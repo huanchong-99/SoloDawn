@@ -43,7 +43,7 @@ func (m ReviewedMerge) Apply(ctx context.Context) (MergeResult, error) {
 		lock.Lock()
 		defer lock.Unlock()
 		if err := m.squashLocal(ctx); err != nil {
-			return MergeResult{Conflict: redactSecrets(err.Error())}, nil
+			return MergeResult{Conflict: RedactSecrets(err.Error())}, nil
 		}
 		return m.inspectLocal(ctx)
 	}
@@ -70,7 +70,7 @@ func (m ReviewedMerge) applyPR(ctx context.Context) (MergeResult, error) {
 		return m.awaitPR(ctx, taken, true)
 	}
 	if result.Conflict != "" {
-		result.Conflict = redactSecrets(mergeErr.Error())
+		result.Conflict = RedactSecrets(mergeErr.Error())
 	}
 	return result, nil
 }

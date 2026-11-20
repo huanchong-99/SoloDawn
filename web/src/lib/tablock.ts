@@ -1,20 +1,33 @@
 type ActiveSession = (signal: AbortSignal) => Promise<void>;
 
-// True when the session ran to its end; false when another tab held the lock or took it.
+/** How a session ended: on its own, or with the error it rejected with. */
+type Ended = { ok: true } | { ok: false; error: unknown };
+
+// True when the session ran to its end; false when another tab held the lock or took it. Only a
+// rejection of request() itself is a steal: an error of the session, an AbortError included, is
+// carried out of the lock's callback and thrown once request() has resolved.
 async function trySession(name: string, options: LockOptions, active: ActiveSession) {
   const session = new AbortController();
+  let ended: Ended | null;
   try {
-    const ended = await navigator.locks.request(
+    ended = await navigator.locks.request(
       name,
       options,
-      (lock) => lock && active(session.signal).then(() => true),
+      (lock) =>
+        lock &&
+        active(session.signal).then(
+          (): Ended => ({ ok: true }),
+          (error: unknown): Ended => ({ ok: false, error }),
+        ),
     );
-    return ended === true;
   } catch (error) {
     if ((error as Error).name !== 'AbortError') throw error;
     session.abort();
     return false;
   }
+  if (ended === null) return false;
+  if (!ended.ok) throw ended.error;
+  return true;
 }
 
 /** Only active may start signalling, peers, reconnects or probes. Its promise holds the lock

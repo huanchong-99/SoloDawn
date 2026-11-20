@@ -1,0 +1,50 @@
+{
+  "t": "post",
+  "n": "KaiCW9JC8UOG7lKNduDo8Q",
+  "ts": 1763599999500,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "as": "qBSFMsr2hHYKOMblEA_kdA",
+  "kind": "brief",
+  "thread": null,
+  "main": false,
+  "text": "",
+  "mentions": [],
+  "re": null,
+  "body": {
+    "title": "Show connection paths",
+    "goal": "People can see how a peer is connected.",
+    "criteria": [
+      "Show a path change within 1 s."
+    ],
+    "scope": {
+      "in": [
+        "node events",
+        "web indicator"
+      ],
+      "out": [
+        "relay service"
+      ]
+    },
+    "tasks": [
+      {
+        "title": "Report path changes",
+        "assignee": "1PC8WineBrUQ-apCjx7tug",
+        "reviewer": "LXCZmuGAXkvO-bSrOkuCfw",
+        "foundation": true,
+        "depends": []
+      },
+      {
+        "title": "Show the path",
+        "assignee": "LXCZmuGAXkvO-bSrOkuCfw",
+        "reviewer": "1PC8WineBrUQ-apCjx7tug",
+        "foundation": false,
+        "depends": [
+          0
+        ]
+      }
+    ],
+    "pass": 90,
+    "requester": "4xq2Q8RPeg7IJLWdEZTWDQ",
+    "replaces": null
+  }
+}

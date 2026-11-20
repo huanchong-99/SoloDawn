@@ -3,70 +3,22 @@ import { describe, expect, it } from 'vitest';
 import { examples, goldens, schemaOf } from './mock';
 import * as p from './proto';
 
-/** Fields of the examples that the contracts mark optional and Go tags omitempty: the only ones
- *  that may be left out. */
-const omitempty: Record<string, string[]> = {
-  'rv-ready': ['ice.username', 'ice.credential'],
-  'rv-ice-answer': ['ice.username', 'ice.credential'],
-  answer: ['to'],
-  ice: ['to'],
-  offer: ['to'],
-  'cmd-pair-link': ['link', 'expires'],
-  'cmd-reviewed': ['passed', 'round'],
-  'cmd-started': ['num'],
-  'device-add': ['kind', 'name'],
-  'row-device': ['kind', 'name'],
-  'row-group': ['repo', 'secretary'],
-  'row-group-paused': ['repo', 'secretary'],
-  'row-member-ai': ['task', ...usage()],
-  'row-msg-brief-revise': ['state.note'],
-  // A superseded brief keeps whatever the state it replaced held.
-  'row-msg-brief-superseded': ['state.by', 'state.at', 'state.act', 'state.note'],
-  'row-msg-decision-decided': [
-    'body.task',
-    'body.context',
-    'body.recommended',
-    'state.choice',
-    'state.text',
-  ],
-  'row-msg-decision-pending': ['body.task', 'body.context', 'body.recommended'],
-  'row-msg-checks': ['body.items.detail'],
-  'row-msg-report': ['body.pr'],
-  'row-msg-review': ['body.items.file', 'body.items.line'],
-  'row-msg-summary': ['body.pr'],
-  'row-msg-system': ['body.task', 'body.detail'],
-  'row-task': [
-    'brief',
-    'commit',
-    'reviewer',
-    'branch',
-    'pr',
-    'pr_url',
-    'review',
-    'checks.local',
-    'checks.cloud',
-    'thread.last',
-  ],
-  'row-task-waiting': ['wait.msg', 'wait.who'],
-};
-
-function usage() {
-  const keys = ['window_pct', 'window_resets', 'day_cap_pct', 'spend_today', 'spend_cap'];
-  return [...keys, 'turns_today'].map((k) => `usage.${k}`);
+/** What the two readers of the wire agree on: internal/proto/testdata/wire.json, which the Go
+ *  tests write from the tags of the Go types and judge `proto.Decode` by. For the members each
+ *  example has, `optional` may be left out, `nullable` may be null, `fraction` are the numbers that
+ *  need not be integers, `id` the texts that are random ids, and `opaque` the members that the Go
+ *  type of the frame keeps as JSON. A path names its members with dots and leaves out the places
+ *  in a list. `cases` are examples with one value replaced, and `slugs` task titles with the slug
+ *  the home makes of each. */
+interface Wire {
+  shapes: Record<string, Record<'optional' | 'nullable' | 'fraction' | 'id' | 'opaque', string[]>>;
+  cases: { name: string; file: string; at: string[]; value: unknown; ok: boolean }[];
+  slugs: { title: string; slug: string }[];
 }
+
+const wire: Wire = JSON.parse(goldens.wire);
 
 type Obj = Record<string, unknown>;
-
-/** The number fields that the contracts give as a fraction. Every other number on the wire is an
- *  integer (contracts/conventions.md section 2). */
-const fractions = ['usage.window_pct', 'usage.day_cap_pct', 'usage.spend_today', 'usage.spend_cap'];
-
-/** Paths to every number, including numbers inside arrays. */
-function numbers(value: unknown, path: string[] = []): string[][] {
-  if (typeof value === 'number') return [path];
-  if (typeof value !== 'object' || value === null) return [];
-  return Object.entries(value).flatMap(([k, x]) => numbers(x, [...path, k]));
-}
 
 /** Paths to every object, including objects inside arrays. */
 function objects(value: unknown, path: string[] = []): string[][] {
@@ -84,6 +36,15 @@ function variant(name: string, path: string[], change: (o: Obj) => void) {
   const value = JSON.parse(goldens[name]);
   change(at(value, path));
   return value;
+}
+
+/** The example with the value at `path` replaced, or left out when there is no `change`. */
+function replaced(name: string, path: string[], change?: () => unknown) {
+  const key = path[path.length - 1];
+  return variant(name, path.slice(0, -1), (parent) => {
+    if (change) parent[key] = change();
+    else delete parent[key];
+  });
 }
 
 describe('wire examples', () => {
@@ -105,28 +66,61 @@ describe('wire examples', () => {
     }
   });
 
-  it.each(examples)('%s is refused without a field that Go always writes', (name) => {
-    // Rows inside rows and fetched are checked through their own examples.
-    const paths = objects(JSON.parse(goldens[name])).filter((path) => path[0] !== 'rows');
-    for (const path of paths) {
-      for (const key of Object.keys(at(JSON.parse(goldens[name]), path))) {
-        const field = named([...path, key]);
-        const missing = variant(name, path, (o) => delete o[key]);
-        const optional =
-          (omitempty[name] ?? []).includes(field) ||
-          (name.startsWith('row-msg-') && field === 'env') ||
-          (name.startsWith('row-msg-approval-') && ['body.full', 'body.why'].includes(field));
-        expect(accepts(name, missing), `without ${field}`).toBe(optional);
-      }
-    }
+  it('has the shared facts of every example, and of nothing else', () => {
+    expect(Object.keys(wire.shapes).toSorted()).toEqual(examples.toSorted());
   });
 
-  it.each(examples)('%s refuses a fraction in every integer field', (name) => {
-    for (const path of numbers(JSON.parse(goldens[name]))) {
-      const key = path[path.length - 1];
-      const fraction = variant(name, path.slice(0, -1), (o) => (o[key] = 0.5));
-      expect(accepts(name, fraction), named(path)).toBe(fractions.includes(named(path)));
-    }
+  // The Go tests make the same changes and expect the same of proto.Decode.
+  it.each(examples)('%s is read as the shared facts say, whichever value is changed', (name) => {
+    const facts = wire.shapes[name];
+    const read = (what: string, path: string[], want: boolean, change?: () => unknown) =>
+      expect(accepts(name, replaced(name, path, change)), `${named(path)} ${what}`).toBe(want);
+    const refused = (what: string, path: string[], value: unknown) => {
+      // The whole example is not replaced.
+      if (path.length > 0) read(what, path, false, () => value);
+    };
+    const visit = (value: unknown, path: string[]) => {
+      const field = named(path);
+      if (facts.opaque.includes(field)) return;
+      if (Array.isArray(value)) {
+        refused('an object', path, {});
+        value.forEach((element, i) => {
+          read('null in the list', [...path, `${i}`], false, () => null);
+          visit(element, [...path, `${i}`]);
+        });
+      } else if (typeof value === 'object' && value !== null) {
+        refused('a list', path, []);
+        for (const [key, member] of Object.entries(value)) {
+          const inner = [...path, key];
+          read('left out', inner, facts.optional.includes(named(inner)));
+          if (!facts.opaque.includes(named(inner))) {
+            read('null', inner, facts.nullable.includes(named(inner)), () => null);
+          }
+          visit(member, inner);
+        }
+      } else if (typeof value === 'string') {
+        refused('a number', path, 7);
+        if (facts.id.includes(field)) refused('a text that is no id', path, 'system');
+      } else if (typeof value === 'number') {
+        const fraction = facts.fraction.includes(field);
+        refused('a text', path, '7');
+        read('a fraction', path, fraction, () => 0.5);
+        read('2^53', path, fraction, () => 2 ** 53);
+      } else if (typeof value === 'boolean') {
+        refused('a text', path, 'true');
+      }
+    };
+    expect(accepts(name, JSON.parse(goldens[name]))).toBe(true);
+    visit(JSON.parse(goldens[name]), []);
+  });
+
+  it.each(wire.cases)('$file: $name', ({ file, at, value, ok }) => {
+    expect(
+      accepts(
+        file,
+        replaced(file, at, () => value),
+      ),
+    ).toBe(ok);
   });
 
   // JSON.parse reads a number beyond the largest double as Infinity; proto.Decode refuses it.
@@ -217,14 +211,21 @@ describe('Id', () => {
     expect(is(text)).toBe(false);
   });
 
-  it('is the type of n and g in a signed payload, and of no other example field', () => {
+  it('is the type of n, g and conn in a signed payload, and not of every field', () => {
     const offer = JSON.parse(goldens.offer);
     expect(accepts('offer', offer)).toBe(true);
     expect(accepts('offer', { ...offer, g: id })).toBe(true);
     expect(accepts('offer', { ...offer, n: 'offer-1' })).toBe(false);
     expect(accepts('offer', { ...offer, g: 'Website' })).toBe(false);
     expect(accepts('offer', { ...offer, g: '' })).toBe(false);
-    expect(accepts('offer', { ...offer, conn: 'c1', to: 'anyone' })).toBe(true);
+    expect(accepts('offer', { ...offer, to: 'anyone' })).toBe(true);
+    // A conn that is no random id is refused, as internal/peer/signal.go refuses it.
+    expect(accepts('offer', { ...offer, conn: 'c1' })).toBe(false);
+    for (const name of ['answer', 'ice']) {
+      const signal = JSON.parse(goldens[name]);
+      expect(accepts(name, signal)).toBe(true);
+      expect(accepts(name, { ...signal, conn: 'c' })).toBe(false);
+    }
     // The by of a message row may be "system", and a device row's id is no random id.
     const msg = JSON.parse(goldens['row-msg-system']);
     expect(msg.by).toBe('system');
@@ -406,5 +407,151 @@ describe('decode', () => {
 
   it('refuses text that is not JSON', () => {
     expect(() => p.decode(p.Frame, '{"t":')).toThrow(SyntaxError);
+  });
+});
+
+describe('objects and errors as Go reads them', () => {
+  it('refuses an array for usage and checks, whose fields are all optional', () => {
+    const member = JSON.parse(goldens['row-member-ai']);
+    const task = JSON.parse(goldens['row-task']);
+    expect(accepts('row-member-ai', member)).toBe(true);
+    expect(accepts('row-task', task)).toBe(true);
+    expect(accepts('row-member-ai', { ...member, usage: [] })).toBe(false);
+    expect(accepts('row-member-ai', { ...member, usage: {} })).toBe(true);
+    expect(accepts('row-task', { ...task, checks: [] })).toBe(false);
+    expect(accepts('row-task', { ...task, checks: {} })).toBe(true);
+  });
+
+  it('reads a frame with err as an error, whatever ok says', () => {
+    const text = '{"re":1,"ok":true,"err":{"code":"conflict","msg":"Decided."}}';
+    expect(p.decode(p.Frame, text)).toStrictEqual({
+      re: 1,
+      err: { code: 'conflict', msg: 'Decided.' },
+    });
+    expect(v.is(p.CmdResult, JSON.parse(text))).toBe(false);
+    expect(v.is(p.CmdResult, { re: 1, ok: true })).toBe(true);
+    expect(() => p.decode(p.Frame, '{"re":1,"ok":true,"err":"conflict"}')).toThrow();
+  });
+});
+
+describe('slugs', () => {
+  it.each(wire.slugs)('takes the slug the home makes of the title $title', ({ slug }) => {
+    expect(v.is(p.Slug, slug)).toBe(true);
+    expect(slug.length).toBeLessThanOrEqual(40);
+  });
+
+  it("is the type of a task row's slug, and the row's branch follows from it", () => {
+    for (const name of ['row-task', 'row-task-waiting', 'row-task-paused']) {
+      const row = p.decode(p.TaskRow, goldens[name]);
+      expect(wire.slugs).toContainEqual({ title: row.title, slug: row.slug });
+      expect(row.branch ?? `task/${row.num}-${row.slug}`).toBe(`task/${row.num}-${row.slug}`);
+    }
+    expect(wire.cases.filter((c) => c.at.at(-1) === 'slug' && !c.ok).length).toBeGreaterThan(20);
+  });
+});
+
+describe('commands', () => {
+  const posts = examples.filter((name) => name.startsWith('post-'));
+
+  it.each(posts)('%s is the post its message row carries, signed', (name) => {
+    const post = p.decode(p.Post, goldens[name]);
+    expect(name).toBe(`post-${post.kind}`);
+    const rows = examples
+      .filter((row) => row.startsWith(`row-msg-${post.kind}`))
+      .map((row) => p.decode(p.MsgRow, goldens[row]));
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(JSON.parse(row.env!.p)).toStrictEqual(post);
+      expect([post.n, post.as, post.text, post.thread, post.main, post.mentions, post.re]).toEqual([
+        row.id,
+        row.by,
+        row.text,
+        row.thread,
+        row.main,
+        row.mentions,
+        row.re,
+      ]);
+    }
+  });
+
+  it.each(['task', 'checks', 'system', 'unknown'])('refuses a post of kind %s', (kind) => {
+    const post = JSON.parse(goldens['post-text']);
+    expect(v.is(p.Post, post)).toBe(true);
+    expect(v.is(p.Post, { ...post, kind })).toBe(false);
+  });
+
+  it('mentions the people who may decide an approval', () => {
+    const row = p.decode(p.MsgRow, goldens['row-msg-approval-pending']);
+    const person = p.decode(p.HumanMemberRow, goldens['row-member-human']);
+    expect(row.mentions).toEqual([person.id]);
+    expect(row.kind === 'approval' && row.body.approvers).toEqual([person.user]);
+  });
+
+  it.each(examples.filter((name) => name.startsWith('act-')))('%s has no empty field', (name) => {
+    const act = p.decode(p.Act, goldens[name]);
+    expect(name).toBe(`act-${act.action}`);
+    expect(Object.values(act)).not.toContain('');
+    const has = Object.keys(act).filter((key) => key === 'arg' || key === 'text');
+    expect(has).toEqual({ choose: ['arg', 'text'], revise: ['text'] }[act.action] ?? []);
+  });
+
+  // A host event is the body of a system message without ai, which the home adds.
+  it.each(examples.filter((name) => name.startsWith('member-status-')))(
+    '%s reports a fact that is a system body once it has ai',
+    (name) => {
+      const status = p.decode(p.MemberStatus, goldens[name]);
+      expect(name).toBe(`member-status-${status.event!.code}`);
+      const row = JSON.parse(goldens['row-msg-system']);
+      expect(v.is(p.MsgRow, { ...row, body: { ...status.event, ai: status.id } })).toBe(true);
+      expect(v.is(p.MsgRow, { ...row, body: status.event })).toBe(false);
+    },
+  );
+
+  it('refuses a host event with a code the contract does not have', () => {
+    const status = JSON.parse(goldens['member-status-rate_limited']);
+    expect(accepts('member-status', status)).toBe(true);
+    expect(accepts('member-status', { ...status, event: { code: 'task_merged' } })).toBe(false);
+  });
+
+  // commands.md 1.7: off: true ends the reminders, whatever else the payload holds.
+  it('reads a push as off only when off is true', () => {
+    const on = JSON.parse(goldens['push-on']);
+    for (const off of [false, 'true', 1]) {
+      expect(accepts('push-off', { ...on, off })).toBe(false);
+      expect(accepts('push-on', { ...on, off })).toBe(true);
+    }
+    expect(accepts('push-off', { ...on, off: true })).toBe(true);
+  });
+
+  it.each(examples.filter((name) => /^(group|member|task)-/.test(name)))(
+    '%s is named by its op, which selects its schema',
+    (name) => {
+      const command = JSON.parse(goldens[name]);
+      expect(name.split('-').slice(0, 2).join('-')).toBe(`${command.t}-${command.op}`);
+      expect(accepts(name, { ...command, op: 'unknown' })).toBe(false);
+    },
+  );
+});
+
+describe('inbox', () => {
+  it('carries items whose envelope names the rows beside it', () => {
+    const { items } = p.decode(p.Inbox, goldens.inbox);
+    expect(items.map((item) => Object.keys(item))).toEqual([
+      ['env', 'msg', 'task', 'cause'],
+      ['env', 'task'],
+    ]);
+    for (const { env, msg, task } of items) {
+      const item = p.decode(p.Item, env.p);
+      expect(item.task).toBe(task!.id);
+      expect(item.msg).toBe(msg?.id);
+    }
+    const first = p.decode(p.Item, items[0].env.p);
+    expect(first).toStrictEqual(JSON.parse(goldens['item-assign']));
+    expect(p.decode(p.Act, items[0].cause!.p).action).toBe('confirm');
+    expect(p.decode(p.Ack, goldens.ack).item).toBe(first.item);
+  });
+
+  it.each(examples.filter((name) => name.startsWith('item-')))('%s is named by its why', (name) => {
+    expect(name).toBe(`item-${p.decode(p.Item, goldens[name]).why}`);
   });
 });

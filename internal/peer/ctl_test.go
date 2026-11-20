@@ -23,10 +23,16 @@ import (
 func TestFramingBoundaries(t *testing.T) {
 	c := &Connection{ctx: t.Context(), incoming: make(chan json.RawMessage, 1), waiting: make(map[int64]chan json.RawMessage)}
 	push := func(n int) string { return `{"t":"` + strings.Repeat("a", n-8) + `"}` }
-	for _, msg := range []string{`[]`, `{}`, `{"T":"push"}`, `{"t":null}`, `{"re":3}`, `{"re":3,"ok":false}`, `{"re":3,"err":{"code":"bad_request"}}`, `{"re":3,"t":"x","err":{"code":"bad_request","msg":"x"}}`, `{"re":3,"ok":false,"err":{"code":"bad_request","msg":"x"}}`, string([]byte{255}), push(61441)} {
+	// A response without a valid result does not reach the request waiting for it.
+	id, waiting := c.reserve()
+	re := `{"re":` + fmt.Sprint(id)
+	for _, msg := range []string{`[]`, `{}`, `{"T":"push"}`, `{"t":null}`, re + `}`, re + `,"ok":false}`, re + `,"err":{"code":"bad_request"}}`, re + `,"t":"x","err":{"code":"bad_request","msg":"x"}}`, re + `,"ok":false,"err":{"code":"bad_request","msg":"x"}}`, string([]byte{255}), push(61441)} {
 		c.deliver([]byte(msg))
 		eq(t, len(c.incoming), 0)
+		eq(t, len(waiting), 0)
 	}
+	c.deliver([]byte(re + `,"ok":true}`))
+	eq(t, string(recv(t, waiting)), re+`,"ok":true}`)
 	c.deliver([]byte(push(61440)))
 	eq(t, len(c.incoming), 1)
 	got, err := c.Read(t.Context())

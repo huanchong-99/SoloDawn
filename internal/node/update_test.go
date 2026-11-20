@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -78,7 +79,7 @@ type updateFixture struct {
 func newUpdate(t *testing.T) (*updateFixture, *http.ServeMux) {
 	t.Helper()
 	mux := http.NewServeMux()
-	server := httptest.NewServer(mux)
+	server := httptest.NewTLSServer(mux)
 	t.Cleanup(server.Close)
 	f := &updateFixture{
 		name:     "solodawn_v1.10.1_" + updateTarget(runtime.GOOS, runtime.GOARCH),
@@ -92,6 +93,7 @@ func newUpdate(t *testing.T) (*updateFixture, *http.ServeMux) {
 		Version:    "v1.9.1",
 		Busy:       func() bool { return f.busy },
 		Restart:    func() error { f.restarts++; return nil },
+		Transport:  server.Client().Transport,
 	}
 	writeImage(t, f.u.Binary, "old binary")
 	return f, mux
@@ -199,8 +201,125 @@ func TestUpdateInstallFailure(t *testing.T) {
 		t.Fatalf("install over a folder: %v", err)
 	}
 	checkUpdateValue(t, f.u.Status, (*UpdateStatus)(nil))
+	// The download that could not be installed is gone.
+	want := []string{"solodawn"}
+	if runtime.GOOS == "windows" {
+		want = append(want, "solodawn.old")
+	}
+	checkFolder(t, filepath.Dir(f.u.Binary), want...)
 }
 
+func TestUpdateNeedsHTTPS(t *testing.T) {
+	f, _ := newUpdate(t)
+	f.u.ReleaseURL = "http://127.0.0.1:1/download"
+	checkUpdateValue(t, fmt.Sprint(f.u.Check(t.Context(), time.Now())), "self-update: http://127.0.0.1:1/download is not https")
+}
+
+// GitHub redirects twice; up to maxRedirects are followed, each to https.
+func TestUpdateRedirects(t *testing.T) {
+	f, mux := newUpdate(t)
+	f.serve(mux)
+	mux.HandleFunc("/hop/{n}/{file}", func(w http.ResponseWriter, r *http.Request) {
+		next := "/download/" + r.PathValue("file")
+		if n, _ := strconv.Atoi(r.PathValue("n")); n > 1 {
+			next = fmt.Sprintf("/hop/%d/%s", n-1, r.PathValue("file"))
+		}
+		http.Redirect(w, r, next, http.StatusFound)
+	})
+	mux.HandleFunc("/plain/{file}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://"+r.Host+"/download/"+r.PathValue("file"), http.StatusFound)
+	})
+	release := f.u.ReleaseURL
+	f.u.ReleaseURL = strings.Replace(release, "/download", "/hop/5", 1)
+	body, err := f.u.get(t.Context(), "SHA256SUMS")
+	noErr(t, err)
+	got, _ := io.ReadAll(body)
+	body.Close()
+	checkUpdateValue(t, string(got), f.manifest)
+	for _, path := range []string{"/hop/6", "/plain"} {
+		f.u.ReleaseURL = strings.Replace(release, "/download", path, 1)
+		if _, err := f.u.get(t.Context(), "SHA256SUMS"); !errors.Is(err, errRedirect) {
+			t.Errorf("%s: %v", path, err)
+		}
+	}
+}
+
+// A download longer than the limit is cut, and fails its checksum.
+func TestUpdateSizeLimit(t *testing.T) {
+	f, mux := newUpdate(t)
+	f.image = strings.Repeat("x", 1000)
+	f.manifest = fmt.Sprintf("%x  %s\n", sha256.Sum256([]byte(f.image)), f.name)
+	f.serve(mux)
+	saved := maxDownload
+	t.Cleanup(func() { maxDownload = saved })
+	maxDownload = int64(len(f.manifest)) // all of SHA256SUMS, a tenth of the binary
+	noErr(t, f.u.Check(t.Context(), time.Now()))
+	checkUpdateValue(t, f.u.Status, &UpdateStatus{Version: "v1.10.1", Status: "mismatch"})
+	checkImage(t, f.u.Binary, "old binary")
+}
+
+// setStall sets the stall limit for the test and returns a channel that a
+// handler waits on to hang: it is closed when the test ends, before the
+// server stops. The request's own context is not used for that, because the
+// server may end it before the client gives up.
+func setStall(t *testing.T, d time.Duration) <-chan struct{} {
+	saved := stallTimeout
+	hang := make(chan struct{})
+	t.Cleanup(func() { stallTimeout = saved; close(hang) })
+	stallTimeout = d
+	return hang
+}
+
+// No answer within the stall limit: the request is given up.
+func TestUpdateStallsWithoutAnswer(t *testing.T) {
+	f, mux := newUpdate(t)
+	hang := setStall(t, 50*time.Millisecond)
+	mux.HandleFunc("/download/SHA256SUMS", func(http.ResponseWriter, *http.Request) { <-hang })
+	if err := f.u.Check(t.Context(), time.Now()); !errors.Is(err, errStalled) {
+		t.Fatalf("a server that never answers: %v", err)
+	}
+}
+
+// The body stops halfway: the download is given up and nothing is installed.
+func TestUpdateStallsInTheBody(t *testing.T) {
+	f, mux := newUpdate(t)
+	hang := setStall(t, 50*time.Millisecond)
+	f.serveBinary(mux, func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(f.image[:4]))
+		w.(http.Flusher).Flush()
+		<-hang
+	})
+	if err := f.u.Check(t.Context(), time.Now()); !errors.Is(err, errStalled) {
+		t.Fatalf("a body that stops: %v", err)
+	}
+	checkImage(t, f.u.Binary, "old binary")
+	checkFolder(t, filepath.Dir(f.u.Binary), "solodawn")
+}
+
+// A slow download that keeps sending takes longer than the stall limit in all
+// and is installed.
+func TestUpdateSlowButSteady(t *testing.T) {
+	f, mux := newUpdate(t)
+	setStall(t, 200*time.Millisecond)
+	f.serveBinary(mux, func(w http.ResponseWriter, _ *http.Request) {
+		for i := range len(f.image) {
+			w.Write([]byte{f.image[i]})
+			w.(http.Flusher).Flush()
+			time.Sleep(50 * time.Millisecond)
+		}
+	})
+	start := time.Now()
+	noErr(t, f.u.Check(t.Context(), start))
+	checkImage(t, f.u.Binary, newImage)
+	if took := time.Since(start); took < 3*stallTimeout {
+		t.Fatalf("the download took %v, not longer than the stall limit in all", took)
+	}
+}
+
+func (f *updateFixture) serveBinary(mux *http.ServeMux, binary http.HandlerFunc) {
+	mux.HandleFunc("/download/SHA256SUMS", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, f.manifest) })
+	mux.HandleFunc("/download/"+f.name, binary)
+}
 func TestUpdateRequestErrors(t *testing.T) {
 	u := Updater{ReleaseURL: "https://%zz"}
 	_, err := u.get(t.Context(), "file")
@@ -258,6 +377,12 @@ func TestInstallRelease(t *testing.T) {
 		t.Fatalf("missing binary: %v", err)
 	}
 	writeImage(t, binary, "old")
+	// The new image cannot take the binary's place: the binary is put back.
+	if err := installRelease(binary, binary, "windows"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("failed second rename: %v", err)
+	}
+	checkImage(t, binary, "old")
+	checkFolder(t, dir, "solodawn.exe", "stage")
 	writeImage(t, binary+".old", "older")
 	noErr(t, installRelease(staged, binary, "windows"))
 	checkImage(t, binary, "new")

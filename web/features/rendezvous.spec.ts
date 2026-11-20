@@ -38,6 +38,11 @@ class Address {
 
 const addresses = new Map<string, Address>();
 
+/** A random id for the connection the signals are about. */
+const conn = 'BBBBBBBBBBBBBBBBBBBBBA';
+/** A frame the rendezvous sends after another, to know that the one before it was handled. */
+const offline = { t: 'offline', k: 'the node of another person' };
+
 const newDevice = async () =>
   Device.of(crypto, await crypto.subtle.generateKey(ed25519, false, ['sign', 'verify']));
 
@@ -88,11 +93,13 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         await rv().deliver(ready[remote]);
         await lan().deliver(ready[local]);
       });
-      Then('the browser is told the ICE servers of each address', () => {
-        expect(given).toStrictEqual([
-          [remote, ready[remote]],
-          [local, ready[local]],
-        ]);
+      Then('the browser is told the ICE servers of each address', async () => {
+        await vi.waitFor(() =>
+          expect(given).toStrictEqual([
+            [remote, ready[remote]],
+            [local, ready[local]],
+          ]),
+        );
       });
     },
   );
@@ -105,7 +112,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         rv().signIn(),
       );
       When('the browser sends the node an offer', async () => {
-        const p = { t: 'offer', n: nonces[local], ts: Date.now(), to: node.id, conn: 'c' };
+        const p = { t: 'offer', n: nonces[local], ts: Date.now(), to: node.id, conn };
         const env = await browser.sign(JSON.stringify({ ...p, sdp: 'v=0', probe: false }));
         offer = { t: 'to', k: node.id, env };
         client.send(offer);
@@ -128,26 +135,35 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Given('both addresses have signed the browser in', async () => {
         await rv().signIn();
         await lan().signIn();
+        await vi.waitFor(() => expect(given).toHaveLength(2));
         given = [];
       });
       When(
         "the node's signed answer arrives through the rendezvous with its description changed",
         async () => {
-          const p = { t: 'answer', n: nonces[local], ts: Date.now(), to: browser.id, conn: 'c' };
+          const p = { t: 'answer', n: nonces[local], ts: Date.now(), to: browser.id, conn };
           const env = await node.sign(JSON.stringify({ ...p, sdp: 'v=0 as the node wrote it' }));
           answer = { t: 'from', k: node.id, env };
           const p2 = env.p.replace('as the node wrote it', 'as the rendezvous wants it');
-          await rv().deliver({ ...answer, env: { ...env, p: p2 } });
+          void rv().deliver({ ...answer, env: { ...env, p: p2 } });
+          // One address delivers in order: once this has arrived, the answer has been handled.
+          void rv().deliver(offline);
+          await vi.waitFor(() => expect(given).toStrictEqual([[remote, offline]]));
         },
       );
       Then('the connection is given nothing', () => {
-        expect(given).toStrictEqual([]);
+        expect(given).toStrictEqual([[remote, offline]]);
       });
       When('the same answer arrives through the local node as the node signed it', () =>
         lan().deliver(answer),
       );
-      Then('the connection is given that answer from the local node', () => {
-        expect(given).toStrictEqual([[local, answer]]);
+      Then('the connection is given that answer from the local node', async () => {
+        await vi.waitFor(() =>
+          expect(given).toStrictEqual([
+            [remote, offline],
+            [local, answer],
+          ]),
+        );
       });
     },
   );

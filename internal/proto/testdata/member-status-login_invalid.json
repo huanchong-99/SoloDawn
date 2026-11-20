@@ -1,0 +1,15 @@
+{
+  "t": "member",
+  "n": "jY20Jfz9yQ16osRnS4CGQw",
+  "ts": 1763600000000,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "op": "status",
+  "id": "1PC8WineBrUQ-apCjx7tug",
+  "state": "limited",
+  "path": "local",
+  "usage": {},
+  "event": {
+    "code": "login_invalid",
+    "detail": "Signed out of the CLI."
+  }
+}
