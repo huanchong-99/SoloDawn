@@ -6,6 +6,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-20 · limitation · The task machine holds `review.failed` and `wait.kept` beside the task row
+
+- Symptom: `home.Step` takes and returns `home.Task`, a `proto.TaskRow` with two more fields, `ReviewFailed` and `Kept`. A caller that keeps only the `proto.TaskRow` loses the count of failed reviews and the wait a pause replaced.
+- Cause: `contracts/rows.md` section 4 has `review.failed` and `wait.kept`, and `proto.TaskRow` does not have them yet: P-1 freezes them. HM-M was built in the same wave, against the row as it was (`internal/home/machine.go:24`).
+- Status: open. When P-1 is merged, `home.Task` becomes the frozen row and the two fields move into it.
+
+### 2026-11-20 · limitation · A task stopped by its sixth failed review is reviewed again when it is resumed
+
+- Symptom: after the sixth failed review a task is `failed` at step `review`. When an admin resumes or reassigns it, the reviewer is asked to review the same commit again, although that commit has just failed.
+- Cause: row 7 of `contracts/task-machine.md` above the limit is row 14 alone, which leaves the step (`internal/home/machine.go:547`); section 2 then gives a task that becomes active at step `review` its `review` item (`internal/home/machine.go:426`). Row 6 is different: failed hosted checks set step `local_check` before they stop the task.
+- Status: open. No change, by the coordinator's decision of 2026-11-20: the contract says so explicitly, and it lets a person resume the task with another reviewer for the same commit.
+
 ### 2026-11-20 · deviation · `solodawn pair` does not start a node that is not running
 
 - Symptom: `local.md` section 1 says `solodawn pair` "starts the node if needed". With no node running, `solodawn pair <secret>` fails on the dial of the local socket and pairs nothing.
