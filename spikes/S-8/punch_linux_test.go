@@ -22,11 +22,11 @@ type variant struct {
 	name                string
 	relay               bool   // TURN offered to both ends (a node's ordinary connection)
 	mapOffer, mapAnswer bool   // that end maps its host candidate's port by NAT-PMP
-	occupied            bool   // another mapping holds 47800/UDP on the right gateway
+	occupied            bool   // another device, 10.0.0.3, holds 47800/UDP on the right gateway
 	tcp, mapTCP         bool   // both ends listen for ICE-TCP; the answerer maps that port
 	tcpType             string // how the mapped ICE-TCP endpoint is published: srflx or host
 	blockUDP            bool   // NET-1 drops UDP between the two gateways
-	runs                int    // repetitions of each pair (1 if zero)
+	runs                int    // repetitions of each pair in TestPunch
 	debug               bool   // ICE trace and the gateways' conntrack tables
 }
 
@@ -202,8 +202,8 @@ func relayOnly(l, r netsim.NAT) bool {
 	return (l == netsim.Symmetric && hard(r)) || (r == netsim.Symmetric && hard(l))
 }
 
-// Question 2: every pair of NET-1's NAT types, four ways; the variants that
-// can only connect run each pair three times.
+// Question 2: every pair of NET-1's NAT types, four ways; the variants with
+// TURN run each pair three times.
 func TestPunch(t *testing.T) {
 	variants := []variant{
 		{name: "direct", runs: 1},
