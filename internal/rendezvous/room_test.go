@@ -7,7 +7,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
@@ -89,15 +89,21 @@ func TestRoomLifetime(t *testing.T) {
 	})
 }
 
-// A room under the id of one that emptied has 15 minutes of its own.
-func TestRoomOutlivesTheOneBeforeIt(t *testing.T) {
+// An emptied room stops its timer. One that had already fired still runs, and
+// must leave a newer room under the same id alone.
+func TestLateExpiryLeavesANewerRoom(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := server{rooms: make(map[string]*room)}
 		a, b := &client{}, &client{}
 		join(&s, a)
+		first := s.rooms["first"]
 		s.leaveRooms(a)
+		if first.timer.Stop() {
+			t.Fatal("the timer of an emptied room was left running")
+		}
 		time.Sleep(time.Minute)
 		join(&s, b)
+		s.expire("first", first)
 		if got := after(&s, 15*time.Minute-time.Nanosecond); !reflect.DeepEqual(got, map[*client]bool{b: true}) {
 			t.Fatalf("second room before its 15 minutes: %v", got)
 		}

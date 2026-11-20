@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -19,8 +20,8 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/cucumber/godog"
-	"github.com/gorilla/websocket"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/rendezvous"
@@ -93,7 +94,7 @@ func rendezvousSteps(sc *godog.ScenarioContext, bin string) {
 	sc.Step(`^the `+device+` answers the challenge with (.+)$`, w.answerChallenge)
 	sc.Step(`^(the .+) (?:is|are) signed in$`, w.signInAll)
 	sc.Step(`^the `+device+` signs in(?: again)?$`, w.signIn)
-	sc.Step(`^the `+device+` leaves$`, func(name string) error { return w.conns[name].Close() })
+	sc.Step(`^the `+device+` leaves$`, func(name string) error { return w.conns[name].CloseNow() })
 	sc.Step(`^the `+device+` is disconnected$`, func(name string) error { return rvDisconnected(w.conns[name]) })
 	sc.Step(`^the `+device+`'s earlier connection is disconnected$`, func(string) error { return rvDisconnected(w.earlier) })
 	sc.Step(`^the `+device+` sends (\{.*\})$`, w.write)
@@ -184,14 +185,20 @@ func (w *rvWorld) get(path, file string) error {
 	return nil
 }
 
+// rvRead fails after 5 seconds, so that a frame that never comes fails its step.
+func rvRead(c *websocket.Conn) (websocket.MessageType, []byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return c.Read(ctx)
+}
+
 func (w *rvWorld) dial(name string) error {
-	c, _, err := websocket.DefaultDialer.Dial(w.ws, nil)
+	c, _, err := websocket.Dial(context.Background(), w.ws, nil)
 	if err != nil {
 		return err
 	}
-	w.cleanup = append(w.cleanup, func() { c.Close() })
-	c.SetReadDeadline(time.Now().Add(5 * time.Second))
-	_, b, err := c.ReadMessage()
+	w.cleanup = append(w.cleanup, func() { c.CloseNow() })
+	_, b, err := rvRead(c)
 	if err != nil {
 		return err
 	}
@@ -204,16 +211,20 @@ func (w *rvWorld) dial(name string) error {
 }
 
 func (w *rvWorld) send(name string, frame any) error {
-	return w.conns[name].WriteJSON(frame)
+	b, err := json.Marshal(frame)
+	if err != nil {
+		return err
+	}
+	return w.write(name, string(b))
 }
 
 func (w *rvWorld) write(name, frame string) error {
-	return w.conns[name].WriteMessage(websocket.TextMessage, []byte(frame))
+	return w.conns[name].Write(context.Background(), websocket.MessageText, []byte(frame))
 }
 
 func (w *rvWorld) receive(name, want string) error {
-	typ, b, err := w.conns[name].ReadMessage()
-	if err != nil || typ != websocket.TextMessage || string(b) != want {
+	typ, b, err := rvRead(w.conns[name])
+	if err != nil || typ != websocket.MessageText || string(b) != want {
 		return fmt.Errorf("the %s received type %d %s, %v; want text %s", name, typ, b, err, want)
 	}
 	return nil
@@ -235,8 +246,13 @@ func (w *rvWorld) nothingElse(name string) error {
 	return w.receive(name, rvICE)
 }
 
+// rvEnded tells a connection that the rendezvous closed from a frame that never came.
+func rvEnded(err error) bool {
+	return err != nil && !errors.Is(err, context.DeadlineExceeded)
+}
+
 func rvDisconnected(c *websocket.Conn) error {
-	if _, b, err := c.ReadMessage(); !websocket.IsUnexpectedCloseError(err) {
+	if _, b, err := rvRead(c); !rvEnded(err) {
 		return fmt.Errorf("want a closed connection, got %s, %v", b, err)
 	}
 	return nil
@@ -319,11 +335,11 @@ func (w *rvWorld) sendPair(name string) error {
 
 // ask sends a frame and reads the answers that are due to it, as far as they come.
 func (w *rvWorld) ask(name string, frame []byte, due int) error {
-	if err := w.conns[name].WriteMessage(websocket.TextMessage, frame); err != nil {
+	if err := w.write(name, string(frame)); err != nil {
 		return err
 	}
 	for range due {
-		_, b, err := w.conns[name].ReadMessage()
+		_, b, err := rvRead(w.conns[name])
 		if err != nil {
 			w.ended = err
 			return nil
@@ -360,7 +376,7 @@ func (w *rvWorld) askMany(name string, n int) error {
 }
 
 func (w *rvWorld) answered(_ string, n int, disconnected string) error {
-	if !slices.Equal(w.got, w.answers[:n]) || websocket.IsUnexpectedCloseError(w.ended) != (disconnected != "") {
+	if !slices.Equal(w.got, w.answers[:n]) || rvEnded(w.ended) != (disconnected != "") {
 		return fmt.Errorf("%d answers %q, then %v; want %q", len(w.got), w.got, w.ended, w.answers[:n])
 	}
 	return nil
@@ -390,7 +406,7 @@ func (w *rvWorld) sendOffer(from, to, action string) error {
 }
 
 func (w *rvWorld) receiveOffer(name, from string) error {
-	_, b, err := w.conns[name].ReadMessage()
+	_, b, err := rvRead(w.conns[name])
 	if err != nil {
 		return err
 	}

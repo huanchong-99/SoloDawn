@@ -3,6 +3,7 @@ package rendezvous
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -13,12 +14,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
 type server struct {
+	wait   time.Duration // for the answer to the challenge
 	mu     sync.Mutex
 	online map[string]*client
 	rooms  map[string]*room
@@ -27,7 +29,11 @@ type server struct {
 // Handler serves the same /rv protocol and static files on nodes and on the
 // standalone rendezvous. Signalling alone advertises an empty ICE list.
 func Handler(web fs.FS) http.Handler {
-	s := &server{online: make(map[string]*client), rooms: make(map[string]*room)}
+	return handler(web, 10*time.Second)
+}
+
+func handler(web fs.FS, wait time.Duration) http.Handler {
+	s := &server{wait: wait, online: make(map[string]*client), rooms: make(map[string]*room)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/rv", s.serve)
 	mux.Handle("/", http.FileServerFS(web))
@@ -36,7 +42,7 @@ func Handler(web fs.FS) http.Handler {
 
 // Browsers can signal through a different origin. Authentication uses the
 // challenge signature and never ambient browser credentials.
-var upgrade = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+var anyOrigin = &websocket.AcceptOptions{InsecureSkipVerify: true}
 
 const maxBytes = 16_384 // 16 KiB
 
@@ -50,22 +56,22 @@ type client struct {
 }
 
 func (s *server) serve(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrade.Upgrade(w, r, nil)
+	conn, err := websocket.Accept(w, r, anyOrigin)
 	if err != nil {
 		return
 	}
-	defer conn.Close()
+	defer conn.CloseNow()
 	conn.SetReadLimit(maxBytes)
 	c := &client{conn: conn, out: make(chan []byte, 128)}
 	go c.write()
 	defer close(c.out)
-	if !c.authenticate() {
+	if !c.authenticate(s.wait) {
 		return
 	}
 	s.connect(c)
 	defer s.disconnect(c)
 	for {
-		msg, kind := c.read()
+		msg, kind := c.read(context.Background())
 		if !s.handle(c, msg, kind) {
 			return
 		}
@@ -75,9 +81,9 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 // Only this goroutine writes to the socket. Closing the socket on write
 // failure wakes the reader, which unregisters the device.
 func (c *client) write() {
-	defer c.conn.Close()
+	defer c.conn.CloseNow()
 	for frame := range c.out {
-		if c.conn.WriteMessage(websocket.TextMessage, frame) != nil {
+		if c.conn.Write(context.Background(), websocket.MessageText, frame) != nil {
 			return
 		}
 	}
@@ -100,7 +106,7 @@ func (c *client) send(frame any) bool {
 	select {
 	case c.out <- data:
 	default:
-		c.conn.Close()
+		c.conn.CloseNow()
 	}
 	return true
 }
@@ -118,9 +124,9 @@ type fields map[string]json.RawMessage
 
 // Split only the outer object. Decode the members we read with proto.Decode;
 // passing env or data through a decoder could change another peer's object.
-func (c *client) read() (fields, string) {
-	t, b, err := c.conn.ReadMessage()
-	if err != nil || t != websocket.TextMessage || !utf8.Valid(b) || !c.admit(time.Now()) {
+func (c *client) read(ctx context.Context) (fields, string) {
+	t, b, err := c.conn.Read(ctx)
+	if err != nil || t != websocket.MessageText || !utf8.Valid(b) || !c.admit(time.Now()) {
 		return nil, ""
 	}
 	var m fields
@@ -138,12 +144,16 @@ func (m fields) text(name string) string {
 	return value
 }
 
-func (c *client) authenticate() bool {
+// A connection that does not answer its challenge in time is closed: until
+// then it holds a socket without having proved a key.
+func (c *client) authenticate(wait time.Duration) bool {
 	var b [16]byte
 	rand.Read(b[:])
 	nonce := base64.RawURLEncoding.EncodeToString(b[:])
 	c.send(proto.Challenge{Type: "challenge", Nonce: nonce})
-	m, kind := c.read()
+	ctx, cancel := context.WithTimeout(context.Background(), wait)
+	defer cancel()
+	m, kind := c.read(ctx)
 	c.id = m.text("k")
 	return kind == "auth" && identity.VerifyChallenge(c.id, nonce, m.text("s"))
 }
@@ -160,7 +170,7 @@ func (s *server) connect(c *client) {
 	c.send(config("ready"))
 	if old != nil {
 		s.leaveRooms(old)
-		old.conn.Close()
+		old.conn.CloseNow()
 	} else {
 		s.notify(c.id, true)
 	}

@@ -2,9 +2,11 @@ package rendezvous
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,7 +17,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
@@ -36,18 +38,32 @@ func key(b byte) identity.Key {
 
 func dial(t *testing.T, url string) (*websocket.Conn, string) {
 	t.Helper()
-	c, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(url, "http")+"/rv", http.Header{"Origin": {"https://client.example"}})
+	header := http.Header{"Origin": {"https://client.example"}}
+	c, _, err := websocket.Dial(t.Context(), "ws"+strings.TrimPrefix(url, "http")+"/rv", &websocket.DialOptions{HTTPHeader: header})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { c.Close() })
-	c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	t.Cleanup(func() { c.CloseNow() })
 	var challenge proto.Challenge
-	if err := c.ReadJSON(&challenge); err != nil {
-		t.Fatal(err)
+	if _, b, err := read(t, c); err != nil || json.Unmarshal(b, &challenge) != nil {
+		t.Fatalf("first frame = %s, %v", b, err)
 	}
 	checkChallenge(t, challenge)
 	return c, challenge.Nonce
+}
+
+// read fails after 5 seconds, so that a frame that never comes fails its test.
+func read(t *testing.T, c *websocket.Conn) (websocket.MessageType, []byte, error) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	return c.Read(ctx)
+}
+
+func write(t *testing.T, c *websocket.Conn, typ websocket.MessageType, frame string) {
+	t.Helper()
+	if err := c.Write(t.Context(), typ, []byte(frame)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func checkChallenge(t *testing.T, challenge proto.Challenge) {
@@ -66,26 +82,29 @@ func checkChallenge(t *testing.T, challenge proto.Challenge) {
 
 func send(t *testing.T, c *websocket.Conn, msg any) {
 	t.Helper()
-	if err := c.WriteJSON(msg); err != nil {
+	b, err := json.Marshal(msg)
+	if err != nil {
 		t.Fatal(err)
 	}
+	write(t, c, websocket.MessageText, string(b))
 }
 
 func expect(t *testing.T, c *websocket.Conn, want any) {
 	t.Helper()
-	typ, b, err := c.ReadMessage()
+	typ, b, err := read(t, c)
 	if err != nil {
 		t.Fatal(err)
 	}
 	w, _ := json.Marshal(want)
-	if typ != websocket.TextMessage || !bytes.Equal(bytes.TrimSpace(b), w) {
+	if typ != websocket.MessageText || !bytes.Equal(b, w) {
 		t.Fatalf("received %d %s, want text %s", typ, b, w)
 	}
 }
 
+// closed holds that the server ended the connection, not that nothing came.
 func closed(t *testing.T, c *websocket.Conn) {
 	t.Helper()
-	if _, b, err := c.ReadMessage(); !websocket.IsUnexpectedCloseError(err) {
+	if _, b, err := read(t, c); err == nil || errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("want closed socket, got %s, %v", b, err)
 	}
 }
@@ -100,7 +119,7 @@ func login(t *testing.T, url string, k identity.Key) *websocket.Conn {
 
 func TestStaticAndUpgrade(t *testing.T) {
 	url := fixture(t)
-	for path, want := range map[string]string{"/": "web client", "/install.md": "install steps", "/missing": "404 page not found\n", "/rv": "Bad Request\n"} {
+	for path, want := range map[string]string{"/": "web client", "/install.md": "install steps", "/missing": "404 page not found\n", "/rv": "WebSocket protocol violation: Connection header \"\" does not contain Upgrade\n"} {
 		resp, err := http.Get(url + path)
 		if err != nil {
 			t.Fatal(err)
@@ -130,6 +149,17 @@ func TestHandshakeRefusals(t *testing.T) {
 	closed(t, c)
 }
 
+func TestChallengeDeadline(t *testing.T) {
+	s := httptest.NewServer(handler(fstest.MapFS{}, 100*time.Millisecond))
+	t.Cleanup(s.Close)
+	idle, _ := dial(t, s.URL)
+	active := login(t, s.URL, key(1))
+	closed(t, idle)
+	// The deadline is over, and it was for the answer to the challenge only.
+	send(t, active, proto.RVFrame{Type: "ice"})
+	expect(t, active, config("ice"))
+}
+
 func TestRoutePresenceAndReplacement(t *testing.T) {
 	url := fixture(t)
 	a, b := key(1), key(2)
@@ -151,7 +181,7 @@ func TestRoutePresenceAndReplacement(t *testing.T) {
 	closed(t, old)
 	send(t, from, to)
 	expect(t, newConn, proto.Route{Type: "from", Key: a.ID(), Env: env})
-	newConn.Close()
+	newConn.CloseNow()
 	expect(t, from, proto.Presence{Type: "presence", Key: b.ID(), On: false})
 	send(t, from, proto.Watch{Type: "watch", Keys: []string{}})
 	ice := proto.RVFrame{Type: "ice"}
@@ -168,17 +198,13 @@ func TestInvalidFrames(t *testing.T) {
 	for _, msg := range []string{`{}`, `null`, `{"T":"ice"}`, `{"t":"ready"}`, `[]`, `{}{}`, `{"t":"to","k":5,"env":{}}`, `{"t":"to","env":{}}`, fmt.Sprintf(`{"t":"to","k":%q}`, key(2).ID()), fmt.Sprintf(`{"t":"to","k":%q,"env":null}`, key(2).ID()), `{"t":"watch"}`, `{"t":"watch","k":[null]}`, `{"t":"watch","k":"device"}`, `{"t":"join","room":"AB"}`, `{"t":"room","room":"00000000000000000000000000000000","data":[]}`, "{\"t\":\"ice\",\"x\":\"\xff\"}"} {
 		t.Run(msg, func(t *testing.T) {
 			c := login(t, url, key(1))
-			if err := c.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
-				t.Fatal(err)
-			}
+			write(t, c, websocket.MessageText, msg)
 			closed(t, c)
 		})
 	}
 	t.Run("binary", func(t *testing.T) {
 		c := login(t, url, key(1))
-		if err := c.WriteMessage(websocket.BinaryMessage, []byte(`{"t":"ice"}`)); err != nil {
-			t.Fatal(err)
-		}
+		write(t, c, websocket.MessageBinary, `{"t":"ice"}`)
 		closed(t, c)
 	})
 }
@@ -187,14 +213,10 @@ func TestLimits(t *testing.T) {
 	url := fixture(t)
 	c := login(t, url, key(1))
 	msg := fmt.Sprintf("%-*s", 16384, `{"t":"ice"}`)
-	if err := c.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
-		t.Fatal(err)
-	}
+	write(t, c, websocket.MessageText, msg)
 	ice := proto.ICEConfig{Type: "ice", ICE: []proto.ICEServer{}, TTL: 3600}
 	expect(t, c, ice)
-	if err := c.WriteMessage(websocket.TextMessage, []byte(msg+" ")); err != nil {
-		t.Fatal(err)
-	}
+	write(t, c, websocket.MessageText, msg+" ")
 	closed(t, c)
 	c = login(t, url, key(1))
 	for range 119 {
@@ -225,18 +247,12 @@ func TestForwardedFrameSize(t *testing.T) {
 	to := fmt.Sprintf(`{"t":"to","k":"%s","env":{"p":"`, b.ID())
 	from := fmt.Sprintf(`{"t":"from","k":"%s","env":{"p":"`, a.ID())
 	p := strings.Repeat("&", 16_384-len(from)-3)
-	rawSend := func(frame string) {
-		t.Helper()
-		if err := sender.WriteMessage(websocket.TextMessage, []byte(frame)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	rawSend(to + p + `"}}`)
-	typ, data, err := receiver.ReadMessage()
-	if err != nil || typ != websocket.TextMessage || string(data) != from+p+`"}}` {
+	write(t, sender, websocket.MessageText, to+p+`"}}`)
+	typ, data, err := read(t, receiver)
+	if err != nil || typ != websocket.MessageText || string(data) != from+p+`"}}` {
 		t.Fatalf("forwarded boundary frame: type %d, length %d, error %v", typ, len(data), err)
 	}
-	rawSend(to + p + `&"}}`)
+	write(t, sender, websocket.MessageText, to+p+`&"}}`)
 	closed(t, sender)
 	// The target never gets a partial or oversized frame and stays connected.
 	send(t, receiver, proto.RVFrame{Type: "ice"})

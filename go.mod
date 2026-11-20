@@ -3,8 +3,8 @@ module github.com/huanchong-99/SoloDawn
 go 1.26
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/cucumber/godog v0.16.0
-	github.com/gorilla/websocket v1.5.3
 	modernc.org/sqlite v1.46.2
 )
 

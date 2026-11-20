@@ -11,6 +11,7 @@ var roomID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 type room struct {
 	members map[*client]bool
+	timer   *time.Timer
 }
 
 func (s *server) roomFrame(c *client, m fields, kind string) bool {
@@ -44,7 +45,7 @@ func (s *server) join(c *client, id string) {
 	if r == nil {
 		r = &room{members: make(map[*client]bool)}
 		s.rooms[id] = r
-		time.AfterFunc(15*time.Minute, func() { s.expire(id, r) })
+		r.timer = time.AfterFunc(15*time.Minute, func() { s.expire(id, r) })
 	}
 	if len(r.members) == 2 {
 		return
@@ -57,8 +58,8 @@ func (s *server) join(c *client, id string) {
 	}
 }
 
-// A room that emptied is gone before its 15 minutes are over, and its id may
-// by then name a newer room, which has its own 15 minutes.
+// A timer that fired while its room emptied was too late to stop, and the id
+// may by then name a newer room, which has its own 15 minutes.
 func (s *server) expire(id string, r *room) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -71,6 +72,7 @@ func (s *server) leaveRooms(c *client) {
 	for id, r := range s.rooms {
 		delete(r.members, c)
 		if len(r.members) == 0 {
+			r.timer.Stop()
 			delete(s.rooms, id)
 		}
 	}
