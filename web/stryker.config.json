@@ -8,7 +8,9 @@
     "!src/**/*.test.ts",
     "!src/routes/**",
     "!src/components/**",
-    "!src/lib/mock.ts"
+    "!src/lib/mock.ts",
+    "!src/lib/mountfiles.ts",
+    "!src/messages/files.ts"
   ],
   "reporters": ["clear-text"],
   "thresholds": { "high": 100, "low": 100, "break": 100 }

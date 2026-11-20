@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
-import { flushSync } from 'svelte';
+import { flushSync, tick } from 'svelte';
 import { expect, vi } from 'vitest';
 import { find, homes } from '../src/lib/groups.svelte';
 import { cards, gather, mounts, points, type Mounts } from '../src/lib/mounts.svelte';
@@ -300,32 +300,115 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
     },
   );
 
+  /** The parts of the chat that the panel covers below 1024 px. */
+  const behind = () => all('.chat > :not(.side)');
+  const press = async (selector: string) => {
+    one<HTMLButtonElement>(selector).click();
+    await tick();
+    flushSync();
+  };
+  const escape = async (init: KeyboardEventInit, target: EventTarget = window) => {
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, ...init }));
+    await tick();
+    flushSync();
+  };
+  const panelOpen = () => one('.chat > .side').classList.contains('open');
+  type Step = (text: string, step: () => void | Promise<void>) => void;
+  /** The steps that open a chat whose area mounts a part at each point of the chat. */
+  const mountedChat = (Given: Step, width: number) => {
+    Given('an area that mounts a part in the head, above the main line and beside it', () =>
+      mount(areas.chat),
+    );
+    Given('the home of the group "Website" is reached', () => reach(website, 'Website'));
+    Given(
+      `the person opens the client at "#/groups/rZNvy-1jH6Z-BcPqA5U5BQ" on a screen ${width} px wide`,
+      () => openPage(`#/groups/${website}`, width),
+    );
+  };
+
   Scenario(
-    'The side panel of a chat opens from its head and closes with Escape',
+    'Below 1024 px the side panel opens over the chat, holds the focus, and closes',
     ({ Given, When, Then, And }) => {
-      Given('an area that mounts a part in the head, above the main line and beside it', () =>
-        mount(areas.chat),
-      );
-      And('the home of the group "Website" is reached', () => reach(website, 'Website'));
-      And('the person opens the client at "#/groups/rZNvy-1jH6Z-BcPqA5U5BQ"', () =>
-        openPage(`#/groups/${website}`),
-      );
-      When('the person presses "People and details"', () => {
-        one<HTMLButtonElement>('.side-open').click();
-        flushSync();
-      });
-      Then('the side panel is open', () => {
-        expect(one('.chat > .side').classList).toContain('open');
+      mountedChat((text, step) => (text.startsWith('an area') ? Given : And)(text, step), 820);
+      When('the person presses "People and details"', () => press('.side-open'));
+      Then('the side panel is open, with focus on its button "Close the panel"', () => {
+        expect(panelOpen()).toBe(true);
         expect(one('.side-open').getAttribute('aria-expanded')).toBe('true');
+        expect(document.activeElement?.getAttribute('aria-label')).toBe('Close the panel');
       });
-      When('the person presses Escape', () => {
-        dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-        flushSync();
+      And('the head, the main line and the composer behind it cannot be reached', () => {
+        expect(behind().map((part) => part.hasAttribute('inert'))).toEqual([
+          true,
+          true,
+          true,
+          true,
+        ]);
+        expect(one('.chat-head').contains(one('.side-open'))).toBe(true);
+        expect(one('.scroller[inert]').getAttribute('aria-label')).toBe('Main line');
+        expect(all('.dock[inert] .composer')).toHaveLength(1);
       });
+      When('the person presses Escape', () => escape({}));
       Then('the side panel is closed and focus is on "People and details"', () => {
-        expect(one('.chat > .side').classList).not.toContain('open');
+        expect(panelOpen()).toBe(false);
         expect(document.activeElement).toBe(one('.side-open'));
       });
+      And('the chat can be reached again', () => {
+        expect(behind().map((part) => part.hasAttribute('inert'))).toEqual([
+          false,
+          false,
+          false,
+          false,
+        ]);
+      });
+      When('the person presses "People and details" and then "Close the panel"', async () => {
+        await press('.side-open');
+        expect(document.activeElement).toBe(one('.side-close'));
+        await press('.side-close');
+      });
+      Then('the side panel is closed again, with focus back on "People and details"', () => {
+        expect(panelOpen()).toBe(false);
+        expect(document.activeElement).toBe(one('.side-open'));
+      });
+    },
+  );
+
+  Scenario(
+    'An Escape that a dialog takes, or that a part already used, leaves the side panel open',
+    ({ Given, When, Then, And }) => {
+      mountedChat((text, step) => (text.startsWith('an area') ? Given : And)(text, step), 820);
+      And('the person has opened the side panel', () => press('.side-open'));
+      When('the person presses Escape in a dialog', async () => {
+        const dialog = document.body.appendChild(document.createElement('dialog'));
+        const field = dialog.appendChild(document.createElement('input'));
+        await escape({}, field);
+        dialog.remove();
+      });
+      Then('the side panel is open', () => expect(panelOpen()).toBe(true));
+      When('the person presses Escape where a part has already used it', async () => {
+        const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+        event.preventDefault();
+        dispatchEvent(event);
+        await tick();
+        flushSync();
+      });
+      Then('the side panel is still open', () => expect(panelOpen()).toBe(true));
+    },
+  );
+
+  Scenario(
+    'From 1024 px the side panel stands beside the chat and takes no focus',
+    ({ Given, When, Then, And }) => {
+      mountedChat((text, step) => (text.startsWith('an area') ? Given : And)(text, step), 1440);
+      When('the person presses "People and details"', async () => {
+        one<HTMLButtonElement>('.side-open').focus();
+        await press('.side-open');
+      });
+      Then('focus is still on "People and details" and the chat can be reached', () => {
+        expect(document.activeElement).toBe(one('.side-open'));
+        expect(behind().some((part) => part.hasAttribute('inert'))).toBe(false);
+      });
+      When('the person presses Escape', () => escape({}));
+      Then('the side panel is still marked open', () => expect(panelOpen()).toBe(true));
     },
   );
 

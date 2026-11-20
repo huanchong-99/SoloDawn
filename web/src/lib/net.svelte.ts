@@ -72,13 +72,17 @@ export function start(source: Source) {
   const added: Home[] = [];
   let stopped = false;
   if (import.meta.env.DEV && source === 'mock') {
-    void mockHome().then(({ home, online }) => {
-      if (stopped) return;
-      since.set(home, Date.now());
-      added.push(home);
-      homes.push(home);
-      online();
-    });
+    mockHome().then(
+      ({ home, online }) => {
+        if (stopped) return;
+        since.set(home, Date.now());
+        added.push(home);
+        homes.push(home);
+        online();
+      },
+      // This browser's storage failed: the development server shows no group, and says why.
+      (error: unknown) => console.error('The mock home could not start:', error),
+    );
   }
   const stop = () => {
     stopped = true;

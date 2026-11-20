@@ -81,8 +81,9 @@ function fit(path: string, parts: string[]) {
   return params;
 }
 
-/** The page an address opens, with its parameters. An address that fits no path, or the page of
- *  a development server in the build, opens the chats. No address fits two paths. */
+/** The page an address opens, with its parameters. One slash at the end is no segment. An
+ *  address that fits no path, or the page of a development server in the build, opens the
+ *  chats. No address fits two paths. */
 export function parse(hash: string, dev = import.meta.env.DEV) {
   let parts: string[] = [];
   try {
@@ -90,6 +91,7 @@ export function parse(hash: string, dev = import.meta.env.DEV) {
   } catch {
     // A malformed escape: the address names no page.
   }
+  if (parts.at(-1) === '') parts.pop();
   for (const page of pages) {
     const route: Route = routes[page];
     const params = dev || !route.dev ? fit(route.path, parts) : undefined;

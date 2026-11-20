@@ -1,9 +1,10 @@
 // The mounting points of the shell: where each area of the interface puts its components without
 // editing the shell, the chat or another area. An area declares what it mounts in
-// `components/<area>/mounts.ts`, whose default export is a `Mounts`; this module finds every such
-// file by its name and gathers them. `Mount.svelte` draws the entries of a point.
+// `components/<area>/mounts.ts`, whose default export is a `Mounts`; mountfiles.ts finds every
+// such file by its name, and `gather` here puts them in order. `Mount.svelte` draws a point.
 import type { Component } from 'svelte';
 import type { Group } from './groups.svelte';
+import { files } from './mountfiles';
 import type { Net } from './net.svelte';
 import type { MsgRow } from './proto';
 
@@ -94,13 +95,7 @@ export function gather(files: Record<string, Mounts>) {
 
 /** What the areas of this client mount: the entries of each point (`mounts`), the card of each
  *  kind with its area (`cards`), and the card of one kind (`card`). */
-export const {
-  at: mounts,
-  cards,
-  card,
-} = gather(
-  import.meta.glob<Mounts>('../components/*/mounts.ts', { eager: true, import: 'default' }),
-);
+export const { at: mounts, cards, card } = gather(files);
 
 /** Whether the side panel of the open chat slides over it, below 1024 px. */
 export const side = $state({ open: false });

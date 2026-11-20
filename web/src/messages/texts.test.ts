@@ -70,6 +70,29 @@ describe('merge', () => {
     expect(() => merge(shell, files)).toThrow(new Error(problem));
   });
 
+  it.each([
+    [{ './chat.en.json': { 'chat.a': 5 } }, './chat.en.json: chat.a is not text'],
+    [{ './chat.en.json': { 'chat.a': null, 'chat.b': '' } }, './chat.en.json: chat.a is not text'],
+    [{ './chat.en.json': { 'chat.a': '', 'chat.b': ['b'] } }, './chat.en.json: chat.b is not text'],
+  ])('refuses a value that is no text, before an empty one: %j', (files, problem) => {
+    expect(() => merge(shell, files)).toThrow(new Error(problem));
+  });
+
+  it.each([
+    [{ './chat.en.json': { 'chat.send': 'Send' } }, 'chat: no xx'],
+    [{ './chat.xx.json': { 'chat.send': 'Envoyer' } }, 'chat: no en'],
+    [
+      {
+        './chat.en.json': { 'chat.send': 'Send' },
+        './chat.xx.json': { 'chat.send': 'Envoyer' },
+        './groups.en.json': { 'groups.new': 'New' },
+      },
+      'groups: no xx',
+    ],
+  ])('refuses an area without a file in every language: %j', (files, problem) => {
+    expect(() => merge(shell, files)).toThrow(new Error(problem));
+  });
+
   it('reads an empty text before a missing language as the first problem', () => {
     expect(() => merge(shell, { './chat.fr.json': { 'chat.send': '' } })).toThrow(
       './chat.fr.json: no language fr',

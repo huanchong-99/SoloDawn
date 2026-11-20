@@ -93,6 +93,20 @@ describe('start', () => {
     expect(homes).toEqual([other]);
   });
 
+  it('adds nothing, and says why, when this browser cannot keep its device key', async () => {
+    const failed = new DOMException('The operation is insecure.', 'SecurityError');
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(globalThis, 'indexedDB', 'get').mockImplementation(() => {
+      throw failed;
+    });
+    start('mock');
+    await vi.waitFor(() => expect(said).toHaveBeenCalledOnce());
+    expect(said.mock.calls[0][0]).toBe('The mock home could not start:');
+    expect(said.mock.calls[0][1]).toMatchObject({ name: 'StorageBlocked' });
+    expect(homes).toEqual([]);
+    vi.restoreAllMocks();
+  });
+
   it('adds nothing when stopped before the mock is ready', async () => {
     const { stop } = start('mock');
     stop();

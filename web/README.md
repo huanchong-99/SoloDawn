@@ -84,6 +84,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
 2. **Parts.** `src/components/<area>/mounts.ts`, default export `{ … } satisfies Mounts`, with
    entries at the points it needs and the cards of its kinds. No import to add: `gather` finds
    it, and `#/states` of a development server shows where each entry and card went.
+   That sheet shows the messages of the wire examples and the mounting points, not the design
+   sheet's colours, type, buttons or the states of the connection and the emergency stop: an
+   area that adds a component adds its states there.
 3. **A page.** `src/routes/<View>.svelte`, named as its route's `view`; it is given
    `{ params, net }` (`PageProps<'terminal'>` types them). A page that needs another address
    or another layout asks for a change of the route table.
@@ -93,8 +96,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
    `features/<slice>.spec.ts`, which loads it with `loadFeature('../features/web_<slice>.feature')`.
    A scenario of `web_shell.feature` fails when a web feature file has no such spec or tag; the
    end-to-end steps (`web_e2e.feature`) are the one exception, run by `e2e/config.ts` from
-   `features/e2e.ts`. The steps open the client with `openPage(address)` of `features/page.ts`,
-   which mounts the shell in the test DOM with English texts, and give it homes with `TestHome`
+   `features/e2e.ts`. The steps open the client with `openPage(address, width)` of
+   `features/page.ts`, which mounts the shell in the test DOM with English texts and answers the
+   media queries of script for a screen that wide, and give it homes with `TestHome`
    and `browser` of `features/home.ts`; `show(component, props)` mounts one part alone. The
    development server's `net` is not used there: a test puts its homes in `homes` itself.
 
@@ -160,8 +164,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
   An entry is `{ order, component }`: the lower `order` comes first, then the area's name. A
   component with nothing to show draws nothing; an empty banner takes no room. While any area
   mounts at `chat.side`, the chat has a side column from 1024 px and, below it, a button "People
-  and details" in its head that opens the panel, which a close button and Escape close, focus
-  returning to the button. `cards` maps a kind of message (`MsgRow['kind']`) to a component that
+  and details" in its head that opens the panel over the chat: focus moves to the panel's close
+  button, and the head, the main line and the composer behind it are `inert` until a press of
+  that button or Escape closes it and focus returns to the head's button. An Escape that a
+  `<dialog>` receives, or that a part has already used (`defaultPrevented`), leaves the panel
+  open; from 1024 px Escape does not touch it. `cards` maps a kind of message (`MsgRow['kind']`) to a component that
   is given `{ group, msg }`, with `msg` of that kind; `card(kind)` finds it, for a thread too. In
   a message written by a member it is drawn in the body, under the head and the text, in place of
   the one-line stub; a row the home wrote (`by: 'system'`) it draws whole, in place of the quiet
@@ -252,10 +259,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
   of its English file to the type `Key`; today the areas are `chat`, `groups`, `nodes`,
-  `settings` and `states`. `src/messages/texts.ts` is the one loader: it finds every file by its
-  name and merges them, and throws, naming the file, when an area takes a namespace of the shell,
-  holds a key outside its own name, has keys that differ between its two languages, or has an
-  empty text. No key can therefore be given twice: a collision fails at start and in the tests,
+  `settings` and `states`. `src/messages/files.ts` finds every file by its name and
+  `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
+  namespace of the shell, holds a key outside its own name, holds a value that is no text or an
+  empty text, or has keys that differ between its two languages, and naming the area when it has
+  no file in one of the languages. No key can therefore be given twice: a collision fails at start and in the tests,
   never replacing a text. A text with a number in it carries `{n}`, which its component replaces. Chat
   content is never translated. The options of the language choice are named in their own
   language in both files and carry its `lang`, so a screen reader speaks each in its language
@@ -363,7 +371,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
     with the dawn edge when it waits for the reader, and a row the home wrote is a quiet line;
     the cards the areas mount replace both.
 - **Where code goes.** Logic lives in `.ts` and `.svelte.ts` modules, which the gates measure
-  (CRAP and mutation); components stay thin. Shared styles are global classes in
+  (CRAP and mutation); components stay thin. A module that only holds an `import.meta.glob` is
+  not mutated; it holds no logic. Stryker would wrap the glob's pattern, which Vite must read
+  as written, so the glob lives alone in such a module (`src/messages/files.ts`,
+  `src/lib/mountfiles.ts`, listed in `stryker.config.json` beside `mock.ts`) and the logic that
+  reads its result takes it as an input, which the tests replace. Shared styles are global classes in
   `src/styles/base.css`, taken from the design; a component's own layout goes in its `<style>`.
 
 ## Understand the implementation
@@ -377,10 +389,12 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/pairing.ts`        | pairing secret, room id, mac, pair message check                |
 | `src/lib/payload.ts`        | the payload fields the envelope and log checks read             |
 | `src/lib/prefs.svelte.ts`   | theme, language and `preference`, their persistence, `t`        |
-| `src/messages/texts.ts`     | the one loader of the texts: finds, checks and merges the files |
+| `src/messages/texts.ts`     | the one loader of the texts: checks and merges the files        |
+| `src/messages/files.ts`     | the glob of the areas' text files, read by `texts.ts`           |
 | `src/lib/route.svelte.ts`   | route table, `parse`, `href`, the page open, the way it went    |
 | `src/lib/net.svelte.ts`     | where the homes come from: `sourceOf`, `start`, the mock's home |
 | `src/lib/mounts.svelte.ts`  | mounting points, `gather` of the areas' mounts, `card(kind)`    |
+| `src/lib/mountfiles.ts`     | the glob of the areas' `mounts.ts`, read by `mounts.svelte.ts`  |
 | `src/lib/motion.ts`         | `spring`, the curve of `--spring`; `shift`, the page cross-fade |
 | `src/lib/proto.ts`          | wire schemas and types, `decode`, the `Ctl` interface           |
 | `src/lib/mock.ts`           | wire examples by name, their schemas, `mockCtl`                 |

@@ -12,9 +12,18 @@ let page: Record<string, never> | undefined;
 const parts: Record<string, never>[] = [];
 let inView: ((entries: { isIntersecting: boolean }[]) => void) | undefined;
 
-/** Opens the client at an address, in English, in a browser with a keyboard. The homes are those
- *  the test puts in `homes`. */
-export function openPage(hash = '#/groups') {
+/** Whether a media query holds on a screen of the given width, in a browser with a keyboard:
+ *  `pointer: fine`, and `min-width` and `max-width` in pixels. */
+function media(query: string, width: number) {
+  const bound = /(min|max)-width:\s*(\d+)px/.exec(query);
+  if (!bound) return query.includes('pointer: fine');
+  return bound[1] === 'min' ? width >= Number(bound[2]) : width <= Number(bound[2]);
+}
+
+/** Opens the client at an address, in English, in a browser with a keyboard, on a screen of the
+ *  given width as far as media queries in script go (the test DOM lays nothing out). The homes
+ *  are those the test puts in `homes`. */
+export function openPage(hash = '#/groups', width = 1440) {
   vi.stubGlobal(
     'IntersectionObserver',
     class {
@@ -26,7 +35,12 @@ export function openPage(hash = '#/groups') {
     },
   );
   vi.spyOn(window, 'matchMedia').mockImplementation(
-    (query) => ({ matches: query.includes('pointer: fine') }) as MediaQueryList,
+    (query) =>
+      ({
+        matches: media(query, width),
+        addEventListener() {},
+        removeEventListener() {},
+      }) as unknown as MediaQueryList,
   );
   prefs.lang = 'en';
   go(hash);

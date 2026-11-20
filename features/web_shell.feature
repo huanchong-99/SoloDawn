@@ -95,14 +95,37 @@ Feature: Shell of the web client
     Then the head, the place above the main line and the side panel each hold the part for "Website"
     And the head has a button "People and details" that opens the side panel
 
-  Scenario: The side panel of a chat opens from its head and closes with Escape
+  Scenario: Below 1024 px the side panel opens over the chat, holds the focus, and closes
     Given an area that mounts a part in the head, above the main line and beside it
     And the home of the group "Website" is reached
-    And the person opens the client at "#/groups/rZNvy-1jH6Z-BcPqA5U5BQ"
+    And the person opens the client at "#/groups/rZNvy-1jH6Z-BcPqA5U5BQ" on a screen 820 px wide
     When the person presses "People and details"
-    Then the side panel is open
+    Then the side panel is open, with focus on its button "Close the panel"
+    And the head, the main line and the composer behind it cannot be reached
     When the person presses Escape
     Then the side panel is closed and focus is on "People and details"
+    And the chat can be reached again
+    When the person presses "People and details" and then "Close the panel"
+    Then the side panel is closed again, with focus back on "People and details"
+
+  Scenario: An Escape that a dialog takes, or that a part already used, leaves the side panel open
+    Given an area that mounts a part in the head, above the main line and beside it
+    And the home of the group "Website" is reached
+    And the person opens the client at "#/groups/rZNvy-1jH6Z-BcPqA5U5BQ" on a screen 820 px wide
+    And the person has opened the side panel
+    When the person presses Escape in a dialog
+    Then the side panel is open
+    When the person presses Escape where a part has already used it
+    Then the side panel is still open
+
+  Scenario: From 1024 px the side panel stands beside the chat and takes no focus
+    Given an area that mounts a part in the head, above the main line and beside it
+    And the home of the group "Website" is reached
+    And the person opens the client at "#/groups/rZNvy-1jH6Z-BcPqA5U5BQ" on a screen 1440 px wide
+    When the person presses "People and details"
+    Then focus is still on "People and details" and the chat can be reached
+    When the person presses Escape
+    Then the side panel is still marked open
 
   Scenario: Two areas cannot mount the card of one kind
     When two areas each mount a card for approvals

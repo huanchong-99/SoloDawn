@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { prefersReducedMotion } from 'svelte/motion';
+  import { MediaQuery } from 'svelte/reactivity';
   import type { Group } from '../../lib/groups.svelte';
   import { mounts, side } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
@@ -16,9 +17,29 @@
   let { group }: { group: Group } = $props();
 
   // The side panel has a column from 1024 px; below that it slides over, closed on each chat.
+  // While it is over the chat, focus is in it and the chat behind it cannot be reached.
   const sided = mounts['chat.side'].length > 0;
   side.open = false;
+  const sliding = new MediaQuery('max-width: 1023px');
+  const covered = $derived(side.open && sliding.current);
   let toggle = $state<HTMLButtonElement>();
+  let closer = $state<HTMLButtonElement>();
+
+  async function openSide() {
+    side.open = true;
+    await tick();
+    if (sliding.current) closer?.focus();
+  }
+  async function closeSide() {
+    side.open = false;
+    await tick();
+    toggle?.focus();
+  }
+  // Escape closes the panel over the chat, unless a dialog took it, or a part already did.
+  function escape(event: KeyboardEvent) {
+    const inDialog = event.target instanceof Element && event.target.closest('dialog');
+    if (event.key === 'Escape' && covered && !event.defaultPrevented && !inDialog) closeSide();
+  }
 
   const paging = $derived(group.paging());
   const line = $derived(days(group.main));
@@ -68,16 +89,13 @@
 <svelte:window
   onkeydown={(event) => {
     keys = true;
-    if (event.key === 'Escape' && side.open) {
-      side.open = false;
-      toggle?.focus();
-    }
+    escape(event);
   }}
   onpointerdown={() => (keys = false)}
 />
 
 <section class="chat" class:keys class:sided aria-label={group.name}>
-  <header class="chat-head">
+  <header class="chat-head" inert={covered}>
     <a class="icon-btn back" href="#/groups" aria-label={t('chat.back')}><Icon name="back" /></a>
     <Avatar id={group.g} name={group.name} group size="sm" />
     <div class="bar-title">
@@ -96,13 +114,13 @@
         aria-label={t('app.side')}
         aria-expanded={side.open}
         aria-controls="chat-side"
-        onclick={() => (side.open = !side.open)}
+        onclick={() => (side.open ? closeSide() : openSide())}
       >
         <Icon name="users" />
       </button>
     {/if}
   </header>
-  <div class="top"><Mount at="chat.top" props={{ group }} /></div>
+  <div class="top" inert={covered}><Mount at="chat.top" props={{ group }} /></div>
 
   <!-- The scroller is reversed and holds one child: its start is the bottom, so the newest
        message is in view when it opens and stays there, and a page added above moves nothing.
@@ -110,6 +128,7 @@
   <div
     class="scroller"
     bind:this={scroller}
+    inert={covered}
     tabindex="-1"
     role="region"
     aria-label={t('chat.line')}
@@ -154,7 +173,7 @@
     </div>
   </div>
 
-  <div class="dock">
+  <div class="dock" inert={covered}>
     {#if away}
       <button class="btn btn-sm latest" onclick={toLatest}>
         <Icon name="down" sm />{t(unseen ? 'chat.latest.new' : 'chat.latest')}
@@ -167,11 +186,9 @@
     <aside id="chat-side" class="side" class:open={side.open} aria-label={t('app.side')}>
       <button
         class="icon-btn side-close"
+        bind:this={closer}
         aria-label={t('app.side.close')}
-        onclick={() => {
-          side.open = false;
-          toggle?.focus();
-        }}
+        onclick={closeSide}
       >
         <Icon name="x" />
       </button>
