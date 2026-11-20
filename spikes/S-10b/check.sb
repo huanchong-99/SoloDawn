@@ -1,0 +1,16 @@
+(version 1)
+(deny default)
+
+; The parent supplies canonical paths for the two unpacked SDKs and the checkout.
+(allow file-read*
+  (literal "/") (literal "/private/var/select/sh")
+  (subpath (param "TREE")) (subpath (param "GO")) (subpath (param "NODE"))
+  (subpath "/System/Library") (subpath "/usr/lib") (subpath "/usr/bin")
+  (subpath "/usr/share") (subpath "/bin")
+  (literal "/dev/null") (literal "/dev/urandom"))
+(allow file-write* (subpath (param "TREE")))
+(allow file-read-metadata
+  (path-ancestors (param "TREE")) (path-ancestors (param "GO"))
+  (path-ancestors (param "NODE")))
+(allow process-exec process-fork sysctl-read)
+(allow signal (target self) (target children))
