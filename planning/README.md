@@ -131,6 +131,7 @@ Change: <files and sections edited, or the reason for rejecting>
 | `flows/ask.md` | one AI calls another, same machine or not |
 | `flows/takeover.md` | the owner takes the terminal and hands it back |
 | `contracts/envelope.md` | identities, signed envelope, device log |
+| `contracts/vectors.md` | the shared test vectors that hold the Go node and the web client to `contracts/envelope.md` |
 | `contracts/rendezvous.md` | WebSocket signalling protocol, STUN and relay |
 | `contracts/datachannel.md` | data-channel protocol: channels, framing, session, reading, inbox, terminal |
 | `contracts/conventions.md` | rules for everything on the wire: which fields are always present, requests and answers, sizes, and which task freezes which shape |

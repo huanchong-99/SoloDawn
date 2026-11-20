@@ -5,8 +5,8 @@ defines it, the device log that says which devices belong to a person, and
 the pairing exchange that introduces two devices that have never met.
 
 The Go node and the web client both implement this file and must give the
-same answer for the same bytes. The test vectors of section 8 hold them to
-it.
+same answer for the same bytes. The test vectors of `contracts/vectors.md`
+hold them to it.
 
 ## 1. Encodings
 
@@ -28,8 +28,8 @@ it.
     (`contracts/local.md` section 2).
   - Browser: a non-extractable WebCrypto key stored in IndexedDB. Only
     browsers with native Ed25519 in WebCrypto are supported; no signature
-    library is bundled (R-164). `[unverified]` The exact minimum versions;
-    spike S-7 fixes them.
+    library is bundled (R-164). The lowest versions are in
+    `docs/decisions/implemented/architecture/2026-11-20-browser-baseline.md`.
 - **Device id** = the 32-byte public key, base64url: 43 characters, in the
   canonical spelling of section 1.
 - **Weak keys.** Fourteen 32-byte values are never a device id. They are
@@ -47,14 +47,19 @@ it.
   eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f
   ```
 
-  Both implementations compare these bytes themselves and do not leave it
-  to their Ed25519 library, because the libraries differ `[verified]`: Go
-  and the three browser engines accept a forged signature under the
-  identity point; OpenSSL, which runs the web client's unit tests, refuses
-  it.
+  Both implementations compare these bytes themselves, in a key and in the
+  first half of a signature (section 3), and do not leave it to their
+  Ed25519 library, because the libraries differ `[verified]`. Under the
+  identity point as key, Go and the three browser engines accept a forged
+  signature, and OpenSSL, which runs the web client's unit tests, refuses
+  it. A signature by a real key that begins with the identity point is
+  accepted by Go and refused by OpenSSL.
 - A text that is not a device id by these rules is never used as a key: as
   `k` it fails `bad_sig`, as `dev` or `user` it makes a log entry refused,
   and a `pair` message that carries it is ignored.
+- Being a point of the curve is not part of being a device id: a `dev` is
+  not tested for it, and nothing verifies under a `k` that is not one
+  (section 3, check 1).
 - **Fingerprint** (shown to people) = first 6 bytes of SHA-256 of the public
   key, as 12 upper-case hex digits in groups of four: `3F9A 0C21 77BE`.
 
@@ -85,12 +90,14 @@ it.
 A receiver checks, in this order, and drops the envelope on the first
 failure with one error code:
 
-1. `bad_sig`: `k` is a device id (section 2); `s` is 64 bytes in their
-   canonical spelling, of which the first 32 are not one of the fourteen
-   values of section 2; and `s` verifies for `k` over the prefix and `p`.
-   (Go accepts a signature that begins with the identity point, OpenSSL
-   refuses it `[verified]`; comparing the bytes makes the answer the same
-   everywhere.)
+1. `bad_sig`: `k` is a device id (section 2). `s` is 64 bytes in their
+   canonical spelling: the first 32 are not one of the fourteen values of
+   section 2, and the last 32, read as a little-endian number, are below
+   the order of the group, 2^252 + 27742317777372353535851937790883648493.
+   And `s` verifies for `k` over the prefix and `p`. A `k` whose bytes are
+   no point of the curve fails here like any signature that does not
+   verify, also where the library refuses such a key before it verifies
+   anything (WebCrypto may throw from `importKey`).
 2. `unknown_device`: `k` is a currently valid device of someone the receiver
    has a reason to listen to (the receiver's owner; a member of a group it
    homes; the home of a group it participates in; or a pairing peer, section
@@ -98,13 +105,12 @@ failure with one error code:
 3. `bad_request`: `p` is a JSON object in which `t` and `n` are strings and
    `ts` is an integer, and `g` and `to`, when there, are strings. The
    payload is parsed at this point because the two checks that follow read
-   `to` and `ts`. Fields are read as `contracts/conventions.md` section 2
-   says, and an integer is a number whose value is one, however it is
-   written: `2.0` is 2, because a browser cannot tell the two apart.
-4. `not_for_me`: `to` is the receiver's device id. A signalling payload
-   must carry it. Another payload may have none, and an empty `to` is read
-   as none; a host command without one is refused with the same code by
-   the node that receives it (`contracts/commands.md` section 2).
+   `to` and `ts`. How fields, `null` and integers are read is in
+   `contracts/conventions.md` section 2.
+4. `not_for_me`: `to`, when there, is the receiver's device id; an empty
+   `to` is a value like any other, and is not that id. A signalling payload
+   must carry `to`. A host command without one is refused with the same
+   code by the node that receives it (`contracts/commands.md` section 2).
 5. `stale`: `ts` is at most two minutes from the receiver's clock for a
    signalling payload, and at most 24 hours for a command, earlier or
    later. Exactly two minutes, or exactly 24 hours, still passes.
@@ -150,10 +156,10 @@ that come after are judged against that unchanged log.
    long after it was signed.
 2. `p` is a JSON object in which `t` is `"device"`, `user` is this log's
    user id, `op` is `"add"` or `"revoke"`, `dev` is a device id, and `ver`
-   is an integer as section 3 reads one. On an `add`, `kind` is `"node"`
-   or `"browser"` and `name` is a string. Nothing else is read: not `n` or
-   `ts`, not `kind` or `name` on a `revoke`, not a field under another
-   name (`contracts/conventions.md` section 2).
+   is an integer. On an `add`, `kind` is `"node"` or `"browser"` and `name`
+   is a string. Nothing else is read: not `n` or `ts`, not `kind` or `name`
+   on a `revoke`, not a field under another name. How fields, `null` and
+   integers are read is in `contracts/conventions.md` section 2.
 3. `ver` is the number of entries in the log plus one.
 4. Entry 1 is the genesis: `op` is `add`, and `dev`, `k` and `user` are the
    same key.
@@ -208,10 +214,12 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
   that the person copies, or as a link that the node prints.
 - **Secret bytes**, wherever the secret is hashed or used as a key: the 16
   characters in upper case, without the hyphens, as ASCII. A secret that a
-  person typed is read by removing the hyphens and making the letters
-  upper case, and nothing more: what remains must be 16 characters of
-  `0123456789ABCDEFGHJKMNPQRSTVWXYZ`. A space, or one of `I`, `L`, `O`,
-  `U`, makes it no secret; no look-alike is mapped to another character.
+  person typed is read by removing the hyphens and turning `a` to `z` into
+  `A` to `Z`, and nothing more: what remains must be 16 characters of
+  `0123456789ABCDEFGHJKMNPQRSTVWXYZ`. No other character is changed, so a
+  space, one of `I`, `L`, `O`, `U`, or a letter outside ASCII makes it no
+  secret, also a letter that a general upper-casing would turn into valid
+  characters (`\u017f` into `S`, `\u00df` into `SS`).
 - **Room id** = the first 16 bytes of SHA-256(`"solodawn/room/1\n"` +
   secret bytes), as 32 lower-case hex characters.
 - Each side sends through the room one message:
@@ -249,8 +257,8 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
   verify a human identity.
 - When the newcomer has been enrolled, the client side sends `hello` again
   and reads `owner: true` from the new `welcome`.
-- The shared test vectors of section 8 pin the secret bytes, the room id
-  and both `mac` values.
+- The shared test vectors pin the secret bytes, the room id and both `mac`
+  values.
 
 The code has 16 characters by decision (R-152, `risks.md` Q-2). Eight would
 need a password-authenticated key exchange, which is not added.
@@ -264,33 +272,5 @@ need a password-authenticated key exchange, which is not added.
 
 ## 8. Shared test vectors
 
-`internal/proto/testdata/crypto.json`, produced by backend task B-02 and
-read by the Go tests and by the web client's tests. Both must pass every
-case. Every field is always present. Its shape:
-
-```json
-{"keys":[{"name":"browser","seed":"<32 bytes>","device":"<device id>",
-          "fingerprint":"3F9A 0C21 77BE"}],
- "envelopes":[{"name":"valid","p":"{\"t\":\"post\",…}","k":"<device id>",
-               "s":"<signature>","ok":true}],
- "rendezvous":[{"nonce":"q0J…","k":"<device id>","s":"<signature>"}],
- "pairing":[{"shown":"7K2M-9QXD-4F8T-WB3N","secret":"7K2M9QXD4F8TWB3N",
-             "room":"<room id>",
-             "a":{"device":"<device id>","mac":"<mac>"},
-             "b":{"device":"<device id>","mac":"<mac>"}}],
- "devlogs":[{"name":"add, then revoke","user":"<user id>",
-             "entries":[{"env":{"p":"…","k":"…","s":"…"},"accept":true}],
-             "valid":["<device id>"]}],
- "adopt":[{"name":"first run","user":"<user id>","me":"<device id>",
-           "peer":"<device id>","entries":[{"p":"…","k":"…","s":"…"}],
-           "ok":true}]}
-```
-
-| Part | Meaning | Cases it must hold |
-| --- | --- | --- |
-| `keys` | `seed` is the 32-byte Ed25519 seed; `device` and `fingerprint` follow from it (section 2) | at least two keys |
-| `envelopes` | `ok` is whether the envelope passes check 1 of section 3. Where `ok` is true, `k` is one of `keys`, and signing `p` with its seed gives exactly `s` | a valid one; the same with one byte of `p` changed; one signed by another key; one whose `p` holds non-ASCII text and escaped characters, to pin "the exact bytes"; `k` in a spelling that is not canonical, and `s` likewise; a forged signature under each of the fourteen weak keys; a signature by a valid key that begins with the identity point |
-| `rendezvous` | `s` answers `nonce` for `k` (`contracts/rendezvous.md` 2.1) | one |
-| `pairing` | `shown` is the code as a person typed it, `secret` its secret bytes as text; `room` and both `mac` values follow (section 6) | as displayed; in lower case; without hyphens |
-| `devlogs` | the entries are applied in order to an empty log of `user`. `accept` true: the entry is not refused, that is, it is appended, or it is the entry already held at its version. False: it is refused. `valid` is the valid set afterwards, the device ids sorted as byte strings, ascending | genesis and an add; an add by a device that is not in the log; a revoke; an add signed by a revoked device; a second add of a revoked key, in its own spelling and in another one; a gap in `ver`; for a version already held, a different entry and the same entry again; a first entry whose `dev`, `k` and `user` are not one key; a payload that is not JSON, and one with another `t` or `op`; `dev` a weak key; `ver` written `2.0`; a field `VER` beside the right `ver`; an `add` with another `kind`, and one without `name`; each entry that section 4 accepts on purpose; a `revoke` of the last valid device |
-| `adopt` | `entries` is a valid log of `user`. `ok` says whether device `me`, which belongs to no person and has paired with `peer`, adopts it (section 6) | first run: the browser's genesis and its add of the node; a node added to an existing person; an add of `me` signed by a device other than `peer`; `me` revoked later in the log; `peer` revoked later; a log that never adds `me` |
+The cases that both implementations must pass, and the shape of the file
+that holds them, are in `contracts/vectors.md`.

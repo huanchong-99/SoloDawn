@@ -50,8 +50,9 @@ are in `steps/step-1.md`.
     encoded value is in `internal/proto`. A zero-valued struct is not what
     is tested: its nil slices are `null` by the language's rule and never
     reach the wire.
-  - *Exact names.* B-02 adds the decoding function and its test; every
-    later task decodes what it reads from the wire with it.
+  - *Reading.* B-02b adds the decoding function and its tests (exact
+    names, `null`, integers, missing fields); every later task decodes
+    what it reads from the wire with it.
 - Every pull request states what was **not** verified.
 - If something blocks you, say so at once in the pull request or its
   description. Do not work around a blocker silently.
@@ -66,8 +67,9 @@ are in `steps/step-1.md`.
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
 | B-00 | Scaffold: Go module; the layout of `architecture.md` section 8 with `cmd/solodawn` parsing arguments only and `internal/node` as the assembly package; a test that fails on an import outside the table of 8.2; `go vet` and tests in CI; cross-compile job for six targets with cgo off; Apache-2.0 licence file | — | CI green on an empty `solodawn version` |
-| B-01 | `internal/proto`, **frozen in slices** (a), (b), (d) and (c), each with its golden files. What each slice holds is in `contracts/conventions.md` section 5; (a) and (b) are done. Slice (c) is one confirmed task from brief to merge as a complete signed vector, with and without a remote, as `flows/trace-task.md` describes it: nothing abridged, every response with its request id | B-00 | round-trip tests pass; a test fails if a struct and its golden file disagree. Slice (a) before B-06, (b) before B-11, (d) before B-11 and as early as possible because the frontend's cards are built from it, (c) before B-19 |
-| B-02 | `internal/identity`: key creation and loading, envelope sign and verify, device-log apply and replay, adoption, fingerprint, the canonical bytes of the pairing secret, `mac` and room id; the exact-name decoding function of `internal/proto` (`contracts/conventions.md` section 2); `testdata/crypto.json` with fixed vectors for the frontend | B-01a | unit tests cover every rule of `contracts/envelope.md` sections 1 to 4 and 6; the vector file holds every case its section 8 names |
+| B-01 | `internal/proto`, **frozen in slices** (a), (b), (d) and (c), each with its golden files. What each slice holds is in `contracts/conventions.md` section 5; (a) and (b) are done. Slice (c) is one confirmed task from brief to merge as a complete signed vector, with and without a remote, as `flows/trace-task.md` describes it: nothing abridged, every response with its request id | B-00 | round-trip tests pass; a test fails if a struct and its golden file disagree. Slice (a) before B-06, (b) before B-11, (d) before B-10, whose tests use its `null` helper, and as early as possible because the frontend's cards are built from it, (c) before B-19 |
+| B-02 | `internal/identity`: key creation and loading, envelope sign and verify, device-log apply and replay, adoption, fingerprint, the canonical bytes of the pairing secret, `mac` and room id; `testdata/crypto.json` with fixed vectors for the frontend. Merged (pull request 63) as the contract stood then; the rules settled since are B-02b | B-01a | unit tests cover the rules of `contracts/envelope.md` sections 3, 4, 6 as they stood |
+| B-02b | The rules settled after B-02 (branch `fix/identity-settled-rules`), in `internal/identity` and `internal/proto`: the function that decodes what a node reads from the wire by `contracts/conventions.md` section 2 (exact names, `null`, integers, missing fields); `contracts/envelope.md` as it now stands (weak keys in a key and in a signature, the checks on `to` and `ts`, what is read from a log entry, the last valid device, how a typed secret is read, the `k` of a `pair` message); `testdata/crypto.json` with every part and case of `contracts/vectors.md` | B-02 | unit tests cover every rule of `contracts/envelope.md` sections 1 to 4 and 6; the vector file holds every case `contracts/vectors.md` names |
 | B-03 | Spikes S-1, S-6, S-8, S-9 | B-00 | answers written in the pull request, which is not merged |
 | B-04 | Spikes S-2, S-3, S-4 on macOS; S-5 on Windows | B-00 | answers written in the pull request, which is not merged; the messages the real CLIs sent are kept as files for B-13 |
 | B-05 | `internal/store`: open, migrations, the tables of `contracts/storage.md`, row put / after-seq-up-to / page by `pos`, counters, inbox, receipts, retention with the purge mark | B-01b | unit tests with an in-memory database |
@@ -80,7 +82,7 @@ and B-11, and S-2, S-3, S-5 before B-13.
 
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
-| B-06 | `internal/rendezvous`, signalling: handshake, `to`/`from`, `watch`, rooms; static file handler; `solodawn rendezvous` | B-02, B-03 | A1.5 against a local instance |
+| B-06 | `internal/rendezvous`, signalling: handshake, `to`/`from`, `watch`, rooms; static file handler; `solodawn rendezvous` | B-02b, B-03 | A1.5 against a local instance |
 | B-07 | `internal/rendezvous`, relay: STUN and TURN, credentials, the daily byte quota counted on relayed data, `quota`; TLS by flags | B-06 | A1.7 |
 | B-08 | `internal/peer`, connections: signalling client with fan-out of every payload over every path; pion setup per `contracts/rendezvous.md` section 5; acceptance hook; `ctl` framing with requests, responses and pushes; one inbound connection per client device; path classification from the selected pair; reconnect | B-06 | A1.3 up to "the path is `relay`" |
 | B-09 | `internal/peer`, paths: the relay-free probe and the move as a reconnect (or renomination, if S-1 says so); local-network beacon; remembered addresses; port mapping | B-07, B-08 | A1.3, A1.4 |

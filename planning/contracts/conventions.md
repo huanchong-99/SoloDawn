@@ -46,18 +46,38 @@ No field is both: a field is either always present or optional.
   online together. A name written in another case is another name, and is
   ignored like any field the receiver does not know. When a name appears
   twice in one object, the last one counts. A missing always-present field,
-  or a field of the wrong type, is `bad_request`.
+  or a field of the wrong type, is `bad_request`; in a device-log entry it
+  makes the entry refused (`contracts/envelope.md` section 4).
+- **`null`** is right only in a field that its contract marks "or `null`".
+  In any other field, an optional one included, it is a wrong type. It
+  never stands for a missing field.
+- **Integers.** A number is read as `JSON.parse` reads it, to the nearest
+  double. It is an integer when that value is a whole number whose
+  absolute value is at most 2^53 − 1, which is what JavaScript's
+  `Number.isSafeInteger` tests. So `2.0` and `2.0000000000000001` are the
+  integer 2, and nothing beyond 2^53 − 1 is an integer, however it is
+  written. In a field that holds an integer, any other number is a wrong
+  type.
 - **For implementers, writing.** Where a language writes an unset list or
   an unset raw JSON value as `null` (Go does, for a nil slice and a nil
   `json.RawMessage`), the code that builds a row, a frame, a payload or a
   body sets them to an empty list or an empty object. A `null` list on the
   wire is a bug in the sender, not something receivers tolerate.
-- **For implementers, reading.** `JSON.parse` already reads as the run-time
-  rule says. Go's `encoding/json` does not `[verified]`: it also matches a
-  name written in another case, folding Unicode, so that for
-  `{"to":"A","TO":"B"}` it reads B where a browser reads A, and `"t\u017f"`
-  (a long s) sets `ts`. A Go node therefore decodes what it reads from the wire through one
-  function of `internal/proto` that keeps exact names only. The envelope
+- **For implementers, reading.** In a browser, `JSON.parse` and a check of
+  each field's type read this way. Go's `encoding/json` does not
+  `[verified]`:
+  - it also matches a name written in another case, folding Unicode: for
+    `{"to":"A","TO":"B"}` it reads B where a browser reads A, and
+    `"t\u017f"` (a long s) sets `ts`;
+  - it reads `null` into a field that is not a pointer as the zero value,
+    without an error;
+  - after decoding, a field that was missing and a field that held its
+    zero value look the same;
+  - it refuses `2.0` for an integer, and takes an integer beyond 2^53 − 1
+    that a browser reads as another number.
+
+  A Go node therefore decodes what it reads from the wire through one
+  function of `internal/proto` that applies the rules above. The envelope
   check and the handler of a payload both use it, so that no payload is
   read two ways.
 
@@ -108,8 +128,8 @@ what.
 | --- | --- |
 | envelope; `offer`, `answer`, `ice`; `pair`; device-log entries; `hello`, `welcome`, `devlog` | B-01 slice (a), done |
 | `sync`, `reset`, `rows`, `synced`, `fetch`, `fetched`, `cmd` and its answers, the error answer; the six row types and the deletion marker | B-01 slice (b), done |
-| every message body and card state (`contracts/messages.md`): one golden message row per kind without a card, `row-msg-<kind>.json`, and one per status of each card kind, `row-msg-<kind>-<status>.json`. The existing `row-msg.json`, a decided decision card, is renamed `row-msg-decision-decided.json`; it is not kept twice. In the same pull request: `pos` on `note` rows (`contracts/rows.md` section 6), and the helper that lists the `null`s of an encoded value | B-01 slice (d), before B-11 |
-| key, signature, pairing, device-log and adoption test vectors (`contracts/envelope.md` section 8) | B-02 |
+| every message body and card state (`contracts/messages.md`): one golden message row per kind without a card, `row-msg-<kind>.json`, and one per status of each card kind, `row-msg-<kind>-<status>.json`. The existing `row-msg.json`, a decided decision card, is renamed `row-msg-decision-decided.json`; it is not kept twice. In the same pull request: `pos` on `note` rows (`contracts/rows.md` section 6), and the helper that lists the `null`s of an encoded value | B-01 slice (d), before B-10, whose tests use the helper |
+| the shared test vectors of `contracts/vectors.md` | B-02, completed by B-02b |
 | the WebSocket frames of signalling: `challenge`, `auth`, `ready`, `ice` (request and answer), `to`, `from`, `offline`, `watch`, `presence`, `join`, `joined`, `room` | B-06 |
 | `quota` (request and answer) | B-07 |
 | the local-network `beacon` payload | B-09 |
