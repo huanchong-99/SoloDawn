@@ -89,13 +89,11 @@ answering node; RV, any signalling path.
     later probe offer supersedes a pending one.
 11. If the probe's `ctl` opens, C moves. A move is a reconnect in which
     the old connection serves until N has accepted the new one:
-    1. C sends `hello` on the probe. From here until `welcome`, the
-       close of the old connection is expected and is not a loss: C does
-       not start again from step 1. With the old connection closed, C
-       starts an ordinary reconnect (section C) only if `welcome` does not
-       arrive within the hello timeout, or if the probe itself fails. The
-       hello timeout is 10 seconds, counted from the moment C sends
-       `hello` on the probe: one round trip on a `ctl` that is open.
+    1. C sends `hello` on the probe and starts a 10-second timer. While it
+       waits for `welcome`, closure of the old connection does not start an
+       ordinary reconnect. A matching `welcome` completes the move and cancels
+       the timer. Probe failure or timer expiry ends this attempt under step
+       14.
     2. N promotes the probe on its first valid `hello`: the probe becomes
        the device's inbound connection, and N closes its predecessor.
        Nothing is carried over from it. A superseded probe or a repeated
@@ -109,13 +107,11 @@ answering node; RV, any signalling path.
     the other side makes a repeat harmless (`contracts/commands.md`).
 13. Both sides classify the new path. The indicator changes within one
     second and the relay notice disappears.
-14. If the probe fails while the old connection is open, C closes the
-    probe, N keeps serving the old connection, and C retries on schedule.
-    That covers a probe whose `ctl` opened and which was lost before N
-    accepted `hello`: the working relay was not closed. A probe can fail
-    where a direct path exists (`contracts/rendezvous.md` section 5.1,
-    point 10). Loss after N has promoted the probe is an ordinary
-    reconnect (section C).
+14. C closes the failed or timed-out probe and ignores a late `welcome` from
+    it. If the old connection is still usable, C continues on it and retries
+    the probe on schedule. If the old connection has also failed or closed, C
+    starts one ordinary reconnect under section C. A later loss of the
+    retained connection follows C.15.
 
 A relayed connection may also find a direct pair by itself; some browsers
 do and one does not (`contracts/rendezvous.md` section 5). Step 8 then
