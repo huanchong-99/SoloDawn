@@ -1,13 +1,30 @@
 package proto
 
+import "errors"
+
 type Request struct {
 	Type string `json:"t"`
 	ID   int64  `json:"id"`
 }
 
+// Success starts every answer that is not an error (contracts/conventions.md
+// section 3).
 type Success struct {
 	Re int64 `json:"re"`
-	OK bool  `json:"ok"`
+	OK True  `json:"ok"`
+}
+
+// True is a truth value that is always true: "ok" of a success.
+type True bool
+
+var errNotTrue = errors.New("proto: ok of a success is not true")
+
+func (t *True) UnmarshalJSON(b []byte) error {
+	if string(b) != "true" {
+		return errNotTrue
+	}
+	*t = true
+	return nil
 }
 
 type Hello struct {

@@ -57,6 +57,17 @@ function usage() {
 
 type Obj = Record<string, unknown>;
 
+/** The number fields that the contracts give as a fraction. Every other number on the wire is an
+ *  integer (contracts/conventions.md section 2). */
+const fractions = ['usage.window_pct', 'usage.day_cap_pct', 'usage.spend_today', 'usage.spend_cap'];
+
+/** Paths to every number, including numbers inside arrays. */
+function numbers(value: unknown, path: string[] = []): string[][] {
+  if (typeof value === 'number') return [path];
+  if (typeof value !== 'object' || value === null) return [];
+  return Object.entries(value).flatMap(([k, x]) => numbers(x, [...path, k]));
+}
+
 /** Paths to every object, including objects inside arrays. */
 function objects(value: unknown, path: string[] = []): string[][] {
   if (typeof value !== 'object' || value === null) return [];
@@ -104,9 +115,30 @@ describe('wire examples', () => {
         const optional =
           (omitempty[name] ?? []).includes(field) ||
           (name.startsWith('row-msg-') && field === 'env') ||
-          (name.startsWith('row-msg-approval-') && field === 'body.why');
+          (name.startsWith('row-msg-approval-') && ['body.full', 'body.why'].includes(field));
         expect(accepts(name, missing), `without ${field}`).toBe(optional);
       }
+    }
+  });
+
+  it.each(examples)('%s refuses a fraction in every integer field', (name) => {
+    for (const path of numbers(JSON.parse(goldens[name]))) {
+      const key = path[path.length - 1];
+      const fraction = variant(name, path.slice(0, -1), (o) => (o[key] = 0.5));
+      expect(accepts(name, fraction), named(path)).toBe(fractions.includes(named(path)));
+    }
+  });
+
+  // JSON.parse reads a number beyond the largest double as Infinity; proto.Decode refuses it.
+  it.each(['1e400', '-1e400'])('refuses %s in a fraction and in an integer field', (literal) => {
+    for (const field of ['window_pct', 'turns_today']) {
+      const text = goldens['row-member-ai'].replace(/("window_pct": )[^,]+/, `$1${literal}`);
+      const changed =
+        field === 'window_pct'
+          ? text
+          : goldens['row-member-ai'].replace(/("turns_today": )\d+/, `$1${literal}`);
+      expect(changed, field).not.toBe(goldens['row-member-ai']);
+      expect(() => p.decode(p.AIMemberRow, changed), field).toThrow(v.ValiError);
     }
   });
 
@@ -347,6 +379,25 @@ describe('decode', () => {
     const groups = '{"t":"groups","groups":[{"g":"Qm1","name":"Website","seq":812}]}';
     expect(p.decode(p.Frame, groups)).toStrictEqual(JSON.parse(groups));
     expect(() => p.decode(p.Frame, '{"t":"groups","groups":[{"g":"Qm1"}]}')).toThrow(v.ValiError);
+  });
+
+  // An answer without t is one to cmd; one with t is read by the schema its t names.
+  it.each(['welcome', 'synced', 'fetched'])(
+    'refuses a %s answer without one of its fields',
+    (name) => {
+      const keys = Object.keys(JSON.parse(goldens[name])).filter((key) => key !== 't');
+      for (const key of keys) {
+        const missing = JSON.parse(goldens[name]);
+        delete missing[key];
+        expect(() => p.decode(p.Frame, JSON.stringify(missing)), `without ${key}`).toThrow(
+          v.ValiError,
+        );
+      }
+    },
+  );
+
+  it('reads a node version as the release tag it was built from (contracts/local.md)', () => {
+    expect(p.decode(p.Welcome, goldens.welcome).version).toMatch(/^v\d+\.\d+\.\d+$/);
   });
 
   it('refuses a frame a node does not send', () => {

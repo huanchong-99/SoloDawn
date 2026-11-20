@@ -1,5 +1,7 @@
 package proto
 
+import "errors"
+
 // EmptyBody is shared by text, progress, question and reply.
 type EmptyBody struct{}
 
@@ -36,6 +38,7 @@ type ApprovalBody struct {
 	AI        string   `json:"ai"`
 	Tool      string   `json:"tool"`
 	Command   string   `json:"command"`
+	Full      *int     `json:"full,omitempty"` // bytes of the whole request when command holds its beginning
 	Why       *string  `json:"why,omitempty"`
 	Category  string   `json:"category"`
 	Approvers []string `json:"approvers"`
@@ -190,6 +193,17 @@ type SessionReplacedBody struct {
 	SystemCode
 	AI   string  `json:"ai"`
 	Task *string `json:"task,omitempty"`
+}
+
+// NoCard is the state of a message that is not a card: null, and nothing else.
+type NoCard = *noCard
+
+type noCard struct{}
+
+var errCard = errors.New("proto: a state on a message that is not a card")
+
+func (*noCard) UnmarshalJSON([]byte) error {
+	return errCard
 }
 
 // StatusOnly represents pending cards and waiting calls.
