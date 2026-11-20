@@ -615,9 +615,10 @@ describe('ctl', () => {
     expect(pc.closes).toBe(0);
   });
 
-  // proto.ts reads a cmd answer by its request, and so ignores every member a result does not
-  // have, a `t` included (proto.test.ts, "ignores in a cmd answer the members it does not read").
-  it('reads the answer to cmd as a result, whatever else the frame holds', async () => {
+  // An answer is read by its request, so the members a result does not have are ignored, a `t`
+  // included (contracts/conventions.md section 2; proto.test.ts, "ignores in a cmd answer the
+  // members it does not read"). Only a frame without the result fails the command.
+  it('answers a cmd with a synced frame as a plain result, its t and other members ignored', async () => {
     const { pc, conn } = await opened();
     const [unreadable, ok, other] = [1, 2, 3].map(() => conn.request({ t: 'cmd' }));
     pc.ctl.deliver({ ...rows, re: 1 });
