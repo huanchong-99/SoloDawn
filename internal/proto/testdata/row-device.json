@@ -1,0 +1,16 @@
+{
+  "r": "device",
+  "id": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs:2",
+  "seq": 41,
+  "user": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+  "ver": 2,
+  "op": "add",
+  "dev": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+  "kind": "node",
+  "name": "workstation",
+  "env": {
+    "p": " {\"t\":\"device\",\"n\":\"fp5aww8iFv0P1vX67TFvLQ\",\"ts\":1763599999999,\"user\":\"akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs\",\"ver\":2,\"op\":\"add\",\"dev\":\"J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q\",\"kind\":\"node\",\"name\":\"workstation\"}",
+    "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+    "s": "Noa9myQIY3SoscXXeDevPqccOpgdip-VvDDLaR3cnJ_3ardUnIZTX_zWqgo9y_l35KhdQrBfZfGUyV0Pt34DAA"
+  }
+}

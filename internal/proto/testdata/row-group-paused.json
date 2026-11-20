@@ -1,0 +1,34 @@
+{
+  "r": "group",
+  "id": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "seq": 816,
+  "name": "Website",
+  "kind": "project",
+  "repo": "https://git.example/team/website.git",
+  "base": "main",
+  "forge": "github",
+  "home": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+  "secretary": "qBSFMsr2hHYKOMblEA_kdA",
+  "checks": [
+    "go vet ./...",
+    "go test ./..."
+  ],
+  "pass": 90,
+  "pass_foundation": 70,
+  "limits": {
+    "rounds": 10,
+    "wakes_per_hour": 20,
+    "turn_minutes": 60,
+    "failures": 3,
+    "review_rounds": 5,
+    "ask_depth": 4,
+    "ask_wait_s": 45,
+    "approval_wait_s": 600,
+    "idle_notice_minutes": 30
+  },
+  "paused": {
+    "by": "4xq2Q8RPeg7IJLWdEZTWDQ",
+    "at": 1763600000000
+  },
+  "created": 1763599995000
+}

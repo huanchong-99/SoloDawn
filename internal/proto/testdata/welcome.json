@@ -1,0 +1,18 @@
+{
+  "t": "welcome",
+  "re": 1,
+  "ok": true,
+  "v": 1,
+  "device": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+  "name": "workstation",
+  "version": "0.3.1",
+  "time": 1763600000000,
+  "groups": [
+    {
+      "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+      "name": "Website",
+      "seq": 812
+    }
+  ],
+  "owner": true
+}
