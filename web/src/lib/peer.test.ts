@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 import { FakePC, transportStats } from '../../features/peer-fakes';
 import type { Device } from './identity';
 import { connect, type Options, type Session } from './peer';
-import type { Ctl, Welcome } from './proto';
+import { goldens } from './mock';
+import type { Ctl, RequestType, Welcome } from './proto';
 
 /** The signalling clients made, oldest first, in place of rendezvous.ts. */
 const { clients, FakeClient } = vi.hoisted(() => {
@@ -573,11 +574,12 @@ describe('an answer and its candidates', () => {
 });
 
 describe('ctl', () => {
-  const group = { g: 'group' };
-  const kinds = [
-    { req: { t: 'hello', v: 1 }, right: welcome },
-    { req: { t: 'sync', ...group }, right: { t: 'synced', ok: true, g: 'group', seq: 7 } },
-    { req: { t: 'fetch', ...group }, right: { t: 'fetched', ok: true, rows: [], more: false } },
+  const kinds: { t: RequestType; right: object }[] = [
+    { t: 'hello', right: welcome },
+    { t: 'sync', right: { t: 'synced', ok: true, g: 'group', seq: 7 } },
+    { t: 'fetch', right: { t: 'fetched', ok: true, rows: [], more: false } },
+    { t: 'host.info', right: JSON.parse(goldens['host-info-answer']) },
+    { t: 'audit', right: JSON.parse(goldens['audit-answer']) },
   ];
 
   it('numbers its requests and gives each the response that names it', async () => {
@@ -597,34 +599,32 @@ describe('ctl', () => {
     expect(await one).toStrictEqual({ re: 1, ok: true, num: 14 });
   });
 
-  it.each(kinds)('answers $req.t only with its own kind of response', async ({ req, right }) => {
+  it.each(kinds)('reads the answer to $t as that request has it', async ({ t, right }) => {
     const { pc, conn } = await opened();
-    const unreadable = conn.request(req);
-    const answered = conn.request(req);
-    const refused = conn.request(req);
+    const unreadable = conn.request({ t });
+    const answered = conn.request({ t });
+    const refused = conn.request({ t });
     pc.ctl.deliver({ re: 1, ok: true });
     pc.ctl.deliver({ ...right, re: 1 });
     pc.ctl.deliver({ ...right, re: 2 });
-    pc.ctl.deliver({ re: 3, err: { code: 'forbidden', msg: 'no' } });
+    pc.ctl.deliver({ re: 3, ok: true, err: { code: 'forbidden', msg: 'no' } });
     await expect(unreadable).rejects.toThrow(new Error('unreadable answer'));
     expect(await answered).toStrictEqual({ ...right, re: 2 });
     expect(await refused).toStrictEqual({ re: 3, err: { code: 'forbidden', msg: 'no' } });
     expect(pc.closes).toBe(0);
   });
 
-  it('answers a command with a result or an error, and a request it has no list for with any response', async () => {
+  // proto.ts reads a cmd answer by its request, and so ignores every member a result does not
+  // have, a `t` included (proto.test.ts, "ignores in a cmd answer the members it does not read").
+  it('reads the answer to cmd as a result, whatever else the frame holds', async () => {
     const { pc, conn } = await opened();
-    const [unreadable, ok, failed, other] = ['cmd', 'cmd', 'cmd', 'host.info'].map((t) =>
-      conn.request({ t }),
-    );
+    const [unreadable, ok, other] = [1, 2, 3].map(() => conn.request({ t: 'cmd' }));
     pc.ctl.deliver({ ...rows, re: 1 });
-    pc.ctl.deliver({ re: 2, ok: true });
-    pc.ctl.deliver({ re: 3, ok: true, err: { code: 'paused', msg: 'paused' } });
-    pc.ctl.deliver({ ...rows, re: 4 });
+    pc.ctl.deliver({ re: 2, ok: true, num: 14 });
+    pc.ctl.deliver({ t: 'synced', re: 3, ok: true, g: 'group', seq: 7 });
     await expect(unreadable).rejects.toThrow(new Error('unreadable answer'));
-    expect(await ok).toStrictEqual({ re: 2, ok: true });
-    expect(await failed).toStrictEqual({ re: 3, err: { code: 'paused', msg: 'paused' } });
-    expect(await other).toStrictEqual(rows);
+    expect(await ok).toStrictEqual({ re: 2, ok: true, num: 14 });
+    expect(await other).toStrictEqual({ re: 3, ok: true });
   });
 
   it('drops what is no frame and stays open', async () => {

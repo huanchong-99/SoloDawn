@@ -170,7 +170,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     ({ Given, When, Then }) => {
       let first: FakePC;
       let second: FakePC;
-      let answered: ReturnType<Ctl['request']>;
+      let answered: Promise<unknown>;
       const cmd = { t: 'cmd', env: { p: '{"t":"post"}', k: 'signer', s: 'signature' } } as const;
       Given('the browser is connected to the node', async () => {
         await offer();

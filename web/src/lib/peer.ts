@@ -7,19 +7,19 @@ import * as v from 'valibot';
 import { encode, utf8, type Device, type Known } from './identity';
 import {
   Answer,
-  CmdResult,
-  ErrorResponse,
-  Fetched,
+  decodeAnswer,
   Frame,
   ICECandidate,
-  Synced,
-  Welcome,
+  type AnswerTo,
   type Ctl,
   type Envelope,
+  type ErrorResponse,
   type Push,
+  type RequestType,
   type RVJoin,
   type RVReady,
   type RVRoom,
+  type Welcome,
 } from './proto';
 import { rendezvous } from './rendezvous';
 
@@ -41,8 +41,8 @@ type Client = ReturnType<typeof rendezvous>;
 export type Heard = Parameters<Parameters<typeof rendezvous>[3]>[1];
 type ICEServer = RVReady['ice'][number];
 type Timer = ReturnType<typeof setTimeout>;
-type Request = { t: string; [field: string]: unknown };
-type Response = v.InferOutput<typeof Frame>;
+type Request = { t: RequestType; [field: string]: unknown };
+type Response = AnswerTo<RequestType> | ErrorResponse;
 /** One entry of the browser's statistics, whose fields depend on its type. */
 type Stat = Record<string, any>;
 
@@ -84,15 +84,6 @@ export interface Options {
    *  `joined` and `room` here. */
   heard?: (url: string, frame: Heard) => void;
 }
-
-/** What answers a request (contracts/datachannel.md sections 3 to 5). A request that is not
- *  listed is answered by any response among Frame. */
-const answers = new Map<string, v.GenericSchema<unknown, Response>>([
-  ['hello', v.union([Welcome, ErrorResponse])],
-  ['sync', v.union([Synced, ErrorResponse])],
-  ['fetch', v.union([Fetched, ErrorResponse])],
-  ['cmd', v.union([CmdResult, ErrorResponse])],
-]);
 
 const Signal = v.variant('t', [Answer, ICECandidate]);
 
@@ -228,7 +219,7 @@ export class Connection {
   #next = 0;
   readonly #waiting = new Map<
     number,
-    { schema: v.GenericSchema; resolve: (answer: Response) => void; reject: (e: Error) => void }
+    { t: RequestType; resolve: (answer: Response) => void; reject: (e: Error) => void }
   >();
   #since: number | undefined;
   #poll: Timer | undefined;
@@ -343,7 +334,7 @@ export class Connection {
     return new Promise((resolve, reject) => {
       if (this.#gone) return reject(lost());
       const id = (this.#next += 1);
-      this.#waiting.set(id, { schema: answers.get(req.t) ?? Frame, resolve, reject });
+      this.#waiting.set(id, { t: req.t, resolve, reject });
       this.#send({ ...req, id });
     });
   }
@@ -352,7 +343,7 @@ export class Connection {
    *  not answered within 10 seconds, the connection closes and the promise rejects. */
   async hello(): Promise<Welcome> {
     const timer = setTimeout(this.close, patience);
-    const hello = { t: 'hello', v: 1, kind: 'browser', name: this.#hub.name, addrs: [] };
+    const hello = { t: 'hello' as const, v: 1, kind: 'browser', name: this.#hub.name, addrs: [] };
     try {
       const answer = (await this.request(hello)) as Welcome | ErrorResponse;
       if (!answer.err) return answer;
@@ -387,7 +378,7 @@ export class Connection {
   #deliver(data: string) {
     const frame = read(data);
     if (frame.id !== undefined) return this.#refuse(frame.id);
-    if (frame.re !== undefined) return this.#settle(frame.re as number, frame);
+    if (frame.re !== undefined) return this.#settle(frame.re as number, data);
     const push = v.safeParse(Frame, frame);
     if (push.success) this.onpush(push.output as Push);
   }
@@ -398,15 +389,18 @@ export class Connection {
     this.#send({ re: id, err: { code: 'bad_request', msg: 'the web client serves no request' } });
   }
 
-  /** A response goes to the request it names, and to none when it names none. One that is not
-   *  an answer of that request's kind fails the request: nothing else will answer it. */
-  #settle(re: number, frame: unknown) {
+  /** A response goes to the request it names, and to none when it names none. It is read as
+   *  the answer of that request's type (`decodeAnswer` of proto.ts). One that is no such answer
+   *  fails the request: nothing else will answer it. */
+  #settle(re: number, data: string) {
     const waiting = this.#waiting.get(re);
     if (!waiting) return;
     this.#waiting.delete(re);
-    const answer = v.safeParse(waiting.schema, frame);
-    if (answer.success) waiting.resolve(answer.output as Response);
-    else waiting.reject(new Error('unreadable answer'));
+    try {
+      waiting.resolve(decodeAnswer(waiting.t, data));
+    } catch {
+      waiting.reject(new Error('unreadable answer'));
+    }
   }
 
   /** Ends the connection: nothing of it is applied from here on, and its requests reject. */
