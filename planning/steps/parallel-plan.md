@@ -75,7 +75,7 @@ differ, which the unit tables state. Lanes never share files.
 
 | Lane | Owns | Units |
 | --- | --- | --- |
-| PROTO | `internal/proto/**`, `web/src/lib/proto.ts`, `proto.test.ts`, `mock.ts` | P-1 → P-2 → P-4 → P-5, strictly serial; P-3 beside P-4 on files of its own |
+| PROTO | `internal/proto/**`, `web/src/lib/proto.ts`, `proto.test.ts`, `mock.ts` | P-1 → P-2 → P-3 → P-4 → P-5, strictly serial |
 | HOME | `internal/home/<file>.go`, one file per unit; `features/home*` | HM-* |
 | HOST | `internal/host/<file>.go`, one file per unit; `internal/host/instructions/`; `features/host*` | HS-* |
 | NODE | `internal/node/<file>.go`, `cmd/solodawn/`, `features/node*`, `features/cmd*` | N-* |
@@ -97,19 +97,18 @@ F-01c; they are expected to merge during wave 1.
 | Wave | Clock | Units | Count |
 | --- | --- | --- | --- |
 | 1 | 0:00 | X-1 (merges first, about 15 minutes), P-1, HM-0, HM-M, HS-0, HS-4, HS-5, HS-6, HS-7a, HS-7b, N-0, N-5, N-6, N-7, NET-1, W-1, W-2, W-4, S-5, S-6, S-10, T3-0, C-0, C2-0 to C2-7, C3-1, C3-2; U-0 as soon as F-06/F-07 merge | 34 |
-| 2 | 0:45 | P-2, HM-1 to HM-17, HS-1, HS-2, HS-8 to HS-15, HS-16a, HS-19, HS-21, N-1, N-2, PR-1, PR-3, RV-1, W-3, E-0, U-1, U-3, U-4, U-7 to U-10, U-14, U-15, S-8 | 48 |
-| 3 | 1:30 | P-3, P-4, HS-3, HS-16b, HS-17, HS-18, HS-20, N-3, N-4, N-8, PR-2, I-1, I-3, U-2, U-5, U-6, U-11, U-12, U-13 | 19 |
-| 4 | 2:15 | I-2, I-4, I-5, I-6, I-7, I-8, U-16; step 2: T2-1 to T2-13, U2-1 to U2-4; step 3: P-5, T3-1 | 26 |
-| 5 | 3:00 | I-9 (E-M1 to E-M8, eight units), I-10; step 2: I2-1; step 3: T3-2 to T3-6, U3-1, U3-2 | 17 |
-| 6 | 3:45 | I-11 on three systems, I2-2, I3-1, fixes found by waves 4 and 5 | 5 + fixes |
-| 7 | 4:30 | second pass of I-11 after fixes; the owner's live list (section 6) | 3 + owner |
+| 2 | 0:45 | P-2, HM-1 to HM-17, HS-1, HS-2, HS-8 to HS-15, HS-16a, HS-19, HS-21, N-1, N-2, PR-0, RV-1, W-3, E-0, U-1, U-3, U-4, U-7 to U-10, U-14, U-15, S-8 | 47 |
+| 3 | 1:30 | P-3, HS-3, HS-16b, HS-17, HS-18, HS-20, N-3, N-4, PR-1, PR-2, PR-3, I-1, I-3, U-2, U-5, U-6, U-11, U-12, U-13 | 19 |
+| 4 | 2:15 | P-4, N-8, I-2, I-4, I-5, I-6, I-7, I-8, U-16; step 3: T3-1 | 10 |
+| 5 | 3:00 | I-9 (E-M1 to E-M8, eight units), I-10; step 2: T2-1 to T2-13, U2-1 to U2-4; step 3: P-5, the first driver of T3-2 to T3-4 | 29 |
+| 6 | 3:45 | I-11 on three systems, I2-1, T3-5, T3-6, U3-1, U3-2, the next driver, fixes found by waves 4 and 5 | 9 + fixes |
+| 7 | 4:30 | second pass of I-11 after fixes; I2-2, I3-1; the owner's live list (section 6) | 5 + owner |
 
-P-3 and P-4 run together in wave 3 although both are in lane PROTO: P-3
-owns only the transcript files and their two test files, which P-2 leaves
-out of the generic file map.
+HS-19 starts in wave 2 only when PR-0 is merged early in that wave;
+otherwise it moves to wave 3 with HS-20 one wave later.
 
-Maximum useful parallelism is wave 2: about 48 sessions. Above that,
-sessions would share files. Wave 1 needs 34, waves 3 and 4 about 20 to 26.
+Maximum useful parallelism is wave 2: about 47 sessions. Above that,
+sessions would share files. Wave 1 needs 34, wave 3 about 19 and wave 5 about 29.
 
 ## 5. Critical path
 
@@ -118,13 +117,14 @@ Each arrow is one wave of 45 minutes.
 - **Group logic**: HM-0 → HM-8 (brief and confirm) → I-1/I-3 (home and host
   on the local link) → I-5 (M5 from brief to merge) → I-9 (browser checks)
   → I-11 (three systems) → second pass. Seven waves: **5 h 15 min**.
-- **Transport**: B-08 (in flight) → PR-1 (probe and move) → N-4 (wiring) →
-  I-2 (M1 on real transport) and I-8 (browser against a real node) → I-9 →
-  I-11 → second pass. Seven waves, the same length; a slip of B-08 moves the
-  whole chain.
-- **Steps 2 and 3**: C2-* (wave 1) → P-4 (wave 3; lane PROTO is serial, so
-  it waits for P-2) → T2-* (wave 4) → I2-1 (wave 5) → I2-2 (wave 6). It
-  ends one wave before the step 1 path.
+- **Transport**: B-08 (in flight) → PR-0 (the dispatch seam) → PR-1 (probe
+  and move) and N-4 (wiring) → I-2 (M1 on real transport) and I-8 (browser
+  against a real node) → I-9 → I-11 → second pass. Seven waves, the same
+  length; a slip of B-08 moves the whole chain.
+- **Steps 2 and 3**: C2-* (wave 1) → P-4 (wave 4; lane PROTO is strictly
+  serial: P-1, P-2, P-3, P-4, P-5) → T2-* (wave 5) → I2-1 (wave 6) → I2-2
+  (wave 7). It ends with the step 1 path. Step 3 drivers are built one at
+  a time, so each driver after the first adds a wave after wave 7.
 
 With one fix wave per integration wave that fails, the estimate is **7 to 8
 hours**, which leaves two hours of the ten. The path cannot be shortened by
@@ -132,7 +132,9 @@ more sessions: waves 1 to 3 are already limited by dependencies, not by
 people. It is shortened only by merging faster than 45 minutes per unit.
 
 What makes it longer, in order of likelihood: mutation testing on large
-packages (run gremlins on the changed files only); P-1 running long (it is
+packages (the rule is per changed package, so a unit that adds one file
+to `home` or `host` pays for the whole package; budget ten minutes more
+for those); P-1 running long (it is
 L); interfaces of HM-0 and HS-0 changing after dependants started (their
 pull requests merge first in wave 1, reviewed before anything else).
 
@@ -153,17 +155,24 @@ checklist item for the owner at the end.
 | Windows | S-5, N-5, HS-19 (ConPTY), I-11 | a Devin Windows machine covers all four | none |
 | Accounts for step 3 CLIs | T3-2 to T3-4 | terms and capabilities are desk research; the driver is built against captures made with an API key if the owner provides one, otherwise against the documented protocol and marked unverified | one key per CLI |
 
-## 7. Open points for the coordinator
+## 7. Decisions and open points
 
-1. The reading of the feature-file rule in section 2.
-2. C-0 changes who freezes which wire shape (PROTO lane instead of the first
-   task that needs it).
-3. Step 2 contracts are written as new files under `contracts/step-2/`, so
-   that no step 1 contract file has two writers while step 1 is being
-   built; they are folded into the main files when step 1 is done.
-4. The design answers of `steps/parallel-plan-step-2-3.md` section 1 are
-   proposals. D-1, D-4 and D-11 are architecture decisions and need a yes
-   before their contract units merge.
+Accepted by the owner: the plan; D-1, D-4 and D-11 of
+`steps/parallel-plan-step-2-3.md` as written; the other answers as
+proposals that a contract unit or its reviewer may object to.
+
+Changed after the review of this plan:
+
+1. B-07 and B-08 are outside the plan and change `go.mod`, the acceptance
+   runner, the web schema files and `cmd/solodawn`. X-1, P-1 and N-0 merge
+   after B-07; B-08 moves its step registration to the registry of X-1.
+2. Tables instead of shared files: commands of the home by operation and
+   sub-key (HM-0), tools (HS-0), subcommands (N-0), offer kinds and channel
+   labels (PR-0), mounting points and message areas (U-0).
+3. The signed transcripts (P-3) are no longer a prerequisite of the home
+   units; they are replayed in I-5.
+4. The live tests and the device runs stay with the owner and are handed
+   over by I-11 as one list.
 
 ## 8. Not verified
 

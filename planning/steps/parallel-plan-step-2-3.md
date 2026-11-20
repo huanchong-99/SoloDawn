@@ -6,8 +6,12 @@ waves are in `steps/parallel-plan.md`; the outline being refined is
 `steps/step-2-3.md`. Columns of the unit tables are those of
 `steps/parallel-plan-units.md`.
 
-Every answer below is a **proposal** until the coordinator accepts it. D-1,
-D-4 and D-11 are architecture decisions.
+The owner accepted D-1, D-4 and D-11 as written and the other answers as
+proposals; a contract unit or its reviewer may still object. The contract
+units also settle what the review of this plan found open: the proof per
+account and item kind (D-2), a tie-break for one signer (D-4), which shown
+fields a signature covers (D-5), authentication of an invitation (D-7),
+receipts and a signed redirect in the snapshot (D-11).
 
 ## 1. Design points and proposed answers
 
@@ -59,44 +63,48 @@ answer goes into C2-5 before T2-12 starts.
 ## 3. Code units of step 2
 
 All in new files. They start when their contract unit and P-4 are merged
-and the step 1 file they call exists.
+and the step 1 file they call exists. Each installs itself through the
+tables of step 1 (commands, tools, subcommands, channel labels, mounting
+points); where a step 1 file must still change, the unit names that file
+in its pull request and is its only writer in that wave. C2-5 and C3-1
+are complete only when S-10 and T3-0 have reported.
 
 | Id | W | Does | Tests | Owns | Needs | M | Sz |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| P-4 | 3 | Wire shapes of step 2: `invite`, `join`, role and removal, `confirm` body and states, group kind `team`, `checks.accept`, templates, the snapshot, `watch`; fork vectors in `crypto.json` | golden round trip | lane PROTO | P-2, C2-1 to C2-6 | F | L |
-| T2-1 | 4 | Home: invitations, joining, roles, removing a member | A9 people | `home/cmd_people.go` | P-4, HM-5 | A | M |
-| T2-2 | 4 | Home: the `confirm` card and `act confirm`; who must be asked | A9 confirm | `home/cmd_confirm.go` | P-4, HM-10 | F | M |
-| T2-3 | 4 | Host: the owner-signature rule, the signed list, the level cap, delegates | A9 authority | `host/authority.go` | P-4, HS-13, HS-16a | F | M |
-| T2-4 | 4 | Device log fork rule in Go and in the web client | the new vectors | `internal/identity/devlog.go`, `lib/devlog.ts` | P-4 | F | S |
-| T2-5 | 4 | Browser: verify row envelopes for homes of others | A9 trust | `lib/verify.ts` | P-4 | A | S |
-| T2-6 | 4 | Host: the receive-only terminal channel | A9 watch | `host/watch.go` | P-4, HS-19, HS-20 | A | S |
-| T2-7 | 4 | Home: group kind `team` | A9 team | `home/team.go` | P-4, HM-5 | A | S |
-| T2-8 | 4 | Host: forge templates | A9 forge | `host/forge_tmpl.go` | P-4, HS-7a, HS-7b | A | M |
-| T2-9 | 4 | Host: acceptance of the check list and templates | A9 checks | `host/accept.go` | P-4, HS-5 | A | S |
-| T2-10 | 4 | Moving a group to another home | A9 move | `home/move.go`, `node/move.go` | P-4, HM-1, N-4 | F | M |
-| T2-11 | 4 | A copy of a group on a second node | A9 copy | `home/copy.go` | P-4, HM-1 | A | M |
-| T2-12 | 4 | Checks inside the system's sandbox on Linux and macOS | A9 sandbox | `host/sandbox_linux.go`, `host/sandbox_darwin.go` | S-10, HS-5 | A | M |
-| T2-13 | 4 | The `information` label in turn text | A9 label | `host/turn_info.go` | P-4, HS-14 | A | S |
-| U2-1 | 4 | Members, roles and the invitation dialog | A9 as seen | `cmp/people/` | U-0, P-4 | F | M |
-| U2-2 | 4 | The `confirm` card; the allow list and delegates editor | A9 as seen | `cmp/confirm/`, `cmp/allow/` | U-0, P-4 | F | M |
-| U2-3 | 4 | Watching a terminal; team-wide group screens | A9 as seen | `cmp/watch/`, `cmp/team/` | U-11, P-4 | F | M |
-| U2-4 | 4 | The unverified mark; the prompt to accept checks; move and copy in settings; the secretary warning | A9 as seen | `cmp/trust/`, `cmp/move/` | U-12, P-4 | F | M |
-| I2-1 | 5 | Step 2 acceptance with two persons, three nodes and fake CLIs | A9.x | `features/s2*` | T2-1 to T2-13 | A | L |
-| I2-2 | 6 | Step 2 in the browsers and on three systems | A9.x as seen | `web/e2e/s2.spec.ts` | I2-1, U2-1 to U2-4 | A | M |
+| P-4 | 4 | Wire shapes of step 2: `invite`, `join`, role and removal, `confirm` body and states, group kind `team`, `checks.accept`, templates, the snapshot, `watch` | golden round trip | lane PROTO | P-3, C2-1 to C2-6 | F | L |
+| T2-1 | 5 | Home: invitations, joining, roles, removing a member; admission of a joiner by the node and the browser | A9 people | `home/cmd_people.go`, `node/admit.go`, `lib/join.ts` | P-4, HM-5 | A | M |
+| T2-2 | 5 | Home: the `confirm` card and `act confirm`; who must be asked | A9 confirm | `home/cmd_confirm.go` | P-4, HM-10 | F | M |
+| T2-3 | 5 | Host: the owner-signature rule, the signed list, the level cap, delegates | A9 authority | `host/authority.go` | P-4, HS-13, HS-16a | F | M |
+| T2-4 | 5 | Device log fork rule in Go and in the web client, with the vector generator and the fork vectors in the same pull request | the new vectors | `internal/identity/devlog.go`, `lib/devlog.ts`, the fork vectors of `crypto.json` and their generator | P-4 | F | S |
+| T2-5 | 5 | Browser: verify row envelopes for homes of others | A9 trust | `lib/verify.ts` | P-4, C2-7 | A | S |
+| T2-6 | 5 | Host: the receive-only terminal channel | A9 watch | `host/watch.go` | P-4, HS-19, HS-20 | A | S |
+| T2-7 | 5 | Home: group kind `team` | A9 team | `home/team.go` | P-4, HM-5 | A | S |
+| T2-8 | 5 | Host: forge templates | A9 forge | `host/forge_tmpl.go` | P-4, HS-7a, HS-7b | A | M |
+| T2-9 | 5 | Host: acceptance of the check list and templates | A9 checks | `host/accept.go` | P-4, HS-5 | A | S |
+| T2-10 | 5 | Moving a group to another home | A9 move | `home/move.go`, `node/move.go` | P-4, HM-1, N-4 | F | M |
+| T2-11 | 5 | A copy of a group on a second node | A9 copy | `home/copy.go` | P-4, HM-1 | A | M |
+| T2-12 | 5 | Checks inside the system's sandbox on Linux and macOS, only where S-10 showed both compatibility and isolation | A9 sandbox | `host/sandbox_linux.go`, `host/sandbox_darwin.go` | S-10, HS-5 | A | M |
+| T2-13 | 5 | The `information` label in turn text | A9 label | `host/turn_info.go` | P-4, HS-14 | A | S |
+| U2-1 | 5 | Members, roles and the invitation dialog | A9 as seen | `cmp/people/` | U-0, P-4 | F | M |
+| U2-2 | 5 | The `confirm` card; the allow list and delegates editor | A9 as seen | `cmp/confirm/`, `cmp/allow/` | U-0, P-4 | F | M |
+| U2-3 | 5 | Watching a terminal; team-wide group screens | A9 as seen | `cmp/watch/`, `cmp/team/` | U-11, P-4 | F | M |
+| U2-4 | 5 | The unverified mark; the prompt to accept checks; move and copy in settings; the secretary warning | A9 as seen | `cmp/trust/`, `cmp/move/` | U-12, P-4 | F | M |
+| I2-1 | 6 | Step 2 acceptance with two persons, three nodes and fake CLIs | A9.x | `features/s2*` | T2-1 to T2-13 | A | L |
+| I2-2 | 7 | Step 2 in the browsers and on three systems | A9.x as seen | `web/e2e/s2.spec.ts` | I2-1, U2-1 to U2-4 | A | M |
 
 ## 4. Code units of step 3
 
 | Id | W | Does | Tests | Owns | Needs | M | Sz |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | T3-0 | 1 | Desk research: terms and capabilities of each candidate CLI, each claim with its source (no code; the answer goes into C3-1) | — | pull request description | — | A | S |
-| P-5 | 4 | Wire shapes: note types `preset` and `kb`, the brief's preset field, `kb_put`, `kb_search` | golden round trip | lane PROTO | P-4, C3-2 | F | S |
+| P-5 | 5 | Wire shapes: note types `preset` and `kb`, the brief's preset field, `kb_put`, `kb_search` | golden round trip | lane PROTO | P-4, C3-2 | F | S |
 | T3-1 | 4 | The capability table and the switches it drives | A10 capabilities | `host/caps.go` | C3-1, HS-1, HS-2 | A | S |
-| T3-2 to T3-4 | 5 | One driver and one fake CLI per CLI that passed T3-0 | M3, M4, M7 tests for that CLI | `host/<cli>.go`, `host/fakecli/<cli>/` | T3-1, captures | A | 3 × M |
-| T3-5 | 5 | Presets: the note type, the brief field, the turn text | A10 presets | `home/preset.go`, `host/turn_preset.go` | P-5 | A | S |
-| T3-6 | 5 | Knowledge base: index, `kb_put`, `kb_search`, exempt from retention | A10 knowledge | `internal/store/kb.go`, `home/kb.go`, `host/tools_kb.go` | P-5 | A | M |
-| U3-1 | 5 | Preset choice in the brief card; the preset editor | A10 as seen | `cmp/preset/` | U-7, P-5 | F | S |
-| U3-2 | 5 | Knowledge base panel in the group info | A10 as seen | `cmp/kb/` | U-14, P-5 | F | S |
-| I3-1 | 6 | Step 3 acceptance | A10.x | `features/s3*` | T3-1 to T3-6, U3-1, U3-2 | A | M |
+| T3-2 to T3-4 | 5+ | One driver and one fake CLI per CLI that passed T3-0, one at a time | M3, M4, M7 tests for that CLI | `host/<cli>.go`, `host/fakecli/<cli>/` | T3-1, captures | A | 3 × M |
+| T3-5 | 6 | Presets: the note type, the brief field, the turn text | A10 presets | `home/preset.go`, `host/turn_preset.go` | P-5 | A | S |
+| T3-6 | 6 | Knowledge base: index, `kb_put`, `kb_search`, exempt from retention | A10 knowledge | `internal/store/kb.go`, `home/kb.go`, `host/tools_kb.go` | P-5 | A | M |
+| U3-1 | 6 | Preset choice in the brief card; the preset editor | A10 as seen | `cmp/preset/` | U-7, P-5 | F | S |
+| U3-2 | 6 | Knowledge base panel in the group info | A10 as seen | `cmp/kb/` | U-14, P-5 | F | S |
+| I3-1 | 7 | Step 3 acceptance, for the CLIs that passed T3-0 only | A10.x | `features/s3*` | T3-1 to T3-6, U3-1, U3-2 | A | M |
 
 Fable ends on Nov 23. If step 2 or 3 interface units slip past that date,
 the coordinator decides who makes their visual decisions; no GPT session
