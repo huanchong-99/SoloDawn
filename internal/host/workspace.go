@@ -142,10 +142,15 @@ func checkoutReview(repo, review string, num int, commit string) error {
 }
 
 // RemoveTaskWorkspace removes the task's worktree and keeps its branch, which
-// a later takeover on this node continues.
-func RemoveTaskWorkspace(projectDir string, num int, slug string) error {
-	name := strconv.Itoa(num) + "-" + slug
-	return workspaceGit(filepath.Join(projectDir, "repo"), nil, "worktree", "remove", filepath.Join("..", "wt", name))
+// a later takeover on this node continues. A cancelled task's worktree is
+// removed with --force: its uncommitted changes are discarded.
+func RemoveTaskWorkspace(projectDir string, num int, slug string, cancelled bool) error {
+	args := []string{"worktree", "remove"}
+	if cancelled {
+		args = append(args, "--force")
+	}
+	path := filepath.Join("..", "wt", strconv.Itoa(num)+"-"+slug)
+	return workspaceGit(filepath.Join(projectDir, "repo"), nil, append(args, path)...)
 }
 
 // RemoveReviewWorkspace deletes the diff, the only untracked file, so that

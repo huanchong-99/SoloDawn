@@ -97,7 +97,7 @@ func TestWorkspaceLocalReassignment(t *testing.T) {
 	tree, err := CreateTaskWorkspace(f.project, 2, "docs", "trunk", false, false)
 	workOK(t, err)
 	head := workspaceCommit(t, tree, "guide", "draft")
-	workOK(t, RemoveTaskWorkspace(f.project, 2, "docs"))
+	workOK(t, RemoveTaskWorkspace(f.project, 2, "docs", false))
 	_, err = os.Stat(tree)
 	workEqual(t, errors.Is(err, fs.ErrNotExist), true)
 	resumed, err := CreateTaskWorkspace(f.project, 2, "docs", "trunk", false, true)
@@ -105,6 +105,23 @@ func TestWorkspaceLocalReassignment(t *testing.T) {
 	workEqual(t, resumed, tree)
 	workEqual(t, fixtureGit(t, resumed, "branch", "--show-current"), "task/2-docs")
 	workEqual(t, fixtureGit(t, resumed, "rev-parse", "HEAD"), head)
+}
+
+func TestWorkspaceCancelDiscardsUncommittedChanges(t *testing.T) {
+	f := workspaceSetup(t)
+	tree, err := CreateTaskWorkspace(f.project, 5, "draft", "trunk", false, false)
+	workOK(t, err)
+	head := workspaceCommit(t, tree, "kept", "committed\n")
+	workOK(t, os.WriteFile(filepath.Join(tree, "kept"), []byte("edited\n"), 0644))
+	workOK(t, os.WriteFile(filepath.Join(tree, "loose"), []byte("untracked\n"), 0644))
+	requireGitExit(t, RemoveTaskWorkspace(f.project, 5, "draft", false), 128)
+	data, err := os.ReadFile(filepath.Join(tree, "kept"))
+	workOK(t, err)
+	workEqual(t, string(data), "edited\n")
+	workOK(t, RemoveTaskWorkspace(f.project, 5, "draft", true))
+	_, err = os.Stat(tree)
+	workEqual(t, errors.Is(err, fs.ErrNotExist), true)
+	workEqual(t, fixtureGit(t, f.repo, "rev-parse", "task/5-draft"), head)
 }
 
 func TestWorkspaceRemoteReassignment(t *testing.T) {
@@ -126,7 +143,7 @@ func TestWorkspaceRetainedBranchFastForward(t *testing.T) {
 	f := workspaceSetup(t)
 	tree, err := CreateTaskWorkspace(f.project, 3, "fix", "trunk", true, false)
 	workOK(t, err)
-	workOK(t, RemoveTaskWorkspace(f.project, 3, "fix"))
+	workOK(t, RemoveTaskWorkspace(f.project, 3, "fix", false))
 	fixtureGit(t, f.source, "switch", "-c", "task/3-fix")
 	newHead := workspaceCommit(t, f.source, "progress", "published")
 	fixtureGit(t, f.source, "push", "origin", "task/3-fix")
@@ -155,7 +172,7 @@ func TestWorkspaceRetainedBranchDiverged(t *testing.T) {
 	cmd.Dir = tree
 	output, err := cmd.CombinedOutput()
 	requireGitExit(t, err, 128)
-	workOK(t, RemoveTaskWorkspace(f.project, 3, "fix"))
+	workOK(t, RemoveTaskWorkspace(f.project, 3, "fix", false))
 	_, err = CreateTaskWorkspace(f.project, 3, "fix", "trunk", true, true)
 	requireGitExit(t, err, 128)
 	workEqual(t, err.Error(), "git: exit status 128: "+strings.TrimSpace(string(output)))

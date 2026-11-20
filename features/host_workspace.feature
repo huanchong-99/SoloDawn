@@ -26,3 +26,11 @@ Feature: Group and task workspaces on a host
     And workspace task 2 starts
     Then workspace task 2 is on its own branch
     And workspace task 2 starts at the merged prerequisite
+
+  Scenario: Cancelling a task discards its uncommitted changes and keeps its branch
+    When workspace task 1 starts
+    And task 1 commits a change for review
+    And task 1 leaves an uncommitted change
+    And the host removes the worktree of cancelled task 1
+    Then task 1 has no task or review folder
+    And the branch of task 1 is at that commit

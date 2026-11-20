@@ -129,10 +129,19 @@ func workspaceSteps(sc *godog.ScenarioContext, f fixtures) {
 		return workspaceGitEquals(repo, strings.TrimSuffix(string(diff), "\n"), "diff", "trunk..."+commit)
 	})
 	sc.Step(`^the host releases the task and review folders for task (\d+)$`, func(n int) error {
-		if err := host.RemoveTaskWorkspace(project, n, "change"); err != nil {
+		if err := host.RemoveTaskWorkspace(project, n, "change", false); err != nil {
 			return err
 		}
 		return host.RemoveReviewWorkspace(project, n)
+	})
+	sc.Step(`^task (\d+) leaves an uncommitted change$`, func(n int) error {
+		return os.WriteFile(filepath.Join(tree(n), "change.txt"), []byte("unsaved\n"), 0644)
+	})
+	sc.Step(`^the host removes the worktree of cancelled task (\d+)$`, func(n int) error {
+		return host.RemoveTaskWorkspace(project, n, "change", true)
+	})
+	sc.Step(`^the branch of task (\d+) is at that commit$`, func(n int) error {
+		return workspaceGitEquals(repo, commit, "rev-parse", "task/"+taskName(n))
 	})
 	sc.Step(`^task (\d+) has no task or review folder$`, func(n int) error {
 		if err := workspaceAbsent(tree(n)); err != nil {
