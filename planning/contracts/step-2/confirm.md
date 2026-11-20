@@ -158,21 +158,21 @@ The home writes the `direct` and `ask` cards and signs nothing in them, and
 from step 2 a home may belong to someone else. So the owner's `act` does not
 rest on the card: it names the request.
 
-- **Digest of a request**: the SHA-256 of the UTF-8 bytes of the request's
-  `env.p`, in base64url (`contracts/envelope.md` section 1): 43 characters.
-  The request is the message `re` names; for `watch` it is the card's own
-  `env`.
+- **Digest of a request**: the SHA-256 of the UTF-8 bytes of `body.ai`, one
+  line feed and the request's `env.p`, in base64url (`contracts/envelope.md`
+  section 1): 43 characters. The request is the message `re` names; for
+  `watch` it is the card's own `env`. With the AI in it, a confirmation for
+  one AI of an owner cannot be used for another AI of the same owner.
 - The owner's browser computes the digest from the request it shows, and
   never takes it from the home. The home computes it too and refuses an
   `act confirm` that carries another value, so that no card is marked
   confirmed by an `act` that no host would accept.
 - A host, or anyone, can then check a confirmation without trusting the
-  home: the `act` is signed by a device of the AI's owner; its `arg` is the
-  digest of the request the host was given; and that request, by its own
-  signature, says who asks and for what: a `post` that mentions the AI, a
-  `call` whose `body.to` is the AI, a brief that names it in `tasks`, a
-  `confirm` whose `body.ai` is the AI. The card row is only how the request
-  is found.
+  home: the `act` is signed by a device of the AI's owner, and its `arg` is
+  the digest for this AI and the request the host was given. The request's
+  own signature says who asks and what for; the card row is only how the
+  request is found. Which role an AI has comes from the home's task rows,
+  as in step 1: a brief need not name an AI that a reassignment names.
 - A message id would not do: `n` is unique per signer only, so a home could
   swap in another member's message with the same `n`.
 - **A confirmation is not a brief confirmation.** `act confirm` on a brief
