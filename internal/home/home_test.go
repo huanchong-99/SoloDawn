@@ -530,7 +530,7 @@ func TestCommitHoldsTheStateRows(t *testing.T) {
 		home.RowOf(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: id(21)}, Num: 6}),
 		home.RowOf(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: id(22)}, Num: 5}),
 		home.RowOf(proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(23)}}),
-		home.RowOf(proto.DeviceRow{RowHeader: proto.RowHeader{Type: "device", ID: browser.ID() + ":1"}}),
+		home.RowOf(deviceRow(browser, browser, 4, "add", device(8))),
 	}})
 	equal(t, s.Group.Name, "Website")
 	equal(t, s.People[id(12)].User, guest.ID())
@@ -612,10 +612,86 @@ func TestSealFinishesTheResultOfATimerOrAnEvent(t *testing.T) {
 	events.Add("closed", nil)
 }
 
+// deviceRow is the row of a device-log entry: signer adds dev to, or revokes
+// it from, the log of the person whose first device is user.
+func deviceRow(signer, user identity.Key, ver int, op string, dev identity.Key) proto.DeviceRow {
+	change := proto.DeviceChange{User: user.ID(), Version: ver, Op: op, Device: dev.ID()}
+	if op == "add" {
+		change.Kind, change.Name = "browser", "a device"
+	}
+	entry, _ := json.Marshal(proto.DeviceEntry{PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: proto.ID(id(40)), Timestamp: clock}, DeviceChange: change})
+	return proto.DeviceRow{RowHeader: proto.RowHeader{Type: "device", ID: fmt.Sprint(user.ID(), ":", ver)}, DeviceChange: change, Env: signer.Sign(string(entry))}
+}
+
+// The state follows the device logs through the device rows it commits: a
+// device is known from the row that adds it, and unknown from the one that
+// revokes it.
+func TestCommitAppliesTheEntryOfADeviceRow(t *testing.T) {
+	s, calls := group(t), 0
+	table := home.Table{"note": writeNote(&calls)}
+	tablet, stranger := device(8), device(9)
+	send := func(by identity.Key, n byte) store.Outcome {
+		return apply(t, table, s, receipts{}, by, signed(by, "note", n, `,"text":"x"`)).Answer
+	}
+	commit := func(rows ...proto.DeviceRow) {
+		res := home.Result{}
+		for _, row := range rows {
+			res.Rows = append(res.Rows, home.RowOf(row))
+		}
+		s.Commit(s.Seal(res))
+	}
+	equal(t, send(tablet, 1), store.Outcome{Code: "unknown_device"})
+	equal(t, s.Serves(tablet.ID()), false)
+
+	add := deviceRow(browser, browser, 4, "add", tablet)
+	commit(add)
+	equal(t, send(tablet, 1), store.Outcome{OK: true, Num: 7})
+	equal(t, s.Serves(tablet.ID()), true)
+	equal(t, len(s.Logs[browser.ID()].Entries), 4)
+
+	// The same entry in a row again changes nothing.
+	commit(add)
+	equal(t, len(s.Logs[browser.ID()].Entries), 4)
+
+	commit(deviceRow(tablet, browser, 5, "revoke", laptop))
+	equal(t, send(laptop, 2), store.Outcome{Code: "unknown_device"})
+	equal(t, send(tablet, 3), store.Outcome{OK: true, Num: 7})
+
+	// The first row of a person starts that person's log: the device is
+	// known from then on, and is still no member's.
+	equal(t, send(stranger, 4), store.Outcome{Code: "unknown_device"})
+	commit(deviceRow(stranger, stranger, 1, "add", stranger))
+	equal(t, s.Logs[stranger.ID()].Valid(stranger.ID()), true)
+	equal(t, send(stranger, 4), store.Outcome{Code: "forbidden"})
+	equal(t, s.Seq, int64(14))
+
+	// A row out of the order of its log is a mistake of whoever wrote it.
+	defer func() {
+		equal(t, recover(), any("home: the entry of device row "+browser.ID()+":9 is refused by its log: device log: the version does not follow the log"))
+	}()
+	commit(deviceRow(browser, browser, 9, "add", device(12)))
+}
+
+// A hook runs after a result is committed, and sees the state that holds it.
+func TestAHookGetsACommittedResult(t *testing.T) {
+	var seen []int64
+	after := home.Rules[home.Hook]{}
+	after.Add("push", func(s *home.State, res home.Result) { seen = append(seen, s.Seq, int64(len(res.Rows))) })
+	s, calls := group(t), 0
+	res := apply(t, home.Table{"note": writeNote(&calls)}, s, receipts{}, browser, signed(browser, "note", 1, `,"text":"x"`))
+	s.Commit(res)
+	for _, hook := range after {
+		hook(s, res)
+	}
+	equal(t, seen, []int64{11, 1})
+	defer func() { equal(t, recover(), any("home: two functions under push")) }()
+	after.Add("push", nil)
+}
+
 // The tables of a node are there for the files of the package to add to, and
 // a new state has the place for the count of the wake-up cap.
 func TestTheTablesOfANodeAndTheWakesOfAState(t *testing.T) {
-	equal(t, []bool{home.Commands != nil, home.Timers != nil, home.Events != nil}, []bool{true, true, true})
+	equal(t, []bool{home.Commands != nil, home.Timers != nil, home.Events != nil, home.After != nil}, []bool{true, true, true, true})
 	s := home.NewState(groupID, node.ID(), browser.ID())
 	s.Wakes[aiID] = append(s.Wakes[aiID], clock)
 	equal(t, s.Wakes, map[string][]int64{aiID: {clock}})

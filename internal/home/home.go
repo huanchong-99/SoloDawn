@@ -34,10 +34,14 @@ type Client interface {
 // disk only is read through a Disk. The function of a command reads a State
 // and changes nothing in it; Commit takes the rows of a result.
 type State struct {
-	ID    string                   // the group, also before it exists
-	Home  string                   // this node's device id
-	Owner string                   // the user id of this node's owner
-	Logs  map[string]*identity.Log // by user id: the owner's device log and that of every person in the group
+	ID    string // the group, also before it exists
+	Home  string // this node's device id
+	Owner string // the user id of this node's owner
+	// Logs holds, by user id, the device log of this node's owner and of
+	// every person in the group. The logs are this state's own values, which
+	// nothing else reads or writes: Commit applies the entry of each device
+	// row to them.
+	Logs map[string]*identity.Log
 
 	Group  proto.GroupRow                  // its ID is empty until the group is created
 	People map[string]proto.HumanMemberRow // by member id
@@ -50,7 +54,7 @@ type State struct {
 	// sent to that AI, in Unix milliseconds: the count of the wake-up cap,
 	// which is kept in memory and starts again with the home
 	// (planning/contracts/commands.md section 1.3). Whoever sends the items
-	// keeps it.
+	// keeps it, on the goroutine of the group.
 	Wakes map[string][]int64
 }
 
@@ -257,9 +261,14 @@ type Func func(s *State, c Command) (Result, *Refusal)
 // outside the commands does: a device-log entry that was accepted, a host
 // connection that closed. Both are pure as a Func is, and return what
 // changes. event is the value that the unit of that kind of event defines.
+//
+// A Hook is what a unit does once a result is committed and the state holds
+// it: what a pure function cannot do, such as sending a Web Push. It gets
+// every result, of a command, a timer or an event.
 type (
 	Timer   func(s *State, d Disk, now int64) Result
 	Handler func(s *State, d Disk, now int64, event any) Result
+	Hook    func(s *State, res Result)
 )
 
 // Table holds the function of every command under its key: the t of the
@@ -273,12 +282,14 @@ type Rules[F any] map[string]F
 
 // The tables of a node. Each file adds its functions from an init of its
 // own. A command is found by its key. Whoever runs the home runs every timer
-// for every group as its clock goes, and the handler of an event by the name
-// of what happened.
+// for every group as its clock goes, the handler of an event by the name of
+// what happened, and every hook of After on the goroutine of the group after
+// each Commit.
 var (
 	Commands = Table{}
 	Timers   = Rules[Timer]{}
 	Events   = Rules[Handler]{}
+	After    = Rules[Hook]{}
 )
 
 // Add puts a function under its key. A key is given once.
@@ -353,7 +364,9 @@ func (s *State) Seal(res Result) Result {
 }
 
 // Commit takes the rows of a result into the state, once the transaction
-// that wrote them is committed and before the next command is applied.
+// that wrote them is committed and before the next command is applied. It is
+// the only writer of the state's rows and logs, on the goroutine of the
+// group.
 func (s *State) Commit(res Result) {
 	for _, r := range res.Rows {
 		s.hold(r.Value())
@@ -361,7 +374,7 @@ func (s *State) Commit(res Result) {
 	s.Seq += int64(len(res.Rows))
 }
 
-// hold keeps a state row; messages, notes and device rows are not held.
+// hold keeps a state row. Messages and notes are not held.
 func (s *State) hold(row any) {
 	switch r := row.(type) {
 	case proto.GroupRow:
@@ -373,8 +386,34 @@ func (s *State) hold(row any) {
 	case proto.TaskRow:
 		s.Tasks[r.ID] = r
 		s.Num = max(s.Num, r.Num)
+	default:
+		s.follow(row)
+	}
+}
+
+// follow takes what a row changes without being held itself.
+func (s *State) follow(row any) {
+	switch r := row.(type) {
 	case proto.GoneRow:
 		s.drop(r)
+	case proto.DeviceRow:
+		s.enrol(r)
+	}
+}
+
+// enrol applies the device-log entry of a device row to the log of its
+// person, so that the next command is judged by the devices the group has
+// just been shown. A log starts with the first row of a person. Whoever
+// writes a device row has had its entry accepted, in order: one that the
+// log refuses is a mistake in that code.
+func (s *State) enrol(r proto.DeviceRow) {
+	log := s.Logs[r.User]
+	if log == nil {
+		log = &identity.Log{User: r.User}
+		s.Logs[r.User] = log
+	}
+	if _, err := log.Apply(r.Env); err != nil {
+		panic("home: the entry of device row " + r.ID + " is refused by its log: " + err.Error())
 	}
 }
 
