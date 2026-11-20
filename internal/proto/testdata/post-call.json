@@ -1,0 +1,18 @@
+{
+  "t": "post",
+  "n": "fts2DwasrvLMgNuhbPVj8Q",
+  "ts": 1763599999500,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "as": "1PC8WineBrUQ-apCjx7tug",
+  "kind": "call",
+  "thread": "DrtCn6htSBwmMPrFPbHJHA",
+  "main": false,
+  "text": "Which event reports a path change?",
+  "mentions": [],
+  "re": null,
+  "body": {
+    "to": "LXCZmuGAXkvO-bSrOkuCfw",
+    "depth": 1,
+    "wait": true
+  }
+}

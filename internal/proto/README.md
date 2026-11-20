@@ -1,8 +1,8 @@
 # Protocol wire types
 
 These structs describe the JSON exchanged during signalling, pairing, device-log
-transfer, session setup and group reads and commands. They do not authenticate
-peers, apply rows or execute commands. The source of truth is
+transfer, session setup, group reads, commands and the inbox of a host. They do
+not authenticate peers, apply rows or execute commands. The source of truth is
 [the wire contracts](../../planning/contracts/).
 
 An envelope's `p` is a **string**: its original UTF-8 bytes are signed. A batch
@@ -13,6 +13,30 @@ a card's state is never `null`. A message that is not a card has the state
 `NoCard`, which is `null` and nothing else. The body is fixed at creation; only
 the card state changes.
 
+## Commands and items
+
+The payload of a command is read in two steps. The receiver reads `t`, and the
+`op`, `kind` or `action` beside it, and then decodes the payload into the type
+of that command ([`command.go`](command.go)): `GroupCreate`, `TaskStart`,
+`Post[BriefBody]`, `Act`. The types hold `t` and those keys as text and do not
+judge them; the home's command table does. Every home command starts with
+`HomeCommand` (`g` is always there, `as` when a node signs for an AI), every
+host command with `HostCommand` (`to` is always there).
+
+- A `set` command carries only what it changes, so each of its fields is a
+  pointer: nil is "not sent", and a pointer to `""` or to an empty list is a value.
+- An optional text or id is a plain field with `omitempty`: left out when it is
+  empty, and an empty one that is sent is read as left out.
+- `Post[B]` holds what the author signs of the body: the row's body type,
+  `EmptyBody` for a summary, `ReviewSigned` for a review. The home adds the rest.
+- `MemberStatus[E]` carries a host's fact as one of the event types, which are
+  the system bodies without `ai`. Read it as `MemberStatus[SystemCode]` first to
+  learn the code.
+- An inbox item's authority is its envelope, whose payload is an `Item`. `Msg`
+  beside it stays as JSON, like a row in a batch; `Task` is a `TaskRow`.
+- `MakeSlug` makes a task's slug from its title, by the rule of
+  [local.md, section 7](../../planning/contracts/local.md). Only the home calls it.
+
 Sender tests pass what their code encoded to `UnexpectedNulls`, with the JSON
 Pointers that may be null for that shape (e.g. `/thread`, `/re` and `/state` for
 a text message). It returns every other null, in lists as well.
@@ -20,6 +44,30 @@ a text message). It returns every other null, in lists as well.
 The examples in [testdata](testdata/) are shared with the web client.
 `go test ./internal/proto` checks encoding and decoding against them.
 Use `go test ./internal/proto -update` only for an agreed change to the wire.
+
+## One answer in Go and in the browser
+
+Every example has one type here and one schema in the web client: the file map
+`shapes` in [`shapes_test.go`](shapes_test.go), and `schemaOf` in
+`web/src/lib/mock.ts`. Each test suite fails on an example it has no entry for.
+
+[`testdata/wire.json`](testdata/wire.json) holds what the two readers must agree
+on, and both suites read it. `-update` writes it from the tags of the types, after
+the examples, so a changed tag shows as a changed line of that file:
+
+- `shapes`: for the members each example has, which may be left out, which may
+  be `null`, which numbers may be a fraction, which texts are random ids, and
+  which members the frame's type keeps as JSON. Both suites change every value
+  of every example in turn (left out, `null`, a list for an object and the
+  reverse, a text for a number and the reverse, a fraction, 2^53, a text that is
+  no id) and expect what these lists say.
+- `cases`: examples with one value replaced, and whether they are read: the slugs,
+  and the values that are always `true`.
+- `slugs`: task titles and the slug of each.
+
+Two things are outside this agreement. A member kept as JSON here (`opaque`) is
+judged by whoever decodes it. And the web client's schemas name `t`, `op`, a
+post's `kind` and an event's `code`, which the types here leave to their reader.
 
 ## Reading the wire
 
@@ -40,7 +88,12 @@ alone reads four things differently from a browser. An error from `Decode` is
   field that reads it; elsewhere it is ignored like any member the receiver does not know.
 - **Ids.** A field of type `ID` takes a random id, the canonical base64url spelling of 16 bytes
   (22 characters), and no other text, an empty one included. `n` and `g` of `PayloadHeader` have
-  this type. The other fields that hold ids are still plain strings ([issues](../../issues.md)).
+  this type, and so has every id in a command payload, in an `Item`, and `g` of `inbox` and `ack`.
+  Rows, message bodies and the frames that read a group still hold ids as plain strings
+  ([issues](../../issues.md)).
+- **Slugs.** A field of type `Slug` takes 1 to 40 characters, groups of `a` to `z` and `0` to `9`
+  with one `-` between two, and no other text. The `slug` of `TaskRow` has this type, so a slug
+  that the home's rule cannot make never reaches a path or a branch name.
 
 A `json.RawMessage` is not looked into; decode it with `Decode` when its type is
 known. So a wire type states the contract in its tags: `omitempty` for an optional
@@ -52,4 +105,4 @@ only by the error text, which is for logs.
 
 `testdata/crypto.json` is not a wire example: it holds the key, signature, pairing
 and device-log test vectors of [`internal/identity`](../identity/README.md), which
-writes and checks it.
+writes and checks it. Nor is `testdata/wire.json`, described above.

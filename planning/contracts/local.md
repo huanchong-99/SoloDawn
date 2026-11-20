@@ -159,7 +159,12 @@ remote.
   leading and trailing `-` are trimmed; the result is cut to 40 characters
   and trimmed of `-` again; if nothing is left, it is `task`. Example:
   "Node: report connection path changes" gives
-  `node-report-connection-path-changes`.
+  `node-report-connection-path-changes`. A slug is therefore 1 to 40
+  characters, groups of `a` to `z` and `0` to `9` with one `-` between two
+  groups (`^[a-z0-9]+(-[a-z0-9]+)*$`), and a host takes no other text for
+  one: the decoder refuses the task row (`contracts/rows.md` section 4).
+  "Lower-case ASCII" is exact: a letter outside ASCII is never kept, also
+  one that a general lower-casing turns into `a` to `z` (the Kelvin sign).
 - **An interrupted squash merge** (no remote), which a restart leaves
   staged in `repo` while `<base>` does not yet record the merge, counts as
   a failed merge. On restart, before anything else touches the clone, the

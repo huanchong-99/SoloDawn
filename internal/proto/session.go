@@ -14,10 +14,11 @@ type Success struct {
 	OK True  `json:"ok"`
 }
 
-// True is a truth value that is always true: "ok" of a success.
+// True is a truth value that is always true: "ok" of a success, "off" of a
+// push, "jump" of an item.
 type True bool
 
-var errNotTrue = errors.New("proto: ok of a success is not true")
+var errNotTrue = errors.New("proto: a value that is always true is not true")
 
 func (t *True) UnmarshalJSON(b []byte) error {
 	if string(b) != "true" {
@@ -49,6 +50,7 @@ type Welcome struct {
 	Name    string         `json:"name"`
 	Version string         `json:"version"`
 	Time    int64          `json:"time"`
+	Addrs   []string       `json:"addrs"`
 	Groups  []GroupSummary `json:"groups"`
 	Owner   bool           `json:"owner"`
 }
