@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -319,6 +320,46 @@ func TestApplyNumbersTheRowsOfAResult(t *testing.T) {
 	equal(t, s.Seq, int64(13))
 	equal(t, s.Tasks[id(21)].Seq, int64(13))
 	equal(t, s.Num, 4)
+}
+
+// A row is at most 16 KiB, and a card 12 KiB when it is created
+// (planning/contracts/conventions.md section 4). The rows are filled with
+// "<", which is one byte of a row and six when JSON is escaped for HTML.
+func TestApplyRefusesARowAboveItsLimit(t *testing.T) {
+	for name, c := range map[string]struct {
+		row   proto.MsgRow // what the command writes, without its text
+		limit int
+	}{
+		"a message that is no card": {proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(1)}, Kind: "text"}, 16384},
+		"a card that is created":    {proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(1)}, Kind: "decision", State: &proto.CardState{Status: "pending"}}, 12288},
+		"a card that is decided":    {proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(1), Seq: 5}, Pos: 3, Kind: "decision", State: &proto.CardState{Status: "decided"}}, 16384},
+	} {
+		t.Run(name, func(t *testing.T) {
+			write := func(text string) home.Result {
+				row := c.row
+				row.Text = text
+				table := home.Table{"post/text": func(*home.State, home.Command) (home.Result, *home.Refusal) {
+					return home.Result{Rows: []home.Row{home.RowOf(note(id(30), 0, "", ownerID)), home.RowOf(row)}}, nil
+				}}
+				return apply(t, table, group(t), receipts{}, browser, signed(browser, "post", 1, `,"kind":"text"`))
+			}
+			// The size of the row a result holds: its JSON, with "<" as it is.
+			size := func(res home.Result) int {
+				b, err := json.Marshal(res.Rows[1].Value())
+				equal(t, err, nil)
+				return len(bytes.ReplaceAll(b, []byte(`\u003c`), []byte("<")))
+			}
+			fill := strings.Repeat("<", c.limit-size(write("")))
+
+			res := write(fill)
+			equal(t, res.Answer, store.Outcome{OK: true})
+			equal(t, size(res), c.limit)
+
+			res = write(fill + "<")
+			equal(t, res, home.Result{Answer: store.Outcome{Code: "bad_request"},
+				Msg: fmt.Sprintf("the command would write a row of %d bytes, above its limit of %d", c.limit+1, c.limit)})
+		})
+	}
 }
 
 func TestApplyFailsWhenItsReceiptCannotBeReadOrWritten(t *testing.T) {

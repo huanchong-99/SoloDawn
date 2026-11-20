@@ -83,13 +83,17 @@ it, above the complexity limit for eight types.
 - `Apply` sets `seq` and `pos` by reflection on the row. A row type whose sequence field is not
   named `Seq`, or whose creation position is not named `Pos`, panics in the first test that
   numbers it.
-- The seam does not measure rows against the 16 KiB limit and does not settle to which person a
-  device belongs when two logs hold it; both are open in [issues](../../../../issues.md).
+- `Apply` measures every row of a result against the size limit of a row, after numbering it,
+  and refuses the whole command for one row above it. It measures the JSON without HTML escaping,
+  as the contract counts; the store still writes rows with it
+  ([issues](../../../../issues.md)).
+- The seam does not settle to which person a device belongs when two logs hold it; that is open
+  in [issues](../../../../issues.md).
 
 ## Verification
 
-`go test ./internal/home` covers every statement of both files. Each `==`, `!=` and arithmetic
-operator of the two files was flipped by hand, one at a time, and the package's tests failed for
-all 38. `features/home.feature` holds A2.3 and A2.4; its step file type-checks under
+`go test ./internal/home` covers every statement of both files. Each `==`, `!=`, `>` and
+arithmetic operator of the two files was flipped by hand, one at a time, and the package's tests
+failed for all 44. `features/home.feature` holds A2.3 and A2.4; its step file type-checks under
 `go vet -tags acceptance ./features/`. The acceptance suite and the mutation gate were not run in
 the building session: the coordinator ran the long checks from one place at that time.

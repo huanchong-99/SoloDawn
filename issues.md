@@ -230,11 +230,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the server can tell sources apart only by their address (`internal/rendezvous/limits.go:41-50`, `source`; `internal/rendezvous/tls.go:192-205`, `admit`), and pion's nonces are not tied to the client's address (pion/turn v5.1.3 `internal/server/util.go:59`, `NonceHash.Generate`), so a nonce fetched from the sender's own address works for forged ones.
 - Status: open, accepted by the coordinator on 2026-11-20 after the rendezvous security review (F9).
 
-### 2026-11-20 · deviation · No unit measures a row against its size limit
+### 2026-11-20 · bug · The store writes a row with HTML escaping, larger than the home measured it
 
-- Symptom: `planning/contracts/conventions.md` section 4 has the home answer `bad_request`, naming the limit and the size, to a command that would write a row above 16 KiB, or a card above 12 KiB when it is created. Nothing does: `Table.Apply` hands the rows of a command's function to its caller unmeasured.
-- Cause: the rule holds for every command, and no row of `planning/steps/parallel-plan-units.md` names it. HM-0 built the seam from the sections its row lists (`contracts/commands.md` head, `contracts/datachannel.md` 5 and 8). The one place every command passes after its function is `Table.run` (`internal/home/home.go:242`).
-- Status: open. For the coordinator to give to a unit.
+- Symptom: a row is at most 16 KiB as "the UTF-8 bytes of its JSON as the home encodes it, without HTML escaping" (`planning/contracts/conventions.md` section 4), and `Table.run` measures it so. The store then writes the row with `<`, `>` and `&` as six bytes each. A row of 16 KiB that is mostly such characters, source code for one, is stored at up to six times its measured size, which is above the 60 KiB of a `ctl` message: a `rows` or `fetched` frame built from the stored text cannot be sent.
+- Cause: `store.Put` encodes with `json.Marshal`, which escapes for HTML (`internal/store/put.go:17`). `internal/peer` encodes frames without it (`internal/peer/path.go:28-34`), and copies a stored row into a frame as it is.
+- Status: open. Found while building the size check of HM-0; `internal/store` is not HM-0's. No row is written by a node yet: no unit has built a command or the run loop.
 
 ### 2026-11-20 · limitation · A device in the logs of two people is read as the device of the lower user id
 
@@ -243,6 +243,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, without effect in step 1, where a group has one person. Step 2, which adds people, has to settle it.
 
 ## Resolved
+
+### 2026-11-20 · deviation · No unit measured a row against its size limit
+
+- Symptom: `planning/contracts/conventions.md` section 4 has the home answer `bad_request`, naming the limit and the size, to a command that would write a row above 16 KiB, or a card above 12 KiB when it is created. No row of `planning/steps/parallel-plan-units.md` names the rule, and the first version of the seam handed the rows of a command's function to its caller unmeasured.
+- Status: resolved in #160 by the coordinator's decision of 2026-11-20: `Table.run` measures every row of a result after numbering it and refuses the command for one above its limit (`internal/home/home.go:276`, `rowFits` at `:135`).
 
 ### 2026-11-20 · bug · The signalling client could set off the rendezvous's own limits
 

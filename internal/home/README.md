@@ -52,7 +52,8 @@ receipts, and returns what to write.
    `host` is the signer, else `forbidden`;
 8. the signer's person is a member of the group, or, for `group/create` on a group that does not
    exist, this node's owner, else `forbidden`;
-9. the function.
+9. the function;
+10. no row of its result is above the size limit of a row, else `bad_request`.
 
 Checks 1 to 3 leave no receipt. From check 5 on, the outcome is written as the receipt, a refusal
 included, with the command's own `ts`. A repeated refusal is answered with its code and a fixed
@@ -75,6 +76,12 @@ by another row.
 row's first `seq`; a row that has a `pos` keeps it. `Row.Value` returns the row as its `proto`
 type; `Row.Put` writes it through `store.Put`. The caller takes `NextSeq` from the store once per
 row: the two counters move together.
+
+**Sizes.** A command whose result holds a row above 16 KiB, or a card above 12 KiB that it creates,
+is refused as a whole with `bad_request`, and the `msg` names the size and the limit
+([conventions](../../planning/contracts/conventions.md), section 4). The size is that of the row's
+JSON without HTML escaping, with its `seq` and `pos` set. A card is a message whose `state` is not
+`null`; it is being created when its `pos` is its `seq`.
 
 **State.** A `State` holds the group row, the member rows of people and of AIs, the task rows, the
 last sequence number and the last task number, and beside them this node's device id, its owner's
@@ -99,14 +106,15 @@ drops the transaction and answers `internal`.
 `peer.Connection` has both. The device a client was authenticated for is given beside it.
 
 **One package, many files.** Every unit of the home adds files to this package, so an unexported
-name is taken for all of them. The seam takes `wireRow`, `typedRow`, `refused`, `repeated`,
-`keyCreate` and `keySelector`. Its tests are in package `home_test` and use only what is exported.
+name is taken for all of them. The seam takes `wireRow`, `typedRow`, `rowLimit`, `cardLimit`,
+`rowFits`, `sizeLimit`, `refused`, `repeated`, `keyCreate` and `keySelector`. Its tests are in package `home_test` and use only what is exported.
 
 ## Known limitations
 
 - The table is empty and nothing in a node calls `Apply` yet: the command files and the run loop
   are separate units ([units](../../planning/steps/parallel-plan-units.md), section 2).
-- No row is measured against the size limit of a row ([issues](../../issues.md)).
+- The store writes a row with HTML escaping, so a row that the seam measured may be stored larger
+  ([issues](../../issues.md)).
 - A device held by the logs of two people is read as the device of the one with the lower user id
   ([issues](../../issues.md)).
 - `Item` is the home's own type. The signed `item` payload on the wire is not frozen yet

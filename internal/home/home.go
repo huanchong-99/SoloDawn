@@ -5,8 +5,11 @@
 package home
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"time"
 
@@ -118,6 +121,36 @@ func (r *typedRow[R]) number(seq int64) {
 	if pos := v.FieldByName("Pos"); pos.IsValid() && pos.Int() == 0 {
 		pos.SetInt(seq)
 	}
+}
+
+// The most bytes a row may have, and a card when it is created, so that it
+// can still take its decision (planning/contracts/conventions.md section 4).
+const (
+	rowLimit  = 16 << 10
+	cardLimit = 12 << 10
+)
+
+// rowFits refuses a row that is above its limit. The size of a row is that
+// of its JSON without HTML escaping, as a browser counts it.
+func rowFits(row any) *Refusal {
+	var b bytes.Buffer
+	e := json.NewEncoder(&b)
+	e.SetEscapeHTML(false)
+	e.Encode(row)                            // a row that does not encode is not written either: Put fails on it
+	size, limit := b.Len()-1, sizeLimit(row) // Encode ends the row with a line break
+	if size > limit {
+		return &Refusal{"bad_request", fmt.Sprintf("the command would write a row of %d bytes, above its limit of %d", size, limit)}
+	}
+	return nil
+}
+
+// sizeLimit is the limit of a numbered row. A message with a state is a
+// card, and one whose pos is its seq is being created.
+func sizeLimit(row any) int {
+	if m, ok := row.(proto.MsgRow); ok && m.State != nil && m.Pos == m.Seq {
+		return cardLimit
+	}
+	return rowLimit
 }
 
 // Item is an inbox item that a command queues for an AI, before the home
@@ -238,7 +271,8 @@ func (t Table) Apply(s *State, receipts Receipts, device string, env proto.Envel
 	return res, receipts.PutReceipt(env.Key, string(hdr.Nonce), hdr.Timestamp, res.Answer)
 }
 
-// run answers a command that has no receipt, and numbers the rows it changes.
+// run answers a command that has no receipt. It numbers the rows the command
+// changes, and refuses the command when one of them is above its limit.
 func (t Table) run(s *State, c Command) Result {
 	f, refusal := t.find(s, &c)
 	if refusal != nil {
@@ -250,6 +284,9 @@ func (t Table) run(s *State, c Command) Result {
 	}
 	for i, r := range res.Rows {
 		r.number(s.Seq + int64(i) + 1)
+		if refusal := rowFits(r.Value()); refusal != nil {
+			return refused(refusal)
+		}
 	}
 	res.Answer.OK = true
 	return res
