@@ -4,6 +4,10 @@ Feature: Rendezvous certificates by ACME
   expires while it keeps serving. Pebble, a local ACME test server, stands in for Let's Encrypt;
   its DNS answers 127.0.0.1 for every name.
 
+  # Not on Windows: its resolver answers no name under .localhost (RFC 6761),
+  # and the rendezvous looks up rv.localhost for its relay address at startup.
+  # A hosts file entry would be needed there (issues.md).
+  @not-windows
   Scenario: A8.4 One command gets certificates for both names and renews them
     Given an ACME test server whose certificates last 30 seconds
     When the command "solodawn rendezvous" starts for "rv.localhost" with that ACME server
