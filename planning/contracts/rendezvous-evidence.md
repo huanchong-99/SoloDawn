@@ -53,10 +53,16 @@ Entries 1 to 10 belong to the points of section 5.1 with the same number.
      translation was verified: replacements opened in 18 and 31 ms and
      echoed.
 
-   pion's default timers, 5 seconds to disconnected and 25 to failed,
-   describe the old agent; they do not schedule success for the new one
+   pion's default timers, 5 seconds to disconnected and a further 25 seconds
+   to failed, describe the old agent; they do not schedule success for the new
+   one
    ([agent_config.go, 23-31](https://github.com/pion/ice/blob/v4.4.2/agent_config.go#L23-L31),
    [agent.go, 777-787](https://github.com/pion/ice/blob/v4.4.2/agent.go#L777-L787)).
+5. **Separate client connections.** Concurrent offers address separate peer
+   connections. The simultaneous-offer measurements are in entry 3.
+6. **A second fixed offering port.** An ordinary connection and its probe
+   could still use the same pair of endpoints. This follows from entry 2. S-8
+   evaluates the reachability alternative.
 7. **Hole punching** between two nodes behind NATs was not measured. For
    port assignment and hairpinning see RFC 4787, sections 4.2.1 and 6.
 8. **TCP from the answerer** (A.1). With TCP candidates only and incoming
@@ -72,6 +78,9 @@ Entries 1 to 10 belong to the points of section 5.1 with the same number.
    external port
    ([icegatherer.go, 66-75](https://github.com/pion/webrtc/blob/v4.2.20/icegatherer.go#L66-L75)),
    which matters when two nodes ask one router for the same public port.
+9. **Remembered addresses.** Section 4 of the rendezvous contract stores
+   signalling URLs. ICE candidates are gathered again for each connection.
+   This is a protocol rule.
 10. **A probe beside a relayed connection.** S-1: the two were open
     together and echoing with each of the three browsers. A.1: an old
     connection kept echoing over TURN after its direct checks had failed.
@@ -80,12 +89,12 @@ Entries 1 to 10 belong to the points of section 5.1 with the same number.
     yet the probe missed its deadline of 15.042 seconds while the old
     relay still echoed. A later probe, translated to 40556, opened in 13
     ms, and both connections echoed.
-11. **Each side's own selected pair** (A.1). With the answerer's relay
-    candidate delayed, and echoes already crossing TURN, the offerer saw
-    host and peer-reflexive, and the answerer relay and host. When the
-    candidate was delivered the offerer reported host and relay at the
-    same address and port: a rule triggered only by an address change
-    misses this
+11. **Each side's own selected pair** (A.1). In both Pion runs with the
+    answerer's relay candidate delayed, and echoes already crossing TURN, the
+    offerer saw host and peer-reflexive, and the answerer relay and host. When
+    the candidate was delivered the offerer reported host and relay at the
+    same address and port: a rule triggered only by an address change misses
+    this
     ([agent.go, 1256-1299](https://github.com/pion/ice/blob/v4.4.2/agent.go#L1256-L1299)).
 12. **Trickling.** S-1 measured the cost of waiting for complete
     descriptions: with a STUN server that did not answer, the first
@@ -96,8 +105,6 @@ Entries 1 to 10 belong to the points of section 5.1 with the same number.
     ([peerconnection.go, 2102-2106](https://github.com/pion/webrtc/blob/v4.2.20/peerconnection.go#L2102-L2106))
     and nominates from the pairs that are valid at the time
     ([selection.go, 57-85](https://github.com/pion/ice/blob/v4.4.2/selection.go#L57-L85)).
-
-Points 5, 6 and 9 of section 5.1 rest on no measurement of their own.
 
 ## 3. Not verified
 
