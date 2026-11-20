@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"testing"
 
 	"github.com/cucumber/godog"
 	"github.com/huanchong-99/SoloDawn/internal/node"
@@ -24,15 +23,16 @@ func init() {
 func nodeServiceSteps(sc *godog.ScenarioContext, f fixtures) {
 	var profile string
 	var installed bool
-	// Scope HOME and XDG_CONFIG_HOME to each operation, not to the whole godog suite.
+	// HOME and XDG_CONFIG_HOME name the profile during each operation only. A
+	// subtest with its own Setenv would skip the operation whenever go test
+	// -run names a scenario, since the subtest's name does not match.
 	inProfile := func(operation func() error) error {
-		var err error
-		f.t.Run("login profile", func(t *testing.T) {
-			t.Setenv("HOME", profile)
-			t.Setenv("XDG_CONFIG_HOME", profile)
-			err = operation()
-		})
-		return err
+		for _, key := range []string{"HOME", "XDG_CONFIG_HOME"} {
+			value, set := os.LookupEnv(key)
+			defer restoreVar(key, value, set)
+			os.Setenv(key, profile)
+		}
+		return operation()
 	}
 	sc.Step(`^a clean login registration for the current user$`, func() error {
 		profile = f.t.TempDir()
