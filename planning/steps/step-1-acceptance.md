@@ -51,6 +51,23 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   (targets: under 30 MB on disk, under 40 MB resident).
 - **A1.9** `pair.browser` sent again with the same nonce returns the same
   link while the link is valid and `conflict` after it was used or expired.
+- **A1.10** An old offer of a device, sent to the node again inside the
+  freshness window after a newer connection from that device has opened,
+  is not processed and closes nothing: no connection is created for it,
+  and the live connection keeps answering `host.info`. A copy of the offer
+  for the current `conn` gets the same answer again, on the path it came
+  by, and nothing else happens (`contracts/rendezvous.md` 2.3).
+- **A1.11** With a test rendezvous that delivers candidates before the
+  offer and before the answer they belong to, each side holds them and
+  applies them once the description is set: the connection opens, and no
+  candidate is sent a second time.
+- **A1.12** A second tab of one browser, which has the same device key,
+  shows that SoloDawn is open in another tab and offers no connection.
+  After "Use here" in it, it connects, and the first tab closes its
+  connections and shows the notice (`flows/connect.md` F).
+- **A1.13** In a move as in A1.3, with `welcome` held back until C has
+  seen the old connection close, C sends no new offer, and the move
+  completes on `welcome` (`flows/connect.md` step 11).
 
 ## M2. Groups, messages, sync
 
@@ -221,6 +238,9 @@ Run once with a scratch GitHub repository and once with `forge: none`.
   Across ten switches no start comes before the previous exit.
 - **A7.5** On a relayed path the button is disabled and `takeover.start`
   returns `relay`.
+- **A7.9** With a terminal open on a direct path, UDP and the ICE-TCP port
+  are blocked as in A1.3: when the path becomes `relay` the `pty` channel
+  closes and the node hands back (`flows/connect.md` step 9).
 - **A7.6** Closing the terminal in order (the button, or a tab close that
   the browser signals) hands back within 2 seconds. A connection that is
   simply lost hands back when the node's stack reports it. `takeover.start`

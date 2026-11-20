@@ -88,8 +88,8 @@ and B-11, and S-2, S-3, S-5 before B-13.
 | --- | --- | --- | --- |
 | B-06 | `internal/rendezvous`, signalling: handshake, `to`/`from`, `watch`, rooms; static file handler; `solodawn rendezvous` | B-02b, B-03 | A1.5 against a local instance |
 | B-07 | `internal/rendezvous`, relay: STUN and TURN, credentials, the daily byte quota counted on relayed data, `quota`; TLS by flags | B-06 | A1.7 |
-| B-08 | `internal/peer`, connections: signalling client with fan-out of every payload over every path; pion setup per `contracts/rendezvous.md` section 5, answering on the fixed port and offering from sockets of its own; acceptance hook; `ctl` framing with requests, responses and pushes; holding early candidates; one inbound connection per client device, with the remembered (signer, `conn`) that makes a replayed offer harmless (section 2.3 there); path classification from the selected pair; reconnect | B-06 | A1.3 up to "the path is `relay`" |
-| B-09 | `internal/peer`, paths: the relay-free probe and the move as a reconnect (`flows/connect.md` B); classifying the path again when the selected pair or its candidate types change; local-network beacon; remembered addresses; port mapping | B-07, B-08 | A1.3, A1.4 |
+| B-08 | `internal/peer`, connections: signalling client with fan-out of every payload over every path; pion setup per `contracts/rendezvous.md` section 5, answering on the fixed port and offering from sockets of its own; acceptance hook; `ctl` framing with requests, responses and pushes; holding early candidates; one inbound connection per client device, with the remembered (signer, `conn`) that makes a replayed offer harmless (section 2.3 there); path classification from the selected pair; reconnect | B-06 | A1.3 up to "the path is `relay`"; A1.10, A1.11 |
+| B-09 | `internal/peer`, paths: the relay-free probe and the move as a reconnect (`flows/connect.md` B); classifying the path again when the selected pair or its candidate types change; local-network beacon; remembered addresses; port mapping | B-07, B-08 | A1.3, A1.4, A1.13 |
 | B-10 | `internal/node`, the assembly package: start-up and wiring; local socket; pairing with the bootstrap rule; `devlog` in both directions and forwarding; `hello`/`welcome`, `groups`; routing of `ctl` messages to the home and host surfaces; receipts for host commands; the node-level part of the host surface (`settings.set`, `pair.browser`, `host.info`). `cmd/solodawn`: `node`, `pair`, `pair-browser`, `open`, `status` as argument parsing | B-02c, B-05, B-08 | A1.1, A1.2, A1.6, A1.8, A1.9 |
 
 ### M2 home
@@ -129,7 +129,7 @@ and B-11, and S-2, S-3, S-5 before B-13.
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
 | B-22 | `ask` and `reply`: call depth per turn, open-call table on the host, the answer to an open call ahead of the queue, wait and receipt | B-20 | A6.1 to A6.4 |
-| B-23 | Takeover: choice of session, a task created for a working AI without one and cancelled when nothing changed; interactive start with the session's level; state switch under C-6; `pty` channel bridge with back-pressure, `pty.resize`; hand-back facts and turn; refusal unless the path is `direct`, and closing the `pty` channel when the path becomes relayed; a repeated `takeover.start` | B-17 | A7.1 to A7.8 |
+| B-23 | Takeover: choice of session, a task created for a working AI without one and cancelled when nothing changed; interactive start with the session's level; state switch under C-6; `pty` channel bridge with back-pressure, `pty.resize`; hand-back facts and turn; refusal unless the path is `direct`, and closing the `pty` channel when the path becomes relayed; a repeated `takeover.start` | B-17 | A7.1 to A7.9 |
 
 ### M8 shipping
 

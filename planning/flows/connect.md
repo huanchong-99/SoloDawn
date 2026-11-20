@@ -89,7 +89,11 @@ answering node; RV, any signalling path.
     later probe offer supersedes a pending one.
 11. If the probe's `ctl` opens, C moves. A move is a reconnect in which
     the old connection serves until N has accepted the new one:
-    1. C sends `hello` on the probe.
+    1. C sends `hello` on the probe. From here until `welcome`, the
+       close of the old connection is expected and is not a loss: C does
+       not start again from step 1. With the old connection closed, C
+       starts an ordinary reconnect (section C) only if `welcome` does not
+       arrive within the hello timeout, or if the probe itself fails.
     2. N promotes the probe on its first valid `hello`: the probe becomes
        the device's inbound connection, and N closes its predecessor.
        Nothing is carried over from it. A superseded probe or a repeated
@@ -103,12 +107,13 @@ answering node; RV, any signalling path.
     the other side makes a repeat harmless (`contracts/commands.md`).
 13. Both sides classify the new path. The indicator changes within one
     second and the relay notice disappears.
-14. If the probe fails, C closes it, N keeps serving the old connection,
-    and C retries on schedule. That covers a probe whose `ctl` opened and
-    which was lost before N accepted `hello`: the working relay was not
-    closed. A probe can fail where a direct path exists
-    (`contracts/rendezvous.md` section 5.1, point 10). Loss after N has
-    promoted the probe is an ordinary reconnect (section C).
+14. If the probe fails while the old connection is open, C closes the
+    probe, N keeps serving the old connection, and C retries on schedule.
+    That covers a probe whose `ctl` opened and which was lost before N
+    accepted `hello`: the working relay was not closed. A probe can fail
+    where a direct path exists (`contracts/rendezvous.md` section 5.1,
+    point 10). Loss after N has promoted the probe is an ordinary
+    reconnect (section C).
 
 A relayed connection may also find a direct pair by itself; some browsers
 do and one does not (`contracts/rendezvous.md` section 5). Step 8 then
@@ -121,7 +126,8 @@ opened, and it will again on the next reconnect.
 ## C. Losing and regaining a connection
 
 15. When ICE reports the connection failed or closed, C starts again from
-    step 1. Retries back off: 1, 2, 4 … 60 seconds.
+    step 1. Retries back off: 1, 2, 4 … 60 seconds. The old connection
+    closing during a move is not this case (step 11.1).
 16. Back-off is skipped, and C retries at once, when a signalling path
     reports the target present (`presence` from rendezvous, a beacon on the
     local network) or when C's own network changes.
@@ -165,3 +171,23 @@ signer, and leave alone the connection N itself offered
 that computer; the AI uses the `net_status` tool (`contracts/mcp-tools.md`)
 and guides the owner (R-132, and the rule that the user's own AI fixes
 network configuration).
+
+## F. One active tab per browser
+
+The tabs of one browser share its device key, and a node keeps one
+inbound connection per device (`contracts/rendezvous.md` 2.3): two
+connected tabs would close each other's connection. So one tab connects.
+Nothing changes on the wire, and the node keeps close-first.
+
+- Before it offers any connection, the web client takes a Web Locks API
+  lock named after its device id. Only the tab that holds the lock
+  connects.
+- Every other tab of that origin shows that SoloDawn is open in another
+  tab, with a "Use here" button.
+- "Use here" requests the lock with `steal`. The tab that loses the lock
+  closes its connections and shows the same notice.
+- A `BroadcastChannel` may carry the notice between tabs.
+
+Web Locks is within the browser baseline (`risks.md` Q-3): it is in Chrome
+from 69, Firefox from 96 and Safari from 15.4. Frontend task F-03
+implements this rule (`steps/step-1-frontend.md`).

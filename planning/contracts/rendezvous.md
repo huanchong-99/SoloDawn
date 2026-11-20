@@ -228,7 +228,7 @@ the review of section 5.1 measured. "Evidence n" is entry n of
      teardown cannot clear that old registration, and closing connections
      by public IP would disconnect unrelated peers.
    - Two browser tabs that share one device key share the ordinary
-     inbound slot under this policy (`risks.md` K-23).
+     inbound slot under this policy; one connects (`flows/connect.md` F).
 5. **Not chosen: one connection per pair of nodes, used both ways.** Each
    direction has its own `conn` and one offering client that owns `hello`,
    commands, reconnect and probing. A node can answer as a home while it
