@@ -25,7 +25,7 @@ Paths are short: `home/` is `internal/home/`, `host/` is `internal/host/`,
 | P-1 | 1 | Freeze payloads of `group`, `member`, `post` (all kinds), `act`, `jump`, `task`, `note`, `forget`, `push`, the review outcome and host events; `inbox`, signed `item`, `ack`; `host.join`, `host.leave` (`commands.md` 1, 2, 3; `datachannel.md` 5, 6) | golden round trip in Go and web | `internal/proto/**`, `lib/proto.ts`, `lib/proto.test.ts`, `lib/mock.ts` | — | F | L |
 | P-2 | 2 | Freeze `groups`, `host.info`, `audit`, `pty.resize`, `beacon`; payloads of `settings.set`, `pair.browser`, `agent.set`, `perm.set`, `host.offline`, `host.online`, `takeover.start`, `takeover.end` (`commands.md` 2; `datachannel.md` 3, 7; `rendezvous.md` 4); `tools.json`, the tool list of `mcp-tools.md` 5; mock answers for `host.info` and `groups` | golden round trip | as P-1 | P-1, B-07 | F | M |
 | P-3 | 3 | B-01 slice (c): two complete signed transcripts of one task, with and without a remote (`flows/trace-task.md`; backend list, "Fix in the task", B-01) | both transcripts parse alone and verify | `internal/proto/trace_test.go`, `testdata/trace-*.json`, `lib/trace.test.ts`, the trace entries of `lib/proto.ts` and of both file maps | P-2 | F | L |
-| NET-1 | 1 | Network simulation on Linux: namespaces with NAT of each type, blocked UDP, blocked ICE-TCP port, a UPnP gateway; started from Go tests | unit; used by A1.3, A1.4, A1.7, A7.9 | `features/netsim/` | — | A | M |
+| NET-1 | 1 | Network simulation on Linux: namespaces with NAT of each type, blocked UDP, blocked ICE-TCP port, a UPnP gateway; started from Go tests. Merged in [#101](https://github.com/huanchong-99/SoloDawn/pull/101): the helper builds only with the Go build tag `netsim` and runs as root in the `netsim` job of `.github/workflows/backend.yml` | unit; used by A1.3, A1.4, A1.7, A7.9 | `features/netsim/` | — | A | M |
 | E-0 | 2 | Playwright project file for Chromium, Firefox and WebKit that starts real nodes and a rendezvous with fake CLIs; the harness only, its smoke scenario runs in I-8 | unit: the harness starts and stops | `web/e2e/config.ts`, `web/e2e/nodes.ts` | F-01c, B-13 | A | M |
 | C-0 | 1 | Planning: `conventions.md` section 5 names P-1 and P-2 as the freezing units; the feature-file convention of the parallel plan | — | `planning/contracts/conventions.md` | — | F | S |
 
@@ -83,7 +83,7 @@ Every tool file registers its tools in the table of HS-0.
 | HS-16b | 3 | Levels by session kind for both CLIs, what the node offers at each level, `perm.set` (`drivers.md` 2) | A4.4, A4.5 | `host/level.go` | HS-1, HS-2, P-2 | F | M |
 | HS-17 | 3 | The `audit` request (`datachannel.md` 7) | A4.1 (audit sentence) | `host/audit_read.go` | HS-0, P-2 | A | S |
 | HS-18 | 3 | Usage and caps, the turn time limit, `host.offline` and `host.online` | A4.8, A4.9 | `host/limits.go` | HS-15, P-2 | A | M |
-| HS-19 | 2 | Pseudo-terminal: interactive start (`drivers.md` 1.3), bridge with back-pressure, resize; Unix and ConPTY | unit on Linux and on a Windows machine | `host/pty.go`, `host/pty_unix.go`, `host/pty_windows.go` | HS-0, X-1, PR-0 | A | M |
+| HS-19 | 2 | Pseudo-terminal: interactive start (`drivers.md` 1.3), bridge with back-pressure, resize; Unix and ConPTY through go-pty v0.2.3. Interrupt uses the driver's structured protocol, not Ctrl+C bytes | unit on Linux; on a Windows machine with go-pty v0.2.3 itself, because S-5 measured ConPTY with pywinpty, not go-pty | `host/pty.go`, `host/pty_unix.go`, `host/pty_windows.go` | HS-0, X-1, PR-0 | A | M |
 | HS-20 | 3 | Takeover: choice of session, a task for a working AI without one, the state switch, hand-back facts and turn, `direct` only, a repeated start (`flows/takeover.md`) | A7.3 to A7.7 (host half) | `host/takeover.go` | HS-15, HS-19, P-2 | F | M |
 | HS-21 | 2 | `host.join`, `host.leave`; one connection per home of the host's AIs | A3.3 (host half) | `host/join.go` | HS-0, HS-4, P-1 | A | S |
 
@@ -93,7 +93,7 @@ HS-7b is restart-safe merge logic and was started on Astra; its Fable reviewer c
 
 | Id | W | Does | Tests | Owns | Needs | M | Sz |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| N-0 | 1 | Data directory, local socket, and `node`, `pair`, `pair-browser`, `open`, `status` as argument parsing (`local.md` 1 to 3); the subcommand table that later units register into | unit; A1.1 (`status` prints the fingerprint) | `node/dir.go`, `node/socket.go`, `node/cmd.go`, `cmd/solodawn/`, `features/cmd.feature` | — | A | M |
+| N-0 | 1 | Data directory, local socket, and `node`, `pair`, `pair-browser`, `open`, `status` as argument parsing (`local.md` 1 to 3); the subcommand table that later units register into. On Windows the socket gets an owner-only protected DACL through `SetNamedSecurityInfo`, in a directory that is owner-only and inheritable; the DACL is set after bind, so the directory's inherited permission covers the gap (S-5) | unit; A1.1 (`status` prints the fingerprint) | `node/dir.go`, `node/socket.go`, `node/cmd.go`, `cmd/solodawn/`, `features/cmd.feature` | — | A | M |
 | N-1 | 2 | The local link: a host and a home on one node through the interfaces of HM-0 and HS-0; a test helper that starts several nodes with fake CLIs | unit: a command and a push cross the link | `node/local.go`, `node/nodetest/` | HM-0, HS-0 | A | M |
 | N-2 | 2 | `ctl` session: `hello`, `welcome`, the bootstrap rule, `devlog` both ways and forwarding, the request table, receipts for host commands (`datachannel.md` 3, 3.1, 8) | A1.1 (second half), A1.6 | `node/session.go`, `node/devlog.go` | HM-0, HS-0, B-08 | F | M |
 | N-3 | 3 | Pairing over a room; `pair.browser` with its nonce; `settings.set`, `host.info`, `groups` (`flows/pairing.md`; `commands.md` 2) | A1.1, A1.9 | `node/pair.go`, `node/surface.go` | N-2, P-2 | A | M |
@@ -105,8 +105,8 @@ HS-7b is restart-safe merge logic and was started on Astra; its Fable reviewer c
 | PR-0 | 2 | Seam in the peer dispatch of B-08: a table of offer kinds and channel labels that other files register into, so that probe offers and channels other than `ctl` (terminal, later `watch:*`) are handed over instead of refused (`datachannel.md` 1, 2) | unit: a registered label is handed over, an unknown one is closed | the dispatch sites in the `peer/` files of B-08, `peer/registry.go` | B-08 | F | S |
 | PR-1 | 3 | The relay-free probe and the move as a reconnect; classifying again (`flows/connect.md` B) | A1.3, A1.13 | `peer/probe.go` | PR-0, B-07 | F | M |
 | PR-2 | 3 | Local-network beacon and remembered addresses (`rendezvous.md` 4) | A1.4 | `peer/beacon.go`, `peer/addrs.go` | B-08, P-2 | A | M |
-| PR-3 | 3 | Port mapping by UPnP and NAT-PMP, publishing the granted port (`rendezvous.md` 5.1) | unit against the gateway of NET-1 | `peer/portmap.go` | B-08, X-1, NET-1, S-8 | A | M |
-| RV-1 | 2 | What B-07 leaves open of HTTPS and TURN over TLS on one port (`rendezvous.md` 3, 6): the checks of A8.4; no second routing by server name | A8.4 against a local certificate authority | `internal/rendezvous/tls.go` | B-07, S-6 | A | M |
+| PR-3 | 3 | Port mapping by UPnP and NAT-PMP, publishing the granted port (`rendezvous.md` 5.1) | unit against the gateway of NET-1, tag `netsim`, in the `netsim` job | `peer/portmap.go` | B-08, X-1, NET-1, S-8 | A | M |
+| RV-1 | 2 | Starts from the compatible set pion/webrtc v4.2.26, pion/ice v4.4.8, golang.org/x/crypto v0.58.0 or later, which B-07 and B-08 are moving to now. B-07 already has routing by server name, `acme-tls/1` and metering on the data path; RV-1 adds A8.4 and does not route again (`rendezvous.md` 3, 6) | A8.4 with Pebble for issuance and renewal | `internal/rendezvous/tls.go` | B-07, S-6 | A | M |
 
 ## 5. Lanes WEB-LIB, UI-SHELL and UI
 
@@ -148,7 +148,7 @@ the owner of the failing file.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | I-1 | 3 | M3 on the local link with fake CLIs | A3.1, A3.2, A3.4 to A3.7, A3.9, A3.10; A3.4 with a configured AI; the tool list against `tools.json` | `features/m3*` | N-1, HM-1, HM-5 to HM-7, HM-16, HS-1, HS-2, HS-8, HS-9, HS-13 to HS-15 | A | M |
 | I-3 | 3 | M2 on the local link with a test client | A2.1 to A2.6 (the `groups` push of A2.1 is in I-2) | `features/m2*` | N-1, HM-1 to HM-6 | A | M |
-| I-2 | 4 | M1 on real transport and NET-1; A2.7 during a move | A1.1 to A1.7, A1.9 to A1.11, A1.13, A2.7 | `features/m1*` | N-3, N-4, PR-1, PR-2, NET-1 | A | M |
+| I-2 | 4 | M1 on real transport and NET-1; A2.7 during a move | A1.1 to A1.7, A1.9 to A1.11, A1.13, A2.7; tag `netsim`, in the `netsim` job | `features/m1*` | N-3, N-4, PR-1, PR-2, NET-1 | A | M |
 | I-4 | 4 | M4 without the `live` parts | A4.1 to A4.9 | `features/m4*` | I-1, HM-10, HM-14, HS-16a, HS-16b, HS-17, HS-18, HM-9, HS-3, HS-10 | A | M |
 | I-5 | 4 | M5 with `forge: none` and with a bare remote and a fake `gh`; the transcripts of P-3 replayed | A5.1 to A5.19 | `features/m5*` | I-1, P-3, HM-8 to HM-13, HS-4 to HS-7b, HS-10, HS-11 | A | L |
 | I-6 | 4 | M6 on one node and on two | A3.3, A6.1 to A6.4 | `features/m6*` | I-1, HM-15, HS-12, HS-21, N-4 | A | S |
@@ -160,9 +160,26 @@ the owner of the failing file.
 
 ## 7. Spikes left
 
+S-5 ([#99](https://github.com/huanchong-99/SoloDawn/pull/99)), S-6
+([#97](https://github.com/huanchong-99/SoloDawn/pull/97)), S-10
+([#90](https://github.com/huanchong-99/SoloDawn/pull/90),
+[#88](https://github.com/huanchong-99/SoloDawn/pull/88)) and T3-0
+([#91](https://github.com/huanchong-99/SoloDawn/pull/91)) have reported.
+Their pull requests stay open and unmerged as references; what follows from
+them is in the rows above, in `steps/parallel-plan-step-2-3.md` and in
+`risks.md`.
+
 | Id | W | Questions | Machine | Needs the owner | M |
 | --- | --- | --- | --- | --- | --- |
 | S-5 | 1 | ConPTY, Unix socket, interrupt without signals; level 2 for Claude Code on Windows from documentation (Q-4) | Devin Windows | the real CLIs for the last confirmation | A |
 | S-6 | 1 | One port for HTTPS and TURN over TLS by server name, `turns:` clients, certificates for two names, cutting an open allocation | Devin Linux with a local certificate authority | a public server for the final run | A |
-| S-8 | 2 | Port mapping and hole punching in the simulation of NET-1 | Devin Linux | a real router for the final run | A |
+| S-8 | 2 | Port mapping and hole punching in the simulation of NET-1; tests with tag `netsim`, in the `netsim` job | Devin Linux | a real router for the final run | A |
 | S-9 | — | TCP simultaneous open; not scheduled, see step 3.4 | — | real NATs | — |
+
+## 8. Test infrastructure follow-ups
+
+- The fake CLI tests asserted Unix error text; they are made
+  platform-independent for I-11 in
+  [#109](https://github.com/huanchong-99/SoloDawn/pull/109).
+- A later rules-branch proposal will exclude `features/` from the gremlins
+  run, so that the gate matches the `tests` classification of `gates.toml`.
