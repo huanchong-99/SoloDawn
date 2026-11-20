@@ -14,15 +14,18 @@ async function load() {
 beforeEach(() => {
   reducedMotion = false;
   vi.stubGlobal('matchMedia', (query: string) => ({
-    matches: query === '(prefers-reduced-motion: reduce)' && reducedMotion,
+    get matches() {
+      return query === '(prefers-reduced-motion: reduce)' && reducedMotion;
+    },
   }));
 });
 afterEach(() => {
+  vi.unstubAllGlobals();
   Reflect.deleteProperty(document, 'startViewTransition');
 });
 
 describe('spring', () => {
-  it('goes from 0 past 1 once and comes to rest at 1', async () => {
+  it('starts at 0, overshoots and approaches 1', async () => {
     const { spring } = await load();
     expect(spring(0)).toBe(0);
     expect(spring(0.25).toFixed(6)).toBe('0.933259');
@@ -63,12 +66,16 @@ describe('shift', () => {
   });
 
   it('makes the change at once when the system asks for reduced motion', async () => {
-    reducedMotion = true;
     const { shift } = await load();
     const start = viewTransitions();
     const change = vi.fn();
+    reducedMotion = true;
     shift(change);
-    expect(change).toHaveBeenCalledOnce();
-    expect(start).not.toHaveBeenCalled();
+    expect(change.mock.calls).toEqual([[]]);
+    expect(start.mock.calls).toEqual([]);
+    reducedMotion = false;
+    shift(change);
+    expect(start.mock.calls).toEqual([[change]]);
+    expect(change.mock.calls).toEqual([[]]);
   });
 });

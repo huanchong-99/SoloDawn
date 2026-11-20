@@ -140,7 +140,7 @@ it('applies successive toggles in the order their transition callbacks run', asy
 });
 
 it('announces top bar actions in the chosen language and clears the status on a radio choice', async () => {
-  const { announcement, choose, toggleLang, toggleTheme } = await load();
+  const { announcement, choose, prefs, toggleLang, toggleTheme } = await load();
   expect(announcement.text).toBe('');
   toggleTheme();
   expect(announcement.text).toBe('Theme: Dark');
@@ -151,6 +151,7 @@ it('announces top bar actions in the chosen language and clears the status on a 
   toggleLang();
   expect(announcement.text).toBe('Language: English');
   choose('theme', 'auto');
+  expect(prefs).toEqual({ theme: 'auto', lang: 'en' });
   expect(announcement.text).toBe('');
 });
 
