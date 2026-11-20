@@ -202,9 +202,9 @@ RV, the rendezvous service.
    this connection. H sends no log.
 8. B sends `join` with the name P chose. H handles it (2.2).
 9. On `ok`, B adds H to its list of group homes with the signalling URLs
-   it reached H on (`contracts/storage.md` section 5), reads the `groups`
-   push and sends `sync`. A new member reads the whole history the home
-   still holds.
+   it reached H on (`contracts/storage.md` section 5), sends `home.add`
+   (section 7) to each of P's nodes it is connected to, reads the `groups`
+   push and sends `sync`. A new member reads the whole history H holds.
 10. P joins AIs as in step 1: B sends `host.join` with `home` = H to one
     of P's nodes. That node connects to H, and H accepts its signalling
     because the node is a valid device of a member.
@@ -261,15 +261,16 @@ change writes no message: the row shows it.
 
 ## 7. Points the owner settled (2026-11-20)
 
-1. **Lifetime of an invitation**: 10 minutes, the pairing secret's, in a
-   room that lives 15 (`contracts/rendezvous.md` 2.2). Nothing is stored
-   or withdrawn, and a leaked link is soon worthless.
-2. **The person's other devices.** After `join` only B knows that P is in
-   a group homed on H; P's nodes learn it through `host.join`. Each entry
-   of `host.info.homes` (`contracts/datachannel.md` section 7) carries the
-   home's device id as `home`: frozen in P-4, built in T2-1. Not settled:
-   whether B records the membership on P's nodes with a host command, so
-   that P's other browsers learn it before an AI of P joins.
+1. **Lifetime of an invitation**: 10 minutes, as a pairing secret, in a
+   room that lives 15 (`contracts/rendezvous.md` 2.2). Nothing is stored.
+2. **The person's other devices** learn the group from P's nodes before
+   any AI of P joins. Host command `home.add` (`contracts/commands.md`
+   section 2), fields `g`, `home` (device id), `name`, `addrs` (the
+   signalling URLs B reached H on): the node adds the entry to
+   `host.info.homes` (`contracts/datachannel.md` section 7), each entry of
+   which carries `home`, and keeps `addrs` as addresses of `home`. It
+   connects to nothing and clones nothing. A node B did not reach learns
+   the group at `host.join`. Frozen in P-4, built in T2-1.
 3. **One web client origin.** A stated limit: a browser is a device per
    origin, and the link opens the web client of the home's rendezvous. A
    person on another origin first adds a browser there
@@ -292,9 +293,8 @@ change writes no message: the row shows it.
 
 Unit P-4 freezes the wire shapes: the payloads of `invite` (with its
 result) and `join`, `member set` with `role`, the `pair` message with
-role `join`, the two `system` bodies, `home` in `host.info.homes`
-(section 7), and the vectors of section 3.
+role `join`, the two `system` bodies, `home.add` and `home` in
+`host.info.homes` (section 7), and the vectors of section 3.
 
-`[unverified]` Nothing here was run; it follows from the step 1 contracts
-as written. That one rendezvous connection holds several rooms was read
-in the code of the service, not tested.
+`[unverified]` Nothing here was run. That one rendezvous connection holds
+several rooms was read in the code of the service, not tested.
