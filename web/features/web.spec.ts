@@ -1,5 +1,8 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
+import * as v from 'valibot';
 import { expect, vi } from 'vitest';
+import { examples, goldens, mockCtl, schemaOf } from '../src/lib/mock';
+import * as proto from '../src/lib/proto';
 
 const feature = await loadFeature('../features/web.feature');
 
@@ -8,6 +11,7 @@ const noEd25519 = {
 } as unknown as Crypto;
 
 let browserCrypto: Crypto;
+let browserCss: Pick<typeof CSS, 'supports'>;
 let svelte: typeof import('svelte');
 let app: Record<string, never> | undefined;
 
@@ -18,8 +22,14 @@ async function open(hash = '') {
   location.hash = hash;
   svelte = await import('svelte');
   const { boot } = await import('../src/lib/boot');
-  app = await boot(document.body, browserCrypto);
+  app = await boot(document.body, browserCrypto, browserCss);
   svelte.flushSync();
+}
+
+/** The test runtime's WebCrypto has Ed25519 and happy-dom's CSS.supports answers yes. */
+function supported() {
+  browserCrypto = crypto;
+  browserCss = CSS;
 }
 
 const texts = (selector: string) =>
@@ -40,8 +50,8 @@ function press(label: string) {
 
 describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   AfterEachScenario(() => {
-    localStorage.clear();
     vi.restoreAllMocks();
+    localStorage.clear();
   });
 
   Background(({ Given }) => {
@@ -56,9 +66,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   });
 
   Scenario('The shell opens on the chats page', ({ Given, When, Then, And }) => {
-    Given('the browser supports Ed25519 in WebCrypto', () => {
-      browserCrypto = crypto;
-    });
+    Given('the browser supports Ed25519 in WebCrypto', supported);
     When('the person opens the client', () => open());
     Then('the navigation reads "群聊", "电脑和 AI", "设置"', () => {
       expect(texts('nav a[href^="#/"] span')).toEqual(['群聊', '电脑和 AI', '设置']);
@@ -70,9 +78,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   });
 
   Scenario('The address fragment selects the page', ({ Given, When, Then, And }) => {
-    Given('the browser supports Ed25519 in WebCrypto', () => {
-      browserCrypto = crypto;
-    });
+    Given('the browser supports Ed25519 in WebCrypto', supported);
     And('the person opens the client', () => open());
     When('the address fragment becomes "#/nodes"', () => {
       location.hash = '#/nodes';
@@ -86,9 +92,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   });
 
   Scenario('An unknown address opens the chats page', ({ Given, When, Then }) => {
-    Given('the browser supports Ed25519 in WebCrypto', () => {
-      browserCrypto = crypto;
-    });
+    Given('the browser supports Ed25519 in WebCrypto', supported);
     When('the person opens the client at "#/nowhere"', () => open('#/nowhere'));
     Then('the current page is "群聊"', () => {
       expect(texts('h1')).toEqual(['群聊']);
@@ -98,9 +102,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   Scenario(
     'The language choice changes the interface texts and is remembered',
     ({ Given, When, Then, And }) => {
-      Given('the browser supports Ed25519 in WebCrypto', () => {
-        browserCrypto = crypto;
-      });
+      Given('the browser supports Ed25519 in WebCrypto', supported);
       And('the person opens the client at "#/settings"', () => open('#/settings'));
       When('the person chooses the language "English"', () => choose('English'));
       Then('the navigation reads "Chats", "Computers", "Settings"', () => {
@@ -120,9 +122,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario('The theme choice is applied and remembered', ({ Given, When, Then, And }) => {
-    Given('the browser supports Ed25519 in WebCrypto', () => {
-      browserCrypto = crypto;
-    });
+    Given('the browser supports Ed25519 in WebCrypto', supported);
     And('the person opens the client at "#/settings"', () => open('#/settings'));
     When('the person chooses the theme "深色"', () => choose('深色'));
     Then('the page uses the "dark" theme', () => {
@@ -136,9 +136,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   });
 
   Scenario('The top bar switches theme and language', ({ Given, When, Then, And }) => {
-    Given('the browser supports Ed25519 in WebCrypto', () => {
-      browserCrypto = crypto;
-    });
+    Given('the browser supports Ed25519 in WebCrypto', supported);
     And('the person opens the client', () => open());
     When('the person presses "切换深色 / 浅色"', () => press('切换深色 / 浅色'));
     And('the person presses "Switch language / 切换语言"', () =>
@@ -152,8 +150,28 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     });
   });
 
+  Scenario(
+    'The client opens when the browser blocks site storage',
+    ({ Given, When, Then, And }) => {
+      Given('the browser supports Ed25519 in WebCrypto', supported);
+      And('the browser blocks site storage', () => {
+        vi.spyOn(globalThis, 'localStorage', 'get').mockImplementation(() => {
+          throw new DOMException('The operation is insecure.', 'SecurityError');
+        });
+      });
+      When('the person opens the client', () => open());
+      Then('the current page is "群聊"', () => {
+        expect(texts('h1')).toEqual(['群聊']);
+      });
+      And('the page uses the "auto" theme', () => {
+        expect(document.documentElement.dataset.theme).toBe('auto');
+      });
+    },
+  );
+
   Scenario('A browser without Ed25519 gets the upgrade notice', ({ Given, When, Then, And }) => {
     Given('the browser lacks Ed25519 in WebCrypto', () => {
+      supported();
       browserCrypto = noEd25519;
     });
     When('the person opens the client', () => open());
@@ -162,6 +180,128 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     });
     And('the application is not shown', () => {
       expect(document.querySelector('nav')).toBeNull();
+    });
+  });
+
+  Scenario(
+    'A browser that cannot keep its Ed25519 key gets the upgrade notice',
+    ({ Given, When, Then, And }) => {
+      // Firefox 129 to 135: the key is made and stored, but a structured clone of it (what
+      // IndexedDB reads back) fails.
+      Given('the browser makes Ed25519 keys but cannot clone them for storage', () => {
+        supported();
+        vi.spyOn(globalThis, 'structuredClone').mockImplementation(() => {
+          throw new DOMException('CryptoKey', 'DataCloneError');
+        });
+      });
+      When('the person opens the client', () => open());
+      Then('the upgrade notice "这个浏览器需要升级" is shown', () => {
+        expect(texts('h1')).toEqual(['这个浏览器需要升级']);
+      });
+      And('the application is not shown', () => {
+        expect(document.querySelector('nav')).toBeNull();
+      });
+    },
+  );
+
+  Scenario(
+    'A browser without light-dark() colours gets the upgrade notice',
+    ({ Given, When, Then, And }) => {
+      Given('the browser supports Ed25519 in WebCrypto but not light-dark() in CSS', () => {
+        supported();
+        browserCss = { supports: () => false };
+      });
+      When('the person opens the client', () => open());
+      Then('the upgrade notice "这个浏览器需要升级" is shown', () => {
+        expect(texts('h1')).toEqual(['这个浏览器需要升级']);
+      });
+      And('the application is not shown', () => {
+        expect(document.querySelector('nav')).toBeNull();
+      });
+    },
+  );
+
+  Scenario(
+    'Every wire example of the node is read as a typed frame',
+    ({ Given, When, Then, And }) => {
+      let names: string[];
+      let read: unknown[];
+      Given('the wire examples in "internal/proto/testdata"', () => {
+        names = examples;
+        expect(names).toContain('welcome');
+      });
+      When('the client reads each one with the schema of its file name', () => {
+        read = names.map((name) => proto.decode(schemaOf[name], goldens[name]));
+      });
+      Then('each one is read with every field as written', () => {
+        expect(read).toStrictEqual(names.map((name) => JSON.parse(goldens[name])));
+      });
+      And('each one is refused with one unknown field added', () => {
+        for (const name of names) {
+          const text = goldens[name].replace('{', '{"unknown":1,');
+          expect(() => proto.decode(schemaOf[name], text), name).toThrow(v.ValiError);
+        }
+      });
+    },
+  );
+
+  Scenario('Screens can sync a group with no node', ({ Given, When, Then }) => {
+    const seen: string[] = [];
+    let ctl: proto.Ctl;
+    let welcome: proto.Welcome;
+    Given('a mock connection, with no node', () => {
+      ctl = mockCtl((push) => seen.push(push.t));
+    });
+    When('the client sends "hello"', async () => {
+      const answer = await ctl.request({
+        t: 'hello',
+        v: 1,
+        kind: 'browser',
+        name: 'test',
+        addrs: [],
+      });
+      welcome = answer as proto.Welcome;
+    });
+    Then('the answer lists the group "Website"', () => {
+      expect(welcome.re).toBe(1);
+      expect(welcome.groups.map((g) => g.name)).toEqual(['Website']);
+    });
+    When('the client syncs that group', async () => {
+      const g = welcome.groups[0].g;
+      const synced = await ctl.request({ t: 'sync', g, since: 0, state_only: false });
+      seen.push(`${(synced as proto.Synced).t} ${(synced as proto.Synced).seq}`);
+    });
+    Then('the pushes "reset" and "rows" arrive before the answer "synced" at 815', () => {
+      expect(seen).toEqual(['reset', 'rows', 'synced 815']);
+    });
+  });
+
+  Scenario('Screens can page a thread and send a command with no node', ({ Given, When, Then }) => {
+    let ctl: proto.Ctl;
+    let page: proto.Fetched;
+    let result: proto.CmdResult | proto.ErrorResponse;
+    Given('a mock connection, with no node', () => {
+      ctl = mockCtl(() => {});
+    });
+    When('the client fetches the newest page of the main line', async () => {
+      const g = 'rZNvy-1jH6Z-BcPqA5U5BQ';
+      page = (await ctl.request({
+        t: 'fetch',
+        g,
+        before: 0,
+        limit: 50,
+        thread: null,
+      })) as proto.Fetched;
+    });
+    Then('the page holds the message "Choose a location."', () => {
+      expect(page.rows.map((row) => (row as proto.MsgRow).text)).toEqual(['Choose a location.']);
+    });
+    When('the client sends a command', async () => {
+      const env = proto.decode(proto.Cmd, goldens.cmd).env;
+      result = await ctl.request({ t: 'cmd', env });
+    });
+    Then('the command is accepted', () => {
+      expect(result).toStrictEqual({ re: 2, ok: true });
     });
   });
 });

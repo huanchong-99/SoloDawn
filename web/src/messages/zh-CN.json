@@ -23,5 +23,5 @@
   "settings.lang.zh-CN": "简体中文",
   "settings.lang.en": "English",
   "upgrade.title": "这个浏览器需要升级",
-  "upgrade.body": "SoloDawn 用浏览器自带的 Ed25519 签名来证明这台设备的身份，这个浏览器还不支持。请升级到最新版的 Chrome、Edge、Firefox 或 Safari，再打开这个页面。"
+  "upgrade.body": "SoloDawn 用浏览器自带的 Ed25519 签名来证明这台设备的身份，并把密钥保存在浏览器里，这个浏览器还做不到。请升级到 Chrome 或 Edge 137、Firefox 136、Safari 17.5 或更新的版本，再打开这个页面。"
 }

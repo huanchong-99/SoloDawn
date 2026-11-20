@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 let systemDark: boolean;
 
@@ -41,6 +41,26 @@ describe('remembered choices', () => {
     localStorage.setItem('sd-lang', 'zh-CN');
     const { prefs } = await load();
     expect(prefs).toEqual({ theme: 'dark', lang: 'zh-CN' });
+  });
+
+  it.each([['auto'], ['light'], ['dark']])('reads the theme %s', async (theme) => {
+    localStorage.setItem('sd-theme', theme);
+    const { prefs } = await load();
+    expect(prefs.theme).toBe(theme);
+  });
+
+  it('reads English in a Chinese browser', async () => {
+    vi.spyOn(navigator, 'language', 'get').mockReturnValue('zh-CN');
+    localStorage.setItem('sd-lang', 'en');
+    const { prefs } = await load();
+    expect(prefs.lang).toBe('en');
+  });
+
+  it('ignores values it does not know, such as those of another version', async () => {
+    localStorage.setItem('sd-theme', 'sepia');
+    localStorage.setItem('sd-lang', 'fr');
+    const { prefs } = await load();
+    expect(prefs).toEqual({ theme: 'auto', lang: 'en' });
   });
 
   it('writes a change to <html> and to this browser', async () => {
@@ -91,5 +111,29 @@ describe('language', () => {
     expect(t('nav.settings')).toBe('设置');
     toggleLang();
     expect(prefs.lang).toBe('en');
+  });
+});
+
+describe('a browser that blocks site storage', () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, 'localStorage', 'get').mockImplementation(() => {
+      throw new DOMException('The operation is insecure.', 'SecurityError');
+    });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('opens with the defaults', async () => {
+    const { prefs } = await load();
+    expect(prefs).toEqual({ theme: 'auto', lang: 'en' });
+    expect(document.documentElement.dataset.theme).toBe('auto');
+  });
+
+  it('applies a change without remembering it', async () => {
+    const { prefs, flushSync } = await load();
+    prefs.theme = 'dark';
+    prefs.lang = 'zh-CN';
+    flushSync();
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(document.documentElement.lang).toBe('zh-CN');
   });
 });

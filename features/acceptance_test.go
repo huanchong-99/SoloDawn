@@ -22,6 +22,7 @@ func TestFeatures(t *testing.T) {
 	suite := godog.TestSuite{
 		ScenarioInitializer: func(sc *godog.ScenarioContext) {
 			protocolSteps(sc)
+			identitySteps(sc)
 			storeSteps(sc)
 			var stdout, stderr bytes.Buffer
 			var code int

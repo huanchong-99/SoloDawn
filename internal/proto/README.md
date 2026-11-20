@@ -12,3 +12,7 @@ can mix row types, so its elements stay as JSON until the consumer reads `r`
 The examples in [testdata](testdata/) are shared with the web client.
 `go test ./internal/proto` checks encoding and decoding against them.
 Use `go test ./internal/proto -update` only for an agreed change to the wire.
+
+`testdata/crypto.json` is not a wire example: it holds the key, signature, pairing
+and device-log test vectors of [`internal/identity`](../identity/README.md), which
+writes and checks it.
