@@ -38,9 +38,9 @@ rest. The server closes a connection that sends a larger frame, more than 120
 frames in 10 seconds, a frame it cannot read, an unknown `t`, a `k` in `to` or
 `watch` that is no device id (`contracts/envelope.md` section 2), a `watch` of
 more than 64 keys, a `join` of a 17th room, or a `to` whose `from` would exceed
-16 KiB (the target gets none). A frame for a receiver whose queue is full, or
-holds 16 frames of the same sender, is dropped for it; no connection is closed,
-and the sender's offer timeout and back-off cover the loss.
+16 KiB (the target gets none). A receiver queues at most 128 frames, 16 per
+sender and 32 from senders off its watch list; more are dropped for it, closing
+nothing, and the sender's offer timeout and back-off cover the loss.
 
 ### 2.1 Handshake
 
@@ -128,25 +128,26 @@ a `from` whose `k` is not the `k` of its envelope. Rules:
 ## 3. Relay
 
 - Standard TURN with time-limited credentials: `username` = expiry (Unix
-  seconds) + `:` + alias, the device's alias being the first 16 bytes of
-  HMAC-SHA256(secret, device id) in base64url; `credential` = base64
-  HMAC-SHA1(secret, username). The secret is random per process start; the
-  library's issuer and verifier take the alias `[verified, S-6]`. Expiry is
-  checked when a credential opens an allocation; later requests on it pass
-  while the HMAC matches.
-- **Limits**: 8 allocations per device and 32 per source IP, 486 beyond;
-  permissions for 64 peer IPs per client address, refreshes always allowed.
+  seconds) + `:` + alias, the first 16 bytes of HMAC-SHA256(secret, device id)
+  in base64url; `credential` = base64 HMAC-SHA1(secret, username). The secret
+  is random per process start; the library's issuer and verifier take the alias
+  `[verified, S-6]`. Expiry is checked when a credential opens an allocation;
+  later requests on it pass while the HMAC matches.
+- **Limits**: 32 allocations per device and 128 per IPv4 address or IPv6 /64,
+  486 beyond; permissions for 64 peer IPs per client address, refreshes always
+  allowed. Relay sockets take UDP ports 20000-29999 (`--relay-ports`), outside
+  the ephemeral ports, which caps them all; the firewall must admit that range.
 - **Quota**: bytes relayed for a device, both directions, all its allocations,
   per UTC day; default 50 MB, set by a flag. A packet counts its payload and 40
-  bytes; once the quota is spent nothing passes, empty packets included. It is
-  counted where data is read and written, so an open allocation stops; refusing
-  new allocations is not enough. Counters live in memory, a limit, not a
-  budget. A node and `--no-relay` answer `{"t":"quota","used":0,"limit":0}`.
+  bytes; once the quota is spent nothing passes, open allocations and empty
+  packets included. Counters live in memory: a limit, not a budget. A node and
+  `--no-relay` answer `{"t":"quota","used":0,"limit":0}`.
 - Refused peers: non-global, private, carrier-grade NAT, 0.0.0.0/8,
   192.0.0.0/24, 198.18.0.0/15, 240.0.0.0/4, 64:ff9b::/96, 64:ff9b:1::/48,
-  ::/96, 2002::/16, 2001::/32, fec0::/10, documentation ranges; loopback only
-  when the relay binds to loopback (tests). A packet to the server's own
-  addresses goes only to its relay allocations. The relay sees DTLS
+  ::/96, ::ffff:0:0:0/96, 2002::/16, 2001::/32, fec0::/10, documentation
+  ranges; loopback only for a loopback relay (tests). Operators' NAT64 prefixes
+  (RFC 6052) cannot be listed: use the host firewall. Packets to the server's
+  own addresses go only to its relay allocations. The relay sees DTLS
   ciphertext; clients leave it once a direct path works (`flows/connect.md`).
 
 ## 4. Finding a peer without the server
@@ -289,9 +290,9 @@ solodawn rendezvous --domain rv.example --turn-domain turn.rv.example
 - `--relay-quota-mb 50`; `--no-relay`: TLS signalling and STUN only.
   `--listen <address>`: where signalling and the static files are served;
   alone, over plain HTTP without STUN or TURN, with the HTTP limits below.
-- Shared TLS port: at most 256 open connections per source IP; the handshake
-  within 10 seconds; ALPN `stun.turn` (RFC 7443) to TURN, anything else by
-  server name; HTTPS headers within 10 seconds, a keep-alive connection closed
+- Shared TLS port: at most 256 open connections per IPv4 address or IPv6 /64;
+  the handshake within 10 s; ALPN `stun.turn` (RFC 7443) to TURN, anything else
+  by server name; HTTPS headers within 10 s, a keep-alive connection closed
   after 120 idle seconds, never an upgraded WebSocket; a TURN stream closed
   after 10 silent minutes, a write to it after 30 s unread. An accept error
   pauses accepting, 5 ms doubling to 1 s.

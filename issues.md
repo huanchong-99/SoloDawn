@@ -130,7 +130,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-20 · limitation · A frame dropped for a slow receiver can leave it with stale state
 
 - Symptom: when a receiver's queue of 128 frames is full, the rendezvous drops the next frame for it and closes neither connection (`planning/contracts/rendezvous.md` section 2). A dropped `from` or `room` is covered by its sender's offer timeout and back-off. A frame the server itself generates has no sender to send it again: after a dropped `presence` a watcher shows the wrong online state until that device's next change or the next `watch`; after a dropped `joined` a pairing member waits until it joins again; a dropped `offline`, `ice` or `quota` leaves that request unanswered.
-- Cause: `client.sendFrom` drops a frame when the queue is full or holds 16 frames of its sender (`internal/rendezvous/server.go:131-136`, queue size at `:84`).
+- Cause: `client.sendFrom` drops a frame when the queue is full, holds 16 frames of its sender, or holds 32 from senders off the receiver's watch list (`internal/rendezvous/server.go:129-165`, limits at `:81-82`, queue size at `:92`).
 - Status: open. Coalescing the server's own frames is not built, by the coordinator's decision of 2026-11-20.
 
 ### 2026-11-20 · limitation · The rendezvous challenge is not bound to a server
@@ -175,13 +175,25 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the Windows resolver answers no name under `.localhost` (RFC 6761), and the rendezvous looks up its `--domain` for the relay address at startup (`internal/rendezvous/relay.go`, `relay.generator`, `net.LookupIP`). The certificate library refuses `localhost` itself, a name without a dot, so the test cannot use it instead.
 - Status: open. A hosts file entry for `rv.localhost` and `turn.rv.localhost` on the Windows runner would let it run; that changes the machine, not the test.
 
+### 2026-11-20 · limitation · A TURN alias links one device's addresses for the life of the process
+
+- Symptom: the alias in a TURN username stays the same for a device as long as the rendezvous process runs, so whoever sees its TURN traffic (the network path to the server, or a relay peer) can tell that allocations from different IP addresses belong to one pseudonym. The alias does not reveal the device id.
+- Cause: the alias is an HMAC-SHA256 of the device id under a secret drawn once per process start (`internal/rendezvous/relay.go:79-86`, secret at `:94`), and the daily quota is kept per alias, so it cannot change within a run.
+- Status: open, accepted by the coordinator on 2026-11-20 after the rendezvous security review (F8).
+
+### 2026-11-20 · limitation · Limits by address let one NAT crowd its users and a spoofer fill a victim's places
+
+- Symptom: the relay's 128 allocations and the shared TLS port's 256 connections are counted per IPv4 address or IPv6 /64 (`planning/contracts/rendezvous.md` sections 3 and 6). Devices behind one NAT or carrier-grade NAT share one count, so busy neighbours can leave a device without relay. A sender that can forge UDP source addresses can, with TURN credentials of its own (any device key it makes gets them), create allocations from a victim's address without seeing the answers; each holds one of the victim's places for its lifetime, up to an hour, and blind refreshes can keep it.
+- Cause: the server can tell sources apart only by their address (`internal/rendezvous/limits.go:40-50`, `source`; `internal/rendezvous/tls.go:192-205`, `admit`), and pion's nonces are not tied to the client's address (pion/turn v5.1.3 `internal/server/util.go:59`, `NonceHash.Generate`), so a nonce fetched from the sender's own address works for forged ones.
+- Status: open, accepted by the coordinator on 2026-11-20 after the rendezvous security review (F9).
+
+## Resolved
+
 ### 2026-11-20 · limitation · The own-address rule knows the interface addresses of the start only
 
 - Symptom: the relay sends a datagram to one of the server's own addresses only when it is for one of its relay allocations (`planning/contracts/rendezvous.md` section 3). The server reads its interface addresses once, when it starts; an address that an interface gets later (a new DHCP lease, an added IPv6 address) is not one of its own addresses for this rule until the service restarts, so a client can relay to a service on the server through that address.
-- Cause: `ownAddrs` reads `net.InterfaceAddrs` once, from `relay.generator` at startup (`internal/rendezvous/relay.go:111-129`), with the addresses its name resolves to.
-- Status: open. Restart the rendezvous after the host's addresses change.
-
-## Resolved
+- Cause: `ownAddrs` read `net.InterfaceAddrs` once, from `relay.generator` at startup (`internal/rendezvous/relay.go:111-129` before the fix), with the addresses its name resolves to.
+- Status: resolved in PR #151: `generator.ownAddr` reads them again once they are a minute old and keeps the previous set if the read fails (`internal/rendezvous/relay.go:133-160`); a new address counts as the server's own within a minute.
 
 ### 2026-11-20 · bug · Go acceptance steps acted beyond their own scenario
 
