@@ -99,12 +99,13 @@ are complete only when S-10 and T3-0 have reported.
 | T3-0 | 1 | Desk research: terms and capabilities of each candidate CLI, each claim with its source (no code; the answer goes into C3-1) | — | pull request description | — | A | S |
 | P-5 | 5 | Wire shapes: note types `preset` and `kb`, the brief's preset field, `kb_put`, `kb_search` | golden round trip | lane PROTO | P-4, C3-2 | F | S |
 | T3-1 | 4 | The capability table and the switches it drives | A10 capabilities | `host/caps.go` | C3-1, HS-1, HS-2 | A | S |
-| T3-2 to T3-4 | 5+ | One driver and one fake CLI per CLI that passed T3-0, one at a time | M3, M4, M7 tests for that CLI | `host/<cli>.go`, `host/fakecli/<cli>/` | T3-1, captures | A | 3 × M |
+| T3-2, T3-3 | 5+ | One driver and one fake CLI each for OpenCode and Qwen Code, the CLIs that passed T3-0, one at a time | M3, M4, M7 tests for that CLI | `host/<cli>.go`, `host/fakecli/<cli>/` | T3-1, captures | A | 2 × M |
+| T3-4 | — | Amp: not scheduled. T3-0 found no approval channel for R-43 | — | — | — | — | — |
 | T3-5 | 6 | Presets: the note type, the brief field, the turn text | A10 presets | `home/preset.go`, `host/turn_preset.go` | P-5 | A | S |
 | T3-6 | 6 | Knowledge base: index, `kb_put`, `kb_search`, exempt from retention | A10 knowledge | `internal/store/kb.go`, `home/kb.go`, `host/tools_kb.go` | P-5 | A | M |
 | U3-1 | 6 | Preset choice in the brief card; the preset editor | A10 as seen | `cmp/preset/` | U-7, P-5 | F | S |
 | U3-2 | 6 | Knowledge base panel in the group info | A10 as seen | `cmp/kb/` | U-14, P-5 | F | S |
-| I3-1 | 7 | Step 3 acceptance, for the CLIs that passed T3-0 only | A10.x | `features/s3*` | T3-1 to T3-6, U3-1, U3-2 | A | M |
+| I3-1 | 7 | Step 3 acceptance, for the CLIs that passed T3-0 only | A10.x | `features/s3*` | T3-1 to T3-3, T3-5, T3-6, U3-1, U3-2 | A | M |
 
 Fable ends on Nov 23. If step 2 or 3 interface units slip past that date,
 the coordinator decides who makes their visual decisions; no GPT session
