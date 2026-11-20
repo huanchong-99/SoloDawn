@@ -128,17 +128,35 @@ func PrepareReviewWorkspace(projectDir string, num int, commit, base string, rem
 	if err != nil {
 		return "", err
 	}
+	// Build the next round's diff before moving the reviewer's checkout.
+	stage, err := os.MkdirTemp(projectDir, ".review-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(stage)
+	if err := stageReviewDiff(repo, stage, commit, ref); err != nil {
+		return "", err
+	}
 	review := filepath.Join(projectDir, "review", strconv.Itoa(num))
 	if err := checkoutReview(repo, review, num, commit); err != nil {
 		return "", err
 	}
-	// Never overwrite a file (including a symlink) from the submitted tree.
-	diff, err := os.OpenFile(filepath.Join(review, reviewDiff), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		return "", err
+	return review, os.Rename(filepath.Join(stage, reviewDiff), filepath.Join(review, reviewDiff))
+}
+
+func stageReviewDiff(repo, stage, commit, ref string) error {
+	// Never replace a tracked file (including a symlink) with review metadata.
+	var tracked bytes.Buffer
+	if err := workspaceGit(repo, &tracked, "ls-tree", "-z", "--name-only", "--end-of-options", commit); err != nil {
+		return err
 	}
-	err = workspaceGit(review, diff, "diff", "--no-color", ref+"...HEAD", "--")
-	return review, errors.Join(err, diff.Close())
+	for path := range strings.SplitSeq(tracked.String(), "\x00") {
+		if strings.EqualFold(path, reviewDiff) {
+			return fmt.Errorf("review diff path %s: %w", path, fs.ErrExist)
+		}
+	}
+	output := filepath.Join("..", filepath.Base(stage), reviewDiff)
+	return workspaceGit(repo, nil, "diff", "--no-color", "--output="+output, ref+"..."+commit, "--")
 }
 
 func checkoutReview(repo, review string, num int, commit string) error {
@@ -149,15 +167,7 @@ func checkoutReview(repo, review string, num int, commit string) error {
 	if !exists {
 		return workspaceGit(repo, nil, "worktree", "add", "--detach", "--", filepath.Join("..", "review", strconv.Itoa(num)), commit)
 	}
-	if err := cleanReviewDiff(review); err != nil {
-		return err
-	}
-	// Resolve the revision as an operand before handing it to checkout.
-	var oid bytes.Buffer
-	if err := workspaceGit(repo, &oid, "rev-parse", "--verify", "--end-of-options", commit+"^{commit}"); err != nil {
-		return err
-	}
-	return workspaceGit(review, nil, "checkout", "--detach", strings.TrimSpace(oid.String()), "--")
+	return workspaceGit(review, nil, "checkout", "--detach", "--end-of-options", commit, "--")
 }
 
 // RemoveTaskWorkspace releases the working tree, keeping its branch for local reassignment.
@@ -169,14 +179,10 @@ func RemoveTaskWorkspace(projectDir string, num int, slug string) error {
 	return workspaceGit(filepath.Join(projectDir, "repo"), nil, "worktree", "remove", "--", filepath.Join("..", "wt", name))
 }
 
-func cleanReviewDiff(review string) error {
-	return workspaceGit(review, nil, "clean", "-fx", "--", reviewDiff)
-}
-
 // RemoveReviewWorkspace removes the generated diff before releasing the checkout.
 func RemoveReviewWorkspace(projectDir string, num int) error {
 	name := strconv.Itoa(num)
-	if err := cleanReviewDiff(filepath.Join(projectDir, "review", name)); err != nil {
+	if err := workspaceGit(filepath.Join(projectDir, "review", name), nil, "clean", "-fx", "--", reviewDiff); err != nil {
 		return err
 	}
 	return workspaceGit(filepath.Join(projectDir, "repo"), nil, "worktree", "remove", "--", filepath.Join("..", "review", name))

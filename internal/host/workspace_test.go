@@ -53,7 +53,10 @@ func workspaceSetup(t *testing.T) workspaceFixture {
 	project := filepath.Join(dir, "projects", "group")
 	fixtureGit(t, dir, "init", "-b", "trunk", source)
 	fixtureGit(t, source, "commit", "--allow-empty", "-m", "base")
-	repo, err := EnsureGroupWorkspace(project, source)
+	upstream := filepath.Join(dir, "origin.git")
+	fixtureGit(t, dir, "clone", "--bare", source, upstream)
+	fixtureGit(t, source, "remote", "add", "origin", upstream)
+	repo, err := EnsureGroupWorkspace(project, upstream)
 	workOK(t, err)
 	workEqual(t, repo, filepath.Join(project, "repo"))
 	return workspaceFixture{project, source, repo}
@@ -71,6 +74,7 @@ func TestWorkspaceCloneAndRemoteBase(t *testing.T) {
 	f := workspaceSetup(t)
 	old := fixtureGit(t, f.repo, "rev-parse", "HEAD")
 	newHead := workspaceCommit(t, f.source, "upstream", "new\n")
+	fixtureGit(t, f.source, "push", "origin", "trunk")
 	again, err := EnsureGroupWorkspace(f.project, "unused")
 	workOK(t, err)
 	workEqual(t, again, f.repo)
@@ -107,6 +111,7 @@ func TestWorkspaceRemoteReassignment(t *testing.T) {
 	base := workspaceCommit(t, f.source, "base", "updated")
 	fixtureGit(t, f.source, "checkout", "-b", "task/3-fix")
 	published := workspaceCommit(t, f.source, "progress", "published")
+	fixtureGit(t, f.source, "push", "origin", "--all")
 	tree, err := CreateTaskWorkspace(f.project, 3, "fix", "trunk", true, true)
 	workOK(t, err)
 	workEqual(t, fixtureGit(t, tree, "rev-parse", "HEAD"), published)
@@ -124,6 +129,7 @@ func TestWorkspaceReviewRounds(t *testing.T) {
 	// Advance base independently: review diffs start at the merge base.
 	fixtureGit(t, f.source, "checkout", "trunk")
 	workspaceCommit(t, f.source, "upstream", "unrelated\n")
+	fixtureGit(t, f.source, "push", "origin", "--all")
 	for _, head := range []string{first, second} {
 		review, err := PrepareReviewWorkspace(f.project, 1, head, "trunk", true)
 		workOK(t, err)
@@ -143,13 +149,14 @@ func TestWorkspaceReviewRounds(t *testing.T) {
 func TestWorkspaceProtectsSubmittedDiffPath(t *testing.T) {
 	f := workspaceSetup(t)
 	fixtureGit(t, f.repo, "remote", "remove", "origin")
-	head := workspaceCommit(t, f.repo, reviewDiff, "tracked content")
+	head := workspaceCommit(t, f.repo, strings.ToUpper(reviewDiff), "tracked content")
 	_, err := PrepareReviewWorkspace(f.project, 5, head, "trunk", false)
 	workEqual(t, errors.Is(err, fs.ErrExist), true)
-	data, err := os.ReadFile(filepath.Join(f.project, "review", "5", reviewDiff))
+	data, err := os.ReadFile(filepath.Join(f.repo, strings.ToUpper(reviewDiff)))
 	workOK(t, err)
 	workEqual(t, string(data), "tracked content")
-	workOK(t, RemoveReviewWorkspace(f.project, 5))
+	_, err = os.Stat(filepath.Join(f.project, "review"))
+	workEqual(t, errors.Is(err, fs.ErrNotExist), true)
 }
 
 func TestWorkspacePathErrors(t *testing.T) {
@@ -163,10 +170,13 @@ func TestWorkspacePathErrors(t *testing.T) {
 		workEqual(t, err.Error(), "invalid task workspace slug "+strconv.Quote(slug))
 		workEqual(t, RemoveTaskWorkspace(project, 1, slug).Error(), err.Error())
 	}
-	_, err = EnsureGroupWorkspace(repo, "unused")
+	badDir := filepath.Join(project, "bad\x00dir")
+	_, err = EnsureGroupWorkspace(badDir, "unused")
 	var pathErr *os.PathError
 	workEqual(t, errors.As(err, &pathErr), true)
-	workEqual(t, pathErr.Path, filepath.Join(repo, "repo"))
+	workEqual(t, pathErr.Path, filepath.Join(badDir, "repo"))
+	_, err = PrepareReviewWorkspace(filepath.Join(project, "missing"), 2, "HEAD", "trunk", false)
+	workEqual(t, errors.Is(err, fs.ErrNotExist), true)
 }
 
 func requireGitExit(t *testing.T, err error, code int) {
@@ -181,11 +191,16 @@ func requireGitExit(t *testing.T, err error, code int) {
 func TestWorkspaceGitFailures(t *testing.T) {
 	f := workspaceSetup(t)
 	head := fixtureGit(t, f.repo, "rev-parse", "HEAD")
-	_, err := PrepareReviewWorkspace(f.project, 1, head, "missing", false)
+	review, err := PrepareReviewWorkspace(f.project, 1, head, "trunk", false)
+	workOK(t, err)
+	_, err = PrepareReviewWorkspace(f.project, 1, head, "missing", false)
 	requireGitExit(t, err, 128)
 	_, err = PrepareReviewWorkspace(f.project, 1, "absent", "trunk", false)
 	requireGitExit(t, err, 128)
-	review := filepath.Join(f.project, "review", "1")
+	workEqual(t, fixtureGit(t, review, "rev-parse", "HEAD"), head)
+	diff, err := os.ReadFile(filepath.Join(review, reviewDiff))
+	workOK(t, err)
+	workEqual(t, string(diff), "")
 	workOK(t, os.Rename(filepath.Join(review, ".git"), filepath.Join(review, "saved-git")))
 	_, err = PrepareReviewWorkspace(f.project, 1, head, "trunk", false)
 	requireGitExit(t, err, 128)
