@@ -1,7 +1,6 @@
 package proto
 
 import (
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"testing"
@@ -80,9 +79,10 @@ func TestBriefGoldens(t *testing.T) {
 	confirmed := ActedState{"confirmed", person, ts, actExample("brief", "confirm", "", "")}
 	golden(t, "row-msg-brief-confirmed", exampleRow(t, m, body, &confirmed, 814))
 	note := "Include the relay path."
-	action := BriefAction{person, ts, actExample("brief", "revise", "", note), &note}
-	golden(t, "row-msg-brief-revise", exampleRow(t, m, body, &BriefReviseState{"revise", action}, 814))
-	golden(t, "row-msg-brief-superseded", exampleRow(t, m, body, &BriefSupersededState{"superseded", &action}, 815))
+	revise := BriefReviseState{"revise", person, ts, actExample("brief", "revise", "", note), &note}
+	golden(t, "row-msg-brief-revise", exampleRow(t, m, body, &revise, 814))
+	superseded := CardState{Status: "superseded", By: &revise.By, At: &revise.At, Act: &revise.Act, Note: &note}
+	golden(t, "row-msg-brief-superseded", exampleRow(t, m, body, &superseded, 815))
 }
 
 func TestApprovalGoldens(t *testing.T) {
@@ -110,14 +110,16 @@ func nonCard[B any](t *testing.T, m messageExample, body B) {
 	golden(t, "row-msg-"+m.kind, exampleRow[B, StatusOnly](t, m, body, nil, 790))
 }
 
+// CardState reads every state, a superseded brief's included, and keeps what is there.
 func TestCardStateRetainsPresentZeroValues(t *testing.T) {
 	for _, wire := range []string{
+		`{"status":"superseded"}`,
 		`{"status":"expired","at":0}`,
 		`{"status":"answered","reply":"m","ms":0}`,
 		`{"status":"decided","by":"m","at":0,"text":"","act":{"p":"act","k":"key","s":"signature"}}`,
 	} {
 		var state CardState
-		if err := json.Unmarshal([]byte(wire), &state); err != nil {
+		if err := Decode([]byte(wire), &state); err != nil {
 			t.Fatal(err)
 		}
 		if got := wireJSON(t, state); !reflect.DeepEqual(jsonValue(t, got), jsonValue(t, []byte(wire))) {

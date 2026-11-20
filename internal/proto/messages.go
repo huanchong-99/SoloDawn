@@ -204,21 +204,15 @@ type ActedState struct {
 	Act    Envelope `json:"act"`
 }
 
-type BriefAction struct {
-	By   string   `json:"by"`
-	At   int64    `json:"at"`
-	Act  Envelope `json:"act"`
-	Note *string  `json:"note,omitempty"`
-}
-
+// BriefReviseState is the one brief state with a note. A superseded brief has no
+// type of its own: it keeps the keys of the state it replaced, pending included,
+// so it is read as a CardState.
 type BriefReviseState struct {
-	Status string `json:"status"`
-	BriefAction
-}
-
-type BriefSupersededState struct {
-	Status string `json:"status"`
-	*BriefAction
+	Status string   `json:"status"`
+	By     string   `json:"by"`
+	At     int64    `json:"at"`
+	Act    Envelope `json:"act"`
+	Note   *string  `json:"note,omitempty"`
 }
 
 type TimedState struct {
