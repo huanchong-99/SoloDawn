@@ -42,8 +42,8 @@ connection, clock or database: every function works on the values it is given.
   `Code` values whose text is the wire code. `known` is the caller's: this package does not know
   owners, groups or pairing peers.
 - **Device log.** `Apply` accepts an entry when its signature holds, it is a `device` payload with
-  op `add` or `revoke` of a device id for this log's person, its version is the next one, and its signer is valid
-  before it; entry 1 must be the `add` of its own signer, which is the person. An `add` of a key
+  op `add` or `revoke` of a device id for this log's person, its version is the next one, and its
+  signer is valid before it; entry 1 must be the `add` of its own signer, which is the person. An `add` of a key
   that was ever revoked is refused. For a version the log already holds, the same envelope again
   returns `added == false` without an error and any other is refused: the first accepted wins. A
   refused entry leaves the log as it was. `Entries` are the envelopes as signed, in order, for
