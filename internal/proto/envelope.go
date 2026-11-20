@@ -9,11 +9,16 @@ type Envelope struct {
 	Signature string `json:"s"`
 }
 
+// ID is a random id: 16 bytes in their canonical base64url spelling, 22
+// characters (contracts/envelope.md section 1). Decode refuses any other text
+// in a field of this type.
+type ID string
+
 type PayloadHeader struct {
 	Type      string `json:"t"`
-	Nonce     string `json:"n"`
+	Nonce     ID     `json:"n"`
 	Timestamp int64  `json:"ts"`
-	Group     string `json:"g,omitempty"`
+	Group     ID     `json:"g,omitempty"`
 	To        string `json:"to,omitempty"`
 }
 

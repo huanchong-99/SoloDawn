@@ -27,13 +27,19 @@ func exampleKey(name string) identity.Key {
 	return identity.Key(ed25519.NewKeyFromSeed(seed[:]))
 }
 
+// exampleID is a random id that follows from a label.
+func exampleID(label string) proto.ID {
+	h := sha256.Sum256([]byte(label))
+	return proto.ID(base64.RawURLEncoding.EncodeToString(h[:16]))
+}
+
 func logEntry(signer, user identity.Key, ver int, op string, dev identity.Key) (proto.Envelope, error) {
 	return logEntryFor(signer, user, ver, op, dev.ID())
 }
 
 func logEntryFor(signer, user identity.Key, ver int, op, dev string) (proto.Envelope, error) {
 	e := proto.DeviceEntry{
-		PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: fmt.Sprint("entry-", ver, op), Timestamp: 1763600000000},
+		PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: exampleID(fmt.Sprint("entry-", ver, op)), Timestamp: 1763600000000},
 		DeviceChange:  proto.DeviceChange{User: user.ID(), Version: ver, Op: op, Device: dev},
 	}
 	if op == "add" {
@@ -125,7 +131,7 @@ func identitySteps(sc *godog.ScenarioContext) {
 	misdirect := func() { receiver = tablet.ID() }
 	delay := func() { arrival = now.Add(25 * time.Hour) }
 	sc.Step(`^a command that the owner's browser signed for the owner's node$`, func() error {
-		env = browser.Sign(fmt.Sprintf(`{"t":"settings.set","n":"command-1","ts":%d,"to":"%s","offline":true}`, now.UnixMilli(), node.ID()))
+		env = browser.Sign(fmt.Sprintf(`{"t":"settings.set","n":"%s","ts":%d,"to":"%s","offline":true}`, exampleID("command"), now.UnixMilli(), node.ID()))
 		receiver, arrival = node.ID(), now
 		return owned()
 	})
@@ -162,7 +168,7 @@ func identitySteps(sc *godog.ScenarioContext) {
 		if whom == "the node" {
 			to = `,"to":"` + node.ID() + `"`
 		}
-		env = browser.Sign(fmt.Sprintf(`{"t":"offer","n":"offer-1","ts":%d%s}`, now.Add(-time.Duration(minutes)*time.Minute).UnixMilli(), to))
+		env = browser.Sign(fmt.Sprintf(`{"t":"offer","n":"%s","ts":%d%s}`, exampleID("offer"), now.Add(-time.Duration(minutes)*time.Minute).UnixMilli(), to))
 		receiver, arrival = node.ID(), now
 		return owned()
 	})
@@ -172,7 +178,7 @@ func identitySteps(sc *godog.ScenarioContext) {
 	weakKey := append([]byte{1}, make([]byte, 31)...)
 	weakID := base64.RawURLEncoding.EncodeToString(weakKey)
 	sc.Step(`^a signature that the Ed25519 library accepts under a key that has no private key$`, func() error {
-		p := fmt.Sprintf(`{"t":"settings.set","n":"forged-1","ts":%d,"to":"%s","offline":true}`, now.UnixMilli(), node.ID())
+		p := fmt.Sprintf(`{"t":"settings.set","n":"%s","ts":%d,"to":"%s","offline":true}`, exampleID("forged"), now.UnixMilli(), node.ID())
 		sig := append(append([]byte{}, weakKey...), make([]byte, 32)...)
 		if !ed25519.Verify(weakKey, []byte("solodawn/1\n"+p), sig) {
 			return fmt.Errorf("crypto/ed25519 no longer verifies the forged signature")
@@ -300,7 +306,9 @@ func identitySteps(sc *godog.ScenarioContext) {
 
 	var created, typed identity.Secret
 	pairMessage := func(s identity.Secret, role string, k identity.Key, kind string) proto.Pair {
-		return proto.Pair{Type: "pair", Key: k.ID(), Kind: kind, Name: kind, Role: role, MAC: s.MAC(role, k.ID())}
+		m := proto.Pair{Type: "pair", Key: k.ID(), Kind: kind, Name: kind, Role: role}
+		m.MAC = s.MAC(m)
+		return m
 	}
 	sc.Step(`^a browser that created a pairing secret$`, func() error {
 		created = identity.NewSecret()

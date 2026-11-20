@@ -74,7 +74,7 @@ func TestGroupGoldens(t *testing.T) {
 	if err := json.Unmarshal([]byte(act.Payload), &header); err != nil {
 		t.Fatal(err)
 	}
-	if want := (PayloadHeader{Type: "act", Nonce: id("act"), Timestamp: ts, Group: group}); header != want {
+	if want := (PayloadHeader{Type: "act", Nonce: ID(id("act")), Timestamp: ts, Group: ID(group)}); header != want {
 		t.Fatalf("command payload header = %+v, want %+v", header, want)
 	}
 	golden(t, "cmd-ok", CmdResult{Success: Success{4, true}})

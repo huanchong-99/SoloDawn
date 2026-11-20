@@ -27,7 +27,7 @@ var (
 
 func change(user device, ver int, op string, dev device) string {
 	e := proto.DeviceEntry{
-		PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: testID(fmt.Sprint(ver, op, dev.name)), Timestamp: ts + int64(ver)},
+		PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: proto.ID(testID(fmt.Sprint(ver, op, dev.name))), Timestamp: ts + int64(ver)},
 		DeviceChange:  proto.DeviceChange{User: user.id(), Version: ver, Op: op, Device: dev.id()},
 	}
 	if op == "add" {
@@ -323,6 +323,40 @@ func rewritten(signer device, p, old, new string) proto.Envelope {
 	return signer.key.Sign(changed)
 }
 
+func TestLogAcceptsAnOffCurveDeviceID(t *testing.T) {
+	l := started(t)
+	id := b64.EncodeToString(offCurve())
+	entry := rewritten(browser, change(browser, 2, "add", node), node.id(), id)
+	apply(t, l, "add the off-curve device", entry, true, nil)
+	if !l.Valid(id) {
+		t.Error("the added device is missing from the valid set")
+	}
+}
+
+// Rule 2 of section 4: p is at most 2,048 bytes as UTF-8, whatever it holds.
+func TestLogRefusesAnEntryOfMoreThan2048Bytes(t *testing.T) {
+	addNode := change(browser, 2, "add", node)
+	spaces := func(size int) string { return addNode + strings.Repeat(" ", size-len(addNode)) }
+	for what, fill := range map[string]func(int) string{
+		"spaces after the entry":             spaces,
+		"a name of two bytes to a character": func(size int) string { return sized(addNode, size) },
+	} {
+		l := started(t)
+		atLimit, over := browser.key.Sign(fill(2048)), browser.key.Sign(fill(2049))
+		if len(atLimit.Payload) != 2048 || len(over.Payload) != 2049 {
+			t.Fatalf("%s: sizes %d, %d", what, len(atLimit.Payload), len(over.Payload))
+		}
+		tampered := atLimit
+		tampered.Payload = over.Payload
+		apply(t, l, what+": signature checked before size", tampered, false, BadSig)
+		apply(t, l, what+": 2,049 bytes", over, false, BadRequest)
+		apply(t, l, what+": 2,048 bytes", atLimit, true, nil)
+		if got := valid(l); got != "phone browser, workstation" {
+			t.Errorf("%s: valid %q", what, got)
+		}
+	}
+}
+
 func TestLogNeverLosesItsLastValidDevice(t *testing.T) {
 	l := started(t)
 	apply(t, l, "the only device revokes itself", revoke(browser, 2, browser), false, errLast)
@@ -378,6 +412,7 @@ func TestLogReadsOnlyTheFieldsOfAnEntry(t *testing.T) {
 		"dev in another spelling":        {addNode, `"dev":"` + node.id() + `"`, `"dev":"` + respelled(node.id()) + `"`, BadRequest},
 		"t null":                         {addNode, `"t":"device"`, `"t":null`, BadRequest},
 		"t in upper case":                {addNode, `"t":"device"`, `"t":"DEVICE"`, BadRequest},
+		"a name of 100000 characters":    {addNode, `"name":"workstation"`, `"name":"` + strings.Repeat("w", 100000) + `"`, BadRequest},
 		"a list":                         {addNode, addNode, "[" + addNode + "]", BadRequest},
 		"null":                           {addNode, addNode, "null", BadRequest},
 	} {
@@ -397,7 +432,6 @@ func TestLogReadsOnlyTheFieldsOfAnEntry(t *testing.T) {
 		"n and ts null":                         {addNode, `"ts":` + fmt.Sprint(ts+2), `"ts":null,"g":null,"to":null`},
 		"ts a text":                             {addNode, `"ts":` + fmt.Sprint(ts+2), `"ts":"long ago"`},
 		"an empty name":                         {addNode, `"name":"workstation"`, `"name":""`},
-		"a name of 100000 characters":           {addNode, `"name":"workstation"`, `"name":"` + strings.Repeat("w", 100000) + `"`},
 		"a field the log does not know":         {addNode, `"name":"workstation"`, `"name":"workstation","os":null,"DEV":"x","OP":"revoke"`},
 	} {
 		l := started(t)

@@ -36,6 +36,9 @@ alone reads four things differently from a browser. An error from `Decode` is
   only if that is a whole number of at most 2^53 - 1 either way: `2.0` is 2. A number
   beyond the largest double, which a browser reads as `Infinity`, is refused only by a
   field that reads it; elsewhere it is ignored like any member the receiver does not know.
+- **Ids.** A field of type `ID` takes a random id, the canonical base64url spelling of 16 bytes
+  (22 characters), and no other text, an empty one included. `n` and `g` of `PayloadHeader` have
+  this type. The other fields that hold ids are still plain strings ([issues](../../issues.md)).
 
 A `json.RawMessage` is not looked into; decode it with `Decode` when its type is
 known. So a wire type states the contract in its tags: `omitempty` for an optional

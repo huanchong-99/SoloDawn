@@ -3,7 +3,8 @@
 // does (contracts/conventions.md section 2). An integer is a number whose value is a safe integer:
 // 2.0 is 2, and so is 2.0000000000000001 once parsed; 2^53 and 1e20 are not. No field read here
 // may be null: null has the wrong type.
-import type { DeviceEntry } from './proto';
+import * as v from 'valibot';
+import { Id, type DeviceEntry } from './proto';
 
 /** The fields common to every payload. */
 export type Header = Pick<DeviceEntry, 'n' | 'ts' | 'g' | 'to'> & { t: string };
@@ -25,14 +26,17 @@ function parse(p: string): Fields | undefined {
   return value ?? undefined;
 }
 
+const isId = (value: unknown) => v.is(Id, value);
+const optionalId = (value: unknown) => value === undefined || isId(value);
 const optionalString = (value: unknown) => value === undefined || typeof value === 'string';
 
-/** Section 3, check 3: t and n are strings, ts an integer, g and to strings when there. */
+/** Section 3, check 3: t is a string, n an id and ts an integer; g, when there, is an id, and to
+ *  a string. */
 const isHeader = (o: Fields) =>
   typeof o.t === 'string' &&
-  typeof o.n === 'string' &&
+  isId(o.n) &&
   Number.isSafeInteger(o.ts) &&
-  optionalString(o.g) &&
+  optionalId(o.g) &&
   optionalString(o.to);
 
 /** The common fields of a payload, or undefined when they are not as section 3 says

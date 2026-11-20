@@ -1,6 +1,6 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { DeviceLog, Refused } from './devlog';
-import { Device, ed25519 } from './identity';
+import { Device, ed25519, encode, verifyEnvelope } from './identity';
 
 const newDevice = async () =>
   Device.of(crypto, await crypto.subtle.generateKey(ed25519, false, ['sign', 'verify']));
@@ -158,6 +158,51 @@ describe('DeviceLog.apply', () => {
     ['text that is not JSON', () => first.sign('device')],
   ])('refuses %s as not a device-log entry', async (_, env) => {
     expect(await refusal(new DeviceLog(crypto, first.id).apply(await env()))).toBe('bad_request');
+  });
+
+  it('adds a dev that is no point of the curve, and never imports a dev as a key', async () => {
+    // y = 2, for which the curve has no x: 32 bytes in their canonical spelling that are no key.
+    const noPoint = 'Ag' + 'A'.repeat(41);
+    const log = await logWith(genesis());
+    const importKey = vi.spyOn(crypto.subtle, 'importKey');
+    const add = await signed(first, 2, 'add', noPoint);
+    expect(await log.apply(add)).toBe(true);
+    expect(log.valid(noPoint)).toBe(true);
+    expect(await log.apply(await signed(first, 3, 'revoke', noPoint))).toBe(true);
+    expect(log.valid(noPoint)).toBe(false);
+    const imported = importKey.mock.calls.map(([, key]) => encode(key as Uint8Array));
+    expect(imported).toStrictEqual([first.id, first.id]);
+    importKey.mockRestore();
+    // Nothing verifies under it, so it can never sign an entry.
+    expect(await verifyEnvelope(crypto, { ...add, k: noPoint })).toBe(false);
+    expect(await refusal(log.apply({ ...add, k: noPoint }))).toBe('bad_sig');
+  });
+
+  it('refuses an entry whose p is more than 2,048 bytes as UTF-8', async () => {
+    const two = change(2, 'add', second.id);
+    const bytes = (p: string) => new TextEncoder().encode(p).length;
+    // Filled with spaces, and with a name of two bytes to a character: fewer than 2,048
+    // characters are still too many bytes.
+    const spaces = (size: number) => two + ' '.repeat(size - bytes(two));
+    const name = (size: number) => {
+      const room = size - bytes(two);
+      const fill = 'é'.repeat(Math.floor(room / 2)) + 'x'.repeat(room % 2);
+      return two.replace('workstation', 'workstation' + fill);
+    };
+    for (const fill of [spaces, name]) {
+      const one = await genesis();
+      const log = await DeviceLog.replay(crypto, first.id, [one]);
+      const atLimit = await first.sign(fill(2048));
+      const over = await first.sign(fill(2049));
+      expect(bytes(fill(2049))).toBe(2049);
+      expect(await refusal(log.apply({ ...atLimit, p: over.p }))).toBe('bad_sig');
+      expect(await refusal(log.apply(over))).toBe('bad_request');
+      expect(log.entries).toStrictEqual([one]);
+      expect(bytes(fill(2048))).toBe(2048);
+      expect(await log.apply(atLimit)).toBe(true);
+      expect(log.entries).toStrictEqual([one, atLimit]);
+    }
+    expect(name(2049).length).toBeLessThan(2048);
   });
 
   it('reads what section 4 reads and nothing else', async () => {

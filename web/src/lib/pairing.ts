@@ -43,22 +43,30 @@ const hmacKey = (crypto: Crypto, secret: string) =>
     'verify',
   ]);
 
-const pairText = (role: string, device: string) => utf8(`solodawn/pair/1\n${role}\n${device}`);
+/** What the mac of a pair message covers: the role, "a" for the side that created the secret and
+ *  "b" for the other, and the device id, kind and name the message carries. */
+export type Paired = Pick<Pair, 'role' | 'k' | 'kind' | 'name'>;
 
-/** The mac of the pair message of a device in a role: "a" for the side that created the secret,
- *  "b" for the other. */
-export async function mac(crypto: Crypto, secret: string, role: string, device: string) {
+/** Each part as it stands in the message, encoded as TextEncoder does: a lone surrogate becomes
+ *  U+FFFD, which is what a Go node reads for its escape. name comes last and may hold line breaks. */
+const pairText = (m: Paired) => utf8(`solodawn/pair/1\n${m.role}\n${m.k}\n${m.kind}\n${m.name}`);
+
+/** The mac of a pair message. */
+export async function mac(crypto: Crypto, secret: string, m: Paired) {
   const key = await hmacKey(crypto, secret);
-  return encode(new Uint8Array(await crypto.subtle.sign('HMAC', key, pairText(role, device))));
+  return encode(new Uint8Array(await crypto.subtle.sign('HMAC', key, pairText(m))));
 }
 
-/** Whether a received pair message proves that its sender holds the secret (section 6). role is
- *  the role the other side must have: a message in the receiver's own role is its own message
- *  sent back, and proves nothing. k must be a device id. The mac is compared in constant time, in
- *  its canonical spelling only. Any other message is ignored. */
+const isKind = (kind: string) => kind === 'node' || kind === 'browser';
+
+/** Whether a received pair message proves that its sender holds the secret and wrote its role,
+ *  device id, kind and name (section 6). role is the role the other side must have: a message in
+ *  the receiver's own role is its own message sent back, and proves nothing. k must be a device
+ *  id and kind node or browser. The mac is compared in constant time, in its canonical spelling
+ *  only. Any other message is ignored. */
 export async function verifyPair(crypto: Crypto, secret: string, m: Pair, role: string) {
   const sent = decode(m.mac);
-  if (m.role !== role || !isDevice(m.k) || sent === null) return false;
+  if (m.role !== role || !isDevice(m.k) || !isKind(m.kind) || sent === null) return false;
   const key = await hmacKey(crypto, secret);
-  return crypto.subtle.verify('HMAC', key, sent, pairText(role, m.k));
+  return crypto.subtle.verify('HMAC', key, sent, pairText(m));
 }
