@@ -479,28 +479,6 @@ func TestEarlyAndRetiredCutoffs(t *testing.T) {
 	eq(t, len(p.early), 0)
 }
 
-// Early candidates of one connection attempt: at most 64 are held, a copy of
-// one held counts once, and those past the limit are dropped.
-func TestEarlyCandidatesAtMost64(t *testing.T) {
-	f := newPair(t)
-	conn := randomID()
-	send := func(text string) {
-		deliver(t, f.b, Route{}, f.a.sign(proto.ICECandidate{SignalHeader: f.a.header(link{f.b.key.ID(), conn}, "ice"), Candidate: text, MID: "0"}))
-	}
-	for i := range 65 {
-		send(fmt.Sprint("candidate ", i))
-	}
-	send("candidate 0")
-	k := link{f.a.key.ID(), conn}
-	eq(t, len(f.b.early[k].pending), 64)
-	eq(t, f.b.early[k].pending[63], candidate{"0", "candidate 63"})
-	var added []candidate
-	add := func(i webrtc.ICECandidateInit) { added = append(added, candidate{*i.SDPMid, i.Candidate}) }
-	f.b.early[k].flush(add)
-	f.b.early[k].receive(candidate{"0", "candidate 64"}, add)
-	eq(t, len(added), 65)
-}
-
 // Early candidates are held for at most 30 seconds of the receiver's clock
 // from the first of them, then dropped.
 func TestEarlyCandidatesAtMost30Seconds(t *testing.T) {
@@ -518,4 +496,82 @@ func TestEarlyCandidatesAtMost30Seconds(t *testing.T) {
 	f.now.Add(1)
 	send(randomID(), "other")
 	eq(t, f.b.early[k], (*batch)(nil))
+}
+
+// The answer goes out from its own goroutine: Receive, and the path's reader
+// that called it, do not wait for the path to take it.
+func TestAnswerLeavesAside(t *testing.T) {
+	f := newPair(t)
+	c, err := f.a.Offer(t.Context(), f.b.key.ID())
+	check(t, err)
+	t.Cleanup(func() { c.Close() })
+	offer := recv(t, f.aMail["offer"])
+	release, answers := make(chan struct{}), make(chan proto.Envelope, 1)
+	t.Cleanup(func() { close(release) })
+	blocked := Route{Send: func(_ context.Context, _ string, env proto.Envelope) error { <-release; answers <- env; return nil }}
+	returned := make(chan error, 1)
+	go func() { returned <- f.b.Receive(t.Context(), blocked, frame(offer)) }()
+	check(t, recv(t, returned))
+	eq(t, len(answers), 0)
+}
+
+// A connection takes at most 64 remote candidates, before and after its
+// description; a copy of one it has counts once.
+func TestCandidatesAtMost64(t *testing.T) {
+	f := newPair(t)
+	conn := randomID()
+	send := func(text string) {
+		deliver(t, f.b, Route{}, f.a.sign(proto.ICECandidate{SignalHeader: f.a.header(link{f.b.key.ID(), conn}, "ice"), Candidate: text, MID: "0"}))
+	}
+	for i := range 65 {
+		send(fmt.Sprint("candidate ", i))
+	}
+	send("candidate 0")
+	k := link{f.a.key.ID(), conn}
+	eq(t, len(f.b.early[k].pending), 64)
+	eq(t, f.b.early[k].pending[63], candidate{"0", "candidate 63"})
+	var added []candidate
+	add := func(i webrtc.ICECandidateInit) { added = append(added, candidate{*i.SDPMid, i.Candidate}) }
+	f.b.early[k].flush(add)
+	f.b.early[k].receive(candidate{"0", "candidate 64"}, add)
+	eq(t, len(added), 64)
+	late := newBatch()
+	late.flush(add)
+	for i := range 65 {
+		late.receive(candidate{"0", fmt.Sprint("late ", i)}, add)
+	}
+	eq(t, len(added), 128)
+	eq(t, added[127], candidate{"0", "late 63"})
+}
+
+// One signer has early candidates held for at most 8 connection attempts.
+func TestEarlyAttemptsPerSigner(t *testing.T) {
+	f := newPair(t)
+	var conns []string
+	for range 9 {
+		conn := randomID()
+		conns = append(conns, conn)
+		deliver(t, f.b, Route{}, f.a.sign(proto.ICECandidate{SignalHeader: f.a.header(link{f.b.key.ID(), conn}, "ice"), Candidate: "c", MID: "0"}))
+	}
+	eq(t, len(f.b.early), 8)
+	eq(t, f.b.early[link{f.a.key.ID(), conns[8]}], (*batch)(nil))
+	f.now.Add(earlyMillis + 1)
+	deliver(t, f.b, Route{}, f.a.sign(proto.ICECandidate{SignalHeader: f.a.header(link{f.b.key.ID(), conns[8]}, "ice"), Candidate: "c", MID: "0"}))
+	eq(t, len(f.b.early), 1)
+}
+
+// The Peer calls paths without holding its lock, so the callback may call
+// back into the Peer, here into Offline, which takes that lock.
+func TestPathsCalledOutsideTheLock(t *testing.T) {
+	f := newPair(t)
+	for _, side := range []struct {
+		node *Peer
+		mail mailbox
+	}{{f.a, f.aMail}, {f.b, f.bMail}} {
+		side.node.paths = func(string) []Route {
+			side.node.Offline("none", "none")
+			return []Route{side.mail.route()}
+		}
+	}
+	f.open(t, 0).info(t)
 }

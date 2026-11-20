@@ -70,8 +70,8 @@ const ready = `{"t":"ready","ice":[],"ttl":3600}`
 func TestPathFrameLimitsAndRefresh(t *testing.T) {
 	p, ws, err := testPath(t, challenge, ready)
 	check(t, err)
-	eq(t, p.lifetime(), time.Hour)
-	eq(t, p.Route().ICE, []proto.ICEServer{})
+	eq(t, p.half(), 30*time.Minute)
+	eq(t, p.Route().ICE, []proto.ICEServer(nil))
 	e := proto.Envelope{Payload: "<local>", Key: "peer", Signature: "sig"}
 	check(t, p.Route().Send(t.Context(), "device", e))
 	ty, raw, err := ws.Read(t.Context())
@@ -167,12 +167,7 @@ func TestPathEnds(t *testing.T) {
 	p, ws, err := testPath(t, challenge, ready)
 	check(t, err)
 	f := newPair(t)
-	eq(t, p.handle(t.Context(), "ice", []byte(`{"t":"ice","ice":[],"ttl":0}`), f.b, nil, nil).Error(), "invalid ICE credential lifetime")
-	f.b.paths = func(string) []Route { return []Route{{ICE: []proto.ICEServer{{URLs: []string{"bogus"}}}}} }
-	offer := f.a.sign(proto.Offer{SignalHeader: f.a.header(link{f.b.key.ID(), randomID()}, "offer"), SDP: "v=0\r\no=- 1 1 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n"})
-	err = p.from(t.Context(), f.b, encode(frame(offer)))
-	var code identity.Code
-	eq(t, err != nil && !errors.As(err, &code), true)
+	eq(t, p.handle(t.Context(), "ice", []byte(`{"t":"ice","ice":[],"ttl":0}`), f.b, nil).Error(), "invalid ICE credential lifetime")
 	done := make(chan error, 1)
 	go func() { done <- p.Serve(t.Context(), f.b, nil) }()
 	check(t, ws.CloseNow())
@@ -184,8 +179,8 @@ func TestMustStopsOnError(t *testing.T) {
 	must(errors.New("mistake"))
 }
 
-// One rendezvous connection carries fewer than 100 frames in any 10 seconds;
-// the rest wait their turn, in order, and a frame given up on takes no turn.
+// One rendezvous connection carries at most 90 frames in any 10 seconds; the
+// rest wait their turn, in order, and a frame given up on takes no turn.
 func TestPathPacesFrames(t *testing.T) {
 	p, ws, err := testPath(t, challenge, ready)
 	check(t, err)
@@ -193,7 +188,7 @@ func TestPathPacesFrames(t *testing.T) {
 	p.pace = pacer{}
 	synctest.Test(t, func(t *testing.T) {
 		start := time.Now()
-		for i := range 99 {
+		for i := range 90 {
 			check(t, p.Write(context.Background(), i))
 		}
 		eq(t, time.Since(start), time.Duration(0))
@@ -201,12 +196,101 @@ func TestPathPacesFrames(t *testing.T) {
 		cancel()
 		eq(t, p.Write(canceled, "given up"), context.Canceled)
 		time.Sleep(time.Second)
-		check(t, p.Write(context.Background(), 99))
+		check(t, p.Write(context.Background(), 90))
 		eq(t, time.Since(start), 10*time.Second)
 	})
-	for i := range 100 {
+	for i := range 91 {
 		_, data, err := ws.Read(t.Context())
 		check(t, err)
 		eq(t, string(data), fmt.Sprint(i))
 	}
+}
+
+// A frame whose context has ended takes no turn and is not written, also when
+// the pacer has room: the library would close the whole connection for it.
+func TestCancelledFrameKeepsThePath(t *testing.T) {
+	p, ws, err := testPath(t, challenge, ready)
+	check(t, err)
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	for range 40 {
+		eq(t, p.Write(canceled, "given up"), context.Canceled)
+	}
+	eq(t, p.pace.next, 1)
+	check(t, p.Write(t.Context(), "kept"))
+	_, data, err := ws.Read(t.Context())
+	check(t, err)
+	eq(t, string(data), `"kept"`)
+}
+
+// Each path keeps only the ICE entries that pion accepts, on ready and on
+// refresh; a signal the node cannot take does not end the path.
+func TestICEEntriesCheckedPerPath(t *testing.T) {
+	good := proto.ICEServer{URLs: []string{"stun:127.0.0.1:3478", "turn:127.0.0.1:3478?transport=udp"}, Username: "u", Credential: "c"}
+	entries := `[{"urls":["stun:127.0.0.1:3478","turn:127.0.0.1:3478?transport=udp"],"username":"u","credential":"c"},` +
+		`{"urls":["bogus"]},{"urls":["turns:127.0.0.1:443?transport=tcp"]}]`
+	p, ws, err := testPath(t, challenge, `{"t":"ready","ice":`+entries+`,"ttl":3600}`)
+	check(t, err)
+	eq(t, p.Route().ICE, []proto.ICEServer{good})
+	f := newPair(t)
+	done, events := make(chan error, 1), make(chan string, 1)
+	go func() {
+		done <- p.Serve(t.Context(), f.b, func(kind string, _ []byte) error { events <- kind; return nil })
+	}()
+	check(t, ws.Write(t.Context(), websocket.MessageText, []byte(`{"t":"ice","ice":[{"urls":["bogus"]},{"urls":["stun:127.0.0.1:1"]}],"ttl":3600}`)))
+	check(t, ws.Write(t.Context(), websocket.MessageText, []byte(`{"t":"presence","k":"device","on":true}`)))
+	eq(t, recv(t, events), "presence")
+	eq(t, p.Route().ICE, []proto.ICEServer{{URLs: []string{"stun:127.0.0.1:1"}}})
+	f.b.paths = func(string) []Route { return []Route{{ICE: []proto.ICEServer{{URLs: []string{"bogus"}}}}} }
+	offer := f.a.sign(proto.Offer{SignalHeader: f.a.header(link{f.b.key.ID(), randomID()}, "offer"), SDP: "v=0\r\no=- 1 1 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n"})
+	check(t, p.from(t.Context(), f.b, encode(frame(offer))))
+	check(t, ws.CloseNow())
+	eq(t, recv(t, done) == nil, false)
+}
+
+// Fresh ICE servers are asked for at half their ttl, and again every 10
+// seconds until they come.
+func TestRenewalAtHalfTTL(t *testing.T) {
+	p, ws, err := testPath(t, challenge, `{"t":"ready","ice":[],"ttl":60}`)
+	check(t, err)
+	p.pace = pacer{}
+	asked := func() int { p.pace.mu.Lock(); defer p.pace.mu.Unlock(); return p.pace.next }
+	synctest.Test(t, func(t *testing.T) {
+		p.startRenewal(context.Background())
+		for _, step := range []struct {
+			wait  time.Duration
+			asked int
+		}{{30*time.Second - time.Nanosecond, 0}, {time.Nanosecond, 1}, {10*time.Second - time.Nanosecond, 1}, {time.Nanosecond, 2}} {
+			time.Sleep(step.wait)
+			synctest.Wait()
+			eq(t, asked(), step.asked)
+		}
+		check(t, p.refresh([]byte(`{"t":"ice","ice":[],"ttl":40}`)))
+		time.Sleep(20*time.Second - time.Nanosecond)
+		synctest.Wait()
+		eq(t, asked(), 2)
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		eq(t, asked(), 3)
+		p.renew.Stop()
+	})
+	for range 3 {
+		_, data, err := ws.Read(t.Context())
+		check(t, err)
+		eq(t, string(data), `{"t":"ice"}`)
+	}
+}
+
+// Asking stops once a request cannot be written: the path has ended.
+func TestRenewalStopsWithThePath(t *testing.T) {
+	p, _, err := testPath(t, challenge, `{"t":"ready","ice":[],"ttl":60}`)
+	check(t, err)
+	p.pace = pacer{}
+	check(t, p.Close())
+	synctest.Test(t, func(t *testing.T) {
+		p.startRenewal(context.Background())
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		eq(t, p.pace.next, 1)
+	})
 }

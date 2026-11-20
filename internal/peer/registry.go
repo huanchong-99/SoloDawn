@@ -15,8 +15,8 @@ import (
 
 // An offerKind answers the first application of an offer of its kind. It
 // runs under the peer lock, after the envelope, the description and the
-// once-only rule have passed.
-type offerKind func(p *Peer, k link, desc webrtc.SessionDescription) (*proto.Envelope, error)
+// once-only rule have passed; paths is the signer's, taken before the lock.
+type offerKind func(p *Peer, k link, desc webrtc.SessionDescription, paths []Route) (*proto.Envelope, error)
 
 // offerKinds is keyed by the kind kindOf names: "ordinary" or "probe". The
 // file of each kind registers it from its own init.

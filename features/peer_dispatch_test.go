@@ -151,21 +151,24 @@ func (w *dispatchWorld) header(kind, conn string) proto.SignalHeader {
 }
 
 // send signs payload as the browser and delivers it to the node; the node's
-// answer, if any, is decoded into answer.
+// answer, if any, is decoded into answer. The node sends its answer from a
+// goroutine of its own, so it is waited for.
 func (w *dispatchWorld) send(payload any, answer *proto.Answer) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	var reply []proto.Envelope
-	path := peer.Route{ID: "local", Send: func(_ context.Context, _ string, env proto.Envelope) error { reply = append(reply, env); return nil }}
+	reply := make(chan proto.Envelope, 1)
+	path := peer.Route{ID: "local", Send: func(_ context.Context, _ string, env proto.Envelope) error { reply <- env; return nil }}
 	if err := w.peer.Receive(w.ctx, path, signal(w.browser.Sign(string(data)))); err != nil || answer == nil {
 		return err
 	}
-	if len(reply) != 1 {
-		return fmt.Errorf("the node answered %d times", len(reply))
+	select {
+	case <-w.ctx.Done():
+		return errors.New("the node did not answer")
+	case env := <-reply:
+		return proto.Decode([]byte(env.Payload), answer)
 	}
-	return proto.Decode([]byte(reply[0].Payload), answer)
 }
 
 // candidates applies the node's relay candidates once its answer is set.
