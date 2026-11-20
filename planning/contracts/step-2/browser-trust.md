@@ -251,10 +251,10 @@ id, so that two people can compare it outside SoloDawn (section 10, limit 1).
 
 ### 8.3 What the other step 2 contracts show
 
-This file adds nothing to the other files of `contracts/step-2/`
-(`people.md`, `confirm.md`, `authority.md`, `watch-team.md`,
-`checks-forge.md`, `move.md`, `copy.md`), which say what their own
-additions show. Their acceptance tests are in `steps/step-2-3-acceptance.md`.
+This file adds nothing to the other step 2 files, which say what their own
+additions show (`people.md`, `confirm.md`, `labels.md`, `authority.md`,
+`authority-record.md`, `fork-vectors.md`, `watch-team.md`, `checks-forge.md`,
+`move.md`, `copy.md`); their tests are in `steps/step-2-3-acceptance.md`.
 
 ## 9. Notes for the user documentation
 
