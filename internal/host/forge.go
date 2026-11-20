@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -114,13 +115,23 @@ func pullRequest(url string) (*ForgePullRequest, error) {
 	return &ForgePullRequest{Number: n, URL: url}, nil
 }
 
-// WaitHostedChecks reads the head and checks together. Only a completed
-// result for commit can be reported to the home. Cancel ctx on supersession.
-func (f TaskForge) WaitHostedChecks(ctx context.Context, pr int, commit string) (*proto.ChecksBody, error) {
+// WaitHostedChecks reads the head and checks together every 30 s and returns
+// the result for commit once every check has finished. A read that fails or
+// shows another head counts as unfinished. No checks pass only on a second
+// consecutive empty read, because a forge may register its checks a few
+// seconds late. The first unfinished read at or after sixty minutes from since,
+// checks.local.at of the submitted commit, fails the checks as timed out with
+// the items of the last read at that commit. The error is ctx's: cancel ctx
+// on supersession.
+func (f TaskForge) WaitHostedChecks(ctx context.Context, pr int, commit string, since time.Time) (*proto.ChecksBody, error) {
+	w := hostedWait{commit: commit}
+	deadline := since.Add(60 * time.Minute)
 	for {
-		result, err := f.ReadHostedChecks(ctx, pr, commit)
-		if result != nil || err != nil {
-			return result, err
+		if result := w.next(f.readHostedChecks(ctx, pr, commit)); result != nil {
+			return result, nil
+		}
+		if !time.Now().Before(deadline) {
+			return w.timedOut(), nil
 		}
 		nextPoll := time.After(30 * time.Second)
 		select {
@@ -131,21 +142,84 @@ func (f TaskForge) WaitHostedChecks(ctx context.Context, pr int, commit string) 
 	}
 }
 
-// ReadHostedChecks takes one sample. A nil result without an error means
-// the head has moved or a check is still pending.
-func (f TaskForge) ReadHostedChecks(ctx context.Context, pr int, commit string) (*proto.ChecksBody, error) {
+// hostedRead is one read at the submitted head: an item per check, and
+// whether every check has finished.
+type hostedRead struct {
+	items []proto.CheckItem
+	done  bool
+}
+
+// readHostedChecks is nil when the read failed or showed another head.
+func (f TaskForge) readHostedChecks(ctx context.Context, pr int, commit string) *hostedRead {
 	out, err := f.command(ctx, "gh", "pr", "view", strconv.Itoa(pr), "--json", "headRefOid,statusCheckRollup")
-	if err != nil {
-		return nil, err
-	}
 	var view struct {
 		HeadRefOid        string
 		StatusCheckRollup []forgeCheck
 	}
-	if err := json.Unmarshal([]byte(out), &view); err != nil || view.HeadRefOid != commit {
-		return nil, err
+	if err != nil || json.Unmarshal([]byte(out), &view) != nil || view.HeadRefOid != commit {
+		return nil
 	}
-	return completedChecks(commit, view.StatusCheckRollup), nil
+	read := hostedRead{items: make([]proto.CheckItem, 0, len(view.StatusCheckRollup)), done: true}
+	for _, check := range view.StatusCheckRollup {
+		item, done := check.item()
+		read.items = append(read.items, item)
+		read.done = read.done && done
+	}
+	return &read
+}
+
+// hostedWait keeps what the reads so far decide: the items of the last read
+// at the submitted head, and whether that read was empty and finished.
+type hostedWait struct {
+	commit string
+	last   []proto.CheckItem
+	empty  bool
+}
+
+// next takes one read and returns the result to report, or nil to read again.
+func (w *hostedWait) next(read *hostedRead) *proto.ChecksBody {
+	if read == nil {
+		w.empty = false
+		return nil
+	}
+	empty := len(read.items) == 0
+	if read.done && (!empty || w.empty) {
+		return w.body(read.items)
+	}
+	w.last, w.empty = read.items, empty
+	return nil
+}
+
+// timedOut fails the checks with the last read's items and the reason.
+func (w *hostedWait) timedOut() *proto.ChecksBody {
+	return w.body(append(w.last, proto.CheckItem{Name: "hosted checks", Detail: new("hosted checks timed out")}))
+}
+
+func (w *hostedWait) body(items []proto.CheckItem) *proto.ChecksBody {
+	result := proto.ChecksBody{Stage: "cloud", OK: true, Commit: w.commit, Items: items}
+	for _, item := range items {
+		result.OK = result.OK && item.OK
+	}
+	return &result
+}
+
+// HostedCheck is a task whose hosted checks a restarted node polls again.
+type HostedCheck struct {
+	Task, Branch, Commit string
+	PR                   int
+	Since                time.Time // checks.local.at, where the 60 minutes count from
+}
+
+// HostedChecksToResume selects, from the task rows, the tasks a restarted
+// node polls again: active, at step cloud_check, assigned to one of ais.
+func HostedChecksToResume(tasks []proto.TaskRow, ais []string) []HostedCheck {
+	var resume []HostedCheck
+	for _, t := range tasks {
+		if t.State == "active" && t.Step == "cloud_check" && slices.Contains(ais, t.Assignee) {
+			resume = append(resume, HostedCheck{Task: t.ID, Branch: t.Branch, Commit: t.Commit, PR: t.PR, Since: time.UnixMilli(t.Checks.Local.At)})
+		}
+	}
+	return resume
 }
 
 // forgeCheck is one entry of the rollup: a CheckRun (name, status,
@@ -159,27 +233,15 @@ type forgeCheck struct {
 // passed holds the conclusions and states that count as a passed check.
 var passed = map[string]bool{"SUCCESS": true, "NEUTRAL": true, "SKIPPED": true}
 
-// completedChecks is nil while any check is still pending. No checks pass.
-func completedChecks(commit string, checks []forgeCheck) *proto.ChecksBody {
-	result := proto.ChecksBody{Stage: "cloud", OK: true, Commit: commit, Items: make([]proto.CheckItem, 0, len(checks))}
-	for _, check := range checks {
-		item := check.item()
-		if item == nil {
-			return nil
-		}
-		result.Items = append(result.Items, *item)
-		result.OK = result.OK && item.OK
-	}
-	return &result
-}
-
-func (c forgeCheck) item() *proto.CheckItem {
+// item is the check as reported, and whether it has finished. An unfinished
+// check is not passed; its detail is its status or state.
+func (c forgeCheck) item() (proto.CheckItem, bool) {
 	name, state, done := c.Name, c.Conclusion, c.Status == "COMPLETED"
+	if !done {
+		state = c.Status
+	}
 	if c.TypeName == "StatusContext" {
 		name, state, done = c.Context, c.State, c.State != "EXPECTED" && c.State != "PENDING"
 	}
-	if !done {
-		return nil
-	}
-	return &proto.CheckItem{Name: name, OK: passed[state], Detail: &state}
+	return proto.CheckItem{Name: name, OK: passed[state], Detail: &state}, done
 }

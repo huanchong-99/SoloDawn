@@ -6,6 +6,36 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-20 · deviation · CI and release builds use Go 1.26.0, eleven patch releases behind
+
+- Symptom: every CI job, and the six binaries of `.github/workflows/release.yml`, build with Go 1.26.0 (Backend run 44697108086: "Setup go version spec 1.26.0"). The newest 1.26 release is 1.26.11, so released binaries would lack the standard-library security fixes of 1.26.1 to 1.26.11.
+- Cause: `go.mod:3` says `go 1.26.0`, and `actions/setup-go` v5.6.0 takes the `go` line as an exact version; it does not read a `toolchain` line (v6 does).
+- Status: open; needs a decision: a `toolchain go1.26.11` line in `go.mod` with setup-go v6, or `go-version: 1.26.x` with `check-latest: true` in the workflows.
+
+### 2026-11-20 · bug · The Git helper of the host-check steps can still end the whole suite
+
+- Symptom: when its Git command fails, the remaining scenarios do not run and go test reports "subtest may have called FailNow on a parent test" (reproduced with commit signing in the global Git configuration: 8 of 70 scenarios ran).
+- Cause: `features/host_checks_test.go:36` calls `f.t.Fatalf` on the suite's test from a scenario; see the resolved entry "Go acceptance steps acted beyond their own scenario". The file was left out of the audit fixes because it belonged to another fix at the time.
+- Status: open. Return the error from the step, as `features/host_forge_test.go` does.
+
+### 2026-11-20 · limitation · Three peer scenarios time out on a Mac with its firewall on
+
+- Symptom: "Both nodes can offer over the same two signalling paths", "A replayed offer is not processed" and "Early and repeated candidates" fail with `context deadline exceeded` after 20 s on macOS with the application firewall enabled, on `rebuild` as merged (815c52aa6) and with the audit fixes; the other 77 scenarios pass. CI runs them on Linux only.
+- Cause, not verified: `features/peer_test.go` makes each node's sockets with `peer.Listen(0, 0)`, which listens on every interface (`internal/peer/sockets.go:22-23`), and the firewall holds incoming traffic to the unsigned test binary on addresses other than loopback. The package's own tests keep the sockets on loopback (`internal/peer/sockets.go:26-27`).
+- Status: open. Bind the acceptance nodes to loopback as the unit tests do, or exclude the scenarios on macOS by tag.
+
+### 2026-11-20 · limitation · Rendezvous steps reserve a port by closing it
+
+- Symptom: not observed. The steps listen on 127.0.0.1:0, close the listener and give its port to `solodawn rendezvous`; another process can bind the port in between, and `rvListening` would take that process for the rendezvous.
+- Cause: `features/rendezvous_test.go:162-169` and `features/relay_test.go:89-94`; the command cannot take a listener or report the port it chose.
+- Status: open, until the command can listen on port 0 and print its address.
+
+### 2026-11-20 · limitation · Three web unit tests time out on a fully busy machine
+
+- Symptom: with 14 busy loops on 12 cores, `web/src/main.test.ts:4`, `web/src/lib/motion.test.ts:29` and `web/src/lib/prefs.test.ts:26` exceeded Vitest's 5 s test limit; one idle run right after `pnpm install` also failed two tests in two files (output not kept). CI passed.
+- Cause: each is the first test of its file to import the client's modules afresh inside the test, so their transformation counts against the test's limit.
+- Status: open; the gate can fail spuriously while other work loads the machine.
+
 ### 2026-11-20 · limitation · End-to-end tests cannot run a node until the node runtime is wired
 
 - Symptom: `startNet` of `web/e2e/nodes.ts` waits until each node answers on its local socket. Every node exits with status 1 and `node runtime is unavailable` right after it makes its data directory and binds the socket, so a start that awaits nodes fails with that message. The harness's own scenarios start nodes with `awaitNodes: false`. A node is started with no flags, because `solodawn node` takes none yet: it has no signalling or web port and no rendezvous address, and the harness hands over only its HOME, data directory, socket and environment.
@@ -107,6 +137,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the rendezvous answers each `to` it cannot deliver with `{"t":"offline","k":…}`, which names the target but not the `conn` (`planning/contracts/rendezvous.md` section 2.2). `internal/peer/path.go:140-145` passes every such report to `Peer.Offline`, which takes it for each unanswered offer to that target and removes the reporting path (`internal/peer/unanswered.go:38-43`). A report for an earlier frame (the earlier offer or one of its candidates) still on its way when the next offer leaves therefore counts against the new one. The back-off of at least one second makes this rare; a presence report can end the back-off sooner (`planning/flows/connect.md` step 16).
 - Status: open, accepted by the coordinator on 2026-11-20 with no contract change.
 
+### 2026-11-20 · deviation · Nothing resumes hosted checks after a node restart yet
+
+- Symptom: after a restart, a task at step `cloud_check` is not polled again, so it stays there until something else moves it (decision D3 of the host-contract audit).
+- Cause: `HostedChecksToResume` (`internal/host/forge.go`) selects the tasks to poll again and gives each its PR, commit, branch and `checks.local.at`, where the 60-minute limit counts from, but no code runs at node start yet to call it and then `WaitHostedChecks` for each.
+- Status: open. The node must call it at start; owner N-4, or HS-0 if it lands first.
+
 ### 2026-11-20 · deviation · No receiver check or shared vector for a beacon yet
 
 - Symptom: `planning/contracts/envelope.md` section 3, checks 4 and 5, now gives a beacon (`planning/contracts/rendezvous.md` section 4) a third set of receiver checks: no `to`, and a two-minute window. The code and the vectors know two kinds only. `OpenSignal` requires `to`, and `OpenCommand` allows 24 hours. So neither reads a beacon as the contract says.
@@ -120,6 +156,29 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, owner W-2.
 
 ## Resolved
+
+### 2026-11-20 · bug · Go acceptance steps acted beyond their own scenario
+
+Found in the audit of the harness; each was reproduced before the fix (lines are those before it).
+- A failing step could end the whole suite: later scenarios and their After hooks did not run, godog printed no summary, go test said "subtest may have called FailNow on a parent test". Steps called `Fatal` on the suite's own test from a scenario's subtest (`features/node_update_test.go:98`, `:104`, `features/host_forge_test.go:26`).
+- `go test -tags acceptance -count=2 ./features/` failed with `open …/TestFeatures…/017/v0.3.1: no such file or directory`: the cache of release builds was a package variable that outlived the TempDir of the first run (`features/node_update_test.go:89`).
+- The fake node's socket stayed listening through every later scenario, and each node-update scenario left an HTTP server listening (five by the end): cleanups were registered with `f.t.Cleanup` (`features/cmd_local_test.go:38`, `:44`, `features/node_update_test.go:54`).
+- Under `go test -run` naming the two login-service scenarios, "Register" failed and "Remove" passed without doing anything: HOME was set in a subtest of the suite's test that `-run` skipped (`features/node_service_test.go:30`).
+- A scenario that changed a variable other than HOME, or the working directory, changed every later scenario: the guard of PR #121 checked HOME only and did not restore it (`features/acceptance_test.go:67-80`).
+- With `commit.gpgsign = true` in the global Git configuration, a host-check scenario failed with "gpg failed to sign the data": git ran with the user's and the system's configuration.
+- A step error X was printed as "after scenario hook failed: X, step error: X, X, step error: X": After hooks returned the step's error as their own (`features/identity_test.go:72`, `features/rendezvous_test.go:101`, `features/peer_test.go:61`).
+- Status: resolved on branch `test/audit-harness-ci`: steps return errors (the comment on `fixtures.t` states the rule); `afterScenario` undoes per scenario; the build cache is `fixtures.stamped`; the login steps set and restore the variables around each operation; after each scenario the suite compares every variable and the working directory with their state at its start, names what changed (never values) and restores it; `TestFeatures` sets `GIT_CONFIG_GLOBAL` to the null device and `GIT_CONFIG_NOSYSTEM`; the hooks return nil. One `Fatal` remains (open entry above).
+
+### 2026-11-20 · bug · The web acceptance file failed on a busy machine although its tests passed
+
+- Symptom: with every core busy, `features/web.spec.ts` failed 3 of 3 runs with "HookTimeoutError: Hook timed out in 10000ms" at `web/features/motion.ts:22`; all 213 tests passed.
+- Cause: `browser.close()` took 10.0 s under that load (20 to 60 ms idle), Vitest's default hook limit.
+- Status: resolved on branch `test/audit-harness-ci`: both browser hooks have 60 s; 3 of 3 loaded runs passed.
+
+### 2026-11-20 · deviation · CI gaps found in the audit of the workflows
+
+- Symptom: `pnpm/action-setup` (third party) and the `actions/*` were referenced by movable tags; `release.yml` restored pnpm and Go caches into the build of released files; `sudo ./netsim.test` had no time limit (a test binary run directly has none); CI never vetted code behind the `acceptance` tag and never compiled the macOS and Windows test files.
+- Status: resolved on branch `test/audit-harness-ci`: every action is pinned to the full commit its tag names today, the release job uses no cache, the netsim binary gets `-test.timeout=10m`, and `go vet` runs with the `acceptance` tag and for every cross-compile target.
 
 ### 2026-11-20 · deviation · Two host check tests skipped themselves on Windows
 

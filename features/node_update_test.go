@@ -3,6 +3,7 @@
 package features
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"net/http"
@@ -26,7 +27,7 @@ func nodeUpdateSteps(sc *godog.ScenarioContext, f fixtures) {
 	if runtime.GOOS == "windows" {
 		exe = ".exe"
 	}
-	release := func(tag string) []byte { return stampedRelease(f, tag) }
+	cleanup := afterScenario(sc)
 	var u node.Updater
 	var state string
 	var restarts int
@@ -38,10 +39,17 @@ func nodeUpdateSteps(sc *godog.ScenarioContext, f fixtures) {
 			Busy:    func() bool { return state != "idle" },
 			Restart: func() error { restarts++; return nil },
 		}
-		return os.WriteFile(u.Binary, release(tag), 0o755)
+		image, err := stampedRelease(f, tag)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(u.Binary, image, 0o755)
 	})
-	sc.Step(`^the release server offers "([^"]+)" with a (matching|mismatching) checksum$`, func(tag, checksum string) {
-		image := release(tag)
+	sc.Step(`^the release server offers "([^"]+)" with a (matching|mismatching) checksum$`, func(tag, checksum string) error {
+		image, err := stampedRelease(f, tag)
+		if err != nil {
+			return err
+		}
 		sum := sha256.Sum256(image)
 		if checksum == "mismatching" {
 			image = image[:len(image)-1]
@@ -51,12 +59,13 @@ func nodeUpdateSteps(sc *godog.ScenarioContext, f fixtures) {
 		mux.HandleFunc("/SHA256SUMS", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprintf(w, "%x  %s\n", sum, name) })
 		mux.HandleFunc("/"+name, func(w http.ResponseWriter, _ *http.Request) { w.Write(image) })
 		server := httptest.NewServer(mux)
-		f.t.Cleanup(server.Close)
+		cleanup(server.Close)
 		u.ReleaseURL = server.URL
+		return nil
 	})
 	sc.Step(`^a session is (working|takeover)$`, func(s string) { state = s })
 	sc.Step(`^the session becomes idle$`, func() { state = "idle" })
-	sc.Step(`^the node checks for an update$`, func() error { return u.Check(f.t.Context(), time.Now()) })
+	sc.Step(`^the node checks for an update$`, func(ctx context.Context) error { return u.Check(ctx, time.Now()) })
 	sc.Step(`^the node applies its update$`, func() error { return u.Apply() })
 	sc.Step(`^the installed binary prints version "([^"]+)"$`, func(tag string) error {
 		out, err := exec.Command(u.Binary, "version").Output()
@@ -85,23 +94,17 @@ func nodeUpdateSteps(sc *godog.ScenarioContext, f fixtures) {
 	})
 }
 
-// stampedBuilds holds one build of solodawn per tag for the whole suite.
-var stampedBuilds = map[string]string{}
-
-// stampedRelease builds solodawn stamped with tag, as the release build does.
-func stampedRelease(f fixtures, tag string) []byte {
-	bin, ok := stampedBuilds[tag]
+// stampedRelease builds solodawn stamped with tag, as the release build does,
+// once per tag and run of the suite: the build lives in the suite's TempDir.
+func stampedRelease(f fixtures, tag string) ([]byte, error) {
+	bin, ok := f.stamped[tag]
 	if !ok {
 		bin = filepath.Join(f.t.TempDir(), tag)
 		out, err := exec.Command("go", "build", "-o", bin, "-ldflags", "-X github.com/huanchong-99/SoloDawn/internal/node.Version="+tag, "../cmd/solodawn").CombinedOutput()
 		if err != nil {
-			f.t.Fatalf("go build %s: %v\n%s", tag, err, out)
+			return nil, fmt.Errorf("go build %s: %v\n%s", tag, err, out)
 		}
-		stampedBuilds[tag] = bin
+		f.stamped[tag] = bin
 	}
-	image, err := os.ReadFile(bin)
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	return image
+	return os.ReadFile(bin)
 }

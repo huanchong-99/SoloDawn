@@ -94,11 +94,11 @@ func rendezvousSteps(sc *godog.ScenarioContext, bin string) {
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, rvKey{}, w), nil
 	})
-	sc.After(func(ctx context.Context, _ *godog.Scenario, err error) (context.Context, error) {
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		for _, undo := range slices.Backward(w.cleanup) {
 			undo()
 		}
-		return ctx, err
+		return ctx, nil
 	})
 	sc.Step(`^a local rendezvous$`, w.local)
 	sc.Step(`^the command "solodawn rendezvous" listening on a local port$`, w.command)

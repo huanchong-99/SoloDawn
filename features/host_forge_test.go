@@ -4,10 +4,10 @@ package features
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
-	"testing"
 
 	"github.com/cucumber/godog"
 	"github.com/huanchong-99/SoloDawn/internal/host"
@@ -17,65 +17,68 @@ func init() {
 	stepSets["host_forge"] = hostForgeSteps
 }
 
-func hostForgeGit(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v: %v: %s", args, err, out)
+// hostForgeGit runs each command in dir, stops at the first that fails and
+// returns the output of the last.
+func hostForgeGit(dir string, commands ...[]string) (string, error) {
+	var out string
+	for _, args := range commands {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		b, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("git %v: %v: %s", args, err, b)
+		}
+		out = strings.TrimSpace(string(b))
 	}
-	return strings.TrimSpace(string(out))
+	return out, nil
+}
+
+func hostForgeCommit(msg string) []string {
+	return []string{"-c", "user.name=test", "-c", "user.email=test.invalid", "commit", "--allow-empty", "-m", msg}
 }
 
 func hostForgeSteps(sc *godog.ScenarioContext, f fixtures) {
 	var task host.TaskForge
 	var remote, commit, newer string
 	var pushErr error
-	git := func(args ...string) string { return hostForgeGit(f.t, task.Worktree, args...) }
-	makeCommit := func(msg string) {
-		git("-c", "user.name=test", "-c", "user.email=test.invalid", "commit", "--allow-empty", "-m", msg)
+	remoteHas := func(want string) error {
+		got, err := hostForgeGit(remote, []string{"for-each-ref", "--format=%(refname) %(objectname)"})
+		if err == nil && got != "refs/heads/"+task.Branch+" "+want {
+			err = fmt.Errorf("unexpected remote refs: %s", got)
+		}
+		return err
 	}
-	remoteBranch := func() string {
-		return hostForgeGit(f.t, remote, "for-each-ref", "--format=%(refname) %(objectname)")
-	}
-	sc.Step(`^a task worktree with a bare origin and another unpublished branch$`, func() {
+	sc.Step(`^a task worktree with a bare origin and another unpublished branch$`, func() (err error) {
 		task = host.TaskForge{Worktree: f.t.TempDir(), Branch: "task/12-fix"}
 		remote = f.t.TempDir()
-		hostForgeGit(f.t, remote, "init", "--bare", "-b", "base")
-		git("init", "-b", task.Branch)
-		makeCommit("task")
-		git("branch", "sibling")
-		git("remote", "add", "origin", remote)
-		commit = git("rev-parse", "HEAD")
+		if _, err = hostForgeGit(remote, []string{"init", "--bare", "-b", "base"}); err != nil {
+			return err
+		}
+		commit, err = hostForgeGit(task.Worktree, []string{"init", "-b", task.Branch}, hostForgeCommit("task"),
+			[]string{"branch", "sibling"}, []string{"remote", "add", "origin", remote}, []string{"rev-parse", "HEAD"})
+		return err
 	})
-	sc.Step(`^origin has a newer commit on the assigned branch$`, func() {
-		git("switch", "sibling")
-		makeCommit("newer")
-		newer = git("rev-parse", "HEAD")
-		git("push", "origin", "HEAD:refs/heads/"+task.Branch)
-		git("switch", task.Branch)
+	sc.Step(`^origin has a newer commit on the assigned branch$`, func() (err error) {
+		if newer, err = hostForgeGit(task.Worktree, []string{"switch", "sibling"}, hostForgeCommit("newer"), []string{"rev-parse", "HEAD"}); err != nil {
+			return err
+		}
+		_, err = hostForgeGit(task.Worktree, []string{"push", "origin", "HEAD:refs/heads/" + task.Branch}, []string{"switch", task.Branch})
+		return err
 	})
-	sc.Step(`^the host pushes the assigned task branch$`, func() {
-		pushErr = task.PushBranch(f.t.Context())
+	sc.Step(`^the host pushes the assigned task branch$`, func(ctx context.Context) {
+		pushErr = task.PushBranch(ctx)
 	})
 	sc.Step(`^origin contains only that branch at the task commit$`, func() error {
 		if pushErr != nil {
 			return pushErr
 		}
-		if got := remoteBranch(); got != "refs/heads/"+task.Branch+" "+commit {
-			return fmt.Errorf("unexpected remote refs: %s", got)
-		}
-		return nil
+		return remoteHas(commit)
 	})
 	sc.Step(`^Git rejects the push and origin keeps the newer commit$`, func() error {
 		if err := hostForgeRejected(task, pushErr); err != nil {
 			return err
 		}
-		if got := remoteBranch(); got != "refs/heads/"+task.Branch+" "+newer {
-			return fmt.Errorf("unexpected remote refs after rejection: %s", got)
-		}
-		return nil
+		return remoteHas(newer)
 	})
 }
 
