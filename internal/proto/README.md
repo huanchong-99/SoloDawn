@@ -11,9 +11,9 @@ can mix row types, so its elements stay as JSON until the consumer reads `r`
 shape, e.g. an answered call, use `MessageRow[CallBody, CallAnsweredState]`.
 The body is fixed at creation; only the card state changes.
 
-Sender tests can pass their encoded JSON to `UnexpectedNulls`, with the JSON
-Pointers allowed to be null for that shape (e.g. `/thread`, `/re`, and
-`/state` for text messages). It reports every other null, including in lists.
+Sender tests pass what their code encoded to `UnexpectedNulls`, with the JSON
+Pointers that may be null for that shape (e.g. `/thread`, `/re` and `/state` for
+a text message). It returns every other null, in lists as well.
 
 The examples in [testdata](testdata/) are shared with the web client.
 `go test ./internal/proto` checks encoding and decoding against them.
