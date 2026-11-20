@@ -23,18 +23,23 @@ type Incoming = v.InferOutput<typeof incoming> | RVReady | { t: 'closed' };
 type Receive = (url: string, frame: Incoming) => void;
 type ICEServer = RVReady['ice'][number];
 
-/** The largest frame, in UTF-8 bytes (contracts/rendezvous.md section 2). */
+/** The largest frame, in UTF-8 bytes (contracts/rendezvous.md section 2). A `to` is forwarded
+ *  as a `from`, whose type is 2 bytes longer and must fit too. */
 const maxFrame = 16_384;
-/** A path sends at most `burst` frames in any `period` milliseconds, below the 100 of the
- *  contract and the 120 at which the server closes it, as a node does (internal/peer/path.go). */
+const maxTo = maxFrame - 2;
+/** A path sends at most `burst` frames in any `period` milliseconds: below the 120 in 10
+ *  seconds at which the server closes it, with a second to spare for jitter. */
 const burst = 90;
-const period = 10_000;
+const period = 11_000;
 
 const closed = { t: 'closed' } as const;
 
 // An ICE URL as pion's stun.ParseURI takes it (internal/peer/path.go, usable): a host, an
 // optional port, and for TURN at most the transport udp or tcp. Schemes are lower case.
-const hostPort = String.raw`(?:\[[0-9A-Fa-f:.]+\]|[^\s:/?#[\]@]+)(?::[0-9]+)?`;
+// A port is 1 to 65535, on which Chromium insists; one written with leading zeros goes too.
+const port =
+  '(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])';
+const hostPort = String.raw`(?:\[[0-9A-Fa-f:.]+\]|[^\s:/?#[\]@]+)` + `(?::${port})?`;
 const stunURL = new RegExp(`^stuns?:${hostPort}$`);
 const turnURL = new RegExp(`^turns?:${hostPort}(?:\\?transport=(?:udp|tcp))?$`);
 const relayed = (url: string) => turnURL.test(url);
@@ -42,10 +47,11 @@ const parses = (url: string) => stunURL.test(url) || relayed(url);
 
 /** Whether the browser can use an ICE entry: Go drops an entry with a URL pion cannot read, or a
  *  TURN URL without a username. A browser also throws on an empty URL list and on TURN without a
- *  credential (WebRTC, "validate an ICE server"), so those go too. */
+ *  credential (WebRTC, "validate an ICE server"), and Chromium on an empty username or
+ *  credential, so those go too. */
 function usable({ urls, username, credential }: ICEServer): boolean {
   if (urls.length === 0 || !urls.every(parses)) return false;
-  return !urls.some(relayed) || (Boolean(username) && credential !== undefined);
+  return !urls.some(relayed) || (Boolean(username) && Boolean(credential));
 }
 
 /** A `ready` or `ice` answer with only its usable entries, or undefined for a ttl below 1, which
@@ -53,6 +59,8 @@ function usable({ urls, username, credential }: ICEServer): boolean {
 function credentials<F extends RVReady | RVICEAnswer>(frame: F): F | undefined {
   return frame.ttl < 1 ? undefined : { ...frame, ice: frame.ice.filter(usable) };
 }
+
+const report = (error: unknown) => reportError(error);
 
 function read(data: string): unknown {
   try {
@@ -69,12 +77,17 @@ const SignalConn = v.object({ conn: Id });
 function path(url: string, device: Device, known: Known, receive: Receive) {
   let silent = false;
   let delivered = Promise.resolve();
-  // A from waits for its checks; the frames after it wait for it.
+  // A from waits for its checks; the frames after it wait for it. What throws is reported and
+  // stops nothing: a check that throws (known, for a from) drops its frame at once, and a
+  // receive that throws leaves the frames after it to come.
   const deliver = (frame: Incoming | undefined | Promise<Incoming | undefined>) => {
-    delivered = delivered.then(async () => {
-      const f = await frame;
-      if (f !== undefined && !silent) receive(url, f);
-    });
+    const checked = Promise.resolve(frame).catch(report);
+    delivered = delivered
+      .then(async () => {
+        const f = await checked;
+        if (f && !silent) receive(url, f);
+      })
+      .catch(report);
   };
 
   let socket: WebSocket;
@@ -100,13 +113,14 @@ function path(url: string, device: Device, known: Known, receive: Receive) {
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   function transmit(text: string) {
-    sent[next] = Date.now();
+    sent[next] = performance.now();
     next = (next + 1) % burst;
     socket.send(text);
   }
 
   // How long the next frame waits until the frame `burst` places back is `period` old.
-  const delay = () => sent[next] + period - Date.now();
+  // performance.now() is monotonic: a wall clock set back would hold frames for that long.
+  const delay = () => sent[next] + period - performance.now();
 
   function drain() {
     while (ready && queue.length > 0) {
@@ -201,11 +215,12 @@ export function rendezvous(
 ) {
   const paths = Array.from(new Set(urls), (url) => path(url, device, known, receive));
   return {
-    /** Throws a RangeError for a frame of more than 16 KiB, which the server would close the
-     *  path for. */
+    /** Throws a RangeError for a frame the server would close the path for: more than 16 KiB,
+     *  or a `to` of more than 16 KiB less 2 bytes. */
     send(frame: Outgoing) {
       const text = JSON.stringify(frame);
-      if (utf8(text).length > maxFrame) throw new RangeError('signalling frame exceeds 16 KiB');
+      const limit = frame.t === 'to' ? maxTo : maxFrame;
+      if (utf8(text).length > limit) throw new RangeError('signalling frame exceeds 16 KiB');
       for (const path of paths) path.send(text);
     },
     close() {

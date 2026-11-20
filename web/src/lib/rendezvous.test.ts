@@ -265,13 +265,15 @@ it('passes on only the ICE entries the browser can use, and drops an ice answer 
   const keep = [
     stun,
     { urls: ['stun:rv.example', 'stuns:[2001:db8::1]:5349'] },
+    { urls: ['stun:rv.example:1', 'stun:rv.example:9', 'stun:rv.example:65535'] },
+    { urls: ['stun:rv.example:10000', 'stun:rv.example:59999', 'stun:rv.example:64999'] },
+    { urls: ['stun:rv.example:65499', 'stun:rv.example:65529'] },
     {
       urls: ['turn:rv.example:3478?transport=udp', 'turns:turn.rv.example:443?transport=tcp'],
       username: 'u',
       credential: 'c',
     },
-    { urls: ['turn:rv.example'], username: 'u', credential: '' },
-    { urls: ['stun:rv.example'], username: '', credential: 'unused' },
+    { urls: ['stun:rv.example'], username: '', credential: '' },
   ];
   const drop = [
     { urls: [] },
@@ -279,12 +281,22 @@ it('passes on only the ICE entries the browser can use, and drops an ice answer 
     { urls: ['stun:'] },
     { urls: ['stun:rv.example:'] },
     { urls: ['stun:rv.example:port'] },
+    { urls: ['stun:rv.example:0'] },
+    { urls: ['stun:rv.example:080'] },
+    { urls: ['stun:rv.example:65536'] },
+    { urls: ['stun:rv.example:65540'] },
+    { urls: ['stun:rv.example:65600'] },
+    { urls: ['stun:rv.example:66000'] },
+    { urls: ['stun:rv.example:70000'] },
+    { urls: ['stun:rv.example:99999'] },
+    { urls: ['stun:rv.example:100000'] },
     { urls: ['STUN:rv.example'] },
     { urls: ['http://rv.example'] },
     { urls: ['stun:rv.example', 'bogus'] },
     { urls: ['turn:rv.example'], credential: 'c' },
     { urls: ['turn:rv.example'], username: '', credential: 'c' },
     { urls: ['turns:rv.example'], username: 'u' },
+    { urls: ['turn:rv.example'], username: 'u', credential: '' },
     { urls: ['turn:rv.example?transport=sctp'], username: 'u', credential: 'c' },
     { urls: ['stun:rv.example', 'turn:rv.example'], credential: 'c' },
   ];
@@ -315,8 +327,11 @@ it('ignores a frame that is no JSON or matches no schema', async () => {
   ]);
 });
 
-it('sends at most 90 frames in any 10 seconds on a path, in order, and queues the rest', async () => {
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+const pacedClock = () =>
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+
+it('sends at most 90 frames in any 11 seconds on a path, in order, and queues the rest', async () => {
+  pacedClock();
   const { client, rv } = connect();
   const joins = (from: number, to: number) =>
     Array.from({ length: to - from }, (_, i) => ({
@@ -327,29 +342,30 @@ it('sends at most 90 frames in any 10 seconds on a path, in order, and queues th
   await rv.authenticate();
   // The auth counts: 89 frames go with it.
   expect(rv.frames()).toStrictEqual([rv.frames()[0], ...joins(0, 89)]);
-  vi.advanceTimersByTime(9_999);
+  // Not at 10 seconds, where the server's window ends: a second later.
+  vi.advanceTimersByTime(10_999);
   client.send(joins(150, 151)[0]);
   expect(rv.sent).toHaveLength(90);
   vi.advanceTimersByTime(1);
   expect(rv.frames().slice(1)).toStrictEqual(joins(0, 151));
-  // The window slides: the 28 places of the frames sent at 0 are free, the rest in 10 seconds.
+  // The window slides: the 28 places of the frames sent at 0 are free, the rest in 11 seconds.
   for (const frame of joins(151, 191)) client.send(frame);
   expect(rv.frames().slice(1)).toStrictEqual(joins(0, 179));
-  vi.advanceTimersByTime(9_999);
+  vi.advanceTimersByTime(10_999);
   expect(rv.sent).toHaveLength(180);
   vi.advanceTimersByTime(1);
   expect(rv.frames().slice(1)).toStrictEqual(joins(0, 191));
-  // The 90 frames of 10 seconds ago free their places; what waits when the client closes is
+  // The 90 frames of 11 seconds ago free their places; what waits when the client closes is
   // never sent.
   for (const frame of joins(191, 300)) client.send(frame);
   expect(rv.frames().slice(1)).toStrictEqual(joins(0, 269));
   client.close();
-  vi.advanceTimersByTime(20_000);
+  vi.advanceTimersByTime(30_000);
   expect(rv.frames().slice(1)).toStrictEqual(joins(0, 269));
 });
 
-it('frees each place 10 seconds after its own frame, not all at once', async () => {
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+it('frees each place 11 seconds after its own frame, not all at once', async () => {
+  pacedClock();
   const { client, rv } = connect();
   await rv.authenticate();
   const ice = () => client.send({ t: 'ice' });
@@ -357,14 +373,27 @@ it('frees each place 10 seconds after its own frame, not all at once', async () 
   vi.advanceTimersByTime(5_000);
   for (let i = 0; i < 145; i++) ice(); // 45 go at 5 s, 100 wait
   expect(rv.sent).toHaveLength(90);
-  vi.advanceTimersByTime(5_000);
-  expect(rv.sent).toHaveLength(135); // the 45 places of 0 s
+  vi.advanceTimersByTime(5_999);
+  expect(rv.sent).toHaveLength(90);
+  vi.advanceTimersByTime(1);
+  expect(rv.sent).toHaveLength(135); // at 11 s, the 45 places of 0 s
   vi.advanceTimersByTime(4_999);
   expect(rv.sent).toHaveLength(135);
   vi.advanceTimersByTime(1);
-  expect(rv.sent).toHaveLength(180); // the 45 places of 5 s
-  vi.advanceTimersByTime(5_000);
-  expect(rv.sent).toHaveLength(190);
+  expect(rv.sent).toHaveLength(180); // at 16 s, the 45 places of 5 s
+  vi.advanceTimersByTime(6_000);
+  expect(rv.sent).toHaveLength(190); // at 22 s, 10 of the places of 11 s
+});
+
+it('paces by a clock that a wall clock set back does not hold up', async () => {
+  pacedClock();
+  const { client, rv } = connect();
+  await rv.authenticate();
+  for (let i = 0; i < 150; i++) client.send({ t: 'ice' });
+  expect(rv.sent).toHaveLength(90);
+  vi.spyOn(Date, 'now').mockReturnValue(Date.now() - 3_600_000);
+  vi.advanceTimersByTime(11_000);
+  expect(rv.sent).toHaveLength(151);
 });
 
 it('refuses a frame of more than 16 KiB in UTF-8 on every path, and sends one of exactly 16 KiB', async () => {
@@ -387,6 +416,82 @@ it('refuses a frame of more than 16 KiB in UTF-8 on every path, and sends one of
     new RangeError('signalling frame exceeds 16 KiB'),
   );
   for (const socket of [rv, lan]) expect(socket.frames().slice(1)).toStrictEqual([room16(16_384)]);
+});
+
+it('refuses a to of more than 16,382 bytes, whose forwarded from would exceed 16 KiB', async () => {
+  const { client, rv } = connect();
+  await rv.authenticate();
+  const to = (bytes: number) => {
+    const frame = { t: 'to' as const, k: node.id, env: { p: '', k: browser.id, s: 's' } };
+    const p = 'a'.repeat(bytes - JSON.stringify(frame).length);
+    return { ...frame, env: { ...frame.env, p } };
+  };
+  expect(JSON.stringify(to(16_382))).toHaveLength(16_382);
+  client.send(to(16_382));
+  for (const bytes of [16_383, 16_384]) {
+    expect(() => client.send(to(bytes))).toThrow(new RangeError('signalling frame exceeds 16 KiB'));
+  }
+  expect(rv.frames().slice(1)).toStrictEqual([to(16_382)]);
+});
+
+it('reports a receive that throws and goes on delivering the frames after it', async () => {
+  const failure = new Error('receive failed');
+  const reported = vi.fn();
+  vi.stubGlobal('reportError', reported);
+  const receive = vi
+    .fn()
+    .mockImplementationOnce(() => {})
+    .mockImplementationOnce(() => {
+      throw failure;
+    });
+  rendezvous([remote], browser, (key) => key === node.id, receive);
+  const rv = sockets.get(remote)!;
+  await rv.authenticate();
+  const presence = { t: 'presence', k: node.id, on: true };
+  const offline = { t: 'offline', k: node.id };
+  void rv.deliver(presence);
+  void rv.deliver(offline);
+  rv.disconnected();
+  await vi.waitFor(() =>
+    expect(receive.mock.calls).toStrictEqual([
+      [remote, ready],
+      [remote, presence],
+      [remote, offline],
+      [remote, { t: 'closed' }],
+    ]),
+  );
+  expect(reported.mock.calls).toStrictEqual([[failure]]);
+});
+
+it('drops a from whose check throws, reports it, and delivers the frames after it', async () => {
+  const failure = new Error('known failed');
+  const reported = vi.fn();
+  vi.stubGlobal('reportError', reported);
+  const known = vi
+    .fn()
+    .mockImplementationOnce(() => {
+      throw failure;
+    })
+    .mockImplementation((key: string) => key === node.id);
+  const receive = vi.fn();
+  rendezvous([remote], browser, known, receive);
+  const rv = sockets.get(remote)!;
+  await rv.authenticate();
+  const from = { t: 'from', k: node.id, env: await signal() };
+  const offline = { t: 'offline', k: node.id };
+  void rv.deliver(from);
+  void rv.deliver(from);
+  void rv.deliver(offline);
+  rv.disconnected();
+  await vi.waitFor(() =>
+    expect(receive.mock.calls).toStrictEqual([
+      [remote, ready],
+      [remote, from],
+      [remote, offline],
+      [remote, { t: 'closed' }],
+    ]),
+  );
+  expect(reported.mock.calls).toStrictEqual([[failure]]);
 });
 
 it('reports a URL the browser refuses as closed, after the call, and keeps the other paths', async () => {
