@@ -214,8 +214,20 @@ func (p *hrMemProc) closeEvents() {
 type hrCLIDriver struct {
 	parentCtx context.Context
 	mu        sync.Mutex
+	wg        sync.WaitGroup
 	scripts   []string
 	logFile   string
+}
+
+func newHRCLIDriver(cleanup func(func()), logFile string, scripts ...string) *hrCLIDriver {
+	ctx, cancel := context.WithCancel(context.Background())
+	d := &hrCLIDriver{parentCtx: ctx, scripts: scripts, logFile: logFile}
+	cleanup(func() {
+		cancel()
+		d.wg.Wait()
+		time.Sleep(15 * time.Millisecond)
+	})
+	return d
 }
 
 func (d *hrCLIDriver) Start(ctx context.Context, l host.Launch) (host.Process, error) {
@@ -269,7 +281,9 @@ func (d *hrCLIDriver) Start(ctx context.Context, l host.Launch) (host.Process, e
 	inR.Close()
 	events := make(chan host.Event, 16)
 	p := &hrCLIProc{in: inW, events: events}
+	d.wg.Add(1)
 	go func() {
+		defer d.wg.Done()
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			var line struct {
@@ -383,6 +397,7 @@ func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T, c
 	})
 	sc.Step(`^a task session completes a turn with CLI session "([^"]+)"$`, func(cliID string) error {
 		var stepErr error
+		wtDir := suiteT.TempDir()
 		synctest.Test(suiteT, func(t *testing.T) {
 			db, err := store.Open(":memory:")
 			if err != nil {
@@ -407,7 +422,7 @@ func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T, c
 			rh := newHRHome()
 			h.Attach("home-dev", rh)
 			tKey := host.SessionKey{Group: hrGroup, Member: hrAI1, Task: hrTask1}
-			if err := h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: "/tmp/wt", Agent: "claude", Home: "home-dev", Name: "Claude"}); err != nil {
+			if err := h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: wtDir, Agent: "claude", Home: "home-dev", Name: "Claude"}); err != nil {
 				stepErr = err
 				return
 			}
@@ -527,12 +542,11 @@ func registerCLICrashAndSwitchSteps(sc *godog.ScenarioContext, suiteT *testing.T
 	sc.Step(`^a task session backed by the scripted Claude CLI$`, func() (err error) {
 		dir = suiteT.TempDir()
 		logFile = filepath.Join(dir, "lifecycle.log")
-		var procCtx context.Context
-		h, rh, procCtx, err = newTestHost(cleanup, 4, 15)
+		h, rh, _, err = newTestHost(cleanup, 4, 15)
 		if err != nil {
 			return err
 		}
-		cliDrv = &hrCLIDriver{parentCtx: procCtx, logFile: logFile}
+		cliDrv = newHRCLIDriver(cleanup, logFile)
 		host.Drivers = map[string]host.Driver{"claude": cliDrv}
 		return h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: dir, Agent: "claude", Home: "home-dev", Name: "Claude"})
 	})
@@ -593,12 +607,11 @@ func registerCLICrashAndSwitchSteps(sc *godog.ScenarioContext, suiteT *testing.T
 		if err := os.WriteFile(script, []byte(body), 0600); err != nil {
 			return err
 		}
-		var procCtx context.Context
-		h, rh, procCtx, err = newTestHost(cleanup, 1, 15)
+		h, rh, _, err = newTestHost(cleanup, 1, 15)
 		if err != nil {
 			return err
 		}
-		cliDrv = &hrCLIDriver{parentCtx: procCtx, scripts: []string{script}, logFile: logFile}
+		cliDrv = newHRCLIDriver(cleanup, logFile, script)
 		host.Drivers = map[string]host.Driver{"claude": cliDrv}
 		if err := h.Sessions.Create(host.Session{SessionKey: kA, Kind: host.GroupSession, Folder: dir, Agent: "claude", Home: "home-dev", Name: "A", CLISession: "sess-a"}); err != nil {
 			return err

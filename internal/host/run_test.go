@@ -6,6 +6,7 @@ import (
 	"errors"
 	"maps"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -478,11 +479,12 @@ func TestStartResumeEventsUsageAndDeliver(t *testing.T) {
 	}
 	l1 := drv.lastLaunch()
 	tok1 := tokenFromLaunch(l1)
-	if l1.Folder != dir || l1.Session != "" || l1.Level != 2 || !slices.Equal(l1.Shim[:2], []string{"solodawn", "mcp"}) || l1.Instructions != "prompt:task" || l1.RepoConfig || l1.ToolTimeout != 60*time.Minute {
+	wantLevel := fallbackClaudeWindows(2, "claude", runtime.GOOS)
+	if l1.Folder != dir || l1.Session != "" || l1.Level != wantLevel || !slices.Equal(l1.Shim[:2], []string{"solodawn", "mcp"}) || l1.Instructions != "prompt:task" || l1.RepoConfig || l1.ToolTimeout != 60*time.Minute {
 		t.Fatalf("unexpected launch: %+v", l1)
 	}
 	caller1, ok := h.Sessions.Caller(tok1)
-	if !ok || caller1.Level != 2 || caller1.Interactive || caller1.Turn != (Turn{N: 1, Kind: ItemsTurn, Thread: runTask1, Depth: 1}) {
+	if !ok || caller1.Level != wantLevel || caller1.Interactive || caller1.Turn != (Turn{N: 1, Kind: ItemsTurn, Thread: runTask1, Depth: 1}) {
 		t.Fatalf("unexpected caller: %+v (ok=%v)", caller1, ok)
 	}
 
@@ -731,6 +733,7 @@ func TestDormancyVirtualClockBoundariesAndSpontaneousIdleExit(t *testing.T) {
 		t.Fatalf("idleDuration boundaries wrong: %v %v %v", idleDuration(0), idleDuration(-1), idleDuration(1))
 	}
 
+	wtDir := t.TempDir()
 	synctest.Test(t, func(t *testing.T) {
 		db, err := store.Open(":memory:")
 		if err != nil {
@@ -748,7 +751,7 @@ func TestDormancyVirtualClockBoundariesAndSpontaneousIdleExit(t *testing.T) {
 		}}
 		Drivers = map[string]Driver{"claude": drv}
 		key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-		if err := h.Sessions.Create(makeRunSession(key, TaskSession, "/tmp/wt")); err != nil {
+		if err := h.Sessions.Create(makeRunSession(key, TaskSession, wtDir)); err != nil {
 			t.Fatal(err)
 		}
 		if err := Runner.Turn(t.Context(), h, key, "hi", Turn{Kind: ItemsTurn}); err != nil {
