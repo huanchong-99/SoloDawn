@@ -445,6 +445,9 @@ export class Peer {
   #conn: Connection | undefined;
   #listener: Listener | undefined;
   #attempt: Connection | undefined;
+  /** Every connection this peer dialled that is not gone: those two and the probes. */
+  readonly #dialled = new Set<Connection>();
+  #closed = false;
   /** The requests without a response, in the order they were first made. */
   readonly #asked = new Set<Ask>();
   /** How long the connection that was lost stayed open, until its reconnect is scheduled. */
@@ -503,17 +506,23 @@ export class Peer {
   }
 
   /** Offers this node a connection that is not the peer's until `adopt`: its own next attempt,
-   *  or a probe, which is offered without the relays (contracts/rendezvous.md section 5). */
+   *  or a probe, which is offered without the relays (contracts/rendezvous.md section 5). The
+   *  peer closes it when it closes itself. A closed peer offers nothing: it throws. */
   dial(probe: boolean) {
+    if (this.#closed) throw new Error('peer closed');
     const conn = new Connection(this.#hub, this.target, probe);
+    this.#dialled.add(conn);
     conn.closed.then((open) => this.#ended(conn, open));
     return conn;
   }
 
-  /** Makes a connection on which the node answered hello the one that serves. The one before
-   *  it, and an attempt still on its way, are closed; its listener hears `online`, and then the
-   *  requests without a response are sent again. */
+  /** Makes a connection on which the node answered hello the one that serves. Every other
+   *  connection the peer dialled is closed: the one before it, an attempt or a probe still on
+   *  its way. Its listener hears `online`, and then the requests without a response are sent
+   *  again. A closed peer adopts nothing: it closes the connection, so a welcome that comes
+   *  late cannot bring it back. */
   adopt(conn: Connection, welcome: Welcome) {
+    if (this.#closed) return conn.close();
     this.#retry.stop();
     this.#lost = undefined;
     this.#end(conn);
@@ -527,12 +536,15 @@ export class Peer {
     for (const ask of unanswered) this.#put(ask);
   }
 
-  /** Until the function it returns is called, once, the loss of the connection starts no
-   *  reconnect: a move waits for its welcome (flows/connect.md step 11.1). Then one starts, if
-   *  the connection was lost meanwhile and none was adopted. */
+  /** Until the function it returns is called, the loss of the connection starts no reconnect:
+   *  a move waits for its welcome (flows/connect.md step 11.1). Then one starts, if the
+   *  connection was lost meanwhile and none was adopted. Calling it again changes nothing. */
   hold() {
     this.#held += 1;
+    let released = false;
     return () => {
+      if (released) return;
+      released = true;
       this.#held -= 1;
       this.#again();
     };
@@ -549,8 +561,10 @@ export class Peer {
     return this.#conn?.channel(label);
   }
 
-  /** Closes the connections for good: nothing reconnects, and every request rejects. */
+  /** Closes every connection it dialled, for good: nothing reconnects, nothing can be dialled
+   *  or adopted, and every request rejects. */
   close() {
+    this.#closed = true;
     this.#retry.stop();
     this.#lost = undefined;
     this.#end();
@@ -558,13 +572,11 @@ export class Peer {
     this.#hub.unlink(this);
   }
 
-  /** Closes the connection that serves and the attempt on its way, but for `keep`. Their end
-   *  is then no loss. */
+  /** Closes every connection the peer dialled but `keep`. Their end is then no loss. */
   #end(keep?: Connection) {
-    const others = [this.#conn, this.#attempt];
     if (this.#conn) this.#offline();
     this.#attempt = undefined;
-    for (const other of others) if (other !== keep) other?.close();
+    for (const conn of this.#dialled) if (conn !== keep) conn.close();
   }
 
   #offline() {
@@ -579,6 +591,7 @@ export class Peer {
    *  an attempt whose hello the node refused for good: its listener hears why, and the peer
    *  stops. */
   #ended(conn: Connection, open: number) {
+    this.#dialled.delete(conn);
     if (conn === this.#conn) this.#offline();
     else if (conn !== this.#attempt) return;
     this.#attempt = undefined;

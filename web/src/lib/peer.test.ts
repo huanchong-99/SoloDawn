@@ -651,7 +651,7 @@ describe('ctl', () => {
     const push = vi.fn();
     conn.onpush = push;
     const asked = vi.fn();
-    void conn.request({ t: 'cmd' }).then(asked);
+    conn.request({ t: 'cmd' }).then(asked, () => {});
     pc.ctl.deliver({ ...rows, id: 5 });
     pc.ctl.deliver({ re: 1, ok: true, id: 6 });
     for (const bad of [1.5, 'seven', null, 2 ** 53]) pc.ctl.deliver({ t: 'sync', id: bad });
@@ -668,7 +668,7 @@ describe('ctl', () => {
   it('refuses a request that cannot fit into 60 KiB under any id', async () => {
     const { pc, conn } = await opened();
     const fixed = JSON.stringify({ t: 'cmd', pad: '', id: Number.MAX_SAFE_INTEGER }).length;
-    void conn.request({ t: 'cmd', pad: 'x'.repeat(61_440 - fixed) });
+    conn.request({ t: 'cmd', pad: 'x'.repeat(61_440 - fixed) }).catch(() => {});
     expect(pc.ctl.sent).toHaveLength(1);
     expect(() => conn.request({ t: 'cmd', pad: 'x'.repeat(61_441 - fixed) })).toThrow(
       new RangeError('ctl frame exceeds 60 KiB'),
@@ -1160,6 +1160,68 @@ describe('a probe and a move', () => {
     release();
     await wait(120_000);
     expect(pcs()).toHaveLength(2);
+  });
+
+  it('releases a hold once, however often its release is called', async () => {
+    const { peer, pc } = await served();
+    const release = peer.hold();
+    release();
+    release();
+    // The next move holds the peer as the first did.
+    const second = peer.hold();
+    pc.ctl.onclose();
+    await flush();
+    await wait(120_000);
+    expect(pcs()).toHaveLength(1);
+    second();
+    await wait(1000);
+    expect(pcs()).toHaveLength(2);
+  });
+
+  it('closes what it dialled when the session closes, the answered probe too', async () => {
+    const { peer, pc } = await served();
+    await probing(peer);
+    const probe = last();
+    await wait(2000);
+    session.close();
+    expect([pc.closes, probe.closes]).toStrictEqual([1, 1]);
+    const asked = [pc.statsAsked, probe.statsAsked];
+    await wait(30_000);
+    expect([pc.statsAsked, probe.statsAsked]).toStrictEqual(asked);
+  });
+
+  it('closes every other connection it dialled when it adopts one', async () => {
+    const { peer, pc } = await served();
+    await probing(peer);
+    const stale = last();
+    const probe = await probing(peer);
+    peer.adopt(probe, next);
+    expect([pc.closes, stale.closes, last().closes]).toStrictEqual([1, 1, 0]);
+  });
+
+  it('cannot be brought back once it is closed', async () => {
+    const { peer, listen } = await served();
+    const probe = await probing(peer);
+    const greeted = probe.hello();
+    greeted.catch(() => {});
+    const elsewhere = await probing(session.peer(other, hearing().listen));
+    const foreign = last();
+    peer.close();
+    expect(pcs()[1].closes).toBe(1);
+    await expect(greeted).rejects.toThrow(new Error('connection lost'));
+    // A welcome that comes late: the peer adopts nothing and closes what it is handed.
+    peer.adopt(probe, next);
+    peer.adopt(elsewhere, next);
+    expect(listen).toHaveBeenCalledTimes(1);
+    expect(foreign.closes).toBe(1);
+    expect(() => peer.dial(true)).toThrow(new Error('peer closed'));
+    // Nothing more is offered to its node, whatever happens to the connections it had.
+    const offered = () => clients[0].signals('offer').filter((offer) => offer.to === node);
+    const before = offered().length;
+    pcs()[1].becomes('failed');
+    clients[0].hear({ t: 'presence', k: node, on: true });
+    await wait(120_000);
+    expect(offered()).toHaveLength(before);
   });
 
   it('forgets a loss when it closes', async () => {

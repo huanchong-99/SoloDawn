@@ -191,8 +191,12 @@ development dependency, an IndexedDB for the tests.
   - **For the probe and the move** (`move.ts`, unit W-3): `peer.dial(probe)` offers a connection
     that is not the peer's own, a probe without TURN entries; `connection.opened`, `closed`,
     `hello()` and `request()` drive it; `peer.adopt(connection, welcome)` makes it the one that
-    serves and closes the one before; `peer.hold()` keeps a loss from starting a reconnect until
-    its release. `peer.channel(label)` opens a data channel beside `ctl` (the terminal).
+    serves and closes every other connection the peer dialled; `peer.hold()` keeps a loss from
+    starting a reconnect until its release, which counts once. `peer.channel(label)` opens a data
+    channel beside `ctl` (the terminal).
+  - **Closing.** `peer.close()` and `session.close()` close every connection a peer dialled,
+    probes included. A closed peer stays closed: `dial` throws, and `adopt` closes the connection
+    it is handed, so a welcome that comes after the tab lost its lock connects nothing.
 - **Fonts.** Geist and Geist Mono 1.9.2, one variable `woff2` each, are served from
   `public/fonts/` with their licence (OFL-1.1); the page requests nothing from a third party. A
   browser downloads a face only when text uses it and shows the system fonts until it arrives.
