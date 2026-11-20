@@ -99,7 +99,8 @@ or ends.
 16. The secretary may give the task to another AI while the card is pending
     (R-42). H sets the card's `state.status = reassigned`; the first AI's
     task session ends (`flows/task.md`, "Reassignment").
-17. If the task is cancelled, H sets the card to `expired`.
+17. If the task is cancelled or merged while the card is pending, H sets
+    the card to `expired` (`contracts/task-machine.md` rows 8 and 15).
 
 ## F. What is recorded on the owner's node (R-139)
 

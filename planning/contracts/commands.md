@@ -65,7 +65,7 @@ that led to the task, or `null`; in `note`, `task` is a task id or `null`.
 | `create` | `name`, `kind`, `repo`, `base`, `forge`, `checks`, `member_name` | a person: a device of the receiving node's owner | the node becomes home of group `g` = `n`; group row with `pass` 90, `pass_foundation` 70 (R-101) and the `limits` of the example in `contracts/rows.md` section 1; a `member` row for that person with role `owner` and `member_name` as its `name`; a `groups` push to that person's connected devices |
 | `set` | any of `name`, `checks`, `pass`, `pass_foundation`, `limits`, `secretary` | an admin | group row updated. `secretary` must name an AI member that is not assignee or reviewer of a task that is not final, else `conflict`; the previous secretary's member row loses the flag |
 | `pause` | — | an admin | `group.paused` set; `system` `group_paused`; hosts interrupt running turns of the group and hold items. A `pause` of a paused group is accepted and changes nothing |
-| `resume` | — | an admin | `group.paused` cleared; `system` `group_resumed`; task-machine row 24 |
+| `resume` | — | an admin | `group.paused` cleared; `system` `group_resumed`; task-machine row 24. A `resume` of a group that is not paused is accepted and changes nothing |
 
 A group has one secretary (R-20). While it has none, main-line messages
 that mention nobody reach no AI and no brief can be posted; the client asks
