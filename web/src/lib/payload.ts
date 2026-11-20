@@ -27,6 +27,8 @@ function parse(p: string): Fields | undefined {
 }
 
 const isId = (value: unknown) => v.is(Id, value);
+const optionalId = (value: unknown) => value === undefined || isId(value);
+const optionalString = (value: unknown) => value === undefined || typeof value === 'string';
 
 /** Section 3, check 3: t is a string, n an id and ts an integer; g, when there, is an id, and to
  *  a string. */
@@ -34,8 +36,8 @@ const isHeader = (o: Fields) =>
   typeof o.t === 'string' &&
   isId(o.n) &&
   Number.isSafeInteger(o.ts) &&
-  (o.g === undefined || isId(o.g)) &&
-  (o.to === undefined || typeof o.to === 'string');
+  optionalId(o.g) &&
+  optionalString(o.to);
 
 /** The common fields of a payload, or undefined when they are not as section 3 says
  *  (`bad_request`). */
