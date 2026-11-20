@@ -19,10 +19,7 @@ type Store struct {
 }
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		return nil, err
-	}
+	db, _ := sql.Open("sqlite", path) // fails only for an unregistered driver
 	if path == ":memory:" {
 		// Each connection to :memory: would otherwise see a different database.
 		db.SetMaxOpenConns(1)
