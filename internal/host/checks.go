@@ -33,8 +33,8 @@ var (
 // The hard checks have their own limit instead of the turn's (R-103), and
 // the secrets check reads at most this much of the added lines.
 var (
-	hardCheckLimit = 2 * time.Minute
-	addedLineLimit = 67108864 // 64 MiB
+	hardCheckLimit time.Duration = 120_000_000_000 // 2 minutes, in nanoseconds
+	addedLineLimit               = 67108864        // 64 MiB
 )
 
 // Run executes the group's checks in order, followed by both hard checks
