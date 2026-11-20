@@ -14,7 +14,7 @@ var (
 		regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`), // AWS access key ID
 	}
 	assignmentRun = regexp.MustCompile(`(?m)^(?:[A-Za-z_]\w*=[^\n]*(?:\n|\z)){3,}`)
-	sensitiveName = regexp.MustCompile(`(?m)^\w*(?:KEY|SECRET|TOKEN|PASSWORD)\w*=`)
+	sensitiveName = regexp.MustCompile(`(?m)^\w*(?:KEY|SECRET|TOKEN|PASSWORD)`)
 )
 
 // CheckOutboundSecret checks text for the fixed secret patterns in local.md §8.
