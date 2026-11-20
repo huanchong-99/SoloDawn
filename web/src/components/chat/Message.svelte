@@ -1,6 +1,7 @@
 <script lang="ts">
   import { parts } from '../../lib/compose';
   import { subject, type Group } from '../../lib/groups.svelte';
+  import { card as cardOf } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import type { MsgRow } from '../../lib/proto';
   import { clock } from '../../lib/when';
@@ -20,7 +21,9 @@
     ),
   );
   const plain = $derived(msg.kind === 'text');
-  // A card is drawn by its own component; until that is mounted, one line says what it is.
+  // The component an area mounts for this kind of message (lib/mounts.svelte.ts) draws it under
+  // its head and text. A card without one is one line that says what it is.
+  const Card = $derived(cardOf(msg.kind));
   const card = $derived(msg.state !== null || msg.kind === 'summary');
   const needsMe = $derived(group.waiting.includes(msg));
 </script>
@@ -37,7 +40,9 @@
       {/each}
     </p>
   {/if}
-  {#if card}
+  {#if Card}
+    <Card {group} {msg} />
+  {:else if card}
     <div class="card stub" class:need={needsMe}>
       <span class="kind">{t(`chat.kind.${msg.kind}`)}</span>
       <span class="grow cut">{subject(msg) === msg.text ? '' : subject(msg)}</span>
@@ -48,7 +53,10 @@
   {/if}
 {/snippet}
 
-{#if msg.by === 'system'}
+{#if msg.by === 'system' && Card}
+  <!-- Written by the home, and drawn whole by the component mounted for its kind. -->
+  <div class="msg sys" id={`m-${msg.id}`}><Card {group} {msg} /></div>
+{:else if msg.by === 'system'}
   <!-- Written by the home: a quiet line, with no author. -->
   <p class="msg note" id={`m-${msg.id}`}>
     <span class="badge">{t(`chat.kind.${msg.kind}`)}</span>
@@ -158,6 +166,9 @@
   .joined:hover .aside,
   :global(.chat.keys:has(:focus-visible:not(textarea))) .aside {
     opacity: 1;
+  }
+  .sys {
+    display: block;
   }
   .note {
     display: flex;

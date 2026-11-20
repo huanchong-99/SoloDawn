@@ -5,7 +5,7 @@
 <div class="page">
   <div class="page-head">
     <div class="grow">
-      <h2>{t('settings.title')}</h2>
+      <h2>{t('page.settings')}</h2>
       <p>{t('settings.lead')}</p>
     </div>
   </div>
@@ -13,9 +13,9 @@
   <section class="card set" aria-labelledby="s-look">
     <header><h3 id="s-look">{t('settings.look')}</h3></header>
     <div class="set-row">
-      <div><b>{t('settings.theme')}</b></div>
+      <div><b>{t('pref.theme')}</b></div>
       <fieldset class="seg" style:--at={themes.indexOf(prefs.theme)}>
-        <legend class="sr">{t('settings.theme')}</legend>
+        <legend class="sr">{t('pref.theme')}</legend>
         {#each themes as theme (theme)}
           <label>
             <input
@@ -24,18 +24,18 @@
               checked={theme === prefs.theme}
               onchange={() => choose('theme', theme)}
             />
-            <span>{t(`settings.theme.${theme}`)}</span>
+            <span>{t(`pref.theme.${theme}`)}</span>
           </label>
         {/each}
       </fieldset>
     </div>
     <div class="set-row">
       <div>
-        <b>{t('settings.lang')}</b>
+        <b>{t('pref.lang')}</b>
         <p>{t('settings.lang.note')}</p>
       </div>
       <fieldset class="seg" style:--at={langs.indexOf(prefs.lang)}>
-        <legend class="sr">{t('settings.lang')}</legend>
+        <legend class="sr">{t('pref.lang')}</legend>
         {#each langs as lang (lang)}
           <!-- Each language is named in itself, so a screen reader speaks it in that language. -->
           <label {lang}>
@@ -45,7 +45,7 @@
               checked={lang === prefs.lang}
               onchange={() => choose('lang', lang)}
             />
-            <span>{t(`settings.lang.${lang}`)}</span>
+            <span>{t(`pref.lang.${lang}`)}</span>
           </label>
         {/each}
       </fieldset>

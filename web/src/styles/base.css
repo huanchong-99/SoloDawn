@@ -220,6 +220,7 @@ kbd,
   overflow: hidden;
   grid-template:
     'rail bar' var(--bar-h)
+    'rail ban' auto
     'rail main' minmax(0, 1fr)
     / var(--rail-w) minmax(0, 1fr);
 }
@@ -227,6 +228,24 @@ kbd,
   grid-area: main;
   min-height: 0;
   overflow: auto;
+}
+/* The banners of the shell's mounting point, under the top bar. With nothing to say it is empty
+   and takes no room. */
+.ban {
+  grid-area: ban;
+  display: grid;
+  min-width: 0;
+}
+/* A page that has the whole screen (its route's `full`): the page and its banners only. */
+.app[data-full='always'] {
+  grid-template:
+    'ban' auto
+    'main' minmax(0, 1fr)
+    / minmax(0, 1fr);
+
+  > :is(.rail, .bar) {
+    display: none;
+  }
 }
 .rail {
   grid-area: rail;
@@ -286,6 +305,10 @@ kbd,
   a[aria-current] {
     color: var(--text);
     font-weight: 600;
+  }
+  /* A page outside the navigation: no entry is marked. */
+  &:not(:has([aria-current]))::before {
+    visibility: hidden;
   }
 }
 /* English labels are longer than Chinese ones: "Computers" in bold needs a wider rail. */
@@ -358,6 +381,7 @@ kbd,
   .app {
     grid-template:
       'bar' var(--bar-h)
+      'ban' auto
       'main' minmax(0, 1fr)
       'rail' auto
       / minmax(0, 1fr);
@@ -383,6 +407,18 @@ kbd,
 
     &::before {
       transform: translateX(calc(var(--at) * 100%));
+    }
+  }
+  /* On a phone a page whose route asks for it has the screen without the top bar and the
+     bottom navigation: an open chat, whose own head is its bar, and the terminal. */
+  .app[data-full='phone'] {
+    grid-template:
+      'ban' auto
+      'main' minmax(0, 1fr)
+      / minmax(0, 1fr);
+
+    > :is(.rail, .bar) {
+      display: none;
     }
   }
   .bar {
@@ -708,6 +744,17 @@ kbd,
 }
 .page > :nth-child(2) {
   animation-delay: var(--stagger), 0s;
+}
+/* A banner comes down from under the top bar, as if the bar let it out. */
+.ban > * {
+  animation:
+    drop var(--dur-4) var(--spring),
+    appear var(--dur-2) var(--ease-out);
+}
+@keyframes drop {
+  from {
+    transform: translateY(calc(-1 * var(--travel)));
+  }
 }
 .page > :nth-child(n + 3) {
   animation-delay: calc(2 * var(--stagger)), 0s;

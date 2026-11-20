@@ -1,6 +1,7 @@
 {
   "groups.list": "群列表",
   "groups.projects": "项目",
+  "groups.lead": "一个项目一个群。",
   "groups.new": "新建项目群",
   "groups.none": "还没有消息",
   "groups.colon": "：",
@@ -30,5 +31,6 @@
   "groups.create.member": "你在群里的名字",
   "groups.create.home": "群的家",
   "groups.create.submit": "创建",
-  "groups.create.cancel": "取消"
+  "groups.create.cancel": "取消",
+  "groups.missing": "还没有读到这个群。连上它所在的那台电脑后才能读到。"
 }
