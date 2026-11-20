@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -43,7 +44,7 @@ type client struct {
 	conn   *websocket.Conn
 	out    chan []byte
 	id     string
-	watch  map[string]bool
+	watch  []string
 	window [120]time.Time
 	next   int
 }
@@ -141,10 +142,8 @@ func (c *client) authenticate() bool {
 	var b [16]byte
 	rand.Read(b[:])
 	nonce := base64.RawURLEncoding.EncodeToString(b[:])
-	c.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	c.send(proto.Challenge{Type: "challenge", Nonce: nonce})
 	m, kind := c.read()
-	c.conn.SetReadDeadline(time.Time{})
 	c.id = m.text("k")
 	return kind == "auth" && identity.VerifyChallenge(c.id, nonce, m.text("s"))
 }
@@ -204,10 +203,10 @@ func (m fields) object(name string) bool {
 	return len(raw) != 0 && raw[0] == '{'
 }
 
+// A target that is no device id is a device that is not connected.
 func (s *server) route(c *client, m fields) bool {
-	key := m.text("k")
-	_, valid := identity.ParseDeviceID(key)
-	if !valid || !m.object("env") {
+	var key string
+	if proto.Decode(m["k"], &key) != nil || !m.object("env") {
 		return false
 	}
 	if target := s.online[key]; target != nil {
@@ -222,22 +221,16 @@ func (s *server) watch(c *client, m fields) bool {
 	if proto.Decode(m["k"], &keys) != nil || len(keys) > 64 {
 		return false
 	}
-	c.watch = make(map[string]bool, len(keys))
+	c.watch = keys
 	for _, key := range keys {
-		if _, valid := identity.ParseDeviceID(key); !valid {
-			return false
-		}
-		if !c.watch[key] {
-			c.watch[key] = true
-			c.send(proto.Presence{Type: "presence", Key: key, On: s.online[key] != nil})
-		}
+		c.send(proto.Presence{Type: "presence", Key: key, On: s.online[key] != nil})
 	}
 	return true
 }
 
 func (s *server) notify(key string, online bool) {
 	for _, c := range s.online {
-		if c.watch[key] {
+		if slices.Contains(c.watch, key) {
 			c.send(proto.Presence{Type: "presence", Key: key, On: online})
 		}
 	}

@@ -2,6 +2,7 @@ package rendezvous
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -51,28 +52,57 @@ func TestRoomMembership(t *testing.T) {
 	expect(t, b, msg)
 }
 
+// after reports who is in the room "first" once d has passed: nobody when it is gone.
+func after(s *server, d time.Duration) map[*client]bool {
+	time.Sleep(d)
+	synctest.Wait()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if r := s.rooms["first"]; r != nil {
+		return r.members
+	}
+	return nil
+}
+
+func join(s *server, c *client) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.join(c, "first")
+}
+
 func TestRoomLifetime(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := server{rooms: make(map[string]*room)}
-		a, b := &client{}, &client{}
-		s.join(a, "first")
-		time.Sleep(15*time.Minute - time.Nanosecond)
-		synctest.Wait()
-		s.mu.Lock()
-		stillHere := s.rooms["first"] != nil && s.rooms["first"].members[a]
-		s.mu.Unlock()
-		if !stillHere {
-			t.Fatal("room expired early")
+		a := &client{}
+		join(&s, a)
+		if got := after(&s, 15*time.Minute-time.Nanosecond); !reflect.DeepEqual(got, map[*client]bool{a: true}) {
+			t.Fatalf("room before its 15 minutes: %v", got)
 		}
-		time.Sleep(time.Nanosecond)
-		synctest.Wait()
-		if len(s.rooms) != 0 {
-			t.Fatal("room survived 15 minutes")
+		if got := after(&s, time.Nanosecond); got != nil || len(s.rooms) != 0 {
+			t.Fatalf("room after 15 minutes: %v", got)
 		}
-		s.join(b, "first")
-		s.leaveRooms(b)
+		join(&s, a)
+		s.leaveRooms(a)
 		if len(s.rooms) != 0 {
 			t.Fatal("empty room retained")
+		}
+	})
+}
+
+// A room under the id of one that emptied has 15 minutes of its own.
+func TestRoomOutlivesTheOneBeforeIt(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := server{rooms: make(map[string]*room)}
+		a, b := &client{}, &client{}
+		join(&s, a)
+		s.leaveRooms(a)
+		time.Sleep(time.Minute)
+		join(&s, b)
+		if got := after(&s, 15*time.Minute-time.Nanosecond); !reflect.DeepEqual(got, map[*client]bool{b: true}) {
+			t.Fatalf("second room before its 15 minutes: %v", got)
+		}
+		if got := after(&s, time.Nanosecond); got != nil {
+			t.Fatalf("second room after 15 minutes: %v", got)
 		}
 	})
 }

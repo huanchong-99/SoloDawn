@@ -89,7 +89,7 @@ func (k Key) sign(text string) string {
 // s is a 64-byte signature in its canonical spelling that does not begin with
 // a weak value, and it verifies for the device over text.
 func verify(device, text, s string) bool {
-	pub, okKey := ParseDeviceID(device)
+	pub, okKey := deviceKey(device)
 	sig, okSig := decode(s)
 	return okKey && okSig && len(sig) == ed25519.SignatureSize && !weak(sig[:32]) && ed25519.Verify(pub, []byte(text), sig)
 }
@@ -102,15 +102,15 @@ func decode(s string) ([]byte, bool) {
 	return b, err == nil && b64.EncodeToString(b) == s
 }
 
-// ParseDeviceID returns the public key that a device id spells. A text that is
+// deviceKey returns the public key that a device id spells. A text that is
 // not a device id is never used as a key.
-func ParseDeviceID(id string) ([]byte, bool) {
+func deviceKey(id string) ([]byte, bool) {
 	pub, ok := decode(id)
 	return pub, ok && len(pub) == ed25519.PublicKeySize && !weak(pub)
 }
 
 func isDevice(id string) bool {
-	_, ok := ParseDeviceID(id)
+	_, ok := deviceKey(id)
 	return ok
 }
 

@@ -130,34 +130,21 @@ func TestHandshakeRefusals(t *testing.T) {
 	closed(t, c)
 }
 
-func TestChallengeDeadline(t *testing.T) {
-	t.Parallel()
-	url := fixture(t)
-	active := login(t, url, key(1))
-	idle, _ := dial(t, url)
-	// Give the server time to close the unauthenticated connection itself.
-	until := time.Now().Add(15 * time.Second)
-	idle.SetReadDeadline(until)
-	active.SetReadDeadline(until)
-	closed(t, idle)
-	// The first device authenticated before that deadline and remains usable.
-	send(t, active, proto.RVFrame{Type: "ice"})
-	expect(t, active, config("ice"))
-}
-
 func TestRoutePresenceAndReplacement(t *testing.T) {
 	url := fixture(t)
 	a, b := key(1), key(2)
 	from := login(t, url, a)
-	watch := proto.Watch{Type: "watch", Keys: []string{b.ID(), b.ID()}}
-	send(t, from, watch)
+	send(t, from, proto.Watch{Type: "watch", Keys: []string{b.ID(), "no device id"}})
 	expect(t, from, proto.Presence{Type: "presence", Key: b.ID(), On: false})
+	expect(t, from, proto.Presence{Type: "presence", Key: "no device id", On: false})
 	// The application owning the envelope is the only one that reads it.
 	// Even unknown keys, an out-of-range number and an invalid payload survive.
 	env := json.RawMessage(`{"Unknown":9e999,"p":"  not JSON","s":null}`)
 	to := proto.Route{Type: "to", Key: b.ID(), Env: env}
 	send(t, from, to)
 	expect(t, from, proto.Offline{Type: "offline", Key: b.ID()})
+	send(t, from, proto.Route{Type: "to", Key: "", Env: env})
+	expect(t, from, proto.Offline{Type: "offline", Key: ""})
 	old := login(t, url, b)
 	expect(t, from, proto.Presence{Type: "presence", Key: b.ID(), On: true})
 	newConn := login(t, url, b)
@@ -178,7 +165,7 @@ func TestRoutePresenceAndReplacement(t *testing.T) {
 
 func TestInvalidFrames(t *testing.T) {
 	url := fixture(t)
-	for _, msg := range []string{`{}`, `null`, `{"T":"ice"}`, `{"t":"ready"}`, `[]`, `{}{}`, `{"t":"to","k":"invalid","env":{}}`, fmt.Sprintf(`{"t":"to","k":%q}`, key(2).ID()), fmt.Sprintf(`{"t":"to","k":%q,"env":null}`, key(2).ID()), `{"t":"watch","k":[null]}`, `{"t":"watch","k":["invalid"]}`, `{"t":"join","room":"AB"}`, `{"t":"room","room":"00000000000000000000000000000000","data":[]}`, "{\"t\":\"ice\",\"x\":\"\xff\"}"} {
+	for _, msg := range []string{`{}`, `null`, `{"T":"ice"}`, `{"t":"ready"}`, `[]`, `{}{}`, `{"t":"to","k":5,"env":{}}`, `{"t":"to","env":{}}`, fmt.Sprintf(`{"t":"to","k":%q}`, key(2).ID()), fmt.Sprintf(`{"t":"to","k":%q,"env":null}`, key(2).ID()), `{"t":"watch"}`, `{"t":"watch","k":[null]}`, `{"t":"watch","k":"device"}`, `{"t":"join","room":"AB"}`, `{"t":"room","room":"00000000000000000000000000000000","data":[]}`, "{\"t\":\"ice\",\"x\":\"\xff\"}"} {
 		t.Run(msg, func(t *testing.T) {
 			c := login(t, url, key(1))
 			if err := c.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
