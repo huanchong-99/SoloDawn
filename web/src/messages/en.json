@@ -23,5 +23,7 @@
   "settings.lang.zh-CN": "简体中文",
   "settings.lang.en": "English",
   "upgrade.title": "This browser needs an update",
-  "upgrade.body": "SoloDawn proves this device's identity with Ed25519 signatures built into the browser and keeps the key in it, which this browser cannot do yet. Update to Chrome or Edge 137, Firefox 136, Safari 17.5 or a later version, then open this page again."
+  "upgrade.body": "SoloDawn proves this device's identity with Ed25519 signatures built into the browser and keeps the key in it, which this browser cannot do yet. Update to Chrome or Edge 137, Firefox 136, Safari 17.5 or a later version, then open this page again.",
+  "storage.title": "Site storage is blocked",
+  "storage.body": "SoloDawn keeps this device's key in the browser's site storage, and this browser does not let this site store anything. Allow this site to store data in the browser's settings, then open this page again."
 }
