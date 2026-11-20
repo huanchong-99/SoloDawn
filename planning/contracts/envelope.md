@@ -235,8 +235,9 @@ person, and when a new browser is added. Sequence in `flows/pairing.md`.
 - `role` is `a` for the side that created the secret, `b` for the other.
 - `mac` = HMAC-SHA256(key = secret bytes, message = `"solodawn/pair/1\n"`
   + role + `"\n"` + device id + `"\n"` + kind + `"\n"` + name),
-  base64url. Each part is the UTF-8 text of the field as it stands in the
-  message after JSON decoding, with nothing trimmed, normalised or
+  base64url. Each part is the field as it stands in the message after
+  JSON decoding, encoded the way `TextEncoder` encodes text: UTF-8, with a
+  lone surrogate becoming U+FFFD. Nothing is trimmed, normalised or
   escaped. `name` comes last and may hold line breaks: the three parts
   before it cannot, so the message is read back in one way only.
 - A side accepts a `pair` message when its `role` is the other role (the

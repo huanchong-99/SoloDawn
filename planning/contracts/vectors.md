@@ -90,15 +90,15 @@ itself.
 **`received`**
 
 - `ok`: a command without `to`; a command and a signalling payload whose
-  `to` is `me`; `ts` written with a fraction of zero; `ts` exactly two
-  minutes from `now` in a signalling payload, and exactly 24 hours in a
-  command; a field `TO` that names another device beside a `to` that is
-  `me`.
+  `to` is `me`; a `t` that is `""`; `ts` written with a fraction of zero;
+  `ts` exactly two minutes from `now` in a signalling payload, and exactly
+  24 hours in a command; a field `TO` that names another device beside a
+  `to` that is `me`.
 - `not_for_me`: `to` is another device; `to` is `""`; a signalling payload
   without `to`.
 - `bad_request`: `to` is `null`; `ts` beyond 2^53 − 1; no `ts`; an `n` that
-  is no id, written with the escape of a lone surrogate; a `p` that is not
-  a JSON object.
+  is `""`, and one that is no id and is written with the escape of a lone
+  surrogate; a `p` that is not a JSON object.
 - `stale`: one millisecond beyond each of the two windows.
 - the order of the checks: a signer the receiver does not listen to, once
   with a signature that does not verify (`bad_sig`) and once with a `p`
@@ -111,7 +111,9 @@ itself.
 **`pair_messages`**: a message that is accepted; the same with `name`
 changed, and with `kind` changed, each keeping its `mac`; a message in the
 receiver's own role; a `k` that is a weak key, and a `kind` that is neither
-`node` nor `browser`, each with the `mac` that follows from it.
+`node` nor `browser`, each with the `mac` that follows from it; a `name`
+written as the escape of a lone surrogate (`"\ud800"`), with the `mac` over
+U+FFFD, which is accepted.
 
 **`bad_secrets`**: with a space; with one of `I`, `L`, `O`, `U`; one
 character short, and one too long; fifteen valid characters and
