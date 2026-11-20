@@ -21,7 +21,7 @@ it.each([
 it('follows the address when it changes', async () => {
   const route = await load('');
   location.hash = '#/settings';
-  dispatchEvent(new HashChangeEvent('hashchange'));
+  dispatchEvent(new HashChangeEvent('hashchange', { newURL: location.href }));
   expect(route.page).toBe('settings');
 });
 
@@ -35,7 +35,19 @@ it('knows which way along the navigation each change went', async () => {
     ['#/nodes/a-node', 0],
   ] as const) {
     location.hash = hash;
-    dispatchEvent(new HashChangeEvent('hashchange'));
+    dispatchEvent(new HashChangeEvent('hashchange', { newURL: location.href }));
     expect(route.dir).toBe(dir);
   }
+});
+
+it('follows each destination when two hash changes are queued', async () => {
+  const route = await load('#/groups');
+  location.hash = '#/settings';
+  const first = new HashChangeEvent('hashchange', { newURL: location.href });
+  location.hash = '#/nodes';
+  const second = new HashChangeEvent('hashchange', { newURL: location.href });
+  dispatchEvent(first);
+  expect(route).toEqual({ page: 'settings', dir: 1 });
+  dispatchEvent(second);
+  expect(route).toEqual({ page: 'nodes', dir: -1 });
 });

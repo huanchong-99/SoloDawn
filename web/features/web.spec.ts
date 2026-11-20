@@ -69,7 +69,7 @@ function choose(label: string) {
 
 function go(hash: string) {
   location.hash = hash;
-  dispatchEvent(new HashChangeEvent('hashchange'));
+  dispatchEvent(new HashChangeEvent('hashchange', { newURL: location.href }));
   svelte.flushSync();
 }
 
