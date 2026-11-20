@@ -40,8 +40,8 @@ function press(label: string) {
 
 describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   AfterEachScenario(() => {
-    localStorage.clear();
     vi.restoreAllMocks();
+    localStorage.clear();
   });
 
   Background(({ Given }) => {
@@ -151,6 +151,27 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       expect(document.documentElement.lang).toBe('en');
     });
   });
+
+  Scenario(
+    'The client opens when the browser blocks site storage',
+    ({ Given, When, Then, And }) => {
+      Given('the browser supports Ed25519 in WebCrypto', () => {
+        browserCrypto = crypto;
+      });
+      And('the browser blocks site storage', () => {
+        vi.spyOn(globalThis, 'localStorage', 'get').mockImplementation(() => {
+          throw new DOMException('The operation is insecure.', 'SecurityError');
+        });
+      });
+      When('the person opens the client', () => open());
+      Then('the current page is "群聊"', () => {
+        expect(texts('h1')).toEqual(['群聊']);
+      });
+      And('the page uses the "auto" theme', () => {
+        expect(document.documentElement.dataset.theme).toBe('auto');
+      });
+    },
+  );
 
   Scenario('A browser without Ed25519 gets the upgrade notice', ({ Given, When, Then, And }) => {
     Given('the browser lacks Ed25519 in WebCrypto', () => {

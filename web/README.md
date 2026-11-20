@@ -40,8 +40,10 @@ Run these in `web/` with pnpm; versions are pinned in `package.json` and `pnpm-l
 - **Preferences.** `prefs.theme` is `auto`, `light` or `dark`; `prefs.lang` is `zh-CN` or `en`.
   A first visit follows the system theme and the browser language (any `zh` locale opens Chinese).
   Every change is written to `<html data-theme lang>` and to `localStorage` (`sd-theme`,
-  `sd-lang`). `tokens.css` turns `data-theme` into `color-scheme`; every colour is a
-  `light-dark()` pair.
+  `sd-lang`). A stored value the client does not know, from another version for instance, is
+  ignored. When the browser blocks site storage, the client opens with the defaults and applies
+  changes without remembering them. `tokens.css` turns `data-theme` into `color-scheme`; every
+  colour is a `light-dark()` pair.
 - **Fonts.** Geist and Geist Mono 1.9.2, one variable `woff2` each, are served from
   `public/fonts/` with their licence (OFL-1.1); the page requests nothing from a third party. A
   browser downloads a face only when text uses it and shows the system fonts until it arrives.

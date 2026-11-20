@@ -1,8 +1,5 @@
 <script lang="ts">
-  import { prefs, t, type Lang, type Theme } from '../lib/prefs.svelte';
-
-  const themes: Theme[] = ['auto', 'light', 'dark'];
-  const langs: Lang[] = ['zh-CN', 'en'];
+  import { langs, prefs, t, themes } from '../lib/prefs.svelte';
 </script>
 
 <div class="page">

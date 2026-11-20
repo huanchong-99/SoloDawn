@@ -47,6 +47,13 @@ Feature: Web client
     Then the page uses the "dark" theme
     And the page is marked as "en"
 
+  Scenario: The client opens when the browser blocks site storage
+    Given the browser supports Ed25519 in WebCrypto
+    And the browser blocks site storage
+    When the person opens the client
+    Then the current page is "群聊"
+    And the page uses the "auto" theme
+
   Scenario: A browser without Ed25519 gets the upgrade notice
     Given the browser lacks Ed25519 in WebCrypto
     When the person opens the client
