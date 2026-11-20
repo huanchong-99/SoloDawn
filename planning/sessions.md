@@ -13,8 +13,8 @@ An AI in a group has several sessions over time:
 | Session | Exists | Working folder | Level | Receives |
 | --- | --- | --- | --- | --- |
 | group session | one per AI per group, long-lived. For the secretary this is its only session. | the project clone | 1, read only | main-line mentions, direct questions (R-70), calls from threads where the AI has no role; for the secretary, everything addressed to it |
-| task session | one per task the AI is assigned, from first delivery until the task is merged, cancelled or given to another AI (`flows/agent-turn.md` step 17) | the task's worktree | the level the owner set for this AI in this project | everything about that task |
-| review session | one per task the AI reviews, until that task is merged, cancelled or given to another AI (`flows/agent-turn.md` step 17) | a read-only checkout of the submitted commit | 1, read only | review requests for that task |
+| task session | one per task the AI is assigned, from first delivery until the task is merged or cancelled, or another AI becomes its assignee (`flows/agent-turn.md` step 17) | the task's worktree | the level the owner set for this AI in this project | everything about that task |
+| review session | one per task the AI reviews, until that task is merged or cancelled, or another AI becomes its reviewer (`flows/agent-turn.md` step 17) | a read-only checkout of the submitted commit | 1, read only | review requests for that task |
 
 - A working AI cannot change code in its group session: the session is read
   only. To change code it calls `start_task`, which creates a task and moves
@@ -26,22 +26,30 @@ An AI in a group has several sessions over time:
 
 ## 2. States
 
-Each session has one state, kept by the host.
+Each session has one state, kept by the host: `dormant`, `working`,
+`waiting` or `takeover`. These are all the changes:
 
-```
-            deliver                    turn ends
- dormant ------------> working <------------------> waiting
-    ^                    |  ^                          |
-    | idle timeout       |  | hand-back                | idle timeout
-    +--------------------+--+--------------------------+
-                         |  |
-        owner takes over v  |
-                      takeover
-```
+| From | To | When | Where |
+| --- | --- | --- | --- |
+| `dormant` | `working` | N starts the CLI for an item, or for a turn of its own (a continue turn) | `flows/agent-turn.md` steps 5, 14 |
+| `waiting` | `working` | N writes a turn to the open process | `flows/agent-turn.md` step 6 |
+| `working` | `waiting` | the turn ends, also after an interrupt | `flows/agent-turn.md` steps 9, 12; E |
+| `waiting` | `dormant` | `idle_minutes` passed, `max_open` needs the slot, or the owner took all AIs offline | `flows/agent-turn.md` steps 5.1, 15; E |
+| `working` | `dormant` | the CLI exits during a turn or is killed; the owner took all AIs offline | `flows/agent-turn.md` E, G |
+| `dormant`, `waiting`, `working` | `takeover` | `takeover.start` is accepted | `flows/takeover.md` steps 3 to 6 |
+| `takeover` | `working` | hand-back: the structured CLI starts with the hand-back turn | `flows/takeover.md` step 16 |
+| `takeover` | `dormant` | the interactive CLI cannot start | `flows/takeover.md` E |
+| `working`, `waiting` (saved) | `dormant` | the node starts | `flows/agent-turn.md` E |
+| `takeover` (saved) | `working` | the node starts: hand-back from step 14 | `flows/takeover.md` E |
 
-Overlays, each of which holds deliveries: `paused` (group pause, round limit,
-pre-empted), `limited` (usage cap or vendor rate limit), `offline` (host not
-connected, or the owner took all AIs offline).
+A session ends, and its row is removed, as section 1 says.
+
+Overlays, each of which holds deliveries: `paused` (group pause; the
+session's task paused by hand, by the round limit, or pre-empted),
+`limited` (usage cap or vendor rate limit; also sign-in not valid, which
+holds nothing: the next item tries the start again), `offline`
+(host not connected, or the owner took all AIs offline). Items of a task
+that is `failed` are held too (`flows/agent-turn.md` step 3).
 
 Exactly one process owns the session in `working`, `waiting` and `takeover`;
 none in `dormant`. A switch closes the old process and waits for it to exit
@@ -50,6 +58,10 @@ before starting the new one.
 ## 3. What others see
 
 What the home and the web client see is one state per AI per group, derived
-by the host: the state of the session that is running a turn or is taken
-over, otherwise `waiting` if any session is open, otherwise `dormant`; and
-the task of that session.
+by the host in this order: `takeover` if one of its sessions is taken over;
+`working` if one is running a turn; `offline` if the owner took all AIs
+offline; `limited` if the AI is limited; `paused` if the group is paused;
+otherwise `waiting` if any session is open, otherwise `dormant`. The task
+is that of the session the state comes from, when it has one. The home
+itself sets `offline` when the host's connection closes
+(`contracts/commands.md` 1.9).

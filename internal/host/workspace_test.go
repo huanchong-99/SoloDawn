@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func workOK(t *testing.T, err error) {
@@ -97,7 +98,7 @@ func TestWorkspaceLocalReassignment(t *testing.T) {
 	tree, err := CreateTaskWorkspace(f.project, 2, "docs", "trunk", false, false)
 	workOK(t, err)
 	head := workspaceCommit(t, tree, "guide", "draft")
-	workOK(t, RemoveTaskWorkspace(f.project, 2, "docs", false))
+	workOK(t, RemoveTaskWorkspace(f.project, 2, "docs", TaskGivenAway))
 	_, err = os.Stat(tree)
 	workEqual(t, errors.Is(err, fs.ErrNotExist), true)
 	resumed, err := CreateTaskWorkspace(f.project, 2, "docs", "trunk", false, true)
@@ -114,11 +115,11 @@ func TestWorkspaceCancelDiscardsUncommittedChanges(t *testing.T) {
 	head := workspaceCommit(t, tree, "kept", "committed\n")
 	workOK(t, os.WriteFile(filepath.Join(tree, "kept"), []byte("edited\n"), 0644))
 	workOK(t, os.WriteFile(filepath.Join(tree, "loose"), []byte("untracked\n"), 0644))
-	requireGitExit(t, RemoveTaskWorkspace(f.project, 5, "draft", false), 128)
+	requireGitExit(t, RemoveTaskWorkspace(f.project, 5, "draft", TaskMerged), 128)
 	data, err := os.ReadFile(filepath.Join(tree, "kept"))
 	workOK(t, err)
 	workEqual(t, string(data), "edited\n")
-	workOK(t, RemoveTaskWorkspace(f.project, 5, "draft", true))
+	workOK(t, RemoveTaskWorkspace(f.project, 5, "draft", TaskCancelled))
 	_, err = os.Stat(tree)
 	workEqual(t, errors.Is(err, fs.ErrNotExist), true)
 	workEqual(t, fixtureGit(t, f.repo, "rev-parse", "task/5-draft"), head)
@@ -143,7 +144,7 @@ func TestWorkspaceRetainedBranchFastForward(t *testing.T) {
 	f := workspaceSetup(t)
 	tree, err := CreateTaskWorkspace(f.project, 3, "fix", "trunk", true, false)
 	workOK(t, err)
-	workOK(t, RemoveTaskWorkspace(f.project, 3, "fix", false))
+	workOK(t, RemoveTaskWorkspace(f.project, 3, "fix", TaskGivenAway))
 	fixtureGit(t, f.source, "switch", "-c", "task/3-fix")
 	newHead := workspaceCommit(t, f.source, "progress", "published")
 	fixtureGit(t, f.source, "push", "origin", "task/3-fix")
@@ -151,10 +152,6 @@ func TestWorkspaceRetainedBranchFastForward(t *testing.T) {
 	workOK(t, err)
 	workEqual(t, resumed, tree)
 	workEqual(t, fixtureGit(t, resumed, "branch", "--show-current"), "task/3-fix")
-	workEqual(t, fixtureGit(t, resumed, "rev-parse", "HEAD"), newHead)
-	// A concurrent second attempt cannot remove the active worktree.
-	_, err = CreateTaskWorkspace(f.project, 3, "fix", "trunk", true, true)
-	requireGitExit(t, err, 128)
 	workEqual(t, fixtureGit(t, resumed, "rev-parse", "HEAD"), newHead)
 }
 
@@ -172,7 +169,7 @@ func TestWorkspaceRetainedBranchDiverged(t *testing.T) {
 	cmd.Dir = tree
 	output, err := cmd.CombinedOutput()
 	requireGitExit(t, err, 128)
-	workOK(t, RemoveTaskWorkspace(f.project, 3, "fix", false))
+	workOK(t, RemoveTaskWorkspace(f.project, 3, "fix", TaskGivenAway))
 	_, err = CreateTaskWorkspace(f.project, 3, "fix", "trunk", true, true)
 	requireGitExit(t, err, 128)
 	workEqual(t, err.Error(), "git: exit status 128: "+strings.TrimSpace(string(output)))
@@ -243,8 +240,7 @@ func TestWorkspaceGitFailures(t *testing.T) {
 	workEqual(t, fixtureGit(t, review, "rev-parse", "HEAD"), head)
 	_, err = PrepareReviewWorkspace(f.project, 1, head, "missing", false)
 	requireGitExit(t, err, 128)
-	err = RemoveReviewWorkspace(f.project, 2)
-	workEqual(t, errors.Is(err, fs.ErrNotExist), true)
+	requireGitExit(t, RemoveReviewWorkspace(f.project, 2), 128)
 	workOK(t, os.Rename(filepath.Join(review, ".git"), filepath.Join(review, "saved-git")))
 	requireGitExit(t, RemoveReviewWorkspace(f.project, 1), 128)
 	_, err = CreateTaskWorkspace(f.project, 1, "bad\x00slug", "trunk", true, true)
@@ -255,4 +251,139 @@ func TestWorkspaceGitFailures(t *testing.T) {
 	requireGitExit(t, err, 128)
 	_, err = PrepareReviewWorkspace(f.project, 1, head, "trunk", true)
 	requireGitExit(t, err, 128)
+}
+
+func TestWorkspaceRetainedBranchWithoutPublishedBranch(t *testing.T) {
+	f := workspaceSetup(t)
+	tree, err := CreateTaskWorkspace(f.project, 3, "fix", "trunk", true, false)
+	workOK(t, err)
+	local := workspaceCommit(t, tree, "local", "never pushed\n")
+	workOK(t, RemoveTaskWorkspace(f.project, 3, "fix", TaskGivenAway))
+	resumed, err := CreateTaskWorkspace(f.project, 3, "fix", "trunk", true, true)
+	workOK(t, err)
+	workEqual(t, resumed, tree)
+	workEqual(t, fixtureGit(t, resumed, "branch", "--show-current"), "task/3-fix")
+	workEqual(t, fixtureGit(t, resumed, "rev-parse", "HEAD"), local)
+}
+
+func TestWorkspaceReusesAWorktreeLeftByACrash(t *testing.T) {
+	f := workspaceSetup(t)
+	for _, takeover := range []bool{false, true} {
+		tree, err := CreateTaskWorkspace(f.project, 4, "crash", "trunk", true, false)
+		if takeover {
+			fixtureGit(t, tree, "push", "origin", "task/4-crash")
+		}
+		workOK(t, err)
+		head := workspaceCommit(t, tree, "saved", "committed\n")
+		workOK(t, os.WriteFile(filepath.Join(tree, "unsaved"), []byte("in progress\n"), 0644))
+		again, err := CreateTaskWorkspace(f.project, 4, "crash", "trunk", true, takeover)
+		workOK(t, err)
+		workEqual(t, again, tree)
+		workEqual(t, fixtureGit(t, again, "rev-parse", "HEAD"), head)
+		data, err := os.ReadFile(filepath.Join(again, "unsaved"))
+		workOK(t, err)
+		workEqual(t, string(data), "in progress\n")
+		workOK(t, RemoveTaskWorkspace(f.project, 4, "crash", TaskCancelled))
+		fixtureGit(t, f.repo, "branch", "-D", "task/4-crash")
+	}
+}
+
+func TestWorkspaceGivingATaskAwayKeepsOnlyCommits(t *testing.T) {
+	f := workspaceSetup(t)
+	tree, err := CreateTaskWorkspace(f.project, 6, "away", "trunk", true, false)
+	workOK(t, err)
+	head := workspaceCommit(t, tree, "kept", "committed\n")
+	workOK(t, os.WriteFile(filepath.Join(tree, "kept"), []byte("edited\n"), 0644))
+	workOK(t, os.WriteFile(filepath.Join(tree, "loose"), []byte("untracked\n"), 0644))
+	workOK(t, RemoveTaskWorkspace(f.project, 6, "away", TaskGivenAway))
+	_, err = os.Stat(tree)
+	workEqual(t, errors.Is(err, fs.ErrNotExist), true)
+	workEqual(t, fixtureGit(t, f.repo, "rev-parse", "task/6-away"), head)
+}
+
+func TestWorkspaceReviewerChangeRemovesOnlyTheReviewCheckout(t *testing.T) {
+	f := workspaceSetup(t)
+	tree, err := CreateTaskWorkspace(f.project, 7, "both", "trunk", false, false)
+	workOK(t, err)
+	commit := workspaceCommit(t, tree, "change", "submitted\n")
+	review, err := PrepareReviewWorkspace(f.project, 7, commit, "trunk", false)
+	workOK(t, err)
+	// A crash between the checkout and its diff leaves review/7 without the diff.
+	workOK(t, os.Remove(filepath.Join(review, reviewDiff)))
+	workOK(t, RemoveReviewWorkspace(f.project, 7))
+	_, err = os.Stat(review)
+	workEqual(t, errors.Is(err, fs.ErrNotExist), true)
+	workEqual(t, fixtureGit(t, tree, "rev-parse", "HEAD"), commit)
+	workEqual(t, fixtureGit(t, tree, "branch", "--show-current"), "task/7-both")
+}
+
+func TestWorkspaceGitCommandsWaitForTheCloneLock(t *testing.T) {
+	f := workspaceSetup(t)
+	head := fixtureGit(t, f.repo, "rev-parse", "HEAD")
+	_, err := CreateTaskWorkspace(f.project, 8, "held", "trunk", false, false)
+	workOK(t, err)
+	_, err = PrepareReviewWorkspace(f.project, 8, head, "trunk", false)
+	workOK(t, err)
+	for _, c := range []struct {
+		name string
+		op   func() error
+	}{
+		{"clone", func() error { _, err := EnsureGroupWorkspace(f.project, "unused", "unused"); return err }},
+		{"fetch and merge", func() error { return RefreshGroupWorkspace(f.project, "trunk", true) }},
+		{"worktree add", func() error { _, err := CreateTaskWorkspace(f.project, 9, "next", "trunk", false, false); return err }},
+		{"review checkout", func() error { _, err := PrepareReviewWorkspace(f.project, 8, head, "trunk", false); return err }},
+		{"worktree remove", func() error { return RemoveTaskWorkspace(f.project, 8, "held", TaskMerged) }},
+		{"review remove", func() error { return RemoveReviewWorkspace(f.project, 8) }},
+	} {
+		requireCloneLockWait(t, f.repo, c.name, c.op)
+	}
+}
+
+// requireCloneLockWait holds the clone's lock, under another spelling of
+// its path, and checks that op starts only after it is released.
+func requireCloneLockWait(t *testing.T, repo, name string, op func() error) {
+	t.Helper()
+	lock := cloneLock(repo + string(filepath.Separator))
+	lock.Lock()
+	done := make(chan error, 1)
+	go func() { done <- op() }()
+	select {
+	case err := <-done:
+		lock.Unlock()
+		t.Fatalf("%s ran while the clone was locked: %v", name, err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	lock.Unlock()
+	workOK(t, <-done)
+}
+
+func TestCloneLocksAreSeparatePerClone(t *testing.T) {
+	f := workspaceSetup(t)
+	lock := cloneLock(f.repo)
+	lock.Lock()
+	defer lock.Unlock()
+	other := filepath.Join(t.TempDir(), "other")
+	repo, err := EnsureGroupWorkspace(other, filepath.Join(filepath.Dir(f.source), "origin.git"), "trunk")
+	workOK(t, err)
+	workEqual(t, fixtureGit(t, repo, "branch", "--show-current"), "trunk")
+}
+
+func TestTaskMergeWaitsForTheCloneLock(t *testing.T) {
+	f := workspaceSetup(t)
+	tree, err := CreateTaskWorkspace(f.project, 10, "merge", "trunk", false, false)
+	workOK(t, err)
+	commit := workspaceCommit(t, tree, "merged", "content\n")
+	merge := ReviewedMerge{Repo: f.repo, Base: "trunk", Branch: "task/10-merge", Task: "t10", Commit: commit}
+	var applied, inspected MergeResult
+	requireCloneLockWait(t, f.repo, "merge", func() (err error) {
+		applied, err = merge.Apply(t.Context())
+		return err
+	})
+	head := fixtureGit(t, f.repo, "rev-parse", "HEAD")
+	workEqual(t, applied, MergeResult{MergeCommit: head})
+	requireCloneLockWait(t, f.repo, "merge inspection", func() (err error) {
+		inspected, err = merge.Inspect(t.Context())
+		return err
+	})
+	workEqual(t, inspected, MergeResult{MergeCommit: head})
 }

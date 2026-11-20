@@ -28,7 +28,8 @@ which fields of the card is in `contracts/messages.md` 2.3.
 ## B. The request
 
 1. N receives the request.
-2. Level 1 (read only): N answers "deny" at once. No card.
+2. Level 1 (read only): N answers "deny" at once with the text "Denied:
+   this session is read only." No card.
 3. N looks in its approval records for one of this AI and task with the same
    tool and the same input digest, in state `granted`. If there is one, N
    deletes it, answers "allow", writes an audit row, done.
@@ -47,7 +48,9 @@ which fields of the card is in `contracts/messages.md` 2.3.
    for a card is not refused: the card carries its beginning and says how
    long the whole is (`contracts/messages.md` 2.3). The record, and so the
    owner's decision, is about the whole request, of which N keeps the
-   digest and not the text (`risks.md` K-21).
+   digest and not the text (`risks.md` K-21). If H refuses the `post`, N
+   deletes the record and answers "deny" with the text "The approval
+   request was refused: <code>: <reason>", the error H answered.
 6. H stores the card with `state.status = pending`, sets the task's wait to
    `approval`, and pushes the rows. The card appears in the main line under
    the secretary's name and mentions the approvers; the thread shows the

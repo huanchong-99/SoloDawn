@@ -66,7 +66,9 @@ task through hosted checks and review again.
     reads, in one request, the pull request's head commit and the state of
     its checks. It reports `task cloud` only from an answer whose head is
     the submitted commit and whose checks have all finished. A repository
-    without hosted checks passes at once. A failure returns the task to
+    without hosted checks passes after two empty reads, and checks that
+    have not finished after 60 minutes count as failed
+    (`contracts/local.md` section 7). A failure returns the task to
     `local_check`, counts as one failure, and A gets the detail.
 12. With `forge: none` this step and the pull request are skipped.
 
@@ -124,12 +126,17 @@ task through hosted checks and review again.
 
 When a task's assignee changes, the previous assignee's node, with a remote,
 first pushes the task branch, then ends its task session and removes its
-worktree. The new assignee's node creates its worktree from the published
-branch, or from the base branch if nothing was ever published; without a
-remote both AIs are on the same node and use the same local branch.
-Committed work carries over; uncommitted changes do not. The new node
-reports `task branch` only if the task is still at step `branch`; a task
-that is further along keeps its step.
+worktree with `--force` (`contracts/local.md` section 7). The new assignee's
+node creates its worktree from the published branch, or from the base
+branch if nothing was ever published; without a remote both AIs are on the
+same node and use the same local branch. Only commits carry over;
+uncommitted changes are discarded. The new node reports `task branch` only
+if the task is still at step `branch`; a task that is further along keeps
+its step. The reviewer's session and checkout stay.
+
+When only the reviewer changes, the previous reviewer's node ends its
+review session and removes `review/<num>`; the new reviewer's node creates
+its own at the next `review` item.
 
 A task cannot be reassigned, paused or resubmitted while it is at step
 `merge`, and an AI cannot leave the group while it is assignee or reviewer
