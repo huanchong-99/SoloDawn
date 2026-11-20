@@ -212,9 +212,9 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
 - **A9.35** Q-team gets a task in P's group. Before Q accepted the group's
   check list and templates, `run_checks` is refused, the task waits with
   `accept` and names Q, and a marker file that the first check command would
-  create does not exist. Q's browser shows each command and template and sends
-  `checks.accept` with their hash; then `run_checks` runs them.
-  `checks.accept` with another hash, or signed by P, is refused by `Q1`.
+  create does not exist. Q's browser shows the repository, the base branch and
+  each command and template, and sends `checks.accept` with their hash; then
+  `run_checks` runs them. With another hash, or signed by P, `Q1` refuses it.
 - **A9.36** An admin changes one check command, then one template. After each
   change `run_checks`, the push and the merge on `Q1` are refused with wait
   `accept` until Q accepts the new hash. The acceptance survives a restart of

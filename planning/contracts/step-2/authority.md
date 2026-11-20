@@ -262,33 +262,33 @@ and with `valid` as in `devlogs`. Cases:
 | `flows/approval.md`, `flows/agent-turn.md`, `flows/task.md` | steps 9 and 10; step 2 and the level of step 5; G: the `re` of section 4 |
 
 Changed with this file: `confirm.md` (the request and the word behind a task
-without a brief; a brief's `arg`), `browser-trust.md` (a `task` request; 8.1)
-and `watch-team.md` here; `steps/step-2-3-acceptance.md`; `risks.md` K-4.
-P-4 freezes `allow.set`, `req`, `body.start`, a brief's `arg` and the lists
-in `host.info`. T2-3 builds sections 2 to 5 on the host, T2-2 the home's
-side (sections 5 and 6), T2-4 sections 7 and 8.
+without a brief; a brief's `arg`), `browser-trust.md` (a `task` request; 8.1),
+`checks-forge.md` (the hash) and `watch-team.md` here; the acceptance tests;
+`risks.md` K-4. P-4 freezes `allow.set`, `req`, `body.start`, a brief's `arg`
+and the lists in `host.info`. T2-3 builds sections 2 to 5 on the host, T2-2
+the home's side (sections 5 and 6), T2-4 sections 7 and 8.
 
 ## 10. Limits
 
 | | Limit | Consequence |
 | --- | --- | --- |
-| 1 | The home still says which task and role an AI has, what a review said and when a merge is due, and it supplies what a session reads: notes, threads, task rows | a session trusts that home with its context; labels are the only guard (`contracts/step-2/confirm.md` section 8). Where level 3 is chosen for a group on someone else's home, the interface says so |
+| 1 | The home still says which task and role an AI has, what a review said and when a merge is due, and it supplies what a session reads: notes, threads, task rows | a session trusts that home with its context; labels are the only guard (`contracts/step-2/confirm.md` section 8). Where level 3 is chosen for a group on someone else's home, the interface says so. A merge goes only into the `repo` and `base` the owner accepted (`contracts/step-2/checks-forge.md` section 2), and only for the task's own branch |
 | 2 | A home can deliver again what was authorised once: an owner's or a listed person's message, the tasks of a confirmed brief | no new authority; a confirmed `mention` is acted on once |
 | 3 | The logs of other people are in memory and come through homes | a home that holds a `revoke` back keeps that device's word good at N until the entry comes from elsewhere |
 | 4 | A signer must be valid when N judges | after the device that confirmed a brief is revoked (`risks.md` K-20), its tasks start no new session; the secretary posts a new brief |
 | 5 | A delegate removed while their `act` is on the way: the home may accept what the host refuses | the card reads approved and the request stays open; the AI asks again and a new card appears |
-| 6 | The repository and base branch N merges into are those of the group row it was given, and the owner's own sign-in merges | section 3 limits a merge to the task's own branch; that a review passed is the home's word |
 
-## 11. Decided here, for the coordinator to confirm
+## 11. Settled by the coordinator (2026-11-20)
 
 | | Written here | The other answer |
 | --- | --- | --- |
 | 1 | The signed list is a host command; the member row is a copy | a list signed into the row: a home could show an old one, so the host would need versions |
 | 2 | A brief's `confirm` carries the digest of the brief, a change to a step 1 command under `v` 2 | `msg` alone: a home can put another brief under the same id, and with it its own work at the owner's level |
 | 3 | The request of a task without a brief is its signed `task start`, shown in the `task` message | the message that led to it: a home could hang any plan on an old message of the owner |
-| 4 | D-4 refined: after a replacement the entries that followed are applied again, not all dropped; one signer: the lower `s` | all dropped: a receiver that saw the winner first keeps an entry that another has dropped |
+| 4 | D-4 refined: after a replacement the entries that followed are applied again, not all dropped; one signer: the lower `s`. Record: `docs/decisions/proposed/architecture/2026-11-20-device-log-fork-rule.md` | all dropped: a receiver that saw the winner first keeps an entry that another has dropped |
 | 5 | Where a `revoke` is written, and adding again what it dropped | always the next version: the revoked device replaces an older entry and is valid again |
 | 6 | Only O's signature as a person carries O's level | "O's word", also through O's AIs: a capped task could raise itself by a call |
+| 7 | The hash of `checks.accept` covers `repo` and `base`; T2-3 adds the branch test of `merge` to `internal/host/merge.go` | a limit: a node merges into whatever the group row names |
 
 ## 12. Not verified
 

@@ -74,8 +74,8 @@ are complete only when S-10 and T3-0 have reported.
 | P-4 | 4 | Wire shapes of step 2: `invite`, `join`, role and removal, `confirm` body and states, group kind `team`, `checks.accept`, templates, the snapshot, `watch`, and the rest that each step 2 contract assigns to P-4; protocol `v` 2, with the rule that a `v` 2 home lets only its owner's own devices connect with `v` 1 (`contracts/step-3/knowledge.md` section 8) | golden round trip | lane PROTO | P-3, C2-1 to C2-6 | F | L |
 | T2-1 | 5 | Home: invitations, joining, roles, removing a member; admission of a joiner by the node and the browser; the `v` 2 negotiation of `hello` in node and browser, and the home's refusal of `v` 1 from devices of others | A9 people | `home/cmd_people.go`, `node/admit.go`, `node/version.go`, `lib/join.ts`, `lib/version.ts` | P-4, HM-5, N-2, W-2 | A | M |
 | T2-2 | 5 | Home: the `confirm` card and `act confirm`; who must be asked; the home's side of `contracts/step-2/authority.md` (sections 5 and 6) | A9 confirm | `home/cmd_confirm.go` | P-4, HM-10 | F | M |
-| T2-3 | 5 | Host: the owner-signature rule, the signed list, the level cap, delegates | A9 authority | `host/authority.go` | P-4, HS-13, HS-16a | F | M |
-| T2-4 | 5 | Device log fork rule in Go and in the web client, with the vector generator and the fork vectors in the same pull request; where a client writes a revoke (`contracts/step-2/authority.md` section 7) | the new vectors | `internal/identity/devlog.go`, `lib/devlog.ts`, the fork vectors of `crypto.json` and their generator | P-4 | F | S |
+| T2-3 | 5 | Host: the owner-signature rule, the signed list, the level cap, delegates; the branch test of `merge` in `host/merge.go` (`contracts/step-2/authority.md` section 3) | A9 authority | `host/authority.go` | P-4, HS-13, HS-16a | F | M |
+| T2-4 | 5 | Device log fork rule in Go and in the web client, with the vector generator and the fork vectors in the same pull request; where a client writes a revoke (`contracts/step-2/authority.md` section 7) | the new vectors | `internal/identity/devlog.go`, `lib/devlog.ts`, the fork vectors of `crypto.json` and their generator | P-4 | F | M |
 | T2-5 | 5 | Browser: verify row envelopes for homes of others | A9 trust | `lib/verify.ts` | P-4, C2-7 | A | S |
 | T2-6 | 5 | Host: the receive-only terminal channel | A9 watch | `host/watch.go` | P-4, HS-19, HS-20 | A | S |
 | T2-7 | 5 | Group kind `team`: the home's refusals; the node and host side of the bulletin: `settings.teams`, the connection to each team home, the `group` argument of the `post` tool | A9 team | `home/team.go`, `node/teams.go`, `host/tools_bulletin.go` | P-4, HM-5, N-3, HS-9, HS-21 | A | M |
@@ -88,7 +88,7 @@ are complete only when S-10 and T3-0 have reported.
 | U2-1 | 5 | Members, roles and the invitation dialog | A9 as seen | `cmp/people/` | U-0, P-4 | F | M |
 | U2-2 | 5 | The `confirm` card; the allow list and delegates editor | A9 as seen | `cmp/confirm/`, `cmp/allow/` | U-0, P-4 | F | M |
 | U2-3 | 5 | Watching a terminal; team-wide group screens | A9 as seen | `cmp/watch/`, `cmp/team/` | U-11, P-4 | F | M |
-| U2-4 | 5 | The unverified mark; the prompt to accept checks; move and copy in settings; the secretary warning | A9 as seen | `cmp/trust/`, `cmp/move/` | U-12, P-4 | F | M |
+| U2-4 | 5 | The unverified mark; the prompt to accept checks; move and copy in settings; the secretary warning; the device list of `contracts/step-2/browser-trust.md` 8.1: what a revoke drops, adding a device again | A9 as seen | `cmp/trust/`, `cmp/move/` | U-12, P-4 | F | M |
 | I2-1 | 6 | Step 2 acceptance with two persons, three nodes and fake CLIs | A9.x | `features/s2*` | T2-1 to T2-13 | A | L |
 | I2-2 | 7 | Step 2 in the browsers and on three systems | A9.x as seen | `web/e2e/s2.spec.ts` | I2-1, U2-1 to U2-4 | A | M |
 
