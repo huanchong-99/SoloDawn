@@ -107,7 +107,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, windows-2022]
+        os: [windows-latest, macos-latest]
     defaults:
       run:
         shell: bash

@@ -44,8 +44,8 @@ func privateDir(dir string) error {
 // ownerOnly replaces the socket's inherited DACL with a protected one that
 // grants the current user, and nobody else, full access. An AF_UNIX socket
 // file is a reparse point and opens only with FILE_FLAG_OPEN_REPARSE_POINT.
-// SetSecurityInfo reads the descriptor it changes, so the handle needs
-// READ_CONTROL besides WRITE_DAC; with WRITE_DAC alone it is refused.
+// SetSecurityInfo needs READ_CONTROL besides WRITE_DAC: with WRITE_DAC alone
+// it answers "Access is denied" (Windows Server 2022 and 2025).
 // A bound socket path holds no NUL, so its conversion cannot fail.
 func ownerOnly(path string) error {
 	name, _ := windows.UTF16PtrFromString(path)
