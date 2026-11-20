@@ -36,6 +36,14 @@ Before the first `pnpm test`, install the headless browser with
 `pnpm exec playwright install --with-deps --only-shell chromium`. The five motion scenarios run
 against a temporary production build in Chromium.
 
+`pnpm test:vectors` runs the unit suite for `crypto.json` in Playwright browsers. Install
+Chromium and Firefox with `pnpm exec playwright install --with-deps --only-shell chromium firefox`;
+on macOS also install `webkit`. Select one engine with `--project chromium|firefox|webkit`.
+WebKit is available only on macOS. CI pins Chrome for Testing and Edge 137 (`CHROMIUM_PATH`),
+and Playwright Firefox 136 (`FIREFOX136_PATH`) on Linux; on macOS it uses Playwright's bundled
+WebKit, not a version-matched Safari release. Firefox 136 needs a separate Playwright driver:
+the current driver's viewport and WebSocket protocol differs from that build's.
+
 The one runtime dependency is `valibot`, for the wire types. Signatures, hashes and macs use the
 browser's WebCrypto only; no signature library is bundled (R-164). `fake-indexeddb` is a
 development dependency, an IndexedDB for the tests.
