@@ -163,14 +163,10 @@ tests. All three change in one pull request: whoever adds or changes a
 golden file also updates the schema in `web/src/lib/proto.ts` and the file
 map of `proto.test.ts`, because the web client's golden test fails on a file
 it has no mapping for and the web job of CI runs on every pull request
-(decided by coordinator). The shapes of step 1 that had no golden file when
-the parallel plan was written are frozen by its units P-1 and P-2
-(`steps/parallel-plan-units.md` section 1), before the code that uses them
-and not by the first task that needs each (decided by coordinator), so that
-the units of every lane build against the files. Until its golden file
-exists, the example and the field table in the contract are the reference,
-and the web client types the shape from them. This table is the only place
-that says who freezes what.
+(decided by coordinator). In step 1, P-1 and P-2 freeze the shapes assigned
+to them below before the code that uses them (`steps/parallel-plan-units.md`
+section 1). Until a golden file exists, the example and field table in the
+contract are the reference, and the web client types the shape from them.
 
 | Shapes | Frozen in |
 | --- | --- |
@@ -181,15 +177,13 @@ that says who freezes what.
 | the WebSocket frames of signalling: `challenge`, `auth`, `ready`, `ice` (request and answer), `to`, `from`, `offline`, `watch`, `presence`, `join`, `joined`, `room` | B-06 |
 | `quota` (request and answer) | B-07 |
 | the payloads of `group`, `member`, `post` (every kind), `act`, `jump`, `task`, `note`, `forget`, `push`; the review outcome and the host events (`contracts/commands.md` 1.8, 1.9); `inbox` with the signed `item` payload, `ack`; the payloads of `host.join`, `host.leave` | P-1 |
-| `groups`; `host.info`; `audit` and its answer; `pty.resize`; the local-network `beacon` payload; the payloads of `settings.set`, `pair.browser`, `agent.set`, `perm.set`, `host.offline`, `host.online`, `takeover.start`, `takeover.end` | P-2, after P-1 and B-07 |
+| `groups`; `host.info`; `audit` and its answer; `pty.resize`; the local-network `beacon` payload; the payloads of `settings.set`, `pair.browser`, `agent.set`, `perm.set`, `host.offline`, `host.online`, `takeover.start`, `takeover.end`; the MCP tool list (`tools.json`, `contracts/mcp-tools.md` section 5) | P-2, after P-1 and B-07 |
 | one confirmed task end to end, with and without a remote | B-01 slice (c) |
 
-**Feature files of the parallel plan** (decided by coordinator). Every unit
-adds one feature file of its own, `features/<module>_<slice>.feature`, and
-one step file, `features/<module>_<slice>_test.go`, which registers its
-steps itself from an `init`, in the registry of unit X-1
-(`features/acceptance_test.go`). A web unit adds
-`features/web_<slice>.feature`, tagged `@web`, and
-`web/features/<slice>.spec.ts`. No unit edits the feature file or the step
-file of another unit. `features/<module>.feature` stays the file of the
-module's seam unit (`steps/parallel-plan.md` section 2).
+**Feature files of the parallel plan** (`steps/parallel-plan.md` section 2).
+The module's seam unit owns `features/<module>.feature`. A Go slice puts
+its acceptance scenarios in `features/<module>_<slice>.feature`; its
+`features/<module>_<slice>_test.go` registers the steps from `init` with
+the X-1 registry in `features/acceptance_test.go`. A web slice puts its
+scenarios in `features/web_<slice>.feature`, tagged `@web`, and runs them
+with `web/features/<slice>.spec.ts`. Each unit edits only its own files.
