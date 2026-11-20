@@ -175,6 +175,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the Windows resolver answers no name under `.localhost` (RFC 6761), and the rendezvous looks up its `--domain` for the relay address at startup (`internal/rendezvous/relay.go`, `relay.generator`, `net.LookupIP`). The certificate library refuses `localhost` itself, a name without a dot, so the test cannot use it instead.
 - Status: open. A hosts file entry for `rv.localhost` and `turn.rv.localhost` on the Windows runner would let it run; that changes the machine, not the test.
 
+### 2026-11-20 · limitation · The own-address rule knows the interface addresses of the start only
+
+- Symptom: the relay sends a datagram to one of the server's own addresses only when it is for one of its relay allocations (`planning/contracts/rendezvous.md` section 3). The server reads its interface addresses once, when it starts; an address that an interface gets later (a new DHCP lease, an added IPv6 address) is not one of its own addresses for this rule until the service restarts, so a client can relay to a service on the server through that address.
+- Cause: `ownAddrs` reads `net.InterfaceAddrs` once, from `relay.generator` at startup (`internal/rendezvous/relay.go:111-129`), with the addresses its name resolves to.
+- Status: open. Restart the rendezvous after the host's addresses change.
+
 ## Resolved
 
 ### 2026-11-20 · bug · Go acceptance steps acted beyond their own scenario
