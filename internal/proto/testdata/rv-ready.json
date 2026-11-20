@@ -1,0 +1,19 @@
+{
+  "t": "ready",
+  "ice": [
+    {
+      "urls": [
+        "stun:rv.example:3478"
+      ]
+    },
+    {
+      "urls": [
+        "turn:rv.example:3478?transport=udp",
+        "turns:turn.rv.example:443?transport=tcp"
+      ],
+      "username": "1763603600:akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+      "credential": "4mW29WRgGh_o3EJ4XNGKhg"
+    }
+  ],
+  "ttl": 3600
+}

@@ -1,0 +1,9 @@
+{
+  "t": "to",
+  "k": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+  "env": {
+    "p": "{\"t\":\"offer\",\"n\":\"mIGAvwyTKMnovQgnVcZHBA\",\"ts\":1763600000000,\"to\":\"J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q\",\"conn\":\"s42dFow67fFW9PJJuBra7w\",\"sdp\":\"v=0\\r\\no=- 1 1 IN IP4 127.0.0.1\\r\\ns=-\\r\\nt=0 0\\r\\na=group:BUNDLE 0\\r\\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\\r\\nc=IN IP4 0.0.0.0\\r\\na=mid:0\\r\\na=sctp-port:5000\\r\\na=ice-ufrag:abc1\\r\\na=ice-pwd:abcdefghijklmnopqrstuv01\\r\\na=setup:actpass\\r\\na=fingerprint:sha-256 98:51:B3:F7:F6:25:1B:69:01:7D:93:D6:F4:A9:0B:2E:3E:27:FF:0C:A9:07:14:1C:82:11:A2:79:98:C9:09:CF\\r\\n\",\"probe\":false}",
+    "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+    "s": "Eh_WwrosuucIVWEKRv4_axiWh9dcsGyU7VlEKbDqxPfmNRF1ayfV-p9UGPQ4vUpY2JwKRyk-6GXAQsyN3mcxAg"
+  }
+}

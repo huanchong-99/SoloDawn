@@ -6,6 +6,8 @@ import * as p from './proto';
 /** Fields of the examples that the contracts mark optional and Go tags omitempty: the only ones
  *  that may be left out. */
 const omitempty: Record<string, string[]> = {
+  'rv-ready': ['ice.username', 'ice.credential'],
+  'rv-ice-answer': ['ice.username', 'ice.credential'],
   answer: ['to'],
   ice: ['to'],
   offer: ['to'],
@@ -287,6 +289,36 @@ describe('message contracts', () => {
   it('rejects an unknown system code', () => {
     const row = JSON.parse(goldens['row-msg-system']);
     expect(accepts('row-msg-system', { ...row, body: { code: 'unknown' } })).toBe(false);
+  });
+});
+
+describe('rendezvous frames', () => {
+  it.each(['rv-join', 'rv-joined', 'rv-room'])('%s takes a 32-digit lowercase hex room', (name) => {
+    const frame = JSON.parse(goldens[name]);
+    const room = '0123456789abcdef'.repeat(2);
+    expect(accepts(name, { ...frame, room })).toBe(true);
+    for (const invalid of [
+      room.slice(1),
+      'z' + room,
+      room + 'z',
+      room.toUpperCase(),
+      room.slice(1) + 'g',
+    ]) {
+      expect(accepts(name, { ...frame, room: invalid })).toBe(false);
+    }
+  });
+
+  it('limits watch to 64 ids', () => {
+    const watch = JSON.parse(goldens['rv-watch']);
+    expect(accepts('rv-watch', { ...watch, k: Array(64).fill(watch.k[0]) })).toBe(true);
+    expect(accepts('rv-watch', { ...watch, k: Array(65).fill(watch.k[0]) })).toBe(false);
+  });
+
+  it.each(['rv-ready', 'rv-ice-answer'])('%s reads ttl as a safe integer', (name) => {
+    const frame = JSON.parse(goldens[name]);
+    for (const ttl of [0.5, 2 ** 53]) {
+      expect(accepts(name, { ...frame, ttl })).toBe(false);
+    }
   });
 });
 

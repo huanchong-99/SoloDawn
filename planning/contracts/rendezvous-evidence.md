@@ -23,7 +23,11 @@ Entries 1 to 10 belong to the points of section 5.1 with the same number.
 
 1. **The first measurement holds.** S-1 opened the reverse connection
    after the first had echoed, and counted missed echoes over two bounded
-   waits. The figures are in section 5.1, point 1.
+   waits. With both nodes using UDP 47800 for all connections, A to B
+   echoed before B to A opened, and both selected the pair 47800 and 47800.
+   A to B then missed both five-second echoes, and B to A answered both.
+   With only the offerers changed to private UDP sockets, all four
+   alternating echoes matched.
 2. **The last registration wins.** pion looks in the map of remote
    addresses first, for STUN too
    ([udp_mux.go, 566-598](https://github.com/pion/ice/blob/v4.4.2/udp_mux.go#L566-L598)).
@@ -105,6 +109,10 @@ Entries 1 to 10 belong to the points of section 5.1 with the same number.
     ([peerconnection.go, 2102-2106](https://github.com/pion/webrtc/blob/v4.2.20/peerconnection.go#L2102-L2106))
     and nominates from the pairs that are valid at the time
     ([selection.go, 57-85](https://github.com/pion/ice/blob/v4.4.2/selection.go#L57-L85)).
+13. **The probe stays.** S-1: when a direct path returned under a live
+    relayed connection, Chromium and WPE WebKit moved to it by themselves
+    within 5 seconds and Firefox was still relayed after 30, with pion's
+    opt-in renomination on or off.
 
 ## 3. Not verified
 

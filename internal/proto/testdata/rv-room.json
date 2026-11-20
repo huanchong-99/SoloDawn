@@ -1,0 +1,12 @@
+{
+  "t": "room",
+  "room": "23b3731de722f5b7425a41416cf5d30b",
+  "data": {
+    "t": "pair",
+    "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+    "kind": "browser",
+    "name": "phone browser",
+    "role": "a",
+    "mac": "LSa7ZkmFClacGrJ6bsUg1G3yTiycOY3RZf3rskaRwCo"
+  }
+}

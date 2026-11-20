@@ -27,9 +27,11 @@ choosing on the TLS server name. Spike S-6 in `steps/step-1.md`.
 
 WebSocket, text frames, one JSON object per frame, at most 16 KiB per frame
 (the largest signed offer or answer in spike S-1 made a frame of 2.5 KB).
-The server closes a connection that sends a larger frame or more than 120
-frames in 10 seconds. Field presence follows `contracts/conventions.md`
-section 2: every field shown for a frame is always present.
+Field presence follows `contracts/conventions.md` section 2: every field
+shown for a frame is always present. The server closes a connection that
+sends a larger frame, more than 120 frames in 10 seconds, a frame it cannot
+read, or a `t` it does not know. The limit holds for the forwarded `from`
+too: a `to` that would exceed it closes its sender, and the target gets none.
 
 ### 2.1 Handshake
 
@@ -44,6 +46,8 @@ server -> {"t":"ready","ice":[ … ],"ttl":3600}
   base64url text, not the bytes they encode. `k` and `s` are held to check
   1 of `contracts/envelope.md` section 3, with this prefix in place of the
   envelope's.
+- A connection that has not authenticated within 10 seconds of its
+  `challenge` is closed.
 - A new connection for a device id replaces the previous one.
 - `ice` is a list in the shape of `RTCIceServer`:
 
@@ -192,19 +196,14 @@ the review of section 5.1 measured. "Evidence n" is entry n of
   addresses (`SetICEMulticastDNSMode`, query only). A name that does not
   resolve is no obstacle: in S-1 the connections used the browser's
   address as its checks showed it (peer-reflexive) `[verified, S-1]`.
-- Both ends create a `probe` connection without TURN. The probe stays:
-  when a direct path returned under a live relayed connection, Chromium
-  and WPE WebKit moved to it by themselves within 5 seconds and Firefox
-  was still relayed after 30, with pion's opt-in renomination on or off
-  `[verified, S-1]`.
+- Both ends create a `probe` connection without TURN. The probe stays: not
+  every browser leaves the relay by itself `[verified, S-1]` (evidence 13).
 
 ### 5.1 Ports: why a node offers from sockets of its own
 
-1. **What was seen** `[verified, S-1]`. With both nodes using UDP 47800
-   for all connections, A to B echoed before B to A opened. Both selected
-   the pair 47800 and 47800. A to B then missed both five-second echoes,
-   and B to A answered both. With only the offerers changed to private
-   UDP sockets, all four alternating echoes matched.
+1. **What was seen** `[verified, S-1]`. With both nodes on UDP 47800 for
+   all connections, opening the reverse connection silenced the first. With
+   the offerers on private UDP sockets both answered (evidence 1).
 2. **Why: the last registration wins.** Each underlying pion UDP mux maps
    an observed remote IP and port to one ICE connection. For an unknown
    endpoint, the USERNAME of a STUN request can identify the local ICE
@@ -295,6 +294,7 @@ solodawn rendezvous --domain rv.example --turn-domain turn.rv.example
 - Obtains certificates automatically for both names, or takes
   `--cert` and `--key`.
 - `--relay-quota-mb 50`, `--no-relay` to run signalling and STUN only.
+- `--listen <address>`: where signalling and the static files are served.
 - No database, no configuration file, no accounts.
 - Nodes and web clients are pointed at it with a rendezvous URL; the web
   client served by that host uses its own origin by default.
