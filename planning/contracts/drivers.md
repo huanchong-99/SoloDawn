@@ -72,7 +72,19 @@ claude -p --verbose
 - A user turn is one line on stdin:
   `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"…"}]}}`.
 - A turn ends with an event of `type` `result`; usage is read from it, and
-  the rate-limit window from the `rate_limit_event` of each turn.
+  the rate-limit window from the `rate_limit_event` of each turn. In
+  `result`, the turn's token count is the sum of `usage.input_tokens`,
+  `usage.cache_creation_input_tokens`, `usage.cache_read_input_tokens` and
+  `usage.output_tokens`, and the turn's cost is the sum of `costUSD` in
+  `model_usage_since_last_result` (falling back to `total_cost_usd` when
+  absent, because `total_cost_usd` and `modelUsage` accumulate across turns
+  and resumes). In `rate_limit_event`, `utilization` (`0` to `1`) is scaled
+  to `window_pct` (`0` to `100`), `resetsAt` (Unix seconds) is scaled to
+  Unix milliseconds, and a `status` other than `allowed` or
+  `allowed_warning` reports `rate_limited`. An unresumable session or
+  unusable sign-in reported in an error `result` or on `stderr` of a
+  non-zero exit becomes `NoSession` or `LoginInvalid` instead of
+  `TurnEnded`.
 - Interrupt: a `control_request` with subtype `interrupt` on stdin, always
   sent. The CLI answers with a `control_response` and ends the turn with a
   `result` of subtype `error_during_execution`; the next turn works in the
@@ -195,7 +207,9 @@ codex resume <thread id> --no-alt-screen --no-daemon -C <folder>
   worktree, with `--setting-sources user` as well. The owner answers in
   the terminal. Codex does not ask.
 - A session that does not exist yet: Claude Code starts one in the
-  terminal with `--session-id <uuid>`. Codex cannot: it takes no id, and a
+  terminal with `--session-id <uuid>`, passing `--append-system-prompt`
+  when instructions are given so the first request records them. Codex
+  cannot: it takes no id, and a
   thread that has had no turn is not saved (`flows/takeover.md` section A).
 - `[unverified]` `project_doc_max_bytes=0` on Codex's interactive CLI.
 

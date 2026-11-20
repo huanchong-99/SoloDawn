@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-21 · limitation · Claude driver matches English error text for `LoginInvalid` and `NoSession`, and keeps the last unresumed terminal MCP file in temp
+
+- Symptom: `claudeDiagEvent` (`internal/host/claude.go`) recognises an unresumable session or invalid sign-in from HTTP status `401` and English error substrings (`no conversation found`, `session not found`, `/login`, `not logged in`, `invalid api key`, `authentication`) in `result` or non-zero-exit `stderr`, so a wording change in a newer Claude Code release can report a failed turn or crash instead. Also, `Driver.Interactive` returns `argv` without owning the terminal process (`internal/host/host.go:422`), so while `claudeDriver.swapInteractive` removes the previous `--mcp-config` temporary file on the next `Interactive` or `Start` for that session, the file of a terminal session that is never handed back or restarted in the same node run stays in the OS temporary directory.
+- Cause: Claude Code has no dedicated stream-json event type for sign-in or missing-session errors (see also the open entry on missing invalid-login captures), and `Interactive` has no post-exit callback.
+- Status: open. Revisit error patterns when live failure captures are added, and let the PTY runner remove the temporary file on exit if needed.
+
 ### 2026-11-21 · deviation · `act confirm` does not make the `replaces` check of the post again
 
 - Symptom: `planning/contracts/commands.md` 1.4 says that a `confirm` makes "the checks of a `brief` post (1.3)" again. One of them is that `body.replaces`, when not `null`, names a brief that is `pending` or `revise`. The post itself made that brief `superseded`, so the check, made again, would refuse every confirm of a brief that replaces another.

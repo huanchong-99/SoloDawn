@@ -84,6 +84,15 @@ A `Driver` starts the structured CLI (`Start`) and gives the command line of the
 - A driver keeps no timer. Its caller ends the context of `Start`, which kills the process tree, when an interrupt or a close was not answered within 10 s.
 - Sign-in that is not usable and a session id that cannot be resumed are events (`LoginInvalid`, `NoSession`), because a CLI reports them after its process has started.
 
+### Claude Code (`claude.go`)
+
+Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/drivers.md), sections 1.1 and 1.3).
+
+- `--mcp-config <file>` holds one server, `solodawn`, built from `Launch.Shim[0]` and `Launch.Shim[1:]` in a mode-`0600` temporary file. `Start` removes its file on start failure or once `Wait` and process-tree cleanup complete. `Interactive` rotates and removes the session's previous interactive file on the next `Interactive` or `Start` for that session; the last file of a terminal session that is never resumed in the same node run stays in the system temp directory ([issues.md](../../issues.md)).
+- `claudeProcess.mu` serializes stdin writes (`Turn`, `Interrupt`), `Close`, `reqSeq` and `interrupted`; nothing inside `mu` waits on `events` or the child process. `readLoop` is the sole writer of `events` and closes it after stdout EOF, `Wait`, process-tree cleanup and temp-file removal; the caller of `Process.Events` is its single reader.
+- `Process.Answer` returns an error because Claude Code sends permission prompts through the MCP `approve` tool ([mcp-tools.md](../../planning/contracts/mcp-tools.md), section 3).
+- `LoginInvalid` and `NoSession` match HTTP status `401` and Claude Code's English error phrases on `result` and non-zero-exit `stderr` until live failure captures exist ([issues.md](../../issues.md)).
+
 # Host test CLIs
 
 Build `./internal/host/fakecli/claude` and `./internal/host/fakecli/codex` into a temporary directory and prepend it to the test's PATH. Both answer `--version` without a script. For sessions, set:
