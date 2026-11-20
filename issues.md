@@ -135,7 +135,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-20 · bug · A failed step was reported three times as an After hook failure
 
 - Symptom: a step error X appeared as "after scenario hook failed: X, step error: X, X, step error: X".
-- Cause: the After hooks of the identity and rendezvous steps, registered for every scenario, returned the error they were given (`features/identity_test.go:72`, `features/rendezvous_test.go:101` before the fix), which godog takes for the hook's own.
+- Cause: the After hooks of the identity, rendezvous and peer steps, registered for every scenario, returned the error they were given (`features/identity_test.go:72`, `features/rendezvous_test.go:101`, `features/peer_test.go:61` before the fix), which godog takes for the hook's own.
 - Status: resolved on branch `test/audit-harness-ci`.
 
 ### 2026-11-20 · bug · The web acceptance file failed on a busy machine although its tests passed
