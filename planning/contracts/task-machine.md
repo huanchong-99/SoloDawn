@@ -105,7 +105,7 @@ is a person with role `owner` or `admin`. Items are inbox items
 | 14 | (inside rows 6, 7 and 10) | `failures` reaches `limits.failures`, or `review.failed` goes above `limits.review_rounds` | `failed`, wait `null`; a `system` message `task_failed` mentioning the brief's requester and the assignee's owner | `notice` [SEC], once; no other item | — |
 | 15 | `task cancel`, by SEC or an admin; by host if `origin` is `takeover`; at step `merge`, by an admin only | not final | `cancelled`, wait `null`; pending cards of the task become `expired`; every queued item of the task is retired | `notice` [SEC] for each queued task that depends on it | — |
 | 16 | `task preempted`, by host | `active`, not at step `merge` | `paused`, wait `preempted`, with `kept` (section 2); a `system` message `preempted` | — | — |
-| 17 | `post` kind `approval`, by the assignee | `active` | wait `approval` with the card, when the wait is `null` or a card wait | — | — |
+| 17 | `post` kind `approval`, by the assignee | `active` | when the wait is `null` or a card wait, it is recomputed with this card among the pending ones (section 2): wait `approval` with the task's oldest pending approval card, which is this card only if no older one is pending | — | — |
 | 18 | `act approve` or `deny`, by an approver | card pending | the card is decided and keeps the signed `act`; wait cleared | `decided` [the asking AI] with that `act` as cause | — |
 | 19 | `post` kind `decision` naming the task, by an AI | not final | if `active` with wait `null`: wait `decision` with the card | — | — |
 | 20 | `act choose`, by an addressee or an admin | card pending | the card is decided and keeps the signed `act`; wait cleared | `decided` [the asking AI; the assignee if another] | — |

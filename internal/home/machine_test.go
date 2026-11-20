@@ -764,8 +764,8 @@ func TestMachineCancel(t *testing.T) {
 func TestMachineCards(t *testing.T) {
 	on := machineEvent
 	posted := home.PendingCard{Msg: "A9", Who: []string{"u9"}, Since: 90}
-	approval := func(member string) home.Event {
-		return on(home.OnApproval, home.ByAI, home.Event{Member: member, Card: posted})
+	approval := func(member string, pending ...home.PendingCard) home.Event {
+		return on(home.OnApproval, home.ByAI, home.Event{Member: member, Card: posted, Pending: pending})
 	}
 	decision := func(by home.Sender) home.Event { return on(home.OnDecision, by, home.Event{Member: mcB, Card: posted}) }
 	approve := func(card string, pending ...home.PendingCard) home.Event {
@@ -786,11 +786,16 @@ func TestMachineCards(t *testing.T) {
 		{name: "row 17: the task waits for the approval",
 			in: base, ev: approval(mcA),
 			out: func(t *home.Task) { t.Wait = asked("approval") }},
-		{name: "row 17: the newest approval replaces a decision wait",
-			in: onD1, ev: approval(mcA),
+		{name: "row 17: an approval takes the wait from a pending decision",
+			in: onD1, ev: approval(mcA, mcDecision),
 			out: func(t *home.Task) { t.Wait = asked("approval") }},
-		{name: "row 17: the newest approval replaces an older one",
-			in: onA1, ev: approval(mcA),
+		{name: "row 17: an older pending approval keeps the wait",
+			in: onA1, ev: approval(mcA, mcApproval1)},
+		{name: "row 17: the oldest pending approval takes the wait from a decision",
+			in: onD1, ev: approval(mcA, mcDecision, mcApproval2),
+			out: func(t *home.Task) { t.Wait = mcCardWait(mcApproval2) }},
+		{name: "row 17: a card the caller already lists as pending is the wait once",
+			in: base, ev: approval(mcA, home.PendingCard{Kind: "approval", Msg: "A9", Who: []string{"u9"}, Since: 90}),
 			out: func(t *home.Task) { t.Wait = asked("approval") }},
 		{name: "row 17: a reviewer wait stays",
 			in: base.at("active", "review").reviewer("").wait("reviewer"), ev: approval(mcA)},
@@ -886,7 +891,7 @@ func TestMachineRoundsAndTimers(t *testing.T) {
 	group := on(home.OnGroupResume, home.ByHome, home.Event{})
 	base := machineTask()
 	rounds := func(n int) func(*home.Task) { return func(t *home.Task) { t.Thread.Rounds = n } }
-	limit := home.Effects{System: "rounds_limit", Items: []home.TaskItem{mcNotice("rounds_limit")}}
+	limit := home.Effects{System: "rounds_limit", Main: true, Items: []home.TaskItem{mcNotice("rounds_limit")}}
 	held := base.at("paused", "local_check").wait("rounds")
 	resume := home.TaskItem{Why: "resume", AI: mcA}
 	review := home.TaskItem{Why: "review", AI: mcR, Commit: "c1", IfNone: true}

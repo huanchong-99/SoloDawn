@@ -68,7 +68,7 @@ const (
 	BySecretary                    // the group's secretary
 	ByAdmin                        // a person with role owner or admin
 	ByPerson                       // any other person
-	ByAI                           // a working AI of the group
+	ByAI                           // a working AI of the group; never the secretary, which is BySecretary and nothing else
 	ByHome                         // the home itself: a timer, or what follows from another row
 	byAssignee                     // Event.Member is the task's assignee
 	byReviewer                     // Event.Member is the task's reviewer
@@ -94,7 +94,7 @@ type Event struct {
 
 	Card    PendingCard   // rows 17 and 19: the card posted; rows 18 and 20: the card decided
 	Asker   string        // rows 18 and 20: the AI that posted the card
-	Pending []PendingCard // the task's pending cards, oldest first; the card of rows 18 and 20 may be among them
+	Pending []PendingCard // the task's pending cards, oldest first; the card of rows 17, 18 and 20 may be among them
 }
 
 // PendingCard is an approval or decision card of the task that nobody has decided.
@@ -110,7 +110,8 @@ type Effects struct {
 	Retire []ItemFilter // queued inbox items of the task to delete
 	Items  []TaskItem   // inbox items to queue, in this order
 	Cards  string       // "expired": every pending card of the task expires; "reassigned": its pending approval cards do
-	System string       // the code of the system message to write in the thread, or ""
+	System string       // the code of the system message to write, or ""
+	Main   bool         // the system message goes in the main line (row 21); otherwise in the task's thread
 	Reason string       // with System task_failed: failures or review_rounds
 }
 
@@ -374,11 +375,11 @@ func taskCardWait(c PendingCard) *proto.TaskWait {
 	return &proto.TaskWait{Kind: c.Kind, Msg: c.Msg, Who: c.Who, Since: c.Since}
 }
 
-// posted is the wait for the card the event posts.
-func (m *taskMove) posted(kind string) *proto.TaskWait {
+// posted is the card the event posts.
+func (m *taskMove) posted(kind string) PendingCard {
 	c := m.e.Card
 	c.Kind = kind
-	return taskCardWait(c)
+	return c
 }
 
 // forget drops cards that stop being pending in this step.
@@ -651,10 +652,12 @@ func (m *taskMove) preempt() {
 	m.x.System = "preempted"
 }
 
-// approval is row 17.
+// approval is row 17: the card is the newest pending one, and the wait is
+// recomputed, so an older pending approval keeps it.
 func (m *taskMove) approval() {
 	if m.cardsDecide() {
-		m.t.Wait = m.posted(waitApproval)
+		m.pending = append(slices.Clone(m.pending), m.posted(waitApproval))
+		m.t.Wait = m.cardWait()
 	}
 }
 
@@ -670,7 +673,7 @@ func (m *taskMove) decided() {
 // decision is row 19.
 func (m *taskMove) decision() {
 	if m.moving() && m.t.Wait == nil {
-		m.t.Wait = m.posted(waitDecision)
+		m.t.Wait = taskCardWait(m.posted(waitDecision))
 	}
 }
 
@@ -689,7 +692,7 @@ func (m *taskMove) mention() {
 		return
 	}
 	m.pause(waitRounds)
-	m.x.System = "rounds_limit"
+	m.x.System, m.x.Main = "rounds_limit", true
 	m.notice("rounds_limit")
 }
 
