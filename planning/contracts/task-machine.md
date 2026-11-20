@@ -58,10 +58,11 @@ R-60, R-63, R-72, R-90.
   task: deciding a card of a `paused` task changes the card and leaves the
   paused wait as it is; the card waits are recomputed when the task becomes
   active.
-- **A manual pause keeps the wait it replaced.** Row 12 writes into the
-  `manual` wait one field, `kept`: the kind of the wait it replaced, when
-  that was `reviewer` or `conflict` (card waits need no keeping: they are
-  recomputed). Row 13 restores a kept wait instead of clearing it. A row
+- **Every pause keeps the wait it replaced.** Rows 12, 16 and 21 write
+  into the paused wait (`manual`, `preempted`, `rounds`) one field, `kept`:
+  the kind of the wait it replaced, when that was `reviewer` or `conflict`
+  (card waits need no keeping: they are recomputed). The row that ends the
+  pause (13, 13b or 22) restores a kept wait instead of clearing it. A row
   that ends such a wait (5, 11) drops `kept` while the task is paused.
 - **Step `merge` is the point of no return.** From the moment a review
   passes until the host reports, the only things that change the task's
@@ -91,16 +92,16 @@ is a person with role `owner` or `admin`. Items are inbox items
 | 11 | `task assign`, by SEC or an admin; from `failed`, by an admin only | not final; not at step `merge` | fields set. Assignee changed: every pending approval card of the task becomes `reassigned`; the old assignee's queued items for the task are retired. Reviewer changed: the old reviewer's queued `review` item is retired. From `failed`: `active`, whichever field changed. Then, if the task is `active`: wait `conflict` cleared; at step `review`, wait `reviewer` cleared when the task now has a reviewer. If it is `paused`, the same applies to `kept` | if `active`: `assign` [assignee] with the latest `checks` or `review` message, when the assignee changed or the wait was `conflict`; `review` [reviewer], when the reviewer changed at step `review` | from `failed`: `failures` = 0, `review.failed` = 0 |
 | 12 | `task pause`, by SEC or an admin | `active`, not at step `merge` | `paused`, wait `manual`, with `kept` (section 2) | — | — |
 | 13 | `task resume`, by SEC or an admin; from `failed` or from wait `rounds`, by an admin only | `paused`, or `failed` | `active`, with the wait that `kept` names if there is one, else wait cleared; from wait `rounds`: `thread.rounds` = 0 | `resume` [assignee]; at step `review`, what section 2 says about activation | from `failed`: `failures` = 0, `review.failed` = 0 |
-| 13b | `task resume`, by host | `paused` with wait `preempted` | `active`, wait cleared | — (the host continues the session itself); at step `review`, what section 2 says about activation | — |
+| 13b | `task resume`, by host | `paused` with wait `preempted` | `active`, with the wait that `kept` names if there is one, else wait cleared | — (the host continues the session itself); at step `review`, what section 2 says about activation | — |
 | 14 | (inside rows 6, 7 and 10) | `failures` reaches `limits.failures`, or `review.failed` goes above `limits.review_rounds` | `failed`, wait `null`; a `system` message `task_failed` mentioning the brief's requester and the assignee's owner | `notice` [SEC], once; no other item | — |
 | 15 | `task cancel`, by SEC or an admin; by host if `origin` is `takeover`; at step `merge`, by an admin only | not final | `cancelled`, wait `null`; pending cards of the task become `expired`; every queued item of the task is retired | `notice` [SEC] for each queued task that depends on it | — |
-| 16 | `task preempted`, by host | `active`, not at step `merge` | `paused`, wait `preempted`; a `system` message `preempted` | — | — |
+| 16 | `task preempted`, by host | `active`, not at step `merge` | `paused`, wait `preempted`, with `kept` (section 2); a `system` message `preempted` | — | — |
 | 17 | `post` kind `approval`, by the assignee | `active` | wait `approval` with the card, when the wait is `null` or a card wait | — | — |
 | 18 | `act approve` or `deny`, by an approver | card pending | the card is decided and keeps the signed `act`; wait cleared | `decided` [the asking AI] with that `act` as cause | — |
 | 19 | `post` kind `decision` naming the task, by an AI | not final | if `active` with wait `null`: wait `decision` with the card | — | — |
 | 20 | `act choose`, by an addressee or an admin | card pending | the card is decided and keeps the signed `act`; wait cleared | `decided` [the asking AI; the assignee if another] | — |
-| 21 | any `post` by an AI in the thread that mentions an AI | — | `thread.rounds` + 1; at or above `limits.rounds`, if `active` and not at step `merge`: `paused`, wait `rounds`, a `system` message `rounds_limit` in the main line | at the limit: `notice` [SEC] | — |
-| 22 | `post` kind `text` by a person in the thread | — | `thread.rounds` = 0; if wait was `rounds`: `active`, wait cleared | — | — |
+| 21 | any `post` by an AI in the thread that mentions an AI | — | `thread.rounds` + 1; at or above `limits.rounds`, if `active` and not at step `merge`: `paused`, wait `rounds`, with `kept` (section 2), a `system` message `rounds_limit` in the main line | at the limit: `notice` [SEC] | — |
+| 22 | `post` kind `text` by a person in the thread | — | `thread.rounds` = 0; if wait was `rounds`: `active`, with the wait that `kept` names if there is one, else wait cleared | — | — |
 | 23 | timer in the home | `active`, wait `null`, not at step `merge`, no thread message for `limits.idle_notice_minutes` | unchanged | `notice` [SEC], once per quiet period | — |
 | 24 | `group resume` | the group is paused; a resume of a group that is not paused is accepted and changes nothing | unchanged | `resume` [assignee] for each task that is `active` with wait `null` and not at step `merge`; `review` [reviewer] for each `active` task at step `review` that has a reviewer, unless one is queued | — |
 
