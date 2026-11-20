@@ -47,8 +47,8 @@ group row: both are statements of the device being judged.
 A valid signature alone says nothing about the name or the text on the
 screen. A `msg` row whose `by` is a member id is shown as that member's
 only when the envelope is good (3.1), what is displayed is what was signed
-(3.2), and the signer is bound to the member (3.3). A row whose `by` is
-`"system"` claims no author and is not checked (section 5).
+(3.2), and the signer is bound to the member (3.3). A row the home wrote
+itself claims no author and is not checked (section 5).
 
 ### 3.1 The envelope
 
@@ -70,8 +70,7 @@ only when the envelope is good (3.1), what is displayed is what was signed
 - Which fields of `body` are signed is listed per kind in
   `contracts/messages.md` section 2, and for the `confirm` card in
   `contracts/step-2/confirm.md`. A field the home adds is not compared
-  (section 5). For `text`, `progress`, `question`, `reply` and `summary`
-  nothing of `body` is signed.
+  (section 5).
 - One exception, from `contracts/messages.md` 2.9: the `score` of a
   `review` row equals the signed `score`, or is 0 when a signed item has
   `veto: true`.
@@ -132,9 +131,12 @@ The group info says once whose computer the home is (8.2).
 | notes | a `note` row has `by` and no envelope (section 11, point 2) |
 | previews and reminders | `thread.last` of a task row; the names in `welcome.groups`; the content of a reminder (`contracts/commands.md` 1.7) |
 
-A row is judged by its `by` alone: with `"system"` it is the home's, with
-anything else it is checked by section 3, whatever its `kind`. So a
-message that names a member and has no `env` does not pass. An `approval`
+A row is the home's only when its `by` is `"system"` and its `kind` is
+`task`, `checks` or `system`: these have no `state` and nothing to act on.
+Every other row is checked by section 3. So a message that names a member
+and has no `env` does not pass, and neither does a card with
+`by: "system"`: no card of step 1 is the home's, and none can be acted on
+unchecked (section 11, point 6, for the `confirm` card). An `approval`
 card is presented under the secretary's name (R-42); the check is about
 its `by`, the AI that asked.
 
@@ -145,7 +147,7 @@ The check ends at the first line that applies:
 | | If | Outcome |
 | --- | --- | --- |
 | 1 | 3.1 or 3.2 fails; for a decision, one of the first three parts of section 4 | does not match |
-| 2 | the browser holds no live member row for `by`, or no log for that member's person | cannot be checked |
+| 2 | the browser holds no live member row for `by` (so also for `"system"`), or no log for that member's person | cannot be checked |
 | 3 | the member is of the other kind, `as` or `host` differ, or the signer is unknown to the log | does not match |
 | 4 | the log has revoked the signer | signed by a removed device |
 | 5 | none of these | verified |
@@ -172,10 +174,10 @@ The check ends at the first line that applies:
 | signed by a removed device | it was signed by a device that its person has removed since |
 | cannot be checked | this browser does not have what it needs to check it |
 
-- **A card with the mark on its author cannot be acted on from this
-  browser.** Its actions are replaced by the sentence of the mark: an
-  `act` names only the id of a card, so acting on content that did not
-  pass would sign for something not seen (section 11, point 3).
+- **A card can be acted on from this browser only when its author is
+  verified.** Otherwise its actions are replaced by the sentence of the
+  mark: an `act` names only the id of a card, so acting on content that
+  did not pass would sign for something not seen (section 11, point 3).
 
 ## 7. The secretary warning (D-6)
 
@@ -225,8 +227,7 @@ and no other device can undo it. SoloDawn cannot take a first device back.
 
 The notice stays until the person closes it. A browser whose own `add` was
 dropped is no device of the person any more and behaves as a revoked
-browser does in step 1 (`flows/pairing.md` C and D). When another person's
-log drops entries nothing is shown; their rows are judged again.
+browser does in step 1 (`flows/pairing.md` C and D).
 
 ### 8.2 Whose computer keeps the group
 
@@ -245,13 +246,10 @@ SoloDawn (section 10, limit 1).
 
 ### 8.3 What the other step 2 contracts show
 
-This file adds nothing to them. In `contracts/step-2/`: `people.md`
-(invitation, joining, roles, removing a member), `confirm.md` (the
-`confirm` card, the `information` label), `authority.md` (allow list,
-delegates, level cap), `watch-team.md` (watching a terminal, team-wide
-groups), `checks-forge.md` (accepting a check list or forge templates),
-`move.md` (moving and copying a group). Their acceptance tests are in
-`steps/step-2-3-acceptance.md`.
+This file adds nothing to the other files of `contracts/step-2/`
+(`people.md`, `confirm.md`, `authority.md`, `watch-team.md`,
+`checks-forge.md`, `move.md`), which say what their own additions show.
+Their acceptance tests are in `steps/step-2-3-acceptance.md`.
 
 ## 9. Notes for the user documentation
 
@@ -287,6 +285,7 @@ The contract is written on the first answer of each point.
 | 3 | A card whose author carries the mark cannot be acted on from this browser | the actions stay, with a warning |
 | 4 | Section 4: `state.act` is checked before the browser names who decided a card | D-5 speaks only of "the envelope of a row": the author alone is checked |
 | 5 | 8.2: the fingerprint of a person's user id on their member card, the only thing added to a step 1 screen beyond the mark and the texts | no fingerprint; limit 1 stays without a remedy |
+| 6 | A card with `by: "system"` does not pass and cannot be acted on. If `contracts/step-2/confirm.md` has the home write the `confirm` card, that file must name the signed message the card is about, which this browser checks by section 3 before the owner can act, and the `act` should name that message | a card the home wrote is acted on unchecked: the owner signs for a card id the home chose, whatever was shown |
 
 ## 12. Not verified
 
