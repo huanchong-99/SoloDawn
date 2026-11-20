@@ -170,8 +170,9 @@ is optional in that command and is left out; `base` is `""`, `forge` is
 
 The row has the shape of `contracts/rows.md` section 1 with those values.
 `repo` and `secretary` are absent for the life of the group; `pass`,
-`pass_foundation` and `limits` hold the defaults and are used by nothing.
-`kind` never changes after `create`.
+`pass_foundation` and `limits` hold the defaults and are used by nothing:
+`group set` with `checks`, `pass`, `pass_foundation` or `limits` is
+`bad_request`. `kind` never changes after `create`.
 
 ## 8. What is refused
 
@@ -222,27 +223,28 @@ the body of a new message kind:
 {"from":"Qm1…","group":"Website","ai":"Claude Code"}
 ```
 
-`from` is the id of the project group, `group` its name and `ai` the
-display name of its secretary, all three written by the node. Signed: every
-field. Added by the home: nothing. The home cannot check them, because it
-may know nothing of that project group: they are the statement of the
-signer's owner, which is all that any message "from an AI" is
-(`architecture.md` section 4). A client shows a bulletin as written by
-`ai` of `group`, on a computer of the person in `by`. In the signed `post`,
-`thread` and `re` are `null` and `main` is `false`.
+`from` is the id of the project group, `group` its name and `ai` the display
+name of its secretary, all three written by the node. Signed: every field.
+Added by the home: nothing. The home cannot check them, because it may know
+nothing of that project group: they are the statement of the signer's owner,
+which is all that any message "from an AI" is (`architecture.md` section 4). A
+client shows a bulletin as written by `ai` of `group`, on a computer of the
+person in `by`. One row for the `post` table of `contracts/commands.md` 1.3:
 
-**A person-level post path.** This gives a node a way to post as its
-owner, a person, with no `as`. The home cannot tell such a post from one
-the person sent from a browser; only its kind, `bulletin`, says a node
-wrote it.
+| `kind` | By | Extra checks | Effect beyond storing the row |
+| --- | --- | --- | --- |
+| `bulletin` | a person who may post in the group, that is a member | `thread` and `re` are `null`, `main` is `false`, `body.from` is an id; in a project group, section 8 | as for `text`: each person in `mentions` is reminded (`contracts/commands.md` 1.7) |
 
-**Which home.** The owner names the team groups to their node, in a new key
-of `settings.set` (`contracts/commands.md` section 2) that `host.info`
-shows in `settings`:
-`"teams":[{"g":"<team group id>","home":"<device id>"}]`, replaced as a
-whole, `[]` by default. The node connects to each `home` as a device of a
-member (`contracts/datachannel.md` section 8, third row) and reads the
-group with `state_only`. Nothing is cloned and no AI joins.
+**A person-level post path.** This gives a node a way to post as its owner, a
+person, with no `as`. The home cannot tell such a post from one the person
+sent from a browser; only its kind, `bulletin`, says a node wrote it.
+
+**Which home.** The owner names the team groups to their node, in a new key of
+`settings.set` (`contracts/commands.md` section 2) that `host.info` shows in
+`settings`: `"teams":[{"g":"<team group id>","home":"<device id>"}]`, replaced
+as a whole, `[]` by default. The node connects to each `home` as a device of a
+member (`contracts/datachannel.md` section 8, third row) and reads the group
+with `state_only`. Nothing is cloned and no AI joins.
 
 **The tool.** `post` (`contracts/mcp-tools.md` section 1) gains one
 argument, listed for the secretary only:
@@ -265,8 +267,8 @@ Unit P-4 freezes the new shapes (`contracts/conventions.md` section 5).
 | Step 1 file | Gains |
 | --- | --- |
 | `contracts/datachannel.md` | section 1: the `watch` channel; section 7: `watch.start`, `pty.resize` to watchers, `watchers` in `host.info`, `teams` in its `settings`; section 8: the grant row |
-| `contracts/envelope.md` | section 3, check 2: the two reasons of section 3 here |
-| `contracts/commands.md` | 1.1: `create` of kind `team`; 1.3: `bulletin`; section 2: `watch.end`, `teams` in `settings.set`; section 3: item `watch`; the refusals of section 8 here |
+| `contracts/envelope.md` | section 3, check 2: the two reasons of section 3 here, and a node's reason to listen to the home of each team group in its `settings.teams` (section 10) |
+| `contracts/commands.md` | 1.1: `create` of kind `team`, and the `set` it refuses (section 7); 1.3: `bulletin`; section 2: `watch.end`, `teams` in `settings.set`; section 3: item `watch`; the refusals of section 8 here |
 | `contracts/messages.md` | kind `bulletin` and its body |
 | `contracts/rows.md` | section 1: the values of a team group |
 | `contracts/mcp-tools.md` | `post` with `group`; the secretary's list in `tools.json` |
@@ -275,10 +277,9 @@ Unit P-4 freezes the new shapes (`contracts/conventions.md` section 5).
 
 ## 12. Settled by the coordinator (2026-11-20)
 
-1. **How a secretary reaches the team group**: the `bulletin` of section
-   10, with the person-level post path it states. Joining the AI as a
-   member without a clone would need a refusal on every path that wakes
-   an AI.
+1. **How a secretary reaches the team group**: the `bulletin` of section 10,
+   with the person-level post path it states. Joining the AI as a member
+   without a clone would need a refusal on every path that wakes an AI.
 2. **The confirmation binds the card's signer**: the digest of
    `contracts/step-2/confirm.md` section 6 covers the request's `k`, so
    check 1 of section 2 fails for the same `p` signed by another person.
@@ -291,10 +292,9 @@ Unit P-4 freezes the new shapes (`contracts/conventions.md` section 5).
 
 - Nothing here was run. No spike covers a second data channel fed from the
   pseudo-terminal bridge.
-- `[unverified]` That a browser terminal draws a usable screen when it
-  joins a running full-screen CLI without the earlier bytes, and that the
-  CLIs redraw on a resize. If not, the remedy is for O to resize, not for
-  N to replay.
+- `[unverified]` That a browser terminal draws a usable screen when it joins a
+  running full-screen CLI without the earlier bytes, and that the CLIs redraw
+  on a resize. If not, the remedy is for O to resize, not for N to replay.
 - `[unverified]` That every engine of the baseline sees promptly that a
   channel with a full send buffer was closed.
 - `contracts/step-2/authority.md` and `move.md` did not exist yet.
