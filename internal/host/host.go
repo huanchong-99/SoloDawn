@@ -90,8 +90,8 @@ type Host struct {
 
 	mu      sync.Mutex
 	homes   map[string]Home
-	waiting sync.Mutex // held while an item is handed over, so not h.mu
-	waits   map[string]func(item json.RawMessage) error
+	waiting sync.Mutex
+	waits   map[string]*wait
 	parts   sync.Map
 }
 
@@ -104,7 +104,7 @@ func New(db *store.Store, key identity.Key, now func() time.Time) (h *Host, save
 		return nil, nil, err
 	}
 	h = &Host{Store: db, Key: key, Sessions: sessions, Rows: &Rows{rows: map[rowKey]json.RawMessage{}}, Now: now,
-		homes: map[string]Home{}, waits: map[string]func(json.RawMessage) error{}}
+		homes: map[string]Home{}, waits: map[string]*wait{}}
 	return h, saved, nil
 }
 
@@ -223,37 +223,83 @@ func frameSize(frame any) int {
 	return text.Len() - 1 // without the line end the encoder adds
 }
 
-// Await makes take the receiver of the item that answers the message with
-// that id while a tool call waits for it: the reply to a call whose ask is
-// open, the decision of an approval the CLI is waiting on. Such an item is
-// not a turn (flows/agent-turn.md A). take refuses an item by its error, and
-// must not call Await, Hand or done itself. done ends the wait: from its
-// return on, take is not called. An id has one receiver: a second Await for
-// it replaces the first.
-func (h *Host) Await(id string, take func(item json.RawMessage) error) (done func()) {
+// A wait is one tool call that waits for the item that answers a message.
+type wait struct {
+	check func(item json.RawMessage) error
+	item  chan json.RawMessage // has room for the one item a wait is given
+}
+
+// Await opens the wait of a tool call for the item that answers the message
+// with that id: the reply to a call whose ask is open, the decision of an
+// approval the CLI is waiting on. Such an item is not a turn
+// (flows/agent-turn.md A). The item arrives on the channel, one at most.
+// check, when it is not nil, sees the item first and refuses it by its
+// error: a decision whose cause no approver signed. done ends the wait; an
+// item handed over before it is still in the channel. An id has one wait: a
+// second Await for it takes the place of the first.
+func (h *Host) Await(id string, check func(item json.RawMessage) error) (item <-chan json.RawMessage, done func()) {
+	w := &wait{check, make(chan json.RawMessage, 1)}
 	h.waiting.Lock()
 	defer h.waiting.Unlock()
-	h.waits[id] = take
-	return func() {
-		h.waiting.Lock()
-		defer h.waiting.Unlock()
+	h.waits[id] = w
+	return w.item, func() { h.release(id, w) }
+}
+
+// release ends a wait and reports whether it was open. It is true once for
+// a wait at most, which is why the one send into its channel never blocks.
+func (h *Host) release(id string, w *wait) bool {
+	h.waiting.Lock()
+	defer h.waiting.Unlock()
+	open := h.waits[id] == w
+	if open {
 		delete(h.waits, id)
 	}
+	return open
 }
 
 // Hand gives an item to the tool call that waits for the answer to the
-// message with that id. Delivery calls it before it queues a reply or a
-// decided item, with the item as the home sent it. waited is false when
-// nothing waits: the item then takes its turn in the queue. Otherwise err
-// says whether the receiver took the item or refused it.
+// message with that id, and ends that wait. Delivery calls it before it
+// queues a reply or a decided item, with the item as the home sent it.
+// waited is false when nothing waits, or the wait ended while the item was
+// checked: the item then takes its turn in the queue. Otherwise err says
+// whether the item was handed over or refused by the wait's check. Hand
+// holds no lock while the check runs, and never waits for the receiver.
 func (h *Host) Hand(id string, item json.RawMessage) (waited bool, err error) {
 	h.waiting.Lock()
-	defer h.waiting.Unlock()
-	take, waited := h.waits[id]
-	if !waited {
+	w := h.waits[id]
+	h.waiting.Unlock()
+	if w == nil {
 		return false, nil
 	}
-	return true, take(item)
+	if w.check != nil {
+		if err := w.check(item); err != nil {
+			return true, err
+		}
+	}
+	if !h.release(id, w) {
+		return false, nil
+	}
+	w.item <- item
+	return true, nil
+}
+
+// Holds says whether a session's deliveries are held, by the name of the
+// unit that knows of one kind of hold: the unit of caps and limits for an AI
+// that reached a cap, is rate limited, or is offline by the owner's command
+// (flows/agent-turn.md step 3). The session table itself holds an AI that is
+// working or taken over (Sessions.Move).
+var Holds = map[string]func(h *Host, key SessionKey) (reason string, held bool){}
+
+// Held asks every entry of Holds, in the order of their names, and returns
+// the first hold. Delivery calls it before it gives a session a turn;
+// whoever lifts a hold calls Deliver.
+func (h *Host) Held(key SessionKey) (reason string, held bool) {
+	for _, hold := range inOrder(Holds) {
+		if reason, held := hold(h, key); held {
+			return reason, true
+		}
+	}
+	return "", false
 }
 
 type rowKey struct{ group, kind, id string }
@@ -468,12 +514,13 @@ func (h *Host) Report(key SessionKey, e Event) {
 // The Runtime owns the CLI processes of the sessions. The session runtime
 // provides Runner; delivery, the approval handler and the takeover call it.
 type Runtime interface {
-	// Turn gives a session one turn. It starts the session's CLI when the
-	// session is dormant, as a resume when the CLI has a session id; notes
-	// turn with Sessions.SetTurn; writes text; and reports TurnBegan. It
-	// returns once the turn is written. With turn.Jump it first interrupts
-	// the turn the AI is running in the group (flows/agent-turn.md C). When
-	// the turn has ended, the runtime reports TurnEnded and calls Deliver.
+	// Turn gives a session one turn, with the text and the turn that Compose
+	// made. It starts the session's CLI when the session is dormant, as a
+	// resume when the CLI has a session id; notes turn with
+	// Sessions.SetTurn; writes text; and reports TurnBegan. It returns once
+	// the turn is written. With turn.Jump it first interrupts the turn the
+	// AI is running in the group (flows/agent-turn.md C). When the turn has
+	// ended, the runtime reports TurnEnded and calls Deliver.
 	Turn(ctx context.Context, h *Host, key SessionKey, text string, turn Turn) error
 	// Answer allows or declines a permission request that the CLI of a
 	// session made: the event Asked.
@@ -493,9 +540,11 @@ var (
 	// Instructions returns the instructions a session is started with, by
 	// its kind (contracts/drivers.md section 4).
 	Instructions func(s Session) string
-	// Compose makes one turn of the items a session is given, in their
-	// order: its text (contracts/drivers.md section 3) and what the host
-	// notes about it. An item is one element of the items of an inbox frame,
-	// as the home sent it (contracts/datachannel.md section 6).
-	Compose func(h *Host, s Session, items []json.RawMessage) (text string, turn Turn, err error)
+	// Compose makes one turn of a session: its text, with the header every
+	// turn has (contracts/drivers.md section 3), and what the host notes
+	// about it. For a turn made of inbox items it is given them in their
+	// order, each one element of the items of an inbox frame as the home
+	// sent it (contracts/datachannel.md section 6); the other kinds have
+	// none.
+	Compose func(h *Host, s Session, kind TurnKind, items []json.RawMessage) (text string, turn Turn, err error)
 )

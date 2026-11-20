@@ -22,10 +22,11 @@ A unit never calls into the file of a unit built beside it. It registers in a ta
 | a session | `h.Sessions`: `Create`, `Get`, `All`, `Update`, `Move`, `End` |
 | a session change that commits with other rows | `h.Sessions.Write(func(tx *Tx) error { … })`, then `tx.Move` and the like, and `h.Audit(tx.Tx, …)` |
 | who calls a tool | `h.Sessions.Admit(key, level, interactive)` issues the token of a CLI process, `Caller(token)` reads it, `Forget(token)` drops it when the process has exited |
-| the turn a tool is called in | `Caller.Turn`: its number, the thread of its last item, whether it is a hand-back, the depth of the call it answers |
+| the turn a tool is called in | `Caller.Turn`: its number, its kind (`HandbackTurn` for a hand-back), the thread of its last item, the depth of the call it answers |
 | whether a tool call or a permission request is open | `done := h.Sessions.Calling(key)` around it; `h.Sessions.Calls(key)` |
 | the state rows of a group | `h.Rows`: `Put` and `Reset` for the unit that handles `rows` and `reset`, `Get` and `Of` for everyone |
-| an item that answers an open tool call | the tool: `done := h.Await(id, take)`; delivery, before it queues a `reply` or a `decided` item: `h.Hand(id, item)` |
+| an item that answers an open tool call | the tool: `item, done := h.Await(id, check)`, then it reads the channel until its wait runs out, calls `done`, and looks at the channel once more. Delivery, before it queues a `reply` or a `decided` item: `h.Hand(id, item)`, which never waits for the tool |
+| whether a session's deliveries are held | `h.Held(key)`, before a turn is given; whoever lifts a hold calls `Deliver` |
 | an audit row | `h.Audit(tx, AuditRow{…})`, inside the transaction of what it records |
 
 ## Tables
@@ -40,8 +41,9 @@ Each is a package map. The file that provides an entry adds it from its `init` w
 | `Surface` | `t` of a request or push of the [host surface](../../planning/contracts/datachannel.md) (`audit`, `pty.resize`), or `t` of a [host command](../../planning/contracts/commands.md) (`takeover.start`) | `node`, only for a device of the owner; for a command after the envelope checks and the receipt lookup |
 | `Listeners` | the name of the listening unit | `h.Report(key, event)`, which the session runtime calls for every event of a session's CLI |
 | `Attached` | the name of the unit | `h.Attach`, each time a connection to a home opens |
+| `Holds` | the name of the unit that knows of a hold | `h.Held(key)`, which delivery calls. The unit of caps and limits registers the holds of a cap, a rate limit and "all offline"; with no entry nothing is held |
 
-`Listeners` and `Attached` are called in the order of their keys. `node` does the rest of the wiring: it registers the subcommands of host features and gives each `Peer` the handlers of their channels.
+`Listeners`, `Attached` and `Holds` are called in the order of their keys. `node` does the rest of the wiring: it registers the subcommands of host features and gives each `Peer` the handlers of their channels.
 
 ## Hooks
 
@@ -49,11 +51,11 @@ One unit implements a hook and sets it from its `init` with `Provide(&Hook, valu
 
 | Hook | Provided by | Called by |
 | --- | --- | --- |
-| `Runner.Turn` | the session runtime: start or resume the CLI, note the turn, write it | delivery, with the text and the `Turn` that `Compose` made; the takeover, for the hand-back turn |
+| `Runner.Turn` | the session runtime: start or resume the CLI, note the turn, write it | delivery, with the text and the `Turn` that `Compose` made; the session runtime itself and the takeover, for their own turns |
 | `Runner.Answer` | the session runtime | the approval handler, for a request it heard as the event `Asked` |
 | `Deliver` | delivery: give the AI its next turn if items are held for it | the session runtime when a turn has ended; whoever lifts a hold |
 | `Instructions` | the unit that writes the instruction texts | whoever fills a `Launch` |
-| `Compose` | the unit that writes the turn text | delivery |
+| `Compose` | the unit that writes the turn text: all four kinds of turn, which share one header | delivery (`ItemsTurn`); the session runtime (`ReplacedTurn`, `ContinueTurn`); the takeover (`HandbackTurn`) |
 
 ## Interfaces
 
@@ -65,7 +67,7 @@ The table is in memory and written through to the `session` table of the store. 
 
 - `Move(key, from, to)` changes a state only from the state the caller names, and only by a change the contract lists; anything else is `conflict`. A change to `working` or `takeover` is `busy` while another session of the same AI in the same group is in either.
 - `Update` changes the other columns, such as the CLI's session id.
-- `End` removes the row, the tokens issued for it and the turn noted for it.
+- `End` removes the row and the turn noted for it, and ends the tokens issued for it: they name nobody from then on, also not a session made later for the same key.
 - When the node starts, `New` makes every session saved as `working` or `waiting` dormant. One saved as `takeover` keeps that state until its hand-back. What the saved rows call for (a crash report, a hand-back) is the caller's to do, from the rows `New` returns.
 - A token is in memory only, and names nobody once it is forgotten or its session has ended.
 

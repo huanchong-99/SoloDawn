@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
@@ -237,44 +238,147 @@ func TestCommandThatDoesNotFitACtlMessageIsNotSent(t *testing.T) {
 	}
 }
 
+// seamSoon fails the test when run has not returned within ten seconds.
+func seamSoon(t *testing.T, what string, run func()) {
+	t.Helper()
+	returned := make(chan struct{})
+	go func() {
+		defer close(returned)
+		run()
+	}()
+	select {
+	case <-returned:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("%s does not return", what)
+	}
+}
+
 func TestAnItemGoesToTheCallThatWaitsForIt(t *testing.T) {
 	h, _ := seamHost(t, seamStore(t))
 	item := json.RawMessage(`{"env":{"p":"{}","k":"home-device","s":""}}`)
 	if waited, err := h.Hand("call-1", item); waited || err != nil {
 		t.Fatalf("got %v and %v when nothing waits", waited, err)
 	}
-	var taken []string
-	refusal := errors.New("the cause is not signed by an approver")
-	done := h.Await("call-1", func(got json.RawMessage) error {
-		// Whoever takes an item may use the host's connections.
-		h.Home("home-device")
-		taken = append(taken, "call-1 "+string(got))
-		return nil
-	})
-	h.Await("card-9", func(json.RawMessage) error { return refusal })
-	if waited, err := h.Hand("call-1", item); !waited || err != nil {
-		t.Fatalf("got %v and %v, want the item taken", waited, err)
-	}
-	if waited, err := h.Hand("card-9", item); !waited || err != refusal {
-		t.Fatalf("got %v and %v, want the item refused by its receiver", waited, err)
-	}
-	if waited, _ := h.Hand("call-2", item); waited {
+	answer, done := h.Await("call-1", nil)
+	if waited, _ := h.Hand("call-2", item); waited || len(answer) != 0 {
 		t.Fatal("an item went to a call that waits for another message")
 	}
-	done()
+	if waited, err := h.Hand("call-1", item); !waited || err != nil {
+		t.Fatalf("got %v and %v, want the item handed over", waited, err)
+	}
+	// The wait has its item: a second one takes its turn in the queue.
 	if waited, err := h.Hand("call-1", item); waited || err != nil {
-		t.Fatalf("got %v and %v after the wait ended", waited, err)
+		t.Fatalf("got %v and %v for a second item", waited, err)
 	}
-	if waited, _ := h.Hand("card-9", item); !waited {
-		t.Fatal("the end of one wait ended another")
+	done()
+	if got := <-answer; string(got) != string(item) || len(answer) != 0 {
+		t.Fatalf("got %s, want the item, once", got)
 	}
-	// A second receiver for an id takes the place of the first.
-	h.Await("card-9", func(json.RawMessage) error { taken = append(taken, "card-9"); return nil })
-	if waited, err := h.Hand("card-9", item); !waited || err != nil {
-		t.Fatalf("got %v and %v from the receiver that replaced the first", waited, err)
+
+	// A decision whose cause its check refuses is not handed over, and the
+	// call goes on waiting.
+	refusal := errors.New("the cause is not signed by an approver")
+	var checked []string
+	decision, _ := h.Await("card-9", func(got json.RawMessage) error {
+		checked = append(checked, string(got))
+		if len(checked) == 1 {
+			return refusal
+		}
+		return nil
+	})
+	if waited, err := h.Hand("card-9", item); !waited || err != refusal || len(decision) != 0 {
+		t.Fatalf("got %v and %v, want the item refused by the check", waited, err)
 	}
-	if want := []string{"call-1 " + string(item), "card-9"}; !slices.Equal(taken, want) {
-		t.Fatalf("got %v, want %v", taken, want)
+	if waited, err := h.Hand("card-9", item); !waited || err != nil || len(decision) != 1 {
+		t.Fatalf("got %v and %v, want the item handed over after its check", waited, err)
+	}
+	if want := []string{string(item), string(item)}; !slices.Equal(checked, want) {
+		t.Fatalf("the check saw %v, want %v", checked, want)
+	}
+
+	// A second wait for an id takes the place of the first, whose end then
+	// ends nothing.
+	first, doneFirst := h.Await("card-3", nil)
+	second, _ := h.Await("card-3", nil)
+	doneFirst()
+	if waited, _ := h.Hand("card-3", item); !waited || len(first) != 0 || len(second) != 1 {
+		t.Fatal("the item did not go to the wait that took the place of the first")
+	}
+}
+
+// Nothing that a waiting call does, or fails to do, stops Hand, the end of a
+// wait, or the waits of others.
+func TestHandNeverWaitsForTheReceiver(t *testing.T) {
+	h, _ := seamHost(t, seamStore(t))
+	item := json.RawMessage(`{"env":{}}`)
+	// Nobody reads the channel: the 45 seconds of an ask run out just as the
+	// reply arrives.
+	unread, done := h.Await("call-1", nil)
+	seamSoon(t, "Hand, for a receiver that does not read,", func() { h.Hand("call-1", item) })
+	seamSoon(t, "the end of a wait whose item nobody read", done)
+	if len(unread) != 1 {
+		t.Fatal("the item that arrived before the end of the wait is lost")
+	}
+
+	// A check that takes its time holds no lock: the wait can end meanwhile,
+	// and the item then takes its turn in the queue.
+	entered, proceed := make(chan struct{}), make(chan struct{})
+	slow, doneSlow := h.Await("card-9", func(json.RawMessage) error {
+		close(entered)
+		<-proceed
+		return nil
+	})
+	handed := make(chan bool, 1)
+	go func() {
+		waited, _ := h.Hand("card-9", item)
+		handed <- waited
+	}()
+	<-entered
+	seamSoon(t, "the end of a wait whose item is being checked", doneSlow)
+	seamSoon(t, "another wait, while an item is being checked,", func() {
+		other, _ := h.Await("call-2", nil)
+		if waited, err := h.Hand("call-2", item); !waited || err != nil || len(other) != 1 {
+			t.Errorf("got %v and %v", waited, err)
+		}
+	})
+	close(proceed)
+	if <-handed || len(slow) != 0 {
+		t.Fatal("an item was handed to a wait that had ended")
+	}
+}
+
+func TestHeldAsksEveryHold(t *testing.T) {
+	before := Holds
+	t.Cleanup(func() { Holds = before })
+	h, _ := seamHost(t, seamStore(t))
+	Holds = map[string]func(*Host, SessionKey) (string, bool){}
+	if reason, held := h.Held(seamTask); held || reason != "" {
+		t.Fatalf("got %q and %v when no unit holds anything", reason, held)
+	}
+	var asked []string
+	hold := func(name, reason string, keys ...SessionKey) func(*Host, SessionKey) (string, bool) {
+		return func(got *Host, key SessionKey) (string, bool) {
+			asked = append(asked, name)
+			return reason, got == h && slices.Contains(keys, key)
+		}
+	}
+	Holds = map[string]func(*Host, SessionKey) (string, bool){
+		"pause":  hold("pause", "the group is paused", seamTask, seamGroup),
+		"limits": hold("limits", "the day cap is reached", seamTask),
+		"never":  hold("never", "nothing"),
+	}
+	if reason, held := h.Held(seamTask); !held || reason != "the day cap is reached" {
+		t.Fatalf("got %q and %v, want the first hold in the order of the names", reason, held)
+	}
+	if reason, held := h.Held(seamGroup); !held || reason != "the group is paused" {
+		t.Fatalf("got %q and %v, want the hold of the one unit that holds", reason, held)
+	}
+	// A reason without a hold is no hold.
+	if reason, held := h.Held(seamReview); held || reason != "" {
+		t.Fatalf("got %q and %v for a session nothing holds", reason, held)
+	}
+	if want := []string{"limits", "limits", "never", "pause", "limits", "never", "pause"}; !slices.Equal(asked, want) {
+		t.Fatalf("asked %v, want %v", asked, want)
 	}
 }
 

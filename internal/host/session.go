@@ -64,14 +64,25 @@ type Session struct {
 	TakeoverAt string `json:"takeover_at"` // the commit noted when a takeover started; "" otherwise
 }
 
+// A TurnKind says what a turn is made of. Every kind has the same header
+// (contracts/drivers.md section 3).
+type TurnKind string
+
+const (
+	ItemsTurn    TurnKind = "items"    // inbox items (flows/agent-turn.md step 6)
+	ReplacedTurn TurnKind = "replaced" // inbox items, as the first turn of a session that replaces one the CLI could not resume (flows/agent-turn.md E)
+	ContinueTurn TurnKind = "continue" // the turn of its own a session gets after a jump interrupted it (flows/agent-turn.md step 14)
+	HandbackTurn TurnKind = "handback" // the turn that follows a takeover (flows/takeover.md step 16)
+)
+
 // A Turn is what the host notes about a turn beside its text. The tools
 // called in that turn go by it (Caller.Turn).
 type Turn struct {
-	N        int64  // the number of the turn among all turns of this host's run; set by SetTurn
-	Thread   string // the task whose thread the turn's last item is in; "" for the main line
-	Handback bool   // a hand-back turn (flows/takeover.md step 16)
-	Depth    int    // the depth of the call the turn answers; 0 when it answers none (flows/ask.md step 2)
-	Jump     bool   // the turn jumps the queue (flows/agent-turn.md C)
+	N      int64    // the number of the turn among all turns of this host's run; set by SetTurn
+	Kind   TurnKind // "" before the session's first turn
+	Thread string   // the task whose thread the turn's last item is in; "" for the main line
+	Depth  int      // the depth of the call the turn answers; 0 when it answers none (flows/ask.md step 2)
+	Jump   bool     // the turn jumps the queue (flows/agent-turn.md C)
 }
 
 // A Caller is the CLI process that a session token names: the session as it
@@ -84,10 +95,14 @@ type Caller struct {
 	Turn        Turn
 }
 
+// An admission is what a token stands for. ended is set when its session
+// has ended: the token then names nobody, also not a session made later for
+// the same key.
 type admission struct {
 	key         SessionKey
 	level       int
 	interactive bool
+	ended       bool
 }
 
 // Sessions is the session table of a host, kept in memory and written through
@@ -102,7 +117,7 @@ type Sessions struct {
 	now    func() time.Time
 	mu     sync.Mutex
 	rows   map[SessionKey]Session
-	tokens map[string]admission
+	tokens map[string]*admission
 	turns  map[SessionKey]Turn
 	turned int64
 	calls  map[SessionKey]int
@@ -131,7 +146,7 @@ func loadSessions(db *store.Store, now func() time.Time) (t *Sessions, saved []S
 		err = json.Unmarshal([]byte(text), &saved)
 	}
 	slices.SortFunc(saved, byKey)
-	t = &Sessions{db: db, now: now, rows: map[SessionKey]Session{}, tokens: map[string]admission{},
+	t = &Sessions{db: db, now: now, rows: map[SessionKey]Session{}, tokens: map[string]*admission{},
 		turns: map[SessionKey]Turn{}, calls: map[SessionKey]int{}}
 	for _, s := range saved {
 		if s.State != Takeover {
@@ -265,8 +280,8 @@ func (t *Sessions) engaged(key SessionKey) bool {
 }
 
 // End removes a session that has ended (sessions.md section 1), with the
-// tokens issued for it and the turn noted for it: a session made later for
-// the same key starts with neither.
+// turn noted for it, and ends the tokens issued for it: a session made later
+// for the same key starts with neither.
 func (tx *Tx) End(key SessionKey) error {
 	t := tx.t
 	t.mu.Lock()
@@ -274,17 +289,21 @@ func (tx *Tx) End(key SessionKey) error {
 	if _, err := tx.Exec("DELETE FROM session WHERE g = ? AND member = ? AND task = ?", key.Group, key.Member, key.Task); err != nil {
 		return err
 	}
-	turn, issued := t.turns[key], map[string]admission{}
-	maps.DeleteFunc(t.tokens, func(token string, a admission) bool {
-		if a.key == key {
-			issued[token] = a
+	turn, ended := t.turns[key], []*admission{}
+	for _, a := range t.tokens {
+		if a.key == key && !a.ended {
+			a.ended = true
+			ended = append(ended, a)
 		}
-		return a.key == key
-	})
+	}
 	delete(t.rows, key)
 	delete(t.turns, key)
+	// A token that was forgotten meanwhile is no longer in the table, so
+	// that taking this back does not bring it back.
 	tx.undo = append(tx.undo, func() {
-		maps.Copy(t.tokens, issued)
+		for _, a := range ended {
+			a.ended = false
+		}
 		t.turns[key] = turn
 	})
 	return nil
@@ -340,11 +359,12 @@ func (t *Sessions) Admit(key SessionKey, level int, interactive bool) string {
 	token := base64.RawURLEncoding.EncodeToString(random[:])
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.tokens[token] = admission{key, level, interactive}
+	t.tokens[token] = &admission{key: key, level: level, interactive: interactive}
 	return token
 }
 
-// Forget drops a token.
+// Forget drops a token, for good: an End that is taken back does not bring
+// it back.
 func (t *Sessions) Forget(token string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -356,9 +376,12 @@ func (t *Sessions) Forget(token string) {
 func (t *Sessions) Caller(token string) (Caller, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	a, issued := t.tokens[token]
+	a := t.tokens[token]
+	if a == nil || a.ended {
+		return Caller{}, false
+	}
 	s, exists := t.rows[a.key]
-	return Caller{Session: s, Level: a.level, Interactive: a.interactive, Turn: t.turns[a.key]}, issued && exists
+	return Caller{Session: s, Level: a.level, Interactive: a.interactive, Turn: t.turns[a.key]}, exists
 }
 
 // SetTurn notes the turn a session is given and numbers it. Whoever writes

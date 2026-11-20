@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -462,14 +463,17 @@ func TestCallerCarriesTheTurn(t *testing.T) {
 	if c, _ := h.Sessions.Caller(token); c.Turn != (Turn{}) {
 		t.Fatalf("got %+v before any turn", c.Turn)
 	}
-	h.Sessions.SetTurn(seamTask, Turn{Thread: "t12", Depth: 2})
-	h.Sessions.SetTurn(seamGroup, Turn{Jump: true})
-	h.Sessions.SetTurn(seamTask, Turn{N: 40, Thread: "t12", Handback: true})
-	if c, _ := h.Sessions.Caller(token); c.Turn != (Turn{N: 3, Thread: "t12", Handback: true}) {
+	h.Sessions.SetTurn(seamTask, Turn{Kind: ItemsTurn, Thread: "t12", Depth: 2})
+	h.Sessions.SetTurn(seamGroup, Turn{Kind: ItemsTurn, Jump: true})
+	h.Sessions.SetTurn(seamTask, Turn{N: 40, Kind: HandbackTurn, Thread: "t12"})
+	if c, _ := h.Sessions.Caller(token); c.Turn != (Turn{N: 3, Kind: "handback", Thread: "t12"}) {
 		t.Fatalf("got %+v, want the third turn of this run, a hand-back in the thread of t12", c.Turn)
 	}
-	if c, _ := h.Sessions.Caller(other); c.Turn != (Turn{N: 2, Jump: true}) {
+	if c, _ := h.Sessions.Caller(other); c.Turn != (Turn{N: 2, Kind: "items", Jump: true}) {
 		t.Fatalf("got %+v, want the second turn of this run", c.Turn)
+	}
+	if kinds := []TurnKind{ItemsTurn, ReplacedTurn, ContinueTurn, HandbackTurn}; !slices.Equal(kinds, []TurnKind{"items", "replaced", "continue", "handback"}) {
+		t.Fatalf("the kinds of turn are %v", kinds)
 	}
 	// A session made later for the same key starts without a turn.
 	if err := h.Sessions.End(seamTask); err != nil {
@@ -564,6 +568,67 @@ func TestSessionChangesCommitWithTheirTransaction(t *testing.T) {
 	}
 	if _, saved := seamHost(t, db); saved[1].State != Takeover {
 		t.Fatalf("stored %+v, want the task session in takeover", saved[1])
+	}
+}
+
+// A token that was forgotten stays forgotten, also when the end of its
+// session is taken back; and a token is for the session it was issued for,
+// not for one made later for the same key.
+func TestForgottenTokenIsNotBroughtBack(t *testing.T) {
+	h, _ := seamHost(t, seamStore(t))
+	seamIn(t, h.Sessions, seamTask, Dormant)
+	seamIn(t, h.Sessions, seamGroup, Dormant)
+	exited, running, other := h.Sessions.Admit(seamTask, 2, false), h.Sessions.Admit(seamTask, 2, true), h.Sessions.Admit(seamGroup, 1, false)
+	refused := errors.New("the rest of the transaction failed")
+	err := h.Sessions.Write(func(tx *Tx) error {
+		if err := tx.End(seamTask); err != nil {
+			t.Error(err)
+		}
+		// The process of the first token exits while the transaction runs.
+		h.Sessions.Forget(exited)
+		if _, ok := h.Sessions.Caller(running); ok {
+			t.Error("the token of a session that has ended names a caller")
+		}
+		return refused
+	})
+	if err != refused {
+		t.Fatal(err)
+	}
+	if _, ok := h.Sessions.Caller(exited); ok {
+		t.Fatal("taking back the end of a session brought back a forgotten token")
+	}
+	if c, ok := h.Sessions.Caller(running); !ok || c.SessionKey != seamTask || !c.Interactive {
+		t.Fatalf("got %+v, want the token that was not forgotten, as before", c)
+	}
+
+	// An earlier session for the key ended for good; its token stays ended
+	// when the end of the session made after it is taken back.
+	if err := h.Sessions.End(seamTask); err != nil {
+		t.Fatal(err)
+	}
+	seamIn(t, h.Sessions, seamTask, Dormant)
+	later := h.Sessions.Admit(seamTask, 3, false)
+	err = h.Sessions.Write(func(tx *Tx) error {
+		if err := tx.End(seamTask); err != nil {
+			t.Error(err)
+		}
+		return refused
+	})
+	if err != refused {
+		t.Fatal(err)
+	}
+	if c, ok := h.Sessions.Caller(running); ok {
+		t.Fatalf("the token of the first session names the second: %+v", c)
+	}
+	if c, ok := h.Sessions.Caller(later); !ok || c.Level != 3 {
+		t.Fatalf("got %+v, want the token of the second session", c)
+	}
+	if c, ok := h.Sessions.Caller(other); !ok || c.SessionKey != seamGroup {
+		t.Fatalf("got %+v, want the token of the group session, which nothing touched", c)
+	}
+	// A token issued for a session that was never made names nobody.
+	if _, ok := h.Sessions.Caller(h.Sessions.Admit(seamReview, 1, false)); ok {
+		t.Fatal("a token names a session that does not exist")
 	}
 }
 
