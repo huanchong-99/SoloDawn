@@ -31,13 +31,14 @@ by its type:
 **Optional** (marked "optional" in the field table of its contract). The
 field is left out when it does not apply or is not known yet. When it is
 there, it has a real value: an optional field is never `null`, and never an
-empty list or object standing in for "nothing".
+empty string, list or object standing in for "nothing".
 
 No field is both: a field is either always present or optional.
 
 - The complete list of optional fields of each row type is in
   `contracts/rows.md`; of each message body and card state, in
-  `contracts/messages.md`; of each command, in `contracts/commands.md`.
+  `contracts/messages.md`; of each command, in `contracts/commands.md`; of
+  each inbox item, in `contracts/datachannel.md` section 6.
 - **Tests are strict in both directions.** A golden example with a field the
   types do not know fails; a type with an always-present field the example
   lacks fails; a `null` where the contract does not say "or `null`" fails.
@@ -176,8 +177,8 @@ contract are the reference, and the web client types the shape from them.
 | the shared test vectors of `contracts/vectors.md` | B-02, completed by B-02b and B-02c |
 | the WebSocket frames of signalling: `challenge`, `auth`, `ready`, `ice` (request and answer), `to`, `from`, `offline`, `watch`, `presence`, `join`, `joined`, `room` | B-06 |
 | `quota` (request and answer) | B-07 |
-| the payloads of `group`, `member`, `post` (every kind), `act`, `jump`, `task`, `note`, `forget`, `push`; the review outcome and the host events (`contracts/commands.md` 1.8, 1.9); `inbox` with the signed `item` payload, `ack`; the payloads of `host.join`, `host.leave` | P-1 |
-| `groups`; `host.info`; `audit` and its answer; `pty.resize`; the local-network `beacon` payload; the payloads of `settings.set`, `pair.browser`, `agent.set`, `perm.set`, `host.offline`, `host.online`, `takeover.start`, `takeover.end`; the MCP tool list (`tools.json`, `contracts/mcp-tools.md` section 5) | P-2, after P-1 and B-07 |
+| the payloads of `group`, `member`, `post` (every kind), `act`, `jump`, `task`, `note`, `forget`, `push`; the review outcome and the host events (`contracts/commands.md` 1.8, 1.9); `inbox` with the signed `item` payload, `ack`; the payloads of `host.join`, `host.leave`; `fetch` of one row (`r`, `row`). Changes to shapes frozen earlier, in the same pull request: the task row's `slug`, `plan`, `review.failed` and `wait.kept`, with `row-task.json`'s branch made by the slug rule; the decision state `expired` (`row-msg-decision-expired.json`); `mentions` of an approval card holding its approvers; `act` payloads in the examples without empty `arg` or `text`; `welcome.addrs`. The approval body's `full` is frozen already (pull request 117) | P-1 |
+| `groups`; `host.info`, with `homes` entries of `g`, `home` and `name`; `audit` and its answer; `pty.resize`; the local-network `beacon` payload; the payloads of `settings.set`, `pair.browser`, `agent.set`, `perm.set`, `host.offline`, `host.online`, `takeover.start`, `takeover.end`; the MCP tool list (`tools.json`, `contracts/mcp-tools.md` section 5) | P-2, after P-1 and B-07 |
 | one confirmed task end to end, with and without a remote | B-01 slice (c) |
 
 **Feature files of the parallel plan** (`steps/parallel-plan.md` section 2).
