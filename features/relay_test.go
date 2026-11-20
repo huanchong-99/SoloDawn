@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -35,9 +36,19 @@ type relayWorld struct {
 	allocs []net.PacketConn
 }
 
-func relaySteps(sc *godog.ScenarioContext, rv *rvWorld) {
-	w := &relayWorld{rvWorld: rv}
-	sc.Step(`^a local TLS rendezvous with a (\d+) MiB relay quota$`, w.startTLS)
+func init() {
+	stepSets["relay"] = func(sc *godog.ScenarioContext, _ fixtures) {
+		relaySteps(sc)
+	}
+}
+
+// The relay steps drive the browser and the rendezvous of the rendezvous steps.
+func relaySteps(sc *godog.ScenarioContext) {
+	w := &relayWorld{}
+	sc.Step(`^a local TLS rendezvous with a (\d+) MiB relay quota$`, func(ctx context.Context, mib int) error {
+		w.rvWorld = ctx.Value(rvKey{}).(*rvWorld)
+		return w.startTLS(mib)
+	})
 	sc.Step(`^the browser signs the challenge and allocates a UDP and a TLS relay$`, w.allocateBoth)
 	sc.Step(`^each allocation forwards (\d+) KiB to a peer and (\d+) KiB back$`, w.transfer)
 	sc.Step(`^neither open allocation forwards another byte in either direction$`, w.cutOff)
@@ -91,7 +102,11 @@ func (w *relayWorld) startTLS(mib int) error {
 	return rvListening(w.tcp)
 }
 
+// The ready frame offers STUN and TURN on one UDP port and TURN over TLS on
+// the signalling port under the canonical relay name. The credential is an
+// expiry one hour ahead and the device id, with a base64 HMAC-SHA1.
 func (w *relayWorld) allocateBoth() error {
+	issued := time.Now().Unix()
 	if err := w.answerChallenge("browser", "its signature of that challenge"); err != nil {
 		return err
 	}
@@ -99,19 +114,21 @@ func (w *relayWorld) allocateBoth() error {
 	if err != nil {
 		return err
 	}
+	frame := regexp.MustCompile(`^\{"t":"ready","ice":\[\{"urls":\["stun:localhost:(\d+)"\]\},` +
+		`\{"urls":\["turn:localhost:(\d+)\?transport=udp","turns:turn\.localhost` + regexp.QuoteMeta(w.tcp[strings.LastIndex(w.tcp, ":"):]) + `\?transport=tcp"\],` +
+		`"username":"(\d+):` + regexp.QuoteMeta(exampleKey("browser").ID()) + `","credential":"[A-Za-z0-9+/]{27}="\}\],"ttl":3600\}$`)
+	m := frame.FindStringSubmatch(string(b))
+	if m == nil || m[1] != m[2] {
+		return fmt.Errorf("ready frame %s", b)
+	}
+	if expiry, _ := strconv.ParseInt(m[3], 10, 64); expiry < issued+3600 || expiry > time.Now().Unix()+3600 {
+		return fmt.Errorf("credential expiry %d issued at %d", expiry, issued)
+	}
 	var ready proto.ICEConfig
 	if err := proto.Decode(b, &ready); err != nil {
 		return err
 	}
-	if ready.Type != "ready" || ready.TTL != 3600 || len(ready.ICE) != 2 || len(ready.ICE[1].URLs) != 2 {
-		return fmt.Errorf("invalid ready ICE configuration")
-	}
-	cred := ready.ICE[1]
-	addr := strings.TrimSuffix(strings.TrimPrefix(cred.URLs[0], "turn:"), "?transport=udp")
-	port := w.tcp[strings.LastIndex(w.tcp, ":"):]
-	if cred.URLs[1] != "turns:turn.localhost"+port+"?transport=tcp" {
-		return fmt.Errorf("unexpected TLS endpoint %s", cred.URLs[1])
-	}
+	cred, addr := ready.ICE[1], "localhost:"+m[1]
 	if w.peer, err = net.ListenPacket("udp4", "127.0.0.1:0"); err != nil {
 		return err
 	}

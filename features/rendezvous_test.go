@@ -85,10 +85,15 @@ func init() {
 	}
 }
 
+// rvKey gives the other step sets of a scenario its rendezvous world.
+type rvKey struct{}
+
 func rendezvousSteps(sc *godog.ScenarioContext, bin string) {
 	w := &rvWorld{bin: bin, conns: map[string]*websocket.Conn{}, nonces: map[string]string{}}
 	const device = `(browser|node|tablet)`
-	relaySteps(sc, w)
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		return context.WithValue(ctx, rvKey{}, w), nil
+	})
 	sc.After(func(ctx context.Context, _ *godog.Scenario, err error) (context.Context, error) {
 		for _, undo := range slices.Backward(w.cleanup) {
 			undo()
