@@ -28,7 +28,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-20 · limitation · Three peer scenarios time out on a Mac with its firewall on
 
-- Symptom: "Both nodes can offer over the same two signalling paths", "A replayed offer is not processed" and "Early and repeated candidates" fail with `context deadline exceeded` after 20 s on macOS with the application firewall enabled, on `rebuild` as merged (815c52aa6) and with the audit fixes; the other 77 scenarios pass. CI runs them on Linux only.
+- Symptom: "Both nodes can offer over the same two signalling paths", "A replayed offer is not processed" and "Early and repeated candidates" fail with `context deadline exceeded` after 20 s on macOS with the application firewall enabled, on `rebuild` as merged (815c52aa6) and with the audit fixes; the other 77 scenarios pass. They pass on Linux in CI, and on GitHub's `macos-latest` runner (#145).
 - Cause, not verified: `features/peer_test.go` makes each node's sockets with `peer.Listen(0, 0)`, which listens on every interface (`internal/peer/sockets.go:22-23`), and the firewall holds incoming traffic to the unsigned test binary on addresses other than loopback. The package's own tests keep the sockets on loopback (`internal/peer/sockets.go:26-27`).
 - Status: open. Bind the acceptance nodes to loopback as the unit tests do, or exclude the scenarios on macOS by tag.
 
