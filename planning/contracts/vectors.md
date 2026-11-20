@@ -131,6 +131,8 @@ characters and `\u00df`, which JavaScript's `toUpperCase` turns into `SS`.
 - a payload that is not JSON, and one with another `t` or `op`;
 - `dev` a weak key (refused); `dev` 32 bytes in their canonical spelling
   that are no point of the curve (accepted);
+- an entry whose `p` is exactly 2,048 bytes (accepted), and one of 2,049
+  bytes (refused);
 - `ver` written `2.0000000000000001`, which is 2; `ver` that is `null`;
 - a field `VER` beside the right `ver`;
 - an `add` with another `kind`, one without `name`, and one whose `name`

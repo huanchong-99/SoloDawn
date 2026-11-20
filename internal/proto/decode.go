@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"regexp"
 	"strings"
 )
 
@@ -14,9 +15,15 @@ var (
 	errMissing = errors.New("proto: a field that is always present is missing")
 	errNull    = errors.New("proto: null where the contract has no null")
 	errInteger = errors.New("proto: not an integer of at most 2^53-1")
+	errID      = errors.New("proto: not a random id")
 )
 
-var rawMessage = reflect.TypeFor[json.RawMessage]()
+var (
+	rawMessage = reflect.TypeFor[json.RawMessage]()
+	idType     = reflect.TypeFor[ID]()
+	// 16 bytes are 21 characters and one that carries two bits: its other four are zero.
+	canonicalID = regexp.MustCompile(`^[A-Za-z0-9_-]{21}[AQgw]$`)
+)
 
 // Decode reads wire JSON into the value v points to, the way
 // contracts/conventions.md section 2 says a receiver reads. Everything read
@@ -37,6 +44,7 @@ var rawMessage = reflect.TypeFor[json.RawMessage]()
 //   - A field without omitempty is always present, and only a pointer field
 //     without omitempty can be null. encoding/json leaves a field at its zero
 //     value for a missing member and for null alike.
+//   - A field of type ID takes a random id and no other text.
 //
 // A json.RawMessage is not looked into: whoever decodes it later does that.
 func Decode(data []byte, v any) error {
@@ -124,6 +132,8 @@ func fitsValue(value any, t reflect.Type) error {
 		return errNull
 	case float64:
 		return fitsNumber(value, t)
+	case string:
+		return fitsText(value, t)
 	case map[string]any:
 		return fitsStruct(value, t)
 	case []any:
@@ -135,6 +145,13 @@ func fitsValue(value any, t reflect.Type) error {
 func fitsNumber(f float64, t reflect.Type) error {
 	if k := t.Kind(); k >= reflect.Int && k <= reflect.Uint64 && (f != math.Trunc(f) || math.Abs(f) > 9007199254740991) {
 		return errInteger
+	}
+	return nil
+}
+
+func fitsText(s string, t reflect.Type) error {
+	if t == idType && !canonicalID.MatchString(s) {
+		return errID
 	}
 	return nil
 }

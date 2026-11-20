@@ -111,9 +111,9 @@ answer in `planning/reviews/gpt-6.2-round-1.md`, in the format given in
 - **D2.** Which commands are missing? (Leaving or deleting a group,
   renaming, changing the secretary, removing a task, anything a `[S1]` rule
   implies.)
-- **D3.** For each acceptance test in `steps/step-1.md`, can it be
-  implemented and automated from the contracts as written? Name the ones
-  that cannot.
+- **D3.** For each step-1 acceptance test (now in
+  `steps/step-1-acceptance.md`), can it be implemented and automated from
+  the contracts as written? Name the ones that cannot.
 - **D4.** MCP tools (`contracts/mcp-tools.md`): can any be merged or
   dropped? Is "the model speaks only through `post`" right, or should the
   final message of a turn be posted automatically?

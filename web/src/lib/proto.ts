@@ -7,6 +7,7 @@ import * as v from 'valibot';
 
 const str = v.string();
 const num = v.number();
+const int = v.pipe(num, v.safeInteger());
 const bool = v.boolean();
 const strs = v.array(str);
 
@@ -14,7 +15,12 @@ const strs = v.array(str);
 export const Envelope = v.object({ p: str, k: str, s: str });
 export type Envelope = v.InferOutput<typeof Envelope>;
 
-const PayloadHeader = { n: str, ts: num, g: v.optional(str), to: v.optional(str) };
+/** A random id: 16 bytes in their canonical base64url spelling (contracts/envelope.md section 1).
+ *  That is 21 characters and one that carries two bits, its other four being zero. A field that
+ *  holds an id takes no other text. */
+export const Id = v.pipe(str, v.regex(/^[A-Za-z0-9_-]{21}[AQgw]$/));
+
+const PayloadHeader = { n: Id, ts: int, g: v.optional(Id), to: v.optional(str) };
 const SignalHeader = { ...PayloadHeader, conn: str };
 
 export const Offer = v.object({
@@ -48,7 +54,7 @@ export type Pair = v.InferOutput<typeof Pair>;
 
 const DeviceChange = {
   user: str,
-  ver: num,
+  ver: int,
   op: str,
   dev: str,
   kind: v.optional(str),
@@ -62,6 +68,53 @@ export const DeviceEntry = v.object({
   ...DeviceChange,
 });
 export type DeviceEntry = v.InferOutput<typeof DeviceEntry>;
+
+// WebSocket signalling (rendezvous.md section 2)
+
+const iceServer = v.object({ urls: strs, username: v.optional(str), credential: v.optional(str) });
+const iceConfig = { ice: v.array(iceServer), ttl: v.pipe(num, v.safeInteger()) };
+
+export const RVChallenge = v.object({ t: v.literal('challenge'), nonce: str });
+export type RVChallenge = v.InferOutput<typeof RVChallenge>;
+
+export const RVAuth = v.object({ t: v.literal('auth'), k: str, s: str });
+export type RVAuth = v.InferOutput<typeof RVAuth>;
+
+export const RVReady = v.object({ t: v.literal('ready'), ...iceConfig });
+export type RVReady = v.InferOutput<typeof RVReady>;
+
+export const RVICERequest = v.object({ t: v.literal('ice') });
+export type RVICERequest = v.InferOutput<typeof RVICERequest>;
+
+export const RVICEAnswer = v.object({ t: v.literal('ice'), ...iceConfig });
+export type RVICEAnswer = v.InferOutput<typeof RVICEAnswer>;
+
+export const RVTo = v.object({ t: v.literal('to'), k: str, env: Envelope });
+export type RVTo = v.InferOutput<typeof RVTo>;
+
+export const RVFrom = v.object({ t: v.literal('from'), k: str, env: Envelope });
+export type RVFrom = v.InferOutput<typeof RVFrom>;
+
+export const RVOffline = v.object({ t: v.literal('offline'), k: str });
+export type RVOffline = v.InferOutput<typeof RVOffline>;
+
+export const RVWatch = v.object({ t: v.literal('watch'), k: v.pipe(strs, v.maxLength(64)) });
+export type RVWatch = v.InferOutput<typeof RVWatch>;
+
+export const RVPresence = v.object({ t: v.literal('presence'), k: str, on: bool });
+export type RVPresence = v.InferOutput<typeof RVPresence>;
+
+const roomId = v.pipe(str, v.regex(/^[0-9a-f]{32}$/));
+
+export const RVJoin = v.object({ t: v.literal('join'), room: roomId });
+export type RVJoin = v.InferOutput<typeof RVJoin>;
+
+export const RVJoined = v.object({ t: v.literal('joined'), room: roomId });
+export type RVJoined = v.InferOutput<typeof RVJoined>;
+
+// What two devices send each other through a pairing room is their pair message (envelope.md 6).
+export const RVRoom = v.object({ t: v.literal('room'), room: roomId, data: Pair });
+export type RVRoom = v.InferOutput<typeof RVRoom>;
 
 // Session (datachannel.md section 3)
 
@@ -226,7 +279,6 @@ export const TaskRow = v.object({
 });
 export type TaskRow = v.InferOutput<typeof TaskRow>;
 
-const int = v.pipe(num, v.safeInteger());
 const optionalText = v.optional(str);
 const optionalInt = v.optional(int);
 // valibot's object({}) also accepts arrays; the body on the wire must be an object.

@@ -38,6 +38,7 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - run: pnpm exec playwright install --with-deps --only-shell chromium
       - run: pnpm test
       - run: pnpm build
 

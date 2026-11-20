@@ -5,6 +5,7 @@ import { DeviceLog, Refused } from '../src/lib/devlog';
 import { Device, ed25519, loadDevice, openCommand, type KeyStore } from '../src/lib/identity';
 import { mac, newSecret, parseSecret, room, shown, verifyPair } from '../src/lib/pairing';
 import { examples, goldens, mockCtl, schemaOf } from '../src/lib/mock';
+import * as motion from './motion';
 import * as proto from '../src/lib/proto';
 
 const feature = await loadFeature('../features/web.feature');
@@ -66,9 +67,23 @@ function choose(label: string) {
   svelte.flushSync();
 }
 
-function press(label: string) {
-  document.querySelector<HTMLElement>(`button[aria-label="${label}"]`)!.click();
+function go(hash: string) {
+  location.hash = hash;
+  dispatchEvent(new HashChangeEvent('hashchange', { newURL: location.href }));
   svelte.flushSync();
+}
+
+function press(label: string) {
+  const button = document.querySelector<HTMLElement>(`button[aria-label="${label}"]`)!;
+  button.focus();
+  button.click();
+  svelte.flushSync();
+}
+
+function expectMainFocus(title: string) {
+  const main = document.querySelector('main')!;
+  expect(document.activeElement).toBe(main);
+  expect(document.getElementById(main.getAttribute('aria-labelledby')!)!.textContent).toBe(title);
 }
 
 describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScenario }) => {
@@ -103,15 +118,24 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
   Scenario('The address fragment selects the page', ({ Given, When, Then, And }) => {
     Given('the browser supports Ed25519 in WebCrypto', supported);
     And('the person opens the client', () => open());
-    When('the address fragment becomes "#/nodes"', () => {
-      location.hash = '#/nodes';
-      dispatchEvent(new HashChangeEvent('hashchange'));
-      svelte.flushSync();
-    });
+    When('the address fragment becomes "#/nodes"', () => go('#/nodes'));
     Then('the current page is "我的电脑和 AI"', () => {
       expect(texts('h1')).toEqual(['我的电脑和 AI']);
+      expect(document.title).toBe('我的电脑和 AI · SoloDawn');
       expect(texts('nav a[aria-current="page"]')).toEqual(['电脑和 AI']);
     });
+    And('focus is on the main landmark named "我的电脑和 AI"', () =>
+      expectMainFocus('我的电脑和 AI'),
+    );
+  });
+
+  Scenario('The skip button moves focus into the current page', ({ Given, When, Then, And }) => {
+    Given('the browser supports Ed25519 in WebCrypto', supported);
+    And('the person opens the client', () => open());
+    When('the person activates the skip button', () => {
+      document.querySelector<HTMLButtonElement>('button.skip')!.click();
+    });
+    Then('focus is on the main landmark named "群聊"', () => expectMainFocus('群聊'));
   });
 
   Scenario('An unknown address opens the chats page', ({ Given, When, Then }) => {
@@ -162,7 +186,11 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
     Given('the browser supports Ed25519 in WebCrypto', supported);
     And('the person opens the client', () => open());
     When('the person presses "切换深色 / 浅色"', () => press('切换深色 / 浅色'));
-    And('the person presses "Switch language / 切换语言"', () =>
+    Then('the focused theme button announces "主题: 深色"', () => {
+      expect(document.activeElement?.getAttribute('aria-label')).toBe('切换深色 / 浅色');
+      expect(texts('[role=status]')).toEqual(['主题: 深色']);
+    });
+    When('the person presses "Switch language / 切换语言"', () =>
       press('Switch language / 切换语言'),
     );
     Then('the page uses the "dark" theme', () => {
@@ -171,7 +199,242 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
     And('the page is marked as "en"', () => {
       expect(document.documentElement.lang).toBe('en');
     });
+    And('the focused language button announces "Language: English"', () => {
+      expect(document.activeElement?.getAttribute('aria-label')).toBe('Switch language / 切换语言');
+      expect(texts('[role=status]')).toEqual(['Language: English']);
+      expect(document.title).toBe('Chats · SoloDawn');
+    });
   });
+
+  Scenario(
+    'The mark of the current page moves to the entry that is opened',
+    ({ Given, When, Then, And }) => {
+      let direction: number[];
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      And('the person opens the client', () => motion.open());
+      When('the address fragment becomes "#/settings"', async () => {
+        direction = await motion.arrival('#/settings');
+      });
+      Then('the mark of the current page is on entry 3 of the navigation', () =>
+        motion.expectMark('nav .tabs', 'a', 2),
+      );
+      And('the page arrives from the side of the later entries', () => {
+        expect(direction).toEqual([0, 1]);
+      });
+    },
+  );
+
+  Scenario(
+    'A page opened from a later one arrives from the other side',
+    ({ Given, When, Then, And }) => {
+      let direction: number[];
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      And('the person opens the client at "#/settings"', () => motion.open('#/settings'));
+      When('the address fragment becomes "#/nodes"', async () => {
+        direction = await motion.arrival('#/nodes');
+      });
+      Then('the mark of the current page is on entry 2 of the navigation', () =>
+        motion.expectMark('nav .tabs', 'a', 1),
+      );
+      And('the page arrives from the side of the earlier entries', () => {
+        expect(direction).toEqual([0, -1]);
+      });
+    },
+  );
+
+  Scenario('The mark of the chosen option moves with the choice', ({ Given, When, Then, And }) => {
+    Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+    And('the person opens the client at "#/settings"', () => motion.open('#/settings'));
+    When('the person chooses the theme "深色"', () => motion.choose('深色'));
+    And('the person chooses the language "English"', () => motion.choose('English'));
+    Then('the mark of the theme is on option 3', () =>
+      motion.expectMark('fieldset:has([name=theme])', 'label', 2),
+    );
+    And('the mark of the language is on option 2', () =>
+      motion.expectMark('fieldset:has([name=lang])', 'label', 1),
+    );
+  });
+
+  Scenario('Keyboard focus is seen the moment it lands', ({ Given, When, Then, And }) => {
+    let cues: Awaited<ReturnType<typeof motion.focusCues>>;
+    Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+    And('the person opens the client at "#/settings"', () => motion.open('#/settings'));
+    When('the person presses the Tab key 8 times', async () => {
+      cues = await motion.focusCues(8);
+    });
+    Then('the button "跳到主要内容" was inside the page, outlined, when focus landed on it', () => {
+      expect(cues[0]).toEqual({ part: '跳到主要内容', top: 8, ring: 'solid' });
+    });
+    And('each of the 7 parts after it had its whole ring when focus landed on it', () => {
+      expect(cues.slice(1).map((cue) => [cue.part, cue.ring])).toEqual([
+        ['SoloDawn', '1'],
+        ['群聊', '1'],
+        ['电脑和 AI', '1'],
+        ['设置', '1'],
+        ['切换深色 / 浅色', '1'],
+        ['Switch language / 切换语言', '1'],
+        ['跟随系统', '1'],
+      ]);
+    });
+  });
+
+  Scenario(
+    'The logo turns to the pointer and a press sinks a button',
+    ({ Given, When, Then, And }) => {
+      let parts: Awaited<ReturnType<typeof motion.underPointer>>;
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      And('the person opens the client', () => motion.open());
+      When(
+        'the person points at the logo and then holds a button of the top bar down',
+        async () => {
+          parts = await motion.underPointer();
+        },
+      );
+      Then('the logo is turned, and the button is smaller over its press layer', () => {
+        expect(parts).toEqual({
+          logo: 'matrix(1.04968, -0.147523, 0.147523, 1.04968, 0, 0)',
+          button: 'matrix(0.96, 0, 0, 0.96, 0, 0)',
+          layer: '1',
+        });
+      });
+    },
+  );
+
+  Scenario(
+    'Nothing turns or sinks under the pointer when the system asks for reduced motion',
+    ({ Given, When, Then, And }) => {
+      let parts: Awaited<ReturnType<typeof motion.underPointer>>;
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      And('the system asks for reduced motion', motion.reduce);
+      And('the person opens the client', () => motion.open());
+      When(
+        'the person points at the logo and then holds a button of the top bar down',
+        async () => {
+          parts = await motion.underPointer();
+        },
+      );
+      Then('the logo and the button are as they were, the button over its press layer', () => {
+        expect(parts).toEqual({ logo: 'none', button: 'none', layer: '1' });
+      });
+    },
+  );
+
+  Scenario('No part of an arriving page waits unseen', ({ Given, When, Then, And }) => {
+    let parts: Awaited<ReturnType<typeof motion.waitingParts>>;
+    Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+    And('the person opens the client', () => motion.open());
+    When('the address fragment becomes "#/settings"', async () => {
+      parts = await motion.waitingParts('#/settings');
+    });
+    Then('one frame later part 2 of the page has not moved from where it arrives', () => {
+      expect(parts.map((part) => part.travel)).toEqual(['8.63', '12.00']);
+    });
+    And('both parts have faded in as far as each other', () => {
+      expect(parts.map((part) => part.opacity)).toEqual(['0.42', '0.42']);
+    });
+    And('both parts are seen in full when no animation runs', () => {
+      expect(parts.map((part) => part.still)).toEqual(['1', '1']);
+    });
+  });
+
+  Scenario(
+    'The page cross-fades to a new theme in a browser with view transitions',
+    ({ Given, When, Then, And }) => {
+      let themes: (string | undefined)[];
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      And('the browser has view transitions', motion.viewTransitions);
+      And('the person opens the client', () => motion.open());
+      When('the person presses "切换深色 / 浅色"', async () => {
+        themes = await motion.crossFade();
+      });
+      Then('the page uses the "auto" theme until the cross-fade has its first picture', () => {
+        expect(themes[0]).toBe('auto');
+      });
+      And('the page uses the "dark" theme in the cross-fade', () => {
+        expect(themes[1]).toBe('dark');
+      });
+    },
+  );
+
+  Scenario('A press during the cross-fade reaches the page', ({ Given, When, Then, And }) => {
+    let result: Awaited<ReturnType<typeof motion.pressDuringCrossFade>>;
+    Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+    And('the browser has view transitions', motion.viewTransitions);
+    And('the person opens the client', () => motion.open());
+    When('the person presses "切换深色 / 浅色" and again while the page cross-fades', async () => {
+      result = await motion.pressDuringCrossFade();
+    });
+    Then('the second press came while the picture of the old page was up', () => {
+      expect(result.pictures).toEqual(['::view-transition-old(root)']);
+    });
+    And('the page uses the "light" theme', () => {
+      expect(result.theme).toBe('light');
+    });
+  });
+
+  Scenario(
+    'A cross-fade under way ends when the system starts to ask for reduced motion',
+    ({ Given, When, Then, And }) => {
+      let result: Awaited<ReturnType<typeof motion.reduceDuringCrossFade>>;
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      And('the browser has view transitions', motion.viewTransitions);
+      And('the person opens the client', () => motion.open());
+      When(
+        'the person presses "切换深色 / 浅色" and the system asks for reduced motion while the page cross-fades',
+        async () => {
+          result = await motion.reduceDuringCrossFade();
+        },
+      );
+      Then('the picture of the old page is gone', () => {
+        expect(result.before).toEqual(['::view-transition-old(root)']);
+        expect(result.after).toEqual([]);
+      });
+      And('the page uses the "dark" theme', () => {
+        expect(result.theme).toBe('dark');
+      });
+    },
+  );
+
+  Scenario(
+    'A browser without view transitions can read the rule for reduced motion',
+    ({ Given, When, Then }) => {
+      let rules: string[];
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      When('the person opens the client', async () => {
+        await motion.open();
+        rules = await motion.reducedMotionRules();
+      });
+      Then('the rule that stills every part names no picture of a cross-fade', () => {
+        expect(rules).toEqual([
+          '*, ::before, ::after',
+          '::view-transition-group(*)',
+          '::view-transition-old(*)',
+          '::view-transition-new(*)',
+        ]);
+      });
+    },
+  );
+
+  Scenario(
+    'The theme changes at once when the system asks for reduced motion',
+    ({ Given, When, Then, And }) => {
+      let result: Awaited<ReturnType<typeof motion.reducedThemeChange>>;
+      Given('the browser supports Ed25519 in WebCrypto', motion.newPage);
+      And('the browser has view transitions', motion.viewTransitions);
+      And('the system asks for reduced motion', motion.reduce);
+      And('the person opens the client', () => motion.open());
+      When('the person presses "切换深色 / 浅色"', async () => {
+        result = await motion.reducedThemeChange();
+      });
+      Then('the page uses the "dark" theme', () => {
+        expect(result.theme).toBe('dark');
+      });
+      And('the page has not cross-faded', () => {
+        expect(result.transitions).toBe(0);
+        expect(result.animations).toBe(0);
+      });
+    },
+  );
 
   Scenario(
     'The client opens when the browser blocks site storage',
@@ -377,7 +640,8 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
       Given("a command that this browser signed for the owner's node", async () => {
         [browser, node] = [await newDevice(), await newDevice()];
         receiver = node.id;
-        env = await browser.sign(`{"t":"cmd","n":"c1","ts":${now},"to":"${node.id}"}`);
+        const n = 'Zk3aZk3aZk3aZk3aZk3aZg';
+        env = await browser.sign(`{"t":"cmd","n":"${n}","ts":${now},"to":"${node.id}"}`);
       });
       When('<event>', () => {
         const event: string = variables.event;
@@ -440,14 +704,10 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
       let typed = '';
       let browser: Device;
       let node: Device;
-      const pair = async (side: Device, role: string, as: string) => ({
-        t: 'pair' as const,
-        k: side.id,
-        kind: role === 'a' ? 'browser' : 'node',
-        name: role,
-        role,
-        mac: await mac(crypto, as, role, side.id),
-      });
+      const pair = async (side: Device, role: string, as: string) => {
+        const m = { k: side.id, kind: role === 'a' ? 'browser' : 'node', name: role, role };
+        return { t: 'pair' as const, ...m, mac: await mac(crypto, as, m) };
+      };
       Given('this browser created a pairing secret', async () => {
         secret = newSecret(crypto);
         [browser, node] = [await newDevice(), await newDevice()];

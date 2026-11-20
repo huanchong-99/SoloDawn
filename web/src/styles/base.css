@@ -1,5 +1,5 @@
 /* SoloDawn shared styles. Colours and sizes come from tokens.css only.
-   Sections: 1 base  2 utilities  3 shell  4 buttons  5 cards  6 forms.
+   Sections: 1 base  2 utilities  3 shell  4 buttons  5 cards  6 forms  7 motion.
    Styles of one component (badges, avatars, chat, thread, terminal, dialog) arrive with it. */
 
 /* 1 base */
@@ -102,6 +102,14 @@ kbd,
     animation: none !important;
     transition: none !important;
   }
+  /* The pictures of a page cross-fade are no element's ::before or ::after: they are named, so
+     that a fade under way ends when the system starts to ask for reduced motion. They have a
+     rule of their own: a browser without view transitions drops a rule that names them. */
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
 }
 
 /* 2 utilities */
@@ -116,16 +124,17 @@ kbd,
 .skip {
   position: absolute;
   left: 8px;
-  top: -60px;
+  top: 8px;
   z-index: 99;
   padding: 8px 12px;
   border: 0;
   border-radius: var(--r-md);
   background: var(--text);
   color: var(--bg);
+  transform: translateY(-200%);
 }
 .skip:focus {
-  top: 8px;
+  transform: none;
 }
 .muted {
   color: var(--text-3);
@@ -164,6 +173,7 @@ kbd,
   height: 30px;
   flex: none;
   display: block;
+  transition: transform var(--dur-4) var(--spring);
 }
 @media (max-width: 767px) {
   .only-wide {
@@ -227,31 +237,54 @@ kbd,
   border-right: 1px solid var(--line);
   background: var(--surface);
 
+  .logo {
+    margin-bottom: var(--sp-3);
+    border-radius: var(--r-md);
+  }
+  /* The mark turns to the pointer, unless the system asks for reduced motion. */
+  @media (prefers-reduced-motion: no-preference) {
+    .logo:hover .logo-mark {
+      transform: rotate(-8deg) scale(1.06);
+    }
+  }
+}
+.tabs {
+  display: grid;
+  grid-auto-rows: 1fr;
+  gap: var(--sp-1);
+  width: calc(var(--rail-w) - 10px);
+
+  /* The mark of the current page: one pill, which springs to the entry at --at. It shares the
+     cell of the first entry, so it has the size of an entry at any width and in any language. */
+  &::before {
+    content: '';
+    grid-area: 1 / 1;
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    transform: translateY(calc(var(--at) * (100% + var(--sp-1))));
+    transition: transform var(--dur-4) var(--spring);
+  }
   a {
     display: grid;
     justify-items: center;
+    align-content: center;
     gap: 2px;
-    width: calc(var(--rail-w) - 10px);
     padding: 8px 0 6px;
     border-radius: var(--r-md);
     color: var(--text-3);
     font-size: 11px;
     line-height: 1.3;
   }
+  a:first-of-type {
+    grid-area: 1 / 1;
+  }
   a:hover {
-    background: var(--surface-2);
     color: var(--text);
     text-decoration: none;
   }
   a[aria-current] {
-    background: var(--surface-2);
     color: var(--text);
     font-weight: 600;
-  }
-  .logo {
-    margin-bottom: var(--sp-3);
-    padding: 0;
-    background: none;
   }
 }
 /* English labels are longer than Chinese ones: "Computers" in bold needs a wider rail. */
@@ -335,14 +368,20 @@ kbd,
     border-right: 0;
     border-top: 1px solid var(--line);
 
-    a {
-      flex: 1;
-      max-width: 120px;
-      min-height: 48px;
-      align-content: center;
-    }
     .logo {
       display: none;
+    }
+  }
+  .tabs {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 0;
+    width: 100%;
+    max-width: 360px;
+    min-height: 48px;
+
+    &::before {
+      transform: translateX(calc(var(--at) * 100%));
     }
   }
   .bar {
@@ -358,6 +397,69 @@ kbd,
 }
 
 /* 4 buttons */
+/* The states of a part a person presses, in opacity and transform alone: hover fades a layer in
+   behind the content (--hover is its colour), a press sinks the part and letting go springs it
+   back, and keyboard focus lands a ring on it. Colours change at once. */
+.btn,
+.icon-btn,
+.logo,
+.tabs a,
+.seg label {
+  position: relative;
+  isolation: isolate;
+  transition: transform var(--dur-4) var(--spring);
+
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    opacity: 0;
+    pointer-events: none;
+  }
+  &::before {
+    z-index: -1;
+    background: var(--hover, var(--surface-2));
+    transition: opacity var(--dur-1) var(--ease);
+  }
+  &::after {
+    inset: -4px;
+    border: var(--focus);
+    border-radius: calc(var(--r-md) + 4px);
+    transform: scale(1.08);
+    transition:
+      opacity var(--dur-1) var(--ease),
+      transform var(--dur-2) var(--ease-out);
+  }
+  /* Under reduced motion a press does not sink the part: the layer behind it shows the press. */
+  @media (prefers-reduced-motion: no-preference) {
+    &:active {
+      transform: scale(0.96);
+      transition: transform var(--dur-1) var(--ease);
+    }
+  }
+  /* The outline stays, unseen, for forced colours, which show it and not the ring's colour. */
+  &:focus-visible {
+    outline-color: transparent;
+  }
+  /* The ring is there in full the moment focus lands: only its settling onto the part is
+     animated. It fades when focus leaves. */
+  &:focus-visible::after,
+  &:has(:focus-visible)::after {
+    opacity: 1;
+    transform: none;
+    transition: transform var(--dur-2) var(--ease-out);
+  }
+}
+:is(.btn, .icon-btn, .tabs a):active::before {
+  opacity: 1;
+}
+@media (hover: hover) {
+  :is(.btn, .icon-btn, .tabs a):hover::before {
+    opacity: 1;
+  }
+}
 .btn {
   display: inline-flex;
   align-items: center;
@@ -373,17 +475,16 @@ kbd,
   font-size: 14px;
   font-weight: 500;
   white-space: nowrap;
-  transition:
-    background var(--dur-1) var(--ease),
-    border-color var(--dur-1) var(--ease),
-    transform var(--dur-1) var(--ease);
 
-  &:hover {
-    background: var(--surface-2);
-    text-decoration: none;
+  /* The layer lies inside the border, the ring outside it. */
+  &::before {
+    border-radius: calc(var(--r-md) - 1px);
   }
-  &:active {
-    transform: translateY(1px);
+  &::after {
+    inset: -5px;
+  }
+  &:hover {
+    text-decoration: none;
   }
   &[disabled] {
     background: var(--surface-2);
@@ -394,34 +495,36 @@ kbd,
   }
 }
 .btn-primary {
+  --hover: color-mix(in srgb, var(--text) 86%, var(--bg));
   background: var(--text);
   color: var(--bg);
   border-color: transparent;
 }
-.btn-primary:hover {
-  background: color-mix(in srgb, var(--text) 86%, var(--bg));
-}
 .btn-dawn {
+  --hover: color-mix(in srgb, var(--dawn) 86%, #fff);
   background: var(--dawn);
   color: var(--on-dawn);
   border-color: transparent;
   font-weight: 600;
 }
-.btn-dawn:hover {
-  background: var(--dawn);
-  filter: brightness(1.07);
-}
 .btn-danger {
+  --hover: var(--danger-soft);
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
-}
-.btn-danger:hover {
-  background: var(--danger-soft);
 }
 .btn-ghost {
   border-color: transparent;
   background: none;
   color: var(--text-2);
+}
+/* No border to stay inside of: the layer covers the whole button. */
+.btn-primary,
+.btn-dawn,
+.btn-ghost {
+  &::before {
+    inset: -1px;
+    border-radius: inherit;
+  }
 }
 .btn-sm {
   height: 30px;
@@ -442,7 +545,6 @@ kbd,
   font-weight: 600;
 }
 .icon-btn:hover {
-  background: var(--surface-2);
   color: var(--text);
 }
 @media (pointer: coarse) {
@@ -490,8 +592,18 @@ kbd,
   border: 1px solid var(--line);
   max-width: 100%;
 
+  /* The chosen option: one thumb, which springs to the option at --at. It shares the cell of the
+     first option, as the pill of the navigation does. */
+  &::before {
+    content: '';
+    grid-area: 1 / 1;
+    border-radius: 7px;
+    background: var(--surface);
+    box-shadow: 0 0 0 1px var(--line);
+    transform: translateX(calc(var(--at) * 100%));
+    transition: transform var(--dur-4) var(--spring);
+  }
   label {
-    position: relative;
     display: grid;
     place-items: center;
     min-height: 30px;
@@ -509,15 +621,16 @@ kbd,
     margin: 0;
     cursor: pointer;
   }
+  label:first-of-type {
+    grid-area: 1 / 1;
+  }
+  label::after {
+    inset: -3px;
+    border-radius: 10px;
+  }
   label:has(:checked) {
-    background: var(--surface);
     color: var(--text);
     font-weight: 600;
-    box-shadow: 0 0 0 1px var(--line);
-  }
-  label:has(:focus-visible) {
-    outline: var(--focus);
-    outline-offset: 1px;
   }
 }
 .set {
@@ -571,4 +684,68 @@ kbd,
   .seg label {
     min-height: 38px;
   }
+}
+
+/* 7 motion: what arrives. The states of single parts are with the parts. */
+/* A page arrives from the side its entry is on in the navigation (--dir, 1 for a later entry):
+   from below or above beside the rail, from the right or left over the bottom bar of a phone.
+   Its parts follow one another, and its title in the top bar comes with them. Only the travel
+   of a part waits its turn: every part fades in from the first frame, so none is held unseen. */
+.app {
+  --arrive: translateY(calc(var(--dir) * var(--travel)));
+}
+@media (max-width: 767px) {
+  .app {
+    --arrive: translateX(calc(var(--dir) * var(--travel)));
+  }
+}
+.page > *,
+.bar-title h1 {
+  animation:
+    arrive var(--dur-3) var(--ease-out) backwards,
+    appear var(--dur-2) var(--ease-out);
+}
+.page > :nth-child(2) {
+  animation-delay: var(--stagger), 0s;
+}
+.page > :nth-child(n + 3) {
+  animation-delay: calc(2 * var(--stagger)), 0s;
+}
+@keyframes arrive {
+  from {
+    transform: var(--arrive);
+  }
+}
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
+}
+/* The glyph of a button that switches something turns in when it has switched. */
+.swap {
+  display: grid;
+  animation: turn var(--dur-4) var(--spring) backwards;
+}
+@keyframes turn {
+  from {
+    opacity: 0;
+    transform: rotate(-90deg) scale(0.6);
+  }
+}
+/* Theme and language change the whole page: shift() in motion.ts fades the picture of the old
+   page out over the new page. The new page has no picture of its own: a page in a picture takes
+   no pointer input, and neither would the pictures above it, so they let it through. The page
+   keeps its place and size, so its group has nothing to animate. */
+[data-live] {
+  view-transition-name: none;
+}
+::view-transition {
+  pointer-events: none;
+}
+::view-transition-group(root) {
+  animation: none;
+}
+::view-transition-old(root) {
+  animation-duration: var(--dur-3);
+  animation-timing-function: var(--ease);
 }

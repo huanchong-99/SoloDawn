@@ -2,6 +2,7 @@
 import { MediaQuery } from 'svelte/reactivity';
 import en from '../messages/en.json';
 import zh from '../messages/zh-CN.json';
+import { shift } from './motion';
 
 export type Key = keyof typeof zh;
 
@@ -50,12 +51,27 @@ const systemDark = new MediaQuery('prefers-color-scheme: dark');
 
 export const isDark = () => (prefs.theme === 'auto' ? systemDark.current : prefs.theme === 'dark');
 
-export function toggleTheme() {
-  prefs.theme = isDark() ? 'light' : 'dark';
+/** Changes a preference; the page cross-fades to its new look. */
+export function choose<K extends keyof typeof prefs>(key: K, value: (typeof prefs)[K]) {
+  shift(() => {
+    prefs[key] = value;
+    announcement.text = '';
+  });
 }
 
-export function toggleLang() {
-  prefs.lang = prefs.lang === 'en' ? 'zh-CN' : 'en';
-}
+// Radios expose their checked state natively. The two action buttons announce their result.
+export const announcement = $state({ text: '' });
+
+export const toggleTheme = () =>
+  shift(() => {
+    prefs.theme = isDark() ? 'light' : 'dark';
+    announcement.text = `${t('settings.theme')}: ${t(`settings.theme.${prefs.theme}`)}`;
+  });
+
+export const toggleLang = () =>
+  shift(() => {
+    prefs.lang = prefs.lang === 'en' ? 'zh-CN' : 'en';
+    announcement.text = `${t('settings.lang')}: ${t(`settings.lang.${prefs.lang}`)}`;
+  });
 
 export const t = (key: Key) => messages[prefs.lang][key];

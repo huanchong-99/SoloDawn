@@ -24,8 +24,8 @@ does what and why. Step-by-step sequences are in `flows/`.
   it (rules R-130 to R-133).
 - **C-8** Validation happens at system boundaries only (README rule 3).
 - **C-9** The web client runs on browsers with native Ed25519 in WebCrypto.
-  The exact minimum versions are fixed by spike S-7. No signature library is
-  bundled (R-164).
+  Spike S-7 fixed the lowest versions (`risks.md` Q-3). No signature
+  library is bundled (R-164).
 - **C-10** The node never inspects shell commands to decide whether they are
   safe (R-41). Permission questions come from the CLI; the node's only
   content check is the outbound secret check of R-137.

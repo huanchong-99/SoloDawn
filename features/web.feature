@@ -20,6 +20,13 @@ Feature: Web client
     And the person opens the client
     When the address fragment becomes "#/nodes"
     Then the current page is "我的电脑和 AI"
+    And focus is on the main landmark named "我的电脑和 AI"
+
+  Scenario: The skip button moves focus into the current page
+    Given the browser supports Ed25519 in WebCrypto
+    And the person opens the client
+    When the person activates the skip button
+    Then focus is on the main landmark named "群聊"
 
   Scenario: An unknown address opens the chats page
     Given the browser supports Ed25519 in WebCrypto
@@ -45,9 +52,99 @@ Feature: Web client
     Given the browser supports Ed25519 in WebCrypto
     And the person opens the client
     When the person presses "切换深色 / 浅色"
-    And the person presses "Switch language / 切换语言"
+    Then the focused theme button announces "主题: 深色"
+    When the person presses "Switch language / 切换语言"
     Then the page uses the "dark" theme
     And the page is marked as "en"
+    And the focused language button announces "Language: English"
+
+  Scenario: The mark of the current page moves to the entry that is opened
+    Given the browser supports Ed25519 in WebCrypto
+    And the person opens the client
+    When the address fragment becomes "#/settings"
+    Then the mark of the current page is on entry 3 of the navigation
+    And the page arrives from the side of the later entries
+
+  Scenario: A page opened from a later one arrives from the other side
+    Given the browser supports Ed25519 in WebCrypto
+    And the person opens the client at "#/settings"
+    When the address fragment becomes "#/nodes"
+    Then the mark of the current page is on entry 2 of the navigation
+    And the page arrives from the side of the earlier entries
+
+  Scenario: The mark of the chosen option moves with the choice
+    Given the browser supports Ed25519 in WebCrypto
+    And the person opens the client at "#/settings"
+    When the person chooses the theme "深色"
+    And the person chooses the language "English"
+    Then the mark of the theme is on option 3
+    And the mark of the language is on option 2
+
+  Scenario: Keyboard focus is seen the moment it lands
+    Given the browser supports Ed25519 in WebCrypto
+    And the person opens the client at "#/settings"
+    When the person presses the Tab key 8 times
+    Then the button "跳到主要内容" was inside the page, outlined, when focus landed on it
+    And each of the 7 parts after it had its whole ring when focus landed on it
+
+  Scenario: The logo turns to the pointer and a press sinks a button
+    Given the browser supports Ed25519 in WebCrypto
+    And the person opens the client
+    When the person points at the logo and then holds a button of the top bar down
+    Then the logo is turned, and the button is smaller over its press layer
+
+  Scenario: Nothing turns or sinks under the pointer when the system asks for reduced motion
+    Given the browser supports Ed25519 in WebCrypto
+    And the system asks for reduced motion
+    And the person opens the client
+    When the person points at the logo and then holds a button of the top bar down
+    Then the logo and the button are as they were, the button over its press layer
+
+  Scenario: No part of an arriving page waits unseen
+    Given the browser supports Ed25519 in WebCrypto
+    And the person opens the client
+    When the address fragment becomes "#/settings"
+    Then one frame later part 2 of the page has not moved from where it arrives
+    And both parts have faded in as far as each other
+    And both parts are seen in full when no animation runs
+
+  Scenario: The page cross-fades to a new theme in a browser with view transitions
+    Given the browser supports Ed25519 in WebCrypto
+    And the browser has view transitions
+    And the person opens the client
+    When the person presses "切换深色 / 浅色"
+    Then the page uses the "auto" theme until the cross-fade has its first picture
+    And the page uses the "dark" theme in the cross-fade
+
+  Scenario: A press during the cross-fade reaches the page
+    Given the browser supports Ed25519 in WebCrypto
+    And the browser has view transitions
+    And the person opens the client
+    When the person presses "切换深色 / 浅色" and again while the page cross-fades
+    Then the second press came while the picture of the old page was up
+    And the page uses the "light" theme
+
+  Scenario: A cross-fade under way ends when the system starts to ask for reduced motion
+    Given the browser supports Ed25519 in WebCrypto
+    And the browser has view transitions
+    And the person opens the client
+    When the person presses "切换深色 / 浅色" and the system asks for reduced motion while the page cross-fades
+    Then the picture of the old page is gone
+    And the page uses the "dark" theme
+
+  Scenario: A browser without view transitions can read the rule for reduced motion
+    Given the browser supports Ed25519 in WebCrypto
+    When the person opens the client
+    Then the rule that stills every part names no picture of a cross-fade
+
+  Scenario: The theme changes at once when the system asks for reduced motion
+    Given the browser supports Ed25519 in WebCrypto
+    And the browser has view transitions
+    And the system asks for reduced motion
+    And the person opens the client
+    When the person presses "切换深色 / 浅色"
+    Then the page uses the "dark" theme
+    And the page has not cross-faded
 
   Scenario: The client opens when the browser blocks site storage
     Given the browser supports Ed25519 in WebCrypto

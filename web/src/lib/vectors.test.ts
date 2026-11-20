@@ -1,6 +1,6 @@
 // The shared test vectors of planning/contracts/vectors.md, which internal/identity passes too.
 import { describe, expect, it } from 'vitest';
-import { DeviceLog } from './devlog';
+import { DeviceLog, Refused } from './devlog';
 import {
   Device,
   decode,
@@ -10,12 +10,15 @@ import {
   verifyChallenge,
   verifyEnvelope,
 } from './identity';
+import * as v from 'valibot';
 import { goldens } from './mock';
 import { mac, parseSecret, room, shown, verifyPair } from './pairing';
-import type { Envelope } from './proto';
+import { Pair, type Envelope } from './proto';
 
 interface Side {
   device: string;
+  kind: string;
+  name: string;
   mac: string;
 }
 
@@ -34,6 +37,7 @@ interface Vectors {
     code: string;
   }[];
   pairing: { shown: string; secret: string; room: string; a: Side; b: Side }[];
+  pair_messages: { name: string; me: 'a' | 'b'; secret: string; msg: unknown; ok: boolean }[];
   bad_secrets: { name: string; shown: string }[];
   devlogs: {
     name: string;
@@ -73,19 +77,18 @@ const devices = new Map<string, Device>();
 
 describe('the shared crypto vectors', () => {
   it('have every part, each with cases', () => {
-    const parts = Object.entries(vectors).map(([part, cases]) => [part, cases.length > 0]);
-    expect(parts).toStrictEqual(
-      [
-        'keys',
-        'envelopes',
-        'rendezvous',
-        'received',
-        'pairing',
-        'bad_secrets',
-        'devlogs',
-        'adopt',
-      ].map((part) => [part, true]),
-    );
+    expect(Object.keys(vectors).sort()).toStrictEqual([
+      'adopt',
+      'bad_secrets',
+      'devlogs',
+      'envelopes',
+      'keys',
+      'pair_messages',
+      'pairing',
+      'received',
+      'rendezvous',
+    ]);
+    for (const cases of Object.values(vectors)) expect(cases.length).toBeGreaterThan(0);
   });
 
   it.each(vectors.keys)('key $name: device id and fingerprint follow from the seed', async (c) => {
@@ -98,11 +101,13 @@ describe('the shared crypto vectors', () => {
   it.each(vectors.envelopes)('envelope "$name": passes check 1 as ok says', async (c) => {
     const env = { p: c.p, k: c.k, s: c.s };
     expect(await verifyEnvelope(crypto, env)).toBe(c.ok);
-    const opened = await openCommand(crypto, env, '', everyone, now);
-    expect('code' in opened && opened.code === 'bad_sig').toBe(!c.ok);
+    if (!c.ok) {
+      expect(await openCommand(crypto, env, '', everyone, now)).toStrictEqual({ code: 'bad_sig' });
+      return;
+    }
     // Signature bytes are never compared (section 2 of the vectors contract): Safari's are
     // random. What the client signs itself must verify.
-    if (c.ok) expect(await verifyEnvelope(crypto, await devices.get(c.k)!.sign(c.p))).toBe(true);
+    expect(await verifyEnvelope(crypto, await devices.get(c.k)!.sign(c.p))).toBe(true);
   });
 
   it.each(vectors.rendezvous)('rendezvous nonce $nonce: the answer is for it alone', async (c) => {
@@ -125,28 +130,29 @@ describe('the shared crypto vectors', () => {
       `${c.secret.slice(0, 4)}-${c.secret.slice(4, 8)}-${c.secret.slice(8, 12)}-${c.secret.slice(12)}`,
     );
     expect(await room(crypto, secret)).toBe(c.room);
-    expect(await mac(crypto, secret, 'a', c.a.device)).toBe(c.a.mac);
-    expect(await mac(crypto, secret, 'b', c.b.device)).toBe(c.b.mac);
-    const a = {
+    const message = (role: string, side: Side) => ({
       t: 'pair' as const,
-      k: c.a.device,
-      kind: 'browser',
-      name: 'a',
-      role: 'a',
-      mac: c.a.mac,
-    };
-    const b = {
-      t: 'pair' as const,
-      k: c.b.device,
-      kind: 'node',
-      name: 'b',
-      role: 'b',
-      mac: c.b.mac,
-    };
+      k: side.device,
+      kind: side.kind,
+      name: side.name,
+      role,
+      mac: side.mac,
+    });
+    const [a, b] = [message('a', c.a), message('b', c.b)];
+    expect(await mac(crypto, secret, a)).toBe(c.a.mac);
+    expect(await mac(crypto, secret, b)).toBe(c.b.mac);
     expect(await verifyPair(crypto, secret, a, 'a')).toBe(true);
     expect(await verifyPair(crypto, secret, b, 'b')).toBe(true);
     expect(await verifyPair(crypto, secret, a, 'b')).toBe(false);
     expect(await verifyPair(crypto, secret, b, 'a')).toBe(false);
+  });
+
+  // A message is read as everything from the wire is; one that cannot be read is ignored.
+  it.each(vectors.pair_messages)('pair message "$name": accepted is $ok', async (c) => {
+    const read = v.safeParse(Pair, c.msg);
+    const sender = c.me === 'a' ? 'b' : 'a';
+    const accepted = read.success && (await verifyPair(crypto, c.secret, read.output, sender));
+    expect(accepted).toBe(c.ok);
   });
 
   it.each(vectors.bad_secrets)('bad secret "$name": no secret', (c) => {
@@ -155,16 +161,13 @@ describe('the shared crypto vectors', () => {
 
   it.each(vectors.devlogs)('device log "$name"', async (c) => {
     const log = new DeviceLog(crypto, c.user);
-    const accepted = [];
-    for (const e of c.entries)
-      accepted.push(
-        await log.apply(e.env).then(
-          () => true,
-          () => false,
-        ),
-      );
-    expect(accepted).toStrictEqual(c.entries.map((e) => e.accept));
-    expect(log.validDevices()).toStrictEqual(c.valid);
+    for (const e of c.entries) {
+      if (e.accept) await log.apply(e.env);
+      else await expect(log.apply(e.env)).rejects.toBeInstanceOf(Refused);
+    }
+    // valid lists the devices of keys only: a dev that is no key of the vectors can be valid too.
+    const listed = log.validDevices().filter((d) => vectors.keys.some((k) => k.device === d));
+    expect(listed).toStrictEqual(c.valid);
   });
 
   it.each(vectors.adopt)('adopt "$name"', async (c) => {

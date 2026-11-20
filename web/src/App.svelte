@@ -1,6 +1,7 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import Icon, { type IconName } from './components/Icon.svelte';
-  import { isDark, t, toggleLang, toggleTheme } from './lib/prefs.svelte';
+  import { announcement, isDark, prefs, t, toggleLang, toggleTheme } from './lib/prefs.svelte';
   import { pages, route, type Page } from './lib/route.svelte';
   import Groups from './routes/Groups.svelte';
   import Nodes from './routes/Nodes.svelte';
@@ -9,33 +10,47 @@
   const views = { groups: Groups, nodes: Nodes, settings: Settings };
   const icons: Record<Page, IconName> = { groups: 'chat', nodes: 'pc', settings: 'sliders' };
   const View = $derived(views[route.page]);
+  const pageTitle = $derived(t(`${route.page}.title`));
   let main: HTMLElement;
+  let previousPage = untrack(() => route.page);
+
+  $effect(() => {
+    if (route.page !== previousPage) {
+      previousPage = route.page;
+      main.focus();
+    }
+  });
 </script>
 
-<svelte:head><title>{t(`${route.page}.title`)} · SoloDawn</title></svelte:head>
+<svelte:head><title>{`${pageTitle} · SoloDawn`}</title></svelte:head>
 
-<div class="app">
+<div class="app" style:--dir={route.dir}>
   <button class="skip" onclick={() => main.focus()}>{t('app.skip')}</button>
   <nav class="rail" aria-label={t('nav.label')}>
     <a class="logo" href="#/groups" aria-label="SoloDawn">
       <img class="logo-mark" src="icon.svg" alt="" />
     </a>
-    {#each pages as page (page)}
-      <a href="#/{page}" aria-current={page === route.page ? 'page' : undefined}>
-        <Icon name={icons[page]} /><span>{t(`nav.${page}`)}</span>
-      </a>
-    {/each}
+    <div class="tabs" style:--at={pages.indexOf(route.page)}>
+      {#each pages as page (page)}
+        <a href={`#/${page}`} aria-current={page === route.page ? 'page' : undefined}>
+          <Icon name={icons[page]} /><span>{t(`nav.${page}`)}</span>
+        </a>
+      {/each}
+    </div>
   </nav>
   <header class="bar">
-    <div class="bar-title"><h1>{t(`${route.page}.title`)}</h1></div>
+    <div class="bar-title">
+      {#key route.page}<h1 id="page-title">{pageTitle}</h1>{/key}
+    </div>
     <div class="global only-wide">
       <button class="icon-btn" onclick={toggleTheme} aria-label={t('bar.theme')}>
-        <Icon name={isDark() ? 'sun' : 'moon'} />
+        {#key isDark()}<span class="swap"><Icon name={isDark() ? 'sun' : 'moon'} /></span>{/key}
       </button>
       <button class="icon-btn" onclick={toggleLang} aria-label={t('bar.lang')}>
-        {t('bar.lang.other')}
+        {#key prefs.lang}<span class="swap">{t('bar.lang.other')}</span>{/key}
       </button>
+      <span class="sr" role="status">{announcement.text}</span>
     </div>
   </header>
-  <main bind:this={main} tabindex="-1"><View /></main>
+  <main bind:this={main} tabindex="-1" aria-labelledby="page-title"><View /></main>
 </div>

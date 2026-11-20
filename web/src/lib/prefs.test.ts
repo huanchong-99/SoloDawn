@@ -114,6 +114,52 @@ describe('language', () => {
   });
 });
 
+it('applies successive toggles in the order their transition callbacks run', async () => {
+  const changes: (() => void)[] = [];
+  const { prefs, toggleTheme, toggleLang } = await load();
+  Object.assign(document, {
+    startViewTransition(change: () => void) {
+      changes.push(change);
+      return { finished: Promise.resolve() };
+    },
+  });
+  try {
+    toggleTheme();
+    toggleTheme();
+    toggleLang();
+    toggleLang();
+    expect(changes).toHaveLength(4);
+    expect(prefs).toEqual({ theme: 'auto', lang: 'en' });
+    for (const [i, [theme, lang]] of [
+      ['dark', 'en'],
+      ['light', 'en'],
+      ['light', 'zh-CN'],
+      ['light', 'en'],
+    ].entries()) {
+      changes[i]();
+      expect(prefs).toEqual({ theme, lang });
+    }
+  } finally {
+    Reflect.deleteProperty(document, 'startViewTransition');
+  }
+});
+
+it('announces top bar actions in the chosen language and clears the status on a radio choice', async () => {
+  const { announcement, choose, prefs, toggleLang, toggleTheme } = await load();
+  expect(announcement.text).toBe('');
+  toggleTheme();
+  expect(announcement.text).toBe('Theme: Dark');
+  toggleTheme();
+  expect(announcement.text).toBe('Theme: Light');
+  toggleLang();
+  expect(announcement.text).toBe('语言: 简体中文');
+  toggleLang();
+  expect(announcement.text).toBe('Language: English');
+  choose('theme', 'auto');
+  expect(prefs).toEqual({ theme: 'auto', lang: 'en' });
+  expect(announcement.text).toBe('');
+});
+
 describe('a browser that blocks site storage', () => {
   beforeEach(() => {
     vi.spyOn(globalThis, 'localStorage', 'get').mockImplementation(() => {

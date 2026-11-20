@@ -31,6 +31,7 @@ func TestFeatures(t *testing.T) {
 			identitySteps(sc)
 			storeSteps(sc)
 			hostSteps(sc, t, fakes)
+			rendezvousSteps(sc, bin)
 			var stdout, stderr bytes.Buffer
 			var code int
 			sc.Step(`^I run "solodawn ?(.*)"$`, func(args string) {

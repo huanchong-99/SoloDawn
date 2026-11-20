@@ -45,7 +45,7 @@ func TestOpenReturnsTheCommonFields(t *testing.T) {
 
 	asked := ""
 	h, err := OpenCommand(sender.Sign(payload("", ts)), me, func(device string) bool { asked = device; return true }, now)
-	want := proto.PayloadHeader{Type: "post", Nonce: testID("post"), Timestamp: ts, Group: testID("group")}
+	want := proto.PayloadHeader{Type: "post", Nonce: proto.ID(testID("post")), Timestamp: ts, Group: proto.ID(testID("group"))}
 	if err != nil || h != want {
 		t.Errorf("payload without to: got %+v, %v; want %+v", h, err, want)
 	}
@@ -54,7 +54,7 @@ func TestOpenReturnsTheCommonFields(t *testing.T) {
 	}
 
 	h, err = OpenSignal(sender.Sign(payload(me, ts)), me, everyone, now)
-	want = proto.PayloadHeader{Type: "offer", Nonce: testID("offer"), Timestamp: ts, To: me}
+	want = proto.PayloadHeader{Type: "offer", Nonce: proto.ID(testID("offer")), Timestamp: ts, To: me}
 	if err != nil || h != want {
 		t.Errorf("payload addressed to the receiver: got %+v, %v; want %+v", h, err, want)
 	}
@@ -76,7 +76,7 @@ func TestOpenRefusesWithOneCodeInContractOrder(t *testing.T) {
 	junkTampered := junk
 	junkTampered.Payload = "hellp"
 	astray := sender.Sign(payload(other, old))
-	noType := sender.Sign(fmt.Sprintf(`{"n":"x","ts":%d,"to":"%s"}`, old, other))
+	noType := sender.Sign(fmt.Sprintf(`{"n":"%s","ts":%d,"to":"%s"}`, testID("offer"), old, other))
 
 	for name, c := range map[string]struct {
 		env             proto.Envelope
@@ -112,14 +112,15 @@ func TestOpenNeverAsksAboutAnUnverifiedKey(t *testing.T) {
 	}
 }
 
-// Check 3: t and n are strings, ts is an integer, and g and to are strings
-// when they are there. Every payload here is addressed to the receiver and
-// fresh, so what is not bad_request passes both ways.
+// Check 3: t is a string, n an id and ts an integer; g is an id and to a
+// string when they are there. Every payload here is addressed to the receiver
+// and fresh, so what is not bad_request passes both ways.
 func TestOpenReadsTheCommonFields(t *testing.T) {
 	sender, me := testKey("browser"), testKey("node").ID()
-	whole := proto.PayloadHeader{Type: "offer", Nonce: "x", Timestamp: ts, Group: "G1", To: me}
+	n, g, second := testID("n"), testID("g"), testID("second")
+	whole := proto.PayloadHeader{Type: "offer", Nonce: proto.ID(n), Timestamp: ts, Group: proto.ID(g), To: me}
 	fields := func(change func(m map[string]string)) string {
-		m := map[string]string{"t": `"offer"`, "n": `"x"`, "ts": fmt.Sprint(ts), "g": `"G1"`, "to": `"` + me + `"`}
+		m := map[string]string{"t": `"offer"`, "n": `"` + n + `"`, "ts": fmt.Sprint(ts), "g": `"` + g + `"`, "to": `"` + me + `"`}
 		change(m)
 		var parts []string
 		for _, name := range []string{"t", "n", "ts", "g", "to"} {
@@ -141,13 +142,15 @@ func TestOpenReadsTheCommonFields(t *testing.T) {
 	for name, c := range map[string]struct{ p, want string }{
 		"every field":                          {fields(set("", "")), ok(whole)},
 		"no g":                                 {fields(set("g", "")), without(whole, func(h *proto.PayloadHeader) { h.Group = "" })},
-		"an empty t and n":                     {fields(func(m map[string]string) { m["t"], m["n"] = `""`, `""` }), without(whole, func(h *proto.PayloadHeader) { h.Type, h.Nonce = "", "" })},
+		"an empty t":                           {fields(set("t", `""`)), without(whole, func(h *proto.PayloadHeader) { h.Type = "" })},
+		"n and g of sixteen zero bytes":        {fields(func(m map[string]string) { m["n"], m["g"] = `"AAAAAAAAAAAAAAAAAAAAAA"`, `"AAAAAAAAAAAAAAAAAAAAAA"` }), without(whole, func(h *proto.PayloadHeader) { h.Nonce, h.Group = "AAAAAAAAAAAAAAAAAAAAAA", "AAAAAAAAAAAAAAAAAAAAAA" })},
+		"n and g of sixteen bytes of ones":     {fields(func(m map[string]string) { m["n"], m["g"] = `"_____________________w"`, `"_____________________w"` }), without(whole, func(h *proto.PayloadHeader) { h.Nonce, h.Group = "_____________________w", "_____________________w" })},
 		"ts written with a fraction of zero":   {fields(set("ts", fmt.Sprint(ts)+".0")), ok(whole)},
 		"ts written with an exponent":          {fields(set("ts", "1.7636e12")), ok(whole)},
 		"ts written with digits past a double": {fields(set("ts", fmt.Sprint(ts)+".00000000000001")), ok(whole)},
 		"a field the receiver does not know":   {fields(set("more", `,"conn":"c1","extra":[1,{"TS":2}]`)), ok(whole)},
-		"other names in another case":          {fields(set("more", `,"T":"post","N":"y","TS":1,"G":"G2","TO":"other"`)), ok(whole)},
-		"a name twice: the last counts":        {fields(set("more", `,"n":"y"`)), without(whole, func(h *proto.PayloadHeader) { h.Nonce = "y" })},
+		"other names in another case":          {fields(set("more", `,"T":"post","N":"`+second+`","TS":1,"G":"`+second+`","TO":"other"`)), ok(whole)},
+		"a name twice: the last counts":        {fields(set("more", `,"n":"`+second+`"`)), without(whole, func(h *proto.PayloadHeader) { h.Nonce = proto.ID(second) })},
 
 		"no t":                                  {fields(set("t", "")), "bad_request"},
 		"no n":                                  {fields(set("n", "")), "bad_request"},
@@ -157,7 +160,21 @@ func TestOpenReadsTheCommonFields(t *testing.T) {
 		"t a number":                            {fields(set("t", "1")), "bad_request"},
 		"t null":                                {fields(set("t", "null")), "bad_request"},
 		"n a number":                            {fields(set("n", "1")), "bad_request"},
-		"n a list":                              {fields(set("n", `["x"]`)), "bad_request"},
+		"n a list":                              {fields(set("n", `["`+n+`"]`)), "bad_request"},
+		"an empty n":                            {fields(set("n", `""`)), "bad_request"},
+		"n one character short":                 {fields(set("n", `"`+n[:21]+`"`)), "bad_request"},
+		"n one character too long":              {fields(set("n", `"`+n+`A"`)), "bad_request"},
+		"n in a spelling that is not canonical": {fields(set("n", `"`+respelled(n)+`"`)), "bad_request"},
+		"n with padding":                        {fields(set("n", `"`+n+`=="`)), "bad_request"},
+		"n followed by a line break":            {fields(set("n", `"`+n+`\n"`)), "bad_request"},
+		"n in the standard alphabet":            {fields(set("n", `"++++++++++++++++++++/w"`)), "bad_request"},
+		"n the escape of a lone surrogate":      {fields(set("n", `"\ud800"`)), "bad_request"},
+		"n 22 characters outside the alphabet":  {fields(set("n", `"`+strings.Repeat("é", 21)+`w"`)), "bad_request"},
+		"n a device id":                         {fields(set("n", `"`+me+`"`)), "bad_request"},
+		"n twice, the last no id":               {fields(set("more", `,"n":"second"`)), "bad_request"},
+		"an empty g":                            {fields(set("g", `""`)), "bad_request"},
+		"g that is no id":                       {fields(set("g", `"G1"`)), "bad_request"},
+		"g in a spelling that is not canonical": {fields(set("g", `"`+respelled(g)+`"`)), "bad_request"},
 		"ts a text":                             {fields(set("ts", `"`+fmt.Sprint(ts)+`"`)), "bad_request"},
 		"ts with a fraction":                    {fields(set("ts", fmt.Sprint(ts)+".5")), "bad_request"},
 		"ts null":                               {fields(set("ts", "null")), "bad_request"},
@@ -188,8 +205,10 @@ func TestOpenReadsTheCommonFields(t *testing.T) {
 // empty to is a value like any other, and is nobody's device id.
 func TestOpenToMustBeTheReceiver(t *testing.T) {
 	sender, me, other := testKey("browser"), testKey("node").ID(), testKey("tablet").ID()
-	p := func(to string) string { return fmt.Sprintf(`{"t":"x","n":"n1","ts":%d%s}`, ts, to) }
-	h := func(to string) string { return ok(proto.PayloadHeader{Type: "x", Nonce: "n1", Timestamp: ts, To: to}) }
+	p := func(to string) string { return fmt.Sprintf(`{"t":"x","n":"%s","ts":%d%s}`, testID("n1"), ts, to) }
+	h := func(to string) string {
+		return ok(proto.PayloadHeader{Type: "x", Nonce: proto.ID(testID("n1")), Timestamp: ts, To: to})
+	}
 	for name, c := range map[string]struct{ p, signal, command string }{
 		"to the receiver":                     {p(`,"to":"` + me + `"`), h(me), h(me)},
 		"to another device":                   {p(`,"to":"` + other + `"`), "not_for_me", "not_for_me"},
@@ -232,9 +251,9 @@ func TestOpenTimeWindows(t *testing.T) {
 		{"9007199254740991", false, false}, // the largest integer there is on the wire
 		{"-9007199254740991", false, false},
 	} {
-		signal, command := answers(sender.Sign(fmt.Sprintf(`{"t":"x","n":"n1","ts":%s,"to":"%s"}`, c.ts, me)), me, everyone)
+		signal, command := answers(sender.Sign(fmt.Sprintf(`{"t":"x","n":"%s","ts":%s,"to":"%s"}`, testID("n1"), c.ts, me)), me, everyone)
 		passed := func(answer string) bool {
-			if answer != "stale" && answer != "ok {Type:x Nonce:n1 Timestamp:"+c.ts+" Group: To:"+me+"}" {
+			if answer != "stale" && answer != "ok {Type:x Nonce:"+testID("n1")+" Timestamp:"+c.ts+" Group: To:"+me+"}" {
 				t.Errorf("ts %s: answer %s", c.ts, answer)
 			}
 			return answer != "stale"

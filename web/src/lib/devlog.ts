@@ -1,6 +1,6 @@
 // A person's device log (contracts/envelope.md section 4). internal/identity/devlog.go is the Go
 // implementation; both are held to the same test vectors.
-import { isDevice, verifyEnvelope } from './identity';
+import { isDevice, utf8, verifyEnvelope } from './identity';
 import { readEntry, type Entry } from './payload';
 import type { Envelope } from './proto';
 
@@ -115,11 +115,16 @@ function genesis(e: Entry, signer: string, user: string): void {
   if (e.op !== 'add' || e.dev !== user || signer !== user) throw new Refused('genesis');
 }
 
+/** The most bytes the payload of an entry may have, as UTF-8, so that its device row stays within
+ *  the size of a row (section 4, rule 2). */
+const maxEntry = 2048;
+
 /** A signed device-log entry. Entries are replayed long after they were written and are
- *  addressed to nobody, so of the envelope checks only the signature applies. */
+ *  addressed to nobody, so of the envelope checks only the signature applies. dev is a device id
+ *  by its bytes alone: it is never imported as a key, and need not be a point of the curve. */
 async function entry(crypto: Crypto, env: Envelope): Promise<Entry> {
   if (!(await verifyEnvelope(crypto, env))) throw new Refused('bad_sig');
-  const e = readEntry(env.p);
+  const e = utf8(env.p).length > maxEntry ? undefined : readEntry(env.p);
   if (e === undefined || !isDevice(e.dev)) throw new Refused('bad_request');
   return e;
 }
