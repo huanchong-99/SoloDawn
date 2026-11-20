@@ -1,0 +1,855 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0C0F16" />
+    <title>SoloDawn 重建 · 群聊 — SoloDawn 样稿</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="base.css" />
+    <script src="base.js"></script>
+  </head>
+  <body class="app" data-page="chat" data-nav="groups">
+    <a class="skip" href="#line">跳到聊天内容</a>
+
+    <header class="bar">
+      <a class="icon-btn only-narrow" href="groups.html" aria-label="返回群列表"
+        ><svg class="i"><use href="#i-back" /></svg
+      ></a>
+      <div class="bar-title">
+        <h1>SoloDawn 重建</h1>
+        <p><span data-en="Project group">项目群</span> · 3 人 · 5 个 AI · 群的家：Alex的 MacBook</p>
+      </div>
+      <a class="icon-btn side-open" href="#members" aria-label="成员和 AI"
+        ><svg class="i"><use href="#i-users" /></svg
+      ></a>
+    </header>
+
+    <main id="main" class="cols">
+      <!-- 电脑宽屏才出现的群列表栏 -->
+      <aside class="list-col" aria-label="群列表">
+        <nav class="glist">
+          <a class="gitem" href="groups.html"
+            ><span class="gav team"
+              ><svg class="i"><use href="#i-users" /></svg
+            ></span>
+            <span class="gbody"
+              ><b class="cut">团队大群</b
+              ><span class="gprev cut">秘书（官网）：文档站今晚 8 点切换域名</span></span
+            >
+            <span class="gside"><time>10:05</time></span></a
+          >
+          <a class="gitem" href="chat.html" aria-current="page"
+            ><span class="gav" style="--h: 265">重</span>
+            <span class="gbody"
+              ><b class="cut">SoloDawn 重建</b
+              ><span class="gprev cut">秘书：任务说明已发出，等你确认开工</span></span
+            >
+            <span class="gside"
+              ><time>11:44</time
+              ><span class="badge solid count" data-tone="dawn" aria-label="3 件事等你"
+                >3</span
+              ></span
+            ></a
+          >
+          <a class="gitem" href="chat.html"
+            ><span class="gav" style="--h: 160">官</span>
+            <span class="gbody"
+              ><b class="cut">官网与文档</b
+              ><span class="gprev cut">Codex：自建文档第 3 节已提交</span></span
+            >
+            <span class="gside"><time>11:20</time></span></a
+          >
+          <a class="gitem" href="chat.html"
+            ><span class="gav" style="--h: 20">示</span>
+            <span class="gbody"
+              ><b class="cut">「示例项目」</b
+              ><span class="gprev cut">秘书：T-4 已合并，全部任务完成</span></span
+            >
+            <span class="gside"><time>昨天</time></span></a
+          >
+        </nav>
+      </aside>
+
+      <section class="chat" aria-label="主线">
+        <!-- 等你处理：整个群里卡在你这儿的事，点一下跳过去 -->
+        <nav class="needbar" aria-label="等你处理">
+          <b
+            ><svg class="i sm"><use href="#i-alert" /></svg
+            ><span data-en="Waiting on you · 3">等你处理 3</span></b
+          >
+          <a href="#ap-1">审批 · Codex 要装依赖</a>
+          <a href="#dc-1">拍板 · 中继提示放哪</a>
+          <a href="#brief-2">确认开工 · 保留天数</a>
+        </nav>
+
+        <div class="line" id="line" tabindex="-1">
+          <p class="sep">今天 · 11 月 20 日</p>
+
+          <!-- 完成总结 -->
+          <article class="msg">
+            <span class="av ai sec"
+              ><svg><use href="#b-claude" /></svg
+            ></span>
+            <p class="msg-head">
+              <b>秘书</b><span class="badge" data-en="Secretary AI">秘书 AI</span><time>09:58</time>
+            </p>
+            <div class="msg-body">
+              <section class="card">
+                <header class="card-head">
+                  <svg class="i" style="color: var(--ok)"><use href="#i-check" /></svg
+                  ><span class="kind" data-en="Done">完成总结</span><span class="mono">T-9</span
+                  ><span class="badge" data-tone="ok" data-en="Merged">已合并</span>
+                </header>
+                <h3>引导页提示词与配对流程</h3>
+                <p>
+                  把提示词发给 AI 就能装好节点并配对。安装时会核对 SHA-256，配对码 10
+                  分钟过期。三条验收标准全部通过。
+                </p>
+                <ul class="stats">
+                  <li><b>94</b><span data-en="Review score">评审得分</span></li>
+                  <li><b>2 轮</b><span data-en="Review rounds">评审</span></li>
+                  <li><b>1 小时 12 分</b><span data-en="Time spent">用时</span></li>
+                  <li><b class="mono">+318 −42</b>PR #28</li>
+                </ul>
+                <details class="fold">
+                  <summary>
+                    <svg class="i sm"><use href="#i-chev" /></svg><b>话题 · 21 条</b
+                    ><span class="cut">Claude Code 做，Gemini（API key）评审，已归档</span>
+                  </summary>
+                  <div class="fold-body muted">（样稿里省略了这段话题的内容）</div>
+                </details>
+              </section>
+            </div>
+          </article>
+
+          <!-- 需求 -->
+          <article class="msg">
+            <span class="av" style="--h: 40">A</span>
+            <p class="msg-head">
+              <b>Alex</b><span class="badge" data-en="You">你</span><time>10:36</time>
+            </p>
+            <div class="msg-body">
+              <p>
+                <span class="at">@秘书</span>
+                网页客户端要能看出现在是直连还是走中继。走中继的时候提示速度和流量受限，后台打通直连以后自动切回来，提示也跟着撤掉。
+              </p>
+            </div>
+          </article>
+
+          <!-- 任务说明卡（已确认，收起）+ 两张任务卡片 -->
+          <article class="msg">
+            <span class="av ai sec"
+              ><svg><use href="#b-claude" /></svg
+            ></span>
+            <p class="msg-head">
+              <b>秘书</b><span class="badge" data-en="Secretary AI">秘书 AI</span><time>10:38</time>
+            </p>
+            <div class="msg-body">
+              <section class="card">
+                <header class="card-head">
+                  <svg class="i"><use href="#i-doc" /></svg
+                  ><span class="kind" data-en="Task brief">任务说明</span
+                  ><span class="badge" data-tone="ok"
+                    ><svg class="i sm"><use href="#i-check" /></svg>Alex 已确认开工 · 10:41</span
+                  >
+                </header>
+                <h3>显示连接方式，中继时提示受限</h3>
+                <details class="fold">
+                  <summary>
+                    <svg class="i sm"><use href="#i-chev" /></svg
+                    ><b data-en="Goal, acceptance, scope, split">目标、验收标准、范围、拆分</b>
+                  </summary>
+                  <dl class="kv wide fold-body">
+                    <dt>目标</dt>
+                    <dd>
+                      网页客户端实时显示连接方式（直连 /
+                      中继）；走中继时提示受限，打通直连后自动切回并撤掉提示。
+                    </dd>
+                    <dt>验收标准</dt>
+                    <dd>
+                      <ol class="num">
+                        <li>连接方式变化后 1 秒内，指示跟着变。</li>
+                        <li>走中继时能看到「速度和流量受限」。</li>
+                        <li>直连恢复后 5 秒内切回，提示消失。</li>
+                        <li>节点和网页两边都有测试，项目检查命令全部通过。</li>
+                      </ol>
+                    </dd>
+                    <dt>范围</dt>
+                    <dd>
+                      <p><span class="pill-do">做</span>节点的连接方式事件、网页的状态指示。</p>
+                      <p><span class="pill-dont">不做</span>中继服务本身、流量统计页面。</p>
+                    </dd>
+                  </dl>
+                </details>
+              </section>
+
+              <p>已确认，开工。拆成两个任务，做完互相评审：</p>
+
+              <!-- 任务卡片：进行中，话题展开 -->
+              <section class="card" id="t-12">
+                <header class="card-head">
+                  <span class="mono">T-12</span>
+                  <h3>节点：上报连接方式变化</h3>
+                  <span class="badge" data-tone="sky"
+                    ><span class="st" data-st="working"><i></i></span>进行中 · 修评审意见</span
+                  >
+                </header>
+                <div class="steps" role="img" aria-label="进度：共 6 步，现在在第 5 步「评审」">
+                  <i data-s="done" title="开工"></i><i data-s="done" title="本机检查"></i
+                  ><i data-s="done" title="开 PR"></i><i data-s="done" title="云端检查"></i
+                  ><i data-s="now" title="评审"></i><i title="合并"></i><span>评审 · 5 / 6</span>
+                </div>
+                <dl class="kv">
+                  <dt data-en="Owner">谁在做</dt>
+                  <dd>
+                    <span class="who"
+                      ><span class="av ai sm"
+                        ><svg><use href="#b-claude" /></svg></span
+                      >Claude Code <span class="muted">· Alex的 MacBook</span></span
+                    >
+                  </dd>
+                  <dt data-en="Branch">分支</dt>
+                  <dd><code>task/12-conn-events</code> <span class="muted">· PR #31</span></dd>
+                  <dt data-en="Checks">检查</dt>
+                  <dd>
+                    <span class="res" data-tone="ok"
+                      ><svg class="i sm"><use href="#i-check" /></svg>本机检查</span
+                    ><span class="res" data-tone="ok"
+                      ><svg class="i sm"><use href="#i-check" /></svg>云端检查</span
+                    ><span class="muted">42 项测试</span>
+                  </dd>
+                  <dt data-en="Review">评审</dt>
+                  <dd>
+                    <span class="res" data-tone="danger"
+                      ><svg class="i sm"><use href="#i-x" /></svg>第 1 轮 86 分，打回</span
+                    ><span class="muted">Gemini（API key）评 · 及格 90</span>
+                  </dd>
+                </dl>
+
+                <details class="fold" open>
+                  <summary>
+                    <svg class="i sm"><use href="#i-chev" /></svg><b>话题 · 7 条</b
+                    ><span class="cut grow">最新：Claude Code 正在补「切回直连后发事件」</span
+                    ><span class="badge only-wide">AI 来回 3 / 10 轮</span>
+                  </summary>
+                  <ol class="tlist">
+                    <li class="ti">
+                      <span class="av ai sm"
+                        ><svg><use href="#b-claude" /></svg
+                      ></span>
+                      <div>
+                        <p class="ti-head">
+                          <b>Claude Code</b><span class="badge">进度</span><time>10:44</time>
+                        </p>
+                        <p>
+                          已开分支，读完 <code>node/conn</code>。计划：加连接方式事件 →
+                          中继切回直连时补发 → 写测试。
+                        </p>
+                      </div>
+                    </li>
+
+                    <!-- AI 调用另一个 AI：发起和回复都以消息形式留在话题里 -->
+                    <li class="ti">
+                      <span class="av ai sm"
+                        ><svg><use href="#b-claude" /></svg
+                      ></span>
+                      <div>
+                        <p class="ti-head">
+                          <b>Claude Code</b><span class="badge" data-tone="sky">调用</span
+                          ><time>11:02</time>
+                        </p>
+                        <div class="call">
+                          <p class="call-route">
+                            Claude Code<svg class="i sm"><use href="#i-arrow" /></svg>Codex<span
+                              class="muted"
+                              >当场等结果 · 用时 38 秒 · 调用第 1 层</span
+                            >
+                          </p>
+                          <p>
+                            <span class="at">@Codex</span>
+                            你做网页那边，订阅连接事件时要哪些字段？我现在给
+                            <code>path</code>、<code>rtt_ms</code>、<code>since</code>。
+                          </p>
+                          <div class="reply">
+                            <span class="av ai sm"
+                              ><svg><use href="#b-openai" /></svg
+                            ></span>
+                            <p>
+                              <b>Codex</b>　加一个
+                              <code>limited</code>（布尔），网页就不用自己判断是不是中继；<code
+                                >rtt_ms</code
+                              >
+                              在中继时可以留空。
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </li>
+
+                    <li class="ti">
+                      <span class="av ai sm"
+                        ><svg><use href="#b-claude" /></svg
+                      ></span>
+                      <div>
+                        <p class="ti-head">
+                          <b>Claude Code</b><span class="badge" data-tone="ok">完成报告</span
+                          ><time>11:15</time>
+                        </p>
+                        <p>
+                          PR #31 已开，改了 4 个文件，<code>+212 −18</code>。事件字段按 Codex
+                          说的加了 <code>limited</code>。
+                        </p>
+                      </div>
+                    </li>
+
+                    <li class="ti sys">
+                      <svg class="i sm" style="color: var(--ok)"><use href="#i-check" /></svg>
+                      <p>
+                        本机检查、云端检查通过 · <code>go vet</code>、<code>go test</code>（42
+                        项）、密钥扫描 · 11:19
+                      </p>
+                    </li>
+
+                    <li class="ti">
+                      <span class="av ai sm"
+                        ><svg><use href="#b-gemini" /></svg
+                      ></span>
+                      <div>
+                        <p class="ti-head">
+                          <b>Gemini（API key）</b
+                          ><span class="badge" data-tone="danger">评审 · 打回</span
+                          ><time>11:27</time>
+                        </p>
+                        <div class="review" data-tone="danger">
+                          <div class="score"><b>86</b>及格 90</div>
+                          <ul class="bul">
+                            <li>
+                              切回直连后没有补发事件（<code>conn/switch.go:88</code>），验收标准第 3
+                              条不满足。
+                            </li>
+                            <li><code>rtt_ms</code> 在中继时恒为 0，应该留空。</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </li>
+
+                    <li class="ti">
+                      <span class="av ai sm"
+                        ><svg><use href="#b-claude" /></svg
+                      ></span>
+                      <div>
+                        <p class="ti-head">
+                          <b>Claude Code</b><span class="badge">进度</span><time>11:33</time>
+                        </p>
+                        <p>
+                          收到。第 1 条确实漏了：切换回调里没发事件。正在补，并加测试
+                          <code>TestSwitchBackEmits</code>。
+                        </p>
+                      </div>
+                    </li>
+
+                    <li class="ti sys">
+                      <span class="typing" aria-hidden="true"><i></i><i></i><i></i></span>
+                      <p>Claude Code 正在干活，已经 6 分钟</p>
+                    </li>
+                  </ol>
+                </details>
+              </section>
+
+              <!-- 任务卡片：卡在审批上，话题收起 -->
+              <section class="card" id="t-13">
+                <header class="card-head">
+                  <span class="mono">T-13</span>
+                  <h3>网页：连接状态指示与受限提示</h3>
+                  <span class="badge solid" data-tone="dawn">等你审批</span>
+                </header>
+                <div
+                  class="steps"
+                  role="img"
+                  aria-label="进度：共 6 步，卡在第 2 步「本机检查」，等你审批"
+                >
+                  <i data-s="done" title="开工"></i><i data-s="wait" title="本机检查"></i
+                  ><i title="开 PR"></i><i title="云端检查"></i><i title="评审"></i
+                  ><i title="合并"></i><span>本机检查 · 2 / 6</span>
+                </div>
+                <dl class="kv">
+                  <dt data-en="Owner">谁在做</dt>
+                  <dd>
+                    <span class="who"
+                      ><span class="av ai sm"
+                        ><svg><use href="#b-openai" /></svg></span
+                      >Codex <span class="muted">· Alex的 Windows</span></span
+                    >
+                  </dd>
+                  <dt data-en="Branch">分支</dt>
+                  <dd><code>task/13-conn-indicator</code></dd>
+                  <dt data-en="Checks">检查</dt>
+                  <dd>
+                    <span class="muted">还没跑：测试要用的浏览器没装，</span
+                    ><a href="#ap-1">等你审批</a>
+                  </dd>
+                  <dt data-en="Review">评审</dt>
+                  <dd><span class="muted">未开始 · 将由 Claude Code 评</span></dd>
+                </dl>
+                <details class="fold">
+                  <summary>
+                    <svg class="i sm"><use href="#i-chev" /></svg><b>话题 · 4 条</b
+                    ><span class="cut grow">最新：Codex 申请安装 Playwright</span>
+                  </summary>
+                  <ol class="tlist">
+                    <li class="ti">
+                      <span class="av ai sm"
+                        ><svg><use href="#b-openai" /></svg
+                      ></span>
+                      <div>
+                        <p class="ti-head">
+                          <b>Codex</b><span class="badge">进度</span><time>10:47</time>
+                        </p>
+                        <p>已开分支。指示组件写完了，三种状态：直连、中继（受限）、重连中。</p>
+                      </div>
+                    </li>
+                    <li class="ti">
+                      <span class="av ai sm"
+                        ><svg><use href="#b-openai" /></svg
+                      ></span>
+                      <div>
+                        <p class="ti-head">
+                          <b>Codex</b><span class="badge">提问</span><time>11:10</time>
+                        </p>
+                        <p>
+                          <span class="at">@秘书</span>
+                          中继时的提示放顶栏常驻，还是只标在连接指示上？两种都能做，需要定一个。
+                        </p>
+                      </div>
+                    </li>
+                    <li class="ti">
+                      <span class="av ai sec sm"
+                        ><svg><use href="#b-claude" /></svg
+                      ></span>
+                      <div>
+                        <p class="ti-head"><b>秘书</b><time>11:12</time></p>
+                        <p>
+                          这是产品取舍，我去主线请
+                          <span class="at">@Alex</span> 拍板。你先做不受影响的部分。
+                        </p>
+                      </div>
+                    </li>
+                    <li class="ti">
+                      <span class="av ai sm"
+                        ><svg><use href="#b-openai" /></svg
+                      ></span>
+                      <div>
+                        <p class="ti-head">
+                          <b>Codex</b><span class="badge" data-tone="dawn">审批申请</span
+                          ><time>11:35</time>
+                        </p>
+                        <p>
+                          验收标准第 1、3 条要在真实浏览器里计时，需要安装
+                          Playwright。已停下等批准。
+                        </p>
+                      </div>
+                    </li>
+                  </ol>
+                </details>
+              </section>
+            </div>
+          </article>
+
+          <!-- 审批卡片：你是电脑主人，可以点 -->
+          <article class="msg">
+            <span class="av ai sec"
+              ><svg><use href="#b-claude" /></svg
+            ></span>
+            <p class="msg-head">
+              <b>秘书</b><span class="badge" data-en="Secretary AI">秘书 AI</span><time>11:36</time>
+            </p>
+            <div class="msg-body">
+              <p><span class="at">@Alex</span> 你的 Codex 想做一件超出权限的事，需要你点头：</p>
+              <section class="card need" id="ap-1">
+                <header class="card-head">
+                  <svg class="i"><use href="#i-shield" /></svg
+                  ><span class="kind" data-en="Approval">审批申请</span
+                  ><span class="badge">越界操作 · 安装软件</span
+                  ><span class="badge solid" data-tone="dawn" data-en="Needs you">等你审批</span>
+                </header>
+                <dl class="kv wide">
+                  <dt data-en="Who">哪个 AI</dt>
+                  <dd>
+                    <span class="who"
+                      ><span class="av ai sm"
+                        ><svg><use href="#b-openai" /></svg></span
+                      >Codex
+                      <span class="muted">· Alex的 Windows（你的电脑）· 任务 T-13</span></span
+                    >
+                  </dd>
+                  <dt data-en="Wants to">想做什么</dt>
+                  <dd>
+                    <pre class="cmd">
+pnpm add -D @playwright/test
+pnpm exec playwright install chromium</pre>
+                    <p class="muted" style="margin-top: 4px">
+                      会下载约 180 MB，装到工作区以外的缓存目录。
+                    </p>
+                  </dd>
+                  <dt data-en="Why">为什么</dt>
+                  <dd>
+                    验收标准第 1、3 条要求「1 秒内变」「5
+                    秒内切回」，得在真实浏览器里计时，现有的单元测试测不出来。
+                  </dd>
+                </dl>
+                <footer class="card-foot">
+                  <button class="btn btn-dawn">
+                    <svg class="i sm"><use href="#i-check" /></svg
+                    ><span data-en="Approve">批准</span>
+                  </button>
+                  <button class="btn" data-en="Deny">拒绝</button>
+                  <span class="hint">只批这一次 · T-13 已挂起 8 分钟</span>
+                </footer>
+              </section>
+            </div>
+          </article>
+
+          <!-- 请拍板 -->
+          <article class="msg">
+            <span class="av ai sec"
+              ><svg><use href="#b-claude" /></svg
+            ></span>
+            <p class="msg-head">
+              <b>秘书</b><span class="badge" data-en="Secretary AI">秘书 AI</span><time>11:38</time>
+            </p>
+            <div class="msg-body">
+              <section class="card need" id="dc-1">
+                <header class="card-head">
+                  <svg class="i"><use href="#i-fork" /></svg
+                  ><span class="kind" data-en="Your call">请你拍板</span
+                  ><span class="badge solid" data-tone="dawn" data-en="Needs you">等你拍板</span>
+                </header>
+                <h3>走中继时，「受限」的提示放在哪？</h3>
+                <p>Codex 两种都能做，工作量差不多。这是产品取舍，我不替你定。</p>
+                <div class="opts">
+                  <button class="opt">
+                    <b>A · 顶栏下面常驻一行</b>最显眼。但一直走中继的人会一直看到这条横幅。
+                  </button>
+                  <button class="opt">
+                    <b>B · 只标在连接指示上</b>指示变成暖色并写「中继 ·
+                    受限」，点开才看详情。不打扰，但容易被忽略。<span class="badge">秘书建议</span>
+                  </button>
+                </div>
+                <p class="hint">T-13 的界面部分在等这个决定 · 也可以直接回复你的想法</p>
+              </section>
+            </div>
+          </article>
+
+          <!-- 审批卡片：别人电脑上的 AI，你只能看 -->
+          <article class="msg">
+            <span class="av ai sec"
+              ><svg><use href="#b-claude" /></svg
+            ></span>
+            <p class="msg-head">
+              <b>秘书</b><span class="badge" data-en="Secretary AI">秘书 AI</span><time>11:40</time>
+            </p>
+            <div class="msg-body">
+              <p><span class="at">@Mina</span> 你的 Claude Code 需要你批准：</p>
+              <section class="card" id="ap-2">
+                <header class="card-head">
+                  <svg class="i"><use href="#i-shield" /></svg
+                  ><span class="kind" data-en="Approval">审批申请</span
+                  ><span class="badge">越界操作 · 推送代码</span
+                  ><span class="badge">等 Mina 审批</span>
+                </header>
+                <dl class="kv wide">
+                  <dt data-en="Who">哪个 AI</dt>
+                  <dd>
+                    <span class="who"
+                      ><span class="av ai sm"
+                        ><svg><use href="#b-claude" /></svg></span
+                      >Claude Code <span class="muted">· Mina的 MacBook · 任务 T-11</span></span
+                    >
+                  </dd>
+                  <dt data-en="Wants to">想做什么</dt>
+                  <dd><pre class="cmd">git push origin task/11-selfhost-docs</pre></dd>
+                  <dt data-en="Why">为什么</dt>
+                  <dd>自建文档已通过本机检查，开 PR 之前要先把分支推上去。</dd>
+                </dl>
+                <footer class="card-foot">
+                  <button class="btn" disabled data-en="Approve">批准</button>
+                  <button class="btn" disabled data-en="Deny">拒绝</button>
+                  <span class="hint"
+                    ><svg class="i sm"><use href="#i-lock" /></svg>只有电脑的主人 Mina 能批 ·
+                    秘书已提醒 · 等了 4 分钟</span
+                  >
+                </footer>
+              </section>
+            </div>
+          </article>
+
+          <article class="msg">
+            <span class="av" style="--h: 160">M</span>
+            <p class="msg-head"><b>Mina</b><time>11:41</time></p>
+            <div class="msg-body"><p>在开会，十分钟后回来批。</p></div>
+          </article>
+
+          <article class="msg">
+            <span class="av" style="--h: 40">A</span>
+            <p class="msg-head">
+              <b>Alex</b><span class="badge" data-en="You">你</span><time>11:43</time>
+            </p>
+            <div class="msg-body">
+              <p>
+                <span class="at">@秘书</span> 另外，设置里要能改本地数据保留多少天，默认 90 天。
+              </p>
+            </div>
+          </article>
+
+          <!-- 任务说明卡：等你确认开工 -->
+          <article class="msg">
+            <span class="av ai sec"
+              ><svg><use href="#b-claude" /></svg
+            ></span>
+            <p class="msg-head">
+              <b>秘书</b><span class="badge" data-en="Secretary AI">秘书 AI</span><time>11:44</time>
+            </p>
+            <div class="msg-body">
+              <p>需求清楚，不用追问。这是任务说明，你确认了我再派活：</p>
+              <section class="card need" id="brief-2">
+                <header class="card-head">
+                  <svg class="i"><use href="#i-doc" /></svg
+                  ><span class="kind" data-en="Task brief">任务说明</span
+                  ><span class="badge solid" data-tone="dawn" data-en="Needs you">等你确认</span>
+                </header>
+                <h3>设置里可以改「本地数据保留天数」</h3>
+                <dl class="kv wide">
+                  <dt data-en="Goal">目标</dt>
+                  <dd>
+                    每台电脑的主人可以在设置里改本机数据保留多少天，默认 90 天，按天滚动清理。
+                  </dd>
+                  <dt data-en="Acceptance">验收标准</dt>
+                  <dd>
+                    <ol class="num">
+                      <li>默认值是 90 天；可以改成 7 到 365 天之间的整数。</li>
+                      <li>改小以后，超出的旧数据在下一次每日清理时删除，删之前有一次确认。</li>
+                      <li>审计记录按同一个保留期清理。</li>
+                      <li>项目检查命令全部通过。</li>
+                    </ol>
+                  </dd>
+                  <dt data-en="Scope">范围</dt>
+                  <dd>
+                    <p><span class="pill-do">做</span>设置页的输入、节点的每日清理、确认弹窗。</p>
+                    <p><span class="pill-dont">不做</span>「永久保留」选项、按群分别设置。</p>
+                  </dd>
+                  <dt data-en="Split">拆分</dt>
+                  <dd>
+                    <ul class="split">
+                      <li>
+                        <span class="mono">T-14</span
+                        ><span class="grow">节点：按保留期每日清理</span
+                        ><span class="who muted"
+                          ><span class="av ai sm"
+                            ><svg><use href="#b-claude" /></svg></span
+                          >Claude Code</span
+                        >
+                      </li>
+                      <li>
+                        <span class="mono">T-15</span
+                        ><span class="grow">网页：设置项与确认弹窗</span
+                        ><span class="who muted"
+                          ><span class="av ai sm"
+                            ><svg><use href="#b-openai" /></svg></span
+                          >Codex</span
+                        >
+                      </li>
+                      <li>
+                        <span class="mono muted">评审</span
+                        ><span class="grow muted">两个任务交叉评审，及格 90 分</span>
+                      </li>
+                    </ul>
+                  </dd>
+                </dl>
+                <footer class="card-foot">
+                  <button class="btn btn-dawn">
+                    <svg class="i sm"><use href="#i-check" /></svg
+                    ><span data-en="Confirm &amp; start">确认开工</span>
+                  </button>
+                  <button class="btn" data-en="Change it">要改一下</button>
+                  <span class="hint" data-en="Nothing starts until you confirm"
+                    >你确认之前，谁都不会动手</span
+                  >
+                </footer>
+              </section>
+            </div>
+          </article>
+        </div>
+
+        <div class="composer">
+          <form onsubmit="return false;">
+            <button type="button" class="icon-btn" aria-label="@ 一位成员或 AI">
+              <svg class="i"><use href="#i-at" /></svg>
+            </button>
+            <textarea
+              rows="1"
+              aria-label="发消息"
+              placeholder="发需求给 @秘书，或者直接 @ 你自己的 AI"
+            ></textarea>
+            <button class="btn btn-primary" aria-label="发送">
+              <svg class="i"><use href="#i-send" /></svg>
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <!-- 成员栏：电脑上常驻；手机和平板上点右上角的成员按钮打开 -->
+      <aside class="side" id="members" aria-label="成员和 AI">
+        <div class="row">
+          <h2 class="sec-title grow">AI · 5</h2>
+          <a class="btn btn-sm btn-ghost side-close" href="#main">关闭</a>
+        </div>
+
+        <section class="card member">
+          <header class="row">
+            <span class="av ai sec lg"
+              ><svg><use href="#b-claude" /></svg
+            ></span>
+            <div class="grow">
+              <h3>秘书</h3>
+              <p class="st" data-st="needyou"><i></i>等待中 · 等你处理 3 件事</p>
+            </div>
+          </header>
+          <dl class="kv">
+            <dt>电脑</dt>
+            <dd>Alex的 MacBook <span class="muted">· 群的家</span></dd>
+            <dt>账号</dt>
+            <dd>个人订阅 <span class="muted">· 只听主人的</span></dd>
+          </dl>
+          <div class="meter" style="--v: 18%"><span>这一轮额度已用</span><b>18%</b><i></i></div>
+          <footer class="card-foot">
+            <a class="btn btn-sm" href="terminal.html"
+              ><svg class="i sm"><use href="#i-terminal" /></svg>打开终端</a
+            >
+          </footer>
+        </section>
+
+        <section class="card member">
+          <header class="row">
+            <span class="av ai lg"
+              ><svg><use href="#b-claude" /></svg
+            ></span>
+            <div class="grow">
+              <h3>Claude Code</h3>
+              <p class="st" data-st="working"><i></i>干活中 · T-12 修评审意见</p>
+            </div>
+          </header>
+          <dl class="kv">
+            <dt>电脑</dt>
+            <dd>Alex的 MacBook <span class="muted">· 直连</span></dd>
+            <dt>账号</dt>
+            <dd>个人订阅 <span class="muted">· 只听主人的</span></dd>
+          </dl>
+          <div class="meter" style="--v: 62%">
+            <span>这一轮额度已用</span><b>62%</b><i></i><small>15:00 重置 · 今天上限 80%</small>
+          </div>
+          <footer class="card-foot">
+            <a class="btn btn-sm" href="terminal.html"
+              ><svg class="i sm"><use href="#i-terminal" /></svg>打开终端</a
+            >
+          </footer>
+        </section>
+
+        <section class="card member">
+          <header class="row">
+            <span class="av ai lg"
+              ><svg><use href="#b-openai" /></svg
+            ></span>
+            <div class="grow">
+              <h3>Codex</h3>
+              <p class="st" data-st="needyou"><i></i>等待中 · T-13 等你审批</p>
+            </div>
+          </header>
+          <dl class="kv">
+            <dt>电脑</dt>
+            <dd>Alex的 Windows <span class="muted">· 中继，受限</span></dd>
+            <dt>账号</dt>
+            <dd>个人订阅 <span class="muted">· 只听主人的</span></dd>
+          </dl>
+          <div class="meter" style="--v: 35%"><span>这一轮额度已用</span><b>35%</b><i></i></div>
+          <footer class="card-foot">
+            <button class="btn btn-sm" disabled>
+              <svg class="i sm"><use href="#i-terminal" /></svg>打开终端</button
+            ><span class="hint">终端画面只走直连</span>
+          </footer>
+        </section>
+
+        <section class="card member">
+          <header class="row">
+            <span class="av ai lg"
+              ><svg><use href="#b-claude" /></svg
+            ></span>
+            <div class="grow">
+              <h3>Claude Code <span class="muted" style="font-weight: 400">· Mina</span></h3>
+              <p class="st" data-st="waiting"><i></i>等待中 · T-11 等 Mina 审批</p>
+            </div>
+          </header>
+          <dl class="kv">
+            <dt>电脑</dt>
+            <dd>Mina的 MacBook <span class="muted">· 直连</span></dd>
+            <dt>账号</dt>
+            <dd>团队方案 <span class="muted">· 已授权本群成员</span></dd>
+          </dl>
+          <div class="meter" style="--v: 44%"><span>这一轮额度已用</span><b>44%</b><i></i></div>
+          <footer class="card-foot">
+            <button class="btn btn-sm">
+              <svg class="i sm"><use href="#i-eye" /></svg>请求旁观</button
+            ><span class="hint">只有主人能接管</span>
+          </footer>
+        </section>
+
+        <section class="card member">
+          <header class="row">
+            <span class="av ai lg"
+              ><svg><use href="#b-gemini" /></svg
+            ></span>
+            <div class="grow">
+              <h3>Gemini（API key） <span class="muted" style="font-weight: 400">· Sam</span></h3>
+              <p class="st" data-st="sleeping"><i></i>休眠 · 被 @ 时自动醒来</p>
+            </div>
+          </header>
+          <dl class="kv">
+            <dt>电脑</dt>
+            <dd>Sam 的 Linux <span class="muted">· 直连</span></dd>
+            <dt>账号</dt>
+            <dd>API key <span class="muted">· 已授权本群成员</span></dd>
+          </dl>
+          <div class="meter" style="--v: 32%"><span>今天花费</span><b>$3.20 / $10</b><i></i></div>
+          <footer class="card-foot">
+            <button class="btn btn-sm">
+              <svg class="i sm"><use href="#i-eye" /></svg>请求旁观
+            </button>
+          </footer>
+        </section>
+
+        <h2 class="sec-title" style="margin-top: 8px">人 · 3</h2>
+        <ul class="glist" style="padding: 0">
+          <li class="row" style="padding: 6px 0">
+            <span class="av" style="--h: 40">A</span
+            ><span class="grow">Alex <span class="muted">· 你 · 群主</span></span
+            ><span class="st" data-st="ok"><i></i>在线</span>
+          </li>
+          <li class="row" style="padding: 6px 0">
+            <span class="av" style="--h: 160">M</span><span class="grow">Mina</span
+            ><span class="st" data-st="ok"><i></i>在线</span>
+          </li>
+          <li class="row" style="padding: 6px 0">
+            <span class="av" style="--h: 320">S</span><span class="grow">Sam</span
+            ><span class="st" data-st="offline"><i></i>3 小时前</span>
+          </li>
+        </ul>
+      </aside>
+    </main>
+  </body>
+</html>
