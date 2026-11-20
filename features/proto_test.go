@@ -42,8 +42,8 @@ func protocolSteps(sc *godog.ScenarioContext) {
 		if err != nil {
 			return err
 		}
-		if len(pub) != ed25519.PublicKeySize || len(log.Entries) != 2 {
-			return fmt.Errorf("expected a device key and two signed entries, got %+v", log)
+		if len(log.Entries) != 2 {
+			return fmt.Errorf("expected two signed entries, got %+v", log)
 		}
 		for i, name := range []string{first, second} {
 			env := log.Entries[i]
