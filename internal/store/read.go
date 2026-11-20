@@ -51,9 +51,9 @@ func (v *Snapshot) PageThread(thread *string, before int64, limit int) ([]json.R
 
 // PageKind reads notes ("note") or the review ledger ("review").
 func (v *Snapshot) PageKind(kind string, before int64, limit int) ([]json.RawMessage, error) {
-	return v.rows(`SELECT data FROM row WHERE g=? AND keep=1 AND pos<?
-		AND (CASE r WHEN 'note' THEN 'note' ELSE 'review' END)=?
-		ORDER BY pos DESC LIMIT ?`, v.group, before, kind, limit)
+	return v.rows(`SELECT data FROM row WHERE g=? AND keep=1
+		AND r=CASE ? WHEN 'note' THEN 'note' WHEN 'review' THEN 'msg' END
+		AND pos<? ORDER BY pos DESC LIMIT ?`, v.group, kind, before, limit)
 }
 
 func (v *Snapshot) rows(query string, args ...any) ([]json.RawMessage, error) {
