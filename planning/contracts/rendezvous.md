@@ -186,9 +186,8 @@ the review of section 5.1 measured. "Evidence n" is entry n of
   TCP signalling listener and the passive ICE-TCP listener. It publishes the
   external TCP signalling port in the signalling URL and each mapped ICE
   endpoint only for the socket it serves (section 5.1, point 8). pion's
-  address rewrite rule has no external-port field. Router mapping is
-  `[unverified]`: S-8 verifies publication and reachability when a router
-  grants a different port.
+  address rewrite rule has no external-port field. S-8 verifies publication
+  and reachability when a router grants a different port `[unverified]`.
 - Queries the `.local` names that browsers give instead of their host
   addresses (`SetICEMulticastDNSMode`, query only). A name that does not
   resolve is no obstacle: in S-1 the connections used the browser's
