@@ -16,6 +16,11 @@ page. A file-backed WAL reader does not
 block new writes; the single-connection in-memory database must release its
 snapshot before another transaction can run.
 
+`home_reads.go` holds what the run loop of a home needs inside a `Write`: `Groups`,
+`StateRows` and `Counters` to load a group, `Row`, `Thread`, `Pending` and `Queued` for
+what a rule reads from disk, and `RaiseNum` and `Retire`. A read there sees what its
+own transaction wrote, and never waits for the writer, which it runs on.
+
 `Retain` is the daily transaction's cleanup operation, not a scheduler.
 See [storage](../../planning/contracts/storage.md) and
 [rows](../../planning/contracts/rows.md) for the schema and wire formats.
