@@ -1,11 +1,17 @@
+//go:build netsim
+
 // Package netsim builds isolated IPv4 networks for Linux integration tests.
+//
+// It is compiled only with the build tag "netsim" and needs root (CAP_SYS_ADMIN
+// and CAP_NET_ADMIN) and the commands ip, nft, sysctl and sh; StartUPnP also
+// needs miniupnpd (nftables backend), ss and timeout. A missing privilege or
+// command fails the test with the failing command and its output.
 package netsim
 
 import (
 	"crypto/rand"
 	_ "embed"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -35,6 +41,7 @@ type Network struct {
 	Left, Right Peer
 }
 
+// Peer is one client namespace behind its own gateway namespace.
 type Peer struct {
 	Client, Gateway string // namespace names
 	PublicIP        string // address of the WAN-facing gateway interface
@@ -43,61 +50,27 @@ type Peer struct {
 //go:embed gateway.sh
 var gatewayScript string
 
-func require(t testing.TB, uid int, names ...string) {
-	t.Helper()
-	if uid != 0 {
-		t.Skip("netsim requires root to create Linux network namespaces")
-	}
-	for _, name := range names {
-		if _, err := exec.LookPath(name); err != nil {
-			t.Skipf("netsim requires %s: %v", name, err)
-		}
-	}
-}
-
 func run(t testing.TB, input string, args ...string) {
 	t.Helper()
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdin = strings.NewReader(input)
 	cmd.Stdout, cmd.Stderr = t.Output(), t.Output()
-	checkCommand(t, cmd, cmd.Run())
-}
-
-func checkCommand(t testing.TB, cmd *exec.Cmd, err error) {
-	t.Helper()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		t.Fatalf("netsim %v: %v", cmd.Args, err)
 	}
-}
-
-// A container may have UID 0 without permission to create or configure a netns.
-func namespaceIP(t testing.TB, args ...string) {
-	t.Helper()
-	cmd := exec.Command("ip", args...)
-	cmd.Env = append(os.Environ(), "LC_ALL=C")
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		return
-	}
-	msg := strings.TrimSpace(string(out))
-	if strings.Contains(msg, "Operation not permitted") || strings.Contains(msg, "Permission denied") {
-		t.Skipf("netsim requires namespace and network administration privileges: %s", msg)
-	}
-	t.Fatalf("netsim %v: %v: %s", cmd.Args, err, msg)
 }
 
 // Start creates two single-client NATs and a routed WAN. All namespaces and
 // links are removed when the test ends, including after partial setup.
 func Start(t testing.TB, left, right NAT) Network {
 	t.Helper()
-	require(t, os.Geteuid(), "ip", "nft", "sysctl", "sh")
 	prefix := "netsim-" + rand.Text() + "-"
 	ns := func(name string) string {
 		t.Helper()
 		name = prefix + name
-		namespaceIP(t, "netns", "add", name)
+		run(t, "", "ip", "netns", "add", name)
 		t.Cleanup(func() { run(t, "", "ip", "netns", "delete", name) })
-		namespaceIP(t, "-n", name, "link", "set", "lo", "up")
+		run(t, "", "ip", "-n", name, "link", "set", "lo", "up")
 		return name
 	}
 
@@ -137,14 +110,15 @@ func (n Network) SetBlocked(t testing.TB, udp bool, iceTCP uint16) {
 // IGD and NAT-PMP available to its LAN. Its process belongs to the test.
 func (p Peer) StartUPnP(t testing.TB) {
 	t.Helper()
-	require(t, os.Geteuid(), "miniupnpd", "ss", "timeout")
 	dir := t.TempDir()
 	cmd := exec.CommandContext(t.Context(), "ip", "netns", "exec", p.Gateway,
 		"miniupnpd", "-d", "-4", "-f", "/dev/stdin", "-i", "wan", "-a", "lan",
 		"-N", "-S", "-p", "5000", "-P", filepath.Join(dir, "miniupnpd.pid"))
 	cmd.Stdin = strings.NewReader("lease_file=" + filepath.Join(dir, "leases") + "\n")
 	cmd.Stdout, cmd.Stderr = t.Output(), t.Output()
-	checkCommand(t, cmd, cmd.Start())
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("netsim %v: %v", cmd.Args, err)
+	}
 	t.Cleanup(func() { _ = cmd.Wait() })
 	// Wait for the listening sockets in the gateway before returning to the client.
 	run(t, "", "ip", "netns", "exec", p.Gateway, "timeout", "5", "sh", "-ec",

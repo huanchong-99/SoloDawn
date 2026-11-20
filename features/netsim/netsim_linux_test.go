@@ -1,12 +1,14 @@
+//go:build netsim
+
 package netsim
 
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/netip"
 	"os"
-	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
@@ -23,10 +25,10 @@ func must(t *testing.T, err error) {
 
 // Only socket creation needs to run on the namespace's OS thread. Go can
 // read and write those descriptors normally after the original ns is restored.
+// If the restore fails, the thread stays locked and Go discards it.
 func inNamespace(t *testing.T, name string, fn func()) {
 	t.Helper()
 	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
 	previous, err := os.Open("/proc/thread-self/ns/net")
 	must(t, err)
 	defer previous.Close()
@@ -34,7 +36,10 @@ func inNamespace(t *testing.T, name string, fn func()) {
 	must(t, err)
 	defer next.Close()
 	must(t, unix.Setns(int(next.Fd()), unix.CLONE_NEWNET))
-	defer func() { must(t, unix.Setns(int(previous.Fd()), unix.CLONE_NEWNET)) }()
+	defer func() {
+		must(t, unix.Setns(int(previous.Fd()), unix.CLONE_NEWNET))
+		runtime.UnlockOSThread()
+	}()
 	fn()
 }
 
@@ -78,13 +83,39 @@ func packet(t *testing.T, label string, from, to *net.UDPConn, dst netip.AddrPor
 	return src
 }
 
-func TestNAT(t *testing.T) {
-	for _, mode := range []NAT{FullCone, Restricted, PortRestricted, Symmetric} {
-		t.Run(string(mode), func(t *testing.T) { checkNAT(t, mode) })
+// removed runs a test on a Network and then checks that its namespaces are gone.
+func removed(t *testing.T, name string, test func(t *testing.T) Network) {
+	var n Network
+	if !t.Run(name, func(t *testing.T) { n = test(t) }) {
+		return
+	}
+	for _, ns := range []string{n.WAN, n.Left.Client, n.Left.Gateway, n.Right.Client, n.Right.Gateway} {
+		if _, err := os.Stat("/var/run/netns/" + ns); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("namespace %s outlived its test: %v", ns, err)
+		}
 	}
 }
 
-func checkNAT(t *testing.T, mode NAT) {
+// mapped checks the public endpoint of a client socket: cones keep the client
+// port, symmetric NAT draws one from 40000 to 59999.
+func mapped(t *testing.T, mode NAT, got netip.AddrPort, public string, port uint16) {
+	t.Helper()
+	ok := got.Addr().String() == public && got.Port() == port
+	if mode == Symmetric {
+		ok = got.Addr().String() == public && got.Port() >= 40000 && got.Port() < 60000
+	}
+	if !ok {
+		t.Fatalf("%s: client port %d mapped to %s, public IP %s", mode, port, got, public)
+	}
+}
+
+func TestNAT(t *testing.T) {
+	for _, mode := range []NAT{FullCone, Restricted, PortRestricted, Symmetric} {
+		removed(t, string(mode), func(t *testing.T) Network { return checkNAT(t, mode) })
+	}
+}
+
+func checkNAT(t *testing.T, mode NAT) Network {
 	n := Start(t, mode, mode)
 	a := socket(t, n.Left.Client, ClientIP, 47800)
 	b := socket(t, n.Right.Client, ClientIP, 47800)
@@ -97,9 +128,9 @@ func checkNAT(t *testing.T, mode NAT) {
 		return packet(t, "discover", c, wan, address(wan), true)
 	}
 	left, right, otherPort := mapAtWAN(a), mapAtWAN(b), mapAtWAN(other)
-	if left.Addr().String() != n.Left.PublicIP || right.Addr().String() != n.Right.PublicIP {
-		t.Fatalf("unexpected WAN endpoints %s and %s", left, right)
-	}
+	mapped(t, mode, left, n.Left.PublicIP, 47800)
+	mapped(t, mode, right, n.Right.PublicIP, 47800)
+	mapped(t, mode, otherPort, n.Right.PublicIP, 47802)
 	packet(t, "reply from discovery endpoint", wan, a, left, true)
 	packet(t, "uncontacted peer IP", b, a, left, mode == FullCone)
 	packet(t, "contact other port", a, other, otherPort, mode == FullCone)
@@ -112,6 +143,7 @@ func checkNAT(t *testing.T, mode NAT) {
 	if again := mapAtWAN(a); again != left {
 		t.Fatalf("mapping changed on an existing flow: %s then %s", left, again)
 	}
+	return n
 }
 
 func checkMapping(t *testing.T, mode NAT, a *net.UDPConn, first netip.AddrPort, alt *net.UDPConn) {
@@ -121,28 +153,6 @@ func checkMapping(t *testing.T, mode NAT, a *net.UDPConn, first netip.AddrPort, 
 		t.Fatalf("%s: mappings to two destinations: %s, %s", mode, first, second)
 	}
 	packet(t, "reply on other mapping", alt, a, second, true)
-}
-
-func TestPrerequisites(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		uid      int
-		tool     string
-		wantSkip bool
-	}{
-		{"ready", 0, "sh", false},
-		{"non-root", 1000, "sh", true},
-		{"missing tool", 0, "netsim-nonexistent-tool", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			defer func() {
-				if t.Skipped() != tc.wantSkip {
-					t.Errorf("skipped = %t, want %t", t.Skipped(), tc.wantSkip)
-				}
-			}()
-			require(t, tc.uid, tc.tool)
-		})
-	}
 }
 
 type failedCommand struct {
@@ -158,27 +168,6 @@ func TestCommandFailure(t *testing.T) {
 	f := &failedCommand{T: t}
 	run(f, "", "sh", "-c", "exit 17")
 	if want := "netsim [sh -c exit 17]: exit status 17"; f.message != want {
-		t.Fatalf("got %q, want %q", f.message, want)
-	}
-}
-
-func TestNamespacePermissions(t *testing.T) {
-	dir := t.TempDir()
-	must(t, os.WriteFile(filepath.Join(dir, "ip"), []byte("#!/bin/sh\necho \"$1\" >&2\nexit 1\n"), 0700))
-	t.Setenv("PATH", dir)
-	for _, msg := range []string{"mount: Permission denied", "RTNETLINK answers: Operation not permitted"} {
-		t.Run(msg, func(t *testing.T) {
-			defer func() {
-				if !t.Skipped() {
-					t.Error("expected a skip for insufficient privileges")
-				}
-			}()
-			namespaceIP(t, msg)
-		})
-	}
-	f := &failedCommand{T: t}
-	namespaceIP(f, "unknown")
-	if want := "netsim [ip unknown]: exit status 1: unknown"; f.message != want {
 		t.Fatalf("got %q, want %q", f.message, want)
 	}
 }
@@ -199,7 +188,10 @@ func TestBlockingUDP(t *testing.T) {
 }
 
 func TestUPnPAndBlockingTCP(t *testing.T) {
-	require(t, os.Geteuid(), "upnpc")
+	removed(t, "port-restricted", checkUPnP)
+}
+
+func checkUPnP(t *testing.T) Network {
 	n := Start(t, PortRestricted, PortRestricted)
 	n.Right.StartUPnP(t)
 	for _, port := range []string{"47801", "7000"} {
@@ -242,4 +234,5 @@ func TestUPnPAndBlockingTCP(t *testing.T) {
 	connect(signal, true)
 	n.SetBlocked(t, true, 0)
 	connect(ice, true)
+	return n
 }
