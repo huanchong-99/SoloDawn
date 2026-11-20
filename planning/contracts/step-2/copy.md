@@ -6,7 +6,7 @@ by hand when the home is lost (R-135, `risks.md` Q-12). With
 `steps/parallel-plan-step-2-3.md`: the same snapshot, sent on a schedule,
 read-only, and no live replication. The snapshot, the redirect and its
 epoch, installing and finding a moved group are in `move.md`; this file
-names their sections. No step 1 contract changes here (section 7).
+names their sections. No step 1 contract changes here (section 8).
 
 Actors: P, the owner of the group; B, a browser of P; H1, the home; H2, the
 node of P that holds the copy.
@@ -25,8 +25,9 @@ Host commands (`contracts/commands.md` section 2), by P as every one:
 | `t` | Fields | Effect |
 | --- | --- | --- |
 | `copy.set` | `g`, `node`, `minutes` | on the home of g, else `not_found`. `node` is another valid node of P and `minutes` at least 1, or `node` is `""` to stop; else `bad_request`. Replaces the group's schedule |
-| `copy.drop` | `g` | on a node that holds a copy of g, else `not_found`: deletes it |
+| `copy.drop` | `g` | on a node that holds a copy of g or has g stopped (section 6), else `not_found`: deletes that data |
 | `copy.restore` | `g`, `redirect` | section 4 |
+| `home.resume` | `g` | on a node that has g stopped, else `not_found`: it is the home of g again (section 6) |
 
 - The home keeps the schedules in the `setting` key `copies`. It copies at
   once, then every `minutes`: a cut as `sync` takes it, while writing goes
@@ -72,11 +73,11 @@ Host commands (`contracts/commands.md` section 2), by P as every one:
    `epoch` is above the copy's `head.epoch`; it has the command's signer,
    the copy's `head.from` as `from`, H2 as `home`, and the copy's `seq`:
    else `bad_request`.
-3. P's log holds a `revoke` entry of `from`: else `conflict`. An `add`
-   dropped by the fork rule (`authority.md` section 7) is no revoke and
-   does not do. A home that may still run is moved, not restored; a
-   revoked node stops being a home (`move.md` section 8), and its peers
-   refuse it.
+3. P's log holds a `revoke` entry of `from`: else `conflict`. A device
+   whose `add` the fork rule dropped is not revoked
+   (`contracts/step-2/authority.md` section 7); P unblocks the restore by
+   revoking it, which any valid device may. A home that may still run is
+   moved, not restored; a revoked node stops being a home (section 6).
 4. H2 is not the home of g: else `conflict`.
 5. The copy verifies again, by checks 1 and 2 of `move.md` section 3 with
    `copy` as the kind: else `bad_request` or `bad_sig` (A9.32).
@@ -93,36 +94,79 @@ move, refuses the redirect: a stale copy cannot pull it back.
   and from `copies` of the home's `host.info` the last copy's time and any
   error.
 - **Restore** is normative for every browser of P, not only a screen rule.
-  B sends `copy.restore` only when all of this holds: P's log holds a
-  `revoke` entry of the copy's `from` (section 4, point 3); a look for the
-  group by `move.md` 7.2, made just before, found no node of P that lists
-  it; and B signs the redirect with an `epoch` above the copy's and above
-  every epoch B holds for the group.
-  Otherwise the page says why: the lost computer is not revoked yet, or
-  the group has a home, which it names.
+  B's **record** of a group is the home it reads the group from and the
+  highest epoch it holds for it (`move.md` 7.1). B sends `copy.restore`
+  only when all of this holds:
+  1. B has a record of the group. No rule gives a browser without one the
+     group's latest epoch and home, so it does not restore; the page says
+     to restore from a device that knows the group.
+  2. P's log holds a `revoke` entry of the copy's `from` (section 4).
+  3. The copy is current: its `head.epoch` is the epoch of B's record and
+     its `head.from` the home there. Or the home of B's record has a
+     `revoke` entry in P's log too: B may then restore the older copy,
+     after the page has said that the copy is older than that home's data
+     and what is lost (limit 1), and P has confirmed.
+  4. A look for the group by `move.md` 7.2, made just before, found no
+     node of P that lists it.
+  5. B signs the redirect with an `epoch` above the copy's and above every
+     epoch B holds for the group.
 
-## 6. Limits
+  Otherwise the page says why: the lost computer is not revoked yet, the
+  copy is older than the home in B's record, which it names, or the look
+  found a home. H2 cannot see B's record: it makes the checks of section 4
+  and none of these.
+
+## 6. A home that is revoked
+
+A node that accepts a `revoke` of itself in its owner's log stops being a
+home: it answers no command, `sync` or `fetch`, sends no item and closes its
+connections. It keeps the data of its groups, its copies and its move
+records, since the fork rule can undo a revoke
+(`contracts/step-2/authority.md` section 7) and a deletion cannot be
+undone. Its peers refuse it once they accept the entry
+(`flows/pairing.md` D).
+
+- **It is told.** A device that refuses another because it holds a
+  `revoke` of it first lets one connection through that carries `hello`
+  and `devlog` only, sends the log up to and with that `revoke`, and
+  closes it. A client does so when it tries the revoked home, and the
+  browser that writes the `revoke` of a node of P connects to that node
+  when it can. The node applies the entry and stops.
+- **Where the data goes.** While the node is revoked nobody reaches it: a
+  person at that machine may remove it there. When the fork rule drops the
+  `revoke`, the node is valid again and its groups stay stopped: its
+  `host.info` lists them in `stopped`, always present, one entry
+  `{"g":"…","name":"Website","epoch":2,"seq":812}` per group. P decides
+  each: `copy.drop` deletes it, `home.resume` makes the node its home
+  again. B sends `home.resume` only by points 1, 3 and 4 of section 5,
+  with this node's group in place of a copy and without the older-copy
+  case. Its copies stay held as before.
+
+## 7. Limits
 
 | | Limit | Consequence |
 | --- | --- | --- |
-| 1 | What the old home wrote after the cut is lost | items it acknowledged after the cut come again, and hosts drop those they took, by `first` (`move.md` section 6) |
+| 1 | What the old home wrote after the cut is lost; after an older copy is restored (section 5, point 3), also all that the newer home wrote | items it acknowledged after the cut come again, and hosts drop those they took, by `first` (`move.md` section 6) |
 | 2 | After a restore, the sequence numbers and task numbers that the lost home gave out after the cut are given out again | a task number may name two tasks over the group's life; a branch `task/<num>-<slug>` of a lost task may exist on the remote, and the push of the new task fails until a person removes it |
-| 3 | Two holders, restored from two browsers while neither can reach the other's holder | each lookup of section 5 finds nothing; a client keeps the higher epoch it meets. The owner keeps one and revokes the other node, which drops the group (`move.md` section 8) |
-| 4 | A holder that never learns of a move keeps its copy | the owner drops it with `copy.drop`. A restore of it is refused while its `from` is valid, and B's lookup finds the present home (section 5) |
+| 3 | Two holders, restored from two browsers while neither can reach the other's holder | each lookup of section 5 finds nothing; a client keeps the higher epoch it meets. The owner keeps one and revokes the other node, which stops and keeps its data until it is removed there (section 6) |
+| 4 | A holder that never learns of a move keeps its copy | the owner drops it with `copy.drop`. A restore of it is refused while its `from` is valid, and section 5 refuses it while B's record names a newer home |
+| 5 | A browser whose record missed a later move, because the home moved on while the browser was away | its record names the old home, so a copy from that home looks current: once that home is revoked and the look of 7.2 finds nothing, the browser makes a second home. The owner resolves it as in limit 3 |
+| 6 | A revoke no longer wipes a stolen node that still runs | its data is as safe as its disk. A remote wipe would protect little, since a thief can copy the disk offline, and as it cannot be undone it would defeat the fork rule's undo |
 
-## 7. Where this goes after step 1
+## 8. Where this goes after step 1
 
 | File | Gains |
 | --- | --- |
-| `contracts/commands.md` | section 2: `copy.set`, `copy.drop`, `copy.restore` |
-| `contracts/datachannel.md` | section 7: `copies` and `held` in `host.info` |
+| `contracts/commands.md` | section 2: `copy.set`, `copy.drop`, `copy.restore`, `home.resume` |
+| `contracts/datachannel.md`, `contracts/envelope.md` | section 7: `copies`, `held` and `stopped` in `host.info`; section 8, and check 2 of envelope section 3: the one connection that tells a revoked device |
 | `contracts/storage.md`, `contracts/local.md` | `setting` key `copies`; data directory: `copies/<g>.snap` |
-| `flows/` | `flows/moving.md` (of `move.md` section 9) gains copying and restoring |
+| `flows/` | `flows/moving.md` (of `move.md` section 8) gains copying and restoring; `flows/pairing.md` D: section 6, the node that stops, and the peer that first sends it the `revoke` |
 
-P-4 freezes `copy.set`, `copy.drop`, `copy.restore`, and `copies` and
-`held` in `host.info`, with the shapes of `move.md` section 9.
+P-4 freezes `copy.set`, `copy.drop`, `copy.restore`, `home.resume`, and
+`copies`, `held` and `stopped` in `host.info`, with the shapes of `move.md`
+section 8.
 
-## 8. Not verified
+## 9. Not verified
 
 - Nothing here was run.
 - `[unverified]` What a copy every minute costs a busy home; the skip of

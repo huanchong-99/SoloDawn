@@ -8,7 +8,7 @@ follow a signed redirect. The home stays the single writer
 (`architecture.md` section 7); nothing is replicated live. A group moves
 only to another node of its owner, so the role `owner` never changes
 (`contracts/step-2/people.md` section 1). No step 1 contract changes here;
-section 9 lists what is folded where. Actors: P, the owner of the group;
+section 8 lists what is folded where. Actors: P, the owner of the group;
 B, a browser of P; H1, the home; H2, another node of P.
 
 ## 1. What travels
@@ -194,17 +194,20 @@ it. `move.abort`, the same fields, drops what it staged for it; always `ok`.
 
 At `move.commit`, and at a restore (`copy.md` section 4), H2 in one
 transaction: stores the rows as recorded and the head's counters; applies
-the `env` of each `device` row but markers to `device_log`, per person by
-`ver` (`contracts/envelope.md` section 4, with the fork rule of
-`contracts/step-2/authority.md` section 7); adds the receipts, keeping one
-it has for the same `k` and `n`; stores the marks; queues each item again,
-signed by itself, with the payload of its `env` but a new `n`, `ts` and
-`item`, and `first`, the rest of the record unchanged; keeps the redirect
-for its `groups` entries (7.1) and its `n`; in a move, keeps the schedule
-of `head.copy` unless its `node` is H2; deletes its own copy of the group;
-writes the group row with `home` = H2 and `epoch` = the redirect's, and a
-`system` message `home_moved` in the main line. Then it is the home: it
-pushes, accepts the devices of members and runs the group's timers.
+the entry of each `device` row (a marker has none) to `device_log`, per
+person in the order of `ver`, as any entry it receives
+(`contracts/envelope.md` section 4, and the fork rule of
+`contracts/step-2/authority.md` section 7: a replaced entry is dropped, and
+those after it are applied again up to the first that is refused, so the
+rows of a version the log no longer has are markers); adds the receipts,
+keeping one it has for the same `k` and `n`; stores the marks; queues each
+item again, signed by itself, with the payload of its `env` but a new `n`,
+`ts` and `item`, and `first`, the rest of the record unchanged; keeps the
+redirect for its `groups` entries (7.1) and its `n`; in a move, keeps the
+schedule of `head.copy` unless its `node` is H2; deletes its own copy of the
+group; writes the group row with `home` = H2 and `epoch` = the redirect's,
+and a `system` message `home_moved` in the main line. Then it is the home:
+it pushes, accepts the devices of members and runs the group's timers.
 
 **`first`**, optional in an item's payload (`contracts/datachannel.md`
 section 6): `{"home":"<device id>","item":4411}`, the home and number under
@@ -259,15 +262,7 @@ as their log last showed them, and judges against the log the node sends
 after `welcome`. In the browser, the owner moves a group from the group
 info, to one of P's other nodes; copies and restoring: `copy.md` section 5.
 
-## 8. A home that is revoked
-
-A node that accepts a `revoke` of itself in its owner's log stops being a
-home: it answers no command, `sync` or `fetch`, sends no item, deletes the
-data of every group homed on it, its copies and its move records, and
-closes its connections. Its peers refuse it once they accept the entry
-(`flows/pairing.md` D). A restore relies on this (`copy.md` section 4).
-
-## 9. Where this goes after step 1
+## 8. Where this goes after step 1
 
 | File | Gains |
 | --- | --- |
@@ -278,7 +273,7 @@ closes its connections. Its peers refuse it once they accept the entry
 | `contracts/rows.md`, `messages.md`, `local.md` | group `epoch`, `home` changes with a move; 2.11: `home_moved`; section 2: the staged snapshot |
 | `contracts/mcp-tools.md` | the tool error `moving` |
 | step 2 files | `people.md` section 7, point 2: `home.add` replaces the entry of its `g`; `watch-team.md` section 10: a node follows a team group in `settings.teams` |
-| `flows/`, `architecture.md`, `risks.md` | a new `flows/moving.md` (sections 4, 7); `flows/sync.md` H: 7.2; `flows/pairing.md` D: section 8; architecture 3 and 5: node to node of one owner, copies; K-1, Q-12 |
+| `flows/`, `architecture.md`, `risks.md` | a new `flows/moving.md` (sections 4, 7); `flows/sync.md` H: 7.2; architecture 3 and 5: node to node of one owner, copies; K-1, Q-12 |
 
 P-4 freezes: `group move`; the `redirect` payload with `epoch`; `epoch` in
 the group row; `redirect` and `addrs` in a `groups` entry; `snap`,
@@ -288,13 +283,14 @@ records `head`, `row`, `item`, `receipt`, `mark`, `seal`, the written form
 of the seal line and the `snapshot` payload; `first`; the `home_moved`
 body; the codes `moving` and `unreachable`; and the shapes of `copy.md`.
 
-## 10. Limits; not verified
+## 9. Limits; not verified
 
 - If H2 is lost between H1's commit and its install, no node is the home
   until P revokes H2; a client that found H2 by 7.2 before that returns
   only with the next move or restore.
-- A client and a revoked node that both missed the `revoke` (both offline
-  then) meet and go on; what is written there is lost when the node gets
-  it. A browser never shown a node P added later does not look there (7.2).
+- A client and a revoked home that both missed the `revoke` meet and go
+  on; what is written there stays on that node, stopped, once it gets the
+  entry (`copy.md` section 6). A browser never shown a node P added later
+  does not look there (7.2).
 - Nothing here was run. `[unverified]` That 60 minutes moves a large group
   on a direct path, and that a home holds a read view open that long.
