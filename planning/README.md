@@ -16,7 +16,8 @@ to start". The coordinator has settled Q-1 to Q-28 (`risks.md`). Next:
    lead changes the contract. Code does not silently depart from it.
 4. The answers of the spikes (M0) are recorded here by the planning lead.
    S-1, S-2, S-3, S-4 and S-7 are answered and recorded
-   (`steps/step-1.md`, M0). Q-4 waits for spike S-5.
+   (`steps/step-1.md`, M0). S-5 has reported, and Q-4 is settled
+   (`risks.md`).
 5. Questions that implementation raises about a contract are settled in
    the contract itself. The first batches, from the reviews of backend
    tasks B-01 and B-02, are in `contracts/conventions.md`,
