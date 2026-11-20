@@ -202,16 +202,28 @@ The two step 1 drivers, from `contracts/drivers.md`
 `usage` of both waits for what the usage unit of step 1 reads from the
 events (`contracts/rows.md` section 2 marks the figures `[unverified]`).
 
-**Gap: the step 3 CLIs.** Which CLIs passed, the name each driver declares,
-its row of this table, and the source and version of every claim come from
-research unit T3-0. Until it reports, this table has no further row, no
-driver is started, and the candidates of `steps/step-2-3.md` 3.1 stay
-`[unverified]`.
+**The step 3 candidates**, from research unit T3-0 (pull request 91; its
+sources were read and spot-checked on 2026-11-20). The source of each claim
+is in that description. `[documented]` means read there and not run.
+
+| CLI, version read | Headless mode | Resume by session id | Takeover | MCP client | Approval request and answer | API key |
+| --- | --- | --- | --- | --- | --- | --- |
+| OpenCode 1.19.6 | `[documented]` `opencode serve`: a session HTTP API and an event stream | `[documented]` | documented, not measured: off | `[documented]` | `[documented]` a pending request on the event stream, answered by its id over HTTP | a direct provider key |
+| Qwen Code 0.28.0 | `[documented]` `--output-format stream-json`; the daemon protocol | `[documented]` `--resume <id>` | documented, not measured: off | `[documented]` | `[documented]` the daemon's `permission_request` event, answered by a POST | a QwenCloud pay-as-you-go key |
+| Amp | deferred | | | | none for an outside program, so it cannot meet R-43 | |
+
+- Units: T3-2 builds the OpenCode driver and T3-3 the Qwen Code driver, one
+  at a time. T3-4 (Amp) is not scheduled.
+- For both, `accounts` is `["api_key"]`: their other account types did not
+  pass T3-0's terms check. `takeover` is `none` until a capture shows the
+  same-id handoff. Every other value is declared from that unit's captures
+  (section 4), so neither has a row in the table above yet.
 
 ## 9. Open points and what is not verified
 
 1. Decided: P-5 freezes `driver` and U3-3 shows it (section 6).
-2. `[unverified]` Every capability of every candidate CLI.
+2. `[unverified]` Every capability of OpenCode and Qwen Code: T3-0 read
+   them, and nothing was run.
 3. `[unverified]` That any CLI without an approval channel can be started
    so that a stopped action fails by itself (section 4). If none can,
    `approvals` `none` always comes with no level 2.
@@ -222,3 +234,8 @@ driver is started, and the candidates of `steps/step-2-3.md` 3.1 stay
 6. The answers of `steps/parallel-plan-step-2-3.md` section 1 that this
    file rests on: D-16 only. The level cap of D-1 is used as R-44 states
    it.
+7. **Open: is an approval channel required?** Amp is deferred because it has
+   no approval channel, yet section 4 lets a driver declare `approvals`
+   `none`. Needs the coordinator's word. Recommended: move the channel to
+   the required list of section 3 and drop `none`, with its instruction
+   sentence (section 5), its A4.10 row (section 7) and point 3 above.
