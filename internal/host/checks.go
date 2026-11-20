@@ -34,7 +34,7 @@ var (
 // the secrets check reads at most this much of the added lines.
 var (
 	hardCheckLimit = 2 * time.Minute
-	addedLineLimit = 64 << 20
+	addedLineLimit = 67108864 // 64 MiB
 )
 
 // Run executes the group's checks in order, followed by both hard checks
@@ -124,10 +124,9 @@ func cleanCheckHead(ctx context.Context, dir string) (string, error) {
 func hiddenCheckPaths(tracked string) (skip, assume []string) {
 	for entry := range strings.SplitSeq(strings.TrimSuffix(tracked, "\x00"), "\x00") {
 		tag, name, _ := strings.Cut(entry, " ")
-		switch {
-		case strings.EqualFold(tag, "S"):
+		if strings.EqualFold(tag, "S") {
 			skip = append(skip, name)
-		case tag != strings.ToUpper(tag):
+		} else if tag != strings.ToUpper(tag) {
 			assume = append(assume, name)
 		}
 	}

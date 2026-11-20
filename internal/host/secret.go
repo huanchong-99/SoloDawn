@@ -18,10 +18,6 @@ type secretPattern struct {
 	find, redact *regexp.Regexp
 }
 
-func isAlnum(c byte) bool {
-	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9'
-}
-
 func (p secretPattern) mayMatch(text string) bool {
 	for _, literal := range p.literals {
 		if strings.Contains(text, literal) {
@@ -40,20 +36,17 @@ func credential(expr string, literals ...string) secretPattern {
 	return secretPattern{literals: literals, find: re, redact: re}
 }
 
-const (
-	privateKeyHeader = `-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----`
-	privateKeyFooter = `-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----`
-)
-
 var (
 	secretPatterns = []secretPattern{
 		// A PEM or OpenPGP private key: the check looks for the header;
 		// redaction takes it through its footer when the text has one, else
 		// to the end of the text.
+		// The header and the footer are -----BEGIN and -----END, any words
+		// in capitals, then PRIVATE KEY (PEM) or PRIVATE KEY BLOCK (OpenPGP).
 		{
 			literals: []string{"-----BEGIN "},
-			find:     regexp.MustCompile(privateKeyHeader),
-			redact:   regexp.MustCompile(`()(` + privateKeyHeader + `(?s:.*?` + privateKeyFooter + `|.*))`),
+			find:     regexp.MustCompile(`-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----`),
+			redact:   regexp.MustCompile(`()(-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----(?s:.*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|.*))`),
 		},
 		// OpenAI keys (sk-, sk-proj-) and Anthropic keys: every sk-ant- key
 		// with its run of 32 is also an sk- key with a run of at least 32.
@@ -69,7 +62,7 @@ var (
 	// and code that handles keys names one.
 	redactPatterns = append(secretPatterns[:len(secretPatterns):len(secretPatterns)], secretPattern{
 		literals: []string{"-----END "},
-		redact:   regexp.MustCompile(`()((?s:\A.*)` + privateKeyFooter + `)`),
+		redact:   regexp.MustCompile(`()((?s:\A.*)-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----)`),
 	})
 
 	// Environment-file content, for redaction: three or more NAME=value
@@ -102,19 +95,14 @@ func envSecretIn(text, prefix string) bool {
 	return false
 }
 
-// envLineName is the NAME of a NAME=value line: a letter or '_', then
-// letters, digits and '_', up to the first '='.
+// envNameSyntax is a NAME: a letter or '_', then letters, digits and '_'.
+var envNameSyntax = regexp.MustCompile(`^[A-Za-z_]\w*$`)
+
+// envLineName is the NAME of a NAME=value line, the text up to its first '='.
 func envLineName(line, prefix string) (string, bool) {
 	rest, ok := strings.CutPrefix(line, prefix)
 	name, _, found := strings.Cut(rest, "=")
-	if !ok || !found || name == "" || '0' <= name[0] && name[0] <= '9' {
-		return "", false
-	}
-	return name, strings.IndexFunc(name, notWordRune) < 0
-}
-
-func notWordRune(r rune) bool {
-	return !(r == '_' || r < 128 && isAlnum(byte(r)))
+	return name, ok && found && envNameSyntax.MatchString(name)
 }
 
 func hasSensitiveWord(name string) bool {
