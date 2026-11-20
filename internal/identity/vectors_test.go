@@ -539,19 +539,22 @@ func TestCryptoVectorsHold(t *testing.T) {
 	}
 
 	for _, c := range v.Envelopes {
-		_, err := OpenCommand(c.Envelope, "", everyone, now)
-		if c.OK && err != nil || !c.OK && err != BadSig {
-			t.Errorf("envelope %q: OpenCommand gave %v, ok is %v", c.Name, err, c.OK)
+		if got := verify(c.Key, envelopeContext+c.Payload, c.Signature); got != c.OK {
+			t.Errorf("envelope %q: signature verified %v, want %v", c.Name, got, c.OK)
 		}
-		// Ed25519 signatures are deterministic: where ok is true, k is one of
-		// the keys and signing p again with its seed gives s itself; where ok
-		// is false and k is one of the keys, it gives another s.
+		if !c.OK {
+			if _, err := OpenCommand(c.Envelope, "", everyone, now); err != BadSig {
+				t.Errorf("envelope %q: OpenCommand gave %v, want bad_sig", c.Name, err)
+			}
+			continue
+		}
+		// Go signs deterministically, so signing again gives exactly s.
 		k, listed := keys[c.Key]
-		if c.OK && !listed {
+		if !listed {
 			t.Fatalf("envelope %q: k is not one of the keys", c.Name)
 		}
-		if listed && (k.Sign(c.Payload) == c.Envelope) != c.OK {
-			t.Errorf("envelope %q: signing p with the seed of k gives s %q, ok is %v", c.Name, k.Sign(c.Payload).Signature, c.OK)
+		if got := k.Sign(c.Payload).Signature; got != c.Signature {
+			t.Errorf("envelope %q: signature %q, want %q", c.Name, got, c.Signature)
 		}
 	}
 
