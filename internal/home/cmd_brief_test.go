@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"testing"
 
@@ -219,6 +220,8 @@ func TestBriefPostRefusals(t *testing.T) {
 		"depending on an entry twice":   {body: third(0, 0), code: "bad_request"},
 		"depending on two, then twice":  {body: third(1, 0, 1), code: "bad_request"},
 		"with one AI in both roles":     {body: task(1, func(e *proto.BriefTask) { e.Reviewer = briefB }), code: "bad_request"},
+		"mentioning a member twice":     {post: func(p *proto.Post[proto.BriefBody]) { p.Mentions = []proto.ID{proto.ID(briefA), proto.ID(briefA)} }, code: "bad_request"},
+		"mentioning someone who left":   {post: func(p *proto.Post[proto.BriefBody]) { p.Mentions = []proto.ID{proto.ID(id(30))} }, code: "conflict"},
 		"for a requester who is gone":   {body: func(b *proto.BriefBody) { b.Requester = id(30) }, code: "conflict"},
 		"for a person as assignee":      {body: task(0, func(e *proto.BriefTask) { e.Assignee = ownerID }), code: "conflict"},
 		"for the secretary as assignee": {body: task(0, func(e *proto.BriefTask) { e.Assignee = aiID }), code: "conflict"},
@@ -387,9 +390,7 @@ func TestBriefConfirmRefusals(t *testing.T) {
 				c.card(&card)
 			}
 			d[card.ID] = card
-			for k, v := range c.disk {
-				d[k] = v
-			}
+			maps.Copy(d, c.disk)
 			if c.state != nil {
 				c.state(s)
 			}

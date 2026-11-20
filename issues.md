@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-21 · limitation · A secretary's own hand-back summary queues a `notice` for the secretary
+
+- Symptom: when the owner hands the secretary's terminal back and a `handback` message is posted in the main line signed for the secretary, the home queues a `notice` (`code: handback`) for `group.secretary`, waking the secretary again for the summary it or its host just posted.
+- Cause: `planning/contracts/commands.md` 1.3 specifies `item notice for the secretary` on `handback` without an exception when `as` is the secretary (`internal/home/cmd_post.go`, `postHandbackNotice`).
+- Status: open, noted in unit HM-6 on 2026-11-21.
+
 ### 2026-11-21 · limitation · The jobs of a group in the home's run loop have no bound
 
 - Symptom: not observed. A client that sends `cmd` frames faster than its group applies them makes the list of that group's jobs grow, and with it the memory of the node, until the client stops. A group applies a command in one transaction of the store, so this needs a client that sends on purpose or a store that has become slow. Ticks and events are jobs as well: while a group does not keep up, each tick of `LoopConfig.Every` and each `Event` adds one job to its list.

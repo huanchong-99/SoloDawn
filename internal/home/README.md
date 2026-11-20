@@ -168,6 +168,9 @@ names that start with `run`, and its tests those that start with `run` and `Run`
 `Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
 `ItemsPush`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
+The posts of HM-6 take the names that start with `post`, their tests too, and their test functions
+start with `TestPost`; the notes and `forget` take the names that start with `note`, their tests
+too, and their test functions start with `TestNote`.
 
 ## The run loop
 
@@ -359,7 +362,8 @@ function that moves a task calls it and adds nothing to its rules.
 - **Post.** Only the secretary posts a brief, else `forbidden`; a group without one has nobody who
   can. What the payload says by itself is `bad_request`: a `thread` that is not `null`, no
   criterion, no task, a dependency that is not an earlier entry or that is named twice, an entry
-  whose assignee is its reviewer. What the group says is `conflict`: a requester who is no member,
+  whose assignee is its reviewer, and a member named twice in `mentions` (shared with `cmd_post.go`).
+  What the group says is `conflict`: a mentioned id or requester who is no member,
   an assignee or reviewer who is no working AI (an AI member other than the secretary), a message
   that already has the id `n`, and a `replaces` that names no brief that is `pending` or `revise`.
   The row is a main-line card with `main` false, `ts` as signed, `state` `pending`, and a body
@@ -392,11 +396,47 @@ function that moves a task calls it and adds nothing to its rules.
   HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
   `c.Disk.Msg` reads.
 
+## Posts, notes and forget
+
+`cmd_post.go` holds `post` of kinds `text`, `progress`, `question`, `report` and `handback`
+([commands](../../planning/contracts/commands.md) 1.3;
+[messages](../../planning/contracts/messages.md) 1, 2.7 and 2.10;
+[rows](../../planning/contracts/rows.md) sections 4 and 5), under `post/<kind>`. `cmd_note.go`
+holds `note` and `forget` ([commands](../../planning/contracts/commands.md) 1.6;
+[rows](../../planning/contracts/rows.md) sections 5 and 6). Where the contracts are silent, they do
+this:
+
+- **Who and placement.** `text` is by a person or an AI; `progress`, `question`, `report` and
+  `handback` are by an AI, else `forbidden`. None of the five is raised from a thread, so `main`
+  must be `false`, else `bad_request`. `progress` and `report` belong in a thread (`thread` not
+  `null`), and `handback` belongs in a thread for a working AI and in the main line (`thread`
+  `null`) for the secretary; any other placement is `bad_request`.
+- **Thread, mentions and ids.** A non-null `thread` must name a task in `State.Tasks`, else
+  `not_found`; for `report`, `as` must be that task's `assignee`, else `forbidden`. One rule,
+  `(*State).postMentions` (shared with `cmd_brief.go`), checks `mentions`: naming an id twice is
+  `bad_request`, and naming someone who is neither in `State.People` nor in `State.AIs` is
+  `conflict`. `re` is kept as signed without looking up the answered message, which retention or
+  `forget` may have removed. A message id `n` already held on disk is `conflict`.
+- **Rows and items.** Every post writes its `MsgRow` with `ts` as signed and `body` encoded without
+  HTML escaping; a post in a thread follows it with the updated `TaskRow` (`thread.count` + 1, and
+  `thread.last` with `text` cut to at most 200 UTF-8 characters). `text`, `progress` and `question`
+  queue `mention` for each mentioned AI in `mentions` order; a main-line `text` from a person that
+  mentions no AI queues `mention` for `Group.Secretary` when set. `handback` queues `notice` (`code`
+  `handback`, `task` set when in a thread) for `Group.Secretary` when set ([issues](../../issues.md)).
+- **`note` and `forget`.** `note` is by a person or an AI; a non-null `task` that names no task in
+  `State.Tasks` is `not_found`, an `id` already held as a live note on disk is `conflict`, and the
+  `NoteRow` gets `ts` from `c.Now`. `forget` is by an admin only (`forbidden`); `r` must be `note`
+  or `msg` (`bad_request`); a missing or already forgotten row is `not_found`; a `msg` whose `kind`
+  is not `review` is `conflict`; otherwise a `GoneRow` (`gone: true`) replaces it.
+
 ## Known limitations
 
-- The table of commands holds only the briefs, and no node starts a loop yet: the other command
-  files and the wiring of the node are separate units
+- The table of commands holds the briefs, the five kinds of `post` of HM-6, `note` and `forget`;
+  the remaining command files (including thread round counting in HM-13 and the wake-up cap in HM-7)
+  and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
+- A `handback` posted by the secretary in the main line still queues a `notice` for the secretary
+  ([issues](../../issues.md)).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
 - A `peer.Connection` takes every frame at once and keeps it in its own buffer, so the limit of
@@ -435,3 +475,10 @@ while a task is paused and a reviewer named while it is paused.
 holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
 `Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
 commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
+
+`cmd_post_test.go` and `cmd_note_test.go` cover every branch and boundary of the five `post` kinds,
+`note` and `forget` through `Commands.Apply`, including the 200-character UTF-8 thread preview, the
+shared `mentions` rule and `UnexpectedNulls` on the rows written. `features/home_post.feature` holds
+acceptance tests A2.1 (message and item push across connected browsers and a host) and A5.14
+(retention keeping notes and review messages, and `forget` replacing them with `gone` markers) on
+`StartLoop` over an in-memory store.
