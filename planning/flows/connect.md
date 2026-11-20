@@ -58,6 +58,12 @@ answering node; RV, any signalling path.
    the connection indicator; a host reports its path to the home in
    member status.
 
+   A browser has no event for every such change. It reads its statistics
+   when `ctl` opens and every second after: the selected pair is the one
+   its transport statistics name, or, where the statistics have no
+   transport, the pair they mark as selected `[unverified]` (unit I-8
+   runs the three browsers).
+
    There is no separate path for a local network. Chromium and Firefox
    give a `.local` name instead of their host address, so the node sees
    them as peer-reflexive; Chromium hides its own address in its
@@ -110,7 +116,9 @@ answering node; RV, any signalling path.
     response: each `cmd`, `fetch` and `host.info`, and each `sync`, which
     is the `sync` of step 11.3 for its group. The receipt on the other side
     makes a repeated command harmless (`contracts/commands.md`); the other
-    requests only read.
+    requests only read. They go out after the `sync` requests, in the order
+    in which they were first made. A `hello` is not among them: the new
+    connection has had its own.
 13. Both sides classify the new path. The indicator changes within one
     second and the relay notice disappears.
 14. C closes the failed or timed-out probe and ignores a late `welcome` from
@@ -139,9 +147,21 @@ opened, and it will again on the next reconnect.
     target offline before an answer arrives, C retires that `conn` at
     once and ignores its late answers. After the same back-off it sends
     a new offer with a new `conn`. Once answered, negotiation is left to ICE.
+    - An offer goes out on the signalling paths C is signed in on at that
+      moment. With none, the attempt has failed, and the back-off goes on.
+    - For a browser, a signalling path that closes counts, for the offers
+      still unanswered, as a path that reported the target offline: an
+      answer comes back on the path that delivered the offer.
+    - A browser ends a connection whose `hello` the node refuses or does
+      not answer within 10 seconds; it is then lost like any other.
+    - A browser opens a signalling path that closed again by the same
+      rule: 1, 2, 4 … 60 seconds, from 1 second again after a path that
+      stayed signed in for 60 seconds, and at once when its own network
+      changes (step 16). It sends its `watch` list on the new path.
 16. Back-off is skipped, and C retries at once, when a signalling path
     reports the target present (`presence` from rendezvous, a beacon on the
-    local network) or when C's own network changes.
+    local network) or when C's own network changes. For a browser, its
+    network has changed when its window gets the `online` event.
 17. After `welcome`, C resumes exactly as in step 11.3: `sync` with the last
     sequence number it applied for each group. A host that restarted has
     nothing cached and starts from zero.

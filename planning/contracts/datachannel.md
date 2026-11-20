@@ -22,7 +22,12 @@ messages it accepts from a peer depends on who the peer is (section 8).
 - A result too large for one message is split (`rows` batches, `fetch` pages).
 - A message that is not a JSON object, or whose `t` the receiver does not
   know, is answered `bad_request` when it carries a request `id`, and is
-  dropped otherwise. The connection stays open.
+  dropped otherwise. The connection stays open. A browser serves no
+  request, so it answers `bad_request` to every message with an `id`.
+- A response that names no request still waiting is dropped. One that is
+  not an answer of the request it names (the answer its section gives, or
+  an error) ends that request as failed on the receiving side; it is not a
+  response from the other side, and the connection stays open.
 
 ## 3. Session
 
