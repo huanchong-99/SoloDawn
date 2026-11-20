@@ -65,7 +65,7 @@ Every tool file registers its tools in the table of HS-0.
 | HS-0 | 1 | Interfaces to a home, the owner's connection and the terminal stream (`architecture.md` 8.3); the driver interface and its events; the session table and state machine (`sessions.md`); the tool table; the audit write | unit: every state change of `sessions.md` 2 | `host/host.go`, `host/session.go`, `host/audit.go`, `features/host.feature` | — | F | M |
 | HS-1 | 2 | Claude Code driver (`drivers.md` 1.1) against the fake CLI | A3.1 (driver half), A3.6 | `host/claude.go` | HS-0, B-13 | A | M |
 | HS-2 | 2 | Codex driver (`drivers.md` 1.2) against the fake CLI | A3.2 (driver half) | `host/codex.go` | HS-0, B-13 | A | M |
-| HS-3 | 3 | CLI detection and sign-in (`drivers.md` 1.4); `agent.set` | A3.4 as seen in `host.info` | `host/agents.go` | HS-0, P-2 | A | S |
+| HS-3 | 3 | CLI detection and sign-in (`drivers.md` 1.4); `agent.set` | unit | `host/agents.go` | HS-0, P-2 | A | S |
 | HS-4 | 1 | Workspaces: one clone per group, worktree and branch per task, read-only checkout for a review, removal (`local.md` 2, 7) | A5.1 (folders), A5.2, A5.6 | `host/workspace.go` | — | A | M |
 | HS-5 | 1 | Check runner: exactly the strings of `group.checks`, clean tree, minimal environment, both hard checks (`local.md` 7) | A5.3 (first sentence), A5.9, A5.17 | `host/checks.go` | — | A | M |
 | HS-6 | 1 | Outbound secret check (`local.md` 8) | A3.9 (the check) | `host/secret.go` | — | A | S |
@@ -84,7 +84,7 @@ Every tool file registers its tools in the table of HS-0.
 | HS-17 | 3 | The `audit` request (`datachannel.md` 7) | A4.1 (audit sentence) | `host/audit_read.go` | HS-0, P-2 | A | S |
 | HS-18 | 3 | Usage and caps, the turn time limit, `host.offline` and `host.online` | A4.8, A4.9 | `host/limits.go` | HS-15, P-2 | A | M |
 | HS-19 | 2 | Pseudo-terminal: interactive start (`drivers.md` 1.3), bridge with back-pressure, resize; Unix and ConPTY through go-pty v0.2.3. Interrupt uses the driver's structured protocol, not Ctrl+C bytes | unit on Linux; on a Windows machine with go-pty v0.2.3 itself, because S-5 measured ConPTY with pywinpty, not go-pty | `host/pty.go`, `host/pty_unix.go`, `host/pty_windows.go` | HS-0, X-1, PR-0 | A | M |
-| HS-20 | 3 | Takeover: choice of session, a task for a working AI without one, the state switch, hand-back facts and turn, `direct` only, a repeated start (`flows/takeover.md`) | A7.3 to A7.7 (host half) | `host/takeover.go` | HS-15, HS-19, P-2 | F | M |
+| HS-20 | 3 | Takeover: choice of session, a task for a working AI without one, the state switch, hand-back facts and turn, `direct` only, a repeated start (`flows/takeover.md`) | A7.3 to A7.7 (host half), A7.9 (host half) | `host/takeover.go` | HS-15, HS-19, P-2 | F | M |
 | HS-21 | 2 | `host.join`, `host.leave`; one connection per home of the host's AIs | A3.3 (host half) | `host/join.go` | HS-0, HS-4, P-1 | A | S |
 
 HS-7b is restart-safe merge logic and was started on Astra; its Fable reviewer checks the recovery path first. Every host unit that adds a subcommand or a channel registers it in the tables of N-0 and PR-0 from its own file.

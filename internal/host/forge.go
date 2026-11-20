@@ -1,6 +1,7 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,14 +20,23 @@ type TaskForge struct {
 	Branch   string
 }
 
-func (f TaskForge) command(ctx context.Context, name string, args ...string) (string, error) {
+// runIn runs the git or gh command name in dir and returns what it wrote to
+// standard output and to standard error. Forge and merge share it.
+func runIn(ctx context.Context, dir, name string, args ...string) (stdout, stderr string, err error) {
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = f.Worktree
+	cmd.Dir = dir
+	var errOut bytes.Buffer
+	cmd.Stderr = &errOut
 	out, err := cmd.Output()
-	if exit, ok := errors.AsType[*exec.ExitError](err); ok {
-		return "", fmt.Errorf("%s: %w", strings.TrimSpace(string(exit.Stderr)), err)
+	return string(out), errOut.String(), err
+}
+
+func (f TaskForge) command(ctx context.Context, name string, args ...string) (string, error) {
+	out, stderr, err := runIn(ctx, f.Worktree, name, args...)
+	if _, ok := errors.AsType[*exec.ExitError](err); ok {
+		return "", fmt.Errorf("%s: %w", strings.TrimSpace(stderr), err)
 	}
-	return strings.TrimSpace(string(out)), err
+	return strings.TrimSpace(out), err
 }
 
 // PushBranch pushes only the host-assigned branch, without requesting approval.

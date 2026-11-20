@@ -24,7 +24,7 @@ Several people in one group, each with their own computers and AIs.
 | Team-wide group | Group kind `team`: no repository, no tasks. Secretaries post cross-project notices there. | R-14 |
 | Other forges | The forge commands of `contracts/local.md` section 7 become per-group templates (`risks.md` Q-9). | R-92 |
 | Home changes | Moving a group to another home; a copy of the group for safekeeping (`risks.md` Q-12). | R-134, R-135 |
-| Checks in a sandbox | Project checks, which in a team may be triggered by someone else's request, run inside an existing operating-system sandbox, not one written here: on macOS and Linux preferably Anthropic's open-source sandbox-runtime, otherwise bubblewrap or sandbox-exec. Windows is stated as a known limit. `[unverified]` To be shown feasible by an experiment before it is planned (`risks.md` Q-19). The experiment measures compatibility first, overhead second: can one real offline build and test, with its subprocesses, use the checkout, the toolchain and scratch space while other user data stays unreadable and writes and network outside stay denied? Windows is reported separately. | R-40, R-44 |
+| Checks in a sandbox | Project checks, which in a team may be triggered by someone else's request, run inside an existing operating-system sandbox, not one written here: on macOS and Linux preferably Anthropic's open-source sandbox-runtime, otherwise bubblewrap or sandbox-exec. Windows is stated as a known limit. To be shown feasible by an experiment before it is planned (`risks.md` Q-19). The experiment measures compatibility first, overhead second: can one real offline build and test, with its subprocesses, use the checkout, the toolchain and scratch space while other user data stays unreadable and writes and network outside stay denied? Windows is reported separately. Spike S-10 did so, on Linux with bubblewrap and, in part, on macOS with `sandbox-exec`; the result is in `contracts/step-2/checks-forge.md` section 7. | R-40, R-44 |
 
 ### What step 1 already provides for it
 
@@ -66,6 +66,8 @@ Several people in one group, each with their own computers and AIs.
 - `contracts/datachannel.md`: section 8 row "a device of another member"
   becomes active; receive-only terminal channel.
 - Nothing in the step 1 shapes changes meaning.
+- The full lists are in the contracts of `contracts/step-2/` and
+  `contracts/step-3/`, each of which names the step 1 files it adds to.
 
 ## Step 3: extensions
 
@@ -94,7 +96,10 @@ otherwise it waits.
 
 `[unverified]` From earlier desk research, candidates that appear to have
 headless mode, resume and MCP: Qwen Code, OpenCode, Amp. Others had gaps.
-Every claim is rechecked when the work starts; CLIs change monthly.
+Every claim is rechecked when the work starts; CLIs change monthly. Desk
+research unit T3-0 did so: OpenCode and Qwen Code passed, for API keys
+only, and get drivers; Amp is deferred (`contracts/step-3/drivers.md`
+section 8).
 
 ### 3.2 Design style presets
 

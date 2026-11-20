@@ -176,7 +176,7 @@ file), and one new argument on each of two existing tools.
 | --- | --- | --- | --- |
 | `kb_put` | `name`; `text` | `{"id":"…","replaced":false}`, the command's result | `note` with `type: kb` |
 | `kb_search` | `query`; `limit` (default 3, at most 20) | `{"documents":[{"id","name","text","by","at"}],"more":false}`, best first | `fetch` with `kind: kb` and `q` |
-| `note_list` | adds `type` (optional): `preset` lists the presets, each entry with `name` beside the step 1 fields. Without `type`: the context notes, as in step 1 | `{"notes":[{"id","task","name","text","by","at"}]}` | `fetch` with `kind: preset` |
+| `note_list` | adds `type` (optional): `preset` lists the presets, each entry with `name` beside the step 1 fields. Without `type`: the context notes, as in step 1 | `{"notes":[{"id","task","name","text","by","at"}]}` | `fetch` with `kind: preset`; without `type`, `kind: note` as in step 1 |
 | `propose_brief` | adds `preset` (optional): a preset's name | as in step 1 | `post` kind `brief` |
 
 - `kb_put` with a name that exists replaces that document; the result says
