@@ -231,13 +231,16 @@ describe('openSignal and openCommand', () => {
   const now = 1763600000000;
   const everyone = () => true;
   const nobody = () => false;
-  const payload = (fields: string) => `{"t":"offer","n":"x","ts":${now}${fields}}`;
+  // Two random ids: 16 bytes in their canonical spelling.
+  const n = 'Zk3aZk3aZk3aZk3aZk3aZg';
+  const g = 'Qm1bQm1bQm1bQm1bQm1bQw';
+  const payload = (fields: string) => `{"t":"offer","n":"${n}","ts":${now}${fields}}`;
 
   it('give the payload of an envelope that passes every check', async () => {
     const device = await newDevice();
-    const env = await device.sign(payload(',"g":"G","to":"me","sdp":"v=0"'));
+    const env = await device.sign(payload(`,"g":"${g}","to":"me","sdp":"v=0"`));
     expect(await openSignal(crypto, env, 'me', everyone, now)).toStrictEqual({
-      header: { t: 'offer', n: 'x', ts: now, g: 'G', to: 'me', sdp: 'v=0' },
+      header: { t: 'offer', n, ts: now, g, to: 'me', sdp: 'v=0' },
     });
   });
 
@@ -250,13 +253,13 @@ describe('openSignal and openCommand', () => {
 
   it('answer the first check that fails, in the contract order', async () => {
     const device = await newDevice();
-    const late = await device.sign(`{"t":"cmd","n":"c","ts":0,"to":"you"}`);
+    const late = await device.sign(`{"t":"cmd","n":"${n}","ts":0,"to":"you"}`);
     const tampered = { ...late, p: late.p.replace('cmd', 'cme') };
     const code = async (env: typeof late, me: string, known: () => boolean) =>
       openCommand(crypto, env, me, known, now);
     expect(await code(tampered, 'me', nobody)).toStrictEqual({ code: 'bad_sig' });
     expect(await code(late, 'me', nobody)).toStrictEqual({ code: 'unknown_device' });
-    const odd = await device.sign('{"t":"cmd","n":"c","ts":"0","to":"you"}');
+    const odd = await device.sign(`{"t":"cmd","n":"${n}","ts":"0","to":"you"}`);
     expect(await code(odd, 'me', nobody)).toStrictEqual({ code: 'unknown_device' });
     expect(await code(odd, 'me', everyone)).toStrictEqual({ code: 'bad_request' });
     expect(await code(late, 'me', everyone)).toStrictEqual({ code: 'not_for_me' });
@@ -271,20 +274,23 @@ describe('openSignal and openCommand', () => {
   });
 
   it.each([
-    ['no t', '{"n":"x","ts":1}'],
+    ['no t', `{"n":"${n}","ts":1}`],
     ['no n', '{"t":"cmd","ts":1}'],
-    ['no ts', '{"t":"cmd","n":"x"}'],
-    ['a t that is not a string', '{"t":1,"n":"x","ts":1}'],
+    ['no ts', `{"t":"cmd","n":"${n}"}`],
+    ['a t that is not a string', `{"t":1,"n":"${n}","ts":1}`],
     ['an n that is not a string', '{"t":"cmd","n":1,"ts":1}'],
-    ['a ts that is a string', '{"t":"cmd","n":"x","ts":"1"}'],
-    ['a ts that is a fraction', '{"t":"cmd","n":"x","ts":1.5}'],
-    ['a ts of 2^53', '{"t":"cmd","n":"x","ts":9007199254740992}'],
-    ['a ts of 1e20', '{"t":"cmd","n":"x","ts":1e20}'],
-    ['a ts that is null', '{"t":"cmd","n":"x","ts":null}'],
-    ['a t that is null', '{"t":null,"n":"x","ts":1}'],
-    ['a g that is null', '{"t":"cmd","n":"x","ts":1,"g":null}'],
-    ['a g that is not a string', '{"t":"cmd","n":"x","ts":1,"g":1}'],
-    ['a to that is null', '{"t":"cmd","n":"x","ts":1,"to":null}'],
+    ['an n that is empty', '{"t":"cmd","n":"","ts":1}'],
+    ['an n that is no id', '{"t":"cmd","n":"x","ts":1}'],
+    ['a ts that is a string', `{"t":"cmd","n":"${n}","ts":"1"}`],
+    ['a ts that is a fraction', `{"t":"cmd","n":"${n}","ts":1.5}`],
+    ['a ts of 2^53', `{"t":"cmd","n":"${n}","ts":9007199254740992}`],
+    ['a ts of 1e20', `{"t":"cmd","n":"${n}","ts":1e20}`],
+    ['a ts that is null', `{"t":"cmd","n":"${n}","ts":null}`],
+    ['a t that is null', `{"t":null,"n":"${n}","ts":1}`],
+    ['a g that is null', `{"t":"cmd","n":"${n}","ts":1,"g":null}`],
+    ['a g that is not a string', `{"t":"cmd","n":"${n}","ts":1,"g":1}`],
+    ['a g that is no id', `{"t":"cmd","n":"${n}","ts":1,"g":"G"}`],
+    ['a to that is null', `{"t":"cmd","n":"${n}","ts":1,"to":null}`],
     ['an array', '[]'],
     ['null', 'null'],
     ['a string', '"cmd"'],
@@ -298,7 +304,7 @@ describe('openSignal and openCommand', () => {
 
   it('read fields by their exact names, the last of a repeat, and integers by value', async () => {
     const device = await newDevice();
-    const p = '{"t":"cmd","n":"x","ts":1.0000000000000001,"TO":"o","to":"o","to":"me","Ts":"no"}';
+    const p = `{"t":"cmd","n":"${n}","ts":1.0000000000000001,"TO":"o","to":"o","to":"me","Ts":"no"}`;
     const opened = await openCommand(crypto, await device.sign(p), 'me', everyone, 1);
     expect(opened).toMatchObject({ header: { ts: 1, to: 'me' } });
   });

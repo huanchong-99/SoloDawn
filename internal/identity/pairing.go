@@ -54,18 +54,22 @@ func (s Secret) Room() string {
 	return hex.EncodeToString(h[:16])
 }
 
-// MAC returns the mac of the pair message of a device in a role, "a" for the
-// side that created the secret and "b" for the other.
-func (s Secret) MAC(role, device string) string {
-	m := hmac.New(sha256.New, []byte(s))
-	m.Write([]byte("solodawn/pair/1\n" + role + "\n" + device))
-	return b64.EncodeToString(m.Sum(nil))
+// MAC returns the mac of a pair message: it covers the role, "a" for the
+// side that created the secret and "b" for the other, and the device id, kind
+// and name the message carries. The text is what goes on the wire, where a
+// byte that is not UTF-8 is written as U+FFFD; the other side reads the same
+// bytes, a browser also for the escape of a lone surrogate.
+func (s Secret) MAC(m proto.Pair) string {
+	h := hmac.New(sha256.New, []byte(s))
+	h.Write([]byte(string([]rune("solodawn/pair/1\n" + m.Role + "\n" + m.Key + "\n" + m.Kind + "\n" + m.Name))))
+	return b64.EncodeToString(h.Sum(nil))
 }
 
 // Verify reports whether a received pair message is to be accepted: it has
-// the role the other side must have, its k is a device id, and its mac proves
-// that its sender holds the secret. A message in the receiver's own role is
-// its own message sent back, and proves nothing.
+// the role the other side must have, its k is a device id, its kind is node or
+// browser, and its mac proves that its sender holds the secret and wrote the
+// other four. A message in the receiver's own role is its own message sent
+// back, and proves nothing.
 func (s Secret) Verify(m proto.Pair, role string) bool {
-	return m.Role == role && isDevice(m.Key) && hmac.Equal([]byte(m.MAC), []byte(s.MAC(role, m.Key)))
+	return m.Role == role && isDevice(m.Key) && (m.Kind == "node" || m.Kind == "browser") && hmac.Equal([]byte(m.MAC), []byte(s.MAC(m)))
 }

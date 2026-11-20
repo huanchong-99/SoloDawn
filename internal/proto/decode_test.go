@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"reflect"
 	"slices"
@@ -264,6 +265,97 @@ func TestDecodeRefusesANumberBeyondADoubleOnlyInAField(t *testing.T) {
 		refused(t, name+" written -1e400", document(map[string]string{name: "-1e400"}), nil)
 	}
 	refused(t, "an optional integer written 1e400", document(map[string]string{"+": `,"turns":1e400`}), nil)
+}
+
+// A field of type ID takes 16 bytes in their canonical base64url spelling and
+// no other text; a field that is plain text is not judged.
+func TestDecodeTakesOnlyARandomIDInAnIDField(t *testing.T) {
+	type tagged struct {
+		N    ID     `json:"n"`
+		G    ID     `json:"g,omitempty"`
+		Re   *ID    `json:"re"`
+		List []ID   `json:"list"`
+		By   string `json:"by"`
+	}
+	good := id("an id")
+	read := func(n, more string) (tagged, error) {
+		var got tagged
+		err := Decode([]byte(`{"n":`+n+`,"re":null,"list":[],"by":"system"`+more+`}`), &got)
+		return got, err
+	}
+	quoted := func(text string) string { return `"` + text + `"` }
+
+	// Every text that 16 bytes encode to is an id, and of the 64 characters a
+	// 22-character text may end on, only the four that decode to those bytes
+	// and encode back to themselves.
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	for b := range 256 {
+		for _, at := range []int{0, 7, 15} {
+			raw := make([]byte, 16)
+			raw[at] = byte(b)
+			text := base64.RawURLEncoding.EncodeToString(raw)
+			if got, err := read(quoted(text), ""); err != nil || got.N != ID(text) {
+				t.Errorf("%x: %q read as %q, %v", raw, text, got.N, err)
+			}
+		}
+	}
+	accepted := ""
+	for _, last := range alphabet {
+		text := good[:21] + string(last)
+		raw, err := base64.RawURLEncoding.DecodeString(text)
+		canonical := err == nil && len(raw) == 16 && base64.RawURLEncoding.EncodeToString(raw) == text
+		if _, err := read(quoted(text), ""); (err == nil) != canonical || err != nil && err != errID {
+			t.Errorf("%q: %v, canonical is %v", text, err, canonical)
+		}
+		if canonical {
+			accepted += string(last)
+		}
+	}
+	if accepted != "AQgw" {
+		t.Errorf("an id ends on one of %q", accepted)
+	}
+
+	for what, n := range map[string]string{
+		"an empty text":                       `""`,
+		"one character short":                 quoted(good[:21]),
+		"one character too long":              quoted(good + "A"),
+		"padding":                             quoted(good + "=="),
+		"a line break after it":               quoted(good + `\n`),
+		"a line break before it":              quoted(`\n` + good),
+		"the standard alphabet":               `"++++++++++++++++++++/w"`,
+		"the escape of a lone surrogate":      `"\ud800"`,
+		"22 characters outside the alphabet":  quoted(strings.Repeat("é", 21) + "w"),
+		"a device id":                         quoted(host),
+		"a value that only some fields allow": `"system"`,
+	} {
+		if _, err := read(n, ""); err != errID {
+			t.Errorf("n %s: %v, want %v", what, err, errID)
+		}
+		if _, err := read(quoted(good), `,"g":`+n); err != errID {
+			t.Errorf("an optional g %s: %v, want %v", what, err, errID)
+		}
+		if got, err := read(quoted(good), `,"re":`+n+`,"list":[`+quoted(good)+`]`); err != errID {
+			t.Errorf("re %s: %+v, %v, want %v", what, got, err, errID)
+		}
+		if _, err := read(quoted(good), `,"list":[`+quoted(good)+`,`+n+`]`); err != errID {
+			t.Errorf("in a list, %s: %v, want %v", what, err, errID)
+		}
+	}
+	if _, err := read("null", ""); err != errNull {
+		t.Errorf("n null: %v, want %v", err, errNull)
+	}
+	if _, err := read("7", ""); err == nil || err == errID {
+		t.Errorf("n a number: %v, want the decoder's error", err)
+	}
+
+	other := id("another id")
+	want := tagged{N: ID(good), G: ID(other), Re: new(ID(other)), List: []ID{ID(good), ID(other)}, By: "system"}
+	if got, err := read(quoted(good), `,"g":`+quoted(other)+`,"re":`+quoted(other)+`,"list":[`+quoted(good)+`,`+quoted(other)+`]`); err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v, %v\nwant %+v", got, err, want)
+	}
+	if got, err := read(quoted(good), ""); err != nil || !reflect.DeepEqual(got, tagged{N: ID(good), List: []ID{}, By: "system"}) {
+		t.Errorf("without the optional g: got %+v, %v", got, err)
+	}
 }
 
 func TestDecodeLeavesWrongTypesToTheDecoder(t *testing.T) {

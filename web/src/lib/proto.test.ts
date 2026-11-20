@@ -123,6 +123,70 @@ describe('wire examples', () => {
   });
 });
 
+describe('Id', () => {
+  const is = (text: unknown) => v.is(p.Id, text);
+  const encode = (bytes: number[]) =>
+    btoa(String.fromCharCode(...bytes))
+      .replaceAll('+', '-')
+      .replaceAll('/', '_')
+      .replaceAll('=', '');
+  const id = 'Zk3-Zk3_Zk3aZk3aZk30Zg';
+
+  it('is what 16 bytes encode to in base64url without padding', () => {
+    for (let b = 0; b < 256; b++) {
+      for (const at of [0, 7, 15]) {
+        const bytes = new Array<number>(16).fill(0);
+        bytes[at] = b;
+        expect(is(encode(bytes)), encode(bytes)).toBe(true);
+      }
+    }
+    expect(is(id)).toBe(true);
+    expect(is(encode(new Array<number>(16).fill(255)))).toBe(true);
+  });
+
+  it('ends on one of the four characters whose unused bits are zero', () => {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const last = [...alphabet].filter((c) => is(id.slice(0, 21) + c));
+    expect(last.join('')).toBe('AQgw');
+  });
+
+  it.each([
+    ['an empty text', ''],
+    ['21 characters', id.slice(1)],
+    ['23 characters, one before', 'A' + id],
+    ['23 characters, one after', id + 'A'],
+    ['padding', id + '=='],
+    ['a line break after it', id + '\n'],
+    ['a line break before it', '\n' + id],
+    ['the standard alphabet', '++++++++++++++++++++/w'],
+    ['a character outside the alphabet at the start', '.' + id.slice(1)],
+    ['a character outside the alphabet near the end', id.slice(0, 20) + '.' + id.slice(21)],
+    ['a lone surrogate', '\ud800'],
+    ['22 characters outside the alphabet', 'é'.repeat(21) + 'w'],
+    ['a device id', 'akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs'],
+    ['a value that only some fields allow', 'system'],
+    ['a number', 5],
+    ['null', null],
+    ['a list of one id', [id]],
+  ])('is not %s', (_, text) => {
+    expect(is(text)).toBe(false);
+  });
+
+  it('is the type of n and g in a signed payload, and of no other example field', () => {
+    const offer = JSON.parse(goldens.offer);
+    expect(accepts('offer', offer)).toBe(true);
+    expect(accepts('offer', { ...offer, g: id })).toBe(true);
+    expect(accepts('offer', { ...offer, n: 'offer-1' })).toBe(false);
+    expect(accepts('offer', { ...offer, g: 'Website' })).toBe(false);
+    expect(accepts('offer', { ...offer, g: '' })).toBe(false);
+    expect(accepts('offer', { ...offer, conn: 'c1', to: 'anyone' })).toBe(true);
+    // The by of a message row may be "system", and a device row's id is no random id.
+    const msg = JSON.parse(goldens['row-msg']);
+    expect(accepts('row-msg', { ...msg, by: 'system' })).toBe(true);
+    expect(JSON.parse(goldens['row-device']).id).toContain(':');
+  });
+});
+
 describe('decode', () => {
   const frames = ['welcome', 'synced', 'fetched', 'cmd-ok', 'cmd-pair-link', 'cmd-error'];
 

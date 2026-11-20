@@ -14,7 +14,12 @@ const strs = v.array(str);
 export const Envelope = v.object({ p: str, k: str, s: str });
 export type Envelope = v.InferOutput<typeof Envelope>;
 
-const PayloadHeader = { n: str, ts: num, g: v.optional(str), to: v.optional(str) };
+/** A random id: 16 bytes in their canonical base64url spelling (contracts/envelope.md section 1).
+ *  That is 21 characters and one that carries two bits, its other four being zero. A field that
+ *  holds an id takes no other text. */
+export const Id = v.pipe(str, v.regex(/^[A-Za-z0-9_-]{21}[AQgw]$/));
+
+const PayloadHeader = { n: Id, ts: num, g: v.optional(Id), to: v.optional(str) };
 const SignalHeader = { ...PayloadHeader, conn: str };
 
 export const Offer = v.object({

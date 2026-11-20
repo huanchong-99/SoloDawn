@@ -377,7 +377,8 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
       Given("a command that this browser signed for the owner's node", async () => {
         [browser, node] = [await newDevice(), await newDevice()];
         receiver = node.id;
-        env = await browser.sign(`{"t":"cmd","n":"c1","ts":${now},"to":"${node.id}"}`);
+        const n = 'Zk3aZk3aZk3aZk3aZk3aZg';
+        env = await browser.sign(`{"t":"cmd","n":"${n}","ts":${now},"to":"${node.id}"}`);
       });
       When('<event>', () => {
         const event: string = variables.event;
@@ -440,14 +441,10 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
       let typed = '';
       let browser: Device;
       let node: Device;
-      const pair = async (side: Device, role: string, as: string) => ({
-        t: 'pair' as const,
-        k: side.id,
-        kind: role === 'a' ? 'browser' : 'node',
-        name: role,
-        role,
-        mac: await mac(crypto, as, role, side.id),
-      });
+      const pair = async (side: Device, role: string, as: string) => {
+        const m = { k: side.id, kind: role === 'a' ? 'browser' : 'node', name: role, role };
+        return { t: 'pair' as const, ...m, mac: await mac(crypto, as, m) };
+      };
       Given('this browser created a pairing secret', async () => {
         secret = newSecret(crypto);
         [browser, node] = [await newDevice(), await newDevice()];

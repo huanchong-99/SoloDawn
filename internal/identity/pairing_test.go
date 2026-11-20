@@ -2,6 +2,7 @@ package identity
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"regexp"
 	"testing"
 
@@ -10,15 +11,27 @@ import (
 
 // The sample secret of contracts/envelope.md section 6. Room and mac values
 // were computed with another SHA-256 and HMAC implementation (Node's crypto
-// module), the mac for the device of the RFC 8032 test key.
+// module, the text encoded by its TextEncoder): macA and macB for the device
+// of the RFC 8032 test key as the node "workstation", macOdd for it in role a
+// as a browser whose name is odd, which holds a lone surrogate in JavaScript
+// and U+FFFD here.
 const (
 	shown      = "7K2M-9QXD-4F8T-WB3N"
 	canonical  = "7K2M9QXD4F8TWB3N"
 	secretBits = "3cc544dfad23d1ae2c75"
 	room       = "23b3731de722f5b7425a41416cf5d30b"
-	macA       = "zYhWxq6OswvENAXMmjHSJmtwd3T-iSMssV1V7JpZzfM"
-	macB       = "F5iwkTqkIaAUSOttDmkU1DRwMDR-2J3ZIlOWNGdxBFY"
+	macA       = "iWG_BRkXCtR8OKQJz6EGeQxUUffZlDp8IOm-XRifvqw"
+	macB       = "dhGdvYswXbCsrMb2YuWEEhmMkUfFsrC3UA5SFI2akqI"
+	macOdd     = "3VEPY8_4LjatXYx7y3qgVWyipZ2TPYHIr4mhBMe1QZc"
+	odd        = "caf\u00e9\n\ufffd \U0001f642"
 )
+
+// pairOf is the pair message of a device, with the mac that follows from it.
+func pairOf(s Secret, role, device, kind, name string) proto.Pair {
+	m := proto.Pair{Type: "pair", Key: device, Kind: kind, Name: name, Role: role}
+	m.MAC = s.MAC(m)
+	return m
+}
 
 func TestParseSecretGivesTheCanonicalBytes(t *testing.T) {
 	for _, text := range []string{shown, canonical, "7k2m-9qxd-4f8t-wb3n", "7k2m9qxd4f8twb3n", "7K2M9QXD-4f8tWB3N", "-7K2M9QXD4F8TWB3N-"} {
@@ -91,14 +104,67 @@ func TestRoomAndMAC(t *testing.T) {
 	if got := s.Room(); got != room {
 		t.Errorf("room %q, want %q", got, room)
 	}
-	if got := s.MAC("a", rfcDevice); got != macA {
-		t.Errorf("mac of role a %q, want %q", got, macA)
+	for want, m := range map[string]proto.Pair{
+		macA:   {Key: rfcDevice, Kind: "node", Name: "workstation", Role: "a"},
+		macB:   {Key: rfcDevice, Kind: "node", Name: "workstation", Role: "b"},
+		macOdd: {Key: rfcDevice, Kind: "browser", Name: odd, Role: "a"},
+	} {
+		if got := s.MAC(m); got != want {
+			t.Errorf("mac of %+v: %q, want %q", m, got, want)
+		}
+		// The mac covers neither t nor the mac the message carries.
+		m.Type, m.MAC = "pair", want
+		if got := s.MAC(m); got != want {
+			t.Errorf("mac of %+v: %q, want %q", m, got, want)
+		}
 	}
-	if got := s.MAC("b", rfcDevice); got != macB {
-		t.Errorf("mac of role b %q, want %q", got, macB)
-	}
-	if other := Secret("7K2M9QXD4F8TWB3M"); other.Room() == room || other.MAC("a", rfcDevice) == macA {
+	if other := Secret("7K2M9QXD4F8TWB3M"); other.Room() == room || pairOf(other, "a", rfcDevice, "node", "workstation").MAC == macA {
 		t.Error("another secret gives the same room or mac")
+	}
+}
+
+// Each of the four values changes the mac, and none can pass for part of
+// another: the three before name hold no line break.
+func TestMACCoversRoleDeviceKindAndName(t *testing.T) {
+	s := Secret(canonical)
+	seen := map[string]string{}
+	for what, m := range map[string]proto.Pair{
+		"the message":                   pairOf(s, "a", rfcDevice, "node", "workstation"),
+		"another role":                  pairOf(s, "b", rfcDevice, "node", "workstation"),
+		"another device":                pairOf(s, "a", testKey("node").ID(), "node", "workstation"),
+		"another kind":                  pairOf(s, "a", rfcDevice, "browser", "workstation"),
+		"another name":                  pairOf(s, "a", rfcDevice, "node", "workstatiom"),
+		"no name":                       pairOf(s, "a", rfcDevice, "node", ""),
+		"a name that begins on a break": pairOf(s, "a", rfcDevice, "node", "\nworkstation"),
+		"the kind moved into the name":  pairOf(s, "a", rfcDevice, "", "node\nworkstation"),
+		"the name without a separator":  pairOf(s, "a", rfcDevice, "nodeworkstation", ""),
+	} {
+		if other, taken := seen[m.MAC]; taken {
+			t.Errorf("%s and %s have one mac", what, other)
+		}
+		seen[m.MAC] = what
+	}
+}
+
+// A message is written to the wire as JSON, where a byte that is not UTF-8
+// becomes U+FFFD. The mac is over what the other side reads.
+func TestMACIsOverTheNameAsItGoesOnTheWire(t *testing.T) {
+	s := Secret(canonical)
+	sent := pairOf(s, "a", rfcDevice, "node", "caf\xe9 \xff\xfe")
+	if want := pairOf(s, "a", rfcDevice, "node", "caf\ufffd \ufffd\ufffd").MAC; sent.MAC != want {
+		t.Errorf("mac %q, want that of the name with U+FFFD for each byte, %q", sent.MAC, want)
+	}
+	wire, err := json.Marshal(sent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var received proto.Pair
+	if err := proto.Decode(wire, &received); err != nil || !s.Verify(received, "a") {
+		t.Errorf("the message read from the wire is refused: %s, %v", wire, err)
+	}
+	// A browser reads the escape of a lone surrogate as one, and encodes it as U+FFFD.
+	if err := proto.Decode([]byte(`{"t":"pair","k":"`+rfcDevice+`","kind":"browser","name":"caf\u00e9\n\ud800 \ud83d\ude42","role":"a","mac":"`+macOdd+`"}`), &received); err != nil || !s.Verify(received, "a") {
+		t.Errorf("a name with the escape of a lone surrogate is refused: %+v, %v", received, err)
 	}
 }
 
@@ -106,6 +172,11 @@ func TestVerifyPair(t *testing.T) {
 	s := Secret(canonical)
 	pair := func(role, device, mac string) proto.Pair {
 		return proto.Pair{Type: "pair", Key: device, Kind: "node", Name: "workstation", Role: role, MAC: mac}
+	}
+	with := func(change func(*proto.Pair)) proto.Pair {
+		m := pair("a", rfcDevice, macA)
+		change(&m)
+		return m
 	}
 	other := testKey("node").ID()
 	weakKey := b64.EncodeToString(weakValues()[2])
@@ -116,15 +187,21 @@ func TestVerifyPair(t *testing.T) {
 	}{
 		"the creator's message, read by the other side": {pair("a", rfcDevice, macA), "a", true},
 		"the other side's message, read by the creator": {pair("b", rfcDevice, macB), "b", true},
+		"a browser's message":                           {pairOf(s, "a", rfcDevice, "browser", "phone"), "a", true},
+		"a name that is empty":                          {pairOf(s, "a", rfcDevice, "node", ""), "a", true},
 		"the creator's own message sent back to it":     {pair("a", rfcDevice, macA), "b", false},
 		"the other side's own message sent back to it":  {pair("b", rfcDevice, macB), "a", false},
 		"the creator's mac under the other role":        {pair("b", rfcDevice, macA), "b", false},
 		"the mac of another device":                     {pair("a", other, macA), "a", false},
-		"a k that is no device id, with its mac":        {pair("a", "workstation", s.MAC("a", "workstation")), "a", false},
-		"a k in another spelling, with its mac":         {pair("a", respelled(rfcDevice), s.MAC("a", respelled(rfcDevice))), "a", false},
-		"a weak key as k, with its mac":                 {pair("a", weakKey, s.MAC("a", weakKey)), "a", false},
-		"no k, with its mac":                            {pair("a", "", s.MAC("a", "")), "a", false},
-		"a mac made with another secret":                {pair("a", rfcDevice, Secret("7K2M9QXD4F8TWB3M").MAC("a", rfcDevice)), "a", false},
+		"the name changed on the way":                   {with(func(m *proto.Pair) { m.Name = "laptop" }), "a", false},
+		"the kind changed on the way":                   {with(func(m *proto.Pair) { m.Kind = "browser" }), "a", false},
+		"a kind that is neither, with its mac":          {pairOf(s, "a", rfcDevice, "phone", "workstation"), "a", false},
+		"no kind, with its mac":                         {pairOf(s, "a", rfcDevice, "", "workstation"), "a", false},
+		"a k that is no device id, with its mac":        {pairOf(s, "a", "workstation", "node", "workstation"), "a", false},
+		"a k in another spelling, with its mac":         {pairOf(s, "a", respelled(rfcDevice), "node", "workstation"), "a", false},
+		"a weak key as k, with its mac":                 {pairOf(s, "a", weakKey, "node", "workstation"), "a", false},
+		"no k, with its mac":                            {pairOf(s, "a", "", "node", "workstation"), "a", false},
+		"a mac made with another secret":                {pairOf(Secret("7K2M9QXD4F8TWB3M"), "a", rfcDevice, "node", "workstation"), "a", false},
 		"no mac":                                        {pair("a", rfcDevice, ""), "a", false},
 		"a mac cut short":                               {pair("a", rfcDevice, macA[:42]), "a", false},
 	} {

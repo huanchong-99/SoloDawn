@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mac, newSecret, parseSecret, room, shown, verifyPair } from './pairing';
+import type { Pair } from './proto';
 
 /** A WebCrypto whose random bytes are the given ones. */
 const randomBytes = (bytes: number[]) =>
@@ -80,18 +81,49 @@ describe('room', () => {
   });
 });
 
+describe('mac', () => {
+  const secret = '7K2M9QXD4F8TWB3N';
+  const k = '11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo';
+  const sent = { role: 'a', k, kind: 'node', name: 'workstation' };
+
+  // The expected values are Node's: an HMAC-SHA256 over the text as its TextEncoder encodes it.
+  it('covers the role, the device id, the kind and the name, one to a line', async () => {
+    expect(await mac(crypto, secret, sent)).toBe('iWG_BRkXCtR8OKQJz6EGeQxUUffZlDp8IOm-XRifvqw');
+    expect(await mac(crypto, secret, { ...sent, role: 'b' })).toBe(
+      'dhGdvYswXbCsrMb2YuWEEhmMkUfFsrC3UA5SFI2akqI',
+    );
+  });
+
+  it('takes the name as it stands, and a lone surrogate in it as U+FFFD', async () => {
+    const odd = '3VEPY8_4LjatXYx7y3qgVWyipZ2TPYHIr4mhBMe1QZc';
+    const name = (text: string) => ({ role: 'a', k, kind: 'browser', name: text });
+    expect(await mac(crypto, secret, name('café\n\ud800 🙂'))).toBe(odd);
+    expect(await mac(crypto, secret, name('café\n\ufffd 🙂'))).toBe(odd);
+    expect(await mac(crypto, secret, name('cafe\u0301\n\ufffd 🙂'))).not.toBe(odd);
+    expect(await mac(crypto, secret, name(' café\n\ufffd 🙂'))).not.toBe(odd);
+  });
+
+  it('differs when a part moves into the next', async () => {
+    const macs = await Promise.all(
+      [
+        sent,
+        { ...sent, kind: '', name: 'node\nworkstation' },
+        { ...sent, kind: 'nodeworkstation', name: '' },
+        { ...sent, name: '' },
+      ].map((m) => mac(crypto, secret, m)),
+    );
+    expect(new Set(macs).size).toBe(4);
+  });
+});
+
 describe('verifyPair', () => {
   const secret = '7K2M9QXD4F8TWB3N';
   const device = 'akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs';
-  const message = async (role: string, override: { mac?: string; k?: string } = {}) => ({
-    t: 'pair' as const,
-    k: device,
-    kind: 'browser',
-    name: 'phone browser',
-    role,
-    mac: await mac(crypto, secret, role, device),
-    ...override,
-  });
+  /** A pair message with the mac that follows from it, unless one is given. */
+  const message = async (role: string, override: Partial<Pair> = {}) => {
+    const m = { k: device, kind: 'browser', name: 'phone browser', role, ...override };
+    return { t: 'pair' as const, mac: await mac(crypto, secret, m), ...m };
+  };
 
   it('accepts the other side and refuses a message in another role', async () => {
     expect(await verifyPair(crypto, secret, await message('b'), 'b')).toBe(true);
@@ -101,9 +133,25 @@ describe('verifyPair', () => {
   it('refuses another secret, another device and a mac for another role', async () => {
     expect(await verifyPair(crypto, '7K2M9QXD4F8TWB3P', await message('b'), 'b')).toBe(false);
     const other = 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q';
-    expect(await verifyPair(crypto, secret, await message('b', { k: other }), 'b')).toBe(false);
-    const forA = await mac(crypto, secret, 'a', device);
-    expect(await verifyPair(crypto, secret, await message('b', { mac: forA }), 'b')).toBe(false);
+    const m = await message('b');
+    expect(await verifyPair(crypto, secret, { ...m, k: other }, 'b')).toBe(false);
+    const forA = (await message('a')).mac;
+    expect(await verifyPair(crypto, secret, { ...m, mac: forA }, 'b')).toBe(false);
+  });
+
+  it('refuses a message whose kind or name was changed on the way', async () => {
+    const m = await message('b');
+    expect(await verifyPair(crypto, secret, { ...m, name: 'laptop' }, 'b')).toBe(false);
+    expect(await verifyPair(crypto, secret, { ...m, name: '' }, 'b')).toBe(false);
+    expect(await verifyPair(crypto, secret, { ...m, kind: 'node' }, 'b')).toBe(false);
+  });
+
+  it('accepts a node and a browser, and ignores any other kind even with the right mac', async () => {
+    expect(await verifyPair(crypto, secret, await message('b', { kind: 'node' }), 'b')).toBe(true);
+    expect(await verifyPair(crypto, secret, await message('b', { name: '' }), 'b')).toBe(true);
+    for (const kind of ['phone', '', 'Node', 'nodebrowser']) {
+      expect(await verifyPair(crypto, secret, await message('b', { kind }), 'b')).toBe(false);
+    }
   });
 
   it('refuses a mac that is not in its canonical spelling', async () => {
@@ -119,7 +167,7 @@ describe('verifyPair', () => {
 
   it('keys the HMAC with the secret bytes, not extractable', async () => {
     const importKey = vi.spyOn(crypto.subtle, 'importKey');
-    await mac(crypto, secret, 'a', device);
+    await message('a');
     expect(importKey).toHaveBeenCalledExactlyOnceWith(
       'raw',
       new TextEncoder().encode(secret),
@@ -132,8 +180,7 @@ describe('verifyPair', () => {
 
   it('ignores a message whose k is not a device id, even with the right mac', async () => {
     for (const k of ['A'.repeat(43), device + '=', 'abc']) {
-      const m = await message('b', { k, mac: await mac(crypto, secret, 'b', k) });
-      expect(await verifyPair(crypto, secret, m, 'b')).toBe(false);
+      expect(await verifyPair(crypto, secret, await message('b', { k }), 'b')).toBe(false);
     }
   });
 

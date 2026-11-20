@@ -106,13 +106,13 @@ var (
 	user    = device(browser)
 	host    = device(node)
 	group   = id("group")
-	genesis = DeviceEntry{PayloadHeader{Type: "device", Nonce: id("genesis"), Timestamp: ts - 2}, DeviceChange{user, 1, "add", user, "browser", "phone browser"}}
-	addNode = DeviceEntry{PayloadHeader{Type: "device", Nonce: id("add"), Timestamp: ts - 1}, DeviceChange{user, 2, "add", host, "node", "workstation"}}
+	genesis = DeviceEntry{PayloadHeader{Type: "device", Nonce: ID(id("genesis")), Timestamp: ts - 2}, DeviceChange{user, 1, "add", user, "browser", "phone browser"}}
+	addNode = DeviceEntry{PayloadHeader{Type: "device", Nonce: ID(id("add")), Timestamp: ts - 1}, DeviceChange{user, 2, "add", host, "node", "workstation"}}
 )
 
 func TestPairingAndSessionGoldens(t *testing.T) {
 	signal := func(kind, to string) SignalHeader {
-		return SignalHeader{PayloadHeader{Type: kind, Nonce: id(kind), Timestamp: ts, To: to}, id("connection")}
+		return SignalHeader{PayloadHeader{Type: kind, Nonce: ID(id(kind)), Timestamp: ts, To: to}, id("connection")}
 	}
 	const sdp = "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\n" +
 		"m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=mid:0\r\na=sctp-port:5000\r\n"
@@ -123,10 +123,10 @@ func TestPairingAndSessionGoldens(t *testing.T) {
 	golden(t, "answer", Answer{signal("answer", user), sdp + "a=ice-ufrag:abc2\r\na=ice-pwd:abcdefghijklmnopqrstuv02\r\na=setup:active\r\n" +
 		"a=fingerprint:sha-256 AB:9F:14:A9:1B:0B:71:6F:BF:BE:34:DA:42:E0:68:EF:14:36:E4:A6:04:0C:15:22:31:E8:0A:E3:89:92:50:2A\r\n"})
 	golden(t, "ice", ICECandidate{signal("ice", host), "candidate:1 1 UDP 2130706431 192.0.2.1 47800 typ host", "0"})
-	golden(t, "pair", Pair{"pair", user, "browser", "phone browser", "a", "zBXTlY4O9eFeMUexu7JpBROUooUwjouJpxZt4h8eBI4"})
+	golden(t, "pair", Pair{"pair", user, "browser", "phone browser", "a", "LSa7ZkmFClacGrJ6bsUg1G3yTiycOY3RZf3rskaRwCo"})
 
 	golden(t, "device-add", addNode)
-	golden(t, "device-revoke", DeviceEntry{PayloadHeader{Type: "device", Nonce: id("revoke"), Timestamp: ts + 1}, DeviceChange{User: user, Version: 3, Op: "revoke", Device: host}})
+	golden(t, "device-revoke", DeviceEntry{PayloadHeader{Type: "device", Nonce: ID(id("revoke")), Timestamp: ts + 1}, DeviceChange{User: user, Version: 3, Op: "revoke", Device: host}})
 	golden(t, "devlog", Devlog{"devlog", user, []Envelope{
 		signed(browser, string(wireJSON(t, genesis))),
 		signed(browser, " "+string(wireJSON(t, addNode))),
