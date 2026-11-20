@@ -168,9 +168,10 @@ room and `mac`, and must never have that effect. Four rules:
    needs a connection paired with roles `a` and `b`. Both logs stay as
    they were; the joiner's person becomes a member, with all its devices.
 
-For check 2 of `contracts/envelope.md` section 3, a joining peer is
-listened to like a pairing peer: for 10 minutes from the creation of the
-secret, for signalling and for the one command of section 5.
+For check 2 of `contracts/envelope.md` section 3, the home listens to a
+joining peer, and the joiner to the `home` of its link, like a pairing
+peer: for 10 minutes from the creation of the secret, for signalling and,
+at the home, for the one command of section 5.
 
 The shared vectors gain (`contracts/vectors.md`): in `pairing`, the `mac`
 of a side with role `join`; in `pair_messages`, a field `for` (`pair` or
@@ -258,27 +259,26 @@ the home:
 So a link that reached the wrong person is seen in the history. A role
 change writes no message: the row shows it.
 
-## 7. Open points, each written above as recommended
+## 7. Points the owner settled (2026-11-20)
 
-1. **Lifetime of an invitation.** D-7 reuses the pairing secret: 10
-   minutes, in a room that lives 15 (`contracts/rendezvous.md` 2.2). Kept
-   here: nothing is stored or withdrawn, and a leaked link is soon
-   worthless. A longer life needs a stored secret, a home that joins its
-   room again, and a command to withdraw; it changes 2.1 and section 3.
+1. **Lifetime of an invitation**: 10 minutes, the pairing secret's, in a
+   room that lives 15 (`contracts/rendezvous.md` 2.2). Nothing is stored
+   or withdrawn, and a leaked link is soon worthless.
 2. **The person's other devices.** After `join` only B knows that P is in
-   a group homed on H; P's nodes learn it through `host.join`, P's other
-   browsers not at all. Recommended, outside this file because it adds
-   to the host surface: `host.info.homes` carries the home's device id,
-   and B records the membership on P's nodes with a host command.
-3. **One web client origin.** A browser is a device per origin, and the
-   link opens the web client of the home's rendezvous. A person on
-   another origin first adds a browser there (`flows/pairing.md` C). A
-   stated limit; with the official service it does not arise.
-4. **A person with no node.** Step 3 of the flow refuses a browser that
-   belongs to nobody. It could write its own genesis entry and join, but
-   that identity would live in one browser profile (`risks.md` K-20).
-5. **Who sets roles.** The owner alone (section 1), so that admins cannot
-   promote or demote each other. D-7 names the roles and not this.
+   a group homed on H; P's nodes learn it through `host.join`. Each entry
+   of `host.info.homes` (`contracts/datachannel.md` section 7) carries the
+   home's device id as `home`: frozen in P-4, built in T2-1. Not settled:
+   whether B records the membership on P's nodes with a host command, so
+   that P's other browsers learn it before an AI of P joins.
+3. **One web client origin.** A stated limit: a browser is a device per
+   origin, and the link opens the web client of the home's rendezvous. A
+   person on another origin first adds a browser there
+   (`flows/pairing.md` C). With the official service it does not arise.
+4. **A person with no node cannot join.** A stated limit: step 3 of the
+   flow refuses a browser that belongs to nobody. An identity in one
+   browser profile alone would be lost with it (`risks.md` K-20).
+5. **Who sets roles**: the owner alone (section 1), so that admins cannot
+   promote or demote each other.
 
 ## 8. Where this goes after step 1
 
@@ -292,7 +292,8 @@ change writes no message: the row shows it.
 
 Unit P-4 freezes the wire shapes: the payloads of `invite` (with its
 result) and `join`, `member set` with `role`, the `pair` message with
-role `join`, the two `system` bodies, and the vectors of section 3.
+role `join`, the two `system` bodies, `home` in `host.info.homes`
+(section 7), and the vectors of section 3.
 
 `[unverified]` Nothing here was run; it follows from the step 1 contracts
 as written. That one rendezvous connection holds several rooms was read
