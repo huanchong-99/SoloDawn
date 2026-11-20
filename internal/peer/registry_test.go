@@ -100,6 +100,9 @@ func TestChannelsHandedOverBesideCtl(t *testing.T) {
 const probeSDP = "v=0\r\no=- 1 1 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=mid:0\r\n"
 
 func TestProbeOfferKind(t *testing.T) {
+	prev := offerKinds["probe"]
+	delete(offerKinds, "probe")
+	t.Cleanup(func() { offerKinds["probe"] = prev })
 	f := newPair(t)
 	k := link{f.a.key.ID(), randomID()}
 	probe := f.a.sign(proto.Offer{SignalHeader: f.a.header(link{f.b.key.ID(), k.conn}, "offer"), SDP: probeSDP, Probe: true})

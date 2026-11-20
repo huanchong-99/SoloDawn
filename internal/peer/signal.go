@@ -38,6 +38,7 @@ type Peer struct {
 	mu       sync.Mutex // decisions and description/candidate application, never network writes
 	live     map[link]*Connection
 	slot     map[string]*Connection
+	probes   map[string]*Connection
 	early    map[link]*batch
 	retired  map[link]int64
 }
@@ -45,7 +46,7 @@ type Peer struct {
 // New keeps its own copy of channels: what the caller changes later does not
 // reach it.
 func New(key identity.Key, sockets *Sockets, db *store.Store, known func(string) bool, paths func(string) []Route, inbound func(*Connection), channels Channels) *Peer {
-	return &Peer{key: key, sockets: sockets, db: db, known: known, paths: paths, inbound: inbound, channels: maps.Clone(channels), now: time.Now, live: make(map[link]*Connection), slot: make(map[string]*Connection), early: make(map[link]*batch), retired: make(map[link]int64)}
+	return &Peer{key: key, sockets: sockets, db: db, known: known, paths: paths, inbound: inbound, channels: maps.Clone(channels), now: time.Now, live: make(map[link]*Connection), slot: make(map[string]*Connection), probes: make(map[string]*Connection), early: make(map[link]*batch), retired: make(map[link]int64)}
 }
 func randomID() string {
 	var b [16]byte
@@ -169,28 +170,28 @@ func (p *Peer) firstOffer(k link, o proto.Offer, now int64, kind offerKind, path
 
 func init() { offerKinds["ordinary"] = (*Peer).ordinaryOffer }
 
-// ordinaryOffer closes the signer's earlier inbound connection before the new
-// checks start (contracts/rendezvous.md section 2.3).
+// ordinaryOffer closes the signer's earlier inbound connection and any pending
+// probe before the new checks start (contracts/rendezvous.md section 2.3).
 func (p *Peer) ordinaryOffer(k link, desc webrtc.SessionDescription, paths []Route) (*proto.Envelope, error) {
 	if old := p.slot[k.device]; old != nil {
 		// Close returns once pion has released the old mux registration; its
 		// error concerns only the old connection.
 		old.Close()
 	}
-	return p.answer(k, desc, paths)
+	p.closeProbe(k.device)
+	return p.answer(k, desc, paths, false)
 }
-func (p *Peer) answer(k link, desc webrtc.SessionDescription, paths []Route) (*proto.Envelope, error) {
-	c, err := p.create(k, p.sockets.answer, paths)
+func (p *Peer) answer(k link, desc webrtc.SessionDescription, paths []Route, probe bool) (*proto.Envelope, error) {
+	c, err := p.create(k, p.sockets.answer, paths, probe)
 	if err != nil {
 		return nil, err
 	}
-	p.slot[k.device] = c
-	c.pc.OnDataChannel(func(dc *webrtc.DataChannel) { p.dispatch(c, dc) })
 	answer, err := c.makeAnswer(desc)
 	if err != nil {
 		c.Close()
 		return nil, err
 	}
+	p.acceptInbound(k.device, c, probe)
 	env := p.sign(proto.Answer{SignalHeader: p.header(k, "answer"), SDP: answer.SDP})
 	c.answer = &env
 	return &env, nil
@@ -255,7 +256,7 @@ func (p *Peer) Offer(ctx context.Context, device string) (*Connection, error) {
 func (p *Peer) makeOffer(k link, paths []Route) (*Connection, proto.Envelope, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	c, err := p.create(k, p.sockets.offer, paths)
+	c, err := p.create(k, p.sockets.offer, paths, false)
 	if err != nil {
 		return nil, proto.Envelope{}, err
 	}
@@ -272,9 +273,9 @@ func (p *Peer) makeOffer(k link, paths []Route) (*Connection, proto.Envelope, er
 }
 
 // create makes a connection with the ICE servers of paths, a snapshot taken
-// before the peer lock.
-func (p *Peer) create(k link, api *webrtc.API, paths []Route) (*Connection, error) {
-	pc, err := api.NewPeerConnection(iceConfig(paths))
+// before the peer lock; a probe omits TURN (contracts/rendezvous.md section 5).
+func (p *Peer) create(k link, api *webrtc.API, paths []Route, probe bool) (*Connection, error) {
+	pc, err := api.NewPeerConnection(peerICE(paths, probe))
 	if err != nil {
 		return nil, err
 	}
