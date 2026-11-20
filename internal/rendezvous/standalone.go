@@ -89,7 +89,7 @@ func (o Options) serveICE(web fs.FS, l net.Listener) error {
 	defer udp.Close()
 	httpEndpoint := newEndpoint(l.Addr())
 	defer httpEndpoint.Close()
-	port := &sharedPort{config: cfg, names: map[string]*endpoint{tlsName(o.Domain): httpEndpoint}}
+	port := &sharedPort{config: cfg, names: map[string]*endpoint{tlsName(o.Domain): httpEndpoint}, conns: map[string]int{}}
 	var turnListener net.Listener
 	if !o.NoRelay {
 		port.turn = newEndpoint(l.Addr())

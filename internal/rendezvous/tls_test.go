@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"net"
@@ -222,4 +223,110 @@ func TestACMEServer(t *testing.T) {
 	if _, err := o.certificates(); err == nil || err.Error() != "--acme-ca holds no certificate" {
 		t.Fatal(err)
 	}
+}
+
+// failingListener returns its errors from Accept, then a connection, then
+// net.ErrClosed.
+type failingListener struct {
+	net.Listener
+	errs []error
+	conn net.Conn
+}
+
+func (l *failingListener) Accept() (net.Conn, error) {
+	if len(l.errs) != 0 {
+		err := l.errs[0]
+		l.errs = l.errs[1:]
+		return nil, err
+	}
+	if c := l.conn; c != nil {
+		l.conn = nil
+		return c, nil
+	}
+	return nil, fmt.Errorf("accept: %w", net.ErrClosed)
+}
+
+// After an Accept error other than a closed listener, the port waits from
+// 5 ms, doubling to at most 1 s, and goes on.
+func TestAcceptBackoff(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		temporary := errors.New("too many open files")
+		errs := make([]error, 10)
+		for i := range errs {
+			errs[i] = temporary
+		}
+		a, b := net.Pipe()
+		defer b.Close()
+		l := &failingListener{errs: errs, conn: a}
+		p := &sharedPort{config: &tls.Config{}, conns: map[string]int{}}
+		start := time.Now()
+		if err := p.serve(l); !errors.Is(err, net.ErrClosed) {
+			t.Fatal(err)
+		}
+		// 5+10+20+40+80+160+320+640 ms, then 1 s twice.
+		if got := time.Since(start); got != 3275*time.Millisecond {
+			t.Fatal(got)
+		}
+		synctest.Wait()
+		if p.conns[host(a.RemoteAddr())] != 1 {
+			t.Fatal("the connection after the errors was not served", p.conns)
+		}
+	})
+}
+
+// A source IP has at most 256 connections open on the shared port; a closed
+// one gives its place back.
+func TestConnectionsPerIP(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := &sharedPort{config: &tls.Config{}, conns: map[string]int{}}
+		var clients []net.Conn
+		connect := func() net.Conn {
+			a, b := net.Pipe() // every pipe has the address "pipe", without a host
+			p.admit(a)
+			clients = append(clients, b)
+			return b
+		}
+		for range maxConnsPerIP {
+			connect()
+		}
+		over := connect()
+		if n, err := over.Read(make([]byte, 1)); n != 0 || err != io.EOF {
+			t.Fatalf("connection %d: %d, %v", maxConnsPerIP+1, n, err)
+		}
+		clients[0].Close() // its handshake fails and the server closes it
+		synctest.Wait()
+		connect()
+		synctest.Wait()
+		if p.conns[""] != maxConnsPerIP {
+			t.Fatal(p.conns)
+		}
+		for _, c := range clients {
+			c.Close()
+		}
+		synctest.Wait()
+		if len(p.conns) != 0 {
+			t.Fatal(p.conns)
+		}
+	})
+}
+
+// A TURN stream's write that the client does not read ends after 30 s.
+func TestTURNWriteDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		a, b := net.Pipe()
+		defer b.Close()
+		stream := idleStream{a}
+		start := time.Now()
+		if n, err := stream.Write([]byte("x")); n != 0 || !errors.Is(err, os.ErrDeadlineExceeded) || time.Since(start) != 30*time.Second {
+			t.Fatal(n, err, time.Since(start))
+		}
+		go b.Read(make([]byte, 1))
+		if n, err := stream.Write([]byte("y")); n != 1 || err != nil {
+			t.Fatal(n, err)
+		}
+		a.Close()
+		if n, err := stream.Write([]byte("z")); n != 0 || !errors.Is(err, io.ErrClosedPipe) {
+			t.Fatal(n, err)
+		}
+	})
 }
