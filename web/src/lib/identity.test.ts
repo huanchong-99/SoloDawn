@@ -1,4 +1,4 @@
-import { IDBFactory } from 'fake-indexeddb';
+import { IDBDatabase as FakeDatabase, IDBFactory } from 'fake-indexeddb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   decode,
@@ -342,7 +342,6 @@ describe('loadDevice', () => {
     return {
       crypto,
       idb: () => idb,
-      storage: { persist: vi.fn(() => Promise.resolve(true)) },
       ...replace,
     };
   };
@@ -401,29 +400,28 @@ describe('loadDevice', () => {
     expect(encode(raw)).toBe(device.id);
   });
 
-  it('asks once for persistent storage, after creating the key', async () => {
-    const browser = store();
-    await loadDevice(browser);
-    await tick();
-    expect(browser.storage.persist).toHaveBeenCalledOnce();
-    await loadDevice(browser);
-    await tick();
-    expect(browser.storage.persist).toHaveBeenCalledOnce();
+  it('keeps the key in a durable transaction', async () => {
+    const transaction = vi.spyOn(FakeDatabase.prototype, 'transaction');
+    await loadDevice(store());
+    // fake-indexeddb opens its own versionchange transaction first; the client's is the other.
+    expect(transaction).toHaveBeenCalledWith('device', 'readwrite', {
+      durability: 'strict',
+    });
   });
 
-  it('ignores how the request for persistent storage ends', async () => {
-    const persist = vi.fn(() => Promise.reject(new DOMException('no', 'NotAllowedError')));
-    await loadDevice(store({ storage: { persist } }));
+  it('does not ask for persistent storage', async () => {
+    const persist = vi.fn(() => Promise.resolve(true));
+    vi.stubGlobal('navigator', { storage: { persist } });
+    await loadDevice(store());
     await tick();
-    expect(persist).toHaveBeenCalledOnce();
+    expect(persist).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 
   it('keeps one key when two pages open at once', async () => {
     const browser = store();
     const [a, b] = await Promise.all([loadDevice(browser), loadDevice(browser)]);
     expect(b.id).toBe(a.id);
-    await tick();
-    expect(browser.storage.persist).toHaveBeenCalledOnce();
   });
 
   it('fails with StorageBlocked when IndexedDB cannot be reached', async () => {

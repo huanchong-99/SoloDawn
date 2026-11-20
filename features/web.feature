@@ -105,7 +105,6 @@ Feature: Web client
     And the person has opened the client once
     When the person opens the client again
     Then the browser is the same device as the first time
-    And the browser asked once for persistent site storage
 
   Scenario Outline: A receiver answers a signed command with one code
     Given a command that this browser signed for the owner's node

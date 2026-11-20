@@ -112,7 +112,6 @@ describe('boot', () => {
     crypto,
     css: withLightDark,
     idb: () => new IDBFactory(),
-    storage: { persist: () => Promise.resolve(true) },
     ...replace,
   });
   const notice = () => document.querySelector('h1')!.textContent;
