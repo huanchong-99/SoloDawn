@@ -6,11 +6,17 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-21 · limitation · `Turn` and `Runtime.Turn` do not carry the jump message id or raw items across the host seam
+### 2026-11-21 · limitation · Group and review sessions default to permission level 3 and rely on instructions not to edit files
 
-- Symptom: when `Runner.Turn` pre-empts a running task session for a queue jump (`planning/flows/agent-turn.md` section C, step 12), `Turn` (`internal/host/session.go:80`) carries `Jump: true` and `Thread` without the jump item's `msg` id (`proto.TaskPreempted.Msg`). Likewise, when a resume fails with `NoSession` (`flows/agent-turn.md` section E), `Runtime.Turn` (`internal/host/host.go:524`) has received the composed `text` and `Turn` without the raw `[]json.RawMessage` inbox items.
-- Cause: `Turn` and `Runtime` were frozen in HS-0 (#159) before P-1's `TaskPreempted.Msg` and `HS-14`'s `ReplacedTurn` item parsing met in Wave 2, and `HS-15` owns `internal/host/run.go` only.
-- Status: open, for I-1. In `internal/host/run.go`, `resolveJumpMsg` fetches the newest 20 rows of `turn.Thread` from the group's home and selects the matching human message id for `TaskPreempted.Msg` (which leaves `Msg` empty if more than 20 messages arrived after the jumped message or the home does not answer `fetch`), and `composeReplacedTurn` calls `Compose(h, s, ReplacedTurn, nil)` when `Compose` is set.
+- Symptom: at the default permission level of 3 (owner's decision of 2026-11-21), a group session or a review session starts its CLI with full tool access rather than a CLI-enforced read-only sandbox, so a model that ignores its prompt could edit files in `repo/` or `review/<num>/`.
+- Cause: `readLaunchConfig` (`internal/host/run.go`) applies `perm.level` or `default_level` (default 3) to every session kind so that group and review sessions keep the CLI's ask-the-user tool and their multiple-choice questions reach the owner as decision cards (`planning/sessions.md` section 1). At level 1 Claude Code runs with `--tools Read,Glob,Grep` (`planning/contracts/drivers.md` section 1.1), which strips that tool.
+- Status: open, accepted by the coordinator's decision of 2026-11-21 (#187). Each session's instructions (`planning/contracts/drivers.md` section 4) tell group and review sessions not to change code.
+
+### 2026-11-21 · limitation · Ending a session through `Sessions.End` does not close an open CLI process
+
+- Symptom: when a session ends (`planning/flows/agent-turn.md` section D, step 17) and its caller removes the row with `Sessions.End`, an open `waiting` CLI process for that session stays in `runtimePart.procs` until its `idle_minutes` timer expires or `max_open` evicts a slot.
+- Cause: `Runtime` (`internal/host/host.go:516`) exposes `Turn` and `Answer` only, and `Sessions.End` (`internal/host/session.go:285`) has no hook into the session runtime (`internal/host/run.go`).
+- Status: open, for I-1 or the unit that ends sessions (#186, #187). Adding a close method on `Runtime` (or a hook called by `Sessions.End`) lets step 17 close and wait for the session's process before removing its folder.
 
 ### 2026-11-21 · limitation · The jobs of a group in the home's run loop have no bound
 
@@ -380,7 +386,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: `planning/flows/agent-turn.md` section G has the node write an audit row, and nothing else, when it kills a CLI that did not answer a close within 10 s outside a turn. `planning/contracts/storage.md` section 3 lists eight values of `what` (`delivered`, `refused`, `requested`, `approval`, `takeover`, `handback`, `merge`, `setting`), and none of them says that.
 - Cause: the list of `what` was written before that rule. The audit write takes any text as `what` and has a constant for each of the eight only (`internal/host/audit.go:6-15`); nothing kills a CLI yet.
-- Status: resolved in branch `gemini/HS-15`: `planning/contracts/storage.md` section 3 adds `killed` to `audit.what`, and `internal/host/run.go` defines `AuditKilled` and writes the row when an idle close does not finish within 10 s (`TestIdleCloseTimeoutKillsProcessAndWritesAuditOnly`).
+- Status: resolved in #187: `planning/contracts/storage.md` section 3 adds `killed` to `audit.what`, `internal/host/audit.go` defines `AuditKilled`, and `internal/host/run.go` writes the row naming the member and task when an idle close does not finish within 10 s (`TestCloseTimeoutOnAllPathsAuditAndC6SwitchOrdering`).
 
 ### 2026-11-21 · bug · A missing clone folder was reported as a failed start of git
 

@@ -37,10 +37,7 @@ const (
 	hrGroup = "rZNvy-1jH6Z-BcPqA5U5BQ"
 	hrAI1   = "1PC8WineBrUQ-apCjx7tug"
 	hrAI2   = "9mL3vB7xQ2kP5wZ8nH4jCA"
-	hrHuman = "3xK8pM2vN7qR4wY9bL5tGA"
 	hrTask1 = "DrtCn6htSBwmMPrFPbHJHA"
-	hrTask2 = "6hJ9kL4mP8rT2vX5zB7nQA"
-	hrMsg1  = "mC2ePrmW9VnmM_TRlN7zdg"
 )
 
 type hrHome struct {
@@ -64,17 +61,7 @@ func (h *hrHome) Request(_ context.Context, build func(int64) any) (json.RawMess
 	h.mu.Lock()
 	id := int64(len(h.cmds) + 1)
 	h.mu.Unlock()
-	frame := build(id)
-	cmd, ok := frame.(proto.Cmd)
-	if !ok {
-		msgRow, _ := json.Marshal(proto.MessageRow[proto.EmptyBody, proto.NoCard]{
-			RowHeader: proto.RowHeader{Type: "msg", ID: hrMsg1, Seq: 1},
-			Pos:       1, Group: hrGroup, Main: true, By: hrHuman, Kind: "text",
-			Timestamp: 1763600000000, Text: "jump now", Mentions: []string{},
-		})
-		fetched, _ := json.Marshal(proto.Fetched{Type: "fetched", Success: proto.Success{Re: id, OK: true}, Rows: []json.RawMessage{msgRow}})
-		return fetched, nil
-	}
+	cmd := build(id).(proto.Cmd)
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(cmd.Env.Payload), &payload); err != nil {
 		return nil, err
@@ -101,6 +88,7 @@ type hrMemDriver struct {
 	noSess    map[int]bool
 	autoEnd   bool
 	readyID   string
+	onStart   func(idx int, l host.Launch)
 }
 
 func (d *hrMemDriver) Start(ctx context.Context, l host.Launch) (host.Process, error) {
@@ -111,12 +99,13 @@ func (d *hrMemDriver) Start(ctx context.Context, l host.Launch) (host.Process, e
 	autoEnd := d.autoEnd
 	readyID := d.readyID
 	parentCtx := d.parentCtx
-	p := &hrMemProc{ctx: ctx, events: make(chan host.Event, 16), turns: make(chan struct {
-		text string
-		kind host.TurnKind
-	}, 8)}
+	onStart := d.onStart
+	p := &hrMemProc{ctx: ctx, events: make(chan host.Event, 16), turns: make(chan string, 8)}
 	d.procs = append(d.procs, p)
 	d.mu.Unlock()
+	if onStart != nil {
+		onStart(idx, l)
+	}
 	go func() {
 		if parentCtx != nil {
 			select {
@@ -159,31 +148,17 @@ type hrMemProc struct {
 	closed bool
 	events chan host.Event
 	onTurn func(string) error
-	turns  chan struct {
-		text string
-		kind host.TurnKind
-	}
-	interrupted int
+	turns  chan string
 }
 
 func (p *hrMemProc) Events() <-chan host.Event { return p.events }
 
 func (p *hrMemProc) Turn(text string) error {
-	p.turns <- struct {
-		text string
-		kind host.TurnKind
-	}{text: text}
+	p.turns <- text
 	return p.onTurn(text)
 }
 
-func (p *hrMemProc) Interrupt() error {
-	p.mu.Lock()
-	p.interrupted++
-	p.mu.Unlock()
-	p.emit(host.Event{Kind: host.TurnEnded, Status: "interrupted"})
-	return nil
-}
-
+func (p *hrMemProc) Interrupt() error          { return nil }
 func (p *hrMemProc) Answer(string, bool) error { return nil }
 
 func (p *hrMemProc) Close() error {
@@ -208,7 +183,7 @@ func (p *hrMemProc) closeEvents() {
 	p.mu.Unlock()
 }
 
-// hrCLIDriver drives the real built fakecli/claude binary on PATH so scenarios
+// hrCLIDriver drives the built fakecli/claude binary on PATH so scenarios
 // exercise actual OS subprocess start, stdin/stdout stream-json, mid-turn exit
 // and SOLODAWN_FAKECLI_LOG ordering.
 type hrCLIDriver struct {
@@ -219,13 +194,13 @@ type hrCLIDriver struct {
 	logFile   string
 }
 
-func newHRCLIDriver(cleanup func(func()), logFile string, scripts ...string) *hrCLIDriver {
+func newHRCLIDriver(h *host.Host, cleanup func(func()), logFile string, scripts ...string) *hrCLIDriver {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &hrCLIDriver{parentCtx: ctx, scripts: scripts, logFile: logFile}
 	cleanup(func() {
 		cancel()
 		d.wg.Wait()
-		time.Sleep(15 * time.Millisecond)
+		waitAllSessionsIdle(h)
 	})
 	return d
 }
@@ -240,6 +215,9 @@ func (d *hrCLIDriver) Start(ctx context.Context, l host.Launch) (host.Process, e
 	parentCtx := d.parentCtx
 	d.mu.Unlock()
 
+	if err := os.MkdirAll(l.Folder, 0o755); err != nil {
+		return nil, err
+	}
 	sessionID := l.Session
 	flag := "--resume"
 	if sessionID == "" {
@@ -336,28 +314,37 @@ func hostRunSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
 	cleanup := afterScenario(sc)
 	origDrivers := maps.Clone(host.Drivers)
 	origCompose := host.Compose
+	origDeliver := host.Deliver
+	origInstructions := host.Instructions
+	installHRDefaultHooks()
 	cleanup(func() {
 		host.Drivers = origDrivers
 		host.Compose = origCompose
+		host.Deliver = origDeliver
+		host.Instructions = origInstructions
 	})
 
-	registerIdleAndMaxOpenSteps(sc, suiteT, cleanup)
+	registerIdleAndMaxOpenSteps(sc, suiteT)
 	registerCLICrashAndSwitchSteps(sc, suiteT, cleanup)
-	registerReplaceAndJumpSteps(sc, suiteT, cleanup)
+	registerReplaceSteps(sc, suiteT, cleanup)
 }
 
-func newTestHost(cleanup func(func()), maxOpen, idleMin int) (*host.Host, *hrHome, context.Context, error) {
+func installHRDefaultHooks() {
+	host.Deliver = func(*host.Host, string, string) {}
+	host.Instructions = func(host.Session) string { return "" }
+	host.Compose = func(_ *host.Host, s host.Session, kind host.TurnKind, _ []json.RawMessage) (string, host.Turn, error) {
+		return "composed:" + string(kind), host.Turn{Kind: kind, Thread: s.Task}, nil
+	}
+}
+
+func newTestHost(suiteT *testing.T, cleanup func(func()), maxOpen, idleMin int) (*host.Host, *hrHome, context.Context, error) {
 	procCtx, cancelProcs := context.WithCancel(context.Background())
-	db, err := store.Open(":memory:")
+	dbPath := filepath.Join(suiteT.TempDir(), "node.db")
+	db, err := store.Open(dbPath)
 	if err != nil {
 		cancelProcs()
 		return nil, nil, nil, err
 	}
-	cleanup(func() { db.Close() })
-	cleanup(func() {
-		cancelProcs()
-		time.Sleep(10 * time.Millisecond)
-	})
 	err = db.Write(func(tx *store.Tx) error {
 		if maxOpen > 0 {
 			if _, err := tx.Exec("INSERT INTO setting(key, value) VALUES('max_open', ?)", fmt.Sprint(maxOpen)); err != nil {
@@ -372,47 +359,82 @@ func newTestHost(cleanup func(func()), maxOpen, idleMin int) (*host.Host, *hrHom
 		return nil
 	})
 	if err != nil {
+		cancelProcs()
+		db.Close()
 		return nil, nil, nil, err
 	}
 	key := identity.Key(ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize)))
 	h, _, err := host.New(db, key, time.Now)
 	if err != nil {
+		cancelProcs()
+		db.Close()
 		return nil, nil, nil, err
 	}
+	cleanup(func() { db.Close() })
+	cleanup(func() {
+		cancelProcs()
+		waitAllSessionsIdle(h)
+	})
 	rh := newHRHome()
 	h.Attach("home-dev", rh)
 	return h, rh, procCtx, nil
 }
 
-func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T, cleanup func(func())) {
-	// Scenario 1 (A3.4): run inside synctest.Test so 1 minute of virtual idle time runs deterministically in <5ms.
-	var idleResumedSession string
-	var idleStates []string
-	var idleStatusReported bool
+func waitAllSessionsIdle(h *host.Host) {
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		allDormant := true
+		for _, s := range h.Sessions.All() {
+			if s.State != host.Dormant {
+				allDormant = false
+				break
+			}
+		}
+		if allDormant {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
 
-	sc.Step(`^a host session runtime with idle_minutes set to 1$`, func() {
-		idleResumedSession = ""
-		idleStates = nil
+func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
+	// Scenario 1 (A3.4): honest steps inside synctest.Test.
+	var idleMinutes int
+	var idleStateBeforeSecond host.State
+	var idleStatusReported bool
+	var idleResumedSession string
+
+	sc.Step(`^a host session runtime with idle_minutes set to (\d+)$`, func(mins int) {
+		idleMinutes = mins
+		idleStateBeforeSecond = ""
 		idleStatusReported = false
+		idleResumedSession = ""
 	})
-	sc.Step(`^a task session completes a turn with CLI session "([^"]+)"$`, func(cliID string) error {
+	sc.Step(`^a task session with CLI session "([^"]+)" completes a turn, stays idle for 1 minute and receives another turn$`, func(cliID string) error {
 		var stepErr error
-		wtDir := suiteT.TempDir()
+		baseDir := suiteT.TempDir()
 		synctest.Test(suiteT, func(t *testing.T) {
-			db, err := store.Open(":memory:")
+			installHRDefaultHooks()
+			procCtx, cancelProcs := context.WithCancel(context.Background())
+			db, err := store.Open(filepath.Join(baseDir, "node.db"))
 			if err != nil {
+				cancelProcs()
 				stepErr = err
 				return
 			}
-			defer db.Close()
+			defer func() {
+				cancelProcs()
+				synctest.Wait()
+				db.Close()
+			}()
 			if err := db.Write(func(tx *store.Tx) error {
-				_, e := tx.Exec("INSERT INTO setting(key, value) VALUES('idle_minutes', '1')")
+				_, e := tx.Exec("INSERT INTO setting(key, value) VALUES('idle_minutes', ?)", fmt.Sprint(idleMinutes))
 				return e
 			}); err != nil {
 				stepErr = err
 				return
 			}
-			drv := &hrMemDriver{autoEnd: true, readyID: cliID}
+			drv := &hrMemDriver{parentCtx: procCtx, autoEnd: true, readyID: cliID}
 			host.Drivers = map[string]host.Driver{"claude": drv}
 			h, _, err := host.New(db, identity.Key(ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))), time.Now)
 			if err != nil {
@@ -422,7 +444,7 @@ func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T, c
 			rh := newHRHome()
 			h.Attach("home-dev", rh)
 			tKey := host.SessionKey{Group: hrGroup, Member: hrAI1, Task: hrTask1}
-			if err := h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: wtDir, Agent: "claude", Home: "home-dev", Name: "Claude"}); err != nil {
+			if err := h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: "wt/1-task", Agent: "claude", Home: "home-dev", Name: "Claude"}); err != nil {
 				stepErr = err
 				return
 			}
@@ -434,7 +456,7 @@ func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T, c
 			time.Sleep(time.Minute)
 			synctest.Wait()
 			s, _ := h.Sessions.Get(tKey)
-			idleStates = append(idleStates, string(s.State))
+			idleStateBeforeSecond = s.State
 			for _, cmd := range rh.snapshot() {
 				if cmd["t"] == "member" && cmd["state"] == "dormant" {
 					idleStatusReported = true
@@ -446,89 +468,130 @@ func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T, c
 			}
 			synctest.Wait()
 			idleResumedSession = drv.launches[1].Session
-			time.Sleep(time.Minute)
-			synctest.Wait()
 		})
 		return stepErr
 	})
-	sc.Step(`^1 minute passes with no turn$`, func() {})
-	sc.Step(`^the task session is "dormant" and member status reported "dormant"$`, func() error {
-		if !slices.Equal(idleStates, []string{"dormant"}) || !idleStatusReported {
-			return fmt.Errorf("states=%v dormantReported=%v", idleStates, idleStatusReported)
+	sc.Step(`^the task session became "dormant" and member status reported "dormant" before the second turn$`, func() error {
+		if idleStateBeforeSecond != host.Dormant || !idleStatusReported {
+			return fmt.Errorf("state=%q dormantReported=%v", idleStateBeforeSecond, idleStatusReported)
 		}
 		return nil
 	})
-	sc.Step(`^the task session receives another turn$`, func() {})
-	sc.Step(`^the driver resumes CLI session "([^"]+)"$`, func(want string) error {
+	sc.Step(`^the driver resumed CLI session "([^"]+)"$`, func(want string) error {
 		if idleResumedSession != want {
 			return fmt.Errorf("resumed %q, want %q", idleResumedSession, want)
 		}
 		return nil
 	})
 
-	// Scenario 2 (A3.5): max_open = 1
-	var h2 *host.Host
-	var drv2 *hrMemDriver
-	k1 := host.SessionKey{Group: hrGroup, Member: hrAI1}
-	k2 := host.SessionKey{Group: hrGroup, Member: hrAI2}
-	var firstWasDormantBeforeSecond bool
-	var waitDone chan error
+	// Scenario 2 (A3.5): max_open = 1 inside synctest.Test, recording first AI state inside hrMemDriver.Start.
+	var maxOpenCfg int
+	var firstStateAtSecondStart host.State
+	var firstStateWhileSecondWorked host.State
+	var launchesWhileSecondWorked int
+	var firstStateAfterSecondFinished host.State
 
-	sc.Step(`^a host session runtime with max_open set to 1 and two AIs$`, func() (err error) {
-		var procCtx context.Context
-		h2, _, procCtx, err = newTestHost(cleanup, 1, 15)
-		if err != nil {
-			return err
-		}
-		drv2 = &hrMemDriver{parentCtx: procCtx}
-		host.Drivers = map[string]host.Driver{"claude": drv2}
-		if err := h2.Sessions.Create(host.Session{SessionKey: k1, Kind: host.GroupSession, Folder: suiteT.TempDir(), Agent: "claude", Home: "home-dev", Name: "AI1"}); err != nil {
-			return err
-		}
-		return h2.Sessions.Create(host.Session{SessionKey: k2, Kind: host.GroupSession, Folder: suiteT.TempDir(), Agent: "claude", Home: "home-dev", Name: "AI2"})
+	sc.Step(`^a host session runtime with max_open set to (\d+) and two AIs$`, func(maxOpen int) {
+		maxOpenCfg = maxOpen
+		firstStateAtSecondStart = ""
+		firstStateWhileSecondWorked = ""
+		launchesWhileSecondWorked = 0
+		firstStateAfterSecondFinished = ""
 	})
-	sc.Step(`^the first AI finishes a turn and is "waiting"$`, func() error {
-		if err := host.Runner.Turn(suiteT.Context(), h2, k1, "hello", host.Turn{Kind: host.ItemsTurn}); err != nil {
-			return err
-		}
-		drv2.procs[0].emit(host.Event{Kind: host.TurnEnded, Status: "completed"})
-		return waitSessionState(h2, k1, host.Waiting)
-	})
-	sc.Step(`^the second AI receives a turn$`, func() error {
-		if err := host.Runner.Turn(suiteT.Context(), h2, k2, "world", host.Turn{Kind: host.ItemsTurn}); err != nil {
-			return err
-		}
-		s1, _ := h2.Sessions.Get(k1)
-		firstWasDormantBeforeSecond = s1.State == host.Dormant
-		return nil
-	})
-	sc.Step(`^the first AI becomes "dormant" before the second AI starts$`, func() error {
-		if !firstWasDormantBeforeSecond {
-			return errors.New("first AI was not dormant when second started")
-		}
-		return nil
-	})
-	sc.Step(`^the second AI is still "working" and the first AI receives a turn$`, func() {
-		waitDone = make(chan error, 1)
-		go func() {
-			waitDone <- host.Runner.Turn(suiteT.Context(), h2, k1, "again", host.Turn{Kind: host.ItemsTurn})
-		}()
-	})
-	sc.Step(`^the first AI waits until the second AI finishes its turn and then starts$`, func() error {
-		time.Sleep(20 * time.Millisecond)
-		if s1, _ := h2.Sessions.Get(k1); s1.State != host.Dormant {
-			return fmt.Errorf("first AI started early: %s", s1.State)
-		}
-		drv2.procs[1].emit(host.Event{Kind: host.TurnEnded, Status: "completed"})
-		select {
-		case err := <-waitDone:
+	sc.Step(`^the first AI finishes a turn, the second AI starts a turn, and the first AI requests a turn before the second finishes$`, func() error {
+		var stepErr error
+		baseDir := suiteT.TempDir()
+		synctest.Test(suiteT, func(t *testing.T) {
+			installHRDefaultHooks()
+			procCtx, cancelProcs := context.WithCancel(context.Background())
+			db, err := store.Open(filepath.Join(baseDir, "node.db"))
 			if err != nil {
-				return err
+				cancelProcs()
+				stepErr = err
+				return
 			}
-		case <-time.After(5 * time.Second):
-			return errors.New("first AI did not start after second finished")
+			defer func() {
+				cancelProcs()
+				synctest.Wait()
+				db.Close()
+			}()
+			if err := db.Write(func(tx *store.Tx) error {
+				_, e := tx.Exec("INSERT INTO setting(key, value) VALUES('max_open', ?)", fmt.Sprint(maxOpenCfg))
+				return e
+			}); err != nil {
+				stepErr = err
+				return
+			}
+			h2, _, err := host.New(db, identity.Key(ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))), time.Now)
+			if err != nil {
+				stepErr = err
+				return
+			}
+			h2.Attach("home-dev", newHRHome())
+			k1 := host.SessionKey{Group: hrGroup, Member: hrAI1}
+			k2 := host.SessionKey{Group: hrGroup, Member: hrAI2}
+			drv2 := &hrMemDriver{
+				parentCtx: procCtx,
+				onStart: func(idx int, _ host.Launch) {
+					if idx == 1 {
+						s1, _ := h2.Sessions.Get(k1)
+						firstStateAtSecondStart = s1.State
+					}
+				},
+			}
+			host.Drivers = map[string]host.Driver{"claude": drv2}
+			if err := h2.Sessions.Create(host.Session{SessionKey: k1, Kind: host.GroupSession, Folder: "repo", Agent: "claude", Home: "home-dev", Name: "AI1"}); err != nil {
+				stepErr = err
+				return
+			}
+			if err := h2.Sessions.Create(host.Session{SessionKey: k2, Kind: host.GroupSession, Folder: "repo", Agent: "claude", Home: "home-dev", Name: "AI2"}); err != nil {
+				stepErr = err
+				return
+			}
+			if err := host.Runner.Turn(t.Context(), h2, k1, "hello", host.Turn{Kind: host.ItemsTurn}); err != nil {
+				stepErr = err
+				return
+			}
+			drv2.procs[0].emit(host.Event{Kind: host.TurnEnded, Status: "completed"})
+			synctest.Wait()
+
+			if err := host.Runner.Turn(t.Context(), h2, k2, "world", host.Turn{Kind: host.ItemsTurn}); err != nil {
+				stepErr = err
+				return
+			}
+			waitDone := make(chan error, 1)
+			go func() {
+				waitDone <- host.Runner.Turn(t.Context(), h2, k1, "again", host.Turn{Kind: host.ItemsTurn})
+			}()
+			synctest.Wait()
+			s1Mid, _ := h2.Sessions.Get(k1)
+			firstStateWhileSecondWorked = s1Mid.State
+			launchesWhileSecondWorked = len(drv2.launches)
+
+			drv2.procs[1].emit(host.Event{Kind: host.TurnEnded, Status: "completed"})
+			if err := <-waitDone; err != nil {
+				stepErr = err
+				return
+			}
+			s1End, _ := h2.Sessions.Get(k1)
+			firstStateAfterSecondFinished = s1End.State
+		})
+		return stepErr
+	})
+	sc.Step(`^the first AI became "dormant" before the second AI started$`, func() error {
+		if firstStateAtSecondStart != host.Dormant {
+			return fmt.Errorf("first AI state at second AI Start = %q, want dormant", firstStateAtSecondStart)
 		}
-		return waitSessionState(h2, k1, host.Working)
+		return nil
+	})
+	sc.Step(`^the first AI waited while the second AI was working and started once it finished$`, func() error {
+		if firstStateWhileSecondWorked != host.Dormant || launchesWhileSecondWorked != 2 {
+			return fmt.Errorf("first AI did not wait: state=%q launches=%d", firstStateWhileSecondWorked, launchesWhileSecondWorked)
+		}
+		if firstStateAfterSecondFinished != host.Working {
+			return fmt.Errorf("first AI state after second finished = %q, want working", firstStateAfterSecondFinished)
+		}
+		return nil
 	})
 }
 
@@ -542,13 +605,13 @@ func registerCLICrashAndSwitchSteps(sc *godog.ScenarioContext, suiteT *testing.T
 	sc.Step(`^a task session backed by the scripted Claude CLI$`, func() (err error) {
 		dir = suiteT.TempDir()
 		logFile = filepath.Join(dir, "lifecycle.log")
-		h, rh, _, err = newTestHost(cleanup, 4, 15)
+		h, rh, _, err = newTestHost(suiteT, cleanup, 4, 15)
 		if err != nil {
 			return err
 		}
-		cliDrv = newHRCLIDriver(cleanup, logFile)
+		cliDrv = newHRCLIDriver(h, cleanup, logFile)
 		host.Drivers = map[string]host.Driver{"claude": cliDrv}
-		return h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: dir, Agent: "claude", Home: "home-dev", Name: "Claude"})
+		return h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: "wt/1-task", Agent: "claude", Home: "home-dev", Name: "Claude"})
 	})
 	sc.Step(`^the scripted Claude CLI exits mid-turn after reporting session "([^"]+)"$`, func(id string) error {
 		crashScript := filepath.Join(dir, "crash.json")
@@ -607,16 +670,16 @@ func registerCLICrashAndSwitchSteps(sc *godog.ScenarioContext, suiteT *testing.T
 		if err := os.WriteFile(script, []byte(body), 0600); err != nil {
 			return err
 		}
-		h, rh, _, err = newTestHost(cleanup, 1, 15)
+		h, rh, _, err = newTestHost(suiteT, cleanup, 1, 15)
 		if err != nil {
 			return err
 		}
-		cliDrv = newHRCLIDriver(cleanup, logFile, script)
+		cliDrv = newHRCLIDriver(h, cleanup, logFile, script)
 		host.Drivers = map[string]host.Driver{"claude": cliDrv}
-		if err := h.Sessions.Create(host.Session{SessionKey: kA, Kind: host.GroupSession, Folder: dir, Agent: "claude", Home: "home-dev", Name: "A", CLISession: "sess-a"}); err != nil {
+		if err := h.Sessions.Create(host.Session{SessionKey: kA, Kind: host.GroupSession, Folder: "repo-a", Agent: "claude", Home: "home-dev", Name: "A", CLISession: "sess-a"}); err != nil {
 			return err
 		}
-		return h.Sessions.Create(host.Session{SessionKey: kB, Kind: host.GroupSession, Folder: dir, Agent: "claude", Home: "home-dev", Name: "B", CLISession: "sess-b"})
+		return h.Sessions.Create(host.Session{SessionKey: kB, Kind: host.GroupSession, Folder: "repo-b", Agent: "claude", Home: "home-dev", Name: "B", CLISession: "sess-b"})
 	})
 	sc.Step(`^turns alternate between the two sessions (\d+) times$`, func(switches int) error {
 		pairs := []host.SessionKey{kA, kB}
@@ -632,9 +695,8 @@ func registerCLICrashAndSwitchSteps(sc *godog.ScenarioContext, suiteT *testing.T
 		return nil
 	})
 	sc.Step(`^the lifecycle log records (\d+) non-overlapping start-exit pairs$`, func(total int) error {
-		// Trigger one switch to a third dormant session so the 11th process exits cleanly before inspecting the log.
 		kC := host.SessionKey{Group: hrGroup, Member: "end-slot"}
-		if err := h.Sessions.Create(host.Session{SessionKey: kC, Kind: host.GroupSession, Folder: dir, Agent: "claude", Home: "home-dev", Name: "C", CLISession: "sess-c"}); err != nil {
+		if err := h.Sessions.Create(host.Session{SessionKey: kC, Kind: host.GroupSession, Folder: "repo-c", Agent: "claude", Home: "home-dev", Name: "C", CLISession: "sess-c"}); err != nil {
 			return err
 		}
 		if err := host.Runner.Turn(suiteT.Context(), h, kC, "done", host.Turn{Kind: host.ItemsTurn}); err != nil {
@@ -648,7 +710,6 @@ func registerCLICrashAndSwitchSteps(sc *godog.ScenarioContext, suiteT *testing.T
 			return err
 		}
 		lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-		// First 2*total lines strictly alternate start / exit with matching session ids.
 		if len(lines) < 2*total {
 			return fmt.Errorf("got %d lines (%q), want at least %d", len(lines), raw, 2*total)
 		}
@@ -663,25 +724,21 @@ func registerCLICrashAndSwitchSteps(sc *godog.ScenarioContext, suiteT *testing.T
 	})
 }
 
-func registerReplaceAndJumpSteps(sc *godog.ScenarioContext, suiteT *testing.T, cleanup func(func())) {
+func registerReplaceSteps(sc *godog.ScenarioContext, suiteT *testing.T, cleanup func(func())) {
 	var h *host.Host
 	var rh *hrHome
 	var drv *hrMemDriver
 	tKey := host.SessionKey{Group: hrGroup, Member: hrAI1, Task: hrTask1}
-	gKey := host.SessionKey{Group: hrGroup, Member: hrAI1}
 
 	sc.Step(`^a task session whose stored CLI session id is no longer resumable$`, func() (err error) {
 		var procCtx context.Context
-		h, rh, procCtx, err = newTestHost(cleanup, 4, 15)
+		h, rh, procCtx, err = newTestHost(suiteT, cleanup, 4, 15)
 		if err != nil {
 			return err
 		}
 		drv = &hrMemDriver{parentCtx: procCtx, noSess: map[int]bool{0: true}, autoEnd: true}
 		host.Drivers = map[string]host.Driver{"claude": drv}
-		host.Compose = func(_ *host.Host, _ host.Session, kind host.TurnKind, _ []json.RawMessage) (string, host.Turn, error) {
-			return "composed:" + string(kind), host.Turn{Kind: kind, Thread: hrTask1}, nil
-		}
-		return h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: suiteT.TempDir(), Agent: "claude", Home: "home-dev", Name: "Claude", CLISession: "gone-id"})
+		return h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: "wt/1-task", Agent: "claude", Home: "home-dev", Name: "Claude", CLISession: "gone-id"})
 	})
 	sc.Step(`^the task session receives a turn$`, func() error {
 		return host.Runner.Turn(suiteT.Context(), h, tKey, "work", host.Turn{Kind: host.ItemsTurn, Thread: hrTask1})
@@ -694,8 +751,8 @@ func registerReplaceAndJumpSteps(sc *godog.ScenarioContext, suiteT *testing.T, c
 			return fmt.Errorf("launches: %+v", drv.launches)
 		}
 		gotTurn := <-drv.procs[1].turns
-		if gotTurn.text != "composed:"+kind {
-			return fmt.Errorf("got turn %q, want composed:%s", gotTurn.text, kind)
+		if gotTurn != "composed:"+kind {
+			return fmt.Errorf("got turn %q, want composed:%s", gotTurn, kind)
 		}
 		for _, cmd := range rh.snapshot() {
 			if ev, ok := cmd["event"].(map[string]any); ok && ev["code"] == "session_replaced" {
@@ -703,78 +760,6 @@ func registerReplaceAndJumpSteps(sc *godog.ScenarioContext, suiteT *testing.T, c
 			}
 		}
 		return fmt.Errorf("session_replaced not reported in %+v", rh.snapshot())
-	})
-
-	// Scenario 6: Jump
-	sc.Step(`^an AI running a turn in its task session and also holding a group session$`, func() (err error) {
-		var procCtx context.Context
-		h, rh, procCtx, err = newTestHost(cleanup, 4, 15)
-		if err != nil {
-			return err
-		}
-		drv = &hrMemDriver{parentCtx: procCtx}
-		host.Drivers = map[string]host.Driver{"claude": drv}
-		host.Compose = func(_ *host.Host, s host.Session, kind host.TurnKind, _ []json.RawMessage) (string, host.Turn, error) {
-			return "composed:" + string(kind), host.Turn{Kind: kind, Thread: s.Task}, nil
-		}
-		if err := h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: suiteT.TempDir(), Agent: "claude", Home: "home-dev", Name: "Claude"}); err != nil {
-			return err
-		}
-		if err := h.Sessions.Create(host.Session{SessionKey: gKey, Kind: host.GroupSession, Folder: suiteT.TempDir(), Agent: "claude", Home: "home-dev", Name: "Claude"}); err != nil {
-			return err
-		}
-		return host.Runner.Turn(suiteT.Context(), h, tKey, "initial work", host.Turn{Kind: host.ItemsTurn, Thread: hrTask1})
-	})
-	sc.Step(`^a jump turn arrives for the group session$`, func() error {
-		return host.Runner.Turn(suiteT.Context(), h, gKey, "header\njump now", host.Turn{Kind: host.ItemsTurn, Jump: true})
-	})
-	sc.Step(`^the task session is interrupted and reported preempted while the jump turn runs$`, func() error {
-		if drv.procs[0].interrupted != 1 {
-			return fmt.Errorf("interrupted = %d, want 1", drv.procs[0].interrupted)
-		}
-		for _, cmd := range rh.snapshot() {
-			if cmd["t"] == "task" && cmd["op"] == "preempted" && cmd["id"] == hrTask1 && cmd["msg"] == hrMsg1 {
-				return nil
-			}
-		}
-		return fmt.Errorf("task preempted not found in %+v", rh.snapshot())
-	})
-	sc.Step(`^when the jump turn ends the host sends task resume and a "([^"]+)" turn to the task session$`, func(kind string) error {
-		drv.procs[1].emit(host.Event{Kind: host.TurnEnded, Status: "completed"})
-		if err := waitSessionState(h, tKey, host.Working); err != nil {
-			return err
-		}
-		<-drv.procs[0].turns // initial turn
-		cont := <-drv.procs[0].turns
-		if cont.text != "composed:"+kind {
-			return fmt.Errorf("got %q, want composed:%s", cont.text, kind)
-		}
-		for _, cmd := range rh.snapshot() {
-			if cmd["t"] == "task" && cmd["op"] == "resume" && cmd["id"] == hrTask1 {
-				return nil
-			}
-		}
-		return fmt.Errorf("task resume not found in %+v", rh.snapshot())
-	})
-	var cmdCountBeforeSameJump int
-	sc.Step(`^a jump turn arrives for the running task session itself$`, func() error {
-		cmdCountBeforeSameJump = len(rh.snapshot())
-		return host.Runner.Turn(suiteT.Context(), h, tKey, "same-session jump", host.Turn{Kind: host.ItemsTurn, Thread: hrTask1, Jump: true})
-	})
-	sc.Step(`^the task session is interrupted and runs the jump turn without pausing the task$`, func() error {
-		if drv.procs[0].interrupted != 2 {
-			return fmt.Errorf("interrupted = %d, want 2", drv.procs[0].interrupted)
-		}
-		for _, cmd := range rh.snapshot()[cmdCountBeforeSameJump:] {
-			if cmd["t"] == "task" && cmd["op"] == "preempted" {
-				return fmt.Errorf("same-session jump sent task preempted: %+v", cmd)
-			}
-		}
-		got := <-drv.procs[0].turns
-		if got.text != "same-session jump" {
-			return fmt.Errorf("got %q, want same-session jump", got.text)
-		}
-		return nil
 	})
 }
 
