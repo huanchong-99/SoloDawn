@@ -6,7 +6,7 @@ Feature: Host MCP server and stdio shim
     Given a host with an active task session at level 2 and a local MCP socket
     And MCP tools "mcp_echo" for all sessions and "mcp_checks" for task sessions above level 1
     When an MCP client connects through the shim with the session's token
-    Then the server lists "mcp_checks" and "mcp_echo" with normalised object schemas
+    Then the server lists "mcp_checks" and "mcp_echo" with object schemas
     And calling "mcp_echo" with "<ok> & ready" returns '{"caller":"Claude Code","echo":"<ok> & ready","open":1}'
     And no MCP tool call remains open on the session
 

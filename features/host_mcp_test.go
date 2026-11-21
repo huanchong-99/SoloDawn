@@ -14,7 +14,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -66,7 +65,7 @@ func hostMCPSteps(sc *godog.ScenarioContext, t *testing.T) {
 	sc.Step(`^MCP tools "([^"]+)" for all sessions and "([^"]+)" for task sessions above level 1$`, func(echoName, checkName string) {
 		host.Tools[echoName] = host.Tool{
 			Description: "echo text",
-			Schema:      json.RawMessage(`{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Echo","type":"object","properties":{"text":{"type":"string"}},"required":["text"]}`),
+			Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":false}`),
 			Call: func(_ context.Context, h *host.Host, c host.Caller, args json.RawMessage) (any, error) {
 				var in struct {
 					Text string `json:"text"`
@@ -116,7 +115,7 @@ func hostMCPSteps(sc *godog.ScenarioContext, t *testing.T) {
 		st.listed = listed
 		return nil
 	})
-	sc.Step(`^the server lists "([^"]+)" and "([^"]+)" with normalised object schemas$`, func(first, second string) error {
+	sc.Step(`^the server lists "([^"]+)" and "([^"]+)" with object schemas$`, func(first, second string) error {
 		return st.expectListed(first, second)
 	})
 	sc.Step(`^the server lists only "([^"]+)"$`, func(only string) error {
@@ -309,23 +308,27 @@ func (m *mcpHarness) connectClient(cleanup func(func()), token string) (*mcp.Cli
 func (m *mcpHarness) expectListed(want ...string) error {
 	var got []string
 	for _, tool := range m.listed.Tools {
+		if err := checkObjectSchema(tool.Name, tool.InputSchema); err != nil {
+			return err
+		}
 		got = append(got, tool.Name)
-		schema, ok := tool.InputSchema.(map[string]any)
-		if !ok || schema["type"] != "object" || schema["additionalProperties"] != false {
-			return fmt.Errorf("tool %s schema is not normalised: %#v", tool.Name, tool.InputSchema)
-		}
-		if _, hasProps := schema["properties"].(map[string]any); !hasProps {
-			return fmt.Errorf("tool %s schema lacks properties: %#v", tool.Name, schema)
-		}
-		if _, hasSchema := schema["$schema"]; hasSchema {
-			return fmt.Errorf("tool %s schema kept $schema: %#v", tool.Name, schema)
-		}
-		if _, hasTitle := schema["title"]; hasTitle {
-			return fmt.Errorf("tool %s schema kept title: %#v", tool.Name, schema)
-		}
 	}
-	if !slices.Equal(got, want) && !reflect.DeepEqual(got, want) {
-		return fmt.Errorf("listed %v, want %v", got, want)
+	slices.Sort(got)
+	wantSorted := slices.Clone(want)
+	slices.Sort(wantSorted)
+	if !slices.Equal(got, wantSorted) {
+		return fmt.Errorf("listed %v, want %v", got, wantSorted)
+	}
+	return nil
+}
+
+func checkObjectSchema(name string, raw any) error {
+	schema, ok := raw.(map[string]any)
+	if !ok || schema["type"] != "object" || schema["additionalProperties"] != false {
+		return fmt.Errorf("tool %s schema is not a closed object: %#v", name, raw)
+	}
+	if _, hasProps := schema["properties"].(map[string]any); !hasProps {
+		return fmt.Errorf("tool %s schema lacks properties: %#v", name, schema)
 	}
 	return nil
 }

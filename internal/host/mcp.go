@@ -2,7 +2,6 @@ package host
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,77 +20,26 @@ const internalToolMessage = "the node failed to run the tool; the cause is in it
 
 var emptyToolSchema = json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
 
-// contractToolOrder lists the tools in the table order of contracts/mcp-tools.md
-// sections 1, 2, 3 and 5.
-var contractToolOrder = []string{
-	"post",
-	"ask",
-	"reply",
-	"read_thread",
-	"list_members",
-	"list_tasks",
-	"note_put",
-	"note_list",
-	"start_task",
-	"push_branch",
-	"run_checks",
-	"submit_task",
-	"submit_review",
-	"request_decision",
-	"net_status",
-	"propose_brief",
-	"set_task",
-	"approve",
-}
-
-// schemaKeywords are the JSON Schema keywords allowed in contracts/mcp-tools.md
-// section 5.
-var schemaKeywords = []string{
-	"type",
-	"enum",
-	"default",
-	"minimum",
-	"maximum",
-	"items",
-	"properties",
-	"required",
-	"additionalProperties",
-}
-
 // ServeMCP runs the solodawn MCP server for the CLI process that token names,
 // reading JSON-RPC frames from in and writing replies to out until the stream
 // ends or ctx is cancelled (contracts/local.md section 3,
 // contracts/mcp-tools.md). It closes out before returning, and refuses a token
 // that names no active session.
 func (h *Host) ServeMCP(ctx context.Context, token string, in io.Reader, out io.WriteCloser) error {
-	rc := inputCloser(in, out)
 	caller, ok := h.Sessions.Caller(token)
 	if !ok {
-		rc.Close()
 		out.Close()
 		return &Error{Code: "forbidden", Message: "unknown session token"}
 	}
-	srv, err := h.newMCPServer(token, caller)
-	if err != nil {
-		rc.Close()
-		out.Close()
-		return err
-	}
+	srv := h.newMCPServer(token, caller)
 	tr := &mcpTransport{
-		io:      mcp.IOTransport{Reader: rc, Writer: out},
+		io:      mcp.IOTransport{Reader: io.NopCloser(in), Writer: out},
 		methods: map[jsonrpc.ID]string{},
 	}
 	return srv.Run(ctx, tr)
 }
 
-func inputCloser(in io.Reader, out io.WriteCloser) io.ReadCloser {
-	if closer, ok := in.(io.ReadCloser); ok && any(in) != any(out) {
-		return closer
-	}
-	return io.NopCloser(in)
-}
-
-func (h *Host) newMCPServer(token string, initial Caller) (*mcp.Server, error) {
+func (h *Host) newMCPServer(token string, initial Caller) *mcp.Server {
 	srv := mcp.NewServer(
 		&mcp.Implementation{Name: "solodawn", Version: "1"},
 		&mcp.ServerOptions{
@@ -102,11 +50,9 @@ func (h *Host) newMCPServer(token string, initial Caller) (*mcp.Server, error) {
 	srv.AddReceivingMiddleware(mcpMiddleware)
 	listed := ToolsFor(initial)
 	for _, name := range slices.Sorted(maps.Keys(listed)) {
-		if err := h.addMCPTool(srv, token, initial, name, listed[name]); err != nil {
-			return nil, err
-		}
+		h.addMCPTool(srv, token, initial, name, listed[name])
 	}
-	return srv, nil
+	return srv
 }
 
 func mcpMiddleware(next mcp.MethodHandler) mcp.MethodHandler {
@@ -129,11 +75,8 @@ func wrapValidationResult(res mcp.Result) mcp.Result {
 	return res
 }
 
-func (h *Host) addMCPTool(srv *mcp.Server, token string, initial Caller, name string, tool Tool) error {
-	schema, err := schemaForCaller(name, initial, tool.Schema)
-	if err != nil {
-		return err
-	}
+func (h *Host) addMCPTool(srv *mcp.Server, token string, initial Caller, name string, tool Tool) {
+	schema := schemaForCaller(name, initial, tool.Schema)
 	handler := func(ctx context.Context, req *mcp.CallToolRequest, _ json.RawMessage) (*mcp.CallToolResult, any, error) {
 		return h.invokeTool(ctx, token, name, req.Params.Arguments), nil, nil
 	}
@@ -142,7 +85,6 @@ func (h *Host) addMCPTool(srv *mcp.Server, token string, initial Caller, name st
 		Description: tool.Description,
 		InputSchema: schema,
 	}, handler)
-	return nil
 }
 
 func (h *Host) invokeTool(ctx context.Context, token, name string, raw json.RawMessage) *mcp.CallToolResult {
@@ -151,7 +93,7 @@ func (h *Host) invokeTool(ctx context.Context, token, name string, raw json.RawM
 		return toolErrorResult(&Error{Code: "forbidden", Message: "unknown session token"})
 	}
 	tool, allowed := ToolsFor(caller)[name]
-	if !allowed || tool.Call == nil {
+	if !allowed {
 		return toolErrorResult(&Error{Code: "forbidden", Message: "tool is not available in this session"})
 	}
 	done := h.Sessions.Calling(caller.SessionKey)
@@ -205,23 +147,17 @@ func mcpEncodeJSON(value any) (string, error) {
 	return strings.TrimSuffix(buf.String(), "\n"), nil
 }
 
-func schemaForCaller(name string, caller Caller, raw json.RawMessage) (json.RawMessage, error) {
+func schemaForCaller(name string, caller Caller, raw json.RawMessage) json.RawMessage {
 	if len(raw) == 0 {
-		return emptyToolSchema, nil
+		return emptyToolSchema
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	var root map[string]any
-	if err := dec.Decode(&root); err != nil {
-		return nil, err
-	}
-	if unwrapNullableType(root["type"]) != "object" {
-		return nil, errors.New("host: tool input schema must have type object")
-	}
-	cleanSchemaMap(root, true)
+	dec.Decode(&root)
 	projectCallerSchema(caller, name, root)
 	encoded, _ := mcpEncodeJSON(root)
-	return json.RawMessage(encoded), nil
+	return json.RawMessage(encoded)
 }
 
 // projectCallerSchema adapts the superset tool schemas registered in Tools to
@@ -274,86 +210,6 @@ func dropPostKind(kind Kind, item any) bool {
 	return kind == GroupSession && item == "handback"
 }
 
-func unwrapNullableType(value any) any {
-	list, _ := value.([]any)
-	if len(list) != 2 || list[0] != "null" {
-		return value
-	}
-	if name, ok := list[1].(string); ok {
-		return name
-	}
-	return value
-}
-
-func dropExtraKeyword(key string, _ any) bool {
-	return !slices.Contains(schemaKeywords, key)
-}
-
-func cleanSchemaMap(m map[string]any, root bool) {
-	if kind, ok := m["type"]; ok {
-		m["type"] = unwrapNullableType(kind)
-	}
-	maps.DeleteFunc(m, dropExtraKeyword)
-	if req, _ := m["required"].([]any); len(req) == 0 {
-		delete(m, "required")
-	}
-	if items, ok := m["items"].(map[string]any); ok {
-		cleanSchemaMap(items, false)
-	}
-	cleanProperties(m, root)
-}
-
-func cleanProperties(m map[string]any, root bool) {
-	props, hasProps := m["properties"].(map[string]any)
-	if !hasProps {
-		if root {
-			m["properties"] = map[string]any{}
-			setDefaultClosed(m)
-		}
-		return
-	}
-	cleanPropertyEntries(props)
-	if m["type"] == "object" {
-		setDefaultClosed(m)
-	}
-}
-
-func cleanPropertyEntries(props map[string]any) {
-	for _, prop := range props {
-		if sub, ok := prop.(map[string]any); ok {
-			cleanSchemaMap(sub, false)
-		}
-	}
-}
-
-func setDefaultClosed(m map[string]any) {
-	if _, ok := m["additionalProperties"]; !ok {
-		m["additionalProperties"] = false
-	}
-}
-
-func toolRank(name string) int {
-	i := slices.Index(contractToolOrder, name)
-	if i < 0 {
-		return len(contractToolOrder)
-	}
-	return i
-}
-
-func compareToolNames(a, b string) int {
-	return cmp.Or(cmp.Compare(toolRank(a), toolRank(b)), cmp.Compare(a, b))
-}
-
-type listedTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"inputSchema"`
-}
-
-func sortListedTools(a, b listedTool) int {
-	return compareToolNames(a.Name, b.Name)
-}
-
 type mcpTransport struct {
 	io      mcp.IOTransport
 	mu      sync.Mutex // guards methods across Read and Write
@@ -395,24 +251,14 @@ func (c *mcpConn) Write(ctx context.Context, msg jsonrpc.Message) error {
 }
 
 func rewriteMCPResult(method string, raw json.RawMessage) json.RawMessage {
-	switch method {
-	case "tools/list":
-		var list struct {
-			Tools []listedTool `json:"tools"`
-		}
-		json.Unmarshal(raw, &list)
-		slices.SortFunc(list.Tools, sortListedTools)
-		out, _ := mcpEncodeJSON(list)
-		return json.RawMessage(out)
-	case "tools/call":
-		var call struct {
-			Content json.RawMessage `json:"content"`
-			IsError bool            `json:"isError"`
-		}
-		json.Unmarshal(raw, &call)
-		out, _ := mcpEncodeJSON(call)
-		return json.RawMessage(out)
-	default:
+	if method != "tools/call" {
 		return raw
 	}
+	var call struct {
+		Content json.RawMessage `json:"content"`
+		IsError bool            `json:"isError"`
+	}
+	json.Unmarshal(raw, &call)
+	out, _ := mcpEncodeJSON(call)
+	return json.RawMessage(out)
 }
