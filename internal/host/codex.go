@@ -84,7 +84,8 @@ func (codexDriver) Start(ctx context.Context, l Launch) (Process, error) {
 		events:    make(chan Event, 16),
 		ready:     make(chan struct{}),
 		nextID:    3,
-		asks:      map[string]json.RawMessage{},
+		asks:      map[string]codexPendingAsk{},
+		inputs:    map[string]json.RawMessage{},
 		files:     map[string]codexFileItem{},
 	}
 	p.send(codexRPCRequest{
@@ -187,8 +188,8 @@ func codexJSON(v any) []byte {
 }
 
 // codexProcess drives one running codex app-server child.
-// wmu guards stdin and closed; mu guards protocol, turn, approval and usage
-// state. The two locks are never nested.
+// wmu guards stdin and closed; mu guards protocol, turn, approval, user-input
+// and usage state. The two locks are never nested.
 type codexProcess struct {
 	launch    Launch
 	sandbox   string
@@ -216,7 +217,8 @@ type codexProcess struct {
 	turnTokens       *int64
 	windowPct        *float64
 	windowResets     *int64
-	asks             map[string]json.RawMessage
+	asks             map[string]codexPendingAsk
+	inputs           map[string]json.RawMessage
 	files            map[string]codexFileItem
 }
 
@@ -307,6 +309,7 @@ func (p *codexProcess) resetTurnLocked() {
 	p.interruptPending = false
 	p.turnTokens = nil
 	clear(p.asks)
+	clear(p.inputs)
 	clear(p.files)
 }
 
@@ -336,19 +339,36 @@ func (p *codexProcess) sendInterrupt(id int64, threadID, turnID string) error {
 	})
 }
 
+func takeCodexPending[V any](mu *sync.Mutex, table map[string]V, id string) (V, bool) {
+	mu.Lock()
+	entry, ok := table[id]
+	delete(table, id)
+	mu.Unlock()
+	return entry, ok
+}
+
 func (p *codexProcess) Answer(ask string, allow bool) error {
-	p.mu.Lock()
-	rawID, ok := p.asks[ask]
-	delete(p.asks, ask)
-	p.mu.Unlock()
+	entry, ok := takeCodexPending(&p.mu, p.asks, ask)
 	if !ok {
 		return fmt.Errorf("codex: unknown approval request %q", ask)
 	}
-	decision := "decline"
+	chosen := entry.deny
 	if allow {
-		decision = "accept"
+		chosen = entry.allow
 	}
-	return p.send(codexRPCResult{ID: rawID, Result: map[string]string{"decision": decision}})
+	return p.send(codexRPCResult{ID: entry.id, Result: chosen})
+}
+
+func (p *codexProcess) replyUserInput(askID string, answers map[string][]string) error {
+	rawID, ok := takeCodexPending(&p.mu, p.inputs, askID)
+	if !ok {
+		return fmt.Errorf("codex: unknown user input request %q", askID)
+	}
+	out := make(map[string]codexUserInputAnswer, len(answers))
+	for qid, list := range answers {
+		out[qid] = codexUserInputAnswer{Answers: list}
+	}
+	return p.send(codexRPCResult{ID: rawID, Result: map[string]any{"answers": out}})
 }
 
 func (p *codexProcess) readLoop(stdout *os.File, wait func()) {
@@ -706,6 +726,10 @@ func (p *codexProcess) handleRequest(msg codexMessage) {
 		p.onCommandApproval(msg.ID, msg.Params)
 	case "item/fileChange/requestApproval":
 		p.onFileApproval(msg.ID, msg.Params)
+	case "item/permissions/requestApproval":
+		p.onPermissionsApproval(msg.ID, msg.Params)
+	case "item/tool/requestUserInput":
+		p.onUserInputRequest(msg.ID, msg.Params)
 	default:
 		p.declineRequest(msg.ID, msg.Method)
 	}
@@ -722,7 +746,13 @@ func (p *codexProcess) onCommandApproval(rawID, raw json.RawMessage) {
 		return
 	}
 	input := codexJSON(codexCommandInput{Command: req.Command, Cwd: req.Cwd})
-	ask := p.registerAsk(rawID, "commandExecution", "command", req.Command, req.Reason, input)
+	ask := p.registerDecisionAsk(rawID, Ask{
+		Tool:     "commandExecution",
+		Category: "command",
+		Command:  req.Command,
+		Why:      req.Reason,
+		Input:    input,
+	})
 	p.events <- Event{Kind: Asked, Ask: ask}
 }
 
@@ -742,8 +772,79 @@ func (p *codexProcess) onFileApproval(rawID, raw json.RawMessage) {
 	}
 	var changes []codexFileChange
 	json.Unmarshal(input, &changes)
-	ask := p.registerAsk(rawID, "fileChange", "file", formatFileChanges(changes), req.Reason, input)
+	ask := p.registerDecisionAsk(rawID, Ask{
+		Tool:     "fileChange",
+		Category: "file",
+		Command:  formatFileChanges(changes),
+		Why:      req.Reason,
+		Input:    input,
+	})
 	p.events <- Event{Kind: Asked, Ask: ask}
+}
+
+func (p *codexProcess) onPermissionsApproval(rawID, raw json.RawMessage) {
+	var req struct {
+		Permissions json.RawMessage `json:"permissions"`
+		Reason      string          `json:"reason"`
+	}
+	if json.Unmarshal(raw, &req) != nil {
+		p.declineRequest(rawID, "item/permissions/requestApproval")
+		return
+	}
+	var fields map[string]json.RawMessage
+	json.Unmarshal(req.Permissions, &fields)
+	if fields == nil {
+		p.declineRequest(rawID, "item/permissions/requestApproval")
+		return
+	}
+	var compact bytes.Buffer
+	json.Compact(&compact, req.Permissions)
+	perms := json.RawMessage(compact.Bytes())
+	ask := p.registerAsk(rawID, Ask{
+		Tool:     "permissions",
+		Category: codexPermissionsCategory(fields),
+		Command:  string(perms),
+		Why:      req.Reason,
+		Input:    perms,
+	}, map[string]any{"permissions": perms}, map[string]any{"permissions": map[string]any{}})
+	p.events <- Event{Kind: Asked, Ask: ask}
+}
+
+func codexPermissionsCategory(fields map[string]json.RawMessage) string {
+	if netRaw, ok := fields["network"]; ok && string(netRaw) != "null" {
+		return "network"
+	}
+	return "file"
+}
+
+func (p *codexProcess) onUserInputRequest(rawID, raw json.RawMessage) {
+	var req codexUserInputParams
+	if json.Unmarshal(raw, &req) != nil || !validCodexQuestions(req.Questions) {
+		p.declineRequest(rawID, "item/tool/requestUserInput")
+		return
+	}
+	askID := p.registerUserInput(rawID)
+	reply := func(answers map[string][]string) error {
+		return p.replyUserInput(askID, answers)
+	}
+	p.events <- Event{Kind: Asked, Ask: &Ask{
+		ID:    askID,
+		Tool:  "requestUserInput",
+		Input: raw,
+		Reply: reply,
+	}}
+}
+
+func validCodexQuestions(qs []codexUserQuestion) bool {
+	if len(qs) == 0 {
+		return false
+	}
+	for _, q := range qs {
+		if q.ID == "" || q.Question == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *codexProcess) lookupFileItem(itemID string) codexFileItem {
@@ -752,19 +853,24 @@ func (p *codexProcess) lookupFileItem(itemID string) codexFileItem {
 	return p.files[itemID]
 }
 
-func (p *codexProcess) registerAsk(rawID json.RawMessage, tool, category, command, why string, input json.RawMessage) *Ask {
-	id := fmt.Sprintf("%x:%s", p.startedNs, rawID)
+func (p *codexProcess) registerDecisionAsk(rawID json.RawMessage, ask Ask) *Ask {
+	return p.registerAsk(rawID, ask, map[string]string{"decision": "accept"}, map[string]string{"decision": "decline"})
+}
+
+func (p *codexProcess) registerAsk(rawID json.RawMessage, ask Ask, allow, deny any) *Ask {
+	ask.ID = fmt.Sprintf("%x:%s", p.startedNs, rawID)
 	p.mu.Lock()
-	p.asks[id] = rawID
+	p.asks[ask.ID] = codexPendingAsk{id: rawID, allow: allow, deny: deny}
 	p.mu.Unlock()
-	return &Ask{
-		ID:       id,
-		Tool:     tool,
-		Category: category,
-		Command:  command,
-		Why:      why,
-		Input:    input,
-	}
+	return &ask
+}
+
+func (p *codexProcess) registerUserInput(rawID json.RawMessage) string {
+	askID := fmt.Sprintf("%x:%s", p.startedNs, rawID)
+	p.mu.Lock()
+	p.inputs[askID] = rawID
+	p.mu.Unlock()
+	return askID
 }
 
 func formatFileChanges(changes []codexFileChange) string {
@@ -888,4 +994,31 @@ type codexTurnCompleted struct {
 type codexTurnError struct {
 	Message        string          `json:"message"`
 	CodexErrorInfo json.RawMessage `json:"codexErrorInfo"`
+}
+
+type codexPendingAsk struct {
+	id    json.RawMessage
+	allow any
+	deny  any
+}
+
+type codexUserInputParams struct {
+	Questions []codexUserQuestion `json:"questions"`
+}
+
+type codexUserQuestion struct {
+	ID       string                `json:"id"`
+	Header   string                `json:"header"`
+	Question string                `json:"question"`
+	IsSecret bool                  `json:"isSecret"`
+	Options  []codexQuestionOption `json:"options"`
+}
+
+type codexQuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+type codexUserInputAnswer struct {
+	Answers []string `json:"answers"`
 }

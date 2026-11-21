@@ -82,6 +82,12 @@ func hostCodexSteps(sc *godog.ScenarioContext, f fixtures) {
 		st.interArgv, st.interSess, st.interErr = host.Drivers["codex"].Interactive(st.baseLaunch(id, "tok-2"))
 	})
 	sc.Step(`^the interactive Codex command resumes "([^"]*)" with workspace-write and project docs disabled$`, st.verifyInteractive)
+	sc.Step(`^a scripted Codex session with user-input and permission requests$`, st.configureUserInputAndPermissionsScript)
+	sc.Step(`^the host starts Codex and begins the user-input and permissions turn$`, func() error {
+		return st.startAndBeginTurn("", "tok-ui-perm", "Ask and request permissions.")
+	})
+	sc.Step(`^Codex asks user-input questions that the host answers and leaves unanswered$`, st.handleUserInputQuestions)
+	sc.Step(`^Codex requests network and file permissions that the host allows then declines$`, st.handlePermissionProfileRequests)
 }
 
 func (st *codexAcceptanceState) setEnv(key, value string) {
@@ -363,4 +369,97 @@ func checkLifecycleLog(path, want string) error {
 		return fmt.Errorf("lifecycle log = %q, want %q (%v)", got, want, err)
 	}
 	return nil
+}
+
+func (st *codexAcceptanceState) configureUserInputAndPermissionsScript() error {
+	const rawScript = `{
+  "session": "thr-ui-perm",
+  "steps": [
+    {"dir":"stdin","msg":{"method":"initialize"}},
+    {"dir":"stdout","msg":{"id":"$id","result":{}}},
+    {"dir":"stdin","msg":{"method":"initialized"}},
+    {"dir":"stdin","msg":{"method":"thread/start"}},
+    {"dir":"stdout","msg":{"id":"$id","result":{"thread":{"id":"$session"}}}},
+    {"dir":"stdin","msg":{"method":"turn/start","params":{"threadId":"$session"}}},
+    {"dir":"stdout","msg":{"id":"$id","result":{"turn":{"id":"turn-ui-perm"}}}},
+    {"dir":"stdout","msg":{"id":10,"method":"item/tool/requestUserInput","params":{"questions":[]}}},
+    {"dir":"stdin","msg":{"id":10,"result":{"answers":{}}}},
+    {"dir":"stdout","msg":{"id":11,"method":"item/tool/requestUserInput","params":{"questions":[{"id":"q1","header":"DB","question":"Which database?","isSecret":false,"options":[{"label":"SQLite","description":"Local file"}]}]}}},
+    {"dir":"stdin","msg":{"id":11,"result":{"answers":{"q1":{"answers":["SQLite"]}}}}},
+    {"dir":"stdout","msg":{"id":12,"method":"item/tool/requestUserInput","params":{"questions":[{"id":"q2","question":"Extra note?"}]}}},
+    {"dir":"stdin","msg":{"id":12,"result":{"answers":{}}}},
+    {"dir":"stdout","msg":{"id":13,"method":"item/permissions/requestApproval","params":{"permissions":[]}}},
+    {"dir":"stdin","msg":{"id":13,"result":{"permissions":{}}}},
+    {"dir":"stdout","msg":{"id":14,"method":"item/permissions/requestApproval","params":{"permissions":{"network":{"enabled":true}},"reason":"Fetch dependency"}}},
+    {"dir":"stdin","msg":{"id":14,"result":{"permissions":{"network":{"enabled":true}}}}},
+    {"dir":"stdout","msg":{"id":15,"method":"item/permissions/requestApproval","params":{"permissions":{"fileSystem":{"write":["/outside"]},"network":null},"reason":"Write outside"}}},
+    {"dir":"stdin","msg":{"id":15,"result":{"permissions":{}}}},
+    {"dir":"stdout","msg":{"method":"thread/tokenUsage/updated","params":{"turnId":"turn-ui-perm","tokenUsage":{"last":{"totalTokens":1234}}}}},
+    {"dir":"stdout","msg":{"method":"turn/completed","params":{"turn":{"id":"turn-ui-perm","status":"completed","error":null}}}},
+    {"dir":"eof"}
+  ]
+}`
+	path := filepath.Join(st.f.t.TempDir(), "codex-ui-perm.json")
+	if err := os.WriteFile(path, []byte(rawScript), 0600); err != nil {
+		return err
+	}
+	if st.logPath == "" {
+		st.logPath = filepath.Join(st.f.t.TempDir(), "codex-lifecycle.log")
+		st.setEnv("SOLODAWN_FAKECLI_LOG", st.logPath)
+	}
+	st.setEnv("SOLODAWN_FAKE_CODEX_SCRIPT", path)
+	return nil
+}
+
+func (st *codexAcceptanceState) handleUserInputQuestions() error {
+	ask1, err := readAskedEvent(st.proc.Events())
+	if err != nil {
+		return err
+	}
+	if ask1.Tool != "requestUserInput" || ask1.Reply == nil {
+		return fmt.Errorf("unexpected first user-input ask: %+v", ask1)
+	}
+	if err := ask1.Reply(map[string][]string{"q1": {"SQLite"}}); err != nil {
+		return err
+	}
+	if ask1.Reply(map[string][]string{"q1": {"SQLite"}}) == nil {
+		return errors.New("duplicate user-input Reply succeeded")
+	}
+	ask2, err := readAskedEvent(st.proc.Events())
+	if err != nil {
+		return err
+	}
+	return ask2.Reply(nil)
+}
+
+func (st *codexAcceptanceState) handlePermissionProfileRequests() error {
+	netAsk, err := readAskedEvent(st.proc.Events())
+	if err != nil {
+		return err
+	}
+	if netAsk.Tool != "permissions" || netAsk.Category != "network" || netAsk.Command != `{"network":{"enabled":true}}` || netAsk.Why != "Fetch dependency" {
+		return fmt.Errorf("unexpected network permissions ask: %+v", netAsk)
+	}
+	if err := st.proc.Answer(netAsk.ID, true); err != nil {
+		return err
+	}
+	fileAsk, err := readAskedEvent(st.proc.Events())
+	if err != nil {
+		return err
+	}
+	if fileAsk.Tool != "permissions" || fileAsk.Category != "file" || fileAsk.Command != `{"fileSystem":{"write":["/outside"]},"network":null}` || fileAsk.Why != "Write outside" {
+		return fmt.Errorf("unexpected file permissions ask: %+v", fileAsk)
+	}
+	if err := st.proc.Answer(fileAsk.ID, false); err != nil {
+		return err
+	}
+	tokens, err := readCompletedTurnTokens(st.proc.Events())
+	if err != nil || tokens != 1234 {
+		return fmt.Errorf("turn tokens = %d, want 1234 (%v)", tokens, err)
+	}
+	if err := st.closeAndDrain(); err != nil {
+		return err
+	}
+	want := fmt.Sprintf("start codex %s\nexit codex %s\n", st.threadID, st.threadID)
+	return checkLifecycleLog(st.logPath, want)
 }

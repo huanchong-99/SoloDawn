@@ -644,16 +644,19 @@ func verifyCompletedFileItemFallback(t *testing.T, proc Process, peer *codexPeer
 
 func verifyDeclinedServerRequests(t *testing.T, peer *codexPeer) {
 	t.Helper()
-	for i, method := range []string{
-		"mcpServer/elicitation/request",
-		"item/permissions/requestApproval",
-		"item/tool/requestUserInput",
-		"item/tool/call",
+	for i, tc := range []struct {
+		method string
+		want   map[string]any
+	}{
+		{"mcpServer/elicitation/request", map[string]any{"action": "decline"}},
+		{"item/permissions/requestApproval", map[string]any{"permissions": map[string]any{}}},
+		{"item/tool/requestUserInput", map[string]any{"answers": map[string]any{}}},
+		{"item/tool/call", map[string]any{"contentItems": []any{}, "success": false}},
 	} {
-		peer.writeLine(fmt.Sprintf(`{"id":%d,"method":%q,"params":{}}`, 50+i, method))
+		peer.writeLine(fmt.Sprintf(`{"id":%d,"method":%q,"params":{}}`, 50+i, tc.method))
 		reply := peer.readJSON()
 		codexEqual(t, int(reply["id"].(float64)), 50+i)
-		codexCheck(t, reply["result"] != nil, "expected decline result")
+		codexEqual(t, reply["result"], tc.want)
 	}
 	for i, line := range []string{
 		`{"id":60,"method":"future/unknownRequest","params":{}}`,
@@ -665,6 +668,190 @@ func verifyDeclinedServerRequests(t *testing.T, peer *codexPeer) {
 		codexEqual(t, int(reply["id"].(float64)), 60+i)
 		codexEqual(t, reply["error"].(map[string]any)["code"], -32601.0)
 	}
+}
+
+func TestCodexUserInputRequestsAndStaleReplies(t *testing.T) {
+	proc, peer := startPeerCodex(t, codexTestLaunch(t, 2))
+	completePeerHandshake(t, peer, "thr-ui")
+	nextCodexEvent(t, proc.Events())
+
+	codexNoErr(t, proc.Turn("Ask the owner."))
+	turnReq := peer.readJSON()
+	peer.writeLine(fmt.Sprintf(`{"id":%d,"result":{"turn":{"id":"turn-ui"}}}`, int(turnReq["id"].(float64))))
+
+	verifyDeclinedUserInputRequests(t, peer)
+	verifyAnsweredUserInputRequests(t, proc, peer)
+	verifyStaleUserInputAfterTurnEnd(t, proc, peer)
+
+	codexNoErr(t, proc.Close())
+	peer.conn.Close()
+	waitEventsClosed(t, proc.Events())
+}
+
+func verifyDeclinedUserInputRequests(t *testing.T, peer *codexPeer) {
+	t.Helper()
+	for i, params := range []string{
+		`"bad"`,
+		`{"questions":[{"id":"q1","question":"Pick?","isSecret":"bad"}]}`,
+		`{}`,
+		`{"questions":[]}`,
+		`{"questions":[{"id":"","question":"Pick?"}]}`,
+		`{"questions":[{"id":"q1","question":""}]}`,
+		`{"questions":[{"id":"q1","question":"First?"},{"id":"q2","question":""}]}`,
+	} {
+		peer.writeLine(fmt.Sprintf(`{"id":%d,"method":"item/tool/requestUserInput","params":%s}`, 200+i, params))
+		reply := peer.readJSON()
+		codexEqual(t, int(reply["id"].(float64)), 200+i)
+		codexEqual(t, reply["result"], map[string]any{"answers": map[string]any{}})
+	}
+}
+
+func verifyAnsweredUserInputRequests(t *testing.T, proc Process, peer *codexPeer) {
+	t.Helper()
+	rawParams := `{"questions":[{"id":"q1","header":"Storage","question":"Which database?","isSecret":false,"options":[{"label":"SQLite","description":"Embedded"},{"label":"Postgres","description":"Server"}]}]}`
+	peer.writeLine(`{"id":"ui-1","method":"item/tool/requestUserInput","params":` + rawParams + `}`)
+	ev, _ := nextNonActiveEvent(t, proc.Events())
+	codexEqual(t, ev.Kind, Asked)
+	codexCheck(t, ev.Ask != nil && ev.Ask.ID != "" && ev.Ask.Reply != nil, "expected user-input Ask with Reply")
+	codexEqual(t, ev.Ask.Tool, "requestUserInput")
+	codexEqual(t, ev.Ask.Category, "")
+	codexEqual(t, ev.Ask.Command, "")
+	codexEqual(t, ev.Ask.Why, "")
+	codexEqual(t, string(ev.Ask.Input), rawParams)
+	codexWantErr(t, proc.Answer(ev.Ask.ID, true))
+	codexNoErr(t, ev.Ask.Reply(map[string][]string{"q1": {"SQLite"}}))
+	codexWantErr(t, ev.Ask.Reply(map[string][]string{"q1": {"SQLite"}}))
+	codexEqual(t, peer.readJSON(), map[string]any{
+		"id": "ui-1",
+		"result": map[string]any{
+			"answers": map[string]any{
+				"q1": map[string]any{"answers": []any{"SQLite"}},
+			},
+		},
+	})
+
+	peer.writeLine(`{"id":220,"method":"item/tool/requestUserInput","params":{"questions":[{"id":"q2","question":"Optional note?"}]}}`)
+	ev2, _ := nextNonActiveEvent(t, proc.Events())
+	codexNoErr(t, ev2.Ask.Reply(nil))
+	codexWantErr(t, ev2.Ask.Reply(nil))
+	codexEqual(t, peer.readJSON(), map[string]any{
+		"id":     220.0,
+		"result": map[string]any{"answers": map[string]any{}},
+	})
+}
+
+func verifyStaleUserInputAfterTurnEnd(t *testing.T, proc Process, peer *codexPeer) {
+	t.Helper()
+	peer.writeLine(`{"id":221,"method":"item/tool/requestUserInput","params":{"questions":[{"id":"q3","question":"Still open?"}]}}`)
+	ev, _ := nextNonActiveEvent(t, proc.Events())
+	peer.writeLine(`{"method":"turn/completed","params":{"turn":{"id":"turn-ui","status":"completed","error":null}}}`)
+	end, _ := nextNonActiveEvent(t, proc.Events())
+	codexEqual(t, end, Event{Kind: TurnEnded, Status: "completed"})
+	codexWantErr(t, ev.Ask.Reply(map[string][]string{"q3": {"late"}}))
+}
+
+func TestCodexPermissionsApprovalRequests(t *testing.T) {
+	proc, peer := startPeerCodex(t, codexTestLaunch(t, 2))
+	completePeerHandshake(t, peer, "thr-perm")
+	nextCodexEvent(t, proc.Events())
+
+	codexNoErr(t, proc.Turn("Request extra permissions."))
+	turnReq := peer.readJSON()
+	peer.writeLine(fmt.Sprintf(`{"id":%d,"result":{"turn":{"id":"turn-perm"}}}`, int(turnReq["id"].(float64))))
+
+	verifyDeclinedPermissionsRequests(t, peer)
+	verifyNetworkPermissionsApproval(t, proc, peer)
+	verifyFilePermissionsApprovals(t, proc, peer)
+
+	peer.writeLine(`{"method":"turn/completed","params":{"turn":{"id":"turn-perm","status":"completed","error":null}}}`)
+	end, _ := nextNonActiveEvent(t, proc.Events())
+	codexEqual(t, end, Event{Kind: TurnEnded, Status: "completed"})
+	codexNoErr(t, proc.Close())
+	peer.conn.Close()
+	waitEventsClosed(t, proc.Events())
+}
+
+func verifyDeclinedPermissionsRequests(t *testing.T, peer *codexPeer) {
+	t.Helper()
+	for i, params := range []string{
+		`"bad"`,
+		`{"permissions":{"network":{"enabled":true}},"reason":123}`,
+		`{}`,
+		`{"permissions":null}`,
+		`{"permissions":["read"]}`,
+		`{"permissions":"all"}`,
+	} {
+		peer.writeLine(fmt.Sprintf(`{"id":%d,"method":"item/permissions/requestApproval","params":%s}`, 300+i, params))
+		reply := peer.readJSON()
+		codexEqual(t, int(reply["id"].(float64)), 300+i)
+		codexEqual(t, reply["result"], map[string]any{"permissions": map[string]any{}})
+	}
+}
+
+func verifyNetworkPermissionsApproval(t *testing.T, proc Process, peer *codexPeer) {
+	t.Helper()
+	peer.writeLine(`{"id":"perm-net","method":"item/permissions/requestApproval","params":{"permissions":{ "network": { "enabled": true }, "fileSystem": null },"reason":"Fetch module"}}`)
+	ev, _ := nextNonActiveEvent(t, proc.Events())
+	wantCompact := `{"network":{"enabled":true},"fileSystem":null}`
+	codexEqual(t, ev.Ask, &Ask{
+		ID:       ev.Ask.ID,
+		Tool:     "permissions",
+		Category: "network",
+		Command:  wantCompact,
+		Why:      "Fetch module",
+		Input:    json.RawMessage(wantCompact),
+	})
+	codexNoErr(t, proc.Answer(ev.Ask.ID, true))
+	codexWantErr(t, proc.Answer(ev.Ask.ID, true))
+	codexEqual(t, peer.readJSON(), map[string]any{
+		"id": "perm-net",
+		"result": map[string]any{
+			"permissions": map[string]any{
+				"network":    map[string]any{"enabled": true},
+				"fileSystem": nil,
+			},
+		},
+	})
+}
+
+func verifyFilePermissionsApprovals(t *testing.T, proc Process, peer *codexPeer) {
+	t.Helper()
+	peer.writeLine(`{"id":320,"method":"item/permissions/requestApproval","params":{"permissions":{ "fileSystem": { "write": ["/outside"] }, "network": null },"reason":"Write output"}}`)
+	ev1, _ := nextNonActiveEvent(t, proc.Events())
+	want1 := `{"fileSystem":{"write":["/outside"]},"network":null}`
+	codexEqual(t, ev1.Ask, &Ask{
+		ID:       ev1.Ask.ID,
+		Tool:     "permissions",
+		Category: "file",
+		Command:  want1,
+		Why:      "Write output",
+		Input:    json.RawMessage(want1),
+	})
+	codexNoErr(t, proc.Answer(ev1.Ask.ID, false))
+	codexEqual(t, peer.readJSON(), map[string]any{
+		"id":     320.0,
+		"result": map[string]any{"permissions": map[string]any{}},
+	})
+
+	peer.writeLine(`{"id":321,"method":"item/permissions/requestApproval","params":{"permissions":{ "fileSystem": { "read": ["/etc/hosts"] } },"reason":null}}`)
+	ev2, _ := nextNonActiveEvent(t, proc.Events())
+	want2 := `{"fileSystem":{"read":["/etc/hosts"]}}`
+	codexEqual(t, ev2.Ask, &Ask{
+		ID:       ev2.Ask.ID,
+		Tool:     "permissions",
+		Category: "file",
+		Command:  want2,
+		Input:    json.RawMessage(want2),
+	})
+	codexNoErr(t, proc.Answer(ev2.Ask.ID, true))
+	codexEqual(t, peer.readJSON(), map[string]any{
+		"id": 321.0,
+		"result": map[string]any{
+			"permissions": map[string]any{
+				"fileSystem": map[string]any{"read": []any{"/etc/hosts"}},
+			},
+		},
+	})
 }
 
 func TestCodexInterruptBeforeAndAfterTurnIDAndSilentTurn(t *testing.T) {

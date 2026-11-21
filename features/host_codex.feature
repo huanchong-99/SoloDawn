@@ -17,3 +17,9 @@ Feature: The host drives Codex over app-server and resume
     Then the Codex driver refuses the interactive start
     When the host asks the Codex driver for a level 2 interactive command on thread "thr-42"
     Then the interactive Codex command resumes "thr-42" with workspace-write and project docs disabled
+
+  Scenario: Codex user-input questions and permission profile approvals round-trip on one turn
+    Given a scripted Codex session with user-input and permission requests
+    When the host starts Codex and begins the user-input and permissions turn
+    Then Codex asks user-input questions that the host answers and leaves unanswered
+    And Codex requests network and file permissions that the host allows then declines

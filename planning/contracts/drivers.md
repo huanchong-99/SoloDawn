@@ -135,15 +135,29 @@ JSON-RPC over stdio, one JSON object per line `[verified]`:
    `turn.error.codexErrorInfo` `"unauthorized"` or HTTP status `401` (or a
    startup authentication error) and is reported as `login_invalid`
    `[verified]`.
-4. Approval requests arrive as server requests, and the node answers
-   `accept` or `decline`. `item/commandExecution/requestApproval` carries
-   `command`, `cwd` and `reason`. `item/fileChange/requestApproval` carries
-   ids only: the change is in the `fileChange` item sent just before it
-   (`changes[]` with `path`, `kind`, `diff`). The schema has more request
-   types (permissions, MCP elicitation, user input, dynamic tools)
-   `[documented]`; none was seen, and the node declines them. A `decline`
-   carries no text, so a deny sentence of `flows/approval.md` reaches only
-   Claude Code; on Codex the instruction of section 4 says what to do.
+4. Approval and user-input requests arrive as server requests.
+   `item/commandExecution/requestApproval` carries `command`, `cwd` and
+   `reason`, and `item/fileChange/requestApproval` carries ids only, with the
+   change in the `fileChange` item sent just before it (`changes[]` with
+   `path`, `kind`, `diff`); the node answers `{"decision":"accept"}` or
+   `{"decision":"decline"}`. By the owner's decision of 2026-11-21, two
+   further schema request types are mapped `[documented]`:
+   `item/permissions/requestApproval` (`permissions` a JSON object, optional
+   `reason`) maps to an `approval` card with `tool` `"permissions"`,
+   `category` `"network"` when `permissions.network` is present and not
+   `null` and `"file"` otherwise, `command` (and the digest input) the compact
+   `permissions` JSON, and `why` `reason`, answered with
+   `{"permissions": permissions}` on allow and `{"permissions": {}}` on
+   decline; `item/tool/requestUserInput` (`questions[]`, each with non-empty
+   `id` and `question`, plus `header`, `isSecret` and `options[]` of `label`
+   and `description`) maps to `Ask` with `Tool` `"requestUserInput"`, `Input`
+   the raw parameters, and `Reply` sending
+   `{"answers": {"<id>": {"answers": […]}}}` or `{"answers": {}}` (invalid
+   parameters on either request are declined at once with the empty result).
+   The other request types in the schema (MCP elicitation, dynamic tools) are
+   declined. A `decline` carries no text, so a deny sentence of
+   `flows/approval.md` reaches only Claude Code; on Codex the instruction of
+   section 4 says what to do.
 5. `turn/interrupt` interrupts: `turn/completed` with status `interrupted`
    follows at once and the process stays usable.
 6. A silent turn is interrupted. In the spike 2 turns of about 25 stopped
