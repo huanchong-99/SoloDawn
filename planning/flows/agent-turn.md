@@ -30,13 +30,14 @@ that is waiting for them.
 ## B. From item to turn
 
 1. Something happens in the group that concerns the AI
-   (`contracts/commands.md` section 3). H writes an inbox item, signs it,
-   and, if N is connected, pushes it.
-2. N checks the item at its boundary (R-136): the item's envelope is signed
-   by the home of that group, that device is in the log of N's owner, the
-   item is addressed to N and names an AI that runs here. Otherwise N
-   refuses the item: audit row `refused`, then `ack`. Rows inside the item
-   that carry no signature are content for the turn, not authority.
+   (`contracts/commands.md` section 3). H writes an inbox item and, if N is
+   connected, pushes it.
+2. N checks the item when it arrives (`contracts/datachannel.md` section 6):
+   the frame comes from the home of that group and `ai` runs on this host
+   (owner's decision of 2026-11-21: no attack-and-defence code, so no item
+   signature or `cause`). Otherwise N refuses the item: audit row `refused`,
+   then `ack`. Rows inside the item that carry no signature are content for
+   the turn, not authority.
 3. N holds the item, unacknowledged, while any of these is true: the group
    is paused; the item's task is `paused` or `failed`; N is offline by the
    owner's command; the AI is `limited` by a cap or a rate limit; the
