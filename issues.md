@@ -30,12 +30,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the home answers `task checked` before pushing the `rows` frame that carries the updated `checks.local` (`internal/home/README.md`), and `tskPrepareSubmit` (`internal/host/tools_task.go:318`) reads `checks.local` from `Host.Rows`.
 - Status: open, accepted by the coordinator's decision of 2026-11-21 (#206).
 
-### 2026-11-21 · limitation · Background hosted-check polling sends `task cloud` once
-
-- Symptom: if the home connection is unreachable at the moment `TaskForge.WaitHostedChecks` settles, the `task cloud` command fails and the task stays in `cloud_check` until the node restarts and `HostedChecksToResume` polls again.
-- Cause: `tskPollHostedChecks` (`internal/host/tools_task.go:475`) calls `Host.Command` once without retrying on `home_unreachable`.
-- Status: open, until N-4 or reconnect handling retries or resumes pending `cloud_check` polls on `Attach`.
-
 ### 2026-11-21 · deviation · Host delivery derives the data folder from SQLite's `pragma_database_list`
 
 - Symptom: for an in-memory store (`:memory:`), `hostConfig.projectDir` returns `""` and delivery skips disk clone and worktree creation; for a disk store it derives `projects/<group>` from the directory of the `main` database file (`filepath.Join(filepath.Dir(dbFile), "projects", group)`), tying delivery to the store's file layout.
@@ -373,12 +367,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the rendezvous answers each `to` it cannot deliver with `{"t":"offline","k":…}`, which names the target but not the `conn` (`planning/contracts/rendezvous.md` section 2.2). `internal/peer/path.go:140-145` passes every such report to `Peer.Offline`, which takes it for each unanswered offer to that target and removes the reporting path (`internal/peer/unanswered.go:38-43`). A report for an earlier frame (the earlier offer or one of its candidates) still on its way when the next offer leaves therefore counts against the new one. The back-off of at least one second makes this rare; a presence report can end the back-off sooner (`planning/flows/connect.md` step 16).
 - Status: open, accepted by the coordinator on 2026-11-20 with no contract change.
 
-### 2026-11-20 · deviation · Nothing resumes hosted checks after a node restart yet
-
-- Symptom: after a restart, a task at step `cloud_check` is not polled again, so it stays there until something else moves it (decision D3 of the host-contract audit).
-- Cause: `HostedChecksToResume` (`internal/host/forge.go`) selects the tasks to poll again and gives each its PR, commit, branch and `checks.local.at`, where the 60-minute limit counts from, but at node startup `Host.Rows` is empty until `deliver.go` finishes syncing each group asynchronously (`afterGroupState`), and `tskPart`, `tskBeginCloud`, `tskPollHostedChecks` and `projectDir` are unexported inside `internal/host`. Wiring it from `internal/node` requires over 40 lines duplicating group-sync waiting, row decoding, worktree path resolution and `proto.TaskChecked` submission without sharing `tskPart`'s cancel map.
-- Status: open (`N-4` coordinator decision 8: over 40 lines from `internal/node`, so left for `internal/host/deliver.go` `afterGroupState` alongside `resumeGroupMerges`).
-
 ### 2026-11-20 · deviation · No receiver check or shared vector for a beacon yet
 
 - Symptom: `planning/contracts/envelope.md` section 3, checks 4 and 5, now gives a beacon (`planning/contracts/rendezvous.md` section 4) a third set of receiver checks: no `to`, and a two-minute window. The code and the vectors know two kinds only. `OpenSignal` requires `to`, and `OpenCommand` allows 24 hours. So neither reads a beacon as the contract says.
@@ -459,6 +447,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-21 · limitation · Background hosted-check polling sends `task cloud` once
+
+- Symptom: if the home connection was unreachable at the moment `TaskForge.WaitHostedChecks` settled, the `task cloud` command failed and the task stayed in `cloud_check`.
+- Cause: `tskPollHostedChecks` (`internal/host/tools_task.go`) calls `Host.Command` once without a separate retry loop on `home_unreachable`.
+- Status: resolved in unit `HS-22`: once `tskFinishCloud` releases the claim after the failed command, the group sync on reconnect (`Attach` -> `syncOneGroup`) and any `rows` push run `afterGroupState` -> `resumeGroupHostedChecks`, which polls the `cloud_check` task again and sends `task cloud`. Test: `TestResumeHostedChecksAfterRestart`.
+
 ### 2026-11-21 · limitation · `Sessions` implements only the server side of a `ctl` connection
 
 - Symptom: a host on one node had no outgoing `ctl` client session yet to a home on another node (sending `hello` with `kind: "host"`, reading `welcome`, exchanging `devlog` both ways, and passing pushes to `Host.Push`), so cross-node AI sessions (`A3.3`, unit `I-6`) had no transport path.
@@ -476,6 +470,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: when an unowned node starts `home.Loop` with `Owner: ""` and is later adopted over a pairing `ctl` session, `Logs.Owner()` becomes the adopter's user id (`internal/node/devlog.go`, `dvlAdopt`), while the running `home.Loop` still has `LoopConfig.Owner == ""` (`internal/home/run.go:65`) and refuses `group create` until the loop is restarted.
 - Cause: `LoopConfig.Owner` was read as a static string when `StartLoop` constructed group states (`internal/home/run.go:175`, `:198`).
 - Status: resolved in branch `gemini/N-4`: `LoopConfig.OwnerFn` (`internal/home/run.go`) reads the node's owner dynamically (`logs.Owner`), so an unowned node's `home.Loop` sees the adopted owner immediately without restarting (`TestRunDynamicOwnerFn`, `TestAdoptionRendezvousAndForegroundStop`).
+
+### 2026-11-20 · deviation · Nothing resumes hosted checks after a node restart yet
+
+- Symptom: after a restart, a task at step `cloud_check` is not polled again, so it stays there until something else moves it (decision D3 of the host-contract audit).
+- Cause: `HostedChecksToResume` (`internal/host/forge.go`) selects the tasks to poll again and gives each its PR, commit, branch and `checks.local.at`, where the 60-minute limit counts from, but no code ran on group-state sync or `rows` pushes to call it and start `WaitHostedChecks` for each.
+- Status: resolved in unit `HS-22`: `afterGroupState` (`internal/host/deliver.go`) calls `resumeGroupHostedChecks`, passing the group's task rows and local AI member ids to `HostedChecksToResume`, and `startHostedCheck` (`internal/host/tools_task.go`) claims `(group, task)` idempotently by commit in `Part[tskPart](h)` so a second `rows` push or a duplicate `submit_task` leaves a running check alone. Test: `TestResumeHostedChecksAfterRestart`.
 
 ### 2026-11-20 · deviation · `solodawn pair` does not start a node that is not running
 
