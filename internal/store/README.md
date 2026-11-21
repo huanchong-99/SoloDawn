@@ -12,7 +12,11 @@ creation time on updates. Pass the resulting proto value to `Put`.
 A `Snapshot` pins the group's sequence and purge mark in the writer's order.
 Read deltas or pages from it, then close it. A page holds the rows
 below `before` in `pos` order, newest first; `before` 0 asks for the newest
-page. A file-backed WAL reader does not
+page. `sync_reads.go` adds the snapshot reads `sync` uses at the cut:
+`StateRows` (live `group`, `member`, `device` and `task` rows in sequence
+order), `Pending` (pending cards in `pos` order), `DeltaCount` (the count of
+rows in `(after, upTo]`, markers included) and `StateAfterSeqUpTo` (state rows
+and their markers in `(after, upTo]`). A file-backed WAL reader does not
 block new writes; the single-connection in-memory database must release its
 snapshot before another transaction can run.
 
