@@ -520,7 +520,7 @@ func TestStartResumeEventsStrayTurnEndedAndDeliver(t *testing.T) {
 		t.Fatalf("waiting status: %+v (%v)", ms2, err)
 	}
 
-	// Must fix 2: a stray second TurnEnded while Waiting is reported to Listeners
+	// A stray second TurnEnded while Waiting is reported to Listeners
 	// without panicking, sending another status, or calling Deliver again.
 	p1.emit(Event{Kind: TurnEnded, Status: "completed"})
 
@@ -560,7 +560,7 @@ func TestStartResumeEventsStrayTurnEndedAndDeliver(t *testing.T) {
 }
 
 func TestDeliverOnTurnEndEvictsSameProcessWithoutDeadlock(t *testing.T) {
-	// Must fix 1: max_open is 1, one AI has a group session and a task session,
+	// With max_open set to 1, one AI has a group session and a task session,
 	// and a synchronous Deliver calls Runner.Turn for the task session when the
 	// group turn ends. The group session's process is evicted without deadlocking.
 	h, _, drv, _ := setupRunEnv(t)
@@ -773,6 +773,43 @@ func TestDormancyVirtualClockIdleGuardsAndSpontaneousExit(t *testing.T) {
 		if seamState(t, h.Sessions, key) != Dormant {
 			t.Fatal("did not go dormant at 1 minute")
 		}
+
+		// A session row ended during a turn still arms its idle timer on TurnEnded and closes when idle expires.
+		drv.mu.Lock()
+		drv.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
+			return newFakeProc(ctx, l), nil
+		}
+		drv.mu.Unlock()
+		kEnded := SessionKey{Group: runGroup2, Member: runAI1}
+		h.Sessions.Create(makeRunSession(kEnded, GroupSession, "repo"))
+		if err := Runner.Turn(t.Context(), h, kEnded, "end-mid-turn", Turn{Kind: ItemsTurn}); err != nil {
+			t.Fatal(err)
+		}
+		pEnded := drv.lastProc()
+		h.Sessions.End(kEnded)
+		pEnded.emit(Event{Kind: TurnEnded, Status: "completed"})
+		synctest.Wait()
+		time.Sleep(time.Minute - time.Nanosecond)
+		synctest.Wait()
+		select {
+		case <-pEnded.exitedCh:
+			t.Fatal("ended session process exited before idle timeout")
+		default:
+		}
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		select {
+		case <-pEnded.exitedCh:
+		default:
+			t.Fatal("ended session process stayed open after idle timeout")
+		}
+		rt := stateOf(h)
+		rt.mu.Lock()
+		stillTracked := rt.procs[kEnded] != nil || rt.closing[kEnded]
+		rt.mu.Unlock()
+		if stillTracked {
+			t.Fatal("ended session remained in runtime maps after idle close")
+		}
 	})
 
 	checkIdleAndArmGuards(t)
@@ -845,27 +882,6 @@ func checkIdleAndArmGuards(t *testing.T) {
 	if rec := seamRecord(t, h); rec != "" {
 		t.Fatalf("unexpected audit row on spontaneous idle exit: %q", rec)
 	}
-
-	// Nit 3: if Session was Ended before TurnEnded, Move(Working, Waiting) fails and idleTimer stays nil.
-	kEnded := SessionKey{Group: runGroup2, Member: runAI1}
-	h.Sessions.Create(makeRunSession(kEnded, GroupSession, "repo"))
-	if err := Runner.Turn(t.Context(), h, kEnded, "end-mid-turn", Turn{Kind: ItemsTurn}); err != nil {
-		t.Fatal(err)
-	}
-	rh.waitCmd(t)
-	rt.mu.Lock()
-	lpEnded := rt.procs[kEnded]
-	rt.mu.Unlock()
-	h.Sessions.End(kEnded)
-	drv.proc(1).emit(Event{Kind: TurnEnded, Status: "completed"})
-	rh.waitCmd(t)
-	rt.mu.Lock()
-	timerAfterEnd := lpEnded.idleTimer
-	rt.mu.Unlock()
-	if timerAfterEnd != nil {
-		t.Fatal("idle timer armed after failed Move(Working, Waiting)")
-	}
-	drv.proc(1).finishExit()
 }
 
 func TestMaxOpenBoundariesLongestWaitingAndBlockingWait(t *testing.T) {
@@ -1095,7 +1111,7 @@ func TestCloseTimeoutOnAllPathsAuditAndC6SwitchOrdering(t *testing.T) {
 
 func checkHungInitialWriteAndNoSessionKill(t *testing.T) {
 	t.Helper()
-	// Must fix 4a: failed initial Turn write with hung CLI is killed after 10 s (no AuditKilled during a turn).
+	// A failed initial Turn write on an unresponsive CLI kills the process after 10 s without recording AuditKilled.
 	baseA := t.TempDir()
 	synctest.Test(t, func(t *testing.T) {
 		h, _, drv, shutdown := setupBubbleEnv(t, baseA)
@@ -1129,7 +1145,7 @@ func checkHungInitialWriteAndNoSessionKill(t *testing.T) {
 		}
 	})
 
-	// Must fix 4b: NoSession on resume with hung CLI kills failed process after 10 s and starts replacement.
+	// NoSession on resume with an unresponsive CLI kills the failed process after 10 s and starts the replacement.
 	baseB := t.TempDir()
 	synctest.Test(t, func(t *testing.T) {
 		h, _, drv, shutdown := setupBubbleEnv(t, baseB)
@@ -1314,7 +1330,7 @@ func TestCrashRedactionLoginInvalidOnceAndReportSaved(t *testing.T) {
 
 func checkLoginInvalidLifecycle(t *testing.T, h *Host, rh *runHome, drv *fakeDriver, taskKey SessionKey) {
 	t.Helper()
-	// Must fix 5: first LoginInvalid enters limited and reports LoginInvalidEvent (redacted);
+	// The first LoginInvalid enters limited and reports a redacted LoginInvalidEvent;
 	// a trailing TurnEnded before exit does not clear limited.
 	if err := Runner.Turn(t.Context(), h, taskKey, "auth-1", Turn{Kind: ItemsTurn}); err != nil {
 		t.Fatal(err)
@@ -1361,6 +1377,23 @@ func checkLoginInvalidLifecycle(t *testing.T, h *Host, rh *runHome, drv *fakeDri
 	if stOK.payload["state"] != "waiting" {
 		t.Fatalf("expected waiting after recovery, got %v", stOK.payload)
 	}
+	// LoginInvalid arriving while the session is waiting outside a turn also enters limited and reports LoginInvalidEvent once.
+	drv.lastProc().emit(Event{Kind: LoginInvalid, Text: "idle expired " + runSecret})
+	waitForState(t, h, taskKey, Dormant)
+	limIdle := rh.waitCmd(t)
+	var msLimIdle proto.MemberStatus[proto.LoginInvalidEvent]
+	if err := proto.Decode([]byte(limIdle.raw), &msLimIdle); err != nil || msLimIdle.State != "limited" || msLimIdle.Event == nil || msLimIdle.Event.Code != "login_invalid" || msLimIdle.Event.Detail != "idle expired [redacted]" {
+		t.Fatalf("waiting login_invalid status: %+v (%v) raw=%s", msLimIdle, err, limIdle.raw)
+	}
+
+	// Recover again so a turn-time LoginInvalid with empty detail is also checked.
+	if err := Runner.Turn(t.Context(), h, taskKey, "auth-ok-2", Turn{Kind: ItemsTurn}); err != nil {
+		t.Fatal(err)
+	}
+	rh.waitCmd(t)
+	drv.lastProc().emit(Event{Kind: TurnEnded, Status: "completed"})
+	waitForState(t, h, taskKey, Waiting)
+	rh.waitCmd(t)
 	closeWaitingSession(h, stateOf(h), taskKey)
 	rh.waitCmd(t)
 
@@ -1402,7 +1435,7 @@ func checkReportSavedBehavior(t *testing.T) {
 		h.Attach("home-dev", closedHome)
 		synctest.Wait()
 
-		// Nit 9: home accepts member status (turn_interrupted), then drops on task fail -> retry sends ONLY task fail.
+		// When the home accepts turn_interrupted status and disconnects on task fail, the retry sends only task fail.
 		dropOnFailHome := newRunHome("direct")
 		dropOnFailHome.cmdFn = func(p map[string]any) (json.RawMessage, error) {
 			if p["t"] == "task" && p["op"] == "fail" {
@@ -1676,7 +1709,7 @@ func TestMemberStatusPriorityAnswerAndTurnRefusals(t *testing.T) {
 	if st, tk := deriveMemberStatus(h, rt, slot); st != "working" || tk != runTask1 {
 		t.Fatalf("got %s/%s, want working/%s", st, tk, runTask1)
 	}
-	// Nit 7: Turn on Working session returns explicit conflict.
+	// Calling Turn on a Working session returns conflict.
 	seamCode(t, Runner.Turn(t.Context(), h, kT1, "on-working", Turn{Kind: ItemsTurn}), "conflict")
 	h.Sessions.Move(kT1, Working, Dormant)
 
@@ -1711,7 +1744,7 @@ func TestMemberStatusPriorityAnswerAndTurnRefusals(t *testing.T) {
 	p.emit(Event{Kind: TurnEnded, Status: "completed"})
 	waitForState(t, h, kT1, Waiting)
 
-	// Nit 1: concurrent Turn on a Waiting session whose turnActive is already set returns busy without moving to Dormant.
+	// A concurrent Turn on a Waiting session whose turnActive is already set returns busy without moving to Dormant.
 	rt.mu.Lock()
 	rt.closing[kT1] = true
 	rt.mu.Unlock()

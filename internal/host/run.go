@@ -463,9 +463,8 @@ func onProcessTurnEnded(h *Host, rt *runtimePart, lp *liveProc, slot aiSlot, e E
 	lp.resumed = false
 	lp.eventText = ""
 	idle := readIdleDuration(h)
-	if h.Sessions.Move(lp.key, Working, Waiting) == nil {
-		armTurnIdle(h, rt, lp, idle)
-	}
+	h.Sessions.Move(lp.key, Working, Waiting)
+	armTurnIdle(h, rt, lp, idle)
 	sendMemberStatus(context.Background(), h, rt, lp.session.Home, lp.key.Group, lp.key.Member, nil)
 	rt.notify()
 	go Deliver(h, slot.group, slot.member)
@@ -565,7 +564,12 @@ func finishWaitingClose(h *Host, rt *runtimePart, lp *liveProc) {
 
 func completeWaitingDormant(h *Host, rt *runtimePart, lp *liveProc) {
 	h.Sessions.Move(lp.key, Waiting, Dormant)
-	sendMemberStatus(context.Background(), h, rt, lp.session.Home, lp.key.Group, lp.key.Member, nil)
+	if lp.exitWhy == LoginInvalid {
+		slot := aiSlot{group: lp.key.Group, member: lp.key.Member}
+		finishLoginInvalid(h, rt, lp.session, slot, lp.eventText)
+	} else {
+		sendMemberStatus(context.Background(), h, rt, lp.session.Home, lp.key.Group, lp.key.Member, nil)
+	}
 	rt.mu.Lock()
 	delete(rt.procs, lp.key)
 	delete(rt.closing, lp.key)
