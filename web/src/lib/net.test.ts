@@ -140,6 +140,12 @@ function createFakeLocks() {
 }
 
 let idb: IDBFactory;
+const stops: (() => void)[] = [];
+const startTracked = (source: Parameters<typeof start>[0]) => {
+  const handle = start(source);
+  stops.push(handle.stop);
+  return handle;
+};
 
 beforeEach(() => {
   idb = new IDBFactory();
@@ -161,6 +167,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  while (stops.length) stops.pop()!();
   homes.length = 0;
   asked.length = 0;
   clients.length = 0;
@@ -177,7 +184,10 @@ async function answerNode(
   pcIndex: number,
   stats = transportStats('host', 'host', 0.008),
 ) {
-  await vi.waitFor(() => expect(client.offersFor(node.id).length).toBeGreaterThan(0));
+  client.receive(client.url, { t: 'presence', k: node.id, on: true });
+  await vi.waitFor(() => expect(client.offersFor(node.id).length).toBeGreaterThan(0), {
+    timeout: 3000,
+  });
   const { conn } = client.offersFor(node.id).at(-1)!;
   const pc = FakePC.made[pcIndex];
   pc.stats = stats;
@@ -353,7 +363,7 @@ describe('start (live)', () => {
 
     const host = document.createElement('div');
     document.body.appendChild(host);
-    const { net, stop } = start('live');
+    const { net, stop } = startTracked('live');
     const indicatorView = mount(Indicator, { target: host, props: { net } });
 
     await vi.waitFor(() => expect(homes).toHaveLength(2));
@@ -526,7 +536,7 @@ describe('start (live)', () => {
       },
     });
 
-    const { stop } = start('live');
+    const { stop } = startTracked('live');
     await vi.waitFor(() => expect(clients.length).toBeGreaterThan(0));
     const rvClient = clients.find((c) => c.url === 'wss://rv.example/rv')!;
     rvClient.ready();
@@ -547,9 +557,12 @@ describe('start (live)', () => {
     const nodeA = await newDevice();
     const nodeB = await newDevice();
 
+    const addListenerSpy = vi.spyOn(window, 'addEventListener');
     location.hash = '#/onboarding';
-    const { stop } = start('live');
-    await new Promise((later) => setTimeout(later, 25));
+    const { stop } = startTracked('live');
+    await vi.waitFor(() =>
+      expect(addListenerSpy.mock.calls.some(([type]) => type === 'hashchange')).toBe(true),
+    );
     expect(clients).toEqual([]);
 
     // Pairing completes on #/onboarding and saves nodeA.
