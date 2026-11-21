@@ -266,6 +266,58 @@ func TestLocalLinkInboxForGroupCreatedAfterAttach(t *testing.T) {
 	})
 }
 
+func TestLocalLinkAckDeletesQueuedItem(t *testing.T) {
+	aiID := testNonce(50)
+	rig := newLocalRig(t, map[string]home.Func{
+		"jump": func(s *home.State, _ home.Command) (home.Result, *home.Refusal) {
+			ai := proto.AIMemberRow{
+				MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: aiID}, Group: s.ID, Kind: "ai", Name: "Coder", User: s.Owner},
+				Host:      s.Home,
+			}
+			return home.Result{Rows: []home.Row{home.RowOf(ai)}, Items: []home.Item{{AI: aiID, Why: "mention"}}}, nil
+		},
+	})
+	link := AttachLocal(rig.host, rig.loop)
+	// Single reader: this test.
+	pushed := make(chan json.RawMessage, 4)
+	origPush := link.push
+	link.push = func(from string, raw json.RawMessage) {
+		origPush(from, raw)
+		pushed <- raw
+	}
+
+	ctx := context.Background()
+	_, err := rig.host.Command(ctx, rig.device.ID(), rig.payload(`"t":"group","op":"create","name":"AckGroup"`))
+	mustNoErr(t, err)
+	_, err = rig.host.Command(ctx, rig.device.ID(), rig.payload(`"t":"jump"`))
+	mustNoErr(t, err)
+	recvFrame(t, pushed)
+
+	checkLocalAckRejectsNonAckAndBadFrames(t, ctx, rig, link, pushed)
+	mustNoErr(t, link.Send(proto.Ack{Type: "ack", Group: localGroupID, Item: 1}))
+	link.Watch(localGroupID, true)
+	rig.loop.Inbox(link.conn)
+	link.Watch(localGroupID, true)
+	mustEqual(t, len(pushed), 0)
+}
+
+func checkLocalAckRejectsNonAckAndBadFrames(t *testing.T, ctx context.Context, rig *localRig, link *LocalLink, pushed <-chan json.RawMessage) {
+	t.Helper()
+	mustNoErr(t, link.Send(json.RawMessage(`{"t":"pad","g":"`+localGroupID+`","item":1}`)))
+	mustNoErr(t, link.Send(json.RawMessage(`{"t":"ack","g":"bad","item":1}`)))
+	ans, err := link.Request(ctx, func(id int64) any {
+		return map[string]any{"t": "ack", "id": id, "g": localGroupID, "item": 1}
+	})
+	mustNoErr(t, err)
+	var errResp proto.ErrorResponse
+	mustNoErr(t, proto.Decode(ans, &errResp))
+	mustEqual(t, errResp.Err.Code, "bad_request")
+	rig.loop.Inbox(link.conn)
+	var resent proto.Inbox
+	mustNoErr(t, proto.Decode(recvFrame(t, pushed), &resent))
+	mustEqual(t, len(resent.Items), 1)
+}
+
 func TestLocalLinkFraming(t *testing.T) {
 	cap := capturePushes(t)
 	rig := newLocalRig(t, nil)

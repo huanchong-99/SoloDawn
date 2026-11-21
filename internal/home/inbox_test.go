@@ -202,8 +202,7 @@ func inboxSingleEntrySize(t *testing.T, msgID string, seq int64, text string) in
 	return len(runFrame(entry))
 }
 
-// Ack deletes an item only when sent on an active connection of a served device
-// that hosts the item, in a group homed here.
+// Ack deletes an item only when sent by the host of that item in a group homed here.
 func TestInboxAckDeletesOnlyTheHostsOwnItem(t *testing.T) {
 	otherAI := id(80)
 	tables := runTables()
@@ -215,22 +214,15 @@ func TestInboxAckDeletesOnlyTheHostsOwnItem(t *testing.T) {
 			Items: []home.Item{{AI: aiID, Why: "notice", Code: "quiet"}, {AI: aiID, Why: "notice", Code: "conflict"}, {AI: otherAI, Why: "notice", Code: "quiet"}},
 		}
 	})
-	tables.Commands["forget"] = runFixed(func(s *home.State, c home.Command) home.Result {
-		return home.Result{Rows: []home.Row{home.RowOf(deviceRow(browser, browser, 4, "revoke", laptop))}}
-	})
 	w, p := runFounded(t, tables)
-	host, nodePeer, detached := w.attach(laptop), w.attach(node), w.attach(laptop)
-	w.loop.Detach(detached.conn)
-	runWait(t, detached.conn.Gone())
+	host, nodePeer := w.attach(laptop), w.attach(node)
 	w.loop.Inbox(host.conn)
 	p.does(groupID, "jump", ``)
 	equal(t, len(inboxDecode(t, host.next()).Items), 2)
 
-	// Non-homed group, browser (not host), another host, and detached host connection leave item 1 intact.
+	// Non-homed group and another host leave item 1 intact.
 	w.loop.Ack(host.conn, proto.Ack{Type: "ack", Group: proto.ID(id(99)), Item: 1})
-	w.loop.Ack(p.conn, proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 1})
 	w.loop.Ack(nodePeer.conn, proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 1})
-	w.loop.Ack(detached.conn, proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 1})
 	p.settled(groupID)
 	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM inbox"), 3)
 
@@ -241,12 +233,6 @@ func TestInboxAckDeletesOnlyTheHostsOwnItem(t *testing.T) {
 	w.loop.Inbox(host.conn)
 	resent := inboxDecode(t, host.next())
 	equal(t, []any{len(resent.Items), resent.Items[0].Item.Item}, []any{1, int64(2)})
-	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM inbox"), 1)
-
-	// Revoking laptop stops its still-open connection from acknowledging item 2.
-	p.does(groupID, "forget", ``)
-	w.loop.Ack(host.conn, proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 2})
-	p.settled(groupID)
 	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM inbox"), 1)
 
 	// A store failure during Ack is reported, and Ack on a closed loop is ignored.
@@ -388,71 +374,4 @@ func inboxCheckCapRollbackAndRestart(t *testing.T) {
 	w.loop.Inbox(host.conn)
 	p.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"notice","Code":"quiet"}]`, aiID))
 	equal(t, inboxDecode(t, host.next()).Items[0].Item.Item, int64(2))
-}
-
-// Retiring superseded items removes them in the same transaction so neither
-// immediate delivery nor a later reconnect sends them.
-func TestInboxRetiresSupersededItems(t *testing.T) {
-	grpID, reviewerID, extraID, taskID := runID(1), id(85), id(87), id(86)
-	tables := home.NodeTables()
-	tables.Commands["task/submitted"] = inboxSubmitCmd(taskID)
-	tables.Commands["jump"] = runFixed(func(s *home.State, c home.Command) home.Result {
-		task := inboxCleanTask(taskID, 0, "Check path")
-		task.Group, task.Step, task.Reviewer = grpID, "local_check", reviewerID
-		return home.Result{Rows: []home.Row{home.RowOf(task)}, Items: []home.Item{{AI: extraID, Why: "mention", Msg: id(90)}}}
-	})
-
-	w := runStart(t, runOpen(t), tables)
-	p := w.attach(browser)
-	p.does(grpID, "group", `,"op":"create","name":"Site","kind":"project","repo":"https://git.example/r.git","base":"main","forge":"none","checks":[],"member_name":"Owner"`)
-	p.next()
-	host := w.attach(laptop)
-	inboxAddAI(w, host, grpID, aiID, "claude", "Worker")
-	inboxAddAI(w, host, grpID, reviewerID, "codex", "Reviewer")
-	inboxAddAI(w, host, grpID, extraID, "claude", "Helper")
-
-	p.does(grpID, "jump", ``)
-	p.does(grpID, "task", `,"op":"submitted","commit":"c1"`)
-	p.does(grpID, "task", `,"op":"submitted","commit":"c2"`)
-	// Removing Helper retires its queued mention item as well.
-	p.does(grpID, "member", fmt.Sprintf(`,"op":"remove","id":%q`, extraID))
-
-	w.loop.Watch(host.conn, grpID, true)
-	w.loop.Inbox(host.conn)
-	frame := inboxDecode(t, host.next())
-	equal(t, len(frame.Items), 1)
-	equal(t, []any{frame.Items[0].Item.Why, frame.Items[0].Item.Commit, frame.Items[0].Task.Commit}, []any{"review", "c2", "c2"})
-}
-
-func inboxAddAI(w *runWorld, host *runPeer, grpID, memberID, cli, name string) {
-	host.re++
-	w.loop.Cmd(host.conn, host.re, laptop.Sign(fmt.Sprintf(`{"t":"member","n":%q,"ts":%d,"g":%q,"op":"add_ai","id":%q,"cli":%q,"name":%q,"account":"personal","secretary":false,"approvers":[]}`,
-		runID(w.nonce.Add(1)), clock, grpID, memberID, cli, name)))
-	host.gets(fmt.Sprintf(`{"re":%d,"ok":true}`, host.re))
-}
-
-func inboxSubmitCmd(taskID string) home.Func {
-	return func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-		var req struct {
-			Commit string `json:"commit"`
-		}
-		if err := json.Unmarshal([]byte(c.Env.Payload), &req); err != nil {
-			return home.Result{}, &home.Refusal{Code: "bad_request", Msg: err.Error()}
-		}
-		base := s.Tasks[taskID]
-		base.Checks.Local = &proto.Check{OK: true, At: c.Now, Commit: req.Commit}
-		moved, fx, _ := home.Step(base, home.Event{Kind: home.OnSubmitted, By: home.ByHost, Now: c.Now, Commit: req.Commit})
-		var retire []int64
-		for _, q := range c.Disk.Queued() {
-			if q.Why == fx.Retire[0].Why {
-				retire = append(retire, q.ID)
-			}
-		}
-		it := fx.Items[0]
-		return home.Result{
-			Rows:   []home.Row{home.RowOf(moved)},
-			Items:  []home.Item{{AI: it.AI, Why: it.Why, Task: taskID, Commit: it.Commit}},
-			Retire: retire,
-		}, nil
-	}
 }

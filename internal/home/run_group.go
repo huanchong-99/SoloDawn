@@ -182,12 +182,15 @@ const runHour = 3600_000
 // hour old or older is dropped from the AI's list as the next item is counted.
 func (g *runGroup) count(items []Item, now int64) {
 	for _, it := range items {
-		if it.Why == itemMerge {
-			continue
-		}
-		recent := slices.DeleteFunc(g.state.Wakes[it.AI], func(at int64) bool { return at <= now-runHour })
-		g.state.Wakes[it.AI] = append(recent, max(now, it.NotBefore))
+		inboxWake(g.state.Wakes, it, 0, now)
 	}
+}
+
+// runRecent returns the times in list after now - runHour, in ascending order.
+func runRecent(list []int64, now int64) []int64 {
+	recent := slices.DeleteFunc(slices.Clone(list), func(at int64) bool { return at <= now-runHour })
+	slices.Sort(recent)
+	return recent
 }
 
 // write writes a sealed result through: its rows under the sequence numbers

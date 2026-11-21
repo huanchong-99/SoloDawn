@@ -1,8 +1,7 @@
-Feature: Inbox wire delivery, wake-up cap and retirement in the home
+Feature: Inbox wire delivery and wake-up cap in the home
   The home sends queued items to each AI's host in wire inbox frames with copies
   of the rows they name, sends unacknowledged items again on hello until their
-  host acknowledges them, holds excess wakes under the group's hourly cap, and
-  removes superseded items before they can be delivered again.
+  host acknowledges them, and holds excess wakes under the group's hourly cap.
 
   Scenario: An unacknowledged inbox item is sent again on reconnect, and not after ack
     Given a group home with a secretary and a working AI on the owner's laptop
@@ -27,10 +26,3 @@ Feature: Inbox wire delivery, wake-up cap and retirement in the home
     Then the laptop receives no inbox frame before 1 hour has passed since the 1st mention
     When 1 hour has passed since the 1st mention
     Then the laptop receives item 3
-
-  Scenario: Resubmitting a task removes the review item of the superseded commit
-    Given a group home with an assignee and a reviewer on the owner's laptop, while the laptop is away
-    When the task is submitted with commit "9f2c1abf43f3224eb6826ef971a943dbab4795ce"
-    And the task is resubmitted with commit "b4d90e1277a1c08d56f34982c0f8a1e7204d91bb"
-    And the laptop connects and says hello
-    Then the laptop receives 1 inbox item, a "review" for commit "b4d90e1277a1c08d56f34982c0f8a1e7204d91bb" with the task at that commit

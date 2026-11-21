@@ -2,36 +2,29 @@ package home
 
 import (
 	"encoding/json"
+	"maps"
 	"slices"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-// Inbox wire framing, host acknowledgements and the hourly wake-up cap
-// (planning/contracts/datachannel.md section 6;
-// planning/contracts/commands.md sections 1.3 and 3).
-
 // Ack records that the host on c has handled the inbox item req.Item of
 // req.Group, so it is deleted and not sent again
 // (planning/contracts/datachannel.md section 6). An ack for a group not homed
-// here, on a connection that is gone or whose device the group does not serve,
-// or for another host's item changes nothing.
+// here or for another host's item changes nothing.
 func (l *Loop) Ack(c *Conn, req proto.Ack) {
 	l.mu.Lock()
 	g := l.groups[string(req.Group)]
 	if g != nil {
-		g.jobs.push(func() { g.ack(c, req.Item) })
+		g.jobs.push(func() { g.ack(c.device, req.Item) })
 	}
 	l.mu.Unlock()
 }
 
-func (g *runGroup) ack(c *Conn, item int64) {
-	if g.seats[c] == nil || !g.state.Serves(c.device) {
-		return
-	}
+func (g *runGroup) ack(device string, item int64) {
 	g.failed(g.loop.cfg.Store.Write(func(tx *store.Tx) error {
-		return tx.Ack(g.state.ID, c.device, item)
+		return tx.Ack(g.state.ID, device, item)
 	}))
 }
 
@@ -76,7 +69,7 @@ func inboxMsg(d Disk, id string) json.RawMessage {
 	if !ok {
 		return nil
 	}
-	raw, _ := runJSON(msg)
+	raw, _ := runJSON(msg) // it encoded when it was written
 	return raw
 }
 
@@ -99,36 +92,28 @@ func inboxFrames(group string, entries []proto.InboxItem, raws []json.RawMessage
 	return frames
 }
 
-// inboxPace applies the group's hourly wake-up cap to items without mutating s.
-// A merge item is for the assignee's host rather than a session, so it does not
-// wake an AI or wait on the cap.
+// inboxPace applies the group's hourly wake-up cap to items without mutating s
+// (planning/contracts/commands.md sections 1.3 and 3).
 func inboxPace(s *State, items []Item, now int64) []Item {
-	limit := s.Group.Limits.WakesPerHour
-	if limit <= 0 {
-		return items
-	}
-	local := map[string][]int64{}
+	wakes := maps.Clone(s.Wakes)
 	out := slices.Clone(items)
 	for i, it := range out {
-		if it.Why == itemMerge {
-			continue
-		}
-		recent := inboxWakes(s, local, it.AI, now)
-		if len(recent) >= limit {
-			it.NotBefore = max(it.NotBefore, recent[len(recent)-limit]+runHour)
-			out[i] = it
-		}
-		local[it.AI] = append(recent, max(now, it.NotBefore))
+		out[i] = inboxWake(wakes, it, s.Group.Limits.WakesPerHour, now)
 	}
 	return out
 }
 
-func inboxWakes(s *State, local map[string][]int64, ai string, now int64) []int64 {
-	recent, ok := local[ai]
-	if !ok {
-		recent = slices.Clone(s.Wakes[ai])
+// inboxWake records one item in wakes and, when limit > 0, holds it once the AI
+// has limit due times in the last hour. A merge item is for the assignee's host
+// rather than a session, so it neither waits on nor counts toward the cap.
+func inboxWake(wakes map[string][]int64, it Item, limit int, now int64) Item {
+	if it.Why == itemMerge {
+		return it
 	}
-	recent = slices.DeleteFunc(recent, func(at int64) bool { return at <= now-runHour })
-	slices.Sort(recent)
-	return recent
+	recent := runRecent(wakes[it.AI], now)
+	if limit > 0 && len(recent) >= limit {
+		it.NotBefore = max(it.NotBefore, recent[len(recent)-limit]+runHour)
+	}
+	wakes[it.AI] = append(recent, max(now, it.NotBefore))
+	return it
 }

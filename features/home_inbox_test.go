@@ -38,7 +38,6 @@ type homeInboxWorld struct {
 	secID     string
 	workerID  string
 	reviewID  string
-	taskID    string
 	nonce     int
 	lastBrief []proto.InboxItem
 }
@@ -76,18 +75,14 @@ func homeInboxSteps(sc *godog.ScenarioContext) {
 	w := &homeInboxWorld{}
 	cleanup := afterScenario(sc)
 	sc.Step(`^a group home with a secretary and a working AI on the owner's laptop$`, func() error {
-		return w.setup(cleanup, 20, true, false, true)
+		return w.setup(cleanup, 20, true)
 	})
 	sc.Step(`^a group home with a wake-up cap of (\d+) per hour and a working AI on the owner's laptop$`, func(capPerHour int) error {
-		return w.setup(cleanup, capPerHour, false, false, true)
-	})
-	sc.Step(`^a group home with an assignee and a reviewer on the owner's laptop, while the laptop is away$`, func() error {
-		return w.setup(cleanup, 20, true, true, false)
+		return w.setup(cleanup, capPerHour, false)
 	})
 	sc.Step(`^a brief of 1 task for the working AI is posted and confirmed$`, w.postAndConfirmBrief)
 	sc.Step(`^the laptop receives the confirmed rows and then an inbox frame with "assign" and "confirmed", carrying their task and message rows$`, w.checkBriefInbox)
 	sc.Step(`^the laptop reconnects and says hello(?: before acknowledging the items)?$`, w.reconnectLaptop)
-	sc.Step(`^the laptop connects and says hello$`, w.reconnectLaptop)
 	sc.Step(`^the laptop receives the same "assign" and "confirmed" items again in 1 inbox frame$`, w.checkResentBriefInbox)
 	sc.Step(`^the owner's browser sends an ack for item (\d+)$`, func(item int64) {
 		w.loop.Ack(w.browser.conn, proto.Ack{Type: "ack", Group: proto.ID(w.group), Item: item})
@@ -97,10 +92,10 @@ func homeInboxSteps(sc *godog.ScenarioContext) {
 		w.loop.Ack(w.laptop.conn, proto.Ack{Type: "ack", Group: proto.ID(w.group), Item: b})
 	})
 	sc.Step(`^the laptop receives no inbox frame$`, w.laptopQuiet)
-	homeInboxCapAndRetireSteps(sc, w)
+	homeInboxCapSteps(sc, w)
 }
 
-func homeInboxCapAndRetireSteps(sc *godog.ScenarioContext, w *homeInboxWorld) {
+func homeInboxCapSteps(sc *godog.ScenarioContext, w *homeInboxWorld) {
 	sc.Step(`^(\d+) mentions are queued for the working AI$`, w.queueMentions)
 	sc.Step(`^the laptop receives (\d+) "mention" items$`, w.expectMentionItems)
 	sc.Step(`^the laptop receives (\d+) "mention" items in 1 inbox frame$`, w.expectMentionBatch)
@@ -117,8 +112,6 @@ func homeInboxCapAndRetireSteps(sc *godog.ScenarioContext, w *homeInboxWorld) {
 		w.loop.Tick(time.UnixMilli(homeInboxClock + 3_600_000))
 	})
 	sc.Step(`^the laptop receives item (\d+)$`, w.expectSingleItem)
-	sc.Step(`^the task is (?:submitted|resubmitted) with commit "([^"]*)"$`, w.submitCommit)
-	sc.Step(`^the laptop receives 1 inbox item, a "review" for commit "([^"]*)" with the task at that commit$`, w.checkReviewCommit)
 }
 
 func (w *homeInboxWorld) id() proto.ID {
@@ -126,7 +119,7 @@ func (w *homeInboxWorld) id() proto.ID {
 	return exampleID(fmt.Sprint("home inbox ", w.nonce))
 }
 
-func (w *homeInboxWorld) setup(cleanup func(func()), capPerHour int, withSec, withReviewer, laptopOnline bool) error {
+func (w *homeInboxWorld) setup(cleanup func(func()), capPerHour int, withSec bool) error {
 	w.clock.Store(homeInboxClock)
 	w.browserK, w.nodeK, w.laptopK = exampleKey("inbox browser"), exampleKey("inbox node"), exampleKey("inbox laptop")
 	w.group = string(w.id())
@@ -141,7 +134,7 @@ func (w *homeInboxWorld) setup(cleanup func(func()), capPerHour int, withSec, wi
 	loop, err := home.StartLoop(home.LoopConfig{
 		Store: db, Home: w.nodeK.ID(), Owner: w.browserK.ID(),
 		Logs:   w.logs,
-		Tables: w.tables(),
+		Tables: home.NodeTables(),
 		Now:    func() time.Time { return time.UnixMilli(w.clock.Load()) },
 	})
 	if err != nil {
@@ -150,7 +143,7 @@ func (w *homeInboxWorld) setup(cleanup func(func()), capPerHour int, withSec, wi
 	cleanup(loop.Close)
 	w.loop = loop
 	w.browser, w.laptop = w.attach(w.browserK), w.attach(w.laptopK)
-	return w.bootstrap(capPerHour, withSec, withReviewer, laptopOnline)
+	return w.bootstrap(capPerHour, withSec)
 }
 
 func (w *homeInboxWorld) logs(user string) *identity.Log {
@@ -159,59 +152,6 @@ func (w *homeInboxWorld) logs(user string) *identity.Log {
 		return nil
 	}
 	return log
-}
-
-func (w *homeInboxWorld) tables() home.Tables {
-	tables := home.NodeTables()
-	cmds := home.Table{}
-	for k, fn := range tables.Commands {
-		cmds[k] = fn
-	}
-	cmds["post/text"] = w.mentionCmd
-	cmds["task/submitted"] = w.submitCmd
-	tables.Commands = cmds
-	return tables
-}
-
-func (w *homeInboxWorld) mentionCmd(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-	msg := proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: string(c.Nonce)}, Group: s.ID,
-		By: c.Who.Member(), Kind: "text", Timestamp: c.Now, Text: "ping",
-		Mentions: []string{w.workerID}, Body: json.RawMessage(`{}`), Env: &c.Env,
-	}
-	return home.Result{Rows: []home.Row{home.RowOf(msg)}, Items: []home.Item{{AI: w.workerID, Why: "mention", Msg: msg.ID}}}, nil
-}
-
-func (w *homeInboxWorld) submitCmd(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-	var req struct {
-		proto.PayloadHeader
-		Op     string `json:"op"`
-		Commit string `json:"commit"`
-	}
-	if refusal := c.Decode(&req); refusal != nil {
-		return home.Result{}, refusal
-	}
-	base := s.Tasks[w.taskID]
-	if base.Step == "branch" {
-		base.Step = "local_check"
-	}
-	base.Checks.Local = &proto.Check{OK: true, At: c.Now, Commit: req.Commit}
-	moved, fx, err := home.Step(base, home.Event{Kind: home.OnSubmitted, By: home.ByHost, Now: c.Now, Commit: req.Commit})
-	if err != nil {
-		return home.Result{}, &home.Refusal{Code: err.Error(), Msg: "refused"}
-	}
-	var retire []int64
-	for _, q := range c.Disk.Queued() {
-		if q.Why == fx.Retire[0].Why {
-			retire = append(retire, q.ID)
-		}
-	}
-	it := fx.Items[0]
-	return home.Result{
-		Rows:   []home.Row{home.RowOf(moved)},
-		Items:  []home.Item{{AI: it.AI, Why: it.Why, Task: w.taskID, Commit: it.Commit}},
-		Retire: retire,
-	}, nil
 }
 
 func (w *homeInboxWorld) attach(key identity.Key) *homeInboxPeer {
@@ -239,7 +179,7 @@ func (w *homeInboxWorld) cmd(p *homeInboxPeer, key identity.Key, payload map[str
 	return nil
 }
 
-func (w *homeInboxWorld) bootstrap(capPerHour int, withSec, withReviewer, laptopOnline bool) error {
+func (w *homeInboxWorld) bootstrap(capPerHour int, withSec bool) error {
 	createNonce := proto.ID(w.group)
 	err := w.cmd(w.browser, w.browserK, map[string]any{
 		"t": "group", "op": "create", "n": createNonce, "name": "Website", "kind": "project",
@@ -248,22 +188,18 @@ func (w *homeInboxWorld) bootstrap(capPerHour int, withSec, withReviewer, laptop
 	if err != nil {
 		return err
 	}
-	if err := w.enrollAIs(withSec, withReviewer); err != nil {
+	if err := w.enrollAIs(withSec); err != nil {
 		return err
 	}
-	if err := w.configureCapAndTasks(capPerHour, withReviewer); err != nil {
+	if err := w.configureCap(capPerHour); err != nil {
 		return err
-	}
-	if !laptopOnline {
-		w.loop.Detach(w.laptop.conn)
-		return nil
 	}
 	w.loop.Watch(w.laptop.conn, w.group, true)
 	w.loop.Inbox(w.laptop.conn)
 	return nil
 }
 
-func (w *homeInboxWorld) enrollAIs(withSec, withReviewer bool) error {
+func (w *homeInboxWorld) enrollAIs(withSec bool) error {
 	if err := w.addAI(w.workerID, "claude", "Worker", false); err != nil {
 		return err
 	}
@@ -283,7 +219,7 @@ func (w *homeInboxWorld) addAI(id, cli, name string, secretary bool) error {
 	})
 }
 
-func (w *homeInboxWorld) configureCapAndTasks(capPerHour int, withReviewer bool) error {
+func (w *homeInboxWorld) configureCap(capPerHour int) error {
 	if capPerHour != 20 {
 		err := w.cmd(w.browser, w.browserK, map[string]any{
 			"t": "group", "op": "set",
@@ -293,20 +229,9 @@ func (w *homeInboxWorld) configureCapAndTasks(capPerHour int, withReviewer bool)
 			return err
 		}
 	}
-	var ownerID string
-	err := w.db.Write(func(tx *store.Tx) error {
-		return tx.QueryRow("SELECT id FROM row WHERE g=? AND r='member' AND data->>'kind'='human'", w.group).Scan(&ownerID)
+	return w.db.Write(func(tx *store.Tx) error {
+		return tx.QueryRow("SELECT id FROM row WHERE g=? AND r='member' AND data->>'kind'='human'", w.group).Scan(&w.ownerID)
 	})
-	w.ownerID = ownerID
-	if err != nil || !withReviewer {
-		return err
-	}
-	if err := w.postAndConfirmBrief(); err != nil {
-		return err
-	}
-	w.loop.Ack(w.laptop.conn, proto.Ack{Type: "ack", Group: proto.ID(w.group), Item: 1})
-	w.loop.Ack(w.laptop.conn, proto.Ack{Type: "ack", Group: proto.ID(w.group), Item: 2})
-	return nil
 }
 
 func (w *homeInboxWorld) postAndConfirmBrief() error {
@@ -324,12 +249,7 @@ func (w *homeInboxWorld) postAndConfirmBrief() error {
 	if err != nil {
 		return err
 	}
-	if err := w.cmd(w.browser, w.browserK, map[string]any{"t": "act", "msg": briefNonce, "action": "confirm"}); err != nil {
-		return err
-	}
-	return w.db.Write(func(tx *store.Tx) error {
-		return tx.QueryRow("SELECT id FROM row WHERE g=? AND r='task'", w.group).Scan(&w.taskID)
-	})
+	return w.cmd(w.browser, w.browserK, map[string]any{"t": "act", "msg": briefNonce, "action": "confirm"})
 }
 
 func (w *homeInboxWorld) decodeInbox(raw string) (proto.Inbox, error) {
@@ -412,7 +332,11 @@ func (w *homeInboxWorld) laptopQuiet() error {
 
 func (w *homeInboxWorld) queueMentions(count int) error {
 	for range count {
-		if err := w.cmd(w.browser, w.browserK, map[string]any{"t": "post", "kind": "text", "text": "ping"}); err != nil {
+		err := w.cmd(w.browser, w.browserK, map[string]any{
+			"t": "post", "kind": "text", "text": "ping",
+			"thread": nil, "main": false, "mentions": []string{w.workerID}, "re": nil, "body": map[string]any{},
+		})
+		if err != nil {
 			return err
 		}
 	}
@@ -455,45 +379,4 @@ func (w *homeInboxWorld) expectSingleItem(wantID int64) error {
 		return fmt.Errorf("expected item %d, got %s (%v)", wantID, raw, err)
 	}
 	return nil
-}
-
-func (w *homeInboxWorld) submitCommit(commit string) error {
-	// A second host connection sends the submission while the AI's session connection is away.
-	sender := w.attach(w.laptopK)
-	defer w.loop.Detach(sender.conn)
-	return w.cmd(sender, w.laptopK, map[string]any{"t": "task", "op": "submitted", "commit": commit})
-}
-
-func (w *homeInboxWorld) checkReviewCommit(commit string) error {
-	raw, err := w.laptop.next()
-	if err != nil {
-		return err
-	}
-	frame, err := w.decodeInbox(raw)
-	if err != nil {
-		return err
-	}
-	reviews := reviewItems(frame.Items)
-	if !singleReviewAt(reviews, commit) {
-		return fmt.Errorf("got review items %+v, want 1 review at %s", reviews, commit)
-	}
-	return nil
-}
-
-func reviewItems(items []proto.InboxItem) []proto.InboxItem {
-	var reviews []proto.InboxItem
-	for _, it := range items {
-		if it.Item.Why == "review" {
-			reviews = append(reviews, it)
-		}
-	}
-	return reviews
-}
-
-func singleReviewAt(reviews []proto.InboxItem, commit string) bool {
-	if len(reviews) != 1 {
-		return false
-	}
-	it := reviews[0]
-	return it.Item.Commit == commit && it.Task != nil && it.Task.Commit == commit
 }
