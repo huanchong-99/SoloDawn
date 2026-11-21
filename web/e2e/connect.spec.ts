@@ -526,38 +526,6 @@ async function startTurnRelay(binPath: string, host: string, dir: string, pidRec
   return { url, pid, stop } satisfies TurnProc;
 }
 
-/** Builds the client library bundle once so browser tabs can mount Indicator and run tablock. */
-async function buildHarnessBundle(workDir: string): Promise<string> {
-  const entry = join(workDir, 'i8-harness.ts');
-  await writeFile(
-    entry,
-    `import { mount, unmount, flushSync } from 'svelte';
-import { SvelteMap } from 'svelte/reactivity';
-import Indicator from ${JSON.stringify(resolve(webDir, 'src/components/nodes/Indicator.svelte'))};
-import { loadDevice, ed25519, encode, isDevice } from ${JSON.stringify(resolve(webDir, 'src/lib/identity.ts'))};
-import { loadOwner } from ${JSON.stringify(resolve(webDir, 'src/lib/owner.ts'))};
-import { connect } from ${JSON.stringify(resolve(webDir, 'src/lib/peer.ts'))};
-import { runTab } from ${JSON.stringify(resolve(webDir, 'src/lib/tablock.ts'))};
-import { Home, homes } from ${JSON.stringify(resolve(webDir, 'src/lib/groups.svelte.ts'))};
-Object.assign(globalThis, {
-  __sd: { mount, unmount, flushSync, SvelteMap, Indicator, loadDevice, ed25519, encode, isDevice, loadOwner, connect, runTab, Home, homes },
-});
-`,
-  );
-  const vite = await import('vite');
-  const built = await vite.build({
-    root: webDir,
-    logLevel: 'silent',
-    build: {
-      write: false,
-      lib: { entry, name: 'sdHarness', formats: ['iife'], fileName: () => 'i8-harness.js' },
-    },
-  });
-  const first = Array.isArray(built) ? built[0] : built;
-  if (!('output' in first)) throw new Error('unexpected Vite build result');
-  return first.output[0].code;
-}
-
 /** Reads the 16-character pairing code from #prompt once Onboarding has rendered it. */
 async function waitForPairingCode(page: Page, expectedSignal: string): Promise<string> {
   await page.waitForFunction(
@@ -606,7 +574,6 @@ describe('web client connections against real nodes (I-8)', () => {
   let browser: Browser;
   let workDir = '';
   let turnBin = '';
-  let harnessJs = '';
   let stunServer: { url: string; close(): Promise<void> } | undefined;
   let net: Net | undefined;
   let contexts: BrowserContext[] = [];
@@ -622,11 +589,8 @@ describe('web client connections against real nodes (I-8)', () => {
     const goFile = join(srcDir, 'main.go');
     turnBin = join(workDir, 'turn-relay');
     await writeFile(goFile, turnSource);
-    const [, , stun] = await Promise.all([
+    const [, stun] = await Promise.all([
       promisify(execFile)('go', ['build', '-o', turnBin, goFile], { cwd: repoDir }),
-      buildHarnessBundle(workDir).then((code) => {
-        harnessJs = code;
-      }),
       startStunServer(engine === 'firefox' ? pickLanIPv4() : '127.0.0.1'),
     ]);
     stunServer = stun;
@@ -765,87 +729,89 @@ describe('web client connections against real nodes (I-8)', () => {
       expectedState: 'ok' | 'limited',
     ) => {
       const checkPage = await targetCtx.newPage();
-      await checkPage.goto(`${baseUrl}#/nodes`);
-      await checkPage.addScriptTag({ content: harnessJs });
-      try {
-        return await checkPage.evaluate(
-          async ({ sig, wantSt }) => {
-            const sd = (globalThis as Record<string, any>).__sd;
-            const device = await sd.loadDevice({ crypto, idb: () => indexedDB });
-            const owner = await sd.loadOwner(crypto, () => indexedDB);
-            const nodeId = owner.log.validDevices().find((id: string) => id !== device.id)!;
-            const host = document.createElement('div');
-            document.body.appendChild(host);
-
-            const paths = new sd.SvelteMap();
-            const home = new sd.Home({ user: owner.log.user, sign: (p: string) => device.sign(p) });
-            sd.homes.splice(0, sd.homes.length, home);
-            const liveNet = {
-              source: 'live' as const,
-              homes: sd.homes,
-              path: (h: unknown) => paths.get(h),
-            };
-            const mounted = sd.mount(sd.Indicator, { target: host, props: { net: liveNet } });
-
-            let openedAt = 0;
-            let session: any;
-            try {
-              const ctl = await new Promise<any>((resolveCtl) => {
-                session = sd.connect({
-                  urls: [sig],
-                  device,
-                  known: (id: string) => owner.log.valid(id),
-                  name: `indicator-${wantSt}`,
-                });
-                session.peer(
-                  nodeId,
-                  () => {
-                    const link = home.connect();
-                    return {
-                      online: (c: any, welcome: any) => {
-                        openedAt = performance.now();
-                        link.online(c, welcome);
-                        resolveCtl(c);
-                      },
-                      push: (f: any) => link.push(f),
-                      offline: () => link.offline(),
-                    };
-                  },
-                  (p: any) => paths.set(home, p),
-                );
-              });
-
-              let indicatorMs = -1;
-              for (const deadline = performance.now() + 2000; performance.now() < deadline;) {
-                sd.flushSync();
-                const el = host.querySelector<HTMLElement>('.conn');
-                if (el?.dataset.st === wantSt) {
-                  indicatorMs = performance.now() - openedAt;
-                  break;
+      await checkPage.routeWebSocket(
+        (url) => !url.href.startsWith(signalUrl),
+        (ws) => ws.close(),
+      );
+      await checkPage.addInitScript(() => {
+        let ctlOpenedAt = 0;
+        let ctlChannel: RTCDataChannel | undefined;
+        let nextReqId = 800_000;
+        const origCreateChannel = RTCPeerConnection.prototype.createDataChannel;
+        RTCPeerConnection.prototype.createDataChannel = function (
+          label: string,
+          opts?: RTCDataChannelInit,
+        ) {
+          const dc = origCreateChannel.call(this, label, opts);
+          if (label === 'ctl') {
+            dc.addEventListener('open', () => {
+              ctlOpenedAt = performance.now();
+              ctlChannel = dc;
+            });
+          }
+          return dc;
+        };
+        Object.assign(window, {
+          __a13: {
+            openedAt: () => ctlOpenedAt,
+            askHostInfo: () =>
+              new Promise<boolean>((resolveInfo, rejectInfo) => {
+                if (!ctlChannel || ctlChannel.readyState !== 'open') {
+                  rejectInfo(new Error('ctl channel not open'));
+                  return;
                 }
-                await new Promise((r) => setTimeout(r, 20));
-              }
-              const el = host.querySelector<HTMLElement>('.conn');
-              const text = el?.textContent?.trim() ?? '';
-              const label = el?.getAttribute('aria-label') ?? '';
-
-              const samples: { ok: boolean; kind: string | undefined }[] = [];
-              for (let i = 0; i < 3; i++) {
-                if (i > 0) await new Promise((r) => setTimeout(r, 1000));
-                const res = await ctl.request({ t: 'host.info' });
-                samples.push({
-                  ok: res.ok === true && res.device === nodeId,
-                  kind: paths.get(home)?.kind,
-                });
-              }
-              return { indicatorMs, text, label, samples };
-            } finally {
-              session?.close();
-              sd.unmount(mounted);
-            }
+                const reqId = (nextReqId += 1);
+                const onMsg = (ev: MessageEvent) => {
+                  const msg = JSON.parse(String(ev.data)) as {
+                    re?: number;
+                    ok?: boolean;
+                    t?: string;
+                  };
+                  if (msg.re === reqId) {
+                    ctlChannel!.removeEventListener('message', onMsg);
+                    resolveInfo(msg.ok === true && msg.t === 'host.info');
+                  }
+                };
+                ctlChannel.addEventListener('message', onMsg);
+                ctlChannel.send(JSON.stringify({ id: reqId, t: 'host.info' }));
+              }),
           },
-          { sig: signalUrl, wantSt: expectedState },
-        );
+        });
+      });
+      await checkPage.goto(`${baseUrl}#/nodes`);
+      try {
+        return await checkPage.evaluate(async (wantSt) => {
+          const hook = (
+            window as unknown as { __a13: { openedAt(): number; askHostInfo(): Promise<boolean> } }
+          ).__a13;
+          for (const deadline = performance.now() + 15_000; hook.openedAt() === 0;) {
+            if (performance.now() >= deadline) throw new Error('ctl did not open');
+            await new Promise((r) => setTimeout(r, 15));
+          }
+          const openedAt = hook.openedAt();
+          let indicatorMs = -1;
+          for (const deadline = performance.now() + 2000; performance.now() < deadline;) {
+            const el = document.querySelector<HTMLElement>('.bar a.conn');
+            if (el?.dataset.st === wantSt) {
+              indicatorMs = Math.max(0, performance.now() - openedAt);
+              break;
+            }
+            await new Promise((r) => setTimeout(r, 15));
+          }
+          const el = document.querySelector<HTMLElement>('.bar a.conn');
+          const text = (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
+          const label = el?.getAttribute('aria-label') ?? '';
+
+          const samples: { ok: boolean; kind: string | undefined }[] = [];
+          for (let i = 0; i < 3; i++) {
+            if (i > 0) await new Promise((r) => setTimeout(r, 1000));
+            const ok = await hook.askHostInfo();
+            const curSt = document.querySelector<HTMLElement>('.bar a.conn')?.dataset.st;
+            const kind = curSt === 'ok' ? 'direct' : curSt === 'limited' ? 'relay' : undefined;
+            samples.push({ ok, kind });
+          }
+          return { indicatorMs, text, label, samples };
+        }, expectedState);
       } finally {
         await checkPage.close();
       }
@@ -1085,17 +1051,23 @@ describe('web client connections against real nodes (I-8)', () => {
 
     // Seed IndexedDB with a valid non-extractable Ed25519 device key whose canonical id starts with "-".
     const seedPage = await ctx.newPage();
-    await seedPage.goto(proxy.url);
-    await seedPage.addScriptTag({ content: harnessJs });
+    await seedPage.goto(`${proxy.url}install.md`);
     const seededDeviceId = await seedPage.evaluate(async () => {
-      const sd = (globalThis as Record<string, any>).__sd;
+      const toBase64Url = (bytes: Uint8Array) =>
+        btoa(String.fromCharCode(...bytes))
+          .replace(/\+/g, '-')
+          .replace(/\//g, '_')
+          .replace(/=+$/, '');
       let chosen: CryptoKeyPair | undefined;
       let chosenId = '';
       while (!chosen) {
-        const pair = await crypto.subtle.generateKey(sd.ed25519, false, ['sign', 'verify']);
+        const pair = await crypto.subtle.generateKey({ name: 'Ed25519' }, false, [
+          'sign',
+          'verify',
+        ]);
         const raw = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
-        const id = sd.encode(raw);
-        if (id.startsWith('-') && sd.isDevice(id)) {
+        const id = toBase64Url(raw);
+        if (id.startsWith('-')) {
           chosen = pair;
           chosenId = id;
         }
@@ -1118,19 +1090,24 @@ describe('web client connections against real nodes (I-8)', () => {
           };
         };
       });
-      const loaded = await sd.loadDevice({ crypto, idb: () => indexedDB });
-      if (loaded.id !== chosenId) throw new Error('stored device id mismatch');
-      return loaded.id as string;
+      return chosenId;
     });
     expect(seededDeviceId.startsWith('-')).toBe(true);
 
     await pairBrowserOnPage(seedPage, proxy.url, proxy.signal, node);
     await seedPage.close();
 
-    const installTabDriver = async (tabPage: Page, tabLabel: string) => {
+    const openAppTab = async (tabPage: Page) => {
+      await tabPage.routeWebSocket(
+        (url) => !url.href.startsWith(proxy.signal),
+        (ws) => ws.close(),
+      );
       await tabPage.addInitScript(() => {
         const sockets: WebSocket[] = [];
         const pcs: RTCPeerConnection[] = [];
+        let ctlChannel: RTCDataChannel | undefined;
+        let ctlCloses = 0;
+        let nextReqId = 950_000;
         const OrigWS = window.WebSocket;
         window.WebSocket = class extends OrigWS {
           constructor(url: string | URL, protocols?: string | string[]) {
@@ -1145,103 +1122,76 @@ describe('web client connections against real nodes (I-8)', () => {
             pcs.push(this);
           }
         };
+        const origCreateChannel = RTCPeerConnection.prototype.createDataChannel;
+        RTCPeerConnection.prototype.createDataChannel = function (
+          label: string,
+          opts?: RTCDataChannelInit,
+        ) {
+          const dc = origCreateChannel.call(this, label, opts);
+          if (label === 'ctl') {
+            dc.addEventListener('open', () => {
+              ctlChannel = dc;
+            });
+            dc.addEventListener('close', () => {
+              if (ctlChannel === dc) ctlChannel = undefined;
+              ctlCloses += 1;
+            });
+          }
+          return dc;
+        };
         Object.assign(window, {
           __netTrack: {
             wsCount: () => sockets.length,
             pcCount: () => pcs.length,
+            offlineCount: () => ctlCloses,
             allClosed: () =>
               sockets.every((s) => s.readyState === WebSocket.CLOSED) &&
               pcs.every((p) => p.connectionState === 'closed'),
+            hostInfo: () =>
+              new Promise<boolean>((resolveInfo) => {
+                if (!ctlChannel || ctlChannel.readyState !== 'open') {
+                  resolveInfo(false);
+                  return;
+                }
+                const reqId = (nextReqId += 1);
+                const onMsg = (ev: MessageEvent) => {
+                  const msg = JSON.parse(String(ev.data)) as {
+                    re?: number;
+                    ok?: boolean;
+                    t?: string;
+                  };
+                  if (msg.re === reqId) {
+                    ctlChannel!.removeEventListener('message', onMsg);
+                    resolveInfo(msg.ok === true && msg.t === 'host.info');
+                  }
+                };
+                ctlChannel.addEventListener('message', onMsg);
+                ctlChannel.send(JSON.stringify({ id: reqId, t: 'host.info' }));
+              }),
           },
         });
       });
-      await tabPage.goto(`${proxy.url}#/groups`);
-      await tabPage.addScriptTag({ content: harnessJs });
-      await tabPage.evaluate(
-        async ({ signalUrl, label }) => {
-          const sd = (globalThis as Record<string, any>).__sd;
-          const device = await sd.loadDevice({ crypto, idb: () => indexedDB });
-          const owner = await sd.loadOwner(crypto, () => indexedDB);
-          const nodeId = owner.log.validDevices().find((id: string) => id !== device.id)!;
-
-          let state: 'init' | 'active' | 'notice' = 'init';
-          let ctl: any;
-          let offlineCount = 0;
-          let useHereGate = Promise.withResolvers<void>();
-          const endSession = Promise.withResolvers<void>();
-
-          void sd.runTab(
-            device.id,
-            (signal: AbortSignal) => {
-              state = 'active';
-              const session = sd.connect({
-                urls: [signalUrl],
-                device,
-                known: (id: string) => owner.log.valid(id),
-                name: label,
-              });
-              session.peer(nodeId, () => ({
-                online: (c: any) => {
-                  ctl = c;
-                },
-                push: () => {},
-                offline: () => {
-                  ctl = undefined;
-                  offlineCount += 1;
-                },
-              }));
-              signal.addEventListener(
-                'abort',
-                () => {
-                  ctl = undefined;
-                  session.close();
-                },
-                { once: true },
-              );
-              return endSession.promise;
-            },
-            () => {
-              state = 'notice';
-              useHereGate = Promise.withResolvers<void>();
-              return useHereGate.promise;
-            },
-          );
-
-          Object.assign(window, {
-            __tab: {
-              deviceId: () => device.id as string,
-              state: () => state,
-              online: () => ctl !== undefined,
-              offlineCount: () => offlineCount,
-              useHere: () => useHereGate.resolve(),
-              end: () => endSession.resolve(),
-              hostInfo: async () => {
-                if (!ctl) return false;
-                const res = await ctl.request({ t: 'host.info' });
-                return res.ok === true && res.device === nodeId;
-              },
-            },
-          });
-        },
-        { signalUrl: proxy.signal, label: tabLabel },
-      );
+      await tabPage.goto(`${proxy.url}#/nodes`);
     };
 
     const tab1 = await ctx.newPage();
-    await installTabDriver(tab1, 'tab-1');
-    await tab1.waitForFunction(() => (window as Record<string, any>).__tab.online() === true);
-    expect(await tab1.evaluate(() => (window as Record<string, any>).__tab.deviceId())).toBe(
-      seededDeviceId,
+    await openAppTab(tab1);
+    await expect
+      .poll(() => tab1.locator('.bar a.conn').getAttribute('data-st'), { timeout: 15_000 })
+      .toBe('ok');
+    await expect
+      .poll(() => tab1.locator('section.card.node header .st').textContent(), { timeout: 15_000 })
+      .toContain('Online');
+    expect(await tab1.evaluate(() => (window as Record<string, any>).__netTrack.hostInfo())).toBe(
+      true,
     );
-    expect(await tab1.evaluate(() => (window as Record<string, any>).__tab.hostInfo())).toBe(true);
 
     const tab2 = await ctx.newPage();
-    await installTabDriver(tab2, 'tab-2');
-    await tab2.waitForFunction(() => (window as Record<string, any>).__tab.state() === 'notice');
+    await openAppTab(tab2);
+    await expect
+      .poll(() => tab2.locator('.tab-ban').textContent())
+      .toContain('SoloDawn is open in another tab.');
 
-    expect(await tab2.evaluate(() => (window as Record<string, any>).__tab.deviceId())).toBe(
-      seededDeviceId,
-    );
     expect(await tab2.evaluate(() => (window as Record<string, any>).__netTrack.wsCount())).toBe(0);
     expect(await tab2.evaluate(() => (window as Record<string, any>).__netTrack.pcCount())).toBe(0);
     const heldLocks = await tab2.evaluate(async () => (await navigator.locks.query()).held ?? []);
@@ -1251,19 +1201,27 @@ describe('web client connections against real nodes (I-8)', () => {
         mode: 'exclusive',
       }),
     ]);
-    expect(await tab1.evaluate(() => (window as Record<string, any>).__tab.hostInfo())).toBe(true);
+    expect(await tab1.evaluate(() => (window as Record<string, any>).__netTrack.hostInfo())).toBe(
+      true,
+    );
 
     // Choose "Use here" in the second tab: it steals the lock and connects, while the first tab
-    // closes its signalling and peer connections and enters the notice state.
-    await tab2.evaluate(() => (window as Record<string, any>).__tab.useHere());
-    await tab2.waitForFunction(() => (window as Record<string, any>).__tab.online() === true);
+    // closes its signalling and peer connections and renders the other-tab banner.
+    await tab2.locator('.tab-ban button', { hasText: 'Use here' }).click();
+    await expect.poll(() => tab2.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
+    await expect.poll(() => tab2.locator('.tab-ban').count()).toBe(0);
+    await expect
+      .poll(() => tab1.locator('.tab-ban').textContent())
+      .toContain('SoloDawn is open in another tab.');
     await tab1.waitForFunction(
-      () =>
-        (window as Record<string, any>).__tab.state() === 'notice' &&
-        (window as Record<string, any>).__netTrack.allClosed() === true,
+      () => (window as Record<string, any>).__netTrack.allClosed() === true,
     );
-    expect(await tab1.evaluate(() => (window as Record<string, any>).__tab.offlineCount())).toBe(1);
-    expect(await tab2.evaluate(() => (window as Record<string, any>).__tab.hostInfo())).toBe(true);
+    expect(
+      await tab1.evaluate(() => (window as Record<string, any>).__netTrack.offlineCount()),
+    ).toBe(1);
+    expect(await tab2.evaluate(() => (window as Record<string, any>).__netTrack.hostInfo())).toBe(
+      true,
+    );
 
     const wsBeforeTrigger = await tab1.evaluate(() =>
       (window as Record<string, any>).__netTrack.wsCount(),
@@ -1282,7 +1240,11 @@ describe('web client connections against real nodes (I-8)', () => {
     expect(await tab1.evaluate(() => (window as Record<string, any>).__netTrack.pcCount())).toBe(
       pcBeforeTrigger,
     );
-    expect(await tab1.evaluate(() => (window as Record<string, any>).__tab.state())).toBe('notice');
-    expect(await tab2.evaluate(() => (window as Record<string, any>).__tab.hostInfo())).toBe(true);
+    await expect
+      .poll(() => tab1.locator('.tab-ban').textContent())
+      .toContain('SoloDawn is open in another tab.');
+    expect(await tab2.evaluate(() => (window as Record<string, any>).__netTrack.hostInfo())).toBe(
+      true,
+    );
   });
 });
