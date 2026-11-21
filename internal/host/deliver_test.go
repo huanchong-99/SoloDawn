@@ -165,7 +165,7 @@ func (f *fakeDeliverHome) Request(ctx context.Context, build func(int64) any) (j
 		return f.waitSyncAnswer(ctx, syncReq)
 	}
 	if syncReq, ok := req.(proto.Sync); ok {
-		raw := encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: id, OK: true}, Group: syncReq.Group, Seq: syncReq.Since})
+		raw := marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: id, OK: true}, Group: syncReq.Group, Seq: syncReq.Since})
 		return json.RawMessage(raw), nil
 	}
 	if cmdReq, ok := req.(proto.Cmd); ok && cmdHook != nil {
@@ -376,7 +376,7 @@ func (r *deliverRig) waitAIUnbusy(group, member string) {
 
 func (r *deliverRig) setSetting(key string, val any) {
 	write := func(tx *store.Tx) error {
-		_, err := tx.Exec("INSERT OR REPLACE INTO setting(key, value) VALUES(?, ?)", key, encodeJSON(val))
+		_, err := tx.Exec("INSERT OR REPLACE INTO setting(key, value) VALUES(?, ?)", key, marshalWire(val))
 		return err
 	}
 	if err := r.db.Write(write); err != nil {
@@ -399,7 +399,7 @@ func (r *deliverRig) seedGroupAndMembers() {
 }
 
 func (r *deliverRig) putGroup(grp proto.GroupRow) {
-	r.h.Rows.Put(grp.ID, "group", grp.ID, json.RawMessage(encodeJSON(grp)))
+	r.h.Rows.Put(grp.ID, "group", grp.ID, json.RawMessage(marshalWire(grp)))
 }
 
 func (r *deliverRig) putAIMember(id, name, hostID string, sec bool, seq int64) {
@@ -407,14 +407,14 @@ func (r *deliverRig) putAIMember(id, name, hostID string, sec bool, seq int64) {
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: id, Seq: seq}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: name},
 		CLI:       "claude", Host: hostID, HostName: "n", Secretary: sec, Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local",
 	}
-	r.h.Rows.Put(testGroup1, "member", id, json.RawMessage(encodeJSON(m)))
+	r.h.Rows.Put(testGroup1, "member", id, json.RawMessage(marshalWire(m)))
 }
 
 func (r *deliverRig) putTask(task proto.TaskRow) {
 	if task.Depends == nil {
 		task.Depends = []string{}
 	}
-	r.h.Rows.Put(task.Group, "task", task.ID, json.RawMessage(encodeJSON(task)))
+	r.h.Rows.Put(task.Group, "task", task.ID, json.RawMessage(marshalWire(task)))
 }
 
 func (r *deliverRig) makeTextMsg(id proto.ID, thread *string, text string) *proto.MsgRow {
@@ -426,11 +426,11 @@ func (r *deliverRig) makeTextMsg(id proto.ID, thread *string, text string) *prot
 }
 
 func (r *deliverRig) pushItem(signer identity.Key, connHome string, group proto.ID, it proto.Item, msg *proto.MsgRow) {
-	wire := proto.InboxItem{Env: signer.Sign(encodeJSON(it))}
+	wire := proto.InboxItem{Env: signer.Sign(marshalWire(it))}
 	if msg != nil {
-		wire.Msg = json.RawMessage(encodeJSON(msg))
+		wire.Msg = json.RawMessage(marshalWire(msg))
 	}
-	frame := encodeJSON(proto.Inbox{Type: "inbox", Group: group, Items: []proto.InboxItem{wire}})
+	frame := marshalWire(proto.Inbox{Type: "inbox", Group: group, Items: []proto.InboxItem{wire}})
 	r.h.Push(connHome, json.RawMessage(frame))
 }
 
@@ -567,11 +567,11 @@ func verifyUnsyncedInboxTriggersSyncAndDelivers(t *testing.T, r *deliverRig) {
 	if req != wantSync || len(r.home.ackList()) != 0 || len(r.audits()) != 0 {
 		t.Fatalf("unexpected pre-sync state: req=%+v acks=%v audits=%v", req, r.home.ackList(), r.audits())
 	}
-	grpRaw := json.RawMessage(encodeJSON(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "P1", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Checks: []string{}}))
-	aiRaw := json.RawMessage(encodeJSON(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 2}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
-	tRaw := json.RawMessage(encodeJSON(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 1, Title: "T", Slug: "t", Origin: "brief", State: "active", Step: "local_check", Assignee: testAI1, Depends: []string{}}))
-	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw, aiRaw, tRaw}})))
-	r.home.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 5}))}
+	grpRaw := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "P1", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Checks: []string{}}))
+	aiRaw := json.RawMessage(marshalWire(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 2}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
+	tRaw := json.RawMessage(marshalWire(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 1, Title: "T", Slug: "t", Origin: "brief", State: "active", Step: "local_check", Assignee: testAI1, Depends: []string{}}))
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw, aiRaw, tRaw}})))
+	r.home.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 5}))}
 	r.waitUntil("item 10 delivered", func() bool { return r.home.ackCountFor(10) == 1 && len(r.runtime.recorded()) == 1 })
 	r.waitAIUnbusy(testGroup1, testAI1)
 	if len(r.home.syncSinces()) != 1 {
@@ -586,12 +586,12 @@ func verifySecondUnsyncedGroupAndCancelCleanup(t *testing.T, r *deliverRig) {
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 2}, Group: testGroup2, Kind: "ai", User: r.ownerKey.ID(), Name: "C2"},
 		CLI:       "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local",
 	}
-	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup2, Rows: []json.RawMessage{json.RawMessage(encodeJSON(m2))}})))
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup2, Rows: []json.RawMessage{json.RawMessage(marshalWire(m2))}})))
 	req2 := <-r.home.started
 	if req2.Group != testGroup2 {
 		t.Fatalf("expected sync for %s, got %+v", testGroup2, req2)
 	}
-	r.home.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 2, OK: true}, Group: testGroup2, Seq: 2}))}
+	r.home.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 2, OK: true}, Group: testGroup2, Seq: 2}))}
 	r.waitGroupLive(testGroup2)
 
 	// Attach a second connection (superseding r.home), then close r.home.done: d.cancels[home] must retain second's entry until second closes.
@@ -599,7 +599,7 @@ func verifySecondUnsyncedGroupAndCancelCleanup(t *testing.T, r *deliverRig) {
 	d.mu.Lock()
 	d.groupLocked(string(testCanonicalID(96)), r.home2Key.ID())
 	d.mu.Unlock()
-	r.h.Push(r.extraKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: string(testCanonicalID(95)), Rows: []json.RawMessage{}})))
+	r.h.Push(r.extraKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: string(testCanonicalID(95)), Rows: []json.RawMessage{}})))
 	r.setSetting("homes", []proto.Home{
 		{Group: testGroup2, Home: r.homeKey.ID(), Name: "Two"},
 		{Group: testCanonicalID(99), Home: r.home2Key.ID(), Name: "Other"},
@@ -608,9 +608,9 @@ func verifySecondUnsyncedGroupAndCancelCleanup(t *testing.T, r *deliverRig) {
 	second.syncMode = true
 	r.h.Attach(r.homeKey.ID(), second)
 	s1 := <-second.started
-	second.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: s1.Group, Seq: s1.Since}))}
+	second.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: s1.Group, Seq: s1.Since}))}
 	s2 := <-second.started
-	second.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 2, OK: true}, Group: s2.Group, Seq: s2.Since}))}
+	second.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 2, OK: true}, Group: s2.Group, Seq: s2.Since}))}
 	if s1.Group != testGroup1 || s2.Group != testGroup2 {
 		t.Fatalf("unexpected synced groups: %s, %s", s1.Group, s2.Group)
 	}
@@ -647,11 +647,11 @@ func TestSyncCursorResetDeltaAndOvertakenRows(t *testing.T) {
 	r.h.Attach(r.homeKey.ID(), second)
 	<-second.started
 	t.Cleanup(func() { second.closeConn() })
-	first.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 99}))}
+	first.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 99}))}
 
-	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Reset{Type: "reset", Group: testGroup1})))
-	grpRaw := json.RawMessage(encodeJSON(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 4}, Name: "P", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Checks: []string{}}))
-	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw}})))
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Reset{Type: "reset", Group: testGroup1})))
+	grpRaw := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 4}, Name: "P", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Checks: []string{}}))
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw}})))
 	second.answers <- syncAnswer{err: errors.New("broken")}
 	r.waitSyncStopped(testGroup1)
 
@@ -673,24 +673,24 @@ func verifyOvertakenSyncedAndMonotonicCursor(t *testing.T, r *deliverRig) {
 	mergeIt := proto.Item{Type: "item", Nonce: testCanonicalID(26), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 31, AI: testAI2, Why: "merge", Task: testTask2, Commit: "c1"}
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, assignIt, nil)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, mergeIt, nil)
-	third.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 10}))}
+	third.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 10}))}
 	r.waitGroupLive(testGroup1)
 	Deliver(r.h, testGroup1, testAI1)
 	if len(r.audits()) != 0 || len(third.ackList()) != 0 {
 		t.Fatalf("absent member rows caused refusal or ack: audits=%+v", r.audits())
 	}
 	// Push member rows (seq 6, 7) while task rows are still absent: checkStillCurrent must hold, not refuse.
-	ai1Raw := json.RawMessage(encodeJSON(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 6}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C1"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
-	ai2Raw := json.RawMessage(encodeJSON(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI2, Seq: 7}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C2"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
-	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{ai1Raw, ai2Raw}})))
+	ai1Raw := json.RawMessage(marshalWire(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 6}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C1"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
+	ai2Raw := json.RawMessage(marshalWire(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI2, Seq: 7}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C2"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{ai1Raw, ai2Raw}})))
 	Deliver(r.h, testGroup1, testAI1)
 	if len(r.audits()) != 0 || len(third.ackList()) != 0 {
 		t.Fatalf("absent task rows caused refusal or ack: audits=%+v", r.audits())
 	}
 	// Push task rows with seq 8, 9 (< 10): items now process, and cursor remains at 10.
-	t1Raw := json.RawMessage(encodeJSON(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 8}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "local_check", Assignee: testAI1, Depends: []string{}}))
-	t2Raw := json.RawMessage(encodeJSON(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 9}, Group: testGroup1, Num: 2, Title: "T2", Slug: "t2", Origin: "brief", State: "active", Step: "merge", Commit: "c1", Assignee: testAI2, Depends: []string{}}))
-	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{t1Raw, t2Raw}})))
+	t1Raw := json.RawMessage(marshalWire(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 8}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "local_check", Assignee: testAI1, Depends: []string{}}))
+	t2Raw := json.RawMessage(marshalWire(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 9}, Group: testGroup1, Num: 2, Title: "T2", Slug: "t2", Origin: "brief", State: "active", Step: "merge", Commit: "c1", Assignee: testAI2, Depends: []string{}}))
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{t1Raw, t2Raw}})))
 	r.waitUntil("both delayed items acknowledged", func() bool { return len(third.ackList()) == 2 && len(r.runtime.recorded()) == 1 })
 	r.waitAIUnbusy(testGroup1, testAI1)
 	r.waitNoActiveMerges()
@@ -707,7 +707,7 @@ func assertLiveCursorAndFailedDelta(t *testing.T, r *deliverRig) {
 	if req4 := <-fourth.started; req4.Since != 10 {
 		t.Fatalf("cursor regressed below synced S: got since=%d, want 10", req4.Since)
 	}
-	fourth.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 10}))}
+	fourth.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 10}))}
 	r.waitGroupLive(testGroup1)
 
 	putSeq := func(seq int64, name string) {
@@ -715,7 +715,7 @@ func assertLiveCursorAndFailedDelta(t *testing.T, r *deliverRig) {
 			MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: seq}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: name},
 			CLI:       "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local",
 		}
-		r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{json.RawMessage(encodeJSON(m))}})))
+		r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{json.RawMessage(marshalWire(m))}})))
 	}
 	putSeq(12, "first-12")
 	putSeq(12, "dup-12")
@@ -738,7 +738,7 @@ func assertMismatchAndMalformedSynced(t *testing.T, r *deliverRig) {
 	if req5 := <-fifth.started; req5.Since != 12 {
 		t.Fatalf("got since=%d, want 12", req5.Since)
 	}
-	fifth.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup2, Seq: 50}))}
+	fifth.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup2, Seq: 50}))}
 	r.waitSyncStopped(testGroup1)
 	sixth := newFakeDeliverHome()
 	sixth.syncMode = true
@@ -767,19 +767,19 @@ func TestGroupResyncAfterPostSyncedResetAndFailedSync(t *testing.T) {
 	r.home.syncMode = true
 	r.h.Attach(r.homeKey.ID(), r.home)
 	req1 := <-r.home.started
-	r.home.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: req1.Group, Seq: 7}))}
+	r.home.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: req1.Group, Seq: 7}))}
 	r.waitGroupLive(testGroup1)
 
-	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Reset{Type: "reset", Group: testGroup1})))
-	grpRaw := json.RawMessage(encodeJSON(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "Proj", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Checks: []string{}}))
-	aiRaw := json.RawMessage(encodeJSON(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 2}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C1"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
-	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw, aiRaw}})))
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Reset{Type: "reset", Group: testGroup1})))
+	grpRaw := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "Proj", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Checks: []string{}}))
+	aiRaw := json.RawMessage(marshalWire(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 2}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C1"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw, aiRaw}})))
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(27), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 401, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "after-reset"))
 	req2 := <-r.home.started
 	if req2.Since != 0 || len(r.home.syncSinces()) != 2 {
 		t.Fatalf("expected single resync from 0 after post-synced reset, got req=%+v sinces=%v", req2, r.home.syncSinces())
 	}
-	r.home.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 2, OK: true}, Group: testGroup1, Seq: 2}))}
+	r.home.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 2, OK: true}, Group: testGroup1, Seq: 2}))}
 	r.waitUntil("post-reset mention delivered", func() bool { return len(r.runtime.recorded()) == 1 && r.home.ackCountFor(401) == 1 })
 	r.waitAIUnbusy(testGroup1, testAI1)
 
@@ -802,7 +802,7 @@ func verifyResyncAfterFailedSync(t *testing.T, r *deliverRig) {
 	if s1.Since != 2 || s2.Since != 2 {
 		t.Fatalf("expected both syncs to ask since kept cursor 2, got %d then %d", s1.Since, s2.Since)
 	}
-	second.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 2, OK: true}, Group: testGroup1, Seq: 2}))}
+	second.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 2, OK: true}, Group: testGroup1, Seq: 2}))}
 	r.waitUntil("post-error mention delivered", func() bool { return len(r.runtime.recorded()) == 2 && second.ackCountFor(402) == 1 })
 	r.waitAIUnbusy(testGroup1, testAI1)
 }
@@ -895,7 +895,7 @@ func verifyMergePreAuditWrittenFalse(t *testing.T, r *deliverRig, pDir string) {
 	delete(Holds, "dup")
 	// Also exercise recordMergeTaken returning written == false when an already-audited merge entry reaches takeOneMerge: acked again, 0 extra Apply.
 	d := deliv(r.h)
-	d.enqueueMerge(verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Env: r.homeKey.Sign(encodeJSON(mIt2))}, item: mIt2})
+	d.enqueueMerge(verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Env: r.homeKey.Sign(marshalWire(mIt2))}, item: mIt2})
 	Deliver(r.h, "", "")
 	if r.home.ackCountFor(906) != 2 || len(r.home.cmdPayloads()) != 2 || len(d.mergeGroups()) != 0 {
 		t.Fatalf("expected 2 acks and 2 total merge commands, got acks=%d cmds=%d", r.home.ackCountFor(906), len(r.home.cmdPayloads()))
@@ -924,7 +924,7 @@ func TestNonBlockingPushHandlersAndLockOrder(t *testing.T) {
 	<-cmdEntered
 	// While Request is blocked, pushing rows and another inbox item must return without deadlocking.
 	noteRaw := json.RawMessage(`{"r":"note","id":"n1","seq":11}`)
-	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{noteRaw}})))
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{noteRaw}})))
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(36), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 41, AI: testSec, Why: "notice", Code: "ping"}, nil)
 	close(pushDone)
 
@@ -972,15 +972,15 @@ func TestArrivalRefusalsNotHostedAndOpenWaitsWithoutCause(t *testing.T) {
 	r.h.Push(r.homeKey.ID(), json.RawMessage(`{"t":"inbox","g":"not-canonical","items":[]}`))
 	r.h.Push(r.homeKey.ID(), json.RawMessage(`{"t":"inbox","g":"`+testGroup1+`","items":[123]}`))
 	badPayload := r.homeKey.Sign(`{"t":"item","n":"` + string(testCanonicalID(5)) + `","ts":1763600000000,"g":"` + testGroup1 + `","to":"` + r.hostKey.ID() + `","item":4,"why":"mention"}`)
-	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Inbox{Type: "inbox", Group: testGroup1, Items: []proto.InboxItem{{Env: badPayload}}})))
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Inbox{Type: "inbox", Group: testGroup1, Items: []proto.InboxItem{{Env: badPayload}}})))
 	checkRowHeaderEdges(t, r)
 
 	// Remote AI, human, and gone member are refused as not_hosted_here.
 	r.putAIMember(testAI2, "RemoteAI", r.extraKey.ID(), false, 10)
 	human := proto.HumanMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testHuman, Seq: 11}, Group: testGroup1, Kind: "human", User: r.ownerKey.ID(), Name: "Owner"}, Role: "owner", Online: true}
-	r.h.Rows.Put(testGroup1, "member", testHuman, json.RawMessage(encodeJSON(human)))
+	r.h.Rows.Put(testGroup1, "member", testHuman, json.RawMessage(marshalWire(human)))
 	goneID := testCanonicalID(88)
-	r.h.Rows.Put(testGroup1, "member", string(goneID), json.RawMessage(encodeJSON(proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: string(goneID), Seq: 12}, Gone: true})))
+	r.h.Rows.Put(testGroup1, "member", string(goneID), json.RawMessage(marshalWire(proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: string(goneID), Seq: 12}, Gone: true})))
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(41), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 101, AI: testAI2, Why: "mention", Msg: testMsg1}, nil)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(42), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 102, AI: testHuman, Why: "mention", Msg: testMsg1}, nil)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(43), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 103, AI: goneID, Why: "merge", Task: testTask1, Commit: "c1"}, nil)
@@ -1003,7 +1003,7 @@ func checkRowHeaderEdges(t *testing.T, r *deliverRig) {
 		json.RawMessage(`{"r":"note","id":"","seq":1}`),
 		json.RawMessage(`{"r":"note","id":"x","seq":0}`),
 	}
-	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: badRows})))
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: badRows})))
 	d := deliv(r.h)
 	d.mu.Lock()
 	emptyGrp := d.groups[""]
@@ -1021,7 +1021,7 @@ func checkCorruptRowReplacement(t *testing.T, r *deliverRig) {
 		json.RawMessage(`{"r":"note","id":"n1","seq":1}`),
 		json.RawMessage(`{"r":"note","id":"corrupt","seq":1}`),
 	}
-	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: validRows})))
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: validRows})))
 	var replaced proto.RowHeader
 	raw, ok := r.h.Rows.Get(testGroup1, "note", "corrupt")
 	if !ok || proto.Decode(raw, &replaced) != nil || replaced.Seq != 1 {
@@ -1101,8 +1101,8 @@ func checkReplyNonMatchingCases(t *testing.T, r *deliverRig) {
 	}
 	// Malformed Msg JSON is treated as no message and queued instead of refused.
 	badMsgIt := proto.Item{Type: "item", Nonce: testCanonicalID(48), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 309, AI: testAI1, Why: "reply", Msg: testMsg1}
-	badWire := proto.InboxItem{Env: r.homeKey.Sign(encodeJSON(badMsgIt)), Msg: json.RawMessage(`{"invalid":true}`)}
-	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Inbox{Type: "inbox", Group: testGroup1, Items: []proto.InboxItem{badWire}})))
+	badWire := proto.InboxItem{Env: r.homeKey.Sign(marshalWire(badMsgIt)), Msg: json.RawMessage(`{"invalid":true}`)}
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Inbox{Type: "inbox", Group: testGroup1, Items: []proto.InboxItem{badWire}})))
 }
 
 func verifyColdStartDrainOpenWait(t *testing.T) {
@@ -1118,16 +1118,16 @@ func verifyColdStartDrainOpenWait(t *testing.T) {
 	defer doneWait()
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(55), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 330, AI: testAI1, Why: "decided", Msg: testCard1}, nil)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(56), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 331, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "held"))
-	grpPaused := json.RawMessage(encodeJSON(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Paused: &proto.GroupPause{By: testHuman, At: testStartMS}, Checks: []string{}}))
-	aiRow := json.RawMessage(encodeJSON(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 2}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
-	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpPaused, aiRow}})))
-	r.home.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 2}))}
+	grpPaused := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Paused: &proto.GroupPause{By: testHuman, At: testStartMS}, Checks: []string{}}))
+	aiRow := json.RawMessage(marshalWire(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 2}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpPaused, aiRow}})))
+	r.home.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 2}))}
 	r.waitUntil("open wait drained at take", func() bool { return len(waitCh) == 1 && r.home.ackCountFor(330) == 1 })
 	if len(r.runtime.recorded()) != 0 || len(r.audits()) != 1 || r.audits()[0].agent != "claude" {
 		t.Fatalf("unexpected cold-start drain state: turns=%d audits=%+v", len(r.runtime.recorded()), r.audits())
 	}
-	grpUnpaused := json.RawMessage(encodeJSON(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 3}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Checks: []string{}}))
-	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpUnpaused}})))
+	grpUnpaused := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 3}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Checks: []string{}}))
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpUnpaused}})))
 	r.waitUntil("mention delivered after unpause", func() bool { return len(r.runtime.recorded()) == 1 })
 }
 
@@ -1534,13 +1534,13 @@ func verifyConflictRestartInspectAndRemoteForge(t *testing.T) {
 	r2 := newDeliverRigOnStore(t, r.db)
 	r2.h.Attach(r2.homeKey.ID(), r2.home)
 	r2.waitGroupLive(testGroup1)
-	grpPaused := json.RawMessage(encodeJSON(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 10}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r2.homeKey.ID(), Secretary: testSec, Paused: &proto.GroupPause{By: testHuman, At: testStartMS}, Checks: []string{}}))
-	grpRaw := json.RawMessage(encodeJSON(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 11}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r2.homeKey.ID(), Secretary: testSec, Checks: []string{}}))
-	aiRaw := json.RawMessage(encodeJSON(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 12}, Group: testGroup1, Kind: "ai", User: r2.ownerKey.ID(), Name: "C"}, CLI: "claude", Host: r2.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
-	t2Raw := json.RawMessage(encodeJSON(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 13}, Group: testGroup1, Num: 2, Title: "Restart", Slug: "restart", Origin: "brief", State: "active", Step: "merge", Commit: baseCommit, Assignee: testAI1, Depends: []string{}}))
-	noAuditRaw := json.RawMessage(encodeJSON(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: string(testCanonicalID(98)), Seq: 14}, Group: testGroup1, Num: 3, Title: "N", Slug: "no-audit", Origin: "brief", State: "active", Step: "merge", Commit: baseCommit, Assignee: testAI1, Depends: []string{}}))
-	remoteAIRaw := json.RawMessage(encodeJSON(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: string(testCanonicalID(97)), Seq: 15}, Group: testGroup1, Num: 4, Title: "R", Slug: "remote-ai", Origin: "brief", State: "active", Step: "merge", Commit: baseCommit, Assignee: testAI2, Depends: []string{}}))
-	r2.h.Push(r2.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpPaused, aiRaw, t2Raw, noAuditRaw, remoteAIRaw}})))
+	grpPaused := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 10}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r2.homeKey.ID(), Secretary: testSec, Paused: &proto.GroupPause{By: testHuman, At: testStartMS}, Checks: []string{}}))
+	grpRaw := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 11}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r2.homeKey.ID(), Secretary: testSec, Checks: []string{}}))
+	aiRaw := json.RawMessage(marshalWire(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 12}, Group: testGroup1, Kind: "ai", User: r2.ownerKey.ID(), Name: "C"}, CLI: "claude", Host: r2.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
+	t2Raw := json.RawMessage(marshalWire(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 13}, Group: testGroup1, Num: 2, Title: "Restart", Slug: "restart", Origin: "brief", State: "active", Step: "merge", Commit: baseCommit, Assignee: testAI1, Depends: []string{}}))
+	noAuditRaw := json.RawMessage(marshalWire(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: string(testCanonicalID(98)), Seq: 14}, Group: testGroup1, Num: 3, Title: "N", Slug: "no-audit", Origin: "brief", State: "active", Step: "merge", Commit: baseCommit, Assignee: testAI1, Depends: []string{}}))
+	remoteAIRaw := json.RawMessage(marshalWire(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: string(testCanonicalID(97)), Seq: 15}, Group: testGroup1, Num: 4, Title: "R", Slug: "remote-ai", Origin: "brief", State: "active", Step: "merge", Commit: baseCommit, Assignee: testAI2, Depends: []string{}}))
+	r2.h.Push(r2.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpPaused, aiRaw, t2Raw, noAuditRaw, remoteAIRaw}})))
 	afterGroupState(r2.h, deliv(r2.h), testGroup1)
 	if len(r2.home.cmdPayloads()) != 0 {
 		t.Fatal("restart inspect ran while group paused")
@@ -1554,7 +1554,7 @@ func verifyConflictRestartInspectAndRemoteForge(t *testing.T) {
 		t.Fatal("restart inspect ran while merge already claimed")
 	}
 	d2.unclaimMerge(mKey2)
-	r2.h.Push(r2.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw}})))
+	r2.h.Push(r2.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw}})))
 	r2.waitUntil("restart inspect reported", func() bool { return len(r2.home.cmdPayloads()) == 1 })
 	r2.waitNoActiveMerges()
 	verifyRemoteForgeAndGitHubRepo(t)
@@ -1714,7 +1714,7 @@ func checkMergeAndHandAuditFailure(t *testing.T, r *deliverRig) {
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 41}, Group: testGroup1, Num: 1, Title: "M", Slug: "m", Origin: "brief", State: "active", Step: "merge", Commit: "c1", Assignee: testAI1})
 	mIt := proto.Item{Type: "item", Nonce: testCanonicalID(212), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 903, AI: testAI1, Why: "merge", Task: testTask1, Commit: "c1"}
 	d := deliv(r.h)
-	v := verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Env: r.homeKey.Sign(encodeJSON(mIt))}, item: mIt}
+	v := verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Env: r.homeKey.Sign(marshalWire(mIt))}, item: mIt}
 	d.enqueueMerge(v)
 	d.enqueueMerge(v)
 	mKey := testGroup1 + "\x00" + testTask1 + "\x00c1"
@@ -1726,7 +1726,7 @@ func checkMergeAndHandAuditFailure(t *testing.T, r *deliverRig) {
 	d.unclaimMerge(mKey)
 	// With audit trigger active, refuseItem skips ack and recordMergeTaken fails and re-queues item 903.
 	humanID := testCanonicalID(89)
-	r.h.Rows.Put(testGroup1, "member", string(humanID), json.RawMessage(encodeJSON(proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: string(humanID), Seq: 42}, Gone: true})))
+	r.h.Rows.Put(testGroup1, "member", string(humanID), json.RawMessage(marshalWire(proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: string(humanID), Seq: 42}, Gone: true})))
 	refuseItem(r.h, verifiedItem{home: r.homeKey.ID(), group: testGroup1, item: proto.Item{Item: 904}}, "", "not_hosted_here")
 	if r.home.ackCountFor(904) != 0 {
 		t.Fatal("refusal ack sent when audit write failed")

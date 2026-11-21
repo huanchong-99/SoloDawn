@@ -1,11 +1,8 @@
 package host
 
 import (
-	"bytes"
 	"cmp"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"log"
 	"maps"
@@ -925,7 +922,7 @@ func reportInitialBranch(ctx context.Context, h *Host, home, group, taskID, bran
 		return nil
 	}
 	cmd := proto.TaskBranch{TaskCommand: hostTaskCommand(h, group, "branch", taskID), Branch: branch}
-	return sendHostCommand(ctx, h, home, encodeJSON(cmd))
+	return sendHostCommand(ctx, h, home, marshalWire(cmd))
 }
 
 func failTargetSession(h *Host, d *delivery, key aiGroupKey, agent string, target routedTarget, batch []verifiedItem, gitErr error) bool {
@@ -949,13 +946,13 @@ func reportWorkspaceFailure(ctx context.Context, h *Host, home string, target ro
 	if conn, ok := h.Home(home); ok {
 		path = conn.Path()
 	}
-	hc := proto.HomeCommand{Type: "member", Nonce: newNonce(), Timestamp: h.Now().UnixMilli(), Group: proto.ID(target.key.Group)}
+	hc := proto.HomeCommand{Type: "member", Nonce: freshNonce(), Timestamp: h.Now().UnixMilli(), Group: proto.ID(target.key.Group)}
 	mc := proto.MemberCommand{HomeCommand: hc, Op: "status", ID: proto.ID(target.key.Member)}
 	ev := &proto.TurnInterruptedEvent{SystemCode: proto.SystemCode{Code: "turn_interrupted"}, Reason: "crash", Task: proto.ID(target.key.Task), Detail: detail}
-	sendHostCommand(ctx, h, home, encodeJSON(proto.MemberStatus[proto.TurnInterruptedEvent]{MemberCommand: mc, State: state, Path: path, Event: ev}))
+	sendHostCommand(ctx, h, home, marshalWire(proto.MemberStatus[proto.TurnInterruptedEvent]{MemberCommand: mc, State: state, Path: path, Event: ev}))
 	if target.kind == TaskSession {
 		fail := proto.TaskFail{TaskCommand: hostTaskCommand(h, target.key.Group, "fail", target.key.Task), Reason: "crash", Detail: detail}
-		sendHostCommand(ctx, h, home, encodeJSON(fail))
+		sendHostCommand(ctx, h, home, marshalWire(fail))
 	}
 }
 
@@ -1260,10 +1257,10 @@ func buildReviewedMerge(pDir string, grp proto.GroupRow, task proto.TaskRow, com
 func reportMergeOutcome(ctx context.Context, h *Host, home, group string, task proto.TaskRow, commit string, res MergeResult) {
 	if res.MergeCommit != "" {
 		stats := proto.DiffStats{Added: task.Stats.Added, Removed: task.Stats.Removed}
-		sendHostCommand(ctx, h, home, encodeJSON(proto.TaskMerged{TaskCommand: hostTaskCommand(h, group, "merged", task.ID), Commit: commit, MergeCommit: res.MergeCommit, Stats: stats}))
+		sendHostCommand(ctx, h, home, marshalWire(proto.TaskMerged{TaskCommand: hostTaskCommand(h, group, "merged", task.ID), Commit: commit, MergeCommit: res.MergeCommit, Stats: stats}))
 		return
 	}
-	sendHostCommand(ctx, h, home, encodeJSON(proto.TaskConflict{TaskCommand: hostTaskCommand(h, group, "conflict", task.ID), Commit: commit, Detail: res.Conflict}))
+	sendHostCommand(ctx, h, home, marshalWire(proto.TaskConflict{TaskCommand: hostTaskCommand(h, group, "conflict", task.ID), Commit: commit, Detail: res.Conflict}))
 }
 
 func githubRepo(raw string) string {
@@ -1277,20 +1274,6 @@ func githubRepo(raw string) string {
 }
 
 func hostTaskCommand(h *Host, group, op, taskID string) proto.TaskCommand {
-	hc := proto.HomeCommand{Type: "task", Nonce: newNonce(), Timestamp: h.Now().UnixMilli(), Group: proto.ID(group)}
+	hc := proto.HomeCommand{Type: "task", Nonce: freshNonce(), Timestamp: h.Now().UnixMilli(), Group: proto.ID(group)}
 	return proto.TaskCommand{HomeCommand: hc, Op: op, ID: proto.ID(taskID)}
-}
-
-func newNonce() proto.ID {
-	var buf [16]byte
-	rand.Read(buf[:])
-	return proto.ID(base64.RawURLEncoding.EncodeToString(buf[:]))
-}
-
-func encodeJSON(v any) string {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	enc.Encode(v)
-	return strings.TrimSuffix(buf.String(), "\n")
 }

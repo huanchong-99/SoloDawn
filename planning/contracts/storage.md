@@ -151,7 +151,7 @@ CREATE TABLE setting (
   expiry is the offer's `ts + 120000`; delete it only when the node's clock is strictly later.
 - `setting` keys: `name`, `owner` (user id), `rendezvous` (list of URLs),
   `retention_days` (90), `idle_minutes` (15), `max_open` (4),
-  `default_level` (2), `all_level3` (false), `approvers` (list of user ids),
+  `default_level` (3, owner's decision of 2026-11-21), `all_level3` (false), `approvers` (list of user ids),
   `offline` (false), `homes` (the list `host.info` shows,
   `contracts/datachannel.md` section 7).
 
@@ -205,7 +205,7 @@ CREATE TABLE audit (              -- R-139
   ts     INTEGER NOT NULL,
   g      TEXT,
   agent  TEXT,
-  what   TEXT NOT NULL,           -- delivered | refused | requested | approval | takeover | handback | merge | setting
+  what   TEXT NOT NULL,           -- delivered | refused | requested | approval | takeover | handback | merge | setting | killed
   item   INTEGER,                 -- delivered, refused: the inbox item id
   home   TEXT,                    -- delivered, refused: device id of the home
   detail TEXT NOT NULL,           -- merge: the task and the commit (contracts/local.md section 7)
