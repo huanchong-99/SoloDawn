@@ -42,8 +42,9 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   restarted; they reconnect without the rendezvous.
 - **A1.5** A test rendezvous that alters the description in transit causes
   the connection to be refused.
-- **A1.6** Revoking a browser closes its connection within 1 second; its
-  next attempt is refused.
+- **A1.6** Removed by the owner's decision of 2026-11-21 (no stolen-device
+  defence in code; revoking is postponed, and a lost device is handled outside
+  the product in the deployment guide).
 - **A1.7** When the relay quota is used up, an allocation that is already
   open stops forwarding, and `quota` reports it.
 - **A1.8** Six targets build with cgo disabled. Binary size and idle memory
@@ -160,6 +161,12 @@ These tests need a task session, so they follow the first slice of M5
 - **A4.10** On each CLI at level 2, an AI asked to write a marker file
   outside its worktree produces a card, and no file exists before approval.
   (`live`)
+- **A4.11** On the real Codex CLI with
+  `-c features.default_mode_request_user_input=true`, an AI in Default mode
+  asked to present a multiple-choice question with its ask-the-user tool
+  emits `item/tool/requestUserInput`, produces a `decision` card, and
+  receives the chosen option (run in B-17 / I-11; `contracts/drivers.md` 1.2
+  says what changes if the flag does not work). (`live`)
 
 ## M5. Tasks
 
