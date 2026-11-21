@@ -617,6 +617,146 @@ kbd,
     box-shadow: inset 3px 0 0 var(--dawn);
   }
 }
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+
+  .kind {
+    font-weight: 600;
+    font-size: var(--fs-sm);
+    color: var(--text);
+  }
+  h3 {
+    flex: 1;
+    min-width: 12ch;
+    color: var(--text);
+  }
+  .badge:last-child {
+    margin-left: auto;
+  }
+}
+.card-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.kv {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px var(--sp-4);
+  font-size: var(--fs-sm);
+
+  dt {
+    color: var(--text-3);
+  }
+  dd {
+    min-width: 0;
+  }
+}
+.fold {
+  border-top: 1px solid var(--line);
+  margin: 0 calc(-1 * var(--sp-4)) -14px;
+
+  > summary {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: 10px var(--sp-4);
+    cursor: pointer;
+    list-style: none;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    border-radius: 0 0 var(--r-lg) var(--r-lg);
+  }
+  > summary::-webkit-details-marker {
+    display: none;
+  }
+  > summary::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--surface-2);
+    opacity: 0;
+    transition: opacity var(--dur-1) var(--ease);
+  }
+  > summary .i {
+    transform: rotate(-90deg);
+    transition: transform var(--dur-2) var(--ease);
+  }
+  > summary b {
+    color: var(--text);
+    white-space: nowrap;
+  }
+  &[open] > summary {
+    border-radius: 0;
+
+    .i {
+      transform: none;
+    }
+  }
+}
+@media (hover: hover) {
+  .fold > summary:hover::before {
+    opacity: 1;
+  }
+}
+.fold-body {
+  padding: var(--sp-1) var(--sp-4) var(--sp-4);
+  font-size: var(--fs-sm);
+}
+.needbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 8px var(--sp-4);
+  border-bottom: 1px solid color-mix(in srgb, var(--dawn) 40%, var(--line));
+  background: var(--dawn-soft);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  b {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    gap: 6px;
+    color: var(--dawn-text);
+  }
+  a {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid color-mix(in srgb, var(--dawn) 40%, var(--line));
+    border-radius: var(--r-full);
+    background: var(--surface);
+    color: var(--text);
+  }
+}
+@media (max-width: 640px) {
+  .card-head h3 {
+    flex-basis: 100%;
+  }
+  .kv.wide {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+
+    dd {
+      margin-bottom: var(--sp-2);
+    }
+  }
+}
 
 /* 6 forms */
 .seg {
@@ -720,6 +860,37 @@ kbd,
 @media (pointer: coarse) {
   .seg label {
     min-height: 38px;
+  }
+}
+/* Account-type radio options (onboarding and computer cards). Positioned so a visually hidden
+   legend inside the fieldset stays anchored to the card instead of the document. */
+.acct {
+  position: relative;
+  display: grid;
+  gap: var(--sp-2);
+
+  label {
+    display: flex;
+    gap: var(--sp-3);
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    cursor: pointer;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+  }
+  label:has(:checked) {
+    border-color: var(--sky);
+    background: var(--sky-soft);
+  }
+  input {
+    margin-top: 4px;
+    accent-color: var(--sky);
+  }
+  b {
+    display: block;
+    color: var(--text);
+    font-size: 14px;
   }
 }
 
@@ -841,6 +1012,101 @@ kbd,
     padding: 0 6px;
   }
 }
+/* Shape and colour change together so state is never carried by colour alone. */
+.st {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  min-width: 0;
+
+  i {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    color: var(--text-3);
+    background: currentColor;
+  }
+  &[data-st='working'] i {
+    color: var(--sky);
+    animation: pulse 2s var(--ease) infinite;
+  }
+  &[data-st='needyou'] {
+    color: var(--dawn-text);
+    font-weight: 500;
+
+    i {
+      color: var(--dawn);
+    }
+  }
+  &[data-st='waiting'] i {
+    background: none;
+    border: 2px solid currentColor;
+  }
+  &[data-st='sleeping'] {
+    color: var(--text-3);
+
+    i {
+      width: 10px;
+      height: 10px;
+      background: none;
+      box-shadow: inset -3px -2px 0 0 currentColor;
+    }
+  }
+  &[data-st='offline'] {
+    color: var(--text-3);
+
+    i {
+      background: none;
+      border: 1.5px dashed currentColor;
+    }
+  }
+  &[data-st='ok'] i {
+    color: var(--ok);
+  }
+  &[data-st='limited'] i {
+    color: var(--dawn);
+    border-radius: 2px;
+    transform: rotate(45deg);
+  }
+  &[data-st='down'] i {
+    color: var(--danger);
+    background: none;
+    border: 2px solid currentColor;
+  }
+  &[data-st='linking'] i {
+    color: var(--sky);
+    animation: pulse 1.2s var(--ease) infinite;
+  }
+}
+p.st {
+  display: flex;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.82);
+  }
+}
+.note:not(:where(.msg)) {
+  display: flex;
+  gap: var(--sp-2);
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--tone-soft, var(--surface-2));
+  color: var(--text);
+  font-size: var(--fs-sm);
+
+  .i {
+    color: var(--tone-text, var(--text-3));
+    margin-top: 2px;
+  }
+  b {
+    color: var(--tone-text, inherit);
+  }
+}
 .sec-title {
   font-size: var(--fs-xs);
   font-weight: 600;
@@ -849,6 +1115,9 @@ kbd,
   text-transform: uppercase;
 }
 .hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   color: var(--text-3);
   font-size: var(--fs-xs);
 }
@@ -856,6 +1125,32 @@ kbd,
 .at {
   color: var(--sky);
   font-weight: 500;
+}
+/* A row written by the home in a thread or in the main line: check results and system notices. */
+.sys-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 2px var(--sp-2);
+  align-items: start;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+
+  .glyph {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    color: var(--tone-text, var(--text-3));
+  }
+  code {
+    padding: 1px 5px;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    color: var(--text-2);
+  }
+  time {
+    font-size: var(--fs-xs);
+  }
 }
 
 /* 10 fields and dialogs */

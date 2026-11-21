@@ -29,10 +29,11 @@ func init() {
 }
 
 type pairStepBrowser struct {
-	key  identity.Key
-	path *peer.Path
-	peer *peer.Peer
-	conn *peer.Connection
+	key    identity.Key
+	path   *peer.Path
+	peer   *peer.Peer
+	conn   *peer.Connection
+	pushes chan json.RawMessage // single reader: pairStepBrowser.nextPush in scenario steps
 }
 
 type nodePairWorld struct {
@@ -218,7 +219,10 @@ func (w *nodePairWorld) initNodeStack(owned bool) error {
 		Now: w.nowTime,
 	})
 	w.cleanup(w.pairer.Close)
+	return w.initNodePeer(owned, &nodePath)
+}
 
+func (w *nodePairWorld) initNodePeer(owned bool, nodePath **peer.Path) error {
 	socks, err := peer.Listen(0, 0)
 	if err != nil {
 		return err
@@ -228,8 +232,8 @@ func (w *nodePairWorld) initNodeStack(owned bool) error {
 	known := func(dev string) bool { return w.logs.Known(dev) || w.pairer.Known(dev) }
 	paths := func(dev string) []peer.Route {
 		var out []peer.Route
-		if nodePath != nil {
-			out = append(out, w.withRelay(nodePath.Route()))
+		if *nodePath != nil {
+			out = append(out, w.withRelay((*nodePath).Route()))
 		}
 		for _, r := range w.pairer.Routes(dev) {
 			out = append(out, w.withRelay(r))
@@ -239,19 +243,20 @@ func (w *nodePairWorld) initNodeStack(owned bool) error {
 	inbound := func(c *peer.Connection) { go w.pairer.Serve(w.ctx, c.Device, c) }
 	w.nodePeer = peer.New(w.nodeKey, socks, w.db, known, paths, inbound, nil)
 	w.pairer.Peer = w.nodePeer
-
-	if owned {
-		nodePath, err = peer.Dial(w.ctx, w.rvURL, w.nodeKey)
-		if err != nil {
-			return err
-		}
-		w.cleanup(func() { nodePath.Close() })
-		event := func(kind string, data []byte) error {
-			w.pairer.HandleEvent(w.ctx, nodePath, kind, data)
-			return nil
-		}
-		go nodePath.Serve(w.ctx, w.nodePeer, event)
+	if !owned {
+		return nil
 	}
+	p, err := peer.Dial(w.ctx, w.rvURL, w.nodeKey)
+	if err != nil {
+		return err
+	}
+	*nodePath = p
+	w.cleanup(func() { p.Close() })
+	event := func(kind string, data []byte) error {
+		w.pairer.HandleEvent(w.ctx, p, kind, data)
+		return nil
+	}
+	go p.Serve(w.ctx, w.nodePeer, event)
 	return nil
 }
 
@@ -336,9 +341,7 @@ func (w *nodePairWorld) joinAndExchange(b *pairStepBrowser, secret identity.Secr
 			b.path.Write(w.ctx, proto.RoomData{RoomID: proto.RoomID{Type: "room", Room: room}, Data: rawSelf})
 		}
 		if kind == "room" {
-			var rd proto.RoomData
-			var m proto.Pair
-			if proto.Decode(data, &rd) == nil && rd.Room == room && proto.Decode(rd.Data, &m) == nil && secret.Verify(m, wantRole) && once.CompareAndSwap(false, true) {
+			if m, ok := matchStepRoomPeer(data, room, secret, wantRole); ok && once.CompareAndSwap(false, true) {
 				got <- m
 			}
 		}
@@ -356,6 +359,55 @@ func (w *nodePairWorld) joinAndExchange(b *pairStepBrowser, secret identity.Secr
 	}
 }
 
+func matchStepRoomPeer(data []byte, room string, secret identity.Secret, wantRole string) (proto.Pair, bool) {
+	var rd proto.RoomData
+	var m proto.Pair
+	if proto.Decode(data, &rd) != nil || rd.Room != room || proto.Decode(rd.Data, &m) != nil {
+		return proto.Pair{}, false
+	}
+	return m, secret.Verify(m, wantRole)
+}
+
+func (w *nodePairWorld) openBrowserCtl(b *pairStepBrowser) error {
+	conn, err := b.peer.Offer(w.ctx, w.nodeKey.ID())
+	if err != nil {
+		return err
+	}
+	w.cleanup(func() { conn.Close() })
+	select {
+	case <-conn.Ready():
+		b.conn = conn
+		b.pushes = make(chan json.RawMessage, 32)
+		go pumpStepPushes(w.ctx, conn, b.pushes)
+		return nil
+	case <-w.ctx.Done():
+		return w.ctx.Err()
+	}
+}
+
+func pumpStepPushes(ctx context.Context, conn *peer.Connection, pushes chan<- json.RawMessage) {
+	defer close(pushes)
+	for {
+		msg, err := conn.Read(ctx)
+		if err != nil {
+			return
+		}
+		pushes <- msg
+	}
+}
+
+func (b *pairStepBrowser) nextPush(ctx context.Context) (json.RawMessage, error) {
+	select {
+	case msg, ok := <-b.pushes:
+		if !ok {
+			return nil, fmt.Errorf("ctl connection closed before push")
+		}
+		return msg, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func (w *nodePairWorld) checkRoomFingerprint() error {
 	if w.roomPeer.Key != w.nodeKey.ID() {
 		return fmt.Errorf("room peer key = %q, want %q", w.roomPeer.Key, w.nodeKey.ID())
@@ -364,16 +416,8 @@ func (w *nodePairWorld) checkRoomFingerprint() error {
 }
 
 func (w *nodePairWorld) browserOpensCtlAndSaysHello() error {
-	conn, err := w.b1.peer.Offer(w.ctx, w.nodeKey.ID())
-	if err != nil {
+	if err := w.openBrowserCtl(w.b1); err != nil {
 		return err
-	}
-	w.cleanup(func() { conn.Close() })
-	select {
-	case <-conn.Ready():
-		w.b1.conn = conn
-	case <-w.ctx.Done():
-		return w.ctx.Err()
 	}
 	return w.sendHello(w.b1.conn)
 }
@@ -462,21 +506,13 @@ func (w *nodePairWorld) setupOwnedWithBrowser() error {
 		return err
 	}
 	go w.b1.path.Serve(w.ctx, w.b1.peer, func(string, []byte) error { return nil })
-	conn, err := w.b1.peer.Offer(w.ctx, w.nodeKey.ID())
-	if err != nil {
+	if err := w.openBrowserCtl(w.b1); err != nil {
 		return err
-	}
-	w.cleanup(func() { conn.Close() })
-	select {
-	case <-conn.Ready():
-		w.b1.conn = conn
-	case <-w.ctx.Done():
-		return w.ctx.Err()
 	}
 	if err := w.sendHello(w.b1.conn); err != nil {
 		return err
 	}
-	_, err = w.b1.conn.Read(w.ctx) // drain initial devlog push
+	_, err := w.b1.nextPush(w.ctx) // drain initial devlog push
 	return err
 }
 
@@ -530,11 +566,7 @@ func (w *nodePairWorld) checkSamePairLink() error {
 }
 
 func (w *nodePairWorld) secondBrowserPairs() error {
-	_, code, ok := strings.Cut(w.linksByNonce["first"].Link, "/#pair=")
-	if !ok {
-		return fmt.Errorf("missing #pair= in %q", w.linksByNonce["first"].Link)
-	}
-	sec, err := identity.ParseSecret(code)
+	sec, err := parsePairSecretLink(w.linksByNonce["first"].Link)
 	if err != nil {
 		return err
 	}
@@ -549,28 +581,32 @@ func (w *nodePairWorld) secondBrowserPairs() error {
 	if err := w.awaitKnown(w.b2.key.ID()); err != nil {
 		return err
 	}
-	conn, err := w.b2.peer.Offer(w.ctx, w.nodeKey.ID())
-	if err != nil {
-		return err
+	return w.openBrowserCtl(w.b2)
+}
+
+func parsePairSecretLink(link string) (identity.Secret, error) {
+	_, code, ok := strings.Cut(link, "/#pair=")
+	if !ok {
+		return "", fmt.Errorf("missing #pair= in %q", link)
 	}
-	w.cleanup(func() { conn.Close() })
-	select {
-	case <-conn.Ready():
-		w.b2.conn = conn
-		return nil
-	case <-w.ctx.Done():
-		return w.ctx.Err()
-	}
+	return identity.ParseSecret(code)
 }
 
 func (w *nodePairWorld) checkSecondBrowserAdopted() error {
-	if err := w.sendHello(w.b2.conn); err != nil {
+	if err := w.sendHello(w.b2.conn); err != nil || w.lastWelcome.Owner {
+		return fmt.Errorf("unexpected first welcome owner=%v err=%v", w.lastWelcome.Owner, err)
+	}
+	if err := w.verifyAdoptedDevlog(w.b2); err != nil {
 		return err
 	}
-	if w.lastWelcome.Owner {
-		return fmt.Errorf("expected first welcome owner=false")
+	if err := w.sendHello(w.b2.conn); err != nil || !w.lastWelcome.Owner {
+		return fmt.Errorf("expected second welcome owner=true, got %v (%v)", w.lastWelcome.Owner, err)
 	}
-	rawDL, err := w.b2.conn.Read(w.ctx)
+	return nil
+}
+
+func (w *nodePairWorld) verifyAdoptedDevlog(b *pairStepBrowser) error {
+	rawDL, err := b.nextPush(w.ctx)
 	if err != nil {
 		return err
 	}
@@ -579,14 +615,8 @@ func (w *nodePairWorld) checkSecondBrowserAdopted() error {
 		return err
 	}
 	cand, err := identity.Replay(w.b1.key.ID(), dl.Entries)
-	if err != nil || !cand.Adopts(w.b2.key.ID(), w.nodeKey.ID()) {
+	if err != nil || !cand.Adopts(b.key.ID(), w.nodeKey.ID()) {
 		return fmt.Errorf("second browser log did not adopt: %v", err)
-	}
-	if err := w.sendHello(w.b2.conn); err != nil {
-		return err
-	}
-	if !w.lastWelcome.Owner {
-		return fmt.Errorf("expected second welcome owner=true")
 	}
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,10 +26,10 @@ var (
 
 // seamClock reads one second later at every call.
 func seamClock() func() time.Time {
-	at := int64(seamStart - 1000)
+	var at atomic.Int64
+	at.Store(seamStart - 1000)
 	return func() time.Time {
-		at += 1000
-		return time.UnixMilli(at)
+		return time.UnixMilli(at.Add(1000))
 	}
 }
 

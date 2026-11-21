@@ -70,14 +70,25 @@ func (g *runGroup) detach(c *Conn) {
 	g.publish()
 }
 
-// watch subscribes a connection to the rows of the group.
-func (g *runGroup) watch(c *Conn, stateOnly bool) (seq int64, ok bool) {
+// watch subscribes a seated connection to the rows of the group.
+func (g *runGroup) watch(c *Conn, stateOnly bool) {
 	seat := g.seats[c]
-	if seat == nil || g.state.Group.ID == "" || !g.state.Serves(c.device) {
-		return 0, false
-	}
 	seat.watching, seat.stateOnly = true, stateOnly
-	return g.state.Seq, true
+}
+
+// runReader checks that a group exists and serves device on its home surface.
+func runReader(s *State, device string) *Refusal {
+	if s.Group.ID == "" {
+		return &Refusal{"not_found", "this node is not home to the group"}
+	}
+	if !s.Serves(device) {
+		return &Refusal{"forbidden", "the connection's device may not read this group"}
+	}
+	return nil
+}
+
+func runErr(re int64, code, msg string) proto.ErrorResponse {
+	return proto.ErrorResponse{Re: re, Err: proto.WireError{Code: code, Message: msg}}
 }
 
 // command applies one cmd in its transaction and answers it.
@@ -88,7 +99,7 @@ func (g *runGroup) command(c *Conn, re int64, env proto.Envelope) {
 	})
 	if err != nil {
 		g.loop.cfg.Report(fmt.Errorf("group %s, a command of %s: %w", g.state.ID, c.device, err))
-		c.send(proto.ErrorResponse{Re: re, Err: proto.WireError{Code: "internal", Message: "the home could not apply the command; the cause is in its log"}})
+		c.send(runErr(re, "internal", "the home could not apply the command; the cause is in its log"))
 		return
 	}
 	g.settle(res, now, func() { c.send(res.Frame(re)) })
@@ -143,6 +154,7 @@ func (g *runGroup) transact(now time.Time, run func(d Disk, tx *store.Tx) (Resul
 		if res, err = run(d, tx); err != nil {
 			return err
 		}
+		res.Items = inboxPace(g.state, res.Items, now.UnixMilli())
 		return errors.Join(d.err, g.write(tx, res, now.UnixMilli()))
 	})
 	return res, err
@@ -176,14 +188,20 @@ func runIdle(res Result) bool {
 // runHour is how far back the count of the wake-up cap goes, in milliseconds.
 const runHour = 3600_000
 
-// count keeps State.Wakes: each item counts once for its AI, at the time it
-// is due, which is now, or its NotBefore when that is later. What is an hour
-// old or older is dropped from the AI's list as the next item is counted.
+// count keeps State.Wakes: each non-merge item counts once for its AI, at the
+// time it is due, which is now, or its NotBefore when that is later. What is an
+// hour old or older is dropped from the AI's list as the next item is counted.
 func (g *runGroup) count(items []Item, now int64) {
 	for _, it := range items {
-		recent := slices.DeleteFunc(g.state.Wakes[it.AI], func(at int64) bool { return at <= now-runHour })
-		g.state.Wakes[it.AI] = append(recent, max(now, it.NotBefore))
+		inboxWake(g.state.Wakes, it, 0, now)
 	}
+}
+
+// runRecent returns the times in list after now - runHour, in ascending order.
+func runRecent(list []int64, now int64) []int64 {
+	recent := slices.DeleteFunc(slices.Clone(list), func(at int64) bool { return at <= now-runHour })
+	slices.Sort(recent)
+	return recent
 }
 
 // write writes a sealed result through: its rows under the sequence numbers
@@ -251,8 +269,8 @@ func (g *runGroup) putItems(tx *store.Tx, res Result, now int64) error {
 			return fmt.Errorf("an item %q is for %q, which is no AI of the group", it.Why, it.AI)
 		}
 		stored := store.Item{Group: g.state.ID, AI: it.AI, Host: host, Why: it.Why, Msg: runText(it.Msg), Task: runText(it.Task),
-			Commit: runText(it.Commit), Cause: runCause(it.Cause), NotBefore: it.NotBefore, Created: now}
-		seal := func(id int64) (json.RawMessage, error) { return runSeal(it, id) }
+			Commit: runText(it.Commit), NotBefore: it.NotBefore, Created: now}
+		seal := func(id int64) (json.RawMessage, error) { return inboxSeal(it, id) }
 		if _, err := tx.Enqueue(stored, seal); err != nil {
 			return err
 		}
@@ -278,15 +296,6 @@ func runText(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-// runCause is the cause column: the signed act as it is, or NULL.
-func runCause(cause *proto.Envelope) json.RawMessage {
-	if cause == nil {
-		return nil
-	}
-	data, _ := runJSON(cause) // three texts
-	return data
 }
 
 func runRetire(tx *store.Tx, group string, ids []int64) error {

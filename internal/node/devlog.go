@@ -1,7 +1,6 @@
 package node
 
 import (
-	"bytes"
 	"cmp"
 	"crypto/rand"
 	"database/sql"
@@ -17,7 +16,7 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-const dvlCtlLimit = 61_440
+const ctlLimit = 61_440
 
 // Logs holds the verified device log of this node's owner.
 // Lock order: writeMu -> Store.Write / mu; mu is a leaf lock guarding owner,
@@ -354,7 +353,7 @@ func dvlRowOf(env proto.Envelope) proto.DeviceRow {
 }
 
 func dvlBatchFrames(user string, entries []proto.Envelope) []proto.Devlog {
-	room := dvlCtlLimit - len(dvlMustEncode(proto.Devlog{Type: "devlog", User: user, Entries: []proto.Envelope{}}))
+	room := ctlLimit - len(dvlMustEncode(proto.Devlog{Type: "devlog", User: user, Entries: []proto.Envelope{}}))
 	var frames []proto.Devlog
 	var batch []proto.Envelope
 	left := room
@@ -369,12 +368,4 @@ func dvlBatchFrames(user string, entries []proto.Envelope) []proto.Devlog {
 	return append(frames, proto.Devlog{Type: "devlog", User: user, Entries: batch})
 }
 
-func dvlEncode(v any) ([]byte, error) {
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	enc.SetEscapeHTML(false)
-	err := enc.Encode(v)
-	return bytes.TrimSuffix(b.Bytes(), []byte{'\n'}), err
-}
-
-func dvlMustEncode(v any) []byte { raw, _ := dvlEncode(v); return raw }
+func dvlMustEncode(v any) []byte { raw, _ := encodeCtl(v); return raw }

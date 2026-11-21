@@ -22,7 +22,7 @@ const (
 	defaultIdleMinutes = 15
 	defaultMaxOpen     = 4
 	defaultTurnMinutes = 60
-	stopTimeout        = 10 * time.Second
+	stopSeconds        = 10
 )
 
 func init() {
@@ -35,14 +35,14 @@ type sessionRunner struct{}
 type aiSlot struct{ group, member string }
 
 type launchConfig struct {
-	dbFile     string
 	maxOpen    int
 	level      int
 	repoConfig bool
 }
 
+const queryMainDBFileSQL = `SELECT coalesce((SELECT file FROM pragma_database_list WHERE name = 'main'), '')`
+
 const queryLaunchConfigSQL = `SELECT
-	coalesce((SELECT file FROM pragma_database_list WHERE name = 'main'), ''),
 	coalesce((SELECT json_extract(value, '$') FROM setting WHERE key = 'max_open'), 4),
 	iif(coalesce((SELECT json_extract(value, '$') FROM setting WHERE key = 'all_level3'), 0), 3,
 		coalesce((SELECT level FROM perm WHERE agent = ? AND g = ?), (SELECT json_extract(value, '$') FROM setting WHERE key = 'default_level'), 3)),
@@ -121,7 +121,7 @@ func (lp *liveProc) triggerClose() {
 			lp.killed.Store(true)
 			lp.cancel()
 		}
-		t := time.AfterFunc(stopTimeout, kill)
+		t := time.AfterFunc(stopSeconds*time.Second, kill)
 		lp.killTimer.Store(t)
 		lp.proc.Close()
 	})
@@ -138,12 +138,21 @@ func readLaunchConfig(h *Host, agent, group string) (launchConfig, error) {
 	var repoCfg int
 	scan := func(tx *store.Tx) error {
 		return tx.QueryRow(queryLaunchConfigSQL, agent, group, agent, group).Scan(
-			&cfg.dbFile, &cfg.maxOpen, &cfg.level, &repoCfg,
+			&cfg.maxOpen, &cfg.level, &repoCfg,
 		)
 	}
 	err := h.Store.Write(scan)
 	cfg.repoConfig = repoCfg != 0
 	return cfg, err
+}
+
+func sessionDir(h *Host, s Session) string {
+	var dbFile string
+	scan := func(tx *store.Tx) error {
+		return tx.QueryRow(queryMainDBFileSQL).Scan(&dbFile)
+	}
+	h.Store.Write(scan)
+	return filepath.Join(filepath.Dir(dbFile), "projects", s.Group, s.Folder)
 }
 
 func readIdleDuration(h *Host) time.Duration {
@@ -183,14 +192,30 @@ func attachRuntime(h *Host, device string) {
 	pending := rt.savedCrash[device]
 	delete(rt.savedCrash, device)
 	rt.mu.Unlock()
-	if len(pending) == 0 {
-		return
-	}
-	go func() {
-		for _, c := range pending {
-			reportOrQueueCrash(context.Background(), h, rt, c)
+	slots := homeAISlots(h, device)
+	go flushHomeRuntime(h, rt, device, pending, slots)
+}
+
+func homeAISlots(h *Host, device string) []aiSlot {
+	seen := map[aiSlot]bool{}
+	var slots []aiSlot
+	for _, s := range h.Sessions.All() {
+		slot := aiSlot{group: s.Group, member: s.Member}
+		if s.Home == device && !seen[slot] {
+			seen[slot] = true
+			slots = append(slots, slot)
 		}
-	}()
+	}
+	return slots
+}
+
+func flushHomeRuntime(h *Host, rt *runtimePart, device string, pending []pendingCrash, slots []aiSlot) {
+	for _, c := range pending {
+		reportOrQueueCrash(context.Background(), h, rt, c)
+	}
+	for _, slot := range slots {
+		sendMemberStatus(context.Background(), h, rt, device, slot.group, slot.member, nil)
+	}
 }
 
 func (sessionRunner) Answer(h *Host, key SessionKey, ask string, allow bool) error {
@@ -364,7 +389,7 @@ func launchSessionProcess(h *Host, rt *runtimePart, s Session, cfg launchConfig,
 	}
 	token := h.Sessions.Admit(s.SessionKey, cfg.level, false)
 	launch := Launch{
-		Folder: filepath.Join(filepath.Dir(cfg.dbFile), "projects", s.Group, s.Folder), Session: s.CLISession,
+		Folder: sessionDir(h, s), Session: s.CLISession,
 		Level: cfg.level, Shim: append(slices.Clone(h.Shim), "--token", token), Instructions: Instructions(s),
 		RepoConfig: s.Kind != GroupSession && cfg.repoConfig, ToolTimeout: groupToolTimeout(h, s.Group),
 	}
