@@ -786,6 +786,8 @@ func (w *m5World) settleBeforeAfterHooks() {
 	n0.Link.Close()
 	n0.Home.Close()
 	w.recordHookErr(m5WaitAllDormant(n0.Host))
+	// Home.Close does not yet join its pump goroutines (internal/home/run.go:275); remove this settle when it does (MAINLINE item 64).
+	time.Sleep(30 * time.Millisecond)
 }
 
 func m5FinalStep(w *m5World, fn func() error) func() error {
