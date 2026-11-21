@@ -168,6 +168,8 @@ names that start with `run`, and its tests those that start with `run` and `Run`
 `Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
 `ItemsPush`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
+The merges and summaries (`cmd_merge.go`) take the names that start with `mrg`, their tests too,
+and their test functions start with `TestMerge`.
 
 ## The run loop
 
@@ -392,11 +394,57 @@ function that moves a task calls it and adds nothing to its rules.
   HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
   `c.Disk.Msg` reads.
 
+## Merges and summaries
+
+`cmd_merge.go` holds `task` `merged` and `conflict` and `post` of kind `summary`
+([commands](../../planning/contracts/commands.md) 1.3 and 1.5;
+[messages](../../planning/contracts/messages.md) 2.5, 2.8 and 2.11;
+[task-machine](../../planning/contracts/task-machine.md) rows 8 and 9), under the keys
+`task/merged`, `task/conflict` and `post/summary`. Where the contracts are silent, it does this:
+
+- **Merged (`task/merged`).** Requires non-empty `commit` and `merge_commit` and non-negative
+  `stats.added` and `stats.removed`, else `bad_request`; a missing task is `not_found`. `Step`
+  checks that the signer is the host of `task.Assignee` (`forbidden`) before checking that the task
+  is `active` at step `merge` with matching `commit` (`conflict`), and sets `state` `merged`, `wait`
+  `null` and `stats.ended` `c.Now`. If `n` already names a message on disk, the answer is
+  `conflict`. The command copies `stats.added` and `stats.removed` onto the task row, expires every
+  pending card in `c.Disk.Pending()` whose `thread` is `task.ID` (`status` `"expired"`, `at`
+  `c.Now`), writes `system` `task_merged` (`ts` `c.Now`) under id `n` in the task's thread, advances
+  `task.thread.count` and `task.thread.last`, and queues `notice` (`code` `"task_merged"`, `msg`
+  `n`) for the secretary when the group has one.
+- **Releasing queued dependents.** `task/merged` walks `s.Tasks` in sorted task id order: each
+  `queued` task whose `depends` names the merged task is stepped with `OnReleased`, `By` `ByHome`,
+  `Blocked` set while any other dependency in `depends` is not `merged`, and `Pending` read from
+  `c.Disk.Pending()`. When a dependent task becomes `active`, `stats.started` is set to `c.Now`
+  ([rows](../../planning/contracts/rows.md), section 4) so summary minutes count active work rather
+  than dependency wait, its updated row is included in `Result.Rows`, and its `assign` item gets
+  `msg` set to its `task` message id when still on disk and `cause` set to `state.act` of the brief
+  `task.brief` names.
+- **Conflict (`task/conflict`).** Requires a non-empty `commit`, else `bad_request`; a missing task
+  is `not_found`. `Step` (`OnConflict`) checks `ByHost`, `active`, step `merge` and matching
+  `commit`, returning the task to `local_check` with wait `conflict` and leaving `failures`
+  unchanged. Writes a `checks` message (`by` `"system"`, `stage` `"merge"`, `ok` `false`, `ts`
+  `c.Now`, one item `"merge"` with `ok` `false` and `detail` omitted when `detail` is `""`) under id
+  `n` in the thread (`conflict` if `n` is taken), advances `task.thread`, and queues `notice`
+  (`code` `"conflict"`, `msg` `n`) for the secretary when the group has one.
+- **Summary (`post/summary`).** Only the secretary posts a summary, else `forbidden`. Requires
+  `thread` not `null` and no duplicate id in `mentions` (`bad_request`), an existing task
+  (`not_found`) whose `state` is `merged` (`conflict`), every mentioned id a member of the group
+  (`conflict`), and `n` unused on disk (`conflict`). Writes the `summary` row under id `n` with
+  `main` `true` and `ts` as signed, fills `SummaryBody` from the task row (`score`
+  `task.Review.Score`, `rounds` `task.Review.Round`, `minutes`
+  `max(0, int((*task.Stats.Ended - task.Stats.Started) / 60_000))`, `added` `task.Stats.Added`,
+  `removed` `task.Stats.Removed`, and `pr` when `task.PR > 0`), and advances `task.thread` with
+  `last.text` cut to at most 200 Unicode characters.
+
 ## Known limitations
 
-- The table of commands holds only the briefs, and no node starts a loop yet: the other command
-  files and the wiring of the node are separate units
+- The table of commands holds only the briefs, merges and summaries, and no node starts a loop yet:
+  the other command files and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
+- Retention keeps a `queued` task's confirmed `brief` card while deleting its main-line `task`
+  message once `retention_days` pass, so a release after that omits `msg` from `assign`
+  ([issues](../../issues.md)).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
 - A `peer.Connection` takes every frame at once and keeps it in its own buffer, so the limit of
@@ -435,3 +483,8 @@ while a task is paused and a reviewer named while it is paused.
 holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
 `Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
 commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
+
+`cmd_merge_test.go` sends `task/merged`, `task/conflict` and `post/summary` through
+`Commands.Apply` with fakes of `Receipts` and `Disk`, covering every refusal, boundary, card
+expiration and dependent task release. `features/home_merge.feature` holds the home half of
+acceptance tests A5.10 and A5.12 and dependent task release with `cause` and `stats.started`.

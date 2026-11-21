@@ -42,11 +42,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the function of a command is pure and has no randomness (`internal/home/README.md`, "Functions are pure"); `briefTaskID` (`internal/home/cmd_brief.go:286`). The id has the form of a random id, and nobody knows it before the act arrives, because the act's `n` is random. An id that a task or a message already has is answered `conflict` (`internal/home/cmd_brief.go:272`).
 - Status: open, decided by unit HM-8 on 2026-11-21. Should the seam ever give functions a source of random ids, the derivation can go.
 
-### 2026-11-21 · limitation · A queued task's `stats.started` is the time its brief was confirmed
+### 2026-11-21 · limitation · Retention removes the `task` message of a queued task before its release
 
-- Symptom: a task created queued by a confirm has `stats.started` set when it is created, and it keeps that time when the merge of its dependency makes it active. The minutes a summary counts for it include the time it waited.
-- Cause: `briefCreate` sets `created` and `stats.started` to the home's time (`internal/home/cmd_brief.go:307`); row 8 of `planning/contracts/task-machine.md` does not name `stats.started`, and `Step` does not set it on a release (`internal/home/machine.go:577`). The contracts do not say when a task starts.
-- Status: open. Unit HM-12, which releases queued tasks and writes the summary, or the coordinator, decides whether a release sets it.
+- Symptom: when a task stays `queued` longer than `retention_days`, `Retain` keeps its confirmed `brief` card so the released `assign` item still carries `state.act` as its `cause`, while deleting the task's main-line `task` message (`keep = 0`, `pending = 0`). The `assign` item queued when the task is later released then has `msg` omitted (`planning/contracts/datachannel.md` section 6: absent when there is none).
+- Cause: `internal/store/retention.go:16-19` (`planning/contracts/storage.md` section 4) exempts only the confirmed `brief` row referenced by a `queued` task, not its `task` message; `mrgTaskMsg` (`internal/home/cmd_merge.go`) includes `msg` only when `Disk.Msg(task.ID)` still holds the `task` message.
+- Status: open, without effect on authority or workspace creation, which read the signed `item`, the current `TaskRow`, and `cause`.
 
 ### 2026-11-20 · limitation · `tools.json` freezes JSON Schema keywords that the MCP SDK may write otherwise
 
@@ -375,6 +375,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-21 · limitation · A queued task's `stats.started` is the time its brief was confirmed
+
+- Symptom: a task created queued by a confirm has `stats.started` set when it is created, and it keeps that time when the merge of its dependency makes it active. The minutes a summary counts for it include the time it waited.
+- Cause: `briefCreate` sets `created` and `stats.started` to the home's time (`internal/home/cmd_brief.go:307`); row 8 of `planning/contracts/task-machine.md` does not name `stats.started`, and `Step` does not set it on a release (`internal/home/machine.go:577`). The contracts did not say when a queued task starts.
+- Status: resolved in unit HM-12: when `task merged` releases a `queued` task into `active`, `mrgReleaseOne` (`internal/home/cmd_merge.go`) sets `stats.started` to the home's time (`c.Now`), and `planning/contracts/rows.md` section 4 states the rule.
 
 ### 2026-11-21 · bug · A missing clone folder was reported as a failed start of git
 
