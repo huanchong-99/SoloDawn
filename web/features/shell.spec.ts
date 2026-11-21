@@ -69,6 +69,7 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
       Then('the page "<title>" is open, drawn by "<drawn by>"', async () => {
         const drawn = {
           'a coming page': '.pending',
+          'the onboarding page': '.onboarding',
           'the group list': '.groups',
           'its own page': '.page:not(.pending)',
           'the states sheet': '.states',

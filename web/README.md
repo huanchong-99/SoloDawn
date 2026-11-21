@@ -127,8 +127,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `encodeURIComponent`, and `parse` reads it back. An address that fits no path, one with a
   malformed escape, and `#/states` in the build open `groups`. `route` is `{ page, params, dir }`;
   `Params<'chat'>` is `{ g: string }`. The navigation has three entries (`tabs`); a page outside
-  them marks none. The shell finds a page's component by file name: until `Onboarding.svelte`
-  and `Terminal.svelte` exist, those pages say that they are coming (`src/Pending.svelte`), with
+  them marks none. The shell finds a page's component by file name: until `Terminal.svelte`
+  exists, that page says that it is coming (`src/Pending.svelte`), with
   a link back to the chats. Focus goes to the main landmark when another page component is shown;
   between the group list and a chat, one component, the chat moves focus itself.
 
@@ -292,7 +292,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
     `unreadable answer` for a response `decodeAnswer` refuses; with a `RangeError` for a request
     over 60 KiB. Every other request whose connection is lost is sent again after the next `welcome`,
     after the listener's own `sync` requests, in the order first made. The group caches word a
-    rejection as `lost`; that code is theirs, not the connection's.
+    rejection as `lost`; that code is theirs, not the connection's. `connection.send(frame)` and
+    `peer.send(frame)` send a `devlog` or `pty.resize` push without a request `id`, throwing a
+    `RangeError` above 60 KiB.
   - **What arrives on `ctl`.** A message with an `id` is a request, which a browser never
     serves: `bad_request`. A message with `re` is a response; one that names no waiting request
     is dropped. Anything else is a push when `Frame` reads it and is dropped when not. `ctl` stays
@@ -321,7 +323,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
   of its English file to the type `Key`; today the areas are `chat`, `groups`, `nodes`,
-  `settings` and `states`. `src/messages/files.glob.ts` finds every file by its name and
+  `pairing`, `settings` and `states`. `src/messages/files.glob.ts` finds every file by its name and
   `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
   empty text, or has keys that differ between its two languages, and naming the area when it has
@@ -504,16 +506,18 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   (`issues.md`).
 - Safari deletes the site's storage, and with it the device key, after seven days of use without
   a visit, unless the client was added to the home screen (`issues.md`).
-- Nothing yet stores a device log or uses the device key beyond `boot`; the wiring of the
-  connection code (`peer.ts`) into the application and onboarding (F-04) will.
+- Onboarding (`routes/Onboarding.svelte`, `components/pairing/`) pairs a node or joins from a
+  `#pair=<secret>` link, stores the owner's device log in IndexedDB (`solodawn`, store `device`,
+  key `owner`), asks for persistent storage once enrolled, and sends `agent.set`; the rest of the
+  pages are not yet wired to `peer.ts` (`net.svelte.ts`).
 - `peer.ts` has run against fakes only. No browser has opened a connection with it, and how each
   browser's statistics name the selected pair is not verified; unit I-8 runs the three browsers.
 - The manifest has an SVG icon only and there is no service worker yet.
-- No page has a connection to a node yet, so the built client lists no group. A development
+- Outside onboarding, no page has a connection to a node yet, so the built client lists no group. A development
   server (`pnpm dev`) shows the one group of the wire examples, unless the address has `?nomock`;
   the mock accepts a post and pushes no row, so a message sent there does not appear.
-- The onboarding and terminal pages are in the route table without their components: they say
-  that they are coming. From 768 px the top bar of an open chat says "Chats", and the chat's own
+- The terminal page is in the route table without its component: it says
+  that it is coming. From 768 px the top bar of an open chat says "Chats", and the chat's own
   head with the group's name is below it, where the design has one bar with the group's name.
 - The texts of the `states` area are in the build, although only a development server shows
   their page.

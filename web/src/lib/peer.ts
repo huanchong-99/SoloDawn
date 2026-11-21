@@ -12,8 +12,10 @@ import {
   ICECandidate,
   type AnswerTo,
   type Ctl,
+  type Devlog,
   type Envelope,
   type ErrorResponse,
+  type PTYResize,
   type Push,
   type RequestType,
   type RVJoin,
@@ -42,6 +44,7 @@ export type Heard = Parameters<Parameters<typeof rendezvous>[3]>[1];
 type ICEServer = RVReady['ice'][number];
 type Timer = ReturnType<typeof setTimeout>;
 type Request = { t: RequestType; [field: string]: unknown };
+type ClientPush = Devlog | PTYResize;
 type Response = AnswerTo<RequestType> | ErrorResponse;
 /** One entry of the browser's statistics, whose fields depend on its type. */
 type Stat = Record<string, any>;
@@ -374,6 +377,14 @@ export class Connection {
     return this.#pc.createDataChannel(label);
   }
 
+  /** Sends a push on an open ctl. Throws a RangeError when the frame exceeds 60 KiB. */
+  send(frame: ClientPush) {
+    if (utf8(JSON.stringify(frame)).length > ctlLimit) {
+      throw new RangeError('ctl frame exceeds 60 KiB');
+    }
+    if (!this.#gone) this.#send(frame);
+  }
+
   /** A channel that cannot send is closing: the connection is gone. */
   #send(frame: object) {
     try {
@@ -563,6 +574,11 @@ export class Peer {
   /** A data channel beside ctl on the connection that serves, or undefined while none does. */
   channel(label: string) {
     return this.#conn?.channel(label);
+  }
+
+  /** Sends a push on the connection that serves, if any. */
+  send(frame: ClientPush) {
+    this.#conn?.send(frame);
   }
 
   /** Closes every connection it dialled, for good: nothing reconnects, nothing can be dialled

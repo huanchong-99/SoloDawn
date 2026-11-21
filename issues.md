@@ -376,6 +376,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-21 · deviation · `web/src/lib/peer.ts` had no method to send a `ctl` push
+
+- Symptom: onboarding (`flows/pairing.md` step 10) and device management must push `devlog` frames (`{"t":"devlog","user":"…","entries":[…]}`) without a request `id` (`planning/contracts/conventions.md` section 3), and terminal takeover pushes `pty.resize`. `Connection` and `Peer` in `web/src/lib/peer.ts` exposed `request(req)` only, which always attaches an `id` and awaits a response, while `#ctl` and `#send` were private.
+- Cause: unit W-2 implemented `request` and incoming `onpush`, omitting outgoing pushes (`internal/peer/ctl.go` has `Send` beside `Request`).
+- Status: resolved in branch `gemini/U-1`: `Connection.send` and `Peer.send` send a `Devlog` or `PTYResize` frame without `id` and enforce the 60 KiB `ctl` frame limit (`web/src/lib/peer.ts`). Tests in `web/src/lib/peer.test.ts`.
+
 ### 2026-11-21 · bug · A missing clone folder was reported as a failed start of git
 
 - Symptom: on Windows CI, `TestWorkspaceGitFailures` failed at `internal/host/workspace_test.go:552`: the error of a command in a missing clone folder was not `fs.ErrNotExist`. On macOS the same error read `fork/exec /usr/bin/git: no such file or directory`, naming git instead of the folder.
