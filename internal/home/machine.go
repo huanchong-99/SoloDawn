@@ -107,7 +107,7 @@ type Effects struct {
 }
 
 // TaskItem is an inbox item about the task (planning/contracts/datachannel.md section 6).
-// The caller adds the message and the cause its row names.
+// The caller adds the message its row names.
 type TaskItem struct {
 	Why    string
 	AI     string // the member it is for; a notice has none, it is the secretary's

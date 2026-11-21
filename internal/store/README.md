@@ -3,7 +3,7 @@
 `Open(path)` migrates the node database and enables WAL for files. Use
 `:memory:` for isolated tests. Each `Write` callback runs on the one writer;
 return its first error to roll back counters, rows, inbox items and receipts
-together. Queue signing happens inside that callback, after allocating the id.
+together. Item numbering happens inside that callback, after allocating the id.
 
 Allocate a sequence with `NextSeq` for each changed row. Use it as the new
 row's `seq` and, for a new message, its `pos`; keep the original `pos` and

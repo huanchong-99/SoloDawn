@@ -257,11 +257,12 @@ func TestLocalLinkInboxForGroupCreatedAfterAttach(t *testing.T) {
 
 	got := recvFrame(t, pushed)
 	mustEqual(t, got.from, rig.device.ID())
-	var items home.ItemsPush
-	mustNoErr(t, json.Unmarshal(got.raw, &items))
-	mustEqual(t, items, home.ItemsPush{
+	var inbox proto.Inbox
+	mustNoErr(t, json.Unmarshal(got.raw, &inbox))
+	mustEqual(t, inbox, proto.Inbox{
+		Type:  "inbox",
 		Group: localGroupID,
-		Items: []home.QueuedItem{{ID: 1, Item: home.Item{AI: "m-ai", Why: "mention"}}},
+		Items: []proto.InboxItem{{Item: proto.Item{Item: 1, AI: "m-ai", Why: "mention"}}},
 	})
 }
 

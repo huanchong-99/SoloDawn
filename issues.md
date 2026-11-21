@@ -12,12 +12,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `home.Loop` on `rebuild` exposes `Cmd` and `Watch` only (`internal/home/run.go:313`, `:357`); `Sync` (HM-2, #205), `Fetch` (HM-3) and `Ack` with `inbox` frames (HM-7) are built in separate units. `LocalLink.toHome` (`internal/node/local.go:127`) dispatches `cmd` to `Loop.Cmd` and answers other requests `bad_request` per `planning/contracts/datachannel.md` section 2.
 - Status: open. Route `sync` to `Loop` and delete `LocalLink.Watch` once HM-2 (#205) merges; wire `fetch` and `ack` once HM-3 and HM-7 merge (N-4 / I-1 / I-3).
 
-### 2026-11-21 · deviation · Dead `cause` path in `internal/home` and `internal/store`
-
-- Symptom: the home and store still carry, write and read an item `cause`, although `P-1b` re-froze `InboxItem` and `Item` without `cause` under the owner's 2026-11-21 decision (no attack-and-defence code). Nothing on the wire or on the host reads it.
-- Cause: `internal/home/home.go:186` (`Item.Cause`), `internal/home/run_group.go:254, 283-288` (`runCause`), `internal/home/cmd_brief.go:318-322, 350, 363`, `internal/home/machine.go:110` (with their tests in `cmd_brief_test.go:297-298, 343, 431`, `home_test.go:318, 332`, `run_push_test.go:174, 195-198, 324` and `run_disk_test.go:69-70`) and `internal/store/inbox.go:9, 17, 33, 43` together with the `inbox.cause` column were built before `P-1b` dropped `cause`.
-- Status: open; owner **HM-7**, which removes the dead `cause` fields, functions, tests and `inbox.cause` column.
-
 ### 2026-11-21 · limitation · Postponed step-2 contracts still assume an item-level `cause`
 
 - Symptom: the step-2 planning documents (`planning/contracts/step-2/authority.md:36, 85, 92-93, 104, 108`, `planning/contracts/step-2/confirm.md:145-147, 196-223, 244`, `planning/contracts/step-2/watch-team.md:46-67` and `planning/steps/parallel-plan-step-2-3.md:20-21, 27`) require an inbox item to carry a signed `cause` when a group home belongs to another person, whereas `P-1b` removed `cause` from step-1 items.
@@ -47,12 +41,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: not observed. The run loop gives a connection up when 1,024 frames wait for it. A `peer.Connection` never lets a frame wait: its `Send` hands the text to the data channel, which keeps it in its own send buffer without a limit. A browser that stops reading while its connection stays open so makes that buffer grow, and the loop does not see it.
 - Cause: `(*Connection).Send` calls `SendText` and returns (`internal/peer/ctl.go:174`); `home.Client` has `Send` and `Done` only (`internal/home/home.go:27`), so the loop cannot ask how much is buffered. The limit (`runBacklog`, `internal/home/run_conn.go`) applies to a client whose `Send` waits, such as a local link.
 - Status: open. Either `peer.Connection.Send` waits, or fails, above a buffered amount, or the node closes a connection whose buffer stays above a limit; owner N-2 or the owner of `internal/peer`.
-
-### 2026-11-21 · deviation · Inbox items are not yet pushed in the wire `inbox` frame
-
-- Symptom: the run loop stores an item with the seam's `Item` as JSON in the `env` column and pushes it as `home.ItemsPush`, one `home.QueuedItem` per frame, where `planning/contracts/datachannel.md` section 6 (re-frozen in P-1b as a plain unsigned `item` object) has an `inbox` frame of `InboxItem`s with optional `msg` and `task` row copies. A host that follows the contract accepts none of them.
-- Cause: the wire `item` and `inbox` frame belong to unit HM-7; the loop has two functions in their place, `runSeal` and `runItemFrame` (`internal/home/run_push.go`).
-- Status: open until HM-7, which replaces those two functions, fills a frame as far as a `ctl` message goes, and adds `ack`. Storing, holding, sending again on a hello and the count of the wake-up cap are in the loop and stay.
 
 ### 2026-11-21 · limitation · A command without `g` knows only the devices of the node's owner
 
@@ -399,6 +387,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-21 · deviation · Dead `cause` path in `internal/home` and `internal/store`
+
+- Symptom: the home and store still carried, wrote and read an item `cause`, although `P-1b` re-froze `InboxItem` and `Item` without `cause` under the owner's 2026-11-21 decision (no attack-and-defence code). Nothing on the wire or on the host read it.
+- Cause: `internal/home/home.go` (`Item.Cause`), `internal/home/run_group.go` (`runCause`), `internal/home/cmd_brief.go`, `internal/home/machine.go` and `internal/store/inbox.go` together with the `inbox.cause` column were built before `P-1b` dropped `cause`.
+- Status: resolved in branch `gemini/HM-7`: removed `Item.Cause`, `runCause`, the dead `cause` assignments and assertions across `home`, `store` and `features/home_brief*`, and the `inbox.cause` column in `internal/store/schema.sql`.
+
+### 2026-11-21 · deviation · Inbox items are not yet pushed in the wire `inbox` frame
+
+- Symptom: the run loop stored an item with the seam's `Item` as JSON in the `env` column and pushed it as `home.ItemsPush`, one `home.QueuedItem` per frame, where `planning/contracts/datachannel.md` section 6 (re-frozen in P-1b as a plain unsigned `item` object) has an `inbox` frame of `InboxItem`s with optional `msg` and `task` row copies.
+- Cause: the wire `item` and `inbox` frame belonged to unit HM-7; the loop had `runSeal` and `runItemFrame` (`internal/home/run_push.go`) in their place.
+- Status: resolved in branch `gemini/HM-7`: `internal/home/inbox.go` encodes plain `proto.Item` JSON in `inbox.env`, copies live `msg` and `task` rows into `proto.InboxItem` when sent, batches due items per connection into `proto.Inbox` frames up to `runRoom` (61,376 bytes), implements `(*Loop).Ack`, and paces excess wakes under `limits.wakes_per_hour` (`TestInboxGoldensAndRowCopies`, `TestInboxBatchesItemsToTheCtlLimit`, `TestInboxAckDeletesOnlyTheHostsOwnItem`, `TestInboxWakeUpCapHoldsAndReleasesItems`).
 
 ### 2026-11-21 · bug · `Loop.Inbox` marked only the groups that existed when it was called
 
