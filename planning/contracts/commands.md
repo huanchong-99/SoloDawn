@@ -258,7 +258,7 @@ device id. Receipts apply as for home commands.
 | `t` | Fields | Effect |
 | --- | --- | --- |
 | `agent.set` | `agent`, `account` | declares the account type of a CLI found on this machine (R-50); required before the AI can join a group |
-| `perm.set` | `agent`, `g`, `level` (1, 2, 3), `repo_config` (bool) | permission level for that AI's task sessions in that project (R-40), and whether repository-supplied AI configuration is loaded (R-45; for which sessions: `contracts/drivers.md` 1.1, 1.2); takes effect the next time a session's process starts |
+| `perm.set` | `agent`, `g`, `level` (1, 2, 3), `repo_config` (bool) | permission level for that AI's sessions in that project (R-40), and whether repository-supplied AI configuration is loaded (R-45; for which sessions: `contracts/drivers.md` 1.1, 1.2); records an audit row of `what = setting`; takes effect the next time a session's process starts |
 | `settings.set` | any of `retention_days`, `idle_minutes`, `max_open`, `default_level`, `all_level3`, `approvers`, `caps` | node settings; for `approvers` the node sends `member set` with them for each of its AIs to that AI's home |
 | `host.join` | `g`, `home`, `agent`, `name`, `secretary` | the node connects to `home`, clones the project if this node has no clone of it yet (R-11), and sends `member add_ai` |
 | `host.leave` | `g`, `agent` | the node sends `member remove`; if the home accepts it, the AI's sessions in that group are closed (it is refused while the AI has unfinished tasks) |
@@ -267,11 +267,12 @@ device id. Receipts apply as for home commands.
 | `host.offline`, `host.online` | — | R-64: `offline` interrupts and closes every session and tells every home; items stay on the homes, unacknowledged, until `online` |
 | `pair.browser` | — | Result: `link`, `expires` (`flows/pairing.md` C) |
 
-Levels: a task session uses the level set for (agent, group); without one,
-`default_level`; and level 3 whenever `all_level3` is on. Group and review
-sessions are always level 1. Where a CLI cannot enforce level 2 (Claude
-Code on native Windows), `perm.set` and `default_level` follow
-`contracts/drivers.md` 1.1.
+Levels: by the owner's decision of 2026-11-21, `default_level` defaults to 3,
+and group, review and task sessions all use the same effective level: 3
+whenever `all_level3` is on, else the level set by `perm.set` for `(agent,
+group)` (1, 2 or 3), else `default_level` (3 when unset). Where a CLI cannot
+enforce level 2 (Claude Code on native Windows), `perm.set` asking for level 2
+is refused with `conflict` (`contracts/drivers.md` 1.1).
 
 `caps`, per agent: `{"day":{"unit":"turns","max":200},"task":{"unit":
 "turns","max":60}}`. `unit` is `turns` always, and `tokens`, `usd` or
