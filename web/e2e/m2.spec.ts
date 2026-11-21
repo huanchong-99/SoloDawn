@@ -76,7 +76,10 @@ async function installNetSwitch(context: BrowserContext) {
     Object.assign(window, {
       __setPeerOffline(offline: boolean) {
         state.offline = offline;
-        if (!offline) return;
+        if (!offline) {
+          window.dispatchEvent(new Event('online'));
+          return;
+        }
         for (const pc of [...state.peers]) pc.close();
         for (const ws of [...state.sockets]) ws.close();
       },
@@ -289,12 +292,18 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
         const ta = document.querySelector<HTMLTextAreaElement>('.composer textarea');
         const form = document.querySelector<HTMLFormElement>('.composer form');
         if (!ta || !form) throw new Error('composer not mounted');
+        const yieldTurn = () =>
+          new Promise<void>((resolve) => {
+            const channel = new MessageChannel();
+            channel.port1.onmessage = () => resolve();
+            channel.port2.postMessage(null);
+          });
         for (let i = 1; i <= 1500; i++) {
           ta.value = `History line ${String(i).padStart(4, '0')}`;
           ta.dispatchEvent(new Event('input', { bubbles: true }));
           form.requestSubmit();
           while (ta.value !== '') {
-            await new Promise((resolve) => setTimeout(resolve, 1));
+            await yieldTurn();
           }
         }
       });
