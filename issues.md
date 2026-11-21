@@ -502,6 +502,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `planning/contracts/commands.md` 1.3 specified `item notice for the secretary` on `handback` without an exception when `as` is the secretary.
 - Status: resolved on branch `gemini/HM-6` (#181): `post` of kind `handback` is removed from `internal/home/cmd_post.go` and marked postponed with takeover in `planning/contracts/commands.md` 1.3, and `planning/contracts/commands.md` 1.3 now states the general rule that a post never queues an item for its own author (`postWakes` skips `msg.By`; tested in `internal/home/cmd_post_test.go`).
 
+### 2026-11-21 · deviation · `web/src/lib/peer.ts` had no method to send a `ctl` push
+
+- Symptom: onboarding (`flows/pairing.md` step 10) and device management must push `devlog` frames (`{"t":"devlog","user":"…","entries":[…]}`) without a request `id` (`planning/contracts/conventions.md` section 3). `Connection` and `Peer` in `web/src/lib/peer.ts` exposed `request(req)` only, which always attaches an `id` and awaits a response, while `#ctl` and `#send` were private.
+- Cause: unit W-2 implemented `request` and incoming `onpush`, omitting outgoing pushes (`internal/peer/ctl.go` has `Send` beside `Request`).
+- Status: resolved in #212: `Connection.send` and `Peer.send` send a `Devlog` frame without `id` and enforce the 60 KiB `ctl` frame limit (`web/src/lib/peer.ts`). Tests in `web/src/lib/peer.test.ts`.
+
 ### 2026-11-20 · limitation · A task's `branch` is text that no reader checks
 
 - Symptom: `proto.Decode` and the web client refuse a task row whose `slug` the home's rule cannot make (unit P-1), but take any text as its `branch`, and as the `branch` of `task branch`. `contracts/local.md` section 7 derives the branch from `num` and `slug` (`task/<num>-<slug>`); `HostedChecksToResume` previously copied `branch` from the row (`internal/host/forge.go:220` before `HOST-BRANCH`), from where it would reach `git` and `gh` arguments.
