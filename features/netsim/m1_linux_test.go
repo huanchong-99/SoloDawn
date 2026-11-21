@@ -4,6 +4,7 @@ package netsim
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
@@ -18,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -42,6 +44,12 @@ const (
 	netsimNodeUDP = 47800
 	netsimNodeTCP = 47801
 )
+
+const disableIPv6Script = `
+for ns in "$@"; do
+	ip netns exec "$ns" sysctl -qw net.ipv6.conf.all.disable_ipv6=1 net.ipv6.conf.default.disable_ipv6=1
+done
+`
 
 const lanLinkScript = `
 left=$1 right=$2
@@ -80,28 +88,36 @@ func TestM1DirectAndRelayFallback(t *testing.T) {
 
 func checkM1LANDirect(t *testing.T) Network {
 	n := Start(t, PortRestricted, PortRestricted)
+	run(t, disableIPv6Script, "sh", "-eu", "-s", "--", n.Left.Client, n.Right.Client)
 	run(t, lanLinkScript, "sh", "-eu", "-s", "--", n.Left.Client, n.Right.Client)
 	startDaemonHelper(t, n.WAN, "wan", "")
-	nodeOut := startDaemonHelper(t, n.Right.Client, "node", "direct")
+	nodeH := startDaemonHelper(t, n.Right.Client, "node", "direct")
 	runBrowserInNS(t, n.Left.Client, "direct")
-	expectHelperLine(t, nodeOut, "NODE_PATH direct")
+	expectHelperLine(t, nodeH, "NODE_PATH direct")
 	return n
 }
 
 func checkM1RelayFallback(t *testing.T) Network {
 	n := Start(t, PortRestricted, PortRestricted)
+	run(t, disableIPv6Script, "sh", "-eu", "-s", "--", n.Left.Client, n.Right.Client)
 	n.Right.StartUPnP(t)
 	run(t, "", "ip", "netns", "exec", n.Right.Client, "upnpc", "-m", ClientIP,
 		"-a", ClientIP, "47801", "47801", "TCP")
 	n.SetBlocked(t, true, netsimNodeTCP)
 	startDaemonHelper(t, n.WAN, "wan", "")
-	nodeOut := startDaemonHelper(t, n.Right.Client, "node", "relay")
+	nodeH := startDaemonHelper(t, n.Right.Client, "node", "relay")
 	runBrowserInNS(t, n.Left.Client, "relay")
-	expectHelperLine(t, nodeOut, "NODE_PATH relay")
+	expectHelperLine(t, nodeH, "NODE_PATH relay")
 	return n
 }
 
-func startDaemonHelper(t *testing.T, ns, role, wantPath string) *bufio.Reader {
+type daemonHelper struct {
+	out    *bufio.Reader
+	stderr bytes.Buffer
+	stop   func()
+}
+
+func startDaemonHelper(t *testing.T, ns, role, wantPath string) *daemonHelper {
 	t.Helper()
 	exe, err := os.Executable()
 	must(t, err)
@@ -111,12 +127,13 @@ func startDaemonHelper(t *testing.T, ns, role, wantPath string) *bufio.Reader {
 	must(t, err)
 	stdout, err := cmd.StdoutPipe()
 	must(t, err)
-	cmd.Stderr = t.Output()
+	h := &daemonHelper{out: bufio.NewReader(stdout)}
+	cmd.Stderr = &h.stderr
 	must(t, cmd.Start())
-	t.Cleanup(func() { stopDaemonHelper(cmd, stdin) })
-	r := bufio.NewReader(stdout)
-	expectHelperLine(t, r, "READY")
-	return r
+	h.stop = sync.OnceFunc(func() { stopDaemonHelper(cmd, stdin) })
+	t.Cleanup(h.stop)
+	expectHelperLine(t, h, "READY")
+	return h
 }
 
 func stopDaemonHelper(cmd *exec.Cmd, stdin io.Closer) {
@@ -141,14 +158,16 @@ func runBrowserInNS(t *testing.T, ns, wantPath string) {
 	must(t, cmd.Run())
 }
 
-func expectHelperLine(t *testing.T, r *bufio.Reader, want string) {
+func expectHelperLine(t *testing.T, h *daemonHelper, want string) {
 	t.Helper()
-	line, err := r.ReadString('\n')
-	must(t, err)
-	if strings.TrimSpace(line) != want {
-		rest, rErr := io.ReadAll(r)
-		t.Fatalf("helper reported %q (rest=%q err=%v), want %q", strings.TrimSpace(line), string(rest), rErr, want)
+	line, err := h.out.ReadString('\n')
+	if err == nil && strings.TrimSpace(line) == want {
+		return
 	}
+	h.stop()
+	rest, rErr := io.ReadAll(h.out)
+	t.Fatalf("helper reported %q (readErr=%v rest=%q restErr=%v stderr=%q), want %q",
+		strings.TrimSpace(line), err, string(rest), rErr, h.stderr.String(), want)
 }
 
 func serveWANHelper() error {
