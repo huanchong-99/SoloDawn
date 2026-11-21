@@ -44,13 +44,22 @@ func briefPost(s *State, c Command) (Result, *Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
 	}
+	mentions, refusal := s.briefCheck(p)
+	if refusal != nil {
+		return Result{}, refusal
+	}
+	return briefCard(s, c, p, mentions)
+}
+
+func (s *State) briefCheck(p proto.Post[proto.BriefBody]) ([]string, *Refusal) {
 	if refusal := briefWellFormed(p); refusal != nil {
-		return Result{}, refusal
+		return nil, refusal
 	}
-	if refusal := s.briefMembers(p.Body); refusal != nil {
-		return Result{}, refusal
+	mentions, refusal := s.postMentions(p.Mentions)
+	if refusal != nil {
+		return nil, refusal
 	}
-	return briefCard(s, c, p)
+	return mentions, s.briefMembers(p.Body)
 }
 
 // briefWellFormed is what a brief must be whatever the group holds: a
@@ -119,13 +128,10 @@ func (s *State) briefWorking(member string) bool {
 }
 
 // briefCard writes the brief, pending, and the brief it replaces, superseded.
-func briefCard(s *State, c Command, p proto.Post[proto.BriefBody]) (Result, *Refusal) {
-	if _, taken := c.Disk.Msg(string(c.Nonce)); taken {
-		return Result{}, &Refusal{"conflict", "a message with the id of the brief exists"}
-	}
+func briefCard(s *State, c Command, p proto.Post[proto.BriefBody], mentions []string) (Result, *Refusal) {
 	card := proto.MsgRow{
 		RowHeader: proto.RowHeader{Type: "msg", ID: string(c.Nonce)}, Group: s.ID, By: c.Who.Member(), Kind: briefKind,
-		Timestamp: c.Timestamp, Text: p.Text, Mentions: briefIDs(p.Mentions), Re: (*string)(p.Re), Body: briefJSON(p.Body),
+		Timestamp: c.Timestamp, Text: p.Text, Mentions: mentions, Re: (*string)(p.Re), Body: briefJSON(p.Body),
 		State: &proto.CardState{Status: briefPending}, Env: &c.Env,
 	}
 	rows := []Row{RowOf(card)}
@@ -361,15 +367,6 @@ func (s *State) briefTold(c Command, brief string) []Item {
 		return nil
 	}
 	return []Item{{AI: s.Group.Secretary, Why: "confirmed", Msg: brief, Cause: &c.Env}}
-}
-
-// briefIDs is a list of ids as the texts a row holds.
-func briefIDs(ids []proto.ID) []string {
-	out := make([]string, len(ids))
-	for i, id := range ids {
-		out[i] = string(id)
-	}
-	return out
 }
 
 // briefJSON encodes a value as a row holds it: without HTML escaping, as a
