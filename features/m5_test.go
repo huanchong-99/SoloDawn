@@ -35,6 +35,8 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
+var m5CurrentWorld atomic.Pointer[m5World]
+
 func init() {
 	prog := m5ProgName(os.Args[0])
 	if prog == "gh" && os.Getenv("SOLODAWN_M5_GH_DIR") != "" {
@@ -46,7 +48,32 @@ func init() {
 	if len(os.Args) > 2 && os.Args[1] == "m5-mcp-shim" {
 		os.Exit(m5RunMCPShim(os.Args[2], os.Args[3:]))
 	}
-	stepSets["m5"] = m5Steps
+	host.Register(host.Listeners, "m5_turns", m5OnHostEvent)
+	host.Register(host.Holds, "m5_hold", m5OnHostHold)
+	stepSets["a_m5"] = m5Steps
+}
+
+func m5OnHostEvent(_ *host.Host, _ host.SessionKey, e host.Event) {
+	w := m5CurrentWorld.Load()
+	if w != nil && e.Kind == host.TurnBegan {
+		w.mu.Lock()
+		w.turns++
+		w.mu.Unlock()
+	}
+}
+
+func m5OnHostHold(_ *host.Host, key host.SessionKey) (string, bool) {
+	w := m5CurrentWorld.Load()
+	if w == nil {
+		return "", false
+	}
+	w.mu.Lock()
+	held := w.closing || w.heldMembers[key.Member]
+	w.mu.Unlock()
+	if held {
+		return "offline", true
+	}
+	return "", false
 }
 
 func m5ProgName(arg0 string) string {
@@ -276,12 +303,19 @@ func m5GHGraphQL(st *m5GHState, args []string) (int, string, string) {
 	if err != nil {
 		return 1, "", err.Error()
 	}
-	head := pr.HeadOid
-	if head == "" {
-		head, _ = m5GitOut(st.BareRepo, "rev-parse", "--verify", "refs/heads/"+pr.Branch)
+	head, err := m5ResolvePRHead(st.BareRepo, pr)
+	if err != nil {
+		return 1, "", err.Error()
 	}
 	body := fmt.Sprintf(`{"state":%q,"headRefOid":%q,"mergeCommit":{"oid":%q},"autoMergeRequest":null,"mergeQueueEntry":null}`, pr.State, head, pr.MergeOid)
 	return 0, body + "\n", ""
+}
+
+func m5ResolvePRHead(bareRepo string, pr *m5GHPR) (string, error) {
+	if pr.HeadOid != "" {
+		return pr.HeadOid, nil
+	}
+	return m5GitOut(bareRepo, "rev-parse", "--verify", "refs/heads/"+pr.Branch)
 }
 
 func m5GitOut(dir string, args ...string) (string, error) {
@@ -346,9 +380,16 @@ type m5ToolCallSpec struct {
 	WantErr bool
 }
 
-func m5StepJSON(dir string, msg any) string {
-	raw, _ := json.Marshal(map[string]any{"dir": dir, "msg": msg})
+func m5MustJSON(v any) string {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
 	return string(raw)
+}
+
+func m5StepJSON(dir string, msg any) string {
+	return m5MustJSON(map[string]any{"dir": dir, "msg": msg})
 }
 
 func m5ClaudeScript(turns ...[]m5ToolCallSpec) string {
@@ -530,10 +571,14 @@ func (b *m5Browser) storeRowLocked(elem json.RawMessage) string {
 	return m5JustMergedID(prev, elem)
 }
 
+func m5WasMerged(prev json.RawMessage) bool {
+	var oldT proto.TaskRow
+	return len(prev) > 0 && json.Unmarshal(prev, &oldT) == nil && oldT.State == "merged"
+}
+
 func m5JustMergedID(prev, cur json.RawMessage) string {
-	var oldT, newT proto.TaskRow
-	json.Unmarshal(prev, &oldT)
-	if json.Unmarshal(cur, &newT) == nil && newT.State == "merged" && oldT.State != "merged" {
+	var newT proto.TaskRow
+	if json.Unmarshal(cur, &newT) == nil && newT.State == "merged" && !m5WasMerged(prev) {
 		return newT.ID
 	}
 	return ""
@@ -574,7 +619,7 @@ type m5World struct {
 	sawRevSess        map[int]host.SessionKey
 	sawRevDir         map[int]string
 	tools             []m5ToolRecord
-	listedTools       map[host.Kind][]string
+	listedTools       map[host.SessionKey][]string
 	beforeHooks       map[string][]m5HookFunc
 	heldMembers       map[string]bool
 	closing           bool
@@ -594,17 +639,21 @@ type m5World struct {
 func newM5World(sc *godog.ScenarioContext, f fixtures) *m5World {
 	w := &m5World{
 		f:                 f,
-		cleanup:           afterScenario(sc),
 		turnsAtReviewPass: map[string]int{},
 		turnsAtMerged:     map[string]int{},
 		sawTaskSess:       map[int]host.SessionKey{},
 		sawTaskDir:        map[int]string{},
 		sawRevSess:        map[int]host.SessionKey{},
 		sawRevDir:         map[int]string{},
-		listedTools:       map[host.Kind][]string{},
+		listedTools:       map[host.SessionKey][]string{},
 		beforeHooks:       map[string][]m5HookFunc{},
 		heldMembers:       map[string]bool{},
 	}
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+		w.settleBeforeAfterHooks()
+		return ctx, nil
+	})
+	w.cleanup = afterScenario(sc)
 	w.browser = newM5Browser(w.recordTaskMerged)
 	return w
 }
@@ -691,7 +740,6 @@ func (w *m5World) setupCluster(forge string, checks []string, level2 bool) error
 	w.registerHostHooks()
 	tb := scenarioTB{TB: w.f.t, cleanup: w.cleanup}
 	w.cluster = nodetest.Start(tb, nodetest.Config{BinDir: w.binDir, Nodes: 1})
-	w.cleanup(w.beforeClusterClose)
 	if err := w.startMCPBridge(); err != nil {
 		return err
 	}
@@ -748,36 +796,38 @@ func m5CopyExec(src, dst string) error {
 }
 
 func (w *m5World) registerHostHooks() {
-	host.Listeners["m5_turns"] = func(_ *host.Host, _ host.SessionKey, e host.Event) {
-		if e.Kind == host.TurnBegan {
-			w.mu.Lock()
-			w.turns++
-			w.mu.Unlock()
-		}
-	}
-	host.Holds["m5_hold"] = func(_ *host.Host, key host.SessionKey) (string, bool) {
-		w.mu.Lock()
-		held := w.closing || w.heldMembers[key.Member]
-		w.mu.Unlock()
-		if held {
-			return "offline", true
-		}
-		return "", false
-	}
-	w.cleanup(func() {
-		delete(host.Listeners, "m5_turns")
-		delete(host.Holds, "m5_hold")
-	})
+	m5CurrentWorld.Store(w)
+	w.cleanup(func() { m5CurrentWorld.Store(nil) })
 }
 
-func (w *m5World) beforeClusterClose() {
+func (w *m5World) settleBeforeAfterHooks() {
+	if w.cluster == nil {
+		return
+	}
 	w.mu.Lock()
 	w.closing = true
 	w.mu.Unlock()
 	n0 := w.cluster.Nodes[0]
 	n0.Link.Close()
 	n0.Home.Close()
+	m5WaitAllDormant(n0.Host)
 	time.Sleep(30 * time.Millisecond)
+}
+
+func m5WaitAllDormant(h *host.Host) {
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if !m5HasNonDormant(h) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func m5HasNonDormant(h *host.Host) bool {
+	return slices.ContainsFunc(h.Sessions.All(), func(s host.Session) bool {
+		return s.State != host.Dormant
+	})
 }
 
 func (w *m5World) startMCPBridge() error {
@@ -939,14 +989,14 @@ func (w *m5World) inspectMCPResponse(h *host.Host, token string, line []byte, mu
 		return
 	}
 	if method == "tools/list" {
-		w.recordListedTools(caller.Kind, resp.Result)
+		w.recordListedTools(caller.SessionKey, resp.Result)
 	}
 	if method == "tools/call" {
 		w.onAfterToolCall(h, caller, tool, resp.Result)
 	}
 }
 
-func (w *m5World) recordListedTools(kind host.Kind, raw json.RawMessage) {
+func (w *m5World) recordListedTools(key host.SessionKey, raw json.RawMessage) {
 	var list struct {
 		Tools []struct {
 			Name string `json:"name"`
@@ -960,7 +1010,7 @@ func (w *m5World) recordListedTools(kind host.Kind, raw json.RawMessage) {
 		names[i] = item.Name
 	}
 	w.mu.Lock()
-	w.listedTools[kind] = names
+	w.listedTools[key] = names
 	w.mu.Unlock()
 }
 
@@ -971,7 +1021,9 @@ func m5ParseToolCallResult(raw json.RawMessage) (string, bool) {
 		} `json:"content"`
 		IsError bool `json:"isError"`
 	}
-	json.Unmarshal(raw, &callRes)
+	if json.Unmarshal(raw, &callRes) != nil {
+		return "", false
+	}
 	if len(callRes.Content) > 0 {
 		return callRes.Content[0].Text, callRes.IsError
 	}
@@ -1116,7 +1168,7 @@ func (w *m5World) callHostSurface(name string, fields map[string]any) error {
 	fields["n"] = w.nextID()
 	fields["ts"] = n0.Host.Now().UnixMilli()
 	fields["to"] = n0.Key.ID()
-	raw, _ := json.Marshal(fields)
+	raw := []byte(m5MustJSON(fields))
 	_, err := host.Surface[name](context.Background(), n0.Host, n0.Link, w.cluster.Owner.ID(), raw)
 	return err
 }
@@ -1129,8 +1181,7 @@ func (w *m5World) addSecretaryMember() error {
 		"g": w.groupID, "id": w.secID, "cli": "claude", "name": "Secretary",
 		"account": "personal", "secretary": true, "approvers": []string{w.cluster.Owner.ID()},
 	}
-	raw, _ := json.Marshal(cmd)
-	_, err := n0.Host.Command(context.Background(), n0.Key.ID(), string(raw))
+	_, err := n0.Host.Command(context.Background(), n0.Key.ID(), m5MustJSON(cmd))
 	return err
 }
 
@@ -1678,13 +1729,16 @@ func (w *m5World) givenOneBriefTask(forge string, checks []string, holdCodex boo
 	if err := w.ownerConfirmBrief(w.pendingBriefID()); err != nil {
 		return err
 	}
-	activeTask1 := func() bool {
-		t, ok := w.taskByNum(1)
-		return ok && t.State == "active"
-	}
-	err := w.waitFor("active task 1", activeTask1)
+	err := w.waitFor("active task 1 and dormant secretary", w.task1AndSecReady)
+	w.setMemberHeld(w.secID, true)
 	w.resetTools()
 	return err
+}
+
+func (w *m5World) task1AndSecReady() bool {
+	t, ok := w.taskByNum(1)
+	state, _ := w.cluster.Nodes[0].Host.MemberState(w.groupID, w.secID)
+	return ok && t.State == "active" && state == string(host.Dormant)
 }
 
 func (w *m5World) resetTools() {
@@ -1715,22 +1769,50 @@ func (w *m5World) registerA53Hooks() {
 		return os.WriteFile(filepath.Join(w.sessionFolder(c), "dirty.txt"), []byte("dirty\n"), 0o600)
 	})
 	w.addBeforeHook("run_checks", func(c host.Caller) error {
-		os.Remove(filepath.Join(w.sessionFolder(c), "dirty.txt"))
+		if err := os.Remove(filepath.Join(w.sessionFolder(c), "dirty.txt")); err != nil {
+			return err
+		}
 		_, err := m5GitCommitFiles(w.sessionFolder(c), map[string]string{"check.txt": "FAIL_MARKER\n", "gamma_test.go": "package proj\n"}, "Failing check")
 		return err
 	})
 	w.addBeforeHook("submit_task", func(_ host.Caller) error { return nil })
 	w.addBeforeHook("run_checks", func(c host.Caller) error {
 		sha, err := m5GitCommitFile(w.sessionFolder(c), "check.txt", "PASS_MARKER\n", "Passing check")
-		w.commit1 = sha
+		w.setCommit1(sha)
 		return err
 	})
 	w.addBeforeHook("submit_task", func(_ host.Caller) error { return nil })
 	w.addBeforeHook("submit_task", func(c host.Caller) error {
 		sha, err := m5GitCommitFile(w.sessionFolder(c), "extra.txt", "extra\n", "Unchecked commit")
+		w.mu.Lock()
 		w.unreviewed = sha
+		w.mu.Unlock()
 		return err
 	})
+}
+
+func (w *m5World) setCommit1(sha string) {
+	w.mu.Lock()
+	w.commit1 = sha
+	w.mu.Unlock()
+}
+
+func (w *m5World) getCommit1() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.commit1
+}
+
+func (w *m5World) setCommit2(sha string) {
+	w.mu.Lock()
+	w.commit2 = sha
+	w.mu.Unlock()
+}
+
+func (w *m5World) getCommit2() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.commit2
 }
 
 func (w *m5World) toolCallCount() int {
@@ -1765,7 +1847,7 @@ func (w *m5World) waitStepMerge() error {
 
 func (w *m5World) stepReviewAndMoveBranchBeforeMerge() error {
 	wtDir := filepath.Join(w.projectDir(), "wt", "1-add-gamma-helper")
-	if _, err := m5GitOut(wtDir, "reset", "--hard", w.commit1); err != nil {
+	if _, err := m5GitOut(wtDir, "reset", "--hard", w.getCommit1()); err != nil {
 		return err
 	}
 	w.setMemberHeld(w.claudeM, true)
@@ -1810,7 +1892,7 @@ func (w *m5World) givenSubmittedBriefTask(conflictingBase bool) error {
 	}))
 	w.addBeforeHook("run_checks", func(c host.Caller) error {
 		sha, err := m5GitCommitFiles(w.sessionFolder(c), map[string]string{"shared.txt": "from-task\n", "gamma_test.go": "package proj\n"}, "Task change")
-		w.commit1 = sha
+		w.setCommit1(sha)
 		return err
 	})
 	w.setMemberHeld(w.claudeM, false)
@@ -1837,8 +1919,7 @@ func (w *m5World) stepAttemptInvalidReviews() error {
 		"kind": "review", "text": "", "thread": t.ID, "main": false, "mentions": []string{}, "re": nil,
 		"body": map[string]any{"task": t.ID, "commit": t.Commit, "score": 95, "items": []any{}},
 	}
-	raw1, _ := json.Marshal(assigneeRev)
-	_, err1 := n0.Host.Command(context.Background(), n0.Key.ID(), string(raw1))
+	_, err1 := n0.Host.Command(context.Background(), n0.Key.ID(), m5MustJSON(assigneeRev))
 	w.refuseCode1 = m5ErrCode(err1)
 
 	wrongRev := map[string]any{
@@ -1846,8 +1927,7 @@ func (w *m5World) stepAttemptInvalidReviews() error {
 		"kind": "review", "text": "", "thread": t.ID, "main": false, "mentions": []string{}, "re": nil,
 		"body": map[string]any{"task": t.ID, "commit": "0000000000000000000000000000000000000000", "score": 95, "items": []any{}},
 	}
-	raw2, _ := json.Marshal(wrongRev)
-	_, err2 := n0.Host.Command(context.Background(), n0.Key.ID(), string(raw2))
+	_, err2 := n0.Host.Command(context.Background(), n0.Key.ID(), m5MustJSON(wrongRev))
 	w.refuseCode2 = m5ErrCode(err2)
 	return nil
 }
@@ -2022,7 +2102,6 @@ func (w *m5World) stepGivenConfirmedDepBrief() error {
 		[]m5ToolCallSpec{{Name: "propose_brief", Args: brief}},
 		nil,
 		[]m5ToolCallSpec{{Name: "set_task", Args: map[string]any{"task": "T-2", "assignee": "Codex", "reviewer": "Claude"}}},
-		nil,
 	))
 	if err := w.ownerPostMain("Build base and dependent units.", nil); err != nil {
 		return err
@@ -2065,6 +2144,7 @@ func (w *m5World) stepVerifyTask2StillQueued() error {
 }
 
 func (w *m5World) stepFinishAndMergeTask1() error {
+	w.setMemberHeld(w.secID, true)
 	w.writeScriptFile("claude", m5ClaudeScript([]m5ToolCallSpec{
 		{Name: "run_checks"},
 		{Name: "submit_task", Args: map[string]any{"summary": "Base unit done."}},
@@ -2092,13 +2172,24 @@ func (w *m5World) stepFinishAndMergeTask1() error {
 }
 
 func (w *m5World) stepVerifyTask2ActivatedForCodex() error {
-	return w.waitFor("Codex ran task session in task 2 worktree", func() bool {
-		w.mu.Lock()
-		sess := w.sawTaskSess[2]
-		dir := w.sawTaskDir[2]
-		w.mu.Unlock()
-		return sess.Member == w.codexM && strings.HasSuffix(dir, "2-dependent-unit")
-	})
+	return w.waitFor("Codex ran task session in task 2 worktree", w.codexCompletedT2Turn)
+}
+
+func (w *m5World) codexCompletedT2Turn() bool {
+	w.mu.Lock()
+	sess := w.sawTaskSess[2]
+	dir := w.sawTaskDir[2]
+	w.mu.Unlock()
+	return sess.Member == w.codexM && strings.HasSuffix(dir, "2-dependent-unit") && w.hasMsgWithText("Started T-2.")
+}
+
+func (w *m5World) hasMsgWithText(text string) bool {
+	for _, m := range w.browserMessages() {
+		if m.Text == text {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *m5World) stepRunDirectTaskA57() error {
@@ -2157,7 +2248,7 @@ func (w *m5World) stepVerifyDirectTaskA57() error {
 		return fmt.Errorf("expected clean repo folder, got status=%q err=%v", status, err)
 	}
 	w.mu.Lock()
-	grpTools := slices.Clone(w.listedTools[host.GroupSession])
+	grpTools := slices.Clone(w.listedTools[host.SessionKey{Group: w.groupID, Member: w.claudeM}])
 	sess := w.sawTaskSess[1]
 	w.mu.Unlock()
 	if !m5GroupToolsReadOnly(grpTools) {
@@ -2248,6 +2339,7 @@ func (w *m5World) stepResolveConflictAndMerge() error {
 		Name: "submit_review", Args: map[string]any{"score": 95, "items": []any{}},
 	}}))
 	w.addBeforeHook("set_task", func(_ host.Caller) error {
+		w.setMemberHeld(w.secID, true)
 		w.writeScriptFile("claude", m5ClaudeScript([]m5ToolCallSpec{
 			{Name: "run_checks"},
 			{Name: "submit_task", Args: map[string]any{"summary": "Resolved conflict."}},
@@ -2256,12 +2348,8 @@ func (w *m5World) stepResolveConflictAndMerge() error {
 	})
 	w.addBeforeHook("run_checks", func(c host.Caller) error {
 		dir := w.sessionFolder(c)
-		m5GitOut(dir, "merge", "--no-commit", "main")
-		m5GitOut(dir, "reset", "--merge")
-		if _, err := m5GitOut(dir, "merge", "-s", "ours", "-m", "Sync base", "-c", "user.name=test", "-c", "user.email=test@test.invalid", "main"); err != nil {
-			if _, err2 := m5GitOut(dir, "-c", "user.name=test", "-c", "user.email=test@test.invalid", "merge", "-s", "ours", "-m", "Sync base", "main"); err2 != nil {
-				return err2
-			}
+		if _, err := m5GitOut(dir, "-c", "user.name=test", "-c", "user.email=test@test.invalid", "merge", "-s", "ours", "-m", "Sync base", "main"); err != nil {
+			return err
 		}
 		_, err := m5GitCommitFile(dir, "shared.txt", "resolved-both\n", "Resolve shared.txt")
 		return err
@@ -2297,11 +2385,11 @@ func (w *m5World) stepSendDuplicateConfirmAndFail() error {
 	n0 := w.cluster.Nodes[0]
 	w.setMemberHeld(w.secID, true)
 	w.setMemberHeld(w.claudeM, true)
-	confirmRaw, _ := json.Marshal(map[string]any{
+	confirmRaw := m5MustJSON(map[string]any{
 		"t": "act", "n": w.nextID(), "ts": n0.Host.Now().UnixMilli(),
 		"g": w.groupID, "msg": w.pendingBriefID(), "action": "confirm",
 	})
-	confirmEnv := w.cluster.Owner.Sign(string(confirmRaw))
+	confirmEnv := w.cluster.Owner.Sign(confirmRaw)
 	var err error
 	if w.confirmAns1, err = w.sendEnvelopeCmd(confirmEnv); err != nil {
 		return err
@@ -2319,11 +2407,11 @@ func (w *m5World) stepSendDuplicateConfirmAndFail() error {
 func (w *m5World) sendDuplicateTaskFail() error {
 	n0 := w.cluster.Nodes[0]
 	t1, _ := w.taskByNum(1)
-	failPayload, _ := json.Marshal(map[string]any{
+	failPayload := m5MustJSON(map[string]any{
 		"t": "task", "op": "fail", "n": w.nextID(), "ts": n0.Host.Now().UnixMilli(),
 		"g": w.groupID, "id": t1.ID, "reason": "crash", "detail": "simulated exit",
 	})
-	env := n0.Key.Sign(string(failPayload))
+	env := n0.Key.Sign(failPayload)
 	var err error
 	if w.failAns1, err = w.sendHostEnvelope(env); err != nil {
 		return err
@@ -2366,13 +2454,25 @@ func (w *m5World) stepVerifyDuplicateConfirmAndFail() error {
 }
 
 func (w *m5World) stepVerifyBusyAICannotLeave() error {
-	for _, agent := range []string{"claude", "codex"} {
-		err := w.callHostSurface("host.leave", map[string]any{"g": w.groupID, "agent": agent})
-		if m5ErrCode(err) != "conflict" {
-			return fmt.Errorf("expected conflict removing %s, got %v", agent, err)
+	for _, memberID := range []string{w.claudeM, w.codexM} {
+		if m5ErrCode(w.ownerRemoveMember(memberID)) != "conflict" {
+			return fmt.Errorf("expected conflict removing member %s", memberID)
 		}
 	}
+	err := w.callHostSurface("host.leave", map[string]any{"g": w.groupID, "agent": "codex"})
+	if m5ErrCode(err) != "conflict" {
+		return fmt.Errorf("expected conflict on host.leave codex, got %v", err)
+	}
 	return nil
+}
+
+func (w *m5World) ownerRemoveMember(memberID string) error {
+	n0 := w.cluster.Nodes[0]
+	_, err := w.ownerCmd(map[string]any{
+		"t": "member", "op": "remove", "n": w.nextID(), "ts": n0.Host.Now().UnixMilli(),
+		"g": w.groupID, "id": memberID,
+	})
+	return err
 }
 
 func (w *m5World) stepPassReviewWithMergeHeld() error {
@@ -2395,11 +2495,11 @@ func (w *m5World) stepVerifyMergeStepRefusals() error {
 		"t": "task", "op": "assign", "n": w.nextID(), "ts": n0.Host.Now().UnixMilli(),
 		"g": w.groupID, "id": t1.ID, "assignee": w.codexM, "reviewer": w.claudeM,
 	})
-	subRaw, _ := json.Marshal(map[string]any{
+	subRaw := m5MustJSON(map[string]any{
 		"t": "task", "op": "submitted", "n": w.nextID(), "ts": n0.Host.Now().UnixMilli(),
 		"g": w.groupID, "id": t1.ID, "commit": t1.Commit, "stats": map[string]any{"added": 1, "removed": 0},
 	})
-	_, errSub := n0.Host.Command(context.Background(), n0.Key.ID(), string(subRaw))
+	_, errSub := n0.Host.Command(context.Background(), n0.Key.ID(), subRaw)
 	if m5ErrCode(errAssign) != "conflict" || m5ErrCode(errSub) != "conflict" {
 		return fmt.Errorf("expected conflict for assign (%v) and submitted (%v)", errAssign, errSub)
 	}
@@ -2425,8 +2525,8 @@ func (w *m5World) stepOwnerCancelsAndHostDropsMerge() error {
 	w.setMemberHeld(w.claudeM, false)
 	host.Deliver(n0.Host, w.groupID, w.claudeM)
 	auditRefused := func() bool {
-		n, _ := w.hostAuditCount("refused", "stale_task")
-		return n >= 1
+		n, err := w.hostAuditCount("refused", "stale_task")
+		return err == nil && n >= 1
 	}
 	return w.waitFor("merge item refused in audit", auditRefused)
 }
@@ -2453,19 +2553,20 @@ func (w *m5World) stepSubmitTwoCommitsWhileReviewerHeld() error {
 	w.writeScriptFile("claude", m5ClaudeScript(calls))
 	w.addBeforeHook("run_checks", func(c host.Caller) error {
 		sha, err := m5GitCommitFiles(w.sessionFolder(c), map[string]string{"v1.go": "package proj\n", "v1_test.go": "package proj\n"}, "Commit 1")
-		w.commit1 = sha
+		w.setCommit1(sha)
 		return err
 	})
 	w.addBeforeHook("run_checks", func(c host.Caller) error {
 		sha, err := m5GitCommitFile(w.sessionFolder(c), "v1.go", "package proj\nvar V = 2\n", "Commit 2")
-		w.commit2 = sha
+		w.setCommit2(sha)
 		return err
 	})
 	w.setMemberHeld(w.claudeM, false)
 	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.claudeM)
 	return w.waitFor("task 1 submitted commit 2", func() bool {
 		t, ok := w.taskByNum(1)
-		return ok && w.commit2 != "" && t.Commit == w.commit2
+		c2 := w.getCommit2()
+		return ok && c2 != "" && t.Commit == c2
 	})
 }
 
@@ -2480,8 +2581,9 @@ func (w *m5World) stepVerifyHomeRetiredCommit1Review() error {
 			commits = append(commits, *it.Commit)
 		}
 	}
-	if !slices.Equal(commits, []string{w.commit2}) {
-		return fmt.Errorf("expected home queued reviews [%s], got %v", w.commit2, commits)
+	c2 := w.getCommit2()
+	if !slices.Equal(commits, []string{c2}) {
+		return fmt.Errorf("expected home queued reviews [%s], got %v", c2, commits)
 	}
 	return nil
 }
@@ -2504,8 +2606,9 @@ func (w *m5World) stepVerifyHostRefusedStaleReview() error {
 	if err != nil || refused < 1 {
 		return fmt.Errorf("expected host audit refused stale_task >= 1, got %d (err=%v)", refused, err)
 	}
+	c2 := w.getCommit2()
 	for _, m := range w.browserMessages() {
-		if m.Kind == "review" && !strings.Contains(string(m.Body), w.commit2) {
+		if m.Kind == "review" && !strings.Contains(string(m.Body), c2) {
 			return fmt.Errorf("unexpected review for stale commit: %s", string(m.Body))
 		}
 	}
