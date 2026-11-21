@@ -119,7 +119,7 @@ func TestRunStopsPushingToADeviceTheGroupNoLongerServes(t *testing.T) {
 
 	// The laptop is revoked: its open connection gets no row and no item.
 	p.does(groupID, "jump", `,"what":"wakes"`)
-	equal(t, strings.HasPrefix(host.next(), `{"Group":"`+groupID+`","Items":[{"ID":1,`), true)
+	equal(t, strings.HasPrefix(host.next(), `{"t":"inbox","g":"`+groupID+`","items":[{"item":{"item":1,`), true)
 	p.does(groupID, "jump", `,"what":"revokes"`)
 	visit.next()
 	p.does(groupID, "note", `,"text":"not for a revoked device"`)
@@ -171,7 +171,7 @@ func runWake(s *home.State, c home.Command) (home.Result, *home.Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return home.Result{}, refusal
 	}
-	item := home.Item{AI: aiID, Why: p.Why, Task: "t1", Msg: string(c.Nonce), Commit: "9f2c1ab", PR: 7, Jump: true, Code: "c", Detail: "d", Cause: &c.Env}
+	item := home.Item{AI: aiID, Why: p.Why, Task: "t1", Msg: string(c.Nonce), Commit: "9f2c1ab", PR: 7, Jump: true, Code: "c", Detail: "d"}
 	if p.Hold != 0 {
 		item.NotBefore = c.Now + p.Hold
 	}
@@ -189,23 +189,27 @@ func TestRunQueuesAndSendsInboxItems(t *testing.T) {
 	w, p := runFounded(t, tables)
 	host := w.attach(laptop)
 	w.loop.Watch(host.conn, groupID, true)
-	sent := map[int64]string{}
-	wake := func(hold int64) (frame string) {
-		p.does(groupID, "jump", fmt.Sprintf(`,"hold":%d,"why":"mention"`, hold))
-		env := runQuery[string](t, w.db, "SELECT cause FROM inbox ORDER BY id DESC LIMIT 1")
-		var cause proto.Envelope
-		equal(t, json.Unmarshal([]byte(env), &cause), nil)
-		item := home.Item{AI: aiID, Why: "mention", Task: "t1", Msg: runID(w.nonce.Load()), Commit: "9f2c1ab", PR: 7, Jump: true, Code: "c", Detail: "d", Cause: &cause}
-		if hold != 0 {
-			item.NotBefore = w.clock.Load() + hold
+	items := map[int64]proto.Item{}
+	inbox := func(seq int64, ids ...int64) string {
+		task := runTask("t1", seq)
+		batch := make([]proto.InboxItem, len(ids))
+		for i, id := range ids {
+			batch[i] = proto.InboxItem{Item: items[id], Task: &task}
 		}
-		n := int64(len(sent) + 1)
-		sent[n] = runFrame(home.ItemsPush{Group: groupID, Items: []home.QueuedItem{{ID: n, Item: item}}})
-		return sent[n]
+		return runFrame(proto.Inbox{Type: "inbox", Group: proto.ID(groupID), Items: batch})
+	}
+	wake := func(hold int64, seq int64) string {
+		p.does(groupID, "jump", fmt.Sprintf(`,"hold":%d,"why":"mention"`, hold))
+		n := int64(len(items) + 1)
+		items[n] = proto.Item{
+			Item: n, AI: proto.ID(aiID), Why: "mention", Task: "t1", Msg: proto.ID(runID(w.nonce.Load())),
+			Commit: "9f2c1ab", PR: 7, Jump: true, Code: "c", Detail: "d",
+		}
+		return inbox(seq, n)
 	}
 
 	// Nobody takes the items yet: the first one waits in the store.
-	wake(0)
+	wake(0, 4)
 	host.gets(runRows(groupID, runTask("t1", 4)))
 	var stored struct {
 		g, ai, host, why, msg, task, commit string
@@ -224,13 +228,13 @@ func TestRunQueuesAndSendsInboxItems(t *testing.T) {
 	// after the rows of its result. A connection of another device gets none.
 	w.loop.Inbox(host.conn)
 	w.loop.Inbox(p.conn)
-	host.gets(sent[1])
-	second := wake(0)
+	host.gets(inbox(4, 1))
+	second := wake(0, 5)
 	host.gets(runRows(groupID, runTask("t1", 5)), second)
 	p.quiet()
 
 	// A held item is sent when the clock reaches its time, and once.
-	held := wake(1000)
+	held := wake(1000, 6)
 	host.gets(runRows(groupID, runTask("t1", 6)))
 	w.loop.Tick(time.UnixMilli(clock + 999))
 	host.quiet()
@@ -239,29 +243,29 @@ func TestRunQueuesAndSendsInboxItems(t *testing.T) {
 	w.loop.Tick(time.UnixMilli(clock + 2000))
 	host.quiet()
 
-	// On a hello every unacknowledged item that is due goes out again,
-	// oldest first; one that was acknowledged or retired does not.
+	// On a hello every unacknowledged item that is due goes out again in one
+	// inbox frame, oldest first; one that was acknowledged or retired does not.
 	w.loop.Inbox(host.conn)
-	host.gets(sent[1], sent[2])
+	host.gets(inbox(6, 1, 2))
 	host.quiet()
 	w.clock.Store(clock + 1000)
 	w.loop.Inbox(host.conn)
-	host.gets(sent[1], sent[2], sent[3])
+	host.gets(inbox(6, 1, 2, 3))
 	runExec(t, w.db, "DELETE FROM inbox WHERE id=1")
 	p.does(groupID, "forget", ``)
 	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM inbox"), 1)
 	w.loop.Inbox(host.conn)
-	host.gets(sent[3])
+	host.gets(inbox(6, 3))
 	// A second connection of the host takes them as well; the first is not
 	// sent an item twice for that.
 	again := w.attach(laptop)
 	w.loop.Inbox(again.conn)
-	again.gets(sent[3])
+	again.gets(inbox(6, 3))
 	host.quiet()
 
 	// An item in the store that cannot be read is reported and left out, once
 	// for a connection; the others are sent.
-	last := wake(0)
+	last := wake(0, 7)
 	host.gets(runRows(groupID, runTask("t1", 7)), last)
 	again.gets(last)
 	env := runQuery[string](t, w.db, "SELECT env FROM inbox WHERE id=3")
@@ -275,7 +279,7 @@ func TestRunQueuesAndSendsInboxItems(t *testing.T) {
 	equal(t, len(w.reports), 0)
 	runExec(t, w.db, "UPDATE inbox SET env=? WHERE id=3", env)
 	w.loop.Inbox(host.conn)
-	host.gets(sent[3], last)
+	host.gets(inbox(7, 3, 4))
 
 	// A queue that cannot be read is reported, and read again on the next tick.
 	runExec(t, w.db, "DROP TABLE inbox")
@@ -301,7 +305,7 @@ func TestRunSendsAHeldItemOnATick(t *testing.T) {
 	p.does(groupID, "note", `,"text":"no item"`)
 	host.quiet()
 	w.loop.Tick(time.UnixMilli(clock + 600))
-	equal(t, strings.HasPrefix(host.next(), `{"Group":"`+groupID+`","Items":[{"ID":1,"AI":"`+aiID+`","Why":"mention"`), true)
+	equal(t, strings.HasPrefix(host.next(), `{"t":"inbox","g":"`+groupID+`","items":[{"item":{"item":1,"ai":"`+aiID+`","why":"mention"`), true)
 }
 
 // An item without the fields its why does not have is stored without them,
@@ -321,9 +325,9 @@ func TestRunStoresAnItemAsItsResultLeavesIt(t *testing.T) {
 	var empty int
 	var host string
 	err := w.db.Write(func(tx *store.Tx) error {
-		return tx.QueryRow("SELECT host, (msg IS NULL)+(task IS NULL)+(commit_id IS NULL)+(cause IS NULL) FROM inbox").Scan(&host, &empty)
+		return tx.QueryRow("SELECT host, (msg IS NULL)+(task IS NULL)+(commit_id IS NULL) FROM inbox").Scan(&host, &empty)
 	})
-	equal(t, []any{err, host, empty}, []any{nil, tablet.ID(), 4})
+	equal(t, []any{err, host, empty}, []any{nil, tablet.ID(), 3})
 }
 
 // State.Wakes holds, by AI, when each item of the last hour is due: the

@@ -125,6 +125,11 @@ func decodeCmd(data []byte) (proto.Cmd, bool) {
 	return cmd, proto.Decode(data, &cmd) == nil && cmd.Type == "cmd"
 }
 
+func decodeAck(data []byte) (proto.Ack, bool) {
+	var ack proto.Ack
+	return ack, proto.Decode(data, &ack) == nil && ack.Type == "ack"
+}
+
 func (l *LocalLink) toHome(data []byte) {
 	if cmd, ok := decodeCmd(data); ok {
 		l.loop.Cmd(l.conn, cmd.ID, cmd.Env)
@@ -135,6 +140,10 @@ func (l *LocalLink) toHome(data []byte) {
 	}
 	if proto.Decode(data, &req) == nil && req.ID != nil {
 		l.badRequest(*req.ID)
+		return
+	}
+	if ack, ok := decodeAck(data); ok {
+		l.loop.Ack(l.conn, ack)
 	}
 }
 

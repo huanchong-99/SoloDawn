@@ -450,80 +450,78 @@ func tokenFromLaunch(l Launch) string {
 	return l.Shim[idx+1]
 }
 
-func TestStartResumeEventsStrayTurnEndedAndDeliver(t *testing.T) {
-	h, rh, drv, dataDir := setupRunEnv(t)
-	Instructions = func(s Session) string { return "prompt:" + string(s.Kind) }
+func waitReportedKind(t *testing.T, reported <-chan EventKind) EventKind {
+	t.Helper()
+	select {
+	case kind := <-reported:
+		return kind
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for reported event")
+		return ""
+	}
+}
 
-	var events []Event
-	var mu sync.Mutex
-	Listeners["test"] = func(_ *Host, _ SessionKey, e Event) {
-		mu.Lock()
-		events = append(events, e)
-		mu.Unlock()
+func drainReportedEvents(t *testing.T, reported <-chan EventKind, want []EventKind) {
+	t.Helper()
+	got := make([]EventKind, len(want))
+	for i := range want {
+		got[i] = waitReportedKind(t, reported)
 	}
-	delivered := make(chan aiSlot, 8)
-	Deliver = func(_ *Host, g, m string) { delivered <- aiSlot{g, m} }
+	if !slices.Equal(got, want) {
+		t.Fatalf("reported events = %v, want %v", got, want)
+	}
+}
 
-	key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-	if err := h.Sessions.Create(makeRunSession(key, TaskSession, "wt/1-paths")); err != nil {
-		t.Fatal(err)
-	}
-
-	turn1 := Turn{Kind: ItemsTurn, Thread: runTask1, Depth: 1}
-	if err := Runner.Turn(t.Context(), h, key, "first message", turn1); err != nil {
-		t.Fatal(err)
-	}
-	if drv.count() != 1 {
-		t.Fatalf("starts = %d, want 1", drv.count())
-	}
-	l1 := drv.lastLaunch()
-	tok1 := tokenFromLaunch(l1)
-	wantDir := filepath.Join(dataDir, "projects", runGroup1, "wt/1-paths")
-	if l1.Folder != wantDir || l1.Session != "" || l1.Level != 3 || !slices.Equal(l1.Shim[:2], []string{"solodawn", "mcp"}) || l1.Instructions != "prompt:task" || l1.RepoConfig || l1.ToolTimeout != 60*time.Minute {
-		t.Fatalf("unexpected launch: %+v, want dir %s", l1, wantDir)
-	}
-	caller1, ok := h.Sessions.Caller(tok1)
-	if !ok || caller1.Level != 3 || caller1.Interactive || caller1.Turn != (Turn{N: 1, Kind: ItemsTurn, Thread: runTask1, Depth: 1}) {
-		t.Fatalf("unexpected caller: %+v (ok=%v)", caller1, ok)
-	}
-
-	stWorking := rh.waitCmd(t)
-	var ms1 proto.MemberStatus[proto.SystemCode]
-	if err := proto.Decode([]byte(stWorking.raw), &ms1); err != nil || ms1.State != "working" || string(ms1.Task) != runTask1 || ms1.Path != "local" {
-		t.Fatalf("working status: %+v (%v)", ms1, err)
-	}
-
-	p1 := drv.proc(0)
-	p1.emit(Event{Kind: Ready, Session: "cli-sess-1"})
-	p1.emit(Event{Kind: Ready, Session: ""})
-	p1.emit(Event{Kind: Active})
-	pct := 42.5
-	p1.emit(Event{Kind: Used, Usage: Usage{WindowPct: &pct}})
-	p1.emit(Event{Kind: TurnEnded, Status: "completed"})
-
+func waitDeliveredSlot(t *testing.T, delivered <-chan aiSlot, want aiSlot) {
+	t.Helper()
 	select {
 	case slot := <-delivered:
-		if slot != (aiSlot{runGroup1, runAI1}) {
-			t.Fatalf("delivered %+v", slot)
+		if slot != want {
+			t.Fatalf("delivered %+v, want %+v", slot, want)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Deliver not called")
 	}
+}
 
-	sAfter1 := waitForState(t, h, key, Waiting)
-	if sAfter1.CLISession != "cli-sess-1" {
-		t.Fatalf("CLISession = %q, want cli-sess-1", sAfter1.CLISession)
+func assertFirstTurnLaunch(t *testing.T, h *Host, drv *fakeDriver, dataDir string) string {
+	t.Helper()
+	if drv.count() != 1 {
+		t.Fatalf("starts = %d, want 1", drv.count())
 	}
-	stWaiting := rh.waitCmd(t)
-	var ms2 proto.MemberStatus[proto.SystemCode]
-	if err := proto.Decode([]byte(stWaiting.raw), &ms2); err != nil || ms2.State != "waiting" || string(ms2.Task) != runTask1 || ms2.Usage != (proto.Usage{}) {
-		t.Fatalf("waiting status: %+v (%v)", ms2, err)
+	l1 := drv.lastLaunch()
+	wantDir := filepath.Join(dataDir, "projects", runGroup1, "wt/1-paths")
+	got := [7]any{l1.Folder, l1.Session, l1.Level, slices.Equal(l1.Shim[:2], []string{"solodawn", "mcp"}), l1.Instructions, l1.RepoConfig, l1.ToolTimeout}
+	want := [7]any{wantDir, "", 3, true, "prompt:task", false, 60 * time.Minute}
+	if got != want {
+		t.Fatalf("unexpected launch: %+v, want dir %s", l1, wantDir)
 	}
+	tok1 := tokenFromLaunch(l1)
+	caller1, ok := h.Sessions.Caller(tok1)
+	gotCaller := [4]any{ok, caller1.Level, caller1.Interactive, caller1.Turn}
+	wantCaller := [4]any{true, 3, false, Turn{N: 1, Kind: ItemsTurn, Thread: runTask1, Depth: 1}}
+	if gotCaller != wantCaller {
+		t.Fatalf("unexpected caller: %+v (ok=%v)", caller1, ok)
+	}
+	return tok1
+}
 
-	// A stray second TurnEnded while Waiting is reported to Listeners
-	// without panicking, sending another status, or calling Deliver again.
-	p1.emit(Event{Kind: TurnEnded, Status: "completed"})
+func assertMemberStatusCmd(t *testing.T, rh *runHome, wantState, wantTask string) {
+	t.Helper()
+	cmd := rh.waitCmd(t)
+	var ms proto.MemberStatus[proto.SystemCode]
+	if err := proto.Decode([]byte(cmd.raw), &ms); err != nil {
+		t.Fatalf("decode member status: %v", err)
+	}
+	got := [4]any{ms.State, string(ms.Task), ms.Path, ms.Usage}
+	want := [4]any{wantState, wantTask, "local", proto.Usage{}}
+	if got != want {
+		t.Fatalf("member status = %+v, want state=%s task=%s", ms, wantState, wantTask)
+	}
+}
 
+func verifySecondTurnAfterStrayEnd(t *testing.T, h *Host, rh *runHome, drv *fakeDriver, key SessionKey, tok1 string, reported <-chan EventKind, delivered <-chan aiSlot) {
+	t.Helper()
 	// Second turn while still Waiting reuses the open process without restarting.
 	if err := Runner.Turn(t.Context(), h, key, "second message", Turn{Kind: ItemsTurn, Thread: runTask1}); err != nil {
 		t.Fatal(err)
@@ -531,32 +529,68 @@ func TestStartResumeEventsStrayTurnEndedAndDeliver(t *testing.T) {
 	if drv.count() != 1 {
 		t.Fatalf("process restarted on waiting turn: %d starts", drv.count())
 	}
-	stWorking2 := rh.waitCmd(t)
-	if stWorking2.payload["state"] != "working" {
-		t.Fatalf("expected working status on second turn, got %v (stray TurnEnded sent extra status)", stWorking2.payload)
-	}
+	assertMemberStatusCmd(t, rh, "working", runTask1)
 	caller2, ok := h.Sessions.Caller(tok1)
-	if !ok || caller2.Turn.N != 2 {
-		t.Fatalf("caller turn after second turn: %+v", caller2)
+	if [2]bool{ok, caller2.Turn.N == 2} != [2]bool{true, true} {
+		t.Fatalf("caller turn after second turn: %+v (ok=%v)", caller2, ok)
 	}
-	p1.emit(Event{Kind: TurnEnded, Status: "completed"})
-	<-delivered
+	drv.proc(0).emit(Event{Kind: TurnEnded, Status: "completed"})
+	waitDeliveredSlot(t, delivered, aiSlot{runGroup1, runAI1})
 	if len(delivered) != 0 {
 		t.Fatalf("stray TurnEnded caused extra Deliver call")
 	}
 	waitForState(t, h, key, Waiting)
-	rh.waitCmd(t)
+	assertMemberStatusCmd(t, rh, "waiting", runTask1)
+	drainReportedEvents(t, reported, []EventKind{TurnBegan, TurnEnded})
+}
 
-	mu.Lock()
-	var kinds []EventKind
-	for _, ev := range events {
-		kinds = append(kinds, ev.Kind)
+func TestStartResumeEventsStrayTurnEndedAndDeliver(t *testing.T) {
+	h, rh, drv, dataDir := setupRunEnv(t)
+	Instructions = func(s Session) string { return "prompt:" + string(s.Kind) }
+
+	// Single reader: waitReportedKind on the test goroutine.
+	reported := make(chan EventKind, 16)
+	Listeners["test"] = func(_ *Host, _ SessionKey, e Event) { reported <- e.Kind }
+	// Single reader: waitDeliveredSlot on the test goroutine.
+	delivered := make(chan aiSlot, 8)
+	Deliver = func(_ *Host, g, m string) { delivered <- aiSlot{g, m} }
+
+	key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
+	if err := h.Sessions.Create(makeRunSession(key, TaskSession, "wt/1-paths")); err != nil {
+		t.Fatal(err)
 	}
-	mu.Unlock()
-	wantKinds := []EventKind{TurnBegan, Ready, Ready, Active, Used, TurnEnded, TurnEnded, TurnBegan, TurnEnded}
-	if !slices.Equal(kinds, wantKinds) {
-		t.Fatalf("reported events = %v, want %v", kinds, wantKinds)
+	turn1 := Turn{Kind: ItemsTurn, Thread: runTask1, Depth: 1}
+	if err := Runner.Turn(t.Context(), h, key, "first message", turn1); err != nil {
+		t.Fatal(err)
 	}
+	tok1 := assertFirstTurnLaunch(t, h, drv, dataDir)
+	assertMemberStatusCmd(t, rh, "working", runTask1)
+
+	p1 := drv.proc(0)
+	pct := 42.5
+	for _, ev := range []Event{
+		{Kind: Ready, Session: "cli-sess-1"},
+		{Kind: Ready, Session: ""},
+		{Kind: Active},
+		{Kind: Used, Usage: Usage{WindowPct: &pct}},
+		{Kind: TurnEnded, Status: "completed"},
+	} {
+		p1.emit(ev)
+	}
+	waitDeliveredSlot(t, delivered, aiSlot{runGroup1, runAI1})
+	if sAfter1 := waitForState(t, h, key, Waiting); sAfter1.CLISession != "cli-sess-1" {
+		t.Fatalf("CLISession = %q, want cli-sess-1", sAfter1.CLISession)
+	}
+	assertMemberStatusCmd(t, rh, "waiting", runTask1)
+
+	// A stray second TurnEnded while Waiting is reported to Listeners without
+	// sending another status or calling Deliver again; the trailing Active event
+	// ensures runProcessLoop has returned from onProcessTurnEnded before Turn.
+	p1.emit(Event{Kind: TurnEnded, Status: "completed"})
+	p1.emit(Event{Kind: Active})
+	drainReportedEvents(t, reported, []EventKind{TurnBegan, Ready, Ready, Active, Used, TurnEnded, TurnEnded, Active})
+
+	verifySecondTurnAfterStrayEnd(t, h, rh, drv, key, tok1, reported, delivered)
 }
 
 func TestDeliverOnTurnEndEvictsSameProcessWithoutDeadlock(t *testing.T) {
@@ -829,58 +863,67 @@ func checkIdleAndArmGuards(t *testing.T) {
 	waitForState(t, h, key, Waiting)
 	rh.waitCmd(t)
 
-	// Pin onIdleTimeout and armTurnIdle guards across every operand.
-	rt := stateOf(h)
-	onIdleTimeout(h, rt, SessionKey{Group: "missing"}, 1)
-	onIdleTimeout(h, rt, key, 9999)
-	rt.mu.Lock()
-	lp := rt.procs[key]
-	stopIdleLocked(lp)
-	lp.turnActive = true
-	rt.mu.Unlock()
-	armTurnIdle(h, rt, lp, time.Hour)
-	rt.mu.Lock()
-	if lp.idleTimer != nil {
-		t.Fatal("armTurnIdle armed timer while turnActive")
-	}
-	curGen := lp.idleGen
-	rt.mu.Unlock()
-	onIdleTimeout(h, rt, key, curGen)
-
-	rt.mu.Lock()
-	lp.turnActive = false
-	rt.closing[key] = true
-	rt.mu.Unlock()
-	armTurnIdle(h, rt, lp, time.Hour)
-	rt.mu.Lock()
-	if lp.idleTimer != nil {
-		t.Fatal("armTurnIdle armed timer while closing")
-	}
-	rt.mu.Unlock()
-	onIdleTimeout(h, rt, key, curGen)
-	rt.mu.Lock()
-	delete(rt.closing, key)
-	rt.mu.Unlock()
-	armTurnIdle(h, rt, lp, time.Hour)
-	rt.mu.Lock()
-	if lp.idleTimer == nil {
-		t.Fatal("armTurnIdle did not arm timer when idle and not closing")
-	}
-	rt.mu.Unlock()
-	if seamState(t, h.Sessions, key) != Waiting {
-		t.Fatal("guarded idle timeout closed session")
-	}
+	verifyIdleGenAndArmGuards(t, h, key)
 
 	// Spontaneous process exit while Waiting moves session to Dormant without crash or AuditKilled.
 	p.finishExit()
 	waitForState(t, h, key, Dormant)
+	assertSpontaneousIdleExit(t, h, rh)
+}
+
+func verifyIdleGenAndArmGuards(t *testing.T, h *Host, key SessionKey) {
+	t.Helper()
+	rt := stateOf(h)
+	onIdleTimeout(h, rt, SessionKey{Group: "missing"}, 1)
+	rt.mu.Lock()
+	lp := rt.procs[key]
+	gen1 := lp.idleGen
+	stopIdleLocked(lp)
+	rt.mu.Unlock()
+	// Stopping the idle timer invalidates gen1 and never wraps idleGen back to 0.
+	onIdleTimeout(h, rt, key, 0)
+	onIdleTimeout(h, rt, key, gen1)
+	verifyArmTurnIdleGuards(t, h, rt, lp, key, gen1)
+}
+
+func verifyArmTurnIdleGuards(t *testing.T, h *Host, rt *runtimePart, lp *liveProc, key SessionKey, gen1 uint64) {
+	t.Helper()
+	rt.mu.Lock()
+	lp.turnActive = true
+	curGen := lp.idleGen
+	rt.mu.Unlock()
+	armTurnIdle(h, rt, lp, time.Hour)
+	onIdleTimeout(h, rt, key, curGen)
+	rt.mu.Lock()
+	armedActive := lp.idleTimer != nil
+	lp.turnActive = false
+	rt.closing[key] = true
+	rt.mu.Unlock()
+	armTurnIdle(h, rt, lp, time.Hour)
+	onIdleTimeout(h, rt, key, curGen)
+	rt.mu.Lock()
+	armedClosing := lp.idleTimer != nil
+	delete(rt.closing, key)
+	rt.mu.Unlock()
+	armTurnIdle(h, rt, lp, time.Hour)
+	// Re-arming after stopIdleLocked advances idleGen instead of colliding with gen1.
+	onIdleTimeout(h, rt, key, gen1)
+	rt.mu.Lock()
+	rearmed := lp.idleTimer != nil
+	rt.mu.Unlock()
+	if [4]bool{armedActive, armedClosing, rearmed, seamState(t, h.Sessions, key) == Waiting} != [4]bool{false, false, true, true} {
+		t.Fatalf("idle guard mismatch: active=%v closing=%v rearmed=%v state=%s", armedActive, armedClosing, rearmed, seamState(t, h.Sessions, key))
+	}
+}
+
+func assertSpontaneousIdleExit(t *testing.T, h *Host, rh *runHome) {
+	t.Helper()
 	st := rh.waitCmd(t)
 	var ms proto.MemberStatus[proto.SystemCode]
-	if err := proto.Decode([]byte(st.raw), &ms); err != nil || ms.State != "dormant" || ms.Event != nil {
-		t.Fatalf("unexpected status on spontaneous idle exit: %s", st.raw)
-	}
-	if rec := seamRecord(t, h); rec != "" {
-		t.Fatalf("unexpected audit row on spontaneous idle exit: %q", rec)
+	err := proto.Decode([]byte(st.raw), &ms)
+	rec := seamRecord(t, h)
+	if [4]bool{err == nil, ms.State == "dormant", ms.Event == nil, rec == ""} != [4]bool{true, true, true, true} {
+		t.Fatalf("unexpected spontaneous idle exit: err=%v raw=%s audit=%q", err, st.raw, rec)
 	}
 }
 
@@ -975,24 +1018,7 @@ func TestMaxOpenBoundariesLongestWaitingAndBlockingWait(t *testing.T) {
 
 func checkSlotGuardOperands(t *testing.T) {
 	t.Helper()
-	// Also test closeWaitingSession when a Waiting row has no liveProc.
-	h3, _, drv3, _ := setupRunEnv(t)
-	putSetting(t, h3.Store, "max_open", "1")
-	kA := SessionKey{Group: runGroup1, Member: runAI1}
-	kB := SessionKey{Group: runGroup1, Member: runAI2}
-	seamIn(t, h3.Sessions, kA, Waiting)
-	h3.Sessions.Create(makeRunSession(kB, GroupSession, "repo"))
-	drv3.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
-		p := newFakeProc(ctx, l)
-		p.autoComplete = true
-		return p, nil
-	}
-	if err := Runner.Turn(t.Context(), h3, kB, "evict-proc-less", Turn{Kind: ItemsTurn}); err != nil {
-		t.Fatal(err)
-	}
-	if seamState(t, h3.Sessions, kA) != Dormant {
-		t.Fatal("proc-less Waiting session was not moved to Dormant")
-	}
+	checkProcLessWaitingClose(t)
 
 	h, _, drv, _ := setupRunEnv(t)
 	rt := stateOf(h)
@@ -1003,51 +1029,95 @@ func checkSlotGuardOperands(t *testing.T) {
 	h.Sessions.Create(makeRunSession(k2, GroupSession, "repo"))
 	h.Sessions.Create(makeRunSession(kOtherGrp, GroupSession, "repo"))
 
-	if _, _, ok := tryReserveSlot(h, rt, k1, -1); !ok {
-		t.Fatal("maxOpen=-1 did not default to 4 and acquire")
-	}
-	rt.releaseStarting(k1)
-	if _, _, ok := tryReserveSlot(h, rt, k1, 1); !ok {
-		t.Fatal("expected first slot reservation to succeed")
-	}
-	if _, waitCh, ok := tryReserveSlot(h, rt, k2, 1); ok || waitCh == nil {
-		t.Fatal("rt.starting[k1] did not count as open in countOpenLocked")
-	}
-	rt.releaseStarting(k1)
+	checkReserveSlotStartingAndGroups(t, h, rt, k1, k2, kOtherGrp)
+	drv.proc(0).emit(Event{Kind: TurnEnded, Status: "completed"})
+	waitForState(t, h, k1, Waiting)
+	checkWaitingVictimGuards(t, h, rt, k1)
+}
 
+func checkProcLessWaitingClose(t *testing.T) {
+	t.Helper()
+	h, rh, drv, _ := setupRunEnv(t)
+	putSetting(t, h.Store, "max_open", "1")
+	kA := SessionKey{Group: runGroup1, Member: runAI1}
+	kB := SessionKey{Group: runGroup1, Member: runAI2}
+	h.Sessions.Create(makeRunSession(kA, GroupSession, "repo"))
+	h.Sessions.Move(kA, Dormant, Working)
+	h.Sessions.Move(kA, Working, Waiting)
+	h.Sessions.Create(makeRunSession(kB, GroupSession, "repo"))
+	drv.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
+		p := newFakeProc(ctx, l)
+		p.autoComplete = true
+		return p, nil
+	}
+	if err := Runner.Turn(t.Context(), h, kB, "evict-proc-less", Turn{Kind: ItemsTurn}); err != nil {
+		t.Fatal(err)
+	}
+	evictedCmd := rh.waitCmd(t)
+	assertMemberStatusCmd(t, rh, "working", "")
+	waitForState(t, h, kB, Waiting)
+	assertMemberStatusCmd(t, rh, "waiting", "")
+	if [3]any{seamState(t, h.Sessions, kA), evictedCmd.payload["id"], evictedCmd.payload["state"]} != [3]any{Dormant, runAI1, "dormant"} {
+		t.Fatalf("proc-less eviction: state=%s cmd=%v", seamState(t, h.Sessions, kA), evictedCmd.payload)
+	}
+	// Single reader: this check on the test goroutine.
+	rt := stateOf(h)
+	rt.mu.Lock()
+	chAfter := rt.changed
+	rt.mu.Unlock()
+	closeWaitingSession(h, rt, kA)
+	closeWaitingSession(h, rt, SessionKey{Group: "missing"})
+	select {
+	case <-chAfter:
+		t.Fatal("closeWaitingSession notified changed when Move failed or session was missing")
+	default:
+	}
+	if len(rh.snapshotCmds()) != 3 {
+		t.Fatalf("unexpected extra member status commands: %d", len(rh.snapshotCmds()))
+	}
+}
+
+func checkReserveSlotStartingAndGroups(t *testing.T, h *Host, rt *runtimePart, k1, k2, kOtherGrp SessionKey) {
+	t.Helper()
+	_, _, okNeg := tryReserveSlot(h, rt, k1, -1)
+	rt.releaseStarting(k1)
+	_, _, okFirst := tryReserveSlot(h, rt, k1, 1)
+	_, waitCh, okSecond := tryReserveSlot(h, rt, k2, 1)
+	rt.releaseStarting(k1)
+	if [4]bool{okNeg, okFirst, okSecond, waitCh != nil} != [4]bool{true, true, false, true} {
+		t.Fatalf("slot reservation mismatch: neg=%v first=%v second=%v waitCh=%v", okNeg, okFirst, okSecond, waitCh != nil)
+	}
 	if err := Runner.Turn(t.Context(), h, k1, "run1", Turn{Kind: ItemsTurn}); err != nil {
 		t.Fatal(err)
 	}
 	if err := Runner.Turn(t.Context(), h, kOtherGrp, "run-other-group", Turn{Kind: ItemsTurn}); err != nil {
 		t.Fatalf("same AI in different group refused as busy: %v", err)
 	}
-	drv.proc(0).emit(Event{Kind: TurnEnded, Status: "completed"})
-	waitForState(t, h, k1, Waiting)
+}
 
+func checkWaitingVictimGuards(t *testing.T, h *Host, rt *runtimePart, k1 SessionKey) {
+	t.Helper()
 	rt.mu.Lock()
 	rt.closing[k1] = true
-	if longestWaitingLocked(rt, h.Sessions.All()) != nil {
-		t.Fatal("closing session selected as waiting victim")
-	}
+	closingVictim := longestWaitingLocked(rt, h.Sessions.All())
 	rt.mu.Unlock()
 	closeWaitingSession(h, rt, k1)
-	if seamState(t, h.Sessions, k1) != Waiting {
-		t.Fatal("closeWaitingSession moved an already-closing session")
-	}
+	closingState := seamState(t, h.Sessions, k1)
+
 	rt.mu.Lock()
 	delete(rt.closing, k1)
 	rt.procs[k1].turnActive = true
-	if longestWaitingLocked(rt, h.Sessions.All()) != nil {
-		t.Fatal("turnActive session selected as waiting victim")
-	}
+	activeVictim := longestWaitingLocked(rt, h.Sessions.All())
 	rt.mu.Unlock()
 	closeWaitingSession(h, rt, k1)
-	if seamState(t, h.Sessions, k1) != Waiting {
-		t.Fatal("closeWaitingSession moved a turnActive session")
-	}
+	activeState := seamState(t, h.Sessions, k1)
+
 	rt.mu.Lock()
 	rt.procs[k1].turnActive = false
 	rt.mu.Unlock()
+	if [4]bool{closingVictim == nil, closingState == Waiting, activeVictim == nil, activeState == Waiting} != [4]bool{true, true, true, true} {
+		t.Fatalf("victim guard failed: closingVictim=%v closingState=%s activeVictim=%v activeState=%s", closingVictim, closingState, activeVictim, activeState)
+	}
 }
 
 func TestCloseTimeoutOnAllPathsAuditAndC6SwitchOrdering(t *testing.T) {

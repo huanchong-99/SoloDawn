@@ -158,7 +158,7 @@ the owner of the failing file.
 | I-8 | 4 | The web client against a real node in three browsers; the smoke scenario of E-0 | A1.3, A1.11 to A1.13 (browser side) | `web/e2e/connect.spec.ts` | E-0, N-4, W-1 to W-4, U-2, U-15 | A | M |
 | I-9 | 5 | F-14: the browser-side checks, one unit per milestone (E-M1 to E-M8) | every "as seen" above | `web/e2e/m<n>.spec.ts` | I-2 to I-8, U-1 to U-15 | A | 8 × M |
 | I-10 | 5 | M8: install, pair, service, update, rendezvous by one command | A8.1 to A8.4 | `features/m8*` | N-4 to N-7, RV-1, HM-17 | A | M |
-| I-11 | 6 | B-26: the full pass on Windows, macOS and Linux, one session per system; the measurements; the printed list for the owner's live run. One session owns the CI matrix; each system writes its own report. The live list handed to the owner: A3.8, A4.1 (second half), A4.10, A7.1, A7.2, A7.8 and the device runs of A8.5 | A8.5, A8.6 | `docs/decisions/` report, CI matrix | I-2 to I-10, I2-1, I2-2, I3-1 | A | 3 × M |
+| I-11 | 6 | B-26: the full pass on Windows, macOS and Linux, one session per system; the measurements; the printed list for the owner's live run. One session owns the CI matrix; each system writes its own report. The live list handed to the owner: A3.8, A4.1 (second half, including `AskUserQuestion` reaching `approve` under each permission mode and the `updatedInput.answers` reply being honoured), A4.10, A7.1, A7.2, A7.8 and the device runs of A8.5 | A8.5, A8.6 | `docs/decisions/` report, CI matrix | I-2 to I-10, I2-1, I2-2, I3-1 | A | 3 × M |
 
 ## 7. Spikes left
 
