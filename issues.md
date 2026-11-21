@@ -6,6 +6,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-21 · limitation · `Sessions` has no `sync`, `fetch` or `ack` handlers until the home units and runtime wire them
+
+- Symptom: inbound `ctl` requests for `sync` and `fetch` are answered `bad_request` ("unknown ctl request") and `ack` pushes are dropped on a bare `Sessions` hub (`internal/node/session.go`, `NewSessions`), and `host.info`, `pair.browser` and `settings.set` are not registered until unit N-3.
+- Cause: `Sessions` provides the `Requests`, `Pushes` and `Commands` tables, while `sync` (`HM-2`), `fetch` (`HM-3`), `ack` (`HM-7`), the pairing and host-info handlers (`N-3`) and runtime assembly (`N-4`) are separate units.
+- Status: open until `HM-2`, `HM-3`, `HM-7`, `N-3` and `N-4` populate those tables.
+
+### 2026-11-21 · limitation · `home.Loop` keeps the `Owner` it was started with across adoption
+
+- Symptom: when an unowned node starts `home.Loop` with `Owner: ""` and is later adopted over a pairing `ctl` session, `Logs.Owner()` becomes the adopter's user id (`internal/node/devlog.go`, `dvlAdopt`), while the running `home.Loop` still has `LoopConfig.Owner == ""` (`internal/home/run.go:65`) and refuses `group create` until the loop is restarted.
+- Cause: `LoopConfig.Owner` is read once when `StartLoop` constructs group states (`internal/home/run.go:175`, `:198`).
+- Status: open until `N-4`, which supplies `SessionConfig.OnAdopt` (`internal/node/session.go:52`) to close and recreate `home.Loop` with the adopted owner.
+
+### 2026-11-21 · limitation · `Sessions` implements only the server side of a `ctl` connection
+
+- Symptom: a host on one node has no outgoing `ctl` client session yet to a home on another node (sending `hello` with `kind: "host"`, reading `welcome`, exchanging `devlog` both ways, and passing pushes to `Host.Push`), so cross-node AI sessions (`A3.3`, unit `I-6`) have no transport path.
+- Cause: `internal/node/session.go` (`N-2`) serves inbound `ctl` connections (`Serve`); the client side of a `ctl` session was split out by the coordinator's decision of 2026-11-21.
+- Status: open for unit `N-2b` (`internal/node/client.go`), wired into the node runtime by `N-4`.
+
 ### 2026-11-21 · deviation · The local link routes only `cmd` requests until `sync`, `fetch` and `ack` land
 
 - Symptom: on `LocalLink`, a `sync` or `fetch` request from the host is answered `bad_request`, and an `ack` push is dropped; tests subscribe to row pushes through `LocalLink.Watch` (`internal/node/local.go:66`), which is temporary until `sync` is routed to `home.Loop`.
