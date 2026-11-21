@@ -394,12 +394,7 @@ func TestHomeLoopIntegrationAndDevlogForwarding(t *testing.T) {
 				from.Send(proto.ErrorResponse{Re: id, Err: proto.WireError{Code: "bad_request", Message: "bad sync"}})
 				return nil, nil
 			}
-			seq, ok := loop.Watch(conn, q.Group, q.StateOnly)
-			if !ok {
-				from.Send(proto.ErrorResponse{Re: id, Err: proto.WireError{Code: "forbidden", Message: "not served"}})
-				return nil, nil
-			}
-			from.Send(proto.Synced{Type: "synced", Success: proto.Success{Re: id, OK: true}, Group: q.Group, Seq: seq})
+			loop.Sync(conn, q)
 			return nil, nil
 		},
 	}
@@ -444,7 +439,7 @@ func TestHomeLoopIntegrationAndDevlogForwarding(t *testing.T) {
 	if !strings.Contains(string(inboxRaw), `"Why":"mention"`) {
 		t.Fatalf("expected inbox item on host hello, got %s", inboxRaw)
 	}
-	ch.push(proto.Sync{Request: proto.Request{Type: "sync", ID: 2}, Group: groupID, Since: 0, StateOnly: true})
+	ch.push(proto.Sync{Request: proto.Request{Type: "sync", ID: 2}, Group: groupID, Since: 3, StateOnly: true})
 	var synced proto.Synced
 	if err := proto.Decode(ch.next(t), &synced); err != nil || synced.Re != 2 {
 		t.Fatalf("host sync = %+v (%v)", synced, err)

@@ -70,14 +70,25 @@ func (g *runGroup) detach(c *Conn) {
 	g.publish()
 }
 
-// watch subscribes a connection to the rows of the group.
-func (g *runGroup) watch(c *Conn, stateOnly bool) (seq int64, ok bool) {
+// watch subscribes a seated connection to the rows of the group.
+func (g *runGroup) watch(c *Conn, stateOnly bool) {
 	seat := g.seats[c]
-	if seat == nil || g.state.Group.ID == "" || !g.state.Serves(c.device) {
-		return 0, false
-	}
 	seat.watching, seat.stateOnly = true, stateOnly
-	return g.state.Seq, true
+}
+
+// runReader checks that a group exists and serves device on its home surface.
+func runReader(s *State, device string) *Refusal {
+	if s.Group.ID == "" {
+		return &Refusal{"not_found", "this node is not home to the group"}
+	}
+	if !s.Serves(device) {
+		return &Refusal{"forbidden", "the connection's device may not read this group"}
+	}
+	return nil
+}
+
+func runErr(re int64, code, msg string) proto.ErrorResponse {
+	return proto.ErrorResponse{Re: re, Err: proto.WireError{Code: code, Message: msg}}
 }
 
 // command applies one cmd in its transaction and answers it.
@@ -88,7 +99,7 @@ func (g *runGroup) command(c *Conn, re int64, env proto.Envelope) {
 	})
 	if err != nil {
 		g.loop.cfg.Report(fmt.Errorf("group %s, a command of %s: %w", g.state.ID, c.device, err))
-		c.send(proto.ErrorResponse{Re: re, Err: proto.WireError{Code: "internal", Message: "the home could not apply the command; the cause is in its log"}})
+		c.send(runErr(re, "internal", "the home could not apply the command; the cause is in its log"))
 		return
 	}
 	g.settle(res, now, func() { c.send(res.Frame(re)) })

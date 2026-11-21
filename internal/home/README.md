@@ -45,7 +45,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | connect a client | `loop.Attach(device, client)` returns its `*Conn`; `loop.Detach(conn)`; `conn.Gone()` |
 | hand in a `cmd` frame | `loop.Cmd(conn, re, env)`; the answer is sent to the connection |
 | answer a `hello` | `loop.Welcome(conn, build)`: `build` makes the `welcome` frame from the groups of the peer |
-| subscribe a connection to a group | `loop.Watch(conn, group, stateOnly)` |
+| read a group and subscribe (`sync`) | `loop.Sync(conn, req)`; queues `reset` when needed, `rows` and `synced`, then pushes changes after the cut |
 | send a host its inbox items, on every `hello` | `loop.Inbox(conn)` |
 | run the timers by hand, or tell the home of an event | `loop.Tick(now)`, `loop.Event(name, event)` |
 | move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
@@ -172,8 +172,9 @@ The task commands (`cmd_task.go`) take the names that start with `tsk`, their te
 test functions start with `TestTaskCmd`. The posts of HM-6 take the names that start with `post`,
 their tests too, and their test functions start with `TestPost`; the notes and `forget` take the
 names that start with `note`, their tests too, and their test functions start with `TestNote`.
-Device-log events (`ev_device.go`) take the names that start with `dev`, and their tests start
-with `TestDevice` and `dev`.
+Device-log events (`ev_device.go`) take the names that start with `dev`, and their tests start with
+`TestDevice` and `dev`. Sync takes the names that start with `syn`, its tests too, and its test
+functions start with `TestSync`; it exports `Loop.Sync`.
 
 ## The run loop
 
@@ -218,14 +219,14 @@ an empty result for a group the event does not concern.
 **Pushes** ([datachannel](../../planning/contracts/datachannel.md), sections 3, 4 and 6). After
 the answer, in this order:
 
-1. `rows`, to each connection that watches the group (`Watch`): all rows of the result, or with
+1. `rows`, to each connection that watches the group (`Sync`): all rows of the result, or with
    `state_only` the `group`, `member`, `device` and `task` rows, markers of those types included.
    A frame takes rows up to 61,376 bytes; the rest follows in further frames. A connection that
    would get no row gets no frame. A connection whose device the group no longer serves
    (`State.Serves`, on the state that holds the result) stops watching with that result and is
    not pushed its rows: a revoked device and a member who left read nothing more on a connection
    that is still open ([datachannel](../../planning/contracts/datachannel.md), section 8). It
-   watches again only through `Watch`.
+   watches again only through `Sync`.
 2. `groups`, to every connection that has had its welcome, when the result has `GroupsChanged`:
    the groups that exist and whose `State.Serves` holds for the connection's device, in the
    order of their ids, `[]` when there are none.
@@ -238,10 +239,6 @@ also orders the `groups` pushes; and a connection is pushed `groups` only once i
 welcome. So no `groups` push comes before the welcome, and none that is older than the welcome
 comes after it. A node calls it for every `hello`. `Groups(conn)` reads the same list without
 queuing anything; a frame built from it can be older than a push that is already queued.
-
-`Watch` is the subscription of `sync` without the rows before it: it returns the group's sequence
-number, and the connection is pushed every change after it. It refuses a group that does not
-exist, a device that `Serves` refuses, and a connection that is gone.
 
 **Inbox items.** An item is stored in the transaction of its result, for the host of its AI as
 that result leaves the member rows; an item for a member that is no AI fails the transaction.
@@ -291,8 +288,8 @@ logger, and no ticks but `Tick`. A connection goes through four entries, the sam
 2. For each frame the client sends, the entry of its type: for `hello`,
    `loop.Welcome(conn, build)`, where `build` gets the `groups` of the welcome and returns the
    whole frame from values the node has ready, and never a `Send` of the node's own, and after it `loop.Inbox(conn)` for a host;
-   `loop.Cmd(conn, re, env)` for `cmd`, with the `id` of the request as `re`; `sync`, `fetch` and
-   `ack` come with their units.
+   `loop.Cmd(conn, re, env)` for `cmd`, with the `id` of the request as `re`;
+   `loop.Sync(conn, req)` for `sync`; `fetch` and `ack` come with their units.
 3. The loop calls `client.Send(frame)` for every answer and push, one at a time, in order. The
    answer to a command is a frame like the others and comes after the frames queued before it.
    So a `Send` must not wait for something that the sender of a command holds while it waits for
@@ -307,21 +304,23 @@ worked out before it called `Welcome`, such as `time` and `addrs`. It takes no l
 nothing and calls nothing, the loop least of all; a `build` that waits for a lock of the node
 which another goroutine holds while it calls `Cmd` waits for ever. The loop calls `LoopConfig.Logs`, `Now`
 and `Report` on the goroutines of its groups, and `Logs` and `Now` also on the caller of `Cmd`:
-none of the three may wait for a lock that is held around a call of `Attach`, `Watch`, `Close`
-or `Cmd`, and none may call those. `Attach`, `Watch` and `Close` wait for the groups: they
-must not be called on the goroutine of a group, which is where a hook runs, or on the store's
-writer, which is where the function of a command, a timer, a handler, a `Disk` and a `Write.Put`
-run. A client's `Send` runs on the goroutine of its connection and may call every entry. A hook
-may start transactions of the store; what runs on the store's writer may not. The goroutine of a
-group waits for the store's writer and for nothing else, and what runs on the writer takes no
-lock of the loop: so no lock of a client, of a host's session or of the node can close a circle
-through the loop, as long as that code keeps to this paragraph.
+none of the three may wait for a lock that is held around a call of `Attach`, `Sync`, `Close` or
+`Cmd`, and none may call those. `Attach`, `Sync` and `Close` wait for the groups: they must not be
+called on the goroutine of a group, which is where a hook runs, or on the store's writer, which is
+where the function of a command, a timer, a handler, a `Disk` and a `Write.Put` run. A client's
+`Send` runs on the goroutine of its connection and may call every entry. A hook may start
+transactions of the store; what runs on the store's writer may not. The goroutine of a group waits
+for the store's writer and for nothing else, and what runs on the writer takes no lock of the loop:
+so no lock of a client, of a host's session or of the node can close a circle through the loop, as
+long as that code keeps to this paragraph.
 
 **For the files that build on the loop.** `loop.ask(group, f)` runs `f` on the goroutine of a
-group and waits for it; there `g.watch(conn, stateOnly)` subscribes, `g.transact` and `g.settle`
-write and finish a result, `g.deliver` sends items, and `conn.send(frame)` queues a frame behind
-the ones before it. `sync` takes its cut and subscribes in one such call. `runDisk` is the `Disk`
-of a transaction.
+group and waits for it; there `runReader(g.state, conn.device)` checks group existence and access,
+`runErr(re, code, msg)` builds an error answer, `g.watch(conn, stateOnly)` subscribes a seated
+connection, `g.transact` and `g.settle` write and finish a result, `g.deliver` sends items, and
+`conn.send(frame)` queues a frame behind the ones before it. Both `Loop.Sync` and `Loop.Fetch`
+take a typed request on `(conn, req)` and read their `store.Snapshot` on the goroutine of the
+group through `loop.ask`. `runDisk` is the `Disk` of a transaction.
 
 ## The task machine
 
@@ -513,11 +512,10 @@ this:
   `question` queue `mention` for each other mentioned AI in `mentions` order, and a main-line `text`
   from a person that mentions no AI queues `mention` for `Group.Secretary` when set.
 - **`note` and `forget`.** `note` is by a person or an AI; a non-null `task` that names no task in
-  `State.Tasks` is `not_found`, an `id` already held as a live note on disk is `conflict`, and the
-  `NoteRow` gets `ts` as signed (`c.Timestamp`). `forget` is by an admin only (`forbidden`); `r`
-  must be `note` or `msg` (`bad_request`); a missing or already forgotten row is `not_found`; a
-  `msg` whose `kind` is not `review` is `conflict`; otherwise a `GoneRow` (`gone: true`) replaces
-  it.
+  `State.Tasks` is `not_found`, and the `NoteRow` gets `ts` as signed (`c.Timestamp`). `forget` is
+  by an admin only (`forbidden`); `r` must be `note` or `msg` (`bad_request`); a missing or already
+  forgotten row is `not_found`; a `msg` whose `kind` is not `review` is `conflict`; otherwise a
+  `GoneRow` (`gone: true`) replaces it.
 
 ## Device-log events
 
@@ -527,6 +525,33 @@ the node for one person ([envelope](../../planning/contracts/envelope.md), secti
 `State.Owner`, appends rows whose `ver` exceeds the entries already held in `State.Logs[State.Owner]`,
 and sets `Result.GroupsChanged` when an `Online` device's access (`State.Serves`) changes between
 served and unserved.
+
+## Sync
+
+`sync.go` answers `sync` requests on `Loop.Sync(conn, req)` with a typed `proto.Sync`
+([datachannel](../../planning/contracts/datachannel.md) section 4;
+[sync](../../planning/flows/sync.md) sections A, C and E).
+
+- **Checks.** A group that has no goroutine or whose `group` row does not exist is answered
+  `not_found`; a connection whose device `State.Serves` refuses is answered `forbidden`
+  (`runReader`); a connection that has already detached receives nothing.
+- **The cut.** Like `Loop.Fetch`, `Loop.Sync` runs its read on the goroutine of the group through
+  `loop.ask`. There it opens a `store.Snapshot`, reads at `S = snap.Seq`, closes the snapshot,
+  queues `reset` (when resetting), `rows` batched to 61,376 bytes by `runBatches` (no frame when
+  there are zero rows) and `synced {re, ok: true, g, seq: S}`, and then calls
+  `g.watch(conn, req.StateOnly)` before returning. Every change committed after `S` runs as a later
+  job of the group's goroutine, so its `rows` push is queued strictly after `synced` and is neither
+  missing nor sent twice. Any store error (`Snapshot`, `DeltaCount`, delta or cold read) is passed
+  to `LoopConfig.Report` and answered `internal` without subscribing the connection.
+- **Delta or reset.** Where the contract does not state what happens when `since > S` (for example
+  a client cursor from before a store rebuild), `sync` resets so stale higher-numbered rows are
+  dropped. A delta is sent when `0 < since <= S`, `since >= purged` and `DeltaCount(since, S) <= 1000`:
+  all rows in `(since, S]` in increasing `seq` order, `gone` markers included, or those whose `r`
+  is in `runStateRows` (`group`, `member`, `device`, `task`, markers included) when `state_only` is
+  true, sharing one rule with live pushes. Otherwise `sync` first queues `reset` (including for
+  `since <= 0`), then for `state_only` sends `StateRows`, and for a full reader merges `StateRows`,
+  `Pending` and the newest 50 main-line messages (`PageThread(nil, 0, 50)`) without duplicates in
+  increasing `seq` order.
 
 ## Known limitations
 
@@ -594,3 +619,10 @@ acceptance tests A2.1 (message and item push across connected browsers and a hos
 
 `ev_device_test.go` covers every branch and boundary of `Events["device"]`, including ignored event
 types, empty and non-owner slices, version boundaries and online/offline `GroupsChanged` transitions.
+
+`sync_test.go` covers `Loop.Sync` against an in-memory and file-backed store: wire frame shapes,
+cold content deduplication and `seq` order, exact boundaries of `since`, `purged` and the 1,000-row
+delta limit, 60 KiB batching, `state_only`, concurrent writes while the first read is in flight,
+refusals, detached connections and store failures; `run_internal_test.go` covers `runReader` and
+`runErr`. `features/home_sync.feature` holds acceptance test A2.2 (delta, 1,500-row reset with
+newest 50 and an older pending card, purge-mark reset, `state_only`) and the first-read cut of A2.7.

@@ -38,7 +38,7 @@ kind: reference
 `AttachLocal(h, loop)` attaches `h.Key.ID()` to `loop` as a `home.Client`, registers the `*LocalLink` on `h` via `h.Attach`, and calls `loop.Inbox` for the node's device.
 
 - **Framing.** Every frame in either direction is encoded as JSON without HTML escaping. `host.Command` checks the `ctl` message limit before sending, and the home loop splits `rows` pushes within the limit ([conventions.md](../../planning/contracts/conventions.md) section 4).
-- **Requests (`Host` to `Home`).** `Request` assigns an increasing request `id`, sends the built frame, and waits on a per-request single-reader channel until the matching `re` arrives, `Done()` closes, or `ctx` is canceled. `cmd` requests dispatch to `loop.Cmd`; any other frame carrying an integer `id` is answered `bad_request` ([datachannel.md](../../planning/contracts/datachannel.md) section 2), and frames without an `id` are dropped.
+- **Requests (`Host` to `Home`).** `Request` assigns an increasing request `id`, sends the built frame, and waits on a per-request single-reader channel until the matching `re` arrives, `Done()` closes, or `ctx` is canceled. `cmd` and `sync` requests dispatch to `loop.Cmd` and `loop.Sync`; any other frame carrying an integer `id` is answered `bad_request` ([datachannel.md](../../planning/contracts/datachannel.md) section 2), and frames without an `id` are dropped.
 - **Answers and pushes (`Home` to `Host`).** Frames carrying `re` wake the waiting `Request` call or are dropped if none waits; frames without `re` are delivered to `h.Push(device, frame)`. `h.Push` runs on the loop's send goroutine for this connection, so a `Pushes` handler must not wait for an answer from the same home, because that answer is sent by the goroutine it blocks.
 - **Lock order and shutdown.** `LocalLink.mu` guards only the request counter and waiting map and is never held while calling into `host` or `home`. The only way to lose the local link is `Close()`, which calls `loop.Detach`, closes `Done()` (`conn.Gone()`), and wakes any waiting `Request` with `io.EOF`.
 
@@ -76,7 +76,7 @@ Populate the maps on `*Sessions` before accepting connections:
 - `solodawn pair` does not yet start a stopped node ([issues.md](../../issues.md)).
 - `Updater` leaves concurrency around `Busy`/`Status` and in-place `exec` restart to `N-4` ([issues.md](../../issues.md)).
 - On macOS, Unix socket paths are limited to 103 bytes, so tests that bind `sock` under `HOME` use `/tmp` ([issues.md](../../issues.md)).
-- `LocalLink` routes `cmd` requests and exposes a temporary `Watch` method for row subscriptions until `HM-2` merges; `sync`, `fetch` and `ack` on `LocalLink` wait for `HM-2`, `HM-3` and `HM-7` ([issues.md](../../issues.md)).
+- `LocalLink` routes `cmd` and `sync` requests; `fetch` and `ack` on `LocalLink` wait for `HM-3` and `HM-7` ([issues.md](../../issues.md)).
 - Cross-node `ctl` links between hosts and remote homes wait for `N-2b` and `N-4`.
 
 ## Verification and sources

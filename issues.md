@@ -36,11 +36,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `internal/node/session.go` (`N-2`) serves inbound `ctl` connections (`Serve`); the client side of a `ctl` session was split out by the coordinator's decision of 2026-11-21.
 - Status: open for unit `N-2b` (`internal/node/client.go`), wired into the node runtime by `N-4`.
 
-### 2026-11-21 · deviation · The local link routes only `cmd` requests until `sync`, `fetch` and `ack` land
+### 2026-11-21 · deviation · The local link routes only `cmd` and `sync` until `fetch` and `ack` land
 
-- Symptom: on `LocalLink`, a `sync` or `fetch` request from the host is answered `bad_request`, and an `ack` push is dropped; tests subscribe to row pushes through `LocalLink.Watch` (`internal/node/local.go:66`), which is temporary until `sync` is routed to `home.Loop`.
-- Cause: `home.Loop` on `rebuild` exposes `Cmd` and `Watch` only (`internal/home/run.go:313`, `:357`); `Sync` (HM-2, #205), `Fetch` (HM-3) and `Ack` with `inbox` frames (HM-7) are built in separate units. `LocalLink.toHome` (`internal/node/local.go:127`) dispatches `cmd` to `Loop.Cmd` and answers other requests `bad_request` per `planning/contracts/datachannel.md` section 2.
-- Status: open. Route `sync` to `Loop` and delete `LocalLink.Watch` once HM-2 (#205) merges; wire `fetch` and `ack` once HM-3 and HM-7 merge (N-4 / I-1 / I-3).
+- Symptom: on `LocalLink`, a `fetch` request from the host is answered `bad_request`, and an `ack` push is dropped.
+- Cause: `LocalLink.toHome` (`internal/node/local.go`) dispatches `cmd` to `Loop.Cmd` and `sync` to `Loop.Sync`, while `Fetch` (HM-3) and `Ack` with `inbox` frames (HM-7) are built in separate units; other requests carrying `id` are answered `bad_request` per `planning/contracts/datachannel.md` section 2.
+- Status: `sync` routed to `Loop.Sync` and temporary `LocalLink.Watch` removed in HM-2 (#205); open for `fetch` and `ack` once HM-3 and HM-7 merge (N-4 / I-1 / I-3).
 
 ### 2026-11-21 · deviation · Dead `cause` path in `internal/home` and `internal/store`
 

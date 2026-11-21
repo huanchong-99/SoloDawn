@@ -151,6 +151,7 @@ func (r *localRig) payload(fields string) string {
 }
 
 type pushCapture struct {
+	resets   chan proto.Reset
 	rowsRaw  chan string
 	rows     chan proto.Rows
 	attached chan string
@@ -160,9 +161,16 @@ func capturePushes(t *testing.T) *pushCapture {
 	t.Helper()
 	// Single reader per channel: the test that called capturePushes.
 	cap := &pushCapture{
+		resets:   make(chan proto.Reset, 4),
 		rowsRaw:  make(chan string, 4),
 		rows:     make(chan proto.Rows, 4),
 		attached: make(chan string, 2),
+	}
+	host.Pushes["reset"] = func(_ *host.Host, from string, raw json.RawMessage) {
+		var frame proto.Reset
+		if from != "" && proto.Decode(raw, &frame) == nil {
+			cap.resets <- frame
+		}
 	}
 	host.Pushes["rows"] = func(_ *host.Host, from string, raw json.RawMessage) {
 		var frame proto.Rows
@@ -175,6 +183,7 @@ func capturePushes(t *testing.T) *pushCapture {
 		cap.attached <- device
 	}
 	t.Cleanup(func() {
+		delete(host.Pushes, "reset")
 		delete(host.Pushes, "rows")
 		delete(host.Attached, "local_test")
 	})
@@ -199,10 +208,7 @@ func TestLocalLinkCommandAndPushCrossLink(t *testing.T) {
 	mustNoErr(t, proto.Decode(ans, &created))
 	mustEqual(t, created.Num, 7)
 
-	seq, watched := link.Watch(localGroupID, false)
-	mustEqual(t, []any{seq, watched}, []any{int64(2), true})
-	missSeq, missOK := link.Watch("missing-group", true)
-	mustEqual(t, []any{missSeq, missOK}, []any{int64(0), false})
+	checkLocalSync(t, ctx, link, cap)
 
 	_, err = rig.host.Command(ctx, rig.device.ID(), rig.payload(`"t":"note","text":"hello <&>"`))
 	mustNoErr(t, err)
@@ -212,6 +218,29 @@ func TestLocalLinkCommandAndPushCrossLink(t *testing.T) {
 	var hostErr *host.Error
 	mustEqual(t, errors.As(err, &hostErr), true)
 	mustEqual(t, *hostErr, host.Error{Code: "conflict", Message: "note refused"})
+}
+
+func checkLocalSync(t *testing.T, ctx context.Context, link *LocalLink, cap *pushCapture) {
+	t.Helper()
+	ans, err := link.Request(ctx, func(id int64) any {
+		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: localGroupID, Since: 0, StateOnly: false}
+	})
+	mustNoErr(t, err)
+	var synced proto.Synced
+	mustNoErr(t, proto.Decode(ans, &synced))
+	mustEqual(t, []any{synced.Group, synced.Seq}, []any{localGroupID, int64(2)})
+	mustEqual(t, recvFrame(t, cap.resets).Group, localGroupID)
+	recvFrame(t, cap.rowsRaw)
+	initial := recvFrame(t, cap.rows)
+	mustEqual(t, []any{initial.Group, len(initial.Rows)}, []any{localGroupID, 2})
+
+	missAns, err := link.Request(ctx, func(id int64) any {
+		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: "missing-group", Since: 0, StateOnly: true}
+	})
+	mustNoErr(t, err)
+	var missErr proto.ErrorResponse
+	mustNoErr(t, proto.Decode(missAns, &missErr))
+	mustEqual(t, missErr.Err.Code, "not_found")
 }
 
 func checkNotePush(t *testing.T, raw string, frame proto.Rows) {
@@ -294,7 +323,12 @@ func checkBadRequests(t *testing.T, rig *localRig, link *LocalLink) {
 	var ids []int64
 	cases := []func(int64) any{
 		func(id int64) any { ids = append(ids, id); return map[string]any{"t": "cmd", "id": id} },
-		func(id int64) any { ids = append(ids, id); return map[string]any{"t": "sync", "id": id, "env": env} },
+		func(id int64) any { ids = append(ids, id); return map[string]any{"t": "nope", "id": id, "env": env} },
+		func(id int64) any { ids = append(ids, id); return map[string]any{"t": "sync", "id": id} },
+		func(id int64) any {
+			ids = append(ids, id)
+			return map[string]any{"t": "nope", "id": id, "g": localGroupID, "since": 0, "state_only": false}
+		},
 		func(id int64) any { ids = append(ids, id); return map[string]any{"id": id} },
 	}
 	for _, build := range cases {
@@ -304,7 +338,7 @@ func checkBadRequests(t *testing.T, rig *localRig, link *LocalLink) {
 		mustNoErr(t, proto.Decode(ans, &errResp))
 		mustEqual(t, errResp.Err.Code, "bad_request")
 	}
-	mustEqual(t, ids, []int64{3, 4, 5})
+	mustEqual(t, ids, []int64{3, 4, 5, 6, 7})
 }
 
 func checkClientInbound(t *testing.T, link *LocalLink, cap *pushCapture) {
