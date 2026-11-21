@@ -197,8 +197,6 @@ func encodeCtl(frame any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(frame); err != nil {
-		return nil, err
-	}
-	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+	err := enc.Encode(frame)
+	return bytes.TrimSuffix(buf.Bytes(), []byte{'\n'}), err
 }

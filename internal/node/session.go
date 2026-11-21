@@ -135,7 +135,7 @@ func (s *Sessions) sesLeave(c *sesConn) {
 	c.raw.Close()
 }
 
-func (s *Sessions) sesDispatch(ctx context.Context, c *sesConn, data json.RawMessage) {
+func sesOpenFrame(c *sesConn, data json.RawMessage) (string, *int64, bool) {
 	var f struct {
 		Type *string `json:"t,omitempty"`
 		ID   *int64  `json:"id,omitempty"`
@@ -143,13 +143,21 @@ func (s *Sessions) sesDispatch(ctx context.Context, c *sesConn, data json.RawMes
 	}
 	if proto.Decode(data, &f) != nil || f.Type == nil || f.Re != nil {
 		c.sesRefuse(data)
+		return "", nil, false
+	}
+	return *f.Type, f.ID, true
+}
+
+func (s *Sessions) sesDispatch(ctx context.Context, c *sesConn, data json.RawMessage) {
+	typ, id, ok := sesOpenFrame(c, data)
+	if !ok {
 		return
 	}
-	if f.ID == nil {
-		s.sesPush(ctx, c, *f.Type, data)
+	if id == nil {
+		s.sesPush(ctx, c, typ, data)
 		return
 	}
-	s.sesRequest(ctx, c, *f.ID, *f.Type, data)
+	s.sesRequest(ctx, c, *id, typ, data)
 }
 
 func (s *Sessions) sesPush(ctx context.Context, c *sesConn, typ string, data json.RawMessage) {
@@ -466,7 +474,7 @@ func sesAnswerFields(res any) (map[string]json.RawMessage, error) {
 	if res == nil {
 		return fields, nil
 	}
-	raw, err := dvlEncode(res)
+	raw, err := encodeCtl(res)
 	if err != nil {
 		return nil, err
 	}

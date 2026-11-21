@@ -210,7 +210,16 @@ func (w *nodeSessionWorld) dialNode(clientKey identity.Key) (*peer.Peer, *peer.C
 	case <-w.ctx.Done():
 		return nil, nil, w.ctx.Err()
 	case <-conn.Ready():
+		go drainBrowserConn(w.ctx, conn)
 		return cp, conn, nil
+	}
+}
+
+func drainBrowserConn(ctx context.Context, conn *peer.Connection) {
+	for {
+		if _, err := conn.Read(ctx); err != nil {
+			return
+		}
 	}
 }
 

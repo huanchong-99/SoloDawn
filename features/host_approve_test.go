@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -87,6 +88,9 @@ func (f *approveAccHome) recordCmdLocked(req any) proto.ID {
 		ID   proto.ID `json:"n"`
 	}
 	json.Unmarshal([]byte(cmd.Env.Payload), &hdr)
+	if hdr.Kind != "approval" && hdr.Kind != "decision" {
+		return ""
+	}
 	f.appendPostLocked(hdr.Kind, []byte(cmd.Env.Payload))
 	return hdr.ID
 }
@@ -188,7 +192,7 @@ type approveAccWorld struct {
 	h             *host.Host
 	fakeHome      *approveAccHome
 	runner        *approveAccRunner
-	nowMS         int64
+	nowMS         atomic.Int64
 	nextItemID    int64
 	sessKey       host.SessionKey
 	cliName       string
@@ -200,7 +204,7 @@ type approveAccWorld struct {
 }
 
 func newApproveAccWorld(cleanup func(func())) *approveAccWorld {
-	return &approveAccWorld{
+	w := &approveAccWorld{
 		cleanup:    cleanup,
 		owner1:     accSeedKey(11),
 		owner2:     accSeedKey(12),
@@ -210,14 +214,14 @@ func newApproveAccWorld(cleanup func(func())) *approveAccWorld {
 		memberID:   string(accMakeID(22)),
 		taskID:     string(accMakeID(23)),
 		humanID:    string(accMakeID(24)),
-		nowMS:      1_763_600_000_000,
 		nextItemID: 500,
 	}
+	w.nowMS.Store(1_763_600_000_000)
+	return w
 }
 
 func (w *approveAccWorld) clock() time.Time {
-	w.nowMS += 500
-	return time.UnixMilli(w.nowMS)
+	return time.UnixMilli(w.nowMS.Add(500))
 }
 
 func (w *approveAccWorld) seedGroupRows(target *host.Host, waitS int, secretary bool) {
@@ -249,7 +253,7 @@ func (w *approveAccWorld) buildCardRow(card proto.ID, kind string, state proto.C
 	return proto.MsgRow{
 		RowHeader: proto.RowHeader{Type: "msg", ID: string(card), Seq: 10},
 		Pos:       10, Group: w.groupID, Thread: thread, Main: true, By: w.memberID,
-		Kind: kind, Timestamp: w.nowMS, Mentions: []string{},
+		Kind: kind, Timestamp: w.nowMS.Load(), Mentions: []string{},
 		Body: json.RawMessage(`{}`), State: &state,
 	}
 }
@@ -272,14 +276,14 @@ func (w *approveAccWorld) buildDecidedInbox(card proto.ID, kind string, state pr
 func (w *approveAccWorld) buildApprovalDecidedRaw(signer identity.Key, card proto.ID, status string) json.RawMessage {
 	actEnv := signer.Sign(`{"t":"act"}`)
 	by := w.humanID
-	at := w.nowMS
+	at := w.nowMS.Load()
 	return w.buildDecidedInbox(card, "approval", proto.CardState{Status: status, By: &by, At: &at, Act: &actEnv})
 }
 
 func (w *approveAccWorld) buildDecisionDecidedRaw(signer identity.Key, card proto.ID, choice, text *string) json.RawMessage {
 	actEnv := signer.Sign(`{"t":"act"}`)
 	by := w.humanID
-	at := w.nowMS
+	at := w.nowMS.Load()
 	return w.buildDecidedInbox(card, "decision", proto.CardState{
 		Status: "decided", By: &by, At: &at, Choice: choice, Text: text, Act: &actEnv,
 	})
@@ -652,7 +656,7 @@ func (w *approveAccWorld) stepRestartAndMarkApproved() error {
 	w.seedGroupRows(w.h, 1, false)
 	actEnv := w.owner2.Sign(`{"t":"act"}`)
 	by := w.humanID
-	at := w.nowMS
+	at := w.nowMS.Load()
 	w.fakeHome.putCard(w.buildCardRow(post.Nonce, "approval", proto.CardState{
 		Status: "approved", By: &by, At: &at, Act: &actEnv,
 	}))
