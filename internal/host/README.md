@@ -1,5 +1,5 @@
 ---
-description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the session runtime, the offline scripted Claude Code and Codex processes for host integration tests, and the API of the host workspaces and Git commands.'
+description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the session runtime, the offline scripted Claude Code and Codex processes for host integration tests, the API of the host workspaces and Git commands, and the MCP server and stdio shim.'
 kind: reference
 ---
 
@@ -22,6 +22,7 @@ A unit never calls into the file of a unit built beside it. It registers in a ta
 | a session | `h.Sessions`: `Create`, `Get`, `All`, `Update`, `Move`, `End` |
 | a session change that commits with other rows | `h.Sessions.Write(func(tx *Tx) error { … })`, then `tx.Move` and the like, and `h.Audit(tx.Tx, …)` |
 | who calls a tool | `h.Sessions.Admit(key, level, interactive)` issues the token of a CLI process, `Caller(token)` reads it, `Forget(token)` drops it when the process has exited |
+| the MCP server of a session | `h.ServeMCP(ctx, token, in, out)` on the node's local socket after `{"mcp":"<token>"}`; `RunShim(args, dial, stdin, stdout, stderr)` for `solodawn mcp --token <t>` |
 | the turn a tool is called in | `Caller.Turn`: its number, its kind (`HandbackTurn` for a hand-back), the thread of its last item, the depth of the call it answers |
 | whether a tool call or a permission request is open | `done := h.Sessions.Calling(key)` around it; `h.Sessions.Calls(key)` |
 | the state rows of a group | `h.Rows`: `Put` and `Reset` for the unit that handles `rows` and `reset`, `Get` and `Of` for everyone |
@@ -133,3 +134,12 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 - A create works out from the branches whether a task is new, taken over or returning; there is no takeover flag. A slug the home cannot produce, or a `num` below 1, is refused.
 - `cloneLock(repo)` is the one lock per clone, keyed by its real path. Workspace functions and `ReviewedMerge` take it.
 - `HostedChecksToResume(tasks, ais)` selects the `cloud_check` tasks a restarted node polls again, deriving each `Branch` (`task/<num>-<slug>`) from `Num` and `Slug` via `taskName` and skipping rows `taskName` refuses.
+
+# MCP server and stdio shim
+
+The rules are in [mcp-tools.md](../../planning/contracts/mcp-tools.md) and [local.md](../../planning/contracts/local.md) sections 1 and 3; this is the API that carries them out.
+
+- `RunShim(args, dial, stdin, stdout, stderr)` runs `solodawn mcp --token <t>`: it parses `--token`, connects through `dial`, writes `{"mcp":"<token>"}\n`, and bridges `stdin` and `stdout` (exit 0, 2 on invalid arguments, 1 on dial or I/O error).
+- `h.ServeMCP(ctx, token, in, out)` runs the `solodawn` MCP server over the remaining bytes of an accepted local-socket connection (`in` is the reader from the opening line, `out` is the socket). It closes `out` before returning, refuses an unknown or forgotten token, and on each `tools/call` re-reads `Caller(token)` and `ToolsFor(caller)` and brackets `Tool.Call` with `Sessions.Calling`.
+- `ServeMCP` takes each `Tool.Schema` as registered (an empty object schema when nil) and projects per-caller differences in `projectCallerSchema`: outside `GroupSession`, `task` and `to` are dropped from top-level `required` except on `ask`; on `post` for non-secretary callers, `task` and `summary` are dropped, and `handback` is dropped in `GroupSession`.
+- `projectCallerSchema` (`mcp.go`) puts per-kind projection of `post` and `ask` in the server because `Tool` has one `Schema`, so any later tool with per-kind arguments puts its projection there.

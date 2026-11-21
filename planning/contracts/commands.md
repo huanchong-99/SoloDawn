@@ -122,7 +122,14 @@ The message id is `n`.
 | `call` | an AI | the callee is another AI member; `body.depth` ≤ `limits.ask_depth` | `state.status = waiting`; item `mention` for the callee |
 | `reply` | an AI | `re` is a `call` addressed to `as` whose `state.status` is still `waiting`, else `conflict`: a call is answered once | the call's `state` becomes `answered` with `reply` and `ms`; item `reply` for the caller |
 | `review` | an AI | `thread` = `body.task`; task-machine row 7 | Result: `passed`, `round` |
-| `handback` | an AI | `body` holds the host's facts | item `notice` for the secretary |
+
+`handback` is postponed with takeover.
+
+Rules for every `post`:
+
+- A member named twice in `mentions` is `bad_request`, and a mentioned id
+  that is no member of the group is `conflict`.
+- A post never queues an item for its own author.
 
 Rules for every `post` by an AI:
 

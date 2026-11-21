@@ -89,9 +89,8 @@ that carries `as`; `Secretary` is true only for one that does. `Who.Human` is em
 
 **Functions are pure.** A function reads `s` and `c` and calls nothing but `c.Disk`. It does not
 change the state, read a clock (the home's is `c.Now`, the signer's `c.Timestamp`) or touch the
-store. A timer and a handler are pure in the same way. It checks its own table row: who may send the command, and that an id the payload chooses
-(`n` as the id of what it creates, the `id` of `member add_ai` or of `note`) is not already taken
-by another row.
+store, and checks its own table row, including who may send the command. A timer and a handler are
+pure in the same way.
 
 **Rows.** `Apply` numbers the rows of a result in order, from `State.Seq + 1`, by `State.Seal`. A function leaves
 `seq` as it is. In a message or a note it creates it leaves `pos` at 0, and `Apply` sets it to the
@@ -170,8 +169,11 @@ names that start with `run`, and its tests those that start with `run` and `Run`
 and their test functions start with `TestGroup` and `TestMember`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
 The task commands (`cmd_task.go`) take the names that start with `tsk`, their tests too, and their
-test functions start with `TestTaskCmd`. Device-log events (`ev_device.go`) take the names that
-start with `dev`, and their tests start with `TestDevice` and `dev`.
+test functions start with `TestTaskCmd`. The posts of HM-6 take the names that start with `post`,
+their tests too, and their test functions start with `TestPost`; the notes and `forget` take the
+names that start with `note`, their tests too, and their test functions start with `TestNote`.
+Device-log events (`ev_device.go`) take the names that start with `dev`, and their tests start
+with `TestDevice` and `dev`.
 
 ## The run loop
 
@@ -409,9 +411,11 @@ function that moves a task calls it and adds nothing to its rules.
 - **Post.** Only the secretary posts a brief, else `forbidden`; a group without one has nobody who
   can. What the payload says by itself is `bad_request`: a `thread` that is not `null`, no
   criterion, no task, a dependency that is not an earlier entry or that is named twice, an entry
-  whose assignee is its reviewer. What the group says is `conflict`: a requester who is no member,
-  an assignee or reviewer who is no working AI (an AI member other than the secretary), a message
-  that already has the id `n`, and a `replaces` that names no brief that is `pending` or `revise`.
+  whose assignee is its reviewer, and a member named twice in `mentions`
+  ([commands](../../planning/contracts/commands.md) 1.3, shared with `cmd_post.go`).
+  What the group says is `conflict`: a mentioned id or requester who is no member,
+  an assignee or reviewer who is no working AI (an AI member other than the secretary), and a
+  `replaces` that names no brief that is `pending` or `revise`.
   The row is a main-line card with `main` false, `ts` as signed, `state` `pending`, and a body
   encoded again from the checked fields. A post creates no task and queues no item (A5.2). The
   replaced brief keeps its state with `status` `superseded`.
@@ -483,6 +487,38 @@ merges in `cmd_merge.go` (unit HM-12). Where the contracts are silent, it does t
   `system` `preempted` under id `n` in the task's thread. Both thread messages advance
   `task.thread.count` and `task.thread.last`. A group without a secretary queues no `notice`.
 
+## Posts, notes and forget
+
+`cmd_post.go` holds `post` of kinds `text`, `progress`, `question` and `report`
+([commands](../../planning/contracts/commands.md) 1.3;
+[messages](../../planning/contracts/messages.md) 1 and 2.7;
+[rows](../../planning/contracts/rows.md) sections 4 and 5), under `post/<kind>`. `cmd_note.go`
+holds `note` and `forget` ([commands](../../planning/contracts/commands.md) 1.6;
+[rows](../../planning/contracts/rows.md) sections 5 and 6). Where the contracts are silent, they do
+this:
+
+- **Who and placement.** `text` is by a person or an AI; `progress`, `question` and `report` are by
+  an AI, else `forbidden`. `progress` and `report` belong in a thread (`thread` not `null`), else
+  `bad_request`. None of the four is raised from a thread, and the row is written with `main`
+  `false`.
+- **Thread and mentions.** A non-null `thread` must name a task in `State.Tasks`, else `not_found`;
+  for `report`, `as` must be that task's `assignee`, else `forbidden`. `(*State).postMentions`,
+  shared with `cmd_brief.go`, checks the `mentions` rule of
+  [commands](../../planning/contracts/commands.md) 1.3. `re` is kept as signed without looking up
+  the answered message, which retention or `forget` may have removed.
+- **Rows and items.** Every post writes its `MsgRow` with `ts` as signed and `body` encoded without
+  HTML escaping; a post in a thread follows it with the updated `TaskRow` (`thread.count` + 1, and
+  `thread.last` with `text` cut to at most 200 UTF-8 characters). A post never queues an item for
+  its own author ([commands](../../planning/contracts/commands.md) 1.3): `text`, `progress` and
+  `question` queue `mention` for each other mentioned AI in `mentions` order, and a main-line `text`
+  from a person that mentions no AI queues `mention` for `Group.Secretary` when set.
+- **`note` and `forget`.** `note` is by a person or an AI; a non-null `task` that names no task in
+  `State.Tasks` is `not_found`, an `id` already held as a live note on disk is `conflict`, and the
+  `NoteRow` gets `ts` as signed (`c.Timestamp`). `forget` is by an admin only (`forbidden`); `r`
+  must be `note` or `msg` (`bad_request`); a missing or already forgotten row is `not_found`; a
+  `msg` whose `kind` is not `review` is `conflict`; otherwise a `GoneRow` (`gone: true`) replaces
+  it.
+
 ## Device-log events
 
 `ev_device.go` registers `Events["device"]`, which receives a `[]proto.DeviceRow` slice accepted by
@@ -494,8 +530,10 @@ served and unserved.
 
 ## Known limitations
 
-- No node starts a loop yet, and not every command file is in the table: the other command files and
-  the wiring of the node are separate units
+- The table of commands holds the groups, members, briefs, the task commands of HM-9, the four
+  kinds of `post` of HM-6, `note` and `forget`, and no node starts a loop yet: the remaining command
+  files (including thread round counting in HM-13 and the wake-up cap in HM-7) and the wiring of the
+  node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
@@ -546,6 +584,13 @@ and `preempted` through `Commands.Apply` with fakes of `Receipts` and `Disk`, pi
 card transition, retirement filter, thread-feedback page boundary and system message, and
 `cmd_task_internal_test.go` pins `tskSender`. `features/home_task.feature` holds acceptance tests
 A5.5, A5.7 (home half), A5.15 (`task fail` twice) and A5.18 (home commands) through `Commands.Apply`.
+
+`cmd_post_test.go` and `cmd_note_test.go` cover every branch and boundary of the four `post` kinds,
+`note` and `forget` through `Commands.Apply`, including the 200-character UTF-8 thread preview, the
+shared `mentions` rule and `UnexpectedNulls` on the rows written. `features/home_post.feature` holds
+acceptance tests A2.1 (message and item push across connected browsers and a host) and A5.14
+(retention keeping notes and review messages, and `forget` replacing them with `gone` markers) on
+`StartLoop` over an in-memory store.
 
 `ev_device_test.go` covers every branch and boundary of `Events["device"]`, including ignored event
 types, empty and non-owner slices, version boundaries and online/offline `GroupsChanged` transitions.
