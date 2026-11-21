@@ -2126,8 +2126,18 @@ func (w *m5World) stepGivenConfirmedDepBrief() error {
 	if err := w.ownerConfirmBrief(w.pendingBriefID()); err != nil {
 		return err
 	}
-	twoTasks := func() bool { return len(w.browserTasks()) == 2 }
-	return w.waitFor("2 tasks created", twoTasks)
+	return w.waitFor("2 tasks created and secretary confirmed turn settled", w.depBriefConfirmedReady)
+}
+
+func (w *m5World) turnCount() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.turns
+}
+
+func (w *m5World) depBriefConfirmedReady() bool {
+	state, _ := w.cluster.Nodes[0].Host.MemberState(w.groupID, w.secID)
+	return len(w.browserTasks()) == 2 && w.turnCount() >= 2 && state == string(host.Waiting)
 }
 
 func (w *m5World) stepReassignQueuedTask2() error {
