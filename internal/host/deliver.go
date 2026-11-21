@@ -1168,7 +1168,7 @@ func resumeGroupMerges(h *Host, d *delivery, group string) {
 	if home == "" {
 		return
 	}
-	for _, task := range groupTasks(h, group) {
+	for _, task := range liveTasks(h, group) {
 		if task.State == "active" && task.Step == "merge" {
 			resumeOneMerge(h, d, home, group, task)
 		}
@@ -1180,20 +1180,9 @@ func resumeGroupHostedChecks(h *Host, d *delivery, group string) {
 	if home == "" {
 		return
 	}
-	for _, hc := range HostedChecksToResume(groupTasks(h, group), localGroupAIs(h, group)) {
+	for _, hc := range HostedChecksToResume(liveTasks(h, group), localGroupAIs(h, group)) {
 		startHostedCheck(h, home, group, hc)
 	}
-}
-
-func groupTasks(h *Host, group string) []proto.TaskRow {
-	var tasks []proto.TaskRow
-	for _, raw := range h.Rows.Of(group, "task") {
-		var t proto.TaskRow
-		if proto.Decode(raw, &t) == nil {
-			tasks = append(tasks, t)
-		}
-	}
-	return tasks
 }
 
 func localGroupAIs(h *Host, group string) []string {

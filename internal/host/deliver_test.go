@@ -1913,12 +1913,11 @@ func TestResumeHostedChecksAfterRestart(t *testing.T) {
 	afterGroupState(r1.h, deliv(r1.h), "unknown-group")
 
 	key := tskCloudKey{group: testGroup1, task: testTask1}
-	ctx1, run1 := tskBeginCloud(Part[tskPart](r1.h), key, head)
+	ctx1, _ := tskBeginCloud(Part[tskPart](r1.h), key, head)
 	r1.h.Push(r1.homeKey.ID(), rowsAt(10))
 	afterGroupState(r1.h, deliv(r1.h), testGroup1)
 	startHostedCheck(r1.h, r1.homeKey.ID(), testGroup1, HostedCheck{Task: testTask1, Branch: "task/1-cloud", Commit: head, PR: 31})
 	tskRequire(t, ctx1.Err() == nil && len(r1.home.cmdPayloads()) == 0, "running check disturbed")
-	tskFinishCloud(Part[tskPart](r1.h), key, run1)
 	noCalls()
 
 	verifyRestartCloudPollOnce(t, r1.db, head, rowsAt)
