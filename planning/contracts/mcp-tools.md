@@ -83,7 +83,18 @@ Listed by the server only when the calling session is the group's secretary.
 | `set_task` | `task`; any of `assignee`, `reviewer`; `action` = `pause`, `resume`, `cancel` | `{"ok":true}` | `task assign`, `task pause`, `task resume`, `task cancel` |
 
 `propose_brief` has no `pass` argument: the host fills the brief's `pass`
-from `group.pass`.
+from `group.pass`. It sets `mentions` to `[requester]`, and when `requester`
+is omitted it defaults to the author of the newest request message in the
+turn's thread or main line (refusing with `bad_request` when none exists).
+`set_task` requires at least one of `assignee`, `reviewer` or `action` (else
+`bad_request`), and sends `task assign` before `task <action>` when both a
+role and an action are given. `request_decision` numbers options `"A"`,
+`"B"`, …, `"Z"`, `"AA"`, … in list order, maps `recommended` from its
+0-based index to that option's `id` (else `bad_request`), sets `mentions` to
+the member ids of the addressed people (refusing an empty `to` with
+`bad_request` and a non-person or unknown name with `not_found` listing the
+group's people), and in a task or review session whose task has no brief
+(`direct` or `takeover`) defaults an omitted `to` to the AI's owner.
 
 The secretary has the tools of section 1 too, except `start_task`,
 `push_branch`, `run_checks`, `submit_task` and `submit_review` (R-21).
