@@ -41,7 +41,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | run a timer or a handler | `s.Seal(f(s, disk, now, …))` inside a transaction, then write and `s.Commit(result)` as for a command |
 | finish any result | after `s.Commit(result)`, every hook of `After`, on the goroutine of the group |
 | know whether a device may use the home surface of a group | `s.Serves(device)` |
-| run the home of a node | `StartLoop(LoopConfig{…})` with `NodeTables()`; `Close` before the store is closed |
+| run the home of a node | `StartLoop(LoopConfig{…})` with `NodeTables()`, then `loop.LoadPushSubscriptions()`; `Close` before the store is closed |
 | connect a client | `loop.Attach(device, client)` returns its `*Conn`; `loop.Detach(conn)`; `conn.Gone()` |
 | hand in a `cmd` frame | `loop.Cmd(conn, re, env)`; the answer is sent to the connection |
 | answer a `hello` | `loop.Welcome(conn, build)`: `build` makes the `welcome` frame from the groups of the peer |
@@ -168,6 +168,8 @@ names that start with `run`, and its tests those that start with `run` and `Run`
 `Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
 `ItemsPush`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
+Web Push takes `LoadPushSubscriptions` on `Loop`, the unexported names that start with `wpush`, and
+test functions that start with `TestWebPush`.
 
 ## The run loop
 
@@ -392,11 +394,40 @@ function that moves a task calls it and adds nothing to its rules.
   HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
   `c.Disk.Msg` reads.
 
+## Web Push
+
+`webpush.go` holds the `push` command, the `"push"` hook of `After` and
+`(*Loop).LoadPushSubscriptions` ([commands](../../planning/contracts/commands.md) 1.7;
+[storage](../../planning/contracts/storage.md) section 1, `push_sub`):
+
+- **Command.** `wpushCmd` accepts only a `browser` device of a member speaking without `as`, else
+  `forbidden`. A payload that decodes as `proto.PushOff` (`off: true`) deletes that device's row
+  from `push_sub`; any other payload decodes as `proto.PushOn`, checks the `http`/`https` endpoint,
+  the canonical base64url P-256 `p256dh` and `vapid` keys, the 16-byte `auth` secret and distinct
+  known `on` kinds (`bad_request`), and writes `push_sub` through `Result.Writes`.
+- **Memory and startup.** In-memory subscriptions are keyed by `State.Home` and browser device id
+  under a leaf mutex (`wpushMu`, which never calls `Loop`, `Store` or HTTP). `After["push"]` updates
+  the map only after the command's transaction commits, so a rolled-back write leaves memory
+  unchanged. `(*Loop).LoadPushSubscriptions` loads `push_sub` from `LoopConfig.Store` for
+  `LoopConfig.Home` at node startup without changing `run.go`.
+- **Eligibility and delivery.** For each newly created `proto.MsgRow` (`Pos == Seq`), `After["push"]`
+  extracts one reminder kind (`approval`, `decision`, `brief` while `pending`; `done` from
+  `summary`; `mention` from any other message kind), filters for offline subscribed browsers of
+  concerned current group members whose device is still a valid browser in `State.Logs`, encrypts
+  the `proto.Reminder` JSON (without HTML escaping) via RFC 8291 (`webpush-go`), and hands delivery
+  to a bounded worker pool (at most 4 concurrent requests and 64 queued jobs, 5 s timeout per
+  request) so slow push services never stall a group goroutine. A `404` or `410` response evicts
+  that subscription in memory if it has not been replaced since.
+
 ## Known limitations
 
-- The table of commands holds only the briefs, and no node starts a loop yet: the other command
-  files and the wiring of the node are separate units
-  ([units](../../planning/steps/parallel-plan-units.md), section 2).
+- The table of commands holds only the briefs and `push`, and no node starts a loop yet: the other
+  command files and the wiring of the node (including calling `LoadPushSubscriptions` after
+  `StartLoop`) are separate units ([units](../../planning/steps/parallel-plan-units.md), section 2;
+  [issues](../../issues.md)).
+- A `404` or `410` answer from a push service drops the browser's subscription in memory for that
+  home until restart, without deleting its `push_sub` row, and reminders beyond 64 queued Web Push
+  requests are dropped ([issues](../../issues.md)).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
 - A `peer.Connection` takes every frame at once and keeps it in its own buffer, so the limit of
@@ -435,3 +466,8 @@ while a task is paused and a reviewer named while it is paused.
 holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
 `Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
 commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
+
+`webpush_test.go` covers `push`, `After["push"]`, `LoadPushSubscriptions`, RFC 8291 decryption,
+per-browser eligibility, `404`/`410` eviction and worker-queue bounds. `features/home_webpush.feature`
+holds the backend half of acceptance test A8.3 against a local HTTP push endpoint, verifying that
+wire payloads are ciphertext only and decrypted reminders hold neither message text nor commands.

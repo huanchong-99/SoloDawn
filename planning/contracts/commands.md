@@ -232,6 +232,21 @@ Never included: message text, the command of an approval, code, file
 names. The browser shows `group · kind · who: title` in the user's language
 and opens the card `msg`.
 
+The signer must be a `browser` device of a member speaking for itself (no
+`as`), else `forbidden`. On a subscription (`off` not `true`): `sub.endpoint`
+is an `https` or `http` URL with a host; `sub.p256dh` is a canonical
+base64url 65-byte uncompressed P-256 public key and `sub.auth` 16 bytes;
+`vapid.priv` is a canonical base64url 32-byte P-256 private key and
+`vapid.pub` its 65-byte uncompressed public key; `on` holds distinct values
+from the five `kind`s (`[]` disables all five while keeping the subscription);
+anything else is `bad_request`. Each created message row produces at most one
+reminder kind: `approval` (`body.approvers`), `decision` (`body.to`), `brief`
+(human `body.requester`) and `summary` (`done`, every human member of the
+group) do not also send `mention` for their `mentions`; any other created
+message row sends `mention` to the people named in `mentions`. `title` is cut
+at the first `\r` or `\n` and then at 80 Unicode code points, and left out
+when empty. A `404` or `410` from the push service drops that subscription.
+
 ### 1.8 Review outcome
 
 On `post` with `kind = review` the home computes `ok`: `score` ≥
