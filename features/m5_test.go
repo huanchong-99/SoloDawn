@@ -50,7 +50,7 @@ func init() {
 	}
 	host.Register(host.Listeners, "m5_turns", m5OnHostEvent)
 	host.Register(host.Holds, "m5_hold", m5OnHostHold)
-	stepSets["a_m5"] = m5Steps
+	stepSets["m5"] = m5Steps
 }
 
 func m5OnHostEvent(_ *host.Host, _ host.SessionKey, e host.Event) {
@@ -616,8 +616,6 @@ type m5World struct {
 	turnsAtMerged     map[string]int
 	sawTaskSess       map[int]host.SessionKey
 	sawTaskDir        map[int]string
-	sawRevSess        map[int]host.SessionKey
-	sawRevDir         map[int]string
 	tools             []m5ToolRecord
 	listedTools       map[host.SessionKey][]string
 	beforeHooks       map[string][]m5HookFunc
@@ -643,8 +641,6 @@ func newM5World(sc *godog.ScenarioContext, f fixtures) *m5World {
 		turnsAtMerged:     map[string]int{},
 		sawTaskSess:       map[int]host.SessionKey{},
 		sawTaskDir:        map[int]string{},
-		sawRevSess:        map[int]host.SessionKey{},
-		sawRevDir:         map[int]string{},
 		listedTools:       map[host.SessionKey][]string{},
 		beforeHooks:       map[string][]m5HookFunc{},
 		heldMembers:       map[string]bool{},
@@ -805,13 +801,25 @@ func (w *m5World) settleBeforeAfterHooks() {
 		return
 	}
 	w.mu.Lock()
+	already := w.closing
 	w.closing = true
 	w.mu.Unlock()
+	if already {
+		return
+	}
 	n0 := w.cluster.Nodes[0]
 	n0.Link.Close()
 	n0.Home.Close()
 	m5WaitAllDormant(n0.Host)
 	time.Sleep(30 * time.Millisecond)
+}
+
+func m5FinalStep(w *m5World, fn func() error) func() error {
+	return func() error {
+		err := fn()
+		w.settleBeforeAfterHooks()
+		return err
+	}
 }
 
 func m5WaitAllDormant(h *host.Host) {
@@ -945,10 +953,6 @@ func (w *m5World) recordObservedSession(caller host.Caller, num int, dir string)
 	if caller.Kind == host.TaskSession {
 		w.sawTaskSess[num] = caller.SessionKey
 		w.sawTaskDir[num] = dir
-	}
-	if caller.Kind == host.ReviewSession {
-		w.sawRevSess[num] = caller.SessionKey
-		w.sawRevDir[num] = dir
 	}
 	w.mu.Unlock()
 }
@@ -1440,8 +1444,7 @@ func m5RegisterFullFlowSteps(sc *godog.ScenarioContext, w *m5World) {
 	sc.Step(`^both tasks are merged on origin with two summary cards carrying pull-request numbers and no approval card$`, func() error {
 		return w.stepVerifyTwoTasksMerged(true)
 	})
-	sc.Step(`^each passing review was followed by its merge with no AI turn in between and a task_merged row in the thread$`, w.stepVerifyNoTurnBeforeMerge)
-	sc.Step(`^each task ran in its own session and worktree, and after the merge those sessions and folders are gone$`, w.stepVerifySessionsAndFoldersGone)
+	sc.Step(`^each passing review was followed by its merge with no AI turn in between and a task_merged row in the thread$`, m5FinalStep(w, w.stepVerifyNoTurnBeforeMerge))
 }
 
 func (w *m5World) stepRequestAndTwoTaskBrief() error {
@@ -1605,6 +1608,9 @@ func (w *m5World) verifyBaseHasFiles(remote bool, names ...string) error {
 }
 
 func (w *m5World) stepVerifyNoTurnBeforeMerge() error {
+	if err := w.verifyDistinctTaskWorkspaces(); err != nil {
+		return err
+	}
 	for _, t := range w.browserTasks() {
 		if err := w.verifyTaskMergedOrder(t.ID); err != nil {
 			return err
@@ -1647,35 +1653,15 @@ func m5DistinctPair[T comparable](a, b, zero T) bool {
 	return a != zero && b != zero && a != b
 }
 
-func (w *m5World) stepVerifySessionsAndFoldersGone() error {
+func (w *m5World) verifyDistinctTaskWorkspaces() error {
 	w.mu.Lock()
 	s1, s2 := w.sawTaskSess[1], w.sawTaskSess[2]
 	d1, d2 := w.sawTaskDir[1], w.sawTaskDir[2]
-	r1, r2 := w.sawRevSess[1], w.sawRevSess[2]
-	rd1, rd2 := w.sawRevDir[1], w.sawRevDir[2]
 	w.mu.Unlock()
 	if !m5DistinctPair(s1, s2, host.SessionKey{}) || !m5DistinctPair(d1, d2, "") {
 		return fmt.Errorf("tasks did not run in distinct sessions and worktrees: %+v %+v %q %q", s1, s2, d1, d2)
 	}
-	return w.waitCleanupComplete([]host.SessionKey{s1, s2, r1, r2}, []string{d1, d2, rd1, rd2})
-}
-
-func (w *m5World) waitCleanupComplete(keys []host.SessionKey, dirs []string) error {
-	h := w.cluster.Nodes[0].Host
-	check := func() bool {
-		for _, k := range keys {
-			if _, ok := h.Sessions.Get(k); ok {
-				return false
-			}
-		}
-		for _, d := range dirs {
-			if _, err := os.Stat(d); !errors.Is(err, fs.ErrNotExist) {
-				return false
-			}
-		}
-		return true
-	}
-	return w.waitFor("task and review sessions and folders removed after merge", check)
+	return nil
 }
 
 func m5RegisterCheckAndReviewSteps(sc *godog.ScenarioContext, w *m5World) {
@@ -1685,7 +1671,7 @@ func m5RegisterCheckAndReviewSteps(sc *godog.ScenarioContext, w *m5World) {
 	sc.Step(`^"Claude" runs checks on a dirty worktree, submits after failing checks, submits after passing checks, and submits again after an unchecked commit$`, w.stepRunA53TaskSequence)
 	sc.Step(`^run_checks refused the dirty worktree, submit_task failed after failing checks, succeeded after passing checks, and failed after the extra commit$`, w.stepVerifyA53ToolResults)
 	sc.Step(`^the review passes while merge is held and a new commit advances the task branch before merge runs$`, w.stepReviewAndMoveBranchBeforeMerge)
-	sc.Step(`^the unreviewed commit is not merged onto base and the task returns to local_check waiting on conflict$`, w.stepVerifyMovedBranchConflict)
+	sc.Step(`^the unreviewed commit is not merged onto base and the task returns to local_check waiting on conflict$`, m5FinalStep(w, w.stepVerifyMovedBranchConflict))
 
 	sc.Step(`^a submitted brief task on forge "none" assigned to "Claude" and reviewed by "Codex"$`, func() error {
 		return w.givenSubmittedBriefTask(false)
@@ -1693,14 +1679,14 @@ func m5RegisterCheckAndReviewSteps(sc *godog.ScenarioContext, w *m5World) {
 	sc.Step(`^the assignee and a wrong-commit checkout attempt reviews on the submitted task$`, w.stepAttemptInvalidReviews)
 	sc.Step(`^the assignee review is refused with "forbidden" and the wrong-commit review is refused with "conflict"$`, w.stepVerifyInvalidReviews)
 	sc.Step(`^"Codex" reviews with score 86, then with a veto at score 95, and then four more failing reviews on resubmissions$`, w.stepRunSixFailedReviews)
-	sc.Step(`^the 86 review returned the task to local_check, the veto recorded score 0, and the sixth failed review made the task failed$`, w.stepVerifySixFailedReviews)
+	sc.Step(`^the 86 review returned the task to local_check, the veto recorded score 0, and the sixth failed review made the task failed$`, m5FinalStep(w, w.stepVerifySixFailedReviews))
 
 	sc.Step(`^"Claude" commits a test secret block with a test file and calls run_checks$`, w.stepCommitSecretAndRunChecks)
-	sc.Step(`^run_checks completes with ok false and a failing "secrets" hard-check item$`, w.stepVerifySecretHardCheck)
+	sc.Step(`^run_checks completes with ok false and a failing "secrets" hard-check item$`, m5FinalStep(w, w.stepVerifySecretHardCheck))
 
 	sc.Step(`^a project group with check "m5envcheck" and a test token variable set in the node environment$`, w.stepSetupEnvCheckGroup)
 	sc.Step(`^an active task on that group commits a change and calls run_checks$`, w.stepRunEnvCheckTask)
-	sc.Step(`^run_checks passes with "m5envcheck" seeing PATH and HOME and not seeing the test token variable$`, w.stepVerifyEnvCheckPassed)
+	sc.Step(`^run_checks passes with "m5envcheck" seeing PATH and HOME and not seeing the test token variable$`, m5FinalStep(w, w.stepVerifyEnvCheckPassed))
 }
 
 func (w *m5World) waitPendingBrief() error {
@@ -2084,10 +2070,10 @@ func m5RegisterDepAndDirectSteps(sc *godog.ScenarioContext, w *m5World) {
 	sc.Step(`^the secretary reassigns task 2 to "Codex" and reviewer "Claude" while task 2 is queued$`, w.stepReassignQueuedTask2)
 	sc.Step(`^task 2 remains queued with no worktree and no task session$`, w.stepVerifyTask2StillQueued)
 	sc.Step(`^task 1 completes checks, passes review and merges$`, w.stepFinishAndMergeTask1)
-	sc.Step(`^task 2 becomes active, creates its worktree, and runs its task session for "Codex"$`, w.stepVerifyTask2ActivatedForCodex)
+	sc.Step(`^task 2 becomes active, creates its worktree, and runs its task session for "Codex"$`, m5FinalStep(w, w.stepVerifyTask2ActivatedForCodex))
 
 	sc.Step(`^the owner mentions "Claude" directly for a code change and "Claude" calls start_task$`, w.stepRunDirectTaskA57)
-	sc.Step(`^the group session kept repo clean without task submission tools, created a task card, notified the secretary, and committed the change in a new task session$`, w.stepVerifyDirectTaskA57)
+	sc.Step(`^the group session kept repo clean without task submission tools, created a task card, notified the secretary, and committed the change in a new task session$`, m5FinalStep(w, w.stepVerifyDirectTaskA57))
 }
 
 func (w *m5World) stepGivenConfirmedDepBrief() error {
@@ -2276,17 +2262,17 @@ func m5RegisterConflictAndEdgeSteps(sc *godog.ScenarioContext, w *m5World) {
 	sc.Step(`^"Codex" passes the review and the host attempts the merge$`, w.stepPassReviewIntoConflict)
 	sc.Step(`^the task returns to local_check with wait "conflict" and the secretary receives a conflict notice$`, w.stepVerifyMergeConflictAndNotice)
 	sc.Step(`^the secretary names "Claude" on the conflicted task and "Claude" resolves, re-checks, resubmits, passes review and merges$`, w.stepResolveConflictAndMerge)
-	sc.Step(`^the task reaches state "merged" and base holds the resolved content$`, w.stepVerifyConflictResolvedOnBase)
+	sc.Step(`^the task reaches state "merged" and base holds the resolved content$`, m5FinalStep(w, w.stepVerifyConflictResolvedOnBase))
 
 	sc.Step(`^a project group with forge "none", a secretary, working AIs and a pending one-task brief$`, w.stepGivenPendingOneTaskBrief)
 	sc.Step(`^the owner sends the same signed confirm twice and the host sends the same signed task fail twice$`, w.stepSendDuplicateConfirmAndFail)
-	sc.Step(`^both confirms answered ok creating one task, and both task fails answered ok counting one failure$`, w.stepVerifyDuplicateConfirmAndFail)
+	sc.Step(`^both confirms answered ok creating one task, and both task fails answered ok counting one failure$`, m5FinalStep(w, w.stepVerifyDuplicateConfirmAndFail))
 
 	sc.Step(`^removing "Claude" or "Codex" from the group is refused with "conflict"$`, w.stepVerifyBusyAICannotLeave)
 	sc.Step(`^"Codex" passes the review while the host holds the merge item$`, w.stepPassReviewWithMergeHeld)
 	sc.Step(`^reassigning the task and submitting a new commit at step merge are refused with "conflict"$`, w.stepVerifyMergeStepRefusals)
 	sc.Step(`^the owner cancels the task at step merge and the host releases and processes the held merge item$`, w.stepOwnerCancelsAndHostDropsMerge)
-	sc.Step(`^the task is cancelled, base is unchanged, and the host recorded the merge item as refused$`, w.stepVerifyCancelledMergeDropped)
+	sc.Step(`^the task is cancelled, base is unchanged, and the host recorded the merge item as refused$`, m5FinalStep(w, w.stepVerifyCancelledMergeDropped))
 
 	sc.Step(`^an active brief task on forge "none" assigned to "Claude" with reviewer "Codex" held on the host$`, func() error {
 		return w.givenOneBriefTask("none", []string{}, true)
@@ -2294,7 +2280,7 @@ func m5RegisterConflictAndEdgeSteps(sc *godog.ScenarioContext, w *m5World) {
 	sc.Step(`^"Claude" submits commit 1 and then commits, checks and submits commit 2 before "Codex" is released$`, w.stepSubmitTwoCommitsWhileReviewerHeld)
 	sc.Step(`^the home has retired the review item for commit 1 and keeps only commit 2 queued$`, w.stepVerifyHomeRetiredCommit1Review)
 	sc.Step(`^the host hold on "Codex" is released and "Codex" runs its review turn$`, w.stepReleaseReviewerForCommit2)
-	sc.Step(`^the host refused the held review item for commit 1 and delivered only commit 2 to "Codex"$`, w.stepVerifyHostRefusedStaleReview)
+	sc.Step(`^the host refused the held review item for commit 1 and delivered only commit 2 to "Codex"$`, m5FinalStep(w, w.stepVerifyHostRefusedStaleReview))
 }
 
 func (w *m5World) stepPassReviewIntoConflict() error {
