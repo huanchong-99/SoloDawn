@@ -361,6 +361,20 @@ export async function readPairingCode(page: Page, expectedSignal: string): Promi
   return found;
 }
 
+/** Waits for modal dialogs to close and composer to enable, fills `text`, and submits it. */
+export async function sendChatMessage(page: Page, text: string): Promise<void> {
+  await poll(() => page.locator('dialog.dlg[open]').count()).toBe(0);
+  const composer = page.locator('.composer textarea');
+  const sendBtn = page.locator('.composer button.send');
+  await poll(() => composer.isDisabled()).toBe(false);
+  await vi.waitFor(async () => {
+    await composer.fill(text);
+    expect(await sendBtn.isDisabled()).toBe(false);
+  });
+  await sendBtn.click();
+  await poll(() => composer.inputValue()).toBe('');
+}
+
 /** Initial stdin/MCP/init handshake steps for a scripted fake Claude Code process. */
 export function claudeInitSteps() {
   return [

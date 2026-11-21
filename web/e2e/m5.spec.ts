@@ -16,6 +16,7 @@ import {
   openDirectContext,
   poll,
   readPairingCode,
+  sendChatMessage,
   startDirectSurface,
   type DirectSurface,
 } from './direct';
@@ -573,30 +574,36 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await addDlg.locator('.sec-opt input[type="checkbox"]').check();
       await poll(() => addDlg.locator('input.input').inputValue()).toBe('Secretary');
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
+      await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(1);
 
       await members.locator('button', { hasText: 'Add AI' }).click();
+      await poll(() => addDlg.locator('.choice').count()).toBe(4);
       await addDlg
         .locator('.choice', { hasText: 'Claude Code · workstation' })
         .locator('input')
         .check();
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
+      await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(2);
 
       await members.locator('button', { hasText: 'Add AI' }).click();
+      await poll(() => addDlg.locator('.choice').count()).toBe(4);
       await addDlg.locator('.choice', { hasText: 'Codex · workstation' }).locator('input').check();
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
+      await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(3);
 
       await members.locator('button', { hasText: 'Add AI' }).click();
+      await poll(() => addDlg.locator('.choice').count()).toBe(4);
       await addDlg.locator('.choice', { hasText: 'Codex · coordinator' }).locator('input').check();
       await addDlg.locator('input.input').fill('Reviewer');
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
+      await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(4);
 
       // Owner sends plain request in chat -> Secretary posts BriefCard.
-      await page.locator('.composer textarea').fill('Build the release checklist and changelog');
-      await page.locator('.composer button.send').click();
+      await sendChatMessage(page, 'Build the release checklist and changelog');
 
       const briefCard = page.locator('.line section.card', { hasText: 'Task brief' });
       await poll(() => briefCard.count()).toBe(1);
@@ -720,11 +727,11 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
         .locator('input')
         .check();
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
+      await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(1);
 
       // Trigger Claude Code turn 1 -> ApprovalCard appears while approve waits for owner action.
-      await page.locator('.composer textarea').fill('@Claude Code clean artifacts and pick cache');
-      await page.locator('.composer button.send').click();
+      await sendChatMessage(page, '@Claude Code clean artifacts and pick cache');
 
       const approvalCard = page.locator('section.card[aria-label="Approval"]');
       await poll(() => approvalCard.count()).toBe(1);

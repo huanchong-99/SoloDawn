@@ -14,6 +14,7 @@ import {
   openDirectContext,
   poll,
   readPairingCode,
+  sendChatMessage,
   startDirectSurface,
   type DirectSurface,
 } from './direct';
@@ -243,6 +244,7 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       await addDlg.locator('.choice', { hasText: 'Claude Code · studio' }).locator('input').check();
       await poll(() => addDlg.locator('input.input').inputValue()).toBe('Claude Code');
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
+      await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(1);
 
       // Add Codex via AddAI dialog; Claude Code now shows "Already in this group".
@@ -253,6 +255,7 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       await addDlg.locator('.choice', { hasText: 'Codex · studio' }).locator('input').check();
       await poll(() => addDlg.locator('input.input').inputValue()).toBe('Codex');
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
+      await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(2);
 
       const claudeCard = members.locator('.member', { hasText: 'Claude Code' });
@@ -272,8 +275,7 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       });
       await poll(() => mentionOption.count()).toBe(1);
       await mentionOption.click();
-      await composer.fill('@Claude Code remember codeword-amber');
-      await page.locator('.composer button.send').click();
+      await sendChatMessage(page, '@Claude Code remember codeword-amber');
 
       await poll(() => page.locator('.line .msg .text').allTextContents()).toContain(
         'Claude reply one: codeword-amber',
@@ -281,15 +283,13 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       await poll(() => claudeCard.locator('header .st').textContent()).toBe('Waiting');
 
       // Mention @Claude Code a second time; the same process handles turn 2 without respawning.
-      await composer.fill('@Claude Code what codeword did I give you?');
-      await page.locator('.composer button.send').click();
+      await sendChatMessage(page, '@Claude Code what codeword did I give you?');
       await poll(() => page.locator('.line .msg .text').allTextContents()).toContain(
         'Claude reply two in same open session: codeword-amber',
       );
 
       // Mention @Codex and verify Codex also replies in chat.
-      await composer.fill('@Codex say hello');
-      await page.locator('.composer button.send').click();
+      await sendChatMessage(page, '@Codex say hello');
       await poll(() => page.locator('.line .msg .text').allTextContents()).toContain(
         'Codex reply from studio',
       );
@@ -312,8 +312,7 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
 
       // Swap Claude script for the resumed session and @mention Claude Code again.
       await writeFile(claudePath, JSON.stringify(claudeResumedScript()));
-      await composer.fill('@Claude Code wake up and confirm the codeword');
-      await page.locator('.composer button.send').click();
+      await sendChatMessage(page, '@Claude Code wake up and confirm the codeword');
 
       await poll(() => page.locator('.line .msg .text').allTextContents()).toContain(
         'Claude resumed after sleep with memory: codeword-amber',

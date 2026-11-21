@@ -13,6 +13,7 @@ import {
   openDirectContext,
   poll,
   readPairingCode,
+  sendChatMessage,
   startDirectSurface,
   type DirectSurface,
 } from './direct';
@@ -228,8 +229,10 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
       await poll(() => new URL(page2.url()).hash).toBe(groupHash);
 
       // Post a message from Browser 1 and verify Browser 2 renders it within 1 second (A2.1).
+      await poll(() => page1.locator('dialog.dlg[open]').count()).toBe(0);
       const composer1 = page1.locator('.composer textarea');
       await composer1.fill('Hello live across browsers');
+      await poll(() => page1.locator('.composer button.send').isDisabled()).toBe(false);
       const sentAt = performance.now();
       await page1.locator('.composer button.send').click();
       await expect
@@ -246,10 +249,10 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
       await poll(() => addDlg.locator('.choice').count()).toBeGreaterThan(0);
       await addDlg.locator('.sec-opt input[type="checkbox"]').check();
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
+      await poll(() => addDlg.count()).toBe(0);
       await poll(() => page1.locator('.members .member').count()).toBe(1);
 
-      await composer1.fill('Please check archive redirects');
-      await page1.locator('.composer button.send').click();
+      await sendChatMessage(page1, 'Please check archive redirects');
       await poll(() => page2.locator('.chat nav.needbar').textContent()).toContain(
         'Keep legacy archive redirects?',
       );
@@ -261,10 +264,7 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
       );
 
       for (let i = 1; i <= 20; i++) {
-        const label = `Delta message ${String(i).padStart(2, '0')}`;
-        await composer1.fill(label);
-        await page1.locator('.composer button.send').click();
-        await poll(() => composer1.inputValue()).toBe('');
+        await sendChatMessage(page1, `Delta message ${String(i).padStart(2, '0')}`);
       }
 
       await setPeerOffline(page2, false);
@@ -292,18 +292,12 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
         const ta = document.querySelector<HTMLTextAreaElement>('.composer textarea');
         const form = document.querySelector<HTMLFormElement>('.composer form');
         if (!ta || !form) throw new Error('composer not mounted');
-        const yieldTurn = () =>
-          new Promise<void>((resolve) => {
-            const channel = new MessageChannel();
-            channel.port1.onmessage = () => resolve();
-            channel.port2.postMessage(null);
-          });
         for (let i = 1; i <= 1500; i++) {
           ta.value = `History line ${String(i).padStart(4, '0')}`;
           ta.dispatchEvent(new Event('input', { bubbles: true }));
           form.requestSubmit();
           while (ta.value !== '') {
-            await yieldTurn();
+            await new Promise((resolve) => setTimeout(resolve, 1));
           }
         }
       });
