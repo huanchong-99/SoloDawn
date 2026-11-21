@@ -249,9 +249,9 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-20 · limitation · A task's `branch` is text that no reader checks
 
-- Symptom: `proto.Decode` and the web client refuse a task row whose `slug` the home's rule cannot make (unit P-1), but take any text as its `branch`, and as the `branch` of `task branch`. `contracts/local.md` section 7 derives the branch from `num` and `slug` (`task/<num>-<slug>`); `HostedChecksToResume` instead copies `branch` from the row (`internal/host/forge.go:219`), from where it would reach `git` and `gh` arguments.
+- Symptom: `proto.Decode` and the web client refuse a task row whose `slug` the home's rule cannot make (unit P-1), but take any text as its `branch`, and as the `branch` of `task branch`. `contracts/local.md` section 7 derives the branch from `num` and `slug` (`task/<num>-<slug>`); `HostedChecksToResume` previously copied `branch` from the row (`internal/host/forge.go:220` before `HOST-BRANCH`), from where it would reach `git` and `gh` arguments.
 - Cause: `TaskRow.Branch` and `TaskBranch.Branch` are plain strings (`internal/proto/task.go`, `internal/proto/command.go`). Giving the field a type of its own changes `internal/host`, which unit P-1 does not own; and whether the home must refuse a `task branch` whose `branch` is not `task/<num>-<slug>` is not in `contracts/commands.md` 1.5.
-- Status: open. Decided by the coordinator on 2026-11-20: hosts build the branch from `num` and `slug` only, and the home refuses any other `branch`. The host side (`internal/host/forge.go`, `HostedChecksToResume`) goes to the owner of the host forge after P-1 and pull request 156 merge; the home side is unit HM-9.
+- Status: host side resolved on branch `gemini/HOST-BRANCH`: `HostedChecksToResume` (`internal/host/forge.go`) now derives `task/<num>-<slug>` from `Num` and `Slug` through `taskName`, skips rows that fail `taskName`, and ignores `TaskRow.Branch` (tests `TestHostedChecksToResume`, `TestHostedChecksToResumeDerivesBranchFromNumAndSlug`). Open on the home side (unit HM-9), per the coordinator's decision of 2026-11-20 that hosts build the branch from `num` and `slug` only and the home refuses any other `branch`.
 
 ### 2026-11-20 · deviation · A `set` that changes nothing and a `task assign` without a role are not refused yet
 
