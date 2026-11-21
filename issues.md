@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-21 · limitation · Stale Web Push subscriptions are evicted in memory only, `LoadPushSubscriptions` waits for node wiring, and queued pushes cap at 64
+
+- Symptom: after a push service answers `404` or `410`, the home sends that browser no further reminders while running, and loads the `push_sub` row again if the node restarts before the browser sends a new `push` command; `StartLoop` itself does not call `LoadPushSubscriptions` yet; and when 4 Web Push requests are in flight and 64 more wait, further reminders are dropped.
+- Cause: `After["push"]` receives `*home.State`, which holds no `*store.Store` (`internal/home/webpush.go`, `wpushAfter`, `wpushEvict`), and `run.go` belongs to unit HM-1, so `(*Loop).LoadPushSubscriptions` is separate (`internal/home/webpush.go`, `LoadPushSubscriptions`) for N-4 to call after `StartLoop`; `wpushEnqueue` bounds the background queue at 64 jobs across 4 workers with a 5 s timeout so a slow push service cannot stall a group or grow memory without bound.
+- Status: open. N-4 calls `loop.LoadPushSubscriptions()` at node start; browsers refresh their subscription with `push` when opened (U-13).
+
 ### 2026-11-21 · limitation · The jobs of a group in the home's run loop have no bound
 
 - Symptom: not observed. A client that sends `cmd` frames faster than its group applies them makes the list of that group's jobs grow, and with it the memory of the node, until the client stops. A group applies a command in one transaction of the store, so this needs a client that sends on purpose or a store that has become slow. Ticks and events are jobs as well: while a group does not keep up, each tick of `LoopConfig.Every` and each `Event` adds one job to its list.
