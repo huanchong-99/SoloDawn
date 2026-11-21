@@ -30,6 +30,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `planning/flows/agent-turn.md` step 5.1 places `max_open` (closing the longest-`waiting` session, or waiting when every open session is `working` or `takeover`) in the session runtime (`HS-15`, #187, `tryReserveSlot`), so delivery does not duplicate it; `Deliver` (`deliverNow` in `internal/host/deliver.go`) walks all held AI keys on each wake so a freed slot reaches waiting AIs.
 - Status: open, coordinated between HS-13 (#186) and HS-15 (#187).
 
+### 2026-11-21 · limitation · `member/status` refuses `cap_reached` and `rate_limited` while `HS-18` is postponed
+
+- Symptom: a `member status` carrying host event code `cap_reached` or `rate_limited` (`planning/contracts/commands.md` section 1.9; `planning/contracts/messages.md` section 2.11) is answered `bad_request` ("unknown host event code").
+- Cause: `internal/home/cmd_hostev.go` (`hevEventReaders`) handles only the three step-1 host codes that `HS-15` sends (`turn_interrupted`, `login_invalid`, `session_replaced`), per the coordinator's decision of 2026-11-21 removing caps and rate limits from the main line.
+- Status: open until `HS-18` brings usage caps and rate-limit events back.
+
 ### 2026-11-21 · limitation · Reassigning a task's assignee also marks a reviewer's pending approval card `reassigned`
 
 - Symptom: if a task's assignee changes while the task's reviewer has a pending approval card on that task, the reviewer's card becomes `reassigned` along with the old assignee's cards, so it can no longer be approved or denied and the reviewer's waiting CLI receives no decision.

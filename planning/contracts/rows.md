@@ -67,7 +67,7 @@ AI:
 | `allow` | user ids that may direct this AI without confirmation (step 2, R-53) |
 | `approvers` | user ids that may decide its approvals: the owner, plus delegates |
 | `state` | `working`, `waiting`, `dormant`, `takeover`, `paused`, `limited`, `offline` |
-| `path` | path between the AI's host and the home: `local` (same node), `direct`, `relay` (`flows/connect.md` step 8) |
+| `path` | path between the AI's host and the home: `local` (same node), `direct`, `relay`, or `""` before a pair is selected (`flows/connect.md` step 8) |
 | `usage` | what the CLI reports. Always an object; `{}` when nothing was reported |
 
 Optional, AI only: `task` (absent when its state names no task); every key
@@ -75,7 +75,11 @@ of `usage`: `window_pct`, `window_resets`, `day_cap_pct`, `spend_today`,
 `spend_cap`, `turns_today`. A person's row has no optional field.
 
 `state` and `task` describe the AI in this group as a whole, derived by the
-host as `sessions.md` section 3 says.
+host as `sessions.md` section 3 says. `since` is the home time at which the
+AI entered its current `state`: set when the AI joins, when `member status`
+changes `state`, and when a closed host connection sets `state = offline`
+and clears `task`. `last_seen` on an AI member row is set when the AI joins
+and on each accepted `member status`.
 
 `[unverified]` Which usage figures each CLI exposes in structured mode.
 Spikes S-2 and S-3 record them; the card shows what exists.
