@@ -728,17 +728,27 @@ func checkSyncFailureModes(t *testing.T, rig *joinRig, fh *joinFakeHome) {
 	}
 	seamCode(t, rig.callJoin(t.Context(), joinReq), "forbidden")
 
-	// Sync malformed JSON answers home_unreachable.
+	// Sync malformed JSON or mismatched group answers home_unreachable.
 	fh.syncFn = func(proto.Sync) (json.RawMessage, error) { return json.RawMessage(`{"bad":1}`), nil }
 	seamCode(t, rig.callJoin(t.Context(), joinReq), "home_unreachable")
-
-	// Sync succeeds without putting a group row -> not_found.
-	rig.h.Rows.Reset(string(joinTestGroup1))
 	fh.syncFn = func(req proto.Sync) (json.RawMessage, error) {
-		ok := proto.Synced{Type: "synced", Success: proto.Success{Re: req.ID, OK: true}, Group: req.Group, Seq: 1}
+		wrong := proto.Synced{Type: "synced", Success: proto.Success{Re: req.ID, OK: true}, Group: string(joinTestGroup2), Seq: 1}
+		return json.RawMessage(marshalWire(wrong)), nil
+	}
+	seamCode(t, rig.callJoin(t.Context(), joinReq), "home_unreachable")
+
+	// Sync succeeds without putting a group row -> not_found; subsequent uncached join resets cursor to 0.
+	rig.h.Rows.Reset(string(joinTestGroup1))
+	var seenSince int64 = -1
+	fh.syncFn = func(req proto.Sync) (json.RawMessage, error) {
+		seenSince = req.Since
+		ok := proto.Synced{Type: "synced", Success: proto.Success{Re: req.ID, OK: true}, Group: req.Group, Seq: 9}
 		return json.RawMessage(marshalWire(ok)), nil
 	}
 	seamCode(t, rig.callJoin(t.Context(), joinReq), "not_found")
+	joinAssertEqual(t, "first sync since", seenSince, int64(0))
+	seamCode(t, rig.callJoin(t.Context(), joinReq), "not_found")
+	joinAssertEqual(t, "retry without cached group resets since to 0", seenSince, int64(0))
 	fh.syncFn = nil
 }
 
@@ -1074,4 +1084,140 @@ func TestHostJoinSignedEnvelopeVerifiesAsNodeCommand(t *testing.T) {
 	joinAssertEqual(t, "OpenCommand err", err, nil)
 	joinAssertEqual(t, "OpenCommand type", hdr.Type, "member")
 	joinAssertEqual(t, "OpenCommand group", hdr.Group, joinTestGroup1)
+}
+
+func TestHostJoinSyncCoordinatesWithDeliveryPushesAndInflightSync(t *testing.T) {
+	checkJoinPushResetAndRowsWithoutDuplicateSync(t)
+	checkJoinWaitsOnInflightGroupSync(t)
+}
+
+func checkJoinPushResetAndRowsWithoutDuplicateSync(t *testing.T) {
+	t.Helper()
+	rig := newJoinRig(t)
+	rig.setAgent("claude", "2.1.311", joinStr("personal"))
+	fh := rig.addHome("home-local")
+	grp := makeGroupRow(joinTestGroup1, "home-local", "Website", rig.makeRepo("local", "main"), "main")
+	gid := string(joinTestGroup1)
+
+	fh.syncFn = func(req proto.Sync) (json.RawMessage, error) {
+		rst := proto.Reset{Type: "reset", Group: gid}
+		rig.h.Push("home-local", json.RawMessage(marshalWire(rst)))
+		batch := proto.Rows{Type: "rows", Group: gid, Rows: []json.RawMessage{json.RawMessage(marshalWire(grp))}}
+		rig.h.Push("home-local", json.RawMessage(marshalWire(batch)))
+		ok := proto.Synced{Type: "synced", Success: proto.Success{Re: req.ID, OK: true}, Group: gid, Seq: grp.Seq}
+		return json.RawMessage(marshalWire(ok)), nil
+	}
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-local", Agent: "claude", Name: "Claude"})
+
+	fh.mu.Lock()
+	syncCount := len(fh.syncs)
+	fh.mu.Unlock()
+	joinAssertEqual(t, "single sync during pushRows", syncCount, 1)
+
+	d := deliv(rig.h)
+	d.mu.Lock()
+	gs := d.groups[gid]
+	live, syncing, cursor := gs.live, gs.syncing, gs.cursor
+	d.mu.Unlock()
+	joinAssertEqual(t, "group marked live", live, true)
+	joinAssertEqual(t, "group not syncing", syncing, false)
+	joinAssertEqual(t, "group cursor", cursor, grp.Seq)
+}
+
+func checkJoinWaitsOnInflightGroupSync(t *testing.T) {
+	t.Helper()
+	rig := newJoinRig(t)
+	rig.setAgent("claude", "2.1.311", joinStr("personal"))
+	rig.setAgent("codex", "0.164.0", joinStr("personal"))
+	fh := rig.addHome("home-1")
+	rig.h.Attach("home-1", fh)
+	repo := rig.makeRepo("inflight", "main")
+	grp1 := makeGroupRow(joinTestGroup1, "home-1", "Website", repo, "main")
+	grp2 := makeGroupRow(joinTestGroup2, "home-1", "Backend", repo, "main")
+	fh.putGroup(grp1)
+	fh.putGroup(grp2)
+
+	// Group 1: background sync fails while two joins wait; cancelled join removes only its waiter, surviving join retries and succeeds.
+	runInflightSyncRetryCase(t, rig, fh, string(joinTestGroup1))
+	// Group 2: background sync populates h.Rows while join waits; join wakes and reuses cached row without a second sync.
+	runInflightSyncCacheHitCase(t, rig, fh, grp2)
+}
+
+func runInflightSyncRetryCase(t *testing.T, rig *joinRig, fh *joinFakeHome, gid string) {
+	t.Helper()
+	syncEntered := make(chan struct{}, 1) // single reader: <-syncEntered below
+	releaseFirst := make(chan struct{})   // single reader: <-releaseFirst in syncFn
+	fh.mu.Lock()
+	fh.syncFn = func(req proto.Sync) (json.RawMessage, error) {
+		select {
+		case syncEntered <- struct{}{}:
+			<-releaseFirst
+			return nil, io.EOF
+		default:
+			fh.mu.Lock()
+			fh.syncFn = nil
+			fh.mu.Unlock()
+			return fh.handleSync(req)
+		}
+	}
+	fh.mu.Unlock()
+	rig.h.Push("home-1", json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: gid, Rows: []json.RawMessage{}})))
+	<-syncEntered
+
+	cancelCtx, cancel := context.WithCancel(t.Context())
+	err1Ch := startAsyncJoin(cancelCtx, rig, joinTestGroup1, "home-1", "claude", "Claude")
+	err2Ch := startAsyncJoin(t.Context(), rig, joinTestGroup1, "home-1", "codex", "Codex")
+	waitGroupSyncWaiters(t, deliv(rig.h), gid, 2)
+
+	cancel()
+	seamCode(t, <-err1Ch, "home_unreachable")
+	waitGroupSyncWaiters(t, deliv(rig.h), gid, 1)
+
+	close(releaseFirst)
+	joinAssertEqual(t, "surviving join succeeds on retry", <-err2Ch, nil)
+}
+
+func runInflightSyncCacheHitCase(t *testing.T, rig *joinRig, fh *joinFakeHome, grp proto.GroupRow) {
+	t.Helper()
+	gid := grp.ID
+	fh.mu.Lock()
+	before := len(fh.syncs)
+	syncEntered := make(chan struct{}, 1) // single reader: <-syncEntered below
+	release := make(chan struct{})        // single reader: <-release in syncFn
+	fh.syncFn = func(req proto.Sync) (json.RawMessage, error) {
+		syncEntered <- struct{}{}
+		<-release
+		rig.h.Rows.Put(gid, "group", gid, json.RawMessage(marshalWire(grp)))
+		ok := proto.Synced{Type: "synced", Success: proto.Success{Re: req.ID, OK: true}, Group: gid, Seq: grp.Seq}
+		return json.RawMessage(marshalWire(ok)), nil
+	}
+	fh.mu.Unlock()
+	rig.h.Push("home-1", json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: gid, Rows: []json.RawMessage{}})))
+	<-syncEntered
+
+	errCh := startAsyncJoin(t.Context(), rig, joinTestGroup2, "home-1", "claude", "Claude")
+	waitGroupSyncWaiters(t, deliv(rig.h), gid, 1)
+	close(release)
+	joinAssertEqual(t, "waiting join succeeds from populated cache", <-errCh, nil)
+
+	fh.mu.Lock()
+	after := len(fh.syncs)
+	fh.syncFn = nil
+	fh.mu.Unlock()
+	joinAssertEqual(t, "no duplicate sync after inflight cache hit", after-before, 1)
+}
+
+func waitGroupSyncWaiters(t *testing.T, d *delivery, group string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		d.mu.Lock()
+		n := len(d.groups[group].waiters)
+		d.mu.Unlock()
+		if n == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d sync waiters on %s", want, group)
 }
