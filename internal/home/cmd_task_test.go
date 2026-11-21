@@ -308,6 +308,7 @@ func TestTaskCmdBranchRefusals(t *testing.T) {
 	taskID := id(76)
 	for name, tc := range map[string]struct {
 		by     identity.Key
+		as     string
 		raw    string
 		id     string
 		branch string
@@ -322,10 +323,11 @@ func TestTaskCmdBranchRefusals(t *testing.T) {
 		"missing task":        {by: laptop, id: id(99), branch: "task/12-report-path-changes", step: "branch", code: "not_found"},
 		"wrong task number":   {by: laptop, id: taskID, branch: "task/13-report-path-changes", step: "branch", code: "bad_request"},
 		"wrong slug":          {by: laptop, id: taskID, branch: "task/12-other", step: "branch", code: "bad_request"},
-		"bare branch name":    {by: laptop, id: taskID, branch: "main", step: "local_check", code: "bad_request"},
-		"by another node":     {by: node, id: taskID, branch: "task/12-report-path-changes", step: "branch", code: "forbidden"},
-		"by browser":          {by: browser, id: taskID, branch: "task/12-report-path-changes", step: "branch", code: "forbidden"},
-		"already past branch": {by: laptop, id: taskID, branch: "task/12-report-path-changes", step: "local_check", code: "conflict"},
+		"bare branch name":    {by: laptop, id: taskID, branch: "main", step: "branch", code: "bad_request"},
+		"by another node":     {by: node, id: taskID, branch: "main", step: "branch", code: "forbidden"},
+		"by browser":          {by: browser, id: taskID, branch: "main", step: "branch", code: "forbidden"},
+		"by working AI":       {by: laptop, as: tskA, id: taskID, branch: "task/12-report-path-changes", step: "branch", code: "forbidden"},
+		"already past branch": {by: laptop, id: taskID, branch: "main", step: "local_check", code: "conflict"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := tskState(t)
@@ -338,7 +340,7 @@ func TestTaskCmdBranchRefusals(t *testing.T) {
 			}
 			cmd := proto.TaskBranch{
 				TaskCommand: proto.TaskCommand{
-					HomeCommand: proto.HomeCommand{Type: "task", Nonce: proto.ID(id(6)), Timestamp: clock, Group: proto.ID(groupID)},
+					HomeCommand: proto.HomeCommand{Type: "task", Nonce: proto.ID(id(6)), Timestamp: clock, Group: proto.ID(groupID), As: proto.ID(tc.as)},
 					Op:          "branch", ID: proto.ID(tc.id),
 				},
 				Branch: tc.branch,
@@ -1029,11 +1031,6 @@ func TestTaskCmdPreempted(t *testing.T) {
 			"by person":            {by: browser, id: taskID, msg: jumpID, state: "active", code: "forbidden"},
 			"while paused":         {by: laptop, id: taskID, msg: jumpID, state: "paused", code: "paused"},
 			"missing jump message": {by: laptop, id: taskID, msg: jumpID, state: "active", code: "not_found"},
-			"system jump message": {
-				by: laptop, id: taskID, msg: jumpID, state: "active",
-				msgs: map[string]proto.MsgRow{jumpID: {RowHeader: proto.RowHeader{ID: jumpID}, By: "system"}},
-				code: "bad_request",
-			},
 			"command nonce taken by message": {
 				by: laptop, id: taskID, msg: jumpID, state: "active",
 				msgs: map[string]proto.MsgRow{

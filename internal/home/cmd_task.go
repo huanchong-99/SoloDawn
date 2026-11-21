@@ -78,12 +78,12 @@ func tskBranch(s *State, c Command) (Result, *Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
 	}
-	if raw, ok := s.Tasks[string(p.ID)]; ok && p.Branch != fmt.Sprintf("task/%d-%s", raw.Num, raw.Slug) {
-		return Result{}, &Refusal{"bad_request", "task branch must name task/<num>-<slug>"}
-	}
 	task, _, refusal := s.tskStep(c, p.ID, Event{Kind: OnBranch})
 	if refusal != nil {
 		return Result{}, refusal
+	}
+	if p.Branch != fmt.Sprintf("task/%d-%s", task.Num, task.Slug) {
+		return Result{}, &Refusal{"bad_request", "task branch must name task/<num>-<slug>"}
 	}
 	task.Branch = p.Branch
 	return Result{Rows: []Row{RowOf(task)}}, nil
@@ -240,9 +240,6 @@ func tskJumpAuthor(d Disk, id string) (string, *Refusal) {
 	if !ok {
 		return "", &Refusal{"not_found", "the message named by task preempted does not exist"}
 	}
-	if msg.By == "system" {
-		return "", &Refusal{"bad_request", "the message named by task preempted has no member author"}
-	}
 	return msg.By, nil
 }
 
@@ -266,6 +263,8 @@ func (s *State) tskSender(w Who, assignee string) Sender {
 	switch {
 	case s.Secretary(w):
 		return BySecretary
+	case w.AI != "":
+		return ByAI
 	case s.Hosts(w, assignee):
 		return ByHost
 	case s.Admin(w):
@@ -292,7 +291,7 @@ func (s *State) tskThreadSystem(c Command, task *proto.TaskRow, mentions []strin
 
 func (s *State) tskFailedMentions(d Disk, task proto.TaskRow) []string {
 	out := []string{}
-	if req := tskRequester(d, task.Brief); s.tskMember(req) {
+	if req := tskRequester(d, task.Brief); s.memExists(req) {
 		out = append(out, req)
 	}
 	if owner := s.human(s.AIs[task.Assignee].User); owner != "" && !slices.Contains(out, owner) {
@@ -306,12 +305,6 @@ func tskRequester(d Disk, brief string) string {
 	var b proto.BriefBody
 	json.Unmarshal(card.Body, &b)
 	return b.Requester
-}
-
-func (s *State) tskMember(id string) bool {
-	_, human := s.People[id]
-	_, ai := s.AIs[id]
-	return human || ai
 }
 
 type tskCardBody struct {
