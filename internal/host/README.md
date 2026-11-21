@@ -211,3 +211,15 @@ The rules are in [mcp-tools.md](../../planning/contracts/mcp-tools.md) and [loca
 - `push_branch` and `submit_task` derive `task/<num>-<slug>` from `num` and `slug` via `taskName`, ignoring `TaskRow.Branch`.
 - `start_task`, `submit_task` and `submit_review` check outbound text arguments with `CheckOutboundSecret` before running Git or signing commands.
 - With `forge == "github"`, `submit_task` runs `TaskForge.WaitHostedChecks` in the background (cancelling any earlier poll for that task in `Part[tskPart](h)`) and sends `task cloud`.
+
+# Approvals
+
+`approve.go` handles permission requests and multiple-choice user questions from both CLIs (`planning/flows/approval.md`, `planning/contracts/mcp-tools.md` section 3):
+
+- `Tools["approve"]` is listed only to structured Claude Code sessions (`c.Agent == "claude" && !c.Interactive`). It maps `AskUserQuestion` to per-question `decision` cards (`options` `"A"`..`"Z"` plus custom free-text answers, posted one card at a time) returning `updatedInput.answers` (and optional `annotations`), and maps `Bash`, `Write`/`Edit`/`NotebookEdit`/`Read`, `WebFetch`/`WebSearch`, and other tool names to `Ask` (`planning/contracts/messages.md` section 2.3).
+- `Listeners["approve"]` starts a goroutine per `Asked` event so `Report` returns at once, brackets the open request synchronously with `Sessions.Calling`, answers Codex `requestUserInput` questions through `Ask.Reply` (posting per-question `decision` cards) and permission requests through `Runner.Answer`, and cancels open `Asked` contexts of a session on `TurnBegan` or `TurnEnded`.
+- `thread` and `body.task` are set on `approval` and `decision` cards only for `TaskSession` and `ReviewSession`; a `GroupSession` posts main-line cards with `thread: null` and empty or omitted `task`.
+- Permission requests from `callApprove` at level 1 are denied immediately; permission requests raised by a CLI fetch any matching `pending` row's `msg` card from the home (consuming an `approved` card and removing stale `denied`, `expired` or `reassigned` records), check `CheckOutboundSecret` on `Command` and `Why`, shorten `Command` to 3 KiB and `Why` to 256 B as unescaped JSON strings, store a `pending` row, open `Host.Await` (with `nil` check) before sending `post` (`kind: approval`), and wait up to `limits.approval_wait_s` (default 600 s).
+- `decodeDecidedInbox` decodes the plain `InboxItem` (`P-1b`) and its `msg` row so `postCardAndWait` reads `card.State` directly; a card that is not decided counts as no decision.
+- `Part[approvalState](h)` holds active `Asked` cancel functions per host. Its `mu` is a leaf lock: nothing called under `mu` takes `Host`, `Sessions`, `Rows` or `Store` locks.
+- `awaitApprovalItem` is the single reader of the channel returned by `Host.Await`: when the wait timer or context ends, it calls `done` and checks the channel once more before returning the timeout denial.

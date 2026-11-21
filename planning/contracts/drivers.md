@@ -94,7 +94,7 @@ claude -p --verbose
 | --- | --- | --- |
 | 1 | `--permission-mode default --tools Read,Glob,Grep,AskUserQuestion`; `approve` answers deny. (`default` is accepted and reported by `system/init`, though `--help` of 2.1.311 no longer lists it.) | `[verified]` `--tools Read,Glob,Grep` gave those three and the node's tools: no Write, no Bash; `AskUserQuestion` is added for decision cards. Reading inside the folder needs no request; reading outside it reaches `approve` and is denied |
 | 2 | `--permission-mode acceptEdits`, and `--settings` with `sandbox.enabled`, `sandbox.autoAllowBashIfSandboxed` and `sandbox.failIfUnavailable` all true; everything else reaches `approve`. On native Windows, where the CLI has no sandbox, the node refuses level 2 for Claude Code with a clear reason and offers only the levels it can enforce (`risks.md` Q-4): `perm.set` asking for it answers `conflict` | `[verified]` file tools: inside the folder without asking, outside it through `approve`. Sandboxed Bash: a write inside the folder works, and so does one in the sandbox's own temp folder, which cannot be closed; a write to a folder named in `sandbox.filesystem.denyWrite` is refused; **reads work anywhere**; the network is blocked with no request and no event, and the command waits for its own timeout. `[unverified]` that a Bash write anywhere else outside the folder is refused: the spike's folder lay inside that temp folder, and the only evidence is the sandbox's debug line `write: denyAllExcept` |
-| 3 | `--permission-mode bypassPermissions`; in the terminal also `--settings '{"skipDangerousModePermissionPrompt":true}'`, without which the terminal asks the owner to accept the mode and stores the answer in the owner's configuration | `[verified]` no requests |
+| 3 | `--permission-mode bypassPermissions`; in the terminal also `--settings '{"skipDangerousModePermissionPrompt":true}'`, without which the terminal asks the owner to accept the mode and stores the answer in the owner's configuration | `[verified]` ordinary file and Bash actions make no permission requests; any permission request or multiple-choice question the CLI still raises becomes a card (`approval` or `decision`, owner's decision of 2026-11-21) |
 
 `[unverified]` That a command the model asks to run outside the sandbox
 reaches `approve`. R-41 rests on it: it is how an action that needs the
@@ -180,7 +180,7 @@ JSON-RPC over stdio, one JSON object per line `[verified]`:
 | --- | --- | --- | --- |
 | 1 | `read-only` | `never` | a shell tool exists and runs: reading works inside and outside the folder, a write fails. Level 1 on Codex means "no writes", not "no execute tool" |
 | 2 | `workspace-write`, with `config.sandbox_workspace_write` = `{"exclude_slash_tmp":true,"exclude_tmpdir_env_var":true}` | `on-request` | writes inside the folder without a request; a write outside it fails and the model asks. Without that `config`, `/tmp` and `$TMPDIR` are writable as well. The network is closed with no request |
-| 3 | `danger-full-access` | `never` | no requests |
+| 3 | `danger-full-access` | `never` | ordinary file and shell actions make no requests; any permission request or multiple-choice question the CLI still raises becomes a card (`approval` or `decision`, owner's decision of 2026-11-21) |
 
 - What the owner configured for themselves applies to the node's sessions
   too: `~/.codex/AGENTS.md`, the service tier, reasoning effort, their own
@@ -249,7 +249,7 @@ permission interface, so the level decides whether they are offered at all.
 
 | Operation | Level 1 | Level 2 | Level 3 |
 | --- | --- | --- | --- |
-| answer the CLI's permission requests | deny | card to the owner | none arise |
+| answer the CLI's permission requests and multiple-choice questions | deny permission requests; `AskUserQuestion` and `requestUserInput` questions become `decision` cards | card to the owner (`approval` or `decision`) | card to the owner (`approval` or `decision`) for any request or question the CLI raises (owner's decision, 2026-11-21) |
 | run the project's check commands (`run_checks`) | not offered | yes | yes |
 | push the task's own branch; open the pull request (`push_branch`, `submit_task`) | not offered | yes | yes |
 | merge a reviewed commit when the home asks | not applicable | yes | yes |

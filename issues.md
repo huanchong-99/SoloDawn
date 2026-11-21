@@ -6,6 +6,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-21 · limitation · `AskUserQuestion` reaching `approve` under each permission mode is not yet verified by a live CLI capture
+
+- Symptom: no spike capture or scripted fake-CLI test shows Claude Code invoking `--permission-prompt-tool mcp__solodawn__approve` when the model calls `AskUserQuestion` under `--permission-mode bypassPermissions` (level 3, the default), or honouring the `updatedInput.answers` reply (`planning/contracts/mcp-tools.md` section 3).
+- Cause: the macOS spike captures (`spikes/b-04-macos/captures/claude/*.jsonl`) mention `AskUserQuestion` only in the `system/init` tool list, and `internal/host/approve_test.go` calls `Tools["approve"]` directly.
+- Status: open; marked `[unverified]` in `planning/contracts/mcp-tools.md` section 3 and added to the `live` checks of `A4.1` (`B-17`) and `I-11`.
+
+### 2026-11-21 · limitation · Claude Code `AskUserQuestion` with `multiSelect` uses a single-choice `decision` card
+
+- Symptom: when Claude Code calls `approve` for an `AskUserQuestion` entry with `multiSelect: true`, the host posts a single-choice `decision` card (`internal/host/approve.go`, `postAndWaitDecision`) whose `act choose` carries at most one option id, so `updatedInput.answers[question]` holds one option label unless the owner enters multiple picks in the free-text field.
+- Cause: `decision` cards (`planning/contracts/messages.md` section 2.4, `planning/contracts/commands.md` section 1.4) take a single `arg` option id plus optional `text`, and owner override 1 of 2026-11-21 does not add multi-select cards.
+- Status: open, accepted for 1.0 (`planning/contracts/mcp-tools.md` section 3); multiple picks are given in the free-text field.
+
 ### 2026-11-21 · limitation · An immediate `submit_task` after `run_checks` can read `checks.local` before the home's row push
 
 - Symptom: a scripted CLI that calls `submit_task` immediately after `run_checks` returns can read a stale `task` row in `Host.Rows` and fail with `conflict` (`local checks have not passed`), whereas with a real model the gap between the two tool calls is seconds.
