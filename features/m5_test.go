@@ -36,7 +36,10 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-var m5CurrentWorld atomic.Pointer[m5World]
+var (
+	m5CurrentWorld atomic.Pointer[m5World]
+	m5ClosedHosts  sync.Map
+)
 
 func init() {
 	prog := m5ProgName(os.Args[0])
@@ -63,7 +66,10 @@ func m5OnHostEvent(_ *host.Host, _ host.SessionKey, e host.Event) {
 	}
 }
 
-func m5OnHostHold(_ *host.Host, key host.SessionKey) (string, bool) {
+func m5OnHostHold(h *host.Host, key host.SessionKey) (string, bool) {
+	if _, closed := m5ClosedHosts.Load(h); closed {
+		return "offline", true
+	}
 	w := m5CurrentWorld.Load()
 	if w == nil {
 		return "", false
@@ -590,6 +596,8 @@ type m5World struct {
 	turnsAtMerged     map[string]int
 	sawTaskSess       map[int]host.SessionKey
 	sawTaskDir        map[int]string
+	sawRevSess        map[int]host.SessionKey
+	sawRevDir         map[int]string
 	tools             []m5ToolRecord
 	listedTools       map[host.SessionKey][]string
 	beforeHooks       map[string][]m5HookFunc
@@ -616,6 +624,8 @@ func newM5World(sc *godog.ScenarioContext, f fixtures) *m5World {
 		turnsAtMerged:     map[string]int{},
 		sawTaskSess:       map[int]host.SessionKey{},
 		sawTaskDir:        map[int]string{},
+		sawRevSess:        map[int]host.SessionKey{},
+		sawRevDir:         map[int]string{},
 		listedTools:       map[host.SessionKey][]string{},
 		beforeHooks:       map[string][]m5HookFunc{},
 		heldMembers:       map[string]bool{},
@@ -783,11 +793,55 @@ func (w *m5World) settleBeforeAfterHooks() {
 		return
 	}
 	n0 := w.cluster.Nodes[0]
+	m5ClosedHosts.Store(n0.Host, true)
 	n0.Link.Close()
 	n0.Home.Close()
-	w.recordHookErr(m5WaitAllDormant(n0.Host))
 	// Home.Close does not yet join its pump goroutines (internal/home/run.go:275); remove this settle when it does (MAINLINE item 64).
 	time.Sleep(30 * time.Millisecond)
+	w.recordHookErr(w.waitEndedTasksCleaned(n0.Host))
+	w.recordHookErr(m5WaitAllDormant(n0.Host))
+}
+
+func (w *m5World) waitEndedTasksCleaned(h *host.Host) error {
+	if w.groupID == "" {
+		return nil
+	}
+	pDir := w.projectDir()
+	return w.waitFor("ended task sessions and folders cleaned", func() bool {
+		return m5EndedTasksCleaned(h, w.groupID, pDir)
+	})
+}
+
+func m5IsObsoleteTask(raw json.RawMessage) (proto.TaskRow, bool) {
+	var t proto.TaskRow
+	ok := json.Unmarshal(raw, &t) == nil && (t.State == "merged" || t.State == "cancelled")
+	return t, ok
+}
+
+func m5EndedTasksCleaned(h *host.Host, group, pDir string) bool {
+	for _, raw := range h.Rows.Of(group, "task") {
+		if t, ok := m5IsObsoleteTask(raw); ok && !m5OneTaskCleaned(h, pDir, t) {
+			return false
+		}
+	}
+	return true
+}
+
+func m5OneTaskCleaned(h *host.Host, pDir string, t proto.TaskRow) bool {
+	if slices.ContainsFunc(h.Sessions.All(), func(s host.Session) bool { return s.Task == t.ID }) {
+		return false
+	}
+	name := strconv.Itoa(t.Num) + "-" + string(t.Slug)
+	wt := filepath.Join(pDir, "wt", name)
+	rev := filepath.Join(pDir, "review", strconv.Itoa(t.Num))
+	if !m5DirsGone([]string{wt, rev}) {
+		return false
+	}
+	if t.State != "merged" {
+		return true
+	}
+	_, err := m5GitOut(filepath.Join(pDir, "repo"), "rev-parse", "--verify", "refs/heads/task/"+name)
+	return err != nil
 }
 
 func m5FinalStep(w *m5World, fn func() error) func() error {
@@ -930,9 +984,13 @@ func (w *m5World) recordObservedSession(caller host.Caller, num int, dir string)
 		return
 	}
 	w.mu.Lock()
-	if caller.Kind == host.TaskSession {
+	switch caller.Kind {
+	case host.TaskSession:
 		w.sawTaskSess[num] = caller.SessionKey
 		w.sawTaskDir[num] = dir
+	case host.ReviewSession:
+		w.sawRevSess[num] = caller.SessionKey
+		w.sawRevDir[num] = dir
 	}
 	w.mu.Unlock()
 }
@@ -1459,7 +1517,8 @@ func m5RegisterFullFlowSteps(sc *godog.ScenarioContext, w *m5World) {
 	sc.Step(`^both tasks are merged on origin with two summary cards carrying pull-request numbers and no approval card$`, func() error {
 		return w.stepVerifyTwoTasksMerged(true)
 	})
-	sc.Step(`^each passing review was followed by its merge with no AI turn in between and a task_merged row in the thread$`, m5FinalStep(w, w.stepVerifyNoTurnBeforeMerge))
+	sc.Step(`^each passing review was followed by its merge with no AI turn in between and a task_merged row in the thread$`, w.stepVerifyNoTurnBeforeMerge)
+	sc.Step(`^each task ran in its own session and worktree, and after the merge those sessions and folders are gone$`, m5FinalStep(w, w.stepVerifySessionsAndFoldersGone))
 }
 
 func (w *m5World) stepRequestAndTwoTaskBrief() error {
@@ -1642,9 +1701,6 @@ func (w *m5World) verifyBaseHasFiles(remote bool, names ...string) error {
 }
 
 func (w *m5World) stepVerifyNoTurnBeforeMerge() error {
-	if err := w.verifyDistinctTaskWorkspaces(); err != nil {
-		return err
-	}
 	for _, t := range w.browserTasks() {
 		if err := w.verifyTaskMergedOrder(t.ID); err != nil {
 			return err
@@ -1696,6 +1752,52 @@ func (w *m5World) verifyDistinctTaskWorkspaces() error {
 		return fmt.Errorf("tasks did not run in distinct sessions and worktrees: %+v %+v %q %q", s1, s2, d1, d2)
 	}
 	return nil
+}
+
+func (w *m5World) stepVerifySessionsAndFoldersGone() error {
+	if err := w.verifyDistinctTaskWorkspaces(); err != nil {
+		return err
+	}
+	w.mu.Lock()
+	keys := []host.SessionKey{w.sawTaskSess[1], w.sawTaskSess[2], w.sawRevSess[1], w.sawRevSess[2]}
+	dirs := []string{w.sawTaskDir[1], w.sawTaskDir[2], w.sawRevDir[1], w.sawRevDir[2]}
+	w.mu.Unlock()
+	if !m5DistinctPair(keys[2], keys[3], host.SessionKey{}) || !m5DistinctPair(dirs[2], dirs[3], "") {
+		return fmt.Errorf("reviews did not run in distinct sessions and folders: %+v %q", keys[2:], dirs[2:])
+	}
+	return w.waitCleanupComplete(keys, dirs)
+}
+
+func (w *m5World) waitCleanupComplete(keys []host.SessionKey, dirs []string) error {
+	h := w.cluster.Nodes[0].Host
+	repo := filepath.Join(w.projectDir(), "repo")
+	check := func() bool {
+		return m5SessionsGone(h, keys) && m5DirsGone(dirs) && m5TaskBranchesGone(repo)
+	}
+	return w.waitFor("task and review sessions and folders removed after merge", check)
+}
+
+func m5TaskBranchesGone(repo string) bool {
+	refs, err := m5GitOut(repo, "for-each-ref", "--format=%(refname)", "refs/heads/task")
+	return err == nil && refs == ""
+}
+
+func m5SessionsGone(h *host.Host, keys []host.SessionKey) bool {
+	for _, k := range keys {
+		if _, ok := h.Sessions.Get(k); ok {
+			return false
+		}
+	}
+	return true
+}
+
+func m5DirsGone(dirs []string) bool {
+	for _, d := range dirs {
+		if _, err := os.Stat(d); !errors.Is(err, fs.ErrNotExist) {
+			return false
+		}
+	}
+	return true
 }
 
 func m5RegisterCheckAndReviewSteps(sc *godog.ScenarioContext, w *m5World) {
