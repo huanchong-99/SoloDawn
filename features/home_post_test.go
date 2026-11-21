@@ -316,23 +316,23 @@ func (w *homePostWorld) hostGetsItem(spec string) error {
 	if err != nil {
 		return err
 	}
-	var push home.ItemsPush
-	if err := json.Unmarshal([]byte(raw), &push); err != nil {
+	var push proto.Inbox
+	if err := proto.Decode([]byte(raw), &push); err != nil {
 		return err
 	}
 	if len(push.Items) != 1 {
 		return fmt.Errorf("host got %s", raw)
 	}
-	it := push.Items[0]
-	if !reflect.DeepEqual([]string{w.itemSpec(it), it.Msg}, []string{spec, w.lastMsg}) {
+	it := push.Items[0].Item
+	if !reflect.DeepEqual([]string{w.itemSpec(it), string(it.Msg)}, []string{spec, w.lastMsg}) {
 		return fmt.Errorf("host item %+v; want %q for %s", it, spec, w.lastMsg)
 	}
 	return nil
 }
 
-func (w *homePostWorld) itemSpec(it home.QueuedItem) string {
-	got := it.Why + " " + w.memberName(it.AI)
-	if it.Task == w.task {
+func (w *homePostWorld) itemSpec(it proto.Item) string {
+	got := it.Why + " " + w.memberName(string(it.AI))
+	if string(it.Task) == w.task {
 		got += " task 1"
 	}
 	return got

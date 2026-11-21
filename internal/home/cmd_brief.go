@@ -267,7 +267,7 @@ func (s *State) briefTasks(c Command, d briefDecision) (Result, *Refusal) {
 		}
 		res.Rows, res.Items = append(res.Rows, rows...), append(res.Items, items...)
 	}
-	res.Items = append(res.Items, s.briefTold(c, d.card.ID)...)
+	res.Items = append(res.Items, s.briefTold(d.card.ID)...)
 	return res, nil
 }
 
@@ -317,15 +317,15 @@ func (s *State) briefCreate(c Command, d briefDecision, ids []string, i int) ([]
 	if err != nil {
 		return nil, nil, &Refusal{err.Error(), "the task machine refused a task of the brief"}
 	}
-	return []Row{RowOf(task), RowOf(briefTaskMsg(s, c, task.ID))}, briefItems(fx.Items, task.ID, c), nil
+	return []Row{RowOf(task), RowOf(briefTaskMsg(s, c, task.ID))}, briefItems(fx.Items, task.ID), nil
 }
 
-// briefItems completes the items of row 1: each is about the task, names its
-// task message, and has the act that confirmed the brief as its cause.
-func briefItems(items []TaskItem, task string, c Command) []Item {
+// briefItems completes the items of row 1: each is about the task and names its
+// task message.
+func briefItems(items []TaskItem, task string) []Item {
 	out := make([]Item, len(items))
 	for i, it := range items {
-		out[i] = Item{AI: it.AI, Why: it.Why, Task: task, Msg: task, Cause: &c.Env}
+		out[i] = Item{AI: it.AI, Why: it.Why, Task: task, Msg: task}
 	}
 	return out
 }
@@ -349,11 +349,11 @@ func briefRevise(s *State, c Command) (Result, *Refusal) {
 	if d.act.Text != "" {
 		note = &d.act.Text
 	}
-	return Result{Rows: []Row{RowOf(briefDecided(d.card, c, briefRevised, note))}, Items: s.briefTold(c, d.card.ID)}, nil
+	return Result{Rows: []Row{RowOf(briefDecided(d.card, c, briefRevised, note))}, Items: s.briefTold(d.card.ID)}, nil
 }
 
 // briefDecided is the brief as an act left it: who decided it, when, and the
-// signed act, which is the cause of every item that follows from it.
+// signed act.
 func briefDecided(card proto.MsgRow, c Command, status string, note *string) proto.MsgRow {
 	by, at, act := c.Who.Human, c.Now, c.Env
 	card.State = &proto.CardState{Status: status, By: &by, At: &at, Note: note, Act: &act}
@@ -362,11 +362,11 @@ func briefDecided(card proto.MsgRow, c Command, status string, note *string) pro
 
 // briefTold is the confirmed item that tells the secretary what became of
 // its brief. A group without a secretary has nobody to tell.
-func (s *State) briefTold(c Command, brief string) []Item {
+func (s *State) briefTold(brief string) []Item {
 	if s.Group.Secretary == "" {
 		return nil
 	}
-	return []Item{{AI: s.Group.Secretary, Why: "confirmed", Msg: brief, Cause: &c.Env}}
+	return []Item{{AI: s.Group.Secretary, Why: "confirmed", Msg: brief}}
 }
 
 // briefJSON encodes a value as a row holds it: without HTML escaping, as a

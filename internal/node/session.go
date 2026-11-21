@@ -157,8 +157,22 @@ func (s *Sessions) sesPush(ctx context.Context, c *sesConn, typ string, data jso
 		s.sesDevlog(c, data)
 		return
 	}
-	if h := s.Pushes[typ]; h != nil && s.sesEnrolled(c) {
+	if !s.sesEnrolled(c) {
+		return
+	}
+	if typ == "ack" {
+		s.sesAck(c, data)
+		return
+	}
+	if h := s.Pushes[typ]; h != nil {
 		h(ctx, c.home, c.raw, c.device, data)
+	}
+}
+
+func (s *Sessions) sesAck(c *sesConn, data json.RawMessage) {
+	var ack proto.Ack
+	if proto.Decode(data, &ack) == nil {
+		s.cfg.Home.Ack(c.home, ack)
 	}
 }
 
