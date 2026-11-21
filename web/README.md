@@ -64,9 +64,11 @@ false, and hands over the addresses: the rendezvous's `url` and `signal`, each n
 an after-hook (`AfterEachScenario`, `afterEach`), which also runs when it fails or times out:
 `stop` sends each group SIGTERM, then SIGKILL once its leader has exited or 3 s have passed, and
 removes the directory. The run's teardown kills what a test process that died left running.
-`launch(inject('browser'))` from `e2e/config.ts` opens the project's browser. `pnpm test` leaves
-`e2e/` out. The tests change nothing of the test process's own environment; the scenarios of
-`../features/web_e2e.feature` check that.
+`launch(inject('browser'))` from `e2e/config.ts` opens the project's browser, and `config.ts` sets
+`fileParallelism: false` so two Playwright WebKit UIProcesses never race to create the macOS
+Keychain WebCrypto master key on a fresh runner. `pnpm test` leaves `e2e/` out. The tests change
+nothing of the test process's own environment; the scenarios of `../features/web_e2e.feature` check
+that.
 
 The runtime dependencies are `valibot`, for the wire types, and `@xterm/xterm` 6.0.0 with
 `@xterm/addon-fit` 0.11.0 (MIT) for the terminal page. Nothing imports xterm yet; it is about

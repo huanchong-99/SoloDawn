@@ -562,8 +562,9 @@ Object.assign(globalThis, {
 async function waitForPairingCode(page: Page, expectedSignal: string): Promise<string> {
   await page.waitForFunction(
     ({ sig }) => {
-      const pre = document.querySelector('#prompt');
-      const text = pre?.textContent ?? '';
+      const notice = document.querySelector('main > .card.need h1, [role="alert"]');
+      if (notice) throw new Error(`onboarding blocked: ${notice.textContent}`);
+      const text = document.querySelector('#prompt')?.textContent ?? '';
       return (
         text.includes(`--rendezvous ${sig}`) &&
         /([0-9A-HJKMNP-TV-Z]{4}-){3}[0-9A-HJKMNP-TV-Z]{4}/.test(text)
