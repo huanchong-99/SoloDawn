@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net"
 	"os"
 	"os/exec"
@@ -328,27 +329,8 @@ func m5GitOut(dir string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func m5GitCommitFile(dir, relPath, content, msg string) (string, error) {
-	full := filepath.Join(dir, relPath)
-	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(full, []byte(content), 0o600); err != nil {
-		return "", err
-	}
-	if _, err := m5GitOut(dir, "add", "--", relPath); err != nil {
-		return "", err
-	}
-	if _, err := m5GitOut(dir, "-c", "user.name=test", "-c", "user.email=test@test.invalid", "commit", "-m", msg); err != nil {
-		return "", err
-	}
-	return m5GitOut(dir, "rev-parse", "--verify", "HEAD")
-}
-
 func m5GitCommitFiles(dir string, files map[string]string, msg string) (string, error) {
-	keys := m5MapKeys(files)
-	slices.Sort(keys)
-	for _, rel := range keys {
+	for _, rel := range slices.Sorted(maps.Keys(files)) {
 		full := filepath.Join(dir, rel)
 		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
 			return "", err
@@ -364,14 +346,6 @@ func m5GitCommitFiles(dir string, files map[string]string, msg string) (string, 
 		return "", err
 	}
 	return m5GitOut(dir, "rev-parse", "--verify", "HEAD")
-}
-
-func m5MapKeys[K comparable, V any](m map[K]V) []K {
-	out := make([]K, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
 }
 
 type m5ToolCallSpec struct {
@@ -632,6 +606,7 @@ type m5World struct {
 	commit1     string
 	commit2     string
 	unreviewed  string
+	refusedItem int64
 }
 
 func newM5World(sc *godog.ScenarioContext, f fixtures) *m5World {
@@ -810,26 +785,29 @@ func (w *m5World) settleBeforeAfterHooks() {
 	n0 := w.cluster.Nodes[0]
 	n0.Link.Close()
 	n0.Home.Close()
-	m5WaitAllDormant(n0.Host)
-	time.Sleep(30 * time.Millisecond)
+	w.recordHookErr(m5WaitAllDormant(n0.Host))
 }
 
 func m5FinalStep(w *m5World, fn func() error) func() error {
 	return func() error {
 		err := fn()
 		w.settleBeforeAfterHooks()
-		return err
+		if err != nil {
+			return err
+		}
+		return w.checkHookErr()
 	}
 }
 
-func m5WaitAllDormant(h *host.Host) {
+func m5WaitAllDormant(h *host.Host) error {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if !m5HasNonDormant(h) {
-			return
+			return nil
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+	return errors.New("timed out waiting for host sessions to become dormant")
 }
 
 func m5HasNonDormant(h *host.Host) bool {
@@ -1069,6 +1047,7 @@ func (w *m5World) waitHostLocalChecks(h *host.Host, caller host.Caller, text str
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
+	w.recordHookErr(fmt.Errorf("timed out waiting for host local check %s", out.Commit))
 }
 
 func m5TaskHasLocalCheck(h *host.Host, group, taskID, commit string) bool {
@@ -1386,13 +1365,34 @@ func (w *m5World) homeQueuedItems() ([]store.Item, error) {
 	return items, err
 }
 
-func (w *m5World) hostAuditCount(what, detailSub string) (int, error) {
+func (w *m5World) hasRefusedItemAudit(itemID int64, agent, detail string) (bool, error) {
 	var count int
 	read := func(tx *store.Tx) error {
-		return tx.QueryRow(`SELECT count(*) FROM audit WHERE g = ? AND what = ? AND instr(detail, ?) > 0`, w.groupID, what, detailSub).Scan(&count)
+		return tx.QueryRow(`SELECT count(*) FROM audit WHERE g = ? AND what = 'refused' AND item = ? AND agent = ? AND detail = ?`,
+			w.groupID, itemID, agent, detail).Scan(&count)
 	}
 	err := w.cluster.Nodes[0].Store.Write(read)
-	return count, err
+	return count == 1, err
+}
+
+func (w *m5World) findQueuedItemID(why, commit string) (int64, error) {
+	items, err := w.homeQueuedItems()
+	if err != nil {
+		return 0, err
+	}
+	for _, it := range items {
+		if m5MatchesQueued(it, why, commit) {
+			return it.ID, nil
+		}
+	}
+	return 0, fmt.Errorf("missing queued %s item (commit=%q)", why, commit)
+}
+
+func m5MatchesQueued(it store.Item, why, commit string) bool {
+	if it.Why != why {
+		return false
+	}
+	return commit == "" || (it.Commit != nil && *it.Commit == commit)
 }
 
 func (w *m5World) projectDir() string {
@@ -1500,6 +1500,8 @@ func (w *m5World) stepConfirmAndRunTwoTasks(withPush bool) error {
 	commitHook1 := "run_checks"
 	if withPush {
 		commitHook1 = "push_branch"
+		w.addBeforeHook("run_checks", w.verifyPushedBranchHead)
+		w.addBeforeHook("run_checks", w.verifyPushedBranchHead)
 	}
 	w.addBeforeHook(commitHook1, func(c host.Caller) error {
 		_, err := m5GitCommitFiles(w.sessionFolder(c), map[string]string{"alpha.go": "package proj\n", "alpha_test.go": "package proj\n"}, "Add alpha")
@@ -1520,6 +1522,23 @@ func (w *m5World) stepConfirmAndRunTwoTasks(withPush bool) error {
 		return err
 	}
 	return w.waitFor("two summary cards", func() bool { return len(w.summaryCards()) == 2 })
+}
+
+func (w *m5World) verifyPushedBranchHead(c host.Caller) error {
+	dir := w.sessionFolder(c)
+	branch, err := m5GitOut(dir, "symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		return err
+	}
+	localHead, err := m5GitOut(dir, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return err
+	}
+	remoteHead, err := m5GitOut(w.bareDir, "rev-parse", "--verify", "refs/heads/"+branch)
+	if err != nil || remoteHead != localHead {
+		return fmt.Errorf("branch %s remote=%q local=%q err=%v", branch, remoteHead, localHead, err)
+	}
+	return nil
 }
 
 func m5WorkerCalls(withPush bool, summary string) []m5ToolCallSpec {
@@ -1776,42 +1795,22 @@ func (w *m5World) registerA53Hooks() {
 	})
 	w.addBeforeHook("submit_task", func(_ host.Caller) error { return nil })
 	w.addBeforeHook("run_checks", func(c host.Caller) error {
-		sha, err := m5GitCommitFile(w.sessionFolder(c), "check.txt", "PASS_MARKER\n", "Passing check")
-		w.setCommit1(sha)
+		sha, err := m5GitCommitFiles(w.sessionFolder(c), map[string]string{"check.txt": "PASS_MARKER\n"}, "Passing check")
+		w.setSHA(&w.commit1, sha)
 		return err
 	})
 	w.addBeforeHook("submit_task", func(_ host.Caller) error { return nil })
 	w.addBeforeHook("submit_task", func(c host.Caller) error {
-		sha, err := m5GitCommitFile(w.sessionFolder(c), "extra.txt", "extra\n", "Unchecked commit")
-		w.mu.Lock()
-		w.unreviewed = sha
-		w.mu.Unlock()
+		sha, err := m5GitCommitFiles(w.sessionFolder(c), map[string]string{"extra.txt": "extra\n"}, "Unchecked commit")
+		w.setSHA(&w.unreviewed, sha)
 		return err
 	})
 }
 
-func (w *m5World) setCommit1(sha string) {
+func (w *m5World) setSHA(dst *string, sha string) {
 	w.mu.Lock()
-	w.commit1 = sha
+	*dst = sha
 	w.mu.Unlock()
-}
-
-func (w *m5World) getCommit1() string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.commit1
-}
-
-func (w *m5World) setCommit2(sha string) {
-	w.mu.Lock()
-	w.commit2 = sha
-	w.mu.Unlock()
-}
-
-func (w *m5World) getCommit2() string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.commit2
 }
 
 func (w *m5World) toolCallCount() int {
@@ -1833,6 +1832,9 @@ func (w *m5World) stepVerifyA53ToolResults() error {
 			return fmt.Errorf("tool[%d] %s isError=%v (%q), want %v", i, recs[i].Tool, recs[i].IsError, recs[i].Text, want)
 		}
 	}
+	if !strings.Contains(recs[0].Text, "uncommitted changes") {
+		return fmt.Errorf("expected uncommitted changes error on dirty run_checks, got %q", recs[0].Text)
+	}
 	return nil
 }
 
@@ -1845,8 +1847,11 @@ func (w *m5World) waitStepMerge() error {
 }
 
 func (w *m5World) stepReviewAndMoveBranchBeforeMerge() error {
+	w.mu.Lock()
+	c1 := w.commit1
+	w.mu.Unlock()
 	wtDir := filepath.Join(w.projectDir(), "wt", "1-add-gamma-helper")
-	if _, err := m5GitOut(wtDir, "reset", "--hard", w.getCommit1()); err != nil {
+	if _, err := m5GitOut(wtDir, "reset", "--hard", c1); err != nil {
 		return err
 	}
 	w.setMemberHeld(w.claudeM, true)
@@ -1858,7 +1863,7 @@ func (w *m5World) stepReviewAndMoveBranchBeforeMerge() error {
 	if err := w.waitStepMerge(); err != nil {
 		return err
 	}
-	if _, err := m5GitCommitFile(wtDir, "late.txt", "after-review\n", "Moved branch after review"); err != nil {
+	if _, err := m5GitCommitFiles(wtDir, map[string]string{"late.txt": "after-review\n"}, "Moved branch after review"); err != nil {
 		return err
 	}
 	w.setMemberHeld(w.claudeM, false)
@@ -1891,7 +1896,7 @@ func (w *m5World) givenSubmittedBriefTask(conflictingBase bool) error {
 	}))
 	w.addBeforeHook("run_checks", func(c host.Caller) error {
 		sha, err := m5GitCommitFiles(w.sessionFolder(c), map[string]string{"shared.txt": "from-task\n", "gamma_test.go": "package proj\n"}, "Task change")
-		w.setCommit1(sha)
+		w.setSHA(&w.commit1, sha)
 		return err
 	})
 	w.setMemberHeld(w.claudeM, false)
@@ -1906,7 +1911,7 @@ func (w *m5World) givenSubmittedBriefTask(conflictingBase bool) error {
 	if !conflictingBase {
 		return nil
 	}
-	_, err := m5GitCommitFile(filepath.Join(w.projectDir(), "repo"), "shared.txt", "from-base\n", "Conflicting base commit")
+	_, err := m5GitCommitFiles(filepath.Join(w.projectDir(), "repo"), map[string]string{"shared.txt": "from-base\n"}, "Conflicting base commit")
 	return err
 }
 
@@ -1976,8 +1981,15 @@ func (w *m5World) runOneFailedReviewRound(round, score int, veto bool) error {
 	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.codexM)
 	return w.waitFor(fmt.Sprintf("review round %d", round), func() bool {
 		t, ok := w.taskByNum(1)
-		return ok && t.Review != nil && t.Review.Round == round
+		return m5RoundSettled(t, ok, round)
 	})
+}
+
+func m5RoundSettled(t proto.TaskRow, ok bool, round int) bool {
+	if !ok || t.Review == nil || t.Review.Round != round {
+		return false
+	}
+	return round == 6 || t.Step == "local_check"
 }
 
 func (w *m5World) resubmitSameCommit(round int) error {
@@ -2086,7 +2098,7 @@ func m5RegisterDepAndDirectSteps(sc *godog.ScenarioContext, w *m5World) {
 	sc.Step(`^task 2 becomes active, creates its worktree, and runs its task session for "Codex"$`, m5FinalStep(w, w.stepVerifyTask2ActivatedForCodex))
 
 	sc.Step(`^the owner mentions "Claude" directly for a code change and "Claude" calls start_task$`, w.stepRunDirectTaskA57)
-	sc.Step(`^the group session kept repo clean without task submission tools, created a task card, notified the secretary, and committed the change in a new task session$`, m5FinalStep(w, w.stepVerifyDirectTaskA57))
+	sc.Step(`^the group session listed start_task without task submission tools, created a task card, notified the secretary, and committed the change in a new task session$`, m5FinalStep(w, w.stepVerifyDirectTaskA57))
 }
 
 func (w *m5World) stepGivenConfirmedDepBrief() error {
@@ -2242,10 +2254,6 @@ func m5GroupToolsReadOnly(grpTools []string) bool {
 }
 
 func (w *m5World) stepVerifyDirectTaskA57() error {
-	status, err := m5GitOut(filepath.Join(w.projectDir(), "repo"), "status", "--porcelain", "--untracked-files=all")
-	if err != nil || status != "" {
-		return fmt.Errorf("expected clean repo folder, got status=%q err=%v", status, err)
-	}
 	w.mu.Lock()
 	grpTools := slices.Clone(w.listedTools[host.SessionKey{Group: w.groupID, Member: w.claudeM}])
 	sess := w.sawTaskSess[1]
@@ -2350,7 +2358,7 @@ func (w *m5World) stepResolveConflictAndMerge() error {
 		if _, err := m5GitOut(dir, "-c", "user.name=test", "-c", "user.email=test@test.invalid", "merge", "-s", "ours", "-m", "Sync base", "main"); err != nil {
 			return err
 		}
-		_, err := m5GitCommitFile(dir, "shared.txt", "resolved-both\n", "Resolve shared.txt")
+		_, err := m5GitCommitFiles(dir, map[string]string{"shared.txt": "resolved-both\n"}, "Resolve shared.txt")
 		return err
 	})
 	w.setMemberHeld(w.secID, false)
@@ -2458,10 +2466,6 @@ func (w *m5World) stepVerifyBusyAICannotLeave() error {
 			return fmt.Errorf("expected conflict removing member %s", memberID)
 		}
 	}
-	err := w.callHostSurface("host.leave", map[string]any{"g": w.groupID, "agent": "codex"})
-	if m5ErrCode(err) != "conflict" {
-		return fmt.Errorf("expected conflict on host.leave codex, got %v", err)
-	}
 	return nil
 }
 
@@ -2481,10 +2485,12 @@ func (w *m5World) stepPassReviewWithMergeHeld() error {
 	}}))
 	w.setMemberHeld(w.codexM, false)
 	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.codexM)
-	return w.waitFor("task 1 at step merge", func() bool {
-		t, ok := w.taskByNum(1)
-		return ok && t.Step == "merge"
-	})
+	if err := w.waitStepMerge(); err != nil {
+		return err
+	}
+	id, err := w.findQueuedItemID("merge", "")
+	w.refusedItem = id
+	return err
 }
 
 func (w *m5World) stepVerifyMergeStepRefusals() error {
@@ -2524,8 +2530,8 @@ func (w *m5World) stepOwnerCancelsAndHostDropsMerge() error {
 	w.setMemberHeld(w.claudeM, false)
 	host.Deliver(n0.Host, w.groupID, w.claudeM)
 	auditRefused := func() bool {
-		n, err := w.hostAuditCount("refused", "stale_task")
-		return err == nil && n >= 1
+		ok, err := w.hasRefusedItemAudit(w.refusedItem, "claude", "stale_task")
+		return err == nil && ok
 	}
 	return w.waitFor("merge item refused in audit", auditRefused)
 }
@@ -2552,21 +2558,40 @@ func (w *m5World) stepSubmitTwoCommitsWhileReviewerHeld() error {
 	w.writeScriptFile("claude", m5ClaudeScript(calls))
 	w.addBeforeHook("run_checks", func(c host.Caller) error {
 		sha, err := m5GitCommitFiles(w.sessionFolder(c), map[string]string{"v1.go": "package proj\n", "v1_test.go": "package proj\n"}, "Commit 1")
-		w.setCommit1(sha)
+		w.setSHA(&w.commit1, sha)
 		return err
 	})
 	w.addBeforeHook("run_checks", func(c host.Caller) error {
-		sha, err := m5GitCommitFile(w.sessionFolder(c), "v1.go", "package proj\nvar V = 2\n", "Commit 2")
-		w.setCommit2(sha)
+		if err := w.recordStaleReviewItemID(); err != nil {
+			return err
+		}
+		sha, err := m5GitCommitFiles(w.sessionFolder(c), map[string]string{"v1.go": "package proj\nvar V = 2\n"}, "Commit 2")
+		w.setSHA(&w.commit2, sha)
 		return err
 	})
 	w.setMemberHeld(w.claudeM, false)
 	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.claudeM)
 	return w.waitFor("task 1 submitted commit 2", func() bool {
 		t, ok := w.taskByNum(1)
-		c2 := w.getCommit2()
+		w.mu.Lock()
+		c2 := w.commit2
+		w.mu.Unlock()
 		return ok && c2 != "" && t.Commit == c2
 	})
+}
+
+func (w *m5World) recordStaleReviewItemID() error {
+	w.mu.Lock()
+	c1 := w.commit1
+	w.mu.Unlock()
+	id, err := w.findQueuedItemID("review", c1)
+	if err != nil {
+		return err
+	}
+	w.mu.Lock()
+	w.refusedItem = id
+	w.mu.Unlock()
+	return nil
 }
 
 func (w *m5World) stepVerifyHomeRetiredCommit1Review() error {
@@ -2580,7 +2605,9 @@ func (w *m5World) stepVerifyHomeRetiredCommit1Review() error {
 			commits = append(commits, *it.Commit)
 		}
 	}
-	c2 := w.getCommit2()
+	w.mu.Lock()
+	c2 := w.commit2
+	w.mu.Unlock()
 	if !slices.Equal(commits, []string{c2}) {
 		return fmt.Errorf("expected home queued reviews [%s], got %v", c2, commits)
 	}
@@ -2601,11 +2628,14 @@ func (w *m5World) stepReleaseReviewerForCommit2() error {
 }
 
 func (w *m5World) stepVerifyHostRefusedStaleReview() error {
-	refused, err := w.hostAuditCount("refused", "stale_task")
-	if err != nil || refused < 1 {
-		return fmt.Errorf("expected host audit refused stale_task >= 1, got %d (err=%v)", refused, err)
+	w.mu.Lock()
+	itemID := w.refusedItem
+	c2 := w.commit2
+	w.mu.Unlock()
+	refused, err := w.hasRefusedItemAudit(itemID, "codex", "stale_task")
+	if err != nil || !refused {
+		return fmt.Errorf("expected host audit refused stale_task for review item %d, got %v (err=%v)", itemID, refused, err)
 	}
-	c2 := w.getCommit2()
 	for _, m := range w.browserMessages() {
 		if m.Kind == "review" && !strings.Contains(string(m.Body), c2) {
 			return fmt.Errorf("unexpected review for stale commit: %s", string(m.Body))

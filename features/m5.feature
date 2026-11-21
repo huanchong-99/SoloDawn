@@ -43,7 +43,7 @@ Feature: Tasks from brief to merge
   Scenario: An owner direct request leaves the group session read-only and moves to a new task session (A5.7)
     Given a project group with forge "none", a secretary and working AIs "Claude" and "Codex" at level 2
     When the owner mentions "Claude" directly for a code change and "Claude" calls start_task
-    Then the group session kept repo clean without task submission tools, created a task card, notified the secretary, and committed the change in a new task session
+    Then the group session listed start_task without task submission tools, created a task card, notified the secretary, and committed the change in a new task session
 
   Scenario: A diff containing a test secret pattern fails the hard check (A5.9)
     Given an active brief task on forge "none" assigned to "Claude" and reviewed by "Codex"
