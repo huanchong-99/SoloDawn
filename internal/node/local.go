@@ -125,6 +125,10 @@ func decodeSync(data []byte) (proto.Sync, bool) {
 }
 
 func decodeFetch(data []byte) (home.Fetch, bool) {
+	var th proto.FetchThread
+	if proto.Decode(data, &th) == nil {
+		return home.Fetch{FetchPage: th.FetchPage, Thread: th.Thread}, th.Type == "fetch"
+	}
 	var req home.Fetch
 	return req, proto.Decode(data, &req) == nil && req.Type == "fetch"
 }
