@@ -121,3 +121,14 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 - `CreateTaskWorkspace(ctx, projectDir, num, slug, ai, base, remote)` and `RemoveTaskWorkspace(ctx, projectDir, num, slug, ai, why)` handle `wt/<num>-<slug>`. `PrepareReviewWorkspace(ctx, projectDir, num, ai, commit, base, remote)` and `RemoveReviewWorkspace(ctx, projectDir, num, ai)` handle `review/<num>`. `ai` is the member id of the AI that holds the folder. A create reuses only a worktree recorded for the same AI, and a removal leaves one recorded for another AI untouched.
 - A create works out from the branches whether a task is new, taken over or returning; there is no takeover flag. A slug the home cannot produce, or a `num` below 1, is refused.
 - `cloneLock(repo)` is the one lock per clone, keyed by its real path. Workspace functions and `ReviewedMerge` take it.
+
+# Approvals
+
+`approve.go` handles permission requests from both CLIs (`planning/flows/approval.md`, `planning/contracts/mcp-tools.md` section 3):
+
+- `Tools["approve"]` is listed only to structured Claude Code sessions (`c.Agent == "claude" && !c.Interactive`) and maps `Bash`, `Write`/`Edit`/`NotebookEdit`/`Read`, `WebFetch`/`WebSearch`, and other tool names to `Ask` (`planning/contracts/messages.md` section 2.3).
+- `Listeners["approve"]` starts a goroutine per `Asked` event so `Report` returns at once, brackets the open request synchronously with `Sessions.Calling`, answers through `Runner.Answer`, and cancels open `Asked` contexts of a session on `TurnBegan` or `TurnEnded`.
+- At level 1 requests are denied immediately; at level 3 they are allowed immediately. At level 2 the handler consumes at most one matching `granted` row of `(g, member, task, tool, input)` in `approval`, checks `CheckOutboundSecret` on the full `Command` and `Why`, shortens `Command` to 3 KiB and `Why` to 256 B as unescaped JSON strings, writes a `pending` row, opens `Host.Await` with cryptographic `cause` verification before sending `post` (`kind: approval`), and waits up to `limits.approval_wait_s` (default 600 s).
+- `Part[approvalState](h)` holds active `Asked` cancel functions per host. Its `mu` is a leaf lock: nothing called under `mu` takes `Host`, `Sessions`, `Rows` or `Store` locks.
+- `awaitApprovalItem` is the single reader of the channel returned by `Host.Await`: when the wait timer or context ends, it calls `done` and checks the channel once more before returning the timeout denial.
+- `Host.RecordApprovalDecision` verifies and records timely or late `decided` items (`AuditDelivered` with `granted` or deletion, or `AuditRefused`), and `Host.DeleteTaskApprovals` deletes records of a reassigned or ended task.
