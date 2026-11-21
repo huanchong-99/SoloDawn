@@ -1,5 +1,5 @@
 ---
-description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the offline scripted Claude Code and Codex processes for host integration tests, and the API of the host workspaces and Git commands.'
+description: 'The host seam (interfaces, tables, hooks, sessions, drivers), group joining and per-home connection management, the offline scripted Claude Code and Codex processes for host integration tests, and the API of the host workspaces and Git commands.'
 kind: reference
 ---
 
@@ -121,3 +121,12 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 - `CreateTaskWorkspace(ctx, projectDir, num, slug, ai, base, remote)` and `RemoveTaskWorkspace(ctx, projectDir, num, slug, ai, why)` handle `wt/<num>-<slug>`. `PrepareReviewWorkspace(ctx, projectDir, num, ai, commit, base, remote)` and `RemoveReviewWorkspace(ctx, projectDir, num, ai)` handle `review/<num>`. `ai` is the member id of the AI that holds the folder. A create reuses only a worktree recorded for the same AI, and a removal leaves one recorded for another AI untouched.
 - A create works out from the branches whether a task is new, taken over or returning; there is no takeover flag. A slug the home cannot produce, or a `num` below 1, is refused.
 - `cloneLock(repo)` is the one lock per clone, keyed by its real path. Workspace functions and `ReviewedMerge` take it.
+
+# Joining, leaving and home connections
+
+`join.go` implements `host.join`, `host.leave` and per-home connection tracking ([commands.md](../../planning/contracts/commands.md) sections 1.2 and 2, [datachannel.md](../../planning/contracts/datachannel.md) sections 4 and 7, [local.md](../../planning/contracts/local.md) sections 2 and 7).
+
+- **Registrations and startup.** From `init`, `join.go` registers `"host.join"` and `"host.leave"` in `Surface` and `"join"` in `Attached`. At node startup, after setting `h.Connect`, the caller invokes `h.EnsureHomeConnections(ctx)` so one persistent connection is opened per distinct home device named in `h.Sessions` or `setting` `'homes'`.
+- **One connection per home.** `Part[joinPart](h)` keeps active `h.Connect` cancellation functions keyed by home device id. Reconciliation starts `h.Connect` once per distinct home needed by any local session, stored `homes` entry or in-flight `host.join`, and cancels a home's context as soon as none of those reference it.
+- **`host.join` and `host.leave`.** `host.join` verifies the payload and declared `agent` account, connects to `home` and waits (bounded by `ctx`) for `h.Home(home)`, obtains the `group` row from `h.Rows` or a `state_only` `sync`, clones `projects/<group>/repo` with `EnsureGroupWorkspace`, sends `member add_ai`, and atomically creates the dormant `GroupSession`, upserts `setting` `'homes'` and records `AuditSetting`. `host.leave` sends `member remove` first so a refusal leaves sessions and connections untouched, and on success ends all sessions of `(g, member)`, deletes their `approval` rows, prunes `setting` `'homes'` when no local AI remains in `g`, records `AuditSetting`, and reconciles home connections.
+- **Lock order and channels.** `joinPart.syncMu` serializes connection reconciliation across `Store` and `Sessions` reads; `joinPart.mu` is a leaf lock that guards only in-memory `joinPart` fields and never calls into `Host`, `Sessions`, `Rows`, `Store`, `Connect` or cancel functions. Each waiter channel in `joinPart.waiters` has a single reader, `joinWaitChannel` in `joinAwaitAttach`.
