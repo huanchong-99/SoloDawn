@@ -3,8 +3,6 @@ package host
 import (
 	stdcmp "cmp"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	stdjson "encoding/json"
 	"fmt"
 	"slices"
@@ -107,28 +105,14 @@ func guardSecTexts(texts ...string) error {
 	return nil
 }
 
-func freshSecNonce() proto.ID {
-	var raw [16]byte
-	rand.Read(raw[:])
-	return proto.ID(base64.RawURLEncoding.EncodeToString(raw[:]))
-}
-
 func secHomeHeader(h *Host, c Caller, kind string) proto.HomeCommand {
 	return proto.HomeCommand{
 		Type:      kind,
-		Nonce:     freshSecNonce(),
+		Nonce:     freshNonce(),
 		Timestamp: h.Now().UnixMilli(),
 		Group:     proto.ID(c.Group),
 		As:        proto.ID(c.Member),
 	}
-}
-
-func marshalSecWire(v any) string {
-	var out str.Builder
-	enc := stdjson.NewEncoder(&out)
-	enc.SetEscapeHTML(false)
-	enc.Encode(v)
-	return str.TrimSuffix(out.String(), "\n")
 }
 
 type secDirectory struct {
@@ -228,7 +212,7 @@ func callProposeBrief(ctx context.Context, h *Host, c Caller, raw stdjson.RawMes
 		Mentions:    []proto.ID{requester},
 		Body:        body,
 	}
-	if _, err := h.Command(ctx, c.Home, marshalSecWire(post)); err != nil {
+	if _, err := h.Command(ctx, c.Home, marshalWire(post)); err != nil {
 		return nil, err
 	}
 	return secIDReply{ID: string(hdr.Nonce)}, nil
@@ -410,11 +394,11 @@ func buildSetTaskPlan(h *Host, c Caller, taskID, assignee, reviewer proto.ID, ac
 			Assignee:    assignee,
 			Reviewer:    reviewer,
 		}
-		plan.assign = marshalSecWire(assign)
+		plan.assign = marshalWire(assign)
 	}
 	if action != nil {
 		cmd := proto.TaskCommand{HomeCommand: secHomeHeader(h, c, "task"), Op: *action, ID: taskID}
-		plan.action = marshalSecWire(cmd)
+		plan.action = marshalWire(cmd)
 		plan.op = *action
 	}
 	return plan
@@ -458,7 +442,7 @@ func callRequestDecision(ctx context.Context, h *Host, c Caller, raw stdjson.Raw
 	if err != nil {
 		return nil, err
 	}
-	if _, err := h.Command(ctx, c.Home, marshalSecWire(post)); err != nil {
+	if _, err := h.Command(ctx, c.Home, marshalWire(post)); err != nil {
 		return nil, err
 	}
 	return secIDReply{ID: string(post.Nonce)}, nil
