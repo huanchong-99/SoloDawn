@@ -295,8 +295,8 @@ Except where a Result is named, effects are observed through `host.info`.
 
 ## 3. Inbox items
 
-`why` says what the item is for. It routes; it authorises nothing. The
-authority is the item's signature (`contracts/datachannel.md` section 6).
+`why` says what the item is for; the wire shape and host checks are in
+`contracts/datachannel.md` section 6.
 
 | `why` | For | When |
 | --- | --- | --- |

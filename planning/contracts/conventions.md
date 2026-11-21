@@ -141,10 +141,8 @@ A client tells a success from an error by the presence of `err`, never by
   beginning (`contracts/messages.md` 2.3).
 - These numbers are enough for what a home sends. A `rows` or `fetched`
   frame always has room for a row. An inbox item
-  (`contracts/datachannel.md` section 6) carries at most one message row,
-  one task row and one `cause`, and a `cause` is an envelope that already
-  sits inside the row of the card it decided: with the item's own small
-  envelope that is under 50 KiB.
+  (`contracts/datachannel.md` section 6) carries at most one message row
+  and one task row beside its small plain `item` object, well under 50 KiB.
 - Whoever builds a list fills a frame only as far as it fits, and sends
   the rest in another frame (`rows`, `devlog`) or as another page
   (`fetched`).
@@ -194,6 +192,7 @@ hold them as text and only the schemas name them.
 | `quota` (request and answer) | B-07 |
 | the payloads of `group`, `member`, `post` (every kind), `act`, `jump`, `task`, `note`, `forget`, `push`; the review outcome and the host events (`contracts/commands.md` 1.8, 1.9); `inbox` with the signed `item` payload, `ack`; the payloads of `host.join`, `host.leave`; `fetch` of one row (`r`, `row`). Changes to shapes frozen earlier, in the same pull request: the task row's `slug`, `plan`, `review.failed` and `wait.kept`, with `row-task.json`'s branch made by the slug rule; the decision state `expired` (`row-msg-decision-expired.json`); `mentions` of an approval card holding its approvers; `act` payloads in the examples without empty `arg` or `text`; `welcome.addrs`. The approval body's `full` is frozen already (pull request 117) | P-1 |
 | `groups`; `host.info`, with `homes` entries of `g`, `home` and `name`; `audit` and its answer; `pty.resize`; the local-network `beacon` payload; the payloads of `settings.set`, `pair.browser`, `agent.set`, `perm.set`, `host.offline`, `host.online`, `takeover.start`, `takeover.end`; the MCP tool list (`tools.json`, `contracts/mcp-tools.md` section 5) | P-2, after P-1 and B-07 |
+| `inbox` and `item-*` re-frozen with a plain unsigned `item` object (`g`, `to`, `item`, `ai`, `why` and the optional fields of `contracts/datachannel.md` section 6), with no `env` wrapper and no `cause` (2026-11-21 slimming A-1, A-3) | P-1b |
 | one confirmed task end to end, with and without a remote | B-01 slice (c) |
 
 **Feature files of the parallel plan** (`steps/parallel-plan.md` section 2).
