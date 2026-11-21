@@ -96,6 +96,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `host.Host` exposes no shutdown method, and CLI processes are started with `context.Background()` (`internal/host/run.go:380`).
 - Status: open, accepted for 1.0 (`N-4` review).
 
+### 2026-11-21 · limitation · `host.info` has no live push yet and reports `queued` as `0`
+
+- Symptom: `Surface` (`internal/node/surface.go`) answers `host.info` requests with `HostState` and sends no `host.info` pushes (no `host.info` push yet), and every `AgentGroup.Queued` entry in `host.info` is `0` (`internal/node/surface.go:154`).
+- Cause: `settings.set` is postponed with `U-12`, the 1.0 web client requests `host.info` on connect and after `agent.set`, and held items are held on the home (`not_before`, `HM-7`) rather than counted on the host.
+- Status: open, accepted for 1.0 (`N-3`).
+
 ### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
 
 - Symptom, from the independent review of `internal/node`:
@@ -105,11 +111,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the `Updater` holds no lock and does not restart by itself; the owner of the runtime is to call `Check` and `Apply` under the lock that admits turns and takeovers, copy `Status` under it, and supply a `Restart` that execs.
 - Status: open, postponed off the step-1 main line (`N-6`).
 
-### 2026-11-21 · limitation · `Sessions` has no `host.info`, `pair.browser` or `settings.set` handlers until `N-3` lands
+### 2026-11-21 · limitation · `Sessions` handlers and runtime pairing/surface wiring across `HM-2`, `HM-3`, `N-3` and `N-4`
 
-- Symptom: inbound `ctl` requests for `host.info` are answered `bad_request` ("unknown ctl request") on a bare `Sessions` hub (`internal/node/session.go`, `NewSessions`), and `pair.browser` and `settings.set` are not registered until unit N-3.
-- Cause: `Sessions` registers `sync` (`HM-2`), `fetch` (`HM-3`) and `ack` (`HM-7`) by default, while the pairing and host-info handlers live in `N-3`.
-- Status: `ack` wired in `HM-7` (#221), `sync` wired after `HM-2` (#205), and `fetch` wired after `HM-3` (#207); open until `N-3` lands.
+- Symptom: before runtime assembly, inbound `ctl` requests for `sync`, `fetch` and `host.info` were answered `bad_request` on a bare `Sessions` hub (`internal/node/session.go`), and `Pairer.Serve`, `Pairer.Known`/`Pairer.Routes`, `Pairer.HandleEvent`/`PairConfig.Paths`, `Pairer.Peer`, local socket `pair`/`pair-browser`/`open`, and `SurfaceConfig.Agents` (`(*Host).Agents`) awaited assembly in `internal/node/node.go`.
+- Cause: `Sessions`, `HM-2`, `HM-3`, `HM-7`, `N-3` and `N-4` were built as separate units (`settings.set` is postponed with `U-12`).
+- Status: resolved in `HM-7` (#221), `HM-2` (#205), `HM-3` (#207), `N-3` (#223) and `N-4` (#226).
 
 ### 2026-11-21 · limitation · Postponed step-2 contracts still assume an item-level `cause`
 

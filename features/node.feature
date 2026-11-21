@@ -1,7 +1,8 @@
 Feature: Node
   The node assembles the SoloDawn runtime: data directory, single-instance
   local socket, embedded local web client and /rv signalling handler, MCP
-  shim, and multi-node fallback when default ports are already bound.
+  shim, room pairing, host.info, and multi-node fallback when default ports
+  are already bound.
 
   Scenario: A development build reports its version
     When I run "solodawn version"
@@ -15,3 +16,8 @@ Feature: Node
     Given two foreground nodes running in separate home directories on this machine
     When the owner runs "solodawn status" in each node's environment
     Then each status prints its node's version and distinct device fingerprint
+
+  Scenario: A second node is added and the browser lists both with system, version and path
+    Given two foreground nodes running in separate home directories and a shared rendezvous
+    When a fresh browser pairs the first node as "alpha" and adds the second node as "beta"
+    Then the browser lists both nodes with their names, system, version and active path

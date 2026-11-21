@@ -2,6 +2,7 @@
 package node
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"sync"
@@ -45,10 +47,27 @@ var (
 	tcpListen               = net.Listen
 	ifaceAddrs              = net.InterfaceAddrs
 	installService          = InstallService
+	openURL                 = openBrowserURL
 	foregroundContext       = func() (context.Context, context.CancelFunc) {
 		return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	}
 )
+
+func openBrowserURL(u string) error {
+	exe, args := browserCommand(runtime.GOOS, u)
+	return startDetached(exe, args...)
+}
+
+func browserCommand(goos, u string) (string, []string) {
+	switch goos {
+	case "darwin":
+		return "open", []string{u}
+	case "windows":
+		return "rundll32", []string{"url.dll,FileProtocolHandler", u}
+	default:
+		return "xdg-open", []string{u}
+	}
+}
 
 type logFile struct {
 	mu   sync.Mutex
@@ -99,8 +118,22 @@ func (l *logFile) Close() error {
 	return l.file.Close()
 }
 
+type rvLoop struct {
+	stop      context.CancelFunc
+	readyOnce sync.Once
+	ready     chan struct{} // closed once by finishFirst; read by waitRVPath
+	err       error
+}
+
+func (r *rvLoop) finishFirst(err error) {
+	r.readyOnce.Do(func() {
+		r.err = err
+		close(r.ready)
+	})
+}
+
 // nodeRuntime holds the running components of one SoloDawn node.
-// mu is a leaf lock guarding closing, rvPaths and rvStop.
+// mu is a leaf lock guarding closing, rvPaths and rvLoops.
 type nodeRuntime struct {
 	ctx       context.Context
 	stop      context.CancelFunc
@@ -115,6 +148,7 @@ type nodeRuntime struct {
 	host      *host.Host
 	saved     []host.Session
 	sessions  *Sessions
+	pairer    *Pairer
 	socks     *peer.Sockets
 	peer      *peer.Peer
 	httpSrv   *http.Server
@@ -126,7 +160,7 @@ type nodeRuntime struct {
 	mu      sync.Mutex
 	closing bool
 	rvPaths map[string]*peer.Path
-	rvStop  map[string]context.CancelFunc
+	rvLoops map[string]*rvLoop
 }
 
 func runForegroundNode(dir string, l *Local) error {
@@ -149,7 +183,7 @@ func openNode(parent context.Context, dir string) (*nodeRuntime, error) {
 	ctx, cancel := context.WithCancel(parent)
 	n := &nodeRuntime{
 		ctx: ctx, stop: cancel, dir: dir,
-		rvPaths: map[string]*peer.Path{}, rvStop: map[string]context.CancelFunc{},
+		rvPaths: map[string]*peer.Path{}, rvLoops: map[string]*rvLoop{},
 	}
 	for _, step := range []func() error{n.stepLog, n.stepIdentity, n.stepServices, n.stepNetwork, n.stepStartup} {
 		if err := step(); err != nil {
@@ -213,9 +247,18 @@ func (n *nodeRuntime) stepServices() error {
 func (n *nodeRuntime) wireServices() {
 	n.host.Shim = []string{n.exe, "mcp"}
 	n.local = AttachLocal(n.host, n.loop)
+	nameFn := func() string { return ReadName(n.db) }
 	n.sessions = NewSessions(SessionConfig{
 		ID: n.key.ID(), Version: Version, Store: n.db, Logs: n.logs,
-		Home: n.loop, Host: n.host, Name: n.readName, Addrs: n.addrs, OnAdopt: n.onAdopt,
+		Home: n.loop, Host: n.host, Name: nameFn, Addrs: n.addrs, OnAdopt: n.onAdopt,
+	})
+	NewSurface(SurfaceConfig{
+		ID: n.key.ID(), Version: Version, Store: n.db,
+		Sessions: n.sessions, Host: n.host, Name: nameFn, Agents: n.host.Agents,
+	})
+	n.pairer = NewPairer(PairConfig{
+		Key: n.key, Store: n.db, Logs: n.logs, Sessions: n.sessions,
+		Paths: n.sharedPaths, WebURL: n.defaultWebURL,
 	})
 }
 
@@ -226,6 +269,7 @@ func (n *nodeRuntime) stepNetwork() error {
 	}
 	n.socks = socks
 	n.peer = peer.New(n.key, socks, n.db, n.knownPeer, n.routesFor, n.serveInbound, nil)
+	n.pairer.Peer = n.peer
 	n.host.Connect = n.sessions.connectHome(n.dialHome)
 	ln, err := listenNodeHTTP(":" + strconv.Itoa(defaultWebPort))
 	if err != nil {
@@ -244,11 +288,16 @@ func (n *nodeRuntime) startLocalHTTP(ln net.Listener) error {
 		return err
 	}
 	n.localPath = path
-	n.spawn(func() { path.Serve(n.ctx, n.peer, noopRVEvent) })
+	n.spawn(func() { path.Serve(n.ctx, n.peer, n.rvEvents(n.ctx, path)) })
 	return nil
 }
 
-func noopRVEvent(string, []byte) error { return nil }
+func (n *nodeRuntime) rvEvents(ctx context.Context, path *peer.Path) func(string, []byte) error {
+	return func(kind string, data []byte) error {
+		n.pairer.HandleEvent(ctx, path, kind, data)
+		return nil
+	}
+}
 
 func (n *nodeRuntime) stepStartup() error {
 	if err := n.host.EnsureHomeConnections(); err != nil {
@@ -286,6 +335,9 @@ func (n *nodeRuntime) Close() {
 }
 
 func (n *nodeRuntime) closeNet() {
+	if n.pairer != nil {
+		n.pairer.Close()
+	}
 	if n.localPath != nil {
 		n.localPath.Close()
 	}
@@ -327,10 +379,23 @@ func listenNodeHTTP(addr string) (net.Listener, error) {
 	return tcpListen("tcp", ":0")
 }
 
-func (n *nodeRuntime) knownPeer(device string) bool { return n.logs.Known(device) }
+func (n *nodeRuntime) localWebURL() string {
+	return "http://localhost:" + strconv.Itoa(n.httpPort)
+}
+
+func (n *nodeRuntime) defaultWebURL() string {
+	if len(ReadRendezvous(n.db)) > 0 {
+		return ""
+	}
+	return n.localWebURL()
+}
+
+func (n *nodeRuntime) knownPeer(device string) bool {
+	return n.logs.Known(device) || n.pairer.Known(device)
+}
 
 func (n *nodeRuntime) serveInbound(c *peer.Connection) {
-	n.spawn(func() { n.sessions.Serve(n.ctx, c.Device, false, c) })
+	n.spawn(func() { n.pairer.Serve(n.ctx, c.Device, c) })
 }
 
 func (n *nodeRuntime) dialHome(ctx context.Context, device string, run func(clientCtl)) {
@@ -345,9 +410,13 @@ func (n *nodeRuntime) dialHome(ctx context.Context, device string, run func(clie
 	})
 }
 
-func (n *nodeRuntime) routesFor(_ string) []peer.Route {
-	routes := []peer.Route{n.localPath.Route()}
-	for _, p := range n.remoteRVPaths() {
+func (n *nodeRuntime) sharedPaths() []*peer.Path {
+	return append([]*peer.Path{n.localPath}, n.remoteRVPaths()...)
+}
+
+func (n *nodeRuntime) routesFor(device string) []peer.Route {
+	routes := slices.Clone(n.pairer.Routes(device))
+	for _, p := range n.sharedPaths() {
 		routes = append(routes, p.Route())
 	}
 	return routes
@@ -363,28 +432,6 @@ func (n *nodeRuntime) remoteRVPaths() []*peer.Path {
 	return out
 }
 
-func (n *nodeRuntime) readName() string {
-	var name string
-	n.readSetting("name", &name)
-	return name
-}
-
-func (n *nodeRuntime) readRendezvous() []string {
-	urls := []string{}
-	n.readSetting("rendezvous", &urls)
-	return urls
-}
-
-func (n *nodeRuntime) readSetting(key string, out any) {
-	var raw string
-	read := func(tx *store.Tx) error {
-		return tx.QueryRow("SELECT value FROM setting WHERE key = ?", key).Scan(&raw)
-	}
-	if n.db.Write(read) == nil {
-		json.Unmarshal([]byte(raw), out)
-	}
-}
-
 func (n *nodeRuntime) saveRendezvous(urls []string) error {
 	raw, _ := json.Marshal(urls)
 	put := func(tx *store.Tx) error {
@@ -394,7 +441,7 @@ func (n *nodeRuntime) saveRendezvous(urls []string) error {
 	return n.db.Write(put)
 }
 
-func (n *nodeRuntime) addrs() []string { return nodeAddrs(n.httpPort, n.readRendezvous()) }
+func (n *nodeRuntime) addrs() []string { return nodeAddrs(n.httpPort, ReadRendezvous(n.db)) }
 
 func nodeAddrs(port int, rvURLs []string) []string {
 	out := []string{}
@@ -442,52 +489,77 @@ func (n *nodeRuntime) onAdopt(_ string) {
 func (n *nodeRuntime) syncRendezvous() {
 	n.withBg(func() {
 		want := map[string]bool{}
-		for _, u := range n.readRendezvous() {
+		for _, u := range ReadRendezvous(n.db) {
 			want[u] = true
 		}
 		n.mu.Lock()
 		defer n.mu.Unlock()
 		n.pruneRendezvousLocked(want)
 		for u := range want {
-			if n.rvStop[u] == nil && !n.closing {
-				rvCtx, cancel := context.WithCancel(n.ctx)
-				n.rvStop[u] = cancel
-				n.bg.Add(1)
-				go n.runRVLoop(rvCtx, u)
+			if n.rvLoops[u] == nil && !n.closing {
+				n.startRVLoopLocked(u)
 			}
 		}
 	})
 }
 
+func (n *nodeRuntime) startRVLoopLocked(url string) {
+	rvCtx, cancel := context.WithCancel(n.ctx)
+	loop := &rvLoop{stop: cancel, ready: make(chan struct{})}
+	n.rvLoops[url] = loop
+	n.bg.Add(1)
+	go n.runRVLoop(rvCtx, url, loop)
+}
+
 func (n *nodeRuntime) pruneRendezvousLocked(want map[string]bool) {
-	for u, stop := range n.rvStop {
+	for u, loop := range n.rvLoops {
 		if !want[u] {
-			stop()
-			delete(n.rvStop, u)
+			loop.stop()
+			loop.finishFirst(net.ErrClosed)
+			delete(n.rvLoops, u)
 			delete(n.rvPaths, u)
 		}
 	}
 }
 
-func (n *nodeRuntime) runRVLoop(ctx context.Context, url string) {
+func (n *nodeRuntime) waitRVPath(url string) error {
+	n.mu.Lock()
+	loop := n.rvLoops[url]
+	n.mu.Unlock()
+	if loop == nil {
+		return net.ErrClosed
+	}
+	<-loop.ready
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.rvPaths[url] != nil {
+		return nil
+	}
+	return loop.err
+}
+
+func (n *nodeRuntime) runRVLoop(ctx context.Context, url string, loop *rvLoop) {
 	defer n.bg.Done()
 	delay := time.Second
 	for ctx.Err() == nil {
-		delay = peer.NextDelay(ctx, nil, delay, n.serveOneRV(ctx, url))
+		delay = peer.NextDelay(ctx, nil, delay, n.serveOneRV(ctx, url, loop))
 	}
+	loop.finishFirst(ctx.Err())
 }
 
-func (n *nodeRuntime) serveOneRV(ctx context.Context, url string) time.Duration {
+func (n *nodeRuntime) serveOneRV(ctx context.Context, url string, loop *rvLoop) time.Duration {
 	path, err := peer.Dial(ctx, url, n.key)
 	if err != nil {
+		loop.finishFirst(err)
 		return 0
 	}
 	opened := time.Now()
 	n.mu.Lock()
 	n.rvPaths[url] = path
 	n.mu.Unlock()
+	loop.finishFirst(nil)
 	stop := context.AfterFunc(ctx, func() { path.Close() })
-	path.Serve(ctx, n.peer, noopRVEvent)
+	path.Serve(ctx, n.peer, n.rvEvents(ctx, path))
 	stop()
 	path.Close()
 	n.mu.Lock()
@@ -565,24 +637,41 @@ func (n *nodeRuntime) cmdPair(line []byte) ([]string, error) {
 		return nil, err
 	}
 	if len(req.Rendezvous) > 0 {
-		if err := n.saveRendezvous(req.Rendezvous); err != nil {
+		if err := n.preparePairRV(req.Rendezvous); err != nil {
 			return nil, err
 		}
-		n.syncRendezvous()
+		req.Rendezvous = nil
 	}
-	return nil, errors.New("pairing room is unavailable")
+	res, err := n.pairer.Pair(n.ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return []string{fmt.Sprintf("%s (%s) %s", res.Name, res.Fingerprint, cmp.Or(res.Path, "direct"))}, nil
+}
+
+func (n *nodeRuntime) preparePairRV(urls []string) error {
+	if err := n.saveRendezvous(urls); err != nil {
+		return err
+	}
+	n.syncRendezvous()
+	return n.waitRVPath(urls[0])
 }
 
 func (n *nodeRuntime) cmdPairBrowser() ([]string, error) {
-	if n.logs.Owner() == "" {
-		return nil, errors.New("node has no owner")
+	link, err := n.pairer.PairBrowser(n.ctx, n.defaultWebURL())
+	if err != nil {
+		return nil, err
 	}
-	return nil, errors.New("pairing room is unavailable")
+	return []string{link.Link}, nil
 }
 
 func (n *nodeRuntime) cmdOpen() ([]string, error) {
-	if n.logs.Owner() == "" {
-		return nil, errors.New("node has no owner")
+	link, err := n.pairer.PairBrowser(n.ctx, n.localWebURL())
+	if err != nil {
+		return nil, err
 	}
-	return nil, errors.New("pairing room is unavailable")
+	if err := openURL(link.Link); err != nil {
+		return nil, err
+	}
+	return []string{link.Link}, nil
 }

@@ -94,6 +94,12 @@ func TestCommandWithoutDataDir(t *testing.T) {
 }
 
 func TestMCPShim(t *testing.T) {
+	checkMCPShimErrors(t)
+	checkMCPShimRoundTrip(t)
+}
+
+func checkMCPShimErrors(t *testing.T) {
+	t.Helper()
 	var stdout, stderr bytes.Buffer
 	if code := MCP(nil, strings.NewReader(""), &stdout, &stderr); code != 2 {
 		t.Fatalf("MCP(nil) = %d, want 2", code)
@@ -101,39 +107,44 @@ func TestMCPShim(t *testing.T) {
 	for _, name := range []string{"HOME", "XDG_DATA_HOME", "LocalAppData", "USERPROFILE"} {
 		t.Setenv(name, "")
 	}
-	stderr.Reset()
-	if code := MCP([]string{"--token", "tok"}, strings.NewReader(""), &stdout, &stderr); code != 1 || stderr.Len() == 0 {
-		t.Fatalf("MCP without DataDir = %d, stderr %q", code, stderr.String())
-	}
+	assertMCPExitOne(t, "without DataDir")
+	nodeTestDir(t)
+	assertMCPExitOne(t, "without socket")
+}
 
-	dir := nodeTestDir(t)
-	stderr.Reset()
+func assertMCPExitOne(t *testing.T, label string) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
 	if code := MCP([]string{"--token", "tok"}, strings.NewReader(""), &stdout, &stderr); code != 1 || stderr.Len() == 0 {
-		t.Fatalf("MCP without socket = %d, stderr %q", code, stderr.String())
+		t.Fatalf("MCP %s = %d, stderr %q", label, code, stderr.String())
 	}
+}
 
-	l := openSocket(t, dir)
-	opened := make(chan string, 1)
-	go func() {
-		conn, err := l.Accept()
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		r := bufio.NewReader(conn)
-		line, _ := r.ReadString('\n')
-		opened <- line
-		req, _ := r.ReadString('\n')
-		io.WriteString(conn, "echo:"+req)
-	}()
-	stdout.Reset()
-	stderr.Reset()
-	if code := MCP([]string{"--token", "tok-1"}, strings.NewReader("ping\n"), &stdout, &stderr); code != 0 || stdout.String() != "echo:ping\n" || stderr.Len() != 0 {
+func checkMCPShimRoundTrip(t *testing.T) {
+	t.Helper()
+	l := openSocket(t, nodeTestDir(t))
+	opened := make(chan string, 1) // single reader: checkMCPShimRoundTrip
+	go serveMCPTestEcho(l, opened)
+	var stdout, stderr bytes.Buffer
+	if code := MCP([]string{"--token", "tok-1"}, strings.NewReader("ping\n"), &stdout, &stderr); code != 0 || stdout.String() != "echo:ping\n" {
 		t.Fatalf("MCP round-trip = %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
 	}
 	if got := <-opened; got != "{\"mcp\":\"tok-1\"}\n" {
 		t.Fatalf("opening = %q", got)
 	}
+}
+
+func serveMCPTestEcho(l *Local, opened chan<- string) {
+	conn, err := l.Accept()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	r := bufio.NewReader(conn)
+	line, _ := r.ReadString('\n')
+	opened <- line
+	req, _ := r.ReadString('\n')
+	io.WriteString(conn, "echo:"+req)
 }
 
 func TestPairAutoStartsNode(t *testing.T) {
@@ -143,33 +154,36 @@ func TestPairAutoStartsNode(t *testing.T) {
 		pairStartWait = savedWait
 		executablePath = savedExe
 	})
-
 	dir := nodeTestDir(t)
 	name := "laptop"
 	pairCmd := Command{Cmd: "pair", Secret: "s", Name: &name}
 
-	// Non-pair commands never call spawnNode.
+	checkPairSpawnFailures(t, dir, pairCmd)
+	checkPairAutoStartSuccess(t, dir, pairCmd)
+	checkStartBackgroundNode(t, dir)
+}
+
+func checkPairSpawnFailures(t *testing.T, dir string, pairCmd Command) {
+	t.Helper()
 	spawns := 0
 	spawnNode = func() error { spawns++; return nil }
 	if err := (Command{Cmd: "status"}).send(dir, io.Discard); err == nil || spawns != 0 {
 		t.Fatalf("status missing socket: err=%v spawns=%d", err, spawns)
 	}
-
-	// Spawn error surfaces directly.
 	spawnNode = func() error { spawns++; return io.ErrUnexpectedEOF }
-	if err := pairCmd.send(dir, io.Discard); !errors.Is(err, io.ErrUnexpectedEOF) || spawns != 1 {
-		t.Fatalf("pair spawn error: err=%v spawns=%d", err, spawns)
+	if err := pairCmd.send(dir, io.Discard); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("pair spawn error = %v", err)
 	}
-
-	// Timeout waiting for socket surfaces dial error.
 	pairStartWait = 0
 	spawnNode = func() error { spawns++; return nil }
 	var dialErr *net.OpError
-	if err := pairCmd.send(dir, io.Discard); !errors.As(err, &dialErr) || spawns != 2 {
-		t.Fatalf("pair wait timeout: err=%v spawns=%d", err, spawns)
+	if err := pairCmd.send(dir, io.Discard); !errors.As(err, &dialErr) {
+		t.Fatalf("pair wait timeout = %v", err)
 	}
+}
 
-	// Successful auto-start waits for the socket and completes exchange; a second pair reuses the live socket without spawning.
+func checkPairAutoStartSuccess(t *testing.T, dir string, pairCmd Command) {
+	t.Helper()
 	pairStartWait = 2 * time.Second
 	var bg *Local
 	t.Cleanup(func() {
@@ -177,38 +191,43 @@ func TestPairAutoStartsNode(t *testing.T) {
 			bg.Close()
 		}
 	})
-	serveOnce := func(l *Local) {
-		conn, err := l.Accept()
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		bufio.NewReader(conn).ReadString('\n')
-		writeLocalReplies(conn, []string{"paired"}, nil)
-	}
+	spawns := 0
 	spawnNode = func() error {
 		spawns++
 		go func() {
 			time.Sleep(30 * time.Millisecond)
 			var err error
-			bg, err = ListenLocal(dir)
-			if err == nil {
-				serveOnce(bg)
+			if bg, err = ListenLocal(dir); err == nil {
+				servePairedOnce(bg)
 			}
 		}()
 		return nil
 	}
-	var out bytes.Buffer
-	if err := pairCmd.send(dir, &out); err != nil || out.String() != "paired\n" || spawns != 3 {
-		t.Fatalf("pair auto-start: out=%q err=%v spawns=%d", out.String(), err, spawns)
-	}
-	go serveOnce(bg)
-	out.Reset()
-	if err := pairCmd.send(dir, &out); err != nil || out.String() != "paired\n" || spawns != 3 {
-		t.Fatalf("pair on running socket: out=%q err=%v spawns=%d", out.String(), err, spawns)
-	}
+	assertPairOutput(t, dir, pairCmd, &spawns, 1)
+	go servePairedOnce(bg)
+	assertPairOutput(t, dir, pairCmd, &spawns, 1)
+}
 
-	// startBackgroundNode covers executablePath error and detached launch.
+func servePairedOnce(l *Local) {
+	conn, err := l.Accept()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	bufio.NewReader(conn).ReadString('\n')
+	writeLocalReplies(conn, []string{"paired"}, nil)
+}
+
+func assertPairOutput(t *testing.T, dir string, pairCmd Command, spawns *int, wantSpawns int) {
+	t.Helper()
+	var out bytes.Buffer
+	if err := pairCmd.send(dir, &out); err != nil || out.String() != "paired\n" || *spawns != wantSpawns {
+		t.Fatalf("pair: out=%q err=%v spawns=%d", out.String(), err, *spawns)
+	}
+}
+
+func checkStartBackgroundNode(t *testing.T, dir string) {
+	t.Helper()
 	executablePath = func() (string, error) { return "", io.ErrNoProgress }
 	if err := startBackgroundNode(); !errors.Is(err, io.ErrNoProgress) {
 		t.Fatalf("startBackgroundNode exe error = %v", err)
