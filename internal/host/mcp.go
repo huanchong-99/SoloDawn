@@ -168,7 +168,7 @@ func (h *Host) runToolCall(ctx context.Context, caller Caller, call func(context
 	if err != nil {
 		return toolFailureResult(err)
 	}
-	encoded, err := encodeJSON(value)
+	encoded, err := mcpEncodeJSON(value)
 	if err != nil {
 		return toolFailureResult(err)
 	}
@@ -192,7 +192,7 @@ func toolErrorResult(err *Error) *mcp.CallToolResult {
 	}
 }
 
-func encodeJSON(value any) (string, error) {
+func mcpEncodeJSON(value any) (string, error) {
 	if raw, ok := value.(json.RawMessage); ok && json.Valid(raw) {
 		return strings.TrimSpace(string(raw)), nil
 	}
@@ -220,7 +220,7 @@ func schemaForCaller(name string, caller Caller, raw json.RawMessage) (json.RawM
 	}
 	cleanSchemaMap(root, true)
 	projectCallerSchema(caller, name, root)
-	encoded, _ := encodeJSON(root)
+	encoded, _ := mcpEncodeJSON(root)
 	return json.RawMessage(encoded), nil
 }
 
@@ -402,7 +402,7 @@ func rewriteMCPResult(method string, raw json.RawMessage) json.RawMessage {
 		}
 		json.Unmarshal(raw, &list)
 		slices.SortFunc(list.Tools, sortListedTools)
-		out, _ := encodeJSON(list)
+		out, _ := mcpEncodeJSON(list)
 		return json.RawMessage(out)
 	case "tools/call":
 		var call struct {
@@ -410,7 +410,7 @@ func rewriteMCPResult(method string, raw json.RawMessage) json.RawMessage {
 			IsError bool            `json:"isError"`
 		}
 		json.Unmarshal(raw, &call)
-		out, _ := encodeJSON(call)
+		out, _ := mcpEncodeJSON(call)
 		return json.RawMessage(out)
 	default:
 		return raw
