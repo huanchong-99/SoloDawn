@@ -242,6 +242,17 @@ func checkLocalSync(t *testing.T, ctx context.Context, link *LocalLink, cap *pus
 	var missErr proto.ErrorResponse
 	mustNoErr(t, proto.Decode(missAns, &missErr))
 	mustEqual(t, missErr.Err.Code, "not_found")
+
+	fetchAns, err := link.Request(ctx, func(id int64) any {
+		return home.Fetch{
+			FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: localGroupID, Before: 0, Limit: 10},
+			Kind:      "note",
+		}
+	})
+	mustNoErr(t, err)
+	var fetched proto.Fetched
+	mustNoErr(t, proto.Decode(fetchAns, &fetched))
+	mustEqual(t, []any{fetched.Type, len(fetched.Rows), fetched.More}, []any{"fetched", 0, false})
 }
 
 func checkNotePush(t *testing.T, raw string, frame proto.Rows) {

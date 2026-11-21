@@ -1548,7 +1548,41 @@ func checkReportSavedBehavior(t *testing.T) {
 		if queued != 0 {
 			t.Fatalf("conflict error was re-queued as unreachable: %d", queued)
 		}
+
+		checkAttachMemberStatus(t, h)
 	})
+}
+
+func checkAttachMemberStatus(t *testing.T, h *Host) {
+	t.Helper()
+	s1 := makeRunSession(SessionKey{Group: runGroup1, Member: runAI1}, GroupSession, "repo")
+	s2 := makeRunSession(SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}, TaskSession, "wt/1")
+	s3 := makeRunSession(SessionKey{Group: runGroup1, Member: runAI2}, GroupSession, "repo")
+	sOther := makeRunSession(SessionKey{Group: runGroup2, Member: runAI1}, GroupSession, "repo")
+	sOther.Home = "other-home"
+	for _, s := range []Session{s1, s2, s3, sOther} {
+		if err := h.Sessions.Create(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	reconn := newRunHome("direct")
+	h.Attach("home-dev", reconn)
+	synctest.Wait()
+	assertAttachStatusCmds(t, reconn.snapshotCmds())
+}
+
+func assertAttachStatusCmds(t *testing.T, cmds []recordedCmd) {
+	t.Helper()
+	if len(cmds) != 2 {
+		t.Fatalf("expected 2 member status commands (ai1 + ai2), got %+v", cmds)
+	}
+	if cmds[0].payload["id"] != runAI1 || cmds[0].payload["state"] != "dormant" || cmds[0].payload["path"] != "direct" {
+		t.Fatalf("expected plain dormant direct status for ai1, got %+v", cmds[0].payload)
+	}
+	if cmds[1].payload["id"] != runAI2 || cmds[1].payload["state"] != "dormant" || cmds[1].payload["path"] != "direct" {
+		t.Fatalf("expected plain dormant direct status for ai2, got %+v", cmds[1].payload)
+	}
 }
 
 func TestNoSessionFailedResumeSyncAsyncAndFailures(t *testing.T) {
@@ -1745,7 +1779,7 @@ func TestMemberStatusPriorityAnswerAndTurnRefusals(t *testing.T) {
 	seamIn(t, h.Sessions, SessionKey{Group: runGroup1, Member: runAI2}, Takeover)
 
 	// 5. dormant when all sessions of (runGroup1, runAI1) are dormant.
-	if st, tk := deriveMemberStatus(h, rt, slot); st != "dormant" || tk != "" {
+	if st, tk := h.MemberState(runGroup1, runAI1); st != "dormant" || tk != "" {
 		t.Fatalf("got %s/%s, want dormant", st, tk)
 	}
 
@@ -1753,30 +1787,30 @@ func TestMemberStatusPriorityAnswerAndTurnRefusals(t *testing.T) {
 	h.Sessions.Move(kT1, Dormant, Working)
 	h.Sessions.Move(kT1, Working, Waiting)
 	h.Sessions.Update(kT1, func(s *Session) { s.LastActive = 0 })
-	if st, tk := deriveMemberStatus(h, rt, slot); st != "waiting" || tk != runTask1 {
+	if st, tk := h.MemberState(runGroup1, runAI1); st != "waiting" || tk != runTask1 {
 		t.Fatalf("zero LastActive waiting got %s/%s, want waiting/%s", st, tk, runTask1)
 	}
 	h.Sessions.Move(kT2, Dormant, Working)
 	h.Sessions.Move(kT2, Working, Waiting)
 	h.Sessions.Update(kT1, func(s *Session) { s.LastActive = 200 })
 	h.Sessions.Update(kT2, func(s *Session) { s.LastActive = 200 })
-	if st, tk := deriveMemberStatus(h, rt, slot); st != "waiting" || tk != runTask2 {
+	if st, tk := h.MemberState(runGroup1, runAI1); st != "waiting" || tk != runTask2 {
 		t.Fatalf("tie waiting got %s/%s, want waiting/%s", st, tk, runTask2)
 	}
 	h.Sessions.Update(kT1, func(s *Session) { s.LastActive = 300 })
-	if st, tk := deriveMemberStatus(h, rt, slot); st != "waiting" || tk != runTask1 {
+	if st, tk := h.MemberState(runGroup1, runAI1); st != "waiting" || tk != runTask1 {
 		t.Fatalf("latest waiting got %s/%s, want waiting/%s", st, tk, runTask1)
 	}
 
 	// 3. limited (sign-in invalid) overrides waiting.
 	rt.enterLimited(slot)
-	if st, tk := deriveMemberStatus(h, rt, slot); st != "limited" || tk != "" {
+	if st, tk := h.MemberState(runGroup1, runAI1); st != "limited" || tk != "" {
 		t.Fatalf("got %s/%s, want limited", st, tk)
 	}
 
 	// 2. working overrides limited.
 	h.Sessions.Move(kT1, Waiting, Working)
-	if st, tk := deriveMemberStatus(h, rt, slot); st != "working" || tk != runTask1 {
+	if st, tk := h.MemberState(runGroup1, runAI1); st != "working" || tk != runTask1 {
 		t.Fatalf("got %s/%s, want working/%s", st, tk, runTask1)
 	}
 	// Calling Turn on a Working session returns conflict.
@@ -1785,7 +1819,7 @@ func TestMemberStatusPriorityAnswerAndTurnRefusals(t *testing.T) {
 
 	// 1. takeover overrides everything, and Turn on Takeover returns explicit conflict.
 	h.Sessions.Move(kT2, Waiting, Takeover)
-	if st, tk := deriveMemberStatus(h, rt, slot); st != "takeover" || tk != runTask2 {
+	if st, tk := h.MemberState(runGroup1, runAI1); st != "takeover" || tk != runTask2 {
 		t.Fatalf("got %s/%s, want takeover/%s", st, tk, runTask2)
 	}
 	seamCode(t, Runner.Turn(t.Context(), h, kT2, "on-takeover", Turn{Kind: ItemsTurn}), "conflict")

@@ -192,14 +192,30 @@ func attachRuntime(h *Host, device string) {
 	pending := rt.savedCrash[device]
 	delete(rt.savedCrash, device)
 	rt.mu.Unlock()
-	if len(pending) == 0 {
-		return
-	}
-	go func() {
-		for _, c := range pending {
-			reportOrQueueCrash(context.Background(), h, rt, c)
+	slots := homeAISlots(h, device)
+	go flushHomeRuntime(h, rt, device, pending, slots)
+}
+
+func homeAISlots(h *Host, device string) []aiSlot {
+	seen := map[aiSlot]bool{}
+	var slots []aiSlot
+	for _, s := range h.Sessions.All() {
+		slot := aiSlot{group: s.Group, member: s.Member}
+		if s.Home == device && !seen[slot] {
+			seen[slot] = true
+			slots = append(slots, slot)
 		}
-	}()
+	}
+	return slots
+}
+
+func flushHomeRuntime(h *Host, rt *runtimePart, device string, pending []pendingCrash, slots []aiSlot) {
+	for _, c := range pending {
+		reportOrQueueCrash(context.Background(), h, rt, c)
+	}
+	for _, slot := range slots {
+		sendMemberStatus(context.Background(), h, rt, device, slot.group, slot.member, nil)
+	}
 }
 
 func (sessionRunner) Answer(h *Host, key SessionKey, ask string, allow bool) error {
@@ -845,13 +861,12 @@ func isUnreachable(err error) bool {
 	return errors.As(err, &he) && he.Code == "home_unreachable"
 }
 
-func sendMemberStatus(ctx context.Context, h *Host, rt *runtimePart, homeDevice, group, member string, ev any) error {
+func sendMemberStatus(ctx context.Context, h *Host, _ *runtimePart, homeDevice, group, member string, ev any) error {
 	home, ok := h.Home(homeDevice)
 	if !ok {
 		return &Error{"home_unreachable", "the home of that group is not connected"}
 	}
-	slot := aiSlot{group: group, member: member}
-	state, task := deriveMemberStatus(h, rt, slot)
+	state, task := h.MemberState(group, member)
 	var evPtr *any
 	if ev != nil {
 		evPtr = &ev
@@ -865,15 +880,17 @@ func sendMemberStatus(ctx context.Context, h *Host, rt *runtimePart, homeDevice,
 	return err
 }
 
-func deriveMemberStatus(h *Host, rt *runtimePart, slot aiSlot) (string, string) {
-	list := memberSessions(h, slot.group, slot.member)
+// MemberState returns the derived state and active task id of member in group
+// (planning/sessions.md section 3).
+func (h *Host) MemberState(group, member string) (state, task string) {
+	list := memberSessions(h, group, member)
 	if s, ok := findSessionInState(list, Takeover); ok {
 		return string(Takeover), s.Task
 	}
 	if s, ok := findSessionInState(list, Working); ok {
 		return string(Working), s.Task
 	}
-	if rt.isLimited(slot) {
+	if stateOf(h).isLimited(aiSlot{group: group, member: member}) {
 		return "limited", ""
 	}
 	if s, ok := latestWaitingSession(list); ok {

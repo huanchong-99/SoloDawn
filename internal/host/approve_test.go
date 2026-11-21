@@ -121,6 +121,9 @@ func (f *approveFakeHome) PathChanged() <-chan struct{} { return nil }
 func (f *approveFakeHome) Done() <-chan struct{}        { return f.done }
 
 func (f *approveFakeHome) Request(_ context.Context, build func(int64) any) (json.RawMessage, error) {
+	if cmd, ok := build(1).(proto.Cmd); ok && isMemberStatusCmd(cmd.Env.Payload) {
+		return json.RawMessage(`{"re":1,"ok":true}`), nil
+	}
 	f.mu.Lock()
 	id := int64(len(f.rawCmds) + len(f.fetches) + 1)
 	req := build(id)
