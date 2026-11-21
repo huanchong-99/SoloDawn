@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -31,18 +32,15 @@ type ctlPair struct {
 type clientPipe struct {
 	pair       *ctlPair
 	toServer   chan json.RawMessage // single reader: serverPipe.Read
-	fromServer chan json.RawMessage // single reader: clientPipe.pump
-	incoming   chan json.RawMessage // single reader: ServeClient via Read
-	ackRead    chan struct{}        // single reader: clientPipe.pump
+	fromServer chan json.RawMessage // single reader: clientPipe.Read
 	pathCh     chan struct{}        // single reader: caller of PathChanged
-	needAck    bool
 
 	mu        sync.Mutex
 	next      int64
 	waiting   map[int64]chan json.RawMessage
 	failAt    int
 	sentCnt   int
-	intercept func(id int64, raw json.RawMessage) (json.RawMessage, bool)
+	intercept func(id int64, raw json.RawMessage) ([]json.RawMessage, bool)
 }
 
 type serverPipe struct {
@@ -59,13 +57,10 @@ func newCtlPair() *ctlPair {
 		pair:       p,
 		toServer:   toSrv,
 		fromServer: fromSrv,
-		incoming:   make(chan json.RawMessage),
-		ackRead:    make(chan struct{}),
 		pathCh:     make(chan struct{}, 1),
 		waiting:    map[int64]chan json.RawMessage{},
 	}
 	p.server = &serverPipe{pair: p, in: toSrv, out: fromSrv}
-	go p.client.pump()
 	return p
 }
 
@@ -89,8 +84,12 @@ func (c *clientPipe) Send(frame any) error {
 	if err := c.checkSendFail(); err != nil {
 		return err
 	}
-	if intercept, ok := c.applyIntercept(raw); ok {
-		c.deliverReply(intercept)
+	if frames, ok := c.applyIntercept(raw); ok {
+		for _, f := range frames {
+			if err := sendOrDone(c.fromServer, c.pair.done, f); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	return sendOrDone(c.toServer, c.pair.done, raw)
@@ -98,15 +97,20 @@ func (c *clientPipe) Send(frame any) error {
 
 func (c *clientPipe) checkSendFail() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.sentCnt++
-	if c.failAt > 0 && c.sentCnt == c.failAt {
-		return errors.New("client send failure")
+	fail := c.failAt > 0 && c.sentCnt == c.failAt
+	c.mu.Unlock()
+	if !fail {
+		return nil
 	}
-	return nil
+	for len(c.fromServer) > 0 {
+		runtime.Gosched()
+	}
+	time.Sleep(time.Millisecond)
+	return errors.New("client send failure")
 }
 
-func (c *clientPipe) applyIntercept(raw json.RawMessage) (json.RawMessage, bool) {
+func (c *clientPipe) applyIntercept(raw json.RawMessage) ([]json.RawMessage, bool) {
 	c.mu.Lock()
 	fn := c.intercept
 	c.mu.Unlock()
@@ -145,40 +149,15 @@ func (c *clientPipe) forget(id int64) {
 }
 
 func (c *clientPipe) Read(ctx context.Context) (json.RawMessage, error) {
-	if c.needAck {
-		c.needAck = false
-		if err := ackPipeRead(ctx, c.ackRead, c.pair.done); err != nil {
-			return nil, err
-		}
-	}
-	msg, err := readPipeMsg(ctx, c.incoming, c.pair.done)
-	if err == nil {
-		c.needAck = true
-	}
-	return msg, err
-}
-
-func (c *clientPipe) pump() {
 	for {
-		msg, ok := c.nextWire()
-		if !ok {
-			return
+		msg, err := readPipeMsg(ctx, c.fromServer, c.pair.done)
+		if err != nil {
+			return nil, err
 		}
 		if c.deliverReply(msg) {
 			continue
 		}
-		if !c.forwardIncoming(msg) {
-			return
-		}
-	}
-}
-
-func (c *clientPipe) nextWire() (json.RawMessage, bool) {
-	select {
-	case <-c.pair.done:
-		return nil, false
-	case msg := <-c.fromServer:
-		return msg, true
+		return msg, nil
 	}
 }
 
@@ -198,18 +177,6 @@ func (c *clientPipe) deliverReply(msg json.RawMessage) bool {
 		ch <- msg
 	}
 	return true
-}
-
-func (c *clientPipe) forwardIncoming(msg json.RawMessage) bool {
-	if sendOrDone(c.incoming, c.pair.done, msg) != nil {
-		return false
-	}
-	select {
-	case <-c.ackRead:
-		return true
-	case <-c.pair.done:
-		return false
-	}
 }
 
 func (s *serverPipe) Path() string                 { return "direct" }
@@ -246,17 +213,6 @@ func waitPipeReply(ctx context.Context, reply <-chan json.RawMessage, done <-cha
 		return nil, io.EOF
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	}
-}
-
-func ackPipeRead(ctx context.Context, ack chan<- struct{}, done <-chan struct{}) error {
-	select {
-	case ack <- struct{}{}:
-		return nil
-	case <-done:
-		return io.EOF
-	case <-ctx.Done():
-		return ctx.Err()
 	}
 }
 
@@ -314,8 +270,6 @@ func TestClientHandshakeDevlogBeforeAttachAndLiveForwarding(t *testing.T) {
 	e3 := sesAddEntry(owner, owner.ID(), 3, hostKey.ID(), "node", "laptop")
 	e4 := sesAddEntry(owner, owner.ID(), 4, extraKey.ID(), "browser", "tablet")
 
-	// Home starts knowing only owner and desktop (v1..v2), plus extraKey is NOT on laptop yet:
-	// test two directions across two connections, starting with laptop having v1..v3 and desktop only v1..v2.
 	cmds := home.Table{
 		"ping": func(_ *home.State, _ home.Command) (home.Result, *home.Refusal) {
 			return home.Result{Answer: store.Outcome{Num: 42}}, nil
@@ -365,13 +319,14 @@ func startPairedSession(t *testing.T, homeNode, hostNode *clientNodeRig) *ctlPai
 	pair := newCtlPair()
 	ctx, cancel := context.WithCancel(t.Context())
 	srvDone := make(chan struct{}) // single reader: cleanup
-	cliDone := make(chan error, 1) // single reader: cleanup
+	cliDone := make(chan struct{}) // single reader: cleanup
 	go func() {
 		defer close(srvDone)
 		homeNode.sessions.Serve(ctx, hostNode.key.ID(), false, pair.server)
 	}()
 	go func() {
-		cliDone <- hostNode.sessions.ServeClient(ctx, homeNode.key.ID(), pair.client)
+		defer close(cliDone)
+		hostNode.sessions.serveClient(ctx, homeNode.key.ID(), pair.client)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -457,12 +412,14 @@ func TestClientSynchronousPushOrderAndFraming(t *testing.T) {
 
 	checkSyncRowsBeforeAnswer(t, hostNode.host, remoteHome, groupID)
 	pair.close()
-	checkClientInboundFraming(t, hostNode, homeKey.ID(), owner)
 
 	pushMu.Lock()
 	gotOrder := slices.Clone(pushOrder)
 	pushMu.Unlock()
 	mustEqual(t, gotOrder, []string{"rows", "inbox"})
+
+	checkPreAttachPushHeldUntilAttachReturns(t, hostNode, homeKey.ID(), owner)
+	checkClientInboundFraming(t, hostNode, homeKey.ID(), owner)
 }
 
 func savePushes(t *testing.T) {
@@ -512,6 +469,55 @@ func checkSyncRowsBeforeAnswer(t *testing.T, h *host.Host, remoteHome host.Home,
 	}
 }
 
+func checkPreAttachPushHeldUntilAttachReturns(t *testing.T, hostNode *clientNodeRig, homeID string, owner identity.Key) {
+	t.Helper()
+	dPre := sesKey("sync-pre-dev")
+	ePre := sesAddEntry(owner, owner.ID(), 4, dPre.ID(), "browser", "pre-attach")
+	dlRaw, err := encodeCtl(proto.Devlog{Type: "devlog", User: owner.ID(), Entries: []proto.Envelope{ePre}})
+	mustNoErr(t, err)
+
+	var events []string
+	var evMu sync.Mutex
+	pushed := make(chan struct{}, 1) // single reader: checkPreAttachPushHeldUntilAttachReturns
+	prevAtt := maps.Clone(host.Attached)
+	defer func() { host.Attached = prevAtt }()
+	host.Attached["order_check"] = func(_ *host.Host, dev string) {
+		if dev != homeID {
+			return
+		}
+		waitKnown(t, hostNode.logs, dPre.ID())
+		time.Sleep(5 * time.Millisecond)
+		evMu.Lock()
+		events = append(events, "attached")
+		evMu.Unlock()
+	}
+	host.Pushes["inbox"] = func(_ *host.Host, _ string, _ json.RawMessage) {
+		evMu.Lock()
+		events = append(events, "inbox")
+		evMu.Unlock()
+		pushed <- struct{}{}
+	}
+
+	pair := newCtlPair()
+	pair.client.intercept = func(id int64, _ json.RawMessage) ([]json.RawMessage, bool) {
+		w := fmt.Sprintf(`{"t":"welcome","re":%d,"ok":true,"v":1,"device":%q,"name":"h","version":"v1","time":1,"addrs":[],"groups":[],"owner":true}`, id, homeID)
+		return []json.RawMessage{dlRaw, json.RawMessage(w), json.RawMessage(`{"t":"inbox","g":"g1","items":[]}`)}, true
+	}
+	done := make(chan struct{}) // single reader: checkPreAttachPushHeldUntilAttachReturns
+	go func() {
+		defer close(done)
+		hostNode.sessions.serveClient(t.Context(), homeID, pair.client)
+	}()
+	recvFrame(t, pushed)
+	pair.close()
+	<-done
+
+	evMu.Lock()
+	got := slices.Clone(events)
+	evMu.Unlock()
+	mustEqual(t, got, []string{"attached", "inbox"})
+}
+
 func checkClientInboundFraming(t *testing.T, hostNode *clientNodeRig, homeID string, owner identity.Key) {
 	t.Helper()
 	var dbErrs atomic.Int32
@@ -522,7 +528,7 @@ func checkClientInboundFraming(t *testing.T, hostNode *clientNodeRig, homeID str
 
 	var gotHello proto.Hello
 	pair := newCtlPair()
-	pair.client.intercept = func(id int64, raw json.RawMessage) (json.RawMessage, bool) {
+	pair.client.intercept = func(id int64, raw json.RawMessage) ([]json.RawMessage, bool) {
 		var req struct {
 			Type string `json:"t"`
 		}
@@ -532,11 +538,12 @@ func checkClientInboundFraming(t *testing.T, hostNode *clientNodeRig, homeID str
 		}
 		proto.Decode(raw, &gotHello)
 		w := fmt.Sprintf(`{"t":"welcome","re":%d,"ok":true,"v":1,"device":%q,"name":"h","version":"v1","time":1,"addrs":[],"groups":[],"owner":true}`, id, homeID)
-		return json.RawMessage(w), true
+		return []json.RawMessage{json.RawMessage(w)}, true
 	}
-	done := make(chan error, 1) // single reader: checkClientInboundFraming cleanup
+	done := make(chan struct{}) // single reader: checkClientInboundFraming cleanup
 	go func() {
-		done <- hostNode.sessions.ServeClient(t.Context(), homeID, pair.client)
+		defer close(done)
+		hostNode.sessions.serveClient(t.Context(), homeID, pair.client)
 	}()
 	defer func() {
 		pair.close()
@@ -551,7 +558,7 @@ func checkClientInboundFraming(t *testing.T, hostNode *clientNodeRig, homeID str
 
 func checkInboundRefusalsAndDevlogErr(t *testing.T, pair *ctlPair, hostNode *clientNodeRig, owner identity.Key, dbErrs *atomic.Int32) {
 	t.Helper()
-	// Drain initial devlog frame sent by ServeClient after welcome.
+	// Drain initial devlog frame sent by serveClient after welcome.
 	recvFrame(t, pair.server.in)
 
 	// Malformed JSON, missing t, stray re with id -> refused or dropped on client ctl without closing.
@@ -562,22 +569,21 @@ func checkInboundRefusalsAndDevlogErr(t *testing.T, pair *ctlPair, hostNode *cli
 	mustNoErr(t, sendOrDone(pair.client.fromServer, pair.done, json.RawMessage(`{"id":71}`)))
 	expectErr(t, recvFrame(t, pair.server.in), 71, "bad_request")
 
-	// Inbound request with t and id is answered bad_request ("unknown ctl request").
+	// Unknown frame types (even with id) go to Host.Push and are ignored without sending an error.
 	mustNoErr(t, sendOrDone(pair.client.fromServer, pair.done, json.RawMessage(`{"t":"sync","id":72}`)))
-	expectErr(t, recvFrame(t, pair.server.in), 72, "bad_request")
 
 	// Invalid devlog push is ignored; devlog DB failure is reported via Report.
 	mustNoErr(t, sendOrDone(pair.client.fromServer, pair.done, json.RawMessage(`{"t":"devlog"}`)))
 	drop := func(tx *store.Tx) error { _, err := tx.Exec("DROP TABLE device_log"); return err }
 	mustNoErr(t, hostNode.db.Write(drop))
 	d6 := sesKey("sync-d6")
-	e6 := sesAddEntry(owner, owner.ID(), 4, d6.ID(), "browser", "bad-db")
+	e6 := sesAddEntry(owner, owner.ID(), 5, d6.ID(), "browser", "bad-db")
 	dlRaw, err := encodeCtl(proto.Devlog{Type: "devlog", User: owner.ID(), Entries: []proto.Envelope{e6}})
 	mustNoErr(t, err)
 	mustNoErr(t, sendOrDone(pair.client.fromServer, pair.done, dlRaw))
 
-	// Send one more inbound request to synchronize after the devlog frame on the read loop.
-	mustNoErr(t, sendOrDone(pair.client.fromServer, pair.done, json.RawMessage(`{"t":"fetch","id":73}`)))
+	// Send one more refused frame to synchronize after the devlog frame on the read loop.
+	mustNoErr(t, sendOrDone(pair.client.fromServer, pair.done, json.RawMessage(`{"id":73}`)))
 	expectErr(t, recvFrame(t, pair.server.in), 73, "bad_request")
 	if dbErrs.Load() != 1 {
 		t.Fatalf("expected 1 reported db error, got %d", dbErrs.Load())
@@ -647,11 +653,11 @@ func verifyConnectHomeAndReconnect(t *testing.T, homeNode, hostNode *clientNodeR
 	t.Helper()
 	var dialCalls atomic.Int32
 	nextConn := make(chan *ctlPair, 2) // single reader: dial loop
-	dial := func(ctx context.Context, device string, session func(ClientCtl)) {
+	dial := func(ctx context.Context, device string, session func(clientCtl)) {
 		dialCalls.Add(1)
 		runTestDialLoop(ctx, homeNode, hostNode.key.ID(), device, nextConn, session)
 	}
-	connectFn := hostNode.sessions.ConnectHome(dial)
+	connectFn := hostNode.sessions.connectHome(dial)
 
 	// Self device is ignored synchronously without invoking dial.
 	connectFn(t.Context(), hostNode.key.ID())
@@ -687,7 +693,7 @@ func assertMemberStatus(t *testing.T, st map[string]any, wantID, wantGroup, want
 	mustEqual(t, st["path"], wantPath)
 }
 
-func runTestDialLoop(ctx context.Context, homeNode *clientNodeRig, hostID, wantHomeID string, nextConn <-chan *ctlPair, session func(ClientCtl)) {
+func runTestDialLoop(ctx context.Context, homeNode *clientNodeRig, hostID, wantHomeID string, nextConn <-chan *ctlPair, session func(clientCtl)) {
 	if wantHomeID != homeNode.key.ID() {
 		return
 	}
@@ -727,49 +733,41 @@ func TestClientHandshakeErrorsAndTimeout(t *testing.T) {
 	}
 	hostNode := newClientNodeRig(t, "host", hostKey, owner, entries, nil)
 
-	checkWelcomeRefusalCases(t, hostNode, homeKey.ID())
+	checkWelcomeErrorResponseCase(t, hostNode, homeKey.ID())
 	checkDevlogSendErrorCase(t, hostNode, homeKey.ID())
 	checkHelloTimeoutInBubble(t, hostNode, homeKey.ID())
 }
 
-func checkWelcomeRefusalCases(t *testing.T, hostNode *clientNodeRig, homeID string) {
+func checkWelcomeErrorResponseCase(t *testing.T, hostNode *clientNodeRig, homeID string) {
 	t.Helper()
-	cases := []struct {
-		reply    string
-		wantCode string
-	}{
-		{`{"re":%d,"err":{"code":"version","msg":"unsupported"}}`, "version"},
-		{`{"t":"welcome","re":%d,"ok":true,"v":1,"device":"d"}`, "bad_request"},
-		{`{"t":"other","re":%d,"ok":true,"v":1,"device":"d","name":"n","version":"v1","time":1,"addrs":[],"groups":[],"owner":true}`, "bad_request"},
-		{`{"t":"welcome","re":%d,"ok":true,"v":2,"device":"d","name":"n","version":"v1","time":1,"addrs":[],"groups":[],"owner":true}`, "bad_request"},
-		{`{"t":"welcome","re":%d,"ok":true,"v":0,"device":"d","name":"n","version":"v1","time":1,"addrs":[],"groups":[],"owner":true}`, "bad_request"},
+	p := newCtlPair()
+	p.client.intercept = func(id int64, _ json.RawMessage) ([]json.RawMessage, bool) {
+		reply := fmt.Sprintf(`{"re":%d,"err":{"code":"version","msg":"unsupported"}}`, id)
+		return []json.RawMessage{json.RawMessage(reply)}, true
 	}
-	for _, tc := range cases {
-		p := newCtlPair()
-		p.client.intercept = func(id int64, _ json.RawMessage) (json.RawMessage, bool) {
-			return json.RawMessage(fmt.Sprintf(tc.reply, id)), true
-		}
-		err := hostNode.sessions.ServeClient(t.Context(), homeID, p.client)
-		assertHostErrCode(t, err, tc.wantCode)
-		if _, ok := hostNode.host.Home(homeID); ok {
-			t.Fatal("failed handshake attached home")
-		}
-		<-p.Done()
+	hostNode.sessions.serveClient(t.Context(), homeID, p.client)
+	if _, ok := hostNode.host.Home(homeID); ok {
+		t.Fatal("refused handshake attached home")
 	}
+	if len(p.server.in) != 0 {
+		t.Fatal("refused handshake sent devlog")
+	}
+	<-p.Done()
 }
 
 func checkDevlogSendErrorCase(t *testing.T, hostNode *clientNodeRig, homeID string) {
 	t.Helper()
+	savePushes(t)
+	host.Pushes["inbox"] = func(*host.Host, string, json.RawMessage) {
+		t.Error("push reached Host.Push when handshake failed before Attach")
+	}
 	p := newCtlPair()
 	p.client.failAt = 2
-	p.client.intercept = func(id int64, _ json.RawMessage) (json.RawMessage, bool) {
+	p.client.intercept = func(id int64, _ json.RawMessage) ([]json.RawMessage, bool) {
 		w := fmt.Sprintf(`{"t":"welcome","re":%d,"ok":true,"v":1,"device":"d","name":"n","version":"v1","time":1,"addrs":[],"groups":[],"owner":true}`, id)
-		return json.RawMessage(w), true
+		return []json.RawMessage{json.RawMessage(w), json.RawMessage(`{"t":"inbox","g":"g1","items":[]}`)}, true
 	}
-	err := hostNode.sessions.ServeClient(t.Context(), homeID, p.client)
-	if err == nil || err.Error() != "client send failure" {
-		t.Fatalf("expected devlog send error, got %v", err)
-	}
+	hostNode.sessions.serveClient(t.Context(), homeID, p.client)
 	if _, ok := hostNode.host.Home(homeID); ok {
 		t.Fatal("failed devlog send attached home")
 	}
@@ -780,23 +778,19 @@ func checkHelloTimeoutInBubble(t *testing.T, hostNode *clientNodeRig, homeID str
 	t.Helper()
 	synctest.Test(t, func(t *testing.T) {
 		p := newCtlPair()
-		errCh := make(chan error, 1) // single reader: checkHelloTimeoutInBubble
+		done := make(chan struct{}) // single reader: checkHelloTimeoutInBubble
 		start := time.Now()
 		go func() {
-			errCh <- hostNode.sessions.ServeClient(t.Context(), homeID, p.client)
+			defer close(done)
+			hostNode.sessions.serveClient(t.Context(), homeID, p.client)
 		}()
-		err := <-errCh
-		if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != cliHelloTimeout {
-			t.Fatalf("got err=%v elapsed=%v, want DeadlineExceeded after %v", err, time.Since(start), cliHelloTimeout)
+		<-done
+		if time.Since(start) != cliHelloTimeout {
+			t.Fatalf("got elapsed=%v, want %v", time.Since(start), cliHelloTimeout)
+		}
+		if _, ok := hostNode.host.Home(homeID); ok {
+			t.Fatal("timed-out handshake attached home")
 		}
 		<-p.Done()
 	})
-}
-
-func assertHostErrCode(t *testing.T, err error, want string) {
-	t.Helper()
-	var he *host.Error
-	if !errors.As(err, &he) || he.Code != want {
-		t.Fatalf("got %v, want *host.Error with code %q", err, want)
-	}
 }

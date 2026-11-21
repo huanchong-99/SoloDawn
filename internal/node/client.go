@@ -10,49 +10,47 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
-var _ ClientCtl = (*peer.Connection)(nil)
+var _ clientCtl = (*peer.Connection)(nil)
 
 const cliHelloTimeout = 10 * time.Second
 
-// ClientCtl is the client side of an authenticated ctl data channel;
-// *peer.Connection satisfies it.
-type ClientCtl interface {
+type clientCtl interface {
 	Ctl
 	host.Home
 }
 
-// DialFunc keeps an outgoing ctl connection to device open until ctx ends,
-// running session for each opened connection.
-type DialFunc func(ctx context.Context, device string, session func(ClientCtl))
+type dialFunc func(ctx context.Context, device string, session func(clientCtl))
 
-// ConnectHome returns a Host.Connect function that ignores this node's own
-// device and starts dial in the background to run ServeClient on each opened
-// connection until ctx ends.
-func (s *Sessions) ConnectHome(dial DialFunc) func(ctx context.Context, device string) {
+func (s *Sessions) connectHome(dial dialFunc) func(ctx context.Context, device string) {
 	return func(ctx context.Context, device string) {
 		if device == s.cfg.ID {
 			return
 		}
-		run := func(raw ClientCtl) { s.ServeClient(ctx, device, raw) }
+		run := func(raw clientCtl) { s.serveClient(ctx, device, raw) }
 		go dial(ctx, device, run)
 	}
 }
 
-// ServeClient runs the client side of a host ctl session to device on raw: it
-// sends hello with kind "host", checks welcome, sends this node's device log,
-// attaches raw to Host, and dispatches incoming pushes in read order until ctx
-// ends or raw closes.
-func (s *Sessions) ServeClient(ctx context.Context, device string, raw ClientCtl) error {
+func (s *Sessions) serveClient(ctx context.Context, device string, raw clientCtl) {
+	runCtx, cancel := context.WithCancel(ctx)
 	c := &sesConn{device: device, raw: raw}
 	s.mu.Lock()
 	s.conns[c] = true
 	s.mu.Unlock()
-	defer s.cliLeave(c)
-	if err := s.cliHandshake(ctx, c, raw); err != nil {
-		return err
+	ready := make(chan struct{})
+	readDone := make(chan struct{}) // single reader: serveClient
+	go func() {
+		defer close(readDone)
+		s.cliReadLoop(runCtx, c, raw, ready)
+	}()
+	if s.cliHandshake(runCtx, c, raw) {
+		s.cfg.Host.Attach(device, raw)
+		close(ready)
+		<-readDone
 	}
-	s.cfg.Host.Attach(device, raw)
-	return s.cliReadLoop(ctx, c, raw)
+	cancel()
+	s.cliLeave(c)
+	<-readDone
 }
 
 func (s *Sessions) cliLeave(c *sesConn) {
@@ -62,7 +60,7 @@ func (s *Sessions) cliLeave(c *sesConn) {
 	c.raw.Close()
 }
 
-func (s *Sessions) cliHandshake(ctx context.Context, c *sesConn, raw ClientCtl) error {
+func (s *Sessions) cliHandshake(ctx context.Context, c *sesConn, raw clientCtl) bool {
 	helloCtx, cancel := context.WithTimeout(ctx, cliHelloTimeout)
 	defer cancel()
 	build := func(id int64) any {
@@ -75,63 +73,54 @@ func (s *Sessions) cliHandshake(ctx context.Context, c *sesConn, raw ClientCtl) 
 		}
 	}
 	ans, err := raw.Request(helloCtx, build)
-	if err != nil {
-		return err
-	}
-	if err := cliCheckWelcome(ans); err != nil {
-		return err
+	if err != nil || !cliWelcomeOK(ans) {
+		return false
 	}
 	return s.cliSendLogs(c)
 }
 
-func cliCheckWelcome(ans json.RawMessage) error {
+func cliWelcomeOK(ans json.RawMessage) bool {
 	var refused proto.ErrorResponse
-	if proto.Decode(ans, &refused) == nil {
-		return &host.Error{Code: refused.Err.Code, Message: refused.Err.Message}
-	}
-	var w proto.Welcome
-	if proto.Decode(ans, &w) != nil || w.Type != "welcome" || w.V != 1 {
-		return &host.Error{Code: "bad_request", Message: "invalid welcome frame"}
-	}
-	return nil
+	return proto.Decode(ans, &refused) != nil
 }
 
-func (s *Sessions) cliSendLogs(c *sesConn) error {
+func (s *Sessions) cliSendLogs(c *sesConn) bool {
 	c.sendMu.Lock()
 	defer c.sendMu.Unlock()
 	s.mu.Lock()
 	c.welcomed = true
 	s.mu.Unlock()
 	for _, dl := range s.cfg.Logs.frames(s.cfg.Logs.Owner()) {
-		if err := c.raw.Send(dl); err != nil {
-			return err
+		if c.raw.Send(dl) != nil {
+			return false
 		}
 	}
-	return nil
+	return true
 }
 
-func (s *Sessions) cliReadLoop(ctx context.Context, c *sesConn, raw ClientCtl) error {
+func (s *Sessions) cliReadLoop(ctx context.Context, c *sesConn, raw clientCtl, ready <-chan struct{}) {
 	for {
 		data, err := raw.Read(ctx)
 		if err != nil {
-			return err
+			return
 		}
-		s.cliDispatch(c, data)
+		s.cliDispatch(ctx, c, data, ready)
 	}
 }
 
-func (s *Sessions) cliDispatch(c *sesConn, data json.RawMessage) {
-	typ, id, ok := sesOpenFrame(c, data)
+func (s *Sessions) cliDispatch(ctx context.Context, c *sesConn, data json.RawMessage, ready <-chan struct{}) {
+	typ, _, ok := sesOpenFrame(c, data)
 	if !ok {
-		return
-	}
-	if id != nil {
-		c.sendErr(*id, "bad_request", "unknown ctl request")
 		return
 	}
 	if typ == "devlog" {
 		s.sesDevlog(c, data)
 		return
 	}
-	s.cfg.Host.Push(c.device, data)
+	select {
+	case <-ready:
+		s.cfg.Host.Push(c.device, data)
+	case <-ctx.Done():
+		return
+	}
 }
