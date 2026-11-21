@@ -106,7 +106,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: `internal/proto/testdata/tools.json` (#165, P-2) freezes each tool's `inputSchema` with a fixed set of keywords: `properties` always there, `{}` for a tool without arguments, `required` only when an argument must be given, and `"additionalProperties": false` (`planning/contracts/mcp-tools.md` section 5). The node's MCP server builds its tools with `github.com/modelcontextprotocol/go-sdk` v1.8.0 and `github.com/google/jsonschema-go`, and it is not shown that they write exactly these keywords: for example `properties: {}` for a struct without fields, or a `$schema` or `title` of their own.
 - Cause: the file was written from the contract, before any server code (`internal/proto/tools_test.go`, `toolLists`).
-- Status: open. HS-8 (the tool list test of the MCP server) and I-1 (the full list against `tools.json`) must check it, and normalise what the SDK writes or raise a change of the file.
+- Status: open until I-1 checks the live registered tools together; the MCP server half is settled in HS-8 (`internal/host/mcp.go`). Every tool registers a hand-written `json.RawMessage` rather than calling `jsonschema.For`, and the server takes the tools' schemas as they are (`emptyToolSchema` when empty), projecting only the per-caller differences of `mcp-tools.md` section 5 (`projectCallerSchema`); each tool's own golden test pins its schema, and `TestToolListsMatchGoldenSchemas` (`internal/host/mcp_test.go`) checks all five session lists of `tools.json` by tool name.
 
 ### 2026-11-20 · limitation · The `post` tool lists `handback` for a whole session, not for a hand-back turn
 
