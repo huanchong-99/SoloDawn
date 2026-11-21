@@ -267,8 +267,8 @@ func accJSON(v any) string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-func (e *accDeliverEnv) pushSignedItem(signer identity.Key, connDev string, it proto.Item, msg *proto.MsgRow) {
-	wire := proto.InboxItem{Env: signer.Sign(accJSON(it))}
+func (e *accDeliverEnv) pushSignedItem(_ identity.Key, connDev string, it proto.Item, msg *proto.MsgRow) {
+	wire := proto.InboxItem{Item: it}
 	if msg != nil {
 		wire.Msg = json.RawMessage(accJSON(msg))
 	}
@@ -369,7 +369,7 @@ func registerBasicPushSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
 			Pos:       20, Group: accGroupID, Main: false, By: accSecID, Kind: "reply", Timestamp: accNowMS,
 			Text: "answer", Mentions: []string{}, Re: &callRef, Body: json.RawMessage(`{}`),
 		}
-		it := proto.Item{Type: "item", Nonce: makeAccID(32), Timestamp: accNowMS, Group: accGroupID, To: env.hostKey.ID(), Item: int64(rNum), AI: accMember1, Why: "reply", Msg: replyID}
+		it := proto.Item{Item: int64(rNum), AI: accMember1, Why: "reply", Msg: replyID}
 		env.pushSignedItem(env.homeKey, env.homeKey.ID(), it, msg)
 		env.pushMention(int64(mNum))
 	})
@@ -393,7 +393,7 @@ func (e *accDeliverEnv) pushMention(itemNum int64) {
 		Pos:       10 + itemNum, Group: accGroupID, Main: true, By: accSecID, Kind: "text", Timestamp: accNowMS,
 		Text: "hi", Mentions: []string{accMember1}, Body: json.RawMessage(`{}`),
 	}
-	it := proto.Item{Type: "item", Nonce: makeAccID(byte(80 + itemNum)), Timestamp: accNowMS, Group: accGroupID, To: e.hostKey.ID(), Item: itemNum, AI: accMember1, Why: "mention", Msg: msgID}
+	it := proto.Item{Item: itemNum, AI: accMember1, Why: "mention", Msg: msgID}
 	e.pushSignedItem(e.homeKey, e.homeKey.ID(), it, msg)
 }
 
@@ -402,8 +402,8 @@ func registerSyncFlowSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
 		env.attachNoWait()
 	})
 	sc.Step(`^"home-1" pushes assign item (\d+) for "Claude Code" on task "T-1" and notice item (\d+) for secretary "Sec"$`, func(aNum, nNum int) {
-		aIt := proto.Item{Type: "item", Nonce: makeAccID(21), Timestamp: accNowMS, Group: accGroupID, To: env.hostKey.ID(), Item: int64(aNum), AI: accMember1, Why: "assign", Task: accTaskID}
-		nIt := proto.Item{Type: "item", Nonce: makeAccID(22), Timestamp: accNowMS, Group: accGroupID, To: env.hostKey.ID(), Item: int64(nNum), AI: accSecID, Why: "notice", Task: accTaskID, Code: "task_merged"}
+		aIt := proto.Item{Item: int64(aNum), AI: accMember1, Why: "assign", Task: accTaskID}
+		nIt := proto.Item{Item: int64(nNum), AI: accSecID, Why: "notice", Task: accTaskID, Code: "task_merged"}
 		env.pushSignedItem(env.homeKey, env.homeKey.ID(), aIt, nil)
 		env.pushSignedItem(env.homeKey, env.homeKey.ID(), nIt, nil)
 	})
@@ -512,10 +512,8 @@ func registerDeliverThenSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
 		raw := <-env.askCh
 		var wire proto.InboxItem
 		proto.Decode(raw, &wire)
-		var it proto.Item
-		proto.Decode([]byte(wire.Env.Payload), &it)
-		if int(it.Item) != wantItem {
-			return fmt.Errorf("got item %d, want %d", it.Item, wantItem)
+		if int(wire.Item.Item) != wantItem {
+			return fmt.Errorf("got item %d, want %d", wire.Item.Item, wantItem)
 		}
 		return nil
 	})

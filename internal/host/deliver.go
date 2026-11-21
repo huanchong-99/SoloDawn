@@ -342,18 +342,12 @@ func pushInbox(h *Host, home string, frame json.RawMessage) {
 	}
 }
 
-func decodeInboxItem(raw json.RawMessage) (proto.InboxItem, proto.Item, bool) {
-	var wire proto.InboxItem
-	var it proto.Item
-	ok := proto.Decode(raw, &wire) == nil && proto.Decode([]byte(wire.Env.Payload), &it) == nil
-	return wire, it, ok
-}
-
 func handleInboxElem(h *Host, d *delivery, home, group string, rawElem json.RawMessage) {
-	wire, it, ok := decodeInboxItem(rawElem)
-	if !ok {
+	var wire proto.InboxItem
+	if proto.Decode(rawElem, &wire) != nil {
 		return
 	}
+	it := wire.Item
 	seen, err := hasAuditItem(h.Store, home, it.Item)
 	if err != nil {
 		log.Printf("host: check audit item %d: %v", it.Item, err)

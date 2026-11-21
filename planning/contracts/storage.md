@@ -82,17 +82,18 @@ CREATE TABLE inbox (
   msg        TEXT,               -- message id
   task       TEXT,               -- task id
   commit_id  TEXT,               -- review, merge: the commit the item is about
-  env        TEXT    NOT NULL,   -- JSON: the item's envelope, signed when the item was queued
-  cause      TEXT,               -- JSON: the signed act that led to the item
+  env        TEXT    NOT NULL,   -- JSON: the plain unsigned item object
   not_before INTEGER NOT NULL DEFAULT 0,  -- wake-up cap, round limit hold
   created    INTEGER NOT NULL
 ) STRICT;
 CREATE INDEX inbox_by_host ON inbox (host, id);
 ```
 
-The item's envelope is built and signed in the transaction that queues the
-item, so it says what was decided then. A row is deleted when its host
-acknowledges it, or when a later change of the task makes it pointless
+The plain unsigned item JSON (owner's decision of 2026-11-21: no
+attack-and-defence code, so items are not signed and carry no `cause`;
+`HM-7` removes the unused `cause` column) is built in the transaction that
+queues the item, so it says what was decided then. A row is deleted when its
+host acknowledges it, or when a later change of the task makes it pointless
 (`contracts/task-machine.md` section 2).
 
 ### `push_sub`: reminders for browsers

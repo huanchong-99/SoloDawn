@@ -425,8 +425,8 @@ func (r *deliverRig) makeTextMsg(id proto.ID, thread *string, text string) *prot
 	}
 }
 
-func (r *deliverRig) pushItem(signer identity.Key, connHome string, group proto.ID, it proto.Item, msg *proto.MsgRow) {
-	wire := proto.InboxItem{Env: signer.Sign(marshalWire(it))}
+func (r *deliverRig) pushItem(_ identity.Key, connHome string, group proto.ID, it proto.Item, msg *proto.MsgRow) {
+	wire := proto.InboxItem{Item: it}
 	if msg != nil {
 		wire.Msg = json.RawMessage(marshalWire(msg))
 	}
@@ -529,7 +529,7 @@ func TestRegistrationsAndHostIsolation(t *testing.T) {
 	t.Cleanup(func() { stopDeliverySyncs(h2) })
 	r1.seedGroupAndMembers()
 	msg := r1.makeTextMsg(testMsg1, nil, "hello")
-	it := proto.Item{Type: "item", Nonce: testCanonicalID(20), Timestamp: testStartMS, Group: testGroup1, To: r1.hostKey.ID(), Item: 1, AI: testAI1, Why: "mention", Msg: testMsg1}
+	it := proto.Item{Item: 1, AI: testAI1, Why: "mention", Msg: testMsg1}
 	r1.pushItem(r1.homeKey, r1.homeKey.ID(), testGroup1, it, msg)
 	r1.waitUntil("1 turn and ack on r1", func() bool { return len(r1.runtime.recorded()) == 1 && r1.home.ackCountFor(1) == 1 })
 	r1.waitAIUnbusy(testGroup1, testAI1)
@@ -560,7 +560,7 @@ func verifyUnsyncedInboxTriggersSyncAndDelivers(t *testing.T, r *deliverRig) {
 	t.Helper()
 	r.home.syncMode = true
 	// Push inbox for unsynced testGroup1 on an open connection whose d.cancels entry is nil.
-	it := proto.Item{Type: "item", Nonce: testCanonicalID(21), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 10, AI: testAI1, Why: "assign", Task: testTask1}
+	it := proto.Item{Item: 10, AI: testAI1, Why: "assign", Task: testTask1}
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, it, nil)
 	req := <-r.home.started
 	wantSync := proto.Sync{Request: req.Request, Group: testGroup1, Since: 0, StateOnly: true}
@@ -669,8 +669,8 @@ func verifyOvertakenSyncedAndMonotonicCursor(t *testing.T, r *deliverRig) {
 	if req3.Since != 0 {
 		t.Fatalf("after interrupted reset got since=%d, want 0", req3.Since)
 	}
-	assignIt := proto.Item{Type: "item", Nonce: testCanonicalID(25), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 30, AI: testAI1, Why: "assign", Task: testTask1}
-	mergeIt := proto.Item{Type: "item", Nonce: testCanonicalID(26), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 31, AI: testAI2, Why: "merge", Task: testTask2, Commit: "c1"}
+	assignIt := proto.Item{Item: 30, AI: testAI1, Why: "assign", Task: testTask1}
+	mergeIt := proto.Item{Item: 31, AI: testAI2, Why: "merge", Task: testTask2, Commit: "c1"}
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, assignIt, nil)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, mergeIt, nil)
 	third.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 10}))}
@@ -747,7 +747,7 @@ func assertMismatchAndMalformedSynced(t *testing.T, r *deliverRig) {
 	if req6 := <-sixth.started; req6.Since != 12 {
 		t.Fatalf("after failed delta got since=%d, want 12", req6.Since)
 	}
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(29), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 39, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "wait-sync"))
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 39, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "wait-sync"))
 	sixth.answers <- syncAnswer{raw: json.RawMessage(`{"t":"synced","re":1,"g":"` + testGroup1 + `","seq":99}`)}
 	r.waitSyncStopped(testGroup1)
 	r.waitAIUnbusy(testGroup1, testAI1)
@@ -774,7 +774,7 @@ func TestGroupResyncAfterPostSyncedResetAndFailedSync(t *testing.T) {
 	grpRaw := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "Proj", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Checks: []string{}}))
 	aiRaw := json.RawMessage(marshalWire(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 2}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C1"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
 	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw, aiRaw}})))
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(27), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 401, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "after-reset"))
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 401, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "after-reset"))
 	req2 := <-r.home.started
 	if req2.Since != 0 || len(r.home.syncSinces()) != 2 {
 		t.Fatalf("expected single resync from 0 after post-synced reset, got req=%+v sinces=%v", req2, r.home.syncSinces())
@@ -797,7 +797,7 @@ func verifyResyncAfterFailedSync(t *testing.T, r *deliverRig) {
 	second.answers <- syncAnswer{err: errors.New("temporary sync failure")}
 	r.waitSyncStopped(testGroup1)
 
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(28), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 402, AI: testAI1, Why: "mention", Msg: testMsg2}, r.makeTextMsg(testMsg2, nil, "after-failed-sync"))
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 402, AI: testAI1, Why: "mention", Msg: testMsg2}, r.makeTextMsg(testMsg2, nil, "after-failed-sync"))
 	s2 := <-second.started
 	if s1.Since != 2 || s2.Since != 2 {
 		t.Fatalf("expected both syncs to ask since kept cursor 2, got %d then %d", s1.Since, s2.Since)
@@ -812,7 +812,7 @@ func TestDuplicateWhileTakingSessionAndMergeItems(t *testing.T) {
 	r := newDeliverRig(t, false)
 	r.seedGroupAndMembers()
 	msg := r.makeTextMsg(testMsg1, nil, "once")
-	it := proto.Item{Type: "item", Nonce: testCanonicalID(30), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 900, AI: testAI1, Why: "mention", Msg: testMsg1}
+	it := proto.Item{Item: 900, AI: testAI1, Why: "mention", Msg: testMsg1}
 	resent := false
 	r.onCompose = func(_ Session, _ []json.RawMessage) {
 		if !resent {
@@ -852,7 +852,7 @@ func verifyDuplicateMergeWhileApplyingAndPreAudit(t *testing.T) {
 	// 1) Block ReviewedMerge.Apply on cloneLock while pushing duplicate merge item 905 -> 1 Apply, 2 acks.
 	repoLock := cloneLock(filepath.Join(pDir, "repo"))
 	repoLock.Lock()
-	mIt1 := proto.Item{Type: "item", Nonce: testCanonicalID(31), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 905, AI: testAI1, Why: "merge", Task: testTask1, Commit: c1}
+	mIt1 := proto.Item{Item: 905, AI: testAI1, Why: "merge", Task: testTask1, Commit: c1}
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, mIt1, nil)
 	r.waitUntil("first ack while Apply is blocked", func() bool { return r.home.ackCountFor(905) == 1 })
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, mIt1, nil)
@@ -880,7 +880,7 @@ func verifyMergePreAuditWrittenFalse(t *testing.T, r *deliverRig, pDir string) {
 	c2 := strings.TrimSpace(mustGit(t, ctx, wt2, "rev-parse", "HEAD"))
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 11}, Group: testGroup1, Num: 2, Title: "M2", Slug: "pre-audit", Origin: "brief", State: "active", Step: "merge", Commit: c2, Assignee: testAI1, Stats: proto.TaskStats{Added: 1}})
 
-	mIt2 := proto.Item{Type: "item", Nonce: testCanonicalID(32), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 906, AI: testAI1, Why: "merge", Task: testTask2, Commit: c2}
+	mIt2 := proto.Item{Item: 906, AI: testAI1, Why: "merge", Task: testTask2, Commit: c2}
 	var first atomic.Bool
 	Holds["dup"] = func(*Host, SessionKey) (string, bool) {
 		if first.CompareAndSwap(false, true) {
@@ -895,10 +895,14 @@ func verifyMergePreAuditWrittenFalse(t *testing.T, r *deliverRig, pDir string) {
 	delete(Holds, "dup")
 	// Also exercise recordMergeTaken returning written == false when an already-audited merge entry reaches takeOneMerge: acked again, 0 extra Apply.
 	d := deliv(r.h)
-	d.enqueueMerge(verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Env: r.homeKey.Sign(marshalWire(mIt2))}, item: mIt2})
+	d.enqueueMerge(verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Item: mIt2}, item: mIt2})
 	Deliver(r.h, "", "")
-	if r.home.ackCountFor(906) != 2 || len(r.home.cmdPayloads()) != 2 || len(d.mergeGroups()) != 0 {
-		t.Fatalf("expected 2 acks and 2 total merge commands, got acks=%d cmds=%d", r.home.ackCountFor(906), len(r.home.cmdPayloads()))
+	r.waitUntil("second ack for already-audited merge 906", func() bool {
+		return r.home.ackCountFor(906) == 2 && len(d.mergeGroups()) == 0
+	})
+	r.waitNoActiveMerges()
+	if len(r.home.cmdPayloads()) != 2 {
+		t.Fatalf("expected 2 total merge commands, got %d", len(r.home.cmdPayloads()))
 	}
 }
 
@@ -920,12 +924,12 @@ func TestNonBlockingPushHandlersAndLockOrder(t *testing.T) {
 		return json.RawMessage(`{"re":1,"ok":true}`), nil
 	}
 	// Push assign (triggers TaskBranch Request on background goroutine); Push must return immediately.
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(35), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 40, AI: testAI1, Why: "assign", Task: testTask1}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 40, AI: testAI1, Why: "assign", Task: testTask1}, nil)
 	<-cmdEntered
 	// While Request is blocked, pushing rows and another inbox item must return without deadlocking.
 	noteRaw := json.RawMessage(`{"r":"note","id":"n1","seq":11}`)
 	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{noteRaw}})))
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(36), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 41, AI: testSec, Why: "notice", Code: "ping"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 41, AI: testSec, Why: "notice", Code: "ping"}, nil)
 	close(pushDone)
 
 	r.waitUntil("both turns completed", func() bool { return len(r.runtime.recorded()) == 2 })
@@ -943,7 +947,7 @@ func verifyHoldLockNotUnderDeliveryMutex(t *testing.T, r *deliverRig) {
 		extMu.Lock()
 		defer extMu.Unlock()
 		if first.CompareAndSwap(false, true) {
-			r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(37), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 42, AI: testAI2, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "reentrant"))
+			r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 42, AI: testAI2, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "reentrant"))
 		}
 		return "", false
 	}
@@ -955,7 +959,7 @@ func verifyHoldLockNotUnderDeliveryMutex(t *testing.T, r *deliverRig) {
 	}()
 	extMu.Unlock()
 	<-done
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(38), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 43, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "check"))
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 43, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "check"))
 	r.waitUntil("4 turns total", func() bool { return len(r.runtime.recorded()) == 4 })
 	r.waitAIUnbusy(testGroup1, testAI1)
 	r.waitAIUnbusy(testGroup1, testAI2)
@@ -971,8 +975,7 @@ func TestArrivalRefusalsNotHostedAndOpenWaitsWithoutCause(t *testing.T) {
 	r.h.Push(r.homeKey.ID(), json.RawMessage(`{"t":"rows","g":"","rows":[]}`))
 	r.h.Push(r.homeKey.ID(), json.RawMessage(`{"t":"inbox","g":"not-canonical","items":[]}`))
 	r.h.Push(r.homeKey.ID(), json.RawMessage(`{"t":"inbox","g":"`+testGroup1+`","items":[123]}`))
-	badPayload := r.homeKey.Sign(`{"t":"item","n":"` + string(testCanonicalID(5)) + `","ts":1763600000000,"g":"` + testGroup1 + `","to":"` + r.hostKey.ID() + `","item":4,"why":"mention"}`)
-	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Inbox{Type: "inbox", Group: testGroup1, Items: []proto.InboxItem{{Env: badPayload}}})))
+	r.h.Push(r.homeKey.ID(), json.RawMessage(`{"t":"inbox","g":"`+testGroup1+`","items":[{"item":{"item":4,"why":"mention"}}]}`))
 	checkRowHeaderEdges(t, r)
 
 	// Remote AI, human, and gone member are refused as not_hosted_here.
@@ -981,9 +984,9 @@ func TestArrivalRefusalsNotHostedAndOpenWaitsWithoutCause(t *testing.T) {
 	r.h.Rows.Put(testGroup1, "member", testHuman, json.RawMessage(marshalWire(human)))
 	goneID := testCanonicalID(88)
 	r.h.Rows.Put(testGroup1, "member", string(goneID), json.RawMessage(marshalWire(proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: string(goneID), Seq: 12}, Gone: true})))
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(41), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 101, AI: testAI2, Why: "mention", Msg: testMsg1}, nil)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(42), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 102, AI: testHuman, Why: "mention", Msg: testMsg1}, nil)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(43), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 103, AI: goneID, Why: "merge", Task: testTask1, Commit: "c1"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 101, AI: testAI2, Why: "mention", Msg: testMsg1}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 102, AI: testHuman, Why: "mention", Msg: testMsg1}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 103, AI: goneID, Why: "merge", Task: testTask1, Commit: "c1"}, nil)
 	r.waitUntil("3 refused acks", func() bool { return len(r.home.ackList()) == 3 })
 	r.waitAIUnbusy(testGroup1, testAI2)
 	r.waitAIUnbusy(testGroup1, testHuman)
@@ -1046,7 +1049,7 @@ func verifyOpenWaitsAndCauselessDecisions(t *testing.T) {
 		Pos:       15, Group: testGroup1, By: testSec, Kind: "reply", Timestamp: testStartMS,
 		Text: "here", Mentions: []string{}, Re: &callRef, Body: json.RawMessage(`{}`),
 	}
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(49), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 310, AI: testAI1, Why: "reply", Msg: testMsg1}, replyMsg)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 310, AI: testAI1, Why: "reply", Msg: testMsg1}, replyMsg)
 	if len(askCh) != 1 {
 		t.Fatal("open ask did not receive reply")
 	}
@@ -1061,7 +1064,7 @@ func verifyOpenWaitsAndCauselessDecisions(t *testing.T) {
 		return nil
 	})
 	defer doneApp()
-	dec1 := proto.Item{Type: "item", Nonce: testCanonicalID(50), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 320, AI: testAI1, Why: "decided", Msg: testCard1}
+	dec1 := proto.Item{Item: 320, AI: testAI1, Why: "decided", Msg: testCard1}
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, dec1, nil)
 	dec2 := dec1
 	dec2.Item = 321
@@ -1096,12 +1099,12 @@ func checkReplyNonMatchingCases(t *testing.T, r *deliverRig) {
 		{RowHeader: proto.RowHeader{Type: "msg", ID: testMsg1, Seq: 13}, Pos: 13, Group: testGroup1, By: testSec, Kind: "reply", Timestamp: testStartMS, Mentions: []string{}, Re: nil, Body: json.RawMessage(`{}`)},
 	}
 	for i, msg := range cases {
-		it := proto.Item{Type: "item", Nonce: testCanonicalID(byte(44 + i)), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: int64(300 + i), AI: testAI1, Why: "reply", Msg: testMsg1}
+		it := proto.Item{Item: int64(300 + i), AI: testAI1, Why: "reply", Msg: testMsg1}
 		r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, it, msg)
 	}
 	// Malformed Msg JSON is treated as no message and queued instead of refused.
-	badMsgIt := proto.Item{Type: "item", Nonce: testCanonicalID(48), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 309, AI: testAI1, Why: "reply", Msg: testMsg1}
-	badWire := proto.InboxItem{Env: r.homeKey.Sign(marshalWire(badMsgIt)), Msg: json.RawMessage(`{"invalid":true}`)}
+	badMsgIt := proto.Item{Item: 309, AI: testAI1, Why: "reply", Msg: testMsg1}
+	badWire := proto.InboxItem{Item: badMsgIt, Msg: json.RawMessage(`{"invalid":true}`)}
 	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Inbox{Type: "inbox", Group: testGroup1, Items: []proto.InboxItem{badWire}})))
 }
 
@@ -1116,8 +1119,8 @@ func verifyColdStartDrainOpenWait(t *testing.T) {
 
 	waitCh, doneWait := r.h.Await(testCard1, nil)
 	defer doneWait()
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(55), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 330, AI: testAI1, Why: "decided", Msg: testCard1}, nil)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(56), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 331, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "held"))
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 330, AI: testAI1, Why: "decided", Msg: testCard1}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 331, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "held"))
 	grpPaused := json.RawMessage(marshalWire(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Paused: &proto.GroupPause{By: testHuman, At: testStartMS}, Checks: []string{}}))
 	aiRow := json.RawMessage(marshalWire(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 2}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
 	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpPaused, aiRow}})))
@@ -1137,30 +1140,30 @@ func TestRoutingHoldsJumpAndBatchSelection(t *testing.T) {
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "review", Commit: "c1", Assignee: testAI1, Reviewer: testAI2})
 
 	// Causeless confirmed to secretary -> GroupSession; assign -> TaskSession; review -> ReviewSession; causeless decided -> GroupSession/TaskSession.
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(101), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 501, AI: testSec, Why: "confirmed", Msg: testMsg1}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 501, AI: testSec, Why: "confirmed", Msg: testMsg1}, nil)
 	r.waitUntil("sec turn", func() bool { return len(r.runtime.recorded()) == 1 })
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(102), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 502, AI: testAI1, Why: "assign", Task: testTask1}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 502, AI: testAI1, Why: "assign", Task: testTask1}, nil)
 	r.waitUntil("assign turn", func() bool { return len(r.runtime.recorded()) == 2 })
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(103), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 503, AI: testAI2, Why: "review", Task: testTask1, Commit: "c1"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 503, AI: testAI2, Why: "review", Task: testTask1, Commit: "c1"}, nil)
 	r.waitUntil("review turn", func() bool { return len(r.runtime.recorded()) == 3 })
 
 	tid := testTask1
 	otherTid := testTask2
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(104), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 504, AI: testAI2, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, &tid, "in review thread"))
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 504, AI: testAI2, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, &tid, "in review thread"))
 	r.waitUntil("thread mention turn", func() bool { return len(r.runtime.recorded()) == 4 })
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(105), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 505, AI: testAI2, Why: "mention", Msg: testMsg2}, r.makeTextMsg(testMsg2, &otherTid, "other thread"))
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 505, AI: testAI2, Why: "mention", Msg: testMsg2}, r.makeTextMsg(testMsg2, &otherTid, "other thread"))
 	r.waitUntil("other thread turn", func() bool { return len(r.runtime.recorded()) == 5 })
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(106), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 506, AI: testAI2, Why: "decided", Task: testTask1, Msg: testCard1}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 506, AI: testAI2, Why: "decided", Task: testTask1, Msg: testCard1}, nil)
 	r.waitUntil("ai2 open review decided turn", func() bool { return len(r.runtime.recorded()) == 6 })
 	r.waitAIUnbusy(testGroup1, testAI2)
 
 	// Dormant ReviewSession falls back to GroupSession on decided, while thread mention still wakes ReviewSession.
 	revKey := SessionKey{Group: testGroup1, Member: testAI2, Task: testTask1}
 	r.h.Sessions.Move(revKey, Waiting, Dormant)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(108), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 507, AI: testAI2, Why: "decided", Task: testTask1, Msg: testCard1}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 507, AI: testAI2, Why: "decided", Task: testTask1, Msg: testCard1}, nil)
 	r.waitUntil("ai2 dormant review decided fallback", func() bool { return len(r.runtime.recorded()) == 7 })
 	r.waitAIUnbusy(testGroup1, testAI2)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(109), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 508, AI: testAI2, Why: "mention", Task: testTask1, Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "wake review"))
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 508, AI: testAI2, Why: "mention", Task: testTask1, Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "wake review"))
 	r.waitUntil("ai2 dormant review mention", func() bool { return len(r.runtime.recorded()) == 8 })
 	r.waitAIUnbusy(testGroup1, testAI2)
 
@@ -1169,9 +1172,9 @@ func TestRoutingHoldsJumpAndBatchSelection(t *testing.T) {
 	r.h.Rows.Reset(testGroup1)
 	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 16}, Name: "Proj", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
 	r.putAIMember(testAI1, "Claude", r.hostKey.ID(), false, 17)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(107), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 509, AI: testAI1, Why: "decided", Task: testTask1, Msg: testCard1}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 509, AI: testAI1, Why: "decided", Task: testTask1, Msg: testCard1}, nil)
 	r.waitUntil("ai1 dormant task decided turn", func() bool { return len(r.runtime.recorded()) == 9 })
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(110), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 510, AI: testAI1, Why: "decided", Task: testTask2, Msg: testCard1}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 510, AI: testAI1, Why: "decided", Task: testTask2, Msg: testCard1}, nil)
 	r.waitUntil("ai1 uncreated task decided fallback", func() bool { return len(r.runtime.recorded()) == 10 })
 	r.waitAIUnbusy(testGroup1, testAI1)
 
@@ -1212,9 +1215,9 @@ func verifyHoldsBatchingAndJump(t *testing.T) {
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "paused", Step: "local_check", Assignee: testAI1})
 
 	// Paused/failed task holds work items while notice delivers immediately.
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(120), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 601, AI: testAI1, Why: "checks", Task: testTask1, Msg: testMsg1}, nil)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(121), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 602, AI: testAI1, Why: "reviewed", Task: testTask1, Msg: testMsg2}, nil)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(122), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 603, AI: testSec, Why: "notice", Task: testTask1, Code: "quiet"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 601, AI: testAI1, Why: "checks", Task: testTask1, Msg: testMsg1}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 602, AI: testAI1, Why: "reviewed", Task: testTask1, Msg: testMsg2}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 603, AI: testSec, Why: "notice", Task: testTask1, Code: "quiet"}, nil)
 	r.waitUntil("sec notice turn", func() bool { return len(r.runtime.recorded()) == 1 })
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 11}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "failed", Step: "local_check", Assignee: testAI1})
 	Deliver(r.h, testGroup1, testAI1)
@@ -1231,8 +1234,8 @@ func verifyHoldsBatchingAndJump(t *testing.T) {
 		return "cap", heldFlag.Load()
 	}
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 12}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "local_check", Assignee: testAI1})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(123), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 604, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "grp"))
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(124), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 605, AI: testAI2, Why: "mention", Msg: testMsg2}, r.makeTextMsg(testMsg2, nil, "ai2"))
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 604, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "grp"))
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 605, AI: testAI2, Why: "mention", Msg: testMsg2}, r.makeTextMsg(testMsg2, nil, "ai2"))
 	r.waitUntil("held items checked", func() bool { return holdChecks.Load() >= 2 })
 	r.waitAIUnbusy(testGroup1, testAI1)
 	r.waitAIUnbusy(testGroup1, testAI2)
@@ -1260,7 +1263,7 @@ func verifyWorkingJumpAndTakeoverRelease(t *testing.T, r *deliverRig, gKey Sessi
 	if len(r.runtime.recorded()) != 2 {
 		t.Fatal("delivered non-jump item while Working")
 	}
-	jumpIt := proto.Item{Type: "item", Nonce: testCanonicalID(125), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 606, AI: testAI1, Why: "mention", Msg: testMsg2, Jump: true}
+	jumpIt := proto.Item{Item: 606, AI: testAI1, Why: "mention", Msg: testMsg2, Jump: true}
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, jumpIt, r.makeTextMsg(testMsg2, nil, "jump"))
 	r.waitUntil("jump turn delivered", func() bool { return len(r.runtime.recorded()) == 3 && r.home.ackCountFor(606) == 1 })
 	r.waitAIUnbusy(testGroup1, testAI1)
@@ -1336,8 +1339,8 @@ func TestStillCurrentTaskRoleStepCommitMismatches(t *testing.T) {
 
 	// Mixed batch on TaskSession: stale assign + valid thread mention on existing TaskSession, plus GroupSession decided queued behind an all-stale batch.
 	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: testAI1, Task: testTask1}, Kind: TaskSession, Folder: "wt/1-t1", Agent: "claude", Home: r.homeKey.ID(), Name: "C"})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(140), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 701, AI: testAI1, Why: "assign", Task: testTask1}, nil)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(141), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 702, AI: testAI1, Why: "mention", Task: testTask1, Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "still valid"))
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 701, AI: testAI1, Why: "assign", Task: testTask1}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 702, AI: testAI1, Why: "mention", Task: testTask1, Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "still valid"))
 	r.waitUntil("held task items checked", func() bool { return holdChecks.Load() >= 2 })
 	r.waitAIUnbusy(testGroup1, testAI1)
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 11}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "review", Commit: "c1", Assignee: testAI2, Reviewer: testSec})
@@ -1358,18 +1361,18 @@ func TestStillCurrentTaskRoleStepCommitMismatches(t *testing.T) {
 		{Why: "merge", AI: testAI1, Task: testTask2, Commit: "c-good"},
 	}
 	for i, it := range staleItems {
-		it.Type, it.Nonce, it.Timestamp, it.Group, it.To, it.Item = "item", testCanonicalID(byte(150+i)), testStartMS, testGroup1, r.hostKey.ID(), int64(710+i)
+		it.Item = int64(710 + i)
 		r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, it, nil)
 	}
 	r.waitUntil("6 acks after first stale wave", func() bool { return len(r.home.ackList()) == 6 })
 	activeTask.Step = "merge"
 	r.putTask(activeTask)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(160), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 720, AI: testAI2, Why: "review", Task: testTask2, Commit: "c-good"}, nil)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(161), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 721, AI: testAI2, Why: "merge", Task: testTask2, Commit: "c-good"}, nil)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(162), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 722, AI: testAI1, Why: "merge", Task: testTask2, Commit: "c-wrong"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 720, AI: testAI2, Why: "review", Task: testTask2, Commit: "c-good"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 721, AI: testAI2, Why: "merge", Task: testTask2, Commit: "c-good"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 722, AI: testAI1, Why: "merge", Task: testTask2, Commit: "c-wrong"}, nil)
 	activeTask.State = "merged"
 	r.putTask(activeTask)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(163), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 723, AI: testAI1, Why: "resume", Task: testTask2}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 723, AI: testAI1, Why: "resume", Task: testTask2}, nil)
 	r.waitUntil("10 acks after second stale wave", func() bool { return len(r.home.ackList()) == 10 })
 	if len(r.runtime.recorded()) != 1 {
 		t.Fatalf("stale items ran turns: %d", len(r.runtime.recorded()))
@@ -1429,7 +1432,7 @@ func TestWorkspacesBranchRetryMergeStatsAndRestartInspect(t *testing.T) {
 	r.home.cmdErr = errors.New("temp_down")
 	r.home.mu.Unlock()
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 1, Title: "Add feature", Slug: "add-feature", Origin: "brief", State: "active", Step: "branch", Assignee: testAI1, Reviewer: testAI2})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(170), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 801, AI: testAI1, Why: "assign", Task: testTask1}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 801, AI: testAI1, Why: "assign", Task: testTask1}, nil)
 	r.waitUntil("first failed TaskBranch logged", func() bool {
 		return len(r.home.cmdPayloads()) == 1 && strings.Contains(logs.String(), "host: command to")
 	})
@@ -1449,7 +1452,7 @@ func TestWorkspacesBranchRetryMergeStatsAndRestartInspect(t *testing.T) {
 	}
 	// Second item at local_check does not resend TaskBranch.
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 6}, Group: testGroup1, Num: 1, Title: "Add feature", Slug: "add-feature", Origin: "brief", State: "active", Step: "local_check", Assignee: testAI1, Reviewer: testAI2})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(171), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 802, AI: testAI1, Why: "resume", Task: testTask1}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 802, AI: testAI1, Why: "resume", Task: testTask1}, nil)
 	r.waitUntil("second turn", func() bool { return len(r.runtime.recorded()) == 2 })
 	if len(r.home.cmdPayloads()) != 2 {
 		t.Fatal("sent duplicate TaskBranch after local_check")
@@ -1469,13 +1472,13 @@ func verifyReviewRoundsAndMergeStats(t *testing.T, r *deliverRig, pDir, wt, c1 s
 	t.Helper()
 	ctx := t.Context()
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 7}, Group: testGroup1, Num: 1, Title: "Add feature", Slug: "add-feature", Origin: "brief", State: "active", Step: "review", Commit: c1, Assignee: testAI1, Reviewer: testAI2})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(172), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 803, AI: testAI2, Why: "review", Task: testTask1, Commit: c1}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 803, AI: testAI2, Why: "review", Task: testTask1, Commit: c1}, nil)
 	r.waitUntil("review 1", func() bool { return len(r.runtime.recorded()) == 3 })
 	if _, err := os.Stat(filepath.Join(pDir, "review", "1", reviewDiff)); err != nil {
 		t.Fatalf("review diff missing: %v", err)
 	}
 	// Mention in existing ReviewSession (commit == "" in batch) reuses review/1 without PrepareReviewWorkspace.
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(173), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 804, AI: testAI2, Why: "mention", Task: testTask1, Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "note"))
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 804, AI: testAI2, Why: "mention", Task: testTask1, Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "note"))
 	r.waitUntil("review mention", func() bool { return len(r.runtime.recorded()) == 4 })
 
 	os.WriteFile(filepath.Join(wt, "extra.txt"), []byte("more\n"), 0o600)
@@ -1483,7 +1486,7 @@ func verifyReviewRoundsAndMergeStats(t *testing.T, r *deliverRig, pDir, wt, c1 s
 	mustGit(t, ctx, wt, "commit", "-m", "c2")
 	c2 := strings.TrimSpace(mustGit(t, ctx, wt, "rev-parse", "HEAD"))
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 8}, Group: testGroup1, Num: 1, Title: "Add feature", Slug: "add-feature", Origin: "brief", State: "active", Step: "review", Commit: c2, Assignee: testAI1, Reviewer: testAI2})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(174), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 805, AI: testAI2, Why: "review", Task: testTask1, Commit: c2}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 805, AI: testAI2, Why: "review", Task: testTask1, Commit: c2}, nil)
 	r.waitUntil("review 2", func() bool { return len(r.runtime.recorded()) == 5 })
 
 	// Merge held while Holds reports "offline"; lifted when Holds reports "cap"; TaskMerged uses TaskRow.Stats directly.
@@ -1495,7 +1498,7 @@ func verifyReviewRoundsAndMergeStats(t *testing.T, r *deliverRig, pDir, wt, c1 s
 		return holdReason.Load().(string), true
 	}
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 9}, Group: testGroup1, Num: 1, Title: "Add feature", Slug: "add-feature", Origin: "brief", State: "active", Step: "merge", Commit: c2, Assignee: testAI1, Reviewer: testAI2, Stats: proto.TaskStats{Added: 17, Removed: 5}})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(175), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 806, AI: testAI1, Why: "merge", Task: testTask1, Commit: c2}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 806, AI: testAI1, Why: "merge", Task: testTask1, Commit: c2}, nil)
 	r.waitUntil("offline merge hold checked", func() bool { return offChecks.Load() >= 1 })
 	Deliver(r.h, "", "")
 	if len(r.home.cmdPayloads()) != 2 {
@@ -1519,7 +1522,7 @@ func verifyConflictRestartInspectAndRemoteForge(t *testing.T) {
 	}
 	CreateTaskWorkspace(t.Context(), pDir, 1, "conflict", testAI1, "main", false)
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 1, Title: "C", Slug: "conflict", Origin: "brief", State: "active", Step: "merge", Commit: "0000000000000000000000000000000000000000", Branch: "task/1-conflict", Assignee: testAI1})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(180), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 820, AI: testAI1, Why: "merge", Task: testTask1, Commit: "0000000000000000000000000000000000000000"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 820, AI: testAI1, Why: "merge", Task: testTask1, Commit: "0000000000000000000000000000000000000000"}, nil)
 	r.waitUntil("TaskConflict command", func() bool { return len(r.home.cmdPayloads()) == 1 })
 	if !strings.Contains(r.home.cmdPayloads()[0], `"op":"conflict"`) {
 		t.Fatalf("expected TaskConflict, got %v", r.home.cmdPayloads())
@@ -1578,12 +1581,12 @@ func verifyRemoteForgeAndGitHubRepo(t *testing.T) {
 	r := newDeliverRig(t, true)
 	initTestOriginAndGroupRepo(t, r, "github")
 	// GroupSession wake with forge=github runs RefreshGroupWorkspace on create and when Dormant, and skips when Waiting.
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(190), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 850, AI: testSec, Why: "notice", Code: "ping"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 850, AI: testSec, Why: "notice", Code: "ping"}, nil)
 	r.waitUntil("sec turn 1", func() bool { return len(r.runtime.recorded()) == 1 })
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(191), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 851, AI: testSec, Why: "notice", Code: "pong"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 851, AI: testSec, Why: "notice", Code: "pong"}, nil)
 	r.waitUntil("sec turn 2", func() bool { return len(r.runtime.recorded()) == 2 })
 	r.h.Sessions.Move(SessionKey{Group: testGroup1, Member: testSec}, Waiting, Dormant)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(192), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 852, AI: testSec, Why: "notice", Code: "dormant-wake"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 852, AI: testSec, Why: "notice", Code: "dormant-wake"}, nil)
 	r.waitUntil("sec turn 3", func() bool { return len(r.runtime.recorded()) == 3 })
 
 	mergedJSON := `{"state":"MERGED","headRefOid":"deadbeef","mergeCommit":{"oid":"merged-oid"}}` + "\n"
@@ -1594,13 +1597,13 @@ func verifyRemoteForgeAndGitHubRepo(t *testing.T) {
 		forgeAnswer{Stderr: "down", Code: 1},
 	)
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 20}, Group: testGroup1, Num: 1, Title: "Remote", Slug: "remote", Origin: "brief", State: "active", Step: "merge", Commit: "deadbeef", PR: 42, Assignee: testAI1, Stats: proto.TaskStats{Added: 9, Removed: 4}})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(193), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 853, AI: testAI1, Why: "merge", Task: testTask1, Commit: "deadbeef", PR: 42}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 853, AI: testAI1, Why: "merge", Task: testTask1, Commit: "deadbeef", PR: 42}, nil)
 	r.waitUntil("remote TaskMerged", func() bool { return len(r.home.cmdPayloads()) == 1 })
 	if !strings.Contains(r.home.cmdPayloads()[0], `"merge_commit":"merged-oid"`) || !strings.Contains(r.home.cmdPayloads()[0], `"added":9`) {
 		t.Fatalf("unexpected remote TaskMerged: %v", r.home.cmdPayloads())
 	}
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 21}, Group: testGroup1, Num: 2, Title: "FailGH", Slug: "failgh", Origin: "brief", State: "active", Step: "merge", Commit: "fail-gh", PR: 99, Assignee: testAI1})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(194), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 854, AI: testAI1, Why: "merge", Task: testTask2, Commit: "fail-gh", PR: 99}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 854, AI: testAI1, Why: "merge", Task: testTask2, Commit: "fail-gh", PR: 99}, nil)
 	r.waitUntil("item 854 acked", func() bool { return r.home.ackCountFor(854) == 1 })
 	r.waitNoActiveMerges()
 	if len(r.home.cmdPayloads()) != 1 {
@@ -1620,7 +1623,7 @@ func TestGroupSessionGitFailureKeepsItemsHeld(t *testing.T) {
 	// 1) Initial clone failure for a group session keeps the item held with 0 acks and 0 audit rows, then delivers once Repo is reachable.
 	missingOrigin := filepath.Join(t.TempDir(), "unreachable.git")
 	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 10}, Name: "Website", Kind: "project", Repo: missingOrigin, Base: "main", Forge: "github", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(195), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 860, AI: testSec, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "wake-clone"))
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 860, AI: testSec, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "wake-clone"))
 	r.waitUntil("clone failure attempt started", func() bool { return attempts.Load() >= 1 })
 	r.waitAIUnbusy(testGroup1, testSec)
 	if r.home.ackCountFor(860) != 0 || len(r.audits()) != 0 || len(r.home.cmdPayloads()) != 0 || len(r.runtime.recorded()) != 0 {
@@ -1641,7 +1644,7 @@ func verifyGroupRefreshFailureHoldsAndRecovers(t *testing.T, r *deliverRig, orig
 	r.h.Sessions.Move(secKey, Waiting, Dormant)
 	mustGit(t, t.Context(), filepath.Join(pDir, "repo"), "remote", "set-url", "origin", filepath.Join(t.TempDir(), "dropped.git"))
 	attempts.Store(0)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(196), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 861, AI: testSec, Why: "notice", Code: "ping"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 861, AI: testSec, Why: "notice", Code: "ping"}, nil)
 	r.waitUntil("refresh failure attempt started", func() bool { return attempts.Load() >= 1 })
 	r.waitAIUnbusy(testGroup1, testSec)
 	if r.home.ackCountFor(861) != 0 || len(r.audits()) != 1 || len(r.home.cmdPayloads()) != 0 || len(r.runtime.recorded()) != 1 {
@@ -1667,7 +1670,7 @@ func TestWorkspaceFailureReportingConfigUnmarshalAndStoreErrors(t *testing.T) {
 	r.runtime.mu.Lock()
 	r.runtime.err = errors.New("cli_failed")
 	r.runtime.mu.Unlock()
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(205), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 900, AI: testSec, Why: "notice", Code: "c"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 900, AI: testSec, Why: "notice", Code: "c"}, nil)
 	r.waitUntil("item 900 turn error logged", func() bool {
 		return r.home.ackCountFor(900) == 1 && strings.Contains(logs.String(), "cli_failed")
 	})
@@ -1679,7 +1682,7 @@ func TestWorkspaceFailureReportingConfigUnmarshalAndStoreErrors(t *testing.T) {
 	r.composeMu.Lock()
 	r.composeE = errors.New("fetch failed")
 	r.composeMu.Unlock()
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(210), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 901, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "retry"))
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 901, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "retry"))
 	r.waitUntil("compose error logged", func() bool { return strings.Contains(logs.String(), "host: compose") })
 	r.waitAIUnbusy(testGroup1, testAI1)
 	if r.home.ackCountFor(901) != 0 {
@@ -1707,14 +1710,14 @@ func checkMergeAndHandAuditFailure(t *testing.T, r *deliverRig) {
 	defer done()
 	callRef := testCall1
 	replyMsg := &proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: testMsg2, Seq: 40}, Pos: 40, Group: testGroup1, By: testSec, Kind: "reply", Timestamp: testStartMS, Mentions: []string{}, Re: &callRef, Body: json.RawMessage(`{}`)}
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(211), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 902, AI: testAI1, Why: "reply", Msg: testMsg2}, replyMsg)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 902, AI: testAI1, Why: "reply", Msg: testMsg2}, replyMsg)
 	if len(ch) != 1 || r.home.ackCountFor(902) != 0 {
 		t.Fatal("expected handed item without ack on audit failure")
 	}
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 41}, Group: testGroup1, Num: 1, Title: "M", Slug: "m", Origin: "brief", State: "active", Step: "merge", Commit: "c1", Assignee: testAI1})
-	mIt := proto.Item{Type: "item", Nonce: testCanonicalID(212), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 903, AI: testAI1, Why: "merge", Task: testTask1, Commit: "c1"}
+	mIt := proto.Item{Item: 903, AI: testAI1, Why: "merge", Task: testTask1, Commit: "c1"}
 	d := deliv(r.h)
-	v := verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Env: r.homeKey.Sign(marshalWire(mIt))}, item: mIt}
+	v := verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Item: mIt}, item: mIt}
 	d.enqueueMerge(v)
 	d.enqueueMerge(v)
 	mKey := testGroup1 + "\x00" + testTask1 + "\x00c1"
@@ -1745,7 +1748,7 @@ func checkWorkspaceFailuresReportedOnce(t *testing.T, r *deliverRig, pDir string
 	os.MkdirAll(filepath.Join(pDir, "repo"), 0o700)
 	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 50}, Name: "W", Kind: "project", Repo: secretRepo, Base: "main", Forge: "github", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 51}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "branch", Assignee: testAI1})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(215), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 910, AI: testAI1, Why: "assign", Task: testTask1}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 910, AI: testAI1, Why: "assign", Task: testTask1}, nil)
 	r.waitUntil("member status and task fail commands", func() bool { return len(r.home.cmdPayloads()) == 2 })
 	cmds := r.home.cmdPayloads()
 	if !strings.Contains(cmds[0], `"code":"turn_interrupted"`) || !strings.Contains(cmds[0], `"state":"waiting"`) || !strings.Contains(cmds[1], `"op":"fail"`) {
@@ -1764,7 +1767,7 @@ func checkRemainingWorkspaceAndMergeEdges(t *testing.T, r *deliverRig, pDir stri
 	t.Helper()
 	// Merge clone failure logs and returns; RefreshGroupWorkspace, CreateTaskWorkspace, PrepareReviewWorkspace, invalid task Num==0, disconnected homePath, and failTargetSession audit failure.
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 52}, Group: testGroup1, Num: 2, Title: "M", Slug: "m", Origin: "brief", State: "active", Step: "merge", Commit: "c1", Assignee: testAI2})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(216), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 911, AI: testAI2, Why: "merge", Task: testTask2, Commit: "c1"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 911, AI: testAI2, Why: "merge", Task: testTask2, Commit: "c1"}, nil)
 	r.waitUntil("merge 911 clone failure logged", func() bool {
 		return r.home.ackCountFor(911) == 1 && strings.Contains(logs.String(), "host: ensure merge clone")
 	})
@@ -1778,7 +1781,7 @@ func checkRemainingWorkspaceAndMergeEdges(t *testing.T, r *deliverRig, pDir stri
 	r.h.Sessions.Move(secKey, Dormant, Working)
 	r.h.Sessions.Move(secKey, Working, Waiting)
 	beforeTurns := len(r.runtime.recorded())
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(224), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 916, AI: testSec, Why: "notice", Code: "c"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 916, AI: testSec, Why: "notice", Code: "c"}, nil)
 	r.waitUntil("sec waiting turn without refresh", func() bool { return len(r.runtime.recorded()) == beforeTurns+1 })
 	r.waitAIUnbusy(testGroup1, testSec)
 	var secChecks atomic.Int32
@@ -1787,7 +1790,7 @@ func checkRemainingWorkspaceAndMergeEdges(t *testing.T, r *deliverRig, pDir stri
 		return "", false
 	}
 	r.h.Sessions.Move(secKey, Waiting, Dormant)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(217), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 912, AI: testSec, Why: "notice", Code: "c"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 912, AI: testSec, Why: "notice", Code: "c"}, nil)
 	r.waitUntil("sec refresh attempt started", func() bool { return secChecks.Load() >= 1 })
 	r.waitAIUnbusy(testGroup1, testSec)
 	delete(Holds, "secobs")
@@ -1796,11 +1799,11 @@ func checkRemainingWorkspaceAndMergeEdges(t *testing.T, r *deliverRig, pDir stri
 	}
 
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 54}, Group: testGroup1, Num: 2, Title: "Bad", Slug: "bad", Origin: "brief", State: "active", Step: "review", Commit: "ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD", Assignee: testAI1, Reviewer: testAI2})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(218), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 913, AI: testAI1, Why: "assign", Task: testTask2}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 913, AI: testAI1, Why: "assign", Task: testTask2}, nil)
 	r.waitUntil("913 failure commands", func() bool { return r.home.ackCountFor(913) == 1 && len(r.home.cmdPayloads()) == 4 })
 	r.waitAIUnbusy(testGroup1, testAI1)
 	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 55}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(219), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 914, AI: testAI2, Why: "review", Task: testTask2, Commit: "ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 914, AI: testAI2, Why: "review", Task: testTask2, Commit: "ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD"}, nil)
 	r.waitUntil("914 review failure and 912 group recovery", func() bool {
 		return r.home.ackCountFor(912) == 1 && r.home.ackCountFor(914) == 1 && len(r.home.cmdPayloads()) == 5
 	})
@@ -1818,7 +1821,7 @@ func checkRemainingWorkspaceAndMergeEdges(t *testing.T, r *deliverRig, pDir stri
 	tZero := testCanonicalID(220)
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: string(tZero), Seq: 56}, Group: testGroup1, Num: 0, Title: "Z", Slug: "z", Origin: "brief", State: "active", Step: "branch", Assignee: testAI2})
 	addAuditBlockTrigger(t, r.db)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(221), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 915, AI: testAI2, Why: "assign", Task: tZero}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 915, AI: testAI2, Why: "assign", Task: tZero}, nil)
 	r.waitUntil("915 blocked audit logged", func() bool { return strings.Contains(logs.String(), "host: commit failed-workspace items") })
 	r.waitAIUnbusy(testGroup1, testAI2)
 	dropAuditBlockTrigger(t, r.db)
@@ -1842,7 +1845,7 @@ func checkConfigUnmarshalAndDroppedTables(t *testing.T, r *deliverRig) {
 	r.home = newFakeDeliverHome()
 	r.h.Attach(r.homeKey.ID(), r.home)
 	r.waitGroupLive(testGroup1)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(222), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 949, AI: testAI2, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "hi"))
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 949, AI: testAI2, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "hi"))
 	r.waitUntil("session create failure logged", func() bool { return strings.Contains(logs.String(), "host: create session") })
 	r.waitAIUnbusy(testGroup1, testAI2)
 
@@ -1860,7 +1863,7 @@ func checkConfigUnmarshalAndDroppedTables(t *testing.T, r *deliverRig) {
 		return err
 	}
 	r.db.Write(dropAudit)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(223), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 960, AI: testAI1, Why: "notice", Code: "c"}, nil)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 960, AI: testAI1, Why: "notice", Code: "c"}, nil)
 	dropSetting := func(tx *store.Tx) error {
 		_, err := tx.Exec("DROP TABLE setting")
 		return err
