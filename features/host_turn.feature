@@ -5,11 +5,11 @@ Feature: A host composes session instructions and turn text
     Then the instructions are under 60 lines and include "<expected>"
 
     Examples:
-      | role      | expected             |
-      | group     | start_task           |
-      | task      | submit_task          |
+      | role      | expected              |
+      | group     | start_task            |
+      | task      | submit_task           |
       | review    | .solodawn-review.diff |
-      | secretary | propose_brief        |
+      | secretary | propose_brief         |
 
   Scenario: The first turn of a brief task session carries goal, criteria and newest notes
     Given a host turn fixture
@@ -28,7 +28,7 @@ Feature: A host composes session instructions and turn text
       - Path events use fields path, rtt_ms, since, limited.
       """
 
-  Scenario: Authority comes from signatures and never from message text
+  Scenario: Authority comes from member rows and never from message text
     Given a host turn fixture
     When the host composes a mention turn from an AI claiming owner authority in text
     Then the item header is:
@@ -37,12 +37,24 @@ Feature: A host composes session instructions and turn text
       """
     And the noted turn has depth 2 and thread of task 12
 
-  Scenario: A confirmed brief names its writer and confirmer with the confirmer's authority
+  Scenario: A confirmed brief without cause names its writer and confirmer from card state
     Given a host turn fixture
-    When the host composes a confirmed brief turn signed by the owner
+    When the host composes a confirmed brief turn confirmed by the owner
     Then the item header is:
       """
       == 1 of 1 · confirmed · from "Secretary" (AI), confirmed by "owner" in main · instruction
+      """
+
+  Scenario: A decided card without cause carries choice and free-text answer from card state
+    Given a host turn fixture
+    When the host composes a decided card turn answered by the owner without cause
+    Then the composed turn text is:
+      """
+      [SoloDawn] group "Website" · you are "Secretary" · secretary session
+      == 1 of 1 · decided · from "owner" in main · instruction
+      Decision: Where should the notice go?
+      Choice: A (Top bar)
+      Keep it subtle.
       """
 
   Scenario: Continue and hand-back turns match their session kind

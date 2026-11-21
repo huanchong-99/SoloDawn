@@ -261,17 +261,22 @@ Which fields do you need in the path event?
 - Session header labels: `task session T-<num>`, `review session T-<num>`,
   `group session` (for a working AI), and `secretary session`. Place in an
   item header is `in T-<num>` for a thread and `in main` for the main line.
-- Authority comes from signatures, never from the text. It is `instruction`
-  when the message that caused the item is signed by the AI's owner as a
-  person (a device in the owner's log, with no `as`; a message an AI wrote
-  is never one), and for the workflow items of a task the owner confirmed
-  (`assign`, `review`, `reviewed`, `decided`, `checks`, `resume`, the
-  hand-back and continue turns; a main-line `decided` without a task gets
-  its authority from the signer of `cause`). It is `information` for
-  everything else (R-52).
-- A `confirmed` item keeps the writer of the brief as its author and also
-  names the person who confirmed it or sent it back (`confirmed by "<name>"`
-  or `sent back by "<name>"`); its authority comes from that person, by the
+- Authority and speaker labels come from the group's rows (`member` and
+  `msg.state`, plus `setting` key `owner`), never from the message text and,
+  by the 2026-11-21 slimming decisions A-3 and A-17, without re-verifying
+  envelopes or reading `cause`. Authority is `instruction` when `msg.by`
+  names a human `member` row whose `user` matches the node's `owner` (a
+  message from an AI, `system`, or another person is never one), and for the
+  workflow items of a task (`assign`, `review`, `reviewed`, `decided`,
+  `checks`, `resume`, and the hand-back and continue turns; a main-line
+  `decided` without a task gets its authority from `msg.state.by`). It is
+  `information` for everything else (R-52).
+- A `decided` or `confirmed` item reads its outcome and actor from
+  `msg.state` (`status`, `by`, `choice`, `text`, `note`; `"unknown"` when
+  `by` is absent), with no `cause` required (slimming A-3). A `confirmed`
+  item keeps the writer of the brief as its author and also names the person
+  who confirmed it or sent it back (`confirmed by "<name>"` or
+  `sent back by "<name>"`); its authority comes from `msg.state.by`, by the
   rule above.
 - A task without a brief (`direct` or `takeover` origin) shows `Plan: <plan>`
   when `plan` is not empty, and `Reviewer: none` while no reviewer is named.
