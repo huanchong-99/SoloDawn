@@ -48,6 +48,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | subscribe a connection to a group | `loop.Watch(conn, group, stateOnly)` |
 | send a host its inbox items, on every `hello` | `loop.Inbox(conn)` |
 | run the timers by hand, or tell the home of an event | `loop.Tick(now)`, `loop.Event(name, event)` |
+| mark a disconnected host's AIs offline | `loop.Event(HostOfflineEvent, device)` after detaching the connection |
 | move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
 | push to a client | the `Client` interface |
 
@@ -168,6 +169,8 @@ names that start with `run`, and its tests those that start with `run` and `Run`
 `Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
 `ItemsPush`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
+Host events take the names that start with `hev`, their tests too, and their test functions start
+with `TestHostEv`; the file exports `HostOfflineEvent`.
 
 ## The run loop
 
@@ -392,9 +395,45 @@ function that moves a task calls it and adds nothing to its rules.
   HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
   `c.Disk.Msg` reads.
 
+## Host events
+
+`cmd_hostev.go` holds `member` `status` and the `HostOfflineEvent` (`"host.offline"`) handler
+([commands](../../planning/contracts/commands.md) 1.2 and 1.9;
+[messages](../../planning/contracts/messages.md) 2.11;
+[rows](../../planning/contracts/rows.md) 2 and 4;
+[task-machine](../../planning/contracts/task-machine.md) 5), under `Commands` key `member/status`
+and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does this:
+
+- **Payload checks.** `state` must be one of `working`, `waiting`, `dormant`, `takeover`,
+  `paused`, `limited` or `offline`; `path` must be `local`, `direct`, `relay` or `""`; every
+  present `usage` figure must be at least 0. When `event` is present, `code` must be one of the
+  five host codes (`turn_interrupted` with `reason` `crash`, `timeout` or `stop`; `cap_reached`
+  with `cap` `day` or `task`; `rate_limited` with `resets` at least 0; `login_invalid`;
+  `session_replaced`), and an optional `detail` may not be `""`. Anything else is `bad_request`.
+- **Member and signer.** An `id` in neither `State.AIs` nor `State.People` is `not_found`. A human
+  member row, or an AI member row for which `State.Hosts(c.Who, id)` is false (another device, or a
+  command carrying `as`), is `forbidden`.
+- **Tasks and message id.** A non-empty `task` on `member/status` or on `event` must exist in
+  `State.Tasks`, else `not_found`. When `event` is present, the `system` message takes the command's
+  `n` as its id; if `c.Disk.Msg(n)` already holds a message, the command is answered `conflict`.
+- **Rows and notices.** The AI's `AIMemberRow` gets `State`, `Task`, `Path`, `Usage` and
+  `LastSeen = c.Now`; `Since` becomes `c.Now` when `State` changes and stays as it was when `State`
+  is unchanged. When `event` is present, the home writes a `system` `MsgRow` (`by` `"system"`,
+  `ts` `c.Now`, `mentions` `[]`, and `ai` set to `id`) in the thread of `event.task` when set,
+  advancing `task.Thread.Count` and `task.Thread.Last` (`text` `""`, `ts` `c.Now`) on the task row,
+  or in the main line otherwise. For `login_invalid`, `cap_reached` and `rate_limited`, when
+  `State.Group.Secretary` is not empty, it queues `Item{AI: s.Group.Secretary, Why: "notice",
+  Task: eventTask, Msg: n, Code: code}`.
+- **Closed host connection.** `internal/node` (units N-1 and N-2) calls
+  `loop.Event(HostOfflineEvent, device)` after detaching a connection of `device`. While
+  `State.Online[device]` holds (another connection of `device` is still attached), the handler
+  changes nothing. Otherwise, for every AI in `State.AIs` in id order with `Host == device` and
+  `State != "offline"`, it sets `State = "offline"`, `Task = ""` and `Since = now`, leaving
+  `LastSeen`, `Path` and `Usage` unchanged.
+
 ## Known limitations
 
-- The table of commands holds only the briefs, and no node starts a loop yet: the other command
+- The table of commands holds only the briefs and host events, and no node starts a loop yet: the other command
   files and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
@@ -435,3 +474,8 @@ while a task is paused and a reviewer named while it is paused.
 holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
 `Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
 commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
+
+`cmd_hostev_test.go` checks `member/status` against the wire golden files, every valid state, path,
+usage bound and host event code, every refusal, and `HostOfflineEvent` both directly and through
+`StartLoop`. `features/home_hostev.feature` holds the home half of acceptance test A3.6 together
+with all five host event codes, secretary notices and host disconnection.
