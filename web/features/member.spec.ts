@@ -3,6 +3,7 @@ import { flushSync, tick } from 'svelte';
 import { expect, vi } from 'vitest';
 import { Home, homes } from '../src/lib/groups.svelte';
 import { goldens } from '../src/lib/mock';
+import { nodes } from '../src/lib/nodes.svelte';
 import * as p from '../src/lib/proto';
 import { example, owner, TestHome, user } from './home';
 import { all, closePage, fill, one, openPage, texts } from './page';
@@ -49,6 +50,42 @@ function makeNode(
         link.offline();
       };
       let seq = 100;
+      function writeJoinedAI(join: p.HostJoin) {
+        const target = groupHome ?? home;
+        const memberId = `ai-${joins.length}`;
+        target.write(
+          join.g,
+          example('row-member-ai', {
+            id: memberId,
+            g: join.g,
+            name: join.name,
+            cli: join.agent,
+            host: node.device,
+            host_name: name,
+            secretary: join.secretary,
+            state: 'waiting',
+            task: undefined,
+            path: target === home ? 'local' : 'direct',
+          }),
+        );
+        if (join.secretary) {
+          target.write(
+            join.g,
+            example('row-group', { id: join.g, name: 'Website', secretary: memberId }),
+          );
+        }
+      }
+      async function handleJoinCmd(env: p.Envelope) {
+        await new Promise((later) => setTimeout(later));
+        expect(env.k).toBe('this-browser');
+        const join = p.decode(p.HostJoin, env.p);
+        joins.push(join);
+        if (node.refuseJoin) {
+          return { re: (seq += 1), err: { code: node.refuseJoin, msg: 'refused' } };
+        }
+        writeJoinedAI(join);
+        return { re: (seq += 1), ok: true as const };
+      }
       const ctl: p.Ctl = {
         request: (async (req: { t: string; env?: p.Envelope }) => {
           if (req.t === 'host.info') {
@@ -56,41 +93,12 @@ function makeNode(
             const base = p.decode(p.HostInfo, goldens['host-info-answer']);
             return { ...base, re: (seq += 1), device: node.device, name, agents: node.agents };
           }
-          if (req.t === 'cmd' && req.env) {
-            const raw = JSON.parse(req.env.p) as { t?: string };
-            if (raw.t === 'host.join') {
-              await new Promise((later) => setTimeout(later));
-              expect(req.env.k).toBe('this-browser');
-              const join = p.decode(p.HostJoin, req.env.p);
-              joins.push(join);
-              if (node.refuseJoin) {
-                return { re: (seq += 1), err: { code: node.refuseJoin, msg: 'refused' } };
-              }
-              const target = groupHome ?? home;
-              const memberId = `ai-${joins.length}`;
-              target.write(
-                join.g,
-                example('row-member-ai', {
-                  id: memberId,
-                  g: join.g,
-                  name: join.name,
-                  cli: join.agent,
-                  host: node.device,
-                  host_name: name,
-                  secretary: join.secretary,
-                  state: 'waiting',
-                  task: undefined,
-                  path: target === home ? 'local' : 'direct',
-                }),
-              );
-              if (join.secretary) {
-                target.write(
-                  join.g,
-                  example('row-group', { id: join.g, name: 'Website', secretary: memberId }),
-                );
-              }
-              return { re: (seq += 1), ok: true as const };
-            }
+          if (
+            req.t === 'cmd' &&
+            req.env &&
+            (JSON.parse(req.env.p) as { t?: string }).t === 'host.join'
+          ) {
+            return handleJoinCmd(req.env);
           }
           return connection.ctl.request(req as Parameters<p.Ctl['request']>[0]);
         }) as p.Ctl['request'],
@@ -160,7 +168,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     flushSync();
   }
 
-  AfterEachScenario(closePage);
+  AfterEachScenario(async () => {
+    await closePage();
+    nodes.infos.clear();
+  });
 
   Background(({ Given }) => {
     Given(

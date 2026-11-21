@@ -21,16 +21,12 @@
   const overLimit = $derived(trimmed !== '' && jsonBytes(trimmed) > actTextLimit);
   const canSendText = $derived(canAct && !readonly && !busy && trimmed !== '' && !overLimit);
 
-  const taskRow = $derived.by(() => {
-    if (!msg.body.task) return undefined;
-    const row = group.rows.get(`task ${msg.body.task}`);
-    return row && row.r === 'task' && !('gone' in row) ? row : undefined;
-  });
+  const taskRow = $derived(msg.body.task ? group.task(msg.body.task) : undefined);
 
   const memberName = (id: string) => group.member(id)?.name ?? t('chat.gone');
-  const userName = (uid: string) =>
-    group.members.find((m) => m.kind === 'human' && m.user === uid)?.name ?? uid;
-  const waitingOn = $derived(msg.body.to.map(userName).join(t('decision.sep')));
+  const waitingOn = $derived(
+    msg.body.to.map((uid) => group.personName(uid) ?? uid).join(t('decision.sep')),
+  );
 
   async function choose(arg?: string) {
     if (!canAct || readonly || busy || overLimit) return;

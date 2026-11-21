@@ -1,12 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Group, Home } from './groups.svelte';
 import {
-  accountTitle,
   addDisabledReason,
   aiMembers,
   candidatesOf,
   canMakeSecretary,
-  cliTitle,
   humanMembers,
   humanName,
   isAdmin,
@@ -15,7 +13,6 @@ import {
   otherWaiter,
   pathLabel,
   personTags,
-  readHosts,
   selectableCandidates,
   statusOf,
   suggestedName,
@@ -61,6 +58,13 @@ function makeHome(opts: { user?: string; owner?: boolean; online?: boolean } = {
   return home;
 }
 
+function makeInfoRow(secretary: string | undefined): p.GroupRow {
+  const info = row<p.GroupRow>('row-group', { id: gid, home: homeDev });
+  if (secretary === undefined) delete (info as { secretary?: string }).secretary;
+  else info.secretary = secretary;
+  return info;
+}
+
 function makeGroup(
   opts: {
     role?: 'owner' | 'admin' | 'member' | 'none';
@@ -69,23 +73,18 @@ function makeGroup(
     secretary?: string;
   } = {},
 ) {
-  const home = makeHome({ online: opts.online ?? true, owner: true });
+  const { role = 'owner', online, withInfo = true, secretary } = opts;
+  const home = makeHome({ online, owner: true });
   const group = new Group(home, gid);
-  const rows: p.Row[] = [];
-  if (opts.withInfo !== false) {
-    const info = row<p.GroupRow>('row-group', { id: gid, home: homeDev });
-    if (opts.secretary === undefined) delete (info as { secretary?: string }).secretary;
-    else info.secretary = opts.secretary;
-    rows.push(info);
-  }
-  if (opts.role !== 'none') {
+  const rows: p.Row[] = withInfo ? [makeInfoRow(secretary)] : [];
+  if (role !== 'none') {
     rows.push(
       row<p.HumanMemberRow>('row-member-human', {
         id: meMemberId,
         g: gid,
         user: meUser,
         name: 'Alex',
-        role: opts.role ?? 'owner',
+        role,
         online: true,
       }),
     );
@@ -97,21 +96,6 @@ function makeGroup(
 beforeEach(() => {
   prefs.lang = 'en';
   seq = 1000;
-});
-
-describe('cliTitle and accountTitle', () => {
-  it('maps known CLIs and preserves unknown ones', () => {
-    expect(cliTitle('claude')).toBe('Claude Code');
-    expect(cliTitle('codex')).toBe('Codex');
-    expect(cliTitle('gemini')).toBe('gemini');
-  });
-
-  it('localizes known account types and preserves unknown ones', () => {
-    expect(accountTitle('personal')).toBe('Personal subscription');
-    expect(accountTitle('team')).toBe('Team plan');
-    expect(accountTitle('api_key')).toBe('API key');
-    expect(accountTitle('enterprise')).toBe('enterprise');
-  });
 });
 
 describe('member lists, roles and addDisabledReason', () => {
@@ -184,8 +168,13 @@ describe('member lists, roles and addDisabledReason', () => {
       'Cannot reach the group home.',
     );
 
-    const noInfo = makeGroup({ online: true, withInfo: false });
-    expect(addDisabledReason(noInfo.group, [ownedOnline])).toBe('Cannot reach the group home.');
+    const offlineNoInfo = makeGroup({ role: 'none', online: false, withInfo: false });
+    expect(addDisabledReason(offlineNoInfo.group, [ownedOnline])).toBe(
+      'Cannot reach the group home.',
+    );
+
+    const noInfo = makeGroup({ role: 'none', online: true, withInfo: false });
+    expect(addDisabledReason(noInfo.group, [])).toBeUndefined();
 
     const regularMember = makeGroup({ role: 'member', online: true, withInfo: true });
     expect(addDisabledReason(regularMember.group, [ownedOnline])).toBe(
@@ -745,52 +734,6 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
     expect(joinError('conflict')).toBe('That name is already used in this group.');
     expect(joinError('lost')).toBe("Not sent: the AI's computer cannot be reached.");
     expect(joinError('forbidden')).toBeUndefined();
-  });
-
-  it('reads host.info once per connected home, retains prior entries and reports errors only when empty', async () => {
-    const baseInfo = p.decode(p.HostInfo, goldens['host-info-answer']);
-    const offline = makeHome({ online: false });
-    let calls1 = 0;
-    const h1 = makeHome();
-    h1.ctl = makeOnlineCtl(async (req) => {
-      expect(req).toEqual({ t: 'host.info' });
-      calls1 += 1;
-      return { ...baseInfo, device: 'd1', name: 'one' };
-    });
-
-    const asked = new Set<Home>();
-    expect(await readHosts([offline], asked, new Map())).toBeUndefined();
-
-    const first = await readHosts([offline, h1], asked, new Map());
-    expect(asked.has(h1)).toBe(true);
-    expect(asked.has(offline)).toBe(false);
-    expect(first?.error).toBe('');
-    expect(first?.infos.get(h1)?.name).toBe('one');
-
-    // Already asked -> undefined and no second request
-    expect(await readHosts([h1], asked, first!.infos)).toBeUndefined();
-    expect(calls1).toBe(1);
-
-    // Failure when held already has an entry -> error is suppressed
-    const hFail1 = makeHome();
-    hFail1.ctl = makeOnlineCtl(async () => ({ re: 1, err: { code: 'forbidden', msg: 'no' } }));
-    const withHeld = await readHosts([hFail1], asked, first!.infos);
-    expect(withHeld?.infos.size).toBe(1);
-    expect(withHeld?.error).toBe('');
-
-    // Multiple failures with empty held -> keeps the first error code; rejected request becomes lost
-    const hFail2 = makeHome();
-    hFail2.ctl = makeOnlineCtl(async () => ({ re: 2, err: { code: 'stale', msg: 'late' } }));
-    const hDrop = makeHome();
-    hDrop.ctl = makeOnlineCtl(async () => {
-      throw new Error('disconnected');
-    });
-    const bothFailed = await readHosts([hFail1, hFail2], new Set(), new Map());
-    expect(bothFailed?.infos.size).toBe(0);
-    expect(bothFailed?.error).toBe('forbidden');
-
-    const dropped = await readHosts([hDrop], new Set(), new Map());
-    expect(dropped?.error).toBe('lost');
   });
 
   it('signs host.join in joinGroup and handles missing target, offline target, refusal and rejection', async () => {

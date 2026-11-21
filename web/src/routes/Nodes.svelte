@@ -5,14 +5,8 @@
   import PairBrowserDialog from '../components/nodes/PairBrowserDialog.svelte';
   import { find } from '../lib/groups.svelte';
   import type { Net } from '../lib/net.svelte';
-  import {
-    accountLabel,
-    accounts,
-    cliName,
-    nodes,
-    type AccountKind,
-    type Computer,
-  } from '../lib/nodes.svelte';
+  import { nodes, type Computer } from '../lib/nodes.svelte';
+  import { accountLabel, accounts, cliName, type AccountKind } from '../lib/onboard.svelte';
   import { t } from '../lib/prefs.svelte';
   import type { TaskRow } from '../lib/proto';
   import { href } from '../lib/route.svelte';
@@ -169,7 +163,7 @@
                     <b>{label}</b>
                     <span class="mono hint">v{agent.cli_version}</span>
                     <span class="badge" data-tone={agent.account ? undefined : 'dawn'}>
-                      {accountLabel(agent.account)}
+                      {agent.account ? accountLabel(agent.account) : t('nodes.account.unset')}
                     </span>
                   </div>
                   {#if !comp.online}
@@ -184,10 +178,10 @@
 
               {#if agent.account === null}
                 <header class="card-head">
-                  <h4 class="kind">{t('nodes.account.title').replace('{name}', label)}</h4>
+                  <h4 class="kind">{t('pairing.acct.title').replace('{name}', label)}</h4>
                 </header>
                 <fieldset class="acct" disabled={!comp.online || busyAcct[acctKey]}>
-                  <legend class="sr">{t('nodes.account.legend')} · {label}</legend>
+                  <legend class="sr">{t('pairing.acct.legend')} · {label}</legend>
                   {#each accounts as acct (acct)}
                     <label>
                       <input
@@ -198,13 +192,13 @@
                       />
                       <span>
                         <b>{accountLabel(acct)}</b>
-                        <span>{t(`nodes.account.${acct}_body`)}</span>
+                        <span>{t(`pairing.acct.${acct}_body`)}</span>
                       </span>
                     </label>
                   {/each}
                 </fieldset>
                 {#if acctFailed[acctKey]}<Failure code={acctFailed[acctKey]} />{/if}
-                <p class="hint">{t('nodes.account.hint')}</p>
+                <p class="hint">{t('pairing.acct.hint')}</p>
               {/if}
 
               {#if agent.groups.length}

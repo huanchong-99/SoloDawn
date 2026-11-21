@@ -6,10 +6,7 @@
   /** The secretary's summary card after a task is merged (contracts/messages.md 2.5). */
   let { group, msg }: CardProps<'summary'> = $props();
 
-  const taskRow = $derived.by(() => {
-    const row = group.rows.get(`task ${msg.body.task}`);
-    return row && row.r === 'task' && !('gone' in row) ? row : undefined;
-  });
+  const taskRow = $derived(group.task(msg.body.task));
 
   const rounds = $derived(
     t(msg.body.rounds === 1 ? 'summary.rounds.one' : 'summary.rounds.many').replace(
