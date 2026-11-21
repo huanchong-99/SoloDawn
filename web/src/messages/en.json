@@ -5,6 +5,8 @@
   "app.home": "Back to the chats",
   "app.side": "People and details",
   "app.side.close": "Close the panel",
+  "app.otherTab": "SoloDawn is open in another tab.",
+  "app.useHere": "Use here",
   "nav.label": "Main",
   "nav.groups": "Chats",
   "nav.nodes": "Computers",
