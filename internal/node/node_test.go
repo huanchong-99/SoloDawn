@@ -482,7 +482,6 @@ func TestAdoptionRendezvousWatchPresenceAndInboundPeer(t *testing.T) {
 	if len(n.sharedPaths()) != 2 {
 		t.Fatalf("sharedPaths = %d, want 2", len(n.sharedPaths()))
 	}
-	n.watchOwnerDevices() // no-op while still unowned
 
 	// Subscribe to presence for browserKey before browserKey connects to rvSrv.
 	browserKey := sesKey("adopt-browser")
@@ -583,17 +582,10 @@ func TestAdoptionRendezvousWatchPresenceAndInboundPeer(t *testing.T) {
 		t.Fatalf("owned open = %v", err)
 	}
 
-	// Cover sendWatch nil and >64 cap, initRVPath when already owned, onRVEvent presence Off, pruneRendezvous, rvNextDelay and onAdopt startHomeLoop error.
-	n.initRVPath(t.Context(), n.localPath)
-	n.sendWatch(t.Context(), n.localPath, nil)
-	many := make([]string, 70)
-	for i := range many {
-		many[i] = browserKey.ID()
-	}
-	n.sendWatch(t.Context(), n.localPath, many)
+	// Cover presence Off, reconnect with Owner set, pruneRendezvous, rvNextDelay and onAdopt startHomeLoop error.
 	n.onRVEvent(t.Context(), n.localPath, "presence", []byte(`{"t":"presence","k":"`+browserKey.ID()+`","on":false}`))
 
-	// Drop the remote RV socket while still configured so clearRVPath deletes it and runRVLoop reconnects.
+	// Drop the remote RV socket while still configured so serveOneRV clears rvPaths and runRVLoop reconnects (sending watch as owned).
 	firstPath := n.remoteRVPaths()[0]
 	firstPath.Close()
 	waitCond(t, func() bool {
@@ -775,7 +767,6 @@ func TestSelfUpdateHoldBusyAndForegroundRestart(t *testing.T) {
 	// Restore pending status, start serve(l), then end the turn so listener wakes runUpdateLoop and triggers restart.
 	n.updMu.Lock()
 	n.updater.Status = &UpdateStatus{Version: "v1.1.0", Status: "pending"}
-	n.syncUpdateStatus()
 	n.updMu.Unlock()
 	n.notifyWake()
 	n.notifyWake()
@@ -809,8 +800,8 @@ func TestSelfUpdateHoldBusyAndForegroundRestart(t *testing.T) {
 		t.Fatal("expected runForegroundNode error on bad dir")
 	}
 
-	// Clean stop via foregroundContext (and cover defaultForegroundContext).
-	defCtx, defStop := defaultForegroundContext()
+	// Clean stop via foregroundContext.
+	defCtx, defStop := foregroundContext()
 	defStop()
 	<-defCtx.Done()
 

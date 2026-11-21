@@ -84,11 +84,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `codexBaseFlags` (`internal/host/codex.go`) passes `-c features.default_mode_request_user_input=true` on `codex app-server` and `codex resume`, and `onUserInputRequest` maps `item/tool/requestUserInput` from the generated schema (`[documented]`), without a live run on the owner's sign-in yet.
 - Status: open for the live check in B-17 / I-11 (`planning/steps/step-1-acceptance.md` A4.11). If the flag does not offer a working `request_user_input` tool in Default mode, record in `planning/contracts/drivers.md` section 1.2 that a Codex AI asks through `request_decision` (`HS-11`) instead.
 
-### 2026-11-21 · limitation · `Sessions` has no `sync` or `fetch` handlers until the home units and runtime wire them
+### 2026-11-21 · limitation · `Sessions` has no `fetch` handler until `HM-3` lands
 
-- Symptom: inbound `ctl` requests for `sync` and `fetch` are answered `bad_request` ("unknown ctl request") on a bare `Sessions` hub (`internal/node/session.go`, `NewSessions`), and `host.info`, `pair.browser` and `settings.set` are not registered until unit N-3.
-- Cause: `Sessions` provides the `Requests`, `Pushes` and `Commands` tables, while `sync` (`HM-2`), `fetch` (`HM-3`), the pairing and host-info handlers (`N-3`) and runtime assembly (`N-4`) are separate units (`ack` pushes are routed to `home.Loop.Ack` in `Sessions.sesPush` as of `HM-7`).
-- Status: open until `HM-2`, `HM-3`, `N-3` and `N-4` populate those tables.
+- Symptom: inbound `ctl` requests for `fetch` are answered `bad_request` ("unknown ctl request") on a `Sessions` hub (`internal/node/session.go`, `NewSessions`), and `host.info`, `pair.browser` and `settings.set` are not registered until unit N-3.
+- Cause: `Sessions` registers `sync` (`HM-2`) and routes `ack` pushes (`HM-7`), while `fetch` (`HM-3`) and the pairing and host-info handlers (`N-3`) are separate units.
+- Status: `ack` wired in `HM-7` (#221) and `sync` wired in `N-4` after `HM-2` (#205); open until `HM-3` and `N-3` land.
 
 ### 2026-11-21 · limitation · `Sessions` implements only the server side of a `ctl` connection
 
@@ -96,11 +96,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `internal/node/session.go` (`N-2`) serves inbound `ctl` connections (`Serve`); the client side of a `ctl` session was split out by the coordinator's decision of 2026-11-21.
 - Status: open for unit `N-2b` (`internal/node/client.go`), wired into the node runtime by `N-4`.
 
-### 2026-11-21 · deviation · The local link routes only `cmd` requests and `ack` pushes until `sync` and `fetch` land
+### 2026-11-21 · deviation · The local link routes `cmd`, `sync` and `ack` until `fetch` lands
 
-- Symptom: on `LocalLink`, a `sync` or `fetch` request from the host is answered `bad_request`; tests subscribe to row pushes through `LocalLink.Watch` (`internal/node/local.go:66`), which is temporary until `sync` is routed to `home.Loop`.
-- Cause: `Sync` (HM-2, #205) and `Fetch` (HM-3) are built in separate units. `LocalLink.toHome` (`internal/node/local.go`) dispatches `cmd` to `Loop.Cmd` and `ack` to `Loop.Ack`, and answers other requests `bad_request` per `planning/contracts/datachannel.md` section 2.
-- Status: open. Route `sync` to `Loop` and delete `LocalLink.Watch` once HM-2 (#205) merges; wire `fetch` once HM-3 merges (N-4 / I-1 / I-3). (`ack` and `inbox` frames wired in `HM-7`.)
+- Symptom: on `LocalLink`, a `fetch` request from the host is answered `bad_request`.
+- Cause: `LocalLink.toHome` (`internal/node/local.go`) dispatches `cmd` to `Loop.Cmd`, `sync` to `Loop.Sync` and `ack` to `Loop.Ack`, while `Fetch` (HM-3) is built in a separate unit; other requests carrying `id` are answered `bad_request` per `planning/contracts/datachannel.md` section 2.
+- Status: `ack` and `inbox` frames wired in HM-7 (#221); `sync` routed to `Loop.Sync` and temporary `LocalLink.Watch` removed in HM-2 (#205); open for `fetch` once HM-3 merges (N-4 / I-1 / I-3).
 
 ### 2026-11-21 · limitation · Postponed step-2 contracts still assume an item-level `cause`
 

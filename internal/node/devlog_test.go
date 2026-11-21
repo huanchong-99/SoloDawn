@@ -330,8 +330,8 @@ func TestBatchFramesExact60KiBBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := logs.OwnerDevices(); got != nil {
-		t.Fatalf("unowned OwnerDevices = %v, want nil", got)
+	if got := logs.OwnerDevices(); got == nil || len(got) != 0 {
+		t.Fatalf("unowned OwnerDevices = %#v, want []string{}", got)
 	}
 	cand, err := identity.Replay(user, []proto.Envelope{
 		sesAddEntry(userKey, user, 1, user, "browser", "b1"),

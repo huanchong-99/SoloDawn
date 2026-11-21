@@ -90,6 +90,7 @@ func NewSessions(cfg SessionConfig) *Sessions {
 		Requests: map[string]RequestHandler{}, Pushes: map[string]PushHandler{}, Commands: map[string]CmdFunc{},
 		cfg: sesDefaultConfig(cfg), inflight: map[string]chan struct{}{}, conns: map[*sesConn]bool{},
 	}
+	s.Requests["sync"] = RequestHandler{Async: true, Run: s.sesSync}
 	cfg.Logs.mu.Lock()
 	cfg.Logs.onChange = s.sesLogChanged
 	cfg.Logs.mu.Unlock()
@@ -258,9 +259,18 @@ func (s *Sessions) sesRunRequest(ctx context.Context, c *sesConn, id int64, typ 
 	}
 	_, hc := s.sesHome(c)
 	res, err := h.Run(ctx, hc, c.raw, c.device, id, data)
-	if !h.Async {
+	if !h.Async || err != nil {
 		s.sesReply(c, id, h.Type, res, err)
 	}
+}
+
+func (s *Sessions) sesSync(_ context.Context, conn *home.Conn, _ Ctl, _ string, _ int64, data json.RawMessage) (any, error) {
+	var req proto.Sync
+	if proto.Decode(data, &req) != nil {
+		return nil, &host.Error{Code: "bad_request", Message: "invalid sync frame"}
+	}
+	s.homeLoop().Sync(conn, req)
+	return nil, nil
 }
 
 func (s *Sessions) sesEnrolled(c *sesConn) bool {

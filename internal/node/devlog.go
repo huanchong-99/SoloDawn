@@ -82,18 +82,19 @@ func (l *Logs) Owner() string { l.mu.RLock(); defer l.mu.RUnlock(); return l.own
 
 // OwnerDevices returns the valid device ids of this node's owner, excluding self.
 func (l *Logs) OwnerDevices() []string {
+	out := []string{}
 	log := l.Log(l.Owner())
 	if log == nil {
-		return nil
+		return out
 	}
-	seen := map[string]bool{}
 	for _, env := range log.Entries {
 		dev := dvlRowOf(env).Device
 		if dev != l.self && log.Valid(dev) {
-			seen[dev] = true
+			out = append(out, dev)
 		}
 	}
-	return slices.Sorted(maps.Keys(seen))
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // UserOf returns this node's owner when device is valid in the owner's log, or empty.

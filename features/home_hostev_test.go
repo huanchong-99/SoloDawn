@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -379,7 +380,6 @@ func (w *homeHostEvWorld) openLaptopConns(cleanup func(func()), n int) error {
 	w.loop = loop
 	w.watchFrames = make(chan any, 32)
 	w.watchConn = loop.Attach(w.keys["browser"].ID(), homeHostEvClient{ch: w.watchFrames})
-	loop.Watch(w.watchConn, w.state.ID, true)
 	nodeConn := loop.Attach(w.keys["node"].ID(), homeHostEvClient{})
 	loop.Inbox(nodeConn)
 	w.laptopConns = nil
@@ -387,6 +387,22 @@ func (w *homeHostEvWorld) openLaptopConns(cleanup func(func()), n int) error {
 		c := loop.Attach(w.keys["laptop"].ID(), homeHostEvClient{})
 		loop.Inbox(c)
 		w.laptopConns = append(w.laptopConns, c)
+	}
+	return w.syncWatcher()
+}
+
+func (w *homeHostEvWorld) syncWatcher() error {
+	w.loop.Sync(w.watchConn, proto.Sync{Request: proto.Request{Type: "sync", ID: 1}, Group: w.state.ID, StateOnly: true})
+	f1, f2, f3 := <-w.watchFrames, <-w.watchFrames, <-w.watchFrames
+	rows, _ := f2.(proto.Rows)
+	got := []any{f1, len(rows.Rows), f3}
+	want := []any{
+		proto.Reset{Type: "reset", Group: w.state.ID},
+		6,
+		proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: w.state.ID, Seq: 6},
+	}
+	if !reflect.DeepEqual(got, want) {
+		return fmt.Errorf("initial sync got %+v; want %+v", got, want)
 	}
 	return nil
 }
@@ -396,7 +412,8 @@ func (w *homeHostEvWorld) closeLaptopConn() error {
 	conn := w.laptopConns[0]
 	w.laptopConns = w.laptopConns[1:]
 	w.loop.Detach(conn)
-	w.loop.Watch(w.watchConn, w.state.ID, true)
+	since := w.loop.Groups(w.watchConn)[0].Seq
+	w.loop.Sync(w.watchConn, proto.Sync{Request: proto.Request{Type: "sync", ID: 2}, Group: w.state.ID, Since: since, StateOnly: true})
 	w.loop.Welcome(w.watchConn, func([]proto.GroupSummary) any { return "sync" })
 	return w.drainWatchedAIs()
 }
@@ -418,6 +435,9 @@ func (w *homeHostEvWorld) drainWatchedAIs() error {
 }
 
 func (w *homeHostEvWorld) applyRowsFrame(frame any) error {
+	if _, ok := frame.(proto.Synced); ok {
+		return nil
+	}
 	pushed, ok := frame.(proto.Rows)
 	if !ok {
 		return fmt.Errorf("unexpected frame %T", frame)
