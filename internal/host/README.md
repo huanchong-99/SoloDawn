@@ -121,3 +121,12 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 - `CreateTaskWorkspace(ctx, projectDir, num, slug, ai, base, remote)` and `RemoveTaskWorkspace(ctx, projectDir, num, slug, ai, why)` handle `wt/<num>-<slug>`. `PrepareReviewWorkspace(ctx, projectDir, num, ai, commit, base, remote)` and `RemoveReviewWorkspace(ctx, projectDir, num, ai)` handle `review/<num>`. `ai` is the member id of the AI that holds the folder. A create reuses only a worktree recorded for the same AI, and a removal leaves one recorded for another AI untouched.
 - A create works out from the branches whether a task is new, taken over or returning; there is no takeover flag. A slug the home cannot produce, or a `num` below 1, is refused.
 - `cloneLock(repo)` is the one lock per clone, keyed by its real path. Workspace functions and `ReviewedMerge` take it.
+
+# Permission levels
+
+`level.go` implements permission levels and the `perm.set` host command ([drivers.md](../../planning/contracts/drivers.md), sections 1 and 2; [commands.md](../../planning/contracts/commands.md), section 2).
+
+- `DefaultLevel` is `3`: every AI defaults to level 3 unless `perm.set` or `default_level` sets another level.
+- `Surface["perm.set"]` decodes `proto.PermSet`, checks that `agent` is `claude` or `codex` and `level` is 1, 2 or 3, refuses level 2 for `claude` on native Windows with `conflict`, and writes the `perm` row and an `AuditSetting` row (`level <n> repo_config <bool>`) in one store transaction.
+- `(*Host).EffectivePerm(agent, group)` returns `(3, repoConfig, nil)` when `all_level3` is enabled, otherwise `(perm.level, repoConfig, nil)` when a `perm` row exists, otherwise `(default_level, false, nil)` when `default_level` is set, and `(DefaultLevel, false, nil)` otherwise. Group sessions never load repository configuration even when `repoConfig` is true.
+- `TaskToolsAllowed(level)` reports whether a task session at `level` is offered `push_branch`, `run_checks` and `submit_task` (`level > 1`).
