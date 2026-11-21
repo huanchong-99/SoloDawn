@@ -76,6 +76,7 @@ func (v *Snapshot) rows(query string, args ...any) ([]json.RawMessage, error) {
 	result := []json.RawMessage{}
 	for rows.Next() {
 		var data string
+		// A Scan failure surfaces through rows.Err() on the next line, because row is STRICT and the driver reads every column before Next returns true.
 		_ = rows.Scan(&data)
 		result = append(result, json.RawMessage(data))
 	}
