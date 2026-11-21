@@ -249,7 +249,7 @@ func TestFramingHelloAndBootstrapRules(t *testing.T) {
 		},
 	}
 	var pushSeen int
-	s.Pushes["ack"] = func(context.Context, *home.Conn, Ctl, string, json.RawMessage) { pushSeen++ }
+	s.Pushes["pty.resize"] = func(context.Context, *home.Conn, Ctl, string, json.RawMessage) { pushSeen++ }
 
 	fc := serveConn(t, s, browserKey.ID(), true)
 
@@ -263,7 +263,7 @@ func TestFramingHelloAndBootstrapRules(t *testing.T) {
 
 	fc.pushRaw(`{"t":"host.info","id":1}`)
 	expectErr(t, fc.next(t), 1, "forbidden")
-	fc.push(proto.Ack{Type: "ack", Group: sesID("g"), Item: 1})
+	fc.pushRaw(`{"t":"pty.resize"}`)
 	fc.expectNone(t)
 	if pushSeen != 0 {
 		t.Fatal("push ran before enrolment")
@@ -292,7 +292,7 @@ func TestFramingHelloAndBootstrapRules(t *testing.T) {
 
 	fc.pushRaw(`{"t":"host.info","id":8}`)
 	expectErr(t, fc.next(t), 8, "forbidden")
-	fc.push(proto.Ack{Type: "ack", Group: sesID("g"), Item: 1})
+	fc.pushRaw(`{"t":"pty.resize"}`)
 	if pushSeen != 0 {
 		t.Fatal("push ran while welcomed but not known in log")
 	}
@@ -345,6 +345,7 @@ func TestFramingHelloAndBootstrapRules(t *testing.T) {
 	fc.push(proto.Devlog{Type: "devlog", User: browserKey.ID(), Entries: []proto.Envelope{e4}})
 
 	fc.pushRaw(`{"t":"unknown_push"}`)
+	fc.pushRaw(`{"t":"pty.resize"}`)
 	fc.pushRaw(`{"t":"host.info","id":10}`)
 	raw := fc.next(t)
 	var hi struct {
@@ -353,8 +354,8 @@ func TestFramingHelloAndBootstrapRules(t *testing.T) {
 		OK   proto.True `json:"ok"`
 		Name string     `json:"name"`
 	}
-	if err := proto.Decode(raw, &hi); err != nil || hi.Type != "host.info" || hi.Re != 10 || hi.Name != "workstation" || adoptCalls != 1 {
-		t.Fatalf("host.info answer = %s (%v), adoptCalls=%d", raw, err, adoptCalls)
+	if err := proto.Decode(raw, &hi); err != nil || hi.Type != "host.info" || hi.Re != 10 || hi.Name != "workstation" || adoptCalls != 1 || pushSeen != 1 {
+		t.Fatalf("host.info answer = %s (%v), adoptCalls=%d pushSeen=%d", raw, err, adoptCalls, pushSeen)
 	}
 }
 
@@ -384,7 +385,6 @@ func TestHomeLoopIntegrationAndDevlogForwarding(t *testing.T) {
 	}
 	loop, h := newTestHomeAndHost(t, db, nodeKey, logs, now, cmds)
 
-	acked := make(chan int64, 1) // single reader: this test
 	s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h, Now: func() time.Time { return now }})
 	s.Requests["sync"] = RequestHandler{
 		Async: true,
@@ -397,12 +397,6 @@ func TestHomeLoopIntegrationAndDevlogForwarding(t *testing.T) {
 			loop.Sync(conn, q)
 			return nil, nil
 		},
-	}
-	s.Pushes["ack"] = func(_ context.Context, _ *home.Conn, _ Ctl, _ string, data json.RawMessage) {
-		var a proto.Ack
-		if proto.Decode(data, &a) == nil {
-			acked <- a.Item
-		}
 	}
 
 	c1 := serveConn(t, s, b1Key.ID(), false)
@@ -427,6 +421,13 @@ func TestHomeLoopIntegrationAndDevlogForwarding(t *testing.T) {
 	c1.next(t)
 	c2.next(t)
 
+	// Unwelcomed host connection cannot acknowledge queued items before hello.
+	cUnwHost := serveConn(t, s, hostKey.ID(), false)
+	cUnwHost.push(proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 1})
+	cUnwHost.pushRaw(`{"t":"sync","id":1,"g":"` + groupID + `","since":0,"state_only":true}`)
+	expectErr(t, cUnwHost.next(t), 1, "forbidden")
+	cUnwHost.Close()
+
 	// Host hello receives welcome, owner devlog and queued inbox items; browser hello does not trigger Inbox.
 	ch := serveConn(t, s, hostKey.ID(), false)
 	ch.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "host", Name: "ai-host", Addrs: []string{}})
@@ -436,7 +437,7 @@ func TestHomeLoopIntegrationAndDevlogForwarding(t *testing.T) {
 	}
 	ch.next(t)
 	inboxRaw := ch.next(t)
-	if !strings.Contains(string(inboxRaw), `"Why":"mention"`) {
+	if !strings.Contains(string(inboxRaw), `"why":"mention"`) {
 		t.Fatalf("expected inbox item on host hello, got %s", inboxRaw)
 	}
 	ch.push(proto.Sync{Request: proto.Request{Type: "sync", ID: 2}, Group: groupID, Since: 3, StateOnly: true})
@@ -444,10 +445,7 @@ func TestHomeLoopIntegrationAndDevlogForwarding(t *testing.T) {
 	if err := proto.Decode(ch.next(t), &synced); err != nil || synced.Re != 2 {
 		t.Fatalf("host sync = %+v (%v)", synced, err)
 	}
-	ch.push(proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 1})
-	if got := <-acked; got != 1 {
-		t.Fatalf("acked = %d, want 1", got)
-	}
+	sesCheckHostAck(t, ch, groupID)
 
 	// Pairing peer on an owned node receives the owner's log after welcome and on subsequent updates.
 	newPairKey := sesKey("newpair")
@@ -526,6 +524,29 @@ func TestHomeLoopIntegrationAndDevlogForwarding(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("broken connection did not close")
 	}
+}
+
+func sesCheckHostAck(t *testing.T, ch *fakeCtl, groupID string) {
+	t.Helper()
+	// Malformed ack is ignored; a fresh host hello resends item 1.
+	ch.pushRaw(`{"t":"ack","g":"bad","item":1}`)
+	ch.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 3}, V: 1, Kind: "host", Name: "ai-host", Addrs: []string{}})
+	ch.next(t)
+	ch.next(t)
+	if got := string(ch.next(t)); !strings.Contains(got, `"why":"mention"`) {
+		t.Fatalf("expected resent inbox item after bad ack, got %s", got)
+	}
+	// Valid ack routes to Loop.Ack and deletes item 1, so the next host hello sends no inbox frame.
+	ch.push(proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 1})
+	ch.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 4}, V: 1, Kind: "host", Name: "ai-host", Addrs: []string{}})
+	ch.next(t)
+	ch.next(t)
+	ch.push(proto.Sync{Request: proto.Request{Type: "sync", ID: 5}, Group: groupID, Since: 3, StateOnly: true})
+	var synced proto.Synced
+	if err := proto.Decode(ch.next(t), &synced); err != nil || synced.Re != 5 {
+		t.Fatalf("sync after ack = %+v (%v)", synced, err)
+	}
+	ch.expectNone(t)
 }
 
 func TestHostCommandsReceiptsAndSurfaceBridge(t *testing.T) {

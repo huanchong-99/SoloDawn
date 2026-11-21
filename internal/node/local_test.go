@@ -166,6 +166,7 @@ func capturePushes(t *testing.T) *pushCapture {
 		rows:     make(chan proto.Rows, 4),
 		attached: make(chan string, 2),
 	}
+	prevReset, prevRows := host.Pushes["reset"], host.Pushes["rows"]
 	host.Pushes["reset"] = func(_ *host.Host, from string, raw json.RawMessage) {
 		var frame proto.Reset
 		if from != "" && proto.Decode(raw, &frame) == nil {
@@ -183,8 +184,8 @@ func capturePushes(t *testing.T) *pushCapture {
 		cap.attached <- device
 	}
 	t.Cleanup(func() {
-		delete(host.Pushes, "reset")
-		delete(host.Pushes, "rows")
+		host.Pushes["reset"] = prevReset
+		host.Pushes["rows"] = prevRows
 		delete(host.Attached, "local_test")
 	})
 	return cap
@@ -286,12 +287,74 @@ func TestLocalLinkInboxForGroupCreatedAfterAttach(t *testing.T) {
 
 	got := recvFrame(t, pushed)
 	mustEqual(t, got.from, rig.device.ID())
-	var items home.ItemsPush
-	mustNoErr(t, json.Unmarshal(got.raw, &items))
-	mustEqual(t, items, home.ItemsPush{
+	var inbox proto.Inbox
+	mustNoErr(t, json.Unmarshal(got.raw, &inbox))
+	mustEqual(t, inbox, proto.Inbox{
+		Type:  "inbox",
 		Group: localGroupID,
-		Items: []home.QueuedItem{{ID: 1, Item: home.Item{AI: "m-ai", Why: "mention"}}},
+		Items: []proto.InboxItem{{Item: proto.Item{Item: 1, AI: "m-ai", Why: "mention"}}},
 	})
+}
+
+func TestLocalLinkAckDeletesQueuedItem(t *testing.T) {
+	aiID := testNonce(50)
+	rig := newLocalRig(t, map[string]home.Func{
+		"jump": func(s *home.State, _ home.Command) (home.Result, *home.Refusal) {
+			ai := proto.AIMemberRow{
+				MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: aiID}, Group: s.ID, Kind: "ai", Name: "Coder", User: s.Owner},
+				Host:      s.Home,
+			}
+			return home.Result{Rows: []home.Row{home.RowOf(ai)}, Items: []home.Item{{AI: aiID, Why: "mention"}}}, nil
+		},
+	})
+	link := AttachLocal(rig.host, rig.loop)
+	// Single reader: this test.
+	pushed := make(chan json.RawMessage, 4)
+	link.push = func(_ string, raw json.RawMessage) {
+		pushed <- raw
+	}
+
+	ctx := context.Background()
+	_, err := rig.host.Command(ctx, rig.device.ID(), rig.payload(`"t":"group","op":"create","name":"AckGroup"`))
+	mustNoErr(t, err)
+	_, err = rig.host.Command(ctx, rig.device.ID(), rig.payload(`"t":"jump"`))
+	mustNoErr(t, err)
+	recvFrame(t, pushed)
+
+	checkLocalAckRejectsNonAckAndBadFrames(t, ctx, rig, link, pushed)
+	mustNoErr(t, link.Send(proto.Ack{Type: "ack", Group: localGroupID, Item: 1}))
+	syncLocalBarrier(t, ctx, link, 3)
+	rig.loop.Inbox(link.conn)
+	syncLocalBarrier(t, ctx, link, 3)
+	mustEqual(t, len(pushed), 0)
+}
+
+func syncLocalBarrier(t *testing.T, ctx context.Context, link *LocalLink, seq int64) {
+	t.Helper()
+	ans, err := link.Request(ctx, func(id int64) any {
+		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: localGroupID, Since: seq, StateOnly: true}
+	})
+	mustNoErr(t, err)
+	var synced proto.Synced
+	mustNoErr(t, proto.Decode(ans, &synced))
+	mustEqual(t, synced.Seq, seq)
+}
+
+func checkLocalAckRejectsNonAckAndBadFrames(t *testing.T, ctx context.Context, rig *localRig, link *LocalLink, pushed <-chan json.RawMessage) {
+	t.Helper()
+	mustNoErr(t, link.Send(json.RawMessage(`{"t":"pad","g":"`+localGroupID+`","item":1}`)))
+	mustNoErr(t, link.Send(json.RawMessage(`{"t":"ack","g":"bad","item":1}`)))
+	ans, err := link.Request(ctx, func(id int64) any {
+		return map[string]any{"t": "ack", "id": id, "g": localGroupID, "item": 1}
+	})
+	mustNoErr(t, err)
+	var errResp proto.ErrorResponse
+	mustNoErr(t, proto.Decode(ans, &errResp))
+	mustEqual(t, errResp.Err.Code, "bad_request")
+	rig.loop.Inbox(link.conn)
+	var resent proto.Inbox
+	mustNoErr(t, proto.Decode(recvFrame(t, pushed), &resent))
+	mustEqual(t, len(resent.Items), 1)
 }
 
 func TestLocalLinkFraming(t *testing.T) {

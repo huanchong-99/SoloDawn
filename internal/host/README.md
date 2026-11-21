@@ -1,5 +1,5 @@
 ---
-description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the session runtime, the offline scripted Claude Code and Codex processes for host integration tests, the API of the host workspaces and Git commands, and the MCP server and stdio shim.'
+description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the session runtime, group sync and inbox delivery, group joining and per-home connection management, the offline scripted Claude Code and Codex processes for host integration tests, the API of the host workspaces and Git commands, and the MCP server and stdio shim.'
 kind: reference
 ---
 
@@ -29,6 +29,7 @@ A unit never calls into the file of a unit built beside it. It registers in a ta
 | an item that answers an open tool call | the tool: `item, done := h.Await(id, check)`, then it reads the channel until its wait runs out, calls `done`, and looks at the channel once more. Delivery, before it queues a `reply` or a `decided` item: `h.Hand(id, item)`, which never waits for the tool |
 | whether a session's deliveries are held | `h.Held(key)`, before a turn is given; whoever lifts a hold calls `Deliver` |
 | an audit row | `h.Audit(tx, AuditRow{…})`, inside the transaction of what it records |
+| the AI CLIs found here (`host.info`) | `h.Agents(ctx)`: probes `claude` and `codex` on `PATH` (cached 60 s), writes `agent`, returns `[]proto.HostAgent` with `Groups` empty |
 
 ## Tables
 
@@ -110,6 +111,12 @@ Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/
 - **One reader per channel and lock order.** `Events()` is written only by `readLoop` and read only by `Start`'s caller, and closes after `cmd.Wait` and tree cleanup finish; `ready` is closed once by `finishReady` for `Turn`. `wmu` (stdin writes and close) and `mu` (protocol, turn, approval, user-input and file-change state) are never nested.
 - **Requests and notifications.** `commandExecution` and `fileChange` approvals emit `Asked` for `Process.Answer`; `item/tool/requestUserInput` emits `Asked` with `Ask.Reply`; invalid parameters and all other server requests get JSON-RPC error `-32601`. Notifications during an active turn emit `Active`. Live behavior of `features.default_mode_request_user_input=true` and `item/tool/requestUserInput` remains unverified ([issues.md](../../issues.md)).
 
+## CLI detection and sign-in
+
+`agents.go` provides `(*Host).Agents(ctx)`, `"agents"` in `Listeners`, and `"agent.set"` in `Surface`; see [drivers.md](../../planning/contracts/drivers.md) section 1.4 and [commands.md](../../planning/contracts/commands.md) section 2.
+
+- **Lock order.** `agtPart.probeMu` -> `Store.Write` -> `agtPart.mu`. The listener calls `Sessions.Get` (leaf `Sessions` lock) and then takes `agtPart.mu`; nothing under `agtPart.mu` waits on a probe or the store.
+
 # Session runtime
 
 `run.go` provides `Runner` (`Turn` and `Answer`), registers `"runtime"` in `Attached`, and exposes `(*Host).ReportSaved(ctx, saved)`. `AuditKilled` lives in `audit.go`.
@@ -160,6 +167,21 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 - `cloneLock(repo)` is the one lock per clone, keyed by its real path. Workspace functions and `ReviewedMerge` take it.
 - `HostedChecksToResume(tasks, ais)` selects the `cloud_check` tasks a restarted node polls again, deriving each `Branch` (`task/<num>-<slug>`) from `Num` and `Slug` via `taskName` and skipping rows `taskName` refuses.
 
+# Secretary and decision tools
+
+`tools_sec.go` registers `propose_brief`, `set_task` and `request_decision` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1, 2 and 5): `propose_brief` and `set_task` set `Tool.For` to `c.Secretary`, while `request_decision` registers the `group` schema for every session.
+`loadSecDirectory`, `resolveSecTask`, `prepareDecisionPost` and `buildDecisionOptions` are package helpers shared with the other MCP tool and approval handlers in `host`.
+
+# Delivery and group state
+
+`deliver.go` implements the host's group synchronization and inbox delivery ([datachannel.md](../../planning/contracts/datachannel.md) sections 4 and 6, [flows/sync.md](../../planning/flows/sync.md), [flows/agent-turn.md](../../planning/flows/agent-turn.md)).
+
+- **Registrations.** From `init`, `deliver.go` registers `"deliver"` in `Attached`, `"inbox"`, `"rows"` and `"reset"` in `Pushes`, and provides `Deliver`. Although `Deliver(h, group, member)` prioritizes `(group, member)` first, `deliverNow` then walks every pending merge group and every held `(group, member)` key across all groups so a lifted hold or a freed `max_open` slot wakes every waiting AI.
+- **Per-host state.** All sync cursors, held session queues, active merge trackers, and per-connection sync cancellation handles live in `Part[delivery](h)`, never in package globals. Connection sync handles are cancelled and removed when `Home.Done()` closes or a newer connection attaches.
+- **Lock order, goroutines and channels.** `delivery` creates no channels of its own; waiting tool calls read the single-item channel returned by `Host.Await`, whose sole writer is `Host.Hand` (`host.go`). `delivery.mu` guards only in-memory maps and slices and is never held across `Store.Write`, `Sessions` calls, `Rows` calls, `Home.Request` or `Home.Send`, `Host.Hand`, `Host.Held`, `Compose`, `Runner.Turn`, or workspace and merge commands. Push handlers (`inbox`, `rows`, `reset`) update state and queues only and dispatch `deliverNow` and `afterGroupState` on goroutines so a home connection's reader never blocks on Git, the forge or `h.Command` (which runs under a one-minute timeout). Per-AI turn delivery is serialized per `(group, member)` with an in-memory busy/recheck flag so concurrent pushes and re-entrant `Deliver` callbacks never overlap or drop a queued turn.
+- **Sync cursor (R3-5).** On `Attach`, each group known for that home (`delivery.groups` or `setting` `'homes'`) enters `syncing` with `live = false` and requests `sync` (`state_only: true`) from its last cursor; an `inbox` or `rows` push for a group that is neither `syncing` nor `live` starts a single-group `sync` on that connection from its kept cursor as well. `reset` drops `h.Rows` for the group and resets `cursor = 0` and `live = false`. `rows` applies only rows whose `seq` exceeds the cached row's `seq` and advances `cursor` monotonically (`max(cursor, seq)`) only while `live = true`. `synced` sets `cursor = seq`, `live = true` and `syncing = false`, so an interrupted reset restarts from `0` while an interrupted delta or late pre-`synced` row batch keeps its cursor.
+- **Routing, open waits, still-current check (R3-3) and merges.** Each `inbox` item deduplicates `(home, item)` against `audit` both on arrival and when taken. Open `ask` and `approve` waits receive `reply` and `decided` items via `h.Hand` on arrival and when taken. Session and merge items wait while their group's member or task row is absent, refuse `not_hosted_here` only when a present member row does not name an AI on this host, and check task work against `h.Rows` when taken. Session batches prepare the workspace (keeping group-session items held on a Git error, and for task or review sessions reporting `member status` `turn_interrupted` plus `task fail` for task sessions with redacted Git output), report `task branch` while at step `branch`, compose with `Compose`, write `AuditDelivered`, send `ack`, and call `Runner.Turn` (`HS-15` enforces `max_open` and owns runtime session closing for step 17; [issues.md](../../issues.md)). `merge` items check `written` on `AuditDelivered` before writing `AuditMerge` and running `ReviewedMerge.Apply` (or `Inspect` after a restart), reporting `task merged` (using `TaskRow.Stats`) or `task conflict`.
+
 # MCP server and stdio shim
 
 The rules are in [mcp-tools.md](../../planning/contracts/mcp-tools.md) and [local.md](../../planning/contracts/local.md) sections 1 and 3; this is the API that carries them out.
@@ -168,3 +190,36 @@ The rules are in [mcp-tools.md](../../planning/contracts/mcp-tools.md) and [loca
 - `h.ServeMCP(ctx, token, in, out)` runs the `solodawn` MCP server over the remaining bytes of an accepted local-socket connection (`in` is the reader from the opening line, `out` is the socket). It closes `out` before returning, refuses an unknown or forgotten token, and on each `tools/call` re-reads `Caller(token)` and `ToolsFor(caller)` and brackets `Tool.Call` with `Sessions.Calling`.
 - `ServeMCP` takes each `Tool.Schema` as registered (an empty object schema when nil) and projects per-caller differences in `projectCallerSchema`: outside `GroupSession`, `task` and `to` are dropped from top-level `required` except on `ask`; on `post` for non-secretary callers, `task` and `summary` are dropped, and `handback` is dropped in `GroupSession`.
 - `projectCallerSchema` (`mcp.go`) puts per-kind projection of `post` and `ask` in the server because `Tool` has one `Schema`, so any later tool with per-kind arguments puts its projection there.
+
+# Joining, leaving and home connections
+
+`join.go` implements `host.join`, `host.leave` and per-home connection tracking ([commands.md](../../planning/contracts/commands.md) sections 1.2 and 2, [datachannel.md](../../planning/contracts/datachannel.md) sections 4 and 7, [local.md](../../planning/contracts/local.md) sections 2 and 7).
+
+- **Registrations and startup.** From `init`, `join.go` registers `"host.join"` and `"host.leave"` in `Surface` and `"join"` in `Attached`. At node startup, after setting `h.Connect`, the caller invokes `h.EnsureHomeConnections()` so one persistent connection is opened per distinct home device named in `setting` `'homes'`.
+- **One connection per home.** `Part[joinPart](h)` keeps active `h.Connect` cancellation functions keyed by home device id, each derived from `context.Background()`. Reconciliation starts `h.Connect` once per distinct home needed by any stored `homes` entry or in-flight `host.join`, and cancels a home's context as soon as neither references it.
+- **`host.join` and `host.leave`.** `host.join` verifies the payload and declared `agent` account, connects to `home` and waits at most 15 s (or until `ctx` ends) for `h.Home(home)` before answering `home_unreachable`, obtains the `group` row from `h.Rows` or a `state_only` `sync`, clones `projects/<group>/repo` with `EnsureGroupWorkspace`, sends `member add_ai` with the stored `approvers` setting, and atomically creates the dormant `GroupSession`, upserts `setting` `'homes'` and records `AuditSetting`. `host.leave` sends `member remove` first so a refusal leaves sessions and connections untouched, and on success ends all sessions of `(g, member)`, prunes `setting` `'homes'` when no local AI remains in `g`, records `AuditSetting`, and reconciles home connections.
+- **Lock order and channels.** `joinPart.syncMu` serializes connection reconciliation across `Store` reads; `joinPart.mu` is a leaf lock that guards only in-memory `joinPart` fields and never calls into `Host`, `Sessions`, `Rows`, `Store`, `Connect` or cancel functions. Each waiter channel in `joinPart.waiters` has a single reader, `joinWaitChannel` in `joinAwaitAttach`.
+
+# Talk and group state tools
+
+`tools_talk.go` registers `post`, `read_thread`, `list_members`, `list_tasks`, `note_put` and `note_list` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1 and 5).
+`post` and `note_put` run `CheckOutboundSecret` before signing or sending any command to the home.
+
+# Task and review tools
+
+- `tools_task.go` lists `start_task` to working AIs' group sessions, `push_branch`, `run_checks` and `submit_task` to task sessions above level 1, and `submit_review` to review sessions ([mcp-tools.md](../../planning/contracts/mcp-tools.md)).
+- `push_branch` and `submit_task` derive `task/<num>-<slug>` from `num` and `slug` via `taskName`, ignoring `TaskRow.Branch`.
+- `start_task`, `submit_task` and `submit_review` check outbound text arguments with `CheckOutboundSecret` before running Git or signing commands.
+- With `forge == "github"`, `submit_task` runs `TaskForge.WaitHostedChecks` in the background (cancelling any earlier poll for that task in `Part[tskPart](h)`) and sends `task cloud`.
+
+# Approvals
+
+`approve.go` handles permission requests and multiple-choice user questions from both CLIs (`planning/flows/approval.md`, `planning/contracts/mcp-tools.md` section 3):
+
+- `Tools["approve"]` is listed only to structured Claude Code sessions (`c.Agent == "claude" && !c.Interactive`). It maps `AskUserQuestion` to per-question `decision` cards (`options` `"A"`..`"Z"` plus custom free-text answers, posted one card at a time) returning `updatedInput.answers` (and optional `annotations`), and maps `Bash`, `Write`/`Edit`/`NotebookEdit`/`Read`, `WebFetch`/`WebSearch`, and other tool names to `Ask` (`planning/contracts/messages.md` section 2.3).
+- `Listeners["approve"]` starts a goroutine per `Asked` event so `Report` returns at once, brackets the open request synchronously with `Sessions.Calling`, answers Codex `requestUserInput` questions through `Ask.Reply` (posting per-question `decision` cards) and permission requests through `Runner.Answer`, and cancels open `Asked` contexts of a session on `TurnBegan` or `TurnEnded`.
+- `thread` and `body.task` are set on `approval` and `decision` cards only for `TaskSession` and `ReviewSession`; a `GroupSession` posts main-line cards with `thread: null` and empty or omitted `task`.
+- Permission requests from `callApprove` at level 1 are denied immediately; permission requests raised by a CLI fetch any matching `pending` row's `msg` card from the home (consuming an `approved` card and removing stale `denied`, `expired` or `reassigned` records), check `CheckOutboundSecret` on `Command` and `Why`, shorten `Command` to 3 KiB and `Why` to 256 B as unescaped JSON strings, store a `pending` row, open `Host.Await` (with `nil` check) before sending `post` (`kind: approval`), and wait up to `limits.approval_wait_s` (default 600 s).
+- `decodeDecidedInbox` decodes the plain `InboxItem` (`P-1b`) and its `msg` row so `postCardAndWait` reads `card.State` directly; a card that is not decided counts as no decision.
+- `Part[approvalState](h)` holds active `Asked` cancel functions per host. Its `mu` is a leaf lock: nothing called under `mu` takes `Host`, `Sessions`, `Rows` or `Store` locks.
+- `awaitApprovalItem` is the single reader of the channel returned by `Host.Await`: when the wait timer or context ends, it calls `done` and checks the channel once more before returning the timeout denial.
