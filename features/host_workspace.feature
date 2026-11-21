@@ -34,3 +34,12 @@ Feature: Group and task workspaces on a host
     And the host removes the worktree of cancelled task 1
     Then task 1 has no task or review folder
     And the branch of task 1 is at that commit
+
+  Scenario: A task given to another AI of the same node carries over only its commits
+    When workspace task 1 starts
+    And task 1 commits a change for review
+    And task 1 leaves an uncommitted change
+    And task 1 is given to another AI of this node before the first AI's worktree is released
+    Then the worktree of task 1 has that commit and none of the first AI's uncommitted change
+    When the host releases the first AI's worktree of task 1
+    Then the worktree of task 1 has that commit and none of the first AI's uncommitted change

@@ -12,17 +12,15 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
 func init() {
-	Register(Drivers, "claude", Driver(newClaudeDriver()))
+	Register(Drivers, "claude", Driver(claudeDriver{}))
 }
 
 var errClaudeAnswer = errors.New("claude: permission requests use the MCP approve tool")
@@ -41,74 +39,40 @@ type claudeMCPConfig struct {
 	MCPServers map[string]claudeMCPServer `json:"mcpServers"`
 }
 
-type claudeDriver struct {
-	mu          sync.Mutex
-	interactive map[string]string
-}
+type claudeDriver struct{}
 
-func newClaudeDriver() *claudeDriver {
-	return &claudeDriver{interactive: map[string]string{}}
-}
-
-func (d *claudeDriver) Start(ctx context.Context, l Launch) (Process, error) {
-	argv, session, mcpPath, err := claudeCommandArgs(l, false, runtime.GOOS == "windows")
+func (claudeDriver) Start(ctx context.Context, l Launch) (Process, error) {
+	argv, _, err := claudeCommandArgs(l, false, runtime.GOOS == "windows")
 	if err != nil {
 		return nil, err
 	}
-	d.swapInteractive(session, "")
-	return startClaudeProcess(ctx, l, argv[1:], mcpPath)
+	return startClaudeProcess(ctx, l, argv[1:])
 }
 
-func (d *claudeDriver) Interactive(l Launch) ([]string, string, error) {
-	argv, session, mcpPath, err := claudeCommandArgs(l, true, runtime.GOOS == "windows")
+func (claudeDriver) Interactive(l Launch) ([]string, string, error) {
+	return claudeCommandArgs(l, true, runtime.GOOS == "windows")
+}
+
+func claudeCommandArgs(l Launch, interactive, windows bool) ([]string, string, error) {
+	levelFlags, err := claudeLevelFlags(l.Level, interactive, windows)
 	if err != nil {
 		return nil, "", err
 	}
-	d.swapInteractive(session, mcpPath)
-	return argv, session, nil
-}
-
-func (d *claudeDriver) swapInteractive(session, mcpPath string) {
-	d.mu.Lock()
-	prev := d.interactive[session]
-	if mcpPath == "" {
-		delete(d.interactive, session)
-	} else {
-		d.interactive[session] = mcpPath
-	}
-	d.mu.Unlock()
-	os.Remove(prev)
-}
-
-func claudeCommandArgs(l Launch, interactive, windows bool) ([]string, string, string, error) {
-	levelFlags, err := claudeLevelFlags(l.Level, interactive, windows)
+	mcpJSON, err := writeClaudeMCPConfig(l.Shim)
 	if err != nil {
-		return nil, "", "", err
-	}
-	mcpPath, err := writeClaudeMCPConfig(l.Shim)
-	if err != nil {
-		return nil, "", "", err
+		return nil, "", err
 	}
 	session, sessionFlags := claudeSessionFlags(l.Session)
-	argv := claudeBaseArgs(interactive, l.RepoConfig, l.Instructions, mcpPath, sessionFlags)
-	return append(argv, levelFlags...), session, mcpPath, nil
+	argv := claudeBaseArgs(interactive, l.RepoConfig, l.Instructions, mcpJSON, sessionFlags)
+	return append(argv, levelFlags...), session, nil
 }
 
 func writeClaudeMCPConfig(shim []string) (string, error) {
 	if len(shim) == 0 {
 		return "", &Error{"bad_request", "missing MCP shim command"}
 	}
-	file, err := os.CreateTemp("", "solodawn-claude-*.json")
-	if err != nil {
-		return "", err
-	}
-	data, _ := json.Marshal(claudeMCPConfig{
-		MCPServers: map[string]claudeMCPServer{
-			"solodawn": {Command: shim[0], Args: append([]string{}, shim[1:]...)},
-		},
-	})
-	file.Write(data)
-	return file.Name(), file.Close()
+	cfg := claudeMCPConfig{MCPServers: map[string]claudeMCPServer{"solodawn": {Command: shim[0], Args: append([]string{}, shim[1:]...)}}}
+	return marshalWire(cfg), nil
 }
 
 func newClaudeUUID() string {
@@ -127,13 +91,13 @@ func claudeSessionFlags(session string) (string, []string) {
 	return session, []string{"--resume", session}
 }
 
-func claudeBaseArgs(interactive, repoConfig bool, instructions, mcpPath string, sessionFlags []string) []string {
+func claudeBaseArgs(interactive, repoConfig bool, instructions, mcpJSON string, sessionFlags []string) []string {
 	argv := []string{"claude"}
 	if !interactive {
 		argv = append(argv, "-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json")
 	}
 	argv = append(argv, sessionFlags...)
-	argv = append(argv, "--mcp-config", mcpPath, "--strict-mcp-config")
+	argv = append(argv, "--mcp-config", mcpJSON, "--strict-mcp-config")
 	if !interactive {
 		argv = append(argv, "--permission-prompt-tool", "mcp__solodawn__approve")
 	}
@@ -151,7 +115,7 @@ func claudeBaseArgs(interactive, repoConfig bool, instructions, mcpPath string, 
 func claudeLevelFlags(level int, interactive, windows bool) ([]string, error) {
 	switch level {
 	case 1:
-		return []string{"--permission-mode", "default", "--tools", "Read,Glob,Grep"}, nil
+		return []string{"--permission-mode", "default", "--tools", "Read,Glob,Grep,AskUserQuestion"}, nil
 	case 2:
 		if windows {
 			return nil, &Error{"conflict", "Claude Code has no sandbox for level 2 on Windows"}
@@ -172,27 +136,10 @@ func claudeBypassFlags(interactive bool) []string {
 	return flags
 }
 
-func claudeExecCmd(ctx context.Context, args []string, windows bool, fields reflect.Value) *exec.Cmd {
+func startClaudeProcess(ctx context.Context, l Launch, args []string) (Process, error) {
 	cmd := exec.CommandContext(ctx, "claude", args...)
+	detachTerminal(cmd)
 	cmd.WaitDelay = time.Second
-	if windows {
-		cmd.Cancel = func() error {
-			return exec.Command("taskkill.exe", "/f", "/t", "/pid", strconv.Itoa(cmd.Process.Pid)).Run()
-		}
-		return cmd
-	}
-	fields.FieldByName("Setpgid").SetBool(true)
-	cmd.Cancel = func() error {
-		group, _ := os.FindProcess(-cmd.Process.Pid)
-		return group.Kill()
-	}
-	return cmd
-}
-
-func startClaudeProcess(ctx context.Context, l Launch, args []string, mcpPath string) (Process, error) {
-	attrs := new(syscall.SysProcAttr)
-	cmd := claudeExecCmd(ctx, args, runtime.GOOS == "windows", reflect.ValueOf(attrs).Elem())
-	cmd.SysProcAttr = attrs
 	cmd.Dir = l.Folder
 	stdinRead, stdinWrite, _ := os.Pipe()
 	cmd.Stdin = stdinRead
@@ -204,7 +151,6 @@ func startClaudeProcess(ctx context.Context, l Launch, args []string, mcpPath st
 	if err != nil {
 		stdinWrite.Close()
 		stdout.Close()
-		os.Remove(mcpPath)
 		return nil, err
 	}
 	killTree := killCheckTree(cmd)
@@ -215,7 +161,7 @@ func startClaudeProcess(ctx context.Context, l Launch, args []string, mcpPath st
 		events:  make(chan Event),
 		resumed: l.Session != "",
 	}
-	go p.readLoop(cmd, stdout, &stderr, killTree, mcpPath)
+	go p.readLoop(cmd, stdout, &stderr, killTree)
 	return p, nil
 }
 
@@ -291,11 +237,7 @@ func (p *claudeProcess) Interrupt() error {
 }
 
 func (p *claudeProcess) writeJSON(msg any) error {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	enc.Encode(msg)
-	_, err := p.in.Write(buf.Bytes())
+	_, err := p.in.WriteString(marshalWire(msg) + "\n")
 	return err
 }
 
@@ -307,7 +249,7 @@ func (p *claudeProcess) takeInterrupted() bool {
 	return was
 }
 
-func (p *claudeProcess) readLoop(cmd *exec.Cmd, stdout io.Reader, stderr *checkTail, killTree func(), mcpPath string) {
+func (p *claudeProcess) readLoop(cmd *exec.Cmd, stdout io.Reader, stderr *checkTail, killTree func()) {
 	reportedDiag := false
 	reader := bufio.NewReader(stdout)
 	for {
@@ -321,7 +263,6 @@ func (p *claudeProcess) readLoop(cmd *exec.Cmd, stdout io.Reader, stderr *checkT
 	}
 	waitErr := cmd.Wait()
 	killTree()
-	os.Remove(mcpPath)
 	p.Close()
 	if waitErr != nil && !reportedDiag {
 		p.emitExitDiag(strings.TrimSpace(string(*stderr)))
@@ -340,16 +281,11 @@ func (p *claudeProcess) handleLine(line []byte) bool {
 	if json.Unmarshal(line, &hdr) != nil || hdr.Type == "" {
 		return false
 	}
-	switch hdr.Type {
-	case "rate_limit_event":
-		p.handleRateLimit(line)
-		return false
-	case "result":
+	if hdr.Type == "result" {
 		return p.handleResult(line)
-	default:
-		p.events <- claudeOtherEvent(hdr)
-		return false
 	}
+	p.events <- claudeOtherEvent(hdr)
+	return false
 }
 
 func claudeOtherEvent(hdr claudeHeader) Event {
@@ -359,98 +295,13 @@ func claudeOtherEvent(hdr claudeHeader) Event {
 	return Event{Kind: Active}
 }
 
-type claudeRateLimitMsg struct {
-	Info *claudeRateLimitInfo `json:"rate_limit_info"`
-}
-
-type claudeRateLimitInfo struct {
-	Status         string                      `json:"status"`
-	RateLimitType  string                      `json:"rateLimitType"`
-	Utilization    *float64                    `json:"utilization"`
-	ResetsAt       *int64                      `json:"resetsAt"`
-	UnifiedWindows map[string]claudeRateWindow `json:"unifiedWindows"`
-}
-
-type claudeRateWindow struct {
-	Utilization *float64 `json:"utilization"`
-	ResetsAt    *int64   `json:"resetsAt"`
-}
-
-func (p *claudeProcess) handleRateLimit(line []byte) {
-	for _, ev := range claudeRateEvents(line) {
-		p.events <- ev
-	}
-}
-
-func parseClaudeRateInfo(line []byte) (claudeRateLimitInfo, bool) {
-	var msg claudeRateLimitMsg
-	if json.Unmarshal(line, &msg) != nil || msg.Info == nil {
-		return claudeRateLimitInfo{}, false
-	}
-	return *msg.Info, true
-}
-
-func claudeRateEvents(line []byte) []Event {
-	info, ok := parseClaudeRateInfo(line)
-	if !ok {
-		return []Event{{Kind: Active}}
-	}
-	usage, resets := claudeRateUsage(info)
-	var out []Event
-	if usage != (Usage{}) {
-		out = append(out, Event{Kind: Used, Usage: usage})
-	}
-	if isClaudeRateLimited(info.Status) {
-		out = append(out, Event{Kind: RateLimited, Resets: resets})
-	}
-	if len(out) == 0 {
-		return []Event{{Kind: Active}}
-	}
-	return out
-}
-
-func claudeRateUsage(info claudeRateLimitInfo) (Usage, int64) {
-	win := info.UnifiedWindows[info.RateLimitType]
-	pct := cmp.Or(info.Utilization, win.Utilization)
-	resets := cmp.Or(info.ResetsAt, win.ResetsAt)
-	var u Usage
-	var resetsMS int64
-	if pct != nil {
-		v := *pct * 100
-		u.WindowPct = &v
-	}
-	if resets != nil {
-		resetsMS = *resets * 1000
-		u.WindowResets = &resetsMS
-	}
-	return u, resetsMS
-}
-
-func isClaudeRateLimited(status string) bool {
-	return status != "" && status != "allowed" && status != "allowed_warning"
-}
-
 type claudeResultMsg struct {
-	Subtype        string                      `json:"subtype"`
-	IsError        bool                        `json:"is_error"`
-	TerminalReason string                      `json:"terminal_reason"`
-	Result         string                      `json:"result"`
-	Errors         []string                    `json:"errors"`
-	APIErrorStatus int                         `json:"api_error_status"`
-	TotalCostUSD   *float64                    `json:"total_cost_usd"`
-	Usage          *claudeTurnTokens           `json:"usage"`
-	SinceLast      map[string]claudeModelDelta `json:"model_usage_since_last_result"`
-}
-
-type claudeTurnTokens struct {
-	InputTokens              int64 `json:"input_tokens"`
-	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
-	OutputTokens             int64 `json:"output_tokens"`
-}
-
-type claudeModelDelta struct {
-	CostUSD float64 `json:"costUSD"`
+	Subtype        string   `json:"subtype"`
+	IsError        bool     `json:"is_error"`
+	TerminalReason string   `json:"terminal_reason"`
+	Result         string   `json:"result"`
+	Errors         []string `json:"errors"`
+	APIErrorStatus int      `json:"api_error_status"`
 }
 
 func (p *claudeProcess) handleResult(line []byte) bool {
@@ -474,7 +325,6 @@ func claudeResultEvent(msg claudeResultMsg, interrupted, resumed bool) (Event, b
 	return Event{
 		Kind:   TurnEnded,
 		Status: claudeTurnStatus(msg, interrupted, failed),
-		Usage:  claudeResultUsage(msg),
 	}, false
 }
 
@@ -520,23 +370,4 @@ func containsClaudeFold(text string, subs ...string) bool {
 		}
 	}
 	return false
-}
-
-func claudeResultUsage(msg claudeResultMsg) Usage {
-	var u Usage
-	if msg.Usage != nil {
-		tokens := msg.Usage.InputTokens + msg.Usage.CacheCreationInputTokens + msg.Usage.CacheReadInputTokens + msg.Usage.OutputTokens
-		u.Tokens = &tokens
-	}
-	if len(msg.SinceLast) != 0 {
-		var usd float64
-		for _, m := range msg.SinceLast {
-			usd += m.CostUSD
-		}
-		u.USD = &usd
-	} else if msg.TotalCostUSD != nil {
-		usd := *msg.TotalCostUSD
-		u.USD = &usd
-	}
-	return u
 }

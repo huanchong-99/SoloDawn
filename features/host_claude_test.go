@@ -54,7 +54,7 @@ func hostClaudeSteps(sc *godog.ScenarioContext, f fixtures) {
 	st := &claudeAcceptanceState{t: f.t, cleanup: afterScenario(sc)}
 	sc.Step(`^a scripted Claude Code session with two turns that call "post"$`, st.givenTwoTurnPostScript)
 	sc.Step(`^the Claude driver starts a fresh session and sends both turns$`, st.whenStartAndSendBothTurns)
-	sc.Step(`^the Claude driver reports Ready once per turn and two completed TurnEnded events with usage$`, st.thenTwoCompletedTurns)
+	sc.Step(`^the Claude driver reports Ready once per turn and two completed TurnEnded events$`, st.thenTwoCompletedTurns)
 	sc.Step(`^the MCP shim received both "post" calls with the start's token$`, st.thenMCPReceivedBothPosts)
 	sc.Step(`^closing the Claude process records one start-exit pair in the lifecycle log$`, st.thenOneStartExitPair)
 	sc.Step(`^a scripted Claude Code session that exits mid-turn before a result$`, st.givenMidTurnExitScript)
@@ -223,8 +223,8 @@ func (s *claudeAcceptanceState) collectUntilTurnEnd() error {
 	return fmt.Errorf("Events closed before TurnEnded: %+v", s.events)
 }
 
-func isCompletedTurnWithUsage(ev host.Event) bool {
-	return ev.Kind == host.TurnEnded && ev.Status == "completed" && ev.Usage.Tokens != nil && ev.Usage.USD != nil
+func isCompletedTurn(ev host.Event) bool {
+	return ev.Kind == host.TurnEnded && ev.Status == "completed"
 }
 
 func (s *claudeAcceptanceState) thenTwoCompletedTurns() error {
@@ -233,7 +233,7 @@ func (s *claudeAcceptanceState) thenTwoCompletedTurns() error {
 		if ev.Kind == host.Ready {
 			readyCount++
 		}
-		if isCompletedTurnWithUsage(ev) {
+		if isCompletedTurn(ev) {
 			endedCount++
 		}
 	}
@@ -355,7 +355,7 @@ func (s *claudeAcceptanceState) thenResumedCompletedWithNewToken() error {
 	for range s.proc.Events() {
 	}
 	last := s.events[len(s.events)-1]
-	if !isCompletedTurnWithUsage(last) {
+	if !isCompletedTurn(last) {
 		return fmt.Errorf("unexpected final event: %+v", last)
 	}
 	wantCalls := []string{"mcp --token tok-resumed|post"}

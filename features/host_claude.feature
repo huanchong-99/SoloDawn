@@ -2,7 +2,7 @@ Feature: Claude Code driver
   Scenario: Two turns run in one Claude Code process and reach the configured MCP shim
     Given a scripted Claude Code session with two turns that call "post"
     When the Claude driver starts a fresh session and sends both turns
-    Then the Claude driver reports Ready once per turn and two completed TurnEnded events with usage
+    Then the Claude driver reports Ready once per turn and two completed TurnEnded events
     And the MCP shim received both "post" calls with the start's token
     And closing the Claude process records one start-exit pair in the lifecycle log
 

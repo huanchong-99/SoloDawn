@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"os"
 	"os/exec"
@@ -87,31 +86,29 @@ func TestNewClaudeUUIDFormatAndBits(t *testing.T) {
 }
 
 func TestClaudeCommandArgsStructured(t *testing.T) {
-	setClaudeTempDir(t)
 	launch := Launch{
 		Folder:       t.TempDir(),
 		Level:        1,
 		Shim:         []string{"/bin/solodawn", "mcp", "--token", "tok-1"},
-		Instructions: "Speak through post.",
+		Instructions: "Speak through <post> & reply.",
 	}
-	argv, session, mcpPath, err := claudeCommandArgs(launch, false, false)
+	argv, session, err := claudeCommandArgs(launch, false, false)
 	claudeNoErr(t, err)
-	t.Cleanup(func() { os.Remove(mcpPath) })
 	claudeTrue(t, claudeUUIDPattern.MatchString(session), "generated session is not UUID v4")
-	checkClaudeMCPFile(t, mcpPath, "/bin/solodawn", []string{"mcp", "--token", "tok-1"})
+	mcpJSON := claudeArgAfter(t, argv, "--mcp-config")
+	checkClaudeMCPJSON(t, mcpJSON, "/bin/solodawn", []string{"mcp", "--token", "tok-1"})
 	want := []string{
 		"claude", "-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json",
-		"--session-id", session, "--mcp-config", mcpPath, "--strict-mcp-config",
+		"--session-id", session, "--mcp-config", mcpJSON, "--strict-mcp-config",
 		"--permission-prompt-tool", "mcp__solodawn__approve",
 		"--setting-sources", "user", "--allowedTools", "mcp__solodawn",
-		"--append-system-prompt", "Speak through post.",
-		"--permission-mode", "default", "--tools", "Read,Glob,Grep",
+		"--append-system-prompt", "Speak through <post> & reply.",
+		"--permission-mode", "default", "--tools", "Read,Glob,Grep,AskUserQuestion",
 	}
 	claudeEqual(t, "structured argv", argv, want)
 }
 
 func TestClaudeCommandArgsInteractiveResume(t *testing.T) {
-	setClaudeTempDir(t)
 	const session = "797fa93e-af8a-4768-b847-42582d5583a0"
 	resumed := Launch{
 		Folder:     t.TempDir(),
@@ -120,13 +117,13 @@ func TestClaudeCommandArgsInteractiveResume(t *testing.T) {
 		Shim:       []string{"solodawn"},
 		RepoConfig: true,
 	}
-	argv, gotSession, mcpPath, err := claudeCommandArgs(resumed, true, false)
+	argv, gotSession, err := claudeCommandArgs(resumed, true, false)
 	claudeNoErr(t, err)
-	t.Cleanup(func() { os.Remove(mcpPath) })
 	claudeEqual(t, "interactive session", gotSession, session)
-	checkClaudeMCPFile(t, mcpPath, "solodawn", []string{})
+	mcpJSON := claudeArgAfter(t, argv, "--mcp-config")
+	checkClaudeMCPJSON(t, mcpJSON, "solodawn", []string{})
 	want := []string{
-		"claude", "--resume", session, "--mcp-config", mcpPath, "--strict-mcp-config",
+		"claude", "--resume", session, "--mcp-config", mcpJSON, "--strict-mcp-config",
 		"--setting-sources", "user,project", "--allowedTools", "mcp__solodawn",
 		"--permission-mode", "bypassPermissions", "--settings", claudeBypassSettings,
 	}
@@ -134,9 +131,7 @@ func TestClaudeCommandArgsInteractiveResume(t *testing.T) {
 }
 
 func TestClaudeInteractiveFirstStartWithInstructions(t *testing.T) {
-	setClaudeTempDir(t)
-	d := newClaudeDriver()
-	argv, session, err := d.Interactive(Launch{
+	argv, session, err := Drivers["claude"].Interactive(Launch{
 		Folder:       t.TempDir(),
 		Level:        1,
 		Shim:         []string{"solodawn", "mcp", "--token", "tok-int"},
@@ -144,13 +139,13 @@ func TestClaudeInteractiveFirstStartWithInstructions(t *testing.T) {
 	})
 	claudeNoErr(t, err)
 	claudeTrue(t, claudeUUIDPattern.MatchString(session), "session is not UUID v4")
-	mcpPath := claudeArgAfter(t, argv, "--mcp-config")
-	t.Cleanup(func() { os.Remove(mcpPath) })
+	mcpJSON := claudeArgAfter(t, argv, "--mcp-config")
+	checkClaudeMCPJSON(t, mcpJSON, "solodawn", []string{"mcp", "--token", "tok-int"})
 	want := []string{
-		"claude", "--session-id", session, "--mcp-config", mcpPath, "--strict-mcp-config",
+		"claude", "--session-id", session, "--mcp-config", mcpJSON, "--strict-mcp-config",
 		"--setting-sources", "user", "--allowedTools", "mcp__solodawn",
 		"--append-system-prompt", "Task instructions.",
-		"--permission-mode", "default", "--tools", "Read,Glob,Grep",
+		"--permission-mode", "default", "--tools", "Read,Glob,Grep,AskUserQuestion",
 	}
 	claudeEqual(t, "interactive first-start argv", argv, want)
 }
@@ -163,7 +158,7 @@ func TestClaudeLevelFlagsAllModesAndRefusals(t *testing.T) {
 		want        []string
 		errText     string
 	}{
-		{1, false, true, []string{"--permission-mode", "default", "--tools", "Read,Glob,Grep"}, ""},
+		{1, false, true, []string{"--permission-mode", "default", "--tools", "Read,Glob,Grep,AskUserQuestion"}, ""},
 		{2, false, false, []string{"--permission-mode", "acceptEdits", "--settings", claudeSandboxSettings}, ""},
 		{2, true, false, []string{"--permission-mode", "acceptEdits", "--settings", claudeSandboxSettings}, ""},
 		{2, false, true, nil, "conflict: Claude Code has no sandbox for level 2 on Windows"},
@@ -183,9 +178,8 @@ func TestClaudeLevelFlagsAllModesAndRefusals(t *testing.T) {
 	}
 }
 
-func TestClaudeStartAndInteractiveErrorsCleanTempFiles(t *testing.T) {
-	tempDir := setClaudeTempDir(t)
-	d := newClaudeDriver()
+func TestClaudeStartAndInteractiveRefusals(t *testing.T) {
+	d := Drivers["claude"]
 	base := Launch{Folder: t.TempDir(), Level: 1, Shim: []string{"solodawn", "mcp"}}
 
 	badLevel := base
@@ -204,72 +198,6 @@ func TestClaudeStartAndInteractiveErrorsCleanTempFiles(t *testing.T) {
 	missingFolder.Folder = filepath.Join(t.TempDir(), "does-not-exist")
 	_, err = d.Start(t.Context(), missingFolder)
 	claudeTrue(t, err != nil, "Start succeeded in a missing folder")
-	entries, readErr := os.ReadDir(tempDir)
-	claudeNoErr(t, readErr)
-	claudeEqual(t, "temp directory entries", len(entries), 0)
-
-	missingTmp := filepath.Join(t.TempDir(), "missing-tmp")
-	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
-		t.Setenv(key, missingTmp)
-	}
-	_, _, err = d.Interactive(base)
-	claudeTrue(t, err != nil, "Interactive succeeded with missing temp dir")
-}
-
-func TestClaudeInteractiveTempFileRotation(t *testing.T) {
-	setClaudeTempDir(t)
-	d := newClaudeDriver()
-	l := Launch{Folder: t.TempDir(), Session: "797fa93e-af8a-4768-b847-42582d5583a0", Level: 1, Shim: []string{"solodawn", "mcp"}}
-	argv1, _, err := d.Interactive(l)
-	claudeNoErr(t, err)
-	path1 := claudeArgAfter(t, argv1, "--mcp-config")
-	_, statErr := os.Stat(path1)
-	claudeNoErr(t, statErr)
-
-	argv2, _, err := d.Interactive(l)
-	claudeNoErr(t, err)
-	path2 := claudeArgAfter(t, argv2, "--mcp-config")
-	_, statErr = os.Stat(path1)
-	claudeTrue(t, errors.Is(statErr, os.ErrNotExist), "first interactive config still exists")
-	_, statErr = os.Stat(path2)
-	claudeNoErr(t, statErr)
-
-	d.swapInteractive(l.Session, "")
-	_, statErr = os.Stat(path2)
-	claudeTrue(t, errors.Is(statErr, os.ErrNotExist), "second interactive config still exists")
-	claudeEqual(t, "interactive map len", len(d.interactive), 0)
-}
-
-func TestClaudeExecCmdUnixAndWindows(t *testing.T) {
-	var unixAttrs struct{ Setpgid bool }
-	unixCmd := claudeExecCmd(t.Context(), []string{"-p"}, false, reflect.ValueOf(&unixAttrs).Elem())
-	claudeTrue(t, unixAttrs.Setpgid, "expected Setpgid on Unix")
-	claudeEqual(t, "unix wait delay", unixCmd.WaitDelay, time.Second)
-	claudeEqual(t, "unix args", unixCmd.Args, []string{"claude", "-p"})
-
-	var winAttrs struct{ Setpgid bool }
-	winCmd := claudeExecCmd(t.Context(), []string{"-p"}, true, reflect.ValueOf(&winAttrs).Elem())
-	claudeTrue(t, !winAttrs.Setpgid, "unexpected Setpgid on Windows")
-	claudeEqual(t, "windows wait delay", winCmd.WaitDelay, time.Second)
-	if runtime.GOOS == "windows" {
-		return
-	}
-	verifyFakeTaskkill(t, winCmd)
-}
-
-func verifyFakeTaskkill(t *testing.T, winCmd *exec.Cmd) {
-	t.Helper()
-	dir := t.TempDir()
-	out := filepath.Join(dir, "killed")
-	t.Setenv("CLAUDE_TASKKILL_OUT", out)
-	script := "#!/bin/sh\nprintf '%s ' \"$@\" > \"$CLAUDE_TASKKILL_OUT\"\n"
-	claudeNoErr(t, os.WriteFile(filepath.Join(dir, "taskkill.exe"), []byte(script), 0700))
-	t.Setenv("PATH", dir)
-	winCmd.Process = &os.Process{Pid: 43210}
-	claudeNoErr(t, winCmd.Cancel())
-	got, err := os.ReadFile(out)
-	claudeNoErr(t, err)
-	claudeEqual(t, "taskkill args", string(got), "/f /t /pid 43210 ")
 }
 
 func TestClaudeStreamLineAndRateEvents(t *testing.T) {
@@ -288,54 +216,18 @@ func TestClaudeStreamLineAndRateEvents(t *testing.T) {
 		{`{"type":"assistant","subtype":"init","session_id":"s1"}`, Event{Kind: Active}},
 		{`{"type":"system","subtype":"thinking_tokens","session_id":"s1"}`, Event{Kind: Active}},
 		{`{"type":"system","subtype":"init","session_id":""}`, Event{Kind: Active}},
+		{`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}}`, Event{Kind: Active}},
 		{`{"type":"result","is_error":"bad"}`, Event{Kind: Active}},
 	}
 	for _, tc := range cases {
 		claudeTrue(t, !p.handleLine([]byte(tc.line)), "unexpected diagnostic return")
 		claudeEqual(t, tc.line, <-events, tc.want)
 	}
-	checkClaudeRateEvents(t)
-}
-
-func checkClaudeRateEvents(t *testing.T) {
-	t.Helper()
-	pct44, pct0, pct85 := 44.0, 0.0, 85.0
-	resetsMS, altMS := int64(1795615200000), int64(1800000000000)
-	cases := []struct {
-		line string
-		want []Event
-	}{
-		{`{"type":"rate_limit_event"}`, []Event{{Kind: Active}}},
-		{`{"type":"rate_limit_event","rate_limit_info":123}`, []Event{{Kind: Active}}},
-		{`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":"bad"}}`, []Event{{Kind: Active}}},
-		{`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}`, []Event{{Kind: Active}}},
-		{`{"type":"rate_limit_event","rate_limit_info":{"status":""}}`, []Event{{Kind: Active}}},
-		{
-			`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","rateLimitType":"seven_day","unifiedWindows":{"seven_day":{"utilization":0.0,"resetsAt":1795615200}}}}`,
-			[]Event{{Kind: Used, Usage: Usage{WindowPct: &pct0, WindowResets: &resetsMS}}},
-		},
-		{
-			`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","utilization":0.85,"resetsAt":1800000000,"rateLimitType":"seven_day","unifiedWindows":{"seven_day":{"utilization":0.44,"resetsAt":1795615200}}}}`,
-			[]Event{{Kind: Used, Usage: Usage{WindowPct: &pct85, WindowResets: &altMS}}},
-		},
-		{
-			`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1795615200,"rateLimitType":"seven_day","unifiedWindows":{"seven_day":{"utilization":0.44}}}}`,
-			[]Event{{Kind: Used, Usage: Usage{WindowPct: &pct44, WindowResets: &resetsMS}}, {Kind: RateLimited, Resets: resetsMS}},
-		},
-		{
-			`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}}`,
-			[]Event{{Kind: RateLimited, Resets: 0}},
-		},
-	}
-	for _, tc := range cases {
-		claudeEqual(t, tc.line, claudeRateEvents([]byte(tc.line)), tc.want)
-	}
 }
 
 func TestClaudeResultAndDiagnosticMapping(t *testing.T) {
 	checkClaudeStatuses(t)
 	checkClaudeDiagnostics(t)
-	checkClaudeUsageMath(t)
 }
 
 func checkClaudeStatuses(t *testing.T) {
@@ -370,7 +262,9 @@ func checkClaudeDiagnostics(t *testing.T) {
 		{claudeResultMsg{Subtype: "error_during_execution", IsError: true, Errors: []string{"No conversation found with session ID: x"}}, true, Event{Kind: NoSession, Text: "No conversation found with session ID: x"}, true},
 		{claudeResultMsg{Subtype: "error_during_execution", IsError: true, Result: "Session not found"}, true, Event{Kind: NoSession, Text: "Session not found"}, true},
 		{claudeResultMsg{Subtype: "error_during_execution", IsError: true, Result: "No conversation found"}, false, Event{Kind: TurnEnded, Status: "failed"}, false},
+		{claudeResultMsg{Subtype: "success", IsError: true, APIErrorStatus: 400, Result: "HTTP 400"}, false, Event{Kind: TurnEnded, Status: "failed"}, false},
 		{claudeResultMsg{Subtype: "success", IsError: true, APIErrorStatus: 401, Result: "HTTP 401"}, false, Event{Kind: LoginInvalid, Text: "HTTP 401"}, true},
+		{claudeResultMsg{Subtype: "success", IsError: true, APIErrorStatus: 402, Result: "HTTP 402"}, false, Event{Kind: TurnEnded, Status: "failed"}, false},
 		{claudeResultMsg{Subtype: "success", IsError: true, Result: "Please run /login"}, false, Event{Kind: LoginInvalid, Text: "Please run /login"}, true},
 		{claudeResultMsg{Subtype: "success", IsError: true, Result: "Not logged in"}, false, Event{Kind: LoginInvalid, Text: "Not logged in"}, true},
 		{claudeResultMsg{Subtype: "success", IsError: true, Result: "Invalid API key"}, false, Event{Kind: LoginInvalid, Text: "Invalid API key"}, true},
@@ -382,29 +276,6 @@ func checkClaudeDiagnostics(t *testing.T) {
 		claudeEqual(t, "isDiag", diag, tc.isDiag)
 		claudeEqual(t, "diag event", ev, tc.want)
 	}
-}
-
-func checkClaudeUsageMath(t *testing.T) {
-	t.Helper()
-	claudeEqual(t, "empty usage", claudeResultUsage(claudeResultMsg{Subtype: "success"}), Usage{})
-	fallbackCost := 0.0125
-	fb := claudeResultUsage(claudeResultMsg{
-		Usage:        &claudeTurnTokens{InputTokens: 10, CacheCreationInputTokens: 20, CacheReadInputTokens: 30, OutputTokens: 40},
-		TotalCostUSD: &fallbackCost,
-	})
-	wantTokens := int64(100)
-	claudeEqual(t, "fallback usage", fb, Usage{Tokens: &wantTokens, USD: &fallbackCost})
-
-	delta := claudeResultUsage(claudeResultMsg{
-		TotalCostUSD: &fallbackCost,
-		SinceLast: map[string]claudeModelDelta{
-			"haiku":  {CostUSD: 0.002},
-			"sonnet": {CostUSD: 0.003},
-		},
-	})
-	claudeTrue(t, delta.Tokens == nil, "unexpected tokens")
-	claudeTrue(t, delta.USD != nil, "missing delta USD")
-	claudeTrue(t, math.Abs(*delta.USD-0.005) <= 1e-12, "wrong delta USD sum")
 }
 
 func TestClaudeDriverWithFakeCLI(t *testing.T) {
@@ -423,13 +294,19 @@ func claudeTestStartLevel() int {
 }
 
 func testClaudeApprovalAndResume(t *testing.T) {
-	tempDir := setClaudeTempDir(t)
 	logFile := filepath.Join(t.TempDir(), "lifecycle.log")
 	t.Setenv("SOLODAWN_FAKECLI_LOG", logFile)
 	script1, err := filepath.Abs(filepath.Join("fakecli", "testdata", "claude-approval.json"))
 	claudeNoErr(t, err)
 	t.Setenv("SOLODAWN_FAKE_CLAUDE_SCRIPT", script1)
 	peer, shim := startTestMCPPeer(t, "tok-first")
+
+	_, _, err = Drivers["claude"].Interactive(Launch{
+		Folder: t.TempDir(),
+		Level:  claudeTestStartLevel(),
+		Shim:   shim,
+	})
+	claudeNoErr(t, err)
 
 	proc, err := Drivers["claude"].Start(t.Context(), Launch{
 		Folder:       t.TempDir(),
@@ -451,32 +328,18 @@ func testClaudeApprovalAndResume(t *testing.T) {
 	claudeNoErr(t, proc.Turn("Approved. Run exactly the same request again."))
 	events2 := drainUntilTurnEnded(t, proc.Events())
 	claudeNoErr(t, <-mcpDone)
-	checkSecondApprovalTurnResult(t, events2[len(events2)-1])
+	claudeEqual(t, "second turn end", events2[len(events2)-1], Event{Kind: TurnEnded, Status: "completed"})
 
 	claudeNoErr(t, proc.Close())
 	_, open := <-proc.Events()
 	claudeTrue(t, !open, "expected Events closed after Close")
-	entries, _ := os.ReadDir(tempDir)
-	claudeEqual(t, "leaked temp files", len(entries), 0)
 	runClaudeResumeCheck(t, session, logFile)
 }
 
 func checkFirstApprovalTurnEvents(t *testing.T, events []Event) {
 	t.Helper()
-	pct44, resetsMS := 44.0, int64(1795615200000)
-	wantUsed := Event{Kind: Used, Usage: Usage{WindowPct: &pct44, WindowResets: &resetsMS}}
-	claudeTrue(t, slices.ContainsFunc(events, func(e Event) bool { return reflect.DeepEqual(e, wantUsed) }), "missing Used event")
 	claudeTrue(t, slices.Contains(events, Event{Kind: Active}), "missing Active event")
-	last := events[len(events)-1]
-	claudeEqual(t, "first turn status", last.Status, "completed")
-	claudeEqual(t, "first turn tokens", *last.Usage.Tokens, int64(57229))
-}
-
-func checkSecondApprovalTurnResult(t *testing.T, last Event) {
-	t.Helper()
-	claudeEqual(t, "second turn status", last.Status, "completed")
-	claudeEqual(t, "second turn tokens", *last.Usage.Tokens, int64(58510))
-	claudeTrue(t, math.Abs(*last.Usage.USD-0.00088614) <= 1e-10, "wrong second turn delta USD")
+	claudeEqual(t, "first turn end", events[len(events)-1], Event{Kind: TurnEnded, Status: "completed"})
 }
 
 func runClaudeResumeCheck(t *testing.T, session, logFile string) {
@@ -498,7 +361,7 @@ func runClaudeResumeCheck(t *testing.T, session, logFile string) {
 	events := drainUntilTurnEnded(t, proc.Events())
 	claudeNoErr(t, <-mcpDone)
 	claudeEqual(t, "resumed Ready", events[0], Event{Kind: Ready, Session: session})
-	claudeEqual(t, "resumed status", events[len(events)-1].Status, "completed")
+	claudeEqual(t, "resumed end", events[len(events)-1], Event{Kind: TurnEnded, Status: "completed"})
 	claudeNoErr(t, proc.Close())
 	for range proc.Events() {
 	}
@@ -509,16 +372,17 @@ func runClaudeResumeCheck(t *testing.T, session, logFile string) {
 }
 
 func testClaudeInterruptAndContinue(t *testing.T) {
-	setClaudeTempDir(t)
 	t.Setenv("SOLODAWN_FAKECLI_LOG", filepath.Join(t.TempDir(), "log"))
 	script := writeClaudeScript(t, `[
 		{"dir":"stdin","msg":{"type":"control_request","request_id":"req-1","request":{"subtype":"interrupt"}}},
 		{"dir":"stdin","msg":{"type":"user","message":{"role":"user","content":[{"type":"text","text":"turn <1> & go"}]}}},
 		{"dir":"stdout","msg":{"type":"system","subtype":"init","session_id":"$session"}},
+		{"dir":"stdout","msg":{"type":"result","subtype":"error_during_execution","is_error":true}},
+		{"dir":"stdin","msg":{"type":"user","message":{"role":"user","content":[{"type":"text","text":"turn 2"}]}}},
 		{"dir":"stdin","msg":{"type":"control_request","request_id":"req-2","request":{"subtype":"interrupt"}}},
 		{"dir":"stdout","msg":{"type":"control_response","response":{"subtype":"success","request_id":"req-2"}}},
 		{"dir":"stdout","msg":{"type":"result","subtype":"error_during_execution","is_error":true}},
-		{"dir":"stdin","msg":{"type":"user","message":{"role":"user","content":[{"type":"text","text":"turn 2"}]}}},
+		{"dir":"stdin","msg":{"type":"user","message":{"role":"user","content":[{"type":"text","text":"turn 3"}]}}},
 		{"dir":"stdout","msg":{"type":"result","subtype":"error_during_execution","is_error":true}},
 		{"dir":"eof"}
 	]`, 0)
@@ -534,20 +398,23 @@ func testClaudeInterruptAndContinue(t *testing.T) {
 	claudeNoErr(t, proc.Interrupt())
 	claudeNoErr(t, proc.Turn("turn <1> & go"))
 	claudeEqual(t, "init kind", (<-proc.Events()).Kind, Ready)
-	claudeNoErr(t, proc.Interrupt())
 	ev1 := drainUntilTurnEnded(t, proc.Events())
-	claudeEqual(t, "turn 1 status", ev1[len(ev1)-1].Status, "interrupted")
+	claudeEqual(t, "turn 1 status", ev1[len(ev1)-1].Status, "failed")
 
 	claudeNoErr(t, proc.Turn("turn 2"))
+	claudeNoErr(t, proc.Interrupt())
 	ev2 := drainUntilTurnEnded(t, proc.Events())
-	claudeEqual(t, "turn 2 status", ev2[len(ev2)-1].Status, "failed")
+	claudeEqual(t, "turn 2 status", ev2[len(ev2)-1].Status, "interrupted")
+
+	claudeNoErr(t, proc.Turn("turn 3"))
+	ev3 := drainUntilTurnEnded(t, proc.Events())
+	claudeEqual(t, "turn 3 status", ev3[len(ev3)-1].Status, "failed")
 	claudeNoErr(t, proc.Close())
 	for range proc.Events() {
 	}
 }
 
 func testClaudeCrashAndStderrDiag(t *testing.T) {
-	setClaudeTempDir(t)
 	t.Setenv("SOLODAWN_FAKECLI_LOG", filepath.Join(t.TempDir(), "log"))
 	cases := []struct {
 		session string
@@ -560,6 +427,12 @@ func testClaudeCrashAndStderrDiag(t *testing.T) {
 			`[{"dir":"stdout","msg":{"type":"system","subtype":"init","session_id":"s-crash"}},{"dir":"stdout","msg":{"type":"assistant"}}]`,
 			1,
 			[]Event{{Kind: Ready, Session: "s-crash"}, {Kind: Active}},
+		},
+		{
+			"",
+			`[{"dir":"stderr","msg":"No conversation found with session ID: s-fresh"}]`,
+			1,
+			nil,
 		},
 		{
 			"missing-id",
@@ -610,7 +483,6 @@ func runClaudeDiagCase(t *testing.T, session, steps string, exit int, want []Eve
 }
 
 func testClaudeContextCancelKillsTree(t *testing.T) {
-	setClaudeTempDir(t)
 	t.Setenv("SOLODAWN_FAKECLI_LOG", filepath.Join(t.TempDir(), "log"))
 	script := writeClaudeScript(t, `[
 		{"dir":"mcp<-cli","msg":{"jsonrpc":"2.0","id":1,"method":"ping"}},
@@ -642,21 +514,11 @@ func testClaudeContextCancelKillsTree(t *testing.T) {
 	claudeTrue(t, !timedOut, "child MCP process survived context cancellation")
 }
 
-func setClaudeTempDir(t *testing.T) string {
+func checkClaudeMCPJSON(t *testing.T, raw, wantCmd string, wantArgs []string) {
 	t.Helper()
-	dir := t.TempDir()
-	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
-		t.Setenv(key, dir)
-	}
-	return dir
-}
-
-func checkClaudeMCPFile(t *testing.T, path, wantCmd string, wantArgs []string) {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	claudeNoErr(t, err)
+	claudeTrue(t, strings.HasPrefix(raw, "{"), "MCP config is not inline JSON: "+raw)
 	var cfg claudeMCPConfig
-	claudeNoErr(t, json.Unmarshal(raw, &cfg))
+	claudeNoErr(t, json.Unmarshal([]byte(raw), &cfg))
 	srv := cfg.MCPServers["solodawn"]
 	claudeEqual(t, "MCP command", srv.Command, wantCmd)
 	claudeTrue(t, srv.Args != nil, "MCP args slice is nil")

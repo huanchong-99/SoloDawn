@@ -6,11 +6,59 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-21 · limitation · Claude driver matches English error text for `LoginInvalid` and `NoSession`, and keeps the last unresumed terminal MCP file in temp
+### 2026-11-21 · limitation · Claude driver matches English error text for `LoginInvalid` and `NoSession`
 
-- Symptom: `claudeDiagEvent` (`internal/host/claude.go`) recognises an unresumable session or invalid sign-in from HTTP status `401` and English error substrings (`no conversation found`, `session not found`, `/login`, `not logged in`, `invalid api key`, `authentication`) in `result` or non-zero-exit `stderr`, so a wording change in a newer Claude Code release can report a failed turn or crash instead. Also, `Driver.Interactive` returns `argv` without owning the terminal process (`internal/host/host.go:422`), so while `claudeDriver.swapInteractive` removes the previous `--mcp-config` temporary file on the next `Interactive` or `Start` for that session, the file of a terminal session that is never handed back or restarted in the same node run stays in the OS temporary directory.
-- Cause: Claude Code has no dedicated stream-json event type for sign-in or missing-session errors (see also the open entry on missing invalid-login captures), and `Interactive` has no post-exit callback.
-- Status: open. Revisit error patterns when live failure captures are added, and let the PTY runner remove the temporary file on exit if needed.
+- Symptom: `claudeDiagEvent` (`internal/host/claude.go`) recognises an unresumable session or invalid sign-in from HTTP status `401` and English error substrings (`no conversation found`, `session not found`, `/login`, `not logged in`, `invalid api key`, `authentication`) in `result` or non-zero-exit `stderr`, so a wording change in a newer Claude Code release can report a failed turn or crash instead.
+- Cause: Claude Code has no dedicated stream-json event type for sign-in or missing-session errors (see also the open entry on missing invalid-login captures).
+- Status: open. Revisit error patterns when live failure captures are added.
+
+### 2026-11-21 · limitation · `Sessions` has no `sync`, `fetch` or `ack` handlers until the home units and runtime wire them
+
+- Symptom: inbound `ctl` requests for `sync` and `fetch` are answered `bad_request` ("unknown ctl request") and `ack` pushes are dropped on a bare `Sessions` hub (`internal/node/session.go`, `NewSessions`), and `host.info`, `pair.browser` and `settings.set` are not registered until unit N-3.
+- Cause: `Sessions` provides the `Requests`, `Pushes` and `Commands` tables, while `sync` (`HM-2`), `fetch` (`HM-3`), `ack` (`HM-7`), the pairing and host-info handlers (`N-3`) and runtime assembly (`N-4`) are separate units.
+- Status: open until `HM-2`, `HM-3`, `HM-7`, `N-3` and `N-4` populate those tables.
+
+### 2026-11-21 · limitation · `home.Loop` keeps the `Owner` it was started with across adoption
+
+- Symptom: when an unowned node starts `home.Loop` with `Owner: ""` and is later adopted over a pairing `ctl` session, `Logs.Owner()` becomes the adopter's user id (`internal/node/devlog.go`, `dvlAdopt`), while the running `home.Loop` still has `LoopConfig.Owner == ""` (`internal/home/run.go:65`) and refuses `group create` until the loop is restarted.
+- Cause: `LoopConfig.Owner` is read once when `StartLoop` constructs group states (`internal/home/run.go:175`, `:198`).
+- Status: open until `N-4`, which supplies `SessionConfig.OnAdopt` (`internal/node/session.go:52`) to close and recreate `home.Loop` with the adopted owner.
+
+### 2026-11-21 · limitation · `Sessions` implements only the server side of a `ctl` connection
+
+- Symptom: a host on one node has no outgoing `ctl` client session yet to a home on another node (sending `hello` with `kind: "host"`, reading `welcome`, exchanging `devlog` both ways, and passing pushes to `Host.Push`), so cross-node AI sessions (`A3.3`, unit `I-6`) have no transport path.
+- Cause: `internal/node/session.go` (`N-2`) serves inbound `ctl` connections (`Serve`); the client side of a `ctl` session was split out by the coordinator's decision of 2026-11-21.
+- Status: open for unit `N-2b` (`internal/node/client.go`), wired into the node runtime by `N-4`.
+
+### 2026-11-21 · deviation · The local link routes only `cmd` requests until `sync`, `fetch` and `ack` land
+
+- Symptom: on `LocalLink`, a `sync` or `fetch` request from the host is answered `bad_request`, and an `ack` push is dropped; tests subscribe to row pushes through `LocalLink.Watch` (`internal/node/local.go:66`), which is temporary until `sync` is routed to `home.Loop`.
+- Cause: `home.Loop` on `rebuild` exposes `Cmd` and `Watch` only (`internal/home/run.go:313`, `:357`); `Sync` (HM-2, #205), `Fetch` (HM-3) and `Ack` with `inbox` frames (HM-7) are built in separate units. `LocalLink.toHome` (`internal/node/local.go:127`) dispatches `cmd` to `Loop.Cmd` and answers other requests `bad_request` per `planning/contracts/datachannel.md` section 2.
+- Status: open. Route `sync` to `Loop` and delete `LocalLink.Watch` once HM-2 (#205) merges; wire `fetch` and `ack` once HM-3 and HM-7 merge (N-4 / I-1 / I-3).
+
+### 2026-11-21 · deviation · Dead `cause` path in `internal/home` and `internal/store`
+
+- Symptom: the home and store still carry, write and read an item `cause`, although `P-1b` re-froze `InboxItem` and `Item` without `cause` under the owner's 2026-11-21 decision (no attack-and-defence code). Nothing on the wire or on the host reads it.
+- Cause: `internal/home/home.go:186` (`Item.Cause`), `internal/home/run_group.go:254, 283-288` (`runCause`), `internal/home/cmd_brief.go:318-322, 350, 363`, `internal/home/machine.go:110` (with their tests in `cmd_brief_test.go:297-298, 343, 431`, `home_test.go:318, 332`, `run_push_test.go:174, 195-198, 324` and `run_disk_test.go:69-70`) and `internal/store/inbox.go:9, 17, 33, 43` together with the `inbox.cause` column were built before `P-1b` dropped `cause`.
+- Status: open; owner **HM-7**, which removes the dead `cause` fields, functions, tests and `inbox.cause` column.
+
+### 2026-11-21 · limitation · Postponed step-2 contracts still assume an item-level `cause`
+
+- Symptom: the step-2 planning documents (`planning/contracts/step-2/authority.md:36, 85, 92-93, 104, 108`, `planning/contracts/step-2/confirm.md:145-147, 196-223, 244`, `planning/contracts/step-2/watch-team.md:46-67` and `planning/steps/parallel-plan-step-2-3.md:20-21, 27`) require an inbox item to carry a signed `cause` when a group home belongs to another person, whereas `P-1b` removed `cause` from step-1 items.
+- Cause: step 2 is postponed while step 1 ships with plain unsigned items under the owner's 2026-11-21 decision.
+- Status: open, without effect in step 1. When step 2 resumes, items will need an authority field again.
+
+### 2026-11-21 · limitation · Group and review sessions default to permission level 3 and rely on instructions not to edit files
+
+- Symptom: at the default permission level of 3 (owner's decision of 2026-11-21), a group session or a review session starts its CLI with full tool access rather than a CLI-enforced read-only sandbox, so a model that ignores its prompt could edit files in `repo/` or `review/<num>/`.
+- Cause: `readLaunchConfig` (`internal/host/run.go`) applies `perm.level` or `default_level` (default 3) to every session kind so that group and review sessions keep the CLI's ask-the-user tool and their multiple-choice questions reach the owner as decision cards (`planning/sessions.md` section 1). At level 1 Claude Code runs with `--tools Read,Glob,Grep` (`planning/contracts/drivers.md` section 1.1), which strips that tool.
+- Status: open, accepted by the coordinator's decision of 2026-11-21 (#187). Each session's instructions (`planning/contracts/drivers.md` section 4) tell group and review sessions not to change code.
+
+### 2026-11-21 · limitation · Ending a session through `Sessions.End` does not close an open CLI process
+
+- Symptom: when a session ends (`planning/flows/agent-turn.md` section D, step 17) and its caller removes the row with `Sessions.End`, an open `waiting` CLI process for that session stays in `runtimePart.procs` until its `idle_minutes` timer expires or `max_open` evicts a slot.
+- Cause: `Runtime` (`internal/host/host.go:516`) exposes `Turn` and `Answer` only, and `Sessions.End` (`internal/host/session.go:285`) has no hook into the session runtime (`internal/host/run.go`).
+- Status: open, for I-1 or the unit that ends sessions (#186, #187). Adding a close method on `Runtime` (or a hook called by `Sessions.End`) lets step 17 close and wait for the session's process before removing its folder.
 
 ### 2026-11-21 · limitation · The jobs of a group in the home's run loop have no bound
 
@@ -24,10 +72,10 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `(*Connection).Send` calls `SendText` and returns (`internal/peer/ctl.go:174`); `home.Client` has `Send` and `Done` only (`internal/home/home.go:27`), so the loop cannot ask how much is buffered. The limit (`runBacklog`, `internal/home/run_conn.go`) applies to a client whose `Send` waits, such as a local link.
 - Status: open. Either `peer.Connection.Send` waits, or fails, above a buffered amount, or the node closes a connection whose buffer stays above a limit; owner N-2 or the owner of `internal/peer`.
 
-### 2026-11-21 · deviation · Inbox items are stored and pushed unsigned
+### 2026-11-21 · deviation · Inbox items are not yet pushed in the wire `inbox` frame
 
-- Symptom: the run loop stores an item with the seam's `Item` as JSON in the `env` column and pushes it as `home.ItemsPush`, one `home.QueuedItem` per frame, where `planning/contracts/datachannel.md` section 6 has an `inbox` frame of items signed by the home. A host that follows the contract accepts none of them.
-- Cause: signing and the wire `item` belong to unit HM-7; the loop has two functions in their place, `runSeal` and `runItemFrame` (`internal/home/run_push.go`).
+- Symptom: the run loop stores an item with the seam's `Item` as JSON in the `env` column and pushes it as `home.ItemsPush`, one `home.QueuedItem` per frame, where `planning/contracts/datachannel.md` section 6 (re-frozen in P-1b as a plain unsigned `item` object) has an `inbox` frame of `InboxItem`s with optional `msg` and `task` row copies. A host that follows the contract accepts none of them.
+- Cause: the wire `item` and `inbox` frame belong to unit HM-7; the loop has two functions in their place, `runSeal` and `runItemFrame` (`internal/home/run_push.go`).
 - Status: open until HM-7, which replaces those two functions, fills a frame as far as a `ctl` message goes, and adds `ack`. Storing, holding, sending again on a hello and the count of the wake-up cap are in the loop and stay.
 
 ### 2026-11-21 · limitation · A command without `g` knows only the devices of the node's owner
@@ -42,11 +90,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the contract lists the post's checks without saying which of them are about the group when the brief is confirmed. `(*State).briefStill` (`internal/home/cmd_brief.go:243`) makes the others again: the shape of the body, the requester a member, every assignee and reviewer a working AI. That an entry's assignee is not its reviewer is made again by the task machine's role rule, which `Step` answers `conflict` (`internal/home/machine.go:253`).
 - Status: open, decided by unit HM-8 on 2026-11-21. The contract should say that the `replaces` check is the post's only.
 
-### 2026-11-21 · deviation · The tasks of a confirmed brief have ids that follow from the act, not random ones
+### 2026-11-21 · deviation · Derived member and task ids where the home creates rows without a client id
 
-- Symptom: `planning/contracts/rows.md` says that the ids of tasks and messages are random ids. The home gives the task of entry `i` of a confirmed brief, and its `task` message, the id made of the first 16 bytes of the SHA-256 of `SoloDawn brief task <n of the act> <i>`.
-- Cause: the function of a command is pure and has no randomness (`internal/home/README.md`, "Functions are pure"); `briefTaskID` (`internal/home/cmd_brief.go:286`). The id has the form of a random id, and nobody knows it before the act arrives, because the act's `n` is random. An id that a task or a message already has is answered `conflict` (`internal/home/cmd_brief.go:272`).
-- Status: open, decided by unit HM-8 on 2026-11-21. Should the seam ever give functions a source of random ids, the derivation can go.
+- Symptom: `planning/contracts/rows.md` says that the ids of members, tasks and messages are random ids. The home gives the owner's `member` row in `group create` the first 16 bytes of the SHA-256 of `SoloDawn group owner <n>`, and the task of entry `i` of a confirmed brief (with its `task` message) the first 16 bytes of the SHA-256 of `SoloDawn brief task <n of the act> <i>`.
+- Cause: the function of a command is pure and has no randomness (`internal/home/README.md`, "Functions are pure"); `grpOwnerID` (`internal/home/cmd_group.go:89`) and `briefTaskID` (`internal/home/cmd_brief.go:286`). Each id has the form of a random id, and nobody knows it before the command arrives, because `n` is random. An id that a task or a message already has is answered `conflict` (`internal/home/cmd_brief.go:272`).
+- Status: open, decided by units HM-8 and HM-5 on 2026-11-21. Should the seam ever give functions a source of random ids, the derivations can go.
 
 ### 2026-11-21 · limitation · A queued task's `stats.started` is the time its brief was confirmed
 
@@ -243,15 +291,15 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-20 · limitation · A task's `branch` is text that no reader checks
 
-- Symptom: `proto.Decode` and the web client refuse a task row whose `slug` the home's rule cannot make (unit P-1), but take any text as its `branch`, and as the `branch` of `task branch`. `contracts/local.md` section 7 derives the branch from `num` and `slug` (`task/<num>-<slug>`); `HostedChecksToResume` instead copies `branch` from the row (`internal/host/forge.go:219`), from where it would reach `git` and `gh` arguments.
+- Symptom: `proto.Decode` and the web client refuse a task row whose `slug` the home's rule cannot make (unit P-1), but take any text as its `branch`, and as the `branch` of `task branch`. `contracts/local.md` section 7 derives the branch from `num` and `slug` (`task/<num>-<slug>`); `HostedChecksToResume` previously copied `branch` from the row (`internal/host/forge.go:220` before `HOST-BRANCH`), from where it would reach `git` and `gh` arguments.
 - Cause: `TaskRow.Branch` and `TaskBranch.Branch` are plain strings (`internal/proto/task.go`, `internal/proto/command.go`). Giving the field a type of its own changes `internal/host`, which unit P-1 does not own; and whether the home must refuse a `task branch` whose `branch` is not `task/<num>-<slug>` is not in `contracts/commands.md` 1.5.
-- Status: open. Decided by the coordinator on 2026-11-20: hosts build the branch from `num` and `slug` only, and the home refuses any other `branch`. The host side (`internal/host/forge.go`, `HostedChecksToResume`) goes to the owner of the host forge after P-1 and pull request 156 merge; the home side is unit HM-9.
+- Status: host side resolved on branch `gemini/HOST-BRANCH`: `HostedChecksToResume` (`internal/host/forge.go`) now derives `task/<num>-<slug>` from `Num` and `Slug` through `taskName`, skips rows that fail `taskName`, and ignores `TaskRow.Branch` (tests `TestHostedChecksToResume`, `TestHostedChecksToResumeDerivesBranchFromNumAndSlug`). Open on the home side (unit HM-9), per the coordinator's decision of 2026-11-20 that hosts build the branch from `num` and `slug` only and the home refuses any other `branch`.
 
-### 2026-11-20 · deviation · A `set` that changes nothing and a `task assign` without a role are not refused yet
+### 2026-11-20 · deviation · A `task assign` without a role is not refused yet
 
-- Symptom: `contracts/commands.md` gives `group set` and `member set` "any of" their fields, and `task assign` at least one of `assignee` and `reviewer`. A `group set` with no field, a `member set` with nothing but `id`, and a `task assign` with neither role are read by `proto.Decode` and by the web client's schemas, and nothing refuses them yet.
-- Cause: each of those fields is optional by itself (`GroupSet`, `MemberSet`, `TaskAssign` in `internal/proto/command.go`; the schemas of the same names in `web/src/lib/proto.ts`), and "at least one" is a rule across fields, which the wire types do not state. The command functions of the home are not written yet.
-- Status: open. Decided by the coordinator on 2026-11-20, and now in `contracts/commands.md` (the list of optional fields): the home answers `bad_request`. Unit HM-9 does it for `task assign`, unit HM-5 for `group set`; `member set` is the same case in HM-5's file.
+- Symptom: `contracts/commands.md` gives `group set` and `member set` "any of" their fields, and `task assign` at least one of `assignee` and `reviewer`. A `task assign` with neither role is read by `proto.Decode` and by the web client's schema, and nothing refuses it yet (`group set` with no field and `member set` with nothing but `id` are now refused).
+- Cause: each of those fields is optional by itself (`GroupSet`, `MemberSet`, `TaskAssign` in `internal/proto/command.go`; the schemas of the same names in `web/src/lib/proto.ts`), and "at least one" is a rule across fields, which the wire types do not state. `cmd_task.go` of the home is not written yet.
+- Status: open for `task assign` (unit HM-9); resolved for `group set` and `member set` in unit HM-5 (`grpSetValid` in `internal/home/cmd_group.go:110`, `memSetValid` in `internal/home/cmd_member.go:144`), which answer `bad_request` as `contracts/commands.md` specifies.
 
 ### 2026-11-20 · limitation · The shared wire test does not show where one reader is stricter about a text
 
@@ -326,12 +374,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the server can tell sources apart only by their address (`internal/rendezvous/limits.go:41-50`, `source`; `internal/rendezvous/tls.go:192-205`, `admit`), and pion's nonces are not tied to the client's address (pion/turn v5.1.3 `internal/server/util.go:59`, `NonceHash.Generate`), so a nonce fetched from the sender's own address works for forged ones.
 - Status: open, accepted by the coordinator on 2026-11-20 after the rendezvous security review (F9).
 
-### 2026-11-20 · deviation · The audit record has no `what` for a CLI killed on an idle close
-
-- Symptom: `planning/flows/agent-turn.md` section G has the node write an audit row, and nothing else, when it kills a CLI that did not answer a close within 10 s outside a turn. `planning/contracts/storage.md` section 3 lists eight values of `what` (`delivered`, `refused`, `requested`, `approval`, `takeover`, `handback`, `merge`, `setting`), and none of them says that.
-- Cause: the list of `what` was written before that rule. The audit write takes any text as `what` and has a constant for each of the eight only (`internal/host/audit.go:6-15`); nothing kills a CLI yet.
-- Status: open. HS-15 adds the value to `storage.md` section 3 and a constant beside the others when it builds the idle close (coordinator, 2026-11-20).
-
 ### 2026-11-20 · limitation · The host gives no notice when something `host.info` shows has changed
 
 - Symptom: `planning/contracts/datachannel.md` section 7 pushes `host.info` whenever one of its fields changes. `open`, and `state`, `task` and `queued` of each AI in a group, come from the host's sessions, and the host tells nobody when one of them changes: whoever builds `host.info` can only read the session table again (`Sessions.All`, `internal/host/session.go:341`).
@@ -381,6 +423,72 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-21 · bug · `Loop.Inbox` marked only the groups that existed when it was called
+
+- Symptom: after `Loop.Inbox(conn)` had made a host connection the inbox taker (`internal/home/run.go:366`), a group created later on that home spawned its `runGroup` with `seat.inbox` false (`internal/home/run_group.go:52`) and did not deliver queued items to `conn` until `Loop.Inbox(conn)` was called again (which `LocalLink` never does, because it sends no `hello`).
+- Cause: `Conn` recorded `welcomed` across groups (`internal/home/run_conn.go:34`), whereas `inbox` was kept per group seat (`internal/home/run_group.go:31`) and `spawn` called `seat` with `inbox` false (`internal/home/run.go:162`).
+- Status: resolved in #209: `Conn.taker` (`internal/home/run_conn.go:36`) is set under `Loop.mu` in `Loop.Inbox` (`internal/home/run.go:366`), and `runGroup.seat` initialises `runSeat{inbox: c.taker}` (`internal/home/run_group.go:53`), covering both local and remote hosts. Test: `TestLocalLinkInboxForGroupCreatedAfterAttach`.
+
+### 2026-11-20 · deviation · The audit record has no `what` for a CLI killed on an idle close
+
+- Symptom: `planning/flows/agent-turn.md` section G has the node write an audit row, and nothing else, when it kills a CLI that did not answer a close within 10 s outside a turn. `planning/contracts/storage.md` section 3 lists eight values of `what` (`delivered`, `refused`, `requested`, `approval`, `takeover`, `handback`, `merge`, `setting`), and none of them says that.
+- Cause: the list of `what` was written before that rule. The audit write takes any text as `what` and has a constant for each of the eight only (`internal/host/audit.go:6-15`); nothing kills a CLI yet.
+- Status: resolved in #187: `planning/contracts/storage.md` section 3 adds `killed` to `audit.what`, `internal/host/audit.go` defines `AuditKilled`, and `internal/host/run.go` writes the row naming the member and task when an idle close does not finish within 10 s (`TestCloseTimeoutOnAllPathsAuditAndC6SwitchOrdering`).
+
+### 2026-11-21 · bug · A missing clone folder was reported as a failed start of git
+
+- Symptom: on Windows CI, `TestWorkspaceGitFailures` failed at `internal/host/workspace_test.go:552`: the error of a command in a missing clone folder was not `fs.ErrNotExist`. On macOS the same error read `fork/exec /usr/bin/git: no such file or directory`, naming git instead of the folder.
+- Cause: the new runner sets `SysProcAttr` (`internal/host/command_unix.go:13`, `internal/host/command_windows.go:16`), and `os.StartProcess` checks the working folder only when `SysProcAttr` is nil (Go `src/os/exec_posix.go:30`). The start then failed in the OS: on Unix with ENOENT from the child's chdir, on Windows with `ERROR_DIRECTORY` ("The directory name is invalid"), which `syscall.Errno.Is` does not map to `fs.ErrNotExist`.
+- Status: resolved in branch `fix/host-workspace-review`: `runInput` checks the folder itself before it starts the command (`internal/host/command.go:45`), so the error is `chdir <folder>: …`, as os/exec gives it without `SysProcAttr`, with `fs.ErrNotExist` on every system. Test: `TestCommandInAMissingFolder`.
+
+### 2026-11-20 · bug · Crash recovery of the host's worktrees decided on the folder alone
+
+- Symptom: the independent review of `internal/host` reproduced four states. (a) A SIGKILL of `worktree add -b` during checkout, held there by a slow smudge filter, left a folder with only `.git` and `.gitattributes`, locked `initializing`; `CreateTaskWorkspace` reused it, `git status` there showed every file staged as deleted, and `RemoveTaskWorkspace(TaskCancelled)` failed with "cannot remove a locked working tree". (b) After `add -b` failed past the branch's creation, every retry failed with "a branch named 'task/1-x' already exists". (c) A kill inside `worktree remove` left "missing but already registered worktree" for good, and a half-deleted folder without `.git` was returned as the task's folder. (d) After a killed clone, `EnsureGroupWorkspace` accepted an empty `repo/`, and every later command failed with "not a git repository".
+- Cause: `internal/host/workspace.go:41`, `:89`, `:122` and `:157-161` before the fix took an existing folder as a good worktree or clone, and `add -b` assumed the branch did not exist.
+- Status: resolved in branch `fix/host-workspace-review`. Under the clone's lock the host prunes, reuses a folder only when `git worktree list` shows it on its branch (or detached, for a review), not `locked initializing`, and recorded for the same AI, and otherwise deletes it and adds it again, with `--force --force` while it is still registered and without `-b` when the branch exists (`internal/host/worktree.go:40-112`, `:129-180`). The clone is made in `.repo-clone` and renamed to `repo`; a `repo` that is not a Git repository is an error that names it (`internal/host/workspace.go:51-72`). Tests: `TestWorkspaceAfterAKilledAdd` (a real SIGKILL through the runner during a slow smudge filter), `TestWorkspaceAfterAnAddThatFailedInCheckout`, `TestWorkspaceAfterAStoppedRemove`, `TestWorkspaceCloneAfterAStoppedClone`, `TestWorkspaceRefusesARepoFolderThatIsNotAClone`. `planning/contracts/local.md` section 7, "A worktree left by a crash".
+
+### 2026-11-20 · bug · Two AIs on one node shared a task's worktree and a review checkout
+
+- Symptom: when the new holder's create ran before the old holder's removal, the new AI got the old AI's uncommitted file, and the removal then force-deleted the new session's folder.
+- Cause: `CreateTaskWorkspace` and the removals did not know which AI held the folder (`internal/host/workspace.go:84-97` and `:176-192` before the fix); the host relied on N-4 ordering them.
+- Status: resolved in branch `fix/host-workspace-review`. Create and Remove, for tasks and reviews, take the member id of the AI that holds the folder; the host records it after the add, in the worktree's own admin folder (`internal/host/worktree.go:68-85`). A create adds a folder recorded for another AI, or with no record, again; a removal leaves a folder recorded for another AI untouched (`internal/host/worktree.go:114-126`). Tests: `TestWorkspaceTaskHandedToAnotherAIOnTheSameNode`, `TestWorkspaceReviewerChangedOnTheSameNode`, `TestWorkspaceWithoutAHolderRecord`, and the scenario "A task given to another AI of the same node carries over only its commits".
+
+### 2026-11-20 · bug · Host Git commands could wait for ever
+
+- Symptom: workspace commands had no context and no limit, so a fetch that hung held the clone lock until a restart, and ssh could prompt on `/dev/tty`. The host had four runners for its Git and gh commands.
+- Cause: `workspaceGit` (`internal/host/workspace.go:47`), `checkGit` (`internal/host/checks.go:59`), `runIn` (`internal/host/forge.go:26`) and `commandText` (`internal/host/merge.go:176`) before the fix; only the last two took a context.
+- Status: resolved in branch `fix/host-workspace-review`. One runner, `runIn` (`internal/host/command.go:27`), runs every git and gh command of the host within the caller's context and its own limit of 60 minutes for `git clone` and `git push` and 10 minutes for any other, with `GIT_TERMINAL_PROMPT=0`, `GH_PROMPT_DISABLED=1`, `SSH_ASKPASS_REQUIRE=never` and `GCM_INTERACTIVE=never` added to the node's environment, in a new session on Unix and without a console window on Windows, killing the whole session or process tree when it stops (`command_unix.go`, `command_windows.go`). The other three call it; every exported workspace function takes a context. Tests: `TestCommandLimits`, `TestCommandsNeverWaitForAPerson`, `TestCommandStopsAtItsLimit`. `planning/contracts/local.md` section 7, "Commands never wait for a person".
+
+### 2026-11-20 · bug · A task slug went into paths unchecked
+
+- Symptom: the slug `x/../../../../outside` gave a folder outside the project, with a nil error.
+- Cause: `internal/host/workspace.go:87-90` before the fix joined `<num>-<slug>` into paths and the branch name as given.
+- Status: resolved in branch `fix/host-workspace-review`: `taskName` refuses a slug that does not match `^[a-z0-9]+(-[a-z0-9]+)*$` or is longer than 40 characters, and a `num` below 1, before any path or branch is built (`internal/host/workspace.go:113`); `reviewSlot` refuses a `num` below 1 (`internal/host/workspace.go:215`). Test: `TestWorkspaceRefusesSlugsTheHomeCannotProduce`. The open entry for P-1 above covers the decoder.
+
+### 2026-11-20 · bug · The review diff followed the owner's diff settings
+
+- Symptom: with `diff.external` set, the review diff was the external program's output; `textconv` and `color.ui=always` changed it too.
+- Cause: `internal/host/workspace.go:154` before the fix ran `git diff --no-color` only.
+- Status: resolved in branch `fix/host-workspace-review` with `--no-ext-diff --no-textconv --no-color` (`internal/host/workspace.go:155`). Test: `TestWorkspaceReviewDiffIgnoresDiffSettings`.
+
+### 2026-11-20 · bug · A tracked `.solodawn-review.diff` stopped the next review round
+
+- Symptom: when the reviewed commit tracks `.solodawn-review.diff`, the untracked diff of the previous round made `checkout --detach` fail.
+- Cause: `internal/host/workspace.go:161` before the fix.
+- Status: resolved in branch `fix/host-workspace-review` with `git -C review/<num> checkout --force --detach <commit>` (`internal/host/worktree.go:167`); `planning/contracts/local.md` section 7 marks the name as reserved. Test: `TestWorkspaceReviewOfACommitThatTracksTheDiffName`.
+
+### 2026-11-20 · bug · Two spellings of one clone path took two locks
+
+- Symptom: a clone reached through a symbolic link and through its real path had two locks.
+- Cause: `cloneLock` keyed by `filepath.Clean` only; `internal/host/merge.go:36`, `:62` and `:114` lock `m.Repo` and `internal/host/workspace.go:29` locked `filepath.Join(projectDir, "repo")`.
+- Status: resolved in branch `fix/host-workspace-review`: `cloneLock`, the one helper both use, keys by the real path of the longest existing prefix (`internal/host/workspace.go:21-33`), so a clone has one key before and after it exists. A relative and an absolute spelling still differ; the node passes absolute paths. Test: `TestCloneLockFollowsSymbolicLinks`.
+
+### 2026-11-20 · deviation · P-1's task row decoder must refuse a slug the home cannot produce
+
+- Symptom: the host refuses a `slug` that does not match `^[a-z0-9]+(-[a-z0-9]+)*$` or is longer than 40 characters, and a `num` below 1 (`internal/host/workspace.go:113`, `taskName`), because both go into paths and branch names; a task row with such a slug was accepted on the wire.
+- Cause: the decoder of the task row (P-1, `internal/proto`) checked no form of `slug`; `planning/contracts/local.md` section 7, "Slug", gives the only form the home produces.
+- Status: resolved by P-1 on `rebuild`: `proto.Slug` (`internal/proto/slug.go`) and `proto.Decode` refuse such a row (`internal/proto/decode.go:163`). The host keeps its own refusal before it builds a path.
 
 ### 2026-11-20 · deviation · An open chat hid the shell's top bar on a phone from its own styles
 
@@ -711,8 +819,8 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Cause: `plain` (`web/src/lib/compose.ts` before the fix) was recursive and spread the result of the rest of the text into a new list at each mention, so the cost grew with the square of the mentions and the depth with their number.
 - Status: resolved in PR #169: `plain` builds the list with a loop (`web/src/lib/compose.ts:53`), same output. Test in `web/src/lib/compose.test.ts` (2300 mentions give the same parts; 6000 take under ten times what 1500 do).
 
-### 2026-11-20 · deviation · Seven error paths in `internal/store` had no unit tests and two `Scan` checks were unreachable
+### 2026-11-21 · deviation · Seven error paths in `internal/store` had no unit tests and two `Scan` checks were unreachable
 
 - Symptom: `go test -cover ./internal/store/` reported 93.7% of statements, leaving nine error-return blocks uncovered across `inbox.go`, `read.go` and `store.go`.
 - Cause: unit tests did not exercise locked or closed database paths in `Enqueue` (`internal/store/inbox.go:20-22`), `Inbox` (`internal/store/inbox.go:35-37`), `Snapshot` (`internal/store/read.go:20-22`, `:26-28`, `:31-33`), `Snapshot.rows` (`internal/store/read.go:72-74`) and `transaction` (`internal/store/store.go:78-80`); and `Inbox` (`internal/store/inbox.go:44-46` before the fix) and `Snapshot.rows` (`internal/store/read.go:79-81` before the fix) checked `rows.Scan` errors that cannot occur. Both `inbox` and `row` are SQLite `STRICT` tables (`internal/store/schema.sql:1-17`, `:31-44`; `planning/contracts/storage.md` section 1) whose selected columns match the non-nil Go destination types (`INTEGER NOT NULL` and `INTEGER PRIMARY KEY` to `*int64`, `TEXT NOT NULL` to `*string` or `*[]byte`, nullable `TEXT` to `**string` or `*[]byte`), while `modernc.org/sqlite` steps and reads column values inside `rows.Next()`, surfacing any SQLite or I/O failure through `rows.Err()`.
-- Status: resolved on branch `gemini/store-coverage`: removed the two unreachable `rows.Scan` error branches in `internal/store/inbox.go` and `internal/store/read.go`, and added unit tests covering all seven reachable error paths (`TestInboxFailures` in `internal/store/delivery_test.go`, `TestSnapshotAndQueryFailures` in `internal/store/read_test.go`, `TestWriteBeginFailure` in `internal/store/store_test.go`), bringing `internal/store` to 100.0% statement coverage.
+- Status: resolved in #174: removed the two unreachable `rows.Scan` error branches in `internal/store/inbox.go` and `internal/store/read.go`, and added unit tests covering all seven reachable error paths (`TestInboxFailures` in `internal/store/delivery_test.go`, `TestSnapshotAndQueryFailures` in `internal/store/read_test.go`, `TestWriteBeginFailure` in `internal/store/store_test.go`), bringing `internal/store` to 100.0% statement coverage.
