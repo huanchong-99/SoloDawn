@@ -497,6 +497,7 @@ func handleHostLeave(ctx context.Context, h *Host, _ Owner, by string, data json
 	if err := joinRemoveFromHome(ctx, h, jp, p.Group, member, home); err != nil {
 		return nil, err
 	}
+	closeMemberSessions(h, group, member)
 	if err := joinCommitLeft(h, group, p.Agent, member, by); err != nil {
 		return nil, err
 	}
@@ -547,6 +548,9 @@ func joinCommitLeft(h *Host, group, agent, member, by string) error {
 		if err := joinPruneHomeIfEmptyTx(tx.Tx, h, group); err != nil {
 			return err
 		}
+		if agent == "" {
+			return nil
+		}
 		_, err := h.Audit(tx.Tx, AuditRow{
 			Group:  group,
 			Agent:  agent,
@@ -559,12 +563,24 @@ func joinCommitLeft(h *Host, group, agent, member, by string) error {
 	return h.Sessions.Write(run)
 }
 
+func closeMemberSessions(h *Host, group, member string) []Session {
+	sessions := memberSessions(h, group, member)
+	for _, s := range sessions {
+		Runner.Close(h, s.SessionKey)
+	}
+	return sessions
+}
+
+func leaveGoneMember(h *Host, group, member string) {
+	if len(closeMemberSessions(h, group, member)) > 0 && joinCommitLeft(h, group, "", member, "") == nil {
+		joinSyncNow(h, joinStateOf(h))
+	}
+}
+
 func joinEndMemberSessions(tx *Tx, h *Host, group, member string) error {
-	for _, s := range h.Sessions.All() {
-		if s.Group == group && s.Member == member {
-			if err := tx.End(s.SessionKey); err != nil {
-				return err
-			}
+	for _, s := range memberSessions(h, group, member) {
+		if err := tx.End(s.SessionKey); err != nil {
+			return err
 		}
 	}
 	return nil

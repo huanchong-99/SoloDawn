@@ -232,6 +232,18 @@ func (sessionRunner) Answer(h *Host, key SessionKey, ask string, allow bool) err
 	return lp.proc.Answer(ask, allow)
 }
 
+func (sessionRunner) Close(h *Host, key SessionKey) {
+	rt := stateOf(h)
+	for {
+		lp, wasTurn, waitCh := claimSessionClose(rt, key, true)
+		if waitCh == nil {
+			finishClaimedClose(h, rt, key, lp, wasTurn)
+			return
+		}
+		<-waitCh
+	}
+}
+
 func (sessionRunner) Turn(ctx context.Context, h *Host, key SessionKey, text string, turn Turn) error {
 	rt := stateOf(h)
 	for {
@@ -531,7 +543,7 @@ func armIdleLocked(h *Host, rt *runtimePart, lp *liveProc, idle time.Duration) {
 
 func onIdleTimeout(h *Host, rt *runtimePart, key SessionKey, gen uint64) {
 	if lp := claimIdleClose(rt, key, gen); lp != nil {
-		finishWaitingClose(h, rt, lp)
+		finishSessionClose(h, rt, lp, false)
 	}
 }
 
@@ -548,47 +560,54 @@ func claimIdleClose(rt *runtimePart, key SessionKey, gen uint64) *liveProc {
 }
 
 func closeWaitingSession(h *Host, rt *runtimePart, key SessionKey) {
-	lp, busyOrClosing := claimWaitingClose(rt, key)
+	if lp, _, waitCh := claimSessionClose(rt, key, false); waitCh == nil {
+		finishClaimedClose(h, rt, key, lp, false)
+	}
+}
+
+func finishClaimedClose(h *Host, rt *runtimePart, key SessionKey, lp *liveProc, wasTurn bool) {
 	if lp != nil {
-		finishWaitingClose(h, rt, lp)
-		return
-	}
-	if busyOrClosing {
-		return
-	}
-	if s, ok := h.Sessions.Get(key); ok && h.Sessions.Move(key, Waiting, Dormant) == nil {
+		finishSessionClose(h, rt, lp, wasTurn)
+	} else if s, ok := h.Sessions.Get(key); ok && h.Sessions.Move(key, Waiting, Dormant) == nil {
 		rt.notify()
 		sendMemberStatus(context.Background(), h, rt, s.Home, s.Group, s.Member, nil)
 	}
 }
 
-func claimWaitingClose(rt *runtimePart, key SessionKey) (*liveProc, bool) {
+func claimSessionClose(rt *runtimePart, key SessionKey, force bool) (*liveProc, bool, <-chan struct{}) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	if rt.closing[key] {
-		return nil, true
+		return nil, false, rt.changed
 	}
 	lp := rt.procs[key]
 	if lp == nil {
-		return nil, false
+		return nil, false, nil
 	}
-	if lp.turnActive {
-		return nil, true
+	if lp.turnActive && !force {
+		return nil, false, rt.changed
 	}
+	wasTurn := lp.turnActive
+	lp.turnActive = false
 	rt.closing[key] = true
 	stopIdleLocked(lp)
-	return lp, false
+	return lp, wasTurn, nil
 }
 
-func finishWaitingClose(h *Host, rt *runtimePart, lp *liveProc) {
+func finishSessionClose(h *Host, rt *runtimePart, lp *liveProc, wasTurn bool) {
 	if stopProcess(lp) {
 		writeKilledAudit(h, lp.session)
 	}
 	completeWaitingDormant(h, rt, lp)
+	if wasTurn {
+		go Deliver(h, lp.key.Group, lp.key.Member)
+	}
 }
 
 func completeWaitingDormant(h *Host, rt *runtimePart, lp *liveProc) {
-	h.Sessions.Move(lp.key, Waiting, Dormant)
+	if s, ok := h.Sessions.Get(lp.key); ok {
+		h.Sessions.Move(lp.key, s.State, Dormant)
+	}
 	if lp.exitWhy == LoginInvalid {
 		slot := aiSlot{group: lp.key.Group, member: lp.key.Member}
 		finishLoginInvalid(h, rt, lp.session, slot, lp.eventText)

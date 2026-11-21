@@ -36,12 +36,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `host.Host` (`internal/host/host.go:75`) has no `Dir` field yet, so `readHostConfigSQL` and `hostConfig.projectDir` (`internal/host/deliver.go`) read `file` from `pragma_database_list WHERE name = 'main'`.
 - Status: open. `node` setting a `Dir` field on `Host` (HS-0 / N-4) can replace the `pragma_database_list` lookup.
 
-### 2026-11-21 · deviation · Step 17 session and workspace cleanup awaits a close hook from the session runtime
-
-- Symptom: when a `rows` push marks a task `merged`, `cancelled` or reassigned, changes a task's reviewer, or marks a member `gone`, `deliver.go` does not end the session row or remove the task or review worktree.
-- Cause: `planning/flows/agent-turn.md` D17 and G require closing any open CLI process and waiting for its exit (C-6) before ending the session row or deleting its working folder, and `host.Runtime` (`internal/host/host.go:516`) exposes `Turn` and `Answer` only.
-- Status: open, for HS-15 (#187) or a follow-up with the session runtime once a close hook exists (`HS-21` already handles `host.leave`).
-
 ### 2026-11-21 · limitation · `reportWorkspaceFailure` duplicates `member status` assembly from the session runtime
 
 - Symptom: on a task or review workspace Git failure, `reportWorkspaceFailure` (`internal/host/deliver.go:934`) builds `member status` (`turn_interrupted`) by hand and infers `state` (`waiting` when any session of the AI is `waiting`, else `dormant`) instead of sharing the session runtime's status builder.
@@ -128,12 +122,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: if a CLI process emits a duplicate `TurnEnded` for a finished turn and `runProcessLoop` handles that event after `Runner.Turn` has started the next turn on the same `waiting` process, the runtime ends the new turn prematurely, moves the session back to `waiting`, reports `waiting` status, and calls `Deliver` early.
 - Cause: `liveProc` tracks an open turn with a boolean `turnActive` rather than a per-turn identifier (`internal/host/run.go:107`). Once `claimWaitingProc` sets `lp.turnActive = true` for the next turn (`internal/host/run.go:285`), `onProcessTurnEnded` (`internal/host/run.go:458`) passes `finishActiveTurn` (`internal/host/run.go:473`) for the stale event, clears `lp.turnActive` (`internal/host/run.go:479`), and moves the session from `working` to `waiting` (`internal/host/run.go:466`).
 - Status: open, accepted on 2026-11-21 with no product code added per the owner's rule on rare cases. In production the next turn starts only after `Deliver` (`internal/host/run.go:470`) fetches held items from the home, leaving a small window for a duplicate event from the previous turn to arrive that late.
-
-### 2026-11-21 · limitation · Ending a session through `Sessions.End` does not close an open CLI process
-
-- Symptom: when a session ends (`planning/flows/agent-turn.md` section D, step 17) and its caller removes the row with `Sessions.End`, an open `waiting` CLI process for that session stays in `runtimePart.procs` until its `idle_minutes` timer expires or `max_open` evicts a slot.
-- Cause: `Runtime` (`internal/host/host.go:516`) exposes `Turn` and `Answer` only, and `Sessions.End` (`internal/host/session.go:285`) has no hook into the session runtime (`internal/host/run.go`).
-- Status: open, for I-1 or the unit that ends sessions (#186, #187). Adding a close method on `Runtime` (or a hook called by `Sessions.End`) lets step 17 close and wait for the session's process before removing its folder.
 
 ### 2026-11-21 · limitation · The jobs of a group in the home's run loop have no bound
 
@@ -446,6 +434,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-21 · deviation · Step 17 session and workspace cleanup awaits a close hook from the session runtime
+
+- Symptom: when a `rows` push marked a task `merged`, `cancelled` or reassigned, changed a task's reviewer, or marked a member `gone`, `deliver.go` did not end the session row or remove the task or review worktree.
+- Cause: `planning/flows/agent-turn.md` D17 and G require closing any open CLI process and waiting for its exit (C-6) before ending the session row or deleting its working folder, and `host.Runtime` exposed `Turn` and `Answer` only.
+- Status: resolved in unit `HS-23`: `Runtime.Close` (`internal/host/host.go`, `internal/host/run.go`) closes any open CLI process for a session and waits for its exit, and `cleanupGroupState` (`internal/host/deliver.go`) closes and ends obsolete task, review and gone-member sessions and removes obsolete `wt/<num>-<slug>` (plus `DeleteBranch` on `merged` and `PushBranch` on `github` handoff) and `review/<num>` worktrees idempotently across pushes and restarts.
+
+### 2026-11-21 · limitation · Ending a session through `Sessions.End` does not close an open CLI process
+
+- Symptom: when a session ended (`planning/flows/agent-turn.md` section D, step 17) and its caller removed the row with `Sessions.End`, an open CLI process for that session stayed in `runtimePart.procs` until its `idle_minutes` timer expired or `max_open` evicted a slot.
+- Cause: `Runtime` exposed `Turn` and `Answer` only, and `Sessions.End` (`internal/host/session.go`) runs inside a `Store.Write` transaction without calling into the session runtime.
+- Status: resolved in unit `HS-23`: `Runtime.Close` closes and waits for any open process outside `Store.Write`, and both step 17 cleanup (`internal/host/deliver.go`) and `host.leave` (`internal/host/join.go`) call `Runner.Close` before `Sessions.End`.
 
 ### 2026-11-21 · limitation · Background hosted-check polling sends `task cloud` once
 

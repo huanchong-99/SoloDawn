@@ -67,6 +67,8 @@ type routedTarget struct {
 // mu guards in-memory state only and is never held across store, session, row, hold or Git calls.
 type delivery struct {
 	mu            sync.Mutex
+	dbFile        string
+	dbLoaded      bool
 	groups        map[string]*groupSync
 	held          map[aiGroupKey][]verifiedItem
 	merges        map[string][]verifiedItem
@@ -137,6 +139,7 @@ func attachHome(h *Host, device string) {
 		return
 	}
 	d := deliv(h)
+	d.setDBFile(cfg.DBFile)
 	groups := groupsForHome(d, cfg, device)
 	if len(groups) == 0 {
 		return
@@ -316,12 +319,123 @@ func (d *delivery) advanceLiveCursor(group, home string, seq int64) {
 }
 
 func afterGroupState(h *Host, d *delivery, group string) {
+	cleanupGroupState(h, d, group)
 	stepMerges(h, d, group)
 	resumeGroupMerges(h, d, group)
 	resumeGroupHostedChecks(h, d, group)
 	for _, key := range d.heldKeys() {
 		deliverPair(h, d, key)
 	}
+}
+
+func (d *delivery) setDBFile(file string) {
+	d.mu.Lock()
+	d.dbFile, d.dbLoaded = file, true
+	d.mu.Unlock()
+}
+
+func (d *delivery) projectDir(h *Host, group string) string {
+	d.mu.Lock()
+	file, ok := d.dbFile, d.dbLoaded
+	d.mu.Unlock()
+	if !ok {
+		cfg, err := loadHostConfig(h)
+		if err != nil {
+			return ""
+		}
+		d.setDBFile(cfg.DBFile)
+		file = cfg.DBFile
+	}
+	return (hostConfig{DBFile: file}).projectDir(group)
+}
+
+func cleanupGroupState(h *Host, d *delivery, group string) {
+	if d.groupSyncActive(group) {
+		return
+	}
+	cleanupGoneMembers(h, group)
+	cleanupTaskSessions(h, group)
+	pDir := d.projectDir(h, group)
+	if !hasGitClone(pDir) {
+		return
+	}
+	grp, _ := lookupRow[proto.GroupRow](h, group, "group", group)
+	for _, task := range liveTasks(h, group) {
+		cleanupTaskFolder(context.Background(), h, group, pDir, grp.Forge == "github", task)
+		cleanupReviewFolder(context.Background(), h, group, pDir, task)
+	}
+}
+
+func cleanupGoneMembers(h *Host, group string) {
+	for _, raw := range h.Rows.Of(group, "member") {
+		var row proto.GoneRow
+		if proto.Decode(raw, &row) == nil && row.Gone {
+			leaveGoneMember(h, group, row.ID)
+		}
+	}
+}
+
+func cleanupTaskSessions(h *Host, group string) {
+	for _, s := range h.Sessions.All() {
+		if s.Group == group && s.Task != "" && sessionTaskObsolete(h, group, s) {
+			Runner.Close(h, s.SessionKey)
+			h.Sessions.End(s.SessionKey)
+		}
+	}
+}
+
+func memberIsGone(h *Host, group, member string) bool {
+	var row proto.GoneRow
+	raw, ok := h.Rows.Get(group, "member", member)
+	return ok && proto.Decode(raw, &row) == nil && row.Gone
+}
+
+func sessionTaskObsolete(h *Host, group string, s Session) bool {
+	task, ok := lookupTaskRow(h, group, s.Task)
+	role := task.Reviewer
+	if s.Kind == TaskSession {
+		role = task.Assignee
+	}
+	return ok && (task.State == "merged" || task.State == "cancelled" || role != s.Member)
+}
+
+func cleanupTaskFolder(ctx context.Context, h *Host, group, pDir string, remote bool, task proto.TaskRow) {
+	name := strconv.Itoa(task.Num) + "-" + string(task.Slug)
+	wtPath := filepath.Join(pDir, "wt", name)
+	if task.State == "merged" {
+		if pathExists(wtPath) {
+			RemoveTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), newSlot(pDir, "wt", name, "", "").holder(ctx), TaskMerged)
+		}
+		(ReviewedMerge{Repo: filepath.Join(pDir, "repo"), Branch: "task/" + name, Commit: task.Commit}).DeleteBranch(ctx)
+	} else if pathExists(wtPath) {
+		releaseUnmergedWorktree(ctx, h, group, pDir, remote, task, name, wtPath)
+	}
+}
+
+func releaseUnmergedWorktree(ctx context.Context, h *Host, group, pDir string, remote bool, task proto.TaskRow, name, wtPath string) {
+	holder := newSlot(pDir, "wt", name, "", "").holder(ctx)
+	if task.State == "cancelled" {
+		RemoveTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), holder, TaskCancelled)
+	} else if holder != task.Assignee || memberIsGone(h, group, holder) {
+		if remote && holder != "" {
+			(TaskForge{Worktree: wtPath, Branch: "task/" + name}).PushBranch(ctx)
+		}
+		RemoveTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), holder, TaskGivenAway)
+	}
+}
+
+func cleanupReviewFolder(ctx context.Context, h *Host, group, pDir string, task proto.TaskRow) {
+	numStr := strconv.Itoa(task.Num)
+	if pathExists(filepath.Join(pDir, "review", numStr)) {
+		if hld := newSlot(pDir, "review", numStr, "", "").holder(ctx); task.State == "merged" || task.State == "cancelled" || hld != task.Reviewer || memberIsGone(h, group, hld) {
+			RemoveReviewWorkspace(ctx, pDir, task.Num, hld)
+		}
+	}
+}
+
+func pathExists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
 }
 
 type rawInboxFrame struct {

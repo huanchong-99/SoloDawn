@@ -256,6 +256,8 @@ func (r *approveFakeRunner) Answer(h *Host, key SessionKey, ask string, allow bo
 	return nil
 }
 
+func (r *approveFakeRunner) Close(*Host, SessionKey) {}
+
 func (r *approveFakeRunner) answerCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()

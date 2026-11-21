@@ -1954,3 +1954,135 @@ func checkTurnFailurePaths(t *testing.T) {
 		t.Fatal("expected error when setting table is dropped")
 	}
 }
+
+func TestRunnerCloseLifecycleAndConcurrency(t *testing.T) {
+	saveRuntimeGlobals(t)
+	h, rh, drv, _ := setupRunEnv(t)
+	var delivered atomic.Int32
+	// Single reader: checkRunnerCloseActiveTurn.
+	deliveredCh := make(chan struct{}, 8)
+	Deliver = func(*Host, string, string) {
+		delivered.Add(1)
+		deliveredCh <- struct{}{}
+	}
+	checkRunnerCloseNoopAndWaiting(t, h, drv, &delivered)
+	checkRunnerCloseActiveTurn(t, h, rh, drv, deliveredCh)
+	checkConcurrentAndKilledClose(t)
+}
+
+func checkRunnerCloseNoopAndWaiting(t *testing.T, h *Host, drv *fakeDriver, delivered *atomic.Int32) {
+	t.Helper()
+	Runner.Close(h, SessionKey{Group: runGroup1, Member: "missing"})
+	kStray := SessionKey{Group: runGroup1, Member: "m-stray"}
+	h.Sessions.Create(makeRunSession(kStray, GroupSession, "repo"))
+	Runner.Close(h, kStray)
+	h.Sessions.Move(kStray, Dormant, Working)
+	h.Sessions.Move(kStray, Working, Waiting)
+	Runner.Close(h, kStray)
+	if seamState(t, h.Sessions, kStray) != Dormant {
+		t.Fatal("expected stray Waiting session to move Dormant")
+	}
+
+	kWait := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
+	h.Sessions.Create(makeRunSession(kWait, TaskSession, "wt/1-a"))
+	if err := Runner.Turn(t.Context(), h, kWait, "w1", Turn{Kind: ItemsTurn}); err != nil {
+		t.Fatal(err)
+	}
+	pWait := drv.lastProc()
+	pWait.emit(Event{Kind: TurnEnded, Status: "completed"})
+	waitForState(t, h, kWait, Waiting)
+	delivered.Store(0)
+	Runner.Close(h, kWait)
+	requireExitedNow(t, pWait.exitedCh, "waiting CLI process")
+	if seamState(t, h.Sessions, kWait) != Dormant || delivered.Load() != 0 {
+		t.Fatalf("unexpected post-close waiting state=%s delivered=%d", seamState(t, h.Sessions, kWait), delivered.Load())
+	}
+}
+
+func checkRunnerCloseActiveTurn(t *testing.T, h *Host, rh *runHome, drv *fakeDriver, deliveredCh <-chan struct{}) {
+	t.Helper()
+	kWork := SessionKey{Group: runGroup1, Member: runAI2, Task: runTask2}
+	h.Sessions.Create(makeRunSession(kWork, TaskSession, "wt/2-b"))
+	if err := Runner.Turn(t.Context(), h, kWork, "w2", Turn{Kind: ItemsTurn}); err != nil {
+		t.Fatal(err)
+	}
+	pWork := drv.lastProc()
+	beforeCmds := len(rh.snapshotCmds())
+	Runner.Close(h, kWork)
+	requireExitedNow(t, pWork.exitedCh, "working CLI process")
+	<-deliveredCh
+	for _, c := range rh.snapshotCmds()[beforeCmds:] {
+		if c.payload["op"] == "fail" || c.payload["event"] != nil {
+			t.Fatalf("unexpected crash/fail command on intentional Close: %v", c.payload)
+		}
+	}
+}
+
+func requireExitedNow(t *testing.T, exited <-chan struct{}, label string) {
+	t.Helper()
+	select {
+	case <-exited:
+	default:
+		t.Fatalf("Runner.Close returned before %s exited", label)
+	}
+}
+
+func checkConcurrentAndKilledClose(t *testing.T) {
+	t.Helper()
+	synctest.Test(t, func(t *testing.T) {
+		h, _, drv, _ := setupRunEnv(t)
+		kActive := SessionKey{Group: runGroup1, Member: runAI1}
+		h.Sessions.Create(makeRunSession(kActive, GroupSession, "repo"))
+		var gate chan struct{}
+		drv.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
+			p := newFakeProc(ctx, l)
+			p.ignoreClose = true
+			gate = p.exitedCh
+			return p, nil
+		}
+		if err := Runner.Turn(t.Context(), h, kActive, "hang", Turn{Kind: ItemsTurn}); err != nil {
+			t.Fatal(err)
+		}
+		// Non-force closeWaitingSession leaves an active turn untouched.
+		closeWaitingSession(h, stateOf(h), kActive)
+		if seamState(t, h.Sessions, kActive) != Working {
+			t.Fatal("closeWaitingSession disturbed active turn")
+		}
+		h.Sessions.End(kActive)
+
+		// Two concurrent Runner.Close calls wait for the 10s kill timer and record AuditKilled once.
+		done1, done2 := make(chan struct{}), make(chan struct{})
+		go func() { Runner.Close(h, kActive); close(done1) }()
+		synctest.Wait()
+		go func() { Runner.Close(h, kActive); close(done2) }()
+		synctest.Wait()
+		select {
+		case <-done2:
+			t.Fatal("concurrent Close returned while process was still closing")
+		default:
+		}
+		time.Sleep(stopSeconds * time.Second)
+		synctest.Wait()
+		<-gate
+		<-done1
+		<-done2
+		if countAuditWhat(t, h.Store, AuditKilled) != 1 {
+			t.Fatalf("expected 1 AuditKilled row, got %d", countAuditWhat(t, h.Store, AuditKilled))
+		}
+	})
+}
+
+func countAuditWhat(t *testing.T, db *store.Store, what string) int {
+	t.Helper()
+	var n int
+	seamSQLScan(t, db, &n, "SELECT count(*) FROM audit WHERE what = ?", what)
+	return n
+}
+
+func seamSQLScan(t *testing.T, db *store.Store, dest any, q string, args ...any) {
+	t.Helper()
+	read := func(tx *store.Tx) error { return tx.QueryRow(q, args...).Scan(dest) }
+	if err := db.Write(read); err != nil {
+		t.Fatal(err)
+	}
+}
