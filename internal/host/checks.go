@@ -81,14 +81,11 @@ func runGroupChecks(ctx context.Context, dir string, group proto.GroupRow) []pro
 }
 
 func checkGit(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(string(exit.Stderr)))
+	out, stderr, err := runIn(ctx, dir, "git", args...)
+	if _, ok := errors.AsType[*exec.ExitError](err); ok {
+		return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr))
 	}
-	return string(out), err
+	return out, err
 }
 
 // cleanCheckHead refuses a tree whose status is not empty (local.md 7,
@@ -147,11 +144,9 @@ func clearAssumeUnchanged(ctx context.Context, dir string, paths []string) error
 	if len(paths) == 0 {
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, "git", "update-index", "--no-assume-unchanged", "-z", "--stdin")
-	cmd.Dir = dir
-	cmd.Stdin = strings.NewReader(strings.Join(paths, "\x00") + "\x00")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git update-index: %w: %s", err, strings.TrimSpace(string(out)))
+	stdin := strings.NewReader(strings.Join(paths, "\x00") + "\x00")
+	if out, stderr, err := runInput(ctx, dir, stdin, "git", "update-index", "--no-assume-unchanged", "-z", "--stdin"); err != nil {
+		return fmt.Errorf("git update-index: %w: %s", err, strings.TrimSpace(out+stderr))
 	}
 	return nil
 }

@@ -712,21 +712,18 @@ describe('mock connection', () => {
 });
 
 describe('inbox', () => {
-  it('carries items whose envelope names the rows beside it', () => {
+  it('carries plain items that name the rows beside them', () => {
     const { items } = p.decode(p.Inbox, goldens.inbox);
-    expect(items.map((item) => Object.keys(item))).toEqual([
-      ['env', 'msg', 'task', 'cause'],
-      ['env', 'task'],
+    expect(items.map((entry) => Object.keys(entry))).toEqual([
+      ['item', 'msg', 'task'],
+      ['item', 'task'],
     ]);
-    for (const { env, msg, task } of items) {
-      const item = p.decode(p.Item, env.p);
+    for (const { item, msg, task } of items) {
       expect(item.task).toBe(task!.id);
       expect(item.msg).toBe(msg?.id);
     }
-    const first = p.decode(p.Item, items[0].env.p);
-    expect(first).toStrictEqual(JSON.parse(goldens['item-assign']));
-    expect(p.decode(p.Act, items[0].cause!.p).action).toBe('confirm');
-    expect(p.decode(p.Ack, goldens.ack).item).toBe(first.item);
+    expect(items[0].item).toStrictEqual(JSON.parse(goldens['item-assign']));
+    expect(p.decode(p.Ack, goldens.ack).item).toBe(items[0].item.item);
   });
 
   it.each(examples.filter((name) => name.startsWith('item-')))('%s is named by its why', (name) => {
