@@ -209,8 +209,6 @@ func TestCommandExamplesAreNamedByWhatSelectsThem(t *testing.T) {
 			want = "post-" + fields["kind"].(string)
 		case "act":
 			want = "act-" + fields["action"].(string)
-		case "item":
-			want = "item-" + fields["why"].(string)
 		case "jump", "note", "forget", "ack", "inbox":
 			want = kind
 		case "host.join", "host.leave", "host.offline", "host.online", "settings.set", "pair.browser", "agent.set", "perm.set",

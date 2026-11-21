@@ -80,8 +80,8 @@ func TestAuditRowsWithoutAnItem(t *testing.T) {
 	if got := seamRecord(t, h); got != want {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}
-	whats := []string{AuditDelivered, AuditRefused, AuditRequested, AuditApproval, AuditTakeover, AuditHandback, AuditMerge, AuditSetting}
-	if got := strings.Join(whats, " "); got != "delivered refused requested approval takeover handback merge setting" {
+	whats := []string{AuditDelivered, AuditRefused, AuditRequested, AuditApproval, AuditTakeover, AuditHandback, AuditMerge, AuditSetting, AuditKilled}
+	if got := strings.Join(whats, " "); got != "delivered refused requested approval takeover handback merge setting killed" {
 		t.Fatalf("the constants spell %q, not the values of contracts/storage.md section 3", got)
 	}
 }
