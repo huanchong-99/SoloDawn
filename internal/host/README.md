@@ -121,3 +121,12 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 - `CreateTaskWorkspace(ctx, projectDir, num, slug, ai, base, remote)` and `RemoveTaskWorkspace(ctx, projectDir, num, slug, ai, why)` handle `wt/<num>-<slug>`. `PrepareReviewWorkspace(ctx, projectDir, num, ai, commit, base, remote)` and `RemoveReviewWorkspace(ctx, projectDir, num, ai)` handle `review/<num>`. `ai` is the member id of the AI that holds the folder. A create reuses only a worktree recorded for the same AI, and a removal leaves one recorded for another AI untouched.
 - A create works out from the branches whether a task is new, taken over or returning; there is no takeover flag. A slug the home cannot produce, or a `num` below 1, is refused.
 - `cloneLock(repo)` is the one lock per clone, keyed by its real path. Workspace functions and `ReviewedMerge` take it.
+
+# Task and review tools (HS-10)
+
+`tools_task.go` registers `start_task`, `push_branch`, `run_checks`, `submit_task` and `submit_review` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1 and 5; [drivers.md](../../planning/contracts/drivers.md), section 2).
+
+- `start_task` is listed to working AIs' group sessions (`c.Kind == GroupSession && !c.Secretary`); `push_branch`, `run_checks` and `submit_task` to task sessions above level 1 (`c.Kind == TaskSession && c.Level > 1`); `submit_review` to review sessions (`c.Kind == ReviewSession`).
+- `start_task`, `submit_task` and `submit_review` check outbound text arguments (`title`, `plan`, `summary`, review item `text` and `file`) with `CheckOutboundSecret` before running Git commands or signing commands for the home.
+- `push_branch` and `submit_task` derive the task branch strictly from `num` and `slug` (`task/<num>-<slug>` via `taskName`), never from `TaskRow.Branch`.
+- With `forge == "github"`, `submit_task` starts `TaskForge.WaitHostedChecks` in a background goroutine tracked per host in `Part[tskPart](h)` (cancelling any earlier poll for the same task) and sends `task cloud` when hosted checks settle.
