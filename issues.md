@@ -30,6 +30,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `planning/flows/agent-turn.md` step 5.1 places `max_open` (closing the longest-`waiting` session, or waiting when every open session is `working` or `takeover`) in the session runtime (`HS-15`, #187, `tryReserveSlot`), so delivery does not duplicate it; `Deliver` (`deliverNow` in `internal/host/deliver.go`) walks all held AI keys on each wake so a freed slot reaches waiting AIs.
 - Status: open, coordinated between HS-13 (#186) and HS-15 (#187).
 
+### 2026-11-21 · limitation · Reassigning a task's assignee also marks a reviewer's pending approval card `reassigned`
+
+- Symptom: if a task's assignee changes while the task's reviewer has a pending approval card on that task, the reviewer's card becomes `reassigned` along with the old assignee's cards, so it can no longer be approved or denied and the reviewer's waiting CLI receives no decision.
+- Cause: row 17 allows both the assignee and the reviewer to post approval cards on the task (`internal/home/machine.go:224`), while row 11 sets `Effects.Cards = "reassigned"` for all pending approval cards of the task whenever `Assignee` changes (`internal/home/machine.go:617`; `planning/contracts/task-machine.md` row 11) without distinguishing who asked. Hitting this requires a review session asking for approval and an assignee reassignment while that request is open.
+- Status: open, accepted as a rare limitation by the coordinator's decision of 2026-11-21 (#184).
+
 ### 2026-11-21 · limitation · A member's `limited` state from `login_invalid` ends at its next completed turn, not at `agent.set`
 
 - Symptom: after `login_invalid` puts an AI member into `limited`, fixing sign-in and sending `agent.set` sets `login_ok` back to `true` in `host.info`, while the group still shows the member as `limited` until the next item arrives and its turn completes.

@@ -172,8 +172,9 @@ The task commands (`cmd_task.go`) take the names that start with `tsk`, their te
 test functions start with `TestTaskCmd`. The posts of HM-6 take the names that start with `post`,
 their tests too, and their test functions start with `TestPost`; the notes and `forget` take the
 names that start with `note`, their tests too, and their test functions start with `TestNote`.
-Device-log events (`ev_device.go`) take the names that start with `dev`, and their tests start
-with `TestDevice` and `dev`.
+The cards take the names that start with `card`, their tests too, and their test functions start
+with `TestCard`. Device-log events (`ev_device.go`) take the names that start with `dev`, and their
+tests start with `TestDevice` and `dev`.
 
 ## The run loop
 
@@ -519,6 +520,29 @@ this:
   `msg` whose `kind` is not `review` is `conflict`; otherwise a `GoneRow` (`gone: true`) replaces
   it.
 
+## Cards
+
+`cmd_card.go` holds `post` of kinds `approval` and `decision`, and `act` `approve`, `deny` and
+`choose` on them ([commands](../../planning/contracts/commands.md) 1.3 and 1.4;
+[messages](../../planning/contracts/messages.md) 2.3, 2.4, 3.2 and 3.3;
+[task machine](../../planning/contracts/task-machine.md) rows 17 to 20), under `post/approval`,
+`post/decision`, `act/approve`, `act/deny` and `act/choose`. It reads a task's pending cards with
+HM-9's `tskPending`, and checks mentions with HM-6's `postMentions`. Where the contracts are silent:
+
+- **Post.** Both card kinds may be posted in the main line (`thread` `null`, with `body.task` `""`
+  for `approval` and omitted for `decision`) or in a task's thread (`thread` equal to `body.task`).
+  Duplicate mentions are `bad_request`; mentioning a non-member is `conflict`. For a card on a
+  task, a missing task is `not_found`, and `Step` (`OnApproval` or `OnDecision`, with
+  `BySecretary` for the secretary and `ByAI` for any other AI) runs before the duplicate-id check,
+  so `forbidden` and `paused` precede `conflict` on a taken `n`. A card in a thread advances
+  `task.Thread` (`count` + 1, `last.text` cut at 200 runes) and writes `[card, task]`.
+- **Act.** Empty `arg` or `text` strings are rejected as `bad_request` like unknown fields; a
+  missing message is `not_found`, and an action on the wrong message kind is `bad_request`. Cards
+  naming a task run `Step` (`OnApprove` or `OnChoose`) with `ByPerson`, writing `[card, task]`
+  only when `Step` changed the task row and `[card]` otherwise. Main-line cards update the card row
+  and queue `decided` for the asking AI directly. `decided` items are queued only for AIs still in
+  `State.AIs`.
+
 ## Device-log events
 
 `ev_device.go` registers `Events["device"]`, which receives a `[]proto.DeviceRow` slice accepted by
@@ -531,9 +555,9 @@ served and unserved.
 ## Known limitations
 
 - The table of commands holds the groups, members, briefs, the task commands of HM-9, the four
-  kinds of `post` of HM-6, `note` and `forget`, and no node starts a loop yet: the remaining command
-  files (including thread round counting in HM-13 and the wake-up cap in HM-7) and the wiring of the
-  node are separate units
+  kinds of `post` of HM-6, `note` and `forget`, and the cards, and no node starts a loop yet: the
+  remaining command files (including thread round counting in HM-13 and the wake-up cap in HM-7)
+  and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
@@ -591,6 +615,12 @@ shared `mentions` rule and `UnexpectedNulls` on the rows written. `features/home
 acceptance tests A2.1 (message and item push across connected browsers and a host) and A5.14
 (retention keeping notes and review messages, and `forget` replacing them with `gone` markers) on
 `StartLoop` over an in-memory store.
+
+`cmd_card_test.go` exercises `post/approval`, `post/decision`, `act/approve`, `act/deny` and
+`act/choose` through `Commands.Apply` with fakes of `Receipts` and `Disk`, covering main-line and
+task cards, wait recomputation and refusals, and `cmd_card_internal_test.go` covers `tskPending` on card rows,
+`cardChoiceOK`, `cardPoster` and `cardItems`. `features/home_card.feature` holds the home half of
+acceptance tests A4.1 and A4.2, decision priority and free-text override.
 
 `ev_device_test.go` covers every branch and boundary of `Events["device"]`, including ignored event
 types, empty and non-owner slices, version boundaries and online/offline `GroupsChanged` transitions.
