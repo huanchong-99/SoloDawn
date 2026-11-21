@@ -1,6 +1,7 @@
 Feature: Node
-  The node assembles the SoloDawn runtime. So far it only carries the build version;
-  a build without a release version reports "dev".
+  The node assembles the SoloDawn runtime: data directory, single-instance
+  local socket, embedded local web client and /rv signalling handler, MCP
+  shim, and multi-node fallback when default ports are already bound.
 
   Scenario: A development build reports its version
     When I run "solodawn version"
@@ -9,3 +10,8 @@ Feature: Node
   Scenario: The standalone service refuses a shared signalling and relay name
     When I run "solodawn rendezvous --domain localhost --turn-domain localhost"
     Then it prints "relay needs a distinct --turn-domain" on stderr and exits with code 1
+
+  Scenario: Two nodes start on one machine and answer status on their local sockets
+    Given two foreground nodes running in separate home directories on this machine
+    When the owner runs "solodawn status" in each node's environment
+    Then each status prints its node's version and distinct device fingerprint

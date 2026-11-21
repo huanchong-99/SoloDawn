@@ -6,7 +6,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"maps"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -57,13 +60,13 @@ type SessionConfig struct {
 // Lock order: cmdMu -> Store.Write; sesConn.sendMu -> mu -> Logs.mu; mu is a
 // leaf lock guarding conns and sesConn.welcomed.
 type Sessions struct {
-	Requests  map[string]RequestHandler
-	Pushes    map[string]PushHandler
-	Commands  map[string]CmdFunc
-	cfg       SessionConfig
-	cmdMu, mu sync.Mutex
-	inflight  map[string]chan struct{}
-	conns     map[*sesConn]bool
+	Requests          map[string]RequestHandler
+	Pushes            map[string]PushHandler
+	Commands          map[string]CmdFunc
+	cfg               SessionConfig
+	homeMu, cmdMu, mu sync.Mutex
+	inflight          map[string]chan struct{}
+	conns             map[*sesConn]bool
 }
 
 type sesConn struct {
@@ -113,10 +116,7 @@ func sesDefaultConfig(cfg SessionConfig) SessionConfig {
 // Serve runs the ctl session of raw until ctx ends or raw closes.
 func (s *Sessions) Serve(ctx context.Context, device string, paired bool, raw Ctl) {
 	c := &sesConn{device: device, paired: paired, raw: raw, staging: map[string]*identity.Log{}}
-	c.home = s.cfg.Home.Attach(device, c)
-	s.mu.Lock()
-	s.conns[c] = true
-	s.mu.Unlock()
+	s.attachHome(c)
 	defer s.sesLeave(c)
 	for {
 		data, err := raw.Read(ctx)
@@ -127,12 +127,68 @@ func (s *Sessions) Serve(ctx context.Context, device string, paired bool, raw Ct
 	}
 }
 
+func (s *Sessions) attachHome(c *sesConn) {
+	s.homeMu.Lock()
+	defer s.homeMu.Unlock()
+	c.home = s.homeLoop().Attach(c.device, c)
+	s.mu.Lock()
+	s.conns[c] = true
+	s.mu.Unlock()
+}
+
 func (s *Sessions) sesLeave(c *sesConn) {
+	s.homeMu.Lock()
 	s.mu.Lock()
 	delete(s.conns, c)
+	loop, hc := s.cfg.Home, c.home
 	s.mu.Unlock()
-	s.cfg.Home.Detach(c.home)
+	s.homeMu.Unlock()
+	loop.Detach(hc)
 	c.raw.Close()
+}
+
+func (s *Sessions) homeLoop() *home.Loop {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg.Home
+}
+
+func (s *Sessions) sesHome(c *sesConn) (*home.Loop, *home.Conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg.Home, c.home
+}
+
+// SetHome switches the session hub and all open inbound connections to loop.
+func (s *Sessions) SetHome(loop *home.Loop) {
+	s.homeMu.Lock()
+	defer s.homeMu.Unlock()
+	s.mu.Lock()
+	conns := slices.Collect(maps.Keys(s.conns))
+	s.mu.Unlock()
+	attached := make([]*home.Conn, len(conns))
+	for i, c := range conns {
+		attached[i] = loop.Attach(c.device, c)
+	}
+	s.mu.Lock()
+	s.cfg.Home = loop
+	for i, c := range conns {
+		c.home = attached[i]
+	}
+	s.mu.Unlock()
+}
+
+func (s *Sessions) statusLines() []string {
+	s.mu.Lock()
+	var lines []string
+	for c := range s.conns {
+		if c.welcomed {
+			lines = append(lines, fmt.Sprintf("connection %s %s", c.device, cmp.Or(c.raw.Path(), "unknown")))
+		}
+	}
+	s.mu.Unlock()
+	slices.Sort(lines)
+	return lines
 }
 
 func (s *Sessions) sesDispatch(ctx context.Context, c *sesConn, data json.RawMessage) {
@@ -165,14 +221,16 @@ func (s *Sessions) sesPush(ctx context.Context, c *sesConn, typ string, data jso
 		return
 	}
 	if h := s.Pushes[typ]; h != nil {
-		h(ctx, c.home, c.raw, c.device, data)
+		_, hc := s.sesHome(c)
+		h(ctx, hc, c.raw, c.device, data)
 	}
 }
 
 func (s *Sessions) sesAck(c *sesConn, data json.RawMessage) {
 	var ack proto.Ack
 	if proto.Decode(data, &ack) == nil {
-		s.cfg.Home.Ack(c.home, ack)
+		loop, hc := s.sesHome(c)
+		loop.Ack(hc, ack)
 	}
 }
 
@@ -198,7 +256,8 @@ func (s *Sessions) sesRunRequest(ctx context.Context, c *sesConn, id int64, typ 
 		c.sendErr(id, "bad_request", "unknown ctl request")
 		return
 	}
-	res, err := h.Run(ctx, c.home, c.raw, c.device, id, data)
+	_, hc := s.sesHome(c)
+	res, err := h.Run(ctx, hc, c.raw, c.device, id, data)
 	if !h.Async {
 		s.sesReply(c, id, h.Type, res, err)
 	}
@@ -230,10 +289,11 @@ func (s *Sessions) sesHello(ctx context.Context, c *sesConn, id int64, data json
 		w.Groups = gs
 		return sesWelcome{welcome: w, onSent: onSent, sent: sent}
 	}
-	s.cfg.Home.Welcome(c.home, wrap)
-	sesWaitWelcome(ctx, sent, c.home.Gone())
+	loop, hc := s.sesHome(c)
+	loop.Welcome(hc, wrap)
+	sesWaitWelcome(ctx, sent, hc.Gone())
 	if h.Kind == "host" {
-		s.cfg.Home.Inbox(c.home)
+		loop.Inbox(hc)
 	}
 }
 
@@ -288,7 +348,8 @@ func (s *Sessions) sesCmd(ctx context.Context, c *sesConn, id int64, data json.R
 		go s.sesHostCmd(ctx, c, id, req.Env)
 		return
 	}
-	s.cfg.Home.Cmd(c.home, id, req.Env)
+	loop, hc := s.sesHome(c)
+	loop.Cmd(hc, id, req.Env)
 }
 
 func sesIsHostCmd(payload string) bool {

@@ -10,8 +10,10 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/node"
 )
 
+var exitProc = os.Exit
+
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	exitProc(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
 func init() {
@@ -26,6 +28,9 @@ func init() {
 	node.Subcommands["node"] = noArgs(func(io.Writer) error {
 		return node.Foreground()
 	})
+	node.Subcommands["mcp"] = func(args []string, stdout, stderr io.Writer) int {
+		return node.MCP(args, os.Stdin, stdout, stderr)
+	}
 	for _, cmd := range []string{"status", "pair-browser", "open"} {
 		node.Subcommands[cmd] = noArgs(node.Command{Cmd: cmd}.Run)
 	}

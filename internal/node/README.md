@@ -1,5 +1,5 @@
 ---
-description: 'Assembly of the SoloDawn node: data directory, single-instance local socket, CLI subcommand dispatch, start-at-login services, verified self-update, verified device logs, the ctl session hub, the in-process local link between host and home, and the nodetest multi-node harness.'
+description: 'Assembly of the SoloDawn node: foreground runtime, data directory, single-instance local socket, CLI subcommand dispatch and MCP shim, start-at-login services, verified self-update with turn hold and in-place restart, verified device logs, the ctl session hub, the in-process local link between host and home, and the nodetest multi-node harness.'
 kind: reference
 ---
 
@@ -9,8 +9,9 @@ kind: reference
 
 `internal/node` assembles the components of a SoloDawn node ([architecture](../../planning/architecture.md), section 8):
 
+- `node.go` and `proc_*.go`: `Foreground()` runtime assembly (`openNode`, `runNode`), `logs/node.log` rotation at 10 MiB (keeping `.1`), `device.key` and `node.db` initialization, `home.StartLoop`, `host.Host` + `ServeMCP` on the local socket, `AttachLocal`, `Logs` + `Sessions`, `OnAdopt` home-loop recreation and rendezvous watch updates, `peer.Peer`, embedded local web UI (`localhost:47800` with `:0` fallback and `Host` check) + `/rv` local signalling path, persistent remote rendezvous loops (`watch`, `presence`, `quota`), and `Updater` turn hold (`updateGate`) and in-place restart (`exec` on Unix, `os.StartProcess` on Windows) ([local](../../planning/contracts/local.md), sections 1-3, 9 and 10).
 - `dir.go` and `socket*.go`: per-user data directory, exclusive lock on `lock`, and owner-only local Unix socket (`sock`) carrying local CLI commands and MCP sessions ([local](../../planning/contracts/local.md), sections 2 and 3).
-- `cmd.go`: the `Subcommands` table and local command exchange.
+- `cmd.go`: the `Subcommands` table, `MCP` (`solodawn mcp --token <t>`), and local command exchange (`solodawn pair` auto-starts a detached background node when `sock` is absent).
 - `service_*.go`: start-at-login registration on macOS, Linux and Windows ([local](../../planning/contracts/local.md), section 1).
 - `update.go`: `Updater` for SHA-256-verified self-update outside running turns and takeovers ([local](../../planning/contracts/local.md), section 9).
 - `rendezvous.go`: standalone signalling, static web assets and ICE service.
@@ -26,7 +27,8 @@ kind: reference
 | locate the user's data directory | `DataDir()` ([local.md](../../planning/contracts/local.md) section 2) |
 | hold the single-node lock and bind `sock` | `ListenLocal(dir)`, `(*Local).Close()` ([local.md](../../planning/contracts/local.md) section 3) |
 | read the first line of a local socket client | `AcceptOpening(conn)`, `ReadOpening(r)`, `ReadPair(line, owner, configured)` |
-| register or send a local CLI subcommand | `Subcommands`, `Command.Run(stdout)` |
+| register or send a local CLI subcommand | `Subcommands`, `Command.Run(stdout)`, `MCP(args, stdin, stdout, stderr)` |
+| run the assembled foreground node | `Foreground()` ([local.md](../../planning/contracts/local.md) sections 1-3, 9, 10) |
 | install or remove start-at-login | `InstallService`, `RemoveService` (`service_*.go`, [local.md](../../planning/contracts/local.md) section 1) |
 | check and apply signed-sum release updates | `(*Updater).Check(ctx, now)`, `(*Updater).Apply()` ([local.md](../../planning/contracts/local.md) section 9) |
 | run the standalone rendezvous and static web service | `Rendezvous(opts)` |
@@ -56,10 +58,11 @@ Populate the maps on `*Sessions` before accepting connections:
 | `Pushes` | `ctl` pushes after enrolment beyond `devlog` and `ack` (`pty.resize`) |
 | `Commands` | node-level host commands (`pair.browser`, `settings.set`); other host commands (`to` set in payload) fall back to `host.Surface` |
 
-`SessionConfig.OnAdopt` is invoked once with the adopted owner's user id when an unowned node persists its first valid adoption log (`dvlAdopt`), before forwarding `devlog` frames. `N-4` uses `OnAdopt` to restart `home.Loop` with the adopted `Owner` and start watching owner devices on the rendezvous.
+`SessionConfig.OnAdopt` is invoked once with the adopted owner's user id when an unowned node persists its first valid adoption log (`dvlAdopt`), before forwarding `devlog` frames. `nodeRuntime.onAdopt` detaches the old `LocalLink`, starts a new `home.Loop` with `Owner: owner`, calls `(*Sessions).SetHome(newLoop)` so open inbound `ctl` sessions re-attach to the new loop, closes the old loop, attaches a new `LocalLink`, and sends `watch` for the owner's devices on remote rendezvous connections.
 
 ## Concurrency and lock order
 
+- `nodeRuntime.homeMu` serializes `OnAdopt` home-loop swaps and `Close`; `Sessions.homeMu` serializes `attachHome`, `sesLeave` and `SetHome` above `Sessions.mu`; `nodeRuntime.updMu` serializes `Updater.Check` and `Updater.Apply` above `updateGate.mu` and `nodeRuntime.mu`; `nodeRuntime.mu` is a leaf lock guarding `rvPaths`, `rvStop`, `presence`, `relay`, `updStatus` and `restartBin`.
 - `Sessions.cmdMu` guards `inflight` (keyed by signer and nonce) and receipt reads/writes in `Store.Write`; host command handlers run on their own goroutines outside `cmdMu`, and duplicate `(signer, nonce)` requests wait on the in-flight channel before reading the stored receipt.
 - `Logs.writeMu` serializes device-log mutations and is acquired before `Store.Write` and before `Logs.mu`; `dvlNotify` runs after `writeMu` is released.
 - `Logs.mu` (`sync.RWMutex`) guards `owner`, `log` and `onChange`; it is a leaf lock never held across `Store.Write`, `home.Loop` calls, `OnAdopt` or network writes.
@@ -68,17 +71,13 @@ Populate the maps on `*Sessions` before accepting connections:
 
 ## Known limitations
 
-- `sync` and `fetch` are not registered in `Sessions` until `HM-2`, `HM-3` and `N-4` wire them, and `host.info`, `pair.browser` and `settings.set` are registered by `N-3` ([issues](../../issues.md)).
-- `home.Loop`'s `Owner` is fixed at `StartLoop`, so after an unowned node is adopted its running loop knows no owner until `SessionConfig.OnAdopt` (`N-4`) recreates the home loop with the adopted owner ([issues](../../issues.md)).
-- `Sessions` implements only the server side of an inbound `ctl` connection; a host's outgoing `ctl` session to a home on another node (`hello` with `kind: "host"`, `welcome`, `devlog` both ways, and pushes to `Host.Push`) is split into unit `N-2b` (`internal/node/client.go`, wired by `N-4`, needed by `I-6` / `A3.3`; [issues](../../issues.md)).
+- `sync` and `fetch` are not registered in `Sessions` until `HM-2` and `HM-3` merge onto `rebuild`, and `Pairer`, `host.info`, `pair.browser` and `settings.set` wait for `N-3` ([issues](../../issues.md)).
+- `Sessions` implements only the server side of an inbound `ctl` connection until `N-2b` (`internal/node/client.go`) merges onto `rebuild` ([issues](../../issues.md)).
 - In step 1 `Logs` stores only the node owner's device log; keeping logs of other group members belongs to step 2.
-- `Foreground` calls a stub `startNode` until `N-4` assembles the full node runtime ([issues.md](../../issues.md)).
-- `solodawn pair` does not yet start a stopped node ([issues.md](../../issues.md)).
-- `Updater` leaves concurrency around `Busy`/`Status` and in-place `exec` restart to `N-4` ([issues.md](../../issues.md)).
-- On macOS, Unix socket paths are limited to 103 bytes, so tests that bind `sock` under `HOME` use `/tmp` ([issues.md](../../issues.md)).
-- `LocalLink` routes `cmd` requests and `ack` pushes, and exposes a temporary `Watch` method for row subscriptions until `HM-2` merges; `sync` and `fetch` on `LocalLink` wait for `HM-2` and `HM-3` ([issues.md](../../issues.md)).
-- Cross-node `ctl` links between hosts and remote homes wait for `N-2b` and `N-4`.
+- On macOS, Unix socket paths are limited to 103 bytes, so tests that bind `sock` under `HOME` use `/tmp` ([issues](../../issues.md)).
+- `LocalLink` routes `cmd` requests and `ack` pushes, and exposes a temporary `Watch` method for row subscriptions until `HM-2` merges; `sync` and `fetch` on `LocalLink` wait for `HM-2` and `HM-3` ([issues](../../issues.md)).
+- Cross-node `ctl` links between hosts and remote homes wait for `N-2b`.
 
 ## Verification and sources
 
-`go test ./internal/node/ ./internal/node/nodetest/` covers every statement of both packages, including local socket locking, opening lines, service definitions, update verification, `LocalLink` request, `ack` and push framing, inbox delivery for groups created after `AttachLocal`, cancellation and closure, and `nodetest` startup and fake CLI replay. Acceptance scenarios live in `features/node.feature`, `features/node_service.feature`, `features/node_update.feature` and `features/node_local.feature`.
+`go test ./internal/node/ ./internal/node/nodetest/` covers every statement of both packages, including foreground runtime startup, port fallback, log rotation, adoption loop swaps, rendezvous presence and reconnects, local socket locking, opening lines, MCP shim dispatch, `pair` auto-start, service definitions, self-update hold and restart, `LocalLink` request, `ack` and push framing, inbox delivery for groups created after `AttachLocal`, cancellation and closure, and `nodetest` startup and fake CLI replay. Acceptance scenarios live in `features/node.feature`, `features/node_service.feature`, `features/node_session.feature`, `features/node_update.feature` and `features/node_local.feature`.

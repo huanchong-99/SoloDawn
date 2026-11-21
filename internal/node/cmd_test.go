@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -88,5 +90,138 @@ func TestCommandWithoutDataDir(t *testing.T) {
 	_, want := DataDir()
 	if err := (Command{Cmd: "status"}).Run(io.Discard); errText(err) != errText(want) || want == nil {
 		t.Fatalf("status returned %v, want %v", err, want)
+	}
+}
+
+func TestMCPShim(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := MCP(nil, strings.NewReader(""), &stdout, &stderr); code != 2 {
+		t.Fatalf("MCP(nil) = %d, want 2", code)
+	}
+	for _, name := range []string{"HOME", "XDG_DATA_HOME", "LocalAppData", "USERPROFILE"} {
+		t.Setenv(name, "")
+	}
+	stderr.Reset()
+	if code := MCP([]string{"--token", "tok"}, strings.NewReader(""), &stdout, &stderr); code != 1 || stderr.Len() == 0 {
+		t.Fatalf("MCP without DataDir = %d, stderr %q", code, stderr.String())
+	}
+
+	dir := nodeTestDir(t)
+	stderr.Reset()
+	if code := MCP([]string{"--token", "tok"}, strings.NewReader(""), &stdout, &stderr); code != 1 || stderr.Len() == 0 {
+		t.Fatalf("MCP without socket = %d, stderr %q", code, stderr.String())
+	}
+
+	l := openSocket(t, dir)
+	opened := make(chan string, 1)
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		r := bufio.NewReader(conn)
+		line, _ := r.ReadString('\n')
+		opened <- line
+		req, _ := r.ReadString('\n')
+		io.WriteString(conn, "echo:"+req)
+	}()
+	stdout.Reset()
+	stderr.Reset()
+	if code := MCP([]string{"--token", "tok-1"}, strings.NewReader("ping\n"), &stdout, &stderr); code != 0 || stdout.String() != "echo:ping\n" || stderr.Len() != 0 {
+		t.Fatalf("MCP round-trip = %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	}
+	if got := <-opened; got != "{\"mcp\":\"tok-1\"}\n" {
+		t.Fatalf("opening = %q", got)
+	}
+}
+
+func TestPairAutoStartsNode(t *testing.T) {
+	savedSpawn, savedWait, savedExe := spawnNode, pairStartWait, executablePath
+	t.Cleanup(func() {
+		spawnNode = savedSpawn
+		pairStartWait = savedWait
+		executablePath = savedExe
+	})
+
+	dir := nodeTestDir(t)
+	name := "laptop"
+	pairCmd := Command{Cmd: "pair", Secret: "s", Name: &name}
+
+	// Non-pair commands never call spawnNode.
+	spawns := 0
+	spawnNode = func() error { spawns++; return nil }
+	if err := (Command{Cmd: "status"}).send(dir, io.Discard); err == nil || spawns != 0 {
+		t.Fatalf("status missing socket: err=%v spawns=%d", err, spawns)
+	}
+
+	// Spawn error surfaces directly.
+	spawnNode = func() error { spawns++; return io.ErrUnexpectedEOF }
+	if err := pairCmd.send(dir, io.Discard); !errors.Is(err, io.ErrUnexpectedEOF) || spawns != 1 {
+		t.Fatalf("pair spawn error: err=%v spawns=%d", err, spawns)
+	}
+
+	// Timeout waiting for socket surfaces dial error.
+	pairStartWait = 0
+	spawnNode = func() error { spawns++; return nil }
+	var dialErr *net.OpError
+	if err := pairCmd.send(dir, io.Discard); !errors.As(err, &dialErr) || spawns != 2 {
+		t.Fatalf("pair wait timeout: err=%v spawns=%d", err, spawns)
+	}
+
+	// Successful auto-start waits for the socket and completes exchange; a second pair reuses the live socket without spawning.
+	pairStartWait = 2 * time.Second
+	var bg *Local
+	t.Cleanup(func() {
+		if bg != nil {
+			bg.Close()
+		}
+	})
+	serveOnce := func(l *Local) {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		bufio.NewReader(conn).ReadString('\n')
+		writeLocalReplies(conn, []string{"paired"}, nil)
+	}
+	spawnNode = func() error {
+		spawns++
+		go func() {
+			time.Sleep(30 * time.Millisecond)
+			var err error
+			bg, err = ListenLocal(dir)
+			if err == nil {
+				serveOnce(bg)
+			}
+		}()
+		return nil
+	}
+	var out bytes.Buffer
+	if err := pairCmd.send(dir, &out); err != nil || out.String() != "paired\n" || spawns != 3 {
+		t.Fatalf("pair auto-start: out=%q err=%v spawns=%d", out.String(), err, spawns)
+	}
+	go serveOnce(bg)
+	out.Reset()
+	if err := pairCmd.send(dir, &out); err != nil || out.String() != "paired\n" || spawns != 3 {
+		t.Fatalf("pair on running socket: out=%q err=%v spawns=%d", out.String(), err, spawns)
+	}
+
+	// startBackgroundNode covers executablePath error and detached launch.
+	executablePath = func() (string, error) { return "", io.ErrNoProgress }
+	if err := startBackgroundNode(); !errors.Is(err, io.ErrNoProgress) {
+		t.Fatalf("startBackgroundNode exe error = %v", err)
+	}
+	executablePath = func() (string, error) { return filepath.Join(dir, "missing-exe"), nil }
+	if err := startBackgroundNode(); err == nil {
+		t.Fatal("expected startBackgroundNode error for missing executable")
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := startDetached(self, "-test.run=^$"); err != nil {
+		t.Fatalf("startDetached(self) = %v", err)
 	}
 }

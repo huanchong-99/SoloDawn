@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -321,5 +322,31 @@ func TestBatchFramesExact60KiBBoundary(t *testing.T) {
 	}
 	if strings.Contains(string(dvlMustEncode(map[string]string{"x": "<&>"})), `\u003c`) {
 		t.Fatal("HTML characters were escaped")
+	}
+
+	db := sesOpenStore(t)
+	selfKey := sesKey("self")
+	logs, err := OpenLogs(db, selfKey.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := logs.OwnerDevices(); got != nil {
+		t.Fatalf("unowned OwnerDevices = %v, want nil", got)
+	}
+	cand, err := identity.Replay(user, []proto.Envelope{
+		sesAddEntry(userKey, user, 1, user, "browser", "b1"),
+		sesAddEntry(userKey, user, 2, selfKey.ID(), "node", "self"),
+		sesAddEntry(userKey, user, 3, otherKey.ID(), "node", "n2"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := logs.dvlAdopt(user, cand, nil); !ok || err != nil {
+		t.Fatalf("dvlAdopt = %v, %v", ok, err)
+	}
+	wantDevs := []string{user, otherKey.ID()}
+	slices.Sort(wantDevs)
+	if got := logs.OwnerDevices(); !slices.Equal(got, wantDevs) {
+		t.Fatalf("OwnerDevices = %v, want %v", got, wantDevs)
 	}
 }

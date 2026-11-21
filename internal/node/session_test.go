@@ -921,4 +921,33 @@ func TestSessionErrorAndEdgePaths(t *testing.T) {
 			t.Fatalf("expected 2 reported db errors, got %d", errs.Load())
 		}
 	})
+
+	t.Run("SetHome reattaches open connections and statusLines lists welcomed ones", func(t *testing.T) {
+		db := sesOpenStore(t)
+		logs := seedOwnedLogs(t, db, nodeKey, browserKey)
+		loop1, h := newTestHomeAndHost(t, db, nodeKey, logs, now, nil)
+		s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop1, Host: h, Now: func() time.Time { return now }})
+		unw := serveConn(t, s, browserKey.ID(), false)
+		defer unw.Close()
+		c := serveConn(t, s, browserKey.ID(), false)
+		c.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "b", Addrs: []string{}})
+		c.next(t)
+		c.next(t)
+		if got := s.statusLines(); len(got) != 1 || got[0] != "connection "+browserKey.ID()+" direct" {
+			t.Fatalf("statusLines = %v", got)
+		}
+		loop2, err := home.StartLoop(home.LoopConfig{Store: db, Home: nodeKey.ID(), Owner: browserKey.ID(), Logs: logs.Log, Tables: home.NodeTables()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(loop2.Close)
+		s.SetHome(loop2)
+		loop1.Close()
+		c.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 2}, V: 1, Kind: "browser", Name: "b", Addrs: []string{}})
+		var w proto.Welcome
+		if err := proto.Decode(c.next(t), &w); err != nil || w.Re != 2 || !w.Owner {
+			t.Fatalf("welcome after SetHome = %+v (%v)", w, err)
+		}
+		c.next(t)
+	})
 }

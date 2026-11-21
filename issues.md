@@ -90,12 +90,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `Sessions` provides the `Requests`, `Pushes` and `Commands` tables, while `sync` (`HM-2`), `fetch` (`HM-3`), the pairing and host-info handlers (`N-3`) and runtime assembly (`N-4`) are separate units (`ack` pushes are routed to `home.Loop.Ack` in `Sessions.sesPush` as of `HM-7`).
 - Status: open until `HM-2`, `HM-3`, `N-3` and `N-4` populate those tables.
 
-### 2026-11-21 · limitation · `home.Loop` keeps the `Owner` it was started with across adoption
-
-- Symptom: when an unowned node starts `home.Loop` with `Owner: ""` and is later adopted over a pairing `ctl` session, `Logs.Owner()` becomes the adopter's user id (`internal/node/devlog.go`, `dvlAdopt`), while the running `home.Loop` still has `LoopConfig.Owner == ""` (`internal/home/run.go:65`) and refuses `group create` until the loop is restarted.
-- Cause: `LoopConfig.Owner` is read once when `StartLoop` constructs group states (`internal/home/run.go:175`, `:198`).
-- Status: open until `N-4`, which supplies `SessionConfig.OnAdopt` (`internal/node/session.go:52`) to close and recreate `home.Loop` with the adopted owner.
-
 ### 2026-11-21 · limitation · `Sessions` implements only the server side of a `ctl` connection
 
 - Symptom: a host on one node has no outgoing `ctl` client session yet to a home on another node (sending `hello` with `kind: "host"`, reading `welcome`, exchanging `devlog` both ways, and passing pushes to `Host.Push`), so cross-node AI sessions (`A3.3`, unit `I-6`) have no transport path.
@@ -210,12 +204,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `run_checks` runs in the task's worktree (`internal/host/checks.go`, `cleanCheckHead`), where such files can exist.
 - Status: open. Step 2 closes it by running the checks on a clean export of the commit.
 
-### 2026-11-20 · deviation · `solodawn pair` does not start a node that is not running
-
-- Symptom: `local.md` section 1 says `solodawn pair` "starts the node if needed". With no node running, `solodawn pair <secret>` fails on the dial of the local socket and pairs nothing.
-- Cause: `pair` (`cmd/solodawn/main.go:61`) only sends the command through `Command.send` (`internal/node/cmd.go:40`). No unit owned starting the node.
-- Status: open. Added to N-4's row in `planning/steps/parallel-plan-units.md` by the coordinator's decision of 2026-11-20 (independent review of `internal/node`).
-
 ### 2026-11-20 · bug · Two nodes starting together could each remove the other's socket
 
 - Symptom: two nodes that started together on one data directory both ran over a stale `sock`: one removed the other's live socket, and the first one's close then removed the second's (89 of 3000 rounds in the independent review of `internal/node`).
@@ -230,15 +218,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
   3. the scheduled task running the node headless through `conhost.exe --headless` (`internal/node/service_windows.go`); Windows CI only builds the action.
 - Cause: nothing is installed on the development machine, by the coordinator's decision of 2026-11-20.
 - Status: open. Candidate for a CI smoke job on GitHub's throwaway runners (Linux, macOS, Windows) after the quota reset: install, log in or start the manager, check that the node runs with the expected PATH, remove.
-
-### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
-
-- Symptom, from the independent review of `internal/node`:
-  1. `Apply` checks `Busy` and then calls `Restart` (`internal/node/update.go:98`). A turn or a takeover admitted between the two is restarted.
-  2. `Status` (`internal/node/update.go:40`) is written by `Check` and read for `host.info`; read from another goroutine, it races.
-  3. `Restart` (`:39`) must replace the process in place (exec on Unix). launchd and systemd stop the whole process group when the node's process ends, so a child started before the exit would be stopped with it.
-- Cause: the `Updater` holds no lock and does not restart by itself; the owner of the runtime is to call `Check` and `Apply` under the lock that admits turns and takeovers, copy `Status` under it, and supply a `Restart` that execs.
-- Status: open, for N-4.
 
 ### 2026-11-20 · limitation · `SHA256SUMS` proves the download intact, not where it came from
 
@@ -290,12 +269,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: with 14 busy loops on 12 cores, `web/src/main.test.ts:4`, `web/src/lib/motion.test.ts:29` and `web/src/lib/prefs.test.ts:26` exceeded Vitest's 5 s test limit; one idle run right after `pnpm install` also failed two tests in two files (output not kept). CI passed.
 - Cause: each is the first test of its file to import the client's modules afresh inside the test, so their transformation counts against the test's limit.
 - Status: open; the gate can fail spuriously while other work loads the machine.
-
-### 2026-11-20 · limitation · End-to-end tests cannot run a node until the node runtime is wired
-
-- Symptom: `startNet` of `web/e2e/nodes.ts` waits until each node answers on its local socket. Every node exits with status 1 and `node runtime is unavailable` right after it makes its data directory and binds the socket, so a start that awaits nodes fails with that message. The harness's own scenarios start nodes with `awaitNodes: false`. A node is started with no flags, because `solodawn node` takes none yet: it has no signalling or web port and no rendezvous address, and the harness hands over only its HOME, data directory, socket and environment.
-- Cause: `startNode` is a stub that returns that error until N-4 assembles the runtime (`internal/node/socket.go:181-183`); `cmd/solodawn/main.go:26-28` registers `node` without arguments.
-- Status: open until N-4. What I-8 needs from N-4 is listed in [#132](https://github.com/huanchong-99/SoloDawn/pull/132).
 
 ### 2026-11-20 · limitation · A node's socket does not fit under a long HOME on macOS
 
@@ -477,6 +450,33 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-21 · limitation · `home.Loop` keeps the `Owner` it was started with across adoption
+
+- Symptom: when an unowned node starts `home.Loop` with `Owner: ""` and is later adopted over a pairing `ctl` session, `Logs.Owner()` becomes the adopter's user id (`internal/node/devlog.go`, `dvlAdopt`), while the running `home.Loop` still has `LoopConfig.Owner == ""` (`internal/home/run.go:65`) and refuses `group create` until the loop is restarted.
+- Cause: `LoopConfig.Owner` is read once when `StartLoop` constructs group states (`internal/home/run.go:175`, `:198`).
+- Status: resolved in branch `gemini/N-4`: `nodeRuntime.onAdopt` (`internal/node/node.go`) detaches `LocalLink`, starts a new `home.Loop` with `Owner: owner`, calls `(*Sessions).SetHome` (`internal/node/session.go`) to re-attach open inbound `ctl` sessions onto the new loop, closes the old loop, attaches a new `LocalLink`, and watches owner devices on remote rendezvous connections (`TestSetHomeReattachesOpenSession`, `TestAdoptionRendezvousWatchPresenceAndInboundPeer`).
+
+### 2026-11-20 · deviation · `solodawn pair` does not start a node that is not running
+
+- Symptom: `local.md` section 1 says `solodawn pair` "starts the node if needed". With no node running, `solodawn pair <secret>` fails on the dial of the local socket and pairs nothing.
+- Cause: `pair` (`cmd/solodawn/main.go:61` before the fix) only sent the command through `Command.send` (`internal/node/cmd.go:40` before the fix).
+- Status: resolved in branch `gemini/N-4`: `(Command).dialOrStart` (`internal/node/cmd.go`) spawns a detached `solodawn node` (`startDetached` in `proc_unix.go` / `proc_windows.go`) when `c.Cmd == "pair"` and `sock` is absent, then polls until `sock` accepts (`TestPairAutoStartsNode`).
+
+### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
+
+- Symptom, from the independent review of `internal/node`:
+  1. `Apply` checks `Busy` and then calls `Restart` (`internal/node/update.go:98`). A turn or a takeover admitted between the two is restarted.
+  2. `Status` (`internal/node/update.go:40`) is written by `Check` and read for `host.info`; read from another goroutine, it races.
+  3. `Restart` (`:39`) must replace the process in place (exec on Unix). launchd and systemd stop the whole process group when the node's process ends, so a child started before the exit would be stopped with it.
+- Cause: the `Updater` holds no lock and does not restart by itself; the owner of the runtime is to call `Check` and `Apply` under the lock that admits turns and takeovers, copy `Status` under it, and supply a `Restart` that execs.
+- Status: resolved in branch `gemini/N-4`: `nodeRuntime` (`internal/node/node.go`) serializes `Updater.Check` and `Updater.Apply` under `updMu`, holds new turns through `holdForUpdate` (`host.Holds["update"]`) while `Apply` checks `isBusy`, snapshots `Status` into `updStatus` under `mu`, wakes pending updates on `host.TurnEnded` (`listenNodeUpdate`), releases `Local` lock, and replaces the process via `syscall.Exec` on Unix (`proc_unix.go`) and `os.StartProcess` on Windows (`proc_windows.go`) (`TestSelfUpdateHoldBusyAndForegroundRestart`).
+
+### 2026-11-20 · limitation · End-to-end tests cannot run a node until the node runtime is wired
+
+- Symptom: `startNet` of `web/e2e/nodes.ts` waits until each node answers on its local socket. Every node exits with status 1 and `node runtime is unavailable` right after it makes its data directory and binds the socket, so a start that awaits nodes fails with that message. The harness's own scenarios start nodes with `awaitNodes: false`. A node is started with no flags, because `solodawn node` takes none yet: it has no signalling or web port and no rendezvous address, and the harness hands over only its HOME, data directory, socket and environment.
+- Cause: `startNode` was a stub that returned that error until N-4 assembled the runtime (`internal/node/socket.go:181-183` before the fix).
+- Status: resolved in branch `gemini/N-4`: `startNode` points to `runForegroundNode` (`internal/node/node.go`), starting the full node runtime (`node.db`, `device.key`, `logs/node.log`, `home.Loop`, `host.Host` + `ServeMCP`, `AttachLocal`, `Logs` + `Sessions`, `peer.Peer`, embedded web UI + `/rv` with `:47800` to `:0` multi-node fallback, and local socket commands).
 
 ### 2026-11-21 · deviation · Dead `cause` path in `internal/home` and `internal/store`
 
