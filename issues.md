@@ -6,6 +6,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-21 · deviation · The local link routes only `cmd` requests until `sync`, `fetch` and `ack` land
+
+- Symptom: on `LocalLink`, a `sync` or `fetch` request from the host is answered `bad_request`, and an `ack` push is dropped; row subscriptions on the local link go through `LocalLink.Watch` for now.
+- Cause: `home.Loop` on `rebuild` exposes `Cmd` and `Watch` only (`internal/home/run.go:313`, `:357`); `Sync` (HM-2), `Fetch` (HM-3) and `Ack` with signed `inbox` frames (HM-7) are built in separate units. `LocalLink.toHome` (`internal/node/local.go:141`) dispatches `cmd` to `Loop.Cmd` and answers other requests `bad_request` per `planning/contracts/datachannel.md` section 2.
+- Status: open until HM-2, HM-3 and HM-7 are wired into `LocalLink` (N-4 / I-1 / I-3).
+
+### 2026-11-21 · limitation · `Loop.Inbox` marks only the groups that exist when it is called
+
+- Symptom: after `Loop.Inbox(conn)` has made a host connection the inbox taker (`internal/home/run.go:366`), a group created later on that home spawns its `runGroup` with `seat.inbox` false (`internal/home/run_group.go:52`) and does not deliver queued items to `conn` until `Loop.Inbox(conn)` is called again (such as on a new `hello`).
+- Cause: `Conn` records `welcomed` across groups (`internal/home/run_conn.go:34`), whereas `inbox` is kept per group seat (`internal/home/run_group.go:31`) and `spawn` calls `seat`, not `inbox` (`internal/home/run.go:162`).
+- Status: open, for HM-7 or N-4.
+
 ### 2026-11-21 · limitation · The jobs of a group in the home's run loop have no bound
 
 - Symptom: not observed. A client that sends `cmd` frames faster than its group applies them makes the list of that group's jobs grow, and with it the memory of the node, until the client stops. A group applies a command in one transaction of the store, so this needs a client that sends on purpose or a store that has become slow. Ticks and events are jobs as well: while a group does not keep up, each tick of `LoopConfig.Every` and each `Event` adds one job to its list.
