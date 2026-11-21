@@ -22,7 +22,7 @@ const (
 	defaultIdleMinutes = 15
 	defaultMaxOpen     = 4
 	defaultTurnMinutes = 60
-	stopTimeout        = 10 * time.Second
+	stopSeconds        = 10
 )
 
 func init() {
@@ -121,7 +121,7 @@ func (lp *liveProc) triggerClose() {
 			lp.killed.Store(true)
 			lp.cancel()
 		}
-		t := time.AfterFunc(stopTimeout, kill)
+		t := time.AfterFunc(stopSeconds*time.Second, kill)
 		lp.killTimer.Store(t)
 		lp.proc.Close()
 	})
