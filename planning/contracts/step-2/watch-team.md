@@ -194,7 +194,7 @@ by the step 1 rules. No inbox item is ever queued in a team group.
 
 - People join, get roles and are removed as in any group
   (`contracts/step-2/people.md`); the group is moved and copied as any
-  group (`contracts/step-2/move.md`).
+  group (`contracts/step-2/move.md`, `copy.md`).
 - A person writes `post` of kind `text` in the main line. Mentions name
   people, who are reminded as in any group (`contracts/commands.md` 1.7).
 - `sync`, `fetch`, `note`, `forget`, `push`, `group set` with `name`,
