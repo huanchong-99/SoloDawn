@@ -6,9 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"io"
-	"slices"
 	"strings"
 	"testing"
 
@@ -225,9 +223,9 @@ func TestSessionInstructionsCoverEveryRole(t *testing.T) {
 		s     Session
 		wants []string
 	}{
-		{Session{Kind: GroupSession}, []string{"post", "ask", "reply", "instruction", "information", "secrets", "read only", "do not edit files", "start_task"}},
-		{Session{Kind: TaskSession}, []string{"post", "ask", "reply", "instruction", "information", "secrets", "push_branch", "run_checks", "submit_task", "sandbox"}},
-		{Session{Kind: ReviewSession}, []string{"post", "ask", "reply", "instruction", "information", "secrets", "read only", "do not edit files", ".solodawn-review.diff", "submit_review", "veto"}},
+		{Session{Kind: GroupSession}, []string{"post", "ask", "reply", "request_decision", "instruction", "information", "secrets", "read only", "do not edit files", "start_task"}},
+		{Session{Kind: TaskSession}, []string{"post", "ask", "reply", "request_decision", "instruction", "information", "secrets", "push_branch", "run_checks", "submit_task", "sandbox"}},
+		{Session{Kind: ReviewSession}, []string{"post", "ask", "reply", "request_decision", "instruction", "information", "secrets", "read only", "do not edit files", ".solodawn-review.diff", "submit_review", "veto"}},
 		{Session{Kind: GroupSession, Secretary: true}, []string{"post", "ask", "reply", "propose_brief", "set_task", "request_decision", "summary", "note_put"}},
 		{Session{Kind: TaskSession, Secretary: true}, []string{"propose_brief", "note_put"}},
 	}
@@ -293,9 +291,11 @@ func TestOwnTurnsContinueAndHandback(t *testing.T) {
 		assertComposed(t, r.h, tc.s, tc.kind, nil, tc.wantText, Turn{Kind: tc.kind, Thread: tc.wantThread})
 	}
 	extra := []json.RawMessage{json.RawMessage(`{}`)}
-	_, _, err := Compose(r.h, r.session(TaskSession, false, "c1"), ContinueTurn, extra)
-	seamCode(t, err, "bad_request")
-	_, _, err = Compose(r.h, r.session(TaskSession, false, "c1"), HandbackTurn, extra)
+	for _, kind := range []TurnKind{ContinueTurn, HandbackTurn, ReplacedTurn} {
+		_, _, err := Compose(r.h, r.session(TaskSession, false, "c1"), kind, extra)
+		seamCode(t, err, "bad_request")
+	}
+	_, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, nil)
 	seamCode(t, err, "bad_request")
 	_, _, err = Compose(r.h, r.session(TaskSession, false, "c1"), TurnKind("unknown"), nil)
 	seamCode(t, err, "bad_request")
@@ -312,7 +312,7 @@ func assertComposed(t *testing.T, h *Host, s Session, kind TurnKind, items []jso
 	}
 }
 
-func TestFirstTaskTurnFromBriefAndNotesPaging(t *testing.T) {
+func TestFirstTaskTurnFromBriefAndNotesLimit(t *testing.T) {
 	r := newTurnRig(t)
 	assignRaw := r.makeInboxItem(proto.Item{Item: 1, Why: "assign", Task: proto.ID(tTaskID)}, nil, nil)
 	want := strings.Join([]string{
@@ -334,83 +334,39 @@ func TestFirstTaskTurnFromBriefAndNotesPaging(t *testing.T) {
 	if len(r.home.asked) != 2 || r.home.asked[0] != wantBriefReq || r.home.asked[1] != wantNoteReq {
 		t.Fatalf("unexpected fetch requests: %+v", r.home.asked)
 	}
+	checkNoteByteLimitAndEmpty(t, r, assignRaw)
+}
 
-	// Exact 8192-byte boundary includes both notes; 8193 bytes stops at the first without paging further.
+func checkNoteByteLimitAndEmpty(t *testing.T, r *turnRig, assignRaw json.RawMessage) {
+	t.Helper()
+	// Exact 8192-byte boundary includes both notes; 8193 bytes stops before the second note (even if a tiny third note would fit).
 	n5000 := strings.Repeat("a", 5000)
 	n3192 := strings.Repeat("b", 3192)
 	r.notes = []proto.NoteRow{
-		{RowHeader: proto.RowHeader{Type: "note", ID: turnID("n1"), Seq: 2}, Pos: 20, Group: tGroupID, Text: n5000, By: tSecID, Timestamp: seamStart},
-		{RowHeader: proto.RowHeader{Type: "note", ID: turnID("n2"), Seq: 1}, Pos: 10, Group: tGroupID, Text: n3192, By: tSecID, Timestamp: seamStart},
+		{RowHeader: proto.RowHeader{Type: "note", ID: turnID("n1"), Seq: 3}, Pos: 30, Group: tGroupID, Text: n5000, By: tSecID, Timestamp: seamStart},
+		{RowHeader: proto.RowHeader{Type: "note", ID: turnID("n2"), Seq: 2}, Pos: 20, Group: tGroupID, Text: n3192, By: tSecID, Timestamp: seamStart},
 	}
 	gotExact, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{assignRaw})
 	if err != nil || !strings.Contains(gotExact, "- "+n5000+"\n- "+n3192) {
 		t.Fatalf("exact 8192 boundary failed: %v", err)
 	}
-	checkNoteOverflowAndMultiPage(t, r, assignRaw, n5000, n3192+"c")
-}
-
-func checkNoteOverflowAndMultiPage(t *testing.T, r *turnRig, assignRaw json.RawMessage, first, overflow string) {
-	t.Helper()
-	noteCalls := 0
-	r.home.handler = func(req any) (json.RawMessage, error) {
-		fk, ok := req.(proto.FetchKind)
-		if !ok {
-			return r.defaultHomeHandler(req)
-		}
-		noteCalls++
-		if noteCalls > 1 {
-			return nil, errors.New("unexpected second note page after overflow")
-		}
-		rows := []json.RawMessage{
-			mustJSON(t, proto.NoteRow{RowHeader: proto.RowHeader{Type: "note", ID: turnID("n1"), Seq: 2}, Pos: int64(30 + fk.Before), Group: tGroupID, Text: first, By: tSecID, Timestamp: seamStart}),
-			mustJSON(t, proto.NoteRow{RowHeader: proto.RowHeader{Type: "note", ID: turnID("n2"), Seq: 1}, Pos: 10, Group: tGroupID, Text: overflow, By: tSecID, Timestamp: seamStart}),
-		}
-		return mustJSON(t, proto.Fetched{Type: "fetched", Success: proto.Success{Re: 1, OK: true}, Rows: rows, More: true}), nil
+	r.notes = []proto.NoteRow{
+		{RowHeader: proto.RowHeader{Type: "note", ID: turnID("n1"), Seq: 3}, Pos: 30, Group: tGroupID, Text: n5000, By: tSecID, Timestamp: seamStart},
+		{RowHeader: proto.RowHeader{Type: "note", ID: turnID("n2"), Seq: 2}, Pos: 20, Group: tGroupID, Text: n3192 + "c", By: tSecID, Timestamp: seamStart},
+		{RowHeader: proto.RowHeader{Type: "note", ID: turnID("n3"), Seq: 1}, Pos: 10, Group: tGroupID, Text: "tiny-after", By: tSecID, Timestamp: seamStart},
 	}
 	gotOver, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{assignRaw})
-	if err != nil || !strings.Contains(gotOver, "- "+first) || strings.Contains(gotOver, overflow) {
+	if err != nil || !strings.Contains(gotOver, "- "+n5000) || strings.Contains(gotOver, n3192) || strings.Contains(gotOver, "tiny-after") {
 		t.Fatalf("overflow 8193 failed: err=%v", err)
 	}
-	checkMultiPageNotes(t, r, assignRaw)
-}
-
-func checkMultiPageNotes(t *testing.T, r *turnRig, assignRaw json.RawMessage) {
-	t.Helper()
-	var seenBefore []int64
-	r.home.handler = func(req any) (json.RawMessage, error) {
-		fk, ok := req.(proto.FetchKind)
-		if !ok {
-			return r.defaultHomeHandler(req)
-		}
-		seenBefore = append(seenBefore, fk.Before)
-		if fk.Before == 0 {
-			n := proto.NoteRow{RowHeader: proto.RowHeader{Type: "note", ID: turnID("p1"), Seq: 2}, Pos: 55, Group: tGroupID, Text: "newest", By: tSecID, Timestamp: seamStart}
-			return mustJSON(t, proto.Fetched{Type: "fetched", Success: proto.Success{Re: 1, OK: true}, Rows: []json.RawMessage{mustJSON(t, n)}, More: true}), nil
-		}
-		n := proto.NoteRow{RowHeader: proto.RowHeader{Type: "note", ID: turnID("p2"), Seq: 1}, Pos: 12, Group: tGroupID, Text: "older", By: tSecID, Timestamp: seamStart}
-		return mustJSON(t, proto.Fetched{Type: "fetched", Success: proto.Success{Re: 1, OK: true}, Rows: []json.RawMessage{mustJSON(t, n)}, More: false}), nil
-	}
-	got, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{assignRaw})
-	if err != nil || !slices.Equal(seenBefore, []int64{0, 55}) || !strings.Contains(got, "- newest\n- older") {
-		t.Fatalf("multi-page notes failed: before=%v err=%v\n%s", seenBefore, err, got)
-	}
-	// More=true with empty rows terminates cleanly and omits Notes section when zero notes fit.
-	r.home.handler = func(req any) (json.RawMessage, error) {
-		if fk, ok := req.(proto.FetchKind); ok {
-			if fk.Before != 0 {
-				return nil, errors.New("unexpected page")
-			}
-			return mustJSON(t, proto.Fetched{Type: "fetched", Success: proto.Success{Re: 1, OK: true}, Rows: []json.RawMessage{}, More: true}), nil
-		}
-		return r.defaultHomeHandler(req)
-	}
+	r.notes = nil
 	gotEmpty, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{assignRaw})
 	if err != nil || strings.Contains(gotEmpty, "Notes of this group:") {
 		t.Fatalf("empty notes failed: err=%v\n%s", err, gotEmpty)
 	}
 }
 
-func TestDirectTakeoverAndNonFirstAssignTurns(t *testing.T) {
+func TestDirectAndNonFirstAssignTurns(t *testing.T) {
 	r := newTurnRig(t)
 	r.notes = nil
 	directTask := r.baseTask()
@@ -418,64 +374,25 @@ func TestDirectTakeoverAndNonFirstAssignTurns(t *testing.T) {
 	r.h.Rows.Put(tGroupID, "task", tTaskID, mustJSON(t, directTask))
 	reqMsg := r.textMsg(tMsg1ID, tOwnerM, "", "Please add the status badge.")
 	raw := r.makeInboxItem(proto.Item{Item: 1, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, reqMsg, nil)
-	got, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{raw})
-	if err != nil || !strings.Contains(got, "Plan: Update status badge.\nReviewer: none   Pass score: 90\nPlease add the status badge.") {
-		t.Fatalf("direct first turn unexpected: err=%v\n%s", err, got)
+	got, turn, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{raw})
+	if err != nil || turn != (Turn{Kind: ItemsTurn, Thread: tTaskID}) || !strings.Contains(got, "Plan: Update status badge.\nReviewer: none   Pass score: 90\nPlease add the status badge.") {
+		t.Fatalf("direct first turn unexpected: err=%v turn=%+v\n%s", err, turn, got)
 	}
 
-	// Direct task with empty Plan and gone reviewer row.
+	// Direct task with empty Plan, gone reviewer row, and an attached kind="task" card omitted from body.
 	directTask.Plan, directTask.Reviewer = "", turnID("gone-rev")
 	r.h.Rows.Put(tGroupID, "member", directTask.Reviewer, json.RawMessage(`{"r":"member","id":"gone","seq":9,"gone":true}`))
 	r.h.Rows.Put(tGroupID, "task", tTaskID, mustJSON(t, directTask))
-	rawNoMsg := r.makeInboxItem(proto.Item{Item: 2, Why: "assign", Task: proto.ID(tTaskID)}, nil, nil)
-	gotPlain, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{rawNoMsg})
-	if err != nil || strings.Contains(gotPlain, "Plan:") || !strings.Contains(gotPlain, "Reviewer: "+directTask.Reviewer+"   Pass score: 90") {
-		t.Fatalf("direct without plan failed: err=%v\n%s", err, gotPlain)
-	}
-	checkTakeoverAndSubsequentAssigns(t, r, rawNoMsg)
-}
-
-func checkTakeoverAndSubsequentAssigns(t *testing.T, r *turnRig, rawNoMsg json.RawMessage) {
-	t.Helper()
-	// Pin all 4 failure branches of composeTakeoverBootstrap before enabling origin=takeover.
-	_, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, nil)
-	seamCode(t, err, "bad_request")
-	tk := r.baseTask()
-	tk.Origin, tk.Brief, tk.Plan = "takeover", "", ""
-	r.h.Rows.Put(tGroupID, "task", tTaskID, mustJSON(t, tk))
-	_, _, err = Compose(r.h, r.session(TaskSession, false, ""), ReplacedTurn, nil)
-	seamCode(t, err, "bad_request")
-	_, _, err = Compose(r.h, r.session(ReviewSession, false, ""), ItemsTurn, nil)
-	seamCode(t, err, "bad_request")
-	missingSess := r.session(TaskSession, false, "")
-	missingSess.Task = turnID("missing-task")
-	_, _, err = Compose(r.h, missingSess, ItemsTurn, nil)
-	seamCode(t, err, "bad_request")
-
-	wantBoot := "[SoloDawn] group \"Website\" · you are \"Claude Code\" · task session T-12\n== 1 of 1 · assign · instruction\nYour owner is about to work with you directly in the terminal."
-	assertComposed(t, r.h, r.session(TaskSession, false, ""), ItemsTurn, nil, wantBoot, Turn{Kind: ItemsTurn, Thread: tTaskID})
-	assertComposed(t, r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{rawNoMsg}, wantBoot, Turn{Kind: ItemsTurn, Thread: tTaskID})
-
 	taskCard := mustJSON(t, proto.MessageRow[proto.TaskBody, proto.NoCard]{
 		RowHeader: proto.RowHeader{Type: "msg", ID: tMsg1ID, Seq: 5},
 		Pos:       5, Group: tGroupID, Main: true, By: "system", Kind: "task", Timestamp: seamStart, Mentions: []string{}, Body: proto.TaskBody{Task: tTaskID},
 	})
-	rawTaskMsg := r.makeInboxItem(proto.Item{Item: 3, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, taskCard, nil)
-	assertComposed(t, r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{rawTaskMsg}, wantBoot, Turn{Kind: ItemsTurn, Thread: tTaskID})
-
-	textAssign := r.makeInboxItem(proto.Item{Item: 3, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)},
-		r.textMsg(tMsg1ID, tOwnerM, "", "Initial note."), nil)
-	if gotTextAssign, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{textAssign}); err != nil || !strings.Contains(gotTextAssign, "Branch: task/12-") {
-		t.Fatalf("takeover assign with text msg should render start lines: err=%v\n%s", err, gotTextAssign)
+	rawTaskMsg := r.makeInboxItem(proto.Item{Item: 2, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, taskCard, nil)
+	gotPlain, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{rawTaskMsg})
+	if err != nil || strings.Contains(gotPlain, "Plan:") || strings.Contains(gotPlain, "(task)") || !strings.HasSuffix(gotPlain, "Reviewer: "+directTask.Reviewer+"   Pass score: 90") {
+		t.Fatalf("direct without plan failed: err=%v\n%s", err, gotPlain)
 	}
-
-	// Once Thread.Count > 0, takeover task uses full taskStartLines.
-	tk.Thread.Count = 1
-	r.h.Rows.Put(tGroupID, "task", tTaskID, mustJSON(t, tk))
-	gotFull, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{rawNoMsg})
-	if err != nil || !strings.Contains(gotFull, "Branch: task/12-node-report-connection-path-changes") {
-		t.Fatalf("reassigned takeover task should render full start lines: err=%v\n%s", err, gotFull)
-	}
+	rawNoMsg := r.makeInboxItem(proto.Item{Item: 3, Why: "assign", Task: proto.ID(tTaskID)}, nil, nil)
 	checkNonFirstAssignVariants(t, r, rawNoMsg, rawTaskMsg)
 }
 
@@ -486,13 +403,13 @@ func checkNonFirstAssignVariants(t *testing.T, r *turnRig, rawNoMsg, rawTaskMsg 
 	if err != nil || !strings.HasSuffix(gotResumed, shortWant) {
 		t.Fatalf("existing CLISession assign unexpected: err=%v\n%s", err, gotResumed)
 	}
+	gotResumedNil, _, err := Compose(r.h, r.session(TaskSession, false, "existing-cli"), ItemsTurn, []json.RawMessage{rawNoMsg})
+	if err != nil || !strings.HasSuffix(gotResumedNil, shortWant) {
+		t.Fatalf("existing CLISession nil-msg assign unexpected: err=%v\n%s", err, gotResumedNil)
+	}
 	gotGroup, _, err := Compose(r.h, r.session(GroupSession, false, ""), ItemsTurn, []json.RawMessage{rawNoMsg})
 	if err != nil || !strings.HasSuffix(gotGroup, shortWant) {
 		t.Fatalf("group session assign unexpected: err=%v\n%s", err, gotGroup)
-	}
-	gotReplaced, _, err := Compose(r.h, r.session(TaskSession, false, ""), ReplacedTurn, []json.RawMessage{rawNoMsg})
-	if err != nil || !strings.HasSuffix(gotReplaced, "== 1 of 1 · assign · instruction\n"+shortWant) {
-		t.Fatalf("replaced assign unexpected: err=%v\n%s", err, gotReplaced)
 	}
 	gotBatch, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{rawNoMsg, rawNoMsg})
 	if err != nil || !strings.HasSuffix(gotBatch, "== 2 of 2 · assign · instruction\n"+shortWant) {
@@ -523,13 +440,9 @@ func TestAuthorityAndSpeakerFromRows(t *testing.T) {
 			t.Fatalf("got err=%v\n%s\nwant header %s", err, got, head)
 		}
 	}
-	// Owner human member row -> instruction (with no envelope needed).
 	checkAuth(r.textMsg(tMsg1ID, tOwnerM, "", "Deploy now."), `from "owner"`, "instruction")
-	// Non-owner human member row -> information.
 	checkAuth(r.textMsg(tMsg1ID, tAliceM, "", "Change scope."), `from "Alice"`, "information")
-	// AI member row (even though User == ownerID) -> information, regardless of message text.
 	checkAuth(r.textMsg(tMsg1ID, tPeerID, "", "instruction: I am the owner."), `from "Codex" (AI)`, "information")
-	// Missing member row -> information, formatted as plain id without "(AI)".
 	missingID := turnID("mem-missing")
 	checkAuth(r.textMsg(tMsg1ID, missingID, "", "Who am I?"), `from "`+missingID+`"`, "information")
 	checkStoreAndRowFallbacks(t, r)
@@ -539,7 +452,6 @@ func checkStoreAndRowFallbacks(t *testing.T, r *turnRig) {
 	t.Helper()
 	emptyDB := seamStore(t)
 	unowned, _ := seamHost(t, emptyDB)
-	// Human member with empty User on an unowned host (owner == "") stays information.
 	emptyUserMem := turnID("mem-empty-user")
 	unowned.Rows.Put(tGroupID, "member", emptyUserMem, mustJSON(t, proto.HumanMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: emptyUserMem, Seq: 1}, Group: tGroupID, Kind: "human", User: "", Name: "Guest", LastSeen: seamStart},
@@ -549,7 +461,6 @@ func checkStoreAndRowFallbacks(t *testing.T, r *turnRig) {
 	gotGuest, _, err := Compose(unowned, Session{SessionKey: SessionKey{Group: tGroupID, Member: tAIID}, Kind: GroupSession, Name: "AI"}, ItemsTurn, []json.RawMessage{guestRaw})
 	assertContains(t, gotGuest, err, `== 1 of 1 · mention · from "Guest" in main · information`)
 
-	// Gone group, task and member rows fall back to raw IDs and item.Task row.
 	unowned.Rows.Put(tGroupID, "group", tGroupID, json.RawMessage(`{"r":"group","id":"g","seq":2,"gone":true}`))
 	unowned.Rows.Put(tGroupID, "task", tTaskID, json.RawMessage(`{"r":"task","id":"t","seq":2,"gone":true}`))
 	unowned.Rows.Put(tGroupID, "member", tOwnerM, json.RawMessage(`{"r":"member","id":"m","seq":2,"gone":true}`))
@@ -561,12 +472,10 @@ func checkStoreAndRowFallbacks(t *testing.T, r *turnRig) {
 		t.Fatalf("fallback with itemTask failed: err=%v\ngot:\n%s\nwant:\n%s", err, gotFallback, want)
 	}
 
-	// Uncached task and uncached speaker fall back to raw IDs without reading msg.Env.
 	rawNoTask := r.makeInboxItem(proto.Item{Item: 3, Why: "mention", Msg: proto.ID(tMsg1ID)}, r.textMsg(tMsg1ID, tPeerID, tTaskID, "ping"), nil)
 	gotUncached, _, err := Compose(unowned, Session{SessionKey: SessionKey{Group: tGroupID, Member: tAIID, Task: tTaskID}, Kind: ReviewSession, Name: "AI"}, ItemsTurn, []json.RawMessage{rawNoTask})
 	assertContains(t, gotUncached, err, "review session "+tTaskID+"\n== 1 of 1 · mention · from \""+tPeerID+"\" in "+tTaskID+" · information\nping")
 
-	// Malformed JSON in setting 'owner' surfaces SQLite error from loadOwner.
 	seamSQL(t, emptyDB, "INSERT INTO setting(key, value) VALUES('owner', 'not-json')")
 	if _, _, err := Compose(unowned, Session{SessionKey: SessionKey{Group: tGroupID, Member: tAIID}, Kind: GroupSession, Name: "AI"}, ContinueTurn, nil); err == nil {
 		t.Fatal("expected SQLite error on malformed owner setting")
@@ -627,10 +536,10 @@ func checkReviewReviewedChecksResume(t *testing.T, r *turnRig) {
 	if err != nil || !strings.Contains(gotReviewed, "== 1 of 1 · reviewed · from \"Codex\" (AI) in T-12 · instruction\n"+wantReviewed) {
 		t.Fatalf("reviewed turn failed: err=%v\n%s", err, gotReviewed)
 	}
-	checkChecksAndResumeItems(t, r)
+	checkChecksResumeAndMissingMsgItems(t, r)
 }
 
-func checkChecksAndResumeItems(t *testing.T, r *turnRig) {
+func checkChecksResumeAndMissingMsgItems(t *testing.T, r *turnRig) {
 	t.Helper()
 	empty, detail := "", "race failed"
 	checksPass := mustJSON(t, proto.MessageRow[proto.ChecksBody, proto.NoCard]{
@@ -652,16 +561,35 @@ func checkChecksAndResumeItems(t *testing.T, r *turnRig) {
 	if err != nil || !strings.HasSuffix(gotResume, "== 1 of 1 · resume · instruction\nTask T-12 resumed. Continue the task.") {
 		t.Fatalf("resume turn failed: err=%v\n%s", err, gotResume)
 	}
+
+	// Items whose msg is absent render header only with no body.
+	batchNil := []json.RawMessage{
+		r.makeInboxItem(proto.Item{Item: 7, Why: "mention"}, nil, nil),
+		r.makeInboxItem(proto.Item{Item: 8, Why: "reply", Task: proto.ID(tTaskID)}, nil, nil),
+		r.makeInboxItem(proto.Item{Item: 9, Why: "reviewed", Task: proto.ID(tTaskID)}, nil, nil),
+		r.makeInboxItem(proto.Item{Item: 10, Why: "checks", Task: proto.ID(tTaskID)}, nil, nil),
+		r.makeInboxItem(proto.Item{Item: 11, Why: "decided"}, nil, nil),
+		r.makeInboxItem(proto.Item{Item: 12, Why: "confirmed"}, nil, nil),
+	}
+	wantNil := strings.Join([]string{
+		`[SoloDawn] group "Website" · you are "Claude Code" · group session`,
+		`== 1 of 6 · mention · in main · information`,
+		`== 2 of 6 · reply · in T-12 · information`,
+		`== 3 of 6 · reviewed · in T-12 · instruction`,
+		`== 4 of 6 · checks · instruction`,
+		`== 5 of 6 · decided · from unknown in main · information`,
+		`== 6 of 6 · confirmed · in main · information`,
+	}, "\n")
+	assertComposed(t, r.h, r.session(GroupSession, false, "c1"), ItemsTurn, batchNil, wantNil, Turn{Kind: ItemsTurn})
 }
 
 func TestDecidedConfirmedAndNoticeItems(t *testing.T) {
 	r := newTurnRig(t)
 	appCard := func(thread *string, state *proto.CardState) json.RawMessage {
-		return mustJSON(t, proto.MessageRow[proto.ApprovalBody, *proto.CardState]{
+		return mustJSON(t, proto.MessageRow[json.RawMessage, *proto.CardState]{
 			RowHeader: proto.RowHeader{Type: "msg", ID: tMsg1ID, Seq: 16},
 			Pos:       16, Group: tGroupID, Thread: thread, Main: true, By: tAIID, Kind: "approval", Timestamp: seamStart, Mentions: []string{tOwnerM},
-			Body:  proto.ApprovalBody{Task: tTaskID, AI: tAIID, Tool: "Bash", Command: "pnpm add x", Category: "command", Approvers: []string{r.ownerID}},
-			State: state,
+			Body: json.RawMessage(`{}`), State: state,
 		})
 	}
 	gotApp, _, err := Compose(r.h, r.session(TaskSession, false, "c1"), ItemsTurn, []json.RawMessage{
@@ -669,21 +597,20 @@ func TestDecidedConfirmedAndNoticeItems(t *testing.T) {
 	})
 	assertContains(t, gotApp, err, "== 1 of 1 · decided · from \"owner\" in T-12 · instruction\nApproved. Run exactly the same request again.")
 
-	// Task-thread decided with non-owner actor stays instruction because thread != "".
 	gotDenyTask, _, err := Compose(r.h, r.session(TaskSession, false, "c1"), ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 2, Why: "decided", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, appCard(&tTaskID, &proto.CardState{Status: "denied", By: strPtr(tAliceM)}), nil),
 	})
 	assertContains(t, gotDenyTask, err, "== 1 of 1 · decided · from \"Alice\" in T-12 · instruction\nDenied.")
 
-	// Main-line decided with absent or empty By renders unknown actor and information authority.
 	gotDenyMain, _, err := Compose(r.h, r.session(GroupSession, false, "c1"), ItemsTurn, []json.RawMessage{
-		r.makeInboxItem(proto.Item{Item: 3, Why: "decided", Msg: proto.ID(tMsg1ID)}, appCard(nil, &proto.CardState{Status: "denied"}), nil),
+		r.makeInboxItem(proto.Item{Item: 3, Why: "decided", Msg: proto.ID(tMsg1ID)}, appCard(nil, &proto.CardState{Status: "denied", By: strPtr("")}), nil),
 	})
 	assertContains(t, gotDenyMain, err, "== 1 of 1 · decided · from unknown in main · information\nDenied.")
-	gotEmptyBy, _, err := Compose(r.h, r.session(GroupSession, false, "c1"), ItemsTurn, []json.RawMessage{
-		r.makeInboxItem(proto.Item{Item: 4, Why: "decided", Msg: proto.ID(tMsg1ID)}, appCard(nil, &proto.CardState{Status: "denied", By: strPtr("")}), nil),
+
+	gotNilState, _, err := Compose(r.h, r.session(GroupSession, false, "c1"), ItemsTurn, []json.RawMessage{
+		r.makeInboxItem(proto.Item{Item: 4, Why: "decided", Msg: proto.ID(tMsg1ID)}, appCard(nil, nil), nil),
 	})
-	assertContains(t, gotEmptyBy, err, "== 1 of 1 · decided · from unknown in main · information\nDenied.")
+	assertContains(t, gotNilState, err, "== 1 of 1 · decided · from unknown in main · information\n(approval)")
 
 	checkDecisionVariants(t, r)
 	checkConfirmedBriefVariants(t, r)
@@ -713,31 +640,36 @@ func checkDecisionVariants(t *testing.T, r *turnRig) {
 	}
 	sec := r.session(GroupSession, true, "c1")
 	const secHead = "[SoloDawn] group \"Website\" · you are \"Secretary\" · secretary session\n"
+	decLine := "Decision (id " + tMsg1ID + "): Where should the notice go?"
 
-	// Multiple-choice card answered by owner with both Choice and Text (no Cause).
 	bothRaw := r.makeInboxItem(proto.Item{Item: 5, AI: proto.ID(tSecID), Why: "decided", Msg: proto.ID(tMsg1ID)},
 		decCard(&proto.CardState{Status: "decided", By: strPtr(tOwnerM), Choice: strPtr("A"), Text: strPtr("Use top bar.")}), nil)
 	assertComposed(t, r.h, sec, ItemsTurn, []json.RawMessage{bothRaw},
-		secHead+"== 1 of 1 · decided · from \"owner\" in main · instruction\nDecision: Where should the notice go?\nChoice: A (Top bar)\nUse top bar.",
+		secHead+"== 1 of 1 · decided · from \"owner\" in main · instruction\n"+decLine+"\nChoice: A (Top bar)\nUse top bar.",
 		Turn{Kind: ItemsTurn})
 
-	// Multiple-choice card answered with Choice only (matched option label and unmatched option ID).
 	choiceOnly := r.makeInboxItem(proto.Item{Item: 6, AI: proto.ID(tSecID), Why: "decided", Msg: proto.ID(tMsg1ID)},
 		decCard(&proto.CardState{Status: "decided", By: strPtr(tAliceM), Choice: strPtr("B")}), nil)
 	assertComposed(t, r.h, sec, ItemsTurn, []json.RawMessage{choiceOnly},
-		secHead+"== 1 of 1 · decided · from \"Alice\" in main · information\nDecision: Where should the notice go?\nChoice: B (Footer)",
+		secHead+"== 1 of 1 · decided · from \"Alice\" in main · information\n"+decLine+"\nChoice: B (Footer)",
 		Turn{Kind: ItemsTurn})
+
 	unmatchedChoice := r.makeInboxItem(proto.Item{Item: 7, AI: proto.ID(tSecID), Why: "decided", Msg: proto.ID(tMsg1ID)},
 		decCard(&proto.CardState{Status: "decided", By: strPtr(tAliceM), Choice: strPtr("Z"), Text: strPtr("")}), nil)
 	assertComposed(t, r.h, sec, ItemsTurn, []json.RawMessage{unmatchedChoice},
-		secHead+"== 1 of 1 · decided · from \"Alice\" in main · information\nDecision: Where should the notice go?\nChoice: Z",
+		secHead+"== 1 of 1 · decided · from \"Alice\" in main · information\n"+decLine+"\nChoice: Z",
 		Turn{Kind: ItemsTurn})
 
-	// Multiple-choice card (with options) answered with custom free-text Text only.
 	textOnly := r.makeInboxItem(proto.Item{Item: 8, AI: proto.ID(tSecID), Why: "decided", Msg: proto.ID(tMsg1ID)},
 		decCard(&proto.CardState{Status: "decided", By: strPtr(tOwnerM), Choice: strPtr(""), Text: strPtr("Put it inline above the composer.")}), nil)
 	assertComposed(t, r.h, sec, ItemsTurn, []json.RawMessage{textOnly},
-		secHead+"== 1 of 1 · decided · from \"owner\" in main · instruction\nDecision: Where should the notice go?\nPut it inline above the composer.",
+		secHead+"== 1 of 1 · decided · from \"owner\" in main · instruction\n"+decLine+"\nPut it inline above the composer.",
+		Turn{Kind: ItemsTurn})
+
+	emptyBoth := r.makeInboxItem(proto.Item{Item: 9, AI: proto.ID(tSecID), Why: "decided", Msg: proto.ID(tMsg1ID)},
+		decCard(&proto.CardState{Status: "decided", By: strPtr(tOwnerM)}), nil)
+	assertComposed(t, r.h, sec, ItemsTurn, []json.RawMessage{emptyBoth},
+		secHead+"== 1 of 1 · decided · from \"owner\" in main · instruction\n"+decLine,
 		Turn{Kind: ItemsTurn})
 }
 
@@ -750,7 +682,6 @@ func checkConfirmedBriefVariants(t *testing.T, r *turnRig) {
 	})
 	assertContains(t, gotConfirm, err, "== 1 of 1 · confirmed · from \"Secretary\" (AI), confirmed by \"owner\" in main · instruction\nBrief \"Connection path\" (id "+tBriefID+") confirmed.")
 
-	// Gone member row falls back to member ID and information authority; absent By renders unknown.
 	r.h.Rows.Put(tGroupID, "member", tOwnerM, json.RawMessage(`{"r":"member","id":"gone","seq":99,"gone":true}`))
 	gotGoneOwner, _, err := Compose(r.h, sec, ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 10, AI: proto.ID(tSecID), Why: "confirmed", Msg: proto.ID(tBriefID)},
@@ -759,11 +690,11 @@ func checkConfirmedBriefVariants(t *testing.T, r *turnRig) {
 	r.putHuman(tOwnerM, r.ownerID, "owner", "owner")
 	assertContains(t, gotGoneOwner, err, "confirmed by \""+tOwnerM+"\" in main · information")
 
-	gotUnknownBy, _, err := Compose(r.h, sec, ItemsTurn, []json.RawMessage{
+	gotNilState, _, err := Compose(r.h, sec, ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 11, AI: proto.ID(tSecID), Why: "confirmed", Msg: proto.ID(tBriefID)},
-			r.briefMsgJSON(tBriefID, &proto.CardState{Status: "confirmed"}), nil),
+			r.briefMsgJSON(tBriefID, nil), nil),
 	})
-	assertContains(t, gotUnknownBy, err, "confirmed by unknown in main · information")
+	assertContains(t, gotNilState, err, "confirmed by unknown in main · information")
 
 	gotRevise, _, err := Compose(r.h, sec, ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 12, AI: proto.ID(tSecID), Why: "confirmed", Msg: proto.ID(tBriefID)},
@@ -847,220 +778,163 @@ func checkHandbackAndTaskStartedNotices(t *testing.T, r *turnRig, sec Session) {
 	if err != nil || strings.Contains(gotStarted, "(task)") {
 		t.Fatalf("task_started notice should omit (task): err=%v\n%s", err, gotStarted)
 	}
+	briefNotice, _, err := Compose(r.h, sec, ItemsTurn, []json.RawMessage{
+		r.makeInboxItem(proto.Item{Item: 7, AI: proto.ID(tSecID), Why: "notice", Msg: proto.ID(tBriefID), Code: "brief"}, r.briefMsgJSON(tBriefID, nil), nil),
+	})
+	assertContains(t, briefNotice, err, "(brief)")
 }
 
 func TestReplacedTurnRecoveryForEverySessionKind(t *testing.T) {
 	r := newTurnRig(t)
-	var mNewest, mAlice proto.MsgRow
-	if err := proto.Decode(r.textMsg(turnID("h-new"), tOwnerM, tTaskID, "Owner guidance."), &mNewest); err != nil {
-		t.Fatal(err)
-	}
-	if err := proto.Decode(r.textMsg(turnID("h-alice"), tAliceM, tTaskID, "Alice comment."), &mAlice); err != nil {
-		t.Fatal(err)
-	}
-	mMid := proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: turnID("h-mid"), Seq: 20},
-		Pos:       20, Group: tGroupID, Thread: &tTaskID, Main: true, By: tAIID, Kind: "decision", Timestamp: seamStart, Text: "", Mentions: []string{},
-		Body: json.RawMessage(`{"question":"q","options":[],"to":["` + r.ownerID + `"]}`), State: &proto.CardState{Status: "pending"},
-	}
-	mOldest := proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: turnID("h-old"), Seq: 10},
-		Pos:       10, Group: tGroupID, Thread: &tTaskID, Main: true, By: "system", Kind: "system", Timestamp: seamStart, Text: "", Mentions: []string{},
-		Body: json.RawMessage(`{"code":"turn_interrupted","ai":"` + tAIID + `","reason":"crash"}`),
-	}
-	// Home returns newest first; Compose reverses to chronological order.
-	r.history = []proto.MsgRow{mNewest, mAlice, mMid, mOldest}
-
-	mentionRaw := r.makeInboxItem(proto.Item{Item: 1, Why: "mention", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)},
-		r.textMsg(tMsg1ID, tPeerID, tTaskID, "Ready?"), nil)
+	r.history = buildReplacedTestHistory(t, r)
 	r.home.asked = nil
-	gotTask, _, err := Compose(r.h, r.session(TaskSession, false, ""), ReplacedTurn, []json.RawMessage{mentionRaw})
+	gotTask, turnTask, err := Compose(r.h, r.session(TaskSession, false, ""), ReplacedTurn, nil)
+	if err != nil || turnTask != (Turn{Kind: ReplacedTurn, Thread: tTaskID}) {
+		t.Fatalf("replaced task turn failed: err=%v turn=%+v", err, turnTask)
+	}
 	ftTask, ok := r.home.asked[len(r.home.asked)-1].(proto.FetchThread)
 	if !ok || ftTask.Group != tGroupID || ftTask.Before != 0 || ftTask.Limit != 20 || ftTask.Thread == nil || *ftTask.Thread != tTaskID {
 		t.Fatalf("unexpected task FetchThread: %+v", r.home.asked)
 	}
+	decID := turnID("h-dec")
 	wantHistory := strings.Join([]string{
 		`Recent messages:`,
 		`-- system · in T-12 · information`,
 		`System: turn_interrupted`,
 		`-- decision · from "Claude Code" (AI) in T-12 · information`,
 		`(decision)`,
-		`-- text · from "Alice" in T-12 · information`,
-		`Alice comment.`,
+		`-- decision · from "Claude Code" (AI) in T-12 · information`,
+		`Decision (id ` + decID + `): Retry on relay?`,
+		`Choice: A (Yes)`,
+		`Keep backoff short.`,
+		`-- approval · from "Claude Code" (AI) in T-12 · information`,
+		`Approved. Run exactly the same request again.`,
 		`-- text · from "owner" in T-12 · instruction`,
 		`Owner guidance.`,
 	}, "\n")
-	if err != nil || !strings.Contains(gotTask, "== context · instruction\nTask T-12") || !strings.Contains(gotTask, wantHistory) {
-		t.Fatalf("replaced task session failed: err=%v\n%s", err, gotTask)
+	if !strings.Contains(gotTask, "== context · instruction\nTask T-12") || !strings.HasSuffix(gotTask, wantHistory) {
+		t.Fatalf("replaced task session text mismatch:\n%s", gotTask)
 	}
-	checkReplacedReviewAndGroupSessions(t, r, mentionRaw)
+	checkReplacedReviewAndGroupSessions(t, r, wantHistory)
 }
 
-func checkReplacedReviewAndGroupSessions(t *testing.T, r *turnRig, mentionRaw json.RawMessage) {
+func buildReplacedTestHistory(t *testing.T, r *turnRig) []proto.MsgRow {
 	t.Helper()
-	gotRevMention, _, err := Compose(r.h, r.session(ReviewSession, false, ""), ReplacedTurn, []json.RawMessage{mentionRaw})
-	if err != nil || !strings.Contains(gotRevMention, "== context · instruction\nTask T-12 \"Node: report connection path changes\"\nCommit: 9f2c1ab\nDiff: .solodawn-review.diff") {
-		t.Fatalf("replaced review session with mention failed: err=%v\n%s", err, gotRevMention)
+	var mNewest proto.MsgRow
+	if err := proto.Decode(r.textMsg(turnID("h-new"), tOwnerM, tTaskID, "Owner guidance."), &mNewest); err != nil {
+		t.Fatal(err)
 	}
-	revRaw := r.makeInboxItem(proto.Item{Item: 2, AI: proto.ID(tPeerID), Why: "review", Task: proto.ID(tTaskID), Commit: "9f2c1ab"}, nil, nil)
-	gotRevItem, _, err := Compose(r.h, r.session(ReviewSession, false, ""), ReplacedTurn, []json.RawMessage{revRaw})
-	if err != nil || strings.Count(gotRevItem, "Diff: .solodawn-review.diff") != 1 {
-		t.Fatalf("replaced review session duplicated review lines: err=%v\n%s", err, gotRevItem)
+	mApproved := proto.MsgRow{
+		RowHeader: proto.RowHeader{Type: "msg", ID: turnID("h-app"), Seq: 25},
+		Pos:       25, Group: tGroupID, Thread: &tTaskID, Main: true, By: tAIID, Kind: "approval", Timestamp: seamStart, Mentions: []string{},
+		Body: json.RawMessage(`{}`), State: &proto.CardState{Status: "approved", By: strPtr(tOwnerM)},
+	}
+	mDecided := proto.MsgRow{
+		RowHeader: proto.RowHeader{Type: "msg", ID: turnID("h-dec"), Seq: 22},
+		Pos:       22, Group: tGroupID, Thread: &tTaskID, Main: true, By: tAIID, Kind: "decision", Timestamp: seamStart, Mentions: []string{},
+		Body:  mustJSON(t, proto.DecisionBody{Question: "Retry on relay?", Options: []proto.DecisionOption{{ID: "A", Label: "Yes", Effect: "Fast"}}, To: []string{r.ownerID}}),
+		State: &proto.CardState{Status: "decided", By: strPtr(tOwnerM), Choice: strPtr("A"), Text: strPtr("Keep backoff short.")},
+	}
+	mPending := proto.MsgRow{
+		RowHeader: proto.RowHeader{Type: "msg", ID: turnID("h-mid"), Seq: 20},
+		Pos:       20, Group: tGroupID, Thread: &tTaskID, Main: true, By: tAIID, Kind: "decision", Timestamp: seamStart, Mentions: []string{},
+		Body: json.RawMessage(`{"question":"q","options":[],"to":["` + r.ownerID + `"]}`), State: &proto.CardState{Status: "pending"},
+	}
+	mOldest := proto.MsgRow{
+		RowHeader: proto.RowHeader{Type: "msg", ID: turnID("h-old"), Seq: 10},
+		Pos:       10, Group: tGroupID, Thread: &tTaskID, Main: true, By: "system", Kind: "system", Timestamp: seamStart, Mentions: []string{},
+		Body: json.RawMessage(`{"code":"turn_interrupted","ai":"` + tAIID + `","reason":"crash"}`),
+	}
+	return []proto.MsgRow{mNewest, mApproved, mDecided, mPending, mOldest}
+}
+
+func checkReplacedReviewAndGroupSessions(t *testing.T, r *turnRig, wantHistory string) {
+	t.Helper()
+	gotRev, turnRev, err := Compose(r.h, r.session(ReviewSession, false, ""), ReplacedTurn, nil)
+	if err != nil || turnRev != (Turn{Kind: ReplacedTurn, Thread: tTaskID}) || !strings.Contains(gotRev, "== context · instruction\nTask T-12 \"Node: report connection path changes\"\nCommit: 9f2c1ab\nDiff: .solodawn-review.diff") || !strings.HasSuffix(gotRev, wantHistory) {
+		t.Fatalf("replaced review session failed: err=%v turn=%+v\n%s", err, turnRev, gotRev)
+	}
+
+	gotGroupWithHist, turnGroupHist, err := Compose(r.h, r.session(GroupSession, false, ""), ReplacedTurn, nil)
+	if err != nil || turnGroupHist != (Turn{Kind: ReplacedTurn}) || !strings.Contains(gotGroupWithHist, "== context · instruction\nRecent messages:") {
+		t.Fatalf("replaced group session with history failed: err=%v turn=%+v\n%s", err, turnGroupHist, gotGroupWithHist)
 	}
 
 	r.history = nil
 	r.home.asked = nil
-	mainMention := r.makeInboxItem(proto.Item{Item: 3, Why: "mention", Msg: proto.ID(tMsg1ID)},
-		r.textMsg(tMsg1ID, tOwnerM, "", "Hello"), nil)
-	wantGroup := "[SoloDawn] group \"Website\" · you are \"Claude Code\" · group session\n== 1 of 1 · mention · from \"owner\" in main · instruction\nHello"
-	assertComposed(t, r.h, r.session(GroupSession, false, ""), ReplacedTurn, []json.RawMessage{mainMention}, wantGroup, Turn{Kind: ReplacedTurn})
+	wantEmptyGroup := "[SoloDawn] group \"Website\" · you are \"Claude Code\" · group session\n== context · instruction"
+	assertComposed(t, r.h, r.session(GroupSession, false, ""), ReplacedTurn, nil, wantEmptyGroup, Turn{Kind: ReplacedTurn})
 	if ftGroup, ok := r.home.asked[0].(proto.FetchThread); !ok || ftGroup.Thread != nil || ftGroup.Limit != 20 || ftGroup.Group != tGroupID {
 		t.Fatalf("unexpected group FetchThread: %+v", r.home.asked)
 	}
 }
 
-func TestComposeRefusalsAndFetchErrors(t *testing.T) {
+func TestComposeDecodeAndFetchErrors(t *testing.T) {
 	r := newTurnRig(t)
 	s := r.session(TaskSession, false, "c1")
-	checkBadItemInputs(t, r, s)
-	checkBadCardAndNoticeInputs(t, r, s)
+	checkMalformedItemAndBodyInputs(t, r, s)
 	checkFetchFailurePaths(t, r)
 }
 
-func checkBadItemInputs(t *testing.T, r *turnRig, s Session) {
+func checkMalformedItemAndBodyInputs(t *testing.T, r *turnRig, s Session) {
 	t.Helper()
-	badEnv := r.homeKey.Sign(string(mustJSON(t, proto.HomeCommand{Type: "post", Nonce: proto.ID(tMsg1ID), Timestamp: seamStart, Group: proto.ID(tGroupID)})))
-	wrongTypeItem := r.homeKey.Sign(string(mustJSON(t, proto.Item{Type: "post", Nonce: proto.ID(tMsg1ID), Timestamp: seamStart, Group: proto.ID(tGroupID), To: r.homeKey.ID(), Item: 1, AI: proto.ID(tAIID), Why: "resume", Task: proto.ID(tTaskID)})))
-	badCallMsg := mustJSON(t, proto.MessageRow[json.RawMessage, proto.NoCard]{
-		RowHeader: proto.RowHeader{Type: "msg", ID: tMsg1ID, Seq: 1}, Pos: 1, Group: tGroupID, By: tPeerID, Kind: "call", Timestamp: seamStart, Mentions: []string{}, Body: json.RawMessage(`{}`),
-	})
-	badChecksMsg := mustJSON(t, proto.MessageRow[json.RawMessage, proto.NoCard]{
-		RowHeader: proto.RowHeader{Type: "msg", ID: tMsg1ID, Seq: 1}, Pos: 1, Group: tGroupID, By: "system", Kind: "checks", Timestamp: seamStart, Mentions: []string{}, Body: json.RawMessage(`{}`),
-	})
-	badRevMsg := mustJSON(t, proto.MessageRow[json.RawMessage, proto.NoCard]{
-		RowHeader: proto.RowHeader{Type: "msg", ID: tMsg1ID, Seq: 1}, Pos: 1, Group: tGroupID, By: tPeerID, Kind: "review", Timestamp: seamStart, Mentions: []string{}, Body: json.RawMessage(`{}`),
-	})
-	textMsg := r.textMsg(tMsg1ID, tOwnerM, tTaskID, "hi")
-
-	badRawItems := []json.RawMessage{
+	badMsg := func(kind string, state *proto.CardState) json.RawMessage {
+		return mustJSON(t, proto.MessageRow[json.RawMessage, *proto.CardState]{
+			RowHeader: proto.RowHeader{Type: "msg", ID: tMsg1ID, Seq: 1},
+			Pos:       1, Group: tGroupID, Main: true, By: tPeerID, Kind: kind, Timestamp: seamStart, Mentions: []string{},
+			Body: json.RawMessage(`{}`), State: state,
+		})
+	}
+	validResumeEnv := r.homeKey.Sign(string(mustJSON(t, proto.Item{
+		Type: "item", Nonce: proto.ID(tMsg1ID), Timestamp: seamStart, Group: proto.ID(tGroupID),
+		To: r.homeKey.ID(), Item: 1, AI: proto.ID(tAIID), Why: "resume", Task: proto.ID(tTaskID),
+	})))
+	cases := []json.RawMessage{
 		json.RawMessage(`{`),
-		mustJSON(t, proto.InboxItem{Env: proto.Envelope{Payload: "{", Key: "k", Signature: "s"}}),
-		mustJSON(t, proto.InboxItem{Env: badEnv}),
-		mustJSON(t, proto.InboxItem{Env: wrongTypeItem}),
+		json.RawMessage(`{"env":` + string(mustJSON(t, validResumeEnv)) + `,"task":"bad"}`),
+		mustJSON(t, proto.InboxItem{Env: r.homeKey.Sign("{")}),
 		r.makeInboxItem(proto.Item{Item: 1, Why: "mention", Msg: proto.ID(tMsg1ID)}, json.RawMessage(`{}`), nil),
 		r.makeInboxItem(proto.Item{Item: 1, Why: "merge", Task: proto.ID(tTaskID), Commit: "c1"}, nil, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "mention"}, nil, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "mention", Msg: proto.ID(tMsg2ID)}, textMsg, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "mention", Msg: proto.ID(tMsg1ID)}, badCallMsg, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "reply"}, nil, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "reply", Msg: proto.ID(tMsg2ID)}, textMsg, nil),
+		r.makeInboxItem(proto.Item{Item: 1, Why: "mention", Msg: proto.ID(tMsg1ID)}, badMsg("call", nil), nil),
 		r.makeInboxItem(proto.Item{Item: 1, Why: "assign", Task: proto.ID(turnID("absent"))}, nil, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, nil, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "assign", Task: proto.ID(tTaskID)}, textMsg, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg2ID)}, textMsg, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, badChecksMsg, nil),
+		r.makeInboxItem(proto.Item{Item: 1, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, badMsg("checks", nil), nil),
 		r.makeInboxItem(proto.Item{Item: 1, Why: "review", Task: proto.ID(turnID("absent")), Commit: "c1"}, nil, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "review", Task: proto.ID(tTaskID)}, nil, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "reviewed", Msg: proto.ID(tMsg1ID)}, badRevMsg, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "reviewed", Task: proto.ID(tTaskID)}, nil, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "reviewed", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg2ID)}, badRevMsg, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "reviewed", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, textMsg, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "reviewed", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, badRevMsg, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "checks", Msg: proto.ID(tMsg1ID)}, badChecksMsg, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "checks", Task: proto.ID(tTaskID)}, nil, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "checks", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg2ID)}, badChecksMsg, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "checks", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, textMsg, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "checks", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, badChecksMsg, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "resume"}, nil, nil),
+		r.makeInboxItem(proto.Item{Item: 1, Why: "reviewed", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, badMsg("review", nil), nil),
+		r.makeInboxItem(proto.Item{Item: 1, Why: "checks", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, badMsg("checks", nil), nil),
+		r.makeInboxItem(proto.Item{Item: 1, Why: "decided", Msg: proto.ID(tMsg1ID)}, badMsg("decision", &proto.CardState{Status: "decided", Choice: strPtr("A")}), nil),
+		r.makeInboxItem(proto.Item{Item: 1, Why: "confirmed", Msg: proto.ID(tMsg1ID)}, badMsg("brief", &proto.CardState{Status: "confirmed"}), nil),
+		r.makeInboxItem(proto.Item{Item: 1, Why: "notice", Code: "handback", Msg: proto.ID(tMsg1ID)}, badMsg("handback", nil), nil),
+		r.makeInboxItem(proto.Item{Item: 1, Why: "notice", Code: "login_invalid", Msg: proto.ID(tMsg1ID)}, badMsg("system", nil), nil),
 	}
-	for i, bad := range badRawItems {
+	for i, bad := range cases {
 		if _, _, err := Compose(r.h, s, ItemsTurn, []json.RawMessage{bad}); err == nil {
 			t.Fatalf("case %d unexpectedly succeeded", i)
 		}
 	}
-}
-
-func checkBadCardAndNoticeInputs(t *testing.T, r *turnRig, s Session) {
-	t.Helper()
-	makeCard := func(kind, body string, state *proto.CardState) json.RawMessage {
-		return mustJSON(t, proto.MessageRow[json.RawMessage, *proto.CardState]{
-			RowHeader: proto.RowHeader{Type: "msg", ID: tMsg1ID, Seq: 1}, Pos: 1, Group: tGroupID, Main: true, By: tSecID, Kind: kind,
-			Timestamp: seamStart, Mentions: []string{}, Body: json.RawMessage(body), State: state,
-		})
-	}
-	badHBMsg := mustJSON(t, proto.MessageRow[json.RawMessage, proto.NoCard]{
-		RowHeader: proto.RowHeader{Type: "msg", ID: tMsg1ID, Seq: 1}, Pos: 1, Group: tGroupID, By: tAIID, Kind: "handback", Timestamp: seamStart, Mentions: []string{}, Body: json.RawMessage(`{}`),
-	})
-	badSysMsg := mustJSON(t, proto.MessageRow[json.RawMessage, proto.NoCard]{
-		RowHeader: proto.RowHeader{Type: "msg", ID: tMsg1ID, Seq: 1}, Pos: 1, Group: tGroupID, By: "system", Kind: "system", Timestamp: seamStart, Mentions: []string{}, Body: json.RawMessage(`{}`),
-	})
-	validAppBody := string(mustJSON(t, proto.ApprovalBody{Task: tTaskID, AI: tAIID, Tool: "Bash", Command: "ls", Category: "command", Approvers: []string{r.ownerID}}))
-	validDecBody := string(mustJSON(t, proto.DecisionBody{Question: "q", Options: []proto.DecisionOption{}, To: []string{r.ownerID}}))
-	validBriefBody := string(mustJSON(t, r.brief))
-
-	cases := []json.RawMessage{
-		r.makeInboxItem(proto.Item{Item: 1, Why: "decided"}, nil, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "decided", Msg: proto.ID(tMsg2ID)}, makeCard("approval", validAppBody, &proto.CardState{Status: "approved"}), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "decided", Msg: proto.ID(tMsg1ID)}, makeCard("approval", validAppBody, nil), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "decided", Msg: proto.ID(tMsg1ID)}, makeCard("brief", validBriefBody, &proto.CardState{Status: "confirmed"}), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "decided", Msg: proto.ID(tMsg1ID)}, makeCard("approval", `{}`, &proto.CardState{Status: "approved"}), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "decided", Msg: proto.ID(tMsg1ID)}, makeCard("approval", validAppBody, &proto.CardState{Status: "pending"}), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "decided", Msg: proto.ID(tMsg1ID)}, makeCard("decision", validDecBody, &proto.CardState{Status: "pending", Choice: strPtr("A")}), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "decided", Msg: proto.ID(tMsg1ID)}, makeCard("decision", `{}`, &proto.CardState{Status: "decided", Choice: strPtr("A")}), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "decided", Msg: proto.ID(tMsg1ID)}, makeCard("decision", validDecBody, &proto.CardState{Status: "decided"}), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "decided", Msg: proto.ID(tMsg1ID)}, makeCard("decision", validDecBody, &proto.CardState{Status: "decided", Choice: strPtr(""), Text: strPtr("")}), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "confirmed"}, nil, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "confirmed", Msg: proto.ID(tMsg2ID)}, makeCard("brief", validBriefBody, &proto.CardState{Status: "confirmed"}), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "confirmed", Msg: proto.ID(tMsg1ID)}, makeCard("brief", validBriefBody, nil), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "confirmed", Msg: proto.ID(tMsg1ID)}, makeCard("approval", validAppBody, &proto.CardState{Status: "approved"}), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "confirmed", Msg: proto.ID(tMsg1ID)}, makeCard("brief", `{}`, &proto.CardState{Status: "confirmed"}), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "confirmed", Msg: proto.ID(tMsg1ID)}, makeCard("brief", validBriefBody, &proto.CardState{Status: "pending"}), nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "notice"}, nil, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "notice", Code: "handback", Msg: proto.ID(tMsg2ID)}, badHBMsg, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "notice", Code: "handback", Msg: proto.ID(tMsg1ID)}, badHBMsg, nil),
-		r.makeInboxItem(proto.Item{Item: 1, Why: "notice", Code: "login_invalid", Msg: proto.ID(tMsg1ID)}, badSysMsg, nil),
-	}
-	for i, bad := range cases {
-		if _, _, err := Compose(r.h, s, ItemsTurn, []json.RawMessage{bad}); err == nil {
-			t.Fatalf("card/notice case %d unexpectedly succeeded", i)
-		}
-	}
+	// First assign with bad attached msg also surfaces the body decode error.
+	badFirstAssign := r.makeInboxItem(proto.Item{Item: 2, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, badMsg("system", nil), nil)
+	_, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{badFirstAssign})
+	seamCode(t, err, "bad_request")
 }
 
 func checkFetchFailurePaths(t *testing.T, r *turnRig) {
 	t.Helper()
 	assignFirst := r.makeInboxItem(proto.Item{Item: 1, Why: "assign", Task: proto.ID(tTaskID)}, nil, nil)
 	revRaw := r.makeInboxItem(proto.Item{Item: 2, Why: "review", Task: proto.ID(tTaskID), Commit: "c1"}, nil, nil)
-	mentionRaw := r.makeInboxItem(proto.Item{Item: 3, Why: "mention", Msg: proto.ID(tMsg1ID)},
-		r.textMsg(tMsg1ID, tOwnerM, tTaskID, "hi"), nil)
 
-	// Brief task missing Brief id.
-	noBriefTask := r.baseTask()
-	noBriefTask.Brief = ""
-	r.h.Rows.Put(tGroupID, "task", tTaskID, mustJSON(t, noBriefTask))
-	_, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{assignFirst})
-	seamCode(t, err, "bad_request")
-	_, _, err = Compose(r.h, r.session(ReviewSession, false, ""), ItemsTurn, []json.RawMessage{revRaw})
-	seamCode(t, err, "bad_request")
-	r.h.Rows.Put(tGroupID, "task", tTaskID, mustJSON(t, r.baseTask()))
-
-	// ReplacedTurn without task row on TaskSession and ReviewSession.
 	missingTaskSess := r.session(TaskSession, false, "")
 	missingTaskSess.Task = turnID("missing")
-	_, _, err = Compose(r.h, missingTaskSess, ReplacedTurn, []json.RawMessage{mentionRaw})
+	_, _, err := Compose(r.h, missingTaskSess, ReplacedTurn, nil)
 	seamCode(t, err, "bad_request")
 	missingRevSess := r.session(ReviewSession, false, "")
 	missingRevSess.Task = turnID("missing")
-	_, _, err = Compose(r.h, missingRevSess, ReplacedTurn, []json.RawMessage{mentionRaw})
+	_, _, err = Compose(r.h, missingRevSess, ReplacedTurn, nil)
 	seamCode(t, err, "bad_request")
 
-	checkHomeTransportAndPayloadErrors(t, r, assignFirst, mentionRaw)
-}
-
-func checkHomeTransportAndPayloadErrors(t *testing.T, r *turnRig, assignFirst, mentionRaw json.RawMessage) {
-	t.Helper()
 	r.home.handler = func(any) (json.RawMessage, error) { return nil, io.EOF }
-	_, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{assignFirst})
+	_, _, err = Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{assignFirst})
+	seamCode(t, err, "home_unreachable")
+	_, _, err = Compose(r.h, r.session(ReviewSession, false, ""), ItemsTurn, []json.RawMessage{revRaw})
 	seamCode(t, err, "home_unreachable")
 
 	r.home.handler = func(any) (json.RawMessage, error) {
@@ -1073,22 +947,27 @@ func checkHomeTransportAndPayloadErrors(t *testing.T, r *turnRig, assignFirst, m
 	_, _, err = Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{assignFirst})
 	seamCode(t, err, "bad_request")
 
+	checkBriefNoteAndHistoryDecodeErrors(t, r, assignFirst)
+}
+
+func checkBriefNoteAndHistoryDecodeErrors(t *testing.T, r *turnRig, assignFirst json.RawMessage) {
+	t.Helper()
 	r.home.handler = func(any) (json.RawMessage, error) {
 		return mustJSON(t, proto.Fetched{Type: "fetched", Success: proto.Success{Re: 1, OK: true}, Rows: []json.RawMessage{}}), nil
 	}
-	_, _, err = Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{assignFirst})
+	_, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{assignFirst})
 	seamCode(t, err, "not_found")
 
 	r.home.handler = func(any) (json.RawMessage, error) {
-		return mustJSON(t, proto.Fetched{Type: "fetched", Success: proto.Success{Re: 1, OK: true}, Rows: []json.RawMessage{r.textMsg(tBriefID, tOwnerM, "", "not brief")}}), nil
+		return mustJSON(t, proto.Fetched{Type: "fetched", Success: proto.Success{Re: 1, OK: true}, Rows: []json.RawMessage{json.RawMessage(`{}`)}}), nil
 	}
 	_, _, err = Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{assignFirst})
 	seamCode(t, err, "bad_request")
 
-	checkNoteAndHistoryDecodeErrors(t, r, assignFirst, mentionRaw)
+	checkNoteAndHistoryFetchErrors(t, r, assignFirst)
 }
 
-func checkNoteAndHistoryDecodeErrors(t *testing.T, r *turnRig, assignFirst, mentionRaw json.RawMessage) {
+func checkNoteAndHistoryFetchErrors(t *testing.T, r *turnRig, assignFirst json.RawMessage) {
 	t.Helper()
 	r.home.handler = func(req any) (json.RawMessage, error) {
 		if _, ok := req.(proto.FetchKind); ok {
@@ -1114,7 +993,7 @@ func checkNoteAndHistoryDecodeErrors(t *testing.T, r *turnRig, assignFirst, ment
 		}
 		return r.defaultHomeHandler(req)
 	}
-	_, _, err = Compose(r.h, r.session(GroupSession, false, ""), ReplacedTurn, []json.RawMessage{mentionRaw})
+	_, _, err = Compose(r.h, r.session(GroupSession, false, ""), ReplacedTurn, nil)
 	seamCode(t, err, "home_unreachable")
 
 	r.home.handler = func(req any) (json.RawMessage, error) {
@@ -1123,7 +1002,7 @@ func checkNoteAndHistoryDecodeErrors(t *testing.T, r *turnRig, assignFirst, ment
 		}
 		return r.defaultHomeHandler(req)
 	}
-	_, _, err = Compose(r.h, r.session(GroupSession, false, ""), ReplacedTurn, []json.RawMessage{mentionRaw})
+	_, _, err = Compose(r.h, r.session(GroupSession, false, ""), ReplacedTurn, nil)
 	seamCode(t, err, "bad_request")
 
 	badHistSys := mustJSON(t, proto.MessageRow[json.RawMessage, proto.NoCard]{
@@ -1135,7 +1014,7 @@ func checkNoteAndHistoryDecodeErrors(t *testing.T, r *turnRig, assignFirst, ment
 		}
 		return r.defaultHomeHandler(req)
 	}
-	_, _, err = Compose(r.h, r.session(GroupSession, false, ""), ReplacedTurn, []json.RawMessage{mentionRaw})
+	_, _, err = Compose(r.h, r.session(GroupSession, false, ""), ReplacedTurn, nil)
 	seamCode(t, err, "bad_request")
 
 	close(r.home.done)

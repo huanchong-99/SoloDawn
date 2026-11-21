@@ -52,7 +52,7 @@ Feature: A host composes session instructions and turn text
       """
       [SoloDawn] group "Website" · you are "Secretary" · secretary session
       == 1 of 1 · decided · from "owner" in main · instruction
-      Decision: Where should the notice go?
+      Decision (id Zk3m8vN2pQ5rT7wX9yB1cA): Where should the notice go?
       Choice: A (Top bar)
       Keep it subtle.
       """

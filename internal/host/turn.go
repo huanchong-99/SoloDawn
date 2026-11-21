@@ -91,6 +91,8 @@ var msgFormatters = map[string]func(proto.MsgRow) (string, error){
 	"checks":   formatChecksMsg,
 	"handback": formatHandbackMsg,
 	"system":   formatSystemMsg,
+	"decision": formatDecisionMsg,
+	"approval": formatApprovalMsg,
 }
 
 func composeTurn(h *Host, s Session, kind TurnKind, items []json.RawMessage) (string, Turn, error) {
@@ -99,9 +101,9 @@ func composeTurn(h *Host, s Session, kind TurnKind, items []json.RawMessage) (st
 		return "", Turn{}, err
 	}
 	switch kind {
-	case ContinueTurn, HandbackTurn:
-		return c.composeOwnTurn(items)
-	case ItemsTurn, ReplacedTurn:
+	case ContinueTurn, HandbackTurn, ReplacedTurn:
+		return c.composeNoItemsTurn(items)
+	case ItemsTurn:
 		return c.composeItemsTurn(items)
 	default:
 		return "", Turn{}, &Error{"bad_request", "unknown turn kind: " + string(kind)}
@@ -131,9 +133,12 @@ func loadOwner(db *store.Store) (string, error) {
 	return owner, err
 }
 
-func (c *turnCtx) composeOwnTurn(items []json.RawMessage) (string, Turn, error) {
+func (c *turnCtx) composeNoItemsTurn(items []json.RawMessage) (string, Turn, error) {
 	if len(items) != 0 {
 		return "", Turn{}, &Error{"bad_request", string(c.kind) + " turn takes no items"}
+	}
+	if c.kind == ReplacedTurn {
+		return c.composeReplaced()
 	}
 	block := itemBlock{why: string(c.kind), authority: "instruction", body: c.ownTurnBody()}
 	text := c.sessionHeader() + "\n" + renderBlock(1, 1, block)
@@ -154,52 +159,28 @@ func (c *turnCtx) ownTurnBody() string {
 	return base
 }
 
+func (c *turnCtx) composeReplaced() (string, Turn, error) {
+	ctx, err := c.replacedContext()
+	if err != nil {
+		return "", Turn{}, err
+	}
+	return c.sessionHeader() + "\n" + ctx, Turn{Kind: ReplacedTurn, Thread: c.s.Task}, nil
+}
+
 func (c *turnCtx) composeItemsTurn(rawItems []json.RawMessage) (string, Turn, error) {
 	if len(rawItems) == 0 {
-		return c.composeTakeoverBootstrap()
+		return "", Turn{}, &Error{"bad_request", "items turn requires at least one item"}
 	}
 	parsed, err := c.parseItems(rawItems)
 	if err != nil {
 		return "", Turn{}, err
 	}
-	lines, err := c.turnHeadLines(parsed)
-	if err != nil {
-		return "", Turn{}, err
-	}
-	return c.appendParsedItems(lines, parsed)
+	return c.renderItems(parsed)
 }
 
-func (c *turnCtx) composeTakeoverBootstrap() (string, Turn, error) {
-	task, ok := c.lookupTask(c.s.Task)
-	if c.kind != ItemsTurn || c.s.Kind != TaskSession || !ok || task.Origin != "takeover" {
-		return "", Turn{}, &Error{"bad_request", "items turn requires at least one item"}
-	}
-	block := itemBlock{
-		why:       "assign",
-		authority: "instruction",
-		body:      "Your owner is about to work with you directly in the terminal.",
-	}
-	text := c.sessionHeader() + "\n" + renderBlock(1, 1, block)
-	return text, Turn{Kind: ItemsTurn, Thread: c.s.Task}, nil
-}
-
-func (c *turnCtx) turnHeadLines(parsed []parsedItem) ([]string, error) {
+func (c *turnCtx) renderItems(parsed []parsedItem) (string, Turn, error) {
 	lines := []string{c.sessionHeader()}
-	if c.kind != ReplacedTurn {
-		return lines, nil
-	}
-	ctxBlock, err := c.replacedContext(parsed)
-	if err != nil {
-		return nil, err
-	}
-	if ctxBlock != "" {
-		lines = append(lines, ctxBlock)
-	}
-	return lines, nil
-}
-
-func (c *turnCtx) appendParsedItems(lines []string, parsed []parsedItem) (string, Turn, error) {
-	turn := Turn{Kind: c.kind}
+	turn := Turn{Kind: ItemsTurn}
 	for i, p := range parsed {
 		block, depth, err := c.buildItem(p, i == 0)
 		if err != nil {
@@ -228,19 +209,10 @@ func (c *turnCtx) parseItems(rawItems []json.RawMessage) ([]parsedItem, error) {
 	return out, nil
 }
 
-func decodeInboxItem(wire proto.InboxItem) (proto.Item, error) {
-	var it proto.Item
-	err := proto.Decode([]byte(wire.Env.Payload), &it)
-	return it, err
-}
-
 func parseOneItem(raw json.RawMessage) (parsedItem, *proto.TaskRow, error) {
 	var wire proto.InboxItem
-	if proto.Decode(raw, &wire) != nil {
-		return parsedItem{}, nil, &Error{"bad_request", "invalid inbox item"}
-	}
-	it, err := decodeInboxItem(wire)
-	if err != nil || it.Type != "item" {
+	var it proto.Item
+	if proto.Decode(raw, &wire) != nil || proto.Decode([]byte(wire.Env.Payload), &it) != nil {
 		return parsedItem{}, nil, &Error{"bad_request", "invalid inbox item"}
 	}
 	msg, err := decodeOptionalMsg(wire.Msg)
@@ -259,13 +231,6 @@ func decodeOptionalMsg(raw json.RawMessage) (*proto.MsgRow, error) {
 		return nil, &Error{"bad_request", "invalid item message"}
 	}
 	return &msg, nil
-}
-
-func msgMatchesItem(id proto.ID, msg *proto.MsgRow) bool {
-	if msg == nil {
-		return id == ""
-	}
-	return string(id) == msg.ID
 }
 
 func (c *turnCtx) buildItem(p parsedItem, first bool) (itemBlock, int, error) {
@@ -368,6 +333,13 @@ func (c *turnCtx) fromIn(memberID, thread string) string {
 	return "from " + c.memberLabel(memberID) + " " + c.place(thread)
 }
 
+func (c *turnCtx) msgWho(msg *proto.MsgRow, thread string) string {
+	if msg != nil && msg.By != "system" {
+		return c.fromIn(msg.By, thread)
+	}
+	return c.place(thread)
+}
+
 func (c *turnCtx) memberLabel(id string) string {
 	if m, ok := c.lookupMember(id); ok {
 		return formatSpeaker(m.Name, m.Kind == "ai")
@@ -376,7 +348,7 @@ func (c *turnCtx) memberLabel(id string) string {
 }
 
 func (c *turnCtx) stateActorLabel(state *proto.CardState) string {
-	if by := strVal(state.By); by != "" {
+	if by := stateBy(state); by != "" {
 		return c.memberLabel(by)
 	}
 	return "unknown"
@@ -403,8 +375,46 @@ func strVal(p *string) string {
 	return *p
 }
 
-func hasCardState(p parsedItem) bool {
-	return p.msg != nil && string(p.item.Msg) == p.msg.ID && p.msg.State != nil
+func msgBy(msg *proto.MsgRow) string {
+	if msg == nil {
+		return ""
+	}
+	return msg.By
+}
+
+func msgText(msg *proto.MsgRow) string {
+	if msg == nil {
+		return ""
+	}
+	return msg.Text
+}
+
+func msgState(msg *proto.MsgRow) *proto.CardState {
+	if msg == nil {
+		return nil
+	}
+	return msg.State
+}
+
+func cardStatus(state *proto.CardState) string {
+	if state == nil {
+		return ""
+	}
+	return state.Status
+}
+
+func stateBy(state *proto.CardState) string {
+	if state == nil {
+		return ""
+	}
+	return strVal(state.By)
+}
+
+func formatOptionalMsg(msg *proto.MsgRow) (string, error) {
+	if msg == nil {
+		return "", nil
+	}
+	return formatMsgContent(*msg)
 }
 
 func appendAttachedMsg(lines []string, msg *proto.MsgRow) (string, error) {
@@ -419,20 +429,17 @@ func appendAttachedMsg(lines []string, msg *proto.MsgRow) (string, error) {
 }
 
 func (c *turnCtx) buildMention(p parsedItem, _ bool) (itemBlock, int, error) {
-	if p.msg == nil || string(p.item.Msg) != p.msg.ID {
-		return itemBlock{}, 0, &Error{"bad_request", "mention item requires matching msg"}
-	}
-	callID, depth, err := parseCallInfo(*p.msg)
+	callID, depth, err := parseCallInfo(p.msg)
 	if err != nil {
 		return itemBlock{}, 0, err
 	}
-	auth := authorityLabel(c.isOwnerMember(p.msg.By))
-	who := c.fromIn(p.msg.By, itemThread(string(p.item.Task), p.msg))
-	return itemBlock{why: "mention", whoPlace: who, authority: auth, callID: callID, body: p.msg.Text}, depth, nil
+	thread := itemThread(string(p.item.Task), p.msg)
+	auth := authorityLabel(c.isOwnerMember(msgBy(p.msg)))
+	return itemBlock{why: "mention", whoPlace: c.msgWho(p.msg, thread), authority: auth, callID: callID, body: msgText(p.msg)}, depth, nil
 }
 
-func parseCallInfo(msg proto.MsgRow) (string, int, error) {
-	if msg.Kind != "call" {
+func parseCallInfo(msg *proto.MsgRow) (string, int, error) {
+	if msg == nil || msg.Kind != "call" {
 		return "", 0, nil
 	}
 	var call proto.CallBody
@@ -443,17 +450,14 @@ func parseCallInfo(msg proto.MsgRow) (string, int, error) {
 }
 
 func (c *turnCtx) buildReply(p parsedItem, _ bool) (itemBlock, int, error) {
-	if p.msg == nil || string(p.item.Msg) != p.msg.ID {
-		return itemBlock{}, 0, &Error{"bad_request", "reply item requires matching msg"}
-	}
-	who := c.fromIn(p.msg.By, itemThread(string(p.item.Task), p.msg))
-	return itemBlock{why: "reply", whoPlace: who, authority: "information", body: p.msg.Text}, 0, nil
+	thread := itemThread(string(p.item.Task), p.msg)
+	return itemBlock{why: "reply", whoPlace: c.msgWho(p.msg, thread), authority: "information", body: msgText(p.msg)}, 0, nil
 }
 
 func (c *turnCtx) buildAssign(p parsedItem, first bool) (itemBlock, int, error) {
 	task, ok := c.lookupTask(string(p.item.Task))
-	if !ok || !msgMatchesItem(p.item.Msg, p.msg) {
-		return itemBlock{}, 0, &Error{"bad_request", "assign item requires task and matching msg"}
+	if !ok {
+		return itemBlock{}, 0, &Error{"bad_request", "assign item requires task"}
 	}
 	body, err := c.assignBody(task, p.msg, first)
 	if err != nil {
@@ -473,22 +477,15 @@ func (c *turnCtx) assignBody(task proto.TaskRow, msg *proto.MsgRow, first bool) 
 }
 
 func (c *turnCtx) isFirstTaskTurn(first bool) bool {
-	return first && c.kind == ItemsTurn && c.s.Kind == TaskSession && c.s.CLISession == ""
+	return first && c.s.Kind == TaskSession && c.s.CLISession == ""
 }
 
 func (c *turnCtx) firstAssignBody(task proto.TaskRow, msg *proto.MsgRow) (string, error) {
-	if isTakeoverBootstrap(task, msg) {
-		return "Your owner is about to work with you directly in the terminal.", nil
-	}
 	lines, err := c.taskStartLines(task)
 	if err != nil {
 		return "", err
 	}
 	return appendAttachedMsg(lines, msg)
-}
-
-func isTakeoverBootstrap(task proto.TaskRow, msg *proto.MsgRow) bool {
-	return task.Origin == "takeover" && task.Thread.Count == 0 && (msg == nil || msg.Kind == "task")
 }
 
 func (c *turnCtx) taskStartLines(task proto.TaskRow) ([]string, error) {
@@ -541,9 +538,6 @@ func (c *turnCtx) taskSpecLines(task proto.TaskRow) ([]string, error) {
 }
 
 func (c *turnCtx) briefSpecLines(briefID string) ([]string, error) {
-	if briefID == "" {
-		return nil, &Error{"bad_request", "brief task has no brief id"}
-	}
 	brief, err := c.fetchBrief(briefID)
 	if err != nil {
 		return nil, err
@@ -557,8 +551,8 @@ func (c *turnCtx) briefSpecLines(briefID string) ([]string, error) {
 
 func (c *turnCtx) buildReview(p parsedItem, _ bool) (itemBlock, int, error) {
 	task, ok := c.lookupTask(string(p.item.Task))
-	if !ok || p.item.Commit == "" {
-		return itemBlock{}, 0, &Error{"bad_request", "review item requires task and commit"}
+	if !ok {
+		return itemBlock{}, 0, &Error{"bad_request", "review item requires task"}
 	}
 	lines, err := c.reviewLines(task, p.item.Commit)
 	if err != nil {
@@ -583,22 +577,16 @@ func (c *turnCtx) reviewLines(task proto.TaskRow, commit string) ([]string, erro
 }
 
 func (c *turnCtx) buildReviewed(p parsedItem, _ bool) (itemBlock, int, error) {
-	if p.item.Task == "" || p.msg == nil || string(p.item.Msg) != p.msg.ID || p.msg.Kind != "review" {
-		return itemBlock{}, 0, &Error{"bad_request", "reviewed item requires review msg and task"}
-	}
-	body, err := formatReviewMsg(*p.msg)
+	body, err := formatOptionalMsg(p.msg)
 	if err != nil {
 		return itemBlock{}, 0, err
 	}
-	who := c.fromIn(p.msg.By, string(p.item.Task))
-	return itemBlock{why: "reviewed", whoPlace: who, authority: "instruction", body: body}, 0, nil
+	thread := itemThread(string(p.item.Task), p.msg)
+	return itemBlock{why: "reviewed", whoPlace: c.msgWho(p.msg, thread), authority: "instruction", body: body}, 0, nil
 }
 
 func (c *turnCtx) buildChecks(p parsedItem, _ bool) (itemBlock, int, error) {
-	if p.item.Task == "" || p.msg == nil || string(p.item.Msg) != p.msg.ID || p.msg.Kind != "checks" {
-		return itemBlock{}, 0, &Error{"bad_request", "checks item requires checks msg and task"}
-	}
-	body, err := formatChecksMsg(*p.msg)
+	body, err := formatOptionalMsg(p.msg)
 	if err != nil {
 		return itemBlock{}, 0, err
 	}
@@ -606,70 +594,50 @@ func (c *turnCtx) buildChecks(p parsedItem, _ bool) (itemBlock, int, error) {
 }
 
 func (c *turnCtx) buildResume(p parsedItem, _ bool) (itemBlock, int, error) {
-	if p.item.Task == "" {
-		return itemBlock{}, 0, &Error{"bad_request", "resume item requires task"}
-	}
 	body := fmt.Sprintf("Task %s resumed. Continue the task.", c.taskRef(string(p.item.Task)))
 	return itemBlock{why: "resume", authority: "instruction", body: body}, 0, nil
 }
 
 func (c *turnCtx) buildDecided(p parsedItem, _ bool) (itemBlock, int, error) {
-	if !hasCardState(p) {
-		return itemBlock{}, 0, &Error{"bad_request", "decided item requires card msg with state"}
-	}
-	body, err := formatDecidedBody(*p.msg)
+	body, err := formatOptionalMsg(p.msg)
 	if err != nil {
 		return itemBlock{}, 0, err
 	}
 	thread := itemThread(string(p.item.Task), p.msg)
-	auth := authorityLabel(thread != "" || c.isOwnerMember(strVal(p.msg.State.By)))
-	who := "from " + c.stateActorLabel(p.msg.State) + " " + c.place(thread)
+	state := msgState(p.msg)
+	auth := authorityLabel(thread != "" || c.isOwnerMember(stateBy(state)))
+	who := "from " + c.stateActorLabel(state) + " " + c.place(thread)
 	return itemBlock{why: "decided", whoPlace: who, authority: auth, body: body}, 0, nil
 }
 
-func formatDecidedBody(msg proto.MsgRow) (string, error) {
-	switch msg.Kind {
-	case "approval":
-		return formatDecidedApproval(msg)
-	case "decision":
-		return formatDecidedDecision(msg)
-	default:
-		return "", &Error{"bad_request", "decided item requires approval or decision card"}
-	}
-}
-
-func formatDecidedApproval(msg proto.MsgRow) (string, error) {
-	var body proto.ApprovalBody
-	if proto.Decode(msg.Body, &body) != nil {
-		return "", &Error{"bad_request", "invalid approval body"}
-	}
-	switch msg.State.Status {
+func formatApprovalMsg(msg proto.MsgRow) (string, error) {
+	switch cardStatus(msg.State) {
 	case "approved":
 		return "Approved. Run exactly the same request again.", nil
 	case "denied":
 		return "Denied.", nil
 	default:
-		return "", &Error{"bad_request", "invalid approval status"}
+		return "(approval)", nil
 	}
+}
+
+func formatDecisionMsg(msg proto.MsgRow) (string, error) {
+	if cardStatus(msg.State) != "decided" {
+		return "(decision)", nil
+	}
+	return formatDecidedDecision(msg)
 }
 
 func formatDecidedDecision(msg proto.MsgRow) (string, error) {
 	var body proto.DecisionBody
-	if msg.State.Status != "decided" || proto.Decode(msg.Body, &body) != nil {
+	if proto.Decode(msg.Body, &body) != nil {
 		return "", &Error{"bad_request", "invalid decision card"}
 	}
-	return decisionLines(body, strVal(msg.State.Choice), strVal(msg.State.Text))
-}
-
-func decisionLines(body proto.DecisionBody, choice, text string) (string, error) {
-	if choice == "" && text == "" {
-		return "", &Error{"bad_request", "empty decision answer"}
-	}
-	lines := []string{"Decision: " + body.Question}
-	if choice != "" {
+	lines := []string{fmt.Sprintf("Decision (id %s): %s", msg.ID, body.Question)}
+	if choice := strVal(msg.State.Choice); choice != "" {
 		lines = append(lines, "Choice: "+decisionOptionLabel(body.Options, choice))
 	}
-	if text != "" {
+	if text := strVal(msg.State.Text); text != "" {
 		lines = append(lines, text)
 	}
 	return strings.Join(lines, "\n"), nil
@@ -685,17 +653,15 @@ func decisionOptionLabel(options []proto.DecisionOption, id string) string {
 }
 
 func (c *turnCtx) buildConfirmed(p parsedItem, _ bool) (itemBlock, int, error) {
-	if !hasCardState(p) || p.msg.Kind != "brief" {
-		return itemBlock{}, 0, &Error{"bad_request", "confirmed item requires brief msg with state"}
+	if p.msg == nil {
+		return itemBlock{why: "confirmed", whoPlace: "in main", authority: "information"}, 0, nil
 	}
 	verb, body, err := formatConfirmedBrief(*p.msg)
 	if err != nil {
 		return itemBlock{}, 0, err
 	}
-	writer := c.memberLabel(p.msg.By)
-	actor := c.stateActorLabel(p.msg.State)
-	who := fmt.Sprintf("from %s, %s %s in main", writer, verb, actor)
-	auth := authorityLabel(c.isOwnerMember(strVal(p.msg.State.By)))
+	who := fmt.Sprintf("from %s, %s %s in main", c.memberLabel(p.msg.By), verb, c.stateActorLabel(p.msg.State))
+	auth := authorityLabel(c.isOwnerMember(stateBy(p.msg.State)))
 	return itemBlock{why: "confirmed", whoPlace: who, authority: auth, body: body}, 0, nil
 }
 
@@ -704,37 +670,23 @@ func formatConfirmedBrief(msg proto.MsgRow) (string, string, error) {
 	if proto.Decode(msg.Body, &brief) != nil {
 		return "", "", &Error{"bad_request", "invalid brief body"}
 	}
-	switch msg.State.Status {
-	case "confirmed":
-		return "confirmed by", fmt.Sprintf("Brief %q (id %s) confirmed.", brief.Title, msg.ID), nil
-	case "revise":
+	if cardStatus(msg.State) == "revise" {
 		body := fmt.Sprintf("Brief %q (id %s) sent back for revision.", brief.Title, msg.ID)
 		if note := strVal(msg.State.Note); note != "" {
 			body += "\n" + note
 		}
 		return "sent back by", body, nil
-	default:
-		return "", "", &Error{"bad_request", "invalid brief status"}
 	}
+	return "confirmed by", fmt.Sprintf("Brief %q (id %s) confirmed.", brief.Title, msg.ID), nil
 }
 
 func (c *turnCtx) buildNotice(p parsedItem, _ bool) (itemBlock, int, error) {
-	if p.item.Code == "" || !msgMatchesItem(p.item.Msg, p.msg) {
-		return itemBlock{}, 0, &Error{"bad_request", "notice item requires code and matching msg"}
-	}
 	thread := itemThread(string(p.item.Task), p.msg)
 	body, err := c.noticeBody(p.item.Code, p.item.Detail, thread, p.msg)
 	if err != nil {
 		return itemBlock{}, 0, err
 	}
-	return itemBlock{why: "notice", whoPlace: c.noticeWho(p.msg, thread), authority: "information", body: body}, 0, nil
-}
-
-func (c *turnCtx) noticeWho(msg *proto.MsgRow, thread string) string {
-	if msg != nil && msg.By != "system" {
-		return c.fromIn(msg.By, thread)
-	}
-	return c.place(thread)
+	return itemBlock{why: "notice", whoPlace: c.msgWho(p.msg, thread), authority: "information", body: body}, 0, nil
 }
 
 func (c *turnCtx) noticeBody(code, detail, thread string, msg *proto.MsgRow) (string, error) {
@@ -855,8 +807,8 @@ func formatSystemMsg(msg proto.MsgRow) (string, error) {
 	return "System: " + sys.Code, nil
 }
 
-func (c *turnCtx) replacedContext(parsed []parsedItem) (string, error) {
-	lines, err := c.replacedSessionLines(parsed)
+func (c *turnCtx) replacedContext() (string, error) {
+	lines, err := c.replacedSessionLines()
 	if err != nil {
 		return "", err
 	}
@@ -870,12 +822,12 @@ func (c *turnCtx) replacedContext(parsed []parsedItem) (string, error) {
 	}
 	lines = append(lines, historyLines...)
 	if len(lines) == 0 {
-		return "", nil
+		return "== context · instruction", nil
 	}
 	return "== context · instruction\n" + strings.Join(lines, "\n"), nil
 }
 
-func (c *turnCtx) replacedSessionLines(parsed []parsedItem) ([]string, error) {
+func (c *turnCtx) replacedSessionLines() ([]string, error) {
 	switch c.s.Kind {
 	case TaskSession:
 		task, ok := c.lookupTask(c.s.Task)
@@ -884,23 +836,14 @@ func (c *turnCtx) replacedSessionLines(parsed []parsedItem) ([]string, error) {
 		}
 		return c.taskStartLines(task)
 	case ReviewSession:
-		return c.replacedReviewLines(parsed)
+		task, ok := c.lookupTask(c.s.Task)
+		if !ok {
+			return nil, &Error{"bad_request", "replaced review session requires task row"}
+		}
+		return c.reviewLines(task, task.Commit)
 	default:
 		return nil, nil
 	}
-}
-
-func (c *turnCtx) replacedReviewLines(parsed []parsedItem) ([]string, error) {
-	for _, p := range parsed {
-		if p.item.Why == "review" {
-			return nil, nil
-		}
-	}
-	task, ok := c.lookupTask(c.s.Task)
-	if !ok {
-		return nil, &Error{"bad_request", "replaced review session requires task row"}
-	}
-	return c.reviewLines(task, task.Commit)
 }
 
 func (c *turnCtx) formatHistory(msgs []proto.MsgRow) ([]string, error) {
@@ -924,12 +867,8 @@ func (c *turnCtx) formatHistoryEntry(m proto.MsgRow) (string, error) {
 		return "", err
 	}
 	thread := itemThread("", &m)
-	who := c.place(thread)
-	if m.By != "system" {
-		who = c.fromIn(m.By, thread)
-	}
 	auth := authorityLabel(c.isOwnerMember(m.By))
-	return fmt.Sprintf("-- %s · %s · %s\n%s", m.Kind, who, auth, content), nil
+	return fmt.Sprintf("-- %s · %s · %s\n%s", m.Kind, c.msgWho(&m, thread), auth, content), nil
 }
 
 func (c *turnCtx) fetchPage(id, before int64, limit int) proto.FetchPage {
@@ -969,57 +908,38 @@ func (c *turnCtx) fetchBrief(briefID string) (proto.BriefBody, error) {
 		return proto.BriefBody{}, &Error{"not_found", "brief not found"}
 	}
 	var msg proto.MessageRow[proto.BriefBody, *proto.CardState]
-	if proto.Decode(fetched.Rows[0], &msg) != nil || msg.Kind != "brief" {
+	if proto.Decode(fetched.Rows[0], &msg) != nil {
 		return proto.BriefBody{}, &Error{"bad_request", "invalid brief row"}
 	}
 	return msg.Body, nil
 }
 
 func (c *turnCtx) fetchNotes() ([]string, error) {
-	var notes []string
-	var before int64
-	used := 0
-	for {
-		page, more, err := c.fetchNotePage(before)
-		if err != nil {
-			return nil, err
-		}
-		var full bool
-		notes, used, before, full = takeNotes(notes, page, used)
-		if full || !more || len(page) == 0 {
-			return notes, nil
-		}
-	}
-}
-
-func (c *turnCtx) fetchNotePage(before int64) ([]proto.NoteRow, bool, error) {
 	build := func(id int64) any {
-		return proto.FetchKind{FetchPage: c.fetchPage(id, before, notePageLimit), Kind: "note"}
+		return proto.FetchKind{FetchPage: c.fetchPage(id, 0, notePageLimit), Kind: "note"}
 	}
 	fetched, err := c.fetch(build)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	rows := make([]proto.NoteRow, len(fetched.Rows))
-	for i, raw := range fetched.Rows {
-		if proto.Decode(raw, &rows[i]) != nil {
-			return nil, false, &Error{"bad_request", "invalid note row"}
-		}
-	}
-	return rows, fetched.More, nil
+	return decodeNotes(fetched.Rows)
 }
 
-func takeNotes(notes []string, page []proto.NoteRow, used int) ([]string, int, int64, bool) {
-	var before int64
-	for _, n := range page {
+func decodeNotes(rawRows []json.RawMessage) ([]string, error) {
+	var notes []string
+	used := 0
+	for _, raw := range rawRows {
+		var n proto.NoteRow
+		if proto.Decode(raw, &n) != nil {
+			return nil, &Error{"bad_request", "invalid note row"}
+		}
 		if used+len(n.Text) > maxNoteBytes {
-			return notes, used, before, true
+			break
 		}
 		used += len(n.Text)
 		notes = append(notes, n.Text)
-		before = n.Pos
 	}
-	return notes, used, before, false
+	return notes, nil
 }
 
 func (c *turnCtx) fetchHistory() ([]proto.MsgRow, error) {
