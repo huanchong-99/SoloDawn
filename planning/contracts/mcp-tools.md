@@ -11,8 +11,8 @@ with each call (`_meta`), which the node may compare.
 Conventions:
 
 - Members are named by their display name, unique in the group (`"Codex"`).
-  Tasks are named `"T-12"`. An unknown name returns an error that lists the
-  valid ones.
+  Tasks are named `"T-12"`. An unknown name returns a `not_found` error that
+  lists the valid ones.
 - In a task or review session the task is the session's own and is not an
   argument. Where a tool takes `task` it is optional and defaults to that
   task; in a group session it must be given.
@@ -83,7 +83,18 @@ Listed by the server only when the calling session is the group's secretary.
 | `set_task` | `task`; any of `assignee`, `reviewer`; `action` = `pause`, `resume`, `cancel` | `{"ok":true}` | `task assign`, `task pause`, `task resume`, `task cancel` |
 
 `propose_brief` has no `pass` argument: the host fills the brief's `pass`
-from `group.pass`.
+from `group.pass`. It sets `mentions` to `[requester]`, and when `requester`
+is omitted it defaults to the group's only person (refusing with
+`bad_request` when the group has no person or more than one, naming them).
+`set_task` requires at least one of `assignee`, `reviewer` or `action` (else
+`bad_request`), and sends `task assign` before `task <action>` when both a
+role and an action are given (noting that `task assign` succeeded if
+`task <action>` fails). `request_decision` numbers options `"A"`, `"B"`, …
+in list order, maps `recommended` from its 0-based index to that option's
+`id` (else `bad_request`), sets `mentions` to the member ids of the
+addressed people (refusing an empty `to` with `bad_request` and a non-person
+or unknown name with `not_found` listing the group's people), and in a task
+or review session defaults an omitted `to` to the group's people.
 
 The secretary has the tools of section 1 too, except `start_task`,
 `push_branch`, `run_checks`, `submit_task` and `submit_review` (R-21).

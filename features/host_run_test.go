@@ -316,7 +316,6 @@ func hostRunSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
 	origCompose := host.Compose
 	origDeliver := host.Deliver
 	origInstructions := host.Instructions
-	installHRDefaultHooks()
 	cleanup(func() {
 		host.Drivers = origDrivers
 		host.Compose = origCompose
@@ -338,6 +337,7 @@ func installHRDefaultHooks() {
 }
 
 func newTestHost(suiteT *testing.T, cleanup func(func()), maxOpen, idleMin int) (*host.Host, *hrHome, context.Context, error) {
+	installHRDefaultHooks()
 	procCtx, cancelProcs := context.WithCancel(context.Background())
 	dbPath := filepath.Join(suiteT.TempDir(), "node.db")
 	db, err := store.Open(dbPath)

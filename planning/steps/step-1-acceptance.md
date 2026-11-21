@@ -137,11 +137,12 @@ These tests need a task session, so they follow the first slice of M5
 - **A4.1** At level 2 an AI that needs to install a package produces a card
   with the exact command. Approving from a second device lets it run. The
   audit shows the request and the decision with the deciding device. With
-  the real CLIs (`live`): a command that the sandbox blocks for want of
-  the network becomes a card once the AI asks through its CLI (R-41 rests
-  on this; `contracts/drivers.md` 1.1 says what changes if it fails), and on
-  Claude Code `AskUserQuestion` reaches `approve` under each permission
-  mode, and the `updatedInput.answers` reply is honoured.
+  the real CLIs (`live`): `--mcp-config` takes a JSON string on Claude Code,
+  and a command that the sandbox blocks for want of the network becomes a
+  card once the AI asks through its CLI (R-41 rests on this;
+  `contracts/drivers.md` 1.1 says what changes if it fails), and on Claude
+  Code `AskUserQuestion` reaches `approve` under each permission mode, and
+  the `updatedInput.answers` reply is honoured.
 - **A4.2** Denying tells the AI; the command does not run.
 - **A4.3** With the wait set to 20 seconds and no answer, the turn ends and
   the task waits. The host is restarted. Approving afterwards makes the AI
@@ -163,6 +164,12 @@ These tests need a task session, so they follow the first slice of M5
 - **A4.10** On each CLI at level 2, an AI asked to write a marker file
   outside its worktree produces a card, and no file exists before approval.
   (`live`)
+- **A4.11** On the real Codex CLI with
+  `-c features.default_mode_request_user_input=true`, an AI in Default mode
+  asked to present a multiple-choice question with its ask-the-user tool
+  emits `item/tool/requestUserInput`, produces a `decision` card, and
+  receives the chosen option (run in B-17 / I-11; `contracts/drivers.md` 1.2
+  says what changes if the flag does not work). (`live`)
 
 ## M5. Tasks
 

@@ -323,14 +323,10 @@ func buildCodexAnswerValues(chosen, free string) []string {
 	return vals
 }
 
-func approveOptionID(i int) string {
-	return string(rune('A' + i))
-}
-
 func approveDecisionOptions(in []cliQuestionOpt) []proto.DecisionOption {
 	opts := make([]proto.DecisionOption, len(in))
 	for i, opt := range in {
-		opts[i] = proto.DecisionOption{ID: approveOptionID(i), Label: opt.Label, Effect: opt.Description}
+		opts[i] = proto.DecisionOption{ID: optionID(i), Label: opt.Label, Effect: opt.Description}
 	}
 	return opts
 }
