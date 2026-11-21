@@ -286,7 +286,7 @@ func briefConfirmedRows(t *testing.T, card proto.MsgRow, act proto.Envelope, by 
 
 // Row 1: confirming creates every task of the brief through the task
 // machine. The first starts and its assignee gets it; the second waits for
-// the first. The secretary is told, and the act is the cause of both items.
+// the first. The secretary is told.
 func TestBriefConfirmCreatesTheTasks(t *testing.T) {
 	s := briefState(t)
 	card, d := briefPosted(t, s, briefBody())
@@ -296,8 +296,8 @@ func TestBriefConfirmCreatesTheTasks(t *testing.T) {
 	equal(t, briefRows(res), briefConfirmedRows(t, card, act, ownerID, 50, 12))
 	one := briefTaskID(50, 0)
 	equal(t, res.Items, []home.Item{
-		{AI: briefA, Why: "assign", Task: one, Msg: one, Cause: &act},
-		{AI: aiID, Why: "confirmed", Msg: card.ID, Cause: &act},
+		{AI: briefA, Why: "assign", Task: one, Msg: one},
+		{AI: aiID, Why: "confirmed", Msg: card.ID},
 	})
 }
 
@@ -342,7 +342,7 @@ func TestBriefConfirmByTheRequesterOrAnAdmin(t *testing.T) {
 		act := briefAct(browser, 50, "confirm", card.ID, "")
 		res := briefApply(t, s, d, receipts{}, browser, act)
 		one := briefTaskID(50, 0)
-		equal(t, res.Items, []home.Item{{AI: briefA, Why: "assign", Task: one, Msg: one, Cause: &act}})
+		equal(t, res.Items, []home.Item{{AI: briefA, Why: "assign", Task: one, Msg: one}})
 	})
 }
 
@@ -428,7 +428,7 @@ func TestBriefReviseSendsTheBriefBack(t *testing.T) {
 			by, at := ownerID, int64(clock)
 			card.Seq, card.State = 12, &proto.CardState{Status: "revise", By: &by, At: &at, Note: c.note, Act: &act}
 			equal(t, briefRows(res), []any{card})
-			equal(t, res.Items, []home.Item{{AI: aiID, Why: "confirmed", Msg: card.ID, Cause: &act}})
+			equal(t, res.Items, []home.Item{{AI: aiID, Why: "confirmed", Msg: card.ID}})
 		})
 	}
 }
