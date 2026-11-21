@@ -1959,18 +1959,18 @@ func TestRunnerCloseLifecycleAndConcurrency(t *testing.T) {
 	saveRuntimeGlobals(t)
 	h, rh, drv, _ := setupRunEnv(t)
 	var delivered atomic.Int32
-	// Single reader: checkRunnerCloseActiveTurn.
+	// Single reader: TestRunnerCloseLifecycleAndConcurrency goroutine.
 	deliveredCh := make(chan struct{}, 8)
 	Deliver = func(*Host, string, string) {
 		delivered.Add(1)
 		deliveredCh <- struct{}{}
 	}
-	checkRunnerCloseNoopAndWaiting(t, h, drv, &delivered)
+	checkRunnerCloseNoopAndWaiting(t, h, drv, &delivered, deliveredCh)
 	checkRunnerCloseActiveTurn(t, h, rh, drv, deliveredCh)
 	checkConcurrentAndKilledClose(t)
 }
 
-func checkRunnerCloseNoopAndWaiting(t *testing.T, h *Host, drv *fakeDriver, delivered *atomic.Int32) {
+func checkRunnerCloseNoopAndWaiting(t *testing.T, h *Host, drv *fakeDriver, delivered *atomic.Int32, deliveredCh <-chan struct{}) {
 	t.Helper()
 	Runner.Close(h, SessionKey{Group: runGroup1, Member: "missing"})
 	kStray := SessionKey{Group: runGroup1, Member: "m-stray"}
@@ -1990,6 +1990,7 @@ func checkRunnerCloseNoopAndWaiting(t *testing.T, h *Host, drv *fakeDriver, deli
 	}
 	pWait := drv.lastProc()
 	pWait.emit(Event{Kind: TurnEnded, Status: "completed"})
+	<-deliveredCh
 	waitForState(t, h, kWait, Waiting)
 	delivered.Store(0)
 	Runner.Close(h, kWait)
