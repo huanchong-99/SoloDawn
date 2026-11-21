@@ -273,15 +273,34 @@ func (l *Loop) Attach(device string, client Client) *Conn {
 }
 
 // Detach ends a connection: nothing more is sent to it, and every group
-// forgets it. It does not close the client. Detaching twice is harmless.
-// Every group has the job of forgetting the connection before Gone is
-// closed, so what is handed in after Gone finds the device gone.
+// forgets it. When the last connection taking inbox items for its device
+// ends, HostOfflineEvent runs for that device. It does not close the client.
+// Detaching twice is harmless. Every group has the job of forgetting the
+// connection before Gone is closed, so what is handed in after Gone finds
+// the device gone.
 func (l *Loop) Detach(c *Conn) {
+	if l.drop(c) {
+		l.Event(HostOfflineEvent, c.device)
+	}
+	c.leave()
+}
+
+func (l *Loop) drop(c *Conn) bool {
 	l.mu.Lock()
+	defer l.mu.Unlock()
+	wasTaker := l.conns[c] && c.taker
 	delete(l.conns, c)
 	l.each(func(g *runGroup) { g.detach(c) })
-	l.mu.Unlock()
-	c.leave()
+	return wasTaker && !l.hasTaker(c.device)
+}
+
+func (l *Loop) hasTaker(device string) bool {
+	for other := range l.conns {
+		if other.device == device && other.taker {
+			return true
+		}
+	}
+	return false
 }
 
 // Welcome sends c the answer to its hello: the frame that build makes from
@@ -364,7 +383,10 @@ func (l *Loop) Watch(c *Conn, group string, stateOnly bool) (seq int64, ok bool)
 // calls it on every hello of a host (planning/contracts/datachannel.md
 // section 6).
 func (l *Loop) Inbox(c *Conn) {
-	l.all(func(g *runGroup) { g.inbox(c) })
+	l.mu.Lock()
+	c.taker = true
+	l.each(func(g *runGroup) { g.inbox(c) })
+	l.mu.Unlock()
 }
 
 // Groups returns the groups homed here that the device of c may read, as

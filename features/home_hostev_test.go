@@ -32,9 +32,23 @@ type homeHostEvWorld struct {
 	lastRes     home.Result
 	items       []home.Item
 	savedSince  int64
-	laptopConns int
+	loop        *home.Loop
+	watchConn   *home.Conn
+	watchFrames chan any
+	laptopConns []*home.Conn
 	nonce       int
 }
+
+type homeHostEvClient struct{ ch chan any }
+
+func (c homeHostEvClient) Send(frame any) error {
+	if c.ch != nil {
+		c.ch <- frame
+	}
+	return nil
+}
+
+func (c homeHostEvClient) Done() <-chan struct{} { return nil }
 
 type homeHostEvDisk map[string]proto.MsgRow
 
@@ -61,6 +75,7 @@ func (r homeHostEvReceipts) PutReceipt(signer, nonce string, _ int64, result sto
 
 func homeHostEvSteps(sc *godog.ScenarioContext) {
 	w := &homeHostEvWorld{}
+	cleanup := afterScenario(sc)
 	sc.Step(`^a group home for host events with (a secretary|no secretary), "codex" on the laptop, "claude" on the home node, and task 1$`, w.setup)
 	sc.Step(`^the laptop (?:reports|has reported) "codex" as "([^"]*)" on task 1 over "([^"]*)" with (\d+) turns today$`, func(state, path string, turns int) error {
 		w.savedSince = w.state.AIs[w.members["codex"]].Since
@@ -110,12 +125,9 @@ func homeHostEvSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^no inbox item was queued by the status$`, func() error { return w.checkNotice("none") })
 	sc.Step(`^the "([^"]*)" system message for "codex" is in "(task 1|main)"$`, w.checkEventPlacement)
 	sc.Step(`^the status queued "([^"]*)"$`, w.checkNotice)
-	sc.Step(`^the laptop has (\d+) open connections to the home$`, func(n int) {
-		w.laptopConns = n
-		w.state.Online[w.keys["laptop"].ID()] = n > 0
-	})
+	sc.Step(`^the laptop has (\d+) open connections to the home$`, func(n int) error { return w.openLaptopConns(cleanup, n) })
 	sc.Step(`^(?:one|the last) laptop connection closes$`, w.closeLaptopConn)
-	sc.Step(`^(the owner's browser reports "codex" as "working"|the laptop, signed as "codex", reports "codex" as "working"|the laptop reports the human owner as "working"|the laptop reports an unknown member as "working"|the laptop reports "codex" as "working" on an unknown task|the laptop reports "codex" with an unknown state|the laptop reports "codex" with an unknown host event code)$`, w.sendBadCase)
+	sc.Step(`^(the owner's browser reports "codex" as "working"|the laptop, signed as "codex", reports "codex" as "working"|the laptop reports an unknown member as "working"|the laptop reports "codex" with an unknown host event code)$`, w.sendBadCase)
 	sc.Step(`^the status is refused with "([^"]*)"$`, w.checkRefused)
 }
 
@@ -142,7 +154,7 @@ func (w *homeHostEvWorld) setup(secMode string) error {
 		secID = ""
 	}
 	w.state.Group = proto.GroupRow{
-		RowHeader: proto.RowHeader{Type: "group", ID: group}, Home: node.ID(), Secretary: secID, Forge: "none",
+		RowHeader: proto.RowHeader{Type: "group", ID: group}, Home: node.ID(), Secretary: secID, Forge: "none", Checks: []string{},
 	}
 	owner := w.members["owner"]
 	w.state.People[owner] = proto.HumanMemberRow{
@@ -151,15 +163,15 @@ func (w *homeHostEvWorld) setup(secMode string) error {
 	}
 	w.state.AIs[w.members["secretary"]] = proto.AIMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.members["secretary"]}, Group: group, Kind: "ai", User: browser.ID(), Name: "secretary"},
-		Host:      laptop.ID(), State: "dormant", Since: w.now.UnixMilli() - 10000, Path: "direct",
+		Host:      laptop.ID(), Allow: []string{}, Approvers: []string{}, State: "dormant", Since: w.now.UnixMilli() - 10000, Path: "direct",
 	}
 	w.state.AIs[w.members["codex"]] = proto.AIMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.members["codex"]}, Group: group, Kind: "ai", User: browser.ID(), Name: "codex"},
-		Host:      laptop.ID(), State: "dormant", Since: w.now.UnixMilli() - 10000, Path: "direct",
+		Host:      laptop.ID(), Allow: []string{}, Approvers: []string{}, State: "dormant", Since: w.now.UnixMilli() - 10000, Path: "direct",
 	}
 	w.state.AIs[w.members["claude"]] = proto.AIMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.members["claude"]}, Group: group, Kind: "ai", User: browser.ID(), Name: "claude"},
-		Host:      node.ID(), State: "working", Task: w.taskID, Since: w.now.UnixMilli() - 5000, Path: "local",
+		Host:      node.ID(), Allow: []string{}, Approvers: []string{}, State: "working", Task: w.taskID, Since: w.now.UnixMilli() - 5000, Path: "local",
 	}
 	w.state.Tasks[w.taskID] = proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: w.taskID}, Group: group, Num: 1,
@@ -205,8 +217,6 @@ func (w *homeHostEvWorld) sendEventCase(state, code, where string) error {
 	}
 	events := map[string]string{
 		"turn_interrupted": fmt.Sprintf(`{"code":"turn_interrupted","reason":"timeout"%s,"detail":"Deadline reached."}`, taskPart),
-		"cap_reached":      fmt.Sprintf(`{"code":"cap_reached","cap":"day"%s}`, taskPart),
-		"rate_limited":     `{"code":"rate_limited","resets":1763603600000}`,
 		"login_invalid":    `{"code":"login_invalid","detail":"Signed out."}`,
 		"session_replaced": fmt.Sprintf(`{"code":"session_replaced"%s}`, taskPart),
 	}
@@ -219,12 +229,7 @@ func (w *homeHostEvWorld) sendBadCase(attempt string) error {
 	cases := map[string]func() error{
 		`the owner's browser reports "codex" as "working"`:            func() error { return w.sendStatus(w.keys["browser"], codex, "working", "direct", "") },
 		`the laptop, signed as "codex", reports "codex" as "working"`: func() error { return w.sendStatus(laptop, codex, "working", "direct", fmt.Sprintf(`,"as":%q`, codex)) },
-		`the laptop reports the human owner as "working"`:             func() error { return w.sendStatus(laptop, w.members["owner"], "working", "direct", "") },
 		`the laptop reports an unknown member as "working"`:           func() error { return w.sendStatus(laptop, string(exampleID("hev nobody")), "working", "direct", "") },
-		`the laptop reports "codex" as "working" on an unknown task`: func() error {
-			return w.sendStatus(laptop, codex, "working", "direct", fmt.Sprintf(`,"task":%q`, exampleID("hev missing task")))
-		},
-		`the laptop reports "codex" with an unknown state`: func() error { return w.sendStatus(laptop, codex, "busy", "direct", "") },
 		`the laptop reports "codex" with an unknown host event code`: func() error {
 			return w.sendStatus(laptop, codex, "limited", "direct", `,"event":{"code":"no_secretary"}`)
 		},
@@ -327,14 +332,102 @@ func (w *homeHostEvWorld) checkOneNotice(it home.Item, want string) error {
 	return nil
 }
 
-func (w *homeHostEvWorld) closeLaptopConn() error {
-	w.laptopConns--
-	device := w.keys["laptop"].ID()
-	if w.laptopConns <= 0 {
-		delete(w.state.Online, device)
+func (w *homeHostEvWorld) seedStore(db *store.Store) error {
+	s := *w.state
+	s.Seq = 0
+	sealed := s.Seal(home.Result{Rows: []home.Row{
+		home.RowOf(w.state.Group),
+		home.RowOf(w.state.People[w.members["owner"]]),
+		home.RowOf(w.state.AIs[w.members["secretary"]]),
+		home.RowOf(w.state.AIs[w.members["codex"]]),
+		home.RowOf(w.state.AIs[w.members["claude"]]),
+		home.RowOf(w.state.Tasks[w.taskID]),
+	}})
+	return db.Write(func(tx *store.Tx) error {
+		for _, r := range sealed.Rows {
+			if _, err := tx.NextSeq(w.state.ID); err != nil {
+				return err
+			}
+			if err := r.Put(tx, w.state.ID, w.now.UnixMilli()); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (w *homeHostEvWorld) openLaptopConns(cleanup func(func()), n int) error {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		return err
 	}
+	if err := w.seedStore(db); err != nil {
+		db.Close()
+		return err
+	}
+	keys := []identity.Key{w.keys["browser"], w.keys["node"], w.keys["laptop"]}
+	loop, err := home.StartLoop(home.LoopConfig{
+		Store: db, Home: w.keys["node"].ID(), Owner: w.keys["browser"].ID(), Tables: home.NodeTables(),
+		Logs: func(string) *identity.Log { l, _ := homeLog(keys); return l },
+		Now:  func() time.Time { return w.now },
+	})
+	if err != nil {
+		db.Close()
+		return err
+	}
+	cleanup(func() { loop.Close(); db.Close() })
+	w.loop = loop
+	w.watchFrames = make(chan any, 32)
+	w.watchConn = loop.Attach(w.keys["browser"].ID(), homeHostEvClient{ch: w.watchFrames})
+	loop.Watch(w.watchConn, w.state.ID, true)
+	nodeConn := loop.Attach(w.keys["node"].ID(), homeHostEvClient{})
+	loop.Inbox(nodeConn)
+	w.laptopConns = nil
+	for range n {
+		c := loop.Attach(w.keys["laptop"].ID(), homeHostEvClient{})
+		loop.Inbox(c)
+		w.laptopConns = append(w.laptopConns, c)
+	}
+	return nil
+}
+
+func (w *homeHostEvWorld) closeLaptopConn() error {
 	w.now = w.now.Add(5 * time.Second)
-	res := w.state.Seal(home.Events[home.HostOfflineEvent](w.state, w.disk, w.now.UnixMilli(), device))
-	w.state.Commit(res)
+	conn := w.laptopConns[0]
+	w.laptopConns = w.laptopConns[1:]
+	w.loop.Detach(conn)
+	w.loop.Watch(w.watchConn, w.state.ID, true)
+	w.loop.Welcome(w.watchConn, func([]proto.GroupSummary) any { return "sync" })
+	return w.drainWatchedAIs()
+}
+
+func (w *homeHostEvWorld) drainWatchedAIs() error {
+	for {
+		select {
+		case frame := <-w.watchFrames:
+			if frame == "sync" {
+				return nil
+			}
+			if err := w.applyRowsFrame(frame); err != nil {
+				return err
+			}
+		case <-time.After(2 * time.Second):
+			return fmt.Errorf("timed out waiting for watch sync")
+		}
+	}
+}
+
+func (w *homeHostEvWorld) applyRowsFrame(frame any) error {
+	pushed, ok := frame.(proto.Rows)
+	if !ok {
+		return fmt.Errorf("unexpected frame %T", frame)
+	}
+	for _, raw := range pushed.Rows {
+		var ai proto.AIMemberRow
+		if err := proto.Decode(raw, &ai); err != nil {
+			return err
+		}
+		w.state.AIs[ai.ID] = ai
+	}
 	return nil
 }

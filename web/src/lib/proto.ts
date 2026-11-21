@@ -1028,14 +1028,10 @@ export type Beacon = v.InferOutput<typeof Beacon>;
 // Inbox (datachannel.md section 6): what a home sends the host of an AI. A browser receives none
 // of it; the schemas are here because every wire example is read by both test suites.
 
-/** The payload of an item's envelope, signed by the home when it queued the item. `task` and
- *  `msg` are ids. Which fields an item of each `why` has is in the table of that section. */
+/** An inbox item for an AI or its host, recorded when the home queued it. `item` numbers it for
+ *  `ack` (`items[].item.item`); `ai`, `task` and `msg` are ids. Which fields an item of each `why`
+ *  has is in the table of that section. */
 export const Item = v.object({
-  t: v.literal('item'),
-  n: Id,
-  ts: int,
-  g: Id,
-  to: str,
   item: int,
   ai: Id,
   why: str,
@@ -1049,17 +1045,16 @@ export const Item = v.object({
 });
 export type Item = v.InferOutput<typeof Item>;
 
-/** `env` holds an Item. `msg` and `task` are copies of the rows it names; `cause` is the signed
- *  act that led to the item. */
+/** `item` is the plain item recorded when the home queued it. `msg` and `task` are copies of the
+ *  rows it names, taken when the item is sent. */
 export const Inbox = v.object({
   t: v.literal('inbox'),
   g: Id,
   items: v.array(
     v.object({
-      env: Envelope,
+      item: Item,
       msg: v.optional(MsgRow),
       task: v.optional(TaskRow),
-      cause: v.optional(Envelope),
     }),
   ),
 });

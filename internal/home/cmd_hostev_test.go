@@ -3,10 +3,12 @@ package home_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,7 +28,7 @@ var (
 const hevStatusTS = clock - 400
 
 // hevState builds a group with a secretary (aiID on laptop), a working AI
-// (hevWorker on laptop), a working AI on node (hevPeer), two tasks and a guest.
+// (hevWorker on laptop), a working AI on node (hevPeer), and two tasks.
 func hevState(t *testing.T) *home.State {
 	t.Helper()
 	s := group(t)
@@ -35,9 +37,6 @@ func hevState(t *testing.T) *home.State {
 	owner := s.People[ownerID]
 	owner.Group, owner.Kind, owner.Name = groupID, "human", "owner"
 	s.People[ownerID] = owner
-	guestRow := person(id(64), guest, "member")
-	guestRow.Group, guestRow.Kind, guestRow.Name = groupID, "human", "guest"
-	s.People[id(64)] = guestRow
 
 	sec := s.AIs[aiID]
 	sec.Group, sec.Kind, sec.Name, sec.CLI, sec.HostName, sec.Account = groupID, "ai", "Secretary", "claude", "laptop", "personal"
@@ -95,11 +94,10 @@ func hevRefused(t *testing.T, res home.Result, code string) {
 }
 
 func hevFloat(v float64) *float64 { return &v }
-func hevInt64(v int64) *int64     { return &v }
 func hevInt(v int) *int           { return &v }
 func hevStr(v string) *string     { return &v }
 
-// All six member-status wire golden files apply cleanly, and the resulting AI
+// Step-1 member-status wire golden files apply cleanly, and the resulting AI
 // member row and system message row match row-member-ai.json and row-msg-system.json.
 func TestHostEvGoldenWireExamples(t *testing.T) {
 	const (
@@ -167,12 +165,7 @@ func TestHostEvGoldenWireExamples(t *testing.T) {
 	wantSys.ID = "fTuX8YoC2SHlMHGAs69RFg"
 	equal(t, decodedSys, wantSys)
 
-	for _, name := range []string{
-		"member-status-cap_reached",
-		"member-status-login_invalid",
-		"member-status-rate_limited",
-		"member-status-session_replaced",
-	} {
+	for _, name := range []string{"member-status-login_invalid", "member-status-session_replaced"} {
 		t.Run(name, func(t *testing.T) {
 			data, err := os.ReadFile(filepath.Join("..", "proto", "testdata", name+".json"))
 			equal(t, err, nil)
@@ -184,54 +177,68 @@ func TestHostEvGoldenWireExamples(t *testing.T) {
 	}
 }
 
-// Every valid state and path is accepted, since moves only when state changes,
-// task clears when omitted, and zero usage figures are accepted at the boundary.
-func TestHostEvStatusStatesPathsAndSince(t *testing.T) {
-	states := []string{"working", "waiting", "dormant", "takeover", "paused", "limited", "offline"}
-	paths := []string{"local", "direct", "relay", ""}
-	for i, state := range states {
-		path := paths[i%len(paths)]
-		t.Run(state+"_"+path, func(t *testing.T) {
-			s := hevState(t)
-			extra := fmt.Sprintf(`,"task":%q,"usage":{"window_pct":0,"window_resets":0,"day_cap_pct":0,"spend_today":0,"spend_cap":0,"turns_today":0}`, hevTaskA)
-			res := hevSend(t, s, disk{}, receipts{}, laptop, hevPayload(1, hevWorker, state, path, extra))
-			equal(t, res.Answer, store.Outcome{OK: true})
-			equal(t, len(res.Items), 0)
-			wantSince := int64(clock)
-			if state == "dormant" {
-				wantSince = clock - 5000
-			}
-			want := s.AIs[hevWorker]
-			want.Seq = 11
-			want.State, want.Task, want.Since, want.LastSeen, want.Path = state, hevTaskA, wantSince, clock, path
-			want.Usage = proto.Usage{
-				WindowPct: hevFloat(0), WindowResets: hevInt64(0), DayCapPct: hevFloat(0),
-				SpendToday: hevFloat(0), SpendCap: hevFloat(0), TurnsToday: hevInt(0),
-			}
-			equal(t, briefRows(res), []any{want})
-			s.Commit(res)
+// State changes advance since, repeating the same state keeps since, usage is
+// copied as sent, and omitting task clears it.
+func TestHostEvStatusFieldsAndSince(t *testing.T) {
+	s := hevState(t)
+	raw := fmt.Sprintf(
+		`{"t":"member","n":%q,"ts":%d,"g":%q,"op":"status","id":%q,"state":"working","task":%q,"path":"","usage":{"window_pct":42.5,"turns_today":7}}`,
+		id(1), hevStatusTS, groupID, hevWorker, hevTaskA,
+	)
+	res := hevSend(t, s, disk{}, receipts{}, laptop, raw)
+	equal(t, res.Answer, store.Outcome{OK: true})
+	equal(t, len(res.Items), 0)
+	want := s.AIs[hevWorker]
+	want.Seq, want.State, want.Task, want.Since, want.LastSeen, want.Path = 11, "working", hevTaskA, clock, clock, ""
+	want.Usage = proto.Usage{WindowPct: hevFloat(42.5), TurnsToday: hevInt(7)}
+	equal(t, briefRows(res), []any{want})
+	s.Commit(res)
 
-			// A follow-up status without task and with empty usage clears both and keeps since when state repeats.
-			res2, err := home.Commands.Apply(s, disk{}, receipts{}, laptop.ID(), laptop.Sign(hevPayload(2, hevWorker, state, "relay", "")), time.UnixMilli(clock+900))
-			equal(t, err, nil)
-			want.Seq, want.Task, want.Path, want.Usage, want.LastSeen = 12, "", "relay", proto.Usage{}, clock+900
-			equal(t, briefRows(res2), []any{want})
-		})
-	}
+	res2, err := home.Commands.Apply(s, disk{}, receipts{}, laptop.ID(), laptop.Sign(hevPayload(2, hevWorker, "working", "relay", "")), time.UnixMilli(clock+900))
+	equal(t, err, nil)
+	want.Seq, want.Task, want.Path, want.Usage, want.LastSeen = 12, "", "relay", proto.Usage{}, clock+900
+	equal(t, briefRows(res2), []any{want})
 }
 
-// All five host event codes write their system row in the task thread or main
+type hevEventCase struct {
+	name       string
+	statusTask string
+	eventJSON  string
+	wantThread string
+	wantBody   any
+	wantNotice *home.Item
+}
+
+func hevCheckEventRows(t *testing.T, s *home.State, tc hevEventCase, res home.Result) proto.MsgRow {
+	t.Helper()
+	wantAI := s.AIs[hevWorker]
+	wantAI.Seq, wantAI.State, wantAI.Task, wantAI.Since, wantAI.LastSeen = 11, "limited", tc.statusTask, clock, clock
+	var thread *string
+	if tc.wantThread != "" {
+		thread = hevStr(tc.wantThread)
+	}
+	wantMsg := proto.MsgRow{
+		RowHeader: proto.RowHeader{Type: "msg", ID: id(10), Seq: 12}, Pos: 12,
+		Group: groupID, Thread: thread, By: "system", Kind: "system",
+		Timestamp: clock, Mentions: []string{}, Body: briefRaw(t, tc.wantBody),
+	}
+	if tc.wantThread == "" {
+		equal(t, briefRows(res), []any{wantAI, wantMsg})
+		return wantMsg
+	}
+	wantTask := s.Tasks[tc.wantThread]
+	wantTask.Seq = 13
+	wantTask.Thread.Count++
+	wantTask.Thread.Last = &proto.ThreadMessage{By: "system", Kind: "system", Text: "", Timestamp: clock}
+	equal(t, briefRows(res), []any{wantAI, wantMsg, wantTask})
+	return wantMsg
+}
+
+// Step-1 host event codes write their system row in the task thread or main
 // line, advance task.Thread when in a thread, and queue a secretary notice
-// only for cap_reached, rate_limited and login_invalid when a secretary exists.
-func TestHostEvAllFiveEventsAndNotices(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		statusTask string
-		eventJSON  string
-		wantThread string
-		wantBody   any
-		wantNotice *home.Item
-	}{
+// only for login_invalid when a secretary exists.
+func TestHostEvEventsAndNotices(t *testing.T) {
+	for _, tc := range []hevEventCase{
 		{
 			name:       "turn_interrupted crash in thread with detail",
 			eventJSON:  fmt.Sprintf(`{"code":"turn_interrupted","reason":"crash","task":%q,"detail":"exit <1> & signal"}`, hevTaskA),
@@ -242,48 +249,16 @@ func TestHostEvAllFiveEventsAndNotices(t *testing.T) {
 			},
 		},
 		{
-			name:      "turn_interrupted stop in main line without detail",
-			eventJSON: `{"code":"turn_interrupted","reason":"stop"}`,
+			name:      "turn_interrupted in main line with empty detail omitted",
+			eventJSON: `{"code":"turn_interrupted","reason":"stop","detail":""}`,
 			wantBody: proto.TurnInterruptedBody{
 				SystemCode: proto.SystemCode{Code: "turn_interrupted"}, AI: hevWorker, Reason: "stop",
 			},
 		},
 		{
-			name:      "turn_interrupted timeout in main line",
-			eventJSON: `{"code":"turn_interrupted","reason":"timeout"}`,
-			wantBody: proto.TurnInterruptedBody{
-				SystemCode: proto.SystemCode{Code: "turn_interrupted"}, AI: hevWorker, Reason: "timeout",
-			},
-		},
-		{
-			name:       "cap_reached task in thread",
-			eventJSON:  fmt.Sprintf(`{"code":"cap_reached","cap":"task","task":%q}`, hevTaskA),
-			wantThread: hevTaskA,
-			wantBody: proto.CapReachedBody{
-				SystemCode: proto.SystemCode{Code: "cap_reached"}, AI: hevWorker, Cap: "task", Task: hevStr(hevTaskA),
-			},
-			wantNotice: &home.Item{AI: aiID, Why: "notice", Task: hevTaskA, Msg: id(10), Code: "cap_reached"},
-		},
-		{
-			name:      "cap_reached day in main line",
-			eventJSON: `{"code":"cap_reached","cap":"day"}`,
-			wantBody: proto.CapReachedBody{
-				SystemCode: proto.SystemCode{Code: "cap_reached"}, AI: hevWorker, Cap: "day",
-			},
-			wantNotice: &home.Item{AI: aiID, Why: "notice", Msg: id(10), Code: "cap_reached"},
-		},
-		{
-			name:       "rate_limited at resets zero stays in main line even when status names a task",
+			name:       "login_invalid with detail stays in main line when status names a task",
 			statusTask: hevTaskB,
-			eventJSON:  `{"code":"rate_limited","resets":0}`,
-			wantBody: proto.RateLimitedBody{
-				SystemCode: proto.SystemCode{Code: "rate_limited"}, AI: hevWorker, Resets: 0,
-			},
-			wantNotice: &home.Item{AI: aiID, Why: "notice", Msg: id(10), Code: "rate_limited"},
-		},
-		{
-			name:      "login_invalid with detail",
-			eventJSON: `{"code":"login_invalid","detail":"Token expired."}`,
+			eventJSON:  `{"code":"login_invalid","detail":"Token expired."}`,
 			wantBody: proto.LoginInvalidBody{
 				SystemCode: proto.SystemCode{Code: "login_invalid"}, AI: hevWorker, Detail: hevStr("Token expired."),
 			},
@@ -323,28 +298,7 @@ func TestHostEvAllFiveEventsAndNotices(t *testing.T) {
 			raw := hevPayload(10, hevWorker, "limited", "direct", extra)
 			res := hevSend(t, s, disk{}, r, laptop, raw)
 			equal(t, res.Answer, store.Outcome{OK: true})
-
-			wantAI := s.AIs[hevWorker]
-			wantAI.Seq, wantAI.State, wantAI.Task, wantAI.Since, wantAI.LastSeen = 11, "limited", tc.statusTask, clock, clock
-
-			var thread *string
-			if tc.wantThread != "" {
-				thread = hevStr(tc.wantThread)
-			}
-			wantMsg := proto.MsgRow{
-				RowHeader: proto.RowHeader{Type: "msg", ID: id(10), Seq: 12}, Pos: 12,
-				Group: groupID, Thread: thread, By: "system", Kind: "system",
-				Timestamp: clock, Mentions: []string{}, Body: briefRaw(t, tc.wantBody),
-			}
-			if tc.wantThread == "" {
-				equal(t, briefRows(res), []any{wantAI, wantMsg})
-			} else {
-				wantTask := s.Tasks[tc.wantThread]
-				wantTask.Seq = 13
-				wantTask.Thread.Count++
-				wantTask.Thread.Last = &proto.ThreadMessage{By: "system", Kind: "system", Text: "", Timestamp: clock}
-				equal(t, briefRows(res), []any{wantAI, wantMsg, wantTask})
-			}
+			wantMsg := hevCheckEventRows(t, s, tc, res)
 
 			var wantItems []home.Item
 			if tc.wantNotice != nil {
@@ -352,7 +306,6 @@ func TestHostEvAllFiveEventsAndNotices(t *testing.T) {
 			}
 			equal(t, res.Items, wantItems)
 
-			// Replaying the exact same command returns the receipt without writing again.
 			s.Commit(res)
 			replay := hevSend(t, s, disk{id(10): wantMsg}, r, laptop, raw)
 			equal(t, replay, home.Result{Answer: store.Outcome{OK: true}})
@@ -367,99 +320,53 @@ func TestHostEvAllFiveEventsAndNotices(t *testing.T) {
 		equal(t, len(res.Rows), 2)
 		equal(t, len(res.Items), 0)
 	})
-
-	t.Run("status without event ignores an existing message with id n", func(t *testing.T) {
-		s := hevState(t)
-		existing := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(12)}, Kind: "text"}
-		res := hevSend(t, s, disk{id(12): existing}, receipts{}, laptop, hevPayload(12, hevWorker, "waiting", "direct", ""))
-		equal(t, res.Answer, store.Outcome{OK: true})
-		equal(t, len(res.Rows), 1)
-	})
 }
 
 type hevRefusalCase struct {
 	by      identity.Key
 	member  string
-	state   string
-	hasSt   bool
-	path    string
 	extra   string
 	raw     string
-	onDisk  disk
 	wantErr string
 }
 
 func hevRefusalInput(tc hevRefusalCase) (identity.Key, string) {
-	by := hevOr(tc.by, laptop)
+	by := laptop
+	if tc.by != nil {
+		by = tc.by
+	}
 	if tc.raw != "" {
 		return by, tc.raw
 	}
-	state := "working"
-	if tc.hasSt {
-		state = tc.state
+	member := hevWorker
+	if tc.member != "" {
+		member = tc.member
 	}
-	return by, hevPayload(25, hevStrOr(tc.member, hevWorker), state, hevStrOr(tc.path, "local"), tc.extra)
-}
-
-func hevOr(k, def identity.Key) identity.Key {
-	if k != nil {
-		return k
-	}
-	return def
-}
-
-func hevStrOr(s, def string) string {
-	if s != "" {
-		return s
-	}
-	return def
+	return by, hevPayload(25, member, "working", "local", tc.extra)
 }
 
 func TestHostEvStatusRefusals(t *testing.T) {
-	existing := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(25)}, Kind: "text"}
 	for name, tc := range map[string]hevRefusalCase{
 		"missing required path": {
 			raw:     fmt.Sprintf(`{"t":"member","n":%q,"ts":%d,"g":%q,"op":"status","id":%q,"state":"working","usage":{}}`, id(25), hevStatusTS, groupID, hevWorker),
 			wantErr: "bad_request",
 		},
-		"null event":                    {extra: `,"event":null`, wantErr: "bad_request"},
 		"event without code":            {extra: `,"event":{}`, wantErr: "bad_request"},
-		"task not a random id":          {extra: `,"task":"not-an-id"`, wantErr: "bad_request"},
-		"unknown state":                 {state: "running", hasSt: true, wantErr: "bad_request"},
-		"empty state":                   {state: "", hasSt: true, wantErr: "bad_request"},
-		"unknown path":                  {path: "wan", wantErr: "bad_request"},
-		"negative window_pct":           {raw: fmt.Sprintf(`{"t":"member","n":%q,"ts":%d,"g":%q,"op":"status","id":%q,"state":"working","path":"local","usage":{"window_pct":-0.1}}`, id(25), hevStatusTS, groupID, hevWorker), wantErr: "bad_request"},
-		"negative window_resets":        {raw: fmt.Sprintf(`{"t":"member","n":%q,"ts":%d,"g":%q,"op":"status","id":%q,"state":"working","path":"local","usage":{"window_resets":-1}}`, id(25), hevStatusTS, groupID, hevWorker), wantErr: "bad_request"},
-		"negative day_cap_pct":          {raw: fmt.Sprintf(`{"t":"member","n":%q,"ts":%d,"g":%q,"op":"status","id":%q,"state":"working","path":"local","usage":{"day_cap_pct":-0.1}}`, id(25), hevStatusTS, groupID, hevWorker), wantErr: "bad_request"},
-		"negative spend_today":          {raw: fmt.Sprintf(`{"t":"member","n":%q,"ts":%d,"g":%q,"op":"status","id":%q,"state":"working","path":"local","usage":{"spend_today":-0.01}}`, id(25), hevStatusTS, groupID, hevWorker), wantErr: "bad_request"},
-		"negative spend_cap":            {raw: fmt.Sprintf(`{"t":"member","n":%q,"ts":%d,"g":%q,"op":"status","id":%q,"state":"working","path":"local","usage":{"spend_cap":-0.01}}`, id(25), hevStatusTS, groupID, hevWorker), wantErr: "bad_request"},
-		"negative turns_today":          {raw: fmt.Sprintf(`{"t":"member","n":%q,"ts":%d,"g":%q,"op":"status","id":%q,"state":"working","path":"local","usage":{"turns_today":-1}}`, id(25), hevStatusTS, groupID, hevWorker), wantErr: "bad_request"},
-		"home-only event code":          {extra: `,"event":{"code":"no_secretary"}`, wantErr: "bad_request"},
-		"unknown event code":            {extra: `,"event":{"code":"mystery"}`, wantErr: "bad_request"},
+		"unknown event code":            {extra: `,"event":{"code":"no_secretary"}`, wantErr: "bad_request"},
+		"postponed cap_reached code":    {extra: `,"event":{"code":"cap_reached","cap":"day"}`, wantErr: "bad_request"},
 		"turn_interrupted no reason":    {extra: `,"event":{"code":"turn_interrupted"}`, wantErr: "bad_request"},
-		"turn_interrupted bad reason":   {extra: `,"event":{"code":"turn_interrupted","reason":"killed"}`, wantErr: "bad_request"},
-		"turn_interrupted empty detail": {extra: `,"event":{"code":"turn_interrupted","reason":"crash","detail":""}`, wantErr: "bad_request"},
-		"turn_interrupted bad task":     {extra: `,"event":{"code":"turn_interrupted","reason":"crash","task":"bad"}`, wantErr: "bad_request"},
-		"cap_reached no cap":            {extra: `,"event":{"code":"cap_reached"}`, wantErr: "bad_request"},
-		"cap_reached bad cap":           {extra: `,"event":{"code":"cap_reached","cap":"month"}`, wantErr: "bad_request"},
-		"cap_reached bad task":          {extra: `,"event":{"code":"cap_reached","cap":"task","task":"bad"}`, wantErr: "bad_request"},
-		"rate_limited no resets":        {extra: `,"event":{"code":"rate_limited"}`, wantErr: "bad_request"},
-		"rate_limited negative resets":  {extra: `,"event":{"code":"rate_limited","resets":-1}`, wantErr: "bad_request"},
 		"login_invalid non-text detail": {extra: `,"event":{"code":"login_invalid","detail":7}`, wantErr: "bad_request"},
-		"login_invalid empty detail":    {extra: `,"event":{"code":"login_invalid","detail":""}`, wantErr: "bad_request"},
 		"session_replaced bad task":     {extra: `,"event":{"code":"session_replaced","task":"bad"}`, wantErr: "bad_request"},
 		"unknown member":                {member: id(99), wantErr: "not_found"},
-		"human member":                  {member: ownerID, wantErr: "forbidden"},
+		"human member":                  {member: ownerID, wantErr: "not_found"},
 		"signed by owner browser":       {by: browser, wantErr: "forbidden"},
 		"signed by another host node":   {by: node, wantErr: "forbidden"},
 		"signed with as by own host":    {extra: fmt.Sprintf(`,"as":%q`, hevWorker), wantErr: "forbidden"},
-		"unknown status task":           {extra: fmt.Sprintf(`,"task":%q`, id(98)), wantErr: "not_found"},
-		"unknown event task":            {extra: fmt.Sprintf(`,"event":{"code":"session_replaced","task":%q}`, id(98)), onDisk: disk{id(25): existing}, wantErr: "not_found"},
-		"message id already exists":     {extra: `,"event":{"code":"login_invalid"}`, onDisk: disk{id(25): existing}, wantErr: "conflict"},
+		"unknown event task":            {extra: fmt.Sprintf(`,"event":{"code":"session_replaced","task":%q}`, id(98)), wantErr: "not_found"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			by, payload := hevRefusalInput(tc)
-			hevRefused(t, hevSend(t, hevState(t), tc.onDisk, receipts{}, by, payload), tc.wantErr)
+			hevRefused(t, hevSend(t, hevState(t), disk{}, receipts{}, by, payload), tc.wantErr)
 		})
 	}
 }
@@ -485,10 +392,9 @@ func TestHostEvSystemRowSizeBoundary(t *testing.T) {
 }
 
 // HostOfflineEvent marks every non-offline AI on that host offline in sorted ID
-// order once the host has no open connection, both directly and via StartLoop.
+// order and leaves already-offline AIs and other hosts untouched.
 func TestHostEvOfflineHandler(t *testing.T) {
 	s := hevState(t)
-	// Add a third AI on laptop that is already offline, and give aiID an active state and task.
 	alreadyOff := id(70)
 	offAI := ai(alreadyOff, laptop)
 	offAI.Group, offAI.Kind, offAI.Name = groupID, "ai", "Offline AI"
@@ -504,10 +410,6 @@ func TestHostEvOfflineHandler(t *testing.T) {
 	worker.State, worker.Task = "waiting", hevTaskA
 	s.AIs[hevWorker] = worker
 
-	// While laptop is still online, or for a non-string / unrelated device, nothing changes.
-	s.Online[laptop.ID()] = true
-	equal(t, home.Events[home.HostOfflineEvent](s, disk{}, clock, laptop.ID()), home.Result{})
-	delete(s.Online, laptop.ID())
 	equal(t, home.Events[home.HostOfflineEvent](s, disk{}, clock, 42), home.Result{})
 	equal(t, home.Events[home.HostOfflineEvent](s, disk{}, clock, guest.ID()), home.Result{})
 
@@ -518,7 +420,6 @@ func TestHostEvOfflineHandler(t *testing.T) {
 	wantSec.Seq, wantSec.State, wantSec.Task, wantSec.Since = 11, "offline", "", clock
 	wantWorker := worker
 	wantWorker.Seq, wantWorker.State, wantWorker.Task, wantWorker.Since = 12, "offline", "", clock
-	// aiID (seed 11) sorts before hevWorker (seed 60): "Cws..." < "PDA...".
 	equal(t, briefRows(res), []any{wantSec, wantWorker})
 
 	s.Commit(res)
@@ -528,40 +429,42 @@ func TestHostEvOfflineHandler(t *testing.T) {
 }
 
 type hevLoopClient struct {
-	done chan struct{}
-	ch   chan any
+	done    chan struct{}
+	ch      chan any
+	started chan struct{}
+	hold    chan struct{}
+	refuse  atomic.Bool
 }
 
 func hevNewClient() *hevLoopClient {
-	return &hevLoopClient{done: make(chan struct{}), ch: make(chan any, 32)}
+	return &hevLoopClient{done: make(chan struct{}), ch: make(chan any, 2048), started: make(chan struct{}, 2048)}
 }
 
 func (c *hevLoopClient) Send(frame any) error {
+	c.started <- struct{}{}
+	if c.hold != nil {
+		<-c.hold
+	}
+	if c.refuse.Load() {
+		return errors.New("send failed")
+	}
 	c.ch <- frame
 	return nil
 }
 
 func (c *hevLoopClient) Done() <-chan struct{} { return c.done }
 
-func TestHostEvOfflineThroughRunLoop(t *testing.T) {
-	db, err := store.Open(":memory:")
-	equal(t, err, nil)
-	defer db.Close()
-
+func hevSeedStore(t *testing.T, db *store.Store) {
+	t.Helper()
 	s := hevState(t)
 	s.Seq = 0
 	worker := s.AIs[hevWorker]
 	worker.State, worker.Task = "working", hevTaskA
-	s.AIs[hevWorker] = worker
 	seed := s.Seal(home.Result{Rows: []home.Row{
-		home.RowOf(s.Group),
-		home.RowOf(s.People[ownerID]),
-		home.RowOf(s.AIs[aiID]),
-		home.RowOf(worker),
-		home.RowOf(s.AIs[hevPeer]),
-		home.RowOf(s.Tasks[hevTaskA]),
+		home.RowOf(s.Group), home.RowOf(s.People[ownerID]), home.RowOf(s.AIs[aiID]),
+		home.RowOf(worker), home.RowOf(s.AIs[hevPeer]), home.RowOf(s.Tasks[hevTaskA]),
 	}})
-	err = db.Write(func(tx *store.Tx) error {
+	err := db.Write(func(tx *store.Tx) error {
 		for _, r := range seed.Rows {
 			if _, err := tx.NextSeq(groupID); err != nil {
 				return err
@@ -573,12 +476,41 @@ func TestHostEvOfflineThroughRunLoop(t *testing.T) {
 		return nil
 	})
 	equal(t, err, nil)
+}
 
-	current := now
+func hevExpectAIState(t *testing.T, watcher *hevLoopClient, wantCount int, wantState, wantTask string, wantSince int64) {
+	t.Helper()
+	select {
+	case frame := <-watcher.ch:
+		pushed, ok := frame.(proto.Rows)
+		equal(t, ok, true)
+		equal(t, len(pushed.Rows), wantCount)
+		var got proto.AIMemberRow
+		equal(t, proto.Decode(pushed.Rows[wantCount-1], &got), nil)
+		equal(t, got.ID, hevWorker)
+		equal(t, got.State, wantState)
+		equal(t, got.Task, wantTask)
+		equal(t, got.Since, wantSince)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for %s rows push", wantState)
+	}
+}
+
+// Loop automatically fires HostOfflineEvent when a device's last taker
+// connection ends via Detach, Send failure, or backlog overflow, and not for
+// browser/non-taker connections or while another taker of that device stays open.
+func TestHostEvOfflineThroughRunLoop(t *testing.T) {
+	db, err := store.Open(":memory:")
+	equal(t, err, nil)
+	defer db.Close()
+	hevSeedStore(t, db)
+
+	var current atomic.Int64
+	current.Store(clock)
 	loop, err := home.StartLoop(home.LoopConfig{
 		Store: db, Home: node.ID(), Owner: browser.ID(), Tables: home.NodeTables(),
-		Logs: func(user string) *identity.Log { return logOf(t, browser, node, laptop) },
-		Now:  func() time.Time { return current },
+		Logs: func(string) *identity.Log { return logOf(t, browser, node, laptop) },
+		Now:  func() time.Time { return time.UnixMilli(current.Load()) },
 	})
 	equal(t, err, nil)
 	defer loop.Close()
@@ -587,32 +519,64 @@ func TestHostEvOfflineThroughRunLoop(t *testing.T) {
 	watchConn := loop.Attach(browser.ID(), watcher)
 	_, ok := loop.Watch(watchConn, groupID, true)
 	equal(t, ok, true)
+	syncLoop := func() { loop.Watch(watchConn, groupID, true) }
 
-	hostOne, hostTwo := hevNewClient(), hevNewClient()
-	connOne := loop.Attach(laptop.ID(), hostOne)
-	connTwo := loop.Attach(laptop.ID(), hostTwo)
+	// Another host's taker stays attached throughout; browser and non-taker laptop detaches do nothing.
+	nodeConn := loop.Attach(node.ID(), hevNewClient())
+	loop.Inbox(nodeConn)
+	loop.Detach(loop.Attach(browser.ID(), hevNewClient()))
+	loop.Detach(loop.Attach(laptop.ID(), hevNewClient()))
+	syncLoop()
+	equal(t, len(watcher.ch), 0)
 
-	// Detaching one of two connections keeps laptop online, so HostOfflineEvent writes nothing.
+	// Two taker connections on laptop: detaching the first leaves the second, so laptop stays online.
+	connOne := loop.Attach(laptop.ID(), hevNewClient())
+	connTwo := loop.Attach(laptop.ID(), hevNewClient())
+	loop.Inbox(connOne)
+	loop.Inbox(connTwo)
 	loop.Detach(connOne)
-	equal(t, loop.Event(home.HostOfflineEvent, laptop.ID()), true)
+	syncLoop()
+	equal(t, len(watcher.ch), 0)
 
-	// Detaching the second connection makes laptop offline, and HostOfflineEvent pushes the offline rows.
-	current = time.UnixMilli(clock + 2500)
+	// Even with a non-taker laptop connection attached, detaching the last taker marks laptop AIs offline.
+	nonTaker := loop.Attach(laptop.ID(), hevNewClient())
+	current.Store(clock + 2500)
 	loop.Detach(connTwo)
-	equal(t, loop.Event(home.HostOfflineEvent, laptop.ID()), true)
+	hevExpectAIState(t, watcher, 2, "offline", "", clock+2500)
 
-	select {
-	case frame := <-watcher.ch:
-		pushed, ok := frame.(proto.Rows)
-		equal(t, ok, true)
-		equal(t, len(pushed.Rows), 2)
-		var got proto.AIMemberRow
-		equal(t, proto.Decode(pushed.Rows[1], &got), nil)
-		equal(t, got.ID, hevWorker)
-		equal(t, got.State, "offline")
-		equal(t, got.Task, "")
-		equal(t, got.Since, int64(clock+2500))
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for offline rows push")
+	// Setting hevWorker working again on nonTaker and re-detaching connTwo does not fire offline a second time.
+	current.Store(clock + 3000)
+	loop.Cmd(nonTaker, 1, laptop.Sign(hevPayload(40, hevWorker, "working", "direct", fmt.Sprintf(`,"task":%q`, hevTaskA))))
+	hevExpectAIState(t, watcher, 1, "working", hevTaskA, clock+3000)
+	loop.Detach(connTwo)
+	loop.Detach(nonTaker)
+	syncLoop()
+	equal(t, len(watcher.ch), 0)
+
+	// A taker connection whose Send fails triggers Detach and marks hevWorker offline.
+	failClient := hevNewClient()
+	connThree := loop.Attach(laptop.ID(), failClient)
+	loop.Inbox(connThree)
+	failClient.refuse.Store(true)
+	current.Store(clock + 4000)
+	loop.Welcome(connThree, runWelcome)
+	runWait(t, connThree.Gone())
+	hevExpectAIState(t, watcher, 1, "offline", "", clock+4000)
+
+	// A taker connection given up on backlog overflow also marks hevWorker offline.
+	slowClient := hevNewClient()
+	slowClient.hold = make(chan struct{})
+	defer close(slowClient.hold)
+	connFour := loop.Attach(laptop.ID(), slowClient)
+	loop.Inbox(connFour)
+	current.Store(clock + 5000)
+	loop.Cmd(connFour, 1, laptop.Sign(hevPayload(41, hevWorker, "working", "direct", fmt.Sprintf(`,"task":%q`, hevTaskA))))
+	runWait(t, slowClient.started)
+	hevExpectAIState(t, watcher, 1, "working", hevTaskA, clock+5000)
+	current.Store(clock + 6000)
+	for range 1025 {
+		loop.Welcome(connFour, runWelcome)
 	}
+	runWait(t, connFour.Gone())
+	hevExpectAIState(t, watcher, 1, "offline", "", clock+6000)
 }

@@ -68,7 +68,7 @@ AI:
 | `approvers` | user ids that may decide its approvals: the owner, plus delegates |
 | `state` | `working`, `waiting`, `dormant`, `takeover`, `paused`, `limited`, `offline` |
 | `path` | path between the AI's host and the home: `local` (same node), `direct`, `relay`, or `""` before a pair is selected (`flows/connect.md` step 8) |
-| `usage` | what the CLI reports, each figure ≥ 0. Always an object; `{}` when nothing was reported |
+| `usage` | what the CLI reports. Always an object; `{}` when nothing was reported |
 
 Optional, AI only: `task` (absent when its state names no task); every key
 of `usage`: `window_pct`, `window_resets`, `day_cap_pct`, `spend_today`,
