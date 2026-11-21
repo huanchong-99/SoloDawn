@@ -166,10 +166,12 @@ start with `task`, `step`, `wait`, `item` and `states`, and `workItems`, `byAssi
 `byReviewer`; its tests take the names that start with `mc` and `machine`. The run loop takes the
 names that start with `run`, and its tests those that start with `run` and `Run`; it exports
 `Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
-`ItemsPush`. The briefs take the
+`ItemsPush`. Groups and members take the names that start with `grp` and `mem`, their tests too,
+and their test functions start with `TestGroup` and `TestMember`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
 The merges and summaries (`cmd_merge.go`) take the names that start with `mrg`, their tests too,
-and their test functions start with `TestMerge`.
+and their test functions start with `TestMerge`. Device-log events (`ev_device.go`) take the names
+that start with `dev`, and their tests start with `TestDevice` and `dev`.
 
 ## The run loop
 
@@ -351,6 +353,52 @@ function that moves a task calls it and adds nothing to its rules.
   `thread.count`, `thread.last`); the bodies of the messages; for row 23, the timer and telling the
   secretary once per quiet period. The machine sets `stats.ended`.
 
+## Groups and members
+
+`cmd_group.go` holds `group` `create` and `set` ([commands](../../planning/contracts/commands.md)
+1.1; [rows](../../planning/contracts/rows.md) 1 and 2), under `group/create` and `group/set`;
+`group` `pause` and `resume` belong to `cmd_pause.go` (unit HM-14). `cmd_member.go` holds `member`
+`add_ai`, `set` and `remove` ([commands](../../planning/contracts/commands.md) 1.2), under
+`member/add_ai`, `member/set` and `member/remove`; `member` `status` belongs to `cmd_hostev.go`
+(unit HM-16). Where the contracts are silent, they do this:
+
+- **`group/create`.** Only a person of this node's owner (`c.Who.AI` empty, `c.Who.User ==
+  s.Owner`) may create a group, else `forbidden`. A `g` that differs from `n`, a `kind` other than
+  `project`, a `forge` other than `github` or `none`, or an empty `name`, `repo`, `base` or
+  `member_name` is `bad_request`. A group that already exists (`s.Group.ID` not empty) is answered
+  `conflict`. It writes the `group` row (`pass` 90, `pass_foundation` 70, default `limits`,
+  `created` `c.Now`) and the owner's `human` `member` row (`role` `owner`, `online` true,
+  `last_seen` `c.Now`), with `GroupsChanged` true. The owner's member id is the first 16 bytes of
+  the SHA-256 of `SoloDawn group owner <n>` in base64url, so the function stays pure
+  ([issues](../../issues.md)).
+- **`group/set`.** By an admin, else `forbidden`. Sending none of `name`, `checks`, `pass`,
+  `pass_foundation`, `limits` and `secretary`, or an empty `name`, is `bad_request`. `secretary`,
+  when sent, must name an AI in `State.AIs` that is neither assignee nor reviewer of an open task
+  (`queued`, `active`, `paused`, `failed`), else `conflict`; any previous secretary's member row
+  loses `secretary`, and the named AI gains it when not already set. `GroupsChanged` is set when
+  `name` changes, because `groups` carries each group's name.
+- **`member/add_ai`.** By a host of a member: `c.Who.AI` must be empty, else `forbidden`; the
+  `name` of the latest `add` entry for `c.Who.Device` in `State.Logs[c.Who.User]` becomes
+  `host_name`. An empty `name`, a `cli` outside `claude` and `codex`, or an `account` outside
+  `personal`, `team` and `api_key` is `bad_request`. `secretary: true` when the group already has a
+  secretary requires an admin, else `forbidden`. An `id` or `name` already held by a human or AI
+  member of the group is `conflict`. The new `ai` `member` row starts with `state` `dormant`,
+  `since` and `last_seen` `c.Now`, `path` `local` when `c.Who.Device == s.Home` and `direct`
+  otherwise, `allow` `[]` and `usage` `{}`; when `secretary` is true, any previous secretary loses
+  the flag and `group.secretary` becomes `id`.
+- **`member/set`.** Sending none of `name`, `account`, `allow` and `approvers`, an empty `name`, or
+  an unknown `account` is `bad_request`. An unknown `id` is `not_found`; a human member row is
+  `forbidden` in step 1. The signer must be the AI's owner (`c.Who.AI` empty, `c.Who.User ==
+  ai.User`) or, when `approvers` is the only field sent, the AI's host (`s.Hosts`), else
+  `forbidden`. A `name` held by another member in the group is `conflict`; keeping the AI's own
+  `name` is accepted.
+- **`member/remove`.** An unknown `id` is `not_found`; a human member row is `forbidden` in step 1.
+  The signer must be the AI's owner or an admin, else `forbidden`. Removing an AI that is assignee
+  or reviewer of an open task is `conflict`. Otherwise the member row becomes a `gone` marker and
+  any queued inbox items for that AI (`c.Disk.Queued`) are retired in `Result.Retire`. Removing the
+  secretary also clears `group.secretary` and writes `system` `no_secretary` in the main line with
+  id `n`.
+
 ## Briefs
 
 `cmd_brief.go` holds `post` of kind `brief` and `act` `confirm` and `revise` on it
@@ -399,51 +447,27 @@ function that moves a task calls it and adds nothing to its rules.
 ([commands](../../planning/contracts/commands.md) 1.3 and 1.5;
 [messages](../../planning/contracts/messages.md) 2.5, 2.8 and 2.11;
 [task-machine](../../planning/contracts/task-machine.md) rows 8 and 9), under the keys
-`task/merged`, `task/conflict` and `post/summary`. Where the contracts are silent, it does this:
+`task/merged`, `task/conflict` and `post/summary`.
 
-- **Merged (`task/merged`).** Requires non-empty `commit` and `merge_commit` and non-negative
-  `stats.added` and `stats.removed`, else `bad_request`; a missing task is `not_found`. `Step`
-  checks that the signer is the host of `task.Assignee` (`forbidden`) before checking that the task
-  is `active` at step `merge` with matching `commit` (`conflict`), and sets `state` `merged`, `wait`
-  `null` and `stats.ended` `c.Now`. If `n` already names a message on disk, the answer is
-  `conflict`. The command copies `stats.added` and `stats.removed` onto the task row, expires every
-  pending card in `c.Disk.Pending()` whose `thread` is `task.ID` (`status` `"expired"`, `at`
-  `c.Now`), writes `system` `task_merged` (`ts` `c.Now`) under id `n` in the task's thread, advances
-  `task.thread.count` and `task.thread.last`, and queues `notice` (`code` `"task_merged"`, `msg`
-  `n`) for the secretary when the group has one.
-- **Releasing queued dependents.** `task/merged` walks `s.Tasks` in sorted task id order: each
-  `queued` task whose `depends` names the merged task is stepped with `OnReleased`, `By` `ByHome`,
-  `Blocked` set while any other dependency in `depends` is not `merged`, and `Pending` read from
-  `c.Disk.Pending()`. When a dependent task becomes `active`, `stats.started` is set to `c.Now`
-  ([rows](../../planning/contracts/rows.md), section 4) so summary minutes count active work rather
-  than dependency wait, its updated row is included in `Result.Rows`, and its `assign` item gets
-  `msg` set to its `task` message id when still on disk (`cause` is `nil`, 2026-11-21 slimming
-  A-3).
-- **Conflict (`task/conflict`).** Requires a non-empty `commit`, else `bad_request`; a missing task
-  is `not_found`. `Step` (`OnConflict`) checks `ByHost`, `active`, step `merge` and matching
-  `commit`, returning the task to `local_check` with wait `conflict` and leaving `failures`
-  unchanged. Writes a `checks` message (`by` `"system"`, `stage` `"merge"`, `ok` `false`, `ts`
-  `c.Now`, one item `"merge"` with `ok` `false` and `detail` omitted when `detail` is `""`) under id
-  `n` in the thread (`conflict` if `n` is taken), advances `task.thread`, and queues `notice`
-  (`code` `"conflict"`, `msg` `n`) for the secretary when the group has one.
-- **Summary (`post/summary`).** Only the secretary posts a summary, else `forbidden`. Requires
-  `thread` not `null` and no duplicate id in `mentions` (`bad_request`), an existing task
-  (`not_found`) whose `state` is `merged` (`conflict`), every mentioned id a member of the group
-  (`conflict`), and `n` unused on disk (`conflict`). Writes the `summary` row under id `n` with
-  `main` `true` and `ts` as signed, fills `SummaryBody` from the task row (`score`
-  `task.Review.Score`, `rounds` `task.Review.Round`, `minutes`
-  `max(0, int((*task.Stats.Ended - task.Stats.Started) / 60_000))`, `added` `task.Stats.Added`,
-  `removed` `task.Stats.Removed`, and `pr` when `task.PR > 0`), and advances `task.thread` with
-  `last.text` cut to at most 200 Unicode characters.
+When `task/merged` steps queued dependents through `OnReleased` (in sorted task id order), each
+task that becomes `active` gets `stats.started` set to `c.Now`
+([rows](../../planning/contracts/rows.md), section 4) so summary minutes count active work rather
+than dependency wait, and its `assign` item names its `task` message (`msg` equal to the task id).
+
+## Device-log events
+
+`ev_device.go` registers `Events["device"]`, which receives a `[]proto.DeviceRow` slice accepted by
+the node for one person ([envelope](../../planning/contracts/envelope.md), section 4;
+[rows](../../planning/contracts/rows.md), section 2). In step 1 it ignores users other than
+`State.Owner`, appends rows whose `ver` exceeds the entries already held in `State.Logs[State.Owner]`,
+and sets `Result.GroupsChanged` when an `Online` device's access (`State.Serves`) changes between
+served and unserved.
 
 ## Known limitations
 
-- The table of commands holds only the briefs, merges and summaries, and no node starts a loop yet:
-  the other command files and the wiring of the node are separate units
+- The table of commands holds only the groups, members, briefs, merges and summaries, and no node
+  starts a loop yet: the other command files and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
-- Retention keeps a `queued` task's confirmed `brief` card while deleting its main-line `task`
-  message once `retention_days` pass, so a release after that omits `msg` from `assign`
-  ([issues](../../issues.md)).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
 - A `peer.Connection` takes every frame at once and keeps it in its own buffer, so the limit of
@@ -477,6 +501,11 @@ and for the refusals, and covers every statement of `machine.go`. `features/home
 holds acceptance test A5.18 at step `merge` and the two points of the third review, a card decided
 while a task is paused and a reviewer named while it is paused.
 
+`cmd_group_test.go` and `cmd_member_test.go` send `group/create`, `group/set`, `member/add_ai`,
+`member/set` and `member/remove` through `Commands.Apply` with fakes of `Receipts` and `Disk`,
+covering every refusal, boundary and secretary transition. `features/home_group.feature` holds the
+home command part of A2.1 and the member-removal part of A5.18.
+
 `cmd_brief_test.go` sends every command of the briefs through `Commands.Apply` with fakes of
 `Receipts` and `Disk`, with a case for every refusal and branch. `features/home_brief.feature`
 holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
@@ -487,3 +516,6 @@ commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
 `Commands.Apply` with fakes of `Receipts` and `Disk`, covering every refusal, boundary, card
 expiration and dependent task release. `features/home_merge.feature` holds the home half of
 acceptance tests A5.10 and A5.12 and dependent task release with `stats.started`.
+
+`ev_device_test.go` covers every branch and boundary of `Events["device"]`, including ignored event
+types, empty and non-owner slices, version boundaries and online/offline `GroupsChanged` transitions.

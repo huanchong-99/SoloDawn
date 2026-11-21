@@ -21,18 +21,10 @@ var (
 const mrgSignedTS = clock - 500
 
 type mrgDisk struct {
-	msgs    map[string]proto.MsgRow
 	pending []proto.MsgRow
 }
 
-func (d *mrgDisk) Msg(id string) (proto.MsgRow, bool) {
-	if d == nil {
-		return proto.MsgRow{}, false
-	}
-	m, ok := d.msgs[id]
-	return m, ok
-}
-
+func (*mrgDisk) Msg(string) (proto.MsgRow, bool)           { return proto.MsgRow{}, false }
 func (*mrgDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
 func (*mrgDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 
@@ -207,10 +199,7 @@ func TestMergeMergedUpdatesTaskExpiresCardsAndWritesSystemMessage(t *testing.T) 
 		Thread: &otherID, Main: true, By: mrgWorkA, Kind: "approval", Timestamp: clock - 1000,
 		Mentions: []string{ownerID}, State: &proto.CardState{Status: "pending"},
 	}
-	d := &mrgDisk{
-		msgs:    map[string]proto.MsgRow{appCard.ID: appCard, decCard.ID: decCard, mainCard.ID: mainCard, otherCard.ID: otherCard},
-		pending: []proto.MsgRow{mainCard, appCard, otherCard, decCard},
-	}
+	d := &mrgDisk{pending: []proto.MsgRow{mainCard, appCard, otherCard, decCard}}
 
 	res := mrgRun(t, s, d, receipts{}, laptop, mrgMergedCmd(90, tid, "9f2c1ab", "c1d9e7a", 318, 42))
 	equal(t, res.Answer, store.Outcome{OK: true})
@@ -271,7 +260,7 @@ func TestMergeMergedZeroStatsAndNoSecretary(t *testing.T) {
 
 // Row 8 release: dependent queued tasks release in sorted ID order when all
 // their dependencies are merged, set stats.started to c.Now, recompute card
-// waits from Pending, and leave Cause nil on released assign items.
+// waits from Pending, and set Msg to the task ID on released assign items.
 func TestMergeMergedReleasesDependentTasksInSortedOrder(t *testing.T) {
 	s := mrgState(t)
 	doneID := id(25)
@@ -290,14 +279,7 @@ func TestMergeMergedReleasesDependentTasksInSortedOrder(t *testing.T) {
 	s.Tasks[mergedID] = mrgTaskAtMerge(mergedID, 2)
 	s.Tasks[stillOpenID] = mrgTaskAtMerge(stillOpenID, 3)
 
-	act := briefAct(browser, 50, "confirm", id(70), "")
-	by, confirmedAt := ownerID, int64(clock-600_000)
-	briefCard := proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: id(70), Seq: 5}, Pos: 5, Group: groupID,
-		By: aiID, Kind: "brief", Timestamp: confirmedAt, Mentions: []string{},
-		State: &proto.CardState{Status: "confirmed", By: &by, At: &confirmedAt, Act: &act},
-	}
-
+	confirmedAt := int64(clock - 600_000)
 	makeQueued := func(tid string, num int, assignee string, brief string, deps []string) proto.TaskRow {
 		return proto.TaskRow{
 			RowHeader: proto.RowHeader{Type: "task", ID: tid, Seq: 6},
@@ -325,13 +307,7 @@ func TestMergeMergedReleasesDependentTasksInSortedOrder(t *testing.T) {
 	cancelledDep.State, cancelledDep.Wait = "cancelled", nil
 	s.Tasks[depCancelled] = cancelledDep
 
-	// depFirst has its task message and a pending decision card; depSecond has a
-	// pending approval card and its task message was purged by retention.
-	firstTaskMsg := proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: depFirst, Seq: 7}, Pos: 7, Group: groupID,
-		By: "system", Kind: "task", Timestamp: confirmedAt, Mentions: []string{},
-		Body: briefRaw(t, proto.TaskBody{Task: depFirst}),
-	}
+	// depFirst has a pending decision card; depSecond has a pending approval card.
 	decPending := proto.MsgRow{
 		RowHeader: proto.RowHeader{Type: "msg", ID: id(84), Seq: 8}, Pos: 8, Group: groupID,
 		Thread: &depFirst, Main: true, By: aiID, Kind: "decision", Timestamp: clock - 900,
@@ -351,10 +327,7 @@ func TestMergeMergedReleasesDependentTasksInSortedOrder(t *testing.T) {
 		Thread: nil, Kind: "brief", State: &proto.CardState{Status: "pending"},
 	}
 
-	d := &mrgDisk{
-		msgs:    map[string]proto.MsgRow{id(70): briefCard, depFirst: firstTaskMsg},
-		pending: []proto.MsgRow{mainPending, decPending, appPending},
-	}
+	d := &mrgDisk{pending: []proto.MsgRow{mainPending, decPending, appPending}}
 
 	res := mrgRun(t, s, d, receipts{}, laptop, mrgMergedCmd(91, mergedID, "9f2c1ab", "c1d9e7a", 10, 2))
 	equal(t, res.Answer, store.Outcome{OK: true})
@@ -376,37 +349,29 @@ func TestMergeMergedReleasesDependentTasksInSortedOrder(t *testing.T) {
 
 	equal(t, res.Items, []home.Item{
 		{AI: aiID, Why: "notice", Task: mergedID, Msg: id(91), Code: "task_merged"},
-		{AI: mrgWorkA, Why: "assign", Task: depFirst, Msg: depFirst, Cause: nil},
-		{AI: mrgWorkB, Why: "assign", Task: depSecond, Msg: "", Cause: nil},
+		{AI: mrgWorkA, Why: "assign", Task: depFirst, Msg: depFirst},
+		{AI: mrgWorkB, Why: "assign", Task: depSecond, Msg: depSecond},
 	})
 }
 
 func TestMergeMergedRefusals(t *testing.T) {
 	tid := id(71)
-	existing := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(90)}, Kind: "text"}
 	for name, tc := range map[string]struct {
 		by   identity.Key
 		raw  string
 		cmd  func(*proto.TaskMerged)
 		task func(*proto.TaskRow)
-		disk *mrgDisk
 		code string
 	}{
-		"invalid json field":   {raw: `{"t":"task","n":"` + id(90) + `","ts":1763600000000,"g":"` + groupID + `","op":"merged","id":"` + tid + `","commit":5}`, code: "bad_request"},
-		"empty commit":         {cmd: func(p *proto.TaskMerged) { p.Commit = "" }, code: "bad_request"},
-		"empty merge commit":   {cmd: func(p *proto.TaskMerged) { p.MergeCommit = "" }, code: "bad_request"},
-		"added below zero":     {cmd: func(p *proto.TaskMerged) { p.Stats.Added = -1 }, code: "bad_request"},
-		"removed below zero":   {cmd: func(p *proto.TaskMerged) { p.Stats.Removed = -1 }, code: "bad_request"},
-		"missing task":         {cmd: func(p *proto.TaskMerged) { p.ID = proto.ID(id(99)) }, code: "not_found"},
-		"by owner browser":     {by: browser, code: "forbidden"},
-		"by another host":      {by: mrgHostB, code: "forbidden"},
-		"by assignee with as":  {cmd: func(p *proto.TaskMerged) { p.As = proto.ID(mrgWorkA) }, code: "forbidden"},
-		"wrong step":           {task: func(r *proto.TaskRow) { r.Step = "review" }, code: "conflict"},
-		"paused task":          {task: func(r *proto.TaskRow) { r.State = "paused" }, code: "conflict"},
-		"already merged":       {task: func(r *proto.TaskRow) { r.State = "merged" }, code: "conflict"},
-		"wrong commit":         {cmd: func(p *proto.TaskMerged) { p.Commit = "other" }, code: "conflict"},
-		"message id taken":     {disk: &mrgDisk{msgs: map[string]proto.MsgRow{id(90): existing}}, code: "conflict"},
-		"forbidden beats disk": {by: browser, disk: &mrgDisk{msgs: map[string]proto.MsgRow{id(90): existing}}, code: "forbidden"},
+		"invalid json field":  {raw: `{"t":"task","n":"` + id(90) + `","ts":1763600000000,"g":"` + groupID + `","op":"merged","id":"` + tid + `","commit":5}`, code: "bad_request"},
+		"missing task":        {cmd: func(p *proto.TaskMerged) { p.ID = proto.ID(id(99)) }, code: "not_found"},
+		"by owner browser":    {by: browser, code: "forbidden"},
+		"by another host":     {by: mrgHostB, code: "forbidden"},
+		"by assignee with as": {cmd: func(p *proto.TaskMerged) { p.As = proto.ID(mrgWorkA) }, code: "forbidden"},
+		"wrong step":          {task: func(r *proto.TaskRow) { r.Step = "review" }, code: "conflict"},
+		"paused task":         {task: func(r *proto.TaskRow) { r.State = "paused" }, code: "conflict"},
+		"already merged":      {task: func(r *proto.TaskRow) { r.State = "merged" }, code: "conflict"},
+		"wrong commit":        {cmd: func(p *proto.TaskMerged) { p.Commit = "other" }, code: "conflict"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := mrgState(t)
@@ -419,10 +384,6 @@ func TestMergeMergedRefusals(t *testing.T) {
 			if tc.by != nil {
 				by = tc.by
 			}
-			d := tc.disk
-			if d == nil {
-				d = &mrgDisk{}
-			}
 			var env proto.Envelope
 			if tc.raw != "" {
 				env = by.Sign(tc.raw)
@@ -433,7 +394,7 @@ func TestMergeMergedRefusals(t *testing.T) {
 				}
 				env = briefSign(by, cmd)
 			}
-			briefRefused(t, briefApply(t, s, d, receipts{}, by, env), tc.code)
+			briefRefused(t, briefApply(t, s, &mrgDisk{}, receipts{}, by, env), tc.code)
 		})
 	}
 }
@@ -513,26 +474,21 @@ func TestMergeConflictMovesTaskToLocalCheckAndWritesMergeChecks(t *testing.T) {
 
 func TestMergeConflictRefusals(t *testing.T) {
 	tid := id(71)
-	existing := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(90)}, Kind: "text"}
 	for name, tc := range map[string]struct {
 		by   identity.Key
 		raw  string
 		cmd  func(*proto.TaskConflict)
 		task func(*proto.TaskRow)
-		disk *mrgDisk
 		code string
 	}{
-		"invalid json":         {raw: `{"t":"task","n":"` + id(90) + `","ts":1763600000000,"g":"` + groupID + `","op":"conflict","id":"` + tid + `","commit":5}`, code: "bad_request"},
-		"empty commit":         {cmd: func(p *proto.TaskConflict) { p.Commit = "" }, code: "bad_request"},
-		"missing task":         {cmd: func(p *proto.TaskConflict) { p.ID = proto.ID(id(99)) }, code: "not_found"},
-		"by owner browser":     {by: browser, code: "forbidden"},
-		"by another host":      {by: mrgHostB, code: "forbidden"},
-		"by assignee with as":  {cmd: func(p *proto.TaskConflict) { p.As = proto.ID(mrgWorkA) }, code: "forbidden"},
-		"wrong step":           {task: func(r *proto.TaskRow) { r.Step = "review" }, code: "conflict"},
-		"paused task":          {task: func(r *proto.TaskRow) { r.State = "paused" }, code: "conflict"},
-		"wrong commit":         {cmd: func(p *proto.TaskConflict) { p.Commit = "other" }, code: "conflict"},
-		"message id taken":     {disk: &mrgDisk{msgs: map[string]proto.MsgRow{id(90): existing}}, code: "conflict"},
-		"forbidden beats disk": {by: browser, disk: &mrgDisk{msgs: map[string]proto.MsgRow{id(90): existing}}, code: "forbidden"},
+		"invalid json":        {raw: `{"t":"task","n":"` + id(90) + `","ts":1763600000000,"g":"` + groupID + `","op":"conflict","id":"` + tid + `","commit":5}`, code: "bad_request"},
+		"missing task":        {cmd: func(p *proto.TaskConflict) { p.ID = proto.ID(id(99)) }, code: "not_found"},
+		"by owner browser":    {by: browser, code: "forbidden"},
+		"by another host":     {by: mrgHostB, code: "forbidden"},
+		"by assignee with as": {cmd: func(p *proto.TaskConflict) { p.As = proto.ID(mrgWorkA) }, code: "forbidden"},
+		"wrong step":          {task: func(r *proto.TaskRow) { r.Step = "review" }, code: "conflict"},
+		"paused task":         {task: func(r *proto.TaskRow) { r.State = "paused" }, code: "conflict"},
+		"wrong commit":        {cmd: func(p *proto.TaskConflict) { p.Commit = "other" }, code: "conflict"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := mrgState(t)
@@ -545,10 +501,6 @@ func TestMergeConflictRefusals(t *testing.T) {
 			if tc.by != nil {
 				by = tc.by
 			}
-			d := tc.disk
-			if d == nil {
-				d = &mrgDisk{}
-			}
 			var env proto.Envelope
 			if tc.raw != "" {
 				env = by.Sign(tc.raw)
@@ -559,7 +511,7 @@ func TestMergeConflictRefusals(t *testing.T) {
 				}
 				env = briefSign(by, cmd)
 			}
-			briefRefused(t, briefApply(t, s, d, receipts{}, by, env), tc.code)
+			briefRefused(t, briefApply(t, s, &mrgDisk{}, receipts{}, by, env), tc.code)
 		})
 	}
 }
@@ -606,8 +558,8 @@ func TestMergeSummaryBuildsBodyAndUpdatesThread(t *testing.T) {
 			mentions: []proto.ID{proto.ID(mrgMember)}, wantMent: []string{mrgMember},
 			re: nil, wantMinutes: 0,
 		},
-		"clock skew ended before started clamps to 0": {
-			started: clock + 120_000, ended: clock, pr: 0, wantPR: nil,
+		"zero elapsed ms and empty text": {
+			started: clock, ended: clock, pr: 0, wantPR: nil,
 			postMain: true, text: "", wantPreview: "",
 			mentions: []proto.ID{proto.ID(mrgWorkB)}, wantMent: []string{mrgWorkB},
 			re: nil, wantMinutes: 0,
@@ -677,11 +629,10 @@ type mrgSummaryRefusalCase struct {
 	thread    *string
 	mentions  []proto.ID
 	taskState string
-	disk      *mrgDisk
 	code      string
 }
 
-func mrgSetupSummaryRefusal(t *testing.T, tid string, tc mrgSummaryRefusalCase) (*home.State, identity.Key, *mrgDisk, proto.Envelope) {
+func mrgSetupSummaryRefusal(t *testing.T, tid string, tc mrgSummaryRefusalCase) (*home.State, identity.Key, proto.Envelope) {
 	t.Helper()
 	s := mrgState(t)
 	if tc.noSec {
@@ -692,11 +643,7 @@ func mrgSetupSummaryRefusal(t *testing.T, tid string, tc mrgSummaryRefusalCase) 
 	row.State, row.Stats.Ended = mrgOrDefault(tc.taskState, "merged"), &ended
 	s.Tasks[tid] = row
 	by, as := mrgSummarySigner(tc)
-	d := tc.disk
-	if d == nil {
-		d = &mrgDisk{}
-	}
-	return s, by, d, mrgSummaryRefusalEnv(by, as, tc)
+	return s, by, mrgSummaryRefusalEnv(by, as, tc)
 }
 
 func mrgOrDefault(val, def string) string {
@@ -731,28 +678,26 @@ func TestMergeSummaryRefusals(t *testing.T) {
 	tid := id(71)
 	missingID := id(99)
 	strangerID := id(98)
-	existing := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(95)}, Kind: "text"}
 
 	for name, tc := range map[string]mrgSummaryRefusalCase{
-		"by person":                {by: browser, as: "", thread: &tid, code: "forbidden"},
-		"by host without as":       {by: laptop, as: "", thread: &tid, code: "forbidden"},
-		"by working AI":            {by: laptop, as: mrgWorkA, thread: &tid, code: "forbidden"},
-		"group without secretary":  {by: laptop, as: aiID, noSec: true, thread: &tid, code: "forbidden"},
-		"invalid json":             {raw: `{"t":"post","n":"` + id(95) + `","ts":1763599999500,"g":"` + groupID + `","as":"` + aiID + `","kind":"summary","thread":"` + tid + `","main":true,"text":7}`, code: "bad_request"},
-		"null thread":              {thread: nil, code: "bad_request"},
-		"duplicate mentions":       {thread: &tid, mentions: []proto.ID{proto.ID(ownerID), proto.ID(mrgWorkA), proto.ID(ownerID)}, code: "bad_request"},
-		"missing task":             {thread: &missingID, mentions: []proto.ID{proto.ID(strangerID)}, code: "not_found"},
-		"queued task":              {thread: &tid, taskState: "queued", code: "conflict"},
-		"active task":              {thread: &tid, taskState: "active", code: "conflict"},
-		"paused task":              {thread: &tid, taskState: "paused", code: "conflict"},
-		"failed task":              {thread: &tid, taskState: "failed", code: "conflict"},
-		"cancelled task":           {thread: &tid, taskState: "cancelled", code: "conflict"},
-		"non-member mention":       {thread: &tid, mentions: []proto.ID{proto.ID(ownerID), proto.ID(strangerID)}, code: "conflict"},
-		"message id already taken": {thread: &tid, disk: &mrgDisk{msgs: map[string]proto.MsgRow{id(95): existing}}, code: "conflict"},
+		"by person":               {by: browser, as: "", thread: &tid, code: "forbidden"},
+		"by host without as":      {by: laptop, as: "", thread: &tid, code: "forbidden"},
+		"by working AI":           {by: laptop, as: mrgWorkA, thread: &tid, code: "forbidden"},
+		"group without secretary": {by: laptop, as: aiID, noSec: true, thread: &tid, code: "forbidden"},
+		"invalid json":            {raw: `{"t":"post","n":"` + id(95) + `","ts":1763599999500,"g":"` + groupID + `","as":"` + aiID + `","kind":"summary","thread":"` + tid + `","main":true,"text":7}`, code: "bad_request"},
+		"null thread":             {thread: nil, code: "bad_request"},
+		"duplicate mentions":      {thread: &tid, mentions: []proto.ID{proto.ID(ownerID), proto.ID(mrgWorkA), proto.ID(ownerID)}, code: "bad_request"},
+		"missing task":            {thread: &missingID, mentions: []proto.ID{proto.ID(strangerID)}, code: "not_found"},
+		"queued task":             {thread: &tid, taskState: "queued", code: "conflict"},
+		"active task":             {thread: &tid, taskState: "active", code: "conflict"},
+		"paused task":             {thread: &tid, taskState: "paused", code: "conflict"},
+		"failed task":             {thread: &tid, taskState: "failed", code: "conflict"},
+		"cancelled task":          {thread: &tid, taskState: "cancelled", code: "conflict"},
+		"non-member mention":      {thread: &tid, mentions: []proto.ID{proto.ID(ownerID), proto.ID(strangerID)}, code: "conflict"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			s, by, d, env := mrgSetupSummaryRefusal(t, tid, tc)
-			briefRefused(t, briefApply(t, s, d, receipts{}, by, env), tc.code)
+			s, by, env := mrgSetupSummaryRefusal(t, tid, tc)
+			briefRefused(t, briefApply(t, s, &mrgDisk{}, receipts{}, by, env), tc.code)
 		})
 	}
 }
@@ -762,17 +707,12 @@ func TestMergeCommandsAnswerRepeatedNonceFromReceipt(t *testing.T) {
 	tid := id(71)
 	s.Tasks[tid] = mrgTaskAtMerge(tid, 1)
 	r := receipts{}
-	d := &mrgDisk{msgs: map[string]proto.MsgRow{}}
+	d := &mrgDisk{}
 
 	mergeEnv := briefSign(laptop, mrgMergedCmd(90, tid, "9f2c1ab", "c1d9e7a", 50, 5))
 	first := briefApply(t, s, d, r, laptop, mergeEnv)
 	equal(t, first.Answer, store.Outcome{OK: true})
 	s.Commit(first)
-	for _, row := range first.Rows {
-		if msg, ok := row.Value().(proto.MsgRow); ok {
-			d.msgs[msg.ID] = msg
-		}
-	}
 	second := briefApply(t, s, d, r, laptop, mergeEnv)
 	equal(t, second, home.Result{Answer: store.Outcome{OK: true}})
 	equal(t, s.Tasks[tid].Thread.Count, 8)

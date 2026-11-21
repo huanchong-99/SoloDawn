@@ -46,21 +46,8 @@ func (w *homeMergeWorld) Msg(id string) (proto.MsgRow, bool) {
 	return m, ok
 }
 
-func (*homeMergeWorld) Note(string) (proto.NoteRow, bool) { return proto.NoteRow{}, false }
-
-func (w *homeMergeWorld) Thread(task *string, before int64, limit int) []proto.MsgRow {
-	var out []proto.MsgRow
-	for i := len(w.order) - 1; i >= 0 && len(out) < limit; i-- {
-		m := w.msgs[w.order[i]]
-		if before > 0 && m.Pos >= before {
-			continue
-		}
-		if homeMergeSameThread(m.Thread, task) {
-			out = append(out, m)
-		}
-	}
-	return out
-}
+func (*homeMergeWorld) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
+func (*homeMergeWorld) Thread(*string, int64, int) []proto.MsgRow { return nil }
 
 func (w *homeMergeWorld) Pending() []proto.MsgRow {
 	var out []proto.MsgRow
@@ -86,13 +73,6 @@ func (w *homeMergeWorld) Receipt(signer, nonce string) (store.Outcome, error) {
 func (w *homeMergeWorld) PutReceipt(signer, nonce string, _ int64, result store.Outcome) error {
 	w.receipts[signer+" "+nonce] = result
 	return nil
-}
-
-func homeMergeSameThread(a, b *string) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
 }
 
 func homeMergeSteps(sc *godog.ScenarioContext) {
@@ -140,7 +120,7 @@ func homeMergeSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^"([^"]*)"'s host checks and submits commit "([^"]*)" and the reviewer passes it with score (\d+)$`, w.checkSubmitAndReview)
 	sc.Step(`^(\d+) minutes pass and task (\d+) reaches step "merge" and merges commit "([^"]*)" as "([^"]*)"$`, w.advanceAndMergeTask)
 	sc.Step(`^task 2 becomes "active" at step "branch" with stats\.started at the release time$`, w.assertTask2Released)
-	sc.Step(`^the merge home queues "([^"]*)" with no cause on task 2$`, w.assertQueuedWithoutCause)
+	sc.Step(`^the merge home queues "([^"]*)" naming task 2's message$`, w.assertQueuedTask2Assign)
 	sc.Step(`^task 2's summary records (\d+) minutes of active work$`, w.assertSummaryMinutes)
 }
 
@@ -295,21 +275,11 @@ func homeMergeStandInAssign(s *home.State, c home.Command) (home.Result, *home.R
 	if err != nil {
 		return home.Result{}, &home.Refusal{Code: err.Error(), Msg: "assign refused"}
 	}
-	feedback := homeMergeFeedbackID(c.Disk, moved.ID)
 	var items []home.Item
 	for _, raw := range fx.Items {
-		items = append(items, home.Item{AI: raw.AI, Why: raw.Why, Task: moved.ID, Msg: feedback})
+		items = append(items, home.Item{AI: raw.AI, Why: raw.Why, Task: moved.ID})
 	}
 	return home.Result{Rows: []home.Row{home.RowOf(moved)}, Items: items}, nil
-}
-
-func homeMergeFeedbackID(d home.Disk, taskID string) string {
-	for _, m := range d.Thread(&taskID, 0, 50) {
-		if m.Kind == "checks" || m.Kind == "review" {
-			return m.ID
-		}
-	}
-	return ""
 }
 
 func (w *homeMergeWorld) initSingleTask(forge, step string, pr int) error {
@@ -607,11 +577,11 @@ func (w *homeMergeWorld) assertTask2Released() error {
 	return nil
 }
 
-func (w *homeMergeWorld) assertQueuedWithoutCause(spec string) error {
+func (w *homeMergeWorld) assertQueuedTask2Assign(spec string) error {
 	t2 := w.taskByNum(2)
 	it, ok := w.findAssign(t2.ID)
-	if !ok || it.Msg != t2.ID || it.Cause != nil {
-		return fmt.Errorf("assign item=%+v; want msg=%q cause=nil", it, t2.ID)
+	if !ok || it.Msg != t2.ID {
+		return fmt.Errorf("assign item=%+v; want msg=%q", it, t2.ID)
 	}
 	return w.assertQueued(spec)
 }

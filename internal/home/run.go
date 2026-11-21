@@ -364,7 +364,10 @@ func (l *Loop) Watch(c *Conn, group string, stateOnly bool) (seq int64, ok bool)
 // calls it on every hello of a host (planning/contracts/datachannel.md
 // section 6).
 func (l *Loop) Inbox(c *Conn) {
-	l.all(func(g *runGroup) { g.inbox(c) })
+	l.mu.Lock()
+	c.taker = true
+	l.each(func(g *runGroup) { g.inbox(c) })
+	l.mu.Unlock()
 }
 
 // Groups returns the groups homed here that the device of c may read, as

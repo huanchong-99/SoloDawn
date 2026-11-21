@@ -2,6 +2,7 @@ package home
 
 import (
 	"encoding/json"
+	"maps"
 	"slices"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
@@ -37,38 +38,28 @@ func mrgMerged(s *State, c Command) (Result, *Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
 	}
-	if !mrgMergedValid(p) {
-		return Result{}, &Refusal{Code: "bad_request", Msg: "task merged requires commit, merge_commit and non-negative stats"}
-	}
 	moved, fx, refusal := s.mrgStepHost(c, p.ID, OnMerged, p.Commit)
 	if refusal != nil {
 		return Result{}, refusal
 	}
-	return s.mrgFinishMerged(c, p, moved, fx)
+	return s.mrgFinishMerged(c, p, moved, fx), nil
 }
 
-func mrgMergedValid(p proto.TaskMerged) bool {
-	return p.Commit != "" && p.MergeCommit != "" && p.Stats.Added >= 0 && p.Stats.Removed >= 0
-}
-
-func (s *State) mrgFinishMerged(c Command, p proto.TaskMerged, moved proto.TaskRow, fx Effects) (Result, *Refusal) {
+func (s *State) mrgFinishMerged(c Command, p proto.TaskMerged, moved proto.TaskRow, fx Effects) Result {
 	body := proto.TaskMergedBody{
 		SystemCode:  proto.SystemCode{Code: fx.System},
 		Task:        moved.ID,
 		Commit:      p.Commit,
 		MergeCommit: p.MergeCommit,
 	}
-	sysMsg, refusal := s.mrgThreadMsg(c, moved.ID, mrgKindSystem, body)
-	if refusal != nil {
-		return Result{}, refusal
-	}
+	sysMsg := s.mrgThreadMsg(c, moved.ID, mrgKindSystem, body)
 	moved.Stats.Added, moved.Stats.Removed = p.Stats.Added, p.Stats.Removed
 	moved = mrgAdvanceThread(moved, sysMsg)
 	rows := append([]Row{RowOf(moved)}, mrgExpireCards(c.Disk, moved.ID, c.Now)...)
 	rows = append(rows, RowOf(sysMsg))
 	relRows, relItems := s.mrgReleaseDeps(c.Disk, moved.ID, c.Now)
-	items := append(s.mrgNotice(fx.Items[0].Code, moved.ID, sysMsg.ID), relItems...)
-	return Result{Rows: append(rows, relRows...), Items: items}, nil
+	items := append(s.mrgItems(moved.ID, sysMsg.ID, fx.Items), relItems...)
+	return Result{Rows: append(rows, relRows...), Items: items}
 }
 
 // mrgConflict records a failed merge attempt through row 9 of the task machine,
@@ -79,19 +70,13 @@ func mrgConflict(s *State, c Command) (Result, *Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
 	}
-	if p.Commit == "" {
-		return Result{}, &Refusal{Code: "bad_request", Msg: "task conflict requires a commit"}
-	}
 	moved, fx, refusal := s.mrgStepHost(c, p.ID, OnConflict, p.Commit)
 	if refusal != nil {
 		return Result{}, refusal
 	}
-	checksMsg, refusal := s.mrgThreadMsg(c, moved.ID, mrgKindChecks, mrgConflictBody(p.Commit, p.Detail))
-	if refusal != nil {
-		return Result{}, refusal
-	}
+	checksMsg := s.mrgThreadMsg(c, moved.ID, mrgKindChecks, mrgConflictBody(p.Commit, p.Detail))
 	moved = mrgAdvanceThread(moved, checksMsg)
-	items := s.mrgNotice(fx.Items[0].Code, moved.ID, checksMsg.ID)
+	items := s.mrgItems(moved.ID, checksMsg.ID, fx.Items)
 	return Result{Rows: []Row{RowOf(moved), RowOf(checksMsg)}, Items: items}, nil
 }
 
@@ -118,7 +103,7 @@ func mrgSummary(s *State, c Command) (Result, *Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
 	}
-	task, mentions, refusal := s.mrgSummaryTarget(c, p)
+	task, mentions, refusal := s.mrgSummaryTarget(p)
 	if refusal != nil {
 		return Result{}, refusal
 	}
@@ -126,7 +111,7 @@ func mrgSummary(s *State, c Command) (Result, *Refusal) {
 	return Result{Rows: []Row{RowOf(msg), RowOf(mrgAdvanceThread(task, msg))}}, nil
 }
 
-func (s *State) mrgSummaryTarget(c Command, p proto.Post[proto.EmptyBody]) (proto.TaskRow, []string, *Refusal) {
+func (s *State) mrgSummaryTarget(p proto.Post[proto.EmptyBody]) (proto.TaskRow, []string, *Refusal) {
 	mentions, unique := mrgStrings(p.Mentions)
 	if p.Thread == nil || !unique {
 		return proto.TaskRow{}, nil, &Refusal{Code: "bad_request", Msg: "summary post requires a task thread and distinct mentions"}
@@ -135,23 +120,20 @@ func (s *State) mrgSummaryTarget(c Command, p proto.Post[proto.EmptyBody]) (prot
 	if !exists {
 		return proto.TaskRow{}, nil, &Refusal{Code: "not_found", Msg: "summary names no task"}
 	}
-	if refusal := s.mrgSummaryReady(c, task, mentions); refusal != nil {
+	if refusal := s.mrgSummaryReady(task, mentions); refusal != nil {
 		return proto.TaskRow{}, nil, refusal
 	}
 	return task, mentions, nil
 }
 
-func (s *State) mrgSummaryReady(c Command, task proto.TaskRow, mentions []string) *Refusal {
+func (s *State) mrgSummaryReady(task proto.TaskRow, mentions []string) *Refusal {
 	if task.State != taskMerged {
 		return &Refusal{Code: "conflict", Msg: "summary requires a merged task"}
 	}
 	for _, m := range mentions {
-		if !s.mrgMember(m) {
+		if !s.memExists(m) {
 			return &Refusal{Code: "conflict", Msg: "summary mentions someone outside the group"}
 		}
-	}
-	if _, taken := c.Disk.Msg(string(c.Nonce)); taken {
-		return &Refusal{Code: "conflict", Msg: "a message with the id of the summary exists"}
 	}
 	return nil
 }
@@ -184,7 +166,7 @@ func mrgSummaryBody(task proto.TaskRow) proto.SummaryBody {
 		Task:    task.ID,
 		Score:   task.Review.Score,
 		Rounds:  task.Review.Round,
-		Minutes: max(0, int((*task.Stats.Ended-task.Stats.Started)/mrgMinuteMS)),
+		Minutes: int((*task.Stats.Ended - task.Stats.Started) / mrgMinuteMS),
 		Added:   task.Stats.Added,
 		Removed: task.Stats.Removed,
 		PR:      pr,
@@ -217,13 +199,9 @@ func (s *State) mrgHost(w Who, assignee string) Sender {
 	return 0
 }
 
-func (s *State) mrgThreadMsg(c Command, taskID, kind string, body any) (proto.MsgRow, *Refusal) {
-	msgID := string(c.Nonce)
-	if _, taken := c.Disk.Msg(msgID); taken {
-		return proto.MsgRow{}, &Refusal{Code: "conflict", Msg: "message id already exists"}
-	}
+func (s *State) mrgThreadMsg(c Command, taskID, kind string, body any) proto.MsgRow {
 	return proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: msgID},
+		RowHeader: proto.RowHeader{Type: "msg", ID: string(c.Nonce)},
 		Group:     s.ID,
 		Thread:    &taskID,
 		By:        mrgAuthorSystem,
@@ -231,7 +209,7 @@ func (s *State) mrgThreadMsg(c Command, taskID, kind string, body any) (proto.Ms
 		Timestamp: c.Now,
 		Mentions:  []string{},
 		Body:      briefJSON(body),
-	}, nil
+	}
 }
 
 func mrgAdvanceThread(task proto.TaskRow, msg proto.MsgRow) proto.TaskRow {
@@ -262,23 +240,24 @@ func mrgExpireCards(d Disk, taskID string, at int64) []Row {
 	return out
 }
 
-func (s *State) mrgNotice(code, taskID, msgID string) []Item {
-	if s.Group.Secretary == "" {
-		return nil
+func (s *State) mrgItems(taskID, msgID string, raw []TaskItem) []Item {
+	var out []Item
+	for _, it := range raw {
+		ai := it.AI
+		if ai == "" {
+			ai = s.Group.Secretary
+		}
+		if ai != "" {
+			out = append(out, Item{AI: ai, Why: it.Why, Task: taskID, Msg: msgID, Code: it.Code})
+		}
 	}
-	return []Item{{
-		AI:   s.Group.Secretary,
-		Why:  itemNotice,
-		Task: taskID,
-		Msg:  msgID,
-		Code: code,
-	}}
+	return out
 }
 
 func (s *State) mrgReleaseDeps(d Disk, mergedID string, now int64) ([]Row, []Item) {
 	var rows []Row
 	var items []Item
-	for _, id := range mrgSortedTaskIDs(s.Tasks) {
+	for _, id := range slices.Sorted(maps.Keys(s.Tasks)) {
 		dep := s.Tasks[id]
 		if dep.State != taskQueued || !slices.Contains(dep.Depends, mergedID) {
 			continue
@@ -289,15 +268,6 @@ func (s *State) mrgReleaseDeps(d Disk, mergedID string, now int64) ([]Row, []Ite
 		}
 	}
 	return rows, items
-}
-
-func mrgSortedTaskIDs(tasks map[string]proto.TaskRow) []string {
-	ids := make([]string, 0, len(tasks))
-	for id := range tasks {
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
-	return ids
 }
 
 func (s *State) mrgReleaseOne(d Disk, dep proto.TaskRow, mergedID string, now int64) (Row, []Item, bool) {
@@ -314,7 +284,7 @@ func (s *State) mrgReleaseOne(d Disk, dep proto.TaskRow, mergedID string, now in
 		return nil, nil, false
 	}
 	released.Stats.Started = now
-	return RowOf(released), mrgAssignItems(d, released, fx.Items), true
+	return RowOf(released), s.mrgItems(released.ID, released.ID, fx.Items), true
 }
 
 func (s *State) mrgBlocked(depends []string, mergedID string) bool {
@@ -352,27 +322,6 @@ func mrgCardWho(m proto.MsgRow) []string {
 	return b.To
 }
 
-func mrgAssignItems(d Disk, task proto.TaskRow, raw []TaskItem) []Item {
-	msgID := mrgTaskMsg(d, task.ID)
-	out := make([]Item, len(raw))
-	for i, it := range raw {
-		out[i] = Item{
-			AI:   it.AI,
-			Why:  it.Why,
-			Task: task.ID,
-			Msg:  msgID,
-		}
-	}
-	return out
-}
-
-func mrgTaskMsg(d Disk, taskID string) string {
-	if m, _ := d.Msg(taskID); m.Kind == "task" {
-		return taskID
-	}
-	return ""
-}
-
 func mrgStrings(ids []proto.ID) ([]string, bool) {
 	out := make([]string, len(ids))
 	for i, id := range ids {
@@ -382,10 +331,4 @@ func mrgStrings(ids []proto.ID) ([]string, bool) {
 		out[i] = string(id)
 	}
 	return out, true
-}
-
-func (s *State) mrgMember(id string) bool {
-	_, human := s.People[id]
-	_, ai := s.AIs[id]
-	return human || ai
 }
