@@ -16,7 +16,7 @@ A unit never calls into the file of a unit built beside it. It registers in a ta
 | the host of a node | `New(db, key, now)`: the `Host`, and the sessions as the last run left them. `node` then sets `h.Connect` and `h.Shim` |
 | what your unit remembers, per host | `Part[T](h)`: one `*T` per type and host, made from its zero value. Not a package variable: tests run several hosts in one process |
 | a command to a home | `h.Command(ctx, home, payload)` signs the payload text with the node's key and sends it as `cmd`. It returns the home's answer, the home's error as an `*Error`, `home_unreachable`, or `bad_request` for a command too large for a `ctl` message |
-| any other request to a home, or a push such as `ack` | `h.Home(device)`, then `Request` or `Send` |
+| any other request to a home, or a push such as `ack` | `h.Home(device)`, then `Request` or `Send`; for a `fetch`, `fetchFrom(ctx, h, device, build)` decodes `proto.Fetched` or the home's `*Error` |
 | a connection to a home (`host.join`) | `h.Connect(ctx, device)`: `node` keeps one open until `ctx` ends and calls `h.Attach` each time it opens |
 | a failure with a wire code | `&Error{Code, Message}`; its text is `<code>: <sentence>` |
 | a session | `h.Sessions`: `Create`, `Get`, `All`, `Update`, `Move`, `End` |
@@ -82,7 +82,7 @@ Not in the seam: the one state per AI that others see (sessions.md, section 3), 
 - `Instructions(s)` returns the embedded English prompt for `s` from `instructions/{group,task,review,secretary}.md` (`secretary.md` when `s.Secretary` is set, otherwise by `s.Kind`).
 - `Compose(h, s, kind, items)` formats `ItemsTurn` (from `items`) and `ReplacedTurn`, `ContinueTurn` and `HandbackTurn` (`items` nil), returning the turn text and `Turn{Kind, Thread, Depth, Jump}` (`N` is set later by `Sessions.SetTurn`).
 - Authority (`instruction` or `information`), speaker labels, and `decided` / `confirmed` outcomes come from `setting` key `owner` in `h.Store`, the `member` rows in `h.Rows`, and `msg.state`, never from message text, envelope re-verification, or `cause`.
-- First task turns, review turns and `ReplacedTurn` fetch the brief (`FetchRow`), the newest 100 notes up to 8 KiB (`FetchKind`), and up to 20 recent thread or main-line messages (`FetchThread`) through `h.Home(s.Home)`. Because `Compose` reads `h.Store` with `Store.Write` and calls `Home.Request`, call it outside any `Store.Write` or `Sessions.Write` transaction.
+- First task turns, review turns and `ReplacedTurn` fetch the brief (`FetchRow`), the newest 100 notes up to 8 KiB (`FetchKind`), and up to 20 recent thread or main-line messages (`FetchThread`) through `fetchFrom(ctx, h, device, build)`. Because `Compose` reads `h.Store` with `Store.Write` and calls `Home.Request`, call it outside any `Store.Write` or `Sessions.Write` transaction.
 
 ## Drivers
 

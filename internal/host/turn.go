@@ -874,13 +874,13 @@ func (c *turnCtx) fetchPage(id, before int64, limit int) proto.FetchPage {
 	return proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: c.s.Group, Before: before, Limit: limit}
 }
 
-func (c *turnCtx) fetch(build func(id int64) any) (proto.Fetched, error) {
+func fetchFrom(ctx context.Context, h *Host, device string, build func(id int64) any) (proto.Fetched, error) {
 	unreachable := &Error{"home_unreachable", "the home of that group is not connected"}
-	home, ok := c.h.Home(c.s.Home)
+	home, ok := h.Home(device)
 	if !ok {
 		return proto.Fetched{}, unreachable
 	}
-	raw, err := home.Request(context.Background(), build)
+	raw, err := home.Request(ctx, build)
 	if err != nil {
 		return proto.Fetched{}, unreachable
 	}
@@ -899,7 +899,7 @@ func (c *turnCtx) fetchBrief(briefID string) (proto.BriefBody, error) {
 	build := func(id int64) any {
 		return proto.FetchRow{FetchPage: c.fetchPage(id, 0, 1), Row: "msg", RowID: briefID}
 	}
-	fetched, err := c.fetch(build)
+	fetched, err := fetchFrom(context.Background(), c.h, c.s.Home, build)
 	if err != nil {
 		return proto.BriefBody{}, err
 	}
@@ -917,7 +917,7 @@ func (c *turnCtx) fetchNotes() ([]string, error) {
 	build := func(id int64) any {
 		return proto.FetchKind{FetchPage: c.fetchPage(id, 0, notePageLimit), Kind: "note"}
 	}
-	fetched, err := c.fetch(build)
+	fetched, err := fetchFrom(context.Background(), c.h, c.s.Home, build)
 	if err != nil {
 		return nil, err
 	}
@@ -950,7 +950,7 @@ func (c *turnCtx) fetchHistory() ([]proto.MsgRow, error) {
 	build := func(id int64) any {
 		return proto.FetchThread{FetchPage: c.fetchPage(id, 0, historyLimit), Thread: thread}
 	}
-	fetched, err := c.fetch(build)
+	fetched, err := fetchFrom(context.Background(), c.h, c.s.Home, build)
 	if err != nil {
 		return nil, err
 	}

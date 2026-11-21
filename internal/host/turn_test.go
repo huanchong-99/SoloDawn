@@ -51,6 +51,7 @@ func strPtr(s string) *string { return &s }
 
 type routedHome struct {
 	done    chan struct{}
+	lastCtx context.Context
 	asked   []any
 	handler func(req any) (json.RawMessage, error)
 }
@@ -63,7 +64,8 @@ func (r *routedHome) Send(any) error               { return nil }
 func (r *routedHome) Path() string                 { return "local" }
 func (r *routedHome) PathChanged() <-chan struct{} { return nil }
 func (r *routedHome) Done() <-chan struct{}        { return r.done }
-func (r *routedHome) Request(_ context.Context, build func(int64) any) (json.RawMessage, error) {
+func (r *routedHome) Request(ctx context.Context, build func(int64) any) (json.RawMessage, error) {
+	r.lastCtx = ctx
 	req := build(int64(len(r.asked) + 1))
 	r.asked = append(r.asked, req)
 	return r.handler(req)
@@ -222,10 +224,10 @@ func TestSessionInstructionsCoverEveryRole(t *testing.T) {
 		s     Session
 		wants []string
 	}{
-		{Session{Kind: GroupSession}, []string{"post", "ask", "reply", "request_decision", "instruction", "information", "secrets", "read only", "do not edit files", "start_task"}},
-		{Session{Kind: TaskSession}, []string{"post", "ask", "reply", "request_decision", "instruction", "information", "secrets", "push_branch", "run_checks", "submit_task", "sandbox"}},
-		{Session{Kind: ReviewSession}, []string{"post", "ask", "reply", "request_decision", "instruction", "information", "secrets", "read only", "do not edit files", ".solodawn-review.diff", "submit_review", "veto"}},
-		{Session{Kind: GroupSession, Secretary: true}, []string{"post", "ask", "reply", "propose_brief", "set_task", "request_decision", "summary", "note_put"}},
+		{Session{Kind: GroupSession}, []string{"post", "request_decision", "instruction", "information", "secrets", "read only", "do not edit files", "start_task"}},
+		{Session{Kind: TaskSession}, []string{"post", "request_decision", "instruction", "information", "secrets", "push_branch", "run_checks", "submit_task", "sandbox"}},
+		{Session{Kind: ReviewSession}, []string{"post", "request_decision", "instruction", "information", "secrets", "read only", "do not edit files", ".solodawn-review.diff", "submit_review", "veto"}},
+		{Session{Kind: GroupSession, Secretary: true}, []string{"post", "propose_brief", "set_task", "request_decision", "summary", "note_put"}},
 		{Session{Kind: TaskSession, Secretary: true}, []string{"propose_brief", "note_put"}},
 	}
 	for _, tc := range cases {
@@ -237,8 +239,8 @@ func checkInstructionCase(t *testing.T, s Session, wants []string) {
 	t.Helper()
 	got := Instructions(s)
 	lines := strings.Count(strings.TrimSuffix(got, "\n"), "\n") + 1
-	if got == "" || lines >= 60 {
-		t.Fatalf("%+v gave %d lines", s, lines)
+	if got == "" || lines >= 60 || strings.Contains(got, "`ask`") || strings.Contains(got, "`reply`") {
+		t.Fatalf("%+v gave invalid instructions (%d lines):\n%s", s, lines, got)
 	}
 	for _, want := range wants {
 		if !strings.Contains(got, want) {
@@ -1013,4 +1015,17 @@ func checkNoteAndHistoryFetchErrors(t *testing.T, r *turnRig, assignFirst json.R
 	close(r.home.done)
 	_, _, err = Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{assignFirst})
 	seamCode(t, err, "home_unreachable")
+}
+
+func TestFetchFromForwardsCallerContext(t *testing.T) {
+	r := newTurnRig(t)
+	type ctxKey struct{}
+	ctx := context.WithValue(context.Background(), ctxKey{}, "tool-ctx")
+	build := func(id int64) any {
+		return proto.FetchKind{FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: tGroupID, Before: 0, Limit: 10}, Kind: "note"}
+	}
+	fetched, err := fetchFrom(ctx, r.h, r.homeKey.ID(), build)
+	if err != nil || len(fetched.Rows) != 1 || r.home.lastCtx.Value(ctxKey{}) != "tool-ctx" {
+		t.Fatalf("fetchFrom failed: err=%v rows=%d ctx=%v", err, len(fetched.Rows), r.home.lastCtx)
+	}
 }
