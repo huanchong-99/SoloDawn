@@ -1,40 +1,26 @@
 // End-to-end milestone 2 (E-M2): group creation across two browsers without reload, sub-second
 // live message delivery, reconnect delta sync, and >1000-row cold reset with scroll-back and
 // preserved pending card (F-06, F-07, A2.1, A2.2).
-import { execFile } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 import type { Browser, BrowserContext, Page } from 'playwright';
-import { afterAll, afterEach, beforeAll, describe, expect, inject, test, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, inject, test } from 'vitest';
 import { launch } from './config';
+import {
+  claudeInitSteps,
+  gitIdentityEnv,
+  initGitRepo,
+  openDirectContext,
+  poll,
+  readPairingCode,
+  startDirectSurface,
+  type DirectSurface,
+} from './direct';
 import { startNet, type Net, type Node } from './nodes';
 
-const exec = promisify(execFile);
-const codePattern =
-  /\b([23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}(?:-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}){3})\b/;
-
-async function initGitRepo(dir: string): Promise<string> {
-  const repo = join(dir, 'project-repo');
-  await mkdir(repo, { recursive: true });
-  await exec('git', ['init', '-b', 'main'], { cwd: repo });
-  await exec('git', ['config', 'user.name', 'Alex'], { cwd: repo });
-  await exec('git', ['config', 'user.email', 'alex@example.test'], { cwd: repo });
-  await writeFile(join(repo, 'README.md'), '# Handbook\n');
-  await exec('git', ['add', 'README.md'], { cwd: repo });
-  await exec('git', ['commit', '-m', 'Initial commit'], { cwd: repo });
-  return repo;
-}
-
-async function pairPrimaryBrowser(page: Page, net: Net, node: Node, label: string) {
-  await page.goto(`${net.rendezvous.url}#/onboarding`);
-  let code = '';
-  await vi.waitFor(async () => {
-    const text = (await page.locator('#prompt').textContent()) ?? '';
-    const match = codePattern.exec(text);
-    expect(match).not.toBeNull();
-    code = match ? match[1] : '';
-  });
+async function pairPrimaryBrowser(page: Page, surface: DirectSurface, node: Node, label: string) {
+  await page.goto(`${surface.url}#/onboarding`);
+  const code = await readPairingCode(page, surface.signal);
   const paired = await node.run(
     'solodawn',
     'pair',
@@ -42,14 +28,17 @@ async function pairPrimaryBrowser(page: Page, net: Net, node: Node, label: strin
     '--name',
     label,
     '--rendezvous',
-    net.rendezvous.signal,
+    surface.signal,
   );
   expect(paired.code, paired.stderr).toBe(0);
+  await poll(() => page.locator('input[name="acct-claude"][value="personal"]').count()).toBe(1);
   await page.locator('input[name="acct-claude"][value="personal"]').check();
+  await poll(() => page.locator('fieldset.acct').first().isDisabled()).toBe(false);
   await page.locator('input[name="acct-codex"][value="api_key"]').check();
+  await poll(() => page.locator('a.done-btn').count()).toBe(1);
   await page.locator('a.done-btn').click();
-  await expect.poll(() => page.url()).toContain('#/groups');
-  await expect.poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
+  await poll(() => page.url()).toContain('#/groups');
+  await poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
 }
 
 async function installNetSwitch(context: BrowserContext) {
@@ -87,10 +76,9 @@ async function installNetSwitch(context: BrowserContext) {
     Object.assign(window, {
       __setPeerOffline(offline: boolean) {
         state.offline = offline;
-        if (offline) {
-          for (const pc of [...state.peers]) pc.close();
-          for (const ws of [...state.sockets]) ws.close();
-        }
+        if (!offline) return;
+        for (const pc of [...state.peers]) pc.close();
+        for (const ws of [...state.sockets]) ws.close();
       },
     });
   });
@@ -103,47 +91,36 @@ async function setPeerOffline(page: Page, offline: boolean) {
   }, offline);
 }
 
-async function pairSecondBrowser(firstPage: Page, secondPage: Page, net: Net) {
-  await firstPage.goto(`${net.rendezvous.url}#/nodes`);
+async function pairSecondBrowser(firstPage: Page, secondPage: Page, surface: DirectSurface) {
+  await firstPage.locator('.rail a[href="#/nodes"]').click();
+  await poll(() => firstPage.url()).toContain('#/nodes');
+  await poll(() => firstPage.locator('button.btn', { hasText: 'Add a browser' }).isDisabled()).toBe(
+    false,
+  );
   await firstPage.locator('button.btn', { hasText: 'Add a browser' }).click();
   const dialog = firstPage.locator('dialog.dlg[open]');
   await dialog.locator('button.btn-primary', { hasText: 'Create pairing link' }).click();
+  await poll(() => dialog.locator('.pair-box pre.cmd').count()).toBe(1);
   const rawLink = ((await dialog.locator('.pair-box pre.cmd').textContent()) ?? '').trim();
   expect(rawLink).toContain('#pair=');
-  const hashIndex = rawLink.indexOf('#pair=');
-  const link = `${net.rendezvous.url}${rawLink.slice(hashIndex)}`;
+  const link = `${surface.url}${rawLink.slice(rawLink.indexOf('#pair='))}`;
   await dialog.locator('button.btn-primary', { hasText: 'Done' }).click();
 
   await secondPage.goto(link);
-  await expect.poll(() => secondPage.url()).toContain('#/onboarding');
-  await expect
-    .poll(() => secondPage.locator('section[aria-labelledby="st-h"] .badge').textContent())
-    .toContain('Connected');
+  await poll(() => secondPage.url()).toContain('#/onboarding');
+  await poll(() =>
+    secondPage.locator('section[aria-labelledby="st-h"] .badge').textContent(),
+  ).toContain('Connected');
+  await poll(() => secondPage.locator('a.done-btn').count()).toBe(1);
   await secondPage.locator('a.done-btn').click();
-  await expect.poll(() => secondPage.url()).toContain('#/groups');
-  await expect.poll(() => secondPage.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
+  await poll(() => secondPage.url()).toContain('#/groups');
+  await poll(() => secondPage.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
 }
 
 function decisionSecretaryScript() {
   return {
     steps: [
-      { dir: 'stdin', msg: { type: 'user', message: { role: 'user' } } },
-      {
-        dir: 'mcp<-cli',
-        msg: {
-          jsonrpc: '2.0',
-          id: 0,
-          method: 'initialize',
-          params: {
-            protocolVersion: '2025-11-25',
-            capabilities: {},
-            clientInfo: { name: 'claude-code', version: '2.1.311' },
-          },
-        },
-      },
-      { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 0, result: {} } },
-      { dir: 'mcp<-cli', msg: { jsonrpc: '2.0', method: 'notifications/initialized' } },
-      { dir: 'stdout', msg: { type: 'system', subtype: 'init', session_id: '$session' } },
+      ...claudeInitSteps(),
       {
         dir: 'mcp<-cli',
         msg: {
@@ -183,18 +160,23 @@ function decisionSecretaryScript() {
 describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back', () => {
   let browser: Browser;
   let net: Net | undefined;
+  let surface: DirectSurface | undefined;
   const contexts: BrowserContext[] = [];
 
   beforeAll(async () => {
     browser = await launch(inject('browser'));
   });
   afterAll(() => browser?.close());
-  afterEach(() => Promise.allSettled(contexts.splice(0).map((ctx) => ctx.close())));
+  afterEach(async () => {
+    await Promise.allSettled(contexts.splice(0).map((ctx) => ctx.close()));
+    await surface?.close();
+    surface = undefined;
+  });
   afterEach(() => net?.stop());
 
   test(
     'syncs group creation, sub-second chat, 20-message delta, and 1500-message reset with scroll-back',
-    { timeout: 120_000 },
+    { timeout: 180_000 },
     async () => {
       const scriptDir = join(inject('e2e').root, `m2-scripts-${Date.now()}`);
       await mkdir(scriptDir, { recursive: true });
@@ -203,23 +185,25 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
 
       const active = await startNet({
         nodes: 1,
-        env: () => ({ SOLODAWN_FAKE_CLAUDE_SCRIPT: claudeScript }),
+        env: () => ({ ...gitIdentityEnv, SOLODAWN_FAKE_CLAUDE_SCRIPT: claudeScript }),
       });
       net = active;
-      const repo = await initGitRepo(active.dir);
+      const direct = await startDirectSurface(active.rendezvous, inject('browser'));
+      surface = direct;
+      const repo = await initGitRepo(active.dir, 'project-repo', '# Handbook\n');
 
-      const ctx1 = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-      const ctx2 = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-      contexts.push(ctx1, ctx2);
+      const ctx1 = await openDirectContext(browser, contexts, direct);
+      const ctx2 = await openDirectContext(browser, contexts, direct);
       await installNetSwitch(ctx2);
 
       const page1 = await ctx1.newPage();
       const page2 = await ctx2.newPage();
 
-      await pairPrimaryBrowser(page1, active, active.nodes[0], 'home-box');
-      await pairSecondBrowser(page1, page2, active);
+      await pairPrimaryBrowser(page1, direct, active.nodes[0], 'home-box');
+      await pairSecondBrowser(page1, page2, direct);
 
-      await page1.goto(`${active.rendezvous.url}#/groups`);
+      await page1.locator('.rail .tabs a[href="#/groups"]').click();
+      await poll(() => page1.url()).toContain('#/groups');
       await page1.locator('button', { hasText: 'New project group' }).first().click();
 
       const createDlg = page1.locator('dialog.dlg[open]');
@@ -231,16 +215,14 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
       await createDlg.locator('select.input').first().selectOption('none');
       await createDlg.locator('button.btn-primary', { hasText: 'Create group' }).click();
 
-      await expect.poll(() => page1.url()).toMatch(/#\/groups\/[^/]+$/);
+      await poll(() => page1.url()).toMatch(/#\/groups\/[^/]+$/);
       const groupHash = new URL(page1.url()).hash;
 
       // Second connected browser sees the new group in its list without reloading.
-      await expect
-        .poll(() => page2.locator('.glist a.gitem b').allTextContents())
-        .toContain('Handbook');
+      await poll(() => page2.locator('.glist a.gitem b').allTextContents()).toContain('Handbook');
 
       await page2.locator('.glist a.gitem', { hasText: 'Handbook' }).click();
-      await expect.poll(() => new URL(page2.url()).hash).toBe(groupHash);
+      await poll(() => new URL(page2.url()).hash).toBe(groupHash);
 
       // Post a message from Browser 1 and verify Browser 2 renders it within 1 second (A2.1).
       const composer1 = page1.locator('.composer textarea');
@@ -258,40 +240,38 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
       // Add a secretary AI so an old pending card exists before the 1500-message gap.
       await page1.locator('.members button', { hasText: 'Add AI' }).click();
       const addDlg = page1.locator('dialog.dlg[open]');
-      await expect.poll(() => addDlg.locator('.choice').count()).toBeGreaterThan(0);
+      await poll(() => addDlg.locator('.choice').count()).toBeGreaterThan(0);
       await addDlg.locator('.sec-opt input[type="checkbox"]').check();
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
-      await expect.poll(() => page1.locator('.members .member').count()).toBe(1);
+      await poll(() => page1.locator('.members .member').count()).toBe(1);
 
       await composer1.fill('Please check archive redirects');
       await page1.locator('.composer button.send').click();
-      await expect
-        .poll(() => page2.locator('.needbar').textContent())
-        .toContain('Keep legacy archive redirects?');
+      await poll(() => page2.locator('.chat nav.needbar').textContent()).toContain(
+        'Keep legacy archive redirects?',
+      );
 
       // Disconnect Browser 2, post 20 messages, reconnect, and verify exact delta sync (A2.2).
       await setPeerOffline(page2, true);
-      await expect
-        .poll(() => page2.locator('.composer .state.down').textContent())
-        .toContain('Cannot reach the group home');
+      await poll(() => page2.locator('.composer .state.down').textContent()).toContain(
+        'Cannot reach the group home',
+      );
 
       for (let i = 1; i <= 20; i++) {
         const label = `Delta message ${String(i).padStart(2, '0')}`;
         await composer1.fill(label);
         await page1.locator('.composer button.send').click();
-        await expect.poll(() => composer1.inputValue()).toBe('');
+        await poll(() => composer1.inputValue()).toBe('');
       }
 
       await setPeerOffline(page2, false);
-      await expect
-        .poll(() => page2.locator('.line .msg .text').allTextContents())
-        .toEqual(
-          expect.arrayContaining([
-            'Hello live across browsers',
-            'Delta message 01',
-            'Delta message 20',
-          ]),
-        );
+      await poll(() => page2.locator('.line .msg .text').allTextContents()).toEqual(
+        expect.arrayContaining([
+          'Hello live across browsers',
+          'Delta message 01',
+          'Delta message 20',
+        ]),
+      );
 
       const textsAfterDelta = await page2.locator('.line .msg .text').allTextContents();
       const idxDelta01 = textsAfterDelta.indexOf('Delta message 01');
@@ -301,9 +281,9 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
 
       // Disconnect Browser 2 again, post 1500 messages (>1000 cap), and verify cold reset + scroll-back.
       await setPeerOffline(page2, true);
-      await expect
-        .poll(() => page2.locator('.composer .state.down').textContent())
-        .toContain('Cannot reach the group home');
+      await poll(() => page2.locator('.composer .state.down').textContent()).toContain(
+        'Cannot reach the group home',
+      );
 
       await page1.evaluate(async () => {
         const ta = document.querySelector<HTMLTextAreaElement>('.composer textarea');
@@ -320,35 +300,30 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
       });
 
       await setPeerOffline(page2, false);
-      await expect
-        .poll(() => page2.locator('.line .msg .text').allTextContents())
-        .toContain('History line 1500');
+      await poll(() => page2.locator('.line .msg .text').allTextContents(), 30_000).toContain(
+        'History line 1500',
+      );
 
       const resetTexts = await page2.locator('.line .msg .text').allTextContents();
       expect(resetTexts).toContain('History line 1451');
       expect(resetTexts).not.toContain('History line 1450');
 
       // The old pending decision card from before the 1500 messages remains visible after reset.
-      await expect
-        .poll(() => page2.locator('.needbar').textContent())
-        .toContain('Keep legacy archive redirects?');
-      await expect
-        .poll(() =>
-          page2
-            .locator('.line .card')
-            .allTextContents()
-            .then((all) => all.join('\n')),
-        )
-        .toContain('Keep legacy archive redirects?');
+      await poll(() => page2.locator('.chat nav.needbar').textContent()).toContain(
+        'Keep legacy archive redirects?',
+      );
+      await poll(() =>
+        page2
+          .locator('.line .card')
+          .allTextContents()
+          .then((all) => all.join('\n')),
+      ).toContain('Keep legacy archive redirects?');
 
       // Scrolling toward the top loads the previous 50-message page in chronological order.
-      await page2.locator('.scroller').evaluate((el) => {
-        el.scrollTop = -el.scrollHeight;
-        el.dispatchEvent(new Event('scroll'));
-      });
-      await expect
-        .poll(() => page2.locator('.line .msg .text').allTextContents())
-        .toContain('History line 1450');
+      await page2.locator('.edge').evaluate((el) => el.scrollIntoView({ block: 'start' }));
+      await poll(() => page2.locator('.line .msg .text').allTextContents()).toContain(
+        'History line 1450',
+      );
 
       const pagedTexts = await page2.locator('.line .msg .text').allTextContents();
       const idx1401 = pagedTexts.indexOf('History line 1401');

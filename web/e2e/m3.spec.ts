@@ -1,29 +1,23 @@
 // End-to-end milestone 3 (E-M3): AI member panel, add-AI dialog, mentioning Claude Code and Codex
 // with session continuity, 1-minute idle dormancy, and resume with memory (U-3, A3.1, A3.4).
-import { execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 import type { Browser, BrowserContext, Page } from 'playwright';
-import { afterAll, afterEach, beforeAll, describe, expect, inject, test, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, inject, test } from 'vitest';
 import { launch } from './config';
+import {
+  claudeInitSteps,
+  codexInitSteps,
+  exec,
+  gitIdentityEnv,
+  initGitRepo,
+  openDirectContext,
+  poll,
+  readPairingCode,
+  startDirectSurface,
+  type DirectSurface,
+} from './direct';
 import { startNet, type Net, type Node } from './nodes';
-
-const exec = promisify(execFile);
-const codePattern =
-  /\b([23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}(?:-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}){3})\b/;
-
-async function initGitRepo(dir: string): Promise<string> {
-  const repo = join(dir, 'website-repo');
-  await mkdir(repo, { recursive: true });
-  await exec('git', ['init', '-b', 'main'], { cwd: repo });
-  await exec('git', ['config', 'user.name', 'Alex'], { cwd: repo });
-  await exec('git', ['config', 'user.email', 'alex@example.test'], { cwd: repo });
-  await writeFile(join(repo, 'README.md'), '# Website\n');
-  await exec('git', ['add', 'README.md'], { cwd: repo });
-  await exec('git', ['commit', '-m', 'Initial commit'], { cwd: repo });
-  return repo;
-}
 
 async function setNodeIdleMinutes(node: Node, minutes: number) {
   const dbPath = join(node.dataDir, 'node.db');
@@ -37,15 +31,9 @@ async function setNodeIdleMinutes(node: Node, minutes: number) {
   await exec(process.execPath, ['--input-type=module', '-e', script, dbPath, String(minutes)]);
 }
 
-async function pairAndCreateGroup(page: Page, net: Net, node: Node, repo: string) {
-  await page.goto(`${net.rendezvous.url}#/onboarding`);
-  let code = '';
-  await vi.waitFor(async () => {
-    const text = (await page.locator('#prompt').textContent()) ?? '';
-    const match = codePattern.exec(text);
-    expect(match).not.toBeNull();
-    code = match ? match[1] : '';
-  });
+async function pairAndCreateGroup(page: Page, surface: DirectSurface, node: Node, repo: string) {
+  await page.goto(`${surface.url}#/onboarding`);
+  const code = await readPairingCode(page, surface.signal);
   const paired = await node.run(
     'solodawn',
     'pair',
@@ -53,15 +41,18 @@ async function pairAndCreateGroup(page: Page, net: Net, node: Node, repo: string
     '--name',
     'studio',
     '--rendezvous',
-    net.rendezvous.signal,
+    surface.signal,
   );
   expect(paired.code, paired.stderr).toBe(0);
 
+  await poll(() => page.locator('input[name="acct-claude"][value="personal"]').count()).toBe(1);
   await page.locator('input[name="acct-claude"][value="personal"]').check();
+  await poll(() => page.locator('fieldset.acct').first().isDisabled()).toBe(false);
   await page.locator('input[name="acct-codex"][value="api_key"]').check();
+  await poll(() => page.locator('a.done-btn').count()).toBe(1);
   await page.locator('a.done-btn').click();
-  await expect.poll(() => page.url()).toContain('#/groups');
-  await expect.poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
+  await poll(() => page.url()).toContain('#/groups');
+  await poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
 
   await page.locator('button', { hasText: 'New project group' }).first().click();
   const dlg = page.locator('dialog.dlg[open]');
@@ -72,29 +63,13 @@ async function pairAndCreateGroup(page: Page, net: Net, node: Node, repo: string
   await inputs.nth(3).fill('Alex');
   await dlg.locator('select.input').first().selectOption('none');
   await dlg.locator('button.btn-primary', { hasText: 'Create group' }).click();
-  await expect.poll(() => page.url()).toMatch(/#\/groups\/[^/]+$/);
+  await poll(() => page.url()).toMatch(/#\/groups\/[^/]+$/);
 }
 
 function claudeTwoTurnScript() {
   return {
     steps: [
-      { dir: 'stdin', msg: { type: 'user', message: { role: 'user' } } },
-      {
-        dir: 'mcp<-cli',
-        msg: {
-          jsonrpc: '2.0',
-          id: 0,
-          method: 'initialize',
-          params: {
-            protocolVersion: '2025-11-25',
-            capabilities: {},
-            clientInfo: { name: 'claude-code', version: '2.1.311' },
-          },
-        },
-      },
-      { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 0, result: {} } },
-      { dir: 'mcp<-cli', msg: { jsonrpc: '2.0', method: 'notifications/initialized' } },
-      { dir: 'stdout', msg: { type: 'system', subtype: 'init', session_id: '$session' } },
+      ...claudeInitSteps(),
       {
         dir: 'mcp<-cli',
         msg: {
@@ -147,23 +122,7 @@ function claudeTwoTurnScript() {
 function claudeResumedScript() {
   return {
     steps: [
-      { dir: 'stdin', msg: { type: 'user', message: { role: 'user' } } },
-      {
-        dir: 'mcp<-cli',
-        msg: {
-          jsonrpc: '2.0',
-          id: 0,
-          method: 'initialize',
-          params: {
-            protocolVersion: '2025-11-25',
-            capabilities: {},
-            clientInfo: { name: 'claude-code', version: '2.1.311' },
-          },
-        },
-      },
-      { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 0, result: {} } },
-      { dir: 'mcp<-cli', msg: { jsonrpc: '2.0', method: 'notifications/initialized' } },
-      { dir: 'stdout', msg: { type: 'system', subtype: 'init', session_id: '$session' } },
+      ...claudeInitSteps(),
       {
         dir: 'mcp<-cli',
         msg: {
@@ -196,34 +155,7 @@ function codexReplyScript() {
   return {
     session: '01a1f63f-701c-78c1-bbf3-f1ac61c56b59',
     steps: [
-      { dir: 'stdin', msg: { method: 'initialize' } },
-      { dir: 'stdout', msg: { id: '$id', result: {} } },
-      { dir: 'stdin', msg: { method: 'initialized' } },
-      { dir: 'stdin', msg: { method: 'thread/start' } },
-      { dir: 'stdout', msg: { id: '$id', result: { thread: { id: '$session' } } } },
-      { dir: 'stdin', msg: { method: 'turn/start', params: { threadId: '$session' } } },
-      {
-        dir: 'stdout',
-        msg: {
-          id: '$id',
-          result: { turn: { id: 'turn-codex-1', status: 'inProgress', error: null } },
-        },
-      },
-      {
-        dir: 'mcp<-cli',
-        msg: {
-          jsonrpc: '2.0',
-          id: 0,
-          method: 'initialize',
-          params: {
-            protocolVersion: '2025-06-18',
-            capabilities: {},
-            clientInfo: { name: 'codex-mcp-client', version: '0.164.0' },
-          },
-        },
-      },
-      { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 0, result: {} } },
-      { dir: 'mcp<-cli', msg: { jsonrpc: '2.0', method: 'notifications/initialized' } },
+      ...codexInitSteps('turn-codex-1'),
       {
         dir: 'mcp<-cli',
         msg: {
@@ -252,18 +184,23 @@ function codexReplyScript() {
 describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume', () => {
   let browser: Browser;
   let net: Net | undefined;
+  let surface: DirectSurface | undefined;
   const contexts: BrowserContext[] = [];
 
   beforeAll(async () => {
     browser = await launch(inject('browser'));
   });
   afterAll(() => browser?.close());
-  afterEach(() => Promise.allSettled(contexts.splice(0).map((ctx) => ctx.close())));
+  afterEach(async () => {
+    await Promise.allSettled(contexts.splice(0).map((ctx) => ctx.close()));
+    await surface?.close();
+    surface = undefined;
+  });
   afterEach(() => net?.stop());
 
   test(
     'adds Claude Code and Codex, replies to mentions, sleeps after 1 minute idle, and resumes',
-    { timeout: 130_000 },
+    { timeout: 180_000 },
     async () => {
       const scriptDir = join(inject('e2e').root, `m3-scripts-${Date.now()}`);
       await mkdir(scriptDir, { recursive: true });
@@ -275,55 +212,57 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       const active = await startNet({
         nodes: 1,
         env: () => ({
+          ...gitIdentityEnv,
           SOLODAWN_FAKE_CLAUDE_SCRIPT: claudePath,
           SOLODAWN_FAKE_CODEX_SCRIPT: codexPath,
         }),
       });
       net = active;
+      const direct = await startDirectSurface(active.rendezvous, inject('browser'));
+      surface = direct;
       const [node] = active.nodes;
       await setNodeIdleMinutes(node, 1);
 
-      const repo = await initGitRepo(active.dir);
-      const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-      contexts.push(context);
+      const repo = await initGitRepo(active.dir, 'website-repo', '# Website\n');
+      const context = await openDirectContext(browser, contexts, direct);
       const page = await context.newPage();
 
-      await pairAndCreateGroup(page, active, node, repo);
+      await pairAndCreateGroup(page, direct, node, repo);
 
       const members = page.locator('#chat-side .members');
-      await expect.poll(() => members.textContent()).toContain('No AI in this group yet.');
-      await expect.poll(() => members.textContent()).toContain('People · 1');
-      await expect.poll(() => members.locator('.person').textContent()).toContain('Alex');
-      await expect.poll(() => members.locator('.person').textContent()).toContain('You');
-      await expect.poll(() => members.locator('.person').textContent()).toContain('Owner');
+      await poll(() => members.textContent()).toContain('No AI in this group yet.');
+      await poll(() => members.textContent()).toContain('People · 1');
+      await poll(() => members.locator('.person').textContent()).toContain('Alex');
+      await poll(() => members.locator('.person').textContent()).toContain('You');
+      await poll(() => members.locator('.person').textContent()).toContain('Owner');
 
       // Add Claude Code via AddAI dialog.
       await members.locator('button', { hasText: 'Add AI' }).click();
       const addDlg = page.locator('dialog.dlg[open]');
-      await expect.poll(() => addDlg.locator('.choice').count()).toBe(2);
+      await poll(() => addDlg.locator('.choice').count()).toBe(2);
       await addDlg.locator('.choice', { hasText: 'Claude Code · studio' }).locator('input').check();
-      await expect.poll(() => addDlg.locator('input.input').inputValue()).toBe('Claude Code');
+      await poll(() => addDlg.locator('input.input').inputValue()).toBe('Claude Code');
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
-      await expect.poll(() => members.locator('.member').count()).toBe(1);
+      await poll(() => members.locator('.member').count()).toBe(1);
 
       // Add Codex via AddAI dialog; Claude Code now shows "Already in this group".
       await members.locator('button', { hasText: 'Add AI' }).click();
-      await expect
-        .poll(() => addDlg.locator('.choice', { hasText: 'Claude Code · studio' }).textContent())
-        .toContain('Already in this group');
+      await poll(() =>
+        addDlg.locator('.choice', { hasText: 'Claude Code · studio' }).textContent(),
+      ).toContain('Already in this group');
       await addDlg.locator('.choice', { hasText: 'Codex · studio' }).locator('input').check();
-      await expect.poll(() => addDlg.locator('input.input').inputValue()).toBe('Codex');
+      await poll(() => addDlg.locator('input.input').inputValue()).toBe('Codex');
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
-      await expect.poll(() => members.locator('.member').count()).toBe(2);
+      await poll(() => members.locator('.member').count()).toBe(2);
 
       const claudeCard = members.locator('.member', { hasText: 'Claude Code' });
       const codexCard = members.locator('.member', { hasText: 'Codex' });
-      await expect.poll(() => claudeCard.textContent()).toContain('studio · group home');
-      await expect.poll(() => claudeCard.textContent()).toContain('Personal subscription');
-      await expect
-        .poll(() => claudeCard.locator('header .st').textContent())
-        .toContain('Sleeping · wakes when @mentioned');
-      await expect.poll(() => codexCard.textContent()).toContain('API key');
+      await poll(() => claudeCard.textContent()).toContain('group home');
+      await poll(() => claudeCard.textContent()).toContain('Personal subscription');
+      await poll(() => claudeCard.locator('header .st').textContent()).toContain(
+        'Sleeping · wakes when @mentioned',
+      );
+      await poll(() => codexCard.textContent()).toContain('API key');
 
       // Mention @Claude Code using the @ completion popup (A3.1 turn 1).
       const composer = page.locator('.composer textarea');
@@ -331,29 +270,29 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       const mentionOption = page.locator('.composer .mentions [role="option"]', {
         hasText: 'Claude Code',
       });
-      await expect.poll(() => mentionOption.count()).toBe(1);
+      await poll(() => mentionOption.count()).toBe(1);
       await mentionOption.click();
       await composer.fill('@Claude Code remember codeword-amber');
       await page.locator('.composer button.send').click();
 
-      await expect
-        .poll(() => page.locator('.line .msg .text').allTextContents())
-        .toContain('Claude reply one: codeword-amber');
-      await expect.poll(() => claudeCard.locator('header .st').textContent()).toBe('Waiting');
+      await poll(() => page.locator('.line .msg .text').allTextContents()).toContain(
+        'Claude reply one: codeword-amber',
+      );
+      await poll(() => claudeCard.locator('header .st').textContent()).toBe('Waiting');
 
       // Mention @Claude Code a second time; the same process handles turn 2 without respawning.
       await composer.fill('@Claude Code what codeword did I give you?');
       await page.locator('.composer button.send').click();
-      await expect
-        .poll(() => page.locator('.line .msg .text').allTextContents())
-        .toContain('Claude reply two in same open session: codeword-amber');
+      await poll(() => page.locator('.line .msg .text').allTextContents()).toContain(
+        'Claude reply two in same open session: codeword-amber',
+      );
 
       // Mention @Codex and verify Codex also replies in chat.
       await composer.fill('@Codex say hello');
       await page.locator('.composer button.send').click();
-      await expect
-        .poll(() => page.locator('.line .msg .text').allTextContents())
-        .toContain('Codex reply from studio');
+      await poll(() => page.locator('.line .msg .text').allTextContents()).toContain(
+        'Codex reply from studio',
+      );
 
       const logBeforeIdle = await readFile(node.env.SOLODAWN_FAKECLI_LOG, 'utf8');
       const claudeStartsBeforeIdle = [...logBeforeIdle.matchAll(/^start claude (\S+)$/gm)];
@@ -367,18 +306,18 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
           interval: 500,
         })
         .toContain('Sleeping · wakes when @mentioned');
-      await expect
-        .poll(() => readFile(node.env.SOLODAWN_FAKECLI_LOG, 'utf8'), { timeout: 10_000 })
-        .toContain(`exit claude ${originalSessionId}`);
+      await poll(() => readFile(node.env.SOLODAWN_FAKECLI_LOG, 'utf8')).toContain(
+        `exit claude ${originalSessionId}`,
+      );
 
       // Swap Claude script for the resumed session and @mention Claude Code again.
       await writeFile(claudePath, JSON.stringify(claudeResumedScript()));
       await composer.fill('@Claude Code wake up and confirm the codeword');
       await page.locator('.composer button.send').click();
 
-      await expect
-        .poll(() => page.locator('.line .msg .text').allTextContents())
-        .toContain('Claude resumed after sleep with memory: codeword-amber');
+      await poll(() => page.locator('.line .msg .text').allTextContents()).toContain(
+        'Claude resumed after sleep with memory: codeword-amber',
+      );
 
       const logAfterResume = await readFile(node.env.SOLODAWN_FAKECLI_LOG, 'utf8');
       const claudeStartsAfterResume = [...logAfterResume.matchAll(/^start claude (\S+)$/gm)];

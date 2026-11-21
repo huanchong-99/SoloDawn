@@ -2,47 +2,28 @@
 // confirmation, two parallel tasks with 6-step progress bars, local checks, cross-AI review,
 // automatic squash-merge, task threads, and secretary summary cards (U-4, U-7, U-8, U-9, A5.1),
 // plus approval card and decision card round-trip in the browser (Owner override 1).
-import { execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, inject, test, vi } from 'vitest';
 import { launch } from './config';
+import {
+  claudeInitSteps,
+  codexInitSteps,
+  ensureNodeGitConfig,
+  gitIdentityEnv,
+  initGitRepo,
+  openDirectContext,
+  poll,
+  readPairingCode,
+  startDirectSurface,
+  type DirectSurface,
+} from './direct';
 import { startNet, type Net, type Node } from './nodes';
 
-const exec = promisify(execFile);
-const codePattern =
-  /\b([23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}(?:-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}){3})\b/;
-
-async function initGitRepo(dir: string): Promise<string> {
-  const repo = join(dir, 'm5-repo');
-  await mkdir(repo, { recursive: true });
-  await exec('git', ['init', '-b', 'main'], { cwd: repo });
-  await exec('git', ['config', 'user.name', 'Alex'], { cwd: repo });
-  await exec('git', ['config', 'user.email', 'alex@example.test'], { cwd: repo });
-  await writeFile(join(repo, 'README.md'), '# Release pipeline\n');
-  await exec('git', ['add', 'README.md'], { cwd: repo });
-  await exec('git', ['commit', '-m', 'Initial commit'], { cwd: repo });
-  return repo;
-}
-
-async function readPairingCode(page: Page): Promise<string> {
-  let code = '';
-  await vi.waitFor(async () => {
-    const muted = await page.locator('#prompt').evaluate((el) => el.classList.contains('muted'));
-    expect(muted).toBe(false);
-    const text = (await page.locator('#prompt').textContent()) ?? '';
-    const match = codePattern.exec(text);
-    expect(match).not.toBeNull();
-    code = match ? match[1] : '';
-  });
-  return code;
-}
-
-async function pairNode(page: Page, net: Net, node: Node, name: string) {
-  await page.goto(`${net.rendezvous.url}#/onboarding`);
-  const code = await readPairingCode(page);
+async function pairNode(page: Page, surface: DirectSurface, node: Node, name: string) {
+  await page.goto(`${surface.url}#/onboarding`);
+  const code = await readPairingCode(page, surface.signal);
   const paired = await node.run(
     'solodawn',
     'pair',
@@ -50,65 +31,17 @@ async function pairNode(page: Page, net: Net, node: Node, name: string) {
     '--name',
     name,
     '--rendezvous',
-    net.rendezvous.signal,
+    surface.signal,
   );
   expect(paired.code, paired.stderr).toBe(0);
+  await poll(() => page.locator('input[name="acct-claude"][value="personal"]').count()).toBe(1);
   await page.locator('input[name="acct-claude"][value="personal"]').check();
+  await poll(() => page.locator('fieldset.acct').first().isDisabled()).toBe(false);
   await page.locator('input[name="acct-codex"][value="api_key"]').check();
+  await poll(() => page.locator('a.done-btn').count()).toBe(1);
   await page.locator('a.done-btn').click();
-  await expect.poll(() => page.url()).toContain('#/groups');
-}
-
-function claudeInitSteps() {
-  return [
-    { dir: 'stdin', msg: { type: 'user', message: { role: 'user' } } },
-    {
-      dir: 'mcp<-cli',
-      msg: {
-        jsonrpc: '2.0',
-        id: 0,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2025-11-25',
-          capabilities: {},
-          clientInfo: { name: 'claude-code', version: '2.1.311' },
-        },
-      },
-    },
-    { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 0, result: {} } },
-    { dir: 'mcp<-cli', msg: { jsonrpc: '2.0', method: 'notifications/initialized' } },
-    { dir: 'stdout', msg: { type: 'system', subtype: 'init', session_id: '$session' } },
-  ];
-}
-
-function codexInitSteps() {
-  return [
-    { dir: 'stdin', msg: { method: 'initialize' } },
-    { dir: 'stdout', msg: { id: '$id', result: {} } },
-    { dir: 'stdin', msg: { method: 'initialized' } },
-    { dir: 'stdin', msg: { method: 'thread/start' } },
-    { dir: 'stdout', msg: { id: '$id', result: { thread: { id: '$session' } } } },
-    { dir: 'stdin', msg: { method: 'turn/start', params: { threadId: '$session' } } },
-    {
-      dir: 'stdout',
-      msg: { id: '$id', result: { turn: { id: 'turn-1', status: 'inProgress', error: null } } },
-    },
-    {
-      dir: 'mcp<-cli',
-      msg: {
-        jsonrpc: '2.0',
-        id: 0,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2025-06-18',
-          capabilities: {},
-          clientInfo: { name: 'codex-mcp-client', version: '0.164.0' },
-        },
-      },
-    },
-    { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 0, result: {} } },
-    { dir: 'mcp<-cli', msg: { jsonrpc: '2.0', method: 'notifications/initialized' } },
-  ];
+  await poll(() => page.url()).toContain('#/groups');
+  await poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
 }
 
 function secretaryM5Script() {
@@ -133,7 +66,7 @@ function secretaryM5Script() {
                 {
                   title: 'Build release checklist',
                   assignee: 'Claude Code',
-                  reviewer: 'Codex',
+                  reviewer: 'Reviewer',
                 },
                 {
                   title: 'Build changelog generator',
@@ -156,7 +89,19 @@ function secretaryM5Script() {
           session_id: '$session',
         },
       },
-      // Turn 2: woken by task_merged notice for T-1.
+      // Turn 2: woken when owner confirms the brief.
+      { dir: 'stdin', msg: { type: 'user', message: { role: 'user' } } },
+      {
+        dir: 'stdout',
+        msg: {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: 'brief-confirmed',
+          session_id: '$session',
+        },
+      },
+      // Turn 3: woken by task_merged notice for T-1.
       { dir: 'stdin', msg: { type: 'user', message: { role: 'user' } } },
       {
         dir: 'mcp<-cli',
@@ -185,7 +130,7 @@ function secretaryM5Script() {
           session_id: '$session',
         },
       },
-      // Turn 3: woken by task_merged notice for T-2.
+      // Turn 4: woken by task_merged notice for T-2.
       { dir: 'stdin', msg: { type: 'user', message: { role: 'user' } } },
       {
         dir: 'mcp<-cli',
@@ -438,55 +383,26 @@ function codexReviewScript() {
 }
 
 function approvalAndDecisionScript() {
-  const approvalArgs = {
-    tool_name: 'Bash',
-    input: {
-      command: 'git clean -fd',
-      description: 'Remove untracked build artifacts before packaging',
-    },
-    tool_use_id: 'toolu_approve_1',
-  };
   return {
     steps: [
       ...claudeInitSteps(),
+      // Turn 1: approve blocks until human clicks Approve, returns allow, then raises DecisionCard.
       {
         dir: 'mcp<-cli',
         msg: {
           jsonrpc: '2.0',
           id: 1,
-          method: 'tools/call',
-          params: { name: 'approve', arguments: approvalArgs },
-        },
-      },
-      {
-        dir: 'mcp->cli',
-        msg: {
-          jsonrpc: '2.0',
-          id: 1,
-          result: { content: [{ type: 'text', text: '{"behavior":"deny"}' }], isError: false },
-        },
-      },
-      {
-        dir: 'stdout',
-        msg: {
-          type: 'result',
-          subtype: 'success',
-          is_error: false,
-          result: 'awaiting-approval',
-          session_id: '$session',
-        },
-      },
-      // Turn 2: woken after human clicks Approve; retries approve -> allow, then raises decision card.
-      { dir: 'stdin', msg: { type: 'user', message: { role: 'user' } } },
-      {
-        dir: 'mcp<-cli',
-        msg: {
-          jsonrpc: '2.0',
-          id: 2,
           method: 'tools/call',
           params: {
             name: 'approve',
-            arguments: { ...approvalArgs, tool_use_id: 'toolu_approve_2' },
+            arguments: {
+              tool_name: 'Bash',
+              input: {
+                command: 'git clean -fd',
+                description: 'Remove untracked build artifacts before packaging',
+              },
+              tool_use_id: 'toolu_approve_1',
+            },
           },
         },
       },
@@ -494,7 +410,7 @@ function approvalAndDecisionScript() {
         dir: 'mcp->cli',
         msg: {
           jsonrpc: '2.0',
-          id: 2,
+          id: 1,
           result: { content: [{ type: 'text', text: '{"behavior":"allow"}' }], isError: false },
         },
       },
@@ -502,7 +418,7 @@ function approvalAndDecisionScript() {
         dir: 'mcp<-cli',
         msg: {
           jsonrpc: '2.0',
-          id: 3,
+          id: 2,
           method: 'tools/call',
           params: {
             name: 'request_decision',
@@ -521,7 +437,7 @@ function approvalAndDecisionScript() {
           },
         },
       },
-      { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 3, result: { isError: false } } },
+      { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 2, result: { isError: false } } },
       {
         dir: 'stdout',
         msg: {
@@ -532,13 +448,13 @@ function approvalAndDecisionScript() {
           session_id: '$session',
         },
       },
-      // Turn 3: woken after human picks option B on DecisionCard.
+      // Turn 2: woken after human picks option B on DecisionCard.
       { dir: 'stdin', msg: { type: 'user', message: { role: 'user' } } },
       {
         dir: 'mcp<-cli',
         msg: {
           jsonrpc: '2.0',
-          id: 4,
+          id: 3,
           method: 'tools/call',
           params: {
             name: 'post',
@@ -546,7 +462,7 @@ function approvalAndDecisionScript() {
           },
         },
       },
-      { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 4, result: { isError: false } } },
+      { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 3, result: { isError: false } } },
       {
         dir: 'stdout',
         msg: {
@@ -565,51 +481,65 @@ function approvalAndDecisionScript() {
 describe('E-M5: full main-line task lifecycle and approval/decision round-trip', () => {
   let browser: Browser;
   let net: Net | undefined;
+  let surface: DirectSurface | undefined;
   const contexts: BrowserContext[] = [];
 
   beforeAll(async () => {
     browser = await launch(inject('browser'));
   });
   afterAll(() => browser?.close());
-  afterEach(() => Promise.allSettled(contexts.splice(0).map((ctx) => ctx.close())));
+  afterEach(async () => {
+    await Promise.allSettled(contexts.splice(0).map((ctx) => ctx.close()));
+    await surface?.close();
+    surface = undefined;
+  });
   afterEach(() => net?.stop());
 
   test(
     'runs owner request -> brief confirm -> two checked, cross-reviewed, merged tasks -> summary cards',
-    { timeout: 90_000 },
+    { timeout: 120_000 },
     async () => {
       const scriptDir = join(inject('e2e').root, `m5-main-${Date.now()}`);
       await mkdir(scriptDir, { recursive: true });
       const node0Claude = join(scriptDir, 'node0-claude.json');
       const node0Codex = join(scriptDir, 'node0-codex.json');
       const node1Claude = join(scriptDir, 'node1-claude.json');
+      const node1Codex = join(scriptDir, 'node1-codex.json');
+      const gateT1 = join(scriptDir, 'release-t1');
+      const gateT2 = join(scriptDir, 'release-t2');
 
       await writeFile(node0Claude, JSON.stringify(claudeTaskScript()));
       await writeFile(node0Codex, JSON.stringify(codexTaskScript()));
       await writeFile(node1Claude, JSON.stringify(secretaryM5Script()));
+      await writeFile(node1Codex, JSON.stringify(codexReviewScript()));
 
       const active = await startNet({
         nodes: 2,
         env: (index) =>
           index === 0
             ? {
+                ...gitIdentityEnv,
                 SOLODAWN_FAKE_CLAUDE_SCRIPT: node0Claude,
                 SOLODAWN_FAKE_CODEX_SCRIPT: node0Codex,
               }
             : {
+                ...gitIdentityEnv,
                 SOLODAWN_FAKE_CLAUDE_SCRIPT: node1Claude,
+                SOLODAWN_FAKE_CODEX_SCRIPT: node1Codex,
               },
       });
       net = active;
+      const direct = await startDirectSurface(active.rendezvous, inject('browser'));
+      surface = direct;
       const [homeNode, secNode] = active.nodes;
-      const repo = await initGitRepo(active.dir);
+      await ensureNodeGitConfig(homeNode, secNode);
+      const repo = await initGitRepo(active.dir, 'm5-repo', '# Release pipeline\n');
 
-      const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-      contexts.push(context);
+      const context = await openDirectContext(browser, contexts, direct);
       const page = await context.newPage();
 
-      await pairNode(page, active, homeNode, 'workstation');
-      await pairNode(page, active, secNode, 'coordinator');
+      await pairNode(page, direct, homeNode, 'workstation');
+      await pairNode(page, direct, secNode, 'coordinator');
 
       await page.locator('button', { hasText: 'New project group' }).first().click();
       const createDlg = page.locator('dialog.dlg[open]');
@@ -619,29 +549,31 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await inputs.nth(2).fill('main');
       await inputs.nth(3).fill('Alex');
       await createDlg.locator('select.input').first().selectOption('none');
-      // Stagger T-1 (0.4s) and T-2 (1.3s) inside run_checks so review scripts swap cleanly
-      // and task_merged notices reach Secretary in deterministic turns.
-      await createDlg
-        .locator('textarea.input')
-        .fill('test -f README.md && case "$PWD" in */1-*) sleep 0.4;; *) sleep 1.3;; esac');
+      // Gate T-1 and T-2 inside run_checks on marker files so review scripts swap deterministically
+      // and Secretary processes each task_merged notice in its own turn.
+      const checkCmd = [
+        'test -f README.md',
+        `case "$(pwd)" in */1-*) until [ -f "${gateT1}" ]; do sleep 0.05; done;; *) until [ -f "${gateT2}" ]; do sleep 0.05; done;; esac`,
+      ].join(' && ');
+      await createDlg.locator('textarea.input').fill(checkCmd);
       await createDlg.locator('select.input').nth(1).selectOption({ label: 'workstation' });
       await createDlg.locator('button.btn-primary', { hasText: 'Create group' }).click();
-      await expect.poll(() => page.url()).toMatch(/#\/groups\/[^/]+$/);
+      await poll(() => page.url()).toMatch(/#\/groups\/[^/]+$/);
 
       const members = page.locator('#chat-side .members');
 
       // Add Secretary on coordinator (Node 1), Claude Code on workstation (Node 0), Codex on workstation (Node 0).
       await members.locator('button', { hasText: 'Add AI' }).click();
       const addDlg = page.locator('dialog.dlg[open]');
-      await expect.poll(() => addDlg.locator('.choice').count()).toBeGreaterThanOrEqual(3);
+      await poll(() => addDlg.locator('.choice').count()).toBe(4);
       await addDlg
         .locator('.choice', { hasText: 'Claude Code · coordinator' })
         .locator('input')
         .check();
       await addDlg.locator('.sec-opt input[type="checkbox"]').check();
-      await expect.poll(() => addDlg.locator('input.input').inputValue()).toBe('Secretary');
+      await poll(() => addDlg.locator('input.input').inputValue()).toBe('Secretary');
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
-      await expect.poll(() => members.locator('.member').count()).toBe(1);
+      await poll(() => members.locator('.member').count()).toBe(1);
 
       await members.locator('button', { hasText: 'Add AI' }).click();
       await addDlg
@@ -649,78 +581,75 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
         .locator('input')
         .check();
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
-      await expect.poll(() => members.locator('.member').count()).toBe(2);
+      await poll(() => members.locator('.member').count()).toBe(2);
 
       await members.locator('button', { hasText: 'Add AI' }).click();
       await addDlg.locator('.choice', { hasText: 'Codex · workstation' }).locator('input').check();
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
-      await expect.poll(() => members.locator('.member').count()).toBe(3);
+      await poll(() => members.locator('.member').count()).toBe(3);
+
+      await members.locator('button', { hasText: 'Add AI' }).click();
+      await addDlg.locator('.choice', { hasText: 'Codex · coordinator' }).locator('input').check();
+      await addDlg.locator('input.input').fill('Reviewer');
+      await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
+      await poll(() => members.locator('.member').count()).toBe(4);
 
       // Owner sends plain request in chat -> Secretary posts BriefCard.
       await page.locator('.composer textarea').fill('Build the release checklist and changelog');
       await page.locator('.composer button.send').click();
 
       const briefCard = page.locator('.line section.card', { hasText: 'Task brief' });
-      await expect.poll(() => briefCard.count()).toBe(1);
-      await expect.poll(() => briefCard.textContent()).toContain('Needs you');
-      await expect
-        .poll(() => briefCard.textContent())
-        .toContain('Add release checklist and changelog generator');
-      await expect.poll(() => briefCard.textContent()).toContain('Build release checklist');
-      await expect.poll(() => briefCard.textContent()).toContain('Build changelog generator');
-      await expect
-        .poll(() => page.locator('.needbar').textContent())
-        .toContain('Waiting on you · 1');
-
-      // Watch Node 0's fakecli.log so as soon as both task processes start and enter run_checks,
-      // their script files switch to the cross-review scripts before submit_task spawns reviewers.
-      const swapPromise = vi
-        .waitFor(
-          async () => {
-            const log = await readFile(homeNode.env.SOLODAWN_FAKECLI_LOG, 'utf8').catch(() => '');
-            expect(log).toMatch(/^start claude /m);
-            expect(log).toMatch(/^start codex /m);
-          },
-          { timeout: 15_000, interval: 20 },
-        )
-        .then(async () => {
-          await Promise.all([
-            writeFile(node0Claude, JSON.stringify(claudeReviewScript())),
-            writeFile(node0Codex, JSON.stringify(codexReviewScript())),
-          ]);
-        });
+      await poll(() => briefCard.count()).toBe(1);
+      await poll(() => briefCard.textContent()).toContain('Needs you');
+      await poll(() => briefCard.textContent()).toContain(
+        'Add release checklist and changelog generator',
+      );
+      await poll(() => briefCard.textContent()).toContain('Build release checklist');
+      await poll(() => briefCard.textContent()).toContain('Build changelog generator');
+      await poll(() => page.locator('.chat nav.needbar').textContent()).toContain(
+        'Waiting on you · 1',
+      );
 
       // The only human action in A5.1: clicking Confirm & start on the brief card.
       await briefCard.locator('button.btn-dawn', { hasText: 'Confirm & start' }).click();
-      await swapPromise;
-
-      await expect.poll(() => briefCard.textContent()).toContain('Alex confirmed');
+      await poll(() => briefCard.textContent()).toContain('Alex confirmed');
 
       const task1Card = page.locator('.line section.card', { hasText: 'T-1' }).first();
       const task2Card = page.locator('.line section.card', { hasText: 'T-2' }).first();
-      await expect.poll(() => task1Card.count()).toBe(1);
-      await expect.poll(() => task2Card.count()).toBe(1);
+      await poll(() => task1Card.count()).toBe(1);
+      await poll(() => task2Card.count()).toBe(1);
 
-      // Verify both task cards reach Merged with 6-step bars completed, local checks passed, and review scores.
-      await expect
-        .poll(() => task1Card.textContent(), { timeout: 30_000 })
-        .toContain('Merged · 96');
-      await expect
-        .poll(() => task2Card.textContent(), { timeout: 30_000 })
-        .toContain('Merged · 94');
+      // Wait until both task CLIs have started, swap scripts to cross-reviewers, then release T-1.
+      await vi.waitFor(
+        async () => {
+          const log = await readFile(homeNode.env.SOLODAWN_FAKECLI_LOG, 'utf8').catch(() => '');
+          expect(log).toMatch(/^start claude /m);
+          expect(log).toMatch(/^start codex /m);
+        },
+        { timeout: 15_000, interval: 25 },
+      );
+      await writeFile(node0Claude, JSON.stringify(claudeReviewScript()));
+      await writeFile(gateT1, 'ok');
+
+      // Wait until T-1 merges and Secretary posts SummaryCard #1, then release T-2.
+      const summaryCards = page.locator('.line section.card', { hasText: 'Review score' });
+      await poll(() => task1Card.textContent(), 30_000).toContain('Merged · 96');
+      await poll(() => summaryCards.count(), 20_000).toBe(1);
+      await writeFile(gateT2, 'ok');
+
+      // Verify T-2 also completes local checks, passes review, merges, and gets SummaryCard #2.
+      await poll(() => task2Card.textContent(), 30_000).toContain('Merged · 94');
+      await poll(() => summaryCards.count(), 20_000).toBe(2);
 
       expect(await task1Card.locator('.steps i').count()).toBe(6);
-      await expect.poll(() => task1Card.textContent()).toContain('Local checks passed');
-      await expect.poll(() => task1Card.textContent()).toContain('Round 1 · 96, passed');
-      await expect.poll(() => task2Card.textContent()).toContain('Local checks passed');
-      await expect.poll(() => task2Card.textContent()).toContain('Round 1 · 94, passed');
+      await poll(() => task1Card.textContent()).toContain('Local checks passed');
+      await poll(() => task1Card.textContent()).toContain('Round 1 · 96, passed');
+      await poll(() => task2Card.textContent()).toContain('Local checks passed');
+      await poll(() => task2Card.textContent()).toContain('Round 1 · 94, passed');
 
       // No approval cards appeared during A5.1.
       expect(await page.locator('section.card[aria-label="Approval"]').count()).toBe(0);
 
-      // Secretary posted two Done / Merged summary cards on the main line.
-      const summaryCards = page.locator('.line section.card', { hasText: 'Review score' });
-      await expect.poll(() => summaryCards.count(), { timeout: 20_000 }).toBe(2);
       const summaryText = (await summaryCards.allTextContents()).join('\n');
       expect(summaryText).toContain('T-1');
       expect(summaryText).toContain('96');
@@ -731,105 +660,108 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       // Open T-1's thread fold and verify progress messages, ChecksRow, ReviewBlock, task_merged, and summary jump link.
       await task1Card.locator('details.fold > summary').click();
       const thread1 = task1Card.locator('.thread');
-      await expect
-        .poll(() => thread1.textContent())
-        .toContain('Drafted checklist rules and running local checks.');
-      await expect.poll(() => thread1.textContent()).toContain('Local checks passed');
-      await expect
-        .poll(() => thread1.locator('.review').textContent())
-        .toContain('Checklist assertions cover edge cases.');
-      await expect.poll(() => thread1.textContent()).toContain('Secretary merged T-1');
+      await poll(() => thread1.textContent()).toContain(
+        'Drafted checklist rules and running local checks.',
+      );
+      await poll(() => thread1.textContent()).toContain('Local checks passed');
+      await poll(() => thread1.locator('.review').textContent()).toContain(
+        'Checklist assertions cover edge cases.',
+      );
+      await poll(() => thread1.textContent()).toContain('Secretary merged T-1');
 
       const summaryJump = thread1.locator('a.tcard').first();
-      await expect.poll(() => summaryJump.count()).toBe(1);
+      await poll(() => summaryJump.count()).toBe(1);
       await summaryJump.click();
-      await expect.poll(() => page.url()).toMatch(/#\/groups\/[^/]+$/);
+      await poll(() => page.url()).toMatch(/#\/groups\/[^/]+$/);
     },
   );
 
-  test('completes approval card and 4-option decision card round-trip in the browser', async () => {
-    const scriptDir = join(inject('e2e').root, `m5-cards-${Date.now()}`);
-    await mkdir(scriptDir, { recursive: true });
-    const claudePath = join(scriptDir, 'claude-cards.json');
-    await writeFile(claudePath, JSON.stringify(approvalAndDecisionScript()));
+  test(
+    'completes approval card and 4-option decision card round-trip in the browser',
+    { timeout: 90_000 },
+    async () => {
+      const scriptDir = join(inject('e2e').root, `m5-cards-${Date.now()}`);
+      await mkdir(scriptDir, { recursive: true });
+      const claudePath = join(scriptDir, 'claude-cards.json');
+      await writeFile(claudePath, JSON.stringify(approvalAndDecisionScript()));
 
-    const active = await startNet({
-      nodes: 1,
-      env: () => ({ SOLODAWN_FAKE_CLAUDE_SCRIPT: claudePath }),
-    });
-    net = active;
-    const [node] = active.nodes;
-    const repo = await initGitRepo(active.dir);
+      const active = await startNet({
+        nodes: 1,
+        env: () => ({ ...gitIdentityEnv, SOLODAWN_FAKE_CLAUDE_SCRIPT: claudePath }),
+      });
+      net = active;
+      const direct = await startDirectSurface(active.rendezvous, inject('browser'));
+      surface = direct;
+      const [node] = active.nodes;
+      const repo = await initGitRepo(active.dir, 'cards-repo', '# Card Roundtrip\n');
 
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-    contexts.push(context);
-    const page = await context.newPage();
+      const context = await openDirectContext(browser, contexts, direct);
+      const page = await context.newPage();
 
-    await pairNode(page, active, node, 'workstation');
+      await pairNode(page, direct, node, 'workstation');
 
-    await page.locator('button', { hasText: 'New project group' }).first().click();
-    const createDlg = page.locator('dialog.dlg[open]');
-    const inputs = createDlg.locator('input.input');
-    await inputs.nth(0).fill('Card Roundtrip');
-    await inputs.nth(1).fill(repo);
-    await inputs.nth(2).fill('main');
-    await inputs.nth(3).fill('Alex');
-    await createDlg.locator('select.input').first().selectOption('none');
-    await createDlg.locator('button.btn-primary', { hasText: 'Create group' }).click();
-    await expect.poll(() => page.url()).toMatch(/#\/groups\/[^/]+$/);
+      await page.locator('button', { hasText: 'New project group' }).first().click();
+      const createDlg = page.locator('dialog.dlg[open]');
+      const inputs = createDlg.locator('input.input');
+      await inputs.nth(0).fill('Card Roundtrip');
+      await inputs.nth(1).fill(repo);
+      await inputs.nth(2).fill('main');
+      await inputs.nth(3).fill('Alex');
+      await createDlg.locator('select.input').first().selectOption('none');
+      await createDlg.locator('button.btn-primary', { hasText: 'Create group' }).click();
+      await poll(() => page.url()).toMatch(/#\/groups\/[^/]+$/);
 
-    const members = page.locator('#chat-side .members');
-    await members.locator('button', { hasText: 'Add AI' }).click();
-    const addDlg = page.locator('dialog.dlg[open]');
-    await expect.poll(() => addDlg.locator('.choice').count()).toBe(2);
-    await addDlg
-      .locator('.choice', { hasText: 'Claude Code · workstation' })
-      .locator('input')
-      .check();
-    await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
-    await expect.poll(() => members.locator('.member').count()).toBe(1);
+      const members = page.locator('#chat-side .members');
+      await members.locator('button', { hasText: 'Add AI' }).click();
+      const addDlg = page.locator('dialog.dlg[open]');
+      await poll(() => addDlg.locator('.choice').count()).toBe(2);
+      await addDlg
+        .locator('.choice', { hasText: 'Claude Code · workstation' })
+        .locator('input')
+        .check();
+      await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
+      await poll(() => members.locator('.member').count()).toBe(1);
 
-    // Trigger Claude Code turn 1 -> ApprovalCard appears.
-    await page.locator('.composer textarea').fill('@Claude Code clean artifacts and pick cache');
-    await page.locator('.composer button.send').click();
+      // Trigger Claude Code turn 1 -> ApprovalCard appears while approve waits for owner action.
+      await page.locator('.composer textarea').fill('@Claude Code clean artifacts and pick cache');
+      await page.locator('.composer button.send').click();
 
-    const approvalCard = page.locator('section.card[aria-label="Approval"]');
-    await expect.poll(() => approvalCard.count()).toBe(1);
-    await expect.poll(() => approvalCard.textContent()).toContain('Needs you');
-    await expect.poll(() => approvalCard.textContent()).toContain('Command');
-    await expect
-      .poll(() => approvalCard.locator('pre.cmd').textContent())
-      .toContain('git clean -fd');
-    await expect
-      .poll(() => approvalCard.textContent())
-      .toContain('Remove untracked build artifacts before packaging');
-    await expect.poll(() => page.locator('.needbar').textContent()).toContain('Approval');
+      const approvalCard = page.locator('section.card[aria-label="Approval"]');
+      await poll(() => approvalCard.count()).toBe(1);
+      await poll(() => approvalCard.textContent()).toContain('Needs you');
+      await poll(() => approvalCard.textContent()).toContain('Command');
+      await poll(() => approvalCard.locator('pre.cmd').textContent()).toContain('git clean -fd');
+      await poll(() => approvalCard.textContent()).toContain(
+        'Remove untracked build artifacts before packaging',
+      );
+      await poll(() => page.locator('.chat nav.needbar').textContent()).toContain('Approval');
 
-    await approvalCard.locator('button.btn-dawn', { hasText: 'Approve' }).click();
-    await expect.poll(() => approvalCard.textContent()).toContain('Approved by Alex');
+      await approvalCard.locator('button.btn-dawn', { hasText: 'Approve' }).click();
+      await poll(() => approvalCard.textContent()).toContain('Approved by Alex');
 
-    // Turn 2 runs approved action and posts a 4-option DecisionCard with Recommended badge on B.
-    const decisionCard = page.locator('.line section.card', { hasText: 'Your call' });
-    await expect.poll(() => decisionCard.count()).toBe(1);
-    await expect.poll(() => decisionCard.textContent()).toContain('Needs you');
-    await expect
-      .poll(() => decisionCard.textContent())
-      .toContain('Which caching backend should we ship?');
-    await expect.poll(() => decisionCard.locator('button.opt').count()).toBe(4);
-    await expect
-      .poll(() => decisionCard.locator('button.opt', { hasText: 'B · SQLite table' }).textContent())
-      .toContain('Recommended');
-    await expect.poll(() => decisionCard.locator('.free-answer input').count()).toBe(1);
-    await expect.poll(() => page.locator('.needbar').textContent()).toContain('Your call');
+      // approve resolves with allow in turn 1 and Claude raises a 4-option DecisionCard.
+      const decisionCard = page.locator('.line section.card', { hasText: 'Your call' });
+      await poll(() => decisionCard.count()).toBe(1);
+      await poll(() => decisionCard.textContent()).toContain('Needs you');
+      await poll(() => decisionCard.textContent()).toContain(
+        'Which caching backend should we ship?',
+      );
+      await poll(() => decisionCard.locator('button.opt').count()).toBe(4);
+      await poll(() =>
+        decisionCard.locator('button.opt', { hasText: 'B · SQLite table' }).textContent(),
+      ).toContain('Recommended');
+      await poll(() => decisionCard.locator('.free-answer input').count()).toBe(1);
+      await poll(() => page.locator('.chat nav.needbar').textContent()).toContain('Your call');
 
-    await decisionCard.locator('button.opt', { hasText: 'B · SQLite table' }).click();
-    await expect.poll(() => decisionCard.textContent()).toContain('Alex decided');
-    await expect.poll(() => decisionCard.locator('.opt.chosen').textContent()).toContain('Chosen');
-    await expect.poll(() => page.locator('.needbar').count()).toBe(0);
+      await decisionCard.locator('button.opt', { hasText: 'B · SQLite table' }).click();
+      await poll(() => decisionCard.textContent()).toContain('Alex decided');
+      await poll(() => decisionCard.locator('.opt.chosen').textContent()).toContain('Chosen');
+      await poll(() => page.locator('.chat nav.needbar').count()).toBe(0);
 
-    // Turn 3 confirms receipt of both the approval and the chosen decision option.
-    await expect
-      .poll(() => page.locator('.line .msg .text').allTextContents())
-      .toContain('Confirmed approval and selected option B: SQLite table.');
-  });
+      // Turn 2 confirms receipt of both the approval and the chosen decision option.
+      await poll(() => page.locator('.line .msg .text').allTextContents()).toContain(
+        'Confirmed approval and selected option B: SQLite table.',
+      );
+    },
+  );
 });
