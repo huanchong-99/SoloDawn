@@ -121,6 +121,9 @@ func (c *clientPipe) applyIntercept(raw json.RawMessage) ([]json.RawMessage, boo
 		ID int64 `json:"id"`
 	}
 	json.Unmarshal(raw, &req)
+	if req.ID == 0 {
+		return nil, false
+	}
 	return fn(req.ID, raw)
 }
 
