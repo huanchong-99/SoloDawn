@@ -398,19 +398,18 @@ function that moves a task calls it and adds nothing to its rules.
 
 ## Posts, notes and forget
 
-`cmd_post.go` holds `post` of kinds `text`, `progress`, `question`, `report` and `handback`
+`cmd_post.go` holds `post` of kinds `text`, `progress`, `question` and `report`
 ([commands](../../planning/contracts/commands.md) 1.3;
-[messages](../../planning/contracts/messages.md) 1, 2.7 and 2.10;
+[messages](../../planning/contracts/messages.md) 1 and 2.7;
 [rows](../../planning/contracts/rows.md) sections 4 and 5), under `post/<kind>`. `cmd_note.go`
 holds `note` and `forget` ([commands](../../planning/contracts/commands.md) 1.6;
 [rows](../../planning/contracts/rows.md) sections 5 and 6). Where the contracts are silent, they do
 this:
 
-- **Who and placement.** `text` is by a person or an AI; `progress`, `question`, `report` and
-  `handback` are by an AI, else `forbidden`. `progress` and `report` belong in a thread (`thread`
-  not `null`), and `handback` belongs in a thread for a working AI and in the main line (`thread`
-  `null`) for the secretary; any other placement is `bad_request`. None of the five is raised from
-  a thread, and the row is written with `main` `false`.
+- **Who and placement.** `text` is by a person or an AI; `progress`, `question` and `report` are by
+  an AI, else `forbidden`. `progress` and `report` belong in a thread (`thread` not `null`), else
+  `bad_request`. None of the four is raised from a thread, and the row is written with `main`
+  `false`.
 - **Thread and mentions.** A non-null `thread` must name a task in `State.Tasks`, else `not_found`;
   for `report`, `as` must be that task's `assignee`, else `forbidden`. `(*State).postMentions`,
   shared with `cmd_brief.go`, checks the `mentions` rule of
@@ -420,9 +419,8 @@ this:
   HTML escaping; a post in a thread follows it with the updated `TaskRow` (`thread.count` + 1, and
   `thread.last` with `text` cut to at most 200 UTF-8 characters). A post never queues an item for
   its own author ([commands](../../planning/contracts/commands.md) 1.3): `text`, `progress` and
-  `question` queue `mention` for each other mentioned AI in `mentions` order; a main-line `text`
-  from a person that mentions no AI queues `mention` for `Group.Secretary` when set; and `handback`
-  from a working AI queues `notice` (`code` `handback`, `task` set) for `Group.Secretary` when set.
+  `question` queue `mention` for each other mentioned AI in `mentions` order, and a main-line `text`
+  from a person that mentions no AI queues `mention` for `Group.Secretary` when set.
 - **`note` and `forget`.** `note` is by a person or an AI; a non-null `task` that names no task in
   `State.Tasks` is `not_found`, an `id` already held as a live note on disk is `conflict`, and the
   `NoteRow` gets `ts` as signed (`c.Timestamp`). `forget` is by an admin only (`forbidden`); `r`
@@ -432,7 +430,7 @@ this:
 
 ## Known limitations
 
-- The table of commands holds the briefs, the five kinds of `post` of HM-6, `note` and `forget`;
+- The table of commands holds the briefs, the four kinds of `post` of HM-6, `note` and `forget`;
   the remaining command files (including thread round counting in HM-13 and the wake-up cap in HM-7)
   and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
@@ -475,7 +473,7 @@ holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the com
 `Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
 commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
 
-`cmd_post_test.go` and `cmd_note_test.go` cover every branch and boundary of the five `post` kinds,
+`cmd_post_test.go` and `cmd_note_test.go` cover every branch and boundary of the four `post` kinds,
 `note` and `forget` through `Commands.Apply`, including the 200-character UTF-8 thread preview, the
 shared `mentions` rule and `UnexpectedNulls` on the rows written. `features/home_post.feature` holds
 acceptance tests A2.1 (message and item push across connected browsers and a host) and A5.14

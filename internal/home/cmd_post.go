@@ -7,16 +7,15 @@ import (
 )
 
 // Messages in the main line and in task threads: post of kinds text, progress,
-// question, report and handback (planning/contracts/commands.md 1.3;
-// planning/contracts/messages.md 1, 2.7 and 2.10). A message in a thread
-// advances the task's thread summary (planning/contracts/rows.md section 4).
+// question and report (planning/contracts/commands.md 1.3;
+// planning/contracts/messages.md 1 and 2.7). A message in a thread advances
+// the task's thread summary (planning/contracts/rows.md section 4).
 
 func init() {
 	Commands.Add("post/text", postText)
 	Commands.Add("post/progress", postProgress)
 	Commands.Add("post/question", postQuestion)
 	Commands.Add("post/report", postReport)
-	Commands.Add("post/handback", postHandback)
 }
 
 const (
@@ -24,22 +23,13 @@ const (
 	postKindProgress = "progress"
 	postKindQuestion = "question"
 	postKindReport   = "report"
-	postKindHandback = "handback"
 
 	postMentionWhy   = "mention"
 	postPreviewLimit = 200
 )
 
-type postPlace uint8
-
-const (
-	postAnywhere postPlace = iota
-	postInThread
-	postMainOnly
-)
-
 func postText(s *State, c Command) (Result, *Refusal) {
-	rows, msg, refusal := postWrite[proto.EmptyBody](s, c, postKindText, false, postAnywhere)
+	rows, msg, refusal := postWrite[proto.EmptyBody](s, c, postKindText, false, false)
 	if refusal != nil {
 		return Result{}, refusal
 	}
@@ -57,15 +47,15 @@ func (s *State) postReachSecretary(w Who, msg proto.MsgRow) bool {
 }
 
 func postProgress(s *State, c Command) (Result, *Refusal) {
-	return postTalk(s, c, postKindProgress, postInThread)
+	return postTalk(s, c, postKindProgress, true)
 }
 
 func postQuestion(s *State, c Command) (Result, *Refusal) {
-	return postTalk(s, c, postKindQuestion, postAnywhere)
+	return postTalk(s, c, postKindQuestion, false)
 }
 
-func postTalk(s *State, c Command, kind string, place postPlace) (Result, *Refusal) {
-	rows, msg, refusal := postWrite[proto.EmptyBody](s, c, kind, true, place)
+func postTalk(s *State, c Command, kind string, inThreadOnly bool) (Result, *Refusal) {
+	rows, msg, refusal := postWrite[proto.EmptyBody](s, c, kind, true, inThreadOnly)
 	if refusal != nil {
 		return Result{}, refusal
 	}
@@ -73,33 +63,14 @@ func postTalk(s *State, c Command, kind string, place postPlace) (Result, *Refus
 }
 
 func postReport(s *State, c Command) (Result, *Refusal) {
-	rows, _, refusal := postWrite[proto.ReportBody](s, c, postKindReport, true, postInThread)
+	rows, _, refusal := postWrite[proto.ReportBody](s, c, postKindReport, true, true)
 	if refusal != nil {
 		return Result{}, refusal
 	}
 	return Result{Rows: rows}, nil
 }
 
-func postHandback(s *State, c Command) (Result, *Refusal) {
-	place := postInThread
-	if s.Secretary(c.Who) {
-		place = postMainOnly
-	}
-	rows, msg, refusal := postWrite[proto.HandbackBody](s, c, postKindHandback, true, place)
-	if refusal != nil {
-		return Result{}, refusal
-	}
-	return Result{Rows: rows, Items: s.postHandbackNotice(msg)}, nil
-}
-
-func (s *State) postHandbackNotice(msg proto.MsgRow) []Item {
-	if s.Group.Secretary == "" || msg.By == s.Group.Secretary {
-		return nil
-	}
-	return []Item{{AI: s.Group.Secretary, Why: itemNotice, Task: postTaskID(msg.Thread), Msg: msg.ID, Code: postKindHandback}}
-}
-
-func postWrite[B any](s *State, c Command, kind string, aiOnly bool, place postPlace) ([]Row, proto.MsgRow, *Refusal) {
+func postWrite[B any](s *State, c Command, kind string, aiOnly, inThreadOnly bool) ([]Row, proto.MsgRow, *Refusal) {
 	if aiOnly && c.Who.AI == "" {
 		return nil, proto.MsgRow{}, &Refusal{"forbidden", "only an AI posts this kind of message"}
 	}
@@ -107,7 +78,7 @@ func postWrite[B any](s *State, c Command, kind string, aiOnly bool, place postP
 	if refusal := c.Decode(&p); refusal != nil {
 		return nil, proto.MsgRow{}, refusal
 	}
-	mentions, refusal := s.postCheck(c.Who, kind, place, p.Thread, p.Mentions)
+	mentions, refusal := s.postCheck(c.Who, kind, inThreadOnly, p.Thread, p.Mentions)
 	if refusal != nil {
 		return nil, proto.MsgRow{}, refusal
 	}
@@ -119,25 +90,14 @@ func postWrite[B any](s *State, c Command, kind string, aiOnly bool, place postP
 	return s.postRows(msg), msg, nil
 }
 
-func (s *State) postCheck(w Who, kind string, place postPlace, thread *proto.ID, raw []proto.ID) ([]string, *Refusal) {
-	if !postAllows(thread != nil, place) {
-		return nil, &Refusal{"bad_request", "the post is not where its kind allows"}
+func (s *State) postCheck(w Who, kind string, inThreadOnly bool, thread *proto.ID, raw []proto.ID) ([]string, *Refusal) {
+	if inThreadOnly && thread == nil {
+		return nil, &Refusal{"bad_request", "the post belongs in a task thread"}
 	}
 	if refusal := s.postThread(w, kind, thread); refusal != nil {
 		return nil, refusal
 	}
 	return s.postMentions(raw)
-}
-
-func postAllows(inThread bool, place postPlace) bool {
-	switch place {
-	case postInThread:
-		return inThread
-	case postMainOnly:
-		return !inThread
-	default:
-		return true
-	}
 }
 
 func (s *State) postThread(w Who, kind string, thread *proto.ID) *Refusal {

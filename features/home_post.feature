@@ -13,13 +13,10 @@ Feature: Messages, notes and deletion markers in the home
     Then the second browser receives that "progress" message and task 1 with 1 thread message
     And the host receives "mention ai-two task 1" for that message
 
-  Scenario: Completion reports and hand-back summaries update the thread and tell the secretary
+  Scenario: Completion reports update the task thread
     Given a group home with two connected browsers of its owner, a secretary and two working AIs on its host
     When "ai-one" posts a completion report for commit "9f2c1ab" in the thread of task 1
     Then the second browser receives that "report" message and task 1 with 1 thread message
-    When "ai-one" posts a hand-back summary in the thread of task 1
-    Then the second browser receives that "handback" message and task 1 with 2 thread messages
-    And the host receives "notice secretary task 1" for that message
 
   Scenario: Notes and review messages survive retention, and forget removes them with gone markers
     Given a group home with two connected browsers of its owner, a secretary and two working AIs on its host

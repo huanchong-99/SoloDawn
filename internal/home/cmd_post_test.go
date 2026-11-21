@@ -234,40 +234,6 @@ func TestPostReport(t *testing.T) {
 	equal(t, res.Rows[0].Value().(proto.MsgRow).Body, postRawJSON(t, withPR))
 }
 
-func TestPostHandback(t *testing.T) {
-	t.Run("working AI in a task thread notifies the secretary", func(t *testing.T) {
-		s := postState(t)
-		thread := postTask
-		emptyBody := proto.HandbackBody{Files: []string{}, Commits: []proto.CommitSubject{}}
-		env, res := postSend(t, s, disk{}, laptop, postMake(92, postB, "handback", &thread, []string{postA}, nil, "Reviewed <diff>.", emptyBody))
-		equal(t, res.Answer, store.Outcome{OK: true})
-		wantMsg := postExpectedMsg(92, 11, postB, "handback", &thread, "Reviewed <diff>.", []string{postA}, nil, postRawJSON(t, emptyBody), env)
-		equal(t, res.Rows[0].Value(), any(wantMsg))
-		equal(t, res.Rows[1].Value().(proto.TaskRow).Thread.Count, 4)
-		equal(t, res.Items, []home.Item{{AI: aiID, Why: "notice", Task: postTask, Msg: id(92), Code: "handback"}})
-		postCheckNulls(t, res.Rows[0].Value(), "/re", "/state")
-	})
-	t.Run("working AI in a group without a secretary queues no item", func(t *testing.T) {
-		s := postState(t)
-		s.Group.Secretary = ""
-		thread := postTask
-		facts := proto.HandbackBody{Files: []string{"path.go"}, Commits: []proto.CommitSubject{{SHA: "9f2c1ab", Subject: "Emit <path>"}}, Added: 10, Removed: 2}
-		_, res := postSend(t, s, disk{}, laptop, postMake(93, postA, "handback", &thread, nil, nil, "", facts))
-		equal(t, res.Answer, store.Outcome{OK: true})
-		equal(t, res.Rows[0].Value().(proto.MsgRow).Body, postRawJSON(t, facts))
-		equal(t, res.Items, ([]home.Item)(nil))
-	})
-	t.Run("the secretary posts handback in the main line without queuing a notice", func(t *testing.T) {
-		s := postState(t)
-		facts := proto.HandbackBody{Files: []string{}, Commits: []proto.CommitSubject{}}
-		env, res := postSend(t, s, disk{}, laptop, postMake(94, aiID, "handback", nil, nil, nil, "Checked status.", facts))
-		equal(t, res.Answer, store.Outcome{OK: true})
-		equal(t, len(res.Rows), 1)
-		equal(t, res.Rows[0].Value(), any(postExpectedMsg(94, 11, aiID, "handback", nil, "Checked status.", []string{}, nil, postRawJSON(t, facts), env)))
-		equal(t, res.Items, ([]home.Item)(nil))
-	})
-}
-
 type postRefusalEnv struct {
 	s       *home.State
 	by      identity.Key
@@ -285,7 +251,6 @@ func postJSONText(v any) string {
 func TestPostRefusals(t *testing.T) {
 	thread, missing := postTask, id(99)
 	report := proto.ReportBody{Commit: "9f2c1ab", Files: 1, Added: 2, Removed: 0}
-	handback := proto.HandbackBody{Files: []string{}, Commits: []proto.CommitSubject{}}
 
 	cases := map[string]struct {
 		code  string
@@ -300,20 +265,11 @@ func TestPostRefusals(t *testing.T) {
 		"report by a person": {code: "forbidden", setup: func(e *postRefusalEnv) {
 			e.by, e.payload = browser, postJSONText(postMake(95, "", "report", &thread, nil, nil, "", report))
 		}},
-		"handback by a person": {code: "forbidden", setup: func(e *postRefusalEnv) {
-			e.by, e.payload = browser, postJSONText(postMake(95, "", "handback", &thread, nil, nil, "", handback))
-		}},
 		"progress in the main line": {code: "bad_request", setup: func(e *postRefusalEnv) {
 			e.payload = postJSONText(postMake(95, postA, "progress", nil, nil, nil, "x", proto.EmptyBody{}))
 		}},
 		"report in the main line": {code: "bad_request", setup: func(e *postRefusalEnv) {
 			e.payload = postJSONText(postMake(95, postA, "report", nil, nil, nil, "", report))
-		}},
-		"working AI handback in the main line": {code: "bad_request", setup: func(e *postRefusalEnv) {
-			e.payload = postJSONText(postMake(95, postA, "handback", nil, nil, nil, "", handback))
-		}},
-		"secretary handback in a thread": {code: "bad_request", setup: func(e *postRefusalEnv) {
-			e.payload = postJSONText(postMake(95, aiID, "handback", &thread, nil, nil, "", handback))
 		}},
 		"text with bad re id": {code: "bad_request", setup: func(e *postRefusalEnv) {
 			bad := "not-an-id"
@@ -322,10 +278,6 @@ func TestPostRefusals(t *testing.T) {
 		"report missing commit": {code: "bad_request", setup: func(e *postRefusalEnv) {
 			raw := postJSONText(postMake(95, postA, "report", &thread, nil, nil, "", report))
 			e.payload = strings.Replace(raw, `"commit"`, `"sha"`, 1)
-		}},
-		"handback with null files": {code: "bad_request", setup: func(e *postRefusalEnv) {
-			raw := postJSONText(postMake(95, postA, "handback", &thread, nil, nil, "", handback))
-			e.payload = strings.Replace(raw, `"files":[]`, `"files":null`, 1)
 		}},
 		"mentioning a member twice": {code: "bad_request", setup: func(e *postRefusalEnv) {
 			e.by, e.payload = browser, postJSONText(postMake(95, "", "text", nil, []string{postA, postA}, nil, "x", proto.EmptyBody{}))
@@ -341,9 +293,6 @@ func TestPostRefusals(t *testing.T) {
 		}},
 		"report in an unknown thread": {code: "not_found", setup: func(e *postRefusalEnv) {
 			e.payload = postJSONText(postMake(95, postA, "report", &missing, nil, nil, "", report))
-		}},
-		"handback in an unknown thread": {code: "not_found", setup: func(e *postRefusalEnv) {
-			e.payload = postJSONText(postMake(95, postA, "handback", &missing, nil, nil, "", handback))
 		}},
 		"report by the reviewer": {code: "forbidden", setup: func(e *postRefusalEnv) {
 			e.payload = postJSONText(postMake(95, postB, "report", &thread, nil, nil, "", report))

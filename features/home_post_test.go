@@ -76,7 +76,6 @@ func homePostSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^"([^"]*)" posts the progress "([^"]*)" in the thread of task 1 mentioning "([^"]*)"$`, w.aiPostsProgress)
 	sc.Step(`^the second browser receives that "([^"]*)" message and task 1 with (\d+) thread messages?$`, w.secondGetsThreadMsg)
 	sc.Step(`^"([^"]*)" posts a completion report for commit "([^"]*)" in the thread of task 1$`, w.aiPostsReport)
-	sc.Step(`^"([^"]*)" posts a hand-back summary in the thread of task 1$`, w.aiPostsHandback)
 	sc.Step(`^the group holds an old text message, an old review message and an old note$`, w.seedMemory)
 	sc.Step(`^(\d+) days pass and daily retention runs for a (\d+)-day window$`, w.runRetention)
 	sc.Step(`^the old text message is gone from the store while the old review message and the old note remain$`, w.checkRetained)
@@ -258,17 +257,6 @@ func (w *homePostWorld) aiPostsReport(ai, commit string) error {
 	cmd := proto.Post[proto.ReportBody]{
 		HomeCommand: proto.HomeCommand{Type: "post", Nonce: id, Timestamp: w.clock.Load(), Group: proto.ID(w.group), As: proto.ID(w.members[ai])},
 		Kind:        "report", Thread: &thread, Mentions: []proto.ID{}, Body: proto.ReportBody{Commit: commit, Files: 2, Added: 20, Removed: 4},
-	}
-	return w.sendOK("host", cmd)
-}
-
-func (w *homePostWorld) aiPostsHandback(ai string) error {
-	id, thread := w.nextID(), proto.ID(w.task)
-	w.lastMsg = string(id)
-	cmd := proto.Post[proto.HandbackBody]{
-		HomeCommand: proto.HomeCommand{Type: "post", Nonce: id, Timestamp: w.clock.Load(), Group: proto.ID(w.group), As: proto.ID(w.members[ai])},
-		Kind:        "handback", Thread: &thread, Text: "Handed back.", Mentions: []proto.ID{},
-		Body: proto.HandbackBody{Files: []string{"path.go"}, Commits: []proto.CommitSubject{{SHA: "9f2c1ab", Subject: "Fix path"}}, Added: 10, Removed: 1},
 	}
 	return w.sendOK("host", cmd)
 }
