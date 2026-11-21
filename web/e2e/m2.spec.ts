@@ -95,35 +95,134 @@ async function setPeerOffline(page: Page, offline: boolean) {
   }, offline);
 }
 
-async function postBulkHistory(page: Page, count: number) {
-  await page.evaluate(async (total) => {
-    const ta = document.querySelector<HTMLTextAreaElement>('.composer textarea');
-    const form = document.querySelector<HTMLFormElement>('.composer form');
-    const desc = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
-    if (!ta || !form || !desc?.set) throw new Error('composer not mounted');
-    let wake = () => {};
-    Object.defineProperty(ta, 'value', {
-      configurable: true,
-      get: desc.get,
-      set(next: string) {
-        desc.set?.call(this, next);
-        if (next === '') wake();
-      },
-    });
-    try {
-      for (let i = 1; i <= total; i++) {
-        const cleared = new Promise<void>((resolve) => {
-          wake = resolve;
+async function installBulkPoster(context: BrowserContext) {
+  await context.addInitScript(() => {
+    const orig = RTCPeerConnection.prototype.createDataChannel;
+    RTCPeerConnection.prototype.createDataChannel = function (
+      this: RTCPeerConnection,
+      label: string,
+      options?: RTCDataChannelInit,
+    ) {
+      const channel = orig.call(this, label, options);
+      if (label === 'ctl') {
+        channel.addEventListener('open', () => {
+          Object.assign(window, { __activeCtl: channel });
         });
-        ta.value = `History line ${String(i).padStart(4, '0')}`;
-        ta.dispatchEvent(new Event('input', { bubbles: true }));
-        form.requestSubmit();
-        if (ta.value !== '') await cleared;
       }
-    } finally {
-      Reflect.deleteProperty(ta, 'value');
-    }
-  }, count);
+      return channel;
+    };
+  });
+}
+
+async function postBulkHistory(page: Page, groupId: string, count: number) {
+  await page.evaluate(
+    async ({ g, total }) => {
+      type Reply = { re?: number; ok?: boolean; err?: { code?: string; msg?: string } };
+
+      const b64url = (bytes: Uint8Array) =>
+        btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(''))
+          .replaceAll('+', '-')
+          .replaceAll('/', '_')
+          .replaceAll('=', '');
+
+      const readDeviceKeys = () =>
+        new Promise<CryptoKeyPair>((resolve, reject) => {
+          const openReq = indexedDB.open('solodawn', 1);
+          openReq.onerror = () => reject(new Error('failed to open solodawn IndexedDB'));
+          openReq.onsuccess = () => {
+            const db = openReq.result;
+            const getReq = db.transaction('device', 'readonly').objectStore('device').get('key');
+            getReq.onerror = () => {
+              db.close();
+              reject(new Error('failed to read device key from IndexedDB'));
+            };
+            getReq.onsuccess = () => {
+              db.close();
+              resolve(getReq.result as CryptoKeyPair);
+            };
+          };
+        });
+
+      const enc = new TextEncoder();
+      const signPost = async (privateKey: CryptoKey, k: string, index: number, ts: number) => {
+        const n = b64url(crypto.getRandomValues(new Uint8Array(16)));
+        const p = JSON.stringify({
+          t: 'post',
+          n,
+          ts,
+          g,
+          kind: 'text',
+          thread: null,
+          main: false,
+          text: `History line ${String(index).padStart(4, '0')}`,
+          mentions: [],
+          re: null,
+          body: {},
+        });
+        const sig = await crypto.subtle.sign(
+          { name: 'Ed25519' },
+          privateKey,
+          enc.encode(`solodawn/1\n${p}`),
+        );
+        const id = 1_000_000 + index;
+        const env = { p, k, s: b64url(new Uint8Array(sig)) };
+        return { id, raw: JSON.stringify({ t: 'cmd', id, env }) };
+      };
+
+      const parseReply = (data: unknown): Reply => {
+        if (typeof data !== 'string') return {};
+        try {
+          return JSON.parse(data) as Reply;
+        } catch {
+          return {};
+        }
+      };
+
+      const replyError = (msg: Reply): string | null => {
+        if (msg.ok === true && !msg.err) return null;
+        return msg.err ? `${msg.err.code}: ${msg.err.msg}` : 'bulk post command failed';
+      };
+
+      const sendBatch = async (ctl: RTCDataChannel, frames: Array<{ id: number; raw: string }>) => {
+        const pending = new Set(frames.map((f) => f.id));
+        let onMsg = (_ev: MessageEvent) => {};
+        let onClose = () => {};
+        const done = new Promise<void>((resolve, reject) => {
+          onClose = () => reject(new Error('ctl channel closed during bulk post'));
+          onMsg = (ev: MessageEvent) => {
+            const msg = parseReply(ev.data);
+            if (typeof msg.re !== 'number' || !pending.delete(msg.re)) return;
+            const err = replyError(msg);
+            if (err !== null) reject(new Error(err));
+            else if (pending.size === 0) resolve();
+          };
+        });
+        ctl.addEventListener('message', onMsg);
+        ctl.addEventListener('close', onClose);
+        try {
+          for (const frame of frames) ctl.send(frame.raw);
+          await done;
+        } finally {
+          ctl.removeEventListener('message', onMsg);
+          ctl.removeEventListener('close', onClose);
+        }
+      };
+
+      const ctl = (window as unknown as { __activeCtl?: RTCDataChannel }).__activeCtl;
+      if (!ctl || ctl.readyState !== 'open') throw new Error('ctl channel not open');
+      const pair = await readDeviceKeys();
+      const k = b64url(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)));
+      const batchSize = 50;
+      for (let start = 1; start <= total; start += batchSize) {
+        const len = Math.min(batchSize, total - start + 1);
+        const ts = Date.now();
+        const indices = Array.from({ length: len }, (_, idx) => start + idx);
+        const frames = await Promise.all(indices.map((i) => signPost(pair.privateKey, k, i, ts)));
+        await sendBatch(ctl, frames);
+      }
+    },
+    { g: groupId, total: count },
+  );
 }
 
 async function pairSecondBrowser(firstPage: Page, secondPage: Page, surface: DirectSurface) {
@@ -229,6 +328,7 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
 
       const ctx1 = await openDirectContext(browser, contexts, direct);
       const ctx2 = await openDirectContext(browser, contexts, direct);
+      await installBulkPoster(ctx1);
       await installNetSwitch(ctx2);
 
       const page1 = await ctx1.newPage();
@@ -252,6 +352,7 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
 
       await poll(() => page1.url()).toMatch(/#\/groups\/[^/]+$/);
       const groupHash = new URL(page1.url()).hash;
+      const groupId = groupHash.slice('#/groups/'.length);
 
       // Second connected browser sees the new group in its list without reloading.
       await poll(() => page2.locator('.glist a.gitem b').allTextContents()).toContain('Handbook');
@@ -319,7 +420,9 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
         'Cannot reach the group home',
       );
 
-      await postBulkHistory(page1, 1500);
+      await page1.locator('.rail a[href="#/settings"]').click();
+      await poll(() => page1.url()).toContain('#/settings');
+      await postBulkHistory(page1, groupId, 1500);
 
       await setPeerOffline(page2, false);
       await poll(() => page2.locator('.line .msg .text').allTextContents(), 30_000).toContain(
