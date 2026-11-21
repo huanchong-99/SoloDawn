@@ -63,7 +63,7 @@ func (f *fakeCtl) Send(frame any) error {
 	if fail {
 		return errors.New("send failed")
 	}
-	raw, err := dvlEncode(frame)
+	raw, err := encodeCtl(frame)
 	if err != nil {
 		return err
 	}
@@ -79,7 +79,7 @@ func (f *fakeCtl) Close() error                 { f.once.Do(func() { close(f.don
 func (f *fakeCtl) pushRaw(s string) { f.in <- json.RawMessage(s) }
 
 func (f *fakeCtl) push(v any) {
-	raw, err := dvlEncode(v)
+	raw, err := encodeCtl(v)
 	if err != nil {
 		panic(err)
 	}
@@ -386,18 +386,6 @@ func TestHomeLoopIntegrationAndDevlogForwarding(t *testing.T) {
 	loop, h := newTestHomeAndHost(t, db, nodeKey, logs, now, cmds)
 
 	s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h, Now: func() time.Time { return now }})
-	s.Requests["sync"] = RequestHandler{
-		Async: true,
-		Run: func(_ context.Context, conn *home.Conn, from Ctl, _ string, id int64, data json.RawMessage) (any, error) {
-			var q proto.Sync
-			if proto.Decode(data, &q) != nil {
-				from.Send(proto.ErrorResponse{Re: id, Err: proto.WireError{Code: "bad_request", Message: "bad sync"}})
-				return nil, nil
-			}
-			loop.Sync(conn, q)
-			return nil, nil
-		},
-	}
 
 	c1 := serveConn(t, s, b1Key.ID(), false)
 	c1.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "b1", Addrs: []string{}})
@@ -440,10 +428,22 @@ func TestHomeLoopIntegrationAndDevlogForwarding(t *testing.T) {
 	if !strings.Contains(string(inboxRaw), `"why":"mention"`) {
 		t.Fatalf("expected inbox item on host hello, got %s", inboxRaw)
 	}
+	ch.pushRaw(`{"t":"sync","id":20,"g":123}`)
+	expectErr(t, ch.next(t), 20, "bad_request")
+	ch.pushRaw(`{"t":"fetch","id":21,"g":123}`)
+	expectErr(t, ch.next(t), 21, "bad_request")
 	ch.push(proto.Sync{Request: proto.Request{Type: "sync", ID: 2}, Group: groupID, Since: 3, StateOnly: true})
 	var synced proto.Synced
 	if err := proto.Decode(ch.next(t), &synced); err != nil || synced.Re != 2 {
 		t.Fatalf("host sync = %+v (%v)", synced, err)
+	}
+	ch.push(home.Fetch{
+		FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: 22}, Group: groupID, Before: 0, Limit: 10},
+		Kind:      "note",
+	})
+	var fetched proto.Fetched
+	if err := proto.Decode(ch.next(t), &fetched); err != nil || fetched.Re != 22 || fetched.Type != "fetched" {
+		t.Fatalf("host fetch = %+v (%v)", fetched, err)
 	}
 	sesCheckHostAck(t, ch, groupID)
 
@@ -914,6 +914,22 @@ func TestSessionErrorAndEdgePaths(t *testing.T) {
 		expectErr(t, c.next(t), 99, "version")
 		if errs.Load() != 2 {
 			t.Fatalf("expected 2 reported db errors, got %d", errs.Load())
+		}
+	})
+
+	t.Run("statusLines lists welcomed connections only", func(t *testing.T) {
+		db := sesOpenStore(t)
+		logs := seedOwnedLogs(t, db, nodeKey, browserKey)
+		loop, h := newTestHomeAndHost(t, db, nodeKey, logs, now, nil)
+		s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h, Now: func() time.Time { return now }})
+		unw := serveConn(t, s, browserKey.ID(), false)
+		defer unw.Close()
+		c := serveConn(t, s, browserKey.ID(), false)
+		c.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "b", Addrs: []string{}})
+		c.next(t)
+		c.next(t)
+		if got := s.statusLines(); len(got) != 1 || got[0] != "connection "+browserKey.ID()+" direct" {
+			t.Fatalf("statusLines = %v", got)
 		}
 	})
 }

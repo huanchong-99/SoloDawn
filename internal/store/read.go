@@ -60,6 +60,12 @@ func (v *Snapshot) AfterSeqUpTo(after, upTo int64) ([]json.RawMessage, error) {
 	return v.rows("SELECT data FROM row WHERE g=? AND seq>? AND seq<=? ORDER BY seq", v.group, after, upTo)
 }
 
+// Row returns one live row of the snapshot's group, or sql.ErrNoRows when
+// there is none or only its marker.
+func (v *Snapshot) Row(r, id string) (json.RawMessage, error) {
+	return v.tx.Row(v.group, r, id)
+}
+
 // below is the pos bound of a page: rows with a lower pos, or all rows for
 // before 0, which asks for the newest page (no pos is 0).
 func below(before int64) int64 {

@@ -104,6 +104,10 @@ func (f *joinFakeHome) handleSync(req proto.Sync) (json.RawMessage, error) {
 }
 
 func (f *joinFakeHome) handleCmd(req proto.Cmd) (json.RawMessage, error) {
+	ok := json.RawMessage(marshalWire(proto.CmdResult{Success: proto.Success{Re: req.ID, OK: true}}))
+	if isMemberStatusCmd(req.Env.Payload) {
+		return ok, nil
+	}
 	f.mu.Lock()
 	override := f.cmdFn
 	f.mu.Unlock()
@@ -113,8 +117,15 @@ func (f *joinFakeHome) handleCmd(req proto.Cmd) (json.RawMessage, error) {
 	if err := f.recordMemberCmd(req.Env.Payload); err != nil {
 		return nil, err
 	}
-	ok := proto.CmdResult{Success: proto.Success{Re: req.ID, OK: true}}
-	return json.RawMessage(marshalWire(ok)), nil
+	return ok, nil
+}
+
+func isMemberStatusCmd(payload string) bool {
+	var hdr struct {
+		Type string `json:"t"`
+		Op   string `json:"op"`
+	}
+	return json.Unmarshal([]byte(payload), &hdr) == nil && hdr.Type == "member" && hdr.Op == "status"
 }
 
 func (f *joinFakeHome) recordMemberCmd(payload string) error {

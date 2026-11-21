@@ -689,8 +689,13 @@ func TestSubmitTaskSupersedesPreviousHostedChecks(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		p := &tskPart{}
 		key := tskCloudKey{group: tskTestGroupID, task: tskTestTaskID}
-		ctx1, run1 := tskBeginCloud(p, key)
-		ctx2, run2 := tskBeginCloud(p, key)
+		ctx1, run1 := tskBeginCloud(p, key, "c1")
+		dupCtx, dupRun := tskBeginCloud(p, key, "c1")
+		tskEqual(t, dupCtx, context.Context(nil))
+		tskEqual(t, dupRun, (*tskCloudRun)(nil))
+		tskRequire(t, ctx1.Err() == nil, "same-commit claim must leave running check alone")
+
+		ctx2, run2 := tskBeginCloud(p, key, "c2")
 		tskRequire(t, ctx1.Err() != nil, "first cloud context must be cancelled")
 		tskRequire(t, ctx2.Err() == nil, "second cloud context must stay active")
 
@@ -708,7 +713,7 @@ func TestSubmitTaskCancelledHostedCheckDoesNotReportCloud(t *testing.T) {
 	h.Attach("home-device", home)
 	p := Part[tskPart](h)
 	key := tskCloudKey{group: tskTestGroupID, task: tskTestTaskID}
-	ctx, run := tskBeginCloud(p, key)
+	ctx, run := tskBeginCloud(p, key, "c1")
 	run.cancel()
 	fakeForgeGH(t, hostedView("c1", queuedRun))
 	tskPollHostedChecks(ctx, p, h, "home-device", key, run, TaskForge{Worktree: t.TempDir()}, 7, "c1", time.Now())

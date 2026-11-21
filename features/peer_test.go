@@ -35,6 +35,7 @@ type peersWorld struct {
 	nodes    [2]*peer.Peer
 	accepted [2]chan *peer.Connection // inbound connections, in the order ctl opened
 	conns    [2]*peer.Connection      // what each side offered last
+	pushes   [2]chan json.RawMessage  // pushes read from conns[i], single reader: pushBoth
 	served   [2]*peer.Connection      // the inbound connection each side accepted last
 	relay    []proto.ICEServer
 	blocked  bool // only relay candidates cross
@@ -199,9 +200,22 @@ func (w *peersWorld) offer(i int) error {
 	if err != nil {
 		return err
 	}
+	ch := make(chan json.RawMessage, 16) // single reader: pushBoth
 	w.conns[i] = c
+	w.pushes[i] = ch
 	w.cleanup = append(w.cleanup, func() { c.Close() })
+	go pumpClientReads(w.ctx, c, ch)
 	return nil
+}
+
+func pumpClientReads(ctx context.Context, c *peer.Connection, out chan<- json.RawMessage) {
+	for {
+		msg, err := c.Read(ctx)
+		if err != nil {
+			return
+		}
+		out <- msg
+	}
 }
 
 // open waits until ctl of what node i offered is open at both ends.
@@ -247,10 +261,12 @@ func (w *peersWorld) directBoth() error {
 	return nil
 }
 func (w *peersWorld) pushBoth() error {
-	for i, c := range w.conns {
-		data, err := c.Read(w.ctx)
-		if err != nil {
-			return err
+	for i, ch := range w.pushes {
+		var data json.RawMessage
+		select {
+		case <-w.ctx.Done():
+			return w.ctx.Err()
+		case data = <-ch:
 		}
 		if want := fmt.Sprintf(`{"t":"host.info",`+peerInfo+"}", w.keys[1-i].ID()); string(data) != want {
 			return fmt.Errorf("push: %s, want %s", data, want)

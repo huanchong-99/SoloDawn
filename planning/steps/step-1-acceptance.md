@@ -40,8 +40,9 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
 - **A1.4** With the rendezvous stopped, open **direct** connections keep
   working for 10 minutes. One of two nodes on the same network is
   restarted; they reconnect without the rendezvous.
-- **A1.5** A test rendezvous that alters the description in transit causes
-  the connection to be refused.
+- **A1.5** Removed under the owner's rule of 2026-11-21: no defence in code
+  against a dishonest rendezvous; handled outside the product in the
+  deployment guide.
 - **A1.6** Removed by the owner's decision of 2026-11-21 (no stolen-device
   defence in code; revoking is postponed, and a lost device is handled outside
   the product in the deployment guide).
@@ -57,10 +58,8 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   not processed and closes nothing: no connection is created for it, and the
   live connection keeps answering `host.info`. A copy of the offer for the
   current `conn` gets the same answer again, on the path it came by, and
-  nothing else happens (`contracts/rendezvous.md` 2.3). Repeat with a
-  future-dated offer that passed check 5 on receipt. At exactly `ts + 120000`,
-  replaying the retired offer still leaves the newer connection answering
-  `host.info`.
+  nothing else happens (`contracts/rendezvous.md` 2.3; covered by
+  `features/peer.feature:14-21`).
 - **A1.11** Deliver two copies of an offerer candidate before the offer and
   two copies of an answerer candidate before the answer. Each receiver makes
   zero calls to add that candidate before setting the corresponding remote

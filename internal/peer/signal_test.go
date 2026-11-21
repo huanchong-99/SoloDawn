@@ -216,6 +216,8 @@ func (n negotiation) info(t *testing.T) {
 		}
 		done <- err
 	}()
+	stop := readReplies(ctx, n.client)
+	defer stop()
 	reply, err := n.client.Request(ctx, func(id int64) any { return proto.Request{Type: "host.info", ID: id} })
 	check(t, err)
 	check(t, <-done)
