@@ -6,6 +6,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-21 · deviation · Dead `cause` path in `internal/home` and `internal/store`
+
+- Symptom: the home and store still carry, write and read an item `cause`, although `P-1b` re-froze `InboxItem` and `Item` without `cause` under the owner's 2026-11-21 decision (no attack-and-defence code). Nothing on the wire or on the host reads it.
+- Cause: `internal/home/home.go:186` (`Item.Cause`), `internal/home/run_group.go:254, 283-288` (`runCause`), `internal/home/cmd_brief.go:318-322, 350, 363`, `internal/home/machine.go:110` (with their tests in `cmd_brief_test.go:297-298, 343, 431`, `home_test.go:318, 332`, `run_push_test.go:174, 195-198, 324` and `run_disk_test.go:69-70`) and `internal/store/inbox.go:9, 17, 33, 43` together with the `inbox.cause` column were built before `P-1b` dropped `cause`.
+- Status: open; owner **HM-7**, which removes the dead `cause` fields, functions, tests and `inbox.cause` column.
+
+### 2026-11-21 · limitation · Postponed step-2 contracts still assume an item-level `cause`
+
+- Symptom: the step-2 planning documents (`planning/contracts/step-2/authority.md:36, 85, 92-93, 104, 108`, `planning/contracts/step-2/confirm.md:145-147, 196-223, 244`, `planning/contracts/step-2/watch-team.md:46-67` and `planning/steps/parallel-plan-step-2-3.md:20-21, 27`) require an inbox item to carry a signed `cause` when a group home belongs to another person, whereas `P-1b` removed `cause` from step-1 items.
+- Cause: step 2 is postponed while step 1 ships with plain unsigned items under the owner's 2026-11-21 decision.
+- Status: open, without effect in step 1. When step 2 resumes, items will need an authority field again.
+
 ### 2026-11-21 · limitation · Group and review sessions default to permission level 3 and rely on instructions not to edit files
 
 - Symptom: at the default permission level of 3 (owner's decision of 2026-11-21), a group session or a review session starts its CLI with full tool access rather than a CLI-enforced read-only sandbox, so a model that ignores its prompt could edit files in `repo/` or `review/<num>/`.
@@ -30,10 +42,10 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `(*Connection).Send` calls `SendText` and returns (`internal/peer/ctl.go:174`); `home.Client` has `Send` and `Done` only (`internal/home/home.go:27`), so the loop cannot ask how much is buffered. The limit (`runBacklog`, `internal/home/run_conn.go`) applies to a client whose `Send` waits, such as a local link.
 - Status: open. Either `peer.Connection.Send` waits, or fails, above a buffered amount, or the node closes a connection whose buffer stays above a limit; owner N-2 or the owner of `internal/peer`.
 
-### 2026-11-21 · deviation · Inbox items are stored and pushed unsigned
+### 2026-11-21 · deviation · Inbox items are not yet pushed in the wire `inbox` frame
 
-- Symptom: the run loop stores an item with the seam's `Item` as JSON in the `env` column and pushes it as `home.ItemsPush`, one `home.QueuedItem` per frame, where `planning/contracts/datachannel.md` section 6 has an `inbox` frame of items signed by the home. A host that follows the contract accepts none of them.
-- Cause: signing and the wire `item` belong to unit HM-7; the loop has two functions in their place, `runSeal` and `runItemFrame` (`internal/home/run_push.go`).
+- Symptom: the run loop stores an item with the seam's `Item` as JSON in the `env` column and pushes it as `home.ItemsPush`, one `home.QueuedItem` per frame, where `planning/contracts/datachannel.md` section 6 (re-frozen in P-1b as a plain unsigned `item` object) has an `inbox` frame of `InboxItem`s with optional `msg` and `task` row copies. A host that follows the contract accepts none of them.
+- Cause: the wire `item` and `inbox` frame belong to unit HM-7; the loop has two functions in their place, `runSeal` and `runItemFrame` (`internal/home/run_push.go`).
 - Status: open until HM-7, which replaces those two functions, fills a frame as far as a `ctl` message goes, and adds `ack`. Storing, holding, sending again on a hello and the count of the wake-up cap are in the loop and stay.
 
 ### 2026-11-21 · limitation · A command without `g` knows only the devices of the node's owner
