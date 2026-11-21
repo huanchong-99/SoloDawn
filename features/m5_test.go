@@ -1157,6 +1157,9 @@ func (w *m5World) joinGroupMembers(level2 bool) error {
 	if err := w.declareAndJoinWorkingAIs(); err != nil {
 		return err
 	}
+	if err := w.configureCloneGitIdentity(); err != nil {
+		return err
+	}
 	if err := w.addSecretaryMember(); err != nil {
 		return err
 	}
@@ -1164,6 +1167,16 @@ func (w *m5World) joinGroupMembers(level2 bool) error {
 		return err
 	}
 	return w.waitMembersSynced()
+}
+
+func (w *m5World) configureCloneGitIdentity() error {
+	repo := filepath.Join(w.projectDir(), "repo")
+	for _, kv := range [][2]string{{"user.name", "fixture"}, {"user.email", "fixture@test.invalid"}, {"commit.gpgsign", "false"}} {
+		if _, err := m5GitOut(repo, "config", kv[0], kv[1]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (w *m5World) callHostSurface(name string, fields map[string]any) error {
