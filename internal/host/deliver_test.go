@@ -66,19 +66,18 @@ type fakeDeliverRuntime struct {
 
 func (r *fakeDeliverRuntime) Turn(_ context.Context, h *Host, key SessionKey, text string, turn Turn) error {
 	r.mu.Lock()
-	err := r.err
-	keep := r.keepRun
-	hook := r.onTurn
+	err, keep, hook := r.err, r.keepRun, r.onTurn
+	r.mu.Unlock()
+	if err == nil {
+		r.advanceState(h, key, keep)
+		if hook != nil {
+			hook(h, key)
+		}
+	}
+	r.mu.Lock()
 	r.turns = append(r.turns, recordedTurn{host: h, key: key, text: text, turn: turn})
 	r.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	r.advanceState(h, key, keep)
-	if hook != nil {
-		hook(h, key)
-	}
-	return nil
+	return err
 }
 
 func (r *fakeDeliverRuntime) advanceState(h *Host, key SessionKey, keepWorking bool) {
@@ -283,7 +282,6 @@ func newDeliverRigOnStore(t *testing.T, db *store.Store) *deliverRig {
 	t.Cleanup(func() {
 		rig.home.closeConn()
 		stopDeliverySyncs(h)
-		rig.waitIdle()
 	})
 	return rig
 }
@@ -333,18 +331,46 @@ func (r *deliverRig) waitUntil(desc string, ok func() bool) {
 	r.t.Fatalf("timed out waiting for %s", desc)
 }
 
-func (r *deliverRig) waitIdle() {
+func (r *deliverRig) waitGroupLive(group string) {
 	r.t.Helper()
 	d := deliv(r.h)
-	r.waitUntil("delivery idle", func() bool {
+	r.waitUntil("group "+group+" live", func() bool {
 		d.mu.Lock()
 		defer d.mu.Unlock()
-		for _, gs := range d.groups {
-			if gs.syncing {
-				return false
-			}
-		}
-		return len(d.busy) == 0 && len(d.merging) == 0
+		gs := d.groups[group]
+		return gs != nil && gs.live && !gs.syncing
+	})
+}
+
+func (r *deliverRig) waitSyncStopped(group string) {
+	r.t.Helper()
+	d := deliv(r.h)
+	r.waitUntil("group "+group+" sync stopped", func() bool {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		gs := d.groups[group]
+		return gs != nil && !gs.syncing
+	})
+}
+
+func (r *deliverRig) waitNoActiveMerges() {
+	r.t.Helper()
+	d := deliv(r.h)
+	r.waitUntil("merges unclaimed", func() bool {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		return len(d.merging) == 0
+	})
+}
+
+func (r *deliverRig) waitAIUnbusy(group, member string) {
+	r.t.Helper()
+	d := deliv(r.h)
+	key := aiGroupKey{group: group, member: member}
+	r.waitUntil("ai "+member+" unbusy", func() bool {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		return !d.busy[key]
 	})
 }
 
@@ -369,14 +395,7 @@ func (r *deliverRig) seedGroupAndMembers() {
 	r.putAIMember(testAI2, "Codex", r.hostKey.ID(), false, 3)
 	r.putAIMember(testSec, "Sec", r.hostKey.ID(), true, 4)
 	r.h.Attach(r.homeKey.ID(), r.home)
-	r.waitUntil("initial attach sync", func() bool {
-		d := deliv(r.h)
-		d.mu.Lock()
-		gs := d.groups[testGroup1]
-		ok := gs != nil && gs.live && !gs.syncing
-		d.mu.Unlock()
-		return ok
-	})
+	r.waitGroupLive(testGroup1)
 }
 
 func (r *deliverRig) putGroup(grp proto.GroupRow) {
@@ -512,10 +531,11 @@ func TestRegistrationsAndHostIsolation(t *testing.T) {
 	msg := r1.makeTextMsg(testMsg1, nil, "hello")
 	it := proto.Item{Type: "item", Nonce: testCanonicalID(20), Timestamp: testStartMS, Group: testGroup1, To: r1.hostKey.ID(), Item: 1, AI: testAI1, Why: "mention", Msg: testMsg1}
 	r1.pushItem(r1.homeKey, r1.homeKey.ID(), testGroup1, it, msg)
-	r1.waitUntil("1 turn on r1", func() bool { return len(r1.runtime.recorded()) == 1 })
+	r1.waitUntil("1 turn and ack on r1", func() bool { return len(r1.runtime.recorded()) == 1 && r1.home.ackCountFor(1) == 1 })
+	r1.waitAIUnbusy(testGroup1, testAI1)
 	turns := r1.runtime.recorded()
-	if turns[0].host != r1.h || len(deliv(h2).groups) != 0 {
-		t.Fatalf("isolation broken: turns=%+v h2Groups=%d", turns, len(deliv(h2).groups))
+	if turns[0].host != r1.h || len(deliv(h2).groups) != 0 || len(r1.home.syncSinces()) != 1 {
+		t.Fatalf("isolation or live sync check broken: turns=%+v h2Groups=%d syncs=%v", turns, len(deliv(h2).groups), r1.home.syncSinces())
 	}
 }
 
@@ -543,11 +563,9 @@ func verifyUnsyncedInboxTriggersSyncAndDelivers(t *testing.T, r *deliverRig) {
 	it := proto.Item{Type: "item", Nonce: testCanonicalID(21), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 10, AI: testAI1, Why: "assign", Task: testTask1}
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, it, nil)
 	req := <-r.home.started
-	if req.Group != testGroup1 || !req.StateOnly || req.Since != 0 {
-		t.Fatalf("unexpected sync request: %+v", req)
-	}
-	if len(r.home.ackList()) != 0 || len(r.audits()) != 0 {
-		t.Fatal("unsynced item was acknowledged or refused before sync completed")
+	wantSync := proto.Sync{Request: req.Request, Group: testGroup1, Since: 0, StateOnly: true}
+	if req != wantSync || len(r.home.ackList()) != 0 || len(r.audits()) != 0 {
+		t.Fatalf("unexpected pre-sync state: req=%+v acks=%v audits=%v", req, r.home.ackList(), r.audits())
 	}
 	grpRaw := json.RawMessage(encodeJSON(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "P1", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Checks: []string{}}))
 	aiRaw := json.RawMessage(encodeJSON(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 2}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
@@ -555,6 +573,10 @@ func verifyUnsyncedInboxTriggersSyncAndDelivers(t *testing.T, r *deliverRig) {
 	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw, aiRaw, tRaw}})))
 	r.home.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 5}))}
 	r.waitUntil("item 10 delivered", func() bool { return r.home.ackCountFor(10) == 1 && len(r.runtime.recorded()) == 1 })
+	r.waitAIUnbusy(testGroup1, testAI1)
+	if len(r.home.syncSinces()) != 1 {
+		t.Fatalf("expected single sync while syncing, got %v", r.home.syncSinces())
+	}
 }
 
 func verifySecondUnsyncedGroupAndCancelCleanup(t *testing.T, r *deliverRig) {
@@ -570,7 +592,7 @@ func verifySecondUnsyncedGroupAndCancelCleanup(t *testing.T, r *deliverRig) {
 		t.Fatalf("expected sync for %s, got %+v", testGroup2, req2)
 	}
 	r.home.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 2, OK: true}, Group: testGroup2, Seq: 2}))}
-	r.waitIdle()
+	r.waitGroupLive(testGroup2)
 
 	// Attach a second connection (superseding r.home), then close r.home.done: d.cancels[home] must retain second's entry until second closes.
 	d := deliv(r.h)
@@ -588,16 +610,20 @@ func verifySecondUnsyncedGroupAndCancelCleanup(t *testing.T, r *deliverRig) {
 	s1 := <-second.started
 	second.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: s1.Group, Seq: s1.Since}))}
 	s2 := <-second.started
+	second.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 2, OK: true}, Group: s2.Group, Seq: s2.Since}))}
 	if s1.Group != testGroup1 || s2.Group != testGroup2 {
 		t.Fatalf("unexpected synced groups: %s, %s", s1.Group, s2.Group)
 	}
-	r.home.closeConn()
-	time.Sleep(5 * time.Millisecond)
+	r.waitGroupLive(testGroup2)
+	stale := newFakeDeliverHome()
+	stale.closeConn()
+	staleCtx, staleCancel := context.WithCancel(context.Background())
+	watchHomeConn(d, r.homeKey.ID(), stale, &homeSync{ctx: staleCtx, cancel: staleCancel})
 	d.mu.Lock()
 	stillPresent := d.cancels[r.homeKey.ID()] != nil
 	d.mu.Unlock()
-	if !stillPresent {
-		t.Fatal("closing superseded connection deleted active connection cancel entry")
+	if staleCtx.Err() == nil || !stillPresent {
+		t.Fatal("closing superseded connection failed to cancel stale ctx or deleted active cancel entry")
 	}
 	second.closeConn()
 	r.waitUntil("cancels cleaned up on conn close", func() bool {
@@ -627,7 +653,7 @@ func TestSyncCursorResetDeltaAndOvertakenRows(t *testing.T) {
 	grpRaw := json.RawMessage(encodeJSON(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 4}, Name: "P", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Checks: []string{}}))
 	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw}})))
 	second.answers <- syncAnswer{err: errors.New("broken")}
-	r.waitIdle()
+	r.waitSyncStopped(testGroup1)
 
 	verifyOvertakenSyncedAndMonotonicCursor(t, r)
 }
@@ -648,7 +674,7 @@ func verifyOvertakenSyncedAndMonotonicCursor(t *testing.T, r *deliverRig) {
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, assignIt, nil)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, mergeIt, nil)
 	third.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 10}))}
-	r.waitIdle()
+	r.waitGroupLive(testGroup1)
 	Deliver(r.h, testGroup1, testAI1)
 	if len(r.audits()) != 0 || len(third.ackList()) != 0 {
 		t.Fatalf("absent member rows caused refusal or ack: audits=%+v", r.audits())
@@ -657,7 +683,6 @@ func verifyOvertakenSyncedAndMonotonicCursor(t *testing.T, r *deliverRig) {
 	ai1Raw := json.RawMessage(encodeJSON(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 6}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C1"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
 	ai2Raw := json.RawMessage(encodeJSON(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI2, Seq: 7}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C2"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
 	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{ai1Raw, ai2Raw}})))
-	r.waitIdle()
 	Deliver(r.h, testGroup1, testAI1)
 	if len(r.audits()) != 0 || len(third.ackList()) != 0 {
 		t.Fatalf("absent task rows caused refusal or ack: audits=%+v", r.audits())
@@ -667,6 +692,8 @@ func verifyOvertakenSyncedAndMonotonicCursor(t *testing.T, r *deliverRig) {
 	t2Raw := json.RawMessage(encodeJSON(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 9}, Group: testGroup1, Num: 2, Title: "T2", Slug: "t2", Origin: "brief", State: "active", Step: "merge", Commit: "c1", Assignee: testAI2, Depends: []string{}}))
 	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{t1Raw, t2Raw}})))
 	r.waitUntil("both delayed items acknowledged", func() bool { return len(third.ackList()) == 2 && len(r.runtime.recorded()) == 1 })
+	r.waitAIUnbusy(testGroup1, testAI1)
+	r.waitNoActiveMerges()
 	assertLiveCursorAndFailedDelta(t, r)
 }
 
@@ -681,7 +708,7 @@ func assertLiveCursorAndFailedDelta(t *testing.T, r *deliverRig) {
 		t.Fatalf("cursor regressed below synced S: got since=%d, want 10", req4.Since)
 	}
 	fourth.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup1, Seq: 10}))}
-	r.waitIdle()
+	r.waitGroupLive(testGroup1)
 
 	putSeq := func(seq int64, name string) {
 		m := proto.AIMemberRow{
@@ -712,7 +739,7 @@ func assertMismatchAndMalformedSynced(t *testing.T, r *deliverRig) {
 		t.Fatalf("got since=%d, want 12", req5.Since)
 	}
 	fifth.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup2, Seq: 50}))}
-	r.waitIdle()
+	r.waitSyncStopped(testGroup1)
 	sixth := newFakeDeliverHome()
 	sixth.syncMode = true
 	r.h.Attach(r.homeKey.ID(), sixth)
@@ -722,7 +749,8 @@ func assertMismatchAndMalformedSynced(t *testing.T, r *deliverRig) {
 	}
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(29), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 39, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "wait-sync"))
 	sixth.answers <- syncAnswer{raw: json.RawMessage(`{"t":"synced","re":1,"g":"` + testGroup1 + `","seq":99}`)}
-	r.waitIdle()
+	r.waitSyncStopped(testGroup1)
+	r.waitAIUnbusy(testGroup1, testAI1)
 	d := deliv(r.h)
 	d.mu.Lock()
 	cur, live := d.groups[testGroup1].cursor, d.groups[testGroup1].live
@@ -730,6 +758,53 @@ func assertMismatchAndMalformedSynced(t *testing.T, r *deliverRig) {
 	if cur != 12 || live || len(r.runtime.recorded()) != 1 {
 		t.Fatalf("invalid synced frame accepted: cursor=%d live=%v turns=%d", cur, live, len(r.runtime.recorded()))
 	}
+}
+
+func TestGroupResyncAfterPostSyncedResetAndFailedSync(t *testing.T) {
+	// 1) A reset handled after synced, followed by group + member rows and a mention, starts a new sync and delivers the turn.
+	r := newDeliverRig(t, false)
+	r.setSetting("homes", []proto.Home{{Group: testGroup1, Home: r.homeKey.ID(), Name: "Proj"}})
+	r.home.syncMode = true
+	r.h.Attach(r.homeKey.ID(), r.home)
+	req1 := <-r.home.started
+	r.home.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: req1.Group, Seq: 7}))}
+	r.waitGroupLive(testGroup1)
+
+	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Reset{Type: "reset", Group: testGroup1})))
+	grpRaw := json.RawMessage(encodeJSON(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "Proj", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Checks: []string{}}))
+	aiRaw := json.RawMessage(encodeJSON(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 2}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "C1"}, CLI: "claude", Host: r.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
+	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw, aiRaw}})))
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(27), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 401, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "after-reset"))
+	req2 := <-r.home.started
+	if req2.Since != 0 || len(r.home.syncSinces()) != 2 {
+		t.Fatalf("expected single resync from 0 after post-synced reset, got req=%+v sinces=%v", req2, r.home.syncSinces())
+	}
+	r.home.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 2, OK: true}, Group: testGroup1, Seq: 2}))}
+	r.waitUntil("post-reset mention delivered", func() bool { return len(r.runtime.recorded()) == 1 && r.home.ackCountFor(401) == 1 })
+	r.waitAIUnbusy(testGroup1, testAI1)
+
+	verifyResyncAfterFailedSync(t, r)
+}
+
+func verifyResyncAfterFailedSync(t *testing.T, r *deliverRig) {
+	t.Helper()
+	// 2) A sync answered with an error, followed by a mention item, sends a fresh sync from the kept cursor and delivers once answered.
+	second := newFakeDeliverHome()
+	second.syncMode = true
+	r.h.Attach(r.homeKey.ID(), second)
+	t.Cleanup(func() { second.closeConn() })
+	s1 := <-second.started
+	second.answers <- syncAnswer{err: errors.New("temporary sync failure")}
+	r.waitSyncStopped(testGroup1)
+
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(28), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 402, AI: testAI1, Why: "mention", Msg: testMsg2}, r.makeTextMsg(testMsg2, nil, "after-failed-sync"))
+	s2 := <-second.started
+	if s1.Since != 2 || s2.Since != 2 {
+		t.Fatalf("expected both syncs to ask since kept cursor 2, got %d then %d", s1.Since, s2.Since)
+	}
+	second.answers <- syncAnswer{raw: json.RawMessage(encodeJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 2, OK: true}, Group: testGroup1, Seq: 2}))}
+	r.waitUntil("post-error mention delivered", func() bool { return len(r.runtime.recorded()) == 2 && second.ackCountFor(402) == 1 })
+	r.waitAIUnbusy(testGroup1, testAI1)
 }
 
 func TestDuplicateWhileTakingSessionAndMergeItems(t *testing.T) {
@@ -746,9 +821,9 @@ func TestDuplicateWhileTakingSessionAndMergeItems(t *testing.T) {
 		}
 	}
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, it, msg)
-	r.waitUntil("2 acks for item 900", func() bool { return r.home.ackCountFor(900) == 2 })
-	r.waitIdle()
-	if len(r.runtime.recorded()) != 1 || len(r.audits()) != 1 || r.audits()[0].what != AuditDelivered || len(deliv(r.h).heldKeys()) != 0 {
+	r.waitUntil("2 acks and 1 turn for item 900", func() bool { return r.home.ackCountFor(900) == 2 && len(r.runtime.recorded()) == 1 })
+	r.waitAIUnbusy(testGroup1, testAI1)
+	if len(r.audits()) != 1 || r.audits()[0].what != AuditDelivered || len(deliv(r.h).heldKeys()) != 0 {
 		t.Fatalf("duplicate session item result: turns=%d audits=%+v held=%d", len(r.runtime.recorded()), r.audits(), len(deliv(r.h).heldKeys()))
 	}
 	verifyDuplicateMergeWhileApplyingAndPreAudit(t)
@@ -784,7 +859,7 @@ func verifyDuplicateMergeWhileApplyingAndPreAudit(t *testing.T) {
 	r.waitUntil("second ack while Apply is still blocked", func() bool { return r.home.ackCountFor(905) == 2 })
 	repoLock.Unlock()
 	r.waitUntil("single TaskMerged command", func() bool { return len(r.home.cmdPayloads()) == 1 })
-	r.waitIdle()
+	r.waitNoActiveMerges()
 
 	// 2) Duplicate merge item 906 arriving in the pre-audit window so recordMergeTaken returns written == false -> 1 Apply, 2 acks.
 	verifyMergePreAuditWrittenFalse(t, r, pDir)
@@ -816,7 +891,7 @@ func verifyMergePreAuditWrittenFalse(t *testing.T, r *deliverRig, pDir string) {
 	}
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, mIt2, nil)
 	r.waitUntil("inner merge 906 acked", func() bool { return r.home.ackCountFor(906) == 1 && len(r.home.cmdPayloads()) == 2 })
-	r.waitIdle()
+	r.waitNoActiveMerges()
 	delete(Holds, "dup")
 	// Also exercise recordMergeTaken returning written == false when an already-audited merge entry reaches takeOneMerge: acked again, 0 extra Apply.
 	d := deliv(r.h)
@@ -882,6 +957,8 @@ func verifyHoldLockNotUnderDeliveryMutex(t *testing.T, r *deliverRig) {
 	<-done
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(38), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 43, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "check"))
 	r.waitUntil("4 turns total", func() bool { return len(r.runtime.recorded()) == 4 })
+	r.waitAIUnbusy(testGroup1, testAI1)
+	r.waitAIUnbusy(testGroup1, testAI2)
 }
 
 func TestArrivalRefusalsNotHostedAndOpenWaitsWithoutCause(t *testing.T) {
@@ -898,9 +975,7 @@ func TestArrivalRefusalsNotHostedAndOpenWaitsWithoutCause(t *testing.T) {
 	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Inbox{Type: "inbox", Group: testGroup1, Items: []proto.InboxItem{{Env: badPayload}}})))
 	checkRowHeaderEdges(t, r)
 
-	// Wrong target host is refused as not_for_me; remote AI, human, and gone member are refused as not_hosted_here.
-	wrongTo := proto.Item{Type: "item", Nonce: testCanonicalID(40), Timestamp: testStartMS, Group: testGroup1, To: r.extraKey.ID(), Item: 100, AI: testAI1, Why: "mention", Msg: testMsg1}
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, wrongTo, nil)
+	// Remote AI, human, and gone member are refused as not_hosted_here.
 	r.putAIMember(testAI2, "RemoteAI", r.extraKey.ID(), false, 10)
 	human := proto.HumanMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testHuman, Seq: 11}, Group: testGroup1, Kind: "human", User: r.ownerKey.ID(), Name: "Owner"}, Role: "owner", Online: true}
 	r.h.Rows.Put(testGroup1, "member", testHuman, json.RawMessage(encodeJSON(human)))
@@ -909,8 +984,14 @@ func TestArrivalRefusalsNotHostedAndOpenWaitsWithoutCause(t *testing.T) {
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(41), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 101, AI: testAI2, Why: "mention", Msg: testMsg1}, nil)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(42), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 102, AI: testHuman, Why: "mention", Msg: testMsg1}, nil)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(43), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 103, AI: goneID, Why: "merge", Task: testTask1, Commit: "c1"}, nil)
-	r.waitUntil("4 refused acks", func() bool { return len(r.home.ackList()) == 4 })
-	r.waitIdle()
+	r.waitUntil("3 refused acks", func() bool { return len(r.home.ackList()) == 3 })
+	r.waitAIUnbusy(testGroup1, testAI2)
+	r.waitAIUnbusy(testGroup1, testHuman)
+	for _, a := range r.audits() {
+		if a.what != AuditRefused || a.detail != "not_hosted_here" {
+			t.Fatalf("unexpected refusal audit: %+v", a)
+		}
+	}
 	verifyOpenWaitsAndCauselessDecisions(t)
 }
 
@@ -996,7 +1077,12 @@ func verifyOpenWaitsAndCauselessDecisions(t *testing.T) {
 	if !slices.Equal(r.audits(), wantAudits) {
 		t.Fatalf("audits=%+v, want %+v", r.audits(), wantAudits)
 	}
-	r.waitIdle()
+	r.h.Sessions.Move(gKey, Working, Waiting)
+	Deliver(r.h, testGroup1, testAI1)
+	r.waitUntil("queued non-matching replies drained", func() bool {
+		return r.home.ackCountFor(300) == 1 && r.home.ackCountFor(309) == 1 && len(deliv(r.h).heldKeys()) == 0
+	})
+	r.waitAIUnbusy(testGroup1, testAI1)
 	verifyColdStartDrainOpenWait(t)
 }
 
@@ -1065,32 +1151,58 @@ func TestRoutingHoldsJumpAndBatchSelection(t *testing.T) {
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(105), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 505, AI: testAI2, Why: "mention", Msg: testMsg2}, r.makeTextMsg(testMsg2, &otherTid, "other thread"))
 	r.waitUntil("other thread turn", func() bool { return len(r.runtime.recorded()) == 5 })
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(106), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 506, AI: testAI2, Why: "decided", Task: testTask1, Msg: testCard1}, nil)
-	r.waitUntil("ai2 decided turn", func() bool { return len(r.runtime.recorded()) == 6 })
+	r.waitUntil("ai2 open review decided turn", func() bool { return len(r.runtime.recorded()) == 6 })
+	r.waitAIUnbusy(testGroup1, testAI2)
 
-	// When TaskRow is absent, decided routes to TaskSession because TaskSession already exists for AI1.
+	// Dormant ReviewSession falls back to GroupSession on decided, while thread mention still wakes ReviewSession.
+	revKey := SessionKey{Group: testGroup1, Member: testAI2, Task: testTask1}
+	r.h.Sessions.Move(revKey, Waiting, Dormant)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(108), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 507, AI: testAI2, Why: "decided", Task: testTask1, Msg: testCard1}, nil)
+	r.waitUntil("ai2 dormant review decided fallback", func() bool { return len(r.runtime.recorded()) == 7 })
+	r.waitAIUnbusy(testGroup1, testAI2)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(109), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 508, AI: testAI2, Why: "mention", Task: testTask1, Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "wake review"))
+	r.waitUntil("ai2 dormant review mention", func() bool { return len(r.runtime.recorded()) == 8 })
+	r.waitAIUnbusy(testGroup1, testAI2)
+
+	// Dormant TaskSession still receives decided for its task; task without a session falls back to GroupSession.
+	r.h.Sessions.Move(SessionKey{Group: testGroup1, Member: testAI1, Task: testTask1}, Waiting, Dormant)
 	r.h.Rows.Reset(testGroup1)
 	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 16}, Name: "Proj", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
 	r.putAIMember(testAI1, "Claude", r.hostKey.ID(), false, 17)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(107), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 507, AI: testAI1, Why: "decided", Task: testTask1, Msg: testCard1}, nil)
-	r.waitUntil("ai1 fallback decided turn", func() bool { return len(r.runtime.recorded()) == 7 })
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(107), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 509, AI: testAI1, Why: "decided", Task: testTask1, Msg: testCard1}, nil)
+	r.waitUntil("ai1 dormant task decided turn", func() bool { return len(r.runtime.recorded()) == 9 })
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(110), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 510, AI: testAI1, Why: "decided", Task: testTask2, Msg: testCard1}, nil)
+	r.waitUntil("ai1 uncreated task decided fallback", func() bool { return len(r.runtime.recorded()) == 10 })
+	r.waitAIUnbusy(testGroup1, testAI1)
 
-	wantKeys := []SessionKey{
-		{Group: testGroup1, Member: testSec},
-		{Group: testGroup1, Member: testAI1, Task: testTask1},
-		{Group: testGroup1, Member: testAI2, Task: testTask1},
-		{Group: testGroup1, Member: testAI2, Task: testTask1},
-		{Group: testGroup1, Member: testAI2},
-		{Group: testGroup1, Member: testAI2},
-		{Group: testGroup1, Member: testAI1, Task: testTask1},
-	}
-	turns := r.runtime.recorded()
-	for i, w := range wantKeys {
-		if turns[i].key != w {
-			t.Fatalf("turn %d key=%+v, want %+v", i, turns[i].key, w)
-		}
-	}
+	assertRoutedTurns(t, r.runtime.recorded())
 	verifyHoldsBatchingAndJump(t)
 	verifyEnqueueHeldOrdering(t)
+}
+
+func assertRoutedTurns(t *testing.T, turns []recordedTurn) {
+	t.Helper()
+	type wantTurn struct {
+		key  SessionKey
+		text string
+	}
+	want := []wantTurn{
+		{SessionKey{Group: testGroup1, Member: testSec}, "group:1"},
+		{SessionKey{Group: testGroup1, Member: testAI1, Task: testTask1}, "task:1"},
+		{SessionKey{Group: testGroup1, Member: testAI2, Task: testTask1}, "review:1"},
+		{SessionKey{Group: testGroup1, Member: testAI2, Task: testTask1}, "review:1"},
+		{SessionKey{Group: testGroup1, Member: testAI2}, "group:1"},
+		{SessionKey{Group: testGroup1, Member: testAI2, Task: testTask1}, "review:1"},
+		{SessionKey{Group: testGroup1, Member: testAI2}, "group:1"},
+		{SessionKey{Group: testGroup1, Member: testAI2, Task: testTask1}, "review:1"},
+		{SessionKey{Group: testGroup1, Member: testAI1, Task: testTask1}, "task:1"},
+		{SessionKey{Group: testGroup1, Member: testAI1}, "group:1"},
+	}
+	for i, w := range want {
+		if turns[i].key != w.key || turns[i].text != w.text {
+			t.Fatalf("turn %d got (%+v, %q), want (%+v, %q)", i, turns[i].key, turns[i].text, w.key, w.text)
+		}
+	}
 }
 
 func verifyHoldsBatchingAndJump(t *testing.T) {
@@ -1112,12 +1224,18 @@ func verifyHoldsBatchingAndJump(t *testing.T) {
 
 	// Holds["cap"] holds AI1 and AI2; also queue a GroupSession mention for AI1 to verify selectEligibleBatch batches 601+602 into TaskSession (task:2) separately from GroupSession (group:1).
 	var heldFlag atomic.Bool
+	var holdChecks atomic.Int32
 	heldFlag.Store(true)
-	Holds["cap"] = func(*Host, SessionKey) (string, bool) { return "cap", heldFlag.Load() }
+	Holds["cap"] = func(*Host, SessionKey) (string, bool) {
+		holdChecks.Add(1)
+		return "cap", heldFlag.Load()
+	}
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 12}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "local_check", Assignee: testAI1})
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(123), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 604, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "grp"))
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(124), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 605, AI: testAI2, Why: "mention", Msg: testMsg2}, r.makeTextMsg(testMsg2, nil, "ai2"))
-	r.waitIdle()
+	r.waitUntil("held items checked", func() bool { return holdChecks.Load() >= 2 })
+	r.waitAIUnbusy(testGroup1, testAI1)
+	r.waitAIUnbusy(testGroup1, testAI2)
 	gKey := SessionKey{Group: testGroup1, Member: testAI1}
 	r.h.Sessions.Create(Session{SessionKey: gKey, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: r.homeKey.ID(), Name: "C"})
 	r.h.Sessions.Move(gKey, Dormant, Takeover)
@@ -1144,8 +1262,8 @@ func verifyWorkingJumpAndTakeoverRelease(t *testing.T, r *deliverRig, gKey Sessi
 	}
 	jumpIt := proto.Item{Type: "item", Nonce: testCanonicalID(125), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 606, AI: testAI1, Why: "mention", Msg: testMsg2, Jump: true}
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, jumpIt, r.makeTextMsg(testMsg2, nil, "jump"))
-	r.waitUntil("jump turn delivered", func() bool { return len(r.runtime.recorded()) == 3 })
-	r.waitIdle()
+	r.waitUntil("jump turn delivered", func() bool { return len(r.runtime.recorded()) == 3 && r.home.ackCountFor(606) == 1 })
+	r.waitAIUnbusy(testGroup1, testAI1)
 	if !r.runtime.recorded()[2].turn.Jump || r.runtime.recorded()[2].text != "group:1" {
 		t.Fatalf("unexpected jump turn: %+v", r.runtime.recorded()[2])
 	}
@@ -1208,15 +1326,20 @@ func TestStillCurrentTaskRoleStepCommitMismatches(t *testing.T) {
 	r := newDeliverRig(t, false)
 	r.seedGroupAndMembers()
 	var held atomic.Bool
+	var holdChecks atomic.Int32
 	held.Store(true)
-	Holds["off"] = func(*Host, SessionKey) (string, bool) { return "offline", held.Load() }
+	Holds["off"] = func(*Host, SessionKey) (string, bool) {
+		holdChecks.Add(1)
+		return "offline", held.Load()
+	}
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "review", Commit: "c1", Assignee: testAI1, Reviewer: testAI2})
 
 	// Mixed batch on TaskSession: stale assign + valid thread mention on existing TaskSession, plus GroupSession decided queued behind an all-stale batch.
 	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: testAI1, Task: testTask1}, Kind: TaskSession, Folder: "wt/1-t1", Agent: "claude", Home: r.homeKey.ID(), Name: "C"})
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(140), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 701, AI: testAI1, Why: "assign", Task: testTask1}, nil)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(141), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 702, AI: testAI1, Why: "mention", Task: testTask1, Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "still valid"))
-	r.waitIdle()
+	r.waitUntil("held task items checked", func() bool { return holdChecks.Load() >= 2 })
+	r.waitAIUnbusy(testGroup1, testAI1)
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 11}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "review", Commit: "c1", Assignee: testAI2, Reviewer: testSec})
 	held.Store(false)
 	Deliver(r.h, testGroup1, testAI1)
@@ -1282,7 +1405,7 @@ func initTestOriginAndGroupRepo(t *testing.T, r *deliverRig, forge string) (orig
 	r.putAIMember(testAI2, "Codex", r.hostKey.ID(), false, 3)
 	r.putAIMember(testSec, "Sec", r.hostKey.ID(), true, 4)
 	r.h.Attach(r.homeKey.ID(), r.home)
-	r.waitIdle()
+	r.waitGroupLive(testGroup1)
 	return originDir, projectDir, baseCommit
 }
 
@@ -1307,10 +1430,12 @@ func TestWorkspacesBranchRetryMergeStatsAndRestartInspect(t *testing.T) {
 	r.home.mu.Unlock()
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 1, Title: "Add feature", Slug: "add-feature", Origin: "brief", State: "active", Step: "branch", Assignee: testAI1, Reviewer: testAI2})
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(170), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 801, AI: testAI1, Why: "assign", Task: testTask1}, nil)
-	r.waitUntil("first failed TaskBranch attempt", func() bool { return len(r.home.cmdPayloads()) == 1 })
-	r.waitIdle()
-	if len(r.runtime.recorded()) != 0 || !strings.Contains(logs.String(), "host: command to") {
-		t.Fatalf("failed TaskBranch should hold turn and log error: turns=%d log=%q", len(r.runtime.recorded()), logs.String())
+	r.waitUntil("first failed TaskBranch logged", func() bool {
+		return len(r.home.cmdPayloads()) == 1 && strings.Contains(logs.String(), "host: command to")
+	})
+	r.waitAIUnbusy(testGroup1, testAI1)
+	if len(r.runtime.recorded()) != 0 {
+		t.Fatalf("failed TaskBranch should hold turn: turns=%d", len(r.runtime.recorded()))
 	}
 	r.home.mu.Lock()
 	r.home.cmdErr = nil
@@ -1363,12 +1488,16 @@ func verifyReviewRoundsAndMergeStats(t *testing.T, r *deliverRig, pDir, wt, c1 s
 
 	// Merge held while Holds reports "offline"; lifted when Holds reports "cap"; TaskMerged uses TaskRow.Stats directly.
 	var holdReason atomic.Value
+	var offChecks atomic.Int32
 	holdReason.Store("offline")
-	Holds["off"] = func(*Host, SessionKey) (string, bool) { return holdReason.Load().(string), true }
+	Holds["off"] = func(*Host, SessionKey) (string, bool) {
+		offChecks.Add(1)
+		return holdReason.Load().(string), true
+	}
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 9}, Group: testGroup1, Num: 1, Title: "Add feature", Slug: "add-feature", Origin: "brief", State: "active", Step: "merge", Commit: c2, Assignee: testAI1, Reviewer: testAI2, Stats: proto.TaskStats{Added: 17, Removed: 5}})
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(175), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 806, AI: testAI1, Why: "merge", Task: testTask1, Commit: c2}, nil)
+	r.waitUntil("offline merge hold checked", func() bool { return offChecks.Load() >= 1 })
 	Deliver(r.h, "", "")
-	r.waitIdle()
 	if len(r.home.cmdPayloads()) != 2 {
 		t.Fatal("merge ran while offline")
 	}
@@ -1404,7 +1533,7 @@ func verifyConflictRestartInspectAndRemoteForge(t *testing.T) {
 	r.db.Write(write)
 	r2 := newDeliverRigOnStore(t, r.db)
 	r2.h.Attach(r2.homeKey.ID(), r2.home)
-	r2.waitIdle()
+	r2.waitGroupLive(testGroup1)
 	grpPaused := json.RawMessage(encodeJSON(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 10}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r2.homeKey.ID(), Secretary: testSec, Paused: &proto.GroupPause{By: testHuman, At: testStartMS}, Checks: []string{}}))
 	grpRaw := json.RawMessage(encodeJSON(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 11}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r2.homeKey.ID(), Secretary: testSec, Checks: []string{}}))
 	aiRaw := json.RawMessage(encodeJSON(proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 12}, Group: testGroup1, Kind: "ai", User: r2.ownerKey.ID(), Name: "C"}, CLI: "claude", Host: r2.hostKey.ID(), HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}))
@@ -1413,7 +1542,6 @@ func verifyConflictRestartInspectAndRemoteForge(t *testing.T) {
 	remoteAIRaw := json.RawMessage(encodeJSON(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: string(testCanonicalID(97)), Seq: 15}, Group: testGroup1, Num: 4, Title: "R", Slug: "remote-ai", Origin: "brief", State: "active", Step: "merge", Commit: baseCommit, Assignee: testAI2, Depends: []string{}}))
 	r2.h.Push(r2.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpPaused, aiRaw, t2Raw, noAuditRaw, remoteAIRaw}})))
 	afterGroupState(r2.h, deliv(r2.h), testGroup1)
-	r2.waitIdle()
 	if len(r2.home.cmdPayloads()) != 0 {
 		t.Fatal("restart inspect ran while group paused")
 	}
@@ -1428,7 +1556,7 @@ func verifyConflictRestartInspectAndRemoteForge(t *testing.T) {
 	d2.unclaimMerge(mKey2)
 	r2.h.Push(r2.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw}})))
 	r2.waitUntil("restart inspect reported", func() bool { return len(r2.home.cmdPayloads()) == 1 })
-	r2.waitIdle()
+	r2.waitNoActiveMerges()
 	verifyRemoteForgeAndGitHubRepo(t)
 }
 
@@ -1474,10 +1602,55 @@ func verifyRemoteForgeAndGitHubRepo(t *testing.T) {
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 21}, Group: testGroup1, Num: 2, Title: "FailGH", Slug: "failgh", Origin: "brief", State: "active", Step: "merge", Commit: "fail-gh", PR: 99, Assignee: testAI1})
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(194), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 854, AI: testAI1, Why: "merge", Task: testTask2, Commit: "fail-gh", PR: 99}, nil)
 	r.waitUntil("item 854 acked", func() bool { return r.home.ackCountFor(854) == 1 })
-	r.waitIdle()
+	r.waitNoActiveMerges()
 	if len(r.home.cmdPayloads()) != 1 {
 		t.Fatal("failed gh inspection reported outcome")
 	}
+}
+
+func TestGroupSessionGitFailureKeepsItemsHeld(t *testing.T) {
+	r := newDeliverRig(t, true)
+	originDir, pDir, _ := initTestOriginAndGroupRepo(t, r, "github")
+	var attempts atomic.Int32
+	Holds["obs"] = func(*Host, SessionKey) (string, bool) {
+		attempts.Add(1)
+		return "", false
+	}
+
+	// 1) Initial clone failure for a group session keeps the item held with 0 acks and 0 audit rows, then delivers once Repo is reachable.
+	missingOrigin := filepath.Join(t.TempDir(), "unreachable.git")
+	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 10}, Name: "Website", Kind: "project", Repo: missingOrigin, Base: "main", Forge: "github", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(195), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 860, AI: testSec, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "wake-clone"))
+	r.waitUntil("clone failure attempt started", func() bool { return attempts.Load() >= 1 })
+	r.waitAIUnbusy(testGroup1, testSec)
+	if r.home.ackCountFor(860) != 0 || len(r.audits()) != 0 || len(r.home.cmdPayloads()) != 0 || len(r.runtime.recorded()) != 0 {
+		t.Fatalf("group clone failure consumed item: acks=%d audits=%+v cmds=%v", r.home.ackCountFor(860), r.audits(), r.home.cmdPayloads())
+	}
+	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 11}, Name: "Website", Kind: "project", Repo: originDir, Base: "main", Forge: "github", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
+	Deliver(r.h, testGroup1, testSec)
+	r.waitUntil("held clone item delivered", func() bool { return r.home.ackCountFor(860) == 1 && len(r.runtime.recorded()) == 1 })
+	r.waitAIUnbusy(testGroup1, testSec)
+
+	verifyGroupRefreshFailureHoldsAndRecovers(t, r, originDir, pDir, &attempts)
+}
+
+func verifyGroupRefreshFailureHoldsAndRecovers(t *testing.T, r *deliverRig, originDir, pDir string, attempts *atomic.Int32) {
+	t.Helper()
+	// 2) RefreshGroupWorkspace failure when waking a Dormant group session keeps the item held and delivers on the next wake once origin recovers.
+	secKey := SessionKey{Group: testGroup1, Member: testSec}
+	r.h.Sessions.Move(secKey, Waiting, Dormant)
+	mustGit(t, t.Context(), filepath.Join(pDir, "repo"), "remote", "set-url", "origin", filepath.Join(t.TempDir(), "dropped.git"))
+	attempts.Store(0)
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(196), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 861, AI: testSec, Why: "notice", Code: "ping"}, nil)
+	r.waitUntil("refresh failure attempt started", func() bool { return attempts.Load() >= 1 })
+	r.waitAIUnbusy(testGroup1, testSec)
+	if r.home.ackCountFor(861) != 0 || len(r.audits()) != 1 || len(r.home.cmdPayloads()) != 0 || len(r.runtime.recorded()) != 1 {
+		t.Fatalf("group refresh failure consumed item: acks=%d audits=%+v cmds=%v", r.home.ackCountFor(861), r.audits(), r.home.cmdPayloads())
+	}
+	mustGit(t, t.Context(), filepath.Join(pDir, "repo"), "remote", "set-url", "origin", originDir)
+	Deliver(r.h, testGroup1, testSec)
+	r.waitUntil("held refresh item delivered", func() bool { return r.home.ackCountFor(861) == 1 && len(r.runtime.recorded()) == 2 })
+	r.waitAIUnbusy(testGroup1, testSec)
 }
 
 func TestWorkspaceFailureReportingConfigUnmarshalAndStoreErrors(t *testing.T) {
@@ -1495,11 +1668,10 @@ func TestWorkspaceFailureReportingConfigUnmarshalAndStoreErrors(t *testing.T) {
 	r.runtime.err = errors.New("cli_failed")
 	r.runtime.mu.Unlock()
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(205), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 900, AI: testSec, Why: "notice", Code: "c"}, nil)
-	r.waitUntil("item 900 acked", func() bool { return r.home.ackCountFor(900) == 1 })
-	r.waitIdle()
-	if !strings.Contains(logs.String(), "cli_failed") {
-		t.Fatalf("Runner.Turn error not logged: %q", logs.String())
-	}
+	r.waitUntil("item 900 turn error logged", func() bool {
+		return r.home.ackCountFor(900) == 1 && strings.Contains(logs.String(), "cli_failed")
+	})
+	r.waitAIUnbusy(testGroup1, testSec)
 	r.runtime.mu.Lock()
 	r.runtime.err = nil
 	r.runtime.mu.Unlock()
@@ -1508,8 +1680,8 @@ func TestWorkspaceFailureReportingConfigUnmarshalAndStoreErrors(t *testing.T) {
 	r.composeE = errors.New("fetch failed")
 	r.composeMu.Unlock()
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(210), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 901, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "retry"))
-	Deliver(r.h, testGroup1, testAI1)
-	r.waitIdle()
+	r.waitUntil("compose error logged", func() bool { return strings.Contains(logs.String(), "host: compose") })
+	r.waitAIUnbusy(testGroup1, testAI1)
 	if r.home.ackCountFor(901) != 0 {
 		t.Fatal("compose error still acked")
 	}
@@ -1525,7 +1697,7 @@ func TestWorkspaceFailureReportingConfigUnmarshalAndStoreErrors(t *testing.T) {
 	dropAuditBlockTrigger(t, r.db)
 	Deliver(r.h, testGroup1, testAI1)
 	r.waitUntil("re-queued 901 acked", func() bool { return r.home.ackCountFor(901) == 1 })
-	checkWorkspaceFailuresReportedOnce(t, r, pDir)
+	checkWorkspaceFailuresReportedOnce(t, r, pDir, logs)
 	checkConfigUnmarshalAndDroppedTables(t, r)
 }
 
@@ -1552,7 +1724,13 @@ func checkMergeAndHandAuditFailure(t *testing.T, r *deliverRig) {
 	}
 	stepMerges(r.h, d, testGroup1)
 	d.unclaimMerge(mKey)
-	// With audit trigger active, recordMergeTaken fails and re-queues item 903.
+	// With audit trigger active, refuseItem skips ack and recordMergeTaken fails and re-queues item 903.
+	humanID := testCanonicalID(89)
+	r.h.Rows.Put(testGroup1, "member", string(humanID), json.RawMessage(encodeJSON(proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: string(humanID), Seq: 42}, Gone: true})))
+	refuseItem(r.h, verifiedItem{home: r.homeKey.ID(), group: testGroup1, item: proto.Item{Item: 904}}, "", "not_hosted_here")
+	if r.home.ackCountFor(904) != 0 {
+		t.Fatal("refusal ack sent when audit write failed")
+	}
 	d.enqueueMerge(v)
 	stepMerges(r.h, d, testGroup1)
 	d.mu.Lock()
@@ -1560,7 +1738,7 @@ func checkMergeAndHandAuditFailure(t *testing.T, r *deliverRig) {
 	d.mu.Unlock()
 }
 
-func checkWorkspaceFailuresReportedOnce(t *testing.T, r *deliverRig, pDir string) {
+func checkWorkspaceFailuresReportedOnce(t *testing.T, r *deliverRig, pDir string, logs *safeLogBuffer) {
 	t.Helper()
 	// Put an open Waiting session on AI1 so idleMemberState returns "waiting" on AI1's TaskSession failure, while AI2 has none ("dormant").
 	secretRepo := "https://ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD@github.com/team/bad.git"
@@ -1573,24 +1751,27 @@ func checkWorkspaceFailuresReportedOnce(t *testing.T, r *deliverRig, pDir string
 	if !strings.Contains(cmds[0], `"code":"turn_interrupted"`) || !strings.Contains(cmds[0], `"state":"waiting"`) || !strings.Contains(cmds[1], `"op":"fail"`) {
 		t.Fatalf("unexpected workspace failure commands: %v", cmds)
 	}
-	// Pushing rows afterwards must NOT retry the failed item.
-	r.h.Push(r.homeKey.ID(), json.RawMessage(encodeJSON(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{}})))
-	r.waitIdle()
+	// Delivering again must not retry the failed item.
+	r.waitAIUnbusy(testGroup1, testAI1)
+	Deliver(r.h, testGroup1, testAI1)
 	if len(r.home.cmdPayloads()) != 2 {
 		t.Fatalf("failed workspace item retried on later push: cmds=%d", len(r.home.cmdPayloads()))
 	}
-	checkRemainingWorkspaceAndMergeEdges(t, r, pDir)
+	checkRemainingWorkspaceAndMergeEdges(t, r, pDir, logs)
 }
 
-func checkRemainingWorkspaceAndMergeEdges(t *testing.T, r *deliverRig, pDir string) {
+func checkRemainingWorkspaceAndMergeEdges(t *testing.T, r *deliverRig, pDir string, logs *safeLogBuffer) {
 	t.Helper()
 	// Merge clone failure logs and returns; RefreshGroupWorkspace, CreateTaskWorkspace, PrepareReviewWorkspace, invalid task Num==0, disconnected homePath, and failTargetSession audit failure.
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 52}, Group: testGroup1, Num: 2, Title: "M", Slug: "m", Origin: "brief", State: "active", Step: "merge", Commit: "c1", Assignee: testAI2})
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(216), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 911, AI: testAI2, Why: "merge", Task: testTask2, Commit: "c1"}, nil)
-	r.waitUntil("merge 911 acked", func() bool { return r.home.ackCountFor(911) == 1 })
+	r.waitUntil("merge 911 clone failure logged", func() bool {
+		return r.home.ackCountFor(911) == 1 && strings.Contains(logs.String(), "host: ensure merge clone")
+	})
+	r.waitNoActiveMerges()
 
 	os.RemoveAll(filepath.Join(pDir, "repo"))
-	// Clone a valid repo without remote "origin": Waiting session skips RefreshGroupWorkspace and runs a turn, while Dormant session runs RefreshGroupWorkspace and reports failure.
+	// Clone a valid repo without remote "origin": Waiting session skips RefreshGroupWorkspace and runs a turn, while Dormant session runs RefreshGroupWorkspace and holds the item.
 	mustGit(t, t.Context(), "", "init", "--initial-branch=main", filepath.Join(pDir, "repo"))
 	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 53}, Name: "W", Kind: "project", Base: "main", Forge: "github", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
 	secKey := SessionKey{Group: testGroup1, Member: testSec}
@@ -1599,20 +1780,36 @@ func checkRemainingWorkspaceAndMergeEdges(t *testing.T, r *deliverRig, pDir stri
 	beforeTurns := len(r.runtime.recorded())
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(224), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 916, AI: testSec, Why: "notice", Code: "c"}, nil)
 	r.waitUntil("sec waiting turn without refresh", func() bool { return len(r.runtime.recorded()) == beforeTurns+1 })
+	r.waitAIUnbusy(testGroup1, testSec)
+	var secChecks atomic.Int32
+	Holds["secobs"] = func(*Host, SessionKey) (string, bool) {
+		secChecks.Add(1)
+		return "", false
+	}
 	r.h.Sessions.Move(secKey, Waiting, Dormant)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(217), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 912, AI: testSec, Why: "notice", Code: "c"}, nil)
-	r.waitUntil("sec refresh failure reported", func() bool { return r.home.ackCountFor(912) == 1 })
+	r.waitUntil("sec refresh attempt started", func() bool { return secChecks.Load() >= 1 })
+	r.waitAIUnbusy(testGroup1, testSec)
+	delete(Holds, "secobs")
+	if r.home.ackCountFor(912) != 0 {
+		t.Fatal("dormant group refresh failure acked item 912")
+	}
 
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 54}, Group: testGroup1, Num: 2, Title: "Bad", Slug: "bad", Origin: "brief", State: "active", Step: "review", Commit: "ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD", Assignee: testAI1, Reviewer: testAI2})
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(218), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 913, AI: testAI1, Why: "assign", Task: testTask2}, nil)
-	r.waitUntil("913 acked", func() bool { return r.home.ackCountFor(913) == 1 })
+	r.waitUntil("913 failure commands", func() bool { return r.home.ackCountFor(913) == 1 && len(r.home.cmdPayloads()) == 4 })
+	r.waitAIUnbusy(testGroup1, testAI1)
 	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 55}, Name: "W", Kind: "project", Base: "main", Forge: "none", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(219), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 914, AI: testAI2, Why: "review", Task: testTask2, Commit: "ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD"}, nil)
-	r.waitUntil("914 acked", func() bool { return r.home.ackCountFor(914) == 1 })
-	r.waitIdle()
-	allCmds := strings.Join(r.home.cmdPayloads(), "\n")
-	if strings.Contains(allCmds, "ghp_") || !strings.Contains(allCmds, "[redacted]") {
-		t.Fatalf("expected secret in git error to be redacted: %s", allCmds)
+	r.waitUntil("914 review failure and 912 group recovery", func() bool {
+		return r.home.ackCountFor(912) == 1 && r.home.ackCountFor(914) == 1 && len(r.home.cmdPayloads()) == 5
+	})
+	r.waitAIUnbusy(testGroup1, testSec)
+	r.waitAIUnbusy(testGroup1, testAI2)
+	cmds := r.home.cmdPayloads()
+	allCmds := strings.Join(cmds, "\n")
+	if strings.Contains(allCmds, "ghp_") || !strings.Contains(allCmds, "[redacted]") || !strings.Contains(cmds[4], `"state":"dormant"`) || strings.Contains(cmds[4], `"op":"fail"`) {
+		t.Fatalf("unexpected redaction or review failure report: %s", allCmds)
 	}
 	os.RemoveAll(filepath.Join(pDir, "repo"))
 
@@ -1622,15 +1819,16 @@ func checkRemainingWorkspaceAndMergeEdges(t *testing.T, r *deliverRig, pDir stri
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: string(tZero), Seq: 56}, Group: testGroup1, Num: 0, Title: "Z", Slug: "z", Origin: "brief", State: "active", Step: "branch", Assignee: testAI2})
 	addAuditBlockTrigger(t, r.db)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(221), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 915, AI: testAI2, Why: "assign", Task: tZero}, nil)
-	Deliver(r.h, testGroup1, testAI2)
-	r.waitIdle()
+	r.waitUntil("915 blocked audit logged", func() bool { return strings.Contains(logs.String(), "host: commit failed-workspace items") })
+	r.waitAIUnbusy(testGroup1, testAI2)
 	dropAuditBlockTrigger(t, r.db)
 	Deliver(r.h, testGroup1, testAI2)
-	r.waitIdle()
+	r.waitAIUnbusy(testGroup1, testAI2)
 }
 
 func checkConfigUnmarshalAndDroppedTables(t *testing.T, r *deliverRig) {
 	t.Helper()
+	logs := captureLogs(t)
 	mem := newDeliverRig(t, false)
 	runReviewedMerge(mem.h, mem.homeKey.ID(), testGroup1, proto.TaskRow{RowHeader: proto.RowHeader{ID: testTask1}, Num: 1, Slug: "m"}, "c1", 0, false, time.Time{})
 	resumeGroupMerges(mem.h, deliv(mem.h), "unknown-group")
@@ -1643,10 +1841,10 @@ func checkConfigUnmarshalAndDroppedTables(t *testing.T, r *deliverRig) {
 	r.db.Write(writeTrigger)
 	r.home = newFakeDeliverHome()
 	r.h.Attach(r.homeKey.ID(), r.home)
-	r.waitIdle()
+	r.waitGroupLive(testGroup1)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Type: "item", Nonce: testCanonicalID(222), Timestamp: testStartMS, Group: testGroup1, To: r.hostKey.ID(), Item: 949, AI: testAI2, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "hi"))
-	Deliver(r.h, testGroup1, testAI2)
-	r.waitIdle()
+	r.waitUntil("session create failure logged", func() bool { return strings.Contains(logs.String(), "host: create session") })
+	r.waitAIUnbusy(testGroup1, testAI2)
 
 	r.setSetting("homes", 123)
 	if _, err := loadHostConfig(r.h); err == nil {
@@ -1655,7 +1853,6 @@ func checkConfigUnmarshalAndDroppedTables(t *testing.T, r *deliverRig) {
 	r.h.Attach(r.homeKey.ID(), r.home)
 	Deliver(r.h, testGroup1, testAI2)
 	runReviewedMerge(r.h, r.homeKey.ID(), testGroup1, proto.TaskRow{RowHeader: proto.RowHeader{ID: testTask1}, Num: 1, Slug: "m"}, "c1", 0, false, time.Time{})
-	r.waitIdle()
 
 	// Drop audit to cover hasAuditItem error, then drop setting to cover SQLite error in loadHostConfig.
 	dropAudit := func(tx *store.Tx) error {

@@ -224,7 +224,7 @@ func ensureGroupSynced(h *Host, d *delivery, device, group string) {
 func (d *delivery) beginSingleGroupSync(device string, conn Home, group string) (context.Context, syncJob, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.groups[group] != nil {
+	if gs := d.groups[group]; gs != nil && (gs.syncing || gs.live) {
 		return nil, syncJob{}, false
 	}
 	entry := d.cancels[device]
@@ -357,10 +357,6 @@ func handleInboxElem(h *Host, d *delivery, home, group string, rawElem json.RawM
 	if !ok {
 		return
 	}
-	if it.To != h.Key.ID() {
-		refuseItem(h, home, group, "", it.Item, home, "not_for_me")
-		return
-	}
 	seen, err := hasAuditItem(h.Store, home, it.Item)
 	if err != nil {
 		log.Printf("host: check audit item %d: %v", it.Item, err)
@@ -408,7 +404,7 @@ func tryOpenWait(h *Host, v verifiedItem, agent string) bool {
 		return false
 	}
 	if err != nil {
-		refuseItem(h, v.home, v.group, agent, v.item.Item, v.home, err.Error())
+		refuseItem(h, v, agent, err.Error())
 		return true
 	}
 	row := AuditRow{Group: v.group, Agent: agent, What: AuditDelivered, Item: v.item.Item, Home: v.home, Detail: v.item.Why, By: v.home}
@@ -558,11 +554,14 @@ func routeSessionItem(h *Host, ai aiInfo, v verifiedItem) routedTarget {
 	if ai.secretary {
 		return routedTarget{key: SessionKey{Group: g, Member: m}, kind: GroupSession}
 	}
-	if isTaskWorkWhy(v.item.Why) || isAssignedTaskDecision(h, g, m, v.item) {
+	if isTaskWorkWhy(v.item.Why) {
 		return routedTarget{key: SessionKey{Group: g, Member: m, Task: string(v.item.Task)}, kind: TaskSession}
 	}
 	if v.item.Why == "review" {
 		return routedTarget{key: SessionKey{Group: g, Member: m, Task: string(v.item.Task)}, kind: ReviewSession}
+	}
+	if v.item.Why == "decided" {
+		return routeDecidedItem(h, g, m, string(v.item.Task))
 	}
 	return routeThreadOrGroup(h, g, m, v)
 }
@@ -571,15 +570,11 @@ func isTaskWorkWhy(why string) bool {
 	return why == "assign" || why == "checks" || why == "reviewed" || why == "resume"
 }
 
-func isAssignedTaskDecision(h *Host, group, member string, it proto.Item) bool {
-	if it.Why != "decided" || it.Task == "" {
-		return false
+func routeDecidedItem(h *Host, group, member, task string) routedTarget {
+	if s, ok := h.Sessions.Get(SessionKey{Group: group, Member: member, Task: task}); ok && (s.Kind == TaskSession || s.State != Dormant) {
+		return routedTarget{key: s.SessionKey, kind: s.Kind}
 	}
-	if task, ok := lookupTaskRow(h, group, string(it.Task)); ok {
-		return task.Assignee == member
-	}
-	_, exists := h.Sessions.Get(SessionKey{Group: group, Member: member, Task: string(it.Task)})
-	return exists
+	return routedTarget{key: SessionKey{Group: group, Member: member}, kind: GroupSession}
 }
 
 func routeThreadOrGroup(h *Host, group, member string, v verifiedItem) routedTarget {
@@ -629,7 +624,7 @@ func refuseHeldNotHosted(h *Host, d *delivery, key aiGroupKey) {
 	delete(d.held, key)
 	d.mu.Unlock()
 	for _, v := range items {
-		refuseItem(h, v.home, v.group, "", v.item.Item, v.home, "not_hosted_here")
+		refuseItem(h, v, "", "not_hosted_here")
 	}
 }
 
@@ -744,10 +739,10 @@ func deliverTargetBatch(h *Host, d *delivery, key aiGroupKey, ai aiInfo, target 
 		return consumed
 	}
 	session, gitErr, err := prepareTargetSession(h, ai, target, current)
-	if gitErr != nil {
+	if gitErr != nil && target.kind != GroupSession {
 		return failTargetSession(h, d, key, ai.agent, target, current, gitErr)
 	}
-	if err != nil {
+	if gitErr != nil || err != nil {
 		d.prependHeld(key, current)
 		return false
 	}
@@ -773,7 +768,7 @@ func classifyBatchEntry(h *Host, agent string, v verifiedItem, kept, held []veri
 		return kept, append(held, v)
 	}
 	if reason != "" {
-		refuseItem(h, v.home, v.group, agent, v.item.Item, v.home, reason)
+		refuseItem(h, v, agent, reason)
 		return kept, held
 	}
 	return append(kept, v), held
@@ -1053,10 +1048,10 @@ func recordAudit(h *Host, row AuditRow) error {
 	return err
 }
 
-func refuseItem(h *Host, home, group, agent string, item int64, by, detail string) {
-	row := AuditRow{Group: group, Agent: agent, What: AuditRefused, Item: item, Home: home, Detail: detail, By: by}
+func refuseItem(h *Host, v verifiedItem, agent, detail string) {
+	row := AuditRow{Group: v.group, Agent: agent, What: AuditRefused, Item: v.item.Item, Home: v.home, Detail: detail, By: v.home}
 	if recordAudit(h, row) == nil {
-		sendAck(h, home, group, item)
+		sendAck(h, v.home, v.group, v.item.Item)
 	}
 }
 
@@ -1095,7 +1090,7 @@ func takeOneMerge(h *Host, d *delivery, v verifiedItem) {
 	ai, local, present := lookupLocalAI(h, v.group, string(v.item.AI))
 	if !local {
 		if present {
-			refuseItem(h, v.home, v.group, "", v.item.Item, v.home, "not_hosted_here")
+			refuseItem(h, v, "", "not_hosted_here")
 		} else {
 			d.enqueueMerge(v)
 		}
@@ -1107,7 +1102,7 @@ func takeOneMerge(h *Host, d *delivery, v verifiedItem) {
 		return
 	}
 	if reason != "" {
-		refuseItem(h, v.home, v.group, ai.agent, v.item.Item, v.home, reason)
+		refuseItem(h, v, ai.agent, reason)
 		return
 	}
 	runClaimedMerge(h, d, ai.agent, v)

@@ -14,8 +14,9 @@ H addresses items to an AI. N chooses the session.
 
 | Item | Session |
 | --- | --- |
-| `assign`, `checks`, `reviewed`, `resume`; `decided` about a task the AI is assigned | the AI's task session for `task`; N creates it on the first `assign` |
+| `assign`, `checks`, `reviewed`, `resume` | the AI's task session for `task`; N creates it on the first `assign` |
 | `review` | the AI's review session for `task`; N creates it on the first `review` |
+| `decided` about a task | the AI's task session for `task` if it has one; else its review session for `task` if one is open; else its group session |
 | `mention` or `reply` whose message is in the thread of a task for which the AI has a task or review session | that session |
 | any other `mention`, `reply` or `decided` | the AI's group session |
 | everything addressed to the secretary | the secretary's group session |
