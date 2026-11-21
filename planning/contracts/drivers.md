@@ -110,6 +110,7 @@ codex app-server
   -c mcp_servers.solodawn.default_tools_approval_mode="approve"   [verified]
   -c mcp_servers.solodawn.tool_timeout_sec=<seconds>              [verified]
   -c notify=[]
+  -c features.default_mode_request_user_input=true                [unverified]
 ```
 
 - `default_tools_approval_mode="approve"`: without it a call of the node's
@@ -130,16 +131,35 @@ JSON-RPC over stdio, one JSON object per line `[verified]`:
    4) and `config`; no `model` (section 1). Codex creates the thread id.
 3. `turn/start` with the turn text. The turn ends with `turn/completed`;
    usage arrives in `thread/tokenUsage/updated` and the rate-limit windows
-   in `account/rateLimits/updated`.
-4. Approval requests arrive as server requests, and the node answers
-   `accept` or `decline`. `item/commandExecution/requestApproval` carries
-   `command`, `cwd` and `reason`. `item/fileChange/requestApproval` carries
-   ids only: the change is in the `fileChange` item sent just before it
-   (`changes[]` with `path`, `kind`, `diff`). The schema has more request
-   types (permissions, MCP elicitation, user input, dynamic tools)
-   `[documented]`; none was seen, and the node declines them. A `decline`
-   carries no text, so a deny sentence of `flows/approval.md` reaches only
-   Claude Code; on Codex the instruction of section 4 says what to do.
+   in `account/rateLimits/updated`. A `thread/resume` for a missing rollout
+   fails with a JSON-RPC error (`no rollout found for thread id …`) and is
+   reported as `no_session` `[verified]`; an unauthenticated turn ends with
+   `turn/completed` status `failed` and `turn.error.codexErrorInfo`
+   `"unauthorized"` or HTTP status `401` (or a startup authentication error)
+   and is reported as `login_invalid` `[verified]`.
+4. Approval and user-input requests arrive as server requests.
+   `item/commandExecution/requestApproval` carries `command`, `cwd` and
+   `reason`, and `item/fileChange/requestApproval` carries ids only, with the
+   change in the `fileChange` item sent just before it (`changes[]` with
+   `path`, `kind`, `diff`); the node answers `{"decision":"accept"}` or
+   `{"decision":"decline"}`. Codex 0.164.0 hides its ask-the-user tool in
+   Default mode behind the `default_mode_request_user_input` feature flag
+   (`under development`, default `false`), so the node turns
+   `-c features.default_mode_request_user_input=true` on `[unverified]` for
+   both `codex app-server` and `codex resume`. By the owner's decision of
+   2026-11-21, `item/tool/requestUserInput` (`questions[]`, each with
+   non-empty `id` and `question`, plus `header`, `isSecret` and `options[]`
+   of `label` and `description`) `[documented]` maps to `Ask` with `Tool`
+   `"requestUserInput"`, `Input` the raw parameters, and `Reply` sending
+   `{"answers": {"<id>": {"answers": […]}}}` or `{"answers": {}}`. If the
+   live check shows `-c features.default_mode_request_user_input=true` does
+   not work, a Codex AI asks through `request_decision`
+   (`contracts/mcp-tools.md` section 1) instead. Invalid parameters and
+   every other server request type in the schema (permissions, MCP
+   elicitation, dynamic tools) are answered with JSON-RPC error `-32601`. A
+   `decline` carries no text, so a deny sentence of `flows/approval.md`
+   reaches only Claude Code; on Codex the instruction of section 4 says what
+   to do.
 5. `turn/interrupt` interrupts: `turn/completed` with status `interrupted`
    follows at once and the process stays usable.
 6. A silent turn is interrupted. In the spike 2 turns of about 25 stopped
