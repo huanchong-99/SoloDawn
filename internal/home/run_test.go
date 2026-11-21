@@ -889,3 +889,23 @@ func TestRunNodeTables(t *testing.T) {
 	equal(t, []bool{same(tables.Commands, home.Commands), same(tables.Timers, home.Timers), same(tables.Events, home.Events), same(tables.After, home.After)},
 		[]bool{true, true, true, true})
 }
+
+func TestRunDynamicOwnerFn(t *testing.T) {
+	db := runOpen(t)
+	var owner atomic.Value
+	owner.Store("")
+	loop, err := home.StartLoop(home.LoopConfig{
+		Store: db, Home: node.ID(),
+		OwnerFn: func() string { return owner.Load().(string) },
+		Logs:    runLogs(t), Tables: runTables(),
+	})
+	equal(t, err, nil)
+	defer loop.Close()
+
+	client := runNewClient()
+	conn := loop.Attach(browser.ID(), client)
+	owner.Store(browser.ID())
+	now := time.Now().UnixMilli()
+	loop.Cmd(conn, 1, browser.Sign(fmt.Sprintf(`{"t":"group","n":%q,"ts":%d,"g":%q%s}`, runID(1), now, groupID, runCreateWebsite)))
+	equal(t, runFrame(<-client.got), `{"re":1,"ok":true}`)
+}

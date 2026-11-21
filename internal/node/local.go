@@ -124,18 +124,18 @@ func decodeSync(data []byte) (proto.Sync, bool) {
 	return req, proto.Decode(data, &req) == nil && req.Type == "sync"
 }
 
+func decodeFetch(data []byte) (home.Fetch, bool) {
+	var req home.Fetch
+	return req, proto.Decode(data, &req) == nil && req.Type == "fetch"
+}
+
 func decodeAck(data []byte) (proto.Ack, bool) {
 	var ack proto.Ack
 	return ack, proto.Decode(data, &ack) == nil && ack.Type == "ack"
 }
 
 func (l *LocalLink) toHome(data []byte) {
-	if cmd, ok := decodeCmd(data); ok {
-		l.loop.Cmd(l.conn, cmd.ID, cmd.Env)
-		return
-	}
-	if req, ok := decodeSync(data); ok {
-		l.loop.Sync(l.conn, req)
+	if l.dispatchHomeReq(data) {
 		return
 	}
 	var req struct {
@@ -148,6 +148,22 @@ func (l *LocalLink) toHome(data []byte) {
 	if ack, ok := decodeAck(data); ok {
 		l.loop.Ack(l.conn, ack)
 	}
+}
+
+func (l *LocalLink) dispatchHomeReq(data []byte) bool {
+	if cmd, ok := decodeCmd(data); ok {
+		l.loop.Cmd(l.conn, cmd.ID, cmd.Env)
+		return true
+	}
+	if req, ok := decodeSync(data); ok {
+		l.loop.Sync(l.conn, req)
+		return true
+	}
+	if req, ok := decodeFetch(data); ok {
+		l.loop.Fetch(l.conn, req)
+		return true
+	}
+	return false
 }
 
 func (l *LocalLink) badRequest(re int64) {
