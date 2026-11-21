@@ -495,6 +495,8 @@ type Ask struct {
 	Command  string          // the request as the CLI presented it
 	Why      string          // the justification the CLI attached; "" without one
 	Input    json.RawMessage // what the digest of the approval record covers (flows/approval.md step 5)
+	// Reply answers a CLI user-input question by question id, or nil when unanswered.
+	Reply func(map[string][]string) error
 }
 
 // Listeners are told every event of every session's CLI. Each has the name

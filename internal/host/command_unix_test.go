@@ -77,10 +77,14 @@ func TestCommandPWD(t *testing.T) {
 // delay after its limit has passed.
 func TestCommandReturnsWithinTheWaitDelay(t *testing.T) {
 	savedUnit, savedDelay := commandUnit, commandWaitDelay
-	commandUnit, commandWaitDelay = 30*time.Millisecond, 600*time.Millisecond
+	commandUnit, commandWaitDelay = 120*time.Millisecond, 600*time.Millisecond
 	t.Cleanup(func() { commandUnit, commandWaitDelay = savedUnit, savedDelay })
-	pidFile := filepath.Join(t.TempDir(), "pid")
-	script := `perl -e 'use POSIX; POSIX::setsid(); exec "sleep", "30"' & echo $! > '` + pidFile + `'; sleep 30`
+	dir := t.TempDir()
+	tmpFile := filepath.Join(dir, "pid.tmp")
+	pidFile := filepath.Join(dir, "pid")
+	// perl writes pidFile only after setsid() has detached the grandchild from
+	// the command's session, and the limit gives perl 1.2s to start under load.
+	script := `perl -MPOSIX=setsid -e 'setsid() != -1 or die; open my $f, ">", $ARGV[0] or die; print $f $$ or die; close $f or die; rename $ARGV[0], $ARGV[1] or die; exec "sleep", "30"' '` + tmpFile + `' '` + pidFile + `' & while [ ! -f '` + pidFile + `' ]; do sleep 0.01; done; sleep 30`
 	t.Cleanup(func() {
 		pid, err := os.ReadFile(pidFile)
 		workOK(t, err)

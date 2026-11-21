@@ -215,11 +215,7 @@ func joinParseJoin(data json.RawMessage) (proto.HostJoin, error) {
 }
 
 func joinValidJoin(p proto.HostJoin) bool {
-	return p.Home != "" && p.Name != "" && joinValidAgent(p.Agent)
-}
-
-func joinValidAgent(agent string) bool {
-	return agent == "claude" || agent == "codex"
+	return p.Home != "" && p.Name != "" && agtValidAgent(p.Agent)
 }
 
 func joinPrepareJoin(h *Host, p proto.HostJoin, group string) (joinConfig, error) {
@@ -510,7 +506,7 @@ func handleHostLeave(ctx context.Context, h *Host, _ Owner, by string, data json
 
 func joinParseLeave(data json.RawMessage) (proto.HostLeave, error) {
 	var p proto.HostLeave
-	if proto.Decode(data, &p) != nil || !joinValidAgent(p.Agent) {
+	if proto.Decode(data, &p) != nil || !agtValidAgent(p.Agent) {
 		return p, &Error{Code: "bad_request", Message: "invalid host.leave payload"}
 	}
 	return p, nil
