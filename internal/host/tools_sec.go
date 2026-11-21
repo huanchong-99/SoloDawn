@@ -96,15 +96,6 @@ func decodeSecInput[T any](raw stdjson.RawMessage) (T, error) {
 	return dst, nil
 }
 
-func guardSecTexts(texts ...string) error {
-	for _, s := range texts {
-		if CheckOutboundSecret(s) != nil {
-			return &Error{Code: "secret", Message: "this looks like a secret; remove it and send again"}
-		}
-	}
-	return nil
-}
-
 func secHomeHeader(h *Host, c Caller, kind string) proto.HomeCommand {
 	return proto.HomeCommand{
 		Type:      kind,
@@ -116,16 +107,21 @@ func secHomeHeader(h *Host, c Caller, kind string) proto.HomeCommand {
 }
 
 type secDirectory struct {
+	byID    map[string]proto.MemberRow
 	byName  map[string]proto.MemberRow
 	members []string
 	people  []string
 }
 
 func loadSecDirectory(rows *Rows, group string) secDirectory {
-	dir := secDirectory{byName: map[string]proto.MemberRow{}}
+	dir := secDirectory{
+		byID:   map[string]proto.MemberRow{},
+		byName: map[string]proto.MemberRow{},
+	}
 	for _, raw := range rows.Of(group, "member") {
 		var m proto.MemberRow
 		if proto.Decode(raw, &m) == nil {
+			dir.byID[m.ID] = m
 			dir.byName[m.Name] = m
 			dir.members = append(dir.members, m.Name)
 			if m.Kind == "human" {
@@ -198,7 +194,7 @@ func callProposeBrief(ctx context.Context, h *Host, c Caller, raw stdjson.RawMes
 	if err != nil {
 		return nil, err
 	}
-	if err := guardSecTexts(briefTexts(in)...); err != nil {
+	if err := checkBriefSecrets(in); err != nil {
 		return nil, err
 	}
 	body, requester, err := prepareBriefBody(h.Rows, c.Group, in)
@@ -218,16 +214,18 @@ func callProposeBrief(ctx context.Context, h *Host, c Caller, raw stdjson.RawMes
 	return secIDReply{ID: string(hdr.Nonce)}, nil
 }
 
-func briefTexts(in proposeBriefInput) []string {
-	var texts []string
-	texts = append(texts, in.Title, in.Goal)
-	texts = append(texts, in.Criteria...)
-	texts = append(texts, in.ScopeIn...)
-	texts = append(texts, in.ScopeOut...)
-	for _, t := range in.Tasks {
-		texts = append(texts, t.Title)
+func checkBriefSecrets(in proposeBriefInput) error {
+	for _, s := range slices.Concat([]string{in.Title, in.Goal}, in.Criteria, in.ScopeIn, in.ScopeOut) {
+		if err := CheckOutboundSecret(s); err != nil {
+			return err
+		}
 	}
-	return texts
+	for _, t := range in.Tasks {
+		if err := CheckOutboundSecret(t.Title); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func prepareBriefBody(rows *Rows, group string, in proposeBriefInput) (proto.BriefBody, proto.ID, error) {
@@ -435,7 +433,7 @@ func callRequestDecision(ctx context.Context, h *Host, c Caller, raw stdjson.Raw
 	if err != nil {
 		return nil, err
 	}
-	if err := guardSecTexts(decisionTexts(in)...); err != nil {
+	if err := checkDecisionSecrets(in); err != nil {
 		return nil, err
 	}
 	post, err := prepareDecisionPost(h, c, in)
@@ -448,16 +446,20 @@ func callRequestDecision(ctx context.Context, h *Host, c Caller, raw stdjson.Raw
 	return secIDReply{ID: string(post.Nonce)}, nil
 }
 
-func decisionTexts(in requestDecisionInput) []string {
-	var texts []string
-	texts = append(texts, in.Question)
+func checkDecisionSecrets(in requestDecisionInput) error {
+	texts := []string{in.Question}
 	if in.Context != nil {
 		texts = append(texts, *in.Context)
 	}
 	for _, opt := range in.Options {
 		texts = append(texts, opt.Label, opt.Effect)
 	}
-	return texts
+	for _, s := range texts {
+		if err := CheckOutboundSecret(s); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func prepareDecisionPost(h *Host, c Caller, in requestDecisionInput) (proto.Post[proto.DecisionBody], error) {
