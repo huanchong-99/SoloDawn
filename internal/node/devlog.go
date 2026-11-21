@@ -3,11 +3,12 @@ package node
 import (
 	"bytes"
 	"cmp"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"sync"
 
@@ -190,6 +191,47 @@ func (l *Logs) dvlSaveAdoption(cand *identity.Log, rows []proto.DeviceRow) error
 	return nil
 }
 
+func (l *Logs) dvlAppendAdd(signer identity.Key, dev, kind, name string, now int64, skip *sesConn) error {
+	l.writeMu.Lock()
+	row, err := l.dvlWriteAdd(signer, dev, kind, name, now)
+	l.writeMu.Unlock()
+	if err == nil {
+		l.dvlNotify(row.User, []proto.DeviceRow{row}, false, skip)
+	}
+	return err
+}
+
+func (l *Logs) dvlWriteAdd(signer identity.Key, dev, kind, name string, now int64) (proto.DeviceRow, error) {
+	owner := l.Owner()
+	log := l.Log(owner)
+	if log == nil {
+		return proto.DeviceRow{}, errors.New("node has no owner log")
+	}
+	entry := proto.DeviceEntry{
+		PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: dvlNewID(), Timestamp: now},
+		DeviceChange:  proto.DeviceChange{User: owner, Version: len(log.Entries) + 1, Op: "add", Device: dev, Kind: kind, Name: name},
+	}
+	env := signer.Sign(string(dvlMustEncode(entry)))
+	if _, err := log.Apply(env); err != nil {
+		return proto.DeviceRow{}, err
+	}
+	row := dvlRowOf(env)
+	write := func(tx *store.Tx) error { return dvlPutEntries(tx, owner, []proto.DeviceRow{row}) }
+	if err := l.db.Write(write); err != nil {
+		return proto.DeviceRow{}, err
+	}
+	l.mu.Lock()
+	l.log = log
+	l.mu.Unlock()
+	return row, nil
+}
+
+func dvlNewID() proto.ID {
+	var b [16]byte
+	rand.Read(b[:])
+	return proto.ID(base64.RawURLEncoding.EncodeToString(b[:]))
+}
+
 func dvlPutEntries(tx *store.Tx, user string, rows []proto.DeviceRow) error {
 	for _, r := range rows {
 		if _, err := tx.Exec("INSERT INTO device_log(user, ver, env) VALUES(?, ?, ?)", user, r.Version, string(dvlMustEncode(r.Env))); err != nil {
@@ -262,20 +304,26 @@ func (s *Sessions) sesFinishAdoption(c *sesConn, dl proto.Devlog, cand *identity
 }
 
 func (s *Sessions) sesLogChanged(user string, rows []proto.DeviceRow, adopted bool, skip *sesConn) {
-	if adopted && s.cfg.OnAdopt != nil {
-		s.cfg.OnAdopt(user)
+	if adopted {
+		s.sesAdopted(user, skip)
 	}
 	s.cfg.Home.Event("device", rows)
-	s.mu.Lock()
-	conns := slices.Collect(maps.Keys(s.conns))
-	s.mu.Unlock()
 	envs := make([]proto.Envelope, len(rows))
 	for i, r := range rows {
 		envs[i] = r.Env
 	}
 	frames := dvlBatchFrames(user, envs)
-	for _, c := range conns {
+	for _, c := range s.sesConns() {
 		s.sesSyncOne(c, frames, skip)
+	}
+}
+
+func (s *Sessions) sesAdopted(user string, skip *sesConn) {
+	if s.cfg.OnAdopt != nil {
+		s.cfg.OnAdopt(user)
+	}
+	if s.onPairAdopt != nil {
+		s.onPairAdopt(skip)
 	}
 }
 

@@ -8,9 +8,9 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-21 · limitation · `Sessions` has no `sync`, `fetch` or `ack` handlers until the home units and runtime wire them
 
-- Symptom: inbound `ctl` requests for `sync` and `fetch` are answered `bad_request` ("unknown ctl request") and `ack` pushes are dropped on a bare `Sessions` hub (`internal/node/session.go`, `NewSessions`), and `host.info`, `pair.browser` and `settings.set` are not registered until unit N-3.
-- Cause: `Sessions` provides the `Requests`, `Pushes` and `Commands` tables, while `sync` (`HM-2`), `fetch` (`HM-3`), `ack` (`HM-7`), the pairing and host-info handlers (`N-3`) and runtime assembly (`N-4`) are separate units.
-- Status: open until `HM-2`, `HM-3`, `HM-7`, `N-3` and `N-4` populate those tables.
+- Symptom: inbound `ctl` requests for `sync` and `fetch` are answered `bad_request` ("unknown ctl request") and `ack` pushes are dropped on a bare `Sessions` hub (`internal/node/session.go`, `NewSessions`) until runtime assembly wires the home handlers (`NewPairer` in `internal/node/pair.go` and `NewSurface` in `internal/node/surface.go` now register `pair.browser` with `Replays["pair.browser"]`, `host.info` and `settings.set`).
+- Cause: `Sessions` provides the `Requests`, `Pushes`, `Commands` and `Replays` tables, while `sync` (`HM-2`), `fetch` (`HM-3`), `ack` (`HM-7`) and runtime assembly (`N-4`, wiring `Surface`, `Pairer`, `HS-3` `Agents` and `HS-13` `Queued`) are separate units.
+- Status: resolved for `pair.browser`, `host.info` and `settings.set` in unit `N-3`; open for `sync`, `fetch`, `ack` and runtime assembly until `HM-2`, `HM-3`, `HM-7` and `N-4` populate those tables.
 
 ### 2026-11-21 · limitation · `home.Loop` keeps the `Owner` it was started with across adoption
 

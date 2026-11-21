@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"maps"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -57,13 +59,16 @@ type SessionConfig struct {
 // Lock order: cmdMu -> Store.Write; sesConn.sendMu -> mu -> Logs.mu; mu is a
 // leaf lock guarding conns and sesConn.welcomed.
 type Sessions struct {
-	Requests  map[string]RequestHandler
-	Pushes    map[string]PushHandler
-	Commands  map[string]CmdFunc
-	cfg       SessionConfig
-	cmdMu, mu sync.Mutex
-	inflight  map[string]chan struct{}
-	conns     map[*sesConn]bool
+	Requests    map[string]RequestHandler
+	Pushes      map[string]PushHandler
+	Commands    map[string]CmdFunc
+	Replays     map[string]CmdFunc
+	cfg         SessionConfig
+	cmdMu, mu   sync.Mutex
+	inflight    map[string]chan struct{}
+	conns       map[*sesConn]bool
+	onPairHello func(*sesConn)
+	onPairAdopt func(*sesConn)
 }
 
 type sesConn struct {
@@ -84,13 +89,36 @@ type sesWelcome struct {
 // NewSessions constructs a ctl session hub and wires device-log notifications.
 func NewSessions(cfg SessionConfig) *Sessions {
 	s := &Sessions{
-		Requests: map[string]RequestHandler{}, Pushes: map[string]PushHandler{}, Commands: map[string]CmdFunc{},
+		Requests: map[string]RequestHandler{}, Pushes: map[string]PushHandler{},
+		Commands: map[string]CmdFunc{}, Replays: map[string]CmdFunc{},
 		cfg: sesDefaultConfig(cfg), inflight: map[string]chan struct{}{}, conns: map[*sesConn]bool{},
 	}
 	cfg.Logs.mu.Lock()
 	cfg.Logs.onChange = s.sesLogChanged
 	cfg.Logs.mu.Unlock()
 	return s
+}
+
+// PushOwner sends frame to every welcomed connection of this node's owner.
+func (s *Sessions) PushOwner(frame any) {
+	for _, c := range s.sesConns() {
+		if s.sesEnrolledOwner(c) {
+			c.send(frame)
+		}
+	}
+}
+
+func (s *Sessions) sesConns() []*sesConn {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Collect(maps.Keys(s.conns))
+}
+
+func (s *Sessions) sesEnrolledOwner(c *sesConn) bool {
+	s.mu.Lock()
+	welcomed := c.welcomed
+	s.mu.Unlock()
+	return welcomed && s.cfg.Logs.IsOwner(c.device)
 }
 
 func sesDefaultConfig(cfg SessionConfig) SessionConfig {
@@ -205,6 +233,7 @@ func (s *Sessions) sesHello(ctx context.Context, c *sesConn, id int64, data json
 	}
 	sent := make(chan struct{})
 	base := s.sesWelcomeBase(id, c.device)
+	s.sesBeforeWelcome(c)
 	onSent := func() []proto.Devlog {
 		s.mu.Lock()
 		c.welcomed = true
@@ -220,6 +249,12 @@ func (s *Sessions) sesHello(ctx context.Context, c *sesConn, id int64, data json
 	sesWaitWelcome(ctx, sent, c.home.Gone())
 	if h.Kind == "host" {
 		s.cfg.Home.Inbox(c.home)
+	}
+}
+
+func (s *Sessions) sesBeforeWelcome(c *sesConn) {
+	if c.paired && s.onPairHello != nil {
+		s.onPairHello(c)
 	}
 }
 
@@ -296,7 +331,7 @@ func (s *Sessions) sesHostCmd(ctx context.Context, c *sesConn, id int64, env pro
 		return
 	}
 	if done == nil {
-		sesReplayHostCmd(c, id, held)
+		s.sesReplayHostCmd(ctx, c, id, hdr.Type, env, held)
 		return
 	}
 	s.sesExecHostCmd(ctx, c, id, hdr, env, done)
@@ -360,9 +395,14 @@ func (s *Sessions) sesReadReceipt(signer, nonce string) (store.Outcome, bool, er
 	return held, found, s.cfg.Store.Write(read)
 }
 
-func sesReplayHostCmd(c *sesConn, id int64, held store.Outcome) {
+func (s *Sessions) sesReplayHostCmd(ctx context.Context, c *sesConn, id int64, typ string, env proto.Envelope, held store.Outcome) {
 	if held.Code != "" {
 		c.sendErr(id, held.Code, "the command was refused when it first arrived")
+		return
+	}
+	if fn := s.Replays[typ]; fn != nil {
+		res, err := fn(ctx, c.raw, env.Key, []byte(env.Payload))
+		s.sesReply(c, id, "", res, err)
 		return
 	}
 	c.send(proto.Success{Re: id, OK: true})
