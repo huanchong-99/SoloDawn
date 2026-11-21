@@ -17,7 +17,7 @@ these shapes.
 | `reply` | where its call is: thread, or main | an AI (`re` is the call) | `{}` | `null` |
 | `brief` | main | the secretary | 2.1 | 3.1 |
 | `task` | main | nobody: the home writes it | 2.2 | `null` |
-| `approval` | thread + main | an AI | 2.3 | 3.2 |
+| `approval` | main, or thread + main | an AI | 2.3 | 3.2 |
 | `decision` | main, or thread + main | an AI | 2.4 | 3.3 |
 | `summary` | thread + main | the secretary | 2.5 | `null` |
 | `call` | thread, or main when the caller has no task | an AI | 2.6 | 3.4 |
@@ -94,6 +94,7 @@ card is drawn from the task row.
 
 | Field | Value |
 | --- | --- |
+| `task` | the task it is about, or `""` for a card in the main line (`thread` is then `null`) |
 | `tool` | what the CLI names: Claude Code's tool (`Bash`, `Write`, …), or the type of Codex's item (`commandExecution`, `fileChange`) |
 | `command` | the request as the CLI presented it (table below), or its beginning: at most 3 KiB as JSON text in the payload, cut at a character |
 | `full` | optional: the size in bytes of the whole request, there when `command` holds only its beginning. The card then says that it shows a part, how long the whole is, and what `risks.md` K-21 recommends |

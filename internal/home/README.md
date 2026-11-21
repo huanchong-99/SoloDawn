@@ -166,10 +166,12 @@ start with `task`, `step`, `wait`, `item` and `states`, and `workItems`, `byAssi
 `byReviewer`; its tests take the names that start with `mc` and `machine`. The run loop takes the
 names that start with `run`, and its tests those that start with `run` and `Run`; it exports
 `Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
-`ItemsPush`. The briefs take the
+`ItemsPush`. Groups and members take the names that start with `grp` and `mem`, their tests too,
+and their test functions start with `TestGroup` and `TestMember`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
 The cards take the names that start with `card`, their tests too, and their test functions start
-with `TestCard`.
+with `TestCard`. Device-log events (`ev_device.go`) take the names that start with `dev`, and their
+tests start with `TestDevice` and `dev`.
 
 ## The run loop
 
@@ -351,6 +353,52 @@ function that moves a task calls it and adds nothing to its rules.
   `thread.count`, `thread.last`); the bodies of the messages; for row 23, the timer and telling the
   secretary once per quiet period. The machine sets `stats.ended`.
 
+## Groups and members
+
+`cmd_group.go` holds `group` `create` and `set` ([commands](../../planning/contracts/commands.md)
+1.1; [rows](../../planning/contracts/rows.md) 1 and 2), under `group/create` and `group/set`;
+`group` `pause` and `resume` belong to `cmd_pause.go` (unit HM-14). `cmd_member.go` holds `member`
+`add_ai`, `set` and `remove` ([commands](../../planning/contracts/commands.md) 1.2), under
+`member/add_ai`, `member/set` and `member/remove`; `member` `status` belongs to `cmd_hostev.go`
+(unit HM-16). Where the contracts are silent, they do this:
+
+- **`group/create`.** Only a person of this node's owner (`c.Who.AI` empty, `c.Who.User ==
+  s.Owner`) may create a group, else `forbidden`. A `g` that differs from `n`, a `kind` other than
+  `project`, a `forge` other than `github` or `none`, or an empty `name`, `repo`, `base` or
+  `member_name` is `bad_request`. A group that already exists (`s.Group.ID` not empty) is answered
+  `conflict`. It writes the `group` row (`pass` 90, `pass_foundation` 70, default `limits`,
+  `created` `c.Now`) and the owner's `human` `member` row (`role` `owner`, `online` true,
+  `last_seen` `c.Now`), with `GroupsChanged` true. The owner's member id is the first 16 bytes of
+  the SHA-256 of `SoloDawn group owner <n>` in base64url, so the function stays pure
+  ([issues](../../issues.md)).
+- **`group/set`.** By an admin, else `forbidden`. Sending none of `name`, `checks`, `pass`,
+  `pass_foundation`, `limits` and `secretary`, or an empty `name`, is `bad_request`. `secretary`,
+  when sent, must name an AI in `State.AIs` that is neither assignee nor reviewer of an open task
+  (`queued`, `active`, `paused`, `failed`), else `conflict`; any previous secretary's member row
+  loses `secretary`, and the named AI gains it when not already set. `GroupsChanged` is set when
+  `name` changes, because `groups` carries each group's name.
+- **`member/add_ai`.** By a host of a member: `c.Who.AI` must be empty, else `forbidden`; the
+  `name` of the latest `add` entry for `c.Who.Device` in `State.Logs[c.Who.User]` becomes
+  `host_name`. An empty `name`, a `cli` outside `claude` and `codex`, or an `account` outside
+  `personal`, `team` and `api_key` is `bad_request`. `secretary: true` when the group already has a
+  secretary requires an admin, else `forbidden`. An `id` or `name` already held by a human or AI
+  member of the group is `conflict`. The new `ai` `member` row starts with `state` `dormant`,
+  `since` and `last_seen` `c.Now`, `path` `local` when `c.Who.Device == s.Home` and `direct`
+  otherwise, `allow` `[]` and `usage` `{}`; when `secretary` is true, any previous secretary loses
+  the flag and `group.secretary` becomes `id`.
+- **`member/set`.** Sending none of `name`, `account`, `allow` and `approvers`, an empty `name`, or
+  an unknown `account` is `bad_request`. An unknown `id` is `not_found`; a human member row is
+  `forbidden` in step 1. The signer must be the AI's owner (`c.Who.AI` empty, `c.Who.User ==
+  ai.User`) or, when `approvers` is the only field sent, the AI's host (`s.Hosts`), else
+  `forbidden`. A `name` held by another member in the group is `conflict`; keeping the AI's own
+  `name` is accepted.
+- **`member/remove`.** An unknown `id` is `not_found`; a human member row is `forbidden` in step 1.
+  The signer must be the AI's owner or an admin, else `forbidden`. Removing an AI that is assignee
+  or reviewer of an open task is `conflict`. Otherwise the member row becomes a `gone` marker and
+  any queued inbox items for that AI (`c.Disk.Queued`) are retired in `Result.Retire`. Removing the
+  secretary also clears `group.secretary` and writes `system` `no_secretary` in the main line with
+  id `n`.
+
 ## Briefs
 
 `cmd_brief.go` holds `post` of kind `brief` and `act` `confirm` and `revise` on it
@@ -396,53 +444,40 @@ function that moves a task calls it and adds nothing to its rules.
 
 ## Cards
 
-`cmd_card.go` holds `post` of kinds `approval` and `decision`, `act` `approve`, `deny` and `choose`
-on them ([commands](../../planning/contracts/commands.md) 1.3 and 1.4;
+`cmd_card.go` holds `post` of kinds `approval` and `decision`, and `act` `approve`, `deny` and
+`choose` on them ([commands](../../planning/contracts/commands.md) 1.3 and 1.4;
 [messages](../../planning/contracts/messages.md) 2.3, 2.4, 3.2 and 3.3;
-[task machine](../../planning/contracts/task-machine.md) rows 17 to 20), under the keys
-`post/approval`, `post/decision`, `act/approve`, `act/deny` and `act/choose`, and the helpers
-`cardPending` and `cardClose` that task transitions share. Where the contracts are silent, it does
-this:
+[task machine](../../planning/contracts/task-machine.md) rows 17 to 20), under `post/approval`,
+`post/decision`, `act/approve`, `act/deny` and `act/choose`, plus `cardPending` for reading a
+task's pending cards from `Disk.Pending` oldest first. Where the contracts are silent:
 
-- **Post.** Only an AI posts an `approval` or `decision` card, else `forbidden`. What the payload
-  says by itself is `bad_request`: for `approval`, `thread` missing or not `body.task`, `body.ai`
-  not `as`, `category` outside `command`/`file`/`network`/`other`, `command` above 3,072 bytes as a
-  JSON string with its quotes, `full` at or below `len(command)`, `why` empty or above 256 bytes as
-  a JSON string with its quotes, `approvers` empty or holding an empty or repeated user id; for
-  `decision`, `thread` and `body.task` disagreeing, `context` empty, an option with an empty or
-  repeated `id`, `recommended` naming no option of the card, `to` empty or holding an empty or
-  repeated user id; for either, a member mentioned twice. A mentioned id that is no member of the
-  group is `conflict`. For a card about a task, a missing task is `not_found`; then `Step` runs
-  (`OnApproval` or `OnDecision`) with `cardPending` before the message id is checked, so a wrong
-  sender (`forbidden`) or a paused task (`paused`) comes before a duplicate id (`conflict`). The
-  card row has `main` `true`, `ts` as signed and `state` `pending`; a card in a thread advances
-  `task.Thread` (`count` + 1, `last` with `text` cut to 200 characters) and writes `[card, task]`.
-- **Act.** `approve` and `deny` take neither `arg` nor `text`; `choose` takes at least one of
-  `arg` and `text`, neither empty, a `text` of at most 1,024 bytes as a JSON string with its
-  quotes, `arg` naming one of `body.options` when given, and no `arg` when `options` is empty;
-  else `bad_request`. A missing message is `not_found`; a message of the wrong kind is
-  `bad_request`. Only a person in `body.approvers` decides an approval, and only a person in
-  `body.to` or an admin decides a decision (`as` never does), else `forbidden`. A card whose
-  `state.status` is not `pending` (`approved`, `denied`, `decided`, `expired`, `reassigned`), or
-  one whose task is missing, final (`merged`, `cancelled`) or, for `approval`, assigned to another
-  AI than `body.ai`, is `conflict`.
-- **Outcome, expiry and reassignment.** The card's `state` gets `by` (the person's member id),
-  `at` (`c.Now`), `act` (`c.Env`), and for `choose` `choice` and `text` when present. Cards naming
-  a task run `Step` (`OnApprove` or `OnChoose`) with `ByPerson` and `cardPending`; the task row is
-  written after the card row when `Step` changed it (`[card, task]`), and left out when it did not
-  (such as a paused task keeping its wait). Each `decided` item (`body.ai` for `approval`;
-  `card.By`, and `task.Assignee` when another, for `decision`) carries no `cause`, and is queued
-  while that AI is still a member of the group. Cards never expire on a timer: a pending card stays
-  pending until someone acts on it or its task is reassigned, merged or cancelled
-  ([approval flow](../../planning/flows/approval.md), sections D and E). `cardPending` reads the
-  task's pending cards from `Disk.Pending` oldest first; `cardClose` applies `Effects.Cards`
-  (`reassigned` on pending approval cards when the assignee changes, `expired` on pending approval
-  and decision cards when the task is merged or cancelled, queuing no `decided` item).
+- **Post.** Both card kinds may be posted in the main line (`thread` `null`, with `body.task` `""`
+  for `approval` and omitted for `decision`) or in a task's thread (`thread` equal to `body.task`).
+  Duplicate mentions are `bad_request`; mentioning a non-member is `conflict`. For a card on a
+  task, a missing task is `not_found`, and `Step` (`OnApproval` or `OnDecision`, with
+  `BySecretary` for the secretary and `ByAI` for any other AI) runs before the duplicate-id check,
+  so `forbidden` and `paused` precede `conflict` on a taken `n`. A card in a thread advances
+  `task.Thread` (`count` + 1, `last.text` cut at 200 runes) and writes `[card, task]`.
+- **Act.** Empty `arg` or `text` strings are rejected as `bad_request` like unknown fields; a
+  missing message is `not_found`, and an action on the wrong message kind is `bad_request`. Cards
+  naming a task run `Step` (`OnApprove` or `OnChoose`) with `ByPerson`, writing `[card, task]`
+  only when `Step` changed the task row and `[card]` otherwise. Main-line cards update the card row
+  and queue `decided` for the asking AI directly. `decided` items are queued only for AIs still in
+  `State.AIs`.
+
+## Device-log events
+
+`ev_device.go` registers `Events["device"]`, which receives a `[]proto.DeviceRow` slice accepted by
+the node for one person ([envelope](../../planning/contracts/envelope.md), section 4;
+[rows](../../planning/contracts/rows.md), section 2). In step 1 it ignores users other than
+`State.Owner`, appends rows whose `ver` exceeds the entries already held in `State.Logs[State.Owner]`,
+and sets `Result.GroupsChanged` when an `Online` device's access (`State.Serves`) changes between
+served and unserved.
 
 ## Known limitations
 
-- The table of commands holds only the briefs and the cards, and no node starts a loop yet: the other command
-  files and the wiring of the node are separate units
+- The table of commands holds only the groups, members, briefs and cards, and no node starts a loop
+  yet: the other command files and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
@@ -477,6 +512,11 @@ and for the refusals, and covers every statement of `machine.go`. `features/home
 holds acceptance test A5.18 at step `merge` and the two points of the third review, a card decided
 while a task is paused and a reviewer named while it is paused.
 
+`cmd_group_test.go` and `cmd_member_test.go` send `group/create`, `group/set`, `member/add_ai`,
+`member/set` and `member/remove` through `Commands.Apply` with fakes of `Receipts` and `Disk`,
+covering every refusal, boundary and secretary transition. `features/home_group.feature` holds the
+home command part of A2.1 and the member-removal part of A5.18.
+
 `cmd_brief_test.go` sends every command of the briefs through `Commands.Apply` with fakes of
 `Receipts` and `Disk`, with a case for every refusal and branch. `features/home_brief.feature`
 holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
@@ -484,7 +524,10 @@ holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the com
 commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
 
 `cmd_card_test.go` exercises `post/approval`, `post/decision`, `act/approve`, `act/deny` and
-`act/choose` through `Commands.Apply` with fakes of `Receipts` and `Disk`, pinning every boundary,
-wait recomputation and refusal, and `cmd_card_internal_test.go` covers `cardPending` and
-`cardClose`. `features/home_card.feature` holds the home half of acceptance tests A4.1 and A4.2,
-decision priority, reassignment and expiry.
+`act/choose` through `Commands.Apply` with fakes of `Receipts` and `Disk`, covering main-line and
+task cards, wait recomputation and refusals, and `cmd_card_internal_test.go` covers `cardPending`,
+`cardChoiceOK`, `cardPoster` and `cardItems`. `features/home_card.feature` holds the home half of
+acceptance tests A4.1 and A4.2, decision priority and free-text override.
+
+`ev_device_test.go` covers every branch and boundary of `Events["device"]`, including ignored event
+types, empty and non-owner slices, version boundaries and online/offline `GroupsChanged` transitions.

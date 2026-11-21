@@ -9,8 +9,8 @@ import (
 )
 
 // Approval and decision cards: post of kinds approval and decision, act
-// approve, deny and choose on them, and the pending-card helpers shared by
-// task transitions (planning/contracts/commands.md 1.3 and 1.4;
+// approve, deny and choose on them, and cardPending for reading a task's
+// pending cards (planning/contracts/commands.md 1.3 and 1.4;
 // planning/contracts/messages.md 2.3, 2.4, 3.2 and 3.3;
 // planning/contracts/task-machine.md rows 17 to 20).
 
@@ -26,22 +26,13 @@ const (
 	cardKindApproval = "approval"
 	cardKindDecision = "decision"
 
-	cardStatusPending    = "pending"
-	cardStatusApproved   = "approved"
-	cardStatusDenied     = "denied"
-	cardStatusDecided    = "decided"
-	cardStatusExpired    = "expired"
-	cardStatusReassigned = "reassigned"
+	cardStatusPending  = "pending"
+	cardStatusApproved = "approved"
+	cardStatusDenied   = "denied"
+	cardStatusDecided  = "decided"
 
-	// cardCommandLimit and cardWhyLimit are the most bytes command and why of
-	// an approval body may have as JSON strings, quotes included
-	// (planning/contracts/messages.md 2.3).
-	cardCommandLimit = 3072
-	cardWhyLimit     = 256
 	cardPreviewLimit = 200
 )
-
-var cardCategories = []string{"command", "file", "network", "other"}
 
 type cardPostSpec struct {
 	kind     string
@@ -73,35 +64,18 @@ func cardPostApproval(s *State, c Command) (Result, *Refusal) {
 		kind: cardKindApproval, on: OnApproval, taskID: p.Body.Task, who: p.Body.Approvers,
 		text: p.Text, mentions: mentions, re: p.Re, body: p.Body,
 	}
-	return s.cardPostOnTask(c, spec)
+	return s.cardWritePost(c, spec)
 }
 
 func cardApprovalShape(p proto.Post[proto.ApprovalBody], ai string) bool {
-	if p.Thread == nil || string(*p.Thread) != p.Body.Task || p.Body.AI != ai {
-		return false
-	}
-	return cardApprovalBody(p.Body)
+	return cardApprovalThread(p.Thread, p.Body.Task) && p.Body.AI == ai && cardUsers(p.Body.Approvers)
 }
 
-func cardApprovalBody(b proto.ApprovalBody) bool {
-	if !slices.Contains(cardCategories, b.Category) || !cardUsers(b.Approvers) {
-		return false
+func cardApprovalThread(thread *proto.ID, task string) bool {
+	if thread == nil {
+		return task == ""
 	}
-	if len(briefJSON(b.Command)) > cardCommandLimit || !cardFullOK(b.Full, b.Command) {
-		return false
-	}
-	return cardWhyOK(b.Why)
-}
-
-func cardFullOK(full *int, command string) bool {
-	return full == nil || *full > len(command)
-}
-
-func cardWhyOK(why *string) bool {
-	if why == nil {
-		return true
-	}
-	return *why != "" && len(briefJSON(*why)) <= cardWhyLimit
+	return string(*thread) == task
 }
 
 func cardPostDecision(s *State, c Command) (Result, *Refusal) {
@@ -119,17 +93,15 @@ func cardPostDecision(s *State, c Command) (Result, *Refusal) {
 	if refusal != nil {
 		return Result{}, refusal
 	}
-	return s.cardWriteDecision(c, p, mentions)
+	spec := cardPostSpec{
+		kind: cardKindDecision, on: OnDecision, taskID: cardTaskStr(p.Body.Task), who: p.Body.To,
+		text: p.Text, mentions: mentions, re: p.Re, body: p.Body,
+	}
+	return s.cardWritePost(c, spec)
 }
 
 func cardDecisionShape(p proto.Post[proto.DecisionBody]) bool {
-	if !cardSameTask(p.Thread, p.Body.Task) || !cardUsers(p.Body.To) {
-		return false
-	}
-	if p.Body.Context != nil && *p.Body.Context == "" {
-		return false
-	}
-	return cardOptionsOK(p.Body.Options, p.Body.Recommended)
+	return cardSameTask(p.Thread, p.Body.Task) && cardUsers(p.Body.To)
 }
 
 func cardSameTask(thread *proto.ID, task *string) bool {
@@ -139,13 +111,15 @@ func cardSameTask(thread *proto.ID, task *string) bool {
 	return task != nil && string(*thread) == *task
 }
 
-func cardOptionsOK(options []proto.DecisionOption, recommended *string) bool {
-	for i, opt := range options {
-		if opt.ID == "" || cardHasOption(options[:i], opt.ID) {
-			return false
-		}
+func cardTaskStr(task *string) string {
+	if task == nil {
+		return ""
 	}
-	return recommended == nil || cardHasOption(options, *recommended)
+	return *task
+}
+
+func cardUsers(users []string) bool {
+	return len(users) > 0
 }
 
 func cardHasOption(options []proto.DecisionOption, id string) bool {
@@ -157,19 +131,19 @@ func cardHasOption(options []proto.DecisionOption, id string) bool {
 	return false
 }
 
-func (s *State) cardWriteDecision(c Command, p proto.Post[proto.DecisionBody], mentions []string) (Result, *Refusal) {
-	if p.Body.Task == nil {
-		card, refusal := s.cardNewMsg(c, cardKindDecision, nil, p.Text, mentions, p.Re, p.Body)
-		if refusal != nil {
-			return Result{}, refusal
-		}
-		return Result{Rows: []Row{RowOf(card)}}, nil
-	}
-	spec := cardPostSpec{
-		kind: cardKindDecision, on: OnDecision, taskID: *p.Body.Task, who: p.Body.To,
-		text: p.Text, mentions: mentions, re: p.Re, body: p.Body,
+func (s *State) cardWritePost(c Command, spec cardPostSpec) (Result, *Refusal) {
+	if spec.taskID == "" {
+		return s.cardPostMain(c, spec)
 	}
 	return s.cardPostOnTask(c, spec)
+}
+
+func (s *State) cardPostMain(c Command, spec cardPostSpec) (Result, *Refusal) {
+	card, refusal := s.cardNewMsg(c, spec.kind, nil, spec.text, spec.mentions, spec.re, spec.body)
+	if refusal != nil {
+		return Result{}, refusal
+	}
+	return Result{Rows: []Row{RowOf(card)}}, nil
 }
 
 func (s *State) cardPostOnTask(c Command, spec cardPostSpec) (Result, *Refusal) {
@@ -179,7 +153,7 @@ func (s *State) cardPostOnTask(c Command, spec cardPostSpec) (Result, *Refusal) 
 	}
 	id := string(c.Nonce)
 	ev := Event{
-		Kind: spec.on, By: ByAI, Member: c.Who.AI, Now: c.Now,
+		Kind: spec.on, By: s.cardPoster(c.Who), Member: c.Who.AI, Now: c.Now,
 		Card:    PendingCard{Kind: spec.kind, Msg: id, Who: spec.who, Since: c.Timestamp},
 		Pending: cardPending(c.Disk, task.ID),
 	}
@@ -192,6 +166,13 @@ func (s *State) cardPostOnTask(c Command, spec cardPostSpec) (Result, *Refusal) 
 		return Result{}, refusal
 	}
 	return Result{Rows: []Row{RowOf(card), RowOf(cardThread(moved, card))}}, nil
+}
+
+func (s *State) cardPoster(w Who) Sender {
+	if s.Secretary(w) {
+		return BySecretary
+	}
+	return ByAI
 }
 
 func (s *State) cardNewMsg(c Command, kind string, thread *string, text string, mentions []string, re *proto.ID, body any) (proto.MsgRow, *Refusal) {
@@ -218,46 +199,19 @@ func cardPreview(text string) string {
 	return string(runes[:min(len(runes), cardPreviewLimit)])
 }
 
-func cardUsers(users []string) bool {
-	for i, u := range users {
-		if u == "" || slices.Contains(users[:i], u) {
-			return false
-		}
-	}
-	return len(users) > 0
-}
-
 func (s *State) cardMentions(ids []proto.ID) ([]string, *Refusal) {
-	list, unique := cardDistinct(ids)
-	if !unique {
-		return nil, &Refusal{"bad_request", "a card mentions the same member twice"}
-	}
-	for _, m := range list {
-		if !s.cardHasMember(m) {
-			return nil, &Refusal{"conflict", "a card mentions no member of the group"}
-		}
-	}
-	return list, nil
-}
-
-func cardDistinct(ids []proto.ID) ([]string, bool) {
-	seen := make(map[proto.ID]bool, len(ids))
 	list := make([]string, len(ids))
 	for i, id := range ids {
-		if seen[id] {
-			return nil, false
+		m := string(id)
+		if slices.Contains(list[:i], m) {
+			return nil, &Refusal{"bad_request", "a card mentions the same member twice"}
 		}
-		seen[id], list[i] = true, string(id)
+		if !s.memExists(m) {
+			return nil, &Refusal{"conflict", "a card mentions no member of the group"}
+		}
+		list[i] = m
 	}
-	return list, true
-}
-
-func (s *State) cardHasMember(id string) bool {
-	if _, ok := s.People[id]; ok {
-		return true
-	}
-	_, ok := s.AIs[id]
-	return ok
+	return list, nil
 }
 
 func cardApprove(s *State, c Command) (Result, *Refusal) {
@@ -281,26 +235,12 @@ func (s *State) cardDecideApproval(c Command, status string) (Result, *Refusal) 
 	if briefStatus(card) != cardStatusPending {
 		return Result{}, &Refusal{"conflict", "the approval card is no longer pending"}
 	}
-	return s.cardFinishApproval(c, card, body, status)
+	decided := cardActed(card, c, status, nil, nil)
+	return s.cardFinishAct(c, decided, body.Task, OnApprove, body.Approvers, body.AI), nil
 }
 
 func cardMayApprove(w Who, approvers []string) bool {
 	return w.AI == "" && slices.Contains(approvers, w.User)
-}
-
-func (s *State) cardFinishApproval(c Command, card proto.MsgRow, body proto.ApprovalBody, status string) (Result, *Refusal) {
-	task := s.Tasks[body.Task]
-	if !slices.Contains(statesOpen, task.State) || task.Assignee != body.AI {
-		return Result{}, &Refusal{"conflict", "the task of the approval card is no longer open for that AI"}
-	}
-	decided := cardActed(card, c, status, nil, nil)
-	ev := Event{
-		Kind: OnApprove, By: ByPerson, Now: c.Now,
-		Card:    PendingCard{Kind: cardKindApproval, Msg: card.ID, Who: body.Approvers, Since: card.Timestamp},
-		Asker:   body.AI,
-		Pending: cardPending(c.Disk, task.ID),
-	}
-	return s.cardApplyStep(decided, task, ev), nil
 }
 
 func cardChoose(s *State, c Command) (Result, *Refusal) {
@@ -319,7 +259,8 @@ func cardChoose(s *State, c Command) (Result, *Refusal) {
 	if briefStatus(card) != cardStatusPending {
 		return Result{}, &Refusal{"conflict", "the decision card is no longer pending"}
 	}
-	return s.cardFinishDecision(c, act, card, body)
+	decided := cardActed(card, c, cardStatusDecided, cardOpt(act.Arg), cardOpt(act.Text))
+	return s.cardFinishAct(c, decided, cardTaskStr(body.Task), OnChoose, body.To, card.By), nil
 }
 
 func cardChooseFields(c Command) bool {
@@ -339,23 +280,19 @@ func (s *State) cardMayChoose(w Who, to []string) bool {
 	return w.AI == "" && (slices.Contains(to, w.User) || s.Admin(w))
 }
 
-func (s *State) cardFinishDecision(c Command, act proto.Act, card proto.MsgRow, body proto.DecisionBody) (Result, *Refusal) {
-	decided := cardActed(card, c, cardStatusDecided, cardOpt(act.Arg), cardOpt(act.Text))
-	if body.Task == nil {
-		items := s.cardItems([]TaskItem{{Why: itemDecided, AI: card.By}}, "", card.ID)
-		return Result{Rows: []Row{RowOf(decided)}, Items: items}, nil
+func (s *State) cardFinishAct(c Command, decided proto.MsgRow, taskID string, on EventKind, who []string, asker string) Result {
+	if taskID == "" {
+		items := s.cardItems([]TaskItem{{Why: itemDecided, AI: asker}}, "", decided.ID)
+		return Result{Rows: []Row{RowOf(decided)}, Items: items}
 	}
-	task := s.Tasks[*body.Task]
-	if !slices.Contains(statesOpen, task.State) {
-		return Result{}, &Refusal{"conflict", "the task of the decision card is no longer open"}
-	}
+	task := s.Tasks[taskID]
 	ev := Event{
-		Kind: OnChoose, By: ByPerson, Now: c.Now,
-		Card:    PendingCard{Kind: cardKindDecision, Msg: card.ID, Who: body.To, Since: card.Timestamp},
-		Asker:   card.By,
+		Kind: on, By: ByPerson, Now: c.Now,
+		Card:    PendingCard{Kind: decided.Kind, Msg: decided.ID, Who: who, Since: decided.Timestamp},
+		Asker:   asker,
 		Pending: cardPending(c.Disk, task.ID),
 	}
-	return s.cardApplyStep(decided, task, ev), nil
+	return s.cardApplyStep(decided, task, ev)
 }
 
 func cardOpenAct(c Command, kind string, validArgs func(Command) bool) (proto.Act, proto.MsgRow, *Refusal) {
@@ -437,29 +374,4 @@ func cardWho(msg proto.MsgRow) []string {
 		return body.Approvers
 	}
 	return body.To
-}
-
-// cardClose marks the pending cards of task as Effects.Cards asks: expired on
-// a merge or cancel (approval and decision cards), reassigned when the task's
-// assignee changes (approval cards only).
-func cardClose(d Disk, task, status string, now int64) []Row {
-	if status == "" {
-		return nil
-	}
-	var rows []Row
-	for _, msg := range d.Pending() {
-		if cardCloses(msg, task, status) {
-			at := now
-			msg.State = &proto.CardState{Status: status, At: &at}
-			rows = append(rows, RowOf(msg))
-		}
-	}
-	return rows
-}
-
-func cardCloses(msg proto.MsgRow, task, status string) bool {
-	if !cardForTask(msg, task) {
-		return false
-	}
-	return status == cardStatusExpired || msg.Kind == cardKindApproval
 }

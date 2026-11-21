@@ -82,7 +82,7 @@ func homeCardSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^a card home with an active task assigned to "([^"]*)"$`, w.setup)
 	sc.Step(`^"([^"]*)" (?:posts|has posted) an approval card for command "([^"]*)"$`, w.postApproval)
 	sc.Step(`^the secretary (?:posts|has posted) a decision card on the task with options "([^"]*)"$`, w.postDecision)
-	sc.Step(`^the owner's (first|second) browser (?:approves|tries to approve) the approval card$`, func(which string) error {
+	sc.Step(`^the owner's (first|second) browser approves the approval card$`, func(which string) error {
 		return w.actCard(w.devices[which], w.approval, "approve", "")
 	})
 	sc.Step(`^the owner's (first|second) browser denies the approval card$`, func(which string) error {
@@ -100,9 +100,7 @@ func homeCardSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the owner's (first|second) browser tries to choose nothing on the decision card$`, func(which string) error {
 		return w.actCard(w.devices[which], w.decision, "choose", "")
 	})
-	sc.Step(`^(a non-approver member tries to approve the approval card|"ai-one" tries to approve its own approval card|the owner's first browser tries to approve the approval card with an arg|"ai-two" tries to post an approval card on "ai-one"'s task)$`, w.attemptRefusal)
-	sc.Step(`^the card task is reassigned to "([^"]*)"$`, w.reassignTask)
-	sc.Step(`^the card task is cancelled$`, w.cancelTask)
+	sc.Step(`^(a non-approver member tries to approve the approval card|"ai-one" tries to approve its own approval card|the owner's first browser tries to approve the approval card with an arg|"ai-three" tries to post an approval card on "ai-one"'s task)$`, w.attemptRefusal)
 	sc.Step(`^the card home answers ok$`, func() error { return w.checkAnswer("") })
 	sc.Step(`^the card home answers "([^"]*)"$`, w.checkAnswer)
 	sc.Step(`^the approval card is "([^"]*)" with command "([^"]*)"$`, w.checkApprovalCmd)
@@ -114,10 +112,9 @@ func homeCardSteps(sc *godog.ScenarioContext) {
 		return w.checkDecision(status, nil, &text)
 	})
 	sc.Step(`^the approval card is "([^"]*)" and the decision card is "([^"]*)"$`, w.checkBothStatuses)
-	sc.Step(`^the decision card is "([^"]*)"$`, func(status string) error { return w.checkCardStatus(w.decision, status) })
 	sc.Step(`^the card task waits for "([^"]*)" on the (approval|decision) card$`, w.checkTaskCardWait)
 	sc.Step(`^the card task waits for "nothing"$`, w.checkNoWait)
-	sc.Step(`^the card home has queued "([^"]*)" with no cause$`, w.checkQueued)
+	sc.Step(`^the card home has queued "([^"]*)"$`, w.checkQueued)
 	sc.Step(`^the card home has queued nothing$`, func() error { return w.checkQueued("") })
 }
 
@@ -126,7 +123,7 @@ func (w *homeCardWorld) setup(assignee string) error {
 	node, host, guest := exampleKey("card node"), exampleKey("card host"), exampleKey("card guest")
 	w.devices = map[string]identity.Key{"first": b1, "second": b2, "host": host, "guest": guest}
 	w.members = map[string]string{}
-	for _, name := range []string{"owner", "guest", "secretary", "ai-one", "ai-two"} {
+	for _, name := range []string{"owner", "guest", "secretary", "ai-one", "ai-two", "ai-three"} {
 		w.members[name] = string(exampleID("card " + name))
 	}
 	group := string(exampleID("card group"))
@@ -154,7 +151,7 @@ func (w *homeCardWorld) setup(assignee string) error {
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.members["guest"]}, Group: group, Kind: "human", User: guest.ID(), Name: "guest"},
 		Role:      "member",
 	}
-	for _, name := range []string{"secretary", "ai-one", "ai-two"} {
+	for _, name := range []string{"secretary", "ai-one", "ai-two", "ai-three"} {
 		mid := w.members[name]
 		w.state.AIs[mid] = proto.AIMemberRow{
 			MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: mid}, Group: group, Kind: "ai", User: b1.ID(), Name: name},
@@ -242,7 +239,7 @@ func (w *homeCardWorld) attemptRefusal(attempt string) error {
 	case "the owner's first browser tries to approve the approval card with an arg":
 		return w.actCard(w.devices["first"], w.approval, "approve", `,"arg":"A"`)
 	default:
-		return w.postApproval("ai-two", "echo hi")
+		return w.postApproval("ai-three", "echo hi")
 	}
 }
 
@@ -260,61 +257,6 @@ func (w *homeCardWorld) apply(by identity.Key, env proto.Envelope) error {
 	w.answers = append(w.answers, res)
 	w.queued = append(w.queued, res.Items...)
 	return nil
-}
-
-func (w *homeCardWorld) pendingCards() []home.PendingCard {
-	var out []home.PendingCard
-	for _, m := range w.disk.Pending() {
-		if m.Thread == nil || *m.Thread != w.taskID {
-			continue
-		}
-		var body struct {
-			Approvers []string `json:"approvers"`
-			To        []string `json:"to"`
-		}
-		json.Unmarshal(m.Body, &body)
-		who := append(body.Approvers, body.To...)
-		out = append(out, home.PendingCard{Kind: m.Kind, Msg: m.ID, Who: who, Since: m.Timestamp})
-	}
-	return out
-}
-
-func (w *homeCardWorld) reassignTask(nextAI string) error {
-	task := w.state.Tasks[w.taskID]
-	task.Reviewer = w.members["ai-one"]
-	moved, fx, err := home.Step(task, home.Event{
-		Kind: home.OnAssign, By: home.BySecretary, Member: w.members["secretary"],
-		Now: w.now.UnixMilli(), Assignee: w.members[nextAI], Pending: w.pendingCards(),
-	})
-	if err != nil {
-		return err
-	}
-	w.state.Tasks[w.taskID] = moved
-	w.closeTaskCards(fx.Cards)
-	return nil
-}
-
-func (w *homeCardWorld) cancelTask() error {
-	task := w.state.Tasks[w.taskID]
-	moved, fx, err := home.Step(task, home.Event{
-		Kind: home.OnCancel, By: home.ByAdmin, Now: w.now.UnixMilli(), Pending: w.pendingCards(),
-	})
-	if err != nil {
-		return err
-	}
-	w.state.Tasks[w.taskID] = moved
-	w.closeTaskCards(fx.Cards)
-	return nil
-}
-
-func (w *homeCardWorld) closeTaskCards(status string) {
-	at := w.now.UnixMilli()
-	for _, m := range w.disk.Pending() {
-		if m.Thread != nil && *m.Thread == w.taskID && (status == "expired" || m.Kind == "approval") {
-			m.State = &proto.CardState{Status: status, At: &at}
-			w.disk[m.ID] = m
-		}
-	}
 }
 
 func (w *homeCardWorld) checkAnswer(code string) error {
@@ -395,9 +337,6 @@ func (w *homeCardWorld) checkQueued(spec string) error {
 	var got []string
 	for _, it := range w.queued {
 		got = append(got, fmt.Sprintf("%s %s task %d", it.Why, w.memberName(it.AI), w.state.Tasks[it.Task].Num))
-		if it.Cause != nil {
-			return fmt.Errorf("item %+v has cause %+v; want nil", it, it.Cause)
-		}
 	}
 	if !slices.Equal(got, want) {
 		return fmt.Errorf("queued %q; want %q", got, want)

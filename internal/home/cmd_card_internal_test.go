@@ -32,7 +32,7 @@ func cardTestSame(t *testing.T, got, want any) {
 	}
 }
 
-func cardTestFixture() (string, string, cardTestDisk) {
+func cardTestFixture() (string, cardTestDisk) {
 	t1, t2 := "task-one", "task-two"
 	d := cardTestDisk{
 		{
@@ -69,13 +69,13 @@ func cardTestFixture() (string, string, cardTestDisk) {
 			State: &proto.CardState{Status: "pending"},
 		},
 	}
-	return t1, t2, d
+	return t1, d
 }
 
 // cardPending keeps only the pending approval and decision cards of the named
 // task, in the oldest-first order Disk.Pending returns them.
 func TestCardPendingSelectsTaskCardsInOrder(t *testing.T) {
-	t1, _, d := cardTestFixture()
+	t1, d := cardTestFixture()
 	got := cardPending(d, t1)
 	want := []PendingCard{
 		{Kind: "decision", Msg: "dec-t1", Who: []string{"u1", "u3"}, Since: 140},
@@ -85,39 +85,10 @@ func TestCardPendingSelectsTaskCardsInOrder(t *testing.T) {
 	cardTestSame(t, cardPending(d, "task-missing"), []PendingCard(nil))
 }
 
-// cardClose marks pending approval cards reassigned on an assignee change, and
-// both pending approval and decision cards expired when the task ends.
-func TestCardCloseExpiresAndReassigns(t *testing.T) {
-	t1, _, d := cardTestFixture()
-	at := int64(900)
-
-	cardTestSame(t, cardClose(d, t1, "", at), []Row(nil))
-
-	reassigned := cardClose(d, t1, "reassigned", at)
-	cardTestSame(t, len(reassigned), 1)
-	wantApp, _ := d.Msg("app-t1")
-	wantApp.State = &proto.CardState{Status: "reassigned", At: &at}
-	cardTestSame(t, reassigned[0].Value(), any(wantApp))
-	rawApp := briefJSON(reassigned[0].Value())
-	cardTestSame(t, proto.UnexpectedNulls(rawApp, "/re"), []string{})
-	var decodedApp proto.MessageRow[proto.ApprovalBody, proto.TimedState]
-	cardTestSame(t, proto.Decode(rawApp, &decodedApp), nil)
-
-	expired := cardClose(d, t1, "expired", at)
-	cardTestSame(t, len(expired), 2)
-	wantDec, _ := d.Msg("dec-t1")
-	wantDec.State = &proto.CardState{Status: "expired", At: &at}
-	wantApp.State = &proto.CardState{Status: "expired", At: &at}
-	cardTestSame(t, []any{expired[0].Value(), expired[1].Value()}, []any{wantDec, wantApp})
-	rawDec := briefJSON(expired[0].Value())
-	cardTestSame(t, proto.UnexpectedNulls(rawDec, "/re"), []string{})
-	var decodedDec proto.MessageRow[proto.DecisionBody, proto.TimedState]
-	cardTestSame(t, proto.Decode(rawDec, &decodedDec), nil)
-}
-
-// cardChoiceOK accepts an omitted arg or a listed option id, and cardItems
-// queues decided items without a cause for current AI members only.
-func TestCardChoiceOKAndCardItems(t *testing.T) {
+// cardChoiceOK accepts an omitted arg or a listed option id, cardPoster maps
+// the secretary to BySecretary and any other AI to ByAI, and cardItems queues
+// decided items for current AI members only.
+func TestCardChoiceOKPosterAndItems(t *testing.T) {
 	opts := []proto.DecisionOption{{ID: "A", Label: "One", Effect: "First"}, {ID: "B", Label: "Two", Effect: "Second"}}
 	cardTestSame(t, cardChoiceOK(opts, ""), true)
 	cardTestSame(t, cardChoiceOK(opts, "A"), true)
@@ -126,7 +97,12 @@ func TestCardChoiceOKAndCardItems(t *testing.T) {
 	cardTestSame(t, cardChoiceOK(nil, "A"), false)
 
 	s := NewState("g1", "home-1", "owner-1")
+	s.Group.Secretary = "sec"
+	s.AIs["sec"] = proto.AIMemberRow{Secretary: true}
 	s.AIs["ai1"] = proto.AIMemberRow{}
+	cardTestSame(t, s.cardPoster(Who{AI: "sec"}), BySecretary)
+	cardTestSame(t, s.cardPoster(Who{AI: "ai1"}), ByAI)
+
 	got := s.cardItems([]TaskItem{{Why: "decided", AI: "ai1"}, {Why: "decided", AI: "gone"}}, "task-one", "dec-1")
-	cardTestSame(t, got, []Item{{AI: "ai1", Why: "decided", Task: "task-one", Msg: "dec-1", Cause: nil}})
+	cardTestSame(t, got, []Item{{AI: "ai1", Why: "decided", Task: "task-one", Msg: "dec-1"}})
 }

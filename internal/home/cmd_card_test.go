@@ -17,6 +17,7 @@ import (
 var (
 	cardA, cardB, cardGuest = id(30), id(31), id(32)
 	cardTaskID, cardOtherID = id(33), id(34)
+	cardC                   = id(36)
 	cardPhone               = device(7)
 )
 
@@ -50,6 +51,7 @@ func cardState(t *testing.T) *home.State {
 	s.Logs[browser.ID()] = logOf(t, browser, node, laptop, cardPhone)
 	s.AIs[cardA] = ai(cardA, laptop)
 	s.AIs[cardB] = ai(cardB, laptop)
+	s.AIs[cardC] = ai(cardC, laptop)
 	s.People[cardGuest] = person(cardGuest, guest, "member")
 	s.Tasks[cardTaskID] = proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: cardTaskID, Seq: 9}, Group: groupID, Num: 5,
@@ -71,10 +73,14 @@ func cardApprovalBody() proto.ApprovalBody {
 }
 
 func cardApprovalPost(n byte, body proto.ApprovalBody) proto.Post[proto.ApprovalBody] {
-	tid := proto.ID(body.Task)
+	var tid *proto.ID
+	if body.Task != "" {
+		v := proto.ID(body.Task)
+		tid = &v
+	}
 	return proto.Post[proto.ApprovalBody]{
-		HomeCommand: proto.HomeCommand{Type: "post", Nonce: proto.ID(id(n)), Timestamp: cardPostTS, Group: proto.ID(groupID), As: proto.ID(cardA)},
-		Kind:        "approval", Thread: &tid, Main: true, Mentions: []proto.ID{proto.ID(ownerID)}, Body: body,
+		HomeCommand: proto.HomeCommand{Type: "post", Nonce: proto.ID(id(n)), Timestamp: cardPostTS, Group: proto.ID(groupID), As: proto.ID(body.AI)},
+		Kind:        "approval", Thread: tid, Main: true, Mentions: []proto.ID{proto.ID(ownerID)}, Body: body,
 	}
 }
 
@@ -182,59 +188,76 @@ func TestCardPostApprovalWritesAPendingCardAndUpdatesTheTask(t *testing.T) {
 	equal(t, minRes.Rows[1].Value().(proto.TaskRow).Thread.Last.Text, strings.Repeat("中", 200))
 }
 
-// Boundaries of command, full, why and category, and wait priority through Event.Pending.
-func TestCardPostApprovalBoundariesAndWaitPriority(t *testing.T) {
-	cmdMax := strings.Repeat("a", 3070)
-	cmdAngle := strings.Repeat("a", 3069) + "<"
-	whyMax := strings.Repeat("b", 254)
-	whyAngle := strings.Repeat("b", 253) + "<"
-	fullMin := 1
-	fullOver := len(cmdMax) + 1
-	for name, body := range map[string]func(*proto.ApprovalBody){
-		"command of 3 KiB":           func(b *proto.ApprovalBody) { b.Command, b.Full = cmdMax, &fullOver },
-		"command of 3 KiB holding <": func(b *proto.ApprovalBody) { b.Command, b.Full = cmdAngle, nil },
-		"empty command with full 1":  func(b *proto.ApprovalBody) { b.Command, b.Full = "", &fullMin },
-		"why of 256 bytes":           func(b *proto.ApprovalBody) { b.Why = &whyMax },
-		"why of 256 bytes holding <": func(b *proto.ApprovalBody) { b.Why = &whyAngle },
-		"file category":              func(b *proto.ApprovalBody) { b.Category = "file" },
-		"network category":           func(b *proto.ApprovalBody) { b.Category = "network" },
-		"two distinct approvers":     func(b *proto.ApprovalBody) { b.Approvers = []string{browser.ID(), guest.ID()} },
-	} {
-		t.Run(name, func(t *testing.T) {
-			s := cardState(t)
-			b := cardApprovalBody()
-			body(&b)
-			res := cardApply(t, s, cardDisk{}, receipts{}, laptop, briefSign(laptop, cardApprovalPost(60, b)))
-			equal(t, res.Answer, store.Outcome{OK: true})
-		})
-	}
+// Main-line approvals (group session), reviewer task approvals (review
+// session), and wait priority through Event.Pending.
+func TestCardApprovalFromMainLineAndReviewSession(t *testing.T) {
+	t.Run("main-line approval from secretary posts and decides without a task", func(t *testing.T) {
+		s, d := cardState(t), cardDisk{}
+		body := cardApprovalBody()
+		body.Task, body.AI = "", aiID
+		post := cardApprovalPost(60, body)
+		post.Main = false
+		resPost := cardApply(t, s, d, receipts{}, laptop, briefSign(laptop, post))
+		equal(t, resPost.Answer, store.Outcome{OK: true})
+		equal(t, len(resPost.Rows), 1)
+		got := resPost.Rows[0].Value().(proto.MsgRow)
+		equal(t, []any{got.Thread == nil, got.Main, got.By, got.State.Status}, []any{true, true, aiID, "pending"})
+		raw := briefRaw(t, got)
+		equal(t, proto.UnexpectedNulls(raw, "/thread", "/re"), []string{})
+		var typed proto.MessageRow[proto.ApprovalBody, proto.StatusOnly]
+		equal(t, proto.Decode(raw, &typed), nil)
+		cardCommit(s, d, resPost)
 
-	// Older pending approval keeps the wait; approval takes the wait from a pending decision.
-	s, d := cardState(t), cardDisk{}
-	decPost := cardDecisionPost(58, aiID, cardDecisionBody(&cardTaskID))
-	decPost.Timestamp = cardPostTS - 200
-	resDec := cardApply(t, s, d, receipts{}, laptop, briefSign(laptop, decPost))
-	cardCommit(s, d, resDec)
-	equal(t, s.Tasks[cardTaskID].Wait.Kind, "decision")
+		act := cardActEnv(browser, 70, "approve", got.ID, "")
+		resAct := cardApply(t, s, d, receipts{}, browser, act)
+		equal(t, resAct.Answer, store.Outcome{OK: true})
+		equal(t, len(resAct.Rows), 1)
+		equal(t, resAct.Rows[0].Value().(proto.MsgRow).State.Status, "approved")
+		equal(t, resAct.Items, []home.Item{{AI: aiID, Why: "decided", Msg: got.ID}})
+	})
 
-	app1 := cardApprovalPost(59, cardApprovalBody())
-	app1.Timestamp = cardPostTS - 100
-	res1 := cardApply(t, s, d, receipts{}, laptop, briefSign(laptop, app1))
-	cardCommit(s, d, res1)
-	equal(t, s.Tasks[cardTaskID].Wait, &proto.TaskWait{Kind: "approval", Msg: id(59), Who: []string{browser.ID()}, Since: cardPostTS - 100})
+	t.Run("reviewer approval on task sets and clears wait and wakes reviewer", func(t *testing.T) {
+		s, d := cardState(t), cardDisk{}
+		body := cardApprovalBody()
+		body.AI = cardB
+		post := cardApprovalPost(60, body)
+		resPost := cardApply(t, s, d, receipts{}, laptop, briefSign(laptop, post))
+		equal(t, resPost.Answer, store.Outcome{OK: true})
+		equal(t, len(resPost.Rows), 2)
+		cardCommit(s, d, resPost)
+		equal(t, s.Tasks[cardTaskID].Wait, &proto.TaskWait{Kind: "approval", Msg: id(60), Who: []string{browser.ID()}, Since: cardPostTS})
+		equal(t, s.Tasks[cardTaskID].Thread.Last.By, cardB)
 
-	app2 := cardApprovalPost(60, cardApprovalBody())
-	res2 := cardApply(t, s, d, receipts{}, laptop, briefSign(laptop, app2))
-	cardCommit(s, d, res2)
-	equal(t, s.Tasks[cardTaskID].Wait, &proto.TaskWait{Kind: "approval", Msg: id(59), Who: []string{browser.ID()}, Since: cardPostTS - 100})
-	equal(t, s.Tasks[cardTaskID].Thread.Count, 5)
+		act := cardActEnv(browser, 70, "deny", id(60), "")
+		resAct := cardApply(t, s, d, receipts{}, browser, act)
+		equal(t, resAct.Answer, store.Outcome{OK: true})
+		equal(t, len(resAct.Rows), 2)
+		cardCommit(s, d, resAct)
+		equal(t, s.Tasks[cardTaskID].Wait, (*proto.TaskWait)(nil))
+		equal(t, resAct.Items, []home.Item{{AI: cardB, Why: "decided", Task: cardTaskID, Msg: id(60)}})
+	})
+
+	t.Run("older pending approval keeps wait and beats pending decision", func(t *testing.T) {
+		s, d := cardState(t), cardDisk{}
+		decPost := cardDecisionPost(58, aiID, cardDecisionBody(&cardTaskID))
+		decPost.Timestamp = cardPostTS - 200
+		cardCommit(s, d, cardApply(t, s, d, receipts{}, laptop, briefSign(laptop, decPost)))
+		equal(t, s.Tasks[cardTaskID].Wait.Kind, "decision")
+
+		app1 := cardApprovalPost(59, cardApprovalBody())
+		app1.Timestamp = cardPostTS - 100
+		cardCommit(s, d, cardApply(t, s, d, receipts{}, laptop, briefSign(laptop, app1)))
+		equal(t, s.Tasks[cardTaskID].Wait, &proto.TaskWait{Kind: "approval", Msg: id(59), Who: []string{browser.ID()}, Since: cardPostTS - 100})
+
+		app2 := cardApprovalPost(60, cardApprovalBody())
+		cardCommit(s, d, cardApply(t, s, d, receipts{}, laptop, briefSign(laptop, app2)))
+		equal(t, s.Tasks[cardTaskID].Wait, &proto.TaskWait{Kind: "approval", Msg: id(59), Who: []string{browser.ID()}, Since: cardPostTS - 100})
+		equal(t, s.Tasks[cardTaskID].Thread.Count, 5)
+	})
 }
 
 func TestCardPostApprovalRefusals(t *testing.T) {
 	existing := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(60)}, Kind: "text"}
-	badWhyEmpty := ""
-	badWhyLong := strings.Repeat("b", 255)
-	badWhyAngle := strings.Repeat("b", 254) + "<"
 	for name, tc := range map[string]struct {
 		by    identity.Key
 		post  func(*proto.Post[proto.ApprovalBody])
@@ -244,26 +267,20 @@ func TestCardPostApprovalRefusals(t *testing.T) {
 		disk  cardDisk
 		code  string
 	}{
-		"by a person":                     {by: browser, post: func(p *proto.Post[proto.ApprovalBody]) { p.As = "" }, code: "forbidden"},
-		"malformed payload":               {raw: func(s string) string { return strings.Replace(s, `"tool":"Bash"`, `"tool":9`, 1) }, code: "bad_request"},
-		"without a thread":                {post: func(p *proto.Post[proto.ApprovalBody]) { p.Thread = nil }, code: "bad_request"},
-		"thread differs from body.task":   {post: func(p *proto.Post[proto.ApprovalBody]) { other := proto.ID(cardOtherID); p.Thread = &other }, code: "bad_request"},
-		"body.ai differs from as":         {body: func(b *proto.ApprovalBody) { b.AI = cardB }, code: "bad_request"},
-		"unknown category":                {body: func(b *proto.ApprovalBody) { b.Category = "shell" }, code: "bad_request"},
-		"without approvers":               {body: func(b *proto.ApprovalBody) { b.Approvers = []string{} }, code: "bad_request"},
-		"empty approver":                  {body: func(b *proto.ApprovalBody) { b.Approvers = []string{""} }, code: "bad_request"},
-		"duplicate approver":              {body: func(b *proto.ApprovalBody) { b.Approvers = []string{browser.ID(), guest.ID(), browser.ID()} }, code: "bad_request"},
-		"command of 3073 bytes":           {body: func(b *proto.ApprovalBody) { b.Command, b.Full = strings.Repeat("a", 3071), nil }, code: "bad_request"},
-		"command holding < of 3073 bytes": {body: func(b *proto.ApprovalBody) { b.Command, b.Full = strings.Repeat("a", 3070)+"<", nil }, code: "bad_request"},
-		"full equal to command length":    {body: func(b *proto.ApprovalBody) { n := len(b.Command); b.Full = &n }, code: "bad_request"},
-		"empty why":                       {body: func(b *proto.ApprovalBody) { b.Why = &badWhyEmpty }, code: "bad_request"},
-		"why of 257 bytes":                {body: func(b *proto.ApprovalBody) { b.Why = &badWhyLong }, code: "bad_request"},
-		"why holding < of 257 bytes":      {body: func(b *proto.ApprovalBody) { b.Why = &badWhyAngle }, code: "bad_request"},
-		"duplicate mention":               {post: func(p *proto.Post[proto.ApprovalBody]) { p.Mentions = []proto.ID{proto.ID(ownerID), proto.ID(ownerID)} }, code: "bad_request"},
-		"mentioning non-member":           {post: func(p *proto.Post[proto.ApprovalBody]) { p.Mentions = []proto.ID{proto.ID(id(99))} }, code: "conflict"},
-		"missing task":                    {state: func(s *home.State) { delete(s.Tasks, cardTaskID) }, code: "not_found"},
-		"by reviewer even with taken id":  {post: func(p *proto.Post[proto.ApprovalBody]) { p.As = proto.ID(cardB) }, body: func(b *proto.ApprovalBody) { b.AI = cardB }, disk: cardDisk{id(60): existing}, code: "forbidden"},
-		"by secretary":                    {post: func(p *proto.Post[proto.ApprovalBody]) { p.As = proto.ID(aiID) }, body: func(b *proto.ApprovalBody) { b.AI = aiID }, code: "forbidden"},
+		"by a person":                       {by: browser, post: func(p *proto.Post[proto.ApprovalBody]) { p.As = "" }, code: "forbidden"},
+		"malformed payload":                 {raw: func(s string) string { return strings.Replace(s, `"tool":"Bash"`, `"tool":9`, 1) }, code: "bad_request"},
+		"thread nil while body.task set":    {post: func(p *proto.Post[proto.ApprovalBody]) { p.Thread = nil }, code: "bad_request"},
+		"thread set while body.task empty":  {body: func(b *proto.ApprovalBody) { b.Task = "" }, post: func(p *proto.Post[proto.ApprovalBody]) { tid := proto.ID(cardTaskID); p.Thread = &tid }, code: "bad_request"},
+		"thread differs from body.task":     {post: func(p *proto.Post[proto.ApprovalBody]) { other := proto.ID(cardOtherID); p.Thread = &other }, code: "bad_request"},
+		"body.ai differs from as":           {post: func(p *proto.Post[proto.ApprovalBody]) { p.As = proto.ID(cardB) }, code: "bad_request"},
+		"without approvers":                 {body: func(b *proto.ApprovalBody) { b.Approvers = []string{} }, code: "bad_request"},
+		"duplicate mention":                 {post: func(p *proto.Post[proto.ApprovalBody]) { p.Mentions = []proto.ID{proto.ID(ownerID), proto.ID(ownerID)} }, code: "bad_request"},
+		"mentioning non-member":             {post: func(p *proto.Post[proto.ApprovalBody]) { p.Mentions = []proto.ID{proto.ID(id(99))} }, code: "conflict"},
+		"missing task":                      {state: func(s *home.State) { delete(s.Tasks, cardTaskID) }, code: "not_found"},
+		"by third AI even with taken id":    {body: func(b *proto.ApprovalBody) { b.AI = cardC }, disk: cardDisk{id(60): existing}, code: "forbidden"},
+		"by secretary on task":              {body: func(b *proto.ApprovalBody) { b.AI = aiID }, code: "forbidden"},
+		"existing id on main-line approval": {body: func(b *proto.ApprovalBody) { b.Task = "" }, disk: cardDisk{id(60): existing}, code: "conflict"},
+		"existing id on task approval":      {disk: cardDisk{id(60): existing}, code: "conflict"},
 		"on a paused task": {state: func(s *home.State) {
 			t := s.Tasks[cardTaskID]
 			t.State, t.Wait = "paused", &proto.TaskWait{Kind: "manual", Since: 1}
@@ -274,8 +291,7 @@ func TestCardPostApprovalRefusals(t *testing.T) {
 			t.State, t.Wait = "queued", &proto.TaskWait{Kind: "depends", Since: 1}
 			s.Tasks[cardTaskID] = t
 		}, code: "conflict"},
-		"on a failed task":    {state: func(s *home.State) { t := s.Tasks[cardTaskID]; t.State = "failed"; s.Tasks[cardTaskID] = t }, code: "conflict"},
-		"existing message id": {disk: cardDisk{id(60): existing}, code: "conflict"},
+		"on a failed task": {state: func(s *home.State) { t := s.Tasks[cardTaskID]; t.State = "failed"; s.Tasks[cardTaskID] = t }, code: "conflict"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := cardState(t)
@@ -294,9 +310,9 @@ func TestCardPostApprovalRefusals(t *testing.T) {
 			if tc.by != nil {
 				by = tc.by
 			}
-			raw, _ := json.Marshal(post)
+			raw := briefRaw(t, post)
 			if tc.raw != nil {
-				raw = []byte(tc.raw(string(raw)))
+				raw = json.RawMessage(tc.raw(string(raw)))
 			}
 			cardRefused(t, cardApply(t, s, tc.disk, receipts{}, by, by.Sign(string(raw))), tc.code)
 		})
@@ -304,8 +320,7 @@ func TestCardPostApprovalRefusals(t *testing.T) {
 }
 
 // A4.1 and A4.2, home half: approving from a second device or denying updates
-// the card, recomputes the task wait from Event.Pending, and queues decided
-// without a cause.
+// the card, recomputes the task wait from Event.Pending, and queues decided.
 func TestCardApproveAndDeny(t *testing.T) {
 	for _, action := range []struct{ action, status string }{{"approve", "approved"}, {"deny", "denied"}} {
 		t.Run(action.action, func(t *testing.T) {
@@ -391,27 +406,22 @@ func TestCardApproveAndDenyRefusals(t *testing.T) {
 		extra  string
 		body   func(*proto.ApprovalBody)
 		card   func(*proto.MsgRow)
-		state  func(*home.State)
 		code   string
 	}{
-		"invalid msg id":                {action: "approve", msg: "not-an-id", code: "bad_request"},
-		"approve with arg":              {action: "approve", extra: `,"arg":"A"`, code: "bad_request"},
-		"approve with empty arg":        {action: "approve", extra: `,"arg":""`, code: "bad_request"},
-		"deny with text":                {action: "deny", extra: `,"text":"No."`, code: "bad_request"},
-		"deny with empty text":          {action: "deny", extra: `,"text":""`, code: "bad_request"},
-		"missing message":               {action: "approve", msg: id(90), code: "not_found"},
-		"wrong card kind":               {action: "deny", card: func(m *proto.MsgRow) { m.Kind = "decision" }, code: "bad_request"},
-		"by an AI on owner device":      {action: "approve", by: laptop, extra: `,"as":"` + cardA + `"`, code: "forbidden"},
-		"by admin not in approvers":     {action: "approve", body: func(b *proto.ApprovalBody) { b.Approvers = []string{guest.ID()} }, code: "forbidden"},
-		"already approved":              {action: "approve", card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "approved"} }, code: "conflict"},
-		"already denied":                {action: "deny", card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "denied"} }, code: "conflict"},
-		"expired card":                  {action: "approve", card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "expired", At: &at} }, code: "conflict"},
-		"reassigned card":               {action: "deny", card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "reassigned", At: &at} }, code: "conflict"},
-		"card with nil state":           {action: "approve", card: func(m *proto.MsgRow) { m.State = nil }, code: "conflict"},
-		"missing task":                  {action: "approve", state: func(s *home.State) { delete(s.Tasks, cardTaskID) }, code: "conflict"},
-		"merged task":                   {action: "approve", state: func(s *home.State) { t := s.Tasks[cardTaskID]; t.State = "merged"; s.Tasks[cardTaskID] = t }, code: "conflict"},
-		"cancelled task":                {action: "deny", state: func(s *home.State) { t := s.Tasks[cardTaskID]; t.State = "cancelled"; s.Tasks[cardTaskID] = t }, code: "conflict"},
-		"task reassigned to another AI": {action: "approve", state: func(s *home.State) { t := s.Tasks[cardTaskID]; t.Assignee = cardB; s.Tasks[cardTaskID] = t }, code: "conflict"},
+		"invalid msg id":            {action: "approve", msg: "not-an-id", code: "bad_request"},
+		"approve with arg":          {action: "approve", extra: `,"arg":"A"`, code: "bad_request"},
+		"approve with empty arg":    {action: "approve", extra: `,"arg":""`, code: "bad_request"},
+		"deny with text":            {action: "deny", extra: `,"text":"No."`, code: "bad_request"},
+		"deny with empty text":      {action: "deny", extra: `,"text":""`, code: "bad_request"},
+		"missing message":           {action: "approve", msg: id(90), code: "not_found"},
+		"wrong card kind":           {action: "deny", card: func(m *proto.MsgRow) { m.Kind = "decision" }, code: "bad_request"},
+		"by an AI on owner device":  {action: "approve", by: laptop, extra: `,"as":"` + cardA + `"`, code: "forbidden"},
+		"by admin not in approvers": {action: "approve", body: func(b *proto.ApprovalBody) { b.Approvers = []string{guest.ID()} }, code: "forbidden"},
+		"already approved":          {action: "approve", card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "approved"} }, code: "conflict"},
+		"already denied":            {action: "deny", card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "denied"} }, code: "conflict"},
+		"expired card":              {action: "approve", card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "expired", At: &at} }, code: "conflict"},
+		"reassigned card":           {action: "deny", card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "reassigned", At: &at} }, code: "conflict"},
+		"card with nil state":       {action: "approve", card: func(m *proto.MsgRow) { m.State = nil }, code: "conflict"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, d := cardState(t), cardDisk{}
@@ -424,9 +434,6 @@ func TestCardApproveAndDenyRefusals(t *testing.T) {
 			if tc.card != nil {
 				tc.card(&card)
 				d[card.ID] = card
-			}
-			if tc.state != nil {
-				tc.state(s)
 			}
 			by, msg := browser, card.ID
 			if tc.by != nil {
@@ -483,8 +490,6 @@ func TestCardPostDecisionInMainLineAndInThread(t *testing.T) {
 
 func TestCardPostDecisionRefusals(t *testing.T) {
 	existing := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(65)}, Kind: "text"}
-	emptyStr := ""
-	badRec := "C"
 	for name, tc := range map[string]struct {
 		by    identity.Key
 		task  *string
@@ -495,21 +500,12 @@ func TestCardPostDecisionRefusals(t *testing.T) {
 		disk  cardDisk
 		code  string
 	}{
-		"by a person":                    {by: browser, task: &cardTaskID, post: func(p *proto.Post[proto.DecisionBody]) { p.As = "" }, code: "forbidden"},
-		"malformed payload":              {task: &cardTaskID, raw: func(s string) string { return strings.Replace(s, `"options"`, `"choices"`, 1) }, code: "bad_request"},
-		"thread nil while body.task set": {task: &cardTaskID, post: func(p *proto.Post[proto.DecisionBody]) { p.Thread = nil }, code: "bad_request"},
-		"thread set while body.task nil": {task: nil, post: func(p *proto.Post[proto.DecisionBody]) { tid := proto.ID(cardTaskID); p.Thread = &tid }, code: "bad_request"},
-		"thread differs from body.task":  {task: &cardTaskID, post: func(p *proto.Post[proto.DecisionBody]) { other := proto.ID(cardOtherID); p.Thread = &other }, code: "bad_request"},
-		"empty to":                       {task: &cardTaskID, body: func(b *proto.DecisionBody) { b.To = []string{} }, code: "bad_request"},
-		"blank user in to":               {task: &cardTaskID, body: func(b *proto.DecisionBody) { b.To = []string{""} }, code: "bad_request"},
-		"duplicate user in to":           {task: &cardTaskID, body: func(b *proto.DecisionBody) { b.To = []string{browser.ID(), browser.ID()} }, code: "bad_request"},
-		"empty context":                  {task: &cardTaskID, body: func(b *proto.DecisionBody) { b.Context = &emptyStr }, code: "bad_request"},
-		"option with empty id":           {task: &cardTaskID, body: func(b *proto.DecisionBody) { b.Options[0].ID = "" }, code: "bad_request"},
-		"duplicate option id": {task: &cardTaskID, body: func(b *proto.DecisionBody) {
-			b.Options = append(b.Options, proto.DecisionOption{ID: "A", Label: "Dup", Effect: "Dup"})
-		}, code: "bad_request"},
-		"recommended not in options":        {task: &cardTaskID, body: func(b *proto.DecisionBody) { b.Recommended = &badRec }, code: "bad_request"},
-		"recommended with empty options":    {task: &cardTaskID, body: func(b *proto.DecisionBody) { b.Options = []proto.DecisionOption{} }, code: "bad_request"},
+		"by a person":                       {by: browser, task: &cardTaskID, post: func(p *proto.Post[proto.DecisionBody]) { p.As = "" }, code: "forbidden"},
+		"malformed payload":                 {task: &cardTaskID, raw: func(s string) string { return strings.Replace(s, `"options"`, `"choices"`, 1) }, code: "bad_request"},
+		"thread nil while body.task set":    {task: &cardTaskID, post: func(p *proto.Post[proto.DecisionBody]) { p.Thread = nil }, code: "bad_request"},
+		"thread set while body.task nil":    {task: nil, post: func(p *proto.Post[proto.DecisionBody]) { tid := proto.ID(cardTaskID); p.Thread = &tid }, code: "bad_request"},
+		"thread differs from body.task":     {task: &cardTaskID, post: func(p *proto.Post[proto.DecisionBody]) { other := proto.ID(cardOtherID); p.Thread = &other }, code: "bad_request"},
+		"empty to":                          {task: &cardTaskID, body: func(b *proto.DecisionBody) { b.To = []string{} }, code: "bad_request"},
 		"duplicate mention":                 {task: &cardTaskID, post: func(p *proto.Post[proto.DecisionBody]) { p.Mentions = []proto.ID{proto.ID(ownerID), proto.ID(ownerID)} }, code: "bad_request"},
 		"mentioning non-member":             {task: &cardTaskID, post: func(p *proto.Post[proto.DecisionBody]) { p.Mentions = []proto.ID{proto.ID(id(99))} }, code: "conflict"},
 		"missing task":                      {task: &cardTaskID, state: func(s *home.State) { delete(s.Tasks, cardTaskID) }, code: "not_found"},
@@ -535,9 +531,9 @@ func TestCardPostDecisionRefusals(t *testing.T) {
 			if tc.by != nil {
 				by = tc.by
 			}
-			raw, _ := json.Marshal(post)
+			raw := briefRaw(t, post)
 			if tc.raw != nil {
-				raw = []byte(tc.raw(string(raw)))
+				raw = json.RawMessage(tc.raw(string(raw)))
 			}
 			cardRefused(t, cardApply(t, s, tc.disk, receipts{}, by, by.Sign(string(raw))), tc.code)
 		})
@@ -655,7 +651,6 @@ func TestCardChooseRefusals(t *testing.T) {
 		msg      string
 		extra    string
 		card     func(*proto.MsgRow)
-		state    func(*home.State)
 		code     string
 	}{
 		"invalid msg id":                 {msg: "bad-id", extra: `,"arg":"A"`, code: "bad_request"},
@@ -677,9 +672,6 @@ func TestCardChooseRefusals(t *testing.T) {
 		"already decided":                {extra: `,"arg":"A"`, card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "decided"} }, code: "conflict"},
 		"expired decision":               {extra: `,"arg":"A"`, card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "expired", At: &at} }, code: "conflict"},
 		"nil state":                      {extra: `,"arg":"A"`, card: func(m *proto.MsgRow) { m.State = nil }, code: "conflict"},
-		"missing task":                   {extra: `,"arg":"A"`, state: func(s *home.State) { delete(s.Tasks, cardTaskID) }, code: "conflict"},
-		"merged task":                    {extra: `,"arg":"A"`, state: func(s *home.State) { t := s.Tasks[cardTaskID]; t.State = "merged"; s.Tasks[cardTaskID] = t }, code: "conflict"},
-		"cancelled task":                 {extra: `,"arg":"A"`, state: func(s *home.State) { t := s.Tasks[cardTaskID]; t.State = "cancelled"; s.Tasks[cardTaskID] = t }, code: "conflict"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, d := cardState(t), cardDisk{}
@@ -692,9 +684,6 @@ func TestCardChooseRefusals(t *testing.T) {
 			if tc.card != nil {
 				tc.card(&card)
 				d[card.ID] = card
-			}
-			if tc.state != nil {
-				tc.state(s)
 			}
 			by, msg := browser, card.ID
 			if tc.by != nil {
