@@ -101,7 +101,9 @@ for one when the group is created.
 | `set` | `id`, any of `name`, `account`, `allow`, `approvers` | the AI's owner; for `approvers` alone, also the AI's host | member row updated. A new `name` must be unused in the group, else `conflict` |
 | `remove` | `id` | the AI's owner, or an admin | refused with `conflict` while the AI is assignee or reviewer of a task that is not final: reassign or cancel first. Otherwise the member row is replaced by a `gone` marker. Removing the secretary clears `group.secretary` and writes `system` `no_secretary` |
 
-Adding people is step 2.
+On `add_ai` and on `set` with `approvers`, the home adds the owner's user id
+to `approvers` when it is missing (`contracts/rows.md` section 2); the owner
+is the person whose host signed `add_ai`. Adding people is step 2.
 
 ### 1.3 `post`
 
