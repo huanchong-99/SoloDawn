@@ -333,6 +333,7 @@ describe('PairingSession mock, countdown and storage checks', () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000_000);
     const session = new PairingSession('live');
+    await vi.waitFor(() => expect(hubs).toHaveLength(1));
     await vi.advanceTimersByTimeAsync(0);
     expect(session.remaining).toBe(600);
     expect(session.code).not.toBe('');

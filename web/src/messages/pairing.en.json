@@ -66,7 +66,7 @@
   "pairing.acct.hint": "Not sure? Ask your AI to check how it is signed in. SoloDawn never reads your credentials.",
   "pairing.done": "Create your first group",
   "pairing.trust.1.title": "Your data stays on your computers",
-  "pairing.trust.1.body": "Chats and tasks live on the computer that hosts the group. Kept 90 days by default.",
+  "pairing.trust.1.body": "Chats and tasks live on the computer that hosts the group.",
   "pairing.trust.2.title": "The server only introduces devices",
   "pairing.trust.2.body": "It stores nothing. When it relays, it sees only encrypted data.",
   "pairing.trust.3.title": "Open source, self-hostable",
