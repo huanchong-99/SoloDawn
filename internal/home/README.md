@@ -46,7 +46,6 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | hand in a `cmd` frame | `loop.Cmd(conn, re, env)`; the answer is sent to the connection |
 | answer a `hello` | `loop.Welcome(conn, build)`: `build` makes the `welcome` frame from the groups of the peer |
 | read a group and subscribe (`sync`) | `loop.Sync(conn, req)`; queues `reset` when needed, `rows` and `synced`, then pushes changes after the cut |
-| subscribe a connection to a group | `loop.Watch(conn, group, stateOnly)` |
 | send a host its inbox items, on every `hello` | `loop.Inbox(conn)` |
 | run the timers by hand, or tell the home of an event | `loop.Tick(now)`, `loop.Event(name, event)` |
 | move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
@@ -167,10 +166,12 @@ start with `task`, `step`, `wait`, `item` and `states`, and `workItems`, `byAssi
 `byReviewer`; its tests take the names that start with `mc` and `machine`. The run loop takes the
 names that start with `run`, and its tests those that start with `run` and `Run`; it exports
 `Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
-`ItemsPush`. The briefs take the
+`ItemsPush`. Groups and members take the names that start with `grp` and `mem`, their tests too,
+and their test functions start with `TestGroup` and `TestMember`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
-Sync takes the names that start with `syn`, its tests too, and its test functions start with
-`TestSync`; it exports `Loop.Sync`.
+Device-log events (`ev_device.go`) take the names that start with `dev`, and their tests start with
+`TestDevice` and `dev`. Sync takes the names that start with `syn`, its tests too, and its test
+functions start with `TestSync`; it exports `Loop.Sync`.
 
 ## The run loop
 
@@ -215,14 +216,14 @@ an empty result for a group the event does not concern.
 **Pushes** ([datachannel](../../planning/contracts/datachannel.md), sections 3, 4 and 6). After
 the answer, in this order:
 
-1. `rows`, to each connection that watches the group (`Watch`): all rows of the result, or with
+1. `rows`, to each connection that watches the group (`Sync`): all rows of the result, or with
    `state_only` the `group`, `member`, `device` and `task` rows, markers of those types included.
    A frame takes rows up to 61,376 bytes; the rest follows in further frames. A connection that
    would get no row gets no frame. A connection whose device the group no longer serves
    (`State.Serves`, on the state that holds the result) stops watching with that result and is
    not pushed its rows: a revoked device and a member who left read nothing more on a connection
    that is still open ([datachannel](../../planning/contracts/datachannel.md), section 8). It
-   watches again only through `Watch`.
+   watches again only through `Sync`.
 2. `groups`, to every connection that has had its welcome, when the result has `GroupsChanged`:
    the groups that exist and whose `State.Serves` holds for the connection's device, in the
    order of their ids, `[]` when there are none.
@@ -235,10 +236,6 @@ also orders the `groups` pushes; and a connection is pushed `groups` only once i
 welcome. So no `groups` push comes before the welcome, and none that is older than the welcome
 comes after it. A node calls it for every `hello`. `Groups(conn)` reads the same list without
 queuing anything; a frame built from it can be older than a push that is already queued.
-
-`Watch` is the subscription of `sync` without the rows before it: it returns the group's sequence
-number, and the connection is pushed every change after it. It refuses a group that does not
-exist, a device that `Serves` refuses, and a connection that is gone.
 
 **Inbox items.** An item is stored in the transaction of its result, for the host of its AI as
 that result leaves the member rows; an item for a member that is no AI fails the transaction.
@@ -304,21 +301,23 @@ worked out before it called `Welcome`, such as `time` and `addrs`. It takes no l
 nothing and calls nothing, the loop least of all; a `build` that waits for a lock of the node
 which another goroutine holds while it calls `Cmd` waits for ever. The loop calls `LoopConfig.Logs`, `Now`
 and `Report` on the goroutines of its groups, and `Logs` and `Now` also on the caller of `Cmd`:
-none of the three may wait for a lock that is held around a call of `Attach`, `Sync`, `Watch`,
-`Close` or `Cmd`, and none may call those. `Attach`, `Sync`, `Watch` and `Close` wait for the
-groups: they must not be called on the goroutine of a group, which is where a hook runs, or on the
-store's writer, which is where the function of a command, a timer, a handler, a `Disk` and a
-`Write.Put` run. A client's `Send` runs on the goroutine of its connection and may call every entry. A hook
-may start transactions of the store; what runs on the store's writer may not. The goroutine of a
-group waits for the store's writer and for nothing else, and what runs on the writer takes no
-lock of the loop: so no lock of a client, of a host's session or of the node can close a circle
-through the loop, as long as that code keeps to this paragraph.
+none of the three may wait for a lock that is held around a call of `Attach`, `Sync`, `Close` or
+`Cmd`, and none may call those. `Attach`, `Sync` and `Close` wait for the groups: they must not be
+called on the goroutine of a group, which is where a hook runs, or on the store's writer, which is
+where the function of a command, a timer, a handler, a `Disk` and a `Write.Put` run. A client's
+`Send` runs on the goroutine of its connection and may call every entry. A hook may start
+transactions of the store; what runs on the store's writer may not. The goroutine of a group waits
+for the store's writer and for nothing else, and what runs on the writer takes no lock of the loop:
+so no lock of a client, of a host's session or of the node can close a circle through the loop, as
+long as that code keeps to this paragraph.
 
 **For the files that build on the loop.** `loop.ask(group, f)` runs `f` on the goroutine of a
-group and waits for it; there `g.watch(conn, stateOnly)` subscribes, `g.transact` and `g.settle`
-write and finish a result, `g.deliver` sends items, and `conn.send(frame)` queues a frame behind
-the ones before it. `sync` takes its cut and subscribes in one such call. `runDisk` is the `Disk`
-of a transaction.
+group and waits for it; there `runReader(g.state, conn.device)` checks group existence and access,
+`runErr(re, code, msg)` builds an error answer, `g.watch(conn, stateOnly)` subscribes a seated
+connection, `g.transact` and `g.settle` write and finish a result, `g.deliver` sends items, and
+`conn.send(frame)` queues a frame behind the ones before it. Both `Loop.Sync` and `Loop.Fetch`
+take a typed request on `(conn, req)` and read their `store.Snapshot` on the goroutine of the
+group through `loop.ask`. `runDisk` is the `Disk` of a transaction.
 
 ## The task machine
 
@@ -351,6 +350,52 @@ function that moves a task calls it and adds nothing to its rules.
   command only copies into the row (`branch`, `pr`, `pr_url`, `stats.added`, `stats.removed`,
   `thread.count`, `thread.last`); the bodies of the messages; for row 23, the timer and telling the
   secretary once per quiet period. The machine sets `stats.ended`.
+
+## Groups and members
+
+`cmd_group.go` holds `group` `create` and `set` ([commands](../../planning/contracts/commands.md)
+1.1; [rows](../../planning/contracts/rows.md) 1 and 2), under `group/create` and `group/set`;
+`group` `pause` and `resume` belong to `cmd_pause.go` (unit HM-14). `cmd_member.go` holds `member`
+`add_ai`, `set` and `remove` ([commands](../../planning/contracts/commands.md) 1.2), under
+`member/add_ai`, `member/set` and `member/remove`; `member` `status` belongs to `cmd_hostev.go`
+(unit HM-16). Where the contracts are silent, they do this:
+
+- **`group/create`.** Only a person of this node's owner (`c.Who.AI` empty, `c.Who.User ==
+  s.Owner`) may create a group, else `forbidden`. A `g` that differs from `n`, a `kind` other than
+  `project`, a `forge` other than `github` or `none`, or an empty `name`, `repo`, `base` or
+  `member_name` is `bad_request`. A group that already exists (`s.Group.ID` not empty) is answered
+  `conflict`. It writes the `group` row (`pass` 90, `pass_foundation` 70, default `limits`,
+  `created` `c.Now`) and the owner's `human` `member` row (`role` `owner`, `online` true,
+  `last_seen` `c.Now`), with `GroupsChanged` true. The owner's member id is the first 16 bytes of
+  the SHA-256 of `SoloDawn group owner <n>` in base64url, so the function stays pure
+  ([issues](../../issues.md)).
+- **`group/set`.** By an admin, else `forbidden`. Sending none of `name`, `checks`, `pass`,
+  `pass_foundation`, `limits` and `secretary`, or an empty `name`, is `bad_request`. `secretary`,
+  when sent, must name an AI in `State.AIs` that is neither assignee nor reviewer of an open task
+  (`queued`, `active`, `paused`, `failed`), else `conflict`; any previous secretary's member row
+  loses `secretary`, and the named AI gains it when not already set. `GroupsChanged` is set when
+  `name` changes, because `groups` carries each group's name.
+- **`member/add_ai`.** By a host of a member: `c.Who.AI` must be empty, else `forbidden`; the
+  `name` of the latest `add` entry for `c.Who.Device` in `State.Logs[c.Who.User]` becomes
+  `host_name`. An empty `name`, a `cli` outside `claude` and `codex`, or an `account` outside
+  `personal`, `team` and `api_key` is `bad_request`. `secretary: true` when the group already has a
+  secretary requires an admin, else `forbidden`. An `id` or `name` already held by a human or AI
+  member of the group is `conflict`. The new `ai` `member` row starts with `state` `dormant`,
+  `since` and `last_seen` `c.Now`, `path` `local` when `c.Who.Device == s.Home` and `direct`
+  otherwise, `allow` `[]` and `usage` `{}`; when `secretary` is true, any previous secretary loses
+  the flag and `group.secretary` becomes `id`.
+- **`member/set`.** Sending none of `name`, `account`, `allow` and `approvers`, an empty `name`, or
+  an unknown `account` is `bad_request`. An unknown `id` is `not_found`; a human member row is
+  `forbidden` in step 1. The signer must be the AI's owner (`c.Who.AI` empty, `c.Who.User ==
+  ai.User`) or, when `approvers` is the only field sent, the AI's host (`s.Hosts`), else
+  `forbidden`. A `name` held by another member in the group is `conflict`; keeping the AI's own
+  `name` is accepted.
+- **`member/remove`.** An unknown `id` is `not_found`; a human member row is `forbidden` in step 1.
+  The signer must be the AI's owner or an admin, else `forbidden`. Removing an AI that is assignee
+  or reviewer of an open task is `conflict`. Otherwise the member row becomes a `gone` marker and
+  any queued inbox items for that AI (`c.Disk.Queued`) are retired in `Result.Retire`. Removing the
+  secretary also clears `group.secretary` and writes `system` `no_secretary` in the main line with
+  id `n`.
 
 ## Briefs
 
@@ -395,37 +440,46 @@ function that moves a task calls it and adds nothing to its rules.
   HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
   `c.Disk.Msg` reads.
 
+## Device-log events
+
+`ev_device.go` registers `Events["device"]`, which receives a `[]proto.DeviceRow` slice accepted by
+the node for one person ([envelope](../../planning/contracts/envelope.md), section 4;
+[rows](../../planning/contracts/rows.md), section 2). In step 1 it ignores users other than
+`State.Owner`, appends rows whose `ver` exceeds the entries already held in `State.Logs[State.Owner]`,
+and sets `Result.GroupsChanged` when an `Online` device's access (`State.Serves`) changes between
+served and unserved.
+
 ## Sync
 
-`sync.go` answers `sync` requests on `Loop.Sync(conn, req)`
+`sync.go` answers `sync` requests on `Loop.Sync(conn, req)` with a typed `proto.Sync`
 ([datachannel](../../planning/contracts/datachannel.md) section 4;
 [sync](../../planning/flows/sync.md) sections A, C and E).
 
-- **Checks.** `req.Group` must not be empty and `req.Since` must not be negative, else
-  `bad_request`. A group that has no goroutine or whose `group` row does not exist is answered
-  `not_found`; a connection whose device `State.Serves` refuses is answered `forbidden`; a
-  connection that has already detached receives nothing.
-- **The cut.** `Sync` runs one job on the goroutine of the group through `loop.ask`. There it opens
-  a `store.Snapshot`, reads at `S = snap.Seq`, closes the snapshot, queues `reset` (when resetting),
-  `rows` batched to 61,376 bytes by `runBatches` (no frame when there are zero rows) and
-  `synced {re, ok: true, g, seq: S}`, and then calls `g.watch(conn, req.StateOnly)` before
-  returning. Every change committed after `S` runs as a later job of the group's goroutine, so its
-  `rows` push is queued strictly after `synced` and is neither missing nor sent twice. A store
-  error is passed to `LoopConfig.Report` and answered `internal` without subscribing the
-  connection.
+- **Checks.** A group that has no goroutine or whose `group` row does not exist is answered
+  `not_found`; a connection whose device `State.Serves` refuses is answered `forbidden`
+  (`runReader`); a connection that has already detached receives nothing.
+- **The cut.** Like `Loop.Fetch`, `Loop.Sync` runs its read on the goroutine of the group through
+  `loop.ask`. There it opens a `store.Snapshot`, reads at `S = snap.Seq`, closes the snapshot,
+  queues `reset` (when resetting), `rows` batched to 61,376 bytes by `runBatches` (no frame when
+  there are zero rows) and `synced {re, ok: true, g, seq: S}`, and then calls
+  `g.watch(conn, req.StateOnly)` before returning. Every change committed after `S` runs as a later
+  job of the group's goroutine, so its `rows` push is queued strictly after `synced` and is neither
+  missing nor sent twice. Any store error (`Snapshot`, `DeltaCount`, delta or cold read) is passed
+  to `LoopConfig.Report` and answered `internal` without subscribing the connection.
 - **Delta or reset.** Where the contract does not state what happens when `since > S` (for example
   a client cursor from before a store rebuild), `sync` resets so stale higher-numbered rows are
   dropped. A delta is sent when `0 < since <= S`, `since >= purged` and `DeltaCount(since, S) <= 1000`:
-  all rows in `(since, S]` in increasing `seq` order, `gone` markers included, or
-  `StateAfterSeqUpTo` when `state_only` is true. Otherwise `sync` first queues `reset` (including
-  for `since == 0`), then for `state_only` sends `StateRows`, and for a full reader merges
-  `StateRows`, `Pending` and the newest 50 main-line messages (`PageThread(nil, 0, 50)`) without
-  duplicates in increasing `seq` order.
+  all rows in `(since, S]` in increasing `seq` order, `gone` markers included, or those whose `r`
+  is in `runStateRows` (`group`, `member`, `device`, `task`, markers included) when `state_only` is
+  true, sharing one rule with live pushes. Otherwise `sync` first queues `reset` (including for
+  `since <= 0`), then for `state_only` sends `StateRows`, and for a full reader merges `StateRows`,
+  `Pending` and the newest 50 main-line messages (`PageThread(nil, 0, 50)`) without duplicates in
+  increasing `seq` order.
 
 ## Known limitations
 
-- The table of commands holds only the briefs, and no node starts a loop yet: the other command
-  files and the wiring of the node are separate units
+- The table of commands holds only the groups, members and briefs, and no node starts a loop yet:
+  the other command files and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
@@ -460,15 +514,23 @@ and for the refusals, and covers every statement of `machine.go`. `features/home
 holds acceptance test A5.18 at step `merge` and the two points of the third review, a card decided
 while a task is paused and a reviewer named while it is paused.
 
+`cmd_group_test.go` and `cmd_member_test.go` send `group/create`, `group/set`, `member/add_ai`,
+`member/set` and `member/remove` through `Commands.Apply` with fakes of `Receipts` and `Disk`,
+covering every refusal, boundary and secretary transition. `features/home_group.feature` holds the
+home command part of A2.1 and the member-removal part of A5.18.
+
 `cmd_brief_test.go` sends every command of the briefs through `Commands.Apply` with fakes of
 `Receipts` and `Disk`, with a case for every refusal and branch. `features/home_brief.feature`
 holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
 `Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
 commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
 
+`ev_device_test.go` covers every branch and boundary of `Events["device"]`, including ignored event
+types, empty and non-owner slices, version boundaries and online/offline `GroupsChanged` transitions.
+
 `sync_test.go` covers `Loop.Sync` against an in-memory and file-backed store: wire frame shapes,
 cold content deduplication and `seq` order, exact boundaries of `since`, `purged` and the 1,000-row
 delta limit, 60 KiB batching, `state_only`, concurrent writes while the first read is in flight,
-refusals, detached connections and store failures. `features/home_sync.feature` holds acceptance
-test A2.2 (delta, 1,500-row reset with newest 50 and an older pending card, purge-mark reset,
-`state_only`) and the first-read cut of A2.7.
+refusals, detached connections and store failures; `run_internal_test.go` covers `runReader` and
+`runErr`. `features/home_sync.feature` holds acceptance test A2.2 (delta, 1,500-row reset with
+newest 50 and an older pending card, purge-mark reset, `state_only`) and the first-read cut of A2.7.

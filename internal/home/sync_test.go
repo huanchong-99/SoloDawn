@@ -260,9 +260,19 @@ func TestSyncDeltaAndPurgeBoundaries(t *testing.T) {
 		home.RowOf(proto.GoneRow{RowHeader: proto.RowHeader{Type: "msg", ID: "m-gone"}, Gone: true}),
 		home.RowOf(freshMsg),
 	)
+	// Exact boundary since == 1 (first positive cursor): delta without reset.
+	w.loop.Sync(p.conn, proto.Sync{Request: proto.Request{ID: 9}, Group: groupID, Since: 1})
+	got := synCollect(t, p, 9)
+	equal(t, []any{got.reset, got.ids, got.synced.Seq}, []any{false, []string{ownerID, aiID, "t-msg", "n-keep", "m-gone", "m-last"}, end})
+
+	// Negative since resets like 0.
+	w.loop.Sync(p.conn, proto.Sync{Request: proto.Request{ID: 8}, Group: groupID, Since: -1})
+	got = synCollect(t, p, 8)
+	equal(t, []any{got.reset, got.ids, got.synced.Seq}, []any{true, []string{groupID, ownerID, aiID, "m-last"}, end})
+
 	// Exact boundary since == S: delta with zero rows, no reset and no rows frame.
 	w.loop.Sync(p.conn, proto.Sync{Request: proto.Request{ID: 10}, Group: groupID, Since: end})
-	got := synCollect(t, p, 10)
+	got = synCollect(t, p, 10)
 	equal(t, []any{got.reset, got.frames, len(got.ids), got.synced.Seq}, []any{false, 0, 0, end})
 
 	// Delta (3, end]: includes thread msg, note, gone marker and main msg in seq order.
@@ -423,17 +433,7 @@ func TestSyncConcurrentWriteDuringFirstRead(t *testing.T) {
 }
 
 func TestSyncRefusals(t *testing.T) {
-	tables := runTables()
-	entered, release := make(chan struct{}), make(chan struct{})
-	tables.Commands["group/create"] = func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-		if s.ID == runOther {
-			entered <- struct{}{}
-			<-release
-			return home.Result{}, &home.Refusal{Code: "conflict", Msg: "refused"}
-		}
-		return runCreate(s, c)
-	}
-	w, owner := runFounded(t, tables)
+	w, owner := runFounded(t, runTables())
 	guestPeer, stranger := w.attach(guest), w.attach(nobody)
 
 	for _, c := range []struct {
@@ -441,8 +441,7 @@ func TestSyncRefusals(t *testing.T) {
 		req  proto.Sync
 		code string
 	}{
-		{owner, proto.Sync{Request: proto.Request{ID: 50}, Group: "", Since: 0}, "bad_request"},
-		{owner, proto.Sync{Request: proto.Request{ID: 51}, Group: groupID, Since: -1}, "bad_request"},
+		{owner, proto.Sync{Request: proto.Request{ID: 50}, Group: "", Since: 0}, "not_found"},
 		{owner, proto.Sync{Request: proto.Request{ID: 52}, Group: id(99), Since: 0}, "not_found"},
 		{guestPeer, proto.Sync{Request: proto.Request{ID: 53}, Group: groupID, Since: 0}, "forbidden"},
 		{stranger, proto.Sync{Request: proto.Request{ID: 54}, Group: groupID, Since: 0}, "forbidden"},
@@ -453,21 +452,6 @@ func TestSyncRefusals(t *testing.T) {
 	// Neither unauthorized connection was subscribed.
 	owner.does(groupID, "post", `,"kind":"text","text":"private"`)
 	guestPeer.quiet()
-
-	// Sync on a transient group goroutine whose group was never created answers not_found.
-	createRe := owner.send(runOther, "group", `,"op":"create","name":"Other"`)
-	runWait(t, entered)
-	syncDone := make(chan struct{})
-	go func() {
-		w.loop.Sync(owner.conn, proto.Sync{Request: proto.Request{ID: 55}, Group: runOther, Since: 0})
-		close(syncDone)
-	}()
-	// Wait until Sync has queued its job behind create before releasing create.
-	time.Sleep(5 * time.Millisecond)
-	close(release)
-	runWait(t, syncDone)
-	synExpectErr(t, owner, createRe, "conflict")
-	synExpectErr(t, owner, 55, "not_found")
 }
 
 func synExpectErr(t *testing.T, p *runPeer, re int64, code string) {

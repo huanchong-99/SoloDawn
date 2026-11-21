@@ -29,7 +29,7 @@ always about one commit: the one that was submitted.
    since. If one fails, the whole brief is answered `conflict` and nothing
    is created. Otherwise H creates the tasks exactly as listed, writes one
    `task` message per task, and queues `assign` for each task with no unmet
-   dependency. The item carries P's signed confirmation as its `cause`.
+   dependency.
 
 ## B. Work
 

@@ -9,16 +9,13 @@ Allocate a sequence with `NextSeq` for each changed row. Use it as the new
 row's `seq` and, for a new message, its `pos`; keep the original `pos` and
 creation time on updates. Pass the resulting proto value to `Put`.
 
-A `Snapshot` pins the group's sequence and purge mark in the writer's order.
-Read deltas or pages from it, then close it. A page holds the rows
-below `before` in `pos` order, newest first; `before` 0 asks for the newest
-page. `sync_reads.go` adds the snapshot reads `sync` uses at the cut:
-`StateRows` (live `group`, `member`, `device` and `task` rows in sequence
-order), `Pending` (pending cards in `pos` order), `DeltaCount` (the count of
-rows in `(after, upTo]`, markers included) and `StateAfterSeqUpTo` (state rows
-and their markers in `(after, upTo]`). A file-backed WAL reader does not
-block new writes; the single-connection in-memory database must release its
-snapshot before another transaction can run.
+A `Snapshot` (`read.go`) pins the group's sequence and purge mark in the
+writer's order. Read deltas (`AfterSeqUpTo`, `DeltaCount`), cold-sync sets
+(`StateRows` and `Pending`, delegating to `Tx`), or pages (`PageThread`,
+`PageKind`) from it, then close it. A page holds the rows below `before` in
+`pos` order, newest first; `before` 0 asks for the newest page. A file-backed
+WAL reader does not block new writes; the single-connection in-memory database
+must release its snapshot before another transaction can run.
 
 `home_reads.go` holds what the run loop of a home needs inside a `Write`: `Groups`,
 `StateRows` and `Counters` to load a group, `Row`, `Thread`, `Pending` and `Queued` for

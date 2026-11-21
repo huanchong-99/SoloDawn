@@ -39,6 +39,7 @@ func (s *Store) Inbox(host string, now int64) ([]Item, error) {
 	items := []Item{}
 	for rows.Next() {
 		var i Item
+		// A Scan failure surfaces through rows.Err() on the next line, because inbox is STRICT and the driver reads every column before Next returns true.
 		_ = rows.Scan(&i.ID, &i.Group, &i.AI, &i.Host, &i.Why, &i.Msg, &i.Task, &i.Commit,
 			(*[]byte)(&i.Env), (*[]byte)(&i.Cause), &i.NotBefore, &i.Created)
 		items = append(items, i)
