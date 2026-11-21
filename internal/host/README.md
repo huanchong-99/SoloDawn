@@ -124,9 +124,5 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 
 # Secretary and decision tools
 
-`tools_sec.go` registers `propose_brief`, `set_task` and `request_decision` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1, 2 and 5).
-
-- `propose_brief` and `set_task` set `Tool.For` to `c.Secretary`; `request_decision` leaves `Tool.For` `nil` and registers the `group` superset schema from `internal/proto/testdata/tools.json`, which the MCP server narrows when `c.Kind != GroupSession`.
-- `propose_brief` checks all text fields with `CheckOutboundSecret` before any lookup or signature, reads `pass` from the group row in `h.Rows`, resolves `assignee`, `reviewer` and `requester` display names (defaulting an omitted `requester` to the author of the newest request message in the turn's thread or main line, from `h.Rows` or `fetch`), sets `mentions` to `[requester]`, and sends `post` of kind `brief`.
-- `set_task` requires at least one of `assignee`, `reviewer` or `action`, resolves `"T-<num>"` and member names from `h.Rows` (listing the group's valid names on `not_found`), and sends `task assign` followed by `task pause`, `resume` or `cancel` when both a role and an action are given.
-- `request_decision` checks `question`, `context` and each option's `label` and `effect` with `CheckOutboundSecret`, assigns option ids `"A"`, `"B"`, … (`"Z"`, `"AA"`, …) and maps `recommended` from its 0-based index, requires `to` in `GroupSession`, and in `TaskSession` and `ReviewSession` binds `thread` and `body.task` to `c.Task` and defaults an omitted `to` to the user id of the task's brief requester (fetched via `h.Home` when not cached) or the AI's owner for tasks without a brief, setting `mentions` to the addressed people's member ids and `main: true`.
+`tools_sec.go` registers `propose_brief`, `set_task` and `request_decision` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1, 2 and 5): `propose_brief` and `set_task` set `Tool.For` to `c.Secretary`, while `request_decision` registers the `group` schema for every session.
+`prepareDecisionPost` and `buildDecisionOptions` are package helpers so CLI question handlers in `host` can build the same `decision` post.

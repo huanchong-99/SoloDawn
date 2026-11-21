@@ -11,7 +11,6 @@ import (
 	str "strings"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
-	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
 var (
@@ -20,8 +19,6 @@ var (
 	setTaskSchema = stdjson.RawMessage(`{"type":"object","properties":{"action":{"type":"string","enum":["pause","resume","cancel"]},"assignee":{"type":"string"},"reviewer":{"type":"string"},"task":{"type":"string"}},"required":["task"],"additionalProperties":false}`)
 
 	requestDecisionSchema = stdjson.RawMessage(`{"type":"object","properties":{"context":{"type":"string"},"options":{"type":"array","items":{"type":"object","properties":{"effect":{"type":"string"},"label":{"type":"string"}},"required":["label","effect"],"additionalProperties":false}},"question":{"type":"string"},"recommended":{"type":"integer","minimum":0},"to":{"type":"array","items":{"type":"string"}}},"required":["question","options","to"],"additionalProperties":false}`)
-
-	setTaskActions = []string{"pause", "resume", "cancel"}
 )
 
 func init() {
@@ -95,9 +92,7 @@ type requestDecisionInput struct {
 
 func decodeSecInput[T any](raw stdjson.RawMessage) (T, error) {
 	var dst T
-	strict := stdjson.NewDecoder(str.NewReader(string(raw)))
-	strict.DisallowUnknownFields()
-	if strict.Decode(new(T)) != nil || proto.Decode(raw, &dst) != nil {
+	if proto.Decode(raw, &dst) != nil {
 		return dst, &Error{Code: "bad_request", Message: "invalid tool arguments"}
 	}
 	return dst, nil
@@ -137,21 +132,16 @@ func marshalSecWire(v any) string {
 }
 
 type secDirectory struct {
-	byID    map[string]proto.MemberRow
 	byName  map[string]proto.MemberRow
 	members []string
 	people  []string
 }
 
 func loadSecDirectory(rows *Rows, group string) secDirectory {
-	dir := secDirectory{
-		byID:   map[string]proto.MemberRow{},
-		byName: map[string]proto.MemberRow{},
-	}
+	dir := secDirectory{byName: map[string]proto.MemberRow{}}
 	for _, raw := range rows.Of(group, "member") {
 		var m proto.MemberRow
 		if proto.Decode(raw, &m) == nil {
-			dir.byID[m.ID] = m
 			dir.byName[m.Name] = m
 			dir.members = append(dir.members, m.Name)
 			if m.Kind == "human" {
@@ -180,7 +170,7 @@ func (d secDirectory) person(name string) (proto.MemberRow, error) {
 
 func missingTargetError(kind, given string, valid []string) error {
 	names := "none"
-	if len(valid) > 0 {
+	if len(valid) != 0 {
 		names = str.Join(valid, ", ")
 	}
 	return &Error{
@@ -219,30 +209,6 @@ func resolveSecTask(rows *Rows, group, label string) (proto.ID, error) {
 	return "", missingTargetError("task", label, valid)
 }
 
-func secFetchRows(ctx context.Context, h *Host, device string, build func(int64) any) ([]stdjson.RawMessage, error) {
-	conn, ok := h.Home(device)
-	if !ok {
-		return nil, &Error{Code: "home_unreachable", Message: "the home of that group is not connected"}
-	}
-	raw, err := conn.Request(ctx, build)
-	if err != nil {
-		return nil, &Error{Code: "home_unreachable", Message: "the home of that group is not connected"}
-	}
-	return parseSecFetched(raw)
-}
-
-func parseSecFetched(raw stdjson.RawMessage) ([]stdjson.RawMessage, error) {
-	var failure proto.ErrorResponse
-	if proto.Decode(raw, &failure) == nil {
-		return nil, &Error{Code: failure.Err.Code, Message: failure.Err.Message}
-	}
-	var fetched proto.Fetched
-	if proto.Decode(raw, &fetched) != nil {
-		return nil, &Error{Code: "bad_request", Message: "invalid fetched response"}
-	}
-	return fetched.Rows, nil
-}
-
 func callProposeBrief(ctx context.Context, h *Host, c Caller, raw stdjson.RawMessage) (any, error) {
 	in, err := decodeSecInput[proposeBriefInput](raw)
 	if err != nil {
@@ -251,7 +217,7 @@ func callProposeBrief(ctx context.Context, h *Host, c Caller, raw stdjson.RawMes
 	if err := guardSecTexts(briefTexts(in)...); err != nil {
 		return nil, err
 	}
-	body, requester, err := prepareBriefBody(ctx, h, c, in)
+	body, requester, err := prepareBriefBody(h.Rows, c.Group, in)
 	if err != nil {
 		return nil, err
 	}
@@ -259,11 +225,7 @@ func callProposeBrief(ctx context.Context, h *Host, c Caller, raw stdjson.RawMes
 	post := proto.Post[proto.BriefBody]{
 		HomeCommand: hdr,
 		Kind:        "brief",
-		Thread:      nil,
-		Main:        false,
-		Text:        "",
 		Mentions:    []proto.ID{requester},
-		Re:          nil,
 		Body:        body,
 	}
 	if _, err := h.Command(ctx, c.Home, marshalSecWire(post)); err != nil {
@@ -273,7 +235,7 @@ func callProposeBrief(ctx context.Context, h *Host, c Caller, raw stdjson.RawMes
 }
 
 func briefTexts(in proposeBriefInput) []string {
-	texts := make([]string, 0, 3+len(in.Criteria)+len(in.ScopeIn)+len(in.ScopeOut)+len(in.Tasks))
+	var texts []string
 	texts = append(texts, in.Title, in.Goal)
 	texts = append(texts, in.Criteria...)
 	texts = append(texts, in.ScopeIn...)
@@ -281,23 +243,20 @@ func briefTexts(in proposeBriefInput) []string {
 	for _, t := range in.Tasks {
 		texts = append(texts, t.Title)
 	}
-	if in.Replaces != nil {
-		texts = append(texts, *in.Replaces)
-	}
 	return texts
 }
 
-func prepareBriefBody(ctx context.Context, h *Host, c Caller, in proposeBriefInput) (proto.BriefBody, proto.ID, error) {
-	pass, err := readGroupPass(h.Rows, c.Group)
+func prepareBriefBody(rows *Rows, group string, in proposeBriefInput) (proto.BriefBody, proto.ID, error) {
+	pass, err := readGroupPass(rows, group)
 	if err != nil {
 		return proto.BriefBody{}, "", err
 	}
-	dir := loadSecDirectory(h.Rows, c.Group)
+	dir := loadSecDirectory(rows, group)
 	tasks, err := buildBriefTasks(dir, in.Tasks)
 	if err != nil {
 		return proto.BriefBody{}, "", err
 	}
-	requester, err := resolveBriefRequester(ctx, h, c, dir, in.Requester)
+	requester, err := resolveBriefRequester(dir, in.Requester)
 	if err != nil {
 		return proto.BriefBody{}, "", err
 	}
@@ -346,10 +305,6 @@ func buildOneBriefTask(dir secDirectory, item briefTaskInput) (proto.BriefTask, 
 	if err != nil {
 		return proto.BriefTask{}, err
 	}
-	deps, err := cleanBriefDepends(item.Depends)
-	if err != nil {
-		return proto.BriefTask{}, err
-	}
 	var foundation bool
 	if item.Foundation != nil {
 		foundation = *item.Foundation
@@ -359,123 +314,38 @@ func buildOneBriefTask(dir secDirectory, item briefTaskInput) (proto.BriefTask, 
 		Assignee:   string(assignee),
 		Reviewer:   string(reviewer),
 		Foundation: foundation,
-		Depends:    deps,
+		Depends:    cleanBriefDepends(item.Depends),
 	}, nil
 }
 
-func cleanBriefDepends(raw *[]int) ([]int, error) {
+func cleanBriefDepends(raw *[]int) []int {
 	if raw == nil {
-		return []int{}, nil
+		return []int{}
 	}
-	for _, idx := range *raw {
-		if idx < 0 {
-			return nil, &Error{Code: "bad_request", Message: "depends index must be at least 0"}
-		}
-	}
-	return append([]int{}, (*raw)...), nil
+	return *raw
 }
 
-func resolveBriefRequester(ctx context.Context, h *Host, c Caller, dir secDirectory, explicit *string) (proto.ID, error) {
+func resolveBriefRequester(dir secDirectory, explicit *string) (proto.ID, error) {
 	if explicit != nil {
 		return dir.memberID(*explicit)
 	}
-	if id, ok := pickRequesterFromMsgs(dir, c.Member, cachedPlaceMessages(h.Rows, c.Group, c.Turn.Thread)); ok {
-		return id, nil
-	}
-	msgs, err := fetchPlaceMessages(ctx, h, c)
-	if err != nil {
-		return "", err
-	}
-	if id, ok := pickRequesterFromMsgs(dir, c.Member, msgs); ok {
-		return id, nil
-	}
-	return "", &Error{Code: "bad_request", Message: "propose_brief requires requester when no request message is found"}
-}
-
-func cachedPlaceMessages(rows *Rows, group, thread string) []proto.MsgRow {
-	var list []proto.MsgRow
-	for _, raw := range rows.Of(group, "msg") {
-		var m proto.MsgRow
-		if proto.Decode(raw, &m) == nil && msgThreadID(m) == thread {
-			list = append(list, m)
+	switch len(dir.people) {
+	case 1:
+		return proto.ID(dir.byName[dir.people[0]].ID), nil
+	case 0:
+		return "", &Error{Code: "bad_request", Message: "propose_brief requires requester when the group has no person"}
+	default:
+		return "", &Error{
+			Code:    "bad_request",
+			Message: fmt.Sprintf("propose_brief requires requester when the group has more than one person (%s)", str.Join(dir.people, ", ")),
 		}
 	}
-	slices.SortFunc(list, newestMsgFirst)
-	return list
 }
 
-func msgThreadID(m proto.MsgRow) string {
-	if m.Thread == nil {
-		return ""
-	}
-	return *m.Thread
-}
-
-func newestMsgFirst(a, b proto.MsgRow) int {
-	return stdcmp.Compare(b.Pos, a.Pos)
-}
-
-func fetchPlaceMessages(ctx context.Context, h *Host, c Caller) ([]proto.MsgRow, error) {
-	var thread *string
-	if c.Turn.Thread != "" {
-		t := c.Turn.Thread
-		thread = &t
-	}
-	build := func(id int64) any {
-		return proto.FetchThread{
-			FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: c.Group, Before: 0, Limit: 50},
-			Thread:    thread,
-		}
-	}
-	rawRows, err := secFetchRows(ctx, h, c.Home, build)
-	if err != nil {
-		return nil, err
-	}
-	return decodeMsgRows(rawRows)
-}
-
-func decodeMsgRows(rawRows []stdjson.RawMessage) ([]proto.MsgRow, error) {
-	msgs := make([]proto.MsgRow, len(rawRows))
-	for i, raw := range rawRows {
-		if proto.Decode(raw, &msgs[i]) != nil {
-			return nil, &Error{Code: "bad_request", Message: "invalid message row"}
-		}
-	}
-	slices.SortFunc(msgs, newestMsgFirst)
-	return msgs, nil
-}
-
-func pickRequesterFromMsgs(dir secDirectory, self string, msgs []proto.MsgRow) (proto.ID, bool) {
-	for _, m := range msgs {
-		if id, ok := msgHumanOrBriefRequester(dir, m); ok {
-			return id, true
-		}
-	}
-	return pickOtherMemberFromMsgs(dir, self, msgs)
-}
-
-func msgHumanOrBriefRequester(dir secDirectory, m proto.MsgRow) (proto.ID, bool) {
-	if author, ok := dir.byID[m.By]; ok && author.Kind == "human" {
-		return proto.ID(author.ID), true
-	}
-	if m.Kind != "brief" {
-		return "", false
-	}
-	var body proto.BriefBody
-	if proto.Decode(m.Body, &body) != nil {
-		return "", false
-	}
-	req, ok := dir.byID[body.Requester]
-	return proto.ID(req.ID), ok
-}
-
-func pickOtherMemberFromMsgs(dir secDirectory, self string, msgs []proto.MsgRow) (proto.ID, bool) {
-	for _, m := range msgs {
-		if author, ok := dir.byID[m.By]; ok && m.By != self {
-			return proto.ID(author.ID), true
-		}
-	}
-	return "", false
+type setTaskPlan struct {
+	assign string
+	action string
+	op     string
 }
 
 func callSetTask(ctx context.Context, h *Host, c Caller, raw stdjson.RawMessage) (any, error) {
@@ -483,46 +353,34 @@ func callSetTask(ctx context.Context, h *Host, c Caller, raw stdjson.RawMessage)
 	if err != nil {
 		return nil, err
 	}
-	payloads, err := prepareSetTaskPayloads(h, c, in)
+	plan, err := prepareSetTask(h, c, in)
 	if err != nil {
 		return nil, err
 	}
-	for _, payload := range payloads {
-		if _, err := h.Command(ctx, c.Home, payload); err != nil {
-			return nil, err
-		}
+	if err := runSetTask(ctx, h, c.Home, plan); err != nil {
+		return nil, err
 	}
 	return secOKReply{OK: true}, nil
 }
 
-func prepareSetTaskPayloads(h *Host, c Caller, in setTaskInput) ([]string, error) {
-	if err := validateSetTaskInput(in); err != nil {
-		return nil, err
+func prepareSetTask(h *Host, c Caller, in setTaskInput) (setTaskPlan, error) {
+	if !hasSetTaskChange(in) {
+		return setTaskPlan{}, &Error{Code: "bad_request", Message: "set_task requires assignee, reviewer or action"}
 	}
 	taskID, err := resolveSecTask(h.Rows, c.Group, in.Task)
 	if err != nil {
-		return nil, err
+		return setTaskPlan{}, err
 	}
 	dir := loadSecDirectory(h.Rows, c.Group)
 	assignee, reviewer, err := resolveSetTaskRoles(dir, in)
 	if err != nil {
-		return nil, err
+		return setTaskPlan{}, err
 	}
-	return buildSetTaskPayloads(h, c, taskID, assignee, reviewer, in.Action), nil
+	return buildSetTaskPlan(h, c, taskID, assignee, reviewer, in.Action), nil
 }
 
 func hasSetTaskChange(in setTaskInput) bool {
 	return in.Assignee != nil || in.Reviewer != nil || in.Action != nil
-}
-
-func validateSetTaskInput(in setTaskInput) error {
-	if !hasSetTaskChange(in) {
-		return &Error{Code: "bad_request", Message: "set_task requires assignee, reviewer or action"}
-	}
-	if in.Action != nil && !slices.Contains(setTaskActions, *in.Action) {
-		return &Error{Code: "bad_request", Message: "action must be pause, resume or cancel"}
-	}
-	return nil
 }
 
 func resolveSetTaskRoles(dir secDirectory, in setTaskInput) (proto.ID, proto.ID, error) {
@@ -544,21 +402,48 @@ func resolveOptionalMember(dir secDirectory, name *string) (proto.ID, error) {
 	return dir.memberID(*name)
 }
 
-func buildSetTaskPayloads(h *Host, c Caller, taskID, assignee, reviewer proto.ID, action *string) []string {
-	var payloads []string
+func buildSetTaskPlan(h *Host, c Caller, taskID, assignee, reviewer proto.ID, action *string) setTaskPlan {
+	var plan setTaskPlan
 	if assignee != "" || reviewer != "" {
 		assign := proto.TaskAssign{
 			TaskCommand: proto.TaskCommand{HomeCommand: secHomeHeader(h, c, "task"), Op: "assign", ID: taskID},
 			Assignee:    assignee,
 			Reviewer:    reviewer,
 		}
-		payloads = append(payloads, marshalSecWire(assign))
+		plan.assign = marshalSecWire(assign)
 	}
 	if action != nil {
 		cmd := proto.TaskCommand{HomeCommand: secHomeHeader(h, c, "task"), Op: *action, ID: taskID}
-		payloads = append(payloads, marshalSecWire(cmd))
+		plan.action = marshalSecWire(cmd)
+		plan.op = *action
 	}
-	return payloads
+	return plan
+}
+
+func runSetTask(ctx context.Context, h *Host, home string, plan setTaskPlan) error {
+	if plan.assign != "" {
+		if _, err := h.Command(ctx, home, plan.assign); err != nil {
+			return err
+		}
+	}
+	if plan.action == "" {
+		return nil
+	}
+	if _, err := h.Command(ctx, home, plan.action); err != nil {
+		return afterAssignError(plan.assign != "", plan.op, err)
+	}
+	return nil
+}
+
+func afterAssignError(assigned bool, op string, err error) error {
+	if !assigned {
+		return err
+	}
+	he := err.(*Error)
+	return &Error{
+		Code:    he.Code,
+		Message: fmt.Sprintf("task assign succeeded before task %s failed: %s", op, he.Message),
+	}
 }
 
 func callRequestDecision(ctx context.Context, h *Host, c Caller, raw stdjson.RawMessage) (any, error) {
@@ -569,7 +454,7 @@ func callRequestDecision(ctx context.Context, h *Host, c Caller, raw stdjson.Raw
 	if err := guardSecTexts(decisionTexts(in)...); err != nil {
 		return nil, err
 	}
-	post, err := prepareDecisionPost(ctx, h, c, in)
+	post, err := prepareDecisionPost(h, c, in)
 	if err != nil {
 		return nil, err
 	}
@@ -580,7 +465,7 @@ func callRequestDecision(ctx context.Context, h *Host, c Caller, raw stdjson.Raw
 }
 
 func decisionTexts(in requestDecisionInput) []string {
-	texts := make([]string, 0, 2+2*len(in.Options))
+	var texts []string
 	texts = append(texts, in.Question)
 	if in.Context != nil {
 		texts = append(texts, *in.Context)
@@ -591,13 +476,13 @@ func decisionTexts(in requestDecisionInput) []string {
 	return texts
 }
 
-func prepareDecisionPost(ctx context.Context, h *Host, c Caller, in requestDecisionInput) (proto.Post[proto.DecisionBody], error) {
+func prepareDecisionPost(h *Host, c Caller, in requestDecisionInput) (proto.Post[proto.DecisionBody], error) {
 	opts, recID, err := buildDecisionOptions(in.Options, in.Recommended)
 	if err != nil {
 		return proto.Post[proto.DecisionBody]{}, err
 	}
 	dir := loadSecDirectory(h.Rows, c.Group)
-	toUsers, mentions, err := resolveDecisionRecipients(ctx, h, c, dir, in.To)
+	toUsers, mentions, err := resolveDecisionRecipients(dir, in.To)
 	if err != nil {
 		return proto.Post[proto.DecisionBody]{}, err
 	}
@@ -606,10 +491,7 @@ func prepareDecisionPost(ctx context.Context, h *Host, c Caller, in requestDecis
 		HomeCommand: secHomeHeader(h, c, "post"),
 		Kind:        "decision",
 		Thread:      thread,
-		Main:        true,
-		Text:        "",
 		Mentions:    mentions,
-		Re:          nil,
 		Body: proto.DecisionBody{
 			Task:        task,
 			Question:    in.Question,
@@ -629,35 +511,22 @@ func buildDecisionOptions(inputs []decisionOptionInput, rec *int) ([]proto.Decis
 	if rec == nil {
 		return opts, nil, nil
 	}
-	if *rec < 0 || *rec >= len(opts) {
+	if *rec >= len(opts) {
 		return nil, nil, &Error{Code: "bad_request", Message: "recommended index out of range"}
 	}
 	id := opts[*rec].ID
 	return opts, &id, nil
 }
 
-func optionID(index int) string {
-	var buf []byte
-	for n := index; ; n = n/26 - 1 {
-		buf = append(buf, byte('A'+n%26))
-		if n < 26 {
-			slices.Reverse(buf)
-			return string(buf)
-		}
-	}
+func optionID(i int) string {
+	return string(rune('A' + i))
 }
 
-func resolveDecisionRecipients(ctx context.Context, h *Host, c Caller, dir secDirectory, explicit *[]string) ([]string, []proto.ID, error) {
+func resolveDecisionRecipients(dir secDirectory, explicit *[]string) ([]string, []proto.ID, error) {
+	names := dir.people
 	if explicit != nil {
-		return resolveExplicitDecisionRecipients(dir, *explicit)
+		names = *explicit
 	}
-	if c.Kind == GroupSession {
-		return nil, nil, &Error{Code: "bad_request", Message: "request_decision requires to in a group session"}
-	}
-	return resolveDefaultDecisionRecipient(ctx, h, c, dir)
-}
-
-func resolveExplicitDecisionRecipients(dir secDirectory, names []string) ([]string, []proto.ID, error) {
 	if len(names) == 0 {
 		return nil, nil, &Error{Code: "bad_request", Message: "request_decision requires at least one recipient"}
 	}
@@ -679,112 +548,6 @@ func appendUnique[T comparable](list []T, v T) []T {
 		return list
 	}
 	return append(list, v)
-}
-
-func resolveDefaultDecisionRecipient(ctx context.Context, h *Host, c Caller, dir secDirectory) ([]string, []proto.ID, error) {
-	if briefID := taskBriefID(h.Rows, c.Group, c.Task); briefID != "" {
-		reqID, err := readBriefRequester(ctx, h, c, briefID)
-		if err != nil {
-			return nil, nil, err
-		}
-		if req, ok := dir.byID[reqID]; ok {
-			return recipientForUser(dir, req.User)
-		}
-	}
-	return recipientForUser(dir, fallbackOwnerUser(h, c, dir))
-}
-
-func taskBriefID(rows *Rows, group, taskID string) string {
-	raw, ok := rows.Get(group, "task", taskID)
-	if !ok {
-		return ""
-	}
-	var task proto.TaskRow
-	if proto.Decode(raw, &task) != nil || task.Origin != "brief" {
-		return ""
-	}
-	return task.Brief
-}
-
-func readBriefRequester(ctx context.Context, h *Host, c Caller, briefID string) (string, error) {
-	raw, ok := h.Rows.Get(c.Group, "msg", briefID)
-	if !ok {
-		fetched, err := fetchSingleMsg(ctx, h, c, briefID)
-		if err != nil {
-			return "", err
-		}
-		raw = fetched
-	}
-	return decodeBriefRequester(raw)
-}
-
-func fetchSingleMsg(ctx context.Context, h *Host, c Caller, msgID string) (stdjson.RawMessage, error) {
-	build := func(id int64) any {
-		return proto.FetchRow{
-			FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: c.Group, Before: 0, Limit: 1},
-			Row:       "msg",
-			RowID:     msgID,
-		}
-	}
-	rows, err := secFetchRows(ctx, h, c.Home, build)
-	if err != nil {
-		return nil, err
-	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return rows[0], nil
-}
-
-func decodeBriefRequester(raw stdjson.RawMessage) (string, error) {
-	if len(raw) == 0 {
-		return "", nil
-	}
-	var msg proto.MsgRow
-	if proto.Decode(raw, &msg) != nil || msg.Kind != "brief" {
-		return "", &Error{Code: "bad_request", Message: "invalid brief message row"}
-	}
-	var body proto.BriefBody
-	if proto.Decode(msg.Body, &body) != nil {
-		return "", &Error{Code: "bad_request", Message: "invalid brief body"}
-	}
-	return body.Requester, nil
-}
-
-func recipientForUser(dir secDirectory, user string) ([]string, []proto.ID, error) {
-	if user == "" {
-		return nil, nil, &Error{Code: "not_found", Message: "no recipient found for decision"}
-	}
-	mentions := []proto.ID{}
-	for _, name := range dir.people {
-		if m := dir.byName[name]; m.User == user {
-			mentions = append(mentions, proto.ID(m.ID))
-		}
-	}
-	return []string{user}, mentions, nil
-}
-
-func fallbackOwnerUser(h *Host, c Caller, dir secDirectory) string {
-	if self, ok := dir.byID[c.Member]; ok {
-		return self.User
-	}
-	if len(dir.people) > 0 {
-		return dir.byName[dir.people[0]].User
-	}
-	return readStoreOwner(h.Store)
-}
-
-const selectOwnerSettingSQL = `SELECT coalesce((SELECT value FROM setting WHERE key = 'owner'), '""')`
-
-func readStoreOwner(db *store.Store) string {
-	var raw string
-	scan := func(tx *store.Tx) error {
-		return tx.QueryRow(selectOwnerSettingSQL).Scan(&raw)
-	}
-	db.Write(scan)
-	var owner string
-	stdjson.Unmarshal([]byte(raw), &owner)
-	return owner
 }
 
 func decisionTaskFields(c Caller) (*proto.ID, *string) {

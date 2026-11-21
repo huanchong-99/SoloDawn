@@ -9,10 +9,10 @@ Feature: Secretary coordination and decision MCP tools
     Then the secretary tool call returns ok
     And the home received "task" commands "assign, pause" for task "T-12"
 
-  Scenario: Decision cards number options from A, default to the brief requester in task sessions, and block secrets
+  Scenario: Decision cards number options from A, default to the group's people in task sessions, and block secrets
     Given a host group with secretary "Secretary", AIs "Claude Code" and "Codex", owner "owner", and task "T-12"
     When task session "Claude Code" on "T-12" invokes "request_decision" with '{"question":"Where does the badge go?","options":[{"label":"Header","effect":"Always visible"},{"label":"Footer","effect":"Quiet"}],"recommended":1}'
     Then the secretary tool call returns a random id
-    And the home received a main-line "decision" post on "T-12" recommending "B" to "owner"
+    And the home received a "decision" post on "T-12" recommending "B" to "owner"
     When task session "Claude Code" on "T-12" invokes "request_decision" with '{"question":"Leak sk-proj-EXAMPLEexampleEXAMPLEexample_EXAMPLE-00?","options":[]}'
     Then the secretary tool call fails with "secret: this looks like a secret; remove it and send again"

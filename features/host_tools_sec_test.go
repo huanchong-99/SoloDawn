@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -44,58 +45,10 @@ func (f *secScenarioHome) Request(_ context.Context, build func(int64) any) (jso
 	id := int64(len(f.requests) + 1)
 	req := build(id)
 	f.requests = append(f.requests, req)
-	switch req := req.(type) {
-	case proto.FetchThread:
-		return f.mainMsgReply(id), nil
-	case proto.FetchRow:
-		return f.briefRowReply(id), nil
-	case proto.Cmd:
-		f.cmds = append(f.cmds, req)
+	if cmd, ok := req.(proto.Cmd); ok {
+		f.cmds = append(f.cmds, cmd)
 	}
 	return json.RawMessage(fmt.Sprintf(`{"re":%d,"ok":true}`, id)), nil
-}
-
-func (f *secScenarioHome) mainMsgReply(id int64) json.RawMessage {
-	row := proto.MessageRow[proto.EmptyBody, proto.NoCard]{
-		RowHeader: proto.RowHeader{Type: "msg", ID: "m1____________________A", Seq: 5},
-		Pos:       5,
-		Group:     f.groupID,
-		By:        f.ownerMID,
-		Kind:      "text",
-		Timestamp: 1_763_600_000_000,
-		Text:      "Please add path notifications.",
-		Mentions:  []string{},
-		Body:      proto.EmptyBody{},
-	}
-	raw, _ := json.Marshal(row)
-	out, _ := json.Marshal(proto.Fetched{Type: "fetched", Success: proto.Success{Re: id, OK: true}, Rows: []json.RawMessage{raw}})
-	return out
-}
-
-func (f *secScenarioHome) briefRowReply(id int64) json.RawMessage {
-	body, _ := json.Marshal(proto.BriefBody{
-		Title:     "Path notice",
-		Goal:      "Show path.",
-		Criteria:  []string{"1 s"},
-		Scope:     proto.BriefScope{In: []string{}, Out: []string{}},
-		Tasks:     []proto.BriefTask{{Title: "Emit", Assignee: f.claudeMID, Reviewer: f.codexMID, Depends: []int{}}},
-		Pass:      90,
-		Requester: f.ownerMID,
-	})
-	row := proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: f.briefID, Seq: 6},
-		Pos:       6,
-		Group:     f.groupID,
-		By:        f.secMID,
-		Kind:      "brief",
-		Timestamp: 1_763_600_000_000,
-		Mentions:  []string{f.ownerMID},
-		Body:      body,
-		State:     &proto.CardState{Status: "confirmed"},
-	}
-	raw, _ := json.Marshal(row)
-	out, _ := json.Marshal(proto.Fetched{Type: "fetched", Success: proto.Success{Re: id, OK: true}, Rows: []json.RawMessage{raw}})
-	return out
 }
 
 type secScenarioWorld struct {
@@ -156,7 +109,7 @@ func hostToolsSecSteps(sc *godog.ScenarioContext, _ fixtures) {
 		return w.checkBriefPost(pass)
 	})
 	sc.Step(`^the home received "task" commands "([^"]+)" for task "T-12"$`, w.checkTaskCommands)
-	sc.Step(`^the home received a main-line "decision" post on "T-12" recommending "([^"]+)" to "([^"]+)"$`, func(rec, _ string) error {
+	sc.Step(`^the home received a "decision" post on "T-12" recommending "([^"]+)" to "([^"]+)"$`, func(rec, _ string) error {
 		return w.checkDecisionPost(rec)
 	})
 }
@@ -284,8 +237,15 @@ func (w *secScenarioWorld) checkBriefPost(wantPass int) error {
 	if err := proto.Decode([]byte(w.home.cmds[0].Env.Payload), &p); err != nil {
 		return err
 	}
-	if string(p.As) != w.home.secMID || p.Body.Pass != wantPass || p.Body.Requester != w.home.ownerMID || !slices.Equal(p.Mentions, []proto.ID{proto.ID(w.home.ownerMID)}) {
-		return fmt.Errorf("unexpected brief post: %+v", p)
+	return w.verifyBriefFields(p, wantPass)
+}
+
+func (w *secScenarioWorld) verifyBriefFields(p proto.Post[proto.BriefBody], wantPass int) error {
+	if string(p.As) != w.home.secMID || p.Body.Pass != wantPass {
+		return fmt.Errorf("unexpected brief header/pass: %+v", p)
+	}
+	if p.Body.Requester != w.home.ownerMID || !slices.Equal(p.Mentions, []proto.ID{proto.ID(w.home.ownerMID)}) {
+		return fmt.Errorf("unexpected brief requester/mentions: %+v", p)
 	}
 	return nil
 }
@@ -316,10 +276,15 @@ func (w *secScenarioWorld) checkDecisionPost(wantRec string) error {
 	if err := proto.Decode([]byte(w.home.cmds[0].Env.Payload), &p); err != nil {
 		return err
 	}
-	if !p.Main || p.Thread == nil || string(*p.Thread) != w.taskID {
-		return errors.New("decision post missing main=true or task thread")
+	return w.verifyDecisionFields(p, wantRec)
+}
+
+func (w *secScenarioWorld) verifyDecisionFields(p proto.Post[proto.DecisionBody], wantRec string) error {
+	tid := proto.ID(w.taskID)
+	if p.Main || !reflect.DeepEqual(p.Thread, &tid) {
+		return errors.New("unexpected decision post main or task thread")
 	}
-	if p.Body.Recommended == nil || *p.Body.Recommended != wantRec || !slices.Equal(p.Body.To, []string{w.ownerUID}) {
+	if !reflect.DeepEqual(p.Body.Recommended, &wantRec) || !slices.Equal(p.Body.To, []string{w.ownerUID}) {
 		return fmt.Errorf("unexpected decision body: %+v", p.Body)
 	}
 	return nil
