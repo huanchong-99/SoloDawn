@@ -12,18 +12,14 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-// agtProbeTimeout bounds one CLI --version check. Tests shorten it.
-var agtProbeTimeout = time.Duration(5e9)
+const (
+	agtProbeTimeout     = 5 * time.Second
+	agtUpsertFoundSQL   = `INSERT INTO agent(agent, cli_version) VALUES(?, ?) ON CONFLICT(agent) DO UPDATE SET cli_version = excluded.cli_version`
+	agtUpdateAccountSQL = `UPDATE agent SET account = ? WHERE agent = ?`
+	agtSelectAgentSQL   = `SELECT account, caps FROM agent WHERE agent = ?`
+)
 
 var agtSupported = []string{"claude", "codex"}
-
-const (
-	agtUpsertFoundSQL = `INSERT INTO agent(agent, cli_version) VALUES(?, ?)
-		ON CONFLICT(agent) DO UPDATE SET cli_version = excluded.cli_version`
-	agtUpsertAccountSQL = `INSERT INTO agent(agent, cli_version, account) VALUES(?, ?, ?)
-		ON CONFLICT(agent) DO UPDATE SET cli_version = excluded.cli_version, account = excluded.account`
-	agtSelectAgentSQL = `SELECT account, caps FROM agent WHERE agent = ?`
-)
 
 func init() {
 	Register(Surface, "agent.set", agtSet)
@@ -65,16 +61,11 @@ func (p *agtPart) loginOK(agent string) bool {
 	return !p.invalid[agent]
 }
 
-func (p *agtPart) cached(now time.Time, need string) ([]agtFound, bool) {
+func (p *agtPart) cached(now time.Time) ([]agtFound, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !now.Before(p.expiresAt) {
 		return nil, false
-	}
-	if need != "" {
-		if _, ok := agtVersionOf(p.found, need); !ok {
-			return nil, false
-		}
 	}
 	return append([]agtFound(nil), p.found...), true
 }
@@ -90,9 +81,10 @@ func (p *agtPart) storeCache(expiresAt time.Time, found []agtFound) {
 // persists found CLIs in the agent table, and returns their host.info entries
 // (contracts/drivers.md section 1.4, contracts/datachannel.md section 7).
 // Groups is an empty slice for the caller to fill from session and permission
-// state.
+// state. If ctx ends during a probe, Agents returns ctx.Err() bare (not an
+// *Error) for the caller to map to a wire code.
 func (h *Host) Agents(ctx context.Context) ([]proto.HostAgent, error) {
-	found, err := agtDetect(ctx, h, "")
+	found, err := agtDetect(ctx, h)
 	if err != nil {
 		return nil, err
 	}
@@ -102,12 +94,12 @@ func (h *Host) Agents(ctx context.Context) ([]proto.HostAgent, error) {
 	return agtLoadAgents(h.Store, Part[agtPart](h), found)
 }
 
-func agtDetect(ctx context.Context, h *Host, need string) ([]agtFound, error) {
+func agtDetect(ctx context.Context, h *Host) ([]agtFound, error) {
 	part := Part[agtPart](h)
 	part.probeMu.Lock()
 	defer part.probeMu.Unlock()
 	now := h.Now()
-	if found, ok := part.cached(now, need); ok {
+	if found, ok := part.cached(now); ok {
 		return found, nil
 	}
 	found, err := agtProbeAll(ctx)
@@ -213,15 +205,6 @@ func agtReadRow(tx *store.Tx, f agtFound, loginOK bool) (proto.HostAgent, error)
 	}, nil
 }
 
-func agtVersionOf(found []agtFound, agent string) (string, bool) {
-	for _, f := range found {
-		if f.agent == agent {
-			return f.version, true
-		}
-	}
-	return "", false
-}
-
 func agtListen(h *Host, key SessionKey, e Event) {
 	s, ok := h.Sessions.Get(key)
 	if !ok {
@@ -236,8 +219,6 @@ func agtLoginChange(e Event) (loginOK, changed bool) {
 	switch e.Kind {
 	case LoginInvalid:
 		return false, true
-	case Ready:
-		return true, true
 	case TurnEnded:
 		return true, e.Status != "failed"
 	default:
@@ -245,20 +226,12 @@ func agtLoginChange(e Event) (loginOK, changed bool) {
 	}
 }
 
-func agtSet(ctx context.Context, h *Host, _ Owner, by string, data json.RawMessage) (any, error) {
+func agtSet(_ context.Context, h *Host, _ Owner, by string, data json.RawMessage) (any, error) {
 	cmd, err := agtDecodeSet(data)
 	if err != nil {
 		return nil, err
 	}
-	found, err := agtDetect(ctx, h, cmd.Agent)
-	if err != nil {
-		return nil, err
-	}
-	version, ok := agtVersionOf(found, cmd.Agent)
-	if !ok {
-		return nil, &Error{Code: "conflict", Message: cmd.Agent + " is not found on this machine"}
-	}
-	if err := agtWriteAccount(h, cmd.Agent, version, cmd.Account, by); err != nil {
+	if err := agtWriteAccount(h, cmd.Agent, cmd.Account, by); err != nil {
 		return nil, err
 	}
 	Part[agtPart](h).setLoginOK(cmd.Agent, true)
@@ -287,12 +260,25 @@ func agtValidAccount(account string) bool {
 	return account == "personal" || account == "team" || account == "api_key"
 }
 
-func agtWriteAccount(h *Host, agent, version, account, by string) error {
+func agtUpdateAccount(tx *store.Tx, agent, account string) (bool, error) {
+	res, err := tx.Exec(agtUpdateAccountSQL, account, agent)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+func agtWriteAccount(h *Host, agent, account, by string) error {
 	write := func(tx *store.Tx) error {
-		if _, err := tx.Exec(agtUpsertAccountSQL, agent, version, account); err != nil {
+		updated, err := agtUpdateAccount(tx, agent, account)
+		if err != nil {
 			return err
 		}
-		_, err := h.Audit(tx, AuditRow{
+		if !updated {
+			return &Error{Code: "conflict", Message: agent + " is not found on this machine"}
+		}
+		_, err = h.Audit(tx, AuditRow{
 			Agent:  agent,
 			What:   AuditSetting,
 			Detail: "account " + account,

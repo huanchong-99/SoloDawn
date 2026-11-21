@@ -179,10 +179,6 @@ func agtSetPayload(agent, account string) json.RawMessage {
 	return json.RawMessage(fmt.Sprintf(`{"t":"agent.set","n":"STwCAvPRTFkRNCvXYEgsMw","ts":1763600000000,"to":"host-device","agent":%q,"account":%q}`, agent, account))
 }
 
-func TestAgentsDefaultTimeout(t *testing.T) {
-	agtEqual(t, agtProbeTimeout, 5*time.Second)
-}
-
 func TestAgentsCleanVersionFormats(t *testing.T) {
 	cases := []struct {
 		agent string
@@ -282,10 +278,6 @@ func TestAgentsEmptyNonZeroExitAndTimeout(t *testing.T) {
 	})
 
 	t.Run("hung version command times out without failing the other CLI", func(t *testing.T) {
-		prev := agtProbeTimeout
-		agtProbeTimeout = 1200 * time.Millisecond
-		t.Cleanup(func() { agtProbeTimeout = prev })
-
 		newAgtStandIns(t, map[string]agtStandInSpec{
 			"claude": {Stdout: "2.1.311 (Claude Code)\n", SleepMS: 10000},
 			"codex":  {Stdout: "codex-cli 0.164.0\n"},
@@ -295,8 +287,8 @@ func TestAgentsEmptyNonZeroExitAndTimeout(t *testing.T) {
 		got := agtReadAgents(t, h)
 		agtEqual(t, len(got), 1)
 		agtEqual(t, got[0].Agent, "codex")
-		if elapsed := time.Since(start); elapsed >= 7*time.Second {
-			t.Fatalf("probe took %v, want bounded by agtProbeTimeout", elapsed)
+		if elapsed := time.Since(start); elapsed < 4*time.Second || elapsed >= 9*time.Second {
+			t.Fatalf("probe took %v, want bounded by 5s agtProbeTimeout", elapsed)
 		}
 	})
 }
@@ -386,19 +378,14 @@ func TestAgentsLoginStatusTransitions(t *testing.T) {
 	h.Report(codexKey, Event{Kind: LoginInvalid, Text: "expired token"})
 	assertLogin(false, false)
 
-	// Neutral events and a failed TurnEnded keep login_ok false.
+	// Neutral events (Ready included) and a failed TurnEnded keep login_ok false.
+	h.Report(claudeKey, Event{Kind: Ready, Session: "sess-1"})
 	h.Report(claudeKey, Event{Kind: Active})
 	h.Report(claudeKey, Event{Kind: RateLimited, Resets: seamStart})
 	h.Report(claudeKey, Event{Kind: TurnEnded, Status: "failed"})
 	assertLogin(false, false)
 
-	// Ready restores login_ok for that agent only.
-	h.Report(claudeKey, Event{Kind: Ready, Session: "sess-1"})
-	assertLogin(true, false)
-
-	// TurnEnded with status completed or interrupted restores login_ok.
-	h.Report(claudeKey, Event{Kind: LoginInvalid})
-	assertLogin(false, false)
+	// TurnEnded with status completed or interrupted restores login_ok for that agent only.
 	h.Report(claudeKey, Event{Kind: TurnEnded, Status: "completed"})
 	assertLogin(true, false)
 
@@ -406,13 +393,14 @@ func TestAgentsLoginStatusTransitions(t *testing.T) {
 	assertLogin(true, true)
 }
 
-func TestAgentSetAccountsAuditAndReprobe(t *testing.T) {
+func TestAgentSetAccountsAndAudit(t *testing.T) {
 	if Surface["agent.set"] == nil {
 		t.Fatal("Surface[\"agent.set\"] is not registered")
 	}
 
 	standIns := newAgtStandIns(t, map[string]agtStandInSpec{
 		"claude": {Stdout: "2.1.311 (Claude Code)\n"},
+		"codex":  {Stdout: "codex-cli 0.164.0\n"},
 	})
 	db := seamStore(t)
 	seamSQL(t, db, `INSERT INTO agent(agent, cli_version, caps) VALUES('claude', '2.1.311', '{"day":{"unit":"turns","max":50}}')`)
@@ -420,32 +408,34 @@ func TestAgentSetAccountsAuditAndReprobe(t *testing.T) {
 	now := time.UnixMilli(seamStart)
 	h.Now = func() time.Time { return now }
 
-	// Warm the 60 s cache with claude only, and mark claude login_invalid.
 	claudeKey := SessionKey{Group: "g1", Member: "m1"}
 	agtCheck(t, h.Sessions.Create(Session{SessionKey: claudeKey, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: "home-1", Name: "Claude"}))
 	agtReadAgents(t, h)
 	agtEqual(t, standIns.calls("claude"), 1)
+	agtEqual(t, standIns.calls("codex"), 1)
 	h.Report(claudeKey, Event{Kind: LoginInvalid})
 
-	// All three valid account types succeed without re-probing a cached CLI, preserve caps, and restore login_ok.
-	for _, account := range []string{"personal", "team", "api_key"} {
+	// All three valid account types (including setting the same value twice) update the row without probing PATH, preserve caps, and restore login_ok.
+	for _, account := range []string{"personal", "personal", "team", "api_key"} {
 		agtCallSet(t, h, "owner-dev", agtSetPayload("claude", account))
 	}
 	agtEqual(t, standIns.calls("claude"), 1)
+	agtEqual(t, standIns.calls("codex"), 1)
 
-	agents := agtReadAgents(t, h)
-	apiKey := "api_key"
-	agtEqual(t, agents[0].Account, &apiKey)
-	agtEqual(t, agents[0].LoginOK, true)
-	agtEqual(t, agents[0].Caps.Day, &proto.Cap{Unit: "turns", Max: 50})
-
-	// Install codex inside the 60 s window and run golden agent-set.json: re-probes and succeeds.
-	standIns.install("codex", agtStandInSpec{Stdout: "codex-cli 0.164.0\n"})
 	goldenRaw := agtVal(os.ReadFile(filepath.Join("..", "proto", "testdata", "agent-set.json")))
 	now = now.Add(5 * time.Second)
 	agtCallSet(t, h, "owner-dev", goldenRaw)
 
+	agents := agtReadAgents(t, h)
+	apiKey := "api_key"
+	personal := "personal"
+	agtEqual(t, agents[0].Account, &apiKey)
+	agtEqual(t, agents[0].LoginOK, true)
+	agtEqual(t, agents[0].Caps.Day, &proto.Cap{Unit: "turns", Max: 50})
+	agtEqual(t, agents[1].Account, &personal)
+
 	wantAudit := strings.Join([]string{
+		"1763600000000|-|claude|setting|-|-|account personal|owner-dev|-",
 		"1763600000000|-|claude|setting|-|-|account personal|owner-dev|-",
 		"1763600000000|-|claude|setting|-|-|account team|owner-dev|-",
 		"1763600000000|-|claude|setting|-|-|account api_key|owner-dev|-",
@@ -460,6 +450,7 @@ func TestAgentSetRefusals(t *testing.T) {
 		"claude": {Stdout: "2.1.311 (Claude Code)\n"},
 	})
 	h, _ := seamHost(t, seamStore(t))
+	agtReadAgents(t, h)
 
 	_, decodeErr := handle(t.Context(), h, nil, "owner-dev", json.RawMessage(`{"t":"agent.set"}`))
 	seamCode(t, decodeErr, "bad_request")
@@ -477,12 +468,6 @@ func TestAgentSetRefusals(t *testing.T) {
 		res, err := handle(t.Context(), h, nil, "owner-dev", bad.raw)
 		agtEqual(t, res, nil)
 		agtErrText(t, err, bad.want)
-	}
-
-	cancelled, cancel := context.WithCancel(t.Context())
-	cancel()
-	if _, err := handle(cancelled, h, nil, "owner-dev", agtSetPayload("codex", "personal")); !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled agent.set = %v, want context.Canceled", err)
 	}
 	agtEqual(t, seamRecord(t, h), "")
 }
@@ -533,11 +518,11 @@ func TestAgentsStoreErrorsAndTransactionAtomicity(t *testing.T) {
 		h, _ := seamHost(t, db)
 		agtReadAgents(t, h)
 		seamSQL(t, db, "DROP TABLE agent")
-		if _, err := h.Agents(t.Context()); err == nil {
-			t.Fatal("expected Agents error when agent table is dropped")
+		if _, err := h.Agents(t.Context()); err == nil || !strings.Contains(err.Error(), "no such table: agent") {
+			t.Fatalf("Agents got %v, want no such table: agent", err)
 		}
-		if _, err := Surface["agent.set"](t.Context(), h, nil, "owner-dev", agtSetPayload("claude", "personal")); err == nil {
-			t.Fatal("expected agent.set error when agent table is dropped")
+		if _, err := Surface["agent.set"](t.Context(), h, nil, "owner-dev", agtSetPayload("claude", "personal")); err == nil || !strings.Contains(err.Error(), "no such table: agent") {
+			t.Fatalf("agent.set got %v, want no such table: agent", err)
 		}
 	})
 }
@@ -563,7 +548,7 @@ func TestAgentsConcurrentAccess(t *testing.T) {
 			if n%2 == 0 {
 				h.Report(key, Event{Kind: LoginInvalid})
 			} else {
-				h.Report(key, Event{Kind: Ready, Session: "s1"})
+				h.Report(key, Event{Kind: TurnEnded, Status: "completed"})
 			}
 			if _, err := Surface["agent.set"](t.Context(), h, nil, "owner-dev", agtSetPayload("claude", "personal")); err != nil {
 				t.Errorf("agent.set: %v", err)

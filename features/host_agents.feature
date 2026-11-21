@@ -15,6 +15,7 @@ Feature: Detecting AI CLIs, sign-in status and declaring accounts
 
   Scenario Outline: Declaring an agent account checks the agent, account and PATH
     Given a host with fake CLIs "<installed>" on PATH
+    And the host reads its agents
     When owner device "owner-1" sends agent.set for "<agent>" with account "<account>"
     Then agent.set ends with "<outcome>"
     And the setting audit rows are "<audit>"

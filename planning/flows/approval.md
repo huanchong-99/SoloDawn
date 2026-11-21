@@ -66,11 +66,10 @@ which fields of the card is in `contracts/messages.md` 2.3.
    sends it to H.
 9. H checks that the signer is in `body.approvers` and the card is pending,
    updates `state`, clears the wait, pushes rows, and queues a `decided`
-   item for the AI whose `cause` is B's envelope, unchanged.
-10. N checks the item like any item, and then the cause itself: signed by a
-    device of its owner or of an approver the owner named, and about the
-    card of an approval record N holds. If not, N refuses the item (audit
-    row `refused`).
+   item for the AI.
+10. N checks the item like any item, and that the `decided` item names an
+    approval card N holds (owner's decision of 2026-11-21: no `cause` on
+    items). If not, N refuses the item (audit row `refused`).
 11. The item is not a turn: it goes straight to the waiting request. N
     answers the CLI "allow" or "deny", deletes the record, and writes an
     audit row with the decision and the signer. The AI continues in the

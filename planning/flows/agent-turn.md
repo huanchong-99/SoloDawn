@@ -30,13 +30,14 @@ that is waiting for them.
 ## B. From item to turn
 
 1. Something happens in the group that concerns the AI
-   (`contracts/commands.md` section 3). H writes an inbox item, signs it,
-   and, if N is connected, pushes it.
-2. N checks the item at its boundary (R-136): the item's envelope is signed
-   by the home of that group, that device is in the log of N's owner, the
-   item is addressed to N and names an AI that runs here. Otherwise N
-   refuses the item: audit row `refused`, then `ack`. Rows inside the item
-   that carry no signature are content for the turn, not authority.
+   (`contracts/commands.md` section 3). H writes an inbox item and, if N is
+   connected, pushes it.
+2. N checks the item when it arrives (`contracts/datachannel.md` section 6):
+   the frame comes from the home of that group and `ai` runs on this host
+   (owner's decision of 2026-11-21: no attack-and-defence code, so no item
+   signature or `cause`). Otherwise N refuses the item: audit row `refused`,
+   then `ack`. Rows inside the item that carry no signature are content for
+   the turn, not authority.
 3. N holds the item, unacknowledged, while any of these is true: the group
    is paused; the item's task is `paused` or `failed`; N is offline by the
    owner's command; the AI is `limited` by a cap or a rate limit; the
@@ -128,7 +129,7 @@ an `event` in `member status`, which H turns into a `system` row
 | the CLI cannot resume the session id | starts a fresh session in the same folder; its first turn carries what the first turn of that session kind carries, plus the last 20 messages of the thread (R-123); reports `session_replaced` |
 | the CLI reports a vendor rate limit | state `limited`; reports `rate_limited` with the reset time; items are held until then |
 | the owner's cap is reached (R-61) | state `limited`; reports `cap_reached`; items are held until the cap is released (`contracts/commands.md` section 2) |
-| the CLI reports that sign-in is not valid in this mode | state `limited`; reports `login_invalid` only when the AI enters `limited`, at the first failed start after a success; later failed tries are not reported again. N never changes how the CLI authenticates (R-56). The state ends when the owner sends `agent.set` for that CLI again, or when the session start for the next item succeeds: that start is still tried |
+| the CLI reports that sign-in is not valid in this mode | state `limited`; reports `login_invalid` only when the AI enters `limited`, at the first failed start after a success; later failed tries are not reported again. N never changes how the CLI authenticates (R-56). Sending `agent.set` for that CLI sets `login_ok` back to `true` in `host.info`, while the member's `limited` state ends at its next completed turn (the start for the next item is still tried, and a completed turn also restores `login_ok`) |
 | group paused | interrupts running turns of the group's sessions (`turn_interrupted`, `stop`); the sessions stay open; items are held |
 | task paused (`contracts/task-machine.md` row 12) | interrupts a running turn of that task's sessions (`turn_interrupted`, `stop`); the sessions stay open; items are held |
 | owner's "all offline" | interrupts running turns (`turn_interrupted`, `stop`) and closes every session; items are held |
