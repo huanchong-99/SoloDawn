@@ -65,16 +65,7 @@ Notes:
   and has no "pending" result. Calls longer than 600 seconds are
   `[unverified]` on both; the turn time limit ends them.
 - `submit_task` fails with `conflict` if the worktree has uncommitted
-  changes or the last `run_checks` did not pass on the head commit. Its
-  `summary` becomes the `text` of the `report` post (and the pull-request
-  body with a remote), `pr` is omitted from the tool result when `forge` is
-  `none`, and with `forge` `github` the host starts `WaitHostedChecks` in the
-  background (cancelling any earlier poll for the same task) to report `task
-  cloud`. In an `items` or `replaced` turn, `start_task` sets `re` of `task
-  start` to the newest message in the turn's place not authored by the caller
-  or `"system"` (preferring one that mentions the caller), or `null` when
-  none is available; `submit_review` refuses an empty item `text` or `file`
-  with `bad_request`.
+  changes or the last `run_checks` did not pass on the head commit.
 - A task session at level 1 is not offered `push_branch`, `run_checks` or
   `submit_task` (`contracts/drivers.md` section 2).
 - `push_branch` and `submit_task` are the only way a task's branch is

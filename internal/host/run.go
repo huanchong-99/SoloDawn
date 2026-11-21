@@ -1,0 +1,928 @@
+package host
+
+import (
+	"cmp"
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/huanchong-99/SoloDawn/internal/proto"
+	"github.com/huanchong-99/SoloDawn/internal/store"
+)
+
+const (
+	defaultIdleMinutes = 15
+	defaultMaxOpen     = 4
+	defaultTurnMinutes = 60
+	stopTimeout        = 10 * time.Second
+)
+
+func init() {
+	Provide(&Runner, Runtime(sessionRunner{}))
+	Register(Attached, "runtime", attachRuntime)
+}
+
+type sessionRunner struct{}
+
+type aiSlot struct{ group, member string }
+
+type launchConfig struct {
+	maxOpen    int
+	level      int
+	repoConfig bool
+}
+
+const queryMainDBFileSQL = `SELECT coalesce((SELECT file FROM pragma_database_list WHERE name = 'main'), '')`
+
+const queryLaunchConfigSQL = `SELECT
+	coalesce((SELECT json_extract(value, '$') FROM setting WHERE key = 'max_open'), 4),
+	iif(coalesce((SELECT json_extract(value, '$') FROM setting WHERE key = 'all_level3'), 0), 3,
+		coalesce((SELECT level FROM perm WHERE agent = ? AND g = ?), (SELECT json_extract(value, '$') FROM setting WHERE key = 'default_level'), 3)),
+	coalesce((SELECT repo_config FROM perm WHERE agent = ? AND g = ?), 0)`
+
+const queryIdleMinutesSQL = `SELECT coalesce((SELECT json_extract(value, '$') FROM setting WHERE key = 'idle_minutes'), 15)`
+
+type pendingCrash struct {
+	session    Session
+	detail     string
+	statusSent bool
+}
+
+// runtimePart holds all per-host session runtime state via Part[runtimePart](h).
+//
+// Lock order: mu may call Sessions.Get and Sessions.All, which take only the
+// leaf in-memory Sessions lock. Nothing called under mu acquires Store, Rows,
+// Host, Driver, Process or hook/listener locks.
+type runtimePart struct {
+	mu         sync.Mutex
+	procs      map[SessionKey]*liveProc
+	closing    map[SessionKey]bool
+	starting   map[SessionKey]bool
+	limited    map[aiSlot]bool
+	savedCrash map[string][]pendingCrash
+	changed    chan struct{} // closed and replaced under mu to wake waitSignal callers
+}
+
+func stateOf(h *Host) *runtimePart {
+	rt := Part[runtimePart](h)
+	rt.mu.Lock()
+	if rt.procs == nil {
+		rt.procs, rt.closing, rt.starting = map[SessionKey]*liveProc{}, map[SessionKey]bool{}, map[SessionKey]bool{}
+		rt.limited, rt.savedCrash, rt.changed = map[aiSlot]bool{}, map[string][]pendingCrash{}, make(chan struct{})
+	}
+	rt.mu.Unlock()
+	return rt
+}
+
+func (rt *runtimePart) notifyLocked() {
+	close(rt.changed)
+	rt.changed = make(chan struct{})
+}
+
+func (rt *runtimePart) notify() {
+	rt.mu.Lock()
+	rt.notifyLocked()
+	rt.mu.Unlock()
+}
+
+type liveProc struct {
+	key        SessionKey
+	session    Session
+	token      string
+	proc       Process
+	cancel     context.CancelFunc
+	closeOnce  sync.Once
+	killTimer  atomic.Pointer[time.Timer]
+	killed     atomic.Bool
+	idleTimer  *time.Timer
+	idleGen    uint64
+	turnActive bool
+	resumed    bool
+	origTurn   Turn
+	exitWhy    EventKind
+	eventText  string
+	replacedOK bool
+	replaceErr error
+	// Single reader: stopProcess or writeTurnToWaiting.
+	loopDone chan struct{}
+}
+
+func (lp *liveProc) triggerClose() {
+	lp.closeOnce.Do(func() {
+		kill := func() {
+			lp.killed.Store(true)
+			lp.cancel()
+		}
+		t := time.AfterFunc(stopTimeout, kill)
+		lp.killTimer.Store(t)
+		lp.proc.Close()
+	})
+}
+
+func (lp *liveProc) stopKillTimer() {
+	if t := lp.killTimer.Load(); t != nil {
+		t.Stop()
+	}
+}
+
+func readLaunchConfig(h *Host, agent, group string) (launchConfig, error) {
+	var cfg launchConfig
+	var repoCfg int
+	scan := func(tx *store.Tx) error {
+		return tx.QueryRow(queryLaunchConfigSQL, agent, group, agent, group).Scan(
+			&cfg.maxOpen, &cfg.level, &repoCfg,
+		)
+	}
+	err := h.Store.Write(scan)
+	cfg.repoConfig = repoCfg != 0
+	return cfg, err
+}
+
+func sessionDir(h *Host, s Session) string {
+	var dbFile string
+	scan := func(tx *store.Tx) error {
+		return tx.QueryRow(queryMainDBFileSQL).Scan(&dbFile)
+	}
+	h.Store.Write(scan)
+	return filepath.Join(filepath.Dir(dbFile), "projects", s.Group, s.Folder)
+}
+
+func readIdleDuration(h *Host) time.Duration {
+	minutes := defaultIdleMinutes
+	scan := func(tx *store.Tx) error {
+		return tx.QueryRow(queryIdleMinutesSQL).Scan(&minutes)
+	}
+	h.Store.Write(scan)
+	return idleDuration(minutes)
+}
+
+// ReportSaved reports a crash (turn_interrupted with reason crash, plus task
+// fail for a task session) for every session row that was working when the
+// previous node run stopped (flows/agent-turn.md E). Rows whose home is not
+// connected yet are queued and reported once Attach connects that home.
+func (h *Host) ReportSaved(ctx context.Context, saved []Session) {
+	rt := stateOf(h)
+	for _, s := range saved {
+		if s.State == Working {
+			reportOrQueueCrash(ctx, h, rt, pendingCrash{session: s})
+		}
+	}
+}
+
+func reportOrQueueCrash(ctx context.Context, h *Host, rt *runtimePart, c pendingCrash) {
+	if sendCrashStep(ctx, h, rt, &c) {
+		return
+	}
+	rt.mu.Lock()
+	rt.savedCrash[c.session.Home] = append(rt.savedCrash[c.session.Home], c)
+	rt.mu.Unlock()
+}
+
+func attachRuntime(h *Host, device string) {
+	rt := stateOf(h)
+	rt.mu.Lock()
+	pending := rt.savedCrash[device]
+	delete(rt.savedCrash, device)
+	rt.mu.Unlock()
+	if len(pending) == 0 {
+		return
+	}
+	go func() {
+		for _, c := range pending {
+			reportOrQueueCrash(context.Background(), h, rt, c)
+		}
+	}()
+}
+
+func (sessionRunner) Answer(h *Host, key SessionKey, ask string, allow bool) error {
+	if _, ok := h.Sessions.Get(key); !ok {
+		return &Error{"not_found", "no such session"}
+	}
+	rt := stateOf(h)
+	rt.mu.Lock()
+	lp := rt.procs[key]
+	rt.mu.Unlock()
+	if lp == nil {
+		return &Error{"not_found", "no open process for session"}
+	}
+	return lp.proc.Answer(ask, allow)
+}
+
+func (sessionRunner) Turn(ctx context.Context, h *Host, key SessionKey, text string, turn Turn) error {
+	rt := stateOf(h)
+	for {
+		if err := waitNotClosing(ctx, rt, key); err != nil {
+			return err
+		}
+		s, ok := h.Sessions.Get(key)
+		if !ok {
+			return &Error{"not_found", "no such session"}
+		}
+		done, err := stepSessionTurn(ctx, h, rt, s, text, turn)
+		if done {
+			return err
+		}
+	}
+}
+
+func stepSessionTurn(ctx context.Context, h *Host, rt *runtimePart, s Session, text string, turn Turn) (bool, error) {
+	if s.State == Waiting {
+		return tryTurnOnWaiting(h, rt, s, text, turn)
+	}
+	if s.State != Dormant {
+		return true, &Error{"conflict", "the session is " + string(s.State)}
+	}
+	cfg, err := readLaunchConfig(h, s.Agent, s.Group)
+	if err != nil {
+		return true, err
+	}
+	if err := acquireOpenSlot(ctx, h, rt, s.SessionKey, cfg.maxOpen); err != nil {
+		return true, err
+	}
+	return true, startFromDormant(h, rt, s, cfg, text, turn)
+}
+
+func waitNotClosing(ctx context.Context, rt *runtimePart, key SessionKey) error {
+	for {
+		rt.mu.Lock()
+		closing := rt.closing[key]
+		waitCh := rt.changed
+		rt.mu.Unlock()
+		if !closing {
+			return nil
+		}
+		if err := waitSignal(ctx, waitCh); err != nil {
+			return err
+		}
+	}
+}
+
+func tryTurnOnWaiting(h *Host, rt *runtimePart, s Session, text string, turn Turn) (bool, error) {
+	lp, retry, err := claimWaitingProc(rt, s.SessionKey)
+	if retry || err != nil {
+		return err != nil, err
+	}
+	if lp == nil {
+		err := h.Sessions.Move(s.SessionKey, Waiting, Dormant)
+		return err != nil, err
+	}
+	return true, writeTurnToWaiting(h, rt, s, lp, text, turn)
+}
+
+func claimWaitingProc(rt *runtimePart, key SessionKey) (*liveProc, bool, error) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.closing[key] {
+		return nil, true, nil
+	}
+	lp := rt.procs[key]
+	if lp == nil {
+		return nil, false, nil
+	}
+	if lp.turnActive {
+		return nil, false, &Error{"busy", "the session is already running a turn"}
+	}
+	stopIdleLocked(lp)
+	lp.turnActive = true
+	return lp, false, nil
+}
+
+func stopIdleLocked(lp *liveProc) {
+	lp.idleGen++
+	if lp.idleTimer != nil {
+		lp.idleTimer.Stop()
+		lp.idleTimer = nil
+	}
+}
+
+func writeTurnToWaiting(h *Host, rt *runtimePart, s Session, lp *liveProc, text string, turn Turn) error {
+	if err := h.Sessions.Move(s.SessionKey, Waiting, Working); err != nil {
+		unclaimWaitingProc(h, rt, lp)
+		return err
+	}
+	sendMemberStatus(context.Background(), h, rt, s.Home, s.Group, s.Member, nil)
+	h.Sessions.SetTurn(s.SessionKey, turn)
+	h.Report(s.SessionKey, Event{Kind: TurnBegan})
+	if err := lp.proc.Turn(text); err != nil {
+		lp.cancel()
+		<-lp.loopDone
+		return err
+	}
+	return nil
+}
+
+func unclaimWaitingProc(h *Host, rt *runtimePart, lp *liveProc) {
+	idle := readIdleDuration(h)
+	rt.mu.Lock()
+	lp.turnActive = false
+	armIdleLocked(h, rt, lp, idle)
+	rt.mu.Unlock()
+}
+
+func startFromDormant(h *Host, rt *runtimePart, s Session, cfg launchConfig, text string, turn Turn) error {
+	err := h.Sessions.Move(s.SessionKey, Dormant, Working)
+	rt.releaseStarting(s.SessionKey)
+	if err != nil {
+		return err
+	}
+	fresh, _ := h.Sessions.Get(s.SessionKey)
+	lp, err := launchSessionProcess(h, rt, fresh, cfg, turn)
+	if err != nil {
+		h.Sessions.Move(fresh.SessionKey, Working, Dormant)
+		rt.notify()
+		sendMemberStatus(context.Background(), h, rt, fresh.Home, fresh.Group, fresh.Member, nil)
+		return err
+	}
+	sendMemberStatus(context.Background(), h, rt, fresh.Home, fresh.Group, fresh.Member, nil)
+	return deliverInitialTurn(h, lp, text, turn)
+}
+
+func (rt *runtimePart) releaseStarting(key SessionKey) {
+	rt.mu.Lock()
+	delete(rt.starting, key)
+	rt.notifyLocked()
+	rt.mu.Unlock()
+}
+
+func deliverInitialTurn(h *Host, lp *liveProc, text string, turn Turn) error {
+	h.Sessions.SetTurn(lp.key, turn)
+	h.Report(lp.key, Event{Kind: TurnBegan})
+	err := lp.proc.Turn(text)
+	if err == nil {
+		return nil
+	}
+	stopProcess(lp)
+	if lp.replacedOK {
+		return nil
+	}
+	return cmp.Or(lp.replaceErr, err)
+}
+
+func launchSessionProcess(h *Host, rt *runtimePart, s Session, cfg launchConfig, turn Turn) (*liveProc, error) {
+	driver := Drivers[s.Agent]
+	if driver == nil {
+		return nil, &Error{"bad_request", "unknown agent: " + s.Agent}
+	}
+	token := h.Sessions.Admit(s.SessionKey, cfg.level, false)
+	launch := Launch{
+		Folder: sessionDir(h, s), Session: s.CLISession,
+		Level: cfg.level, Shim: append(slices.Clone(h.Shim), "--token", token), Instructions: Instructions(s),
+		RepoConfig: s.Kind != GroupSession && cfg.repoConfig, ToolTimeout: groupToolTimeout(h, s.Group),
+	}
+	procCtx, procCancel := context.WithCancel(context.Background())
+	proc, err := driver.Start(procCtx, launch)
+	if err != nil {
+		procCancel()
+		h.Sessions.Forget(token)
+		return nil, err
+	}
+	lp := &liveProc{
+		key: s.SessionKey, session: s, token: token, proc: proc, cancel: procCancel,
+		turnActive: true, resumed: s.CLISession != "", origTurn: turn,
+		loopDone: make(chan struct{}), // single reader: stopProcess or writeTurnToWaiting
+	}
+	rt.mu.Lock()
+	rt.procs[s.SessionKey] = lp
+	rt.mu.Unlock()
+	go runProcessLoop(h, rt, lp)
+	return lp, nil
+}
+
+func groupToolTimeout(h *Host, group string) time.Duration {
+	if raw, ok := h.Rows.Get(group, "group", group); ok {
+		var grp proto.GroupRow
+		if proto.Decode(raw, &grp) == nil && grp.Limits.TurnMinutes > 0 {
+			return time.Duration(grp.Limits.TurnMinutes) * time.Minute
+		}
+	}
+	return defaultTurnMinutes * time.Minute
+}
+
+// runProcessLoop is the single reader of lp.proc.Events().
+func runProcessLoop(h *Host, rt *runtimePart, lp *liveProc) {
+	defer close(lp.loopDone)
+	defer lp.stopKillTimer()
+	defer lp.cancel()
+	for e := range lp.proc.Events() {
+		handleProcessEvent(h, rt, lp, e)
+	}
+	h.Sessions.Forget(lp.token)
+	finishExitedProcess(h, rt, lp)
+}
+
+func handleProcessEvent(h *Host, rt *runtimePart, lp *liveProc, e Event) {
+	slot := aiSlot{group: lp.key.Group, member: lp.key.Member}
+	switch e.Kind {
+	case Ready:
+		onProcessReady(h, lp.key, e)
+	case NoSession:
+		onProcessNoSession(h, lp, e)
+	case LoginInvalid:
+		onProcessLoginInvalid(h, lp, e)
+	case TurnEnded:
+		onProcessTurnEnded(h, rt, lp, slot, e)
+	default:
+		noteEventText(lp, e.Text)
+		h.Report(lp.key, e)
+	}
+}
+
+func noteEventText(lp *liveProc, text string) {
+	if text != "" {
+		lp.eventText = text
+	}
+}
+
+func onProcessReady(h *Host, key SessionKey, e Event) {
+	if e.Session != "" {
+		setID := func(s *Session) { s.CLISession = e.Session }
+		h.Sessions.Update(key, setID)
+	}
+	h.Report(key, e)
+}
+
+func onProcessNoSession(h *Host, lp *liveProc, e Event) {
+	h.Report(lp.key, e)
+	if lp.resumed {
+		lp.exitWhy = NoSession
+		lp.triggerClose()
+	}
+}
+
+func onProcessLoginInvalid(h *Host, lp *liveProc, e Event) {
+	lp.exitWhy = LoginInvalid
+	noteEventText(lp, e.Text)
+	lp.triggerClose()
+	h.Report(lp.key, e)
+}
+
+func onProcessTurnEnded(h *Host, rt *runtimePart, lp *liveProc, slot aiSlot, e Event) {
+	h.Report(lp.key, e)
+	if lp.exitWhy != "" || !finishActiveTurn(rt, lp, slot) {
+		return
+	}
+	lp.resumed = false
+	lp.eventText = ""
+	idle := readIdleDuration(h)
+	h.Sessions.Move(lp.key, Working, Waiting)
+	armTurnIdle(h, rt, lp, idle)
+	sendMemberStatus(context.Background(), h, rt, lp.session.Home, lp.key.Group, lp.key.Member, nil)
+	rt.notify()
+	go Deliver(h, slot.group, slot.member)
+}
+
+func finishActiveTurn(rt *runtimePart, lp *liveProc, slot aiSlot) bool {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if !lp.turnActive {
+		return false
+	}
+	lp.turnActive = false
+	delete(rt.limited, slot)
+	return true
+}
+
+func armTurnIdle(h *Host, rt *runtimePart, lp *liveProc, idle time.Duration) {
+	rt.mu.Lock()
+	if !lp.turnActive && !rt.closing[lp.key] {
+		armIdleLocked(h, rt, lp, idle)
+	}
+	rt.mu.Unlock()
+}
+
+func idleDuration(minutes int) time.Duration {
+	if minutes <= 0 {
+		minutes = defaultIdleMinutes
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+func armIdleLocked(h *Host, rt *runtimePart, lp *liveProc, idle time.Duration) {
+	lp.idleGen++
+	gen := lp.idleGen
+	key := lp.key
+	fire := func() { onIdleTimeout(h, rt, key, gen) }
+	lp.idleTimer = time.AfterFunc(idle, fire)
+}
+
+func onIdleTimeout(h *Host, rt *runtimePart, key SessionKey, gen uint64) {
+	if lp := claimIdleClose(rt, key, gen); lp != nil {
+		finishWaitingClose(h, rt, lp)
+	}
+}
+
+func claimIdleClose(rt *runtimePart, key SessionKey, gen uint64) *liveProc {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	lp := rt.procs[key]
+	if lp == nil || lp.idleGen != gen || lp.turnActive || rt.closing[key] {
+		return nil
+	}
+	rt.closing[key] = true
+	lp.idleTimer = nil
+	return lp
+}
+
+func closeWaitingSession(h *Host, rt *runtimePart, key SessionKey) {
+	lp, busyOrClosing := claimWaitingClose(rt, key)
+	if lp != nil {
+		finishWaitingClose(h, rt, lp)
+		return
+	}
+	if busyOrClosing {
+		return
+	}
+	if s, ok := h.Sessions.Get(key); ok && h.Sessions.Move(key, Waiting, Dormant) == nil {
+		rt.notify()
+		sendMemberStatus(context.Background(), h, rt, s.Home, s.Group, s.Member, nil)
+	}
+}
+
+func claimWaitingClose(rt *runtimePart, key SessionKey) (*liveProc, bool) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.closing[key] {
+		return nil, true
+	}
+	lp := rt.procs[key]
+	if lp == nil {
+		return nil, false
+	}
+	if lp.turnActive {
+		return nil, true
+	}
+	rt.closing[key] = true
+	stopIdleLocked(lp)
+	return lp, false
+}
+
+func finishWaitingClose(h *Host, rt *runtimePart, lp *liveProc) {
+	if stopProcess(lp) {
+		writeKilledAudit(h, lp.session)
+	}
+	completeWaitingDormant(h, rt, lp)
+}
+
+func completeWaitingDormant(h *Host, rt *runtimePart, lp *liveProc) {
+	h.Sessions.Move(lp.key, Waiting, Dormant)
+	if lp.exitWhy == LoginInvalid {
+		slot := aiSlot{group: lp.key.Group, member: lp.key.Member}
+		finishLoginInvalid(h, rt, lp.session, slot, lp.eventText)
+	} else {
+		sendMemberStatus(context.Background(), h, rt, lp.session.Home, lp.key.Group, lp.key.Member, nil)
+	}
+	rt.mu.Lock()
+	delete(rt.procs, lp.key)
+	delete(rt.closing, lp.key)
+	rt.notifyLocked()
+	rt.mu.Unlock()
+}
+
+func writeKilledAudit(h *Host, s Session) {
+	detail := strings.TrimSpace(s.Member + " " + s.Task)
+	row := AuditRow{Group: s.Group, Agent: s.Agent, What: AuditKilled, Detail: detail}
+	write := func(tx *store.Tx) error {
+		_, err := h.Audit(tx, row)
+		return err
+	}
+	h.Store.Write(write)
+}
+
+func stopProcess(lp *liveProc) bool {
+	lp.triggerClose()
+	<-lp.loopDone
+	lp.stopKillTimer()
+	return lp.killed.Load()
+}
+
+func waitSignal(ctx context.Context, ch <-chan struct{}) error {
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func finishExitedProcess(h *Host, rt *runtimePart, lp *liveProc) {
+	wasTurn, spontaneousIdle := classifyProcessExit(rt, lp)
+	if wasTurn {
+		finishTurnProcessExit(h, rt, lp)
+		return
+	}
+	if spontaneousIdle {
+		completeWaitingDormant(h, rt, lp)
+	}
+}
+
+func classifyProcessExit(rt *runtimePart, lp *liveProc) (bool, bool) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if lp.turnActive {
+		return true, false
+	}
+	if rt.closing[lp.key] {
+		return false, false
+	}
+	rt.closing[lp.key] = true
+	stopIdleLocked(lp)
+	return false, true
+}
+
+func finishTurnProcessExit(h *Host, rt *runtimePart, lp *liveProc) {
+	if lp.exitWhy == NoSession {
+		handleNoSession(h, rt, lp)
+		return
+	}
+	slot := aiSlot{group: lp.key.Group, member: lp.key.Member}
+	beginTurnExitClose(rt, lp)
+	h.Sessions.Move(lp.key, Working, Dormant)
+	if lp.exitWhy == LoginInvalid {
+		finishLoginInvalid(h, rt, lp.session, slot, lp.eventText)
+	} else {
+		c := pendingCrash{session: lp.session, detail: RedactSecrets(lp.eventText)}
+		sendCrashStep(context.Background(), h, rt, &c)
+	}
+	go Deliver(h, slot.group, slot.member)
+	endTurnExitClose(rt, lp.key)
+}
+
+func beginTurnExitClose(rt *runtimePart, lp *liveProc) {
+	rt.mu.Lock()
+	lp.turnActive = false
+	delete(rt.procs, lp.key)
+	rt.closing[lp.key] = true
+	rt.mu.Unlock()
+}
+
+func endTurnExitClose(rt *runtimePart, key SessionKey) {
+	rt.mu.Lock()
+	delete(rt.closing, key)
+	rt.notifyLocked()
+	rt.mu.Unlock()
+}
+
+func finishLoginInvalid(h *Host, rt *runtimePart, s Session, slot aiSlot, text string) {
+	var ev any
+	if rt.enterLimited(slot) {
+		ev = proto.LoginInvalidEvent{SystemCode: proto.SystemCode{Code: "login_invalid"}, Detail: RedactSecrets(text)}
+	}
+	sendMemberStatus(context.Background(), h, rt, s.Home, s.Group, s.Member, ev)
+}
+
+func (rt *runtimePart) enterLimited(slot aiSlot) bool {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.limited[slot] {
+		return false
+	}
+	rt.limited[slot] = true
+	return true
+}
+
+func (rt *runtimePart) isLimited(slot aiSlot) bool {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.limited[slot]
+}
+
+func handleNoSession(h *Host, rt *runtimePart, lp *liveProc) {
+	beginTurnExitClose(rt, lp)
+	var fresh Session
+	clearID := func(s *Session) {
+		s.CLISession = ""
+		fresh = *s
+	}
+	if err := h.Sessions.Update(lp.key, clearID); err != nil {
+		failReplacement(h, rt, lp, err)
+		return
+	}
+	replText, replTurn, err := composeReplacedTurn(h, fresh, lp.origTurn)
+	if err != nil {
+		failReplacement(h, rt, lp, err)
+		return
+	}
+	startReplacementProcess(h, rt, lp, fresh, replText, replTurn)
+}
+
+func composeReplacedTurn(h *Host, s Session, origTurn Turn) (string, Turn, error) {
+	text, turn, err := Compose(h, s, ReplacedTurn, nil)
+	if err != nil {
+		return "", Turn{}, err
+	}
+	turn.Kind = ReplacedTurn
+	turn.Depth = cmp.Or(turn.Depth, origTurn.Depth)
+	turn.Thread = cmp.Or(turn.Thread, origTurn.Thread)
+	return text, turn, nil
+}
+
+func startReplacementProcess(h *Host, rt *runtimePart, old *liveProc, fresh Session, text string, turn Turn) {
+	cfg, err := readLaunchConfig(h, fresh.Agent, fresh.Group)
+	if err != nil {
+		failReplacement(h, rt, old, err)
+		return
+	}
+	lp2, err := launchSessionProcess(h, rt, fresh, cfg, turn)
+	if err != nil {
+		failReplacement(h, rt, old, err)
+		return
+	}
+	endTurnExitClose(rt, fresh.SessionKey)
+	ev := proto.SessionReplacedEvent{SystemCode: proto.SystemCode{Code: "session_replaced"}, Task: proto.ID(fresh.Task)}
+	sendMemberStatus(context.Background(), h, rt, fresh.Home, fresh.Group, fresh.Member, ev)
+	if err := deliverInitialTurn(h, lp2, text, turn); err != nil {
+		old.replaceErr = err
+		return
+	}
+	old.replacedOK = true
+}
+
+func failReplacement(h *Host, rt *runtimePart, lp *liveProc, err error) {
+	lp.replaceErr = err
+	h.Sessions.Move(lp.key, Working, Dormant)
+	sendMemberStatus(context.Background(), h, rt, lp.session.Home, lp.key.Group, lp.key.Member, nil)
+	go Deliver(h, lp.key.Group, lp.key.Member)
+	endTurnExitClose(rt, lp.key)
+}
+
+func acquireOpenSlot(ctx context.Context, h *Host, rt *runtimePart, key SessionKey, maxOpen int) error {
+	for {
+		victim, waitCh, acquired := tryReserveSlot(h, rt, key, maxOpen)
+		if acquired {
+			return nil
+		}
+		if victim != nil {
+			closeWaitingSession(h, rt, *victim)
+			continue
+		}
+		if err := waitSignal(ctx, waitCh); err != nil {
+			return err
+		}
+	}
+}
+
+func tryReserveSlot(h *Host, rt *runtimePart, key SessionKey, maxOpen int) (*SessionKey, <-chan struct{}, bool) {
+	if maxOpen <= 0 {
+		maxOpen = defaultMaxOpen
+	}
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	sessions := h.Sessions.All()
+	if countOpenLocked(rt, sessions) < maxOpen {
+		rt.starting[key] = true
+		return nil, nil, true
+	}
+	if victim := longestWaitingLocked(rt, sessions); victim != nil {
+		return victim, nil, false
+	}
+	return nil, rt.changed, false
+}
+
+func countOpenLocked(rt *runtimePart, sessions []Session) int {
+	open := 0
+	for _, s := range sessions {
+		if s.State != Dormant || rt.starting[s.SessionKey] {
+			open++
+		}
+	}
+	return open
+}
+
+func longestWaitingLocked(rt *runtimePart, sessions []Session) *SessionKey {
+	var best *Session
+	for i := range sessions {
+		s := &sessions[i]
+		if !eligibleWaitingLocked(rt, *s) {
+			continue
+		}
+		if best == nil || s.LastActive < best.LastActive {
+			best = s
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	chosen := best.SessionKey
+	return &chosen
+}
+
+func eligibleWaitingLocked(rt *runtimePart, s Session) bool {
+	if s.State != Waiting || rt.closing[s.SessionKey] {
+		return false
+	}
+	lp := rt.procs[s.SessionKey]
+	return lp == nil || !lp.turnActive
+}
+
+func sendCrashStep(ctx context.Context, h *Host, rt *runtimePart, c *pendingCrash) bool {
+	s := c.session
+	if !c.statusSent {
+		ev := proto.TurnInterruptedEvent{SystemCode: proto.SystemCode{Code: "turn_interrupted"}, Reason: "crash", Task: proto.ID(s.Task), Detail: c.detail}
+		if err := sendMemberStatus(ctx, h, rt, s.Home, s.Group, s.Member, ev); err != nil {
+			return !isUnreachable(err)
+		}
+		c.statusSent = true
+	}
+	if s.Kind != TaskSession {
+		return true
+	}
+	hdr := proto.HomeCommand{Type: "task", Nonce: freshNonce(), Timestamp: h.Now().UnixMilli(), Group: proto.ID(s.Group)}
+	fail := proto.TaskFail{TaskCommand: proto.TaskCommand{HomeCommand: hdr, Op: "fail", ID: proto.ID(s.Task)}, Reason: "crash", Detail: c.detail}
+	_, err := h.Command(ctx, s.Home, marshalWire(fail))
+	return !isUnreachable(err)
+}
+
+func isUnreachable(err error) bool {
+	var he *Error
+	return errors.As(err, &he) && he.Code == "home_unreachable"
+}
+
+func sendMemberStatus(ctx context.Context, h *Host, rt *runtimePart, homeDevice, group, member string, ev any) error {
+	home, ok := h.Home(homeDevice)
+	if !ok {
+		return &Error{"home_unreachable", "the home of that group is not connected"}
+	}
+	slot := aiSlot{group: group, member: member}
+	state, task := deriveMemberStatus(h, rt, slot)
+	var evPtr *any
+	if ev != nil {
+		evPtr = &ev
+	}
+	hdr := proto.HomeCommand{Type: "member", Nonce: freshNonce(), Timestamp: h.Now().UnixMilli(), Group: proto.ID(group)}
+	status := proto.MemberStatus[any]{
+		MemberCommand: proto.MemberCommand{HomeCommand: hdr, Op: "status", ID: proto.ID(member)},
+		State:         state, Task: proto.ID(task), Path: home.Path(), Event: evPtr,
+	}
+	_, err := h.Command(ctx, homeDevice, marshalWire(status))
+	return err
+}
+
+func deriveMemberStatus(h *Host, rt *runtimePart, slot aiSlot) (string, string) {
+	list := memberSessions(h, slot.group, slot.member)
+	if s, ok := findSessionInState(list, Takeover); ok {
+		return string(Takeover), s.Task
+	}
+	if s, ok := findSessionInState(list, Working); ok {
+		return string(Working), s.Task
+	}
+	if rt.isLimited(slot) {
+		return "limited", ""
+	}
+	if s, ok := latestWaitingSession(list); ok {
+		return string(Waiting), s.Task
+	}
+	return string(Dormant), ""
+}
+
+func memberSessions(h *Host, group, member string) []Session {
+	var list []Session
+	for _, s := range h.Sessions.All() {
+		if s.Group == group && s.Member == member {
+			list = append(list, s)
+		}
+	}
+	return list
+}
+
+func findSessionInState(list []Session, want State) (Session, bool) {
+	for _, s := range list {
+		if s.State == want {
+			return s, true
+		}
+	}
+	return Session{}, false
+}
+
+func latestWaitingSession(list []Session) (Session, bool) {
+	var best Session
+	found := false
+	for _, s := range list {
+		if s.State == Waiting && (!found || s.LastActive > best.LastActive) {
+			best = s
+			found = true
+		}
+	}
+	return best, found
+}
+
+func freshNonce() proto.ID {
+	var random [16]byte
+	rand.Read(random[:])
+	return proto.ID(base64.RawURLEncoding.EncodeToString(random[:]))
+}
+
+func marshalWire(v any) string {
+	var out strings.Builder
+	enc := json.NewEncoder(&out)
+	enc.SetEscapeHTML(false)
+	enc.Encode(v)
+	return strings.TrimSuffix(out.String(), "\n")
+}

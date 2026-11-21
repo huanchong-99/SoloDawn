@@ -3,7 +3,7 @@ Feature: Host task and review MCP tools
     Given a working AI group session with an owner request in the main line
     Then the group session lists "start_task" and none of "push_branch, run_checks, submit_task"
     When the AI calls start_task with title "Fix path event" and plan "Add path status and tests."
-    Then start_task returns task "T-1" with moved true and sends task start naming the owner's message
+    Then start_task returns task "T-1" with moved true and sends a direct task start
     When the host creates the task worktree and admits the task session at levels 1 and 2
     Then level 1 lists none of "push_branch, run_checks, submit_task" and level 2 lists all three without "start_task"
 

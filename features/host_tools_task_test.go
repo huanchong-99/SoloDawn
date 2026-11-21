@@ -79,7 +79,6 @@ const (
 	tskAccTaskID   = "DrtCn6htSBwmMPrFPbHJHA"
 	tskAccWorkerID = "1PC8WineBrUQ-apCjx7tug"
 	tskAccReviewID = "LXCZmuGAXkvO-bSrOkuCfw"
-	tskAccOwnerMsg = "mC2ePrmW9VnmM_TRlN7zdg"
 )
 
 type tskAccHome struct {
@@ -91,17 +90,20 @@ type tskAccHome struct {
 	remote   bool
 	requests []proto.Cmd
 	// Single reader: thenRemoteSubmitAndCloudSucceeded.
-	cloudCh  chan proto.TaskChecked
+	cloudCh chan proto.TaskChecked
+	// Single reader: awaitRowPush.
+	pushedCh chan struct{}
 	handlers map[string]func(int64, string) (json.RawMessage, error)
 }
 
 func newTskAccHome(h *host.Host, remote bool) *tskAccHome {
 	m := &tskAccHome{
-		done:    make(chan struct{}),
-		h:       h,
-		hostDev: h.Key.ID(),
-		remote:  remote,
-		cloudCh: make(chan proto.TaskChecked, 1),
+		done:     make(chan struct{}),
+		h:        h,
+		hostDev:  h.Key.ID(),
+		remote:   remote,
+		cloudCh:  make(chan proto.TaskChecked, 1),
+		pushedCh: make(chan struct{}, 8),
 	}
 	m.handlers = map[string]func(int64, string) (json.RawMessage, error){
 		"task/start":     m.recordStart,
@@ -123,9 +125,6 @@ func (m *tskAccHome) Request(_ context.Context, build func(int64) any) (json.Raw
 	defer m.mu.Unlock()
 	id := int64(len(m.requests) + 1)
 	req := build(id)
-	if ft, ok := req.(proto.FetchThread); ok {
-		return m.fetchOwnerMsg(id, ft.Thread), nil
-	}
 	cmd, ok := req.(proto.Cmd)
 	if !ok {
 		return nil, fmt.Errorf("unexpected frame %T", req)
@@ -136,26 +135,6 @@ func (m *tskAccHome) Request(_ context.Context, build func(int64) any) (json.Raw
 	}
 	m.requests = append(m.requests, cmd)
 	return m.applyCmd(id, cmd.Env.Payload)
-}
-
-func (m *tskAccHome) fetchOwnerMsg(id int64, thread *string) json.RawMessage {
-	row := proto.MessageRow[proto.EmptyBody, proto.NoCard]{
-		RowHeader: proto.RowHeader{Type: "msg", ID: tskAccOwnerMsg, Seq: 4},
-		Pos:       4,
-		Group:     tskAccGroupID,
-		Thread:    thread,
-		By:        "u1____________________A",
-		Kind:      "text",
-		Timestamp: 1_763_600_000_000,
-		Text:      "Please fix the path event.",
-		Mentions:  []string{tskAccWorkerID},
-		Body:      proto.EmptyBody{},
-	}
-	raw, _ := json.Marshal(row)
-	out, _ := json.Marshal(proto.Fetched{
-		Type: "fetched", Success: proto.Success{Re: id, OK: true}, Rows: []json.RawMessage{raw},
-	})
-	return out
 }
 
 func (m *tskAccHome) applyCmd(id int64, payload string) (json.RawMessage, error) {
@@ -186,9 +165,10 @@ func (m *tskAccHome) recordLocalChecks(id int64, payload string) (json.RawMessag
 	if err := proto.Decode([]byte(payload), &p); err != nil {
 		return nil, err
 	}
-	task := m.currentTask()
-	task.Checks.Local = &proto.Check{OK: p.OK, At: m.h.Now().UnixMilli(), Commit: p.Commit}
-	m.putTask(task)
+	at := m.h.Now().UnixMilli()
+	go m.pushTaskAfterAnswer(func(task *proto.TaskRow) {
+		task.Checks.Local = &proto.Check{OK: p.OK, At: at, Commit: p.Commit}
+	})
 	return json.RawMessage(fmt.Sprintf(`{"re":%d,"ok":true}`, id)), nil
 }
 
@@ -197,15 +177,25 @@ func (m *tskAccHome) recordSubmitted(id int64, payload string) (json.RawMessage,
 	if err := proto.Decode([]byte(payload), &p); err != nil {
 		return nil, err
 	}
-	task := m.currentTask()
-	task.Commit, task.PR, task.PRURL = p.Commit, p.PR, p.PRURL
-	task.Stats.Added, task.Stats.Removed = p.Stats.Added, p.Stats.Removed
-	task.Step = "review"
+	step := "review"
 	if m.remote {
-		task.Step = "cloud_check"
+		step = "cloud_check"
 	}
-	m.putTask(task)
+	go m.pushTaskAfterAnswer(func(task *proto.TaskRow) {
+		task.Commit, task.PR, task.PRURL = p.Commit, p.PR, p.PRURL
+		task.Stats.Added, task.Stats.Removed = p.Stats.Added, p.Stats.Removed
+		task.Step = step
+	})
 	return json.RawMessage(fmt.Sprintf(`{"re":%d,"ok":true}`, id)), nil
+}
+
+func (m *tskAccHome) pushTaskAfterAnswer(edit func(*proto.TaskRow)) {
+	m.mu.Lock()
+	task := m.currentTask()
+	edit(&task)
+	m.putTask(task)
+	m.mu.Unlock()
+	m.pushedCh <- struct{}{}
 }
 
 func (m *tskAccHome) recordCloud(id int64, payload string) (json.RawMessage, error) {
@@ -264,7 +254,7 @@ func hostToolsTaskSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^a working AI group session with an owner request in the main line$`, st.givenGroupSession)
 	sc.Step(`^the group session lists "([^"]+)" and none of "([^"]+)"$`, st.thenCallerLists)
 	sc.Step(`^the AI calls start_task with title "([^"]+)" and plan "([^"]+)"$`, st.whenStartTask)
-	sc.Step(`^start_task returns task "([^"]+)" with moved true and sends task start naming the owner's message$`, st.thenStartTaskSucceeded)
+	sc.Step(`^start_task returns task "([^"]+)" with moved true and sends a direct task start$`, st.thenStartTaskSucceeded)
 	sc.Step(`^the host creates the task worktree and admits the task session at levels 1 and 2$`, st.whenCreateAndAdmitTaskSessions)
 	sc.Step(`^level 1 lists none of "([^"]+)" and level 2 lists all three without "([^"]+)"$`, st.thenLevelListsMatch)
 
@@ -436,8 +426,7 @@ func tskVerifyStartPayload(payload string) error {
 	if err := proto.Decode([]byte(payload), &p); err != nil {
 		return err
 	}
-	wantRe := proto.ID(tskAccOwnerMsg)
-	if p.Re == nil || *p.Re != wantRe || p.Origin != "direct" {
+	if p.Re != nil || p.Origin != "direct" {
 		return fmt.Errorf("unexpected TaskStart: %+v", p)
 	}
 	if string(p.As) != tskAccWorkerID {
@@ -656,6 +645,15 @@ func (st *tskScenario) parseCheckOK() (bool, error) {
 	return parsed.OK, err
 }
 
+func (st *tskScenario) awaitRowPush() error {
+	select {
+	case <-st.home.pushedCh:
+		return nil
+	case <-time.After(5 * time.Second):
+		return errors.New("timed out waiting for row push")
+	}
+}
+
 func (st *tskScenario) whenFailingCheckThenSubmit() error {
 	if err := st.commitWorktreeFiles(map[string]string{
 		"app.go":      "package app\n",
@@ -666,6 +664,9 @@ func (st *tskScenario) whenFailingCheckThenSubmit() error {
 	st.callTool("run_checks", map[string]any{})
 	var err error
 	if st.lastCheck, err = st.parseCheckOK(); err != nil {
+		return err
+	}
+	if err := st.awaitRowPush(); err != nil {
 		return err
 	}
 	st.callTool("submit_task", map[string]string{"summary": "Should be refused."})
@@ -688,8 +689,11 @@ func (st *tskScenario) whenPassingCheckThenSubmit(summary string) error {
 	if st.lastCheck, err = st.parseCheckOK(); err != nil {
 		return err
 	}
+	if err := st.awaitRowPush(); err != nil {
+		return err
+	}
 	st.callTool("submit_task", map[string]string{"summary": summary})
-	return nil
+	return st.awaitRowPush()
 }
 
 func (st *tskScenario) thenLocalSubmitSucceeded() error {
@@ -763,6 +767,9 @@ func (st *tskScenario) whenRemoteChecksAndSubmit(summary string) error {
 	if st.lastErr != nil {
 		return st.lastErr
 	}
+	if err := st.awaitRowPush(); err != nil {
+		return err
+	}
 	prURL := "https://example.invalid/team/website/pull/31"
 	rollup := fmt.Sprintf(`{"headRefOid":%q,"statusCheckRollup":[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"SUCCESS"}]}`, st.head)
 	if err := st.queueGHReplies(
@@ -773,7 +780,10 @@ func (st *tskScenario) whenRemoteChecksAndSubmit(summary string) error {
 		return err
 	}
 	st.callTool("submit_task", map[string]string{"summary": summary})
-	return st.lastErr
+	if st.lastErr != nil {
+		return st.lastErr
+	}
+	return st.awaitRowPush()
 }
 
 func (st *tskScenario) thenRemoteSubmitAndCloudSucceeded() error {

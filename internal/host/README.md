@@ -1,5 +1,5 @@
 ---
-description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the offline scripted Claude Code and Codex processes for host integration tests, and the API of the host workspaces and Git commands.'
+description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the session runtime, the offline scripted Claude Code and Codex processes for host integration tests, and the API of the host workspaces and Git commands.'
 kind: reference
 ---
 
@@ -84,6 +84,17 @@ A `Driver` starts the structured CLI (`Start`) and gives the command line of the
 - A driver keeps no timer. Its caller ends the context of `Start`, which kills the process tree, when an interrupt or a close was not answered within 10 s.
 - Sign-in that is not usable and a session id that cannot be resumed are events (`LoginInvalid`, `NoSession`), because a CLI reports them after its process has started.
 
+# Session runtime
+
+`run.go` provides `Runner` (`Turn` and `Answer`), registers `"runtime"` in `Attached`, and exposes `(*Host).ReportSaved(ctx, saved)`. `AuditKilled` lives in `audit.go`.
+
+- **Per-host state.** Everything the runtime remembers lives in `Part[runtimePart](h)` (`procs`, `closing`, `starting`, `limited`, `savedCrash`, and `changed`). No package-level state is shared across hosts, so tests run independent hosts in one process.
+- **Lifecycle and C-6.** `Runner.Turn` wakes a `dormant` session by starting its driver with `Launch` (`Folder` under `<dbDir>/projects/<group>/<folder>`, `Session`, `Level` defaulting to 3 across all session kinds unless overridden by `perm` or `default_level`, `Shim` with an `Admit` token, `Instructions`, `RepoConfig`, `ToolTimeout`), reports `TurnBegan` before writing the turn, stores a non-empty `Ready.Session`, and forwards every `Process.Events()` event in order through `h.Report`. Every switch waits for the previous process's `Events()` channel to close and forgets its token before starting the next process or marking the session `dormant`.
+- **Dormancy, `max_open` and timeouts.** `TurnEnded` moves an active turn's session to `waiting`, then arms the `idle_minutes` timer (default 15), reports `member status`, and calls `Deliver` on a separate goroutine; a stray `TurnEnded` with no active turn is reported to `Listeners` and ignored. Waking a `dormant` session at `max_open` (default 4) closes the open `waiting` session with the earliest `LastActive` first, or waits on `changed` until an active session frees a slot. Every `Close` arms a 10 s timer that cancels `Start`'s context to kill an unresponsive process tree: outside a turn that records `AuditKilled` (`what = "killed"`, naming the member and task) and nothing else; during a turn the exit is a crash (`turn_interrupted` with reason `crash`, plus `task fail` in a task session).
+- **Failed resume and `login_invalid`.** On `NoSession` during a resume, the runtime closes the failed process, clears `CLISession`, composes `ReplacedTurn`, starts a fresh session in the same folder, and reports `session_replaced`. On `LoginInvalid`, the runtime closes the process, marks the AI `limited`, and sends `LoginInvalidEvent` (with redacted detail) only when entering `limited`.
+- **Lock order.** `runtimePart.mu` may call `Sessions.Get` and `Sessions.All`, which acquire only the leaf in-memory `Sessions` lock; nothing called under `runtimePart.mu` acquires `Store`, `Rows`, `Host`, `Driver`, `Process` or hook/listener locks.
+- **One reader per channel.** `Process.Events()` is read only by `runProcessLoop`; `liveProc.loopDone` is read only by `stopProcess` or `writeTurnToWaiting` when waiting for that process to exit; `runtimePart.changed` is closed and replaced under `runtimePart.mu` to wake `waitSignal` callers.
+
 # Host test CLIs
 
 Build `./internal/host/fakecli/claude` and `./internal/host/fakecli/codex` into a temporary directory and prepend it to the test's PATH. Both answer `--version` without a script. For sessions, set:
@@ -121,12 +132,11 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 - `CreateTaskWorkspace(ctx, projectDir, num, slug, ai, base, remote)` and `RemoveTaskWorkspace(ctx, projectDir, num, slug, ai, why)` handle `wt/<num>-<slug>`. `PrepareReviewWorkspace(ctx, projectDir, num, ai, commit, base, remote)` and `RemoveReviewWorkspace(ctx, projectDir, num, ai)` handle `review/<num>`. `ai` is the member id of the AI that holds the folder. A create reuses only a worktree recorded for the same AI, and a removal leaves one recorded for another AI untouched.
 - A create works out from the branches whether a task is new, taken over or returning; there is no takeover flag. A slug the home cannot produce, or a `num` below 1, is refused.
 - `cloneLock(repo)` is the one lock per clone, keyed by its real path. Workspace functions and `ReviewedMerge` take it.
+- `HostedChecksToResume(tasks, ais)` selects the `cloud_check` tasks a restarted node polls again, deriving each `Branch` (`task/<num>-<slug>`) from `Num` and `Slug` via `taskName` and skipping rows `taskName` refuses.
 
-# Task and review tools (HS-10)
+# Task and review tools
 
-`tools_task.go` registers `start_task`, `push_branch`, `run_checks`, `submit_task` and `submit_review` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1 and 5; [drivers.md](../../planning/contracts/drivers.md), section 2).
-
-- `start_task` is listed to working AIs' group sessions (`c.Kind == GroupSession && !c.Secretary`); `push_branch`, `run_checks` and `submit_task` to task sessions above level 1 (`c.Kind == TaskSession && c.Level > 1`); `submit_review` to review sessions (`c.Kind == ReviewSession`).
-- `start_task`, `submit_task` and `submit_review` check outbound text arguments (`title`, `plan`, `summary`, review item `text` and `file`) with `CheckOutboundSecret` before running Git commands or signing commands for the home.
-- `push_branch` and `submit_task` derive the task branch strictly from `num` and `slug` (`task/<num>-<slug>` via `taskName`), never from `TaskRow.Branch`.
-- With `forge == "github"`, `submit_task` starts `TaskForge.WaitHostedChecks` in a background goroutine tracked per host in `Part[tskPart](h)` (cancelling any earlier poll for the same task) and sends `task cloud` when hosted checks settle.
+- `tools_task.go` lists `start_task` to working AIs' group sessions, `push_branch`, `run_checks` and `submit_task` to task sessions above level 1, and `submit_review` to review sessions ([mcp-tools.md](../../planning/contracts/mcp-tools.md)).
+- `push_branch` and `submit_task` derive `task/<num>-<slug>` from `num` and `slug` via `taskName`, ignoring `TaskRow.Branch`.
+- `start_task`, `submit_task` and `submit_review` check outbound text arguments with `CheckOutboundSecret` before running Git or signing commands.
+- With `forge == "github"`, `submit_task` runs `TaskForge.WaitHostedChecks` in the background (cancelling any earlier poll for that task in `Part[tskPart](h)`) and sends `task cloud`.

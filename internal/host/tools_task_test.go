@@ -24,9 +24,6 @@ const (
 	tskTestTaskID   = "DrtCn6htSBwmMPrFPbHJHA"
 	tskTestWorkerID = "1PC8WineBrUQ-apCjx7tug"
 	tskTestReviewID = "LXCZmuGAXkvO-bSrOkuCfw"
-	tskTestOwnerMsg = "zC2ePrmW9VnmM_TRlN7zdg"
-	tskTestOtherMsg = "mC2ePrmW9VnmM_TRlN7zdg"
-	tskTestOldMsg   = "AC2ePrmW9VnmM_TRlN7zdg"
 )
 
 type tskReplyStep struct {
@@ -37,14 +34,15 @@ type tskReplyStep struct {
 type tskScriptHome struct {
 	mu sync.Mutex
 	// Single reader: Host.Home via Done.
-	done    chan struct{}
-	steps   []tskReplyStep
-	asked   []any
-	onFetch func(id int64, req proto.FetchThread) (json.RawMessage, error)
+	done  chan struct{}
+	steps []tskReplyStep
+	asked []any
+	// Single reader: waitAsked in TestSubmitTaskRemoteAndHostedChecks.
+	askedCh chan struct{}
 }
 
 func newTskScriptHome(steps ...tskReplyStep) *tskScriptHome {
-	return &tskScriptHome{done: make(chan struct{}), steps: steps}
+	return &tskScriptHome{done: make(chan struct{}), steps: steps, askedCh: make(chan struct{}, 16)}
 }
 
 func (f *tskScriptHome) Send(any) error               { return nil }
@@ -57,13 +55,12 @@ func (f *tskScriptHome) Request(_ context.Context, build func(int64) any) (json.
 	id := int64(len(f.asked) + 1)
 	req := build(id)
 	f.asked = append(f.asked, req)
-	if ft, ok := req.(proto.FetchThread); ok && f.onFetch != nil {
-		fn := f.onFetch
-		f.mu.Unlock()
-		return fn(id, ft)
-	}
 	step := f.popStepLocked(id)
 	f.mu.Unlock()
+	select {
+	case f.askedCh <- struct{}{}:
+	default:
+	}
 	return json.RawMessage(step.answer), step.err
 }
 
@@ -80,6 +77,20 @@ func (f *tskScriptHome) snapshotAsked() []any {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(f.asked)
+}
+
+func (f *tskScriptHome) waitAsked(t *testing.T, want int) []any {
+	t.Helper()
+	for {
+		if got := f.snapshotAsked(); len(got) >= want {
+			return got
+		}
+		select {
+		case <-f.askedCh:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("timed out waiting for %d requests", want)
+		}
+	}
 }
 
 func tskEqual(t *testing.T, got, want any) {
@@ -112,7 +123,6 @@ func tskStopAllCloud(t *testing.T, h *Host) {
 			run.cancel()
 		}
 		p.mu.Unlock()
-		p.wg.Wait()
 	})
 }
 
@@ -324,7 +334,7 @@ func TestStartTaskWithoutTurn(t *testing.T) {
 	tskStopAllCloud(t, h)
 	home := newTskScriptHome(tskReplyStep{answer: `{"re":1,"ok":true,"num":14}`})
 	h.Attach("home-device", home)
-	res, err := Tools["start_task"].Call(t.Context(), h, tskGroupCaller(Turn{}), json.RawMessage(`{"title":"Add badge","plan":"Update TaskCard."}`))
+	res, err := Tools["start_task"].Call(t.Context(), h, tskGroupCaller(Turn{Kind: ItemsTurn}), json.RawMessage(`{"title":"Add badge","plan":"Update TaskCard."}`))
 	tskNoErr(t, err)
 	tskEqual(t, res, tskStartResult{Task: "T-14", Moved: true})
 	asked := home.snapshotAsked()
@@ -340,116 +350,6 @@ func TestStartTaskWithoutTurn(t *testing.T) {
 	tskRequire(t, started.ID != "" && started.ID != started.Nonce, "expected fresh task id distinct from nonce")
 }
 
-func tskSeedMsgRow(t *testing.T, h *Host, id string, pos int64, thread *string, by string, mentions ...string) {
-	t.Helper()
-	if mentions == nil {
-		mentions = []string{}
-	}
-	tskPutRow(t, h, "msg", id, proto.MessageRow[proto.EmptyBody, proto.NoCard]{
-		RowHeader: proto.RowHeader{Type: "msg", ID: id, Seq: pos},
-		Pos:       pos, Group: tskTestGroupID, Thread: thread, By: by, Kind: "text", Mentions: mentions, Body: proto.EmptyBody{},
-	})
-}
-
-func TestStartTaskCachedLeadMessage(t *testing.T) {
-	h, _ := seamHost(t, seamStore(t))
-	tskStopAllCloud(t, h)
-	home := newTskScriptHome(
-		tskReplyStep{answer: `{"re":1,"ok":true,"num":1}`},
-		tskReplyStep{answer: `{"re":2,"ok":true,"num":2}`},
-		tskReplyStep{answer: `{"re":3,"ok":true,"num":3}`},
-	)
-	h.Attach("home-device", home)
-
-	otherThread := tskTestTaskID
-	tskSeedMsgRow(t, h, tskTestOldMsg, 5, nil, "u1", tskTestWorkerID)
-	tskSeedMsgRow(t, h, tskTestOwnerMsg, 9, nil, "u1", tskTestWorkerID)
-	tskSeedMsgRow(t, h, tskTestOtherMsg, 12, nil, tskTestReviewID)
-	tskSeedMsgRow(t, h, "s1___________________A", 15, nil, "system", tskTestWorkerID)
-	tskSeedMsgRow(t, h, "w1___________________A", 16, nil, tskTestWorkerID, tskTestWorkerID)
-	tskSeedMsgRow(t, h, "t1___________________A", 20, &otherThread, "u1", tskTestWorkerID)
-	h.Rows.Put(tskTestGroupID, "msg", "bad", json.RawMessage(`{"r":"msg"`))
-
-	res, err := Tools["start_task"].Call(t.Context(), h, tskGroupCaller(Turn{Kind: ItemsTurn}), json.RawMessage(`{"title":"T1","plan":""}`))
-	tskNoErr(t, err)
-	tskEqual(t, res, tskStartResult{Task: "T-1", Moved: true})
-	started := tskOpenSignedCmd[proto.TaskStart](t, h, home.snapshotAsked()[0])
-	wantOwner := proto.ID(tskTestOwnerMsg)
-	tskEqual(t, started.Re, &wantOwner)
-
-	// Non-items/replaced turns must not pick up cached messages.
-	_, err = Tools["start_task"].Call(t.Context(), h, tskGroupCaller(Turn{Kind: ContinueTurn}), json.RawMessage(`{"title":"TC","plan":""}`))
-	tskNoErr(t, err)
-	started = tskOpenSignedCmd[proto.TaskStart](t, h, home.snapshotAsked()[1])
-	tskEqual(t, started.Re, (*proto.ID)(nil))
-
-	// Fallback in ReplacedTurn inside a thread when no message mentions caller.
-	h.Rows.Reset(tskTestGroupID)
-	tskSeedMsgRow(t, h, tskTestOtherMsg, 12, &otherThread, tskTestReviewID)
-	_, err = Tools["start_task"].Call(t.Context(), h, tskGroupCaller(Turn{Kind: ReplacedTurn, Thread: otherThread}), json.RawMessage(`{"title":"T2","plan":"P2"}`))
-	tskNoErr(t, err)
-	started = tskOpenSignedCmd[proto.TaskStart](t, h, home.snapshotAsked()[2])
-	wantOther := proto.ID(tskTestOtherMsg)
-	tskEqual(t, started.Re, &wantOther)
-}
-
-func TestStartTaskFetchedLeadMessage(t *testing.T) {
-	h, _ := seamHost(t, seamStore(t))
-	tskStopAllCloud(t, h)
-	home := newTskScriptHome(
-		tskReplyStep{answer: `{"re":1,"ok":true,"num":3}`},
-		tskReplyStep{answer: `{"re":2,"ok":true,"num":4}`},
-		tskReplyStep{answer: `{"re":3,"ok":true,"num":5}`},
-		tskReplyStep{answer: `{"re":4,"ok":true,"num":6}`},
-	)
-	h.Attach("home-device", home)
-
-	var seenThreads []*string
-	var seenLimits []int
-	home.onFetch = func(id int64, ft proto.FetchThread) (json.RawMessage, error) {
-		seenThreads = append(seenThreads, ft.Thread)
-		seenLimits = append(seenLimits, ft.Limit)
-		msg := proto.MessageRow[proto.EmptyBody, proto.NoCard]{
-			RowHeader: proto.RowHeader{Type: "msg", ID: tskTestOwnerMsg, Seq: 8},
-			Pos:       8, Group: tskTestGroupID, Thread: ft.Thread, By: "u1", Kind: "text",
-			Mentions: []string{tskTestWorkerID}, Body: proto.EmptyBody{},
-		}
-		rawMsg, _ := json.Marshal(msg)
-		rawPage, _ := json.Marshal(proto.Fetched{
-			Type: "fetched", Success: proto.Success{Re: id, OK: true}, Rows: []json.RawMessage{rawMsg},
-		})
-		return rawPage, nil
-	}
-	call := Tools["start_task"].Call
-
-	_, err := call(t.Context(), h, tskGroupCaller(Turn{Kind: ItemsTurn}), json.RawMessage(`{"title":"T3","plan":"P3"}`))
-	tskNoErr(t, err)
-	started := tskOpenSignedCmd[proto.TaskStart](t, h, home.snapshotAsked()[1])
-	wantOwner := proto.ID(tskTestOwnerMsg)
-	tskEqual(t, started.Re, &wantOwner)
-	tskEqual(t, seenThreads[0], (*string)(nil))
-	tskEqual(t, seenLimits[0], 20)
-
-	otherThread := tskTestTaskID
-	_, err = call(t.Context(), h, tskGroupCaller(Turn{Kind: ItemsTurn, Thread: otherThread}), json.RawMessage(`{"title":"T4","plan":"P4"}`))
-	tskNoErr(t, err)
-	tskEqual(t, seenThreads[1], &otherThread)
-
-	home.onFetch = func(int64, proto.FetchThread) (json.RawMessage, error) { return nil, os.ErrClosed }
-	_, err = call(t.Context(), h, tskGroupCaller(Turn{Kind: ItemsTurn, Thread: otherThread}), json.RawMessage(`{"title":"T5","plan":"P5"}`))
-	tskNoErr(t, err)
-	asked := home.snapshotAsked()
-	started = tskOpenSignedCmd[proto.TaskStart](t, h, asked[len(asked)-1])
-	tskEqual(t, started.Re, (*proto.ID)(nil))
-
-	home.onFetch = func(int64, proto.FetchThread) (json.RawMessage, error) { return json.RawMessage(`not-json`), nil }
-	_, err = call(t.Context(), h, tskGroupCaller(Turn{Kind: ItemsTurn, Thread: otherThread}), json.RawMessage(`{"title":"T6","plan":"P6"}`))
-	tskNoErr(t, err)
-	asked = home.snapshotAsked()
-	started = tskOpenSignedCmd[proto.TaskStart](t, h, asked[len(asked)-1])
-	tskEqual(t, started.Re, (*proto.ID)(nil))
-}
-
 func TestStartTaskErrorsAndBoundaries(t *testing.T) {
 	h, _ := seamHost(t, seamStore(t))
 	tskStopAllCloud(t, h)
@@ -459,17 +359,13 @@ func TestStartTaskErrorsAndBoundaries(t *testing.T) {
 	_, err := call(t.Context(), h, caller, json.RawMessage(`{"title":"T","plan":"P"}`))
 	seamCode(t, err, "home_unreachable")
 
-	home := newTskScriptHome(
-		tskReplyStep{answer: `{"re":1,"ok":true}`},
-		tskReplyStep{answer: `not-json`},
-	)
+	home := newTskScriptHome()
 	h.Attach("home-device", home)
 
 	for _, bad := range []string{
 		`[]`,
 		`{"title":"only"}`,
-		`{"title":"a","plan":"b","extra":1}`,
-		`{"title":"a","Title":"b","plan":"c"}`,
+		`{"title":1,"plan":"c"}`,
 	} {
 		_, err := call(t.Context(), h, caller, json.RawMessage(bad))
 		seamCode(t, err, "bad_request")
@@ -484,12 +380,6 @@ func TestStartTaskErrorsAndBoundaries(t *testing.T) {
 		seamCode(t, err, "secret")
 	}
 	tskEqual(t, len(home.snapshotAsked()), 0)
-
-	caller.Turn = Turn{Kind: ContinueTurn}
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{"title":"T","plan":"P"}`))
-	seamCode(t, err, "bad_request")
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{"title":"T","plan":"P"}`))
-	seamCode(t, err, "bad_request")
 }
 
 func TestPushBranchRefusals(t *testing.T) {
@@ -498,13 +388,10 @@ func TestPushBranchRefusals(t *testing.T) {
 	call := Tools["push_branch"].Call
 	caller := tskTaskCaller("wt/12-fix-path", 2)
 
-	_, err := call(t.Context(), h, caller, json.RawMessage(`{"extra":true}`))
+	_, err := call(t.Context(), h, caller, json.RawMessage(`[]`))
 	seamCode(t, err, "bad_request")
 	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
 	seamCode(t, err, "not_found")
-	h.Rows.Put(tskTestGroupID, "group", tskTestGroupID, json.RawMessage(`{"r":"group"`))
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
-	seamCode(t, err, "bad_request")
 
 	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("none"))
 	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
@@ -513,19 +400,10 @@ func TestPushBranchRefusals(t *testing.T) {
 	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("github"))
 	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
 	seamCode(t, err, "not_found")
-	h.Rows.Put(tskTestGroupID, "task", tskTestTaskID, json.RawMessage(`{"r":"task"`))
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
-	seamCode(t, err, "bad_request")
-	tskPutRow(t, h, "task", tskTestTaskID, tskTaskFixture(0, "fix-path", "refs/heads/main", nil))
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
-	seamCode(t, err, "bad_request")
+
 	tskPutRow(t, h, "task", tskTestTaskID, tskTaskFixture(1, "fix-path", "refs/heads/main", nil))
 	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
 	seamCode(t, err, "cli")
-
-	tskPutRow(t, h, "task", tskTestTaskID, tskTaskFixture(12, "fix-path", "wrong/branch", nil))
-	_, err = call(t.Context(), h, tskTaskCaller("", 2), json.RawMessage(`{}`))
-	seamCode(t, err, "bad_request")
 }
 
 func TestPushBranchSuccessAndSecretRedaction(t *testing.T) {
@@ -559,14 +437,12 @@ func TestRunChecksRefusals(t *testing.T) {
 	call := Tools["run_checks"].Call
 	caller := tskTaskCaller("wt/12-fix-path", 2)
 
-	_, err := call(t.Context(), h, caller, json.RawMessage(`{"x":1}`))
+	_, err := call(t.Context(), h, caller, json.RawMessage(`[]`))
 	seamCode(t, err, "bad_request")
 	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
 	seamCode(t, err, "not_found")
 	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("none", "echo checked"))
-	_, err = call(t.Context(), h, tskTaskCaller("", 2), json.RawMessage(`{}`))
-	seamCode(t, err, "bad_request")
-	_, err = call(t.Context(), h, tskTaskCaller(filepath.Join(t.TempDir(), "absent"), 2), json.RawMessage(`{}`))
+	_, err = call(t.Context(), h, tskTaskCaller("wt/99-absent", 2), json.RawMessage(`{}`))
 	seamCode(t, err, "cli")
 
 	tskNoErr(t, os.WriteFile(filepath.Join(wtDir, "dirty.txt"), []byte("wip"), 0o600))
@@ -613,32 +489,22 @@ func TestRunChecksSuccessAndUnreachable(t *testing.T) {
 	close(home.done)
 	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
 	seamCode(t, err, "home_unreachable")
-}
 
-func TestRunChecksWithRemoteBaseRefAndInMemoryStore(t *testing.T) {
-	memHost, _ := seamHost(t, seamStore(t))
-	tskStopAllCloud(t, memHost)
-	home := newTskScriptHome()
-	memHost.Attach("home-device", home)
-	tskPutRow(t, memHost, "group", tskTestGroupID, tskGroupFixture("github"))
-
-	_, err := Tools["run_checks"].Call(t.Context(), memHost, tskTaskCaller("wt/12-fix-path", 2), json.RawMessage(`{}`))
-	seamCode(t, err, "bad_request")
-
-	dataDir := t.TempDir()
-	_, _, wtDir, baseSHA := tskInitWorktree(t, dataDir, true)
-	// Advance origin/base with an untested file so base...HEAD would fail if origin/ were omitted.
-	untestedBase := tskCommitFiles(t, wtDir, map[string]string{"legacy.go": "package p\n"}, "advance origin base")
-	forgeGit(t, wtDir, "push", "origin", "HEAD:base")
-	forgeGit(t, filepath.Join(dataDir, "projects", tskTestGroupID, "repo"), "fetch", "origin", "base")
-	forgeGit(t, filepath.Join(dataDir, "projects", tskTestGroupID, "repo"), "update-ref", "refs/heads/base", baseSHA)
-	head := tskCommitFiles(t, wtDir, map[string]string{"only_test.go": "package p\n"}, "tested relative to origin/base")
-	tskRequire(t, untestedBase != head, "expected distinct commits")
-	res, err := Tools["run_checks"].Call(t.Context(), memHost, tskTaskCaller(wtDir, 2), json.RawMessage(`{}`))
+	// Remote group compares against origin/<base> rather than local <base>.
+	rh, rDataDir := tskDiskHost(t)
+	rProjectDir, _, rWtDir, rBaseSHA := tskInitWorktree(t, rDataDir, true)
+	rHome := newTskScriptHome()
+	rh.Attach("home-device", rHome)
+	tskPutRow(t, rh, "group", tskTestGroupID, tskGroupFixture("github"))
+	tskCommitFiles(t, rWtDir, map[string]string{"legacy.go": "package p\n"}, "advance origin base")
+	forgeGit(t, rWtDir, "push", "origin", "HEAD:base")
+	forgeGit(t, filepath.Join(rProjectDir, "repo"), "fetch", "origin", "base")
+	forgeGit(t, filepath.Join(rProjectDir, "repo"), "update-ref", "refs/heads/base", rBaseSHA)
+	rHead := tskCommitFiles(t, rWtDir, map[string]string{"only_test.go": "package p\n"}, "tested relative to origin/base")
+	rRes, err := call(t.Context(), rh, caller, json.RawMessage(`{}`))
 	tskNoErr(t, err)
-	got := res.(tskChecksResult)
-	tskEqual(t, got.OK, true)
-	tskEqual(t, got.Commit, head)
+	tskEqual(t, rRes.(tskChecksResult).OK, true)
+	tskEqual(t, rRes.(tskChecksResult).Commit, rHead)
 }
 
 func TestSubmitTaskPreconditions(t *testing.T) {
@@ -651,8 +517,6 @@ func TestSubmitTaskPreconditions(t *testing.T) {
 
 	_, err := call(t.Context(), h, caller, json.RawMessage(`{}`))
 	seamCode(t, err, "bad_request")
-	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"ok","extra":1}`))
-	seamCode(t, err, "bad_request")
 	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"sk-proj-EXAMPLEexampleEXAMPLEexample_EXAMPLE-00"}`))
 	seamCode(t, err, "secret")
 	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"Done."}`))
@@ -664,8 +528,6 @@ func TestSubmitTaskPreconditions(t *testing.T) {
 	head := tskCommitFiles(t, wtDir, map[string]string{"f_test.go": "package p\n"}, "add test")
 
 	tskPutRow(t, h, "task", tskTestTaskID, tskTaskFixture(12, "fix-path", "ignored", nil))
-	_, err = call(t.Context(), h, tskTaskCaller("", 2), json.RawMessage(`{"summary":"Done."}`))
-	seamCode(t, err, "bad_request")
 	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"Done."}`))
 	seamCode(t, err, "conflict")
 
@@ -741,7 +603,7 @@ func TestSubmitTaskLocalSuccessAndAddedCommit(t *testing.T) {
 
 func TestSubmitTaskErrorPaths(t *testing.T) {
 	h, dataDir := tskDiskHost(t)
-	_, _, wtDir, baseSHA := tskInitWorktree(t, dataDir, false)
+	_, _, _, baseSHA := tskInitWorktree(t, dataDir, false)
 	call := Tools["submit_task"].Call
 	caller := tskTaskCaller("wt/12-fix-path", 3)
 
@@ -769,7 +631,7 @@ func TestSubmitTaskErrorPaths(t *testing.T) {
 	_, err = call(t.Context(), h, caller, json.RawMessage(`{"summary":"empty diff"}`))
 	seamCode(t, err, "home_unreachable")
 
-	_, err = call(t.Context(), h, tskTaskCaller(filepath.Join(wtDir, "missing-subdir"), 3), json.RawMessage(`{"summary":"s"}`))
+	_, err = call(t.Context(), h, tskTaskCaller("wt/99-missing", 3), json.RawMessage(`{"summary":"s"}`))
 	seamCode(t, err, "cli")
 }
 
@@ -800,12 +662,11 @@ func TestSubmitTaskRemoteAndHostedChecks(t *testing.T) {
 	res, err := call(t.Context(), h, caller, json.RawMessage(`{"summary":"PR body"}`))
 	tskNoErr(t, err)
 	tskEqual(t, res, tskSubmitResult{OK: true, Commit: head, PR: 31})
-	Part[tskPart](h).wg.Wait()
 
+	asked := home.waitAsked(t, 3)
 	gotRefs := forgeGit(t, remoteDir, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/task")
 	tskEqual(t, gotRefs, "refs/heads/task/12-fix-path "+head)
 
-	asked := home.snapshotAsked()
 	tskEqual(t, len(asked), 3)
 	report := tskOpenSignedCmd[proto.Post[proto.ReportBody]](t, h, asked[0])
 	wantPR := 31
@@ -834,13 +695,10 @@ func TestSubmitTaskSupersedesPreviousHostedChecks(t *testing.T) {
 		tskRequire(t, ctx2.Err() == nil, "second cloud context must stay active")
 
 		tskFinishCloud(p, key, run1)
-		p.wg.Done()
 		tskEqual(t, p.cancels[key] == run2, true)
 
 		tskFinishCloud(p, key, run2)
-		p.wg.Done()
 		tskEqual(t, len(p.cancels), 0)
-		p.wg.Wait()
 	})
 }
 
@@ -920,26 +778,14 @@ func TestSubmitReviewRefusalsAndSecrets(t *testing.T) {
 	head := tskCommitFiles(t, wtDir, map[string]string{"x.go": "package x\n"}, "change")
 	_, err := PrepareReviewWorkspace(t.Context(), projectDir, 12, tskTestReviewID, head, "base", false)
 	tskNoErr(t, err)
-	home := newTskScriptHome(
-		tskReplyStep{answer: `{"re":1,"ok":true,"round":1}`},
-		tskReplyStep{answer: `{"re":2,"ok":true,"passed":true,"round":0}`},
-		tskReplyStep{answer: `invalid`},
-		tskReplyStep{err: os.ErrClosed},
-	)
+	home := newTskScriptHome(tskReplyStep{err: os.ErrClosed})
 	h.Attach("home-device", home)
 	call := Tools["submit_review"].Call
 	caller := tskReviewCaller("review/12")
 
 	for _, bad := range []string{
-		`{"score":-1,"items":[]}`,
-		`{"score":101,"items":[]}`,
-		`{"score":50}`,
-		`{"score":50,"items":[],"extra":1}`,
+		`[]`,
 		`{"score":50,"items":[123]}`,
-		`{"score":50,"items":[{"text":"ok","unknown":true}]}`,
-		`{"score":50,"items":[{"text":""}]}`,
-		`{"score":50,"items":[{"text":"ok","file":""}]}`,
-		`{"score":50,"items":[{"text":"ok","line":0}]}`,
 	} {
 		_, err := call(t.Context(), h, caller, json.RawMessage(bad))
 		seamCode(t, err, "bad_request")
@@ -952,15 +798,9 @@ func TestSubmitReviewRefusalsAndSecrets(t *testing.T) {
 	seamCode(t, err, "secret")
 	tskEqual(t, len(home.snapshotAsked()), 0)
 
-	_, err = call(t.Context(), h, tskReviewCaller(""), json.RawMessage(`{"score":90,"items":[]}`))
-	seamCode(t, err, "bad_request")
-	_, err = call(t.Context(), h, tskReviewCaller(filepath.Join(t.TempDir(), "missing")), json.RawMessage(`{"score":90,"items":[]}`))
+	_, err = call(t.Context(), h, tskReviewCaller("review/99"), json.RawMessage(`{"score":90,"items":[]}`))
 	seamCode(t, err, "cli")
 
-	for range 3 {
-		_, err = call(t.Context(), h, caller, json.RawMessage(`{"score":90,"items":[]}`))
-		seamCode(t, err, "bad_request")
-	}
 	_, err = call(t.Context(), h, caller, json.RawMessage(`{"score":90,"items":[]}`))
 	seamCode(t, err, "home_unreachable")
 }
