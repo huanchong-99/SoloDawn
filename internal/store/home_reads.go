@@ -63,13 +63,8 @@ func (tx *Tx) Pending(group string) ([]json.RawMessage, error) {
 // Queued returns the inbox items of a group that no host has acknowledged,
 // oldest first, those held back by not_before included.
 func (tx *Tx) Queued(group string) ([]Item, error) {
-	rows, err := tx.Query(`SELECT id,g,ai,host,why,msg,task,commit_id,env,cause,not_before,created
-		FROM inbox WHERE g=? ORDER BY id`, group)
-	return collect(rows, err, func(rows *sql.Rows) (i Item, err error) {
-		err = rows.Scan(&i.ID, &i.Group, &i.AI, &i.Host, &i.Why, &i.Msg, &i.Task, &i.Commit,
-			(*[]byte)(&i.Env), (*[]byte)(&i.Cause), &i.NotBefore, &i.Created)
-		return i, err
-	})
+	rows, err := tx.Query(selectInbox+"WHERE g=? ORDER BY id", group)
+	return collect(rows, err, scanItem)
 }
 
 // Retire deletes a queued item of a group that a later change made

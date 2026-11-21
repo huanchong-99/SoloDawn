@@ -16,7 +16,7 @@ Feature: Shell of the web client
 
     Examples:
       | address                         | title                    | drawn by         | entry     |
-      | #/onboarding                    | Connect a computer       | a coming page    | nothing   |
+      | #/onboarding                    | Connect a computer       | the onboarding page | nothing   |
       | #/groups                        | Chats                    | the group list   | Chats     |
       | #/groups/rZNvy-1jH6Z-BcPqA5U5BQ | Chats                    | the group list   | Chats     |
       | #/terminal/g/m                  | Terminal takeover        | a coming page    | Chats     |

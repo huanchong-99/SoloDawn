@@ -17,7 +17,7 @@ import (
 // then the list of groups when it changed, then the inbox items the result
 // queued. A row change so reaches a host before the items it causes.
 
-// runRoom is the most bytes the rows of one rows frame may have: a ctl
+// runRoom is the most bytes the rows or items of one ctl frame may have: a ctl
 // message of 61,440 bytes less the frame around them
 // (planning/contracts/conventions.md section 4).
 const runRoom = 61_376
@@ -146,38 +146,6 @@ func (l *Loop) announce() {
 	}
 }
 
-// QueuedItem is an inbox item as a home sends it while items are not signed
-// yet: the seam's Item beside the number that ack names. The inbox unit
-// replaces it with the signed item of planning/contracts/datachannel.md
-// section 6.
-type QueuedItem struct {
-	ID int64
-	Item
-}
-
-// ItemsPush is the frame that carries one QueuedItem to its host.
-type ItemsPush struct {
-	Group string
-	Items []QueuedItem
-}
-
-// runSeal makes what the store keeps as the envelope of an item, in the
-// transaction that queues it under the number id. Until the inbox unit signs
-// items, that is the item itself. The inbox unit replaces this function and
-// runItemFrame, and nothing else of the loop.
-func runSeal(it Item, _ int64) (json.RawMessage, error) {
-	return runJSON(it)
-}
-
-// runItemFrame makes the frame that carries a queued item to its host, in a
-// transaction that d reads: the rows an item names are copied when it is
-// sent.
-func runItemFrame(_ Disk, it store.Item) (any, error) {
-	var item Item
-	err := json.Unmarshal(it.Env, &item)
-	return ItemsPush{Group: it.Group, Items: []QueuedItem{{ID: it.ID, Item: item}}}, err
-}
-
 // inbox makes a connection the taker of its device's items and sends it
 // every one that is due, whether it was sent before or not.
 func (g *runGroup) inbox(c *Conn) {
@@ -216,7 +184,7 @@ func (g *runGroup) deliver(now time.Time) {
 		var due []store.Item
 		due, next = runDue(d.Queued(), now.UnixMilli())
 		for c, seat := range g.seats {
-			lot, err := runLotOf(d, seat.inbox && g.state.Serves(c.device), seat.sent, c.device, due)
+			lot, err := runLotOf(g.state, d, seat.inbox && g.state.Serves(c.device), seat.sent, c.device, due)
 			lots[c], skipped = lot, errors.Join(skipped, err)
 		}
 		return d.err
@@ -271,8 +239,10 @@ func runDue(queued []store.Item, now int64) (due []store.Item, next int64) {
 // the connection takes items and its group serves the device, and makes the
 // frames of the ones it was not sent yet. An item whose frame cannot be made
 // counts as sent and is in the error.
-func runLotOf(d Disk, takes bool, sent map[int64]bool, device string, due []store.Item) (lot runLot, err error) {
+func runLotOf(s *State, d Disk, takes bool, sent map[int64]bool, device string, due []store.Item) (lot runLot, err error) {
 	lot.sent = map[int64]bool{}
+	var entries []proto.InboxItem
+	var raws []json.RawMessage
 	for _, it := range due {
 		if !takes || it.Host != device {
 			continue
@@ -281,12 +251,13 @@ func runLotOf(d Disk, takes bool, sent map[int64]bool, device string, due []stor
 		if sent[it.ID] {
 			continue
 		}
-		frame, failed := runItemFrame(d, it)
+		entry, raw, failed := inboxEntry(s, d, it)
 		if failed != nil {
 			err = errors.Join(err, fmt.Errorf("item %d: %w", it.ID, failed))
 			continue
 		}
-		lot.frames = append(lot.frames, frame)
+		entries, raws = append(entries, entry), append(raws, raw)
 	}
+	lot.frames = inboxFrames(s.ID, entries, raws)
 	return lot, err
 }

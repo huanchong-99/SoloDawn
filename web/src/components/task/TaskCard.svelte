@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Component } from 'svelte';
   import type { Group } from '../../lib/groups.svelte';
+  import { jumpToMessage } from '../../lib/jump';
   import type { CardProps } from '../../lib/mounts.svelte';
   import { t } from '../../lib/prefs.svelte';
   import type { TaskRow } from '../../lib/proto';
@@ -104,7 +105,15 @@
         {/if}
         {#if noChecks}<span class="muted">{t('task.checks.none')}</span>{/if}
         {#if task.wait?.msg && waiting}
-          {#if noChecks}<span class="muted">{' · '}</span>{/if}<a href={`#m-${task.wait.msg}`}>
+          {@const waitMsg = task.wait.msg}
+          {@const waitKind = task.wait.kind}
+          {#if noChecks}<span class="muted">{' · '}</span>{/if}<a
+            href={`#m-${waitMsg}`}
+            onclick={(event) => {
+              event.stopPropagation();
+              jumpToMessage(event, waitMsg, waitKind);
+            }}
+          >
             {waiting.text}
           </a>
         {/if}

@@ -49,6 +49,8 @@ Feature: Task card in the chat main line
     Then the task card shows solid dawn badge "Waiting for your decision", steps "wait, -, -, -, -, -" with "Work · 1 / 6", and a checks link to "#m-TDRDfXwvOO-iOegSUoyidg"
     When the task instead waits on an approval from the reader, then from "Mina", then from an unknown user
     Then the task card shows solid dawn "Waiting for your approval" with step "wait", then neutral "Waiting for Mina's approval" with step "now", then "Waiting for approval"
+    When the reader clicks "Waiting for your approval" on the task card for main-line card "ap-card-1"
+    Then the chat stays open at the group's address, the thread stays closed, and "#m-ap-card-1" scrolls into view
     When the task waits for a reviewer, and then hits a merge conflict
     Then the task card shows "Waiting for a reviewer", and then danger "Merge conflict" with step "fail"
 

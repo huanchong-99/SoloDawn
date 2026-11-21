@@ -4,6 +4,7 @@ import { expect, vi } from 'vitest';
 import { homes } from '../src/lib/groups.svelte';
 import { prefs } from '../src/lib/prefs.svelte';
 import type * as p from '../src/lib/proto';
+import { route } from '../src/lib/route.svelte';
 import { browser, example, TestHome } from './home';
 import { all, closePage, one, openPage, texts } from './page';
 
@@ -439,6 +440,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     ({ When, Then }) => {
       const seen: Array<[string, string | null, boolean, string]> = [];
       let reviewerBadge = '';
+      let scrolled: unknown;
+      let windowClicks = 0;
 
       When('the home writes "row-task-waiting" and a task message for it', () => {
         home.write(website, example('row-task-waiting'));
@@ -495,6 +498,46 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             ["Waiting for Mina's approval", null, false, 'now'],
             ['Waiting for approval', null, false, 'now'],
           ]);
+        },
+      );
+      When(
+        'the reader clicks "Waiting for your approval" on the task card for main-line card "ap-card-1"',
+        () => {
+          const viewer = JSON.parse(JSON.stringify(example('row-task-waiting').wait)).who[0];
+          home.write(website, example('row-msg-approval-pending', { id: 'ap-card-1', main: true }));
+          home.write(
+            website,
+            example('row-task-waiting', {
+              wait: { kind: 'approval', msg: 'ap-card-1', who: [viewer], since: 1763600000000 },
+            }),
+          );
+          flushSync();
+          scrolled = undefined;
+          windowClicks = 0;
+          const onWindowClick = () => {
+            windowClicks += 1;
+          };
+          window.addEventListener('click', onWindowClick);
+          one('#m-ap-card-1').scrollIntoView = (arg) => {
+            scrolled = arg;
+          };
+          const link = one<HTMLAnchorElement>('.card .kv a[href="#m-ap-card-1"]');
+          expect(link.textContent?.trim()).toBe('Waiting for your approval');
+          link.click();
+          window.removeEventListener('click', onWindowClick);
+          flushSync();
+        },
+      );
+      Then(
+        'the chat stays open at the group\'s address, the thread stays closed, and "#m-ap-card-1" scrolls into view',
+        () => {
+          expect(location.hash).toBe(`#/groups/${website}`);
+          expect(route.page).toBe('chat');
+          expect(route.params).toEqual({ g: website });
+          expect(texts('.chat-head h2')).toEqual(['Website']);
+          expect(one<HTMLDetailsElement>('.card details.fold').open).toBe(false);
+          expect(windowClicks).toBe(0);
+          expect(scrolled).toEqual({ behavior: 'smooth', block: 'center' });
         },
       );
       When('the task waits for a reviewer, and then hits a merge conflict', () => {
