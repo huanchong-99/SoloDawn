@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -74,9 +75,12 @@ func (f *accHome) PathChanged() <-chan struct{} { return nil }
 func (f *accHome) Done() <-chan struct{}        { return f.done }
 
 func (f *accHome) Request(ctx context.Context, build func(int64) any) (json.RawMessage, error) {
+	s, ok := build(1).(proto.Sync)
+	if !ok {
+		return json.RawMessage(`{"re":1,"ok":true}`), nil
+	}
 	defer func() { f.finished <- struct{}{} }()
-	req := build(1)
-	f.recordSync(req)
+	f.recordSync(s.Since)
 	f.started <- struct{}{}
 	select {
 	case <-ctx.Done():
@@ -86,12 +90,28 @@ func (f *accHome) Request(ctx context.Context, build func(int64) any) (json.RawM
 	}
 }
 
-func (f *accHome) recordSync(req any) {
-	if s, ok := req.(proto.Sync); ok {
-		f.mu.Lock()
-		f.sinces = append(f.sinces, s.Since)
-		f.mu.Unlock()
-	}
+func (f *accHome) recordSync(since int64) {
+	f.mu.Lock()
+	f.sinces = append(f.sinces, since)
+	f.mu.Unlock()
+}
+
+func (f *accHome) sincesSnapshot() []int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.sinces)
+}
+
+func (f *accHome) acksSnapshot() []proto.Ack {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.acks)
+}
+
+func (f *accHome) prependAcks(prev []proto.Ack) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.acks = append(slices.Clone(prev), f.acks...)
 }
 
 func (f *accHome) ackCount(item int64) int {
@@ -222,7 +242,7 @@ func (e *accDeliverEnv) attachAndFinishSync(seq int64) {
 	ans := accJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: accGroupID, Seq: seq})
 	e.home.reply <- accSyncReply{raw: json.RawMessage(ans)}
 	<-e.home.finished
-	e.sinces = append(e.sinces, e.home.sinces...)
+	e.sinces = append(e.sinces, e.home.sincesSnapshot()...)
 }
 
 func (e *accDeliverEnv) waitCondition(desc string, ok func() bool) error {
@@ -350,14 +370,12 @@ func registerBasicPushSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
 		return nil
 	})
 	sc.Step(`^the host restarts on its store and "home-1" pushes mention item (\d+) again$`, func(num int) error {
-		prevAcks := env.home.acks
+		prevAcks := env.home.acksSnapshot()
 		if err := env.startHost(); err != nil {
 			return err
 		}
 		env.seedLiveGroup()
-		env.home.mu.Lock()
-		env.home.acks = append(prevAcks, env.home.acks...)
-		env.home.mu.Unlock()
+		env.home.prependAcks(prevAcks)
 		env.pushMention(int64(num))
 		return nil
 	})
@@ -429,11 +447,11 @@ func registerSyncFlowSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
 		env.h.Push(env.homeKey.ID(), json.RawMessage(accJSON(proto.Rows{Type: "rows", Group: accGroupID, Rows: rows})))
 		env.home.reply <- accSyncReply{err: errors.New("eof")}
 		<-env.home.finished
-		gotSince := func() bool { return len(env.home.sinces) == 1 }
+		gotSince := func() bool { return len(env.home.sincesSnapshot()) == 1 }
 		if err := env.waitCondition("initial sync request", gotSince); err != nil {
 			return err
 		}
-		env.sinces = append(env.sinces, env.home.sinces...)
+		env.sinces = append(env.sinces, env.home.sincesSnapshot()...)
 		return nil
 	})
 	sc.Step(`^the host reconnects to "home-1" and completes sync at sequence (\d+)$`, func(seq int) {
@@ -447,7 +465,7 @@ func registerSyncFlowSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
 		env.h.Push(env.homeKey.ID(), json.RawMessage(accJSON(proto.Rows{Type: "rows", Group: accGroupID, Rows: rows2})))
 		env.home.reply <- accSyncReply{err: errors.New("eof")}
 		<-env.home.finished
-		env.sinces = append(env.sinces, env.home.sinces...)
+		env.sinces = append(env.sinces, env.home.sincesSnapshot()...)
 	})
 }
 
