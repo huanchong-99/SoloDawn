@@ -309,6 +309,9 @@ func registerDeliverGivenSteps(sc *godog.ScenarioContext, f fixtures, cleanup fu
 		installHooks()
 		cleanup(func() {
 			env.closeHome()
+			if env.h != nil {
+				env.h.Settle()
+			}
 			if env.db != nil {
 				env.db.Close()
 			}

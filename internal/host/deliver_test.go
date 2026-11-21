@@ -302,20 +302,9 @@ func newDeliverRigOnStore(t *testing.T, db *store.Store) *deliverRig {
 	rig.h = h
 	t.Cleanup(func() {
 		rig.home.closeConn()
-		stopDeliverySyncs(h)
+		h.Settle()
 	})
 	return rig
-}
-
-func stopDeliverySyncs(h *Host) {
-	d := deliv(h)
-	d.mu.Lock()
-	for dev, entry := range d.cancels {
-		entry.cancel()
-		delete(d.cancels, dev)
-	}
-	d.mu.Unlock()
-	d.wg.Wait()
 }
 
 func (r *deliverRig) installHooks() {
@@ -530,7 +519,7 @@ func captureLogs(t *testing.T) *safeLogBuffer {
 
 func assertDeliverRegistrations(t *testing.T) {
 	t.Helper()
-	checks := []bool{Attached["deliver"] != nil, Pushes["inbox"] != nil, Pushes["rows"] != nil, Pushes["reset"] != nil, Deliver != nil}
+	checks := []bool{Attached["deliver"] != nil, Settled["deliver"] != nil, Pushes["inbox"] != nil, Pushes["rows"] != nil, Pushes["reset"] != nil, Deliver != nil}
 	if slices.Contains(checks, false) {
 		t.Fatal("deliver registrations missing")
 	}
@@ -548,7 +537,7 @@ func TestRegistrationsAndHostIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { stopDeliverySyncs(h2) })
+	t.Cleanup(func() { h2.Settle() })
 	r1.seedGroupAndMembers()
 	msg := r1.makeTextMsg(testMsg1, nil, "hello")
 	it := proto.Item{Item: 1, AI: testAI1, Why: "mention", Msg: testMsg1}
@@ -559,6 +548,7 @@ func TestRegistrationsAndHostIsolation(t *testing.T) {
 	if turns[0].host != r1.h || len(deliv(h2).groups) != 0 || len(r1.home.syncSinces()) != 1 {
 		t.Fatalf("isolation or live sync check broken: turns=%+v h2Groups=%d syncs=%v", turns, len(deliv(h2).groups), r1.home.syncSinces())
 	}
+	r1.h.Settle()
 }
 
 func TestAttachGroupsCancelsCleanupAndUnsyncedPush(t *testing.T) {

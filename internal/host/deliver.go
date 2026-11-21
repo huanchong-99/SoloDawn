@@ -20,6 +20,7 @@ import (
 
 func init() {
 	Register(Attached, "deliver", attachHome)
+	Register(Settled, "deliver", settleDelivery)
 	Register(Pushes, "inbox", pushInbox)
 	Register(Pushes, "rows", pushRows)
 	Register(Pushes, "reset", pushReset)
@@ -144,11 +145,22 @@ func attachHome(h *Host, device string) {
 		return
 	}
 	ctx, jobs := d.beginHomeSync(device, conn, groups)
-	go func() {
+	d.wg.Go(func() {
 		for _, job := range jobs {
 			syncOneGroup(ctx, h, d, conn, device, job)
 		}
-	}()
+	})
+}
+
+func settleDelivery(h *Host) {
+	d := deliv(h)
+	d.mu.Lock()
+	for dev, entry := range d.cancels {
+		entry.cancel()
+		delete(d.cancels, dev)
+	}
+	d.mu.Unlock()
+	d.wg.Wait()
 }
 
 func groupsForHome(d *delivery, cfg hostConfig, device string) []string {
@@ -216,7 +228,7 @@ func ensureGroupSynced(h *Host, d *delivery, device, group string) {
 		return
 	}
 	if ctx, job, started := d.beginSingleGroupSync(device, conn, group); started {
-		go syncOneGroup(ctx, h, d, conn, device, job)
+		d.wg.Go(func() { syncOneGroup(ctx, h, d, conn, device, job) })
 	}
 }
 
@@ -394,13 +406,17 @@ func cleanupGroupState(h *Host, d *delivery, group string) {
 	}
 	cleanupGoneMembers(h, group)
 	cleanupTaskSessions(h, group)
+	tasks := liveTasks(h, group)
+	if len(tasks) == 0 {
+		return
+	}
 	cfg, _ := loadHostConfig(h)
 	pDir := cfg.projectDir(group)
 	if !hasGitClone(pDir) {
 		return
 	}
 	grp, _ := lookupRow[proto.GroupRow](h, group, "group", group)
-	for _, task := range liveTasks(h, group) {
+	for _, task := range tasks {
 		cleanupTaskFolder(context.Background(), pDir, grp.Forge == "github", task)
 		cleanupReviewFolder(context.Background(), pDir, task)
 	}
@@ -452,7 +468,7 @@ func releaseUnmergedWorktree(ctx context.Context, pDir string, remote bool, task
 	if task.State == "cancelled" {
 		RemoveTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), holder, TaskCancelled)
 	} else if holder != task.Assignee {
-		if remote {
+		if remote && holder != "" {
 			(TaskForge{Worktree: wtPath, Branch: "task/" + name}).PushBranch(ctx)
 		}
 		RemoveTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), holder, TaskGivenAway)
@@ -564,7 +580,7 @@ func enqueueVerified(h *Host, d *delivery, v verifiedItem) {
 		d.held[key] = enqueueHeld(d.held[key], v)
 		d.mu.Unlock()
 	}
-	go deliverNow(h, v.group, string(v.item.AI))
+	d.wg.Go(func() { deliverNow(h, v.group, string(v.item.AI)) })
 }
 
 func (d *delivery) enqueueMerge(v verifiedItem) {

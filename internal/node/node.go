@@ -356,6 +356,9 @@ func (n *nodeRuntime) closeCore() {
 	if n.loop != nil {
 		n.loop.Close()
 	}
+	if n.host != nil {
+		n.host.Settle()
+	}
 	if n.db != nil {
 		n.db.Close()
 	}
