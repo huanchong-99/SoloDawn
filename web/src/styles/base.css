@@ -617,6 +617,112 @@ kbd,
     box-shadow: inset 3px 0 0 var(--dawn);
   }
 }
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+
+  .kind {
+    font-weight: 600;
+    color: var(--text);
+  }
+  h3 {
+    flex: 1;
+    min-width: 12ch;
+  }
+  .badge:last-child {
+    margin-left: auto;
+  }
+}
+.card-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.kv {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px var(--sp-4);
+  font-size: var(--fs-sm);
+
+  dt {
+    color: var(--text-3);
+  }
+  dd {
+    min-width: 0;
+  }
+}
+@media (max-width: 640px) {
+  .kv.wide {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+
+    dd {
+      margin-bottom: var(--sp-2);
+    }
+  }
+}
+.fold {
+  border-top: 1px solid var(--line);
+  margin: 0 calc(-1 * var(--sp-4)) -14px;
+
+  > summary {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: 10px var(--sp-4);
+    cursor: pointer;
+    list-style: none;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    border-radius: 0 0 var(--r-lg) var(--r-lg);
+
+    &::-webkit-details-marker {
+      display: none;
+    }
+    &::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      border-radius: inherit;
+      background: var(--surface-2);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity var(--dur-1) var(--ease);
+    }
+    .i {
+      transform: rotate(-90deg);
+      transition: transform var(--dur-2) var(--ease);
+    }
+    b {
+      color: var(--text);
+      white-space: nowrap;
+    }
+  }
+  &[open] > summary {
+    border-radius: 0;
+
+    .i {
+      transform: none;
+    }
+  }
+}
+@media (hover: hover) {
+  .fold > summary:hover::before {
+    opacity: 1;
+  }
+}
+.fold-body {
+  padding: var(--sp-1) var(--sp-4) var(--sp-4);
+  font-size: var(--fs-sm);
+}
 
 /* 6 forms */
 .seg {
