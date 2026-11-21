@@ -211,15 +211,14 @@ func (c *turnCtx) parseItems(rawItems []json.RawMessage) ([]parsedItem, error) {
 
 func parseOneItem(raw json.RawMessage) (parsedItem, *proto.TaskRow, error) {
 	var wire proto.InboxItem
-	var it proto.Item
-	if proto.Decode(raw, &wire) != nil || proto.Decode([]byte(wire.Env.Payload), &it) != nil {
+	if proto.Decode(raw, &wire) != nil {
 		return parsedItem{}, nil, &Error{"bad_request", "invalid inbox item"}
 	}
 	msg, err := decodeOptionalMsg(wire.Msg)
 	if err != nil {
 		return parsedItem{}, nil, err
 	}
-	return parsedItem{item: it, msg: msg}, wire.Task, nil
+	return parsedItem{item: wire.Item, msg: msg}, wire.Task, nil
 }
 
 func decodeOptionalMsg(raw json.RawMessage) (*proto.MsgRow, error) {

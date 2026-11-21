@@ -196,11 +196,10 @@ func (r *turnRig) session(kind Kind, sec bool, cliSession string) Session {
 }
 
 func (r *turnRig) makeInboxItem(p proto.Item, msg json.RawMessage, task *proto.TaskRow) json.RawMessage {
-	p.Type, p.Nonce, p.Timestamp, p.Group, p.To = "item", proto.ID(turnID("item-"+p.Why)), seamStart, proto.ID(tGroupID), r.homeKey.ID()
 	if p.AI == "" {
 		p.AI = proto.ID(tAIID)
 	}
-	return mustJSON(r.t, proto.InboxItem{Env: r.homeKey.Sign(string(mustJSON(r.t, p))), Msg: msg, Task: task})
+	return mustJSON(r.t, proto.InboxItem{Item: p, Msg: msg, Task: task})
 }
 
 func (r *turnRig) textMsg(id, by, thread, text string) json.RawMessage {
@@ -885,14 +884,8 @@ func checkMalformedItemAndBodyInputs(t *testing.T, r *turnRig, s Session) {
 			Body: json.RawMessage(`{}`), State: state,
 		})
 	}
-	validResumeEnv := r.homeKey.Sign(string(mustJSON(t, proto.Item{
-		Type: "item", Nonce: proto.ID(tMsg1ID), Timestamp: seamStart, Group: proto.ID(tGroupID),
-		To: r.homeKey.ID(), Item: 1, AI: proto.ID(tAIID), Why: "resume", Task: proto.ID(tTaskID),
-	})))
 	cases := []json.RawMessage{
 		json.RawMessage(`{`),
-		json.RawMessage(`{"env":` + string(mustJSON(t, validResumeEnv)) + `,"task":"bad"}`),
-		mustJSON(t, proto.InboxItem{Env: r.homeKey.Sign("{")}),
 		r.makeInboxItem(proto.Item{Item: 1, Why: "mention", Msg: proto.ID(tMsg1ID)}, json.RawMessage(`{}`), nil),
 		r.makeInboxItem(proto.Item{Item: 1, Why: "merge", Task: proto.ID(tTaskID), Commit: "c1"}, nil, nil),
 		r.makeInboxItem(proto.Item{Item: 1, Why: "mention", Msg: proto.ID(tMsg1ID)}, badMsg("call", nil), nil),

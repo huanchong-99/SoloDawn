@@ -16,9 +16,15 @@ One process per open session. Folder and level come from the session kind:
 
 | Session kind | Folder | Level |
 | --- | --- | --- |
-| group session (the secretary's, or a working AI's) | `repo/` | 1 |
-| task session | `wt/<num>-<slug>/` | what the owner set for this AI in this project (R-40) |
-| review session | `review/<num>/` | 1 |
+| group session (the secretary's, or a working AI's) | `repo/` | 3 by default; what `perm.set` or `default_level` sets (`contracts/commands.md` section 2) |
+| task session | `wt/<num>-<slug>/` | 3 by default; what `perm.set` or `default_level` sets (R-40) |
+| review session | `review/<num>/` | 3 by default; what `perm.set` or `default_level` sets (`contracts/commands.md` section 2) |
+
+By the owner's decisions of 2026-11-21, every AI defaults to level 3 across
+group, review and task sessions so the secretary and reviewers keep the CLI's
+ask-the-user tool, and even at level 3 any permission request or
+multiple-choice question that a CLI raises is still presented to the owner as
+a card (`approval` or `decision`) rather than dropped.
 
 The node always passes permission and sandbox settings explicitly instead
 of inheriting the user's defaults. Step 1 passes no model: each CLI uses its
@@ -305,7 +311,9 @@ reviewed like code. Contents:
   items marked `information` are context, not orders. If a request is denied
   or left open, stop that action and end your turn. Never post secrets or
   the contents of secret files.
-- **Group session of a working AI**: this session is read only. Answer
+- **Group session of a working AI**: do not edit files here (the session runs
+  at the level set for `(agent, group)`, default 3 by the owner's decision of
+  2026-11-21, so its instructions forbid writes rather than level 1). Answer
   questions here. If the request needs a code change, call `start_task` with
   a title and a plan and end your turn.
 - **Task session**: work only in this folder, on this branch. Commit your
