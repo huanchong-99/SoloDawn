@@ -318,6 +318,7 @@ func (d *delivery) advanceLiveCursor(group, home string, seq int64) {
 func afterGroupState(h *Host, d *delivery, group string) {
 	stepMerges(h, d, group)
 	resumeGroupMerges(h, d, group)
+	resumeGroupHostedChecks(h, d, group)
 	for _, key := range d.heldKeys() {
 		deliverPair(h, d, key)
 	}
@@ -1167,12 +1168,33 @@ func resumeGroupMerges(h *Host, d *delivery, group string) {
 	if home == "" {
 		return
 	}
-	for _, raw := range h.Rows.Of(group, "task") {
-		var task proto.TaskRow
-		if proto.Decode(raw, &task) == nil && task.State == "active" && task.Step == "merge" {
+	for _, task := range liveTasks(h, group) {
+		if task.State == "active" && task.Step == "merge" {
 			resumeOneMerge(h, d, home, group, task)
 		}
 	}
+}
+
+func resumeGroupHostedChecks(h *Host, d *delivery, group string) {
+	home := d.groupHome(group)
+	if home == "" {
+		return
+	}
+	for _, hc := range HostedChecksToResume(liveTasks(h, group), localGroupAIs(h, group)) {
+		startHostedCheck(h, home, group, hc)
+	}
+}
+
+func localGroupAIs(h *Host, group string) []string {
+	var ais []string
+	for _, raw := range h.Rows.Of(group, "member") {
+		var m proto.AIMemberRow
+		proto.Decode(raw, &m)
+		if m.Host == h.Key.ID() {
+			ais = append(ais, m.ID)
+		}
+	}
+	return ais
 }
 
 func resumeOneMerge(h *Host, d *delivery, home, group string, task proto.TaskRow) {
