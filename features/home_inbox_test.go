@@ -194,9 +194,31 @@ func (w *homeInboxWorld) bootstrap(capPerHour int, withSec bool) error {
 	if err := w.configureCap(capPerHour); err != nil {
 		return err
 	}
-	w.loop.Watch(w.laptop.conn, w.group, true)
+	if err := w.sync(w.laptop, 0); err != nil {
+		return err
+	}
 	w.loop.Inbox(w.laptop.conn)
 	return nil
+}
+
+func (w *homeInboxWorld) sync(p *homeInboxPeer, since int64) error {
+	p.re++
+	w.loop.Sync(p.conn, proto.Sync{Request: proto.Request{Type: "sync", ID: p.re}, Group: w.group, Since: since, StateOnly: true})
+	for {
+		raw, err := p.next()
+		if err != nil {
+			return err
+		}
+		var h struct {
+			Type string `json:"t"`
+		}
+		if err := json.Unmarshal([]byte(raw), &h); err != nil {
+			return err
+		}
+		if h.Type == "synced" {
+			return nil
+		}
+	}
 }
 
 func (w *homeInboxWorld) enrollAIs(withSec bool) error {
@@ -321,7 +343,9 @@ func (w *homeInboxWorld) checkResentBriefInbox() error {
 
 func (w *homeInboxWorld) laptopQuiet() error {
 	// Synchronise with the group goroutine, then verify no frame arrived on laptop.
-	w.loop.Watch(w.browser.conn, w.group, true)
+	if err := w.sync(w.browser, w.loop.Groups(w.browser.conn)[0].Seq); err != nil {
+		return err
+	}
 	select {
 	case got := <-w.laptop.frames:
 		return fmt.Errorf("laptop unexpectedly received %s", got)

@@ -102,11 +102,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `internal/node/session.go` (`N-2`) serves inbound `ctl` connections (`Serve`); the client side of a `ctl` session was split out by the coordinator's decision of 2026-11-21.
 - Status: open for unit `N-2b` (`internal/node/client.go`), wired into the node runtime by `N-4`.
 
-### 2026-11-21 · deviation · The local link routes only `cmd` requests and `ack` pushes until `sync` and `fetch` land
+### 2026-11-21 · deviation · The local link routes `cmd`, `sync` and `ack` until `fetch` lands
 
-- Symptom: on `LocalLink`, a `sync` or `fetch` request from the host is answered `bad_request`; tests subscribe to row pushes through `LocalLink.Watch` (`internal/node/local.go:66`), which is temporary until `sync` is routed to `home.Loop`.
-- Cause: `Sync` (HM-2, #205) and `Fetch` (HM-3) are built in separate units. `LocalLink.toHome` (`internal/node/local.go`) dispatches `cmd` to `Loop.Cmd` and `ack` to `Loop.Ack`, and answers other requests `bad_request` per `planning/contracts/datachannel.md` section 2.
-- Status: open. Route `sync` to `Loop` and delete `LocalLink.Watch` once HM-2 (#205) merges; wire `fetch` once HM-3 merges (N-4 / I-1 / I-3). (`ack` and `inbox` frames wired in `HM-7`.)
+- Symptom: on `LocalLink`, a `fetch` request from the host is answered `bad_request`.
+- Cause: `LocalLink.toHome` (`internal/node/local.go`) dispatches `cmd` to `Loop.Cmd`, `sync` to `Loop.Sync` and `ack` to `Loop.Ack`, while `Fetch` (HM-3) is built in a separate unit; other requests carrying `id` are answered `bad_request` per `planning/contracts/datachannel.md` section 2.
+- Status: `ack` and `inbox` frames wired in HM-7 (#221); `sync` routed to `Loop.Sync` and temporary `LocalLink.Watch` removed in HM-2 (#205); open for `fetch` once HM-3 merges (N-4 / I-1 / I-3).
 
 ### 2026-11-21 · limitation · Postponed step-2 contracts still assume an item-level `cause`
 

@@ -5,6 +5,7 @@ package features
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -199,9 +200,25 @@ func (w *homePostWorld) bootLoop(cleanup func(func()), b1, b2, node, host, guest
 		p.conn = loop.Attach(key.ID(), p)
 		w.peers[name] = p
 	}
-	loop.Watch(w.peers["b1"].conn, w.group, false)
-	loop.Watch(w.peers["b2"].conn, w.group, false)
 	loop.Inbox(w.peers["host"].conn)
+	return errors.Join(w.syncBrowser("b1"), w.syncBrowser("b2"))
+}
+
+func (w *homePostWorld) syncBrowser(who string) error {
+	p := w.peers[who]
+	p.re++
+	w.loop.Sync(p.conn, proto.Sync{Request: proto.Request{Type: "sync", ID: p.re}, Group: w.group})
+	resetRaw, err1 := p.next()
+	rows, err2 := w.readRows(who, 8)
+	syncedRaw, err3 := p.next()
+	var reset proto.Reset
+	var synced proto.Synced
+	err := errors.Join(err1, err2, err3, proto.Decode([]byte(resetRaw), &reset), proto.Decode([]byte(syncedRaw), &synced))
+	wantReset := proto.Reset{Type: "reset", Group: w.group}
+	wantSynced := proto.Synced{Type: "synced", Success: proto.Success{Re: p.re, OK: true}, Group: w.group, Seq: int64(len(rows))}
+	if err != nil || reset != wantReset || synced != wantSynced {
+		return fmt.Errorf("%s sync got %+v / %+v (%v); want %+v / %+v", who, reset, synced, err, wantReset, wantSynced)
+	}
 	return nil
 }
 

@@ -223,7 +223,7 @@ func TestInboxAckDeletesOnlyTheHostsOwnItem(t *testing.T) {
 	// Non-homed group and another host leave item 1 intact.
 	w.loop.Ack(host.conn, proto.Ack{Type: "ack", Group: proto.ID(id(99)), Item: 1})
 	w.loop.Ack(nodePeer.conn, proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 1})
-	p.settled(groupID)
+	w.idle()
 	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM inbox"), 3)
 
 	// Host acknowledges item 1; repeat ack is harmless; node acknowledges its own item 3.
@@ -364,7 +364,7 @@ func inboxCheckCapRollbackAndRestart(t *testing.T) {
 	p.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"notice","Code":"quiet"}]`, aiID))
 	equal(t, inboxDecode(t, host.next()).Items[0].Item.Item, int64(1))
 	w.loop.Ack(host.conn, proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 1})
-	p.settled(groupID)
+	w.idle()
 
 	// Restarting the loop resets the in-memory wake count.
 	w.loop.Close()
