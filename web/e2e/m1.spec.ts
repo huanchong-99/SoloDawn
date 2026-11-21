@@ -168,7 +168,7 @@ describe('E-M1: onboarding, pairing, account declaration, and two computers', ()
       await poll(() => laptopCard.locator('dl.kv').textContent()).toContain('Direct');
       await poll(() => laptopCard.textContent()).toContain('Account type not set');
 
-      await laptopCard.locator('fieldset.acct input[value="api_key"]').check();
+      await laptopCard.locator('fieldset.acct input[value="api_key"]').click();
       await poll(() => laptopCard.locator('fieldset.acct').count()).toBe(0);
       await poll(() => laptopCard.textContent()).toContain('Team plan');
       await poll(() => laptopCard.textContent()).toContain('API key');
