@@ -1,5 +1,5 @@
 ---
-description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the offline scripted Claude Code and Codex processes for host integration tests, and the API of the host workspaces and Git commands.'
+description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the offline scripted Claude Code and Codex processes for host integration tests, the API of the host workspaces and Git commands, and the audit host-surface request.'
 kind: reference
 ---
 
@@ -121,3 +121,13 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 - `CreateTaskWorkspace(ctx, projectDir, num, slug, ai, base, remote)` and `RemoveTaskWorkspace(ctx, projectDir, num, slug, ai, why)` handle `wt/<num>-<slug>`. `PrepareReviewWorkspace(ctx, projectDir, num, ai, commit, base, remote)` and `RemoveReviewWorkspace(ctx, projectDir, num, ai)` handle `review/<num>`. `ai` is the member id of the AI that holds the folder. A create reuses only a worktree recorded for the same AI, and a removal leaves one recorded for another AI untouched.
 - A create works out from the branches whether a task is new, taken over or returning; there is no takeover flag. A slug the home cannot produce, or a `num` below 1, is refused.
 - `cloneLock(repo)` is the one lock per clone, keyed by its real path. Workspace functions and `ReviewedMerge` take it.
+
+# Audit request (HS-17)
+
+`audit_read.go` serves the `audit` request on the host surface ([datachannel.md](../../planning/contracts/datachannel.md) section 7, [storage.md](../../planning/contracts/storage.md) section 3):
+
+- Registers `"audit"` in `Surface` from `init`. `node` calls the handler only for an authenticated owner device (`welcome.owner` true) and wraps its returned result fields with `re` and `ok: true` (no `t` field on the answer).
+- Decodes the request frame with `proto.Decode` into `proto.Audit`, refusing malformed payloads, `t` values other than `"audit"`, `before < 0`, and `limit < 1` or `limit > 100` with `bad_request`.
+- Reads the `audit` table inside `Host.Store.Write` ordered by `id DESC` (`LIMIT ?` when `before == 0`, `WHERE id < ? ORDER BY id DESC LIMIT ?` when `before > 0`) so rows sharing the same millisecond timestamp are neither skipped nor repeated across pages.
+- Maps nullable `g`, `agent` (wire `ai`), `by` and `result` columns with `coalesce(..., '')` onto `proto.AuditRow` (`omitempty` omits unset optional fields without writing `null`), leaves `item` and `home` internal to the store, and initializes `rows` to `[]proto.AuditRow{}` so an empty page encodes `"rows":[]`.
+- Keeps no in-memory state, locks or channels of its own.
