@@ -670,13 +670,15 @@ func TestRunAClientMayCallBackWhileItIsSent(t *testing.T) {
 	left.Store(40)
 	var reader *runPeer
 	client.during = func(frame any) {
-		if _, rows := frame.(proto.Rows); !rows || left.Add(-1) < 0 {
+		r, rows := frame.(proto.Rows)
+		if !rows || left.Add(-1) < 0 {
 			return
 		}
 		runExec(t, w.db, "INSERT INTO setting(key, value) VALUES(?, 'x')", fmt.Sprint(left.Load()))
 		w.loop.Groups(reader.conn)
-		seq := w.loop.Groups(reader.conn)[0].Seq
-		w.loop.Sync(reader.conn, proto.Sync{Request: proto.Request{Type: "sync", ID: 99}, Group: groupID, Since: seq})
+		var last proto.RowHeader
+		equal(t, json.Unmarshal(r.Rows[len(r.Rows)-1], &last), nil)
+		w.loop.Sync(reader.conn, proto.Sync{Request: proto.Request{Type: "sync", ID: 99}, Group: groupID, Since: last.Seq})
 		w.loop.Cmd(reader.conn, 100, w.cmd(laptop, groupID, "note", `,"text":"again"`))
 	}
 	reader = w.attachClient(laptop, client, client)
