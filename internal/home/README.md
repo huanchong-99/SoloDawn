@@ -168,6 +168,8 @@ names that start with `run`, and its tests those that start with `run` and `Run`
 `Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
 `ItemsPush`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
+The calls of HM-15 take the names that start with `cal`, their tests too, and their test functions
+start with `TestCall`.
 
 ## The run loop
 
@@ -392,9 +394,37 @@ function that moves a task calls it and adds nothing to its rules.
   HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
   `c.Disk.Msg` reads.
 
+## Calls
+
+`cmd_call.go` holds `post` of kinds `call` and `reply`
+([commands](../../planning/contracts/commands.md) 1.3;
+[messages](../../planning/contracts/messages.md) 1, 2.6 and 3.4;
+[ask](../../planning/flows/ask.md)), under the keys `post/call` and `post/reply`. Where the
+contracts are silent, it does this:
+
+- **Call.** Only an AI posts a call (`c.Who.AI` not empty), else `forbidden`. What the payload says
+  by itself is `bad_request`: `main` `true`, `body.depth` below 1, `body.to` equal to `as`, or a
+  member id named twice in `mentions`. A non-null `thread` must name a task in `State.Tasks`, else
+  `not_found`. `body.to` must name an AI member in `State.AIs`, every id in `mentions` must name a
+  member of the group, and `c.Disk.Msg` must not already hold `n`, else `conflict`. `body.depth`
+  above `Group.Limits.AskDepth` is refused with `limit` (A6.4). The row has `state`
+  `{"status":"waiting"}`, `ts` as signed, and `body` encoded without HTML escaping; in a thread,
+  `TaskRow` follows with `thread.count` + 1 and `thread.last` cut to at most 200 UTF-8 characters.
+  One `mention` item is queued for `body.to`, with `task` set when in a thread; round counting and
+  held mentions wrap `post/*` in unit HM-13.
+- **Reply.** Only an AI posts a reply, else `forbidden`. `main` `true`, `re` `null`, or a duplicate
+  id in `mentions` is `bad_request`. `c.Disk.Msg` must hold `re`, else `not_found`. That message
+  must be a `call` whose `body.to` is `as` and whose `state.status` is `waiting`, else `conflict`.
+  `thread` must match the call's `thread` (`bad_request` when mismatched, `not_found` when the task
+  is missing in `State.Tasks`); a non-member in `mentions` or an `n` already in `c.Disk.Msg` is
+  `conflict`. The call's `state` becomes `{"status":"answered","reply":n,"ms":max(0, c.Timestamp -
+  call.Timestamp)}`, followed by the reply `MsgRow` (`state` `null`, `body` `{}`) and, in a thread,
+  the updated `TaskRow`. When the caller is still in `State.AIs`, a `reply` item is queued for it
+  (A6.3).
+
 ## Known limitations
 
-- The table of commands holds only the briefs, and no node starts a loop yet: the other command
+- The table of commands holds only the briefs and the calls, and no node starts a loop yet: the other command
   files and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
@@ -435,3 +465,8 @@ while a task is paused and a reviewer named while it is paused.
 holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
 `Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
 commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
+
+`cmd_call_test.go` sends `post/call` and `post/reply` through `Commands.Apply` with fakes of
+`Receipts` and `Disk`, checking the golden shapes, `UnexpectedNulls`, the 200-character preview,
+elapsed-time clamping, receipts and every refusal boundary. `features/home_call.feature` holds the
+home half of acceptance tests A6.3 and A6.4.
