@@ -77,7 +77,6 @@ func grpState(t *testing.T) *home.State {
 		s.AIs[member] = w
 	}
 	s.Logs[device(6).ID()] = logOf(t, device(6))
-	s.People[grpAdmin] = person(grpAdmin, guest, "admin")
 	s.People[grpAdmin] = proto.HumanMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: grpAdmin}, Group: groupID, Kind: "human", User: guest.ID(), Name: "admin-user"},
 		Role:      "admin", Online: true,

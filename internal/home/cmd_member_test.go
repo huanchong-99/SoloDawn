@@ -11,16 +11,13 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-type memDisk struct {
-	msgs   map[string]proto.MsgRow
-	queued []store.Item
-}
+type memDisk []store.Item
 
-func (d memDisk) Msg(id string) (proto.MsgRow, bool)        { m, ok := d.msgs[id]; return m, ok }
-func (d memDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
-func (d memDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
-func (d memDisk) Pending() []proto.MsgRow                   { return nil }
-func (d memDisk) Queued() []store.Item                      { return d.queued }
+func (memDisk) Msg(string) (proto.MsgRow, bool)           { return proto.MsgRow{}, false }
+func (memDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
+func (memDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
+func (memDisk) Pending() []proto.MsgRow                   { return nil }
+func (d memDisk) Queued() []store.Item                    { return d }
 
 func memAddCmd(n byte, memberID, cli, name, account string, secretary bool) proto.MemberAddAI {
 	return proto.MemberAddAI{
@@ -81,7 +78,7 @@ func TestMemberAddAIHostAndPath(t *testing.T) {
 			Group:     groupID, Kind: "ai", User: browser.ID(), Name: "Remote Codex", LastSeen: clock,
 		},
 		CLI: "codex", Host: laptop.ID(), HostName: "studio", Secretary: false,
-		Account: "team", Allow: []string{}, Approvers: []string{},
+		Account: "team", Allow: []string{}, Approvers: []string{browser.ID()},
 		State: "dormant", Since: clock, Path: "direct", Usage: proto.Usage{},
 	}
 	equal(t, res.Answer, store.Outcome{OK: true})
@@ -91,20 +88,24 @@ func TestMemberAddAIHostAndPath(t *testing.T) {
 	s.Commit(res)
 
 	cmdLocal := memAddCmd(91, localID, "claude", "Local Claude", "api_key", false)
+	cmdLocal.Approvers = []string{guest.ID(), browser.ID()}
 	res = grpApply(t, s, memDisk{}, receipts{}, node, cmdLocal)
 	wantLocal := wantRemote
 	wantLocal.ID, wantLocal.Seq, wantLocal.Name = localID, 12, "Local Claude"
 	wantLocal.CLI, wantLocal.Host, wantLocal.HostName = "claude", node.ID(), "home-box"
-	wantLocal.Account, wantLocal.Approvers, wantLocal.Path = "api_key", []string{browser.ID()}, "local"
+	wantLocal.Account, wantLocal.Approvers, wantLocal.Path = "api_key", []string{guest.ID(), browser.ID()}, "local"
 	equal(t, briefRows(res), []any{wantLocal})
 }
 
 func TestMemberAddAISecretaryRules(t *testing.T) {
 	t.Run("a non-admin adds a working AI while the group has a secretary", func(t *testing.T) {
 		s := grpState(t)
-		res := grpApply(t, s, memDisk{}, receipts{}, device(6), memAddCmd(92, id(92), "codex", "Guest Worker", "personal", false))
+		cmd := memAddCmd(92, id(92), "codex", "Guest Worker", "personal", false)
+		cmd.Approvers = []string{guest.ID()}
+		res := grpApply(t, s, memDisk{}, receipts{}, device(6), cmd)
 		equal(t, res.Answer, store.Outcome{OK: true})
 		equal(t, len(res.Rows), 1)
+		equal(t, res.Rows[0].Value().(proto.AIMemberRow).Approvers, []string{device(6).ID(), guest.ID()})
 	})
 
 	t.Run("a non-admin adds the first secretary when the group has none", func(t *testing.T) {
@@ -143,11 +144,9 @@ func TestMemberAddAISecretaryRules(t *testing.T) {
 }
 
 func TestMemberAddAIRefusals(t *testing.T) {
-	phone := device(8)
 	for name, c := range map[string]struct {
 		by     identity.Key
 		raw    string
-		state  func(*home.State)
 		change func(*proto.MemberAddAI)
 		code   string
 	}{
@@ -155,13 +154,6 @@ func TestMemberAddAIRefusals(t *testing.T) {
 			by:     laptop,
 			change: func(p *proto.MemberAddAI) { p.As = proto.ID(aiID) },
 			code:   "forbidden",
-		},
-		"by a browser device": {
-			by: phone,
-			state: func(s *home.State) {
-				memAppendDevice(t, s.Logs[browser.ID()], browser, phone, "browser", "phone")
-			},
-			code: "forbidden",
 		},
 		"by a non-admin replacing the secretary": {
 			by:     device(6),
@@ -203,9 +195,6 @@ func TestMemberAddAIRefusals(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := grpState(t)
-			if c.state != nil {
-				c.state(s)
-			}
 			by := laptop
 			if c.by != nil {
 				by = c.by
@@ -248,14 +237,25 @@ func TestMemberSetEachFieldIndividually(t *testing.T) {
 			set:  func(p *proto.MemberSet) { v := []string{guest.ID()}; p.Allow = &v },
 			want: func(m *proto.AIMemberRow) { m.Allow = []string{guest.ID()} },
 		},
-		"empty approvers": {
+		"empty approvers keeps owner": {
 			set:  func(p *proto.MemberSet) { v := []string{}; p.Approvers = &v },
-			want: func(m *proto.AIMemberRow) { m.Approvers = []string{} },
+			want: func(m *proto.AIMemberRow) { m.Approvers = []string{browser.ID()} },
+		},
+		"approvers without owner adds owner": {
+			set:  func(p *proto.MemberSet) { v := []string{guest.ID()}; p.Approvers = &v },
+			want: func(m *proto.AIMemberRow) { m.Approvers = []string{browser.ID(), guest.ID()} },
+		},
+		"approvers with owner keeps order without duplicate": {
+			set:  func(p *proto.MemberSet) { v := []string{guest.ID(), browser.ID()}; p.Approvers = &v },
+			want: func(m *proto.AIMemberRow) { m.Approvers = []string{guest.ID(), browser.ID()} },
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := grpState(t)
-			want := s.AIs[grpWorkerA]
+			initial := s.AIs[grpWorkerA]
+			initial.Approvers = []string{browser.ID(), device(6).ID()}
+			s.AIs[grpWorkerA] = initial
+			want := initial
 			want.Seq = 11
 			c.want(&want)
 			cmd := memSetCmd(100, grpWorkerA)
@@ -271,7 +271,7 @@ func TestMemberSetEachFieldIndividually(t *testing.T) {
 
 func TestMemberSetHostOnlyForApprovers(t *testing.T) {
 	// When the signing device is the AI's host under another user's log, only
-	// approvers alone is permitted.
+	// approvers alone is permitted, and the AI's owner stays in approvers.
 	makeHostState := func(t *testing.T) *home.State {
 		t.Helper()
 		s := grpState(t)
@@ -283,11 +283,11 @@ func TestMemberSetHostOnlyForApprovers(t *testing.T) {
 
 	s := makeHostState(t)
 	cmd := memSetCmd(101, grpWorkerA)
-	approvers := []string{device(6).ID(), guest.ID()}
+	approvers := []string{guest.ID()}
 	cmd.Approvers = &approvers
 	res := grpApply(t, s, memDisk{}, receipts{}, guest, cmd)
 	equal(t, res.Answer, store.Outcome{OK: true})
-	equal(t, res.Rows[0].Value().(proto.AIMemberRow).Approvers, approvers)
+	equal(t, res.Rows[0].Value().(proto.AIMemberRow).Approvers, []string{device(6).ID(), guest.ID()})
 
 	for name, addField := range map[string]func(*proto.MemberSet){
 		"host also sets name":    func(p *proto.MemberSet) { v := "Renamed"; p.Name = &v },
@@ -390,12 +390,9 @@ func TestMemberRemoveWorkingAndSecretary(t *testing.T) {
 		s.Tasks[id(111)] = proto.TaskRow{State: "cancelled", Reviewer: grpWorkerA}
 		s.Tasks[id(120)] = proto.TaskRow{State: "active", Assignee: grpWorkerB, Reviewer: grpWorkerB}
 		d := memDisk{
-			msgs: map[string]proto.MsgRow{},
-			queued: []store.Item{
-				{ID: 5, AI: grpWorkerA, Why: "mention"},
-				{ID: 6, AI: aiID, Why: "notice"},
-				{ID: 7, AI: grpWorkerA, Why: "reply"},
-			},
+			{ID: 5, AI: grpWorkerA, Why: "mention"},
+			{ID: 6, AI: aiID, Why: "notice"},
+			{ID: 7, AI: grpWorkerA, Why: "reply"},
 		}
 		res := grpApply(t, s, d, receipts{}, device(6), memRemoveCmd(112, grpWorkerA))
 		wantGone := proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: grpWorkerA, Seq: 11}, Gone: true}
@@ -421,10 +418,7 @@ func TestMemberRemoveWorkingAndSecretary(t *testing.T) {
 		s.Commit(res)
 
 		// Now remove the secretary.
-		d := memDisk{
-			msgs:   map[string]proto.MsgRow{},
-			queued: []store.Item{{ID: 9, AI: aiID, Why: "confirmed"}},
-		}
+		d := memDisk{{ID: 9, AI: aiID, Why: "confirmed"}}
 		res = grpApply(t, s, d, receipts{}, browser, memRemoveCmd(114, aiID))
 		wantGone := proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: aiID, Seq: 12}, Gone: true}
 		wantGroup := s.Group
@@ -456,7 +450,6 @@ func TestMemberRemoveRefusals(t *testing.T) {
 		target string
 		as     string
 		state  func(*home.State)
-		disk   memDisk
 		code   string
 	}{
 		"with a bad id": {
@@ -490,11 +483,6 @@ func TestMemberRemoveRefusals(t *testing.T) {
 			state: func(s *home.State) { s.Tasks[id(118)] = proto.TaskRow{State: "queued", Reviewer: grpWorkerA} },
 			code:  "conflict",
 		},
-		"when no_secretary message id is taken": {
-			target: aiID,
-			disk:   memDisk{msgs: map[string]proto.MsgRow{id(119): {Kind: "text"}}},
-			code:   "conflict",
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := grpState(t)
@@ -506,7 +494,7 @@ func TestMemberRemoveRefusals(t *testing.T) {
 				by = c.by
 			}
 			if c.raw != "" {
-				briefRefused(t, grpApplyRaw(t, s, c.disk, receipts{}, by, c.raw), c.code)
+				briefRefused(t, grpApplyRaw(t, s, memDisk{}, receipts{}, by, c.raw), c.code)
 				return
 			}
 			target := grpWorkerA
@@ -515,7 +503,7 @@ func TestMemberRemoveRefusals(t *testing.T) {
 			}
 			cmd := memRemoveCmd(119, target)
 			cmd.As = proto.ID(c.as)
-			briefRefused(t, grpApply(t, s, c.disk, receipts{}, by, cmd), c.code)
+			briefRefused(t, grpApply(t, s, memDisk{}, receipts{}, by, cmd), c.code)
 		})
 	}
 }

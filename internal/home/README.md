@@ -374,15 +374,15 @@ function that moves a task calls it and adds nothing to its rules.
   (`queued`, `active`, `paused`, `failed`), else `conflict`; any previous secretary's member row
   loses `secretary`, and the named AI gains it when not already set. `GroupsChanged` is set when
   `name` changes, because `groups` carries each group's name.
-- **`member/add_ai`.** By a host node of a member: `c.Who.AI` must be empty and the latest `add`
-  entry for `c.Who.Device` in `State.Logs[c.Who.User]` must have `kind` `node`, else `forbidden`;
-  that entry's `name` becomes `host_name`. An empty `name`, a `cli` outside `claude` and `codex`,
-  or an `account` outside `personal`, `team` and `api_key` is `bad_request`. `secretary: true` when
-  the group already has a secretary requires an admin, else `forbidden`. An `id` or `name` already
-  held by a human or AI member of the group is `conflict`. The new `ai` `member` row starts with
-  `state` `dormant`, `since` and `last_seen` `c.Now`, `path` `local` when `c.Who.Device == s.Home`
-  and `direct` otherwise, `allow` `[]` and `usage` `{}`; when `secretary` is true, any previous
-  secretary loses the flag and `group.secretary` becomes `id`.
+- **`member/add_ai`.** By a host of a member: `c.Who.AI` must be empty, else `forbidden`; the
+  `name` of the latest `add` entry for `c.Who.Device` in `State.Logs[c.Who.User]` becomes
+  `host_name`. An empty `name`, a `cli` outside `claude` and `codex`, or an `account` outside
+  `personal`, `team` and `api_key` is `bad_request`. `secretary: true` when the group already has a
+  secretary requires an admin, else `forbidden`. An `id` or `name` already held by a human or AI
+  member of the group is `conflict`. The new `ai` `member` row starts with `state` `dormant`,
+  `since` and `last_seen` `c.Now`, `path` `local` when `c.Who.Device == s.Home` and `direct`
+  otherwise, `allow` `[]` and `usage` `{}`; when `secretary` is true, any previous secretary loses
+  the flag and `group.secretary` becomes `id`.
 - **`member/set`.** Sending none of `name`, `account`, `allow` and `approvers`, an empty `name`, or
   an unknown `account` is `bad_request`. An unknown `id` is `not_found`; a human member row is
   `forbidden` in step 1. The signer must be the AI's owner (`c.Who.AI` empty, `c.Who.User ==
@@ -394,7 +394,7 @@ function that moves a task calls it and adds nothing to its rules.
   or reviewer of an open task is `conflict`. Otherwise the member row becomes a `gone` marker and
   any queued inbox items for that AI (`c.Disk.Queued`) are retired in `Result.Retire`. Removing the
   secretary also clears `group.secretary` and writes `system` `no_secretary` in the main line with
-  id `n` (`conflict` if a message already holds `n`).
+  id `n`.
 
 ## Briefs
 

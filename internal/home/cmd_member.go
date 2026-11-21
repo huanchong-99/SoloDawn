@@ -26,8 +26,7 @@ var (
 // memAddAI adds an AI member hosted by the signing node. When secretary is
 // set, it updates the group row and clears any previous secretary's flag.
 func memAddAI(s *State, c Command) (Result, *Refusal) {
-	kind, hostName := memDevice(s.Logs[c.Who.User], c.Who.Device)
-	if c.Who.AI != "" || kind != "node" {
+	if c.Who.AI != "" {
 		return Result{}, &Refusal{"forbidden", "only a host node of a member adds an AI"}
 	}
 	var p proto.MemberAddAI
@@ -37,21 +36,22 @@ func memAddAI(s *State, c Command) (Result, *Refusal) {
 	if refusal := memAddValid(p); refusal != nil {
 		return Result{}, refusal
 	}
+	hostName := memDevice(s.Logs[c.Who.User], c.Who.Device)
 	return s.memCreateAI(c, p, hostName)
 }
 
-// memDevice reads the kind and label from the latest add entry for device in
-// log. The caller's device is valid in log, so at least one add entry exists
-// and no revoke entry for it is present.
-func memDevice(log *identity.Log, device string) (kind, name string) {
+// memDevice reads the label from the latest add entry for device in log. The
+// caller's device is valid in log, so at least one add entry exists and no
+// revoke entry for it is present.
+func memDevice(log *identity.Log, device string) (name string) {
 	for _, env := range log.Entries {
 		var e proto.DeviceChange
 		proto.Decode([]byte(env.Payload), &e)
 		if e.Device == device {
-			kind, name = e.Kind, e.Name
+			name = e.Name
 		}
 	}
-	return kind, name
+	return name
 }
 
 func memAddValid(p proto.MemberAddAI) *Refusal {
@@ -88,9 +88,16 @@ func memNewAI(s *State, c Command, p proto.MemberAddAI, hostName string) proto.A
 			Group:     s.ID, Kind: "ai", User: c.Who.User, Name: p.Name, LastSeen: c.Now,
 		},
 		CLI: p.CLI, Host: c.Who.Device, HostName: hostName, Secretary: p.Secretary,
-		Account: p.Account, Allow: []string{}, Approvers: p.Approvers,
+		Account: p.Account, Allow: []string{}, Approvers: memApprovers(c.Who.User, p.Approvers),
 		State: "dormant", Since: c.Now, Path: path, Usage: proto.Usage{},
 	}
+}
+
+func memApprovers(owner string, list []string) []string {
+	if slices.Contains(list, owner) {
+		return list
+	}
+	return append([]string{owner}, list...)
 }
 
 func (s *State) memJoinedRows(ai proto.AIMemberRow) []Row {
@@ -153,7 +160,11 @@ func (s *State) memMaySet(w Who, ai proto.AIMemberRow, p proto.MemberSet) bool {
 	if w.AI == "" && w.User == ai.User {
 		return true
 	}
-	return s.Hosts(w, ai.ID) && [3]bool{p.Name == nil, p.Account == nil, p.Allow == nil} == [3]bool{true, true, true}
+	return s.Hosts(w, ai.ID) && memApproversOnly(p)
+}
+
+func memApproversOnly(p proto.MemberSet) bool {
+	return p.Name == nil && p.Account == nil && p.Allow == nil
 }
 
 func (s *State) memFinishSet(ai proto.AIMemberRow, p proto.MemberSet) (Result, *Refusal) {
@@ -167,7 +178,9 @@ func memUpdated(ai proto.AIMemberRow, p proto.MemberSet) proto.AIMemberRow {
 	grpSetOpt(&ai.Name, p.Name)
 	grpSetOpt(&ai.Account, p.Account)
 	grpSetOpt(&ai.Allow, p.Allow)
-	grpSetOpt(&ai.Approvers, p.Approvers)
+	if p.Approvers != nil {
+		ai.Approvers = memApprovers(ai.User, *p.Approvers)
+	}
 	return ai
 }
 
@@ -188,19 +201,16 @@ func memRemove(s *State, c Command) (Result, *Refusal) {
 	if s.memBusy(ai.ID) {
 		return Result{}, &Refusal{"conflict", "the AI has an unfinished task"}
 	}
-	return s.memRemoved(c, ai.ID)
+	return s.memRemoved(c, ai.ID), nil
 }
 
 func (s *State) memMayRemove(w Who, ai proto.AIMemberRow) bool {
 	return w.AI == "" && w.User == ai.User || s.Admin(w)
 }
 
-func (s *State) memRemoved(c Command, id string) (Result, *Refusal) {
+func (s *State) memRemoved(c Command, id string) Result {
 	rows := []Row{RowOf(proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: id}, Gone: true})}
 	if s.Group.Secretary == id {
-		if _, taken := c.Disk.Msg(string(c.Nonce)); taken {
-			return Result{}, &Refusal{"conflict", "a message with the id of no_secretary exists"}
-		}
 		group := s.Group
 		group.Secretary = ""
 		msg := proto.MsgRow{
@@ -209,7 +219,7 @@ func (s *State) memRemoved(c Command, id string) (Result, *Refusal) {
 		}
 		rows = append(rows, RowOf(group), RowOf(msg))
 	}
-	return Result{Rows: rows, Retire: memRetired(c.Disk, id)}, nil
+	return Result{Rows: rows, Retire: memRetired(c.Disk, id)}
 }
 
 func memRetired(d Disk, ai string) []int64 {
