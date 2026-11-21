@@ -11,8 +11,8 @@ with each call (`_meta`), which the node may compare.
 Conventions:
 
 - Members are named by their display name, unique in the group (`"Codex"`).
-  Tasks are named `"T-12"`. An unknown name returns an error that lists the
-  valid ones.
+  Tasks are named `"T-12"`. An unknown name returns a `not_found` error that
+  lists the valid ones.
 - In a task or review session the task is the session's own and is not an
   argument. Where a tool takes `task` it is optional and defaults to that
   task; in a group session it must be given.
@@ -55,20 +55,6 @@ Notes:
 
 - `post` is the only way an AI speaks in the group. What the model prints
   outside tool calls stays in its own session.
-- An unknown member name or task name fails with `not_found`, listing the
-  group's valid names.
-- `list_members` orders entries by `name`: AI rows include `state`, `host`
-  (`host_name`, or `host` when empty), `account`, `task` (`"T-<num>"`,
-  omitted when unset) and `usage` (`{}` when empty); human rows include
-  `state` (`online` or `offline` from `online`) and omit the AI-only fields.
-- `list_tasks` orders entries by `num` (`T-1`, `T-2`, …), omits `reviewer`
-  when unset, sets `wait` to `wait.kind` or `null`, and sets `idle_minutes`
-  to `0` for finished tasks (`merged`, `cancelled`) and to whole minutes
-  elapsed since `thread.last.ts` (or `stats.started`) otherwise.
-- `note_put` defaults an omitted `task` to the session's task in task and
-  review sessions and to `null` in group sessions. `note_list` returns all
-  notes of the group when `task` is omitted and filters to that task when
-  given, formatting each note's `task` as `"T-<num>"` or `null`.
 - `ask` returns within `limits.ask_wait_s` (45 seconds) in every case.
 - `run_checks` may run for a long time, and the call stays open until the
   checks end. Claude Code kept a call of 600 seconds in the foreground,

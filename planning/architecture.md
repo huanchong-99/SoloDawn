@@ -74,8 +74,8 @@ for the groups it is home to.
 - Accepts signed commands from clients, checks who may do what, applies them,
   and assigns each changed row the next sequence number of the group.
 - Pushes changed rows to connected clients and answers history queries.
-- Decides which AI must be woken by which message and queues a signed item
-  in that AI's inbox.
+- Decides which AI must be woken by which message and queues an item in
+  that AI's inbox.
 - Runs the task state machine and the group-level limits (rounds, wake-ups,
   failure counts, review rounds, pause).
 - When checks and review have passed, tells the assignee's host to merge. No

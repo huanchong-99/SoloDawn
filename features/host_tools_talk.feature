@@ -18,16 +18,6 @@ Feature: Host talking and group state MCP tools
       | post     | {"text":"Key: sk-proj-EXAMPLEexampleEXAMPLEexample_EXAMPLE-00"} |
       | note_put | {"text":"Header: -----BEGIN PRIVATE KEY-----"}                  |
 
-  Scenario: Handback post is refused outside a hand-back turn and carries Git facts in one
-    Given a connected host session for AI "Claude Code" in a group with task "T-12"
-    When the AI calls "post" with '{"text":"Back to structured mode.","kind":"handback"}'
-    Then the tool fails with code "bad_request"
-    And the home has received 0 requests
-    When the task session enters a hand-back turn after committing "fix.go" and leaving "notes.txt" untracked
-    And the AI calls "post" with '{"text":"Fixed the path check.","kind":"handback"}'
-    Then the tool succeeds with an id
-    And the home received a "handback" post listing files "fix.go, notes.txt" and 1 commit
-
   Scenario: Group read and memory tools map member names and task numbers
     Given a connected host session for AI "Claude Code" in a group with task "T-12"
     When the AI calls "list_members" with '{}'

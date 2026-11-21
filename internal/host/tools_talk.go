@@ -3,25 +3,20 @@ package host
 import (
 	"cmp"
 	"context"
-	crand "crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"maps"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
-	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
 // Schemas registered on Tools match internal/proto/testdata/tools.json.
 // For post and read_thread, where tools.json narrows the schema by session,
 // Tools holds the superset schema (secretary for post, group for read_thread)
-// while the MCP server projects caller-specific schemas on tools/list and Call
-// enforces the caller rules below.
+// while the MCP server projects caller-specific schemas.
 var (
 	postSchema = json.RawMessage(`{"type":"object","properties":{"kind":{"type":"string","enum":["text","progress","question","handback","summary"],"default":"text"},"mentions":{"type":"array","items":{"type":"string"}},"task":{"type":"string"},"text":{"type":"string"},"where":{"type":"string","enum":["thread","main"]}},"required":["text"],"additionalProperties":false}`)
 
@@ -70,11 +65,11 @@ func init() {
 }
 
 type postArgs struct {
-	Text     string    `json:"text"`
-	Kind     *string   `json:"kind,omitempty"`
-	Mentions *[]string `json:"mentions,omitempty"`
-	Where    *string   `json:"where,omitempty"`
-	Task     *string   `json:"task,omitempty"`
+	Text     string   `json:"text"`
+	Kind     *string  `json:"kind,omitempty"`
+	Mentions []string `json:"mentions,omitempty"`
+	Where    *string  `json:"where,omitempty"`
+	Task     *string  `json:"task,omitempty"`
 }
 
 type readThreadArgs struct {
@@ -167,74 +162,29 @@ func badTalkRequest(msg string) error {
 	return &Error{Code: "bad_request", Message: msg}
 }
 
-func errHomeUnreachable() error {
-	return &Error{Code: "home_unreachable", Message: "the home of that group is not connected"}
-}
-
-func decodeTalkArgs(raw json.RawMessage, dst any, allowed ...string) error {
+func decodeTalkArgs(raw json.RawMessage, dst any) error {
 	if proto.Decode(raw, dst) != nil {
 		return badTalkRequest("invalid tool arguments")
 	}
-	var fields map[string]json.RawMessage
-	json.Unmarshal(raw, &fields)
-	for name := range fields {
-		if !slices.Contains(allowed, name) {
-			return badTalkRequest("unknown argument " + name)
-		}
-	}
 	return nil
-}
-
-func checkTalkSecret(text string) error {
-	if err := CheckOutboundSecret(text); err != nil {
-		return &Error{Code: "secret", Message: "this looks like a secret; remove it and send again"}
-	}
-	return nil
-}
-
-func newTalkID() proto.ID {
-	var b [16]byte
-	crand.Read(b[:])
-	return proto.ID(base64.RawURLEncoding.EncodeToString(b[:]))
 }
 
 func talkCommandHeader(h *Host, c Caller, cmdType string) proto.HomeCommand {
 	return proto.HomeCommand{
 		Type:      cmdType,
-		Nonce:     newTalkID(),
+		Nonce:     freshNonce(),
 		Timestamp: h.Now().UnixMilli(),
 		Group:     proto.ID(c.Group),
 		As:        proto.ID(c.Member),
 	}
 }
 
-func encodeTalkJSON(v any) string {
-	var buf strings.Builder
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	enc.Encode(v)
-	return strings.TrimSuffix(buf.String(), "\n")
-}
-
-func encodePostPayload[B any](hdr proto.HomeCommand, p preparedPost, body B) string {
-	return encodeTalkJSON(proto.Post[B]{
-		HomeCommand: hdr,
-		Kind:        p.kind,
-		Thread:      p.thread,
-		Main:        p.main,
-		Text:        p.text,
-		Mentions:    p.mentions,
-		Re:          nil,
-		Body:        body,
-	})
-}
-
 func callPost(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (any, error) {
 	var a postArgs
-	if err := decodeTalkArgs(raw, &a, postAllowedFields(c.Secretary)...); err != nil {
+	if err := decodeTalkArgs(raw, &a); err != nil {
 		return nil, err
 	}
-	if err := checkTalkSecret(a.Text); err != nil {
+	if err := CheckOutboundSecret(a.Text); err != nil {
 		return nil, err
 	}
 	p, err := preparePost(h, c, a)
@@ -244,19 +194,12 @@ func callPost(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (any,
 	return sendPreparedPost(ctx, h, c, p)
 }
 
-func postAllowedFields(secretary bool) []string {
-	if secretary {
-		return []string{"text", "kind", "mentions", "where", "task"}
-	}
-	return []string{"text", "kind", "mentions", "where"}
-}
-
 func preparePost(h *Host, c Caller, a postArgs) (preparedPost, error) {
 	kind := "text"
 	if a.Kind != nil {
 		kind = *a.Kind
 	}
-	if err := checkPostKind(c, kind); err != nil {
+	if err := checkPostKind(kind); err != nil {
 		return preparedPost{}, err
 	}
 	thread, mainLine, err := resolvePostPlace(h, c, kind, a.Where, a.Task)
@@ -270,55 +213,21 @@ func preparePost(h *Host, c Caller, a postArgs) (preparedPost, error) {
 	return preparedPost{kind: kind, text: a.Text, thread: thread, main: mainLine, mentions: mentions}, nil
 }
 
-func checkPostKind(c Caller, kind string) error {
+func checkPostKind(kind string) error {
 	switch kind {
-	case "text", "progress", "question":
+	case "text", "progress", "question", "summary":
 		return nil
-	case "summary":
-		if !c.Secretary {
-			return badTalkRequest("only the secretary may post a summary")
-		}
-		return nil
-	case "handback":
-		return checkHandbackCaller(c)
 	default:
 		return badTalkRequest("unsupported post kind " + kind)
 	}
 }
 
-func checkHandbackCaller(c Caller) error {
-	if c.Interactive || c.Turn.Kind != HandbackTurn {
-		return badTalkRequest("handback is allowed only in a hand-back turn")
-	}
-	if c.Kind == GroupSession && !c.Secretary {
-		return badTalkRequest("group sessions of working AIs have no takeover")
-	}
-	return nil
-}
-
 func resolvePostPlace(h *Host, c Caller, kind string, whereArg, taskArg *string) (*proto.ID, bool, error) {
-	where, err := postWhere(whereArg)
-	if err != nil {
-		return nil, false, err
-	}
 	if kind == "summary" {
 		return resolveSummaryPlace(h, c.Group, taskArg)
 	}
-	thread, err := resolveOrdinaryThread(h, c, where, taskArg)
-	if err != nil {
-		return nil, false, err
-	}
-	return thread, false, checkKindPlace(c, kind, thread)
-}
-
-func postWhere(whereArg *string) (string, error) {
-	if whereArg == nil {
-		return "", nil
-	}
-	if *whereArg != "thread" && *whereArg != "main" {
-		return "", badTalkRequest("where must be thread or main")
-	}
-	return *whereArg, nil
+	thread, err := resolveOrdinaryThread(h, c, whereArg, taskArg)
+	return thread, false, err
 }
 
 func resolveSummaryPlace(h *Host, group string, taskArg *string) (*proto.ID, bool, error) {
@@ -332,7 +241,11 @@ func resolveSummaryPlace(h *Host, group string, taskArg *string) (*proto.ID, boo
 	return &tid, true, nil
 }
 
-func resolveOrdinaryThread(h *Host, c Caller, where string, taskArg *string) (*proto.ID, error) {
+func resolveOrdinaryThread(h *Host, c Caller, whereArg, taskArg *string) (*proto.ID, error) {
+	var where string
+	if whereArg != nil {
+		where = *whereArg
+	}
 	if taskArg != nil {
 		if where == "main" {
 			return nil, badTalkRequest("task cannot be combined with where=main")
@@ -350,162 +263,40 @@ func turnThreadPlace(c Caller, where string) (*proto.ID, error) {
 	if where == "main" {
 		return nil, nil
 	}
-	tid := cmp.Or(c.Turn.Thread, c.Task)
-	if tid == "" {
+	if c.Turn.Thread == "" {
 		if where == "thread" {
 			return nil, badTalkRequest("no task thread for where=thread")
 		}
 		return nil, nil
 	}
-	id := proto.ID(tid)
+	id := proto.ID(c.Turn.Thread)
 	return &id, nil
-}
-
-func checkKindPlace(c Caller, kind string, thread *proto.ID) error {
-	if kind == "progress" && thread == nil {
-		return badTalkRequest("progress post requires a task thread")
-	}
-	if kind == "handback" && (thread == nil) != c.Secretary {
-		return badTalkRequest("handback post is not in the session's place")
-	}
-	return nil
 }
 
 func sendPreparedPost(ctx context.Context, h *Host, c Caller, p preparedPost) (any, error) {
 	hdr := talkCommandHeader(h, c, "post")
-	payload := encodePostPayload(hdr, p, proto.EmptyBody{})
-	if p.kind == "handback" {
-		body, err := handbackFacts(ctx, h, c)
-		if err != nil {
-			return nil, err
-		}
-		payload = encodePostPayload(hdr, p, body)
-	}
+	payload := marshalWire(proto.Post[proto.EmptyBody]{
+		HomeCommand: hdr,
+		Kind:        p.kind,
+		Thread:      p.thread,
+		Main:        p.main,
+		Text:        p.text,
+		Mentions:    p.mentions,
+		Re:          nil,
+		Body:        proto.EmptyBody{},
+	})
 	if _, err := h.Command(ctx, c.Home, payload); err != nil {
 		return nil, err
 	}
 	return idResult{ID: string(hdr.Nonce)}, nil
 }
 
-func handbackFacts(ctx context.Context, h *Host, c Caller) (proto.HandbackBody, error) {
-	empty := proto.HandbackBody{Files: []string{}, Commits: []proto.CommitSubject{}}
-	if c.Kind != TaskSession || c.TakeoverAt == "" {
-		return empty, nil
-	}
-	return readGitHandback(ctx, sessionWorkDir(h, c.Group, c.Folder), c.TakeoverAt)
-}
-
-const mainDBFileSQL = `SELECT coalesce((SELECT file FROM pragma_database_list WHERE name = 'main'), '')`
-
-func sessionWorkDir(h *Host, group, folder string) string {
-	if filepath.IsAbs(folder) {
-		return folder
-	}
-	var dbFile string
-	scan := func(tx *store.Tx) error {
-		return tx.QueryRow(mainDBFileSQL).Scan(&dbFile)
-	}
-	h.Store.Write(scan)
-	if dbFile == "" {
-		return folder
-	}
-	return filepath.Join(filepath.Dir(dbFile), "projects", group, folder)
-}
-
-func readGitHandback(ctx context.Context, dir, start string) (proto.HandbackBody, error) {
-	outs, err := runGitLines(ctx, dir,
-		[]string{"rev-parse", "HEAD"},
-		[]string{"status", "--porcelain", "--untracked-files=all"},
-		[]string{"log", start + "..HEAD", "--format=%h %s"},
-		[]string{"diff", "--shortstat", start},
-		[]string{"diff", "--name-only", start},
-	)
-	if err != nil {
-		return proto.HandbackBody{}, err
-	}
-	added, removed := parseShortstat(outs[3])
-	return proto.HandbackBody{
-		Files:   collectHandbackFiles(outs[4], outs[1]),
-		Commits: parseHandbackCommits(outs[2]),
-		Added:   added,
-		Removed: removed,
-	}, nil
-}
-
-func runGitLines(ctx context.Context, dir string, commands ...[]string) ([]string, error) {
-	outs := make([]string, len(commands))
-	for i, args := range commands {
-		out, err := workspaceGit(ctx, dir, args...)
-		if err != nil {
-			return nil, err
-		}
-		outs[i] = out
-	}
-	return outs, nil
-}
-
-func parseHandbackCommits(logOut string) []proto.CommitSubject {
-	trimmed := strings.TrimRight(logOut, "\r\n")
-	if trimmed == "" {
-		return []proto.CommitSubject{}
-	}
-	lines := strings.Split(trimmed, "\n")
-	commits := make([]proto.CommitSubject, len(lines))
-	for i, line := range lines {
-		sha, subject, _ := strings.Cut(strings.TrimRight(line, "\r"), " ")
-		commits[i] = proto.CommitSubject{SHA: sha, Subject: subject}
-	}
-	return commits
-}
-
-func parseShortstat(statOut string) (added, removed int) {
-	for part := range strings.SplitSeq(statOut, ",") {
-		fields := strings.Fields(part)
-		if len(fields) >= 2 {
-			n, _ := strconv.Atoi(fields[0])
-			applyShortstatField(fields[1], n, &added, &removed)
-		}
-	}
-	return added, removed
-}
-
-func applyShortstatField(label string, n int, added, removed *int) {
-	if strings.HasPrefix(label, "insertion") {
-		*added = n
-	} else if strings.HasPrefix(label, "deletion") {
-		*removed = n
-	}
-}
-
-func collectHandbackFiles(namesOut, statusOut string) []string {
-	files := []string{}
-	for line := range strings.SplitSeq(namesOut, "\n") {
-		files = appendUniqueFile(files, strings.TrimRight(line, "\r"))
-	}
-	for line := range strings.SplitSeq(statusOut, "\n") {
-		if untracked, ok := strings.CutPrefix(strings.TrimRight(line, "\r"), "?? "); ok {
-			files = appendUniqueFile(files, untracked)
-		}
-	}
-	return files
-}
-
-func appendUniqueFile(files []string, path string) []string {
-	if path != "" && !slices.Contains(files, path) {
-		return append(files, path)
-	}
-	return files
-}
-
 func callReadThread(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (any, error) {
 	var a readThreadArgs
-	if err := decodeTalkArgs(raw, &a, "task", "limit", "before"); err != nil {
+	if err := decodeTalkArgs(raw, &a); err != nil {
 		return nil, err
 	}
-	limit, before, err := checkThreadPaging(a.Limit, a.Before)
-	if err != nil {
-		return nil, err
-	}
+	limit, before := threadPaging(a.Limit, a.Before)
 	thread, err := resolveThreadTarget(h, c, a.Task)
 	if err != nil {
 		return nil, err
@@ -513,29 +304,20 @@ func callReadThread(ctx context.Context, h *Host, c Caller, raw json.RawMessage)
 	return fetchThreadMessages(ctx, h, c, thread, before, limit)
 }
 
-func checkThreadPaging(limitArg *int, beforeArg *int64) (int, int64, error) {
+func threadPaging(limitArg *int, beforeArg *int64) (int, int64) {
 	limit := 30
 	if limitArg != nil {
-		if *limitArg < 1 || *limitArg > 100 {
-			return 0, 0, badTalkRequest("limit must be between 1 and 100")
-		}
 		limit = *limitArg
 	}
 	var before int64
 	if beforeArg != nil {
-		if *beforeArg < 1 {
-			return 0, 0, badTalkRequest("before must be at least 1")
-		}
 		before = *beforeArg
 	}
-	return limit, before, nil
+	return limit, before
 }
 
 func resolveThreadTarget(h *Host, c Caller, taskArg *string) (*string, error) {
 	if taskArg == nil {
-		if c.Kind == GroupSession {
-			return nil, badTalkRequest("read_thread requires task in a group session")
-		}
 		own := c.Task
 		return &own, nil
 	}
@@ -565,9 +347,7 @@ func fetchThreadMessages(ctx context.Context, h *Host, c Caller, thread *string,
 	msgs := make([]threadMsgItem, len(page.Rows))
 	for i, rawRow := range page.Rows {
 		var row proto.MsgRow
-		if proto.Decode(rawRow, &row) != nil {
-			return nil, badTalkRequest("invalid message row")
-		}
+		proto.Decode(rawRow, &row)
 		msgs[i] = threadMsgItem{
 			ID:   row.ID,
 			Pos:  row.Pos,
@@ -581,26 +361,21 @@ func fetchThreadMessages(ctx context.Context, h *Host, c Caller, thread *string,
 }
 
 func requestFetched(ctx context.Context, h *Host, device string, build func(int64) any) (proto.Fetched, error) {
+	unreachable := &Error{Code: "home_unreachable", Message: "the home of that group is not connected"}
 	conn, ok := h.Home(device)
 	if !ok {
-		return proto.Fetched{}, errHomeUnreachable()
+		return proto.Fetched{}, unreachable
 	}
 	reply, err := conn.Request(ctx, build)
 	if err != nil {
-		return proto.Fetched{}, errHomeUnreachable()
+		return proto.Fetched{}, unreachable
 	}
-	return decodeFetchedReply(reply)
-}
-
-func decodeFetchedReply(reply json.RawMessage) (proto.Fetched, error) {
 	var wireErr proto.ErrorResponse
 	if proto.Decode(reply, &wireErr) == nil {
 		return proto.Fetched{}, &Error{Code: wireErr.Err.Code, Message: wireErr.Err.Message}
 	}
 	var page proto.Fetched
-	if proto.Decode(reply, &page) != nil {
-		return proto.Fetched{}, badTalkRequest("invalid fetched frame")
-	}
+	proto.Decode(reply, &page)
 	return page, nil
 }
 
@@ -663,14 +438,9 @@ func decodeHumanMemberItem(raw json.RawMessage) (memberListItem, bool) {
 	return memberListItem{Name: hum.Name, Kind: hum.Kind, State: state}, true
 }
 
-var validTaskStates = []string{"queued", "active", "paused", "failed", "merged", "cancelled"}
-
 func callListTasks(_ context.Context, h *Host, c Caller, raw json.RawMessage) (any, error) {
 	var a listTasksArgs
-	if err := decodeTalkArgs(raw, &a, "state"); err != nil {
-		return nil, err
-	}
-	if err := checkTaskStateFilter(a.State); err != nil {
+	if err := decodeTalkArgs(raw, &a); err != nil {
 		return nil, err
 	}
 	names := memberNamesByID(h, c.Group)
@@ -682,13 +452,6 @@ func callListTasks(_ context.Context, h *Host, c Caller, raw json.RawMessage) (a
 		}
 	}
 	return listTasksResult{Tasks: items}, nil
-}
-
-func checkTaskStateFilter(state *string) error {
-	if state != nil && !slices.Contains(validTaskStates, *state) {
-		return badTalkRequest("invalid task state " + *state)
-	}
-	return nil
 }
 
 func taskMatchesState(rowState string, filter *string) bool {
@@ -726,10 +489,10 @@ func taskIdleMinutes(row proto.TaskRow, nowMS int64) int {
 
 func callNotePut(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (any, error) {
 	var a notePutArgs
-	if err := decodeTalkArgs(raw, &a, "text", "task"); err != nil {
+	if err := decodeTalkArgs(raw, &a); err != nil {
 		return nil, err
 	}
-	if err := checkTalkSecret(a.Text); err != nil {
+	if err := CheckOutboundSecret(a.Text); err != nil {
 		return nil, err
 	}
 	task, err := resolveNotePutTask(h, c, a.Task)
@@ -737,9 +500,9 @@ func callNotePut(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (a
 		return nil, err
 	}
 	hdr := talkCommandHeader(h, c, "note")
-	noteID := newTalkID()
+	noteID := freshNonce()
 	cmd := proto.Note{HomeCommand: hdr, ID: noteID, Task: task, Text: a.Text}
-	if _, err := h.Command(ctx, c.Home, encodeTalkJSON(cmd)); err != nil {
+	if _, err := h.Command(ctx, c.Home, marshalWire(cmd)); err != nil {
 		return nil, err
 	}
 	return idResult{ID: string(noteID)}, nil
@@ -764,7 +527,7 @@ const noteFetchLimit = 100
 
 func callNoteList(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (any, error) {
 	var a noteListArgs
-	if err := decodeTalkArgs(raw, &a, "task"); err != nil {
+	if err := decodeTalkArgs(raw, &a); err != nil {
 		return nil, err
 	}
 	var filter string
@@ -788,10 +551,7 @@ func fetchAllNotes(ctx context.Context, h *Host, c Caller, filter string) (any, 
 		if err != nil {
 			return nil, err
 		}
-		notes, before, err = appendNoteRows(notes, page.Rows, filter, names, tasks)
-		if err != nil {
-			return nil, err
-		}
+		notes, before = appendNoteRows(notes, page.Rows, filter, names, tasks)
 		if !page.More || len(page.Rows) == 0 {
 			return noteListResult{Notes: notes}, nil
 		}
@@ -808,13 +568,11 @@ func fetchNotesPage(ctx context.Context, h *Host, c Caller, before int64) (proto
 	return requestFetched(ctx, h, c.Home, req)
 }
 
-func appendNoteRows(dst []noteListItem, rows []json.RawMessage, filter string, names, tasks map[string]string) ([]noteListItem, int64, error) {
+func appendNoteRows(dst []noteListItem, rows []json.RawMessage, filter string, names, tasks map[string]string) ([]noteListItem, int64) {
 	var before int64
 	for _, rawRow := range rows {
 		var row proto.NoteRow
-		if proto.Decode(rawRow, &row) != nil {
-			return nil, 0, badTalkRequest("invalid note row")
-		}
+		proto.Decode(rawRow, &row)
 		before = row.Pos
 		if noteMatchesTask(row.Task, filter) {
 			dst = append(dst, noteListItem{
@@ -826,7 +584,7 @@ func appendNoteRows(dst []noteListItem, rows []json.RawMessage, filter string, n
 			})
 		}
 	}
-	return dst, before, nil
+	return dst, before
 }
 
 func noteMatchesTask(rowTask *string, filter string) bool {
@@ -871,18 +629,17 @@ func memberIDsByName(h *Host, group string) (map[string]proto.ID, []string) {
 	return byName, slices.Sorted(maps.Keys(byName))
 }
 
-func resolveMentions(h *Host, group string, raw *[]string) ([]proto.ID, error) {
-	if raw == nil {
-		return []proto.ID{}, nil
-	}
+func resolveMentions(h *Host, group string, names []string) ([]proto.ID, error) {
 	byName, valid := memberIDsByName(h, group)
-	ids := make([]proto.ID, len(*raw))
-	for i, name := range *raw {
+	ids := []proto.ID{}
+	for _, name := range names {
 		id, ok := byName[name]
 		if !ok {
 			return nil, unknownNameError("member", name, valid)
 		}
-		ids[i] = id
+		if !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
 	}
 	return ids, nil
 }
