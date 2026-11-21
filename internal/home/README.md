@@ -170,7 +170,8 @@ and their test functions start with `TestGroup` and `TestMember`. The briefs tak
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
 The posts of HM-6 take the names that start with `post`, their tests too, and their test functions
 start with `TestPost`; the notes and `forget` take the names that start with `note`, their tests
-too, and their test functions start with `TestNote`.
+too, and their test functions start with `TestNote`. Device-log events (`ev_device.go`) take the
+names that start with `dev`, and their tests start with `TestDevice` and `dev`.
 
 ## The run loop
 
@@ -475,6 +476,15 @@ this:
   `msg` whose `kind` is not `review` is `conflict`; otherwise a `GoneRow` (`gone: true`) replaces
   it.
 
+## Device-log events
+
+`ev_device.go` registers `Events["device"]`, which receives a `[]proto.DeviceRow` slice accepted by
+the node for one person ([envelope](../../planning/contracts/envelope.md), section 4;
+[rows](../../planning/contracts/rows.md), section 2). In step 1 it ignores users other than
+`State.Owner`, appends rows whose `ver` exceeds the entries already held in `State.Logs[State.Owner]`,
+and sets `Result.GroupsChanged` when an `Online` device's access (`State.Serves`) changes between
+served and unserved.
+
 ## Known limitations
 
 - The table of commands holds the groups, members, briefs, the four kinds of `post` of HM-6, `note`
@@ -531,3 +541,6 @@ shared `mentions` rule and `UnexpectedNulls` on the rows written. `features/home
 acceptance tests A2.1 (message and item push across connected browsers and a host) and A5.14
 (retention keeping notes and review messages, and `forget` replacing them with `gone` markers) on
 `StartLoop` over an in-memory store.
+
+`ev_device_test.go` covers every branch and boundary of `Events["device"]`, including ignored event
+types, empty and non-owner slices, version boundaries and online/offline `GroupsChanged` transitions.

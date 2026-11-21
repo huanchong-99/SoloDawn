@@ -1,5 +1,5 @@
 ---
-description: 'The node assembly package: data directory, single-instance local socket and CLI subcommands, standalone rendezvous wrapper, verified self-updater, in-process local link between host and home, and the nodetest multi-node harness.'
+description: 'Assembly of the SoloDawn node: data directory, single-instance local socket, CLI subcommand dispatch, start-at-login services, verified self-update, verified device logs, the ctl session hub, the in-process local link between host and home, and the nodetest multi-node harness.'
 kind: reference
 ---
 
@@ -7,7 +7,17 @@ kind: reference
 
 ## Summary
 
-`internal/node` assembles the components of a SoloDawn node ([architecture](../../planning/architecture.md), sections 2.1 and 8). It owns the per-user data directory, the exclusive lock and owner-only local Unix socket through which CLI subcommands and MCP shims reach the running node, the standalone `rendezvous` entry that serves embedded web assets, the verified release self-updater, and the in-process `LocalLink` that connects a `*host.Host` and a `*home.Loop` on the same node without WebRTC. `internal/node/nodetest` starts in-process node clusters with built fake Claude Code and Codex binaries for integration tests.
+`internal/node` assembles the components of a SoloDawn node ([architecture](../../planning/architecture.md), section 8):
+
+- `dir.go` and `socket*.go`: per-user data directory, exclusive lock on `lock`, and owner-only local Unix socket (`sock`) carrying local CLI commands and MCP sessions ([local](../../planning/contracts/local.md), sections 2 and 3).
+- `cmd.go`: the `Subcommands` table and local command exchange.
+- `service_*.go`: start-at-login registration on macOS, Linux and Windows ([local](../../planning/contracts/local.md), section 1).
+- `update.go`: `Updater` for SHA-256-verified self-update outside running turns and takeovers ([local](../../planning/contracts/local.md), section 9).
+- `rendezvous.go`: standalone signalling, static web assets and ICE service.
+- `devlog.go`: `Logs`, loading and persisting `setting` (`key = 'owner'`, JSON-encoded string) and `device_log` for the node's owner, unowned-node adoption across split frames, forwarding accepted entries in `devlog` frames up to 61,440 bytes, and delivering accepted `device` rows to `home.Loop.Event("device", rows)` ([envelope](../../planning/contracts/envelope.md), sections 4 and 6; [datachannel](../../planning/contracts/datachannel.md), section 3.1).
+- `session.go`: `Sessions`, serving inbound `ctl` connections (`*peer.Connection` via `Ctl`), `hello` and `welcome`, the bootstrap rule before enrolment, request and push tables, delegation to `home.Loop` and `host.Surface`, and asynchronous execution with envelope checks, in-flight nonce coordination and `receipt` persistence for host commands ([datachannel](../../planning/contracts/datachannel.md), sections 2, 3, 5, 7 and 8; [commands](../../planning/contracts/commands.md), "Once only" and section 2).
+- `local.go`: `AttachLocal` and `LocalLink`, the in-process link between a `*host.Host` and a `*home.Loop` on the same node ([architecture](../../planning/architecture.md), section 2.1).
+- `nodetest/`: in-process node clusters with built fake Claude Code and Codex binaries for integration tests.
 
 ## Capabilities
 
@@ -36,8 +46,32 @@ kind: reference
 
 `nodetest.Start(t, cfg)` creates an owner key, loads a `device.key` per node, signs an owner device log enrolling the owner and every node, seeds `setting("owner")` and `device_log` in each node's SQLite store, starts `home.StartLoop` and `host.New`, and connects each node's own host and home with `AttachLocal`. Cross-node links between nodes in a cluster come with `N-2b` and `N-4`. When `Config.BinDir` is empty, `Start` builds `internal/host/fakecli/claude` and `internal/host/fakecli/codex` into `Root/bin`, prepends `BinDir` to `PATH`, and sets `SOLODAWN_FAKECLI_LOG`.
 
+## Plugging into `Sessions`
+
+Populate the maps on `*Sessions` before accepting connections:
+
+| Map | Purpose |
+| --- | --- |
+| `Requests` | `ctl` requests (`sync`, `fetch` with `Async: true`; `host.info` with `Type: "host.info"`) |
+| `Pushes` | `ctl` pushes after enrolment (`ack`) |
+| `Commands` | node-level host commands (`pair.browser`, `settings.set`); other host commands (`to` set in payload) fall back to `host.Surface` |
+
+`SessionConfig.OnAdopt` is invoked once with the adopted owner's user id when an unowned node persists its first valid adoption log (`dvlAdopt`), before forwarding `devlog` frames. `N-4` uses `OnAdopt` to restart `home.Loop` with the adopted `Owner` and start watching owner devices on the rendezvous.
+
+## Concurrency and lock order
+
+- `Sessions.cmdMu` guards `inflight` (keyed by signer and nonce) and receipt reads/writes in `Store.Write`; host command handlers run on their own goroutines outside `cmdMu`, and duplicate `(signer, nonce)` requests wait on the in-flight channel before reading the stored receipt.
+- `Logs.writeMu` serializes device-log mutations and is acquired before `Store.Write` and before `Logs.mu`; `dvlNotify` runs after `writeMu` is released.
+- `Logs.mu` (`sync.RWMutex`) guards `owner`, `log` and `onChange`; it is a leaf lock never held across `Store.Write`, `home.Loop` calls, `OnAdopt` or network writes.
+- `Sessions.mu` guards the active connection map (`conns`) and `sesConn.welcomed`; it is a leaf lock never held across `Store.Write`, `home.Loop` calls or network writes.
+- `sesConn.sendMu` serializes outbound frames on one `Ctl` connection; during `welcome` delivery it holds `sendMu` across `raw.Send(welcome)`, setting `welcomed = true` under `Sessions.mu`, reading `Logs` under `Logs.mu`, and sending the initial `devlog` frames so no `devlog` frame is forwarded ahead of `welcome`.
+
 ## Known limitations
 
+- `sync`, `fetch` and `ack` are not registered in `Sessions` until `HM-2`, `HM-3`, `HM-7` and `N-4` wire them, and `host.info`, `pair.browser` and `settings.set` are registered by `N-3` ([issues](../../issues.md)).
+- `home.Loop`'s `Owner` is fixed at `StartLoop`, so after an unowned node is adopted its running loop knows no owner until `SessionConfig.OnAdopt` (`N-4`) recreates the home loop with the adopted owner ([issues](../../issues.md)).
+- `Sessions` implements only the server side of an inbound `ctl` connection; a host's outgoing `ctl` session to a home on another node (`hello` with `kind: "host"`, `welcome`, `devlog` both ways, and pushes to `Host.Push`) is split into unit `N-2b` (`internal/node/client.go`, wired by `N-4`, needed by `I-6` / `A3.3`; [issues](../../issues.md)).
+- In step 1 `Logs` stores only the node owner's device log; keeping logs of other group members belongs to step 2.
 - `Foreground` calls a stub `startNode` until `N-4` assembles the full node runtime ([issues.md](../../issues.md)).
 - `solodawn pair` does not yet start a stopped node ([issues.md](../../issues.md)).
 - `Updater` leaves concurrency around `Busy`/`Status` and in-place `exec` restart to `N-4` ([issues.md](../../issues.md)).
