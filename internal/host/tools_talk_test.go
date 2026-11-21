@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -197,21 +195,6 @@ func findGoldenTool(t *testing.T, list proto.ToolList, name string) proto.Tool {
 	}
 	t.Fatalf("tool %q not in golden list", name)
 	return proto.Tool{}
-}
-
-func loadGoldenToolLists(t *testing.T) proto.ToolLists {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "proto", "testdata", "tools.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	var lists proto.ToolLists
-	if err := dec.Decode(&lists); err != nil {
-		t.Fatal(err)
-	}
-	return lists
 }
 
 func checkRegisteredTalkTool(t *testing.T, sec proto.ToolList, name string) {

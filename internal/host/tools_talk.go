@@ -169,16 +169,6 @@ func decodeTalkArgs(raw json.RawMessage, dst any) error {
 	return nil
 }
 
-func talkCommandHeader(h *Host, c Caller, cmdType string) proto.HomeCommand {
-	return proto.HomeCommand{
-		Type:      cmdType,
-		Nonce:     freshNonce(),
-		Timestamp: h.Now().UnixMilli(),
-		Group:     proto.ID(c.Group),
-		As:        proto.ID(c.Member),
-	}
-}
-
 func callPost(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (any, error) {
 	var a postArgs
 	if err := decodeTalkArgs(raw, &a); err != nil {
@@ -274,7 +264,7 @@ func turnThreadPlace(c Caller, where string) (*proto.ID, error) {
 }
 
 func sendPreparedPost(ctx context.Context, h *Host, c Caller, p preparedPost) (any, error) {
-	hdr := talkCommandHeader(h, c, "post")
+	hdr := secHomeHeader(h, c, "post")
 	payload := marshalWire(proto.Post[proto.EmptyBody]{
 		HomeCommand: hdr,
 		Kind:        p.kind,
@@ -499,7 +489,7 @@ func callNotePut(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (a
 	if err != nil {
 		return nil, err
 	}
-	hdr := talkCommandHeader(h, c, "note")
+	hdr := secHomeHeader(h, c, "note")
 	noteID := freshNonce()
 	cmd := proto.Note{HomeCommand: hdr, ID: noteID, Task: task, Text: a.Text}
 	if _, err := h.Command(ctx, c.Home, marshalWire(cmd)); err != nil {
