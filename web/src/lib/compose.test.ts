@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  actTextLimit,
   complete,
   fill,
+  jsonBytes,
   matching,
   mentioned,
   nearLimit,
@@ -253,6 +255,17 @@ describe('the size of a row', () => {
     expect(room('中'.repeat(2700))).toBe('over');
     expect(room('\n' + 'a'.repeat(5802), 1)).toBe('near');
     expect(room('\n' + 'a'.repeat(5801), 1)).toBe('ok');
+  });
+
+  it('measures a JSON string in UTF-8 bytes against the 1 KiB act text limit', () => {
+    expect(actTextLimit).toBe(1024);
+    expect(jsonBytes('')).toBe(2);
+    expect(jsonBytes('abc')).toBe(5);
+    expect(jsonBytes('"')).toBe(4);
+    expect(jsonBytes('\n')).toBe(4);
+    expect(jsonBytes('中')).toBe(5);
+    expect(jsonBytes('a'.repeat(1022))).toBe(actTextLimit);
+    expect(jsonBytes('a'.repeat(1023))).toBe(actTextLimit + 1);
   });
 });
 

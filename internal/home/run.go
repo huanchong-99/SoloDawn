@@ -60,9 +60,10 @@ func NodeTables() Tables {
 // caller of Cmd. So none of the three may wait for a lock that is held
 // around a call of Attach, Sync, Close or Cmd, and none may call those.
 type LoopConfig struct {
-	Store *store.Store
-	Home  string // this node's device id
-	Owner string // the user id of this node's owner
+	Store   *store.Store
+	Home    string        // this node's device id
+	Owner   string        // the user id of this node's owner when OwnerFn is nil
+	OwnerFn func() string // dynamic owner user id; overrides Owner when non-nil
 	// Logs returns the node's verified device log of a person, as a value
 	// that nothing else reads or writes from then on, or nil when the node
 	// holds none. The loop asks for the owner's log for every group.
@@ -113,6 +114,10 @@ func StartLoop(cfg LoopConfig) (*Loop, error) {
 }
 
 func runDefaults(cfg LoopConfig) LoopConfig {
+	if cfg.OwnerFn == nil {
+		owner := cfg.Owner
+		cfg.OwnerFn = func() string { return owner }
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -172,15 +177,16 @@ func (l *Loop) spawn(s *State) *runGroup {
 // fresh is the state of a group before its rows: the owner's log is all it
 // knows.
 func (l *Loop) fresh(group string) *State {
-	s := NewState(group, l.cfg.Home, l.cfg.Owner)
+	s := NewState(group, l.cfg.Home, l.cfg.OwnerFn())
 	l.adopt(s)
 	return s
 }
 
 // adopt gives a state the owner's log as the node holds it now.
 func (l *Loop) adopt(s *State) {
-	if log := l.cfg.Logs(l.cfg.Owner); log != nil {
-		s.Logs[l.cfg.Owner] = log
+	owner := l.cfg.OwnerFn()
+	if log := l.cfg.Logs(owner); log != nil {
+		s.Logs[owner] = log
 	}
 }
 
@@ -195,7 +201,7 @@ func (l *Loop) route(group string, job func(g *runGroup)) {
 	}
 	g := l.groups[group]
 	if g == nil {
-		g = l.spawn(NewState(group, l.cfg.Home, l.cfg.Owner))
+		g = l.spawn(NewState(group, l.cfg.Home, l.cfg.OwnerFn()))
 		g.jobs.push(func() { l.adopt(g.state) }) // not under l.mu: Logs is the node's code
 	}
 	g.jobs.push(func() { job(g) })

@@ -6,7 +6,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"maps"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -57,13 +60,16 @@ type SessionConfig struct {
 // Lock order: cmdMu -> Store.Write; sesConn.sendMu -> mu -> Logs.mu; mu is a
 // leaf lock guarding conns and sesConn.welcomed.
 type Sessions struct {
-	Requests  map[string]RequestHandler
-	Pushes    map[string]PushHandler
-	Commands  map[string]CmdFunc
-	cfg       SessionConfig
-	cmdMu, mu sync.Mutex
-	inflight  map[string]chan struct{}
-	conns     map[*sesConn]bool
+	Requests    map[string]RequestHandler
+	Pushes      map[string]PushHandler
+	Commands    map[string]CmdFunc
+	Replays     map[string]CmdFunc
+	cfg         SessionConfig
+	cmdMu, mu   sync.Mutex
+	inflight    map[string]chan struct{}
+	conns       map[*sesConn]bool
+	onPairHello func(*sesConn)
+	onPairAdopt func(*sesConn)
 }
 
 type sesConn struct {
@@ -84,13 +90,22 @@ type sesWelcome struct {
 // NewSessions constructs a ctl session hub and wires device-log notifications.
 func NewSessions(cfg SessionConfig) *Sessions {
 	s := &Sessions{
-		Requests: map[string]RequestHandler{}, Pushes: map[string]PushHandler{}, Commands: map[string]CmdFunc{},
+		Requests: map[string]RequestHandler{}, Pushes: map[string]PushHandler{},
+		Commands: map[string]CmdFunc{}, Replays: map[string]CmdFunc{},
 		cfg: sesDefaultConfig(cfg), inflight: map[string]chan struct{}{}, conns: map[*sesConn]bool{},
 	}
+	s.Requests["sync"] = RequestHandler{Async: true, Run: s.sesSync}
+	s.Requests["fetch"] = RequestHandler{Async: true, Run: s.sesFetch}
 	cfg.Logs.mu.Lock()
 	cfg.Logs.onChange = s.sesLogChanged
 	cfg.Logs.mu.Unlock()
 	return s
+}
+
+func (s *Sessions) sesConns() []*sesConn {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Collect(maps.Keys(s.conns))
 }
 
 func sesDefaultConfig(cfg SessionConfig) SessionConfig {
@@ -135,7 +150,20 @@ func (s *Sessions) sesLeave(c *sesConn) {
 	c.raw.Close()
 }
 
-func (s *Sessions) sesDispatch(ctx context.Context, c *sesConn, data json.RawMessage) {
+func (s *Sessions) statusLines() []string {
+	s.mu.Lock()
+	var lines []string
+	for c := range s.conns {
+		if c.welcomed {
+			lines = append(lines, fmt.Sprintf("connection %s %s", c.device, cmp.Or(c.raw.Path(), "unknown")))
+		}
+	}
+	s.mu.Unlock()
+	slices.Sort(lines)
+	return lines
+}
+
+func sesOpenFrame(c *sesConn, data json.RawMessage) (string, *int64, bool) {
 	var f struct {
 		Type *string `json:"t,omitempty"`
 		ID   *int64  `json:"id,omitempty"`
@@ -143,13 +171,21 @@ func (s *Sessions) sesDispatch(ctx context.Context, c *sesConn, data json.RawMes
 	}
 	if proto.Decode(data, &f) != nil || f.Type == nil || f.Re != nil {
 		c.sesRefuse(data)
+		return "", nil, false
+	}
+	return *f.Type, f.ID, true
+}
+
+func (s *Sessions) sesDispatch(ctx context.Context, c *sesConn, data json.RawMessage) {
+	typ, id, ok := sesOpenFrame(c, data)
+	if !ok {
 		return
 	}
-	if f.ID == nil {
-		s.sesPush(ctx, c, *f.Type, data)
+	if id == nil {
+		s.sesPush(ctx, c, typ, data)
 		return
 	}
-	s.sesRequest(ctx, c, *f.ID, *f.Type, data)
+	s.sesRequest(ctx, c, *id, typ, data)
 }
 
 func (s *Sessions) sesPush(ctx context.Context, c *sesConn, typ string, data json.RawMessage) {
@@ -199,9 +235,27 @@ func (s *Sessions) sesRunRequest(ctx context.Context, c *sesConn, id int64, typ 
 		return
 	}
 	res, err := h.Run(ctx, c.home, c.raw, c.device, id, data)
-	if !h.Async {
+	if !h.Async || err != nil {
 		s.sesReply(c, id, h.Type, res, err)
 	}
+}
+
+func (s *Sessions) sesSync(_ context.Context, conn *home.Conn, _ Ctl, _ string, _ int64, data json.RawMessage) (any, error) {
+	var req proto.Sync
+	if proto.Decode(data, &req) != nil {
+		return nil, &host.Error{Code: "bad_request", Message: "invalid sync frame"}
+	}
+	s.cfg.Home.Sync(conn, req)
+	return nil, nil
+}
+
+func (s *Sessions) sesFetch(_ context.Context, conn *home.Conn, _ Ctl, _ string, _ int64, data json.RawMessage) (any, error) {
+	var req home.Fetch
+	if proto.Decode(data, &req) != nil {
+		return nil, &host.Error{Code: "bad_request", Message: "invalid fetch frame"}
+	}
+	s.cfg.Home.Fetch(conn, req)
+	return nil, nil
 }
 
 func (s *Sessions) sesEnrolled(c *sesConn) bool {
@@ -219,6 +273,7 @@ func (s *Sessions) sesHello(ctx context.Context, c *sesConn, id int64, data json
 	}
 	sent := make(chan struct{})
 	base := s.sesWelcomeBase(id, c.device)
+	s.sesBeforeWelcome(c)
 	onSent := func() []proto.Devlog {
 		s.mu.Lock()
 		c.welcomed = true
@@ -234,6 +289,12 @@ func (s *Sessions) sesHello(ctx context.Context, c *sesConn, id int64, data json
 	sesWaitWelcome(ctx, sent, c.home.Gone())
 	if h.Kind == "host" {
 		s.cfg.Home.Inbox(c.home)
+	}
+}
+
+func (s *Sessions) sesBeforeWelcome(c *sesConn) {
+	if c.paired && s.onPairHello != nil {
+		s.onPairHello(c)
 	}
 }
 
@@ -310,7 +371,7 @@ func (s *Sessions) sesHostCmd(ctx context.Context, c *sesConn, id int64, env pro
 		return
 	}
 	if done == nil {
-		sesReplayHostCmd(c, id, held)
+		s.sesReplayHostCmd(ctx, c, id, hdr.Type, env, held)
 		return
 	}
 	s.sesExecHostCmd(ctx, c, id, hdr, env, done)
@@ -374,9 +435,14 @@ func (s *Sessions) sesReadReceipt(signer, nonce string) (store.Outcome, bool, er
 	return held, found, s.cfg.Store.Write(read)
 }
 
-func sesReplayHostCmd(c *sesConn, id int64, held store.Outcome) {
+func (s *Sessions) sesReplayHostCmd(ctx context.Context, c *sesConn, id int64, typ string, env proto.Envelope, held store.Outcome) {
 	if held.Code != "" {
 		c.sendErr(id, held.Code, "the command was refused when it first arrived")
+		return
+	}
+	if fn := s.Replays[typ]; fn != nil {
+		res, err := fn(ctx, c.raw, env.Key, []byte(env.Payload))
+		s.sesReply(c, id, "", res, err)
 		return
 	}
 	c.send(proto.Success{Re: id, OK: true})
@@ -466,7 +532,7 @@ func sesAnswerFields(res any) (map[string]json.RawMessage, error) {
 	if res == nil {
 		return fields, nil
 	}
-	raw, err := dvlEncode(res)
+	raw, err := encodeCtl(res)
 	if err != nil {
 		return nil, err
 	}
