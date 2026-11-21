@@ -5,6 +5,7 @@
 // active tab lock with a "-" device id, takeover and suppressed reconnect).
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { createSocket, type Socket as UdpSocket } from 'node:dgram';
 import { appendFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
@@ -123,7 +124,7 @@ interface IceServer {
 interface ProxyOptions {
   targetHttp: string;
   targetWs: string;
-  turn?: IceServer;
+  ice?: IceServer[];
   dropDirect?: boolean;
   reorderEarly?: boolean;
 }
@@ -248,11 +249,43 @@ function isNonRelayIce(rawFrame: string): boolean {
   return inner?.t === 'ice' && !(inner.cand ?? '').includes(' typ relay');
 }
 
-function injectTurnServer(rawFrame: string, turn: IceServer | undefined): string {
-  if (!turn) return rawFrame;
+/** Starts an RFC 5389 STUN Binding responder so srflx candidates gather over loopback or LAN. */
+async function startStunServer(host: string): Promise<{ url: string; close(): Promise<void> }> {
+  const sock: UdpSocket = createSocket('udp4');
+  sock.on('message', (msg, rinfo) => {
+    if (msg.length < 20 || msg.readUInt16BE(0) !== 0x0001) return;
+    const cookie = 0x2112a442;
+    const attr = Buffer.alloc(12);
+    attr.writeUInt16BE(0x0020, 0);
+    attr.writeUInt16BE(8, 2);
+    attr[4] = 0;
+    attr[5] = 0x01;
+    attr.writeUInt16BE(rinfo.port ^ (cookie >>> 16), 6);
+    const octets = rinfo.address.split('.').map(Number);
+    const ipv4 = ((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) >>> 0;
+    attr.writeUInt32BE((ipv4 ^ cookie) >>> 0, 8);
+    const hdr = Buffer.alloc(20);
+    hdr.writeUInt16BE(0x0101, 0);
+    hdr.writeUInt16BE(attr.length, 2);
+    msg.copy(hdr, 4, 4, 20);
+    sock.send(Buffer.concat([hdr, attr]), rinfo.port, rinfo.address);
+  });
+  await new Promise<void>((resolveBind, rejectBind) => {
+    sock.once('error', rejectBind);
+    sock.bind(0, host, () => resolveBind());
+  });
+  const { port } = sock.address();
+  return {
+    url: `stun:${host}:${port}`,
+    close: () => new Promise<void>((done) => sock.close(() => done())),
+  };
+}
+
+function injectIceServers(rawFrame: string, extra: IceServer[] | undefined): string {
+  if (!extra?.length) return rawFrame;
   const parsed = JSON.parse(rawFrame) as { t?: string; ice?: IceServer[]; ttl?: number };
   if (parsed.t !== 'ready' && parsed.t !== 'ice') return rawFrame;
-  return JSON.stringify({ ...parsed, ice: [...(parsed.ice ?? []), turn] });
+  return JSON.stringify({ ...parsed, ice: [...(parsed.ice ?? []), ...extra] });
 }
 
 /** Starts a local HTTP and WebSocket proxy in front of a real solodawn rendezvous server. */
@@ -355,7 +388,7 @@ async function startProxy(opts: ProxyOptions): Promise<ProxyHandle> {
     });
 
     upstream.addEventListener('message', (ev) => {
-      const raw = injectTurnServer(String(ev.data), opts.turn);
+      const raw = injectIceServers(String(ev.data), opts.ice);
       if (opts.dropDirect && isNonRelayIce(raw)) return;
       if (opts.reorderEarly && isBrowserConn && !answerReleased) {
         const { outer, inner } = parseEnvelopePayload(raw);
@@ -574,6 +607,7 @@ describe('web client connections against real nodes (I-8)', () => {
   let workDir = '';
   let turnBin = '';
   let harnessJs = '';
+  let stunServer: { url: string; close(): Promise<void> } | undefined;
   let net: Net | undefined;
   let contexts: BrowserContext[] = [];
   let proxies: ProxyHandle[] = [];
@@ -581,19 +615,22 @@ describe('web client connections against real nodes (I-8)', () => {
 
   beforeAll(async () => {
     const { root } = inject('e2e');
+    const engine = inject('browser');
     workDir = await mkdtemp(join(root, 'i8-'));
     const srcDir = join(workDir, 'src');
     await mkdir(srcDir);
     const goFile = join(srcDir, 'main.go');
     turnBin = join(workDir, 'turn-relay');
     await writeFile(goFile, turnSource);
-    await Promise.all([
+    const [, , stun] = await Promise.all([
       promisify(execFile)('go', ['build', '-o', turnBin, goFile], { cwd: repoDir }),
       buildHarnessBundle(workDir).then((code) => {
         harnessJs = code;
       }),
+      startStunServer(engine === 'firefox' ? pickLanIPv4() : '127.0.0.1'),
     ]);
-    browser = await launch(inject('browser'));
+    stunServer = stun;
+    browser = await launch(engine);
   });
 
   beforeEach(() => {
@@ -612,6 +649,7 @@ describe('web client connections against real nodes (I-8)', () => {
 
   afterAll(async () => {
     await browser?.close();
+    await stunServer?.close();
     if (workDir) await rm(workDir, { recursive: true, force: true });
   });
 
@@ -621,16 +659,28 @@ describe('web client connections against real nodes (I-8)', () => {
     return ctx;
   }
 
+  async function startDirectProxy(rv: Net['rendezvous'], reorderEarly = false) {
+    const proxy = await startProxy({
+      targetHttp: rv.url,
+      targetWs: rv.signal,
+      ice: [{ urls: [stunServer!.url] }],
+      reorderEarly,
+    });
+    proxies.push(proxy);
+    return proxy;
+  }
+
   test('smoke: onboarding pairs a real node, verifies its fingerprint and declares CLI accounts', async () => {
     net = await startNet({ nodes: 1 });
     const [node] = net.nodes;
+    const proxy = await startDirectProxy(net.rendezvous);
     const ctx = await newContext();
     const page = await ctx.newPage();
 
-    await page.goto(`${net.rendezvous.url}#/onboarding`);
-    const code = await waitForPairingCode(page, net.rendezvous.signal);
+    await page.goto(`${proxy.url}#/onboarding`);
+    const code = await waitForPairingCode(page, proxy.signal);
     const prompt = (await page.locator('#prompt').textContent()) ?? '';
-    expect(prompt).toContain(`${net.rendezvous.url}install.md`);
+    expect(prompt).toContain(`${proxy.url}install.md`);
 
     const paired = await node.run(
       'solodawn',
@@ -639,7 +689,7 @@ describe('web client connections against real nodes (I-8)', () => {
       '--name',
       'workstation',
       '--rendezvous',
-      net.rendezvous.signal,
+      proxy.signal,
     );
     expect(paired.code, paired.stderr).toBe(0);
 
@@ -693,11 +743,7 @@ describe('web client connections against real nodes (I-8)', () => {
       credential: 'secret',
     };
 
-    const directProxy = await startProxy({
-      targetHttp: net.rendezvous.url,
-      targetWs: net.rendezvous.signal,
-    });
-    proxies.push(directProxy);
+    const directProxy = await startDirectProxy(net.rendezvous);
 
     const ctx = await newContext();
     const pairPage = await ctx.newPage();
@@ -707,7 +753,7 @@ describe('web client connections against real nodes (I-8)', () => {
     const relayProxy = await startProxy({
       targetHttp: net.rendezvous.url,
       targetWs: net.rendezvous.signal,
-      turn: turnEntry,
+      ice: [turnEntry],
       dropDirect: true,
     });
     proxies.push(relayProxy);
@@ -868,12 +914,7 @@ describe('web client connections against real nodes (I-8)', () => {
   test('A1.11: early and duplicate candidates are buffered until remote description and applied once', async () => {
     net = await startNet({ nodes: 1 });
     const [node] = net.nodes;
-    const proxy = await startProxy({
-      targetHttp: net.rendezvous.url,
-      targetWs: net.rendezvous.signal,
-      reorderEarly: true,
-    });
-    proxies.push(proxy);
+    const proxy = await startDirectProxy(net.rendezvous, true);
 
     const ctx = await newContext();
     await ctx.addInitScript(() => {
@@ -1039,11 +1080,12 @@ describe('web client connections against real nodes (I-8)', () => {
   test('A1.12: second tab with "-" device id stays idle until Use here, then closes first tab without reconnect', async () => {
     net = await startNet({ nodes: 1 });
     const [node] = net.nodes;
+    const proxy = await startDirectProxy(net.rendezvous);
     const ctx = await newContext();
 
     // Seed IndexedDB with a valid non-extractable Ed25519 device key whose canonical id starts with "-".
     const seedPage = await ctx.newPage();
-    await seedPage.goto(net.rendezvous.url);
+    await seedPage.goto(proxy.url);
     await seedPage.addScriptTag({ content: harnessJs });
     const seededDeviceId = await seedPage.evaluate(async () => {
       const sd = (globalThis as Record<string, any>).__sd;
@@ -1082,7 +1124,7 @@ describe('web client connections against real nodes (I-8)', () => {
     });
     expect(seededDeviceId.startsWith('-')).toBe(true);
 
-    await pairBrowserOnPage(seedPage, net.rendezvous.url, net.rendezvous.signal, node);
+    await pairBrowserOnPage(seedPage, proxy.url, proxy.signal, node);
     await seedPage.close();
 
     const installTabDriver = async (tabPage: Page, tabLabel: string) => {
@@ -1113,7 +1155,7 @@ describe('web client connections against real nodes (I-8)', () => {
           },
         });
       });
-      await tabPage.goto(`${net!.rendezvous.url}#/groups`);
+      await tabPage.goto(`${proxy.url}#/groups`);
       await tabPage.addScriptTag({ content: harnessJs });
       await tabPage.evaluate(
         async ({ signalUrl, label }) => {
@@ -1181,7 +1223,7 @@ describe('web client connections against real nodes (I-8)', () => {
             },
           });
         },
-        { signalUrl: net!.rendezvous.signal, label: tabLabel },
+        { signalUrl: proxy.signal, label: tabLabel },
       );
     };
 
