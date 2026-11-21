@@ -117,7 +117,7 @@ The message id is `n`.
 | `report` | an AI | `thread` is a task whose assignee is `as` | — |
 | `brief` | the secretary | `body.requester` is a member; every assignee and reviewer is a working AI of the group, the two differ, and `depends` names only earlier entries of the same brief; `body.replaces`, when not `null`, is a brief whose `state.status` is `pending` or `revise`, else `conflict` | `state.status = pending`; the brief named in `body.replaces` becomes `superseded` |
 | `summary` | the secretary | `thread` is a `merged` task | the home adds the whole `body` from the task row; `main = true` |
-| `approval` | an AI | `thread` = `body.task`; `as` is that task's assignee and = `body.ai` | `state.status = pending`; `main = true`; task-machine row 17 |
+| `approval` | an AI | `thread` = `body.task`, or `null` when `body.task` is `""`; `as` = `body.ai`; for a task, `as` is its assignee or reviewer | `state.status = pending`; `main = true`; with a task, task-machine row 17 |
 | `decision` | an AI | `thread` = `body.task`, or `null` when the body names no task | `state.status = pending`; `main = true`; task-machine row 19 |
 | `call` | an AI | the callee is another AI member; `body.depth` ≤ `limits.ask_depth` | `state.status = waiting`; item `mention` for the callee |
 | `reply` | an AI | `re` is a `call` addressed to `as` whose `state.status` is still `waiting`, else `conflict`: a call is answered once | the call's `state` becomes `answered` with `reply` and `ms`; item `reply` for the caller |
@@ -152,10 +152,11 @@ Rules for every `post` by an AI:
 | `approval` | `approve`, `deny` | a person in `body.approvers` | `state` updated; task-machine row 18 |
 | `decision` | `choose` | a person in `body.to`, or an admin | `state.status = decided` with `choice = arg` and `text`; task-machine row 20 |
 
-`choose` has `arg`, the `id` of one of `body.options`, and may have
-`text`; on a decision whose `options` is empty it has `text` and no `arg`.
-`revise` may have `text`. `confirm`, `approve` and `deny` have neither.
-Anything else is `bad_request`.
+On a decision with options, `choose` takes `arg` (the `id` of one of
+`body.options`), `text`, or both, and `text` alone is also accepted on a
+card with options (2026-11-21 owner decision); on a decision whose `options`
+is empty it takes `text` and no `arg`. `revise` may have `text`. `confirm`,
+`approve` and `deny` have neither. Anything else is `bad_request`.
 
 Acting on a card whose `state.status` is not `pending` returns `conflict`.
 A decided card keeps the signed `act` in `state.act`.
@@ -186,8 +187,10 @@ When each is allowed, and what it does, is `contracts/task-machine.md`.
 | `resume` | `id` | the secretary, or an admin (for a `failed` task, or one paused by the round limit, an admin only); the host of the assignee, for its own pre-empted task | — |
 | `cancel` | `id` | the secretary, or an admin (at step `merge` an admin only); the host of the assignee when `origin` is `takeover` | — |
 
-`items` of `checked` and `cloud` has the shape of `items` in a `checks`
-body (`contracts/messages.md` 2.8), which the home writes from it.
+`branch` of `task branch` is `task/<num>-<slug>` (`contracts/local.md`
+section 7); any other value is `bad_request`. `items` of `checked` and
+`cloud` has the shape of `items` in a `checks` body
+(`contracts/messages.md` 2.8), which the home writes from it.
 `stats` of `submitted` and `merged` is `{"added":…,"removed":…}`, the line
 counts of `git diff --shortstat <base-ref>...<commit>` (`contracts/local.md`
 section 7), written into the task row's `stats`.
@@ -266,7 +269,7 @@ device id. Receipts apply as for home commands.
 
 | `t` | Fields | Effect |
 | --- | --- | --- |
-| `agent.set` | `agent`, `account` | declares the account type of a CLI found on this machine (R-50); required before the AI can join a group |
+| `agent.set` | `agent`, `account` | declares the account type (`personal`, `team` or `api_key`, else `bad_request`) of a CLI found on this machine (`claude` or `codex`, else `bad_request`; `conflict` when not found here; R-50); sets `login_ok` back to `true` in `host.info` (`flows/agent-turn.md` E) and writes audit `setting` (`account <account>`); required before the AI can join a group |
 | `perm.set` | `agent`, `g`, `level` (1, 2, 3), `repo_config` (bool) | permission level for that AI's sessions in that project (R-40), and whether repository-supplied AI configuration is loaded (R-45; for which sessions: `contracts/drivers.md` 1.1, 1.2); records an audit row of `what = setting`; takes effect the next time a session's process starts |
 | `settings.set` | any of `retention_days`, `idle_minutes`, `max_open`, `default_level`, `all_level3`, `approvers`, `caps` | node settings; for `approvers` the node sends `member set` with them for each of its AIs to that AI's home |
 | `host.join` | `g`, `home`, `agent`, `name`, `secretary` | the node connects to `home`, clones the project if this node has no clone of it yet (R-11), and sends `member add_ai` |
