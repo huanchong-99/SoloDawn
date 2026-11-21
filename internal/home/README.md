@@ -391,8 +391,7 @@ function that moves a task calls it and adds nothing to its rules.
   message, with the act as `cause`. Then the secretary gets `confirmed`, naming the brief, with
   the act as `cause`, after a `confirm` and after a `revise`; a group without a secretary gets
   none. A queued task gets its `assign` when the merge of its last dependency releases it (unit
-  HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
-  `c.Disk.Msg` reads.
+  HM-12), without a `cause` (2026-11-21 slimming A-3).
 
 ## Merges and summaries
 
@@ -418,8 +417,8 @@ function that moves a task calls it and adds nothing to its rules.
   `c.Disk.Pending()`. When a dependent task becomes `active`, `stats.started` is set to `c.Now`
   ([rows](../../planning/contracts/rows.md), section 4) so summary minutes count active work rather
   than dependency wait, its updated row is included in `Result.Rows`, and its `assign` item gets
-  `msg` set to its `task` message id when still on disk and `cause` set to `state.act` of the brief
-  `task.brief` names.
+  `msg` set to its `task` message id when still on disk (`cause` is `nil`, 2026-11-21 slimming
+  A-3).
 - **Conflict (`task/conflict`).** Requires a non-empty `commit`, else `bad_request`; a missing task
   is `not_found`. `Step` (`OnConflict`) checks `ByHost`, `active`, step `merge` and matching
   `commit`, returning the task to `local_check` with wait `conflict` and leaving `failures`
@@ -487,4 +486,4 @@ commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
 `cmd_merge_test.go` sends `task/merged`, `task/conflict` and `post/summary` through
 `Commands.Apply` with fakes of `Receipts` and `Disk`, covering every refusal, boundary, card
 expiration and dependent task release. `features/home_merge.feature` holds the home half of
-acceptance tests A5.10 and A5.12 and dependent task release with `cause` and `stats.started`.
+acceptance tests A5.10 and A5.12 and dependent task release with `stats.started`.

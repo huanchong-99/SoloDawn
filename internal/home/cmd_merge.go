@@ -354,15 +354,13 @@ func mrgCardWho(m proto.MsgRow) []string {
 
 func mrgAssignItems(d Disk, task proto.TaskRow, raw []TaskItem) []Item {
 	msgID := mrgTaskMsg(d, task.ID)
-	cause := mrgBriefAct(d, task.Brief)
 	out := make([]Item, len(raw))
 	for i, it := range raw {
 		out[i] = Item{
-			AI:    it.AI,
-			Why:   it.Why,
-			Task:  task.ID,
-			Msg:   msgID,
-			Cause: cause,
+			AI:   it.AI,
+			Why:  it.Why,
+			Task: task.ID,
+			Msg:  msgID,
 		}
 	}
 	return out
@@ -373,14 +371,6 @@ func mrgTaskMsg(d Disk, taskID string) string {
 		return taskID
 	}
 	return ""
-}
-
-func mrgBriefAct(d Disk, briefID string) *proto.Envelope {
-	card, _ := d.Msg(briefID)
-	if card.State == nil {
-		return nil
-	}
-	return card.State.Act
 }
 
 func mrgStrings(ids []proto.ID) ([]string, bool) {

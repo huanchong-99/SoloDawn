@@ -44,9 +44,9 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-21 · limitation · Retention removes the `task` message of a queued task before its release
 
-- Symptom: when a task stays `queued` longer than `retention_days`, `Retain` keeps its confirmed `brief` card so the released `assign` item still carries `state.act` as its `cause`, while deleting the task's main-line `task` message (`keep = 0`, `pending = 0`). The `assign` item queued when the task is later released then has `msg` omitted (`planning/contracts/datachannel.md` section 6: absent when there is none).
+- Symptom: when a task stays `queued` longer than `retention_days`, `Retain` keeps its confirmed `brief` card while deleting the task's main-line `task` message (`keep = 0`, `pending = 0`). The `assign` item queued when the task is later released then has `msg` omitted (`planning/contracts/datachannel.md` section 6: absent when there is none).
 - Cause: `internal/store/retention.go:16-19` (`planning/contracts/storage.md` section 4) exempts only the confirmed `brief` row referenced by a `queued` task, not its `task` message; `mrgTaskMsg` (`internal/home/cmd_merge.go`) includes `msg` only when `Disk.Msg(task.ID)` still holds the `task` message.
-- Status: open, without effect on authority or workspace creation, which read the signed `item`, the current `TaskRow`, and `cause`.
+- Status: open, without effect on delivery or workspace creation, which read the item and the current `TaskRow`.
 
 ### 2026-11-20 · limitation · `tools.json` freezes JSON Schema keywords that the MCP SDK may write otherwise
 

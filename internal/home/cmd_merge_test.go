@@ -271,7 +271,7 @@ func TestMergeMergedZeroStatsAndNoSecretary(t *testing.T) {
 
 // Row 8 release: dependent queued tasks release in sorted ID order when all
 // their dependencies are merged, set stats.started to c.Now, recompute card
-// waits from Pending, and carry the brief's confirmation act as cause.
+// waits from Pending, and leave Cause nil on released assign items.
 func TestMergeMergedReleasesDependentTasksInSortedOrder(t *testing.T) {
 	s := mrgState(t)
 	doneID := id(25)
@@ -376,39 +376,9 @@ func TestMergeMergedReleasesDependentTasksInSortedOrder(t *testing.T) {
 
 	equal(t, res.Items, []home.Item{
 		{AI: aiID, Why: "notice", Task: mergedID, Msg: id(91), Code: "task_merged"},
-		{AI: mrgWorkA, Why: "assign", Task: depFirst, Msg: depFirst, Cause: &act},
-		{AI: mrgWorkB, Why: "assign", Task: depSecond, Msg: "", Cause: &act},
+		{AI: mrgWorkA, Why: "assign", Task: depFirst, Msg: depFirst, Cause: nil},
+		{AI: mrgWorkB, Why: "assign", Task: depSecond, Msg: "", Cause: nil},
 	})
-}
-
-// If a released task's brief is absent from disk or has no card state, and the
-// message stored under the task's ID is not of kind task, release still
-// succeeds with nil cause and empty msg.
-func TestMergeMergedReleaseWithoutBriefStateOrTaskKind(t *testing.T) {
-	s := mrgState(t)
-	mergedID, depA, depB := id(26), id(31), id(32)
-	s.Tasks[mergedID] = mrgTaskAtMerge(mergedID, 1)
-	s.Tasks[depA] = proto.TaskRow{
-		RowHeader: proto.RowHeader{Type: "task", ID: depA}, Group: groupID, Num: 2,
-		Title: "A", Slug: "a", Origin: "brief", Brief: id(75), State: "queued", Step: "branch",
-		Assignee: mrgWorkA, Reviewer: mrgWorkB, Pass: 90, Depends: []string{mergedID},
-		Wait: &proto.TaskWait{Kind: "depends", Since: clock - 1000},
-	}
-	s.Tasks[depB] = proto.TaskRow{
-		RowHeader: proto.RowHeader{Type: "task", ID: depB}, Group: groupID, Num: 3,
-		Title: "B", Slug: "b", Origin: "brief", Brief: id(76), State: "queued", Step: "branch",
-		Assignee: mrgWorkB, Reviewer: mrgWorkA, Pass: 90, Depends: []string{mergedID},
-		Wait: &proto.TaskWait{Kind: "depends", Since: clock - 1000},
-	}
-	d := &mrgDisk{msgs: map[string]proto.MsgRow{
-		id(75): {RowHeader: proto.RowHeader{Type: "msg", ID: id(75)}, Kind: "brief", State: nil},
-		depA:   {RowHeader: proto.RowHeader{Type: "msg", ID: depA}, Kind: "text"},
-	}}
-
-	res := mrgRun(t, s, d, receipts{}, laptop, mrgMergedCmd(92, mergedID, "9f2c1ab", "c1d9e7a", 1, 1))
-	equal(t, res.Answer, store.Outcome{OK: true})
-	equal(t, res.Items[1], home.Item{AI: mrgWorkA, Why: "assign", Task: depA, Msg: "", Cause: nil})
-	equal(t, res.Items[2], home.Item{AI: mrgWorkB, Why: "assign", Task: depB, Msg: "", Cause: nil})
 }
 
 func TestMergeMergedRefusals(t *testing.T) {

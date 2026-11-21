@@ -35,7 +35,6 @@ type homeMergeWorld struct {
 	members     map[string]string
 	hosts       map[string]identity.Key
 	ownerKey    identity.Key
-	briefID     string
 	taskID      string
 	items       []home.Item
 	lastSummary proto.MsgRow
@@ -141,7 +140,7 @@ func homeMergeSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^"([^"]*)"'s host checks and submits commit "([^"]*)" and the reviewer passes it with score (\d+)$`, w.checkSubmitAndReview)
 	sc.Step(`^(\d+) minutes pass and task (\d+) reaches step "merge" and merges commit "([^"]*)" as "([^"]*)"$`, w.advanceAndMergeTask)
 	sc.Step(`^task 2 becomes "active" at step "branch" with stats\.started at the release time$`, w.assertTask2Released)
-	sc.Step(`^the merge home queues "([^"]*)" with task 2 caused by the confirm$`, w.assertQueuedWithCause)
+	sc.Step(`^the merge home queues "([^"]*)" with no cause on task 2$`, w.assertQueuedWithoutCause)
 	sc.Step(`^task 2's summary records (\d+) minutes of active work$`, w.assertSummaryMinutes)
 }
 
@@ -351,7 +350,6 @@ func (w *homeMergeWorld) initTwoTaskBrief() error {
 			Pass: 90, Requester: w.members["owner"],
 		},
 	}
-	w.briefID = string(post.Nonce)
 	if err := w.apply(w.hosts["secretary"], post); err != nil {
 		return err
 	}
@@ -359,7 +357,7 @@ func (w *homeMergeWorld) initTwoTaskBrief() error {
 		HomeCommand: proto.HomeCommand{
 			Type: "act", Nonce: w.nextID(), Timestamp: w.now.UnixMilli() - 500, Group: proto.ID(w.state.ID),
 		},
-		Msg: proto.ID(w.briefID), Action: "confirm",
+		Msg: post.Nonce, Action: "confirm",
 	}
 	if err := w.apply(w.ownerKey, act); err != nil {
 		return err
@@ -609,15 +607,11 @@ func (w *homeMergeWorld) assertTask2Released() error {
 	return nil
 }
 
-func (w *homeMergeWorld) assertQueuedWithCause(spec string) error {
-	brief := w.msgs[w.briefID]
-	if brief.State == nil || brief.State.Act == nil {
-		return fmt.Errorf("brief %s has no confirmation act", w.briefID)
-	}
+func (w *homeMergeWorld) assertQueuedWithoutCause(spec string) error {
 	t2 := w.taskByNum(2)
 	it, ok := w.findAssign(t2.ID)
-	if !ok || !homeMergeCauseMatches(it, t2.ID, *brief.State.Act) {
-		return fmt.Errorf("assign item=%+v; want msg=%q cause=%+v", it, t2.ID, brief.State.Act)
+	if !ok || it.Msg != t2.ID || it.Cause != nil {
+		return fmt.Errorf("assign item=%+v; want msg=%q cause=nil", it, t2.ID)
 	}
 	return w.assertQueued(spec)
 }
@@ -629,10 +623,6 @@ func (w *homeMergeWorld) findAssign(taskID string) (home.Item, bool) {
 		}
 	}
 	return home.Item{}, false
-}
-
-func homeMergeCauseMatches(it home.Item, msg string, act proto.Envelope) bool {
-	return it.Msg == msg && it.Cause != nil && *it.Cause == act
 }
 
 func (w *homeMergeWorld) assertSummaryMinutes(want int) error {
