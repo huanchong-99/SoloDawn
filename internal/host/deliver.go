@@ -67,8 +67,7 @@ type routedTarget struct {
 // mu guards in-memory state only and is never held across store, session, row, hold or Git calls.
 type delivery struct {
 	mu            sync.Mutex
-	dbFile        string
-	dbLoaded      bool
+	wg            sync.WaitGroup
 	groups        map[string]*groupSync
 	held          map[aiGroupKey][]verifiedItem
 	merges        map[string][]verifiedItem
@@ -139,7 +138,6 @@ func attachHome(h *Host, device string) {
 		return
 	}
 	d := deliv(h)
-	d.setDBFile(cfg.DBFile)
 	groups := groupsForHome(d, cfg, device)
 	if len(groups) == 0 {
 		return
@@ -242,7 +240,7 @@ func syncOneGroup(ctx context.Context, h *Host, d *delivery, conn Home, device s
 	var synced proto.Synced
 	ok := err == nil && proto.Decode(answer, &synced) == nil && synced.Group == job.group
 	if d.finishGroupSync(job, device, synced.Seq, ok) && ok {
-		go afterGroupState(h, d, job.group)
+		d.wg.Go(func() { afterGroupState(h, d, job.group) })
 	}
 }
 
@@ -283,7 +281,7 @@ func pushRows(h *Host, home string, frame json.RawMessage) {
 	for _, raw := range batch.Rows {
 		applyGroupRow(h, d, home, batch.Group, raw)
 	}
-	go afterGroupState(h, d, batch.Group)
+	d.wg.Go(func() { afterGroupState(h, d, batch.Group) })
 }
 
 func applyGroupRow(h *Host, d *delivery, home, group string, raw json.RawMessage) {
@@ -328,41 +326,21 @@ func afterGroupState(h *Host, d *delivery, group string) {
 	}
 }
 
-func (d *delivery) setDBFile(file string) {
-	d.mu.Lock()
-	d.dbFile, d.dbLoaded = file, true
-	d.mu.Unlock()
-}
-
-func (d *delivery) projectDir(h *Host, group string) string {
-	d.mu.Lock()
-	file, ok := d.dbFile, d.dbLoaded
-	d.mu.Unlock()
-	if !ok {
-		cfg, err := loadHostConfig(h)
-		if err != nil {
-			return ""
-		}
-		d.setDBFile(cfg.DBFile)
-		file = cfg.DBFile
-	}
-	return (hostConfig{DBFile: file}).projectDir(group)
-}
-
 func cleanupGroupState(h *Host, d *delivery, group string) {
 	if d.groupSyncActive(group) {
 		return
 	}
 	cleanupGoneMembers(h, group)
 	cleanupTaskSessions(h, group)
-	pDir := d.projectDir(h, group)
+	cfg, _ := loadHostConfig(h)
+	pDir := cfg.projectDir(group)
 	if !hasGitClone(pDir) {
 		return
 	}
 	grp, _ := lookupRow[proto.GroupRow](h, group, "group", group)
 	for _, task := range liveTasks(h, group) {
-		cleanupTaskFolder(context.Background(), h, group, pDir, grp.Forge == "github", task)
-		cleanupReviewFolder(context.Background(), h, group, pDir, task)
+		cleanupTaskFolder(context.Background(), pDir, grp.Forge == "github", task)
+		cleanupReviewFolder(context.Background(), pDir, task)
 	}
 }
 
@@ -384,12 +362,6 @@ func cleanupTaskSessions(h *Host, group string) {
 	}
 }
 
-func memberIsGone(h *Host, group, member string) bool {
-	var row proto.GoneRow
-	raw, ok := h.Rows.Get(group, "member", member)
-	return ok && proto.Decode(raw, &row) == nil && row.Gone
-}
-
 func sessionTaskObsolete(h *Host, group string, s Session) bool {
 	task, ok := lookupTaskRow(h, group, s.Task)
 	role := task.Reviewer
@@ -399,35 +371,36 @@ func sessionTaskObsolete(h *Host, group string, s Session) bool {
 	return ok && (task.State == "merged" || task.State == "cancelled" || role != s.Member)
 }
 
-func cleanupTaskFolder(ctx context.Context, h *Host, group, pDir string, remote bool, task proto.TaskRow) {
+func cleanupTaskFolder(ctx context.Context, pDir string, remote bool, task proto.TaskRow) {
 	name := strconv.Itoa(task.Num) + "-" + string(task.Slug)
 	wtPath := filepath.Join(pDir, "wt", name)
-	if task.State == "merged" {
-		if pathExists(wtPath) {
-			RemoveTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), newSlot(pDir, "wt", name, "", "").holder(ctx), TaskMerged)
-		}
-		(ReviewedMerge{Repo: filepath.Join(pDir, "repo"), Branch: "task/" + name, Commit: task.Commit}).DeleteBranch(ctx)
-	} else if pathExists(wtPath) {
-		releaseUnmergedWorktree(ctx, h, group, pDir, remote, task, name, wtPath)
+	if !pathExists(wtPath) {
+		return
 	}
+	if task.State == "merged" {
+		RemoveTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), newSlot(pDir, "wt", name, "", "").holder(ctx), TaskMerged)
+		(ReviewedMerge{Repo: filepath.Join(pDir, "repo"), Branch: "task/" + name, Commit: task.Commit}).DeleteBranch(ctx)
+		return
+	}
+	releaseUnmergedWorktree(ctx, pDir, remote, task, name, wtPath)
 }
 
-func releaseUnmergedWorktree(ctx context.Context, h *Host, group, pDir string, remote bool, task proto.TaskRow, name, wtPath string) {
+func releaseUnmergedWorktree(ctx context.Context, pDir string, remote bool, task proto.TaskRow, name, wtPath string) {
 	holder := newSlot(pDir, "wt", name, "", "").holder(ctx)
 	if task.State == "cancelled" {
 		RemoveTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), holder, TaskCancelled)
-	} else if holder != task.Assignee || memberIsGone(h, group, holder) {
-		if remote && holder != "" {
+	} else if holder != task.Assignee {
+		if remote {
 			(TaskForge{Worktree: wtPath, Branch: "task/" + name}).PushBranch(ctx)
 		}
 		RemoveTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), holder, TaskGivenAway)
 	}
 }
 
-func cleanupReviewFolder(ctx context.Context, h *Host, group, pDir string, task proto.TaskRow) {
+func cleanupReviewFolder(ctx context.Context, pDir string, task proto.TaskRow) {
 	numStr := strconv.Itoa(task.Num)
 	if pathExists(filepath.Join(pDir, "review", numStr)) {
-		if hld := newSlot(pDir, "review", numStr, "", "").holder(ctx); task.State == "merged" || task.State == "cancelled" || hld != task.Reviewer || memberIsGone(h, group, hld) {
+		if hld := newSlot(pDir, "review", numStr, "", "").holder(ctx); task.State == "merged" || task.State == "cancelled" || hld != task.Reviewer {
 			RemoveReviewWorkspace(ctx, pDir, task.Num, hld)
 		}
 	}

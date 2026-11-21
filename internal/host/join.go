@@ -572,7 +572,7 @@ func closeMemberSessions(h *Host, group, member string) []Session {
 }
 
 func leaveGoneMember(h *Host, group, member string) {
-	if len(closeMemberSessions(h, group, member)) > 0 && joinCommitLeft(h, group, "", member, "") == nil {
+	if len(closeMemberSessions(h, group, member)) != 0 && joinCommitLeft(h, group, "", member, "") == nil {
 		joinSyncNow(h, joinStateOf(h))
 	}
 }

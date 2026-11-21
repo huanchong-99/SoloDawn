@@ -36,6 +36,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `host.Host` (`internal/host/host.go:75`) has no `Dir` field yet, so `readHostConfigSQL` and `hostConfig.projectDir` (`internal/host/deliver.go`) read `file` from `pragma_database_list WHERE name = 'main'`.
 - Status: open. `node` setting a `Dir` field on `Host` (HS-0 / N-4) can replace the `pragma_database_list` lookup.
 
+### 2026-11-22 · limitation · Step 17 cleanup leaves narrow turn-start windows and retries dirty merged worktrees
+
+- Symptom: a `notice` or `mention` arriving during step 17 cleanup can start one more turn in an obsolete session (whose CLI then stays open until `idle_minutes` expires), and a merged task worktree left with untracked files fails the non-forced `git worktree remove` and retries one Git call on each later `rows` push.
+- Cause: `finishSessionClose` (`internal/host/run.go`) starts `go Deliver` before the caller's `Sessions.End` (`internal/host/deliver.go`), `Runner.Close` finds no `liveProc` while `startFromDormant` is between `Move(Dormant, Working)` and `rt.procs[key] = lp`, and `RemoveTaskWorkspace(..., TaskMerged)` omits `--force` so unsaved files in a merged worktree are preserved (`planning/contracts/local.md` section 7).
+- Status: open, accepted on 2026-11-22 (`HS-23` review).
+
 ### 2026-11-21 · limitation · `reportWorkspaceFailure` duplicates `member status` assembly from the session runtime
 
 - Symptom: on a task or review workspace Git failure, `reportWorkspaceFailure` (`internal/host/deliver.go:934`) builds `member status` (`turn_interrupted`) by hand and infers `state` (`waiting` when any session of the AI is `waiting`, else `dormant`) instead of sharing the session runtime's status builder.

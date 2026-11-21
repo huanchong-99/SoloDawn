@@ -315,6 +315,7 @@ func stopDeliverySyncs(h *Host) {
 		delete(d.cancels, dev)
 	}
 	d.mu.Unlock()
+	d.wg.Wait()
 }
 
 func (r *deliverRig) installHooks() {
@@ -2085,12 +2086,20 @@ func checkStep17GuardsAndRoleChanges(t *testing.T, r *deliverRig, pDir, remoteDi
 	assertStep17True(t, strings.TrimSpace(runTestGit(t, remoteDir, "rev-parse", "refs/heads/task/1-alpha")) == alphaHead, "github handoff pushed branch")
 	assertStep17True(t, hasSession(r.h, kR1) && pathExists(rev1) && slices.Contains(r.runtime.closedKeys(), kT1), "reviewer kept and kT1 closed")
 
+	kGrpKeep := SessionKey{Group: testGroup1, Member: testAI1}
+	kOtherGroup := SessionKey{Group: testGroup2, Member: testAI1, Task: testTask1}
+	r.h.Sessions.Create(Session{SessionKey: kGrpKeep, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
+	r.h.Sessions.Create(Session{SessionKey: kOtherGroup, Kind: TaskSession, Folder: "wt/1-alpha", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
+
 	unrecordedWT := filepath.Join(pDir, "wt", "1-alpha")
 	os.MkdirAll(unrecordedWT, 0o700)
 	pushTaskState(r, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 12}, Group: testGroup1, Num: 1, Title: "Alpha", Slug: "alpha", Origin: "brief", State: "active", Step: "review", Assignee: remoteAI, Reviewer: remoteAI, Commit: alphaHead})
 	r.waitUntil("changed reviewer session and folders removed", func() bool {
 		return !hasSession(r.h, kR1) && !pathExists(rev1) && !pathExists(unrecordedWT)
 	})
+	assertStep17True(t, hasSession(r.h, kGrpKeep) && hasSession(r.h, kOtherGroup), "group session and other-group session kept")
+	r.h.Sessions.End(kGrpKeep)
+	r.h.Sessions.End(kOtherGroup)
 	r.h.Sessions.End(kNoRow)
 }
 
@@ -2166,21 +2175,19 @@ func checkStep17CancelMergeGoneAndRestart(t *testing.T, r *deliverRig, pDir, c1 
 
 func checkGoneMemberAndRestartCleanup(t *testing.T, r *deliverRig, pDir, c1 string) {
 	t.Helper()
-	// Gone member closes GroupSession + TaskSession + ReviewSession and removes worktrees held by that gone member even when stale task row still names them.
+	// Gone member closes GroupSession + TaskSession + ReviewSession and ends their session rows.
 	task4 := string(testCanonicalID(64))
-	wt4, _, rev4, _, head4 := seedTaskAndReview(t, r, pDir, task4, 4, "delta", c1)
-	kG1 := SessionKey{Group: testGroup1, Member: testAI1}
-	kG2 := SessionKey{Group: testGroup1, Member: testAI2}
-	r.h.Sessions.Create(Session{SessionKey: kG1, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
-	r.h.Sessions.Create(Session{SessionKey: kG2, Kind: GroupSession, Folder: "repo", Agent: "codex", Home: r.homeKey.ID(), Name: "Codex"})
-	pushTaskState(r, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: task4, Seq: 40}, Group: testGroup1, Num: 4, Title: "Delta", Slug: "delta", Origin: "brief", State: "active", Step: "review", Assignee: testAI1, Reviewer: testAI2, Commit: head4})
+	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: testAI1}, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
+	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: testAI2}, Kind: GroupSession, Folder: "repo", Agent: "codex", Home: r.homeKey.ID(), Name: "Codex"})
+	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: testAI1, Task: task4}, Kind: TaskSession, Folder: "wt/4-delta", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
+	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: testAI2, Task: task4}, Kind: ReviewSession, Folder: "review/4", Agent: "codex", Home: r.homeKey.ID(), Name: "Codex"})
 
 	gone1 := proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 41}, Gone: true}
 	gone2 := proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI2, Seq: 42}, Gone: true}
 	frame := proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{json.RawMessage(marshalWire(gone1)), json.RawMessage(marshalWire(gone2))}}
 	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(frame)))
 	r.waitUntil("gone members cleaned", func() bool {
-		return len(r.h.Sessions.All()) == 0 && !pathExists(wt4) && !pathExists(rev4)
+		return len(r.h.Sessions.All()) == 0
 	})
 
 	// Restart over existing store with an orphan Session row and orphan wt/review folders cleans all of them on sync completion.
@@ -2199,13 +2206,6 @@ func checkGoneMemberAndRestartCleanup(t *testing.T, r *deliverRig, pDir, c1 stri
 	r2.waitUntil("restart cleaned orphan session and folders", func() bool {
 		return !hasSession(r2.h, kT5) && !pathExists(wt5) && !pathExists(rev5)
 	})
-
-	// In-memory host (no disk clone), uncached loadHostConfig success, and missing setting table error return cleanly.
-	memRig := newDeliverRig(t, false)
-	cleanupGroupState(memRig.h, deliv(memRig.h), testGroup1)
-	errRig := newDeliverRig(t, false)
-	seamSQL(t, errRig.db, "DROP TABLE setting")
-	cleanupGroupState(errRig.h, deliv(errRig.h), testGroup1)
 }
 
 func seedTaskAndReview(t *testing.T, r *deliverRig, pDir, taskID string, num int, slug, baseCommit string) (string, SessionKey, string, SessionKey, string) {
