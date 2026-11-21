@@ -1478,7 +1478,53 @@ func checkReportSavedBehavior(t *testing.T) {
 		if queued != 0 {
 			t.Fatalf("conflict error was re-queued as unreachable: %d", queued)
 		}
+
+		checkAttachMemberStatus(t, h)
 	})
+}
+
+func checkAttachMemberStatus(t *testing.T, h *Host) {
+	t.Helper()
+	s1 := makeRunSession(SessionKey{Group: runGroup1, Member: runAI1}, GroupSession, "repo")
+	s2 := makeRunSession(SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}, TaskSession, "wt/1")
+	s3 := makeRunSession(SessionKey{Group: runGroup1, Member: runAI2}, GroupSession, "repo")
+	sOther := makeRunSession(SessionKey{Group: runGroup2, Member: runAI1}, GroupSession, "repo")
+	sOther.Home = "other-home"
+	for _, s := range []Session{s1, s2, s3, sOther} {
+		if err := h.Sessions.Create(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Queue one unsent crash for runAI1 and one status-already-sent crash for runAI2.
+	rt := stateOf(h)
+	rt.mu.Lock()
+	rt.savedCrash["home-dev"] = []pendingCrash{
+		{session: s1, statusSent: false},
+		{session: s3, statusSent: true},
+	}
+	rt.mu.Unlock()
+
+	reconn := newRunHome("direct")
+	h.Attach("home-dev", reconn)
+	synctest.Wait()
+	assertAttachStatusCmds(t, reconn.snapshotCmds())
+}
+
+func assertAttachStatusCmds(t *testing.T, cmds []recordedCmd) {
+	t.Helper()
+	if len(cmds) != 2 {
+		t.Fatalf("expected 2 member status commands (crash for ai1 + current for ai2), got %+v", cmds)
+	}
+	if cmds[0].payload["id"] != runAI1 || cmds[0].payload["event"] == nil {
+		t.Fatalf("expected crash status for ai1 first, got %+v", cmds[0].payload)
+	}
+	if cmds[1].payload["id"] != runAI2 || cmds[1].payload["state"] != "dormant" {
+		t.Fatalf("expected plain dormant status for ai2, got %+v", cmds[1].payload)
+	}
+	if cmds[1].payload["path"] != "direct" {
+		t.Fatalf("expected direct path for ai2, got %+v", cmds[1].payload)
+	}
 }
 
 func TestNoSessionFailedResumeSyncAsyncAndFailures(t *testing.T) {
