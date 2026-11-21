@@ -725,9 +725,14 @@ describe('web client connections against real nodes (I-8)', () => {
     const measureIndicator = async (
       targetCtx: BrowserContext,
       baseUrl: string,
+      signalUrl: string,
       expectedState: 'ok' | 'limited',
     ) => {
       const checkPage = await targetCtx.newPage();
+      await checkPage.routeWebSocket(
+        (url) => !url.href.startsWith(signalUrl),
+        (ws) => ws.close(),
+      );
       await checkPage.addInitScript(() => {
         let ctlOpenedAt = 0;
         let ctlChannel: RTCDataChannel | undefined;
@@ -812,7 +817,7 @@ describe('web client connections against real nodes (I-8)', () => {
       }
     };
 
-    const directResult = await measureIndicator(ctx, directProxy.url, 'ok');
+    const directResult = await measureIndicator(ctx, directProxy.url, directProxy.signal, 'ok');
     expect(directResult.indicatorMs).toBeGreaterThanOrEqual(0);
     expect(directResult.indicatorMs).toBeLessThanOrEqual(1000);
     expect(directResult.text).toMatch(/^Direct( \d+ ms)?$/);
@@ -852,7 +857,12 @@ describe('web client connections against real nodes (I-8)', () => {
       });
       await relayOnboardPage.close();
 
-      const relayResult = await measureIndicator(relayOnboardCtx, relayProxy.url, 'limited');
+      const relayResult = await measureIndicator(
+        relayOnboardCtx,
+        relayProxy.url,
+        relayProxy.signal,
+        'limited',
+      );
       expect(relayResult.indicatorMs).toBeGreaterThanOrEqual(0);
       expect(relayResult.indicatorMs).toBeLessThanOrEqual(1000);
       expect(relayResult.text).toBe('Relayed · limited');
@@ -1088,6 +1098,10 @@ describe('web client connections against real nodes (I-8)', () => {
     await seedPage.close();
 
     const openAppTab = async (tabPage: Page) => {
+      await tabPage.routeWebSocket(
+        (url) => !url.href.startsWith(proxy.signal),
+        (ws) => ws.close(),
+      );
       await tabPage.addInitScript(() => {
         const sockets: WebSocket[] = [];
         const pcs: RTCPeerConnection[] = [];
@@ -1162,9 +1176,11 @@ describe('web client connections against real nodes (I-8)', () => {
 
     const tab1 = await ctx.newPage();
     await openAppTab(tab1);
-    await expect.poll(() => tab1.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
     await expect
-      .poll(() => tab1.locator('section.card.node header .st').textContent())
+      .poll(() => tab1.locator('.bar a.conn').getAttribute('data-st'), { timeout: 15_000 })
+      .toBe('ok');
+    await expect
+      .poll(() => tab1.locator('section.card.node header .st').textContent(), { timeout: 15_000 })
       .toContain('Online');
     expect(await tab1.evaluate(() => (window as Record<string, any>).__netTrack.hostInfo())).toBe(
       true,

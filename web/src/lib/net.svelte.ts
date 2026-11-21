@@ -91,6 +91,7 @@ function startLive(
   waitForUseHere: () => Promise<void>,
 ) {
   const activeTab = (device: Device, signal: AbortSignal) => {
+    if (signal.aborted) return Promise.resolve();
     let session: Session | undefined;
     let epoch = 0;
     const homeOf = (user: string, id: string, name: string) => {
@@ -170,7 +171,7 @@ function startLive(
     (device) => {
       if (stopSignal.aborted) return;
       const run = (sig: AbortSignal) => activeTab(device, AbortSignal.any([sig, stopSignal]));
-      void (navigator.locks ? runTab(device.id, run, waitForUseHere) : run(stopSignal));
+      void runTab(device.id, run, waitForUseHere);
     },
     () => {},
   );

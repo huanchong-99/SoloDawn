@@ -145,6 +145,13 @@ beforeEach(() => {
   idb = new IDBFactory();
   vi.stubGlobal('indexedDB', idb);
   vi.stubGlobal('RTCPeerConnection', FakePC);
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: {
+      request: (_name: string, _opts: unknown, cb: (lock: object) => unknown) =>
+        Promise.resolve(cb({})),
+    },
+  });
   FakePC.reset();
   clients.length = 0;
   homes.length = 0;
@@ -489,6 +496,35 @@ describe('start (live)', () => {
       await signDeviceEntry(browserDev, browserDev.id, 2, 'add', nodeA.id, 'node', 'workstation'),
     );
     await saveOwner(() => idb, log, { [nodeA.id]: ['wss://rv.example/rv'] });
+
+    // Also cover stop() firing between runTab() and the async lock grant callback.
+    const grantGate = Promise.withResolvers<void>();
+    let lockEntered = false;
+    Object.defineProperty(navigator, 'locks', {
+      configurable: true,
+      value: {
+        request: async (_name: string, _opts: unknown, cb: (lock: object) => unknown) => {
+          lockEntered = true;
+          await grantGate.promise;
+          return cb({});
+        },
+      },
+    });
+    const abortedBeforeGrant = start('live');
+    await vi.waitFor(() => expect(lockEntered).toBe(true));
+    abortedBeforeGrant.stop();
+    grantGate.resolve();
+    await new Promise((later) => setTimeout(later, 20));
+    expect(clients).toEqual([]);
+
+    // Restore default granted lock stub for the live session check.
+    Object.defineProperty(navigator, 'locks', {
+      configurable: true,
+      value: {
+        request: (_name: string, _opts: unknown, cb: (lock: object) => unknown) =>
+          Promise.resolve(cb({})),
+      },
+    });
 
     const { stop } = start('live');
     await vi.waitFor(() => expect(clients.length).toBeGreaterThan(0));
