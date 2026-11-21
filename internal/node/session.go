@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"maps"
 	"slices"
@@ -93,6 +94,8 @@ func NewSessions(cfg SessionConfig) *Sessions {
 		Commands: map[string]CmdFunc{}, Replays: map[string]CmdFunc{},
 		cfg: sesDefaultConfig(cfg), inflight: map[string]chan struct{}{}, conns: map[*sesConn]bool{},
 	}
+	s.Requests["sync"] = RequestHandler{Async: true, Run: s.sesSync}
+	s.Requests["fetch"] = RequestHandler{Async: true, Run: s.sesFetch}
 	cfg.Logs.mu.Lock()
 	cfg.Logs.onChange = s.sesLogChanged
 	cfg.Logs.mu.Unlock()
@@ -145,6 +148,19 @@ func (s *Sessions) sesLeave(c *sesConn) {
 	s.mu.Unlock()
 	s.cfg.Home.Detach(c.home)
 	c.raw.Close()
+}
+
+func (s *Sessions) statusLines() []string {
+	s.mu.Lock()
+	var lines []string
+	for c := range s.conns {
+		if c.welcomed {
+			lines = append(lines, fmt.Sprintf("connection %s %s", c.device, cmp.Or(c.raw.Path(), "unknown")))
+		}
+	}
+	s.mu.Unlock()
+	slices.Sort(lines)
+	return lines
 }
 
 func sesOpenFrame(c *sesConn, data json.RawMessage) (string, *int64, bool) {
@@ -219,9 +235,27 @@ func (s *Sessions) sesRunRequest(ctx context.Context, c *sesConn, id int64, typ 
 		return
 	}
 	res, err := h.Run(ctx, c.home, c.raw, c.device, id, data)
-	if !h.Async {
+	if !h.Async || err != nil {
 		s.sesReply(c, id, h.Type, res, err)
 	}
+}
+
+func (s *Sessions) sesSync(_ context.Context, conn *home.Conn, _ Ctl, _ string, _ int64, data json.RawMessage) (any, error) {
+	var req proto.Sync
+	if proto.Decode(data, &req) != nil {
+		return nil, &host.Error{Code: "bad_request", Message: "invalid sync frame"}
+	}
+	s.cfg.Home.Sync(conn, req)
+	return nil, nil
+}
+
+func (s *Sessions) sesFetch(_ context.Context, conn *home.Conn, _ Ctl, _ string, _ int64, data json.RawMessage) (any, error) {
+	var req home.Fetch
+	if proto.Decode(data, &req) != nil {
+		return nil, &host.Error{Code: "bad_request", Message: "invalid fetch frame"}
+	}
+	s.cfg.Home.Fetch(conn, req)
+	return nil, nil
 }
 
 func (s *Sessions) sesEnrolled(c *sesConn) bool {

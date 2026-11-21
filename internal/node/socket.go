@@ -176,11 +176,8 @@ func ReadPair(line []byte, owner string, configured []string) (PairRequest, erro
 	return req, nil
 }
 
-// startNode runs the node on its data directory and local listener. The
-// runtime assembly in node.go replaces it.
-var startNode = func(string, *Local) error {
-	return errors.New("node runtime is unavailable")
-}
+// startNode runs the node on its data directory and local listener.
+var startNode = runForegroundNode
 
 // Foreground gives the node runtime its data directory and local listener.
 func Foreground() error {

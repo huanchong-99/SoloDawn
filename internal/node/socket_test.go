@@ -230,9 +230,6 @@ func TestInvalidOpening(t *testing.T) {
 
 func TestForegroundRuntime(t *testing.T) {
 	dir := nodeTestDir(t)
-	if err := Foreground(); errText(err) != "node runtime is unavailable" {
-		t.Fatalf("foreground returned %v", err)
-	}
 	saved := startNode
 	t.Cleanup(func() { startNode = saved })
 	startNode = func(path string, l *Local) error {
