@@ -235,7 +235,7 @@ func tskStartTool(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (
 	}
 	var res proto.CmdResult
 	proto.Decode(ans, &res)
-	return tskStartResult{Task: "T-" + strconv.Itoa(res.Num), Moved: true}, nil
+	return tskStartResult{Task: taskLabel(res.Num), Moved: true}, nil
 }
 
 func tskPushTool(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (any, error) {
