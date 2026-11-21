@@ -134,20 +134,23 @@ before `synced` and rows from `fetch` never move it.
 {"t":"fetch","id":3,"g":"Qm1…","thread":"<task id>","before":700,"limit":50}
 ```
 
-- `thread` is a task id, or `null` for the main line. In its place,
+- `thread` is a non-empty task id, or `null` for the main line. In its place,
   `"kind":"review"` asks for the review messages of all threads (the
-  ledger), `"kind":"note"` for the notes (R-102), and `"r":"<row type>",
-  "row":"<id>"` for that one row of the group, with `before` 0 and `limit`
-  1 (unit HM-3).
-- `before` is a `pos` (`contracts/rows.md`): the answer holds rows with a
-  lower `pos`, newest first. `before: 0` asks for the newest page; no `pos`
-  is 0. For an older page the client sends the lowest `pos` it received.
-  `limit` is at most 100.
+  ledger), `"kind":"note"` for the notes (R-102), and non-empty
+  `"r":"<row type>", "row":"<id>"` for that one row of the group, with
+  `before` 0 and `limit` 1 (unit HM-3). Exactly one of `thread`, `kind`, and
+  the pair `r`, `row` is present; any other combination is `bad_request`.
+- `before` is 0 or a positive `pos` (`contracts/rows.md`): the answer holds
+  rows with a lower `pos`, newest first. `before: 0` asks for the newest
+  page; no `pos` is 0. For an older page the client sends the lowest `pos`
+  it received. `limit` is 1 to 100.
 
 `{"t":"fetched","re":3,"ok":true,"rows":[ … ],"more":true}`: the home stops
 filling `rows` when the next row would exceed the message limit; `more`
 says whether older rows exist. `rows` is `[]` when there is nothing and
-never a `gone` marker, which has no `pos` (`contracts/rows.md`).
+never a `gone` marker, which has no `pos` (`contracts/rows.md`). A group
+this node does not home is answered `not_found`; a peer the group does not
+serve (section 8), `forbidden`.
 
 ## 5. Commands
 
