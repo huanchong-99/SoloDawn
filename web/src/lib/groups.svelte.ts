@@ -121,6 +121,17 @@ export class Group {
     return this.members.find((member) => member.id === id);
   }
 
+  /** A person's display name in this group by user id; undefined when absent or left. */
+  personName(user: string) {
+    return this.members.find((member) => member.kind === 'human' && member.user === user)?.name;
+  }
+
+  /** A task by id; undefined when absent or deleted. */
+  task(id: string) {
+    const row = this.rows.get(key('task', id));
+    return row && shown(row) ? (row as p.TaskRow) : undefined;
+  }
+
   /** The paging of a thread, or of the main line (null). */
   paging(thread: string | null = null) {
     const known = this.#paging.get(thread);
