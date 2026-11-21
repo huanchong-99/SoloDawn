@@ -204,3 +204,10 @@ The rules are in [mcp-tools.md](../../planning/contracts/mcp-tools.md) and [loca
 
 `tools_talk.go` registers `post`, `read_thread`, `list_members`, `list_tasks`, `note_put` and `note_list` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1 and 5).
 `post` and `note_put` run `CheckOutboundSecret` before signing or sending any command to the home.
+
+# Task and review tools
+
+- `tools_task.go` lists `start_task` to working AIs' group sessions, `push_branch`, `run_checks` and `submit_task` to task sessions above level 1, and `submit_review` to review sessions ([mcp-tools.md](../../planning/contracts/mcp-tools.md)).
+- `push_branch` and `submit_task` derive `task/<num>-<slug>` from `num` and `slug` via `taskName`, ignoring `TaskRow.Branch`.
+- `start_task`, `submit_task` and `submit_review` check outbound text arguments with `CheckOutboundSecret` before running Git or signing commands.
+- With `forge == "github"`, `submit_task` runs `TaskForge.WaitHostedChecks` in the background (cancelling any earlier poll for that task in `Part[tskPart](h)`) and sends `task cloud`.
