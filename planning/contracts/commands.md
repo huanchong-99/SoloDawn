@@ -117,7 +117,7 @@ The message id is `n`.
 | `report` | an AI | `thread` is a task whose assignee is `as` | — |
 | `brief` | the secretary | `body.requester` is a member; every assignee and reviewer is a working AI of the group, the two differ, and `depends` names only earlier entries of the same brief; `body.replaces`, when not `null`, is a brief whose `state.status` is `pending` or `revise`, else `conflict` | `state.status = pending`; the brief named in `body.replaces` becomes `superseded` |
 | `summary` | the secretary | `thread` is a `merged` task | the home adds the whole `body` from the task row; `main = true` |
-| `approval` | an AI | `thread` = `body.task`; `as` is that task's assignee and = `body.ai` | `state.status = pending`; `main = true`; task-machine row 17 |
+| `approval` | an AI | `thread` = `body.task`, or `null` when `body.task` is `""`; `as` = `body.ai`; for a task, `as` is its assignee or reviewer | `state.status = pending`; `main = true`; with a task, task-machine row 17 |
 | `decision` | an AI | `thread` = `body.task`, or `null` when the body names no task | `state.status = pending`; `main = true`; task-machine row 19 |
 | `call` | an AI | the callee is another AI member; `body.depth` ≤ `limits.ask_depth` | `state.status = waiting`; item `mention` for the callee |
 | `reply` | an AI | `re` is a `call` addressed to `as` whose `state.status` is still `waiting`, else `conflict`: a call is answered once | the call's `state` becomes `answered` with `reply` and `ms`; item `reply` for the caller |
@@ -152,10 +152,11 @@ Rules for every `post` by an AI:
 | `approval` | `approve`, `deny` | a person in `body.approvers` | `state` updated; task-machine row 18 |
 | `decision` | `choose` | a person in `body.to`, or an admin | `state.status = decided` with `choice = arg` and `text`; task-machine row 20 |
 
-`choose` has `arg`, the `id` of one of `body.options`, and may have
-`text`; on a decision whose `options` is empty it has `text` and no `arg`.
-`revise` may have `text`. `confirm`, `approve` and `deny` have neither.
-Anything else is `bad_request`.
+On a decision with options, `choose` takes `arg` (the `id` of one of
+`body.options`), `text`, or both, and `text` alone is also accepted on a
+card with options (2026-11-21 owner decision); on a decision whose `options`
+is empty it takes `text` and no `arg`. `revise` may have `text`. `confirm`,
+`approve` and `deny` have neither. Anything else is `bad_request`.
 
 Acting on a card whose `state.status` is not `pending` returns `conflict`.
 A decided card keeps the signed `act` in `state.act`.

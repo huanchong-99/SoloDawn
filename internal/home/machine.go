@@ -221,7 +221,7 @@ var taskRules = map[EventKind][]taskRule{
 	},
 	OnOrphaned:    {{by: ByHome, states: []string{taskQueued}, do: (*taskMove).orphaned}},
 	OnPreempted:   {{by: ByHost, states: statesActive, steps: stepsBeforeMerge, do: (*taskMove).preempt, orPaused: true}},
-	OnApproval:    {{by: byAssignee, states: statesActive, do: (*taskMove).approval, orPaused: true}},
+	OnApproval:    {{by: byAssignee | byReviewer, states: statesActive, do: (*taskMove).approval, orPaused: true}},
 	OnApprove:     {{by: ByAdmin | ByPerson, do: (*taskMove).decided}},
 	OnDecision:    {{by: BySecretary | ByAI, states: statesOpen, do: (*taskMove).decision}},
 	OnChoose:      {{by: ByAdmin | ByPerson, do: (*taskMove).chosen}},
