@@ -312,7 +312,7 @@ func TestForgeCheckItems(t *testing.T) {
 
 func TestHostedChecksToResume(t *testing.T) {
 	task := func(id, state, step, assignee string) proto.TaskRow {
-		return proto.TaskRow{RowHeader: proto.RowHeader{ID: id}, State: state, Step: step, Assignee: assignee, Branch: "task/4-fix",
+		return proto.TaskRow{RowHeader: proto.RowHeader{ID: id}, Num: 4, Slug: "fix", State: state, Step: step, Assignee: assignee,
 			Commit: "new", PR: 12, Checks: proto.TaskChecks{Local: &proto.Check{OK: true, At: 1_700_000_000_123, Commit: "new"}}}
 	}
 	tasks := []proto.TaskRow{task("t1", "active", "cloud_check", "a1"), task("t2", "active", "cloud_check", "a9"),
@@ -331,13 +331,43 @@ func TestHostedChecksToResume(t *testing.T) {
 func TestHostedChecksToResumePausedAndWithoutLocalCheck(t *testing.T) {
 	local := &proto.Check{OK: true, At: 1_700_000_000_123, Commit: "new"}
 	tasks := []proto.TaskRow{
-		{RowHeader: proto.RowHeader{ID: "t1"}, State: "paused", Step: "cloud_check", Assignee: "a1", Commit: "new", PR: 12, Checks: proto.TaskChecks{Local: local}},
-		{RowHeader: proto.RowHeader{ID: "t2"}, State: "cancelled", Step: "cloud_check", Assignee: "a1", Commit: "new", PR: 13, Checks: proto.TaskChecks{Local: local}},
-		{RowHeader: proto.RowHeader{ID: "t3"}, State: "active", Step: "cloud_check", Assignee: "a1", Commit: "new", PR: 14},
+		{RowHeader: proto.RowHeader{ID: "t1"}, Num: 1, Slug: "paused", State: "paused", Step: "cloud_check", Assignee: "a1", Commit: "new", PR: 12, Checks: proto.TaskChecks{Local: local}},
+		{RowHeader: proto.RowHeader{ID: "t2"}, Num: 2, Slug: "cancelled", State: "cancelled", Step: "cloud_check", Assignee: "a1", Commit: "new", PR: 13, Checks: proto.TaskChecks{Local: local}},
+		{RowHeader: proto.RowHeader{ID: "t3"}, Num: 3, Slug: "no-local", State: "active", Step: "cloud_check", Assignee: "a1", Commit: "new", PR: 14},
 	}
 	assertForge(t, HostedChecksToResume(tasks, []string{"a1"}), []HostedCheck{
-		{Task: "t1", Commit: "new", PR: 12, Since: time.UnixMilli(1_700_000_000_123)},
-		{Task: "t3", Commit: "new", PR: 14},
+		{Task: "t1", Branch: "task/1-paused", Commit: "new", PR: 12, Since: time.UnixMilli(1_700_000_000_123)},
+		{Task: "t3", Branch: "task/3-no-local", Commit: "new", PR: 14},
+	})
+}
+
+// HostedChecksToResume derives Branch from Num and Slug only, ignoring
+// TaskRow.Branch, and skips rows whose Num or Slug fails taskName.
+func TestHostedChecksToResumeDerivesBranchFromNumAndSlug(t *testing.T) {
+	slug40 := proto.Slug(strings.Repeat("a", 39) + "9")
+	slug41 := proto.Slug(strings.Repeat("a", 41))
+	row := func(id string, num int, slug proto.Slug, branch string) proto.TaskRow {
+		return proto.TaskRow{RowHeader: proto.RowHeader{ID: id}, Num: num, Slug: slug, Branch: branch,
+			State: "active", Step: "cloud_check", Assignee: "a1", Commit: "c1", PR: 7}
+	}
+	tasks := []proto.TaskRow{
+		row("zero-num", 0, "fix", "task/1-valid"),
+		row("neg-num", -1, "fix", "task/1-valid"),
+		row("empty-branch", 1, "fix", ""),
+		row("too-long", 1, slug41, "task/1-valid"),
+		row("max-slug", 2, slug40, "--evil"),
+		row("empty-slug", 3, "", "task/3-valid"),
+		row("upper-slug", 3, "Upper", "task/3-valid"),
+		row("lead-dash", 3, "-lead", "task/3-valid"),
+		row("trail-dash", 3, "trail-", "task/3-valid"),
+		row("double-dash", 3, "two--dashes", "task/3-valid"),
+		row("traversal", 3, "../outside", "task/3-valid"),
+		row("poisoned-ref", 17, "a-1-b", "refs/heads/main"),
+	}
+	assertForge(t, HostedChecksToResume(tasks, []string{"a1"}), []HostedCheck{
+		{Task: "empty-branch", Branch: "task/1-fix", Commit: "c1", PR: 7},
+		{Task: "max-slug", Branch: "task/2-" + string(slug40), Commit: "c1", PR: 7},
+		{Task: "poisoned-ref", Branch: "task/17-a-1-b", Commit: "c1", PR: 7},
 	})
 }
 
