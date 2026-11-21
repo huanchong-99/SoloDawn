@@ -139,7 +139,7 @@ Rules for every `post` by an AI:
 | Card | `action` | By | Effect |
 | --- | --- | --- | --- |
 | `brief` | `confirm` | its requester, or an admin | the checks of a `brief` post (1.3) are made again, and a brief that fails one is answered `conflict`. Then `state.status = confirmed`; one task row and one `task` message per entry of `body.tasks`; task-machine row 1 |
-| `brief` | `revise` | same | `state.status = revise`, `state.note = text`; item `confirmed` for the secretary, with this `act` as cause |
+| `brief` | `revise` | same | `state.status = revise`, `state.note = text`; item `confirmed` for the secretary |
 | `approval` | `approve`, `deny` | a person in `body.approvers` | `state` updated; task-machine row 18 |
 | `decision` | `choose` | a person in `body.to`, or an admin | `state.status = decided` with `choice = arg` and `text`; task-machine row 20 |
 
@@ -149,14 +149,12 @@ Rules for every `post` by an AI:
 Anything else is `bad_request`.
 
 Acting on a card whose `state.status` is not `pending` returns `conflict`.
-A decided card keeps the signed `act` in `state.act`; it is the `cause` of
-the items that follow from it, also of those created later (a dependent
-task that becomes active after a merge).
+A decided card keeps the signed `act` in `state.act`.
 
 `jump` (R-72), fields: `msg`. By the person who wrote message `msg`. The
 newest unacknowledged item that a message of that person in the same
-thread (or the main line, when `msg` has no thread) produced is signed
-again with `jump: true` and sent again; when there is none, `conflict`.
+thread (or the main line, when `msg` has no thread) produced gets
+`jump: true` and is sent again; when there is none, `conflict`.
 The host does the rest (`flows/agent-turn.md` C).
 
 ### 1.5 `task`
@@ -260,7 +258,7 @@ device id. Receipts apply as for home commands.
 | `t` | Fields | Effect |
 | --- | --- | --- |
 | `agent.set` | `agent`, `account` | declares the account type of a CLI found on this machine (R-50); required before the AI can join a group |
-| `perm.set` | `agent`, `g`, `level` (1, 2, 3), `repo_config` (bool) | permission level for that AI's task sessions in that project (R-40), and whether repository-supplied AI configuration is loaded (R-45; for which sessions: `contracts/drivers.md` 1.1, 1.2); takes effect the next time a session's process starts |
+| `perm.set` | `agent`, `g`, `level` (1, 2, 3), `repo_config` (bool) | permission level for that AI's sessions in that project (R-40), and whether repository-supplied AI configuration is loaded (R-45; for which sessions: `contracts/drivers.md` 1.1, 1.2); records an audit row of `what = setting`; takes effect the next time a session's process starts |
 | `settings.set` | any of `retention_days`, `idle_minutes`, `max_open`, `default_level`, `all_level3`, `approvers`, `caps` | node settings; for `approvers` the node sends `member set` with them for each of its AIs to that AI's home |
 | `host.join` | `g`, `home`, `agent`, `name`, `secretary` | the node connects to `home`, clones the project if this node has no clone of it yet (R-11), and sends `member add_ai` |
 | `host.leave` | `g`, `agent` | the node sends `member remove`; if the home accepts it, the AI's sessions in that group are closed (it is refused while the AI has unfinished tasks) |
@@ -269,11 +267,12 @@ device id. Receipts apply as for home commands.
 | `host.offline`, `host.online` | — | R-64: `offline` interrupts and closes every session and tells every home; items stay on the homes, unacknowledged, until `online` |
 | `pair.browser` | — | Result: `link`, `expires` (`flows/pairing.md` C) |
 
-Levels: a task session uses the level set for (agent, group); without one,
-`default_level`; and level 3 whenever `all_level3` is on. Group and review
-sessions are always level 1. Where a CLI cannot enforce level 2 (Claude
-Code on native Windows), `perm.set` and `default_level` follow
-`contracts/drivers.md` 1.1.
+Levels: by the owner's decision of 2026-11-21, `default_level` defaults to 3,
+and group, review and task sessions all use the same effective level: 3
+whenever `all_level3` is on, else the level set by `perm.set` for `(agent,
+group)` (1, 2 or 3), else `default_level` (3 when unset). Where a CLI cannot
+enforce level 2 (Claude Code on native Windows), `perm.set` asking for level 2
+is refused with `conflict` (`contracts/drivers.md` 1.1).
 
 `caps`, per agent: `{"day":{"unit":"turns","max":200},"task":{"unit":
 "turns","max":60}}`. `unit` is `turns` always, and `tokens`, `usd` or
@@ -295,8 +294,8 @@ Except where a Result is named, effects are observed through `host.info`.
 
 ## 3. Inbox items
 
-`why` says what the item is for. It routes; it authorises nothing. The
-authority is the item's signature (`contracts/datachannel.md` section 6).
+`why` says what the item is for; the wire shape and host checks are in
+`contracts/datachannel.md` section 6.
 
 | `why` | For | When |
 | --- | --- | --- |
