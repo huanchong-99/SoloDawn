@@ -124,6 +124,7 @@ type tskCloudKey struct {
 }
 
 type tskCloudRun struct {
+	commit string
 	cancel context.CancelFunc
 }
 
@@ -398,7 +399,8 @@ func tskSendSubmission(ctx context.Context, h *Host, c Caller, r tskSubmitReady,
 	if pr == nil {
 		return tskSubmitResult{OK: true, Commit: r.head}, nil
 	}
-	tskStartHostedChecks(h, c, r, pr.Number)
+	hc := HostedCheck{Task: c.Task, Branch: r.branch, Commit: r.head, PR: pr.Number, Since: time.UnixMilli(r.task.Checks.Local.At)}
+	startHostedCheck(h, c.Home, c.Group, hc)
 	return tskSubmitResult{OK: true, Commit: r.head, PR: pr.Number}, nil
 }
 
@@ -439,26 +441,32 @@ func tskSubmittedCmd(h *Host, c Caller, r tskSubmitReady, pr *ForgePullRequest) 
 	return marshalWire(cmd)
 }
 
-func tskStartHostedChecks(h *Host, c Caller, r tskSubmitReady, prNum int) {
+func startHostedCheck(h *Host, home, group string, hc HostedCheck) {
 	p := Part[tskPart](h)
-	key := tskCloudKey{group: c.Group, task: c.Task}
-	pollCtx, run := tskBeginCloud(p, key)
-	forge := TaskForge{Worktree: r.worktree, Branch: r.branch}
-	since := time.UnixMilli(r.task.Checks.Local.At)
-	go tskPollHostedChecks(pollCtx, p, h, c.Home, key, run, forge, prNum, r.head, since)
+	key := tskCloudKey{group: group, task: hc.Task}
+	pollCtx, run := tskBeginCloud(p, key, hc.Commit)
+	if run == nil {
+		return
+	}
+	wt := sessionDir(h, Session{SessionKey: SessionKey{Group: group}, Folder: "wt/" + strings.TrimPrefix(hc.Branch, "task/")})
+	forge := TaskForge{Worktree: wt, Branch: hc.Branch}
+	go tskPollHostedChecks(pollCtx, p, h, home, key, run, forge, hc.PR, hc.Commit, hc.Since)
 }
 
-func tskBeginCloud(p *tskPart, key tskCloudKey) (context.Context, *tskCloudRun) {
+func tskBeginCloud(p *tskPart, key tskCloudKey, commit string) (context.Context, *tskCloudRun) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.cancels == nil {
 		p.cancels = map[tskCloudKey]*tskCloudRun{}
 	}
 	if prev := p.cancels[key]; prev != nil {
+		if prev.commit == commit {
+			return nil, nil
+		}
 		prev.cancel()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	run := &tskCloudRun{cancel: cancel}
+	run := &tskCloudRun{commit: commit, cancel: cancel}
 	p.cancels[key] = run
 	return ctx, run
 }

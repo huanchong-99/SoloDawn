@@ -1895,3 +1895,112 @@ func dropAuditBlockTrigger(t *testing.T, db *store.Store) {
 		t.Fatal(err)
 	}
 }
+
+func TestResumeHostedChecksAfterRestart(t *testing.T) {
+	r1 := newDeliverRig(t, true)
+	tskStopAllCloud(t, r1.h)
+	originDir, pDir, head := initTestOriginAndGroupRepo(t, r1, "github")
+	_, err := EnsureGroupWorkspace(t.Context(), pDir, originDir, "main")
+	tskNoErr(t, err)
+	_, err = CreateTaskWorkspace(t.Context(), pDir, 1, "cloud", testAI1, "main", true)
+	tskNoErr(t, err)
+	rowsAt := func(seq int64) json.RawMessage { return cloudCheckRows(r1, head, seq) }
+
+	// Group with no home entry skips hosted-check resume; an already-running check is left alone.
+	r1.h.Rows.Put("unknown-group", "member", testAI1, json.RawMessage(marshalWire(cloudCheckAI(r1, testAI1, r1.hostKey.ID()))))
+	r1.h.Rows.Put("unknown-group", "task", testTask1, json.RawMessage(marshalWire(cloudCheckTask("unknown-group", testTask1, 1, testAI1, head, 2))))
+	noCalls := fakeForgeGH(t)
+	afterGroupState(r1.h, deliv(r1.h), "unknown-group")
+
+	key := tskCloudKey{group: testGroup1, task: testTask1}
+	ctx1, run1 := tskBeginCloud(Part[tskPart](r1.h), key, head)
+	r1.h.Push(r1.homeKey.ID(), rowsAt(10))
+	afterGroupState(r1.h, deliv(r1.h), testGroup1)
+	startHostedCheck(r1.h, r1.homeKey.ID(), testGroup1, HostedCheck{Task: testTask1, Branch: "task/1-cloud", Commit: head, PR: 31})
+	tskRequire(t, ctx1.Err() == nil && len(r1.home.cmdPayloads()) == 0, "running check disturbed")
+	tskFinishCloud(Part[tskPart](r1.h), key, run1)
+	noCalls()
+
+	verifyRestartCloudPollOnce(t, r1.db, head, rowsAt)
+}
+
+func verifyRestartCloudPollOnce(t *testing.T, db *store.Store, head string, rowsAt func(int64) json.RawMessage) {
+	t.Helper()
+	r2 := newDeliverRigOnStore(t, db)
+	tskStopAllCloud(t, r2.h)
+	calls := fakeForgeGH(t, hostedView(head, passedRun), hostedView(head, passedRun))
+
+	// First resume loses task cloud to home_unreachable; reconnect retries it once.
+	r2.home.cmdErr = errors.New("unreachable")
+	r2.h.Attach(r2.homeKey.ID(), r2.home)
+	r2.waitGroupLive(testGroup1)
+	r2.h.Push(r2.homeKey.ID(), rowsAt(20))
+	r2.waitUntil("failed cloud command", func() bool { return len(r2.home.cmdPayloads()) == 1 })
+	waitCloudIdle(r2)
+
+	var secondRowsChecks atomic.Int32
+	Holds["obs"] = func(*Host, SessionKey) (string, bool) {
+		secondRowsChecks.Add(1)
+		return "cap", true
+	}
+	r2.pushItem(r2.homeKey, r2.homeKey.ID(), testGroup1, proto.Item{Item: 980, AI: testAI1, Why: "notice", Code: "c"}, nil)
+	r2.waitAIUnbusy(testGroup1, testAI1)
+
+	inFlight := make(chan struct{}, 1) // single reader: verifyRestartCloudPollOnce
+	release := make(chan struct{})     // single reader: r3.onCmd
+	r3 := newFakeDeliverHome()
+	t.Cleanup(r3.closeConn)
+	r3.onCmd = func(ctx context.Context, _ proto.Cmd) (json.RawMessage, error) {
+		inFlight <- struct{}{}
+		<-release
+		done := cloudCheckTask(testGroup1, testTask1, 1, testAI1, head, 30)
+		done.Step = "review"
+		r2.putTask(done)
+		return json.RawMessage(`{"re":1,"ok":true}`), ctx.Err()
+	}
+	r2.h.Attach(r2.homeKey.ID(), r3)
+	<-inFlight
+	secondRowsChecks.Store(0)
+	r2.h.Push(r2.homeKey.ID(), rowsAt(25))
+	r2.waitUntil("second rows push evaluated", func() bool { return secondRowsChecks.Load() >= 1 })
+	close(release)
+	waitCloudIdle(r2)
+
+	view := []string{"pr", "view", "31", "--json", "headRefOid,statusCheckRollup"}
+	calls(view, view)
+	tskEqual(t, len(r3.cmdPayloads()), 1)
+	var cloud proto.TaskChecked
+	tskNoErr(t, proto.Decode([]byte(r3.cmdPayloads()[0]), &cloud))
+	tskEqual(t, cloud.Op, "cloud")
+	tskEqual(t, cloud.OK, true)
+	tskEqual(t, cloud.Commit, head)
+}
+
+func waitCloudIdle(r *deliverRig) {
+	r.t.Helper()
+	p := Part[tskPart](r.h)
+	r.waitUntil("cloud polls idle", func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return len(p.cancels) == 0
+	})
+}
+
+func cloudCheckAI(r *deliverRig, id, hostID string) proto.AIMemberRow {
+	return proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: id, Seq: 7}, Group: testGroup1, Kind: "ai", User: r.ownerKey.ID(), Name: "AI"}, CLI: "claude", Host: hostID, HostName: "n", Account: "personal", Allow: []string{}, Approvers: []string{}, State: "dormant", Path: "local"}
+}
+
+func cloudCheckTask(group, id string, num int, assignee, commit string, seq int64) proto.TaskRow {
+	return proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: id, Seq: seq}, Group: group, Num: num, Title: "Cloud", Slug: "cloud", Origin: "brief", State: "active", Step: "cloud_check", Assignee: assignee, Commit: commit, PR: 31, Depends: []string{}, Checks: proto.TaskChecks{Local: &proto.Check{OK: true, At: time.Now().UnixMilli(), Commit: commit}}}
+}
+
+func cloudCheckRows(r *deliverRig, head string, seq int64) json.RawMessage {
+	raw := func(v any) json.RawMessage { return json.RawMessage(marshalWire(v)) }
+	human := proto.HumanMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: testHuman, Seq: 5}, Group: testGroup1, Kind: "human", User: r.ownerKey.ID(), Name: "Owner"}, Role: "owner"}
+	gone := proto.GoneRow{RowHeader: proto.RowHeader{Type: "task", ID: string(testCanonicalID(99)), Seq: 6}, Gone: true}
+	return raw(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{
+		raw(cloudCheckAI(r, testAI1, r.hostKey.ID())), raw(cloudCheckAI(r, testAI2, r.extraKey.ID())),
+		raw(human), raw(gone), raw(cloudCheckTask(testGroup1, testTask2, 2, testAI2, head, 9)),
+		raw(cloudCheckTask(testGroup1, testTask1, 1, testAI1, head, seq)),
+	}})
+}
