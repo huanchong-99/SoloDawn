@@ -219,11 +219,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the dial of `sock` and its removal were not one step (`internal/node/socket.go`, before this fix).
 - Status: resolved. `local.md` section 3, "One node per data directory", now holds the rule: an exclusive lock on `lock` in the data directory, taken by `ListenLocal` (`internal/node/socket.go:38`, `lockData` at `:61`) before the socket is touched.
 
-### 2026-11-20 · bug · Windows scheduled task expands `%VAR%` in the executable path
+### 2026-11-20 · limitation · Windows scheduled task expands `%VAR%` in the executable path
 
-- Symptom: when `solodawn.exe` is installed under a directory whose path contains a matching `%VAR%` pair (`D:\a\_temp\sd-$USERNAME-%USERNAME%\solodawn.exe`), `solodawn service install` registers `\SoloDawn-<SID>` with `Execute` `conhost.exe` and `Arguments` `--headless "D:\a\_temp\sd-$USERNAME-%USERNAME%\solodawn.exe" node`, and `Start-ScheduledTask` exits at once (`State: Ready`, `LastTaskResult: 0`) without starting the node; `solodawn status` then fails with `dial unix C:\Users\runneradmin\AppData\Local\solodawn\sock: connect: A socket operation encountered a dead network` ([CI run 44790549293](https://github.com/huanchong-99/SoloDawn/actions/runs/44790549293)).
-- Cause: Windows Task Scheduler expands `%VAR%` environment references in `IExecAction.Arguments` (`ExpandEnvironmentStringsW`, which has no `%%` escape), turning `%USERNAME%` into `runneradmin` before `conhost.exe` receives the command line (`internal/node/service_windows.go:17`, `taskAction`). An unmatched `%` (such as `%25`) is left as written.
-- Status: open, found by `.github/workflows/service-smoke.yml`.
+- Symptom: when `solodawn.exe` is installed under a directory whose path contains a matching `%VAR%` pair, `Start-ScheduledTask` expands `%VAR%` in `IExecAction.Arguments` (`internal/node/service_windows.go:17`, `taskAction`) and fails to start the binary.
+- Cause: Windows Task Scheduler applies `ExpandEnvironmentStringsW` (which has no `%%` escape) to `IExecAction.Arguments`.
+- Status: open, off the main line.
 
 ### 2026-11-20 · limitation · The start-at-login entries are not run by a real service manager
 
@@ -232,12 +232,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
   2. launchd loading the agent with its `EnvironmentVariables` (`internal/node/service_darwin.go`);
   3. the scheduled task running the node headless through `conhost.exe --headless` (`internal/node/service_windows.go`); Windows unit tests only build the action.
 - Cause: nothing is installed on the development machine, by the coordinator's decision of 2026-11-20.
-- Status: open, covered in CI by `.github/workflows/service-smoke.yml` on `ubuntu-latest`, `macos-latest` and `windows-latest`. Each job installs from a path containing `$` and `%`, starts the entry through the system's manager (`systemctl --user` via `user@$uid.service` on Linux; `launchctl bootstrap gui/$uid` on macOS, verified as `gui/501` on `macos-latest` macOS 26.7.2; `Start-ScheduledTask` on Windows), checks `solodawn status` and the process's `PATH`, checks on Windows that `conhost.exe --headless` attaches no `ConsoleWindowClass` or visible window, and removes the entry. Still unverified:
-  - the assembled node runtime under these managers until N-4 replaces the `startNode` stub (`internal/node/socket.go:181-183`; until then the workflow builds with a Go `-overlay` stand-in on `startNode` only);
-  - a real interactive desktop login and machine reboot on each system (`A8.1`);
-  - paired `%VAR%` in the Windows executable path, which Task Scheduler expands (`internal/node/service_windows.go:17`; open bug above);
-  - shell-only `PATH` entries on Windows: `InstallService` (`internal/node/service_windows.go:23`) ignores the installing process's `PATH` and relies on the user's persisted Windows `Path`;
-  - stopping a running node on removal: `RemoveService` (`internal/node/service_linux.go:46`, `service_darwin.go:41`, `service_windows.go:30`) removes the start-at-login registration only, without stopping or unloading an already-running instance.
+- Status: open, covered in CI by `.github/workflows/service-smoke.yml` on `ubuntu-latest`, `macos-latest` and `windows-latest` against the assembled `solodawn` binary (N-4). Still unverified: a real interactive desktop login and machine reboot on each system (I-11).
 
 ### 2026-11-20 · limitation · `SHA256SUMS` proves the download intact, not where it came from
 
