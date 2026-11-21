@@ -340,9 +340,10 @@ func dialRawLocal(t *testing.T, dir, payload string) string {
 	conn, err := net.Dial("unix", filepath.Join(dir, "sock"))
 	mustNoErr(t, err)
 	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(500 * time.Millisecond))
 	io.WriteString(conn, payload)
-	out, _ := io.ReadAll(conn)
-	return string(out)
+	line, _ := bufio.NewReader(conn).ReadString('\n')
+	return line
 }
 
 func checkUnownedLocalCommands(t *testing.T, dir string, n *nodeRuntime) {
