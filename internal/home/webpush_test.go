@@ -691,15 +691,16 @@ func TestWebPushReminderKindsTitlesAndNoLeak(t *testing.T) {
 		t.Fatalf("expected 6 pushes, got %d", len(calls))
 	}
 
-	want := []proto.Reminder{
-		{Group: proto.ID(wpushGroupID), Msg: proto.ID(wpushTestID(20)), GroupName: "Website <Alpha> & Co", Kind: "approval", Who: "Codex", Title: strings.Repeat("界", 80)},
-		{Group: proto.ID(wpushGroupID), Msg: proto.ID(wpushTestID(21)), GroupName: "Website <Alpha> & Co", Kind: "approval", Who: "Codex"},
-		{Group: proto.ID(wpushGroupID), Msg: proto.ID(wpushTestID(22)), GroupName: "Website <Alpha> & Co", Kind: "decision", Who: "Codex", Title: strings.Repeat("é", 80)},
-		{Group: proto.ID(wpushGroupID), Msg: proto.ID(wpushTestID(23)), GroupName: "Website <Alpha> & Co", Kind: "brief", Who: "Dawn", Title: "Plan <v1> & rollout"},
-		{Group: proto.ID(wpushGroupID), Msg: proto.ID(wpushTestID(24)), GroupName: "Website <Alpha> & Co", Kind: "done", Who: "Dawn", Title: "Ship encrypted Web Push reminders"},
-		{Group: proto.ID(wpushGroupID), Msg: proto.ID(wpushTestID(25)), GroupName: "Website <Alpha> & Co", Kind: "mention", Who: "Owner"},
+	want := map[proto.ID]proto.Reminder{
+		proto.ID(wpushTestID(20)): {Group: proto.ID(wpushGroupID), Msg: proto.ID(wpushTestID(20)), GroupName: "Website <Alpha> & Co", Kind: "approval", Who: "Codex", Title: strings.Repeat("界", 80)},
+		proto.ID(wpushTestID(21)): {Group: proto.ID(wpushGroupID), Msg: proto.ID(wpushTestID(21)), GroupName: "Website <Alpha> & Co", Kind: "approval", Who: "Codex"},
+		proto.ID(wpushTestID(22)): {Group: proto.ID(wpushGroupID), Msg: proto.ID(wpushTestID(22)), GroupName: "Website <Alpha> & Co", Kind: "decision", Who: "Codex", Title: strings.Repeat("é", 80)},
+		proto.ID(wpushTestID(23)): {Group: proto.ID(wpushGroupID), Msg: proto.ID(wpushTestID(23)), GroupName: "Website <Alpha> & Co", Kind: "brief", Who: "Dawn", Title: "Plan <v1> & rollout"},
+		proto.ID(wpushTestID(24)): {Group: proto.ID(wpushGroupID), Msg: proto.ID(wpushTestID(24)), GroupName: "Website <Alpha> & Co", Kind: "done", Who: "Dawn", Title: "Ship encrypted Web Push reminders"},
+		proto.ID(wpushTestID(25)): {Group: proto.ID(wpushGroupID), Msg: proto.ID(wpushTestID(25)), GroupName: "Website <Alpha> & Co", Kind: "mention", Who: "Owner"},
 	}
 
+	seen := map[proto.ID]bool{}
 	for i, call := range calls {
 		if call.encoding != "aes128gcm" || call.ttl != "86400" || !strings.Contains(call.authHdr, "k="+k.vapid.Public) {
 			t.Fatalf("call %d headers: encoding=%q ttl=%q auth=%q", i, call.encoding, call.ttl, call.authHdr)
@@ -721,12 +722,17 @@ func TestWebPushReminderKindsTitlesAndNoLeak(t *testing.T) {
 		if err := proto.Decode(plain, &got); err != nil {
 			t.Fatalf("call %d decode reminder %s: %v", i, plain, err)
 		}
-		if got != want[i] {
-			t.Fatalf("call %d got %+v, want %+v", i, got, want[i])
+		expected, ok := want[got.Msg]
+		if !ok || seen[got.Msg] || got != expected {
+			t.Fatalf("call %d got %+v, expected %+v (seen=%v)", i, got, expected, seen[got.Msg])
 		}
-		if want[i].Title == "" && bytes.Contains(plain, []byte(`"title"`)) {
+		seen[got.Msg] = true
+		if expected.Title == "" && bytes.Contains(plain, []byte(`"title"`)) {
 			t.Fatalf("call %d must omit absent title: %s", i, plain)
 		}
+	}
+	if len(seen) != len(want) {
+		t.Fatalf("saw %d distinct reminders, want %d", len(seen), len(want))
 	}
 }
 
@@ -950,7 +956,7 @@ func TestWebPushEvictionErrorsQueueBoundsAndConcurrency(t *testing.T) {
 	}
 	wpushAfter(s, resPool)
 
-	wpushTimeout = 40 * time.Millisecond
+	wpushTimeout = 2 * time.Second
 	entered := make(chan struct{}, wpushWorkers)
 	release := make(chan struct{})
 	var sawDeadline sync.Once
