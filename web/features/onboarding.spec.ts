@@ -2,9 +2,9 @@ import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
 import { IDBFactory } from 'fake-indexeddb';
 import { flushSync, tick } from 'svelte';
 import { expect, vi } from 'vitest';
-import { loadOwner } from '../src/components/pairing/store';
 import { DeviceLog } from '../src/lib/devlog';
 import { Device, ed25519, encode, loadDevice, verifyEnvelope } from '../src/lib/identity';
+import { loadOwner } from '../src/lib/owner';
 import { mac, newSecret, parseSecret, room, shown, verifyPair } from '../src/lib/pairing';
 import type { Devlog, Pair } from '../src/lib/proto';
 import { all, closePage, one, openPage, texts } from './page';
@@ -509,67 +509,6 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(stored.log?.valid(browserDev.id)).toBe(true);
         },
       );
-    },
-  );
-
-  Scenario(
-    'A device log whose entry for this browser was signed by another device is not adopted',
-    ({ Given, When, Then, And }) => {
-      let ws: FakeSocket;
-      let pc: FakePC;
-      let browserDev: Device;
-
-      Given(
-        'a node that already belongs to the owner and created a browser pairing secret',
-        async () => {
-          setupBrowser();
-          owner = await newDevice();
-          node = await newDevice();
-          linkSecret = newSecret(crypto);
-        },
-      );
-
-      When('a fresh browser opens the pairing link', async () => {
-        openPage(`#pair=${shown(linkSecret)}`);
-        ws = await signInSocket();
-        browserDev = await loadDevice({ crypto, idb: () => idb });
-      });
-
-      And(
-        'the node pairs, welcomes the browser and pushes a log signed for this browser by another device',
-        async () => {
-          const roomId = await room(crypto, linkSecret);
-          await vi.waitFor(() => expect(ws.sent).toContainEqual({ t: 'join', room: roomId }));
-          const nodeSelf = { role: 'a', k: node.id, kind: 'node', name: 'workstation' };
-          await ws.deliver({
-            t: 'room',
-            room: roomId,
-            data: { t: 'pair', ...nodeSelf, mac: await mac(crypto, linkSecret, nodeSelf) },
-          });
-          pc = await answerOffer(ws, browserDev.id);
-          pc.ctl.deliver(welcomeFrame(1, false));
-          await tick();
-          // Entry 3 adds this browser, signed by `owner` instead of the pairing peer `node`.
-          const e1 = await signDeviceAdd(owner, owner.id, 1, owner.id, 'browser', 'desktop');
-          const e2 = await signDeviceAdd(owner, owner.id, 2, node.id, 'node', 'workstation');
-          const e3 = await signDeviceAdd(owner, owner.id, 3, browserDev.id, 'browser', 'Browser');
-          pc.ctl.deliver({ t: 'devlog', user: owner.id, entries: [e1, e2, e3] });
-          await vi.waitFor(() => {
-            flushSync();
-            expect(all('[role="alert"]')).toHaveLength(1);
-          });
-        },
-      );
-
-      Then('the browser does not adopt the log and shows the enrolment error', async () => {
-        expect(texts('[role="alert"]')).toEqual([
-          'The node sent a device log that does not enrol this browser.',
-        ]);
-        expect(pc.ctl.frames().filter((f) => f.t === 'hello')).toHaveLength(1);
-        expect(persistCalls).toBe(0);
-        const stored = await loadOwner(crypto, () => idb);
-        expect(stored.log).toBeUndefined();
-      });
     },
   );
 

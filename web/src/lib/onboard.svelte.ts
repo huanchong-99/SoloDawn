@@ -1,19 +1,15 @@
-// Reactive onboarding pairing session (planning/flows/pairing.md sections A, B and C;
+// Reactive onboarding pairing session, `#pair=<secret>` link capture, `agent.set` host command,
+// and shared CLI and account labels (planning/flows/pairing.md sections A, B and C;
 // planning/contracts/envelope.md sections 2, 4 and 6; planning/contracts/datachannel.md sections 3
 // and 7; planning/contracts/commands.md section 2).
-import { DeviceLog } from '../../lib/devlog';
-import {
-  decode,
-  encode,
-  fingerprint,
-  loadDevice,
-  StorageBlocked,
-  type Device,
-} from '../../lib/identity';
-import type { Source } from '../../lib/net.svelte';
-import { mac, newSecret, parseSecret, room, shown, verifyPair } from '../../lib/pairing';
-import { connect, type Heard, type Path, type Peer, type Session } from '../../lib/peer';
-import { textIn, type Lang } from '../../lib/prefs.svelte';
+import { DeviceLog } from './devlog';
+import { lost, newId } from './groups.svelte';
+import { decode, fingerprint, loadDevice, StorageBlocked, type Device } from './identity';
+import type { Source } from './net.svelte';
+import { loadOwner, saveOwner } from './owner';
+import { mac, newSecret, parseSecret, room, shown, verifyPair } from './pairing';
+import { connect, type Heard, type Path, type Peer, type Session } from './peer';
+import { t, textIn, type Lang } from './prefs.svelte';
 import type {
   CmdResult,
   Ctl,
@@ -25,38 +21,103 @@ import type {
   Pair,
   Push,
   Welcome,
-} from '../../lib/proto';
-import { takeLinkSecret } from './mounts';
-import { devlogFrames, loadOwner, saveOwner } from './store';
+} from './proto';
 
 const windowSeconds = 600;
 const second = 1000;
-const officialOrigin = 'https://solodawn.org';
 const browserName = 'Browser';
+
+/** Account types declared with `agent.set` (`contracts/commands.md` section 2). */
+export const accounts = ['personal', 'team', 'api_key'] as const;
+export type AccountKind = (typeof accounts)[number];
 
 const cliLabels: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' };
 
 /** Display label of an AI CLI identifier. */
 export const cliName = (agent: string) => cliLabels[agent] ?? agent;
 
+const accountKeys: Record<string, `pairing.acct.${AccountKind}`> = {
+  personal: 'pairing.acct.personal',
+  team: 'pairing.acct.team',
+  api_key: 'pairing.acct.api_key',
+};
+
+/** Localized label of a declared AI account type, or `account` as given when unknown. */
+export const accountLabel = (account: string) =>
+  account in accountKeys ? t(accountKeys[account]) : account;
+
 /** Signalling WebSocket URL of the page's own origin (`contracts/rendezvous.md` section 1). */
 export const signalUrlOf = (loc: Pick<Location, 'protocol' | 'host'> = location) =>
   `${loc.protocol === 'https:' ? 'wss:' : 'ws:'}//${loc.host}/rv`;
 
-/** Builds the onboarding prompt in `lang`, including `--rendezvous` outside the official origin. */
+/** Builds the onboarding prompt in `lang` with the page's install and signalling URLs. */
 export function promptFor(
   lang: Lang,
   code: string,
   loc: Pick<Location, 'origin' | 'protocol' | 'host'> = location,
 ): string {
-  const key = loc.origin === officialOrigin ? 'pairing.prompt.text' : 'pairing.prompt.text_rv';
-  return textIn(lang, key)
+  return textIn(lang, 'pairing.prompt.text_rv')
     .replace('{install}', `${loc.origin}/install.md`)
     .replace('{code}', code)
     .replace('{rv}', signalUrlOf(loc));
 }
 
-export type AccountKind = 'personal' | 'team' | 'api_key';
+let pending: string | undefined;
+
+function decodePart(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/** Captures a `#pair=<secret>` address fragment and rewrites it to `#/onboarding`. */
+export function capturePairHash() {
+  if (!location.hash.startsWith('#pair=')) return;
+  pending = decodePart(location.hash.slice('#pair='.length));
+  location.hash = '#/onboarding';
+}
+
+/** Claims the secret captured from a `#pair=<secret>` link, once. */
+export function takeLinkSecret(): string | undefined {
+  capturePairHash();
+  const taken = pending;
+  pending = undefined;
+  return taken;
+}
+
+/** Sends a signed `agent.set` host command (`contracts/commands.md` section 2). */
+export async function setAccount(
+  ctl: Ctl | undefined,
+  signer: { sign(p: string): Promise<Envelope> },
+  to: string,
+  agent: string,
+  account: AccountKind,
+): Promise<CmdResult | ErrorResponse> {
+  const env = await signer.sign(
+    JSON.stringify({ t: 'agent.set', n: newId(), ts: Date.now(), to, agent, account }),
+  );
+  return ctl ? ctl.request({ t: 'cmd', env }).catch(lost) : lost();
+}
+
+/** Opens the development mock node; kept at module scope so production builds tree-shake `mock.ts`. */
+async function openMock(onpush: (push: Push) => void) {
+  const { mockCtl } = await import('./mock');
+  const device = await loadDevice({ crypto, idb: () => indexedDB }).catch(() => undefined);
+  if (!device) return undefined;
+  const ctl = mockCtl(onpush);
+  const welcome = (await ctl.request({
+    t: 'hello',
+    v: 1,
+    kind: 'browser',
+    name: browserName,
+    addrs: [],
+  })) as Welcome;
+  const nodeFp = await fingerprint(crypto, decode(welcome.device)!);
+  return { device, ctl, welcome, nodeFp };
+}
+
 export type Stage = 'waiting' | 'linking' | 'accounts' | 'ready' | 'expired' | 'failed';
 export type ErrorKey = 'bad_secret' | 'unadopted' | 'not_owner' | 'lost' | 'refused' | 'storage';
 
@@ -72,16 +133,6 @@ export interface FailureInfo {
   step: 1 | 2 | 3 | 4;
   key: ErrorKey;
   code?: string;
-}
-
-const newId = () => encode(crypto.getRandomValues(new Uint8Array(16)));
-
-function entryDevice(p: string): string | undefined {
-  try {
-    return (JSON.parse(p) as { dev?: string }).dev;
-  } catch {
-    return undefined;
-  }
 }
 
 /** Drives one onboarding pairing session from secret creation (or `#pair=` link) to `agent.set`. */
@@ -120,36 +171,35 @@ export class PairingSession {
 
   /** Starts or restarts pairing with a fresh secret and a 10-minute window. */
   async start() {
-    this.#cleanup();
-    const run = (this.#runId += 1);
+    this.#stop();
+    const run = this.#runId;
     this.#resetState();
-    if (import.meta.env.DEV && this.#source === 'mock') return this.#startMock(run);
+    if (import.meta.env.DEV && this.#source === 'mock') {
+      const secret = newSecret(crypto);
+      this.#secret = secret;
+      this.code = shown(secret);
+      this.#startCountdown();
+      const ready = await openMock((push) => void this.#onPush(run, push));
+      if (!ready || !this.#active(run)) return;
+      this.#applyMock(run, ready);
+      return;
+    }
     await this.#startLive(run);
   }
 
   /** Declares the account type of one CLI on the paired node (`contracts/commands.md` section 2). */
   async setAccount(agent: string, account: AccountKind) {
-    if (!this.#ctl || !this.#device || !this.node) return;
+    if (!this.#device || !this.node || !this.agents) return;
     this.busy = true;
     this.error = undefined;
-    const payload = JSON.stringify({
-      t: 'agent.set',
-      n: newId(),
-      ts: Date.now(),
-      to: this.node.id,
-      agent,
-      account,
-    });
-    const env = await this.#device.sign(payload);
-    const answer = await this.#ctl.request({ t: 'cmd', env }).catch(() => undefined);
+    const answer = await setAccount(this.#ctl, this.#device, this.node.id, agent, account);
     this.busy = false;
-    this.#applyAccountAnswer(agent, account, answer);
+    this.#applyAccountAnswer(this.#runId, agent, account, answer);
   }
 
+  /** Stops timers and closes any open signalling session. */
   destroy() {
-    this.#runId += 1;
-    this.#discardSecret();
-    this.#cleanup();
+    this.#stop();
   }
 
   #active(run: number) {
@@ -157,21 +207,18 @@ export class PairingSession {
   }
 
   #applyAccountAnswer(
+    run: number,
     agent: string,
     account: AccountKind,
-    answer: CmdResult | ErrorResponse | undefined,
+    answer: CmdResult | ErrorResponse,
   ) {
-    if (!answer) return this.#fail(4, 'lost');
     if (answer.err) {
-      this.error = { step: 4, key: 'refused', code: answer.err.code };
+      if (answer.err.code === 'lost') this.#fail(run, 4, 'lost');
+      else this.error = { step: 4, key: 'refused', code: answer.err.code };
       return;
     }
-    this.#setAgentAccount(agent, account);
+    this.agents = this.agents!.map((item) => (item.agent === agent ? { ...item, account } : item));
     this.#syncStage();
-  }
-
-  #setAgentAccount(agent: string, account: AccountKind) {
-    this.agents = this.agents?.map((item) => (item.agent === agent ? { ...item, account } : item));
   }
 
   #resetState() {
@@ -186,13 +233,11 @@ export class PairingSession {
     this.busy = false;
     this.error = undefined;
     this.#candidateLog = undefined;
-    this.#ctl = undefined;
   }
 
-  #startCountdown(run: number) {
+  #startCountdown() {
     this.#expiresAt = Date.now() + windowSeconds * second;
     this.#timer = setInterval(() => {
-      if (!this.#active(run)) return;
       const left = Math.max(0, Math.ceil((this.#expiresAt - Date.now()) / second));
       this.remaining = left;
       if (left === 0) this.#expire();
@@ -200,8 +245,7 @@ export class PairingSession {
   }
 
   #expire() {
-    this.#discardSecret();
-    this.#cleanup();
+    this.#stop();
     this.stage = 'expired';
   }
 
@@ -214,88 +258,52 @@ export class PairingSession {
     this.#timer = undefined;
   }
 
-  #cleanup() {
-    clearInterval(this.#timer);
-    this.#timer = undefined;
+  #stop() {
+    this.#runId += 1;
+    this.#discardSecret();
     this.#session?.close();
     this.#session = undefined;
     this.#peer = undefined;
+    this.#ctl = undefined;
   }
 
-  #fail(step: 1 | 2 | 3 | 4, key: ErrorKey, code?: string) {
-    this.#discardSecret();
-    this.#cleanup();
+  #fail(run: number, step: 1 | 2 | 3 | 4, key: ErrorKey, code?: string) {
+    if (!this.#active(run)) return;
+    this.#stop();
     this.error = { step, key, code };
     this.stage = 'failed';
   }
 
-  async #startMock(run: number) {
-    if (!import.meta.env.DEV) return;
-    const secret = newSecret(crypto);
-    this.#secret = secret;
-    this.code = shown(secret);
-    this.#startCountdown(run);
-    const { mockCtl } = await import('../../lib/mock');
-    const device = await loadDevice({ crypto, idb: () => indexedDB }).catch(() => undefined);
-    if (!device || !this.#active(run)) return;
-    this.#device = device;
-    this.browserFingerprint = device.fingerprint;
-    await this.#connectMock(
-      run,
-      mockCtl((push) => void this.#onPush(run, push)),
-    );
-  }
-
-  async #connectMock(run: number, ctl: Ctl) {
-    this.#ctl = ctl;
-    const welcome = (await ctl.request({
-      t: 'hello',
-      v: 1,
-      kind: 'browser',
-      name: browserName,
-      addrs: [],
-    })) as Welcome;
-    const nodeFp = await fingerprint(crypto, decode(welcome.device)!);
-    if (!this.#active(run)) return;
+  #applyMock(run: number, ready: NonNullable<Awaited<ReturnType<typeof openMock>>>) {
+    this.#device = ready.device;
+    this.browserFingerprint = ready.device.fingerprint;
+    this.#ctl = ready.ctl;
     this.node = {
-      id: welcome.device,
-      name: welcome.name,
-      fingerprint: nodeFp,
-      version: welcome.version,
+      id: ready.welcome.device,
+      name: ready.welcome.name,
+      fingerprint: ready.nodeFp,
+      version: ready.welcome.version,
     };
     this.path = { kind: 'direct', rtt: 12, since: Date.now() };
     this.enrolled = true;
-    await this.#fetchHostInfo(run, ctl);
+    void this.#fetchHostInfo(run, ready.ctl);
   }
 
   async #startLive(run: number) {
-    if (!this.#prepareSecret(takeLinkSecret())) return;
-    this.#startCountdown(run);
-    const loaded = await this.#loadIdentity();
+    if (!this.#prepareSecret(run, takeLinkSecret())) return;
+    this.#startCountdown();
+    const loaded = await this.#loadAndSign(run);
     if (!loaded || !this.#active(run)) return;
-    await this.#openSignalling(run, loaded);
-  }
-
-  async #openSignalling(run: number, loaded: Device) {
-    this.#roomId = await room(crypto, this.#secret);
-    const self = { role: this.role, k: loaded.id, kind: 'browser', name: browserName };
-    this.#pairMsg = { t: 'pair', ...self, mac: await mac(crypto, this.#secret, self) };
-    if (!this.#active(run) || !this.#secret) return;
     this.#session = connect({
       urls: [signalUrlOf()],
       device: loaded,
-      known: (id) => this.#isKnown(id),
+      known: (id) => id === this.node?.id || Boolean(this.#ownerLog?.valid(id)),
       name: browserName,
       heard: (url, frame) => void this.#onHeard(run, url, frame),
     });
   }
 
-  #isKnown(id: string): boolean {
-    if (id === this.node?.id) return true;
-    return Boolean(this.#ownerLog?.valid(id));
-  }
-
-  #prepareSecret(linkSecret: string | undefined): boolean {
+  #prepareSecret(run: number, linkSecret: string | undefined): boolean {
     if (linkSecret === undefined) {
       this.#secret = newSecret(crypto);
       this.code = shown(this.#secret);
@@ -306,12 +314,12 @@ export class PairingSession {
       this.#secret = parseSecret(linkSecret);
       return true;
     } catch {
-      this.#fail(1, 'bad_secret');
+      this.#fail(run, 1, 'bad_secret');
       return false;
     }
   }
 
-  async #loadIdentity(): Promise<Device | undefined> {
+  async #loadAndSign(run: number): Promise<Device | undefined> {
     try {
       const device = await loadDevice({ crypto, idb: () => indexedDB });
       const owner = await loadOwner(crypto, () => indexedDB);
@@ -319,50 +327,61 @@ export class PairingSession {
       this.#ownerLog = owner.log;
       this.#addrs = owner.addrs;
       this.browserFingerprint = device.fingerprint;
+      this.#roomId = await room(crypto, this.#secret);
+      const self = { role: this.role, k: device.id, kind: 'browser', name: browserName };
+      this.#pairMsg = { t: 'pair', ...self, mac: await mac(crypto, this.#secret, self) };
       return device;
     } catch (err) {
-      this.#fail(1, err instanceof StorageBlocked ? 'storage' : 'lost');
+      this.#fail(run, 1, err instanceof StorageBlocked ? 'storage' : 'lost');
       return undefined;
     }
   }
 
   async #onHeard(run: number, url: string, frame: Heard) {
     if (!this.#active(run) || !this.#roomId) return;
+    await this.#dispatchHeard(run, url, frame);
+  }
+
+  async #dispatchHeard(run: number, url: string, frame: Heard) {
     if (frame.t === 'ready') this.#joinRoom(url);
     else if (frame.t === 'joined') this.#sendPair(url, frame.room);
     else if (frame.t === 'room') await this.#receivePair(run, frame.room, frame.data);
   }
 
   #joinRoom(url: string) {
-    if (!this.node) this.#session?.send(url, { t: 'join', room: this.#roomId });
+    if (!this.node) this.#session!.send(url, { t: 'join', room: this.#roomId });
   }
 
   #sendPair(url: string, roomId: string) {
-    if (roomId === this.#roomId && this.#pairMsg) {
-      this.#session?.send(url, { t: 'room', room: roomId, data: this.#pairMsg });
+    if (roomId === this.#roomId) {
+      this.#session!.send(url, { t: 'room', room: roomId, data: this.#pairMsg! });
     }
   }
 
+  #isCandidatePair(roomId: string, data: Pair): boolean {
+    return roomId === this.#roomId && !this.node && data.kind === 'node';
+  }
+
   async #receivePair(run: number, roomId: string, data: Pair) {
-    if (roomId !== this.#roomId || this.node || data.kind !== 'node') return;
+    if (!this.#isCandidatePair(roomId, data)) return;
     const expected = this.role === 'a' ? 'b' : 'a';
     const valid = await verifyPair(crypto, this.#secret, data, expected);
-    if (!valid || !this.#active(run) || this.node) return;
+    if (!valid || !this.#active(run)) return;
     await this.#dialNode(run, data);
   }
 
   async #dialNode(run: number, data: Pair) {
     const nodeFp = await fingerprint(crypto, decode(data.k)!);
-    if (!this.#active(run) || !this.#session) return;
+    if (!this.#active(run) || this.node) return;
     this.node = { id: data.k, name: data.name, fingerprint: nodeFp };
     this.stage = 'linking';
-    this.#peer = this.#session.peer(
+    this.#peer = this.#session!.peer(
       data.k,
       () => ({
         online: (ctl, welcome) => void this.#onOnline(run, ctl, welcome),
         push: (frame) => void this.#onPush(run, frame),
         offline: () => this.#onOffline(run),
-        refused: (code) => this.#fail(3, 'refused', code),
+        refused: (code) => this.#fail(run, 3, 'refused', code),
       }),
       (path) => {
         if (this.#active(run)) this.path = path;
@@ -371,23 +390,23 @@ export class PairingSession {
   }
 
   async #onOnline(run: number, ctl: Ctl, welcome: Welcome) {
-    if (!this.#active(run) || !this.node) return;
+    if (!this.#active(run)) return;
     this.#ctl = ctl;
     this.#addrs[welcome.device] = welcome.addrs;
-    this.node = { ...this.node, name: welcome.name, version: welcome.version };
+    this.node = { ...this.node!, name: welcome.name, version: welcome.version };
     if (!this.enrolled) await this.#beginEnrolment(run, ctl, welcome);
   }
 
   async #beginEnrolment(run: number, ctl: Ctl, welcome: Welcome) {
     if (this.role === 'a') return this.#enrolNode(run, ctl);
     if (welcome.owner) return this.#finishEnrolment(run, ctl, welcome);
-    if (this.#ownerLog) this.#fail(3, 'unadopted');
+    if (this.#ownerLog) this.#fail(run, 3, 'unadopted');
   }
 
   async #enrolNode(run: number, ctl: Ctl) {
+    const peer = this.#peer!;
     const log = await this.#ensureNodeInLog();
-    if (!this.#active(run) || !this.#peer) return;
-    for (const frame of devlogFrames(log.user, log.entries)) this.#peer.send(frame);
+    peer.send({ t: 'devlog', user: log.user, entries: [...log.entries] });
     await this.#confirmOwner(run, ctl);
   }
 
@@ -427,10 +446,9 @@ export class PairingSession {
     const answer = await ctl
       .request({ t: 'hello', v: 1, kind: 'browser', name: browserName, addrs: [] })
       .catch(() => undefined);
-    if (!this.#active(run)) return;
-    if (!answer) return this.#fail(3, 'lost');
-    if (answer.err) return this.#fail(3, 'refused', answer.err.code);
-    if (!answer.owner) return this.#fail(3, 'not_owner');
+    if (!answer) return this.#fail(run, 3, 'lost');
+    if (answer.err) return this.#fail(run, 3, 'refused', answer.err.code);
+    if (!answer.owner) return this.#fail(run, 3, 'not_owner');
     await this.#finishEnrolment(run, ctl, answer);
   }
 
@@ -447,32 +465,20 @@ export class PairingSession {
   async #onDevlog(run: number, frame: Devlog) {
     if (!this.#canAdopt()) return;
     const log = (this.#candidateLog ??= new DeviceLog(crypto, frame.user));
-    const batch = await this.#applyEntries(log, frame.entries);
-    if (!batch.ok) return this.#fail(3, 'unadopted');
-    if (this.#active(run) && batch.mentionsMe) await this.#adoptLog(run, log);
-  }
-
-  async #applyEntries(
-    log: DeviceLog,
-    entries: Envelope[],
-  ): Promise<{ ok: boolean; mentionsMe: boolean }> {
-    let mentionsMe = false;
-    for (const env of entries) {
+    for (const env of frame.entries) {
       const ok = await log.apply(env).then(
         () => true,
         () => false,
       );
-      if (!ok) return { ok: false, mentionsMe: false };
-      if (entryDevice(env.p) === this.#device?.id) mentionsMe = true;
+      if (!ok) return this.#fail(run, 3, 'unadopted');
     }
-    return { ok: true, mentionsMe };
+    if (log.valid(this.#device!.id)) await this.#adoptLog(run, log);
   }
 
   async #adoptLog(run: number, log: DeviceLog) {
-    if (!log.adopts(this.#device!.id, this.node!.id)) return this.#fail(3, 'unadopted');
     this.#ownerLog = log;
     await saveOwner(() => indexedDB, log, this.#addrs);
-    if (this.#active(run)) await this.#confirmOwner(run, this.#ctl!);
+    await this.#confirmOwner(run, this.#ctl!);
   }
 
   async #finishEnrolment(run: number, ctl: Ctl, welcome: Welcome) {
@@ -481,33 +487,29 @@ export class PairingSession {
     if (!this.#active(run)) return;
     this.enrolled = true;
     this.#discardSecret();
-    void navigator.storage?.persist?.()?.catch(() => undefined);
+    void navigator.storage?.persist?.().catch(() => undefined);
     await this.#fetchHostInfo(run, ctl);
   }
 
   async #fetchHostInfo(run: number, ctl: Ctl) {
     const info = await ctl.request({ t: 'host.info' }).catch(() => undefined);
-    if (!this.#active(run)) return;
-    if (!info) return this.#fail(4, 'lost');
-    if (info.err) return this.#fail(4, 'refused', info.err.code);
-    this.#applyHostInfo(info);
+    if (!info) return this.#fail(run, 4, 'lost');
+    if (info.err) return this.#fail(run, 4, 'refused', info.err.code);
+    if (this.#active(run)) this.#applyHostInfo(info);
   }
 
   #applyHostInfo(info: HostInfo | HostInfoPush) {
-    if (this.node) {
-      this.node = { ...this.node, name: info.name, os: info.os, version: info.version };
-    }
+    this.node = { ...this.node!, name: info.name, os: info.os, version: info.version };
     this.agents = info.agents;
     this.#syncStage();
   }
 
   #syncStage() {
-    if (!this.agents) return;
-    const undeclared = this.agents.some((item) => item.account === null);
+    const undeclared = this.agents!.some((item) => item.account === null);
     this.stage = undeclared ? 'accounts' : 'ready';
   }
 
   #onOffline(run: number) {
-    if (this.#active(run) && !this.agents) this.#fail(3, 'lost');
+    if (this.#active(run) && !this.agents) this.#fail(run, 3, 'lost');
   }
 }

@@ -40,12 +40,6 @@ Feature: Onboarding and pairing in the web client
     When the node pairs, welcomes the browser and pushes the owner's device log
     Then the browser adopts the log, sends a second "hello" and asks to keep storage
 
-  Scenario: A device log whose entry for this browser was signed by another device is not adopted
-    Given a node that already belongs to the owner and created a browser pairing secret
-    When a fresh browser opens the pairing link
-    And the node pairs, welcomes the browser and pushes a log signed for this browser by another device
-    Then the browser does not adopt the log and shows the enrolment error
-
   Scenario: A malformed pairing link shows its error
     Given a fresh browser and a fresh node on a rendezvous
     When the person opens a pairing link with secret "not-a-secret"

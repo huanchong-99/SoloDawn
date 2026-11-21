@@ -617,6 +617,27 @@ kbd,
     box-shadow: inset 3px 0 0 var(--dawn);
   }
 }
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+
+  .kind {
+    font-weight: 600;
+    font-size: var(--fs-sm);
+    color: var(--text);
+  }
+  h3 {
+    flex: 1;
+    min-width: 12ch;
+  }
+  .badge:last-child {
+    margin-left: auto;
+  }
+}
 
 /* 6 forms */
 .seg {
@@ -720,6 +741,37 @@ kbd,
 @media (pointer: coarse) {
   .seg label {
     min-height: 38px;
+  }
+}
+/* Account-type radio options (onboarding and computer cards). Positioned so a visually hidden
+   legend inside the fieldset stays anchored to the card instead of the document. */
+.acct {
+  position: relative;
+  display: grid;
+  gap: var(--sp-2);
+
+  label {
+    display: flex;
+    gap: var(--sp-3);
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    cursor: pointer;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+  }
+  label:has(:checked) {
+    border-color: var(--sky);
+    background: var(--sky-soft);
+  }
+  input {
+    margin-top: 4px;
+    accent-color: var(--sky);
+  }
+  b {
+    display: block;
+    color: var(--text);
+    font-size: 14px;
   }
 }
 
@@ -839,6 +891,114 @@ kbd,
     min-width: 22px;
     justify-content: center;
     padding: 0 6px;
+  }
+}
+/* Shape and colour change together so state is never carried by colour alone. */
+.st {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  min-width: 0;
+
+  i {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    color: var(--text-3);
+    background: currentColor;
+  }
+  &[data-st='working'] i {
+    color: var(--sky);
+    animation: pulse 2s var(--ease) infinite;
+  }
+  &[data-st='needyou'] {
+    color: var(--dawn-text);
+    font-weight: 500;
+
+    i {
+      color: var(--dawn);
+    }
+  }
+  &[data-st='waiting'] i {
+    background: none;
+    border: 2px solid currentColor;
+  }
+  &[data-st='sleeping'] {
+    color: var(--text-3);
+
+    i {
+      width: 10px;
+      height: 10px;
+      background: none;
+      box-shadow: inset -3px -2px 0 0 currentColor;
+    }
+  }
+  &[data-st='offline'] {
+    color: var(--text-3);
+
+    i {
+      background: none;
+      border: 1.5px dashed currentColor;
+    }
+  }
+  &[data-st='paused'] i {
+    border-radius: 1px;
+    background: linear-gradient(90deg, currentColor 34%, transparent 34% 66%, currentColor 66%);
+  }
+  &[data-st='takeover'] {
+    color: var(--text);
+    font-weight: 500;
+
+    i {
+      border-radius: 2px;
+      color: var(--text);
+    }
+  }
+  &[data-st='ok'] i {
+    color: var(--ok);
+  }
+  &[data-st='limited'] i {
+    color: var(--dawn);
+    border-radius: 2px;
+    transform: rotate(45deg);
+  }
+  &[data-st='down'] i {
+    color: var(--danger);
+    background: none;
+    border: 2px solid currentColor;
+  }
+  &[data-st='linking'] i {
+    color: var(--sky);
+    animation: pulse 1.2s var(--ease) infinite;
+  }
+}
+p.st {
+  display: flex;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.82);
+  }
+}
+.note:not(:where(.msg)) {
+  display: flex;
+  gap: var(--sp-2);
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--tone-soft, var(--surface-2));
+  color: var(--text);
+  font-size: var(--fs-sm);
+
+  .i {
+    color: var(--tone-text, var(--text-3));
+    margin-top: 2px;
+  }
+  b {
+    color: var(--tone-text, inherit);
   }
 }
 .sec-title {

@@ -1,13 +1,17 @@
 <script lang="ts">
   import Icon from '../Icon.svelte';
+  import {
+    accounts,
+    accountLabel,
+    cliName,
+    type PairingSession,
+    type Stage,
+  } from '../../lib/onboard.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { href } from '../../lib/route.svelte';
-  import PairingIcon from './PairingIcon.svelte';
-  import { cliName, type AccountKind, type PairingSession, type Stage } from './session.svelte';
 
   let { session }: { session: PairingSession } = $props();
 
-  const accounts: AccountKind[] = ['personal', 'team', 'api_key'];
   const tones: Partial<Record<Stage, string>> = {
     linking: 'sky',
     accounts: 'dawn',
@@ -27,7 +31,7 @@
   const nodeLine = $derived(
     session.node
       ? [session.node.name, session.node.os, session.node.version].filter(Boolean).join(' · ')
-      : t('pairing.step.node_wait'),
+      : t(session.role === 'b' ? 'pairing.step.node_wait_browser' : 'pairing.step.node_wait'),
   );
   const connectLine = $derived(
     !session.enrolled
@@ -46,7 +50,9 @@
     return t('pairing.step.ai_found').replace('{list}', names);
   });
 
-  function stepState(n: 1 | 2 | 3 | 4): 'done' | 'active' | 'error' | 'todo' {
+  type StepMark = 'done' | 'active' | 'needyou' | 'error' | 'todo';
+
+  function stepState(n: 1 | 2 | 3 | 4): StepMark {
     if (session.error?.step === n) return 'error';
     if (n <= 2) {
       if (session.node) return 'done';
@@ -57,6 +63,7 @@
       return session.node && session.stage === 'linking' ? 'active' : 'todo';
     }
     if (session.stage === 'ready') return 'done';
+    if (session.stage === 'accounts') return 'needyou';
     return session.enrolled && session.stage !== 'failed' ? 'active' : 'todo';
   }
 
@@ -67,9 +74,11 @@
   );
 </script>
 
-{#snippet marker(state: 'done' | 'active' | 'error' | 'todo')}
+{#snippet marker(state: StepMark)}
   {#if state === 'done'}
     <span class="mark ok"><Icon name="check" /></span>
+  {:else if state === 'needyou'}
+    <span class="st step-dot" data-st="needyou" aria-hidden="true"><i></i></span>
   {:else if state === 'active'}
     <span class="spin" aria-hidden="true"></span>
   {:else if state === 'error'}
@@ -134,15 +143,9 @@
   {/if}
 
   <p class="note">
-    <PairingIcon name="info" sm />
+    <Icon name="info" sm />
     <span>{t('pairing.status.relay_note')}</span>
   </p>
-
-  {#if session.stage === 'ready'}
-    <a class="btn btn-dawn done-btn" href={href('groups')}>{t('pairing.done')}</a>
-  {:else if session.stage === 'expired' || session.stage === 'failed'}
-    <button class="btn" onclick={() => void session.start()}>{t('pairing.prompt.renew')}</button>
-  {/if}
 </section>
 
 {#each session.agents ?? [] as item (item.agent)}
@@ -165,7 +168,7 @@
             onchange={() => void session.setAccount(item.agent, acct)}
           />
           <span>
-            <b>{t(`pairing.acct.${acct}`)}</b>
+            <b>{accountLabel(acct)}</b>
             <span>{t(`pairing.acct.${acct}_body`)}</span>
           </span>
         </label>
@@ -175,61 +178,11 @@
   </section>
 {/each}
 
+{#if session.stage === 'ready'}
+  <a class="btn btn-dawn done-btn" href={href('groups')}>{t('pairing.done')}</a>
+{/if}
+
 <style>
-  .card-head {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    flex-wrap: wrap;
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-  }
-  .kind {
-    font-weight: 600;
-    font-size: var(--fs-sm);
-    color: var(--text);
-  }
-  .card-head .badge {
-    margin-left: auto;
-  }
-  .st {
-    display: inline-flex;
-    align-items: center;
-  }
-  .st i {
-    position: relative;
-    flex: none;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    color: var(--text-3);
-    background: currentColor;
-  }
-  .st[data-st='waiting'] i {
-    background: none;
-    border: 2px solid currentColor;
-  }
-  .st[data-st='linking'] i {
-    color: var(--sky);
-    animation: breatheDot 1.2s var(--ease) infinite;
-  }
-  .st[data-st='needyou'] i {
-    color: var(--dawn);
-  }
-  .st[data-st='ok'] i {
-    color: var(--ok);
-  }
-  .st[data-st='down'] i {
-    color: var(--danger);
-    background: none;
-    border: 2px solid currentColor;
-  }
-  @keyframes breatheDot {
-    50% {
-      opacity: 0.35;
-      transform: scale(0.82);
-    }
-  }
   .link-steps li {
     display: grid;
     grid-template-columns: 22px minmax(0, 1fr);
@@ -249,6 +202,12 @@
   }
   .link-steps .todo {
     color: var(--text-3);
+  }
+  .step-dot {
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
   }
   .mark {
     display: inline-flex;
@@ -273,47 +232,7 @@
       transform: rotate(360deg);
     }
   }
-  .note {
-    display: flex;
-    gap: var(--sp-2);
-    padding: 10px 12px;
-    border-radius: var(--r-md);
-    background: var(--tone-soft, var(--surface-2));
-    color: var(--text);
-    font-size: var(--fs-sm);
-  }
-  .note :global(.i) {
-    color: var(--tone-text, var(--text-3));
-    margin-top: 2px;
-  }
   .done-btn {
     width: 100%;
-  }
-  .acct {
-    display: grid;
-    gap: var(--sp-2);
-  }
-  .acct label {
-    display: flex;
-    gap: var(--sp-3);
-    padding: 10px 12px;
-    border: 1px solid var(--line);
-    border-radius: var(--r-md);
-    cursor: pointer;
-    font-size: var(--fs-sm);
-    color: var(--text-2);
-  }
-  .acct label:has(:checked) {
-    border-color: var(--sky);
-    background: var(--sky-soft);
-  }
-  .acct input {
-    margin-top: 4px;
-    accent-color: var(--sky);
-  }
-  .acct b {
-    display: block;
-    color: var(--text);
-    font-size: 14px;
   }
 </style>

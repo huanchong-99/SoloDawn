@@ -1,10 +1,9 @@
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';
   import Icon from '../components/Icon.svelte';
-  import PairingIcon from '../components/pairing/PairingIcon.svelte';
   import StatusPanel from '../components/pairing/StatusPanel.svelte';
-  import { PairingSession, promptFor } from '../components/pairing/session.svelte';
   import type { Net } from '../lib/net.svelte';
+  import { PairingSession, promptFor } from '../lib/onboard.svelte';
   import {
     isDark,
     otherLang,
@@ -18,6 +17,10 @@
 
   let { net }: { params: Record<string, string | undefined>; net: Net } = $props();
 
+  const maskedCode = '••••-••••-••••-••••';
+  const focusable = (el: HTMLElement) => {
+    el.tabIndex = 0;
+  };
   const session = new PairingSession(untrack(() => net.source));
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
@@ -27,9 +30,7 @@
     session.destroy();
   });
 
-  const promptText = $derived(
-    session.code ? promptFor(prefs.lang, session.code) : t('pairing.countdown.expired'),
-  );
+  const promptText = $derived(promptFor(prefs.lang, session.code || maskedCode));
 
   const countdownText = $derived.by(() => {
     if (session.enrolled) return t('pairing.countdown.used');
@@ -72,11 +73,11 @@
   <section class="hero">
     {#if session.role === 'b'}
       <span class="badge">{t('pairing.browser.step')}</span>
-      <h2>{t('pairing.browser.title')}</h2>
+      <h1>{t('pairing.browser.title')}</h1>
       <p>{t('pairing.browser.body')}</p>
     {:else}
       <span class="badge">{t('pairing.hero.step')}</span>
-      <h2>{t('pairing.hero.title')}</h2>
+      <h1>{t('pairing.hero.title')}</h1>
       <p>{t('pairing.hero.body')}</p>
     {/if}
   </section>
@@ -100,7 +101,7 @@
             <h2 class="kind grow" id="prompt-h">{t('pairing.prompt.title')}</h2>
             {#if session.code}
               <button class="btn btn-dawn" onclick={copyPrompt}>
-                {#if copied}<Icon name="check" sm />{:else}<PairingIcon name="copy" sm />{/if}
+                <Icon name={copied ? 'check' : 'copy'} sm />
                 <span>{t(copied ? 'pairing.prompt.copied' : 'pairing.prompt.copy')}</span>
               </button>
             {:else if !session.enrolled}
@@ -109,9 +110,9 @@
               </button>
             {/if}
           </header>
-          <pre id="prompt">{promptText}</pre>
+          <pre id="prompt" use:focusable class:muted={!session.code}>{promptText}</pre>
           <footer class="hint">
-            <PairingIcon name="clock" sm />
+            <Icon name="clock" sm />
             <span>{countdownText}</span>
           </footer>
         </section>
@@ -155,11 +156,11 @@
         <span>{t('pairing.trust.1.body')}</span>
       </li>
       <li>
-        <b><PairingIcon name="direct" sm /><span>{t('pairing.trust.2.title')}</span></b>
+        <b><Icon name="direct" sm /><span>{t('pairing.trust.2.title')}</span></b>
         <span>{t('pairing.trust.2.body')}</span>
       </li>
       <li>
-        <b><PairingIcon name="key" sm /><span>{t('pairing.trust.3.title')}</span></b>
+        <b><Icon name="key" sm /><span>{t('pairing.trust.3.title')}</span></b>
         <span>{t('pairing.trust.3.body')}</span>
       </li>
     </ul>
@@ -214,7 +215,7 @@
   .hero > * {
     position: relative;
   }
-  .hero h2 {
+  .hero h1 {
     font-size: var(--fs-3xl);
     letter-spacing: -0.03em;
     max-width: 16em;

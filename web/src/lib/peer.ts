@@ -15,7 +15,6 @@ import {
   type Devlog,
   type Envelope,
   type ErrorResponse,
-  type PTYResize,
   type Push,
   type RequestType,
   type RVJoin,
@@ -44,7 +43,6 @@ export type Heard = Parameters<Parameters<typeof rendezvous>[3]>[1];
 type ICEServer = RVReady['ice'][number];
 type Timer = ReturnType<typeof setTimeout>;
 type Request = { t: RequestType; [field: string]: unknown };
-type ClientPush = Devlog | PTYResize;
 type Response = AnswerTo<RequestType> | ErrorResponse;
 /** One entry of the browser's statistics, whose fields depend on its type. */
 type Stat = Record<string, any>;
@@ -378,7 +376,7 @@ export class Connection {
   }
 
   /** Sends a push on an open ctl. Throws a RangeError when the frame exceeds 60 KiB. */
-  send(frame: ClientPush) {
+  send(frame: Devlog) {
     if (utf8(JSON.stringify(frame)).length > ctlLimit) {
       throw new RangeError('ctl frame exceeds 60 KiB');
     }
@@ -577,7 +575,7 @@ export class Peer {
   }
 
   /** Sends a push on the connection that serves, if any. */
-  send(frame: ClientPush) {
+  send(frame: Devlog) {
     this.#conn?.send(frame);
   }
 
