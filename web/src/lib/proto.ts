@@ -1029,11 +1029,9 @@ export type Beacon = v.InferOutput<typeof Beacon>;
 // of it; the schemas are here because every wire example is read by both test suites.
 
 /** An inbox item for an AI or its host, recorded when the home queued it. `item` numbers it for
- *  `ack`; `task` and `msg` are ids. Which fields an item of each `why` has is in the table of
- *  that section. */
+ *  `ack` (`items[].item.item`); `ai`, `task` and `msg` are ids. Which fields an item of each `why`
+ *  has is in the table of that section. */
 export const Item = v.object({
-  g: Id,
-  to: str,
   item: int,
   ai: Id,
   why: str,

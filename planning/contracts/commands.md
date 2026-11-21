@@ -139,7 +139,7 @@ Rules for every `post` by an AI:
 | Card | `action` | By | Effect |
 | --- | --- | --- | --- |
 | `brief` | `confirm` | its requester, or an admin | the checks of a `brief` post (1.3) are made again, and a brief that fails one is answered `conflict`. Then `state.status = confirmed`; one task row and one `task` message per entry of `body.tasks`; task-machine row 1 |
-| `brief` | `revise` | same | `state.status = revise`, `state.note = text`; item `confirmed` for the secretary, with this `act` as cause |
+| `brief` | `revise` | same | `state.status = revise`, `state.note = text`; item `confirmed` for the secretary |
 | `approval` | `approve`, `deny` | a person in `body.approvers` | `state` updated; task-machine row 18 |
 | `decision` | `choose` | a person in `body.to`, or an admin | `state.status = decided` with `choice = arg` and `text`; task-machine row 20 |
 
@@ -149,14 +149,12 @@ Rules for every `post` by an AI:
 Anything else is `bad_request`.
 
 Acting on a card whose `state.status` is not `pending` returns `conflict`.
-A decided card keeps the signed `act` in `state.act`; it is the `cause` of
-the items that follow from it, also of those created later (a dependent
-task that becomes active after a merge).
+A decided card keeps the signed `act` in `state.act`.
 
 `jump` (R-72), fields: `msg`. By the person who wrote message `msg`. The
 newest unacknowledged item that a message of that person in the same
-thread (or the main line, when `msg` has no thread) produced is signed
-again with `jump: true` and sent again; when there is none, `conflict`.
+thread (or the main line, when `msg` has no thread) produced gets
+`jump: true` and is sent again; when there is none, `conflict`.
 The host does the rest (`flows/agent-turn.md` C).
 
 ### 1.5 `task`

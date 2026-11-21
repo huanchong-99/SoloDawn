@@ -178,26 +178,27 @@ never a `gone` marker, which has no `pos` (`contracts/rows.md`).
 ## 6. Inbox (home to host)
 
 The home decides which AI must see what and queues an item per AI. By the
-2026-11-21 slimming decision (A-1, A-3), an inbox item carries a plain
-unsigned `item` object with no `env` signature and no `cause`.
+owner's decision of 2026-11-21 (no attack-and-defence code), an inbox item
+carries a plain unsigned `item` object with no `env` signature, no `cause`,
+no `g` and no `to`.
 
 ```json
 {"t":"inbox","g":"Qm1…","items":[
-  {"item":{"g":"Qm1…","to":"<host device>","item":4411,"ai":"<member id>","why":"review","task":"t12…","commit":"9f2c1ab"},
+  {"item":{"item":4411,"ai":"<member id>","why":"review","task":"t12…","commit":"9f2c1ab"},
    "task":{"r":"task", …}}
 ]}
 ```
 
 `item` is the plain item object, built by the home in the transaction that
 queues it, and stored: what is sent later is what was decided then,
-whatever the task has become. It always has `g`, `to`, `item`, `ai` and
-`why`, and the fields the table gives its `why`, each there exactly when
-the table says. `item` (inside `item`) is the number that `ack` names. In
-`item`, `task` and `msg` are the ids of those rows, and the optional fields
-are `task`, `msg`, `commit`, `pr`, `jump`, `code` and `detail`. Beside
-`item`, `msg` and `task` are optional copies of the rows `item` names,
-taken when the item is sent, to build the turn from (`msg.env` is the
-author's own envelope); `items` is `[]` when a frame has none.
+whatever the task has become. It always has `item`, `ai` and `why`, and the
+fields the table gives its `why`, each there exactly when the table says.
+`ack.item` is `items[].item.item`. In `item`, `task` and `msg` are the ids
+of those rows, and the optional fields are `task`, `msg`, `commit`, `pr`,
+`jump`, `code` and `detail`. Beside `item`, `msg` and `task` are optional
+copies of the rows `item` names, taken when the item is sent, to build the
+turn from (`msg.env` is the author's own envelope); `items` is `[]` when a
+frame has none.
 
 | `why` | `task` | `msg` | Other |
 | --- | --- | --- | --- |
@@ -212,18 +213,17 @@ author's own envelope); `items` is `[]` when a frame has none.
 | `notice` | when the case is about a task | the message that records the case, when there is one | `code`; `detail` where the case has one (`contracts/task-machine.md` section 5) |
 
 - **What a host accepts (step 1).** The frame comes from the home of that
-  group, `to` is this host and `ai` runs here (2026-11-21 slimming A-1,
-  A-2, A-3: no item signature and no `cause` check).
-- **Still current.** Whether an item is for this host and one of its AIs is
-  checked when it arrives; whether it is still true is checked when the
-  host **uses** it, after it has read the group's state on this connection.
-  For a work item (`assign`, `checks`, `reviewed`, `review`, `resume`,
-  `merge`): the task is active, the AI still has that role, and for
-  `review` and `merge` the task is at that step with the item's commit. If
-  not, the host refuses it (audit `refused`, then `ack`). A `notice` is
-  delivered whatever the task has become. The home pushes a row change
-  before the items it produces, and deletes items that a later change made
-  pointless.
+  group and `ai` runs here (owner's decision of 2026-11-21: no
+  attack-and-defence code, so no item signature, no `cause` check and no
+  `to` check).
+- **Still current.** Whether it is still true is checked when the host
+  **uses** it, after it has read the group's state on this connection. For
+  a work item (`assign`, `checks`, `reviewed`, `review`, `resume`, `merge`):
+  the task is active, the AI still has that role, and for `review` and
+  `merge` the task is at that step with the item's commit. If not, the host
+  refuses it (audit `refused`, then `ack`). A `notice` is delivered
+  whatever the task has become. The home pushes a row change before the
+  items it produces, and deletes items that a later change made pointless.
 - The host answers `{"t":"ack","g":"…","item":4411}` when it delivers the
   item to the session or refuses it. The home deletes an acknowledged item
   only if the acknowledging connection is the item's host. On every `hello`

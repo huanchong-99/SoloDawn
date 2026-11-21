@@ -20,12 +20,11 @@ type InboxItem struct {
 	Task *TaskRow        `json:"task,omitempty"`
 }
 
-// Item is an inbox item for an AI or its host. Item numbers it for ack; Task
-// and Msg are ids. Which fields an item of each Why has is in the table of
+// Item is an inbox item for an AI or its host. Item numbers it for ack
+// (items[].item.item); AI is the target member, and Task and Msg are ids.
+// Which fields an item of each Why has is in the table of
 // contracts/datachannel.md section 6; a host judges that when it uses the item.
 type Item struct {
-	Group  ID     `json:"g"`
-	To     string `json:"to"`
 	Item   int64  `json:"item"`
 	AI     ID     `json:"ai"`
 	Why    string `json:"why"`

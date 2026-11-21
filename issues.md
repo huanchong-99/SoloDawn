@@ -6,6 +6,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-21 · deviation · Dead `cause` path in `internal/home` and `internal/store`
+
+- Symptom: the home and store still carry, write and read an item `cause`, although `P-1b` re-froze `InboxItem` and `Item` without `cause` under the owner's 2026-11-21 decision (no attack-and-defence code). Nothing on the wire or on the host reads it.
+- Cause: `internal/home/home.go:186` (`Item.Cause`), `internal/home/run_group.go:254, 283-288` (`runCause`), `internal/home/cmd_brief.go:318-322, 350, 363`, `internal/home/machine.go:110` (with their tests in `cmd_brief_test.go:297-298, 343, 431`, `home_test.go:318, 332`, `run_push_test.go:174, 195-198, 324` and `run_disk_test.go:69-70`) and `internal/store/inbox.go:9, 17, 33, 43` together with the `inbox.cause` column were built before `P-1b` dropped `cause`.
+- Status: open; owner **HM-7**, which removes the dead `cause` fields, functions, tests and `inbox.cause` column.
+
+### 2026-11-21 · limitation · Postponed step-2 contracts still assume an item-level `cause`
+
+- Symptom: the step-2 planning documents (`planning/contracts/step-2/authority.md:36, 85, 92-93, 104, 108`, `planning/contracts/step-2/confirm.md:145-147, 196-223, 244`, `planning/contracts/step-2/watch-team.md:46-67` and `planning/steps/parallel-plan-step-2-3.md:20-21, 27`) require an inbox item to carry a signed `cause` when a group home belongs to another person, whereas `P-1b` removed `cause` from step-1 items.
+- Cause: step 2 is postponed while step 1 ships with plain unsigned items under the owner's 2026-11-21 decision.
+- Status: open, without effect in step 1. When step 2 resumes, items will need an authority field again.
+
 ### 2026-11-21 · limitation · The jobs of a group in the home's run loop have no bound
 
 - Symptom: not observed. A client that sends `cmd` frames faster than its group applies them makes the list of that group's jobs grow, and with it the memory of the node, until the client stops. A group applies a command in one transaction of the store, so this needs a client that sends on purpose or a store that has become slow. Ticks and events are jobs as well: while a group does not keep up, each tick of `LoopConfig.Every` and each `Event` adds one job to its list.

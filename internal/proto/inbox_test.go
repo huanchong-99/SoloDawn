@@ -9,7 +9,7 @@ import (
 
 // item starts a plain inbox item for the example AI.
 func item(why string, number int64) Item {
-	return Item{Group: ID(group), To: host, Item: number, AI: ID(agent), Why: why}
+	return Item{Item: number, AI: ID(agent), Why: why}
 }
 
 func (i Item) about(task, msg string) Item {
@@ -66,7 +66,7 @@ func TestInboxGoldens(t *testing.T) {
 
 	// What a host reads from an item: the plain item, and beside it the rows that item names.
 	var read Inbox
-	if err := Decode(example(t, "inbox"), &read); err != nil || read.Items[0].Item != assign || inbox.Items[0].Item != assign {
+	if err := Decode(example(t, "inbox"), &read); err != nil || read.Items[0].Item != assign {
 		t.Fatalf("inbox item read as %+v, %v", read, err)
 	}
 	var copied MessageRow[TaskBody, NoCard]
