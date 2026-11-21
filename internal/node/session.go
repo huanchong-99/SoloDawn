@@ -250,8 +250,8 @@ func (s *Sessions) sesSync(_ context.Context, conn *home.Conn, _ Ctl, _ string, 
 }
 
 func (s *Sessions) sesFetch(_ context.Context, conn *home.Conn, _ Ctl, _ string, _ int64, data json.RawMessage) (any, error) {
-	var req home.Fetch
-	if proto.Decode(data, &req) != nil {
+	req, ok := decodeFetch(data)
+	if !ok {
 		return nil, &host.Error{Code: "bad_request", Message: "invalid fetch frame"}
 	}
 	s.cfg.Home.Fetch(conn, req)
