@@ -8,15 +8,9 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-21 · deviation · The local link routes only `cmd` requests until `sync`, `fetch` and `ack` land
 
-- Symptom: on `LocalLink`, a `sync` or `fetch` request from the host is answered `bad_request`, and an `ack` push is dropped; row subscriptions on the local link go through `LocalLink.Watch` for now.
-- Cause: `home.Loop` on `rebuild` exposes `Cmd` and `Watch` only (`internal/home/run.go:313`, `:357`); `Sync` (HM-2), `Fetch` (HM-3) and `Ack` with signed `inbox` frames (HM-7) are built in separate units. `LocalLink.toHome` (`internal/node/local.go:141`) dispatches `cmd` to `Loop.Cmd` and answers other requests `bad_request` per `planning/contracts/datachannel.md` section 2.
-- Status: open until HM-2, HM-3 and HM-7 are wired into `LocalLink` (N-4 / I-1 / I-3).
-
-### 2026-11-21 · limitation · `Loop.Inbox` marks only the groups that exist when it is called
-
-- Symptom: after `Loop.Inbox(conn)` has made a host connection the inbox taker (`internal/home/run.go:366`), a group created later on that home spawns its `runGroup` with `seat.inbox` false (`internal/home/run_group.go:52`) and does not deliver queued items to `conn` until `Loop.Inbox(conn)` is called again (such as on a new `hello`).
-- Cause: `Conn` records `welcomed` across groups (`internal/home/run_conn.go:34`), whereas `inbox` is kept per group seat (`internal/home/run_group.go:31`) and `spawn` calls `seat`, not `inbox` (`internal/home/run.go:162`).
-- Status: open, for HM-7 or N-4.
+- Symptom: on `LocalLink`, a `sync` or `fetch` request from the host is answered `bad_request`, and an `ack` push is dropped; tests subscribe to row pushes through `LocalLink.Watch` (`internal/node/local.go:66`), which is temporary until `sync` is routed to `home.Loop`.
+- Cause: `home.Loop` on `rebuild` exposes `Cmd` and `Watch` only (`internal/home/run.go:313`, `:357`); `Sync` (HM-2, #205), `Fetch` (HM-3) and `Ack` with `inbox` frames (HM-7) are built in separate units. `LocalLink.toHome` (`internal/node/local.go:127`) dispatches `cmd` to `Loop.Cmd` and answers other requests `bad_request` per `planning/contracts/datachannel.md` section 2.
+- Status: open. Route `sync` to `Loop` and delete `LocalLink.Watch` once HM-2 (#205) merges; wire `fetch` and `ack` once HM-3 and HM-7 merge (N-4 / I-1 / I-3).
 
 ### 2026-11-21 · limitation · The jobs of a group in the home's run loop have no bound
 
@@ -387,6 +381,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-21 · bug · `Loop.Inbox` marked only the groups that existed when it was called
+
+- Symptom: after `Loop.Inbox(conn)` had made a host connection the inbox taker (`internal/home/run.go:366`), a group created later on that home spawned its `runGroup` with `seat.inbox` false (`internal/home/run_group.go:52`) and did not deliver queued items to `conn` until `Loop.Inbox(conn)` was called again (which `LocalLink` never does, because it sends no `hello`).
+- Cause: `Conn` recorded `welcomed` across groups (`internal/home/run_conn.go:34`), whereas `inbox` was kept per group seat (`internal/home/run_group.go:31`) and `spawn` called `seat` with `inbox` false (`internal/home/run.go:162`).
+- Status: resolved in #209: `Conn.taker` (`internal/home/run_conn.go:36`) is set under `Loop.mu` in `Loop.Inbox` (`internal/home/run.go:366`), and `runGroup.seat` initialises `runSeat{inbox: c.taker}` (`internal/home/run_group.go:53`), covering both local and remote hosts. Test: `TestLocalLinkInboxForGroupCreatedAfterAttach`.
 
 ### 2026-11-21 · bug · A missing clone folder was reported as a failed start of git
 

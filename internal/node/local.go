@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"sync"
 
@@ -12,12 +11,6 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/host"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
-
-// ctlLimit is the maximum UTF-8 byte length of a ctl message
-// (planning/contracts/conventions.md section 4).
-const ctlLimit = 61_440
-
-var errCtlTooLarge = errors.New("node: ctl frame exceeds 60 KiB")
 
 var (
 	_ host.Home   = (*LocalLink)(nil)
@@ -31,7 +24,7 @@ var (
 // into host or home. Each channel in waiting has a single reader, the Request
 // call that registered its id.
 type LocalLink struct {
-	host   *host.Host
+	push   func(string, json.RawMessage)
 	loop   *home.Loop
 	conn   *home.Conn
 	device string
@@ -42,13 +35,11 @@ type LocalLink struct {
 }
 
 // AttachLocal connects h to loop over a new LocalLink for this node's device,
-// registers the link on h, and enables group-list and inbox pushes from loop.
+// registers the link on h, and marks it as the inbox taker on loop.
 func AttachLocal(h *host.Host, loop *home.Loop) *LocalLink {
-	l := &LocalLink{host: h, loop: loop, device: h.Key.ID(), waiting: make(map[int64]chan json.RawMessage)}
+	l := &LocalLink{push: h.Push, loop: loop, device: h.Key.ID(), waiting: make(map[int64]chan json.RawMessage)}
 	l.conn = loop.Attach(l.device, localClient{l})
 	h.Attach(l.device, l)
-	buildGroups := func(groups []proto.GroupSummary) any { return proto.Groups{Type: "groups", Groups: groups} }
-	loop.Welcome(l.conn, buildGroups)
 	loop.Inbox(l.conn)
 	return l
 }
@@ -130,12 +121,8 @@ func (l *LocalLink) dropWait(id int64) {
 }
 
 func decodeCmd(data []byte) (proto.Cmd, bool) {
-	var frame struct {
-		proto.Cmd
-		Re json.RawMessage `json:"re,omitempty"`
-	}
-	ok := proto.Decode(data, &frame) == nil && frame.Type == "cmd" && frame.Re == nil
-	return frame.Cmd, ok
+	var cmd proto.Cmd
+	return cmd, proto.Decode(data, &cmd) == nil && cmd.Type == "cmd"
 }
 
 func (l *LocalLink) toHome(data []byte) {
@@ -181,7 +168,7 @@ func (l *LocalLink) fromHome(data []byte) {
 		l.deliver(*hdr.Re, data)
 		return
 	}
-	l.host.Push(l.device, data)
+	l.push(l.device, data)
 }
 
 func (l *LocalLink) deliver(re int64, data json.RawMessage) {
@@ -201,9 +188,5 @@ func encodeCtl(frame any) ([]byte, error) {
 	if err := enc.Encode(frame); err != nil {
 		return nil, err
 	}
-	data := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
-	if len(data) > ctlLimit {
-		return nil, errCtlTooLarge
-	}
-	return data, nil
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }

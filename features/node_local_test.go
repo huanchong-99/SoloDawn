@@ -8,7 +8,9 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -20,6 +22,19 @@ import (
 
 func init() {
 	stepSets["node_local"] = nodeLocalSteps
+}
+
+type scenarioTB struct {
+	testing.TB
+	cleanup func(func())
+}
+
+func (s scenarioTB) Cleanup(fn func()) { s.cleanup(fn) }
+
+func (s scenarioTB) Setenv(key, value string) {
+	old, had := os.LookupEnv(key)
+	os.Setenv(key, value)
+	s.cleanup(func() { restoreVar(key, old, had) })
 }
 
 func nodeLocalSteps(sc *godog.ScenarioContext, f fixtures) {
@@ -67,7 +82,7 @@ func nodeLocalSteps(sc *godog.ScenarioContext, f fixtures) {
 		}
 	}
 
-	sc.Step(`^an in-process cluster of (\d+) nodes$`, func(n int) error {
+	sc.Step(`^an in-process cluster of (\d+) nodes?$`, func(n int) {
 		groups = map[string]string{}
 		// Single reader: the "receives a rows push" step in this scenario.
 		pushes = make(chan proto.Rows, 8)
@@ -78,22 +93,14 @@ func nodeLocalSteps(sc *godog.ScenarioContext, f fixtures) {
 			}
 		}
 		cleanup(func() { delete(host.Pushes, "rows") })
-
-		var err error
-		cluster, err = nodetest.Open(nodetest.Config{
-			Root:   f.t.TempDir(),
+		cluster = nodetest.Start(scenarioTB{TB: f.t, cleanup: cleanup}, nodetest.Config{
 			BinDir: f.fakeCLIs,
 			Nodes:  n,
 			Tables: tables(),
 		})
-		if err != nil {
-			return err
-		}
-		cleanup(cluster.Close)
-		return nil
 	})
 
-	sc.Step(`^the first node's host creates group "([^"]+)" on its local home$`, func(name string) error {
+	sc.Step(`^the node's host creates group "([^"]+)" on its local home$`, func(name string) error {
 		n0 := cluster.Nodes[0]
 		gid := nextID()
 		groups[name] = gid
@@ -102,7 +109,7 @@ func nodeLocalSteps(sc *godog.ScenarioContext, f fixtures) {
 		return err
 	})
 
-	sc.Step(`^the first node's local link watches group "([^"]+)"$`, func(name string) error {
+	sc.Step(`^the node's local link watches group "([^"]+)"$`, func(name string) error {
 		n0 := cluster.Nodes[0]
 		if _, ok := n0.Link.Watch(groups[name], false); !ok {
 			return fmt.Errorf("Watch(%q) refused", name)
@@ -110,14 +117,14 @@ func nodeLocalSteps(sc *godog.ScenarioContext, f fixtures) {
 		return nil
 	})
 
-	sc.Step(`^the first node's host writes note "([^"]+)" to group "([^"]+)"$`, func(text, name string) error {
+	sc.Step(`^the node's host writes note "([^"]+)" to group "([^"]+)"$`, func(text, name string) error {
 		n0 := cluster.Nodes[0]
 		payload := fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"text":%q}`, nextID(), n0.Host.Now().UnixMilli(), groups[name], text)
 		_, err := n0.Host.Command(context.Background(), n0.Key.ID(), payload)
 		return err
 	})
 
-	sc.Step(`^the first node's host receives a rows push for group "([^"]+)" containing "([^"]+)"$`, func(name, text string) error {
+	sc.Step(`^the node's host receives a rows push for group "([^"]+)" containing "([^"]+)"$`, func(name, text string) error {
 		select {
 		case frame := <-pushes:
 			if frame.Group != groups[name] || len(frame.Rows) != 1 || !strings.Contains(string(frame.Rows[0]), text) {
@@ -129,7 +136,7 @@ func nodeLocalSteps(sc *godog.ScenarioContext, f fixtures) {
 		}
 	})
 
-	sc.Step(`^the first node's local link reports path "([^"]+)"$`, func(want string) error {
+	sc.Step(`^the node's local link reports path "([^"]+)"$`, func(want string) error {
 		if got := cluster.Nodes[0].Link.Path(); got != want {
 			return fmt.Errorf("Path() = %q, want %q", got, want)
 		}

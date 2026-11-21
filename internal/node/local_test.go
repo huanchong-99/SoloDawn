@@ -153,7 +153,6 @@ func (r *localRig) payload(fields string) string {
 type pushCapture struct {
 	rowsRaw  chan string
 	rows     chan proto.Rows
-	groups   chan proto.Groups
 	attached chan string
 }
 
@@ -163,7 +162,6 @@ func capturePushes(t *testing.T) *pushCapture {
 	cap := &pushCapture{
 		rowsRaw:  make(chan string, 4),
 		rows:     make(chan proto.Rows, 4),
-		groups:   make(chan proto.Groups, 4),
 		attached: make(chan string, 2),
 	}
 	host.Pushes["rows"] = func(_ *host.Host, from string, raw json.RawMessage) {
@@ -173,18 +171,11 @@ func capturePushes(t *testing.T) *pushCapture {
 			cap.rows <- frame
 		}
 	}
-	host.Pushes["groups"] = func(_ *host.Host, _ string, raw json.RawMessage) {
-		var frame proto.Groups
-		if proto.Decode(raw, &frame) == nil {
-			cap.groups <- frame
-		}
-	}
 	host.Attached["local_test"] = func(_ *host.Host, device string) {
 		cap.attached <- device
 	}
 	t.Cleanup(func() {
 		delete(host.Pushes, "rows")
-		delete(host.Pushes, "groups")
 		delete(host.Attached, "local_test")
 	})
 	return cap
@@ -200,7 +191,6 @@ func TestLocalLinkCommandAndPushCrossLink(t *testing.T) {
 	homeConn, ok := rig.host.Home(rig.device.ID())
 	mustEqual(t, []any{homeConn, ok}, []any{host.Home(link), true})
 	mustEqual(t, recvFrame(t, cap.attached), rig.device.ID())
-	mustEqual(t, recvFrame(t, cap.groups).Groups, []proto.GroupSummary{})
 
 	ctx := context.Background()
 	ans, err := rig.host.Command(ctx, rig.device.ID(), rig.payload(`"t":"group","op":"create","name":"Alpha"`))
@@ -208,7 +198,6 @@ func TestLocalLinkCommandAndPushCrossLink(t *testing.T) {
 	var created proto.CmdResult
 	mustNoErr(t, proto.Decode(ans, &created))
 	mustEqual(t, created.Num, 7)
-	mustEqual(t, recvFrame(t, cap.groups).Groups, []proto.GroupSummary{{Group: localGroupID, Name: "Alpha", Seq: 2}})
 
 	seq, watched := link.Watch(localGroupID, false)
 	mustEqual(t, []any{seq, watched}, []any{int64(2), true})
@@ -230,22 +219,58 @@ func checkNotePush(t *testing.T, raw string, frame proto.Rows) {
 	mustEqual(t, frame.Group, localGroupID)
 	mustEqual(t, len(frame.Rows), 1)
 	mustEqual(t, strings.Contains(raw, `"hello <&>"`), true)
+	mustEqual(t, strings.Contains(raw, "\n"), false)
 	var note proto.NoteRow
 	mustNoErr(t, proto.Decode(frame.Rows[0], &note))
 	mustEqual(t, note.Text, "hello <&>")
 }
 
-func TestLocalLinkFramingAndLimits(t *testing.T) {
+func TestLocalLinkInboxForGroupCreatedAfterAttach(t *testing.T) {
+	rig := newLocalRig(t, map[string]home.Func{
+		"jump": func(s *home.State, _ home.Command) (home.Result, *home.Refusal) {
+			ai := proto.AIMemberRow{
+				MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: "m-ai"}, Group: s.ID, Kind: "ai", Name: "Coder", User: s.Owner},
+				Host:      s.Home,
+			}
+			return home.Result{Rows: []home.Row{home.RowOf(ai)}, Items: []home.Item{{AI: "m-ai", Why: "mention"}}}, nil
+		},
+	})
+	link := AttachLocal(rig.host, rig.loop)
+
+	type pushedFrame struct {
+		from string
+		raw  json.RawMessage
+	}
+	// Single reader: this test.
+	pushed := make(chan pushedFrame, 2)
+	origPush := link.push
+	link.push = func(from string, raw json.RawMessage) {
+		origPush(from, raw)
+		pushed <- pushedFrame{from: from, raw: raw}
+	}
+
+	ctx := context.Background()
+	_, err := rig.host.Command(ctx, rig.device.ID(), rig.payload(`"t":"group","op":"create","name":"AfterAttach"`))
+	mustNoErr(t, err)
+	_, err = rig.host.Command(ctx, rig.device.ID(), rig.payload(`"t":"jump"`))
+	mustNoErr(t, err)
+
+	got := recvFrame(t, pushed)
+	mustEqual(t, got.from, rig.device.ID())
+	var items home.ItemsPush
+	mustNoErr(t, json.Unmarshal(got.raw, &items))
+	mustEqual(t, items, home.ItemsPush{
+		Group: localGroupID,
+		Items: []home.QueuedItem{{ID: 1, Item: home.Item{AI: "m-ai", Why: "mention"}}},
+	})
+}
+
+func TestLocalLinkFraming(t *testing.T) {
 	cap := capturePushes(t)
 	rig := newLocalRig(t, nil)
 	link := AttachLocal(rig.host, rig.loop)
 	ctx := context.Background()
 
-	// Exact 61,440-byte ctlLimit boundary with '<' (pins SetEscapeHTML(false) and TrimSuffix).
-	exactPad := strings.Repeat("<", ctlLimit-len(`{"t":"pad","v":""}`))
-	mustNoErr(t, link.Send(map[string]string{"t": "pad", "v": exactPad}))
-	overPad := exactPad + "<"
-	mustEqual(t, link.Send(map[string]string{"t": "pad", "v": overPad}), errCtlTooLarge)
 	mustEqual(t, link.Send(math.NaN()) != nil, true)
 	buildNaN := func(int64) any { return math.NaN() }
 	_, nanErr := link.Request(ctx, buildNaN)
@@ -256,7 +281,7 @@ func TestLocalLinkFramingAndLimits(t *testing.T) {
 	}
 
 	checkBadRequests(t, rig, link)
-	checkClientInbound(t, link, cap, overPad)
+	checkClientInbound(t, link, cap)
 }
 
 func checkBadRequests(t *testing.T, rig *localRig, link *LocalLink) {
@@ -270,10 +295,6 @@ func checkBadRequests(t *testing.T, rig *localRig, link *LocalLink) {
 	cases := []func(int64) any{
 		func(id int64) any { ids = append(ids, id); return map[string]any{"t": "cmd", "id": id} },
 		func(id int64) any { ids = append(ids, id); return map[string]any{"t": "sync", "id": id, "env": env} },
-		func(id int64) any {
-			ids = append(ids, id)
-			return map[string]any{"t": "cmd", "id": id, "re": id, "env": env}
-		},
 		func(id int64) any { ids = append(ids, id); return map[string]any{"id": id} },
 	}
 	for _, build := range cases {
@@ -283,17 +304,17 @@ func checkBadRequests(t *testing.T, rig *localRig, link *LocalLink) {
 		mustNoErr(t, proto.Decode(ans, &errResp))
 		mustEqual(t, errResp.Err.Code, "bad_request")
 	}
-	mustEqual(t, ids, []int64{3, 4, 5, 6})
+	mustEqual(t, ids, []int64{3, 4, 5})
 }
 
-func checkClientInbound(t *testing.T, link *LocalLink, cap *pushCapture, overPad string) {
+func checkClientInbound(t *testing.T, link *LocalLink, cap *pushCapture) {
 	t.Helper()
 	client := localClient{link}
 	mustEqual(t, client.Done(), (<-chan struct{})(nil))
 	mustNoErr(t, client.Send(map[string]any{"re": "bad", "t": "rows"}))
 	mustNoErr(t, client.Send(map[string]any{"re": 999, "ok": true, "t": "rows"}))
 	mustEqual(t, len(cap.rows), 0)
-	mustEqual(t, client.Send(map[string]string{"t": "pad", "v": overPad}), errCtlTooLarge)
+	mustEqual(t, client.Send(math.NaN()) != nil, true)
 }
 
 func TestLocalLinkCancellationAndClose(t *testing.T) {

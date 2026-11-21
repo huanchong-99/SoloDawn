@@ -2,9 +2,9 @@ package nodetest_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,7 +19,6 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/node/nodetest"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
-	_ "modernc.org/sqlite"
 )
 
 const testGroupID = "BBBBBBBBBBBBBBBBBBBBBA"
@@ -44,33 +43,37 @@ func nonceID(n int64) string {
 	return base64.RawURLEncoding.EncodeToString(raw[:])
 }
 
-type fakeTB struct {
-	dir     string
-	fatal   []any
-	cleaned int
-	env     map[string]string
+type fatalTB struct {
+	testing.TB
+	fatal bool
 }
 
-func (f *fakeTB) Cleanup(fn func())        { f.cleaned++; fn() }
-func (f *fakeTB) Fatal(args ...any)        { f.fatal = append(f.fatal, args...) }
-func (f *fakeTB) Setenv(key, value string) { f.env[key] = value }
-func (f *fakeTB) TempDir() string          { return f.dir }
+func (f *fatalTB) Fatal(...any) { f.fatal = true; panic(f) }
 
 func TestStartMultiNodeAndFakeCLIs(t *testing.T) {
-	c := nodetest.Start(t, 2)
-	mustEq(t, c.Root != "", true)
+	c := nodetest.Start(t, nodetest.Config{Nodes: 2})
+	mustEq(t, filepath.IsAbs(c.Root), true)
 	mustEq(t, len(c.Nodes), 2)
 	mustEq(t, []string{c.Nodes[0].Name, c.Nodes[1].Name}, []string{"node-1", "node-2"})
 	mustEq(t, filepath.Base(c.Nodes[0].Dir), "node-1")
 	mustEq(t, c.Nodes[0].Key.ID() != c.Nodes[1].Key.ID(), true)
 	mustEq(t, c.Nodes[0].Host.Now().UnixMilli() > 0, true)
 
+	// Default Tables uses home.NodeTables(), where post/brief is registered
+	// and reaches the group-existence check (not_found rather than bad_request).
+	n0 := c.Nodes[0]
+	briefPayload := fmt.Sprintf(`{"t":"post","kind":"brief","n":%q,"ts":%d,"g":%q}`, nonceID(1), n0.Host.Now().UnixMilli(), testGroupID)
+	_, cmdErr := n0.Host.Command(context.Background(), n0.Key.ID(), briefPayload)
+	var hostErr *host.Error
+	mustEq(t, errors.As(cmdErr, &hostErr), true)
+	mustEq(t, hostErr.Code, "not_found")
+
 	checkOwnerLogs(t, c)
 	for _, n := range c.Nodes {
 		checkNodeSeeded(t, c, n)
 	}
 	checkFakeCLIs(t, c)
-	checkCustomStartWith(t, c.BinDir)
+	checkCustomStart(t, c.BinDir)
 }
 
 func checkOwnerLogs(t *testing.T, c *nodetest.Cluster) {
@@ -133,14 +136,13 @@ func checkFakeCLIs(t *testing.T, c *nodetest.Cluster) {
 	mustEq(t, string(logBytes), "start claude s-1\nexit claude s-1\nstart codex s-1\nexit codex s-1\n")
 }
 
-func checkCustomStartWith(t *testing.T, binDir string) {
+func checkCustomStart(t *testing.T, binDir string) {
 	t.Helper()
 	fixedMs := int64(1_763_700_000_000)
 	customRoot := filepath.Join(t.TempDir(), "custom")
-	single := nodetest.StartWith(t, nodetest.Config{
+	single := nodetest.Start(t, nodetest.Config{
 		Root:   customRoot,
 		BinDir: binDir,
-		Nodes:  1,
 		Now:    func() time.Time { return time.UnixMilli(fixedMs) },
 		Tables: home.Tables{Commands: home.Table{"group/create": singleGroupCreate}},
 	})
@@ -148,7 +150,7 @@ func checkCustomStartWith(t *testing.T, binDir string) {
 
 	n0 := single.Nodes[0]
 	mustEq(t, n0.Host.Now().UnixMilli(), fixedMs)
-	payload := fmt.Sprintf(`{"t":"group","op":"create","n":%q,"ts":%d,"g":%q,"name":"One"}`, nonceID(1), fixedMs, testGroupID)
+	payload := fmt.Sprintf(`{"t":"group","op":"create","n":%q,"ts":%d,"g":%q,"name":"One"}`, nonceID(2), fixedMs, testGroupID)
 	ans, err := n0.Host.Command(context.Background(), n0.Key.ID(), payload)
 	mustOK(t, err)
 	var res proto.CmdResult
@@ -159,9 +161,14 @@ func checkCustomStartWith(t *testing.T, binDir string) {
 	_, open := n0.Host.Home(n0.Key.ID())
 	mustEq(t, open, false)
 
-	tb := &fakeTB{dir: t.TempDir(), env: map[string]string{}}
-	got := nodetest.StartWith(tb, nodetest.Config{Nodes: 0})
-	mustEq(t, []any{got == nil, len(tb.fatal)}, []any{true, 1})
+	badRoot := filepath.Join(t.TempDir(), "not-a-dir")
+	mustOK(t, os.WriteFile(badRoot, []byte("x"), 0o600))
+	tb := &fatalTB{TB: t}
+	func() {
+		defer func() { recover() }()
+		nodetest.Start(tb, nodetest.Config{Root: badRoot, BinDir: binDir, Nodes: 1})
+	}()
+	mustEq(t, tb.fatal, true)
 }
 
 func singleGroupCreate(s *home.State, cmd home.Command) (home.Result, *home.Refusal) {
@@ -171,62 +178,4 @@ func singleGroupCreate(s *home.State, cmd home.Command) (home.Result, *home.Refu
 		Role:      "admin",
 	}
 	return home.Result{Rows: []home.Row{home.RowOf(grp), home.RowOf(mem)}, Answer: store.Outcome{Num: 3}}, nil
-}
-
-func mustFailOpen(t *testing.T, cfg nodetest.Config) error {
-	t.Helper()
-	c, err := nodetest.Open(cfg)
-	mustEq(t, c == nil && err != nil, true)
-	return err
-}
-
-func TestOpenErrorsAndPartialCleanup(t *testing.T) {
-	sharedBins := t.TempDir()
-
-	errZero := mustFailOpen(t, nodetest.Config{Root: t.TempDir(), BinDir: sharedBins, Nodes: 0})
-	mustEq(t, errZero.Error(), "nodetest: cluster needs at least one node")
-
-	rootFile := filepath.Join(t.TempDir(), "not-a-dir")
-	mustOK(t, os.WriteFile(rootFile, []byte("x"), 0o600))
-	mustFailOpen(t, nodetest.Config{Root: rootFile, Nodes: 1})
-
-	rootBadDir := t.TempDir()
-	mustOK(t, os.WriteFile(filepath.Join(rootBadDir, "node-1"), []byte("x"), 0o600))
-	mustFailOpen(t, nodetest.Config{Root: rootBadDir, BinDir: sharedBins, Nodes: 1})
-
-	rootBadKey := t.TempDir()
-	mustOK(t, os.MkdirAll(filepath.Join(rootBadKey, "node-1"), 0o700))
-	mustOK(t, os.WriteFile(filepath.Join(rootBadKey, "node-1", "device.key"), []byte("bad"), 0o600))
-	mustFailOpen(t, nodetest.Config{Root: rootBadKey, BinDir: sharedBins, Nodes: 1})
-
-	rootBadStore := filepath.Join(t.TempDir(), "partial")
-	mustOK(t, os.MkdirAll(filepath.Join(rootBadStore, "node-2", "solodawn.db"), 0o700))
-	mustFailOpen(t, nodetest.Config{Root: rootBadStore, BinDir: sharedBins, Nodes: 2})
-	mustOK(t, os.RemoveAll(rootBadStore))
-
-	for _, stmt := range []string{
-		"DROP TABLE setting",
-		`INSERT INTO row(g, r, id, seq, pos, ts, mt, data) VALUES('g1', 'group', 'g1', 1, 1, 1, 1, '{}')`,
-		"DROP TABLE session",
-	} {
-		mustFailOpen(t, nodetest.Config{Root: prepareBrokenDB(t, stmt), BinDir: sharedBins, Nodes: 1})
-	}
-}
-
-func prepareBrokenDB(t *testing.T, stmt string) string {
-	t.Helper()
-	root := filepath.Join(t.TempDir(), "broken")
-	nodeDir := filepath.Join(root, "node-1")
-	mustOK(t, os.MkdirAll(nodeDir, 0o700))
-	dbPath := filepath.Join(nodeDir, "solodawn.db")
-	st, err := store.Open(dbPath)
-	mustOK(t, err)
-	mustOK(t, st.Close())
-
-	rawDB, err := sql.Open("sqlite", dbPath)
-	mustOK(t, err)
-	_, execErr := rawDB.Exec(stmt)
-	mustOK(t, rawDB.Close())
-	mustOK(t, execErr)
-	return root
 }

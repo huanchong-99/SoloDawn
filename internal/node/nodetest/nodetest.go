@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/home"
@@ -28,16 +29,6 @@ const (
 	claudePkg = "github.com/huanchong-99/SoloDawn/internal/host/fakecli/claude"
 	codexPkg  = "github.com/huanchong-99/SoloDawn/internal/host/fakecli/codex"
 )
-
-var errNoNodes = errors.New("nodetest: cluster needs at least one node")
-
-// TB is the subset of testing.TB that Start and StartWith use.
-type TB interface {
-	Cleanup(func())
-	Fatal(args ...any)
-	Setenv(key, value string)
-	TempDir() string
-}
 
 // Config configures a Cluster of in-process nodes.
 type Config struct {
@@ -73,52 +64,24 @@ type Node struct {
 	once  sync.Once
 }
 
-// Start opens a cluster of nodes in a temporary directory, prepends the fake
-// CLIs to PATH, sets SOLODAWN_FAKECLI_LOG, and registers Close on t.
-func Start(t TB, nodes int) *Cluster {
-	return StartWith(t, Config{Nodes: nodes})
-}
-
-// StartWith is Start with explicit cluster configuration. When cfg.Root is
-// empty, t.TempDir() is used.
-func StartWith(t TB, cfg Config) *Cluster {
-	if cfg.Root == "" {
-		cfg.Root = t.TempDir()
-	}
-	c, err := Open(cfg)
-	if err != nil {
-		t.Fatal(err)
-		return nil
-	}
-	t.Cleanup(c.Close)
-	t.Setenv("PATH", c.BinDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("SOLODAWN_FAKECLI_LOG", c.LogPath)
-	return c
-}
-
-// Open creates and starts the cluster described by cfg without modifying
-// process environment variables. The caller closes the returned cluster.
-func Open(cfg Config) (*Cluster, error) {
-	if cfg.Nodes < 1 {
-		return nil, errNoNodes
-	}
-	cfg = withDefaults(cfg)
-	binDir, err := prepareFakeCLIs(cfg.Root, cfg.BinDir)
-	if err != nil {
-		return nil, err
-	}
-	keys, dirs, err := loadNodeKeys(cfg.Root, cfg.Nodes)
-	if err != nil {
-		return nil, err
-	}
+// Start opens a cluster of in-process nodes, prepends the fake CLIs to PATH,
+// sets SOLODAWN_FAKECLI_LOG, and registers Close on t. When cfg.Root is empty
+// t.TempDir() is used, and when cfg.Nodes is below 1 a single node is started.
+func Start(t testing.TB, cfg Config) *Cluster {
+	t.Helper()
+	cfg = withDefaults(t, cfg)
+	binDir := prepareFakeCLIs(t, cfg.Root, cfg.BinDir)
+	keys, dirs := loadNodeKeys(t, cfg.Root, cfg.Nodes)
 	owner := newKey()
 	entries := buildOwnerLog(owner, keys, cfg.Now().UnixMilli())
 	c := &Cluster{Root: cfg.Root, BinDir: binDir, LogPath: filepath.Join(cfg.Root, "fakecli.log"), Owner: owner, entries: entries}
-	if err := c.startNodes(cfg, dirs, keys); err != nil {
-		c.Close()
-		return nil, err
+	t.Cleanup(c.Close)
+	for i, dir := range dirs {
+		c.Nodes = append(c.Nodes, c.openNode(t, cfg, nodeName(i), dir, keys[i]))
 	}
-	return c, nil
+	t.Setenv("PATH", c.BinDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("SOLODAWN_FAKECLI_LOG", c.LogPath)
+	return c
 }
 
 // Logs returns a fresh verified copy of the owner's device log when user is
@@ -132,7 +95,7 @@ func (c *Cluster) Logs(user string) *identity.Log {
 }
 
 // SetScript points the next start of vendor ("claude" or "codex") at path.
-func (c *Cluster) SetScript(t TB, vendor, path string) {
+func (c *Cluster) SetScript(t testing.TB, vendor, path string) {
 	t.Setenv("SOLODAWN_FAKE_"+strings.ToUpper(vendor)+"_SCRIPT", path)
 }
 
@@ -153,7 +116,18 @@ func (n *Node) Close() {
 	})
 }
 
-func withDefaults(cfg Config) Config {
+func must(t testing.TB, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func withDefaults(t testing.TB, cfg Config) Config {
+	if cfg.Root == "" {
+		cfg.Root = t.TempDir()
+	}
+	cfg.Nodes = max(1, cfg.Nodes)
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -163,66 +137,39 @@ func withDefaults(cfg Config) Config {
 	return cfg
 }
 
-func prepareFakeCLIs(root, binDir string) (string, error) {
+func prepareFakeCLIs(t testing.TB, root, binDir string) string {
 	if binDir != "" {
-		return binDir, nil
+		return binDir
 	}
 	out := filepath.Join(root, "bin")
-	err := exec.Command("go", "build", "-o", out+string(os.PathSeparator), claudePkg, codexPkg).Run()
-	return out, err
+	must(t, exec.Command("go", "build", "-o", out+string(os.PathSeparator), claudePkg, codexPkg).Run())
+	return out
 }
 
 func nodeName(i int) string { return fmt.Sprintf("node-%d", i+1) }
 
-func loadNodeKeys(root string, count int) ([]identity.Key, []string, error) {
+func loadNodeKeys(t testing.TB, root string, count int) ([]identity.Key, []string) {
 	keys, dirs := make([]identity.Key, count), make([]string, count)
 	for i := range count {
 		dir := filepath.Join(root, nodeName(i))
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return nil, nil, err
-		}
+		must(t, os.MkdirAll(dir, 0o700))
 		key, err := identity.LoadKey(dir)
-		if err != nil {
-			return nil, nil, err
-		}
+		must(t, err)
 		keys[i], dirs[i] = key, dir
 	}
-	return keys, dirs, nil
+	return keys, dirs
 }
 
-func (c *Cluster) startNodes(cfg Config, dirs []string, keys []identity.Key) error {
-	for i, dir := range dirs {
-		n, err := c.openNode(cfg, nodeName(i), dir, keys[i])
-		if err != nil {
-			return err
-		}
-		c.Nodes = append(c.Nodes, n)
-	}
-	return nil
-}
-
-func (c *Cluster) openNode(cfg Config, name, dir string, key identity.Key) (*Node, error) {
+func (c *Cluster) openNode(t testing.TB, cfg Config, name, dir string, key identity.Key) *Node {
 	db, err := store.Open(filepath.Join(dir, "solodawn.db"))
-	if err != nil {
-		return nil, err
-	}
-	if err := seedOwner(db, c.Owner.ID(), c.entries); err != nil {
-		db.Close()
-		return nil, err
-	}
+	must(t, err)
+	must(t, seedOwner(db, c.Owner.ID(), c.entries))
 	loopCfg := home.LoopConfig{Store: db, Home: key.ID(), Owner: c.Owner.ID(), Logs: c.Logs, Tables: cfg.Tables, Now: cfg.Now, Report: cfg.Report}
 	loop, err := home.StartLoop(loopCfg)
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
+	must(t, err)
 	h, _, err := host.New(db, key, cfg.Now)
-	if err != nil {
-		loop.Close()
-		db.Close()
-		return nil, err
-	}
-	return &Node{Name: name, Dir: dir, Key: key, Store: db, Home: loop, Host: h, Link: node.AttachLocal(h, loop)}, nil
+	must(t, err)
+	return &Node{Name: name, Dir: dir, Key: key, Store: db, Home: loop, Host: h, Link: node.AttachLocal(h, loop)}
 }
 
 func seedOwner(db *store.Store, owner string, entries []proto.Envelope) error {
