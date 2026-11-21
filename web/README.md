@@ -321,7 +321,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
   of its English file to the type `Key`; today the areas are `chat`, `groups`, `nodes`,
-  `settings` and `states`. `src/messages/files.glob.ts` finds every file by its name and
+  `settings`, `states` and `task`. `src/messages/files.glob.ts` finds every file by its name and
   `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
   empty text, or has keys that differ between its two languages, and naming the area when it has
@@ -466,6 +466,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/groups.svelte.ts`  | `Home`, `Group`: row caches, cursor, paging, lists, commands    |
 | `src/lib/compose.ts`        | mention being typed, mentions and parts of a text, row size     |
 | `src/lib/when.ts`           | times in the reader's language; messages by day                 |
+| `src/lib/task.ts`           | task card derivations: badge, six-step bar, review and thread   |
 | `src/App.svelte`            | shell: navigation, top bar, banners, the page of the route      |
 | `src/Notice.svelte`         | the upgrade notice and the storage notice                       |
 | `src/Pending.svelte`        | a page of the route table whose component is not built yet      |
@@ -474,12 +475,14 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/`           | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount` |
 | `src/components/groups/`    | the group list, the cards that wait, the create-group dialog    |
 | `src/components/chat/`      | the chat of a group: main line, message, composer               |
+| `src/components/task/`      | `TaskCard.svelte`, mounted for kind `task`                      |
 | `src/styles/`               | `tokens.css` (design tokens) and `base.css` (shared classes)    |
 | `public/`                   | manifest, icon and `fonts/`, copied as they are                 |
 | `features/web.spec.ts`      | steps of `../features/web.feature`                              |
 | `features/shell.spec.ts`    | steps of `../features/web_shell.feature`; `fixtures/` stand-ins |
 | `features/groups.spec.ts`   | steps of `../features/web_groups.feature`                       |
 | `features/chat.spec.ts`     | steps of `../features/web_chat.feature`                         |
+| `features/task.spec.ts`     | steps of `../features/web_task.feature`                         |
 | `features/home.ts`          | a home in memory for those steps; `page.ts` drives the page     |
 | `features/demo.ts`          | groups with a morning of talk, for a development page           |
 | `features/watch.svelte.ts`  | an effect outside a component, for tests of what is reactive    |
