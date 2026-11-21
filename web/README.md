@@ -324,7 +324,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
   of its English file to the type `Key`; today the areas are `chat`, `groups`, `member`, `nodes`,
-  `pairing`, `settings` and `states`. `src/messages/files.glob.ts` finds every file by its name and
+  `pairing`, `settings`, `states` and `thread`. `src/messages/files.glob.ts` finds every file by its name and
   `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
   empty text, or has keys that differ between its two languages, and naming the area when it has
@@ -390,7 +390,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
     again; a page that arrives after a later read, or after its connection is gone, is dropped.
     `paging(thread)` says whether more may exist, whether a page is on its way, and whether one
     can be asked for (`ready`).
-  - The lists: `main` and `thread(task)` in `pos` order, `members` by name, `me`, `waiting` (the
+  - The lists and lookups: `main` and `thread(task)` in `pos` order, `members` by name,
+    `member(id)`, `personName(user)`, `task(id)`, `me`, `waiting` (the
     pending brief the person asked for, the pending approvals and decisions put to them), `info`
     (the group row), `latest`. `recent()` is every group, the newest main line first.
   - `post` and `create` send signed commands, shaped as the wire examples `post-text.json` and
@@ -485,6 +486,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/net.svelte.ts`       | where the homes come from: `sourceOf`, `start`, the mock's home                   |
 | `src/lib/mounts.svelte.ts`    | mounting points, `gather` of the areas' mounts, `card(kind)`                      |
 | `src/lib/motion.ts`           | `spring`, the curve of `--spring`; `shift`, the page cross-fade                   |
+| `src/lib/jump.ts`             | `jumpToMessage`: scroll and focus `#m-<id>` without routing                       |
 | `src/lib/proto.ts`            | wire schemas and types, `decode`, the `Ctl` interface                             |
 | `src/lib/mock.ts`             | wire examples by name, their schemas, `mockCtl`                                   |
 | `src/lib/rendezvous.ts`       | signalling client: sign-in, pacing, the receiver's checks                         |
@@ -503,6 +505,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/`             | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount`                   |
 | `src/components/groups/`      | the group list, the cards that wait, the create-group dialog                      |
 | `src/components/chat/`        | the chat of a group: main line, message, composer                                 |
+| `src/components/thread/`      | a task's thread, scored review block, checks and system notices                   |
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
 | `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
@@ -512,6 +515,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/shell.spec.ts`      | steps of `../features/web_shell.feature`; `fixtures/` stand-ins                   |
 | `features/groups.spec.ts`     | steps of `../features/web_groups.feature`                                         |
 | `features/chat.spec.ts`       | steps of `../features/web_chat.feature`                                           |
+| `features/thread.spec.ts`     | steps of `../features/web_thread.feature`                                         |
 | `features/member.spec.ts`     | steps of `../features/web_member.feature`                                         |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
 | `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                     |

@@ -1,7 +1,7 @@
 import type { Component } from 'svelte';
 import { describe, expect, it } from 'vitest';
-import { files } from './mounts.glob';
 import { card, cards, gather, mounts, points, side } from './mounts.svelte';
+import { files } from './mounts.glob';
 
 // Stand-ins for components: gather only places them.
 // A stand-in fits any point: gather only places it.
