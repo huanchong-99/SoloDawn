@@ -32,7 +32,7 @@ func notePut(s *State, c Command) (Result, *Refusal) {
 	}
 	row := proto.NoteRow{
 		RowHeader: proto.RowHeader{Type: noteRowType, ID: string(p.ID)}, Group: s.ID,
-		Task: (*string)(p.Task), Text: p.Text, By: c.Who.Member(), Timestamp: c.Now,
+		Task: (*string)(p.Task), Text: p.Text, By: c.Who.Member(), Timestamp: c.Timestamp,
 	}
 	return Result{Rows: []Row{RowOf(row)}}, nil
 }

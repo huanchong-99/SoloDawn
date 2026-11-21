@@ -141,6 +141,13 @@ func TestPostTextMainLineAndSecretaryRouting(t *testing.T) {
 			{AI: postB, Why: "mention", Msg: id(75)},
 		})
 	})
+	t.Run("an AI mentioning only itself queues no item", func(t *testing.T) {
+		s := postState(t)
+		_, res := postSend(t, s, disk{}, laptop, postMake(76, aiID, "text", nil, []string{aiID}, nil, "Note to self", proto.EmptyBody{}))
+		equal(t, res.Answer, store.Outcome{OK: true})
+		equal(t, res.Rows[0].Value().(proto.MsgRow).Mentions, []string{aiID})
+		equal(t, res.Items, ([]home.Item)(nil))
+	})
 }
 
 func TestPostThreadSummaryAndPreviewBoundary(t *testing.T) {
@@ -181,9 +188,9 @@ func TestPostThreadSummaryAndPreviewBoundary(t *testing.T) {
 func TestPostProgressAndQuestion(t *testing.T) {
 	s := postState(t)
 	thread := postTask
-	env, res := postSend(t, s, disk{}, laptop, postMake(85, postB, "progress", &thread, []string{postGuest, postA}, nil, "Checked diff.", proto.EmptyBody{}))
+	env, res := postSend(t, s, disk{}, laptop, postMake(85, postB, "progress", &thread, []string{postGuest, postB, postA}, nil, "Checked diff.", proto.EmptyBody{}))
 	equal(t, res.Answer, store.Outcome{OK: true})
-	wantMsg := postExpectedMsg(85, 11, postB, "progress", &thread, "Checked diff.", []string{postGuest, postA}, nil, json.RawMessage(`{}`), env)
+	wantMsg := postExpectedMsg(85, 11, postB, "progress", &thread, "Checked diff.", []string{postGuest, postB, postA}, nil, json.RawMessage(`{}`), env)
 	equal(t, res.Rows[0].Value(), any(wantMsg))
 	equal(t, res.Rows[1].Value().(proto.TaskRow).Thread.Last, &proto.ThreadMessage{By: postB, Kind: "progress", Text: "Checked diff.", Timestamp: postTS})
 	equal(t, res.Items, []home.Item{{AI: postA, Why: "mention", Task: postTask, Msg: id(85)}})
@@ -198,9 +205,12 @@ func TestPostProgressAndQuestion(t *testing.T) {
 	postCheckNulls(t, res.Rows[0].Value(), "/thread", "/re", "/state")
 	s.Commit(res)
 
-	_, res = postSend(t, s, disk{}, laptop, postMake(87, postB, "question", &thread, nil, nil, "Ready?", proto.EmptyBody{}))
+	q := postMake(87, postB, "question", &thread, nil, nil, "Ready?", proto.EmptyBody{})
+	q.Main = true
+	_, res = postSend(t, s, disk{}, laptop, q)
 	equal(t, res.Answer, store.Outcome{OK: true})
 	equal(t, len(res.Rows), 2)
+	equal(t, res.Rows[0].Value().(proto.MsgRow).Main, false)
 	equal(t, res.Items, ([]home.Item)(nil))
 }
 
@@ -247,20 +257,19 @@ func TestPostHandback(t *testing.T) {
 		equal(t, res.Rows[0].Value().(proto.MsgRow).Body, postRawJSON(t, facts))
 		equal(t, res.Items, ([]home.Item)(nil))
 	})
-	t.Run("the secretary posts handback in the main line", func(t *testing.T) {
+	t.Run("the secretary posts handback in the main line without queuing a notice", func(t *testing.T) {
 		s := postState(t)
 		facts := proto.HandbackBody{Files: []string{}, Commits: []proto.CommitSubject{}}
 		env, res := postSend(t, s, disk{}, laptop, postMake(94, aiID, "handback", nil, nil, nil, "Checked status.", facts))
 		equal(t, res.Answer, store.Outcome{OK: true})
 		equal(t, len(res.Rows), 1)
 		equal(t, res.Rows[0].Value(), any(postExpectedMsg(94, 11, aiID, "handback", nil, "Checked status.", []string{}, nil, postRawJSON(t, facts), env)))
-		equal(t, res.Items, []home.Item{{AI: aiID, Why: "notice", Msg: id(94), Code: "handback"}})
+		equal(t, res.Items, ([]home.Item)(nil))
 	})
 }
 
 type postRefusalEnv struct {
 	s       *home.State
-	d       disk
 	by      identity.Key
 	payload string
 }
@@ -275,10 +284,8 @@ func postJSONText(v any) string {
 
 func TestPostRefusals(t *testing.T) {
 	thread, missing := postTask, id(99)
-	taken := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(95)}, Kind: "text"}
 	report := proto.ReportBody{Commit: "9f2c1ab", Files: 1, Added: 2, Removed: 0}
 	handback := proto.HandbackBody{Files: []string{}, Commits: []proto.CommitSubject{}}
-	raiseMain := func(raw string) string { return strings.Replace(raw, `"main":false`, `"main":true`, 1) }
 
 	cases := map[string]struct {
 		code  string
@@ -295,21 +302,6 @@ func TestPostRefusals(t *testing.T) {
 		}},
 		"handback by a person": {code: "forbidden", setup: func(e *postRefusalEnv) {
 			e.by, e.payload = browser, postJSONText(postMake(95, "", "handback", &thread, nil, nil, "", handback))
-		}},
-		"text with main true": {code: "bad_request", setup: func(e *postRefusalEnv) {
-			e.by, e.payload = browser, raiseMain(postJSONText(postMake(95, "", "text", nil, nil, nil, "x", proto.EmptyBody{})))
-		}},
-		"progress with main true": {code: "bad_request", setup: func(e *postRefusalEnv) {
-			e.payload = raiseMain(postJSONText(postMake(95, postA, "progress", &thread, nil, nil, "x", proto.EmptyBody{})))
-		}},
-		"question with main true": {code: "bad_request", setup: func(e *postRefusalEnv) {
-			e.payload = raiseMain(postJSONText(postMake(95, postA, "question", &thread, nil, nil, "x", proto.EmptyBody{})))
-		}},
-		"report with main true": {code: "bad_request", setup: func(e *postRefusalEnv) {
-			e.payload = raiseMain(postJSONText(postMake(95, postA, "report", &thread, nil, nil, "", report)))
-		}},
-		"handback with main true": {code: "bad_request", setup: func(e *postRefusalEnv) {
-			e.payload = raiseMain(postJSONText(postMake(95, postA, "handback", &thread, nil, nil, "", handback)))
 		}},
 		"progress in the main line": {code: "bad_request", setup: func(e *postRefusalEnv) {
 			e.payload = postJSONText(postMake(95, postA, "progress", nil, nil, nil, "x", proto.EmptyBody{}))
@@ -362,20 +354,12 @@ func TestPostRefusals(t *testing.T) {
 		"mentioning no member of the group": {code: "conflict", setup: func(e *postRefusalEnv) {
 			e.by, e.payload = browser, postJSONText(postMake(95, "", "text", nil, []string{missing}, nil, "x", proto.EmptyBody{}))
 		}},
-		"with the id of an existing message": {code: "conflict", setup: func(e *postRefusalEnv) {
-			e.d[id(95)] = taken
-			e.by, e.payload = browser, postJSONText(postMake(95, "", "text", nil, nil, nil, "x", proto.EmptyBody{}))
-		}},
-		"report with the id of an existing message": {code: "conflict", setup: func(e *postRefusalEnv) {
-			e.d[id(95)] = taken
-			e.payload = postJSONText(postMake(95, postA, "report", &thread, nil, nil, "", report))
-		}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			env := postRefusalEnv{s: postState(t), d: disk{}, by: laptop}
+			env := postRefusalEnv{s: postState(t), by: laptop}
 			tc.setup(&env)
-			res, err := home.Commands.Apply(env.s, env.d, receipts{}, env.by.ID(), env.by.Sign(env.payload), now)
+			res, err := home.Commands.Apply(env.s, disk{}, receipts{}, env.by.ID(), env.by.Sign(env.payload), now)
 			if err != nil {
 				t.Fatal(err)
 			}

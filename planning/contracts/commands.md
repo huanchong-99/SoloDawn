@@ -122,6 +122,12 @@ The message id is `n`.
 | `review` | an AI | `thread` = `body.task`; task-machine row 7 | Result: `passed`, `round` |
 | `handback` | an AI | `body` holds the host's facts | item `notice` for the secretary |
 
+Rules for every `post`:
+
+- A member named twice in `mentions` is `bad_request`, and a mentioned id
+  that is no member of the group is `conflict`.
+- A post never queues an item for its own author.
+
 Rules for every `post` by an AI:
 
 - A message in a thread that mentions an AI counts a round (task-machine

@@ -80,7 +80,7 @@ func TestNotePutWritesNoteRow(t *testing.T) {
 	equal(t, res.Items, ([]home.Item)(nil))
 	want := proto.NoteRow{
 		RowHeader: proto.RowHeader{Type: "note", ID: id(111), Seq: 11}, Pos: 11, Group: groupID,
-		Text: "Keep <paths> clean.", By: ownerID, Timestamp: clock,
+		Text: "Keep <paths> clean.", By: ownerID, Timestamp: noteTS,
 	}
 	equal(t, []any{res.Rows[0].Value()}, []any{want})
 	noteNulls(t, res.Rows[0].Value(), "/task")
@@ -92,7 +92,7 @@ func TestNotePutWritesNoteRow(t *testing.T) {
 	taskRef := noteTask
 	wantTask := proto.NoteRow{
 		RowHeader: proto.RowHeader{Type: "note", ID: id(113), Seq: 12}, Pos: 12, Group: groupID,
-		Task: &taskRef, Text: "", By: noteWorker, Timestamp: clock,
+		Task: &taskRef, Text: "", By: noteWorker, Timestamp: noteTS,
 	}
 	equal(t, []any{res.Rows[0].Value()}, []any{wantTask})
 	noteNulls(t, res.Rows[0].Value())

@@ -93,7 +93,7 @@ func postHandback(s *State, c Command) (Result, *Refusal) {
 }
 
 func (s *State) postHandbackNotice(msg proto.MsgRow) []Item {
-	if s.Group.Secretary == "" {
+	if s.Group.Secretary == "" || msg.By == s.Group.Secretary {
 		return nil
 	}
 	return []Item{{AI: s.Group.Secretary, Why: itemNotice, Task: postTaskID(msg.Thread), Msg: msg.ID, Code: postKindHandback}}
@@ -107,7 +107,7 @@ func postWrite[B any](s *State, c Command, kind string, aiOnly bool, place postP
 	if refusal := c.Decode(&p); refusal != nil {
 		return nil, proto.MsgRow{}, refusal
 	}
-	mentions, refusal := s.postCheck(c, kind, place, p.Main, p.Thread, p.Mentions)
+	mentions, refusal := s.postCheck(c.Who, kind, place, p.Thread, p.Mentions)
 	if refusal != nil {
 		return nil, proto.MsgRow{}, refusal
 	}
@@ -119,27 +119,17 @@ func postWrite[B any](s *State, c Command, kind string, aiOnly bool, place postP
 	return s.postRows(msg), msg, nil
 }
 
-func (s *State) postCheck(c Command, kind string, place postPlace, main bool, thread *proto.ID, raw []proto.ID) ([]string, *Refusal) {
-	if !postAllows(main, thread != nil, place) {
+func (s *State) postCheck(w Who, kind string, place postPlace, thread *proto.ID, raw []proto.ID) ([]string, *Refusal) {
+	if !postAllows(thread != nil, place) {
 		return nil, &Refusal{"bad_request", "the post is not where its kind allows"}
 	}
-	if refusal := s.postThread(c.Who, kind, thread); refusal != nil {
+	if refusal := s.postThread(w, kind, thread); refusal != nil {
 		return nil, refusal
 	}
-	mentions, refusal := s.postMentions(raw)
-	if refusal != nil {
-		return nil, refusal
-	}
-	if _, taken := c.Disk.Msg(string(c.Nonce)); taken {
-		return nil, &Refusal{"conflict", "a message with the id of the post exists"}
-	}
-	return mentions, nil
+	return s.postMentions(raw)
 }
 
-func postAllows(main, inThread bool, place postPlace) bool {
-	if main {
-		return false
-	}
+func postAllows(inThread bool, place postPlace) bool {
 	switch place {
 	case postInThread:
 		return inThread
@@ -209,7 +199,7 @@ func (s *State) postWakes(msg proto.MsgRow) []Item {
 	var items []Item
 	task := postTaskID(msg.Thread)
 	for _, m := range msg.Mentions {
-		if _, ai := s.AIs[m]; ai {
+		if _, ai := s.AIs[m]; ai && m != msg.By {
 			items = append(items, Item{AI: m, Why: postMentionWhy, Task: task, Msg: msg.ID})
 		}
 	}

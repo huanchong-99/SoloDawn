@@ -129,9 +129,6 @@ func (s *State) briefWorking(member string) bool {
 
 // briefCard writes the brief, pending, and the brief it replaces, superseded.
 func briefCard(s *State, c Command, p proto.Post[proto.BriefBody], mentions []string) (Result, *Refusal) {
-	if _, taken := c.Disk.Msg(string(c.Nonce)); taken {
-		return Result{}, &Refusal{"conflict", "a message with the id of the brief exists"}
-	}
 	card := proto.MsgRow{
 		RowHeader: proto.RowHeader{Type: "msg", ID: string(c.Nonce)}, Group: s.ID, By: c.Who.Member(), Kind: briefKind,
 		Timestamp: c.Timestamp, Text: p.Text, Mentions: mentions, Re: (*string)(p.Re), Body: briefJSON(p.Body),

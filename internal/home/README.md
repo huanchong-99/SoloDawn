@@ -89,9 +89,8 @@ that carries `as`; `Secretary` is true only for one that does. `Who.Human` is em
 
 **Functions are pure.** A function reads `s` and `c` and calls nothing but `c.Disk`. It does not
 change the state, read a clock (the home's is `c.Now`, the signer's `c.Timestamp`) or touch the
-store. A timer and a handler are pure in the same way. It checks its own table row: who may send the command, and that an id the payload chooses
-(`n` as the id of what it creates, the `id` of `member add_ai` or of `note`) is not already taken
-by another row.
+store, and checks its own table row, including who may send the command. A timer and a handler are
+pure in the same way.
 
 **Rows.** `Apply` numbers the rows of a result in order, from `State.Seq + 1`, by `State.Seal`. A function leaves
 `seq` as it is. In a message or a note it creates it leaves `pos` at 0, and `Apply` sets it to the
@@ -362,10 +361,11 @@ function that moves a task calls it and adds nothing to its rules.
 - **Post.** Only the secretary posts a brief, else `forbidden`; a group without one has nobody who
   can. What the payload says by itself is `bad_request`: a `thread` that is not `null`, no
   criterion, no task, a dependency that is not an earlier entry or that is named twice, an entry
-  whose assignee is its reviewer, and a member named twice in `mentions` (shared with `cmd_post.go`).
+  whose assignee is its reviewer, and a member named twice in `mentions`
+  ([commands](../../planning/contracts/commands.md) 1.3, shared with `cmd_post.go`).
   What the group says is `conflict`: a mentioned id or requester who is no member,
-  an assignee or reviewer who is no working AI (an AI member other than the secretary), a message
-  that already has the id `n`, and a `replaces` that names no brief that is `pending` or `revise`.
+  an assignee or reviewer who is no working AI (an AI member other than the secretary), and a
+  `replaces` that names no brief that is `pending` or `revise`.
   The row is a main-line card with `main` false, `ts` as signed, `state` `pending`, and a body
   encoded again from the checked fields. A post creates no task and queues no item (A5.2). The
   replaced brief keeps its state with `status` `superseded`.
@@ -407,27 +407,28 @@ holds `note` and `forget` ([commands](../../planning/contracts/commands.md) 1.6;
 this:
 
 - **Who and placement.** `text` is by a person or an AI; `progress`, `question`, `report` and
-  `handback` are by an AI, else `forbidden`. None of the five is raised from a thread, so `main`
-  must be `false`, else `bad_request`. `progress` and `report` belong in a thread (`thread` not
-  `null`), and `handback` belongs in a thread for a working AI and in the main line (`thread`
-  `null`) for the secretary; any other placement is `bad_request`.
-- **Thread, mentions and ids.** A non-null `thread` must name a task in `State.Tasks`, else
-  `not_found`; for `report`, `as` must be that task's `assignee`, else `forbidden`. One rule,
-  `(*State).postMentions` (shared with `cmd_brief.go`), checks `mentions`: naming an id twice is
-  `bad_request`, and naming someone who is neither in `State.People` nor in `State.AIs` is
-  `conflict`. `re` is kept as signed without looking up the answered message, which retention or
-  `forget` may have removed. A message id `n` already held on disk is `conflict`.
+  `handback` are by an AI, else `forbidden`. `progress` and `report` belong in a thread (`thread`
+  not `null`), and `handback` belongs in a thread for a working AI and in the main line (`thread`
+  `null`) for the secretary; any other placement is `bad_request`. None of the five is raised from
+  a thread, and the row is written with `main` `false`.
+- **Thread and mentions.** A non-null `thread` must name a task in `State.Tasks`, else `not_found`;
+  for `report`, `as` must be that task's `assignee`, else `forbidden`. `(*State).postMentions`,
+  shared with `cmd_brief.go`, checks the `mentions` rule of
+  [commands](../../planning/contracts/commands.md) 1.3. `re` is kept as signed without looking up
+  the answered message, which retention or `forget` may have removed.
 - **Rows and items.** Every post writes its `MsgRow` with `ts` as signed and `body` encoded without
   HTML escaping; a post in a thread follows it with the updated `TaskRow` (`thread.count` + 1, and
-  `thread.last` with `text` cut to at most 200 UTF-8 characters). `text`, `progress` and `question`
-  queue `mention` for each mentioned AI in `mentions` order; a main-line `text` from a person that
-  mentions no AI queues `mention` for `Group.Secretary` when set. `handback` queues `notice` (`code`
-  `handback`, `task` set when in a thread) for `Group.Secretary` when set ([issues](../../issues.md)).
+  `thread.last` with `text` cut to at most 200 UTF-8 characters). A post never queues an item for
+  its own author ([commands](../../planning/contracts/commands.md) 1.3): `text`, `progress` and
+  `question` queue `mention` for each other mentioned AI in `mentions` order; a main-line `text`
+  from a person that mentions no AI queues `mention` for `Group.Secretary` when set; and `handback`
+  from a working AI queues `notice` (`code` `handback`, `task` set) for `Group.Secretary` when set.
 - **`note` and `forget`.** `note` is by a person or an AI; a non-null `task` that names no task in
   `State.Tasks` is `not_found`, an `id` already held as a live note on disk is `conflict`, and the
-  `NoteRow` gets `ts` from `c.Now`. `forget` is by an admin only (`forbidden`); `r` must be `note`
-  or `msg` (`bad_request`); a missing or already forgotten row is `not_found`; a `msg` whose `kind`
-  is not `review` is `conflict`; otherwise a `GoneRow` (`gone: true`) replaces it.
+  `NoteRow` gets `ts` as signed (`c.Timestamp`). `forget` is by an admin only (`forbidden`); `r`
+  must be `note` or `msg` (`bad_request`); a missing or already forgotten row is `not_found`; a
+  `msg` whose `kind` is not `review` is `conflict`; otherwise a `GoneRow` (`gone: true`) replaces
+  it.
 
 ## Known limitations
 
@@ -435,8 +436,6 @@ this:
   the remaining command files (including thread round counting in HM-13 and the wake-up cap in HM-7)
   and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
-- A `handback` posted by the secretary in the main line still queues a `notice` for the secretary
-  ([issues](../../issues.md)).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
 - A `peer.Connection` takes every frame at once and keeps it in its own buffer, so the limit of

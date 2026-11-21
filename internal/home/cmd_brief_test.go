@@ -227,7 +227,6 @@ func TestBriefPostRefusals(t *testing.T) {
 		"for the secretary as assignee": {body: task(0, func(e *proto.BriefTask) { e.Assignee = aiID }), code: "conflict"},
 		"for no AI as reviewer":         {body: task(1, func(e *proto.BriefTask) { e.Reviewer = id(30) }), code: "conflict"},
 		"for the secretary as reviewer": {body: task(1, func(e *proto.BriefTask) { e.Reviewer = aiID }), code: "conflict"},
-		"with the id of a message":      {disk: disk{id(40): text}, code: "conflict"},
 		"replacing nothing":             {body: replacing, code: "conflict"},
 		"replacing a text message":      {body: replacing, disk: disk{id(39): text}, code: "conflict"},
 		"replacing an approval card":    {body: replacing, disk: disk{id(39): approval}, code: "conflict"},
