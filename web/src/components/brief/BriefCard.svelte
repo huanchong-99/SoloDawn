@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { actTextLimit, jsonBytes } from '../../lib/compose';
   import type { CardProps } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { clock } from '../../lib/when';
@@ -8,10 +9,6 @@
 
   /** A secretary's task brief in all four states (contracts/messages.md 2.1, 3.1). */
   let { group, msg }: CardProps<'brief'> = $props();
-
-  // The text of an act is at most 1 KiB as a JSON string, quotes included (messages.md section 3).
-  const actTextLimit = 1024;
-  const jsonBytes = (value: string) => new TextEncoder().encode(JSON.stringify(value)).length;
 
   let revising = $state(false);
   let note = $state('');
@@ -131,7 +128,7 @@
       {#if isRequester}
         <span class="badge solid" data-tone="dawn">{t('brief.needs_you')}</span>
       {:else}
-        <span class="badge" data-tone={canAct ? 'dawn' : undefined}>
+        <span class="badge">
           {t('brief.waiting_on').replace('{name}', nameOf(msg.body.requester))}
         </span>
       {/if}
@@ -143,7 +140,7 @@
           .replace('{time}', clock(msg.state.at, prefs.lang))}
       </span>
     {:else if msg.state.status === 'revise'}
-      <span class="badge" data-tone="dawn">
+      <span class="badge">
         {t('brief.revised')
           .replace('{name}', nameOf(msg.state.by))
           .replace('{time}', clock(msg.state.at, prefs.lang))}
@@ -227,36 +224,6 @@
 </section>
 
 <style>
-  .card-head,
-  .card-foot {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    flex-wrap: wrap;
-  }
-  .card-head {
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-    .kind {
-      font-weight: 600;
-      color: var(--text);
-    }
-    .badge:last-child {
-      margin-left: auto;
-    }
-  }
-  .kv {
-    display: grid;
-    grid-template-columns: max-content minmax(0, 1fr);
-    gap: 6px var(--sp-4);
-    font-size: var(--fs-sm);
-    dt {
-      color: var(--text-3);
-    }
-    dd {
-      min-width: 0;
-    }
-  }
   .scope p + p {
     margin-top: 4px;
   }
@@ -315,53 +282,9 @@
   .over {
     color: var(--danger);
   }
-  .fold {
-    border-top: 1px solid var(--line);
-    margin: 0 calc(-1 * var(--sp-4)) -14px;
-    > summary {
-      display: flex;
-      align-items: center;
-      gap: var(--sp-2);
-      padding: 10px var(--sp-4);
-      cursor: pointer;
-      list-style: none;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
-      border-radius: 0 0 var(--r-lg) var(--r-lg);
-      &::-webkit-details-marker {
-        display: none;
-      }
-      :global(.i) {
-        transition: transform var(--dur-2) var(--ease);
-        transform: rotate(-90deg);
-      }
-      b {
-        color: var(--text);
-      }
-    }
-    &[open] > summary {
-      border-radius: 0;
-      :global(.i) {
-        transform: none;
-      }
-    }
-  }
-  @media (hover: hover) {
-    .fold > summary:hover {
-      background: var(--surface-2);
-    }
-  }
-  .fold-body {
-    padding: var(--sp-1) var(--sp-4) var(--sp-4);
-    font-size: var(--fs-sm);
-  }
   @media (max-width: 640px) {
-    .kv.wide {
-      grid-template-columns: minmax(0, 1fr);
-      gap: 2px;
-      dd {
-        margin-bottom: var(--sp-2);
-      }
+    .split .grow {
+      flex-basis: 100%;
     }
   }
 </style>

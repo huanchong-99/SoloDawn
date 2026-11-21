@@ -51,24 +51,9 @@
 </section>
 
 <style>
-  .card-head {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    flex-wrap: wrap;
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-  }
   .done-icon {
     display: inline-grid;
     color: var(--ok);
-  }
-  .kind {
-    font-weight: 600;
-    color: var(--text);
-  }
-  .card-head .badge:last-child {
-    margin-left: auto;
   }
   .stats {
     display: flex;

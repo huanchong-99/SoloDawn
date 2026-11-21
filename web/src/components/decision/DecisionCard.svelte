@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { actTextLimit, jsonBytes } from '../../lib/compose';
   import type { CardProps } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { clock } from '../../lib/when';
@@ -7,9 +8,6 @@
 
   /** A decision card with multiple-choice options and a free-text answer field (messages.md 2.4, 3.3). */
   let { group, msg }: CardProps<'decision'> = $props();
-
-  const actTextLimit = 1024;
-  const jsonBytes = (value: string) => new TextEncoder().encode(JSON.stringify(value)).length;
 
   let freeText = $state('');
   let busy = $state(false);
@@ -32,11 +30,7 @@
   const memberName = (id: string) => group.member(id)?.name ?? t('chat.gone');
   const userName = (uid: string) =>
     group.members.find((m) => m.kind === 'human' && m.user === uid)?.name ?? uid;
-  const waitingOn = $derived(msg.body.to.map(userName).join(prefs.lang === 'zh-CN' ? '、' : ', '));
-  const chosenOption = $derived.by(() => {
-    const choice = msg.state.status === 'decided' ? msg.state.choice : undefined;
-    return choice === undefined ? undefined : msg.body.options.find((opt) => opt.id === choice);
-  });
+  const waitingOn = $derived(msg.body.to.map(userName).join(t('decision.sep')));
 
   async function choose(arg?: string) {
     if (!canAct || readonly || busy || overLimit) return;
@@ -60,7 +54,7 @@
   }
 </script>
 
-<section class="card" class:need={canAct}>
+<section class="card" class:need={canAct} aria-label={t('decision.kind')}>
   <header class="card-head">
     <Icon name="fork" />
     <span class="kind">{t('decision.kind')}</span>
@@ -122,13 +116,8 @@
     </div>
   {/if}
 
-  {#if msg.state.status === 'decided'}
-    {#if msg.state.choice !== undefined && !chosenOption}
-      <p class="answer"><b>{msg.state.choice}</b></p>
-    {/if}
-    {#if msg.state.text !== undefined}
-      <p class="answer">{msg.state.text}</p>
-    {/if}
+  {#if msg.state.status === 'decided' && msg.state.text !== undefined}
+    <p class="answer">{msg.state.text}</p>
   {:else if pending}
     {#if failed}<Failure code={failed} />{/if}
     {#if inTo}
@@ -172,23 +161,11 @@
 </section>
 
 <style>
-  .card-head,
   .free-answer {
     display: flex;
     align-items: center;
     gap: var(--sp-2);
     flex-wrap: wrap;
-  }
-  .card-head {
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-    .kind {
-      font-weight: 600;
-      color: var(--text);
-    }
-    .badge:last-child {
-      margin-left: auto;
-    }
   }
   .context {
     color: var(--text-2);
@@ -226,10 +203,26 @@
       background: var(--ok-soft);
     }
   }
-  @media (hover: hover) {
-    button.opt:not([disabled]):hover {
-      border-color: var(--dawn);
+  button.opt {
+    position: relative;
+    isolation: isolate;
+
+    &::before {
+      content: '';
+      position: absolute;
+      inset: -1px;
+      z-index: -1;
+      border: 1px solid var(--dawn);
+      border-radius: inherit;
       background: var(--dawn-soft);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity var(--dur-1) var(--ease);
+    }
+  }
+  @media (hover: hover) {
+    button.opt:not([disabled]):hover::before {
+      opacity: 1;
     }
   }
   button.opt[disabled] {

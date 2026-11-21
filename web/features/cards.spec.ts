@@ -241,9 +241,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       And(
         'the brief card shows "Alex asked for changes" with the note "Include the relay path."',
         () => {
-          expect(one('.msg-body .card .card-head .badge').textContent).toContain(
-            'Alex asked for changes ·',
-          );
+          const badge = one('.msg-body .card .card-head .badge');
+          expect(badge.textContent).toContain('Alex asked for changes ·');
+          expect(badge.getAttribute('data-tone')).toBeNull();
           expect(texts('.msg-body .card .revise-note')).toEqual(['Include the relay path.']);
           expect(one<HTMLDetailsElement>('.msg-body .card details.fold').open).toBe(false);
         },
@@ -289,6 +289,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         'the decision card shows all four options, marks "B" as "Recommended", and offers a free-text field',
         () => {
           const card = one('.msg-body .card.need');
+          expect(card.getAttribute('aria-label')).toBe('Your call');
           expect(texts('.msg-body .card .card-head .mono')).toEqual(['T-12']);
           expect(texts('.msg-body .card .opts .opt b')).toEqual([
             'A · Top banner',
@@ -297,7 +298,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             'D · Settings page only',
           ]);
           expect(texts('.msg-body .card .opts .opt .badge')).toEqual(['Recommended']);
-          expect(card.querySelector('input[type=text]')).not.toBeNull();
+          const input = card.querySelector<HTMLInputElement>('input[type=text]')!;
+          expect(input.placeholder).toBe('Your own answer, or a note');
           expect(buttonNamed(card, 'Send answer').disabled).toBe(true);
         },
       );
@@ -554,6 +556,16 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             website,
             example('row-msg-decision-decided', { id: 'goldenDecisionDecidedA' }),
           );
+          home.write(
+            website,
+            example('row-msg-brief-pending', {
+              id: 'minaBriefPending00000A',
+              body: {
+                ...(example('row-msg-brief-pending').body as Record<string, unknown>),
+                requester: 'mina-member-id',
+              },
+            }),
+          );
           flushSync();
         },
       );
@@ -577,18 +589,23 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       And(
         'the golden confirmed brief, revise brief and decided decision show their acted states',
         () => {
-          const [, , confirmedBrief, reviseBrief, decidedDecision] = all('.msg-body .card');
+          const [, , confirmedBrief, reviseBrief, decidedDecision, minaBrief] =
+            all('.msg-body .card');
           expect(confirmedBrief.querySelector('.card-head .badge')!.textContent).toContain(
             'Alex confirmed ·',
           );
-          expect(reviseBrief.querySelector('.card-head .badge')!.textContent).toContain(
-            'Alex asked for changes ·',
-          );
+          const reviseBadge = reviseBrief.querySelector('.card-head .badge')!;
+          expect(reviseBadge.textContent).toContain('Alex asked for changes ·');
+          expect(reviseBadge.getAttribute('data-tone')).toBeNull();
           expect(reviseBrief.querySelector('.revise-note')!.textContent).toBe(
             'Include the relay path.',
           );
           expect(decidedDecision.querySelector('.opt.chosen b')!.textContent).toBe('A · Header');
           expect(decidedDecision.querySelector('.answer')!.textContent).toBe('Header works.');
+          expect(minaBrief.classList.contains('need')).toBe(true);
+          const minaBriefBadge = minaBrief.querySelector('.card-head .badge')!;
+          expect(minaBriefBadge.textContent!.trim()).toBe('Waiting on Mina');
+          expect(minaBriefBadge.getAttribute('data-tone')).toBeNull();
         },
       );
       Given(
@@ -600,13 +617,13 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       When('the owner presses "Confirm & start" on the brief card', async () => {
-        const brief = all('.msg-body .card')[5];
+        const brief = all('.msg-body .card')[6];
         buttonNamed(brief, 'Confirm & start').click();
         flushSync();
         await settled(1);
       });
       Then('the brief card reports the refusal "conflict"', () => {
-        const brief = all('.msg-body .card')[5];
+        const brief = all('.msg-body .card')[6];
         expect(brief.querySelector('[role=alert]')!.textContent).toContain('conflict');
       });
       When('the connection to the home is lost', () => {
@@ -615,7 +632,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         flushSync();
       });
       Then('the pending brief disables its action buttons while offline', () => {
-        const brief = all('.msg-body .card')[5];
+        const brief = all('.msg-body .card')[6];
         expect(buttonNamed(brief, 'Confirm & start').disabled).toBe(true);
         expect(buttonNamed(brief, 'Change it').disabled).toBe(true);
       });
