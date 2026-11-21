@@ -30,6 +30,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `planning/flows/agent-turn.md` step 5.1 places `max_open` (closing the longest-`waiting` session, or waiting when every open session is `working` or `takeover`) in the session runtime (`HS-15`, #187, `tryReserveSlot`), so delivery does not duplicate it; `Deliver` (`deliverNow` in `internal/host/deliver.go`) walks all held AI keys on each wake so a freed slot reaches waiting AIs.
 - Status: open, coordinated between HS-13 (#186) and HS-15 (#187).
 
+### 2026-11-21 · limitation · A member's `limited` state from `login_invalid` ends at its next completed turn, not at `agent.set`
+
+- Symptom: after `login_invalid` puts an AI member into `limited`, fixing sign-in and sending `agent.set` sets `login_ok` back to `true` in `host.info`, while the group still shows the member as `limited` until the next item arrives and its turn completes.
+- Cause: `agent.set` clears `agtPart.invalid` (`internal/host/agents.go`) and is not a session `Event`, while the member status overlay `runtimePart.limited` (`internal/host/run.go:69`, set at `:664-680`) is cleared in `finishActiveTurn` (`internal/host/run.go:473-482`) when a turn finishes. `runtimePart.isLimited` (`:682-686`) feeds member status only and holds no delivery.
+- Status: open, accepted by the coordinator's decision of 2026-11-21 (`HS-3`, `HS-15`); `planning/contracts/commands.md` section 2 and `planning/flows/agent-turn.md` section E match this behaviour.
+
 ### 2026-11-21 · limitation · Claude driver matches English error text for `LoginInvalid` and `NoSession`
 
 - Symptom: `claudeDiagEvent` (`internal/host/claude.go`) recognises an unresumable session or invalid sign-in from HTTP status `401` and English error substrings (`no conversation found`, `session not found`, `/login`, `not logged in`, `invalid api key`, `authentication`) in `result` or non-zero-exit `stderr`, so a wording change in a newer Claude Code release can report a failed turn or crash instead.
