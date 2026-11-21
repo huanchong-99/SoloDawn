@@ -9,8 +9,7 @@ import (
 )
 
 // Approval and decision cards: post of kinds approval and decision, act
-// approve, deny and choose on them, and cardPending for reading a task's
-// pending cards (planning/contracts/commands.md 1.3 and 1.4;
+// approve, deny and choose on them (planning/contracts/commands.md 1.3 and 1.4;
 // planning/contracts/messages.md 2.3, 2.4, 3.2 and 3.3;
 // planning/contracts/task-machine.md rows 17 to 20).
 
@@ -30,8 +29,6 @@ const (
 	cardStatusApproved = "approved"
 	cardStatusDenied   = "denied"
 	cardStatusDecided  = "decided"
-
-	cardPreviewLimit = 200
 )
 
 type cardPostSpec struct {
@@ -56,7 +53,7 @@ func cardPostApproval(s *State, c Command) (Result, *Refusal) {
 	if !cardApprovalShape(p, c.Who.AI) {
 		return Result{}, &Refusal{"bad_request", "the approval card does not match the contract"}
 	}
-	mentions, refusal := s.cardMentions(p.Mentions)
+	mentions, refusal := s.postMentions(p.Mentions)
 	if refusal != nil {
 		return Result{}, refusal
 	}
@@ -89,7 +86,7 @@ func cardPostDecision(s *State, c Command) (Result, *Refusal) {
 	if !cardDecisionShape(p) {
 		return Result{}, &Refusal{"bad_request", "the decision card does not match the contract"}
 	}
-	mentions, refusal := s.cardMentions(p.Mentions)
+	mentions, refusal := s.postMentions(p.Mentions)
 	if refusal != nil {
 		return Result{}, refusal
 	}
@@ -155,7 +152,7 @@ func (s *State) cardPostOnTask(c Command, spec cardPostSpec) (Result, *Refusal) 
 	ev := Event{
 		Kind: spec.on, By: s.cardPoster(c.Who), Member: c.Who.AI, Now: c.Now,
 		Card:    PendingCard{Kind: spec.kind, Msg: id, Who: spec.who, Since: c.Timestamp},
-		Pending: cardPending(c.Disk, task.ID),
+		Pending: tskPending(c.Disk, task.ID),
 	}
 	moved, _, err := Step(task, ev)
 	if err != nil {
@@ -189,29 +186,9 @@ func (s *State) cardNewMsg(c Command, kind string, thread *string, text string, 
 func cardThread(task proto.TaskRow, msg proto.MsgRow) proto.TaskRow {
 	task.Thread.Count++
 	task.Thread.Last = &proto.ThreadMessage{
-		By: msg.By, Kind: msg.Kind, Text: cardPreview(msg.Text), Timestamp: msg.Timestamp,
+		By: msg.By, Kind: msg.Kind, Text: postPreview(msg.Text), Timestamp: msg.Timestamp,
 	}
 	return task
-}
-
-func cardPreview(text string) string {
-	runes := []rune(text)
-	return string(runes[:min(len(runes), cardPreviewLimit)])
-}
-
-func (s *State) cardMentions(ids []proto.ID) ([]string, *Refusal) {
-	list := make([]string, len(ids))
-	for i, id := range ids {
-		m := string(id)
-		if slices.Contains(list[:i], m) {
-			return nil, &Refusal{"bad_request", "a card mentions the same member twice"}
-		}
-		if !s.memExists(m) {
-			return nil, &Refusal{"conflict", "a card mentions no member of the group"}
-		}
-		list[i] = m
-	}
-	return list, nil
 }
 
 func cardApprove(s *State, c Command) (Result, *Refusal) {
@@ -290,7 +267,7 @@ func (s *State) cardFinishAct(c Command, decided proto.MsgRow, taskID string, on
 		Kind: on, By: ByPerson, Now: c.Now,
 		Card:    PendingCard{Kind: decided.Kind, Msg: decided.ID, Who: who, Since: decided.Timestamp},
 		Asker:   asker,
-		Pending: cardPending(c.Disk, task.ID),
+		Pending: tskPending(c.Disk, task.ID),
 	}
 	return s.cardApplyStep(decided, task, ev)
 }
@@ -343,35 +320,4 @@ func (s *State) cardItems(items []TaskItem, task, msg string) []Item {
 		}
 	}
 	return out
-}
-
-// cardPending returns the pending approval and decision cards of task, oldest
-// first, as Event.Pending reads them.
-func cardPending(d Disk, task string) []PendingCard {
-	var out []PendingCard
-	for _, msg := range d.Pending() {
-		if cardForTask(msg, task) {
-			out = append(out, PendingCard{Kind: msg.Kind, Msg: msg.ID, Who: cardWho(msg), Since: msg.Timestamp})
-		}
-	}
-	return out
-}
-
-func cardForTask(msg proto.MsgRow, task string) bool {
-	if msg.Thread == nil || *msg.Thread != task {
-		return false
-	}
-	return msg.Kind == cardKindApproval || msg.Kind == cardKindDecision
-}
-
-func cardWho(msg proto.MsgRow) []string {
-	var body struct {
-		Approvers []string `json:"approvers"`
-		To        []string `json:"to"`
-	}
-	json.Unmarshal(msg.Body, &body)
-	if msg.Kind == cardKindApproval {
-		return body.Approvers
-	}
-	return body.To
 }

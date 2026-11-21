@@ -122,7 +122,14 @@ The message id is `n`.
 | `call` | an AI | the callee is another AI member; `body.depth` ≤ `limits.ask_depth` | `state.status = waiting`; item `mention` for the callee |
 | `reply` | an AI | `re` is a `call` addressed to `as` whose `state.status` is still `waiting`, else `conflict`: a call is answered once | the call's `state` becomes `answered` with `reply` and `ms`; item `reply` for the caller |
 | `review` | an AI | `thread` = `body.task`; task-machine row 7 | Result: `passed`, `round` |
-| `handback` | an AI | `body` holds the host's facts | item `notice` for the secretary |
+
+`handback` is postponed with takeover.
+
+Rules for every `post`:
+
+- A member named twice in `mentions` is `bad_request`, and a mentioned id
+  that is no member of the group is `conflict`.
+- A post never queues an item for its own author.
 
 Rules for every `post` by an AI:
 
@@ -180,8 +187,10 @@ When each is allowed, and what it does, is `contracts/task-machine.md`.
 | `resume` | `id` | the secretary, or an admin (for a `failed` task, or one paused by the round limit, an admin only); the host of the assignee, for its own pre-empted task | — |
 | `cancel` | `id` | the secretary, or an admin (at step `merge` an admin only); the host of the assignee when `origin` is `takeover` | — |
 
-`items` of `checked` and `cloud` has the shape of `items` in a `checks`
-body (`contracts/messages.md` 2.8), which the home writes from it.
+`branch` of `task branch` is `task/<num>-<slug>` (`contracts/local.md`
+section 7); any other value is `bad_request`. `items` of `checked` and
+`cloud` has the shape of `items` in a `checks` body
+(`contracts/messages.md` 2.8), which the home writes from it.
 `stats` of `submitted` and `merged` is `{"added":…,"removed":…}`, the line
 counts of `git diff --shortstat <base-ref>...<commit>` (`contracts/local.md`
 section 7), written into the task row's `stats`.

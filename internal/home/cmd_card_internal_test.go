@@ -72,17 +72,17 @@ func cardTestFixture() (string, cardTestDisk) {
 	return t1, d
 }
 
-// cardPending keeps only the pending approval and decision cards of the named
+// tskPending keeps only the pending approval and decision cards of the named
 // task, in the oldest-first order Disk.Pending returns them.
 func TestCardPendingSelectsTaskCardsInOrder(t *testing.T) {
 	t1, d := cardTestFixture()
-	got := cardPending(d, t1)
+	got := tskPending(d, t1)
 	want := []PendingCard{
 		{Kind: "decision", Msg: "dec-t1", Who: []string{"u1", "u3"}, Since: 140},
 		{Kind: "approval", Msg: "app-t1", Who: []string{"u1"}, Since: 150},
 	}
 	cardTestSame(t, got, want)
-	cardTestSame(t, cardPending(d, "task-missing"), []PendingCard(nil))
+	cardTestSame(t, tskPending(d, "task-missing"), []PendingCard(nil))
 }
 
 // cardChoiceOK accepts an omitted arg or a listed option id, cardPoster maps
