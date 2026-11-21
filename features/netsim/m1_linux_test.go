@@ -6,7 +6,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -44,22 +43,13 @@ const (
 	netsimNodeTCP = 47801
 )
 
-const lanBridgeScript = `
-gw=$1 peer=$2
-ip -n "$gw" link set lan down
-ip -n "$gw" link set lan name lan0
-ip -n "$gw" address flush dev lan0
-ip -n "$gw" link add lan type bridge
-ip -n "$gw" link set lan0 master lan
-ip -n "$gw" link set lan0 up
-ip link add lan1 netns "$gw" type veth peer name eth0 netns "$peer"
-ip -n "$gw" link set lan1 master lan
-ip -n "$gw" link set lan1 up
-ip -n "$gw" address add 10.0.0.1/24 dev lan
-ip -n "$gw" link set lan up
-ip -n "$peer" address add 10.0.0.3/24 dev eth0
-ip -n "$peer" link set eth0 up
-ip -n "$peer" route add default via 10.0.0.1
+const lanLinkScript = `
+left=$1 right=$2
+ip -n "$left" link add lan0 type veth peer name lan1 netns "$right"
+ip -n "$left" address add 192.168.10.1/24 dev lan0
+ip -n "$right" address add 192.168.10.2/24 dev lan1
+ip -n "$left" link set lan0 up
+ip -n "$right" link set lan1 up
 `
 
 func TestNetsimHelper(t *testing.T) {
@@ -90,10 +80,10 @@ func TestM1DirectAndRelayFallback(t *testing.T) {
 
 func checkM1LANDirect(t *testing.T) Network {
 	n := Start(t, PortRestricted, PortRestricted)
-	lanPeer := addLANPeer(t, n.Left.Gateway)
+	run(t, lanLinkScript, "sh", "-eu", "-s", "--", n.Left.Client, n.Right.Client)
 	startDaemonHelper(t, n.WAN, "wan", "")
-	nodeOut := startDaemonHelper(t, n.Left.Client, "node", "direct")
-	runBrowserInNS(t, lanPeer, "direct")
+	nodeOut := startDaemonHelper(t, n.Right.Client, "node", "direct")
+	runBrowserInNS(t, n.Left.Client, "direct")
 	expectHelperLine(t, nodeOut, "NODE_PATH direct")
 	return n
 }
@@ -109,16 +99,6 @@ func checkM1RelayFallback(t *testing.T) Network {
 	runBrowserInNS(t, n.Left.Client, "relay")
 	expectHelperLine(t, nodeOut, "NODE_PATH relay")
 	return n
-}
-
-func addLANPeer(t *testing.T, gateway string) string {
-	t.Helper()
-	peerNS := "netsim-" + rand.Text() + "-lan2"
-	run(t, "", "ip", "netns", "add", peerNS)
-	t.Cleanup(func() { run(t, "", "ip", "netns", "delete", peerNS) })
-	run(t, "", "ip", "-n", peerNS, "link", "set", "lo", "up")
-	run(t, lanBridgeScript, "sh", "-eu", "-s", "--", gateway, peerNS)
-	return peerNS
 }
 
 func startDaemonHelper(t *testing.T, ns, role, wantPath string) *bufio.Reader {
@@ -166,7 +146,8 @@ func expectHelperLine(t *testing.T, r *bufio.Reader, want string) {
 	line, err := r.ReadString('\n')
 	must(t, err)
 	if strings.TrimSpace(line) != want {
-		t.Fatalf("helper reported %q, want %q", strings.TrimSpace(line), want)
+		rest, rErr := io.ReadAll(r)
+		t.Fatalf("helper reported %q (rest=%q err=%v), want %q", strings.TrimSpace(line), string(rest), rErr, want)
 	}
 }
 
