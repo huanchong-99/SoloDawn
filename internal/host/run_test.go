@@ -863,58 +863,67 @@ func checkIdleAndArmGuards(t *testing.T) {
 	waitForState(t, h, key, Waiting)
 	rh.waitCmd(t)
 
-	// Pin onIdleTimeout and armTurnIdle guards across every operand.
-	rt := stateOf(h)
-	onIdleTimeout(h, rt, SessionKey{Group: "missing"}, 1)
-	onIdleTimeout(h, rt, key, 9999)
-	rt.mu.Lock()
-	lp := rt.procs[key]
-	stopIdleLocked(lp)
-	lp.turnActive = true
-	rt.mu.Unlock()
-	armTurnIdle(h, rt, lp, time.Hour)
-	rt.mu.Lock()
-	if lp.idleTimer != nil {
-		t.Fatal("armTurnIdle armed timer while turnActive")
-	}
-	curGen := lp.idleGen
-	rt.mu.Unlock()
-	onIdleTimeout(h, rt, key, curGen)
-
-	rt.mu.Lock()
-	lp.turnActive = false
-	rt.closing[key] = true
-	rt.mu.Unlock()
-	armTurnIdle(h, rt, lp, time.Hour)
-	rt.mu.Lock()
-	if lp.idleTimer != nil {
-		t.Fatal("armTurnIdle armed timer while closing")
-	}
-	rt.mu.Unlock()
-	onIdleTimeout(h, rt, key, curGen)
-	rt.mu.Lock()
-	delete(rt.closing, key)
-	rt.mu.Unlock()
-	armTurnIdle(h, rt, lp, time.Hour)
-	rt.mu.Lock()
-	if lp.idleTimer == nil {
-		t.Fatal("armTurnIdle did not arm timer when idle and not closing")
-	}
-	rt.mu.Unlock()
-	if seamState(t, h.Sessions, key) != Waiting {
-		t.Fatal("guarded idle timeout closed session")
-	}
+	verifyIdleGenAndArmGuards(t, h, key)
 
 	// Spontaneous process exit while Waiting moves session to Dormant without crash or AuditKilled.
 	p.finishExit()
 	waitForState(t, h, key, Dormant)
+	assertSpontaneousIdleExit(t, h, rh)
+}
+
+func verifyIdleGenAndArmGuards(t *testing.T, h *Host, key SessionKey) {
+	t.Helper()
+	rt := stateOf(h)
+	onIdleTimeout(h, rt, SessionKey{Group: "missing"}, 1)
+	rt.mu.Lock()
+	lp := rt.procs[key]
+	gen1 := lp.idleGen
+	stopIdleLocked(lp)
+	rt.mu.Unlock()
+	// Stopping the idle timer invalidates gen1 and never wraps idleGen back to 0.
+	onIdleTimeout(h, rt, key, 0)
+	onIdleTimeout(h, rt, key, gen1)
+	verifyArmTurnIdleGuards(t, h, rt, lp, key, gen1)
+}
+
+func verifyArmTurnIdleGuards(t *testing.T, h *Host, rt *runtimePart, lp *liveProc, key SessionKey, gen1 uint64) {
+	t.Helper()
+	rt.mu.Lock()
+	lp.turnActive = true
+	curGen := lp.idleGen
+	rt.mu.Unlock()
+	armTurnIdle(h, rt, lp, time.Hour)
+	onIdleTimeout(h, rt, key, curGen)
+	rt.mu.Lock()
+	armedActive := lp.idleTimer != nil
+	lp.turnActive = false
+	rt.closing[key] = true
+	rt.mu.Unlock()
+	armTurnIdle(h, rt, lp, time.Hour)
+	onIdleTimeout(h, rt, key, curGen)
+	rt.mu.Lock()
+	armedClosing := lp.idleTimer != nil
+	delete(rt.closing, key)
+	rt.mu.Unlock()
+	armTurnIdle(h, rt, lp, time.Hour)
+	// Re-arming after stopIdleLocked advances idleGen instead of colliding with gen1.
+	onIdleTimeout(h, rt, key, gen1)
+	rt.mu.Lock()
+	rearmed := lp.idleTimer != nil
+	rt.mu.Unlock()
+	if [4]bool{armedActive, armedClosing, rearmed, seamState(t, h.Sessions, key) == Waiting} != [4]bool{false, false, true, true} {
+		t.Fatalf("idle guard mismatch: active=%v closing=%v rearmed=%v state=%s", armedActive, armedClosing, rearmed, seamState(t, h.Sessions, key))
+	}
+}
+
+func assertSpontaneousIdleExit(t *testing.T, h *Host, rh *runHome) {
+	t.Helper()
 	st := rh.waitCmd(t)
 	var ms proto.MemberStatus[proto.SystemCode]
-	if err := proto.Decode([]byte(st.raw), &ms); err != nil || ms.State != "dormant" || ms.Event != nil {
-		t.Fatalf("unexpected status on spontaneous idle exit: %s", st.raw)
-	}
-	if rec := seamRecord(t, h); rec != "" {
-		t.Fatalf("unexpected audit row on spontaneous idle exit: %q", rec)
+	err := proto.Decode([]byte(st.raw), &ms)
+	rec := seamRecord(t, h)
+	if [4]bool{err == nil, ms.State == "dormant", ms.Event == nil, rec == ""} != [4]bool{true, true, true, true} {
+		t.Fatalf("unexpected spontaneous idle exit: err=%v raw=%s audit=%q", err, st.raw, rec)
 	}
 }
 
@@ -1009,24 +1018,7 @@ func TestMaxOpenBoundariesLongestWaitingAndBlockingWait(t *testing.T) {
 
 func checkSlotGuardOperands(t *testing.T) {
 	t.Helper()
-	// Also test closeWaitingSession when a Waiting row has no liveProc.
-	h3, _, drv3, _ := setupRunEnv(t)
-	putSetting(t, h3.Store, "max_open", "1")
-	kA := SessionKey{Group: runGroup1, Member: runAI1}
-	kB := SessionKey{Group: runGroup1, Member: runAI2}
-	seamIn(t, h3.Sessions, kA, Waiting)
-	h3.Sessions.Create(makeRunSession(kB, GroupSession, "repo"))
-	drv3.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
-		p := newFakeProc(ctx, l)
-		p.autoComplete = true
-		return p, nil
-	}
-	if err := Runner.Turn(t.Context(), h3, kB, "evict-proc-less", Turn{Kind: ItemsTurn}); err != nil {
-		t.Fatal(err)
-	}
-	if seamState(t, h3.Sessions, kA) != Dormant {
-		t.Fatal("proc-less Waiting session was not moved to Dormant")
-	}
+	checkProcLessWaitingClose(t)
 
 	h, _, drv, _ := setupRunEnv(t)
 	rt := stateOf(h)
@@ -1037,51 +1029,95 @@ func checkSlotGuardOperands(t *testing.T) {
 	h.Sessions.Create(makeRunSession(k2, GroupSession, "repo"))
 	h.Sessions.Create(makeRunSession(kOtherGrp, GroupSession, "repo"))
 
-	if _, _, ok := tryReserveSlot(h, rt, k1, -1); !ok {
-		t.Fatal("maxOpen=-1 did not default to 4 and acquire")
-	}
-	rt.releaseStarting(k1)
-	if _, _, ok := tryReserveSlot(h, rt, k1, 1); !ok {
-		t.Fatal("expected first slot reservation to succeed")
-	}
-	if _, waitCh, ok := tryReserveSlot(h, rt, k2, 1); ok || waitCh == nil {
-		t.Fatal("rt.starting[k1] did not count as open in countOpenLocked")
-	}
-	rt.releaseStarting(k1)
+	checkReserveSlotStartingAndGroups(t, h, rt, k1, k2, kOtherGrp)
+	drv.proc(0).emit(Event{Kind: TurnEnded, Status: "completed"})
+	waitForState(t, h, k1, Waiting)
+	checkWaitingVictimGuards(t, h, rt, k1)
+}
 
+func checkProcLessWaitingClose(t *testing.T) {
+	t.Helper()
+	h, rh, drv, _ := setupRunEnv(t)
+	putSetting(t, h.Store, "max_open", "1")
+	kA := SessionKey{Group: runGroup1, Member: runAI1}
+	kB := SessionKey{Group: runGroup1, Member: runAI2}
+	h.Sessions.Create(makeRunSession(kA, GroupSession, "repo"))
+	h.Sessions.Move(kA, Dormant, Working)
+	h.Sessions.Move(kA, Working, Waiting)
+	h.Sessions.Create(makeRunSession(kB, GroupSession, "repo"))
+	drv.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
+		p := newFakeProc(ctx, l)
+		p.autoComplete = true
+		return p, nil
+	}
+	if err := Runner.Turn(t.Context(), h, kB, "evict-proc-less", Turn{Kind: ItemsTurn}); err != nil {
+		t.Fatal(err)
+	}
+	evictedCmd := rh.waitCmd(t)
+	assertMemberStatusCmd(t, rh, "working", "")
+	waitForState(t, h, kB, Waiting)
+	assertMemberStatusCmd(t, rh, "waiting", "")
+	if [3]any{seamState(t, h.Sessions, kA), evictedCmd.payload["id"], evictedCmd.payload["state"]} != [3]any{Dormant, runAI1, "dormant"} {
+		t.Fatalf("proc-less eviction: state=%s cmd=%v", seamState(t, h.Sessions, kA), evictedCmd.payload)
+	}
+	// Single reader: this check on the test goroutine.
+	rt := stateOf(h)
+	rt.mu.Lock()
+	chAfter := rt.changed
+	rt.mu.Unlock()
+	closeWaitingSession(h, rt, kA)
+	closeWaitingSession(h, rt, SessionKey{Group: "missing"})
+	select {
+	case <-chAfter:
+		t.Fatal("closeWaitingSession notified changed when Move failed or session was missing")
+	default:
+	}
+	if len(rh.snapshotCmds()) != 3 {
+		t.Fatalf("unexpected extra member status commands: %d", len(rh.snapshotCmds()))
+	}
+}
+
+func checkReserveSlotStartingAndGroups(t *testing.T, h *Host, rt *runtimePart, k1, k2, kOtherGrp SessionKey) {
+	t.Helper()
+	_, _, okNeg := tryReserveSlot(h, rt, k1, -1)
+	rt.releaseStarting(k1)
+	_, _, okFirst := tryReserveSlot(h, rt, k1, 1)
+	_, waitCh, okSecond := tryReserveSlot(h, rt, k2, 1)
+	rt.releaseStarting(k1)
+	if [4]bool{okNeg, okFirst, okSecond, waitCh != nil} != [4]bool{true, true, false, true} {
+		t.Fatalf("slot reservation mismatch: neg=%v first=%v second=%v waitCh=%v", okNeg, okFirst, okSecond, waitCh != nil)
+	}
 	if err := Runner.Turn(t.Context(), h, k1, "run1", Turn{Kind: ItemsTurn}); err != nil {
 		t.Fatal(err)
 	}
 	if err := Runner.Turn(t.Context(), h, kOtherGrp, "run-other-group", Turn{Kind: ItemsTurn}); err != nil {
 		t.Fatalf("same AI in different group refused as busy: %v", err)
 	}
-	drv.proc(0).emit(Event{Kind: TurnEnded, Status: "completed"})
-	waitForState(t, h, k1, Waiting)
+}
 
+func checkWaitingVictimGuards(t *testing.T, h *Host, rt *runtimePart, k1 SessionKey) {
+	t.Helper()
 	rt.mu.Lock()
 	rt.closing[k1] = true
-	if longestWaitingLocked(rt, h.Sessions.All()) != nil {
-		t.Fatal("closing session selected as waiting victim")
-	}
+	closingVictim := longestWaitingLocked(rt, h.Sessions.All())
 	rt.mu.Unlock()
 	closeWaitingSession(h, rt, k1)
-	if seamState(t, h.Sessions, k1) != Waiting {
-		t.Fatal("closeWaitingSession moved an already-closing session")
-	}
+	closingState := seamState(t, h.Sessions, k1)
+
 	rt.mu.Lock()
 	delete(rt.closing, k1)
 	rt.procs[k1].turnActive = true
-	if longestWaitingLocked(rt, h.Sessions.All()) != nil {
-		t.Fatal("turnActive session selected as waiting victim")
-	}
+	activeVictim := longestWaitingLocked(rt, h.Sessions.All())
 	rt.mu.Unlock()
 	closeWaitingSession(h, rt, k1)
-	if seamState(t, h.Sessions, k1) != Waiting {
-		t.Fatal("closeWaitingSession moved a turnActive session")
-	}
+	activeState := seamState(t, h.Sessions, k1)
+
 	rt.mu.Lock()
 	rt.procs[k1].turnActive = false
 	rt.mu.Unlock()
+	if [4]bool{closingVictim == nil, closingState == Waiting, activeVictim == nil, activeState == Waiting} != [4]bool{true, true, true, true} {
+		t.Fatalf("victim guard failed: closingVictim=%v closingState=%s activeVictim=%v activeState=%s", closingVictim, closingState, activeVictim, activeState)
+	}
 }
 
 func TestCloseTimeoutOnAllPathsAuditAndC6SwitchOrdering(t *testing.T) {
