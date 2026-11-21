@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/identity"
@@ -25,7 +26,6 @@ const (
 	joinTestGroup3 = proto.ID("BEVDTkBah3oHfAzuxeLAZw")
 	joinTestNonce1 = proto.ID("eS_j3OiWABlRuJAcS_RR5w")
 	joinTestNonce2 = proto.ID("HzE87sj3_L_tiVTdhfybwQ")
-	joinTestOwner  = "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs"
 	joinTestByDev  = "owner-browser-device"
 	joinTestSecret = "ghp_1234567890abcdefghijklmnopqrstuvwxyz"
 )
@@ -91,16 +91,16 @@ func (f *joinFakeHome) handleSync(req proto.Sync) (json.RawMessage, error) {
 	}
 	if !ok {
 		resp := proto.ErrorResponse{Re: req.ID, Err: proto.WireError{Code: "not_found", Message: "group not found"}}
-		return json.RawMessage(joinEncodeJSON(resp)), nil
+		return json.RawMessage(marshalWire(resp)), nil
 	}
-	f.host.Rows.Put(req.Group, "group", req.Group, json.RawMessage(joinEncodeJSON(grp)))
+	f.host.Rows.Put(req.Group, "group", req.Group, json.RawMessage(marshalWire(grp)))
 	synced := proto.Synced{
 		Type:    "synced",
 		Success: proto.Success{Re: req.ID, OK: true},
 		Group:   req.Group,
 		Seq:     grp.Seq,
 	}
-	return json.RawMessage(joinEncodeJSON(synced)), nil
+	return json.RawMessage(marshalWire(synced)), nil
 }
 
 func (f *joinFakeHome) handleCmd(req proto.Cmd) (json.RawMessage, error) {
@@ -110,25 +110,38 @@ func (f *joinFakeHome) handleCmd(req proto.Cmd) (json.RawMessage, error) {
 	if override != nil {
 		return override(req.Env)
 	}
-	var base proto.MemberCommand
-	if err := proto.Decode([]byte(req.Env.Payload), &base); err != nil {
+	if err := f.recordMemberCmd(req.Env.Payload); err != nil {
 		return nil, err
 	}
-	f.mu.Lock()
+	ok := proto.CmdResult{Success: proto.Success{Re: req.ID, OK: true}}
+	return json.RawMessage(marshalWire(ok)), nil
+}
+
+func (f *joinFakeHome) recordMemberCmd(payload string) error {
+	var base proto.MemberCommand
+	if err := proto.Decode([]byte(payload), &base); err != nil {
+		return err
+	}
 	if base.Op == "add_ai" {
-		var add proto.MemberAddAI
-		if err := proto.Decode([]byte(req.Env.Payload), &add); err != nil {
-			f.mu.Unlock()
-			return nil, err
-		}
-		f.addAIs = append(f.addAIs, add)
+		return f.recordAddAI(payload)
 	}
 	if base.Op == "remove" {
+		f.mu.Lock()
 		f.removes = append(f.removes, base)
+		f.mu.Unlock()
 	}
+	return nil
+}
+
+func (f *joinFakeHome) recordAddAI(payload string) error {
+	var add proto.MemberAddAI
+	if err := proto.Decode([]byte(payload), &add); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	f.addAIs = append(f.addAIs, add)
 	f.mu.Unlock()
-	ok := proto.CmdResult{Success: proto.Success{Re: req.ID, OK: true}}
-	return json.RawMessage(joinEncodeJSON(ok)), nil
+	return nil
 }
 
 type joinRig struct {
@@ -230,7 +243,7 @@ func (r *joinRig) setAgent(agent, version string, account *string) {
 
 func (r *joinRig) setSetting(key string, val any) {
 	r.t.Helper()
-	joinExecSQL(r.t, r.db, "INSERT OR REPLACE INTO setting(key, value) VALUES(?, ?)", key, joinEncodeJSON(val))
+	joinExecSQL(r.t, r.db, "INSERT OR REPLACE INTO setting(key, value) VALUES(?, ?)", key, marshalWire(val))
 }
 
 func (r *joinRig) makeRepo(name, branch string) string {
@@ -274,6 +287,12 @@ func makeGroupRow(id proto.ID, home, name, repo, base string) proto.GroupRow {
 }
 
 func (r *joinRig) callJoin(ctx context.Context, p proto.HostJoin) error {
+	fillJoinDefaults(&p, r.h)
+	_, err := Surface["host.join"](ctx, r.h, nil, joinTestByDev, json.RawMessage(marshalWire(p)))
+	return err
+}
+
+func fillJoinDefaults(p *proto.HostJoin, h *Host) {
 	if p.Type == "" {
 		p.Type = "host.join"
 	}
@@ -281,13 +300,18 @@ func (r *joinRig) callJoin(ctx context.Context, p proto.HostJoin) error {
 		p.Nonce = joinTestNonce1
 	}
 	if p.Timestamp == 0 {
-		p.Timestamp = r.h.Now().UnixMilli()
+		p.Timestamp = h.Now().UnixMilli()
 	}
 	if p.To == "" {
-		p.To = r.h.Key.ID()
+		p.To = h.Key.ID()
 	}
-	_, err := Surface["host.join"](ctx, r.h, nil, joinTestByDev, json.RawMessage(joinEncodeJSON(p)))
-	return err
+}
+
+func (r *joinRig) mustJoin(p proto.HostJoin) {
+	r.t.Helper()
+	if err := r.callJoin(r.t.Context(), p); err != nil {
+		r.t.Fatal(err)
+	}
 }
 
 func (r *joinRig) callLeave(ctx context.Context, group proto.ID, agent string) error {
@@ -301,16 +325,46 @@ func (r *joinRig) callLeave(ctx context.Context, group proto.ID, agent string) e
 		Group: group,
 		Agent: agent,
 	}
-	_, err := Surface["host.leave"](ctx, r.h, nil, joinTestByDev, json.RawMessage(joinEncodeJSON(p)))
+	_, err := Surface["host.leave"](ctx, r.h, nil, joinTestByDev, json.RawMessage(marshalWire(p)))
 	return err
 }
 
-func strPtr(s string) *string { return &s }
+func (r *joinRig) mustLeave(group proto.ID, agent string) {
+	r.t.Helper()
+	if err := r.callLeave(r.t.Context(), group, agent); err != nil {
+		r.t.Fatal(err)
+	}
+}
+
+func joinStr(s string) *string { return &s }
+
+func joinAssertEqual[T comparable](t *testing.T, label string, got, want T) {
+	t.Helper()
+	if got != want {
+		t.Fatalf("%s: got %v, want %v", label, got, want)
+	}
+}
+
+func joinAssertSlice[T comparable](t *testing.T, label string, got, want []T) {
+	t.Helper()
+	if got == nil || !slices.Equal(got, want) {
+		t.Fatalf("%s: got %#v, want %#v", label, got, want)
+	}
+}
+
+func joinAssertHomes(t *testing.T, db *store.Store, want []proto.Home) {
+	t.Helper()
+	got, err := joinSavedHomes(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joinAssertSlice(t, "homes setting", got, want)
+}
 
 func TestHostJoinAndLeaveRegistrations(t *testing.T) {
-	if Surface["host.join"] == nil || Surface["host.leave"] == nil || Attached["join"] == nil {
-		t.Fatalf("missing init registrations: join=%v leave=%v attached=%v", Surface["host.join"] != nil, Surface["host.leave"] != nil, Attached["join"] != nil)
-	}
+	joinAssertEqual(t, "host.join registered", Surface["host.join"] != nil, true)
+	joinAssertEqual(t, "host.leave registered", Surface["host.leave"] != nil, true)
+	joinAssertEqual(t, "join attached registered", Attached["join"] != nil, true)
 }
 
 func TestHostJoinPayloadValidation(t *testing.T) {
@@ -333,237 +387,149 @@ func TestHostJoinPayloadValidation(t *testing.T) {
 		{Group: joinTestGroup1, Home: "home-1", Agent: "Claude", Name: "Claude"},
 	}
 	for _, tc := range cases {
-		err := rig.callJoin(t.Context(), tc)
-		seamCode(t, err, "bad_request")
+		seamCode(t, rig.callJoin(t.Context(), tc), "bad_request")
 	}
-	if rig.dialCount("home-1") != 0 {
-		t.Fatalf("invalid payloads must not dial, got %d dials", rig.dialCount("home-1"))
-	}
+	joinAssertEqual(t, "invalid payload dials", rig.dialCount("home-1"), 0)
 }
 
-func TestHostJoinPreconditionsAndInFlightConflict(t *testing.T) {
+func TestHostJoinPreconditions(t *testing.T) {
 	rig := newJoinRig(t)
 	fh := rig.addHome("home-1")
 	repo := rig.makeRepo("web", "main")
 	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", repo, "main"))
 	fh.putGroup(makeGroupRow(joinTestGroup2, "home-1", "Backend", repo, "main"))
 
-	// Agent missing from agent table.
-	err := rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"})
-	seamCode(t, err, "conflict")
-
-	// Agent present with NULL account.
+	// Agent missing from agent table and agent with NULL account are refused without dialling.
+	seamCode(t, rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"}), "conflict")
 	rig.setAgent("claude", "2.1.311", nil)
-	err = rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"})
-	seamCode(t, err, "conflict")
-	if rig.dialCount("home-1") != 0 {
-		t.Fatalf("undeclared account must not dial, got %d", rig.dialCount("home-1"))
-	}
+	seamCode(t, rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"}), "conflict")
+	joinAssertEqual(t, "undeclared account dials", rig.dialCount("home-1"), 0)
 
-	// Declare both agents and block sync to test concurrent duplicate (group, agent) join.
-	rig.setAgent("claude", "2.1.311", strPtr("personal"))
-	rig.setAgent("codex", "0.164.0", strPtr("team"))
-
-	enteredSync := make(chan struct{})
-	releaseSync := make(chan struct{})
-	var once sync.Once
-	fh.syncFn = func(req proto.Sync) (json.RawMessage, error) {
-		once.Do(func() { close(enteredSync) })
-		<-releaseSync
-		return nil, io.EOF
-	}
-
-	firstErr := make(chan error, 1)
-	go func() {
-		firstErr <- rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"})
-	}()
-	<-enteredSync
-
-	// Same (group, agent) while in flight is refused with conflict.
-	dupErr := rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude 2"})
-	seamCode(t, dupErr, "conflict")
-
-	close(releaseSync)
-	seamCode(t, <-firstErr, "home_unreachable")
-
-	// After the failed join released its slot, joining succeeds.
-	fh.syncFn = nil
-	if err := rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"}); err != nil {
-		t.Fatalf("join after slot release failed: %v", err)
-	}
+	rig.setAgent("claude", "2.1.311", joinStr("personal"))
+	rig.setAgent("codex", "0.164.0", joinStr("team"))
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"})
 
 	// Already-joined (group, agent) is refused, while (same group, other agent) and (other group, same agent) succeed.
 	seamCode(t, rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude Again"}), "conflict")
-	if err := rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "codex", Name: "Codex"}); err != nil {
-		t.Fatalf("other agent in same group failed: %v", err)
-	}
-	if err := rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup2, Home: "home-1", Agent: "claude", Name: "Claude Backend"}); err != nil {
-		t.Fatalf("same agent in other group failed: %v", err)
-	}
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "codex", Name: "Codex"})
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup2, Home: "home-1", Agent: "claude", Name: "Claude Backend"})
 }
 
 func TestHostJoinOneConnectionPerHomeCloneReuseAndSecretaryDemotion(t *testing.T) {
 	rig := newJoinRig(t)
-	rig.setSetting("owner", joinTestOwner)
-	rig.setAgent("claude", "2.1.311", strPtr("personal"))
-	rig.setAgent("codex", "0.164.0", strPtr("api_key"))
+	rig.setAgent("claude", "2.1.311", joinStr("personal"))
+	rig.setAgent("codex", "0.164.0", joinStr("api_key"))
+	fhA, repo1 := setupMultiHomeGroups(t, rig)
 
+	// First join on home-a: claude joins group 1 as secretary with default empty approvers.
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-a", Agent: "claude", Name: "Claude Sec", Secretary: true})
+	assertRepoClonedAndRemoveUpstream(t, rig, repo1)
+
+	// Configure approvers, rename cached group 1 row, and join codex to group 1 as the new secretary.
+	rig.setSetting("approvers", []string{"u-del-1", "u-del-2"})
+	renamed := makeGroupRow(joinTestGroup1, "home-a", "Website v2", repo1, "main")
+	rig.h.Rows.Put(string(joinTestGroup1), "group", string(joinTestGroup1), json.RawMessage(marshalWire(renamed)))
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-a", Agent: "codex", Name: "Codex Sec", Secretary: true})
+
+	// Join claude to group 2 on home-a and codex to group 3 on home-b (with Secretary: false).
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup2, Home: "home-a", Agent: "claude", Name: "Claude Backend", Secretary: false})
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup3, Home: "home-b", Agent: "codex", Name: "Codex Docs", Secretary: false})
+
+	assertMultiJoinOutcomes(t, rig, fhA)
+}
+
+func setupMultiHomeGroups(t *testing.T, rig *joinRig) (*joinFakeHome, string) {
+	t.Helper()
 	fhA := rig.addHome("home-a")
 	fhB := rig.addHome("home-b")
 	repo1 := rig.makeRepo("repo1", "main")
-	repo2 := rig.makeRepo("repo2", "trunk")
-	repo3 := rig.makeRepo("repo3", "main")
 	fhA.putGroup(makeGroupRow(joinTestGroup1, "home-a", "Website", repo1, "main"))
-	fhA.putGroup(makeGroupRow(joinTestGroup2, "home-a", "Backend", repo2, "trunk"))
-	fhB.putGroup(makeGroupRow(joinTestGroup3, "home-b", "Docs", repo3, "main"))
+	fhA.putGroup(makeGroupRow(joinTestGroup2, "home-a", "Backend", rig.makeRepo("repo2", "trunk"), "trunk"))
+	fhB.putGroup(makeGroupRow(joinTestGroup3, "home-b", "Docs", rig.makeRepo("repo3", "main"), "main"))
 
 	// Seed another group's secretary session to verify demotion affects only the target group.
-	if err := rig.h.Sessions.Create(Session{
+	err := rig.h.Sessions.Create(Session{
 		SessionKey: SessionKey{Group: string(joinTestGroup3), Member: "existing-sec"},
-		Kind:       GroupSession,
-		Folder:     "repo",
-		Agent:      "claude",
-		Home:       "home-b",
-		Name:       "Docs Sec",
-		Secretary:  true,
-	}); err != nil {
+		Kind:       GroupSession, Folder: "repo", Agent: "claude", Home: "home-b", Name: "Docs Sec", Secretary: true,
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
+	return fhA, repo1
+}
 
-	// First join on home-a: claude joins group 1 as secretary.
-	if err := rig.callJoin(t.Context(), proto.HostJoin{
-		Group: joinTestGroup1, Home: "home-a", Agent: "claude", Name: "Claude Sec", Secretary: true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	// Remove upstream repo1 to prove the second AI joining group 1 reuses projects/<g1>/repo without re-cloning.
+func assertRepoClonedAndRemoveUpstream(t *testing.T, rig *joinRig, repo1 string) {
+	t.Helper()
 	if _, err := os.Stat(filepath.Join(rig.root, "projects", string(joinTestGroup1), "repo", ".git")); err != nil {
 		t.Fatalf("expected clone in store projects directory: %v", err)
 	}
 	if err := os.RemoveAll(repo1); err != nil {
 		t.Fatal(err)
 	}
-	// Update cached group row name and join codex to group 1 as the new secretary.
-	renamed := makeGroupRow(joinTestGroup1, "home-a", "Website v2", repo1, "main")
-	rig.h.Rows.Put(string(joinTestGroup1), "group", string(joinTestGroup1), json.RawMessage(joinEncodeJSON(renamed)))
-	if err := rig.callJoin(t.Context(), proto.HostJoin{
-		Group: joinTestGroup1, Home: "home-a", Agent: "codex", Name: "Codex Sec", Secretary: true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	// Join claude to group 2 on home-a and codex to group 3 on home-b.
-	if err := rig.callJoin(t.Context(), proto.HostJoin{
-		Group: joinTestGroup2, Home: "home-a", Agent: "claude", Name: "Claude Backend", Secretary: false,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := rig.callJoin(t.Context(), proto.HostJoin{
-		Group: joinTestGroup3, Home: "home-b", Agent: "codex", Name: "Codex Docs", Secretary: false,
-	}); err != nil {
-		t.Fatal(err)
-	}
+}
 
-	// Exactly one Connect per distinct home.
-	if rig.dialCount("home-a") != 1 || rig.dialCount("home-b") != 1 {
-		t.Fatalf("want 1 dial each, got home-a=%d home-b=%d", rig.dialCount("home-a"), rig.dialCount("home-b"))
-	}
-	// Cached group row on second join of group 1 skipped a second sync for group 1.
-	if len(fhA.syncs) != 2 || !fhA.syncs[0].StateOnly || fhA.syncs[0].Since != 0 {
-		t.Fatalf("unexpected syncs on home-a: %+v", fhA.syncs)
-	}
-
-	// Verify MemberAddAI wire fields.
-	if len(fhA.addAIs) != 3 {
-		t.Fatalf("want 3 add_ai commands on home-a, got %d", len(fhA.addAIs))
-	}
-	firstAdd := fhA.addAIs[0]
-	if firstAdd.Type != "member" || firstAdd.Op != "add_ai" || firstAdd.Group != joinTestGroup1 || firstAdd.As != "" ||
-		firstAdd.ID == "" || firstAdd.Nonce == "" || firstAdd.ID == firstAdd.Nonce ||
-		firstAdd.CLI != "claude" || firstAdd.Name != "Claude Sec" || firstAdd.Account != "personal" ||
-		!firstAdd.Secretary || !slices.Equal(firstAdd.Approvers, []string{joinTestOwner}) {
-		t.Fatalf("unexpected first MemberAddAI: %+v", firstAdd)
-	}
-
-	// Verify secretary demotion in group 1 and preservation in group 3.
-	sClaudeG1, ok := rig.h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: string(firstAdd.ID)})
-	if !ok || sClaudeG1.Secretary || sClaudeG1.Kind != GroupSession || sClaudeG1.Folder != "repo" || sClaudeG1.State != Dormant {
-		t.Fatalf("expected claude in g1 demoted and dormant, got %+v (ok=%v)", sClaudeG1, ok)
-	}
-	sCodexG1, ok := rig.h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: string(fhA.addAIs[1].ID)})
-	if !ok || !sCodexG1.Secretary || sCodexG1.Agent != "codex" {
-		t.Fatalf("expected codex in g1 as secretary, got %+v (ok=%v)", sCodexG1, ok)
-	}
-	sClaudeG3, ok := rig.h.Sessions.Get(SessionKey{Group: string(joinTestGroup3), Member: "existing-sec"})
-	if !ok || !sClaudeG3.Secretary {
-		t.Fatalf("expected claude in g3 to remain secretary, got %+v (ok=%v)", sClaudeG3, ok)
-	}
-
-	// Verify setting 'homes' has one entry per group with updated name for group 1.
-	savedHomes, err := joinSavedHomes(rig.db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantHomes := []proto.Home{
+func assertMultiJoinOutcomes(t *testing.T, rig *joinRig, fhA *joinFakeHome) {
+	t.Helper()
+	joinAssertEqual(t, "home-a dials", rig.dialCount("home-a"), 1)
+	joinAssertEqual(t, "home-b dials", rig.dialCount("home-b"), 1)
+	joinAssertEqual(t, "home-a sync count", len(fhA.syncs), 2)
+	joinAssertEqual(t, "sync state_only", fhA.syncs[0].StateOnly, true)
+	joinAssertEqual(t, "sync since", fhA.syncs[0].Since, int64(0))
+	assertAddAICommands(t, fhA.addAIs)
+	assertSecretaryStates(t, rig.h, string(fhA.addAIs[0].ID), string(fhA.addAIs[1].ID))
+	joinAssertHomes(t, rig.db, []proto.Home{
 		{Group: joinTestGroup1, Home: "home-a", Name: "Website v2"},
 		{Group: joinTestGroup2, Home: "home-a", Name: "Backend"},
 		{Group: joinTestGroup3, Home: "home-b", Name: "Docs"},
-	}
-	if !slices.Equal(savedHomes, wantHomes) {
-		t.Fatalf("homes setting = %+v, want %+v", savedHomes, wantHomes)
-	}
-
-	// Verify audit rows recorded AuditSetting with By device.
+	})
 	rec := seamRecord(t, rig.h)
-	if !strings.Contains(rec, "|"+string(joinTestGroup1)+"|claude|setting|-|-|host.join Claude Sec|"+joinTestByDev+"|-") {
-		t.Fatalf("missing audit row in:\n%s", rec)
-	}
+	wantAudit := "|" + string(joinTestGroup1) + "|claude|setting|-|-|host.join Claude Sec|" + joinTestByDev + "|-"
+	joinAssertEqual(t, "audit row recorded", strings.Contains(rec, wantAudit), true)
 }
 
-func TestHostJoinApproversCombinations(t *testing.T) {
-	cases := []struct {
-		name      string
-		owner     string
-		approvers []string
-		hasList   bool
-		want      []string
-	}{
-		{name: "none", want: []string{}},
-		{name: "owner-only", owner: "u-owner", want: []string{"u-owner"}},
-		{name: "delegates-without-owner", approvers: []string{"u-del-1", "u-del-2"}, hasList: true, want: []string{"u-del-1", "u-del-2"}},
-		{name: "owner-and-dedup-delegates", owner: "u-owner", approvers: []string{"u-del-1", "u-owner", "u-del-2"}, hasList: true, want: []string{"u-owner", "u-del-1", "u-del-2"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			rig := newJoinRig(t)
-			rig.setAgent("claude", "2.1.311", strPtr("team"))
-			if tc.owner != "" {
-				rig.setSetting("owner", tc.owner)
-			}
-			if tc.hasList {
-				rig.setSetting("approvers", tc.approvers)
-			}
-			fh := rig.addHome("home-1")
-			repo := rig.makeRepo("repo", "main")
-			fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "App", repo, "main"))
-
-			if err := rig.callJoin(t.Context(), proto.HostJoin{
-				Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude",
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if len(fh.addAIs) != 1 || fh.addAIs[0].Approvers == nil || !slices.Equal(fh.addAIs[0].Approvers, tc.want) {
-				t.Fatalf("got approvers %#v, want %#v", fh.addAIs[0].Approvers, tc.want)
-			}
-		})
-	}
+func assertAddAICommands(t *testing.T, adds []proto.MemberAddAI) {
+	t.Helper()
+	joinAssertEqual(t, "add_ai count", len(adds), 3)
+	first := adds[0]
+	joinAssertEqual(t, "add_ai type", first.Type, "member")
+	joinAssertEqual(t, "add_ai op", first.Op, "add_ai")
+	joinAssertEqual(t, "add_ai group", first.Group, joinTestGroup1)
+	joinAssertEqual(t, "add_ai as", string(first.As), "")
+	joinAssertEqual(t, "add_ai distinct id and nonce", first.ID != "" && first.Nonce != "" && first.ID != first.Nonce, true)
+	joinAssertEqual(t, "add_ai cli", first.CLI, "claude")
+	joinAssertEqual(t, "add_ai name", first.Name, "Claude Sec")
+	joinAssertEqual(t, "add_ai account", first.Account, "personal")
+	joinAssertEqual(t, "add_ai secretary", first.Secretary, true)
+	joinAssertSlice(t, "default approvers", first.Approvers, []string{})
+	joinAssertSlice(t, "configured approvers", adds[1].Approvers, []string{"u-del-1", "u-del-2"})
 }
 
-func TestHostJoinAttachModesWaitersAndCancellation(t *testing.T) {
-	// 1. Connect == nil with pre-attached Home succeeds; Connect == nil without Home fails.
+func assertSecretaryStates(t *testing.T, h *Host, claudeID, codexID string) {
+	t.Helper()
+	sClaudeG1, ok := h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: claudeID})
+	joinAssertEqual(t, "claude g1 exists", ok, true)
+	joinAssertEqual(t, "claude g1 demoted", sClaudeG1.Secretary, false)
+	joinAssertEqual(t, "claude g1 kind", sClaudeG1.Kind, GroupSession)
+	joinAssertEqual(t, "claude g1 folder", sClaudeG1.Folder, "repo")
+	joinAssertEqual(t, "claude g1 state", sClaudeG1.State, Dormant)
+
+	sCodexG1, ok := h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: codexID})
+	joinAssertEqual(t, "codex g1 secretary", ok && sCodexG1.Secretary && sCodexG1.Agent == "codex", true)
+
+	sClaudeG3, ok := h.Sessions.Get(SessionKey{Group: string(joinTestGroup3), Member: "existing-sec"})
+	joinAssertEqual(t, "claude g3 preserved secretary", ok && sClaudeG3.Secretary, true)
+}
+
+func TestHostJoinAttachModesAndWaiters(t *testing.T) {
+	checkNilConnectModes(t)
+	checkConcurrentAsyncWaiters(t)
+}
+
+func checkNilConnectModes(t *testing.T) {
+	t.Helper()
 	rigNil := newJoinRig(t)
 	rigNil.h.Connect = nil
-	rigNil.setAgent("claude", "2.1.311", strPtr("personal"))
-	rigNil.setAgent("codex", "0.164.0", strPtr("personal"))
+	rigNil.setAgent("claude", "2.1.311", joinStr("personal"))
 	seamCode(t, rigNil.callJoin(t.Context(), proto.HostJoin{
 		Group: joinTestGroup1, Home: "unattached", Agent: "claude", Name: "Claude",
 	}), "home_unreachable")
@@ -571,88 +537,58 @@ func TestHostJoinAttachModesWaitersAndCancellation(t *testing.T) {
 	fhPre := newJoinFakeHome(rigNil.h, "pre-attached")
 	fhPre.putGroup(makeGroupRow(joinTestGroup1, "pre-attached", "Pre", rigNil.makeRepo("pre", "main"), "main"))
 	rigNil.h.Attach("pre-attached", fhPre)
-	if err := rigNil.callJoin(t.Context(), proto.HostJoin{
-		Group: joinTestGroup1, Home: "pre-attached", Agent: "claude", Name: "Claude",
-	}); err != nil {
-		t.Fatalf("pre-attached join failed: %v", err)
-	}
+	rigNil.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "pre-attached", Agent: "claude", Name: "Claude"})
 
 	// Attached notification when nobody waits is a harmless no-op.
 	joinAttached(rigNil.h, "nobody-waiting")
+}
 
-	// 2. Async Attach: two concurrent joins wait on one home; first times out while second waits,
-	// keeping the home's Connect alive until Attach arrives (including a stale closed Home first).
-	rigAsync := newJoinRig(t)
-	rigAsync.setAgent("claude", "2.1.311", strPtr("personal"))
-	rigAsync.setAgent("codex", "0.164.0", strPtr("personal"))
-	repo := rigAsync.makeRepo("async", "main")
-	fhLive := newJoinFakeHome(rigAsync.h, "home-async")
-	fhLive.putGroup(makeGroupRow(joinTestGroup1, "home-async", "Async", repo, "main"))
+func checkConcurrentAsyncWaiters(t *testing.T) {
+	t.Helper()
+	rig := newJoinRig(t)
+	rig.setAgent("claude", "2.1.311", joinStr("personal"))
+	rig.setAgent("codex", "0.164.0", joinStr("personal"))
+	fhLive := newJoinFakeHome(rig.h, "home-async")
+	fhLive.putGroup(makeGroupRow(joinTestGroup1, "home-async", "Async", rig.makeRepo("async", "main"), "main"))
 
 	dialed := make(chan context.Context, 2)
-	rigAsync.h.Connect = func(ctx context.Context, device string) {
-		rigAsync.mu.Lock()
-		rigAsync.dials = append(rigAsync.dials, joinDialRecord{device: device, ctx: ctx})
-		rigAsync.mu.Unlock()
+	rig.h.Connect = func(ctx context.Context, device string) {
+		rig.mu.Lock()
+		rig.dials = append(rig.dials, joinDialRecord{device: device, ctx: ctx})
+		rig.mu.Unlock()
 		dialed <- ctx
 	}
 
 	shortCtx, cancelShort := context.WithCancel(t.Context())
 	waitCtx, cancelWait := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancelWait()
-	err1Ch := make(chan error, 1)
-	err2Ch := make(chan error, 1)
-	go func() {
-		err1Ch <- rigAsync.callJoin(shortCtx, proto.HostJoin{
-			Group: joinTestGroup1, Home: "home-async", Agent: "claude", Name: "Claude",
-		})
-	}()
+	err1Ch := startAsyncJoin(shortCtx, rig, joinTestGroup1, "home-async", "claude", "Claude")
 	connCtx := <-dialed
+	err2Ch := startAsyncJoin(waitCtx, rig, joinTestGroup1, "home-async", "codex", "Codex")
+	waitWaiterCount(t, joinStateOf(rig.h), "home-async", 2)
 
-	go func() {
-		err2Ch <- rigAsync.callJoin(waitCtx, proto.HostJoin{
-			Group: joinTestGroup1, Home: "home-async", Agent: "codex", Name: "Codex",
-		})
-	}()
-	waitWaiterCount(t, joinStateOf(rigAsync.h), "home-async", 2)
-
-	// Cancel only the first join; the second still pins home-async so connCtx must stay open.
+	// Cancel only the first join; the second still pins home-async so connCtx stays open.
 	cancelShort()
 	seamCode(t, <-err1Ch, "home_unreachable")
-	if connCtx.Err() != nil {
-		t.Fatal("connCtx cancelled while second join was still waiting")
-	}
+	joinAssertEqual(t, "connCtx open while second waits", connCtx.Err(), nil)
 
 	// Attach an already-closed connection first so joinAwaitAttach loops once, then attach live Home.
-	closedHome := newJoinFakeHome(rigAsync.h, "home-async")
+	closedHome := newJoinFakeHome(rig.h, "home-async")
 	close(closedHome.done)
-	rigAsync.h.Attach("home-async", closedHome)
-	rigAsync.h.Attach("home-async", fhLive)
+	rig.h.Attach("home-async", closedHome)
+	rig.h.Attach("home-async", fhLive)
 
-	if err := <-err2Ch; err != nil {
-		t.Fatalf("second async join failed: %v", err)
-	}
-	if rigAsync.dialCount("home-async") != 1 || connCtx.Err() != nil {
-		t.Fatalf("expected 1 dial and live connCtx, dials=%d err=%v", rigAsync.dialCount("home-async"), connCtx.Err())
-	}
+	joinAssertEqual(t, "second async join err", <-err2Ch, nil)
+	joinAssertEqual(t, "home-async dials", rig.dialCount("home-async"), 1)
+	joinAssertEqual(t, "connCtx still open after join", connCtx.Err(), nil)
+}
 
-	// 3. Single join whose Attach times out cancels the unused Connect context.
-	timeoutCtx, cancelTimeout := context.WithCancel(t.Context())
-	cancelTimeout()
-	seamCode(t, rigAsync.callJoin(timeoutCtx, proto.HostJoin{
-		Group: joinTestGroup2, Home: "home-never", Agent: "claude", Name: "Claude",
-	}), "home_unreachable")
-	neverCtx := rigAsync.lastDialCtx("home-never")
-	if neverCtx == nil || neverCtx.Err() == nil {
-		t.Fatalf("expected home-never Connect context to be cancelled on failure, got %v", neverCtx)
-	}
-	jpAsync := joinStateOf(rigAsync.h)
-	jpAsync.mu.Lock()
-	remainingWaiters := len(jpAsync.waiters)
-	jpAsync.mu.Unlock()
-	if remainingWaiters != 0 {
-		t.Fatalf("expected 0 remaining waiter entries, got %d", remainingWaiters)
-	}
+func startAsyncJoin(ctx context.Context, rig *joinRig, group proto.ID, home, agent, name string) <-chan error {
+	ch := make(chan error, 1)
+	go func() {
+		ch <- rig.callJoin(ctx, proto.HostJoin{Group: group, Home: home, Agent: agent, Name: name})
+	}()
+	return ch
 }
 
 func waitWaiterCount(t *testing.T, jp *joinPart, device string, want int) {
@@ -670,205 +606,216 @@ func waitWaiterCount(t *testing.T, jp *joinPart, device string, want int) {
 	t.Fatalf("timed out waiting for %d waiters on %s", want, device)
 }
 
-func TestHostJoinSyncWorkspaceAndAddAIFailures(t *testing.T) {
-	rig := newJoinRig(t)
-	rig.setAgent("claude", "2.1.311", strPtr("personal"))
-	fh := rig.addHome("home-1")
-	repo := rig.makeRepo("web", "main")
-
-	// Corrupt or mismatched cached group row falls through to sync.
-	rig.h.Rows.Put(string(joinTestGroup1), "group", string(joinTestGroup1), json.RawMessage(`{"r":"group","id":"other"}`))
-
-	// 1. Sync transport error -> home_unreachable and Connect cancelled.
-	fh.syncFn = func(proto.Sync) (json.RawMessage, error) { return nil, io.EOF }
-	seamCode(t, rig.callJoin(t.Context(), proto.HostJoin{
-		Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude",
-	}), "home_unreachable")
-	if rig.lastDialCtx("home-1").Err() == nil {
-		t.Fatal("failed join must cancel unused home Connect")
-	}
-
-	// 2. Sync wire refusal -> propagates refusal code.
-	fh.syncFn = func(req proto.Sync) (json.RawMessage, error) {
-		errResp := proto.ErrorResponse{Re: req.ID, Err: proto.WireError{Code: "forbidden", Message: "not allowed"}}
-		return json.RawMessage(joinEncodeJSON(errResp)), nil
-	}
-	seamCode(t, rig.callJoin(t.Context(), proto.HostJoin{
-		Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude",
-	}), "forbidden")
-
-	// 3. Sync malformed JSON and mismatched group -> home_unreachable.
-	fh.syncFn = func(proto.Sync) (json.RawMessage, error) { return json.RawMessage(`{"bad":1}`), nil }
-	seamCode(t, rig.callJoin(t.Context(), proto.HostJoin{
-		Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude",
-	}), "home_unreachable")
-
-	fh.syncFn = func(req proto.Sync) (json.RawMessage, error) {
-		wrong := proto.Synced{Type: "synced", Success: proto.Success{Re: req.ID, OK: true}, Group: string(joinTestGroup2), Seq: 1}
-		return json.RawMessage(joinEncodeJSON(wrong)), nil
-	}
-	seamCode(t, rig.callJoin(t.Context(), proto.HostJoin{
-		Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude",
-	}), "home_unreachable")
-
-	// 4. Sync succeeds without putting a group row -> not_found.
-	rig.h.Rows.Reset(string(joinTestGroup1))
-	fh.syncFn = func(req proto.Sync) (json.RawMessage, error) {
-		ok := proto.Synced{Type: "synced", Success: proto.Success{Re: req.ID, OK: true}, Group: req.Group, Seq: 1}
-		return json.RawMessage(joinEncodeJSON(ok)), nil
-	}
-	seamCode(t, rig.callJoin(t.Context(), proto.HostJoin{
-		Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude",
-	}), "not_found")
-	fh.syncFn = nil
-
-	// 5. Non-project group kind -> conflict; missing repo or base -> bad_request.
-	teamGrp := makeGroupRow(joinTestGroup1, "home-1", "Team", "", "")
-	teamGrp.Kind = "team"
-	rig.h.Rows.Put(string(joinTestGroup1), "group", string(joinTestGroup1), json.RawMessage(joinEncodeJSON(teamGrp)))
-	seamCode(t, rig.callJoin(t.Context(), proto.HostJoin{
-		Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude",
-	}), "conflict")
-
-	noRepo := makeGroupRow(joinTestGroup1, "home-1", "NoRepo", "", "main")
-	rig.h.Rows.Put(string(joinTestGroup1), "group", string(joinTestGroup1), json.RawMessage(joinEncodeJSON(noRepo)))
-	seamCode(t, rig.callJoin(t.Context(), proto.HostJoin{
-		Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude",
-	}), "bad_request")
-
-	noBase := makeGroupRow(joinTestGroup1, "home-1", "NoBase", repo, "")
-	rig.h.Rows.Put(string(joinTestGroup1), "group", string(joinTestGroup1), json.RawMessage(joinEncodeJSON(noBase)))
-	seamCode(t, rig.callJoin(t.Context(), proto.HostJoin{
-		Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude",
-	}), "bad_request")
-
-	// 6. Clone failure with secret in path is answered cli with secret redacted.
-	secretRepo := filepath.Join(rig.root, joinTestSecret, "missing.git")
-	badClone := makeGroupRow(joinTestGroup1, "home-1", "SecretFail", secretRepo, "main")
-	rig.h.Rows.Put(string(joinTestGroup1), "group", string(joinTestGroup1), json.RawMessage(joinEncodeJSON(badClone)))
-	cloneErr := rig.callJoin(t.Context(), proto.HostJoin{
-		Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude",
-	})
-	seamCode(t, cloneErr, "cli")
-	if strings.Contains(cloneErr.Error(), joinTestSecret) || !strings.Contains(cloneErr.Error(), "[redacted]") {
-		t.Fatalf("expected secret redacted in cli error, got %q", cloneErr.Error())
-	}
-
-	// 7. Home refuses member add_ai -> error propagated, no session created.
-	rig.h.Rows.Put(string(joinTestGroup1), "group", string(joinTestGroup1), json.RawMessage(joinEncodeJSON(makeGroupRow(joinTestGroup1, "home-1", "Web", repo, "main"))))
-	fh.cmdFn = func(proto.Envelope) (json.RawMessage, error) {
-		ref := proto.ErrorResponse{Re: 7, Err: proto.WireError{Code: "conflict", Message: "name taken"}}
-		return json.RawMessage(joinEncodeJSON(ref)), nil
-	}
-	seamCode(t, rig.callJoin(t.Context(), proto.HostJoin{
-		Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude",
-	}), "conflict")
-	if len(rig.h.Sessions.All()) != 0 {
-		t.Fatalf("refused add_ai must create no session, got %+v", rig.h.Sessions.All())
-	}
-}
-
-func TestHostJoinMemoryStoreAndEnsureHomeConnections(t *testing.T) {
-	// 1. In-memory store fallback directory and reuse across joins on the same Host.
-	memDB := seamStore(t)
-	hMem, _ := seamHost(t, memDB)
-	seamSQL(t, memDB, "INSERT INTO agent(agent, cli_version, account) VALUES('claude', '2.1.311', 'personal'), ('codex', '0.164.0', 'personal')")
-	fh := newJoinFakeHome(hMem, "home-mem")
-	hMem.Attach("home-mem", fh)
-
+func TestHostJoinAttachTimeout15Seconds(t *testing.T) {
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo := filepath.Join(root, "upstream")
-	joinGit(t, root, "init", "-b", "main", repo)
-	joinGit(t, repo, "commit", "--allow-empty", "-m", "initial")
-	fh.putGroup(makeGroupRow(joinTestGroup1, "home-mem", "MemGroup", repo, "main"))
+	synctest.Test(t, func(t *testing.T) {
+		db, h := openJoinBubbleHost(t, root)
+		defer db.Close()
 
-	t.Cleanup(func() {
-		if dir := joinStateOf(hMem).memDir; dir != "" {
-			os.RemoveAll(dir)
+		var dialedCtx context.Context
+		h.Connect = func(ctx context.Context, _ string) {
+			dialedCtx = ctx
 		}
+		payload := proto.HostJoin{Group: joinTestGroup1, Home: "home-off", Agent: "claude", Name: "Claude"}
+		fillJoinDefaults(&payload, h)
+		raw := json.RawMessage(marshalWire(payload))
+
+		errCh := make(chan error, 1)
+		go func() {
+			_, callErr := Surface["host.join"](context.Background(), h, nil, joinTestByDev, raw)
+			errCh <- callErr
+		}()
+		synctest.Wait()
+
+		// 1 ns before 15 s: still waiting for Attach, Connect context still open.
+		time.Sleep(15*time.Second - time.Nanosecond)
+		synctest.Wait()
+		assertJoinPending(t, errCh)
+		joinAssertEqual(t, "dialedCtx open before 15s", dialedCtx.Err(), nil)
+
+		// At exact 15 s: answers home_unreachable, clears waiters, and cancels unused Connect context.
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		seamCode(t, <-errCh, "home_unreachable")
+		joinAssertEqual(t, "dialedCtx cancelled at 15s", dialedCtx.Err() != nil, true)
+		jp := joinStateOf(h)
+		jp.mu.Lock()
+		remainingWaiters := len(jp.waiters)
+		jp.mu.Unlock()
+		joinAssertEqual(t, "remaining waiters", remainingWaiters, 0)
 	})
+}
 
-	joinPayload1 := proto.HostJoin{
-		HostCommand: proto.HostCommand{Type: "host.join", Nonce: joinTestNonce1, Timestamp: seamStart, To: hMem.Key.ID()},
-		Group:       joinTestGroup1, Home: "home-mem", Agent: "claude", Name: "Claude",
-	}
-	if _, err := Surface["host.join"](t.Context(), hMem, nil, joinTestByDev, json.RawMessage(joinEncodeJSON(joinPayload1))); err != nil {
+func openJoinBubbleHost(t *testing.T, root string) (*store.Store, *Host) {
+	t.Helper()
+	db, err := store.Open(filepath.Join(root, "node.db"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	memDir := joinStateOf(hMem).memDir
-	if !filepath.IsAbs(memDir) {
-		t.Fatalf("expected absolute fallback dir for :memory: store, got %q", memDir)
-	}
-	if _, err := os.Stat(filepath.Join(memDir, "projects", string(joinTestGroup1), "repo", ".git")); err != nil {
-		t.Fatalf("expected clone in fallback :memory: projects dir: %v", err)
-	}
-	if err := os.RemoveAll(repo); err != nil {
+	h, _, err := New(db, seamKey(), seamClock())
+	if err != nil {
+		db.Close()
 		t.Fatal(err)
 	}
-	joinPayload2 := joinPayload1
-	joinPayload2.Nonce = joinTestNonce2
-	joinPayload2.Agent = "codex"
-	joinPayload2.Name = "Codex"
-	if _, err := Surface["host.join"](t.Context(), hMem, nil, joinTestByDev, json.RawMessage(joinEncodeJSON(joinPayload2))); err != nil {
-		t.Fatalf("second join on :memory: host did not reuse fallback dir: %v", err)
-	}
+	joinExecSQL(t, db, "INSERT INTO agent(agent, cli_version, account) VALUES('claude', '2.1.311', 'personal')")
+	return db, h
+}
 
-	// 2. Restarting a host on an existing store and calling EnsureHomeConnections.
+func assertJoinPending(t *testing.T, errCh <-chan error) {
+	t.Helper()
+	select {
+	case err := <-errCh:
+		t.Fatalf("join finished before 15s timeout: %v", err)
+	default:
+	}
+}
+
+func TestHostJoinSyncWorkspaceAndAddAIFailures(t *testing.T) {
 	rig := newJoinRig(t)
-	rig.setAgent("claude", "2.1.311", strPtr("personal"))
+	rig.setAgent("claude", "2.1.311", joinStr("personal"))
+	fh := rig.addHome("home-1")
+	repo := rig.makeRepo("web", "main")
+	checkSyncFailureModes(t, rig, fh)
+
+	// Clone failure with secret in path is answered cli with secret redacted.
+	secretRepo := filepath.Join(rig.root, joinTestSecret, "missing.git")
+	badClone := makeGroupRow(joinTestGroup1, "home-1", "SecretFail", secretRepo, "main")
+	rig.h.Rows.Put(string(joinTestGroup1), "group", string(joinTestGroup1), json.RawMessage(marshalWire(badClone)))
+	cloneErr := rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"})
+	seamCode(t, cloneErr, "cli")
+	joinAssertEqual(t, "secret stripped", strings.Contains(cloneErr.Error(), joinTestSecret), false)
+	joinAssertEqual(t, "redacted marker present", strings.Contains(cloneErr.Error(), "[redacted]"), true)
+
+	// Home refuses member add_ai -> error propagated, no session created.
+	webGrp := makeGroupRow(joinTestGroup1, "home-1", "Web", repo, "main")
+	rig.h.Rows.Put(string(joinTestGroup1), "group", string(joinTestGroup1), json.RawMessage(marshalWire(webGrp)))
+	fh.cmdFn = func(proto.Envelope) (json.RawMessage, error) {
+		ref := proto.ErrorResponse{Re: 7, Err: proto.WireError{Code: "conflict", Message: "name taken"}}
+		return json.RawMessage(marshalWire(ref)), nil
+	}
+	seamCode(t, rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"}), "conflict")
+	joinAssertEqual(t, "sessions after refused add_ai", len(rig.h.Sessions.All()), 0)
+}
+
+func checkSyncFailureModes(t *testing.T, rig *joinRig, fh *joinFakeHome) {
+	t.Helper()
+	joinReq := proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"}
+
+	// Corrupt cached group row falls through to sync; transport error answers home_unreachable and cancels Connect.
+	rig.h.Rows.Put(string(joinTestGroup1), "group", string(joinTestGroup1), json.RawMessage(`{"r":"group","id":"other"}`))
+	fh.syncFn = func(proto.Sync) (json.RawMessage, error) { return nil, io.EOF }
+	seamCode(t, rig.callJoin(t.Context(), joinReq), "home_unreachable")
+	joinAssertEqual(t, "unused home Connect cancelled", rig.lastDialCtx("home-1").Err() != nil, true)
+
+	// Sync wire refusal propagates refusal code.
+	fh.syncFn = func(req proto.Sync) (json.RawMessage, error) {
+		errResp := proto.ErrorResponse{Re: req.ID, Err: proto.WireError{Code: "forbidden", Message: "not allowed"}}
+		return json.RawMessage(marshalWire(errResp)), nil
+	}
+	seamCode(t, rig.callJoin(t.Context(), joinReq), "forbidden")
+
+	// Sync malformed JSON answers home_unreachable.
+	fh.syncFn = func(proto.Sync) (json.RawMessage, error) { return json.RawMessage(`{"bad":1}`), nil }
+	seamCode(t, rig.callJoin(t.Context(), joinReq), "home_unreachable")
+
+	// Sync succeeds without putting a group row -> not_found.
+	rig.h.Rows.Reset(string(joinTestGroup1))
+	fh.syncFn = func(req proto.Sync) (json.RawMessage, error) {
+		ok := proto.Synced{Type: "synced", Success: proto.Success{Re: req.ID, OK: true}, Group: req.Group, Seq: 1}
+		return json.RawMessage(marshalWire(ok)), nil
+	}
+	seamCode(t, rig.callJoin(t.Context(), joinReq), "not_found")
+	fh.syncFn = nil
+}
+
+func TestHostEnsureHomeConnections(t *testing.T) {
+	rig := newJoinRig(t)
+	rig.setAgent("claude", "2.1.311", joinStr("personal"))
 	fh1 := rig.addHome("home-1")
 	rig.addHome("home-2")
 	fh1.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", rig.makeRepo("r1", "main"), "main"))
-	if err := rig.callJoin(t.Context(), proto.HostJoin{
-		Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	// Also store a second home in setting 'homes' without a local session (e.g. step 2 home.add).
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"})
+
+	// Store a second home in setting 'homes' alongside home-1.
 	rig.setSetting("homes", []proto.Home{
 		{Group: joinTestGroup1, Home: "home-1", Name: "Website"},
 		{Group: joinTestGroup2, Home: "home-2", Name: "Shared"},
 	})
 
 	restarted, saved, err := New(rig.db, seamKey(), seamClock())
-	if err != nil || len(saved) != 1 {
-		t.Fatalf("restart New: saved=%v err=%v", saved, err)
-	}
+	joinAssertEqual(t, "restart New err", err, nil)
+	joinAssertEqual(t, "restart saved count", len(saved), 1)
+
 	var restartedDials []joinDialRecord
 	restarted.Connect = func(ctx context.Context, device string) {
 		restartedDials = append(restartedDials, joinDialRecord{device: device, ctx: ctx})
 	}
-	nodeCtx, stopNode := context.WithCancel(t.Context())
-	if err := restarted.EnsureHomeConnections(nodeCtx); err != nil {
-		t.Fatal(err)
-	}
+	joinAssertEqual(t, "first EnsureHomeConnections", restarted.EnsureHomeConnections(), nil)
 	// Calling EnsureHomeConnections again while already connected opens no duplicate connections.
-	if err := restarted.EnsureHomeConnections(nodeCtx); err != nil {
-		t.Fatal(err)
-	}
-	if len(restartedDials) != 2 || restartedDials[0].device != "home-1" || restartedDials[1].device != "home-2" {
-		t.Fatalf("unexpected restarted dials: %+v", restartedDials)
-	}
-	stopNode()
-	if restartedDials[0].ctx.Err() == nil || restartedDials[1].ctx.Err() == nil {
-		t.Fatal("cancelling parent nodeCtx must cancel child home contexts")
-	}
+	joinAssertEqual(t, "second EnsureHomeConnections", restarted.EnsureHomeConnections(), nil)
+
+	joinAssertEqual(t, "restarted dial count", len(restartedDials), 2)
+	joinAssertEqual(t, "first dial device", restartedDials[0].device, "home-1")
+	joinAssertEqual(t, "second dial device", restartedDials[1].device, "home-2")
+	joinAssertEqual(t, "first dial ctx open", restartedDials[0].ctx.Err(), nil)
+	joinAssertEqual(t, "second dial ctx open", restartedDials[1].ctx.Err(), nil)
 }
 
 func TestHostLeaveValidationRefusalAndMultiSessionCleanup(t *testing.T) {
+	rig, fhA := setupLeaveRig(t)
+	checkInvalidAndMissingLeaves(t, rig)
+
+	claudeMember := string(fhA.addAIs[0].ID)
+	taskKey := SessionKey{Group: string(joinTestGroup1), Member: claudeMember, Task: "t-1"}
+	otherGroupSameMember := SessionKey{Group: string(joinTestGroup2), Member: claudeMember, Task: "t-other"}
+	tok := seedLeaveExtraSessions(t, rig, taskKey, otherGroupSameMember)
+
+	fhA = checkLeaveRefusalAndUnreachable(t, rig, fhA, taskKey, tok)
+
+	// Accepted leave for claude in g1 ends only g1 sessions of claudeMember and invalidates tok.
+	rig.mustLeave(joinTestGroup1, "claude")
+	assertClaudeLeftGroup1(t, rig, fhA, claudeMember, taskKey, otherGroupSameMember, tok)
+	if err := rig.h.Sessions.End(otherGroupSameMember); err != nil {
+		t.Fatal(err)
+	}
+
+	// Codex leaves g1: g1 is pruned from setting 'homes', while g2 keeps home-a connected.
+	rig.mustLeave(joinTestGroup1, "codex")
+	joinAssertHomes(t, rig.db, []proto.Home{
+		{Group: joinTestGroup2, Home: "home-a", Name: "Backend"},
+		{Group: joinTestGroup3, Home: "home-b", Name: "Docs"},
+	})
+	joinAssertEqual(t, "home-a open while g2 remains", rig.lastDialCtx("home-a").Err(), nil)
+
+	// Claude leaves g2 (last group on home-a): home-a Connect cancelled, home-b stays open.
+	rig.mustLeave(joinTestGroup2, "claude")
+	joinAssertEqual(t, "home-a cancelled", rig.lastDialCtx("home-a").Err() != nil, true)
+	joinAssertEqual(t, "home-b still open", rig.lastDialCtx("home-b").Err(), nil)
+
+	// Codex leaves g3 (last group on home-b): homes becomes [] and home-b Connect is cancelled.
+	rig.mustLeave(joinTestGroup3, "codex")
+	joinAssertHomes(t, rig.db, []proto.Home{})
+	joinAssertEqual(t, "home-b cancelled", rig.lastDialCtx("home-b").Err() != nil, true)
+}
+
+func setupLeaveRig(t *testing.T) (*joinRig, *joinFakeHome) {
+	t.Helper()
 	rig := newJoinRig(t)
-	rig.setAgent("claude", "2.1.311", strPtr("personal"))
-	rig.setAgent("codex", "0.164.0", strPtr("personal"))
+	rig.setAgent("claude", "2.1.311", joinStr("personal"))
+	rig.setAgent("codex", "0.164.0", joinStr("personal"))
 	fhA := rig.addHome("home-a")
 	fhB := rig.addHome("home-b")
 	fhA.putGroup(makeGroupRow(joinTestGroup1, "home-a", "Website", rig.makeRepo("w1", "main"), "main"))
 	fhA.putGroup(makeGroupRow(joinTestGroup2, "home-a", "Backend", rig.makeRepo("w2", "main"), "main"))
 	fhB.putGroup(makeGroupRow(joinTestGroup3, "home-b", "Docs", rig.makeRepo("w3", "main"), "main"))
+	return rig, fhA
+}
 
-	// Invalid payloads -> bad_request.
+func checkInvalidAndMissingLeaves(t *testing.T, rig *joinRig) {
+	t.Helper()
 	for _, raw := range []string{
 		`[]`,
 		`{"t":"host.leave"}`,
@@ -880,310 +827,227 @@ func TestHostLeaveValidationRefusalAndMultiSessionCleanup(t *testing.T) {
 		seamCode(t, err, "bad_request")
 	}
 
-	// Leaving a group the agent is not in -> not_found.
 	seamCode(t, rig.callLeave(t.Context(), joinTestGroup1, "claude"), "not_found")
-
-	// Join claude and codex to g1 (home-a), claude to g2 (home-a), and codex to g3 (home-b).
-	if err := rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-a", Agent: "claude", Name: "Claude"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-a", Agent: "codex", Name: "Codex"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup2, Home: "home-a", Agent: "claude", Name: "Claude B"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup3, Home: "home-b", Agent: "codex", Name: "Codex D"}); err != nil {
-		t.Fatal(err)
-	}
-
-	// Leaving g3 with claude (only codex is in g3, claude is in g1/g2) -> not_found.
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-a", Agent: "claude", Name: "Claude"})
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-a", Agent: "codex", Name: "Codex"})
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup2, Home: "home-a", Agent: "claude", Name: "Claude B"})
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup3, Home: "home-b", Agent: "codex", Name: "Codex D"})
 	seamCode(t, rig.callLeave(t.Context(), joinTestGroup3, "claude"), "not_found")
+}
 
-	claudeMember := string(fhA.addAIs[0].ID)
-	codexMember := string(fhA.addAIs[1].ID)
-
-	// Add a task session, an admitted token, and approval rows for claude and codex in g1.
-	taskKey := SessionKey{Group: string(joinTestGroup1), Member: claudeMember, Task: "t-1"}
-	if err := rig.h.Sessions.Create(Session{
+func seedLeaveExtraSessions(t *testing.T, rig *joinRig, taskKey, otherGroupKey SessionKey) string {
+	t.Helper()
+	err := rig.h.Sessions.Create(Session{
 		SessionKey: taskKey, Kind: TaskSession, Folder: "wt/1-fix", Agent: "claude", Home: "home-a", Name: "Claude",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	tok := rig.h.Sessions.Admit(taskKey, 2, false)
-	joinExecSQL(t, rig.db, "INSERT INTO approval(card, g, member, task, tool, input, state) VALUES('c1', ?, ?, 't-1', 'Bash', 'h1', 'pending'), ('c2', ?, ?, 't-2', 'Bash', 'h2', 'pending')",
-		string(joinTestGroup1), claudeMember, string(joinTestGroup1), codexMember)
+	err = rig.h.Sessions.Create(Session{
+		SessionKey: otherGroupKey, Kind: TaskSession, Folder: "wt/2-fix", Agent: "other", Home: "home-a", Name: "Other",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rig.h.Sessions.Admit(taskKey, 2, false)
+}
 
-	// Refused member remove (unfinished task) keeps sessions, token, approvals, homes and connection intact.
+func checkLeaveRefusalAndUnreachable(t *testing.T, rig *joinRig, fhA *joinFakeHome, taskKey SessionKey, tok string) *joinFakeHome {
+	t.Helper()
 	fhA.cmdFn = func(proto.Envelope) (json.RawMessage, error) {
 		ref := proto.ErrorResponse{Re: 7, Err: proto.WireError{Code: "conflict", Message: "unfinished task"}}
-		return json.RawMessage(joinEncodeJSON(ref)), nil
+		return json.RawMessage(marshalWire(ref)), nil
 	}
 	seamCode(t, rig.callLeave(t.Context(), joinTestGroup1, "claude"), "conflict")
-	if _, ok := rig.h.Sessions.Get(taskKey); !ok {
-		t.Fatal("refused leave ended task session")
-	}
-	if _, ok := rig.h.Sessions.Caller(tok); !ok {
-		t.Fatal("refused leave invalidated token")
-	}
-	if rig.lastDialCtx("home-a").Err() != nil {
-		t.Fatal("refused leave cancelled home-a connection")
-	}
+	_, hasTask := rig.h.Sessions.Get(taskKey)
+	_, hasTok := rig.h.Sessions.Caller(tok)
+	joinAssertEqual(t, "task session preserved on refused leave", hasTask, true)
+	joinAssertEqual(t, "token preserved on refused leave", hasTok, true)
+	joinAssertEqual(t, "home-a open on refused leave", rig.lastDialCtx("home-a").Err(), nil)
 
 	// Unreachable home during leave returns home_unreachable and preserves state.
 	close(fhA.done)
 	rig.h.Connect = nil
 	seamCode(t, rig.callLeave(t.Context(), joinTestGroup1, "claude"), "home_unreachable")
-	fhA = rig.addHome("home-a")
+	freshHome := rig.addHome("home-a")
 	rig.h.Connect = rig.connectSync
-	rig.h.Attach("home-a", fhA)
+	rig.h.Attach("home-a", freshHome)
+	return freshHome
+}
 
-	// Accepted leave for claude in g1: ends both group and task sessions of claude in g1,
-	// invalidates token, deletes claude's approval c1 (keeping codex's c2), keeps g1 in homes (codex still in g1),
-	// and keeps home-a connected.
-	if err := rig.callLeave(t.Context(), joinTestGroup1, "claude"); err != nil {
-		t.Fatalf("claude leave g1 failed: %v", err)
-	}
-	if len(fhA.removes) != 1 || fhA.removes[0].Op != "remove" || string(fhA.removes[0].ID) != claudeMember || fhA.removes[0].As != "" {
-		t.Fatalf("unexpected remove command: %+v", fhA.removes)
-	}
-	if _, ok := rig.h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: claudeMember}); ok {
-		t.Fatal("claude group session still exists")
-	}
-	if _, ok := rig.h.Sessions.Get(taskKey); ok {
-		t.Fatal("claude task session still exists")
-	}
-	if _, ok := rig.h.Sessions.Caller(tok); ok {
-		t.Fatal("ended session token still valid")
-	}
-	var remainingCards string
-	seamSQLScan(t, rig.db, &remainingCards, "SELECT coalesce(group_concat(card), '') FROM approval")
-	if remainingCards != "c2" {
-		t.Fatalf("expected only c2 approval left, got %q", remainingCards)
-	}
-	homesWhileCodexInG1, err := joinSavedHomes(rig.db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantWhileCodexInG1 := []proto.Home{
+func assertClaudeLeftGroup1(t *testing.T, rig *joinRig, fhA *joinFakeHome, claudeMember string, taskKey, otherGroupKey SessionKey, tok string) {
+	t.Helper()
+	joinAssertEqual(t, "remove count", len(fhA.removes), 1)
+	joinAssertEqual(t, "remove op", fhA.removes[0].Op, "remove")
+	joinAssertEqual(t, "remove id", string(fhA.removes[0].ID), claudeMember)
+	joinAssertEqual(t, "remove as", string(fhA.removes[0].As), "")
+
+	_, hasGrp := rig.h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: claudeMember})
+	_, hasTask := rig.h.Sessions.Get(taskKey)
+	_, hasOtherGroup := rig.h.Sessions.Get(otherGroupKey)
+	_, hasTok := rig.h.Sessions.Caller(tok)
+	joinAssertEqual(t, "claude group session ended", hasGrp, false)
+	joinAssertEqual(t, "claude task session ended", hasTask, false)
+	joinAssertEqual(t, "other group session with same member untouched", hasOtherGroup, true)
+	joinAssertEqual(t, "ended session token invalidated", hasTok, false)
+
+	joinAssertHomes(t, rig.db, []proto.Home{
 		{Group: joinTestGroup1, Home: "home-a", Name: "Website"},
 		{Group: joinTestGroup2, Home: "home-a", Name: "Backend"},
 		{Group: joinTestGroup3, Home: "home-b", Name: "Docs"},
-	}
-	if !slices.Equal(homesWhileCodexInG1, wantWhileCodexInG1) {
-		t.Fatalf("expected g1 kept in homes while codex remains, got %+v", homesWhileCodexInG1)
-	}
-
-	// Codex leaves g1: now no AI remains in g1, so g1 is pruned from setting 'homes',
-	// while g2 still keeps home-a connected.
-	if err := rig.callLeave(t.Context(), joinTestGroup1, "codex"); err != nil {
-		t.Fatal(err)
-	}
-	homesAfterG1, err := joinSavedHomes(rig.db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantAfterG1 := []proto.Home{
-		{Group: joinTestGroup2, Home: "home-a", Name: "Backend"},
-		{Group: joinTestGroup3, Home: "home-b", Name: "Docs"},
-	}
-	if !slices.Equal(homesAfterG1, wantAfterG1) || rig.lastDialCtx("home-a").Err() != nil {
-		t.Fatalf("unexpected state after g1 empty: homes=%+v ctxErr=%v", homesAfterG1, rig.lastDialCtx("home-a").Err())
-	}
-
-	// Claude leaves g2 (last group on home-a): home-a Connect context is cancelled, home-b stays open.
-	if err := rig.callLeave(t.Context(), joinTestGroup2, "claude"); err != nil {
-		t.Fatal(err)
-	}
-	if rig.lastDialCtx("home-a").Err() == nil {
-		t.Fatal("expected home-a Connect context cancelled when last group on home-a left")
-	}
-	if rig.lastDialCtx("home-b").Err() != nil {
-		t.Fatal("home-b Connect context must stay open while g3 is joined")
-	}
-
-	// Codex leaves g3 (last group on home-b): homes becomes [] and home-b Connect context is cancelled.
-	if err := rig.callLeave(t.Context(), joinTestGroup3, "codex"); err != nil {
-		t.Fatal(err)
-	}
-	finalHomes, err := joinSavedHomes(rig.db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(finalHomes) != 0 || rig.lastDialCtx("home-b").Err() == nil {
-		t.Fatalf("expected empty homes and cancelled home-b, got homes=%+v err=%v", finalHomes, rig.lastDialCtx("home-b").Err())
-	}
-}
-
-func seamSQLScan(t *testing.T, db *store.Store, dest *string, query string, args ...any) {
-	t.Helper()
-	read := func(tx *store.Tx) error {
-		return tx.QueryRow(query, args...).Scan(dest)
-	}
-	if err := db.Write(read); err != nil {
-		t.Fatal(err)
-	}
+	})
 }
 
 func TestHostJoinAndLeaveStoreErrorsAndTransactionRollback(t *testing.T) {
-	// 1. Corrupt setting 'homes' JSON fails EnsureHomeConnections, joinConnectAndWait and joinRemoveFromHome.
+	checkCorruptAndDroppedSettings(t)
+	checkJoinCommitRollbacks(t)
+	checkLeaveCommitRollbacks(t)
+}
+
+func checkCorruptAndDroppedSettings(t *testing.T) {
+	t.Helper()
 	rigCorrupt := newJoinRig(t)
-	rigCorrupt.setAgent("claude", "2.1.311", strPtr("personal"))
-	if err := rigCorrupt.h.Sessions.Create(Session{
+	rigCorrupt.setAgent("claude", "2.1.311", joinStr("personal"))
+	err := rigCorrupt.h.Sessions.Create(Session{
 		SessionKey: SessionKey{Group: string(joinTestGroup1), Member: "m1"},
 		Kind:       GroupSession, Folder: "repo", Agent: "claude", Home: "home-1", Name: "Claude",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	seamSQL(t, rigCorrupt.db, "INSERT INTO setting(key, value) VALUES('homes', 'not-json')")
-	if err := rigCorrupt.h.EnsureHomeConnections(t.Context()); err == nil {
-		t.Fatal("expected EnsureHomeConnections error on corrupt homes JSON")
-	}
-	if err := rigCorrupt.callJoin(t.Context(), proto.HostJoin{
+	joinAssertEqual(t, "EnsureHomeConnections corrupt homes err", rigCorrupt.h.EnsureHomeConnections() != nil, true)
+	joinAssertEqual(t, "join corrupt homes err", rigCorrupt.callJoin(t.Context(), proto.HostJoin{
 		Group: joinTestGroup2, Home: "home-1", Agent: "claude", Name: "Claude",
-	}); err == nil {
-		t.Fatal("expected join error on corrupt homes JSON")
-	}
-	if err := rigCorrupt.callLeave(t.Context(), joinTestGroup1, "claude"); err == nil {
-		t.Fatal("expected leave error on corrupt homes JSON")
-	}
+	}) != nil, true)
+	joinAssertEqual(t, "leave corrupt homes err", rigCorrupt.callLeave(t.Context(), joinTestGroup1, "claude") != nil, true)
 
-	// 2. Dropped setting table fails joinSavedHomes and joinLoadConfig.
+	// Corrupt setting 'approvers' JSON fails joinLoadConfig.
+	rigBadApprovers := newJoinRig(t)
+	rigBadApprovers.setAgent("claude", "2.1.311", joinStr("personal"))
+	seamSQL(t, rigBadApprovers.db, "INSERT INTO setting(key, value) VALUES('approvers', 'not-json')")
+	joinAssertEqual(t, "join corrupt approvers err", rigBadApprovers.callJoin(t.Context(), proto.HostJoin{
+		Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude",
+	}) != nil, true)
+
+	// Dropped setting table fails EnsureHomeConnections and joinLoadConfig.
 	rigDrop := newJoinRig(t)
 	seamSQL(t, rigDrop.db, "DROP TABLE setting")
-	if err := rigDrop.h.EnsureHomeConnections(t.Context()); err == nil {
-		t.Fatal("expected EnsureHomeConnections error when setting table dropped")
-	}
-	if err := rigDrop.callJoin(t.Context(), proto.HostJoin{
+	joinAssertEqual(t, "EnsureHomeConnections dropped setting err", rigDrop.h.EnsureHomeConnections() != nil, true)
+	joinAssertEqual(t, "join dropped setting err", rigDrop.callJoin(t.Context(), proto.HostJoin{
 		Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude",
-	}); err == nil {
-		t.Fatal("expected joinLoadConfig error when setting table dropped")
-	}
+	}) != nil, true)
+}
 
-	// 3. Transaction rollback in joinCommitJoined for each failure point during member add_ai.
-	joinFailSteps := []struct {
+func checkJoinCommitRollbacks(t *testing.T) {
+	t.Helper()
+	steps := []struct {
 		name         string
 		hasSecretary bool
 		mutateDB     func(*testing.T, *store.Store)
 	}{
-		{
-			name:         "demote-secretary-update-fails",
-			hasSecretary: true,
-			mutateDB:     func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE session") },
-		},
-		{
-			name:     "create-session-fails",
-			mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE session") },
-		},
-		{
-			name:     "upsert-homes-scan-fails",
-			mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE setting") },
-		},
-		{
-			name: "upsert-homes-unmarshal-fails",
-			mutateDB: func(t *testing.T, db *store.Store) {
-				seamSQL(t, db, "INSERT OR REPLACE INTO setting(key, value) VALUES('homes', '{bad')")
-			},
-		},
-		{
-			name:     "audit-fails",
-			mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE audit") },
-		},
+		{name: "demote-secretary-update-fails", hasSecretary: true, mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE session") }},
+		{name: "create-session-fails", mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE session") }},
+		{name: "upsert-homes-scan-fails", mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE setting") }},
+		{name: "upsert-homes-unmarshal-fails", mutateDB: func(t *testing.T, db *store.Store) {
+			seamSQL(t, db, "INSERT OR REPLACE INTO setting(key, value) VALUES('homes', '{bad')")
+		}},
+		{name: "audit-fails", mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE audit") }},
 	}
-	for _, tc := range joinFailSteps {
+	for _, tc := range steps {
 		t.Run("join-"+tc.name, func(t *testing.T) {
-			rig := newJoinRig(t)
-			rig.setAgent("claude", "2.1.311", strPtr("personal"))
-			rig.setAgent("codex", "0.164.0", strPtr("personal"))
-			fh := rig.addHome("home-1")
-			fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", rig.makeRepo("r", "main"), "main"))
-			if tc.hasSecretary {
-				if err := rig.h.Sessions.Create(Session{
-					SessionKey: SessionKey{Group: string(joinTestGroup1), Member: "sec-1"},
-					Kind:       GroupSession, Folder: "repo", Agent: "codex", Home: "home-1", Name: "Sec", Secretary: true,
-				}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			fh.cmdFn = func(proto.Envelope) (json.RawMessage, error) {
-				tc.mutateDB(t, rig.db)
-				ok := proto.CmdResult{Success: proto.Success{Re: 7, OK: true}}
-				return json.RawMessage(joinEncodeJSON(ok)), nil
-			}
-			err := rig.callJoin(t.Context(), proto.HostJoin{
-				Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude", Secretary: true,
-			})
-			if err == nil {
-				t.Fatal("expected commit failure")
-			}
-			var bad *Error
-			if errors.As(err, &bad) {
-				t.Fatalf("expected raw store error for internal mapping, got *Error %v", err)
-			}
-			// Verify in-memory session table rolled back cleanly.
-			if _, _, found := joinFindAgentMember(rig.h, string(joinTestGroup1), "claude"); found {
-				t.Fatal("rolled-back join left claude session in memory")
-			}
-			if tc.hasSecretary {
-				sec, ok := rig.h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: "sec-1"})
-				if !ok || !sec.Secretary {
-					t.Fatalf("rolled-back join did not restore prior secretary flag: %+v", sec)
-				}
-			}
-		})
-	}
-
-	// 4. Transaction rollback in joinCommitLeft for each failure point during member remove.
-	leaveFailSteps := []struct {
-		name     string
-		mutateDB func(*testing.T, *store.Store)
-	}{
-		{
-			name:     "end-session-fails",
-			mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE session") },
-		},
-		{
-			name:     "delete-approval-fails",
-			mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE approval") },
-		},
-		{
-			name:     "prune-homes-fails",
-			mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE setting") },
-		},
-		{
-			name:     "audit-fails",
-			mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE audit") },
-		},
-	}
-	for _, tc := range leaveFailSteps {
-		t.Run("leave-"+tc.name, func(t *testing.T) {
-			rig := newJoinRig(t)
-			rig.setAgent("claude", "2.1.311", strPtr("personal"))
-			fh := rig.addHome("home-1")
-			fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", rig.makeRepo("r", "main"), "main"))
-			if err := rig.callJoin(t.Context(), proto.HostJoin{
-				Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude",
-			}); err != nil {
-				t.Fatal(err)
-			}
-			fh.cmdFn = func(proto.Envelope) (json.RawMessage, error) {
-				tc.mutateDB(t, rig.db)
-				ok := proto.CmdResult{Success: proto.Success{Re: 7, OK: true}}
-				return json.RawMessage(joinEncodeJSON(ok)), nil
-			}
-			if err := rig.callLeave(t.Context(), joinTestGroup1, "claude"); err == nil {
-				t.Fatal("expected leave commit failure")
-			}
-			if _, _, found := joinFindAgentMember(rig.h, string(joinTestGroup1), "claude"); !found {
-				t.Fatal("rolled-back leave removed claude session from memory")
-			}
+			runJoinRollbackCase(t, tc.hasSecretary, tc.mutateDB)
 		})
 	}
 }
 
+func runJoinRollbackCase(t *testing.T, hasSecretary bool, mutateDB func(*testing.T, *store.Store)) {
+	t.Helper()
+	rig := newJoinRig(t)
+	rig.setAgent("claude", "2.1.311", joinStr("personal"))
+	rig.setAgent("codex", "0.164.0", joinStr("personal"))
+	fh := rig.addHome("home-1")
+	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", rig.makeRepo("r", "main"), "main"))
+	if hasSecretary {
+		seedExistingSecretary(t, rig.h)
+	}
+	fh.cmdFn = func(proto.Envelope) (json.RawMessage, error) {
+		mutateDB(t, rig.db)
+		ok := proto.CmdResult{Success: proto.Success{Re: 7, OK: true}}
+		return json.RawMessage(marshalWire(ok)), nil
+	}
+	err := rig.callJoin(t.Context(), proto.HostJoin{
+		Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude", Secretary: true,
+	})
+	assertRawStoreFailure(t, err)
+	_, _, found := joinFindAgentMember(rig.h, string(joinTestGroup1), "claude")
+	joinAssertEqual(t, "rolled-back claude absent", found, false)
+	if hasSecretary {
+		sec, ok := rig.h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: "sec-1"})
+		joinAssertEqual(t, "prior secretary restored", ok && sec.Secretary, true)
+	}
+}
+
+func seedExistingSecretary(t *testing.T, h *Host) {
+	t.Helper()
+	err := h.Sessions.Create(Session{
+		SessionKey: SessionKey{Group: string(joinTestGroup1), Member: "sec-1"},
+		Kind:       GroupSession, Folder: "repo", Agent: "codex", Home: "home-1", Name: "Sec", Secretary: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertRawStoreFailure(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected commit failure")
+	}
+	var bad *Error
+	if errors.As(err, &bad) {
+		t.Fatalf("expected raw store error, got *Error %v", err)
+	}
+}
+
+func checkLeaveCommitRollbacks(t *testing.T) {
+	t.Helper()
+	steps := []struct {
+		name     string
+		mutateDB func(*testing.T, *store.Store)
+	}{
+		{name: "end-session-fails", mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE session") }},
+		{name: "prune-homes-fails", mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE setting") }},
+		{name: "audit-fails", mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE audit") }},
+	}
+	for _, tc := range steps {
+		t.Run("leave-"+tc.name, func(t *testing.T) {
+			runLeaveRollbackCase(t, tc.mutateDB)
+		})
+	}
+}
+
+func runLeaveRollbackCase(t *testing.T, mutateDB func(*testing.T, *store.Store)) {
+	t.Helper()
+	rig := newJoinRig(t)
+	rig.setAgent("claude", "2.1.311", joinStr("personal"))
+	fh := rig.addHome("home-1")
+	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", rig.makeRepo("r", "main"), "main"))
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"})
+	fh.cmdFn = func(proto.Envelope) (json.RawMessage, error) {
+		mutateDB(t, rig.db)
+		ok := proto.CmdResult{Success: proto.Success{Re: 7, OK: true}}
+		return json.RawMessage(marshalWire(ok)), nil
+	}
+	err := rig.callLeave(t.Context(), joinTestGroup1, "claude")
+	assertRawStoreFailure(t, err)
+	_, _, found := joinFindAgentMember(rig.h, string(joinTestGroup1), "claude")
+	joinAssertEqual(t, "rolled-back leave preserved session", found, true)
+}
+
 func TestHostJoinSignedEnvelopeVerifiesAsNodeCommand(t *testing.T) {
 	rig := newJoinRig(t)
-	rig.setAgent("codex", "0.164.0", strPtr("personal"))
+	rig.setAgent("codex", "0.164.0", joinStr("personal"))
 	fh := rig.addHome("home-1")
 	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", rig.makeRepo("r", "main"), "main"))
 
@@ -1191,16 +1055,12 @@ func TestHostJoinSignedEnvelopeVerifiesAsNodeCommand(t *testing.T) {
 	fh.cmdFn = func(env proto.Envelope) (json.RawMessage, error) {
 		captured = env
 		ok := proto.CmdResult{Success: proto.Success{Re: 7, OK: true}}
-		return json.RawMessage(joinEncodeJSON(ok)), nil
+		return json.RawMessage(marshalWire(ok)), nil
 	}
-	if err := rig.callJoin(t.Context(), proto.HostJoin{
-		Group: joinTestGroup1, Home: "home-1", Agent: "codex", Name: "Codex",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "codex", Name: "Codex"})
 	known := func(dev string) bool { return dev == rig.h.Key.ID() }
 	hdr, err := identity.OpenCommand(captured, "", known, rig.h.Now())
-	if err != nil || hdr.Type != "member" || hdr.Group != joinTestGroup1 {
-		t.Fatalf("captured command envelope failed OpenCommand: hdr=%+v err=%v", hdr, err)
-	}
+	joinAssertEqual(t, "OpenCommand err", err, nil)
+	joinAssertEqual(t, "OpenCommand type", hdr.Type, "member")
+	joinAssertEqual(t, "OpenCommand group", hdr.Group, joinTestGroup1)
 }

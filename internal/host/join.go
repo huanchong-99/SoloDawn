@@ -2,29 +2,23 @@ package host
 
 import (
 	"context"
-	crand "crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"maps"
-	"os"
-	fpath "path/filepath"
+	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
+	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
+const joinAttachTimeout = 15 * time.Second
+
 func init() {
 	Register(Surface, "host.join", handleHostJoin)
 	Register(Surface, "host.leave", handleHostLeave)
 	Register(Attached, "join", joinAttached)
-}
-
-type joinSlot struct {
-	group string
-	agent string
 }
 
 type joinStart struct {
@@ -41,25 +35,20 @@ type joinConfig struct {
 const joinConfigQuerySQL = `SELECT
 	coalesce((SELECT account FROM agent WHERE agent = ?), ''),
 	coalesce((SELECT file FROM pragma_database_list WHERE name = 'main'), ''),
-	coalesce((SELECT value FROM setting WHERE key = 'owner'), '""'),
 	coalesce((SELECT value FROM setting WHERE key = 'approvers'), '[]')`
 
 const joinHomesSettingSQL = `SELECT coalesce((SELECT value FROM setting WHERE key = 'homes'), '[]')`
 
-// joinPart holds per-host home connection tracking, in-flight join slots,
-// Attach waiters, and the fallback root directory for in-memory stores.
+// joinPart holds per-host home connection tracking and Attach waiters.
 //
-// Lock order: syncMu serializes connection reconciliation across Store and
-// Sessions reads; mu is a strict leaf lock that guards only joinPart fields and
-// never calls into Host, Sessions, Rows, Store, Connect or cancel funcs.
+// Lock order: syncMu serializes connection reconciliation across Store reads;
+// mu is a strict leaf lock that guards only joinPart fields and never calls
+// into Host, Sessions, Rows, Store, Connect or cancel funcs.
 type joinPart struct {
 	syncMu   sync.Mutex
 	mu       sync.Mutex
-	rootCtx  context.Context
-	memDir   string
 	conns    map[string]context.CancelFunc
 	inflight map[string]int
-	joining  map[joinSlot]bool
 	waiters  map[string][]chan struct{}
 }
 
@@ -69,7 +58,6 @@ func joinStateOf(h *Host) *joinPart {
 	if jp.conns == nil {
 		jp.conns = map[string]context.CancelFunc{}
 		jp.inflight = map[string]int{}
-		jp.joining = map[joinSlot]bool{}
 		jp.waiters = make(map[string][]chan struct{})
 	}
 	jp.mu.Unlock()
@@ -77,37 +65,9 @@ func joinStateOf(h *Host) *joinPart {
 }
 
 // EnsureHomeConnections opens one persistent connection through h.Connect for
-// each distinct home device named in the host's sessions or stored homes
-// setting, using ctx as the parent lifetime of those connections.
-func (h *Host) EnsureHomeConnections(ctx context.Context) error {
-	jp := joinStateOf(h)
-	jp.mu.Lock()
-	jp.rootCtx = ctx
-	jp.mu.Unlock()
-	return joinSyncNow(h, jp)
-}
-
-func (jp *joinPart) parentCtxLocked() context.Context {
-	if jp.rootCtx != nil {
-		return jp.rootCtx
-	}
-	return context.Background()
-}
-
-func (jp *joinPart) beginJoin(slot joinSlot) bool {
-	jp.mu.Lock()
-	defer jp.mu.Unlock()
-	if jp.joining[slot] {
-		return false
-	}
-	jp.joining[slot] = true
-	return true
-}
-
-func (jp *joinPart) endJoin(slot joinSlot) {
-	jp.mu.Lock()
-	delete(jp.joining, slot)
-	jp.mu.Unlock()
+// each distinct home device named in the host's stored homes setting.
+func (h *Host) EnsureHomeConnections() error {
+	return joinSyncNow(h, joinStateOf(h))
 }
 
 func (jp *joinPart) pinHome(device string) {
@@ -123,15 +83,6 @@ func (jp *joinPart) unpinHome(device string) {
 		delete(jp.inflight, device)
 	}
 	jp.mu.Unlock()
-}
-
-func (jp *joinPart) ensureMemDir() string {
-	jp.syncMu.Lock()
-	defer jp.syncMu.Unlock()
-	if jp.memDir == "" {
-		jp.memDir = fpath.Join(os.TempDir(), "solodawn-host-"+string(joinNewID()))
-	}
-	return jp.memDir
 }
 
 func (jp *joinPart) addWaiter(device string) chan struct{} {
@@ -173,7 +124,7 @@ func joinSyncNow(h *Host, jp *joinPart) error {
 	if err != nil {
 		return err
 	}
-	needed := joinNeededHomes(h.Sessions.All(), homes)
+	needed := joinNeededHomes(homes)
 	jp.mu.Lock()
 	for dev := range jp.inflight {
 		needed[dev] = true
@@ -212,7 +163,7 @@ func joinPlanStartsLocked(jp *joinPart, canConnect bool, needed map[string]bool)
 	var starts []joinStart
 	for _, dev := range slices.Sorted(maps.Keys(needed)) {
 		if _, open := jp.conns[dev]; !open {
-			connCtx, cancel := context.WithCancel(jp.parentCtxLocked())
+			connCtx, cancel := context.WithCancel(context.Background())
 			jp.conns[dev] = cancel
 			starts = append(starts, joinStart{device: dev, ctx: connCtx})
 		}
@@ -220,11 +171,8 @@ func joinPlanStartsLocked(jp *joinPart, canConnect bool, needed map[string]bool)
 	return starts
 }
 
-func joinNeededHomes(sessions []Session, homes []proto.Home) map[string]bool {
+func joinNeededHomes(homes []proto.Home) map[string]bool {
 	needed := map[string]bool{}
-	for _, s := range sessions {
-		needed[s.Home] = true
-	}
 	for _, entry := range homes {
 		needed[entry.Home] = true
 	}
@@ -251,14 +199,11 @@ func handleHostJoin(ctx context.Context, h *Host, _ Owner, by string, data json.
 	if err != nil {
 		return nil, err
 	}
-	jp := joinStateOf(h)
-	group := string(p.Group)
-	cfg, err := joinPrepareJoin(h, jp, p, group)
+	cfg, err := joinPrepareJoin(h, p, string(p.Group))
 	if err != nil {
 		return nil, err
 	}
-	defer jp.endJoin(joinSlot{group: group, agent: p.Agent})
-	return nil, joinExecuteJoin(ctx, h, jp, p, cfg, by)
+	return nil, joinExecuteJoin(ctx, h, joinStateOf(h), p, cfg, by)
 }
 
 func joinParseJoin(data json.RawMessage) (proto.HostJoin, error) {
@@ -277,26 +222,17 @@ func joinValidAgent(agent string) bool {
 	return agent == "claude" || agent == "codex"
 }
 
-func joinPrepareJoin(h *Host, jp *joinPart, p proto.HostJoin, group string) (joinConfig, error) {
+func joinPrepareJoin(h *Host, p proto.HostJoin, group string) (joinConfig, error) {
 	if _, _, exists := joinFindAgentMember(h, group, p.Agent); exists {
 		return joinConfig{}, &Error{Code: "conflict", Message: "that agent is already in the group"}
 	}
-	slot := joinSlot{group: group, agent: p.Agent}
-	if !jp.beginJoin(slot) {
-		return joinConfig{}, &Error{Code: "conflict", Message: "that agent is already joining the group"}
-	}
-	cfg, err := joinLoadConfig(h, jp, p.Agent, group)
-	if err != nil {
-		jp.endJoin(slot)
-		return joinConfig{}, err
-	}
-	return cfg, nil
+	return joinLoadConfig(h, p.Agent, group)
 }
 
-func joinLoadConfig(h *Host, jp *joinPart, agent, group string) (joinConfig, error) {
-	var account, dbFile, ownerJSON, listJSON string
+func joinLoadConfig(h *Host, agent, group string) (joinConfig, error) {
+	var account, dbFile, listJSON string
 	read := func(tx *store.Tx) error {
-		return tx.QueryRow(joinConfigQuerySQL, agent).Scan(&account, &dbFile, &ownerJSON, &listJSON)
+		return tx.QueryRow(joinConfigQuerySQL, agent).Scan(&account, &dbFile, &listJSON)
 	}
 	if err := h.Store.Write(read); err != nil {
 		return joinConfig{}, err
@@ -304,35 +240,15 @@ func joinLoadConfig(h *Host, jp *joinPart, agent, group string) (joinConfig, err
 	if account == "" {
 		return joinConfig{}, &Error{Code: "conflict", Message: "declare the agent's account with agent.set before joining a group"}
 	}
+	approvers := []string{}
+	if err := json.Unmarshal([]byte(listJSON), &approvers); err != nil {
+		return joinConfig{}, err
+	}
 	return joinConfig{
 		account:    account,
-		projectDir: joinProjectDir(jp, dbFile, group),
-		approvers:  joinBuildApprovers(ownerJSON, listJSON),
+		projectDir: filepath.Join(filepath.Dir(dbFile), "projects", group),
+		approvers:  approvers,
 	}, nil
-}
-
-func joinProjectDir(jp *joinPart, dbFile, group string) string {
-	if dbFile != "" {
-		return fpath.Join(fpath.Dir(dbFile), "projects", group)
-	}
-	return fpath.Join(jp.ensureMemDir(), "projects", group)
-}
-
-func joinBuildApprovers(ownerJSON, listJSON string) []string {
-	var owner string
-	json.Unmarshal([]byte(ownerJSON), &owner)
-	var configured []string
-	json.Unmarshal([]byte(listJSON), &configured)
-	out := []string{}
-	if owner != "" {
-		out = append(out, owner)
-	}
-	for _, user := range configured {
-		if !slices.Contains(out, user) {
-			out = append(out, user)
-		}
-	}
-	return out
 }
 
 func joinExecuteJoin(ctx context.Context, h *Host, jp *joinPart, p proto.HostJoin, cfg joinConfig, by string) error {
@@ -375,7 +291,9 @@ func joinWaitHome(ctx context.Context, h *Host, jp *joinPart, device string) (Ho
 	if h.Connect == nil {
 		return nil, joinUnreachable()
 	}
-	return joinAwaitAttach(ctx, h, jp, device)
+	waitCtx, cancel := context.WithTimeout(ctx, joinAttachTimeout)
+	defer cancel()
+	return joinAwaitAttach(waitCtx, h, jp, device)
 }
 
 func joinAwaitAttach(ctx context.Context, h *Host, jp *joinPart, device string) (Home, error) {
@@ -446,19 +364,13 @@ func joinSyncState(ctx context.Context, homeConn Home, group string) error {
 		return &Error{Code: refused.Err.Code, Message: refused.Err.Message}
 	}
 	var synced proto.Synced
-	if proto.Decode(answer, &synced) != nil || synced.Group != group {
+	if proto.Decode(answer, &synced) != nil {
 		return joinUnreachable()
 	}
 	return nil
 }
 
 func joinPrepareWorkspace(ctx context.Context, projectDir string, grp proto.GroupRow) error {
-	if grp.Kind != "project" {
-		return &Error{Code: "conflict", Message: "an AI joins only a project group"}
-	}
-	if grp.Repo == "" || grp.Base == "" {
-		return &Error{Code: "bad_request", Message: "the group has no repository or base branch"}
-	}
 	if _, err := EnsureGroupWorkspace(ctx, projectDir, grp.Repo, grp.Base); err != nil {
 		return &Error{Code: "cli", Message: RedactSecrets(err.Error())}
 	}
@@ -466,12 +378,12 @@ func joinPrepareWorkspace(ctx context.Context, projectDir string, grp proto.Grou
 }
 
 func joinSendAddAI(ctx context.Context, h *Host, p proto.HostJoin, cfg joinConfig) (proto.ID, error) {
-	memberID := joinNewID()
+	memberID := freshNonce()
 	cmd := proto.MemberAddAI{
 		MemberCommand: proto.MemberCommand{
 			HomeCommand: proto.HomeCommand{
 				Type:      "member",
-				Nonce:     joinNewID(),
+				Nonce:     freshNonce(),
 				Timestamp: h.Now().UnixMilli(),
 				Group:     p.Group,
 			},
@@ -484,7 +396,7 @@ func joinSendAddAI(ctx context.Context, h *Host, p proto.HostJoin, cfg joinConfi
 		Secretary: p.Secretary,
 		Approvers: cfg.approvers,
 	}
-	_, err := h.Command(ctx, p.Home, joinEncodeJSON(cmd))
+	_, err := h.Command(ctx, p.Home, marshalWire(cmd))
 	return memberID, err
 }
 
@@ -542,7 +454,7 @@ func joinUpsertHomeTx(tx *store.Tx, entry proto.Home) error {
 		return err
 	}
 	updated := joinPutHome(homes, entry)
-	_, err = tx.Exec("INSERT OR REPLACE INTO setting(key, value) VALUES('homes', ?)", joinEncodeJSON(updated))
+	_, err = tx.Exec("INSERT OR REPLACE INTO setting(key, value) VALUES('homes', ?)", marshalWire(updated))
 	return err
 }
 
@@ -620,23 +532,20 @@ func joinRemoveFromHome(ctx context.Context, h *Host, jp *joinPart, group proto.
 	cmd := proto.MemberCommand{
 		HomeCommand: proto.HomeCommand{
 			Type:      "member",
-			Nonce:     joinNewID(),
+			Nonce:     freshNonce(),
 			Timestamp: h.Now().UnixMilli(),
 			Group:     group,
 		},
 		Op: "remove",
 		ID: proto.ID(member),
 	}
-	_, err := h.Command(ctx, home, joinEncodeJSON(cmd))
+	_, err := h.Command(ctx, home, marshalWire(cmd))
 	return err
 }
 
 func joinCommitLeft(h *Host, group, agent, member, by string) error {
 	run := func(tx *Tx) error {
 		if err := joinEndMemberSessions(tx, h, group, member); err != nil {
-			return err
-		}
-		if _, err := tx.Exec("DELETE FROM approval WHERE g = ? AND member = ?", group, member); err != nil {
 			return err
 		}
 		if err := joinPruneHomeIfEmptyTx(tx.Tx, h, group); err != nil {
@@ -679,7 +588,7 @@ func joinPruneHomeIfEmptyTx(tx *store.Tx, h *Host, group string) error {
 			kept = append(kept, cur)
 		}
 	}
-	_, err = tx.Exec("INSERT OR REPLACE INTO setting(key, value) VALUES('homes', ?)", joinEncodeJSON(kept))
+	_, err = tx.Exec("INSERT OR REPLACE INTO setting(key, value) VALUES('homes', ?)", marshalWire(kept))
 	return err
 }
 
@@ -690,18 +599,4 @@ func joinGroupHasSession(h *Host, group string) bool {
 		}
 	}
 	return false
-}
-
-func joinNewID() proto.ID {
-	var random [16]byte
-	crand.Read(random[:])
-	return proto.ID(base64.RawURLEncoding.EncodeToString(random[:]))
-}
-
-func joinEncodeJSON(v any) string {
-	var builder strings.Builder
-	encoder := json.NewEncoder(&builder)
-	encoder.SetEscapeHTML(false)
-	encoder.Encode(v)
-	return strings.TrimSuffix(builder.String(), "\n")
 }
