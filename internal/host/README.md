@@ -86,7 +86,7 @@ A `Driver` starts the structured CLI (`Start`) and gives the command line of the
 
 # Session runtime
 
-`run.go` provides `Runner` (`Turn` and `Answer`), registers `"runtime"` in `Attached`, and exposes `(*Host).ReportSaved(ctx, saved)`. `AuditKilled` lives in `audit.go`.
+`run.go` provides `Runner` (`Turn` and `Answer`), registers `"runtime"` in `Attached`, and exposes `(*Host).ReportSaved(ctx, saved)` and `(*Host).MemberState(group, member)`. `AuditKilled` lives in `audit.go`.
 
 - **Per-host state.** Everything the runtime remembers lives in `Part[runtimePart](h)` (`procs`, `closing`, `starting`, `limited`, `savedCrash`, and `changed`). No package-level state is shared across hosts, so tests run independent hosts in one process.
 - **Lifecycle and C-6.** `Runner.Turn` wakes a `dormant` session by starting its driver with `Launch` (`Folder` under `<dbDir>/projects/<group>/<folder>`, `Session`, `Level` defaulting to 3 across all session kinds unless overridden by `perm` or `default_level`, `Shim` with an `Admit` token, `Instructions`, `RepoConfig`, `ToolTimeout`), reports `TurnBegan` before writing the turn, stores a non-empty `Ready.Session`, and forwards every `Process.Events()` event in order through `h.Report`. Every switch waits for the previous process's `Events()` channel to close and forgets its token before starting the next process or marking the session `dormant`.

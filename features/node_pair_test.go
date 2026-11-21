@@ -78,13 +78,13 @@ func nodePairSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the node fingerprint seen in the room equals the node key fingerprint$`, w.checkRoomFingerprint)
 	sc.Step(`^the pairing browser opens ctl and sends hello before any device log$`, w.browserOpensCtlAndSaysHello)
 	sc.Step(`^the pairing welcome reports owner (true|false)$`, w.checkWelcomeOwner)
-	sc.Step(`^host\.info and settings\.set before enrolment are refused with "([^"]*)"$`, w.checkPreEnrolmentForbidden)
+	sc.Step(`^host\.info before enrolment is refused with "([^"]*)"$`, w.checkPreEnrolmentForbidden)
 	sc.Step(`^the pairing browser sends a log whose add entry for the node was signed by another device$`, w.sendWrongSignerLog)
 	sc.Step(`^the pairing node still has no owner and refuses host\.info with "([^"]*)"$`, w.checkUnownedForbidden)
 	sc.Step(`^the pairing browser sends a valid device log adding the node signed by the pairing browser$`, w.sendValidAdoptionLog)
 	sc.Step(`^pair completes with the node fingerprint and active path$`, w.checkPairCompleted)
 	sc.Step(`^the pairing browser sends hello again$`, func() error { return w.sendHello(w.b1.conn) })
-	sc.Step(`^host\.info and settings\.set succeed for the owner browser$`, w.checkOwnerSurface)
+	sc.Step(`^host\.info succeeds for the owner browser$`, w.checkOwnerSurface)
 
 	sc.Step(`^an owned node with a connected owner browser over the rendezvous$`, w.setupOwnedWithBrowser)
 	sc.Step(`^the owner browser sends pair\.browser with nonce "([^"]*)"$`, w.sendPairBrowser)
@@ -202,7 +202,8 @@ func (w *nodePairWorld) initNodeStack(owned bool) error {
 	})
 	w.surface = node.NewSurface(node.SurfaceConfig{
 		ID: w.nodeKey.ID(), OS: "darwin/arm64", Version: "v0.3.1",
-		Store: w.db, Logs: w.logs, Sessions: w.sessions, Host: h, Now: w.nowTime,
+		Store: w.db, Sessions: w.sessions, Host: h,
+		Agents: func(context.Context) ([]proto.HostAgent, error) { return []proto.HostAgent{}, nil },
 	})
 
 	var nodePath *peer.Path
@@ -399,17 +400,7 @@ func (w *nodePairWorld) checkPreEnrolmentForbidden(wantCode string) error {
 	if err != nil {
 		return err
 	}
-	if err := checkWireError(rawInfo, wantCode); err != nil {
-		return err
-	}
-	env := w.b1.key.Sign(fmt.Sprintf(`{"t":"settings.set","n":%q,"ts":%d,"to":%q,"max_open":2}`, exampleID("pre-set"), w.nowTime().UnixMilli(), w.nodeKey.ID()))
-	rawCmd, err := w.b1.conn.Request(w.ctx, func(id int64) any {
-		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
-	})
-	if err != nil {
-		return err
-	}
-	return checkWireError(rawCmd, wantCode)
+	return checkWireError(rawInfo, wantCode)
 }
 
 func (w *nodePairWorld) sendWrongSignerLog() error {
@@ -463,15 +454,7 @@ func (w *nodePairWorld) checkOwnerSurface() error {
 	if err := proto.Decode(rawInfo, &info); err != nil || info.Device != w.nodeKey.ID() || info.Name != "workstation" {
 		return fmt.Errorf("host.info = %+v (%v)", info, err)
 	}
-	env := w.b1.key.Sign(fmt.Sprintf(`{"t":"settings.set","n":%q,"ts":%d,"to":%q,"max_open":3}`, exampleID("post-set"), w.nowTime().UnixMilli(), w.nodeKey.ID()))
-	rawCmd, err := w.b1.conn.Request(w.ctx, func(id int64) any {
-		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
-	})
-	if err != nil {
-		return err
-	}
-	var ok proto.Success
-	return proto.Decode(rawCmd, &ok)
+	return nil
 }
 
 func (w *nodePairWorld) setupOwnedWithBrowser() error {

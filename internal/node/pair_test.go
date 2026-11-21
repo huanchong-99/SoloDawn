@@ -165,8 +165,8 @@ func newPairHarness(t *testing.T, ownedBy *identity.Key, withSharedPath bool) *p
 	})
 	surface := NewSurface(SurfaceConfig{
 		ID: nodeKey.ID(), OS: "darwin/arm64", Version: "v0.3.1",
-		Store: db, Logs: logs, Sessions: sessions, Host: h,
-		Now: clk.Now, Report: func(err error) { reported <- err },
+		Store: db, Sessions: sessions, Host: h,
+		Agents: func(context.Context) ([]proto.HostAgent, error) { return []proto.HostAgent{}, nil },
 	})
 	putRV := func(tx *store.Tx) error {
 		_, err := tx.Exec("INSERT INTO setting(key, value) VALUES('rendezvous', ?)", string(dvlMustEncode([]string{rvURL})))
@@ -357,7 +357,7 @@ func TestPairRoleBEndToEndAndBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	var w1 proto.Welcome
-	if err := proto.Decode(rawW1, &w1); err != nil || w1.Owner || w1.Name != "workstation" {
+	if err := proto.Decode(rawW1, &w1); err != nil || w1.Owner || w1.Name != "" {
 		t.Fatalf("first welcome = %+v (%v)", w1, err)
 	}
 
@@ -401,7 +401,7 @@ func TestPairRoleBEndToEndAndBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	var w2 proto.Welcome
-	if err := proto.Decode(rawW2, &w2); err != nil || !w2.Owner {
+	if err := proto.Decode(rawW2, &w2); err != nil || !w2.Owner || w2.Name != "workstation" {
 		t.Fatalf("second welcome = %+v (%v)", w2, err)
 	}
 	rawInfo, err := conn.Request(t.Context(), func(id int64) any { return proto.Request{Type: "host.info", ID: id} })
@@ -565,8 +565,8 @@ func TestPairRoomEdgeCasesAndFailures(t *testing.T) {
 		defPairer.attempts[openA] = true
 		defPairer.mu.Unlock()
 		defPairer.Close()
-		if !openA.done || !errors.Is(openA.err, net.ErrClosed) || openA.secret != "" {
-			t.Fatalf("Close did not finish open attempt: done=%v err=%v secret=%q", openA.done, openA.err, openA.secret)
+		if !openA.done || !errors.Is(<-openA.outcome, net.ErrClosed) || openA.secret != "" {
+			t.Fatalf("Close did not finish open attempt: done=%v secret=%q", openA.done, openA.secret)
 		}
 		if defPairer.cfg.Now == nil || defPairer.cfg.After == nil || defPairer.sharedPaths() != nil {
 			t.Fatal("NewPairer left nil callbacks")
@@ -606,7 +606,7 @@ func TestPairRoomEdgeCasesAndFailures(t *testing.T) {
 		}
 	})
 
-	t.Run("prepareLabel store error, preset name, explicit RV override and two-path survival", func(t *testing.T) {
+	t.Run("saveLabel on success only, store error, preset name, explicit RV override and two-path survival", func(t *testing.T) {
 		phShared := newPairHarness(t, nil, true)
 		putPreset := func(tx *store.Tx) error {
 			_, err := tx.Exec(`INSERT INTO setting(key, value) VALUES('name', '"preset-box"')`)
@@ -615,9 +615,12 @@ func TestPairRoomEdgeCasesAndFailures(t *testing.T) {
 		if err := phShared.db.Write(putPreset); err != nil {
 			t.Fatal(err)
 		}
-		// Explicit Rendezvous overrides shared Paths and returns the dial error rather than errNoRendezvous.
-		if _, err := phShared.pairer.Pair(t.Context(), PairRequest{Secret: identity.NewSecret().String(), Rendezvous: []string{"ws://127.0.0.1:1/rv"}}); err == nil || errors.Is(err, errNoRendezvous) {
+		// Explicit Rendezvous overrides shared Paths, returns the dial error, and does not save --name on failure.
+		if _, err := phShared.pairer.Pair(t.Context(), PairRequest{Secret: identity.NewSecret().String(), Name: "aborted", Rendezvous: []string{"ws://127.0.0.1:1/rv"}}); err == nil || errors.Is(err, errNoRendezvous) {
 			t.Fatalf("expected dial error from explicit Rendezvous, got %v", err)
+		}
+		if ReadName(phShared.db) != "preset-box" {
+			t.Fatalf("failed Pair saved --name: %q", ReadName(phShared.db))
 		}
 
 		ctx, cancel := context.WithCancel(t.Context())
@@ -644,6 +647,21 @@ func TestPairRoomEdgeCasesAndFailures(t *testing.T) {
 			t.Fatalf("shared role b cancel = %v", got)
 		}
 
+		// Succeeding without --name preserves existing setting('name').
+		noSavePeer := sesKey("no-save-peer").ID()
+		aNoSave := &pairAttempt{
+			role: "b", wantRole: "a", secret: identity.NewSecret(), label: "preset-box",
+			peer: proto.Pair{Key: noSavePeer}, link: PairLink{Expires: phShared.clock.Now().Add(pairWindow).UnixMilli()},
+			cancel: func() {}, outcome: make(chan error, 1),
+		}
+		phShared.pairer.mu.Lock()
+		phShared.pairer.attempts[aNoSave] = true
+		phShared.pairer.mu.Unlock()
+		phShared.pairer.onPairAdopt(&sesConn{device: noSavePeer, raw: newFakeCtl()})
+		if err := <-aNoSave.outcome; err != nil || ReadName(phShared.db) != "preset-box" {
+			t.Fatalf("empty saveName finish = %v, name = %q", err, ReadName(phShared.db))
+		}
+
 		// Two rendezvous paths: closing the first leaves pathsLeft == 1 and does not fail the attempt;
 		// once conn is set, closing the second path (pathsLeft == 0) also leaves the attempt alive until adoption or ctl close.
 		srv2 := httptest.NewServer(rendezvous.Handler(fstest.MapFS{}))
@@ -653,7 +671,7 @@ func TestPairRoomEdgeCasesAndFailures(t *testing.T) {
 		ctx2, cancel2 := context.WithCancel(t.Context())
 		err2Ch := make(chan error, 1) // single reader: subtest
 		go func() {
-			_, err := phShared.pairer.Pair(ctx2, PairRequest{Secret: identity.NewSecret().String(), Rendezvous: []string{rvURL2, rvURL3}})
+			_, err := phShared.pairer.Pair(ctx2, PairRequest{Secret: identity.NewSecret().String(), Name: "aborted-cancel", Rendezvous: []string{rvURL2, rvURL3}})
 			err2Ch <- err
 		}()
 		waitAttempts(t, phShared.pairer, 1)
@@ -670,40 +688,54 @@ func TestPairRoomEdgeCasesAndFailures(t *testing.T) {
 		waitAttempts(t, phShared.pairer, 1)
 		cancel2()
 		<-err2Ch
+		if ReadName(phShared.db) != "preset-box" {
+			t.Fatalf("cancelled Pair overwrote setting('name'): %q", ReadName(phShared.db))
+		}
 
 		ph := newPairHarness(t, nil, false)
 		drop := func(tx *store.Tx) error { _, err := tx.Exec("DROP TABLE setting"); return err }
 		if err := ph.db.Write(drop); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := ph.pairer.Pair(t.Context(), PairRequest{Secret: identity.NewSecret().String(), Name: "x", Rendezvous: []string{ph.rvURL}}); err == nil {
-			t.Fatal("expected label store error")
+		saveErrPeer := sesKey("save-err-peer").ID()
+		aSaveErr := &pairAttempt{
+			role: "b", wantRole: "a", secret: identity.NewSecret(), label: "x", saveName: "x",
+			peer: proto.Pair{Key: saveErrPeer}, link: PairLink{Expires: ph.clock.Now().Add(pairWindow).UnixMilli()},
+			cancel: func() {}, outcome: make(chan error, 1),
+		}
+		ph.pairer.mu.Lock()
+		ph.pairer.attempts[aSaveErr] = true
+		ph.pairer.mu.Unlock()
+		ph.pairer.onPairAdopt(&sesConn{device: saveErrPeer, raw: newFakeCtl()})
+		if err := <-aSaveErr.outcome; err == nil {
+			t.Fatal("expected label store error in finish")
 		}
 	})
 
-	t.Run("replace role b, expiry, context cancel and room full", func(t *testing.T) {
-		ph := newPairHarness(t, nil, false)
+	t.Run("concurrent role b, expiry, context cancel and room full", func(t *testing.T) {
+		ph := newPairHarness(t, nil, true)
 		s1, s2 := identity.NewSecret(), identity.NewSecret()
 		err1 := make(chan error, 1) // single reader: subtest
 		go func() {
-			_, err := ph.pairer.Pair(t.Context(), PairRequest{Secret: s1.String()})
+			_, err := ph.pairer.Pair(t.Context(), PairRequest{Secret: s1.String(), Name: "first"})
 			err1 <- err
 		}()
-		waitAttempts(t, ph.pairer, 1)
-
-		// Starting a second Role B attempt supersedes the first, then expires via After.
 		err2 := make(chan error, 1) // single reader: subtest
 		go func() {
-			_, err := ph.pairer.Pair(t.Context(), PairRequest{Secret: s2.String()})
+			_, err := ph.pairer.Pair(t.Context(), PairRequest{Secret: s2.String(), Name: "second"})
 			err2 <- err
 		}()
-		if got := <-err1; !errors.Is(got, errPairReplaced) {
-			t.Fatalf("first attempt = %v, want errPairReplaced", got)
-		}
-		waitAttempts(t, ph.pairer, 1)
+		waitAttempts(t, ph.pairer, 2)
+		ph.clock.WaitWaiters(t, 2)
 		ph.clock.FireAll()
+		if got := <-err1; !errors.Is(got, errPairExpired) {
+			t.Fatalf("first attempt = %v, want errPairExpired", got)
+		}
 		if got := <-err2; !errors.Is(got, errPairExpired) {
 			t.Fatalf("second attempt = %v, want errPairExpired", got)
+		}
+		if ReadName(ph.db) != "" {
+			t.Fatalf("expired Pair saved --name: %q", ReadName(ph.db))
 		}
 
 		// Room already full (2 browsers in room before node joins).
@@ -763,7 +795,6 @@ func TestPairRoomEdgeCasesAndFailures(t *testing.T) {
 			t.Fatalf("wsConns = %d, want 1", nConns)
 		}
 
-		// cancelRoleB leaves a role "a" attempt untouched while replacing role "b".
 		roleA := &pairAttempt{
 			role: "a", wantRole: "b", secret: identity.NewSecret(), room: "11111111111111111111111111111111",
 			link:   PairLink{Expires: ph.clock.Now().Add(pairWindow).UnixMilli()},
@@ -772,10 +803,6 @@ func TestPairRoomEdgeCasesAndFailures(t *testing.T) {
 		ph.pairer.mu.Lock()
 		ph.pairer.attempts[roleA] = true
 		ph.pairer.mu.Unlock()
-		ph.pairer.cancelRoleB()
-		if roleA.done {
-			t.Fatal("cancelRoleB finished role a attempt")
-		}
 		// At exact expires, findRoom, onPairMsg and Known treat the attempt as expired.
 		pExp := sesKey("p-exp")
 		msgExp := proto.Pair{Type: "pair", Key: pExp.ID(), Kind: "browser", Name: "b", Role: "b"}
@@ -841,8 +868,9 @@ func TestPairRoomEdgeCasesAndFailures(t *testing.T) {
 		if err := <-a.outcome; !errors.Is(err, net.ErrClosed) && err == nil {
 			t.Fatal("expected EOF when paired ctl closes before adoption")
 		}
-		if got := ph.pairer.finish(a, errRoomFull); got == nil || errors.Is(got, errRoomFull) {
-			t.Fatalf("second finish = %v, want original EOF error", got)
+		ph.pairer.finish(a, errRoomFull)
+		if len(a.outcome) != 0 {
+			t.Fatal("second finish wrote another outcome")
 		}
 		fcUnpaired := newFakeCtl()
 		fcUnpaired.Close()

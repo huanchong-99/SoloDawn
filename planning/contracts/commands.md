@@ -261,7 +261,7 @@ device id. Receipts apply as for home commands.
 | --- | --- | --- |
 | `agent.set` | `agent`, `account` | declares the account type of a CLI found on this machine (R-50); required before the AI can join a group |
 | `perm.set` | `agent`, `g`, `level` (1, 2, 3), `repo_config` (bool) | permission level for that AI's sessions in that project (R-40), and whether repository-supplied AI configuration is loaded (R-45; for which sessions: `contracts/drivers.md` 1.1, 1.2); records an audit row of `what = setting`; takes effect the next time a session's process starts |
-| `settings.set` | any of `retention_days`, `idle_minutes`, `max_open`, `default_level`, `all_level3`, `approvers`, `caps` | node settings; for `approvers` the node sends `member set` with them for each of its AIs to that AI's home |
+| `settings.set` | any of `retention_days`, `idle_minutes`, `max_open`, `default_level`, `all_level3`, `approvers`, `caps` | postponed after 1.0 (with `U-12`): node settings; for `approvers` the node sends `member set` with them for each of its AIs to that AI's home |
 | `host.join` | `g`, `home`, `agent`, `name`, `secretary` | the node connects to `home`, clones the project if this node has no clone of it yet (R-11), and sends `member add_ai` |
 | `host.leave` | `g`, `agent` | the node sends `member remove`; if the home accepts it, the AI's sessions in that group are closed (it is refused while the AI has unfinished tasks) |
 | `takeover.start` | `g`, `member`, `task` (optional) | `flows/takeover.md`; refused with `relay`, `busy` or `cli` |

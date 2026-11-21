@@ -9,14 +9,14 @@ Feature: Room pairing, pair.browser and the host surface
     Then the node fingerprint seen in the room equals the node key fingerprint
     When the pairing browser opens ctl and sends hello before any device log
     Then the pairing welcome reports owner false
-    And host.info and settings.set before enrolment are refused with "forbidden"
+    And host.info before enrolment is refused with "forbidden"
     When the pairing browser sends a log whose add entry for the node was signed by another device
     Then the pairing node still has no owner and refuses host.info with "forbidden"
     When the pairing browser sends a valid device log adding the node signed by the pairing browser
     Then pair completes with the node fingerprint and active path
     When the pairing browser sends hello again
     Then the pairing welcome reports owner true
-    And host.info and settings.set succeed for the owner browser
+    And host.info succeeds for the owner browser
 
   Scenario: pair.browser returns the same link on replay until used or expired (A1.9)
     Given an owned node with a connected owner browser over the rendezvous

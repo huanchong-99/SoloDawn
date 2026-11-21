@@ -15,9 +15,9 @@ kind: reference
 - `update.go`: `Updater` for SHA-256-verified self-update outside running turns and takeovers ([local](../../planning/contracts/local.md), section 9).
 - `rendezvous.go`: standalone signalling, static web assets and ICE service.
 - `devlog.go`: `Logs`, loading and persisting `setting` (`key = 'owner'`, JSON-encoded string) and `device_log` for the node's owner, unowned-node adoption across split frames, node-signed device additions during browser pairing, forwarding accepted entries in `devlog` frames up to 61,440 bytes, and delivering accepted `device` rows to `home.Loop.Event("device", rows)` ([envelope](../../planning/contracts/envelope.md), sections 4 and 6; [datachannel](../../planning/contracts/datachannel.md), section 3.1).
-- `session.go`: `Sessions`, serving inbound `ctl` connections (`*peer.Connection` via `Ctl`), `hello` and `welcome`, the bootstrap rule before enrolment, request, push, command and replay tables, owner push fan-out (`PushOwner`), delegation to `home.Loop` and `host.Surface`, and asynchronous execution with envelope checks, in-flight nonce coordination and `receipt` persistence for host commands ([datachannel](../../planning/contracts/datachannel.md), sections 2, 3, 5, 7 and 8; [commands](../../planning/contracts/commands.md), "Once only" and section 2).
+- `session.go`: `Sessions`, serving inbound `ctl` connections (`*peer.Connection` via `Ctl`), `hello` and `welcome`, the bootstrap rule before enrolment, request, push, command and replay tables, delegation to `home.Loop` and `host.Surface`, and asynchronous execution with envelope checks, in-flight nonce coordination and `receipt` persistence for host commands ([datachannel](../../planning/contracts/datachannel.md), sections 2, 3, 5, 7 and 8; [commands](../../planning/contracts/commands.md), "Once only" and section 2).
 - `pair.go`: `Pairer`, running 10-minute single-use pairing rooms in role `b` (`Pair`, onboarding and adding another computer) and role `a` (`PairBrowser` and `pair.browser`, adding another browser with `#pair=<secret>` links and once-only nonce replay; [pairing](../../planning/flows/pairing.md), sections A to C; [envelope](../../planning/contracts/envelope.md), section 6).
-- `surface.go`: `Surface`, serving `host.info` (`HostState`, `PushHostInfo`), `ReadName` and `ReadRendezvous`, and `settings.set` with SQLite persistence, `setting` audit rows, `approvers` propagation via `member set` and live `host.info` pushes ([datachannel](../../planning/contracts/datachannel.md), sections 3 and 7; [commands](../../planning/contracts/commands.md), section 2).
+- `surface.go`: `Surface`, serving `host.info` (`HostState`) and reading `name`, `max_open`, `homes` and `rendezvous` (`ReadName`, `ReadRendezvous`; [datachannel](../../planning/contracts/datachannel.md), sections 3 and 7).
 - `local.go`: `AttachLocal` and `LocalLink`, the in-process link between a `*host.Host` and a `*home.Loop` on the same node ([architecture](../../planning/architecture.md), section 2.1).
 - `nodetest/`: in-process node clusters with built fake Claude Code and Codex binaries for integration tests.
 
@@ -33,7 +33,7 @@ kind: reference
 | check and apply signed-sum release updates | `(*Updater).Check(ctx, now)`, `(*Updater).Apply()` ([local.md](../../planning/contracts/local.md) section 9) |
 | run the standalone rendezvous and static web service | `Rendezvous(opts)` |
 | pair a node over a rendezvous room or issue a browser pairing link | `NewPairer(cfg)`, `(*Pairer).Pair(ctx, req)`, `(*Pairer).PairBrowser(ctx, webURL)`, `(*Pairer).HandleEvent(ctx, path, kind, data)`, `(*Pairer).Serve(ctx, device, raw)` ([pairing.md](../../planning/flows/pairing.md)) |
-| serve `host.info` and `settings.set` and push `host.info` updates | `NewSurface(cfg)`, `(*Surface).HostState(ctx)`, `(*Surface).PushHostInfo(ctx)`, `ReadName(db)`, `ReadRendezvous(db)` ([datachannel.md](../../planning/contracts/datachannel.md) section 7) |
+| serve `host.info` and read node settings | `NewSurface(cfg)`, `(*Surface).HostState(ctx)`, `ReadName(db)`, `ReadRendezvous(db)` ([datachannel.md](../../planning/contracts/datachannel.md) section 7) |
 | wire a host to the home on the same node | `AttachLocal(h, loop)` returning `*LocalLink` (`host.Home` with `Path() == "local"`) |
 | start in-process nodes with fake CLIs | `nodetest.Start(t, cfg)` |
 
@@ -58,8 +58,8 @@ Populate the maps on `*Sessions` (or attach `NewPairer` and `NewSurface`) before
 | --- | --- |
 | `Requests` | `ctl` requests (`sync`, `fetch` with `Async: true`; `host.info` registered by `NewSurface` with `Type: "host.info"`) |
 | `Pushes` | `ctl` pushes after enrolment (`ack`) |
-| `Commands` | node-level host commands (`pair.browser` registered by `NewPairer`; `settings.set` registered by `NewSurface`); other host commands (`to` set in payload) fall back to `host.Surface` |
-| `Replays` | memory-backed replay answers for succeeded host commands (`pair.browser` registered by `NewPairer`, returning the active link while valid and `conflict` once used, expired or lost across restart; `takeover.start` later) |
+| `Commands` | node-level host commands (`pair.browser` registered by `NewPairer`); other host commands (`to` set in payload) fall back to `host.Surface` |
+| `Replays` | memory-backed replay answers for succeeded host commands (`pair.browser` registered by `NewPairer`, returning the active link while valid and `conflict` once used, expired or lost across restart) |
 
 `SessionConfig.OnAdopt` is invoked once with the adopted owner's user id when an unowned node persists its first valid adoption log (`dvlAdopt`), before forwarding `devlog` frames. `N-4` uses `OnAdopt` to restart `home.Loop` with the adopted `Owner` and start watching owner devices on the rendezvous. `home.Loop.Welcome` and `home.Loop` group announcements deliver `welcome.groups` and `groups` pushes over `Sessions`.
 
@@ -72,10 +72,22 @@ Populate the maps on `*Sessions` (or attach `NewPairer` and `NewSurface`) before
 - `Sessions.mu` guards the active connection map (`conns`) and `sesConn.welcomed`; it is a leaf lock never held across `Store.Write`, `home.Loop` calls or network writes.
 - `sesConn.sendMu` serializes outbound frames on one `Ctl` connection; during `welcome` delivery it holds `sendMu` across `raw.Send(welcome)`, setting `welcomed = true` under `Sessions.mu`, reading `Logs` under `Logs.mu`, and sending the initial `devlog` frames so no `devlog` frame is forwarded ahead of `welcome`.
 
+## Wiring for N-4
+
+`N-4` must wire six things in the node runtime for pairing and `host.info` ([issues](../../issues.md)):
+
+1. Inbound `ctl` connections go through `Pairer.Serve` rather than `Sessions.Serve`, so a room-paired peer is marked `paired` for adoption and `onPairHello`.
+2. `peer.New`'s known-device check and route lookup accept `Pairer.Known` and `Pairer.Routes`.
+3. `Pairer.HandleEvent` receives the `joined`, `full` and `room` frames from the node's own rendezvous paths, and `PairConfig.Paths` returns those paths.
+4. `Pairer.Peer` is set after `peer.New` constructs the `*peer.Peer`.
+5. The local socket's `pair` command calls `Pairer.Pair`, and `pair-browser` calls `Pairer.PairBrowser`.
+6. `SurfaceConfig.Agents` is set to `(*Host).Agents` (`HS-3`).
+
 ## Known limitations
 
+- Pairing and `host.info` are not wired in the running node until `N-4` connects `Pairer.Serve`, `Pairer.Known`/`Pairer.Routes`, `Pairer.HandleEvent`/`PairConfig.Paths`, `Pairer.Peer` after `peer.New`, local socket `pair`/`pair-browser`, and `SurfaceConfig.Agents = h.Agents` ([Wiring for N-4](#wiring-for-n-4); [issues](../../issues.md)).
 - `sync`, `fetch` and `ack` are not registered in `Sessions` until `HM-2`, `HM-3`, `HM-7` and `N-4` wire them ([issues](../../issues.md)).
-- `SurfaceConfig.Agents` and `SurfaceConfig.Queued` are optional hooks until `N-4` wires `HS-3` (`(*Host).Agents`) and `HS-13` (held-item counts); without `Agents`, `Surface` reads found CLIs from the `agent` table ([issues](../../issues.md)).
+- `Surface` answers `host.info` requests only; there is no `host.info` push yet, `settings.set` is postponed with `U-12`, and `queued` in `host.info` is always `0` because held items live on the home (`not_before`, `HM-7`; [issues](../../issues.md)).
 - `home.Loop`'s `Owner` is fixed at `StartLoop`, so after an unowned node is adopted its running loop knows no owner until `SessionConfig.OnAdopt` (`N-4`) recreates the home loop with the adopted owner ([issues](../../issues.md)).
 - `Sessions` implements only the server side of an inbound `ctl` connection; a host's outgoing `ctl` session to a home on another node (`hello` with `kind: "host"`, `welcome`, `devlog` both ways, and pushes to `Host.Push`) is split into unit `N-2b` (`internal/node/client.go`, wired by `N-4`, needed by `I-6` / `A3.3`; [issues](../../issues.md)).
 - In step 1 `Logs` stores only the node owner's device log; keeping logs of other group members belongs to step 2.
@@ -88,4 +100,4 @@ Populate the maps on `*Sessions` (or attach `NewPairer` and `NewSurface`) before
 
 ## Verification and sources
 
-`go test ./internal/node/ ./internal/node/nodetest/` covers every statement of both packages, including local socket locking, opening lines, service definitions, update verification, room pairing in both roles, `pair.browser` single-use expiry and nonce replay, `host.info` state assembly, `settings.set` validation, audit rows and `approvers` propagation, `LocalLink` request/push framing, inbox delivery for groups created after `AttachLocal`, cancellation and closure, and `nodetest` startup and fake CLI replay. Acceptance scenarios live in `features/node.feature`, `features/node_service.feature`, `features/node_update.feature`, `features/node_local.feature`, `features/node_session.feature` and `features/node_pair.feature`.
+`go test ./internal/node/ ./internal/node/nodetest/` covers every statement of both packages, including local socket locking, opening lines, service definitions, update verification, room pairing in both roles, `pair.browser` single-use expiry and nonce replay, `host.info` state assembly, `LocalLink` request/push framing, inbox delivery for groups created after `AttachLocal`, cancellation and closure, and `nodetest` startup and fake CLI replay. Acceptance scenarios live in `features/node.feature`, `features/node_service.feature`, `features/node_update.feature`, `features/node_local.feature`, `features/node_session.feature` and `features/node_pair.feature`.

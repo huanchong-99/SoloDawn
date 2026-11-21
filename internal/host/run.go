@@ -836,13 +836,12 @@ func isUnreachable(err error) bool {
 	return errors.As(err, &he) && he.Code == "home_unreachable"
 }
 
-func sendMemberStatus(ctx context.Context, h *Host, rt *runtimePart, homeDevice, group, member string, ev any) error {
+func sendMemberStatus(ctx context.Context, h *Host, _ *runtimePart, homeDevice, group, member string, ev any) error {
 	home, ok := h.Home(homeDevice)
 	if !ok {
 		return &Error{"home_unreachable", "the home of that group is not connected"}
 	}
-	slot := aiSlot{group: group, member: member}
-	state, task := deriveMemberStatus(h, rt, slot)
+	state, task := h.MemberState(group, member)
 	var evPtr *any
 	if ev != nil {
 		evPtr = &ev
@@ -856,15 +855,17 @@ func sendMemberStatus(ctx context.Context, h *Host, rt *runtimePart, homeDevice,
 	return err
 }
 
-func deriveMemberStatus(h *Host, rt *runtimePart, slot aiSlot) (string, string) {
-	list := memberSessions(h, slot.group, slot.member)
+// MemberState returns the derived state and active task id of member in group
+// (planning/sessions.md section 3).
+func (h *Host) MemberState(group, member string) (state, task string) {
+	list := memberSessions(h, group, member)
 	if s, ok := findSessionInState(list, Takeover); ok {
 		return string(Takeover), s.Task
 	}
 	if s, ok := findSessionInState(list, Working); ok {
 		return string(Working), s.Task
 	}
-	if rt.isLimited(slot) {
+	if stateOf(h).isLimited(aiSlot{group: group, member: member}) {
 		return "limited", ""
 	}
 	if s, ok := latestWaitingSession(list); ok {

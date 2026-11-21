@@ -27,7 +27,6 @@ var (
 	errNoRendezvous = errors.New("no rendezvous URL configured")
 	errRoomFull     = errors.New("pairing room is full")
 	errPairExpired  = errors.New("pairing secret expired")
-	errPairReplaced = errors.New("pairing superseded by a newer attempt")
 	pairSchemes     = map[string]string{"wss": "https", "https": "https", "ws": "http", "http": "http"}
 )
 
@@ -47,7 +46,6 @@ type (
 		Store        *store.Store
 		Logs         *Logs
 		Sessions     *Sessions
-		Peer         *peer.Peer
 		Paths        func() []*peer.Path
 		Name, WebURL func() string
 		Rendezvous   func() []string
@@ -58,6 +56,8 @@ type (
 	// Lock order: mu is a leaf lock guarding attempts and links; it is never held
 	// across Store.Write, Logs, Sessions, Peer or WebSocket calls.
 	Pairer struct {
+		// Peer handles WebRTC signalling on paths dialled by Pairer; N-4 sets
+		// it after peer.New when Peer's callbacks reference this Pairer.
 		Peer     *peer.Peer
 		cfg      PairConfig
 		mu       sync.Mutex
@@ -65,19 +65,18 @@ type (
 		links    map[string]*pairAttempt
 	}
 	pairAttempt struct {
-		role, wantRole, room, label, pathUsed string
-		secret                                identity.Secret
-		link                                  PairLink
-		rawSelf                               json.RawMessage
-		cancel                                context.CancelFunc
-		ownedPaths                            []*peer.Path
-		routes                                []peer.Route
-		peer                                  proto.Pair
-		conn                                  Ctl
-		done                                  bool
-		pathsLeft                             int
-		err                                   error
-		outcome                               chan error // single reader: waitPair (role "b") or watchBrowser (role "a")
+		role, wantRole, room, label, saveName, pathUsed string
+		secret                                          identity.Secret
+		link                                            PairLink
+		rawSelf                                         json.RawMessage
+		cancel                                          context.CancelFunc
+		ownedPaths                                      []*peer.Path
+		routes                                          []peer.Route
+		peer                                            proto.Pair
+		conn                                            Ctl
+		done                                            bool
+		pathsLeft                                       int
+		outcome                                         chan error // single reader: waitPair (role "b") or watchBrowser (role "a")
 	}
 )
 
@@ -95,7 +94,7 @@ func NewPairer(cfg PairConfig) *Pairer {
 	if cfg.After == nil {
 		cfg.After = time.After
 	}
-	p := &Pairer{Peer: cfg.Peer, cfg: cfg, attempts: map[*pairAttempt]bool{}, links: map[string]*pairAttempt{}}
+	p := &Pairer{cfg: cfg, attempts: map[*pairAttempt]bool{}, links: map[string]*pairAttempt{}}
 	cfg.Sessions.Commands["pair.browser"] = p.cmdPairBrowser
 	cfg.Sessions.Replays["pair.browser"] = p.replayPairBrowser
 	cfg.Sessions.onPairHello, cfg.Sessions.onPairAdopt = p.onPairHello, p.onPairAdopt
@@ -185,17 +184,13 @@ func (p *Pairer) openRoleB(ctx context.Context, req PairRequest) (*pairAttempt, 
 	if err != nil {
 		return nil, err
 	}
-	label, err := p.prepareLabel(req.Name)
-	if err != nil {
-		return nil, err
-	}
-	p.cancelRoleB()
 	var shared []*peer.Path
 	urls := req.Rendezvous
 	if len(urls) == 0 {
 		shared, urls = p.sharedPaths(), p.cfg.Rendezvous()
 	}
-	return p.openAttempt(ctx, "b", "a", secret, label, "", shared, urls)
+	a := &pairAttempt{role: "b", wantRole: "a", secret: secret, label: cmp.Or(req.Name, p.cfg.Name()), saveName: req.Name}
+	return a, p.openAttempt(ctx, a, shared, urls)
 }
 
 // PairBrowser creates a single-use secret, joins its room in role "a", and
@@ -254,11 +249,12 @@ func (p *Pairer) startBrowser(ctx context.Context, webURL string) (*pairAttempt,
 		return nil, err
 	}
 	secret := identity.NewSecret()
-	a, err := p.openAttempt(ctx, "a", "b", secret, p.cfg.Name(), base+"/#pair="+secret.String(), p.sharedPaths(), urls)
-	if err == nil {
-		go p.watchBrowser(a)
+	a := &pairAttempt{role: "a", wantRole: "b", secret: secret, label: p.cfg.Name(), link: PairLink{Link: base + "/#pair=" + secret.String()}}
+	if err := p.openAttempt(ctx, a, p.sharedPaths(), urls); err != nil {
+		return nil, err
 	}
-	return a, err
+	go p.watchBrowser(a)
+	return a, nil
 }
 
 func (p *Pairer) sharedPaths() []*peer.Path {
@@ -282,75 +278,56 @@ func (p *Pairer) waitPair(ctx context.Context, a *pairAttempt) error {
 	case err := <-a.outcome:
 		return err
 	case <-p.cfg.After(pairWindow):
-		return p.finish(a, errPairExpired)
+		p.finish(a, errPairExpired)
 	case <-ctx.Done():
-		return p.finish(a, ctx.Err())
+		p.finish(a, ctx.Err())
 	}
+	return <-a.outcome
 }
 
-func (p *Pairer) prepareLabel(name string) (string, error) {
-	if name == "" {
-		return p.cfg.Name(), nil
-	}
+func (p *Pairer) saveLabel(name string) error {
 	raw := string(dvlMustEncode(name))
-	return name, p.cfg.Store.Write(func(tx *store.Tx) error {
+	write := func(tx *store.Tx) error {
 		_, err := tx.Exec("INSERT INTO setting(key, value) VALUES('name', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", raw)
 		return err
-	})
+	}
+	return p.cfg.Store.Write(write)
 }
 
-func (p *Pairer) cancelRoleB() {
-	p.mu.Lock()
-	var old []*pairAttempt
-	for a := range p.attempts {
-		if a.role == "b" {
-			old = append(old, a)
-		}
-	}
-	p.mu.Unlock()
-	for _, a := range old {
-		p.finish(a, errPairReplaced)
-	}
-}
-
-func (p *Pairer) openAttempt(dialCtx context.Context, role, wantRole string, secret identity.Secret, label, linkURL string, shared []*peer.Path, urls []string) (*pairAttempt, error) {
+func (p *Pairer) openAttempt(dialCtx context.Context, a *pairAttempt, shared []*peer.Path, urls []string) error {
 	paths, dialed, err := shared, len(shared) == 0, error(nil)
 	if dialed {
 		paths, err = p.dialPaths(dialCtx, urls)
 		if len(paths) == 0 {
-			return nil, cmp.Or(err, errNoRendezvous)
+			return cmp.Or(err, errNoRendezvous)
 		}
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
-	a := p.registerAttempt(role, wantRole, secret, label, linkURL, cancel, dialed, paths)
+	p.registerAttempt(a, cancel, dialed, paths)
 	for _, path := range paths {
 		path.Write(runCtx, proto.RoomID{Type: "join", Room: a.room})
 		if dialed {
 			go p.servePath(runCtx, a, path)
 		}
 	}
-	return a, nil
+	return nil
 }
 
-func (p *Pairer) registerAttempt(role, wantRole string, secret identity.Secret, label, linkURL string, cancel context.CancelFunc, dialed bool, paths []*peer.Path) *pairAttempt {
+func (p *Pairer) registerAttempt(a *pairAttempt, cancel context.CancelFunc, dialed bool, paths []*peer.Path) {
 	routes := make([]peer.Route, len(paths))
 	for i, path := range paths {
 		routes[i] = path.Route()
 	}
-	self := proto.Pair{Type: "pair", Key: p.cfg.Key.ID(), Kind: "node", Name: label, Role: role}
-	self.MAC = secret.MAC(self)
-	a := &pairAttempt{
-		role: role, wantRole: wantRole, secret: secret, room: secret.Room(), label: label,
-		link:    PairLink{Link: linkURL, Expires: p.cfg.Now().Add(pairWindow).UnixMilli()},
-		rawSelf: dvlMustEncode(self), cancel: cancel, routes: routes, outcome: make(chan error, 1),
-	}
+	self := proto.Pair{Type: "pair", Key: p.cfg.Key.ID(), Kind: "node", Name: a.label, Role: a.role}
+	self.MAC = a.secret.MAC(self)
+	a.room, a.link.Expires = a.secret.Room(), p.cfg.Now().Add(pairWindow).UnixMilli()
+	a.rawSelf, a.cancel, a.routes, a.outcome = dvlMustEncode(self), cancel, routes, make(chan error, 1)
 	if dialed {
 		a.ownedPaths, a.pathsLeft = paths, len(paths)
 	}
 	p.mu.Lock()
 	p.attempts[a] = true
 	p.mu.Unlock()
-	return a
 }
 
 func (p *Pairer) dialPaths(ctx context.Context, urls []string) ([]*peer.Path, error) {
@@ -368,10 +345,11 @@ func (p *Pairer) dialPaths(ctx context.Context, urls []string) ([]*peer.Path, er
 }
 
 func (p *Pairer) servePath(ctx context.Context, a *pairAttempt, path *peer.Path) {
-	err := path.Serve(ctx, p.Peer, func(kind string, data []byte) error {
+	event := func(kind string, data []byte) error {
 		p.HandleEvent(ctx, path, kind, data)
 		return nil
-	})
+	}
+	err := path.Serve(ctx, p.Peer, event)
 	p.mu.Lock()
 	a.pathsLeft--
 	fail := a.pathsLeft == 0 && a.conn == nil
@@ -450,24 +428,32 @@ func pairLive(a *pairAttempt, now int64) bool {
 	return a != nil && !a.done && now < a.link.Expires
 }
 
-func (p *Pairer) finish(a *pairAttempt, err error) error {
-	p.mu.Lock()
-	if a.done {
-		first := a.err
-		p.mu.Unlock()
-		return first
+func (p *Pairer) finish(a *pairAttempt, err error) {
+	paths, ok := p.claimFinish(a)
+	if !ok {
+		return
 	}
-	a.done, a.err, a.secret = true, err, ""
-	delete(p.attempts, a)
-	paths := a.ownedPaths
-	a.ownedPaths, a.routes = nil, nil
-	p.mu.Unlock()
+	if err == nil && a.saveName != "" {
+		err = p.saveLabel(a.saveName)
+	}
 	a.cancel()
 	for _, path := range paths {
 		path.Close()
 	}
 	a.outcome <- err
-	return err
+}
+
+func (p *Pairer) claimFinish(a *pairAttempt) ([]*peer.Path, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if a.done {
+		return nil, false
+	}
+	a.done, a.secret = true, ""
+	delete(p.attempts, a)
+	paths := a.ownedPaths
+	a.ownedPaths, a.routes = nil, nil
+	return paths, true
 }
 
 func pairWebBase(webURL string, rvURLs []string) (string, error) {

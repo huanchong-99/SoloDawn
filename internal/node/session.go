@@ -99,26 +99,10 @@ func NewSessions(cfg SessionConfig) *Sessions {
 	return s
 }
 
-// PushOwner sends frame to every welcomed connection of this node's owner.
-func (s *Sessions) PushOwner(frame any) {
-	for _, c := range s.sesConns() {
-		if s.sesEnrolledOwner(c) {
-			c.send(frame)
-		}
-	}
-}
-
 func (s *Sessions) sesConns() []*sesConn {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return slices.Collect(maps.Keys(s.conns))
-}
-
-func (s *Sessions) sesEnrolledOwner(c *sesConn) bool {
-	s.mu.Lock()
-	welcomed := c.welcomed
-	s.mu.Unlock()
-	return welcomed && s.cfg.Logs.IsOwner(c.device)
 }
 
 func sesDefaultConfig(cfg SessionConfig) SessionConfig {

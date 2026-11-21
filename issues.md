@@ -8,9 +8,15 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-21 · limitation · `Sessions` has no `sync`, `fetch` or `ack` handlers until the home units and runtime wire them
 
-- Symptom: inbound `ctl` requests for `sync` and `fetch` are answered `bad_request` ("unknown ctl request") and `ack` pushes are dropped on a bare `Sessions` hub (`internal/node/session.go`, `NewSessions`) until runtime assembly wires the home handlers (`NewPairer` in `internal/node/pair.go` and `NewSurface` in `internal/node/surface.go` now register `pair.browser` with `Replays["pair.browser"]`, `host.info` and `settings.set`).
-- Cause: `Sessions` provides the `Requests`, `Pushes`, `Commands` and `Replays` tables, while `sync` (`HM-2`), `fetch` (`HM-3`), `ack` (`HM-7`) and runtime assembly (`N-4`, wiring `Surface`, `Pairer`, `HS-3` `Agents` and `HS-13` `Queued`) are separate units.
-- Status: resolved for `pair.browser`, `host.info` and `settings.set` in unit `N-3`; open for `sync`, `fetch`, `ack` and runtime assembly until `HM-2`, `HM-3`, `HM-7` and `N-4` populate those tables.
+- Symptom: inbound `ctl` requests for `sync` and `fetch` are answered `bad_request` ("unknown ctl request") and `ack` pushes are dropped on a bare `Sessions` hub (`internal/node/session.go`, `NewSessions`) until runtime assembly wires the home handlers (`NewPairer` in `internal/node/pair.go` and `NewSurface` in `internal/node/surface.go` register `pair.browser` with `Replays["pair.browser"]` and `host.info`). In a running node, `N-4` must also wire six pairing and surface duties: (1) pass inbound `ctl` connections through `Pairer.Serve` (`internal/node/pair.go:130`) rather than `Sessions.Serve`; (2) include `Pairer.Known` and `Pairer.Routes` (`internal/node/pair.go:115-126`) in `peer.New`'s known-device check and route lookup; (3) feed `joined`, `full` and `room` frames from the node's rendezvous paths to `Pairer.HandleEvent` (`internal/node/pair.go:146`) and return those paths from `PairConfig.Paths`; (4) set `Pairer.Peer` (`internal/node/pair.go:61`) after `peer.New`; (5) wire local socket `pair` to `Pairer.Pair` and `pair-browser` to `Pairer.PairBrowser`; and (6) set `SurfaceConfig.Agents` to `(*Host).Agents` (`HS-3`).
+- Cause: `Sessions` provides the `Requests`, `Pushes`, `Commands` and `Replays` tables, while `sync` (`HM-2`), `fetch` (`HM-3`), `ack` (`HM-7`) and runtime assembly (`N-4`) are separate units (`settings.set` is postponed with `U-12`).
+- Status: resolved for `pair.browser` and `host.info` in unit `N-3`; open for `sync`, `fetch`, `ack` and the six `N-4` wiring duties until `HM-2`, `HM-3`, `HM-7` and `N-4` land.
+
+### 2026-11-21 · limitation · `host.info` has no live push yet and reports `queued` as `0`
+
+- Symptom: `Surface` (`internal/node/surface.go`) answers `host.info` requests with `HostState` and sends no `host.info` pushes (no `host.info` push yet), and every `AgentGroup.Queued` entry in `host.info` is `0` (`internal/node/surface.go:154`).
+- Cause: `settings.set` is postponed with `U-12`, the 1.0 web client requests `host.info` on connect and after `agent.set`, and held items are held on the home (`not_before`, `HM-7`) rather than counted on the host.
+- Status: open, accepted for 1.0 (`N-3`).
 
 ### 2026-11-21 · limitation · `home.Loop` keeps the `Owner` it was started with across adoption
 
