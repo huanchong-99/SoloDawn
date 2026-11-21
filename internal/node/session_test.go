@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ type fakeCtl struct {
 	mu        sync.Mutex
 	failAfter int
 	sends     int
+	beforeOut func(frame any)
 }
 
 func newFakeCtl() *fakeCtl {
@@ -51,9 +53,13 @@ func (f *fakeCtl) Read(ctx context.Context) (json.RawMessage, error) {
 
 func (f *fakeCtl) Send(frame any) error {
 	f.mu.Lock()
+	hook := f.beforeOut
 	f.sends++
 	fail := f.failAfter > 0 && f.sends >= f.failAfter
 	f.mu.Unlock()
+	if hook != nil {
+		hook(frame)
+	}
 	if fail {
 		return errors.New("send failed")
 	}
@@ -129,14 +135,35 @@ func seedOwnedLogs(t *testing.T, db *store.Store, nodeKey, browserKey identity.K
 	return logs
 }
 
-func serveConn(t *testing.T, s *Sessions, device string, paired bool) *fakeCtl {
+func newTestHomeAndHost(t *testing.T, db *store.Store, nodeKey identity.Key, logs *Logs, now time.Time, cmds home.Table) (*home.Loop, *host.Host) {
+	t.Helper()
+	if cmds == nil {
+		cmds = home.Table{}
+	}
+	tables := home.Tables{Commands: cmds, Timers: home.Rules[home.Timer]{}, Events: home.Events, After: home.Rules[home.Hook]{}}
+	loop, err := home.StartLoop(home.LoopConfig{
+		Store: db, Home: nodeKey.ID(), Owner: logs.Owner(),
+		Logs: logs.Log, Tables: tables, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(loop.Close)
+	h, _, err := host.New(db, nodeKey, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return loop, h
+}
+
+func serveConnCtx(t *testing.T, ctx context.Context, s *Sessions, device string, paired bool) *fakeCtl {
 	t.Helper()
 	fc := newFakeCtl()
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		s.Serve(t.Context(), device, paired, fc)
+		s.Serve(ctx, device, paired, fc)
 	}()
 	t.Cleanup(func() {
 		fc.Close()
@@ -145,36 +172,55 @@ func serveConn(t *testing.T, s *Sessions, device string, paired bool) *fakeCtl {
 	return fc
 }
 
-func TestSessionDefaultsAndUnadmittedConnection(t *testing.T) {
+func serveConn(t *testing.T, s *Sessions, device string, paired bool) *fakeCtl {
+	t.Helper()
+	return serveConnCtx(t, t.Context(), s, device, paired)
+}
+
+func TestSessionDefaultsAndWelcomeOrdering(t *testing.T) {
 	db := sesOpenStore(t)
-	nodeKey, stranger := sesKey("node"), sesKey("stranger")
-	logs, err := OpenLogs(db, nodeKey.ID())
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs})
+	nodeKey, browserKey, b2Key := sesKey("node"), sesKey("browser"), sesKey("b2")
+	logs := seedOwnedLogs(t, db, nodeKey, browserKey)
+	now := time.UnixMilli(1763600000000)
+	loop, h := newTestHomeAndHost(t, db, nodeKey, logs, now, nil)
+
+	s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h})
 	s.cfg.Report(errors.New("logged default error"))
 
-	unadmitted := newFakeCtl()
-	s.Serve(t.Context(), stranger.ID(), false, unadmitted)
-	select {
-	case <-unadmitted.Done():
-	default:
-		t.Fatal("expected unadmitted connection to close")
+	fc := newFakeCtl()
+	e3 := sesAddEntry(browserKey, browserKey.ID(), 3, b2Key.ID(), "browser", "b2")
+	var injected sync.Once
+	fc.beforeOut = func(frame any) {
+		if _, isWelcome := frame.(proto.Welcome); isWelcome {
+			injected.Do(func() {
+				if err := logs.dvlReceive(proto.Devlog{Type: "devlog", User: browserKey.ID(), Entries: []proto.Envelope{e3}}, nil); err != nil {
+					t.Error(err)
+				}
+			})
+		}
 	}
-
-	sNilAddrs := NewSessions(SessionConfig{
-		ID: nodeKey.ID(), Store: db, Logs: logs,
-		Addrs: func() []string { return nil },
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.Serve(t.Context(), browserKey.ID(), false, fc)
+	}()
+	t.Cleanup(func() {
+		fc.Close()
+		wg.Wait()
 	})
-	fc := serveConn(t, sNilAddrs, stranger.ID(), true)
+
 	fc.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "b", Addrs: []string{}})
 	var w proto.Welcome
 	if err := proto.Decode(fc.next(t), &w); err != nil {
-		t.Fatal(err)
+		t.Fatalf("first frame was not welcome: %v", err)
 	}
-	if w.Version != Version || w.Name != "" || w.Addrs == nil || len(w.Addrs) != 0 || w.Owner {
+	if w.Version != Version || w.Name != "" || w.Addrs == nil || len(w.Addrs) != 0 || !w.Owner || w.Time <= 0 {
 		t.Fatalf("unexpected welcome: %+v", w)
+	}
+	var dl proto.Devlog
+	if err := proto.Decode(fc.next(t), &dl); err != nil || len(dl.Entries) != 3 {
+		t.Fatalf("expected 3-entry devlog after welcome, got %+v (%v)", dl, err)
 	}
 }
 
@@ -185,21 +231,25 @@ func TestFramingHelloAndBootstrapRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var adoptedOwner string
 	now := time.UnixMilli(1763600000000)
+	loop, h := newTestHomeAndHost(t, db, nodeKey, logs, now, nil)
+	var adoptCalls int
+	var adoptedOwner string
 	s := NewSessions(SessionConfig{
-		ID: nodeKey.ID(), Version: "v0.3.1", Store: db, Logs: logs,
+		ID: nodeKey.ID(), Version: "v0.3.1", Store: db, Logs: logs, Home: loop, Host: h,
 		Name:    func() string { return "workstation" },
 		Addrs:   func() []string { return []string{"wss://rv.example/rv"} },
 		Now:     func() time.Time { return now },
-		OnAdopt: func(owner string) { adoptedOwner = owner },
+		OnAdopt: func(owner string) { adoptCalls++; adoptedOwner = owner },
 	})
 	s.Requests["host.info"] = RequestHandler{
-		Owner: true, Type: "host.info",
+		Type: "host.info",
 		Run: func(context.Context, *home.Conn, Ctl, string, int64, json.RawMessage) (any, error) {
 			return map[string]any{"name": "workstation"}, nil
 		},
 	}
+	var pushSeen int
+	s.Pushes["ack"] = func(context.Context, *home.Conn, Ctl, string, json.RawMessage) { pushSeen++ }
 
 	fc := serveConn(t, s, browserKey.ID(), true)
 
@@ -213,8 +263,11 @@ func TestFramingHelloAndBootstrapRules(t *testing.T) {
 
 	fc.pushRaw(`{"t":"host.info","id":1}`)
 	expectErr(t, fc.next(t), 1, "forbidden")
-	fc.pushRaw(`{"t":"pty.resize","g":"` + string(sesID("g")) + `","ai":"` + string(sesID("ai")) + `","cols":80,"rows":24}`)
+	fc.push(proto.Ack{Type: "ack", Group: sesID("g"), Item: 1})
 	fc.expectNone(t)
+	if pushSeen != 0 {
+		t.Fatal("push ran before enrolment")
+	}
 
 	fc.pushRaw(`{"t":"hello","id":2}`)
 	expectErr(t, fc.next(t), 2, "bad_request")
@@ -239,18 +292,18 @@ func TestFramingHelloAndBootstrapRules(t *testing.T) {
 
 	fc.pushRaw(`{"t":"host.info","id":8}`)
 	expectErr(t, fc.next(t), 8, "forbidden")
+	fc.push(proto.Ack{Type: "ack", Group: sesID("g"), Item: 1})
+	if pushSeen != 0 {
+		t.Fatal("push ran while welcomed but not known in log")
+	}
 
 	fc.pushRaw(`{"t":"devlog","user":123}`)
 	fc.push(proto.Devlog{Type: "devlog", User: "bad", Entries: []proto.Envelope{{}}})
 	fc.push(proto.Devlog{Type: "devlog", User: browserKey.ID(), Entries: []proto.Envelope{{Payload: "{}", Key: browserKey.ID(), Signature: "bad"}}})
 
 	// Non-paired connection on an unowned node cannot trigger adoption.
-	logs.Keep(otherKey.ID())
-	o1 := sesAddEntry(otherKey, otherKey.ID(), 1, otherKey.ID(), "browser", "other")
-	if err := logs.Receive(proto.Devlog{Type: "devlog", User: otherKey.ID(), Entries: []proto.Envelope{o1}}); err != nil {
-		t.Fatal(err)
-	}
 	unpaired := serveConn(t, s, otherKey.ID(), false)
+	o1 := sesAddEntry(otherKey, otherKey.ID(), 1, otherKey.ID(), "browser", "other")
 	o2 := sesAddEntry(otherKey, otherKey.ID(), 2, nodeKey.ID(), "node", "workstation")
 	unpaired.push(proto.Devlog{Type: "devlog", User: otherKey.ID(), Entries: []proto.Envelope{o1, o2}})
 	unpaired.pushRaw(`{"t":"hello","id":1,"v":2}`)
@@ -279,13 +332,17 @@ func TestFramingHelloAndBootstrapRules(t *testing.T) {
 	if err := proto.Decode(fc.next(t), &w2); err != nil {
 		t.Fatal(err)
 	}
-	if !w2.Owner || adoptedOwner != browserKey.ID() {
-		t.Fatalf("expected owner=true after adoption: %+v, adopted=%s", w2, adoptedOwner)
+	if !w2.Owner || adoptedOwner != browserKey.ID() || adoptCalls != 1 {
+		t.Fatalf("expected owner=true after adoption: %+v, adopted=%s calls=%d", w2, adoptedOwner, adoptCalls)
 	}
 	var pushedLog proto.Devlog
 	if err := proto.Decode(fc.next(t), &pushedLog); err != nil || len(pushedLog.Entries) != 3 {
 		t.Fatalf("expected 3-entry devlog after welcome, got %+v (%v)", pushedLog, err)
 	}
+
+	// Subsequent devlog entry does not call OnAdopt a second time.
+	e4 := sesAddEntry(browserKey, browserKey.ID(), 4, sesKey("extra").ID(), "browser", "extra")
+	fc.push(proto.Devlog{Type: "devlog", User: browserKey.ID(), Entries: []proto.Envelope{e4}})
 
 	fc.pushRaw(`{"t":"unknown_push"}`)
 	fc.pushRaw(`{"t":"host.info","id":10}`)
@@ -296,50 +353,39 @@ func TestFramingHelloAndBootstrapRules(t *testing.T) {
 		OK   proto.True `json:"ok"`
 		Name string     `json:"name"`
 	}
-	if err := proto.Decode(raw, &hi); err != nil || hi.Type != "host.info" || hi.Re != 10 || hi.Name != "workstation" {
-		t.Fatalf("host.info answer = %s (%v)", raw, err)
+	if err := proto.Decode(raw, &hi); err != nil || hi.Type != "host.info" || hi.Re != 10 || hi.Name != "workstation" || adoptCalls != 1 {
+		t.Fatalf("host.info answer = %s (%v), adoptCalls=%d", raw, err, adoptCalls)
 	}
 }
 
-func TestHomeLoopIntegrationForwardingAndRevocation(t *testing.T) {
+func TestHomeLoopIntegrationAndDevlogForwarding(t *testing.T) {
 	db := sesOpenStore(t)
-	nodeKey, b1Key, b2Key, memberKey, hostKey := sesKey("node"), sesKey("b1"), sesKey("b2"), sesKey("member"), sesKey("aihost")
+	nodeKey, b1Key, b2Key, hostKey := sesKey("node"), sesKey("b1"), sesKey("b2"), sesKey("aihost")
 	logs := seedOwnedLogs(t, db, nodeKey, b1Key)
-	if _, err := logs.Append(sesAddEntry(b1Key, b1Key.ID(), 3, b2Key.ID(), "browser", "tablet")); err != nil {
-		t.Fatal(err)
-	}
-	logs.Keep(memberKey.ID())
-	m1 := sesAddEntry(memberKey, memberKey.ID(), 1, memberKey.ID(), "browser", "m-browser")
-	m2 := sesAddEntry(memberKey, memberKey.ID(), 2, hostKey.ID(), "node", "m-host")
-	if err := logs.Receive(proto.Devlog{Type: "devlog", User: memberKey.ID(), Entries: []proto.Envelope{m1, m2}}); err != nil {
+	e3 := sesAddEntry(b1Key, b1Key.ID(), 3, b2Key.ID(), "browser", "tablet")
+	e4 := sesAddEntry(b1Key, b1Key.ID(), 4, hostKey.ID(), "node", "ai-host")
+	if err := logs.dvlReceive(proto.Devlog{Type: "devlog", User: b1Key.ID(), Entries: []proto.Envelope{e3, e4}}, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	now := time.UnixMilli(1763600000000)
 	groupID := string(sesID("group1"))
-	tables := home.Tables{Commands: home.Table{}, Timers: home.Rules[home.Timer]{}, Events: home.Events, After: home.Rules[home.Hook]{}}
-	tables.Commands["group/create"] = func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-		grp := proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "Proj", Kind: "project", Home: s.Home, Checks: []string{}, Created: c.Now}
-		own := proto.HumanMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: "m-own"}, Group: s.ID, Kind: "human", User: b1Key.ID(), Name: "owner"}, Role: "owner"}
-		mem := proto.HumanMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: "m-mem"}, Group: s.ID, Kind: "human", User: memberKey.ID(), Name: "ally"}, Role: "member"}
-		ai := proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: "m-ai"}, Group: s.ID, Kind: "ai", User: memberKey.ID(), Name: "Codex"}, CLI: "codex", Host: hostKey.ID(), Account: "personal", Allow: []string{}, Approvers: []string{b1Key.ID()}, State: "waiting", Path: "direct"}
-		return home.Result{
-			Rows:          []home.Row{home.RowOf(grp), home.RowOf(own), home.RowOf(mem), home.RowOf(dvlRowOf(m1)), home.RowOf(dvlRowOf(m2)), home.RowOf(ai)},
-			Items:         []home.Item{{AI: "m-ai", Why: "mention"}},
-			GroupsChanged: true,
-		}, nil
+	cmds := home.Table{
+		"group/create": func(st *home.State, c home.Command) (home.Result, *home.Refusal) {
+			grp := proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: st.ID}, Name: "Proj", Kind: "project", Home: st.Home, Checks: []string{}, Created: c.Now}
+			own := proto.HumanMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: "m-own"}, Group: st.ID, Kind: "human", User: b1Key.ID(), Name: "owner"}, Role: "owner"}
+			ai := proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: "m-ai"}, Group: st.ID, Kind: "ai", User: b1Key.ID(), Name: "Codex"}, CLI: "codex", Host: hostKey.ID(), Account: "personal", Allow: []string{}, Approvers: []string{b1Key.ID()}, State: "waiting", Path: "direct"}
+			return home.Result{
+				Rows:          []home.Row{home.RowOf(grp), home.RowOf(own), home.RowOf(ai)},
+				Items:         []home.Item{{AI: "m-ai", Why: "mention"}},
+				GroupsChanged: true,
+			}, nil
+		},
 	}
-	loop, err := home.StartLoop(home.LoopConfig{
-		Store: db, Home: nodeKey.ID(), Owner: b1Key.ID(),
-		Logs: logs.Log, Tables: tables, Now: func() time.Time { return now },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(loop.Close)
+	loop, h := newTestHomeAndHost(t, db, nodeKey, logs, now, cmds)
 
 	acked := make(chan int64, 1) // single reader: this test
-	s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Now: func() time.Time { return now }})
+	s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h, Now: func() time.Time { return now }})
 	s.Requests["sync"] = RequestHandler{
 		Async: true,
 		Run: func(_ context.Context, conn *home.Conn, from Ctl, _ string, id int64, data json.RawMessage) (any, error) {
@@ -357,13 +403,11 @@ func TestHomeLoopIntegrationForwardingAndRevocation(t *testing.T) {
 			return nil, nil
 		},
 	}
-	s.Pushes["ack"] = PushHandler{
-		Run: func(_ context.Context, _ *home.Conn, _ Ctl, _ string, data json.RawMessage) {
-			var a proto.Ack
-			if proto.Decode(data, &a) == nil {
-				acked <- a.Item
-			}
-		},
+	s.Pushes["ack"] = func(_ context.Context, _ *home.Conn, _ Ctl, _ string, data json.RawMessage) {
+		var a proto.Ack
+		if proto.Decode(data, &a) == nil {
+			acked <- a.Item
+		}
 	}
 
 	c1 := serveConn(t, s, b1Key.ID(), false)
@@ -379,19 +423,6 @@ func TestHomeLoopIntegrationForwardingAndRevocation(t *testing.T) {
 	c2.next(t)
 	c2.next(t)
 
-	// Non-owner host before group exists gets only its own person's log (groups: []).
-	chEarly := serveConn(t, s, hostKey.ID(), false)
-	chEarly.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "early", Addrs: []string{}})
-	var wEarly proto.Welcome
-	if err := proto.Decode(chEarly.next(t), &wEarly); err != nil || wEarly.Owner || len(wEarly.Groups) != 0 {
-		t.Fatalf("early welcome: %+v (%v)", wEarly, err)
-	}
-	var dlEarly proto.Devlog
-	if err := proto.Decode(chEarly.next(t), &dlEarly); err != nil || dlEarly.User != memberKey.ID() {
-		t.Fatalf("early devlog: %+v (%v)", dlEarly, err)
-	}
-	chEarly.Close()
-
 	cmdPayload := fmt.Sprintf(`{"t":"group","op":"create","n":%q,"ts":%d,"g":%q}`, groupID, now.UnixMilli(), groupID)
 	c1.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 2}, Env: b1Key.Sign(cmdPayload)})
 	var createAns proto.Success
@@ -401,37 +432,29 @@ func TestHomeLoopIntegrationForwardingAndRevocation(t *testing.T) {
 	c1.next(t)
 	c2.next(t)
 
+	// Host hello receives welcome, owner devlog and queued inbox items; browser hello does not trigger Inbox.
 	ch := serveConn(t, s, hostKey.ID(), false)
-	ch.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "host", Name: "m-host", Addrs: []string{}})
+	ch.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "host", Name: "ai-host", Addrs: []string{}})
 	var wh proto.Welcome
-	if err := proto.Decode(ch.next(t), &wh); err != nil || wh.Owner || len(wh.Groups) != 1 || wh.Groups[0].Group != groupID {
+	if err := proto.Decode(ch.next(t), &wh); err != nil || !wh.Owner || len(wh.Groups) != 1 || wh.Groups[0].Group != groupID {
 		t.Fatalf("host welcome: %+v (%v)", wh, err)
 	}
-	ch.next(t)
 	ch.next(t)
 	inboxRaw := ch.next(t)
 	if !strings.Contains(string(inboxRaw), `"Why":"mention"`) {
 		t.Fatalf("expected inbox item on host hello, got %s", inboxRaw)
 	}
-
 	ch.push(proto.Sync{Request: proto.Request{Type: "sync", ID: 2}, Group: groupID, Since: 0, StateOnly: true})
 	var synced proto.Synced
 	if err := proto.Decode(ch.next(t), &synced); err != nil || synced.Re != 2 {
 		t.Fatalf("host sync = %+v (%v)", synced, err)
 	}
 	ch.push(proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 1})
-	ch.pushRaw(`{"t":"host.info","id":3}`)
-	expectErr(t, ch.next(t), 3, "forbidden")
-	ch.pushRaw(`{"t":"audit","id":4,"before":0,"limit":10}`)
-	expectErr(t, ch.next(t), 4, "forbidden")
-	hostCmdEnv := hostKey.Sign(fmt.Sprintf(`{"t":"pair.browser","n":%q,"ts":%d,"to":%q}`, sesID("hc"), now.UnixMilli(), nodeKey.ID()))
-	ch.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 5}, Env: hostCmdEnv})
-	expectErr(t, ch.next(t), 5, "forbidden")
 	if got := <-acked; got != 1 {
 		t.Fatalf("acked = %d, want 1", got)
 	}
 
-	// Pairing peer on an owned node receives only the owner's log after welcome.
+	// Pairing peer on an owned node receives the owner's log after welcome and on subsequent updates.
 	newPairKey := sesKey("newpair")
 	cPair := serveConn(t, s, newPairKey.ID(), true)
 	cPair.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "np", Addrs: []string{}})
@@ -444,48 +467,57 @@ func TestHomeLoopIntegrationForwardingAndRevocation(t *testing.T) {
 		t.Fatalf("pair devlog: %+v (%v)", dlPair, err)
 	}
 	cPair.expectNone(t)
-	cPair.Close()
 
-	// Unwelcomed connection does not receive forwarded devlogs; renaming b2 keeps c2 open.
+	// Unwelcomed owner connection is refused requests and gets no forwarded devlogs; welcomed peers get them.
 	cUnwelcomed := serveConn(t, s, b1Key.ID(), false)
-	renameB2 := sesAddEntry(b1Key, b1Key.ID(), 4, b2Key.ID(), "browser", "tablet-renamed")
+	cUnwelcomed.pushRaw(`{"t":"sync","id":77,"g":"` + groupID + `","since":0,"state_only":false}`)
+	expectErr(t, cUnwelcomed.next(t), 77, "forbidden")
+	renameB2 := sesAddEntry(b1Key, b1Key.ID(), 5, b2Key.ID(), "browser", "tablet-renamed")
 	c1.push(proto.Devlog{Type: "devlog", User: b1Key.ID(), Entries: []proto.Envelope{renameB2}})
-	var fwdB2 proto.Devlog
+	var fwdB2, fwdPair proto.Devlog
 	if err := proto.Decode(c2.next(t), &fwdB2); err != nil || len(fwdB2.Entries) != 1 {
 		t.Fatalf("expected rename devlog on c2, got %+v (%v)", fwdB2, err)
 	}
-	cUnwelcomed.expectNone(t)
-	cUnwelcomed.Close()
-	// Drain ch's forwarded devlog and device row from renameB2.
-	ch.next(t)
-	ch.next(t)
-
-	rev := sesRevokeEntry(b1Key, b1Key.ID(), 5, b2Key.ID())
-	c1.push(proto.Devlog{Type: "devlog", User: b1Key.ID(), Entries: []proto.Envelope{rev}})
-	select {
-	case <-c2.Done():
-	case <-time.After(time.Second):
-		t.Fatal("revoked browser connection did not close within 1s")
-	}
-	if got := string(c1.next(t)); !strings.Contains(got, `"t":"groups"`) {
-		t.Fatalf("expected groups push on c1, got %s", got)
+	if err := proto.Decode(cPair.next(t), &fwdPair); err != nil || len(fwdPair.Entries) != 1 {
+		t.Fatalf("expected rename devlog on cPair, got %+v (%v)", fwdPair, err)
 	}
 	c1.expectNone(t)
-	gotDevlog, gotDeviceRow, gotGroups := false, false, false
-	for range 3 {
+	cUnwelcomed.expectNone(t)
+	cUnwelcomed.Close()
+	cPair.Close()
+	gotHostDevlog, gotHostRow := false, false
+	for range 2 {
 		msg := string(ch.next(t))
 		if strings.Contains(msg, `"t":"devlog"`) {
-			gotDevlog = true
+			gotHostDevlog = true
 		}
 		if strings.Contains(msg, `"r":"device"`) {
-			gotDeviceRow = true
-		}
-		if strings.Contains(msg, `"t":"groups"`) {
-			gotGroups = true
+			gotHostRow = true
 		}
 	}
-	if !gotDevlog || !gotDeviceRow || !gotGroups {
-		t.Fatalf("host got devlog=%v deviceRow=%v groups=%v", gotDevlog, gotDeviceRow, gotGroups)
+	if !gotHostDevlog || !gotHostRow {
+		t.Fatalf("host frames: devlog=%v row=%v", gotHostDevlog, gotHostRow)
+	}
+
+	// Revoking b2 leaves c2 open (rule 10), stops forwarding devlogs to c2, and refuses requests on c2.
+	rev := sesRevokeEntry(b1Key, b1Key.ID(), 6, b2Key.ID())
+	c1.push(proto.Devlog{Type: "devlog", User: b1Key.ID(), Entries: []proto.Envelope{rev}})
+	if got := string(c2.next(t)); !strings.Contains(got, `"groups":[]`) {
+		t.Fatalf("expected empty groups push on revoked c2, got %s", got)
+	}
+	c2.expectNone(t)
+	c2.pushRaw(`{"t":"sync","id":9,"g":"` + groupID + `","since":0,"state_only":false}`)
+	expectErr(t, c2.next(t), 9, "forbidden")
+	c2.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 10}, V: 1, Kind: "browser", Name: "b2", Addrs: []string{}})
+	var wRev proto.Welcome
+	if err := proto.Decode(c2.next(t), &wRev); err != nil || wRev.Owner || len(wRev.Groups) != 0 {
+		t.Fatalf("revoked welcome: %+v (%v)", wRev, err)
+	}
+	c2.expectNone(t)
+	select {
+	case <-c2.Done():
+		t.Fatal("revoked connection should remain open")
+	default:
 	}
 
 	// Failing Send on attached home connection causes home.Conn.watch to call (*sesConn).Close.
@@ -501,71 +533,42 @@ func TestHomeLoopIntegrationForwardingAndRevocation(t *testing.T) {
 	}
 }
 
-func TestHostCommandsReceiptsAndHostSurfaceBridge(t *testing.T) {
+func TestHostCommandsReceiptsAndSurfaceBridge(t *testing.T) {
 	db := sesOpenStore(t)
-	nodeKey, browserKey, b2Key, memberKey := sesKey("node"), sesKey("browser"), sesKey("b2"), sesKey("member")
+	nodeKey, browserKey, b2Key := sesKey("node"), sesKey("browser"), sesKey("b2")
 	logs := seedOwnedLogs(t, db, nodeKey, browserKey)
-	if _, err := logs.Append(sesAddEntry(browserKey, browserKey.ID(), 3, b2Key.ID(), "browser", "b2")); err != nil {
-		t.Fatal(err)
-	}
-	logs.Keep(memberKey.ID())
-	if err := logs.Receive(proto.Devlog{Type: "devlog", User: memberKey.ID(), Entries: []proto.Envelope{sesAddEntry(memberKey, memberKey.ID(), 1, memberKey.ID(), "browser", "m")}}); err != nil {
+	e3 := sesAddEntry(browserKey, browserKey.ID(), 3, b2Key.ID(), "browser", "b2")
+	if err := logs.dvlReceive(proto.Devlog{Type: "devlog", User: browserKey.ID(), Entries: []proto.Envelope{e3}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	now := time.UnixMilli(1763600000000)
-	h, _, err := host.New(db, nodeKey, func() time.Time { return now })
-	if err != nil {
-		t.Fatal(err)
-	}
+	loop, h := newTestHomeAndHost(t, db, nodeKey, logs, now, nil)
 
-	var resized int
-	var agentSetCalls int
-	host.Surface["audit"] = func(_ context.Context, _ *host.Host, _ host.Owner, _ string, _ json.RawMessage) (any, error) {
-		return proto.AuditAnswer{Rows: []proto.AuditRow{{ID: 1, TS: now.UnixMilli(), What: "setting", Detail: "x"}}}, nil
-	}
-	host.Surface["pty.resize"] = func(_ context.Context, _ *host.Host, _ host.Owner, _ string, _ json.RawMessage) (any, error) {
-		resized++
-		return nil, nil
-	}
+	var agentSetCalls atomic.Int32
 	host.Surface["agent.set"] = func(_ context.Context, _ *host.Host, _ host.Owner, _ string, _ json.RawMessage) (any, error) {
-		agentSetCalls++
+		agentSetCalls.Add(1)
 		return nil, nil
 	}
-	t.Cleanup(func() {
-		delete(host.Surface, "audit")
-		delete(host.Surface, "pty.resize")
-		delete(host.Surface, "agent.set")
-	})
+	t.Cleanup(func() { delete(host.Surface, "agent.set") })
 
+	var reportMu sync.Mutex
 	var reported []error
 	s := NewSessions(SessionConfig{
-		ID: nodeKey.ID(), Store: db, Logs: logs, Host: h,
+		ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h,
 		Now:    func() time.Time { return now },
-		Report: func(err error) { reported = append(reported, err) },
+		Report: func(err error) { reportMu.Lock(); reported = append(reported, err); reportMu.Unlock() },
 	})
 
-	linkValid := true
-	pairCalls := 0
-	s.Commands["pair.browser"] = func(context.Context, Ctl, string, json.RawMessage) (any, error) {
-		pairCalls++
-		return map[string]any{"link": "https://example/#pair=SECRET", "expires": now.UnixMilli() + 600_000}, nil
-	}
-	s.Replays["pair.browser"] = func(context.Context, Ctl, string, string, json.RawMessage) (any, error) {
-		if !linkValid {
-			return nil, &Error{Code: "conflict", Message: "link expired"}
-		}
-		return map[string]any{"link": "https://example/#pair=SECRET", "expires": now.UnixMilli() + 600_000}, nil
-	}
-	s.Commands["takeover.start"] = func(context.Context, Ctl, string, json.RawMessage) (any, error) {
-		return nil, nil
-	}
-	refusalCalls := 0
+	var refusalCalls atomic.Int32
 	s.Commands["settings.set"] = func(context.Context, Ctl, string, json.RawMessage) (any, error) {
-		refusalCalls++
-		return nil, &Error{Code: "bad_request", Message: "no field set"}
+		refusalCalls.Add(1)
+		return nil, &host.Error{Code: "bad_request", Message: "no field set"}
 	}
 	s.Commands["host.offline"] = func(context.Context, Ctl, string, json.RawMessage) (any, error) {
 		return nil, errors.New("boom")
+	}
+	s.Commands["pair.browser"] = func(context.Context, Ctl, string, json.RawMessage) (any, error) {
+		return map[string]any{"t": "ignored", "link": "https://example/#pair=SECRET", "expires": now.UnixMilli() + 600_000}, nil
 	}
 
 	c := serveConn(t, s, browserKey.ID(), false)
@@ -577,38 +580,25 @@ func TestHostCommandsReceiptsAndHostSurfaceBridge(t *testing.T) {
 	expectErr(t, c.next(t), 2, "bad_request")
 	c.pushRaw(`{"t":"host.info","id":3}`)
 	expectErr(t, c.next(t), 3, "bad_request")
-	c.push(proto.Audit{Request: proto.Request{Type: "audit", ID: 4}, Before: 0, Limit: 10})
-	var auditAns proto.AuditAnswer
-	rawAudit := c.next(t)
-	if strings.Contains(string(rawAudit), `"t":`) {
-		t.Fatalf("audit answer must have no t field: %s", rawAudit)
-	}
-	if err := proto.Decode(rawAudit, &auditAns); err != nil || auditAns.Re != 4 || len(auditAns.Rows) != 1 {
-		t.Fatalf("audit answer = %s (%v)", rawAudit, err)
-	}
-	c.push(proto.PTYResize{Type: "pty.resize", Group: sesID("g"), AI: sesID("ai"), Cols: 120, Rows: 40})
 
 	c.pushRaw(`{"t":"cmd","id":10}`)
 	expectErr(t, c.next(t), 10, "bad_request")
 	wrongSigner := b2Key.Sign(fmt.Sprintf(`{"t":"agent.set","n":%q,"ts":%d,"to":%q}`, sesID("ws"), now.UnixMilli(), nodeKey.ID()))
 	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 11}, Env: wrongSigner})
 	expectErr(t, c.next(t), 11, "forbidden")
-	badSig := browserKey.Sign(fmt.Sprintf(`{"t":"agent.set","n":%q,"ts":0}`, sesID("bs")))
+	badSig := browserKey.Sign(fmt.Sprintf(`{"t":"agent.set","n":%q,"ts":0,"to":%q}`, sesID("bs"), nodeKey.ID()))
 	badSig.Signature = strings.Repeat("A", 86)
 	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 12}, Env: badSig})
 	expectErr(t, c.next(t), 12, "bad_sig")
-	badPayload := browserKey.Sign(`{"t":"agent.set","n":"not-an-id","ts":0}`)
+	badPayload := browserKey.Sign(fmt.Sprintf(`{"t":"agent.set","n":"not-an-id","ts":0,"to":%q}`, nodeKey.ID()))
 	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 13}, Env: badPayload})
 	expectErr(t, c.next(t), 13, "bad_request")
 	nonJSONPayload := browserKey.Sign(`not-json`)
 	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 130}, Env: nonJSONPayload})
-	expectErr(t, c.next(t), 130, "not_found")
-	missingToFresh := browserKey.Sign(fmt.Sprintf(`{"t":"agent.set","n":%q,"ts":%d}`, sesID("mtf"), now.UnixMilli()))
-	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 139}, Env: missingToFresh})
-	expectErr(t, c.next(t), 139, "not_for_me")
-	missingTo := browserKey.Sign(fmt.Sprintf(`{"t":"agent.set","n":%q,"ts":0}`, sesID("mt")))
-	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 14}, Env: missingTo})
-	expectErr(t, c.next(t), 14, "not_for_me")
+	expectErr(t, c.next(t), 130, "bad_request")
+	noGroupNoTo := browserKey.Sign(fmt.Sprintf(`{"t":"agent.set","n":%q,"ts":%d}`, sesID("ngnt"), now.UnixMilli()))
+	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 14}, Env: noGroupNoTo})
+	expectErr(t, c.next(t), 14, "bad_request")
 	wrongTo := browserKey.Sign(fmt.Sprintf(`{"t":"agent.set","n":%q,"ts":0,"to":%q}`, sesID("wt"), b2Key.ID()))
 	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 15}, Env: wrongTo})
 	expectErr(t, c.next(t), 15, "not_for_me")
@@ -619,13 +609,13 @@ func TestHostCommandsReceiptsAndHostSurfaceBridge(t *testing.T) {
 	exactBoundaryEnv := browserKey.Sign(fmt.Sprintf(`{"t":"agent.set","n":%q,"ts":%d,"to":%q}`, sesID("exact24h"), now.Add(-24*time.Hour).UnixMilli(), nodeKey.ID()))
 	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 17}, Env: exactBoundaryEnv})
 	var ok17 proto.Success
-	if err := proto.Decode(c.next(t), &ok17); err != nil || ok17.Re != 17 || agentSetCalls != 1 {
-		t.Fatalf("exact 24h = %+v (%v), calls=%d", ok17, err, agentSetCalls)
+	if err := proto.Decode(c.next(t), &ok17); err != nil || ok17.Re != 17 || agentSetCalls.Load() != 1 {
+		t.Fatalf("exact 24h = %+v (%v), calls=%d", ok17, err, agentSetCalls.Load())
 	}
 	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 18}, Env: exactBoundaryEnv})
 	var ok18 proto.Success
-	if err := proto.Decode(c.next(t), &ok18); err != nil || ok18.Re != 18 || agentSetCalls != 1 {
-		t.Fatalf("replayed agent.set = %+v (%v), calls=%d", ok18, err, agentSetCalls)
+	if err := proto.Decode(c.next(t), &ok18); err != nil || ok18.Re != 18 || agentSetCalls.Load() != 1 {
+		t.Fatalf("replayed agent.set = %+v (%v), calls=%d", ok18, err, agentSetCalls.Load())
 	}
 
 	refEnv := browserKey.Sign(fmt.Sprintf(`{"t":"settings.set","n":%q,"ts":%d,"to":%q}`, sesID("ref"), now.UnixMilli(), nodeKey.ID()))
@@ -633,86 +623,140 @@ func TestHostCommandsReceiptsAndHostSurfaceBridge(t *testing.T) {
 	expectErr(t, c.next(t), 19, "bad_request")
 	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 20}, Env: refEnv})
 	expectErr(t, c.next(t), 20, "bad_request")
-	if refusalCalls != 1 {
-		t.Fatalf("refusalCalls = %d, want 1", refusalCalls)
+	if refusalCalls.Load() != 1 {
+		t.Fatalf("refusalCalls = %d, want 1", refusalCalls.Load())
 	}
 
-	auditAsCmd := browserKey.Sign(fmt.Sprintf(`{"t":"audit","n":%q,"ts":%d,"to":%q}`, sesID("audcmd"), now.UnixMilli(), nodeKey.ID()))
-	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 21}, Env: auditAsCmd})
+	unknownHostCmd := browserKey.Sign(fmt.Sprintf(`{"t":"perm.set","n":%q,"ts":%d,"to":%q,"g":%q}`, sesID("perm1"), now.UnixMilli(), nodeKey.ID(), sesID("g")))
+	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 21}, Env: unknownHostCmd})
 	expectErr(t, c.next(t), 21, "bad_request")
-	permUnreg := browserKey.Sign(fmt.Sprintf(`{"t":"perm.set","n":%q,"ts":%d,"to":%q,"g":%q}`, sesID("perm1"), now.UnixMilli(), nodeKey.ID(), sesID("g")))
-	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 210}, Env: permUnreg})
-	expectErr(t, c.next(t), 210, "bad_request")
-	s.Commands["custom.host"] = func(context.Context, Ctl, string, json.RawMessage) (any, error) { return nil, nil }
-	customHost := browserKey.Sign(fmt.Sprintf(`{"t":"custom.host","n":%q,"ts":%d,"to":%q,"g":%q}`, sesID("ch1"), now.UnixMilli(), nodeKey.ID(), sesID("g")))
-	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 211}, Env: customHost})
-	var okCustom proto.Success
-	if err := proto.Decode(c.next(t), &okCustom); err != nil || okCustom.Re != 211 {
-		t.Fatalf("custom.host = %+v (%v)", okCustom, err)
-	}
-	homeWithTo := browserKey.Sign(fmt.Sprintf(`{"t":"post","n":%q,"ts":%d,"to":%q,"g":%q}`, sesID("hwt"), now.UnixMilli(), nodeKey.ID(), sesID("g")))
-	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 212}, Env: homeWithTo})
-	expectErr(t, c.next(t), 212, "not_found")
 
-	// Non-owner enrolled device cannot trigger owner push (pty.resize) or host commands.
-	cm := serveConn(t, s, memberKey.ID(), false)
-	cm.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "m", Addrs: []string{}})
-	cm.next(t)
-	cm.next(t)
-	cm.push(proto.PTYResize{Type: "pty.resize", Group: sesID("g"), AI: sesID("ai"), Cols: 80, Rows: 24})
-	cm.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 2}, Env: memberKey.Sign(fmt.Sprintf(`{"t":"agent.set","n":%q,"ts":%d,"to":%q}`, sesID("mhc"), now.UnixMilli(), nodeKey.ID()))})
-	expectErr(t, cm.next(t), 2, "forbidden")
-	cm.Close()
-
-	// Missing audit/pty.resize surface entries fail cleanly without panicking.
-	delete(host.Surface, "audit")
-	delete(host.Surface, "pty.resize")
-	c.push(proto.PTYResize{Type: "pty.resize", Group: sesID("g"), AI: sesID("ai"), Cols: 80, Rows: 24})
-	c.push(proto.Audit{Request: proto.Request{Type: "audit", ID: 213}, Before: 0, Limit: 10})
-	expectErr(t, c.next(t), 213, "bad_request")
-
-	homeNoLoop := browserKey.Sign(fmt.Sprintf(`{"t":"post","n":%q,"ts":%d,"g":%q}`, sesID("hnl"), now.UnixMilli(), sesID("g")))
-	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 22}, Env: homeNoLoop})
-	expectErr(t, c.next(t), 22, "not_found")
+	homeMissingGroup := browserKey.Sign(fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q}`, sesID("hnl"), now.UnixMilli(), sesID("g")))
+	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 22}, Env: homeMissingGroup})
+	expectErr(t, c.next(t), 22, "bad_request")
 
 	boomEnv := browserKey.Sign(fmt.Sprintf(`{"t":"host.offline","n":%q,"ts":%d,"to":%q}`, sesID("boom"), now.UnixMilli(), nodeKey.ID()))
 	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 23}, Env: boomEnv})
 	expectErr(t, c.next(t), 23, "internal")
+	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 231}, Env: boomEnv})
+	expectErr(t, c.next(t), 231, "internal")
 
-	pairNonce := sesID("pair1")
-	pairEnv := browserKey.Sign(fmt.Sprintf(`{"t":"pair.browser","n":%q,"ts":%d,"to":%q}`, pairNonce, now.UnixMilli(), nodeKey.ID()))
+	pairEnv := browserKey.Sign(fmt.Sprintf(`{"t":"pair.browser","n":%q,"ts":%d,"to":%q}`, sesID("pair1"), now.UnixMilli(), nodeKey.ID()))
 	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 24}, Env: pairEnv})
-	var pr1 proto.CmdResult
-	if err := proto.Decode(c.next(t), &pr1); err != nil || pr1.Link != "https://example/#pair=SECRET" || pairCalls != 1 {
-		t.Fatalf("pair.browser 1 = %+v (%v)", pr1, err)
+	rawPair := c.next(t)
+	var pr proto.CmdResult
+	if err := proto.Decode(rawPair, &pr); err != nil || pr.Re != 24 || pr.Link != "https://example/#pair=SECRET" || strings.Contains(string(rawPair), `"t":`) {
+		t.Fatalf("pair.browser = %s (%v)", rawPair, err)
 	}
-	var storedAnswer string
-	checkReceipt := func(tx *store.Tx) error {
-		return tx.QueryRow("SELECT answer FROM receipt WHERE k=? AND n=?", browserKey.ID(), string(pairNonce)).Scan(&storedAnswer)
-	}
-	if err := db.Write(checkReceipt); err != nil || strings.Contains(storedAnswer, "SECRET") || storedAnswer != `{"ok":true}` {
-		t.Fatalf("stored receipt leaked secret or wrong shape: %q (%v)", storedAnswer, err)
-	}
-	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 25}, Env: pairEnv})
-	var pr2 proto.CmdResult
-	if err := proto.Decode(c.next(t), &pr2); err != nil || pr2.Re != 25 || pr2.Link != pr1.Link || pairCalls != 1 {
-		t.Fatalf("pair.browser replay = %+v (%v), calls=%d", pr2, err, pairCalls)
-	}
-	linkValid = false
-	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 26}, Env: pairEnv})
-	expectErr(t, c.next(t), 26, "conflict")
 
-	tkEnv := browserKey.Sign(fmt.Sprintf(`{"t":"takeover.start","n":%q,"ts":%d,"to":%q,"g":%q,"member":%q}`, sesID("tk1"), now.UnixMilli(), nodeKey.ID(), sesID("g"), sesID("m")))
-	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 27}, Env: tkEnv})
-	var tkOK proto.Success
-	if err := proto.Decode(c.next(t), &tkOK); err != nil || tkOK.Re != 27 {
-		t.Fatalf("takeover.start 1 = %+v (%v)", tkOK, err)
+	reportMu.Lock()
+	numReported := len(reported)
+	reportMu.Unlock()
+	if numReported == 0 {
+		t.Fatal("expected internal error to be reported")
 	}
-	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 28}, Env: tkEnv})
-	expectErr(t, c.next(t), 28, "conflict")
+}
 
-	if resized != 1 || len(reported) == 0 {
-		t.Fatalf("resized=%d reported=%d", resized, len(reported))
+func TestBlockingHostCmdDoesNotHoldUpHomeCmdOrInflightDuplicate(t *testing.T) {
+	db := sesOpenStore(t)
+	nodeKey, b1Key, b2Key := sesKey("node"), sesKey("b1"), sesKey("b2")
+	logs := seedOwnedLogs(t, db, nodeKey, b1Key)
+	e3 := sesAddEntry(b1Key, b1Key.ID(), 3, b2Key.ID(), "browser", "b2")
+	if err := logs.dvlReceive(proto.Devlog{Type: "devlog", User: b1Key.ID(), Entries: []proto.Envelope{e3}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	now := time.UnixMilli(1763600000000)
+	groupID := string(sesID("grp-async"))
+	cmds := home.Table{
+		"group/create": func(st *home.State, c home.Command) (home.Result, *home.Refusal) {
+			grp := proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: st.ID}, Name: "Async", Kind: "project", Home: st.Home, Checks: []string{}, Created: c.Now}
+			own := proto.HumanMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: "m-own"}, Group: st.ID, Kind: "human", User: b1Key.ID(), Name: "owner"}, Role: "owner"}
+			return home.Result{Rows: []home.Row{home.RowOf(grp), home.RowOf(own)}}, nil
+		},
+	}
+	loop, h := newTestHomeAndHost(t, db, nodeKey, logs, now, cmds)
+	s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h, Now: func() time.Time { return now }})
+
+	started := make(chan struct{}) // single reader: this test
+	release := make(chan struct{})
+	var joinRuns atomic.Int32
+	s.Commands["host.join"] = func(_ context.Context, _ Ctl, by string, _ json.RawMessage) (any, error) {
+		if by == b1Key.ID() && joinRuns.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+		return nil, nil
+	}
+	var fastRuns atomic.Int32
+	s.Commands["settings.set"] = func(context.Context, Ctl, string, json.RawMessage) (any, error) {
+		fastRuns.Add(1)
+		return nil, nil
+	}
+
+	c1 := serveConn(t, s, b1Key.ID(), false)
+	c1.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "b1", Addrs: []string{}})
+	c1.next(t)
+	c1.next(t)
+
+	// 1. Send blocking host.join (id 2), wait until its handler is running.
+	sharedNonce := sesID("join-nonce")
+	joinEnv := b1Key.Sign(fmt.Sprintf(`{"t":"host.join","n":%q,"ts":%d,"to":%q}`, sharedNonce, now.UnixMilli(), nodeKey.ID()))
+	c1.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 2}, Env: joinEnv})
+	<-started
+
+	// 2. While host.join is blocked, send a home cmd (id 3) and a distinct host cmd (id 4) on the same connection.
+	createEnv := b1Key.Sign(fmt.Sprintf(`{"t":"group","op":"create","n":%q,"ts":%d,"g":%q}`, groupID, now.UnixMilli(), groupID))
+	c1.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 3}, Env: createEnv})
+	var homeAns proto.Success
+	if err := proto.Decode(c1.next(t), &homeAns); err != nil || homeAns.Re != 3 {
+		t.Fatalf("home cmd blocked behind host cmd: %+v (%v)", homeAns, err)
+	}
+
+	fastEnv := b1Key.Sign(fmt.Sprintf(`{"t":"settings.set","n":%q,"ts":%d,"to":%q}`, sesID("fast-nonce"), now.UnixMilli(), nodeKey.ID()))
+	c1.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 4}, Env: fastEnv})
+	var fastAns proto.Success
+	if err := proto.Decode(c1.next(t), &fastAns); err != nil || fastAns.Re != 4 || fastRuns.Load() != 1 {
+		t.Fatalf("distinct host cmd blocked behind inflight cmd: %+v (%v)", fastAns, err)
+	}
+
+	// 3. Different signer (b2) with the same nonce does not wait on b1's inflight entry.
+	c2 := serveConn(t, s, b2Key.ID(), false)
+	c2.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "b2", Addrs: []string{}})
+	c2.next(t)
+	c2.next(t)
+	b2SameNonce := b2Key.Sign(fmt.Sprintf(`{"t":"host.join","n":%q,"ts":%d,"to":%q}`, sharedNonce, now.UnixMilli(), nodeKey.ID()))
+	c2.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 5}, Env: b2SameNonce})
+	var b2Ans proto.Success
+	if err := proto.Decode(c2.next(t), &b2Ans); err != nil || b2Ans.Re != 5 {
+		t.Fatalf("different signer with same nonce blocked: %+v (%v)", b2Ans, err)
+	}
+
+	// 4. Duplicate (b1, sharedNonce) on a cancellable context exits cleanly on ctx cancellation.
+	cancelCtx, cancel := context.WithCancel(t.Context())
+	cCancel := serveConnCtx(t, cancelCtx, s, b1Key.ID(), false)
+	cCancel.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "bc", Addrs: []string{}})
+	cCancel.next(t)
+	cCancel.next(t)
+	cCancel.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 6}, Env: joinEnv})
+	time.Sleep(15 * time.Millisecond)
+	cancel()
+	cCancel.expectNone(t)
+
+	// 5. Duplicate (b1, sharedNonce) on c1 waits for the first run, then gets the stored receipt without re-running.
+	c1.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 7}, Env: joinEnv})
+	c1.expectNone(t)
+	close(release)
+
+	gotRe := map[int64]bool{}
+	for range 2 {
+		var ans proto.Success
+		if err := proto.Decode(c1.next(t), &ans); err != nil {
+			t.Fatal(err)
+		}
+		gotRe[ans.Re] = true
+	}
+	if !gotRe[2] || !gotRe[7] || joinRuns.Load() != 1 {
+		t.Fatalf("gotRe=%v joinRuns=%d, want {2,7} and 1 run", gotRe, joinRuns.Load())
 	}
 }
 
@@ -723,9 +767,10 @@ func TestSessionErrorAndEdgePaths(t *testing.T) {
 	t.Run("reply and answer encoding errors", func(t *testing.T) {
 		db := sesOpenStore(t)
 		logs := seedOwnedLogs(t, db, nodeKey, browserKey)
-		s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Now: func() time.Time { return now }, Report: func(error) {}})
+		loop, h := newTestHomeAndHost(t, db, nodeKey, logs, now, nil)
+		s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h, Now: func() time.Time { return now }, Report: func(error) {}})
 		s.Requests["wire_err"] = RequestHandler{Run: func(context.Context, *home.Conn, Ctl, string, int64, json.RawMessage) (any, error) {
-			return nil, &Error{Code: "busy", Message: "busy now"}
+			return nil, &host.Error{Code: "busy", Message: "busy now"}
 		}}
 		s.Requests["plain_err"] = RequestHandler{Run: func(context.Context, *home.Conn, Ctl, string, int64, json.RawMessage) (any, error) {
 			return nil, errors.New("unexpected")
@@ -762,7 +807,8 @@ func TestSessionErrorAndEdgePaths(t *testing.T) {
 	t.Run("receipt read and write failures", func(t *testing.T) {
 		db := sesOpenStore(t)
 		logs := seedOwnedLogs(t, db, nodeKey, browserKey)
-		s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Now: func() time.Time { return now }, Report: func(error) {}})
+		loop, h := newTestHomeAndHost(t, db, nodeKey, logs, now, nil)
+		s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h, Now: func() time.Time { return now }, Report: func(error) {}})
 		s.Commands["agent.set"] = func(context.Context, Ctl, string, json.RawMessage) (any, error) {
 			drop := func(tx *store.Tx) error { _, err := tx.Exec("DROP TABLE receipt"); return err }
 			if err := db.Write(drop); err != nil {
@@ -787,20 +833,21 @@ func TestSessionErrorAndEdgePaths(t *testing.T) {
 	t.Run("send failures on welcome and devlog", func(t *testing.T) {
 		db := sesOpenStore(t)
 		logs := seedOwnedLogs(t, db, nodeKey, browserKey)
-		s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Now: func() time.Time { return now }, Report: func(error) {}})
+		loop, h := newTestHomeAndHost(t, db, nodeKey, logs, now, nil)
+		s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h, Now: func() time.Time { return now }, Report: func(error) {}})
 
-		buildLogs := func([]proto.GroupSummary) []proto.Devlog { return logs.Frames(browserKey.ID()) }
+		onSent := func() []proto.Devlog { return logs.frames(browserKey.ID()) }
 		fc1 := newFakeCtl()
 		fc1.failAfter = 1
 		sc1 := &sesConn{device: browserKey.ID(), raw: fc1}
-		if err := sc1.Send(sesWelcome{welcome: proto.Welcome{Type: "welcome"}, build: buildLogs, sent: make(chan struct{})}); err == nil {
+		if err := sc1.Send(sesWelcome{welcome: proto.Welcome{Type: "welcome"}, onSent: onSent, sent: make(chan struct{})}); err == nil {
 			t.Fatal("expected welcome send error")
 		}
 
 		fc2 := newFakeCtl()
 		fc2.failAfter = 2
 		sc2 := &sesConn{device: browserKey.ID(), raw: fc2}
-		if err := sc2.Send(sesWelcome{welcome: proto.Welcome{Type: "welcome"}, build: buildLogs, sent: make(chan struct{})}); err == nil {
+		if err := sc2.Send(sesWelcome{welcome: proto.Welcome{Type: "welcome"}, onSent: onSent, sent: make(chan struct{})}); err == nil {
 			t.Fatal("expected devlog send error")
 		}
 
@@ -811,7 +858,8 @@ func TestSessionErrorAndEdgePaths(t *testing.T) {
 		c.mu.Lock()
 		c.failAfter = c.sends + 1
 		c.mu.Unlock()
-		if _, err := logs.Append(sesAddEntry(browserKey, browserKey.ID(), 3, sesKey("d3").ID(), "browser", "d3")); err != nil {
+		e3 := sesAddEntry(browserKey, browserKey.ID(), 3, sesKey("d3").ID(), "browser", "d3")
+		if err := logs.dvlReceive(proto.Devlog{Type: "devlog", User: browserKey.ID(), Entries: []proto.Envelope{e3}}, nil); err != nil {
 			t.Fatal(err)
 		}
 
@@ -829,8 +877,9 @@ func TestSessionErrorAndEdgePaths(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var errs int
-		s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Report: func(error) { errs++ }})
+		loop, h := newTestHomeAndHost(t, db, nodeKey, logs, now, nil)
+		var errs atomic.Int32
+		s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h, Report: func(error) { errs.Add(1) }})
 		drop := func(tx *store.Tx) error { _, err := tx.Exec("DROP TABLE device_log"); return err }
 		if err := db.Write(drop); err != nil {
 			t.Fatal(err)
@@ -842,13 +891,13 @@ func TestSessionErrorAndEdgePaths(t *testing.T) {
 		c.pushRaw(`{"t":"hello","id":98,"v":2}`)
 		expectErr(t, c.next(t), 98, "version")
 		logs.mu.Lock()
-		logs.owner, logs.kept[browserKey.ID()] = browserKey.ID(), true
+		logs.owner = browserKey.ID()
 		logs.mu.Unlock()
 		c.push(proto.Devlog{Type: "devlog", User: browserKey.ID(), Entries: []proto.Envelope{e1}})
 		c.pushRaw(`{"t":"hello","id":99,"v":2}`)
 		expectErr(t, c.next(t), 99, "version")
-		if errs != 2 {
-			t.Fatalf("expected 2 reported db errors, got %d", errs)
+		if errs.Load() != 2 {
+			t.Fatalf("expected 2 reported db errors, got %d", errs.Load())
 		}
 	})
 }

@@ -5,13 +5,13 @@ package features
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/cucumber/godog"
 	"github.com/huanchong-99/SoloDawn/internal/home"
+	"github.com/huanchong-99/SoloDawn/internal/host"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/node"
 	"github.com/huanchong-99/SoloDawn/internal/peer"
@@ -36,13 +36,11 @@ type nodeSessionWorld struct {
 	pairingDev string
 	mu         sync.Mutex
 	routes     map[string]*peer.Peer
-	lastErr    error
 
-	b1Key, b2Key, otherKey identity.Key
-	b1Conn, b2Conn         *peer.Connection
-	lastWelcome            proto.Welcome
-	cmdRuns                int
-	revokeSent             time.Time
+	b1Key, otherKey identity.Key
+	b1Conn          *peer.Connection
+	lastWelcome     proto.Welcome
+	cmdRuns         int
 }
 
 func nodeSessionSteps(sc *godog.ScenarioContext) {
@@ -60,14 +58,9 @@ func nodeSessionSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the browser sends a device log whose add entry for the node is signed by the pairing browser$`, w.sendValidAdoptionLog)
 	sc.Step(`^the browser sends hello again$`, func() error { return w.sendHello(w.b1Conn) })
 	sc.Step(`^host\.info and a host command succeed with a stored receipt$`, w.checkAdoptedSurfaceAndReceipt)
-
-	sc.Step(`^an owned node with two browsers of its owner connected over ctl$`, w.setupOwnedTwoBrowsers)
-	sc.Step(`^the first browser revokes the second browser in a devlog push$`, w.revokeSecondBrowser)
-	sc.Step(`^the second browser's connection closes within 1 second$`, w.checkSecondClosedFast)
-	sc.Step(`^the second browser's next connection attempt is refused with "([^"]*)"$`, w.checkNextAttemptRefused)
 }
 
-func (w *nodeSessionWorld) initRelayAndNode(paired bool) error {
+func (w *nodeSessionWorld) initRelayAndNode() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	w.ctx = ctx
 	w.cleanup(cancel)
@@ -83,7 +76,6 @@ func (w *nodeSessionWorld) initRelayAndNode(paired bool) error {
 	w.ice = relay.relay
 	w.nodeKey = exampleKey("n2-node")
 	w.b1Key = exampleKey("n2-browser-1")
-	w.b2Key = exampleKey("n2-browser-2")
 	w.otherKey = exampleKey("n2-other")
 
 	db, err := store.Open(":memory:")
@@ -98,13 +90,25 @@ func (w *nodeSessionWorld) initRelayAndNode(paired bool) error {
 		return err
 	}
 	w.logs = logs
+	loop, err := home.StartLoop(home.LoopConfig{
+		Store: db, Home: w.nodeKey.ID(), Owner: logs.Owner(),
+		Logs: logs.Log, Tables: home.NodeTables(), Now: func() time.Time { return w.now },
+	})
+	if err != nil {
+		return err
+	}
+	w.cleanup(loop.Close)
+	h, _, err := host.New(db, w.nodeKey, func() time.Time { return w.now })
+	if err != nil {
+		return err
+	}
 	w.sessions = node.NewSessions(node.SessionConfig{
-		ID: w.nodeKey.ID(), Version: "v0.3.1", Store: db, Logs: logs,
+		ID: w.nodeKey.ID(), Version: "v0.3.1", Store: db, Logs: logs, Home: loop, Host: h,
 		Name: func() string { return "workstation" },
 		Now:  func() time.Time { return w.now },
 	})
 	w.sessions.Requests["host.info"] = node.RequestHandler{
-		Owner: true, Type: "host.info",
+		Type: "host.info",
 		Run: func(context.Context, *home.Conn, node.Ctl, string, int64, json.RawMessage) (any, error) {
 			return map[string]any{"device": w.nodeKey.ID(), "name": "workstation"}, nil
 		},
@@ -116,9 +120,7 @@ func (w *nodeSessionWorld) initRelayAndNode(paired bool) error {
 		return nil, nil
 	}
 
-	if paired {
-		w.pairingDev = w.b1Key.ID()
-	}
+	w.pairingDev = w.b1Key.ID()
 	nodePeer, err := w.makePeer(w.nodeKey, func(dev string) bool {
 		w.mu.Lock()
 		logs, pDev := w.logs, w.pairingDev
@@ -178,13 +180,7 @@ func (w *nodeSessionWorld) deliverSignal(ctx context.Context, from, to string, e
 	route := peer.Route{ID: "loopback-relay", ICE: w.ice, Send: func(ctx context.Context, backTo string, ans proto.Envelope) error {
 		return w.deliverSignal(ctx, to, backTo, ans)
 	}}
-	err = target.Receive(ctx, route, proto.Route{Type: "from", Key: from, Env: rawEnv})
-	if err != nil {
-		w.mu.Lock()
-		w.lastErr = err
-		w.mu.Unlock()
-	}
-	return err
+	return target.Receive(ctx, route, proto.Route{Type: "from", Key: from, Env: rawEnv})
 }
 
 func isRelayCand(cand string) bool {
@@ -219,7 +215,7 @@ func (w *nodeSessionWorld) dialNode(clientKey identity.Key) (*peer.Peer, *peer.C
 }
 
 func (w *nodeSessionWorld) setupUnownedPairing() error {
-	if err := w.initRelayAndNode(true); err != nil {
+	if err := w.initRelayAndNode(); err != nil {
 		return err
 	}
 	_, conn, err := w.dialNode(w.b1Key)
@@ -316,98 +312,6 @@ func (w *nodeSessionWorld) checkAdoptedSurfaceAndReceipt() error {
 	w.mu.Unlock()
 	if runs != 1 {
 		return fmt.Errorf("host command ran %d times, want 1", runs)
-	}
-	return nil
-}
-
-func (w *nodeSessionWorld) setupOwnedTwoBrowsers() error {
-	if err := w.initRelayAndNode(false); err != nil {
-		return err
-	}
-	e1 := w.makeAdd(w.b1Key, w.b1Key.ID(), 1, w.b1Key.ID(), "browser", "b1")
-	e2 := w.makeAdd(w.b1Key, w.b1Key.ID(), 2, w.nodeKey.ID(), "node", "workstation")
-	e3 := w.makeAdd(w.b1Key, w.b1Key.ID(), 3, w.b2Key.ID(), "browser", "b2")
-	w.logs.Keep(w.b1Key.ID())
-	if err := w.logs.Receive(proto.Devlog{Type: "devlog", User: w.b1Key.ID(), Entries: []proto.Envelope{e1, e2, e3}}); err != nil {
-		return err
-	}
-	setOwner, err := json.Marshal(w.b1Key.ID())
-	if err != nil {
-		return err
-	}
-	putOwner := func(tx *store.Tx) error {
-		_, err := tx.Exec("INSERT INTO setting(key, value) VALUES('owner', ?)", string(setOwner))
-		return err
-	}
-	if err := w.db.Write(putOwner); err != nil {
-		return err
-	}
-	reloaded, err := node.OpenLogs(w.db, w.nodeKey.ID())
-	if err != nil {
-		return err
-	}
-	w.mu.Lock()
-	w.logs = reloaded
-	w.sessions = node.NewSessions(node.SessionConfig{
-		ID: w.nodeKey.ID(), Version: "v0.3.1", Store: w.db, Logs: reloaded,
-		Now: func() time.Time { return w.now },
-	})
-	w.mu.Unlock()
-
-	_, c1, err := w.dialNode(w.b1Key)
-	if err != nil {
-		return err
-	}
-	w.b1Conn = c1
-	if err := w.sendHello(w.b1Conn); err != nil {
-		return err
-	}
-	_, c2, err := w.dialNode(w.b2Key)
-	if err != nil {
-		return err
-	}
-	w.b2Conn = c2
-	return w.sendHello(w.b2Conn)
-}
-
-func (w *nodeSessionWorld) revokeSecondBrowser() error {
-	p, err := json.Marshal(proto.DeviceEntry{
-		PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: exampleID("revoke-b2"), Timestamp: w.now.UnixMilli()},
-		DeviceChange:  proto.DeviceChange{User: w.b1Key.ID(), Version: 4, Op: "revoke", Device: w.b2Key.ID()},
-	})
-	if err != nil {
-		return err
-	}
-	w.revokeSent = time.Now()
-	return w.b1Conn.Send(proto.Devlog{Type: "devlog", User: w.b1Key.ID(), Entries: []proto.Envelope{w.b1Key.Sign(string(p))}})
-}
-
-func (w *nodeSessionWorld) checkSecondClosedFast() error {
-	select {
-	case <-w.b2Conn.Done():
-		if elapsed := time.Since(w.revokeSent); elapsed > time.Second {
-			return fmt.Errorf("closed in %v, want within 1s", elapsed)
-		}
-		return nil
-	case <-time.After(time.Second):
-		return errors.New("second browser connection did not close within 1s")
-	}
-}
-
-func (w *nodeSessionWorld) checkNextAttemptRefused(wantCode string) error {
-	w.mu.Lock()
-	w.lastErr = nil
-	w.mu.Unlock()
-	p2, err := w.makePeer(w.b2Key, func(id string) bool { return id == w.nodeKey.ID() }, func(*peer.Connection) {})
-	if err != nil {
-		return err
-	}
-	_, err = p2.Offer(w.ctx, w.nodeKey.ID())
-	if err == nil {
-		return errors.New("expected offer from revoked browser to be refused")
-	}
-	if err.Error() != wantCode {
-		return fmt.Errorf("offer error = %q, want %q", err.Error(), wantCode)
 	}
 	return nil
 }

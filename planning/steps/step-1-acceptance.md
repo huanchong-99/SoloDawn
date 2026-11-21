@@ -42,8 +42,9 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   restarted; they reconnect without the rendezvous.
 - **A1.5** A test rendezvous that alters the description in transit causes
   the connection to be refused.
-- **A1.6** Revoking a browser closes its connection within 1 second; its
-  next attempt is refused.
+- **A1.6** Removed by the owner's decision of 2026-11-21 (no stolen-device
+  defence in code; revoking is postponed, and a lost device is handled outside
+  the product in the deployment guide).
 - **A1.7** When the relay quota is used up, an allocation that is already
   open stops forwarding, and `quota` reports it.
 - **A1.8** Six targets build with cgo disabled. Binary size and idle memory

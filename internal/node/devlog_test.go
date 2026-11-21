@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/huanchong-99/SoloDawn/internal/home"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
@@ -57,14 +56,14 @@ func sesOpenStore(t *testing.T) *store.Store {
 	return db
 }
 
-func TestOpenLogsAndReload(t *testing.T) {
+func TestOpenLogsReceiveAndReload(t *testing.T) {
 	db := sesOpenStore(t)
-	nodeKey, browserKey, laptopKey := sesKey("node"), sesKey("browser"), sesKey("laptop")
+	nodeKey, browserKey, laptopKey, otherKey := sesKey("node"), sesKey("browser"), sesKey("laptop"), sesKey("other")
 	logs, err := OpenLogs(db, nodeKey.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if logs.Owner() != "" || logs.IsOwner(browserKey.ID()) || logs.Known(browserKey.ID()) || logs.Log(browserKey.ID()) != nil || logs.Frames(browserKey.ID()) != nil {
+	if logs.Owner() != "" || logs.UserOf(browserKey.ID()) != "" || logs.IsOwner(browserKey.ID()) || logs.Known(browserKey.ID()) || logs.Log("") != nil || logs.Log(browserKey.ID()) != nil || logs.frames(browserKey.ID()) != nil {
 		t.Fatal("empty logs reported state")
 	}
 
@@ -81,22 +80,34 @@ func TestOpenLogsAndReload(t *testing.T) {
 	if second, err := logs.dvlAdopt(browserKey.ID(), cand, nil); err != nil || second {
 		t.Fatalf("second adopt = %v, %v", second, err)
 	}
-	if logs.Owner() != browserKey.ID() || !logs.IsOwner(browserKey.ID()) || !logs.IsOwner(nodeKey.ID()) || logs.IsOwner(laptopKey.ID()) {
+	if logs.Owner() != browserKey.ID() || logs.UserOf(browserKey.ID()) != browserKey.ID() || logs.UserOf(laptopKey.ID()) != "" || !logs.IsOwner(nodeKey.ID()) || logs.IsOwner(laptopKey.ID()) || logs.Log(otherKey.ID()) != nil {
 		t.Fatal("owner state mismatch")
 	}
 
-	e3 := sesAddEntry(nodeKey, browserKey.ID(), 3, laptopKey.ID(), "node", "laptop")
 	var changeCalls int
 	logs.mu.Lock()
 	logs.onChange = func(string, []proto.DeviceRow, bool, *sesConn) { changeCalls++ }
 	logs.mu.Unlock()
-	row, err := logs.Append(e3)
-	if err != nil || row.ID != browserKey.ID()+":3" || row.Kind != "node" || row.Name != "laptop" || changeCalls != 1 {
-		t.Fatalf("append = %+v, %v, calls=%d", row, err, changeCalls)
+
+	// Unrelated user, duplicate entries and gaps leave log unchanged without notifying.
+	o1 := sesAddEntry(otherKey, otherKey.ID(), 1, otherKey.ID(), "browser", "o")
+	if err := logs.dvlReceive(proto.Devlog{Type: "devlog", User: otherKey.ID(), Entries: []proto.Envelope{o1}}, nil); err != nil || logs.Known(otherKey.ID()) || changeCalls != 0 {
+		t.Fatalf("other user receive = %v, calls=%d", err, changeCalls)
 	}
-	dupRow, err := logs.Append(e3)
-	if err != nil || dupRow.ID != row.ID || changeCalls != 1 {
-		t.Fatalf("duplicate append = %+v, %v, calls=%d", dupRow, err, changeCalls)
+	if err := logs.dvlReceive(proto.Devlog{Type: "devlog", User: browserKey.ID(), Entries: []proto.Envelope{e1, e2}}, nil); err != nil || changeCalls != 0 {
+		t.Fatalf("duplicate receive = %v, calls=%d", err, changeCalls)
+	}
+
+	badGap := sesAddEntry(nodeKey, browserKey.ID(), 9, laptopKey.ID(), "node", "gap")
+	e3 := sesAddEntry(nodeKey, browserKey.ID(), 3, laptopKey.ID(), "node", "laptop")
+	if err := logs.dvlReceive(proto.Devlog{Type: "devlog", User: browserKey.ID(), Entries: []proto.Envelope{badGap, e3}}, nil); err != nil || changeCalls != 1 || !logs.IsOwner(laptopKey.ID()) {
+		t.Fatalf("receive after gap = %v, calls=%d", err, changeCalls)
+	}
+
+	revRaw := fmt.Sprintf(`{"t":"device","n":%q,"ts":1,"user":%q,"ver":4,"op":"revoke","dev":%q,"kind":"node","name":"ignored"}`, sesID("rev-extra"), browserKey.ID(), laptopKey.ID())
+	revRow := dvlRowOf(nodeKey.Sign(revRaw))
+	if revRow.Kind != "" || revRow.Name != "" || revRow.Op != "revoke" || revRow.ID != browserKey.ID()+":4" {
+		t.Fatalf("revoke row kept extra fields: %+v", revRow)
 	}
 
 	reloaded, err := OpenLogs(db, nodeKey.ID())
@@ -114,6 +125,17 @@ func TestOpenLogsAndReload(t *testing.T) {
 
 func TestOpenLogsErrors(t *testing.T) {
 	nodeKey, browserKey := sesKey("node"), sesKey("browser")
+	ownerJSON := string(dvlMustEncode(browserKey.ID()))
+	putOwner := func(db *store.Store) {
+		t.Helper()
+		put := func(tx *store.Tx) error {
+			_, err := tx.Exec("INSERT INTO setting(key, value) VALUES('owner', ?)", ownerJSON)
+			return err
+		}
+		if err := db.Write(put); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	t.Run("dropped setting table", func(t *testing.T) {
 		db := sesOpenStore(t)
@@ -142,25 +164,24 @@ func TestOpenLogsErrors(t *testing.T) {
 
 	t.Run("owner set before entries", func(t *testing.T) {
 		db := sesOpenStore(t)
-		ownerJSON := string(dvlMustEncode(browserKey.ID()))
-		put := func(tx *store.Tx) error {
-			_, err := tx.Exec("INSERT INTO setting(key, value) VALUES('owner', ?)", ownerJSON)
-			return err
-		}
-		if err := db.Write(put); err != nil {
-			t.Fatal(err)
-		}
+		putOwner(db)
 		logs, err := OpenLogs(db, nodeKey.ID())
-		if err != nil || logs.Owner() != browserKey.ID() || logs.IsOwner(browserKey.ID()) {
+		if err != nil || logs.Owner() != browserKey.ID() || logs.IsOwner(browserKey.ID()) || logs.Log(browserKey.ID()) != nil {
 			t.Fatalf("logs = %v, %v", logs, err)
 		}
-		if _, err := logs.Append(sesAddEntry(browserKey, browserKey.ID(), 1, browserKey.ID(), "browser", "b")); err != nil {
-			t.Fatalf("append to kept owner failed: %v", err)
+		e1 := sesAddEntry(browserKey, browserKey.ID(), 1, browserKey.ID(), "browser", "b")
+		if err := logs.dvlReceive(proto.Devlog{Type: "devlog", User: browserKey.ID(), Entries: []proto.Envelope{e1}}, nil); err != nil || !logs.IsOwner(browserKey.ID()) {
+			t.Fatalf("receive to empty owner log failed: %v", err)
+		}
+		reloaded1, err := OpenLogs(db, nodeKey.ID())
+		if err != nil || !reloaded1.IsOwner(browserKey.ID()) {
+			t.Fatalf("reload 1-entry owner log failed: %v", err)
 		}
 	})
 
 	t.Run("dropped device_log table", func(t *testing.T) {
 		db := sesOpenStore(t)
+		putOwner(db)
 		drop := func(tx *store.Tx) error { _, err := tx.Exec("DROP TABLE device_log"); return err }
 		if err := db.Write(drop); err != nil {
 			t.Fatal(err)
@@ -172,6 +193,7 @@ func TestOpenLogsErrors(t *testing.T) {
 
 	t.Run("corrupt device_log envelope", func(t *testing.T) {
 		db := sesOpenStore(t)
+		putOwner(db)
 		corrupt := func(tx *store.Tx) error {
 			_, err := tx.Exec("INSERT INTO device_log(user, ver, env) VALUES(?, 1, '{}')", browserKey.ID())
 			return err
@@ -186,6 +208,7 @@ func TestOpenLogsErrors(t *testing.T) {
 
 	t.Run("invalid device_log signature", func(t *testing.T) {
 		db := sesOpenStore(t)
+		putOwner(db)
 		bad := sesAddEntry(nodeKey, browserKey.ID(), 1, browserKey.ID(), "browser", "b")
 		raw := string(dvlMustEncode(bad))
 		put := func(tx *store.Tx) error {
@@ -199,77 +222,6 @@ func TestOpenLogsErrors(t *testing.T) {
 			t.Fatal("expected replay error")
 		}
 	})
-}
-
-func TestLogsAppendReceiveKeepAndUserOrder(t *testing.T) {
-	db := sesOpenStore(t)
-	nodeKey := sesKey("node")
-	logs, err := OpenLogs(db, nodeKey.ID())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	logs.Keep("not-a-device")
-	u1, u2, shared := sesKey("u1"), sesKey("u2"), sesKey("shared")
-	if u1.ID() > u2.ID() {
-		u1, u2 = u2, u1
-	}
-	logs.Keep(u2.ID())
-
-	if _, err := logs.Append(proto.Envelope{Payload: `{"user":123}`}); err != identity.BadRequest {
-		t.Fatalf("bad payload = %v", err)
-	}
-	if _, err := logs.Append(sesAddEntry(u1, "invalid", 1, u1.ID(), "browser", "b")); err != identity.BadRequest {
-		t.Fatalf("invalid user = %v", err)
-	}
-	if _, err := logs.Append(sesAddEntry(u1, u1.ID(), 1, u1.ID(), "browser", "b")); err != identity.UnknownDevice {
-		t.Fatalf("unkept user = %v", err)
-	}
-	if _, err := logs.Append(sesAddEntry(u2, u2.ID(), 2, u2.ID(), "browser", "b")); err == nil {
-		t.Fatal("expected gap error")
-	}
-
-	if err := logs.Receive(proto.Devlog{Type: "devlog", User: "bad", Entries: []proto.Envelope{{}}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := logs.Receive(proto.Devlog{Type: "devlog", User: u2.ID()}); err != nil {
-		t.Fatal(err)
-	}
-	if err := logs.Receive(proto.Devlog{Type: "devlog", User: u1.ID(), Entries: []proto.Envelope{sesAddEntry(u1, u1.ID(), 1, u1.ID(), "browser", "b")}}); err != nil {
-		t.Fatal(err)
-	}
-	if logs.Known(u1.ID()) {
-		t.Fatal("unkept user should be ignored")
-	}
-
-	badGap := sesAddEntry(u2, u2.ID(), 5, shared.ID(), "browser", "s")
-	g2 := sesAddEntry(u2, u2.ID(), 1, u2.ID(), "browser", "b2")
-	a2 := sesAddEntry(u2, u2.ID(), 2, shared.ID(), "browser", "shared")
-	if err := logs.Receive(proto.Devlog{Type: "devlog", User: u2.ID(), Entries: []proto.Envelope{badGap, g2, a2}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := logs.Receive(proto.Devlog{Type: "devlog", User: u2.ID(), Entries: []proto.Envelope{g2, a2}}); err != nil {
-		t.Fatal(err)
-	}
-
-	logs.Keep(u1.ID())
-	g1 := sesAddEntry(u1, u1.ID(), 1, u1.ID(), "browser", "b1")
-	a1 := sesAddEntry(u1, u1.ID(), 2, shared.ID(), "browser", "shared")
-	if err := logs.Receive(proto.Devlog{Type: "devlog", User: u1.ID(), Entries: []proto.Envelope{g1, a1}}); err != nil {
-		t.Fatal(err)
-	}
-	if got := logs.UserOf(shared.ID()); got != u1.ID() {
-		t.Fatalf("UserOf(shared) = %s, want lower %s", got, u1.ID())
-	}
-
-	revRaw := fmt.Sprintf(`{"t":"device","n":%q,"ts":1,"user":%q,"ver":3,"op":"revoke","dev":%q,"kind":"browser","name":"ignored"}`, sesID("rev-extra"), u1.ID(), shared.ID())
-	revRow, err := logs.Append(u1.Sign(revRaw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if revRow.Kind != "" || revRow.Name != "" || revRow.Op != "revoke" {
-		t.Fatalf("revoke row kept extra fields: %+v", revRow)
-	}
 }
 
 func TestLogsStoreWriteFailures(t *testing.T) {
@@ -315,18 +267,15 @@ func TestLogsStoreWriteFailures(t *testing.T) {
 		}
 	})
 
-	t.Run("append device_log write failure", func(t *testing.T) {
+	t.Run("receive device_log write failure", func(t *testing.T) {
 		db := sesOpenStore(t)
-		logs, err := OpenLogs(db, nodeKey.ID())
-		if err != nil {
-			t.Fatal(err)
-		}
-		logs.Keep(browserKey.ID())
+		logs := seedOwnedLogs(t, db, nodeKey, browserKey)
 		drop := func(tx *store.Tx) error { _, err := tx.Exec("DROP TABLE device_log"); return err }
 		if err := db.Write(drop); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := logs.Append(e1); err == nil {
+		e3 := sesAddEntry(browserKey, browserKey.ID(), 3, sesKey("d3").ID(), "browser", "d3")
+		if err := logs.dvlReceive(proto.Devlog{Type: "devlog", User: browserKey.ID(), Entries: []proto.Envelope{e3}}, nil); err == nil {
 			t.Fatal("expected error when device_log table is missing")
 		}
 	})
@@ -372,68 +321,5 @@ func TestBatchFramesExact60KiBBoundary(t *testing.T) {
 	}
 	if strings.Contains(string(dvlMustEncode(map[string]string{"x": "<&>"})), `\u003c`) {
 		t.Fatal("HTML characters were escaped")
-	}
-}
-
-func TestHomeDeviceEvent(t *testing.T) {
-	ownerKey, memberKey, strangerKey, devKey := sesKey("owner"), sesKey("member"), sesKey("stranger"), sesKey("dev2")
-	s := home.NewState("g1", sesKey("home").ID(), ownerKey.ID())
-	s.Group = proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: "g1"}, Name: "Website"}
-	s.People["m-member"] = proto.HumanMemberRow{
-		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: "m-member"}, User: memberKey.ID()},
-		Role:      "member",
-	}
-
-	if res := dvlHomeEvent(s, nil, 0, "wrong"); len(res.Rows) != 0 {
-		t.Fatal("expected empty result for wrong event type")
-	}
-	if res := dvlHomeEvent(s, nil, 0, []proto.DeviceRow{}); len(res.Rows) != 0 {
-		t.Fatal("expected empty result for empty slice")
-	}
-	strangerRow := dvlRowOf(sesAddEntry(strangerKey, strangerKey.ID(), 1, strangerKey.ID(), "browser", "s"))
-	if res := dvlHomeEvent(s, nil, 0, []proto.DeviceRow{strangerRow}); len(res.Rows) != 0 {
-		t.Fatal("expected empty result for unrelated user")
-	}
-
-	r1 := dvlRowOf(sesAddEntry(ownerKey, ownerKey.ID(), 1, ownerKey.ID(), "browser", "b"))
-	res := dvlHomeEvent(s, nil, 0, []proto.DeviceRow{r1})
-	if len(res.Rows) != 1 || res.GroupsChanged {
-		t.Fatalf("offline add result = %+v", res)
-	}
-	s.Commit(s.Seal(res))
-
-	s.Online[devKey.ID()] = true
-	r2 := dvlRowOf(sesAddEntry(ownerKey, ownerKey.ID(), 2, devKey.ID(), "browser", "b2"))
-	res = dvlHomeEvent(s, nil, 0, []proto.DeviceRow{r1, r2})
-	if len(res.Rows) != 1 || !res.GroupsChanged {
-		t.Fatalf("online add result = %+v", res)
-	}
-	s.Commit(s.Seal(res))
-
-	r3 := dvlRowOf(sesAddEntry(ownerKey, ownerKey.ID(), 3, devKey.ID(), "browser", "renamed"))
-	res = dvlHomeEvent(s, nil, 0, []proto.DeviceRow{r3})
-	if len(res.Rows) != 1 || res.GroupsChanged {
-		t.Fatalf("online rename result = %+v", res)
-	}
-	s.Commit(s.Seal(res))
-
-	neverKey := sesKey("never")
-	s.Online[neverKey.ID()] = true
-	r4 := dvlRowOf(sesRevokeEntry(ownerKey, ownerKey.ID(), 4, neverKey.ID()))
-	res = dvlHomeEvent(s, nil, 0, []proto.DeviceRow{r4})
-	if len(res.Rows) != 1 || res.GroupsChanged {
-		t.Fatalf("revoke never-added result = %+v", res)
-	}
-	s.Commit(s.Seal(res))
-
-	r5 := dvlRowOf(sesRevokeEntry(ownerKey, ownerKey.ID(), 5, devKey.ID()))
-	res = dvlHomeEvent(s, nil, 0, []proto.DeviceRow{r5})
-	if len(res.Rows) != 1 || !res.GroupsChanged {
-		t.Fatalf("online revoke result = %+v", res)
-	}
-
-	mRow := dvlRowOf(sesAddEntry(memberKey, memberKey.ID(), 1, memberKey.ID(), "browser", "m"))
-	if mRes := dvlHomeEvent(s, nil, 0, []proto.DeviceRow{mRow}); len(mRes.Rows) != 1 {
-		t.Fatalf("member row result = %+v", mRes)
 	}
 }
