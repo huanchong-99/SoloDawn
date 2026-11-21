@@ -129,6 +129,7 @@ does not.
 | `review.failed` | failed reviews since the task was created or a person last resumed or reassigned it from `failed`; the stop of R-63 counts it (`contracts/task-machine.md` row 7) |
 | `thread.rounds` | AI-to-AI exchanges since the last human message in the thread (R-60) |
 | `thread.last.text` | a preview: at most the first 200 characters of that message's text. A long message is cut here, never refused because of it |
+| `stats.started` | the time the task became active: when it was created, or, for a task created `queued`, when the merge of its last dependency released it (`contracts/task-machine.md` row 8) |
 | `stats.ended` | the time the task finished, or `null` |
 
 Optional:

@@ -176,7 +176,8 @@ The cards take the names that start with `card`, their tests too, and their test
 with `TestCard`. Device-log events (`ev_device.go`) take the names that start with `dev`, and their
 tests start with `TestDevice` and `dev`.
 The checks and reviews (`cmd_review.go`) take the names that start with `rev`, their tests too, and
-their test functions start with `TestReviewCmd`.
+their test functions start with `TestReviewCmd`. The merges and summaries (`cmd_merge.go`) take the
+names that start with `mrg`, their tests too, and their test functions start with `TestMerge`.
 
 ## The run loop
 
@@ -446,8 +447,20 @@ function that moves a task calls it and adds nothing to its rules.
   message, with the act as `cause`. Then the secretary gets `confirmed`, naming the brief, with
   the act as `cause`, after a `confirm` and after a `revise`; a group without a secretary gets
   none. A queued task gets its `assign` when the merge of its last dependency releases it (unit
-  HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
-  `c.Disk.Msg` reads.
+  HM-12), without a `cause` (2026-11-21 slimming A-3).
+
+## Merges and summaries
+
+`cmd_merge.go` holds `task` `merged` and `conflict` and `post` of kind `summary`
+([commands](../../planning/contracts/commands.md) 1.3 and 1.5;
+[messages](../../planning/contracts/messages.md) 2.5, 2.8 and 2.11;
+[task-machine](../../planning/contracts/task-machine.md) rows 8 and 9), under the keys
+`task/merged`, `task/conflict` and `post/summary`.
+
+When `task/merged` steps queued dependents through `OnReleased` (in sorted task id order), each
+task that becomes `active` gets `stats.started` set to `c.Now`
+([rows](../../planning/contracts/rows.md), section 4) so summary minutes count active work rather
+than dependency wait, and its `assign` item names its `task` message (`msg` equal to the task id).
 
 ## Task commands
 
@@ -574,8 +587,8 @@ it does this:
 ## Known limitations
 
 - The table of commands holds the groups, members, briefs, the task commands of HM-9, the four
-  kinds of `post` of HM-6, `note` and `forget`, the cards, and the checks and reviews, and no node
-  starts a loop yet: the remaining command files (including thread round counting in HM-13 and the
+  kinds of `post` of HM-6, `note` and `forget`, the cards, the checks and reviews, and the merges and
+  summaries, and no node starts a loop yet: the remaining command files (including thread round counting in HM-13 and the
   wake-up cap in HM-7) and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
@@ -640,6 +653,11 @@ acceptance tests A2.1 (message and item push across connected browsers and a hos
 task cards, wait recomputation and refusals, and `cmd_card_internal_test.go` covers `tskPending` on card rows,
 `cardChoiceOK`, `cardPoster` and `cardItems`. `features/home_card.feature` holds the home half of
 acceptance tests A4.1 and A4.2, decision priority and free-text override.
+
+`cmd_merge_test.go` sends `task/merged`, `task/conflict` and `post/summary` through
+`Commands.Apply` with fakes of `Receipts` and `Disk`, covering every refusal, boundary, card
+expiration and dependent task release. `features/home_merge.feature` holds the home half of
+acceptance tests A5.10 and A5.12 and dependent task release with `stats.started`.
 
 `ev_device_test.go` covers every branch and boundary of `Events["device"]`, including ignored event
 types, empty and non-owner slices, version boundaries and online/offline `GroupsChanged` transitions.
