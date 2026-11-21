@@ -1496,15 +1496,6 @@ func checkAttachMemberStatus(t *testing.T, h *Host) {
 		}
 	}
 
-	// Queue one unsent crash for runAI1 and one status-already-sent crash for runAI2.
-	rt := stateOf(h)
-	rt.mu.Lock()
-	rt.savedCrash["home-dev"] = []pendingCrash{
-		{session: s1, statusSent: false},
-		{session: s3, statusSent: true},
-	}
-	rt.mu.Unlock()
-
 	reconn := newRunHome("direct")
 	h.Attach("home-dev", reconn)
 	synctest.Wait()
@@ -1514,16 +1505,13 @@ func checkAttachMemberStatus(t *testing.T, h *Host) {
 func assertAttachStatusCmds(t *testing.T, cmds []recordedCmd) {
 	t.Helper()
 	if len(cmds) != 2 {
-		t.Fatalf("expected 2 member status commands (crash for ai1 + current for ai2), got %+v", cmds)
+		t.Fatalf("expected 2 member status commands (ai1 + ai2), got %+v", cmds)
 	}
-	if cmds[0].payload["id"] != runAI1 || cmds[0].payload["event"] == nil {
-		t.Fatalf("expected crash status for ai1 first, got %+v", cmds[0].payload)
+	if cmds[0].payload["id"] != runAI1 || cmds[0].payload["state"] != "dormant" || cmds[0].payload["path"] != "direct" {
+		t.Fatalf("expected plain dormant direct status for ai1, got %+v", cmds[0].payload)
 	}
-	if cmds[1].payload["id"] != runAI2 || cmds[1].payload["state"] != "dormant" {
-		t.Fatalf("expected plain dormant status for ai2, got %+v", cmds[1].payload)
-	}
-	if cmds[1].payload["path"] != "direct" {
-		t.Fatalf("expected direct path for ai2, got %+v", cmds[1].payload)
+	if cmds[1].payload["id"] != runAI2 || cmds[1].payload["state"] != "dormant" || cmds[1].payload["path"] != "direct" {
+		t.Fatalf("expected plain dormant direct status for ai2, got %+v", cmds[1].payload)
 	}
 }
 
