@@ -2,18 +2,14 @@ package host
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
-	"reflect"
-	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -67,9 +63,10 @@ func (codexDriver) Start(ctx context.Context, l Launch) (Process, error) {
 	if err != nil {
 		return nil, err
 	}
-	attrs := new(syscall.SysProcAttr)
-	cmd := codexCommand(ctx, l.Folder, append([]string{"app-server"}, flags...), runtime.GOOS == "windows", reflect.ValueOf(attrs).Elem())
-	cmd.SysProcAttr = attrs
+	cmd := exec.CommandContext(ctx, "codex", append([]string{"app-server"}, flags...)...)
+	cmd.Dir = l.Folder
+	detachTerminal(cmd)
+	cmd.WaitDelay = time.Second
 	stdin, stdout, err := startCodexCmd(cmd)
 	if err != nil {
 		return nil, err
@@ -84,7 +81,7 @@ func (codexDriver) Start(ctx context.Context, l Launch) (Process, error) {
 		events:    make(chan Event, 16),
 		ready:     make(chan struct{}),
 		nextID:    3,
-		asks:      map[string]codexPendingAsk{},
+		asks:      map[string]json.RawMessage{},
 		inputs:    map[string]json.RawMessage{},
 		files:     map[string]codexFileItem{},
 	}
@@ -93,11 +90,12 @@ func (codexDriver) Start(ctx context.Context, l Launch) (Process, error) {
 		Method: "initialize",
 		Params: map[string]any{"clientInfo": map[string]string{"name": "solodawn", "version": "1"}},
 	})
-	go p.readLoop(stdout, func() {
+	wait := func() {
 		stdout.Close()
 		cmd.Wait()
 		kill()
-	})
+	}
+	go p.readLoop(stdout, wait)
 	return p, nil
 }
 
@@ -121,11 +119,12 @@ func codexBaseFlags(l Launch) ([]string, error) {
 	}
 	timeout := fmt.Sprintf("%d", int64(l.ToolTimeout.Seconds()))
 	return []string{
-		"-c", "mcp_servers.solodawn.command=" + string(codexJSON(l.Shim[0])),
-		"-c", "mcp_servers.solodawn.args=" + string(codexJSON(l.Shim[1:])),
+		"-c", "mcp_servers.solodawn.command=" + marshalWire(l.Shim[0]),
+		"-c", "mcp_servers.solodawn.args=" + marshalWire(l.Shim[1:]),
 		"-c", `mcp_servers.solodawn.default_tools_approval_mode="approve"`,
 		"-c", "mcp_servers.solodawn.tool_timeout_sec=" + timeout,
 		"-c", "notify=[]",
+		"-c", "features.default_mode_request_user_input=true",
 	}, nil
 }
 
@@ -156,40 +155,9 @@ func codexThreadConfig(l Launch) map[string]any {
 	return cfg
 }
 
-// codexCommand configures process-group termination on Unix and taskkill tree
-// termination on Windows.
-func codexCommand(ctx context.Context, dir string, args []string, windows bool, fields reflect.Value) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "codex", args...)
-	cmd.Dir, cmd.WaitDelay = dir, time.Second
-	if windows {
-		cmd.Cancel = func() error { return cancelCodexWindows(cmd.Process.Pid) }
-		return cmd
-	}
-	fields.FieldByName("Setpgid").SetBool(true)
-	cmd.Cancel = func() error { return cancelCodexUnix(cmd.Process.Pid) }
-	return cmd
-}
-
-func cancelCodexWindows(pid int) error {
-	return exec.Command("taskkill.exe", "/f", "/t", "/pid", fmt.Sprint(pid)).Run()
-}
-
-func cancelCodexUnix(pid int) error {
-	proc, _ := os.FindProcess(-pid)
-	return proc.Kill()
-}
-
-func codexJSON(v any) []byte {
-	var raw bytes.Buffer
-	encoder := json.NewEncoder(&raw)
-	encoder.SetEscapeHTML(false)
-	encoder.Encode(v)
-	return bytes.TrimSuffix(raw.Bytes(), []byte("\n"))
-}
-
 // codexProcess drives one running codex app-server child.
 // wmu guards stdin and closed; mu guards protocol, turn, approval, user-input
-// and usage state. The two locks are never nested.
+// and file-change state. The two locks are never nested.
 type codexProcess struct {
 	launch    Launch
 	sandbox   string
@@ -214,10 +182,7 @@ type codexProcess struct {
 	turnActive       bool
 	turnID           string
 	interruptPending bool
-	turnTokens       *int64
-	windowPct        *float64
-	windowResets     *int64
-	asks             map[string]codexPendingAsk
+	asks             map[string]json.RawMessage
 	inputs           map[string]json.RawMessage
 	files            map[string]codexFileItem
 }
@@ -240,19 +205,19 @@ func (p *codexProcess) send(v any) error {
 	if p.closed {
 		return errCodexClosed
 	}
-	line := append(codexJSON(v), '\n')
-	_, err := p.stdin.Write(line)
+	_, err := p.stdin.WriteString(marshalWire(v) + "\n")
 	return err
 }
 
 func (p *codexProcess) finishReady(threadID string, err error) {
-	p.readyOnce.Do(func() {
+	done := func() {
 		p.mu.Lock()
 		p.threadID = threadID
 		p.startErr = err
 		p.mu.Unlock()
 		close(p.ready)
-	})
+	}
+	p.readyOnce.Do(done)
 }
 
 func (p *codexProcess) Turn(text string) error {
@@ -270,7 +235,7 @@ func (p *codexProcess) Turn(text string) error {
 		},
 	}
 	if err := p.send(req); err != nil {
-		p.abortTurn()
+		p.finishTurn()
 		return err
 	}
 	return nil
@@ -291,12 +256,11 @@ func (p *codexProcess) beginTurn() (int64, string, error) {
 	p.turnActive = true
 	p.turnID = ""
 	p.interruptPending = false
-	p.turnTokens = nil
 	clear(p.files)
 	return id, p.threadID, nil
 }
 
-func (p *codexProcess) abortTurn() {
+func (p *codexProcess) finishTurn() {
 	p.mu.Lock()
 	p.resetTurnLocked()
 	p.mu.Unlock()
@@ -307,7 +271,6 @@ func (p *codexProcess) resetTurnLocked() {
 	p.turnActive = false
 	p.turnID = ""
 	p.interruptPending = false
-	p.turnTokens = nil
 	clear(p.asks)
 	clear(p.inputs)
 	clear(p.files)
@@ -339,24 +302,32 @@ func (p *codexProcess) sendInterrupt(id int64, threadID, turnID string) error {
 	})
 }
 
-func takeCodexPending[V any](mu *sync.Mutex, table map[string]V, id string) (V, bool) {
+func takeCodexPending(mu *sync.Mutex, table map[string]json.RawMessage, id string) (json.RawMessage, bool) {
 	mu.Lock()
-	entry, ok := table[id]
+	rawID, ok := table[id]
 	delete(table, id)
 	mu.Unlock()
-	return entry, ok
+	return rawID, ok
+}
+
+func (p *codexProcess) recordPending(table map[string]json.RawMessage, rawID json.RawMessage) string {
+	askID := fmt.Sprintf("%x:%s", p.startedNs, rawID)
+	p.mu.Lock()
+	table[askID] = rawID
+	p.mu.Unlock()
+	return askID
 }
 
 func (p *codexProcess) Answer(ask string, allow bool) error {
-	entry, ok := takeCodexPending(&p.mu, p.asks, ask)
+	rawID, ok := takeCodexPending(&p.mu, p.asks, ask)
 	if !ok {
 		return fmt.Errorf("codex: unknown approval request %q", ask)
 	}
-	chosen := entry.deny
+	decision := "decline"
 	if allow {
-		chosen = entry.allow
+		decision = "accept"
 	}
-	return p.send(codexRPCResult{ID: entry.id, Result: chosen})
+	return p.send(codexRPCResult{ID: rawID, Result: map[string]string{"decision": decision}})
 }
 
 func (p *codexProcess) replyUserInput(askID string, answers map[string][]string) error {
@@ -534,14 +505,7 @@ func (p *codexProcess) handleNotification(msg codexMessage) {
 	if p.isTurnActive() {
 		p.events <- Event{Kind: Active}
 	}
-	switch msg.Method {
-	case "thread/tokenUsage/updated":
-		p.onTokenUsage(msg.Params)
-	case "account/rateLimits/updated":
-		p.onRateLimits(msg.Params)
-	default:
-		p.onItemNotification(msg.Method, msg.Params)
-	}
+	p.onItemNotification(msg.Method, msg.Params)
 }
 
 func (p *codexProcess) onItemNotification(method string, raw json.RawMessage) {
@@ -561,150 +525,28 @@ func (p *codexProcess) onItemNotification(method string, raw json.RawMessage) {
 	p.files[note.Item.ID] = note.Item
 }
 
-func (p *codexProcess) onTokenUsage(raw json.RawMessage) {
-	var note codexTokenParams
-	if json.Unmarshal(raw, &note) != nil {
-		return
-	}
-	usage, ok := p.addTurnTokens(note.TurnID, note.TokenUsage.Last.TotalTokens)
-	if ok {
-		p.events <- Event{Kind: Used, Usage: usage}
-	}
-}
-
-func (p *codexProcess) addTurnTokens(turnID string, delta int64) (Usage, bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.turnID == "" || turnID != p.turnID {
-		return Usage{}, false
-	}
-	var next int64
-	if p.turnTokens != nil {
-		next = *p.turnTokens
-	}
-	next += delta
-	p.turnTokens = new(next)
-	return Usage{
-		Tokens:       new(next),
-		WindowPct:    cloneCodexPtr(p.windowPct),
-		WindowResets: cloneCodexPtr(p.windowResets),
-	}, true
-}
-
-func (p *codexProcess) onRateLimits(raw json.RawMessage) {
-	var note struct {
-		RateLimits codexRateLimits `json:"rateLimits"`
-	}
-	if json.Unmarshal(raw, &note) != nil {
-		return
-	}
-	usage, resets, hasWindow, limited := p.updateRateLimits(note.RateLimits)
-	if hasWindow {
-		p.events <- Event{Kind: Used, Usage: usage}
-	}
-	if limited {
-		p.events <- Event{Kind: RateLimited, Resets: resets}
-	}
-}
-
-func (p *codexProcess) updateRateLimits(rl codexRateLimits) (Usage, int64, bool, bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	win := selectRateWindow(rl.Primary, rl.Secondary)
-	var usage Usage
-	if win != nil {
-		p.windowPct = new(win.UsedPercent)
-		p.windowResets = codexWindowResetsMs(win.ResetsAt)
-		usage = Usage{
-			WindowPct:    cloneCodexPtr(p.windowPct),
-			WindowResets: cloneCodexPtr(p.windowResets),
-		}
-	}
-	var resets int64
-	if p.windowResets != nil {
-		resets = *p.windowResets
-	}
-	return usage, resets, win != nil, codexRateLimited(rl, win)
-}
-
-func selectRateWindow(primary, secondary *codexLimitWindow) *codexLimitWindow {
-	if primary == nil {
-		return secondary
-	}
-	if secondary != nil && secondary.UsedPercent > primary.UsedPercent {
-		return secondary
-	}
-	return primary
-}
-
-func codexWindowResetsMs(sec *int64) *int64 {
-	if sec == nil {
-		return nil
-	}
-	return new(*sec * 1000)
-}
-
-func codexRateLimited(rl codexRateLimits, win *codexLimitWindow) bool {
-	if win != nil && win.UsedPercent >= 100 {
-		return true
-	}
-	return rl.RateLimitReachedType != "" || rl.SpendControlReached
-}
-
 func (p *codexProcess) onTurnCompleted(raw json.RawMessage) {
 	var note codexTurnCompleted
 	if json.Unmarshal(raw, &note) != nil {
 		return
 	}
-	usage, resets := p.finishTurn()
+	p.finishTurn()
 	var errText string
 	if note.Turn.Error != nil {
 		errText = note.Turn.Error.Message
-		p.emitTurnError(note.Turn.Error.CodexErrorInfo, errText, resets)
+		if isCodexTurnAuthError(note.Turn.Error.CodexErrorInfo) {
+			p.events <- Event{Kind: LoginInvalid, Text: errText}
+		}
 	}
-	p.events <- Event{Kind: TurnEnded, Status: note.Turn.Status, Usage: usage, Text: errText}
+	p.events <- Event{Kind: TurnEnded, Status: note.Turn.Status, Text: errText}
 }
 
-func (p *codexProcess) finishTurn() (Usage, int64) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	usage := Usage{
-		Tokens:       cloneCodexPtr(p.turnTokens),
-		WindowPct:    cloneCodexPtr(p.windowPct),
-		WindowResets: cloneCodexPtr(p.windowResets),
-	}
-	var resets int64
-	if p.windowResets != nil {
-		resets = *p.windowResets
-	}
-	p.resetTurnLocked()
-	return usage, resets
-}
-
-func (p *codexProcess) emitTurnError(info json.RawMessage, text string, resets int64) {
-	switch codexTurnErrorKind(info) {
-	case LoginInvalid:
-		p.events <- Event{Kind: LoginInvalid, Text: text}
-	case RateLimited:
-		p.events <- Event{Kind: RateLimited, Resets: resets}
-	}
-}
-
-func codexTurnErrorKind(info json.RawMessage) EventKind {
+func isCodexTurnAuthError(info json.RawMessage) bool {
 	var code string
 	if json.Unmarshal(info, &code) == nil {
-		if code == "unauthorized" {
-			return LoginInvalid
-		}
-		if code == "usageLimitExceeded" {
-			return RateLimited
-		}
-		return ""
+		return code == "unauthorized"
 	}
-	if codexHTTPStatus(info) == 401 {
-		return LoginInvalid
-	}
-	return ""
+	return codexHTTPStatus(info) == 401
 }
 
 func codexHTTPStatus(info json.RawMessage) int {
@@ -726,12 +568,10 @@ func (p *codexProcess) handleRequest(msg codexMessage) {
 		p.onCommandApproval(msg.ID, msg.Params)
 	case "item/fileChange/requestApproval":
 		p.onFileApproval(msg.ID, msg.Params)
-	case "item/permissions/requestApproval":
-		p.onPermissionsApproval(msg.ID, msg.Params)
 	case "item/tool/requestUserInput":
 		p.onUserInputRequest(msg.ID, msg.Params)
 	default:
-		p.declineRequest(msg.ID, msg.Method)
+		p.declineRequest(msg.ID)
 	}
 }
 
@@ -742,11 +582,11 @@ func (p *codexProcess) onCommandApproval(rawID, raw json.RawMessage) {
 		Reason  string `json:"reason"`
 	}
 	if json.Unmarshal(raw, &req) != nil {
-		p.declineRequest(rawID, "")
+		p.declineRequest(rawID)
 		return
 	}
-	input := codexJSON(codexCommandInput{Command: req.Command, Cwd: req.Cwd})
-	ask := p.registerDecisionAsk(rawID, Ask{
+	input := json.RawMessage(marshalWire(codexCommandInput{Command: req.Command, Cwd: req.Cwd}))
+	ask := p.registerAsk(rawID, Ask{
 		Tool:     "commandExecution",
 		Category: "command",
 		Command:  req.Command,
@@ -762,7 +602,7 @@ func (p *codexProcess) onFileApproval(rawID, raw json.RawMessage) {
 		Reason string `json:"reason"`
 	}
 	if json.Unmarshal(raw, &req) != nil {
-		p.declineRequest(rawID, "")
+		p.declineRequest(rawID)
 		return
 	}
 	item := p.lookupFileItem(req.ItemID)
@@ -772,7 +612,7 @@ func (p *codexProcess) onFileApproval(rawID, raw json.RawMessage) {
 	}
 	var changes []codexFileChange
 	json.Unmarshal(input, &changes)
-	ask := p.registerDecisionAsk(rawID, Ask{
+	ask := p.registerAsk(rawID, Ask{
 		Tool:     "fileChange",
 		Category: "file",
 		Command:  formatFileChanges(changes),
@@ -782,48 +622,13 @@ func (p *codexProcess) onFileApproval(rawID, raw json.RawMessage) {
 	p.events <- Event{Kind: Asked, Ask: ask}
 }
 
-func (p *codexProcess) onPermissionsApproval(rawID, raw json.RawMessage) {
-	var req struct {
-		Permissions json.RawMessage `json:"permissions"`
-		Reason      string          `json:"reason"`
-	}
-	if json.Unmarshal(raw, &req) != nil {
-		p.declineRequest(rawID, "item/permissions/requestApproval")
-		return
-	}
-	var fields map[string]json.RawMessage
-	json.Unmarshal(req.Permissions, &fields)
-	if fields == nil {
-		p.declineRequest(rawID, "item/permissions/requestApproval")
-		return
-	}
-	var compact bytes.Buffer
-	json.Compact(&compact, req.Permissions)
-	perms := json.RawMessage(compact.Bytes())
-	ask := p.registerAsk(rawID, Ask{
-		Tool:     "permissions",
-		Category: codexPermissionsCategory(fields),
-		Command:  string(perms),
-		Why:      req.Reason,
-		Input:    perms,
-	}, map[string]any{"permissions": perms}, map[string]any{"permissions": map[string]any{}})
-	p.events <- Event{Kind: Asked, Ask: ask}
-}
-
-func codexPermissionsCategory(fields map[string]json.RawMessage) string {
-	if netRaw, ok := fields["network"]; ok && string(netRaw) != "null" {
-		return "network"
-	}
-	return "file"
-}
-
 func (p *codexProcess) onUserInputRequest(rawID, raw json.RawMessage) {
 	var req codexUserInputParams
 	if json.Unmarshal(raw, &req) != nil || !validCodexQuestions(req.Questions) {
-		p.declineRequest(rawID, "item/tool/requestUserInput")
+		p.declineRequest(rawID)
 		return
 	}
-	askID := p.registerUserInput(rawID)
+	askID := p.recordPending(p.inputs, rawID)
 	reply := func(answers map[string][]string) error {
 		return p.replyUserInput(askID, answers)
 	}
@@ -853,24 +658,9 @@ func (p *codexProcess) lookupFileItem(itemID string) codexFileItem {
 	return p.files[itemID]
 }
 
-func (p *codexProcess) registerDecisionAsk(rawID json.RawMessage, ask Ask) *Ask {
-	return p.registerAsk(rawID, ask, map[string]string{"decision": "accept"}, map[string]string{"decision": "decline"})
-}
-
-func (p *codexProcess) registerAsk(rawID json.RawMessage, ask Ask, allow, deny any) *Ask {
-	ask.ID = fmt.Sprintf("%x:%s", p.startedNs, rawID)
-	p.mu.Lock()
-	p.asks[ask.ID] = codexPendingAsk{id: rawID, allow: allow, deny: deny}
-	p.mu.Unlock()
+func (p *codexProcess) registerAsk(rawID json.RawMessage, ask Ask) *Ask {
+	ask.ID = p.recordPending(p.asks, rawID)
 	return &ask
-}
-
-func (p *codexProcess) registerUserInput(rawID json.RawMessage) string {
-	askID := fmt.Sprintf("%x:%s", p.startedNs, rawID)
-	p.mu.Lock()
-	p.inputs[askID] = rawID
-	p.mu.Unlock()
-	return askID
 }
 
 func formatFileChanges(changes []codexFileChange) string {
@@ -888,26 +678,11 @@ func formatFileChanges(changes []codexFileChange) string {
 	return strings.Join(lines, "\n")
 }
 
-func (p *codexProcess) declineRequest(rawID json.RawMessage, method string) {
-	switch method {
-	case "mcpServer/elicitation/request":
-		p.send(codexRPCResult{ID: rawID, Result: map[string]string{"action": "decline"}})
-	case "item/permissions/requestApproval":
-		p.send(codexRPCResult{ID: rawID, Result: map[string]any{"permissions": map[string]any{}}})
-	case "item/tool/requestUserInput":
-		p.send(codexRPCResult{ID: rawID, Result: map[string]any{"answers": map[string]any{}}})
-	case "item/tool/call":
-		p.send(codexRPCResult{ID: rawID, Result: map[string]any{"contentItems": []any{}, "success": false}})
-	default:
-		p.send(codexRPCErrorReply{ID: rawID, Error: codexRPCError{Code: -32601, Message: "unsupported server request"}})
-	}
-}
-
-func cloneCodexPtr[T any](v *T) *T {
-	if v == nil {
-		return nil
-	}
-	return new(*v)
+func (p *codexProcess) declineRequest(rawID json.RawMessage) {
+	p.send(codexRPCErrorReply{
+		ID:    rawID,
+		Error: codexRPCError{Code: -32601, Message: "unsupported server request"},
+	})
 }
 
 type codexRPCRequest struct {
@@ -963,27 +738,6 @@ type codexFileChange struct {
 	Diff string `json:"diff"`
 }
 
-type codexTokenParams struct {
-	TurnID     string `json:"turnId"`
-	TokenUsage struct {
-		Last struct {
-			TotalTokens int64 `json:"totalTokens"`
-		} `json:"last"`
-	} `json:"tokenUsage"`
-}
-
-type codexRateLimits struct {
-	Primary              *codexLimitWindow `json:"primary"`
-	Secondary            *codexLimitWindow `json:"secondary"`
-	SpendControlReached  bool              `json:"spendControlReached"`
-	RateLimitReachedType string            `json:"rateLimitReachedType"`
-}
-
-type codexLimitWindow struct {
-	UsedPercent float64 `json:"usedPercent"`
-	ResetsAt    *int64  `json:"resetsAt"`
-}
-
 type codexTurnCompleted struct {
 	Turn struct {
 		Status string          `json:"status"`
@@ -994,12 +748,6 @@ type codexTurnCompleted struct {
 type codexTurnError struct {
 	Message        string          `json:"message"`
 	CodexErrorInfo json.RawMessage `json:"codexErrorInfo"`
-}
-
-type codexPendingAsk struct {
-	id    json.RawMessage
-	allow any
-	deny  any
 }
 
 type codexUserInputParams struct {

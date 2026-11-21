@@ -83,7 +83,14 @@ A `Driver` starts the structured CLI (`Start`) and gives the command line of the
 - `Launch.Shim` is the command line of the MCP server for that start: `h.Shim`, then `--token` and the token. The driver writes it into the CLI's MCP configuration as it is.
 - A driver keeps no timer. Its caller ends the context of `Start`, which kills the process tree, when an interrupt or a close was not answered within 10 s.
 - Sign-in that is not usable and a session id that cannot be resumed are events (`LoginInvalid`, `NoSession`), because a CLI reports them after its process has started.
-- **Codex (`codex.go`)**: registers `Drivers["codex"]`. `Start` runs `codex app-server` over stdio JSON-RPC (`initialize`, `initialized`, `thread/start` or `thread/resume`), and `Interactive` returns the `codex resume` command line (failing when `Launch.Session` is empty). `Events` has one reader, the caller of `Start`, and is closed by the stdout reader goroutine after `cmd.Wait` and tree cleanup finish; `wmu` (stdin writes and close) and `mu` (turn, approval, user-input, file-change and usage state) are never nested. Server requests for `commandExecution`, `fileChange` and `permissions` emit `Asked` for `Process.Answer`, and `item/tool/requestUserInput` emits `Asked` with `Ask.Reply`. Notifications during an active turn emit `Active`; `thread/tokenUsage/updated` sums `last.totalTokens` for the active turn id; `account/rateLimits/updated` selects the window with the higher `usedPercent` (`primary` on a tie) and converts `resetsAt` from seconds to Unix milliseconds.
+
+### Codex
+
+`codex.go` registers `Drivers["codex"]` ([drivers.md](../../planning/contracts/drivers.md), section 1.2 and 1.3):
+
+- `Start` runs `codex app-server` over stdio JSON-RPC (`initialize`, `initialized`, `thread/start` or `thread/resume`, with `-c features.default_mode_request_user_input=true`), detached from any terminal (`detachTerminal`). `Interactive` returns the `codex resume` command line and refuses an empty `Launch.Session`.
+- **One reader per channel and lock order.** `Events()` is written only by `readLoop` and read only by `Start`'s caller, and closes after `cmd.Wait` and tree cleanup finish; `ready` is closed once by `finishReady` for `Turn`. `wmu` (stdin writes and close) and `mu` (protocol, turn, approval, user-input and file-change state) are never nested.
+- **Requests and notifications.** `commandExecution` and `fileChange` approvals emit `Asked` for `Process.Answer`; `item/tool/requestUserInput` emits `Asked` with `Ask.Reply`; invalid parameters and all other server requests get JSON-RPC error `-32601`. Notifications during an active turn emit `Active`. Live behavior of `features.default_mode_request_user_input=true` and `item/tool/requestUserInput` remains unverified ([issues.md](../../issues.md)).
 
 # Session runtime
 

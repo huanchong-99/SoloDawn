@@ -291,6 +291,7 @@ func TestCodexInteractiveFlagsAcrossLevels(t *testing.T) {
 		"-c", `mcp_servers.solodawn.default_tools_approval_mode="approve"`,
 		"-c", "mcp_servers.solodawn.tool_timeout_sec=600",
 		"-c", "notify=[]",
+		"-c", "features.default_mode_request_user_input=true",
 		"-s", "workspace-write",
 		"-a", "on-request",
 		"-c", "sandbox_workspace_write.exclude_slash_tmp=true",
@@ -326,17 +327,6 @@ func TestCodexStartValidationAndMissingExecutable(t *testing.T) {
 	proc, err := drv.Start(t.Context(), codexTestLaunch(t, 1))
 	codexWantErr(t, err)
 	codexEqual(t, proc, nil)
-}
-
-func TestCodexWindowsCommandCancelUsesTaskkill(t *testing.T) {
-	var attrs syscall.SysProcAttr
-	cmd := codexCommand(t.Context(), t.TempDir(), []string{"app-server"}, true, reflect.ValueOf(&attrs).Elem())
-	codexEqual(t, cmd.Args, []string{"codex", "app-server"})
-	codexEqual(t, cmd.WaitDelay, time.Second)
-	if runtime.GOOS == "windows" {
-		return
-	}
-	checkTaskkillArgs(t, cmd)
 }
 
 func answerFakeCodexMCP(cp *codexPeer, token string, answerCall bool) {
@@ -406,12 +396,9 @@ func runApprovalTurnOne(t *testing.T, proc Process) string {
 	codexEqual(t, ev.Ask, wantAsk)
 	codexNoErr(t, proc.Answer(ev.Ask.ID, false))
 	codexWantErr(t, proc.Answer(ev.Ask.ID, false))
-	end := drainUntilTurnEnd(t, proc.Events())
-	codexEqual(t, end, Event{
-		Kind:   TurnEnded,
-		Status: "completed",
-		Usage:  Usage{Tokens: new(int64(35980)), WindowPct: new(float64(0)), WindowResets: new(int64(1795149937000))},
-	})
+	end, endActives := nextNonActiveEvent(t, proc.Events())
+	codexCheck(t, endActives > 0, "expected active events before TurnEnded")
+	codexEqual(t, end, Event{Kind: TurnEnded, Status: "completed"})
 	return ev.Ask.ID
 }
 
@@ -422,24 +409,8 @@ func runApprovalTurnTwo(t *testing.T, proc Process, firstAskID string) {
 	codexEqual(t, ev.Kind, Asked)
 	codexCheck(t, ev.Ask.ID != firstAskID, "expected distinct Ask ID on retry")
 	codexNoErr(t, proc.Answer(ev.Ask.ID, true))
-	end := drainUntilTurnEnd(t, proc.Events())
-	codexEqual(t, end.Status, "completed")
-	codexEqual(t, *end.Usage.Tokens, int64(41562))
-}
-
-func drainUntilTurnEnd(t *testing.T, ch <-chan Event) Event {
-	t.Helper()
-	sawUsed := false
-	for {
-		ev, _ := nextNonActiveEvent(t, ch)
-		if ev.Kind == Used {
-			sawUsed = true
-			continue
-		}
-		codexEqual(t, ev.Kind, TurnEnded)
-		codexCheck(t, sawUsed, "TurnEnded arrived without preceding Used events")
-		return ev
-	}
+	end, _ := nextNonActiveEvent(t, proc.Events())
+	codexEqual(t, end, Event{Kind: TurnEnded, Status: "completed"})
 }
 
 func assertCodexLog(t *testing.T, path string, lines ...string) {
@@ -476,9 +447,8 @@ func TestCodexFakeCLIExitMidTurnAndResume(t *testing.T) {
 
 	codexEqual(t, nextCodexEvent(t, p2.Events()), Event{Kind: Ready, Session: threadID})
 	codexNoErr(t, <-turnDone)
-	end := drainUntilTurnEnd(t, p2.Events())
-	codexEqual(t, end.Status, "completed")
-	codexEqual(t, *end.Usage.Tokens, int64(67311))
+	end, _ := nextNonActiveEvent(t, p2.Events())
+	codexEqual(t, end, Event{Kind: TurnEnded, Status: "completed"})
 	<-mcpDone
 
 	codexNoErr(t, p2.Close())
@@ -553,6 +523,8 @@ func verifyHandshakeCase(t *testing.T, tc codexHandshakeCase) {
 	l.Session = tc.session
 	proc, peer := startPeerCodex(t, l)
 	initMsg, threadMsg := completePeerHandshake(t, peer, "thr-9")
+	codexEqual(t, peer.header.Args[0], "app-server")
+	codexCheck(t, slices.Contains(peer.header.Args, "features.default_mode_request_user_input=true"), "missing default_mode_request_user_input flag on app-server")
 	codexEqual(t, initMsg["method"], "initialize")
 	codexEqual(t, threadMsg["method"], tc.wantMethod)
 	assertThreadParams(t, threadMsg["params"].(map[string]any), l, tc)
@@ -644,24 +616,13 @@ func verifyCompletedFileItemFallback(t *testing.T, proc Process, peer *codexPeer
 
 func verifyDeclinedServerRequests(t *testing.T, peer *codexPeer) {
 	t.Helper()
-	for i, tc := range []struct {
-		method string
-		want   map[string]any
-	}{
-		{"mcpServer/elicitation/request", map[string]any{"action": "decline"}},
-		{"item/permissions/requestApproval", map[string]any{"permissions": map[string]any{}}},
-		{"item/tool/requestUserInput", map[string]any{"answers": map[string]any{}}},
-		{"item/tool/call", map[string]any{"contentItems": []any{}, "success": false}},
-	} {
-		peer.writeLine(fmt.Sprintf(`{"id":%d,"method":%q,"params":{}}`, 50+i, tc.method))
-		reply := peer.readJSON()
-		codexEqual(t, int(reply["id"].(float64)), 50+i)
-		codexEqual(t, reply["result"], tc.want)
-	}
 	for i, line := range []string{
-		`{"id":60,"method":"future/unknownRequest","params":{}}`,
-		`{"id":61,"method":"item/commandExecution/requestApproval","params":"bad"}`,
-		`{"id":62,"method":"item/fileChange/requestApproval","params":"bad"}`,
+		`{"id":60,"method":"mcpServer/elicitation/request","params":{}}`,
+		`{"id":61,"method":"item/permissions/requestApproval","params":{}}`,
+		`{"id":62,"method":"item/tool/call","params":{}}`,
+		`{"id":63,"method":"future/unknownRequest","params":{}}`,
+		`{"id":64,"method":"item/commandExecution/requestApproval","params":"bad"}`,
+		`{"id":65,"method":"item/fileChange/requestApproval","params":"bad"}`,
 	} {
 		peer.writeLine(line)
 		reply := peer.readJSON()
@@ -702,7 +663,7 @@ func verifyDeclinedUserInputRequests(t *testing.T, peer *codexPeer) {
 		peer.writeLine(fmt.Sprintf(`{"id":%d,"method":"item/tool/requestUserInput","params":%s}`, 200+i, params))
 		reply := peer.readJSON()
 		codexEqual(t, int(reply["id"].(float64)), 200+i)
-		codexEqual(t, reply["result"], map[string]any{"answers": map[string]any{}})
+		codexEqual(t, reply["error"].(map[string]any)["code"], -32601.0)
 	}
 }
 
@@ -748,110 +709,6 @@ func verifyStaleUserInputAfterTurnEnd(t *testing.T, proc Process, peer *codexPee
 	end, _ := nextNonActiveEvent(t, proc.Events())
 	codexEqual(t, end, Event{Kind: TurnEnded, Status: "completed"})
 	codexWantErr(t, ev.Ask.Reply(map[string][]string{"q3": {"late"}}))
-}
-
-func TestCodexPermissionsApprovalRequests(t *testing.T) {
-	proc, peer := startPeerCodex(t, codexTestLaunch(t, 2))
-	completePeerHandshake(t, peer, "thr-perm")
-	nextCodexEvent(t, proc.Events())
-
-	codexNoErr(t, proc.Turn("Request extra permissions."))
-	turnReq := peer.readJSON()
-	peer.writeLine(fmt.Sprintf(`{"id":%d,"result":{"turn":{"id":"turn-perm"}}}`, int(turnReq["id"].(float64))))
-
-	verifyDeclinedPermissionsRequests(t, peer)
-	verifyNetworkPermissionsApproval(t, proc, peer)
-	verifyFilePermissionsApprovals(t, proc, peer)
-
-	peer.writeLine(`{"method":"turn/completed","params":{"turn":{"id":"turn-perm","status":"completed","error":null}}}`)
-	end, _ := nextNonActiveEvent(t, proc.Events())
-	codexEqual(t, end, Event{Kind: TurnEnded, Status: "completed"})
-	codexNoErr(t, proc.Close())
-	peer.conn.Close()
-	waitEventsClosed(t, proc.Events())
-}
-
-func verifyDeclinedPermissionsRequests(t *testing.T, peer *codexPeer) {
-	t.Helper()
-	for i, params := range []string{
-		`"bad"`,
-		`{"permissions":{"network":{"enabled":true}},"reason":123}`,
-		`{}`,
-		`{"permissions":null}`,
-		`{"permissions":["read"]}`,
-		`{"permissions":"all"}`,
-	} {
-		peer.writeLine(fmt.Sprintf(`{"id":%d,"method":"item/permissions/requestApproval","params":%s}`, 300+i, params))
-		reply := peer.readJSON()
-		codexEqual(t, int(reply["id"].(float64)), 300+i)
-		codexEqual(t, reply["result"], map[string]any{"permissions": map[string]any{}})
-	}
-}
-
-func verifyNetworkPermissionsApproval(t *testing.T, proc Process, peer *codexPeer) {
-	t.Helper()
-	peer.writeLine(`{"id":"perm-net","method":"item/permissions/requestApproval","params":{"permissions":{ "network": { "enabled": true }, "fileSystem": null },"reason":"Fetch module"}}`)
-	ev, _ := nextNonActiveEvent(t, proc.Events())
-	wantCompact := `{"network":{"enabled":true},"fileSystem":null}`
-	codexEqual(t, ev.Ask, &Ask{
-		ID:       ev.Ask.ID,
-		Tool:     "permissions",
-		Category: "network",
-		Command:  wantCompact,
-		Why:      "Fetch module",
-		Input:    json.RawMessage(wantCompact),
-	})
-	codexNoErr(t, proc.Answer(ev.Ask.ID, true))
-	codexWantErr(t, proc.Answer(ev.Ask.ID, true))
-	codexEqual(t, peer.readJSON(), map[string]any{
-		"id": "perm-net",
-		"result": map[string]any{
-			"permissions": map[string]any{
-				"network":    map[string]any{"enabled": true},
-				"fileSystem": nil,
-			},
-		},
-	})
-}
-
-func verifyFilePermissionsApprovals(t *testing.T, proc Process, peer *codexPeer) {
-	t.Helper()
-	peer.writeLine(`{"id":320,"method":"item/permissions/requestApproval","params":{"permissions":{ "fileSystem": { "write": ["/outside"] }, "network": null },"reason":"Write output"}}`)
-	ev1, _ := nextNonActiveEvent(t, proc.Events())
-	want1 := `{"fileSystem":{"write":["/outside"]},"network":null}`
-	codexEqual(t, ev1.Ask, &Ask{
-		ID:       ev1.Ask.ID,
-		Tool:     "permissions",
-		Category: "file",
-		Command:  want1,
-		Why:      "Write output",
-		Input:    json.RawMessage(want1),
-	})
-	codexNoErr(t, proc.Answer(ev1.Ask.ID, false))
-	codexEqual(t, peer.readJSON(), map[string]any{
-		"id":     320.0,
-		"result": map[string]any{"permissions": map[string]any{}},
-	})
-
-	peer.writeLine(`{"id":321,"method":"item/permissions/requestApproval","params":{"permissions":{ "fileSystem": { "read": ["/etc/hosts"] } },"reason":null}}`)
-	ev2, _ := nextNonActiveEvent(t, proc.Events())
-	want2 := `{"fileSystem":{"read":["/etc/hosts"]}}`
-	codexEqual(t, ev2.Ask, &Ask{
-		ID:       ev2.Ask.ID,
-		Tool:     "permissions",
-		Category: "file",
-		Command:  want2,
-		Input:    json.RawMessage(want2),
-	})
-	codexNoErr(t, proc.Answer(ev2.Ask.ID, true))
-	codexEqual(t, peer.readJSON(), map[string]any{
-		"id": 321.0,
-		"result": map[string]any{
-			"permissions": map[string]any{
-				"fileSystem": map[string]any{"read": []any{"/etc/hosts"}},
-			},
-		},
-	})
 }
 
 func TestCodexInterruptBeforeAndAfterTurnIDAndSilentTurn(t *testing.T) {
@@ -911,12 +768,21 @@ func verifyInterruptClearsOpenAsk(t *testing.T, proc Process, peer *codexPeer) {
 	codexWantErr(t, proc.Answer(askEv.Ask.ID, true))
 }
 
-func TestCodexRateLimitsTokenBoundariesAndTurnErrors(t *testing.T) {
+func TestCodexTurnAuthAndRPCErrors(t *testing.T) {
 	proc, peer := startPeerCodex(t, codexTestLaunch(t, 1))
 	completePeerHandshake(t, peer, "thr-lim")
 	nextCodexEvent(t, proc.Events())
 
-	exerciseCodexRateLimitWindows(t, proc, peer)
+	for _, ignored := range []string{
+		"not-json",
+		`{}`,
+		`{"method":"thread/status/changed","params":{}}`,
+		`{"method":"turn/completed","params":"bad"}`,
+	} {
+		peer.writeLine(ignored)
+	}
+	peer.writeLine(`{"id":50,"method":"ping","params":{}}`)
+	codexEqual(t, peer.readJSON()["id"], 50.0)
 	exerciseCodexTurnErrors(t, proc, peer)
 
 	codexNoErr(t, proc.Close())
@@ -924,52 +790,20 @@ func TestCodexRateLimitsTokenBoundariesAndTurnErrors(t *testing.T) {
 	waitEventsClosed(t, proc.Events())
 }
 
-func exerciseCodexRateLimitWindows(t *testing.T, proc Process, peer *codexPeer) {
-	t.Helper()
-	for _, ignored := range []string{
-		"not-json",
-		`{}`,
-		`{"method":"thread/tokenUsage/updated","params":"bad"}`,
-		`{"method":"account/rateLimits/updated","params":"bad"}`,
-		`{"method":"turn/completed","params":"bad"}`,
-		`{"method":"thread/tokenUsage/updated","params":{"turnId":"","tokenUsage":{"last":{"totalTokens":100}}}}`,
-		`{"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":null,"secondary":null}}}`,
-	} {
-		peer.writeLine(ignored)
-	}
-	peer.writeLine(`{"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":null,"secondary":{"usedPercent":25,"resetsAt":null}}}}`)
-	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Used, Usage: Usage{WindowPct: new(float64(25))}})
-
-	peer.writeLine(`{"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":50,"resetsAt":100},"secondary":{"usedPercent":50,"resetsAt":200}}}}`)
-	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Used, Usage: Usage{WindowPct: new(float64(50)), WindowResets: new(int64(100000))}})
-
-	peer.writeLine(`{"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":40,"resetsAt":100},"secondary":{"usedPercent":99,"resetsAt":300}}}}`)
-	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Used, Usage: Usage{WindowPct: new(float64(99)), WindowResets: new(int64(300000))}})
-
-	peer.writeLine(`{"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":100,"resetsAt":400},"secondary":{"usedPercent":40,"resetsAt":300}}}}`)
-	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Used, Usage: Usage{WindowPct: new(float64(100)), WindowResets: new(int64(400000))}})
-	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: RateLimited, Resets: 400000})
-
-	peer.writeLine(`{"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":10,"resetsAt":500},"rateLimitReachedType":"five_hour"}}}`)
-	nextCodexEvent(t, proc.Events())
-	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: RateLimited, Resets: 500000})
-
-	peer.writeLine(`{"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":10,"resetsAt":null},"spendControlReached":true}}}`)
-	nextCodexEvent(t, proc.Events())
-	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: RateLimited, Resets: 0})
-
-	peer.writeLine(`{"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":15,"resetsAt":777}}}}`)
-	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Used, Usage: Usage{WindowPct: new(float64(15)), WindowResets: new(int64(777000))}})
-}
-
 func exerciseCodexTurnErrors(t *testing.T, proc Process, peer *codexPeer) {
 	t.Helper()
+	codexNoErr(t, proc.Turn("rpc-fail"))
+	req := peer.readJSON()
+	codexEqual(t, req["id"], 3.0)
+	peer.writeLine(`{"id":999,"error":{"code":-32000,"message":"unrelated"}}`)
+	peer.writeLine(`{"id":3,"error":{"code":-32000,"message":"turn rejected"}}`)
+	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: TurnEnded, Status: "failed", Text: "turn rejected"})
+
 	for i, tc := range []struct {
 		info   string
 		wantEv Event
 	}{
 		{`"unauthorized"`, Event{Kind: LoginInvalid, Text: "err-msg"}},
-		{`"usageLimitExceeded"`, Event{Kind: RateLimited, Resets: 777000}},
 		{`"otherError"`, Event{}},
 		{`{"stream":{"httpStatusCode":401}}`, Event{Kind: LoginInvalid, Text: "err-msg"}},
 		{`{"stream":{"httpStatusCode":400}}`, Event{}},
@@ -979,11 +813,6 @@ func exerciseCodexTurnErrors(t *testing.T, proc Process, peer *codexPeer) {
 	} {
 		runFailedTurnErrorCase(t, proc, peer, i, tc.info, tc.wantEv)
 	}
-	codexNoErr(t, proc.Turn("rpc-fail"))
-	req := peer.readJSON()
-	peer.writeLine(`{"id":999,"error":{"code":-32000,"message":"unrelated"}}`)
-	peer.writeLine(fmt.Sprintf(`{"id":%d,"error":{"code":-32000,"message":"turn rejected"}}`, int(req["id"].(float64))))
-	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: TurnEnded, Status: "failed", Text: "turn rejected"})
 }
 
 func runFailedTurnErrorCase(t *testing.T, proc Process, peer *codexPeer, idx int, info string, wantEv Event) {
@@ -992,20 +821,13 @@ func runFailedTurnErrorCase(t *testing.T, proc Process, peer *codexPeer, idx int
 	req := peer.readJSON()
 	turnID := fmt.Sprintf("tid-%d", idx)
 	peer.writeLine(fmt.Sprintf(`{"id":%d,"result":{"turn":{"id":%q}}}`, int(req["id"].(float64)), turnID))
-	peer.writeLine(`{"method":"thread/tokenUsage/updated","params":{"turnId":"wrong","tokenUsage":{"last":{"totalTokens":999}}}}`)
-	peer.writeLine(fmt.Sprintf(`{"method":"thread/tokenUsage/updated","params":{"turnId":%q,"tokenUsage":{"last":{"totalTokens":10}}}}`, turnID))
-	used, _ := nextNonActiveEvent(t, proc.Events())
-	codexEqual(t, *used.Usage.Tokens, int64(10))
 	peer.writeLine(fmt.Sprintf(`{"method":"turn/completed","params":{"turn":{"id":%q,"status":"failed","error":{"message":"err-msg","codexErrorInfo":%s}}}}`, turnID, info))
 	if wantEv.Kind != "" {
 		ev, _ := nextNonActiveEvent(t, proc.Events())
 		codexEqual(t, ev, wantEv)
 	}
 	end, _ := nextNonActiveEvent(t, proc.Events())
-	codexEqual(t, end.Kind, TurnEnded)
-	codexEqual(t, end.Status, "failed")
-	codexEqual(t, end.Text, "err-msg")
-	codexEqual(t, *end.Usage.Tokens, int64(10))
+	codexEqual(t, end, Event{Kind: TurnEnded, Status: "failed", Text: "err-msg"})
 }
 
 type codexStartupFailureCase struct {
