@@ -30,6 +30,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `planning/flows/agent-turn.md` step 5.1 places `max_open` (closing the longest-`waiting` session, or waiting when every open session is `working` or `takeover`) in the session runtime (`HS-15`, #187, `tryReserveSlot`), so delivery does not duplicate it; `Deliver` (`deliverNow` in `internal/host/deliver.go`) walks all held AI keys on each wake so a freed slot reaches waiting AIs.
 - Status: open, coordinated between HS-13 (#186) and HS-15 (#187).
 
+### 2026-11-21 · limitation · Codex `default_mode_request_user_input` and `item/tool/requestUserInput` are unverified against a live session
+
+- Symptom: Codex CLI 0.164.0 hides its `request_user_input` tool in Default mode (`codex features list` reports `default_mode_request_user_input` as `under development`, default `false`), and no spike capture covers `item/tool/requestUserInput` (`planning/contracts/drivers.md` section 1.2, step 4).
+- Cause: `codexBaseFlags` (`internal/host/codex.go`) passes `-c features.default_mode_request_user_input=true` on `codex app-server` and `codex resume`, and `onUserInputRequest` maps `item/tool/requestUserInput` from the generated schema (`[documented]`), without a live run on the owner's sign-in yet.
+- Status: open for the live check in B-17 / I-11 (`planning/steps/step-1-acceptance.md` A4.11). If the flag does not offer a working `request_user_input` tool in Default mode, record in `planning/contracts/drivers.md` section 1.2 that a Codex AI asks through `request_decision` (`HS-11`) instead.
+
 ### 2026-11-21 · limitation · `Sessions` has no `sync`, `fetch` or `ack` handlers until the home units and runtime wire them
 
 - Symptom: inbound `ctl` requests for `sync` and `fetch` are answered `bad_request` ("unknown ctl request") and `ack` pushes are dropped on a bare `Sessions` hub (`internal/node/session.go`, `NewSessions`), and `host.info`, `pair.browser` and `settings.set` are not registered until unit N-3.
@@ -130,7 +136,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: `internal/proto/testdata/tools.json` (#165, P-2) freezes each tool's `inputSchema` with a fixed set of keywords: `properties` always there, `{}` for a tool without arguments, `required` only when an argument must be given, and `"additionalProperties": false` (`planning/contracts/mcp-tools.md` section 5). The node's MCP server builds its tools with `github.com/modelcontextprotocol/go-sdk` v1.8.0 and `github.com/google/jsonschema-go`, and it is not shown that they write exactly these keywords: for example `properties: {}` for a struct without fields, or a `$schema` or `title` of their own.
 - Cause: the file was written from the contract, before any server code (`internal/proto/tools_test.go`, `toolLists`).
-- Status: open. HS-8 (the tool list test of the MCP server) and I-1 (the full list against `tools.json`) must check it, and normalise what the SDK writes or raise a change of the file.
+- Status: open until I-1 checks the live registered tools together; the MCP server half is settled in HS-8 (`internal/host/mcp.go`). Every tool registers a hand-written `json.RawMessage` rather than calling `jsonschema.For`, and the server takes the tools' schemas as they are (`emptyToolSchema` when empty), projecting only the per-caller differences of `mcp-tools.md` section 5 (`projectCallerSchema`); each tool's own golden test pins its schema, and `TestToolListsMatchGoldenSchemas` (`internal/host/mcp_test.go`) checks all five session lists of `tools.json` by tool name.
 
 ### 2026-11-20 · limitation · The `post` tool lists `handback` for a whole session, not for a hand-back turn
 
@@ -441,6 +447,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-21 · limitation · A secretary's own hand-back summary queues a `notice` for the secretary
+
+- Symptom: when the owner hands the secretary's terminal back and a `handback` message is posted in the main line signed for the secretary, the home queued a `notice` (`code: handback`) for `group.secretary`, waking the secretary again for the summary it or its host just posted.
+- Cause: `planning/contracts/commands.md` 1.3 specified `item notice for the secretary` on `handback` without an exception when `as` is the secretary.
+- Status: resolved on branch `gemini/HM-6` (#181): `post` of kind `handback` is removed from `internal/home/cmd_post.go` and marked postponed with takeover in `planning/contracts/commands.md` 1.3, and `planning/contracts/commands.md` 1.3 now states the general rule that a post never queues an item for its own author (`postWakes` skips `msg.By`; tested in `internal/home/cmd_post_test.go`).
 
 ### 2026-11-21 · bug · `Loop.Inbox` marked only the groups that existed when it was called
 
