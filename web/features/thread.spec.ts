@@ -1,0 +1,647 @@
+import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
+import { flushSync } from 'svelte';
+import { expect, vi } from 'vitest';
+import Thread from '../src/components/thread/Thread.svelte';
+import { homes, type Group } from '../src/lib/groups.svelte';
+import { examples } from '../src/lib/mock';
+import { cards } from '../src/lib/mounts.svelte';
+import { prefs } from '../src/lib/prefs.svelte';
+import type * as p from '../src/lib/proto';
+import { browser, example, owner, TestHome, user } from './home';
+import { all, closePage, one, openPage, show, texts } from './page';
+
+const feature = await loadFeature('../features/web_thread.feature');
+
+const website = 'rZNvy-1jH6Z-BcPqA5U5BQ';
+const taskId = 'DrtCn6htSBwmMPrFPbHJHA';
+const codexId = '1PC8WineBrUQ-apCjx7tug';
+const claudeId = 'LXCZmuGAXkvO-bSrOkuCfw';
+const secId = 'qBSFMsr2hHYKOMblEA_kdA';
+
+describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
+  let home: TestHome;
+  let reader: ReturnType<typeof browser>;
+  let group: Group;
+  let task: p.TaskRow;
+
+  const fetches = () => home.asked.filter((req) => req.t === 'fetch');
+
+  async function read() {
+    const answered = home.synced + home.groups.size;
+    await reader.connect();
+    await vi.waitFor(() => expect(home.synced).toBe(answered));
+    await new Promise((applied) => setTimeout(applied));
+    flushSync();
+  }
+
+  AfterEachScenario(async () => {
+    prefs.lang = 'en';
+    vi.unstubAllEnvs();
+    await closePage();
+  });
+
+  Background(({ Given }) => {
+    Given(
+      'a group "Website" with a secretary, two AIs and task 12 "Show connection path"',
+      async () => {
+        prefs.lang = 'en';
+        home = new TestHome();
+        home.add(website, 'Website');
+        home.write(
+          website,
+          example('row-member-ai', {
+            id: secId,
+            g: website,
+            name: 'Secretary',
+            cli: 'claude',
+            secretary: true,
+            state: 'waiting',
+            task: undefined,
+          }),
+        );
+        home.write(
+          website,
+          example('row-member-ai', {
+            id: codexId,
+            g: website,
+            name: 'Codex',
+            cli: 'codex',
+            state: 'waiting',
+            task: undefined,
+          }),
+        );
+        home.write(
+          website,
+          example('row-member-ai', {
+            id: claudeId,
+            g: website,
+            name: 'Claude Code',
+            cli: 'claude',
+            state: 'dormant',
+            task: undefined,
+          }),
+        );
+        task = home.write(website, example('row-task', { g: website })) as p.TaskRow;
+        reader = browser(home);
+        homes.push(reader.store);
+        await read();
+        group = reader.store.groups[0];
+      },
+    );
+  });
+
+  Scenario(
+    'Opening a thread fetches its newest page, and older pages load on demand',
+    ({ Given, When, Then, And }) => {
+      const items = Array.from({ length: 75 }, (_, i) => `step ${i + 1}`);
+      Given('the thread of task 12 holds 75 progress messages on the home', async () => {
+        reader.drop();
+        for (const [i, text] of items.entries()) {
+          home.write(
+            website,
+            example('row-msg-progress', {
+              id: `prog-${i + 1}`,
+              thread: taskId,
+              by: codexId,
+              text,
+            }),
+          );
+        }
+        reader = browser(home);
+        homes.length = 0;
+        homes.push(reader.store);
+        await read();
+        group = reader.store.groups[0];
+        expect(group.thread(taskId)).toEqual([]);
+      });
+      When('the thread of task 12 is mounted', async () => {
+        show(Thread, { group, task });
+        await vi.waitFor(() => expect(fetches()).toHaveLength(1));
+        await vi.waitFor(() => expect(group.paging(taskId).busy).toBe(false));
+        flushSync();
+      });
+      Then('the browser fetches the newest 50 messages of task 12 and shows them in order', () => {
+        expect(fetches()).toEqual([
+          { t: 'fetch', g: website, thread: taskId, before: 0, limit: 50 },
+        ]);
+        expect(texts('.tlist .ti .text')).toEqual(items.slice(-50));
+        expect(texts('.tpage button')).toEqual(['Load earlier messages']);
+      });
+      When('the reader presses "Load earlier messages"', async () => {
+        one<HTMLButtonElement>('.tpage button').click();
+        await vi.waitFor(() => expect(fetches()).toHaveLength(2));
+        await vi.waitFor(() => expect(group.paging(taskId).more).toBe(false));
+        flushSync();
+      });
+      Then(
+        'the browser fetches the page before the oldest message held and shows all 75 in order',
+        () => {
+          const oldest = group.thread(taskId).find((m) => m.text === 'step 26')!.pos;
+          expect(fetches()[1]).toEqual({
+            t: 'fetch',
+            g: website,
+            thread: taskId,
+            before: oldest,
+            limit: 50,
+          });
+          expect(texts('.tlist .ti .text')).toEqual(items);
+        },
+      );
+      And('the button "Load earlier messages" is gone', () => {
+        expect(all('.tpage')).toEqual([]);
+      });
+    },
+  );
+
+  Scenario(
+    'An unreachable home stops thread paging with a notice',
+    ({ Given, When, Then, And }) => {
+      Given('the thread of task 12 holds 75 progress messages on the home', () => {
+        for (let i = 0; i < 75; i++) {
+          home.write(
+            website,
+            example('row-msg-progress', {
+              id: `off-${i}`,
+              thread: taskId,
+              by: codexId,
+              text: `line ${i}`,
+            }),
+          );
+        }
+      });
+      When('the home stops and the thread of task 12 is mounted', () => {
+        home.stop();
+        reader.drop();
+        show(Thread, { group, task });
+      });
+      Then('no thread page is fetched', async () => {
+        await new Promise((later) => setTimeout(later, 10));
+        expect(fetches()).toEqual([]);
+      });
+      And('the thread says "Earlier messages cannot be loaded right now."', () => {
+        expect(texts('.tpage')).toEqual(['Earlier messages cannot be loaded right now.']);
+        group.paging(taskId).failed = true;
+        flushSync();
+        expect(texts('.tpage')).toEqual(['Earlier messages cannot be loaded right now.']);
+      });
+    },
+  );
+
+  Scenario(
+    'A thread renders every message kind, report, checks, hand-back, call fallback and working indicator',
+    ({ Given, When, Then, And }) => {
+      Given('the thread of task 12 holds every thread message kind', () => {
+        home.write(website, example('row-msg-progress', { id: 'k-prog', thread: taskId }));
+        home.write(
+          website,
+          example('row-msg-question', {
+            id: 'k-q',
+            thread: taskId,
+            text: '@Secretary should `path` carry rtt?',
+            mentions: [secId],
+          }),
+        );
+        home.write(
+          website,
+          example('row-msg-text', {
+            id: 'k-txt',
+            thread: taskId,
+            by: owner,
+            text: 'Keep it optional.',
+          }),
+        );
+        home.write(website, example('row-msg-call-answered', { id: 'k-call', thread: taskId }));
+        home.write(website, example('row-msg-call-waiting', { id: 'k-call-w', thread: taskId }));
+        home.write(website, example('row-msg-reply', { id: 'k-reply', thread: taskId }));
+        home.write(website, example('row-msg-report', { id: 'k-rep', thread: taskId }));
+        home.write(
+          website,
+          example('row-msg-report', {
+            id: 'k-rep-local',
+            thread: taskId,
+            body: { commit: '1234567890abcdef', files: 1, added: 10, removed: 2 },
+          }),
+        );
+        home.write(website, example('row-msg-checks', { id: 'k-chk-ok', thread: taskId }));
+        home.write(
+          website,
+          example('row-msg-checks', {
+            id: 'k-chk-cloud',
+            thread: taskId,
+            body: {
+              stage: 'cloud',
+              ok: false,
+              commit: '9f2c1abf43f3',
+              items: [{ name: 'ci/linux', ok: false, detail: 'exit 1' }],
+            },
+          }),
+        );
+        home.write(
+          website,
+          example('row-msg-checks', {
+            id: 'k-chk-merge',
+            thread: taskId,
+            body: {
+              stage: 'merge',
+              ok: false,
+              commit: '9f2c1abf43f3',
+              items: [{ name: 'merge', ok: false, detail: 'CONFLICT in path.go' }],
+            },
+          }),
+        );
+        home.write(website, example('row-msg-handback', { id: 'k-hb', thread: taskId }));
+        home.write(website, example('row-msg-approval-pending', { id: 'k-ap', thread: taskId }));
+        home.write(website, example('row-msg-decision-pending', { id: 'k-dc', thread: taskId }));
+        home.write(website, example('row-msg-summary', { id: 'k-sum', thread: taskId }));
+      });
+      And('the assignee "Codex" is working on task 12 for 6 minutes', () => {
+        home.write(
+          website,
+          example('row-member-ai', {
+            id: codexId,
+            g: website,
+            name: 'Codex',
+            cli: 'codex',
+            state: 'working',
+            task: taskId,
+            since: Date.now() - 6 * 60_000,
+          }),
+        );
+      });
+      When('the thread of task 12 is mounted', async () => {
+        show(Thread, { group, task });
+        await vi.waitFor(() => expect(group.paging(taskId).more).toBe(false));
+        flushSync();
+      });
+      Then(
+        'the thread shows the badges for progress, question, call, reply, report, hand-back, approval and decision',
+        () => {
+          expect(texts('.ti-head .badge')).toEqual([
+            'Progress',
+            'Question',
+            'Call',
+            'Call',
+            'Reply',
+            'Report',
+            'Report',
+            'Hand-back',
+            'Approval',
+            'Decision',
+            'Summary',
+          ]);
+          expect(one('#m-k-call .ti-head .badge').dataset.tone).toBe('sky');
+          expect(one('#m-k-rep .ti-head .badge').dataset.tone).toBe('ok');
+          expect(one('#m-k-ap .ti-head .badge').dataset.tone).toBe('dawn');
+          expect(one('#m-k-dc .ti-head .badge').dataset.tone).toBe('dawn');
+          expect(one('#m-k-txt .ti-head .badge')).toBeNull();
+          expect(one('#m-k-call .call-stub').textContent).toContain('Answered in 500ms · depth 1');
+          expect(one('#m-k-call-w .call-stub').textContent).toContain(
+            'Waiting for reply · depth 1',
+          );
+        },
+      );
+      And('the question marks the mention "@Secretary" and the code span "path"', () => {
+        expect(texts('#m-k-q .text .at')).toEqual(['@Secretary']);
+        expect(texts('#m-k-q .text code')).toEqual(['path']);
+      });
+      And(
+        'the report metadata shows PR 31, short commit "9f2c1ab", "4 files" and "+212 −18"',
+        () => {
+          const meta = one('#m-k-rep .meta').textContent!.replace(/\s+/g, ' ').trim();
+          expect(meta).toBe('PR #31 · 9f2c1ab · 4 files · +212 −18');
+          const localMeta = one('#m-k-rep-local .meta').textContent!.replace(/\s+/g, ' ').trim();
+          expect(localMeta).toBe('1234567 · 1 file · +10 −2');
+        },
+      );
+      And(
+        'the check rows show passing local checks, failing cloud checks and a merge conflict',
+        () => {
+          expect(one('#m-k-chk-ok .glyph').dataset.tone).toBe('ok');
+          expect(one('#m-k-chk-ok').textContent).toContain('Local checks passed');
+          expect(one('#m-k-chk-ok').textContent).toContain('go test ./... (42 tests)');
+          expect(one('#m-k-chk-cloud .glyph').dataset.tone).toBe('danger');
+          expect(one('#m-k-chk-cloud').textContent).toContain('Cloud checks failed');
+          expect(one('#m-k-chk-cloud').textContent).toContain('ci/linux (exit 1)');
+          expect(one('#m-k-chk-merge').textContent).toContain('Merge conflict');
+          expect(one('#m-k-chk-merge').textContent).toContain('CONFLICT in path.go');
+        },
+      );
+      And(
+        'the hand-back metadata shows "1 file", "path.go", "+40 −3" and commit "9f2c1ab Emit path changes"',
+        () => {
+          const hb = one('#m-k-hb .handback').textContent!.replace(/\s+/g, ' ').trim();
+          expect(hb).toContain('1 file · path.go · +40 −3');
+          expect(hb).toContain('9f2c1ab Emit path changes');
+        },
+      );
+      And('the bottom of the thread shows "Codex is working · 6 min"', () => {
+        expect(texts('.ti.working p')).toEqual(['Codex is working · 6 min']);
+        home.write(
+          website,
+          example('row-member-ai', {
+            id: codexId,
+            g: website,
+            name: 'Codex',
+            cli: 'codex',
+            state: 'working',
+            task: taskId,
+            since: Date.now() - 30_000,
+          }),
+        );
+        flushSync();
+        expect(texts('.ti.working p')).toEqual(['Codex is working']);
+      });
+      When('"Codex" works on another task or is waiting', () => {
+        home.write(
+          website,
+          example('row-member-ai', {
+            id: codexId,
+            g: website,
+            name: 'Codex',
+            cli: 'codex',
+            state: 'working',
+            task: 'other-task',
+            since: Date.now(),
+          }),
+        );
+        flushSync();
+        expect(all('.ti.working')).toEqual([]);
+        home.write(
+          website,
+          example('row-member-ai', {
+            id: codexId,
+            g: website,
+            name: 'Codex',
+            cli: 'codex',
+            state: 'waiting',
+            task: taskId,
+            since: Date.now(),
+          }),
+        );
+        flushSync();
+      });
+      Then('the working indicator is gone', () => {
+        expect(all('.ti.working')).toEqual([]);
+      });
+    },
+  );
+
+  Scenario(
+    'Review blocks show pass, sent-back and veto states with file locations',
+    ({ Given, When, Then, And }) => {
+      Given(
+        'the thread of task 12 holds a sent-back review, a veto review and a passed review',
+        () => {
+          home.write(
+            website,
+            example('row-msg-review', {
+              id: 'rev-fail',
+              thread: taskId,
+              body: {
+                task: taskId,
+                num: 12,
+                title: 'Show connection path',
+                commit: '9f2c1abf43',
+                round: 1,
+                score: 86,
+                pass: 90,
+                ok: false,
+                items: [
+                  { text: 'Missing `relay` event', veto: false, file: 'path.go', line: 88 },
+                  { text: 'Unused field', veto: false, file: 'conn.go' },
+                ],
+              },
+            }),
+          );
+          home.write(
+            website,
+            example('row-msg-review', {
+              id: 'rev-veto',
+              thread: taskId,
+              body: {
+                task: taskId,
+                num: 12,
+                title: 'Show connection path',
+                commit: '9f2c1abf43',
+                round: 2,
+                score: 0,
+                pass: 90,
+                ok: false,
+                items: [{ text: 'Leaked token in fixture', veto: true }],
+              },
+            }),
+          );
+          home.write(
+            website,
+            example('row-msg-review', {
+              id: 'rev-ok',
+              thread: taskId,
+              body: {
+                task: taskId,
+                num: 12,
+                title: 'Show connection path',
+                commit: 'def4567890',
+                round: 3,
+                score: 94,
+                pass: 90,
+                ok: true,
+                items: [],
+              },
+            }),
+          );
+        },
+      );
+      When('the thread of task 12 is mounted', async () => {
+        show(Thread, { group, task });
+        await vi.waitFor(() => expect(group.paging(taskId).more).toBe(false));
+        flushSync();
+      });
+      Then(
+        'the sent-back review has tone "danger", badge "Review · Sent back", score "86", "Pass 90" and locations "path.go:88" and "conn.go"',
+        () => {
+          expect(one('#m-rev-fail .ti-head .badge').textContent).toBe('Review · Sent back');
+          expect(one('#m-rev-fail .ti-head .badge').dataset.tone).toBe('danger');
+          expect(one('#m-rev-fail .review').dataset.tone).toBe('danger');
+          expect(one('#m-rev-fail .score').textContent!.replace(/\s+/g, ' ').trim()).toBe(
+            '86Pass 90',
+          );
+          expect(texts('#m-rev-fail .bul code')).toEqual(['relay', 'path.go:88', 'conn.go']);
+        },
+      );
+      And('the veto review shows the "Veto" badge and score "0"', () => {
+        expect(texts('#m-rev-veto .veto')).toEqual(['Veto']);
+        expect(one('#m-rev-veto .score b').textContent).toBe('0');
+      });
+      And('the passed review has tone "ok", badge "Review · Passed" and score "94"', () => {
+        expect(one('#m-rev-ok .ti-head .badge').textContent).toBe('Review · Passed');
+        expect(one('#m-rev-ok .ti-head .badge').dataset.tone).toBe('ok');
+        expect(one('#m-rev-ok .review').dataset.tone).toBe('ok');
+        expect(one('#m-rev-ok .score b').textContent).toBe('94');
+        expect(one('#m-rev-ok .summary').textContent).toContain('def4567');
+      });
+    },
+  );
+
+  Scenario(
+    "Task merges appear under the secretary's name and every system code has client wording",
+    ({ Given, When, Then, And }) => {
+      const codes = [
+        'task_merged',
+        'task_failed',
+        'turn_interrupted',
+        'login_invalid',
+        'rate_limited',
+        'cap_reached',
+        'session_replaced',
+        'rounds_limit',
+        'preempted',
+        'group_paused',
+        'group_resumed',
+        'no_secretary',
+      ];
+
+      Given('the thread of task 12 holds a task_merged notice and every other system code', () => {
+        const bodies: p.MsgRow['body'][] = [
+          {
+            code: 'task_merged',
+            task: taskId,
+            commit: '9f2c1abf43f3',
+            merge_commit: 'def4567890ab',
+          },
+          { code: 'task_failed', task: taskId, reason: 'failures' },
+          { code: 'task_failed', task: taskId, reason: 'review_rounds' },
+          {
+            code: 'turn_interrupted',
+            ai: codexId,
+            reason: 'crash',
+            task: taskId,
+            detail: 'signal 9',
+          },
+          { code: 'turn_interrupted', ai: codexId, reason: 'timeout' },
+          { code: 'turn_interrupted', ai: codexId, reason: 'stop' },
+          { code: 'login_invalid', ai: codexId, detail: 'expired token' },
+          { code: 'rate_limited', ai: codexId, resets: 1763600010000 },
+          { code: 'cap_reached', ai: codexId, cap: 'day', task: taskId },
+          { code: 'cap_reached', ai: codexId, cap: 'task' },
+          { code: 'session_replaced', ai: codexId, task: taskId },
+          { code: 'rounds_limit', task: taskId, n: 10 },
+          { code: 'preempted', task: taskId, by: owner },
+          { code: 'group_paused', by: owner },
+          { code: 'group_resumed', by: owner },
+          { code: 'no_secretary' },
+        ];
+        bodies.forEach((body, i) => {
+          home.write(website, example('row-msg-system', { id: `sys-${i}`, thread: taskId, body }));
+        });
+      });
+      And('the main line also holds a task_merged notice', () => {
+        home.write(
+          website,
+          example('row-msg-system', {
+            id: 'sys-main-merged',
+            thread: null,
+            main: true,
+            body: {
+              code: 'task_merged',
+              task: taskId,
+              commit: '9f2c1abf43f3',
+              merge_commit: 'def4567890ab',
+            },
+          }),
+        );
+      });
+      When('the thread of task 12 is mounted', async () => {
+        show(Thread, { group, task });
+        await vi.waitFor(() => expect(group.paging(taskId).more).toBe(false));
+        flushSync();
+      });
+      Then(
+        'the task_merged row names "Secretary", "T-12", "Show connection path" and commits "9f2c1ab → def4567" with an ok check icon',
+        () => {
+          const merged = one('#m-sys-0');
+          expect(merged.querySelector('.glyph')?.getAttribute('data-tone')).toBe('ok');
+          const text = merged.textContent!.replace(/\s+/g, ' ').trim();
+          expect(text).toContain('Secretary merged T-12 · Show connection path');
+          expect(text).toContain('9f2c1ab → def4567');
+        },
+      );
+      And('none of the 12 system rows shows a raw system code', () => {
+        const rendered = texts('.tlist .ti.sys').join('\n');
+        for (const code of codes) expect(rendered).not.toContain(code);
+        expect(rendered).toContain('Task T-12 stopped after repeated failures.');
+        expect(rendered).toContain('Task T-12 stopped after repeated failed reviews.');
+        expect(rendered).toContain("Codex's turn crashed. · T-12 · signal 9");
+        expect(rendered).toContain("Codex's turn timed out.");
+        expect(rendered).toContain("Codex's turn was stopped.");
+        expect(rendered).toContain("Codex's sign-in is no longer valid. · expired token");
+        expect(rendered).toContain('Codex hit the rate limit');
+        expect(rendered).toContain('Codex reached the daily usage cap. · T-12');
+        expect(rendered).toContain('Codex reached the task usage cap.');
+        expect(rendered).toContain('Codex started a new session from the task notes. · T-12');
+        expect(rendered).toContain('T-12 paused after 10 AI-to-AI rounds.');
+        expect(rendered).toContain('T-12 paused for a direct request from Alex.');
+        expect(rendered).toContain('All AIs in this group were paused by Alex.');
+        expect(rendered).toContain('AIs in this group were resumed by Alex.');
+        expect(rendered).toContain('This group has no secretary AI.');
+      });
+      And(
+        'switching the language to Chinese words task_merged under "Secretary" as "已合并 T-12"',
+        () => {
+          prefs.lang = 'zh-CN';
+          flushSync();
+          expect(one('#m-sys-0').textContent).toContain('Secretary 已合并 T-12');
+          prefs.lang = 'en';
+          flushSync();
+        },
+      );
+      When('the reader opens the main line of "Website"', async () => {
+        await closePage();
+        homes.push(reader.store);
+        openPage(`#/groups/${website}`);
+      });
+      Then('the main line also renders the task_merged notice under "Secretary"', () => {
+        const lineMerged = one('#m-sys-main-merged');
+        expect(lineMerged.textContent!.replace(/\s+/g, ' ')).toContain(
+          'Secretary merged T-12 · Show connection path · 9f2c1ab → def4567',
+        );
+      });
+    },
+  );
+
+  Scenario(
+    "The states sheet renders every wire example with the thread area's mounted cards",
+    ({ When, Then, And }) => {
+      When('the reader opens "#/states" in a development server', async () => {
+        await closePage();
+        vi.stubEnv('MODE', 'development');
+        openPage('#/states');
+        await vi.waitFor(() => {
+          flushSync();
+          expect(all('.states .kind').length).toBeGreaterThan(0);
+        });
+      });
+      Then(
+        'the states sheet marks "review", "checks", "system", "report" and "handback" as mounted by "thread"',
+        () => {
+          for (const kind of ['review', 'checks', 'system', 'report', 'handback']) {
+            expect(cards.get(kind)?.area).toBe('thread');
+            const section = one(`#states-${kind}`).closest('section')!;
+            expect(section.querySelector('header .badge')?.textContent).toBe('Mounted by thread');
+          }
+        },
+      );
+      And(
+        'none of "task", "approval", "brief", "decision", "summary" or "call" is mounted by "thread"',
+        () => {
+          for (const kind of ['task', 'approval', 'brief', 'decision', 'summary', 'call']) {
+            expect(cards.get(kind)?.area).not.toBe('thread');
+          }
+        },
+      );
+      And('every message wire example is rendered on the sheet', () => {
+        const msgExamples = examples.filter((name) => name.startsWith('row-msg-')).sort();
+        expect(texts('.states figure figcaption')).toEqual(msgExamples);
+      });
+    },
+  );
+});

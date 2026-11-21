@@ -1,0 +1,268 @@
+<script lang="ts">
+  import { untrack } from 'svelte';
+  import { parts } from '../../lib/compose';
+  import { subject, type Group } from '../../lib/groups.svelte';
+  import { card as cardOf } from '../../lib/mounts.svelte';
+  import { prefs, t } from '../../lib/prefs.svelte';
+  import type { MsgRow, TaskRow } from '../../lib/proto';
+  import { clock, now } from '../../lib/when';
+  import Avatar from '../Avatar.svelte';
+
+  /** The message list of one task's thread, mounted inside a task card's fold. */
+  let { group, task }: { group: Group; task: TaskRow } = $props();
+
+  const msgs = $derived(group.thread(task.id));
+  const paging = $derived(group.paging(task.id));
+  const stuck = $derived(paging.failed || (paging.more && !group.home.ctl));
+
+  const started = new WeakSet<object>();
+  let loaded = $state.raw<object>();
+  $effect(() => {
+    if (!started.has(paging) && paging.ready && group.home.ctl) {
+      const current = paging;
+      started.add(current);
+      untrack(() => {
+        void group.older(task.id).then(() => {
+          loaded = current;
+        });
+      });
+    }
+  });
+
+  const assignee = $derived(group.member(task.assignee));
+  const working = $derived(
+    assignee?.kind === 'ai' && assignee.state === 'working' && assignee.task === task.id
+      ? assignee
+      : undefined,
+  );
+  const workMins = $derived(working ? Math.floor((now() - working.since) / 60_000) : 0);
+
+  type Badge = { label: string; tone?: 'ok' | 'danger' | 'dawn' | 'sky' };
+  const tones: Partial<Record<MsgRow['kind'], Badge['tone']>> = {
+    report: 'ok',
+    summary: 'ok',
+    approval: 'dawn',
+    decision: 'dawn',
+    call: 'sky',
+  };
+
+  function badgeOf(msg: MsgRow): Badge | null {
+    if (msg.kind === 'text') return null;
+    if (msg.kind === 'review') {
+      return {
+        label: t(msg.body.ok ? 'thread.review.badge.ok' : 'thread.review.badge.fail'),
+        tone: msg.body.ok ? 'ok' : 'danger',
+      };
+    }
+    return { label: t(`chat.kind.${msg.kind}`), tone: tones[msg.kind] };
+  }
+
+  const elapsed = (ms: number) => (ms >= 1000 ? `${Math.round(ms / 1000)}s` : `${ms}ms`);
+</script>
+
+<div class="thread">
+  {#if stuck}
+    <p class="tpage">{t('thread.older.offline')}</p>
+  {:else if paging.more}
+    <div class="tpage" role={paging.busy ? 'status' : undefined}>
+      {#if loaded !== paging}
+        <span>{t('thread.older.busy')}</span>
+      {:else}
+        <button
+          type="button"
+          class="btn btn-sm btn-ghost"
+          disabled={paging.busy}
+          onclick={() => void group.older(task.id)}
+        >
+          {t(paging.busy ? 'thread.older.busy' : 'thread.older')}
+        </button>
+      {/if}
+    </div>
+  {/if}
+
+  <ol class="tlist">
+    {#each msgs as msg (msg.id)}
+      {@const Card = cardOf(msg.kind)}
+      {@const time = clock(msg.ts, prefs.lang)}
+      {@const iso = new Date(msg.ts).toISOString()}
+      {#if msg.by === 'system'}
+        <li class="ti sys" id={`m-${msg.id}`}>
+          {#if Card}
+            <Card {group} {msg} />
+          {:else}
+            <p>{t(`chat.kind.${msg.kind}`)} · <time datetime={iso}>{time}</time></p>
+          {/if}
+        </li>
+      {:else}
+        {@const author = group.member(msg.by)}
+        {@const badge = badgeOf(msg)}
+        {@const segs = parts(
+          msg.text,
+          group.members.filter((member) => msg.mentions.includes(member.id)),
+        )}
+        <li class="ti" id={`m-${msg.id}`}>
+          <Avatar
+            id={author?.kind === 'human' ? author.user : msg.by}
+            name={author?.name ?? '?'}
+            cli={author?.kind === 'ai' ? author.cli : undefined}
+            size="sm"
+          />
+          <div>
+            <p class="ti-head">
+              <b>{author?.name ?? t('chat.gone')}</b>
+              {#if badge}<span class="badge" data-tone={badge.tone}>{badge.label}</span>{/if}
+              <time datetime={iso}>{time}</time>
+            </p>
+            {#if segs.length}
+              <p class="text">
+                {#each segs as part, i (i)}
+                  {#if part.kind === 'code'}<code>
+                      {part.text}
+                    </code>{:else if part.kind === 'at'}<span class="at">
+                      {part.text}
+                    </span>{:else}{part.text}{/if}
+                {/each}
+              </p>
+            {/if}
+            {#if Card}
+              <Card {group} {msg} />
+            {:else if msg.kind === 'call'}
+              <p class="call-stub">
+                <span class="mono">→ {group.member(msg.body.to)?.name ?? t('chat.gone')}</span> ·
+                {msg.state.status === 'answered'
+                  ? t('thread.call.answered')
+                      .replace('{t}', elapsed(msg.state.ms))
+                      .replace('{n}', String(msg.body.depth))
+                  : t('thread.call.waiting').replace('{n}', String(msg.body.depth))}
+              </p>
+            {:else if msg.state !== null || msg.kind === 'summary'}
+              {@const line = subject(msg) === msg.text ? '' : subject(msg)}
+              {#if line || group.waiting.includes(msg)}
+                <p class="stub-line">
+                  {#if line}<span>{line}</span>{/if}
+                  {#if group.waiting.includes(msg)}
+                    <span class="badge solid" data-tone="dawn">{t('groups.waiting')}</span>
+                  {/if}
+                </p>
+              {/if}
+            {/if}
+          </div>
+        </li>
+      {/if}
+    {:else}
+      {#if !paging.more && !stuck && !working}
+        <li class="ti sys empty"><p>{t('thread.empty')}</p></li>
+      {/if}
+    {/each}
+
+    {#if working}
+      <li class="ti sys working">
+        <span class="typing" aria-hidden="true"><i></i><i></i><i></i></span>
+        <p>
+          {workMins >= 1
+            ? t('thread.working.since')
+                .replace('{name}', working.name)
+                .replace('{n}', String(workMins))
+            : t('thread.working').replace('{name}', working.name)}
+        </p>
+      </li>
+    {/if}
+  </ol>
+</div>
+
+<style>
+  .thread {
+    background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+    border-radius: 0 0 var(--r-lg) var(--r-lg);
+    font-size: var(--fs-sm);
+  }
+  .tpage {
+    display: flex;
+    justify-content: center;
+    padding: var(--sp-2) var(--sp-4) 0;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .tlist {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-4) var(--sp-4);
+  }
+  .ti {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 2px var(--sp-2);
+  }
+  .ti > :global(.av) {
+    margin-top: 1px;
+  }
+  .ti > div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .ti.sys {
+    display: block;
+    color: var(--text-3);
+  }
+  .ti.working {
+    display: grid;
+    align-items: center;
+  }
+  .ti.empty {
+    text-align: center;
+  }
+  .ti-head,
+  .call-stub,
+  .stub-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .ti-head time,
+  .call-stub,
+  .stub-line {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  code {
+    padding: 1px 5px;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+  }
+  .typing {
+    display: inline-flex;
+    justify-self: center;
+    gap: 3px;
+  }
+  .typing i {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--text-3);
+    animation: blink 1.2s infinite;
+  }
+  .typing i:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .typing i:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+  @keyframes blink {
+    0%,
+    60%,
+    100% {
+      opacity: 0.25;
+    }
+    30% {
+      opacity: 1;
+    }
+  }
+</style>
