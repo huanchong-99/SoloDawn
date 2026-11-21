@@ -315,7 +315,7 @@ func TestApplyNumbersTheRowsOfAResult(t *testing.T) {
 				home.RowOf(card),
 				home.RowOf(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: id(21)}, Num: 4}),
 			},
-			Items:         []home.Item{{AI: aiID, Why: "decided", Msg: card.ID, Cause: &c.Env, NotBefore: c.Now + 60000}},
+			Items:         []home.Item{{AI: aiID, Why: "decided", Msg: card.ID, NotBefore: c.Now + 60000}},
 			Retire:        []int64{17},
 			Writes:        []home.Write{setting{"hm0", "1"}},
 			GroupsChanged: true,
@@ -329,7 +329,7 @@ func TestApplyNumbersTheRowsOfAResult(t *testing.T) {
 	equal(t, []int64{created.Seq, created.Pos}, []int64{11, 11})
 	equal(t, []int64{decided.Seq, decided.Pos}, []int64{12, 3})
 	equal(t, res.Rows[2].Value().(proto.TaskRow).Seq, int64(13))
-	equal(t, res.Items, []home.Item{{AI: aiID, Why: "decided", Msg: id(20), Cause: &env, NotBefore: clock + 60000}})
+	equal(t, res.Items, []home.Item{{AI: aiID, Why: "decided", Msg: id(20), NotBefore: clock + 60000}})
 	equal(t, res.Retire, []int64{17})
 	equal(t, res.Writes, []home.Write{setting{"hm0", "1"}})
 	equal(t, res.GroupsChanged, true)

@@ -14,8 +14,9 @@ H addresses items to an AI. N chooses the session.
 
 | Item | Session |
 | --- | --- |
-| `assign`, `checks`, `reviewed`, `resume`; `decided` about a task the AI is assigned | the AI's task session for `task`; N creates it on the first `assign` |
+| `assign`, `checks`, `reviewed`, `resume` | the AI's task session for `task`; N creates it on the first `assign` |
 | `review` | the AI's review session for `task`; N creates it on the first `review` |
+| `decided` about a task | the AI's task session for `task` if it has one; else its review session for `task` if one is open; else its group session |
 | `mention` or `reply` whose message is in the thread of a task for which the AI has a task or review session | that session |
 | any other `mention`, `reply` or `decided` | the AI's group session |
 | everything addressed to the secretary | the secretary's group session |
@@ -129,7 +130,7 @@ an `event` in `member status`, which H turns into a `system` row
 | the CLI cannot resume the session id | starts a fresh session in the same folder; its first turn carries what the first turn of that session kind carries, plus the last 20 messages of the thread (R-123); reports `session_replaced` |
 | the CLI reports a vendor rate limit | state `limited`; reports `rate_limited` with the reset time; items are held until then |
 | the owner's cap is reached (R-61) | state `limited`; reports `cap_reached`; items are held until the cap is released (`contracts/commands.md` section 2) |
-| the CLI reports that sign-in is not valid in this mode | state `limited`; reports `login_invalid` only when the AI enters `limited`, at the first failed start after a success; later failed tries are not reported again. N never changes how the CLI authenticates (R-56). The state ends when the owner sends `agent.set` for that CLI again, or when the session start for the next item succeeds: that start is still tried |
+| the CLI reports that sign-in is not valid in this mode | state `limited`; reports `login_invalid` only when the AI enters `limited`, at the first failed start after a success; later failed tries are not reported again. N never changes how the CLI authenticates (R-56). Sending `agent.set` for that CLI sets `login_ok` back to `true` in `host.info`, while the member's `limited` state ends at its next completed turn (the start for the next item is still tried, and a completed turn also restores `login_ok`) |
 | group paused | interrupts running turns of the group's sessions (`turn_interrupted`, `stop`); the sessions stay open; items are held |
 | task paused (`contracts/task-machine.md` row 12) | interrupts a running turn of that task's sessions (`turn_interrupted`, `stop`); the sessions stay open; items are held |
 | owner's "all offline" | interrupts running turns (`turn_interrupted`, `stop`) and closes every session; items are held |

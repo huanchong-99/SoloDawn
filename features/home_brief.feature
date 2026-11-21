@@ -21,7 +21,7 @@ Feature: Briefs and their confirmation in the home
     And the brief is "confirmed"
     And the home holds 2 tasks
     And task 1 is "active" and task 2 is "queued" until task 1 is merged
-    And the home has queued "assign ai-one task 1, confirmed secretary", each caused by the confirm
+    And the home has queued "assign ai-one task 1, confirmed secretary"
 
   Scenario: A task that depends on another starts only after that one merged
     Given a group home with a secretary and three working AIs
@@ -30,14 +30,14 @@ Feature: Briefs and their confirmation in the home
     When the secretary gives task 2 to "ai-three" while it is queued
     Then task 2 is "queued" and the home has queued nothing that makes a worktree
     When task 1 is merged
-    Then task 2 is "active" and the home has queued "assign ai-three task 2", caused by the confirm
+    Then task 2 is "active" and the home has queued "assign ai-three task 2"
 
   Scenario: Sending a brief back tells the secretary, and a new brief supersedes it
     Given a group home with a secretary and three working AIs
     And the secretary has posted the brief
     When the owner sends the brief back with the note "Include the relay path."
     Then the brief is "revise" with the note "Include the relay path."
-    And the home has queued "confirmed secretary", each caused by the send-back
+    And the home has queued "confirmed secretary"
     And the home holds no task
     When the secretary posts a brief that replaces it
     Then the home answers ok

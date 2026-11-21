@@ -66,7 +66,7 @@ func TestRunADiskReadsWhatTheStoreHolds(t *testing.T) {
 		"main [c2@8 c1@7 m1@4], below 7 [m1@4], one [c2@8]",
 		"thread [c2@8 m3@6], below 8 [m3@6], another 0",
 		"pending [c1@7 c2@8]",
-		fmt.Sprintf(`item 1 for %s on %s, not before 0: {"AI":%q,"Why":"notice","Task":"","Msg":"","Commit":"","PR":0,"Jump":false,"Code":"first","Detail":"","Cause":null,"NotBefore":0}`, aiID, laptop.ID(), aiID),
-		fmt.Sprintf(`item 2 for %s on %s, not before %d: {"AI":%q,"Why":"notice","Task":"","Msg":"","Commit":"","PR":0,"Jump":false,"Code":"second","Detail":"","Cause":null,"NotBefore":%d}`, aiID, laptop.ID(), clock+5000, aiID, clock+5000),
+		fmt.Sprintf(`item 1 for %s on %s, not before 0: {"item":1,"ai":%q,"why":"notice","code":"first"}`, aiID, laptop.ID(), aiID),
+		fmt.Sprintf(`item 2 for %s on %s, not before %d: {"item":2,"ai":%q,"why":"notice","code":"second"}`, aiID, laptop.ID(), clock+5000, aiID),
 	})
 }
