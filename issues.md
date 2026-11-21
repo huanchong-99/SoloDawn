@@ -20,9 +20,15 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-21 · limitation · `Sessions` implements only the server side of a `ctl` connection
 
-- Symptom: a host on one node has no outgoing `ctl` client session yet to a home on another node (sending `hello` with `kind: "host"`, reading `welcome`, exchanging `devlog` both ways, and passing pushes to `Host.Push`), so cross-node AI sessions (`A3.3`, unit `I-6`) have no transport path.
+- Symptom: a host on one node had no outgoing `ctl` client session yet to a home on another node (sending `hello` with `kind: "host"`, reading `welcome`, exchanging `devlog` both ways, and passing pushes to `Host.Push`), so cross-node AI sessions (`A3.3`, unit `I-6`) had no transport path.
 - Cause: `internal/node/session.go` (`N-2`) serves inbound `ctl` connections (`Serve`); the client side of a `ctl` session was split out by the coordinator's decision of 2026-11-21.
-- Status: open for unit `N-2b` (`internal/node/client.go`), wired into the node runtime by `N-4`.
+- Status: resolved in unit `N-2b` (`internal/node/client.go`: `(*Sessions).ServeClient` and `(*Sessions).ConnectHome`, plus `attachRuntime` in `internal/host/run.go` sending current `member status` on `Attach` per `flows/connect.md` step 18); wiring `Host.Connect` to `peer.Peer.Connect` in `node.go` belongs to `N-4`.
+
+### 2026-11-21 · deviation · `peer.Connection` delivers `re` responses without waiting for earlier queued pushes
+
+- Symptom: on a WebRTC `*peer.Connection`, when a remote home sends `rows` pushes immediately followed by a `synced` response (`planning/contracts/datachannel.md` section 4), `(*peer.Connection).Request` can return `synced` before the `ServeClient` reader goroutine has read `rows` from `(*peer.Connection).Read` and applied them to `Host.Rows`. A caller such as `host.join` (`HS-21`) that reads `Host.Rows` immediately after `sync` returns can see `not_found` if scheduled ahead of the reader goroutine.
+- Cause: `(*peer.Connection).deliver` (`internal/peer/ctl.go:83-94`) writes non-`re` frames to the buffered `incoming` channel (`Read`) and writes `re` frames directly to `waiting[re]` (`Request`) on Pion's callback goroutine, with no ordering barrier between the two channels. `deliver` was left unchanged here per the CRAP 6.01 decision below.
+- Status: open for `internal/peer` or `I-6`.
 
 ### 2026-11-21 · deviation · The local link routes only `cmd` requests until `sync`, `fetch` and `ack` land
 

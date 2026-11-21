@@ -301,7 +301,7 @@ func TestBatchFramesExact60KiBBoundary(t *testing.T) {
 	curSize := len(dvlMustEncode(one[0]))
 	probe := sesAddEntry(userKey, user, 51, otherKey.ID(), "node", "b")
 	probeSize := len(dvlMustEncode(probe))
-	need := dvlCtlLimit - curSize - 1 - probeSize + 1
+	need := ctlLimit - curSize - 1 - probeSize + 1
 	if need < 0 {
 		t.Fatalf("unexpected negative padding %d", need)
 	}
@@ -310,8 +310,8 @@ func TestBatchFramesExact60KiBBoundary(t *testing.T) {
 	if len(exactFrames) != 1 {
 		t.Fatalf("at 61,440 bytes got %d frames, want 1", len(exactFrames))
 	}
-	if got := len(dvlMustEncode(exactFrames[0])); got != dvlCtlLimit {
-		t.Fatalf("frame size = %d, want %d", got, dvlCtlLimit)
+	if got := len(dvlMustEncode(exactFrames[0])); got != ctlLimit {
+		t.Fatalf("frame size = %d, want %d", got, ctlLimit)
 	}
 
 	overEntry := sesAddEntry(userKey, user, 51, otherKey.ID(), "node", strings.Repeat("b", need+1))
