@@ -75,7 +75,9 @@ type m6World struct {
 	homeLink   *m6OwnerLink
 	aiLink     *m6OwnerLink
 	groupID    proto.ID
+	aiAgent    string
 	aiMemberID string
+	sessionID  string
 	seenMsgs   map[string]bool
 	idSeq      uint64
 
@@ -396,7 +398,7 @@ func seedM6LogEntries(tx *store.Tx, user string, entries []proto.Envelope) error
 }
 
 func (w *m6World) startNodeProc(np *m6NodeProc, extraEnv []string) error {
-	env := append(os.Environ(), "HOME="+np.root, "XDG_DATA_HOME="+np.root, "LocalAppData="+np.root)
+	env := append(os.Environ(), "HOME="+np.root, "XDG_DATA_HOME="+np.root, "XDG_CONFIG_HOME="+np.root, "LocalAppData="+np.root)
 	env = append(env, extraEnv...)
 	cmd := exec.Command(w.bin, "node")
 	cmd.Env = env
@@ -675,7 +677,6 @@ func buildM6ClaudeScript(turn1, ans1, turn2, ans2 string) []byte {
 		m6MCPPostCallStep(2, ans2),
 		m6MCPPostResultStep(2),
 		{"dir": "stdout", "msg": map[string]any{"type": "result", "subtype": "success"}},
-		{"dir": "eof"},
 	}
 	return m6MarshalJSON(map[string]any{"steps": steps})
 }
@@ -711,7 +712,6 @@ func buildM6CodexScript(turn1, ans1, turn2, ans2 string) []byte {
 		m6MCPPostCallStep(2, ans2),
 		m6MCPPostResultStep(2),
 		m6CodexTurnDoneStep(),
-		{"dir": "eof"},
 	}
 	return m6MarshalJSON(map[string]any{"session": "thr-m6-codex-1", "steps": steps})
 }
@@ -828,6 +828,7 @@ func (w *m6World) verifyJoinedRow(ai proto.AIMemberRow, agent string) (bool, err
 	if ai.CLI != agent || ai.Host != w.aiNode.key.ID() || ai.Host == w.homeNode.key.ID() {
 		return false, fmt.Errorf("unexpected AI member row: %+v", ai)
 	}
+	w.aiAgent = agent
 	w.aiMemberID = ai.ID
 	return true, nil
 }
@@ -860,7 +861,19 @@ func (w *m6World) thenAIPostsAndWaits(_ string, wantText string) error {
 		}
 		return w.matchesWaitingAI(raw), nil
 	}
-	return w.readHomeRowsUntil(match)
+	if err := w.readHomeRowsUntil(match); err != nil {
+		return err
+	}
+	return w.recordLiveStartIfFirst()
+}
+
+func (w *m6World) recordLiveStartIfFirst() error {
+	if w.sessionID != "" {
+		return nil
+	}
+	id, err := readSingleStartLine(w.cliLogPath, w.aiAgent)
+	w.sessionID = id
+	return err
 }
 
 func (w *m6World) matchesNewAIPost(raw json.RawMessage, wantText string) bool {
@@ -920,12 +933,7 @@ func (w *m6World) scanRowsFrame(rawFrame json.RawMessage, match func(json.RawMes
 }
 
 func (w *m6World) thenOneCLIProcessRan(agent string) error {
-	sessionID, err := readSingleStartLine(w.cliLogPath, agent)
-	if err != nil {
-		return err
-	}
-	w.aiNode.stop()
-	return waitSingleStartExitLog(w.cliLogPath, agent, sessionID)
+	return waitSingleStartExitLog(w.cliLogPath, agent, w.sessionID)
 }
 
 func readSingleStartLine(path, agent string) (string, error) {
