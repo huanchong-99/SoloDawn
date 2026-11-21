@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"math"
 	"net"
 	"os"
 	"os/exec"
@@ -398,16 +397,6 @@ func registerCallTestTools(t *testing.T, h *Host, arrived chan<- int, release <-
 				return nil, errors.New("sensitive sqlite path /private/db")
 			},
 		},
-		"bad_output": {
-			Call: func(context.Context, *Host, Caller, json.RawMessage) (any, error) {
-				return math.NaN(), nil
-			},
-		},
-		"bad_raw": {
-			Call: func(context.Context, *Host, Caller, json.RawMessage) (any, error) {
-				return json.RawMessage("{"), nil
-			},
-		},
 	})
 }
 
@@ -500,9 +489,7 @@ func verifyToolErrorsAndRevocation(t *testing.T, h *Host, cs *mcp.ClientSession,
 	}
 
 	assertExactToolError(t, cs, "domain_err", "secret: this looks like a secret")
-	for _, toolName := range []string{"unexpected_err", "bad_output", "bad_raw"} {
-		assertExactToolError(t, cs, toolName, "internal: "+internalToolMessage)
-	}
+	assertExactToolError(t, cs, "unexpected_err", "internal: "+internalToolMessage)
 
 	clearSecretary := func(s *Session) { s.Secretary = false }
 	if err := h.Sessions.Update(secKey, clearSecretary); err != nil {

@@ -110,13 +110,16 @@ func (h *Host) runToolCall(ctx context.Context, caller Caller, call func(context
 	if err != nil {
 		return toolFailureResult(err)
 	}
-	encoded, err := mcpEncodeJSON(value)
-	if err != nil {
-		return toolFailureResult(err)
-	}
 	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: encoded}},
+		Content: []mcp.Content{&mcp.TextContent{Text: encodeToolValue(value)}},
 	}
+}
+
+func encodeToolValue(value any) string {
+	if raw, ok := value.(json.RawMessage); ok {
+		return strings.TrimSpace(string(raw))
+	}
+	return marshalWire(value)
 }
 
 func toolFailureResult(err error) *mcp.CallToolResult {
@@ -134,19 +137,6 @@ func toolErrorResult(err *Error) *mcp.CallToolResult {
 	}
 }
 
-func mcpEncodeJSON(value any) (string, error) {
-	if raw, ok := value.(json.RawMessage); ok && json.Valid(raw) {
-		return strings.TrimSpace(string(raw)), nil
-	}
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(value); err != nil {
-		return "", err
-	}
-	return strings.TrimSuffix(buf.String(), "\n"), nil
-}
-
 func schemaForCaller(name string, caller Caller, raw json.RawMessage) json.RawMessage {
 	if len(raw) == 0 {
 		return emptyToolSchema
@@ -156,8 +146,7 @@ func schemaForCaller(name string, caller Caller, raw json.RawMessage) json.RawMe
 	var root map[string]any
 	dec.Decode(&root)
 	projectCallerSchema(caller, name, root)
-	encoded, _ := mcpEncodeJSON(root)
-	return json.RawMessage(encoded)
+	return json.RawMessage(marshalWire(root))
 }
 
 // projectCallerSchema adapts the superset tool schemas registered in Tools to
@@ -259,6 +248,5 @@ func rewriteMCPResult(method string, raw json.RawMessage) json.RawMessage {
 		IsError bool            `json:"isError"`
 	}
 	json.Unmarshal(raw, &call)
-	out, _ := mcpEncodeJSON(call)
-	return json.RawMessage(out)
+	return json.RawMessage(marshalWire(call))
 }

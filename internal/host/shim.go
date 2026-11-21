@@ -1,8 +1,6 @@
 package host
 
 import (
-	"bytes"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -67,11 +65,7 @@ func bridgeShim(token string, dial func() (net.Conn, error), stdin io.Reader, st
 }
 
 func writeOpeningLine(w io.Writer, token string) error {
-	var line bytes.Buffer
-	enc := json.NewEncoder(&line)
-	enc.SetEscapeHTML(false)
-	enc.Encode(shimOpening{MCP: token})
-	_, err := w.Write(line.Bytes())
+	_, err := io.WriteString(w, marshalWire(shimOpening{MCP: token})+"\n")
 	return err
 }
 
