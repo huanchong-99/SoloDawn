@@ -149,6 +149,17 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     await syncNode(laptop);
   }
 
+  async function submitLaptopRefusal(code: string) {
+    laptop.refuseJoin = code;
+    one<HTMLButtonElement>('.members .head button').click();
+    flushSync();
+    await vi.waitFor(() => expect(all('dialog .choice')).toHaveLength(4));
+    flushSync();
+    one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(laptop.joins).toHaveLength(1));
+    flushSync();
+  }
+
   AfterEachScenario(closePage);
 
   Background(({ Given }) => {
@@ -206,7 +217,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   });
 
   Scenario(
-    'AI member cards show secretary, working, waiting, sleeping and offline states',
+    'AI member cards show secretary, working, waiting, sleeping, limited and offline states',
     ({ Given, When, Then, And }) => {
       Given(
         "the group has a secretary, a working AI on T-12, a waiting AI on T-13, Mina's AI on T-11, and a dormant AI",
@@ -424,96 +435,66 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         expect(all('.member .meter')).toEqual([]);
         expect(all('.member button, .member a')).toEqual([]);
       });
-      When(
-        'the dormant AI wakes to work and another AI goes offline, pauses, hits a limit and enters takeover',
-        () => {
-          const h = workstation.home;
-          h.write(
-            website,
-            example('row-member-ai', {
-              id: 'sec-ai',
-              g: website,
-              name: 'Secretary',
-              cli: 'claude',
-              secretary: true,
-              state: 'takeover',
-              task: undefined,
-            }),
-          );
-          h.write(
-            website,
-            example('row-member-ai', {
-              id: 'claude-ws',
-              g: website,
-              name: 'Claude Code',
-              cli: 'claude',
-              state: 'limited',
-              task: undefined,
-            }),
-          );
-          h.write(
-            website,
-            example('row-member-ai', {
-              id: 'codex-win',
-              g: website,
-              name: 'Codex',
-              cli: 'codex',
-              state: 'offline',
-              task: undefined,
-              host_name: 'windows',
-              path: 'relay',
-            }),
-          );
-          h.write(
-            website,
-            example('row-member-ai', {
-              id: 'mina-ai',
-              g: website,
-              user: 'mina-user',
-              name: 'Mina Claude',
-              cli: 'claude',
-              state: 'paused',
-              task: undefined,
-            }),
-          );
-          h.write(
-            website,
-            example('row-member-ai', {
-              id: 'dormant-ai',
-              g: website,
-              name: 'Night Codex',
-              cli: 'codex',
-              state: 'working',
-              task: undefined,
-            }),
-          );
-          flushSync();
-        },
-      );
-      Then(
-        'those cards update to working, "Offline" with "offline", "Paused", "Limit reached" and "Owner is operating directly"',
-        () => {
-          expect(texts('.member p.st')).toEqual([
-            'Owner is operating directly',
-            'Limit reached',
-            'Offline',
-            'Paused',
-            'Working',
-          ]);
-          expect(all('.member p.st').map((el) => el.dataset.st)).toEqual([
-            'takeover',
-            'limited',
-            'offline',
-            'paused',
-            'working',
-          ]);
-          const codexComputer = all('.member .kv')[2]
-            .querySelectorAll('dd')[0]
-            .textContent!.replace(/\s+/g, ' ')
-            .trim();
-          expect(codexComputer).toBe('windows · offline');
-        },
-      );
+      When('the dormant AI wakes to work and two other AIs go offline and hit a limit', () => {
+        const h = workstation.home;
+        h.write(
+          website,
+          example('row-member-ai', {
+            id: 'claude-ws',
+            g: website,
+            name: 'Claude Code',
+            cli: 'claude',
+            state: 'limited',
+            task: undefined,
+          }),
+        );
+        h.write(
+          website,
+          example('row-member-ai', {
+            id: 'codex-win',
+            g: website,
+            name: 'Codex',
+            cli: 'codex',
+            state: 'offline',
+            task: undefined,
+            host_name: 'windows',
+            path: 'relay',
+          }),
+        );
+        h.write(
+          website,
+          example('row-member-ai', {
+            id: 'dormant-ai',
+            g: website,
+            name: 'Night Codex',
+            cli: 'codex',
+            state: 'working',
+            task: undefined,
+          }),
+        );
+        flushSync();
+      });
+      Then('those cards update to "Working", "Offline" with "offline" and "Limited"', () => {
+        expect(texts('.member p.st')).toEqual([
+          'Waiting · 2 items waiting on you',
+          'Limited',
+          'Offline',
+          "Waiting · T-11 waiting for Mina's approval",
+          'Working',
+        ]);
+        expect(all('.member p.st').map((el) => el.dataset.st)).toEqual([
+          'needyou',
+          'limited',
+          'offline',
+          'waiting',
+          'working',
+        ]);
+        const codexComputer = all('.member .kv')[2]
+          .querySelectorAll('dd')[0]
+          .textContent!.replace(/\s+/g, ' ')
+          .trim();
+        expect(codexComputer).toBe('windows · offline');
+      });
     },
   );
 
@@ -595,7 +576,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         expect(texts('#chat-side .people .person > .grow')).toEqual(['Alex · You · Owner']);
       });
       When('the owner opens "Add AI" and presses Escape in the dialog', async () => {
-        one<HTMLButtonElement>('.members > .row button').click();
+        one<HTMLButtonElement>('.members .head button').click();
         flushSync();
         const dlg = one<HTMLDialogElement>('.members ~ dialog, #chat-side dialog');
         expect(dlg.open).toBe(true);
@@ -622,7 +603,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
-    'Adding an AI reads connected computers and sends host.join',
+    'Adding an AI reads connected computers, suggests a free name and sends host.join',
     ({ Given, When, Then, And }) => {
       Given(
         'the group has no secretary yet and a second computer "laptop" is connected',
@@ -634,13 +615,13 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       When('the owner opens "Add AI"', async () => {
-        one<HTMLButtonElement>('.members > .row button').click();
+        one<HTMLButtonElement>('.members .head button').click();
         flushSync();
         await vi.waitFor(() => expect(all('dialog .choice')).toHaveLength(4));
         flushSync();
       });
       Then(
-        '"Claude Code · workstation" is disabled as "Already in this group" and "Codex · workstation" is disabled as "Choose an account type on Computers first"',
+        '"Claude Code · workstation" is disabled as "Already in this group" and "Codex · workstation" is disabled as "Choose an account type on the Computers page first"',
         () => {
           const labels = texts('dialog .choice b');
           const subs = texts('dialog .choice .sub');
@@ -652,17 +633,24 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             'Claude Code · laptop',
           ]);
           expect(subs[0]).toBe('Already in this group');
-          expect(subs[1]).toBe('Choose an account type on Computers first');
+          expect(subs[1]).toBe('Choose an account type on the Computers page first');
           expect(radios.map((r) => r.disabled)).toEqual([true, true, false, false]);
         },
       );
       And(
-        '"Codex · laptop" is chosen with name "Codex" and "Claude Code · laptop" warns "Not signed in"',
+        '"Codex · laptop" is chosen with name "Codex" and "Claude Code · laptop" warns "Not signed in" and suggests "Claude Code 2"',
         () => {
           const radios = all<HTMLInputElement>('dialog .choice input');
+          const nameInput = one<HTMLInputElement>('dialog input.input');
           expect(radios.map((r) => r.checked)).toEqual([false, false, true, false]);
           expect(texts('dialog .choice .sub')[3]).toBe('API key · Not signed in');
-          expect(one<HTMLInputElement>('dialog input.input').value).toBe('Codex');
+          expect(nameInput.value).toBe('Codex');
+          radios[3].click();
+          flushSync();
+          expect(nameInput.value).toBe('Claude Code 2');
+          radios[2].click();
+          flushSync();
+          expect(nameInput.value).toBe('Codex');
         },
       );
       When(
@@ -714,54 +702,86 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     },
   );
 
+  Scenario('A name conflict when adding an AI is reported clearly', ({ Given, When, Then }) => {
+    Given('a second computer "laptop" is connected', addLaptop);
+    When(
+      '"laptop" refuses "host.join" with "conflict" and the owner submits "Codex · laptop"',
+      () => submitLaptopRefusal('conflict'),
+    );
+    Then('the dialog stays open and says "That name is already used in this group."', () => {
+      expect(one<HTMLDialogElement>('#chat-side dialog').open).toBe(true);
+      expect(texts('dialog [role=alert]')).toEqual(['That name is already used in this group.']);
+    });
+  });
+
   Scenario(
-    'Refusals and lost computers are reported without sending elsewhere',
+    "An unreachable group home from the AI's computer is reported clearly",
     ({ Given, When, Then }) => {
       Given('a second computer "laptop" is connected', addLaptop);
       When(
-        '"laptop" refuses "host.join" with "conflict" and the owner submits "Codex · laptop"',
-        async () => {
-          laptop.refuseJoin = 'conflict';
-          one<HTMLButtonElement>('.members > .row button').click();
-          flushSync();
-          await vi.waitFor(() => expect(all('dialog .choice')).toHaveLength(4));
-          flushSync();
-          one('dialog form').dispatchEvent(
-            new Event('submit', { bubbles: true, cancelable: true }),
-          );
-          await vi.waitFor(() => expect(laptop.joins).toHaveLength(1));
-          flushSync();
-        },
+        '"laptop" refuses "host.join" with "home_unreachable" and the owner submits "Codex · laptop"',
+        () => submitLaptopRefusal('home_unreachable'),
       );
-      Then('the dialog stays open and says "Not sent. The home answered: conflict"', () => {
-        expect(one<HTMLDialogElement>('#chat-side dialog').open).toBe(true);
-        expect(texts('dialog [role=alert]')).toEqual(['Not sent. The home answered: conflict']);
-      });
-      When('"laptop" disconnects before the owner submits again', async () => {
-        laptop.drop();
-        flushSync();
-        one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-        await new Promise((later) => setTimeout(later, 5));
-        flushSync();
-      });
       Then(
-        'no command is sent to "workstation" and the dialog says "Not sent: the group home cannot be reached."',
+        'the dialog stays open and says "The AI\'s computer cannot reach this group\'s home right now. Try again when both are online."',
         () => {
-          expect(workstation.joins).toEqual([]);
-          expect(laptop.joins).toHaveLength(1);
+          expect(one<HTMLDialogElement>('#chat-side dialog').open).toBe(true);
           expect(texts('dialog [role=alert]')).toEqual([
-            'Not sent: the group home cannot be reached.',
+            "The AI's computer cannot reach this group's home right now. Try again when both are online.",
           ]);
         },
       );
-      When('the group home disconnects', () => {
-        one<HTMLButtonElement>('dialog .btn-ghost').click();
-        workstation.drop();
-        flushSync();
-      });
-      Then('the "Add AI" button is disabled', () => {
-        expect(one<HTMLButtonElement>('.members > .row button').disabled).toBe(true);
-      });
     },
   );
+
+  Scenario('A lost AI computer and disabled Add AI states explain why', ({ Given, When, Then }) => {
+    Given('a second computer "laptop" is connected', addLaptop);
+    When('the owner opens "Add AI" and "laptop" disconnects before the owner submits', async () => {
+      one<HTMLButtonElement>('.members .head button').click();
+      flushSync();
+      await vi.waitFor(() => expect(all('dialog .choice')).toHaveLength(4));
+      laptop.drop();
+      flushSync();
+      one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await new Promise((later) => setTimeout(later, 5));
+      flushSync();
+    });
+    Then(
+      'no command is sent to "workstation" and the dialog says "Not sent: the AI\'s computer cannot be reached."',
+      () => {
+        expect(workstation.joins).toEqual([]);
+        expect(laptop.joins).toEqual([]);
+        expect(texts('dialog [role=alert]')).toEqual([
+          "Not sent: the AI's computer cannot be reached.",
+        ]);
+      },
+    );
+    When('the owner closes the dialog and becomes a non-admin member', () => {
+      one<HTMLButtonElement>('dialog .btn-ghost').click();
+      workstation.home.write(
+        website,
+        example('row-member-human', {
+          id: owner,
+          g: website,
+          user,
+          name: 'Alex',
+          role: 'member',
+          online: true,
+        }),
+      );
+      flushSync();
+    });
+    Then('the "Add AI" button is disabled with reason "Only an admin can add an AI."', () => {
+      expect(one<HTMLButtonElement>('.members .head button').disabled).toBe(true);
+      expect(texts('.members .add-why')).toEqual(['Only an admin can add an AI.']);
+    });
+    When('the group home disconnects', () => {
+      workstation.drop();
+      flushSync();
+    });
+    Then('the "Add AI" button is disabled with reason "Cannot reach the group home."', () => {
+      expect(one<HTMLButtonElement>('.members .head button').disabled).toBe(true);
+      expect(texts('.members .add-why')).toEqual(['Cannot reach the group home.']);
+    });
+  });
 });

@@ -1,6 +1,18 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { homes, lost, newId, type Group, type Home } from '../../lib/groups.svelte';
+  import { homes, type Group, type Home } from '../../lib/groups.svelte';
+  import {
+    accountTitle,
+    candidatesOf,
+    canMakeSecretary,
+    cliTitle,
+    joinError,
+    joinGroup,
+    readHosts,
+    selectableCandidates,
+    suggestedName,
+    type Candidate,
+  } from '../../lib/members';
   import { t } from '../../lib/prefs.svelte';
   import type { HostInfo } from '../../lib/proto';
   import Avatar from '../Avatar.svelte';
@@ -11,18 +23,8 @@
   let { group, open = $bindable(false) }: { group: Group; open?: boolean } = $props();
   const uid = $props.id();
 
-  const cliTitle = (agent: string) =>
-    agent === 'claude' ? 'Claude Code' : agent === 'codex' ? 'Codex' : agent;
-  const accountName = (account: string) =>
-    account === 'personal' || account === 'team' || account === 'api_key'
-      ? t(`member.account.${account}`)
-      : account;
-
   const owned = $derived(homes.filter((home) => home.owner && home.ctl));
-  const canSecretary = $derived(
-    !group.info?.secretary ||
-      (group.me?.kind === 'human' && (group.me.role === 'owner' || group.me.role === 'admin')),
-  );
+  const canSecretary = $derived(canMakeSecretary(group));
 
   let dialog: HTMLDialogElement;
   let infos = $state.raw(new Map<Home, HostInfo>());
@@ -34,58 +36,21 @@
   let failed = $state('');
   let asked = new Set<Home>();
 
-  const candidates = $derived(
-    owned.flatMap((home) => {
-      const info = infos.get(home);
-      if (!info) return [];
-      return info.agents.map((entry) => ({
-        key: `${info.device}:${entry.agent}`,
-        home,
-        device: info.device,
-        hostName: info.name,
-        agent: entry.agent,
-        account: entry.account,
-        loginOk: entry.login_ok,
-        inGroup:
-          entry.groups.some((g) => g.g === group.g) ||
-          group.members.some(
-            (m) => m.kind === 'ai' && m.host === info.device && m.cli === entry.agent,
-          ),
-      }));
-    }),
-  );
-  type Candidate = (typeof candidates)[number];
-  const selectable = $derived(candidates.filter((c) => c.account !== null && !c.inGroup));
+  const candidates = $derived(candidatesOf(group, owned, infos));
+  const selectable = $derived(selectableCandidates(candidates));
   let chosen = $state.raw<Candidate>();
 
-  const suggestedName = (agent: string | undefined, asSecretary: boolean) =>
-    asSecretary && !group.info?.secretary
-      ? t('member.join.secretary.name')
-      : agent
-        ? cliTitle(agent)
-        : '';
-
-  async function loadHosts(targets: Home[]) {
-    const fresh = targets.filter((home) => !asked.has(home) && home.ctl);
-    if (!fresh.length) return;
-    for (const home of fresh) asked.add(home);
+  async function syncHosts(targets: Home[]) {
     loading = true;
-    const results = await Promise.all(
-      fresh.map(async (home) => ({
-        home,
-        answer: await home.ctl!.request({ t: 'host.info' }).catch(lost),
-      })),
+    const next = await readHosts(
+      targets,
+      asked,
+      untrack(() => infos),
     );
     loading = false;
-    if (!open) return;
-    const next = new Map(infos);
-    let firstErr = '';
-    for (const { home, answer } of results) {
-      if (answer.err) firstErr ||= answer.err.code;
-      else next.set(home, answer);
-    }
-    infos = next;
-    if (!infos.size && firstErr) failed = firstErr;
+    if (!open || !next) return;
+    infos = next.infos;
+    if (next.error) failed = next.error;
   }
 
   $effect(() => {
@@ -107,57 +72,42 @@
 
   $effect(() => {
     if (!open) return;
-    void loadHosts(owned);
+    void syncHosts(owned);
     if (!chosen && selectable.length) {
       const first = selectable[0];
       chosen = first;
-      if (!untrack(() => customName))
+      if (!untrack(() => customName)) {
         name = suggestedName(
+          group,
           first.agent,
           untrack(() => secretary),
         );
+      }
     }
   });
 
   function pickCandidate(candidate: Candidate) {
     chosen = candidate;
-    if (!customName) name = suggestedName(candidate.agent, secretary);
+    if (!customName) name = suggestedName(group, candidate.agent, secretary);
   }
 
   function toggleSecretary(checked: boolean) {
     secretary = checked;
-    if (!customName) name = suggestedName(chosen?.agent, checked);
+    if (!customName) name = suggestedName(group, chosen?.agent, checked);
   }
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     failed = '';
     if (!chosen || !group.info) return;
-    const target = owned.find((home) => home === chosen!.home);
-    if (!target?.ctl) {
-      failed = 'lost';
-      chosen = selectable[0];
-      return;
-    }
     const trimmed = name.trim();
     if (!trimmed) return;
+    const target = owned.find((home) => home === chosen!.home);
     busy = true;
-    const env = await target.me.sign(
-      JSON.stringify({
-        t: 'host.join',
-        n: newId(),
-        ts: Date.now(),
-        to: chosen.device,
-        g: group.g,
-        home: group.info.home,
-        agent: chosen.agent,
-        name: trimmed,
-        secretary,
-      }),
-    );
-    const answer = await target.ctl.request({ t: 'cmd', env }).catch(lost);
+    const code = await joinGroup(target, group, chosen, trimmed, secretary);
     busy = false;
-    if (answer.err) failed = answer.err.code;
+    if (code === 'lost' && !target?.ctl) chosen = selectable[0];
+    if (code) failed = code;
     else dialog.close();
   }
 </script>
@@ -197,7 +147,9 @@
                   {:else if candidate.account === null}
                     {t('member.join.unconfigured')}
                   {:else}
-                    {accountName(candidate.account)}{#if !candidate.loginOk}{' '}<span class="warn">
+                    {accountTitle(candidate.account)}{#if !candidate.loginOk}{' '}<span
+                        class="warn"
+                      >
                         · {t('member.join.nologin')}
                       </span>{/if}
                   {/if}
@@ -241,7 +193,14 @@
       </div>
     {/if}
 
-    {#if failed}<Failure code={failed} />{/if}
+    {#if failed}
+      {@const message = joinError(failed)}
+      {#if message}
+        <p class="fail" role="alert">{message}</p>
+      {:else}
+        <Failure code={failed} />
+      {/if}
+    {/if}
     <footer class="row">
       <span class="grow"></span>
       <button type="button" class="btn btn-ghost" onclick={() => dialog.close()}>
@@ -328,5 +287,9 @@
     height: 16px;
     margin: 0;
     accent-color: var(--sky);
+  }
+  .fail {
+    color: var(--danger);
+    font-size: var(--fs-sm);
   }
 </style>

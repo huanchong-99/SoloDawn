@@ -320,7 +320,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `app`, `nav`, `bar`, `page` (the title of each page), `pref` (the names of the preferences),
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
-  of its English file to the type `Key`; today the areas are `chat`, `groups`, `nodes`,
+  of its English file to the type `Key`; today the areas are `chat`, `groups`, `member`, `nodes`,
   `settings` and `states`. `src/messages/files.glob.ts` finds every file by its name and
   `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
@@ -432,6 +432,17 @@ file in `src/routes/`. It edits neither the shell nor another area:
   - Only text messages are drawn in full. A card is one line that names its kind and its subject,
     with the dawn edge when it waits for the reader, and a row the home wrote is a quiet line;
     the cards the areas mount replace both.
+  - The member panel (`src/components/member/`) mounts at `chat.side` (`order: 10`). It lists the
+    group's AI members, placing the secretary first with its corner mark, with each AI's state
+    (`working`, `waiting` on the reader in dawn or on another member, `dormant` as sleeping,
+    `limited`, `offline`), computer with path (`local`, `direct`, `relay`, `offline`), and
+    account type; then the human members with their roles and online status. Its "Add AI" button
+    requires a reachable group home, an admin reader and at least one connected owned computer,
+    and shows its reason when disabled. The add-AI dialog reads `host.info` from the owner's
+    connected computers, suggests an unused member name in the group, offers the secretary switch
+    when the group has none or the reader is an admin, signs `host.join` for the chosen computer,
+    and words `home_unreachable`, `conflict` and a lost computer directly before falling back to
+    `Failure`.
 - **Where code goes.** Logic lives in `.ts` and `.svelte.ts` modules, which the gates measure
   (CRAP and mutation); components stay thin. A module that only holds an `import.meta.glob` is
   named `*.glob.ts` and is not mutated; it holds no logic. Stryker would wrap the glob's
@@ -464,6 +475,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/peer.ts`           | signalling paths, connections to nodes, `ctl`, path, reconnect  |
 | `features/peer-fakes.ts`    | a peer connection and its channels for the tests of `peer.ts`   |
 | `src/lib/groups.svelte.ts`  | `Home`, `Group`: row caches, cursor, paging, lists, commands    |
+| `src/lib/members.ts`        | AI card status, path, candidate list, free name, `host.join`    |
 | `src/lib/compose.ts`        | mention being typed, mentions and parts of a text, row size     |
 | `src/lib/when.ts`           | times in the reader's language; messages by day                 |
 | `src/App.svelte`            | shell: navigation, top bar, banners, the page of the route      |
@@ -474,12 +486,14 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/`           | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount` |
 | `src/components/groups/`    | the group list, the cards that wait, the create-group dialog    |
 | `src/components/chat/`      | the chat of a group: main line, message, composer               |
+| `src/components/member/`    | the chat's member panel (`chat.side`) and the add-AI dialog     |
 | `src/styles/`               | `tokens.css` (design tokens) and `base.css` (shared classes)    |
 | `public/`                   | manifest, icon and `fonts/`, copied as they are                 |
 | `features/web.spec.ts`      | steps of `../features/web.feature`                              |
 | `features/shell.spec.ts`    | steps of `../features/web_shell.feature`; `fixtures/` stand-ins |
 | `features/groups.spec.ts`   | steps of `../features/web_groups.feature`                       |
 | `features/chat.spec.ts`     | steps of `../features/web_chat.feature`                         |
+| `features/member.spec.ts`   | steps of `../features/web_member.feature`                       |
 | `features/home.ts`          | a home in memory for those steps; `page.ts` drives the page     |
 | `features/demo.ts`          | groups with a morning of talk, for a development page           |
 | `features/watch.svelte.ts`  | an effect outside a component, for tests of what is reactive    |
