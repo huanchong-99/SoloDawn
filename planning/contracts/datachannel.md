@@ -147,7 +147,9 @@ before `synced` and rows from `fetch` never move it.
 `{"t":"fetched","re":3,"ok":true,"rows":[ … ],"more":true}`: the home stops
 filling `rows` when the next row would exceed the message limit; `more`
 says whether older rows exist. `rows` is `[]` when there is nothing and
-never a `gone` marker, which has no `pos` (`contracts/rows.md`).
+never a `gone` marker, which has no `pos` (`contracts/rows.md`). A group
+this node does not home is answered `not_found`; a peer the group does not
+serve (section 8), `forbidden`.
 
 ## 5. Commands
 
