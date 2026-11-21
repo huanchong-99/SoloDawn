@@ -49,6 +49,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | send a host its inbox items, on every `hello` | `loop.Inbox(conn)` |
 | record a host's `ack` | `loop.Ack(conn, req)` |
 | run the timers by hand, or tell the home of an event | `loop.Tick(now)`, `loop.Event(name, event)` |
+| mark a disconnected host's AIs offline | `HostOfflineEvent`, fired by `Loop` when a device's last `Inbox` connection ends |
 | move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
 | push to a client | the `Client` interface |
 
@@ -178,7 +179,10 @@ The cards take the names that start with `card`, their tests too, and their test
 with `TestCard`. Device-log events (`ev_device.go`) take the names that start with `dev`, and their
 tests start with `TestDevice` and `dev`.
 The checks and reviews (`cmd_review.go`) take the names that start with `rev`, their tests too, and
-their test functions start with `TestReviewCmd`.
+their test functions start with `TestReviewCmd`. The merges and summaries (`cmd_merge.go`) take the
+names that start with `mrg`, their tests too, and their test functions start with `TestMerge`.
+Host events (`cmd_hostev.go`) take the names that start with `hev`, their tests too, and their test
+functions start with `TestHostEv`; the file exports `HostOfflineEvent`.
 
 ## The run loop
 
@@ -283,8 +287,9 @@ out, because a client's rows must have no gap. Instead, a connection is given up
 returns an error from `Send`, or when 1,024 frames wait for it: nothing more is sent, every group
 forgets it, `Gone()` is closed, and the client is closed if it has a `Close` method, as a
 `peer.Connection` has. The client then connects and reads again. A client that is done
-(`Done()`) and one that the node detaches are forgotten in the same way and not closed. A
-client's `Send` must return once the client is done or closed.
+(`Done()`) and one that the node detaches are forgotten in the same way and not closed. When the
+last connection that took inbox items (`Inbox`) for a device ends, the loop runs `HostOfflineEvent`
+for that device. A client's `Send` must return once the client is done or closed.
 
 **For the node and the local link.** A loop is started with a `LoopConfig`: the store, the node's
 device id, its owner's user id, the tables, and `Logs`, which returns the node's verified log of a
@@ -450,6 +455,19 @@ function that moves a task calls it and adds nothing to its rules.
   `revise`; a group without a secretary gets none. A queued task gets its `assign` when the merge
   of its last dependency releases it (unit HM-12).
 
+## Merges and summaries
+
+`cmd_merge.go` holds `task` `merged` and `conflict` and `post` of kind `summary`
+([commands](../../planning/contracts/commands.md) 1.3 and 1.5;
+[messages](../../planning/contracts/messages.md) 2.5, 2.8 and 2.11;
+[task-machine](../../planning/contracts/task-machine.md) rows 8 and 9), under the keys
+`task/merged`, `task/conflict` and `post/summary`.
+
+When `task/merged` steps queued dependents through `OnReleased` (in sorted task id order), each
+task that becomes `active` gets `stats.started` set to `c.Now`
+([rows](../../planning/contracts/rows.md), section 4) so summary minutes count active work rather
+than dependency wait, and its `assign` item names its `task` message (`msg` equal to the task id).
+
 ## Task commands
 
 `cmd_task.go` holds `task` `start`, `branch`, `assign`, `pause`, `resume`, `cancel`, `fail` and
@@ -572,12 +590,39 @@ it does this:
   SHA-256 of `SoloDawn task failed <n>` in base64url ([issues](../../issues.md)), and mentions the
   brief's requester when still a member and the assignee's owner without duplicates.
 
+## Host events
+
+`cmd_hostev.go` holds `member` `status` and the `HostOfflineEvent` (`"host.offline"`) handler
+([commands](../../planning/contracts/commands.md) 1.2 and 1.9;
+[messages](../../planning/contracts/messages.md) 2.11;
+[rows](../../planning/contracts/rows.md) 2 and 4;
+[task-machine](../../planning/contracts/task-machine.md) 5), under `Commands` key `member/status`
+and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does this:
+
+- **Payload and target.** When `event` is present, `code` must be one of the step-1 host codes
+  (`turn_interrupted`, `login_invalid`, `session_replaced`), else `bad_request`; an omitted or `""`
+  `detail` is left out of the row body, and a non-empty `event.task` must exist in `State.Tasks`,
+  else `not_found`. An `id` not in `State.AIs` is `not_found`; any signer for which
+  `State.Hosts(c.Who, id)` is false (another device, or a command carrying `as`) is `forbidden`.
+- **Rows and notices.** The AI's `AIMemberRow` gets `State`, `Task`, `Path`, `Usage` and
+  `LastSeen = c.Now`; `Since` becomes `c.Now` when `State` changes and stays as it was when `State`
+  is unchanged. When `event` is present, the home writes a `system` `MsgRow` (`id` `n`, `by`
+  `"system"`, `ts` `c.Now`, `mentions` `[]`, and `ai` set to `id`) in the thread of `event.task`
+  when set, advancing `task.Thread.Count` and `task.Thread.Last` (`text` `""`, `ts` `c.Now`) on the
+  task row, or in the main line otherwise. For `login_invalid`, when `State.Group.Secretary` is not
+  empty, it queues `Item{AI: s.Group.Secretary, Why: "notice", Msg: n, Code: "login_invalid"}`.
+- **Closed host connection.** When `Loop.Detach` ends a connection that took inbox items
+  (`Conn.taker`, set by `Loop.Inbox`) and no other taker connection of `device` remains on the
+  loop, `Loop` fires `HostOfflineEvent` with `device`. For every AI in `State.AIs` in id order with
+  `Host == device` and `State != "offline"`, the handler sets `State = "offline"`, `Task = ""` and
+  `Since = now`, leaving `LastSeen`, `Path` and `Usage` unchanged.
+
 ## Known limitations
 
 - The table of commands holds the groups, members, briefs, the task commands of HM-9, the four
-  kinds of `post` of HM-6, `note` and `forget`, the cards, and the checks and reviews, and no node
-  starts a loop yet: the remaining command files (including thread round counting in HM-13) and the
-  wiring of the node are separate units
+  kinds of `post` of HM-6, `note` and `forget`, the cards, the checks and reviews, the merges and
+  summaries, and the host events, and no node starts a loop yet: the remaining command files
+  (including thread round counting in HM-13) and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
@@ -643,6 +688,11 @@ task cards, wait recomputation and refusals, and `cmd_card_internal_test.go` cov
 `cardChoiceOK`, `cardPoster` and `cardItems`. `features/home_card.feature` holds the home half of
 acceptance tests A4.1 and A4.2, decision priority and free-text override.
 
+`cmd_merge_test.go` sends `task/merged`, `task/conflict` and `post/summary` through
+`Commands.Apply` with fakes of `Receipts` and `Disk`, covering every refusal, boundary, card
+expiration and dependent task release. `features/home_merge.feature` holds the home half of
+acceptance tests A5.10 and A5.12 and dependent task release with `stats.started`.
+
 `ev_device_test.go` covers every branch and boundary of `Events["device"]`, including ignored event
 types, empty and non-owner slices, version boundaries and online/offline `GroupsChanged` transitions.
 
@@ -650,3 +700,9 @@ types, empty and non-owner slices, version boundaries and online/offline `Groups
 `Commands.Apply` with fakes of `Receipts` and `Disk`, pinning every refusal, boundary, retirement,
 card-wait recomputation, veto and row-14 stop, and checking `proto.UnexpectedNulls` on the rows
 written. `features/home_review.feature` holds the home half of acceptance tests A5.3 and A5.4.
+
+`cmd_hostev_test.go` checks `member/status` against the wire golden files, state and `since`
+transitions, the three step-1 host event codes, `login_invalid` secretary notices, refusals, and
+`HostOfflineEvent` both directly and when taker connections end on `StartLoop`.
+`features/home_hostev.feature` holds the home half of acceptance test A3.6 together with the three
+host event codes, secretary notices and host disconnection.
