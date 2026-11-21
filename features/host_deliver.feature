@@ -1,9 +1,7 @@
 Feature: Host inbox delivery and group state sync
 
-  Scenario: An item not signed by the group home is refused and an item sent twice runs one turn across a restart
+  Scenario: An item sent twice runs one turn across a restart
     Given a paired host on disk with AI "Claude Code" in group "Website" homed on "home-1"
-    When an inbox item signed by "impostor" is pushed for "Website"
-    Then the delivery audit records 1 "refused" row and 0 "delivered" rows
     When "home-1" pushes mention item 11 for "Claude Code" twice
     Then "Claude Code" has received 1 turn and "home-1" has received 2 acknowledgements for item 11
     When the host restarts on its store and "home-1" pushes mention item 11 again

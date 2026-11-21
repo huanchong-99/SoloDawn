@@ -6,6 +6,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-21 · deviation · Host delivery derives the data folder from SQLite's `pragma_database_list`
+
+- Symptom: for an in-memory store (`:memory:`), `hostConfig.projectDir` returns `""` and delivery skips disk clone and worktree creation; for a disk store it derives `projects/<group>` from the directory of the `main` database file (`filepath.Join(filepath.Dir(dbFile), "projects", group)`), tying delivery to the store's file layout.
+- Cause: `host.Host` (`internal/host/host.go:75`) has no `Dir` field yet, so `readHostConfigSQL` and `hostConfig.projectDir` (`internal/host/deliver.go`) read `file` from `pragma_database_list WHERE name = 'main'`.
+- Status: open. `node` setting a `Dir` field on `Host` (HS-0 / N-4) can replace the `pragma_database_list` lookup.
+
+### 2026-11-21 · deviation · Step 17 session and workspace cleanup awaits a close hook from the session runtime
+
+- Symptom: when a `rows` push marks a task `merged`, `cancelled` or reassigned, changes a task's reviewer, or marks a member `gone`, `deliver.go` does not end the session row or remove the task or review worktree.
+- Cause: `planning/flows/agent-turn.md` D17 and G require closing any open CLI process and waiting for its exit (C-6) before ending the session row or deleting its working folder, and `host.Runtime` (`internal/host/host.go:516`) exposes `Turn` and `Answer` only.
+- Status: open, for HS-15 (#187) or a follow-up with the session runtime once a close hook exists (`HS-21` already handles `host.leave`).
+
+### 2026-11-21 · limitation · `max_open` is enforced in the session runtime rather than in delivery
+
+- Symptom: `deliver.go` composes and hands an eligible turn to `Runner.Turn` without counting open sessions against `max_open` itself.
+- Cause: `planning/flows/agent-turn.md` step 5.1 places `max_open` (closing the longest-`waiting` session, or waiting when every open session is `working` or `takeover`) in the session runtime (`HS-15`, #187, `tryReserveSlot`), so delivery does not duplicate it; `Deliver` (`deliverNow` in `internal/host/deliver.go`) walks all held AI keys on each wake so a freed slot reaches waiting AIs.
+- Status: open, coordinated between HS-13 (#186) and HS-15 (#187).
+
 ### 2026-11-21 · limitation · The jobs of a group in the home's run loop have no bound
 
 - Symptom: not observed. A client that sends `cmd` frames faster than its group applies them makes the list of that group's jobs grow, and with it the memory of the node, until the client stops. A group applies a command in one transaction of the store, so this needs a client that sends on purpose or a store that has become slow. Ticks and events are jobs as well: while a group does not keep up, each tick of `LoopConfig.Every` and each `Event` adds one job to its list.
@@ -295,6 +313,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a browser that joins a pairing room that already has two members is answered `{"t":"full","room":"<room id>"}` (`planning/contracts/rendezvous.md` section 2.2), but the web client drops the frame without telling the page, so a third browser keeps waiting for `joined`.
 - Cause: `full` is not among the frames the web rendezvous client reads (`web/src/lib/rendezvous.ts:21`); a frame that does not parse is ignored (`web/src/lib/rendezvous.ts:165-168`). The server sends it from `internal/rendezvous/room.go` (`join`).
 - Status: open, owner W-2.
+
+### 2026-11-20 · limitation · `ReviewedMerge.GitHubRepo` is not filled from the group's repository
+
+- Symptom: the merge with a remote runs `gh pr merge <pr> --repo <owner>/<repo>` (`planning/contracts/local.md` section 7, row "merge, with a remote"), but no code sets `<owner>/<repo>` from the group's repository; an empty `GitHubRepo` would make the merge fail.
+- Cause: `ReviewedMerge.GitHubRepo` (`internal/host/merge.go`) is set by its caller, and no unit called the merge before HS-13. The claim that `--repo` makes gh skip every local step (worktree removal, local branch deletion) rests on the gh 2.102.0 source (`pkg/cmd/pr/merge/merge.go`: `CanDeleteLocalBranch = !cmd.Flags().Changed("repo")`), not on a run against GitHub or on older gh versions.
+- Status: resolved in HS-13: `githubRepo` (`internal/host/deliver.go`, `buildReviewedMerge`) extracts `<owner>/<repo>` from the group row's `repo` field when `forge` is `github`.
 
 ### 2026-11-20 · limitation · A8.4 does not run on Windows
 
@@ -758,9 +782,3 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Symptom: `go test -cover ./internal/store/` reported 93.7% of statements, leaving nine error-return blocks uncovered across `inbox.go`, `read.go` and `store.go`.
 - Cause: unit tests did not exercise locked or closed database paths in `Enqueue` (`internal/store/inbox.go:20-22`), `Inbox` (`internal/store/inbox.go:35-37`), `Snapshot` (`internal/store/read.go:20-22`, `:26-28`, `:31-33`), `Snapshot.rows` (`internal/store/read.go:72-74`) and `transaction` (`internal/store/store.go:78-80`); and `Inbox` (`internal/store/inbox.go:44-46` before the fix) and `Snapshot.rows` (`internal/store/read.go:79-81` before the fix) checked `rows.Scan` errors that cannot occur. Both `inbox` and `row` are SQLite `STRICT` tables (`internal/store/schema.sql:1-17`, `:31-44`; `planning/contracts/storage.md` section 1) whose selected columns match the non-nil Go destination types (`INTEGER NOT NULL` and `INTEGER PRIMARY KEY` to `*int64`, `TEXT NOT NULL` to `*string` or `*[]byte`, nullable `TEXT` to `**string` or `*[]byte`), while `modernc.org/sqlite` steps and reads column values inside `rows.Next()`, surfacing any SQLite or I/O failure through `rows.Err()`.
 - Status: resolved on branch `gemini/store-coverage`: removed the two unreachable `rows.Scan` error branches in `internal/store/inbox.go` and `internal/store/read.go`, and added unit tests covering all seven reachable error paths (`TestInboxFailures` in `internal/store/delivery_test.go`, `TestSnapshotAndQueryFailures` in `internal/store/read_test.go`, `TestWriteBeginFailure` in `internal/store/store_test.go`), bringing `internal/store` to 100.0% statement coverage.
-
-### 2026-11-20 · limitation · `ReviewedMerge.GitHubRepo` is not filled from the group's repository yet
-
-- Symptom: the merge with a remote runs `gh pr merge <pr> --repo <owner>/<repo>` (`planning/contracts/local.md` section 7, row "merge, with a remote"), but no code sets `<owner>/<repo>` from the group's repository; an empty `GitHubRepo` would make the merge fail.
-- Cause: `ReviewedMerge.GitHubRepo` (`internal/host/merge.go`) is set by its caller, and no unit called the merge before HS-13. The claim that `--repo` makes gh skip every local step (worktree removal, local branch deletion) rests on the gh 2.102.0 source (`pkg/cmd/pr/merge/merge.go`: `CanDeleteLocalBranch = !cmd.Flags().Changed("repo")`), not on a run against GitHub or on older gh versions.
-- Status: resolved in HS-13: `githubRepo` (`internal/host/deliver.go`, `buildReviewedMerge`) extracts `<owner>/<repo>` from the group row's `repo` field when `forge` is `github`.

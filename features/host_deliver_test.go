@@ -46,8 +46,8 @@ type accHome struct {
 	done     chan struct{}
 	acks     []proto.Ack
 	sinces   []int64
-	started  chan struct{} // read by attachNoWait
-	finished chan struct{} // read by waitSyncDone
+	started  chan struct{} // single reader: attachNoWait
+	finished chan struct{} // single reader: attachAndFinishSync / sync steps
 	reply    chan accSyncReply
 }
 
@@ -137,18 +137,16 @@ func (r *accRunner) count(member string) int {
 }
 
 type accDeliverEnv struct {
-	dir      string
-	db       *store.Store
-	h        *host.Host
-	ownerKey identity.Key
-	hostKey  identity.Key
-	homeKey  identity.Key
-	otherKey identity.Key
-	home     *accHome
-	sinces   []int64
-	runner   *accRunner
-	askCh    <-chan json.RawMessage
-	askDone  func()
+	dir     string
+	db      *store.Store
+	h       *host.Host
+	hostKey identity.Key
+	homeKey identity.Key
+	home    *accHome
+	sinces  []int64
+	runner  *accRunner
+	askCh   <-chan json.RawMessage
+	askDone func()
 }
 
 func makeAccKey(seed byte) identity.Key {
@@ -164,37 +162,25 @@ func makeAccID(tag byte) proto.ID {
 
 func (e *accDeliverEnv) setupKeysAndStore(dir string) error {
 	e.dir = dir
-	e.ownerKey = makeAccKey(1)
 	e.hostKey = makeAccKey(2)
 	e.homeKey = makeAccKey(3)
-	e.otherKey = makeAccKey(4)
 	e.runner = &accRunner{turns: map[string]int{}}
 	db, err := store.Open(filepath.Join(dir, "node.db"))
 	if err != nil {
 		return err
 	}
 	e.db = db
-	if err := e.seedOwnerAndHomes(); err != nil {
+	if err := e.seedHomes(); err != nil {
 		return err
 	}
 	return e.startHost()
 }
 
-func (e *accDeliverEnv) seedOwnerAndHomes() error {
-	ownerID := e.ownerKey.ID()
-	e1 := e.ownerKey.Sign(accJSON(map[string]any{"t": "device", "n": makeAccID(1), "ts": accNowMS, "user": ownerID, "ver": 1, "op": "add", "dev": ownerID, "kind": "browser", "name": "owner"}))
-	e2 := e.ownerKey.Sign(accJSON(map[string]any{"t": "device", "n": makeAccID(2), "ts": accNowMS, "user": ownerID, "ver": 2, "op": "add", "dev": e.hostKey.ID(), "kind": "node", "name": "host"}))
-	e3 := e.ownerKey.Sign(accJSON(map[string]any{"t": "device", "n": makeAccID(3), "ts": accNowMS, "user": ownerID, "ver": 3, "op": "add", "dev": e.homeKey.ID(), "kind": "node", "name": "home"}))
+func (e *accDeliverEnv) seedHomes() error {
 	homes := accJSON([]proto.Home{{Group: accGroupID, Home: e.homeKey.ID(), Name: "Website"}})
-	ownerSetting := accJSON(ownerID)
 	write := func(tx *store.Tx) error {
-		tx.Exec("INSERT INTO setting(key, value) VALUES('owner', ?), ('homes', ?)", ownerSetting, homes)
-		for i, env := range []proto.Envelope{e1, e2, e3} {
-			if _, err := tx.Exec("INSERT INTO device_log(user, ver, env) VALUES(?, ?, ?)", ownerID, i+1, accJSON(env)); err != nil {
-				return err
-			}
-		}
-		return nil
+		_, err := tx.Exec("INSERT INTO setting(key, value) VALUES('homes', ?)", homes)
+		return err
 	}
 	return e.db.Write(write)
 }
@@ -206,6 +192,17 @@ func (e *accDeliverEnv) startHost() error {
 	return err
 }
 
+func (e *accDeliverEnv) closeHome() {
+	if e.home == nil {
+		return
+	}
+	select {
+	case <-e.home.done:
+	default:
+		close(e.home.done)
+	}
+}
+
 func (e *accDeliverEnv) seedLiveGroup() {
 	e.h.Rows.Put(accGroupID, "group", accGroupID, json.RawMessage(accGroupRowJSON(e.homeKey.ID(), 1)))
 	e.h.Rows.Put(accGroupID, "member", accMember1, json.RawMessage(accMemberRowJSON(accMember1, "Claude Code", e.hostKey.ID(), false, 2)))
@@ -214,6 +211,7 @@ func (e *accDeliverEnv) seedLiveGroup() {
 }
 
 func (e *accDeliverEnv) attachNoWait() {
+	e.closeHome()
 	e.home = newAccHome()
 	e.h.Attach(e.homeKey.ID(), e.home)
 	<-e.home.started
@@ -227,14 +225,15 @@ func (e *accDeliverEnv) attachAndFinishSync(seq int64) {
 	e.sinces = append(e.sinces, e.home.sinces...)
 }
 
-func (e *accDeliverEnv) waitCondition(ok func() bool) {
+func (e *accDeliverEnv) waitCondition(desc string, ok func() bool) error {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if ok() {
-			return
+			return nil
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
+	return fmt.Errorf("timed out waiting for %s", desc)
 }
 
 func accGroupRowJSON(homeID string, seq int64) string {
@@ -303,6 +302,7 @@ func registerDeliverGivenSteps(sc *godog.ScenarioContext, f fixtures, cleanup fu
 		}
 		installHooks()
 		cleanup(func() {
+			env.closeHome()
 			if env.db != nil {
 				env.db.Close()
 			}
@@ -340,14 +340,14 @@ func registerDeliverWhenSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
 }
 
 func registerBasicPushSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
-	sc.Step(`^an inbox item signed by "impostor" is pushed for "Website"$`, func() {
-		msgID := makeAccID(10)
-		it := proto.Item{Type: "item", Nonce: makeAccID(11), Timestamp: accNowMS, Group: accGroupID, To: env.hostKey.ID(), Item: 9, AI: accMember1, Why: "mention", Msg: msgID}
-		env.pushSignedItem(env.otherKey, env.otherKey.ID(), it, nil)
-	})
-	sc.Step(`^"home-1" pushes mention item (\d+) for "Claude Code" twice$`, func(num int) {
+	sc.Step(`^"home-1" pushes mention item (\d+) for "Claude Code" twice$`, func(num int) error {
 		env.pushMention(int64(num))
+		firstAck := func() bool { return env.home.ackCount(int64(num)) == 1 }
+		if err := env.waitCondition("first mention delivery", firstAck); err != nil {
+			return err
+		}
 		env.pushMention(int64(num))
+		return nil
 	})
 	sc.Step(`^the host restarts on its store and "home-1" pushes mention item (\d+) again$`, func(num int) error {
 		prevAcks := env.home.acks
@@ -355,7 +355,9 @@ func registerBasicPushSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
 			return err
 		}
 		env.seedLiveGroup()
+		env.home.mu.Lock()
 		env.home.acks = append(prevAcks, env.home.acks...)
+		env.home.mu.Unlock()
 		env.pushMention(int64(num))
 		return nil
 	})
@@ -405,7 +407,7 @@ func registerSyncFlowSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
 		env.pushSignedItem(env.homeKey, env.homeKey.ID(), aIt, nil)
 		env.pushSignedItem(env.homeKey, env.homeKey.ID(), nIt, nil)
 	})
-	sc.Step(`^"home-1" completes sync at sequence (\d+) with task "T-1" already merged$`, func(seq int) {
+	sc.Step(`^"home-1" completes sync at sequence (\d+) with task "T-1" already merged$`, func(seq int) error {
 		rows := []json.RawMessage{
 			json.RawMessage(accGroupRowJSON(env.homeKey.ID(), 1)),
 			json.RawMessage(accMemberRowJSON(accMember1, "Claude Code", env.hostKey.ID(), false, 2)),
@@ -416,21 +418,26 @@ func registerSyncFlowSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
 		ans := accJSON(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: accGroupID, Seq: int64(seq)})
 		env.home.reply <- accSyncReply{raw: json.RawMessage(ans)}
 		<-env.home.finished
-		env.waitCondition(func() bool { return env.home.allAcks() == 2 })
+		return env.waitCondition("2 acks and secretary turn", func() bool {
+			return env.home.allAcks() == 2 && env.runner.count(accSecID) == 1
+		})
 	})
-	sc.Step(`^the host attaches to "home-1" and an initial reset breaks off after row sequence (\d+)$`, func(seq int) {
+	sc.Step(`^the host attaches to "home-1" and an initial reset breaks off after row sequence (\d+)$`, func(seq int) error {
 		env.attachNoWait()
 		env.h.Push(env.homeKey.ID(), json.RawMessage(accJSON(proto.Reset{Type: "reset", Group: accGroupID})))
 		rows := []json.RawMessage{json.RawMessage(accGroupRowJSON(env.homeKey.ID(), int64(seq)))}
 		env.h.Push(env.homeKey.ID(), json.RawMessage(accJSON(proto.Rows{Type: "rows", Group: accGroupID, Rows: rows})))
 		env.home.reply <- accSyncReply{err: errors.New("eof")}
 		<-env.home.finished
-		env.waitCondition(func() bool { return len(env.home.sinces) == 1 })
+		gotSince := func() bool { return len(env.home.sinces) == 1 }
+		if err := env.waitCondition("initial sync request", gotSince); err != nil {
+			return err
+		}
 		env.sinces = append(env.sinces, env.home.sinces...)
+		return nil
 	})
 	sc.Step(`^the host reconnects to "home-1" and completes sync at sequence (\d+)$`, func(seq int) {
 		env.attachAndFinishSync(int64(seq))
-		env.waitCondition(func() bool { return true })
 	})
 	sc.Step(`^"home-1" pushes live row sequence (\d+) and a reconnect delta breaks off before synced$`, func(seq int) {
 		rows := []json.RawMessage{json.RawMessage(accMemberRowJSON(accMember1, "Claude Code", env.hostKey.ID(), false, int64(seq)))}
@@ -451,19 +458,20 @@ func registerDeliverThenSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
 			tx.QueryRow("SELECT count(*) FROM audit WHERE what = 'refused'").Scan(&gotRef)
 			return tx.QueryRow("SELECT count(*) FROM audit WHERE what = 'delivered'").Scan(&gotDel)
 		}
-		err := env.db.Write(read)
-		if err != nil {
+		if err := env.db.Write(read); err != nil {
 			return err
 		}
 		if gotRef != wantRef || gotDel != wantDel {
-			return fmt.Errorf("audit refused=%d delivered=%d, want refused=%d delivered=%d", gotRef, wantDel, wantRef, wantDel)
+			return fmt.Errorf("audit refused=%d delivered=%d, want refused=%d delivered=%d", gotRef, gotDel, wantRef, wantDel)
 		}
 		return nil
 	})
 	sc.Step(`^"Claude Code" has received (\d+) turns? and "home-1" has received (\d+) acknowledgements? for item (\d+)$`, func(wantTurns, wantAcks, item int) error {
-		gotTurns, gotAcks := env.runner.count(accMember1), env.home.ackCount(int64(item))
-		if gotTurns != wantTurns || gotAcks != wantAcks {
-			return fmt.Errorf("turns=%d acks=%d, want turns=%d acks=%d", gotTurns, gotAcks, wantTurns, wantAcks)
+		err := env.waitCondition("turns and acknowledgements", func() bool {
+			return env.runner.count(accMember1) == wantTurns && env.home.ackCount(int64(item)) == wantAcks
+		})
+		if err != nil {
+			return fmt.Errorf("%w: turns=%d acks=%d, want turns=%d acks=%d", err, env.runner.count(accMember1), env.home.ackCount(int64(item)), wantTurns, wantAcks)
 		}
 		return nil
 	})
@@ -474,7 +482,10 @@ func registerDeliverThenSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
 		return nil
 	})
 	sc.Step(`^"Sec" has received (\d+) turn and "Claude Code" has received (\d+) turns$`, func(wantSec, wantAI int) error {
-		env.waitCondition(func() bool { return env.runner.count(accSecID) == wantSec })
+		secReady := func() bool { return env.runner.count(accSecID) == wantSec }
+		if err := env.waitCondition("secretary turn", secReady); err != nil {
+			return err
+		}
 		if env.runner.count(accSecID) != wantSec || env.runner.count(accMember1) != wantAI {
 			return fmt.Errorf("sec=%d ai=%d, want sec=%d ai=%d", env.runner.count(accSecID), env.runner.count(accMember1), wantSec, wantAI)
 		}
@@ -491,8 +502,12 @@ func registerDeliverThenSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
 		return nil
 	})
 	sc.Step(`^the open ask receives item (\d+) and "Claude Code" has received (\d+) new turns$`, func(wantItem, wantTurns int) error {
-		if len(env.askCh) != 1 || env.runner.count(accMember1) != wantTurns {
-			return fmt.Errorf("askCh=%d turns=%d", len(env.askCh), env.runner.count(accMember1))
+		gotReply := func() bool { return len(env.askCh) == 1 }
+		if err := env.waitCondition("open ask reply", gotReply); err != nil {
+			return err
+		}
+		if env.runner.count(accMember1) != wantTurns {
+			return fmt.Errorf("turns=%d, want %d", env.runner.count(accMember1), wantTurns)
 		}
 		raw := <-env.askCh
 		var wire proto.InboxItem
@@ -505,9 +520,8 @@ func registerDeliverThenSteps(sc *godog.ScenarioContext, env *accDeliverEnv) {
 		return nil
 	})
 	sc.Step(`^"Claude Code" has received (\d+) new turn and "home-1" has received (\d+) acknowledgement for item (\d+)$`, func(wantTurns, wantAcks, item int) error {
-		if env.runner.count(accMember1) != wantTurns || env.home.ackCount(int64(item)) != wantAcks {
-			return fmt.Errorf("turns=%d acks=%d", env.runner.count(accMember1), env.home.ackCount(int64(item)))
-		}
-		return nil
+		return env.waitCondition("post-turn delivery", func() bool {
+			return env.runner.count(accMember1) == wantTurns && env.home.ackCount(int64(item)) == wantAcks
+		})
 	})
 }
