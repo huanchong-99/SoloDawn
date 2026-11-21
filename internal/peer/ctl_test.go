@@ -18,33 +18,38 @@ import (
 )
 
 // Messages that are not ctl frames of the contract and carry no request id
-// are dropped; responses go to their request once; Read ends with its context
-// or the connection.
+// are dropped; responses go to their request once via Read; Read ends with its
+// context or the connection.
 func TestFramingBoundaries(t *testing.T) {
-	c := &Connection{ctx: t.Context(), incoming: make(chan json.RawMessage, 1), waiting: make(map[int64]chan json.RawMessage)}
+	c := &Connection{ctx: t.Context(), incoming: make(chan json.RawMessage, 4), waiting: make(map[int64]chan json.RawMessage)}
 	push := func(n int) string { return `{"t":"` + strings.Repeat("a", n-8) + `"}` }
 	// A response without a valid result does not reach the request waiting for it.
 	id, waiting := c.reserve()
 	re := `{"re":` + fmt.Sprint(id)
-	for _, msg := range []string{`[]`, `{}`, `{"T":"push"}`, `{"t":null}`, re + `}`, re + `,"ok":false}`, re + `,"err":{"code":"bad_request"}}`, re + `,"t":"x","err":{"code":"bad_request","msg":"x"}}`, re + `,"ok":false,"err":{"code":"bad_request","msg":"x"}}`, string([]byte{255}), push(61441)} {
+	for _, msg := range []string{`[]`, `{}`, `{"t":"x"}{}`, `{"T":"push"}`, `{"t":null}`, re + `}`, re + `,"ok":false}`, re + `,"err":{"code":"bad_request"}}`, re + `,"t":"x","err":{"code":"bad_request","msg":"x"}}`, re + `,"ok":false,"err":{"code":"bad_request","msg":"x"}}`, string([]byte{255}), push(61441)} {
 		c.deliver([]byte(msg))
 		eq(t, len(c.incoming), 0)
 		eq(t, len(waiting), 0)
 	}
 	c.deliver([]byte(re + `,"ok":true}`))
-	eq(t, string(recv(t, waiting)), re+`,"ok":true}`)
+	eq(t, len(waiting), 0)
 	c.deliver([]byte(push(61440)))
-	eq(t, len(c.incoming), 1)
+	eq(t, len(c.incoming), 2)
 	got, err := c.Read(t.Context())
 	check(t, err)
+	eq(t, string(recv(t, waiting)), re+`,"ok":true}`)
 	eq(t, string(got), push(61440))
 	eq(t, c.Send(json.RawMessage(push(61441))).Error(), "ctl frame exceeds 60 KiB")
 	for _, result := range []string{`"ok":true`, `"err":{"code":"bad_request","msg":"invalid"}`} {
 		id, ch := c.reserve()
 		data := `{"re":` + string(encode(id)) + "," + result + "}"
 		c.deliver([]byte(data))
-		eq(t, string(recv(t, ch)), data)
 		c.deliver([]byte(data))
+		c.deliver([]byte(`{"t":"marker"}`))
+		marker, err := c.Read(t.Context())
+		check(t, err)
+		eq(t, string(marker), `{"t":"marker"}`)
+		eq(t, string(recv(t, ch)), data)
 		eq(t, len(ch), 0)
 	}
 	canceled, cancel := context.WithCancel(t.Context())
@@ -67,11 +72,13 @@ func TestRefusedMessagesKeepTheConnection(t *testing.T) {
 		big := `{"t":"x","id":` + fmt.Sprint(id) + `,"data":"` + strings.Repeat("a", 61440) + `"}`
 		return []string{`{"id":` + fmt.Sprint(id) + `}`, `{"id":` + fmt.Sprint(id) + `,"re":5,"ok":true}`, big}
 	}
+	stop := readReplies(t.Context(), n.client)
 	for i := range 3 {
 		id, ch := n.client.reserve()
 		check(t, n.client.dc.SendText(refused(id)[i]))
 		eq(t, string(recv(t, ch)), fmt.Sprintf(`{"re":%d,"err":{"code":"bad_request","msg":"the message is not a ctl frame of the contract"}}`, id))
 	}
+	stop()
 	for _, msg := range []string{`[]`, `{}`, `{"re":99,"ok":false}`, string([]byte{255})} {
 		check(t, n.client.dc.SendText(msg))
 	}
@@ -102,6 +109,7 @@ func TestCtlSizeAndReplyRouting(t *testing.T) {
 	eq(t, string(data), `{"t":"one","id":1}`)
 	_, err = n.client.Request(t.Context(), func(int64) any { return oversize })
 	eq(t, err.Error(), "ctl frame exceeds 60 KiB")
+	stop := readReplies(t.Context(), n.client)
 	waiting := make(chan error, 1)
 	go func() {
 		_, err := n.client.Request(t.Context(), func(id int64) any { return proto.Request{Type: "two", ID: id} })
@@ -115,7 +123,10 @@ func TestCtlSizeAndReplyRouting(t *testing.T) {
 	check(t, proto.Decode(data, &q))
 	check(t, n.server.Send(proto.Success{Re: q.ID, OK: true}))
 	check(t, recv(t, waiting))
+	stop()
 	n.info(t)
+	stop = readReplies(t.Context(), n.client)
+	defer stop()
 	go func() {
 		_, err := n.client.Request(t.Context(), func(id int64) any { return proto.Request{Type: "three", ID: id} })
 		waiting <- err
@@ -124,6 +135,63 @@ func TestCtlSizeAndReplyRouting(t *testing.T) {
 	check(t, err)
 	check(t, n.server.Close())
 	eq(t, recv(t, waiting), io.EOF)
+}
+
+// Pushes sent before a request's answer are returned by Read before Request
+// wakes, and Request wakes only once Read is called again after the push.
+func TestPushesDeliveredBeforeAnswer(t *testing.T) {
+	f := newPair(t)
+	n := f.open(t, 0)
+	reply := make(chan json.RawMessage, 1) // single reader: TestPushesDeliveredBeforeAnswer
+	go func() {
+		ans, err := n.client.Request(t.Context(), func(id int64) any { return proto.Request{Type: "sync", ID: id} })
+		check(t, err)
+		reply <- ans
+	}()
+	reqRaw, err := n.server.Read(t.Context())
+	check(t, err)
+	var q proto.Request
+	check(t, proto.Decode(reqRaw, &q))
+	check(t, n.server.Send(proto.RVFrame{Type: "rows"}))
+	check(t, n.server.Send(proto.Success{Re: q.ID, OK: true}))
+	waitQueued(t, n.client, 2)
+	eq(t, len(reply), 0)
+	push, err := n.client.Read(t.Context())
+	check(t, err)
+	eq(t, string(push), `{"t":"rows"}`)
+	eq(t, len(reply), 0)
+	stop := readReplies(t.Context(), n.client)
+	defer stop()
+	eq(t, string(recv(t, reply)), fmt.Sprintf(`{"re":%d,"ok":true}`, q.ID))
+}
+
+func waitQueued(t *testing.T, c *Connection, want int) {
+	t.Helper()
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(c.incoming) == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("queued %d frames, want %d", len(c.incoming), want)
+}
+
+func readReplies(ctx context.Context, c *Connection) func() {
+	rctx, stop := context.WithCancel(ctx)
+	done := make(chan struct{}) // single reader: returned stop function
+	go func() {
+		defer close(done)
+		for {
+			if _, err := c.Read(rctx); err != nil {
+				return
+			}
+		}
+	}()
+	return func() {
+		stop()
+		<-done
+	}
 }
 func TestBackoffSequenceAndWake(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {

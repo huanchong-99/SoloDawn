@@ -342,7 +342,7 @@ func TestToolCallsTrackLiveCallerCountAndErrors(t *testing.T) {
 	h.Sessions.SetTurn(secKey, Turn{Kind: ItemsTurn, Thread: "t1", Depth: 1})
 
 	// arrived is read by verifyConcurrentCallerCount; release is closed there.
-	arrived := make(chan int, 2)
+	arrived := make(chan struct{}, 2)
 	release := make(chan struct{})
 	registerCallTestTools(t, h, arrived, release)
 
@@ -355,7 +355,7 @@ func TestToolCallsTrackLiveCallerCountAndErrors(t *testing.T) {
 	verifyToolErrorsAndRevocation(t, h, cs, secKey, token)
 }
 
-func registerCallTestTools(t *testing.T, h *Host, arrived chan<- int, release <-chan struct{}) {
+func registerCallTestTools(t *testing.T, h *Host, arrived chan<- struct{}, release <-chan struct{}) {
 	t.Helper()
 	saveTools(t, map[string]Tool{
 		"inspect": {
@@ -375,8 +375,8 @@ func registerCallTestTools(t *testing.T, h *Host, arrived chan<- int, release <-
 			},
 		},
 		"barrier": {
-			Call: func(_ context.Context, gotH *Host, c Caller, _ json.RawMessage) (any, error) {
-				arrived <- gotH.Sessions.Calls(c.SessionKey)
+			Call: func(context.Context, *Host, Caller, json.RawMessage) (any, error) {
+				arrived <- struct{}{}
 				<-release
 				return map[string]bool{"ok": true}, nil
 			},
@@ -453,9 +453,12 @@ func callToolText(t *testing.T, cs *mcp.ClientSession, params *mcp.CallToolParam
 	return res.Content[0].(*mcp.TextContent).Text
 }
 
-func verifyConcurrentCallerCount(t *testing.T, h *Host, cs *mcp.ClientSession, secKey SessionKey, arrived <-chan int, release chan struct{}) {
+func verifyConcurrentCallerCount(t *testing.T, h *Host, cs *mcp.ClientSession, secKey SessionKey, arrived <-chan struct{}, release chan struct{}) {
 	t.Helper()
 	var wg sync.WaitGroup
+	defer wg.Wait()
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
 	for range 2 {
 		wg.Add(1)
 		go func() {
@@ -466,15 +469,15 @@ func verifyConcurrentCallerCount(t *testing.T, h *Host, cs *mcp.ClientSession, s
 			}
 		}()
 	}
-	counts := []int{<-arrived, <-arrived}
-	slices.Sort(counts)
-	if !slices.Equal(counts, []int{1, 2}) || h.Sessions.Calls(secKey) != 2 {
-		t.Fatalf("concurrent counts = %v, current = %d", counts, h.Sessions.Calls(secKey))
+	<-arrived
+	<-arrived
+	if got := h.Sessions.Calls(secKey); got != 2 {
+		t.Fatalf("concurrent calls = %d, want 2", got)
 	}
-	close(release)
+	unblock()
 	wg.Wait()
-	if h.Sessions.Calls(secKey) != 0 {
-		t.Fatalf("calls after barrier = %d", h.Sessions.Calls(secKey))
+	if got := h.Sessions.Calls(secKey); got != 0 {
+		t.Fatalf("calls after barrier = %d, want 0", got)
 	}
 }
 
@@ -821,10 +824,22 @@ type failWriter struct{ err error }
 
 func (f failWriter) Write([]byte) (int, error) { return 0, f.err }
 
+type halfCloseConn struct {
+	net.Conn
+	w *io.PipeWriter
+}
+
+func (h *halfCloseConn) Write(p []byte) (int, error) { return h.w.Write(p) }
+func (h *halfCloseConn) CloseWrite() error           { return h.w.Close() }
+func (h *halfCloseConn) Close() error {
+	h.w.Close()
+	return h.Conn.Close()
+}
+
 func TestRunShimArgumentsErrorsAndHalfClose(t *testing.T) {
 	verifyShimUsageErrors(t)
 	verifyShimIOFailures(t)
-	verifyShimUnixHalfClose(t)
+	verifyShimHalfClose(t)
 	verifyShimPipeFallback(t)
 }
 
@@ -886,36 +901,28 @@ func verifyShimStdoutFailure(t *testing.T) {
 	}
 }
 
-func verifyShimUnixHalfClose(t *testing.T) {
+func verifyShimHalfClose(t *testing.T) {
 	t.Helper()
-	sock := shortSocketPath(t)
-	ln, err := net.Listen("unix", sock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
+	c1, c2 := net.Pipe()
+	inR, inW := io.Pipe()
 	// serverOpening is read once after RunShim returns.
 	serverOpening := make(chan string, 1)
 	go func() {
-		srv, acceptErr := ln.Accept()
-		if acceptErr != nil {
-			return
-		}
-		defer srv.Close()
-		r := bufio.NewReader(srv)
+		defer c2.Close()
+		r := bufio.NewReader(inR)
 		first, _ := r.ReadString('\n')
 		serverOpening <- first
 		body, _ := io.ReadAll(r)
-		time.Sleep(20 * time.Millisecond)
-		srv.Write([]byte("echo:" + string(body)))
+		c2.Write([]byte("echo:" + string(body)))
 	}()
 
 	var out, errBuf bytes.Buffer
+	conn := &halfCloseConn{Conn: c1, w: inW}
 	code := RunShim([]string{"--token", "tok<&>"}, func() (net.Conn, error) {
-		return net.Dial("unix", sock)
+		return conn, nil
 	}, strings.NewReader("ping\n"), &out, &errBuf)
 	if code != 0 || errBuf.Len() != 0 || out.String() != "echo:ping\n" {
-		t.Fatalf("pipelined unix shim: code %d, out %q, err %q", code, out.String(), errBuf.String())
+		t.Fatalf("half-close shim: code %d, out %q, err %q", code, out.String(), errBuf.String())
 	}
 	if gotOpen := <-serverOpening; gotOpen != "{\"mcp\":\"tok<&>\"}\n" {
 		t.Fatalf("opening line = %q", gotOpen)

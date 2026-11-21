@@ -59,12 +59,6 @@ func (l *LocalLink) Close() error {
 	return nil
 }
 
-// Watch subscribes the link to row pushes of group after the returned sequence
-// number, state rows only when stateOnly is true.
-func (l *LocalLink) Watch(group string, stateOnly bool) (int64, bool) {
-	return l.loop.Watch(l.conn, group, stateOnly)
-}
-
 func (l *LocalLink) isClosed() bool {
 	select {
 	case <-l.Done():
@@ -125,14 +119,23 @@ func decodeCmd(data []byte) (proto.Cmd, bool) {
 	return cmd, proto.Decode(data, &cmd) == nil && cmd.Type == "cmd"
 }
 
+func decodeSync(data []byte) (proto.Sync, bool) {
+	var req proto.Sync
+	return req, proto.Decode(data, &req) == nil && req.Type == "sync"
+}
+
+func decodeFetch(data []byte) (home.Fetch, bool) {
+	var req home.Fetch
+	return req, proto.Decode(data, &req) == nil && req.Type == "fetch"
+}
+
 func decodeAck(data []byte) (proto.Ack, bool) {
 	var ack proto.Ack
 	return ack, proto.Decode(data, &ack) == nil && ack.Type == "ack"
 }
 
 func (l *LocalLink) toHome(data []byte) {
-	if cmd, ok := decodeCmd(data); ok {
-		l.loop.Cmd(l.conn, cmd.ID, cmd.Env)
+	if l.dispatchHomeReq(data) {
 		return
 	}
 	var req struct {
@@ -145,6 +148,22 @@ func (l *LocalLink) toHome(data []byte) {
 	if ack, ok := decodeAck(data); ok {
 		l.loop.Ack(l.conn, ack)
 	}
+}
+
+func (l *LocalLink) dispatchHomeReq(data []byte) bool {
+	if cmd, ok := decodeCmd(data); ok {
+		l.loop.Cmd(l.conn, cmd.ID, cmd.Env)
+		return true
+	}
+	if req, ok := decodeSync(data); ok {
+		l.loop.Sync(l.conn, req)
+		return true
+	}
+	if req, ok := decodeFetch(data); ok {
+		l.loop.Fetch(l.conn, req)
+		return true
+	}
+	return false
 }
 
 func (l *LocalLink) badRequest(re int64) {
@@ -194,8 +213,6 @@ func encodeCtl(frame any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(frame); err != nil {
-		return nil, err
-	}
-	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+	err := enc.Encode(frame)
+	return bytes.TrimSuffix(buf.Bytes(), []byte{'\n'}), err
 }

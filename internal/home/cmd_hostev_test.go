@@ -496,6 +496,22 @@ func hevExpectAIState(t *testing.T, watcher *hevLoopClient, wantCount int, wantS
 	}
 }
 
+func hevSyncWatch(t *testing.T, loop *home.Loop, conn *home.Conn, watcher *hevLoopClient) {
+	t.Helper()
+	loop.Sync(conn, proto.Sync{Request: proto.Request{Type: "sync", ID: 1}, Group: groupID, StateOnly: true})
+	equal(t, <-watcher.ch, proto.Reset{Type: "reset", Group: groupID})
+	pushed, ok := (<-watcher.ch).(proto.Rows)
+	equal(t, ok && len(pushed.Rows) == 6, true)
+	equal(t, <-watcher.ch, proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: groupID, Seq: 6})
+}
+
+func hevSyncBarrier(t *testing.T, loop *home.Loop, conn *home.Conn, watcher *hevLoopClient, re int64) {
+	t.Helper()
+	seq := loop.Groups(conn)[0].Seq
+	loop.Sync(conn, proto.Sync{Request: proto.Request{Type: "sync", ID: re}, Group: groupID, Since: seq, StateOnly: true})
+	equal(t, <-watcher.ch, proto.Synced{Type: "synced", Success: proto.Success{Re: re, OK: true}, Group: groupID, Seq: seq})
+}
+
 // Loop automatically fires HostOfflineEvent when a device's last taker
 // connection ends via Detach, Send failure, or backlog overflow, and not for
 // browser/non-taker connections or while another taker of that device stays open.
@@ -517,9 +533,12 @@ func TestHostEvOfflineThroughRunLoop(t *testing.T) {
 
 	watcher := hevNewClient()
 	watchConn := loop.Attach(browser.ID(), watcher)
-	_, ok := loop.Watch(watchConn, groupID, true)
-	equal(t, ok, true)
-	syncLoop := func() { loop.Watch(watchConn, groupID, true) }
+	hevSyncWatch(t, loop, watchConn, watcher)
+	var syncRe int64 = 1
+	syncLoop := func() {
+		syncRe++
+		hevSyncBarrier(t, loop, watchConn, watcher, syncRe)
+	}
 
 	// Another host's taker stays attached throughout; browser and non-taker laptop detaches do nothing.
 	nodeConn := loop.Attach(node.ID(), hevNewClient())

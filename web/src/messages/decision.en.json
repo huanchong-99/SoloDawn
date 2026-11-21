@@ -1,0 +1,19 @@
+{
+  "decision.kind": "Your call",
+  "decision.needs_you": "Needs you",
+  "decision.waiting_on": "Waiting on {name}",
+  "decision.decided": "{name} decided · {time}",
+  "decision.expired": "Expired · {time}",
+  "decision.recommended": "Recommended",
+  "decision.chosen": "Chosen",
+  "decision.sep": ", ",
+  "decision.custom.label": "Answer in your own words, or add a note",
+  "decision.custom.hint": "Your own answer, or a note",
+  "decision.answer.label": "Your answer",
+  "decision.answer.hint": "Write your answer…",
+  "decision.submit": "Send answer",
+  "decision.hint": "Pick an option (with an optional note), or send your own answer.",
+  "decision.hint.free": "Send your answer so the AI can continue.",
+  "decision.waiting_hint": "Waiting on {name}",
+  "decision.too_long": "Too long: shorten your answer to fit 1 KB."
+}

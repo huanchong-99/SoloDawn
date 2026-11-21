@@ -63,34 +63,6 @@
 {/if}
 
 <style>
-  .needbar {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    padding: 8px var(--sp-4);
-    border-bottom: 1px solid color-mix(in srgb, var(--dawn) 40%, var(--line));
-    background: var(--dawn-soft);
-    font-size: var(--fs-sm);
-    white-space: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  .needbar b {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--dawn-text);
-  }
-  .needbar a {
-    display: inline-flex;
-    align-items: center;
-    height: 26px;
-    padding: 0 10px;
-    border: 1px solid color-mix(in srgb, var(--dawn) 40%, var(--line));
-    border-radius: var(--r-full);
-    background: var(--surface);
-    color: var(--text);
-  }
   .digest {
     display: flex;
     flex-direction: column;

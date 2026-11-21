@@ -26,7 +26,7 @@ import (
 // Who waits for whom, so that nothing waits in a circle:
 //
 //   - A caller of an entry never waits for a client and holds no lock while
-//     it waits for a group (Attach, Watch).
+//     it waits for a group (Attach, Sync).
 //   - The goroutine of a group waits for the store's writer and for nothing
 //     else. It never waits for a client: a frame goes into the queue of its
 //     connection. It never waits for another group or for itself: the jobs of
@@ -58,11 +58,12 @@ func NodeTables() Tables {
 // LoopConfig is what a loop is started with. The loop calls Logs, Now and
 // Report on the goroutines of its groups, and Logs and Now also on the
 // caller of Cmd. So none of the three may wait for a lock that is held
-// around a call of Attach, Watch, Close or Cmd, and none may call those.
+// around a call of Attach, Sync, Close or Cmd, and none may call those.
 type LoopConfig struct {
-	Store *store.Store
-	Home  string // this node's device id
-	Owner string // the user id of this node's owner
+	Store   *store.Store
+	Home    string        // this node's device id
+	Owner   string        // the user id of this node's owner when OwnerFn is nil
+	OwnerFn func() string // dynamic owner user id; overrides Owner when non-nil
 	// Logs returns the node's verified device log of a person, as a value
 	// that nothing else reads or writes from then on, or nil when the node
 	// holds none. The loop asks for the owner's log for every group.
@@ -113,6 +114,10 @@ func StartLoop(cfg LoopConfig) (*Loop, error) {
 }
 
 func runDefaults(cfg LoopConfig) LoopConfig {
+	if cfg.OwnerFn == nil {
+		owner := cfg.Owner
+		cfg.OwnerFn = func() string { return owner }
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -172,15 +177,16 @@ func (l *Loop) spawn(s *State) *runGroup {
 // fresh is the state of a group before its rows: the owner's log is all it
 // knows.
 func (l *Loop) fresh(group string) *State {
-	s := NewState(group, l.cfg.Home, l.cfg.Owner)
+	s := NewState(group, l.cfg.Home, l.cfg.OwnerFn())
 	l.adopt(s)
 	return s
 }
 
 // adopt gives a state the owner's log as the node holds it now.
 func (l *Loop) adopt(s *State) {
-	if log := l.cfg.Logs(l.cfg.Owner); log != nil {
-		s.Logs[l.cfg.Owner] = log
+	owner := l.cfg.OwnerFn()
+	if log := l.cfg.Logs(owner); log != nil {
+		s.Logs[owner] = log
 	}
 }
 
@@ -195,7 +201,7 @@ func (l *Loop) route(group string, job func(g *runGroup)) {
 	}
 	g := l.groups[group]
 	if g == nil {
-		g = l.spawn(NewState(group, l.cfg.Home, l.cfg.Owner))
+		g = l.spawn(NewState(group, l.cfg.Home, l.cfg.OwnerFn()))
 		g.jobs.push(func() { l.adopt(g.state) }) // not under l.mu: Logs is the node's code
 	}
 	g.jobs.push(func() { job(g) })
@@ -363,18 +369,6 @@ func (l *Loop) stray(c *Conn, re int64, env proto.Envelope) {
 		res = refused(refusal)
 	}
 	c.send(res.Frame(re))
-}
-
-// Watch subscribes c to every change of a group after the sequence number it
-// returns: from then on c is pushed the rows of each result, only the group,
-// member, device and task rows with stateOnly. ok is false when the node is
-// not home to the group, when the group is not open to the device of c, and
-// for a connection that is gone. It is the subscription of sync
-// (planning/contracts/datachannel.md section 4), without the rows before it.
-// Watch waits for the group, as Attach does.
-func (l *Loop) Watch(c *Conn, group string, stateOnly bool) (seq int64, ok bool) {
-	l.ask(group, func(g *runGroup) { seq, ok = g.watch(c, stateOnly) })
-	return seq, ok
 }
 
 // Inbox makes c the connection that takes the inbox items of its device, in

@@ -27,9 +27,6 @@ func notePut(s *State, c Command) (Result, *Refusal) {
 			return Result{}, &Refusal{"not_found", "the note names no task"}
 		}
 	}
-	if _, taken := c.Disk.Note(string(p.ID)); taken {
-		return Result{}, &Refusal{"conflict", "a note with that id exists"}
-	}
 	row := proto.NoteRow{
 		RowHeader: proto.RowHeader{Type: noteRowType, ID: string(p.ID)}, Group: s.ID,
 		Task: (*string)(p.Task), Text: p.Text, By: c.Who.Member(), Timestamp: c.Timestamp,

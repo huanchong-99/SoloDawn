@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-21 · limitation · Windows `AF_UNIX` half-close does not always deliver EOF; a shim may outlive its CLI until the session closes
+
+- Symptom: on Windows, `solodawn mcp --token <t>` can stay blocked in `bridgeShim`'s socket-to-stdout copy (`internal/host/shim.go:60`) after its CLI has closed `stdin`, and `TestRunShimArgumentsErrorsAndHalfClose` hung on Windows CI (`internal/host/mcp_test.go:827,908,914`) when `verifyShimUnixHalfClose` waited for end-of-input after the shim half-closed the socket.
+- Cause: when `stdin` reaches EOF, `copyShimInput` calls `half.CloseWrite()` on `*net.UnixConn` (`internal/host/shim.go:74-76`, `shutdown` with `SD_SEND`) without closing the connection, and Windows `afunix.sys` occasionally fails to deliver `io.EOF` when `CloseWrite` races with a concurrent `WSARecv` on the peer (`golang/go#73140`).
+- Status: open, accepted on 2026-11-21 with no product code changed per the owner's rule on rare cases. When the node closes the session (`internal/host/run.go`), closing the session kills the CLI's process tree (`detachTerminal`), which includes the shim, and `ServeMCP` closes its socket end when the session ends.
+
 ### 2026-11-21 · limitation · `AskUserQuestion` reaching `approve` under each permission mode is not yet verified by a live CLI capture
 
 - Symptom: no spike capture or scripted fake-CLI test shows Claude Code invoking `--permission-prompt-tool mcp__solodawn__approve` when the model calls `AskUserQuestion` under `--permission-mode bypassPermissions` (level 3, the default), or honouring the `updatedInput.answers` reply (`planning/contracts/mcp-tools.md` section 3).
@@ -84,29 +90,32 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `codexBaseFlags` (`internal/host/codex.go`) passes `-c features.default_mode_request_user_input=true` on `codex app-server` and `codex resume`, and `onUserInputRequest` maps `item/tool/requestUserInput` from the generated schema (`[documented]`), without a live run on the owner's sign-in yet.
 - Status: open for the live check in B-17 / I-11 (`planning/steps/step-1-acceptance.md` A4.11). If the flag does not offer a working `request_user_input` tool in Default mode, record in `planning/contracts/drivers.md` section 1.2 that a Codex AI asks through `request_decision` (`HS-11`) instead.
 
-### 2026-11-21 · limitation · `Sessions` has no `sync` or `fetch` handlers until the home units and runtime wire them
+### 2026-11-21 · limitation · The host has no shutdown hook for open CLI processes
 
-- Symptom: inbound `ctl` requests for `sync` and `fetch` are answered `bad_request` ("unknown ctl request") on a bare `Sessions` hub (`internal/node/session.go`, `NewSessions`), and `host.info`, `pair.browser` and `settings.set` are not registered until unit N-3.
-- Cause: `Sessions` provides the `Requests`, `Pushes` and `Commands` tables, while `sync` (`HM-2`), `fetch` (`HM-3`), the pairing and host-info handlers (`N-3`) and runtime assembly (`N-4`) are separate units (`ack` pushes are routed to `home.Loop.Ack` in `Sessions.sesPush` as of `HM-7`).
-- Status: open until `HM-2`, `HM-3`, `N-3` and `N-4` populate those tables.
+- Symptom: when `solodawn node` stops on `SIGINT` or `SIGTERM`, open AI CLI processes are not closed explicitly before `node.db` closes; they end on stdin EOF when the node process exits.
+- Cause: `host.Host` exposes no shutdown method, and CLI processes are started with `context.Background()` (`internal/host/run.go:380`).
+- Status: open, accepted for 1.0 (`N-4` review).
 
-### 2026-11-21 · limitation · `home.Loop` keeps the `Owner` it was started with across adoption
+### 2026-11-21 · limitation · `host.info` has no live push yet and reports `queued` as `0`
 
-- Symptom: when an unowned node starts `home.Loop` with `Owner: ""` and is later adopted over a pairing `ctl` session, `Logs.Owner()` becomes the adopter's user id (`internal/node/devlog.go`, `dvlAdopt`), while the running `home.Loop` still has `LoopConfig.Owner == ""` (`internal/home/run.go:65`) and refuses `group create` until the loop is restarted.
-- Cause: `LoopConfig.Owner` is read once when `StartLoop` constructs group states (`internal/home/run.go:175`, `:198`).
-- Status: open until `N-4`, which supplies `SessionConfig.OnAdopt` (`internal/node/session.go:52`) to close and recreate `home.Loop` with the adopted owner.
+- Symptom: `Surface` (`internal/node/surface.go`) answers `host.info` requests with `HostState` and sends no `host.info` pushes (no `host.info` push yet), and every `AgentGroup.Queued` entry in `host.info` is `0` (`internal/node/surface.go:154`).
+- Cause: `settings.set` is postponed with `U-12`, the 1.0 web client requests `host.info` on connect and after `agent.set`, and held items are held on the home (`not_before`, `HM-7`) rather than counted on the host.
+- Status: open, accepted for 1.0 (`N-3`).
 
-### 2026-11-21 · limitation · `Sessions` implements only the server side of a `ctl` connection
+### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
 
-- Symptom: a host on one node has no outgoing `ctl` client session yet to a home on another node (sending `hello` with `kind: "host"`, reading `welcome`, exchanging `devlog` both ways, and passing pushes to `Host.Push`), so cross-node AI sessions (`A3.3`, unit `I-6`) have no transport path.
-- Cause: `internal/node/session.go` (`N-2`) serves inbound `ctl` connections (`Serve`); the client side of a `ctl` session was split out by the coordinator's decision of 2026-11-21.
-- Status: open for unit `N-2b` (`internal/node/client.go`), wired into the node runtime by `N-4`.
+- Symptom, from the independent review of `internal/node`:
+  1. `Apply` checks `Busy` and then calls `Restart` (`internal/node/update.go:98`). A turn or a takeover admitted between the two is restarted.
+  2. `Status` (`internal/node/update.go:40`) is written by `Check` and read for `host.info`; read from another goroutine, it races.
+  3. `Restart` (`:39`) must replace the process in place (exec on Unix). launchd and systemd stop the whole process group when the node's process ends, so a child started before the exit would be stopped with it.
+- Cause: the `Updater` holds no lock and does not restart by itself; the owner of the runtime is to call `Check` and `Apply` under the lock that admits turns and takeovers, copy `Status` under it, and supply a `Restart` that execs.
+- Status: open, postponed off the step-1 main line (`N-6`).
 
-### 2026-11-21 · deviation · The local link routes only `cmd` requests and `ack` pushes until `sync` and `fetch` land
+### 2026-11-21 · limitation · `Sessions` handlers and runtime pairing/surface wiring across `HM-2`, `HM-3`, `N-3` and `N-4`
 
-- Symptom: on `LocalLink`, a `sync` or `fetch` request from the host is answered `bad_request`; tests subscribe to row pushes through `LocalLink.Watch` (`internal/node/local.go:66`), which is temporary until `sync` is routed to `home.Loop`.
-- Cause: `Sync` (HM-2, #205) and `Fetch` (HM-3) are built in separate units. `LocalLink.toHome` (`internal/node/local.go`) dispatches `cmd` to `Loop.Cmd` and `ack` to `Loop.Ack`, and answers other requests `bad_request` per `planning/contracts/datachannel.md` section 2.
-- Status: open. Route `sync` to `Loop` and delete `LocalLink.Watch` once HM-2 (#205) merges; wire `fetch` once HM-3 merges (N-4 / I-1 / I-3). (`ack` and `inbox` frames wired in `HM-7`.)
+- Symptom: before runtime assembly, inbound `ctl` requests for `sync`, `fetch` and `host.info` were answered `bad_request` on a bare `Sessions` hub (`internal/node/session.go`), and `Pairer.Serve`, `Pairer.Known`/`Pairer.Routes`, `Pairer.HandleEvent`/`PairConfig.Paths`, `Pairer.Peer`, local socket `pair`/`pair-browser`/`open`, and `SurfaceConfig.Agents` (`(*Host).Agents`) awaited assembly in `internal/node/node.go`.
+- Cause: `Sessions`, `HM-2`, `HM-3`, `HM-7`, `N-3` and `N-4` were built as separate units (`settings.set` is postponed with `U-12`).
+- Status: resolved in `HM-7` (#221), `HM-2` (#205), `HM-3` (#207), `N-3` (#223) and `N-4` (#226).
 
 ### 2026-11-21 · limitation · Postponed step-2 contracts still assume an item-level `cause`
 
@@ -210,12 +219,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `run_checks` runs in the task's worktree (`internal/host/checks.go`, `cleanCheckHead`), where such files can exist.
 - Status: open. Step 2 closes it by running the checks on a clean export of the commit.
 
-### 2026-11-20 · deviation · `solodawn pair` does not start a node that is not running
-
-- Symptom: `local.md` section 1 says `solodawn pair` "starts the node if needed". With no node running, `solodawn pair <secret>` fails on the dial of the local socket and pairs nothing.
-- Cause: `pair` (`cmd/solodawn/main.go:61`) only sends the command through `Command.send` (`internal/node/cmd.go:40`). No unit owned starting the node.
-- Status: open. Added to N-4's row in `planning/steps/parallel-plan-units.md` by the coordinator's decision of 2026-11-20 (independent review of `internal/node`).
-
 ### 2026-11-20 · bug · Two nodes starting together could each remove the other's socket
 
 - Symptom: two nodes that started together on one data directory both ran over a stale `sock`: one removed the other's live socket, and the first one's close then removed the second's (89 of 3000 rounds in the independent review of `internal/node`).
@@ -231,27 +234,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: nothing is installed on the development machine, by the coordinator's decision of 2026-11-20.
 - Status: open. Candidate for a CI smoke job on GitHub's throwaway runners (Linux, macOS, Windows) after the quota reset: install, log in or start the manager, check that the node runs with the expected PATH, remove.
 
-### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
-
-- Symptom, from the independent review of `internal/node`:
-  1. `Apply` checks `Busy` and then calls `Restart` (`internal/node/update.go:98`). A turn or a takeover admitted between the two is restarted.
-  2. `Status` (`internal/node/update.go:40`) is written by `Check` and read for `host.info`; read from another goroutine, it races.
-  3. `Restart` (`:39`) must replace the process in place (exec on Unix). launchd and systemd stop the whole process group when the node's process ends, so a child started before the exit would be stopped with it.
-- Cause: the `Updater` holds no lock and does not restart by itself; the owner of the runtime is to call `Check` and `Apply` under the lock that admits turns and takeovers, copy `Status` under it, and supply a `Restart` that execs.
-- Status: open, for N-4.
-
 ### 2026-11-20 · limitation · `SHA256SUMS` proves the download intact, not where it came from
 
 - Symptom: the node checks the binary against `SHA256SUMS` from the same release (`local.md` section 9). Whoever can replace the binary there can replace `SHA256SUMS` too, so the check catches a damaged or cut download, not a forged release.
 - Cause: the contract has no signature over releases; binaries are not signed (decided). The download itself is https only, follows at most five redirects, each to https, is limited in size, and is given up after 60 s without data, whatever its total time (`internal/node/update.go`, `get`).
 - Status: accepted trade-off of the contract.
-
-### 2026-11-20 · limitation · The gate measures CRAP 6.01 for `deliver`, which Go covers fully
-
-- Symptom: `crap.py` gives `deliver` in `internal/peer/ctl.go` a CRAP score of 6.01, above the limit of 6, while `go test -cover` reports `internal/peer` at 100% of statements.
-- Cause: the empty `case <-c.Done():` of the `select` in `deliver` (`internal/peer/ctl.go:91`) is a cover block with no statements and count 0. Go leaves it out of its percentage; the gate's conversion of the cover profile into lines (the last command of `stages.fast` in `.project-standard/gates.toml`) counts its line as an uncovered line. That gives `deliver` 13 of 14 lines, 92.9%, at complexity 6. The same before PR-0 (9c09938f6).
-- Effect: none on a change that leaves `deliver` alone, because the gate measures changed functions only. A change to `deliver`, or a CRAP run over the whole repository, reports it.
-- Status: open. No code change, by the coordinator's decision of 2026-11-20.
 
 ### 2026-11-20 · bug · go-nat v0.2.0 gets four things wrong in port mapping
 
@@ -290,12 +277,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: with 14 busy loops on 12 cores, `web/src/main.test.ts:4`, `web/src/lib/motion.test.ts:29` and `web/src/lib/prefs.test.ts:26` exceeded Vitest's 5 s test limit; one idle run right after `pnpm install` also failed two tests in two files (output not kept). CI passed.
 - Cause: each is the first test of its file to import the client's modules afresh inside the test, so their transformation counts against the test's limit.
 - Status: open; the gate can fail spuriously while other work loads the machine.
-
-### 2026-11-20 · limitation · End-to-end tests cannot run a node until the node runtime is wired
-
-- Symptom: `startNet` of `web/e2e/nodes.ts` waits until each node answers on its local socket. Every node exits with status 1 and `node runtime is unavailable` right after it makes its data directory and binds the socket, so a start that awaits nodes fails with that message. The harness's own scenarios start nodes with `awaitNodes: false`. A node is started with no flags, because `solodawn node` takes none yet: it has no signalling or web port and no rendezvous address, and the harness hands over only its HOME, data directory, socket and environment.
-- Cause: `startNode` is a stub that returns that error until N-4 assembles the runtime (`internal/node/socket.go:181-183`); `cmd/solodawn/main.go:26-28` registers `node` without arguments.
-- Status: open until N-4. What I-8 needs from N-4 is listed in [#132](https://github.com/huanchong-99/SoloDawn/pull/132).
 
 ### 2026-11-20 · limitation · A node's socket does not fit under a long HOME on macOS
 
@@ -395,8 +376,8 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-20 · deviation · Nothing resumes hosted checks after a node restart yet
 
 - Symptom: after a restart, a task at step `cloud_check` is not polled again, so it stays there until something else moves it (decision D3 of the host-contract audit).
-- Cause: `HostedChecksToResume` (`internal/host/forge.go`) selects the tasks to poll again and gives each its PR, commit, branch and `checks.local.at`, where the 60-minute limit counts from, but no code runs at node start yet to call it and then `WaitHostedChecks` for each.
-- Status: open. The node must call it at start; owner N-4, or HS-0 if it lands first.
+- Cause: `HostedChecksToResume` (`internal/host/forge.go`) selects the tasks to poll again and gives each its PR, commit, branch and `checks.local.at`, where the 60-minute limit counts from, but at node startup `Host.Rows` is empty until `deliver.go` finishes syncing each group asynchronously (`afterGroupState`), and `tskPart`, `tskBeginCloud`, `tskPollHostedChecks` and `projectDir` are unexported inside `internal/host`. Wiring it from `internal/node` requires over 40 lines duplicating group-sync waiting, row decoding, worktree path resolution and `proto.TaskChecked` submission without sharing `tskPart`'s cancel map.
+- Status: open (`N-4` coordinator decision 8: over 40 lines from `internal/node`, so left for `internal/host/deliver.go` `afterGroupState` alongside `resumeGroupMerges`).
 
 ### 2026-11-20 · deviation · No receiver check or shared vector for a beacon yet
 
@@ -477,6 +458,48 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-21 · limitation · `Sessions` implements only the server side of a `ctl` connection
+
+- Symptom: a host on one node had no outgoing `ctl` client session yet to a home on another node (sending `hello` with `kind: "host"`, reading `welcome`, exchanging `devlog` both ways, and passing pushes to `Host.Push`), so cross-node AI sessions (`A3.3`, unit `I-6`) had no transport path.
+- Cause: `internal/node/session.go` (`N-2`) served inbound `ctl` connections (`Serve`); the client side of a `ctl` session was split out by the coordinator's decision of 2026-11-21.
+- Status: resolved in unit `N-2b` (#222, `internal/node/client.go`: `(*Sessions).serveClient` and `(*Sessions).connectHome`, plus `attachRuntime` in `internal/host/run.go`) and wired in `N-4` (`internal/node/node.go`, `Host.Connect` -> `connectHome` -> `peer.Peer.Connect`).
+
+### 2026-11-21 · deviation · The local link routes `cmd`, `sync` and `ack` until `fetch` lands
+
+- Symptom: on `LocalLink`, a `fetch` request from the host was answered `bad_request`.
+- Cause: `LocalLink.toHome` (`internal/node/local.go`) dispatched `cmd` to `Loop.Cmd`, `sync` to `Loop.Sync` and `ack` to `Loop.Ack`, while `Fetch` (`HM-3`, #207) landed in a separate unit.
+- Status: resolved in branch `gemini/N-4` after `HM-3` (#207): `LocalLink.toHome` (`internal/node/local.go`) and `NewSessions` (`internal/node/session.go`) both route `fetch` requests to `Loop.Fetch` (`TestLocalLinkCommandAndRowPush`, `TestHomeLoopIntegrationAndDevlogForwarding`).
+
+### 2026-11-21 · limitation · `home.Loop` keeps the `Owner` it was started with across adoption
+
+- Symptom: when an unowned node starts `home.Loop` with `Owner: ""` and is later adopted over a pairing `ctl` session, `Logs.Owner()` becomes the adopter's user id (`internal/node/devlog.go`, `dvlAdopt`), while the running `home.Loop` still has `LoopConfig.Owner == ""` (`internal/home/run.go:65`) and refuses `group create` until the loop is restarted.
+- Cause: `LoopConfig.Owner` was read as a static string when `StartLoop` constructed group states (`internal/home/run.go:175`, `:198`).
+- Status: resolved in branch `gemini/N-4`: `LoopConfig.OwnerFn` (`internal/home/run.go`) reads the node's owner dynamically (`logs.Owner`), so an unowned node's `home.Loop` sees the adopted owner immediately without restarting (`TestRunDynamicOwnerFn`, `TestAdoptionRendezvousAndForegroundStop`).
+
+### 2026-11-20 · deviation · `solodawn pair` does not start a node that is not running
+
+- Symptom: `local.md` section 1 says `solodawn pair` "starts the node if needed". With no node running, `solodawn pair <secret>` fails on the dial of the local socket and pairs nothing.
+- Cause: `pair` (`cmd/solodawn/main.go:61` before the fix) only sent the command through `Command.send` (`internal/node/cmd.go:40` before the fix).
+- Status: resolved in branch `gemini/N-4`: `(Command).dialOrStart` (`internal/node/cmd.go`) spawns a detached `solodawn node` (`startDetached` in `proc_unix.go` / `proc_windows.go`) when `c.Cmd == "pair"` and `sock` is absent, then polls until `sock` accepts (`TestPairAutoStartsNode`).
+
+### 2026-11-20 · limitation · End-to-end tests cannot run a node until the node runtime is wired
+
+- Symptom: `startNet` of `web/e2e/nodes.ts` waits until each node answers on its local socket. Every node exits with status 1 and `node runtime is unavailable` right after it makes its data directory and binds the socket, so a start that awaits nodes fails with that message. The harness's own scenarios start nodes with `awaitNodes: false`. A node is started with no flags, because `solodawn node` takes none yet: it has no signalling or web port and no rendezvous address, and the harness hands over only its HOME, data directory, socket and environment.
+- Cause: `startNode` was a stub that returned that error until N-4 assembled the runtime (`internal/node/socket.go:181-183` before the fix).
+- Status: resolved in branch `gemini/N-4`: `startNode` points to `runForegroundNode` (`internal/node/node.go`), starting the full node runtime (`node.db`, `device.key`, `logs/node.log`, `home.Loop`, `host.Host` + `ServeMCP`, `AttachLocal`, `Logs` + `Sessions`, `peer.Peer`, embedded web UI + `/rv` with `:47800` to `:0` multi-node fallback, and local socket commands).
+
+### 2026-11-21 · deviation · `peer.Connection` delivers `re` responses without waiting for earlier queued pushes
+
+- Symptom: on a WebRTC `*peer.Connection`, when a remote home sends `rows` pushes immediately followed by a `synced` response (`planning/contracts/datachannel.md` section 4), `(*peer.Connection).Request` could return `synced` before the `serveClient` reader goroutine had read `rows` from `(*peer.Connection).Read` and applied them to `Host.Rows`. A caller such as `host.join` (`HS-21`) that reads `Host.Rows` immediately after `sync` returns could see `not_found` if scheduled ahead of the reader goroutine.
+- Cause: `(*peer.Connection).deliver` (`internal/peer/ctl.go`) previously wrote non-`re` frames to the buffered `incoming` channel (`Read`) and wrote `re` frames directly to `waiting[re]` (`Request`) on Pion's callback goroutine, with no ordering barrier between the two channels.
+- Status: resolved in #222: `(*peer.Connection).deliver` queues valid `re` responses in `incoming` alongside requests and pushes, and `(*peer.Connection).Read` hands any queued `re` frame to `response` before reading on; `(*Sessions).serveClient` (`internal/node/client.go`) starts its read loop before sending `hello`, applies `devlog` pushes at once, and holds other pushes until `Host.Attach` has returned. Test: `TestPushesDeliveredBeforeAnswer`.
+
+### 2026-11-20 · limitation · The gate measures CRAP 6.01 for `deliver`, which Go covers fully
+
+- Symptom: `crap.py` gave `deliver` in `internal/peer/ctl.go` a CRAP score of 6.01, above the limit of 6, while `go test -cover` reported `internal/peer` at 100% of statements.
+- Cause: the empty `case <-c.Done():` of the `select` previously in `deliver` was a cover block with no statements and count 0, counted as an uncovered line at complexity 6.
+- Status: resolved in #222: `queue` holds the `select`, `validFrame` checks incoming `ctl` framing, and `deliver` has complexity 2 (`lizard -C 6 -w` clean, 100.0% statement coverage).
 
 ### 2026-11-21 · deviation · Dead `cause` path in `internal/home` and `internal/store`
 
