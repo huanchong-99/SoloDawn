@@ -7,16 +7,13 @@
   import { clock, now } from '../../lib/when';
   import Failure from '../Failure.svelte';
   import Icon from '../Icon.svelte';
-  import NodeIcon from './NodeIcon.svelte';
 
   /** Dialog that requests a one-time `#pair=<secret>` link from an online owner node. */
   let { open = $bindable(false), net }: { open?: boolean; net: Net } = $props();
   const uid = $props.id();
 
   const pairable = $derived(
-    nodes
-      .list(net)
-      .filter((comp) => comp.online && comp.home !== undefined && comp.info !== undefined),
+    nodes.list(net).filter((comp) => comp.online && comp.info !== undefined),
   );
 
   let dialog: HTMLDialogElement;
@@ -58,7 +55,7 @@
       return;
     }
     busy = true;
-    const answer = await nodes.pairBrowser(target.home!, target.info!.device);
+    const answer = await nodes.pairBrowser(target.home, target.info!.device);
     busy = false;
     if ('err' in answer) {
       failed = answer.err.code;
@@ -105,12 +102,12 @@
             {#if copied}
               <Icon name="check" sm /><span>{t('nodes.pair.copied')}</span>
             {:else}
-              <NodeIcon name="copy" sm /><span>{t('nodes.pair.copy')}</span>
+              <Icon name="copy" sm /><span>{t('nodes.pair.copy')}</span>
             {/if}
           </button>
           {#if remaining > 0}
             <span class="hint">
-              <NodeIcon name="clock" sm />
+              <Icon name="clock" sm />
               {t('nodes.pair.expires')
                 .replace('{n}', String(remaining))
                 .replace('{time}', clock(result.expires, prefs.lang))}

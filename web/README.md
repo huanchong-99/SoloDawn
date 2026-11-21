@@ -17,9 +17,10 @@ client or that block its storage; this browser's device
 key with signed envelopes, the device log and pairing; the wire types with their decoding; a
 mock connection that answers from the node's wire examples; the row cache of every group with the
 lists drawn from it; the group list with its create-group dialog; the main line of a group's
-chat with its composer; and the connection code, signalling and connections to nodes. No screen
-connects to a node yet: until the browser's connections are wired into the shell, a development
-server shows the one group of the wire examples.
+chat with its composer; the connection indicator and the computers and AIs page; and the
+connection code, signalling and connections to nodes. No screen connects to a node yet: until
+the browser's connections are wired into the shell, a development server shows the one computer
+and the one group of the wire examples.
 
 The interface mockups are in `design/`. They are the visual reference for the interface: implement
 screens to match them, and add the motion they leave out.
@@ -432,6 +433,17 @@ file in `src/routes/`. It edits neither the shell nor another area:
   - Only text messages are drawn in full. A card is one line that names its kind and its subject,
     with the dawn edge when it waits for the reader, and a row the home wrote is a quiet line;
     the cards the areas mount replace both.
+- **Connection indicator and computers page.** `indicator(net, group)` in `src/lib/nodes.svelte.ts`
+  gives the pill mounted at `bar` (and at `chat.head` below 768 px, where an open chat hides the
+  top bar) one of four states, linking to `#/nodes` with an accessible `Connection status: …`
+  label: for an open `#/groups/<g>` chat, the path to that group's home; elsewhere, the summary
+  across `net.homes` (`undefined` before any home is known, `down` when no target home is
+  connected, `linking` while any connected target has no selected pair yet, `limited` when any
+  uses a relay, and `ok` with the first measured `rtt` when all are direct). `routes/Nodes.svelte`
+  calls `nodes.sync(net.homes)` to read `host.info` once per online owner connection, lists owned
+  computers with their link path, hosted groups and registered AIs, sends `agent.set` followed by
+  a fresh `host.info` read when the owner chooses an unset AI account type, and opens
+  `PairBrowserDialog` (`pair.browser`).
 - **Where code goes.** Logic lives in `.ts` and `.svelte.ts` modules, which the gates measure
   (CRAP and mutation); components stay thin. A module that only holds an `import.meta.glob` is
   named `*.glob.ts` and is not mutated; it holds no logic. Stryker would wrap the glob's
@@ -464,6 +476,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/peer.ts`           | signalling paths, connections to nodes, `ctl`, path, reconnect  |
 | `features/peer-fakes.ts`    | a peer connection and its channels for the tests of `peer.ts`   |
 | `src/lib/groups.svelte.ts`  | `Home`, `Group`: row caches, cursor, paging, lists, commands    |
+| `src/lib/nodes.svelte.ts`   | connection indicator, `host.info` cache, `agent.set`, pairing   |
 | `src/lib/compose.ts`        | mention being typed, mentions and parts of a text, row size     |
 | `src/lib/when.ts`           | times in the reader's language; messages by day                 |
 | `src/App.svelte`            | shell: navigation, top bar, banners, the page of the route      |
@@ -474,12 +487,14 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/`           | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount` |
 | `src/components/groups/`    | the group list, the cards that wait, the create-group dialog    |
 | `src/components/chat/`      | the chat of a group: main line, message, composer               |
+| `src/components/nodes/`     | top-bar and phone-chat indicator, add-browser pairing dialog    |
 | `src/styles/`               | `tokens.css` (design tokens) and `base.css` (shared classes)    |
 | `public/`                   | manifest, icon and `fonts/`, copied as they are                 |
 | `features/web.spec.ts`      | steps of `../features/web.feature`                              |
 | `features/shell.spec.ts`    | steps of `../features/web_shell.feature`; `fixtures/` stand-ins |
 | `features/groups.spec.ts`   | steps of `../features/web_groups.feature`                       |
 | `features/chat.spec.ts`     | steps of `../features/web_chat.feature`                         |
+| `features/nodes.spec.ts`    | steps of `../features/web_nodes.feature`                        |
 | `features/home.ts`          | a home in memory for those steps; `page.ts` drives the page     |
 | `features/demo.ts`          | groups with a morning of talk, for a development page           |
 | `features/watch.svelte.ts`  | an effect outside a component, for tests of what is reactive    |
@@ -509,9 +524,11 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
 - `peer.ts` has run against fakes only. No browser has opened a connection with it, and how each
   browser's statistics name the selected pair is not verified; unit I-8 runs the three browsers.
 - The manifest has an SVG icon only and there is no service worker yet.
-- No page has a connection to a node yet, so the built client lists no group. A development
-  server (`pnpm dev`) shows the one group of the wire examples, unless the address has `?nomock`;
-  the mock accepts a post and pushes no row, so a message sent there does not appear.
+- No page has a connection to a node yet, so the built client lists no group and no computer. A
+  development server (`pnpm dev`) shows the one computer and the one group of the wire examples,
+  unless the address has `?nomock`; the mock answers every command with a bare `ok` and pushes no
+  row, so a message sent there does not appear, an account choice does not update `host.info`,
+  and `pair.browser` returns no link.
 - The onboarding and terminal pages are in the route table without their components: they say
   that they are coming. From 768 px the top bar of an open chat says "Chats", and the chat's own
   head with the group's name is below it, where the design has one bar with the group's name.

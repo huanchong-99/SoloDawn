@@ -6,10 +6,10 @@ import { expect, vi } from 'vitest';
 import { find, Home, homes } from '../src/lib/groups.svelte';
 import { goldens } from '../src/lib/mock';
 import type { Path, Source } from '../src/lib/net.svelte';
-import { nodes } from '../src/lib/nodes.svelte';
+import { nodes, type AccountKind } from '../src/lib/nodes.svelte';
 import * as p from '../src/lib/proto';
 import { example, TestHome } from './home';
-import { all, closePage, one, openPage, texts } from './page';
+import { all, closePage, go, one, openPage, texts } from './page';
 
 const feature = await loadFeature('../features/web_nodes.feature');
 
@@ -35,6 +35,7 @@ interface Rig {
   home: TestHome;
   store: Home;
   device: string;
+  info: p.HostInfo;
   commands: p.Envelope[];
   connect(): Promise<void>;
   drop(): void;
@@ -60,18 +61,29 @@ function makeNode(name: string, device: string, overrides: Partial<p.HostInfo> =
     home,
     store,
     device,
+    info,
     commands,
     async connect() {
       const link = store.connect();
       const base = home.connect(link.push);
       const ctl = {
         request: async (req: { t: string; env?: p.Envelope }) => {
-          if (req.t === 'host.info') return info;
+          if (req.t === 'host.info') return structuredClone(info);
           if (req.t === 'cmd' && req.env) {
-            const parsed = JSON.parse(req.env.p) as { t: string };
+            const parsed = JSON.parse(req.env.p) as {
+              t: string;
+              agent?: string;
+              account?: AccountKind;
+            };
             if (parsed.t === 'pair.browser') {
               commands.push(req.env);
               return p.decode(p.CmdResult, goldens['cmd-pair-link']);
+            }
+            if (parsed.t === 'agent.set') {
+              commands.push(req.env);
+              const entry = info.agents.find((item) => item.agent === parsed.agent);
+              if (entry && parsed.account) entry.account = parsed.account;
+              return { re: 1, ok: true } satisfies p.CmdResult;
             }
           }
           return base.ctl.request(req as never);
@@ -102,7 +114,6 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     await closePage();
     paths.clear();
     nodes.infos.clear();
-    nodes.devices.clear();
   });
 
   Background(({ Given }) => {
@@ -110,7 +121,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   });
 
   Scenario(
-    'The top-bar indicator shows all four connection states and links to the computers page',
+    'The indicator shows all four states, names them for screen readers, and shows in phone chats',
     ({ Given, When, Then, And }) => {
       Given('an owned computer "workstation" that hosts the group "Website"', async () => {
         workstation = makeNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q');
@@ -127,6 +138,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         const el = one<HTMLAnchorElement>('.bar .conn');
         expect(el.dataset.st).toBe('linking');
         expect(texts('.bar .conn')).toEqual(['Reconnecting']);
+        expect(el.getAttribute('aria-label')).toBe('Connection status: reconnecting');
+        expect(all('.chat-head .conn')).toEqual([]);
       });
       And('the indicator links to "#/nodes"', () => {
         expect(one<HTMLAnchorElement>('.bar .conn').getAttribute('href')).toBe('#/nodes');
@@ -135,17 +148,24 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         paths.set(workstation.store, { kind: 'direct', rtt: 18, since: Date.now() });
         flushSync();
       });
-      Then('the indicator in the top bar has state "ok" and reads "Direct 18 ms"', () => {
-        expect(one('.bar .conn').dataset.st).toBe('ok');
-        expect(texts('.bar .conn')).toEqual(['Direct 18 ms']);
-      });
+      Then(
+        'the indicator in the top bar has state "ok", reads "Direct 18 ms" and is named "Connection status: direct, 18 ms"',
+        () => {
+          const el = one<HTMLAnchorElement>('.bar .conn');
+          expect(el.dataset.st).toBe('ok');
+          expect(texts('.bar .conn')).toEqual(['Direct 18 ms']);
+          expect(el.getAttribute('aria-label')).toBe('Connection status: direct, 18 ms');
+        },
+      );
       When('the path to "workstation" becomes relayed', () => {
         paths.set(workstation.store, { kind: 'relay', rtt: 210, since: Date.now() });
         flushSync();
       });
       Then('the indicator in the top bar has state "limited" and reads "Relayed · limited"', () => {
-        expect(one('.bar .conn').dataset.st).toBe('limited');
+        const el = one<HTMLAnchorElement>('.bar .conn');
+        expect(el.dataset.st).toBe('limited');
         expect(texts('.bar .conn')).toEqual(['Relayed · limited']);
+        expect(el.getAttribute('aria-label')).toBe('Connection status: relayed · limited');
       });
       When('"workstation" stops', () => {
         workstation.drop();
@@ -154,15 +174,41 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then(
         'the indicator in the top bar has state "down" and reads "Cannot reach group home"',
         () => {
-          expect(one('.bar .conn').dataset.st).toBe('down');
+          const el = one<HTMLAnchorElement>('.bar .conn');
+          expect(el.dataset.st).toBe('down');
           expect(texts('.bar .conn')).toEqual(['Cannot reach group home']);
+          expect(el.getAttribute('aria-label')).toBe('Connection status: cannot reach group home');
+        },
+      );
+      When('the browser opens "#/nodes"', () => go('#/nodes'));
+      Then(
+        'the indicator in the top bar has state "down" and reads "Cannot reach computers"',
+        () => {
+          const el = one<HTMLAnchorElement>('.bar .conn');
+          expect(el.dataset.st).toBe('down');
+          expect(texts('.bar .conn')).toEqual(['Cannot reach computers']);
+          expect(el.getAttribute('aria-label')).toBe('Connection status: cannot reach computers');
+        },
+      );
+      When('the browser opens "#/groups/rZNvy-1jH6Z-BcPqA5U5BQ" on a 390 px phone', async () => {
+        await closePage();
+        homes.push(workstation.store);
+        openPage(`#/groups/${website}`, 390);
+      });
+      Then(
+        'the indicator in the chat head has state "down" and reads "Cannot reach group home"',
+        () => {
+          const el = one<HTMLAnchorElement>('.chat-head .conn');
+          expect(el.dataset.st).toBe('down');
+          expect(texts('.chat-head .conn')).toEqual(['Cannot reach group home']);
+          expect(all('.bar .conn')).toEqual([]);
         },
       );
     },
   );
 
   Scenario(
-    'Two computers are listed with direct, relayed and offline states, relay quota and AIs',
+    'Two computers are listed with direct, relayed, limited and offline states, and setting an account type updates the card',
     ({ Given, And, When, Then }) => {
       Given(
         'an owned computer "workstation" on "macOS 15.2" running "v0.3.1" with direct path 4 ms and group "Website"',
@@ -179,7 +225,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       And(
-        'an owned computer "windows-box" on "Windows 11" running "v0.3.1" on a relayed path for 26 minutes with quota 3.1 MB of 50 MB',
+        'an owned computer "windows-box" on "Windows 11" running "v0.3.1" on a relayed path for 26 minutes with a limited AI in "Website"',
         async () => {
           windowsBox = makeNode('windows-box', 'W9Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q', {
             os: 'Windows 11',
@@ -187,7 +233,6 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             open: 1,
             max_open: 3,
             homes: [],
-            relay: { used: 3_250_000, limit: 52_428_800 },
             agents: [
               {
                 agent: 'codex',
@@ -195,7 +240,16 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
                 account: 'api_key',
                 login_ok: true,
                 caps: {},
-                groups: [],
+                groups: [
+                  {
+                    g: website,
+                    member: '1PC8WineBrUQ-apCjx7tug',
+                    level: 2,
+                    repo_config: false,
+                    state: 'limited',
+                    queued: 0,
+                  },
+                ],
               },
             ],
           });
@@ -243,19 +297,50 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(ai.textContent).toContain('Claude Code');
           expect(ai.textContent).toContain('Personal subscription');
           expect(ai.textContent).toContain('Signed in');
+          expect(ai.querySelector('.acct')).toBeNull();
           expect(ai.querySelector('.perm')!.textContent!.replace(/\s+/g, ' ').trim()).toBe(
             'Website Working · T-12',
           );
         },
       );
-      And('"workstation" lists "Codex" as "Account type not set" and "Not signed in"', () => {
-        const ai = all('.card.node')[0].querySelectorAll('.ai-row')[1];
-        expect(ai.textContent).toContain('Codex');
-        expect(ai.textContent).toContain('Account type not set');
-        expect(ai.textContent).toContain('Not signed in');
-      });
       And(
-        'the page lists "windows-box" as "Online" with link "Relay · 210 ms · 26 min" and relay notice "Relay data today: 3.1 MB / 50 MB"',
+        '"workstation" lists "Codex" as "Account type not set" and "Not signed in" with the three account choices',
+        () => {
+          const ai = all('.card.node')[0].querySelectorAll('.ai-row')[1];
+          expect(ai.textContent).toContain('Codex');
+          expect(ai.textContent).toContain('Account type not set');
+          expect(ai.textContent).toContain('Not signed in');
+          const choices = [...ai.querySelectorAll('.acct label b')].map((b) => b.textContent);
+          expect(choices).toEqual(['Personal subscription', 'Team plan', 'API key']);
+        },
+      );
+      When('the person chooses "Team plan" for "Codex" on "workstation"', async () => {
+        const ai = all('.card.node')[0].querySelectorAll('.ai-row')[1];
+        const radio = ai.querySelector<HTMLInputElement>('input[value="team"]')!;
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change', { bubbles: true }));
+        await vi.waitFor(() => {
+          flushSync();
+          expect(ai.querySelector('.acct')).toBeNull();
+        });
+      });
+      Then(
+        '"workstation" receives a signed "agent.set" command setting "codex" to "team" and lists "Codex" as "Team plan"',
+        () => {
+          expect(workstation.commands).toHaveLength(1);
+          const payload = JSON.parse(workstation.commands[0].p) as Record<string, unknown>;
+          expect(payload).toMatchObject({
+            t: 'agent.set',
+            to: workstation.device,
+            agent: 'codex',
+            account: 'team',
+          });
+          const ai = all('.card.node')[0].querySelectorAll('.ai-row')[1];
+          expect(ai.querySelector('.badge')!.textContent!.trim()).toBe('Team plan');
+        },
+      );
+      And(
+        'the page lists "windows-box" as "Online" with link "Relay · 210 ms · 26 min", relay notice "Using a relay — speed and data are limited." and "Limited" AI state',
         () => {
           const card = all('.card.node')[1];
           expect(card.querySelector('h3')!.textContent).toBe('windows-box');
@@ -263,9 +348,12 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(card.querySelector('.kv dd')!.textContent!.replace(/\s+/g, ' ').trim()).toBe(
             'Relay · 210 ms · 26 min',
           );
-          expect(card.querySelector('.note .hint')!.textContent!.trim()).toBe(
-            'Relay data today: 3.1 MB / 50 MB',
+          expect(card.querySelector('.note b')!.textContent!.trim()).toBe(
+            'Using a relay — speed and data are limited.',
           );
+          const permSt = card.querySelector('.perm .st')!;
+          expect(permSt.getAttribute('data-st')).toBe('limited');
+          expect(permSt.textContent!.trim()).toBe('Limited');
         },
       );
       When('"windows-box" stops', () => {
@@ -359,38 +447,34 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
-    'An empty computers page prompts to add a computer, and a host.info push updates a card live',
+    'An empty computers page shows a single Add a computer action and updates when a computer connects',
     ({ When, Then }) => {
       When('the browser opens "#/nodes"', () => openPage('#/nodes'));
       Then(
-        'the page shows the empty notice "No computers connected yet" with a link to "#/onboarding"',
+        'the page shows the empty notice "No computers connected yet" and one "Add a computer" link to "#/onboarding"',
         () => {
           expect(texts('.empty h3')).toEqual(['No computers connected yet']);
-          expect(one<HTMLAnchorElement>('.empty a').getAttribute('href')).toBe('#/onboarding');
+          expect(all('.empty a')).toEqual([]);
+          const links = all<HTMLAnchorElement>('main a').filter((a) =>
+            a.textContent!.includes('Add a computer'),
+          );
+          expect(links).toHaveLength(1);
+          expect(links[0].getAttribute('href')).toBe('#/onboarding');
         },
       );
-      When(
-        'an owned computer "workstation" connects and pushes a host.info update with 3 open AIs',
-        async () => {
-          workstation = makeNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q');
-          homes.push(workstation.store);
-          await workstation.connect();
-          paths.set(workstation.store, { kind: 'direct', rtt: 6, since: Date.now() });
-          await vi.waitFor(() => {
-            flushSync();
-            expect(all('.card.node .sub')).toHaveLength(1);
-          });
-          nodes.push({
-            ...p.decode(p.HostInfoPush, goldens['host-info-push']),
-            device: workstation.device,
-            name: 'workstation',
-            open: 3,
-            max_open: 4,
-            offline: false,
-          });
+      When('an owned computer "workstation" connects with 3 open AIs', async () => {
+        workstation = makeNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q', {
+          open: 3,
+          max_open: 4,
+        });
+        homes.push(workstation.store);
+        await workstation.connect();
+        paths.set(workstation.store, { kind: 'direct', rtt: 6, since: Date.now() });
+        await vi.waitFor(() => {
           flushSync();
-        },
-      );
+          expect(all('.card.node .sub')).toHaveLength(1);
+        });
+      });
       Then('the page lists "workstation" with "3 of 4 AIs open"', () => {
         expect(one('.card.node .sub').textContent!.replace(/\s+/g, ' ').trim()).toBe(
           'macOS 15.2 · Node v0.3.1 · 3 of 4 AIs open',

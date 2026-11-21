@@ -1,11 +1,18 @@
 <script lang="ts">
   import Avatar from '../components/Avatar.svelte';
+  import Failure from '../components/Failure.svelte';
   import Icon from '../components/Icon.svelte';
-  import NodeIcon from '../components/nodes/NodeIcon.svelte';
   import PairBrowserDialog from '../components/nodes/PairBrowserDialog.svelte';
   import { find } from '../lib/groups.svelte';
   import type { Net } from '../lib/net.svelte';
-  import { nodes, type Computer } from '../lib/nodes.svelte';
+  import {
+    accountLabel,
+    accounts,
+    cliName,
+    nodes,
+    type AccountKind,
+    type Computer,
+  } from '../lib/nodes.svelte';
   import { t } from '../lib/prefs.svelte';
   import type { TaskRow } from '../lib/proto';
   import { href } from '../lib/route.svelte';
@@ -17,18 +24,10 @@
   $effect(() => nodes.sync(net.homes));
 
   const computers = $derived(nodes.list(net));
-  const pairable = $derived(
-    computers.filter((comp) => comp.online && comp.home !== undefined && comp.info !== undefined),
-  );
+  const pairable = $derived(computers.filter((comp) => comp.online && comp.info !== undefined));
   let pairing = $state(false);
-
-  const cliName = (agent: string) =>
-    agent === 'claude' ? 'Claude Code' : agent === 'codex' ? 'Codex' : agent;
-
-  const mb = (bytes: number) => String(Number((bytes / (1024 * 1024)).toFixed(1)));
-
-  const relayQuota = (relay: { used: number; limit: number }) =>
-    t('nodes.relay.used').replace('{used}', mb(relay.used)).replace('{limit}', mb(relay.limit));
+  let busyAcct = $state<Record<string, boolean>>({});
+  let acctFailed = $state<Record<string, string>>({});
 
   function hostedGroups(comp: Computer) {
     const map = new Map<string, string>();
@@ -37,32 +36,26 @@
         if (entry.home === comp.info.device) map.set(entry.g, entry.name);
       }
     }
-    for (const group of comp.home?.groups ?? []) map.set(group.g, group.name);
+    for (const group of comp.home.groups) map.set(group.g, group.name);
     return [...map].map(([g, name]) => ({ g, name }));
   }
 
-  function accountLabel(account: string | null) {
-    if (account === 'personal') return t('nodes.account.personal');
-    if (account === 'team') return t('nodes.account.team');
-    if (account === 'api_key') return t('nodes.account.api_key');
-    return t('nodes.account.unset');
-  }
-
-  const stateTone = (state: string) =>
-    state === 'dormant' ? 'sleeping' : state === 'limited' ? 'paused' : state;
+  const stateTone = (state: string) => (state === 'dormant' ? 'sleeping' : state);
 
   function stateLabel(state: string) {
-    const known = [
-      'working',
-      'waiting',
-      'dormant',
-      'takeover',
-      'paused',
-      'limited',
-      'offline',
-    ] as const;
+    const known = ['working', 'waiting', 'dormant', 'limited', 'offline'] as const;
     const match = known.find((each) => each === state);
     return match ? t(`nodes.ai.state.${match}`) : state;
+  }
+
+  async function chooseAccount(comp: Computer, agent: string, account: AccountKind) {
+    if (!comp.info) return;
+    const key = `${comp.info.device}:${agent}`;
+    busyAcct[key] = true;
+    acctFailed[key] = '';
+    const answer = await nodes.setAccount(comp.home, comp.info.device, agent, account);
+    busyAcct[key] = false;
+    if (answer.err) acctFailed[key] = answer.err.code;
   }
 </script>
 
@@ -76,19 +69,19 @@
       <Icon name="plus" sm /><span>{t('nodes.add.computer')}</span>
     </a>
     <button type="button" class="btn" disabled={!pairable.length} onclick={() => (pairing = true)}>
-      <NodeIcon name="phone" sm /><span>{t('nodes.add.browser')}</span>
+      <Icon name="phone" sm /><span>{t('nodes.add.browser')}</span>
     </button>
   </div>
 
   {#if computers.length}
-    {#each computers as comp, idx (comp.info?.device ?? comp.home ?? idx)}
+    {#each computers as comp, idx (comp.info?.device ?? comp.home)}
       {@const hosted = hostedGroups(comp)}
       {@const relayed = comp.online && comp.path?.kind === 'relay'}
       <section class="card node" aria-labelledby={`${uid}-n-${idx}`}>
         <header class="row">
           <span class="node-ico"><Icon name="pc" /></span>
           <div class="grow">
-            <h3 id={`${uid}-n-${idx}`}>{comp.info?.name ?? comp.home?.name ?? ''}</h3>
+            <h3 id={`${uid}-n-${idx}`}>{comp.info?.name ?? comp.home.name ?? ''}</h3>
             {#if comp.info}
               <p class="muted sub">
                 {comp.info.os} · {t('nodes.node')}
@@ -104,14 +97,14 @@
           </span>
         </header>
 
-        {#if comp.online || hosted.length || (comp.info?.relay && !relayed)}
+        {#if comp.online || hosted.length}
           <dl class="kv">
             {#if comp.online}
               <dt>{t('nodes.link')}</dt>
               <dd>
                 {#if comp.path?.kind === 'direct'}
                   <span class="who">
-                    <span class="ok-ico"><NodeIcon name="direct" sm /></span>
+                    <span class="ok-ico"><Icon name="direct" sm /></span>
                     <span>{t('nodes.conn.ok')}</span>
                     {#if comp.path.rtt !== undefined}
                       <span class="muted">· {comp.path.rtt} ms</span>
@@ -120,7 +113,7 @@
                 {:else if comp.path?.kind === 'relay'}
                   {@const mins = Math.max(1, Math.round((now() - comp.path.since) / 60_000))}
                   <span class="who relay-who">
-                    <NodeIcon name="relay" sm /><b>{t('nodes.relay')}</b>
+                    <Icon name="relay" sm /><b>{t('nodes.relay')}</b>
                     <span class="muted">
                       {#if comp.path.rtt !== undefined}· {comp.path.rtt} ms{' '}{/if}· {t(
                         'nodes.relay.for',
@@ -131,10 +124,6 @@
                   <span class="muted">{t('nodes.conn.linking')}</span>
                 {/if}
               </dd>
-            {/if}
-            {#if comp.info?.relay && !relayed}
-              <dt>{t('nodes.relay.quota')}</dt>
-              <dd>{mb(comp.info.relay.used)} MB / {mb(comp.info.relay.limit)} MB</dd>
             {/if}
             {#if hosted.length}
               <dt>{t('nodes.hosts')}</dt>
@@ -148,12 +137,7 @@
             <Icon name="alert" sm />
             <div class="grow">
               <b>{t('nodes.relay.title')}</b>
-              {t('nodes.relay.body')}
-              {#if comp.info?.relay}
-                <div class="row relay-foot">
-                  <span class="hint">{relayQuota(comp.info.relay)}</span>
-                </div>
-              {/if}
+              {' '}{t('nodes.relay.body')}
             </div>
           </div>
         {/if}
@@ -175,12 +159,14 @@
 
         {#if comp.info}
           {#each comp.info.agents as agent (agent.agent)}
+            {@const label = cliName(agent.agent)}
+            {@const acctKey = `${comp.info.device}:${agent.agent}`}
             <div class="ai-row">
               <div class="row">
-                <Avatar id={agent.agent} name={cliName(agent.agent)} cli={agent.agent} />
+                <Avatar id={agent.agent} name={label} cli={agent.agent} />
                 <div class="grow">
                   <div class="row ai-title">
-                    <b>{cliName(agent.agent)}</b>
+                    <b>{label}</b>
                     <span class="mono hint">v{agent.cli_version}</span>
                     <span class="badge" data-tone={agent.account ? undefined : 'dawn'}>
                       {accountLabel(agent.account)}
@@ -195,6 +181,31 @@
                   {/if}
                 </div>
               </div>
+
+              {#if agent.account === null}
+                <header class="card-head">
+                  <h4 class="kind">{t('nodes.account.title').replace('{name}', label)}</h4>
+                </header>
+                <fieldset class="acct" disabled={!comp.online || busyAcct[acctKey]}>
+                  <legend class="sr">{t('nodes.account.legend')} · {label}</legend>
+                  {#each accounts as acct (acct)}
+                    <label>
+                      <input
+                        type="radio"
+                        name={`${uid}-acct-${idx}-${agent.agent}`}
+                        value={acct}
+                        onchange={() => void chooseAccount(comp, agent.agent, acct)}
+                      />
+                      <span>
+                        <b>{accountLabel(acct)}</b>
+                        <span>{t(`nodes.account.${acct}_body`)}</span>
+                      </span>
+                    </label>
+                  {/each}
+                </fieldset>
+                {#if acctFailed[acctKey]}<Failure code={acctFailed[acctKey]} />{/if}
+                <p class="hint">{t('nodes.account.hint')}</p>
+              {/if}
 
               {#if agent.groups.length}
                 {#each agent.groups as entry (entry.g)}
@@ -233,9 +244,6 @@
       <span class="horizon"></span>
       <h3>{t('nodes.empty.title')}</h3>
       <p>{t('nodes.empty.body')}</p>
-      <a class="btn btn-primary" href={href('onboarding')}>
-        <Icon name="plus" sm /><span>{t('nodes.add.computer')}</span>
-      </a>
     </div>
   {/if}
 </div>
@@ -299,25 +307,6 @@
   .relay-who {
     color: var(--dawn-text);
   }
-  .relay-foot {
-    margin-top: 8px;
-  }
-  .note {
-    display: flex;
-    gap: var(--sp-2);
-    padding: 10px 12px;
-    border-radius: var(--r-md);
-    background: var(--tone-soft, var(--surface-2));
-    color: var(--text);
-    font-size: var(--fs-sm);
-  }
-  .note > :global(.i) {
-    color: var(--tone-text, var(--text-3));
-    margin-top: 2px;
-  }
-  .note b {
-    color: var(--tone-text, inherit);
-  }
   .ai-row {
     border-top: 1px solid var(--line);
     padding: var(--sp-4);
@@ -327,6 +316,9 @@
   }
   .ai-title {
     gap: 6px;
+  }
+  .ai-row p.st {
+    margin-top: 2px;
   }
   .perm {
     display: flex;
@@ -341,79 +333,6 @@
   .perm > span:first-child {
     flex: 1;
     min-width: 0;
-  }
-  .st {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-    min-width: 0;
-  }
-  p.st {
-    display: flex;
-    margin-top: 2px;
-  }
-  .st i {
-    flex: none;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    color: var(--text-3);
-    background: currentColor;
-  }
-  .st[data-st='ok'] i {
-    color: var(--ok);
-  }
-  .st[data-st='working'] i {
-    color: var(--sky);
-    animation: pulse 2s var(--ease) infinite;
-  }
-  .st[data-st='waiting'] i {
-    background: none;
-    border: 2px solid currentColor;
-  }
-  .st[data-st='sleeping'] {
-    color: var(--text-3);
-  }
-  .st[data-st='sleeping'] i {
-    width: 10px;
-    height: 10px;
-    background: none;
-    box-shadow: inset -3px -2px 0 0 currentColor;
-  }
-  .st[data-st='offline'] {
-    color: var(--text-3);
-  }
-  .st[data-st='offline'] i {
-    background: none;
-    border: 1.5px dashed currentColor;
-  }
-  .st[data-st='paused'] i {
-    border-radius: 1px;
-    background: linear-gradient(90deg, currentColor 34%, transparent 34% 66%, currentColor 66%);
-  }
-  .st[data-st='takeover'] {
-    color: var(--text);
-    font-weight: 500;
-  }
-  .st[data-st='takeover'] i {
-    border-radius: 2px;
-    color: var(--text);
-  }
-  .st[data-st='down'] {
-    color: var(--danger);
-  }
-  .st[data-st='down'] i {
-    color: var(--danger);
-    background: none;
-    border: 2px solid currentColor;
-  }
-  @keyframes pulse {
-    50% {
-      opacity: 0.35;
-      transform: scale(0.82);
-    }
   }
   .empty {
     display: grid;
