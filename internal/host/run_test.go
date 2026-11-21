@@ -450,80 +450,78 @@ func tokenFromLaunch(l Launch) string {
 	return l.Shim[idx+1]
 }
 
-func TestStartResumeEventsStrayTurnEndedAndDeliver(t *testing.T) {
-	h, rh, drv, dataDir := setupRunEnv(t)
-	Instructions = func(s Session) string { return "prompt:" + string(s.Kind) }
+func waitReportedKind(t *testing.T, reported <-chan EventKind) EventKind {
+	t.Helper()
+	select {
+	case kind := <-reported:
+		return kind
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for reported event")
+		return ""
+	}
+}
 
-	var events []Event
-	var mu sync.Mutex
-	Listeners["test"] = func(_ *Host, _ SessionKey, e Event) {
-		mu.Lock()
-		events = append(events, e)
-		mu.Unlock()
+func drainReportedEvents(t *testing.T, reported <-chan EventKind, want []EventKind) {
+	t.Helper()
+	got := make([]EventKind, len(want))
+	for i := range want {
+		got[i] = waitReportedKind(t, reported)
 	}
-	delivered := make(chan aiSlot, 8)
-	Deliver = func(_ *Host, g, m string) { delivered <- aiSlot{g, m} }
+	if !slices.Equal(got, want) {
+		t.Fatalf("reported events = %v, want %v", got, want)
+	}
+}
 
-	key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-	if err := h.Sessions.Create(makeRunSession(key, TaskSession, "wt/1-paths")); err != nil {
-		t.Fatal(err)
-	}
-
-	turn1 := Turn{Kind: ItemsTurn, Thread: runTask1, Depth: 1}
-	if err := Runner.Turn(t.Context(), h, key, "first message", turn1); err != nil {
-		t.Fatal(err)
-	}
-	if drv.count() != 1 {
-		t.Fatalf("starts = %d, want 1", drv.count())
-	}
-	l1 := drv.lastLaunch()
-	tok1 := tokenFromLaunch(l1)
-	wantDir := filepath.Join(dataDir, "projects", runGroup1, "wt/1-paths")
-	if l1.Folder != wantDir || l1.Session != "" || l1.Level != 3 || !slices.Equal(l1.Shim[:2], []string{"solodawn", "mcp"}) || l1.Instructions != "prompt:task" || l1.RepoConfig || l1.ToolTimeout != 60*time.Minute {
-		t.Fatalf("unexpected launch: %+v, want dir %s", l1, wantDir)
-	}
-	caller1, ok := h.Sessions.Caller(tok1)
-	if !ok || caller1.Level != 3 || caller1.Interactive || caller1.Turn != (Turn{N: 1, Kind: ItemsTurn, Thread: runTask1, Depth: 1}) {
-		t.Fatalf("unexpected caller: %+v (ok=%v)", caller1, ok)
-	}
-
-	stWorking := rh.waitCmd(t)
-	var ms1 proto.MemberStatus[proto.SystemCode]
-	if err := proto.Decode([]byte(stWorking.raw), &ms1); err != nil || ms1.State != "working" || string(ms1.Task) != runTask1 || ms1.Path != "local" {
-		t.Fatalf("working status: %+v (%v)", ms1, err)
-	}
-
-	p1 := drv.proc(0)
-	p1.emit(Event{Kind: Ready, Session: "cli-sess-1"})
-	p1.emit(Event{Kind: Ready, Session: ""})
-	p1.emit(Event{Kind: Active})
-	pct := 42.5
-	p1.emit(Event{Kind: Used, Usage: Usage{WindowPct: &pct}})
-	p1.emit(Event{Kind: TurnEnded, Status: "completed"})
-
+func waitDeliveredSlot(t *testing.T, delivered <-chan aiSlot, want aiSlot) {
+	t.Helper()
 	select {
 	case slot := <-delivered:
-		if slot != (aiSlot{runGroup1, runAI1}) {
-			t.Fatalf("delivered %+v", slot)
+		if slot != want {
+			t.Fatalf("delivered %+v, want %+v", slot, want)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Deliver not called")
 	}
+}
 
-	sAfter1 := waitForState(t, h, key, Waiting)
-	if sAfter1.CLISession != "cli-sess-1" {
-		t.Fatalf("CLISession = %q, want cli-sess-1", sAfter1.CLISession)
+func assertFirstTurnLaunch(t *testing.T, h *Host, drv *fakeDriver, dataDir string) string {
+	t.Helper()
+	if drv.count() != 1 {
+		t.Fatalf("starts = %d, want 1", drv.count())
 	}
-	stWaiting := rh.waitCmd(t)
-	var ms2 proto.MemberStatus[proto.SystemCode]
-	if err := proto.Decode([]byte(stWaiting.raw), &ms2); err != nil || ms2.State != "waiting" || string(ms2.Task) != runTask1 || ms2.Usage != (proto.Usage{}) {
-		t.Fatalf("waiting status: %+v (%v)", ms2, err)
+	l1 := drv.lastLaunch()
+	wantDir := filepath.Join(dataDir, "projects", runGroup1, "wt/1-paths")
+	got := [7]any{l1.Folder, l1.Session, l1.Level, slices.Equal(l1.Shim[:2], []string{"solodawn", "mcp"}), l1.Instructions, l1.RepoConfig, l1.ToolTimeout}
+	want := [7]any{wantDir, "", 3, true, "prompt:task", false, 60 * time.Minute}
+	if got != want {
+		t.Fatalf("unexpected launch: %+v, want dir %s", l1, wantDir)
 	}
+	tok1 := tokenFromLaunch(l1)
+	caller1, ok := h.Sessions.Caller(tok1)
+	gotCaller := [4]any{ok, caller1.Level, caller1.Interactive, caller1.Turn}
+	wantCaller := [4]any{true, 3, false, Turn{N: 1, Kind: ItemsTurn, Thread: runTask1, Depth: 1}}
+	if gotCaller != wantCaller {
+		t.Fatalf("unexpected caller: %+v (ok=%v)", caller1, ok)
+	}
+	return tok1
+}
 
-	// A stray second TurnEnded while Waiting is reported to Listeners
-	// without panicking, sending another status, or calling Deliver again.
-	p1.emit(Event{Kind: TurnEnded, Status: "completed"})
+func assertMemberStatusCmd(t *testing.T, rh *runHome, wantState, wantTask string) {
+	t.Helper()
+	cmd := rh.waitCmd(t)
+	var ms proto.MemberStatus[proto.SystemCode]
+	if err := proto.Decode([]byte(cmd.raw), &ms); err != nil {
+		t.Fatalf("decode member status: %v", err)
+	}
+	got := [4]any{ms.State, string(ms.Task), ms.Path, ms.Usage}
+	want := [4]any{wantState, wantTask, "local", proto.Usage{}}
+	if got != want {
+		t.Fatalf("member status = %+v, want state=%s task=%s", ms, wantState, wantTask)
+	}
+}
 
+func verifySecondTurnAfterStrayEnd(t *testing.T, h *Host, rh *runHome, drv *fakeDriver, key SessionKey, tok1 string, reported <-chan EventKind, delivered <-chan aiSlot) {
+	t.Helper()
 	// Second turn while still Waiting reuses the open process without restarting.
 	if err := Runner.Turn(t.Context(), h, key, "second message", Turn{Kind: ItemsTurn, Thread: runTask1}); err != nil {
 		t.Fatal(err)
@@ -531,32 +529,68 @@ func TestStartResumeEventsStrayTurnEndedAndDeliver(t *testing.T) {
 	if drv.count() != 1 {
 		t.Fatalf("process restarted on waiting turn: %d starts", drv.count())
 	}
-	stWorking2 := rh.waitCmd(t)
-	if stWorking2.payload["state"] != "working" {
-		t.Fatalf("expected working status on second turn, got %v (stray TurnEnded sent extra status)", stWorking2.payload)
-	}
+	assertMemberStatusCmd(t, rh, "working", runTask1)
 	caller2, ok := h.Sessions.Caller(tok1)
-	if !ok || caller2.Turn.N != 2 {
-		t.Fatalf("caller turn after second turn: %+v", caller2)
+	if [2]bool{ok, caller2.Turn.N == 2} != [2]bool{true, true} {
+		t.Fatalf("caller turn after second turn: %+v (ok=%v)", caller2, ok)
 	}
-	p1.emit(Event{Kind: TurnEnded, Status: "completed"})
-	<-delivered
+	drv.proc(0).emit(Event{Kind: TurnEnded, Status: "completed"})
+	waitDeliveredSlot(t, delivered, aiSlot{runGroup1, runAI1})
 	if len(delivered) != 0 {
 		t.Fatalf("stray TurnEnded caused extra Deliver call")
 	}
 	waitForState(t, h, key, Waiting)
-	rh.waitCmd(t)
+	assertMemberStatusCmd(t, rh, "waiting", runTask1)
+	drainReportedEvents(t, reported, []EventKind{TurnBegan, TurnEnded})
+}
 
-	mu.Lock()
-	var kinds []EventKind
-	for _, ev := range events {
-		kinds = append(kinds, ev.Kind)
+func TestStartResumeEventsStrayTurnEndedAndDeliver(t *testing.T) {
+	h, rh, drv, dataDir := setupRunEnv(t)
+	Instructions = func(s Session) string { return "prompt:" + string(s.Kind) }
+
+	// Single reader: waitReportedKind on the test goroutine.
+	reported := make(chan EventKind, 16)
+	Listeners["test"] = func(_ *Host, _ SessionKey, e Event) { reported <- e.Kind }
+	// Single reader: waitDeliveredSlot on the test goroutine.
+	delivered := make(chan aiSlot, 8)
+	Deliver = func(_ *Host, g, m string) { delivered <- aiSlot{g, m} }
+
+	key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
+	if err := h.Sessions.Create(makeRunSession(key, TaskSession, "wt/1-paths")); err != nil {
+		t.Fatal(err)
 	}
-	mu.Unlock()
-	wantKinds := []EventKind{TurnBegan, Ready, Ready, Active, Used, TurnEnded, TurnEnded, TurnBegan, TurnEnded}
-	if !slices.Equal(kinds, wantKinds) {
-		t.Fatalf("reported events = %v, want %v", kinds, wantKinds)
+	turn1 := Turn{Kind: ItemsTurn, Thread: runTask1, Depth: 1}
+	if err := Runner.Turn(t.Context(), h, key, "first message", turn1); err != nil {
+		t.Fatal(err)
 	}
+	tok1 := assertFirstTurnLaunch(t, h, drv, dataDir)
+	assertMemberStatusCmd(t, rh, "working", runTask1)
+
+	p1 := drv.proc(0)
+	pct := 42.5
+	for _, ev := range []Event{
+		{Kind: Ready, Session: "cli-sess-1"},
+		{Kind: Ready, Session: ""},
+		{Kind: Active},
+		{Kind: Used, Usage: Usage{WindowPct: &pct}},
+		{Kind: TurnEnded, Status: "completed"},
+	} {
+		p1.emit(ev)
+	}
+	waitDeliveredSlot(t, delivered, aiSlot{runGroup1, runAI1})
+	if sAfter1 := waitForState(t, h, key, Waiting); sAfter1.CLISession != "cli-sess-1" {
+		t.Fatalf("CLISession = %q, want cli-sess-1", sAfter1.CLISession)
+	}
+	assertMemberStatusCmd(t, rh, "waiting", runTask1)
+
+	// A stray second TurnEnded while Waiting is reported to Listeners without
+	// sending another status or calling Deliver again; the trailing Active event
+	// ensures runProcessLoop has returned from onProcessTurnEnded before Turn.
+	p1.emit(Event{Kind: TurnEnded, Status: "completed"})
+	p1.emit(Event{Kind: Active})
+	drainReportedEvents(t, reported, []EventKind{TurnBegan, Ready, Ready, Active, Used, TurnEnded, TurnEnded, Active})
+
+	verifySecondTurnAfterStrayEnd(t, h, rh, drv, key, tok1, reported, delivered)
 }
 
 func TestDeliverOnTurnEndEvictsSameProcessWithoutDeadlock(t *testing.T) {
