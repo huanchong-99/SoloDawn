@@ -46,6 +46,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | hand in a `cmd` frame | `loop.Cmd(conn, re, env)`; the answer is sent to the connection |
 | answer a `hello` | `loop.Welcome(conn, build)`: `build` makes the `welcome` frame from the groups of the peer |
 | subscribe a connection to a group | `loop.Watch(conn, group, stateOnly)` |
+| answer a `fetch` frame | `loop.Fetch(conn, req)`; the answer is sent to the connection |
 | send a host its inbox items, on every `hello` | `loop.Inbox(conn)` |
 | run the timers by hand, or tell the home of an event | `loop.Tick(now)`, `loop.Event(name, event)` |
 | move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
@@ -170,7 +171,8 @@ names that start with `run`, and its tests those that start with `run` and `Run`
 and their test functions start with `TestGroup` and `TestMember`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
 Device-log events (`ev_device.go`) take the names that start with `dev`, and their tests start with
-`TestDevice` and `dev`.
+`TestDevice` and `dev`. `fetch.go` exports `Fetch`, takes the names that start with `fet`, its tests
+too, and its test functions start with `TestFetch`.
 
 ## The run loop
 
@@ -240,6 +242,17 @@ queuing anything; a frame built from it can be older than a push that is already
 number, and the connection is pushed every change after it. It refuses a group that does not
 exist, a device that `Serves` refuses, and a connection that is gone.
 
+**Fetch.** `Fetch(conn, req)` answers a `fetch` request
+([datachannel](../../planning/contracts/datachannel.md), section 4): a page by `kind` (`note` or
+`review`) when `Kind` is set, one live row when `Row` or `RowID` is set, or a page of a task's
+thread or of the main line (`Thread` nil) otherwise. Paged reads require `Limit` in 1..100 and
+`Before >= 0` (`bad_request` otherwise). On the goroutine of the group (`ask`), it checks that the
+connection is still seated, that the group exists (`not_found` otherwise) and serves the
+connection's device (`forbidden` otherwise), opens and closes a `store.Snapshot`, packs page rows
+with `runBatches` within the 61,440-byte `ctl` limit
+([conventions](../../planning/contracts/conventions.md), section 4) without `gone` markers, and
+queues the `fetched` or error answer on `conn`.
+
 **Inbox items.** An item is stored in the transaction of its result, for the host of its AI as
 that result leaves the member rows; an item for a member that is no AI fails the transaction.
 `Inbox(conn)` makes a connection the taker of the items of its device: it is sent every item
@@ -288,8 +301,8 @@ logger, and no ticks but `Tick`. A connection goes through four entries, the sam
 2. For each frame the client sends, the entry of its type: for `hello`,
    `loop.Welcome(conn, build)`, where `build` gets the `groups` of the welcome and returns the
    whole frame from values the node has ready, and never a `Send` of the node's own, and after it `loop.Inbox(conn)` for a host;
-   `loop.Cmd(conn, re, env)` for `cmd`, with the `id` of the request as `re`; `sync`, `fetch` and
-   `ack` come with their units.
+   `loop.Cmd(conn, re, env)` for `cmd`, with the `id` of the request as `re`, and
+   `loop.Fetch(conn, req)` for `fetch`; `sync` and `ack` come with their units.
 3. The loop calls `client.Send(frame)` for every answer and push, one at a time, in order. The
    answer to a command is a frame like the others and comes after the frames queued before it.
    So a `Send` must not wait for something that the sender of a command holds while it waits for
@@ -304,11 +317,11 @@ worked out before it called `Welcome`, such as `time` and `addrs`. It takes no l
 nothing and calls nothing, the loop least of all; a `build` that waits for a lock of the node
 which another goroutine holds while it calls `Cmd` waits for ever. The loop calls `LoopConfig.Logs`, `Now`
 and `Report` on the goroutines of its groups, and `Logs` and `Now` also on the caller of `Cmd`:
-none of the three may wait for a lock that is held around a call of `Attach`, `Watch`, `Close`
-or `Cmd`, and none may call those. `Attach`, `Watch` and `Close` wait for the groups: they
-must not be called on the goroutine of a group, which is where a hook runs, or on the store's
-writer, which is where the function of a command, a timer, a handler, a `Disk` and a `Write.Put`
-run. A client's `Send` runs on the goroutine of its connection and may call every entry. A hook
+none of the three may wait for a lock that is held around a call of `Attach`, `Watch`, `Fetch`,
+`Close` or `Cmd`, and none may call those. `Attach`, `Watch`, `Fetch` and `Close` wait for the
+groups: they must not be called on the goroutine of a group, which is where a hook runs, or on the
+store's writer, which is where the function of a command, a timer, a handler, a `Disk` and a
+`Write.Put` run. A client's `Send` runs on the goroutine of its connection and may call every entry. A hook
 may start transactions of the store; what runs on the store's writer may not. The goroutine of a
 group waits for the store's writer and for nothing else, and what runs on the writer takes no
 lock of the loop: so no lock of a client, of a host's session or of the node can close a circle
@@ -501,3 +514,8 @@ commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
 
 `ev_device_test.go` covers every branch and boundary of `Events["device"]`, including ignored event
 types, empty and non-owner slices, version boundaries and online/offline `GroupsChanged` transitions.
+
+`fetch_test.go` and `fetch_internal_test.go` exercise `Loop.Fetch` across thread pages, `note` and
+`review` pages, single-row reads, exact 61,440-byte boundaries, page bounds checks, group access
+checks, detached connections and store failures. `features/home_fetch.feature` holds the
+scroll-back scenarios of A2.2 and the deleted-row scenario of A2.7.
