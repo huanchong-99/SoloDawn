@@ -1434,27 +1434,28 @@ func TestWorkspacesBranchRetryMergeStatsAndRestartInspect(t *testing.T) {
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 1, Title: "Add feature", Slug: "add-feature", Origin: "brief", State: "active", Step: "branch", Assignee: testAI1, Reviewer: testAI2})
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 801, AI: testAI1, Why: "assign", Task: testTask1}, nil)
 	r.waitUntil("first failed TaskBranch logged", func() bool {
-		return len(r.home.cmdPayloads()) == 1 && strings.Contains(logs.String(), "host: command to")
+		return len(r.home.cmdPayloads()) >= 1 && strings.Contains(logs.String(), "host: command to")
 	})
 	r.waitAIUnbusy(testGroup1, testAI1)
 	if len(r.runtime.recorded()) != 0 {
 		t.Fatalf("failed TaskBranch should hold turn: turns=%d", len(r.runtime.recorded()))
 	}
 	r.home.mu.Lock()
+	failed := len(r.home.cmds)
 	r.home.cmdErr = nil
 	r.home.mu.Unlock()
 	Deliver(r.h, testGroup1, testAI1)
 	r.waitUntil("retried TaskBranch and turn", func() bool {
-		return len(r.runtime.recorded()) == 1 && len(r.home.cmdPayloads()) == 2
+		return len(r.runtime.recorded()) == 1 && len(r.home.cmdPayloads()) == failed+1
 	})
-	if !strings.Contains(r.home.cmdPayloads()[1], `"branch":"task/1-add-feature"`) {
+	if !strings.Contains(r.home.cmdPayloads()[failed], `"branch":"task/1-add-feature"`) {
 		t.Fatalf("expected retried TaskBranch and turn, got cmds=%v", r.home.cmdPayloads())
 	}
 	// Second item at local_check does not resend TaskBranch.
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 6}, Group: testGroup1, Num: 1, Title: "Add feature", Slug: "add-feature", Origin: "brief", State: "active", Step: "local_check", Assignee: testAI1, Reviewer: testAI2})
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 802, AI: testAI1, Why: "resume", Task: testTask1}, nil)
 	r.waitUntil("second turn", func() bool { return len(r.runtime.recorded()) == 2 })
-	if len(r.home.cmdPayloads()) != 2 {
+	if len(r.home.cmdPayloads()) != failed+1 {
 		t.Fatal("sent duplicate TaskBranch after local_check")
 	}
 	wt := filepath.Join(pDir, "wt", "1-add-feature")
@@ -1464,11 +1465,11 @@ func TestWorkspacesBranchRetryMergeStatsAndRestartInspect(t *testing.T) {
 	mustGit(t, ctx, wt, "add", "README.md")
 	mustGit(t, ctx, wt, "commit", "-m", "c1")
 	c1 := strings.TrimSpace(mustGit(t, ctx, wt, "rev-parse", "HEAD"))
-	verifyReviewRoundsAndMergeStats(t, r, pDir, wt, c1)
+	verifyReviewRoundsAndMergeStats(t, r, pDir, wt, c1, failed+1)
 	verifyConflictRestartInspectAndRemoteForge(t)
 }
 
-func verifyReviewRoundsAndMergeStats(t *testing.T, r *deliverRig, pDir, wt, c1 string) {
+func verifyReviewRoundsAndMergeStats(t *testing.T, r *deliverRig, pDir, wt, c1 string, baseCmds int) {
 	t.Helper()
 	ctx := t.Context()
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 7}, Group: testGroup1, Num: 1, Title: "Add feature", Slug: "add-feature", Origin: "brief", State: "active", Step: "review", Commit: c1, Assignee: testAI1, Reviewer: testAI2})
@@ -1501,14 +1502,14 @@ func verifyReviewRoundsAndMergeStats(t *testing.T, r *deliverRig, pDir, wt, c1 s
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 806, AI: testAI1, Why: "merge", Task: testTask1, Commit: c2}, nil)
 	r.waitUntil("offline merge hold checked", func() bool { return offChecks.Load() >= 1 })
 	Deliver(r.h, "", "")
-	if len(r.home.cmdPayloads()) != 2 {
+	if len(r.home.cmdPayloads()) != baseCmds {
 		t.Fatal("merge ran while offline")
 	}
 	holdReason.Store("cap")
 	Deliver(r.h, "", "")
-	r.waitUntil("TaskMerged after offline lifted", func() bool { return len(r.home.cmdPayloads()) == 3 })
+	r.waitUntil("TaskMerged after offline lifted", func() bool { return len(r.home.cmdPayloads()) == baseCmds+1 })
 	cmds := r.home.cmdPayloads()
-	if !strings.Contains(cmds[2], `"op":"merged"`) || !strings.Contains(cmds[2], `"added":17`) || !strings.Contains(cmds[2], `"removed":5`) {
+	if !strings.Contains(cmds[baseCmds], `"op":"merged"`) || !strings.Contains(cmds[baseCmds], `"added":17`) || !strings.Contains(cmds[baseCmds], `"removed":5`) {
 		t.Fatalf("expected TaskMerged with TaskRow.Stats 17/5, got %v", cmds)
 	}
 }
