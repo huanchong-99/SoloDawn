@@ -10,8 +10,8 @@ row's `seq` and, for a new message, its `pos`; keep the original `pos` and
 creation time on updates. Pass the resulting proto value to `Put`.
 
 A `Snapshot` pins the group's sequence and purge mark in the writer's order.
-Read deltas, pages (`PageThread`, `PageKind`) or one live row (`Row`, in
-`fetch_reads.go`) from it, then close it. A page holds the rows
+Read deltas, pages (`PageThread`, `PageKind`) or one live row (`Row`) from it,
+then close it. A page holds the rows
 below `before` in `pos` order, newest first; `before` 0 asks for the newest
 page. `Row` returns `sql.ErrNoRows` when the row does not exist or is a `gone`
 marker. A file-backed WAL reader does not

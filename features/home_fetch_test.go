@@ -284,16 +284,12 @@ func (w *homeFetchWorld) seedWatchedNotes(cleanup func(func()), first, second st
 	return nil
 }
 
-func (w *homeFetchWorld) sendFetch(raw map[string]any) error {
+func (w *homeFetchWorld) sendFetch(req home.Fetch) error {
 	w.re++
-	raw["t"] = "fetch"
-	raw["id"] = w.re
-	raw["g"] = w.group
-	encoded, err := json.Marshal(raw)
-	if err != nil {
-		return err
-	}
-	w.loop.Fetch(w.conn, w.re, encoded)
+	req.Type = "fetch"
+	req.ID = w.re
+	req.Group = w.group
+	w.loop.Fetch(w.conn, req)
 	text, err := w.nextJSON()
 	if err != nil {
 		return err
@@ -304,15 +300,15 @@ func (w *homeFetchWorld) sendFetch(raw map[string]any) error {
 }
 
 func (w *homeFetchWorld) fetchThread(thread *string, before int64, limit int) error {
-	return w.sendFetch(map[string]any{"thread": thread, "before": before, "limit": limit})
+	return w.sendFetch(home.Fetch{FetchPage: proto.FetchPage{Before: before, Limit: limit}, Thread: thread})
 }
 
 func (w *homeFetchWorld) fetchKind(kind string, before int64, limit int) error {
-	return w.sendFetch(map[string]any{"kind": kind, "before": before, "limit": limit})
+	return w.sendFetch(home.Fetch{FetchPage: proto.FetchPage{Before: before, Limit: limit}, Kind: kind})
 }
 
 func (w *homeFetchWorld) fetchOneRow(r, row string) error {
-	return w.sendFetch(map[string]any{"r": r, "row": row, "before": 0, "limit": 1})
+	return w.sendFetch(home.Fetch{FetchPage: proto.FetchPage{Before: 0, Limit: 1}, Row: r, RowID: row})
 }
 
 func (w *homeFetchWorld) lowestPos() int64 {

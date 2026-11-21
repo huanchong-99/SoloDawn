@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -145,6 +146,23 @@ func TestSnapshotPinsReplacedRow(t *testing.T) {
 		equal(t, r.Seq, c.seq)
 		equal(t, r.Pos, int64(1))
 	}
+}
+
+func TestSnapshotRowPinsView(t *testing.T) {
+	s := openDB(t, filepath.Join(t.TempDir(), "node.db"))
+	note := proto.NoteRow{RowHeader: header("note", "n1", 1), Pos: 1, Group: "g", Text: "pinned text"}
+	put(t, s, "g", 10, note)
+	pinned := snapshot(t, s, "g")
+	put(t, s, "g", 20, proto.GoneRow{RowHeader: header("note", "n1", 2), Gone: true})
+	later := snapshot(t, s, "g")
+
+	got, err := pinned.Row("note", "n1")
+	check(t, err)
+	want, err := encode(note)
+	check(t, err)
+	equal(t, string(got), want)
+	_, err = later.Row("note", "n1")
+	equal(t, errors.Is(err, sql.ErrNoRows), true)
 }
 
 func roundTripGolden[R wireRow](t *testing.T, file string) {

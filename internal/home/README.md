@@ -46,7 +46,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | hand in a `cmd` frame | `loop.Cmd(conn, re, env)`; the answer is sent to the connection |
 | answer a `hello` | `loop.Welcome(conn, build)`: `build` makes the `welcome` frame from the groups of the peer |
 | subscribe a connection to a group | `loop.Watch(conn, group, stateOnly)` |
-| answer a `fetch` frame | `loop.Fetch(conn, re, raw)`; the answer is sent to the connection |
+| answer a `fetch` frame | `loop.Fetch(conn, req)`; the answer is sent to the connection |
 | send a host its inbox items, on every `hello` | `loop.Inbox(conn)` |
 | run the timers by hand, or tell the home of an event | `loop.Tick(now)`, `loop.Event(name, event)` |
 | move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
@@ -167,10 +167,12 @@ start with `task`, `step`, `wait`, `item` and `states`, and `workItems`, `byAssi
 `byReviewer`; its tests take the names that start with `mc` and `machine`. The run loop takes the
 names that start with `run`, and its tests those that start with `run` and `Run`; it exports
 `Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
-`ItemsPush`. The briefs take the
+`ItemsPush`. Groups and members take the names that start with `grp` and `mem`, their tests too,
+and their test functions start with `TestGroup` and `TestMember`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
-`fetch.go` takes the names that start with `fet`, its tests too, and its test functions start
-with `TestFetch`.
+Device-log events (`ev_device.go`) take the names that start with `dev`, and their tests start with
+`TestDevice` and `dev`. `fetch.go` exports `Fetch`, takes the names that start with `fet`, its tests
+too, and its test functions start with `TestFetch`.
 
 ## The run loop
 
@@ -240,15 +242,16 @@ queuing anything; a frame built from it can be older than a push that is already
 number, and the connection is pushed every change after it. It refuses a group that does not
 exist, a device that `Serves` refuses, and a connection that is gone.
 
-**Fetch.** `Fetch(conn, re, raw)` answers a `fetch` frame
-([datachannel](../../planning/contracts/datachannel.md), section 4): a page of the main line or of
-a task's thread (`thread`), a page of notes or review messages (`kind`), or one live row by `r`
-and `row` with `before` 0 and `limit` 1. On the goroutine of the group (`ask`), it checks that the
+**Fetch.** `Fetch(conn, req)` answers a `fetch` request
+([datachannel](../../planning/contracts/datachannel.md), section 4): a page by `kind` (`note` or
+`review`) when `Kind` is set, one live row when `Row` or `RowID` is set, or a page of a task's
+thread or of the main line (`Thread` nil) otherwise. Paged reads require `Limit` in 1..100 and
+`Before >= 0` (`bad_request` otherwise). On the goroutine of the group (`ask`), it checks that the
 connection is still seated, that the group exists (`not_found` otherwise) and serves the
-connection's device (`forbidden` otherwise), and pins a `store.Snapshot`. It then releases the
-group's goroutine, reads from the snapshot, packs page rows within the 61,440-byte `ctl` limit
-([conventions](../../planning/contracts/conventions.md), section 4) without `gone` markers, closes
-the snapshot, and queues the `fetched` or error answer on `conn`.
+connection's device (`forbidden` otherwise), opens and closes a `store.Snapshot`, packs page rows
+with `runBatches` within the 61,440-byte `ctl` limit
+([conventions](../../planning/contracts/conventions.md), section 4) without `gone` markers, and
+queues the `fetched` or error answer on `conn`.
 
 **Inbox items.** An item is stored in the transaction of its result, for the host of its AI as
 that result leaves the member rows; an item for a member that is no AI fails the transaction.
@@ -299,7 +302,7 @@ logger, and no ticks but `Tick`. A connection goes through four entries, the sam
    `loop.Welcome(conn, build)`, where `build` gets the `groups` of the welcome and returns the
    whole frame from values the node has ready, and never a `Send` of the node's own, and after it `loop.Inbox(conn)` for a host;
    `loop.Cmd(conn, re, env)` for `cmd`, with the `id` of the request as `re`, and
-   `loop.Fetch(conn, re, raw)` for `fetch`; `sync` and `ack` come with their units.
+   `loop.Fetch(conn, req)` for `fetch`; `sync` and `ack` come with their units.
 3. The loop calls `client.Send(frame)` for every answer and push, one at a time, in order. The
    answer to a command is a frame like the others and comes after the frames queued before it.
    So a `Send` must not wait for something that the sender of a command holds while it waits for
@@ -362,6 +365,52 @@ function that moves a task calls it and adds nothing to its rules.
   `thread.count`, `thread.last`); the bodies of the messages; for row 23, the timer and telling the
   secretary once per quiet period. The machine sets `stats.ended`.
 
+## Groups and members
+
+`cmd_group.go` holds `group` `create` and `set` ([commands](../../planning/contracts/commands.md)
+1.1; [rows](../../planning/contracts/rows.md) 1 and 2), under `group/create` and `group/set`;
+`group` `pause` and `resume` belong to `cmd_pause.go` (unit HM-14). `cmd_member.go` holds `member`
+`add_ai`, `set` and `remove` ([commands](../../planning/contracts/commands.md) 1.2), under
+`member/add_ai`, `member/set` and `member/remove`; `member` `status` belongs to `cmd_hostev.go`
+(unit HM-16). Where the contracts are silent, they do this:
+
+- **`group/create`.** Only a person of this node's owner (`c.Who.AI` empty, `c.Who.User ==
+  s.Owner`) may create a group, else `forbidden`. A `g` that differs from `n`, a `kind` other than
+  `project`, a `forge` other than `github` or `none`, or an empty `name`, `repo`, `base` or
+  `member_name` is `bad_request`. A group that already exists (`s.Group.ID` not empty) is answered
+  `conflict`. It writes the `group` row (`pass` 90, `pass_foundation` 70, default `limits`,
+  `created` `c.Now`) and the owner's `human` `member` row (`role` `owner`, `online` true,
+  `last_seen` `c.Now`), with `GroupsChanged` true. The owner's member id is the first 16 bytes of
+  the SHA-256 of `SoloDawn group owner <n>` in base64url, so the function stays pure
+  ([issues](../../issues.md)).
+- **`group/set`.** By an admin, else `forbidden`. Sending none of `name`, `checks`, `pass`,
+  `pass_foundation`, `limits` and `secretary`, or an empty `name`, is `bad_request`. `secretary`,
+  when sent, must name an AI in `State.AIs` that is neither assignee nor reviewer of an open task
+  (`queued`, `active`, `paused`, `failed`), else `conflict`; any previous secretary's member row
+  loses `secretary`, and the named AI gains it when not already set. `GroupsChanged` is set when
+  `name` changes, because `groups` carries each group's name.
+- **`member/add_ai`.** By a host of a member: `c.Who.AI` must be empty, else `forbidden`; the
+  `name` of the latest `add` entry for `c.Who.Device` in `State.Logs[c.Who.User]` becomes
+  `host_name`. An empty `name`, a `cli` outside `claude` and `codex`, or an `account` outside
+  `personal`, `team` and `api_key` is `bad_request`. `secretary: true` when the group already has a
+  secretary requires an admin, else `forbidden`. An `id` or `name` already held by a human or AI
+  member of the group is `conflict`. The new `ai` `member` row starts with `state` `dormant`,
+  `since` and `last_seen` `c.Now`, `path` `local` when `c.Who.Device == s.Home` and `direct`
+  otherwise, `allow` `[]` and `usage` `{}`; when `secretary` is true, any previous secretary loses
+  the flag and `group.secretary` becomes `id`.
+- **`member/set`.** Sending none of `name`, `account`, `allow` and `approvers`, an empty `name`, or
+  an unknown `account` is `bad_request`. An unknown `id` is `not_found`; a human member row is
+  `forbidden` in step 1. The signer must be the AI's owner (`c.Who.AI` empty, `c.Who.User ==
+  ai.User`) or, when `approvers` is the only field sent, the AI's host (`s.Hosts`), else
+  `forbidden`. A `name` held by another member in the group is `conflict`; keeping the AI's own
+  `name` is accepted.
+- **`member/remove`.** An unknown `id` is `not_found`; a human member row is `forbidden` in step 1.
+  The signer must be the AI's owner or an admin, else `forbidden`. Removing an AI that is assignee
+  or reviewer of an open task is `conflict`. Otherwise the member row becomes a `gone` marker and
+  any queued inbox items for that AI (`c.Disk.Queued`) are retired in `Result.Retire`. Removing the
+  secretary also clears `group.secretary` and writes `system` `no_secretary` in the main line with
+  id `n`.
+
 ## Briefs
 
 `cmd_brief.go` holds `post` of kind `brief` and `act` `confirm` and `revise` on it
@@ -405,10 +454,19 @@ function that moves a task calls it and adds nothing to its rules.
   HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
   `c.Disk.Msg` reads.
 
+## Device-log events
+
+`ev_device.go` registers `Events["device"]`, which receives a `[]proto.DeviceRow` slice accepted by
+the node for one person ([envelope](../../planning/contracts/envelope.md), section 4;
+[rows](../../planning/contracts/rows.md), section 2). In step 1 it ignores users other than
+`State.Owner`, appends rows whose `ver` exceeds the entries already held in `State.Logs[State.Owner]`,
+and sets `Result.GroupsChanged` when an `Online` device's access (`State.Serves`) changes between
+served and unserved.
+
 ## Known limitations
 
-- The table of commands holds only the briefs, and no node starts a loop yet: the other command
-  files and the wiring of the node are separate units
+- The table of commands holds only the groups, members and briefs, and no node starts a loop yet:
+  the other command files and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
@@ -443,13 +501,21 @@ and for the refusals, and covers every statement of `machine.go`. `features/home
 holds acceptance test A5.18 at step `merge` and the two points of the third review, a card decided
 while a task is paused and a reviewer named while it is paused.
 
+`cmd_group_test.go` and `cmd_member_test.go` send `group/create`, `group/set`, `member/add_ai`,
+`member/set` and `member/remove` through `Commands.Apply` with fakes of `Receipts` and `Disk`,
+covering every refusal, boundary and secretary transition. `features/home_group.feature` holds the
+home command part of A2.1 and the member-removal part of A5.18.
+
 `cmd_brief_test.go` sends every command of the briefs through `Commands.Apply` with fakes of
 `Receipts` and `Disk`, with a case for every refusal and branch. `features/home_brief.feature`
 holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
 `Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
 commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
 
-`fetch_test.go` exercises `Loop.Fetch` across thread pages, `note` and `review` pages, single-row
-reads, exact 61,440-byte boundaries, request validation, group access checks, detached connections
-and store failures. `features/home_fetch.feature` holds the scroll-back scenarios of A2.2 and the
-deleted-row scenario of A2.7.
+`ev_device_test.go` covers every branch and boundary of `Events["device"]`, including ignored event
+types, empty and non-owner slices, version boundaries and online/offline `GroupsChanged` transitions.
+
+`fetch_test.go` and `fetch_internal_test.go` exercise `Loop.Fetch` across thread pages, `note` and
+`review` pages, single-row reads, exact 61,440-byte boundaries, page bounds checks, group access
+checks, detached connections and store failures. `features/home_fetch.feature` holds the
+scroll-back scenarios of A2.2 and the deleted-row scenario of A2.7.

@@ -5,14 +5,11 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/home"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
-
-func fetYield() { time.Sleep(5 * time.Millisecond) }
 
 type fetItem struct {
 	Type   string  `json:"row_type"`
@@ -70,9 +67,31 @@ func fetWrite(p *runPeer, item fetItem) {
 	p.does(groupID, "post", `,"kind":"item",`+string(raw[1:len(raw)-1]))
 }
 
-func fetCall(p *runPeer, re int64, raw string) string {
+func fetThread(id int64, group string, thread *string, before int64, limit int) home.Fetch {
+	return home.Fetch{
+		FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: group, Before: before, Limit: limit},
+		Thread:    thread,
+	}
+}
+
+func fetKind(id int64, group, kind string, before int64, limit int) home.Fetch {
+	return home.Fetch{
+		FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: group, Before: before, Limit: limit},
+		Kind:      kind,
+	}
+}
+
+func fetRow(id int64, group, r, rowID string) home.Fetch {
+	return home.Fetch{
+		FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: group},
+		Row:       r,
+		RowID:     rowID,
+	}
+}
+
+func fetCall(p *runPeer, req home.Fetch) string {
 	p.w.t.Helper()
-	p.w.loop.Fetch(p.conn, re, json.RawMessage(raw))
+	p.w.loop.Fetch(p.conn, req)
 	return p.next()
 }
 
@@ -107,7 +126,7 @@ func fetError(t *testing.T, re int64, got, code string) {
 
 func TestFetchPagesMainLineAndThreadsNewestFirst(t *testing.T) {
 	_, p := runFounded(t, fetTables())
-	taskA, taskB := id(21), id(22)
+	taskA, taskB, absent, empty := id(21), id(22), id(99), ""
 	fetWrite(p, fetItem{Type: "msg", ID: "m1", Kind: "text", Text: "first"})
 	fetWrite(p, fetItem{Type: "msg", ID: "m2", Thread: &taskA, Main: true, Kind: "decision", Text: "raised card"})
 	fetWrite(p, fetItem{Type: "msg", ID: "m3", Thread: &taskA, Main: false, Kind: "text", Text: "in thread A"})
@@ -116,29 +135,25 @@ func TestFetchPagesMainLineAndThreadsNewestFirst(t *testing.T) {
 	fetWrite(p, fetItem{Type: "msg", ID: "m6", Kind: "text", Text: "erased"})
 	fetWrite(p, fetItem{Type: "msg", ID: "m6", Gone: true})
 
-	// Extra unknown fields and uppercase shadows are ignored at run time.
-	got := fetCall(p, 11, fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"thread":null,"before":0,"limit":1,"extra":true,"KIND":"note"}`, groupID))
-	ids, more := fetParsed(t, 11, got)
+	ids, more := fetParsed(t, 11, fetCall(p, fetThread(11, groupID, nil, 0, 1)))
 	equal(t, []any{ids, more}, []any{[]string{"m5"}, true})
 
-	got = fetCall(p, 12, fmt.Sprintf(`{"t":"fetch","id":2,"g":%q,"thread":null,"before":8,"limit":100}`, groupID))
-	ids, more = fetParsed(t, 12, got)
+	ids, more = fetParsed(t, 12, fetCall(p, fetThread(12, groupID, nil, 8, 100)))
 	equal(t, []any{ids, more}, []any{[]string{"m2", "m1"}, false})
 
-	got = fetCall(p, 13, fmt.Sprintf(`{"t":"fetch","id":3,"g":%q,"thread":null,"before":4,"limit":10}`, groupID))
-	ids, more = fetParsed(t, 13, got)
+	ids, more = fetParsed(t, 13, fetCall(p, fetThread(13, groupID, nil, 4, 10)))
 	equal(t, []any{ids, more}, []any{[]string{}, false})
 
-	got = fetCall(p, 14, fmt.Sprintf(`{"t":"fetch","id":4,"g":%q,"thread":%q,"before":0,"limit":1}`, groupID, taskA))
-	ids, more = fetParsed(t, 14, got)
+	ids, more = fetParsed(t, 14, fetCall(p, fetThread(14, groupID, &taskA, 0, 1)))
 	equal(t, []any{ids, more}, []any{[]string{"m3"}, true})
 
-	got = fetCall(p, 15, fmt.Sprintf(`{"t":"fetch","id":5,"g":%q,"thread":%q,"before":6,"limit":1}`, groupID, taskA))
-	ids, more = fetParsed(t, 15, got)
+	ids, more = fetParsed(t, 15, fetCall(p, fetThread(15, groupID, &taskA, 6, 1)))
 	equal(t, []any{ids, more}, []any{[]string{"m2"}, false})
 
-	got = fetCall(p, 16, fmt.Sprintf(`{"t":"fetch","id":6,"g":%q,"thread":%q,"before":0,"limit":10}`, groupID, id(99)))
-	ids, more = fetParsed(t, 16, got)
+	ids, more = fetParsed(t, 16, fetCall(p, fetThread(16, groupID, &absent, 0, 10)))
+	equal(t, []any{ids, more}, []any{[]string{}, false})
+
+	ids, more = fetParsed(t, 17, fetCall(p, fetThread(17, groupID, &empty, 0, 10)))
 	equal(t, []any{ids, more}, []any{[]string{}, false})
 }
 
@@ -155,48 +170,60 @@ func TestFetchPagesNotesAndReviewsByKind(t *testing.T) {
 	fetWrite(p, fetItem{Type: "msg", ID: "r3", Thread: &taskB, Kind: "review", Text: "removed review"})
 	fetWrite(p, fetItem{Type: "msg", ID: "r3", Gone: true})
 
-	got := fetCall(p, 21, fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"kind":"note","before":0,"limit":1}`, groupID))
-	ids, more := fetParsed(t, 21, got)
+	ids, more := fetParsed(t, 21, fetCall(p, fetKind(21, groupID, "note", 0, 1)))
 	equal(t, []any{ids, more}, []any{[]string{"n2"}, true})
 
-	got = fetCall(p, 22, fmt.Sprintf(`{"t":"fetch","id":2,"g":%q,"kind":"note","before":7,"limit":2}`, groupID))
-	ids, more = fetParsed(t, 22, got)
+	ids, more = fetParsed(t, 22, fetCall(p, fetKind(22, groupID, "note", 7, 2)))
 	equal(t, []any{ids, more}, []any{[]string{"n1"}, false})
 
-	got = fetCall(p, 23, fmt.Sprintf(`{"t":"fetch","id":3,"g":%q,"kind":"review","before":0,"limit":1}`, groupID))
-	ids, more = fetParsed(t, 23, got)
+	ids, more = fetParsed(t, 23, fetCall(p, fetKind(23, groupID, "review", 0, 1)))
 	equal(t, []any{ids, more}, []any{[]string{"r2"}, true})
 
-	got = fetCall(p, 24, fmt.Sprintf(`{"t":"fetch","id":4,"g":%q,"kind":"review","before":10,"limit":100}`, groupID))
-	ids, more = fetParsed(t, 24, got)
+	ids, more = fetParsed(t, 24, fetCall(p, fetKind(24, groupID, "review", 10, 100)))
 	equal(t, []any{ids, more}, []any{[]string{"r1"}, false})
+
+	ids, more = fetParsed(t, 25, fetCall(p, fetKind(25, groupID, "text", 0, 10)))
+	equal(t, []any{ids, more}, []any{[]string{}, false})
+
+	// Kind takes precedence over Row when both are populated.
+	mixed := fetKind(26, groupID, "note", 0, 10)
+	mixed.Row, mixed.RowID = "msg", "t1"
+	ids, more = fetParsed(t, 26, fetCall(p, mixed))
+	equal(t, []any{ids, more}, []any{[]string{"n2", "n1"}, false})
 }
 
 func TestFetchOneRowReturnsLiveRowAndOmitsMissingOrGone(t *testing.T) {
 	_, p := runFounded(t, fetTables())
+	fetWrite(p, fetItem{Type: "msg", ID: "m1", Kind: "text", Text: "main line"})
 	fetWrite(p, fetItem{Type: "note", ID: "n1", Text: "live <note> & text"})
 	fetWrite(p, fetItem{Type: "note", ID: "n2", Text: "soon gone"})
 	fetWrite(p, fetItem{Type: "note", ID: "n2", Gone: true})
 
-	got := fetCall(p, 31, fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"r":"note","row":"n1","before":0,"limit":1}`, groupID))
+	got := fetCall(p, fetRow(31, groupID, "note", "n1"))
 	ids, more := fetParsed(t, 31, got)
 	equal(t, []any{ids, more}, []any{[]string{"n1"}, false})
 	if !strings.Contains(got, `"text":"live <note> & text"`) {
 		t.Fatalf("html characters were escaped in %s", got)
 	}
 
-	got = fetCall(p, 32, fmt.Sprintf(`{"t":"fetch","id":2,"g":%q,"r":"group","row":%q,"before":0,"limit":1}`, groupID, groupID))
-	ids, more = fetParsed(t, 32, got)
+	// Single-row reads ignore Before and Limit.
+	ignored := home.Fetch{
+		FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: 32}, Group: groupID, Before: -5, Limit: 999},
+		Row:       "group",
+		RowID:     groupID,
+	}
+	ids, more = fetParsed(t, 32, fetCall(p, ignored))
 	equal(t, []any{ids, more}, []any{[]string{groupID}, false})
 
 	for i, spec := range [][2]string{
 		{"note", "n2"},
 		{"note", "absent"},
 		{"msg", "n1"},
+		{"", "n1"},
+		{"note", ""},
 	} {
 		re := int64(40 + i)
-		raw := fmt.Sprintf(`{"t":"fetch","id":%d,"g":%q,"r":%q,"row":%q,"before":0,"limit":1}`, re, groupID, spec[0], spec[1])
-		ids, more = fetParsed(t, re, fetCall(p, re, raw))
+		ids, more = fetParsed(t, re, fetCall(p, fetRow(re, groupID, spec[0], spec[1])))
 		equal(t, []any{ids, more}, []any{[]string{}, false})
 	}
 }
@@ -204,13 +231,13 @@ func TestFetchOneRowReturnsLiveRowAndOmitsMissingOrGone(t *testing.T) {
 func TestFetchPacksRowsToTheExactByteLimit(t *testing.T) {
 	// With re=9, {"t":"fetched","re":9,"ok":true,"rows":[r0,r1,r2,r3],"more":true}
 	// has 54 bytes of wrapper plus 3 commas = 57 bytes around the 4 rows, and 58 bytes
-	// when more is false. We build 4 notes whose encoded JSON lengths sum to 61,383 bytes:
-	// with a 5th older note present, more is true and all 4 fit in exactly 61,440 bytes;
-	// without a 5th note, including the 4th would make more false (61,441 bytes), so the
-	// page stops at 3 rows with more true.
+	// when more is false. We build 4 notes whose encoded JSON lengths sum to 61,383 + extraByte:
+	// with a 5th older note present, more is true and 61,383 fits in 61,440 bytes while 61,384 drops p1;
+	// without a 5th note, more is false so 61,382 fits in 61,440 bytes while 61,383 drops p1 (more true).
 	fetCheckExactBoundary(t, true, 0, 61_440, []string{"p4", "p3", "p2", "p1"}, true)
-	fetCheckExactBoundary(t, false, 0, 0, []string{"p4", "p3", "p2"}, true)
 	fetCheckExactBoundary(t, true, 1, 0, []string{"p4", "p3", "p2"}, true)
+	fetCheckExactBoundary(t, false, -1, 61_440, []string{"p4", "p3", "p2", "p1"}, false)
+	fetCheckExactBoundary(t, false, 0, 0, []string{"p4", "p3", "p2"}, true)
 }
 
 func fetCheckExactBoundary(t *testing.T, withFifth bool, extraByte int, wantLen int, wantIDs []string, wantMore bool) {
@@ -220,14 +247,13 @@ func fetCheckExactBoundary(t *testing.T, withFifth bool, extraByte int, wantLen 
 		fetWrite(p, fetItem{Type: "note", ID: "p0", Text: "older fifth note"})
 	}
 	base := fetNoteOverhead(w.db, groupID)
-	// Four rows: three of 15,346 bytes and one of 15,345 + extraByte bytes -> sum = 61,383 + extraByte.
 	sizes := []int{15_345 + extraByte, 15_346, 15_346, 15_346}
 	for i, target := range sizes {
 		idName := fmt.Sprintf("p%d", i+1)
 		textLen := target - base
 		fetWrite(p, fetItem{Type: "note", ID: idName, Text: strings.Repeat("<", textLen)})
 	}
-	got := fetCall(p, 9, fmt.Sprintf(`{"t":"fetch","id":9,"g":%q,"kind":"note","before":0,"limit":4}`, groupID))
+	got := fetCall(p, fetKind(9, groupID, "note", 0, 4))
 	if wantLen > 0 {
 		equal(t, len(got), wantLen)
 	}
@@ -271,100 +297,40 @@ func TestFetchStopsAtFirstOverflowingRowWithoutSkipping(t *testing.T) {
 	for _, name := range []string{"n2", "n3", "n4", "n5"} {
 		fetWrite(p, fetItem{Type: "note", ID: name, Text: strings.Repeat("a", 15_900)})
 	}
-	got := fetCall(p, 50, fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"kind":"note","before":0,"limit":5}`, groupID))
+	got := fetCall(p, fetKind(50, groupID, "note", 0, 5))
 	ids, more := fetParsed(t, 50, got)
 	equal(t, []any{ids, more}, []any{[]string{"n5", "n4", "n3"}, true})
 }
 
-func TestFetchRefusesInvalidRequestsWithBadRequest(t *testing.T) {
+func TestFetchRefusesOutOfBoundsPageWithBadRequest(t *testing.T) {
 	_, p := runFounded(t, fetTables())
-	for i, raw := range fetBadRequests() {
+	for i, req := range []home.Fetch{
+		fetThread(100, groupID, nil, -1, 1),
+		fetThread(101, groupID, nil, 0, 0),
+		fetThread(102, groupID, nil, 0, -1),
+		fetThread(103, groupID, nil, 0, 101),
+		fetKind(104, groupID, "note", -1, 1),
+		fetKind(105, groupID, "note", 0, 0),
+		fetKind(106, groupID, "note", 0, 101),
+	} {
 		re := int64(100 + i)
-		fetError(t, re, fetCall(p, re, raw), "bad_request")
+		fetError(t, re, fetCall(p, req), "bad_request")
 	}
 }
 
-func fetBadRequests() []string {
-	g := groupID
-	return []string{
-		`not json`,
-		`[]`,
-		`null`,
-		`7`,
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"before":0,"limit":10}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"THREAD":null,"before":0,"limit":10}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"thread":null,"kind":"note","before":0,"limit":10}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"thread":null,"r":"msg","row":"m1","before":0,"limit":1}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"kind":"note","r":"note","row":"n1","before":0,"limit":1}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"r":"msg","before":0,"limit":1}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"row":"m1","before":0,"limit":1}`, g),
-		fmt.Sprintf(`{"t":"sync","id":1,"g":%q,"thread":null,"before":0,"limit":10}`, g),
-		`{"t":"fetch","id":1,"g":"","thread":null,"before":0,"limit":10}`,
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"thread":"","before":0,"limit":10}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"thread":7,"before":0,"limit":10}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"thread":null,"before":-1,"limit":1}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"thread":null,"before":0,"limit":0}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"thread":null,"before":0,"limit":-1}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"thread":null,"before":0,"limit":101}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"thread":null,"before":0,"limit":1.5}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"kind":"","before":0,"limit":10}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"kind":"text","before":0,"limit":10}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"kind":null,"before":0,"limit":10}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"kind":"note","before":-1,"limit":1}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"kind":"note","before":0,"limit":0}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"kind":"note","before":0,"limit":101}`, g),
-		fmt.Sprintf(`{"t":"sync","id":1,"g":%q,"r":"msg","row":"m1","before":0,"limit":1}`, g),
-		`{"t":"fetch","id":1,"g":"","r":"msg","row":"m1","before":0,"limit":1}`,
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"r":"","row":"m1","before":0,"limit":1}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"r":"msg","row":"","before":0,"limit":1}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"r":"msg","row":null,"before":0,"limit":1}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"r":"msg","row":"m1","before":1,"limit":1}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"r":"msg","row":"m1","before":-1,"limit":1}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"r":"msg","row":"m1","before":0,"limit":0}`, g),
-		fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"r":"msg","row":"m1","before":0,"limit":2}`, g),
+func TestFetchGroupAccess(t *testing.T) {
+	w, p := runFounded(t, fetTables())
+
+	// Unknown or empty group answers not_found.
+	for i, g := range []string{id(77), ""} {
+		re := int64(61 + i)
+		fetError(t, re, fetCall(p, fetThread(re, g, nil, 0, 10)), "not_found")
 	}
-}
-
-func TestFetchGroupAccessAndUncreatedGroup(t *testing.T) {
-	tables := fetTables()
-	entered, release := make(chan struct{}), make(chan struct{})
-	tables.Commands["group/create"] = func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-		if s.ID == runOther {
-			entered <- struct{}{}
-			<-release
-			return home.Result{}, &home.Refusal{Code: "conflict", Msg: "held"}
-		}
-		return runCreate(s, c)
-	}
-	w, p := runFounded(t, tables)
-
-	// Non-existent group with no goroutine answers not_found.
-	rawAbsent := fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"thread":null,"before":0,"limit":10}`, id(77))
-	fetError(t, 61, fetCall(p, 61, rawAbsent), "not_found")
-
-	// Non-existent group while its temporary goroutine is running also answers not_found.
-	otherPeer := w.attach(laptop)
-	p.send(runOther, "group", `,"op":"create","name":"Other"`)
-	runWait(t, entered)
-	started, done := make(chan struct{}), make(chan string, 1)
-	go func() {
-		close(started)
-		rawOther := fmt.Sprintf(`{"t":"fetch","id":2,"g":%q,"thread":null,"before":0,"limit":10}`, runOther)
-		done <- fetCall(otherPeer, 62, rawOther)
-	}()
-	<-started
-	fetYield()
-	close(release)
-	p.next()
-	fetError(t, 62, <-done, "not_found")
 
 	// Unserved devices (another person's device and an unknown device) get forbidden.
-	rawGroup := fmt.Sprintf(`{"t":"fetch","id":3,"g":%q,"thread":null,"before":0,"limit":10}`, groupID)
-	for i, dev := range []struct {
-		peer *runPeer
-	}{{w.attach(guest)}, {w.attach(nobody)}} {
+	for i, peer := range []*runPeer{w.attach(guest), w.attach(nobody)} {
 		re := int64(70 + i)
-		fetError(t, re, fetCall(dev.peer, re, rawGroup), "forbidden")
+		fetError(t, re, fetCall(peer, fetThread(re, groupID, nil, 0, 10)), "forbidden")
 	}
 }
 
@@ -372,13 +338,12 @@ func TestFetchDetachedConnAndStoreFailures(t *testing.T) {
 	t.Run("query failure after snapshot", func(t *testing.T) {
 		w, p := runFounded(t, fetTables())
 		runExec(t, w.db, "DROP TABLE row")
-		for i, raw := range []string{
-			fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"thread":null,"before":0,"limit":10}`, groupID),
-			fmt.Sprintf(`{"t":"fetch","id":2,"g":%q,"kind":"note","before":0,"limit":10}`, groupID),
-			fmt.Sprintf(`{"t":"fetch","id":3,"g":%q,"r":"note","row":"n1","before":0,"limit":1}`, groupID),
+		for _, req := range []home.Fetch{
+			fetThread(80, groupID, nil, 0, 10),
+			fetKind(81, groupID, "note", 0, 10),
+			fetRow(82, groupID, "note", "n1"),
 		} {
-			re := int64(80 + i)
-			fetError(t, re, fetCall(p, re, raw), "internal")
+			fetError(t, req.ID, fetCall(p, req), "internal")
 			if got := w.reported(); !strings.Contains(got, "group "+groupID+", a fetch of "+browser.ID()) || !strings.Contains(got, "no such table: row") {
 				t.Fatalf("reported %q; want row table error", got)
 			}
@@ -390,10 +355,9 @@ func TestFetchDetachedConnAndStoreFailures(t *testing.T) {
 		runExec(t, w.db, "DROP TABLE grp")
 
 		// A detached connection returns before touching the broken store, so nothing is reported.
-		raw := fmt.Sprintf(`{"t":"fetch","id":1,"g":%q,"thread":null,"before":0,"limit":10}`, groupID)
-		w.loop.Fetch(w.ghost, 90, json.RawMessage(raw))
+		w.loop.Fetch(w.ghost, fetThread(90, groupID, nil, 0, 10))
 
-		fetError(t, 91, fetCall(p, 91, raw), "internal")
+		fetError(t, 91, fetCall(p, fetThread(91, groupID, nil, 0, 10)), "internal")
 		if got := w.reported(); !strings.Contains(got, "group "+groupID+", a fetch of "+browser.ID()) || !strings.Contains(got, "no such table: grp") {
 			t.Fatalf("reported %q; want grp table error", got)
 		}

@@ -41,6 +41,12 @@ func (v *Snapshot) AfterSeqUpTo(after, upTo int64) ([]json.RawMessage, error) {
 	return v.rows("SELECT data FROM row WHERE g=? AND seq>? AND seq<=? ORDER BY seq", v.group, after, upTo)
 }
 
+// Row returns one live row of the snapshot's group, or sql.ErrNoRows when
+// there is none or only its marker.
+func (v *Snapshot) Row(r, id string) (json.RawMessage, error) {
+	return (&Tx{v.tx}).Row(v.group, r, id)
+}
+
 // below is the pos bound of a page: rows with a lower pos, or all rows for
 // before 0, which asks for the newest page (no pos is 0).
 func below(before int64) int64 {
@@ -76,6 +82,7 @@ func (v *Snapshot) rows(query string, args ...any) ([]json.RawMessage, error) {
 	result := []json.RawMessage{}
 	for rows.Next() {
 		var data string
+		// A Scan failure surfaces through rows.Err() on the next line, because row is STRICT and the driver reads every column before Next returns true.
 		_ = rows.Scan(&data)
 		result = append(result, json.RawMessage(data))
 	}
