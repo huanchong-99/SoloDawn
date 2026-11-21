@@ -944,19 +944,6 @@ kbd,
       border: 1.5px dashed currentColor;
     }
   }
-  &[data-st='paused'] i {
-    border-radius: 1px;
-    background: linear-gradient(90deg, currentColor 34%, transparent 34% 66%, currentColor 66%);
-  }
-  &[data-st='takeover'] {
-    color: var(--text);
-    font-weight: 500;
-
-    i {
-      border-radius: 2px;
-      color: var(--text);
-    }
-  }
   &[data-st='ok'] i {
     color: var(--ok);
   }

@@ -128,8 +128,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `encodeURIComponent`, and `parse` reads it back. An address that fits no path, one with a
   malformed escape, and `#/states` in the build open `groups`. `route` is `{ page, params, dir }`;
   `Params<'chat'>` is `{ g: string }`. The navigation has three entries (`tabs`); a page outside
-  them marks none. The shell finds a page's component by file name: until `Onboarding.svelte`
-  and `Terminal.svelte` exist, those pages say that they are coming (`src/Pending.svelte`), with
+  them marks none. The shell finds a page's component by file name: until `Terminal.svelte`
+  exists, that page says that it is coming (`src/Pending.svelte`), with
   a link back to the chats. Focus goes to the main landmark when another page component is shown;
   between the group list and a chat, one component, the chat moves focus itself.
 
@@ -293,7 +293,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
     `unreadable answer` for a response `decodeAnswer` refuses; with a `RangeError` for a request
     over 60 KiB. Every other request whose connection is lost is sent again after the next `welcome`,
     after the listener's own `sync` requests, in the order first made. The group caches word a
-    rejection as `lost`; that code is theirs, not the connection's.
+    rejection as `lost`; that code is theirs, not the connection's. `connection.send(frame)` and
+    `peer.send(frame)` send a `devlog` push without a request `id`, throwing a `RangeError` above
+    60 KiB.
   - **What arrives on `ctl`.** A message with an `id` is a request, which a browser never
     serves: `bad_request`. A message with `re` is a response; one that names no waiting request
     is dropped. Anything else is a push when `Frame` reads it and is dropped when not. `ctl` stays
@@ -322,7 +324,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
   of its English file to the type `Key`; today the areas are `chat`, `groups`, `nodes`,
-  `settings` and `states`. `src/messages/files.glob.ts` finds every file by its name and
+  `pairing`, `settings` and `states`. `src/messages/files.glob.ts` finds every file by its name and
   `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
   empty text, or has keys that differ between its two languages, and naming the area when it has
@@ -455,53 +457,57 @@ file in `src/routes/`. It edits neither the shell nor another area:
 
 ## Understand the implementation
 
-| Path                        | Role                                                            |
-| --------------------------- | --------------------------------------------------------------- |
-| `index.html`, `src/main.ts` | entry: styles, then `boot` with the page's crypto, CSS, storage |
-| `src/lib/boot.ts`           | browser check, device key; mounts `App` or `Notice`             |
-| `src/lib/identity.ts`       | device key in IndexedDB, base64url, sign, verify, open          |
-| `src/lib/devlog.ts`         | `DeviceLog`: apply, replay, valid devices, adoption             |
-| `src/lib/pairing.ts`        | pairing secret, room id, mac, pair message check                |
-| `src/lib/payload.ts`        | the payload fields the envelope and log checks read             |
-| `src/lib/prefs.svelte.ts`   | theme, language and `preference`, their persistence, `t`        |
-| `src/messages/texts.ts`     | the one loader of the texts: checks and merges the files        |
-| `src/**/*.glob.ts`          | an `import.meta.glob` alone: the areas' texts and mounts        |
-| `src/lib/route.svelte.ts`   | route table, `parse`, `href`, the page open, the way it went    |
-| `src/lib/net.svelte.ts`     | where the homes come from: `sourceOf`, `start`, the mock's home |
-| `src/lib/mounts.svelte.ts`  | mounting points, `gather` of the areas' mounts, `card(kind)`    |
-| `src/lib/motion.ts`         | `spring`, the curve of `--spring`; `shift`, the page cross-fade |
-| `src/lib/proto.ts`          | wire schemas and types, `decode`, the `Ctl` interface           |
-| `src/lib/mock.ts`           | wire examples by name, their schemas, `mockCtl`                 |
-| `src/lib/rendezvous.ts`     | signalling client: sign-in, pacing, the receiver's checks       |
-| `src/lib/peer.ts`           | signalling paths, connections to nodes, `ctl`, path, reconnect  |
-| `features/peer-fakes.ts`    | a peer connection and its channels for the tests of `peer.ts`   |
-| `src/lib/groups.svelte.ts`  | `Home`, `Group`: row caches, cursor, paging, lists, commands    |
-| `src/lib/nodes.svelte.ts`   | connection indicator, `host.info` cache, `agent.set`, pairing   |
-| `src/lib/compose.ts`        | mention being typed, mentions and parts of a text, row size     |
-| `src/lib/when.ts`           | times in the reader's language; messages by day                 |
-| `src/App.svelte`            | shell: navigation, top bar, banners, the page of the route      |
-| `src/Notice.svelte`         | the upgrade notice and the storage notice                       |
-| `src/Pending.svelte`        | a page of the route table whose component is not built yet      |
-| `src/routes/`               | one component per page; `Groups.svelte` is the list and a chat  |
-| `src/routes/dev/`           | `States.svelte`: the message examples, for a development server |
-| `src/components/`           | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount` |
-| `src/components/groups/`    | the group list, the cards that wait, the create-group dialog    |
-| `src/components/chat/`      | the chat of a group: main line, message, composer               |
-| `src/components/nodes/`     | top-bar and phone-chat indicator, add-browser pairing dialog    |
-| `src/styles/`               | `tokens.css` (design tokens) and `base.css` (shared classes)    |
-| `public/`                   | manifest, icon and `fonts/`, copied as they are                 |
-| `features/web.spec.ts`      | steps of `../features/web.feature`                              |
-| `features/shell.spec.ts`    | steps of `../features/web_shell.feature`; `fixtures/` stand-ins |
-| `features/groups.spec.ts`   | steps of `../features/web_groups.feature`                       |
-| `features/chat.spec.ts`     | steps of `../features/web_chat.feature`                         |
-| `features/nodes.spec.ts`    | steps of `../features/web_nodes.feature`                        |
-| `features/home.ts`          | a home in memory for those steps; `page.ts` drives the page     |
-| `features/demo.ts`          | groups with a morning of talk, for a development page           |
-| `features/watch.svelte.ts`  | an effect outside a component, for tests of what is reactive    |
-| `features/shots.ts`         | screenshots of the pages from that demo, four widths            |
-| `e2e/config.ts`             | end-to-end projects per engine, `launch`, the build of a run    |
-| `e2e/nodes.ts`              | `startNet`: rendezvous and nodes per test, stop, teardown sweep |
-| `features/e2e.ts`           | steps of `../features/web_e2e.feature`, run by `e2e/config.ts`  |
+| Path                          | Role                                                                              |
+| ----------------------------- | --------------------------------------------------------------------------------- |
+| `index.html`, `src/main.ts`   | entry: styles, then `boot` with the page's crypto, CSS, storage                   |
+| `src/lib/boot.ts`             | browser check, device key; mounts `App` or `Notice`                               |
+| `src/lib/identity.ts`         | device key in IndexedDB, base64url, sign, verify, open                            |
+| `src/lib/devlog.ts`           | `DeviceLog`: apply, replay, valid devices, adoption                               |
+| `src/lib/pairing.ts`          | pairing secret, room id, mac, pair message check                                  |
+| `src/lib/owner.ts`            | owner device log and node signalling URLs in IndexedDB                            |
+| `src/lib/onboard.svelte.ts`   | onboarding pairing session, `#pair=` capture, `agent.set`, CLI and account labels |
+| `src/lib/payload.ts`          | the payload fields the envelope and log checks read                               |
+| `src/lib/prefs.svelte.ts`     | theme, language and `preference`, their persistence, `t`                          |
+| `src/messages/texts.ts`       | the one loader of the texts: checks and merges the files                          |
+| `src/**/*.glob.ts`            | an `import.meta.glob` alone: the areas' texts and mounts                          |
+| `src/lib/route.svelte.ts`     | route table, `parse`, `href`, the page open, the way it went                      |
+| `src/lib/net.svelte.ts`       | where the homes come from: `sourceOf`, `start`, the mock's home                   |
+| `src/lib/mounts.svelte.ts`    | mounting points, `gather` of the areas' mounts, `card(kind)`                      |
+| `src/lib/motion.ts`           | `spring`, the curve of `--spring`; `shift`, the page cross-fade                   |
+| `src/lib/proto.ts`            | wire schemas and types, `decode`, the `Ctl` interface                             |
+| `src/lib/mock.ts`             | wire examples by name, their schemas, `mockCtl`                                   |
+| `src/lib/rendezvous.ts`       | signalling client: sign-in, pacing, the receiver's checks                         |
+| `src/lib/peer.ts`             | signalling paths, connections to nodes, `ctl`, path, reconnect                    |
+| `features/peer-fakes.ts`      | a peer connection and its channels for the tests of `peer.ts`                     |
+| `src/lib/groups.svelte.ts`    | `Home`, `Group`: row caches, cursor, paging, lists, commands                      |
+| `src/lib/nodes.svelte.ts`     | connection indicator, `host.info` cache, `agent.set`, pairing                     |
+| `src/lib/compose.ts`          | mention being typed, mentions and parts of a text, row size                       |
+| `src/lib/when.ts`             | times in the reader's language; messages by day                                   |
+| `src/App.svelte`              | shell: navigation, top bar, banners, the page of the route                        |
+| `src/Notice.svelte`           | the upgrade notice and the storage notice                                         |
+| `src/Pending.svelte`          | a page of the route table whose component is not built yet                        |
+| `src/routes/`                 | one component per page; `Groups.svelte` is the list and a chat                    |
+| `src/routes/dev/`             | `States.svelte`: the message examples, for a development server                   |
+| `src/components/`             | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount`                   |
+| `src/components/groups/`      | the group list, the cards that wait, the create-group dialog                      |
+| `src/components/chat/`        | the chat of a group: main line, message, composer                                 |
+| `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
+| `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
+| `src/styles/`                 | `tokens.css` (design tokens) and `base.css` (shared classes)                      |
+| `public/`                     | manifest, icon and `fonts/`, copied as they are                                   |
+| `features/web.spec.ts`        | steps of `../features/web.feature`                                                |
+| `features/shell.spec.ts`      | steps of `../features/web_shell.feature`; `fixtures/` stand-ins                   |
+| `features/groups.spec.ts`     | steps of `../features/web_groups.feature`                                         |
+| `features/chat.spec.ts`       | steps of `../features/web_chat.feature`                                           |
+| `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
+| `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                     |
+| `features/home.ts`            | a home in memory for those steps; `page.ts` drives the page                       |
+| `features/demo.ts`            | groups with a morning of talk, for a development page                             |
+| `features/watch.svelte.ts`    | an effect outside a component, for tests of what is reactive                      |
+| `features/shots.ts`           | screenshots of the pages from that demo, four widths                              |
+| `e2e/config.ts`               | end-to-end projects per engine, `launch`, the build of a run                      |
+| `e2e/nodes.ts`                | `startNet`: rendezvous and nodes per test, stop, teardown sweep                   |
+| `features/e2e.ts`             | steps of `../features/web_e2e.feature`, run by `e2e/config.ts`                    |
 
 Below 768 px the navigation is the bottom bar and the theme and language buttons of the top bar
 are hidden; both choices are on the settings page at every width.
@@ -519,18 +525,21 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   (`issues.md`).
 - Safari deletes the site's storage, and with it the device key, after seven days of use without
   a visit, unless the client was added to the home screen (`issues.md`).
-- Nothing yet stores a device log or uses the device key beyond `boot`; the wiring of the
-  connection code (`peer.ts`) into the application and onboarding (F-04) will.
+- Onboarding (`routes/Onboarding.svelte`, `lib/onboard.svelte.ts`, `lib/owner.ts`,
+  `components/pairing/`) pairs a node or joins from a `#pair=<secret>` link, stores the owner's
+  device log in IndexedDB (`solodawn`, store `device`, key `owner`), asks for persistent storage
+  once enrolled, and sends `agent.set`; the rest of the pages are not yet wired to `peer.ts`
+  (`net.svelte.ts`).
 - `peer.ts` has run against fakes only. No browser has opened a connection with it, and how each
   browser's statistics name the selected pair is not verified; unit I-8 runs the three browsers.
 - The manifest has an SVG icon only and there is no service worker yet.
-- No page has a connection to a node yet, so the built client lists no group and no computer. A
-  development server (`pnpm dev`) shows the one computer and the one group of the wire examples,
-  unless the address has `?nomock`; the mock answers every command with a bare `ok` and pushes no
-  row, so a message sent there does not appear, an account choice does not update `host.info`,
-  and `pair.browser` returns no link.
-- The onboarding and terminal pages are in the route table without their components: they say
-  that they are coming. From 768 px the top bar of an open chat says "Chats", and the chat's own
+- Outside onboarding, no page has a connection to a node yet, so the built client lists no group
+  and no computer. A development server (`pnpm dev`) shows the one computer and the one group of
+  the wire examples, unless the address has `?nomock`; the mock answers every command with a bare
+  `ok` and pushes no row, so a message sent there does not appear, an account choice does not
+  update `host.info`, and `pair.browser` returns no link.
+- The terminal page is in the route table without its component: it says
+  that it is coming. From 768 px the top bar of an open chat says "Chats", and the chat's own
   head with the group's name is below it, where the design has one bar with the group's name.
 - The texts of the `states` area are in the build, although only a development server shows
   their page.

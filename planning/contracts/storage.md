@@ -90,11 +90,10 @@ CREATE INDEX inbox_by_host ON inbox (host, id);
 ```
 
 The plain unsigned item JSON (owner's decision of 2026-11-21: no
-attack-and-defence code, so items are not signed and carry no `cause`;
-`HM-7` removes the unused `cause` column) is built in the transaction that
-queues the item, so it says what was decided then. A row is deleted when its
-host acknowledges it, or when a later change of the task makes it pointless
-(`contracts/task-machine.md` section 2).
+attack-and-defence code, so items are not signed and carry no `cause`) is
+built in the transaction that queues the item, so it says what was decided
+then. A row is deleted when its host acknowledges it, or when a later change
+of the task makes it pointless (`contracts/task-machine.md` section 2).
 
 ### `push_sub`: reminders for browsers
 

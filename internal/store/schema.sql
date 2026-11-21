@@ -38,7 +38,6 @@ CREATE TABLE inbox (
   task       TEXT,
   commit_id  TEXT,
   env        TEXT    NOT NULL,
-  cause      TEXT,
   not_before INTEGER NOT NULL DEFAULT 0,
   created    INTEGER NOT NULL
 ) STRICT;
