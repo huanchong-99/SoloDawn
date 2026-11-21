@@ -9,7 +9,7 @@
 
   type Asked = 'brief' | 'approval' | 'decision';
 
-  function jump(event: MouseEvent, id: string) {
+  function jump(event: MouseEvent, id: string, kind: Asked) {
     event.preventDefault();
     const item = document.getElementById(`m-${id}`);
     if (!item) return;
@@ -17,9 +17,11 @@
       behavior: prefersReducedMotion.current ? 'auto' : 'smooth',
       block: 'nearest',
     });
-    const action = item.querySelector<HTMLElement>(
-      'button:not([disabled]), input:not([disabled]), textarea:not([disabled])',
-    );
+    const selector =
+      kind === 'decision'
+        ? 'input:not([disabled]), textarea:not([disabled])'
+        : 'button:not([disabled])';
+    const action = item.querySelector<HTMLElement>(selector);
     if (action) {
       action.focus({ preventScroll: true });
       return;
@@ -37,43 +39,9 @@
     </b>
     {#each group.waiting as msg (msg.id)}
       {@const kind = msg.kind as Asked}
-      <a href={`#m-${msg.id}`} onclick={(event) => jump(event, msg.id)}>
-        <span class="cut">{t(`approval.waiting.${kind}`)} · {subject(msg)}</span>
+      <a href={`#m-${msg.id}`} onclick={(event) => jump(event, msg.id, kind)}>
+        {t(`approval.waiting.${kind}`)} · {subject(msg)}
       </a>
     {/each}
   </nav>
 {/if}
-
-<style>
-  .needbar {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    padding: 8px var(--sp-4);
-    border-bottom: 1px solid color-mix(in srgb, var(--dawn) 40%, var(--line));
-    background: var(--dawn-soft);
-    font-size: var(--fs-sm);
-    white-space: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  .needbar b {
-    display: inline-flex;
-    align-items: center;
-    flex: none;
-    gap: 6px;
-    color: var(--dawn-text);
-  }
-  .needbar a {
-    display: inline-flex;
-    align-items: center;
-    flex: none;
-    max-width: 280px;
-    height: 26px;
-    padding: 0 10px;
-    border: 1px solid color-mix(in srgb, var(--dawn) 40%, var(--line));
-    border-radius: var(--r-full);
-    background: var(--surface);
-    color: var(--text);
-  }
-</style>

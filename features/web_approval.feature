@@ -16,6 +16,8 @@ Feature: Approval card and waiting bar of the web client
     Then the chat stays open on "Website" and focus moves to the Approve button of that card
     When the person clicks the brief chip in the waiting bar
     Then focus moves to the brief message in the main line
+    When the person clicks the decision chip in the waiting bar
+    Then focus moves to the decision message in the main line
     When the three cards waiting on the reader are no longer pending
     Then the chat has no waiting bar
 
@@ -41,7 +43,7 @@ Feature: Approval card and waiting bar of the web client
     Given "Mina" owns "Claude Code" on "Mina's MacBook" and a pending network approval waits on "Mina"
     Then the card has no dawn edge, reads "Waiting on Mina" and category "Network", and shows "Mina's MacBook" without "your computer"
     And the Approve and Deny buttons are disabled with the lock hint "Only the computer's owner Mina can approve"
-    When a pending approval waits on an unknown user with an unrecognised category
+    When a pending approval waits on an unknown user with category "other"
     Then that card reads "Waiting for owner", category "Other", and "Only the computer's owner can approve"
 
   Scenario: Offline and refused actions disable or report errors cleanly

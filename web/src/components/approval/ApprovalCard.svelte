@@ -9,12 +9,11 @@
   /** An AI's permission request in any of its five states (contracts/messages.md 2.3 and 3.2). */
   let { group, msg }: CardProps<'approval'> = $props();
 
-  const categories = ['command', 'file', 'network', 'other'] as const;
+  type Category = 'command' | 'file' | 'network' | 'other';
 
   let busy = $state(false);
   let failed = $state('');
 
-  const category = $derived(categories.find((each) => each === msg.body.category) ?? 'other');
   const pending = $derived(msg.state.status === 'pending');
   const canApprove = $derived(msg.body.approvers.includes(group.home.me.user));
   const needsMe = $derived(pending && canApprove);
@@ -63,7 +62,7 @@
   <header class="card-head">
     <Icon name="shield" />
     <span class="kind">{t('approval.kind')}</span>
-    <span class="badge">{t(`approval.category.${category}`)}</span>
+    <span class="badge">{t(`approval.category.${msg.body.category as Category}`)}</span>
     {#if needsMe}
       <span class="badge solid" data-tone="dawn">{t('approval.status.needs_you')}</span>
     {:else if pending}
@@ -162,33 +161,6 @@
 </section>
 
 <style>
-  .card-head {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    flex-wrap: wrap;
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-  }
-  .kind {
-    font-weight: 600;
-    color: var(--text);
-  }
-  .card-head .badge:last-child {
-    margin-left: auto;
-  }
-  .kv {
-    display: grid;
-    grid-template-columns: max-content minmax(0, 1fr);
-    gap: 6px var(--sp-4);
-    font-size: var(--fs-sm);
-  }
-  .kv dt {
-    color: var(--text-3);
-  }
-  .kv dd {
-    min-width: 0;
-  }
   .who {
     display: inline-flex;
     align-items: center;
@@ -222,25 +194,5 @@
   .note :global(.i) {
     color: var(--tone-text, var(--text-3));
     margin-top: 2px;
-  }
-  .card-foot {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    flex-wrap: wrap;
-  }
-  .hint {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-  }
-  @media (max-width: 640px) {
-    .kv.wide {
-      grid-template-columns: minmax(0, 1fr);
-      gap: 2px;
-    }
-    .kv.wide dd {
-      margin-bottom: var(--sp-2);
-    }
   }
 </style>

@@ -198,7 +198,19 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then('focus moves to the brief message in the main line', () => {
         const briefEl = document.getElementById('m-b-1')!;
         expect(scrolled.at(-1)).toBe(briefEl);
-        expect(document.activeElement).toBe(briefEl);
+        const target = briefEl.querySelector('button:not([disabled])') ?? briefEl;
+        expect(document.activeElement).toBe(target);
+      });
+      When('the person clicks the decision chip in the waiting bar', () => {
+        all<HTMLAnchorElement>('nav.needbar a')[2].click();
+        flushSync();
+      });
+      Then('focus moves to the decision message in the main line', () => {
+        const decisionEl = document.getElementById('m-d-1')!;
+        expect(scrolled.at(-1)).toBe(decisionEl);
+        const target =
+          decisionEl.querySelector('input:not([disabled]), textarea:not([disabled])') ?? decisionEl;
+        expect(document.activeElement).toBe(target);
       });
       When('the three cards waiting on the reader are no longer pending', () => {
         home.write(website, example('row-msg-brief-confirmed', { id: 'b-1' }));
@@ -447,7 +459,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           ]);
         },
       );
-      When('a pending approval waits on an unknown user with an unrecognised category', () => {
+      When('a pending approval waits on an unknown user with category "other"', () => {
         home.write(
           website,
           example('row-msg-approval-pending', {
@@ -455,7 +467,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             body: approvalBody({
               ai: 'gone-ai',
               task: 'missing-task',
-              category: 'custom-tool',
+              category: 'other',
               approvers: ['stranger-user'],
               full: undefined,
             }),
