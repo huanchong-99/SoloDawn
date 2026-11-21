@@ -11,8 +11,8 @@ with each call (`_meta`), which the node may compare.
 Conventions:
 
 - Members are named by their display name, unique in the group (`"Codex"`).
-  Tasks are named `"T-12"`. An unknown name returns an error that lists the
-  valid ones.
+  Tasks are named `"T-12"`. An unknown name returns a `not_found` error that
+  lists the valid ones.
 - In a task or review session the task is the session's own and is not an
   argument. Where a tool takes `task` it is optional and defaults to that
   task; in a group session it must be given.
@@ -83,7 +83,18 @@ Listed by the server only when the calling session is the group's secretary.
 | `set_task` | `task`; any of `assignee`, `reviewer`; `action` = `pause`, `resume`, `cancel` | `{"ok":true}` | `task assign`, `task pause`, `task resume`, `task cancel` |
 
 `propose_brief` has no `pass` argument: the host fills the brief's `pass`
-from `group.pass`.
+from `group.pass`. It sets `mentions` to `[requester]`, and when `requester`
+is omitted it defaults to the group's only person (refusing with
+`bad_request` when the group has no person or more than one, naming them).
+`set_task` requires at least one of `assignee`, `reviewer` or `action` (else
+`bad_request`), and sends `task assign` before `task <action>` when both a
+role and an action are given (noting that `task assign` succeeded if
+`task <action>` fails). `request_decision` numbers options `"A"`, `"B"`, …
+in list order, maps `recommended` from its 0-based index to that option's
+`id` (else `bad_request`), sets `mentions` to the member ids of the
+addressed people (refusing an empty `to` with `bad_request` and a non-person
+or unknown name with `not_found` listing the group's people), and in a task
+or review session defaults an omitted `to` to the group's people.
 
 The secretary has the tools of section 1 too, except `start_task`,
 `push_branch`, `run_checks`, `submit_task` and `submit_review` (R-21).
@@ -95,7 +106,9 @@ merge conflict the secretary uses `set_task` to say which AI resolves it.
 ## 3. The permission prompt tool (Claude Code only)
 
 `approve` is named in `--permission-prompt-tool`. The model does not call
-it; the CLI does, when an action needs permission.
+it directly; the CLI calls it when an action needs permission, and whenever
+the model invokes `AskUserQuestion` (including at level 3,
+`bypassPermissions`, per the 2026-11-21 owner override `[unverified]`).
 
 Input, as sent by the CLI `[verified]`:
 
@@ -103,10 +116,11 @@ Input, as sent by the CLI `[verified]`:
 {"tool_name":"Bash","input":{"command":"git push origin task/11-docs","description":"Push the branch"},"tool_use_id":"toolu_…"}
 ```
 
-Result, one text block containing exactly one of:
+Result, one text block containing one of:
 
 ```json
 {"behavior":"allow"}
+{"behavior":"allow","updatedInput":{"questions":[…],"answers":{…}}}
 {"behavior":"deny","message":"…"}
 ```
 
@@ -116,15 +130,33 @@ case: step 2 at level 1; step 4 for a request that contains a secret; step
 denied the card while the CLI waited; step 12 when it was not decided in
 time. Codex's `decline` carries no text (`contracts/drivers.md` 1.2).
 
-The input is never echoed back in the result `[verified: large echoed inputs
-fail]`. Handling is in `flows/approval.md`. `tool_use_id` is new on every
-attempt, so a retry is recognised by `tool_name` and `input` alone.
+For ordinary tool approvals, `updatedInput` is never returned `[verified:
+large echoed inputs fail]`. Handling is in `flows/approval.md`.
+`tool_use_id` is new on every attempt, so a retry is recognised by
+`tool_name` and `input` alone.
+
+When `tool_name` is `AskUserQuestion`, `input.questions` must be a non-empty
+list of `{question, header, options: [{label, description}], multiSelect}`
+entries with non-empty `question` texts (otherwise `bad_request`). After the
+outbound secret check on every `question`, `header`, `label` and
+`description`, each question is posted one at a time as a `decision` card
+(`options` numbered `"A"` to `"Z"`; `context` from a non-empty `header`;
+`thread` and `body.task` set for a task or review session and omitted in a
+group session) and the node waits up to `limits.approval_wait_s` for its
+`decided` item before posting the next question. A question with
+`multiSelect: true` still uses a single-choice `decision` card; multiple
+selections are given in the free-text field (`issues.md`). When all
+questions are decided, `approve` returns `{"behavior":"allow",
+"updatedInput":{…}}` with the original `input` fields, `answers[question]`
+set to the chosen option's `label` (plus `annotations[question] =
+{"notes": text}` when free text accompanied that choice) or to the custom
+free-text answer when no option was chosen.
 
 The node lists `approve` only to a structured Claude Code session, where
 the CLI hides it from the model `[verified]`. Codex has no such tool: its
-approval requests arrive on the app-server connection and are handled by
-the same code in the node. A session taken over in the terminal is not
-given it either (`contracts/drivers.md` 1.3).
+approval and `item/tool/requestUserInput` requests arrive on the app-server
+connection and are handled by the same code in the node. A session taken
+over in the terminal is not given it either (`contracts/drivers.md` 1.3).
 
 ## 4. What the tools deliberately do not do
 

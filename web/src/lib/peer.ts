@@ -12,6 +12,7 @@ import {
   ICECandidate,
   type AnswerTo,
   type Ctl,
+  type Devlog,
   type Envelope,
   type ErrorResponse,
   type Push,
@@ -374,6 +375,14 @@ export class Connection {
     return this.#pc.createDataChannel(label);
   }
 
+  /** Sends a push on an open ctl. Throws a RangeError when the frame exceeds 60 KiB. */
+  send(frame: Devlog) {
+    if (utf8(JSON.stringify(frame)).length > ctlLimit) {
+      throw new RangeError('ctl frame exceeds 60 KiB');
+    }
+    if (!this.#gone) this.#send(frame);
+  }
+
   /** A channel that cannot send is closing: the connection is gone. */
   #send(frame: object) {
     try {
@@ -563,6 +572,11 @@ export class Peer {
   /** A data channel beside ctl on the connection that serves, or undefined while none does. */
   channel(label: string) {
     return this.#conn?.channel(label);
+  }
+
+  /** Sends a push on the connection that serves, if any. */
+  send(frame: Devlog) {
+    this.#conn?.send(frame);
   }
 
   /** Closes every connection it dialled, for good: nothing reconnects, nothing can be dialled

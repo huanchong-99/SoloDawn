@@ -278,10 +278,25 @@ func (w *homeFetchWorld) seedWatchedNotes(cleanup func(func()), first, second st
 			return err
 		}
 	}
-	if _, ok := w.loop.Watch(w.conn, w.group, false); !ok {
-		return fmt.Errorf("watch refused")
+	return w.syncGroup()
+}
+
+func (w *homeFetchWorld) syncGroup() error {
+	w.re++
+	w.loop.Sync(w.conn, proto.Sync{Request: proto.Request{Type: "sync", ID: w.re}, Group: w.group})
+	for range 8 {
+		raw, err := w.nextJSON()
+		if err != nil {
+			return err
+		}
+		var h struct {
+			Type string `json:"t"`
+		}
+		if json.Unmarshal([]byte(raw), &h) == nil && h.Type == "synced" {
+			return nil
+		}
 	}
-	return nil
+	return fmt.Errorf("sync %d did not deliver synced", w.re)
 }
 
 func (w *homeFetchWorld) sendFetch(req home.Fetch) error {

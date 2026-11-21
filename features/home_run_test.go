@@ -218,8 +218,16 @@ func (w *homeRunWorld) founded(name string) error {
 // read subscribes both connections to the group, which is at seq.
 func (w *homeRunWorld) read(seq int64) error {
 	for who, p := range w.peers {
-		if got, ok := w.loop.Watch(p.conn, w.group, false); !ok || got != seq {
-			return fmt.Errorf("%s reads the group from %d (%v); want %d", who, got, ok, seq)
+		p.re++
+		w.loop.Sync(p.conn, proto.Sync{Request: proto.Request{Type: "sync", ID: p.re}, Group: w.group, Since: seq})
+		got, err := p.next()
+		if err != nil {
+			return err
+		}
+		var synced proto.Synced
+		want := proto.Synced{Type: "synced", Success: proto.Success{Re: p.re, OK: true}, Group: w.group, Seq: seq}
+		if err := proto.Decode([]byte(got), &synced); err != nil || synced != want {
+			return fmt.Errorf("%s synced %s (%v); want %+v", who, got, err, want)
 		}
 	}
 	return nil

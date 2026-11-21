@@ -26,7 +26,7 @@ type Fetch struct {
 // of c, pins and closes a store.Snapshot, reads and packs the answer, and
 // queues the response frame on c.
 //
-// Fetch waits for the group and for the store's writer, as Watch does: it must
+// Fetch waits for the group and for the store's writer, as Sync does: it must
 // not be called on the goroutine of a group or inside a transaction of the
 // store.
 func (l *Loop) Fetch(c *Conn, req Fetch) {
@@ -34,12 +34,12 @@ func (l *Loop) Fetch(c *Conn, req Fetch) {
 	if fetIsRow(req) {
 		read = fetOneRow
 	} else if !fetPageOK(req) {
-		c.send(fetErr(req.ID, "bad_request", "the fetch limit must be 1 to 100 and before at least 0"))
+		c.send(runErr(req.ID, "bad_request", "the fetch limit must be 1 to 100 and before at least 0"))
 		return
 	}
 	step := func(g *runGroup) { g.fetRun(c, req, read) }
 	if !l.ask(req.Group, step) {
-		c.send(fetErr(req.ID, "not_found", "this node is not home to the group"))
+		c.send(runErr(req.ID, "not_found", "this node is not home to the group"))
 	}
 }
 
@@ -52,28 +52,25 @@ func fetPageOK(req Fetch) bool {
 }
 
 func (g *runGroup) fetRun(c *Conn, req Fetch, read func(Fetch, *store.Snapshot) (proto.Fetched, error)) {
-	if !g.fetReader(c, req.ID) {
+	if !g.fetAdmit(c, req.ID) {
 		return
 	}
 	frame, err := g.fetRead(req, read)
 	if err != nil {
 		g.loop.cfg.Report(fmt.Errorf("group %s, a fetch of %s: %w", g.state.ID, c.device, err))
-		c.send(fetErr(req.ID, "internal", "the home could not read the group; the cause is in its log"))
+		c.send(runErr(req.ID, "internal", "the home could not read the group; the cause is in its log"))
 		return
 	}
 	c.send(frame)
 }
 
-func (g *runGroup) fetReader(c *Conn, re int64) bool {
+func (g *runGroup) fetAdmit(c *Conn, re int64) bool {
 	if g.seats[c] == nil {
 		return false
 	}
-	if g.state.Group.ID == "" {
-		c.send(fetErr(re, "not_found", "this node is not home to the group"))
-		return false
-	}
-	if !g.state.Serves(c.device) {
-		c.send(fetErr(re, "forbidden", "the device may not read this group"))
+	refusal := runReader(g.state, c.device)
+	if refusal != nil {
+		c.send(runErr(re, refusal.Code, refusal.Msg))
 		return false
 	}
 	return true
@@ -142,8 +139,4 @@ func fetFetched(re int64, rows []json.RawMessage, more bool) proto.Fetched {
 		Rows:    rows,
 		More:    more,
 	}
-}
-
-func fetErr(re int64, code, msg string) proto.ErrorResponse {
-	return proto.ErrorResponse{Re: re, Err: proto.WireError{Code: code, Message: msg}}
 }
