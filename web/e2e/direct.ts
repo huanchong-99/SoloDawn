@@ -13,7 +13,7 @@ import { promisify } from 'node:util';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { expect, vi } from 'vitest';
 import type { BrowserName } from './config';
-import type { Env, Node, Rendezvous } from './nodes';
+import type { Env, Rendezvous } from './nodes';
 
 export const exec = promisify(execFile);
 
@@ -25,12 +25,8 @@ export function poll<T>(fn: () => Promise<T> | T, timeout = 15_000) {
   return expect.poll(fn, { timeout });
 }
 
-/** Git author/committer environment for node processes on clean CI runners with no ~/.gitconfig. */
+/** Git author/committer config environment for clean CI runners with no ~/.gitconfig. */
 export const gitIdentityEnv: Env = {
-  GIT_AUTHOR_NAME: 'Alex',
-  GIT_AUTHOR_EMAIL: 'alex@example.test',
-  GIT_COMMITTER_NAME: 'Alex',
-  GIT_COMMITTER_EMAIL: 'alex@example.test',
   GIT_CONFIG_COUNT: '3',
   GIT_CONFIG_KEY_0: 'user.name',
   GIT_CONFIG_VALUE_0: 'Alex',
@@ -173,7 +169,7 @@ function attachWsReader(
   onText: (text: string) => void,
   onClose: () => void,
 ) {
-  let buf = Buffer.from(initial);
+  let buf: Buffer = Buffer.from(initial);
   const parts: Buffer[] = [];
   const drain = () => {
     for (let next = takeWsFrame(buf); next; next = takeWsFrame(buf)) {
@@ -315,12 +311,6 @@ export async function openDirectContext(
   return context;
 }
 
-/** Writes `.gitconfig` inside each isolated node `HOME` so local merges work on clean CI runners. */
-export async function ensureNodeGitConfig(...nodes: Node[]): Promise<void> {
-  const cfg = '[user]\n\tname = Alex\n\temail = alex@example.test\n[commit]\n\tgpgsign = false\n';
-  await Promise.all(nodes.map((node) => writeFile(join(node.home, '.gitconfig'), cfg)));
-}
-
 /** Creates a local Git repository initialized on branch `main` with one commit. */
 export async function initGitRepo(
   dir: string,
@@ -367,10 +357,8 @@ export async function sendChatMessage(page: Page, text: string): Promise<void> {
   const composer = page.locator('.composer textarea');
   const sendBtn = page.locator('.composer button.send');
   await poll(() => composer.isDisabled()).toBe(false);
-  await vi.waitFor(async () => {
-    await composer.fill(text);
-    expect(await sendBtn.isDisabled()).toBe(false);
-  });
+  await composer.fill(text);
+  expect(await sendBtn.isDisabled()).toBe(false);
   await sendBtn.click();
   await poll(() => composer.inputValue()).toBe('');
 }

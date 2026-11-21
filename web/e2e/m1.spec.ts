@@ -4,7 +4,6 @@ import type { Browser, BrowserContext } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, inject, test } from 'vitest';
 import { launch } from './config';
 import {
-  gitIdentityEnv,
   openDirectContext,
   poll,
   readPairingCode,
@@ -45,7 +44,7 @@ describe('E-M1: onboarding, pairing, account declaration, and two computers', ()
     'pairs a first node through onboarding and enrolls a second node on Computers',
     { timeout: 90_000 },
     async () => {
-      const active = await startNet({ nodes: 2, env: () => gitIdentityEnv });
+      const active = await startNet({ nodes: 2 });
       net = active;
       const direct = await startDirectSurface(active.rendezvous, inject('browser'));
       surface = direct;

@@ -10,7 +10,6 @@ import { launch } from './config';
 import {
   claudeInitSteps,
   codexInitSteps,
-  ensureNodeGitConfig,
   gitIdentityEnv,
   initGitRepo,
   openDirectContext,
@@ -533,7 +532,6 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       const direct = await startDirectSurface(active.rendezvous, inject('browser'));
       surface = direct;
       const [homeNode, secNode] = active.nodes;
-      await ensureNodeGitConfig(homeNode, secNode);
       const repo = await initGitRepo(active.dir, 'm5-repo', '# Release pipeline\n');
 
       const context = await openDirectContext(browser, contexts, direct);
@@ -550,11 +548,11 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await inputs.nth(2).fill('main');
       await inputs.nth(3).fill('Alex');
       await createDlg.locator('select.input').first().selectOption('none');
-      // Gate T-1 and T-2 inside run_checks on marker files so review scripts swap deterministically
-      // and Secretary processes each task_merged notice in its own turn.
+      // Gate T-1 and T-2 inside run_checks on marker files (`*/1-*` relies on the host's
+      // `wt/<num>-<slug>` worktree folder naming) with a 60 s bound so orphaned shells exit.
       const checkCmd = [
         'test -f README.md',
-        `case "$(pwd)" in */1-*) until [ -f "${gateT1}" ]; do sleep 0.05; done;; *) until [ -f "${gateT2}" ]; do sleep 0.05; done;; esac`,
+        `i=0; case "$(pwd)" in */1-*) until [ -f "${gateT1}" ] || [ $i -ge 1200 ]; do sleep 0.05; i=$((i+1)); done; test -f "${gateT1}";; *) until [ -f "${gateT2}" ] || [ $i -ge 1200 ]; do sleep 0.05; i=$((i+1)); done; test -f "${gateT2}";; esac`,
       ].join(' && ');
       await createDlg.locator('textarea.input').fill(checkCmd);
       await createDlg.locator('select.input').nth(1).selectOption({ label: 'workstation' });

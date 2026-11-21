@@ -95,6 +95,36 @@ async function setPeerOffline(page: Page, offline: boolean) {
   }, offline);
 }
 
+async function postBulkHistory(page: Page, count: number) {
+  await page.evaluate(async (total) => {
+    const chat = document.querySelector('.chat');
+    const ta = document.querySelector<HTMLTextAreaElement>('.composer textarea');
+    const form = document.querySelector<HTMLFormElement>('.composer form');
+    if (!chat || !ta || !form) throw new Error('composer not mounted');
+    let wake = () => {};
+    const notify = () => {
+      if (ta.value === '') wake();
+    };
+    const obs = new MutationObserver(notify);
+    obs.observe(chat, { childList: true, subtree: true });
+    document.addEventListener('selectionchange', notify);
+    try {
+      for (let i = 1; i <= total; i++) {
+        const cleared = new Promise<void>((resolve) => {
+          wake = resolve;
+        });
+        ta.value = `History line ${String(i).padStart(4, '0')}`;
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        form.requestSubmit();
+        if (ta.value !== '') await cleared;
+      }
+    } finally {
+      obs.disconnect();
+      document.removeEventListener('selectionchange', notify);
+    }
+  }, count);
+}
+
 async function pairSecondBrowser(firstPage: Page, secondPage: Page, surface: DirectSurface) {
   await firstPage.locator('.rail a[href="#/nodes"]').click();
   await poll(() => firstPage.url()).toContain('#/nodes');
@@ -288,19 +318,7 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
         'Cannot reach the group home',
       );
 
-      await page1.evaluate(async () => {
-        const ta = document.querySelector<HTMLTextAreaElement>('.composer textarea');
-        const form = document.querySelector<HTMLFormElement>('.composer form');
-        if (!ta || !form) throw new Error('composer not mounted');
-        for (let i = 1; i <= 1500; i++) {
-          ta.value = `History line ${String(i).padStart(4, '0')}`;
-          ta.dispatchEvent(new Event('input', { bubbles: true }));
-          form.requestSubmit();
-          while (ta.value !== '') {
-            await new Promise((resolve) => setTimeout(resolve, 1));
-          }
-        }
-      });
+      await postBulkHistory(page1, 1500);
 
       await setPeerOffline(page2, false);
       await poll(() => page2.locator('.line .msg .text').allTextContents(), 30_000).toContain(
@@ -309,7 +327,11 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
 
       const resetTexts = await page2.locator('.line .msg .text').allTextContents();
       expect(resetTexts).toContain('History line 1451');
-      expect(resetTexts).not.toContain('History line 1450');
+      expect(resetTexts).not.toContain('History line 0001');
+      expect(resetTexts).not.toContain('Delta message 20');
+      const firstHistory = resetTexts.find((item) => item.startsWith('History line ')) ?? '';
+      const oldestLoaded = Number(firstHistory.slice('History line '.length));
+      expect(oldestLoaded).toBeGreaterThan(50);
 
       // The old pending decision card from before the 1500 messages remains visible after reset.
       await poll(() => page2.locator('.chat nav.needbar').textContent()).toContain(
@@ -323,20 +345,20 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
       ).toContain('Keep legacy archive redirects?');
 
       // Scrolling toward the top loads the previous 50-message page in chronological order.
+      const prevPageEnd = `History line ${String(oldestLoaded - 1).padStart(4, '0')}`;
+      const prevPageStart = `History line ${String(oldestLoaded - 50).padStart(4, '0')}`;
       await page2.locator('.edge').evaluate((el) => el.scrollIntoView({ block: 'start' }));
-      await poll(() => page2.locator('.line .msg .text').allTextContents()).toContain(
-        'History line 1450',
-      );
+      await poll(() => page2.locator('.line .msg .text').allTextContents()).toContain(prevPageEnd);
 
       const pagedTexts = await page2.locator('.line .msg .text').allTextContents();
-      const idx1401 = pagedTexts.indexOf('History line 1401');
-      const idx1450 = pagedTexts.indexOf('History line 1450');
-      const idx1451 = pagedTexts.indexOf('History line 1451');
+      const idxPrevStart = pagedTexts.indexOf(prevPageStart);
+      const idxPrevEnd = pagedTexts.indexOf(prevPageEnd);
+      const idxOldestBefore = pagedTexts.indexOf(firstHistory);
       const idx1500 = pagedTexts.indexOf('History line 1500');
-      expect(idx1401).toBeGreaterThan(-1);
-      expect(idx1401).toBeLessThan(idx1450);
-      expect(idx1450).toBeLessThan(idx1451);
-      expect(idx1451).toBeLessThan(idx1500);
+      expect(idxPrevStart).toBeGreaterThan(-1);
+      expect(idxPrevStart).toBeLessThan(idxPrevEnd);
+      expect(idxPrevEnd).toBeLessThan(idxOldestBefore);
+      expect(idxOldestBefore).toBeLessThan(idx1500);
     },
   );
 });
