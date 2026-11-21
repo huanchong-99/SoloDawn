@@ -162,6 +162,12 @@ These tests need a task session, so they follow the first slice of M5
 - **A4.10** On each CLI at level 2, an AI asked to write a marker file
   outside its worktree produces a card, and no file exists before approval.
   (`live`)
+- **A4.11** On the real Codex CLI with
+  `-c features.default_mode_request_user_input=true`, an AI in Default mode
+  asked to present a multiple-choice question with its ask-the-user tool
+  emits `item/tool/requestUserInput`, produces a `decision` card, and
+  receives the chosen option (run in B-17 / I-11; `contracts/drivers.md` 1.2
+  says what changes if the flag does not work). (`live`)
 
 ## M5. Tasks
 

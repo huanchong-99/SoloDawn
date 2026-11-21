@@ -70,7 +70,7 @@ type TurnKind string
 
 const (
 	ItemsTurn    TurnKind = "items"    // inbox items (flows/agent-turn.md step 6)
-	ReplacedTurn TurnKind = "replaced" // inbox items, as the first turn of a session that replaces one the CLI could not resume (flows/agent-turn.md E)
+	ReplacedTurn TurnKind = "replaced" // the first turn of a session that replaces one the CLI could not resume (flows/agent-turn.md E)
 	ContinueTurn TurnKind = "continue" // the turn of its own a session gets after a jump interrupted it (flows/agent-turn.md step 14)
 	HandbackTurn TurnKind = "handback" // the turn that follows a takeover (flows/takeover.md step 16)
 )
