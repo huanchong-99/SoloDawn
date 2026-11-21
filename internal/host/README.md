@@ -27,6 +27,8 @@ A unit never calls into the file of a unit built beside it. It registers in a ta
 | the state rows of a group | `h.Rows`: `Put` and `Reset` for the unit that handles `rows` and `reset`, `Get` and `Of` for everyone |
 | an item that answers an open tool call | the tool: `item, done := h.Await(id, check)`, then it reads the channel until its wait runs out, calls `done`, and looks at the channel once more. Delivery, before it queues a `reply` or a `decided` item: `h.Hand(id, item)`, which never waits for the tool |
 | whether a session's deliveries are held | `h.Held(key)`, before a turn is given; whoever lifts a hold calls `Deliver` |
+| an interactive pseudo-terminal (`takeover`) | `h.StartPTY(group, member, agent, launch, onDone)`, `p.Resize(cols, rows)`, `p.Close()`, `h.ClosePTY(group, member)` |
+| bridging a `pty:<g>:<member>` data channel | `h.ServeTerminal(t)` |
 | an audit row | `h.Audit(tx, AuditRow{…})`, inside the transaction of what it records |
 
 ## Tables
@@ -83,6 +85,15 @@ A `Driver` starts the structured CLI (`Start`) and gives the command line of the
 - `Launch.Shim` is the command line of the MCP server for that start: `h.Shim`, then `--token` and the token. The driver writes it into the CLI's MCP configuration as it is.
 - A driver keeps no timer. Its caller ends the context of `Start`, which kills the process tree, when an interrupt or a close was not answered within 10 s.
 - Sign-in that is not usable and a session id that cannot be resumed are events (`LoginInvalid`, `NoSession`), because a CLI reports them after its process has started.
+
+## Pseudo-terminals (HS-19)
+
+`StartPTY(group, member, agent, launch, onDone)` runs `Drivers[agent].Interactive(launch)` inside a `github.com/aymanbagabas/go-pty` v0.2.3 pseudo-terminal (Unix PTY or Windows ConPTY) in `launch.Folder`, registers the open `*PTY` under `(group, member)` in `Part[ptyPart](h)`, applies any stored `pty.resize` dimensions for `(group, member)`, and returns the `*PTY` and the CLI session id. A second `StartPTY` while `(group, member)` is already open is refused with `busy`; non-`*Error` CLI launch failures are returned as `&Error{Code: "cli", Message: …}`.
+
+- Closing (`p.Close()`, `h.ClosePTY(group, member)`) never writes `0x03` (`Ctrl+C`) bytes. It closes the pseudo-terminal, waits up to 10 s (`ptyStopTimeout`) for exit, kills the process tree when still running (`SIGKILL` to `-pid` on Unix, `taskkill.exe /f /t /pid` on Windows), removes any temporary `--mcp-config` file from `Interactive`, releases `(group, member)`, and calls `onDone` once after the process has exited.
+- `ServeTerminal(t)` parses `"pty:<g>:<member>"` strictly. A malformed label, an unmatched `(g, member)` or a duplicate stream for an already bridged `PTY` is closed and drained so unread messages never hold back the connection's shared SCTP receive window. Otherwise one goroutine copies `PTY -> t` (pausing `PTY` reads while `t.Write` waits on the 1 MiB send-buffer limit) and the caller copies `t -> PTY`; `t` ending closes `PTY`, and `PTY` exiting closes `t`.
+- `Surface["pty.resize"]` decodes `proto.PTYResize`, requires `cols >= 1` and `rows >= 1` (`bad_request` below 1), remembers the size for `(g, ai)` so a `pty.resize` before `StartPTY` sets the initial size, resizes an open `PTY`, and accepts a `pty.resize` after close as a no-op.
+- Lock order: `PTY.mu -> ptyPart.mu`; neither lock waits on I/O, process exit or `onDone`.
 
 # Host test CLIs
 
