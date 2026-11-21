@@ -933,3 +933,39 @@ func TestSessionErrorAndEdgePaths(t *testing.T) {
 		}
 	})
 }
+
+func TestSessionFetchMainLineAndThread(t *testing.T) {
+	db := sesOpenStore(t)
+	nodeKey, browserKey := sesKey("node"), sesKey("browser")
+	logs := seedOwnedLogs(t, db, nodeKey, browserKey)
+	now := time.UnixMilli(1763600000000)
+	groupID := string(sesID("fetch-grp"))
+	threadID := string(sesID("task-1"))
+	cmds := home.Table{
+		"group/create": func(st *home.State, c home.Command) (home.Result, *home.Refusal) {
+			grp := proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: st.ID}, Name: "Proj", Kind: "project", Home: st.Home, Checks: []string{}, Created: c.Now}
+			own := proto.HumanMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: "m-owner"}, Group: st.ID, Kind: "human", User: browserKey.ID(), Name: "owner"}, Role: "owner"}
+			mainMsg := testMsgRow("m-main", st.ID, nil, c.Now)
+			thMsg := testMsgRow("m-thread", st.ID, &threadID, c.Now)
+			return home.Result{Rows: []home.Row{home.RowOf(grp), home.RowOf(own), home.RowOf(mainMsg), home.RowOf(thMsg)}}, nil
+		},
+	}
+	loop, h := newTestHomeAndHost(t, db, nodeKey, logs, now, cmds)
+	s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h, Now: func() time.Time { return now }})
+
+	c := serveConn(t, s, browserKey.ID(), false)
+	c.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "b1", Addrs: []string{}})
+	c.next(t)
+	c.next(t)
+
+	createPayload := fmt.Sprintf(`{"t":"group","op":"create","n":%q,"ts":%d,"g":%q}`, groupID, now.UnixMilli(), groupID)
+	c.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 2}, Env: browserKey.Sign(createPayload)})
+	var okAns proto.Success
+	mustNoErr(t, proto.Decode(c.next(t), &okAns))
+
+	c.pushRaw(fmt.Sprintf(`{"t":"fetch","id":3,"g":%q,"before":800,"limit":50,"thread":null}`, groupID))
+	mustEqual(t, fetchedRowIDs(t, c.next(t)), []string{"m-main"})
+
+	c.pushRaw(fmt.Sprintf(`{"t":"fetch","id":4,"g":%q,"before":800,"limit":50,"thread":%q}`, groupID, threadID))
+	mustEqual(t, fetchedRowIDs(t, c.next(t)), []string{"m-thread"})
+}
