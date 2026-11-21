@@ -108,6 +108,13 @@ const perMention = 52;
 
 const size = (text: string) => utf8(text).length;
 
+/** The most an `act` command's `text` may hold as a JSON string, quotes included: 1 KiB
+ *  (contracts/messages.md section 3). */
+export const actTextLimit = 1024;
+
+/** The UTF-8 byte length of `value` encoded as a JSON string, quotes included. */
+export const jsonBytes = (value: string) => size(JSON.stringify(value));
+
 /** The size of the row that a text message would make, by the rule of contracts/rows.md section
  *  5. The row holds the text twice: as `text`, and inside `env.p`, where it is escaped once more,
  *  so a letter costs 2 bytes, a line break 5, a quote or a backslash 6, a Chinese character 6.

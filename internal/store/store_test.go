@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -129,4 +130,41 @@ func TestCountersAndRollback(t *testing.T) {
 	equal(t, err, stop)
 	equal(t, scalar[string](t, s.db, "SELECT group_concat(g||':'||seq||':'||num,',' ORDER BY g) FROM grp"), "a:2:2,b:2:1")
 	equal(t, scalar[int](t, s.db, "SELECT count(*) FROM receipt"), 0)
+}
+
+func lockDB(t *testing.T, path string) func() {
+	t.Helper()
+	lock, err := sql.Open("sqlite", path)
+	check(t, err)
+	lock.SetMaxOpenConns(1)
+	t.Cleanup(func() { check(t, lock.Close()) })
+	_, err = lock.Exec("BEGIN IMMEDIATE")
+	check(t, err)
+	var once sync.Once
+	unlock := func() {
+		t.Helper()
+		once.Do(func() {
+			_, err := lock.Exec("ROLLBACK")
+			check(t, err)
+			check(t, lock.Close())
+		})
+	}
+	t.Cleanup(unlock)
+	return unlock
+}
+
+func TestWriteBeginFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "node.db")
+	s := openDB(t, path+"?_txlock=immediate")
+	unlock := lockDB(t, path)
+	ran := false
+	err := s.Write(func(*Tx) error {
+		ran = true
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "database is locked") {
+		t.Fatalf("locked write begin: %v", err)
+	}
+	equal(t, ran, false)
+	unlock()
 }

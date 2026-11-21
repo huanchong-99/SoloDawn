@@ -69,6 +69,10 @@ export default defineConfig({
     environment: 'node',
     // Builds once for every project of the run; see setup in nodes.ts.
     globalSetup: ['e2e/nodes.ts'],
+    // One file runs at a time: on a fresh macOS Keychain, two Playwright WebKit UIProcesses calling
+    // defaultWebCryptoMasterKey together race on SecItemAdd (SerializedCryptoKeyWrapCocoa.mm), and
+    // errSecDuplicateItem returns std::nullopt, making boot's structuredClone(privateKey) fail.
+    fileParallelism: false,
     testTimeout: 60_000,
     hookTimeout: 60_000,
     projects: browsers.map((browser) => ({ test: { name: browser, provide: { browser } } })),

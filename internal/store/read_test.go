@@ -2,7 +2,9 @@ package store
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -146,6 +148,23 @@ func TestSnapshotPinsReplacedRow(t *testing.T) {
 	}
 }
 
+func TestSnapshotRowPinsView(t *testing.T) {
+	s := openDB(t, filepath.Join(t.TempDir(), "node.db"))
+	note := proto.NoteRow{RowHeader: header("note", "n1", 1), Pos: 1, Group: "g", Text: "pinned text"}
+	put(t, s, "g", 10, note)
+	pinned := snapshot(t, s, "g")
+	put(t, s, "g", 20, proto.GoneRow{RowHeader: header("note", "n1", 2), Gone: true})
+	later := snapshot(t, s, "g")
+
+	got, err := pinned.Row("note", "n1")
+	check(t, err)
+	want, err := encode(note)
+	check(t, err)
+	equal(t, string(got), want)
+	_, err = later.Row("note", "n1")
+	equal(t, errors.Is(err, sql.ErrNoRows), true)
+}
+
 func roundTripGolden[R wireRow](t *testing.T, file string) {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("..", "proto", "testdata", "row-"+file+".json"))
@@ -224,4 +243,163 @@ func TestPutKeepsStoredEscapesOfRawJSON(t *testing.T) {
 	if !strings.Contains(stored, `"body":{"a":"<b>"}`) {
 		t.Fatalf("escapes were rewritten: %s", stored)
 	}
+}
+
+func TestSnapshotAndQueryFailures(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "node.db")
+	s := openDB(t, path+"?_txlock=immediate")
+	unlock := lockDB(t, path)
+	v, err := s.Snapshot("g")
+	equal(t, v, (*Snapshot)(nil))
+	if err == nil || !strings.Contains(err.Error(), "database is locked") {
+		t.Fatalf("locked snapshot begin: %v", err)
+	}
+	unlock()
+
+	v, err = s.Snapshot("g")
+	check(t, err)
+	check(t, v.Close())
+	rows, err := v.AfterSeqUpTo(0, 1)
+	equal(t, rows, ([]json.RawMessage)(nil))
+	equal(t, err, sql.ErrTxDone)
+
+	mem := openDB(t, ":memory:")
+	_, err = mem.db.Exec("DROP TABLE grp")
+	check(t, err)
+	v, err = mem.Snapshot("g")
+	equal(t, v, (*Snapshot)(nil))
+	equal(t, err.Error(), "SQL logic error: no such table: grp (1)")
+	equal(t, mem.db.Stats().InUse, 0)
+}
+
+func emptyJSON(t *testing.T, rows []json.RawMessage, err error) {
+	t.Helper()
+	check(t, err)
+	raw, err := json.Marshal(rows)
+	check(t, err)
+	equal(t, string(raw), "[]")
+}
+
+func TestSnapshotStateRowsAndPending(t *testing.T) {
+	s := openDB(t, ":memory:")
+	thread := "t1"
+	put(t, s, "g", 10, proto.GroupRow{RowHeader: header("group", "g", 1)})
+	put(t, s, "g", 10, member("m1", 2))
+	put(t, s, "g", 10, proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: header("member", "ai1", 3), Kind: "ai"}})
+	put(t, s, "g", 10, proto.DeviceRow{RowHeader: header("device", "d1", 4)})
+	put(t, s, "g", 10, proto.TaskRow{RowHeader: header("task", "t1", 5)})
+	put(t, s, "g", 10, msg("m6", 6, nil, false, "text"))
+	put(t, s, "g", 10, proto.NoteRow{RowHeader: header("note", "n7", 7), Pos: 7})
+	c8 := card("c8", 8, &thread, "pending")
+	c8.Main = false
+	put(t, s, "g", 10, c8)
+	put(t, s, "g", 10, card("c9", 9, nil, "pending"))
+	put(t, s, "g", 10, card("c10", 10, nil, "decided"))
+	put(t, s, "g", 10, member("m11", 11))
+	put(t, s, "g", 20, proto.GoneRow{RowHeader: header("member", "m11", 12), Gone: true})
+	put(t, s, "g", 10, card("c13", 13, nil, "pending"))
+	put(t, s, "g", 20, proto.GoneRow{RowHeader: header("msg", "c13", 14), Gone: true})
+	put(t, s, "g", 30, member("m1", 15))
+	c8.Seq = 16
+	put(t, s, "g", 30, c8)
+	put(t, s, "other", 10, proto.GroupRow{RowHeader: header("group", "other", 1)})
+	put(t, s, "other", 10, card("other-card", 2, nil, "pending"))
+
+	v, err := s.Snapshot("g")
+	check(t, err)
+	rows, err := v.StateRows()
+	equal(t, ids(t, rows, err), []string{"g", "ai1", "d1", "t1", "m1"})
+	rows, err = v.Pending()
+	equal(t, ids(t, rows, err), []string{"c8", "c9"})
+	check(t, v.Close())
+
+	empty := snapshot(t, s, "absent")
+	rows, err = empty.StateRows()
+	emptyJSON(t, rows, err)
+	rows, err = empty.Pending()
+	emptyJSON(t, rows, err)
+}
+
+func TestSnapshotDeltaCount(t *testing.T) {
+	s := openDB(t, ":memory:")
+	put(t, s, "g", 10, proto.GroupRow{RowHeader: header("group", "g", 1)})
+	put(t, s, "g", 10, msg("m2", 2, nil, false, "text"))
+	put(t, s, "g", 10, member("mem3", 3))
+	put(t, s, "g", 10, proto.NoteRow{RowHeader: header("note", "n4", 4), Pos: 4})
+	put(t, s, "g", 10, proto.TaskRow{RowHeader: header("task", "t5", 5)})
+	put(t, s, "g", 20, proto.GoneRow{RowHeader: header("msg", "gone-msg", 6), Gone: true})
+	put(t, s, "g", 20, proto.DeviceRow{RowHeader: header("device", "dev7", 7)})
+	put(t, s, "g", 20, proto.GoneRow{RowHeader: header("member", "gone-mem", 8), Gone: true})
+	put(t, s, "g", 20, proto.GoneRow{RowHeader: header("note", "gone-note", 9), Gone: true})
+	put(t, s, "g", 20, proto.TaskRow{RowHeader: header("task", "t10", 10)})
+	put(t, s, "other", 10, proto.TaskRow{RowHeader: header("task", "other-task", 4)})
+
+	v := snapshot(t, s, "g")
+	for _, c := range []struct {
+		after, upTo int64
+		want        int
+	}{
+		{0, 10, 10},
+		{1, 10, 9},
+		{0, 9, 9},
+		{5, 8, 3},
+		{10, 10, 0},
+		{12, 10, 0},
+	} {
+		got, err := v.DeltaCount(c.after, c.upTo)
+		check(t, err)
+		equal(t, got, c.want)
+	}
+}
+
+func TestSnapshotSyncIsolationAndClosedErrors(t *testing.T) {
+	s := openDB(t, filepath.Join(t.TempDir(), "node.db"))
+	seedSnapshotStep(t, s, proto.GroupRow{RowHeader: header("group", "g", 1)}, card("c2", 2, nil, "pending"))
+	old := snapshot(t, s, "g")
+	seedSnapshotStep(t, s, card("c2", 3, nil, "decided"), proto.TaskRow{RowHeader: header("task", "t4", 4)})
+	fresh := snapshot(t, s, "g")
+
+	rows, err := old.StateRows()
+	equal(t, ids(t, rows, err), []string{"g"})
+	rows, err = old.Pending()
+	equal(t, ids(t, rows, err), []string{"c2"})
+	n, err := old.DeltaCount(0, old.Seq)
+	equal(t, []any{n, err}, []any{2, nil})
+
+	rows, err = fresh.StateRows()
+	equal(t, ids(t, rows, err), []string{"g", "t4"})
+	rows, err = fresh.Pending()
+	equal(t, ids(t, rows, err), []string{})
+	n, err = fresh.DeltaCount(0, fresh.Seq)
+	equal(t, []any{n, err}, []any{3, nil})
+
+	closed, err := s.Snapshot("g")
+	check(t, err)
+	check(t, closed.Close())
+	assertClosedSnapshot(t, closed)
+}
+
+func seedSnapshotStep[A, B wireRow](t *testing.T, s *Store, first A, second B) {
+	t.Helper()
+	check(t, s.Write(func(tx *Tx) error {
+		for range 2 {
+			if _, err := tx.NextSeq("g"); err != nil {
+				return err
+			}
+		}
+		if err := Put(tx, "g", 10, first); err != nil {
+			return err
+		}
+		return Put(tx, "g", 10, second)
+	}))
+}
+
+func assertClosedSnapshot(t *testing.T, v *Snapshot) {
+	t.Helper()
+	rows, err := v.StateRows()
+	equal(t, []any{rows, err}, []any{[]json.RawMessage(nil), sql.ErrTxDone})
+	rows, err = v.Pending()
+	equal(t, []any{rows, err}, []any{[]json.RawMessage(nil), sql.ErrTxDone})
+	n, err := v.DeltaCount(0, 1)
+	equal(t, []any{n, err}, []any{0, sql.ErrTxDone})
 }
