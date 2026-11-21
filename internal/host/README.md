@@ -167,6 +167,11 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 - `cloneLock(repo)` is the one lock per clone, keyed by its real path. Workspace functions and `ReviewedMerge` take it.
 - `HostedChecksToResume(tasks, ais)` selects the `cloud_check` tasks a restarted node polls again, deriving each `Branch` (`task/<num>-<slug>`) from `Num` and `Slug` via `taskName` and skipping rows `taskName` refuses.
 
+# Secretary and decision tools
+
+`tools_sec.go` registers `propose_brief`, `set_task` and `request_decision` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1, 2 and 5): `propose_brief` and `set_task` set `Tool.For` to `c.Secretary`, while `request_decision` registers the `group` schema for every session.
+`loadSecDirectory`, `resolveSecTask`, `prepareDecisionPost` and `buildDecisionOptions` are package helpers shared with the other MCP tool and approval handlers in `host`.
+
 # Delivery and group state
 
 `deliver.go` implements the host's group synchronization and inbox delivery ([datachannel.md](../../planning/contracts/datachannel.md) sections 4 and 6, [flows/sync.md](../../planning/flows/sync.md), [flows/agent-turn.md](../../planning/flows/agent-turn.md)).
