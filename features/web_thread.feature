@@ -1,9 +1,10 @@
 @web
 Feature: Task thread, review block and system notices
   A task's thread pages from its newest messages back, renders every message kind with its badge,
-  mentions, code spans and body block, shows when the task's assignee AI is working on it, draws
-  scored review blocks with pass thresholds and veto items, and words every system notice of the
-  home in the reader's language, showing task merges under the secretary's name.
+  mentions, code spans and body block, links cards raised to the main line instead of drawing them
+  twice, shows when the task's assignee AI is working on it, draws scored review blocks with pass
+  thresholds and veto items, and words the home's system notices in the reader's language, showing
+  task merges under the secretary's name.
 
   Background:
     Given a group "Website" with a secretary, two AIs and task 12 "Show connection path"
@@ -22,38 +23,38 @@ Feature: Task thread, review block and system notices
     Then no thread page is fetched
     And the thread says "Earlier messages cannot be loaded right now."
 
-  Scenario: A thread renders every message kind, report, checks, hand-back, call fallback and working indicator
+  Scenario: A thread renders message kinds, report, checks, one-line links for main-line cards and the working indicator
     Given the thread of task 12 holds every thread message kind
     And the assignee "Codex" is working on task 12 for 6 minutes
     When the thread of task 12 is mounted
-    Then the thread shows the badges for progress, question, call, reply, report, hand-back, approval and decision
+    Then the thread shows the badges for progress, question, report, approval, decision and summary
+    And only cards waiting on the reader carry the dawn badge, and every main-line card links to its main-line message without duplicate ids
     And the question marks the mention "@Secretary" and the code span "path"
     And the report metadata shows PR 31, short commit "9f2c1ab", "4 files" and "+212 −18"
     And the check rows show passing local checks, failing cloud checks and a merge conflict
-    And the hand-back metadata shows "1 file", "path.go", "+40 −3" and commit "9f2c1ab Emit path changes"
     And the bottom of the thread shows "Codex is working · 6 min"
     When "Codex" works on another task or is waiting
     Then the working indicator is gone
 
-  Scenario: Review blocks show pass, sent-back and veto states with file locations
+  Scenario: Review blocks show pass, sent-back and veto states with round numbers and file locations
     Given the thread of task 12 holds a sent-back review, a veto review and a passed review
     When the thread of task 12 is mounted
-    Then the sent-back review has tone "danger", badge "Review · Sent back", score "86", "Pass 90" and locations "path.go:88" and "conn.go"
+    Then the sent-back review has tone "danger", badge "Review · Round 1 · Sent back", score "86", "Pass 90" and locations "path.go:88" and "conn.go"
     And the veto review shows the "Veto" badge and score "0"
-    And the passed review has tone "ok", badge "Review · Passed" and score "94"
+    And the passed review has tone "ok", badge "Review · Round 3 · Passed" and score "94"
 
-  Scenario: Task merges appear under the secretary's name and every system code has client wording
-    Given the thread of task 12 holds a task_merged notice and every other system code
+  Scenario: Task merges appear under the secretary's name, 1.0 system codes have client wording and postponed codes fall back cleanly
+    Given the thread of task 12 holds a task_merged notice, every 1.0 system code and a postponed system code
     And the main line also holds a task_merged notice
     When the thread of task 12 is mounted
     Then the task_merged row names "Secretary", "T-12", "Show connection path" and commits "9f2c1ab → def4567" with an ok check icon
-    And none of the 12 system rows shows a raw system code
+    And every 1.0 system row is worded in English and the postponed row shows its code
     And switching the language to Chinese words task_merged under "Secretary" as "已合并 T-12"
     When the reader opens the main line of "Website"
     Then the main line also renders the task_merged notice under "Secretary"
 
   Scenario: The states sheet renders every wire example with the thread area's mounted cards
     When the reader opens "#/states" in a development server
-    Then the states sheet marks "review", "checks", "system", "report" and "handback" as mounted by "thread"
-    And none of "task", "approval", "brief", "decision", "summary" or "call" is mounted by "thread"
+    Then the states sheet marks "review", "checks", "system" and "report" as mounted by "thread"
+    And none of "task", "approval", "brief", "decision", "summary", "call" or "handback" is mounted by "thread"
     And every message wire example is rendered on the sheet

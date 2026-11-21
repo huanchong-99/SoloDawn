@@ -15,17 +15,11 @@
   const paging = $derived(group.paging(task.id));
   const stuck = $derived(paging.failed || (paging.more && !group.home.ctl));
 
-  const started = new WeakSet<object>();
   let loaded = $state.raw<object>();
   $effect(() => {
-    if (!started.has(paging) && paging.ready && group.home.ctl) {
-      const current = paging;
-      started.add(current);
-      untrack(() => {
-        void group.older(task.id).then(() => {
-          loaded = current;
-        });
-      });
+    if (paging.ready && group.home.ctl && loaded !== paging) {
+      loaded = paging;
+      untrack(() => void group.older(task.id));
     }
   });
 
@@ -37,27 +31,26 @@
   );
   const workMins = $derived(working ? Math.floor((now() - working.since) / 60_000) : 0);
 
-  type Badge = { label: string; tone?: 'ok' | 'danger' | 'dawn' | 'sky' };
+  type Badge = { label: string; tone?: 'ok' | 'danger' | 'dawn' };
   const tones: Partial<Record<MsgRow['kind'], Badge['tone']>> = {
     report: 'ok',
     summary: 'ok',
-    approval: 'dawn',
-    decision: 'dawn',
-    call: 'sky',
   };
 
   function badgeOf(msg: MsgRow): Badge | null {
     if (msg.kind === 'text') return null;
     if (msg.kind === 'review') {
+      const key = msg.body.ok ? 'thread.review.badge.ok' : 'thread.review.badge.fail';
       return {
-        label: t(msg.body.ok ? 'thread.review.badge.ok' : 'thread.review.badge.fail'),
+        label: t(key).replace('{n}', String(msg.body.round)),
         tone: msg.body.ok ? 'ok' : 'danger',
       };
     }
-    return { label: t(`chat.kind.${msg.kind}`), tone: tones[msg.kind] };
+    return {
+      label: t(`chat.kind.${msg.kind}`),
+      tone: group.waiting.includes(msg) ? 'dawn' : tones[msg.kind],
+    };
   }
-
-  const elapsed = (ms: number) => (ms >= 1000 ? `${Math.round(ms / 1000)}s` : `${ms}ms`);
 </script>
 
 <div class="thread">
@@ -65,28 +58,24 @@
     <p class="tpage">{t('thread.older.offline')}</p>
   {:else if paging.more}
     <div class="tpage" role={paging.busy ? 'status' : undefined}>
-      {#if loaded !== paging}
-        <span>{t('thread.older.busy')}</span>
-      {:else}
-        <button
-          type="button"
-          class="btn btn-sm btn-ghost"
-          disabled={paging.busy}
-          onclick={() => void group.older(task.id)}
-        >
-          {t(paging.busy ? 'thread.older.busy' : 'thread.older')}
-        </button>
-      {/if}
+      <button
+        type="button"
+        class="btn btn-sm btn-ghost"
+        disabled={paging.busy}
+        onclick={() => void group.older(task.id)}
+      >
+        {t(paging.busy ? 'thread.older.busy' : 'thread.older')}
+      </button>
     </div>
   {/if}
 
   <ol class="tlist">
     {#each msgs as msg (msg.id)}
-      {@const Card = cardOf(msg.kind)}
       {@const time = clock(msg.ts, prefs.lang)}
       {@const iso = new Date(msg.ts).toISOString()}
       {#if msg.by === 'system'}
-        <li class="ti sys" id={`m-${msg.id}`}>
+        {@const Card = cardOf(msg.kind)}
+        <li class="ti sys">
           {#if Card}
             <Card {group} {msg} />
           {:else}
@@ -96,11 +85,7 @@
       {:else}
         {@const author = group.member(msg.by)}
         {@const badge = badgeOf(msg)}
-        {@const segs = parts(
-          msg.text,
-          group.members.filter((member) => msg.mentions.includes(member.id)),
-        )}
-        <li class="ti" id={`m-${msg.id}`}>
+        <li class="ti">
           <Avatar
             id={author?.kind === 'human' ? author.user : msg.by}
             name={author?.name ?? '?'}
@@ -113,37 +98,29 @@
               {#if badge}<span class="badge" data-tone={badge.tone}>{badge.label}</span>{/if}
               <time datetime={iso}>{time}</time>
             </p>
-            {#if segs.length}
+            {#if msg.main}
               <p class="text">
-                {#each segs as part, i (i)}
-                  {#if part.kind === 'code'}<code>
-                      {part.text}
-                    </code>{:else if part.kind === 'at'}<span class="at">
-                      {part.text}
-                    </span>{:else}{part.text}{/if}
-                {/each}
+                <a href={`#m-${msg.id}`}>{subject(msg) || t(`chat.kind.${msg.kind}`)}</a>
               </p>
-            {/if}
-            {#if Card}
-              <Card {group} {msg} />
-            {:else if msg.kind === 'call'}
-              <p class="call-stub">
-                <span class="mono">→ {group.member(msg.body.to)?.name ?? t('chat.gone')}</span> ·
-                {msg.state.status === 'answered'
-                  ? t('thread.call.answered')
-                      .replace('{t}', elapsed(msg.state.ms))
-                      .replace('{n}', String(msg.body.depth))
-                  : t('thread.call.waiting').replace('{n}', String(msg.body.depth))}
-              </p>
-            {:else if msg.state !== null || msg.kind === 'summary'}
-              {@const line = subject(msg) === msg.text ? '' : subject(msg)}
-              {#if line || group.waiting.includes(msg)}
-                <p class="stub-line">
-                  {#if line}<span>{line}</span>{/if}
-                  {#if group.waiting.includes(msg)}
-                    <span class="badge solid" data-tone="dawn">{t('groups.waiting')}</span>
-                  {/if}
+            {:else}
+              {@const Card = cardOf(msg.kind)}
+              {@const segs = parts(
+                msg.text,
+                group.members.filter((member) => msg.mentions.includes(member.id)),
+              )}
+              {#if segs.length}
+                <p class="text">
+                  {#each segs as part, i (i)}
+                    {#if part.kind === 'code'}<code>
+                        {part.text}
+                      </code>{:else if part.kind === 'at'}<span class="at">
+                        {part.text}
+                      </span>{:else}{part.text}{/if}
+                  {/each}
                 </p>
+              {/if}
+              {#if Card}
+                <Card {group} {msg} />
               {/if}
             {/if}
           </div>
@@ -214,17 +191,13 @@
   .ti.empty {
     text-align: center;
   }
-  .ti-head,
-  .call-stub,
-  .stub-line {
+  .ti-head {
     display: flex;
     align-items: center;
     gap: 6px;
     flex-wrap: wrap;
   }
-  .ti-head time,
-  .call-stub,
-  .stub-line {
+  .ti-head time {
     color: var(--text-3);
     font-size: var(--fs-xs);
   }

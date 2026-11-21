@@ -321,7 +321,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
   of its English file to the type `Key`; today the areas are `chat`, `groups`, `nodes`,
-  `settings` and `states`. `src/messages/files.glob.ts` finds every file by its name and
+  `settings`, `states` and `thread`. `src/messages/files.glob.ts` finds every file by its name and
   `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
   empty text, or has keys that differ between its two languages, and naming the area when it has
@@ -387,7 +387,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
     again; a page that arrives after a later read, or after its connection is gone, is dropped.
     `paging(thread)` says whether more may exist, whether a page is on its way, and whether one
     can be asked for (`ready`).
-  - The lists: `main` and `thread(task)` in `pos` order, `members` by name, `me`, `waiting` (the
+  - The lists and lookups: `main` and `thread(task)` in `pos` order, `members` by name,
+    `member(id)`, `personName(user)`, `task(id)`, `me`, `waiting` (the
     pending brief the person asked for, the pending approvals and decisions put to them), `info`
     (the group row), `latest`. `recent()` is every group, the newest main line first.
   - `post` and `create` send signed commands, shaped as the wire examples `post-text.json` and
@@ -474,12 +475,14 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/`           | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount` |
 | `src/components/groups/`    | the group list, the cards that wait, the create-group dialog    |
 | `src/components/chat/`      | the chat of a group: main line, message, composer               |
+| `src/components/thread/`    | a task's thread, scored review block, checks and system notices |
 | `src/styles/`               | `tokens.css` (design tokens) and `base.css` (shared classes)    |
 | `public/`                   | manifest, icon and `fonts/`, copied as they are                 |
 | `features/web.spec.ts`      | steps of `../features/web.feature`                              |
 | `features/shell.spec.ts`    | steps of `../features/web_shell.feature`; `fixtures/` stand-ins |
 | `features/groups.spec.ts`   | steps of `../features/web_groups.feature`                       |
 | `features/chat.spec.ts`     | steps of `../features/web_chat.feature`                         |
+| `features/thread.spec.ts`   | steps of `../features/web_thread.feature`                       |
 | `features/home.ts`          | a home in memory for those steps; `page.ts` drives the page     |
 | `features/demo.ts`          | groups with a morning of talk, for a development page           |
 | `features/watch.svelte.ts`  | an effect outside a component, for tests of what is reactive    |

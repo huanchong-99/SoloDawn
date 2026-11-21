@@ -188,8 +188,11 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
-    'A thread renders every message kind, report, checks, hand-back, call fallback and working indicator',
+    'A thread renders message kinds, report, checks, one-line links for main-line cards and the working indicator',
     ({ Given, When, Then, And }) => {
+      const rowWith = (needle: string) =>
+        all('.tlist > .ti').find((el) => el.textContent?.includes(needle))!;
+
       Given('the thread of task 12 holds every thread message kind', () => {
         home.write(website, example('row-msg-progress', { id: 'k-prog', thread: taskId }));
         home.write(
@@ -210,15 +213,13 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             text: 'Keep it optional.',
           }),
         );
-        home.write(website, example('row-msg-call-answered', { id: 'k-call', thread: taskId }));
-        home.write(website, example('row-msg-call-waiting', { id: 'k-call-w', thread: taskId }));
-        home.write(website, example('row-msg-reply', { id: 'k-reply', thread: taskId }));
         home.write(website, example('row-msg-report', { id: 'k-rep', thread: taskId }));
         home.write(
           website,
           example('row-msg-report', {
             id: 'k-rep-local',
             thread: taskId,
+            text: 'Updated local report.',
             body: { commit: '1234567890abcdef', files: 1, added: 10, removed: 2 },
           }),
         );
@@ -249,9 +250,37 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             },
           }),
         );
-        home.write(website, example('row-msg-handback', { id: 'k-hb', thread: taskId }));
         home.write(website, example('row-msg-approval-pending', { id: 'k-ap', thread: taskId }));
+        home.write(
+          website,
+          example('row-msg-approval-approved', {
+            id: 'k-ap-done',
+            thread: taskId,
+            body: {
+              task: taskId,
+              ai: codexId,
+              tool: 'Bash',
+              command: 'go test ./...',
+              why: 'Approved earlier.',
+              category: 'command',
+              approvers: [user],
+            },
+          }),
+        );
         home.write(website, example('row-msg-decision-pending', { id: 'k-dc', thread: taskId }));
+        home.write(
+          website,
+          example('row-msg-decision-decided', {
+            id: 'k-dc-done',
+            thread: taskId,
+            body: {
+              task: taskId,
+              question: 'Already answered?',
+              options: [{ id: 'A', label: 'Yes', effect: 'Ship it.' }],
+              to: [user],
+            },
+          }),
+        );
         home.write(website, example('row-msg-summary', { id: 'k-sum', thread: taskId }));
       });
       And('the assignee "Codex" is working on task 12 for 6 minutes', () => {
@@ -274,64 +303,94 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         flushSync();
       });
       Then(
-        'the thread shows the badges for progress, question, call, reply, report, hand-back, approval and decision',
+        'the thread shows the badges for progress, question, report, approval, decision and summary',
         () => {
           expect(texts('.ti-head .badge')).toEqual([
             'Progress',
             'Question',
-            'Call',
-            'Call',
-            'Reply',
             'Report',
             'Report',
-            'Hand-back',
             'Approval',
+            'Approval',
+            'Decision',
             'Decision',
             'Summary',
           ]);
-          expect(one('#m-k-call .ti-head .badge').dataset.tone).toBe('sky');
-          expect(one('#m-k-rep .ti-head .badge').dataset.tone).toBe('ok');
-          expect(one('#m-k-ap .ti-head .badge').dataset.tone).toBe('dawn');
-          expect(one('#m-k-dc .ti-head .badge').dataset.tone).toBe('dawn');
-          expect(one('#m-k-txt .ti-head .badge')).toBeNull();
-          expect(one('#m-k-call .call-stub').textContent).toContain('Answered in 500ms · depth 1');
-          expect(one('#m-k-call-w .call-stub').textContent).toContain(
-            'Waiting for reply · depth 1',
+          expect(
+            rowWith('PR #31').querySelector<HTMLElement>('.ti-head .badge')?.dataset.tone,
+          ).toBe('ok');
+          expect(rowWith('Keep it optional.').querySelector('.ti-head .badge')).toBeNull();
+        },
+      );
+      And(
+        'only cards waiting on the reader carry the dawn badge, and every main-line card links to its main-line message without duplicate ids',
+        () => {
+          expect(all('.thread [id]')).toEqual([]);
+          const pendingAp = rowWith('Time the path change in a browser.');
+          const decidedAp = rowWith('Approved earlier.');
+          const pendingDc = rowWith('Where should the path appear?');
+          const decidedDc = rowWith('Already answered?');
+          const summaryRow = all('.tlist > .ti').find(
+            (el) => el.querySelector('.ti-head .badge')?.textContent === 'Summary',
+          )!;
+
+          expect(pendingAp.querySelector<HTMLElement>('.ti-head .badge')?.dataset.tone).toBe(
+            'dawn',
           );
+          expect(
+            decidedAp.querySelector<HTMLElement>('.ti-head .badge')?.dataset.tone,
+          ).toBeUndefined();
+          expect(pendingDc.querySelector<HTMLElement>('.ti-head .badge')?.dataset.tone).toBe(
+            'dawn',
+          );
+          expect(
+            decidedDc.querySelector<HTMLElement>('.ti-head .badge')?.dataset.tone,
+          ).toBeUndefined();
+          expect(summaryRow.querySelector<HTMLElement>('.ti-head .badge')?.dataset.tone).toBe('ok');
+
+          expect(pendingAp.querySelector('a')?.getAttribute('href')).toBe('#m-k-ap');
+          expect(decidedAp.querySelector('a')?.getAttribute('href')).toBe('#m-k-ap-done');
+          expect(pendingDc.querySelector('a')?.getAttribute('href')).toBe('#m-k-dc');
+          expect(decidedDc.querySelector('a')?.getAttribute('href')).toBe('#m-k-dc-done');
+          expect(summaryRow.querySelector('a')?.getAttribute('href')).toBe('#m-k-sum');
+          expect(all('.thread .card, .thread button:not(.tpage button)')).toEqual([]);
         },
       );
       And('the question marks the mention "@Secretary" and the code span "path"', () => {
-        expect(texts('#m-k-q .text .at')).toEqual(['@Secretary']);
-        expect(texts('#m-k-q .text code')).toEqual(['path']);
+        const q = rowWith('should path carry rtt?');
+        expect([...q.querySelectorAll('.text .at')].map((el) => el.textContent?.trim())).toEqual([
+          '@Secretary',
+        ]);
+        expect([...q.querySelectorAll('.text code')].map((el) => el.textContent?.trim())).toEqual([
+          'path',
+        ]);
       });
       And(
         'the report metadata shows PR 31, short commit "9f2c1ab", "4 files" and "+212 −18"',
         () => {
-          const meta = one('#m-k-rep .meta').textContent!.replace(/\s+/g, ' ').trim();
+          const meta = rowWith('PR #31')
+            .querySelector('.meta')!
+            .textContent!.replace(/\s+/g, ' ')
+            .trim();
           expect(meta).toBe('PR #31 · 9f2c1ab · 4 files · +212 −18');
-          const localMeta = one('#m-k-rep-local .meta').textContent!.replace(/\s+/g, ' ').trim();
+          const localMeta = rowWith('Updated local report.')
+            .querySelector('.meta')!
+            .textContent!.replace(/\s+/g, ' ')
+            .trim();
           expect(localMeta).toBe('1234567 · 1 file · +10 −2');
         },
       );
       And(
         'the check rows show passing local checks, failing cloud checks and a merge conflict',
         () => {
-          expect(one('#m-k-chk-ok .glyph').dataset.tone).toBe('ok');
-          expect(one('#m-k-chk-ok').textContent).toContain('Local checks passed');
-          expect(one('#m-k-chk-ok').textContent).toContain('go test ./... (42 tests)');
-          expect(one('#m-k-chk-cloud .glyph').dataset.tone).toBe('danger');
-          expect(one('#m-k-chk-cloud').textContent).toContain('Cloud checks failed');
-          expect(one('#m-k-chk-cloud').textContent).toContain('ci/linux (exit 1)');
-          expect(one('#m-k-chk-merge').textContent).toContain('Merge conflict');
-          expect(one('#m-k-chk-merge').textContent).toContain('CONFLICT in path.go');
-        },
-      );
-      And(
-        'the hand-back metadata shows "1 file", "path.go", "+40 −3" and commit "9f2c1ab Emit path changes"',
-        () => {
-          const hb = one('#m-k-hb .handback').textContent!.replace(/\s+/g, ' ').trim();
-          expect(hb).toContain('1 file · path.go · +40 −3');
-          expect(hb).toContain('9f2c1ab Emit path changes');
+          const localOk = rowWith('Local checks passed');
+          expect(localOk.querySelector<HTMLElement>('.glyph')?.dataset.tone).toBe('ok');
+          expect(localOk.textContent).toContain('go test ./... (42 tests)');
+          const cloudFail = rowWith('Cloud checks failed');
+          expect(cloudFail.querySelector<HTMLElement>('.glyph')?.dataset.tone).toBe('danger');
+          expect(cloudFail.textContent).toContain('ci/linux (exit 1)');
+          const mergeFail = rowWith('Merge conflict');
+          expect(mergeFail.textContent).toContain('CONFLICT in path.go');
         },
       );
       And('the bottom of the thread shows "Codex is working · 6 min"', () => {
@@ -387,7 +446,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
-    'Review blocks show pass, sent-back and veto states with file locations',
+    'Review blocks show pass, sent-back and veto states with round numbers and file locations',
     ({ Given, When, Then, And }) => {
       Given(
         'the thread of task 12 holds a sent-back review, a veto review and a passed review',
@@ -457,83 +516,92 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         flushSync();
       });
       Then(
-        'the sent-back review has tone "danger", badge "Review · Sent back", score "86", "Pass 90" and locations "path.go:88" and "conn.go"',
+        'the sent-back review has tone "danger", badge "Review · Round 1 · Sent back", score "86", "Pass 90" and locations "path.go:88" and "conn.go"',
         () => {
-          expect(one('#m-rev-fail .ti-head .badge').textContent).toBe('Review · Sent back');
-          expect(one('#m-rev-fail .ti-head .badge').dataset.tone).toBe('danger');
-          expect(one('#m-rev-fail .review').dataset.tone).toBe('danger');
-          expect(one('#m-rev-fail .score').textContent!.replace(/\s+/g, ' ').trim()).toBe(
+          const items = all('.tlist > .ti');
+          const fail = items[0];
+          expect(fail.querySelector('.ti-head .badge')?.textContent).toBe(
+            'Review · Round 1 · Sent back',
+          );
+          expect(fail.querySelector<HTMLElement>('.ti-head .badge')?.dataset.tone).toBe('danger');
+          expect(fail.querySelector<HTMLElement>('.review')?.dataset.tone).toBe('danger');
+          expect(fail.querySelector('.score')?.textContent!.replace(/\s+/g, ' ').trim()).toBe(
             '86Pass 90',
           );
-          expect(texts('#m-rev-fail .bul code')).toEqual(['relay', 'path.go:88', 'conn.go']);
+          expect(
+            [...fail.querySelectorAll('.bul code')].map((el) => el.textContent?.trim()),
+          ).toEqual(['relay', 'path.go:88', 'conn.go']);
         },
       );
       And('the veto review shows the "Veto" badge and score "0"', () => {
-        expect(texts('#m-rev-veto .veto')).toEqual(['Veto']);
-        expect(one('#m-rev-veto .score b').textContent).toBe('0');
+        const veto = all('.tlist > .ti')[1];
+        expect([...veto.querySelectorAll('.veto')].map((el) => el.textContent?.trim())).toEqual([
+          'Veto',
+        ]);
+        expect(veto.querySelector('.score b')?.textContent).toBe('0');
       });
-      And('the passed review has tone "ok", badge "Review · Passed" and score "94"', () => {
-        expect(one('#m-rev-ok .ti-head .badge').textContent).toBe('Review · Passed');
-        expect(one('#m-rev-ok .ti-head .badge').dataset.tone).toBe('ok');
-        expect(one('#m-rev-ok .review').dataset.tone).toBe('ok');
-        expect(one('#m-rev-ok .score b').textContent).toBe('94');
-        expect(one('#m-rev-ok .summary').textContent).toContain('def4567');
-      });
+      And(
+        'the passed review has tone "ok", badge "Review · Round 3 · Passed" and score "94"',
+        () => {
+          const passed = all('.tlist > .ti')[2];
+          expect(passed.querySelector('.ti-head .badge')?.textContent).toBe(
+            'Review · Round 3 · Passed',
+          );
+          expect(passed.querySelector<HTMLElement>('.ti-head .badge')?.dataset.tone).toBe('ok');
+          expect(passed.querySelector<HTMLElement>('.review')?.dataset.tone).toBe('ok');
+          expect(passed.querySelector('.score b')?.textContent).toBe('94');
+          expect(passed.querySelector('.summary')?.textContent).toContain('def4567');
+        },
+      );
     },
   );
 
   Scenario(
-    "Task merges appear under the secretary's name and every system code has client wording",
+    "Task merges appear under the secretary's name, 1.0 system codes have client wording and postponed codes fall back cleanly",
     ({ Given, When, Then, And }) => {
-      const codes = [
+      const activeCodes = [
         'task_merged',
         'task_failed',
         'turn_interrupted',
         'login_invalid',
-        'rate_limited',
-        'cap_reached',
         'session_replaced',
-        'rounds_limit',
-        'preempted',
-        'group_paused',
-        'group_resumed',
         'no_secretary',
       ];
 
-      Given('the thread of task 12 holds a task_merged notice and every other system code', () => {
-        const bodies: p.MsgRow['body'][] = [
-          {
-            code: 'task_merged',
-            task: taskId,
-            commit: '9f2c1abf43f3',
-            merge_commit: 'def4567890ab',
-          },
-          { code: 'task_failed', task: taskId, reason: 'failures' },
-          { code: 'task_failed', task: taskId, reason: 'review_rounds' },
-          {
-            code: 'turn_interrupted',
-            ai: codexId,
-            reason: 'crash',
-            task: taskId,
-            detail: 'signal 9',
-          },
-          { code: 'turn_interrupted', ai: codexId, reason: 'timeout' },
-          { code: 'turn_interrupted', ai: codexId, reason: 'stop' },
-          { code: 'login_invalid', ai: codexId, detail: 'expired token' },
-          { code: 'rate_limited', ai: codexId, resets: 1763600010000 },
-          { code: 'cap_reached', ai: codexId, cap: 'day', task: taskId },
-          { code: 'cap_reached', ai: codexId, cap: 'task' },
-          { code: 'session_replaced', ai: codexId, task: taskId },
-          { code: 'rounds_limit', task: taskId, n: 10 },
-          { code: 'preempted', task: taskId, by: owner },
-          { code: 'group_paused', by: owner },
-          { code: 'group_resumed', by: owner },
-          { code: 'no_secretary' },
-        ];
-        bodies.forEach((body, i) => {
-          home.write(website, example('row-msg-system', { id: `sys-${i}`, thread: taskId, body }));
-        });
-      });
+      Given(
+        'the thread of task 12 holds a task_merged notice, every 1.0 system code and a postponed system code',
+        () => {
+          const bodies: p.MsgRow['body'][] = [
+            {
+              code: 'task_merged',
+              task: taskId,
+              commit: '9f2c1abf43f3',
+              merge_commit: 'def4567890ab',
+            },
+            { code: 'task_failed', task: taskId, reason: 'failures' },
+            { code: 'task_failed', task: taskId, reason: 'review_rounds' },
+            {
+              code: 'turn_interrupted',
+              ai: codexId,
+              reason: 'crash',
+              task: taskId,
+              detail: 'signal 9',
+            },
+            { code: 'turn_interrupted', ai: codexId, reason: 'timeout' },
+            { code: 'turn_interrupted', ai: codexId, reason: 'stop' },
+            { code: 'login_invalid', ai: codexId, detail: 'expired token' },
+            { code: 'session_replaced', ai: codexId, task: taskId },
+            { code: 'no_secretary' },
+            { code: 'rounds_limit', task: taskId, n: 10 },
+          ];
+          bodies.forEach((body, i) => {
+            home.write(
+              website,
+              example('row-msg-system', { id: `sys-${i}`, thread: taskId, body }),
+            );
+          });
+        },
+      );
       And('the main line also holds a task_merged notice', () => {
         home.write(
           website,
@@ -558,38 +626,32 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then(
         'the task_merged row names "Secretary", "T-12", "Show connection path" and commits "9f2c1ab → def4567" with an ok check icon',
         () => {
-          const merged = one('#m-sys-0');
+          const merged = all('.tlist > .ti.sys')[0];
           expect(merged.querySelector('.glyph')?.getAttribute('data-tone')).toBe('ok');
           const text = merged.textContent!.replace(/\s+/g, ' ').trim();
           expect(text).toContain('Secretary merged T-12 · Show connection path');
           expect(text).toContain('9f2c1ab → def4567');
         },
       );
-      And('none of the 12 system rows shows a raw system code', () => {
+      And('every 1.0 system row is worded in English and the postponed row shows its code', () => {
         const rendered = texts('.tlist .ti.sys').join('\n');
-        for (const code of codes) expect(rendered).not.toContain(code);
+        for (const code of activeCodes) expect(rendered).not.toContain(code);
         expect(rendered).toContain('Task T-12 stopped after repeated failures.');
         expect(rendered).toContain('Task T-12 stopped after repeated failed reviews.');
         expect(rendered).toContain("Codex's turn crashed. · T-12 · signal 9");
         expect(rendered).toContain("Codex's turn timed out.");
         expect(rendered).toContain("Codex's turn was stopped.");
         expect(rendered).toContain("Codex's sign-in is no longer valid. · expired token");
-        expect(rendered).toContain('Codex hit the rate limit');
-        expect(rendered).toContain('Codex reached the daily usage cap. · T-12');
-        expect(rendered).toContain('Codex reached the task usage cap.');
         expect(rendered).toContain('Codex started a new session from the task notes. · T-12');
-        expect(rendered).toContain('T-12 paused after 10 AI-to-AI rounds.');
-        expect(rendered).toContain('T-12 paused for a direct request from Alex.');
-        expect(rendered).toContain('All AIs in this group were paused by Alex.');
-        expect(rendered).toContain('AIs in this group were resumed by Alex.');
         expect(rendered).toContain('This group has no secretary AI.');
+        expect(rendered).toContain('rounds_limit');
       });
       And(
         'switching the language to Chinese words task_merged under "Secretary" as "已合并 T-12"',
         () => {
           prefs.lang = 'zh-CN';
           flushSync();
-          expect(one('#m-sys-0').textContent).toContain('Secretary 已合并 T-12');
+          expect(all('.tlist > .ti.sys')[0].textContent).toContain('Secretary 已合并 T-12');
           prefs.lang = 'en';
           flushSync();
         },
@@ -621,9 +683,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         });
       });
       Then(
-        'the states sheet marks "review", "checks", "system", "report" and "handback" as mounted by "thread"',
+        'the states sheet marks "review", "checks", "system" and "report" as mounted by "thread"',
         () => {
-          for (const kind of ['review', 'checks', 'system', 'report', 'handback']) {
+          for (const kind of ['review', 'checks', 'system', 'report']) {
             expect(cards.get(kind)?.area).toBe('thread');
             const section = one(`#states-${kind}`).closest('section')!;
             expect(section.querySelector('header .badge')?.textContent).toBe('Mounted by thread');
@@ -631,9 +693,17 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       And(
-        'none of "task", "approval", "brief", "decision", "summary" or "call" is mounted by "thread"',
+        'none of "task", "approval", "brief", "decision", "summary", "call" or "handback" is mounted by "thread"',
         () => {
-          for (const kind of ['task', 'approval', 'brief', 'decision', 'summary', 'call']) {
+          for (const kind of [
+            'task',
+            'approval',
+            'brief',
+            'decision',
+            'summary',
+            'call',
+            'handback',
+          ]) {
             expect(cards.get(kind)?.area).not.toBe('thread');
           }
         },

@@ -590,15 +590,31 @@ describe('the lists of a group', () => {
     expect(group.member('system')).toBeUndefined();
   });
 
-  it('know the person at this browser among the members', () => {
+  it('know the person at this browser among the members, and find a person name or task by id', () => {
     const { group } = joined();
     expect(group.me).toBeUndefined();
+    expect(group.personName(user)).toBeUndefined();
+    expect(group.task(task)).toBeUndefined();
     // An AI carries its owner's user id too, and comes first by name.
-    const ai = row('row-member-ai');
-    const stranger = row('row-member-human', { id: 'other', user: 'someone', name: 'mina' });
-    const owner = row('row-member-human');
-    group.apply([ai, stranger, owner]);
+    const ai = row('row-member-ai', { name: 'Alpha AI' });
+    const aiOnly = row('row-member-ai', { id: 'solo-ai', user: 'ai-owner', name: 'Beta AI' });
+    const stranger = row('row-member-human', { id: 'other', user: 'someone', name: 'Mina' });
+    const owner = row('row-member-human', { name: 'Zoe' }) as p.HumanMemberRow;
+    const taskRow = row('row-task') as p.TaskRow;
+    const sameIdNote = row('row-note', { id: 'same' });
+    group.apply([ai, aiOnly, stranger, owner, taskRow, sameIdNote]);
     expect(group.me).toBe(owner);
+    expect(group.personName(user)).toBe('Zoe');
+    expect(group.personName('someone')).toBe('Mina');
+    expect(group.personName('ai-owner')).toBeUndefined();
+    expect(group.personName('nobody')).toBeUndefined();
+    expect(group.task(taskRow.id)).toBe(taskRow);
+    expect(group.task('same')).toBeUndefined();
+    expect(group.task('missing')).toBeUndefined();
+
+    group.apply([gone('member', owner.id, 900), gone('task', taskRow.id, 901)]);
+    expect(group.personName(user)).toBeUndefined();
+    expect(group.task(taskRow.id)).toBeUndefined();
   });
 
   it('hold the group row and the time of the last main-line message', () => {
