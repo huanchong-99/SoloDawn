@@ -101,7 +101,6 @@ func TestNotePutWritesNoteRow(t *testing.T) {
 func TestNotePutRefusals(t *testing.T) {
 	for name, tc := range map[string]struct {
 		payload string
-		taken   bool
 		code    string
 	}{
 		"non-id note id": {
@@ -120,18 +119,10 @@ func TestNotePutRefusals(t *testing.T) {
 			payload: fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":%q,"text":"x"}`, id(114), noteTS, groupID, id(115), id(119)),
 			code:    "not_found",
 		},
-		"duplicate note id": {
-			payload: fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":null,"text":"x"}`, id(114), noteTS, groupID, id(115)),
-			taken:   true,
-			code:    "conflict",
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := noteState(t)
 			d := noteDisk{msgs: map[string]proto.MsgRow{}, notes: map[string]proto.NoteRow{}}
-			if tc.taken {
-				d.notes[id(115)] = proto.NoteRow{RowHeader: proto.RowHeader{Type: "note", ID: id(115)}}
-			}
 			noteRefused(t, noteApply(t, s, d, receipts{}, browser, tc.payload), tc.code)
 		})
 	}

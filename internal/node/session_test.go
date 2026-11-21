@@ -394,12 +394,7 @@ func TestHomeLoopIntegrationAndDevlogForwarding(t *testing.T) {
 				from.Send(proto.ErrorResponse{Re: id, Err: proto.WireError{Code: "bad_request", Message: "bad sync"}})
 				return nil, nil
 			}
-			seq, ok := loop.Watch(conn, q.Group, q.StateOnly)
-			if !ok {
-				from.Send(proto.ErrorResponse{Re: id, Err: proto.WireError{Code: "forbidden", Message: "not served"}})
-				return nil, nil
-			}
-			from.Send(proto.Synced{Type: "synced", Success: proto.Success{Re: id, OK: true}, Group: q.Group, Seq: seq})
+			loop.Sync(conn, q)
 			return nil, nil
 		},
 	}
@@ -445,7 +440,7 @@ func TestHomeLoopIntegrationAndDevlogForwarding(t *testing.T) {
 	if !strings.Contains(string(inboxRaw), `"why":"mention"`) {
 		t.Fatalf("expected inbox item on host hello, got %s", inboxRaw)
 	}
-	ch.push(proto.Sync{Request: proto.Request{Type: "sync", ID: 2}, Group: groupID, Since: 0, StateOnly: true})
+	ch.push(proto.Sync{Request: proto.Request{Type: "sync", ID: 2}, Group: groupID, Since: 3, StateOnly: true})
 	var synced proto.Synced
 	if err := proto.Decode(ch.next(t), &synced); err != nil || synced.Re != 2 {
 		t.Fatalf("host sync = %+v (%v)", synced, err)
@@ -546,7 +541,7 @@ func sesCheckHostAck(t *testing.T, ch *fakeCtl, groupID string) {
 	ch.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 4}, V: 1, Kind: "host", Name: "ai-host", Addrs: []string{}})
 	ch.next(t)
 	ch.next(t)
-	ch.push(proto.Sync{Request: proto.Request{Type: "sync", ID: 5}, Group: groupID, Since: 0, StateOnly: true})
+	ch.push(proto.Sync{Request: proto.Request{Type: "sync", ID: 5}, Group: groupID, Since: 3, StateOnly: true})
 	var synced proto.Synced
 	if err := proto.Decode(ch.next(t), &synced); err != nil || synced.Re != 5 {
 		t.Fatalf("sync after ack = %+v (%v)", synced, err)

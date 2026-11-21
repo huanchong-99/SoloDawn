@@ -821,10 +821,22 @@ type failWriter struct{ err error }
 
 func (f failWriter) Write([]byte) (int, error) { return 0, f.err }
 
+type halfCloseConn struct {
+	net.Conn
+	w *io.PipeWriter
+}
+
+func (h *halfCloseConn) Write(p []byte) (int, error) { return h.w.Write(p) }
+func (h *halfCloseConn) CloseWrite() error           { return h.w.Close() }
+func (h *halfCloseConn) Close() error {
+	h.w.Close()
+	return h.Conn.Close()
+}
+
 func TestRunShimArgumentsErrorsAndHalfClose(t *testing.T) {
 	verifyShimUsageErrors(t)
 	verifyShimIOFailures(t)
-	verifyShimUnixHalfClose(t)
+	verifyShimHalfClose(t)
 	verifyShimPipeFallback(t)
 }
 
@@ -886,36 +898,28 @@ func verifyShimStdoutFailure(t *testing.T) {
 	}
 }
 
-func verifyShimUnixHalfClose(t *testing.T) {
+func verifyShimHalfClose(t *testing.T) {
 	t.Helper()
-	sock := shortSocketPath(t)
-	ln, err := net.Listen("unix", sock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
+	c1, c2 := net.Pipe()
+	inR, inW := io.Pipe()
 	// serverOpening is read once after RunShim returns.
 	serverOpening := make(chan string, 1)
 	go func() {
-		srv, acceptErr := ln.Accept()
-		if acceptErr != nil {
-			return
-		}
-		defer srv.Close()
-		r := bufio.NewReader(srv)
+		defer c2.Close()
+		r := bufio.NewReader(inR)
 		first, _ := r.ReadString('\n')
 		serverOpening <- first
 		body, _ := io.ReadAll(r)
-		time.Sleep(20 * time.Millisecond)
-		srv.Write([]byte("echo:" + string(body)))
+		c2.Write([]byte("echo:" + string(body)))
 	}()
 
 	var out, errBuf bytes.Buffer
+	conn := &halfCloseConn{Conn: c1, w: inW}
 	code := RunShim([]string{"--token", "tok<&>"}, func() (net.Conn, error) {
-		return net.Dial("unix", sock)
+		return conn, nil
 	}, strings.NewReader("ping\n"), &out, &errBuf)
 	if code != 0 || errBuf.Len() != 0 || out.String() != "echo:ping\n" {
-		t.Fatalf("pipelined unix shim: code %d, out %q, err %q", code, out.String(), errBuf.String())
+		t.Fatalf("half-close shim: code %d, out %q, err %q", code, out.String(), errBuf.String())
 	}
 	if gotOpen := <-serverOpening; gotOpen != "{\"mcp\":\"tok<&>\"}\n" {
 		t.Fatalf("opening line = %q", gotOpen)
