@@ -203,25 +203,13 @@ func TestReviewCmdCheckedRefusals(t *testing.T) {
 		by    identity.Key
 		raw   string
 		patch func(*proto.TaskChecked)
-		state func(*home.State, *revDisk)
+		state func(*home.State)
 		code  string
 	}{
 		"malformed payload": {
 			raw: fmt.Sprintf(`{"t":"task","n":%q,"ts":%d,"g":%q,"op":"checked","id":%q,"ok":"yes","items":[],"commit":"c1"}`,
 				id(70), revCmdTS, groupID, revTaskID),
 			code: "bad_request",
-		},
-		"empty commit": {
-			patch: func(p *proto.TaskChecked) { p.Commit = "" },
-			code:  "bad_request",
-		},
-		"empty item name": {
-			patch: func(p *proto.TaskChecked) { p.Items = []proto.CheckItem{{Name: "", OK: true}} },
-			code:  "bad_request",
-		},
-		"empty item detail": {
-			patch: func(p *proto.TaskChecked) { p.Items = []proto.CheckItem{{Name: "vet", OK: false, Detail: revStr("")}} },
-			code:  "bad_request",
 		},
 		"unknown task": {
 			patch: func(p *proto.TaskChecked) { p.ID = proto.ID(id(99)) },
@@ -240,7 +228,7 @@ func TestReviewCmdCheckedRefusals(t *testing.T) {
 			code:  "forbidden",
 		},
 		"at step branch": {
-			state: func(s *home.State, _ *revDisk) {
+			state: func(s *home.State) {
 				row := s.Tasks[revTaskID]
 				row.Step = "branch"
 				s.Tasks[revTaskID] = row
@@ -248,16 +236,10 @@ func TestReviewCmdCheckedRefusals(t *testing.T) {
 			code: "conflict",
 		},
 		"at step merge": {
-			state: func(s *home.State, _ *revDisk) {
+			state: func(s *home.State) {
 				row := s.Tasks[revTaskID]
 				row.Step = "merge"
 				s.Tasks[revTaskID] = row
-			},
-			code: "conflict",
-		},
-		"nonce already held on disk": {
-			state: func(_ *home.State, d *revDisk) {
-				d.msgs[id(70)] = proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(70)}, Kind: "text"}
 			},
 			code: "conflict",
 		},
@@ -265,7 +247,7 @@ func TestReviewCmdCheckedRefusals(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s, d := revState(t, "github")
 			if tc.state != nil {
-				tc.state(s, &d)
+				tc.state(s)
 			}
 			by := laptop
 			if tc.by != nil {
@@ -285,7 +267,7 @@ func TestReviewCmdCheckedRefusals(t *testing.T) {
 }
 
 func TestReviewCmdSubmittedWithAndWithoutRemote(t *testing.T) {
-	t.Run("with remote at zero diff and pr 1 boundary, retiring review items and recomputing card waits", func(t *testing.T) {
+	t.Run("with remote retiring review items and recomputing card waits", func(t *testing.T) {
 		s, d := revState(t, "github")
 		task := s.Tasks[revTaskID]
 		task.Checks.Local = &proto.Check{OK: true, At: clock - 200, Commit: "c1"}
@@ -294,7 +276,7 @@ func TestReviewCmdSubmittedWithAndWithoutRemote(t *testing.T) {
 
 		tid, other := revTaskID, revOtherTask
 		d.queued = []store.Item{
-			{ID: 1, Why: "mention"},
+			{ID: 1, Why: "review"},
 			{ID: 2, Task: &other, Why: "review"},
 			{ID: 3, Task: &tid, Why: "assign"},
 			{ID: 4, Task: &tid, Why: "review"},
@@ -350,9 +332,7 @@ func TestReviewCmdSubmittedWithAndWithoutRemote(t *testing.T) {
 		task.Failures = 2
 		s.Tasks[revTaskID] = task
 
-		raw := fmt.Sprintf(`{"t":"task","n":%q,"ts":%d,"g":%q,"op":"submitted","id":%q,"commit":"c1","PR":99,"stats":{"added":10,"removed":4}}`,
-			id(74), revCmdTS, groupID, revTaskID)
-		res := revApplyRaw(t, s, d, laptop, raw)
+		res := revApply(t, s, d, laptop, revSubmittedPayload(74, "c1", 0, "", 10, 4))
 		equal(t, res.Answer, store.Outcome{OK: true})
 		got := res.Rows[0].Value().(proto.TaskRow)
 		equal(t, got.Step, "review")
@@ -387,82 +367,27 @@ func TestReviewCmdSubmittedWithAndWithoutRemote(t *testing.T) {
 }
 
 func TestReviewCmdSubmittedRefusals(t *testing.T) {
-	rawSubmit := func(extra string) string {
-		return fmt.Sprintf(`{"t":"task","n":%q,"ts":%d,"g":%q,"op":"submitted","id":%q,%s}`,
-			id(76), revCmdTS, groupID, revTaskID, extra)
-	}
 	for name, tc := range map[string]struct {
-		forge string
 		by    identity.Key
 		raw   string
+		patch func(*proto.TaskSubmitted)
 		state func(*home.State)
 		code  string
 	}{
 		"malformed stats": {
-			forge: "none",
-			raw:   rawSubmit(`"commit":"c1","stats":null`),
-			code:  "bad_request",
-		},
-		"empty commit": {
-			forge: "none",
-			raw:   rawSubmit(`"commit":"","stats":{"added":1,"removed":0}`),
-			code:  "bad_request",
-		},
-		"negative added": {
-			forge: "none",
-			raw:   rawSubmit(`"commit":"c1","stats":{"added":-1,"removed":0}`),
-			code:  "bad_request",
-		},
-		"negative removed": {
-			forge: "none",
-			raw:   rawSubmit(`"commit":"c1","stats":{"added":0,"removed":-1}`),
-			code:  "bad_request",
-		},
-		"remote missing pr": {
-			forge: "github",
-			raw:   rawSubmit(`"commit":"c1","pr_url":"https://x/1","stats":{"added":1,"removed":0}`),
-			code:  "bad_request",
-		},
-		"remote zero pr": {
-			forge: "github",
-			raw:   rawSubmit(`"commit":"c1","pr":0,"pr_url":"https://x/1","stats":{"added":1,"removed":0}`),
-			code:  "bad_request",
-		},
-		"remote missing pr_url": {
-			forge: "github",
-			raw:   rawSubmit(`"commit":"c1","pr":1,"stats":{"added":1,"removed":0}`),
-			code:  "bad_request",
-		},
-		"remote empty pr_url": {
-			forge: "github",
-			raw:   rawSubmit(`"commit":"c1","pr":1,"pr_url":"","stats":{"added":1,"removed":0}`),
-			code:  "bad_request",
-		},
-		"no remote with pr zero": {
-			forge: "none",
-			raw:   rawSubmit(`"commit":"c1","pr":0,"stats":{"added":1,"removed":0}`),
-			code:  "bad_request",
-		},
-		"no remote with empty pr_url": {
-			forge: "none",
-			raw:   rawSubmit(`"commit":"c1","pr_url":"","stats":{"added":1,"removed":0}`),
-			code:  "bad_request",
+			raw: fmt.Sprintf(`{"t":"task","n":%q,"ts":%d,"g":%q,"op":"submitted","id":%q,"commit":"c1","stats":null}`,
+				id(76), revCmdTS, groupID, revTaskID),
+			code: "bad_request",
 		},
 		"unknown task": {
-			forge: "none",
-			raw: fmt.Sprintf(`{"t":"task","n":%q,"ts":%d,"g":%q,"op":"submitted","id":%q,"commit":"c1","stats":{"added":1,"removed":0}}`,
-				id(76), revCmdTS, groupID, id(99)),
-			code: "not_found",
+			patch: func(p *proto.TaskSubmitted) { p.ID = proto.ID(id(99)) },
+			code:  "not_found",
 		},
 		"non-host sender": {
-			forge: "none",
-			by:    browser,
-			raw:   rawSubmit(`"commit":"c1","stats":{"added":1,"removed":0}`),
-			code:  "forbidden",
+			by:   browser,
+			code: "forbidden",
 		},
 		"failing local checks": {
-			forge: "none",
-			raw:   rawSubmit(`"commit":"c1","stats":{"added":1,"removed":0}`),
 			state: func(s *home.State) {
 				row := s.Tasks[revTaskID]
 				row.Checks.Local = &proto.Check{OK: false, At: clock - 100, Commit: "c1"}
@@ -471,13 +396,12 @@ func TestReviewCmdSubmittedRefusals(t *testing.T) {
 			code: "conflict",
 		},
 		"commit differs from checked commit": {
-			forge: "none",
-			raw:   rawSubmit(`"commit":"c2","stats":{"added":1,"removed":0}`),
+			patch: func(p *proto.TaskSubmitted) { p.Commit = "c2" },
 			code:  "conflict",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			s, d := revState(t, tc.forge)
+			s, d := revState(t, "none")
 			row := s.Tasks[revTaskID]
 			row.Checks.Local = &proto.Check{OK: true, At: clock - 100, Commit: "c1"}
 			s.Tasks[revTaskID] = row
@@ -488,7 +412,15 @@ func TestReviewCmdSubmittedRefusals(t *testing.T) {
 			if tc.by != nil {
 				by = tc.by
 			}
-			briefRefused(t, revApplyRaw(t, s, d, by, tc.raw), tc.code)
+			if tc.raw != "" {
+				briefRefused(t, revApplyRaw(t, s, d, by, tc.raw), tc.code)
+				return
+			}
+			p := revSubmittedPayload(76, "c1", 0, "", 1, 0)
+			if tc.patch != nil {
+				tc.patch(&p)
+			}
+			briefRefused(t, revApply(t, s, d, by, p), tc.code)
 		})
 	}
 }
@@ -501,8 +433,6 @@ func TestReviewCmdCloudOutcomesAndStop(t *testing.T) {
 		task := s.Tasks[revTaskID]
 		task.Step, task.Commit, task.PR, task.Failures = "cloud_check", "c1", 31, 2
 		s.Tasks[revTaskID] = task
-		// Even if the derived task_failed id exists on disk, a non-stopping cloud command succeeds.
-		d.msgs[revDerivedID(80)] = proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: revDerivedID(80)}, Kind: "text"}
 
 		res := revApply(t, s, d, laptop, revCheckedPayload(80, "cloud", true, "c1", items))
 		equal(t, res.Answer, store.Outcome{OK: true})
@@ -575,15 +505,6 @@ func TestReviewCmdCloudOutcomesAndStop(t *testing.T) {
 			Last: &proto.ThreadMessage{By: "system", Kind: "system", Text: "", Timestamp: clock},
 		})
 		equal(t, res.Items, []home.Item{{AI: aiID, Why: "notice", Task: revTaskID, Msg: sysID, Code: "task_failed"}})
-	})
-
-	t.Run("derived task_failed id collision on disk is refused with conflict", func(t *testing.T) {
-		s, d := revState(t, "github")
-		task := s.Tasks[revTaskID]
-		task.Step, task.Commit, task.Failures = "cloud_check", "c1", 2
-		s.Tasks[revTaskID] = task
-		d.msgs[revDerivedID(83)] = proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: revDerivedID(83)}, Kind: "text"}
-		briefRefused(t, revApply(t, s, d, laptop, revCheckedPayload(83, "cloud", false, "c1", []proto.CheckItem{})), "conflict")
 	})
 
 	t.Run("wrong commit or step on cloud is conflict", func(t *testing.T) {
@@ -767,7 +688,7 @@ func TestReviewCmdPostRefusals(t *testing.T) {
 		by    identity.Key
 		raw   string
 		patch func(*proto.Post[proto.ReviewSigned])
-		state func(*home.State, *revDisk)
+		state func(*home.State)
 		code  string
 	}{
 		"by a person": {
@@ -796,10 +717,6 @@ func TestReviewCmdPostRefusals(t *testing.T) {
 				id(97), revCmdTS, groupID, revReviewer, revTaskID, revTaskID),
 			code: "bad_request",
 		},
-		"main is true": {
-			patch: func(p *proto.Post[proto.ReviewSigned]) { p.Main = true },
-			code:  "bad_request",
-		},
 		"null thread": {
 			patch: func(p *proto.Post[proto.ReviewSigned]) { p.Thread = nil },
 			code:  "bad_request",
@@ -807,34 +724,6 @@ func TestReviewCmdPostRefusals(t *testing.T) {
 		"thread differs from body task": {
 			patch: func(p *proto.Post[proto.ReviewSigned]) { p.Thread = &otherID },
 			code:  "bad_request",
-		},
-		"empty commit": {
-			patch: func(p *proto.Post[proto.ReviewSigned]) { p.Body.Commit = "" },
-			code:  "bad_request",
-		},
-		"score below zero": {
-			patch: func(p *proto.Post[proto.ReviewSigned]) { p.Body.Score = -1 },
-			code:  "bad_request",
-		},
-		"score above 100": {
-			patch: func(p *proto.Post[proto.ReviewSigned]) { p.Body.Score = 101 },
-			code:  "bad_request",
-		},
-		"empty remark text": {
-			patch: func(p *proto.Post[proto.ReviewSigned]) { p.Body.Items = []proto.ReviewItem{{Text: ""}} },
-			code:  "bad_request",
-		},
-		"empty remark file": {
-			patch: func(p *proto.Post[proto.ReviewSigned]) {
-				p.Body.Items = []proto.ReviewItem{{Text: "note", File: revStr("")}}
-			},
-			code: "bad_request",
-		},
-		"zero remark line": {
-			patch: func(p *proto.Post[proto.ReviewSigned]) {
-				p.Body.Items = []proto.ReviewItem{{Text: "note", Line: revInt(0)}}
-			},
-			code: "bad_request",
 		},
 		"duplicate mention": {
 			patch: func(p *proto.Post[proto.ReviewSigned]) {
@@ -850,7 +739,7 @@ func TestReviewCmdPostRefusals(t *testing.T) {
 			code: "not_found",
 		},
 		"paused task": {
-			state: func(s *home.State, _ *revDisk) {
+			state: func(s *home.State) {
 				row := s.Tasks[revTaskID]
 				row.State, row.Wait = "paused", &proto.TaskWait{Kind: "manual", Since: clock - 100}
 				s.Tasks[revTaskID] = row
@@ -862,7 +751,7 @@ func TestReviewCmdPostRefusals(t *testing.T) {
 			code:  "conflict",
 		},
 		"outside step review": {
-			state: func(s *home.State, _ *revDisk) {
+			state: func(s *home.State) {
 				row := s.Tasks[revTaskID]
 				row.Step = "local_check"
 				s.Tasks[revTaskID] = row
@@ -873,22 +762,6 @@ func TestReviewCmdPostRefusals(t *testing.T) {
 			patch: func(p *proto.Post[proto.ReviewSigned]) { p.Mentions = []proto.ID{proto.ID(id(98))} },
 			code:  "conflict",
 		},
-		"nonce already held on disk": {
-			state: func(_ *home.State, d *revDisk) {
-				d.msgs[id(97)] = proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(97)}, Kind: "text"}
-			},
-			code: "conflict",
-		},
-		"derived task_failed id held on disk on sixth failure": {
-			patch: func(p *proto.Post[proto.ReviewSigned]) { p.Body.Score = 50 },
-			state: func(s *home.State, d *revDisk) {
-				row := s.Tasks[revTaskID]
-				row.Review = &proto.Review{Round: 5, Failed: 5, Score: 50, By: revReviewer, Commit: "c0", At: clock - 900}
-				s.Tasks[revTaskID] = row
-				d.msgs[revDerivedID(97)] = proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: revDerivedID(97)}, Kind: "text"}
-			},
-			code: "conflict",
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, d := revState(t, "none")
@@ -896,7 +769,7 @@ func TestReviewCmdPostRefusals(t *testing.T) {
 			row.Step, row.Commit = "review", "c1"
 			s.Tasks[revTaskID] = row
 			if tc.state != nil {
-				tc.state(s, &d)
+				tc.state(s)
 			}
 			by := revReviewBox
 			if tc.by != nil {

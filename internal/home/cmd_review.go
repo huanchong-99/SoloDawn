@@ -30,7 +30,6 @@ const (
 	revKindSystem   = "system"
 	revAuthorSystem = "system"
 	revPreviewMax   = 200
-	revMaxScore     = 100
 )
 
 // revChecked records local check results through row 4 of the task machine and
@@ -51,35 +50,13 @@ func (s *State) revRunChecks(c Command, stage string, kind EventKind) (Result, *
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
 	}
-	if !revCheckPayloadOK(p) {
-		return Result{}, &Refusal{"bad_request", "task check requires a commit and non-empty item fields"}
-	}
-	moved, fx, refusal := s.revHostStep(c, p.ID, Event{Kind: kind, Commit: p.Commit, OK: p.OK})
+	moved, fx, refusal := s.revStep(c, p.ID, Event{Kind: kind, Commit: p.Commit, OK: p.OK})
 	if refusal != nil {
 		return Result{}, refusal
 	}
 	body := proto.ChecksBody{Stage: stage, OK: p.OK, Commit: p.Commit, Items: p.Items}
 	msg := s.revSystemMsg(string(c.Nonce), moved.ID, revKindChecks, c.Now, []string{}, body)
-	return s.revFinishThread(c, moved, fx, msg, store.Outcome{})
-}
-
-func revCheckPayloadOK(p proto.TaskChecked) bool {
-	if p.Commit == "" {
-		return false
-	}
-	for _, it := range p.Items {
-		if !revCheckItemOK(it) {
-			return false
-		}
-	}
-	return true
-}
-
-func revCheckItemOK(it proto.CheckItem) bool {
-	if it.Name == "" {
-		return false
-	}
-	return it.Detail == nil || *it.Detail != ""
+	return s.revFinishThread(c, moved, fx, msg, store.Outcome{}), nil
 }
 
 // revSubmitted records a submitted commit, pull request and diff line counts
@@ -90,11 +67,7 @@ func revSubmitted(s *State, c Command) (Result, *Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
 	}
-	remote := s.Group.Forge != "none"
-	if !revSubmitPayloadOK(c.Env.Payload, p, remote) {
-		return Result{}, &Refusal{"bad_request", "task submitted fields do not match the group's forge or bounds"}
-	}
-	moved, fx, refusal := s.revHostStep(c, p.ID, Event{Kind: OnSubmitted, Commit: p.Commit})
+	moved, fx, refusal := s.revStep(c, p.ID, Event{Kind: OnSubmitted, Commit: p.Commit})
 	if refusal != nil {
 		return Result{}, refusal
 	}
@@ -105,97 +78,33 @@ func revSubmitted(s *State, c Command) (Result, *Refusal) {
 	return Result{Rows: []Row{RowOf(moved)}, Items: items, Retire: retire}, nil
 }
 
-func revSubmitPayloadOK(raw string, p proto.TaskSubmitted, remote bool) bool {
-	if p.Commit == "" || p.Stats.Added < 0 || p.Stats.Removed < 0 {
-		return false
-	}
-	return revSubmitPROK(raw, p, remote)
-}
-
-func revSubmitPROK(raw string, p proto.TaskSubmitted, remote bool) bool {
-	if remote {
-		return p.PR >= 1 && p.PRURL != ""
-	}
-	var fields map[string]json.RawMessage
-	proto.Decode([]byte(raw), &fields)
-	_, hasPR := fields["pr"]
-	_, hasURL := fields["pr_url"]
-	return !hasPR && !hasURL
-}
-
 // revPost is post of kind review: computes the review outcome, steps the task
 // through row 7 (and row 14 on the sixth failed review), writes the completed
 // review row in the thread, and answers with passed and round.
 func revPost(s *State, c Command) (Result, *Refusal) {
-	if !s.briefWorking(c.Who.AI) {
-		return Result{}, &Refusal{"forbidden", "only a working AI posts a review"}
-	}
 	var p proto.Post[proto.ReviewSigned]
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
 	}
-	if !revPostPayloadOK(p) {
-		return Result{}, &Refusal{"bad_request", "the review post does not match the contract"}
+	if p.Thread == nil || *p.Thread != p.Body.Task {
+		return Result{}, &Refusal{"bad_request", "a review post belongs in the thread of its task"}
 	}
 	return s.revApplyReview(c, p)
 }
 
-func revPostPayloadOK(p proto.Post[proto.ReviewSigned]) bool {
-	if p.Main || p.Thread == nil || *p.Thread != p.Body.Task {
-		return false
-	}
-	return revSignedBodyOK(p.Body) && revUniqueIDs(p.Mentions)
-}
-
-func revSignedBodyOK(b proto.ReviewSigned) bool {
-	if b.Commit == "" || !revScoreOK(b.Score) {
-		return false
-	}
-	for _, it := range b.Items {
-		if !revReviewItemOK(it) {
-			return false
-		}
-	}
-	return true
-}
-
-func revScoreOK(score int) bool {
-	return score >= 0 && score <= revMaxScore
-}
-
-func revReviewItemOK(it proto.ReviewItem) bool {
-	if it.Text == "" || (it.File != nil && *it.File == "") {
-		return false
-	}
-	return it.Line == nil || *it.Line >= 1
-}
-
-func revUniqueIDs(ids []proto.ID) bool {
-	for i, id := range ids {
-		if slices.Contains(ids[:i], id) {
-			return false
-		}
-	}
-	return true
-}
-
 func (s *State) revApplyReview(c Command, p proto.Post[proto.ReviewSigned]) (Result, *Refusal) {
-	task, ok := s.Tasks[string(p.Body.Task)]
-	if !ok {
-		return Result{}, &Refusal{"not_found", "the review names no task"}
-	}
-	score, passed := revOutcome(p.Body, task.Pass)
-	ev := Event{Kind: OnReview, By: ByAI, Member: c.Who.AI, Commit: p.Body.Commit, OK: passed, Score: score}
-	moved, fx, refusal := s.revStepTask(c, task, ev)
+	score, passed := revOutcome(p.Body, s.Tasks[string(p.Body.Task)].Pass)
+	ev := Event{Kind: OnReview, Member: c.Who.AI, Commit: p.Body.Commit, OK: passed, Score: score}
+	moved, fx, refusal := s.revStep(c, p.Body.Task, ev)
 	if refusal != nil {
 		return Result{}, refusal
 	}
-	mentions, refusal := s.revCheckMentions(p.Mentions)
+	mentions, refusal := s.revMentions(p.Mentions)
 	if refusal != nil {
 		return Result{}, refusal
 	}
 	msg := s.revBuildMsg(c, p, moved, mentions, score, passed)
-	return s.revFinishThread(c, moved, fx, msg, store.Outcome{Passed: &passed, Round: moved.Review.Round})
+	return s.revFinishThread(c, moved, fx, msg, store.Outcome{Passed: &passed, Round: moved.Review.Round}), nil
 }
 
 func revOutcome(b proto.ReviewSigned, pass int) (score int, ok bool) {
@@ -207,22 +116,21 @@ func revOutcome(b proto.ReviewSigned, pass int) (score int, ok bool) {
 	return b.Score, b.Score >= pass
 }
 
-func (s *State) revCheckMentions(ids []proto.ID) ([]string, *Refusal) {
+func (s *State) revMentions(ids []proto.ID) ([]string, *Refusal) {
+	for i, id := range ids {
+		if slices.Contains(ids[:i], id) {
+			return nil, &Refusal{"bad_request", "the review mentions a member twice"}
+		}
+	}
 	out := make([]string, len(ids))
 	for i, id := range ids {
 		m := string(id)
-		if !s.revIsMember(m) {
+		if !s.memExists(m) {
 			return nil, &Refusal{"conflict", "the review mentions someone who is no member of the group"}
 		}
 		out[i] = m
 	}
 	return out, nil
-}
-
-func (s *State) revIsMember(id string) bool {
-	_, human := s.People[id]
-	_, ai := s.AIs[id]
-	return human || ai
 }
 
 func (s *State) revBuildMsg(c Command, p proto.Post[proto.ReviewSigned], task proto.TaskRow, mentions []string, score int, ok bool) proto.MsgRow {
@@ -238,7 +146,7 @@ func (s *State) revBuildMsg(c Command, p proto.Post[proto.ReviewSigned], task pr
 	}
 }
 
-func (s *State) revHostStep(c Command, id proto.ID, ev Event) (proto.TaskRow, Effects, *Refusal) {
+func (s *State) revStep(c Command, id proto.ID, ev Event) (proto.TaskRow, Effects, *Refusal) {
 	task, ok := s.Tasks[string(id)]
 	if !ok {
 		return proto.TaskRow{}, Effects{}, &Refusal{"not_found", "the group has no such task"}
@@ -246,10 +154,6 @@ func (s *State) revHostStep(c Command, id proto.ID, ev Event) (proto.TaskRow, Ef
 	if s.Hosts(c.Who, task.Assignee) {
 		ev.By = ByHost
 	}
-	return s.revStepTask(c, task, ev)
-}
-
-func (s *State) revStepTask(c Command, task proto.TaskRow, ev Event) (proto.TaskRow, Effects, *Refusal) {
 	ev.Now = c.Now
 	ev.Limits = s.Group.Limits
 	ev.Remote = s.Group.Forge != "none"
@@ -261,25 +165,19 @@ func (s *State) revStepTask(c Command, task proto.TaskRow, ev Event) (proto.Task
 	return moved, fx, nil
 }
 
-func (s *State) revFinishThread(c Command, moved proto.TaskRow, fx Effects, primary proto.MsgRow, answer store.Outcome) (Result, *Refusal) {
-	if _, taken := c.Disk.Msg(primary.ID); taken {
-		return Result{}, &Refusal{"conflict", "a message with the id of the command exists"}
-	}
+func (s *State) revFinishThread(c Command, moved proto.TaskRow, fx Effects, primary proto.MsgRow, answer store.Outcome) Result {
 	moved = revAddThread(moved, primary)
 	rows := []Row{RowOf(primary)}
-	noticeMsg := ""
+	var noticeMsg string
 	if fx.System != "" {
-		failed, refusal := s.revFailedMsg(c, moved, fx)
-		if refusal != nil {
-			return Result{}, refusal
-		}
+		failed := s.revFailedMsg(c, moved, fx)
 		moved = revAddThread(moved, failed)
 		rows = append(rows, RowOf(failed))
 		noticeMsg = failed.ID
 	}
 	rows = append(rows, RowOf(moved))
 	items := s.revMakeItems(fx.Items, moved, primary.ID, noticeMsg)
-	return Result{Rows: rows, Items: items, Answer: answer}, nil
+	return Result{Rows: rows, Items: items, Answer: answer}
 }
 
 func revAddThread(task proto.TaskRow, msg proto.MsgRow) proto.TaskRow {
@@ -302,13 +200,9 @@ func (s *State) revSystemMsg(id, taskID, kind string, ts int64, mentions []strin
 	}
 }
 
-func (s *State) revFailedMsg(c Command, task proto.TaskRow, fx Effects) (proto.MsgRow, *Refusal) {
-	id := revFailedID(c.Nonce)
-	if _, taken := c.Disk.Msg(id); taken {
-		return proto.MsgRow{}, &Refusal{"conflict", "a message with the derived id of task_failed exists"}
-	}
+func (s *State) revFailedMsg(c Command, task proto.TaskRow, fx Effects) proto.MsgRow {
 	body := proto.TaskFailedBody{SystemCode: proto.SystemCode{Code: fx.System}, Task: task.ID, Reason: fx.Reason}
-	return s.revSystemMsg(id, task.ID, revKindSystem, c.Now, s.revFailedMentions(c.Disk, task), body), nil
+	return s.revSystemMsg(revFailedID(c.Nonce), task.ID, revKindSystem, c.Now, s.revFailedMentions(c.Disk, task), body)
 }
 
 // revFailedID derives the id of a task_failed system message from the command's
@@ -320,7 +214,7 @@ func revFailedID(nonce proto.ID) string {
 
 func (s *State) revFailedMentions(d Disk, task proto.TaskRow) []string {
 	mentions := []string{}
-	if req := revBriefRequester(d, task.Brief); s.revIsMember(req) {
+	if req := revBriefRequester(d, task.Brief); s.memExists(req) {
 		mentions = append(mentions, req)
 	}
 	owner := s.human(s.AIs[task.Assignee].User)

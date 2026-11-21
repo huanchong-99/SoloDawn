@@ -166,10 +166,12 @@ start with `task`, `step`, `wait`, `item` and `states`, and `workItems`, `byAssi
 `byReviewer`; its tests take the names that start with `mc` and `machine`. The run loop takes the
 names that start with `run`, and its tests those that start with `run` and `Run`; it exports
 `Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
-`ItemsPush`. The briefs take the
+`ItemsPush`. Groups and members take the names that start with `grp` and `mem`, their tests too,
+and their test functions start with `TestGroup` and `TestMember`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
-The checks and reviews (`cmd_review.go`) take the names that start with `rev`, their tests too, and
-their test functions start with `TestReviewCmd`.
+Device-log events (`ev_device.go`) take the names that start with `dev`, and their tests start with
+`TestDevice` and `dev`. The checks and reviews (`cmd_review.go`) take the names that start with
+`rev`, their tests too, and their test functions start with `TestReviewCmd`.
 
 ## The run loop
 
@@ -351,6 +353,52 @@ function that moves a task calls it and adds nothing to its rules.
   `thread.count`, `thread.last`); the bodies of the messages; for row 23, the timer and telling the
   secretary once per quiet period. The machine sets `stats.ended`.
 
+## Groups and members
+
+`cmd_group.go` holds `group` `create` and `set` ([commands](../../planning/contracts/commands.md)
+1.1; [rows](../../planning/contracts/rows.md) 1 and 2), under `group/create` and `group/set`;
+`group` `pause` and `resume` belong to `cmd_pause.go` (unit HM-14). `cmd_member.go` holds `member`
+`add_ai`, `set` and `remove` ([commands](../../planning/contracts/commands.md) 1.2), under
+`member/add_ai`, `member/set` and `member/remove`; `member` `status` belongs to `cmd_hostev.go`
+(unit HM-16). Where the contracts are silent, they do this:
+
+- **`group/create`.** Only a person of this node's owner (`c.Who.AI` empty, `c.Who.User ==
+  s.Owner`) may create a group, else `forbidden`. A `g` that differs from `n`, a `kind` other than
+  `project`, a `forge` other than `github` or `none`, or an empty `name`, `repo`, `base` or
+  `member_name` is `bad_request`. A group that already exists (`s.Group.ID` not empty) is answered
+  `conflict`. It writes the `group` row (`pass` 90, `pass_foundation` 70, default `limits`,
+  `created` `c.Now`) and the owner's `human` `member` row (`role` `owner`, `online` true,
+  `last_seen` `c.Now`), with `GroupsChanged` true. The owner's member id is the first 16 bytes of
+  the SHA-256 of `SoloDawn group owner <n>` in base64url, so the function stays pure
+  ([issues](../../issues.md)).
+- **`group/set`.** By an admin, else `forbidden`. Sending none of `name`, `checks`, `pass`,
+  `pass_foundation`, `limits` and `secretary`, or an empty `name`, is `bad_request`. `secretary`,
+  when sent, must name an AI in `State.AIs` that is neither assignee nor reviewer of an open task
+  (`queued`, `active`, `paused`, `failed`), else `conflict`; any previous secretary's member row
+  loses `secretary`, and the named AI gains it when not already set. `GroupsChanged` is set when
+  `name` changes, because `groups` carries each group's name.
+- **`member/add_ai`.** By a host of a member: `c.Who.AI` must be empty, else `forbidden`; the
+  `name` of the latest `add` entry for `c.Who.Device` in `State.Logs[c.Who.User]` becomes
+  `host_name`. An empty `name`, a `cli` outside `claude` and `codex`, or an `account` outside
+  `personal`, `team` and `api_key` is `bad_request`. `secretary: true` when the group already has a
+  secretary requires an admin, else `forbidden`. An `id` or `name` already held by a human or AI
+  member of the group is `conflict`. The new `ai` `member` row starts with `state` `dormant`,
+  `since` and `last_seen` `c.Now`, `path` `local` when `c.Who.Device == s.Home` and `direct`
+  otherwise, `allow` `[]` and `usage` `{}`; when `secretary` is true, any previous secretary loses
+  the flag and `group.secretary` becomes `id`.
+- **`member/set`.** Sending none of `name`, `account`, `allow` and `approvers`, an empty `name`, or
+  an unknown `account` is `bad_request`. An unknown `id` is `not_found`; a human member row is
+  `forbidden` in step 1. The signer must be the AI's owner (`c.Who.AI` empty, `c.Who.User ==
+  ai.User`) or, when `approvers` is the only field sent, the AI's host (`s.Hosts`), else
+  `forbidden`. A `name` held by another member in the group is `conflict`; keeping the AI's own
+  `name` is accepted.
+- **`member/remove`.** An unknown `id` is `not_found`; a human member row is `forbidden` in step 1.
+  The signer must be the AI's owner or an admin, else `forbidden`. Removing an AI that is assignee
+  or reviewer of an open task is `conflict`. Otherwise the member row becomes a `gone` marker and
+  any queued inbox items for that AI (`c.Disk.Queued`) are retired in `Result.Retire`. Removing the
+  secretary also clears `group.secretary` and writes `system` `no_secretary` in the main line with
+  id `n`.
+
 ## Briefs
 
 `cmd_brief.go` holds `post` of kind `brief` and `act` `confirm` and `revise` on it
@@ -394,6 +442,15 @@ function that moves a task calls it and adds nothing to its rules.
   HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
   `c.Disk.Msg` reads.
 
+## Device-log events
+
+`ev_device.go` registers `Events["device"]`, which receives a `[]proto.DeviceRow` slice accepted by
+the node for one person ([envelope](../../planning/contracts/envelope.md), section 4;
+[rows](../../planning/contracts/rows.md), section 2). In step 1 it ignores users other than
+`State.Owner`, appends rows whose `ver` exceeds the entries already held in `State.Logs[State.Owner]`,
+and sets `Result.GroupsChanged` when an `Online` device's access (`State.Serves`) changes between
+served and unserved.
+
 ## Checks and reviews
 
 `cmd_review.go` holds `task` `checked`, `submitted` and `cloud`, and `post` of kind `review`
@@ -403,44 +460,17 @@ function that moves a task calls it and adds nothing to its rules.
 `task/checked`, `task/submitted`, `task/cloud` and `post/review`. Where the contracts are silent,
 it does this:
 
-- **Checks (`task/checked`, `task/cloud`).** Both require a non-empty `commit` and check items
-  whose `name` and optional `detail` are non-empty, else `bad_request`; a missing task is
-  `not_found`, and any signer other than the host of the task's assignee is `forbidden`. Each
-  writes a `checks` message (`by` `"system"`, `stage` `"local"` or `"cloud"`, `ts` `c.Now`) under id
-  `n` in the task's thread, advancing `task.thread.count` and `task.thread.last`, on both passed
-  and failed runs ([issues](../../issues.md)). When failed hosted checks reach `limits.failures`
-  (row 6 into row 14), the home also writes `system` `task_failed` (`reason` `"failures"`) in the
-  thread after the `checks` message and queues `notice` (`code` `"task_failed"`) naming it for the
-  secretary when the group has one.
-- **Submissions (`task/submitted`).** Requires a non-empty `commit` and `stats.added` and
-  `stats.removed` at least 0; when `group.forge` is not `"none"`, `pr` must be at least 1 and
-  `pr_url` non-empty, and when `group.forge` is `"none"`, neither `pr` nor `pr_url` may appear in
-  the payload, else `bad_request`. `Step` receives the task's pending `approval` and `decision`
-  cards from `c.Disk.Pending()`, retires queued `review` items of the task from `c.Disk.Queued()`,
-  and copies `pr`, `pr_url`, `stats.added` and `stats.removed` onto the task row.
-- **Reviews (`post/review`).** Only a working AI may post a review, else `forbidden`; `Step`
-  checks that `as` is the task's reviewer before checking state or commit. `main` must be `false`,
-  `thread` must equal `body.task`, `commit` must be non-empty, `score` must be 0 to 100, each
-  remark's `text` and optional `file` must be non-empty, optional `line` must be at least 1, and
-  `mentions` must hold no duplicate id, else `bad_request`; a mentioned id that is no member of the
-  group, or an id collision on disk, is `conflict`. Any item with `veto` sets `score` to 0 and `ok`
-  to `false`; otherwise `ok` is `score >= task.pass`. The row has `ts` as signed, `body` completed
-  with `num`, `title`, `round`, `score`, `pass` and `ok`, and `task.thread.last.text` cut to at
-  most 200 UTF-8 characters; the answer carries `passed` and `round`. Passing queues `merge` for
-  the assignee's host with `commit`, plus `pr` when `group.forge` is not `"none"`. The sixth failed
-  review (`review.failed > limits.review_rounds`, row 14) writes `system` `task_failed` (`reason`
-  `"review_rounds"`) after the `review` row instead of queuing `reviewed`.
+- **Passed hosted checks.** `task/cloud` writes a `checks` message (`by` `"system"`, `stage`
+  `"cloud"`, `ts` `c.Now`) under id `n` in the task's thread on passed runs as well as failed ones,
+  so the `items` of a passing `task cloud` payload are recorded ([issues](../../issues.md)).
 - **Derived `task_failed` id.** When `task/cloud` or `post/review` triggers row 14, `n` already
   names the `checks` or `review` row, so the `task_failed` row gets the first 16 bytes of the
-  SHA-256 of `SoloDawn task failed <n>` in base64url (`conflict` if already held on disk;
-  [issues](../../issues.md)), and mentions the brief's requester when still a member and the
-  assignee's owner without duplicates.
+  SHA-256 of `SoloDawn task failed <n>` in base64url ([issues](../../issues.md)), and mentions the
+  brief's requester when still a member and the assignee's owner without duplicates.
 
 ## Known limitations
 
-- The table of commands holds only the briefs and the checks, submissions and reviews, and no node
-  starts a loop yet: the other command
-  files and the wiring of the node are separate units
+- No node starts a loop yet; the wiring of the node is a separate unit
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
@@ -475,11 +505,19 @@ and for the refusals, and covers every statement of `machine.go`. `features/home
 holds acceptance test A5.18 at step `merge` and the two points of the third review, a card decided
 while a task is paused and a reviewer named while it is paused.
 
+`cmd_group_test.go` and `cmd_member_test.go` send `group/create`, `group/set`, `member/add_ai`,
+`member/set` and `member/remove` through `Commands.Apply` with fakes of `Receipts` and `Disk`,
+covering every refusal, boundary and secretary transition. `features/home_group.feature` holds the
+home command part of A2.1 and the member-removal part of A5.18.
+
 `cmd_brief_test.go` sends every command of the briefs through `Commands.Apply` with fakes of
 `Receipts` and `Disk`, with a case for every refusal and branch. `features/home_brief.feature`
 holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
 `Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
 commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
+
+`ev_device_test.go` covers every branch and boundary of `Events["device"]`, including ignored event
+types, empty and non-owner slices, version boundaries and online/offline `GroupsChanged` transitions.
 
 `cmd_review_test.go` sends `task/checked`, `task/submitted`, `task/cloud` and `post/review` through
 `Commands.Apply` with fakes of `Receipts` and `Disk`, pinning every refusal, boundary, retirement,
