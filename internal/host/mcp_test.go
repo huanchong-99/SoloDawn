@@ -342,7 +342,7 @@ func TestToolCallsTrackLiveCallerCountAndErrors(t *testing.T) {
 	h.Sessions.SetTurn(secKey, Turn{Kind: ItemsTurn, Thread: "t1", Depth: 1})
 
 	// arrived is read by verifyConcurrentCallerCount; release is closed there.
-	arrived := make(chan int, 2)
+	arrived := make(chan struct{}, 2)
 	release := make(chan struct{})
 	registerCallTestTools(t, h, arrived, release)
 
@@ -355,7 +355,7 @@ func TestToolCallsTrackLiveCallerCountAndErrors(t *testing.T) {
 	verifyToolErrorsAndRevocation(t, h, cs, secKey, token)
 }
 
-func registerCallTestTools(t *testing.T, h *Host, arrived chan<- int, release <-chan struct{}) {
+func registerCallTestTools(t *testing.T, h *Host, arrived chan<- struct{}, release <-chan struct{}) {
 	t.Helper()
 	saveTools(t, map[string]Tool{
 		"inspect": {
@@ -375,8 +375,8 @@ func registerCallTestTools(t *testing.T, h *Host, arrived chan<- int, release <-
 			},
 		},
 		"barrier": {
-			Call: func(_ context.Context, gotH *Host, c Caller, _ json.RawMessage) (any, error) {
-				arrived <- gotH.Sessions.Calls(c.SessionKey)
+			Call: func(context.Context, *Host, Caller, json.RawMessage) (any, error) {
+				arrived <- struct{}{}
 				<-release
 				return map[string]bool{"ok": true}, nil
 			},
@@ -453,9 +453,12 @@ func callToolText(t *testing.T, cs *mcp.ClientSession, params *mcp.CallToolParam
 	return res.Content[0].(*mcp.TextContent).Text
 }
 
-func verifyConcurrentCallerCount(t *testing.T, h *Host, cs *mcp.ClientSession, secKey SessionKey, arrived <-chan int, release chan struct{}) {
+func verifyConcurrentCallerCount(t *testing.T, h *Host, cs *mcp.ClientSession, secKey SessionKey, arrived <-chan struct{}, release chan struct{}) {
 	t.Helper()
 	var wg sync.WaitGroup
+	defer wg.Wait()
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
 	for range 2 {
 		wg.Add(1)
 		go func() {
@@ -466,15 +469,15 @@ func verifyConcurrentCallerCount(t *testing.T, h *Host, cs *mcp.ClientSession, s
 			}
 		}()
 	}
-	counts := []int{<-arrived, <-arrived}
-	slices.Sort(counts)
-	if !slices.Equal(counts, []int{1, 2}) || h.Sessions.Calls(secKey) != 2 {
-		t.Fatalf("concurrent counts = %v, current = %d", counts, h.Sessions.Calls(secKey))
+	<-arrived
+	<-arrived
+	if got := h.Sessions.Calls(secKey); got != 2 {
+		t.Fatalf("concurrent calls = %d, want 2", got)
 	}
-	close(release)
+	unblock()
 	wg.Wait()
-	if h.Sessions.Calls(secKey) != 0 {
-		t.Fatalf("calls after barrier = %d", h.Sessions.Calls(secKey))
+	if got := h.Sessions.Calls(secKey); got != 0 {
+		t.Fatalf("calls after barrier = %d, want 0", got)
 	}
 }
 
