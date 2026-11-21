@@ -16,7 +16,3 @@ func startDetached(exe string, args ...string) error {
 	cmd.Process.Release()
 	return nil
 }
-
-func replaceProcess(binary string, args, env []string) error {
-	return syscall.Exec(binary, args, env)
-}

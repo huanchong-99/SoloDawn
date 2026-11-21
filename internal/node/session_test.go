@@ -430,10 +430,20 @@ func TestHomeLoopIntegrationAndDevlogForwarding(t *testing.T) {
 	}
 	ch.pushRaw(`{"t":"sync","id":20,"g":123}`)
 	expectErr(t, ch.next(t), 20, "bad_request")
+	ch.pushRaw(`{"t":"fetch","id":21,"g":123}`)
+	expectErr(t, ch.next(t), 21, "bad_request")
 	ch.push(proto.Sync{Request: proto.Request{Type: "sync", ID: 2}, Group: groupID, Since: 3, StateOnly: true})
 	var synced proto.Synced
 	if err := proto.Decode(ch.next(t), &synced); err != nil || synced.Re != 2 {
 		t.Fatalf("host sync = %+v (%v)", synced, err)
+	}
+	ch.push(home.Fetch{
+		FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: 22}, Group: groupID, Before: 0, Limit: 10},
+		Kind:      "note",
+	})
+	var fetched proto.Fetched
+	if err := proto.Decode(ch.next(t), &fetched); err != nil || fetched.Re != 22 || fetched.Type != "fetched" {
+		t.Fatalf("host fetch = %+v (%v)", fetched, err)
 	}
 	sesCheckHostAck(t, ch, groupID)
 
@@ -907,11 +917,11 @@ func TestSessionErrorAndEdgePaths(t *testing.T) {
 		}
 	})
 
-	t.Run("SetHome reattaches open connections and statusLines lists welcomed ones", func(t *testing.T) {
+	t.Run("statusLines lists welcomed connections only", func(t *testing.T) {
 		db := sesOpenStore(t)
 		logs := seedOwnedLogs(t, db, nodeKey, browserKey)
-		loop1, h := newTestHomeAndHost(t, db, nodeKey, logs, now, nil)
-		s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop1, Host: h, Now: func() time.Time { return now }})
+		loop, h := newTestHomeAndHost(t, db, nodeKey, logs, now, nil)
+		s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h, Now: func() time.Time { return now }})
 		unw := serveConn(t, s, browserKey.ID(), false)
 		defer unw.Close()
 		c := serveConn(t, s, browserKey.ID(), false)
@@ -921,18 +931,5 @@ func TestSessionErrorAndEdgePaths(t *testing.T) {
 		if got := s.statusLines(); len(got) != 1 || got[0] != "connection "+browserKey.ID()+" direct" {
 			t.Fatalf("statusLines = %v", got)
 		}
-		loop2, err := home.StartLoop(home.LoopConfig{Store: db, Home: nodeKey.ID(), Owner: browserKey.ID(), Logs: logs.Log, Tables: home.NodeTables()})
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(loop2.Close)
-		s.SetHome(loop2)
-		loop1.Close()
-		c.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 2}, V: 1, Kind: "browser", Name: "b", Addrs: []string{}})
-		var w proto.Welcome
-		if err := proto.Decode(c.next(t), &w); err != nil || w.Re != 2 || !w.Owner {
-			t.Fatalf("welcome after SetHome = %+v (%v)", w, err)
-		}
-		c.next(t)
 	})
 }

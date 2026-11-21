@@ -3,7 +3,6 @@
 package node
 
 import (
-	"os"
 	"os/exec"
 	"syscall"
 
@@ -19,19 +18,5 @@ func startDetached(exe string, args ...string) error {
 		return err
 	}
 	cmd.Process.Release()
-	return nil
-}
-
-func replaceProcess(binary string, args, env []string) error {
-	attr := &os.ProcAttr{
-		Env:   env,
-		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
-		Sys:   &syscall.SysProcAttr{CreationFlags: createNoWindow | windows.CREATE_NEW_PROCESS_GROUP},
-	}
-	proc, err := os.StartProcess(binary, args, attr)
-	if err != nil {
-		return err
-	}
-	proc.Release()
 	return nil
 }

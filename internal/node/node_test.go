@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,10 +13,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
+	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -52,7 +50,6 @@ func TestLogRotationAndErrors(t *testing.T) {
 		t.Fatal("expected openLog error when node.log is a directory")
 	}
 
-	// Empty file with write > maxLogBytes writes directly without rotating an empty .1.
 	bigDir := t.TempDir()
 	bigLog, err := openLog(bigDir)
 	if err != nil {
@@ -66,7 +63,6 @@ func TestLogRotationAndErrors(t *testing.T) {
 	}
 	bigLog.Close()
 
-	// Exact boundary == maxLogBytes does not rotate; +1 rotates; second rotation keeps 1 generation.
 	dir := t.TempDir()
 	lf, err := openLog(dir)
 	if err != nil {
@@ -90,14 +86,13 @@ func TestLogRotationAndErrors(t *testing.T) {
 	checkImage(t, lf.path+".1", "next")
 	checkImage(t, lf.path, "0123456")
 
-	// Rotation failure when node.log.1 is a non-empty directory.
 	if err := os.Remove(lf.path + ".1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(lf.path+".1", "sub"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := lf.Write([]byte("overflow!!")); err == nil {
+	if _, err := lf.Write([]byte("overflow..")); err == nil {
 		t.Fatal("expected rotate error when .1 is a non-empty directory")
 	}
 	if err := lf.Close(); err != nil {
@@ -105,35 +100,7 @@ func TestLogRotationAndErrors(t *testing.T) {
 	}
 }
 
-func TestBrowserCommandAndReplaceProcess(t *testing.T) {
-	if prog, args := browserCommand("darwin", "http://localhost:47800"); prog != "open" || !slices.Equal(args, []string{"http://localhost:47800"}) {
-		t.Fatalf("darwin browserCommand = %q, %v", prog, args)
-	}
-	if prog, args := browserCommand("windows", "http://localhost:47800"); prog != "rundll32" || !slices.Equal(args, []string{"url.dll,FileProtocolHandler", "http://localhost:47800"}) {
-		t.Fatalf("windows browserCommand = %q, %v", prog, args)
-	}
-	if prog, args := browserCommand("linux", "http://localhost:47800"); prog != "xdg-open" || !slices.Equal(args, []string{"http://localhost:47800"}) {
-		t.Fatalf("linux browserCommand = %q, %v", prog, args)
-	}
-
-	savedStart := startBrowser
-	t.Cleanup(func() { startBrowser = savedStart })
-	var gotProg string
-	var gotArgs []string
-	startBrowser = func(exe string, args ...string) error {
-		gotProg, gotArgs = exe, args
-		return nil
-	}
-	if err := openBrowserURL("http://localhost:47800/#pair=ABCD"); err != nil || gotProg == "" || len(gotArgs) == 0 {
-		t.Fatalf("openBrowserURL = %v, %q, %v", err, gotProg, gotArgs)
-	}
-
-	if err := replaceProcess(filepath.Join(t.TempDir(), "missing-binary"), []string{"solodawn"}, os.Environ()); err == nil {
-		t.Fatal("expected replaceProcess error on missing binary")
-	}
-}
-
-func TestNodeAddrsAndLocalHostFilter(t *testing.T) {
+func TestNodeAddrs(t *testing.T) {
 	savedIfaces := ifaceAddrs
 	t.Cleanup(func() { ifaceAddrs = savedIfaces })
 
@@ -174,39 +141,13 @@ func TestNodeAddrsAndLocalHostFilter(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("nodeAddrs = %v, want %v", got, want)
 	}
-
-	h := nodeHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	for _, tc := range []struct {
-		path, host string
-		code       int
-	}{
-		{"/", "localhost:47800", http.StatusOK},
-		{"/", "127.0.0.1:47800", http.StatusOK},
-		{"/", "localhost", http.StatusOK},
-		{"/", "127.0.0.1", http.StatusOK},
-		{"/", "example.com:47800", http.StatusForbidden},
-		{"/", "192.0.2.10:47800", http.StatusForbidden},
-		{"/", "", http.StatusForbidden},
-		{"/rv", "192.0.2.10:47800", http.StatusOK},
-		{"/rv", "example.com", http.StatusOK},
-	} {
-		req := httptest.NewRequest(http.MethodGet, "http://localhost"+tc.path, nil)
-		req.Host = tc.host
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
-		if rec.Code != tc.code {
-			t.Errorf("%s Host=%q: code %d, want %d", tc.path, tc.host, rec.Code, tc.code)
-		}
-	}
 }
 
 func TestOpenNodeStartupErrors(t *testing.T) {
 	t.Run("stepLog fails", func(t *testing.T) {
 		dir := socketRoot(t)
 		os.WriteFile(filepath.Join(dir, "logs"), []byte("x"), 0o600)
-		if _, err := runNode(t.Context(), dir, nil); err == nil {
+		if err := runNode(t.Context(), dir, nil); err == nil {
 			t.Fatal("expected stepLog error")
 		}
 	})
@@ -335,7 +276,6 @@ func TestMultiNodePortFallbackWebAndLocalCommands(t *testing.T) {
 	}
 	t.Cleanup(n1.Close)
 
-	// Occupy defaultWebPort if n1 happened to fall back already, ensuring n2 exercises fallback on both TCP and peer sockets.
 	n2, err := openNode(t.Context(), dir2)
 	if err != nil {
 		t.Fatal(err)
@@ -345,12 +285,9 @@ func TestMultiNodePortFallbackWebAndLocalCommands(t *testing.T) {
 	if n1.httpPort == n2.httpPort {
 		t.Fatalf("two nodes bound the same HTTP port %d", n1.httpPort)
 	}
-	if n1.relayStatus() != nil {
-		t.Fatalf("expected nil relayStatus without remote rendezvous, got %+v", n1.relayStatus())
-	}
+	n1.localPath.Write(t.Context(), proto.RoomID{Type: "join", Room: string(sesID("r1"))})
 
-	// Serve embedded web UI on localhost and refuse external Host headers while allowing /rv.
-	respOK, err := http.Get(n1.localWebURL() + "/")
+	respOK, err := http.Get("http://localhost:" + strconv.Itoa(n1.httpPort) + "/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,22 +295,13 @@ func TestMultiNodePortFallbackWebAndLocalCommands(t *testing.T) {
 	if respOK.StatusCode != http.StatusOK {
 		t.Fatalf("localhost GET / = %d", respOK.StatusCode)
 	}
-	badReq, _ := http.NewRequest(http.MethodGet, n1.localWebURL()+"/", nil)
-	badReq.Host = "evil.example:47800"
-	respBad, err := http.DefaultClient.Do(badReq)
-	if err != nil {
-		t.Fatal(err)
-	}
-	respBad.Body.Close()
-	if respBad.StatusCode != http.StatusForbidden {
-		t.Fatalf("evil Host GET / = %d, want 403", respBad.StatusCode)
-	}
 
-	// Run serve(l1) and exercise invalid opening, MCP shim, status (with active session), pair, pair-browser, open and unknown command.
-	done1 := make(chan string, 1)
-	go func() { done1 <- n1.serve(l1) }()
+	done1 := make(chan struct{})
+	go func() {
+		n1.serve(l1)
+		close(done1)
+	}()
 
-	// Invalid opening line on live socket.
 	rawConn, err := net.Dial("unix", filepath.Join(dir1, "sock"))
 	if err != nil {
 		t.Fatal(err)
@@ -385,7 +313,6 @@ func TestMultiNodePortFallbackWebAndLocalCommands(t *testing.T) {
 		t.Fatalf("bad opening reply = %q", badReply)
 	}
 
-	// Unknown MCP token closes connection; admitted token serves MCP initialize.
 	unauthConn, err := net.Dial("unix", filepath.Join(dir1, "sock"))
 	if err != nil {
 		t.Fatal(err)
@@ -425,7 +352,6 @@ func TestMultiNodePortFallbackWebAndLocalCommands(t *testing.T) {
 		t.Fatalf("status output = %q", gotStatus)
 	}
 
-	// Unowned pair-browser, open, pair with invalid secret, pair with valid secret, unknown cmd.
 	if err := (Command{Cmd: "pair-browser"}).send(dir1, io.Discard); errText(err) != "node has no owner" {
 		t.Fatalf("unowned pair-browser = %v", err)
 	}
@@ -445,23 +371,29 @@ func TestMultiNodePortFallbackWebAndLocalCommands(t *testing.T) {
 	}
 
 	n1.Close()
-	if restart := <-done1; restart != "" {
-		t.Fatalf("restartBin = %q, want empty", restart)
-	}
+	<-done1
 }
 
-func TestAdoptionRendezvousWatchPresenceAndInboundPeer(t *testing.T) {
-	savedDelay := rvRetryDelay
-	t.Cleanup(func() { rvRetryDelay = savedDelay })
+func TestAdoptionRendezvousAndForegroundStop(t *testing.T) {
+	savedDelay, savedInstall := rvRetryDelay, installService
+	t.Cleanup(func() {
+		rvRetryDelay = savedDelay
+		installService = savedInstall
+	})
 	rvRetryDelay = 20 * time.Millisecond
 
-	rvURL := startTestRVWithRelay(t)
-
-	dir := seedNodeDB(t, func(tx *store.Tx) error {
-		raw, _ := json.Marshal([]string{rvURL})
-		if _, err := tx.Exec("INSERT INTO setting(key, value) VALUES('rendezvous', ?)", string(raw)); err != nil {
-			return err
+	var serviceCalls int
+	var failService bool
+	installService = func(string, string) error {
+		serviceCalls++
+		if failService {
+			return errors.New("service registration failed")
 		}
+		return nil
+	}
+
+	rvURL := startTestRVWithRelay(t)
+	dir := seedNodeDB(t, func(tx *store.Tx) error {
 		_, err := tx.Exec("INSERT INTO setting(key, value) VALUES('name', '\"office-mac\"')")
 		return err
 	})
@@ -471,27 +403,25 @@ func TestAdoptionRendezvousWatchPresenceAndInboundPeer(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(n.Close)
-	done := make(chan string, 1)
-	go func() { done <- n.serve(l) }()
+	done := make(chan struct{})
+	go func() {
+		n.serve(l)
+		close(done)
+	}()
 
-	// Wait until remote RV path connects and quota is recorded.
-	waitCond(t, func() bool { return len(n.remoteRVPaths()) == 1 && n.relayStatus() != nil })
+	// Local pair with --rendezvous saves the setting first and starts syncRendezvous.
+	name := "desk"
+	validSecret := identity.NewSecret().String()
+	if err := (Command{Cmd: "pair", Secret: validSecret, Name: &name, Rendezvous: rvURL}).send(dir, io.Discard); errText(err) != "pairing room is unavailable" {
+		t.Fatalf("pair with rendezvous = %v", err)
+	}
+	waitCond(t, func() bool { return len(n.remoteRVPaths()) == 1 })
 	if got := n.readName(); got != "office-mac" {
 		t.Fatalf("readName = %q", got)
 	}
-	if len(n.sharedPaths()) != 2 {
-		t.Fatalf("sharedPaths = %d, want 2", len(n.sharedPaths()))
-	}
 
-	// Subscribe to presence for browserKey before browserKey connects to rvSrv.
+	// Adopt n over a paired ctl session; Dynamic OwnerFn allows group create on the existing home.Loop and onAdopt registers login service.
 	browserKey := sesKey("adopt-browser")
-	subCtx, subCancel := context.WithCancel(t.Context())
-	sub1 := n.subscribePresence(subCtx, browserKey.ID())
-	sub2Ctx, sub2Cancel := context.WithCancel(t.Context())
-	n.subscribePresence(sub2Ctx, browserKey.ID())
-	sub2Cancel()
-
-	// Adopt n over a paired ctl session; OnAdopt restarts home.Loop with Owner, re-attaches LocalLink and watches browserKey on rvSrv.
 	fc := serveConn(t, n.sessions, browserKey.ID(), true)
 	fc.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "b1", Addrs: []string{}})
 	var w1 proto.Welcome
@@ -504,43 +434,32 @@ func TestAdoptionRendezvousWatchPresenceAndInboundPeer(t *testing.T) {
 
 	fc.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 2}, V: 1, Kind: "browser", Name: "b1", Addrs: []string{}})
 	var w2 proto.Welcome
-	if err := proto.Decode(fc.next(t), &w2); err != nil || !w2.Owner {
-		t.Fatalf("post-adopt welcome = %+v (%v)", w2, err)
+	if err := proto.Decode(fc.next(t), &w2); err != nil || !w2.Owner || serviceCalls != 1 {
+		t.Fatalf("post-adopt welcome = %+v (%v), serviceCalls=%d", w2, err, serviceCalls)
 	}
-	fc.next(t) // devlog frame
+	fc.next(t)
 
-	// Create a group on the newly restarted home.Loop over the same ctl connection.
+	failService = true
+	n.onAdopt(browserKey.ID())
+	if serviceCalls != 2 {
+		t.Fatalf("serviceCalls = %d, want 2", serviceCalls)
+	}
+
 	gid := sesID("grp-adopted")
 	createEnv := browserKey.Sign(fmt.Sprintf(`{"t":"group","op":"create","n":%q,"ts":%d,"g":%q,"name":"Main","kind":"project","forge":"none","repo":"/tmp/r","base":"main","checks":[],"member_name":"Owner"}`, gid, time.Now().UnixMilli(), gid))
 	fc.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 3}, Env: createEnv})
 	var okAns proto.Success
 	if err := proto.Decode(fc.next(t), &okAns); err != nil || okAns.Re != 3 {
-		t.Fatalf("group create after OnAdopt = %+v (%v)", okAns, err)
+		t.Fatalf("group create after adopt = %+v (%v)", okAns, err)
 	}
-	fc.next(t) // groups push
+	fc.next(t)
 
-	// Connect browserKey to rvSrv to trigger presence On for watched browserKey and inbound WebRTC connection.
+	// Dial inbound WebRTC ctl connection from browserKey to n over rvURL.
 	bPath, err := peer.Dial(t.Context(), rvURL, browserKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { bPath.Close() })
-	select {
-	case <-sub1:
-	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for presence notification")
-	}
-	// Duplicate notify when buffer full is non-blocking; cancel cleans up last subscriber.
-	n.notifyPresence(browserKey.ID())
-	n.notifyPresence(browserKey.ID())
-	subCancel()
-	waitCond(t, func() bool {
-		n.mu.Lock()
-		defer n.mu.Unlock()
-		return len(n.presence) == 0
-	})
-
-	// Dial inbound WebRTC ctl connection from browserKey to n over rvSrv.
 	bSocks, err := peer.Listen(0, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -570,9 +489,7 @@ func TestAdoptionRendezvousWatchPresenceAndInboundPeer(t *testing.T) {
 		t.Fatalf("WebRTC welcome = %+v (%v)", wRTC, err)
 	}
 
-	// Owned pair, pair-browser and open commands over local socket.
-	name := "desk"
-	if err := (Command{Cmd: "pair", Secret: identity.NewSecret().String(), Name: &name}).send(dir, io.Discard); errText(err) != ErrOwned.Error() {
+	if err := (Command{Cmd: "pair", Secret: validSecret, Name: &name}).send(dir, io.Discard); errText(err) != ErrOwned.Error() {
 		t.Fatalf("owned pair = %v, want %v", err, ErrOwned)
 	}
 	if err := (Command{Cmd: "pair-browser"}).send(dir, io.Discard); errText(err) != "pairing room is unavailable" {
@@ -582,10 +499,6 @@ func TestAdoptionRendezvousWatchPresenceAndInboundPeer(t *testing.T) {
 		t.Fatalf("owned open = %v", err)
 	}
 
-	// Cover presence Off, reconnect with Owner set, pruneRendezvous, rvNextDelay and onAdopt startHomeLoop error.
-	n.onRVEvent(t.Context(), n.localPath, "presence", []byte(`{"t":"presence","k":"`+browserKey.ID()+`","on":false}`))
-
-	// Drop the remote RV socket while still configured so serveOneRV clears rvPaths and runRVLoop reconnects (sending watch as owned).
 	firstPath := n.remoteRVPaths()[0]
 	firstPath.Close()
 	waitCond(t, func() bool {
@@ -593,44 +506,12 @@ func TestAdoptionRendezvousWatchPresenceAndInboundPeer(t *testing.T) {
 		return len(paths) == 1 && paths[0] != firstPath
 	})
 
-	clearRV := func(tx *store.Tx) error {
-		_, err := tx.Exec("UPDATE setting SET value = '[]' WHERE key = 'rendezvous'")
-		return err
-	}
-	if err := n.db.Write(clearRV); err != nil {
+	if err := n.saveRendezvous([]string{}); err != nil {
 		t.Fatal(err)
 	}
 	n.syncRendezvous()
 	waitCond(t, func() bool { return len(n.remoteRVPaths()) == 0 })
 
-	restoreRV := func(tx *store.Tx) error {
-		raw, _ := json.Marshal([]string{rvURL})
-		_, err := tx.Exec("UPDATE setting SET value = ? WHERE key = 'rendezvous'", string(raw))
-		return err
-	}
-	if err := n.db.Write(restoreRV); err != nil {
-		t.Fatal(err)
-	}
-	n.syncRendezvous()
-	waitCond(t, func() bool { return len(n.remoteRVPaths()) == 1 })
-
-	// Corrupt row causes onAdopt error path to log cleanly without crashing.
-	badRow := func(tx *store.Tx) error {
-		if _, err := tx.Exec(`INSERT INTO grp(g, seq, num) VALUES('gbad', 2, 0)`); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`INSERT INTO row(g, r, id, seq, pos, ts, mt, data) VALUES('gbad', 'group', 'gbad', 1, 1, 1, 1, '{"r":"group","id":"gbad"}')`); err != nil {
-			return err
-		}
-		_, err := tx.Exec(`INSERT INTO row(g, r, id, seq, pos, ts, mt, data) VALUES('gbad', 'member', 'x', 2, 2, 1, 1, '{"r":"member","kind":"badkind"}')`)
-		return err
-	}
-	if err := n.db.Write(badRow); err != nil {
-		t.Fatal(err)
-	}
-	n.onAdopt(browserKey.ID())
-
-	// rvNextDelay resets after 1 minute run and exits on canceled context.
 	if d := rvNextDelay(t.Context(), 8*time.Millisecond, time.Minute); d != 2*rvRetryDelay {
 		t.Fatalf("rvNextDelay after 1m = %v, want %v", d, 2*rvRetryDelay)
 	}
@@ -642,8 +523,6 @@ func TestAdoptionRendezvousWatchPresenceAndInboundPeer(t *testing.T) {
 	if d := rvNextDelay(cctx, time.Hour, 0); d != 0 {
 		t.Fatalf("rvNextDelay canceled = %v", d)
 	}
-
-	// Rendezvous dial failure in serveOneRV returns 0.
 	if ran := n.serveOneRV(cctx, "ws://127.0.0.1:1/rv"); ran != 0 {
 		t.Fatalf("serveOneRV error ran = %v", ran)
 	}
@@ -651,166 +530,42 @@ func TestAdoptionRendezvousWatchPresenceAndInboundPeer(t *testing.T) {
 	fc.Close()
 	n.Close()
 	<-done
-	// syncRendezvous after Close returns immediately.
 	n.syncRendezvous()
-}
 
-func TestSelfUpdateHoldBusyAndForegroundRestart(t *testing.T) {
-	savedVersion, savedRelease, savedEvery, savedExec, savedTrans := Version, releaseURL, updateEvery, execReplace, updateTransport
-	t.Cleanup(func() {
-		Version = savedVersion
-		releaseURL = savedRelease
-		updateEvery = savedEvery
-		execReplace = savedExec
-		updateTransport = savedTrans
-	})
-
-	// Non-TurnEnded and nil-wake listener cases, plus default holdForUpdate.
-	tmpDB := sesOpenStore(t)
-	h0, _, err := host.New(tmpDB, sesKey("h0"), time.Now)
+	// SaveRendezvous error path when setting table is absent.
+	errDir := socketRoot(t)
+	errL := openSocket(t, errDir)
+	errNode, err := openNode(t.Context(), errDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reason, held := holdForUpdate(h0, host.SessionKey{}); held || reason != "" {
-		t.Fatalf("default holdForUpdate = %q, %v", reason, held)
+	errDone := make(chan struct{})
+	go func() {
+		errNode.serve(errL)
+		close(errDone)
+	}()
+	dropSetting := func(tx *store.Tx) error {
+		_, err := tx.Exec("DROP TABLE setting")
+		return err
 	}
-	listenNodeUpdate(h0, host.SessionKey{}, host.Event{Kind: host.Ready})
-	listenNodeUpdate(h0, host.SessionKey{}, host.Event{Kind: host.TurnEnded})
-
-	// Set up TLS release server with mismatching then matching v1.1.0 release.
-	Version = "v1.0.0"
-	updateEvery = 30 * time.Millisecond
-	target := updateTarget(runtime.GOOS, runtime.GOARCH)
-	fileName := "solodawn_v1.1.0_" + target
-	goodBin := []byte("updated-binary-image")
-	sum := sha256.Sum256(goodBin)
-
-	var serveGood sync.Mutex
-	allowGood := false
-	mux := http.NewServeMux()
-	mux.HandleFunc("/SHA256SUMS", func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintf(w, "%x  %s\n", sum, fileName)
-	})
-	mux.HandleFunc("/"+fileName, func(w http.ResponseWriter, _ *http.Request) {
-		serveGood.Lock()
-		ok := allowGood
-		serveGood.Unlock()
-		if !ok {
-			w.Write([]byte("corrupted"))
-			return
-		}
-		w.Write(goodBin)
-	})
-	tlsSrv := httptest.NewTLSServer(mux)
-	t.Cleanup(tlsSrv.Close)
-	releaseURL = tlsSrv.URL
-	updateTransport = tlsSrv.Client().Transport
-
-	savedExe := executablePath
-	t.Cleanup(func() { executablePath = savedExe })
-	fakeBin := filepath.Join(t.TempDir(), "solodawn")
-	writeImage(t, fakeBin, "old-binary")
-	executablePath = func() (string, error) { return fakeBin, nil }
-
-	dir := nodeTestDir(t)
-	l := openSocket(t, dir)
-	n, err := openNode(t.Context(), dir)
-	if err != nil {
+	if err := errNode.db.Write(dropSetting); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(50 * time.Millisecond) // allow ticker.C in runUpdateLoop to fire once
-
-	// Create a Working session so n.isBusy() is true when the valid update lands.
-	sKey := host.SessionKey{Group: "g1", Member: "m1"}
-	if err := n.host.Sessions.Create(host.Session{SessionKey: sKey, Kind: host.GroupSession, Folder: "repo", Agent: "claude", Home: n.key.ID(), Name: "C"}); err != nil {
-		t.Fatal(err)
+	if err := (Command{Cmd: "pair", Secret: validSecret, Name: &name, Rendezvous: rvURL}).send(errDir, io.Discard); err == nil {
+		t.Fatal("expected pair error when setting table is missing")
 	}
-	if err := n.host.Sessions.Move(sKey, host.Dormant, host.Working); err != nil {
-		t.Fatal(err)
-	}
+	errNode.Close()
+	<-errDone
 
-	// First check gets mismatch (and tryApplyLocked sees !pending).
-	n.updMu.Lock()
-	n.updater.nextCheck = time.Time{}
-	n.updMu.Unlock()
-	n.checkAndApplyUpdate(time.Now())
-	if st := n.updateStatus(); st == nil || st.Status != "mismatch" || st.Version != "v1.1.0" {
-		t.Fatalf("mismatch updateStatus = %+v", st)
-	}
-
-	// Second check downloads valid release while session is Working: status becomes pending, hold resets to false, no restart yet.
-	serveGood.Lock()
-	allowGood = true
-	serveGood.Unlock()
-	n.updMu.Lock()
-	n.updater.nextCheck = time.Time{}
-	n.updMu.Unlock()
-	n.checkAndApplyUpdate(time.Now().Add(25 * time.Hour))
-	if st := n.updateStatus(); st == nil || st.Status != "pending" {
-		t.Fatalf("pending updateStatus = %+v", st)
-	}
-	if reason, held := n.host.Held(sKey); held || reason != "" {
-		t.Fatalf("hold while still working = %q, %v", reason, held)
-	}
-
-	// Also verify checkAndApplyUpdate logs error cleanly when ReleaseURL is unreachable.
-	n.updMu.Lock()
-	n.updater.Status = nil
-	n.updater.nextCheck = time.Time{}
-	n.updater.ReleaseURL = "http://invalid.example"
-	n.updMu.Unlock()
-	n.checkAndApplyUpdate(time.Now().Add(50 * time.Hour))
-	if n.updateStatus() != nil {
-		t.Fatalf("expected nil updateStatus after reset, got %+v", n.updateStatus())
-	}
-
-	// Restore pending status, start serve(l), then end the turn so listener wakes runUpdateLoop and triggers restart.
-	n.updMu.Lock()
-	n.updater.Status = &UpdateStatus{Version: "v1.1.0", Status: "pending"}
-	n.updMu.Unlock()
-	n.notifyWake()
-	n.notifyWake()
-
-	serveDone := make(chan string, 1)
-	go func() { serveDone <- n.serve(l) }()
-
-	if err := n.host.Sessions.Move(sKey, host.Working, host.Waiting); err != nil {
-		t.Fatal(err)
-	}
-	n.host.Report(sKey, host.Event{Kind: host.TurnEnded})
-
-	select {
-	case gotBin := <-serveDone:
-		if gotBin != fakeBin {
-			t.Fatalf("serve restartBin = %q, want %q", gotBin, fakeBin)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for pending update restart")
-	}
-	if reason, held := n.host.Held(sKey); !held || reason != "updating" {
-		t.Fatalf("hold during restart drain = %q, %v", reason, held)
-	}
-	n.Close()
-
-	// Test runForegroundNode: startup error, clean SIGINT stop, and update execReplace.
-	badDir := socketRoot(t)
-	os.WriteFile(filepath.Join(badDir, "logs"), []byte("x"), 0o600)
-	badL := openSocket(t, badDir)
-	if err := runForegroundNode(badDir, badL); err == nil {
-		t.Fatal("expected runForegroundNode error on bad dir")
-	}
-
-	// Clean stop via foregroundContext.
+	// Foreground stop via foregroundContext.
 	defCtx, defStop := foregroundContext()
 	defStop()
 	<-defCtx.Done()
 
-	savedFgCtx := foregroundContext
-	t.Cleanup(func() { foregroundContext = savedFgCtx })
+	savedFg := foregroundContext
+	t.Cleanup(func() { foregroundContext = savedFg })
 	stopCtx, stopNode := context.WithCancel(t.Context())
 	foregroundContext = func() (context.Context, context.CancelFunc) { return stopCtx, func() {} }
-
-	Version = "dev"
 	sigDir := socketRoot(t)
 	sigL := openSocket(t, sigDir)
 	sigErr := make(chan error, 1)
@@ -821,33 +576,6 @@ func TestSelfUpdateHoldBusyAndForegroundRestart(t *testing.T) {
 	stopNode()
 	if err := <-sigErr; err != nil {
 		t.Fatalf("runForegroundNode stop = %v", err)
-	}
-	foregroundContext = savedFgCtx
-
-	// Restart path invokes execReplace after releasing lock.
-	Version = "v1.0.0"
-	execDir := socketRoot(t)
-	execL, err := ListenLocal(execDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var execCalled string
-	execReplace = func(bin string, _ []string, _ []string) error {
-		execCalled = bin
-		// Lock must already be released before execReplace.
-		rebound, err := ListenLocal(execDir)
-		if err != nil {
-			return fmt.Errorf("lock still held in execReplace: %w", err)
-		}
-		rebound.Close()
-		return nil
-	}
-	writeImage(t, fakeBin, "old-binary")
-	if err := runForegroundNode(execDir, execL); err != nil {
-		t.Fatalf("runForegroundNode update restart = %v", err)
-	}
-	if execCalled != fakeBin {
-		t.Fatalf("execCalled = %q, want %q", execCalled, fakeBin)
 	}
 }
 

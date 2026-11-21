@@ -16,7 +16,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"sync"
@@ -27,7 +26,6 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/host"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/peer"
-	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/rendezvous"
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
@@ -43,70 +41,15 @@ const (
 
 var (
 	maxLogBytes       int64 = 10 << 20
-	updateEvery             = time.Hour
 	rvRetryDelay            = time.Second
-	releaseURL              = "https://github.com/huanchong-99/SoloDawn/releases/latest/download"
-	updateTransport   http.RoundTripper
-	peerListen        = peer.Listen
-	tcpListen         = net.Listen
-	ifaceAddrs        = net.InterfaceAddrs
-	execReplace       = replaceProcess
-	startBrowser      = startDetached
-	openURL           = openBrowserURL
-	foregroundContext = func() (context.Context, context.CancelFunc) {
+	peerListen              = peer.Listen
+	tcpListen               = net.Listen
+	ifaceAddrs              = net.InterfaceAddrs
+	installService          = InstallService
+	foregroundContext       = func() (context.Context, context.CancelFunc) {
 		return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	}
 )
-
-func init() {
-	host.Register(host.Holds, "update", holdForUpdate)
-	host.Register(host.Listeners, "node_update", listenNodeUpdate)
-}
-
-type updateGate struct {
-	mu   sync.Mutex
-	hold bool
-	wake func()
-}
-
-func holdForUpdate(h *host.Host, _ host.SessionKey) (string, bool) {
-	g := host.Part[updateGate](h)
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.hold {
-		return "updating", true
-	}
-	return "", false
-}
-
-func listenNodeUpdate(h *host.Host, _ host.SessionKey, e host.Event) {
-	if e.Kind != host.TurnEnded {
-		return
-	}
-	g := host.Part[updateGate](h)
-	g.mu.Lock()
-	wake := g.wake
-	g.mu.Unlock()
-	if wake != nil {
-		wake()
-	}
-}
-
-func browserCommand(goos, link string) (string, []string) {
-	switch goos {
-	case "darwin":
-		return "open", []string{link}
-	case "windows":
-		return "rundll32", []string{"url.dll,FileProtocolHandler", link}
-	default:
-		return "xdg-open", []string{link}
-	}
-}
-
-func openBrowserURL(link string) error {
-	prog, args := browserCommand(runtime.GOOS, link)
-	return startBrowser(prog, args...)
-}
 
 type logFile struct {
 	mu   sync.Mutex
@@ -128,8 +71,8 @@ func (l *logFile) openCurrent() error {
 	if err != nil {
 		return err
 	}
-	info, _ := f.Stat()
-	l.file, l.size = f, info.Size()
+	size, _ := f.Seek(0, io.SeekEnd)
+	l.file, l.size = f, size
 	return nil
 }
 
@@ -158,60 +101,48 @@ func (l *logFile) Close() error {
 }
 
 // nodeRuntime holds the running components of one SoloDawn node.
-// Lock order: homeMu -> Home/Sessions; updMu -> updateGate.mu / mu; mu is a
-// leaf lock guarding rvPaths, rvStop, presence, relay and restartBin.
+// mu is a leaf lock guarding rvPaths and rvStop.
 type nodeRuntime struct {
-	ctx        context.Context
-	stop       context.CancelFunc
-	dir, exe   string
-	logFile    *logFile
-	prevLog    io.Writer
-	key        identity.Key
-	db         *store.Store
-	logs       *Logs
-	homeMu     sync.Mutex
-	loop       *home.Loop
-	local      *LocalLink
-	host       *host.Host
-	saved      []host.Session
-	sessions   *Sessions
-	socks      *peer.Sockets
-	peer       *peer.Peer
-	httpSrv    *http.Server
-	httpPort   int
-	localPath  *peer.Path
-	updMu      sync.Mutex
-	updater    Updater
-	wakeUpdate chan struct{} // single reader: runUpdateLoop
-	bg         sync.WaitGroup
-	closeOnce  sync.Once
+	ctx       context.Context
+	stop      context.CancelFunc
+	dir, exe  string
+	logFile   *logFile
+	prevLog   io.Writer
+	key       identity.Key
+	db        *store.Store
+	logs      *Logs
+	loop      *home.Loop
+	local     *LocalLink
+	host      *host.Host
+	saved     []host.Session
+	sessions  *Sessions
+	socks     *peer.Sockets
+	peer      *peer.Peer
+	httpSrv   *http.Server
+	httpPort  int
+	localPath *peer.Path
+	bg        sync.WaitGroup
+	closeOnce sync.Once
 
-	mu         sync.Mutex
-	rvPaths    map[string]*peer.Path
-	rvStop     map[string]context.CancelFunc
-	presence   map[string]map[chan struct{}]bool
-	relay      *proto.RelayUse
-	restartBin string
+	mu      sync.Mutex
+	rvPaths map[string]*peer.Path
+	rvStop  map[string]context.CancelFunc
 }
 
 func runForegroundNode(dir string, l *Local) error {
 	ctx, stop := foregroundContext()
 	defer stop()
-	restartBin, err := runNode(ctx, dir, l)
-	if err != nil || restartBin == "" {
-		return err
-	}
-	l.Close()
-	return execReplace(restartBin, os.Args, os.Environ())
+	return runNode(ctx, dir, l)
 }
 
-func runNode(ctx context.Context, dir string, l *Local) (string, error) {
+func runNode(ctx context.Context, dir string, l *Local) error {
 	n, err := openNode(ctx, dir)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer n.Close()
-	return n.serve(l), nil
+	n.serve(l)
+	return nil
 }
 
 func openNode(parent context.Context, dir string) (*nodeRuntime, error) {
@@ -219,7 +150,6 @@ func openNode(parent context.Context, dir string) (*nodeRuntime, error) {
 	n := &nodeRuntime{
 		ctx: ctx, stop: cancel, dir: dir,
 		rvPaths: map[string]*peer.Path{}, rvStop: map[string]context.CancelFunc{},
-		presence: map[string]map[chan struct{}]bool{}, wakeUpdate: make(chan struct{}, 1),
 	}
 	for _, step := range []func() error{n.stepLog, n.stepIdentity, n.stepServices, n.stepNetwork, n.stepStartup} {
 		if err := step(); err != nil {
@@ -263,7 +193,10 @@ func (n *nodeRuntime) stepServices() error {
 		return err
 	}
 	n.logs = logs
-	loop, err := n.startHomeLoop(logs.Owner())
+	loop, err := home.StartLoop(home.LoopConfig{
+		Store: n.db, Home: n.key.ID(), OwnerFn: logs.Owner,
+		Logs: logs.Log, Tables: home.NodeTables(), Every: time.Second,
+	})
 	if err != nil {
 		return err
 	}
@@ -277,25 +210,13 @@ func (n *nodeRuntime) stepServices() error {
 	return nil
 }
 
-func (n *nodeRuntime) startHomeLoop(owner string) (*home.Loop, error) {
-	return home.StartLoop(home.LoopConfig{
-		Store: n.db, Home: n.key.ID(), Owner: owner,
-		Logs: n.logs.Log, Tables: home.NodeTables(), Every: time.Second,
-	})
-}
-
 func (n *nodeRuntime) wireServices() {
 	n.host.Shim = []string{n.exe, "mcp"}
-	host.Part[updateGate](n.host).wake = n.notifyWake
 	n.local = AttachLocal(n.host, n.loop)
 	n.sessions = NewSessions(SessionConfig{
 		ID: n.key.ID(), Version: Version, Store: n.db, Logs: n.logs,
 		Home: n.loop, Host: n.host, Name: n.readName, Addrs: n.addrs, OnAdopt: n.onAdopt,
 	})
-	n.updater = Updater{
-		ReleaseURL: releaseURL, Binary: n.exe, Version: Version,
-		Busy: n.isBusy, Restart: n.triggerRestart, Transport: updateTransport,
-	}
 }
 
 func (n *nodeRuntime) stepNetwork() error {
@@ -315,7 +236,7 @@ func (n *nodeRuntime) stepNetwork() error {
 func (n *nodeRuntime) startLocalHTTP(ln net.Listener) error {
 	web, _ := fs.Sub(assets, "webdist")
 	n.httpPort = ln.Addr().(*net.TCPAddr).Port
-	n.httpSrv = &http.Server{Handler: nodeHTTPHandler(rendezvous.Handler(web))}
+	n.httpSrv = &http.Server{Handler: rendezvous.Handler(web)}
 	go n.httpSrv.Serve(ln)
 	path, err := peer.Dial(n.ctx, "ws://127.0.0.1:"+strconv.Itoa(n.httpPort)+"/rv", n.key)
 	if err != nil {
@@ -327,10 +248,11 @@ func (n *nodeRuntime) startLocalHTTP(ln net.Listener) error {
 	return nil
 }
 
+func noopRVEvent(string, []byte) error { return nil }
+
 func (n *nodeRuntime) serveLocalRV(path *peer.Path) {
 	defer n.bg.Done()
-	event := func(kind string, data []byte) error { n.onRVEvent(n.ctx, path, kind, data); return nil }
-	path.Serve(n.ctx, n.peer, event)
+	path.Serve(n.ctx, n.peer, noopRVEvent)
 }
 
 func (n *nodeRuntime) stepStartup() error {
@@ -339,8 +261,6 @@ func (n *nodeRuntime) stepStartup() error {
 	}
 	n.host.ReportSaved(n.ctx, n.saved)
 	n.syncRendezvous()
-	n.bg.Add(1)
-	go n.runUpdateLoop()
 	return nil
 }
 
@@ -366,15 +286,11 @@ func (n *nodeRuntime) closeNet() {
 }
 
 func (n *nodeRuntime) closeCore() {
-	n.homeMu.Lock()
-	local, loop := n.local, n.loop
-	n.local, n.loop = nil, nil
-	n.homeMu.Unlock()
-	if local != nil {
-		local.Close()
+	if n.local != nil {
+		n.local.Close()
 	}
-	if loop != nil {
-		loop.Close()
+	if n.loop != nil {
+		n.loop.Close()
 	}
 	if n.db != nil {
 		n.db.Close()
@@ -399,32 +315,14 @@ func listenNodeHTTP(addr string) (net.Listener, error) {
 	return tcpListen("tcp", ":0")
 }
 
-func nodeHTTPHandler(rv http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/rv" && !isLocalHost(r.Host) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-		rv.ServeHTTP(w, r)
-	})
-}
-
-func isLocalHost(hostport string) bool {
-	h := hostport
-	if parsed, _, err := net.SplitHostPort(hostport); err == nil {
-		h = parsed
-	}
-	return h == "localhost" || h == "127.0.0.1"
-}
-
-func (n *nodeRuntime) localWebURL() string {
-	return "http://localhost:" + strconv.Itoa(n.httpPort)
-}
-
 func (n *nodeRuntime) knownPeer(device string) bool { return n.logs.Known(device) }
 
 func (n *nodeRuntime) serveInbound(c *peer.Connection) {
-	go n.sessions.Serve(n.ctx, c.Device, false, c)
+	n.bg.Add(1)
+	go func() {
+		defer n.bg.Done()
+		n.sessions.Serve(n.ctx, c.Device, false, c)
+	}()
 }
 
 func (n *nodeRuntime) routesFor(_ string) []peer.Route {
@@ -433,10 +331,6 @@ func (n *nodeRuntime) routesFor(_ string) []peer.Route {
 		routes = append(routes, p.Route())
 	}
 	return routes
-}
-
-func (n *nodeRuntime) sharedPaths() []*peer.Path {
-	return append([]*peer.Path{n.localPath}, n.remoteRVPaths()...)
 }
 
 func (n *nodeRuntime) remoteRVPaths() []*peer.Path {
@@ -469,6 +363,15 @@ func (n *nodeRuntime) readSetting(key string, out any) {
 	if n.db.Write(read) == nil {
 		json.Unmarshal([]byte(raw), out)
 	}
+}
+
+func (n *nodeRuntime) saveRendezvous(urls []string) error {
+	raw, _ := json.Marshal(urls)
+	put := func(tx *store.Tx) error {
+		_, err := tx.Exec("INSERT INTO setting(key, value) VALUES('rendezvous', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", string(raw))
+		return err
+	}
+	return n.db.Write(put)
 }
 
 func (n *nodeRuntime) addrs() []string { return nodeAddrs(n.httpPort, n.readRendezvous()) }
@@ -510,23 +413,9 @@ func isUsableAddr(addr netip.Addr) bool {
 	return addr.IsValid() && !addr.IsLoopback() && !addr.IsLinkLocalUnicast() && !addr.IsUnspecified()
 }
 
-func (n *nodeRuntime) onAdopt(owner string) {
-	n.homeMu.Lock()
-	oldLocal, oldLoop := n.local, n.loop
-	oldLocal.Close()
-	newLoop, err := n.startHomeLoop(owner)
-	if err != nil {
-		n.homeMu.Unlock()
-		log.Printf("node: restart home on adopt: %v", err)
-		return
-	}
-	n.sessions.SetHome(newLoop)
-	oldLoop.Close()
-	n.loop, n.local = newLoop, AttachLocal(n.host, newLoop)
-	n.homeMu.Unlock()
-	devs := n.logs.OwnerDevices()
-	for _, path := range n.remoteRVPaths() {
-		path.Write(n.ctx, proto.Watch{Type: "watch", Keys: devs})
+func (n *nodeRuntime) onAdopt(_ string) {
+	if err := installService(n.exe, os.Getenv("PATH")); err != nil {
+		log.Printf("node: install service: %v", err)
 	}
 }
 
@@ -590,13 +479,8 @@ func (n *nodeRuntime) serveOneRV(ctx context.Context, url string) time.Duration 
 	n.mu.Lock()
 	n.rvPaths[url] = path
 	n.mu.Unlock()
-	if n.logs.Owner() != "" {
-		path.Write(ctx, proto.Watch{Type: "watch", Keys: n.logs.OwnerDevices()})
-	}
-	path.Write(ctx, proto.RVFrame{Type: "quota"})
 	stop := context.AfterFunc(ctx, func() { path.Close() })
-	event := func(kind string, data []byte) error { n.onRVEvent(ctx, path, kind, data); return nil }
-	path.Serve(ctx, n.peer, event)
+	path.Serve(ctx, n.peer, noopRVEvent)
 	stop()
 	path.Close()
 	n.mu.Lock()
@@ -607,147 +491,7 @@ func (n *nodeRuntime) serveOneRV(ctx context.Context, url string) time.Duration 
 	return time.Since(opened)
 }
 
-func (n *nodeRuntime) onRVEvent(_ context.Context, _ *peer.Path, kind string, data []byte) {
-	switch kind {
-	case "presence":
-		var p proto.Presence
-		if proto.Decode(data, &p) == nil && p.On {
-			n.notifyPresence(p.Key)
-		}
-	case "quota":
-		var q proto.Quota
-		if proto.Decode(data, &q) == nil {
-			n.mu.Lock()
-			n.relay = &proto.RelayUse{Used: q.Used, Limit: q.Limit}
-			n.mu.Unlock()
-		}
-	}
-}
-
-func (n *nodeRuntime) subscribePresence(ctx context.Context, device string) <-chan struct{} {
-	ch := make(chan struct{}, 1) // single reader: peer.Connect backoff for device
-	n.mu.Lock()
-	if n.presence[device] == nil {
-		n.presence[device] = map[chan struct{}]bool{}
-	}
-	n.presence[device][ch] = true
-	n.mu.Unlock()
-	context.AfterFunc(ctx, func() { n.unsubscribePresence(device, ch) })
-	return ch
-}
-
-func (n *nodeRuntime) unsubscribePresence(device string, ch chan struct{}) {
-	n.mu.Lock()
-	delete(n.presence[device], ch)
-	if len(n.presence[device]) == 0 {
-		delete(n.presence, device)
-	}
-	n.mu.Unlock()
-}
-
-func (n *nodeRuntime) notifyPresence(device string) {
-	n.mu.Lock()
-	subs := slices.Collect(maps.Keys(n.presence[device]))
-	n.mu.Unlock()
-	for _, ch := range subs {
-		select {
-		case ch <- struct{}{}:
-		default:
-		}
-	}
-}
-
-func (n *nodeRuntime) relayStatus() *proto.RelayUse {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	return n.relay
-}
-
-func (n *nodeRuntime) isBusy() bool {
-	for _, s := range n.host.Sessions.All() {
-		if s.State == host.Working || s.State == host.Takeover {
-			return true
-		}
-	}
-	return false
-}
-
-func (n *nodeRuntime) triggerRestart() error {
-	n.mu.Lock()
-	n.restartBin = n.updater.Binary
-	n.mu.Unlock()
-	n.stop()
-	return nil
-}
-
-func (n *nodeRuntime) notifyWake() {
-	select {
-	case n.wakeUpdate <- struct{}{}:
-	default:
-	}
-}
-
-func (n *nodeRuntime) updateStatus() *proto.Update {
-	n.updMu.Lock()
-	defer n.updMu.Unlock()
-	if s := n.updater.Status; s != nil {
-		return &proto.Update{Version: s.Version, Status: s.Status}
-	}
-	return nil
-}
-
-func (n *nodeRuntime) runUpdateLoop() {
-	defer n.bg.Done()
-	n.checkAndApplyUpdate(time.Now())
-	ticker := time.NewTicker(updateEvery)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-n.ctx.Done():
-			return
-		case now := <-ticker.C:
-			n.checkAndApplyUpdate(now)
-		case <-n.wakeUpdate:
-			n.updMu.Lock()
-			n.tryApplyLocked()
-			n.updMu.Unlock()
-		}
-	}
-}
-
-func (n *nodeRuntime) checkAndApplyUpdate(now time.Time) {
-	n.updMu.Lock()
-	defer n.updMu.Unlock()
-	if !stableTag.MatchString(n.updater.Version) {
-		return
-	}
-	if err := n.updater.Check(n.ctx, now); err != nil {
-		log.Printf("node: update check: %v", err)
-	}
-	n.tryApplyLocked()
-}
-
-func (n *nodeRuntime) tryApplyLocked() {
-	if !n.updater.pending() {
-		return
-	}
-	gate := host.Part[updateGate](n.host)
-	gate.mu.Lock()
-	gate.hold = true
-	gate.mu.Unlock()
-	n.updater.Apply()
-	n.mu.Lock()
-	restarting := n.restartBin != ""
-	n.mu.Unlock()
-	if !restarting {
-		gate.mu.Lock()
-		gate.hold = false
-		gate.mu.Unlock()
-		go host.Deliver(n.host, "", "")
-	}
-}
-
-func (n *nodeRuntime) serve(l *Local) string {
+func (n *nodeRuntime) serve(l *Local) {
 	stopAccept := context.AfterFunc(n.ctx, func() { l.SetDeadline(time.Now()) })
 	defer stopAccept()
 	var wg sync.WaitGroup
@@ -763,9 +507,6 @@ func (n *nodeRuntime) serve(l *Local) string {
 		}()
 	}
 	wg.Wait()
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	return n.restartBin
 }
 
 func (n *nodeRuntime) handleLocal(conn net.Conn) {
@@ -815,6 +556,12 @@ func (n *nodeRuntime) cmdPair(line []byte) ([]string, error) {
 	}
 	if _, err := identity.ParseSecret(req.Secret); err != nil {
 		return nil, err
+	}
+	if len(req.Rendezvous) > 0 {
+		if err := n.saveRendezvous(req.Rendezvous); err != nil {
+			return nil, err
+		}
+		n.syncRendezvous()
 	}
 	return nil, errors.New("pairing room is unavailable")
 }

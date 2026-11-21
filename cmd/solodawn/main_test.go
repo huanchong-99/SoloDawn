@@ -203,7 +203,7 @@ func TestRelayFlags(t *testing.T) {
 	}
 }
 
-func TestMCPRoundTripAndMain(t *testing.T) {
+func TestMCPRoundTrip(t *testing.T) {
 	l := testListener(t, testDataDir(t))
 	received := make(chan string, 1)
 	go func() {
@@ -221,15 +221,5 @@ func TestMCPRoundTripAndMain(t *testing.T) {
 	}
 	if got := <-received; got != "{\"mcp\":\"tok-9\"}\n" {
 		t.Fatalf("mcp opening = %q", got)
-	}
-
-	var gotExit int
-	savedArgs, savedExit := os.Args, exitProc
-	t.Cleanup(func() { os.Args, exitProc = savedArgs, savedExit })
-	os.Args = []string{"solodawn", "version"}
-	exitProc = func(code int) { gotExit = code }
-	main()
-	if gotExit != 0 {
-		t.Fatalf("main() exit = %d, want 0", gotExit)
 	}
 }

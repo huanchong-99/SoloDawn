@@ -90,23 +90,32 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `codexBaseFlags` (`internal/host/codex.go`) passes `-c features.default_mode_request_user_input=true` on `codex app-server` and `codex resume`, and `onUserInputRequest` maps `item/tool/requestUserInput` from the generated schema (`[documented]`), without a live run on the owner's sign-in yet.
 - Status: open for the live check in B-17 / I-11 (`planning/steps/step-1-acceptance.md` A4.11). If the flag does not offer a working `request_user_input` tool in Default mode, record in `planning/contracts/drivers.md` section 1.2 that a Codex AI asks through `request_decision` (`HS-11`) instead.
 
-### 2026-11-21 · limitation · `Sessions` has no `fetch` handler until `HM-3` lands
+### 2026-11-21 · limitation · The host has no shutdown hook for open CLI processes
 
-- Symptom: inbound `ctl` requests for `fetch` are answered `bad_request` ("unknown ctl request") on a `Sessions` hub (`internal/node/session.go`, `NewSessions`), and `host.info`, `pair.browser` and `settings.set` are not registered until unit N-3.
-- Cause: `Sessions` registers `sync` (`HM-2`) and routes `ack` pushes (`HM-7`), while `fetch` (`HM-3`) and the pairing and host-info handlers (`N-3`) are separate units.
-- Status: `ack` wired in `HM-7` (#221) and `sync` wired in `N-4` after `HM-2` (#205); open until `HM-3` and `N-3` land.
+- Symptom: when `solodawn node` stops on `SIGINT` or `SIGTERM`, open AI CLI processes are not closed explicitly before `node.db` closes; they end on stdin EOF when the node process exits.
+- Cause: `host.Host` exposes no shutdown method, and CLI processes are started with `context.Background()` (`internal/host/run.go:380`).
+- Status: open, accepted for 1.0 (`N-4` review).
+
+### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
+
+- Symptom, from the independent review of `internal/node`:
+  1. `Apply` checks `Busy` and then calls `Restart` (`internal/node/update.go:98`). A turn or a takeover admitted between the two is restarted.
+  2. `Status` (`internal/node/update.go:40`) is written by `Check` and read for `host.info`; read from another goroutine, it races.
+  3. `Restart` (`:39`) must replace the process in place (exec on Unix). launchd and systemd stop the whole process group when the node's process ends, so a child started before the exit would be stopped with it.
+- Cause: the `Updater` holds no lock and does not restart by itself; the owner of the runtime is to call `Check` and `Apply` under the lock that admits turns and takeovers, copy `Status` under it, and supply a `Restart` that execs.
+- Status: open, postponed off the step-1 main line (`N-6`).
+
+### 2026-11-21 · limitation · `Sessions` has no `host.info`, `pair.browser` or `settings.set` handlers until `N-3` lands
+
+- Symptom: inbound `ctl` requests for `host.info` are answered `bad_request` ("unknown ctl request") on a bare `Sessions` hub (`internal/node/session.go`, `NewSessions`), and `pair.browser` and `settings.set` are not registered until unit N-3.
+- Cause: `Sessions` registers `sync` (`HM-2`), `fetch` (`HM-3`) and `ack` (`HM-7`) by default, while the pairing and host-info handlers live in `N-3`.
+- Status: `ack` wired in `HM-7` (#221), `sync` wired after `HM-2` (#205), and `fetch` wired after `HM-3` (#207); open until `N-3` lands.
 
 ### 2026-11-21 · limitation · `Sessions` implements only the server side of a `ctl` connection
 
 - Symptom: a host on one node has no outgoing `ctl` client session yet to a home on another node (sending `hello` with `kind: "host"`, reading `welcome`, exchanging `devlog` both ways, and passing pushes to `Host.Push`), so cross-node AI sessions (`A3.3`, unit `I-6`) have no transport path.
 - Cause: `internal/node/session.go` (`N-2`) serves inbound `ctl` connections (`Serve`); the client side of a `ctl` session was split out by the coordinator's decision of 2026-11-21.
 - Status: open for unit `N-2b` (`internal/node/client.go`), wired into the node runtime by `N-4`.
-
-### 2026-11-21 · deviation · The local link routes `cmd`, `sync` and `ack` until `fetch` lands
-
-- Symptom: on `LocalLink`, a `fetch` request from the host is answered `bad_request`.
-- Cause: `LocalLink.toHome` (`internal/node/local.go`) dispatches `cmd` to `Loop.Cmd`, `sync` to `Loop.Sync` and `ack` to `Loop.Ack`, while `Fetch` (HM-3) is built in a separate unit; other requests carrying `id` are answered `bad_request` per `planning/contracts/datachannel.md` section 2.
-- Status: `ack` and `inbox` frames wired in HM-7 (#221); `sync` routed to `Loop.Sync` and temporary `LocalLink.Watch` removed in HM-2 (#205); open for `fetch` once HM-3 merges (N-4 / I-1 / I-3).
 
 ### 2026-11-21 · limitation · Postponed step-2 contracts still assume an item-level `cause`
 
@@ -457,26 +466,23 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-21 · deviation · The local link routes `cmd`, `sync` and `ack` until `fetch` lands
+
+- Symptom: on `LocalLink`, a `fetch` request from the host was answered `bad_request`.
+- Cause: `LocalLink.toHome` (`internal/node/local.go`) dispatched `cmd` to `Loop.Cmd`, `sync` to `Loop.Sync` and `ack` to `Loop.Ack`, while `Fetch` (`HM-3`, #207) landed in a separate unit.
+- Status: resolved in branch `gemini/N-4` after `HM-3` (#207): `LocalLink.toHome` (`internal/node/local.go`) and `NewSessions` (`internal/node/session.go`) both route `fetch` requests to `Loop.Fetch` (`TestLocalLinkCommandAndRowPush`, `TestHomeLoopIntegrationAndDevlogForwarding`).
+
 ### 2026-11-21 · limitation · `home.Loop` keeps the `Owner` it was started with across adoption
 
 - Symptom: when an unowned node starts `home.Loop` with `Owner: ""` and is later adopted over a pairing `ctl` session, `Logs.Owner()` becomes the adopter's user id (`internal/node/devlog.go`, `dvlAdopt`), while the running `home.Loop` still has `LoopConfig.Owner == ""` (`internal/home/run.go:65`) and refuses `group create` until the loop is restarted.
-- Cause: `LoopConfig.Owner` is read once when `StartLoop` constructs group states (`internal/home/run.go:175`, `:198`).
-- Status: resolved in branch `gemini/N-4`: `nodeRuntime.onAdopt` (`internal/node/node.go`) detaches `LocalLink`, starts a new `home.Loop` with `Owner: owner`, calls `(*Sessions).SetHome` (`internal/node/session.go`) to re-attach open inbound `ctl` sessions onto the new loop, closes the old loop, attaches a new `LocalLink`, and watches owner devices on remote rendezvous connections (`TestSetHomeReattachesOpenSession`, `TestAdoptionRendezvousWatchPresenceAndInboundPeer`).
+- Cause: `LoopConfig.Owner` was read as a static string when `StartLoop` constructed group states (`internal/home/run.go:175`, `:198`).
+- Status: resolved in branch `gemini/N-4`: `LoopConfig.OwnerFn` (`internal/home/run.go`) reads the node's owner dynamically (`logs.Owner`), so an unowned node's `home.Loop` sees the adopted owner immediately without restarting (`TestRunDynamicOwnerFn`, `TestAdoptionRendezvousAndForegroundStop`).
 
 ### 2026-11-20 · deviation · `solodawn pair` does not start a node that is not running
 
 - Symptom: `local.md` section 1 says `solodawn pair` "starts the node if needed". With no node running, `solodawn pair <secret>` fails on the dial of the local socket and pairs nothing.
 - Cause: `pair` (`cmd/solodawn/main.go:61` before the fix) only sent the command through `Command.send` (`internal/node/cmd.go:40` before the fix).
 - Status: resolved in branch `gemini/N-4`: `(Command).dialOrStart` (`internal/node/cmd.go`) spawns a detached `solodawn node` (`startDetached` in `proc_unix.go` / `proc_windows.go`) when `c.Cmd == "pair"` and `sock` is absent, then polls until `sock` accepts (`TestPairAutoStartsNode`).
-
-### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
-
-- Symptom, from the independent review of `internal/node`:
-  1. `Apply` checks `Busy` and then calls `Restart` (`internal/node/update.go:98`). A turn or a takeover admitted between the two is restarted.
-  2. `Status` (`internal/node/update.go:40`) is written by `Check` and read for `host.info`; read from another goroutine, it races.
-  3. `Restart` (`:39`) must replace the process in place (exec on Unix). launchd and systemd stop the whole process group when the node's process ends, so a child started before the exit would be stopped with it.
-- Cause: the `Updater` holds no lock and does not restart by itself; the owner of the runtime is to call `Check` and `Apply` under the lock that admits turns and takeovers, copy `Status` under it, and supply a `Restart` that execs.
-- Status: resolved in branch `gemini/N-4`: `nodeRuntime` (`internal/node/node.go`) serializes `Updater.Check` and `Updater.Apply` under `updMu`, holds new turns through `holdForUpdate` (`host.Holds["update"]`) while `Apply` checks `isBusy`, snapshots `Status` into `updStatus` under `mu`, wakes pending updates on `host.TurnEnded` (`listenNodeUpdate`), releases `Local` lock, and replaces the process via `syscall.Exec` on Unix (`proc_unix.go`) and `os.StartProcess` on Windows (`proc_windows.go`) (`TestSelfUpdateHoldBusyAndForegroundRestart`).
 
 ### 2026-11-20 · limitation · End-to-end tests cannot run a node until the node runtime is wired
 

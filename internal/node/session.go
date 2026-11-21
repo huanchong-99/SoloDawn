@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"maps"
 	"slices"
 	"strconv"
 	"sync"
@@ -60,13 +59,13 @@ type SessionConfig struct {
 // Lock order: cmdMu -> Store.Write; sesConn.sendMu -> mu -> Logs.mu; mu is a
 // leaf lock guarding conns and sesConn.welcomed.
 type Sessions struct {
-	Requests          map[string]RequestHandler
-	Pushes            map[string]PushHandler
-	Commands          map[string]CmdFunc
-	cfg               SessionConfig
-	homeMu, cmdMu, mu sync.Mutex
-	inflight          map[string]chan struct{}
-	conns             map[*sesConn]bool
+	Requests  map[string]RequestHandler
+	Pushes    map[string]PushHandler
+	Commands  map[string]CmdFunc
+	cfg       SessionConfig
+	cmdMu, mu sync.Mutex
+	inflight  map[string]chan struct{}
+	conns     map[*sesConn]bool
 }
 
 type sesConn struct {
@@ -91,6 +90,7 @@ func NewSessions(cfg SessionConfig) *Sessions {
 		cfg: sesDefaultConfig(cfg), inflight: map[string]chan struct{}{}, conns: map[*sesConn]bool{},
 	}
 	s.Requests["sync"] = RequestHandler{Async: true, Run: s.sesSync}
+	s.Requests["fetch"] = RequestHandler{Async: true, Run: s.sesFetch}
 	cfg.Logs.mu.Lock()
 	cfg.Logs.onChange = s.sesLogChanged
 	cfg.Logs.mu.Unlock()
@@ -117,7 +117,10 @@ func sesDefaultConfig(cfg SessionConfig) SessionConfig {
 // Serve runs the ctl session of raw until ctx ends or raw closes.
 func (s *Sessions) Serve(ctx context.Context, device string, paired bool, raw Ctl) {
 	c := &sesConn{device: device, paired: paired, raw: raw, staging: map[string]*identity.Log{}}
-	s.attachHome(c)
+	c.home = s.cfg.Home.Attach(device, c)
+	s.mu.Lock()
+	s.conns[c] = true
+	s.mu.Unlock()
 	defer s.sesLeave(c)
 	for {
 		data, err := raw.Read(ctx)
@@ -128,55 +131,12 @@ func (s *Sessions) Serve(ctx context.Context, device string, paired bool, raw Ct
 	}
 }
 
-func (s *Sessions) attachHome(c *sesConn) {
-	s.homeMu.Lock()
-	defer s.homeMu.Unlock()
-	c.home = s.homeLoop().Attach(c.device, c)
-	s.mu.Lock()
-	s.conns[c] = true
-	s.mu.Unlock()
-}
-
 func (s *Sessions) sesLeave(c *sesConn) {
-	s.homeMu.Lock()
 	s.mu.Lock()
 	delete(s.conns, c)
-	loop, hc := s.cfg.Home, c.home
 	s.mu.Unlock()
-	s.homeMu.Unlock()
-	loop.Detach(hc)
+	s.cfg.Home.Detach(c.home)
 	c.raw.Close()
-}
-
-func (s *Sessions) homeLoop() *home.Loop {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.cfg.Home
-}
-
-func (s *Sessions) sesHome(c *sesConn) (*home.Loop, *home.Conn) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.cfg.Home, c.home
-}
-
-// SetHome switches the session hub and all open inbound connections to loop.
-func (s *Sessions) SetHome(loop *home.Loop) {
-	s.homeMu.Lock()
-	defer s.homeMu.Unlock()
-	s.mu.Lock()
-	conns := slices.Collect(maps.Keys(s.conns))
-	s.mu.Unlock()
-	attached := make([]*home.Conn, len(conns))
-	for i, c := range conns {
-		attached[i] = loop.Attach(c.device, c)
-	}
-	s.mu.Lock()
-	s.cfg.Home = loop
-	for i, c := range conns {
-		c.home = attached[i]
-	}
-	s.mu.Unlock()
 }
 
 func (s *Sessions) statusLines() []string {
@@ -222,16 +182,14 @@ func (s *Sessions) sesPush(ctx context.Context, c *sesConn, typ string, data jso
 		return
 	}
 	if h := s.Pushes[typ]; h != nil {
-		_, hc := s.sesHome(c)
-		h(ctx, hc, c.raw, c.device, data)
+		h(ctx, c.home, c.raw, c.device, data)
 	}
 }
 
 func (s *Sessions) sesAck(c *sesConn, data json.RawMessage) {
 	var ack proto.Ack
 	if proto.Decode(data, &ack) == nil {
-		loop, hc := s.sesHome(c)
-		loop.Ack(hc, ack)
+		s.cfg.Home.Ack(c.home, ack)
 	}
 }
 
@@ -257,8 +215,7 @@ func (s *Sessions) sesRunRequest(ctx context.Context, c *sesConn, id int64, typ 
 		c.sendErr(id, "bad_request", "unknown ctl request")
 		return
 	}
-	_, hc := s.sesHome(c)
-	res, err := h.Run(ctx, hc, c.raw, c.device, id, data)
+	res, err := h.Run(ctx, c.home, c.raw, c.device, id, data)
 	if !h.Async || err != nil {
 		s.sesReply(c, id, h.Type, res, err)
 	}
@@ -269,7 +226,16 @@ func (s *Sessions) sesSync(_ context.Context, conn *home.Conn, _ Ctl, _ string, 
 	if proto.Decode(data, &req) != nil {
 		return nil, &host.Error{Code: "bad_request", Message: "invalid sync frame"}
 	}
-	s.homeLoop().Sync(conn, req)
+	s.cfg.Home.Sync(conn, req)
+	return nil, nil
+}
+
+func (s *Sessions) sesFetch(_ context.Context, conn *home.Conn, _ Ctl, _ string, _ int64, data json.RawMessage) (any, error) {
+	var req home.Fetch
+	if proto.Decode(data, &req) != nil {
+		return nil, &host.Error{Code: "bad_request", Message: "invalid fetch frame"}
+	}
+	s.cfg.Home.Fetch(conn, req)
 	return nil, nil
 }
 
@@ -299,11 +265,10 @@ func (s *Sessions) sesHello(ctx context.Context, c *sesConn, id int64, data json
 		w.Groups = gs
 		return sesWelcome{welcome: w, onSent: onSent, sent: sent}
 	}
-	loop, hc := s.sesHome(c)
-	loop.Welcome(hc, wrap)
-	sesWaitWelcome(ctx, sent, hc.Gone())
+	s.cfg.Home.Welcome(c.home, wrap)
+	sesWaitWelcome(ctx, sent, c.home.Gone())
 	if h.Kind == "host" {
-		loop.Inbox(hc)
+		s.cfg.Home.Inbox(c.home)
 	}
 }
 
@@ -358,8 +323,7 @@ func (s *Sessions) sesCmd(ctx context.Context, c *sesConn, id int64, data json.R
 		go s.sesHostCmd(ctx, c, id, req.Env)
 		return
 	}
-	loop, hc := s.sesHome(c)
-	loop.Cmd(hc, id, req.Env)
+	s.cfg.Home.Cmd(c.home, id, req.Env)
 }
 
 func sesIsHostCmd(payload string) bool {

@@ -10,10 +10,8 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/node"
 )
 
-var exitProc = os.Exit
-
 func main() {
-	exitProc(run(os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
 func init() {
