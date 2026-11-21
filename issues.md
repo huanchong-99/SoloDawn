@@ -106,7 +106,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: `tools.json` lists `handback` among the kinds of `post` in every session a takeover can reach (the secretary's, review and task sessions), because a tool list is fixed per session, not per turn. `planning/contracts/mcp-tools.md` section 1 allows it only in a hand-back turn, so a model can call it in any turn of those sessions.
 - Cause: `tools/list` is read once per session (`internal/proto/tools_test.go`, `toolLists`; `planning/contracts/mcp-tools.md` section 5).
-- Status: open. The node refuses `post` with kind `handback` outside a hand-back turn, with `bad_request`: unit HS-9, through `Caller.Turn.Kind`.
+- Status: open. Terminal takeover is postponed off the main line, so `post` with kind `handback` answers `bad_request` (`internal/host/tools_talk.go`, `checkPostKind`); the hand-back path comes back with takeover.
 
 ### 2026-11-20 · limitation · A task stopped by its sixth failed review is reviewed again when it is resumed
 

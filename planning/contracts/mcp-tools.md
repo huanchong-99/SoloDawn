@@ -11,8 +11,8 @@ with each call (`_meta`), which the node may compare.
 Conventions:
 
 - Members are named by their display name, unique in the group (`"Codex"`).
-  Tasks are named `"T-12"`. An unknown name returns an error that lists the
-  valid ones.
+  Tasks are named `"T-12"`. An unknown name returns a `not_found` error that
+  lists the valid ones.
 - In a task or review session the task is the session's own and is not an
   argument. Where a tool takes `task` it is optional and defaults to that
   task; in a group session it must be given.
