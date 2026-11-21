@@ -43,14 +43,13 @@ const (
 )
 
 type m6NodeProc struct {
-	name     string
-	root     string
-	data     string
-	key      identity.Key
-	cmd      *exec.Cmd
-	stopOnce sync.Once
-	done     chan struct{} // Single reader: m6NodeProc.terminate waiting for cmd.Wait.
-	out      bytes.Buffer
+	name string
+	root string
+	data string
+	key  identity.Key
+	cmd  *exec.Cmd
+	done chan struct{} // Single reader: m6NodeProc.terminate waiting for cmd.Wait.
+	out  bytes.Buffer
 }
 
 type m6OwnerLink struct {
@@ -75,9 +74,7 @@ type m6World struct {
 	homeLink   *m6OwnerLink
 	aiLink     *m6OwnerLink
 	groupID    proto.ID
-	aiAgent    string
 	aiMemberID string
-	sessionID  string
 	seenMsgs   map[string]bool
 	idSeq      uint64
 
@@ -398,7 +395,7 @@ func seedM6LogEntries(tx *store.Tx, user string, entries []proto.Envelope) error
 }
 
 func (w *m6World) startNodeProc(np *m6NodeProc, extraEnv []string) error {
-	env := append(os.Environ(), "HOME="+np.root, "XDG_DATA_HOME="+np.root, "XDG_CONFIG_HOME="+np.root, "LocalAppData="+np.root)
+	env := append(os.Environ(), "HOME="+np.root, "XDG_DATA_HOME="+np.root, "LocalAppData="+np.root)
 	env = append(env, extraEnv...)
 	cmd := exec.Command(w.bin, "node")
 	cmd.Env = env
@@ -412,16 +409,12 @@ func (w *m6World) startNodeProc(np *m6NodeProc, extraEnv []string) error {
 		cmd.Wait()
 		close(np.done)
 	}()
-	w.cleanup(np.stop)
+	w.cleanup(np.terminate)
 	sock := filepath.Join(np.data, "sock")
 	if err := waitM6Socket(sock, 10*time.Second); err != nil {
 		return fmt.Errorf("%s socket %s: %w (%s)", np.name, sock, err, np.out.String())
 	}
 	return nil
-}
-
-func (np *m6NodeProc) stop() {
-	np.stopOnce.Do(np.terminate)
 }
 
 func (np *m6NodeProc) terminate() {
@@ -677,6 +670,7 @@ func buildM6ClaudeScript(turn1, ans1, turn2, ans2 string) []byte {
 		m6MCPPostCallStep(2, ans2),
 		m6MCPPostResultStep(2),
 		{"dir": "stdout", "msg": map[string]any{"type": "result", "subtype": "success"}},
+		{"dir": "eof"},
 	}
 	return m6MarshalJSON(map[string]any{"steps": steps})
 }
@@ -712,6 +706,7 @@ func buildM6CodexScript(turn1, ans1, turn2, ans2 string) []byte {
 		m6MCPPostCallStep(2, ans2),
 		m6MCPPostResultStep(2),
 		m6CodexTurnDoneStep(),
+		{"dir": "eof"},
 	}
 	return m6MarshalJSON(map[string]any{"session": "thr-m6-codex-1", "steps": steps})
 }
@@ -828,7 +823,6 @@ func (w *m6World) verifyJoinedRow(ai proto.AIMemberRow, agent string) (bool, err
 	if ai.CLI != agent || ai.Host != w.aiNode.key.ID() || ai.Host == w.homeNode.key.ID() {
 		return false, fmt.Errorf("unexpected AI member row: %+v", ai)
 	}
-	w.aiAgent = agent
 	w.aiMemberID = ai.ID
 	return true, nil
 }
@@ -861,19 +855,7 @@ func (w *m6World) thenAIPostsAndWaits(_ string, wantText string) error {
 		}
 		return w.matchesWaitingAI(raw), nil
 	}
-	if err := w.readHomeRowsUntil(match); err != nil {
-		return err
-	}
-	return w.recordLiveStartIfFirst()
-}
-
-func (w *m6World) recordLiveStartIfFirst() error {
-	if w.sessionID != "" {
-		return nil
-	}
-	id, err := readSingleStartLine(w.cliLogPath, w.aiAgent)
-	w.sessionID = id
-	return err
+	return w.readHomeRowsUntil(match)
 }
 
 func (w *m6World) matchesNewAIPost(raw json.RawMessage, wantText string) bool {
@@ -933,39 +915,24 @@ func (w *m6World) scanRowsFrame(rawFrame json.RawMessage, match func(json.RawMes
 }
 
 func (w *m6World) thenOneCLIProcessRan(agent string) error {
-	return waitSingleStartExitLog(w.cliLogPath, agent, w.sessionID)
+	return readSingleStartLine(w.cliLogPath, agent)
 }
 
-func readSingleStartLine(path, agent string) (string, error) {
+func readSingleStartLine(path, agent string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return "", err
+		return err
 	}
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
 	if len(lines) != 1 {
-		return "", fmt.Errorf("expected one live start line before shutdown, got %q", string(raw))
+		return fmt.Errorf("expected one start line after both turns, got %q", string(raw))
 	}
 	prefix := "start " + agent + " "
 	sessionID, ok := strings.CutPrefix(lines[0], prefix)
 	if !ok || sessionID == "" {
-		return "", fmt.Errorf("unexpected start line %q for %s", lines[0], agent)
+		return fmt.Errorf("unexpected start line %q for %s", lines[0], agent)
 	}
-	return sessionID, nil
-}
-
-func waitSingleStartExitLog(path, agent, sessionID string) error {
-	want := fmt.Sprintf("start %s %s\nexit %s %s\n", agent, sessionID, agent, sessionID)
-	deadline := time.Now().Add(5 * time.Second)
-	var got string
-	for time.Now().Before(deadline) {
-		raw, err := os.ReadFile(path)
-		if err == nil && string(raw) == want {
-			return nil
-		}
-		got = string(raw)
-		time.Sleep(20 * time.Millisecond)
-	}
-	return fmt.Errorf("lifecycle log = %q, want %q", got, want)
+	return nil
 }
 
 func m6NewKey() identity.Key {
