@@ -91,8 +91,14 @@ func homeCardSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the owner's (first|second) browser chooses option "([^"]*)" with text "([^"]*)" on the decision card$`, func(which, opt, text string) error {
 		return w.actCard(w.devices[which], w.decision, "choose", fmt.Sprintf(`,"arg":%q,"text":%q`, opt, text))
 	})
+	sc.Step(`^the owner's (first|second) browser answers the decision card with free text "([^"]*)"$`, func(which, text string) error {
+		return w.actCard(w.devices[which], w.decision, "choose", fmt.Sprintf(`,"text":%q`, text))
+	})
 	sc.Step(`^the owner's (first|second) browser tries to choose option "([^"]*)" on the decision card$`, func(which, opt string) error {
 		return w.actCard(w.devices[which], w.decision, "choose", fmt.Sprintf(`,"arg":%q`, opt))
+	})
+	sc.Step(`^the owner's (first|second) browser tries to choose nothing on the decision card$`, func(which string) error {
+		return w.actCard(w.devices[which], w.decision, "choose", "")
 	})
 	sc.Step(`^(a non-approver member tries to approve the approval card|"ai-one" tries to approve its own approval card|the owner's first browser tries to approve the approval card with an arg|"ai-two" tries to post an approval card on "ai-one"'s task)$`, w.attemptRefusal)
 	sc.Step(`^the card task is reassigned to "([^"]*)"$`, w.reassignTask)
@@ -101,12 +107,17 @@ func homeCardSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the card home answers "([^"]*)"$`, w.checkAnswer)
 	sc.Step(`^the approval card is "([^"]*)" with command "([^"]*)"$`, w.checkApprovalCmd)
 	sc.Step(`^the approval card is "([^"]*)" by "([^"]*)"$`, w.checkApprovalBy)
-	sc.Step(`^the decision card is "([^"]*)" with choice "([^"]*)" and text "([^"]*)"$`, w.checkDecisionChoice)
+	sc.Step(`^the decision card is "([^"]*)" with choice "([^"]*)" and text "([^"]*)"$`, func(status, choice, text string) error {
+		return w.checkDecision(status, &choice, &text)
+	})
+	sc.Step(`^the decision card is "([^"]*)" with no choice and text "([^"]*)"$`, func(status, text string) error {
+		return w.checkDecision(status, nil, &text)
+	})
 	sc.Step(`^the approval card is "([^"]*)" and the decision card is "([^"]*)"$`, w.checkBothStatuses)
 	sc.Step(`^the decision card is "([^"]*)"$`, func(status string) error { return w.checkCardStatus(w.decision, status) })
 	sc.Step(`^the card task waits for "([^"]*)" on the (approval|decision) card$`, w.checkTaskCardWait)
 	sc.Step(`^the card task waits for "nothing"$`, w.checkNoWait)
-	sc.Step(`^the card home has queued "([^"]*)", each caused by the last act$`, w.checkQueued)
+	sc.Step(`^the card home has queued "([^"]*)" with no cause$`, w.checkQueued)
 	sc.Step(`^the card home has queued nothing$`, func() error { return w.checkQueued("") })
 }
 
@@ -325,18 +336,19 @@ func (w *homeCardWorld) checkApprovalCmd(status, command string) error {
 }
 
 func (w *homeCardWorld) checkApprovalBy(status, who string) error {
-	card := w.disk[w.approval]
-	wantBy := w.members[who]
-	if card.State == nil || card.State.Status != status || card.State.By == nil || *card.State.By != wantBy {
-		return fmt.Errorf("approval card state %+v; want %s by %s", card.State, status, wantBy)
+	card, by, at := w.disk[w.approval], w.members[who], w.now.UnixMilli()
+	want := &proto.CardState{Status: status, By: &by, At: &at, Act: &w.lastAct}
+	if !reflect.DeepEqual(card.State, want) {
+		return fmt.Errorf("approval card state %+v; want %+v", card.State, want)
 	}
 	return nil
 }
 
-func (w *homeCardWorld) checkDecisionChoice(status, choice, text string) error {
-	card := w.disk[w.decision]
-	if card.State == nil || card.State.Status != status || !reflect.DeepEqual(card.State.Choice, &choice) || !reflect.DeepEqual(card.State.Text, &text) {
-		return fmt.Errorf("decision card state %+v", card.State)
+func (w *homeCardWorld) checkDecision(status string, choice, text *string) error {
+	card, by, at := w.disk[w.decision], w.members["owner"], w.now.UnixMilli()
+	want := &proto.CardState{Status: status, By: &by, At: &at, Choice: choice, Text: text, Act: &w.lastAct}
+	if !reflect.DeepEqual(card.State, want) {
+		return fmt.Errorf("decision card state %+v; want %+v", card.State, want)
 	}
 	return nil
 }
@@ -383,8 +395,8 @@ func (w *homeCardWorld) checkQueued(spec string) error {
 	var got []string
 	for _, it := range w.queued {
 		got = append(got, fmt.Sprintf("%s %s task %d", it.Why, w.memberName(it.AI), w.state.Tasks[it.Task].Num))
-		if it.Cause == nil || *it.Cause != w.lastAct {
-			return fmt.Errorf("item %+v has cause %+v; want %+v", it, it.Cause, w.lastAct)
+		if it.Cause != nil {
+			return fmt.Errorf("item %+v has cause %+v; want nil", it, it.Cause)
 		}
 	}
 	if !slices.Equal(got, want) {

@@ -300,7 +300,7 @@ func (s *State) cardFinishApproval(c Command, card proto.MsgRow, body proto.Appr
 		Asker:   body.AI,
 		Pending: cardPending(c.Disk, task.ID),
 	}
-	return s.cardApplyStep(c, decided, task, ev), nil
+	return s.cardApplyStep(decided, task, ev), nil
 }
 
 func cardChoose(s *State, c Command) (Result, *Refusal) {
@@ -332,10 +332,7 @@ func cardChooseFields(c Command) bool {
 }
 
 func cardChoiceOK(options []proto.DecisionOption, arg string) bool {
-	if len(options) == 0 {
-		return arg == ""
-	}
-	return cardHasOption(options, arg)
+	return arg == "" || cardHasOption(options, arg)
 }
 
 func (s *State) cardMayChoose(w Who, to []string) bool {
@@ -345,7 +342,7 @@ func (s *State) cardMayChoose(w Who, to []string) bool {
 func (s *State) cardFinishDecision(c Command, act proto.Act, card proto.MsgRow, body proto.DecisionBody) (Result, *Refusal) {
 	decided := cardActed(card, c, cardStatusDecided, cardOpt(act.Arg), cardOpt(act.Text))
 	if body.Task == nil {
-		items := s.cardItems([]TaskItem{{Why: itemDecided, AI: card.By}}, "", card.ID, &c.Env)
+		items := s.cardItems([]TaskItem{{Why: itemDecided, AI: card.By}}, "", card.ID)
 		return Result{Rows: []Row{RowOf(decided)}, Items: items}, nil
 	}
 	task := s.Tasks[*body.Task]
@@ -358,7 +355,7 @@ func (s *State) cardFinishDecision(c Command, act proto.Act, card proto.MsgRow, 
 		Asker:   card.By,
 		Pending: cardPending(c.Disk, task.ID),
 	}
-	return s.cardApplyStep(c, decided, task, ev), nil
+	return s.cardApplyStep(decided, task, ev), nil
 }
 
 func cardOpenAct(c Command, kind string, validArgs func(Command) bool) (proto.Act, proto.MsgRow, *Refusal) {
@@ -392,20 +389,20 @@ func cardOpt(s string) *string {
 	return &s
 }
 
-func (s *State) cardApplyStep(c Command, card proto.MsgRow, task proto.TaskRow, ev Event) Result {
+func (s *State) cardApplyStep(card proto.MsgRow, task proto.TaskRow, ev Event) Result {
 	moved, fx, _ := Step(task, ev)
 	rows := []Row{RowOf(card)}
 	if !reflect.DeepEqual(moved, task) {
 		rows = append(rows, RowOf(moved))
 	}
-	return Result{Rows: rows, Items: s.cardItems(fx.Items, task.ID, card.ID, &c.Env)}
+	return Result{Rows: rows, Items: s.cardItems(fx.Items, task.ID, card.ID)}
 }
 
-func (s *State) cardItems(items []TaskItem, task, msg string, cause *proto.Envelope) []Item {
+func (s *State) cardItems(items []TaskItem, task, msg string) []Item {
 	var out []Item
 	for _, it := range items {
 		if _, ok := s.AIs[it.AI]; ok {
-			out = append(out, Item{AI: it.AI, Why: it.Why, Task: task, Msg: msg, Cause: cause})
+			out = append(out, Item{AI: it.AI, Why: it.Why, Task: task, Msg: msg})
 		}
 	}
 	return out

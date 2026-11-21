@@ -417,9 +417,9 @@ this:
   sender (`forbidden`) or a paused task (`paused`) comes before a duplicate id (`conflict`). The
   card row has `main` `true`, `ts` as signed and `state` `pending`; a card in a thread advances
   `task.Thread` (`count` + 1, `last` with `text` cut to 200 characters) and writes `[card, task]`.
-- **Act.** `approve` and `deny` take neither `arg` nor `text`; `choose` takes no empty `arg` or
-  `text`, a `text` of at most 1,024 bytes as a JSON string with its quotes, `arg` naming one of
-  `body.options` when `options` is not empty, and `text` without `arg` when `options` is empty;
+- **Act.** `approve` and `deny` take neither `arg` nor `text`; `choose` takes at least one of
+  `arg` and `text`, neither empty, a `text` of at most 1,024 bytes as a JSON string with its
+  quotes, `arg` naming one of `body.options` when given, and no `arg` when `options` is empty;
   else `bad_request`. A missing message is `not_found`; a message of the wrong kind is
   `bad_request`. Only a person in `body.approvers` decides an approval, and only a person in
   `body.to` or an admin decides a decision (`as` never does), else `forbidden`. A card whose
@@ -431,8 +431,8 @@ this:
   a task run `Step` (`OnApprove` or `OnChoose`) with `ByPerson` and `cardPending`; the task row is
   written after the card row when `Step` changed it (`[card, task]`), and left out when it did not
   (such as a paused task keeping its wait). Each `decided` item (`body.ai` for `approval`;
-  `card.By`, and `task.Assignee` when another, for `decision`) carries `c.Env` as `cause`, while
-  that AI is still a member of the group. Cards never expire on a timer: a pending card stays
+  `card.By`, and `task.Assignee` when another, for `decision`) carries no `cause`, and is queued
+  while that AI is still a member of the group. Cards never expire on a timer: a pending card stays
   pending until someone acts on it or its task is reassigned, merged or cancelled
   ([approval flow](../../planning/flows/approval.md), sections D and E). `cardPending` reads the
   task's pending cards from `Disk.Pending` oldest first; `cardClose` applies `Effects.Cards`

@@ -305,7 +305,7 @@ func TestCardPostApprovalRefusals(t *testing.T) {
 
 // A4.1 and A4.2, home half: approving from a second device or denying updates
 // the card, recomputes the task wait from Event.Pending, and queues decided
-// with the signed act as cause.
+// without a cause.
 func TestCardApproveAndDeny(t *testing.T) {
 	for _, action := range []struct{ action, status string }{{"approve", "approved"}, {"deny", "denied"}} {
 		t.Run(action.action, func(t *testing.T) {
@@ -325,7 +325,7 @@ func TestCardApproveAndDeny(t *testing.T) {
 			wantTask := s.Tasks[cardTaskID]
 			wantTask.Seq, wantTask.Wait = 14, nil
 			equal(t, cardValues(res), []any{wantCard, wantTask})
-			equal(t, res.Items, []home.Item{{AI: cardA, Why: "decided", Task: cardTaskID, Msg: card.ID, Cause: &act}})
+			equal(t, res.Items, []home.Item{{AI: cardA, Why: "decided", Task: cardTaskID, Msg: card.ID}})
 
 			raw := briefRaw(t, res.Rows[0].Value())
 			equal(t, proto.UnexpectedNulls(raw, "/re"), []string{})
@@ -378,7 +378,7 @@ func TestCardApproveAndDeny(t *testing.T) {
 		act := cardActEnv(browser, 73, "approve", id(60), "")
 		res := cardApply(t, s, d, receipts{}, browser, act)
 		equal(t, len(res.Rows), 1)
-		equal(t, res.Items, []home.Item{{AI: cardA, Why: "decided", Task: cardTaskID, Msg: id(60), Cause: &act}})
+		equal(t, res.Items, []home.Item{{AI: cardA, Why: "decided", Task: cardTaskID, Msg: id(60)}})
 	})
 }
 
@@ -566,8 +566,8 @@ func TestCardChoose(t *testing.T) {
 		wantTask.Seq, wantTask.Wait = 14, nil
 		equal(t, cardValues(res), []any{wantCard, wantTask})
 		equal(t, res.Items, []home.Item{
-			{AI: aiID, Why: "decided", Task: cardTaskID, Msg: id(66), Cause: &act},
-			{AI: cardA, Why: "decided", Task: cardTaskID, Msg: id(66), Cause: &act},
+			{AI: aiID, Why: "decided", Task: cardTaskID, Msg: id(66)},
+			{AI: cardA, Why: "decided", Task: cardTaskID, Msg: id(66)},
 		})
 
 		raw := briefRaw(t, res.Rows[0].Value())
@@ -588,7 +588,32 @@ func TestCardChoose(t *testing.T) {
 		equal(t, res.Answer, store.Outcome{OK: true})
 		gotState := res.Rows[0].Value().(proto.MsgRow).State
 		equal(t, []any{*gotState.By, *gotState.Choice, gotState.Text == nil}, []any{cardGuest, "A", true})
-		equal(t, res.Items, []home.Item{{AI: cardA, Why: "decided", Task: cardTaskID, Msg: id(66), Cause: &act}})
+		equal(t, res.Items, []home.Item{{AI: cardA, Why: "decided", Task: cardTaskID, Msg: id(66)}})
+	})
+
+	t.Run("multiple-choice decision answered with free text alone", func(t *testing.T) {
+		s, d := cardState(t), cardDisk{}
+		body := cardDecisionBody(&cardTaskID)
+		cardCommit(s, d, cardApply(t, s, d, receipts{}, laptop, briefSign(laptop, cardDecisionPost(66, cardA, body))))
+
+		custom := "Put the path in the status bar."
+		act := cardActEnv(browser, 76, "choose", id(66), `,"text":"`+custom+`"`)
+		res := cardApply(t, s, d, receipts{}, browser, act)
+		equal(t, res.Answer, store.Outcome{OK: true})
+
+		by, at := ownerID, int64(clock)
+		wantCard := d[id(66)]
+		wantCard.Seq = 13
+		wantCard.State = &proto.CardState{Status: "decided", By: &by, At: &at, Choice: nil, Text: &custom, Act: &act}
+		wantTask := s.Tasks[cardTaskID]
+		wantTask.Seq, wantTask.Wait = 14, nil
+		equal(t, cardValues(res), []any{wantCard, wantTask})
+		equal(t, res.Items, []home.Item{{AI: cardA, Why: "decided", Task: cardTaskID, Msg: id(66)}})
+
+		raw := briefRaw(t, res.Rows[0].Value())
+		equal(t, proto.UnexpectedNulls(raw, "/re"), []string{})
+		var typed proto.MessageRow[proto.DecisionBody, proto.DecisionDecidedState]
+		equal(t, proto.Decode(raw, &typed), nil)
 	})
 
 	t.Run("admin not in body.to decides free-text main-line decision of 1 KiB", func(t *testing.T) {
@@ -602,7 +627,7 @@ func TestCardChoose(t *testing.T) {
 		equal(t, len(res.Rows), 1)
 		gotState := res.Rows[0].Value().(proto.MsgRow).State
 		equal(t, []any{*gotState.By, gotState.Choice == nil, *gotState.Text}, []any{ownerID, true, maxText})
-		equal(t, res.Items, []home.Item{{AI: cardB, Why: "decided", Msg: id(66), Cause: &act}})
+		equal(t, res.Items, []home.Item{{AI: cardB, Why: "decided", Msg: id(66)}})
 	})
 
 	t.Run("removed asking AI is not queued an item, and next pending decision takes wait", func(t *testing.T) {
@@ -618,7 +643,7 @@ func TestCardChoose(t *testing.T) {
 		res := cardApply(t, s, d, receipts{}, browser, act)
 		equal(t, res.Answer, store.Outcome{OK: true})
 		equal(t, res.Rows[1].Value().(proto.TaskRow).Wait, &proto.TaskWait{Kind: "decision", Msg: id(67), Who: []string{browser.ID()}, Since: cardPostTS})
-		equal(t, res.Items, []home.Item{{AI: cardA, Why: "decided", Task: cardTaskID, Msg: id(66), Cause: &act}})
+		equal(t, res.Items, []home.Item{{AI: cardA, Why: "decided", Task: cardTaskID, Msg: id(66)}})
 	})
 }
 
@@ -633,25 +658,28 @@ func TestCardChooseRefusals(t *testing.T) {
 		state    func(*home.State)
 		code     string
 	}{
-		"invalid msg id":                    {msg: "bad-id", extra: `,"arg":"A"`, code: "bad_request"},
-		"neither arg nor text":              {extra: "", code: "bad_request"},
-		"empty arg with text":               {extra: `,"arg":"","text":"ok"`, code: "bad_request"},
-		"empty text with arg":               {extra: `,"arg":"A","text":""`, code: "bad_request"},
-		"text of 1025 bytes":                {extra: `,"arg":"A","text":"` + strings.Repeat("x", 1023) + `"`, code: "bad_request"},
-		"text holding < of 1025 bytes":      {extra: `,"arg":"A","text":"` + strings.Repeat("x", 1022) + `<"`, code: "bad_request"},
-		"missing message":                   {msg: id(91), extra: `,"arg":"A"`, code: "not_found"},
-		"wrong card kind":                   {extra: `,"arg":"A"`, card: func(m *proto.MsgRow) { m.Kind = "approval" }, code: "bad_request"},
-		"arg not in options":                {extra: `,"arg":"C"`, code: "bad_request"},
-		"text without arg when options set": {extra: `,"text":"Custom"`, code: "bad_request"},
-		"arg when options empty":            {freeText: true, extra: `,"arg":"A","text":"Custom"`, code: "bad_request"},
-		"by an AI on owner device":          {by: laptop, extra: `,"arg":"A","as":"` + cardA + `"`, code: "forbidden"},
-		"by non-admin not in body.to":       {by: guest, extra: `,"arg":"A"`, code: "forbidden"},
-		"already decided":                   {extra: `,"arg":"A"`, card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "decided"} }, code: "conflict"},
-		"expired decision":                  {extra: `,"arg":"A"`, card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "expired", At: &at} }, code: "conflict"},
-		"nil state":                         {extra: `,"arg":"A"`, card: func(m *proto.MsgRow) { m.State = nil }, code: "conflict"},
-		"missing task":                      {extra: `,"arg":"A"`, state: func(s *home.State) { delete(s.Tasks, cardTaskID) }, code: "conflict"},
-		"merged task":                       {extra: `,"arg":"A"`, state: func(s *home.State) { t := s.Tasks[cardTaskID]; t.State = "merged"; s.Tasks[cardTaskID] = t }, code: "conflict"},
-		"cancelled task":                    {extra: `,"arg":"A"`, state: func(s *home.State) { t := s.Tasks[cardTaskID]; t.State = "cancelled"; s.Tasks[cardTaskID] = t }, code: "conflict"},
+		"invalid msg id":                 {msg: "bad-id", extra: `,"arg":"A"`, code: "bad_request"},
+		"neither arg nor text":           {extra: "", code: "bad_request"},
+		"neither arg nor text free-text": {freeText: true, extra: "", code: "bad_request"},
+		"empty arg with text":            {extra: `,"arg":"","text":"ok"`, code: "bad_request"},
+		"empty text with arg":            {extra: `,"arg":"A","text":""`, code: "bad_request"},
+		"empty text without arg":         {extra: `,"text":""`, code: "bad_request"},
+		"text of 1025 bytes":             {extra: `,"arg":"A","text":"` + strings.Repeat("x", 1023) + `"`, code: "bad_request"},
+		"text holding < of 1025 bytes":   {extra: `,"arg":"A","text":"` + strings.Repeat("x", 1022) + `<"`, code: "bad_request"},
+		"missing message":                {msg: id(91), extra: `,"arg":"A"`, code: "not_found"},
+		"wrong card kind":                {extra: `,"arg":"A"`, card: func(m *proto.MsgRow) { m.Kind = "approval" }, code: "bad_request"},
+		"arg not in options":             {extra: `,"arg":"C"`, code: "bad_request"},
+		"arg not in options with text":   {extra: `,"arg":"C","text":"Custom"`, code: "bad_request"},
+		"arg when options empty":         {freeText: true, extra: `,"arg":"A","text":"Custom"`, code: "bad_request"},
+		"arg alone when options empty":   {freeText: true, extra: `,"arg":"A"`, code: "bad_request"},
+		"by an AI on owner device":       {by: laptop, extra: `,"arg":"A","as":"` + cardA + `"`, code: "forbidden"},
+		"by non-admin not in body.to":    {by: guest, extra: `,"arg":"A"`, code: "forbidden"},
+		"already decided":                {extra: `,"arg":"A"`, card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "decided"} }, code: "conflict"},
+		"expired decision":               {extra: `,"arg":"A"`, card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "expired", At: &at} }, code: "conflict"},
+		"nil state":                      {extra: `,"arg":"A"`, card: func(m *proto.MsgRow) { m.State = nil }, code: "conflict"},
+		"missing task":                   {extra: `,"arg":"A"`, state: func(s *home.State) { delete(s.Tasks, cardTaskID) }, code: "conflict"},
+		"merged task":                    {extra: `,"arg":"A"`, state: func(s *home.State) { t := s.Tasks[cardTaskID]; t.State = "merged"; s.Tasks[cardTaskID] = t }, code: "conflict"},
+		"cancelled task":                 {extra: `,"arg":"A"`, state: func(s *home.State) { t := s.Tasks[cardTaskID]; t.State = "cancelled"; s.Tasks[cardTaskID] = t }, code: "conflict"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, d := cardState(t), cardDisk{}

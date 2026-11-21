@@ -143,15 +143,16 @@ Rules for every `post` by an AI:
 | `approval` | `approve`, `deny` | a person in `body.approvers` | `state` updated; task-machine row 18 |
 | `decision` | `choose` | a person in `body.to`, or an admin | `state.status = decided` with `choice = arg` and `text`; task-machine row 20 |
 
-`choose` has `arg`, the `id` of one of `body.options`, and may have
-`text`; on a decision whose `options` is empty it has `text` and no `arg`.
-`revise` may have `text`. `confirm`, `approve` and `deny` have neither.
-Anything else is `bad_request`.
+On a decision with options, `choose` has `arg` (the `id` of one of
+`body.options`), `text`, or both (2026-11-21 owner decision); on a decision
+whose `options` is empty it has `text` and no `arg`. `revise` may have
+`text`. `confirm`, `approve` and `deny` have neither. Anything else is
+`bad_request`.
 
 Acting on a card whose `state.status` is not `pending` returns `conflict`.
-A decided card keeps the signed `act` in `state.act`; it is the `cause` of
-the items that follow from it, also of those created later (a dependent
-task that becomes active after a merge).
+A decided card keeps the signed `act` in `state.act` on the card row;
+`decided` items and later `assign` items (a dependent task that becomes
+active after a merge) carry no `cause` (2026-11-21 slimming A-3).
 
 `jump` (R-72), fields: `msg`. By the person who wrote message `msg`. The
 newest unacknowledged item that a message of that person in the same

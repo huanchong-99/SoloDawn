@@ -114,3 +114,19 @@ func TestCardCloseExpiresAndReassigns(t *testing.T) {
 	var decodedDec proto.MessageRow[proto.DecisionBody, proto.TimedState]
 	cardTestSame(t, proto.Decode(rawDec, &decodedDec), nil)
 }
+
+// cardChoiceOK accepts an omitted arg or a listed option id, and cardItems
+// queues decided items without a cause for current AI members only.
+func TestCardChoiceOKAndCardItems(t *testing.T) {
+	opts := []proto.DecisionOption{{ID: "A", Label: "One", Effect: "First"}, {ID: "B", Label: "Two", Effect: "Second"}}
+	cardTestSame(t, cardChoiceOK(opts, ""), true)
+	cardTestSame(t, cardChoiceOK(opts, "A"), true)
+	cardTestSame(t, cardChoiceOK(opts, "Z"), false)
+	cardTestSame(t, cardChoiceOK(nil, ""), true)
+	cardTestSame(t, cardChoiceOK(nil, "A"), false)
+
+	s := NewState("g1", "home-1", "owner-1")
+	s.AIs["ai1"] = proto.AIMemberRow{}
+	got := s.cardItems([]TaskItem{{Why: "decided", AI: "ai1"}, {Why: "decided", AI: "gone"}}, "task-one", "dec-1")
+	cardTestSame(t, got, []Item{{AI: "ai1", Why: "decided", Task: "task-one", Msg: "dec-1", Cause: nil}})
+}

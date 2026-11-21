@@ -140,9 +140,9 @@ read the rest of it (`risks.md` K-21).
 | `recommended` | optional: the `id` of an option |
 | `to` | user ids, at least one |
 
-A decision with options is answered with one of them, with or without free
-text; one whose `options` is empty, with free text (`contracts/commands.md`
-1.4).
+A decision with options is answered with one of them (with or without free
+text) or with free text alone (2026-11-21 owner decision); one whose
+`options` is empty, with free text (`contracts/commands.md` 1.4).
 
 Signed: every field. Added by the home: nothing.
 
