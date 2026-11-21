@@ -1,5 +1,69 @@
 <script lang="ts">
+  import Avatar from '../components/Avatar.svelte';
+  import Icon from '../components/Icon.svelte';
+  import NodeIcon from '../components/nodes/NodeIcon.svelte';
+  import PairBrowserDialog from '../components/nodes/PairBrowserDialog.svelte';
+  import { find } from '../lib/groups.svelte';
+  import type { Net } from '../lib/net.svelte';
+  import { nodes, type Computer } from '../lib/nodes.svelte';
   import { t } from '../lib/prefs.svelte';
+  import type { TaskRow } from '../lib/proto';
+  import { href } from '../lib/route.svelte';
+  import { now } from '../lib/when';
+
+  let { net }: { net: Net } = $props();
+  const uid = $props.id();
+
+  $effect(() => nodes.sync(net.homes));
+
+  const computers = $derived(nodes.list(net));
+  const pairable = $derived(
+    computers.filter((comp) => comp.online && comp.home !== undefined && comp.info !== undefined),
+  );
+  let pairing = $state(false);
+
+  const cliName = (agent: string) =>
+    agent === 'claude' ? 'Claude Code' : agent === 'codex' ? 'Codex' : agent;
+
+  const mb = (bytes: number) => String(Number((bytes / (1024 * 1024)).toFixed(1)));
+
+  const relayQuota = (relay: { used: number; limit: number }) =>
+    t('nodes.relay.used').replace('{used}', mb(relay.used)).replace('{limit}', mb(relay.limit));
+
+  function hostedGroups(comp: Computer) {
+    const map = new Map<string, string>();
+    if (comp.info) {
+      for (const entry of comp.info.homes) {
+        if (entry.home === comp.info.device) map.set(entry.g, entry.name);
+      }
+    }
+    for (const group of comp.home?.groups ?? []) map.set(group.g, group.name);
+    return [...map].map(([g, name]) => ({ g, name }));
+  }
+
+  function accountLabel(account: string | null) {
+    if (account === 'personal') return t('nodes.account.personal');
+    if (account === 'team') return t('nodes.account.team');
+    if (account === 'api_key') return t('nodes.account.api_key');
+    return t('nodes.account.unset');
+  }
+
+  const stateTone = (state: string) =>
+    state === 'dormant' ? 'sleeping' : state === 'limited' ? 'paused' : state;
+
+  function stateLabel(state: string) {
+    const known = [
+      'working',
+      'waiting',
+      'dormant',
+      'takeover',
+      'paused',
+      'limited',
+      'offline',
+    ] as const;
+    const match = known.find((each) => each === state);
+    return match ? t(`nodes.ai.state.${match}`) : state;
+  }
 </script>
 
 <div class="page">
@@ -8,5 +72,375 @@
       <h2>{t('page.nodes')}</h2>
       <p>{t('nodes.lead')}</p>
     </div>
+    <a class="btn" href={href('onboarding')}>
+      <Icon name="plus" sm /><span>{t('nodes.add.computer')}</span>
+    </a>
+    <button type="button" class="btn" disabled={!pairable.length} onclick={() => (pairing = true)}>
+      <NodeIcon name="phone" sm /><span>{t('nodes.add.browser')}</span>
+    </button>
   </div>
+
+  {#if computers.length}
+    {#each computers as comp, idx (comp.info?.device ?? comp.home ?? idx)}
+      {@const hosted = hostedGroups(comp)}
+      {@const relayed = comp.online && comp.path?.kind === 'relay'}
+      <section class="card node" aria-labelledby={`${uid}-n-${idx}`}>
+        <header class="row">
+          <span class="node-ico"><Icon name="pc" /></span>
+          <div class="grow">
+            <h3 id={`${uid}-n-${idx}`}>{comp.info?.name ?? comp.home?.name ?? ''}</h3>
+            {#if comp.info}
+              <p class="muted sub">
+                {comp.info.os} · {t('nodes.node')}
+                {comp.info.version}{#if comp.online}
+                  {' '}· {t('nodes.sessions')
+                    .replace('{open}', String(comp.info.open))
+                    .replace('{max}', String(comp.info.max_open))}{/if}
+              </p>
+            {/if}
+          </div>
+          <span class="st" data-st={comp.online ? 'ok' : 'offline'}>
+            <i></i>{t(comp.online ? 'nodes.status.online' : 'nodes.status.offline')}
+          </span>
+        </header>
+
+        {#if comp.online || hosted.length || (comp.info?.relay && !relayed)}
+          <dl class="kv">
+            {#if comp.online}
+              <dt>{t('nodes.link')}</dt>
+              <dd>
+                {#if comp.path?.kind === 'direct'}
+                  <span class="who">
+                    <span class="ok-ico"><NodeIcon name="direct" sm /></span>
+                    <span>{t('nodes.conn.ok')}</span>
+                    {#if comp.path.rtt !== undefined}
+                      <span class="muted">· {comp.path.rtt} ms</span>
+                    {/if}
+                  </span>
+                {:else if comp.path?.kind === 'relay'}
+                  {@const mins = Math.max(1, Math.round((now() - comp.path.since) / 60_000))}
+                  <span class="who relay-who">
+                    <NodeIcon name="relay" sm /><b>{t('nodes.relay')}</b>
+                    <span class="muted">
+                      {#if comp.path.rtt !== undefined}· {comp.path.rtt} ms{' '}{/if}· {t(
+                        'nodes.relay.for',
+                      ).replace('{n}', String(mins))}
+                    </span>
+                  </span>
+                {:else}
+                  <span class="muted">{t('nodes.conn.linking')}</span>
+                {/if}
+              </dd>
+            {/if}
+            {#if comp.info?.relay && !relayed}
+              <dt>{t('nodes.relay.quota')}</dt>
+              <dd>{mb(comp.info.relay.used)} MB / {mb(comp.info.relay.limit)} MB</dd>
+            {/if}
+            {#if hosted.length}
+              <dt>{t('nodes.hosts')}</dt>
+              <dd>{hosted.map((group) => group.name).join(' · ')}</dd>
+            {/if}
+          </dl>
+        {/if}
+
+        {#if relayed}
+          <div class="note" data-tone="dawn">
+            <Icon name="alert" sm />
+            <div class="grow">
+              <b>{t('nodes.relay.title')}</b>
+              {t('nodes.relay.body')}
+              {#if comp.info?.relay}
+                <div class="row relay-foot">
+                  <span class="hint">{relayQuota(comp.info.relay)}</span>
+                </div>
+              {/if}
+            </div>
+          </div>
+        {/if}
+
+        {#if hosted.length}
+          <p class="note" data-tone="dawn">
+            <Icon name="home" sm />
+            <span>
+              <b>
+                {t(hosted.length === 1 ? 'nodes.hosts.warnOne' : 'nodes.hosts.warn').replace(
+                  '{n}',
+                  String(hosted.length),
+                )}
+              </b>
+              {' '}{t('nodes.hosts.body')}
+            </span>
+          </p>
+        {/if}
+
+        {#if comp.info}
+          {#each comp.info.agents as agent (agent.agent)}
+            <div class="ai-row">
+              <div class="row">
+                <Avatar id={agent.agent} name={cliName(agent.agent)} cli={agent.agent} />
+                <div class="grow">
+                  <div class="row ai-title">
+                    <b>{cliName(agent.agent)}</b>
+                    <span class="mono hint">v{agent.cli_version}</span>
+                    <span class="badge" data-tone={agent.account ? undefined : 'dawn'}>
+                      {accountLabel(agent.account)}
+                    </span>
+                  </div>
+                  {#if !comp.online}
+                    <p class="st" data-st="offline"><i></i>{t('nodes.ai.offline')}</p>
+                  {:else if !agent.login_ok}
+                    <p class="st" data-st="down"><i></i>{t('nodes.ai.notSignedIn')}</p>
+                  {:else}
+                    <p class="st" data-st="ok"><i></i>{t('nodes.ai.signedIn')}</p>
+                  {/if}
+                </div>
+              </div>
+
+              {#if agent.groups.length}
+                {#each agent.groups as entry (entry.g)}
+                  {@const group = find(entry.g)}
+                  {@const groupName =
+                    group?.name ?? comp.info.homes.find((h) => h.g === entry.g)?.name ?? entry.g}
+                  {@const member = group?.member(entry.member)}
+                  {@const isSec = member?.kind === 'ai' && member.secretary}
+                  {@const state = comp.online ? entry.state : 'offline'}
+                  {@const taskRow = entry.task
+                    ? (group?.rows.get(`task ${entry.task}`) as TaskRow | undefined)
+                    : undefined}
+                  <div class="perm">
+                    <span class="row">
+                      <a href={href('chat', { g: entry.g })}>{groupName}</a>
+                      {#if isSec}
+                        <span class="badge">{t('nodes.ai.secretary')}</span>
+                      {/if}
+                    </span>
+                    <span class="st" data-st={stateTone(state)}>
+                      <i></i>{stateLabel(state)}{#if taskRow}
+                        {' '}· T-{taskRow.num}{/if}
+                    </span>
+                  </div>
+                {/each}
+              {:else}
+                <p class="hint">{t('nodes.ai.nogroups')}</p>
+              {/if}
+            </div>
+          {/each}
+        {/if}
+      </section>
+    {/each}
+  {:else}
+    <div class="empty">
+      <span class="horizon"></span>
+      <h3>{t('nodes.empty.title')}</h3>
+      <p>{t('nodes.empty.body')}</p>
+      <a class="btn btn-primary" href={href('onboarding')}>
+        <Icon name="plus" sm /><span>{t('nodes.add.computer')}</span>
+      </a>
+    </div>
+  {/if}
 </div>
+
+<PairBrowserDialog bind:open={pairing} {net} />
+
+<style>
+  .node {
+    padding: 0;
+    gap: 0;
+  }
+  .node > header {
+    padding: var(--sp-4);
+  }
+  .node > header h3 {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    flex-wrap: wrap;
+  }
+  .sub {
+    font-size: var(--fs-sm);
+    margin-top: 2px;
+  }
+  .node > .kv,
+  .node > .note {
+    margin: 0 var(--sp-4) var(--sp-4);
+  }
+  .node-ico {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 13px;
+    background: var(--surface-2);
+    color: var(--text-2);
+  }
+  .kv {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 6px var(--sp-4);
+    font-size: var(--fs-sm);
+  }
+  .kv dt {
+    color: var(--text-3);
+  }
+  .kv dd {
+    min-width: 0;
+  }
+  .who {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    vertical-align: middle;
+  }
+  .ok-ico {
+    display: inline-grid;
+    color: var(--ok);
+  }
+  .relay-who {
+    color: var(--dawn-text);
+  }
+  .relay-foot {
+    margin-top: 8px;
+  }
+  .note {
+    display: flex;
+    gap: var(--sp-2);
+    padding: 10px 12px;
+    border-radius: var(--r-md);
+    background: var(--tone-soft, var(--surface-2));
+    color: var(--text);
+    font-size: var(--fs-sm);
+  }
+  .note > :global(.i) {
+    color: var(--tone-text, var(--text-3));
+    margin-top: 2px;
+  }
+  .note b {
+    color: var(--tone-text, inherit);
+  }
+  .ai-row {
+    border-top: 1px solid var(--line);
+    padding: var(--sp-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+  }
+  .ai-title {
+    gap: 6px;
+  }
+  .perm {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    font-size: var(--fs-sm);
+  }
+  .perm + .perm {
+    padding-top: var(--sp-2);
+    border-top: 1px dashed var(--line);
+  }
+  .perm > span:first-child {
+    flex: 1;
+    min-width: 0;
+  }
+  .st {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    min-width: 0;
+  }
+  p.st {
+    display: flex;
+    margin-top: 2px;
+  }
+  .st i {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    color: var(--text-3);
+    background: currentColor;
+  }
+  .st[data-st='ok'] i {
+    color: var(--ok);
+  }
+  .st[data-st='working'] i {
+    color: var(--sky);
+    animation: pulse 2s var(--ease) infinite;
+  }
+  .st[data-st='waiting'] i {
+    background: none;
+    border: 2px solid currentColor;
+  }
+  .st[data-st='sleeping'] {
+    color: var(--text-3);
+  }
+  .st[data-st='sleeping'] i {
+    width: 10px;
+    height: 10px;
+    background: none;
+    box-shadow: inset -3px -2px 0 0 currentColor;
+  }
+  .st[data-st='offline'] {
+    color: var(--text-3);
+  }
+  .st[data-st='offline'] i {
+    background: none;
+    border: 1.5px dashed currentColor;
+  }
+  .st[data-st='paused'] i {
+    border-radius: 1px;
+    background: linear-gradient(90deg, currentColor 34%, transparent 34% 66%, currentColor 66%);
+  }
+  .st[data-st='takeover'] {
+    color: var(--text);
+    font-weight: 500;
+  }
+  .st[data-st='takeover'] i {
+    border-radius: 2px;
+    color: var(--text);
+  }
+  .st[data-st='down'] {
+    color: var(--danger);
+  }
+  .st[data-st='down'] i {
+    color: var(--danger);
+    background: none;
+    border: 2px solid currentColor;
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.35;
+      transform: scale(0.82);
+    }
+  }
+  .empty {
+    display: grid;
+    justify-items: start;
+    gap: var(--sp-3);
+    padding: var(--sp-6) var(--sp-5);
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--r-lg);
+  }
+  .empty h3 {
+    font-size: var(--fs-lg);
+  }
+  .empty p {
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+  }
+  .horizon {
+    width: 100%;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--horizon);
+  }
+  @media (max-width: 640px) {
+    .perm {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+    }
+  }
+</style>
