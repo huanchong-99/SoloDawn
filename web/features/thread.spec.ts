@@ -7,6 +7,7 @@ import { examples } from '../src/lib/mock';
 import { cards } from '../src/lib/mounts.svelte';
 import { prefs } from '../src/lib/prefs.svelte';
 import type * as p from '../src/lib/proto';
+import { route } from '../src/lib/route.svelte';
 import { browser, example, owner, TestHome, user } from './home';
 import { all, closePage, one, openPage, show, texts } from './page';
 
@@ -297,7 +298,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           }),
         );
       });
+      let scrolled: unknown;
       When('the thread of task 12 is mounted', async () => {
+        openPage(`#/groups/${website}`);
         show(Thread, { group, task });
         await vi.waitFor(() => expect(group.paging(taskId).more).toBe(false));
         flushSync();
@@ -326,6 +329,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         'only cards waiting on the reader carry the dawn badge, and every main-line card links to its main-line message without duplicate ids',
         () => {
           expect(all('.thread [id]')).toEqual([]);
+          const ids = all('[id]').map((el) => el.id);
+          expect(new Set(ids).size).toBe(ids.length);
           const pendingAp = rowWith('Time the path change in a browser.');
           const decidedAp = rowWith('Approved earlier.');
           const pendingDc = rowWith('Where should the path appear?');
@@ -348,12 +353,44 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           ).toBeUndefined();
           expect(summaryRow.querySelector<HTMLElement>('.ti-head .badge')?.dataset.tone).toBe('ok');
 
-          expect(pendingAp.querySelector('a')?.getAttribute('href')).toBe('#m-k-ap');
-          expect(decidedAp.querySelector('a')?.getAttribute('href')).toBe('#m-k-ap-done');
-          expect(pendingDc.querySelector('a')?.getAttribute('href')).toBe('#m-k-dc');
-          expect(decidedDc.querySelector('a')?.getAttribute('href')).toBe('#m-k-dc-done');
-          expect(summaryRow.querySelector('a')?.getAttribute('href')).toBe('#m-k-sum');
+          expect(pendingAp.querySelector('a.tcard')?.getAttribute('href')).toBe('#m-k-ap');
+          expect(decidedAp.querySelector('a.tcard')?.getAttribute('href')).toBe('#m-k-ap-done');
+          expect(pendingDc.querySelector('a.tcard')?.getAttribute('href')).toBe('#m-k-dc');
+          expect(decidedDc.querySelector('a.tcard')?.getAttribute('href')).toBe('#m-k-dc-done');
+          expect(summaryRow.querySelector('a.tcard')?.getAttribute('href')).toBe('#m-k-sum');
           expect(all('.thread .card, .thread button:not(.tpage button)')).toEqual([]);
+        },
+      );
+      And(
+        'the summary line shows "T-12 · score 94" in English and "T-12 · 94 分" in Chinese',
+        () => {
+          const summaryLink = () => one<HTMLAnchorElement>('.thread a.tcard[href="#m-k-sum"]');
+          expect(summaryLink().textContent).toBe('T-12 · score 94');
+          prefs.lang = 'zh-CN';
+          flushSync();
+          expect(summaryLink().textContent).toBe('T-12 · 94 分');
+          prefs.lang = 'en';
+          flushSync();
+        },
+      );
+      When('the reader clicks a main-line card link in the thread', () => {
+        scrolled = undefined;
+        const target = one('#m-k-ap');
+        target.scrollIntoView = (arg) => {
+          scrolled = arg;
+        };
+        one<HTMLAnchorElement>('.thread a.tcard[href="#m-k-ap"]').click();
+        flushSync();
+      });
+      Then(
+        'the hash route stays on the chat of "Website" and scrolls to the main-line message',
+        () => {
+          expect(location.hash).toBe(`#/groups/${website}`);
+          expect(route.page).toBe('chat');
+          expect(route.params).toEqual({ g: website });
+          expect(texts('.chat-head h2')).toEqual(['Website']);
+          expect(scrolled).toEqual({ behavior: 'smooth', block: 'center' });
+          expect(one('#m-k-ap').contains(document.activeElement)).toBe(true);
         },
       );
       And('the question marks the mention "@Secretary" and the code span "path"', () => {

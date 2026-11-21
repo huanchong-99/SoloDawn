@@ -459,6 +459,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/net.svelte.ts`     | where the homes come from: `sourceOf`, `start`, the mock's home |
 | `src/lib/mounts.svelte.ts`  | mounting points, `gather` of the areas' mounts, `card(kind)`    |
 | `src/lib/motion.ts`         | `spring`, the curve of `--spring`; `shift`, the page cross-fade |
+| `src/lib/jump.ts`           | `jumpToMessage`: scroll and focus `#m-<id>` without routing     |
 | `src/lib/proto.ts`          | wire schemas and types, `decode`, the `Ctl` interface           |
 | `src/lib/mock.ts`           | wire examples by name, their schemas, `mockCtl`                 |
 | `src/lib/rendezvous.ts`     | signalling client: sign-in, pacing, the receiver's checks       |

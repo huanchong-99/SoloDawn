@@ -11,6 +11,7 @@
   "thread.review.veto": "Veto",
   "thread.review.ok": "Passed review",
   "thread.review.fail": "Sent back by review",
+  "thread.summary.score": "score {n}",
   "thread.file.one": "1 file",
   "thread.files": "{n} files",
   "thread.checks.local.ok": "Local checks passed",

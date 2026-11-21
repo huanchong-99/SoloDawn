@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { parts } from '../../lib/compose';
   import { subject, type Group } from '../../lib/groups.svelte';
+  import { jumpToMessage } from '../../lib/jump';
   import { card as cardOf } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import type { MsgRow, TaskRow } from '../../lib/proto';
@@ -50,6 +51,15 @@
       label: t(`chat.kind.${msg.kind}`),
       tone: group.waiting.includes(msg) ? 'dawn' : tones[msg.kind],
     };
+  }
+
+  function lineText(msg: MsgRow): string {
+    if (msg.kind === 'summary' && !msg.text) {
+      const score = t('thread.summary.score').replace('{n}', String(msg.body.score));
+      const num = group.task(msg.body.task)?.num;
+      return num !== undefined ? `T-${num} · ${score}` : score;
+    }
+    return subject(msg) || t(`chat.kind.${msg.kind}`);
   }
 </script>
 
@@ -100,7 +110,13 @@
             </p>
             {#if msg.main}
               <p class="text">
-                <a href={`#m-${msg.id}`}>{subject(msg) || t(`chat.kind.${msg.kind}`)}</a>
+                <a
+                  class="tcard"
+                  href="#m-{msg.id}"
+                  onclick={(event) => jumpToMessage(event, msg.id, msg.kind)}
+                >
+                  {lineText(msg)}
+                </a>
               </p>
             {:else}
               {@const Card = cardOf(msg.kind)}

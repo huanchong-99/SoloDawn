@@ -11,6 +11,7 @@
   "thread.review.veto": "一票否决",
   "thread.review.ok": "评审通过",
   "thread.review.fail": "评审打回",
+  "thread.summary.score": "{n} 分",
   "thread.file.one": "1 个文件",
   "thread.files": "{n} 个文件",
   "thread.checks.local.ok": "本机检查通过",

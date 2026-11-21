@@ -29,6 +29,9 @@ Feature: Task thread, review block and system notices
     When the thread of task 12 is mounted
     Then the thread shows the badges for progress, question, report, approval, decision and summary
     And only cards waiting on the reader carry the dawn badge, and every main-line card links to its main-line message without duplicate ids
+    And the summary line shows "T-12 · score 94" in English and "T-12 · 94 分" in Chinese
+    When the reader clicks a main-line card link in the thread
+    Then the hash route stays on the chat of "Website" and scrolls to the main-line message
     And the question marks the mention "@Secretary" and the code span "path"
     And the report metadata shows PR 31, short commit "9f2c1ab", "4 files" and "+212 −18"
     And the check rows show passing local checks, failing cloud checks and a merge conflict
