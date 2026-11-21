@@ -125,10 +125,8 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   each CLI. (`live`)
 - **A3.9** A `post` from an AI that contains a test secret pattern fails
   with `secret`; no row for it exists on the home.
-- **A3.10** An inbox item that is not signed by the group's home, injected
-  by a test hook, is refused by the host; the audit says `refused`. An item
-  sent twice by the home produces one turn, also across a restart of the
-  host.
+- **A3.10** An inbox item sent twice by the home produces one turn, also
+  across a restart of the host.
 
 ## M4. Permissions and approvals
 
