@@ -97,17 +97,19 @@ async function setPeerOffline(page: Page, offline: boolean) {
 
 async function postBulkHistory(page: Page, count: number) {
   await page.evaluate(async (total) => {
-    const chat = document.querySelector('.chat');
     const ta = document.querySelector<HTMLTextAreaElement>('.composer textarea');
     const form = document.querySelector<HTMLFormElement>('.composer form');
-    if (!chat || !ta || !form) throw new Error('composer not mounted');
+    const desc = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+    if (!ta || !form || !desc?.set) throw new Error('composer not mounted');
     let wake = () => {};
-    const notify = () => {
-      if (ta.value === '') wake();
-    };
-    const obs = new MutationObserver(notify);
-    obs.observe(chat, { childList: true, subtree: true });
-    document.addEventListener('selectionchange', notify);
+    Object.defineProperty(ta, 'value', {
+      configurable: true,
+      get: desc.get,
+      set(next: string) {
+        desc.set?.call(this, next);
+        if (next === '') wake();
+      },
+    });
     try {
       for (let i = 1; i <= total; i++) {
         const cleared = new Promise<void>((resolve) => {
@@ -119,8 +121,7 @@ async function postBulkHistory(page: Page, count: number) {
         if (ta.value !== '') await cleared;
       }
     } finally {
-      obs.disconnect();
-      document.removeEventListener('selectionchange', notify);
+      Reflect.deleteProperty(ta, 'value');
     }
   }, count);
 }
