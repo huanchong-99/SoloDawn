@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-21 · limitation · Finished tasks stay in a group's state in memory after retention until a restart
+
+- Symptom: after the daily retention run deletes a `merged` or `cancelled` task row older than `retention_days` from SQLite, `State.Tasks` in the running home still holds that task row until the loop restarts. A rule or a state read that inspects `State.Tasks` before a restart still sees the finished task; a cold read from the store snapshot and a restarted loop do not.
+- Cause: retention runs `(*store.Tx).Retain` through `Result.Writes` (`internal/home/retention.go`, `retWrite.Put`; `internal/store/retention.go`, `Retain`), which deletes aged rows in SQLite without returning per-group task removals to `State.Commit` (`internal/home/home.go:375`).
+- Status: open, accepted for step 1 (`internal/home/README.md`, "Retention"). Finished tasks take no further commands and occupy little memory until the next restart; `grp.num` keeps the highest task number so task numbers are never reused after a restart.
+
 ### 2026-11-21 · limitation · The jobs of a group in the home's run loop have no bound
 
 - Symptom: not observed. A client that sends `cmd` frames faster than its group applies them makes the list of that group's jobs grow, and with it the memory of the node, until the client stops. A group applies a command in one transaction of the store, so this needs a client that sends on purpose or a store that has become slow. Ticks and events are jobs as well: while a group does not keep up, each tick of `LoopConfig.Every` and each `Event` adds one job to its list.

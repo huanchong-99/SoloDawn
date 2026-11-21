@@ -48,6 +48,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | subscribe a connection to a group | `loop.Watch(conn, group, stateOnly)` |
 | send a host its inbox items, on every `hello` | `loop.Inbox(conn)` |
 | run the timers by hand, or tell the home of an event | `loop.Tick(now)`, `loop.Event(name, event)` |
+| run retention on demand, or in a transaction | `loop.Event(RetainEvent, nil)`, `RetainWrite(now)` |
 | move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
 | push to a client | the `Client` interface |
 
@@ -168,6 +169,8 @@ names that start with `run`, and its tests those that start with `run` and `Run`
 `Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
 `ItemsPush`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
+Retention takes the names that start with `ret`, exports `RetainEvent` and `RetainWrite`, and its
+test functions start with `TestRetention`.
 
 ## The run loop
 
@@ -392,11 +395,38 @@ function that moves a task calls it and adds nothing to its rules.
   HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
   `c.Disk.Msg` reads.
 
+## Retention
+
+`retention.go` runs the daily retention rules of
+[storage](../../planning/contracts/storage.md) sections 2 and 4 under the name `RetainEvent`
+(`"retention"`), registered in `Timers`, `Events` and `After`.
+
+- **Daily schedule and purity.** `retDaily` runs on the first tick of a `State` and again once at
+  least 24 hours (`86,400,000` ms) have elapsed since the previous committed run on that state;
+  earlier ticks return an empty result. `retDaily` returns `RetainWrite(now)` in `Result.Writes`
+  and changes nothing in memory itself. `retNoted` records `now` per state in a weak-keyed map
+  (`weak.Pointer[State]`) only after the transaction commits, so a failed or rolled-back run is
+  retried on the next tick. `Events[RetainEvent]` runs `RetainWrite(now)` on demand and updates
+  the same last-run mark once committed.
+- **Days and what remains.** `RetainWrite(now).Put(tx)` reads `retention_days` from SQLite
+  `setting` as a JSON integer, defaulting to `90` when absent and failing the transaction for
+  malformed values or values below `1`, then calls `tx.Retain(time.UnixMilli(now), days)`. In one
+  transaction the store raises `grp.purged` to the highest `seq` among aged-out `gone` markers
+  before deleting those markers, keeps `pending` cards, keeps `note` and `review` rows
+  (`keep = 1`), keeps any `confirmed` brief while a `queued` task in the same group still names
+  it (R3-4), and deletes older messages and final (`merged` and `cancelled`) task rows whose `mt`
+  is before the cutoff.
+- **In-memory tasks.** After retention deletes rows from the store, finished tasks stay in the
+  in-memory state (`State.Tasks`) until restart ([issues](../../issues.md)). `grp.num` keeps the
+  highest task number given out, so task numbers are not reused after restart.
+
 ## Known limitations
 
 - The table of commands holds only the briefs, and no node starts a loop yet: the other command
   files and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
+- After retention deletes rows, finished tasks stay in the in-memory `State.Tasks` until restart
+  ([issues](../../issues.md)).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
 - A `peer.Connection` takes every frame at once and keeps it in its own buffer, so the limit of
@@ -435,3 +465,9 @@ while a task is paused and a reviewer named while it is paused.
 holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
 `Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
 commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
+
+`retention_test.go` runs the node's retention timer, event and hook through `StartLoop` and
+`RetainWrite`: the 24-hour boundary, default and configured `retention_days`, rollback purity when
+a write fails, the purge mark, protected rows and R3-4, and finished tasks staying in `State.Tasks`
+until restart. `features/home_retention.feature` holds acceptance test A2.5, the retention half of
+A5.14, R3-4 and the restart behaviour for finished tasks.
