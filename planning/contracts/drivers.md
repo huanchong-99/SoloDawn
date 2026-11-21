@@ -48,7 +48,7 @@ claude -p --verbose
   --input-format stream-json --output-format stream-json
   --session-id <uuid>            (first start)    [verified]
   --resume <uuid>                (later starts)   [verified]
-  --mcp-config <file>                             [verified]
+  --mcp-config <json>                             [documented]
   --strict-mcp-config                             [verified]
   --permission-prompt-tool mcp__solodawn__approve [verified]
   --allowedTools mcp__solodawn                    [verified]
@@ -57,13 +57,13 @@ claude -p --verbose
   --permission-mode <mode>                        [verified]
 ```
 
-- `<file>` is a temporary MCP configuration with one server: command
-  `solodawn`, arguments `mcp --token <t>`. Every start reads the file it is
-  given, so after a resume the token of that start is the one in force. The
-  command is the node's own: each node gives its drivers the command line
-  that reaches itself, so that two nodes on one machine do not answer each
-  other's CLIs. The same holds for the two `-c mcp_servers.solodawn`
-  settings of 1.2.
+- `<json>` is an MCP configuration JSON string with one server: command
+  `solodawn`, arguments `mcp --token <t>`. Every start reads the
+  configuration it is given, so after a resume the token of that start is
+  the one in force. The command is the node's own: each node gives its
+  drivers the command line that reaches itself, so that two nodes on one
+  machine do not answer each other's CLIs. The same holds for the two
+  `-c mcp_servers.solodawn` settings of 1.2.
 - `--allowedTools mcp__solodawn` is needed at every level: without it each
   call of the node's own tools goes to `approve` first.
 - `--setting-sources user` keeps project settings and hooks out (R-45), and
@@ -78,7 +78,10 @@ claude -p --verbose
 - A user turn is one line on stdin:
   `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"…"}]}}`.
 - A turn ends with an event of `type` `result`; usage is read from it, and
-  the rate-limit window from the `rate_limit_event` of each turn.
+  the rate-limit window from the `rate_limit_event` of each turn. An
+  unresumable session or unusable sign-in reported in an error `result` or
+  on `stderr` of a non-zero exit becomes `NoSession` or `LoginInvalid`
+  instead of `TurnEnded`.
 - Interrupt: a `control_request` with subtype `interrupt` on stdin, always
   sent. The CLI answers with a `control_response` and ends the turn with a
   `result` of subtype `error_during_execution`; the next turn works in the
@@ -89,8 +92,8 @@ claude -p --verbose
 
 | Level | Flags | What was measured |
 | --- | --- | --- |
-| 1 | `--permission-mode default --tools Read,Glob,Grep`; `approve` answers deny. (`default` is accepted and reported by `system/init`, though `--help` of 2.1.311 no longer lists it.) | `[verified]` the tool set is those three and the node's tools: no Write, no Bash. Reading inside the folder needs no request; reading outside it reaches `approve` and is denied |
-| 2 | `--permission-mode acceptEdits`, and `--settings` with `sandbox.enabled`, `sandbox.autoAllowBashIfSandboxed` and `sandbox.failIfUnavailable` all true; everything else reaches `approve`. On native Windows, where the CLI has no sandbox, the node refuses level 2 for Claude Code with a clear reason and offers only the levels it can enforce (`risks.md` Q-4): `perm.set` asking for it answers `conflict`, and a `default_level` of 2 falls back to 1 for it | `[verified]` file tools: inside the folder without asking, outside it through `approve`. Sandboxed Bash: a write inside the folder works, and so does one in the sandbox's own temp folder, which cannot be closed; a write to a folder named in `sandbox.filesystem.denyWrite` is refused; **reads work anywhere**; the network is blocked with no request and no event, and the command waits for its own timeout. `[unverified]` that a Bash write anywhere else outside the folder is refused: the spike's folder lay inside that temp folder, and the only evidence is the sandbox's debug line `write: denyAllExcept` |
+| 1 | `--permission-mode default --tools Read,Glob,Grep,AskUserQuestion`; `approve` answers deny. (`default` is accepted and reported by `system/init`, though `--help` of 2.1.311 no longer lists it.) | `[verified]` `--tools Read,Glob,Grep` gave those three and the node's tools: no Write, no Bash; `AskUserQuestion` is added for decision cards. Reading inside the folder needs no request; reading outside it reaches `approve` and is denied |
+| 2 | `--permission-mode acceptEdits`, and `--settings` with `sandbox.enabled`, `sandbox.autoAllowBashIfSandboxed` and `sandbox.failIfUnavailable` all true; everything else reaches `approve`. On native Windows, where the CLI has no sandbox, the node refuses level 2 for Claude Code with a clear reason and offers only the levels it can enforce (`risks.md` Q-4): `perm.set` asking for it answers `conflict` | `[verified]` file tools: inside the folder without asking, outside it through `approve`. Sandboxed Bash: a write inside the folder works, and so does one in the sandbox's own temp folder, which cannot be closed; a write to a folder named in `sandbox.filesystem.denyWrite` is refused; **reads work anywhere**; the network is blocked with no request and no event, and the command waits for its own timeout. `[unverified]` that a Bash write anywhere else outside the folder is refused: the spike's folder lay inside that temp folder, and the only evidence is the sandbox's debug line `write: denyAllExcept` |
 | 3 | `--permission-mode bypassPermissions`; in the terminal also `--settings '{"skipDangerousModePermissionPrompt":true}'`, without which the terminal asks the owner to accept the mode and stores the answer in the owner's configuration | `[verified]` no requests |
 
 `[unverified]` That a command the model asks to run outside the sandbox
@@ -100,6 +103,8 @@ acceptance test A4.1 shows it, and backend task B-17 runs that part first.
 If such a command turns out to run without a request, the node turns the
 sandbox setting `allowUnsandboxedCommands` off `[documented]`, and an
 action that needs the network is then possible only at level 3.
+`AskUserQuestion` reaches `approve` at every level; it becomes decision
+cards (`mcp-tools.md` 3) `[unverified]` under `bypassPermissions`.
 
 ### 1.2 Codex, structured
 
@@ -199,7 +204,7 @@ or field the node uses has changed.
 In a pseudo-terminal, in the session's folder `[verified]`:
 
 ```
-claude --resume <uuid> --mcp-config <file> --strict-mcp-config
+claude --resume <uuid> --mcp-config <json> --strict-mcp-config
   --setting-sources user --allowedTools mcp__solodawn <level flags of 1.1>
 codex resume <thread id> --no-alt-screen --no-daemon -C <folder>
   <the -c settings of 1.2> -s <sandbox> -a <approvalPolicy>
@@ -221,7 +226,9 @@ codex resume <thread id> --no-alt-screen --no-daemon -C <folder>
   worktree, with `--setting-sources user` as well. The owner answers in
   the terminal. Codex does not ask.
 - A session that does not exist yet: Claude Code starts one in the
-  terminal with `--session-id <uuid>`. Codex cannot: it takes no id, and a
+  terminal with `--session-id <uuid>`, passing `--append-system-prompt`
+  when instructions are given so the first request records them. Codex
+  cannot: it takes no id, and a
   thread that has had no turn is not saved (`flows/takeover.md` section A).
 - `[unverified]` `project_doc_max_bytes=0` on Codex's interactive CLI.
 

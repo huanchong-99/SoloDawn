@@ -1,5 +1,5 @@
 ---
-description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the session runtime, the offline scripted Claude Code and Codex processes for host integration tests, the API of the host workspaces and Git commands, and the MCP server and stdio shim.'
+description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the session runtime, group sync and inbox delivery, the offline scripted Claude Code and Codex processes for host integration tests, the API of the host workspaces and Git commands, and the MCP server and stdio shim.'
 kind: reference
 ---
 
@@ -29,6 +29,7 @@ A unit never calls into the file of a unit built beside it. It registers in a ta
 | an item that answers an open tool call | the tool: `item, done := h.Await(id, check)`, then it reads the channel until its wait runs out, calls `done`, and looks at the channel once more. Delivery, before it queues a `reply` or a `decided` item: `h.Hand(id, item)`, which never waits for the tool |
 | whether a session's deliveries are held | `h.Held(key)`, before a turn is given; whoever lifts a hold calls `Deliver` |
 | an audit row | `h.Audit(tx, AuditRow{…})`, inside the transaction of what it records |
+| the AI CLIs found here (`host.info`) | `h.Agents(ctx)`: probes `claude` and `codex` on `PATH` (cached 60 s), writes `agent`, returns `[]proto.HostAgent` with `Groups` empty |
 
 ## Tables
 
@@ -94,6 +95,14 @@ A `Driver` starts the structured CLI (`Start`) and gives the command line of the
 - A driver keeps no timer. Its caller ends the context of `Start`, which kills the process tree, when an interrupt or a close was not answered within 10 s.
 - Sign-in that is not usable and a session id that cannot be resumed are events (`LoginInvalid`, `NoSession`), because a CLI reports them after its process has started.
 
+### Claude Code (`claude.go`)
+
+Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/drivers.md), sections 1.1 and 1.3).
+
+- `claudeProcess.mu` serializes stdin writes (`Turn`, `Interrupt`), `Close`, `reqSeq` and `interrupted`; nothing inside `mu` waits on `events` or the child process. `readLoop` is the sole writer of `events` and closes it after stdout EOF, `Wait` and process-tree cleanup; the caller of `Process.Events` is its single reader.
+- `Process.Answer` returns an error because Claude Code sends permission prompts through the MCP `approve` tool ([mcp-tools.md](../../planning/contracts/mcp-tools.md), section 3).
+- `LoginInvalid` and `NoSession` match HTTP status `401` and Claude Code's English error phrases on `result` and non-zero-exit `stderr` until live failure captures exist ([issues.md](../../issues.md)).
+
 ### Codex
 
 `codex.go` registers `Drivers["codex"]` ([drivers.md](../../planning/contracts/drivers.md), section 1.2 and 1.3):
@@ -101,6 +110,12 @@ A `Driver` starts the structured CLI (`Start`) and gives the command line of the
 - `Start` runs `codex app-server` over stdio JSON-RPC (`initialize`, `initialized`, `thread/start` or `thread/resume`, with `-c features.default_mode_request_user_input=true`), detached from any terminal (`detachTerminal`). `Interactive` returns the `codex resume` command line and refuses an empty `Launch.Session`.
 - **One reader per channel and lock order.** `Events()` is written only by `readLoop` and read only by `Start`'s caller, and closes after `cmd.Wait` and tree cleanup finish; `ready` is closed once by `finishReady` for `Turn`. `wmu` (stdin writes and close) and `mu` (protocol, turn, approval, user-input and file-change state) are never nested.
 - **Requests and notifications.** `commandExecution` and `fileChange` approvals emit `Asked` for `Process.Answer`; `item/tool/requestUserInput` emits `Asked` with `Ask.Reply`; invalid parameters and all other server requests get JSON-RPC error `-32601`. Notifications during an active turn emit `Active`. Live behavior of `features.default_mode_request_user_input=true` and `item/tool/requestUserInput` remains unverified ([issues.md](../../issues.md)).
+
+## CLI detection and sign-in
+
+`agents.go` provides `(*Host).Agents(ctx)`, `"agents"` in `Listeners`, and `"agent.set"` in `Surface`; see [drivers.md](../../planning/contracts/drivers.md) section 1.4 and [commands.md](../../planning/contracts/commands.md) section 2.
+
+- **Lock order.** `agtPart.probeMu` -> `Store.Write` -> `agtPart.mu`. The listener calls `Sessions.Get` (leaf `Sessions` lock) and then takes `agtPart.mu`; nothing under `agtPart.mu` waits on a probe or the store.
 
 # Session runtime
 
@@ -127,7 +142,7 @@ Each [script](fakecli/testdata/) is a span of one of the [macOS captures](https:
 | Step direction | Action |
 | --- | --- |
 | `stdin`, `mcp->cli` | Wait for one JSON line from the node or from the MCP server. An object matches when it has the fields of `msg`, recursively; arrays, numbers and strings must be equal, the text of an MCP result included. |
-| `stdout`, `mcp<-cli` | Write `msg` as one JSON line to the node or to the MCP server. The first MCP step starts the server named `solodawn` in `--mcp-config <file>` or in the two `-c mcp_servers.solodawn.{command,args}=…` settings. The fake runs nothing else. |
+| `stdout`, `mcp<-cli` | Write `msg` as one JSON line to the node or to the MCP server. The first MCP step starts the server named `solodawn` in `--mcp-config <file or json>` or in the two `-c mcp_servers.solodawn.{command,args}=…` settings. The fake runs nothing else. |
 | `stderr` | Write the string `msg` as one line. |
 | `eof` | Wait for closed stdin; input fails the script. |
 
@@ -156,6 +171,16 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 
 `tools_sec.go` registers `propose_brief`, `set_task` and `request_decision` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1, 2 and 5): `propose_brief` and `set_task` set `Tool.For` to `c.Secretary`, while `request_decision` registers the `group` schema for every session.
 `loadSecDirectory`, `resolveSecTask`, `prepareDecisionPost` and `buildDecisionOptions` are package helpers shared with the other MCP tool and approval handlers in `host`.
+
+# Delivery and group state
+
+`deliver.go` implements the host's group synchronization and inbox delivery ([datachannel.md](../../planning/contracts/datachannel.md) sections 4 and 6, [flows/sync.md](../../planning/flows/sync.md), [flows/agent-turn.md](../../planning/flows/agent-turn.md)).
+
+- **Registrations.** From `init`, `deliver.go` registers `"deliver"` in `Attached`, `"inbox"`, `"rows"` and `"reset"` in `Pushes`, and provides `Deliver`. Although `Deliver(h, group, member)` prioritizes `(group, member)` first, `deliverNow` then walks every pending merge group and every held `(group, member)` key across all groups so a lifted hold or a freed `max_open` slot wakes every waiting AI.
+- **Per-host state.** All sync cursors, held session queues, active merge trackers, and per-connection sync cancellation handles live in `Part[delivery](h)`, never in package globals. Connection sync handles are cancelled and removed when `Home.Done()` closes or a newer connection attaches.
+- **Lock order, goroutines and channels.** `delivery` creates no channels of its own; waiting tool calls read the single-item channel returned by `Host.Await`, whose sole writer is `Host.Hand` (`host.go`). `delivery.mu` guards only in-memory maps and slices and is never held across `Store.Write`, `Sessions` calls, `Rows` calls, `Home.Request` or `Home.Send`, `Host.Hand`, `Host.Held`, `Compose`, `Runner.Turn`, or workspace and merge commands. Push handlers (`inbox`, `rows`, `reset`) update state and queues only and dispatch `deliverNow` and `afterGroupState` on goroutines so a home connection's reader never blocks on Git, the forge or `h.Command` (which runs under a one-minute timeout). Per-AI turn delivery is serialized per `(group, member)` with an in-memory busy/recheck flag so concurrent pushes and re-entrant `Deliver` callbacks never overlap or drop a queued turn.
+- **Sync cursor (R3-5).** On `Attach`, each group known for that home (`delivery.groups` or `setting` `'homes'`) enters `syncing` with `live = false` and requests `sync` (`state_only: true`) from its last cursor; an `inbox` or `rows` push for a group that is neither `syncing` nor `live` starts a single-group `sync` on that connection from its kept cursor as well. `reset` drops `h.Rows` for the group and resets `cursor = 0` and `live = false`. `rows` applies only rows whose `seq` exceeds the cached row's `seq` and advances `cursor` monotonically (`max(cursor, seq)`) only while `live = true`. `synced` sets `cursor = seq`, `live = true` and `syncing = false`, so an interrupted reset restarts from `0` while an interrupted delta or late pre-`synced` row batch keeps its cursor.
+- **Routing, open waits, still-current check (R3-3) and merges.** Each `inbox` item deduplicates `(home, item)` against `audit` both on arrival and when taken. Open `ask` and `approve` waits receive `reply` and `decided` items via `h.Hand` on arrival and when taken. Session and merge items wait while their group's member or task row is absent, refuse `not_hosted_here` only when a present member row does not name an AI on this host, and check task work against `h.Rows` when taken. Session batches prepare the workspace (keeping group-session items held on a Git error, and for task or review sessions reporting `member status` `turn_interrupted` plus `task fail` for task sessions with redacted Git output), report `task branch` while at step `branch`, compose with `Compose`, write `AuditDelivered`, send `ack`, and call `Runner.Turn` (`HS-15` enforces `max_open` and owns runtime session closing for step 17; [issues.md](../../issues.md)). `merge` items check `written` on `AuditDelivered` before writing `AuditMerge` and running `ReviewedMerge.Apply` (or `Inspect` after a restart), reporting `task merged` (using `TaskRow.Stats`) or `task conflict`.
 
 # MCP server and stdio shim
 
