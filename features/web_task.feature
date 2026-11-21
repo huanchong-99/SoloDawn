@@ -24,20 +24,20 @@ Feature: Task card in the chat main line
     And the metadata shows owner "Codex · workstation" and branch "task/12-show-connection-path" with link "PR #31"
     And the checks line shows "Local checks passed" and "Hosted checks passed"
     And the review line shows "Round 1 · 86, sent back" and "Claude Code · pass 90"
-    And the folded thread summary shows "Thread · 7", "Latest: Codex · Added the path indicator." and "AI rounds 3 / 10"
+    And the folded thread summary shows "Thread · 7" and "Latest: Codex · Added the path indicator."
     When the reader switches the language to Chinese and expands the thread fold
     Then the task card shows "打回 · 第 1 轮", "评审 · 5 / 6", "第 1 轮 86 分，打回" and an open thread fold
 
   Scenario: A task moves from queued through each step to merged, with and without a remote forge
     When a queued task "T-15" "Add path badge" is created without a branch yet
-    Then the task card shows badge "Queued", steps "-, -, -, -, -, -" with "0 / 6", branch "task/15-add-path-badge", "Not run yet" and "Not started · Claude Code to review · pass 90"
+    Then the task card shows badge "Queued", steps "-, -, -, -, -, -" with "0 / 6", no branch row, "Not run yet" and "Not started · Claude Code to review · pass 90"
     When the task becomes active at step "branch"
     Then the task card shows working badge "In progress" and steps "now, -, -, -, -, -" with "Work · 1 / 6"
-    When the task advances to "local_check" with a failing local check, then a passing one
+    When the task advances to "local_check" on branch "task/15-add-path-badge" with a failing local check, then a passing one
     Then the six-step bar first marks "done, fail, -, -, -, -" with "Local checks failed", then "done, done, now, -, -, -" with "Open PR · 3 / 6" and "Local checks passed"
-    When the task advances to "cloud_check" on PR 44 with an unsafe URL and a failing hosted check
+    When the task advances to "cloud_check" on PR 44 without a link yet and a failing hosted check
     Then the branch line shows plain text "PR #44" with no link, and the six-step bar marks "done, done, done, fail, -, -" with "Hosted checks · 4 / 6" and "Hosted checks failed"
-    When hosted checks pass, the review passes with score 94 in round 2, and the task enters "merge"
+    When hosted checks pass, the pull request URL arrives, the review passes with score 94 in round 2, and the task enters "merge"
     Then the six-step bar marks "done, done, done, done, done, now" with "Merge · 6 / 6" and the review line shows "Round 2 · 94, passed"
     When the task becomes "merged"
     Then the task card shows ok badge "Merged · 94" and steps "done, done, done, done, done, done" with "6 / 6"
@@ -52,13 +52,13 @@ Feature: Task card in the chat main line
     When the task waits for a reviewer, and then hits a merge conflict
     Then the task card shows "Waiting for a reviewer", and then danger "Merge conflict" with step "fail"
 
-  Scenario: Paused, stopped, taken-over and cancelled tasks show their state
+  Scenario: Paused, stopped and cancelled tasks show their state
     When the home writes "row-task-paused" and a task message for it
     Then the task card shows paused badge "Paused", steps "done, done, -, -, -, -" with "Review · 5 / 6", and "Local checks passed"
     When the task stops in state "failed" after 3 consecutive failures, and then after 6 failed reviews
     Then the task card shows solid danger badge "Stopped after 3 failures" with step "fail", and then "Stopped after 6 failed reviews"
-    When the assignee enters state "takeover" on that active task, and then the task is "cancelled"
-    Then the task card shows takeover badge "Owner is operating directly" with step "now", and then "Cancelled" with no active step marker
+    When the task becomes "cancelled"
+    Then the task card shows "Cancelled" with no active step marker
 
   Scenario: The development states sheet mounts the task card for the wire example
     Given a development server

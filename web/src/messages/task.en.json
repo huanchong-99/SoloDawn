@@ -5,7 +5,6 @@
   "task.badge.reviewer": "Waiting for a reviewer",
   "task.badge.conflict": "Merge conflict",
   "task.badge.paused": "Paused",
-  "task.badge.takeover": "Owner is operating directly",
   "task.badge.failed": "Stopped",
   "task.badge.failed.count": "Stopped after {n} failures",
   "task.badge.failed.reviews": "Stopped after {n} failed reviews",
@@ -44,6 +43,5 @@
   "task.review.pass": "Pass {pass}",
   "task.thread.count": "Thread · {n}",
   "task.thread.empty": "No messages yet",
-  "task.thread.last": "Latest: {who} · {text}",
-  "task.thread.rounds": "AI rounds {n} / {max}"
+  "task.thread.last": "Latest: {who} · {text}"
 }

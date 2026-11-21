@@ -1,16 +1,19 @@
 // Pure display derivations for TaskCard, reading only cached rows (contracts/rows.md section 4,
 // contracts/task-machine.md section 1).
-import type { Group } from '../../lib/groups.svelte';
-import type { Kind } from '../../lib/mounts.svelte';
-import { t } from '../../lib/prefs.svelte';
-import type { TaskRow } from '../../lib/proto';
+import type { Group } from './groups.svelte';
+import type { Kind } from './mounts.svelte';
+import { t } from './prefs.svelte';
+import type { TaskRow } from './proto';
 
+/** Highlight state of one segment in the six-step task bar. */
 export type StepMark = 'done' | 'now' | 'wait' | 'fail' | undefined;
+
+/** Visual model of the task status pill. */
 export interface Badge {
   text: string;
   tone?: 'sky' | 'dawn' | 'ok' | 'danger';
   solid?: boolean;
-  dot?: 'working' | 'paused' | 'takeover';
+  dot?: 'working' | 'paused';
 }
 
 const stepKeys = ['work', 'checks', 'pr', 'cloud', 'review', 'merge'] as const;
@@ -22,39 +25,12 @@ const stepPos: Record<string, number> = {
   merge: 5,
 };
 const idleStates = new Set(['paused', 'cancelled']);
-const knownKinds = new Set(
-  'text progress question reply brief task approval decision summary call report checks review handback system'.split(
-    ' ',
-  ),
-);
-
-/** Looks up a live task row in `group`, returning `undefined` when absent or deleted. */
-export function findTask(group: Group, id: string): TaskRow | undefined {
-  const row = group.rows.get(`task ${id}`);
-  return row?.r === 'task' && !('gone' in row) ? row : undefined;
-}
-
-/** Returns `url` when it is an `http:` or `https:` URL, and `undefined` otherwise. */
-export function safePrUrl(url: string | undefined): string | undefined {
-  if (!url) return undefined;
-  try {
-    const p = new URL(url).protocol;
-    return p === 'https:' || p === 'http:' ? url : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function isTakeover(group: Group, task: TaskRow): boolean {
-  const ai = group.member(task.assignee);
-  return ai?.kind === 'ai' && ai.state === 'takeover' && ai.task === task.id;
-}
 
 function cardWaitBadge(group: Group, kind: 'approval' | 'decision', who?: string[]): Badge {
   if (who?.includes(group.home.me.user)) {
     return { text: t(`task.wait.${kind}.you`), tone: 'dawn', solid: true };
   }
-  const person = group.members.find((m) => m.kind === 'human' && who?.includes(m.user))?.name;
+  const person = who?.map((u) => group.personName(u)).find(Boolean);
   const text = person
     ? t(`task.wait.${kind}.who`).replace('{who}', person)
     : t(`task.wait.${kind}.other`);
@@ -111,7 +87,6 @@ function activeBadge(group: Group, task: TaskRow): Badge {
 export function taskBadge(group: Group, task: TaskRow): Badge {
   const ended = finalBadge(task);
   if (ended) return ended;
-  if (isTakeover(group, task)) return { text: t('task.badge.takeover'), dot: 'takeover' };
   if (task.state === 'paused') return { text: t('task.badge.paused'), dot: 'paused' };
   return task.state === 'queued' ? { text: t('task.badge.queued') } : activeBadge(group, task);
 }
@@ -145,7 +120,6 @@ function waitsOnViewer(group: Group, task: TaskRow): boolean {
 function currentMark(group: Group, task: TaskRow, at: number): StepMark {
   if (task.state === 'failed') return 'fail';
   if (idleStates.has(task.state)) return undefined;
-  if (isTakeover(group, task)) return 'now';
   if (waitsOnViewer(group, task)) return 'wait';
   return activeStepFailed(task, at) ? 'fail' : 'now';
 }
@@ -223,7 +197,6 @@ export function threadPreview(group: Group, task: TaskRow): string {
   if (!last) return task.thread.count === 0 ? t('task.thread.empty') : '';
   const who =
     last.by === 'system' ? t('chat.system') : (group.member(last.by)?.name ?? t('chat.gone'));
-  const said =
-    last.text || (knownKinds.has(last.kind) ? t(`chat.kind.${last.kind as Kind}`) : last.kind);
+  const said = last.text || t(`chat.kind.${last.kind as Kind}`);
   return t('task.thread.last').replace('{who}', who).replace('{text}', said);
 }

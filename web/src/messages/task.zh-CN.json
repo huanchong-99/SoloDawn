@@ -5,7 +5,6 @@
   "task.badge.reviewer": "等派评审",
   "task.badge.conflict": "合并冲突",
   "task.badge.paused": "已暂停",
-  "task.badge.takeover": "主人正在直接操作",
   "task.badge.failed": "已停",
   "task.badge.failed.count": "连续失败 {n} 次，已停",
   "task.badge.failed.reviews": "评审打回 {n} 次，已停",
@@ -44,6 +43,5 @@
   "task.review.pass": "及格 {pass}",
   "task.thread.count": "话题 · {n} 条",
   "task.thread.empty": "还没有消息",
-  "task.thread.last": "最新：{who} · {text}",
-  "task.thread.rounds": "AI 来回 {n} / {max} 轮"
+  "task.thread.last": "最新：{who} · {text}"
 }

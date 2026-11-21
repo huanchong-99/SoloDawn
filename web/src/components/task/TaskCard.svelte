@@ -4,17 +4,9 @@
   import type { CardProps } from '../../lib/mounts.svelte';
   import { t } from '../../lib/prefs.svelte';
   import type { TaskRow } from '../../lib/proto';
+  import { reviewLine, taskBadge, taskSteps, threadPreview, waitBadge } from '../../lib/task';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
-  import {
-    findTask,
-    reviewLine,
-    safePrUrl,
-    taskBadge,
-    taskSteps,
-    threadPreview,
-    waitBadge,
-  } from './task';
 
   const threads = import.meta.glob<Component<{ group: Group; task: TaskRow }>>(
     '../thread/Thread.svelte',
@@ -25,7 +17,7 @@
   /** Draws a `task` message in the main line from the live `TaskRow` of its group. */
   let { group, msg }: CardProps<'task'> = $props();
   let open = $state(false);
-  const task = $derived(findTask(group, msg.body.task));
+  const task = $derived(group.task(msg.body.task));
 </script>
 
 {#if !task}
@@ -39,7 +31,6 @@
   {@const assignee = group.member(task.assignee)}
   {@const badge = taskBadge(group, task)}
   {@const steps = taskSteps(group, task, badge.text)}
-  {@const prHref = safePrUrl(task.pr_url)}
   {@const waiting = waitBadge(group, task.wait)}
   {@const review = reviewLine(group, task)}
   {@const noChecks = !task.checks.local && !task.checks.cloud && task.wait?.kind !== 'conflict'}
@@ -76,19 +67,21 @@
         </span>
       </dd>
 
-      <dt>{t('task.kv.branch')}</dt>
-      <dd>
-        <code>{task.branch ?? `task/${task.num}-${task.slug}`}</code>
-        {#if task.pr !== undefined}
-          <span class="muted">{' · '}</span>{#if prHref}<a
-              href={prHref}
-              target="_blank"
-              rel="noreferrer"
-            >
-              PR #{task.pr}
-            </a>{:else}<span class="muted">PR #{task.pr}</span>{/if}
-        {/if}
-      </dd>
+      {#if task.branch}
+        <dt>{t('task.kv.branch')}</dt>
+        <dd>
+          <code>{task.branch}</code>
+          {#if task.pr !== undefined}
+            <span class="muted">{' · '}</span>{#if task.pr_url}<a
+                href={task.pr_url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                PR #{task.pr}
+              </a>{:else}<span class="muted">PR #{task.pr}</span>{/if}
+          {/if}
+        </dd>
+      {/if}
 
       <dt>{t('task.kv.checks')}</dt>
       <dd>
@@ -133,13 +126,6 @@
         <Icon name="down" sm />
         <b>{t('task.thread.count').replace('{n}', `${task.thread.count}`)}</b>
         <span class="cut grow" class:muted={!task.thread.last}>{threadPreview(group, task)}</span>
-        {#if task.thread.rounds > 0}
-          <span class="badge only-wide">
-            {t('task.thread.rounds')
-              .replace('{n}', `${task.thread.rounds}`)
-              .replace('{max}', `${group.info?.limits.rounds ?? 10}`)}
-          </span>
-        {/if}
       </summary>
       {#if open && Thread}
         <Thread {group} {task} />
@@ -149,53 +135,6 @@
 {/if}
 
 <style>
-  .card-head {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    flex-wrap: wrap;
-    color: var(--text-2);
-    font-size: var(--fs-sm);
-    .kind {
-      font-weight: 600;
-      color: var(--text);
-    }
-    h3 {
-      flex: 1;
-      min-width: 12ch;
-      color: var(--text);
-    }
-    .badge:last-child {
-      margin-left: auto;
-    }
-  }
-  .st {
-    display: inline-flex;
-    align-items: center;
-    i {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: currentColor;
-    }
-    &[data-st='working'] i {
-      color: var(--sky);
-      animation: pulse 2s var(--ease) infinite;
-    }
-    &[data-st='paused'] i {
-      border-radius: 1px;
-      background: linear-gradient(90deg, currentColor 34%, transparent 34% 66%, currentColor 66%);
-    }
-    &[data-st='takeover'] i {
-      border-radius: 2px;
-      color: var(--text);
-    }
-  }
-  @keyframes pulse {
-    50% {
-      opacity: 0.35;
-    }
-  }
   .steps {
     display: flex;
     align-items: center;
@@ -228,18 +167,6 @@
       white-space: nowrap;
     }
   }
-  .kv {
-    display: grid;
-    grid-template-columns: max-content minmax(0, 1fr);
-    gap: 6px var(--sp-4);
-    font-size: var(--fs-sm);
-    dt {
-      color: var(--text-3);
-    }
-    dd {
-      min-width: 0;
-    }
-  }
   .who {
     display: inline-flex;
     align-items: center;
@@ -261,54 +188,5 @@
     border-radius: var(--r-sm);
     background: var(--surface-2);
     overflow-wrap: anywhere;
-  }
-  .fold {
-    border-top: 1px solid var(--line);
-    margin: 0 calc(-1 * var(--sp-4)) -14px;
-    > summary {
-      position: relative;
-      isolation: isolate;
-      display: flex;
-      align-items: center;
-      gap: var(--sp-2);
-      padding: 10px var(--sp-4);
-      cursor: pointer;
-      list-style: none;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
-      border-radius: 0 0 var(--r-lg) var(--r-lg);
-    }
-    > summary::-webkit-details-marker {
-      display: none;
-    }
-    > summary::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      z-index: -1;
-      border-radius: inherit;
-      background: var(--surface-2);
-      opacity: 0;
-      transition: opacity var(--dur-1) var(--ease);
-    }
-    > summary :global(.i) {
-      transform: rotate(-90deg);
-      transition: transform var(--dur-2) var(--ease);
-    }
-    > summary b {
-      color: var(--text);
-      white-space: nowrap;
-    }
-    &[open] > summary {
-      border-radius: 0;
-      :global(.i) {
-        transform: none;
-      }
-    }
-  }
-  @media (hover: hover) {
-    .fold > summary:hover::before {
-      opacity: 1;
-    }
   }
 </style>

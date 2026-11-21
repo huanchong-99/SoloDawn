@@ -10,7 +10,6 @@ import { all, closePage, one, openPage, texts } from './page';
 const feature = await loadFeature('../features/web_task.feature');
 
 const website = 'rZNvy-1jH6Z-BcPqA5U5BQ';
-const codexId = '1PC8WineBrUQ-apCjx7tug';
 const claudeId = 'LXCZmuGAXkvO-bSrOkuCfw';
 const task12 = 'DrtCn6htSBwmMPrFPbHJHA';
 const task13 = 'R0gyAncJnBJT8iCk5-s78A';
@@ -22,7 +21,10 @@ const stepMarks = () =>
     .map((el) => el.getAttribute('data-s') ?? '-')
     .join(', ');
 
-const kvValue = (index: number) => all('.card .kv dd')[index];
+const kv = (label: string) => {
+  const dt = all('.card .kv dt').find((el) => el.textContent?.trim() === label);
+  return dt?.nextElementSibling as HTMLElement | undefined;
+};
 
 describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   let home: TestHome;
@@ -137,40 +139,39 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       And(
         'the metadata shows owner "Codex · workstation" and branch "task/12-show-connection-path" with link "PR #31"',
         () => {
-          expect(kvValue(0).textContent?.replace(/\s+/g, ' ').trim()).toBe('Codex · workstation');
-          expect(kvValue(1).querySelector('code')?.textContent).toBe(
+          expect(kv('Owner')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Codex · workstation');
+          expect(kv('Branch')?.querySelector('code')?.textContent).toBe(
             'task/12-show-connection-path',
           );
-          const prLink = kvValue(1).querySelector('a');
+          const prLink = kv('Branch')?.querySelector('a');
           expect(prLink?.textContent).toBe('PR #31');
           expect(prLink?.getAttribute('href')).toBe('https://git.example/team/website/pull/31');
         },
       );
       And('the checks line shows "Local checks passed" and "Hosted checks passed"', () => {
-        const res = [...kvValue(2).querySelectorAll('.res')];
+        const res = [...(kv('Checks')?.querySelectorAll('.res') ?? [])];
         expect(res.map((el) => [el.getAttribute('data-tone'), el.textContent?.trim()])).toEqual([
           ['ok', 'Local checks passed'],
           ['ok', 'Hosted checks passed'],
         ]);
       });
       And('the review line shows "Round 1 · 86, sent back" and "Claude Code · pass 90"', () => {
-        expect(kvValue(3).querySelector('.res')?.getAttribute('data-tone')).toBe('danger');
-        expect(kvValue(3).querySelector('.res')?.textContent?.trim()).toBe(
+        expect(kv('Review')?.querySelector('.res')?.getAttribute('data-tone')).toBe('danger');
+        expect(kv('Review')?.querySelector('.res')?.textContent?.trim()).toBe(
           'Round 1 · 86, sent back',
         );
-        expect(kvValue(3).querySelector('.muted')?.textContent?.trim()).toBe(
+        expect(kv('Review')?.querySelector('.muted')?.textContent?.trim()).toBe(
           'Claude Code · pass 90',
         );
       });
       And(
-        'the folded thread summary shows "Thread · 7", "Latest: Codex · Added the path indicator." and "AI rounds 3 / 10"',
+        'the folded thread summary shows "Thread · 7" and "Latest: Codex · Added the path indicator."',
         () => {
           expect(one<HTMLDetailsElement>('.card details.fold').open).toBe(false);
           expect(texts('.card .fold summary b')).toEqual(['Thread · 7']);
           expect(texts('.card .fold summary .grow')).toEqual([
             'Latest: Codex · Added the path indicator.',
           ]);
-          expect(texts('.card .fold summary .badge')).toEqual(['AI rounds 3 / 10']);
         },
       );
       When('the reader switches the language to Chinese and expands the thread fold', () => {
@@ -184,7 +185,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         () => {
           expect(texts('.card-head .badge')).toEqual(['打回 · 第 1 轮']);
           expect(texts('.card .steps span')).toEqual(['评审 · 5 / 6']);
-          expect(kvValue(3).querySelector('.res')?.textContent?.trim()).toBe('第 1 轮 86 分，打回');
+          expect(kv('评审')?.querySelector('.res')?.textContent?.trim()).toBe(
+            '第 1 轮 86 分，打回',
+          );
           expect(texts('.card .fold summary b')).toEqual(['话题 · 7 条']);
           expect(one<HTMLDetailsElement>('.card details.fold').open).toBe(true);
         },
@@ -224,7 +227,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         flushSync();
       });
       Then(
-        'the task card shows badge "Queued", steps "-, -, -, -, -, -" with "0 / 6", branch "task/15-add-path-badge", "Not run yet" and "Not started · Claude Code to review · pass 90"',
+        'the task card shows badge "Queued", steps "-, -, -, -, -, -" with "0 / 6", no branch row, "Not run yet" and "Not started · Claude Code to review · pass 90"',
         () => {
           expect(texts('.card-head .badge')).toEqual(['Queued']);
           expect(stepMarks()).toBe('-, -, -, -, -, -');
@@ -232,9 +235,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(one('.card .steps').getAttribute('aria-label')).toBe(
             'Progress: 0 of 6 steps, Queued',
           );
-          expect(kvValue(1).textContent?.trim()).toBe('task/15-add-path-badge');
-          expect(kvValue(2).textContent?.trim()).toBe('Not run yet');
-          expect(kvValue(3).textContent?.trim()).toBe(
+          expect(kv('Branch')).toBeUndefined();
+          expect(kv('Checks')?.textContent?.trim()).toBe('Not run yet');
+          expect(kv('Review')?.textContent?.trim()).toBe(
             'Not started · Claude Code to review · pass 90',
           );
         },
@@ -252,10 +255,11 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(badge.querySelector('.st')?.getAttribute('data-st')).toBe('working');
           expect(stepMarks()).toBe('now, -, -, -, -, -');
           expect(texts('.card .steps span')).toEqual(['Work · 1 / 6']);
+          expect(kv('Branch')).toBeUndefined();
         },
       );
       When(
-        'the task advances to "local_check" with a failing local check, then a passing one',
+        'the task advances to "local_check" on branch "task/15-add-path-badge" with a failing local check, then a passing one',
         () => {
           home.write(
             website,
@@ -269,7 +273,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           );
           flushSync();
           stepAfterFail = stepMarks();
-          checkFailText = kvValue(2).textContent?.trim() ?? '';
+          checkFailText = kv('Checks')?.textContent?.trim() ?? '';
 
           home.write(
             website,
@@ -287,15 +291,16 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then(
         'the six-step bar first marks "done, fail, -, -, -, -" with "Local checks failed", then "done, done, now, -, -, -" with "Open PR · 3 / 6" and "Local checks passed"',
         () => {
+          expect(kv('Branch')?.textContent?.trim()).toBe('task/15-add-path-badge');
           expect(stepAfterFail).toBe('done, fail, -, -, -, -');
           expect(checkFailText).toBe('Local checks failed');
           expect(stepMarks()).toBe('done, done, now, -, -, -');
           expect(texts('.card .steps span')).toEqual(['Open PR · 3 / 6']);
-          expect(kvValue(2).textContent?.trim()).toBe('Local checks passed');
+          expect(kv('Checks')?.textContent?.trim()).toBe('Local checks passed');
         },
       );
       When(
-        'the task advances to "cloud_check" on PR 44 with an unsafe URL and a failing hosted check',
+        'the task advances to "cloud_check" on PR 44 without a link yet and a failing hosted check',
         () => {
           home.write(
             website,
@@ -305,7 +310,6 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               wait: null,
               branch: 'task/15-add-path-badge',
               pr: 44,
-              pr_url: 'javascript:alert(1)',
               checks: {
                 local: { ok: true, at: 1763600002000, commit: 'abc1234' },
                 cloud: { ok: false, at: 1763600003000, commit: 'abc1234' },
@@ -318,19 +322,19 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then(
         'the branch line shows plain text "PR #44" with no link, and the six-step bar marks "done, done, done, fail, -, -" with "Hosted checks · 4 / 6" and "Hosted checks failed"',
         () => {
-          expect(kvValue(1).querySelector('a')).toBeNull();
-          expect(kvValue(1).textContent?.replace(/\s+/g, ' ').trim()).toBe(
+          expect(kv('Branch')?.querySelector('a')).toBeNull();
+          expect(kv('Branch')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
             'task/15-add-path-badge · PR #44',
           );
           expect(stepMarks()).toBe('done, done, done, fail, -, -');
           expect(texts('.card .steps span')).toEqual(['Hosted checks · 4 / 6']);
-          expect(kvValue(2).textContent?.replace(/\s+/g, ' ').trim()).toBe(
+          expect(kv('Checks')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
             'Local checks passed Hosted checks failed',
           );
         },
       );
       When(
-        'hosted checks pass, the review passes with score 94 in round 2, and the task enters "merge"',
+        'hosted checks pass, the pull request URL arrives, the review passes with score 94 in round 2, and the task enters "merge"',
         () => {
           home.write(
             website,
@@ -340,7 +344,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               wait: null,
               branch: 'task/15-add-path-badge',
               pr: 44,
-              pr_url: 'http://git.example/pull/44',
+              pr_url: 'https://git.example/pull/44',
               checks: {
                 local: { ok: true, at: 1763600002000, commit: 'abc1234' },
                 cloud: { ok: true, at: 1763600004000, commit: 'abc1234' },
@@ -362,13 +366,13 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then(
         'the six-step bar marks "done, done, done, done, done, now" with "Merge · 6 / 6" and the review line shows "Round 2 · 94, passed"',
         () => {
-          expect(kvValue(1).querySelector('a')?.getAttribute('href')).toBe(
-            'http://git.example/pull/44',
+          expect(kv('Branch')?.querySelector('a')?.getAttribute('href')).toBe(
+            'https://git.example/pull/44',
           );
           expect(stepMarks()).toBe('done, done, done, done, done, now');
           expect(texts('.card .steps span')).toEqual(['Merge · 6 / 6']);
-          expect(kvValue(3).querySelector('.res')?.getAttribute('data-tone')).toBe('ok');
-          expect(kvValue(3).querySelector('.res')?.textContent?.trim()).toBe(
+          expect(kv('Review')?.querySelector('.res')?.getAttribute('data-tone')).toBe('ok');
+          expect(kv('Review')?.querySelector('.res')?.textContent?.trim()).toBe(
             'Round 2 · 94, passed',
           );
         },
@@ -450,13 +454,14 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(badge.classList.contains('solid')).toBe(true);
           expect(stepMarks()).toBe('wait, -, -, -, -, -');
           expect(texts('.card .steps span')).toEqual(['Work · 1 / 6']);
-          expect(kvValue(2).textContent?.replace(/\s+/g, ' ').trim()).toBe(
+          expect(kv('Branch')).toBeUndefined();
+          expect(kv('Checks')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
             'Not run yet · Waiting for your decision',
           );
-          expect(kvValue(2).querySelector('a')?.getAttribute('href')).toBe(
+          expect(kv('Checks')?.querySelector('a')?.getAttribute('href')).toBe(
             '#m-TDRDfXwvOO-iOegSUoyidg',
           );
-          expect(kvValue(3).textContent?.trim()).toBe('Not started · pass 70');
+          expect(kv('Review')?.textContent?.trim()).toBe('Not started · pass 70');
           expect(texts('.card .fold summary .grow')).toEqual(['No messages yet']);
         },
       );
@@ -523,7 +528,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(badge.textContent?.trim()).toBe('Merge conflict');
           expect(badge.getAttribute('data-tone')).toBe('danger');
           expect(stepMarks()).toBe('done, fail, -, -, -, -');
-          expect(kvValue(2).textContent?.replace(/\s+/g, ' ').trim()).toBe(
+          expect(kv('Checks')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
             'Local checks passed Merge conflict',
           );
         },
@@ -531,12 +536,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     },
   );
 
-  Scenario('Paused, stopped, taken-over and cancelled tasks show their state', ({ When, Then }) => {
+  Scenario('Paused, stopped and cancelled tasks show their state', ({ When, Then }) => {
     let crashBadge = '';
     let crashSteps = '';
-    let takeoverBadge = '';
-    let takeoverDot = '';
-    let takeoverSteps = '';
 
     When('the home writes "row-task-paused" and a task message for it', () => {
       home.write(website, example('row-task-paused'));
@@ -551,7 +553,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         expect(badge.querySelector('.st')?.getAttribute('data-st')).toBe('paused');
         expect(stepMarks()).toBe('done, done, -, -, -, -');
         expect(texts('.card .steps span')).toEqual(['Review · 5 / 6']);
-        expect(kvValue(2).textContent?.trim()).toBe('Local checks passed');
+        expect(kv('Branch')?.textContent?.trim()).toBe('task/14-fix-the-relay-notice');
+        expect(kv('Checks')?.textContent?.trim()).toBe('Local checks passed');
       },
     );
     When(
@@ -604,40 +607,17 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         expect(stepMarks()).toBe('done, done, done, done, fail, -');
       },
     );
-    When(
-      'the assignee enters state "takeover" on that active task, and then the task is "cancelled"',
-      () => {
-        home.write(
-          website,
-          example('row-member-ai', { id: codexId, state: 'takeover', task: task14 }),
-        );
-        home.write(
-          website,
-          example('row-task-paused', { state: 'active', step: 'review', pr: 22, wait: null }),
-        );
-        flushSync();
-        const badge = one('.card-head .badge');
-        takeoverBadge = badge.textContent?.trim() ?? '';
-        takeoverDot = badge.querySelector('.st')?.getAttribute('data-st') ?? '';
-        takeoverSteps = stepMarks();
-
-        home.write(
-          website,
-          example('row-task-paused', { state: 'cancelled', step: 'review', pr: 22, wait: null }),
-        );
-        flushSync();
-      },
-    );
-    Then(
-      'the task card shows takeover badge "Owner is operating directly" with step "now", and then "Cancelled" with no active step marker',
-      () => {
-        expect(takeoverBadge).toBe('Owner is operating directly');
-        expect(takeoverDot).toBe('takeover');
-        expect(takeoverSteps).toBe('done, done, done, done, now, -');
-        expect(texts('.card-head .badge')).toEqual(['Cancelled']);
-        expect(stepMarks()).toBe('done, done, done, done, -, -');
-      },
-    );
+    When('the task becomes "cancelled"', () => {
+      home.write(
+        website,
+        example('row-task-paused', { state: 'cancelled', step: 'review', pr: 22, wait: null }),
+      );
+      flushSync();
+    });
+    Then('the task card shows "Cancelled" with no active step marker', () => {
+      expect(texts('.card-head .badge')).toEqual(['Cancelled']);
+      expect(stepMarks()).toBe('done, done, done, done, -, -');
+    });
   });
 
   Scenario(
