@@ -129,6 +129,8 @@ func TestAStartThatCannotRunSaysWhy(t *testing.T) {
 			"step 1 (mcp->cli): " + notFound(t, noMCP), started},
 		{"broken MCP file", mcp, "", "", []string{"--resume", session, "--mcp-config", broken},
 			"step 1 (mcp->cli): unexpected end of JSON input", started},
+		{"broken MCP JSON", mcp, "", "", []string{"--resume", session, "--mcp-config", "{"},
+			"step 1 (mcp->cli): unexpected end of JSON input", started},
 		{"MCP command that is no string", mcp, "", "", []string{"resume", session, "-c", "mcp_servers.solodawn.command=7"},
 			"step 1 (mcp->cli): json: cannot unmarshal number into Go value of type string", started},
 		{"MCP arguments that are no list", mcp, "", "", []string{"resume", session, "-c", "mcp_servers.solodawn.args=7"},
