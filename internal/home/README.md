@@ -177,6 +177,8 @@ names that start with `note`, their tests too, and their test functions start wi
 The cards take the names that start with `card`, their tests too, and their test functions start
 with `TestCard`. Device-log events (`ev_device.go`) take the names that start with `dev`, and their
 tests start with `TestDevice` and `dev`.
+The checks and reviews (`cmd_review.go`) take the names that start with `rev`, their tests too, and
+their test functions start with `TestReviewCmd`.
 
 ## The run loop
 
@@ -553,12 +555,29 @@ the node for one person ([envelope](../../planning/contracts/envelope.md), secti
 and sets `Result.GroupsChanged` when an `Online` device's access (`State.Serves`) changes between
 served and unserved.
 
+## Checks and reviews
+
+`cmd_review.go` holds `task` `checked`, `submitted` and `cloud`, and `post` of kind `review`
+([commands](../../planning/contracts/commands.md) 1.3, 1.5 and 1.8;
+[messages](../../planning/contracts/messages.md) 2.8, 2.9 and 2.11;
+[task-machine](../../planning/contracts/task-machine.md) rows 4 to 7 and 14), under the keys
+`task/checked`, `task/submitted`, `task/cloud` and `post/review`. Where the contracts are silent,
+it does this:
+
+- **Passed hosted checks.** `task/cloud` writes a `checks` message (`by` `"system"`, `stage`
+  `"cloud"`, `ts` `c.Now`) under id `n` in the task's thread on passed runs as well as failed ones,
+  so the `items` of a passing `task cloud` payload are recorded ([issues](../../issues.md)).
+- **Derived `task_failed` id.** When `task/cloud` or `post/review` triggers row 14, `n` already
+  names the `checks` or `review` row, so the `task_failed` row gets the first 16 bytes of the
+  SHA-256 of `SoloDawn task failed <n>` in base64url ([issues](../../issues.md)), and mentions the
+  brief's requester when still a member and the assignee's owner without duplicates.
+
 ## Known limitations
 
 - The table of commands holds the groups, members, briefs, the task commands of HM-9, the four
-  kinds of `post` of HM-6, `note` and `forget`, and the cards, and no node starts a loop yet: the
-  remaining command files (including thread round counting in HM-13) and the wiring of the node are
-  separate units
+  kinds of `post` of HM-6, `note` and `forget`, the cards, and the checks and reviews, and no node
+  starts a loop yet: the remaining command files (including thread round counting in HM-13) and the
+  wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
@@ -626,3 +645,8 @@ acceptance tests A4.1 and A4.2, decision priority and free-text override.
 
 `ev_device_test.go` covers every branch and boundary of `Events["device"]`, including ignored event
 types, empty and non-owner slices, version boundaries and online/offline `GroupsChanged` transitions.
+
+`cmd_review_test.go` sends `task/checked`, `task/submitted`, `task/cloud` and `post/review` through
+`Commands.Apply` with fakes of `Receipts` and `Disk`, pinning every refusal, boundary, retirement,
+card-wait recomputation, veto and row-14 stop, and checking `proto.UnexpectedNulls` on the rows
+written. `features/home_review.feature` holds the home half of acceptance tests A5.3 and A5.4.
