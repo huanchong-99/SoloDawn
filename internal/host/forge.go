@@ -210,14 +210,18 @@ type HostedCheck struct {
 
 // HostedChecksToResume selects, from the task rows, the tasks a restarted
 // node polls again: at step cloud_check, assigned to one of ais, and active
-// or paused, the states in which task-machine row 6 takes task cloud. A row
-// without checks.local has its 60 minutes spent: it ends with the timed-out
-// result unless the first read has finished.
+// or paused, the states in which task-machine row 6 takes task cloud. Each
+// HostedCheck.Branch is derived from Num and Slug via taskName, ignoring
+// TaskRow.Branch; rows that fail taskName are skipped. A row without
+// checks.local has its 60 minutes spent: it ends with the timed-out result
+// unless the first read has finished.
 func HostedChecksToResume(tasks []proto.TaskRow, ais []string) []HostedCheck {
 	var resume []HostedCheck
 	for _, t := range tasks {
 		if t.Step == "cloud_check" && slices.Contains(ais, t.Assignee) && slices.Contains(cloudStates, t.State) {
-			resume = append(resume, HostedCheck{Task: t.ID, Branch: t.Branch, Commit: t.Commit, PR: t.PR, Since: localCheckTime(t.Checks.Local)})
+			if name, err := taskName(t.Num, string(t.Slug)); err == nil {
+				resume = append(resume, HostedCheck{Task: t.ID, Branch: "task/" + name, Commit: t.Commit, PR: t.PR, Since: localCheckTime(t.Checks.Local)})
+			}
 		}
 	}
 	return resume

@@ -50,7 +50,7 @@ func (g *runGroup) run() {
 // seat gives a connection its place in the group and counts its device as
 // online.
 func (g *runGroup) seat(c *Conn) {
-	g.seats[c] = &runSeat{}
+	g.seats[c] = &runSeat{inbox: c.taker}
 	g.state.Online[c.device] = true
 }
 
