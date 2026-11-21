@@ -28,6 +28,7 @@ A unit never calls into the file of a unit built beside it. It registers in a ta
 | an item that answers an open tool call | the tool: `item, done := h.Await(id, check)`, then it reads the channel until its wait runs out, calls `done`, and looks at the channel once more. Delivery, before it queues a `reply` or a `decided` item: `h.Hand(id, item)`, which never waits for the tool |
 | whether a session's deliveries are held | `h.Held(key)`, before a turn is given; whoever lifts a hold calls `Deliver` |
 | an audit row | `h.Audit(tx, AuditRow{…})`, inside the transaction of what it records |
+| the AI CLIs found here (`host.info`) | `h.Agents(ctx)`: probes `claude` and `codex` on `PATH` (cached 60 s), writes `agent`, returns `[]proto.HostAgent` with `Groups` empty |
 
 ## Tables
 
@@ -83,6 +84,15 @@ A `Driver` starts the structured CLI (`Start`) and gives the command line of the
 - `Launch.Shim` is the command line of the MCP server for that start: `h.Shim`, then `--token` and the token. The driver writes it into the CLI's MCP configuration as it is.
 - A driver keeps no timer. Its caller ends the context of `Start`, which kills the process tree, when an interrupt or a close was not answered within 10 s.
 - Sign-in that is not usable and a session id that cannot be resumed are events (`LoginInvalid`, `NoSession`), because a CLI reports them after its process has started.
+
+## CLI detection and sign-in (`HS-3`)
+
+The rules are in [drivers.md](../../planning/contracts/drivers.md) section 1.4 and [commands.md](../../planning/contracts/commands.md) section 2 (`agent.set`).
+
+- `(*Host).Agents(ctx)` runs `claude --version` and `codex --version` on `PATH` (5 s bound per CLI, no standard input, detached from any controlling terminal), keeps the detected list in `Part[agtPart](h)` for 60 s (`h.Now()`), upserts found CLIs into `agent(agent, cli_version)` while preserving `account` and `caps`, and returns `[]proto.HostAgent` in deterministic order (`claude`, `codex`) with `Groups: []proto.AgentGroup{}` for the `host.info` caller to fill.
+- Sign-in status is kept per `Host` in `Part[agtPart](h)` (default `true`) without reading credential files. The `"agents"` entry in `Listeners` sets `login_ok = false` on `LoginInvalid` and restores `true` on `Ready` or on `TurnEnded` when `Status` is not `"failed"`; `agent.set` also restores `true`.
+- `"agent.set"` in `Surface` decodes `proto.AgentSet`, checks `agent` (`claude`, `codex`) and `account` (`personal`, `team`, `api_key`), ensures the CLI is found on `PATH` (re-probing when not cached as found; `conflict` when absent), and in one `Store.Write` transaction updates `agent.account` and `cli_version` and records an `AuditSetting` row (`detail`: `"account <account>"`).
+- Lock order in `agents.go`: `agtPart.probeMu` -> `Store.Write` -> `agtPart.mu`. Listeners take `Sessions.mu` (via `Sessions.Get`) and then `agtPart.mu`, and never wait on a probe or the store.
 
 # Host test CLIs
 
