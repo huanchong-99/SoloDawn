@@ -6,6 +6,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-21 · limitation · An immediate `submit_task` after `run_checks` can read `checks.local` before the home's row push
+
+- Symptom: a scripted CLI that calls `submit_task` immediately after `run_checks` returns can read a stale `task` row in `Host.Rows` and fail with `conflict` (`local checks have not passed`), whereas with a real model the gap between the two tool calls is seconds.
+- Cause: the home answers `task checked` before pushing the `rows` frame that carries the updated `checks.local` (`internal/home/README.md`), and `tskPrepareSubmit` (`internal/host/tools_task.go:318`) reads `checks.local` from `Host.Rows`.
+- Status: open, accepted by the coordinator's decision of 2026-11-21 (#206).
+
+### 2026-11-21 · limitation · Background hosted-check polling sends `task cloud` once
+
+- Symptom: if the home connection is unreachable at the moment `TaskForge.WaitHostedChecks` settles, the `task cloud` command fails and the task stays in `cloud_check` until the node restarts and `HostedChecksToResume` polls again.
+- Cause: `tskPollHostedChecks` (`internal/host/tools_task.go:475`) calls `Host.Command` once without retrying on `home_unreachable`.
+- Status: open, until N-4 or reconnect handling retries or resumes pending `cloud_check` polls on `Attach`.
+
 ### 2026-11-21 · limitation · `Sessions` has no `sync`, `fetch` or `ack` handlers until the home units and runtime wire them
 
 - Symptom: inbound `ctl` requests for `sync` and `fetch` are answered `bad_request` ("unknown ctl request") and `ack` pushes are dropped on a bare `Sessions` hub (`internal/node/session.go`, `NewSessions`), and `host.info`, `pair.browser` and `settings.set` are not registered until unit N-3.
