@@ -124,18 +124,12 @@ func (s *State) postMentions(ids []proto.ID) ([]string, *Refusal) {
 	}
 	out := make([]string, len(ids))
 	for i, id := range ids {
-		if !s.postMember(string(id)) {
+		if !s.memExists(string(id)) {
 			return nil, &Refusal{"conflict", "the post mentions someone who is no member of the group"}
 		}
 		out[i] = string(id)
 	}
 	return out, nil
-}
-
-func (s *State) postMember(id string) bool {
-	_, person := s.People[id]
-	_, ai := s.AIs[id]
-	return person || ai
 }
 
 func (s *State) postRows(msg proto.MsgRow) []Row {

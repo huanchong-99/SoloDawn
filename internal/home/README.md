@@ -165,7 +165,8 @@ start with `task`, `step`, `wait`, `item` and `states`, and `workItems`, `byAssi
 `byReviewer`; its tests take the names that start with `mc` and `machine`. The run loop takes the
 names that start with `run`, and its tests those that start with `run` and `Run`; it exports
 `Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
-`ItemsPush`. The briefs take the
+`ItemsPush`. Groups and members take the names that start with `grp` and `mem`, their tests too,
+and their test functions start with `TestGroup` and `TestMember`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
 The posts of HM-6 take the names that start with `post`, their tests too, and their test functions
 start with `TestPost`; the notes and `forget` take the names that start with `note`, their tests
@@ -351,6 +352,52 @@ function that moves a task calls it and adds nothing to its rules.
   `thread.count`, `thread.last`); the bodies of the messages; for row 23, the timer and telling the
   secretary once per quiet period. The machine sets `stats.ended`.
 
+## Groups and members
+
+`cmd_group.go` holds `group` `create` and `set` ([commands](../../planning/contracts/commands.md)
+1.1; [rows](../../planning/contracts/rows.md) 1 and 2), under `group/create` and `group/set`;
+`group` `pause` and `resume` belong to `cmd_pause.go` (unit HM-14). `cmd_member.go` holds `member`
+`add_ai`, `set` and `remove` ([commands](../../planning/contracts/commands.md) 1.2), under
+`member/add_ai`, `member/set` and `member/remove`; `member` `status` belongs to `cmd_hostev.go`
+(unit HM-16). Where the contracts are silent, they do this:
+
+- **`group/create`.** Only a person of this node's owner (`c.Who.AI` empty, `c.Who.User ==
+  s.Owner`) may create a group, else `forbidden`. A `g` that differs from `n`, a `kind` other than
+  `project`, a `forge` other than `github` or `none`, or an empty `name`, `repo`, `base` or
+  `member_name` is `bad_request`. A group that already exists (`s.Group.ID` not empty) is answered
+  `conflict`. It writes the `group` row (`pass` 90, `pass_foundation` 70, default `limits`,
+  `created` `c.Now`) and the owner's `human` `member` row (`role` `owner`, `online` true,
+  `last_seen` `c.Now`), with `GroupsChanged` true. The owner's member id is the first 16 bytes of
+  the SHA-256 of `SoloDawn group owner <n>` in base64url, so the function stays pure
+  ([issues](../../issues.md)).
+- **`group/set`.** By an admin, else `forbidden`. Sending none of `name`, `checks`, `pass`,
+  `pass_foundation`, `limits` and `secretary`, or an empty `name`, is `bad_request`. `secretary`,
+  when sent, must name an AI in `State.AIs` that is neither assignee nor reviewer of an open task
+  (`queued`, `active`, `paused`, `failed`), else `conflict`; any previous secretary's member row
+  loses `secretary`, and the named AI gains it when not already set. `GroupsChanged` is set when
+  `name` changes, because `groups` carries each group's name.
+- **`member/add_ai`.** By a host of a member: `c.Who.AI` must be empty, else `forbidden`; the
+  `name` of the latest `add` entry for `c.Who.Device` in `State.Logs[c.Who.User]` becomes
+  `host_name`. An empty `name`, a `cli` outside `claude` and `codex`, or an `account` outside
+  `personal`, `team` and `api_key` is `bad_request`. `secretary: true` when the group already has a
+  secretary requires an admin, else `forbidden`. An `id` or `name` already held by a human or AI
+  member of the group is `conflict`. The new `ai` `member` row starts with `state` `dormant`,
+  `since` and `last_seen` `c.Now`, `path` `local` when `c.Who.Device == s.Home` and `direct`
+  otherwise, `allow` `[]` and `usage` `{}`; when `secretary` is true, any previous secretary loses
+  the flag and `group.secretary` becomes `id`.
+- **`member/set`.** Sending none of `name`, `account`, `allow` and `approvers`, an empty `name`, or
+  an unknown `account` is `bad_request`. An unknown `id` is `not_found`; a human member row is
+  `forbidden` in step 1. The signer must be the AI's owner (`c.Who.AI` empty, `c.Who.User ==
+  ai.User`) or, when `approvers` is the only field sent, the AI's host (`s.Hosts`), else
+  `forbidden`. A `name` held by another member in the group is `conflict`; keeping the AI's own
+  `name` is accepted.
+- **`member/remove`.** An unknown `id` is `not_found`; a human member row is `forbidden` in step 1.
+  The signer must be the AI's owner or an admin, else `forbidden`. Removing an AI that is assignee
+  or reviewer of an open task is `conflict`. Otherwise the member row becomes a `gone` marker and
+  any queued inbox items for that AI (`c.Disk.Queued`) are retired in `Result.Retire`. Removing the
+  secretary also clears `group.secretary` and writes `system` `no_secretary` in the main line with
+  id `n`.
+
 ## Briefs
 
 `cmd_brief.go` holds `post` of kind `brief` and `act` `confirm` and `revise` on it
@@ -430,9 +477,9 @@ this:
 
 ## Known limitations
 
-- The table of commands holds the briefs, the four kinds of `post` of HM-6, `note` and `forget`;
-  the remaining command files (including thread round counting in HM-13 and the wake-up cap in HM-7)
-  and the wiring of the node are separate units
+- The table of commands holds the groups, members, briefs, the four kinds of `post` of HM-6, `note`
+  and `forget`, and no node starts a loop yet: the remaining command files (including thread round
+  counting in HM-13 and the wake-up cap in HM-7) and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
@@ -466,6 +513,11 @@ a restart, with commands of its own. The choices behind the loop are in
 and for the refusals, and covers every statement of `machine.go`. `features/home_machine.feature`
 holds acceptance test A5.18 at step `merge` and the two points of the third review, a card decided
 while a task is paused and a reviewer named while it is paused.
+
+`cmd_group_test.go` and `cmd_member_test.go` send `group/create`, `group/set`, `member/add_ai`,
+`member/set` and `member/remove` through `Commands.Apply` with fakes of `Receipts` and `Disk`,
+covering every refusal, boundary and secretary transition. `features/home_group.feature` holds the
+home command part of A2.1 and the member-removal part of A5.18.
 
 `cmd_brief_test.go` sends every command of the briefs through `Commands.Apply` with fakes of
 `Receipts` and `Disk`, with a case for every refusal and branch. `features/home_brief.feature`

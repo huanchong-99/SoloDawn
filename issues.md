@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-21 · deviation · The local link routes only `cmd` requests until `sync`, `fetch` and `ack` land
+
+- Symptom: on `LocalLink`, a `sync` or `fetch` request from the host is answered `bad_request`, and an `ack` push is dropped; tests subscribe to row pushes through `LocalLink.Watch` (`internal/node/local.go:66`), which is temporary until `sync` is routed to `home.Loop`.
+- Cause: `home.Loop` on `rebuild` exposes `Cmd` and `Watch` only (`internal/home/run.go:313`, `:357`); `Sync` (HM-2, #205), `Fetch` (HM-3) and `Ack` with `inbox` frames (HM-7) are built in separate units. `LocalLink.toHome` (`internal/node/local.go:127`) dispatches `cmd` to `Loop.Cmd` and answers other requests `bad_request` per `planning/contracts/datachannel.md` section 2.
+- Status: open. Route `sync` to `Loop` and delete `LocalLink.Watch` once HM-2 (#205) merges; wire `fetch` and `ack` once HM-3 and HM-7 merge (N-4 / I-1 / I-3).
+
 ### 2026-11-21 · deviation · Dead `cause` path in `internal/home` and `internal/store`
 
 - Symptom: the home and store still carry, write and read an item `cause`, although `P-1b` re-froze `InboxItem` and `Item` without `cause` under the owner's 2026-11-21 decision (no attack-and-defence code). Nothing on the wire or on the host reads it.
@@ -60,11 +66,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the contract lists the post's checks without saying which of them are about the group when the brief is confirmed. `(*State).briefStill` (`internal/home/cmd_brief.go:243`) makes the others again: the shape of the body, the requester a member, every assignee and reviewer a working AI. That an entry's assignee is not its reviewer is made again by the task machine's role rule, which `Step` answers `conflict` (`internal/home/machine.go:253`).
 - Status: open, decided by unit HM-8 on 2026-11-21. The contract should say that the `replaces` check is the post's only.
 
-### 2026-11-21 · deviation · The tasks of a confirmed brief have ids that follow from the act, not random ones
+### 2026-11-21 · deviation · Derived member and task ids where the home creates rows without a client id
 
-- Symptom: `planning/contracts/rows.md` says that the ids of tasks and messages are random ids. The home gives the task of entry `i` of a confirmed brief, and its `task` message, the id made of the first 16 bytes of the SHA-256 of `SoloDawn brief task <n of the act> <i>`.
-- Cause: the function of a command is pure and has no randomness (`internal/home/README.md`, "Functions are pure"); `briefTaskID` (`internal/home/cmd_brief.go:286`). The id has the form of a random id, and nobody knows it before the act arrives, because the act's `n` is random. An id that a task or a message already has is answered `conflict` (`internal/home/cmd_brief.go:272`).
-- Status: open, decided by unit HM-8 on 2026-11-21. Should the seam ever give functions a source of random ids, the derivation can go.
+- Symptom: `planning/contracts/rows.md` says that the ids of members, tasks and messages are random ids. The home gives the owner's `member` row in `group create` the first 16 bytes of the SHA-256 of `SoloDawn group owner <n>`, and the task of entry `i` of a confirmed brief (with its `task` message) the first 16 bytes of the SHA-256 of `SoloDawn brief task <n of the act> <i>`.
+- Cause: the function of a command is pure and has no randomness (`internal/home/README.md`, "Functions are pure"); `grpOwnerID` (`internal/home/cmd_group.go:89`) and `briefTaskID` (`internal/home/cmd_brief.go:286`). Each id has the form of a random id, and nobody knows it before the command arrives, because `n` is random. An id that a task or a message already has is answered `conflict` (`internal/home/cmd_brief.go:272`).
+- Status: open, decided by units HM-8 and HM-5 on 2026-11-21. Should the seam ever give functions a source of random ids, the derivations can go.
 
 ### 2026-11-21 · limitation · A queued task's `stats.started` is the time its brief was confirmed
 
@@ -265,11 +271,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `TaskRow.Branch` and `TaskBranch.Branch` are plain strings (`internal/proto/task.go`, `internal/proto/command.go`). Giving the field a type of its own changes `internal/host`, which unit P-1 does not own; and whether the home must refuse a `task branch` whose `branch` is not `task/<num>-<slug>` is not in `contracts/commands.md` 1.5.
 - Status: host side resolved on branch `gemini/HOST-BRANCH`: `HostedChecksToResume` (`internal/host/forge.go`) now derives `task/<num>-<slug>` from `Num` and `Slug` through `taskName`, skips rows that fail `taskName`, and ignores `TaskRow.Branch` (tests `TestHostedChecksToResume`, `TestHostedChecksToResumeDerivesBranchFromNumAndSlug`). Open on the home side (unit HM-9), per the coordinator's decision of 2026-11-20 that hosts build the branch from `num` and `slug` only and the home refuses any other `branch`.
 
-### 2026-11-20 · deviation · A `set` that changes nothing and a `task assign` without a role are not refused yet
+### 2026-11-20 · deviation · A `task assign` without a role is not refused yet
 
-- Symptom: `contracts/commands.md` gives `group set` and `member set` "any of" their fields, and `task assign` at least one of `assignee` and `reviewer`. A `group set` with no field, a `member set` with nothing but `id`, and a `task assign` with neither role are read by `proto.Decode` and by the web client's schemas, and nothing refuses them yet.
-- Cause: each of those fields is optional by itself (`GroupSet`, `MemberSet`, `TaskAssign` in `internal/proto/command.go`; the schemas of the same names in `web/src/lib/proto.ts`), and "at least one" is a rule across fields, which the wire types do not state. The command functions of the home are not written yet.
-- Status: open. Decided by the coordinator on 2026-11-20, and now in `contracts/commands.md` (the list of optional fields): the home answers `bad_request`. Unit HM-9 does it for `task assign`, unit HM-5 for `group set`; `member set` is the same case in HM-5's file.
+- Symptom: `contracts/commands.md` gives `group set` and `member set` "any of" their fields, and `task assign` at least one of `assignee` and `reviewer`. A `task assign` with neither role is read by `proto.Decode` and by the web client's schema, and nothing refuses it yet (`group set` with no field and `member set` with nothing but `id` are now refused).
+- Cause: each of those fields is optional by itself (`GroupSet`, `MemberSet`, `TaskAssign` in `internal/proto/command.go`; the schemas of the same names in `web/src/lib/proto.ts`), and "at least one" is a rule across fields, which the wire types do not state. `cmd_task.go` of the home is not written yet.
+- Status: open for `task assign` (unit HM-9); resolved for `group set` and `member set` in unit HM-5 (`grpSetValid` in `internal/home/cmd_group.go:110`, `memSetValid` in `internal/home/cmd_member.go:144`), which answer `bad_request` as `contracts/commands.md` specifies.
 
 ### 2026-11-20 · limitation · The shared wire test does not show where one reader is stricter about a text
 
@@ -399,6 +405,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: when the owner hands the secretary's terminal back and a `handback` message is posted in the main line signed for the secretary, the home queued a `notice` (`code: handback`) for `group.secretary`, waking the secretary again for the summary it or its host just posted.
 - Cause: `planning/contracts/commands.md` 1.3 specified `item notice for the secretary` on `handback` without an exception when `as` is the secretary.
 - Status: resolved on branch `gemini/HM-6` (#181): `post` of kind `handback` is removed from `internal/home/cmd_post.go` and marked postponed with takeover in `planning/contracts/commands.md` 1.3, and `planning/contracts/commands.md` 1.3 now states the general rule that a post never queues an item for its own author (`postWakes` skips `msg.By`; tested in `internal/home/cmd_post_test.go`).
+
+### 2026-11-21 · bug · `Loop.Inbox` marked only the groups that existed when it was called
+
+- Symptom: after `Loop.Inbox(conn)` had made a host connection the inbox taker (`internal/home/run.go:366`), a group created later on that home spawned its `runGroup` with `seat.inbox` false (`internal/home/run_group.go:52`) and did not deliver queued items to `conn` until `Loop.Inbox(conn)` was called again (which `LocalLink` never does, because it sends no `hello`).
+- Cause: `Conn` recorded `welcomed` across groups (`internal/home/run_conn.go:34`), whereas `inbox` was kept per group seat (`internal/home/run_group.go:31`) and `spawn` called `seat` with `inbox` false (`internal/home/run.go:162`).
+- Status: resolved in #209: `Conn.taker` (`internal/home/run_conn.go:36`) is set under `Loop.mu` in `Loop.Inbox` (`internal/home/run.go:366`), and `runGroup.seat` initialises `runSeat{inbox: c.taker}` (`internal/home/run_group.go:53`), covering both local and remote hosts. Test: `TestLocalLinkInboxForGroupCreatedAfterAttach`.
 
 ### 2026-11-20 · deviation · The audit record has no `what` for a CLI killed on an idle close
 
