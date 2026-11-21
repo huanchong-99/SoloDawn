@@ -192,14 +192,30 @@ func attachRuntime(h *Host, device string) {
 	pending := rt.savedCrash[device]
 	delete(rt.savedCrash, device)
 	rt.mu.Unlock()
-	if len(pending) == 0 {
-		return
-	}
-	go func() {
-		for _, c := range pending {
-			reportOrQueueCrash(context.Background(), h, rt, c)
+	slots := homeAISlots(h, device)
+	go flushHomeRuntime(h, rt, device, pending, slots)
+}
+
+func homeAISlots(h *Host, device string) []aiSlot {
+	seen := map[aiSlot]bool{}
+	var slots []aiSlot
+	for _, s := range h.Sessions.All() {
+		slot := aiSlot{group: s.Group, member: s.Member}
+		if s.Home == device && !seen[slot] {
+			seen[slot] = true
+			slots = append(slots, slot)
 		}
-	}()
+	}
+	return slots
+}
+
+func flushHomeRuntime(h *Host, rt *runtimePart, device string, pending []pendingCrash, slots []aiSlot) {
+	for _, c := range pending {
+		reportOrQueueCrash(context.Background(), h, rt, c)
+	}
+	for _, slot := range slots {
+		sendMemberStatus(context.Background(), h, rt, device, slot.group, slot.member, nil)
+	}
 }
 
 func (sessionRunner) Answer(h *Host, key SessionKey, ask string, allow bool) error {

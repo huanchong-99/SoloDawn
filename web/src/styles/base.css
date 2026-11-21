@@ -713,6 +713,37 @@ kbd,
   padding: var(--sp-1) var(--sp-4) var(--sp-4);
   font-size: var(--fs-sm);
 }
+.needbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 8px var(--sp-4);
+  border-bottom: 1px solid color-mix(in srgb, var(--dawn) 40%, var(--line));
+  background: var(--dawn-soft);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  b {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    gap: 6px;
+    color: var(--dawn-text);
+  }
+  a {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid color-mix(in srgb, var(--dawn) 40%, var(--line));
+    border-radius: var(--r-full);
+    background: var(--surface);
+    color: var(--text);
+  }
+}
 @media (max-width: 640px) {
   .card-head h3 {
     flex-basis: 100%;
@@ -1084,6 +1115,9 @@ p.st {
   text-transform: uppercase;
 }
 .hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   color: var(--text-3);
   font-size: var(--fs-xs);
 }

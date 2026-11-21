@@ -41,7 +41,6 @@ const (
 
 var (
 	maxLogBytes       int64 = 10 << 20
-	rvRetryDelay            = time.Second
 	peerListen              = peer.Listen
 	tcpListen               = net.Listen
 	ifaceAddrs              = net.InterfaceAddrs
@@ -101,7 +100,7 @@ func (l *logFile) Close() error {
 }
 
 // nodeRuntime holds the running components of one SoloDawn node.
-// mu is a leaf lock guarding rvPaths and rvStop.
+// mu is a leaf lock guarding closing, rvPaths and rvStop.
 type nodeRuntime struct {
 	ctx       context.Context
 	stop      context.CancelFunc
@@ -125,6 +124,7 @@ type nodeRuntime struct {
 	closeOnce sync.Once
 
 	mu      sync.Mutex
+	closing bool
 	rvPaths map[string]*peer.Path
 	rvStop  map[string]context.CancelFunc
 }
@@ -226,6 +226,7 @@ func (n *nodeRuntime) stepNetwork() error {
 	}
 	n.socks = socks
 	n.peer = peer.New(n.key, socks, n.db, n.knownPeer, n.routesFor, n.serveInbound, nil)
+	n.host.Connect = n.sessions.connectHome(n.dialHome)
 	ln, err := listenNodeHTTP(":" + strconv.Itoa(defaultWebPort))
 	if err != nil {
 		return err
@@ -243,17 +244,11 @@ func (n *nodeRuntime) startLocalHTTP(ln net.Listener) error {
 		return err
 	}
 	n.localPath = path
-	n.bg.Add(1)
-	go n.serveLocalRV(path)
+	n.spawn(func() { path.Serve(n.ctx, n.peer, noopRVEvent) })
 	return nil
 }
 
 func noopRVEvent(string, []byte) error { return nil }
-
-func (n *nodeRuntime) serveLocalRV(path *peer.Path) {
-	defer n.bg.Done()
-	path.Serve(n.ctx, n.peer, noopRVEvent)
-}
 
 func (n *nodeRuntime) stepStartup() error {
 	if err := n.host.EnsureHomeConnections(); err != nil {
@@ -264,8 +259,25 @@ func (n *nodeRuntime) stepStartup() error {
 	return nil
 }
 
+func (n *nodeRuntime) withBg(fn func()) {
+	n.mu.Lock()
+	if n.closing {
+		n.mu.Unlock()
+		return
+	}
+	n.bg.Add(1)
+	n.mu.Unlock()
+	defer n.bg.Done()
+	fn()
+}
+
+func (n *nodeRuntime) spawn(fn func()) { go n.withBg(fn) }
+
 func (n *nodeRuntime) Close() {
 	n.closeOnce.Do(func() {
+		n.mu.Lock()
+		n.closing = true
+		n.mu.Unlock()
 		n.stop()
 		n.closeNet()
 		n.bg.Wait()
@@ -318,11 +330,19 @@ func listenNodeHTTP(addr string) (net.Listener, error) {
 func (n *nodeRuntime) knownPeer(device string) bool { return n.logs.Known(device) }
 
 func (n *nodeRuntime) serveInbound(c *peer.Connection) {
-	n.bg.Add(1)
-	go func() {
-		defer n.bg.Done()
-		n.sessions.Serve(n.ctx, c.Device, false, c)
-	}()
+	n.spawn(func() { n.sessions.Serve(n.ctx, c.Device, false, c) })
+}
+
+func (n *nodeRuntime) dialHome(ctx context.Context, device string, run func(clientCtl)) {
+	n.spawn(func() {
+		runCtx, cancel := context.WithCancel(ctx)
+		stop := context.AfterFunc(n.ctx, cancel)
+		defer stop()
+		defer cancel()
+		n.peer.Connect(runCtx, device, nil, func(c *peer.Connection) {
+			n.spawn(func() { run(c) })
+		})
+	})
 }
 
 func (n *nodeRuntime) routesFor(_ string) []peer.Route {
@@ -420,24 +440,23 @@ func (n *nodeRuntime) onAdopt(_ string) {
 }
 
 func (n *nodeRuntime) syncRendezvous() {
-	if n.ctx.Err() != nil {
-		return
-	}
-	want := map[string]bool{}
-	for _, u := range n.readRendezvous() {
-		want[u] = true
-	}
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.pruneRendezvousLocked(want)
-	for u := range want {
-		if n.rvStop[u] == nil {
-			rvCtx, cancel := context.WithCancel(n.ctx)
-			n.rvStop[u] = cancel
-			n.bg.Add(1)
-			go n.runRVLoop(rvCtx, u)
+	n.withBg(func() {
+		want := map[string]bool{}
+		for _, u := range n.readRendezvous() {
+			want[u] = true
 		}
-	}
+		n.mu.Lock()
+		defer n.mu.Unlock()
+		n.pruneRendezvousLocked(want)
+		for u := range want {
+			if n.rvStop[u] == nil && !n.closing {
+				rvCtx, cancel := context.WithCancel(n.ctx)
+				n.rvStop[u] = cancel
+				n.bg.Add(1)
+				go n.runRVLoop(rvCtx, u)
+			}
+		}
+	})
 }
 
 func (n *nodeRuntime) pruneRendezvousLocked(want map[string]bool) {
@@ -452,21 +471,9 @@ func (n *nodeRuntime) pruneRendezvousLocked(want map[string]bool) {
 
 func (n *nodeRuntime) runRVLoop(ctx context.Context, url string) {
 	defer n.bg.Done()
-	delay := rvRetryDelay
+	delay := time.Second
 	for ctx.Err() == nil {
-		delay = rvNextDelay(ctx, delay, n.serveOneRV(ctx, url))
-	}
-}
-
-func rvNextDelay(ctx context.Context, delay, ran time.Duration) time.Duration {
-	if ran >= time.Minute {
-		delay = rvRetryDelay
-	}
-	select {
-	case <-ctx.Done():
-		return 0
-	case <-time.After(delay):
-		return min(2*delay, time.Minute)
+		delay = peer.NextDelay(ctx, nil, delay, n.serveOneRV(ctx, url))
 	}
 }
 

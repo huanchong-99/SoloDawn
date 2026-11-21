@@ -63,7 +63,7 @@ func (f *fakeCtl) Send(frame any) error {
 	if fail {
 		return errors.New("send failed")
 	}
-	raw, err := dvlEncode(frame)
+	raw, err := encodeCtl(frame)
 	if err != nil {
 		return err
 	}
@@ -79,7 +79,7 @@ func (f *fakeCtl) Close() error                 { f.once.Do(func() { close(f.don
 func (f *fakeCtl) pushRaw(s string) { f.in <- json.RawMessage(s) }
 
 func (f *fakeCtl) push(v any) {
-	raw, err := dvlEncode(v)
+	raw, err := encodeCtl(v)
 	if err != nil {
 		panic(err)
 	}

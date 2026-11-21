@@ -375,12 +375,8 @@ func TestMultiNodePortFallbackWebAndLocalCommands(t *testing.T) {
 }
 
 func TestAdoptionRendezvousAndForegroundStop(t *testing.T) {
-	savedDelay, savedInstall := rvRetryDelay, installService
-	t.Cleanup(func() {
-		rvRetryDelay = savedDelay
-		installService = savedInstall
-	})
-	rvRetryDelay = 20 * time.Millisecond
+	savedInstall := installService
+	t.Cleanup(func() { installService = savedInstall })
 
 	var serviceCalls int
 	var failService bool
@@ -478,6 +474,13 @@ func TestAdoptionRendezvousAndForegroundStop(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("WebRTC ctl connection did not open")
 	}
+	go func() {
+		for {
+			if _, err := rtcConn.Read(t.Context()); err != nil {
+				return
+			}
+		}
+	}()
 	rawWelc, err := rtcConn.Request(t.Context(), func(id int64) any {
 		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 1, Kind: "browser", Name: "rtc", Addrs: []string{}}
 	})
@@ -488,6 +491,31 @@ func TestAdoptionRendezvousAndForegroundStop(t *testing.T) {
 	if err := proto.Decode(rawWelc, &wRTC); err != nil || !wRTC.Owner {
 		t.Fatalf("WebRTC welcome = %+v (%v)", wRTC, err)
 	}
+
+	// Second node with setting('homes') connects its host to n's home over WebRTC at startup and shuts down cleanly.
+	hostDir := socketRoot(t)
+	hostKey, err := identity.LoadKey(hostDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e3 := sesAddEntry(browserKey, browserKey.ID(), 3, hostKey.ID(), "node", "worker")
+	fc.push(proto.Devlog{Type: "devlog", User: browserKey.ID(), Entries: []proto.Envelope{e3}})
+	waitCond(t, func() bool { return n.logs.Known(hostKey.ID()) })
+
+	seedWorkerNode(t, hostDir, browserKey.ID(), []proto.Envelope{e1, e2, e3}, rvURL, []proto.Home{
+		{Group: gid, Home: n.key.ID()},
+		{Group: sesID("grp-self"), Home: hostKey.ID()},
+	})
+	nHost, err := openNode(t.Context(), hostDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitCond(t, func() bool {
+		_, ok := nHost.host.Home(n.key.ID())
+		return ok
+	})
+	nHost.Close()
+	nHost.dialHome(t.Context(), n.key.ID(), func(clientCtl) {})
 
 	if err := (Command{Cmd: "pair", Secret: validSecret, Name: &name}).send(dir, io.Discard); errText(err) != ErrOwned.Error() {
 		t.Fatalf("owned pair = %v, want %v", err, ErrOwned)
@@ -512,17 +540,8 @@ func TestAdoptionRendezvousAndForegroundStop(t *testing.T) {
 	n.syncRendezvous()
 	waitCond(t, func() bool { return len(n.remoteRVPaths()) == 0 })
 
-	if d := rvNextDelay(t.Context(), 8*time.Millisecond, time.Minute); d != 2*rvRetryDelay {
-		t.Fatalf("rvNextDelay after 1m = %v, want %v", d, 2*rvRetryDelay)
-	}
-	if d := rvNextDelay(t.Context(), 5*time.Millisecond, 0); d != 10*time.Millisecond {
-		t.Fatalf("rvNextDelay backoff = %v", d)
-	}
 	cctx, ccancel := context.WithCancel(t.Context())
 	ccancel()
-	if d := rvNextDelay(cctx, time.Hour, 0); d != 0 {
-		t.Fatalf("rvNextDelay canceled = %v", d)
-	}
 	if ran := n.serveOneRV(cctx, "ws://127.0.0.1:1/rv"); ran != 0 {
 		t.Fatalf("serveOneRV error ran = %v", ran)
 	}
@@ -589,6 +608,35 @@ func waitCond(t *testing.T, fn func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("condition was not met before deadline")
+}
+
+func seedWorkerNode(t *testing.T, dir, owner string, entries []proto.Envelope, rvURL string, homes []proto.Home) {
+	t.Helper()
+	db, err := store.Open(filepath.Join(dir, "node.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerRaw, _ := json.Marshal(owner)
+	rvRaw, _ := json.Marshal([]string{rvURL})
+	homesRaw, _ := json.Marshal(homes)
+	err = db.Write(func(tx *store.Tx) error {
+		if _, err := tx.Exec("INSERT INTO setting(key, value) VALUES('owner', ?), ('rendezvous', ?), ('homes', ?)", string(ownerRaw), string(rvRaw), string(homesRaw)); err != nil {
+			return err
+		}
+		for i, env := range entries {
+			raw, _ := json.Marshal(env)
+			if _, err := tx.Exec("INSERT INTO device_log(user, ver, env) VALUES(?, ?, ?)", owner, i+1, string(raw)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func startTestRVWithRelay(t *testing.T) string {

@@ -111,12 +111,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `Sessions` registers `sync` (`HM-2`), `fetch` (`HM-3`) and `ack` (`HM-7`) by default, while the pairing and host-info handlers live in `N-3`.
 - Status: `ack` wired in `HM-7` (#221), `sync` wired after `HM-2` (#205), and `fetch` wired after `HM-3` (#207); open until `N-3` lands.
 
-### 2026-11-21 · limitation · `Sessions` implements only the server side of a `ctl` connection
-
-- Symptom: a host on one node has no outgoing `ctl` client session yet to a home on another node (sending `hello` with `kind: "host"`, reading `welcome`, exchanging `devlog` both ways, and passing pushes to `Host.Push`), so cross-node AI sessions (`A3.3`, unit `I-6`) have no transport path.
-- Cause: `internal/node/session.go` (`N-2`) serves inbound `ctl` connections (`Serve`); the client side of a `ctl` session was split out by the coordinator's decision of 2026-11-21.
-- Status: open for unit `N-2b` (`internal/node/client.go`), wired into the node runtime by `N-4`.
-
 ### 2026-11-21 · limitation · Postponed step-2 contracts still assume an item-level `cause`
 
 - Symptom: the step-2 planning documents (`planning/contracts/step-2/authority.md:36, 85, 92-93, 104, 108`, `planning/contracts/step-2/confirm.md:145-147, 196-223, 244`, `planning/contracts/step-2/watch-team.md:46-67` and `planning/steps/parallel-plan-step-2-3.md:20-21, 27`) require an inbox item to carry a signed `cause` when a group home belongs to another person, whereas `P-1b` removed `cause` from step-1 items.
@@ -239,13 +233,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: the node checks the binary against `SHA256SUMS` from the same release (`local.md` section 9). Whoever can replace the binary there can replace `SHA256SUMS` too, so the check catches a damaged or cut download, not a forged release.
 - Cause: the contract has no signature over releases; binaries are not signed (decided). The download itself is https only, follows at most five redirects, each to https, is limited in size, and is given up after 60 s without data, whatever its total time (`internal/node/update.go`, `get`).
 - Status: accepted trade-off of the contract.
-
-### 2026-11-20 · limitation · The gate measures CRAP 6.01 for `deliver`, which Go covers fully
-
-- Symptom: `crap.py` gives `deliver` in `internal/peer/ctl.go` a CRAP score of 6.01, above the limit of 6, while `go test -cover` reports `internal/peer` at 100% of statements.
-- Cause: the empty `case <-c.Done():` of the `select` in `deliver` (`internal/peer/ctl.go:91`) is a cover block with no statements and count 0. Go leaves it out of its percentage; the gate's conversion of the cover profile into lines (the last command of `stages.fast` in `.project-standard/gates.toml`) counts its line as an uncovered line. That gives `deliver` 13 of 14 lines, 92.9%, at complexity 6. The same before PR-0 (9c09938f6).
-- Effect: none on a change that leaves `deliver` alone, because the gate measures changed functions only. A change to `deliver`, or a CRAP run over the whole repository, reports it.
-- Status: open. No code change, by the coordinator's decision of 2026-11-20.
 
 ### 2026-11-20 · bug · go-nat v0.2.0 gets four things wrong in port mapping
 
@@ -383,8 +370,8 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-20 · deviation · Nothing resumes hosted checks after a node restart yet
 
 - Symptom: after a restart, a task at step `cloud_check` is not polled again, so it stays there until something else moves it (decision D3 of the host-contract audit).
-- Cause: `HostedChecksToResume` (`internal/host/forge.go`) selects the tasks to poll again and gives each its PR, commit, branch and `checks.local.at`, where the 60-minute limit counts from, but no code runs at node start yet to call it and then `WaitHostedChecks` for each.
-- Status: open. The node must call it at start; owner N-4, or HS-0 if it lands first.
+- Cause: `HostedChecksToResume` (`internal/host/forge.go`) selects the tasks to poll again and gives each its PR, commit, branch and `checks.local.at`, where the 60-minute limit counts from, but at node startup `Host.Rows` is empty until `deliver.go` finishes syncing each group asynchronously (`afterGroupState`), and `tskPart`, `tskBeginCloud`, `tskPollHostedChecks` and `projectDir` are unexported inside `internal/host`. Wiring it from `internal/node` requires over 40 lines duplicating group-sync waiting, row decoding, worktree path resolution and `proto.TaskChecked` submission without sharing `tskPart`'s cancel map.
+- Status: open (`N-4` coordinator decision 8: over 40 lines from `internal/node`, so left for `internal/host/deliver.go` `afterGroupState` alongside `resumeGroupMerges`).
 
 ### 2026-11-20 · deviation · No receiver check or shared vector for a beacon yet
 
@@ -466,6 +453,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-21 · limitation · `Sessions` implements only the server side of a `ctl` connection
+
+- Symptom: a host on one node had no outgoing `ctl` client session yet to a home on another node (sending `hello` with `kind: "host"`, reading `welcome`, exchanging `devlog` both ways, and passing pushes to `Host.Push`), so cross-node AI sessions (`A3.3`, unit `I-6`) had no transport path.
+- Cause: `internal/node/session.go` (`N-2`) served inbound `ctl` connections (`Serve`); the client side of a `ctl` session was split out by the coordinator's decision of 2026-11-21.
+- Status: resolved in unit `N-2b` (#222, `internal/node/client.go`: `(*Sessions).serveClient` and `(*Sessions).connectHome`, plus `attachRuntime` in `internal/host/run.go`) and wired in `N-4` (`internal/node/node.go`, `Host.Connect` -> `connectHome` -> `peer.Peer.Connect`).
+
 ### 2026-11-21 · deviation · The local link routes `cmd`, `sync` and `ack` until `fetch` lands
 
 - Symptom: on `LocalLink`, a `fetch` request from the host was answered `bad_request`.
@@ -489,6 +482,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `startNet` of `web/e2e/nodes.ts` waits until each node answers on its local socket. Every node exits with status 1 and `node runtime is unavailable` right after it makes its data directory and binds the socket, so a start that awaits nodes fails with that message. The harness's own scenarios start nodes with `awaitNodes: false`. A node is started with no flags, because `solodawn node` takes none yet: it has no signalling or web port and no rendezvous address, and the harness hands over only its HOME, data directory, socket and environment.
 - Cause: `startNode` was a stub that returned that error until N-4 assembled the runtime (`internal/node/socket.go:181-183` before the fix).
 - Status: resolved in branch `gemini/N-4`: `startNode` points to `runForegroundNode` (`internal/node/node.go`), starting the full node runtime (`node.db`, `device.key`, `logs/node.log`, `home.Loop`, `host.Host` + `ServeMCP`, `AttachLocal`, `Logs` + `Sessions`, `peer.Peer`, embedded web UI + `/rv` with `:47800` to `:0` multi-node fallback, and local socket commands).
+
+### 2026-11-21 · deviation · `peer.Connection` delivers `re` responses without waiting for earlier queued pushes
+
+- Symptom: on a WebRTC `*peer.Connection`, when a remote home sends `rows` pushes immediately followed by a `synced` response (`planning/contracts/datachannel.md` section 4), `(*peer.Connection).Request` could return `synced` before the `serveClient` reader goroutine had read `rows` from `(*peer.Connection).Read` and applied them to `Host.Rows`. A caller such as `host.join` (`HS-21`) that reads `Host.Rows` immediately after `sync` returns could see `not_found` if scheduled ahead of the reader goroutine.
+- Cause: `(*peer.Connection).deliver` (`internal/peer/ctl.go`) previously wrote non-`re` frames to the buffered `incoming` channel (`Read`) and wrote `re` frames directly to `waiting[re]` (`Request`) on Pion's callback goroutine, with no ordering barrier between the two channels.
+- Status: resolved in #222: `(*peer.Connection).deliver` queues valid `re` responses in `incoming` alongside requests and pushes, and `(*peer.Connection).Read` hands any queued `re` frame to `response` before reading on; `(*Sessions).serveClient` (`internal/node/client.go`) starts its read loop before sending `hello`, applies `devlog` pushes at once, and holds other pushes until `Host.Attach` has returned. Test: `TestPushesDeliveredBeforeAnswer`.
+
+### 2026-11-20 · limitation · The gate measures CRAP 6.01 for `deliver`, which Go covers fully
+
+- Symptom: `crap.py` gave `deliver` in `internal/peer/ctl.go` a CRAP score of 6.01, above the limit of 6, while `go test -cover` reported `internal/peer` at 100% of statements.
+- Cause: the empty `case <-c.Done():` of the `select` previously in `deliver` was a cover block with no statements and count 0, counted as an uncovered line at complexity 6.
+- Status: resolved in #222: `queue` holds the `select`, `validFrame` checks incoming `ctl` framing, and `deliver` has complexity 2 (`lizard -C 6 -w` clean, 100.0% statement coverage).
 
 ### 2026-11-21 · deviation · Dead `cause` path in `internal/home` and `internal/store`
 

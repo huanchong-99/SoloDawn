@@ -1548,7 +1548,41 @@ func checkReportSavedBehavior(t *testing.T) {
 		if queued != 0 {
 			t.Fatalf("conflict error was re-queued as unreachable: %d", queued)
 		}
+
+		checkAttachMemberStatus(t, h)
 	})
+}
+
+func checkAttachMemberStatus(t *testing.T, h *Host) {
+	t.Helper()
+	s1 := makeRunSession(SessionKey{Group: runGroup1, Member: runAI1}, GroupSession, "repo")
+	s2 := makeRunSession(SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}, TaskSession, "wt/1")
+	s3 := makeRunSession(SessionKey{Group: runGroup1, Member: runAI2}, GroupSession, "repo")
+	sOther := makeRunSession(SessionKey{Group: runGroup2, Member: runAI1}, GroupSession, "repo")
+	sOther.Home = "other-home"
+	for _, s := range []Session{s1, s2, s3, sOther} {
+		if err := h.Sessions.Create(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	reconn := newRunHome("direct")
+	h.Attach("home-dev", reconn)
+	synctest.Wait()
+	assertAttachStatusCmds(t, reconn.snapshotCmds())
+}
+
+func assertAttachStatusCmds(t *testing.T, cmds []recordedCmd) {
+	t.Helper()
+	if len(cmds) != 2 {
+		t.Fatalf("expected 2 member status commands (ai1 + ai2), got %+v", cmds)
+	}
+	if cmds[0].payload["id"] != runAI1 || cmds[0].payload["state"] != "dormant" || cmds[0].payload["path"] != "direct" {
+		t.Fatalf("expected plain dormant direct status for ai1, got %+v", cmds[0].payload)
+	}
+	if cmds[1].payload["id"] != runAI2 || cmds[1].payload["state"] != "dormant" || cmds[1].payload["path"] != "direct" {
+		t.Fatalf("expected plain dormant direct status for ai2, got %+v", cmds[1].payload)
+	}
 }
 
 func TestNoSessionFailedResumeSyncAsyncAndFailures(t *testing.T) {
