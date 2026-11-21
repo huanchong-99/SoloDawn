@@ -254,7 +254,7 @@ func joinExecuteJoin(ctx context.Context, h *Host, jp *joinPart, p proto.HostJoi
 	if err != nil {
 		return err
 	}
-	grp, err := joinFetchGroup(ctx, h, homeConn, string(p.Group))
+	grp, err := joinFetchGroup(ctx, h, homeConn, p.Home, string(p.Group))
 	if err != nil {
 		return err
 	}
@@ -320,11 +320,8 @@ func joinUnreachable() *Error {
 	return &Error{Code: "home_unreachable", Message: "the home of that group is not connected"}
 }
 
-func joinFetchGroup(ctx context.Context, h *Host, homeConn Home, group string) (proto.GroupRow, error) {
-	if grp, ok := joinCachedGroup(h, group); ok {
-		return grp, nil
-	}
-	if err := joinSyncState(ctx, homeConn, group); err != nil {
+func joinFetchGroup(ctx context.Context, h *Host, homeConn Home, device, group string) (proto.GroupRow, error) {
+	if err := syncGroupState(ctx, h, homeConn, device, group); err != nil {
 		return proto.GroupRow{}, err
 	}
 	if grp, ok := joinCachedGroup(h, group); ok {
@@ -340,30 +337,6 @@ func joinCachedGroup(h *Host, group string) (proto.GroupRow, bool) {
 	}
 	var grp proto.GroupRow
 	return grp, proto.Decode(raw, &grp) == nil
-}
-
-func joinSyncState(ctx context.Context, homeConn Home, group string) error {
-	build := func(id int64) any {
-		return proto.Sync{
-			Request:   proto.Request{Type: "sync", ID: id},
-			Group:     group,
-			Since:     0,
-			StateOnly: true,
-		}
-	}
-	answer, err := homeConn.Request(ctx, build)
-	if err != nil {
-		return joinUnreachable()
-	}
-	var refused proto.ErrorResponse
-	if proto.Decode(answer, &refused) == nil {
-		return &Error{Code: refused.Err.Code, Message: refused.Err.Message}
-	}
-	var synced proto.Synced
-	if proto.Decode(answer, &synced) != nil {
-		return joinUnreachable()
-	}
-	return nil
 }
 
 func joinPrepareWorkspace(ctx context.Context, projectDir string, grp proto.GroupRow) error {

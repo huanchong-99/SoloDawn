@@ -33,6 +33,7 @@ type groupSync struct {
 	cursor        int64
 	live, syncing bool
 	token         uint64
+	waiters       []chan struct{}
 }
 
 type syncJob struct {
@@ -232,28 +233,89 @@ func (d *delivery) beginSingleGroupSync(device string, conn Home, group string) 
 	return entry.ctx, d.startGroupJobLocked(group, device), true
 }
 
-func syncOneGroup(ctx context.Context, h *Host, d *delivery, conn Home, device string, job syncJob) {
+func syncGroupState(ctx context.Context, h *Host, conn Home, device, group string) error {
+	d := deliv(h)
+	for {
+		if _, ok := joinCachedGroup(h, group); ok {
+			return nil
+		}
+		job, waitCh := d.claimOrWaitGroupSync(device, group)
+		if waitCh == nil {
+			return syncOneGroup(ctx, h, d, conn, device, job)
+		}
+		if !joinWaitChannel(ctx, waitCh) {
+			d.removeGroupWaiter(group, waitCh)
+			return joinUnreachable()
+		}
+	}
+}
+
+func (d *delivery) claimOrWaitGroupSync(device, group string) (syncJob, chan struct{}) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	gs := d.groupLocked(group, device)
+	if gs.syncing {
+		// Single reader: the joinWaitChannel call in syncGroupState that created ch.
+		ch := make(chan struct{})
+		gs.waiters = append(gs.waiters, ch)
+		return syncJob{}, ch
+	}
+	gs.cursor = 0
+	return d.startGroupJobLocked(group, device), nil
+}
+
+func (d *delivery) removeGroupWaiter(group string, ch chan struct{}) {
+	match := func(cur chan struct{}) bool { return cur == ch }
+	d.mu.Lock()
+	gs := d.groups[group]
+	gs.waiters = slices.DeleteFunc(gs.waiters, match)
+	d.mu.Unlock()
+}
+
+func syncOneGroup(ctx context.Context, h *Host, d *delivery, conn Home, device string, job syncJob) error {
 	build := func(id int64) any {
 		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: job.group, Since: job.since, StateOnly: true}
 	}
 	answer, err := conn.Request(ctx, build)
-	var synced proto.Synced
-	ok := err == nil && proto.Decode(answer, &synced) == nil && synced.Group == job.group
+	synced, syncErr := decodeSyncAnswer(answer, err, job.group)
+	ok := syncErr == nil
 	if d.finishGroupSync(job, device, synced.Seq, ok) && ok {
 		d.wg.Go(func() { afterGroupState(h, d, job.group) })
 	}
+	return syncErr
+}
+
+func decodeSyncAnswer(answer json.RawMessage, err error, group string) (proto.Synced, error) {
+	if err != nil {
+		return proto.Synced{}, joinUnreachable()
+	}
+	var refused proto.ErrorResponse
+	if proto.Decode(answer, &refused) == nil {
+		return proto.Synced{}, &Error{Code: refused.Err.Code, Message: refused.Err.Message}
+	}
+	var synced proto.Synced
+	if proto.Decode(answer, &synced) != nil || synced.Group != group {
+		return proto.Synced{}, joinUnreachable()
+	}
+	return synced, nil
 }
 
 func (d *delivery) finishGroupSync(job syncJob, device string, seq int64, ok bool) bool {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	gs := d.groupLocked(job.group, device)
 	if gs.token != job.token {
+		d.mu.Unlock()
 		return false
 	}
 	gs.syncing = false
 	if ok {
 		gs.cursor, gs.live = seq, true
+	}
+	waiters := gs.waiters
+	gs.waiters = nil
+	d.mu.Unlock()
+	for _, ch := range waiters {
+		close(ch)
 	}
 	return true
 }

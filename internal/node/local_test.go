@@ -403,6 +403,10 @@ func checkBadRequests(t *testing.T, rig *localRig, link *LocalLink) {
 			ids = append(ids, id)
 			return map[string]any{"t": "nope", "id": id, "g": localGroupID, "since": 0, "state_only": false}
 		},
+		func(id int64) any {
+			ids = append(ids, id)
+			return map[string]any{"t": "nope", "id": id, "g": localGroupID, "before": 0, "limit": 10, "thread": nil}
+		},
 		func(id int64) any { ids = append(ids, id); return map[string]any{"id": id} },
 	}
 	for _, build := range cases {
@@ -412,7 +416,66 @@ func checkBadRequests(t *testing.T, rig *localRig, link *LocalLink) {
 		mustNoErr(t, proto.Decode(ans, &errResp))
 		mustEqual(t, errResp.Err.Code, "bad_request")
 	}
-	mustEqual(t, ids, []int64{3, 4, 5, 6, 7})
+	mustEqual(t, ids, []int64{3, 4, 5, 6, 7, 8})
+}
+
+func TestLocalLinkFetchMainLineAndThread(t *testing.T) {
+	threadID := testNonce(77)
+	rig := newLocalRig(t, map[string]home.Func{
+		"seed": func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
+			mainMsg := testMsgRow("m-main", s.ID, nil, c.Now)
+			thMsg := testMsgRow("m-thread", s.ID, &threadID, c.Now)
+			return home.Result{Rows: []home.Row{home.RowOf(mainMsg), home.RowOf(thMsg)}}, nil
+		},
+	})
+	link := AttachLocal(rig.host, rig.loop)
+	ctx := context.Background()
+	_, err := rig.host.Command(ctx, rig.device.ID(), rig.payload(`"t":"group","op":"create","name":"FetchGroup"`))
+	mustNoErr(t, err)
+	_, err = rig.host.Command(ctx, rig.device.ID(), rig.payload(`"t":"seed"`))
+	mustNoErr(t, err)
+
+	mustEqual(t, fetchThreadRowIDs(t, ctx, link, nil), []string{"m-main"})
+	mustEqual(t, fetchThreadRowIDs(t, ctx, link, &threadID), []string{"m-thread"})
+}
+
+func fetchThreadRowIDs(t *testing.T, ctx context.Context, link *LocalLink, thread *string) []string {
+	t.Helper()
+	ans, err := link.Request(ctx, func(id int64) any {
+		return proto.FetchThread{
+			FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: localGroupID, Before: 800, Limit: 50},
+			Thread:    thread,
+		}
+	})
+	mustNoErr(t, err)
+	return fetchedRowIDs(t, ans)
+}
+
+func testMsgRow(id, group string, thread *string, ts int64) proto.MsgRow {
+	return proto.MsgRow{
+		RowHeader: proto.RowHeader{Type: "msg", ID: id},
+		Group:     group,
+		Thread:    thread,
+		By:        "m-owner",
+		Kind:      "text",
+		Timestamp: ts,
+		Text:      id,
+		Mentions:  []string{},
+		Body:      json.RawMessage(`{}`),
+	}
+}
+
+func fetchedRowIDs(t *testing.T, raw json.RawMessage) []string {
+	t.Helper()
+	var fetched proto.Fetched
+	mustNoErr(t, proto.Decode(raw, &fetched))
+	var ids []string
+	for _, r := range fetched.Rows {
+		var hdr proto.RowHeader
+		mustNoErr(t, json.Unmarshal(r, &hdr))
+		ids = append(ids, hdr.ID)
+	}
+	return ids
 }
 
 func checkClientInbound(t *testing.T, link *LocalLink, cap *pushCapture) {

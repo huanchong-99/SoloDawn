@@ -5,6 +5,8 @@
   "app.home": "回到群聊",
   "app.side": "成员和群资料",
   "app.side.close": "关闭面板",
+  "app.otherTab": "SoloDawn 已在另一个标签页中打开。",
+  "app.useHere": "在此使用",
   "nav.label": "主导航",
   "nav.groups": "群聊",
   "nav.nodes": "电脑和 AI",

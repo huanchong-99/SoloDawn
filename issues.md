@@ -453,6 +453,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `Runtime` exposed `Turn` and `Answer` only, and `Sessions.End` (`internal/host/session.go`) runs inside a `Store.Write` transaction without calling into the session runtime.
 - Status: resolved in unit `HS-23`: `Runtime.Close` closes and waits for any open process outside `Store.Write`, and both step 17 cleanup (`internal/host/deliver.go`) and `host.leave` (`internal/host/join.go`) call `Runner.Close` before `Sessions.End`.
 
+### 2026-11-22 · bug · Uncoordinated group sync in `host.join` raced with `pushRows` and wiped `Host.Rows`
+
+- Symptom: on macOS CI (`features/m3_test.go:128-131`), M3 setup steps calling `host.join` over `LocalLink` occasionally failed within 0.1 s with `not_found: the group does not exist` (`internal/host/join.go:333`).
+- Cause: `joinFetchGroup` (`internal/host/join.go:327` before the fix) called `joinSyncState`, which sent `proto.Sync{Group: group, Since: 0, StateOnly: true}` without marking `groupSync.syncing = true` in `Part[delivery](h)`. When the home pushed `reset` and `rows` before `synced`, `pushRows` -> `ensureGroupSynced` (`internal/host/deliver.go:279`) saw `syncing == false && live == false` and launched a concurrent `syncOneGroup` (`Since: 0`), whose `reset` push wiped `Host.Rows` (`internal/host/deliver.go:266`) after `LocalLink` queued `synced` for `joinSyncState` and before `joinFetchGroup` checked `joinCachedGroup` (`internal/host/join.go:330`).
+- Status: resolved in branch `gemini/flaky-tests-6`: `joinFetchGroup` coordinates state synchronization through `syncGroupState` (`internal/host/deliver.go`), which claims `groupSync.syncing` (or waits on an in-flight sync) and shares `syncOneGroup` and `decodeSyncAnswer` so `pushRows` starts no duplicate cold sync. Test: `TestHostJoinSyncCoordinatesWithDeliveryPushesAndInflightSync`.
+
 ### 2026-11-21 · limitation · Background hosted-check polling sends `task cloud` once
 
 - Symptom: if the home connection was unreachable at the moment `TaskForge.WaitHostedChecks` settled, the `task cloud` command failed and the task stayed in `cloud_check`.

@@ -17,10 +17,10 @@ client or that block its storage; this browser's device
 key with signed envelopes, the device log and pairing; the wire types with their decoding; a
 mock connection that answers from the node's wire examples; the row cache of every group with the
 lists drawn from it; the group list with its create-group dialog; the main line of a group's
-chat with its composer; the connection indicator and the computers and AIs page; and the
-connection code, signalling and connections to nodes. No screen connects to a node yet: until
-the browser's connections are wired into the shell, a development server shows the one computer
-and the one group of the wire examples.
+chat with its composer; the connection indicator and the computers and AIs page; and the connection code, signalling and
+connections to paired nodes under the single-tab Web Lock. A development server shows the one
+computer and the one group of the wire examples unless the address carries `?nomock`; everywhere
+else the shell connects to each paired node over its rendezvous.
 
 The interface mockups are in `design/`. They are the visual reference for the interface: implement
 screens to match them, and add the motion they leave out.
@@ -64,9 +64,11 @@ false, and hands over the addresses: the rendezvous's `url` and `signal`, each n
 an after-hook (`AfterEachScenario`, `afterEach`), which also runs when it fails or times out:
 `stop` sends each group SIGTERM, then SIGKILL once its leader has exited or 3 s have passed, and
 removes the directory. The run's teardown kills what a test process that died left running.
-`launch(inject('browser'))` from `e2e/config.ts` opens the project's browser. `pnpm test` leaves
-`e2e/` out. The tests change nothing of the test process's own environment; the scenarios of
-`../features/web_e2e.feature` check that.
+`launch(inject('browser'))` from `e2e/config.ts` opens the project's browser, and `config.ts` sets
+`fileParallelism: false` so two Playwright WebKit UIProcesses never race to create the macOS
+Keychain WebCrypto master key on a fresh runner. `pnpm test` leaves `e2e/` out. The tests change
+nothing of the test process's own environment; the scenarios of `../features/web_e2e.feature` check
+that.
 
 The runtime dependencies are `valibot`, for the wire types, and `@xterm/xterm` 6.0.0 with
 `@xterm/addon-fit` 0.11.0 (MIT) for the terminal page. Nothing imports xterm yet; it is about
@@ -143,10 +145,12 @@ file in `src/routes/`. It edits neither the shell nor another area:
   has `?nomock`, and `live` everywhere else, the tests included. `mock` adds one home answered by
   `mockCtl`, read by the person of the wire examples with this browser's device key, and online;
   only a development build has this code, so the build carries neither the mock nor the examples
-  (checked in the output of `vite build`). `live` reaches no home yet: the browser's connections
-  (`peer.ts`, W-2) are wired here, one `session.peer(node, () => home.connect(), onpath)` per
-  node, and nowhere else. `net.homes` is `homes` of `groups.svelte.ts`; `net.path(home)` is how
-  this browser reaches a home now (`direct` or `relay`, the round trip, since when), and
+  (checked in the output of `vite build`). `live` acquires the single-tab Web Lock (`runTab` of
+  `tablock.ts`, showing the other-tab banner with "Use here" in `App.svelte` while another tab
+  holds it) and connects to each paired node from `owner.ts` through `peer.ts` (W-2), one
+  `session.peer(node, ...)` per node, pausing while `#/onboarding` runs a pairing session and
+  forwarding owner `devlog` updates. `net.homes` is `homes` of `groups.svelte.ts`; `net.path(home)`
+  is how this browser reaches a home now (`direct` or `relay`, the round trip, since when), and
   undefined while it does not; the mock's path is direct. `net.source` says which it is.
 - **Mounting points.** An area of the interface mounts its components without editing the shell,
   the chat or another area: it adds `src/components/<area>/mounts.ts`, whose default export is a
@@ -483,7 +487,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/messages/texts.ts`       | the one loader of the texts: checks and merges the files                          |
 | `src/**/*.glob.ts`            | an `import.meta.glob` alone: the areas' texts and mounts                          |
 | `src/lib/route.svelte.ts`     | route table, `parse`, `href`, the page open, the way it went                      |
-| `src/lib/net.svelte.ts`       | where the homes come from: `sourceOf`, `start`, the mock's home                   |
+| `src/lib/net.svelte.ts`       | where the homes come from: `sourceOf`, `start` (`mock` and `live`), `runTab` lock |
 | `src/lib/mounts.svelte.ts`    | mounting points, `gather` of the areas' mounts, `card(kind)`                      |
 | `src/lib/motion.ts`           | `spring`, the curve of `--spring`; `shift`, the page cross-fade                   |
 | `src/lib/jump.ts`             | `jumpToMessage`: scroll and focus `#m-<id>` without routing                       |
