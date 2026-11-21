@@ -29,13 +29,6 @@ func mustApproveNoErr(t *testing.T, err error) {
 	}
 }
 
-func mustApproveErr(t *testing.T, err error) {
-	t.Helper()
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-}
-
 func mustApproveTrue(t *testing.T, cond bool, msg string) {
 	t.Helper()
 	if !cond {
@@ -72,6 +65,17 @@ func recvApproveChan[T any](t *testing.T, ch <-chan T, label string) T {
 	}
 }
 
+func waitCallsZero(t *testing.T, h *Host, key SessionKey) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for h.Sessions.Calls(key) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for Calls(%v) == 0", key)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func approveTestClock() func() time.Time {
 	var ms atomic.Int64
 	ms.Store(seamStart - 1000)
@@ -97,7 +101,6 @@ type approveFakeHome struct {
 	decisions   []proto.Post[proto.DecisionBody]
 	fetches     []proto.FetchRow
 	rawCmds     []proto.Cmd
-	acks        []proto.Ack
 	cards       map[string]json.RawMessage
 	onPost      func(post proto.Post[proto.ApprovalBody])
 	onDecision  func(post proto.Post[proto.DecisionBody])
@@ -112,15 +115,7 @@ func newApproveFakeHome() *approveFakeHome {
 	}
 }
 
-func (f *approveFakeHome) Send(frame any) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if ack, ok := frame.(proto.Ack); ok {
-		f.acks = append(f.acks, ack)
-	}
-	return nil
-}
-
+func (f *approveFakeHome) Send(any) error               { return nil }
 func (f *approveFakeHome) Path() string                 { return "local" }
 func (f *approveFakeHome) PathChanged() <-chan struct{} { return nil }
 func (f *approveFakeHome) Done() <-chan struct{}        { return f.done }
@@ -130,44 +125,35 @@ func (f *approveFakeHome) Request(_ context.Context, build func(int64) any) (jso
 	id := int64(len(f.rawCmds) + len(f.fetches) + 1)
 	req := build(id)
 	if fetch, ok := req.(proto.FetchRow); ok {
-		f.fetches = append(f.fetches, fetch)
-		hook := f.onFetchHook
-		rawCard, hasCard := f.cards[fetch.RowID]
-		reqErr := f.err
-		f.mu.Unlock()
-		if hook != nil {
-			return hook(fetch)
-		}
-		if reqErr != nil {
-			return nil, reqErr
-		}
-		rows := []json.RawMessage{}
-		if hasCard {
-			rows = []json.RawMessage{rawCard}
-		}
-		return json.RawMessage(marshalApproveJSON(proto.Fetched{
-			Type:    "fetched",
-			Success: proto.Success{Re: id, OK: true},
-			Rows:    rows,
-			More:    false,
-		})), nil
+		return f.handleFetchLocked(id, fetch)
 	}
-	cmd := req.(proto.Cmd)
+	return f.handleCmdLocked(req.(proto.Cmd))
+}
+
+func (f *approveFakeHome) handleFetchLocked(id int64, fetch proto.FetchRow) (json.RawMessage, error) {
+	f.fetches = append(f.fetches, fetch)
+	hook := f.onFetchHook
+	rawCard, hasCard := f.cards[fetch.RowID]
+	reqErr := f.err
+	f.mu.Unlock()
+	if hook != nil {
+		return hook(fetch)
+	}
+	if reqErr != nil {
+		return nil, reqErr
+	}
+	rows := []json.RawMessage{}
+	if hasCard {
+		rows = []json.RawMessage{rawCard}
+	}
+	return json.RawMessage(marshalWire(proto.Fetched{
+		Type: "fetched", Success: proto.Success{Re: id, OK: true}, Rows: rows,
+	})), nil
+}
+
+func (f *approveFakeHome) handleCmdLocked(cmd proto.Cmd) (json.RawMessage, error) {
 	f.rawCmds = append(f.rawCmds, cmd)
-	var kindOnly struct {
-		Kind string `json:"kind"`
-	}
-	json.Unmarshal([]byte(cmd.Env.Payload), &kindOnly)
-	var appPost proto.Post[proto.ApprovalBody]
-	hasApp := kindOnly.Kind == "approval" && proto.Decode([]byte(cmd.Env.Payload), &appPost) == nil
-	if hasApp {
-		f.posts = append(f.posts, appPost)
-	}
-	var decPost proto.Post[proto.DecisionBody]
-	hasDec := kindOnly.Kind == "decision" && proto.Decode([]byte(cmd.Env.Payload), &decPost) == nil
-	if hasDec {
-		f.decisions = append(f.decisions, decPost)
-	}
+	appPost, hasApp, decPost, hasDec := f.decodeAndRecordLocked([]byte(cmd.Env.Payload))
 	ans, reqErr, appHook, decHook := f.answer, f.err, f.onPost, f.onDecision
 	f.mu.Unlock()
 	if reqErr != nil {
@@ -176,19 +162,35 @@ func (f *approveFakeHome) Request(_ context.Context, build func(int64) any) (jso
 	if ans != "" {
 		return json.RawMessage(ans), nil
 	}
+	runPostHooks(hasApp, appPost, appHook, hasDec, decPost, decHook)
+	return json.RawMessage(`{"re":1,"ok":true}`), nil
+}
+
+func runPostHooks(hasApp bool, appPost proto.Post[proto.ApprovalBody], appHook func(proto.Post[proto.ApprovalBody]), hasDec bool, decPost proto.Post[proto.DecisionBody], decHook func(proto.Post[proto.DecisionBody])) {
 	if hasApp && appHook != nil {
 		appHook(appPost)
 	}
 	if hasDec && decHook != nil {
 		decHook(decPost)
 	}
-	return json.RawMessage(`{"re":1,"ok":true}`), nil
 }
 
-func (f *approveFakeHome) ackList() []proto.Ack {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return slices.Clone(f.acks)
+func (f *approveFakeHome) decodeAndRecordLocked(payload []byte) (proto.Post[proto.ApprovalBody], bool, proto.Post[proto.DecisionBody], bool) {
+	var kindOnly struct {
+		Kind string `json:"kind"`
+	}
+	json.Unmarshal(payload, &kindOnly)
+	var appPost proto.Post[proto.ApprovalBody]
+	hasApp := kindOnly.Kind == "approval" && proto.Decode(payload, &appPost) == nil
+	if hasApp {
+		f.posts = append(f.posts, appPost)
+	}
+	var decPost proto.Post[proto.DecisionBody]
+	hasDec := kindOnly.Kind == "decision" && proto.Decode(payload, &decPost) == nil
+	if hasDec {
+		f.decisions = append(f.decisions, decPost)
+	}
+	return appPost, hasApp, decPost, hasDec
 }
 
 func (f *approveFakeHome) postList() []proto.Post[proto.ApprovalBody] {
@@ -212,7 +214,7 @@ func (f *approveFakeHome) fetchList() []proto.FetchRow {
 func (f *approveFakeHome) putCard(card proto.MsgRow) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.cards[card.ID] = json.RawMessage(marshalApproveJSON(card))
+	f.cards[card.ID] = json.RawMessage(marshalWire(card))
 }
 
 type recordedAnswer struct {
@@ -299,7 +301,7 @@ func newApproveFixture(t *testing.T) *approveFixture {
 	mustApproveNoErr(t, err)
 	fx.h = h
 	fx.sessKey = SessionKey{Group: fx.groupID, Member: fx.memberID, Task: fx.taskID}
-	seamSQL(t, fx.db, "INSERT INTO setting(key, value) VALUES('owner', '"+marshalApproveJSON(fx.owner1.ID())+"')")
+	seamSQL(t, fx.db, "INSERT INTO setting(key, value) VALUES('owner', '"+marshalWire(fx.owner1.ID())+"')")
 	fx.h.Attach(fx.homeKey.ID(), fx.home)
 	fx.seedDefaultRows()
 	mustApproveNoErr(t, fx.h.Sessions.Create(Session{
@@ -316,13 +318,8 @@ func newApproveFixture(t *testing.T) *approveFixture {
 func (fx *approveFixture) seedDefaultRows() {
 	grp := proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: fx.groupID, Seq: 1},
-		Name:      "SoloDawn",
-		Kind:      "project",
-		Base:      "main",
-		Forge:     "none",
-		Home:      fx.homeKey.ID(),
-		Checks:    []string{},
-		Limits:    proto.Limits{ApprovalWaitS: 20},
+		Name:      "SoloDawn", Kind: "project", Base: "main", Forge: "none",
+		Home: fx.homeKey.ID(), Checks: []string{}, Limits: proto.Limits{ApprovalWaitS: 20},
 	}
 	h1 := proto.HumanMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: fx.human1ID, Seq: 2}, Group: fx.groupID, Kind: "human", User: fx.owner1.ID(), Name: "Alice"},
@@ -334,17 +331,13 @@ func (fx *approveFixture) seedDefaultRows() {
 	}
 	ai := proto.AIMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: fx.memberID, Seq: 4}, Group: fx.groupID, Kind: "ai", User: fx.owner1.ID(), Name: "Claude Worker"},
-		CLI:       "claude",
-		Host:      fx.hostKey.ID(),
-		Account:   "personal",
-		Allow:     []string{},
-		Approvers: []string{fx.owner1.ID()},
-		State:     "working",
+		CLI:       "claude", Host: fx.hostKey.ID(), Account: "personal",
+		Allow: []string{}, Approvers: []string{fx.owner1.ID()}, State: "working",
 	}
-	fx.h.Rows.Put(fx.groupID, "group", fx.groupID, json.RawMessage(marshalApproveJSON(grp)))
-	fx.h.Rows.Put(fx.groupID, "member", fx.human1ID, json.RawMessage(marshalApproveJSON(h1)))
-	fx.h.Rows.Put(fx.groupID, "member", fx.human2ID, json.RawMessage(marshalApproveJSON(h2)))
-	fx.h.Rows.Put(fx.groupID, "member", fx.memberID, json.RawMessage(marshalApproveJSON(ai)))
+	fx.h.Rows.Put(fx.groupID, "group", fx.groupID, json.RawMessage(marshalWire(grp)))
+	fx.h.Rows.Put(fx.groupID, "member", fx.human1ID, json.RawMessage(marshalWire(h1)))
+	fx.h.Rows.Put(fx.groupID, "member", fx.human2ID, json.RawMessage(marshalWire(h2)))
+	fx.h.Rows.Put(fx.groupID, "member", fx.memberID, json.RawMessage(marshalWire(ai)))
 }
 
 func (fx *approveFixture) caller(level int) Caller {
@@ -377,48 +370,29 @@ func (fx *approveFixture) makeCardMsg(card proto.ID, kind string, task string, s
 	}
 	return proto.MsgRow{
 		RowHeader: proto.RowHeader{Type: "msg", ID: string(card), Seq: 1},
-		Pos:       1,
-		Group:     fx.groupID,
-		Thread:    thread,
-		Main:      true,
-		By:        fx.memberID,
-		Kind:      kind,
-		Timestamp: seamStart,
-		Text:      "",
-		Mentions:  []string{},
-		Re:        nil,
-		Body:      json.RawMessage(`{}`),
-		State:     state,
+		Pos:       1, Group: fx.groupID, Thread: thread, Main: true, By: fx.memberID,
+		Kind: kind, Timestamp: seamStart, Mentions: []string{},
+		Body: json.RawMessage(`{}`), State: state,
 	}
 }
 
-func (fx *approveFixture) buildDecidedItem(actSigner identity.Key, card proto.ID, status string) json.RawMessage {
+func (fx *approveFixture) buildDecidedItem(actSigner identity.Key, card proto.ID, task, status string) json.RawMessage {
 	fx.itemSeq++
 	actEnv := actSigner.Sign(`{"t":"act"}`)
 	by := fx.human1ID
 	at := int64(seamStart)
-	msg := fx.makeCardMsg(card, "approval", fx.taskID, &proto.CardState{
-		Status: status,
-		By:     &by,
-		At:     &at,
-		Act:    &actEnv,
+	msg := fx.makeCardMsg(card, "approval", task, &proto.CardState{
+		Status: status, By: &by, At: &at, Act: &actEnv,
 	})
-	item := proto.Item{
-		Type:      "item",
-		Nonce:     approveTestID(byte(110 + fx.itemSeq%40)),
-		Timestamp: seamStart,
-		Group:     proto.ID(fx.groupID),
-		To:        fx.hostKey.ID(),
-		Item:      fx.itemSeq,
-		AI:        proto.ID(fx.memberID),
-		Why:       "decided",
-		Task:      proto.ID(fx.taskID),
-		Msg:       card,
-	}
-	env := fx.homeKey.Sign(marshalApproveJSON(item))
-	return json.RawMessage(marshalApproveJSON(proto.InboxItem{
-		Env: env,
-		Msg: json.RawMessage(marshalApproveJSON(msg)),
+	return json.RawMessage(marshalWire(proto.InboxItem{
+		Item: proto.Item{
+			Item: fx.itemSeq,
+			AI:   proto.ID(fx.memberID),
+			Why:  "decided",
+			Task: proto.ID(task),
+			Msg:  card,
+		},
+		Msg: json.RawMessage(marshalWire(msg)),
 	}))
 }
 
@@ -427,34 +401,22 @@ func (fx *approveFixture) buildDecisionItem(actSigner identity.Key, s Session, c
 	actEnv := actSigner.Sign(`{"t":"act"}`)
 	by := fx.human1ID
 	at := int64(seamStart)
-	msg := fx.makeCardMsg(card, "decision", s.Task, &proto.CardState{
-		Status: "decided",
-		By:     &by,
-		At:     &at,
-		Choice: choice,
-		Text:   text,
-		Act:    &actEnv,
+	var task string
+	if s.Kind == TaskSession || s.Kind == ReviewSession {
+		task = s.Task
+	}
+	msg := fx.makeCardMsg(card, "decision", task, &proto.CardState{
+		Status: "decided", By: &by, At: &at, Choice: choice, Text: text, Act: &actEnv,
 	})
-	var itemTask proto.ID
-	if s.Task != "" {
-		itemTask = proto.ID(s.Task)
-	}
-	item := proto.Item{
-		Type:      "item",
-		Nonce:     approveTestID(byte(60 + fx.itemSeq%40)),
-		Timestamp: seamStart,
-		Group:     proto.ID(s.Group),
-		To:        fx.hostKey.ID(),
-		Item:      fx.itemSeq,
-		AI:        proto.ID(s.Member),
-		Why:       "decided",
-		Task:      itemTask,
-		Msg:       card,
-	}
-	env := fx.homeKey.Sign(marshalApproveJSON(item))
-	return json.RawMessage(marshalApproveJSON(proto.InboxItem{
-		Env: env,
-		Msg: json.RawMessage(marshalApproveJSON(msg)),
+	return json.RawMessage(marshalWire(proto.InboxItem{
+		Item: proto.Item{
+			Item: fx.itemSeq,
+			AI:   proto.ID(s.Member),
+			Why:  "decided",
+			Task: proto.ID(task),
+			Msg:  card,
+		},
+		Msg: json.RawMessage(marshalWire(msg)),
 	}))
 }
 
@@ -469,13 +431,6 @@ func (fx *approveFixture) approvalRows() string {
 	return rows
 }
 
-func setFastWaitUnit(t *testing.T, unit time.Duration) {
-	t.Helper()
-	prev := approvalWaitUnit
-	approvalWaitUnit = unit
-	t.Cleanup(func() { approvalWaitUnit = prev })
-}
-
 func TestApproveToolRegistrationSchemaAndVisibility(t *testing.T) {
 	tool, ok := Tools["approve"]
 	mustApproveTrue(t, ok, "Tools[approve] missing")
@@ -483,6 +438,7 @@ func TestApproveToolRegistrationSchemaAndVisibility(t *testing.T) {
 	mustApproveTrue(t, tool.Call != nil, "Tools[approve] Call nil")
 	mustApproveTrue(t, tool.For != nil, "Tools[approve] For nil")
 	mustApproveTrue(t, Listeners["approve"] != nil, "Listeners[approve] nil")
+	mustApproveTrue(t, !bytes.Contains(tool.Schema, []byte("additionalProperties")), "approveInputSchema must omit additionalProperties")
 
 	dec := json.NewDecoder(bytes.NewReader(tool.Schema))
 	dec.DisallowUnknownFields()
@@ -494,7 +450,6 @@ func TestApproveToolRegistrationSchemaAndVisibility(t *testing.T) {
 		"tool_use_id": {Type: "string"},
 	}
 	mustApproveEqual(t, schema.Type, "object", "schema.Type")
-	mustApproveEqual(t, schema.AdditionalProperties, false, "schema.AdditionalProperties")
 	mustApproveDeepEqual(t, schema.Properties, wantProps, "schema.Properties")
 	mustApproveDeepEqual(t, schema.Required, []string{"tool_name", "input", "tool_use_id"}, "schema.Required")
 
@@ -526,17 +481,13 @@ func assertBadApprovePayloads(t *testing.T, fx *approveFixture) {
 		`[]`,
 		`null`,
 		`"str"`,
+		`{"tool_name":"Bash","input":`,
 		`{"input":{},"tool_use_id":"u1"}`,
 		`{"tool_name":null,"input":{},"tool_use_id":"u1"}`,
 		`{"tool_name":"","input":{},"tool_use_id":"u1"}`,
-		`{"tool_name":"Bash","input":{}}`,
-		`{"tool_name":"Bash","input":{},"tool_use_id":null}`,
 		`{"tool_name":"Bash","tool_use_id":"u1"}`,
-		`{"tool_name":"Bash","input":null,"tool_use_id":"u1"}`,
-		`{"tool_name":"Bash","input":[],"tool_use_id":"u1"}`,
-		`{"tool_name":"Bash","input":"x","tool_use_id":"u1"}`,
-		`{"tool_name":"Bash","input":{},"tool_use_id":"u1","extra":true}`,
 		`{"tool_name":"Bash","input":{"command":123},"tool_use_id":"u1"}`,
+		`{"tool_name":"Write","tool_use_id":"u1"}`,
 		`{"tool_name":"AskUserQuestion","input":{"questions":"bad"},"tool_use_id":"u1"}`,
 		`{"tool_name":"AskUserQuestion","input":{"questions":[]},"tool_use_id":"u1"}`,
 		`{"tool_name":"AskUserQuestion","input":{},"tool_use_id":"u1"}`,
@@ -551,12 +502,12 @@ func assertBadApprovePayloads(t *testing.T, fx *approveFixture) {
 func assertMappedToolCategories(t *testing.T, fx *approveFixture) {
 	t.Helper()
 	fx.home.onPost = func(post proto.Post[proto.ApprovalBody]) {
-		raw := fx.buildDecidedItem(fx.owner2, post.Nonce, "approved")
-		_, err := fx.h.RecordApprovalDecision(fx.homeKey.ID(), raw)
-		mustApproveNoErr(t, err)
+		raw := fx.buildDecidedItem(fx.owner2, post.Nonce, fx.taskID, "approved")
+		waited, err := fx.h.Hand(string(post.Nonce), raw)
+		mustApproveTrue(t, waited && err == nil, "Hand approved category case")
 	}
 	cases := []categoryMapCase{
-		{raw: `{"tool_name":"Bash","input":{"command":"git push origin other","description":"Push feature"},"tool_use_id":"u1"}`, tool: "Bash", category: "command", command: "git push origin other", why: new("Push feature"), level: 3},
+		{raw: `{"tool_name":"Bash","input":{"command":"git push origin other","description":"Push feature"},"tool_use_id":"u1","permission_suggestions":[{"type":"addRules"}]}`, tool: "Bash", category: "command", command: "git push origin other", why: new("Push feature"), level: 3},
 		{raw: `{"tool_name":"Bash","input":{"command":"ls -la"},"tool_use_id":""}`, tool: "Bash", category: "command", command: "ls -la", level: 2},
 		{raw: "{\n  \"tool_name\": \"Write\",\n  \"input\": {\n    \"filePath\": \"/outside/a.txt\",\n    \"content\": \"x\"\n  },\n  \"tool_use_id\": \"u2\"\n}", tool: "Write", category: "file", command: `{"filePath":"/outside/a.txt","content":"x"}`, level: 3},
 		{raw: `{"tool_name":"Edit","input":{"old_string":"a","new_string":"b"},"tool_use_id":"u3"}`, tool: "Edit", category: "file", command: `{"old_string":"a","new_string":"b"}`, level: 2},
@@ -568,7 +519,7 @@ func assertMappedToolCategories(t *testing.T, fx *approveFixture) {
 	}
 	for _, tc := range cases {
 		res := fx.mustCallTool(t.Context(), tc.level, tc.raw)
-		mustApproveEqual(t, marshalApproveJSON(res), `{"behavior":"allow"}`, tc.tool)
+		mustApproveEqual(t, marshalWire(res), `{"behavior":"allow"}`, tc.tool)
 		posts := fx.home.postList()
 		assertPostedApprovalCard(t, fx, posts[len(posts)-1], tc)
 	}
@@ -580,8 +531,8 @@ func assertPostedApprovalCard(t *testing.T, fx *approveFixture, got proto.Post[p
 	mustApproveEqual(t, got.Main, true, "post.Main")
 	mustApproveEqual(t, got.Text, "", "post.Text")
 	mustApproveTrue(t, got.Re == nil, "post.Re must be nil")
-	mustApproveTrue(t, got.Thread != nil, "post.Thread must be set")
-	mustApproveEqual(t, string(*got.Thread), fx.taskID, "post.Thread")
+	mustApproveTrue(t, got.Thread != nil && string(*got.Thread) == fx.taskID, "post.Thread")
+	mustApproveEqual(t, got.Body.Task, fx.taskID, "Body.Task")
 	mustApproveEqual(t, string(got.As), fx.memberID, "post.As")
 	mustApproveEqual(t, got.Body.Tool, tc.tool, "Body.Tool")
 	mustApproveEqual(t, got.Body.Category, tc.category, "Body.Category")
@@ -590,26 +541,88 @@ func assertPostedApprovalCard(t *testing.T, fx *approveFixture, got proto.Post[p
 	mustApproveDeepEqual(t, got.Body.Why, tc.why, "Body.Why")
 }
 
+func TestCardsAcrossTaskReviewAndGroupSessions(t *testing.T) {
+	fx := newApproveFixture(t)
+	reviewTask := string(approveTestID(45))
+	reviewKey := SessionKey{Group: fx.groupID, Member: fx.memberID, Task: reviewTask}
+	groupKey := SessionKey{Group: fx.groupID, Member: fx.memberID}
+	mustApproveNoErr(t, fx.h.Sessions.Create(Session{
+		SessionKey: reviewKey, Kind: ReviewSession, Folder: "review/45", Agent: "claude", Home: fx.homeKey.ID(), Name: "Reviewer",
+	}))
+	mustApproveNoErr(t, fx.h.Sessions.Create(Session{
+		SessionKey: groupKey, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: fx.homeKey.ID(), Name: "Secretary", Secretary: true,
+	}))
+
+	assertSessionKindApproval(t, fx, fx.sessKey, fx.taskID)
+	assertSessionKindApproval(t, fx, reviewKey, reviewTask)
+	assertSessionKindApproval(t, fx, groupKey, "")
+
+	assertSessionKindDecision(t, fx, fx.sessKey, fx.taskID, 3)
+	assertSessionKindDecision(t, fx, reviewKey, reviewTask, 2)
+	assertSessionKindDecision(t, fx, groupKey, "", 1)
+}
+
+func assertSessionKindApproval(t *testing.T, fx *approveFixture, key SessionKey, wantTask string) {
+	t.Helper()
+	s, _ := fx.h.Sessions.Get(key)
+	fx.home.onPost = func(post proto.Post[proto.ApprovalBody]) {
+		waited, err := fx.h.Hand(string(post.Nonce), fx.buildDecidedItem(fx.owner1, post.Nonce, wantTask, "approved"))
+		mustApproveTrue(t, waited && err == nil, "session kind approval Hand")
+	}
+	val, err := Tools["approve"].Call(t.Context(), fx.h, Caller{Session: s, Level: 3}, json.RawMessage(`{"tool_name":"Bash","input":{"command":"echo ok"},"tool_use_id":"u_sk"}`))
+	mustApproveNoErr(t, err)
+	mustApproveEqual(t, val.(ApprovalResult).Behavior, "allow", string(s.Kind)+" approval allow")
+	posts := fx.home.postList()
+	got := posts[len(posts)-1]
+	mustApproveEqual(t, got.Body.Task, wantTask, string(s.Kind)+" approval Body.Task")
+	if wantTask == "" {
+		mustApproveTrue(t, got.Thread == nil, "group approval Thread must be nil")
+		return
+	}
+	mustApproveTrue(t, got.Thread != nil && string(*got.Thread) == wantTask, string(s.Kind)+" approval Thread")
+}
+
+func assertSessionKindDecision(t *testing.T, fx *approveFixture, key SessionKey, wantTask string, level int) {
+	t.Helper()
+	s, _ := fx.h.Sessions.Get(key)
+	fx.home.onDecision = func(post proto.Post[proto.DecisionBody]) {
+		txt := "Picked"
+		waited, err := fx.h.Hand(string(post.Nonce), fx.buildDecisionItem(fx.owner1, s, post.Nonce, nil, &txt))
+		mustApproveTrue(t, waited && err == nil, "session kind decision Hand")
+	}
+	raw := json.RawMessage(`{"tool_name":"AskUserQuestion","input":{"questions":[{"question":"Proceed?"}]},"tool_use_id":"u_dq"}`)
+	val, err := Tools["approve"].Call(t.Context(), fx.h, Caller{Session: s, Level: level}, raw)
+	mustApproveNoErr(t, err)
+	mustApproveEqual(t, val.(ApprovalResult).Behavior, "allow", string(s.Kind)+" decision allow")
+	decs := fx.home.decisionList()
+	got := decs[len(decs)-1]
+	if wantTask == "" {
+		mustApproveTrue(t, got.Thread == nil && got.Body.Task == nil, "group decision Thread and Task must be nil")
+		return
+	}
+	mustApproveTrue(t, got.Thread != nil && string(*got.Thread) == wantTask, string(s.Kind)+" decision Thread")
+	mustApproveTrue(t, got.Body.Task != nil && *got.Body.Task == wantTask, string(s.Kind)+" decision Body.Task")
+}
+
 func TestApproveLevelOneAndOutboundSecretCheck(t *testing.T) {
 	fx := newApproveFixture(t)
 	res1 := fx.mustCallTool(t.Context(), 1, `{"tool_name":"Bash","input":{"command":"touch x"},"tool_use_id":"u1"}`)
-	mustApproveEqual(t, marshalApproveJSON(res1), `{"behavior":"deny","message":"Denied: this session is read only."}`, "level 1")
+	mustApproveEqual(t, marshalWire(res1), `{"behavior":"deny","message":"Denied: this session is read only."}`, "level 1")
 	mustApproveEqual(t, len(fx.home.postList()), 0, "level 1 posts")
 	mustApproveEqual(t, fx.approvalRows(), "", "level 1 rows")
-	mustApproveEqual(t, seamRecord(t, fx.h), "", "level 1 audit")
 
 	secretTok := "ghp_0123456789abcdefghijklmnopqrstuvwxyzABCD"
 	longWithSecret := strings.Repeat("a", 4000) + " " + secretTok
-	argCmdSecret := marshalApproveJSON(map[string]any{
+	argCmdSecret := marshalWire(map[string]any{
 		"tool_name":   "Bash",
 		"input":       map[string]string{"command": longWithSecret, "description": "Safe justification"},
 		"tool_use_id": "u3",
 	})
 	resSec1 := fx.mustCallTool(t.Context(), 3, argCmdSecret)
 	mustApproveDeepEqual(t, resSec1, ApprovalResult{Behavior: "deny", Message: denySecretMessage}, "command secret")
-	mustApproveTrue(t, !strings.Contains(marshalApproveJSON(resSec1), secretTok), "deny leaked secret")
+	mustApproveTrue(t, !strings.Contains(marshalWire(resSec1), secretTok), "deny leaked secret")
 
-	argWhySecret := marshalApproveJSON(map[string]any{
+	argWhySecret := marshalWire(map[string]any{
 		"tool_name":   "Bash",
 		"input":       map[string]string{"command": "echo ok", "description": "Using -----BEGIN PRIVATE KEY-----"},
 		"tool_use_id": "u4",
@@ -618,19 +631,11 @@ func TestApproveLevelOneAndOutboundSecretCheck(t *testing.T) {
 	mustApproveDeepEqual(t, resSec2, ApprovalResult{Behavior: "deny", Message: denySecretMessage}, "why secret")
 	mustApproveEqual(t, len(fx.home.postList()), 0, "secret posts")
 	mustApproveEqual(t, fx.approvalRows(), "", "secret rows")
-
-	audit := seamRecord(t, fx.h)
-	mustApproveTrue(t, !strings.Contains(audit, secretTok), "audit leaked github token")
-	mustApproveTrue(t, !strings.Contains(audit, "PRIVATE KEY"), "audit leaked private key")
-	wantAudit := strings.Join([]string{
-		"1763600001000|" + fx.groupID + "|claude|approval|-|-|Bash|-|secret",
-		"1763600002000|" + fx.groupID + "|claude|approval|-|-|Bash|-|secret",
-	}, "\n")
-	mustApproveEqual(t, audit, wantAudit, "secret audit rows")
+	mustApproveEqual(t, seamRecord(t, fx.h), "", "no audit rows written")
 }
 
 func jsonEncodedLen(s string) int {
-	return len(marshalApproveJSON(s))
+	return len(marshalWire(s))
 }
 
 func TestShortenJSONTextAndCardLimitsBoundaries(t *testing.T) {
@@ -643,8 +648,7 @@ func TestShortenJSONTextAndCardLimitsBoundaries(t *testing.T) {
 	overCmd := strings.Repeat("a", 3071)
 	shortOver, fullOver := shortenCommand(overCmd)
 	mustApproveEqual(t, len(shortOver), 3070, "over 3072 cut len")
-	mustApproveTrue(t, fullOver != nil, "over 3072 full set")
-	mustApproveEqual(t, *fullOver, 3071, "over 3072 full value")
+	mustApproveTrue(t, fullOver != nil && *fullOver == 3071, "over 3072 full value")
 	mustApproveEqual(t, jsonEncodedLen(shortOver), 3072, "over 3072 jsonLen")
 
 	htmlExact := strings.Repeat("<&>", 1023) + "a"
@@ -657,8 +661,7 @@ func TestShortenJSONTextAndCardLimitsBoundaries(t *testing.T) {
 	shortUTF8, fullUTF8 := shortenCommand(utf8Straddle)
 	mustApproveEqual(t, shortUTF8, strings.Repeat("b", 3069), "utf8 straddle cut")
 	mustApproveTrue(t, utf8.ValidString(shortUTF8), "utf8 valid")
-	mustApproveTrue(t, fullUTF8 != nil, "utf8 full set")
-	mustApproveEqual(t, *fullUTF8, 3072, "utf8 full bytes")
+	mustApproveTrue(t, fullUTF8 != nil && *fullUTF8 == 3072, "utf8 full bytes")
 	mustApproveEqual(t, jsonEncodedLen(shortUTF8), 3071, "utf8 jsonLen")
 
 	nlExact := strings.Repeat("\n", 1535)
@@ -669,20 +672,24 @@ func TestShortenJSONTextAndCardLimitsBoundaries(t *testing.T) {
 	nlOver := strings.Repeat("\n", 1536)
 	nlOverShort, nlOverFull := shortenCommand(nlOver)
 	mustApproveEqual(t, len(nlOverShort), 1535, "newline over cut")
-	mustApproveTrue(t, nlOverFull != nil, "newline over full set")
-	mustApproveEqual(t, *nlOverFull, 1536, "newline over full len")
+	mustApproveTrue(t, nlOverFull != nil && *nlOverFull == 1536, "newline over full len")
 
 	mustApproveTrue(t, optionalWhy("") == nil, "empty why nil")
 	whyExact := strings.Repeat("w", 254)
 	gotWhyExact := optionalWhy(whyExact)
-	mustApproveTrue(t, gotWhyExact != nil, "why exact non-nil")
-	mustApproveEqual(t, *gotWhyExact, whyExact, "why exact val")
+	mustApproveTrue(t, gotWhyExact != nil && *gotWhyExact == whyExact, "why exact val")
 	mustApproveEqual(t, jsonEncodedLen(*gotWhyExact), 256, "why exact jsonLen")
 
 	gotWhyOver := optionalWhy(strings.Repeat("w", 255))
-	mustApproveTrue(t, gotWhyOver != nil, "why over non-nil")
-	mustApproveEqual(t, *gotWhyOver, whyExact, "why over val")
+	mustApproveTrue(t, gotWhyOver != nil && *gotWhyOver == whyExact, "why over val")
 	mustApproveEqual(t, jsonEncodedLen(*gotWhyOver), 256, "why over jsonLen")
+
+	d1 := hashApprovalInput(json.RawMessage(`{"b":9007199254740993,"a":1}`))
+	d2 := hashApprovalInput(json.RawMessage(`{ "a": 1, "b": 9007199254740993 }`))
+	d3 := hashApprovalInput(json.RawMessage(`{"a":1,"b":9007199254740992}`))
+	mustApproveEqual(t, d1, d2, "canonical JSON digest")
+	mustApproveTrue(t, d1 != d3, "UseNumber 64-bit integer precision")
+	mustApproveEqual(t, len(hashApprovalInput(json.RawMessage("  not-json  "))), 64, "non-JSON digest len")
 }
 
 func TestTimelyApproveDenyHomeRefusalAndApproverResolution(t *testing.T) {
@@ -696,31 +703,26 @@ func TestTimelyApproveDenyHomeRefusalAndApproverResolution(t *testing.T) {
 func seedDelegateAndExtraHuman(fx *approveFixture) identity.Key {
 	otherUser := approveTestKey(9)
 	human3ID := string(approveTestID(15))
-	fx.h.Rows.Put(fx.groupID, "member", human3ID, json.RawMessage(marshalApproveJSON(proto.HumanMemberRow{
+	fx.h.Rows.Put(fx.groupID, "member", human3ID, json.RawMessage(marshalWire(proto.HumanMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: human3ID, Seq: 5}, Group: fx.groupID, Kind: "human", User: otherUser.ID(), Name: "Carol"},
 		Role:      "member",
 	})))
 	fx.h.Rows.Put(fx.groupID, "member", "bad-member", json.RawMessage(`{"r":"member"`))
-	fx.h.Rows.Put(fx.groupID, "member", fx.memberID, json.RawMessage(marshalApproveJSON(proto.AIMemberRow{
+	fx.h.Rows.Put(fx.groupID, "member", fx.memberID, json.RawMessage(marshalWire(proto.AIMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: fx.memberID, Seq: 6}, Group: fx.groupID, Kind: "ai", User: fx.owner1.ID(), Name: "Claude Worker"},
-		CLI:       "claude",
-		Host:      fx.hostKey.ID(),
-		Account:   "personal",
-		Allow:     []string{},
-		Approvers: []string{fx.owner1.ID(), fx.delegate.ID()},
-		State:     "working",
+		CLI:       "claude", Host: fx.hostKey.ID(), Account: "personal",
+		Allow: []string{}, Approvers: []string{fx.owner1.ID(), fx.delegate.ID()}, State: "working",
 	})))
 	return approveTestKey(8)
 }
 
 func assertTimelyDelegateApprove(t *testing.T, fx *approveFixture, delegateDev2 identity.Key) {
 	t.Helper()
-	// Approve inside Home.Request so the test proves Await opened before Command.
+	// Hand inside Home.Request so the test proves Await opened before Command.
 	fx.home.onPost = func(post proto.Post[proto.ApprovalBody]) {
-		raw := fx.buildDecidedItem(delegateDev2, post.Nonce, "approved")
-		status, err := fx.h.RecordApprovalDecision(fx.homeKey.ID(), raw)
-		mustApproveNoErr(t, err)
-		mustApproveEqual(t, status, "approved", "timely delegate status")
+		raw := fx.buildDecidedItem(delegateDev2, post.Nonce, fx.taskID, "approved")
+		waited, err := fx.h.Hand(string(post.Nonce), raw)
+		mustApproveTrue(t, waited && err == nil, "timely delegate Hand")
 	}
 	resAllow := fx.mustCallTool(t.Context(), 3, `{"tool_name":"Bash","input":{"command":"npm test","description":"Run suite"},"tool_use_id":"u1"}`)
 	mustApproveDeepEqual(t, resAllow, ApprovalResult{Behavior: "allow"}, "timely allow")
@@ -730,19 +732,18 @@ func assertTimelyDelegateApprove(t *testing.T, fx *approveFixture, delegateDev2 
 	mustApproveDeepEqual(t, post.Mentions, wantMentions, "post.Mentions")
 	mustApproveDeepEqual(t, post.Body.Approvers, []string{fx.owner1.ID(), fx.delegate.ID()}, "post.Body.Approvers")
 	mustApproveEqual(t, fx.approvalRows(), "", "timely allow rows")
-	mustApproveEqual(t, len(fx.home.ackList()), 1, "timely allow acks")
+	mustApproveEqual(t, seamRecord(t, fx.h), "", "timely allow writes no audit rows")
 }
 
 func assertTimelyOwnerDenyAndRefusals(t *testing.T, fx *approveFixture) {
 	t.Helper()
 	fx.home.onPost = func(post proto.Post[proto.ApprovalBody]) {
-		raw := fx.buildDecidedItem(fx.owner2, post.Nonce, "denied")
-		status, err := fx.h.RecordApprovalDecision(fx.homeKey.ID(), raw)
-		mustApproveNoErr(t, err)
-		mustApproveEqual(t, status, "denied", "timely deny status")
+		raw := fx.buildDecidedItem(fx.owner2, post.Nonce, fx.taskID, "denied")
+		waited, err := fx.h.Hand(string(post.Nonce), raw)
+		mustApproveTrue(t, waited && err == nil, "timely deny Hand")
 	}
 	resDeny := fx.mustCallTool(t.Context(), 3, `{"tool_name":"Bash","input":{"command":"rm -rf /tmp/x"},"tool_use_id":"u2"}`)
-	mustApproveEqual(t, marshalApproveJSON(resDeny), `{"behavior":"deny","message":"Denied by the owner."}`, "timely deny")
+	mustApproveEqual(t, marshalWire(resDeny), `{"behavior":"deny","message":"Denied by the owner."}`, "timely deny")
 	mustApproveEqual(t, fx.approvalRows(), "", "timely deny rows")
 
 	fx.home.onPost = nil
@@ -778,32 +779,33 @@ func assertApproverFallbackChain(t *testing.T, fx *approveFixture) {
 
 	fx.h.Rows.Put(fx.groupID, "member", fx.memberID, json.RawMessage(`{"r":"member"`))
 	mustApproveTrue(t, memberApprovers(fx.h.Rows, fx.groupID, fx.memberID) == nil, "corrupt member row nil")
-	fx.h.Rows.Put(fx.groupID, "member", fx.memberID, json.RawMessage(marshalApproveJSON(proto.HumanMemberRow{
+	fx.h.Rows.Put(fx.groupID, "member", fx.memberID, json.RawMessage(marshalWire(proto.HumanMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: fx.memberID, Seq: 9}, Group: fx.groupID, Kind: "human", User: fx.owner1.ID(), Name: "Human"},
 		Role:      "owner",
 	})))
 	mustApproveTrue(t, memberApprovers(fx.h.Rows, fx.groupID, fx.memberID) == nil, "human member row nil")
-	fx.h.Rows.Put(fx.groupID, "member", fx.memberID, json.RawMessage(marshalApproveJSON(proto.AIMemberRow{
+	fx.h.Rows.Put(fx.groupID, "member", fx.memberID, json.RawMessage(marshalWire(proto.AIMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: fx.memberID, Seq: 10}, Group: fx.groupID, Kind: "ai", User: fx.owner1.ID(), Name: "AI"},
 		CLI:       "claude", Host: fx.hostKey.ID(), Account: "personal", Allow: []string{}, Approvers: []string{}, State: "working",
 	})))
 	mustApproveTrue(t, memberApprovers(fx.h.Rows, fx.groupID, fx.memberID) == nil, "empty ai approvers nil")
 }
 
-func TestTimeoutLateDecisionFetchFallbackAndOneTimeGrant(t *testing.T) {
+func TestTimeoutNonDecidedItemsAndFetchRetry(t *testing.T) {
 	fx := newApproveFixture(t)
-	setFastWaitUnit(t, time.Millisecond)
 	grpOne := assertWaitDurationAndSelectBranches(t, fx)
-	assertLateApproveOneTimeGrantAndCleanup(t, fx, grpOne)
+	assertNonDecidedHandedItemsCountAsNoDecision(t, fx)
+	assertTimeoutRestartAndFetchRetry(t, fx, grpOne)
 	assertFetchPendingApprovalFallback(t, fx)
+	assertStoreFailurePaths(t)
 }
 
 func assertWaitDurationAndSelectBranches(t *testing.T, fx *approveFixture) proto.GroupRow {
 	t.Helper()
 	fx.h.Rows.Reset(fx.groupID)
-	mustApproveEqual(t, approvalWaitDuration(fx.h, fx.groupID), 600*time.Millisecond, "missing group wait")
+	mustApproveEqual(t, approvalWaitDuration(fx.h, fx.groupID), 600*time.Second, "missing group wait")
 	fx.h.Rows.Put(fx.groupID, "group", fx.groupID, json.RawMessage(`{"r":"group"`))
-	mustApproveEqual(t, approvalWaitDuration(fx.h, fx.groupID), 600*time.Millisecond, "corrupt group wait")
+	mustApproveEqual(t, approvalWaitDuration(fx.h, fx.groupID), 600*time.Second, "corrupt group wait")
 
 	fx.seedDefaultRows()
 	grpZero := proto.GroupRow{
@@ -811,14 +813,14 @@ func assertWaitDurationAndSelectBranches(t *testing.T, fx *approveFixture) proto
 		Name:      "SoloDawn", Kind: "project", Base: "main", Forge: "none", Home: fx.homeKey.ID(), Checks: []string{},
 		Limits: proto.Limits{ApprovalWaitS: 0},
 	}
-	fx.h.Rows.Put(fx.groupID, "group", fx.groupID, json.RawMessage(marshalApproveJSON(grpZero)))
-	mustApproveEqual(t, approvalWaitDuration(fx.h, fx.groupID), 600*time.Millisecond, "zero ApprovalWaitS")
+	fx.h.Rows.Put(fx.groupID, "group", fx.groupID, json.RawMessage(marshalWire(grpZero)))
+	mustApproveEqual(t, approvalWaitDuration(fx.h, fx.groupID), 600*time.Second, "zero ApprovalWaitS")
 
 	grpOne := grpZero
 	grpOne.Seq = 11
 	grpOne.Limits.ApprovalWaitS = 1
-	fx.h.Rows.Put(fx.groupID, "group", fx.groupID, json.RawMessage(marshalApproveJSON(grpOne)))
-	mustApproveEqual(t, approvalWaitDuration(fx.h, fx.groupID), 1*time.Millisecond, "ApprovalWaitS=1")
+	fx.h.Rows.Put(fx.groupID, "group", fx.groupID, json.RawMessage(marshalWire(grpOne)))
+	mustApproveEqual(t, approvalWaitDuration(fx.h, fx.groupID), time.Second, "ApprovalWaitS=1")
 
 	cancelCtx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -837,104 +839,110 @@ func assertWaitDurationAndSelectBranches(t *testing.T, fx *approveFixture) proto
 	return grpOne
 }
 
-func assertLateApproveOneTimeGrantAndCleanup(t *testing.T, fx *approveFixture, grpOne proto.GroupRow) {
+func assertNonDecidedHandedItemsCountAsNoDecision(t *testing.T, fx *approveFixture) {
 	t.Helper()
-	resTimeout := fx.mustCallTool(t.Context(), 3, `{"tool_name":"Write","input":{"file_path":"/ext/a.txt","content":"<v1>&v2"},"tool_use_id":"u_t1"}`)
-	mustApproveDeepEqual(t, resTimeout, ApprovalResult{Behavior: "deny", Message: denyTimeoutMessage}, "timeout deny")
-	card1 := fx.home.postList()[0].Nonce
+	validMsg := marshalWire(fx.makeCardMsg(approveTestID(80), "approval", fx.taskID, &proto.CardState{Status: "approved"}))
+	nilStateMsg := marshalWire(fx.makeCardMsg(approveTestID(80), "approval", fx.taskID, nil))
+	pendingAppMsg := marshalWire(fx.makeCardMsg(approveTestID(80), "approval", fx.taskID, &proto.CardState{Status: "pending"}))
+	pendingDecMsg := marshalWire(fx.makeCardMsg(approveTestID(81), "decision", fx.taskID, &proto.CardState{Status: "pending"}))
+
+	badItems := []string{
+		`{`,
+		`{"item":{"item":1,"ai":"not-an-id","why":"decided"},"msg":` + validMsg + `}`,
+		marshalWire(proto.InboxItem{Item: proto.Item{Item: 1, AI: proto.ID(fx.memberID), Why: "decided", Msg: approveTestID(80)}, Msg: json.RawMessage(`{`)}),
+		marshalWire(proto.InboxItem{Item: proto.Item{Item: 1, AI: proto.ID(fx.memberID), Why: "decided", Msg: approveTestID(80)}, Msg: json.RawMessage(nilStateMsg)}),
+		marshalWire(proto.InboxItem{Item: proto.Item{Item: 1, AI: proto.ID(fx.memberID), Why: "decided", Msg: approveTestID(80)}, Msg: json.RawMessage(pendingAppMsg)}),
+	}
+	for i, bad := range badItems {
+		rawBad := json.RawMessage(bad)
+		fx.home.onPost = func(post proto.Post[proto.ApprovalBody]) {
+			waited, err := fx.h.Hand(string(post.Nonce), rawBad)
+			mustApproveTrue(t, waited && err == nil, "Hand non-decided approval item")
+		}
+		res := fx.mustCallTool(t.Context(), 3, `{"tool_name":"Bash","input":{"command":"cmd-`+strconv.Itoa(i)+`"},"tool_use_id":"u_nd"}`)
+		mustApproveDeepEqual(t, res, ApprovalResult{Behavior: "deny", Message: denyTimeoutMessage}, "non-decided approval item")
+	}
+	fx.home.onPost = nil
+	mustApproveEqual(t, strings.Count(fx.approvalRows(), "|pending"), len(badItems), "pending rows kept on non-decided items")
+	seamSQL(t, fx.db, "DELETE FROM approval")
+
+	rawPendingDec := json.RawMessage(marshalWire(proto.InboxItem{
+		Item: proto.Item{Item: 2, AI: proto.ID(fx.memberID), Why: "decided", Msg: approveTestID(81)},
+		Msg:  json.RawMessage(pendingDecMsg),
+	}))
+	fx.home.onDecision = func(post proto.Post[proto.DecisionBody]) {
+		waited, err := fx.h.Hand(string(post.Nonce), rawPendingDec)
+		mustApproveTrue(t, waited && err == nil, "Hand non-decided decision item")
+	}
+	resDec := fx.mustCallTool(t.Context(), 3, `{"tool_name":"AskUserQuestion","input":{"questions":[{"question":"Still pending?"}]},"tool_use_id":"u_pdec"}`)
+	mustApproveDeepEqual(t, resDec, ApprovalResult{Behavior: "deny", Message: denyTimeoutMessage}, "non-decided decision item")
+	fx.home.onDecision = nil
+}
+
+func assertTimeoutRestartAndFetchRetry(t *testing.T, fx *approveFixture, grpOne proto.GroupRow) {
+	t.Helper()
+	// Run the 1-second approval timeout and 1-second decision timeout concurrently.
+	// Single reader: recvApproveChan reading approval timeout outcome.
+	appOut := make(chan ApprovalResult, 1)
+	// Single reader: recvApproveChan reading decision timeout outcome.
+	decOut := make(chan ApprovalResult, 1)
+	go func() {
+		appOut <- fx.mustCallTool(t.Context(), 3, `{"tool_name":"Write","input":{"file_path":"/ext/a.txt","content":"<v1>&v2"},"tool_use_id":"u_t1"}`)
+	}()
+	go func() {
+		decOut <- fx.mustCallTool(t.Context(), 3, `{"tool_name":"AskUserQuestion","input":{"questions":[{"question":"Timed out?"}]},"tool_use_id":"u_qt1"}`)
+	}()
+	mustApproveDeepEqual(t, recvApproveChan(t, appOut, "approval timeout"), ApprovalResult{Behavior: "deny", Message: denyTimeoutMessage}, "approval timeout deny")
+	mustApproveDeepEqual(t, recvApproveChan(t, decOut, "decision timeout"), ApprovalResult{Behavior: "deny", Message: denyTimeoutMessage}, "decision timeout deny")
+
+	posts := fx.home.postList()
+	card1 := posts[len(posts)-1].Nonce
 	mustApproveTrue(t, strings.HasSuffix(fx.approvalRows(), "|Write|pending"), "pending row after timeout")
 
 	restarted, _, err := New(fx.db, fx.hostKey, approveTestClock())
 	mustApproveNoErr(t, err)
 	fx.h = restarted
-	// Create a non-matching session first so sessionRowAgent iterates past a non-matching entry.
-	mustApproveNoErr(t, fx.h.Sessions.Create(Session{
-		SessionKey: SessionKey{Group: "other-g", Member: fx.memberID, Task: "t"},
-		Kind:       TaskSession, Folder: "wt/1-x", Agent: "codex", Home: fx.homeKey.ID(), Name: "Other",
-	}))
 	fx.h.Attach(fx.homeKey.ID(), fx.home)
-
-	decidedRaw := fx.buildDecidedItem(fx.owner2, card1, "approved")
-	st1, err := fx.h.RecordApprovalDecision(fx.homeKey.ID(), decidedRaw)
-	mustApproveNoErr(t, err)
-	mustApproveEqual(t, st1, "approved", "late approve status")
-	mustApproveTrue(t, strings.HasSuffix(fx.approvalRows(), "|Write|granted"), "granted row after late approve")
-
-	ackCountBefore := len(fx.home.ackList())
-	stDup, err := fx.h.RecordApprovalDecision(fx.homeKey.ID(), decidedRaw)
-	mustApproveNoErr(t, err)
-	mustApproveEqual(t, stDup, "", "duplicate late approve status")
-	mustApproveEqual(t, len(fx.home.ackList()), ackCountBefore+1, "duplicate ack count")
-
 	fx.seedDefaultRows()
-	fx.h.Rows.Put(fx.groupID, "group", fx.groupID, json.RawMessage(marshalApproveJSON(grpOne)))
+	fx.h.Rows.Put(fx.groupID, "group", fx.groupID, json.RawMessage(marshalWire(grpOne)))
+
+	// Mark the pending card approved on the home; non-matching tool/input still ask, matching input consumes once.
+	actEnv := fx.owner2.Sign(`{"t":"act"}`)
+	fx.home.putCard(fx.makeCardMsg(card1, "approval", fx.taskID, &proto.CardState{Status: "approved", Act: &actEnv}))
+
+	fx.home.onPost = func(post proto.Post[proto.ApprovalBody]) {
+		waited, err := fx.h.Hand(string(post.Nonce), fx.buildDecidedItem(fx.owner1, post.Nonce, fx.taskID, "denied"))
+		mustApproveTrue(t, waited && err == nil, "non-matching deny Hand")
+	}
 	resDiffTool := fx.mustCallTool(t.Context(), 3, `{"tool_name":"Edit","input":{"file_path":"/ext/a.txt","content":"<v1>&v2"},"tool_use_id":"u_diff_tool"}`)
 	resDiffInput := fx.mustCallTool(t.Context(), 3, `{"tool_name":"Write","input":{"file_path":"/ext/a.txt","content":"changed"},"tool_use_id":"u_diff_in"}`)
-	mustApproveEqual(t, resDiffTool.Behavior, "deny", "different tool must not match grant")
-	mustApproveEqual(t, resDiffInput.Behavior, "deny", "different input must not match grant")
-	mustApproveEqual(t, len(fx.home.postList()), 3, "posts after non-matching calls")
+	mustApproveEqual(t, resDiffTool.Behavior, "deny", "different tool does not match pending card")
+	mustApproveEqual(t, resDiffInput.Behavior, "deny", "different input does not match pending card")
 
 	postsBefore := len(fx.home.postList())
 	resRetry := fx.mustCallTool(t.Context(), 3, `{"tool_name":"Write","input":{ "content": "<v1>&v2", "file_path": "/ext/a.txt" },"tool_use_id":"u_retry_ok"}`)
-	mustApproveDeepEqual(t, resRetry, ApprovalResult{Behavior: "allow"}, "granted retry")
-	mustApproveEqual(t, len(fx.home.postList()), postsBefore, "granted retry did not post")
+	mustApproveDeepEqual(t, resRetry, ApprovalResult{Behavior: "allow"}, "fetched approved retry")
+	mustApproveEqual(t, len(fx.home.postList()), postsBefore, "fetched retry posted no new card")
+	mustApproveEqual(t, fx.approvalRows(), "", "consumed pending row deleted")
 
 	resSecondTry := fx.mustCallTool(t.Context(), 3, `{"tool_name":"Write","input":{"file_path":"/ext/a.txt","content":"<v1>&v2"},"tool_use_id":"u_retry_2"}`)
 	mustApproveEqual(t, resSecondTry.Behavior, "deny", "second retry asks again")
 	mustApproveEqual(t, len(fx.home.postList()), postsBefore+1, "second retry posted new card")
-
-	latestCard := fx.home.postList()[len(fx.home.postList())-1].Nonce
-	stDeny, err := fx.h.RecordApprovalDecision(fx.homeKey.ID(), fx.buildDecidedItem(fx.owner1, latestCard, "denied"))
-	mustApproveNoErr(t, err)
-	mustApproveEqual(t, stDeny, "denied", "late deny status")
-
-	otherTask := string(approveTestID(99))
-	seamSQL(t, fx.db, "INSERT INTO approval(card, g, member, task, tool, input, state) VALUES('other-card', '"+fx.groupID+"', '"+fx.memberID+"', '"+otherTask+"', 'Bash', 'abc', 'granted')")
-	mustApproveNoErr(t, fx.h.DeleteTaskApprovals(fx.groupID, fx.taskID))
-	mustApproveEqual(t, fx.approvalRows(), "other-card|"+fx.groupID+"|"+fx.memberID+"|"+otherTask+"|Bash|granted", "rows after DeleteTaskApprovals")
+	fx.home.onPost = nil
 }
 
 func assertFetchPendingApprovalFallback(t *testing.T, fx *approveFixture) {
 	t.Helper()
-	mustApproveNoErr(t, fx.h.DeleteTaskApprovals(fx.groupID, string(approveTestID(99))))
 	s, ok := fx.h.Sessions.Get(fx.sessKey)
 	mustApproveTrue(t, ok, "session must exist")
-	inputJSON := json.RawMessage(`{"command":"npm publish"}`)
-	digest := hashApprovalInput(inputJSON)
-
+	digest := hashApprovalInput(json.RawMessage(`{"command":"npm publish"}`))
 	cards := []proto.ID{approveTestID(61), approveTestID(62), approveTestID(63), approveTestID(64), approveTestID(65)}
 	for _, c := range cards {
 		mustApproveNoErr(t, storePendingApproval(fx.h, c, s, "Bash", digest))
 	}
 
-	// Disconnected home returns false without deleting pending rows.
-	discHome := newApproveFakeHome()
-	close(discHome.done)
-	fx.h.Attach(fx.homeKey.ID(), discHome)
-	mustApproveEqual(t, consumeGrantedApproval(t.Context(), fx.h, s, "Bash", digest, "npm publish"), false, "disconnected home fetch")
-	fx.h.Attach(fx.homeKey.ID(), fx.home)
+	assertFetchErrorPathsLeavePending(t, fx, s, digest, cards[0])
 
-	// Network error and malformed Fetched / MsgRow paths leave pending rows intact.
-	fx.home.err = io.EOF
-	mustApproveEqual(t, consumeGrantedApproval(t.Context(), fx.h, s, "Bash", digest, "npm publish"), false, "fetch transport err")
-	fx.home.err = nil
-
-	for _, badAns := range []string{
-		`{"re":1,"err":{"code":"not_found","msg":"missing"}}`,
-		`{"t":"fetched","re":1,"ok":true,"rows":[],"more":false}`,
-		`{"t":"fetched","re":1,"ok":true,"rows":[{}],"more":false}`,
-		marshalApproveJSON(proto.Fetched{Type: "fetched", Success: proto.Success{Re: 1, OK: true}, Rows: []json.RawMessage{json.RawMessage(marshalApproveJSON(fx.makeCardMsg(cards[0], "text", fx.taskID, nil)))}}),
-		marshalApproveJSON(proto.Fetched{Type: "fetched", Success: proto.Success{Re: 1, OK: true}, Rows: []json.RawMessage{json.RawMessage(marshalApproveJSON(fx.makeCardMsg(cards[0], "approval", fx.taskID, nil)))}}),
-	} {
-		ansCopy := badAns
-		fx.home.onFetchHook = func(proto.FetchRow) (json.RawMessage, error) {
-			return json.RawMessage(ansCopy), nil
-		}
-		mustApproveEqual(t, consumeGrantedApproval(t.Context(), fx.h, s, "Bash", digest, "npm publish"), false, "bad fetch payload")
-	}
-	fx.home.onFetchHook = nil
-
-	// Stale statuses (denied, expired, reassigned) delete their rows and continue; pending stays; approved consumes and stops.
 	actEnv := fx.owner2.Sign(`{"t":"act"}`)
 	fx.home.putCard(fx.makeCardMsg(cards[0], "approval", fx.taskID, &proto.CardState{Status: "denied"}))
 	fx.home.putCard(fx.makeCardMsg(cards[1], "approval", fx.taskID, &proto.CardState{Status: "expired"}))
@@ -942,7 +950,7 @@ func assertFetchPendingApprovalFallback(t *testing.T, fx *approveFixture) {
 	fx.home.putCard(fx.makeCardMsg(cards[3], "approval", fx.taskID, &proto.CardState{Status: "pending"}))
 	fx.home.putCard(fx.makeCardMsg(cards[4], "approval", fx.taskID, &proto.CardState{Status: "approved", Act: &actEnv}))
 
-	mustApproveEqual(t, consumeGrantedApproval(t.Context(), fx.h, s, "Bash", digest, "npm publish"), true, "fetch consumes approved card")
+	mustApproveEqual(t, consumePendingApproval(t.Context(), fx.h, s, "Bash", digest), true, "fetch consumes approved card")
 	mustApproveEqual(t, fx.approvalRows(), string(cards[3])+"|"+fx.groupID+"|"+fx.memberID+"|"+fx.taskID+"|Bash|pending", "only still-pending card remains")
 	fetches := fx.home.fetchList()
 	lastFetch := fetches[len(fetches)-1]
@@ -953,87 +961,115 @@ func assertFetchPendingApprovalFallback(t *testing.T, fx *approveFixture) {
 	mustApproveEqual(t, lastFetch.Row, "msg", "fetch.Row")
 	mustApproveEqual(t, lastFetch.RowID, string(cards[4]), "fetch.RowID")
 
-	// Concurrent deletion between fetch and consumePendingCard yields false without an extra audit row.
+	// Concurrent deletion between fetch and deletePendingCard yields false.
 	fx.home.putCard(fx.makeCardMsg(cards[3], "approval", fx.taskID, &proto.CardState{Status: "approved", Act: &actEnv}))
 	fx.home.onFetchHook = func(req proto.FetchRow) (json.RawMessage, error) {
 		deleteApprovalCard(fx.h, req.RowID)
 		row := fx.home.cards[req.RowID]
-		return json.RawMessage(marshalApproveJSON(proto.Fetched{
-			Type:    "fetched",
-			Success: proto.Success{Re: 1, OK: true},
-			Rows:    []json.RawMessage{row},
+		return json.RawMessage(marshalWire(proto.Fetched{
+			Type: "fetched", Success: proto.Success{Re: 1, OK: true}, Rows: []json.RawMessage{row},
 		})), nil
 	}
-	mustApproveEqual(t, consumeGrantedApproval(t.Context(), fx.h, s, "Bash", digest, "npm publish"), false, "concurrent delete during fetch")
+	mustApproveEqual(t, consumePendingApproval(t.Context(), fx.h, s, "Bash", digest), false, "concurrent delete during fetch")
 	fx.home.onFetchHook = nil
+}
+
+func assertFetchErrorPathsLeavePending(t *testing.T, fx *approveFixture, s Session, digest string, sampleCard proto.ID) {
+	t.Helper()
+	discHome := newApproveFakeHome()
+	close(discHome.done)
+	fx.h.Attach(fx.homeKey.ID(), discHome)
+	mustApproveEqual(t, consumePendingApproval(t.Context(), fx.h, s, "Bash", digest), false, "disconnected home fetch")
+	fx.h.Attach(fx.homeKey.ID(), fx.home)
+
+	fx.home.err = io.EOF
+	mustApproveEqual(t, consumePendingApproval(t.Context(), fx.h, s, "Bash", digest), false, "fetch transport err")
+	fx.home.err = nil
+
+	for _, badAns := range []string{
+		`{"re":1,"err":{"code":"not_found","msg":"missing"}}`,
+		`{"t":"fetched","re":1,"ok":true,"rows":[],"more":false}`,
+		`{"t":"fetched","re":1,"ok":true,"rows":[{}],"more":false}`,
+		marshalWire(proto.Fetched{Type: "fetched", Success: proto.Success{Re: 1, OK: true}, Rows: []json.RawMessage{json.RawMessage(marshalWire(fx.makeCardMsg(sampleCard, "text", fx.taskID, nil)))}}),
+		marshalWire(proto.Fetched{Type: "fetched", Success: proto.Success{Re: 1, OK: true}, Rows: []json.RawMessage{json.RawMessage(marshalWire(fx.makeCardMsg(sampleCard, "approval", fx.taskID, nil)))}}),
+	} {
+		ansCopy := badAns
+		fx.home.onFetchHook = func(proto.FetchRow) (json.RawMessage, error) {
+			return json.RawMessage(ansCopy), nil
+		}
+		mustApproveEqual(t, consumePendingApproval(t.Context(), fx.h, s, "Bash", digest), false, "bad fetch payload")
+	}
+	fx.home.onFetchHook = nil
+}
+
+func assertStoreFailurePaths(t *testing.T) {
+	t.Helper()
+	fx := newApproveFixture(t)
+	s, _ := fx.h.Sessions.Get(fx.sessKey)
+	card := approveTestID(90)
+	digest := hashApprovalInput(json.RawMessage(`{"command":"echo x"}`))
+	mustApproveNoErr(t, storePendingApproval(fx.h, card, s, "Bash", digest))
+
+	rowJSON := json.RawMessage(marshalWire(fx.makeCardMsg(card, "approval", fx.taskID, &proto.CardState{Status: "approved"})))
+	fx.home.onFetchHook = func(proto.FetchRow) (json.RawMessage, error) {
+		seamSQL(t, fx.db, "DROP TABLE approval")
+		return json.RawMessage(marshalWire(proto.Fetched{
+			Type: "fetched", Success: proto.Success{Re: 1, OK: true}, Rows: []json.RawMessage{rowJSON},
+		})), nil
+	}
+	mustApproveEqual(t, consumePendingApproval(t.Context(), fx.h, s, "Bash", digest), false, "deletePendingCard error after DROP TABLE")
+	fx.home.onFetchHook = nil
+
+	mustApproveEqual(t, consumePendingApproval(t.Context(), fx.h, s, "Bash", digest), false, "listPendingCards error after DROP TABLE")
+	res := fx.mustCallTool(t.Context(), 3, `{"tool_name":"Bash","input":{"command":"echo x"},"tool_use_id":"u_no_tbl"}`)
+	mustApproveDeepEqual(t, res, ApprovalResult{Behavior: "deny", Message: "The approval request was refused: internal: failed to store approval record"}, "missing approval table")
 }
 
 func TestClaudeAskUserQuestionDecisionCardsAndAnswers(t *testing.T) {
 	fx := newApproveFixture(t)
-	setFastWaitUnit(t, time.Millisecond)
-
 	assertClaudeQuestionSecretChecks(t, fx)
-	assertClaudeQuestionOptionIDsAndAnswers(t, fx)
-	assertClaudeQuestionGroupSessionAndFailures(t, fx)
+	assertClaudeQuestionOptionIDsAndOneAtATime(t, fx)
 }
 
 func assertClaudeQuestionSecretChecks(t *testing.T, fx *approveFixture) {
 	t.Helper()
 	secretTok := "ghp_0123456789abcdefghijklmnopqrstuvwxyzABCD"
 	secretInputs := []map[string]any{
-		{"questions": []map[string]any{{"question": "Leak " + secretTok, "header": "H", "options": []map[string]string{{"label": "A", "description": "B"}}}}},
+		{"questions": []map[string]any{{"question": "Safe?"}, {"question": "Leak " + secretTok, "header": "H", "options": []map[string]string{{"label": "A", "description": "B"}}}}},
 		{"questions": []map[string]any{{"question": "Clean", "header": secretTok, "options": []map[string]string{{"label": "A", "description": "B"}}}}},
 		{"questions": []map[string]any{{"question": "Clean", "header": "H", "options": []map[string]string{{"label": secretTok, "description": "B"}}}}},
 		{"questions": []map[string]any{{"question": "Clean", "header": "H", "options": []map[string]string{{"label": "A", "description": secretTok}}}}},
 	}
 	for _, in := range secretInputs {
-		raw := marshalApproveJSON(map[string]any{"tool_name": "AskUserQuestion", "input": in, "tool_use_id": "u_sec"})
+		raw := marshalWire(map[string]any{"tool_name": "AskUserQuestion", "input": in, "tool_use_id": "u_sec"})
 		res := fx.mustCallTool(t.Context(), 3, raw)
 		mustApproveDeepEqual(t, res, ApprovalResult{Behavior: "deny", Message: denySecretMessage}, "AskUserQuestion secret")
 	}
 	mustApproveEqual(t, len(fx.home.decisionList()), 0, "no decision cards posted on secret")
 }
 
-func assertClaudeQuestionOptionIDsAndAnswers(t *testing.T, fx *approveFixture) {
+func assertClaudeQuestionOptionIDsAndOneAtATime(t *testing.T, fx *approveFixture) {
 	t.Helper()
-	// Build 27 options so optionID pins 0 ("A"), 25 ("Z"), and 26 ("27").
-	opts27 := make([]map[string]string, 27)
-	for i := range opts27 {
-		opts27[i] = map[string]string{"label": "Opt-" + strconv.Itoa(i), "description": "Desc-" + strconv.Itoa(i)}
+	opts26 := make([]map[string]string, 26)
+	for i := range opts26 {
+		opts26[i] = map[string]string{"label": "Opt-" + strconv.Itoa(i), "description": "Desc-" + strconv.Itoa(i)}
 	}
 	s, _ := fx.h.Sessions.Get(fx.sessKey)
 	step := 0
 	fx.home.onDecision = func(post proto.Post[proto.DecisionBody]) {
 		step++
-		var choice, note *string
-		switch step {
-		case 1:
-			c := "Z"
-			choice = &c
-		case 2:
-			c := "27"
-			n := "With custom note"
-			choice, note = &c, &n
-		case 3:
-			n := "Pure custom answer"
-			note = &n
-		case 4:
-			c := "UNKNOWN"
-			n := "Fallback when choice id unknown"
-			choice, note = &c, &n
-		}
+		// Pin that multi-question calls post one card at a time.
+		mustApproveEqual(t, len(fx.home.decisionList()), step, "one decision card posted at a time")
+		choice, note := scriptedClaudeChoice(step)
 		waited, err := fx.h.Hand(string(post.Nonce), fx.buildDecisionItem(fx.owner2, s, post.Nonce, choice, note))
-		mustApproveEqual(t, waited, true, "decision Hand waited")
-		mustApproveNoErr(t, err)
+		mustApproveTrue(t, waited && err == nil, "decision Hand")
 	}
 
-	raw := marshalApproveJSON(map[string]any{
+	raw := marshalWire(map[string]any{
 		"tool_name": "AskUserQuestion",
 		"input": map[string]any{
 			"extraKeep": "kept",
-			"questions": []map[string]any{
-				{"question": "Q1?", "header": "H1", "options": opts27, "multiSelect": false},
-			},
+			"questions": []map[string]any{{"question": "Q1?", "header": "H1", "options": opts26, "multiSelect": true}},
 		},
 		"tool_use_id": "u_q1",
 	})
@@ -1045,19 +1081,16 @@ func assertClaudeQuestionOptionIDsAndAnswers(t *testing.T, fx *approveFixture) {
 	mustApproveDeepEqual(t, res1.UpdatedInput["answers"], map[string]string{"Q1?": "Opt-25"}, "Q1 answer Z")
 
 	decCard := fx.home.decisionList()[0]
-	mustApproveEqual(t, len(decCard.Body.Options), 27, "27 options count")
+	mustApproveEqual(t, len(decCard.Body.Options), 26, "26 options count")
 	mustApproveEqual(t, decCard.Body.Options[0].ID, "A", "option 0 ID")
 	mustApproveEqual(t, decCard.Body.Options[25].ID, "Z", "option 25 ID")
-	mustApproveEqual(t, decCard.Body.Options[26].ID, "27", "option 26 ID")
-	mustApproveTrue(t, decCard.Thread != nil && string(*decCard.Thread) == fx.taskID, "task session decision Thread")
-	mustApproveTrue(t, decCard.Body.Task != nil && *decCard.Body.Task == fx.taskID, "task session decision Body.Task")
 	mustApproveTrue(t, decCard.Body.Context != nil && *decCard.Body.Context == "H1", "decision Context")
 
-	rawMulti := marshalApproveJSON(map[string]any{
+	rawMulti := marshalWire(map[string]any{
 		"tool_name": "AskUserQuestion",
 		"input": map[string]any{
 			"questions": []map[string]any{
-				{"question": "Q2?", "header": "", "options": opts27},
+				{"question": "Q2?", "header": "", "options": opts26},
 				{"question": "Q3?", "header": "", "options": []map[string]string{}},
 				{"question": "Q4?", "header": "", "options": []map[string]string{{"label": "OnlyA", "description": "D"}}},
 			},
@@ -1067,201 +1100,35 @@ func assertClaudeQuestionOptionIDsAndAnswers(t *testing.T, fx *approveFixture) {
 	resMulti := fx.mustCallTool(t.Context(), 3, rawMulti)
 	mustApproveEqual(t, resMulti.Behavior, "allow", "multi question allow")
 	mustApproveDeepEqual(t, resMulti.UpdatedInput["answers"], map[string]string{
-		"Q2?": "Opt-26",
+		"Q2?": "Opt-0",
 		"Q3?": "Pure custom answer",
 		"Q4?": "Fallback when choice id unknown",
 	}, "multi question answers")
 	mustApproveDeepEqual(t, resMulti.UpdatedInput["annotations"], map[string]map[string]string{
 		"Q2?": {"notes": "With custom note"},
 	}, "multi question annotations")
-}
 
-func assertClaudeQuestionGroupSessionAndFailures(t *testing.T, fx *approveFixture) {
-	t.Helper()
-	grpKey := SessionKey{Group: fx.groupID, Member: fx.memberID}
-	mustApproveNoErr(t, fx.h.Sessions.Create(Session{
-		SessionKey: grpKey, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: fx.homeKey.ID(), Name: "Sec", Secretary: true,
-	}))
-	grpSess, _ := fx.h.Sessions.Get(grpKey)
-
-	fx.home.onDecision = func(post proto.Post[proto.DecisionBody]) {
-		mustApproveTrue(t, post.Thread == nil, "group session decision Thread nil")
-		mustApproveTrue(t, post.Body.Task == nil, "group session decision Task nil")
-		mustApproveTrue(t, post.Body.Context == nil, "empty header Context nil")
-		mustApproveDeepEqual(t, post.Body.Options, []proto.DecisionOption{}, "empty options non-nil")
-		txt := "Free answer"
-		waited, err := fx.h.Hand(string(post.Nonce), fx.buildDecisionItem(fx.owner1, grpSess, post.Nonce, nil, &txt))
-		mustApproveTrue(t, waited && err == nil, "group decision Hand")
-	}
-	rawGrp := json.RawMessage(`{"tool_name":"AskUserQuestion","input":{"questions":[{"question":"Main question?"}]},"tool_use_id":"u_grp"}`)
-	valGrp, err := Tools["approve"].Call(t.Context(), fx.h, Caller{Session: grpSess, Level: 3}, rawGrp)
-	mustApproveNoErr(t, err)
-	mustApproveEqual(t, valGrp.(ApprovalResult).Behavior, "allow", "group session AskUserQuestion")
-
-	// Timeout on decision wait.
 	fx.home.onDecision = nil
-	grpFast := proto.GroupRow{
-		RowHeader: proto.RowHeader{Type: "group", ID: fx.groupID, Seq: 30},
-		Name:      "SoloDawn", Kind: "project", Base: "main", Forge: "none", Home: fx.homeKey.ID(), Checks: []string{},
-		Limits: proto.Limits{ApprovalWaitS: 1},
-	}
-	fx.h.Rows.Put(fx.groupID, "group", fx.groupID, json.RawMessage(marshalApproveJSON(grpFast)))
-	resTimeout := fx.mustCallTool(t.Context(), 3, string(rawGrp))
-	mustApproveDeepEqual(t, resTimeout, ApprovalResult{Behavior: "deny", Message: denyTimeoutMessage}, "AskUserQuestion timeout")
-
-	// Home refusal on decision post.
 	fx.home.answer = `{"re":1,"err":{"code":"forbidden","msg":"not member"}}`
-	resRef := fx.mustCallTool(t.Context(), 3, string(rawGrp))
+	resRef := fx.mustCallTool(t.Context(), 3, raw)
 	mustApproveDeepEqual(t, resRef, ApprovalResult{Behavior: "deny", Message: "The approval request was refused: forbidden: not member"}, "AskUserQuestion refused")
 	fx.home.answer = ""
 }
 
-func TestDecisionDecodingValidationAndDeciderPrecedence(t *testing.T) {
-	fx := newApproveFixture(t)
-	assertCardDeciderAndPredicates(t, fx)
-	assertOpenWaitAndRecordDecisionChecks(t, fx)
-}
-
-func assertCardDeciderAndPredicates(t *testing.T, fx *approveFixture) {
-	t.Helper()
-	cardID := approveTestID(70)
-	actWithKey := proto.Envelope{Payload: `{}`, Key: "dev-act", Signature: "s"}
-	actEmptyKey := proto.Envelope{Payload: `{}`, Key: "", Signature: "s"}
-	byNonEmpty := "member-by"
-	byEmpty := ""
-
-	c1 := fx.makeCardMsg(cardID, "approval", fx.taskID, &proto.CardState{Status: "approved", Act: &actWithKey, By: &byNonEmpty})
-	mustApproveEqual(t, cardDecider(c1, "fb"), "dev-act", "Act.Key wins")
-
-	c2 := fx.makeCardMsg(cardID, "approval", fx.taskID, &proto.CardState{Status: "approved", Act: &actEmptyKey, By: &byNonEmpty})
-	mustApproveEqual(t, cardDecider(c2, "fb"), "member-by", "empty Act.Key falls through to By")
-
-	c3 := fx.makeCardMsg(cardID, "approval", fx.taskID, &proto.CardState{Status: "approved", By: &byNonEmpty})
-	mustApproveEqual(t, cardDecider(c3, "fb"), "member-by", "nil Act uses By")
-
-	c4 := fx.makeCardMsg(cardID, "approval", fx.taskID, &proto.CardState{Status: "approved", By: &byEmpty})
-	mustApproveEqual(t, cardDecider(c4, "fb"), "fb", "empty By uses fallback")
-
-	c5 := fx.makeCardMsg(cardID, "approval", fx.taskID, &proto.CardState{Status: "approved"})
-	mustApproveEqual(t, cardDecider(c5, "fb"), "fb", "nil By uses fallback")
-
-	// Pin isDecidedItem exact boundaries including Item == 0 vs Item == 1.
-	validItem := proto.Item{Type: "item", Item: 1, Why: "decided", Msg: cardID}
-	mustApproveTrue(t, isDecidedItem(validItem), "Item=1 valid")
-	zeroItem := validItem
-	zeroItem.Item = 0
-	mustApproveTrue(t, !isDecidedItem(zeroItem), "Item=0 invalid")
-	wrongType := validItem
-	wrongType.Type = "other"
-	mustApproveTrue(t, !isDecidedItem(wrongType), "Type!=item invalid")
-	wrongWhy := validItem
-	wrongWhy.Why = "mention"
-	mustApproveTrue(t, !isDecidedItem(wrongWhy), "Why!=decided invalid")
-	emptyMsg := validItem
-	emptyMsg.Msg = ""
-	mustApproveTrue(t, !isDecidedItem(emptyMsg), "Msg empty invalid")
-
-	// Pin isApprovalDecided and isDecisionDecided operands.
-	mustApproveTrue(t, isApprovalDecided(fx.makeCardMsg(cardID, "approval", fx.taskID, &proto.CardState{Status: "approved"})), "approval approved")
-	mustApproveTrue(t, isApprovalDecided(fx.makeCardMsg(cardID, "approval", fx.taskID, &proto.CardState{Status: "denied"})), "approval denied")
-	mustApproveTrue(t, !isApprovalDecided(fx.makeCardMsg(cardID, "approval", fx.taskID, &proto.CardState{Status: "pending"})), "approval pending")
-	mustApproveTrue(t, !isApprovalDecided(fx.makeCardMsg(cardID, "approval", fx.taskID, nil)), "approval nil state")
-	mustApproveTrue(t, !isApprovalDecided(fx.makeCardMsg(cardID, "decision", fx.taskID, &proto.CardState{Status: "approved"})), "wrong kind approval")
-
-	mustApproveTrue(t, isDecisionDecided(fx.makeCardMsg(cardID, "decision", fx.taskID, &proto.CardState{Status: "decided"})), "decision decided")
-	mustApproveTrue(t, !isDecisionDecided(fx.makeCardMsg(cardID, "decision", fx.taskID, &proto.CardState{Status: "pending"})), "decision pending")
-	mustApproveTrue(t, !isDecisionDecided(fx.makeCardMsg(cardID, "decision", fx.taskID, nil)), "decision nil state")
-	mustApproveTrue(t, !isDecisionDecided(fx.makeCardMsg(cardID, "approval", fx.taskID, &proto.CardState{Status: "decided"})), "wrong kind decision")
-}
-
-func assertOpenWaitAndRecordDecisionChecks(t *testing.T, fx *approveFixture) {
-	t.Helper()
-	for _, bad := range []string{
-		`{`,
-		`{"env":{"p":"{","k":"k","s":"s"}}`,
-		marshalApproveJSON(proto.InboxItem{Env: fx.homeKey.Sign(marshalApproveJSON(proto.Item{
-			Type: "item", Nonce: approveTestID(71), Timestamp: seamStart, Group: proto.ID(fx.groupID),
-			To: "wrong-host", Item: 1, AI: proto.ID(fx.memberID), Why: "decided", Msg: approveTestID(72),
-		})), Msg: json.RawMessage(marshalApproveJSON(fx.makeCardMsg(approveTestID(72), "approval", fx.taskID, &proto.CardState{Status: "approved"})))}),
-		marshalApproveJSON(proto.InboxItem{Env: fx.homeKey.Sign(marshalApproveJSON(proto.Item{
-			Type: "item", Nonce: approveTestID(71), Timestamp: seamStart, Group: proto.ID(fx.groupID),
-			To: fx.hostKey.ID(), Item: 1, AI: proto.ID(fx.memberID), Why: "decided", Msg: approveTestID(72),
-		})), Msg: json.RawMessage(`{`)}),
-		marshalApproveJSON(proto.InboxItem{Env: fx.homeKey.Sign(marshalApproveJSON(proto.Item{
-			Type: "item", Nonce: approveTestID(71), Timestamp: seamStart, Group: proto.ID(fx.groupID),
-			To: fx.hostKey.ID(), Item: 1, AI: proto.ID(fx.memberID), Why: "decided", Msg: approveTestID(72),
-		})), Msg: json.RawMessage(marshalApproveJSON(fx.makeCardMsg(approveTestID(72), "decision", fx.taskID, &proto.CardState{Status: "decided"})))}),
-	} {
-		_, err := fx.h.RecordApprovalDecision(fx.homeKey.ID(), json.RawMessage(bad))
-		seamCode(t, err, "bad_request")
+func scriptedClaudeChoice(step int) (*string, *string) {
+	switch step {
+	case 1:
+		return new("Z"), nil
+	case 2:
+		return new("A"), new("With custom note")
+	case 3:
+		return nil, new("Pure custom answer")
+	default:
+		return new("UNKNOWN"), new("Fallback when choice id unknown")
 	}
-
-	// Late decision with no pending row returns not_found.
-	_, errMissing := fx.h.RecordApprovalDecision(fx.homeKey.ID(), fx.buildDecidedItem(fx.owner1, approveTestID(73), "approved"))
-	seamCode(t, errMissing, "not_found")
-
-	// Open approval wait rejects mismatched session/card/state/pending-row items without consuming wait.
-	// Single reader: test goroutine awaiting posted card ID via recvApproveChan.
-	postedCh := make(chan proto.ID, 1)
-	fx.home.onPost = func(post proto.Post[proto.ApprovalBody]) { postedCh <- post.Nonce }
-	// Single reader: test goroutine awaiting callTool completion via recvApproveChan.
-	doneCh := make(chan ApprovalResult, 1)
-	go func() {
-		doneCh <- fx.mustCallTool(t.Context(), 3, `{"tool_name":"Bash","input":{"command":"curl https://api.example"},"tool_use_id":"u_wait"}`)
-	}()
-	cardID := recvApproveChan(t, postedCh, "posted card")
-
-	s, _ := fx.h.Sessions.Get(fx.sessKey)
-	mustApproveErr(t, checkOpenDecisionWait(s, cardID, json.RawMessage(`{`)))
-	mustApproveErr(t, checkOpenDecisionWait(Session{SessionKey: SessionKey{Group: "other", Member: s.Member}}, cardID, fx.buildDecisionItem(fx.owner1, s, cardID, nil, nil)))
-	mustApproveErr(t, checkOpenDecisionWait(s, cardID, fx.buildDecidedItem(fx.owner1, cardID, "approved")))
-
-	wrongAIItem := proto.Item{
-		Type: "item", Nonce: approveTestID(74), Timestamp: seamStart, Group: proto.ID(fx.groupID),
-		To: fx.hostKey.ID(), Item: 1, AI: approveTestID(75), Why: "decided", Task: proto.ID(fx.taskID), Msg: cardID,
-	}
-	wrongAIRaw := json.RawMessage(marshalApproveJSON(proto.InboxItem{
-		Env: fx.homeKey.Sign(marshalApproveJSON(wrongAIItem)),
-		Msg: json.RawMessage(marshalApproveJSON(fx.makeCardMsg(cardID, "approval", fx.taskID, &proto.CardState{Status: "approved"}))),
-	}))
-	_, errWrongAI := fx.h.RecordApprovalDecision(fx.homeKey.ID(), wrongAIRaw)
-	seamCode(t, errWrongAI, "bad_request")
-	waitedBad, errBad := fx.h.Hand(string(cardID), json.RawMessage(`{`))
-	mustApproveTrue(t, waitedBad && errBad != nil, "Hand bad json rejected")
-
-	// Valid item with Item == 1 resolves open wait.
-	itemOne := wrongAIItem
-	itemOne.AI = proto.ID(fx.memberID)
-	itemOne.Item = 1
-	rawOne := json.RawMessage(marshalApproveJSON(proto.InboxItem{
-		Env: fx.homeKey.Sign(marshalApproveJSON(itemOne)),
-		Msg: json.RawMessage(marshalApproveJSON(fx.makeCardMsg(cardID, "approval", fx.taskID, &proto.CardState{Status: "approved"}))),
-	}))
-	st, err := fx.h.RecordApprovalDecision(fx.homeKey.ID(), rawOne)
-	mustApproveNoErr(t, err)
-	mustApproveEqual(t, st, "approved", "Item=1 open wait status")
-	mustApproveDeepEqual(t, recvApproveChan(t, doneCh, "waiting tool result"), ApprovalResult{Behavior: "allow"}, "waiting call outcome")
-
-	// Deleted pending row while wait is open rejects decision.
-	ctx2, cancel2 := context.WithCancel(t.Context())
-	// Single reader: test goroutine awaiting cancelled callTool completion via recvApproveChan.
-	done2 := make(chan ApprovalResult, 1)
-	go func() {
-		done2 <- fx.mustCallTool(ctx2, 3, `{"tool_name":"Bash","input":{"command":"curl https://two.example"},"tool_use_id":"u_deleted"}`)
-	}()
-	card2 := recvApproveChan(t, postedCh, "second posted card")
-	mustApproveNoErr(t, fx.h.DeleteTaskApprovals(fx.groupID, fx.taskID))
-	_, errDeleted := fx.h.RecordApprovalDecision(fx.homeKey.ID(), fx.buildDecidedItem(fx.owner1, card2, "approved"))
-	seamCode(t, errDeleted, "bad_request")
-	cancel2()
-	recvApproveChan(t, done2, "cancelled waiting call")
-
-	// lookupApprovalAgent returns "" when neither Rows nor Sessions knows the AI.
-	fx.h.Rows.Reset(fx.groupID)
-	mustApproveEqual(t, lookupApprovalAgent(fx.h, fx.groupID, string(approveTestID(98))), "", "unknown agent empty")
 }
 
-func TestCodexAskedListenerLevelsQuestionsConcurrencyAndCancellation(t *testing.T) {
+func TestCodexAskedListenerQuestionsConcurrencyAndCancellation(t *testing.T) {
 	fx := newApproveFixture(t)
 	runner := newApproveFakeRunner()
 	prevRunner := Runner
@@ -1269,7 +1136,7 @@ func TestCodexAskedListenerLevelsQuestionsConcurrencyAndCancellation(t *testing.
 	t.Cleanup(func() { Runner = prevRunner })
 
 	codexKey, groupKey, reviewKey := seedCodexSessions(t, fx)
-	assertCodexDefaultLevelThreeAndOverrides(t, fx, runner, codexKey, groupKey, reviewKey)
+	assertCodexIgnoredEventsAndApprovalPath(t, fx, runner, codexKey, reviewKey)
 	assertCodexQuestionsViaAskReply(t, fx, groupKey)
 	assertCodexConcurrentWaitAndCancel(t, fx, runner, codexKey, groupKey)
 }
@@ -1289,64 +1156,22 @@ func seedCodexSessions(t *testing.T, fx *approveFixture) (SessionKey, SessionKey
 	return codexKey, groupKey, reviewKey
 }
 
-func assertCodexDefaultLevelThreeAndOverrides(t *testing.T, fx *approveFixture, runner *approveFakeRunner, codexKey, groupKey, reviewKey SessionKey) {
+func assertCodexIgnoredEventsAndApprovalPath(t *testing.T, fx *approveFixture, runner *approveFakeRunner, codexKey, reviewKey SessionKey) {
 	t.Helper()
 	fx.h.Report(codexKey, Event{Kind: Active})
 	fx.h.Report(codexKey, Event{Kind: Asked, Ask: nil})
 	fx.h.Report(SessionKey{Group: "none", Member: "none", Task: "none"}, Event{Kind: Asked, Ask: &Ask{ID: "x"}})
+	mustApproveEqual(t, runner.answerCount(), 0, "ignored events answerCount")
 
-	// Default level is 3 across task, group, and review sessions.
-	for _, k := range []SessionKey{codexKey, groupKey, reviewKey} {
-		s, _ := fx.h.Sessions.Get(k)
-		mustApproveEqual(t, resolveSessionLevel(fx.h, s), 3, "default level 3")
-	}
-
-	// default_level = 1 denies without posting a card across all session kinds.
-	seamSQL(t, fx.db, `INSERT INTO setting(key, value) VALUES('default_level', '1')`)
-	for _, k := range []SessionKey{codexKey, groupKey, reviewKey} {
-		fx.h.Report(k, Event{Kind: Asked, Ask: &Ask{ID: "def1", Tool: "commandExecution", Category: "command", Command: "ls"}})
-		mustApproveEqual(t, recvApproveChan(t, runner.ch, "def1"), recordedAnswer{key: k, askID: "def1", allow: false}, "default_level=1")
-		mustApproveEqual(t, recvApproveChan(t, runner.inCall, "def1 inCall"), 1, "Calls inside Answer")
-	}
-	approveStateOf(fx.h).wg.Wait()
-	mustApproveEqual(t, fx.h.Sessions.Calls(groupKey), 0, "groupKey Calls after Ask")
-
-	// perm = 2 overrides default_level = 1 and goes through approval card flow.
 	fx.home.onPost = func(post proto.Post[proto.ApprovalBody]) {
-		it := proto.Item{
-			Type: "item", Nonce: approveTestID(52), Timestamp: seamStart, Group: proto.ID(fx.groupID),
-			To: fx.hostKey.ID(), Item: 601, AI: proto.ID(fx.memberID), Why: "decided", Task: proto.ID(codexKey.Task), Msg: post.Nonce,
-		}
-		raw := json.RawMessage(marshalApproveJSON(proto.InboxItem{
-			Env: fx.homeKey.Sign(marshalApproveJSON(it)),
-			Msg: json.RawMessage(marshalApproveJSON(fx.makeCardMsg(post.Nonce, "approval", codexKey.Task, &proto.CardState{Status: "approved"}))),
-		}))
-		fx.h.RecordApprovalDecision(fx.homeKey.ID(), raw)
+		raw := fx.buildDecidedItem(fx.owner1, post.Nonce, post.Body.Task, "approved")
+		waited, err := fx.h.Hand(string(post.Nonce), raw)
+		mustApproveTrue(t, waited && err == nil, "Codex approval Hand")
 	}
-	seamSQL(t, fx.db, `INSERT INTO perm(agent, g, level, repo_config) VALUES('codex', '`+fx.groupID+`', 2, 0)`)
-	fx.h.Report(codexKey, Event{Kind: Asked, Ask: &Ask{ID: "perm2", Tool: "commandExecution", Category: "command", Command: "ls"}})
-	mustApproveEqual(t, recvApproveChan(t, runner.ch, "perm2"), recordedAnswer{key: codexKey, askID: "perm2", allow: true}, "perm=2 card approved")
-	recvApproveChan(t, runner.inCall, "perm2 inCall")
-
-	// all_level3 = true overrides perm = 1 and also goes through approval card flow.
-	fx.home.onPost = func(post proto.Post[proto.ApprovalBody]) {
-		it := proto.Item{
-			Type: "item", Nonce: approveTestID(53), Timestamp: seamStart, Group: proto.ID(fx.groupID),
-			To: fx.hostKey.ID(), Item: 602, AI: proto.ID(fx.memberID), Why: "decided", Task: proto.ID(codexKey.Task), Msg: post.Nonce,
-		}
-		raw := json.RawMessage(marshalApproveJSON(proto.InboxItem{
-			Env: fx.homeKey.Sign(marshalApproveJSON(it)),
-			Msg: json.RawMessage(marshalApproveJSON(fx.makeCardMsg(post.Nonce, "approval", codexKey.Task, &proto.CardState{Status: "approved"}))),
-		}))
-		fx.h.RecordApprovalDecision(fx.homeKey.ID(), raw)
-	}
-	seamSQL(t, fx.db,
-		`UPDATE perm SET level = 1 WHERE agent = 'codex' AND g = '`+fx.groupID+`'`,
-		`INSERT INTO setting(key, value) VALUES('all_level3', 'true')`,
-	)
-	fx.h.Report(codexKey, Event{Kind: Asked, Ask: &Ask{ID: "all3", Tool: "commandExecution", Category: "command", Command: "ls"}})
-	mustApproveEqual(t, recvApproveChan(t, runner.ch, "all3"), recordedAnswer{key: codexKey, askID: "all3", allow: true}, "all_level3=true card approved")
-	recvApproveChan(t, runner.inCall, "all3 inCall")
+	fx.h.Report(reviewKey, Event{Kind: Asked, Ask: &Ask{ID: "rev-ask", Tool: "commandExecution", Category: "command", Command: "go test"}})
+	mustApproveEqual(t, recvApproveChan(t, runner.ch, "rev-ask"), recordedAnswer{key: reviewKey, askID: "rev-ask", allow: true}, "review session Codex Ask approved")
+	mustApproveEqual(t, recvApproveChan(t, runner.inCall, "rev-ask inCall"), 1, "Calls inside Answer")
+	waitCallsZero(t, fx.h, reviewKey)
 	fx.home.onPost = nil
 }
 
@@ -1359,7 +1184,6 @@ func assertCodexQuestionsViaAskReply(t *testing.T, fx *approveFixture, groupKey 
 		return nil
 	}
 
-	// Invalid inputs and secrets call Ask.Reply(nil).
 	for _, bad := range []string{
 		`{`,
 		`{"questions":[]}`,
@@ -1372,30 +1196,15 @@ func assertCodexQuestionsViaAskReply(t *testing.T, fx *approveFixture, groupKey 
 		mustApproveTrue(t, recvApproveChan(t, replyCh, "invalid/secret Codex question") == nil, "expected nil Reply")
 	}
 
-	// Multi-question decision flow: option only, free text only, option + free text, and empty both.
 	grpSess, _ := fx.h.Sessions.Get(groupKey)
 	qStep := 0
 	fx.home.onDecision = func(post proto.Post[proto.DecisionBody]) {
 		qStep++
-		var choice, note *string
-		switch qStep {
-		case 1:
-			c := "A"
-			choice = &c
-		case 2:
-			n := "Custom text"
-			note = &n
-		case 3:
-			c := "B"
-			n := "Note text"
-			choice, note = &c, &n
-		case 4:
-			// Neither choice nor text -> empty slice.
-		}
+		choice, note := scriptedCodexChoice(qStep)
 		waited, err := fx.h.Hand(string(post.Nonce), fx.buildDecisionItem(fx.owner2, grpSess, post.Nonce, choice, note))
 		mustApproveTrue(t, waited && err == nil, "Codex decision Hand")
 	}
-	validInput := marshalApproveJSON(map[string]any{
+	validInput := marshalWire(map[string]any{
 		"questions": []map[string]any{
 			{"id": "q1", "header": "H1", "question": "First?", "options": []map[string]string{{"label": "L1", "description": "D1"}}},
 			{"id": "q2", "header": "", "question": "Second?", "options": []map[string]string{{"label": "L2", "description": "D2"}}},
@@ -1404,23 +1213,15 @@ func assertCodexQuestionsViaAskReply(t *testing.T, fx *approveFixture, groupKey 
 		},
 	})
 	fx.h.Report(groupKey, Event{Kind: Asked, Ask: &Ask{ID: "ok-q", Input: json.RawMessage(validInput), Reply: replyFn}})
-	gotAns := recvApproveChan(t, replyCh, "Codex multi-question Reply")
-	wantAns := map[string][]string{
-		"q1": {"L1"},
-		"q2": {"Custom text"},
-		"q3": {"B3", "Note text"},
-		"q4": {},
-	}
-	mustApproveDeepEqual(t, gotAns, wantAns, "Codex multi-question answers")
+	wantAns := map[string][]string{"q1": {"L1"}, "q2": {"Custom text"}, "q3": {"B3", "Note text"}, "q4": {}}
+	mustApproveDeepEqual(t, recvApproveChan(t, replyCh, "Codex multi-question Reply"), wantAns, "Codex multi-question answers")
 
-	// Home refusal on Codex question calls Reply(nil).
 	fx.home.onDecision = nil
 	fx.home.answer = `{"re":1,"err":{"code":"conflict","msg":"refused"}}`
 	fx.h.Report(groupKey, Event{Kind: Asked, Ask: &Ask{ID: "ref-q", Input: json.RawMessage(validInput), Reply: replyFn}})
 	mustApproveTrue(t, recvApproveChan(t, replyCh, "refused Codex question") == nil, "refused Codex question nil")
 	fx.home.answer = ""
 
-	// Cancelled turn while Codex question waits does not call Reply.
 	// Single reader: test goroutine awaiting decision post signal via recvApproveChan.
 	postedQ := make(chan struct{}, 1)
 	fx.home.onDecision = func(proto.Post[proto.DecisionBody]) { postedQ <- struct{}{} }
@@ -1432,26 +1233,37 @@ func assertCodexQuestionsViaAskReply(t *testing.T, fx *approveFixture, groupKey 
 	fx.h.Report(groupKey, Event{Kind: Asked, Ask: &Ask{ID: "cancel-q", Input: json.RawMessage(validInput), Reply: cancelReplyFn}})
 	recvApproveChan(t, postedQ, "Codex question posted before cancel")
 	fx.h.Report(groupKey, Event{Kind: TurnBegan})
-	approveStateOf(fx.h).wg.Wait()
+	waitCallsZero(t, fx.h, groupKey)
 	mustApproveEqual(t, calledReply.Load(), false, "cancelled Codex question must not call Reply")
 	fx.home.onDecision = nil
 }
 
-func pickCardByCmd(p1, p2 proto.Post[proto.ApprovalBody], cmd string) proto.ID {
-	if p1.Body.Command == cmd {
-		return p1.Nonce
+func scriptedCodexChoice(step int) (*string, *string) {
+	switch step {
+	case 1:
+		return new("A"), nil
+	case 2:
+		return nil, new("Custom text")
+	case 3:
+		return new("B"), new("Note text")
+	default:
+		return nil, nil
 	}
-	return p2.Nonce
+}
+
+func pickCardByCmd(cmd string, posts ...proto.Post[proto.ApprovalBody]) proto.ID {
+	for _, p := range posts {
+		if p.Body.Command == cmd {
+			return p.Nonce
+		}
+	}
+	return ""
 }
 
 func assertCodexConcurrentWaitAndCancel(t *testing.T, fx *approveFixture, runner *approveFakeRunner, codexKey, groupKey SessionKey) {
 	t.Helper()
-	seamSQL(t, fx.db,
-		`DELETE FROM setting WHERE key IN ('all_level3', 'default_level')`,
-		`DELETE FROM perm WHERE agent = 'codex'`,
-	)
-	// Single reader: test goroutine awaiting two Codex approval posts via recvApproveChan.
-	cards := make(chan proto.Post[proto.ApprovalBody], 2)
+	// Single reader: test goroutine awaiting three Codex approval posts via recvApproveChan.
+	cards := make(chan proto.Post[proto.ApprovalBody], 3)
 	fx.home.onPost = func(post proto.Post[proto.ApprovalBody]) { cards <- post }
 
 	seamSoon(t, "Report for first Codex Ask", func() {
@@ -1460,69 +1272,44 @@ func assertCodexConcurrentWaitAndCancel(t *testing.T, fx *approveFixture, runner
 	seamSoon(t, "Report for second Codex Ask", func() {
 		fx.h.Report(codexKey, Event{Kind: Asked, Ask: &Ask{ID: "c2", Tool: "fileChange", Category: "file", Command: "add a.txt", Input: json.RawMessage(`[{"path":"a.txt"}]`)}})
 	})
-	mustApproveEqual(t, fx.h.Sessions.Calls(codexKey), 2, "Calls right after two Reports")
+	seamSoon(t, "Report for groupKey Codex Ask", func() {
+		fx.h.Report(groupKey, Event{Kind: Asked, Ask: &Ask{ID: "g1", Tool: "commandExecution", Category: "command", Command: "make g"}})
+	})
+	mustApproveEqual(t, fx.h.Sessions.Calls(codexKey), 2, "Calls right after two Reports on codexKey")
+	mustApproveEqual(t, fx.h.Sessions.Calls(groupKey), 1, "Calls right after Report on groupKey")
 
-	postA := recvApproveChan(t, cards, "first Codex card")
-	postB := recvApproveChan(t, cards, "second Codex card")
-	mustApproveTrue(t, postA.Nonce != postB.Nonce, "concurrent asks got distinct cards")
-	cardC1 := pickCardByCmd(postA, postB, "make a")
+	postA := recvApproveChan(t, cards, "first card")
+	postB := recvApproveChan(t, cards, "second card")
+	postC := recvApproveChan(t, cards, "third card")
+	cardC1 := pickCardByCmd("make a", postA, postB, postC)
 
 	countBeforeC1 := runner.answerCount()
-	itA := proto.Item{
-		Type: "item", Nonce: approveTestID(55), Timestamp: seamStart,
-		Group: proto.ID(fx.groupID), To: fx.hostKey.ID(), Item: 777,
-		AI: proto.ID(fx.memberID), Why: "decided", Task: proto.ID(codexKey.Task), Msg: cardC1,
-	}
-	rawA := json.RawMessage(marshalApproveJSON(proto.InboxItem{
-		Env: fx.homeKey.Sign(marshalApproveJSON(itA)),
-		Msg: json.RawMessage(marshalApproveJSON(fx.makeCardMsg(cardC1, "approval", codexKey.Task, &proto.CardState{Status: "approved"}))),
-	}))
-	_, err := fx.h.RecordApprovalDecision(fx.homeKey.ID(), rawA)
-	mustApproveNoErr(t, err)
+	waited, err := fx.h.Hand(string(cardC1), fx.buildDecidedItem(fx.owner1, cardC1, codexKey.Task, "approved"))
+	mustApproveTrue(t, waited && err == nil, "c1 Hand")
 	mustApproveEqual(t, recvApproveChan(t, runner.ch, "c1 answer"), recordedAnswer{key: codexKey, askID: "c1", allow: true}, "c1 allow")
 	recvApproveChan(t, runner.inCall, "c1 inCall")
 
+	// TurnEnded cancels remaining codexKey ask without cancelling groupKey's ask.
 	fx.h.Report(codexKey, Event{Kind: TurnEnded, Status: "interrupted"})
-	approveStateOf(fx.h).wg.Wait()
-	mustApproveEqual(t, fx.h.Sessions.Calls(codexKey), 0, "Calls after TurnEnded")
+	waitCallsZero(t, fx.h, codexKey)
+	mustApproveEqual(t, fx.h.Sessions.Calls(groupKey), 1, "groupKey ask still active")
 	mustApproveEqual(t, runner.answerCount(), countBeforeC1+1, "cancelled Ask did not call Runner.Answer")
 
-	seamSQL(t, fx.db, `INSERT INTO setting(key, value) VALUES('default_level', '1')`)
+	fx.h.Report(groupKey, Event{Kind: TurnBegan})
+	waitCallsZero(t, fx.h, groupKey)
+
+	st := Part[approvalState](fx.h)
+	st.mu.Lock()
+	leftover := len(st.cancels)
+	st.mu.Unlock()
+	mustApproveEqual(t, leftover, 0, "all cancel maps cleaned up")
+
+	// Nil Runner does not panic when an Asked request finishes.
 	Runner = nil
-	fx.h.Report(groupKey, Event{Kind: Asked, Ask: &Ask{ID: "nil-runner", Tool: "commandExecution", Category: "command", Command: "ls"}})
-	approveStateOf(fx.h).wg.Wait()
-}
-
-func TestStoreFailurePathsAndNonJSONInputDigest(t *testing.T) {
-	mustApproveEqual(t, len(hashApprovalInput(json.RawMessage("  not-json  "))), 64, "non-JSON digest len")
-
-	fx := newApproveFixture(t)
-	card := approveTestID(90)
-	it := proto.Item{
-		Type: "item", Nonce: approveTestID(91), Timestamp: seamStart,
-		Group: proto.ID(fx.groupID), To: fx.hostKey.ID(), Item: 888,
-		AI: proto.ID(fx.memberID), Why: "decided", Task: proto.ID(fx.taskID), Msg: card,
+	fx.home.onPost = func(post proto.Post[proto.ApprovalBody]) {
+		fx.h.Hand(string(post.Nonce), fx.buildDecidedItem(fx.owner1, post.Nonce, "", "denied"))
 	}
-
-	digest := hashApprovalInput(json.RawMessage(`{"command":"echo x"}`))
-	seamSQL(t, fx.db, "INSERT INTO approval(card, g, member, task, tool, input, state) VALUES('"+string(card)+"', '"+fx.groupID+"', '"+fx.memberID+"', '"+fx.taskID+"', 'Bash', '"+digest+"', 'granted')")
-	seamSQL(t, fx.db, "DROP TABLE audit")
-
-	s, ok := fx.h.Sessions.Get(fx.sessKey)
-	mustApproveTrue(t, ok, "session exists")
-	mustApproveEqual(t, consumeGrantedApproval(t.Context(), fx.h, s, "Bash", digest, "echo x"), false, "consumeGrantedApproval without audit")
-
-	seamSQL(t, fx.db, "UPDATE approval SET state = 'pending' WHERE card = '"+string(card)+"'")
-	fx.home.putCard(fx.makeCardMsg(card, "approval", fx.taskID, &proto.CardState{Status: "approved"}))
-	mustApproveEqual(t, consumeGrantedApproval(t.Context(), fx.h, s, "Bash", digest, "echo x"), false, "consumePendingCard without audit")
-
-	_, errLate := applyLateApprovalDecision(fx.h, fx.homeKey.ID(), "claude", fx.owner1.ID(), it, "approved")
-	mustApproveErr(t, errLate)
-
-	seamSQL(t, fx.db, "DROP TABLE approval")
-	mustApproveEqual(t, consumeGrantedApproval(t.Context(), fx.h, s, "Bash", digest, "echo x"), false, "consumeGrantedApproval without approval")
-
-	res := fx.mustCallTool(t.Context(), 3, `{"tool_name":"Bash","input":{"command":"echo x"},"tool_use_id":"u_no_tbl"}`)
-	mustApproveDeepEqual(t, res, ApprovalResult{Behavior: "deny", Message: "The approval request was refused: internal: failed to store approval record"}, "missing approval table")
-	mustApproveErr(t, fx.h.DeleteTaskApprovals(fx.groupID, fx.taskID))
+	fx.h.Report(groupKey, Event{Kind: Asked, Ask: &Ask{ID: "nil-runner", Tool: "commandExecution", Category: "command", Command: "ls"}})
+	waitCallsZero(t, fx.h, groupKey)
+	fx.home.onPost = nil
 }

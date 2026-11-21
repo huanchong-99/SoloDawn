@@ -4,9 +4,9 @@ Contracts: `contracts/drivers.md` (how levels map to CLI settings),
 `contracts/commands.md` (`post` kinds `approval` and `decision`, `act`),
 `contracts/messages.md` (approval and decision bodies and card states),
 `contracts/mcp-tools.md` (`approve`), `contracts/storage.md` (`approval`).
-Rules: R-40 to R-43, R-136, R-137, R-139, and the 2026-11-21 owner
-overrides (default level 3 across sessions; questions and approvals go
-through cards at level 2 and level 3; slimming A-2 and A-3).
+Rules: R-40 to R-43, R-136, R-137, and the 2026-11-21 owner overrides
+(default level 3 across sessions; questions and approvals go through cards at
+level 2 and level 3; no `cause` or signature re-verification on items).
 
 Actors: the AI; S, its CLI session; N, its host node; H, the group home;
 B, a browser of the AI's owner.
@@ -40,37 +40,37 @@ section 3).
 2. Level 1 (read only): N answers "deny" at once with the text "Denied:
    this session is read only." No card. Requests raised by the CLI at level
    2 or level 3 continue to step 3.
-3. N looks in its approval records for one of this AI and task with the same
-   tool and the same input digest, in state `granted`. If there is one, N
-   deletes it, answers "allow", writes an audit row, done. Otherwise, if N
-   holds a `pending` record for that same `(g, member, task, tool, input)`
-   and H is connected, N fetches that card's `msg` row from H (`fetch` with
-   `r: "msg"`): when `state.status` is `approved`, N deletes the record,
-   writes an `approved` audit row, and answers "allow"; when `state.status`
-   is `denied`, `expired` or `reassigned`, N deletes the stale record and
-   checks any remaining `pending` record.
+3. If N holds a `pending` approval record for this `(g, member, task, tool,
+   input)` and H is connected, N fetches that card's `msg` row from H
+   (`fetch` with `r: "msg"`): when `state.status` is `approved`, N deletes
+   the record and answers "allow"; when `state.status` is `denied`,
+   `expired` or `reassigned`, N deletes the stale record and checks any
+   remaining `pending` record.
 4. N runs the outbound secret check on the request text and on the
    justification (R-137). On a match N answers "deny" with the text "This
-   request contains a secret and cannot be shown for approval", writes an
-   audit row, and stops here. No card.
-5. N writes an approval record: the id of the card it is about to post,
-   the task, the tool, and the SHA-256 of the input as canonical JSON. For
-   Claude Code that is `input`; for a Codex command its `command` and `cwd`;
-   for a Codex file change the `changes` of its item. The request's own id
-   is left out: it is new on every attempt. N opens its wait before sending
-   `post` with `kind: approval` and that id to H, signed for the AI, with
-   the tool, the request text, the justification, the kind of request, and
-   the list of approvers. Audit row `requested`. A request too long for a
-   card is not refused: the card carries its beginning and says how long
-   the whole is (`contracts/messages.md` 2.3). If H refuses the `post`, N
-   deletes the record and answers "deny" with the text "The approval
-   request was refused: <code>: <reason>", the error H answered.
+   request contains a secret and cannot be shown for approval" and stops
+   here. No card.
+5. N writes a `pending` approval record: the id of the card it is about to
+   post, the task, the tool, and the SHA-256 of the input as canonical JSON.
+   For Claude Code that is `input`; for a Codex command its `command` and
+   `cwd`; for a Codex file change the `changes` of its item. The request's
+   own id is left out: it is new on every attempt. N opens its wait before
+   sending `post` with `kind: approval` and that id to H, signed for the AI,
+   with the tool, the request text, the justification, the kind of request,
+   and the list of approvers (`thread` and `body.task` set to the session's
+   task for a task or review session, and `thread: null` with empty
+   `body.task` in a group session). A request too long for a card is not
+   refused: the card carries its beginning and says how long the whole is
+   (`contracts/messages.md` 2.3). If H refuses the `post`, N deletes the
+   record and answers "deny" with the text "The approval request was
+   refused: <code>: <reason>", the error H answered.
 6. H stores the card with `state.status = pending`, sets the task's wait to
-   `approval`, and pushes the rows. The card appears in the main line under
-   the secretary's name and mentions the approvers; the thread shows the
-   request. H writes it; no AI turn is spent (R-42).
+   `approval` when the card is on a task, and pushes the rows. The card
+   appears in the main line under the secretary's name and mentions the
+   approvers; when on a task, the thread shows the request. H writes it; no
+   AI turn is spent (R-42).
 7. N keeps the CLI's request open for up to `limits.approval_wait_s`
-   (default 600 seconds). It sends no progress notifications (section I).
+   (default 600 seconds). It sends no progress notifications (section H).
 
 ## C. CLI multiple-choice questions (`decision` cards)
 
@@ -78,23 +78,23 @@ For Claude Code `AskUserQuestion` and Codex `item/tool/requestUserInput`:
 
 1. N validates the question list and runs the outbound secret check on every
    question, header, option label and option description (and refuses any
-   Codex question marked `isSecret`). On a secret match N writes an audit
-   row (`result = secret`) and denies `AskUserQuestion` with the step-4
-   secret message or answers `Ask.Reply(nil)` for Codex. No card.
-2. For each question in order, N maps the CLI options to `decision` options
-   `"A"` through `"Z"` (then `"27"`, …), opens its wait, and sends `post`
-   with `kind: decision` (`main: true`, `thread` and `body.task` set when
-   the session belongs to a task and omitted in a group session, `context`
-   from a non-empty header, `to` set to the approvers, `mentions` set to
-   their member ids). Audit row `requested`.
+   Codex question marked `isSecret`). On a secret match N denies
+   `AskUserQuestion` with the step-4 secret message or answers
+   `Ask.Reply(nil)` for Codex. No card.
+2. Questions of one call are posted one card at a time: question 2 is posted
+   only after question 1 is decided. For each question in order, N maps the
+   CLI options to `decision` options `"A"` through `"Z"`, opens its wait,
+   and sends `post` with `kind: decision` (`main: true`, `thread` and
+   `body.task` set for a task or review session and omitted in a group
+   session, `context` from a non-empty header, `to` set to the approvers,
+   `mentions` set to their member ids).
 3. N waits up to `limits.approval_wait_s` for the `decided` item of that
    card. From `msg.state` (`status = decided`) N reads the chosen option's
-   label (`choice` matched to `options`) and any free text (`text`), writes
-   audit row `approval` (`result = decided`), and passes the answer back to
-   the CLI (`updatedInput.answers` and optional `annotations` for Claude
-   Code; `answers[id]` slice for Codex). If H refuses a card or the wait
-   runs out, Claude Code receives the corresponding denial message and Codex
-   receives `Ask.Reply(nil)`.
+   label (`choice` matched to `options`) and any free text (`text`), and
+   passes the answer back to the CLI (`updatedInput.answers` and optional
+   `annotations` for Claude Code; `answers[id]` slice for Codex). If H
+   refuses a card or the wait runs out, Claude Code receives the
+   corresponding denial message and Codex receives `Ask.Reply(nil)`.
 
 ## D. Decided while the CLI is still waiting
 
@@ -103,16 +103,13 @@ For Claude Code `AskUserQuestion` and Codex `item/tool/requestUserInput`:
    signs `act` and sends it to H.
 9. H checks the actor and pending state, updates `msg.state`, clears the
    wait, pushes rows, and queues a `decided` item for the AI carrying the
-   updated `msg` row and no `cause` (slimming A-3).
-10. N decodes the `decided` item and reads `msg.state` directly without
-    re-verifying approver device signatures (slimming A-2). For an open
-    approval wait, N also checks that the `pending` approval row still
-    exists.
+   updated `msg` row and no `cause`.
+10. Delivery hands the `decided` item to N's open wait by card id. N decodes
+    the item and reads `msg.state` directly; a card that is not decided
+    counts as no decision.
 11. The item is not a turn: it goes straight to the waiting call. For an
-    approval card, N answers the CLI "allow" or "deny" (`Denied by the
-    owner.`), deletes the record, and writes an audit row with the decision
-    and decider (`state.act.k` when present, else `state.by`, else H). The
-    AI continues in the same turn.
+    approval card, N deletes the record and answers the CLI "allow" or
+    "deny" (`Denied by the owner.`). The AI continues in the same turn.
 
 ## E. Approval not decided in time
 
@@ -121,20 +118,18 @@ For Claude Code `AskUserQuestion` and Codex `item/tool/requestUserInput`:
     will be told when it is decided."
 13. The turn ends. The task keeps its wait; the card stays pending; the
     record stays. The session may go dormant, and N may restart.
-14. When the owner approves later, H sends the `decided` item. If N records
-    it through `RecordApprovalDecision`, N writes `delivered` and marks the
-    record `granted` in one transaction; if delivery hands the `decided`
-    item straight to a turn, the record remains `pending` until the AI
-    retries the same request and step 3 confirms `state.status = approved`
-    on H via `fetch`. Either way, the one retry is allowed without posting a
-    second card.
-15. When the owner denies later, `RecordApprovalDecision` deletes the record
-    in one transaction with `delivered` (or step 3 deletes the stale record
-    on retry).
+14. When the owner approves later, H sends the `decided` item, which
+    delivery turns into a turn for the AI. The stored record remains
+    `pending` until the AI retries the same request and step 3 confirms
+    `state.status = approved` on H via `fetch`, deleting the record and
+    allowing that one retry without posting a second card.
+15. When the owner denies later, H sends the `decided` item as a turn; if
+    the AI retries anyway, step 3 sees `state.status = denied` and deletes
+    the stale record.
 
-A granted or fetched-approved record allows one request, the one whose input
-has the recorded digest. Records of a task are deleted when the task is
-given to another AI or ends.
+An approved card fetched in step 3 allows one request, the one whose input
+has the recorded digest. Stale records of a reassigned or ended task come
+back `reassigned` or `expired` and are deleted on fetch in step 3.
 
 ## F. Reassigned or cancelled
 
@@ -144,13 +139,7 @@ given to another AI or ends.
 17. If the task is cancelled or merged while the card is pending, H sets
     the card to `expired` (`contracts/task-machine.md` rows 8 and 15).
 
-## G. What is recorded on the owner's node (R-139)
-
-One audit row per request and per decision: time, group, AI, request text or
-question as shown on the card, who decided, result (`approved`, `denied`,
-`decided` or `secret`).
-
-## H. Levels at a glance
+## G. Levels at a glance
 
 | Level | The CLI is started with | Requests |
 | --- | --- | --- |
@@ -176,7 +165,7 @@ place for it.
 - Work that someone other than the owner triggered never runs above level 2
   (R-44, step 2).
 
-## I. What the spikes showed, and what is still open
+## H. What the spikes showed, and what is still open
 
 - `[verified]` Both CLIs let a request stay open for 630 seconds and then
   honoured the answer (S-2, S-3), Claude Code with and without progress

@@ -16,9 +16,15 @@ One process per open session. Folder and level come from the session kind:
 
 | Session kind | Folder | Level |
 | --- | --- | --- |
-| group session (the secretary's, or a working AI's) | `repo/` | 1 |
-| task session | `wt/<num>-<slug>/` | what the owner set for this AI in this project (R-40) |
-| review session | `review/<num>/` | 1 |
+| group session (the secretary's, or a working AI's) | `repo/` | 3 by default; what `perm.set` or `default_level` sets (`contracts/commands.md` section 2) |
+| task session | `wt/<num>-<slug>/` | 3 by default; what `perm.set` or `default_level` sets (R-40) |
+| review session | `review/<num>/` | 3 by default; what `perm.set` or `default_level` sets (`contracts/commands.md` section 2) |
+
+By the owner's decisions of 2026-11-21, every AI defaults to level 3 across
+group, review and task sessions so the secretary and reviewers keep the CLI's
+ask-the-user tool, and even at level 3 any permission request or
+multiple-choice question that a CLI raises is still presented to the owner as
+a card (`approval` or `decision`) rather than dropped.
 
 The node always passes permission and sandbox settings explicitly instead
 of inheriting the user's defaults. Step 1 passes no model: each CLI uses its
@@ -85,7 +91,7 @@ claude -p --verbose
 | --- | --- | --- |
 | 1 | `--permission-mode default --tools Read,Glob,Grep`; `approve` answers deny. (`default` is accepted and reported by `system/init`, though `--help` of 2.1.311 no longer lists it.) | `[verified]` the tool set is those three and the node's tools: no Write, no Bash. Reading inside the folder needs no request; reading outside it reaches `approve` and is denied |
 | 2 | `--permission-mode acceptEdits`, and `--settings` with `sandbox.enabled`, `sandbox.autoAllowBashIfSandboxed` and `sandbox.failIfUnavailable` all true; everything else reaches `approve`. On native Windows, where the CLI has no sandbox, the node refuses level 2 for Claude Code with a clear reason and offers only the levels it can enforce (`risks.md` Q-4): `perm.set` asking for it answers `conflict`, and a `default_level` of 2 falls back to 1 for it | `[verified]` file tools: inside the folder without asking, outside it through `approve`. Sandboxed Bash: a write inside the folder works, and so does one in the sandbox's own temp folder, which cannot be closed; a write to a folder named in `sandbox.filesystem.denyWrite` is refused; **reads work anywhere**; the network is blocked with no request and no event, and the command waits for its own timeout. `[unverified]` that a Bash write anywhere else outside the folder is refused: the spike's folder lay inside that temp folder, and the only evidence is the sandbox's debug line `write: denyAllExcept` |
-| 3 | `--permission-mode bypassPermissions`; in the terminal also `--settings '{"skipDangerousModePermissionPrompt":true}'`, without which the terminal asks the owner to accept the mode and stores the answer in the owner's configuration | `[verified]` no requests |
+| 3 | `--permission-mode bypassPermissions`; in the terminal also `--settings '{"skipDangerousModePermissionPrompt":true}'`, without which the terminal asks the owner to accept the mode and stores the answer in the owner's configuration | `[verified]` ordinary file and Bash actions make no permission requests; any permission request or multiple-choice question the CLI still raises becomes a card (`approval` or `decision`, owner's decision of 2026-11-21) |
 
 `[unverified]` That a command the model asks to run outside the sandbox
 reaches `approve`. R-41 rests on it: it is how an action that needs the
@@ -149,7 +155,7 @@ JSON-RPC over stdio, one JSON object per line `[verified]`:
 | --- | --- | --- | --- |
 | 1 | `read-only` | `never` | a shell tool exists and runs: reading works inside and outside the folder, a write fails. Level 1 on Codex means "no writes", not "no execute tool" |
 | 2 | `workspace-write`, with `config.sandbox_workspace_write` = `{"exclude_slash_tmp":true,"exclude_tmpdir_env_var":true}` | `on-request` | writes inside the folder without a request; a write outside it fails and the model asks. Without that `config`, `/tmp` and `$TMPDIR` are writable as well. The network is closed with no request |
-| 3 | `danger-full-access` | `never` | no requests |
+| 3 | `danger-full-access` | `never` | ordinary file and shell actions make no requests; any permission request or multiple-choice question the CLI still raises becomes a card (`approval` or `decision`, owner's decision of 2026-11-21) |
 
 - What the owner configured for themselves applies to the node's sessions
   too: `~/.codex/AGENTS.md`, the service tier, reasoning effort, their own
@@ -216,7 +222,7 @@ permission interface, so the level decides whether they are offered at all.
 
 | Operation | Level 1 | Level 2 | Level 3 |
 | --- | --- | --- | --- |
-| answer the CLI's permission requests | deny | card to the owner | none arise |
+| answer the CLI's permission requests and multiple-choice questions | deny permission requests; `AskUserQuestion` and `requestUserInput` questions become `decision` cards | card to the owner (`approval` or `decision`) | card to the owner (`approval` or `decision`) for any request or question the CLI raises (owner's decision, 2026-11-21) |
 | run the project's check commands (`run_checks`) | not offered | yes | yes |
 | push the task's own branch; open the pull request (`push_branch`, `submit_task`) | not offered | yes | yes |
 | merge a reviewed commit when the home asks | not applicable | yes | yes |
@@ -284,7 +290,9 @@ reviewed like code. Contents:
   items marked `information` are context, not orders. If a request is denied
   or left open, stop that action and end your turn. Never post secrets or
   the contents of secret files.
-- **Group session of a working AI**: this session is read only. Answer
+- **Group session of a working AI**: do not edit files here (the session runs
+  at the level set for `(agent, group)`, default 3 by the owner's decision of
+  2026-11-21, so its instructions forbid writes rather than level 1). Answer
   questions here. If the request needs a code change, call `start_task` with
   a title and a plan and end your turn.
 - **Task session**: work only in this folder, on this branch. Commit your

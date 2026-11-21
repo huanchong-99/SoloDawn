@@ -97,7 +97,7 @@ merge conflict the secretary uses `set_task` to say which AI resolves it.
 `approve` is named in `--permission-prompt-tool`. The model does not call
 it directly; the CLI calls it when an action needs permission, and whenever
 the model invokes `AskUserQuestion` (including at level 3,
-`bypassPermissions`, per the 2026-11-21 owner override `[verified: Claude Code 2.1.311]`).
+`bypassPermissions`, per the 2026-11-21 owner override `[unverified]`).
 
 Input, as sent by the CLI `[verified]`:
 
@@ -128,10 +128,13 @@ When `tool_name` is `AskUserQuestion`, `input.questions` must be a non-empty
 list of `{question, header, options: [{label, description}], multiSelect}`
 entries with non-empty `question` texts (otherwise `bad_request`). After the
 outbound secret check on every `question`, `header`, `label` and
-`description`, each question is posted as a `decision` card (`options`
-numbered `"A"` to `"Z"`, then `"27"`, …; `context` from a non-empty
-`header`; `thread` and `body.task` set when the session has a task) and the
-node waits up to `limits.approval_wait_s` for its `decided` item. When all
+`description`, each question is posted one at a time as a `decision` card
+(`options` numbered `"A"` to `"Z"`; `context` from a non-empty `header`;
+`thread` and `body.task` set for a task or review session and omitted in a
+group session) and the node waits up to `limits.approval_wait_s` for its
+`decided` item before posting the next question. A question with
+`multiSelect: true` still uses a single-choice `decision` card; multiple
+selections are given in the free-text field (`issues.md`). When all
 questions are decided, `approve` returns `{"behavior":"allow",
 "updatedInput":{…}}` with the original `input` fields, `answers[question]`
 set to the chosen option's `label` (plus `annotations[question] =

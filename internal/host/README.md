@@ -1,5 +1,5 @@
 ---
-description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the offline scripted Claude Code and Codex processes for host integration tests, and the API of the host workspaces and Git commands.'
+description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the session runtime, the offline scripted Claude Code and Codex processes for host integration tests, and the API of the host workspaces and Git commands.'
 kind: reference
 ---
 
@@ -84,6 +84,17 @@ A `Driver` starts the structured CLI (`Start`) and gives the command line of the
 - A driver keeps no timer. Its caller ends the context of `Start`, which kills the process tree, when an interrupt or a close was not answered within 10 s.
 - Sign-in that is not usable and a session id that cannot be resumed are events (`LoginInvalid`, `NoSession`), because a CLI reports them after its process has started.
 
+# Session runtime
+
+`run.go` provides `Runner` (`Turn` and `Answer`), registers `"runtime"` in `Attached`, and exposes `(*Host).ReportSaved(ctx, saved)`. `AuditKilled` lives in `audit.go`.
+
+- **Per-host state.** Everything the runtime remembers lives in `Part[runtimePart](h)` (`procs`, `closing`, `starting`, `limited`, `savedCrash`, and `changed`). No package-level state is shared across hosts, so tests run independent hosts in one process.
+- **Lifecycle and C-6.** `Runner.Turn` wakes a `dormant` session by starting its driver with `Launch` (`Folder` under `<dbDir>/projects/<group>/<folder>`, `Session`, `Level` defaulting to 3 across all session kinds unless overridden by `perm` or `default_level`, `Shim` with an `Admit` token, `Instructions`, `RepoConfig`, `ToolTimeout`), reports `TurnBegan` before writing the turn, stores a non-empty `Ready.Session`, and forwards every `Process.Events()` event in order through `h.Report`. Every switch waits for the previous process's `Events()` channel to close and forgets its token before starting the next process or marking the session `dormant`.
+- **Dormancy, `max_open` and timeouts.** `TurnEnded` moves an active turn's session to `waiting`, then arms the `idle_minutes` timer (default 15), reports `member status`, and calls `Deliver` on a separate goroutine; a stray `TurnEnded` with no active turn is reported to `Listeners` and ignored. Waking a `dormant` session at `max_open` (default 4) closes the open `waiting` session with the earliest `LastActive` first, or waits on `changed` until an active session frees a slot. Every `Close` arms a 10 s timer that cancels `Start`'s context to kill an unresponsive process tree: outside a turn that records `AuditKilled` (`what = "killed"`, naming the member and task) and nothing else; during a turn the exit is a crash (`turn_interrupted` with reason `crash`, plus `task fail` in a task session).
+- **Failed resume and `login_invalid`.** On `NoSession` during a resume, the runtime closes the failed process, clears `CLISession`, composes `ReplacedTurn`, starts a fresh session in the same folder, and reports `session_replaced`. On `LoginInvalid`, the runtime closes the process, marks the AI `limited`, and sends `LoginInvalidEvent` (with redacted detail) only when entering `limited`.
+- **Lock order.** `runtimePart.mu` may call `Sessions.Get` and `Sessions.All`, which acquire only the leaf in-memory `Sessions` lock; nothing called under `runtimePart.mu` acquires `Store`, `Rows`, `Host`, `Driver`, `Process` or hook/listener locks.
+- **One reader per channel.** `Process.Events()` is read only by `runProcessLoop`; `liveProc.loopDone` is read only by `stopProcess` or `writeTurnToWaiting` when waiting for that process to exit; `runtimePart.changed` is closed and replaced under `runtimePart.mu` to wake `waitSignal` callers.
+
 # Host test CLIs
 
 Build `./internal/host/fakecli/claude` and `./internal/host/fakecli/codex` into a temporary directory and prepend it to the test's PATH. Both answer `--version` without a script. For sessions, set:
@@ -121,15 +132,16 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 - `CreateTaskWorkspace(ctx, projectDir, num, slug, ai, base, remote)` and `RemoveTaskWorkspace(ctx, projectDir, num, slug, ai, why)` handle `wt/<num>-<slug>`. `PrepareReviewWorkspace(ctx, projectDir, num, ai, commit, base, remote)` and `RemoveReviewWorkspace(ctx, projectDir, num, ai)` handle `review/<num>`. `ai` is the member id of the AI that holds the folder. A create reuses only a worktree recorded for the same AI, and a removal leaves one recorded for another AI untouched.
 - A create works out from the branches whether a task is new, taken over or returning; there is no takeover flag. A slug the home cannot produce, or a `num` below 1, is refused.
 - `cloneLock(repo)` is the one lock per clone, keyed by its real path. Workspace functions and `ReviewedMerge` take it.
+- `HostedChecksToResume(tasks, ais)` selects the `cloud_check` tasks a restarted node polls again, deriving each `Branch` (`task/<num>-<slug>`) from `Num` and `Slug` via `taskName` and skipping rows `taskName` refuses.
 
 # Approvals
 
 `approve.go` handles permission requests and multiple-choice user questions from both CLIs (`planning/flows/approval.md`, `planning/contracts/mcp-tools.md` section 3):
 
-- `Tools["approve"]` is listed only to structured Claude Code sessions (`c.Agent == "claude" && !c.Interactive`). It maps `AskUserQuestion` to per-question `decision` cards (`options` `"A"`..`"Z"`, `"27"`, … plus custom free-text answers) returning `updatedInput.answers` (and optional `annotations`), and maps `Bash`, `Write`/`Edit`/`NotebookEdit`/`Read`, `WebFetch`/`WebSearch`, and other tool names to `Ask` (`planning/contracts/messages.md` section 2.3).
+- `Tools["approve"]` is listed only to structured Claude Code sessions (`c.Agent == "claude" && !c.Interactive`). It maps `AskUserQuestion` to per-question `decision` cards (`options` `"A"`..`"Z"` plus custom free-text answers, posted one card at a time) returning `updatedInput.answers` (and optional `annotations`), and maps `Bash`, `Write`/`Edit`/`NotebookEdit`/`Read`, `WebFetch`/`WebSearch`, and other tool names to `Ask` (`planning/contracts/messages.md` section 2.3).
 - `Listeners["approve"]` starts a goroutine per `Asked` event so `Report` returns at once, brackets the open request synchronously with `Sessions.Calling`, answers Codex `requestUserInput` questions through `Ask.Reply` (posting per-question `decision` cards) and permission requests through `Runner.Answer`, and cancels open `Asked` contexts of a session on `TurnBegan` or `TurnEnded`.
-- All session kinds default to level 3 (`all_level3`, else `perm.level`, else `default_level`, else `3`). Permission requests at level 1 are denied immediately; permission requests raised by the CLI at level 2 or level 3 consume at most one matching `granted` row (or fetch any matching `pending` row's `msg` card from the home to consume an `approved` card and remove stale `denied`/`expired`/`reassigned` records), check `CheckOutboundSecret` on `Command` and `Why`, shorten `Command` to 3 KiB and `Why` to 256 B as unescaped JSON strings, store a `pending` row, open `Host.Await` before sending `post` (`kind: approval`), and wait up to `limits.approval_wait_s` (default 600 s).
-- `decodeDecidedInbox` decodes `InboxItem` and its `msg` row in one helper, reading `card.State` directly without reading `cause` or re-verifying approver device signatures.
+- `thread` and `body.task` are set on `approval` and `decision` cards only for `TaskSession` and `ReviewSession`; a `GroupSession` posts main-line cards with `thread: null` and empty or omitted `task`.
+- Permission requests from `callApprove` at level 1 are denied immediately; permission requests raised by a CLI fetch any matching `pending` row's `msg` card from the home (consuming an `approved` card and removing stale `denied`, `expired` or `reassigned` records), check `CheckOutboundSecret` on `Command` and `Why`, shorten `Command` to 3 KiB and `Why` to 256 B as unescaped JSON strings, store a `pending` row, open `Host.Await` (with `nil` check) before sending `post` (`kind: approval`), and wait up to `limits.approval_wait_s` (default 600 s).
+- `decodeDecidedInbox` decodes the plain `InboxItem` (`P-1b`) and its `msg` row so `postCardAndWait` reads `card.State` directly; a card that is not decided counts as no decision.
 - `Part[approvalState](h)` holds active `Asked` cancel functions per host. Its `mu` is a leaf lock: nothing called under `mu` takes `Host`, `Sessions`, `Rows` or `Store` locks.
 - `awaitApprovalItem` is the single reader of the channel returned by `Host.Await`: when the wait timer or context ends, it calls `done` and checks the channel once more before returning the timeout denial.
-- `Host.RecordApprovalDecision` handles timely or late `decided` approval items (`AuditDelivered` with `granted` or deletion), and `Host.DeleteTaskApprovals` deletes records of a reassigned or ended task.
