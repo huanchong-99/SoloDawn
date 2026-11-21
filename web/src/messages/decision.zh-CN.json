@@ -1,0 +1,18 @@
+{
+  "decision.kind": "请你拍板",
+  "decision.needs_you": "等你拍板",
+  "decision.waiting_on": "等 {name} 拍板",
+  "decision.decided": "{name} 已拍板 · {time}",
+  "decision.expired": "已过期 · {time}",
+  "decision.recommended": "推荐",
+  "decision.chosen": "已选",
+  "decision.custom.label": "直接写你的回答，或补充说明",
+  "decision.custom.hint": "直接写你的回答，或先写补充说明再点选项…",
+  "decision.answer.label": "你的回答",
+  "decision.answer.hint": "写下你的回答…",
+  "decision.submit": "发送回答",
+  "decision.hint": "点一个选项（可附补充说明），或直接发送你的回答。",
+  "decision.hint.free": "发送回答后 AI 继续干活。",
+  "decision.waiting_hint": "正在等 {name} 拍板",
+  "decision.too_long": "回答太长：请缩短到 1 KB 以内。"
+}

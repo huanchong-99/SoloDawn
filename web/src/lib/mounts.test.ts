@@ -1,5 +1,6 @@
 import type { Component } from 'svelte';
 import { describe, expect, it } from 'vitest';
+import { files } from './mounts.glob';
 import { card, cards, gather, mounts, points, side } from './mounts.svelte';
 
 // Stand-ins for components: gather only places them.
@@ -86,10 +87,13 @@ describe('gather', () => {
 });
 
 describe('the mounts of this client', () => {
-  it('are gathered from components/<area>/mounts.ts, of which there are none yet', () => {
-    for (const point of points) expect(mounts[point]).toEqual([]);
-    expect(cards.size).toBe(0);
-    expect(card('approval')).toBeUndefined();
+  it('are gathered from components/<area>/mounts.ts', () => {
+    const expected = gather(files);
+    expect(mounts).toEqual(expected.at);
+    expect(cards).toEqual(expected.cards);
+    for (const [kind] of expected.cards) {
+      expect(card(kind as Parameters<typeof card>[0])).toBeDefined();
+    }
   });
 
   it('start with the side panel of a chat closed', () => {
