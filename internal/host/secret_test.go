@@ -1,6 +1,7 @@
 package host_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -48,8 +49,10 @@ func TestCheckOutboundSecretRejects(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			const want = "secret: this looks like a secret; remove it and send again"
-			if err := host.CheckOutboundSecret(text); err == nil || err.Error() != want {
-				t.Errorf("got %v, want %q", err, want)
+			err := host.CheckOutboundSecret(text)
+			var he *host.Error
+			if !errors.As(err, &he) || he.Code != "secret" || err.Error() != want {
+				t.Errorf("got %T %v, want *host.Error %q", err, err, want)
 			}
 		})
 	}

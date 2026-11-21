@@ -143,6 +143,7 @@ func (g *runGroup) transact(now time.Time, run func(d Disk, tx *store.Tx) (Resul
 		if res, err = run(d, tx); err != nil {
 			return err
 		}
+		res.Items = inboxPace(g.state, res.Items, now.UnixMilli())
 		return errors.Join(d.err, g.write(tx, res, now.UnixMilli()))
 	})
 	return res, err
@@ -176,14 +177,20 @@ func runIdle(res Result) bool {
 // runHour is how far back the count of the wake-up cap goes, in milliseconds.
 const runHour = 3600_000
 
-// count keeps State.Wakes: each item counts once for its AI, at the time it
-// is due, which is now, or its NotBefore when that is later. What is an hour
-// old or older is dropped from the AI's list as the next item is counted.
+// count keeps State.Wakes: each non-merge item counts once for its AI, at the
+// time it is due, which is now, or its NotBefore when that is later. What is an
+// hour old or older is dropped from the AI's list as the next item is counted.
 func (g *runGroup) count(items []Item, now int64) {
 	for _, it := range items {
-		recent := slices.DeleteFunc(g.state.Wakes[it.AI], func(at int64) bool { return at <= now-runHour })
-		g.state.Wakes[it.AI] = append(recent, max(now, it.NotBefore))
+		inboxWake(g.state.Wakes, it, 0, now)
 	}
+}
+
+// runRecent returns the times in list after now - runHour, in ascending order.
+func runRecent(list []int64, now int64) []int64 {
+	recent := slices.DeleteFunc(slices.Clone(list), func(at int64) bool { return at <= now-runHour })
+	slices.Sort(recent)
+	return recent
 }
 
 // write writes a sealed result through: its rows under the sequence numbers
@@ -251,8 +258,8 @@ func (g *runGroup) putItems(tx *store.Tx, res Result, now int64) error {
 			return fmt.Errorf("an item %q is for %q, which is no AI of the group", it.Why, it.AI)
 		}
 		stored := store.Item{Group: g.state.ID, AI: it.AI, Host: host, Why: it.Why, Msg: runText(it.Msg), Task: runText(it.Task),
-			Commit: runText(it.Commit), Cause: runCause(it.Cause), NotBefore: it.NotBefore, Created: now}
-		seal := func(id int64) (json.RawMessage, error) { return runSeal(it, id) }
+			Commit: runText(it.Commit), NotBefore: it.NotBefore, Created: now}
+		seal := func(id int64) (json.RawMessage, error) { return inboxSeal(it, id) }
 		if _, err := tx.Enqueue(stored, seal); err != nil {
 			return err
 		}
@@ -278,15 +285,6 @@ func runText(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-// runCause is the cause column: the signed act as it is, or NULL.
-func runCause(cause *proto.Envelope) json.RawMessage {
-	if cause == nil {
-		return nil
-	}
-	data, _ := runJSON(cause) // three texts
-	return data
 }
 
 func runRetire(tx *store.Tx, group string, ids []int64) error {

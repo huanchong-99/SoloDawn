@@ -47,7 +47,9 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | answer a `hello` | `loop.Welcome(conn, build)`: `build` makes the `welcome` frame from the groups of the peer |
 | subscribe a connection to a group | `loop.Watch(conn, group, stateOnly)` |
 | send a host its inbox items, on every `hello` | `loop.Inbox(conn)` |
+| record a host's `ack` | `loop.Ack(conn, req)` |
 | run the timers by hand, or tell the home of an event | `loop.Tick(now)`, `loop.Event(name, event)` |
+| mark a disconnected host's AIs offline | `HostOfflineEvent`, fired by `Loop` when a device's last `Inbox` connection ends |
 | move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
 | push to a client | the `Client` interface |
 
@@ -89,9 +91,8 @@ that carries `as`; `Secretary` is true only for one that does. `Who.Human` is em
 
 **Functions are pure.** A function reads `s` and `c` and calls nothing but `c.Disk`. It does not
 change the state, read a clock (the home's is `c.Now`, the signer's `c.Timestamp`) or touch the
-store. A timer and a handler are pure in the same way. It checks its own table row: who may send the command, and that an id the payload chooses
-(`n` as the id of what it creates, the `id` of `member add_ai` or of `note`) is not already taken
-by another row.
+store, and checks its own table row, including who may send the command. A timer and a handler are
+pure in the same way.
 
 **Rows.** `Apply` numbers the rows of a result in order, from `State.Seq + 1`, by `State.Seal`. A function leaves
 `seq` as it is. In a message or a note it creates it leaves `pos` at 0, and `Apply` sets it to the
@@ -147,7 +148,7 @@ returns it; the caller of `Apply` calls its `Put` in the command's transaction, 
 `Result.GroupsChanged` asks the caller to push every connected peer its `groups` again once the
 result is committed.
 
-**Items.** An `Item` is an inbox item before the home signs it: the AI, the `why`, and the fields
+**Items.** An `Item` is an inbox item before the home numbers it: the AI, the `why`, and the fields
 [datachannel](../../planning/contracts/datachannel.md) section 6 gives that `why`. `NotBefore`
 holds an item back until that time. `Retire` lists queued items, by id, that the change made
 pointless.
@@ -165,12 +166,23 @@ are in package `home_test` and use only what is exported. The task machine takes
 start with `task`, `step`, `wait`, `item` and `states`, and `workItems`, `byAssignee` and
 `byReviewer`; its tests take the names that start with `mc` and `machine`. The run loop takes the
 names that start with `run`, and its tests those that start with `run` and `Run`; it exports
-`Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
-`ItemsPush`. Groups and members take the names that start with `grp` and `mem`, their tests too,
+`Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables` and `Conn`. The inbox
+takes the names that start with `inbox`, its tests too, and its test functions start with
+`TestInbox`. Groups and members take the names that start with `grp` and `mem`, their tests too,
 and their test functions start with `TestGroup` and `TestMember`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
-Device-log events (`ev_device.go`) take the names that start with `dev`, and their tests start with
-`TestDevice` and `dev`.
+The task commands (`cmd_task.go`) take the names that start with `tsk`, their tests too, and their
+test functions start with `TestTaskCmd`. The posts of HM-6 take the names that start with `post`,
+their tests too, and their test functions start with `TestPost`; the notes and `forget` take the
+names that start with `note`, their tests too, and their test functions start with `TestNote`.
+The cards take the names that start with `card`, their tests too, and their test functions start
+with `TestCard`. Device-log events (`ev_device.go`) take the names that start with `dev`, and their
+tests start with `TestDevice` and `dev`.
+The checks and reviews (`cmd_review.go`) take the names that start with `rev`, their tests too, and
+their test functions start with `TestReviewCmd`. The merges and summaries (`cmd_merge.go`) take the
+names that start with `mrg`, their tests too, and their test functions start with `TestMerge`.
+Host events (`cmd_hostev.go`) take the names that start with `hev`, their tests too, and their test
+functions start with `TestHostEv`; the file exports `HostOfflineEvent`.
 
 ## The run loop
 
@@ -240,28 +252,29 @@ queuing anything; a frame built from it can be older than a push that is already
 number, and the connection is pushed every change after it. It refuses a group that does not
 exist, a device that `Serves` refuses, and a connection that is gone.
 
-**Inbox items.** An item is stored in the transaction of its result, for the host of its AI as
-that result leaves the member rows; an item for a member that is no AI fails the transaction.
-`Inbox(conn)` makes a connection the taker of the items of its device: it is sent every item
-that is due now, also those it was sent before, and from then on each item when it is queued or
-when its `NotBefore` has passed, which the loop looks at on a tick. Each delivery reads the queue
-from the store, so an item that was acknowledged or retired is not sent again. A queue that
-cannot be read is reported and read again on the next tick. An item that cannot be made into a
-frame is reported and left out, once for each connection until its next `Inbox`, and the other
-items are sent. Until the inbox unit signs items, an item is
-kept and sent in the seam's form: the store's `env` holds the `Item` as JSON, and the frame is an
-`ItemsPush` with one `QueuedItem`. That unit replaces `runSeal` and `runItemFrame` in
-`run_push.go` and nothing else.
+**Inbox items.** An item is stored in the transaction of its result as a plain wire `proto.Item`
+JSON in `inbox.env`, for the host of its AI as that result leaves the member rows; an item for a
+member that is no AI fails the transaction. `Inbox(conn)` makes a connection the taker of the
+items of its device: it is sent every item that is due now, also those it was sent before, and
+from then on each item when it is queued or when its `NotBefore` has passed, which the loop looks
+at on a tick. Due items for one connection are sent in `proto.Inbox` frames packed up to 61,376
+bytes (`runRoom`), in queue order, each carrying live copies of the `msg` and `task` rows the item
+names when sent ([datachannel](../../planning/contracts/datachannel.md), section 6). `Ack(conn, req)` deletes `req.Item` in `req.Group` when `conn`'s device is the item's host. Each delivery reads the queue from the store, so an
+item that was acknowledged or retired is not sent again. A queue that cannot be read is reported
+and read again on the next tick. An item that cannot be made into a frame is reported and left out,
+once for each connection until its next `Inbox`, and the other items are sent.
 
-**The wake-up cap.** `State.Wakes[ai]` holds one time for each item queued for that AI: when the
-item is due, which is the home's time when its result was committed, or its `NotBefore` when that
-is later. An item counts once, when it is queued. Sending it again, on a hello after a reconnect
-or to a second connection of its host, counts nothing, and so does a host that was not connected
-when the item became due. Retiring or acknowledging an item does not take its time back. Times
-that are an hour old or older are dropped from an AI's list when its next item is counted, so a
-rule that reads `Wakes` counts only the times after `c.Now` minus one hour, and can count on a
-held item's time being in the future. The count is in memory and starts again with the loop, as
-the contract says; items sent again after a restart count nothing.
+**The wake-up cap.** `inboxPace` enforces `limits.wakes_per_hour` before items are written, and
+`State.Wakes[ai]` holds one time for each non-`merge` item queued for that AI: when the item is
+due, which is the home's time when its result was committed, or its `NotBefore` when that is
+later. Once an AI has `limits.wakes_per_hour` due times after `now - 3600000`, each further item
+gets `NotBefore` at least one hour after the oldest of the last `wakes_per_hour` times. A `merge`
+item is for the assignee's host rather than an AI session, so it neither waits on nor counts
+toward `wakes_per_hour`. Sending an item again, on a hello after a reconnect or to a second
+connection of its host, counts nothing, and so does a host that was not connected when the item
+became due. Retiring or acknowledging an item does not take its time back. The count is in memory
+and starts again with the loop, as the contract says; items sent again after a restart count
+nothing.
 
 **Online.** `State.Online[device]` is true from `Attach` until the last connection of that device
 is gone, in every group, also for a device that the group does not serve. `Gone()` is closed
@@ -274,8 +287,9 @@ out, because a client's rows must have no gap. Instead, a connection is given up
 returns an error from `Send`, or when 1,024 frames wait for it: nothing more is sent, every group
 forgets it, `Gone()` is closed, and the client is closed if it has a `Close` method, as a
 `peer.Connection` has. The client then connects and reads again. A client that is done
-(`Done()`) and one that the node detaches are forgotten in the same way and not closed. A
-client's `Send` must return once the client is done or closed.
+(`Done()`) and one that the node detaches are forgotten in the same way and not closed. When the
+last connection that took inbox items (`Inbox`) for a device ends, the loop runs `HostOfflineEvent`
+for that device. A client's `Send` must return once the client is done or closed.
 
 **For the node and the local link.** A loop is started with a `LoopConfig`: the store, the node's
 device id, its owner's user id, the tables, and `Logs`, which returns the node's verified log of a
@@ -288,8 +302,8 @@ logger, and no ticks but `Tick`. A connection goes through four entries, the sam
 2. For each frame the client sends, the entry of its type: for `hello`,
    `loop.Welcome(conn, build)`, where `build` gets the `groups` of the welcome and returns the
    whole frame from values the node has ready, and never a `Send` of the node's own, and after it `loop.Inbox(conn)` for a host;
-   `loop.Cmd(conn, re, env)` for `cmd`, with the `id` of the request as `re`; `sync`, `fetch` and
-   `ack` come with their units.
+   `loop.Cmd(conn, re, env)` for `cmd`, with the `id` of the request as `re`; `loop.Ack(conn,
+   req)` for `ack`; `sync` and `fetch` come with their units.
 3. The loop calls `client.Send(frame)` for every answer and push, one at a time, in order. The
    answer to a command is a frame like the others and comes after the frames queued before it.
    So a `Send` must not wait for something that the sender of a command holds while it waits for
@@ -297,7 +311,7 @@ logger, and no ticks but `Tick`. A connection goes through four entries, the sam
 4. `loop.Detach(conn)`, or the client's `Done()`. `conn.Gone()` tells the node that the loop
    gave a connection up; the node need not detach it then.
 
-**Who may call what.** `Cmd`, `Detach`, `Welcome`, `Inbox`, `Tick`, `Event` and `Groups` never
+**Who may call what.** `Cmd`, `Ack`, `Detach`, `Welcome`, `Inbox`, `Tick`, `Event` and `Groups` never
 wait for a group and may be called from anywhere. The `build` of a `Welcome` runs under the lock
 of the loop: it only puts the frame together from the list of groups and from values the node
 worked out before it called `Welcome`, such as `time` and `addrs`. It takes no lock, waits for
@@ -336,7 +350,7 @@ function that moves a task calls it and adds nothing to its rules.
   pending cards, oldest first: every row that sets or clears a card wait reads it.
 - **The effects**, in the order to apply them. `Retire` selects queued items of the task to
   withdraw; an empty field selects every value. `Items` are the items to queue. Each is a
-  `TaskItem`, which the function completes into an `Item`: the task, the message and the cause its
+  `TaskItem`, which the function completes into an `Item`: the task and the message its
   row names, the pull request, and the secretary as the AI of a `notice`. A `review` item with
   `IfNone` is queued only if none is queued for that AI and commit. `Cards` says what the task's
   pending cards become. `System` is the code of the system message to write, in the main line when
@@ -408,9 +422,11 @@ function that moves a task calls it and adds nothing to its rules.
 - **Post.** Only the secretary posts a brief, else `forbidden`; a group without one has nobody who
   can. What the payload says by itself is `bad_request`: a `thread` that is not `null`, no
   criterion, no task, a dependency that is not an earlier entry or that is named twice, an entry
-  whose assignee is its reviewer. What the group says is `conflict`: a requester who is no member,
-  an assignee or reviewer who is no working AI (an AI member other than the secretary), a message
-  that already has the id `n`, and a `replaces` that names no brief that is `pending` or `revise`.
+  whose assignee is its reviewer, and a member named twice in `mentions`
+  ([commands](../../planning/contracts/commands.md) 1.3, shared with `cmd_post.go`).
+  What the group says is `conflict`: a mentioned id or requester who is no member,
+  an assignee or reviewer who is no working AI (an AI member other than the secretary), and a
+  `replaces` that names no brief that is `pending` or `revise`.
   The row is a main-line card with `main` false, `ts` as signed, `state` `pending`, and a body
   encoded again from the checked fields. A post creates no task and queues no item (A5.2). The
   replaced brief keeps its state with `status` `superseded`.
@@ -435,11 +451,118 @@ function that moves a task calls it and adds nothing to its rules.
   nobody can know the id before the act arrives. An id that a task or a message already has is
   answered `conflict`.
 - **Items.** Each item of row 1 (`assign` for a task that starts) names the task and its task
-  message, with the act as `cause`. Then the secretary gets `confirmed`, naming the brief, with
-  the act as `cause`, after a `confirm` and after a `revise`; a group without a secretary gets
-  none. A queued task gets its `assign` when the merge of its last dependency releases it (unit
-  HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
-  `c.Disk.Msg` reads.
+  message. Then the secretary gets `confirmed`, naming the brief, after a `confirm` and after a
+  `revise`; a group without a secretary gets none. A queued task gets its `assign` when the merge
+  of its last dependency releases it (unit HM-12).
+
+## Merges and summaries
+
+`cmd_merge.go` holds `task` `merged` and `conflict` and `post` of kind `summary`
+([commands](../../planning/contracts/commands.md) 1.3 and 1.5;
+[messages](../../planning/contracts/messages.md) 2.5, 2.8 and 2.11;
+[task-machine](../../planning/contracts/task-machine.md) rows 8 and 9), under the keys
+`task/merged`, `task/conflict` and `post/summary`.
+
+When `task/merged` steps queued dependents through `OnReleased` (in sorted task id order), each
+task that becomes `active` gets `stats.started` set to `c.Now`
+([rows](../../planning/contracts/rows.md), section 4) so summary minutes count active work rather
+than dependency wait, and its `assign` item names its `task` message (`msg` equal to the task id).
+
+## Task commands
+
+`cmd_task.go` holds `task` `start`, `branch`, `assign`, `pause`, `resume`, `cancel`, `fail` and
+`preempted` ([commands](../../planning/contracts/commands.md) 1.5;
+[task-machine](../../planning/contracts/task-machine.md) rows 2, 3 and 10 to 16), under the keys
+`task/start`, `task/branch`, `task/assign`, `task/pause`, `task/resume`, `task/cancel`, `task/fail`
+and `task/preempted`. Checks, submissions and reviews live in `cmd_review.go` (unit HM-11), and
+merges in `cmd_merge.go` (unit HM-12). Where the contracts are silent, it does this:
+
+- **Start.** Only a working AI starts a task, else `forbidden`. An `origin` other than `direct` or
+  `takeover` is `bad_request`. An `id` already held by a task or a message is `conflict`. The row
+  gets `num` `State.Num + 1`, `slug` from `proto.MakeSlug`, `pass` `group.pass`, `depends` `[]`,
+  and `created` and `stats.started` the home's time; its `task` message in the main line has the
+  task's own `id`. The answer carries `num`.
+- **Branch.** After `Step` checks the task and sender (`not_found`, `forbidden`, `conflict`), a
+  `branch` other than `task/<num>-<slug>` is answered `bad_request`.
+- **Sender.** For an existing task, `s.Secretary` maps to `BySecretary`, any other `as` to `ByAI`,
+  `s.Hosts` for the task's assignee to `ByHost`, `s.Admin` to `ByAdmin`, and anything else to
+  `ByPerson`. Checking `s.Hosts` before `s.Admin` gives the assignee's host row 13b on `task resume`
+  and the host rules on `pause`, `assign` and `cancel`.
+- **Assign.** Sending neither `assignee` nor `reviewer` is `bad_request`. After `Step` checks the
+  sender, the state and that the two roles differ, each role sent must name a working AI of the
+  group, else `conflict`. When `Step` queues an `assign` item (an active task whose assignee
+  changed, or that was `failed` or waiting on `conflict`), its `msg` is the newest `checks` or
+  `review` message in the task's thread, paged through `c.Disk.Thread`, or absent when there is
+  none. On a `queued` or `paused` task `Step` queues no work item.
+- **Cards and queue.** Every step over an existing task passes the task's pending `approval` and
+  `decision` cards from `c.Disk.Pending()`, oldest first. `Retire` withdraws matching items of that
+  task from `c.Disk.Queued()` before `IfNone` checks what remains. `Cards` `reassigned` updates the
+  task's pending `approval` cards; `expired` updates its pending `approval` and `decision` cards.
+- **Cancel.** After `OnCancel`, each `queued` task whose `depends` names the cancelled task is
+  stepped with `OnOrphaned`, in sorted task id order, queuing `dependency_cancelled` notices when
+  the group has a secretary.
+- **System messages.** `task fail` refuses a `reason` other than `crash` or `timeout` with
+  `bad_request`. At `limits.failures` (row 14) it writes `system` `task_failed` under id `n` in the
+  task's thread (or answers `conflict` if `n` is taken), mentioning the brief's requester when still
+  a member and the assignee's owner without duplicates, and sets the `task_failed` notice's `msg` to
+  that message. `task preempted` reads the jump message `msg` (`not_found` if absent) and writes
+  `system` `preempted` under id `n` in the task's thread. Both thread messages advance
+  `task.thread.count` and `task.thread.last`. A group without a secretary queues no `notice`.
+
+## Posts, notes and forget
+
+`cmd_post.go` holds `post` of kinds `text`, `progress`, `question` and `report`
+([commands](../../planning/contracts/commands.md) 1.3;
+[messages](../../planning/contracts/messages.md) 1 and 2.7;
+[rows](../../planning/contracts/rows.md) sections 4 and 5), under `post/<kind>`. `cmd_note.go`
+holds `note` and `forget` ([commands](../../planning/contracts/commands.md) 1.6;
+[rows](../../planning/contracts/rows.md) sections 5 and 6). Where the contracts are silent, they do
+this:
+
+- **Who and placement.** `text` is by a person or an AI; `progress`, `question` and `report` are by
+  an AI, else `forbidden`. `progress` and `report` belong in a thread (`thread` not `null`), else
+  `bad_request`. None of the four is raised from a thread, and the row is written with `main`
+  `false`.
+- **Thread and mentions.** A non-null `thread` must name a task in `State.Tasks`, else `not_found`;
+  for `report`, `as` must be that task's `assignee`, else `forbidden`. `(*State).postMentions`,
+  shared with `cmd_brief.go`, checks the `mentions` rule of
+  [commands](../../planning/contracts/commands.md) 1.3. `re` is kept as signed without looking up
+  the answered message, which retention or `forget` may have removed.
+- **Rows and items.** Every post writes its `MsgRow` with `ts` as signed and `body` encoded without
+  HTML escaping; a post in a thread follows it with the updated `TaskRow` (`thread.count` + 1, and
+  `thread.last` with `text` cut to at most 200 UTF-8 characters). A post never queues an item for
+  its own author ([commands](../../planning/contracts/commands.md) 1.3): `text`, `progress` and
+  `question` queue `mention` for each other mentioned AI in `mentions` order, and a main-line `text`
+  from a person that mentions no AI queues `mention` for `Group.Secretary` when set.
+- **`note` and `forget`.** `note` is by a person or an AI; a non-null `task` that names no task in
+  `State.Tasks` is `not_found`, an `id` already held as a live note on disk is `conflict`, and the
+  `NoteRow` gets `ts` as signed (`c.Timestamp`). `forget` is by an admin only (`forbidden`); `r`
+  must be `note` or `msg` (`bad_request`); a missing or already forgotten row is `not_found`; a
+  `msg` whose `kind` is not `review` is `conflict`; otherwise a `GoneRow` (`gone: true`) replaces
+  it.
+
+## Cards
+
+`cmd_card.go` holds `post` of kinds `approval` and `decision`, and `act` `approve`, `deny` and
+`choose` on them ([commands](../../planning/contracts/commands.md) 1.3 and 1.4;
+[messages](../../planning/contracts/messages.md) 2.3, 2.4, 3.2 and 3.3;
+[task machine](../../planning/contracts/task-machine.md) rows 17 to 20), under `post/approval`,
+`post/decision`, `act/approve`, `act/deny` and `act/choose`. It reads a task's pending cards with
+HM-9's `tskPending`, and checks mentions with HM-6's `postMentions`. Where the contracts are silent:
+
+- **Post.** Both card kinds may be posted in the main line (`thread` `null`, with `body.task` `""`
+  for `approval` and omitted for `decision`) or in a task's thread (`thread` equal to `body.task`).
+  Duplicate mentions are `bad_request`; mentioning a non-member is `conflict`. For a card on a
+  task, a missing task is `not_found`, and `Step` (`OnApproval` or `OnDecision`, with
+  `BySecretary` for the secretary and `ByAI` for any other AI) runs before the duplicate-id check,
+  so `forbidden` and `paused` precede `conflict` on a taken `n`. A card in a thread advances
+  `task.Thread` (`count` + 1, `last.text` cut at 200 runes) and writes `[card, task]`.
+- **Act.** Empty `arg` or `text` strings are rejected as `bad_request` like unknown fields; a
+  missing message is `not_found`, and an action on the wrong message kind is `bad_request`. Cards
+  naming a task run `Step` (`OnApprove` or `OnChoose`) with `ByPerson`, writing `[card, task]`
+  only when `Step` changed the task row and `[card]` otherwise. Main-line cards update the card row
+  and queue `decided` for the asking AI directly. `decided` items are queued only for AIs still in
+  `State.AIs`.
 
 ## Device-log events
 
@@ -450,22 +573,65 @@ the node for one person ([envelope](../../planning/contracts/envelope.md), secti
 and sets `Result.GroupsChanged` when an `Online` device's access (`State.Serves`) changes between
 served and unserved.
 
+## Checks and reviews
+
+`cmd_review.go` holds `task` `checked`, `submitted` and `cloud`, and `post` of kind `review`
+([commands](../../planning/contracts/commands.md) 1.3, 1.5 and 1.8;
+[messages](../../planning/contracts/messages.md) 2.8, 2.9 and 2.11;
+[task-machine](../../planning/contracts/task-machine.md) rows 4 to 7 and 14), under the keys
+`task/checked`, `task/submitted`, `task/cloud` and `post/review`. Where the contracts are silent,
+it does this:
+
+- **Passed hosted checks.** `task/cloud` writes a `checks` message (`by` `"system"`, `stage`
+  `"cloud"`, `ts` `c.Now`) under id `n` in the task's thread on passed runs as well as failed ones,
+  so the `items` of a passing `task cloud` payload are recorded ([issues](../../issues.md)).
+- **Derived `task_failed` id.** When `task/cloud` or `post/review` triggers row 14, `n` already
+  names the `checks` or `review` row, so the `task_failed` row gets the first 16 bytes of the
+  SHA-256 of `SoloDawn task failed <n>` in base64url ([issues](../../issues.md)), and mentions the
+  brief's requester when still a member and the assignee's owner without duplicates.
+
+## Host events
+
+`cmd_hostev.go` holds `member` `status` and the `HostOfflineEvent` (`"host.offline"`) handler
+([commands](../../planning/contracts/commands.md) 1.2 and 1.9;
+[messages](../../planning/contracts/messages.md) 2.11;
+[rows](../../planning/contracts/rows.md) 2 and 4;
+[task-machine](../../planning/contracts/task-machine.md) 5), under `Commands` key `member/status`
+and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does this:
+
+- **Payload and target.** When `event` is present, `code` must be one of the step-1 host codes
+  (`turn_interrupted`, `login_invalid`, `session_replaced`), else `bad_request`; an omitted or `""`
+  `detail` is left out of the row body, and a non-empty `event.task` must exist in `State.Tasks`,
+  else `not_found`. An `id` not in `State.AIs` is `not_found`; any signer for which
+  `State.Hosts(c.Who, id)` is false (another device, or a command carrying `as`) is `forbidden`.
+- **Rows and notices.** The AI's `AIMemberRow` gets `State`, `Task`, `Path`, `Usage` and
+  `LastSeen = c.Now`; `Since` becomes `c.Now` when `State` changes and stays as it was when `State`
+  is unchanged. When `event` is present, the home writes a `system` `MsgRow` (`id` `n`, `by`
+  `"system"`, `ts` `c.Now`, `mentions` `[]`, and `ai` set to `id`) in the thread of `event.task`
+  when set, advancing `task.Thread.Count` and `task.Thread.Last` (`text` `""`, `ts` `c.Now`) on the
+  task row, or in the main line otherwise. For `login_invalid`, when `State.Group.Secretary` is not
+  empty, it queues `Item{AI: s.Group.Secretary, Why: "notice", Msg: n, Code: "login_invalid"}`.
+- **Closed host connection.** When `Loop.Detach` ends a connection that took inbox items
+  (`Conn.taker`, set by `Loop.Inbox`) and no other taker connection of `device` remains on the
+  loop, `Loop` fires `HostOfflineEvent` with `device`. For every AI in `State.AIs` in id order with
+  `Host == device` and `State != "offline"`, the handler sets `State = "offline"`, `Task = ""` and
+  `Since = now`, leaving `LastSeen`, `Path` and `Usage` unchanged.
+
 ## Known limitations
 
-- The table of commands holds only the groups, members and briefs, and no node starts a loop yet:
-  the other command files and the wiring of the node are separate units
+- The table of commands holds the groups, members, briefs, the task commands of HM-9, the four
+  kinds of `post` of HM-6, `note` and `forget`, the cards, the checks and reviews, the merges and
+  summaries, and the host events, and no node starts a loop yet: the remaining command files
+  (including thread round counting in HM-13) and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
 - A `peer.Connection` takes every frame at once and keeps it in its own buffer, so the limit of
   1,024 waiting frames never meets a slow browser ([issues](../../issues.md)).
-- Inbox items are stored and sent unsigned, in the seam's form, until the inbox unit is built.
 - A device of a member of another group on the same home is answered `unknown_device`, not
   `forbidden` ([issues](../../issues.md)).
 - A device held by the logs of two people is read as the device of the one with the lower user id
   ([issues](../../issues.md)).
-- `Item` is the home's own type. The signed `item` payload on the wire is not frozen yet
-  ([conventions](../../planning/contracts/conventions.md), section 5).
 
 ## Verification and sources
 
@@ -483,6 +649,10 @@ values a queue takes. `features/home_run.feature` holds the home half of accepta
 a restart, with commands of its own. The choices behind the loop are in
 [its decision record](../../docs/decisions/implemented/architecture/2026-11-21-home-run-loop.md).
 
+`inbox_test.go` pins every frozen `item-*.json` wire shape, `msg` and `task` row copies, multi-item
+`inbox` frame batching to the `ctl` byte limit, `Loop.Ack`, and the `wakes_per_hour` hold and
+release. `features/home_inbox.feature` holds the home half of A3.10 and the hourly wake-up cap.
+
 `machine_test.go` has a case for every row of the task machine, for every rule of its section 2
 and for the refusals, and covers every statement of `machine.go`. `features/home_machine.feature`
 holds acceptance test A5.18 at step `merge` and the two points of the third review, a card decided
@@ -499,5 +669,40 @@ holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the com
 `Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
 commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
 
+`cmd_task_test.go` sends `task` `start`, `branch`, `assign`, `pause`, `resume`, `cancel`, `fail`
+and `preempted` through `Commands.Apply` with fakes of `Receipts` and `Disk`, pinning every refusal,
+card transition, retirement filter, thread-feedback page boundary and system message, and
+`cmd_task_internal_test.go` pins `tskSender`. `features/home_task.feature` holds acceptance tests
+A5.5, A5.7 (home half), A5.15 (`task fail` twice) and A5.18 (home commands) through `Commands.Apply`.
+
+`cmd_post_test.go` and `cmd_note_test.go` cover every branch and boundary of the four `post` kinds,
+`note` and `forget` through `Commands.Apply`, including the 200-character UTF-8 thread preview, the
+shared `mentions` rule and `UnexpectedNulls` on the rows written. `features/home_post.feature` holds
+acceptance tests A2.1 (message and item push across connected browsers and a host) and A5.14
+(retention keeping notes and review messages, and `forget` replacing them with `gone` markers) on
+`StartLoop` over an in-memory store.
+
+`cmd_card_test.go` exercises `post/approval`, `post/decision`, `act/approve`, `act/deny` and
+`act/choose` through `Commands.Apply` with fakes of `Receipts` and `Disk`, covering main-line and
+task cards, wait recomputation and refusals, and `cmd_card_internal_test.go` covers `tskPending` on card rows,
+`cardChoiceOK`, `cardPoster` and `cardItems`. `features/home_card.feature` holds the home half of
+acceptance tests A4.1 and A4.2, decision priority and free-text override.
+
+`cmd_merge_test.go` sends `task/merged`, `task/conflict` and `post/summary` through
+`Commands.Apply` with fakes of `Receipts` and `Disk`, covering every refusal, boundary, card
+expiration and dependent task release. `features/home_merge.feature` holds the home half of
+acceptance tests A5.10 and A5.12 and dependent task release with `stats.started`.
+
 `ev_device_test.go` covers every branch and boundary of `Events["device"]`, including ignored event
 types, empty and non-owner slices, version boundaries and online/offline `GroupsChanged` transitions.
+
+`cmd_review_test.go` sends `task/checked`, `task/submitted`, `task/cloud` and `post/review` through
+`Commands.Apply` with fakes of `Receipts` and `Disk`, pinning every refusal, boundary, retirement,
+card-wait recomputation, veto and row-14 stop, and checking `proto.UnexpectedNulls` on the rows
+written. `features/home_review.feature` holds the home half of acceptance tests A5.3 and A5.4.
+
+`cmd_hostev_test.go` checks `member/status` against the wire golden files, state and `since`
+transitions, the three step-1 host event codes, `login_invalid` secretary notices, refusals, and
+`HostOfflineEvent` both directly and when taker connections end on `StartLoop`.
+`features/home_hostev.feature` holds the home half of acceptance test A3.6 together with the three
+host event codes, secretary notices and host disconnection.

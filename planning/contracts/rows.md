@@ -67,7 +67,7 @@ AI:
 | `allow` | user ids that may direct this AI without confirmation (step 2, R-53) |
 | `approvers` | user ids that may decide its approvals: the owner, plus delegates |
 | `state` | `working`, `waiting`, `dormant`, `takeover`, `paused`, `limited`, `offline` |
-| `path` | path between the AI's host and the home: `local` (same node), `direct`, `relay` (`flows/connect.md` step 8) |
+| `path` | path between the AI's host and the home: `local` (same node), `direct`, `relay`, or `""` before a pair is selected (`flows/connect.md` step 8) |
 | `usage` | what the CLI reports. Always an object; `{}` when nothing was reported |
 
 Optional, AI only: `task` (absent when its state names no task); every key
@@ -75,7 +75,11 @@ of `usage`: `window_pct`, `window_resets`, `day_cap_pct`, `spend_today`,
 `spend_cap`, `turns_today`. A person's row has no optional field.
 
 `state` and `task` describe the AI in this group as a whole, derived by the
-host as `sessions.md` section 3 says.
+host as `sessions.md` section 3 says. `since` is the home time at which the
+AI entered its current `state`: set when the AI joins, when `member status`
+changes `state`, and when a closed host connection sets `state = offline`
+and clears `task`. `last_seen` on an AI member row is set when the AI joins
+and on each accepted `member status`.
 
 `[unverified]` Which usage figures each CLI exposes in structured mode.
 Spikes S-2 and S-3 record them; the card shows what exists.
@@ -129,6 +133,7 @@ does not.
 | `review.failed` | failed reviews since the task was created or a person last resumed or reassigned it from `failed`; the stop of R-63 counts it (`contracts/task-machine.md` row 7) |
 | `thread.rounds` | AI-to-AI exchanges since the last human message in the thread (R-60) |
 | `thread.last.text` | a preview: at most the first 200 characters of that message's text. A long message is cut here, never refused because of it |
+| `stats.started` | the time the task became active: when it was created, or, for a task created `queued`, when the merge of its last dependency released it (`contracts/task-machine.md` row 8) |
 | `stats.ended` | the time the task finished, or `null` |
 
 Optional:
