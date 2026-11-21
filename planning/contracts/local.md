@@ -98,7 +98,8 @@ The command reads lines until one has `"done":true`. That line must carry
 command, like an error.
 
 A session token is 16 random bytes created when the node starts a CLI
-process and forgotten when that process exits.
+process and forgotten when that process exits. A connection whose session
+token is unknown or forgotten is closed at once.
 
 ## 4 to 6. Moved
 

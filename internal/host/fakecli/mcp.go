@@ -60,12 +60,12 @@ func (p *process) stopMCP() {
 	p.mcp.cmd.Wait()
 }
 
-// Claude Code names a configuration file; Codex takes -c settings, whose TOML
-// values are also JSON here.
+// Claude Code takes a configuration file or JSON string; Codex takes -c
+// settings, whose TOML values are also JSON here.
 func (p *process) server() (srv server, err error) {
-	if path := value(p.args, "--mcp-config"); path != "" {
+	if arg := value(p.args, "--mcp-config"); arg != "" {
 		var config struct{ MCPServers map[string]server }
-		data, err := os.ReadFile(path)
+		data, err := readMCPConfig(arg)
 		if err == nil {
 			err = json.Unmarshal(data, &config)
 		}
@@ -80,4 +80,11 @@ func (p *process) server() (srv server, err error) {
 		}
 	}
 	return srv, err
+}
+
+func readMCPConfig(arg string) ([]byte, error) {
+	if strings.HasPrefix(arg, "{") {
+		return []byte(arg), nil
+	}
+	return os.ReadFile(arg)
 }
