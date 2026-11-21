@@ -168,6 +168,8 @@ names that start with `run`, and its tests those that start with `run` and `Run`
 `Loop` with its entries, `LoopConfig`, `StartLoop`, `Tables`, `NodeTables`, `Conn`, `QueuedItem` and
 `ItemsPush`. The briefs take the
 names that start with `brief`, their tests too, and their test functions start with `TestBrief`.
+Group pause and resume take the names that start with `pau`, their tests too, and their test
+functions start with `TestPause`.
 
 ## The run loop
 
@@ -392,10 +394,33 @@ function that moves a task calls it and adds nothing to its rules.
   HM-12): its cause is the act in `state.act` of the brief that `brief` names, which
   `c.Disk.Msg` reads.
 
+## Group pause and resume
+
+`cmd_pause.go` holds `group` `pause` and `resume`
+([commands](../../planning/contracts/commands.md) 1.1;
+[messages](../../planning/contracts/messages.md) 2.11;
+[the task machine](../../planning/contracts/task-machine.md) row 24), under the keys `group/pause`
+and `group/resume`:
+
+- **Who and payload.** Both decode `proto.GroupCommand` (`bad_request` on a malformed field) and
+  require `s.Admin(c.Who)` (`forbidden` for a non-admin person or any command carrying `as`).
+- **Idempotence.** Pausing a group whose `group.paused` is already set, or resuming one whose
+  `group.paused` is `null`, returns `ok` without writing rows or queuing items.
+- **Rows.** Otherwise, if `c.Disk.Msg` already holds `n`, the command is answered `conflict`.
+  `group/pause` sets `group.paused` to `{"by": c.Who.Human, "at": c.Now}` and writes main-line
+  `system` message `group_paused` with `id` `n`, `ts` `c.Now` and `by` `c.Who.Human`.
+  `group/resume` clears `group.paused` to `null` and writes main-line `system` message
+  `group_resumed` with the same fields.
+- **Waking tasks.** On `group/resume` of a paused group, `Step` runs with `OnGroupResume` (`ByHome`)
+  over `State.Tasks` in sorted task-id order: `resume` goes to each `active` task with `wait` `null`
+  before step `merge`, and `review` goes to each `active` task at step `review` that has a reviewer
+  unless `c.Disk.Queued` already holds an unacknowledged `review` item for that reviewer, task and
+  commit.
+
 ## Known limitations
 
-- The table of commands holds only the briefs, and no node starts a loop yet: the other command
-  files and the wiring of the node are separate units
+- The table of commands holds only the briefs and group pause and resume, and no node starts a loop
+  yet: the other command files and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
@@ -435,3 +460,7 @@ while a task is paused and a reviewer named while it is paused.
 holds acceptance tests A5.2, A5.6 and A5.15 for the home: its steps send the commands through
 `Commands.Apply` with a `Disk` in memory, and move the created tasks through `Step` where the
 commands of `task assign` and `task merged` are other units' (HM-9, HM-12).
+
+`cmd_pause_test.go` sends `group/pause` and `group/resume` through `Commands.Apply` with fakes of
+`Receipts` and `Disk`, pinning every refusal, idempotence branch, row 24 task state and queued-item
+field check. `features/home_pause.feature` holds the home half of acceptance test A4.7.
