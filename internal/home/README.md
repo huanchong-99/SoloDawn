@@ -710,13 +710,15 @@ does this:
 - **Call.** A self-call (`body.to` equal to `as`) is `bad_request`, a non-null `thread` absent from
   `State.Tasks` is `not_found`, a `body.to` absent from `State.AIs` is `conflict`, and `body.depth`
   above `Group.Limits.AskDepth` is `limit` (A6.4). One `mention` item is queued for `body.to`, with
-  `task` set when in a thread, even when `mentions` also names `body.to` or other AIs; round
-  counting and held mentions wrap `post/*` in unit HM-13.
+  `task` set when in a thread, even when `mentions` also names `body.to` or other AIs. In a thread
+  the call counts a round through that item, and a reply counts one when it mentions another AI
+  (`rndWrap`, see "Rounds"; [ask](../../planning/flows/ask.md) A.3 and D).
 - **Reply.** A `re` `null` or a `thread` that differs from the call's `thread` is `bad_request`; a
   missing `re` message on `Disk` or a deleted task in `State.Tasks` is `not_found`. Elapsed `ms` on
   the answered call is `max(0, c.Timestamp - call.Timestamp)` so inter-host clock skew never
   produces a negative duration, followed by the reply `MsgRow` and, in a thread, the updated
   `TaskRow`. When `call.By` is still in `State.AIs`, one `reply` item is queued for it (A6.3).
+
 ## Retention
 
 `retention.go` exports `Retain(tx, now)`, which reads `retention_days` from SQLite `setting`

@@ -77,7 +77,7 @@ func rndLimitID(n byte) string {
 func rndState(t *testing.T) *home.State {
 	t.Helper()
 	s := briefState(t)
-	s.Group.Limits = proto.Limits{Rounds: 10, Failures: 3, ReviewRounds: 5, IdleNoticeMinutes: 2}
+	s.Group.Limits = proto.Limits{Rounds: 10, Failures: 3, ReviewRounds: 5, AskDepth: 4, IdleNoticeMinutes: 2}
 	return s
 }
 
@@ -89,39 +89,6 @@ func rndTaskRow(taskID string, num int) proto.TaskRow {
 		Assignee: briefA, Reviewer: briefB, Pass: 90, Depends: []string{},
 		Stats: proto.TaskStats{Started: clock - 120_000}, Created: clock - 200_000,
 	}
-}
-
-func rndTableWithCall() home.Table {
-	tbl := maps.Clone(home.Commands)
-	tbl.Add("post/call", func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-		var p proto.Post[proto.CallBody]
-		if refusal := c.Decode(&p); refusal != nil {
-			return home.Result{}, refusal
-		}
-		tid := string(*p.Thread)
-		msg := proto.MsgRow{
-			RowHeader: proto.RowHeader{Type: "msg", ID: string(c.Nonce)}, Group: s.ID, Thread: &tid,
-			By: c.Who.Member(), Kind: p.Kind, Timestamp: c.Timestamp, Text: p.Text,
-			Mentions: []string{}, Body: json.RawMessage(`{}`), Env: &c.Env,
-		}
-		task := s.Tasks[tid]
-		task.Thread.Count++
-		task.Thread.Last = &proto.ThreadMessage{By: msg.By, Kind: msg.Kind, Text: msg.Text, Timestamp: msg.Timestamp}
-		return home.Result{
-			Rows:  []home.Row{home.RowOf(msg), home.RowOf(task)},
-			Items: []home.Item{{AI: p.Body.To, Why: "mention", Task: tid, Msg: msg.ID}},
-		}, nil
-	})
-	return tbl
-}
-
-func rndApplyTable(t *testing.T, tbl home.Table, s *home.State, d home.Disk, env proto.Envelope) home.Result {
-	t.Helper()
-	res, err := tbl.Apply(s, d, receipts{}, env, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return res
 }
 
 // Jump retires the newest unacknowledged mention item produced by a message of
@@ -332,7 +299,7 @@ func TestRoundsQuietTimerBoundariesAndPeriods(t *testing.T) {
 func TestRoundsTenExchangesPauseAndResume(t *testing.T) {
 	for _, how := range []string{"person_text", "admin_resume"} {
 		t.Run(how, func(t *testing.T) {
-			s, d, tbl := rndState(t), &rndDisk{msgs: map[string]proto.MsgRow{}}, rndTableWithCall()
+			s, d := rndState(t), &rndDisk{msgs: map[string]proto.MsgRow{}}
 			taskID := id(70)
 			s.Tasks[taskID] = rndTaskRow(taskID, 1)
 
@@ -342,19 +309,19 @@ func TestRoundsTenExchangesPauseAndResume(t *testing.T) {
 				if round%2 == 0 {
 					sender, target = briefB, briefA
 				}
-				res := rndApplyTable(t, tbl, s, d, rndPostEnv(laptop, byte(30+round), sender, "question", taskID, "q", []string{target}, ""))
+				res := briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, byte(30+round), sender, "question", taskID, "q", []string{target}, ""))
 				equal(t, res.Items, []home.Item{{AI: target, Why: "mention", Task: taskID, Msg: id(byte(30 + round))}})
 				s.Commit(res)
 				equal(t, s.Tasks[taskID].Thread.Rounds, round)
 			}
 
-			r9 := rndApplyTable(t, tbl, s, d, rndPostEnv(laptop, 39, aiID, "text", taskID, "check", []string{briefA}, ""))
+			r9 := briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 39, aiID, "text", taskID, "check", []string{briefA}, ""))
 			s.Commit(r9)
 			equal(t, []any{s.Tasks[taskID].State, s.Tasks[taskID].Thread.Rounds}, []any{"active", 9})
 
 			// Round 10: a call with empty mentions[] counts via its mention item (R-114).
 			callBody := fmt.Sprintf(`{"to":%q,"depth":1,"wait":true}`, briefB)
-			r10 := rndApplyTable(t, tbl, s, d, rndPostEnv(laptop, 40, briefA, "call", taskID, "ask", []string{}, callBody))
+			r10 := briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 40, briefA, "call", taskID, "ask", []string{}, callBody))
 			sysID := rndLimitID(40)
 			equal(t, r10.Items, []home.Item{
 				{AI: briefB, Why: "mention", Task: taskID, Msg: id(40)},
@@ -374,21 +341,21 @@ func TestRoundsTenExchangesPauseAndResume(t *testing.T) {
 				[]any{groupID, int64(clock), true, false, "system", "system", fmt.Sprintf(`{"code":"rounds_limit","task":%q,"n":10}`, taskID)})
 
 			// Round 11 while already paused at rounds increments rounds to 11 without writing a second rounds_limit.
-			r11 := rndApplyTable(t, tbl, s, d, rndPostEnv(laptop, 41, briefB, "question", taskID, "more", []string{briefA}, ""))
+			r11 := briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 41, briefB, "question", taskID, "more", []string{briefA}, ""))
 			equal(t, len(r11.Rows), 2)
 			equal(t, r11.Items, []home.Item{{AI: briefA, Why: "mention", Task: taskID, Msg: id(41)}})
 			s.Commit(r11)
 			equal(t, s.Tasks[taskID].Thread.Rounds, 11)
 
 			// Secretary cannot end the round limit via task/resume.
-			briefRefused(t, rndApplyTable(t, tbl, s, d, rndResumeEnv(laptop, 42, aiID, taskID)), "forbidden")
+			briefRefused(t, briefApply(t, s, d, receipts{}, laptop, rndResumeEnv(laptop, 42, aiID, taskID)), "forbidden")
 
 			if how == "person_text" {
-				resumed := rndApplyTable(t, tbl, s, d, rndPostEnv(guest, 43, "", "text", taskID, "go ahead", []string{briefB}, ""))
+				resumed := briefApply(t, s, d, receipts{}, laptop, rndPostEnv(guest, 43, "", "text", taskID, "go ahead", []string{briefB}, ""))
 				equal(t, resumed.Items, []home.Item{{AI: briefB, Why: "mention", Task: taskID, Msg: id(43)}})
 				s.Commit(resumed)
 			} else {
-				resumed := rndApplyTable(t, tbl, s, d, rndResumeEnv(browser, 44, "", taskID))
+				resumed := briefApply(t, s, d, receipts{}, laptop, rndResumeEnv(browser, 44, "", taskID))
 				equal(t, resumed.Items, []home.Item{{AI: briefA, Why: "resume", Task: taskID}})
 				s.Commit(resumed)
 			}
