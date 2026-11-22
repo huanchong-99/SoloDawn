@@ -59,6 +59,9 @@ func grpCreateValid(p proto.GroupCreate) *Refusal {
 	if p.Group != p.Nonce {
 		return &Refusal{"bad_request", "group create names a group other than its nonce"}
 	}
+	if p.Kind == "team" {
+		return teamCreateValid(p)
+	}
 	if p.Kind != grpKind || !slices.Contains(grpForges, p.Forge) {
 		return &Refusal{"bad_request", "group create has a kind or forge outside step 1"}
 	}
@@ -119,6 +122,11 @@ func grpSetValid(p proto.GroupSet) *Refusal {
 }
 
 func (s *State) grpApplySet(p proto.GroupSet) (Result, *Refusal) {
+	if s.Group.Kind == "team" {
+		if refusal := teamSetValid(p); refusal != nil {
+			return Result{}, refusal
+		}
+	}
 	group := grpUpdated(s.Group, p)
 	var extra []Row
 	if p.Secretary != "" {
