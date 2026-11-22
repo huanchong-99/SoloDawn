@@ -33,6 +33,7 @@ func (d *rndDisk) TypedNotes(string) []proto.NoteRow         { return nil }
 func (d *rndDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d *rndDisk) Pending() []proto.MsgRow                   { return d.pending }
 func (d *rndDisk) Queued() []store.Item                      { return d.queued }
+func (d *rndDisk) OtherMember(string) bool                   { return false }
 
 func rndPtr(v string) *string { return &v }
 
@@ -353,7 +354,8 @@ func TestRoundsTenExchangesPauseAndResume(t *testing.T) {
 
 			if how == "person_text" {
 				resumed := briefApply(t, s, d, receipts{}, laptop, rndPostEnv(guest, 43, "", "text", taskID, "go ahead", []string{briefB}, ""))
-				equal(t, resumed.Items, []home.Item{{AI: briefB, Why: "mention", Task: taskID, Msg: id(43)}})
+				equal(t, resumed.Items, []home.Item(nil))
+				equal(t, cfmCard(t, resumed).State.Status, "pending")
 				s.Commit(resumed)
 			} else {
 				resumed := briefApply(t, s, d, receipts{}, laptop, rndResumeEnv(browser, 44, "", taskID))

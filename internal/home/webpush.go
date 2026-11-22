@@ -159,6 +159,12 @@ func wpushApplyWrite(home string, w Write) {
 		h.subs[w.sub.device] = w.sub
 	case wpushDrop:
 		delete(h.subs, w.device)
+	case peopleForget:
+		for device, sub := range h.subs {
+			if sub.user == w.user {
+				delete(h.subs, device)
+			}
+		}
 	}
 }
 

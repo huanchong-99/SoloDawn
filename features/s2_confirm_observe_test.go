@@ -59,13 +59,15 @@ func s2ConfirmBrowserStatus(raw json.RawMessage, card, status string) error {
 }
 
 func (w *s2ConfirmWorld) approvalMentions(name string) error {
-	var raw []byte
-	err := w.db.QueryRowContext(w.cast.Ctx, "SELECT data FROM row WHERE g = ? AND r = 'msg' AND id = ?", w.gid, w.ids[name]).Scan(&raw)
+	rows, err := readS2SQLiteRows(w.cast.Ctx, s2ExportDB(w.cast.P1), "SELECT data FROM row WHERE g = ? AND r = 'msg' AND id = ?", w.gid, w.ids[name])
 	if err != nil {
 		return err
 	}
+	if len(rows) == 0 {
+		return sql.ErrNoRows
+	}
 	var row proto.MsgRow
-	if err := proto.Decode(raw, &row); err != nil {
+	if err := proto.Decode([]byte(rows[0][0].(string)), &row); err != nil {
 		return err
 	}
 	want := []string{w.ids["P-member"], w.ids["Q-member"]}
@@ -126,31 +128,21 @@ func (w *s2ConfirmWorld) rowQuery(doc *godog.DocString) (map[string]any, error) 
 }
 
 func (w *s2ConfirmWorld) matchRows(kind string, fields map[string]any) ([]string, error) {
-	rows, err := w.db.QueryContext(w.cast.Ctx, "SELECT id, data FROM row WHERE g = ? AND r = ? AND gone = 0", w.gid, kind)
+	rows, err := readS2SQLiteRows(w.cast.Ctx, s2ExportDB(w.cast.P1), "SELECT id, data FROM row WHERE g = ? AND r = ? AND gone = 0", w.gid, kind)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	return s2ConfirmMatchingIDs(rows, fields)
-}
-
-func s2ConfirmMatchingIDs(rows *sql.Rows, fields map[string]any) ([]string, error) {
 	var found []string
-	for rows.Next() {
-		var id string
-		var data []byte
-		if err := rows.Scan(&id, &data); err != nil {
-			return nil, err
-		}
+	for _, values := range rows {
 		var row any
-		if err := json.Unmarshal(data, &row); err != nil {
+		if err := json.Unmarshal([]byte(values[1].(string)), &row); err != nil {
 			return nil, err
 		}
 		if s2ConfirmMatches(row, fields) {
-			found = append(found, id)
+			found = append(found, values[0].(string))
 		}
 	}
-	return found, rows.Err()
+	return found, nil
 }
 
 func s2ConfirmMatches(got, want any) bool {
@@ -206,7 +198,7 @@ func (w *s2ConfirmWorld) hasTurn(logs []s2CLILogEntry, ai string, re *regexp.Reg
 }
 
 func (w *s2ConfirmWorld) countItems(ai string, want int, why string) error {
-	queued, err := s2ConfirmItemIDs(w.db.QueryContext(w.cast.Ctx, "SELECT id FROM inbox WHERE g = ? AND ai = ? AND why = ?", w.gid, w.ais[ai].ID, why))
+	queued, err := readS2SQLiteRows(w.cast.Ctx, s2ExportDB(w.cast.P1), "SELECT id FROM inbox WHERE g = ? AND ai = ? AND why = ?", w.gid, w.ais[ai].ID, why)
 	if err != nil {
 		return err
 	}
@@ -215,36 +207,15 @@ func (w *s2ConfirmWorld) countItems(ai string, want int, why string) error {
 		return err
 	}
 	for _, id := range delivered {
-		if !slices.Contains(queued, id) {
+		if !slices.ContainsFunc(queued, func(row []any) bool { return row[0] == id[0] }) {
 			queued = append(queued, id)
 		}
 	}
 	return s2ConfirmCount(ai+" "+why, len(queued), want)
 }
 
-func (w *s2ConfirmWorld) delivered(ai, why string) ([]int64, error) {
-	db, err := s2ConfirmDB(w.aiNode(ai))
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
-	return s2ConfirmItemIDs(db.QueryContext(w.cast.Ctx, "SELECT item FROM audit WHERE g = ? AND agent = ? AND what = 'delivered' AND detail = ?", w.gid, w.ais[ai].CLI, why))
-}
-
-func s2ConfirmItemIDs(rows *sql.Rows, err error) ([]int64, error) {
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
+func (w *s2ConfirmWorld) delivered(ai, why string) ([][]any, error) {
+	return readS2SQLiteRows(w.cast.Ctx, s2ExportDB(w.aiNode(ai)), "SELECT item FROM audit WHERE g = ? AND agent = ? AND what = 'delivered' AND detail = ?", w.gid, w.ais[ai].CLI, why)
 }
 
 func s2ConfirmCount(subject string, got, want int) error {

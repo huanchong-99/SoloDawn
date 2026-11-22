@@ -12,6 +12,7 @@ kind: reference
 - `node.go` and `proc_*.go`: `Foreground()` runtime assembly (`openNode`, `runNode`), `logs/node.log` rotation at 10 MiB (keeping `.1`), `device.key` and `node.db` initialization, `home.StartLoop` (`OwnerFn: logs.Owner`), `host.Host` + `ServeMCP` on the local socket, `AttachLocal`, `Logs` + `Sessions` + `Surface` + `Pairer`, start-at-login registration on adoption (`InstallService`), `peer.Peer` + `Host.Connect`, embedded local web UI (`localhost:47800` with `:0` fallback) + `/rv` local signalling path, and persistent remote rendezvous connections ([local](../../planning/contracts/local.md), sections 1-3 and 10).
 - `dir.go` and `socket*.go`: per-user data directory, exclusive lock on `lock`, and owner-only local Unix socket (`sock`) carrying local CLI commands and MCP sessions ([local](../../planning/contracts/local.md), sections 2 and 3).
 - `cmd.go`: the `Subcommands` table, `MCP` (`solodawn mcp --token <t>`), and local command exchange (`solodawn pair` auto-starts a detached background node when `sock` is absent).
+- `export.go`: `solodawn group export <group id> <file> [--to <device id>]` and `solodawn group import <file>` use the running node's local socket. Export without `--to` keeps the group on the old node; export with it makes the old node answer `moved`. Import requires a node of the same owner and no existing rows for that group. Files resolve relative to the CLI's working directory.
 - `service_*.go`: start-at-login registration on macOS, Linux and Windows ([local](../../planning/contracts/local.md), section 1).
 - `update.go`: `Updater` for SHA-256-verified self-update outside running turns and takeovers ([local](../../planning/contracts/local.md), section 9; postponed off the main line).
 - `rendezvous.go`: standalone signalling, static web assets and ICE service.
@@ -46,6 +47,7 @@ kind: reference
 ## Local link
 
 `AttachLocal(h, loop)` attaches `h.Key.ID()` to `loop` as a `home.Client`, registers the `*LocalLink` on `h` via `h.Attach`, and calls `loop.Inbox` for the node's device.
+The node runtime also subscribes its `LocalLink` to `groups` pushes.
 
 - **Framing.** Every frame in either direction is encoded as JSON without HTML escaping. `host.Command` checks the `ctl` message limit before sending, and the home loop splits `rows` pushes within the limit ([conventions.md](../../planning/contracts/conventions.md) section 4).
 - **Requests and pushes (`Host` to `Home`).** `Request` assigns an increasing request `id`, sends the built frame, and waits on a per-request single-reader channel until the matching `re` arrives, `Done()` closes, or `ctx` is canceled. `cmd`, `sync` and `fetch` requests dispatch to `loop.Cmd`, `loop.Sync` and `loop.Fetch`, and `ack` pushes dispatch to `loop.Ack`; any other frame carrying an integer `id` is answered `bad_request` ([datachannel.md](../../planning/contracts/datachannel.md) section 2), and any other frame without an `id` is dropped.

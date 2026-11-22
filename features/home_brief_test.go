@@ -49,6 +49,7 @@ func (d homeBriefDisk) TypedNotes(string) []proto.NoteRow         { return nil }
 func (d homeBriefDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d homeBriefDisk) Pending() []proto.MsgRow                   { return nil }
 func (d homeBriefDisk) Queued() []store.Item                      { return nil }
+func (d homeBriefDisk) OtherMember(string) bool                   { return false }
 
 // homeBriefReceipts is a home.Receipts in memory.
 type homeBriefReceipts map[string]store.Outcome

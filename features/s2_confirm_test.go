@@ -3,13 +3,9 @@
 package features
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
-	"net/url"
-	"path/filepath"
 	"regexp"
-	"strings"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -21,7 +17,6 @@ func init() { stepSets["s2_confirm"] = s2ConfirmSteps }
 type s2ConfirmWorld struct {
 	cast      *s2Cast
 	gid       proto.ID
-	db        *sql.DB
 	ids       map[string]string
 	ais       map[string]proto.AIMemberRow
 	browsers  map[string]*peerBrowserConn
@@ -60,11 +55,6 @@ func (w *s2ConfirmWorld) setup(f fixtures, cleanup func(func()), withQ bool) err
 	w.actors = map[string]*s2Person{"P": c.P, "Q": c.Q, "Q2": c.Q}
 	w.ids = map[string]string{"P": c.P.ID(), "Q": c.Q.ID()}
 	w.ais = map[string]proto.AIMemberRow{}
-	w.db, err = s2ConfirmDB(c.P1)
-	if err != nil {
-		return err
-	}
-	cleanup(func() { w.db.Close() })
 	if err := w.awaitRow("member", "P-member", &godog.DocString{Content: `{"kind":"human","user":"${P}"}`}); err != nil {
 		return err
 	}
@@ -234,13 +224,4 @@ func (w *s2ConfirmWorld) answer(want string) error {
 	}
 	var ok proto.CmdResult
 	return proto.Decode([]byte(w.lastActor), &ok)
-}
-
-func s2ConfirmDB(n *s2Node) (*sql.DB, error) {
-	path := filepath.ToSlash(filepath.Join(n.Data, "node.db"))
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-	dsn := url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro"}
-	return sql.Open("sqlite", dsn.String())
 }

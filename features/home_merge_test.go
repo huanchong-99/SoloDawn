@@ -59,7 +59,8 @@ func (w *homeMergeWorld) Pending() []proto.MsgRow {
 	return out
 }
 
-func (*homeMergeWorld) Queued() []store.Item { return nil }
+func (*homeMergeWorld) Queued() []store.Item    { return nil }
+func (*homeMergeWorld) OtherMember(string) bool { return false }
 
 func (w *homeMergeWorld) Receipt(signer, nonce string) (store.Outcome, error) {
 	out, ok := w.receipts[signer+" "+nonce]
