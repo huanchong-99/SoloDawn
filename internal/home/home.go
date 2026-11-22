@@ -6,9 +6,7 @@ package home
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"reflect"
 	"time"
@@ -34,9 +32,10 @@ type Client interface {
 // disk only is read through a Disk. The function of a command reads a State
 // and changes nothing in it; Commit takes the rows of a result.
 type State struct {
-	ID    string // the group, also before it exists
-	Home  string // this node's device id
-	Owner string // the user id of this node's owner
+	ID     string  // the group, also before it exists
+	Home   string  // this node's device id
+	Owner  string  // the user id of this node's owner
+	Invite Inviter // optional invite hook for standalone Apply calls
 	// Logs holds, by user id, the device log of this node's owner and of
 	// every person in the group. The logs are this state's own values, which
 	// nothing else reads or writes: Commit applies the entry of each device
@@ -61,6 +60,12 @@ type State struct {
 	// Whoever runs the home keeps it, on the goroutine of the group; a Hook
 	// reads it.
 	Online map[string]bool
+
+	// quiet holds, by task id, the last activity of each task whose quiet
+	// period has already notified the secretary (task-machine.md row 23). It
+	// is kept in memory, on the goroutine of the group, and starts again with
+	// the home.
+	quiet map[string]int64
 }
 
 // NewState returns the state of a group that does not exist yet, on the home
@@ -68,7 +73,7 @@ type State struct {
 func NewState(group, home, owner string) *State {
 	return &State{ID: group, Home: home, Owner: owner, Logs: map[string]*identity.Log{},
 		People: map[string]proto.HumanMemberRow{}, AIs: map[string]proto.AIMemberRow{}, Tasks: map[string]proto.TaskRow{},
-		Wakes: map[string][]int64{}, Online: map[string]bool{}}
+		Wakes: map[string][]int64{}, Online: map[string]bool{}, quiet: map[string]int64{}}
 }
 
 // Disk is what the rules read of a group beyond its state rows: messages,
@@ -206,6 +211,11 @@ type Result struct {
 	Answer store.Outcome // a function sets the result fields of its command and nothing else
 	Msg    string        // of a refusal: the sentence for logs
 
+	Link       string // invite answer link, omitted from receipt
+	Expires    int64  // invite answer expiry in Unix ms, omitted from receipt
+	InviteBy   string // member id of the inviting admin when an invite is accepted
+	InviteUsed bool   // true when an accepted join consumes its invitation
+
 	// GroupsChanged says that the list of groups a peer may read has changed:
 	// once the result is committed, every connected peer is pushed its
 	// groups again (planning/contracts/datachannel.md section 3).
@@ -219,8 +229,9 @@ func (r Result) Frame(re int64) any {
 		return proto.ErrorResponse{Re: re, Err: proto.WireError{Code: r.Answer.Code, Message: r.Msg}}
 	}
 	return proto.CmdResult{
-		Success: proto.Success{Re: re, OK: true}, Num: r.Answer.Num, Passed: r.Answer.Passed,
-		Round: r.Answer.Round, ID: r.Answer.ID, Replaced: r.Answer.Replaced,
+		Success: proto.Success{Re: re, OK: true}, Num: r.Answer.Num,
+		Passed: r.Answer.Passed, Round: r.Answer.Round, Link: r.Link, Expires: r.Expires,
+		ID: r.Answer.ID, Replaced: r.Answer.Replaced,
 	}
 }
 
@@ -247,8 +258,9 @@ type Command struct {
 	proto.PayloadHeader                // t, n, ts and g of the payload
 	Env                 proto.Envelope // as it was signed: the env of a row it writes, the act a card keeps
 	Who                 Who
-	Now                 int64 // the home's clock, in Unix milliseconds
-	Disk                Disk  // the reads of this command's transaction
+	Now                 int64    // the home's clock, in Unix milliseconds
+	Disk                Disk     // the reads of this command's transaction
+	Joining             *Joining // non-nil on a joining connection
 }
 
 // Decode reads the payload into v, the wire type of the command.
@@ -299,8 +311,9 @@ var (
 	After    = Rules[Hook]{}
 )
 
-// Add puts a function under its key. A key is given once.
-func (t Table) Add(key string, f Func) { addOnce(t, key, f) }
+// Add puts a function under its key. A key is given once. A post command
+// gets the thread round rules around it (rndWrap).
+func (t Table) Add(key string, f Func) { addOnce(t, key, rndWrap(key, f)) }
 
 // Add puts a function under its name. A name is given once.
 func (r Rules[F]) Add(name string, f F) { addOnce(r, name, f) }
@@ -325,19 +338,7 @@ func addOnce[F any](table map[string]F, name string, f F) {
 // table, the group and the signer (Table.find) and the function itself. What
 // the last two answer, a refusal included, is the receipt.
 func (t Table) Apply(s *State, disk Disk, receipts Receipts, env proto.Envelope, now time.Time) (Result, error) {
-	hdr, refusal := s.open(env, now)
-	if refusal != nil {
-		return refused(refusal), nil
-	}
-	held, err := receipts.Receipt(env.Key, string(hdr.Nonce))
-	if err == nil {
-		return repeated(held), nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return Result{}, err
-	}
-	res := t.run(s, Command{PayloadHeader: hdr, Env: env, Now: now.UnixMilli(), Disk: disk})
-	return res, receipts.PutReceipt(env.Key, string(hdr.Nonce), hdr.Timestamp, res.Answer)
+	return t.ApplyJoining(s, disk, receipts, env, nil, now)
 }
 
 // run answers a command that has no receipt.

@@ -241,13 +241,15 @@ export interface KeyStore {
  *  StorageBlocked when IndexedDB fails. */
 export async function loadDevice({ crypto, idb }: KeyStore): Promise<Device> {
   const fresh = await crypto.subtle.generateKey(ed25519, false, ['sign', 'verify']);
-  const kept = await keep(idb, fresh).catch((cause: unknown) => {
+  const kept = await keep(idb, 'key', fresh).catch((cause: unknown) => {
     throw new StorageBlocked(cause);
   });
   return Device.of(crypto, kept);
 }
 
-function keep(idb: () => IDBFactory, fresh: CryptoKeyPair): Promise<CryptoKeyPair> {
+/** Stores `fresh` in IndexedDB (`solodawn`, store `device`) under `name` when absent and returns
+ *  whichever value is kept, in one durable transaction. */
+export function keep<T>(idb: () => IDBFactory, name: string, fresh: T): Promise<T> {
   return new Promise((resolve, reject) => {
     const opening = idb().open('solodawn', 1);
     opening.onupgradeneeded = () => opening.result.createObjectStore('device');
@@ -257,11 +259,11 @@ function keep(idb: () => IDBFactory, fresh: CryptoKeyPair): Promise<CryptoKeyPai
       // A browser without the durability option ignores it.
       const tx = db.transaction('device', 'readwrite', { durability: 'strict' });
       const store = tx.objectStore('device');
-      const stored = store.get('key');
+      const stored = store.get(name);
       let kept = fresh;
       stored.onsuccess = () => {
-        if (stored.result) kept = stored.result;
-        else store.add(fresh, 'key');
+        if (stored.result) kept = stored.result as T;
+        else store.add(fresh, name);
       };
       tx.oncomplete = () => {
         db.close();

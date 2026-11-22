@@ -97,43 +97,45 @@
     </span>
   </header>
 
-  <ol class="link-steps" role="status" aria-live="polite">
-    <li class:todo={stepState(1) === 'todo'}>
-      {@render marker(stepState(1))}
-      <div>
-        <b>{t('pairing.step.node')}</b>
-        <span class="muted">{nodeLine}</span>
-      </div>
-    </li>
-    <li class:todo={stepState(2) === 'todo'}>
-      {@render marker(stepState(2))}
-      <div>
-        <b>{t('pairing.step.identity')}</b>
-        {#if session.node}
-          <span class="muted">
-            <span>{t('pairing.step.fingerprint')}</span>
-            <code>{session.node.fingerprint}</code>
-          </span>
-        {:else}
-          <span class="muted">{t('pairing.step.identity_wait')}</span>
-        {/if}
-      </div>
-    </li>
-    <li class:todo={stepState(3) === 'todo'}>
-      {@render marker(stepState(3))}
-      <div>
-        <b>{t('pairing.step.connect')}</b>
-        <span class="muted">{connectLine}</span>
-      </div>
-    </li>
-    <li class:todo={stepState(4) === 'todo'}>
-      {@render marker(stepState(4))}
-      <div>
-        <b>{t('pairing.step.ai')}</b>
-        <span class={session.agents ? undefined : 'muted'}>{foundLine}</span>
-      </div>
-    </li>
-  </ol>
+  <div role="status" aria-live="polite">
+    <ol class="link-steps">
+      <li class:todo={stepState(1) === 'todo'}>
+        {@render marker(stepState(1))}
+        <div>
+          <b>{t('pairing.step.node')}</b>
+          <span class="muted">{nodeLine}</span>
+        </div>
+      </li>
+      <li class:todo={stepState(2) === 'todo'}>
+        {@render marker(stepState(2))}
+        <div>
+          <b>{t('pairing.step.identity')}</b>
+          {#if session.node}
+            <span class="muted">
+              <span>{t('pairing.step.fingerprint')}</span>
+              <code>{session.node.fingerprint}</code>
+            </span>
+          {:else}
+            <span class="muted">{t('pairing.step.identity_wait')}</span>
+          {/if}
+        </div>
+      </li>
+      <li class:todo={stepState(3) === 'todo'}>
+        {@render marker(stepState(3))}
+        <div>
+          <b>{t('pairing.step.connect')}</b>
+          <span class="muted">{connectLine}</span>
+        </div>
+      </li>
+      <li class:todo={stepState(4) === 'todo'}>
+        {@render marker(stepState(4))}
+        <div>
+          <b>{t('pairing.step.ai')}</b>
+          <span class={session.agents ? undefined : 'muted'}>{foundLine}</span>
+        </div>
+      </li>
+    </ol>
+  </div>
 
   {#if session.error}
     <p class="note" data-tone="danger" role="alert">

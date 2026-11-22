@@ -33,7 +33,8 @@ type Conn struct {
 	// its groups from then on. The lock of the loop guards it.
 	welcomed bool
 	// taker says that the connection takes the inbox items of its device; the lock of the loop guards it.
-	taker bool
+	taker   bool
+	joining atomic.Pointer[func() *Joining]
 }
 
 // Gone is closed when the loop sends nothing more to the connection: after
