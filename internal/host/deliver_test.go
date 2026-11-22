@@ -1864,7 +1864,6 @@ func checkConfigUnmarshalAndDroppedTables(t *testing.T, r *deliverRig) {
 	}
 	r.db.Write(dropAudit)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 960, AI: testAI1, Why: "notice", Code: "c"}, nil)
-	// Cleanups run last in, first out: mem's restores the hooks of r before r's settles r.h, so r.h, which was attached again above, is settled here.
 	r.h.Settle()
 }
 
