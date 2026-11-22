@@ -4,7 +4,7 @@ Feature: Driver capability table and switches
   declaration without naming individual CLIs outside the drivers.
 
   Scenario: Every driver declares the capability table and Claude Code and Codex match section 8 (A10.1)
-    Then every registered host driver declares a valid capability table
+    Then Drivers and DriverCaps have the same keys
     And the Claude Code and Codex capability declarations match section 8 of the step 3 driver contract
 
   Scenario Outline: Synthetic capability declarations switch agent.set and the approve tool (A10.1)
