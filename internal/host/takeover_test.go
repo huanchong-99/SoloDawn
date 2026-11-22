@@ -209,6 +209,17 @@ func (r *tkRig) sent(t, op string) []map[string]any {
 	return out
 }
 
+// lastState is the state of member in the last member status sent.
+func (r *tkRig) lastState(member string) any {
+	var state any
+	for _, c := range r.sent("member", "status") {
+		if c["id"] == member {
+			state = c["state"]
+		}
+	}
+	return state
+}
+
 func (r *tkRig) waitFor(desc string, ok func() bool) {
 	r.t.Helper()
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
@@ -349,13 +360,34 @@ func TestTakeoverOfAWorkingAIWithoutATaskIsCancelledWhenNothingChanged(t *testin
 	_, err = r.h.ReplayTakeover(t.Context(), r.owner, "owner-dev", json.RawMessage(strings.Replace(string(replay), "Nn"+runAI1[2:], "Oo"+runAI1[2:], 1)))
 	tkCode(t, err, "conflict")
 
+	cancelling := make(chan struct{})
+	letCancel := sync.OnceFunc(func() { close(cancelling) })
+	t.Cleanup(letCancel)
+	r.home.cmdFn = func(p map[string]any) (json.RawMessage, error) {
+		if p["op"] == "cancel" {
+			<-cancelling
+		}
+		return json.RawMessage(`{"re":1,"ok":true}`), nil
+	}
 	r.end(runAI1)
+	r.waitFor("the cancel", func() bool { return len(r.sent("task", "cancel")) == 1 })
+	p := takeoverState(r.h)
+	p.mu.Lock()
+	free := p.open[aiSlot{group: runGroup1, member: runAI1}].free
+	p.mu.Unlock()
+	if r.held(runAI1) || !free {
+		t.Fatal("the takeover still held its slot when it reported the cancel")
+	}
+	letCancel()
 	r.waitReleased(runAI1)
 	if c := r.sent("task", "cancel"); len(c) != 1 || c[0]["id"] != key.Task || c[0]["as"] != nil {
 		t.Fatalf("task cancel = %v", c)
 	}
 	if _, ok := r.h.Sessions.Get(key); ok || len(r.sent("post", "")) != 0 || r.drv.count() != 0 {
 		t.Fatal("an unchanged takeover task kept its session, posted, or started a hand-back turn")
+	}
+	if state := r.lastState(runAI1); state != "dormant" {
+		t.Fatalf("member state after the cancelled takeover = %v, want dormant", state)
 	}
 	if _, ok := r.h.Sessions.Caller(tokenFromLaunch(l)); ok {
 		t.Fatal("the interactive token outlived the terminal")
@@ -742,6 +774,9 @@ func TestTakeoverEndsWithItsTask(t *testing.T) {
 	r.waitReleased(runAI1)
 	if _, ok := r.h.Sessions.Get(key); ok || r.open(runAI1) || len(r.sent("post", "")) != 0 {
 		t.Fatal("a cancelled task's takeover kept its session or terminal, or posted")
+	}
+	if state := r.lastState(runAI1); state != "dormant" {
+		t.Fatalf("member state after the task ended = %v, want dormant", state)
 	}
 }
 

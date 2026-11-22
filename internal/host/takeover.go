@@ -17,10 +17,11 @@ import (
 // session (section A) and switches it to the interactive CLI in a
 // pseudo-terminal (section B); the terminal closing for any reason hands it
 // back (section D). A takeover holds the AI's deliveries in its group from
-// takeover.start until its hand-back turn starts.
+// takeover.start until its hand-back starts.
 
-// The takeover frees its slot when the hand-back turn starts, while the
-// session itself still holds every delivery (state takeover, then working):
+// The takeover frees its slot once the facts are read, before anything of
+// the hand-back is reported, while the session itself still holds every
+// delivery (state takeover, then working during the hand-back turn):
 // a delivery that runs while the slot is freed then sees one hold, not two
 // that lift at different moments, and when the turn ends the AI is waiting
 // and free for the next takeover at once.
@@ -58,7 +59,7 @@ type takeover struct {
 	closed  bool // the terminal has closed
 	facts   proto.HandbackBody
 	posted  bool // the AI posted its hand-back
-	free    bool // the hand-back turn has started: the takeover holds nothing
+	free    bool // the hand-back has started: the takeover holds nothing
 }
 
 func takeoverState(h *Host) *takeovers {
@@ -445,17 +446,19 @@ func handBack(h *Host, p *takeovers, t *takeover) {
 	defer p.release(h, aiSlot{group: t.key.Group, member: t.key.Member}, t)
 	s, ok := h.Sessions.Get(t.key)
 	if !ok || s.State != Takeover {
+		reportEnded(ctx, h, t.key)
 		return
 	}
 	facts, changed := handbackFacts(ctx, h, s)
-	if t.created && !changed {
-		sendHostCommand(ctx, h, s.Home, marshalWire(hostTaskCommand(h, s.Group, "cancel", s.Task)))
-		h.Sessions.End(s.SessionKey)
-		return
-	}
 	p.mu.Lock()
 	t.facts, t.free = facts, true
 	p.mu.Unlock()
+	if t.created && !changed {
+		sendHostCommand(ctx, h, s.Home, marshalWire(hostTaskCommand(h, s.Group, "cancel", s.Task)))
+		h.Sessions.End(s.SessionKey)
+		reportEnded(ctx, h, t.key)
+		return
+	}
 	handBackTurn(ctx, h, s)
 	p.mu.Lock()
 	posted := t.posted
@@ -463,6 +466,13 @@ func handBack(h *Host, p *takeovers, t *takeover) {
 	if !posted {
 		postFacts(ctx, h, s, facts)
 	}
+}
+
+// reportEnded reports the member's state once its taken-over session has
+// ended without a hand-back turn: the home last heard takeover.
+func reportEnded(ctx context.Context, h *Host, key SessionKey) {
+	grp, _ := lookupRow[proto.GroupRow](h, key.Group, "group", key.Group)
+	sendMemberStatus(ctx, h, stateOf(h), grp.Home, key.Group, key.Member, nil)
 }
 
 // handBackTurn gives the session its hand-back turn and waits for its end.
