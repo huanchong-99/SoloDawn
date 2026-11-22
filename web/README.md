@@ -329,8 +329,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   of its English file to the type `Key`; today the areas are `approval`, `brief`, `call`, `chat`,
   `decision`, `groups`, `member`, `nodes`, `pairing`, `reminder`, `settings`, `states`,
   `summary`, `task`, `terminal` and `thread`. `src/messages/files.glob.ts` finds every file by
-  its name and
-  `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
+  its name, and `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
   empty text, or has keys that differ between its two languages, and naming the area when it has
   no file in one of the languages. No key can therefore be given twice: a collision fails at start and in the tests,
