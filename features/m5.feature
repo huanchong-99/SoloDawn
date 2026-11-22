@@ -4,7 +4,7 @@ Feature: Tasks from brief to merge
   conflicts, direct tasks, idempotency and stale-item retirement.
 
   Scenario: Two tasks run from brief to merge without a remote, with no human action beyond confirm (A5.1, A5.2, A5.12)
-    Given a project group with forge "none", a secretary and working AIs "Claude" and "Codex" at level 2
+    Given a project group with forge "none", a secretary and working AIs "Claude" and "Codex"
     When the owner posts a feature request in the main line and the secretary proposes a two-task brief
     Then before confirm no task worktree exists and no assign item is queued on the home
     When the owner confirms the brief and both tasks run through checks, cross-AI review, merge and summary
@@ -12,11 +12,11 @@ Feature: Tasks from brief to merge
     And each passing review was followed by its merge with no AI turn in between and a task_merged row in the thread
     And each task ran in its own session and worktree, and after the merge those sessions and folders are gone
 
-  Scenario: Two tasks run from brief to merge with a bare remote and fake gh, including push_branch at level 2 (A5.1, A5.12, A5.13)
-    Given a project group with forge "github", a bare remote, fake gh, a secretary and working AIs "Claude" and "Codex" at level 2
+  Scenario: Two tasks run from brief to merge with a bare remote and fake gh, including push_branch (A5.1, A5.12, A5.13)
+    Given a project group with forge "github", a bare remote, fake gh, a secretary and working AIs "Claude" and "Codex"
     When the owner posts a feature request in the main line and the secretary proposes a two-task brief
     And the owner confirms the brief and both tasks push their branches, pass local and hosted checks, review each other, merge and summarize
-    Then push_branch pushed the assigned branch to origin at level 2 with no approval card
+    Then push_branch pushed the assigned branch to origin with no approval card
     And both tasks are merged on origin with two summary cards carrying pull-request numbers and no approval card
     And each passing review was followed by its merge with no AI turn in between and a task_merged row in the thread
     And each task ran in its own session and worktree, and after the merge those sessions and folders are gone
@@ -43,7 +43,7 @@ Feature: Tasks from brief to merge
     Then task 2 becomes active, creates its worktree, and runs its task session for "Codex"
 
   Scenario: An owner direct request leaves the group session read-only and moves to a new task session (A5.7)
-    Given a project group with forge "none", a secretary and working AIs "Claude" and "Codex" at level 2
+    Given a project group with forge "none", a secretary and working AIs "Claude" and "Codex"
     When the owner mentions "Claude" directly for a code change and "Claude" calls start_task
     Then the group session listed start_task without task submission tools, created a task card, notified the secretary, and committed the change in a new task session
 
