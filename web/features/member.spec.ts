@@ -186,6 +186,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     flushSync();
     await vi.waitFor(() => expect(all('dialog .choice')).toHaveLength(4));
     flushSync();
+    all<HTMLInputElement>('dialog .choice input')[2].click();
+    flushSync();
     one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await vi.waitFor(() => expect(laptop.joins).toHaveLength(1));
     flushSync();
@@ -506,12 +508,18 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(cards[0].querySelector('a')!.getAttribute('href')).toBe(
             `#/terminal/${website}/sec-ai`,
           );
-          expect(cards[1].querySelector<HTMLButtonElement>('button')!.disabled).toBe(true);
+          expect(cards[1].querySelector<HTMLButtonElement>('.card-foot button')!.disabled).toBe(
+            true,
+          );
           expect(cards[1].querySelector('.card-foot .hint')!.textContent).toBe('Computer offline');
-          expect(cards[2].querySelector<HTMLButtonElement>('button')!.disabled).toBe(true);
+          expect(cards[2].querySelector<HTMLButtonElement>('.card-foot button')!.disabled).toBe(
+            true,
+          );
           expect(cards[2].querySelector('.card-foot .hint')!.textContent).toBe('Direct link only');
           expect(cards[3].querySelector('.card-foot')).toBeNull();
-          expect(cards[4].querySelector<HTMLButtonElement>('button')!.disabled).toBe(true);
+          expect(cards[4].querySelector<HTMLButtonElement>('.card-foot button')!.disabled).toBe(
+            true,
+          );
         },
       );
       And('the cards show a window usage bar where reported', () => {
@@ -727,7 +735,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         flushSync();
       });
       Then(
-        '"Claude Code · workstation" is disabled as "Already in this group" and "Codex · workstation" is disabled as "Choose an account type on the Computers page first"',
+        '"Claude Code · workstation" is selectable again and "Codex · workstation" is disabled as "Choose an account type on the Computers page first"',
         () => {
           const labels = texts('dialog .choice b');
           const subs = texts('dialog .choice .sub');
@@ -740,15 +748,18 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           ]);
           expect(subs[0]).toBe('Already in this group');
           expect(subs[1]).toBe('Choose an account type on the Computers page first');
-          expect(radios.map((r) => r.disabled)).toEqual([true, true, false, false]);
+          expect(radios.map((r) => r.disabled)).toEqual([false, true, false, false]);
         },
       );
       And(
-        '"Codex · laptop" is chosen with name "Codex" and "Claude Code · laptop" warns "Not signed in" and suggests "Claude Code 2"',
+        '"Claude Code · workstation" is initially chosen with name "Claude Code 2" and the owner chooses "Codex · laptop"',
         async () => {
           const radios = all<HTMLInputElement>('dialog .choice input');
-          const nameInput = one<HTMLInputElement>('dialog input.input');
-          expect(radios.map((r) => r.checked)).toEqual([false, false, true, false]);
+          const nameInput = one<HTMLInputElement>('dialog input[required]');
+          expect(radios.map((r) => r.checked)).toEqual([true, false, false, false]);
+          expect(nameInput.value).toBe('Claude Code 2');
+          radios[2].click();
+          flushSync();
           expect(texts('dialog .choice .sub')[3]).toBe('API key · Not signed in');
           expect(nameInput.value).toBe('Codex');
           radios[3].click();
@@ -771,14 +782,17 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             flushSync();
             expect(texts('dialog .choice .sub')[3]).toBe('API key');
           });
-          expect(one<HTMLInputElement>('dialog input.input').value).toBe('Codex');
+          expect(one<HTMLInputElement>('dialog input[required]').value).toBe('Claude Code 2');
+          all<HTMLInputElement>('dialog .choice input')[2].click();
+          flushSync();
+          expect(one<HTMLInputElement>('dialog input[required]').value).toBe('Codex');
         },
       );
       When(
         'the owner toggles "Make this AI the group\'s secretary" on and off, then checks it and names the AI "Lead Secretary"',
         () => {
           const secCheck = one<HTMLInputElement>('dialog .check input');
-          const nameInput = one<HTMLInputElement>('dialog input.input');
+          const nameInput = one<HTMLInputElement>('dialog input[required]');
           secCheck.click();
           flushSync();
           expect(nameInput.value).toBe('Secretary');
@@ -865,6 +879,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       one<HTMLButtonElement>('.members .head button').click();
       flushSync();
       await vi.waitFor(() => expect(all('dialog .choice')).toHaveLength(4));
+      all<HTMLInputElement>('dialog .choice input')[2].click();
+      flushSync();
       laptop.drop();
       flushSync();
       one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
@@ -907,6 +923,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           false,
         ),
       );
+      all<HTMLInputElement>('dialog .choice input')[2].click();
+      flushSync();
       one('dialog[open] form').dispatchEvent(
         new Event('submit', { bubbles: true, cancelable: true }),
       );

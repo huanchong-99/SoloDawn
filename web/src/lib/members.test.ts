@@ -823,7 +823,11 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
         inGroup: false,
       },
     ]);
-    expect(selectableCandidates(list).map((c) => c.key)).toEqual(['dev-2:claude']);
+    expect(selectableCandidates(list).map((c) => c.key)).toEqual([
+      'dev-1:claude',
+      'dev-2:codex',
+      'dev-2:claude',
+    ]);
   });
 
   it('checks canMakeSecretary across missing info, no secretary, admin and regular member', () => {

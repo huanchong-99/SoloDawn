@@ -230,9 +230,9 @@ export function candidatesOf(
   });
 }
 
-/** Candidates that have an account type set and are not yet in the group. */
+/** Candidates that have an account type set; one already in the group adds another member. */
 export const selectableCandidates = (candidates: readonly Candidate[]): Candidate[] =>
-  candidates.filter((c) => c.account !== null && !c.inGroup);
+  candidates.filter((c) => c.account !== null);
 
 /** Whether the add-AI dialog offers making the new AI the group's secretary. */
 export const canMakeSecretary = (group: Group): boolean => !group.info?.secretary || isAdmin(group);

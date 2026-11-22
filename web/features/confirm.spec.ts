@@ -9,7 +9,7 @@ import { prefs } from '../src/lib/prefs.svelte';
 import type { AIMemberRow, Ctl, Envelope, MsgRow } from '../src/lib/proto';
 import { clock } from '../src/lib/when';
 import { example, owner, user } from './home';
-import { all, closePage, one, show, text, texts } from './page';
+import { all, closePage, one, read, show, text, texts } from './page';
 
 const feature = await loadFeature('../features/web_confirm.feature');
 const g = 'rZNvy-1jH6Z-BcPqA5U5BQ';
@@ -81,7 +81,10 @@ function command(env: Envelope) {
 }
 
 const save = () => one<HTMLButtonElement>('form button[type="submit"]');
-const accessValues = () => texts('.member > .kv dd:nth-of-type(n + 3)');
+const accessValues = () =>
+  all('.member > .kv dt')
+    .filter((dt) => ['Allow list', 'Approval delegates'].includes(read(dt)))
+    .map((dt) => read(dt.nextElementSibling!));
 
 async function edit(card = 0) {
   const buttons = all<HTMLButtonElement>('.member button').filter(
@@ -206,9 +209,13 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
     });
     Then('a different member sees the access lists without edit controls', () => {
       expect(all('.member > dl')).toHaveLength(2);
-      expect(texts('.member > dl dt').slice(0, 4)).toEqual([
+      expect(texts('.member > dl dt').slice(0, 8)).toEqual([
         'Computer',
         'Account',
+        'Model',
+        'Level',
+        'Tier',
+        'Skills',
         'Allow list',
         'Approval delegates',
       ]);
@@ -226,7 +233,10 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
         return { ok: true };
       });
       showPanel(group);
-      expect(text('.member footer button + button')).toBe('Edit access');
+      expect(texts('.member footer button').filter((label) => label === 'Edit access')).toEqual([
+        'Edit access',
+        'Edit access',
+      ]);
       await edit();
       expect(save().disabled).toBe(true);
       change(0);

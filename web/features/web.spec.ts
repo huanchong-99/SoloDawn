@@ -482,6 +482,7 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
           '::view-transition-group(*)',
           '::view-transition-old(*)',
           '::view-transition-new(*)',
+          expect.stringMatching(/^\.spin\.on\.svelte-[\w-]+ svg$/),
         ]);
       });
     },

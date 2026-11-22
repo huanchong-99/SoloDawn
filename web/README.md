@@ -183,6 +183,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
 
   Parts at `member.ai` show or edit more of the member. A part at `member.add` may set the draft's
   `model`, `effort` and `tier` before `host.join` sends it; `candidate` is undefined until chosen.
+  The model area uses both points at order 10: `MemberModel` displays and edits the member's
+  model/level, and `AddModel` supplies the chosen candidate's model/level fields.
 
   An entry is `{ order, component }`: the lower `order` comes first, then the area's name. A
   component with nothing to show draws nothing; an empty banner takes no room. While any area
@@ -497,6 +499,13 @@ file in `src/routes/`. It edits neither the shell nor another area:
     suggestion from `host.info`; accepting sends only the tier, and saving sends only changed
     tier/skills. The add-AI dialog uses the same fields and sends tier and skills with the CLI
     model/effort defaults. The skills counter counts code points; over 200, Save and Add are disabled.
+  - Model choices (`src/components/model/`) show the CLI's model names, levels and fast-mode
+    capability. Empty catalogs offer model and level text inputs; stored models absent from a
+    catalog remain visible as "Not listed". Choosing a model in Add AI fills its suggested tier,
+    which the owner can override. The same CLI can be selected repeatedly with distinct member
+    names; Computers lists each hosted member separately. Only the AI's owner can edit model/level
+    or refresh its catalog. Refresh sends `host.info` with `refresh: true`, updates the live list
+    without restarting, and never changes the stored model, level, tier or skills.
   - Task cards (`src/components/task/`, `src/lib/task.ts`) show "Must ask a stronger AI" in dawn
     when an active task has `stuck.ask` true, after wait badges and before a rejected-review
     badge. A false or absent `ask` leaves the normal badge selection unchanged.
@@ -630,6 +639,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/allow/`       | `AllowEditor.svelte`, lists and editor for each AI in the member panel            |
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
 | `src/components/profile/`     | tier badge, owner editor, model-tier suggestion and shared add-AI profile fields  |
+| `src/components/model/`       | model/level fields, owner editor and catalog refresh                              |
 | `src/components/people/`      | invitation dialog, role/removal actions and join form                             |
 | `src/messages/people.*`       | English and Chinese invitation, member-action and join texts                      |
 | `src/components/groupinfo/`   | home, commands, settings (order 19) and project memory (order 20) at `chat.side`  |
@@ -655,6 +665,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/status.spec.ts`     | steps of `../features/web_status.feature`                                         |
 | `features/task.spec.ts`       | steps of `../features/web_task.feature`                                           |
 | `features/profile.spec.ts`    | steps of `../features/web_profile.feature`                                        |
+| `features/model.spec.ts`      | steps of `../features/web_model.feature`                                          |
 | `features/thread.spec.ts`     | steps of `../features/web_thread.feature`                                         |
 | `features/call.spec.ts`       | steps of `../features/web_call.feature`                                           |
 | `features/confirm.spec.ts`    | steps of `../features/web_confirm.feature`                                        |
