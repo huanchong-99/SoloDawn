@@ -88,10 +88,10 @@ func (w *acmeWorld) start(name string, env []string, args ...string) error {
 	}
 	cmd := exec.Command(filepath.Join(w.dir, "bin", name), args...)
 	cmd.Env, cmd.Stdout, cmd.Stderr = append(os.Environ(), env...), log, log
-	if err := cmd.Start(); err != nil {
+	if err := killManagedCmd(w.t, w.addCleanup, cmd, func() { _ = log.Close() }); err != nil {
+		_ = log.Close()
 		return err
 	}
-	w.cleanup = append(w.cleanup, func() { cmd.Process.Kill(); cmd.Wait(); log.Close() })
 	return nil
 }
 
@@ -189,10 +189,10 @@ func (w *acmeWorld) startRendezvous(domain string) error {
 		return err
 	}
 	cmd.Stderr = stderr
-	if err := cmd.Start(); err != nil {
+	if err := killManagedCmd(w.t, w.addCleanup, cmd, func() { _ = stderr.Close() }); err != nil {
+		_ = stderr.Close()
 		return err
 	}
-	w.cleanup = append(w.cleanup, func() { cmd.Process.Kill(); cmd.Wait(); stderr.Close() })
 	w.httpClient = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: w.issuer, ServerName: domain}}}
 	w.ws = "wss://" + w.tcp + "/rv"
 	if err := rvListening(w.tcp); err != nil {

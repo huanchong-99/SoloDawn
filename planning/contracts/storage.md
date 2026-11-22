@@ -82,18 +82,18 @@ CREATE TABLE inbox (
   msg        TEXT,               -- message id
   task       TEXT,               -- task id
   commit_id  TEXT,               -- review, merge: the commit the item is about
-  env        TEXT    NOT NULL,   -- JSON: the item's envelope, signed when the item was queued
-  cause      TEXT,               -- JSON: the signed act that led to the item
+  env        TEXT    NOT NULL,   -- JSON: the plain unsigned item object
   not_before INTEGER NOT NULL DEFAULT 0,  -- wake-up cap, round limit hold
   created    INTEGER NOT NULL
 ) STRICT;
 CREATE INDEX inbox_by_host ON inbox (host, id);
 ```
 
-The item's envelope is built and signed in the transaction that queues the
-item, so it says what was decided then. A row is deleted when its host
-acknowledges it, or when a later change of the task makes it pointless
-(`contracts/task-machine.md` section 2).
+The plain unsigned item JSON (owner's decision of 2026-11-21: no
+attack-and-defence code, so items are not signed and carry no `cause`) is
+built in the transaction that queues the item, so it says what was decided
+then. A row is deleted when its host acknowledges it, or when a later change
+of the task makes it pointless (`contracts/task-machine.md` section 2).
 
 ### `push_sub`: reminders for browsers
 
@@ -151,7 +151,7 @@ CREATE TABLE setting (
   expiry is the offer's `ts + 120000`; delete it only when the node's clock is strictly later.
 - `setting` keys: `name`, `owner` (user id), `rendezvous` (list of URLs),
   `retention_days` (90), `idle_minutes` (15), `max_open` (4),
-  `default_level` (2), `all_level3` (false), `approvers` (list of user ids),
+  `default_level` (3, owner's decision of 2026-11-21), `all_level3` (false), `approvers` (list of user ids),
   `offline` (false), `homes` (the list `host.info` shows,
   `contracts/datachannel.md` section 7).
 
@@ -165,11 +165,10 @@ CREATE TABLE agent (              -- AI CLIs registered on this machine
   caps        TEXT NOT NULL DEFAULT '{}'   -- JSON, as in commands.md section 2
 ) STRICT;
 
-CREATE TABLE perm (               -- R-40, R-45
-  agent       TEXT    NOT NULL,
-  g           TEXT    NOT NULL,   -- group id
-  level       INTEGER NOT NULL,   -- 1 | 2 | 3
-  repo_config INTEGER NOT NULL DEFAULT 0,
+CREATE TABLE perm (               -- R-40
+  agent TEXT    NOT NULL,
+  g     TEXT    NOT NULL,         -- group id
+  level INTEGER NOT NULL,         -- 1 | 2 | 3
   PRIMARY KEY (agent, g)
 ) STRICT;
 
@@ -205,7 +204,7 @@ CREATE TABLE audit (              -- R-139
   ts     INTEGER NOT NULL,
   g      TEXT,
   agent  TEXT,
-  what   TEXT NOT NULL,           -- delivered | refused | requested | approval | takeover | handback | merge | setting
+  what   TEXT NOT NULL,           -- delivered | refused | requested | approval | takeover | handback | merge | setting | killed
   item   INTEGER,                 -- delivered, refused: the inbox item id
   home   TEXT,                    -- delivered, refused: device id of the home
   detail TEXT NOT NULL,           -- merge: the task and the commit (contracts/local.md section 7)

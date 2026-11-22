@@ -38,7 +38,6 @@ CREATE TABLE inbox (
   task       TEXT,
   commit_id  TEXT,
   env        TEXT    NOT NULL,
-  cause      TEXT,
   not_before INTEGER NOT NULL DEFAULT 0,
   created    INTEGER NOT NULL
 ) STRICT;
@@ -81,10 +80,9 @@ CREATE TABLE agent (
 ) STRICT;
 
 CREATE TABLE perm (
-  agent       TEXT    NOT NULL,
-  g           TEXT    NOT NULL,
-  level       INTEGER NOT NULL,
-  repo_config INTEGER NOT NULL DEFAULT 0,
+  agent TEXT    NOT NULL,
+  g     TEXT    NOT NULL,
+  level INTEGER NOT NULL,
   PRIMARY KEY (agent, g)
 ) STRICT;
 

@@ -3,6 +3,7 @@ package home_test
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/huanchong-99/SoloDawn/internal/home"
@@ -22,17 +23,6 @@ var (
 
 const pauSignTS = clock - 2500
 
-type pauDisk struct {
-	msgs   map[string]proto.MsgRow
-	queued []store.Item
-}
-
-func (d pauDisk) Msg(id string) (proto.MsgRow, bool)        { m, ok := d.msgs[id]; return m, ok }
-func (d pauDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
-func (d pauDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
-func (d pauDisk) Pending() []proto.MsgRow                   { return nil }
-func (d pauDisk) Queued() []store.Item                      { return d.queued }
-
 func pauState(t *testing.T) *home.State {
 	t.Helper()
 	s := group(t)
@@ -47,30 +37,6 @@ func pauState(t *testing.T) *home.State {
 
 func pauCmd(by identity.Key, op string, n byte, more string) proto.Envelope {
 	return by.Sign(fmt.Sprintf(`{"t":"group","n":%q,"ts":%d,"g":%q,"op":%q%s}`, id(n), pauSignTS, groupID, op, more))
-}
-
-func pauApply(t *testing.T, s *home.State, d pauDisk, r home.Receipts, by identity.Key, env proto.Envelope) home.Result {
-	t.Helper()
-	res, err := home.Commands.Apply(s, d, r, by.ID(), env, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return res
-}
-
-func pauRows(res home.Result) []any {
-	out := []any{}
-	for _, r := range res.Rows {
-		out = append(out, r.Value())
-	}
-	return out
-}
-
-func pauRefused(t *testing.T, res home.Result, code string) {
-	t.Helper()
-	if res.Answer.Code != code || res.Answer.OK || res.Msg == "" || len(res.Rows) != 0 || len(res.Items) != 0 {
-		t.Fatalf("answered %+v (%q) with %d rows and %d items; want %s", res.Answer, res.Msg, len(res.Rows), len(res.Items), code)
-	}
 }
 
 func pauSysRow(msgID string, seq int64, code, by string) proto.MsgRow {
@@ -95,7 +61,8 @@ func TestPauseSetsPausedAndWritesSystemMessage(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := pauState(t)
-			res := pauApply(t, s, pauDisk{}, receipts{}, tc.key, pauCmd(tc.key, "pause", 70, ""))
+			s.Group.Checks = []string{}
+			res := briefApply(t, s, disk{}, receipts{}, tc.key, pauCmd(tc.key, "pause", 70, ""))
 			if s.Group.Paused != nil {
 				t.Fatalf("command mutated state before Commit: %+v", s.Group.Paused)
 			}
@@ -103,7 +70,10 @@ func TestPauseSetsPausedAndWritesSystemMessage(t *testing.T) {
 			wantGroup.Seq = 11
 			wantGroup.Paused = &proto.GroupPause{By: tc.member, At: clock}
 			equal(t, res, home.Result{Rows: res.Rows, Answer: store.Outcome{OK: true}})
-			equal(t, pauRows(res), []any{wantGroup, pauSysRow(id(70), 12, "group_paused", tc.member)})
+			rows := briefRows(res)
+			equal(t, rows, []any{wantGroup, pauSysRow(id(70), 12, "group_paused", tc.member)})
+			grpNoNulls(t, rows[0])
+			grpNoNulls(t, rows[1], "/thread", "/re", "/state")
 
 			s.Commit(res)
 			equal(t, s.Group, wantGroup)
@@ -119,23 +89,21 @@ func TestPauseBodyDoesNotEscapeHTML(t *testing.T) {
 	rawID := "<admin&1>"
 	s.People[rawID] = person(rawID, pauAdminKey, "admin")
 
-	paused := pauApply(t, s, pauDisk{}, receipts{}, pauAdminKey, pauCmd(pauAdminKey, "pause", 70, ""))
+	paused := briefApply(t, s, disk{}, receipts{}, pauAdminKey, pauCmd(pauAdminKey, "pause", 70, ""))
 	equal(t, paused.Rows[1].Value().(proto.MsgRow).Body, json.RawMessage(`{"code":"group_paused","by":"<admin&1>"}`))
 	s.Commit(paused)
 
-	resumed := pauApply(t, s, pauDisk{}, receipts{}, pauAdminKey, pauCmd(pauAdminKey, "resume", 71, ""))
+	resumed := briefApply(t, s, disk{}, receipts{}, pauAdminKey, pauCmd(pauAdminKey, "resume", 71, ""))
 	equal(t, resumed.Rows[1].Value().(proto.MsgRow).Body, json.RawMessage(`{"code":"group_resumed","by":"<admin&1>"}`))
 }
 
-// Pausing a group that is already paused is accepted and changes nothing, even
-// when a message already holds the command's nonce.
+// Pausing a group that is already paused is accepted and changes nothing.
 func TestPauseAlreadyPausedChangesNothing(t *testing.T) {
 	s := pauState(t)
 	original := &proto.GroupPause{By: ownerID, At: clock - 9000}
 	s.Group.Paused = original
-	taken := pauDisk{msgs: map[string]proto.MsgRow{id(70): {RowHeader: proto.RowHeader{Type: "msg", ID: id(70)}, Kind: "text"}}}
 
-	res := pauApply(t, s, taken, receipts{}, pauAdminKey, pauCmd(pauAdminKey, "pause", 70, ""))
+	res := briefApply(t, s, disk{}, receipts{}, pauAdminKey, pauCmd(pauAdminKey, "pause", 70, ""))
 	equal(t, res, home.Result{Answer: store.Outcome{OK: true}})
 	s.Commit(res)
 	equal(t, s.Group.Paused, original)
@@ -143,52 +111,38 @@ func TestPauseAlreadyPausedChangesNothing(t *testing.T) {
 }
 
 // Resuming a group that is not paused is accepted and changes nothing, even
-// when active tasks exist and a message holds the command's nonce.
+// when active tasks exist.
 func TestPauseResumeUnpausedGroupChangesNothing(t *testing.T) {
 	s := pauState(t)
 	s.Tasks[id(31)] = proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: id(31)}, State: "active", Step: "local_check", Assignee: pauWorkA}
 	s.Tasks[id(32)] = proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: id(32)}, State: "active", Step: "review", Assignee: pauWorkA, Reviewer: pauWorkB, Commit: "c1"}
-	taken := pauDisk{msgs: map[string]proto.MsgRow{id(71): {RowHeader: proto.RowHeader{Type: "msg", ID: id(71)}, Kind: "text"}}}
 
-	res := pauApply(t, s, taken, receipts{}, browser, pauCmd(browser, "resume", 71, ""))
+	res := briefApply(t, s, disk{}, receipts{}, browser, pauCmd(browser, "resume", 71, ""))
 	equal(t, res, home.Result{Answer: store.Outcome{OK: true}})
 	s.Commit(res)
 	equal(t, s.Seq, int64(10))
 }
 
 func TestPauseAndResumeRefusals(t *testing.T) {
-	existing := pauDisk{msgs: map[string]proto.MsgRow{id(72): {RowHeader: proto.RowHeader{Type: "msg", ID: id(72)}, Kind: "text"}}}
 	for name, tc := range map[string]struct {
 		op     string
 		paused bool
 		by     identity.Key
 		more   string
-		state  func(*home.State)
-		disk   pauDisk
 		code   string
 	}{
-		"pause with non-id as": {
-			op: "pause", by: laptop, more: `,"as":"not-a-random-id"`,
-			state: func(s *home.State) { s.AIs["not-a-random-id"] = ai("not-a-random-id", laptop) },
-			code:  "bad_request",
-		},
-		"resume with non-id as": {
-			op: "resume", paused: true, by: laptop, more: `,"as":"not-a-random-id"`,
-			state: func(s *home.State) { s.AIs["not-a-random-id"] = ai("not-a-random-id", laptop) },
-			code:  "bad_request",
-		},
-		"pause by ordinary member":                 {op: "pause", by: guest, code: "forbidden"},
-		"pause already paused by ordinary member":  {op: "pause", paused: true, by: guest, code: "forbidden"},
-		"resume by ordinary member":                {op: "resume", paused: true, by: guest, code: "forbidden"},
-		"resume unpaused by ordinary member":       {op: "resume", by: guest, code: "forbidden"},
-		"pause by secretary":                       {op: "pause", by: laptop, more: fmt.Sprintf(`,"as":%q`, aiID), code: "forbidden"},
-		"pause already paused by secretary":        {op: "pause", paused: true, by: laptop, more: fmt.Sprintf(`,"as":%q`, aiID), code: "forbidden"},
-		"resume by secretary":                      {op: "resume", paused: true, by: laptop, more: fmt.Sprintf(`,"as":%q`, aiID), code: "forbidden"},
-		"resume unpaused by secretary":             {op: "resume", by: laptop, more: fmt.Sprintf(`,"as":%q`, aiID), code: "forbidden"},
-		"pause by working AI":                      {op: "pause", by: laptop, more: fmt.Sprintf(`,"as":%q`, pauWorkA), code: "forbidden"},
-		"resume by working AI":                     {op: "resume", paused: true, by: laptop, more: fmt.Sprintf(`,"as":%q`, pauWorkA), code: "forbidden"},
-		"pause with taken message id":              {op: "pause", by: browser, disk: existing, code: "conflict"},
-		"resume with taken message id wakes no AI": {op: "resume", paused: true, by: browser, disk: existing, code: "conflict"},
+		"pause with empty as":                     {op: "pause", by: laptop, more: `,"as":""`, code: "bad_request"},
+		"resume with non-string as":               {op: "resume", paused: true, by: laptop, more: `,"as":1`, code: "bad_request"},
+		"pause by ordinary member":                {op: "pause", by: guest, code: "forbidden"},
+		"pause already paused by ordinary member": {op: "pause", paused: true, by: guest, code: "forbidden"},
+		"resume by ordinary member":               {op: "resume", paused: true, by: guest, code: "forbidden"},
+		"resume unpaused by ordinary member":      {op: "resume", by: guest, code: "forbidden"},
+		"pause by secretary":                      {op: "pause", by: laptop, more: fmt.Sprintf(`,"as":%q`, aiID), code: "forbidden"},
+		"pause already paused by secretary":       {op: "pause", paused: true, by: laptop, more: fmt.Sprintf(`,"as":%q`, aiID), code: "forbidden"},
+		"resume by secretary":                     {op: "resume", paused: true, by: laptop, more: fmt.Sprintf(`,"as":%q`, aiID), code: "forbidden"},
+		"resume unpaused by secretary":            {op: "resume", by: laptop, more: fmt.Sprintf(`,"as":%q`, aiID), code: "forbidden"},
+		"pause by working AI":                     {op: "pause", by: laptop, more: fmt.Sprintf(`,"as":%q`, pauWorkA), code: "forbidden"},
+		"resume by working AI":                    {op: "resume", paused: true, by: laptop, more: fmt.Sprintf(`,"as":%q`, pauWorkA), code: "forbidden"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := pauState(t)
@@ -196,11 +150,8 @@ func TestPauseAndResumeRefusals(t *testing.T) {
 			if tc.paused {
 				s.Group.Paused = &proto.GroupPause{By: ownerID, At: clock - 5000}
 			}
-			if tc.state != nil {
-				tc.state(s)
-			}
-			res := pauApply(t, s, tc.disk, receipts{}, tc.by, pauCmd(tc.by, tc.op, 72, tc.more))
-			pauRefused(t, res, tc.code)
+			res := briefApply(t, s, disk{}, receipts{}, tc.by, pauCmd(tc.by, tc.op, 72, tc.more))
+			briefRefused(t, res, tc.code)
 		})
 	}
 }
@@ -210,6 +161,7 @@ func TestPauseAndResumeRefusals(t *testing.T) {
 // skips tasks with waits, tasks at step merge, and non-active tasks.
 func TestPauseResumeClearsPausedAndWakesTasksByRow24(t *testing.T) {
 	s := pauState(t)
+	s.Group.Checks = []string{}
 	s.Group.Paused = &proto.GroupPause{By: ownerID, At: clock - 5000}
 	wait := func(kind string) *proto.TaskWait { return &proto.TaskWait{Kind: kind, Since: clock - 4000} }
 	s.Tasks = map[string]proto.TaskRow{
@@ -229,7 +181,7 @@ func TestPauseResumeClearsPausedAndWakesTasksByRow24(t *testing.T) {
 		id(44): {RowHeader: proto.RowHeader{Type: "task", ID: id(44)}, State: "cancelled", Step: "review", Assignee: pauWorkA, Reviewer: pauWorkB, Commit: "c14"},
 	}
 
-	res := pauApply(t, s, pauDisk{}, receipts{}, pauAdminKey, pauCmd(pauAdminKey, "resume", 73, ""))
+	res := briefApply(t, s, disk{}, receipts{}, pauAdminKey, pauCmd(pauAdminKey, "resume", 73, ""))
 	if s.Group.Paused == nil {
 		t.Fatal("command mutated state before Commit")
 	}
@@ -245,7 +197,10 @@ func TestPauseResumeClearsPausedAndWakesTasksByRow24(t *testing.T) {
 		{AI: pauWorkC, Why: "review", Task: id(35), Commit: "c5"},
 	}
 	equal(t, res, home.Result{Rows: res.Rows, Items: wantItems, Answer: store.Outcome{OK: true}})
-	equal(t, pauRows(res), []any{wantGroup, pauSysRow(id(73), 12, "group_resumed", pauAdminID)})
+	rows := briefRows(res)
+	equal(t, rows, []any{wantGroup, pauSysRow(id(73), 12, "group_resumed", pauAdminID)})
+	grpNoNulls(t, rows[0], "/paused")
+	grpNoNulls(t, rows[1], "/thread", "/re", "/state")
 
 	s.Commit(res)
 	equal(t, s.Group, wantGroup)
@@ -318,7 +273,7 @@ func TestPauseResumeQueuedFilterPinsEveryField(t *testing.T) {
 				RowHeader: proto.RowHeader{Type: "task", ID: taskID}, State: "active", Step: "review",
 				Assignee: pauWorkA, Reviewer: pauWorkB, Commit: "c1",
 			}
-			res := pauApply(t, s, pauDisk{queued: tc.queued}, receipts{}, browser, pauCmd(browser, "resume", 74, ""))
+			res := briefApply(t, s, tskDisk{queued: tc.queued}, receipts{}, browser, pauCmd(browser, "resume", 74, ""))
 			equal(t, res.Answer, store.Outcome{OK: true})
 			equal(t, res.Items, tc.want)
 		})
@@ -329,18 +284,144 @@ func TestPauseRepeatedCommandUsesReceipt(t *testing.T) {
 	s, held := pauState(t), receipts{}
 	pauseEnv := pauCmd(browser, "pause", 75, "")
 
-	first := pauApply(t, s, pauDisk{}, held, browser, pauseEnv)
+	first := briefApply(t, s, disk{}, held, browser, pauseEnv)
 	equal(t, len(first.Rows), 2)
 	s.Commit(first)
 
-	second := pauApply(t, s, pauDisk{}, held, browser, pauseEnv)
+	second := briefApply(t, s, disk{}, held, browser, pauseEnv)
 	equal(t, second, home.Result{Answer: store.Outcome{OK: true}})
 
 	resumeEnv := pauCmd(browser, "resume", 76, "")
-	third := pauApply(t, s, pauDisk{}, held, browser, resumeEnv)
+	third := briefApply(t, s, disk{}, held, browser, resumeEnv)
 	equal(t, len(third.Rows), 2)
 	s.Commit(third)
 
-	fourth := pauApply(t, s, pauDisk{}, held, browser, resumeEnv)
+	fourth := briefApply(t, s, disk{}, held, browser, resumeEnv)
 	equal(t, fourth, home.Result{Answer: store.Outcome{OK: true}})
+}
+
+// End-to-end StartLoop verification: Loop.Sync receives the paused and resumed
+// group and system rows, mentions still deliver over Loop.Inbox while paused,
+// and group/resume delivers plain InboxItems with live Task copies while
+// deduplicating unacknowledged review items and respecting B-18.
+func TestPauseLoopSyncAndInbox(t *testing.T) {
+	w := runStart(t, runOpen(t), home.NodeTables())
+	owner, watcher, host := pauLoopSetup(t, w)
+	t0, t1, t2 := pauLoopSeedTasks(t, w, owner, host)
+	w.idle()
+	watcher.watch(groupID, false)
+
+	pauSendEnv(t, owner, pauCmd(browser, "pause", 85, ""))
+	pauCheckSyncPause(t, watcher, &proto.GroupPause{By: grpOwnerID(groupID), At: clock}, "group_paused")
+	host.quiet()
+
+	post := proto.Post[proto.EmptyBody]{
+		HomeCommand: proto.HomeCommand{Type: "post", Nonce: proto.ID(id(86)), Timestamp: clock, Group: proto.ID(groupID)},
+		Kind:        "text", Text: "Hold while paused.", Mentions: []proto.ID{proto.ID(pauWorkA)}, Body: proto.EmptyBody{},
+	}
+	pauSendEnv(t, owner, briefSign(browser, post))
+	watcher.next()
+	mention := inboxDecode(t, host.next())
+	equal(t, len(mention.Items), 1)
+	equal(t, []any{mention.Items[0].Item.Why, string(mention.Items[0].Item.AI), string(mention.Items[0].Item.Msg), len(mention.Items[0].Msg) > 0},
+		[]any{"mention", pauWorkA, id(86), true})
+
+	pauSendEnv(t, owner, pauCmd(browser, "resume", 87, ""))
+	pauCheckSyncPause(t, watcher, nil, "group_resumed")
+	pauCheckLoopWake(t, inboxDecode(t, host.next()), t0, t1, t2)
+}
+
+func pauLoopSetup(t *testing.T, w *runWorld) (owner, watcher, host *runPeer) {
+	t.Helper()
+	owner, watcher, host = w.attach(browser), w.attach(node), w.attach(laptop)
+	w.loop.Inbox(host.conn)
+	create := grpCreatePayload(groupID, groupID)
+	create.Forge, create.Checks = "none", []string{}
+	pauSendEnv(t, owner, briefSign(browser, create))
+	owner.next()
+	watcher.next()
+	host.next()
+	for i, member := range []string{aiID, pauWorkA, pauWorkB} {
+		host.does(groupID, "member", fmt.Sprintf(`,"op":"add_ai","id":%q,"cli":"claude","name":"ai-%d","account":"personal","secretary":%t,"approvers":[]`,
+			member, i, member == aiID))
+	}
+	return owner, watcher, host
+}
+
+func pauLoopSeedTasks(t *testing.T, w *runWorld, owner, host *runPeer) (t0, t1, t2 string) {
+	t.Helper()
+	body := briefBody()
+	body.Requester = grpOwnerID(groupID)
+	entry := proto.BriefTask{Title: "Task", Assignee: pauWorkA, Reviewer: pauWorkB, Depends: []int{}}
+	body.Tasks = []proto.BriefTask{entry, entry, entry}
+	pauSendEnv(t, host, briefSign(laptop, briefPost(80, body)))
+	pauSendEnv(t, owner, briefAct(browser, 81, "confirm", id(80), ""))
+	pauAckAll(t, w, host)
+
+	t0, t1, t2 = briefTaskID(81, 0), briefTaskID(81, 1), briefTaskID(81, 2)
+	pauSubmitReview(t, host, t1, 2, "c1")
+	host.next() // leave t1's review item unacknowledged in the store
+	pauSubmitReview(t, host, t2, 3, "c2")
+	pauAckAll(t, w, host) // acknowledge t2's review item so row 24 queues review again
+
+	tid := proto.ID(t2)
+	approval := proto.Post[proto.ApprovalBody]{
+		HomeCommand: proto.HomeCommand{Type: "post", Nonce: proto.ID(id(84)), Timestamp: clock, Group: proto.ID(groupID), As: proto.ID(pauWorkA)},
+		Kind:        "approval", Thread: &tid, Main: true, Mentions: []proto.ID{},
+		Body: proto.ApprovalBody{Task: t2, AI: pauWorkA, Tool: "Bash", Command: "make", Category: "command", Approvers: []string{browser.ID()}},
+	}
+	pauSendEnv(t, host, briefSign(laptop, approval))
+	return t0, t1, t2
+}
+
+func pauSubmitReview(t *testing.T, host *runPeer, taskID string, num int, commit string) {
+	t.Helper()
+	host.does(groupID, "task", fmt.Sprintf(`,"op":"branch","id":%q,"branch":"task/%d-task"`, taskID, num))
+	host.does(groupID, "task", fmt.Sprintf(`,"op":"checked","id":%q,"commit":%q,"ok":true,"items":[]`, taskID, commit))
+	host.does(groupID, "task", fmt.Sprintf(`,"op":"submitted","id":%q,"commit":%q,"stats":{"added":4,"removed":1}`, taskID, commit))
+}
+
+func pauAckAll(t *testing.T, w *runWorld, host *runPeer) {
+	t.Helper()
+	for _, entry := range inboxDecode(t, host.next()).Items {
+		w.loop.Ack(host.conn, proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: entry.Item.Item})
+	}
+}
+
+func pauSendEnv(t *testing.T, p *runPeer, env proto.Envelope) {
+	t.Helper()
+	p.re++
+	p.w.loop.Cmd(p.conn, p.re, env)
+	p.gets(fmt.Sprintf(`{"re":%d,"ok":true}`, p.re))
+}
+
+func pauCheckSyncPause(t *testing.T, watcher *runPeer, want *proto.GroupPause, code string) {
+	t.Helper()
+	var push proto.Rows
+	equal(t, json.Unmarshal([]byte(watcher.next()), &push), nil)
+	equal(t, len(push.Rows), 2)
+	var grp proto.GroupRow
+	var msg proto.MsgRow
+	equal(t, json.Unmarshal(push.Rows[0], &grp), nil)
+	equal(t, json.Unmarshal(push.Rows[1], &msg), nil)
+	equal(t, grp.Paused, want)
+	equal(t, []any{msg.Kind, msg.By, msg.Body}, []any{"system", "system", json.RawMessage(fmt.Sprintf(`{"code":%q,"by":%q}`, code, grpOwnerID(groupID)))})
+}
+
+func pauCheckLoopWake(t *testing.T, frame proto.Inbox, t0, t1, t2 string) {
+	t.Helper()
+	var got []string
+	for _, entry := range frame.Items {
+		if entry.Task == nil || entry.Task.ID != string(entry.Item.Task) {
+			t.Fatalf("missing or mismatched task copy on %+v", entry)
+		}
+		got = append(got, fmt.Sprintf("%s:%s:%s:%s", entry.Item.Task, entry.Item.Why, entry.Item.AI, entry.Item.Commit))
+	}
+	want := []string{
+		fmt.Sprintf("%s:resume:%s:", t0, pauWorkA),
+		fmt.Sprintf("%s:resume:%s:", t1, pauWorkA),
+		fmt.Sprintf("%s:review:%s:c2", t2, pauWorkB),
+	}
+	slices.Sort(want)
+	equal(t, got, want)
 }

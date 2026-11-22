@@ -700,6 +700,31 @@ describe('ctl', () => {
     expect(pc.ctl.sent).toHaveLength(1);
   });
 
+  it('sends a push without an id up to 60 KiB, and closes when the channel cannot send', async () => {
+    const { pc, conn } = await opened();
+    // fixed is 37 bytes, so 61_439 - fixed and 61_441 - fixed are even multiples of two-byte 'é'.
+    const fixed = JSON.stringify({ t: 'devlog', user: '', entries: [] }).length;
+    const exact = {
+      t: 'devlog' as const,
+      user: 'x' + 'é'.repeat((61_439 - fixed) / 2),
+      entries: [],
+    };
+    conn.send(exact);
+    expect(pc.ctl.frames()).toStrictEqual([exact]);
+    const overAscii = { t: 'devlog' as const, user: 'x'.repeat(61_441 - fixed), entries: [] };
+    expect(() => conn.send(overAscii)).toThrow(new RangeError('ctl frame exceeds 60 KiB'));
+    const overUtf8 = { t: 'devlog' as const, user: 'é'.repeat((61_441 - fixed) / 2), entries: [] };
+    expect(() => conn.send(overUtf8)).toThrow(new RangeError('ctl frame exceeds 60 KiB'));
+    expect(pc.ctl.sent).toHaveLength(1);
+    pc.ctl.closing = true;
+    conn.send({ t: 'devlog', user: 'u', entries: [] });
+    expect(conn.gone).toBe(true);
+    expect(pc.closes).toBe(1);
+    const sendSpy = vi.spyOn(pc.ctl, 'send');
+    conn.send({ t: 'devlog', user: 'u', entries: [] });
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
   it('is gone when its channel cannot send, and rejects what waits', async () => {
     const { pc, conn } = await opened();
     const first = conn.request({ t: 'cmd' });
@@ -747,10 +772,21 @@ describe('ctl', () => {
     const peer = session.peer(node, hearing().listen);
     await flush();
     expect(peer.channel('pty:group:member')).toBeUndefined();
+    expect(() => peer.send({ t: 'devlog', user: 'u', entries: [] })).not.toThrow();
     await serve(last());
     const channel = peer.channel('pty:group:member');
     expect(channel).toBe(last().channels[1]);
     expect(last().channels[1].label).toBe('pty:group:member');
+    const push = { t: 'devlog' as const, user: 'u', entries: [] };
+    peer.send(push);
+    expect(last().ctl.frames().at(-1)).toStrictEqual(push);
+    const fixed = JSON.stringify({ t: 'devlog', user: '', entries: [] }).length;
+    expect(() => peer.send({ t: 'devlog', user: 'x'.repeat(61_441 - fixed), entries: [] })).toThrow(
+      new RangeError('ctl frame exceeds 60 KiB'),
+    );
+    last().ctl.onclose();
+    await flush();
+    expect(() => peer.send(push)).not.toThrow();
   });
 });
 

@@ -22,11 +22,11 @@ type Connection struct {
 	close       func() error
 	ready       chan struct{}
 	pathChanged chan struct{}
-	incoming    chan json.RawMessage
+	incoming    chan json.RawMessage // single reader: Read
 	mu          sync.Mutex
 	dc          *webrtc.DataChannel
 	next        int64
-	waiting     map[int64]chan json.RawMessage
+	waiting     map[int64]chan json.RawMessage // each channel's single reader: its Request
 	answer      *proto.Envelope
 	pending     map[string]bool // see waitForAnswer
 	deadline    *time.Timer
@@ -77,23 +77,29 @@ type framing struct {
 	Re   *int64  `json:"re,omitempty"`
 }
 
-// deliver routes a response to its request and queues a request or push for
-// Read. Anything else is refused; the connection stays open
+// deliver queues a valid request, push or response for Read, and refuses
+// anything else while keeping the connection open
 // (contracts/datachannel.md section 2).
 func (c *Connection) deliver(data []byte) {
-	f, err := readFraming(data)
-	if err == nil && f.Re != nil {
-		c.response(*f.Re, f, data)
-		return
-	}
-	if err != nil || f.Type == nil {
+	if !validFrame(data) {
 		c.refuse(data)
 		return
 	}
 	c.queue(data)
 }
 
-// queue holds a request or push until Read takes it.
+func validFrame(data []byte) bool {
+	f, err := readFraming(data)
+	if err != nil {
+		return false
+	}
+	if f.Re != nil {
+		return f.ID == nil && validResult(f.Type, data) == nil
+	}
+	return f.Type != nil
+}
+
+// queue holds a valid ctl frame until Read takes it.
 func (c *Connection) queue(data []byte) {
 	select {
 	case c.incoming <- data:
@@ -119,13 +125,8 @@ func readFraming(data []byte) (f framing, err error) {
 	return f, err
 }
 
-// response hands a valid response to the request waiting for it; one that
-// also carries an id, or no valid result, is refused.
-func (c *Connection) response(re int64, f framing, data []byte) {
-	if f.ID != nil || validResult(f.Type, data) != nil {
-		c.refuse(data)
-		return
-	}
+// response hands a queued response to the request waiting for it.
+func (c *Connection) response(re int64, data json.RawMessage) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if ch := c.waiting[re]; ch != nil {
@@ -157,9 +158,23 @@ func checkErrorResult(ok *bool, kind *string) error {
 	return nil
 }
 
-// Read returns the next request or push, in channel order. Replies go to
-// the corresponding Request call, not to this stream.
+// Read returns the next request or push in channel order, handing any queued
+// response to its waiting Request before reading on.
 func (c *Connection) Read(ctx context.Context) (json.RawMessage, error) {
+	for {
+		msg, err := c.dequeue(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if re := replyID(msg); re != nil {
+			c.response(*re, msg)
+			continue
+		}
+		return msg, nil
+	}
+}
+
+func (c *Connection) dequeue(ctx context.Context) (json.RawMessage, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -168,6 +183,12 @@ func (c *Connection) Read(ctx context.Context) (json.RawMessage, error) {
 	case msg := <-c.incoming:
 		return msg, nil
 	}
+}
+
+func replyID(msg json.RawMessage) *int64 {
+	var f framing
+	json.Unmarshal(msg, &f)
+	return f.Re
 }
 
 // Send writes a response or push after ctl opens.

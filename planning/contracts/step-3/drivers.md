@@ -54,7 +54,7 @@ and a step 1 acceptance test shows each. A CLI that lacks one waits.
 | an MCP client that takes, at each start, one stdio server with its arguments, and calls that server's tools without a request for each call | the session token names the caller; `post` is the only way an AI speaks (`contracts/mcp-tools.md`) | A3.1, A3.7 |
 | an approval channel that is not a terminal prompt: the CLI's own permission request reaches the node and waits for its answer (section 4, `approvals`) | R-42, R-43 | A4.1, A4.2 |
 | level 1: settings under which the session changes no file | every group session, review session and secretary is level 1 (`sessions.md`) | A4.4 |
-| repository configuration kept out unless the owner enabled it | R-45 | A3.8 |
+| repository configuration loaded in task and review sessions and kept out in group sessions (owner's decision, 2026-11-22) | R-45, Q-24 | A3.8 |
 
 The driver itself is what `steps/step-2-3.md` 3.1 lists, as for the two
 step 1 drivers:
@@ -95,7 +95,8 @@ Rules for a declaration:
   the vendor provides no sandbox (`risks.md` Q-4): the node refuses level 2
   there and says why. WSL2 is a later option.
 - `takeover` is not `none` only if all of it holds. A terminal that drops
-  the level or loads the repository's configuration is no takeover.
+  the level or loads the repository's configuration in a group session is no
+  takeover.
 - A value is declared from what was run with the real CLI. A capability
   known only from documentation is declared as missing until a capture
   shows it.

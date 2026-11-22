@@ -2,6 +2,7 @@ package home
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -131,7 +132,7 @@ func TestRunForgetsAGroupThatDoesNotExist(t *testing.T) {
 	}
 	for re := range int64(3) {
 		l.Cmd(c, re, proto.Envelope{Payload: `{"g":"CQkJCQkJCQkJCQkJCQkJCQ"}`})
-		runSame(t, <-client, any(proto.ErrorResponse{Re: re, Err: proto.WireError{Code: "forbidden", Message: "the command is signed by another device than this connection's"}}))
+		runSame(t, <-client, any(proto.ErrorResponse{Re: re, Err: proto.WireError{Code: "bad_sig", Message: "the envelope of the command was refused"}}))
 		for end := time.Now().Add(10 * time.Second); groups() != 0; {
 			if time.Now().After(end) {
 				t.Fatal("the group's goroutine did not end")
@@ -142,4 +143,28 @@ func TestRunForgetsAGroupThatDoesNotExist(t *testing.T) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	runSame(t, len(l.views), 0)
+}
+
+func TestRunReaderChecksGroupAndAccess(t *testing.T) {
+	owner := identity.Key(ed25519.NewKeyFromSeed(bytes.Repeat([]byte{1}, ed25519.SeedSize)))
+	entry, err := json.Marshal(proto.DeviceEntry{
+		PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: "AAAAAAAAAAAAAAAAAAAAAQ", Timestamp: 1},
+		DeviceChange:  proto.DeviceChange{User: owner.ID(), Version: 1, Op: "add", Device: owner.ID(), Kind: "browser", Name: "b"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	log, err := identity.Replay(owner.ID(), []proto.Envelope{owner.Sign(string(entry))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewState("g", "home", owner.ID())
+	s.Logs[owner.ID()] = log
+	runSame(t, s.Serves(owner.ID()), true)
+	runSame(t, runReader(s, owner.ID()), &Refusal{"not_found", "this node is not home to the group"})
+
+	s.Group.ID = "g"
+	runSame(t, runReader(s, "stranger"), &Refusal{"forbidden", "the connection's device may not read this group"})
+	runSame(t, runReader(s, owner.ID()), (*Refusal)(nil))
+	runSame(t, runErr(7, "not_found", "gone"), proto.ErrorResponse{Re: 7, Err: proto.WireError{Code: "not_found", Message: "gone"}})
 }

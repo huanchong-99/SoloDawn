@@ -1,0 +1,245 @@
+name: Service smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [rebuild]
+    paths:
+      - 'internal/node/service_*'
+      - 'cmd/solodawn/**'
+      - '.github/workflows/service-smoke.yml'
+  push:
+    branches: [rebuild]
+    paths:
+      - 'internal/node/service_*'
+      - 'cmd/solodawn/**'
+      - '.github/workflows/service-smoke.yml'
+
+permissions:
+  contents: read
+
+# Builds the assembled solodawn binary, installs it as a login service, starts
+# it through the system's service manager, checks that it answers "solodawn status"
+# (and keeps PATH on Linux and macOS), and removes the registration.
+jobs:
+  linux:
+    name: smoke (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+
+      - name: Install, start via systemd --user, verify and remove
+        run: |
+          set -euo pipefail
+          unset XDG_CONFIG_HOME XDG_DATA_HOME
+
+          install_dir="$RUNNER_TEMP/solodawn"
+          cli_dir="$RUNNER_TEMP/cli/bin"
+          mkdir -p "$install_dir" "$cli_dir"
+          exe="$install_dir/solodawn"
+
+          go build -o "$exe" ./cmd/solodawn
+
+          expected_path="$cli_dir:$PATH"
+          PATH="$expected_path" "$exe" service install
+
+          unit="$HOME/.config/systemd/user/solodawn.service"
+          link="$HOME/.config/systemd/user/default.target.wants/solodawn.service"
+          test -f "$unit"
+          test -L "$link"
+
+          uid=$(id -u)
+          sudo loginctl enable-linger "$USER"
+          sudo systemctl restart "user@${uid}.service"
+          export XDG_RUNTIME_DIR="/run/user/${uid}"
+          if [[ -S "${XDG_RUNTIME_DIR}/bus" ]]; then
+            export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+          fi
+
+          deadline=$((SECONDS + 15))
+          until status_out=$("$exe" status 2>/dev/null); do
+            if (( SECONDS >= deadline )); then
+              systemctl --user status solodawn.service --no-pager || true
+              journalctl --user -u solodawn.service --no-pager || true
+              "$exe" status
+              exit 1
+            fi
+            sleep 0.2
+          done
+          test -n "$status_out"
+          echo "solodawn status: $status_out"
+
+          systemctl --user is-active --quiet solodawn.service
+          pid=$(systemctl --user show --property=MainPID --value solodawn.service)
+          test -n "$pid" && test "$pid" -gt 0
+
+          got_path=$(tr '\0' '\n' < "/proc/$pid/environ" | sed -n 's/^PATH=//p')
+          if [[ "$got_path" != "$expected_path" ]]; then
+            printf 'got PATH=%s\nwant PATH=%s\n' "$got_path" "$expected_path" >&2
+            exit 1
+          fi
+
+          "$exe" service remove
+          if [[ -e "$unit" || -L "$link" ]]; then
+            echo "systemd unit or symlink still exists after service remove" >&2
+            exit 1
+          fi
+          systemctl --user stop solodawn.service 2>/dev/null || true
+
+      - name: Clean up systemd user unit on failure
+        if: failure()
+        run: |
+          uid=$(id -u)
+          export XDG_RUNTIME_DIR="/run/user/${uid}"
+          systemctl --user stop solodawn.service 2>/dev/null || true
+          rm -f "$HOME/.config/systemd/user/default.target.wants/solodawn.service" \
+                "$HOME/.config/systemd/user/solodawn.service"
+          systemctl --user daemon-reload 2>/dev/null || true
+
+  macos:
+    name: smoke (macos-latest)
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+
+      - name: Install, bootstrap via launchd, verify and remove
+        run: |
+          set -euo pipefail
+
+          install_dir="$RUNNER_TEMP/solodawn"
+          cli_dir="$RUNNER_TEMP/cli/bin"
+          mkdir -p "$install_dir" "$cli_dir"
+          exe="$install_dir/solodawn"
+
+          go build -o "$exe" ./cmd/solodawn
+
+          expected_path="$cli_dir:$PATH"
+          PATH="$expected_path" "$exe" service install
+
+          plist="$HOME/Library/LaunchAgents/org.solodawn.node.plist"
+          test -f "$plist"
+
+          uid=$(id -u)
+          if launchctl bootstrap "gui/$uid" "$plist"; then
+            domain="gui/$uid"
+          else
+            launchctl bootstrap "user/$uid" "$plist"
+            domain="user/$uid"
+          fi
+
+          deadline=$((SECONDS + 15))
+          until status_out=$("$exe" status 2>/dev/null); do
+            if (( SECONDS >= deadline )); then
+              launchctl print "$domain/org.solodawn.node" || true
+              "$exe" status
+              exit 1
+            fi
+            sleep 0.2
+          done
+          test -n "$status_out"
+          echo "solodawn status: $status_out"
+
+          pid=$(launchctl print "$domain/org.solodawn.node" | awk '$1 == "pid" && $2 == "=" { print $3; exit }')
+          test -n "$pid" && test "$pid" -gt 0
+
+          cmdline=$(ps eww -p "$pid" -o command=)
+          if [[ " $cmdline " != *" PATH=$expected_path "* ]]; then
+            echo "process command+env did not contain expected PATH:" >&2
+            echo "want PATH=$expected_path" >&2
+            echo "got: $cmdline" >&2
+            exit 1
+          fi
+
+          "$exe" service remove
+          if [[ -e "$plist" ]]; then
+            echo "launchd plist still exists after service remove" >&2
+            exit 1
+          fi
+          launchctl bootout "$domain/org.solodawn.node" 2>/dev/null || true
+
+      - name: Clean up launchd agent on failure
+        if: failure()
+        run: |
+          uid=$(id -u)
+          launchctl bootout "gui/$uid/org.solodawn.node" 2>/dev/null || true
+          launchctl bootout "user/$uid/org.solodawn.node" 2>/dev/null || true
+          rm -f "$HOME/Library/LaunchAgents/org.solodawn.node.plist"
+
+  windows:
+    name: smoke (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - run: git config --global core.autocrlf false
+        shell: pwsh
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+
+      - name: Install, run scheduled task, verify and remove
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installDir = Join-Path $env:RUNNER_TEMP 'solodawn'
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+          $exe = Join-Path $installDir 'solodawn.exe'
+
+          & go build -o $exe ./cmd/solodawn
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $taskName = "SoloDawn-$sid"
+          try {
+            & $exe service install
+            if ($LASTEXITCODE -ne 0) { throw "solodawn service install exited $LASTEXITCODE" }
+
+            $null = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop
+            Start-ScheduledTask -TaskPath '\' -TaskName $taskName
+
+            $deadline = (Get-Date).AddSeconds(20)
+            $statusOut = $null
+            while ($true) {
+              $out = & $exe status 2>$null
+              if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace("$out")) {
+                $statusOut = "$out".Trim()
+                break
+              }
+              if ((Get-Date) -ge $deadline) {
+                Get-ScheduledTask -TaskPath '\' -TaskName $taskName | Format-List * | Out-String | Write-Host
+                Get-ScheduledTaskInfo -TaskPath '\' -TaskName $taskName | Format-List * | Out-String | Write-Host
+                & $exe status
+                throw 'timed out waiting for solodawn status from scheduled task'
+              }
+              Start-Sleep -Milliseconds 250
+            }
+            Write-Host "solodawn status: $statusOut"
+
+            & $exe service remove
+            if ($LASTEXITCODE -ne 0) { throw "solodawn service remove exited $LASTEXITCODE" }
+            if ($null -ne (Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue)) {
+              throw "scheduled task $taskName still exists after solodawn service remove"
+            }
+          } finally {
+            Unregister-ScheduledTask -TaskPath '\' -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+            Get-CimInstance Win32_Process -Filter "Name = 'solodawn.exe'" -ErrorAction SilentlyContinue |
+              Where-Object { $_.ExecutablePath -eq $exe } |
+              ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          }

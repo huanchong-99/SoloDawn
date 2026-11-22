@@ -40,12 +40,9 @@ func TestRunPushesTheRowsEachClientAskedFor(t *testing.T) {
 	})
 	w, full := runFounded(t, tables)
 	host, idle, guestPeer := w.attach(laptop), w.attach(laptop), w.attach(guest)
-	if _, ok := w.loop.Watch(guestPeer.conn, groupID, false); ok {
-		t.Fatal("a device of no member watches the group")
-	}
-	full.settled(groupID)
-	seq, ok := w.loop.Watch(host.conn, groupID, true)
-	equal(t, []any{seq, ok}, []any{int64(3), true})
+	guestPeer.syncRefused(groupID, "forbidden")
+	full.watch(groupID, false)
+	equal(t, host.watch(groupID, true), int64(3))
 
 	full.does(groupID, "jump", ``)
 	added := deviceRow(browser, browser, 4, "add", device(8))
@@ -93,12 +90,11 @@ func TestRunStopsPushingToADeviceTheGroupNoLongerServes(t *testing.T) {
 	}
 	w, p := runFounded(t, tables)
 	host, visit := w.attach(laptop), w.attach(guest)
-	w.loop.Watch(host.conn, groupID, false)
+	host.watch(groupID, false)
 	w.loop.Inbox(host.conn)
 	p.does(groupID, "jump", `,"what":"joins"`)
 	host.next()
-	seq, ok := w.loop.Watch(visit.conn, groupID, false)
-	equal(t, []any{seq, ok}, []any{int64(5), true})
+	equal(t, visit.watch(groupID, false), int64(5))
 	p.does(groupID, "note", `,"text":"for everyone"`)
 	note := runRows(groupID, runNote(runID(w.nonce.Load()), 6, "for everyone"))
 	host.gets(note)
@@ -114,12 +110,11 @@ func TestRunStopsPushingToADeviceTheGroupNoLongerServes(t *testing.T) {
 	p.does(groupID, "note", `,"text":"not for a connection that did not ask again"`)
 	host.next()
 	visit.quiet()
-	seq, ok = w.loop.Watch(visit.conn, groupID, false)
-	equal(t, []any{seq, ok}, []any{int64(9), true})
+	equal(t, visit.watch(groupID, false), int64(9))
 
 	// The laptop is revoked: its open connection gets no row and no item.
 	p.does(groupID, "jump", `,"what":"wakes"`)
-	equal(t, strings.HasPrefix(host.next(), `{"Group":"`+groupID+`","Items":[{"ID":1,`), true)
+	equal(t, strings.HasPrefix(host.next(), `{"t":"inbox","g":"`+groupID+`","items":[{"item":{"item":1,`), true)
 	p.does(groupID, "jump", `,"what":"revokes"`)
 	visit.next()
 	p.does(groupID, "note", `,"text":"not for a revoked device"`)
@@ -127,9 +122,7 @@ func TestRunStopsPushingToADeviceTheGroupNoLongerServes(t *testing.T) {
 	p.does(groupID, "jump", `,"what":"wakes"`)
 	w.loop.Inbox(host.conn)
 	host.quiet()
-	if _, ok := w.loop.Watch(host.conn, groupID, false); ok {
-		t.Fatal("a revoked device watches the group")
-	}
+	host.syncRefused(groupID, "forbidden")
 	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM inbox"), 2)
 }
 
@@ -145,7 +138,7 @@ func TestRunSplitsTheRowsOfALargeResult(t *testing.T) {
 		return res
 	})
 	_, p := runFounded(t, tables)
-	p.settled(groupID)
+	p.watch(groupID, false)
 	p.does(groupID, "jump", ``)
 	var counts []int
 	for range 2 {
@@ -171,7 +164,7 @@ func runWake(s *home.State, c home.Command) (home.Result, *home.Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return home.Result{}, refusal
 	}
-	item := home.Item{AI: aiID, Why: p.Why, Task: "t1", Msg: string(c.Nonce), Commit: "9f2c1ab", PR: 7, Jump: true, Code: "c", Detail: "d", Cause: &c.Env}
+	item := home.Item{AI: aiID, Why: p.Why, Task: "t1", Msg: string(c.Nonce), Commit: "9f2c1ab", PR: 7, Jump: true, Code: "c", Detail: "d"}
 	if p.Hold != 0 {
 		item.NotBefore = c.Now + p.Hold
 	}
@@ -188,24 +181,28 @@ func TestRunQueuesAndSendsInboxItems(t *testing.T) {
 	tables.Commands["forget"] = runFixed(func(s *home.State, c home.Command) home.Result { return home.Result{Retire: []int64{2}} })
 	w, p := runFounded(t, tables)
 	host := w.attach(laptop)
-	w.loop.Watch(host.conn, groupID, true)
-	sent := map[int64]string{}
-	wake := func(hold int64) (frame string) {
-		p.does(groupID, "jump", fmt.Sprintf(`,"hold":%d,"why":"mention"`, hold))
-		env := runQuery[string](t, w.db, "SELECT cause FROM inbox ORDER BY id DESC LIMIT 1")
-		var cause proto.Envelope
-		equal(t, json.Unmarshal([]byte(env), &cause), nil)
-		item := home.Item{AI: aiID, Why: "mention", Task: "t1", Msg: runID(w.nonce.Load()), Commit: "9f2c1ab", PR: 7, Jump: true, Code: "c", Detail: "d", Cause: &cause}
-		if hold != 0 {
-			item.NotBefore = w.clock.Load() + hold
+	host.watch(groupID, true)
+	items := map[int64]proto.Item{}
+	inbox := func(seq int64, ids ...int64) string {
+		task := runTask("t1", seq)
+		batch := make([]proto.InboxItem, len(ids))
+		for i, id := range ids {
+			batch[i] = proto.InboxItem{Item: items[id], Task: &task}
 		}
-		n := int64(len(sent) + 1)
-		sent[n] = runFrame(home.ItemsPush{Group: groupID, Items: []home.QueuedItem{{ID: n, Item: item}}})
-		return sent[n]
+		return runFrame(proto.Inbox{Type: "inbox", Group: proto.ID(groupID), Items: batch})
+	}
+	wake := func(hold int64, seq int64) string {
+		p.does(groupID, "jump", fmt.Sprintf(`,"hold":%d,"why":"mention"`, hold))
+		n := int64(len(items) + 1)
+		items[n] = proto.Item{
+			Item: n, AI: proto.ID(aiID), Why: "mention", Task: "t1", Msg: proto.ID(runID(w.nonce.Load())),
+			Commit: "9f2c1ab", PR: 7, Jump: true, Code: "c", Detail: "d",
+		}
+		return inbox(seq, n)
 	}
 
 	// Nobody takes the items yet: the first one waits in the store.
-	wake(0)
+	wake(0, 4)
 	host.gets(runRows(groupID, runTask("t1", 4)))
 	var stored struct {
 		g, ai, host, why, msg, task, commit string
@@ -224,13 +221,13 @@ func TestRunQueuesAndSendsInboxItems(t *testing.T) {
 	// after the rows of its result. A connection of another device gets none.
 	w.loop.Inbox(host.conn)
 	w.loop.Inbox(p.conn)
-	host.gets(sent[1])
-	second := wake(0)
+	host.gets(inbox(4, 1))
+	second := wake(0, 5)
 	host.gets(runRows(groupID, runTask("t1", 5)), second)
 	p.quiet()
 
 	// A held item is sent when the clock reaches its time, and once.
-	held := wake(1000)
+	held := wake(1000, 6)
 	host.gets(runRows(groupID, runTask("t1", 6)))
 	w.loop.Tick(time.UnixMilli(clock + 999))
 	host.quiet()
@@ -239,29 +236,29 @@ func TestRunQueuesAndSendsInboxItems(t *testing.T) {
 	w.loop.Tick(time.UnixMilli(clock + 2000))
 	host.quiet()
 
-	// On a hello every unacknowledged item that is due goes out again,
-	// oldest first; one that was acknowledged or retired does not.
+	// On a hello every unacknowledged item that is due goes out again in one
+	// inbox frame, oldest first; one that was acknowledged or retired does not.
 	w.loop.Inbox(host.conn)
-	host.gets(sent[1], sent[2])
+	host.gets(inbox(6, 1, 2))
 	host.quiet()
 	w.clock.Store(clock + 1000)
 	w.loop.Inbox(host.conn)
-	host.gets(sent[1], sent[2], sent[3])
+	host.gets(inbox(6, 1, 2, 3))
 	runExec(t, w.db, "DELETE FROM inbox WHERE id=1")
 	p.does(groupID, "forget", ``)
 	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM inbox"), 1)
 	w.loop.Inbox(host.conn)
-	host.gets(sent[3])
+	host.gets(inbox(6, 3))
 	// A second connection of the host takes them as well; the first is not
 	// sent an item twice for that.
 	again := w.attach(laptop)
 	w.loop.Inbox(again.conn)
-	again.gets(sent[3])
+	again.gets(inbox(6, 3))
 	host.quiet()
 
 	// An item in the store that cannot be read is reported and left out, once
 	// for a connection; the others are sent.
-	last := wake(0)
+	last := wake(0, 7)
 	host.gets(runRows(groupID, runTask("t1", 7)), last)
 	again.gets(last)
 	env := runQuery[string](t, w.db, "SELECT env FROM inbox WHERE id=3")
@@ -275,7 +272,7 @@ func TestRunQueuesAndSendsInboxItems(t *testing.T) {
 	equal(t, len(w.reports), 0)
 	runExec(t, w.db, "UPDATE inbox SET env=? WHERE id=3", env)
 	w.loop.Inbox(host.conn)
-	host.gets(sent[3], last)
+	host.gets(inbox(7, 3, 4))
 
 	// A queue that cannot be read is reported, and read again on the next tick.
 	runExec(t, w.db, "DROP TABLE inbox")
@@ -301,7 +298,7 @@ func TestRunSendsAHeldItemOnATick(t *testing.T) {
 	p.does(groupID, "note", `,"text":"no item"`)
 	host.quiet()
 	w.loop.Tick(time.UnixMilli(clock + 600))
-	equal(t, strings.HasPrefix(host.next(), `{"Group":"`+groupID+`","Items":[{"ID":1,"AI":"`+aiID+`","Why":"mention"`), true)
+	equal(t, strings.HasPrefix(host.next(), `{"t":"inbox","g":"`+groupID+`","items":[{"item":{"item":1,"ai":"`+aiID+`","why":"mention"`), true)
 }
 
 // An item without the fields its why does not have is stored without them,
@@ -321,9 +318,9 @@ func TestRunStoresAnItemAsItsResultLeavesIt(t *testing.T) {
 	var empty int
 	var host string
 	err := w.db.Write(func(tx *store.Tx) error {
-		return tx.QueryRow("SELECT host, (msg IS NULL)+(task IS NULL)+(commit_id IS NULL)+(cause IS NULL) FROM inbox").Scan(&host, &empty)
+		return tx.QueryRow("SELECT host, (msg IS NULL)+(task IS NULL)+(commit_id IS NULL) FROM inbox").Scan(&host, &empty)
 	})
-	equal(t, []any{err, host, empty}, []any{nil, tablet.ID(), 4})
+	equal(t, []any{err, host, empty}, []any{nil, tablet.ID(), 3})
 }
 
 // State.Wakes holds, by AI, when each item of the last hour is due: the
@@ -382,11 +379,12 @@ func TestRunGivesUpAClientThatStopsReading(t *testing.T) {
 			tables.Commands["jump"] = runFixed(func(s *home.State, c home.Command) home.Result { return home.Result{GroupsChanged: true} })
 			w, p := runFounded(t, tables)
 			inner := runNewClient()
-			inner.hold = make(chan struct{})
 			client := &runClosing{runClient: inner, closed: make(chan struct{})}
 			slow := w.attachClient(laptop, client, inner)
-			w.loop.Watch(slow.conn, groupID, false)
-			p.settled(groupID)
+			slow.watch(groupID, false)
+			<-inner.started
+			inner.hold = make(chan struct{})
+			p.watch(groupID, false)
 			note := func(n int) {
 				for range n {
 					p.does(groupID, "note", `,"text":"x"`)
@@ -412,9 +410,8 @@ func TestRunGivesUpAClientThatStopsReading(t *testing.T) {
 			slow.gets(runWelcomeFrame(proto.GroupSummary{Group: groupID, Name: "Website", Seq: 3}))
 			time.Sleep(20 * time.Millisecond)
 			equal(t, len(inner.got), 0)
-			if _, ok := w.loop.Watch(slow.conn, groupID, false); ok {
-				t.Fatal("a connection that is gone watches the group")
-			}
+			w.loop.Sync(slow.conn, proto.Sync{Request: proto.Request{Type: "sync", ID: 99}, Group: groupID, Since: 3})
+			equal(t, len(inner.got), 0)
 		})
 	}
 }
@@ -430,7 +427,7 @@ func TestRunEndsAConnection(t *testing.T) {
 	closing := func() (*runPeer, *runClosing) {
 		c := &runClosing{runClient: runNewClient(), closed: make(chan struct{})}
 		peer := w.attachClient(laptop, c, c.runClient)
-		w.loop.Watch(peer.conn, groupID, false)
+		peer.watch(groupID, false)
 		return peer, c
 	}
 	open := func(c *runClosing) {
@@ -448,7 +445,7 @@ func TestRunEndsAConnection(t *testing.T) {
 
 	refusing, refused := closing()
 	plain := w.attach(laptop)
-	w.loop.Watch(plain.conn, groupID, false)
+	plain.watch(groupID, false)
 	refused.refuse.Store(true)
 	plain.client.refuse.Store(true)
 	note()
@@ -471,7 +468,7 @@ func TestRunEndsAConnection(t *testing.T) {
 	runWait(t, left.conn.Gone())
 	note()
 	w.loop.Inbox(left.conn)
-	p.settled(groupID)
+	w.idle()
 	open(detached)
 	equal(t, online.all()[1:], []string{"true", "true", "true", "false"})
 	// Nothing was sent after the detach.
@@ -510,7 +507,7 @@ func TestRunRunsTheTimersAndTheEvents(t *testing.T) {
 		return home.Result{Rows: []home.Row{home.RowOf(runNote("from-event", 0, fmt.Sprint(event)))}}
 	})
 	w, p := runFounded(t, tables)
-	p.settled(groupID)
+	p.watch(groupID, false)
 
 	w.loop.Tick(time.UnixMilli(clock))
 	p.quiet()
@@ -591,7 +588,7 @@ func TestRunTicksByItsClock(t *testing.T) {
 	})
 	once.Store(true)
 	_, p := runFounded(t, tables, func(cfg *home.LoopConfig) { cfg.Every = time.Millisecond })
-	p.settled(groupID)
+	p.watch(groupID, false)
 	once.Store(false)
 	p.gets(runRows(groupID, runNote("ticked", 4, "by the clock")))
 }
@@ -627,7 +624,7 @@ func TestRunCallsTheHooksAfterTheCommit(t *testing.T) {
 	w, p = runFounded(t, tables)
 	p.does(groupID, "note", `,"text":"first"`)
 	p.gets(`{"re":50,"ok":true}`)
-	p.settled(groupID)
+	w.idle()
 	equal(t, seen.all(), []string{
 		"a: 3 rows", "a: 1 rows", "b: seq 4, stored 1, online true", "0 frames sent", "groups 1",
 		"a: 1 rows", "b: seq 5, stored 1, online true", "event first",
@@ -673,20 +670,23 @@ func TestRunAClientMayCallBackWhileItIsSent(t *testing.T) {
 	left.Store(40)
 	var reader *runPeer
 	client.during = func(frame any) {
-		if _, rows := frame.(proto.Rows); !rows || left.Add(-1) < 0 {
+		r, rows := frame.(proto.Rows)
+		if !rows || left.Add(-1) < 0 {
 			return
 		}
 		runExec(t, w.db, "INSERT INTO setting(key, value) VALUES(?, 'x')", fmt.Sprint(left.Load()))
 		w.loop.Groups(reader.conn)
-		w.loop.Watch(reader.conn, groupID, false)
+		var last proto.RowHeader
+		equal(t, json.Unmarshal(r.Rows[len(r.Rows)-1], &last), nil)
+		w.loop.Sync(reader.conn, proto.Sync{Request: proto.Request{Type: "sync", ID: 99}, Group: groupID, Since: last.Seq})
 		w.loop.Cmd(reader.conn, 100, w.cmd(laptop, groupID, "note", `,"text":"again"`))
 	}
 	reader = w.attachClient(laptop, client, client)
-	w.loop.Watch(reader.conn, groupID, false)
+	reader.watch(groupID, false)
 	p.does(groupID, "note", `,"text":"first"`)
 	for range 40 {
-		rows, answer := reader.next(), reader.next()
-		equal(t, []bool{strings.HasPrefix(rows, `{"t":"rows"`), answer == `{"re":100,"ok":true}`}, []bool{true, true})
+		rows, synced, answer := reader.next(), reader.next(), reader.next()
+		equal(t, []bool{strings.HasPrefix(rows, `{"t":"rows"`), strings.HasPrefix(synced, `{"t":"synced","re":99,`), answer == `{"re":100,"ok":true}`}, []bool{true, true, true})
 	}
 	equal(t, strings.HasPrefix(reader.next(), `{"t":"rows"`), true)
 	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM row WHERE r='note'"), 41)
@@ -697,7 +697,7 @@ func TestRunAClientMayCallBackWhileItIsSent(t *testing.T) {
 // once, and its entries do nothing.
 func TestRunACloseEndsEverything(t *testing.T) {
 	w, p := runFounded(t, runTables())
-	p.settled(groupID)
+	w.idle()
 	p.send(groupID, "note", `,"text":"before the close"`)
 	w.loop.Close()
 	w.loop.Close()
@@ -715,9 +715,52 @@ func TestRunACloseEndsEverything(t *testing.T) {
 	w.loop.Inbox(late.conn)
 	w.loop.Detach(late.conn)
 	equal(t, w.loop.Event("none", nil), false)
-	if _, ok := w.loop.Watch(late.conn, groupID, false); ok {
-		t.Fatal("a closed loop has a group to watch")
-	}
+	w.loop.Sync(late.conn, proto.Sync{Request: proto.Request{Type: "sync", ID: 99}, Group: groupID})
 	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM row"), 4)
 	equal(t, len(late.client.got), 0)
+}
+
+// Close waits for an in-flight Client.Send on attached and detached connections.
+func TestRunCloseWaitsForConnectionSends(t *testing.T) {
+	checkCloseWaitsForSend(t, false)
+	checkCloseWaitsForSend(t, true)
+}
+
+func checkCloseWaitsForSend(t *testing.T, detachFirst bool) {
+	t.Helper()
+	db, err := store.Open(":memory:")
+	equal(t, err, nil)
+	loop, err := home.StartLoop(home.LoopConfig{Store: db, Home: node.ID(), Owner: browser.ID(), Logs: runLogs(t), Tables: runTables()})
+	equal(t, err, nil)
+
+	var sentDone atomic.Bool
+	client := runNewClient()
+	client.hold = make(chan struct{})
+	client.during = func(any) {
+		runExec(t, db, "INSERT INTO setting(key, value) VALUES('during', '1')")
+		sentDone.Store(true)
+	}
+	conn := loop.Attach(browser.ID(), client)
+	idle := loop.Attach(laptop.ID(), runNewClient())
+	loop.Welcome(conn, runWelcome)
+	runWait(t, client.started)
+	if detachFirst {
+		loop.Detach(conn)
+	}
+
+	closed := make(chan struct{}) // single reader: checkCloseWaitsForSend
+	go func() {
+		loop.Close()
+		db.Close()
+		close(closed)
+	}()
+	runWait(t, idle.Gone())
+	select {
+	case <-closed:
+		t.Fatal("Close returned while Client.Send was still running")
+	default:
+	}
+	close(client.hold)
+	runWait(t, closed)
+	equal(t, sentDone.Load(), true)
 }

@@ -14,8 +14,15 @@ import (
 func (p *Peer) Connect(ctx context.Context, device string, present <-chan struct{}, session func(*Connection)) {
 	delay := time.Second
 	for ctx.Err() == nil {
-		delay = backoff(ctx, present, after(delay, p.attempt(ctx, device, session)))
+		delay = NextDelay(ctx, present, delay, p.attempt(ctx, device, session))
 	}
+}
+
+// NextDelay waits out the reconnect back-off after a connection that stayed
+// open for open and returns the next delay, resetting to 1 second after 60
+// seconds open.
+func NextDelay(ctx context.Context, present <-chan struct{}, delay, open time.Duration) time.Duration {
+	return backoff(ctx, present, after(delay, open))
 }
 
 // after is the back-off that follows an attempt whose ctl stayed open for
