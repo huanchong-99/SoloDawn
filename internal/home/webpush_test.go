@@ -310,7 +310,7 @@ func TestWebPushReminderKindsTitlesAndNoLeak(t *testing.T) {
 	wpushFoundGroup(t, w, groupID, "Website <Alpha> & Co", 10)
 
 	k := wpushMakeKeys(4, srv.URL+"/kinds")
-	wpushCmdOK(t, w, wpushBrowserOne, wpushSignOn(wpushBrowserOne, 1, groupID, k, []string{"mention", "approval", "decision", "brief", "done"}))
+	wpushCmdOK(t, w, wpushBrowserOne, wpushSignOn(wpushBrowserOne, 1, groupID, k, []string{"mention", "approval", "decision", "brief", "done", "confirm"}))
 
 	secretCmd := "curl -H 'Authorization: Bearer topsecret' https://internal.example"
 	secretText := "Private approval explanation text"
@@ -351,6 +351,12 @@ func wpushReminderFixtures(t *testing.T, ownerMem, secretCmd, secretText string)
 		Kind: "text", Text: "Hello AI", Mentions: []string{wpushAIMem}, Body: json.RawMessage(`{}`),
 	}
 	rows := []home.Row{
+		home.RowOf(proto.MsgRow{
+			RowHeader: proto.RowHeader{Type: "msg", ID: id(27)}, Group: groupID, By: "system",
+			Kind: "confirm", Text: secretText,
+			Body:  briefRaw(t, proto.ConfirmBody{What: "direct", AI: wpushAIMem, To: []string{wpushBrowserOne.ID()}}),
+			State: &proto.CardState{Status: "pending"},
+		}),
 		home.RowOf(taskRow),
 		home.RowOf(updatedCard),
 		home.RowOf(aiBrief),
@@ -396,6 +402,7 @@ func wpushReminderFixtures(t *testing.T, ownerMem, secretCmd, secretText string)
 		}),
 	}
 	want := map[proto.ID]proto.Reminder{
+		proto.ID(id(27)): {Group: proto.ID(groupID), Msg: proto.ID(id(27)), GroupName: grpName, Kind: "confirm", Who: "Codex"},
 		proto.ID(id(20)): {Group: proto.ID(groupID), Msg: proto.ID(id(20)), GroupName: grpName, Kind: "approval", Who: "Codex", Title: strings.Repeat("界", 80)},
 		proto.ID(id(21)): {Group: proto.ID(groupID), Msg: proto.ID(id(21)), GroupName: grpName, Kind: "approval", Who: "Codex"},
 		proto.ID(id(22)): {Group: proto.ID(groupID), Msg: proto.ID(id(22)), GroupName: grpName, Kind: "decision", Who: "Codex", Title: strings.Repeat("é", 80)},

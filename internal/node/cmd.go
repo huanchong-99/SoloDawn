@@ -53,10 +53,13 @@ func startBackgroundNode() error {
 // Command opens a local command connection. Pair always sends the name
 // field, and the rendezvous field only when the option was given.
 type Command struct {
-	Cmd        string  `json:"cmd"`
-	Secret     string  `json:"secret,omitempty"`
-	Name       *string `json:"name,omitempty"`
-	Rendezvous string  `json:"rendezvous,omitempty"`
+	Cmd        string   `json:"cmd"`
+	Secret     string   `json:"secret,omitempty"`
+	Name       *string  `json:"name,omitempty"`
+	Rendezvous string   `json:"rendezvous,omitempty"`
+	Group      proto.ID `json:"g,omitempty"`
+	File       string   `json:"file,omitempty"`
+	To         string   `json:"to,omitempty"`
 }
 
 // Run submits a command to the user's running node and prints each text line

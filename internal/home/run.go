@@ -92,6 +92,7 @@ type Loop struct {
 	groups map[string]*runGroup
 	conns  map[*Conn]bool
 	views  map[string]runView // what each group that exists shows in groups
+	moved  map[string]string
 }
 
 // StartLoop loads every group and the persisted browser push subscriptions
@@ -101,6 +102,9 @@ func StartLoop(cfg LoopConfig) (*Loop, error) {
 		groups: map[string]*runGroup{}, conns: map[*Conn]bool{}, views: map[string]runView{}}
 	states, err := l.load()
 	if err != nil {
+		return nil, err
+	}
+	if err := l.loadMoved(); err != nil {
 		return nil, err
 	}
 	if err := l.wpushLoad(); err != nil {
@@ -201,11 +205,11 @@ func (l *Loop) adopt(s *State) {
 // route hands a job to the goroutine of a group, which it starts for a
 // group that has none: the group of a group create. Such a goroutine ends
 // when its jobs are done and the group still does not exist (retire).
-func (l *Loop) route(group string, job func(g *runGroup)) {
+func (l *Loop) route(group string, job func(g *runGroup)) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.closed {
-		return
+		return false
 	}
 	g := l.groups[group]
 	if g == nil {
@@ -213,6 +217,7 @@ func (l *Loop) route(group string, job func(g *runGroup)) {
 		g.jobs.push(func() { l.adopt(g.state) }) // not under l.mu: Logs is the node's code
 	}
 	g.jobs.push(func() { job(g) })
+	return true
 }
 
 // retire ends the goroutine of a group that does not exist once it has no
@@ -350,7 +355,11 @@ func (l *Loop) Cmd(c *Conn, re int64, env proto.Envelope) {
 		l.stray(c, re, env)
 		return
 	}
-	l.route(group, func(g *runGroup) { g.command(c, re, env) })
+	l.route(group, func(g *runGroup) {
+		if !l.replyMoved(c, re, group) {
+			g.command(c, re, env)
+		}
+	})
 }
 
 // runNowhere is the id of the state that answers a command without a g. It

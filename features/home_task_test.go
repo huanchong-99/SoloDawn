@@ -39,6 +39,7 @@ func (d *homeTaskStore) TypedNotes(string) []proto.NoteRow         { return nil 
 func (d *homeTaskStore) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d *homeTaskStore) Pending() []proto.MsgRow                   { return d.pending }
 func (d *homeTaskStore) Queued() []store.Item                      { return d.queued }
+func (d *homeTaskStore) OtherMember(string) bool                   { return false }
 
 func (d *homeTaskStore) Receipt(signer, nonce string) (store.Outcome, error) {
 	out, ok := d.outcomes[signer+" "+nonce]

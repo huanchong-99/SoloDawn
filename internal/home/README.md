@@ -33,8 +33,10 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | do after a commit what a pure function cannot, such as a Web Push | a function `func(s *State, res Result)` and `After.Add(name, f)` in its file's `init` |
 | know in a hook which devices are connected | `s.Online[device]` |
 | answer with result fields | `Result.Answer.Num`, `.Passed`, `.Round`, `.ID`, `.Replaced`, and for `invite`, `Result.Link` and `Result.Expires` |
-| create or replay an invitation | `Result.InviteBy` (the inviting admin's member id) with `LoopConfig.Invite` / `State.Invite` (`Inviter`) |
-| handle a joining connection | `c.Joining` (`*Joining`: `Group`, `By`, `Open`, `Log`, `Admit`), attached with `conn.SetJoining(fn)` on `Loop` or passed to `Commands.ApplyJoining`; `Result.InviteUsed` marks an accepted `join` that consumes the invitation |
+| create or replay an invitation | `Result.InviteBy` (the inviting admin's member id) with `LoopConfig.Invite` (`Inviter`) |
+| handle a joining connection | `c.Joining`, attached with `conn.SetJoining(fn)` on `Loop`; `Result.InviteUsed` marks consumption |
+| admit or remove a person, or change their role | `cmd_people.go`: `join`, human `member/set` and `member/remove` |
+| check another group's membership in a transaction | `Disk.OtherMember(user)` excludes the current group |
 | refuse | `&Refusal{Code: "conflict", Msg: "…"}`, with a code of [datachannel](../../planning/contracts/datachannel.md) section 9 |
 | read a message, a note, a thread, the pending cards, the queued items | `c.Disk` in a command, the `Disk` argument of a timer or a handler |
 | add a rule that the clock sets off | a function `func(s *State, d Disk, now int64) Result` and `Timers.Add(name, f)` in its file's `init` |
@@ -56,6 +58,10 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | mark a disconnected host's AIs offline | `HostOfflineEvent`, fired by `Loop` when a device's last `Inbox` connection ends |
 | move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
 | push to a client | the `Client` interface |
+
+Joining an existing person writes no rows and does not consume the invitation. Removing a
+person retires their AIs and group devices and drops the group's in-memory device log. Only the
+last local membership deletes the node-wide device log and push subscriptions.
 
 ## Contract
 
@@ -95,8 +101,9 @@ included, with the command's own `ts`. For an accepted `invite` (`Result.InviteB
 home calls `Inviter.Invite(group, by, signer, nonce)` (on a `Loop`, on the group's goroutine outside
 `Store.Write` before writing the `{ok: true}` receipt, so an `Invite` error leaves no receipt and
 never deadlocks `Store.Write`), and carries `Link` and `Expires` on `Result` without storing them in
-the receipt. On a joining connection, when an accepted command commits on `Loop`, `Joining.Admit(res.InviteUsed)` runs before the `ok` answer frame is queued. A repeated refusal is answered with its code and a fixed
-`msg`, because a receipt holds no sentence.
+the receipt. On a joining connection, when an accepted command commits on `Loop`,
+`Joining.Admit(res.InviteUsed)` runs before the `ok` answer frame is queued. A repeated refusal
+is answered with its code and a fixed `msg`, because a receipt holds no sentence.
 
 **Who.** `Who` carries the signer, the person whose log holds it, that person's member id and the
 AI of `as`. A signer without `as` is a person and, where a command's table names a host, also that
@@ -198,6 +205,9 @@ tests start with `TestDevice` and `dev`. Sync takes the names that start with `s
 and its test functions start with `TestSync`; it exports `Loop.Sync`. `fetch.go` exports `Fetch`
 and `Loop.Fetch`, takes the names that start with `fet`, its tests too, and its test functions
 start with `TestFetch`.
+`export.go` exports `Loop.ExportGroup` and `Loop.ImportGroup`. The home answers `cmd`, `sync`,
+and `fetch` for moved groups with `moved` and the destination device ID from the `moved` map
+loaded by `StartLoop`.
 The checks and reviews (`cmd_review.go`) take the names that start with `rev`, their tests too, and
 their test functions start with `TestReviewCmd`. The merges and summaries (`cmd_merge.go`) take the
 names that start with `mrg`, their tests too, and their test functions start with `TestMerge`.
@@ -211,7 +221,7 @@ start with `rnd`, their tests too, and their test functions start with `TestRoun
 start with `TestRetention`.
 The step-2 people seam (`people_seam.go`) takes the unexported names that start with `seam` and
 `keyInvite` / `keyJoin` (leaving `ppl` for `cmd_people.go`), and exports `Joining`, `InviteLink`,
-`Inviter`, `(*Conn).SetJoining` and `Table.ApplyJoining`. Web Push (`webpush.go`) takes the names that start with
+`Inviter` and `(*Conn).SetJoining`. Web Push (`webpush.go`) takes the names that start with
 `wpush`, its tests too, and its test functions start with `TestWebPush`.
 Style presets (`preset.go`) take the names that start with `preset`, their tests too, and their test
 functions start with `TestPreset`.
@@ -456,6 +466,20 @@ function that moves a task calls it and adds nothing to its rules.
   id `n`.
 
 ## Briefs
+
+`cmd_confirm.go` gates mention and call delivery by the AI owner's word
+([step-2 confirmations](../../planning/contracts/step-2/confirm.md) sections 2–5).
+Personal accounts require the owner; team and API-key accounts also accept their allow list.
+Task participants receive thread messages without a new card. Otherwise each AI gets a pending
+`direct` or `ask` card, on the main line and also in the request's thread. Only its owner may
+confirm or deny it; a confirmation delivers once. A denied call becomes `denied` and gives its
+caller a `reply` carrying the card, plus a secretary notice. Denied direct requests from current
+AI members also notify the secretary. Human `post/confirm` requests create `watch` cards; confirming one
+queues a host-only `watch` item, outside the wake cap. The confirmation timer expires cards when
+the AI, watch requester or retained request disappears. Role confirmation and waits belong to
+T2-2b. Approval decisions require both the card's approvers and the AI row's current approvers.
+
+Watch admission checks `body.what`, target ownership and empty `mentions`, not `thread`, `re` or `text`.
 
 `cmd_brief.go` holds `post` of kind `brief` and `act` `confirm` and `revise` on it
 ([commands](../../planning/contracts/commands.md) 1.3 and 1.4;
@@ -797,10 +821,11 @@ shutdown hooks ([commands](../../planning/contracts/commands.md) 1.7;
   `After["push"]` updates memory only after transaction commit so a rolled-back write leaves memory
   unchanged, and `Loop.Close` drains in-flight Web Push deliveries on `Loop.wg` before detaching.
 - **Eligibility and delivery.** For each newly created `proto.MsgRow` (`Pos == Seq`), `After["push"]`
-  extracts one reminder kind (`approval`, `decision`, `brief`, `done` from `summary`, or `mention`
+  extracts one reminder kind (`approval`, `decision`, `brief`, `confirm`, `done` from `summary`, or `mention`
   from any other message kind), filters for offline subscribed devices of concerned group members
   that remain valid in `State.Logs`, encrypts `proto.Reminder` JSON (without HTML escaping) via
   RFC 8291 (`webpush-go`), and sends each request in its own goroutine with a 5 s context timeout.
+  Confirmation reminders go to `body.to`, name the AI in `who`, and omit `title`.
   A `404` or `410` response drops that subscription in memory and from `push_sub` if not replaced
   since.
 
@@ -935,7 +960,7 @@ home half of acceptance tests A6.3 and A6.4.
 propagation, protected rows, and the purge mark with `Loop.Sync` reset.
 `features/home_retention.feature` holds acceptance test A2.5 and the retention half of A5.14.
 
-`people_seam_test.go` covers `people_seam.go` across `Table.ApplyJoining`, `State.Invite`,
+`people_seam_internal_test.go` covers joining dispatch. `people_seam_test.go` covers
 `LoopConfig.Invite` (including `Store.Write` re-entrancy freedom on `Invite` and `ReplayInvite`),
 and `(*Conn).SetJoining` admission callbacks.
 `webpush_test.go` covers `push`, `After["push"]`, `StartLoop` subscription loading and `Close`
