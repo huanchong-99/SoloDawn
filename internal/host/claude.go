@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
 func init() {
@@ -55,6 +57,10 @@ type claudeMCPConfig struct {
 }
 
 type claudeDriver struct{}
+
+func (claudeDriver) Models(ctx context.Context) []proto.Model {
+	return probeModels(ctx, "claude", []string{"-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json", "--no-session-persistence", "--strict-mcp-config", "--settings", `{"disableAllHooks":true}`}, readClaudeModels)
+}
 
 func (claudeDriver) Start(ctx context.Context, l Launch) (Process, error) {
 	argv, _, err := claudeCommandArgs(l, false, runtime.GOOS == "windows")

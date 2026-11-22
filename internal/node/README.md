@@ -27,6 +27,8 @@ kind: reference
 - `local.go`: `AttachLocal` and `LocalLink`, the in-process link between a `*host.Host` and a `*home.Loop` on the same node ([architecture](../../planning/architecture.md), section 2.1).
 - `nodetest/`: in-process node clusters with built fake Claude Code and Codex binaries for integration tests.
 
+Startup probes the host's CLI versions and model listings. `host.info` reuses the shared 60-second cache; `refresh:true` probes again and pushes the resulting `host.info` to welcomed devices of the owner. `surface_models_test.go` covers refresh forwarding, push recipients, and malformed or failed refreshes.
+
 ## Capabilities
 
 | Need | Entry |
