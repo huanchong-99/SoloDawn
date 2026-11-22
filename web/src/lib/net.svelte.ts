@@ -5,12 +5,12 @@
 // under the single-tab Web Lock of tablock.ts.
 import { SvelteMap } from 'svelte/reactivity';
 import type { DeviceLog } from './devlog';
-import { Home, homes, type Link } from './groups.svelte';
+import { Home, homes } from './groups.svelte';
 import { loadDevice, type Device } from './identity';
 import { joinGroup, JoinError, presentLog, type Invitation } from './join';
 import { browserName, signalUrlOf } from './onboard.svelte';
 import { loadJoined, loadOwner, saveJoined, saveOwner, type JoinedHomes } from './owner';
-import { connect, type Peer } from './peer';
+import { connect, type Peer, type Session } from './peer';
 import type { Devlog, Welcome } from './proto';
 import { parse } from './route.svelte';
 import { runTab } from './tablock';
@@ -77,7 +77,7 @@ function pairedNodes(log: DeviceLog): [string, string][] {
 async function appendEntries(log: DeviceLog, entries: Devlog['entries']): Promise<boolean> {
   let changed = false;
   for (const env of entries) {
-    if (await log.apply(env).catch(() => {})) changed = true;
+    if (await log.apply(env).catch(() => false)) changed = true;
   }
   return changed;
 }
@@ -91,13 +91,14 @@ function startLive(
 ) {
   const activeTab = (device: Device, signal: AbortSignal) => {
     if (signal.aborted) return Promise.resolve();
-    let session: (() => void) | undefined;
-    let pending: symbol | undefined;
-    const homeOf = (user: string, id: string, name: string, owner = false) => {
+    let session: Session | undefined;
+    let joining: AbortController | undefined;
+    let epoch = 0;
+    const homeOf = (log: DeviceLog, id: string, name: string) => {
       let home = added.get(id);
       if (!home) {
-        home = new Home({ user, sign: (payload) => device.sign(payload) });
-        Object.assign(home, { device: id, name, owner });
+        home = new Home({ user: log.user, sign: (payload) => device.sign(payload) });
+        Object.assign(home, { device: id, name, owner: log.valid(id) });
         added.set(id, home);
         homes.push(home);
       }
@@ -105,32 +106,32 @@ function startLive(
     };
     const openSession = (log: DeviceLog, addrs: Record<string, string[]>, joined: JoinedHomes) => {
       if (!pairedNodes(log).length) return undefined;
+      const url = signalUrlOf();
       const urls = [
-        signalUrlOf(),
+        url,
         ...Object.values(addrs).flat(),
-        ...Object.values(joined).map((home) => home.url),
+        ...Object.values(joined).map((h) => h.url),
       ];
-      const pendingHomes = new Set<string>();
+      const invited = new Set<string>();
       const hub = connect({
         urls,
         device,
-        known: (id) => log.valid(id) || Object.hasOwn(joined, id) || pendingHomes.has(id),
+        known: (id) => log.valid(id) || Object.hasOwn(joined, id) || invited.has(id),
         name: browserName,
       });
       const peers = new Map<string, Pick<Peer, 'send'>>();
-      const joining = new AbortController();
-      const pushLog = (): Devlog => ({ t: 'devlog', user: log.user, entries: [...log.entries] });
+      const controller = (joining = new AbortController());
       const onDevlog = async (frame: Devlog) => {
-        if (!(await appendEntries(log, frame.entries)) || joining.signal.aborted) return;
+        if (!(await appendEntries(log, frame.entries)) || session !== hub) return;
         await saveOwner(() => indexedDB, log, addrs);
         syncPeers();
-        for (const peer of peers.values()) presentLog(peer, log);
+        for (const p of peers.values()) presentLog(p, log);
       };
-      const connectHome = (home: Home): Link => {
+      const connectHome = (home: Home) => {
         const link = home.connect();
         return {
           ...link,
-          push(frame) {
+          push(frame: Parameters<typeof link.push>[0]) {
             link.push(frame);
             switch (frame.t) {
               case 'devlog':
@@ -148,7 +149,7 @@ function startLive(
               online: (ctl, welcome) => {
                 addrs[id] = welcome.addrs;
                 void saveOwner(() => indexedDB, log, addrs);
-                peer.send(pushLog());
+                presentLog(peer, log);
                 link.online(ctl, welcome);
               },
               push: link.push,
@@ -161,19 +162,16 @@ function startLive(
       };
       const syncPeers = () => {
         for (const [id, name] of pairedNodes(log)) {
-          const home = homeOf(log.user, id, name, true);
+          const home = homeOf(log, id, name);
           if (!peers.has(id)) dial(id, home);
         }
       };
       syncPeers();
       for (const [id, { name }] of Object.entries(joined)) {
-        if (!peers.has(id)) dial(id, homeOf(log.user, id, name));
+        if (!peers.has(id)) dial(id, homeOf(log, id, name));
       }
       setJoin(async (invitation, name, cancel) => {
         const id = invitation.home;
-        const url = signalUrlOf();
-        if (pendingHomes.has(id)) throw new JoinError('room', 'conflict');
-        pendingHomes.add(id);
         let trackPath: ((path: Path | undefined) => void) | undefined;
         let replaced: Home | undefined;
         try {
@@ -182,14 +180,15 @@ function startLive(
             log,
             url,
             session: hub,
+            browserName,
+            signal: AbortSignal.any([cancel, controller.signal]),
             dial(listen, onpath) {
+              invited.add(id);
               replaced = added.get(id);
               return hub.peer(id, listen, onpath);
             },
-            browserName,
-            signal: AbortSignal.any([cancel, signal, joining.signal]),
             ownNodes: () => {
-              const own = new Set(pairedNodes(log).map(([id]) => id));
+              const own = new Set(pairedNodes(log).map(([node]) => node));
               return [...added.values()].filter((home) => home.ctl && own.has(home.device));
             },
             async remember(homeName) {
@@ -197,7 +196,7 @@ function startLive(
               await saveJoined(() => indexedDB, joined);
             },
             link: () => {
-              const home = homeOf(log.user, id, joined[id].name);
+              const home = homeOf(log, id, joined[id].name);
               trackPath = (path) => (path ? paths.set(home, path) : paths.delete(home));
               return connectHome(home);
             },
@@ -206,32 +205,30 @@ function startLive(
           peers.set(id, peer);
           return { notifications: await notices };
         } catch (error) {
-          if (replaced && !joining.signal.aborted) dial(id, replaced);
+          if (replaced && session === hub) dial(id, replaced);
           throw error;
         } finally {
-          pendingHomes.delete(id);
+          invited.delete(id);
         }
       });
-      return () => {
-        joining.abort();
-        hub.close();
-      };
+      return hub;
     };
     const close = () => {
-      pending = undefined;
+      epoch += 1;
       setJoin(undefined);
-      session?.();
+      joining?.abort();
+      session?.close();
       session = undefined;
     };
     const syncRoute = async () => {
       if (parse(location.hash).page === 'onboarding') return close();
       if (session) return;
-      const run = (pending = Symbol());
+      const run = (epoch += 1);
       const [{ log, addrs }, joined] = await Promise.all([
         loadOwner(crypto, () => indexedDB),
         loadJoined(() => indexedDB),
       ]);
-      if (run === pending && log) session = openSession(log, addrs, joined);
+      if (run === epoch && log) session = openSession(log, addrs, joined);
     };
     addEventListener('hashchange', () => void syncRoute(), { signal });
     void syncRoute();
@@ -242,8 +239,9 @@ function startLive(
 
   loadDevice({ crypto, idb: () => indexedDB }).then(
     (device) => {
+      if (stopSignal.aborted) return;
       const run = (sig: AbortSignal) => activeTab(device, AbortSignal.any([sig, stopSignal]));
-      if (!stopSignal.aborted) void runTab(device.id, run, waitForUseHere);
+      void runTab(device.id, run, waitForUseHere);
     },
     () => {},
   );
@@ -271,22 +269,21 @@ export function start(source: Source) {
       return join(invitation, name, signal);
     },
   };
-  function waitForUseHere() {
-    const { promise, resolve } = Promise.withResolvers<void>();
-    otherTab = true;
-    chooseHere = () => {
-      chooseHere = undefined;
-      otherTab = false;
-      resolve();
-    };
-    return promise;
-  }
+  const waitForUseHere = () =>
+    new Promise<void>((resolve) => {
+      otherTab = true;
+      chooseHere = () => {
+        chooseHere = undefined;
+        otherTab = false;
+        resolve();
+      };
+    });
   if (import.meta.env.DEV && source === 'mock') {
     mockHome().then(
       ({ home, online }) => {
         if (stopAbort.signal.aborted) return;
         paths.set(home, { kind: 'direct', rtt: undefined, since: Date.now() });
-        added.set(home.me.user, home);
+        added.set('mock', home);
         homes.push(home);
         online();
       },
