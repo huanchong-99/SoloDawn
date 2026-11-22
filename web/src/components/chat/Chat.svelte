@@ -13,7 +13,6 @@
   import Mount from '../Mount.svelte';
   import Composer from './Composer.svelte';
   import Message from './Message.svelte';
-  import TeamMembers from '../team/TeamMembers.svelte';
 
   /** The chat of one group: its main line, newest at the bottom, and the composer, with what the
    *  areas mount in its head, above its main line and beside it (lib/mounts.svelte.ts). */
@@ -111,7 +110,7 @@
         {#if group.home.name}· <Icon name="home" sm /> {group.home.name}{/if}
       </p>
     </div>
-    {#if group.info?.kind !== 'team'}<Mount at="chat.head" props={{ group }} />{/if}
+    <Mount at="chat.head" props={{ group }} />
     {#if sided}
       <button
         class="icon-btn side-open"
@@ -126,7 +125,7 @@
     {/if}
   </header>
   <div class="top" inert={covered}>
-    {#if group.info?.kind !== 'team'}<Mount at="chat.top" props={{ group }} />{/if}
+    <Mount at="chat.top" props={{ group }} />
   </div>
 
   <!-- The scroller is reversed and holds one child: its start is the bottom, so the newest
@@ -199,10 +198,7 @@
       >
         <Icon name="x" />
       </button>
-      {#if group.info?.kind === 'team'}<TeamMembers {group} />{:else}<Mount
-          at="chat.side"
-          props={{ group, net }}
-        />{/if}
+      <Mount at="chat.side" props={{ group, net }} />
     </aside>
   {/if}
 </section>

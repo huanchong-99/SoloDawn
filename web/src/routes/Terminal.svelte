@@ -3,6 +3,7 @@
   import Failure from '../components/Failure.svelte';
   import Icon from '../components/Icon.svelte';
   import TerminalInfo from '../components/terminal/TerminalInfo.svelte';
+  import AskToWatch from '../components/watch/AskToWatch.svelte';
   import Watchers from '../components/watch/Watchers.svelte';
   import { Watch } from '../components/watch/watch.svelte';
   import { find } from '../lib/groups.svelte';
@@ -55,6 +56,7 @@
   const taskId = $derived(params.task);
   const tk = $derived(new Takeover(g, memberId, taskId, write));
   const watch = $derived(new Watch(g, memberId, write));
+  const watchHost = $derived(watching && watch.phase !== 'ended' ? ai?.host : undefined);
   const session = $derived(watching ? watch : tk);
   const size = $derived(host?.terminalSizes.get(`${g}:${memberId}`));
   const backHref = $derived(href('chat', { g: params.g }));
@@ -87,6 +89,9 @@
     return () => current.handBack();
   });
   $effect(() => session.follow(targetOf(host, ai), path));
+  $effect(() => {
+    if (watchHost) return net.watchHost?.(watchHost);
+  });
   $effect(() => {
     if (watching && term && size) term.resize(size.cols, size.rows);
   });
@@ -168,6 +173,9 @@
             {bar.detail}
           {/if}
         </span>
+        {#if watching && watch.errorCode === 'forbidden' && group && ai}
+          <AskToWatch {group} {ai} />
+        {/if}
         {#if bar.handback}
           <a class="btn btn-dawn" href={backHref} bind:this={exit} onclick={() => tk.handBack()}>
             {t('terminal.handback')}
@@ -207,7 +215,7 @@
     </section>
 
     <TerminalInfo {ai} {task} {watching} link={linkBadgeOf(Boolean(host?.ctl), path)}>
-      {#if group && host}<Watchers {group} {host} member={memberId} />{/if}
+      {#if !watching && group && host}<Watchers {group} {host} member={memberId} />{/if}
     </TerminalInfo>
   </div>
 </div>

@@ -49,6 +49,53 @@ beforeEach(() => {
 });
 afterEach(closePage);
 
+it('offers a watch request beside a forbidden response, without owner watcher controls', async () => {
+  const ai = { ...p.decode(p.AIMemberRow, goldens['row-member-ai']), state: 'takeover' as const };
+  const home = new Home({
+    user: 'viewer',
+    sign: async (payload: string) => ({ p: payload, k: 'key', s: 'signature' }),
+  });
+  const group = new Group(home, ai.g);
+  group.apply([ai]);
+  home.groups = [group];
+  home.device = ai.host;
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce({ re: 1, err: { code: 'forbidden', msg: 'not permitted' } })
+    .mockResolvedValue({ re: 2, ok: true });
+  const release = vi.fn();
+  const watchHost = vi.fn(() => release);
+  home.ctl = { request: request as p.Ctl['request'] };
+  homes.push(home);
+  show(Terminal, {
+    params: { g: ai.g, member: ai.id },
+    net: {
+      watchHost,
+      source: 'mock' as const,
+      homes,
+      path: () => ({ kind: 'direct' as const, rtt: 1, since: 0 }),
+    },
+  });
+  await vi.waitFor(() =>
+    expect(document.querySelector('.takeover button')?.textContent?.trim()).toBe('Ask to watch'),
+  );
+  expect(document.querySelector('[aria-label="Watching"]')).toBeNull();
+  (document.querySelector('.takeover button') as HTMLButtonElement).click();
+  await vi.waitFor(() =>
+    expect(document.querySelector('.takeover button')?.textContent?.trim()).toBe(
+      'Watch request sent',
+    ),
+  );
+  expect(request.mock.calls.map(([req]) => req.t)).toEqual(['watch.start', 'cmd']);
+  expect(JSON.parse(request.mock.calls[1][0].env.p).body).toEqual({
+    what: 'watch',
+    ai: ai.id,
+  });
+  expect(watchHost).toHaveBeenCalledExactlyOnceWith(ai.host);
+  await closePage();
+  expect(release).toHaveBeenCalledTimes(1);
+});
+
 it('opens the receive-only terminal, applies initial and pushed sizes, and closes on pagehide', async () => {
   const ai = p.decode(p.AIMemberRow, goldens['row-member-ai']);
   const home = new Home({ user: 'viewer', sign: async () => ({ p: '', k: '', s: '' }) });
@@ -67,6 +114,8 @@ it('opens the receive-only terminal, applies initial and pushed sizes, and close
   const request = vi.fn().mockResolvedValue({ re: 1, ok: true });
   const send = vi.fn();
   const open = vi.fn(() => channel);
+  const release = vi.fn();
+  const watchHost = vi.fn(() => release);
   home.ctl = { request: request as p.Ctl['request'], send, channel: open };
   homes.push(home);
   const size = { t: 'pty.resize' as const, g: ai.g, ai: ai.id, cols: 100, rows: 30 };
@@ -74,6 +123,7 @@ it('opens the receive-only terminal, applies initial and pushed sizes, and close
   show(Terminal, {
     params: { g: ai.g, member: ai.id },
     net: {
+      watchHost,
       source: 'mock' as const,
       homes,
       path: () => ({ kind: 'direct' as const, rtt: 1, since: 0 }),
@@ -100,6 +150,10 @@ it('opens the receive-only terminal, applies initial and pushed sizes, and close
     [],
     [],
   ]);
+  expect(watchHost).toHaveBeenCalledExactlyOnceWith(ai.host);
+  expect(release).toHaveBeenCalledTimes(0);
+  channel.onclose!({});
+  await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
   dispatchEvent(new Event('pagehide'));
   expect(channel.close).toHaveBeenCalledExactlyOnceWith();
   expect(request.mock.calls).toEqual([[{ t: 'watch.start', g: ai.g, member: ai.id }]]);
@@ -141,7 +195,13 @@ it('buffers early owner output, forwards binary input and refits after a viewpor
     },
   );
   home.ctl = {
-    request: vi.fn().mockResolvedValue({ re: 1, ok: true }) as p.Ctl['request'],
+    request: vi
+      .fn()
+      .mockImplementation(async (req: { t: string }) =>
+        req.t === 'host.info'
+          ? { ...p.decode(p.HostInfoPush, goldens['host-info-push']), re: 1, ok: true }
+          : { re: 1, ok: true },
+      ) as p.Ctl['request'],
     channel: () => channel,
     send: vi.fn(),
   };

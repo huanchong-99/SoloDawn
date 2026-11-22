@@ -7,6 +7,7 @@ import { prefs } from '../../lib/prefs.svelte';
 import * as p from '../../lib/proto';
 import AskToWatch from './AskToWatch.svelte';
 import Watchers from './Watchers.svelte';
+import MemberPanel from '../member/MemberPanel.svelte';
 
 const g = 'rZNvy-1jH6Z-BcPqA5U5BQ';
 const me = {
@@ -31,6 +32,20 @@ beforeEach(() => {
   prefs.lang = 'en';
 });
 afterEach(closePage);
+
+it('offers request and watch links only on another person’s taken-over AI', () => {
+  const { group, ai } = setup();
+  show(MemberPanel, { group, net: { source: 'mock', homes: [], path: () => undefined } });
+  expect(
+    document.querySelector('.member .card-foot')!.textContent!.replace(/\s+/g, ' ').trim(),
+  ).toBe('Ask to watch Watch');
+  expect(document.querySelector('.member a')!.getAttribute('href')).toBe(
+    `#/terminal/${group.g}/${ai.id}`,
+  );
+  group.apply([{ ...ai, seq: ai.seq + 1, state: 'working' }]);
+  flushSync();
+  expect(document.querySelector('.member .card-foot')).toBeNull();
+});
 
 describe('ask to watch action', () => {
   it('submits once and displays success', async () => {
@@ -62,17 +77,18 @@ describe('ask to watch action', () => {
 });
 
 describe('watcher list', () => {
-  it('shows empty, does not query another owner, and has no stop control', () => {
+  it('queries the AI owner’s host even without host ownership and offers stop controls', () => {
     const s = setup();
+    s.request.mockResolvedValue({ re: 1, err: { code: 'forbidden', msg: 'not permitted' } });
     show(Watchers, { group: s.group, host: s.home, member: s.ai.id });
     expect(text()).toBe('Watching Nobody is watching.');
-    expect(s.request.mock.calls).toEqual([]);
+    expect(s.request.mock.calls).toEqual([[{ t: 'host.info' }]]);
     const info = p.decode(p.HostInfoPush, goldens['host-info-push']);
     Object.assign(info.agents[0].groups[0], { g, member: s.ai.id, watchers: ['absent'] });
     s.home.hostInfo = info;
     flushSync();
-    expect(text()).toBe('Watching F Former member');
-    expect(document.querySelector('button')).toBeNull();
+    expect(text()).toBe('Watching F Former member Stop watching');
+    expect(document.querySelector('button')!.textContent!.trim()).toBe('Stop watching');
   });
 
   it('loads host.info, stops the named person, and reflects a pushed removal', async () => {

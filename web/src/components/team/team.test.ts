@@ -5,7 +5,7 @@ import { goldens } from '../../lib/mock';
 import { prefs } from '../../lib/prefs.svelte';
 import * as p from '../../lib/proto';
 import Bulletin from './Bulletin.svelte';
-import TeamMembers from './TeamMembers.svelte';
+import MemberPanel from '../member/MemberPanel.svelte';
 import mounts from './mounts';
 
 const text = () => document.body.textContent!.replace(/\s+/g, ' ').trim();
@@ -54,21 +54,25 @@ it('shows only people, their live state, and no AI controls', () => {
   const group = setup();
   const person = p.decode(p.HumanMemberRow, goldens['row-member-human']);
   group.apply([
+    { ...p.decode(p.GroupRow, goldens['row-group-team']), id: group.g },
     person,
     { ...person, id: 'other', name: 'Reader', online: false },
     p.decode(p.AIMemberRow, goldens['row-member-ai']),
   ]);
-  show(TeamMembers, { group });
+  show(MemberPanel, { group, net: { source: 'mock', homes: [], path: () => undefined } });
   expect(document.querySelectorAll('li').length).toBe(2);
   expect([...document.querySelectorAll('.st')].map((el) => el.textContent!.trim())).toEqual([
     'Online',
     'Offline',
   ]);
-  expect(document.querySelector('button')).toBeNull();
+  expect(document.querySelector('.head')).toBeNull();
+  expect(document.querySelector('.member')).toBeNull();
 });
 
 it('shows an empty member list', () => {
-  show(TeamMembers, { group: setup() });
+  const group = setup();
+  group.apply([{ ...p.decode(p.GroupRow, goldens['row-group-team']), id: group.g }]);
+  show(MemberPanel, { group, net: { source: 'mock', homes: [], path: () => undefined } });
   expect(text()).toBe('People · 0');
   expect(document.querySelectorAll('li').length).toBe(0);
 });

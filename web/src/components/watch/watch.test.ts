@@ -49,7 +49,11 @@ describe('receive-only watch', () => {
     s.channel.onmessage!({ data: new Uint8Array([0, 255]) });
     s.channel.onmessage!({ data: new Uint8Array([27, 91]).buffer });
     s.channel.onmessage!({ data: 'not binary' });
-    expect(s.write.mock.calls).toEqual([[new Uint8Array([0, 255])], [new Uint8Array([27, 91])]]);
+    expect(s.write.mock.calls).toEqual([
+      [new Uint8Array([0, 255])],
+      [new Uint8Array([27, 91])],
+      ['not binary'],
+    ]);
     expect(s.channel.send).not.toHaveBeenCalled();
     s.channel.onclose!({});
     s.watch.handBack();

@@ -6,18 +6,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-22 · limitation · Watch action awaits the member-card seam
-
-- Symptom: the standalone `AskToWatch` action is not yet shown on another person's AI card.
-- Cause: U2-3 leaves `components/member/` to its parallel owner; the card has no action mount seam yet.
-- Status: open pending the coordinated seam. The receive-only view uses the existing terminal address for another person's AI.
-
-### 2026-11-22 · limitation · Watching needs an already connected AI host
-
-- Symptom: a browser cannot open a watch channel to a foreign AI host it has not connected to.
-- Cause: `web/src/lib/net.svelte.ts` dials paired nodes and joined homes, not foreign hosts named in AI member rows.
-- Status: open; U2-3 builds against connected mock hosts. A real host, Safari, Firefox, a real phone and a running full-screen CLI without replay remain unverified.
-
 ### 2026-11-22 · limitation · Remembered addresses are not dialled yet
 
 - Symptom: `home.add` records signalling addresses, but a node still needs a shared configured rendezvous to reach an external home.

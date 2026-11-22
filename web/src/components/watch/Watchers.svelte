@@ -12,7 +12,7 @@
 
   $effect(() => {
     const ctl = host.ctl;
-    if (ctl && host.owner)
+    if (ctl)
       void ctl
         .request({ t: 'host.info' })
         .then((answer) => {
@@ -38,16 +38,14 @@
     <div class="row">
       <Avatar id={user} name={group.personName(user) ?? t('chat.gone')} />
       <span class="grow">{group.personName(user) ?? t('chat.gone')}</span>
-      {#if host.owner}
-        <button
-          type="button"
-          class="btn btn-sm"
-          disabled={busy || !host.ctl}
-          onclick={() => stop(user)}
-        >
-          {t('watch.stop')}
-        </button>
-      {/if}
+      <button
+        type="button"
+        class="btn btn-sm"
+        disabled={busy || !host.ctl}
+        onclick={() => stop(user)}
+      >
+        {t('watch.stop')}
+      </button>
     </div>
   {:else}
     <p class="hint">{t('watch.empty')}</p>

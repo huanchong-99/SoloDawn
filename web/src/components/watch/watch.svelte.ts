@@ -86,7 +86,6 @@ export class Watch {
     this.#channel = channel;
     channel.binaryType = 'arraybuffer';
     channel.onmessage = ({ data }: { data: unknown }) => {
-      if (!(data instanceof ArrayBuffer || data instanceof Uint8Array)) return;
       this.write(toTerminalChunk(data)!);
     };
     channel.onclose = () => this.handBack();
