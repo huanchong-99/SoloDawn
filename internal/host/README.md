@@ -119,6 +119,22 @@ Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/
 - **One reader per channel and lock order.** `Events()` is written only by `readLoop` and read only by `Start`'s caller, and closes after `cmd.Wait` and tree cleanup finish; `ready` is closed once by `finishReady` for `Turn`. `wmu` (stdin writes and close) and `mu` (protocol, turn, approval, user-input and file-change state) are never nested.
 - **Requests and notifications.** `commandExecution` and `fileChange` approvals emit `Asked` for `Process.Answer`; `item/tool/requestUserInput` emits `Asked` with `Ask.Reply`; invalid parameters and all other server requests get JSON-RPC error `-32601`. Notifications during an active turn emit `Active`; `account/rateLimits/updated` selects the higher `usedPercent` window (`Used`, and `RateLimited` at 100 percent or when a limit flag is set), and a turn that fails with `usageLimitExceeded` emits `RateLimited`. Live behavior of `features.default_mode_request_user_input=true` and `item/tool/requestUserInput` remains unverified ([issues.md](../../issues.md)).
 
+### OpenCode
+
+`opencode.go` registers `Drivers["opencode"]` and its declaration (`api_key`; levels `1`, `3`; `conn`; takeover `none`) from the OpenCode 1.19.6 documentation read by T3-0. No capture of the real CLI exists yet, so every value below is `[unverified]` ([issues.md](../../issues.md)).
+
+- `Start` runs `opencode serve --hostname 127.0.0.1 --port 0` in the session folder with a random `OPENCODE_SERVER_PASSWORD`, and `OPENCODE_CONFIG_CONTENT` holding the `solodawn` MCP server (`Launch.Shim`) and the level's `permission`. Without `RepoConfig` it also sets `OPENCODE_DISABLE_PROJECT_CONFIG=1`. It reads the address from the `listening on` line (`serverAddress`), opens `GET /event`, then `GET /session/<id>` (a failure is `NoSession`) or `POST /session`.
+- A turn is `POST /session/<id>/prompt_async` with the instructions as `system`; `session.idle` of that session ends it, as `interrupted` after a `MessageAbortedError`, `failed` after any other `session.error` of that session or of none (a `ProviderAuthError` also reports `LoginInvalid`). `message.part.updated` is `Active`, `permission.asked` is `Asked`, answered with `POST /permission/<id>/reply` (`once` or `reject`). `Interrupt` is `POST /session/<id>/abort`. The server does not exit when its input closes, so `Close` kills its process tree.
+
+| Level | `permission` |
+| --- | --- |
+| 1 | `edit` and `bash` `deny` |
+| 3 | `edit`, `bash`, `webfetch`, `external_directory` and `doom_loop` `allow` |
+
+### Local servers (`serve.go`)
+
+The drivers whose CLI runs as a local HTTP server share `serve.go`: `serve` starts the server detached from any terminal and returns its standard output and a wait that kills what it left running, `serverAddress` reads the `listening on` line, and `readSSE` reads the event stream with `bufio.Reader`, so an event has no size limit.
+
 ## CLI detection and sign-in
 
 `agents.go` provides `(*Host).Agents(ctx)`, `"agents"` in `Listeners`, and `"agent.set"` in `Surface`; see [drivers.md](../../planning/contracts/drivers.md) section 1.4 and [commands.md](../../planning/contracts/commands.md) section 2.
@@ -153,18 +169,6 @@ Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/
 - **Failed resume and `login_invalid`.** On `NoSession` during a resume, the runtime closes the failed process, clears `CLISession`, composes `ReplacedTurn`, starts a fresh session in the same folder, and reports `session_replaced`. On `LoginInvalid`, the runtime closes the process, marks the AI `limited`, and sends `LoginInvalidEvent` (with redacted detail) only when entering `limited`.
 - **Shutdown.** `Settle` (entry `"runtime"`) refuses new processes with `busy`, ends every CLI process and waits for each process loop, so that none reaches the store after it closes. A loop that ends while the host settles leaves the session row as it is; the next start turns it `dormant` and reports a turn that was running (`ReportSaved`).
 - **Lock order.** `runtimePart.mu` may call `Sessions.Get` and `Sessions.All`, which acquire only the leaf in-memory `Sessions` lock; nothing called under `runtimePart.mu` acquires `Store`, `Rows`, `Host`, `Driver`, `Process` or hook/listener locks.
-### OpenCode
-
-`opencode.go` registers `Drivers["opencode"]` and its declaration (`api_key`; levels `1`, `3`; `conn`; takeover `none`) from the OpenCode 1.19.6 documentation read by T3-0. No capture of the real CLI exists yet, so every value below is `[unverified]` ([issues.md](../../issues.md)).
-
-- `Start` runs `opencode serve --hostname 127.0.0.1 --port 0` in the session folder with a random `OPENCODE_SERVER_PASSWORD`, and `OPENCODE_CONFIG_CONTENT` holding the `solodawn` MCP server (`Launch.Shim`) and the level's `permission`. Without `RepoConfig` it also sets `OPENCODE_DISABLE_PROJECT_CONFIG=1`. It reads the address from the `listening on` line, opens `GET /event`, then `GET /session/<id>` (a failure is `NoSession`) or `POST /session`.
-- A turn is `POST /session/<id>/prompt_async` with the instructions as `system`; `session.idle` of that session ends it, as `interrupted` after a `MessageAbortedError`, `failed` after any other `session.error` (a `ProviderAuthError` also reports `LoginInvalid`). `message.part.updated` is `Active`, `permission.asked` is `Asked`, answered with `POST /permission/<id>/reply` (`once` or `reject`). `Interrupt` is `POST /session/<id>/abort`. The server does not exit when its input closes, so `Close` kills its process tree.
-
-| Level | `permission` |
-| --- | --- |
-| 1 | `edit` and `bash` `deny` |
-| 3 | `edit`, `bash`, `webfetch`, `external_directory` and `doom_loop` `allow` |
-
 - **One reader per channel.** `Process.Events()` is read only by `runProcessLoop`; `liveProc.loopDone` is read only by `stopProcess` or `writeTurnToWaiting` when waiting for that process to exit; `runtimePart.changed` is closed and replaced under `runtimePart.mu` to wake `waitSignal` callers.
 
 # Host test CLIs

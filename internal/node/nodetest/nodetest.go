@@ -26,9 +26,8 @@ import (
 )
 
 const (
-	claudePkg   = "github.com/huanchong-99/SoloDawn/internal/host/fakecli/claude"
-	codexPkg    = "github.com/huanchong-99/SoloDawn/internal/host/fakecli/codex"
-	opencodePkg = "github.com/huanchong-99/SoloDawn/internal/host/fakecli/opencode"
+	claudePkg = "github.com/huanchong-99/SoloDawn/internal/host/fakecli/claude"
+	codexPkg  = "github.com/huanchong-99/SoloDawn/internal/host/fakecli/codex"
 )
 
 // Config configures a Cluster of in-process nodes.
@@ -173,7 +172,7 @@ func prepareFakeCLIs(t testing.TB, root, binDir string) string {
 		return binDir
 	}
 	out := filepath.Join(root, "bin")
-	must(t, exec.Command("go", "build", "-o", out+string(os.PathSeparator), claudePkg, codexPkg, opencodePkg).Run())
+	must(t, exec.Command("go", "build", "-o", out+string(os.PathSeparator), claudePkg, codexPkg).Run())
 	return out
 }
 

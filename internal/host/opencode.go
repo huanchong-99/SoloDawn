@@ -1,7 +1,6 @@
 package host
 
 import (
-	"bufio"
 	"cmp"
 	"context"
 	"crypto/rand"
@@ -9,10 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"os/exec"
 	"strings"
-	"time"
 )
 
 // OpenCode runs as `opencode serve`, one server per session process: turns
@@ -45,43 +41,36 @@ func (openCodeDriver) Interactive(Launch) ([]string, string, error) {
 }
 
 func (openCodeDriver) Start(ctx context.Context, l Launch) (Process, error) {
-	permission, ok := openCodeLevels[l.Level]
-	if !ok {
+	if _, ok := openCodeLevels[l.Level]; !ok {
 		return nil, fmt.Errorf("opencode: level %d is not declared", l.Level)
 	}
-	config := marshalWire(map[string]any{
-		"permission": permission,
-		"mcp": map[string]any{"solodawn": map[string]any{
-			"type": "local", "command": l.Shim, "timeout": l.ToolTimeout.Milliseconds(),
-		}},
-	})
 	p := &openCodeProcess{launch: l, password: rand.Text(), events: make(chan Event, 16), ready: make(chan struct{})}
 	ctx, p.stop = context.WithCancel(ctx)
-	cmd := exec.CommandContext(ctx, "opencode", "serve", "--hostname", "127.0.0.1", "--port", "0")
-	cmd.Dir = l.Folder
-	cmd.Env = append(os.Environ(), "OPENCODE_SERVER_PASSWORD="+p.password, "OPENCODE_CONFIG_CONTENT="+config)
-	if !l.RepoConfig {
-		cmd.Env = append(cmd.Env, "OPENCODE_DISABLE_PROJECT_CONFIG=1")
-	}
-	detachTerminal(cmd)
-	cmd.WaitDelay = time.Second
-	out, w, _ := os.Pipe()
-	cmd.Stdout = w
-	err := cmd.Start()
-	w.Close()
+	out, wait, err := serve(ctx, l.Folder, openCodeEnv(l, p.password), "opencode", "serve", "--hostname", "127.0.0.1", "--port", "0")
 	if err != nil {
 		p.stop()
-		out.Close()
 		return nil, err
 	}
-	kill := killCheckTree(cmd)
 	go p.run(out, func() {
 		p.stop()
-		cmd.Wait()
-		kill()
-		out.Close()
+		wait()
 	})
 	return p, nil
+}
+
+// openCodeEnv is the environment of the server of l: the password, the
+// level's permission settings and the solodawn MCP server, and without
+// RepoConfig the switch that keeps the repository's configuration out.
+func openCodeEnv(l Launch, password string) []string {
+	config := marshalWire(map[string]any{
+		"permission": openCodeLevels[l.Level],
+		"mcp":        map[string]any{"solodawn": map[string]any{"type": "local", "command": l.Shim}},
+	})
+	env := []string{"OPENCODE_SERVER_PASSWORD=" + password, "OPENCODE_CONFIG_CONTENT=" + config}
+	if !l.RepoConfig {
+		env = append(env, "OPENCODE_DISABLE_PROJECT_CONFIG=1")
+	}
+	return env
 }
 
 // openCodeProcess drives one opencode server. base and session are written
@@ -170,8 +159,7 @@ func (p *openCodeProcess) call(method, path string, body any) ([]byte, error) {
 func (p *openCodeProcess) run(out io.Reader, wait func()) {
 	defer close(p.events)
 	defer wait()
-	p.base = openCodeAddress(out)
-	go io.Copy(io.Discard, out)
+	p.base = serverAddress(out)
 	stream, err := p.request(http.MethodGet, "/event", nil)
 	if err == nil {
 		defer stream.Body.Close()
@@ -182,23 +170,12 @@ func (p *openCodeProcess) run(out io.Reader, wait func()) {
 		return
 	}
 	p.events <- Event{Kind: Ready, Session: p.session}
-	events := bufio.NewScanner(stream.Body)
-	for events.Scan() {
+	readSSE(stream.Body, func(data []byte) {
 		var e openCodeEvent
-		if data, ok := strings.CutPrefix(events.Text(), "data: "); ok && json.Unmarshal([]byte(data), &e) == nil {
-			p.handle(e, json.RawMessage(data))
+		if json.Unmarshal(data, &e) == nil {
+			p.handle(e, data)
 		}
-	}
-}
-
-func openCodeAddress(out io.Reader) string {
-	lines := bufio.NewScanner(out)
-	for lines.Scan() {
-		if _, url, ok := strings.Cut(lines.Text(), "listening on "); ok {
-			return url
-		}
-	}
-	return ""
+	})
 }
 
 // open resumes the launch's session, or creates one.
@@ -234,13 +211,18 @@ func (p *openCodeProcess) handle(e openCodeEvent, raw json.RawMessage) {
 			Input:    raw,
 		}}
 	case "session.error":
-		p.failed(props.Error.Name, props.Error.Data.Message)
+		p.failed(props.SessionID, props.Error.Name, props.Error.Data.Message)
 	case "session.idle":
 		p.idle(props.SessionID)
 	}
 }
 
-func (p *openCodeProcess) failed(name, text string) {
+// failed records how the turn ends. An error of another session, such as a
+// child session, is not the turn's; an error without a session is.
+func (p *openCodeProcess) failed(session, name, text string) {
+	if cmp.Or(session, p.session) != p.session {
+		return
+	}
 	p.status = map[bool]string{true: "interrupted", false: "failed"}[name == "MessageAbortedError"]
 	if name == "ProviderAuthError" {
 		p.events <- Event{Kind: LoginInvalid, Text: text}

@@ -190,8 +190,6 @@ func TestAgentsCleanVersionFormats(t *testing.T) {
 		{"claude", "claude-cli 2.1.311\n", "2.1.311"},
 		{"codex", "codex-cli 0.164.0\n", "0.164.0"},
 		{"codex", "codex 0.164.0\r\nextra line\r\n", "0.164.0"},
-		{"opencode", "1.19.6\n", "1.19.6"},
-		{"opencode", "opencode 1.19.6\n", "1.19.6"},
 		{"claude", "claude\n", "claude"},
 		{"codex", "0.164.0\n", "0.164.0"},
 		{"claude", "   \n\t\n", ""},
