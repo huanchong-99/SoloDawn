@@ -71,9 +71,9 @@ func briefAct(by identity.Key, n byte, action, msg, more string) proto.Envelope 
 }
 
 // briefApply runs a command through the table of the node.
-func briefApply(t *testing.T, s *home.State, d home.Disk, r home.Receipts, by identity.Key, env proto.Envelope) home.Result {
+func briefApply(t *testing.T, s *home.State, d home.Disk, r home.Receipts, _ identity.Key, env proto.Envelope) home.Result {
 	t.Helper()
-	res, err := home.Commands.Apply(s, d, r, by.ID(), env, now)
+	res, err := home.Commands.Apply(s, d, r, env, now)
 	if err != nil {
 		t.Fatal(err)
 	}

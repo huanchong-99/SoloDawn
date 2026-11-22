@@ -12,8 +12,8 @@ kind: reference
 and `check.go`: the state of a group in memory, the tables of commands, timers and events, the
 checks every command passes before its function runs, and the receipt that answers a repeated
 command. Every other file of the package adds to a table or builds on these types. The seam opens
-no connection, keeps no clock and starts no transaction: it is given a device id, an envelope, a
-time, and the reads and receipts of a transaction, and returns what to write.
+no connection, keeps no clock and starts no transaction: it is given an envelope, a time, and the
+reads and receipts of a transaction, and returns what to write.
 
 The run loop, in the files whose names start with `run`, is "whoever runs the home": it owns the
 states, the transactions, the clock and the connections ("The run loop" below).
@@ -37,7 +37,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | read a message, a note, a thread, the pending cards, the queued items | `c.Disk` in a command, the `Disk` argument of a timer or a handler |
 | add a rule that the clock sets off | a function `func(s *State, d Disk, now int64) Result` and `Timers.Add(name, f)` in its file's `init` |
 | add a rule for an event outside the commands | a function `func(s *State, d Disk, now int64, event any) Result` and `Events.Add(name, f)` in its file's `init` |
-| take a `cmd` from a connection | `Commands.Apply(s, disk, tx, device, env, now)` inside the command's transaction, then `s.Commit(result)` once it is committed, and `result.Frame(re)` for the answer |
+| take a `cmd` from a connection | `Commands.Apply(s, disk, tx, env, now)` inside the command's transaction, then `s.Commit(result)` once it is committed, and `result.Frame(re)` for the answer |
 | run a timer or a handler | `s.Seal(f(s, disk, now, …))` inside a transaction, then write and `s.Commit(result)` as for a command |
 | finish any result | after `s.Commit(result)`, every hook of `After`, on the goroutine of the group |
 | know whether a device may use the home surface of a group | `s.Serves(device)` |
@@ -50,6 +50,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | send a host its inbox items, on every `hello` | `loop.Inbox(conn)` |
 | record a host's `ack` | `loop.Ack(conn, req)` |
 | run the timers by hand, or tell the home of an event | `loop.Tick(now)`, `loop.Event(name, event)` |
+| expire old store data in a transaction | `Retain(tx, now)` |
 | mark a disconnected host's AIs offline | `HostOfflineEvent`, fired by `Loop` when a device's last `Inbox` connection ends |
 | move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
 | push to a client | the `Client` interface |
@@ -65,22 +66,21 @@ does one of those five types without its field. `Add` panics when a key is given
 **Order of checks.** `Apply` answers with the first check that fails
 ([datachannel](../../planning/contracts/datachannel.md), section 5):
 
-1. the signer is the device of the connection, else `forbidden`;
-2. the envelope checks of [envelope](../../planning/contracts/envelope.md) section 3, with their
+1. the envelope checks of [envelope](../../planning/contracts/envelope.md) section 3, with their
    own codes; a device is known when a log in `State.Logs` holds it as valid, and a `to` must be
    `State.Home`;
-3. `g` is `State.ID`, else `bad_request`;
-4. the receipt: a command answered before gets that outcome and nothing runs;
-5. the payload names a key, and the key is in the table, else `bad_request`;
-6. the group exists, else `not_found`; only `group/create` reaches its function without one;
-7. `as`, when there, is a text that is not empty, else `bad_request`, and names an AI whose
+2. `g` is `State.ID`, else `bad_request`;
+3. the receipt: a command answered before gets that outcome and nothing runs;
+4. the payload names a key, and the key is in the table, else `bad_request`;
+5. the group exists, else `not_found`; only `group/create` reaches its function without one;
+6. `as`, when there, is a text that is not empty, else `bad_request`, and names an AI whose
    `host` is the signer, else `forbidden`;
-8. the signer's person is a member of the group, or, for `group/create` on a group that does not
+7. the signer's person is a member of the group, or, for `group/create` on a group that does not
    exist, this node's owner, else `forbidden`;
-9. the function;
-10. no row of its result is above the size limit of a row, else `bad_request`.
+8. the function;
+9. no row of its result is above the size limit of a row, else `bad_request`.
 
-Checks 1 to 3 leave no receipt. From check 5 on, the outcome is written as the receipt, a refusal
+Checks 1 and 2 leave no receipt. From check 4 on, the outcome is written as the receipt, a refusal
 included, with the command's own `ts`. A repeated refusal is answered with its code and a fixed
 `msg`, because a receipt holds no sentence.
 
@@ -186,7 +186,13 @@ The checks and reviews (`cmd_review.go`) take the names that start with `rev`, t
 their test functions start with `TestReviewCmd`. The merges and summaries (`cmd_merge.go`) take the
 names that start with `mrg`, their tests too, and their test functions start with `TestMerge`.
 Host events (`cmd_hostev.go`) take the names that start with `hev`, their tests too, and their test
+functions start with `TestHostEv`; the file exports `HostOfflineEvent`. The calls (`cmd_call.go`)
+take the names that start with `cal`, their tests too, and their test functions start with
+`TestCall`.
 functions start with `TestHostEv`; the file exports `HostOfflineEvent`.
+Retention (`retention.go`) takes the names that start with `ret`, exports `Retain`, and its test
+functions start with `TestRetention`. Web Push (`webpush.go`) takes the names that start with
+`wpush`, its tests too, and its test functions start with `TestWebPush`.
 
 ## The run loop
 
@@ -658,13 +664,71 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
   `Pending` and the newest 50 main-line messages (`PageThread(nil, 0, 50)`) without duplicates in
   increasing `seq` order.
 
+## Calls
+
+`cmd_call.go` holds `post` of kinds `call` and `reply`
+([commands](../../planning/contracts/commands.md) 1.3;
+[messages](../../planning/contracts/messages.md) 1, 2.6 and 3.4;
+[ask](../../planning/flows/ask.md)), under the keys `post/call` and `post/reply`, sharing
+`postCheck`, `postRows` and `postTaskID` with `cmd_post.go`. Where the contracts are silent, it
+does this:
+
+- **Call.** A self-call (`body.to` equal to `as`) is `bad_request`, a non-null `thread` absent from
+  `State.Tasks` is `not_found`, a `body.to` absent from `State.AIs` is `conflict`, and `body.depth`
+  above `Group.Limits.AskDepth` is `limit` (A6.4). One `mention` item is queued for `body.to`, with
+  `task` set when in a thread, even when `mentions` also names `body.to` or other AIs; round
+  counting and held mentions wrap `post/*` in unit HM-13.
+- **Reply.** A `re` `null` or a `thread` that differs from the call's `thread` is `bad_request`; a
+  missing `re` message on `Disk` or a deleted task in `State.Tasks` is `not_found`. Elapsed `ms` on
+  the answered call is `max(0, c.Timestamp - call.Timestamp)` so inter-host clock skew never
+  produces a negative duration, followed by the reply `MsgRow` and, in a thread, the updated
+  `TaskRow`. When `call.By` is still in `State.AIs`, one `reply` item is queued for it (A6.3).
+## Retention
+
+`retention.go` exports `Retain(tx, now)`, which reads `retention_days` from SQLite `setting`
+(defaulting to `90` when absent) and calls `tx.Retain(time.UnixMilli(now), days)`
+([storage](../../planning/contracts/storage.md) sections 2 and 4). The daily node schedule in
+`internal/node` calls `Retain` once a day per node.
+
+- **What remains.** In one transaction the store raises `grp.purged` to the highest `seq` among
+  aged-out `gone` markers before deleting those markers, keeps `pending` cards, keeps `note` and
+  `review` rows (`keep = 1`), and deletes older messages and final (`merged` and `cancelled`) task
+  rows whose `mt` is before the cutoff.
+- **In-memory tasks.** After retention deletes rows from the store, finished tasks stay in the
+  in-memory state (`State.Tasks`) until restart ([issues](../../issues.md)). `grp.num` keeps the
+  highest task number given out, so task numbers are not reused after restart.
+
+## Web Push
+
+`webpush.go` holds the `push` command, the `"push"` hook of `After` and the loop's startup and
+shutdown hooks ([commands](../../planning/contracts/commands.md) 1.7;
+[storage](../../planning/contracts/storage.md) section 1, `push_sub`):
+
+- **Command.** A payload that decodes as `proto.PushOff` (`off: true`) deletes the signing device's
+  row from `push_sub`; any other payload decodes as `proto.PushOn` (`bad_request` otherwise) and
+  writes `push_sub` through `Result.Writes`.
+- **Memory, startup and shutdown.** Subscriptions and the active `*Loop` are held per `State.Home`
+  under a leaf mutex (`wpushMu`, which never calls `Loop`, `Store` or HTTP). `StartLoop` loads
+  `push_sub` from `LoopConfig.Store` for `LoopConfig.Home` before starting group goroutines,
+  `After["push"]` updates memory only after transaction commit so a rolled-back write leaves memory
+  unchanged, and `Loop.Close` drains in-flight Web Push deliveries on `Loop.wg` before detaching.
+- **Eligibility and delivery.** For each newly created `proto.MsgRow` (`Pos == Seq`), `After["push"]`
+  extracts one reminder kind (`approval`, `decision`, `brief`, `done` from `summary`, or `mention`
+  from any other message kind), filters for offline subscribed devices of concerned group members
+  that remain valid in `State.Logs`, encrypts `proto.Reminder` JSON (without HTML escaping) via
+  RFC 8291 (`webpush-go`), and sends each request in its own goroutine with a 5 s context timeout.
+  A `404` or `410` response drops that subscription in memory and from `push_sub` if not replaced
+  since.
+
 ## Known limitations
 
 - The table of commands holds the groups, members, briefs, the task commands of HM-9, the four
   kinds of `post` of HM-6, `note` and `forget`, the cards, the checks and reviews, the merges and
-  summaries, and the host events, and no node starts a loop yet: the remaining command files
-  (including thread round counting in HM-13) and the wiring of the node are separate units
-  ([units](../../planning/steps/parallel-plan-units.md), section 2).
+  summaries, the host events, `push`, and the calls, and no node starts a loop yet: the remaining
+  command files (including thread round counting in HM-13) and the wiring of the node are separate
+  units ([units](../../planning/steps/parallel-plan-units.md), section 2).
+- After retention deletes rows, finished tasks stay in the in-memory `State.Tasks` until restart
+  ([issues](../../issues.md)).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
 - A `peer.Connection` takes every frame at once and keeps it in its own buffer, so the limit of
@@ -759,3 +823,17 @@ newest 50 and an older pending card, purge-mark reset, `state_only`) and the fir
 reads, exact 61,440-byte boundaries, page bounds checks, group access checks, detached connections
 and store failures. `features/home_fetch.feature` holds the scroll-back scenarios of A2.2 and the
 deleted-row scenario of A2.7.
+
+`cmd_call_test.go` sends `post/call` and `post/reply` through `Commands.Apply` with fakes of
+`Receipts` and `Disk`, checking the golden shapes, `UnexpectedNulls`, the 200-character preview,
+elapsed-time clamping, receipts and every refusal boundary. `features/home_call.feature` holds the
+home half of acceptance tests A6.3 and A6.4.
+`retention_test.go` covers `Retain`: default and configured `retention_days`, store error
+propagation, protected rows, and the purge mark with `Loop.Sync` reset.
+`features/home_retention.feature` holds acceptance test A2.5 and the retention half of A5.14.
+
+`webpush_test.go` covers `push`, `After["push"]`, `StartLoop` subscription loading and `Close`
+drain, RFC 8291 decryption, per-browser eligibility and revocation, and `404`/`410` eviction in
+memory and `push_sub`. `features/home_webpush.feature` holds the backend half of acceptance test
+A8.3 against a local HTTP push endpoint, verifying that wire payloads are ciphertext only and
+decrypted reminders hold neither message text nor commands.

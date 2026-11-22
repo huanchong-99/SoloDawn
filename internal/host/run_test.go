@@ -492,7 +492,7 @@ func assertFirstTurnLaunch(t *testing.T, h *Host, drv *fakeDriver, dataDir strin
 	l1 := drv.lastLaunch()
 	wantDir := filepath.Join(dataDir, "projects", runGroup1, "wt/1-paths")
 	got := [7]any{l1.Folder, l1.Session, l1.Level, slices.Equal(l1.Shim[:2], []string{"solodawn", "mcp"}), l1.Instructions, l1.RepoConfig, l1.ToolTimeout}
-	want := [7]any{wantDir, "", 3, true, "prompt:task", false, 60 * time.Minute}
+	want := [7]any{wantDir, "", 3, true, "prompt:task", true, 60 * time.Minute}
 	if got != want {
 		t.Fatalf("unexpected launch: %+v, want dir %s", l1, wantDir)
 	}
@@ -659,6 +659,31 @@ func TestTwoHostsInOneProcessAreIsolated(t *testing.T) {
 	}
 }
 
+func runAndCheckLaunch(t *testing.T, h *Host, drv *fakeDriver, key SessionKey, wantLevel int, wantRepo bool) Launch {
+	t.Helper()
+	if err := Runner.Turn(t.Context(), h, key, "turn", Turn{Kind: ItemsTurn}); err != nil {
+		t.Fatal(err)
+	}
+	waitForState(t, h, key, Waiting)
+	got := drv.lastLaunch()
+	if got.Level != wantLevel {
+		t.Fatalf("session %v level = %d, want %d", key, got.Level, wantLevel)
+	}
+	if got.RepoConfig != wantRepo {
+		t.Fatalf("session %v repoConfig = %v, want %v", key, got.RepoConfig, wantRepo)
+	}
+	closeWaitingSession(h, stateOf(h), key)
+	return got
+}
+
+func assertKindLaunches(t *testing.T, h *Host, drv *fakeDriver, keys [3]SessionKey, wantLevel int) Launch {
+	t.Helper()
+	first := runAndCheckLaunch(t, h, drv, keys[0], wantLevel, false)
+	runAndCheckLaunch(t, h, drv, keys[1], wantLevel, true)
+	runAndCheckLaunch(t, h, drv, keys[2], wantLevel, true)
+	return first
+}
+
 func TestLaunchConfigLevelsRepoConfigAndTimeout(t *testing.T) {
 	h, _, drv, dataDir := setupRunEnv(t)
 	drv.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
@@ -667,14 +692,16 @@ func TestLaunchConfigLevelsRepoConfigAndTimeout(t *testing.T) {
 		return p, nil
 	}
 
-	keyGrp := SessionKey{Group: runGroup1, Member: runAI1}
-	keyRev := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask2}
-	keyTask := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-	h.Sessions.Create(makeRunSession(keyGrp, GroupSession, "repo"))
-	h.Sessions.Create(makeRunSession(keyRev, ReviewSession, "review/12"))
-	h.Sessions.Create(makeRunSession(keyTask, TaskSession, "wt/12-paths"))
+	keys := [3]SessionKey{
+		{Group: runGroup1, Member: runAI1},
+		{Group: runGroup1, Member: runAI1, Task: runTask2},
+		{Group: runGroup1, Member: runAI1, Task: runTask1},
+	}
+	h.Sessions.Create(makeRunSession(keys[0], GroupSession, "repo"))
+	h.Sessions.Create(makeRunSession(keys[1], ReviewSession, "review/12"))
+	h.Sessions.Create(makeRunSession(keys[2], TaskSession, "wt/12-paths"))
 
-	// 1. Fresh store defaults every session kind (group, review, task) to level 3.
+	// 1. Fresh store defaults every session kind to level 3; task and review enable RepoConfig while group does not.
 	grpRow := proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: runGroup1, Seq: 1},
 		Name:      "Website", Kind: "project", Base: "main", Forge: "none", Home: "home-dev",
@@ -683,19 +710,10 @@ func TestLaunchConfigLevelsRepoConfigAndTimeout(t *testing.T) {
 	rawGrp, _ := json.Marshal(grpRow)
 	h.Rows.Put(runGroup1, "group", runGroup1, rawGrp)
 
-	for _, key := range []SessionKey{keyGrp, keyRev, keyTask} {
-		if err := Runner.Turn(t.Context(), h, key, "default-3", Turn{Kind: ItemsTurn}); err != nil {
-			t.Fatal(err)
-		}
-		waitForState(t, h, key, Waiting)
-		if drv.lastLaunch().Level != 3 {
-			t.Fatalf("session %v default level = %d, want 3", key, drv.lastLaunch().Level)
-		}
-		closeWaitingSession(h, stateOf(h), key)
-	}
+	grpLaunch := assertKindLaunches(t, h, drv, keys, 3)
 	wantGrpDir := filepath.Join(dataDir, "projects", runGroup1, "repo")
-	if drv.launches[0].Folder != wantGrpDir || drv.launches[0].ToolTimeout != 17*time.Minute {
-		t.Fatalf("group launch: %+v, want dir %s", drv.launches[0], wantGrpDir)
+	if grpLaunch.Folder != wantGrpDir || grpLaunch.ToolTimeout != 17*time.Minute {
+		t.Fatalf("group launch: %+v, want dir %s", grpLaunch, wantGrpDir)
 	}
 
 	// 2. default_level=2 applies when perm is absent; TurnMinutes=0 falls back to 60m.
@@ -703,41 +721,21 @@ func TestLaunchConfigLevelsRepoConfigAndTimeout(t *testing.T) {
 	grpRow.Limits.TurnMinutes = 0
 	rawGrp0, _ := json.Marshal(grpRow)
 	h.Rows.Put(runGroup1, "group", runGroup1, rawGrp0)
-	if err := Runner.Turn(t.Context(), h, keyGrp, "def-2", Turn{Kind: ItemsTurn}); err != nil {
-		t.Fatal(err)
+	defLaunch := runAndCheckLaunch(t, h, drv, keys[0], 2, false)
+	if defLaunch.ToolTimeout != 60*time.Minute {
+		t.Fatalf("default_level=2 launch: %+v", defLaunch)
 	}
-	waitForState(t, h, keyGrp, Waiting)
-	if drv.lastLaunch().Level != 2 || drv.lastLaunch().ToolTimeout != 60*time.Minute {
-		t.Fatalf("default_level=2 launch: %+v", drv.lastLaunch())
-	}
-	closeWaitingSession(h, stateOf(h), keyGrp)
 
-	// 3. perm(level=1, repo_config=1) overrides default_level=2 for every kind; GroupSession never enables RepoConfig.
-	seamSQL(t, h.Store, `INSERT INTO perm(agent, g, level, repo_config) VALUES('claude', '`+runGroup1+`', 1, 1)`)
-	for _, tc := range []struct {
-		key      SessionKey
-		wantRepo bool
-	}{{keyGrp, false}, {keyRev, true}, {keyTask, true}} {
-		if err := Runner.Turn(t.Context(), h, tc.key, "perm-1", Turn{Kind: ItemsTurn}); err != nil {
-			t.Fatal(err)
-		}
-		waitForState(t, h, tc.key, Waiting)
-		got := drv.lastLaunch()
-		if got.Level != 1 || got.RepoConfig != tc.wantRepo {
-			t.Fatalf("perm launch for %v: %+v, want level 1 repoConfig=%v", tc.key, got, tc.wantRepo)
-		}
-		closeWaitingSession(h, stateOf(h), tc.key)
-	}
+	// 3. perm(level=1) overrides default_level=2 for every kind; session kind alone controls RepoConfig.
+	seamSQL(t, h.Store, `INSERT INTO perm(agent, g, level) VALUES('claude', '`+runGroup1+`', 1)`)
+	assertKindLaunches(t, h, drv, keys, 1)
 
 	// 4. all_level3=true overrides perm=1 to 3; malformed group JSON falls back to 60m.
 	putSetting(t, h.Store, "all_level3", "true")
 	h.Rows.Put(runGroup1, "group", runGroup1, json.RawMessage(`{"t":"group","id":"`+runGroup1+`","seq":1,"name":"W","kind":"project","base":"main","forge":"none","home":"home-dev","checks":[],"limits":{"turn_minutes":17},"extra":1}`))
-	if err := Runner.Turn(t.Context(), h, keyRev, "all3", Turn{Kind: ItemsTurn}); err != nil {
-		t.Fatal(err)
-	}
-	waitForState(t, h, keyRev, Waiting)
-	if drv.lastLaunch().Level != 3 || drv.lastLaunch().ToolTimeout != 60*time.Minute {
-		t.Fatalf("all_level3 launch: %+v", drv.lastLaunch())
+	all3Launch := runAndCheckLaunch(t, h, drv, keys[1], 3, true)
+	if all3Launch.ToolTimeout != 60*time.Minute {
+		t.Fatalf("all_level3 launch: %+v", all3Launch)
 	}
 }
 

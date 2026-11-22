@@ -6,6 +6,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · Web Push VAPID `sub` URL is not yet checked against Apple's push service
+
+- Symptom: none observed; `wpushSubscriber` (`https://github.com/huanchong-99/SoloDawn`) has not yet been exercised against Apple's Web Push service on iOS.
+- Cause: `internal/home/webpush.go` (`wpushSubscriber`) sets the VAPID JWT `sub` claim to the repository URL, and no iOS device run is available in automated CI.
+- Status: open for the live iOS check of `A8.3` (`I-10` / `I-11`).
+
+### 2026-11-22 · limitation · An unanswered AI-to-AI `call` stays `waiting`
+
+- Symptom: when the called AI never answers with `reply`, the `call` message keeps `state.status = "waiting"` for good; the web call block (`U-10`) shows it as waiting, with the time since it was made.
+- Cause: `planning/contracts/messages.md` section 3.4 gives a call only `waiting` and `answered`, with no `expired` as decisions have. The caller is not blocked: `ask` returns its receipt after `limits.ask_wait_s` (45 s, `internal/host/tools_ask.go:117-119`) and goes on with its turn.
+- Status: open, accepted for 1.0 (coordinator, 2026-11-22, `HS-12` review): no expiry, less code.
+
+### 2026-11-21 · limitation · Finished tasks stay in a group's state in memory after retention until a restart
+
+- Symptom: after the daily retention run deletes a `merged` or `cancelled` task row older than `retention_days` from SQLite, `State.Tasks` in the running home still holds that task row until the loop restarts. A rule or a state read that inspects `State.Tasks` before a restart still sees the finished task; a cold read from the store snapshot and a restarted loop do not.
+- Cause: retention runs `home.Retain` (`internal/home/retention.go`, `Retain`; `internal/store/retention.go`, `Retain`) directly against SQLite, deleting aged rows without removing finished tasks from `State.Tasks` (`internal/home/home.go`).
+- Status: open, accepted for step 1 (`internal/home/README.md`, "Retention"). Finished tasks take no further commands and occupy little memory until the next restart; `grp.num` keeps the highest task number so task numbers are never reused after a restart.
+
 ### 2026-11-22 · limitation · macOS Application Firewall blocks incoming direct connections to an unsigned `solodawn` binary
 
 - Symptom: on macOS with the Application Firewall enabled, incoming UDP and ICE-TCP flows to an unsigned `solodawn` (or test) binary are blocked (`verdict: 2 (Block)`) unless the user clicks Allow when macOS asks or adds `solodawn` under System Settings → Network → Firewall → Options, so direct connections fail and fall back to the relay.
@@ -452,6 +470,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-22 · bug · `Host.Hand` could lose the item that answers a wait when the wait ended at the same moment
+
+- Symptom: an `ask` reply or an approval decision that arrived just as its wait ended was acknowledged and never seen. `Hand` returned `waited = true`, so `tryOpenWait` (`internal/host/deliver.go:528-540`) acked the item and did not queue it, while the waiting tool had already called `done()` and found its channel empty (`awaitApprovalItem`, `internal/host/approve.go:648-665`). The HS-12 reviewer's probe lost 16 of 200,000; `TestHandAndEndOfWaitNeverLoseAnItem` lost 1 to 18 of 200,000 in each of 20 runs without the fix (84 to 162 under `-race`).
+- Cause: `(*Host).Hand` (`internal/host/host.go:293-297` before the fix) removed the wait through `release`, unlocked `h.waiting`, and only then sent into the channel. `done()` and the tool's last look at the channel could run in that gap.
+- Status: resolved in unit `HAND-RACE`: `Hand` removes the wait and sends the item while it holds `h.waiting` (`internal/host/host.go:290-297`); the channel has room for the one item, so the send never blocks. The same test keeps every item in 20 runs, and in 5 under `-race`.
 
 ### 2026-11-22 · bug · `home.Loop.Close` and `node.Sessions` left connection pumps and host commands running into `Store.Close`
 

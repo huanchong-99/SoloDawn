@@ -711,7 +711,7 @@ func verifyOvertakenSyncedAndMonotonicCursor(t *testing.T, r *deliverRig) {
 
 func assertLiveCursorAndFailedDelta(t *testing.T, r *deliverRig) {
 	t.Helper()
-	// Reconnect must ask since 10 (not regressed to 9); wrong group in Synced keeps 10; live row seq 12 advances to 12; dup 12 and 11 ignored.
+	// Reconnect must ask since 10 (not regressed to 9); live row seq 12 advances to 12; dup 12 and 11 ignored.
 	fourth := newFakeDeliverHome()
 	fourth.syncMode = true
 	r.h.Attach(r.homeKey.ID(), fourth)
@@ -738,29 +738,20 @@ func assertLiveCursorAndFailedDelta(t *testing.T, r *deliverRig) {
 	if got.Name != "first-12" {
 		t.Fatalf("row overwritten by equal or lower seq: %q", got.Name)
 	}
-	assertMismatchAndMalformedSynced(t, r)
+	assertMalformedSynced(t, r)
 }
 
-func assertMismatchAndMalformedSynced(t *testing.T, r *deliverRig) {
+func assertMalformedSynced(t *testing.T, r *deliverRig) {
 	t.Helper()
 	fifth := newFakeDeliverHome()
 	fifth.syncMode = true
 	r.h.Attach(r.homeKey.ID(), fifth)
 	t.Cleanup(func() { fifth.closeConn() })
 	if req5 := <-fifth.started; req5.Since != 12 {
-		t.Fatalf("got since=%d, want 12", req5.Since)
-	}
-	fifth.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup2, Seq: 50}))}
-	r.waitSyncStopped(testGroup1)
-	sixth := newFakeDeliverHome()
-	sixth.syncMode = true
-	r.h.Attach(r.homeKey.ID(), sixth)
-	t.Cleanup(func() { sixth.closeConn() })
-	if req6 := <-sixth.started; req6.Since != 12 {
-		t.Fatalf("after failed delta got since=%d, want 12", req6.Since)
+		t.Fatalf("after live rows got since=%d, want 12", req5.Since)
 	}
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 39, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "wait-sync"))
-	sixth.answers <- syncAnswer{raw: json.RawMessage(`{"t":"synced","re":1,"g":"` + testGroup1 + `","seq":99}`)}
+	fifth.answers <- syncAnswer{raw: json.RawMessage(`{"t":"synced","re":1,"g":"` + testGroup1 + `","seq":99}`)}
 	r.waitSyncStopped(testGroup1)
 	r.waitAIUnbusy(testGroup1, testAI1)
 	d := deliv(r.h)
@@ -2241,11 +2232,10 @@ func TestRouteThreadReplyAndNonThreadItems(t *testing.T) {
 	deliverSingleAndWait(r, 951, proto.Item{Item: 951, AI: testAI1, Why: "mention", Task: testTask1, Msg: testMsg1}, r.makeTextMsg(testMsg1, &tid, "mention"), 1)
 	deliverSingleAndWait(r, 952, proto.Item{Item: 952, AI: testAI1, Why: "reply", Task: testTask1, Msg: testMsg2}, r.makeTextMsg(testMsg2, &tid, "reply"), 2)
 	deliverSingleAndWait(r, 953, proto.Item{Item: 953, AI: testAI1, Why: "notice", Task: testTask1, Code: "quiet"}, nil, 3)
-	deliverSingleAndWait(r, 954, proto.Item{Item: 954, AI: testAI1, Why: "confirmed", Task: testTask1, Msg: testMsg1}, nil, 4)
-	deliverSingleAndWait(r, 955, proto.Item{Item: 955, AI: testAI2, Why: "reply", Msg: testMsg2}, r.makeTextMsg(testMsg2, &tid, "review reply"), 5)
+	deliverSingleAndWait(r, 955, proto.Item{Item: 955, AI: testAI2, Why: "reply", Msg: testMsg2}, r.makeTextMsg(testMsg2, &tid, "review reply"), 4)
 
-	wantKeys := []SessionKey{taskKey, taskKey, grpKey, grpKey, revKey}
-	wantTexts := []string{"task:1", "task:1", "group:1", "group:1", "review:1"}
+	wantKeys := []SessionKey{taskKey, taskKey, grpKey, revKey}
+	wantTexts := []string{"task:1", "task:1", "group:1", "review:1"}
 	assertTurnTargets(t, r.runtime.recorded(), wantKeys, wantTexts)
 }
 
@@ -2305,6 +2295,10 @@ func verifyMergeHoldReasons(t *testing.T) {
 	c2 := commitNewMergeTask(t, r, pDir, testTask2, 2, "m-unheld", "f2.txt")
 	d := deliv(r.h)
 
+	t.Cleanup(func() {
+		r.h.Settle()
+		delete(Holds, "reason")
+	})
 	Holds["reason"] = func(*Host, SessionKey) (string, bool) { return "offline", true }
 	m1 := proto.Item{Item: 972, AI: testAI1, Why: "merge", Task: testTask1, Commit: c1}
 	d.enqueueMerge(verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Item: m1}, item: m1})

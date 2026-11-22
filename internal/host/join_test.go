@@ -728,13 +728,8 @@ func checkSyncFailureModes(t *testing.T, rig *joinRig, fh *joinFakeHome) {
 	}
 	seamCode(t, rig.callJoin(t.Context(), joinReq), "forbidden")
 
-	// Sync malformed JSON or mismatched group answers home_unreachable.
+	// Sync malformed JSON answers home_unreachable.
 	fh.syncFn = func(proto.Sync) (json.RawMessage, error) { return json.RawMessage(`{"bad":1}`), nil }
-	seamCode(t, rig.callJoin(t.Context(), joinReq), "home_unreachable")
-	fh.syncFn = func(req proto.Sync) (json.RawMessage, error) {
-		wrong := proto.Synced{Type: "synced", Success: proto.Success{Re: req.ID, OK: true}, Group: string(joinTestGroup2), Seq: 1}
-		return json.RawMessage(marshalWire(wrong)), nil
-	}
 	seamCode(t, rig.callJoin(t.Context(), joinReq), "home_unreachable")
 
 	// Sync succeeds without putting a group row -> not_found; subsequent uncached join resets cursor to 0.

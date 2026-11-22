@@ -90,8 +90,7 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   cold start.
 - **A2.3** A command sent twice with the same nonce produces one row and
   the same answer both times.
-- **A2.4** A command whose signer is not the connection's device is refused.
-  A command from a device that is not a member's is refused.
+- **A2.4** A command from a device that is not a member's is refused.
 - **A2.5** With retention set to 7 days and the clock advanced, older
   messages are gone after the daily run and newer ones remain; a card that
   is still pending remains however old. A client whose cursor is older
@@ -120,9 +119,7 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
 - **A3.6** Killing the CLI mid-turn produces a `turn_interrupted` row; the
   next mention works.
 - **A3.7** Text the model prints outside tools does not appear in the group.
-- **A3.8** A repository hook that would create a marker file does not run by
-  default, and runs after the owner enables repository configuration, on
-  each CLI. (`live`)
+- **A3.8** A repository hook that would create a marker file runs in task and review sessions, and does not run in group sessions, on each CLI. (`live`)
 - **A3.9** A `post` from an AI that contains a test secret pattern fails
   with `secret`; no row for it exists on the home.
 - **A3.10** An inbox item sent twice by the home produces one turn, also

@@ -54,7 +54,7 @@ and a step 1 acceptance test shows each. A CLI that lacks one waits.
 | an MCP client that takes, at each start, one stdio server with its arguments, and calls that server's tools without a request for each call | the session token names the caller; `post` is the only way an AI speaks (`contracts/mcp-tools.md`) | A3.1, A3.7 |
 | an approval channel that is not a terminal prompt: the CLI's own permission request reaches the node and waits for its answer (section 4, `approvals`) | R-42, R-43 | A4.1, A4.2 |
 | level 1: settings under which the session changes no file | every group session, review session and secretary is level 1 (`sessions.md`) | A4.4 |
-| repository configuration kept out unless the owner enabled it | R-45 | A3.8 |
+| repository configuration loaded in task and review sessions and kept out in group sessions (owner's decision, 2026-11-22) | R-45, Q-24 | A3.8 |
 
 The driver itself is what `steps/step-2-3.md` 3.1 lists, as for the two
 step 1 drivers:
@@ -95,7 +95,8 @@ Rules for a declaration:
   the vendor provides no sandbox (`risks.md` Q-4): the node refuses level 2
   there and says why. WSL2 is a later option.
 - `takeover` is not `none` only if all of it holds. A terminal that drops
-  the level or loads the repository's configuration is no takeover.
+  the level or loads the repository's configuration in a group session is no
+  takeover.
 - A value is declared from what was run with the real CLI. A capability
   known only from documentation is declared as missing until a capture
   shows it.
@@ -112,17 +113,14 @@ would be refused. The home knows nothing of it, and no row changes.
 | Where | What the declaration switches |
 | --- | --- |
 | `agent.set` | an `account` not in `accounts` is refused with `bad_request` |
-| `perm.set` | a `level` not in `levels` is refused with `bad_request` |
-| the level of a task session | the highest level in `levels` that is not above the level the other rules give: `contracts/commands.md` section 2, and from step 2 the cap of R-44 |
-| `settings.set` | a cap for this CLI whose `unit` is neither `turns` nor in `usage` is refused with `bad_request` |
 | the tool list of a session | `approve` is listed only to a structured session of a driver with `approvals` `tool` (`contracts/mcp-tools.md` section 3) |
 | `takeover.start` | refused with `conflict` when `takeover` is `none`, before the checks that answer `relay`, `busy` or `cli` |
 | `takeover.start` for a working AI without an unfinished task | `new`: the session starts in the terminal. `resume`: the structured `assign` turn comes first |
 
 - Each refusal names the field of the declaration in `msg`.
-- From step 2, a task that someone other than the owner caused runs at
-  level 2 at most (R-44). On a CLI whose `levels` are `1` and `3` that is
-  level 1: such a task can be read and reported on, and not submitted.
+- No switch reads `levels` or `usage` in 1.0: `perm.set` and the caps of
+  `settings.set` are postponed, and R-44 is not applied (coordinator,
+  2026-11-22). They are declared all the same, for when those return.
 - Nothing else in the node asks which CLI a session runs. A difference
   between CLIs that is not in this table lives inside the driver, behind
   the five operations.
@@ -145,10 +143,10 @@ The name is not `caps`: that field holds the owner's usage caps.
 | Field | Presence | The web client uses it for |
 | --- | --- | --- |
 | `accounts` | always, never `[]` | the account types offered when an AI is registered |
-| `levels` | always, never `[]` | the levels offered where a level is chosen |
+| `levels` | always, never `[]` | nothing in 1.0, which has no level control |
 | `approvals` | always | nothing: every driver has a channel (section 3) |
 | `takeover` | always | "open terminal" is absent when it is `none` |
-| `usage` | always; `[]` when the CLI reports none | the cap units offered beside `turns` |
+| `usage` | always; `[]` when the CLI reports none | nothing in 1.0, whose caps are postponed |
 
 - `agent` in `host.info` and `cli` in a member row (`contracts/rows.md`
   section 2) take one new value per driver: the name the driver declares,
@@ -160,9 +158,8 @@ The name is not `caps`: that field holds the owner's usage caps.
   something says so in the group, like any member.
 - `driver` is a wire shape, so lane PROTO freezes it in both languages in
   one pull request (`contracts/conventions.md` section 5): unit P-5, as
-  the coordinator decided on 2026-11-20. The Fable interface unit U3-3
-  shows it: the account choice, the level control, the cap units and the
-  terminal button. The parallel plan lists both; T3-1 puts nothing on the
+  the coordinator decided on 2026-11-20. The interface unit U3-3 shows it:
+  the account choice and the terminal button (2026-11-22). The parallel plan lists both; T3-1 puts nothing on the
   wire, and T3-2 puts `driver` into `host.info` after P-5.
 
 ## 7. Acceptance
@@ -231,6 +228,5 @@ is in that description. `[documented]` means read there and not run.
 5. The capability tests are A10.1 to A10.4 of
    `steps/step-3-acceptance.md` (unit C2-0).
 6. The answers of `steps/parallel-plan-step-2-3.md` section 1 that this
-   file rests on: D-16 only. The level cap of D-1 is used as R-44 states
-   it.
+   file rests on: D-16 only. R-44 is not applied in 1.0.
 7. Decided on 2026-11-20: the approval channel is required (point 3).

@@ -38,9 +38,8 @@ receiver's clock is refused with `stale`; receipts are kept for that long
 (`contracts/storage.md`).
 
 A command is accepted, in this sense, once it passed the checks that
-`contracts/datachannel.md` section 5 puts before the receipt: it arrived on
-the connection of its signer, passed the envelope checks and, as a home
-command, has its `g`. Whatever the receiver answers after that, a refusal
+`contracts/datachannel.md` section 5 puts before the receipt: it passed the
+envelope checks and, as a home command, has its `g`. Whatever the receiver answers after that, a refusal
 included, is the outcome its receipt keeps; a command that one of those
 checks refused leaves no receipt. The answer to a repeated refusal has the
 same code. Its `msg` is not kept, and need not be the same.
@@ -242,6 +241,14 @@ Never included: message text, the command of an approval, code, file
 names. The browser shows `group · kind · who: title` in the user's language
 and opens the card `msg`.
 
+Each created message row produces at most one reminder kind: `approval`
+(`body.approvers`), `decision` (`body.to`), `brief` (human `body.requester`)
+and `summary` (`done`, every human member of the group) do not also send
+`mention` for their `mentions`; any other created message row sends `mention`
+to the people named in `mentions`. `title` is cut at the first `\r` or `\n` and
+then at 80 Unicode code points, and left out when empty. A `404` or `410` from
+the push service drops that subscription.
+
 ### 1.8 Review outcome
 
 On `post` with `kind = review` the home computes `ok`: `score` ≥
@@ -270,7 +277,7 @@ device id. Receipts apply as for home commands.
 | `t` | Fields | Effect |
 | --- | --- | --- |
 | `agent.set` | `agent`, `account` | declares the account type (`personal`, `team` or `api_key`, else `bad_request`) of a CLI found on this machine (`claude` or `codex`, else `bad_request`; `conflict` when not found here; R-50); sets `login_ok` back to `true` in `host.info` (`flows/agent-turn.md` E) and writes audit `setting` (`account <account>`); required before the AI can join a group |
-| `perm.set` | `agent`, `g`, `level` (1, 2, 3), `repo_config` (bool) | postponed after 1.0 (no level control in 1.0): permission level for that AI's sessions in that project (R-40), and whether repository-supplied AI configuration is loaded (R-45; for which sessions: `contracts/drivers.md` 1.1, 1.2); takes effect the next time a session's process starts |
+| `perm.set` | `agent`, `g`, `level` (1, 2, 3) | postponed after 1.0 (no level control in 1.0): permission level for that AI's sessions in that project (R-40); takes effect the next time a session's process starts |
 | `settings.set` | any of `retention_days`, `idle_minutes`, `max_open`, `default_level`, `all_level3`, `approvers`, `caps` | postponed after 1.0 (with `U-12`): node settings; for `approvers` the node sends `member set` with them for each of its AIs to that AI's home |
 | `host.join` | `g`, `home`, `agent`, `name`, `secretary` | the node connects to `home`, clones the project if this node has no clone of it yet (R-11), and sends `member add_ai` |
 | `host.leave` | `g`, `agent` | the node sends `member remove`; if the home accepts it, the AI's sessions in that group are closed (it is refused while the AI has unfinished tasks) |

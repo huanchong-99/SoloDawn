@@ -79,3 +79,6 @@ solodawn pair <secret> --name "<label>"
 
 Check the pairing result against the device label and fingerprint shown
 in the browser.
+
+Add only repositories you trust, because their `CLAUDE.md`, `AGENTS.md` and
+hooks are used by the AIs that work on them.
