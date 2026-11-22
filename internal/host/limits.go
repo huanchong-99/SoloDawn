@@ -52,6 +52,7 @@ type memberHomeSlot struct {
 type limitsPart struct {
 	mu         sync.Mutex
 	wg         sync.WaitGroup
+	settled    bool // Settle has begun: nothing more starts on wg
 	offline    bool
 	seq        uint64
 	turns      map[string]int // by "<local day> <agent>"
@@ -92,6 +93,7 @@ func loadLimits(h *Host) {
 func settleLimits(h *Host) {
 	lp := limitsOf(h)
 	lp.mu.Lock()
+	lp.settled = true
 	for agent, t := range lp.rateTimers {
 		t.Stop()
 		delete(lp.rateTimers, agent)
@@ -191,7 +193,17 @@ func releaseHeld(ctx context.Context, h *Host, agent string) {
 	for _, slot := range distinctMemberSlots(h, agent) {
 		sendMemberStatus(ctx, h, rt, slot.home, slot.group, slot.member, nil)
 	}
-	limitsOf(h).wg.Go(func() { Deliver(h, "", "") })
+	limitsOf(h).spawn(func() { Deliver(h, "", "") })
+}
+
+// spawn runs f on wg unless the part has settled; the Add happens under mu,
+// so it comes before Settle's Wait or not at all.
+func (lp *limitsPart) spawn(f func()) {
+	lp.mu.Lock()
+	defer lp.mu.Unlock()
+	if !lp.settled {
+		lp.wg.Go(f)
+	}
 }
 
 func distinctMemberSlots(h *Host, onlyAgent string) []memberHomeSlot {
@@ -353,6 +365,9 @@ func onRateLimited(h *Host, lp *limitsPart, s Session, resets int64) {
 	wait := time.Duration(resets-h.Now().UnixMilli()) * time.Millisecond
 	lp.mu.Lock()
 	defer lp.mu.Unlock()
+	if lp.settled {
+		return
+	}
 	if prev := lp.rateTimers[s.Agent]; prev != nil {
 		prev.Stop()
 	}

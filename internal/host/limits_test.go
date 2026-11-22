@@ -424,11 +424,16 @@ func TestAStaleTurnTimerDoesNothingAndSettleStopsTheTimers(t *testing.T) {
 		t.Fatal("a stale timer interrupted a turn")
 	}
 	h.Settle()
+	var delivered atomic.Int32
+	Deliver = func(*Host, string, string) { delivered.Add(1) }
+	releaseRateLimit(h, lp, "claude")
+	onRateLimited(h, lp, cdx, h.Now().Add(time.Hour).UnixMilli())
+	lp.wg.Wait()
 	lp.mu.Lock()
 	left := len(lp.rateTimers) + len(lp.watches)
 	lp.mu.Unlock()
-	if left != 0 {
-		t.Fatalf("Settle left %d timers", left)
+	if left != 0 || delivered.Load() != 0 {
+		t.Fatalf("after Settle: %d timers, %d deliveries", left, delivered.Load())
 	}
 }
 
