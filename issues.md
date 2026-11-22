@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · Foreign home attribution depends on a device row
+
+- Symptom: a foreign home with no matching device row shows its computer name but says its owner was not provided.
+- Cause: `welcome` carries the device name and an owner boolean, not its owner's user id. Group details use a matching live `device` row rather than guessing from a person's group role.
+- Status: open when that row is unavailable. Real-host custom forge execution and Windows program resolution are not verified by the browser UI.
+
 ### 2026-11-22 · limitation · The Qwen Code driver is declared from documentation, not from a capture
 
 - Symptom: `DriverCaps["qwen"]` declares levels `1` and `3` and approvals `conn`, and `qwenDriver` speaks the `qwen serve` daemon API (`internal/host/qwen.go`), but no run of the real Qwen Code exists: the fake Qwen Code's scripts are written from the documented API, not cut from captures.
@@ -17,6 +23,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `contracts/step-3/drivers.md` section 3 requires the repository's configuration to be kept out of group sessions. `qwenDriver` cannot do that: a Qwen Code group session may load the project's `.qwen/settings.json`, `QWEN.md` and extensions (`internal/host/qwen.go`).
 - Cause: Qwen Code 0.28.0 documents no switch for it. Folder trust is not one: in an untrusted folder Qwen Code asks before every tool, even at `yolo`, which would turn level 3 into approval cards.
 - Status: accepted by the coordinator (2026-11-22): Qwen Code ships with this limitation, the risk R-45 already accepts (only trusted repositories go into a group; `install.md`). Open until a capture shows a switch that keeps the configuration out and leaves approvals alone.
+
 ### 2026-11-22 · limitation · The multi-person label scenarios cannot admit Q yet
 
 - Symptom: A9.12 and five A9.42 cases (failing review, decision by P, decision by Q, secretary confirmation without Q on the allow list, and secretary confirmation with Q on it) each failed under `-race` in `Given the confirmation cast with Q`. The reply was `bad_request: the home has no such command`; decoding that refusal as a successful command reply reported `proto: a field that is always present is missing`.
