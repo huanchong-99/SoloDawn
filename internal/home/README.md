@@ -50,6 +50,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | send a host its inbox items, on every `hello` | `loop.Inbox(conn)` |
 | record a host's `ack` | `loop.Ack(conn, req)` |
 | run the timers by hand, or tell the home of an event | `loop.Tick(now)`, `loop.Event(name, event)` |
+| expire old store data in a transaction | `Retain(tx, now)` |
 | mark a disconnected host's AIs offline | `HostOfflineEvent`, fired by `Loop` when a device's last `Inbox` connection ends |
 | move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
 | push to a client | the `Client` interface |
@@ -188,6 +189,8 @@ Host events (`cmd_hostev.go`) take the names that start with `hev`, their tests 
 functions start with `TestHostEv`; the file exports `HostOfflineEvent`.
 Thread rounds, queue jumps and the quiet-task timer (`rounds.go`) take the names that start with
 `rnd`, their tests too, and their test functions start with `TestRounds`.
+Retention (`retention.go`) takes the names that start with `ret`, exports `Retain`, and its test
+functions start with `TestRetention`.
 
 ## The run loop
 
@@ -693,6 +696,21 @@ row 23), and the thread round transitions (rows 21 and 22, and section 4 "Held b
   again once a person's thread `post/text` (row 22, passing `tskPending` and deduplicating `IfNone`
   `review` items through `tskItemCtx`) or an admin's `task/resume` (row 13) activates the task.
 
+## Retention
+
+`retention.go` exports `Retain(tx, now)`, which reads `retention_days` from SQLite `setting`
+(defaulting to `90` when absent) and calls `tx.Retain(time.UnixMilli(now), days)`
+([storage](../../planning/contracts/storage.md) sections 2 and 4). The daily node schedule in
+`internal/node` calls `Retain` once a day per node.
+
+- **What remains.** In one transaction the store raises `grp.purged` to the highest `seq` among
+  aged-out `gone` markers before deleting those markers, keeps `pending` cards, keeps `note` and
+  `review` rows (`keep = 1`), and deletes older messages and final (`merged` and `cancelled`) task
+  rows whose `mt` is before the cutoff.
+- **In-memory tasks.** After retention deletes rows from the store, finished tasks stay in the
+  in-memory state (`State.Tasks`) until restart ([issues](../../issues.md)). `grp.num` keeps the
+  highest task number given out, so task numbers are not reused after restart.
+
 ## Known limitations
 
 - The table of commands holds the groups, members, briefs, the task commands of HM-9, the four
@@ -700,6 +718,8 @@ row 23), and the thread round transitions (rows 21 and 22, and section 4 "Held b
   summaries, the host events, and `jump` and thread rounds of HM-13: the remaining command files
   (HM-14, HM-15, HM-17) are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
+- After retention deletes rows, finished tasks stay in the in-memory `State.Tasks` until restart
+  ([issues](../../issues.md)).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
 - A `peer.Connection` takes every frame at once and keeps it in its own buffer, so the limit of
@@ -799,3 +819,7 @@ deleted-row scenario of A2.7.
 `Commands.Apply`, `Table.Add` and `StartLoop`, including delivery after a rounds-paused task fails
 and is resumed and wake-up cap ageing. `features/home_rounds.feature` holds acceptance tests A5.8,
 A5.11 (home half) and A5.16 over `StartLoop`.
+
+`retention_test.go` covers `Retain`: default and configured `retention_days`, store error
+propagation, protected rows, and the purge mark with `Loop.Sync` reset.
+`features/home_retention.feature` holds acceptance test A2.5 and the retention half of A5.14.
