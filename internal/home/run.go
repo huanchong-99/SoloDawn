@@ -93,12 +93,16 @@ type Loop struct {
 	views  map[string]runView // what each group that exists shows in groups
 }
 
-// StartLoop loads every group from the store and starts its goroutine.
+// StartLoop loads every group and the persisted browser push subscriptions
+// from the store, and starts each group's goroutine.
 func StartLoop(cfg LoopConfig) (*Loop, error) {
 	l := &Loop{cfg: runDefaults(cfg), stop: make(chan struct{}),
 		groups: map[string]*runGroup{}, conns: map[*Conn]bool{}, views: map[string]runView{}}
 	states, err := l.load()
 	if err != nil {
+		return nil, err
+	}
+	if err := l.wpushLoad(); err != nil {
 		return nil, err
 	}
 	l.mu.Lock()
@@ -161,6 +165,7 @@ func (l *Loop) Close() {
 		c.leave()
 	}
 	l.wg.Wait()
+	l.wpushClose()
 }
 
 // spawn starts the goroutine of a group with the connections of the node.
