@@ -5,7 +5,7 @@ import { encode, type Device } from './identity';
 import { joinGroup, presentLog, readInvitation } from './join';
 import { mac, parseSecret, room } from './pairing';
 import { connect, type Listener, type Options, type Session } from './peer';
-import type { Ctl, Devlog, Welcome } from './proto';
+import type { Ctl, Devlog, Envelope, Welcome } from './proto';
 
 vi.mock('./peer', () => ({ connect: vi.fn() }));
 
@@ -46,6 +46,18 @@ it('presents the log in ordered frames no larger than the ctl byte limit', () =>
     { t: 'devlog', user: home, entries: entries.slice(0, 2) },
     { t: 'devlog', user: home, entries: entries.slice(2) },
   ]);
+});
+
+it('keeps a frame exactly at the ctl byte limit intact', () => {
+  const frame: Devlog = {
+    t: 'devlog',
+    user: home,
+    entries: [{ p: '', k: home, s: 'signature' }],
+  };
+  frame.entries[0].p = 'a'.repeat(61_440 - JSON.stringify(frame).length);
+  const send = vi.fn((value: Devlog) => structuredClone(value));
+  presentLog({ send }, { user: home, entries: frame.entries } as DeviceLog);
+  expect(send.mock.results.map(({ value }) => value)).toEqual([frame]);
 });
 
 const secret = parseSecret('7K2M-9QXD-4F8T-WB3N');
@@ -100,18 +112,31 @@ function attempt(valid = true, signal = new AbortController().signal, nodes: Hom
     onpath: vi.fn(),
   });
   void result.catch(() => {});
-  const matched = async () => {
+  const offer = async () => {
     const opts = await options.promise;
     const id = await room(crypto, secret);
     const fields = { role: 'a', k: home, kind: 'node', name: 'Home' };
     const data = { t: 'pair' as const, ...fields, mac: await mac(crypto, secret, fields) };
-    opts.heard!(url, { t: 'room', room: 'wrong room', data });
-    opts.heard!(url, { t: 'room', room: id, data: { ...data, k: browser } });
-    opts.heard!(url, { t: 'room', room: id, data: { ...data, kind: 'browser' } });
+    return { opts, id, data };
+  };
+  const matched = async () => {
+    const { opts, id, data } = await offer();
     opts.heard!(url, { t: 'room', room: id, data });
     return listen.promise;
   };
-  return { result, matched, close, request, push, remember, link, options: options.promise };
+  return {
+    result,
+    matched,
+    offer,
+    peer,
+    send,
+    close,
+    request,
+    push,
+    remember,
+    link,
+    options: options.promise,
+  };
 }
 
 it('does not contact rendezvous before onboarding', async () => {
@@ -157,6 +182,57 @@ it('closes a cancelled room without sending join', async () => {
   expect(run.request).not.toHaveBeenCalled();
 });
 
+it('dials only the invited node, from a matching authenticated room message', async () => {
+  const run = attempt();
+  const { opts, id, data } = await run.offer();
+  const foreign = { role: 'a', k: browser, kind: 'node', name: 'Foreign' };
+  const otherKind = { ...data, kind: 'browser' };
+  expect(opts.known(home)).toBe(true);
+  expect(opts.known(browser)).toBe(false);
+  opts.heard!(url, { t: 'presence', k: home, on: true });
+  opts.heard!(url, { t: 'joined', room: 'another room' });
+  opts.heard!(url, { t: 'room', room: 'another room', data });
+  opts.heard!(url, {
+    t: 'room',
+    room: id,
+    data: { t: 'pair', ...foreign, mac: await mac(crypto, secret, foreign) },
+  });
+  opts.heard!(url, {
+    t: 'room',
+    room: id,
+    data: { ...otherKind, mac: await mac(crypto, secret, otherKind) },
+  });
+  expect(run.send).not.toHaveBeenCalled();
+  expect(run.peer).not.toHaveBeenCalled();
+  const listener = await run.matched();
+  opts.heard!(url, { t: 'ready', ice: [], ttl: 0 });
+  const refusal = { step: 'hello', code: 'forbidden' };
+  listener.refused!('forbidden');
+  await expect(run.result).rejects.toMatchObject(refusal);
+  expect(run.peer).toHaveBeenCalledExactlyOnceWith(
+    home,
+    expect.any(Function),
+    expect.any(Function),
+  );
+  expect(run.send).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['devlog', new Error('send failed')],
+  ['join', new Error('request failed')],
+])('reports transport errors at the %s step', async (step, error) => {
+  const run = attempt();
+  const listener = await run.matched();
+  if (step === 'devlog')
+    run.push.mockImplementation(() => {
+      throw error;
+    });
+  else run.request.mockRejectedValue(error);
+  listener.online({ request: run.request, send: run.push } as Ctl, welcome);
+  await expect(run.result).rejects.toMatchObject({ step, code: 'lost' });
+  expect(run.close).toHaveBeenCalledOnce();
+});
+
 it('reports a connection loss before the home confirms the group', async () => {
   const run = attempt();
   const listener = await run.matched();
@@ -179,13 +255,52 @@ it('reports a failed write while remembering an admitted home', async () => {
   expect(run.link.online).not.toHaveBeenCalled();
 });
 
+it('closes on cancellation during persistence and ignores further room messages', async () => {
+  const cancel = new AbortController();
+  const run = attempt(true, cancel.signal);
+  const { opts } = await run.offer();
+  const listener = await run.matched();
+  const write = Promise.withResolvers<void>();
+  run.request.mockResolvedValue({ re: 2, ok: true });
+  run.remember.mockReturnValue(write.promise);
+  listener.online({ request: run.request, send: run.push } as Ctl, welcome);
+  await vi.waitFor(() => expect(run.remember).toHaveBeenCalledWith('Home'));
+  cancel.abort();
+  expect(run.close).toHaveBeenCalledOnce();
+  opts.heard!(url, { t: 'ready', ice: [], ttl: 0 });
+  expect(run.send).not.toHaveBeenCalled();
+  write.resolve();
+  await expect(run.result).rejects.toMatchObject({ step: 'remember', code: 'cancelled' });
+});
+
+it('clears the invitation timer and cancellation listener after joining', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const cancel = new AbortController();
+    const run = attempt(true, cancel.signal);
+    const listener = await run.matched();
+    run.request.mockResolvedValue({ re: 2, ok: true });
+    listener.online({ request: run.request, send: run.push } as Ctl, {
+      ...welcome,
+      groups: [{ g, name: 'Group', seq: 1 }],
+    });
+    await run.result;
+    expect(vi.getTimerCount()).toBe(0);
+    cancel.abort();
+    expect(run.close).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it('keeps the admitted group when its own nodes refuse or lose the notification', async () => {
   const sign = async (p: string) => ({ p, k: browser, s: 's' });
+  const refuse = vi.fn(async (_request: { env: Envelope }) => ({ err: { code: 'bad_request' } }));
   const nodes = [
     {
       device: 'older',
       me: { sign },
-      ctl: { request: vi.fn().mockResolvedValue({ err: { code: 'bad_request' } }) },
+      ctl: { request: refuse },
     },
     {
       device: 'lost',
@@ -196,7 +311,10 @@ it('keeps the admitted group when its own nodes refuse or lose the notification'
   ] as unknown as Home[];
   const run = attempt(true, undefined, nodes);
   const listener = await run.matched();
-  const groups = [{ g, name: 'Group', seq: 1 }];
+  const groups = [
+    { g: encode(new Uint8Array(16).fill(1)), name: 'Other', seq: 2 },
+    { g, name: 'Group', seq: 1 },
+  ];
   run.request.mockResolvedValue({ re: 2, ok: true });
   listener.online({ request: run.request, send: run.push } as Ctl, { ...welcome, groups });
   const { notices } = await run.result;
@@ -206,6 +324,7 @@ it('keeps the admitted group when its own nodes refuse or lose the notification'
     { node: 'offline', error: { step: 'home.add', code: 'lost' } },
   ]);
   expect(run.link.push).toHaveBeenCalledWith({ t: 'groups', groups });
+  expect(JSON.parse(refuse.mock.calls[0][0].env.p)).toMatchObject({ name: 'Group' });
   expect(run.close).not.toHaveBeenCalled();
 });
 

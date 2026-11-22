@@ -247,6 +247,19 @@ it('joins an invitation without adopting the home and reconnects to it after rel
   const ownPC = await answerNode(clients[0], own, browser.id, 0);
   ownPC.ctl.deliver(welcomeFrame(1, own.id, 'Own node'));
   await vi.waitFor(() => expect(homes[0].ctl).toBeDefined());
+  expect(ownPC.ctl.frames()).toContainEqual({
+    t: 'devlog',
+    user: browser.id,
+    entries: log.entries,
+  });
+
+  const cancel = new AbortController();
+  cancel.abort();
+  await expect(client.net.join!(invitation, 'Joiner', cancel.signal)).rejects.toMatchObject({
+    step: 'room',
+    code: 'cancelled',
+  });
+  expect(clients).toHaveLength(1);
 
   const joined = client.net.join!(invitation, 'Joiner', new AbortController().signal);
   await vi.waitFor(() => expect(clients).toHaveLength(2));
@@ -276,7 +289,8 @@ it('joins an invitation without adopting the home and reconnects to it after rel
   expect(JSON.parse(command.env.p)).toMatchObject({ t: 'join', g: websiteId, name: 'Joiner' });
   expect(command.env.k).toBe(browser.id);
   const groups = [{ g: websiteId, name: 'Shared', seq: 3 }];
-  pc.ctl.deliver({ t: 'groups', groups: [] });
+  pc.ctl.deliver({ t: 'devlog', user: home.id, entries: [] });
+  pc.ctl.deliver({ t: 'groups', groups: [{ g: makeId(), name: 'Other', seq: 1 }] });
   pc.ctl.deliver({ t: 'groups', groups });
   pc.ctl.deliver({ t: 'cmd', re: command.id, ok: true });
   await vi.waitFor(() => expect(ownPC.ctl.frames().at(-1)?.t).toBe('cmd'));
@@ -339,8 +353,12 @@ it('joins an invitation without adopting the home and reconnects to it after rel
   );
   reconnected.ctl.deliver({ t: 'groups', groups: [] });
   expect(homes[1].groups).toEqual([]);
+  await vi.waitFor(() => expect(client.net.path(homes[1])).toMatchObject({ kind: 'direct' }));
   client.stop();
   expect(rv.closed).toBe(true);
+  await expect(
+    client.net.join!(invitation, 'Joiner', new AbortController().signal),
+  ).rejects.toMatchObject({ step: 'onboarding', code: 'unpaired' });
   await saveJoined(() => idb, {
     ...(await loadJoined(() => idb)),
     [own.id]: { name: 'Also joined', url: rv.url },
@@ -350,6 +368,8 @@ it('joins an invitation without adopting the home and reconnects to it after rel
   expect(homes[0].owner).toBe(true);
   expect(homes[1].owner).toBe(false);
   expect(clients[2].known(home.id)).toBe(true);
+  expect(clients[2].known(anotherBrowser.id)).toBe(false);
+  expect(clients[2].urls).toContain(rv.url);
 });
 
 describe('sourceOf', () => {
