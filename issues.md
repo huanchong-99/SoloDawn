@@ -15,7 +15,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-23 · limitation · Remembered project homes without local AIs stay connected
 
 - Symptom: remembering a project home now retains a connection even when no AI is hosted locally in that group.
-- Cause: `internal/host/join.go:120-180,420-439` reconciles all remembered homes. The remembered-home wire shape carries no group kind. State-only sync supplies it after connection, as specified in [watch-team.md section 9](planning/contracts/step-2/watch-team.md#9-people-and-messages).
+- Cause: `internal/host/join.go:120-180,420-439` reconciles all remembered homes. The remembered-home wire shape carries no group kind. State-only sync supplies it after connection, as specified in [watch-team.md section 10 ("Which home")](planning/contracts/step-2/watch-team.md#10-a-secretarys-notice-r-14).
 - Status: the coordinator accepted keeping the connection on 2026-11-23.
 
 ### 2026-11-22 · limitation · Custom forge results depend on the template program
