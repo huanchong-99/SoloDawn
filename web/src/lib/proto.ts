@@ -905,7 +905,6 @@ export const PermSet = v.object({
   agent: str,
   g: Id,
   level: int,
-  repo_config: bool,
 });
 export type PermSet = v.InferOutput<typeof PermSet>;
 
@@ -961,7 +960,6 @@ const HostState = {
           g: Id,
           member: Id,
           level: int,
-          repo_config: bool,
           state: str,
           task: v.optional(Id),
           queued: int,

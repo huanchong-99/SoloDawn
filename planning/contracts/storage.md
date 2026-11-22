@@ -165,11 +165,10 @@ CREATE TABLE agent (              -- AI CLIs registered on this machine
   caps        TEXT NOT NULL DEFAULT '{}'   -- JSON, as in commands.md section 2
 ) STRICT;
 
-CREATE TABLE perm (               -- R-40, R-45
-  agent       TEXT    NOT NULL,
-  g           TEXT    NOT NULL,   -- group id
-  level       INTEGER NOT NULL,   -- 1 | 2 | 3
-  repo_config INTEGER NOT NULL DEFAULT 0,
+CREATE TABLE perm (               -- R-40
+  agent TEXT    NOT NULL,
+  g     TEXT    NOT NULL,         -- group id
+  level INTEGER NOT NULL,         -- 1 | 2 | 3
   PRIMARY KEY (agent, g)
 ) STRICT;
 
