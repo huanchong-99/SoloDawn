@@ -131,7 +131,7 @@ func (w *homePostWorld) writeInitialRows(tx *store.Tx, b1, node, host, guest ide
 		home.RowOf(proto.GroupRow{
 			RowHeader: proto.RowHeader{Type: "group", ID: w.group}, Name: "Website", Kind: "project",
 			Home: node.ID(), Secretary: w.members["secretary"], Forge: "none", Pass: 90, PassFoundation: 70,
-			Checks: []string{}, Created: ms,
+			Checks: []string{}, Limits: proto.Limits{Rounds: 10}, Created: ms,
 		}),
 		home.RowOf(proto.HumanMemberRow{
 			MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.members["owner"]}, Group: w.group, Kind: "human", User: b1.ID(), Name: "owner"},
