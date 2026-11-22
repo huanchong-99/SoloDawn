@@ -10,8 +10,8 @@ kind: reference
 One responsive Svelte 5 page, built by Vite into `internal/node/webdist/`, from where the node
 embeds it and the rendezvous serves it as static files. It holds no group logic: it renders rows
 and sends commands (`planning/steps/step-1-frontend.md`). What exists today is the frame every
-screen lives in: navigation, top bar, themes, languages, the route table of the seven pages, the
-connection the shell chooses for every page, the mounting points through which each area of the
+screen lives in: navigation, top bar, themes, languages, the route table, the connection the
+shell chooses for every page, the mounting points through which each area of the
 interface adds its parts, the web manifest and the notices for browsers that cannot run the
 client or that block its storage; this browser's device
 key with signed envelopes, the device log and pairing; the wire types with their decoding; a
@@ -110,13 +110,14 @@ file in `src/routes/`. It edits neither the shell nor another area:
 
 - **Static hosting.** Asset paths are relative (`base: './'`) and pages are address fragments, so
   the build works from any path and needs no server rule.
-- **Route table.** `routes` in `src/lib/route.svelte.ts` holds the seven pages of the design
-  (`design/index.html`), each with its path, the file in `src/routes/` that draws it, the entry of
-  the navigation it belongs to and whether it has the whole screen:
+- **Route table.** `routes` in `src/lib/route.svelte.ts` holds the pages of the design
+  (`design/index.html`) and the invitation entry point. Each has a path, a file in
+  `src/routes/`, a navigation entry (if any), and a whole-screen setting:
 
   | Page         | Address                            | Drawn by            | Entry     | Whole screen   |
   | ------------ | ---------------------------------- | ------------------- | --------- | -------------- |
   | `onboarding` | `#/onboarding`                     | `Onboarding.svelte` | none      | at every width |
+  | `join`       | `#join=<invitation>`, `#/join`     | `Join.svelte`       | none      | at every width |
   | `groups`     | `#/groups`                         | `Groups.svelte`     | chats     | no             |
   | `chat`       | `#/groups/<g>`                     | `Groups.svelte`     | chats     | on a phone     |
   | `terminal`   | `#/terminal/<g>/<member>[/<task>]` | `Terminal.svelte`   | chats     | on a phone     |
@@ -125,7 +126,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
   | `states`     | `#/states`                         | `dev/States.svelte` | none      | no             |
 
   An address fits a path when it has as many segments, every word is equal and every parameter
-  is given, except an optional last one (`:task?`); no address fits two paths. Parameters are
+  is given, except an optional last one (such as `:task?`); no address fits two paths. A `#join=`
+  fragment is passed intact to the join form. Parameters are
   read with `decodeURIComponent`; `href(page, params)` writes an address with
   `encodeURIComponent`, and `parse` reads it back. An address that fits no path, one with a
   malformed escape, and `#/states` in the build open `groups`. `route` is `{ page, params, dir }`;
@@ -136,8 +138,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
 
 - **Whole screen.** A route's `full` is written to `<div class="app" data-full>`: `phone` hides
   the top bar and the bottom navigation below 768 px (an open chat, whose head is its bar, and the
-  terminal), `always` hides them and the side navigation at every width (onboarding). The banners
-  stay in both.
+  terminal), `always` hides them and the side navigation at every width (onboarding and join).
+  The banners stay in both.
 - **Connection.** The shell decides once, when it starts, where the homes come from, and hands
   the result to every page as `net` (`src/lib/net.svelte.ts`): `sourceOf(mode, search)` is
   `mock` in a development server (`import.meta.env.MODE === 'development'`) unless the address
@@ -470,12 +472,16 @@ file in `src/routes/`. It edits neither the shell nor another area:
     for owned AIs an "Open terminal" link enabled only when the browser's own
     path to that computer is `direct`, or, while the AI is in `takeover`, a "Hand back" button that
     sends `takeover.end` and says that messages to it wait until then; then the human members with
-    their roles and online status. The access editor (`src/components/allow/`) places each AI's allow
+    their roles and online status; actions and errors go below the person's name. Owners and
+    admins can generate a one-time invite with a countdown. The owner's row has no role or removal
+    action. Owners can promote, demote, and remove other people; admins can remove ordinary
+    members; non-owners can leave. Signed commands go to the group home, and its row pushes
+    update the panel. The access editor (`src/components/allow/`) places each AI's allow
     list and approval delegates alongside its computer and account. Only its owner sees "Edit access"
     next to the terminal action. The home applies the allow list
     only on a team or API-key account and always retains the owner as an approver.
-    The panel's "Add AI" button requires a reachable group home, an admin
-    reader and at least one connected owned computer, and shows its reason when disabled. The
+    The panel's "Add AI" button requires a reachable group home, a group member, and at least
+    one connected owned computer, and shows its reason when disabled. The
     add-AI dialog reads `host.info` from the owner's connected computers, suggests an unused member
     name in the group, offers the secretary switch when the group has none or the reader is an
     admin, signs `host.join` for the chosen computer, and words `home_unreachable`, `conflict` and
@@ -565,6 +571,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/devlog.ts`           | `DeviceLog`: apply, replay, valid devices, adoption                               |
 | `src/lib/pairing.ts`          | pairing secret, room id, mac, pair message check                                  |
 | `src/lib/owner.ts`            | owner device log and node signalling URLs in IndexedDB                            |
+| `src/lib/join.ts`             | invitation reader, room pairing, log presentation, `join` and `home.add`          |
+| `src/lib/version.ts`          | hello version 2 and version 1 fallback                                            |
 | `src/lib/onboard.svelte.ts`   | onboarding pairing session, `#pair=` capture, `agent.set`, CLI and account labels |
 | `src/lib/payload.ts`          | the payload fields the envelope and log checks read                               |
 | `src/lib/prefs.svelte.ts`     | theme, language and `preference`, their persistence, `t`                          |
@@ -595,6 +603,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/App.svelte`              | shell: navigation, top bar, banners, the page of the route                        |
 | `src/Notice.svelte`           | the upgrade notice and the storage notice                                         |
 | `src/routes/`                 | one component per page; `Groups.svelte` is the list and a chat                    |
+| `src/routes/Join.svelte`      | invitation landing page, using the onboarding header and hero styles              |
 | `src/routes/dev/`             | `States.svelte`: the message examples, for a development server                   |
 | `src/components/`             | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount`, `Rich` (a text)  |
 | `src/components/groups/`      | the group list, the cards that wait, the create-group dialog                      |
@@ -605,6 +614,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/confirm/`     | `ConfirmCard.svelte`, mounted for kind `confirm`                                  |
 | `src/components/allow/`       | `AllowEditor.svelte`, lists and editor for each AI in the member panel            |
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
+| `src/components/people/`      | invitation dialog, role/removal actions and join form                             |
+| `src/messages/people.*`       | English and Chinese invitation, member-action and join texts                      |
 | `src/components/groupinfo/`   | group details and project memory (`chat.side`, `order: 20`)                       |
 | `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
@@ -612,7 +623,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
 | `src/components/reminder/`    | settings notifications card with iOS hint (`ReminderCard`), `ReminderSync` mount  |
 | `src/components/status/`      | other-tab notice mounted at `banner`                                              |
-| `src/styles/`                 | `tokens.css` (design tokens) and `base.css` (shared classes)                      |
+| `src/styles/`                 | `tokens.css`, `base.css` and `onboarding.css` (shared pairing and join layout)    |
 | `public/`                     | manifest, icon and `fonts/`, copied as they are                                   |
 | `features/web.spec.ts`        | steps of `../features/web.feature`                                                |
 | `features/shell.spec.ts`      | steps of `../features/web_shell.feature`; `fixtures/` stand-ins                   |
@@ -624,6 +635,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/call.spec.ts`       | steps of `../features/web_call.feature`                                           |
 | `features/confirm.spec.ts`    | steps of `../features/web_confirm.feature`                                        |
 | `features/member.spec.ts`     | steps of `../features/web_member.feature`                                         |
+| `features/people.spec.ts`     | steps of `../features/web_people.feature`                                         |
+| `features/people.test.ts`     | focused tests for member actions and the join page                                |
 | `features/groupinfo.spec.ts`  | steps of `../features/web_groupinfo.feature`                                      |
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |

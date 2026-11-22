@@ -11,6 +11,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a final task cancelled before its first role item was queued can qualify for the thread exception after its expired card is pruned, as can an assignee newly named by row 11 before its first activation. A reviewer's earlier participation can be lost after a later reassignment/review overwrites its evidence.
 - Cause: `internal/home/cmd_confirm.go:48-80` derives participation from current roles, state, step and latest review, excluding unconfirmed role cards. Acknowledged inbox items are deleted; task rows contain no durable participation history. Row 11 also cannot durably distinguish an owner's reassignment that overrides an earlier closed card from that card; a foreign reassignment to the same AI after expiry needs a new request, since the request's one card is closed (`internal/home/cmd_confirm_task.go:109-123,138-154`).
 - Status: open, accepted for T2-2b pending the owner's review: no new table, export format or wire shape. Held role cards no longer qualify; known participation survives finalization while its current fields still show it.
+### 2026-11-22 · limitation · Home task participation needs the role-confirmation lane
+
+- Symptom: mention and call gating infers participation from a running task's assignee, or a reviewer that reached review. It does not yet account for role items held by a confirmation, or retain participation after a task becomes final.
+- Cause: `internal/home/cmd_confirm.go` uses the step-1 task machine's current role and step; T2-2b owns role-item gating and confirmation waits.
+- Status: open for T2-2b integration. Its held role items must not qualify for the thread exception in `planning/contracts/step-2/confirm.md` section 2.
 
 ### 2026-11-22 · limitation · Remembered addresses are not dialled yet
 
@@ -26,7 +31,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-22 · limitation · Browser invitation joining needs the node and home implementations
 
 - Symptom: a current node does not admit a browser through an invitation; it knows only protocol version 1.
-- Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts`. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a. U2-1 supplies the join page.
+- Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts`. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a. U2-1 supplies the join page and member controls.
 - Status: open until those units are integrated. The browser exchange is covered against a simulated home, not a released node.
 
 ### 2026-11-22 · limitation · `host.CheckTakeover` awaits `takeover.start` (`HS-20`) and `driver` in `host.info` awaits `P-5` / `T3-2`

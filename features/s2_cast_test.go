@@ -761,17 +761,24 @@ func (c *s2Cast) AddBrowser(p *s2Person, label string) (*peerBrowser, error) {
 	if err != nil {
 		return nil, err
 	}
+	p.Browsers = append(p.Browsers, b)
+	if err := c.EnrollBrowser(p, key, label); err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+func (c *s2Cast) EnrollBrowser(p *s2Person, key identity.Key, label string) error {
 	ver := len(p.Entries) + 1
 	entry := nodetest.SignDeviceAdd(p.Key, p.ID(), ver, "browser", label, key.ID(), time.Now().UnixMilli())
 	p.Entries = append(p.Entries, entry)
-	p.Browsers = append(p.Browsers, b)
 	dl := proto.Devlog{Type: "devlog", User: p.ID(), Entries: []proto.Envelope{entry}}
 	for _, bc := range p.Conns {
 		if err := bc.conn.Send(dl); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	return b, nil
+	return nil
 }
 
 func (c *s2Cast) SendCmd(p *s2Person, conn *peer.Connection, payload any) (proto.CmdResult, error) {
