@@ -39,6 +39,7 @@ import (
 var (
 	m5CurrentWorld atomic.Pointer[m5World]
 	m5ClosedHosts  sync.Map
+	m5BinDirs      sync.Map
 )
 
 func init() {
@@ -630,8 +631,8 @@ func newM5World(sc *godog.ScenarioContext, f fixtures) *m5World {
 		beforeHooks:       map[string][]m5HookFunc{},
 		heldMembers:       map[string]bool{},
 	}
-	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
-		w.settleBeforeAfterHooks()
+	sc.After(func(ctx context.Context, _ *godog.Scenario, stepErr error) (context.Context, error) {
+		w.settleScenarioHost(stepErr != nil)
 		return ctx, nil
 	})
 	w.cleanup = afterScenario(sc)
@@ -738,17 +739,35 @@ func m5ExeExt() string {
 }
 
 func (w *m5World) prepareHelperBinaries(withGH bool) error {
-	w.binDir = w.f.t.TempDir()
-	ext := m5ExeExt()
-	for _, cli := range []string{"claude", "codex"} {
-		if err := m5CopyExec(filepath.Join(w.f.fakeCLIs, cli+ext), filepath.Join(w.binDir, cli+ext)); err != nil {
-			return err
-		}
+	key := fmt.Sprintf("%s|%t", w.f.fakeCLIs, withGH)
+	if cached, ok := m5BinDirs.Load(key); ok {
+		w.binDir = cached.(string)
+		return nil
 	}
-	return w.linkSelfHelpers(ext, withGH)
+	dir, err := w.buildHelperBinDir(withGH)
+	if err != nil {
+		return err
+	}
+	m5BinDirs.Store(key, dir)
+	w.binDir = dir
+	return nil
 }
 
-func (w *m5World) linkSelfHelpers(ext string, withGH bool) error {
+func (w *m5World) buildHelperBinDir(withGH bool) (string, error) {
+	dir := w.f.t.TempDir()
+	ext := m5ExeExt()
+	for _, cli := range []string{"claude", "codex"} {
+		if err := m5CopyExec(filepath.Join(w.f.fakeCLIs, cli+ext), filepath.Join(dir, cli+ext)); err != nil {
+			return "", err
+		}
+	}
+	if err := w.linkSelfHelpers(dir, ext, withGH); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func (w *m5World) linkSelfHelpers(dir, ext string, withGH bool) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -758,7 +777,7 @@ func (w *m5World) linkSelfHelpers(ext string, withGH bool) error {
 		names = append(names, "gh")
 	}
 	for _, name := range names {
-		if err := m5CopyExec(exe, filepath.Join(w.binDir, name+ext)); err != nil {
+		if err := m5CopyExec(exe, filepath.Join(dir, name+ext)); err != nil {
 			return err
 		}
 	}
@@ -781,23 +800,41 @@ func (w *m5World) registerHostHooks() {
 	w.cleanup(func() { m5CurrentWorld.Store(nil) })
 }
 
-func (w *m5World) settleBeforeAfterHooks() {
-	if w.cluster == nil {
-		return
-	}
-	w.mu.Lock()
-	already := w.closing
-	w.closing = true
-	w.mu.Unlock()
-	if already {
+func (w *m5World) settleScenarioHost(forceClose bool) {
+	if w.cluster == nil || !w.claimClosing() {
 		return
 	}
 	n0 := w.cluster.Nodes[0]
 	m5ClosedHosts.Store(n0.Host, true)
 	n0.Link.Close()
 	n0.Home.Close()
+	if forceClose {
+		m5CloseAllSessions(n0.Host)
+		return
+	}
 	w.recordHookErr(w.waitEndedTasksCleaned(n0.Host))
-	w.recordHookErr(m5WaitAllDormant(n0.Host))
+	if err := m5WaitAllDormant(n0.Host); err != nil {
+		w.recordHookErr(err)
+		m5CloseAllSessions(n0.Host)
+	}
+}
+
+func (w *m5World) claimClosing() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closing {
+		return false
+	}
+	w.closing = true
+	return true
+}
+
+func m5CloseAllSessions(h *host.Host) {
+	for _, s := range h.Sessions.All() {
+		if s.State != host.Dormant {
+			host.Runner.Close(h, s.SessionKey)
+		}
+	}
 }
 
 func (w *m5World) waitEndedTasksCleaned(h *host.Host) error {
@@ -845,7 +882,7 @@ func m5OneTaskCleaned(h *host.Host, pDir string, t proto.TaskRow) bool {
 func m5FinalStep(w *m5World, fn func() error) func() error {
 	return func() error {
 		err := fn()
-		w.settleBeforeAfterHooks()
+		w.settleScenarioHost(err != nil)
 		if err != nil {
 			return err
 		}
@@ -1580,7 +1617,12 @@ func (w *m5World) stepConfirmAndRunTwoTasks(withPush bool) error {
 	if err := w.ownerConfirmBrief(w.pendingBriefID()); err != nil {
 		return err
 	}
-	return w.waitFor("two summary cards", func() bool { return len(w.summaryCards()) == 2 })
+	hasFirst := func() bool { return len(w.summaryCards()) >= 1 }
+	if err := w.waitFor("first summary card", hasFirst); err != nil {
+		return err
+	}
+	hasBoth := func() bool { return len(w.summaryCards()) == 2 }
+	return w.waitFor("two summary cards", hasBoth)
 }
 
 func (w *m5World) verifyPushedBranchHead(c host.Caller) error {
@@ -1855,10 +1897,22 @@ func (w *m5World) givenOneBriefTask(forge string, checks []string, holdCodex boo
 	return err
 }
 
+func (w *m5World) memberDormant(member string) bool {
+	state, _ := w.cluster.Nodes[0].Host.MemberState(w.groupID, member)
+	return state == string(host.Dormant)
+}
+
 func (w *m5World) task1AndSecReady() bool {
 	t, ok := w.taskByNum(1)
-	state, _ := w.cluster.Nodes[0].Host.MemberState(w.groupID, w.secID)
-	return ok && t.State == "active" && state == string(host.Dormant)
+	return ok && t.State == "active" && w.memberDormant(w.secID)
+}
+
+func (w *m5World) task1SubmittedReady() bool {
+	t, ok := w.taskByNum(1)
+	if !ok || t.Step != "review" || t.Commit == "" {
+		return false
+	}
+	return w.memberDormant(w.claudeM)
 }
 
 func (w *m5World) resetTools() {
@@ -2003,11 +2057,7 @@ func (w *m5World) givenSubmittedBriefTask(conflictingBase bool) error {
 	})
 	w.setMemberHeld(w.claudeM, false)
 	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.claudeM)
-	atReview := func() bool {
-		t, ok := w.taskByNum(1)
-		return ok && t.Step == "review" && t.Commit != ""
-	}
-	if err := w.waitFor("task 1 at step review", atReview); err != nil {
+	if err := w.waitFor("task 1 at step review", w.task1SubmittedReady); err != nil {
 		return err
 	}
 	if !conflictingBase {
@@ -2081,10 +2131,11 @@ func (w *m5World) runOneFailedReviewRound(round, score int, veto bool) error {
 	}}))
 	w.setMemberHeld(w.codexM, false)
 	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.codexM)
-	return w.waitFor(fmt.Sprintf("review round %d", round), func() bool {
+	settled := func() bool {
 		t, ok := w.taskByNum(1)
-		return m5RoundSettled(t, ok, round)
-	})
+		return m5RoundSettled(t, ok, round) && w.memberDormant(w.codexM)
+	}
+	return w.waitFor(fmt.Sprintf("review round %d", round), settled)
 }
 
 func m5RoundSettled(t proto.TaskRow, ok bool, round int) bool {
@@ -2101,10 +2152,7 @@ func (w *m5World) resubmitSameCommit(round int) error {
 	}}))
 	w.setMemberHeld(w.claudeM, false)
 	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.claudeM)
-	return w.waitFor(fmt.Sprintf("resubmit %d at review", round), func() bool {
-		t, ok := w.taskByNum(1)
-		return ok && t.Step == "review"
-	})
+	return w.waitFor(fmt.Sprintf("resubmit %d at review", round), w.task1SubmittedReady)
 }
 
 func (w *m5World) collectReviewScores() []int {
@@ -2423,10 +2471,15 @@ func (w *m5World) stepPassReviewIntoConflict() error {
 	}}))
 	w.setMemberHeld(w.codexM, false)
 	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.codexM)
-	return w.waitFor("task 1 wait conflict", func() bool {
-		t, ok := w.taskByNum(1)
-		return ok && t.Step == "local_check" && t.Wait != nil && t.Wait.Kind == "conflict"
-	})
+	return w.waitFor("task 1 wait conflict", w.task1ConflictedReady)
+}
+
+func (w *m5World) task1ConflictedReady() bool {
+	t, ok := w.taskByNum(1)
+	if !ok || t.Step != "local_check" || t.Wait == nil || t.Wait.Kind != "conflict" {
+		return false
+	}
+	return w.memberDormant(w.codexM)
 }
 
 func m5IsSecConflictNotice(it store.Item, secID string) bool {
@@ -2451,34 +2504,68 @@ func (w *m5World) stepVerifyMergeConflictAndNotice() error {
 }
 
 func (w *m5World) stepResolveConflictAndMerge() error {
+	if err := w.secAssignConflictedTask1(); err != nil {
+		return err
+	}
+	if err := w.resolveAndResubmitTask1(); err != nil {
+		return err
+	}
+	return w.waitFor("task 1 merged after conflict resolution", w.task1Merged)
+}
+
+func (w *m5World) secAssignConflictedTask1() error {
+	w.setMemberHeld(w.claudeM, true)
 	w.writeScriptFile("claude", m5ClaudeScript([]m5ToolCallSpec{{
 		Name: "set_task", Args: map[string]any{"task": "T-1", "assignee": "Claude"},
 	}}))
+	w.setMemberHeld(w.secID, false)
+	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.secID)
+	err := w.waitFor("secretary cleared conflict wait", w.secConflictAssignedReady)
+	w.setMemberHeld(w.secID, true)
+	return err
+}
+
+func (w *m5World) secConflictAssignedReady() bool {
+	t, ok := w.taskByNum(1)
+	return ok && t.Wait == nil && w.memberDormant(w.secID)
+}
+
+func (w *m5World) resolveAndResubmitTask1() error {
+	w.setSHA(&w.commit2, "")
+	w.writeScriptFile("claude", m5ClaudeScript([]m5ToolCallSpec{
+		{Name: "run_checks"},
+		{Name: "submit_task", Args: map[string]any{"summary": "Resolved conflict."}},
+	}))
 	w.writeScriptFile("codex", m5CodexScript("codex-conf-rev2", []m5ToolCallSpec{{
 		Name: "submit_review", Args: map[string]any{"score": 95, "items": []any{}},
 	}}))
-	w.addBeforeHook("set_task", func(_ host.Caller) error {
-		w.setMemberHeld(w.secID, true)
-		w.writeScriptFile("claude", m5ClaudeScript([]m5ToolCallSpec{
-			{Name: "run_checks"},
-			{Name: "submit_task", Args: map[string]any{"summary": "Resolved conflict."}},
-		}))
-		return nil
-	})
-	w.addBeforeHook("run_checks", func(c host.Caller) error {
-		dir := w.sessionFolder(c)
-		if _, err := m5GitOut(dir, "-c", "user.name=test", "-c", "user.email=test@test.invalid", "merge", "-s", "ours", "-m", "Sync base", "main"); err != nil {
-			return err
-		}
-		_, err := m5GitCommitFiles(dir, map[string]string{"shared.txt": "resolved-both\n"}, "Resolve shared.txt")
+	w.addBeforeHook("run_checks", w.mergeBaseAndResolveShared)
+	w.setMemberHeld(w.claudeM, false)
+	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.claudeM)
+	return w.waitFor("conflict resolution submitted for review", w.task1Commit2Submitted)
+}
+
+func (w *m5World) mergeBaseAndResolveShared(c host.Caller) error {
+	dir := w.sessionFolder(c)
+	if _, err := m5GitOut(dir, "-c", "user.name=test", "-c", "user.email=test@test.invalid", "merge", "-s", "ours", "-m", "Sync base", "main"); err != nil {
 		return err
-	})
-	w.setMemberHeld(w.secID, false)
-	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.secID)
-	return w.waitFor("task 1 merged after conflict resolution", func() bool {
-		t, ok := w.taskByNum(1)
-		return ok && t.State == "merged"
-	})
+	}
+	sha, err := m5GitCommitFiles(dir, map[string]string{"shared.txt": "resolved-both\n"}, "Resolve shared.txt")
+	w.setSHA(&w.commit2, sha)
+	return err
+}
+
+func (w *m5World) task1Commit2Submitted() bool {
+	t, ok := w.taskByNum(1)
+	w.mu.Lock()
+	c2 := w.commit2
+	w.mu.Unlock()
+	return ok && c2 != "" && t.Commit == c2
+}
+
+func (w *m5World) task1Merged() bool {
+	t, ok := w.taskByNum(1)
+	return ok && t.State == "merged"
 }
 
 func (w *m5World) stepVerifyConflictResolvedOnBase() error {
@@ -2683,13 +2770,7 @@ func (w *m5World) stepSubmitTwoCommitsWhileReviewerHeld() error {
 	})
 	w.setMemberHeld(w.claudeM, false)
 	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.claudeM)
-	return w.waitFor("task 1 submitted commit 2", func() bool {
-		t, ok := w.taskByNum(1)
-		w.mu.Lock()
-		c2 := w.commit2
-		w.mu.Unlock()
-		return ok && c2 != "" && t.Commit == c2
-	})
+	return w.waitFor("task 1 submitted commit 2", w.task1Commit2Submitted)
 }
 
 func (w *m5World) recordStaleReviewItemID() error {
@@ -2733,10 +2814,7 @@ func (w *m5World) stepReleaseReviewerForCommit2() error {
 	}}))
 	w.setMemberHeld(w.codexM, false)
 	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.codexM)
-	return w.waitFor("task 1 merged at commit 2", func() bool {
-		t, ok := w.taskByNum(1)
-		return ok && t.State == "merged"
-	})
+	return w.waitFor("task 1 merged at commit 2", w.task1Merged)
 }
 
 func (w *m5World) stepVerifyHostRefusedStaleReview() error {
