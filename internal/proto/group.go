@@ -42,7 +42,8 @@ type FetchThread struct {
 
 type FetchKind struct {
 	FetchPage
-	Kind string `json:"kind"`
+	Kind  string `json:"kind"`
+	Query string `json:"q,omitempty"`
 }
 
 // FetchRow asks for one row of the group by its type and id, with Before 0 and
@@ -67,11 +68,13 @@ type Cmd struct {
 
 type CmdResult struct {
 	Success
-	Num     int    `json:"num,omitempty"`
-	Passed  *bool  `json:"passed,omitempty"`
-	Round   int    `json:"round,omitempty"`
-	Link    string `json:"link,omitempty"`
-	Expires int64  `json:"expires,omitempty"`
+	Num      int    `json:"num,omitempty"`
+	Passed   *bool  `json:"passed,omitempty"`
+	Round    int    `json:"round,omitempty"`
+	Link     string `json:"link,omitempty"`
+	Expires  int64  `json:"expires,omitempty"`
+	ID       string `json:"id,omitempty"`
+	Replaced *bool  `json:"replaced,omitempty"`
 }
 
 type ErrorResponse struct {

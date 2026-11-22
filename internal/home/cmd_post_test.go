@@ -25,6 +25,7 @@ const postTS = clock - 400
 func postState(t *testing.T) *home.State {
 	t.Helper()
 	s := group(t)
+	s.Group.Limits = proto.Limits{Rounds: 10}
 	s.AIs[postA] = ai(postA, laptop)
 	s.AIs[postB] = ai(postB, laptop)
 	s.People[postGuest] = person(postGuest, guest, "member")
@@ -161,7 +162,7 @@ func TestPostThreadSummaryAndPreviewBoundary(t *testing.T) {
 	wantTask := s.Tasks[postTask]
 	wantTask.Seq = 12
 	wantTask.Thread = proto.ThreadSummary{
-		Count: 4, Rounds: 2,
+		Count: 4, Rounds: 0,
 		Last: &proto.ThreadMessage{By: ownerID, Kind: "text", Text: exact200, Timestamp: postTS},
 	}
 	equal(t, []any{res.Rows[0].Value(), res.Rows[1].Value()}, []any{wantMsg, wantTask})
@@ -175,7 +176,7 @@ func TestPostThreadSummaryAndPreviewBoundary(t *testing.T) {
 	equal(t, res.Rows[0].Value().(proto.MsgRow).Text, over200)
 	updated := res.Rows[1].Value().(proto.TaskRow)
 	equal(t, updated.Thread, proto.ThreadSummary{
-		Count: 5, Rounds: 2,
+		Count: 5, Rounds: 0,
 		Last: &proto.ThreadMessage{By: ownerID, Kind: "text", Text: exact200, Timestamp: postTS},
 	})
 	equal(t, res.Items, []home.Item{{AI: postB, Why: "mention", Task: postTask, Msg: id(81)}})
