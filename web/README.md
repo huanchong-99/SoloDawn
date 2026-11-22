@@ -68,7 +68,8 @@ removes the directory. The run's teardown kills what a test process that died le
 `fileParallelism: false` so two Playwright WebKit UIProcesses never race to create the macOS
 Keychain WebCrypto master key on a fresh runner. `pnpm test` leaves `e2e/` out. The tests change
 nothing of the test process's own environment; the scenarios of `../features/web_e2e.feature` check
-that.
+that. `e2e/s2.spec.ts` instead runs the step 2 cast of `features/s2_cast.ts` in each page against a
+Vite development server with `?nomock`; the node side of step 2 is tested by integration.
 
 The runtime dependencies are `valibot`, for the wire types, and `@xterm/xterm` 6.0.0 with
 `@xterm/addon-fit` 0.11.0 (MIT) for the terminal page. It is about
@@ -659,11 +660,13 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/reminder.spec.ts`   | steps of `../features/web_reminder.feature` (A8.3 browser half)                   |
 | `features/a11y.spec.ts`       | steps of `../features/web_a11y.feature`                                           |
 | `features/home.ts`            | a home and an owned computer in memory for the steps; `page.ts` drives the page   |
+| `features/s2_cast.ts`         | the step 2 cast in a page, as `window.s2`                                         |
 | `features/demo.ts`            | groups with a morning of talk, for a development page                             |
 | `features/watch.svelte.ts`    | an effect outside a component, for tests of what is reactive                      |
 | `features/shots.ts`           | screenshots of the pages from that demo, four widths                              |
 | `e2e/config.ts`               | end-to-end projects per engine, `launch`, the build of a run                      |
 | `e2e/nodes.ts`                | `startNet`: rendezvous and nodes per test, stop, teardown sweep                   |
+| `e2e/s2.spec.ts`              | the In the browser sentences of step 2, one page per person                       |
 | `features/e2e.ts`             | steps of `../features/web_e2e.feature`, run by `e2e/config.ts`                    |
 
 Below 768 px the navigation is the bottom bar and the theme and language buttons of the top bar
