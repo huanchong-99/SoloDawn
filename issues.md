@@ -6,6 +6,30 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · A quiet task's notice has no runtime timer
+
+- Symptom: a quiet task does not notify the secretary after `idle_notice_minutes`.
+- Cause: the machine can produce a quiet notice (`internal/home/machine.go:230`), but the runtime does not dispatch that event.
+- Status: open; A9.44's one-person quiet-task case remains pending independently of the confirmation units.
+
+### 2026-11-22 · deviation · A confirmed brief cannot yet be replaced
+
+- Symptom: a new brief cannot replace a confirmed one as required by A9.13.
+- Cause: `internal/home/cmd_brief.go:153` accepts only pending or revised briefs as predecessors.
+- Status: open; A9.13 remains pending for T2-2b.
+
+### 2026-11-22 · limitation · The cast's approval fixture does not execute shell commands
+
+- Symptom: A9.19 verifies the approval tool returns allow and the fake CLI resumes; it does not verify that the command runs in a real CLI.
+- Cause: the replay fixture supports protocol I/O only (`internal/host/fakecli/replay.go:98`).
+- Status: open; actual command execution is unverified.
+
+### 2026-11-22 · limitation · Confirmation browser controls are not yet exercised
+
+- Symptom: the I2-1b scenarios exercise the card and member commands over the browser connection but do not check the rendered buttons, expired card or member editor.
+- Cause: the cast supplies protocol clients, not a rendered browser (`features/s2_cast_test.go:762`); the confirmation controls and member editor are planned in U2-2.
+- Status: open; verify the UI cases of A9.8, A9.9, A9.11 and A9.14 with U2-2.
+
 ### 2026-11-22 · limitation · Web Push VAPID `sub` URL is not yet checked against Apple's push service
 
 - Symptom: none observed; `wpushSubscriber` (`https://github.com/huanchong-99/SoloDawn`) has not yet been exercised against Apple's Web Push service on iOS.

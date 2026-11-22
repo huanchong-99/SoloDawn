@@ -1,0 +1,288 @@
+//go:build acceptance
+
+package features
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"slices"
+	"strings"
+
+	"github.com/cucumber/godog"
+	"github.com/huanchong-99/SoloDawn/internal/proto"
+)
+
+func s2ConfirmObservationSteps(sc *godog.ScenarioContext, w *s2ConfirmWorld) {
+	sc.Step(`^a confirmation "(msg|task|member|group)" row is seen as "([^"]+)":$`, w.awaitRow)
+	sc.Step(`^the confirmation "(msg|task|member|group)" rows contain (\d+) matches:$`, w.countRows)
+	sc.Step(`^"([^"]+)" receives a confirmation turn matching "([^"]+)"$`, w.awaitTurn)
+	sc.Step(`^"([^"]+)" has (\d+) confirmation items of kind "([^"]+)"$`, w.countItems)
+	sc.Step(`^Q1 has no confirmation task or review checkout$`, w.noQCheckout)
+	sc.Step(`^the approval "([^"]+)" mentions P and Q$`, w.approvalMentions)
+	sc.Step(`^P's confirmation browser sees "([^"]+)" as "([^"]+)"$`, w.browserCardStatus)
+}
+
+func (w *s2ConfirmWorld) browserCardStatus(card, status string) error {
+	raw, err := w.browsers["P"].conn.Request(w.cast.Ctx, func(id int64) any {
+		return proto.FetchRow{
+			FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: string(w.gid), Limit: 1},
+			Row:       "msg", RowID: w.ids[card],
+		}
+	})
+	if err != nil {
+		return err
+	}
+	var result proto.Fetched
+	if err := proto.Decode(raw, &result); err != nil {
+		return err
+	}
+	if len(result.Rows) != 1 {
+		return fmt.Errorf("P's browser cannot read card %s", card)
+	}
+	return s2ConfirmBrowserStatus(result.Rows[0], card, status)
+}
+
+func s2ConfirmBrowserStatus(raw json.RawMessage, card, status string) error {
+	var row proto.MsgRow
+	if err := proto.Decode(raw, &row); err != nil {
+		return err
+	}
+	if row.State == nil || row.State.Status != status {
+		return fmt.Errorf("P's browser got card %s with state %+v, want %s", card, row.State, status)
+	}
+	return nil
+}
+
+func (w *s2ConfirmWorld) approvalMentions(name string) error {
+	var raw []byte
+	err := w.db.QueryRowContext(w.cast.Ctx, "SELECT data FROM row WHERE g = ? AND r = 'msg' AND id = ?", w.gid, w.ids[name]).Scan(&raw)
+	if err != nil {
+		return err
+	}
+	var row proto.MsgRow
+	if err := proto.Decode(raw, &row); err != nil {
+		return err
+	}
+	want := []string{w.ids["P-member"], w.ids["Q-member"]}
+	slices.Sort(want)
+	if !slices.Equal(row.Mentions, want) {
+		return fmt.Errorf("approval mentions %v, want %v", row.Mentions, want)
+	}
+	return nil
+}
+
+func (w *s2ConfirmWorld) observe(check func() (bool, error)) error {
+	if done, err := check(); done || err != nil {
+		return err
+	}
+	return w.cast.readGroupRowsUntil(w.browsers["P"], w.gid, func(json.RawMessage) (bool, error) {
+		return check()
+	})
+}
+
+func (w *s2ConfirmWorld) awaitRow(kind, name string, doc *godog.DocString) error {
+	query, err := w.rowQuery(doc)
+	if err != nil {
+		return err
+	}
+	return w.observe(func() (bool, error) {
+		ids, err := w.matchRows(kind, query)
+		if err != nil || len(ids) == 0 {
+			return false, err
+		}
+		if len(ids) != 1 {
+			return false, fmt.Errorf("found %d rows for %s", len(ids), doc.Content)
+		}
+		w.ids[name] = ids[0]
+		return true, nil
+	})
+}
+
+func (w *s2ConfirmWorld) countRows(kind string, want int, doc *godog.DocString) error {
+	query, err := w.rowQuery(doc)
+	if err != nil {
+		return err
+	}
+	ids, err := w.matchRows(kind, query)
+	if err != nil {
+		return err
+	}
+	return s2ConfirmCount(doc.Content, len(ids), want)
+}
+
+func (w *s2ConfirmWorld) rowQuery(doc *godog.DocString) (map[string]any, error) {
+	raw, err := w.expand(doc.Content)
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]any
+	err = json.Unmarshal([]byte(raw), &fields)
+	return fields, err
+}
+
+func (w *s2ConfirmWorld) matchRows(kind string, fields map[string]any) ([]string, error) {
+	rows, err := w.db.QueryContext(w.cast.Ctx, "SELECT id, data FROM row WHERE g = ? AND r = ? AND gone = 0", w.gid, kind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return s2ConfirmMatchingIDs(rows, fields)
+}
+
+func s2ConfirmMatchingIDs(rows *sql.Rows, fields map[string]any) ([]string, error) {
+	var found []string
+	for rows.Next() {
+		var id string
+		var data []byte
+		if err := rows.Scan(&id, &data); err != nil {
+			return nil, err
+		}
+		var row any
+		if err := json.Unmarshal(data, &row); err != nil {
+			return nil, err
+		}
+		if s2ConfirmMatches(row, fields) {
+			found = append(found, id)
+		}
+	}
+	return found, rows.Err()
+}
+
+func s2ConfirmMatches(got, want any) bool {
+	fields, ok := want.(map[string]any)
+	if !ok {
+		return reflect.DeepEqual(got, want)
+	}
+	obj, ok := got.(map[string]any)
+	if !ok {
+		return false
+	}
+	for key, value := range fields {
+		if actual, exists := obj[key]; !exists || !s2ConfirmMatches(actual, value) {
+			return false
+		}
+	}
+	return true
+}
+
+func (w *s2ConfirmWorld) aiNode(name string) *s2Node {
+	switch name {
+	case s2SecretaryName:
+		return w.cast.P1
+	case s2PWorkName:
+		return w.cast.P2
+	default:
+		return w.cast.Q1
+	}
+}
+
+func (w *s2ConfirmWorld) awaitTurn(ai, pattern string) error {
+	re, err := regexp.Compile("(?m)" + pattern)
+	if err != nil {
+		return err
+	}
+	err = w.observe(func() (bool, error) {
+		logs, err := w.cast.CLILogs()
+		return w.hasTurn(logs, ai, re), err
+	})
+	if err != nil {
+		return fmt.Errorf("%s turn matching %q: %w", ai, pattern, err)
+	}
+	return nil
+}
+
+func (w *s2ConfirmWorld) hasTurn(logs []s2CLILogEntry, ai string, re *regexp.Regexp) bool {
+	for _, entry := range logs {
+		if entry.Kind == "turn" && entry.Node == w.aiNode(ai).Name && entry.Vendor == w.ais[ai].CLI && re.MatchString(entry.Text) {
+			return true
+		}
+	}
+	return false
+}
+
+func (w *s2ConfirmWorld) countItems(ai string, want int, why string) error {
+	queued, err := s2ConfirmItemIDs(w.db.QueryContext(w.cast.Ctx, "SELECT id FROM inbox WHERE g = ? AND ai = ? AND why = ?", w.gid, w.ais[ai].ID, why))
+	if err != nil {
+		return err
+	}
+	delivered, err := w.delivered(ai, why)
+	if err != nil {
+		return err
+	}
+	for _, id := range delivered {
+		if !slices.Contains(queued, id) {
+			queued = append(queued, id)
+		}
+	}
+	return s2ConfirmCount(ai+" "+why, len(queued), want)
+}
+
+func (w *s2ConfirmWorld) delivered(ai, why string) ([]int64, error) {
+	db, err := s2ConfirmDB(w.aiNode(ai))
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	return s2ConfirmItemIDs(db.QueryContext(w.cast.Ctx, "SELECT item FROM audit WHERE g = ? AND agent = ? AND what = 'delivered' AND detail = ?", w.gid, w.ais[ai].CLI, why))
+}
+
+func s2ConfirmItemIDs(rows *sql.Rows, err error) ([]int64, error) {
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func s2ConfirmCount(subject string, got, want int) error {
+	if got != want {
+		return fmt.Errorf("%s: got %d, want %d", subject, got, want)
+	}
+	return nil
+}
+
+func (w *s2ConfirmWorld) noQCheckout() error {
+	for _, kind := range []string{"wt", "review"} {
+		path := filepath.Join(w.cast.Q1.Data, "projects", string(w.gid), kind)
+		entries, err := os.ReadDir(path)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if len(entries) != 0 {
+			return fmt.Errorf("Q1 has a %s checkout: %s", kind, entries[0].Name())
+		}
+	}
+	return nil
+}
+
+func (w *s2ConfirmWorld) awaitIdle(ai string) error {
+	return w.observe(func() (bool, error) {
+		ids, err := w.matchRows("member", map[string]any{"id": w.ais[ai].ID, "state": "waiting"})
+		return len(ids) == 1, err
+	})
+}
+
+func (w *s2ConfirmWorld) commitWork(ai, text string) error {
+	roots, err := filepath.Glob(filepath.Join(w.aiNode(ai).Data, "projects", string(w.gid), "wt", "*"))
+	if err != nil {
+		return err
+	}
+	if len(roots) != 1 {
+		return fmt.Errorf("%s: got %d task worktrees, want one", ai, len(roots))
+	}
+	_, err = m5GitCommitFiles(roots[0], map[string]string{"path.txt": strings.TrimSpace(text) + "\n"}, text)
+	return err
+}
