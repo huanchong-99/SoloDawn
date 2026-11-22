@@ -82,3 +82,22 @@ func TestFollowMovedHomeKeepsTheCurrentHomeOnErrors(t *testing.T) {
 		t.Fatal("invalid homes setting did not fail")
 	}
 }
+
+func TestHomeAnnouncementKeepsUnrelatedAndCurrentGroups(t *testing.T) {
+	h, _ := seamHost(t, seamStore(t))
+	d := deliv(h)
+	d.groupLocked("current", "home").live = true
+	d.groupLocked("unrelated", "other").live = false
+	joinAssertEqual(t, "no sync needed", len(d.announcedGroups("home", map[string]bool{"current": true})), 0)
+}
+
+func TestMovedHomeRejectsMalformedAddressStorage(t *testing.T) {
+	db := seamStore(t)
+	err := db.Write(func(tx *store.Tx) error {
+		_, err := tx.Exec("DROP TABLE peer; CREATE TABLE peer(device TEXT, url TEXT); INSERT INTO peer VALUES('home', NULL)")
+		return err
+	})
+	joinAssertEqual(t, "malformed address storage", err, nil)
+	_, err = movedHomeAddrs(db, "home")
+	joinAssertEqual(t, "reject null address", err != nil, true)
+}
