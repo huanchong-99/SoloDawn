@@ -59,6 +59,7 @@ func (d homeHostEvDisk) TypedNotes(string) []proto.NoteRow         { return nil 
 func (d homeHostEvDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d homeHostEvDisk) Pending() []proto.MsgRow                   { return nil }
 func (d homeHostEvDisk) Queued() []store.Item                      { return nil }
+func (d homeHostEvDisk) OtherMember(string) bool                   { return false }
 
 type homeHostEvReceipts map[string]store.Outcome
 

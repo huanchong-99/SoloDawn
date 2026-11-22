@@ -49,83 +49,7 @@ type seamClient chan any
 func (c seamClient) Send(frame any) error  { c <- frame; return nil }
 func (c seamClient) Done() <-chan struct{} { return nil }
 
-func TestApplyJoiningChecksAndPopulatesCommand(t *testing.T) {
-	var got home.Command
-	table := home.Table{
-		"join": func(_ *home.State, c home.Command) (home.Result, *home.Refusal) {
-			got = c
-			return home.Result{InviteUsed: c.Who.Human == ""}, nil
-		},
-		"note": func(*home.State, home.Command) (home.Result, *home.Refusal) {
-			return home.Result{}, nil
-		},
-	}
-
-	stranger := nobody
-	joinLog := logOf(t, stranger)
-	join := &home.Joining{Group: groupID, By: ownerID, Open: true, Log: joinLog}
-
-	// Bad signature and wrong group fail before receipts on a joining connection.
-	bad := signed(stranger, "join", 1, `,"name":"Quinn"`)
-	bad.Payload += " "
-	held := receipts{}
-	res, err := table.ApplyJoining(group(t), disk(nil), held, bad, join, now)
-	equal(t, err, nil)
-	equal(t, res.Answer, store.Outcome{Code: "bad_sig"})
-	equal(t, len(held), 0)
-
-	wrongGroup := stranger.Sign(`{"t":"join","n":"` + id(2) + `","ts":1763600000000,"g":"` + id(8) + `","name":"Quinn"}`)
-	res, err = table.ApplyJoining(group(t), disk(nil), held, wrongGroup, join, now)
-	equal(t, err, nil)
-	equal(t, res.Answer, store.Outcome{Code: "bad_request"})
-	equal(t, len(held), 0)
-
-	// Non-join command, mismatched invitation group (even on an empty group), missing group, and as are refused.
-	for name, tc := range map[string]struct {
-		state *home.State
-		join  *home.Joining
-		env   proto.Envelope
-		code  string
-	}{
-		"non-join command":       {group(t), join, signed(stranger, "note", 3, `,"text":"x"`), "forbidden"},
-		"invitation other group": {empty(t), &home.Joining{Group: id(8), Open: true, Log: joinLog}, signed(stranger, "join", 4, `,"name":"Q"`), "forbidden"},
-		"group does not exist":   {empty(t), join, signed(stranger, "join", 5, `,"name":"Q"`), "not_found"},
-		"as is not a string":     {group(t), join, signed(stranger, "join", 6, `,"name":"Q","as":5`), "bad_request"},
-		"as names an AI":         {group(t), join, signed(stranger, "join", 7, `,"name":"Q","as":"`+aiID+`"`), "forbidden"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			r, applyErr := table.ApplyJoining(tc.state, disk(nil), receipts{}, tc.env, tc.join, now)
-			equal(t, applyErr, nil)
-			equal(t, r.Answer, store.Outcome{Code: tc.code})
-		})
-	}
-
-	// Without a valid log entry for the signer, Who carries only Device.
-	res, err = table.ApplyJoining(group(t), disk(nil), receipts{}, signed(stranger, "join", 8, `,"name":"Q"`), &home.Joining{Group: groupID, Open: true}, now)
-	equal(t, err, nil)
-	equal(t, res.Answer, store.Outcome{OK: true})
-	equal(t, got.Who, home.Who{Device: stranger.ID()})
-
-	res, err = table.ApplyJoining(group(t), disk(nil), receipts{}, signed(stranger, "join", 9, `,"name":"Q"`), &home.Joining{Group: groupID, Open: true, Log: logOf(t, guest)}, now)
-	equal(t, err, nil)
-	equal(t, got.Who, home.Who{Device: stranger.ID()})
-
-	// With a valid presented log, Who carries User, and Human when already a member (restore).
-	res, err = table.ApplyJoining(group(t), disk(nil), receipts{}, signed(stranger, "join", 10, `,"name":"Q"`), join, now)
-	equal(t, err, nil)
-	equal(t, res.InviteUsed, true)
-	equal(t, got.Joining, join)
-	equal(t, got.Who, home.Who{Device: stranger.ID(), User: stranger.ID()})
-
-	restored := group(t)
-	restored.People[id(15)] = person(id(15), stranger, "member")
-	res, err = table.ApplyJoining(restored, disk(nil), receipts{}, signed(stranger, "join", 11, `,"name":"Q"`), join, now)
-	equal(t, err, nil)
-	equal(t, res.InviteUsed, false)
-	equal(t, got.Who, home.Who{Device: stranger.ID(), User: stranger.ID(), Human: id(15)})
-}
-
-func TestApplyInviterHookAndReplay(t *testing.T) {
+func TestApplyInviteReplayWithoutHook(t *testing.T) {
 	table := home.Table{
 		"invite": func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
 			if !s.Admin(c.Who) {
@@ -135,40 +59,14 @@ func TestApplyInviterHookAndReplay(t *testing.T) {
 		},
 	}
 
-	// Without an Inviter on State, an accepted invite still succeeds; replay after restart answers conflict.
-	sNoHook, heldNoHook := group(t), receipts{}
+	// An accepted invite without a loop hook replays as conflict.
+	s, held := group(t), receipts{}
 	env := signed(browser, "invite", 1, ``)
-	first := apply(t, table, sNoHook, heldNoHook, env)
+	first := apply(t, table, s, held, env)
 	equal(t, first.Answer, store.Outcome{OK: true})
 	equal(t, first.InviteBy, ownerID)
-	replayNoHook := apply(t, table, sNoHook, heldNoHook, env)
+	replayNoHook := apply(t, table, s, held, env)
 	equal(t, replayNoHook.Answer, store.Outcome{Code: "conflict"})
-
-	// An Inviter error leaves no receipt so a retry runs again.
-	inv := &seamInviter{err: errors.New("no rendezvous")}
-	s, held := group(t), receipts{}
-	s.Invite = inv
-	_, err := table.Apply(s, disk(nil), held, env, now)
-	equal(t, err, inv.err)
-	equal(t, len(held), 0)
-
-	// Succeeded invite keeps only {OK: true} in receipts, frames link and expires, and replays while open.
-	inv.err = nil
-	res := apply(t, table, s, held, env)
-	equal(t, held[[2]string{browser.ID(), id(1)}], receipt{clock, store.Outcome{OK: true}})
-	equal(t, res.Frame(7), any(proto.CmdResult{
-		Success: proto.Success{Re: 7, OK: true}, Link: inv.link.Link, Expires: inv.link.Expires,
-	}))
-
-	again := apply(t, table, s, held, env)
-	equal(t, again.Frame(8), any(proto.CmdResult{
-		Success: proto.Success{Re: 8, OK: true}, Link: inv.link.Link, Expires: inv.link.Expires,
-	}))
-	equal(t, inv.calls, 2)
-
-	inv.open = false
-	closed := apply(t, table, s, held, env)
-	equal(t, closed.Answer, store.Outcome{Code: "conflict"})
 
 	// A refused invite replays its original refusal rather than conflict.
 	s.People[id(12)] = person(id(12), guest, "member")

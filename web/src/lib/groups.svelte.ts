@@ -102,7 +102,10 @@ export class Group {
   );
   /** The person at this browser as a member of the group. */
   me = $derived(
-    this.members.find((member) => member.kind === 'human' && member.user === this.home.me.user),
+    this.members.find(
+      (member): member is p.HumanMemberRow =>
+        member.kind === 'human' && member.user === this.home.me.user,
+    ),
   );
   /** The cards that cannot move until this person acts, oldest first. */
   waiting = $derived(this.#msgs.filter((msg) => waitsFor(msg, this.home.me.user, this.me?.id)));

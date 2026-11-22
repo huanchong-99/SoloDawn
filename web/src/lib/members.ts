@@ -40,7 +40,7 @@ export function isAdmin(group: Group): boolean {
 export function addDisabledReason(group: Group, allHomes: readonly Home[]): string | undefined {
   if (!group.home.ctl) return t('member.add.offline');
   if (!group.info) return undefined;
-  if (!isAdmin(group)) return t('member.add.forbidden');
+  if (!group.me) return t('member.add.forbidden');
   if (!allHomes.some((home) => home.owner && Boolean(home.ctl))) return t('member.add.nohost');
   return undefined;
 }
