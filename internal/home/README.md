@@ -640,8 +640,9 @@ it does this:
 [task-machine](../../planning/contracts/task-machine.md) 5), under `Commands` key `member/status`
 and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does this:
 
-- **Payload and target.** When `event` is present, `code` must be one of the step-1 host codes
-  (`turn_interrupted`, `login_invalid`, `session_replaced`), else `bad_request`; an omitted or `""`
+- **Payload and target.** When `event` is present, `code` must be one of the host codes
+  (`turn_interrupted`, `rate_limited`, `login_invalid`, `session_replaced`; `cap_reached` is postponed
+  with `settings.set`), else `bad_request`; an omitted or `""`
   `detail` is left out of the row body, and a non-empty `event.task` must exist in `State.Tasks`,
   else `not_found`. An `id` not in `State.AIs` is `not_found`; any signer for which
   `State.Hosts(c.Who, id)` is false (another device, or a command carrying `as`) is `forbidden`.
@@ -650,8 +651,8 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
   is unchanged. When `event` is present, the home writes a `system` `MsgRow` (`id` `n`, `by`
   `"system"`, `ts` `c.Now`, `mentions` `[]`, and `ai` set to `id`) in the thread of `event.task`
   when set, advancing `task.Thread.Count` and `task.Thread.Last` (`text` `""`, `ts` `c.Now`) on the
-  task row, or in the main line otherwise. For `login_invalid`, when `State.Group.Secretary` is not
-  empty, it queues `Item{AI: s.Group.Secretary, Why: "notice", Msg: n, Code: "login_invalid"}`.
+  task row, or in the main line otherwise. For `login_invalid` and `rate_limited`, when `State.Group.Secretary` is not
+  empty, it queues `Item{AI: s.Group.Secretary, Why: "notice", Msg: n, Code: code}`.
 - **Closed host connection.** When `Loop.Detach` ends a connection that took inbox items
   (`Conn.taker`, set by `Loop.Inbox`) and no other taker connection of `device` remains on the
   loop, `Loop` fires `HostOfflineEvent` with `device`. For every AI in `State.AIs` in id order with
@@ -887,9 +888,9 @@ card-wait recomputation, veto and row-14 stop, and checking `proto.UnexpectedNul
 written. `features/home_review.feature` holds the home half of acceptance tests A5.3 and A5.4.
 
 `cmd_hostev_test.go` checks `member/status` against the wire golden files, state and `since`
-transitions, the three step-1 host event codes, `login_invalid` secretary notices, refusals, and
+transitions, the four host event codes, `login_invalid` and `rate_limited` secretary notices, refusals, and
 `HostOfflineEvent` both directly and when taker connections end on `StartLoop`.
-`features/home_hostev.feature` holds the home half of acceptance test A3.6 together with the three
+`features/home_hostev.feature` holds the home half of acceptance test A3.6 together with the four
 host event codes, secretary notices and host disconnection.
 
 `sync_test.go` covers `Loop.Sync` against an in-memory and file-backed store: wire frame shapes,

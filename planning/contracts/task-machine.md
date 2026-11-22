@@ -179,7 +179,7 @@ it, and `detail` the host's text, each where the table gives one.
 | `rounds_limit` | the round limit (row 21) | the `system` message `rounds_limit` | — |
 | `quiet` | a quiet task (row 23) | — | — |
 | `handback` | a hand-back summary (`contracts/commands.md` 1.3) | the `handback` message | — |
-| `login_invalid`, `cap_reached`, `rate_limited` | an AI is limited (`contracts/commands.md` 1.9) | the `system` message of that event | — |
+| `login_invalid`, `cap_reached` (postponed after 1.0 with `settings.set`), `rate_limited` | an AI is limited (`contracts/commands.md` 1.9) | the `system` message of that event | — |
 
 What the secretary does next (ask, reassign, cancel, bring it to a person)
 is its judgement, not the platform's (R-22).

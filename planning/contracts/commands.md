@@ -264,7 +264,9 @@ writes the row in the thread of the event's `task` when it has one, else in
 the main line.
 
 For `login_invalid`, `cap_reached` and `rate_limited` the home also gives
-the secretary a `notice`. A closed host connection sets `state = offline`
+the secretary a `notice`. `cap_reached` is postponed after 1.0 with
+`settings.set`, which alone sets caps: a 1.0 host never sends it, and a 1.0
+home refuses it as an unknown code. A closed host connection sets `state = offline`
 for its AIs. Nothing else is derived from a status.
 
 ## 2. Host commands
@@ -301,7 +303,8 @@ optional, a cap that is not there is no longer set, and `{}` sets none. An
 agent that is not there keeps its caps. `host.info` shows each agent's caps
 in its entry of `agents`. A day cap is released at the next local midnight
 or when the owner raises it; a task cap when the owner raises it. Reaching
-one is the host event `cap_reached`.
+one is the host event `cap_reached`. Caps and `cap_reached` are postponed
+after 1.0 with `settings.set`.
 
 `pair.browser`, `host.offline` and `host.online` carry `t`, `n`, `ts` and
 `to` only. In `takeover.start` and `takeover.end`, `member` is the member id

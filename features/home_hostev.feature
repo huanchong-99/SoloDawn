@@ -18,7 +18,7 @@ Feature: AI member status and host events in the home
     And time advances and the laptop reports "codex" as "working" on task 1 over "relay" with 13 turns today
     Then "codex" is "working" on task 1 over "relay" with 13 turns today and kept its state time on the path change
 
-  Scenario Outline: Host event codes write system rows and notify the secretary only for login_invalid
+  Scenario Outline: Host event codes write system rows and notify the secretary for rate limits and invalid login
     Given a group home for host events with <secretary>, "codex" on the laptop, "claude" on the home node, and task 1
     When the laptop reports "codex" as "<state>" with host event "<code>" on "<where>"
     Then the home answers ok to the status
@@ -29,6 +29,7 @@ Feature: AI member status and host events in the home
       | secretary    | state   | code             | where  | notice               |
       | a secretary  | dormant | turn_interrupted | task 1 | none                 |
       | a secretary  | dormant | turn_interrupted | main   | none                 |
+      | a secretary  | limited | rate_limited     | main   | notice rate_limited  |
       | a secretary  | limited | login_invalid    | main   | notice login_invalid |
       | no secretary | limited | login_invalid    | main   | none                 |
       | a secretary  | working | session_replaced | task 1 | none                 |

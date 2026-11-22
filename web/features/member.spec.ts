@@ -309,6 +309,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               body: { question: 'Which port?', options: [], to: [user] },
             }),
           );
+          const resetAt = new Date(2026, 10, 20, 15, 0).getTime();
           h.write(
             website,
             example('row-member-ai', {
@@ -323,6 +324,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               host_name: 'workstation',
               path: 'local',
               account: 'personal',
+              usage: { window_pct: 18 },
             }),
           );
           h.write(
@@ -339,6 +341,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               host_name: 'laptop',
               path: 'direct',
               account: 'team',
+              usage: { window_pct: 62, window_resets: resetAt },
             }),
           );
           h.write(
@@ -355,6 +358,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               host_name: 'windows',
               path: 'relay',
               account: 'personal',
+              usage: {},
             }),
           );
           h.write(
@@ -372,6 +376,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               host_name: 'laptop',
               path: 'direct',
               account: 'team',
+              usage: { window_pct: 100 },
             }),
           );
           h.write(
@@ -388,6 +393,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               host_name: 'old-box',
               path: 'direct',
               account: 'api_key',
+              usage: { turns_today: 3 },
             }),
           );
           flushSync();
@@ -471,7 +477,6 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           paths.set(winBox.store, { kind: 'relay', rtt: 120, since: Date.now() });
           flushSync();
 
-          expect(all('.member .meter')).toEqual([]);
           const cards = all('.member');
           expect(cards[0].querySelector('a')!.getAttribute('href')).toBe(
             `#/terminal/${website}/sec-ai`,
@@ -484,6 +489,28 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(cards[4].querySelector<HTMLButtonElement>('button')!.disabled).toBe(true);
         },
       );
+      And('the cards show a window usage bar where reported', () => {
+        expect(all('.member').map((card) => Boolean(card.querySelector('.meter')))).toEqual([
+          true,
+          true,
+          false,
+          true,
+          false,
+        ]);
+        expect(texts('.member .meter span')).toEqual(['Window used', 'Window used', 'Window used']);
+        expect(texts('.member .meter b')).toEqual(['18%', '62%', '100%']);
+        expect(all('.member .meter').map((m) => m.getAttribute('style'))).toEqual([
+          '--v: 18%;',
+          '--v: 62%;',
+          '--v: 100%;',
+        ]);
+        expect(all('.member .meter').map((m) => m.dataset.tone)).toEqual([
+          undefined,
+          undefined,
+          'danger',
+        ]);
+        expect(texts('.member .meter small')).toEqual(['Resets 15:00']);
+      });
       When('the dormant AI wakes to work and two other AIs go offline and hit a limit', () => {
         const h = workstation.home;
         h.write(
