@@ -277,11 +277,11 @@ export class Home {
   ctl = $state.raw<p.Ctl>();
   /** The groups homed here that this person may read, as the node last listed them. */
   groups = $state.raw<Group[]>([]);
-  /** The node's device id, its name, whether this person owns it, and its latest `host.info` push. */
+  /** The node's device id and name, and whether this person owns it: only then can a group be
+   *  created here. */
   device = $state('');
   name = $state('');
   owner = $state(false);
-  hostInfo = $state.raw<p.HostInfoPush>();
   // The connection that is the home's now: the last one to come online, until it is gone.
   #link: Link | undefined;
 
@@ -318,11 +318,6 @@ export class Home {
    *  group that is not listed are dropped. */
   #push(frame: p.Push) {
     if (frame.t === 'groups') this.#readAll(this.#list(frame.groups));
-    else if (frame.t === 'host.info') this.hostInfo = frame;
-    else this.#pushGroup(frame);
-  }
-
-  #pushGroup(frame: Exclude<p.Push, { t: 'groups' | 'host.info' }>) {
     if (frame.t === 'rows') this.#find(frame.g)?.apply(frame.rows);
     if (frame.t === 'reset') this.#find(frame.g)?.reset();
   }

@@ -9,12 +9,10 @@
     ai,
     task,
     link,
-    queued,
   }: {
     ai: AIMemberRow | undefined;
     task: TaskRow | undefined;
     link: { st: 'ok' | 'limited' | 'linking' | 'down'; text: string };
-    queued: number;
   } = $props();
 </script>
 
@@ -64,11 +62,10 @@
   <section class="card">
     <header class="card-head">
       <span class="kind">{t('terminal.queue.title')}</span>
-      <span class="badge count">{queued}</span>
     </header>
     <p class="hint">
       <Icon name="lock" sm />
-      <span>{t(queued > 0 ? 'terminal.queue.held' : 'terminal.queue.empty')}</span>
+      <span>{t('terminal.queue.body')}</span>
     </p>
   </section>
 

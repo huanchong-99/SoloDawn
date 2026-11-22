@@ -9,6 +9,8 @@
   "member.ai": "AI",
   "member.ai.empty": "No AI in this group yet.",
   "member.computer": "Computer",
+  "member.handback": "Hand back",
+  "member.handback.queued": "Messages to it are queued until you hand back",
   "member.join.cancel": "Cancel",
   "member.join.cli": "Computer and AI",
   "member.join.error.conflict": "That name is already used in this group.",

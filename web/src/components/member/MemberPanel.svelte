@@ -1,9 +1,3 @@
-<script lang="ts" module>
-  import type { Net } from '../../lib/net.svelte';
-
-  let activeNet = $state.raw<Net>();
-</script>
-
 <script lang="ts">
   import { homes, type Group } from '../../lib/groups.svelte';
   import {
@@ -15,129 +9,129 @@
     statusOf,
     terminalDisabledReason,
   } from '../../lib/members';
+  import type { Net } from '../../lib/net.svelte';
   import { accountLabel } from '../../lib/onboard.svelte';
   import { t } from '../../lib/prefs.svelte';
   import { href } from '../../lib/route.svelte';
+  import { endTakeover, hostHomeOf } from '../../lib/terminal.svelte';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
   import AddAI from './AddAI.svelte';
 
   /** The member column of a group's chat: AI member cards, people, and the add-AI dialog. */
-  let { group, net }: { group?: Group; net?: Net } = $props();
+  let { group, net }: { group: Group; net: Net } = $props();
   const uid = $props.id();
 
   let adding = $state(false);
 
-  $effect(() => {
-    if (!net) return;
-    activeNet = net;
-    return () => {
-      if (activeNet === net) activeNet = undefined;
-    };
-  });
-
-  const netSource = $derived(net ?? activeNet);
-  const ais = $derived(group ? aiMembers(group) : []);
-  const humans = $derived(group ? humanMembers(group) : []);
-  const addReason = $derived(group ? addDisabledReason(group, homes) : undefined);
+  const ais = $derived(aiMembers(group));
+  const humans = $derived(humanMembers(group));
+  const addReason = $derived(addDisabledReason(group, homes));
 </script>
 
-{#if group}
-  <div class="members">
-    <div class="head">
-      <div class="row">
-        <h2 class="sec-title grow">{t('member.ai')} · {ais.length}</h2>
-        <button
-          class="btn btn-sm"
-          onclick={() => (adding = true)}
-          disabled={!group.info || Boolean(addReason)}
-          aria-describedby={addReason ? `${uid}-add-why` : undefined}
-        >
-          <Icon name="plus" sm /><span>{t('member.add')}</span>
-        </button>
-      </div>
-      {#if addReason}
-        <p id={`${uid}-add-why`} class="hint add-why">{addReason}</p>
-      {/if}
+<div class="members">
+  <div class="head">
+    <div class="row">
+      <h2 class="sec-title grow">{t('member.ai')} · {ais.length}</h2>
+      <button
+        class="btn btn-sm"
+        onclick={() => (adding = true)}
+        disabled={!group.info || Boolean(addReason)}
+        aria-describedby={addReason ? `${uid}-add-why` : undefined}
+      >
+        <Icon name="plus" sm /><span>{t('member.add')}</span>
+      </button>
     </div>
-
-    {#each ais as ai (ai.id)}
-      {@const status = statusOf(group, ai)}
-      {@const mine = ai.user === group.home.me.user}
-      {@const owner = mine ? undefined : group.personName(ai.user)}
-      {@const termWhy = mine ? terminalDisabledReason(netSource, group, ai) : undefined}
-      <section class="card member">
-        <header class="row">
-          <span
-            class="av-wrap"
-            class:sec={ai.secretary}
-            data-sec={t('member.sec.mark')}
-            data-st={status.st}
-            aria-hidden="true"
-          >
-            <Avatar id={ai.id} name={ai.name} cli={ai.cli} />
-          </span>
-          <div class="grow">
-            <h3>
-              {ai.name}{#if owner}{' '}<span class="owner">· {owner}</span>{/if}
-            </h3>
-            <p class="st" data-st={status.st}><i></i><span>{status.text}</span></p>
-          </div>
-        </header>
-        <dl class="kv">
-          <dt>{t('member.computer')}</dt>
-          <dd>{ai.host_name} <span class="muted">· {pathLabel(ai)}</span></dd>
-          <dt>{t('member.account')}</dt>
-          <dd>
-            {accountLabel(ai.account)}{#if ai.account === 'personal'}{' '}<span class="muted">
-                · {t('member.account.personal.note')}
-              </span>{/if}
-          </dd>
-        </dl>
-        {#if mine}
-          <footer class="card-foot">
-            {#if !termWhy}
-              <a class="btn btn-sm" href={href('terminal', { g: group.g, member: ai.id })}>
-                <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
-              </a>
-            {:else}
-              <button
-                type="button"
-                class="btn btn-sm"
-                disabled
-                aria-describedby={`${uid}-term-${ai.id}`}
-              >
-                <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
-              </button>
-              <span id={`${uid}-term-${ai.id}`} class="hint">{termWhy}</span>
-            {/if}
-          </footer>
-        {/if}
-      </section>
-    {:else}
-      <p class="hint">{t('member.ai.empty')}</p>
-    {/each}
-
-    <h2 class="sec-title people-head">{t('member.people')} · {humans.length}</h2>
-    <ul class="people">
-      {#each humans as person (person.id)}
-        {@const tags = personTags(group, person)}
-        <li class="row person">
-          <Avatar id={person.user} name={person.name} />
-          <span class="grow cut">
-            {person.name}{#if tags}{' '}<span class="muted">· {tags}</span>{/if}
-          </span>
-          <span class="st" data-st={person.online ? 'ok' : 'offline'}>
-            <i></i>{t(person.online ? 'member.online' : 'member.offline')}
-          </span>
-        </li>
-      {/each}
-    </ul>
+    {#if addReason}
+      <p id={`${uid}-add-why`} class="hint add-why">{addReason}</p>
+    {/if}
   </div>
 
-  {#if adding}
-    <AddAI {group} bind:open={adding} />
-  {/if}
+  {#each ais as ai (ai.id)}
+    {@const status = statusOf(group, ai)}
+    {@const mine = ai.user === group.home.me.user}
+    {@const owner = mine ? undefined : group.personName(ai.user)}
+    {@const termWhy = mine ? terminalDisabledReason(net, ai) : undefined}
+    <section class="card member">
+      <header class="row">
+        <span
+          class="av-wrap"
+          class:sec={ai.secretary}
+          data-sec={t('member.sec.mark')}
+          data-st={status.st}
+          aria-hidden="true"
+        >
+          <Avatar id={ai.id} name={ai.name} cli={ai.cli} />
+        </span>
+        <div class="grow">
+          <h3>
+            {ai.name}{#if owner}{' '}<span class="owner">· {owner}</span>{/if}
+          </h3>
+          <p class="st" data-st={status.st}><i></i><span>{status.text}</span></p>
+        </div>
+      </header>
+      <dl class="kv">
+        <dt>{t('member.computer')}</dt>
+        <dd>{ai.host_name} <span class="muted">· {pathLabel(ai)}</span></dd>
+        <dt>{t('member.account')}</dt>
+        <dd>
+          {accountLabel(ai.account)}{#if ai.account === 'personal'}{' '}<span class="muted">
+              · {t('member.account.personal.note')}
+            </span>{/if}
+        </dd>
+      </dl>
+      {#if mine}
+        <footer class="card-foot">
+          {#if ai.state === 'takeover'}
+            <button
+              type="button"
+              class="btn btn-sm btn-dawn"
+              onclick={() => endTakeover(hostHomeOf(net.homes, ai.host), ai.host, group.g, ai.id)}
+            >
+              {t('member.handback')}
+            </button>
+            <span class="hint">{t('member.handback.queued')}</span>
+          {:else if !termWhy}
+            <a class="btn btn-sm" href={href('terminal', { g: group.g, member: ai.id })}>
+              <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
+            </a>
+          {:else}
+            <button
+              type="button"
+              class="btn btn-sm"
+              disabled
+              aria-describedby={`${uid}-term-${ai.id}`}
+            >
+              <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
+            </button>
+            <span id={`${uid}-term-${ai.id}`} class="hint">{termWhy}</span>
+          {/if}
+        </footer>
+      {/if}
+    </section>
+  {:else}
+    <p class="hint">{t('member.ai.empty')}</p>
+  {/each}
+
+  <h2 class="sec-title people-head">{t('member.people')} · {humans.length}</h2>
+  <ul class="people">
+    {#each humans as person (person.id)}
+      {@const tags = personTags(group, person)}
+      <li class="row person">
+        <Avatar id={person.user} name={person.name} />
+        <span class="grow cut">
+          {person.name}{#if tags}{' '}<span class="muted">· {tags}</span>{/if}
+        </span>
+        <span class="st" data-st={person.online ? 'ok' : 'offline'}>
+          <i></i>{t(person.online ? 'member.online' : 'member.offline')}
+        </span>
+      </li>
+    {/each}
+  </ul>
+</div>
+
+{#if adding}
+  <AddAI {group} bind:open={adding} />
 {/if}
 
 <style>

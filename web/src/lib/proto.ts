@@ -1168,7 +1168,6 @@ type Ask<R> = Omit<R, 'id'>;
 export interface PtyChannel {
   binaryType: BinaryType;
   readonly readyState: string;
-  onopen: ((this: any, event: any) => any) | null;
   onmessage: ((this: any, event: any) => any) | null;
   onclose: ((this: any, event: any) => any) | null;
   send(data: Uint8Array<ArrayBuffer>): void;

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { CardProps } from '../../lib/mounts.svelte';
-  import { handbackFilesLabel } from '../../lib/terminal';
+  import { handbackFilesLabel } from '../../lib/terminal.svelte';
 
   /** Metadata summary for a terminal `handback` message: changed files, commits and diff stats. */
   let { msg }: CardProps<'handback'> = $props();

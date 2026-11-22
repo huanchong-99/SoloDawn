@@ -197,29 +197,6 @@ function createsGroup(env: p.Envelope) {
   return t === 'group' && op === 'create';
 }
 
-function mockPty(): p.PtyChannel {
-  let open = true;
-  const ch: p.PtyChannel = {
-    binaryType: 'arraybuffer',
-    get readyState() {
-      return open ? 'open' : 'closed';
-    },
-    onopen: null,
-    onmessage: null,
-    onclose: null,
-    send(data) {
-      if (open) ch.onmessage?.({ data });
-    },
-    close() {
-      open = false;
-    },
-  };
-  queueMicrotask(() => {
-    if (open) ch.onmessage?.({ data: new TextEncoder().encode('$ ') });
-  });
-  return ch;
-}
-
 /** A connection to a node that knows the examples' one group and is the owner's: it answers
  *  `host.info` and `audit`. `sync` pushes `reset` and `rows`, then answers `synced`; every command
  *  is accepted, and a `group create` pushes `groups` before its answer. Frames are read as real
@@ -237,7 +214,5 @@ export function mockCtl(onpush: (push: p.Push) => void): p.Ctl {
       if (req.t === 'cmd' && createsGroup(req.env!)) push('groups');
       return { ...p.decodeAnswer(req.t, goldens[answers[req.t]]), re: id };
     },
-    send() {},
-    channel: () => mockPty(),
   } as p.Ctl;
 }

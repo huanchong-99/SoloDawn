@@ -15,19 +15,22 @@ import {
   linkBadgeOf,
   phoneKeys,
   ptyLabel,
-  queuedCountOf,
   sendResize,
   sessionTaskOf,
   startTakeover,
+  Takeover,
   takeoverBarState,
   takeoverErrorText,
+  targetOf,
   toTerminalChunk,
-} from './terminal';
+} from './terminal.svelte';
 
 const gid = 'rZNvy-1jH6Z-BcPqA5U5BQ';
 const memberId = '1PC8WineBrUQ-apCjx7tug';
 const taskId = 'DrtCn6htSBwmMPrFPbHJHA';
 const hostId = 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q';
+const direct = { kind: 'direct' as const, rtt: 5, since: 1 };
+const relay = { kind: 'relay' as const, rtt: 90, since: 1 };
 
 const signed: string[] = [];
 const me = {
@@ -42,16 +45,86 @@ function row<T extends p.Row = p.Row>(name: string, changes: Record<string, unkn
   return { ...p.decode(p.Row, goldens[name]), ...changes } as T;
 }
 
-function onlineHome(device = hostId, handler?: (req: unknown) => Promise<unknown>): Home {
-  const home = new Home(me);
-  const link = home.connect();
-  const ctl: p.Ctl = {
-    request: (async (req: unknown) =>
-      handler ? handler(req) : { re: 1, ok: true }) as p.Ctl['request'],
-  };
+function online(home: Home, ctl: p.Ctl, device = hostId) {
   const welcome = p.decode(p.Welcome, goldens.welcome);
-  link.online(ctl, { ...welcome, device, groups: [] });
+  home.connect().online(ctl, { ...welcome, device, groups: [] });
   return home;
+}
+
+function onlineHome(device = hostId, handler?: (req: unknown) => Promise<unknown>): Home {
+  const request = (async (req: unknown) =>
+    handler ? handler(req) : { re: 1, ok: true }) as p.Ctl['request'];
+  return online(new Home(me), { request }, device);
+}
+
+/** A data channel: what was sent, how often it was closed, and the far end's acts. */
+function fakeChannel(state = 'open') {
+  const sent: number[][] = [];
+  let closes = 0;
+  const channel: p.PtyChannel = {
+    binaryType: 'blob',
+    get readyState() {
+      return state;
+    },
+    onmessage: null,
+    onclose: null,
+    send: (data) => sent.push([...data]),
+    close() {
+      closes += 1;
+      state = 'closed';
+      channel.onclose?.({});
+    },
+  };
+  return {
+    channel,
+    sent,
+    get closes() {
+      return closes;
+    },
+    open: () => (state = 'open'),
+    deliver: (data: unknown) => channel.onmessage?.({ data }),
+    remoteClose() {
+      state = 'closed';
+      channel.onclose?.({});
+    },
+  };
+}
+
+/** A computer that answers `takeover.start` when the test says so, and records the rest. */
+function computer() {
+  const commands: Record<string, unknown>[] = [];
+  const resizes: unknown[] = [];
+  const channels: { label: string; fake: ReturnType<typeof fakeChannel> }[] = [];
+  const answers: ((answer: unknown) => void)[] = [];
+  const ctl: p.Ctl = {
+    request: (async (req: { env: p.Envelope }): Promise<unknown> => {
+      const cmd = JSON.parse(req.env.p) as Record<string, unknown>;
+      commands.push(cmd);
+      if (cmd.t !== 'takeover.start') return { re: 1, ok: true };
+      return new Promise((resolve) => answers.push(resolve));
+    }) as unknown as p.Ctl['request'],
+    send: (frame) => resizes.push(frame),
+    channel(label) {
+      const fake = fakeChannel();
+      channels.push({ label, fake });
+      return fake.channel;
+    },
+  };
+  const home = online(new Home(me), ctl);
+  return {
+    home,
+    target: { host: home, to: hostId },
+    commands,
+    sent: (t: string) => commands.filter((cmd) => cmd.t === t),
+    resizes,
+    channels,
+    noChannel: () => delete ctl.channel,
+    answer: async (answer: object = { re: 1, ok: true }) => {
+      await vi.waitFor(() => expect(answers.length).toBeGreaterThan(0));
+      answers.shift()!(answer);
+      await new Promise((later) => setTimeout(later));
+    },
+  };
 }
 
 beforeEach(() => {
@@ -59,13 +132,13 @@ beforeEach(() => {
   signed.length = 0;
 });
 
-describe('ptyLabel, phoneKeys, hostHomeOf, sessionTaskOf and queuedCountOf', () => {
-  it('formats ptyLabel and lists the eight phone toolbar keys in order', () => {
+describe('the parts of a terminal page', () => {
+  it('names the channel and lists the eight phone keys in order', () => {
     expect(ptyLabel(gid, memberId)).toBe(`pty:${gid}:${memberId}`);
     expect(phoneKeys).toEqual([
       { label: 'Esc', seq: '\x1b' },
       { label: 'Tab', seq: '\t' },
-      { label: 'Ctrl', ctrl: true },
+      { label: 'Ctrl', seq: '', ctrl: true },
       { label: '↑', seq: '\x1b[A', ariaKey: 'terminal.key.up' },
       { label: '↓', seq: '\x1b[B', ariaKey: 'terminal.key.down' },
       { label: '/', seq: '/' },
@@ -74,252 +147,163 @@ describe('ptyLabel, phoneKeys, hostHomeOf, sessionTaskOf and queuedCountOf', () 
     ]);
   });
 
-  it('finds hostHomeOf by device, hostInfo.device, group.info.home, or returns undefined', () => {
-    const byDevice = onlineHome('dev-a');
-    const byPush = new Home(me);
-    byPush.hostInfo = { ...p.decode(p.HostInfoPush, goldens['host-info-push']), device: 'dev-b' };
+  it('finds the computer by its device id, and a target once the AI is read and online', () => {
+    const a = onlineHome('dev-a');
+    const b = onlineHome('dev-b');
+    expect(hostHomeOf([a, b], 'dev-b')).toBe(b);
+    expect(hostHomeOf([a, b], 'dev-c')).toBeUndefined();
 
-    const groupHome = onlineHome('home-dev');
-    const group = new Group(groupHome, gid);
-    group.apply([row('row-group', { id: gid, home: 'group-host-id' })]);
-
-    expect(hostHomeOf([byDevice, byPush], group, 'dev-a')).toBe(byDevice);
-    expect(hostHomeOf([byDevice, byPush], group, 'dev-b')).toBe(byPush);
-    expect(hostHomeOf([byDevice], group, 'group-host-id')).toBe(groupHome);
-    expect(hostHomeOf([byDevice], group, 'missing-id')).toBeUndefined();
-    expect(hostHomeOf([], undefined, 'group-host-id')).toBeUndefined();
-
-    const groupWithoutInfo = new Group(groupHome, gid);
-    expect(hostHomeOf([], groupWithoutInfo, 'group-host-id')).toBeUndefined();
+    const ai = row<p.AIMemberRow>('row-member-ai', { host: 'dev-a', state: 'working' });
+    expect(targetOf(a, ai)).toEqual({ host: a, to: 'dev-a' });
+    expect(targetOf(undefined, ai)).toBeUndefined();
+    expect(targetOf(new Home(me), ai)).toBeUndefined();
+    expect(targetOf(a, undefined)).toBeUndefined();
+    expect(targetOf(a, { ...ai, state: 'offline' })).toBeUndefined();
   });
 
-  it('resolves sessionTaskOf from route taskParam, ai.task, or returns undefined', () => {
-    const home = onlineHome();
-    const group = new Group(home, gid);
+  it('takes the task the address names, else the AI’s', () => {
+    const group = new Group(onlineHome(), gid);
     const t1 = row<p.TaskRow>('row-task', { id: 't-1', g: gid, num: 1 });
     const t2 = row<p.TaskRow>('row-task', { id: 't-2', g: gid, num: 2 });
     const ai = row<p.AIMemberRow>('row-member-ai', { id: memberId, g: gid, task: 't-1' });
-    const idleAi = row<p.AIMemberRow>('row-member-ai', { id: memberId, g: gid, task: undefined });
     group.apply([t1, t2, ai]);
 
     expect(sessionTaskOf(undefined, ai, 't-2')).toBeUndefined();
     expect(sessionTaskOf(group, ai, 't-2')).toBe(t2);
     expect(sessionTaskOf(group, ai, undefined)).toBe(t1);
-    expect(sessionTaskOf(group, idleAi, undefined)).toBeUndefined();
+    expect(sessionTaskOf(group, { ...ai, task: undefined }, undefined)).toBeUndefined();
     expect(sessionTaskOf(group, undefined, undefined)).toBeUndefined();
   });
 
-  it('reads queuedCountOf across agents and groups', () => {
-    expect(queuedCountOf(undefined, gid, memberId)).toBe(0);
-    const base = p.decode(p.HostInfoPush, goldens['host-info-push']);
-    const info: p.HostInfoPush = {
-      ...base,
-      agents: [
-        {
-          agent: 'claude',
-          cli_version: '2.0.0',
-          account: 'personal',
-          login_ok: true,
-          caps: {},
-          groups: [
-            { g: gid, member: 'other-member', level: 3, state: 'working', queued: 9 },
-            { g: 'other-group', member: memberId, level: 3, state: 'working', queued: 7 },
-          ],
-        },
-        {
-          agent: 'codex',
-          cli_version: '0.1.0',
-          account: 'team',
-          login_ok: true,
-          caps: {},
-          groups: [{ g: gid, member: memberId, level: 3, state: 'takeover', queued: 4 }],
-        },
-      ],
-    };
-    expect(queuedCountOf(info, gid, memberId)).toBe(4);
-    expect(queuedCountOf(info, gid, 'nobody')).toBe(0);
-  });
-});
-
-describe('headerSubtitle, linkBadgeOf, activeSummary, takeoverErrorText and takeoverBarState', () => {
-  it('builds headerSubtitle with and without ai, task and branch', () => {
+  it('writes the header line and the link line', () => {
     const ai = row<p.AIMemberRow>('row-member-ai', { host_name: 'MacBook' });
-    const taskWithBranch = row<p.TaskRow>('row-task', { num: 12, branch: 'task/12-conn' });
-    const taskNoBranch = { ...taskWithBranch, branch: undefined };
+    const task = row<p.TaskRow>('row-task', { num: 12, branch: 'task/12-conn' });
 
-    expect(headerSubtitle(undefined, taskWithBranch)).toBe('');
-    expect(headerSubtitle(undefined, taskWithBranch, 'Website')).toBe('Website');
+    expect(headerSubtitle(undefined, task)).toBe('');
+    expect(headerSubtitle(undefined, task, 'Website')).toBe('Website');
     expect(headerSubtitle(ai, undefined, 'Website')).toBe('MacBook');
-    expect(headerSubtitle(ai, taskNoBranch)).toBe('MacBook · T-12');
-    expect(headerSubtitle(ai, taskWithBranch)).toBe('MacBook · T-12 · task/12-conn');
-  });
+    expect(headerSubtitle(ai, { ...task, branch: undefined })).toBe('MacBook · T-12');
+    expect(headerSubtitle(ai, task)).toBe('MacBook · T-12 · task/12-conn');
 
-  it('formats linkBadgeOf for offline, linking, relay and direct with or without rtt', () => {
-    expect(linkBadgeOf(false, { kind: 'direct', rtt: 4, since: 1 })).toEqual({
-      st: 'down',
-      text: 'Offline',
-    });
+    expect(linkBadgeOf(false, direct)).toEqual({ st: 'down', text: 'Offline' });
     expect(linkBadgeOf(true, undefined)).toEqual({ st: 'linking', text: 'Connecting' });
-    expect(linkBadgeOf(true, { kind: 'relay', rtt: 120, since: 1 })).toEqual({
-      st: 'limited',
-      text: 'Relayed · limited',
-    });
-    expect(linkBadgeOf(true, { kind: 'direct', rtt: undefined, since: 1 })).toEqual({
-      st: 'ok',
-      text: 'Direct',
-    });
-    expect(linkBadgeOf(true, { kind: 'direct', rtt: 0, since: 1 })).toEqual({
-      st: 'ok',
-      text: 'Direct · 0 ms',
-    });
-    expect(linkBadgeOf(true, { kind: 'direct', rtt: 4, since: 1 })).toEqual({
-      st: 'ok',
-      text: 'Direct · 4 ms',
-    });
+    expect(linkBadgeOf(true, relay)).toEqual({ st: 'limited', text: 'Relayed · limited' });
+    expect(linkBadgeOf(true, { ...direct, rtt: undefined })).toEqual({ st: 'ok', text: 'Direct' });
+    expect(linkBadgeOf(true, { ...direct, rtt: 0 })).toEqual({ st: 'ok', text: 'Direct · 0 ms' });
   });
 
-  it('formats activeSummary across exact minute and queued boundaries', () => {
+  it('says since when the owner drives, and that messages wait, in both languages', () => {
     const start = 1_000_000;
-    expect(activeSummary(start, start - 500, 0)).toBe('You took over just now.');
-    expect(activeSummary(start, start + 59_999, 0)).toBe('You took over just now.');
-    expect(activeSummary(start, start + 60_000, 0)).toBe('You took over 1 min ago.');
-    expect(activeSummary(start, start + 60_000, -1)).toBe('You took over 1 min ago.');
-    expect(activeSummary(start, start + 360_000, 1)).toBe(
-      'You took over 6 min ago. 1 message is queued until you hand back.',
+    const now = 'You took over just now. Messages to this AI are queued until you hand back.';
+    expect(activeSummary(start, start - 500)).toBe(now);
+    expect(activeSummary(start, start + 59_999)).toBe(now);
+    expect(activeSummary(start, start + 60_000)).toBe(
+      'You took over 1 min ago. Messages to this AI are queued until you hand back.',
     );
-    expect(activeSummary(start, start + 360_000, 2)).toBe(
-      'You took over 6 min ago. 2 messages are queued until you hand back.',
+    prefs.lang = 'zh-CN';
+    expect(activeSummary(start, start + 360_000)).toBe(
+      '你已接管 6 分钟。发给它的消息在排队，交还后送达。',
     );
   });
 
-  it('maps known takeoverErrorText codes and derives takeoverBarState across every phase', () => {
-    expect(takeoverErrorText('busy')).toBe(
-      'This AI is busy with another terminal or a merge right now.',
-    );
-    expect(takeoverErrorText('cli')).toBe(
-      'The AI CLI could not open the interactive session on its computer.',
-    );
-    expect(takeoverErrorText('conflict')).toBe(
-      'This session cannot be taken over in its current state.',
-    );
-    expect(takeoverErrorText('home_unreachable')).toBe(
-      "The AI's computer cannot reach this group's home right now.",
-    );
-    expect(takeoverErrorText('not_found')).toBe('This AI or task was not found on its computer.');
-    expect(takeoverErrorText('lost')).toBe("Cannot reach this AI's computer.");
+  it('words the refusals it knows and says what the bar shows in every phase', () => {
+    for (const [code, text] of [
+      ['busy', 'This AI is busy with another terminal or a merge right now.'],
+      ['cli', 'The AI CLI could not open the interactive session on its computer.'],
+      ['conflict', 'This session cannot be taken over in its current state.'],
+      ['home_unreachable', "The AI's computer cannot reach this group's home right now."],
+      ['not_found', 'This AI or task was not found on its computer.'],
+      ['lost', "Cannot reach this AI's computer."],
+    ]) {
+      expect(takeoverErrorText(code)).toBe(text);
+    }
     expect(takeoverErrorText('forbidden')).toBeUndefined();
 
     const ai = row<p.AIMemberRow>('row-member-ai', { state: 'working' });
-    const offlineAi = row<p.AIMemberRow>('row-member-ai', { state: 'offline' });
-    const direct = { kind: 'direct' as const, rtt: 5, since: 1 };
-    const relay = { kind: 'relay' as const, rtt: 90, since: 1 };
     const base = {
       phase: 'idle' as const,
       ai,
-      owned: true,
       online: true,
       path: direct,
       errorCode: '',
       startedAt: 1000,
       nowMs: 121_000,
-      queued: 2,
     };
+    const bar = (title: string, detail: string, handback = false) => ({
+      title,
+      detail,
+      handback,
+    });
+    const offline = bar('Computer offline', "Cannot reach this AI's computer right now.");
+    const opening = bar(
+      'Opening terminal…',
+      'Switching the AI session into interactive terminal mode.',
+      true,
+    );
+    const direct1 = bar(
+      'Direct connection required',
+      'The terminal works over a direct connection only. Establish one to this computer first.',
+    );
 
-    expect(takeoverBarState({ ...base, ai: undefined })).toEqual({
-      title: 'AI not found',
-      detail: 'This AI member has not been read yet or has left the group.',
-      handback: false,
-    });
-    expect(takeoverBarState({ ...base, owned: false })).toEqual({
-      title: 'Owner only',
-      detail: "Only this AI's owner can open its terminal.",
-      handback: false,
-    });
-    expect(takeoverBarState({ ...base, online: false })).toEqual({
-      title: 'Computer offline',
-      detail: "Cannot reach this AI's computer right now.",
-      handback: false,
-    });
-    expect(takeoverBarState({ ...base, ai: offlineAi })).toEqual({
-      title: 'Computer offline',
-      detail: "Cannot reach this AI's computer right now.",
-      handback: false,
-    });
-    expect(takeoverBarState({ ...base, path: undefined })).toEqual({
-      title: 'Connecting…',
-      detail: 'Waiting for a direct connection to this computer.',
-      handback: false,
-    });
-    expect(takeoverBarState({ ...base, path: relay })).toEqual({
-      title: 'Direct connection required',
-      detail: 'Terminal video uses a direct link only. Establish a direct connection first.',
-      handback: false,
-    });
-    expect(takeoverBarState(base)).toEqual({
-      title: 'Opening terminal…',
-      detail: 'Switching the AI session into interactive terminal mode.',
-      handback: true,
-    });
-    expect(takeoverBarState({ ...base, phase: 'starting' })).toEqual({
-      title: 'Opening terminal…',
-      detail: 'Switching the AI session into interactive terminal mode.',
-      handback: true,
-    });
-    expect(takeoverBarState({ ...base, phase: 'relay' })).toEqual({
-      title: 'Direct connection required',
-      detail: 'Terminal video uses a direct link only. Establish a direct connection first.',
-      handback: false,
-    });
-    expect(takeoverBarState({ ...base, phase: 'relayed' })).toEqual({
-      title: 'Handed back · switched to relay',
-      detail:
+    expect(takeoverBarState({ ...base, ai: undefined })).toEqual(
+      bar('AI not found', 'This AI member has not been read yet or has left the group.'),
+    );
+    expect(takeoverBarState({ ...base, online: false })).toEqual(offline);
+    expect(takeoverBarState({ ...base, ai: { ...ai, state: 'offline' } })).toEqual(offline);
+    expect(takeoverBarState({ ...base, path: undefined })).toEqual(
+      bar('Connecting…', 'Waiting for a direct connection to this computer.'),
+    );
+    expect(takeoverBarState({ ...base, path: relay })).toEqual(direct1);
+    expect(takeoverBarState(base)).toEqual(opening);
+    expect(takeoverBarState({ ...base, phase: 'starting' })).toEqual(opening);
+    expect(takeoverBarState({ ...base, phase: 'relay' })).toEqual(direct1);
+    expect(takeoverBarState({ ...base, phase: 'relayed' })).toEqual(
+      bar(
+        'Handed back · switched to relay',
         'The connection switched to a relay, so the terminal closed and handed back to the AI.',
-      handback: false,
-    });
-    expect(takeoverBarState({ ...base, phase: 'ended' })).toEqual({
-      title: 'Handed back',
-      detail: 'The interactive session ended and control returned to the AI.',
-      handback: false,
-    });
-    expect(takeoverBarState({ ...base, phase: 'active' })).toEqual({
-      title: 'Owner is driving',
-      detail: 'You took over 2 min ago. 2 messages are queued until you hand back.',
-      handback: true,
-    });
+      ),
+    );
+    expect(takeoverBarState({ ...base, phase: 'ended' })).toEqual(
+      bar('Handed back', 'The interactive session ended and control returned to the AI.'),
+    );
+    expect(takeoverBarState({ ...base, phase: 'active' })).toEqual(
+      bar(
+        'Owner is driving',
+        'You took over 2 min ago. Messages to this AI are queued until you hand back.',
+        true,
+      ),
+    );
     expect(takeoverBarState({ ...base, phase: 'error', errorCode: 'busy' })).toEqual({
       title: 'Cannot open terminal',
       detail: 'This AI is busy with another terminal or a merge right now.',
+      errorCode: undefined,
       handback: false,
     });
     expect(takeoverBarState({ ...base, phase: 'error', errorCode: 'internal' })).toEqual({
       title: 'Cannot open terminal',
+      detail: undefined,
       errorCode: 'internal',
       handback: false,
     });
   });
-});
 
-describe('applyCtrl, binaryBytes, toTerminalChunk and handbackFilesLabel', () => {
-  it('applies sticky Ctrl across exact ASCII boundaries', () => {
+  it('applies a sticky Ctrl to the first character from @ to ~', () => {
     expect(applyCtrl('c', false)).toEqual({ out: 'c', ctrl: false });
     expect(applyCtrl('', true)).toEqual({ out: '', ctrl: true });
     expect(applyCtrl('?', true)).toEqual({ out: '?', ctrl: false });
     expect(applyCtrl('@', true)).toEqual({ out: '\x00', ctrl: false });
-    expect(applyCtrl('c', true)).toEqual({ out: '\x03', ctrl: false });
     expect(applyCtrl('C', true)).toEqual({ out: '\x03', ctrl: false });
     expect(applyCtrl('cd', true)).toEqual({ out: '\x03d', ctrl: false });
     expect(applyCtrl('~', true)).toEqual({ out: '\x1e', ctrl: false });
     expect(applyCtrl('\x7f', true)).toEqual({ out: '\x7f', ctrl: false });
   });
 
-  it('converts binary strings, normalizes chunks and formats handback file counts', () => {
-    expect([...binaryBytes('\x00\x7f\xff\u0102')]).toEqual([0, 0x7f, 0xff, 0x02]);
-
+  it('reads binary strings and channel messages, and counts the files of a hand-back', () => {
+    expect([...binaryBytes('\x00\x7f\xffĂ')]).toEqual([0, 0x7f, 0xff, 0x02]);
     const bytes = new Uint8Array([65, 66]);
     expect(toTerminalChunk(bytes)).toBe(bytes);
     expect(toTerminalChunk(bytes.buffer)).toEqual(bytes);
     expect(toTerminalChunk('hello')).toBe('hello');
-    expect(toTerminalChunk(null)).toBeUndefined();
     expect(toTerminalChunk(42)).toBeUndefined();
 
     expect(handbackFilesLabel(-1)).toBe('No file changes');
@@ -329,25 +313,18 @@ describe('applyCtrl, binaryBytes, toTerminalChunk and handbackFilesLabel', () =>
   });
 });
 
-describe('startTakeover, endTakeover, sendResize and bridgePty', () => {
-  it('signs takeover.start and takeover.end and handles offline, refusal and rejection', async () => {
+describe('the takeover commands and the channel', () => {
+  it('signs takeover.start and takeover.end, and words a lost or refused start', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(1763600000000);
     const offline = new Home(me);
-    expect(await startTakeover(undefined, hostId, gid, memberId)).toBe('lost');
     expect(await startTakeover(offline, hostId, gid, memberId)).toBe('lost');
     await endTakeover(undefined, hostId, gid, memberId);
     await endTakeover(offline, hostId, gid, memberId);
     expect(signed).toEqual([]);
 
-    const sent: unknown[] = [];
-    const host = onlineHome(hostId, async (req) => {
-      sent.push(req);
-      return { re: 1, ok: true };
-    });
-
+    const host = onlineHome();
     expect(await startTakeover(host, hostId, gid, memberId)).toBe('');
-    const first = JSON.parse(signed[0]) as Record<string, unknown>;
-    expect(first).toEqual({
+    expect(JSON.parse(signed[0])).toEqual({
       t: 'takeover.start',
       n: expect.stringMatching(/^[A-Za-z0-9_-]{21}[AQgw]$/),
       ts: 1763600000000,
@@ -355,17 +332,8 @@ describe('startTakeover, endTakeover, sendResize and bridgePty', () => {
       g: gid,
       member: memberId,
     });
-    expect('task' in first).toBe(false);
-
     expect(await startTakeover(host, hostId, gid, memberId, taskId)).toBe('');
-    expect(p.decode(p.TakeoverStart, signed[1])).toMatchObject({
-      t: 'takeover.start',
-      to: hostId,
-      g: gid,
-      member: memberId,
-      task: taskId,
-    });
-
+    expect(p.decode(p.TakeoverStart, signed[1]).task).toBe(taskId);
     await endTakeover(host, hostId, gid, memberId);
     expect(p.decode(p.TakeoverEnd, signed[2])).toMatchObject({
       t: 'takeover.end',
@@ -374,153 +342,192 @@ describe('startTakeover, endTakeover, sendResize and bridgePty', () => {
       g: gid,
       member: memberId,
     });
-    expect(sent).toHaveLength(3);
 
-    const refusing = onlineHome(hostId, async () => ({
-      re: 2,
-      err: { code: 'relay', msg: 'relayed' },
-    }));
-    expect(await startTakeover(refusing, hostId, gid, memberId)).toBe('relay');
-
-    const rejecting = onlineHome(hostId, async () => {
-      throw new Error('dropped');
-    });
-    expect(await startTakeover(rejecting, hostId, gid, memberId)).toBe('lost');
-    await expect(endTakeover(rejecting, hostId, gid, memberId)).resolves.toBeUndefined();
+    const refusing = onlineHome(hostId, async () => ({ re: 2, err: { code: 'busy', msg: '' } }));
+    expect(await startTakeover(refusing, hostId, gid, memberId)).toBe('busy');
+    const dropping = onlineHome(hostId, () => Promise.reject(new Error('dropped')));
+    expect(await startTakeover(dropping, hostId, gid, memberId)).toBe('lost');
+    await expect(endTakeover(dropping, hostId, gid, memberId)).resolves.toBeUndefined();
     vi.restoreAllMocks();
   });
 
-  it('pushes pty.resize only when ctl.send exists and cols and rows are at least 1', () => {
+  it('pushes pty.resize for a size of at least one column and one row', () => {
     const pushed: unknown[] = [];
-    const withoutSend = { request: vi.fn() } as unknown as p.Ctl;
-    const withSend = {
-      request: vi.fn(),
-      send: (frame: unknown) => pushed.push(frame),
-    } as unknown as p.Ctl;
-
+    const ctl = { request: vi.fn(), send: (frame: unknown) => pushed.push(frame) } as p.Ctl;
     sendResize(undefined, gid, memberId, 80, 24);
-    sendResize(withoutSend, gid, memberId, 80, 24);
-    sendResize(withSend, gid, memberId, 0, 24);
-    sendResize(withSend, gid, memberId, 80, 0);
+    sendResize({ request: vi.fn() } as p.Ctl, gid, memberId, 80, 24);
+    sendResize(ctl, gid, memberId, 0, 24);
+    sendResize(ctl, gid, memberId, 80, 0);
     expect(pushed).toEqual([]);
-
-    sendResize(withSend, gid, memberId, 1, 1);
-    sendResize(withSend, gid, memberId, 120.8, 32.4);
+    sendResize(ctl, gid, memberId, 1, 1);
+    sendResize(ctl, gid, memberId, 120.8, 32.4);
     expect(pushed).toEqual([
       { t: 'pty.resize', g: gid, ai: memberId, cols: 1, rows: 1 },
       { t: 'pty.resize', g: gid, ai: memberId, cols: 120, rows: 32 },
     ]);
   });
 
-  it('bridges PtyChannel open, incoming chunks, outgoing bytes/text, remote close and local close', () => {
-    function makeFakePty(initialState = 'connecting') {
-      let state = initialState;
-      const sent: Uint8Array[] = [];
-      let closes = 0;
-      const hooks = {
-        onopen: null as (() => void) | null,
-        onmessage: null as ((event: { data: unknown }) => void) | null,
-        onclose: null as (() => void) | null,
-      };
-      const channel: p.PtyChannel = {
-        binaryType: 'blob',
-        get readyState() {
-          return state;
-        },
-        get onopen() {
-          return hooks.onopen;
-        },
-        set onopen(fn: (() => void) | null) {
-          hooks.onopen = fn;
-        },
-        get onmessage() {
-          return hooks.onmessage;
-        },
-        set onmessage(fn: ((event: { data: unknown }) => void) | null) {
-          hooks.onmessage = fn;
-        },
-        get onclose() {
-          return hooks.onclose;
-        },
-        set onclose(fn: (() => void) | null) {
-          hooks.onclose = fn;
-        },
-        send(data) {
-          sent.push(data);
-        },
-        close() {
-          closes += 1;
-          state = 'closed';
-          hooks.onclose?.();
-        },
-      };
-      return {
-        channel,
-        hooks,
-        sent,
-        get closes() {
-          return closes;
-        },
-        setState(next: string) {
-          state = next;
-        },
-      };
-    }
+  it('carries bytes both ways, sends only on an open channel, and tells a close from afar', () => {
+    const far = fakeChannel('connecting');
+    const chunks: unknown[] = [];
+    const closed = vi.fn();
+    const bridge = bridgePty(far.channel, (chunk) => chunks.push(chunk), closed);
+    expect(far.channel.binaryType).toBe('arraybuffer');
+    bridge.sendText('early');
+    expect(far.sent).toEqual([]);
 
-    // 1. Channel starts connecting, opens, streams both ways, then closes from remote.
-    const first = makeFakePty('connecting');
-    const opened = vi.fn();
-    const chunks: (Uint8Array | string)[] = [];
-    const remoteClosed = vi.fn();
-    const bridge = bridgePty(first.channel, {
-      onOpen: opened,
-      onChunk: (c) => chunks.push(c),
-      onClose: remoteClosed,
-    });
-    expect(first.channel.binaryType).toBe('arraybuffer');
-    expect(opened).not.toHaveBeenCalled();
-
-    // Outgoing sends are dropped until readyState is 'open'.
-    bridge.send(new Uint8Array([1]));
-    bridge.sendText('ignored');
-    expect(first.sent).toEqual([]);
-
-    first.setState('open');
-    first.hooks.onopen?.();
-    expect(opened).toHaveBeenCalledTimes(1);
-
+    far.open();
     bridge.sendText('');
     bridge.sendText('ls\r');
     bridge.send(new Uint8Array([3]));
-    expect(first.sent.map((b) => [...b])).toEqual([[108, 115, 13], [3]]);
-
-    first.hooks.onmessage?.({ data: new Uint8Array([65]).buffer });
-    first.hooks.onmessage?.({ data: 'prompt> ' });
-    first.hooks.onmessage?.({ data: null });
+    expect(far.sent).toEqual([[108, 115, 13], [3]]);
+    far.deliver(new Uint8Array([65]).buffer);
+    far.deliver('prompt> ');
+    far.deliver(null);
     expect(chunks).toEqual([new Uint8Array([65]), 'prompt> ']);
 
-    first.setState('closed');
-    first.hooks.onclose?.();
-    first.hooks.onclose?.();
-    expect(remoteClosed).toHaveBeenCalledTimes(1);
-    first.setState('open');
+    far.remoteClose();
+    far.remoteClose();
+    expect(closed).toHaveBeenCalledTimes(1);
+    far.open();
     bridge.send(new Uint8Array([9]));
-    expect(first.sent).toHaveLength(2);
+    bridge.close();
+    expect([far.sent.length, far.closes]).toEqual([2, 0]);
 
-    // 2. Channel already open on attach, no onOpen callback, and closed locally.
-    const second = makeFakePty('open');
-    const secondClosed = vi.fn();
-    const bridge2 = bridgePty(second.channel, {
-      onChunk: () => {},
-      onClose: secondClosed,
+    const near = fakeChannel();
+    const nearClosed = vi.fn();
+    const own = bridgePty(near.channel, () => {}, nearClosed);
+    own.close();
+    own.close();
+    expect([near.closes, near.channel.onmessage, near.channel.onclose]).toEqual([1, null, null]);
+    expect(nearClosed).not.toHaveBeenCalled();
+  });
+});
+
+describe('a takeover', () => {
+  const ctrlC = { label: 'Ctrl', seq: '', ctrl: true } as const;
+
+  it('starts on a direct path, opens the channel, sends its size, and hands back', async () => {
+    const pc = computer();
+    const written: unknown[] = [];
+    const tk = new Takeover(gid, memberId, taskId, (chunk) => written.push(chunk));
+    tk.follow(undefined, direct);
+    tk.follow(pc.target, undefined);
+    expect([tk.phase, pc.commands]).toEqual(['idle', []]);
+
+    tk.resize(100, 30);
+    vi.spyOn(Date, 'now').mockReturnValue(5000);
+    tk.follow(pc.target, direct);
+    expect(tk.phase).toBe('starting');
+    tk.follow(pc.target, direct);
+    await pc.answer();
+    expect(pc.sent('takeover.start')).toEqual([
+      expect.objectContaining({ to: hostId, g: gid, member: memberId, task: taskId }),
+    ]);
+    expect([tk.phase, tk.startedAt, tk.errorCode]).toEqual(['active', 5000, '']);
+    expect(pc.channels.map((c) => c.label)).toEqual([`pty:${gid}:${memberId}`]);
+    expect(pc.resizes).toEqual([{ t: 'pty.resize', g: gid, ai: memberId, cols: 100, rows: 30 }]);
+    tk.resize(120, 32);
+    expect(pc.resizes.at(-1)).toEqual({
+      t: 'pty.resize',
+      g: gid,
+      ai: memberId,
+      cols: 120,
+      rows: 32,
     });
-    second.hooks.onopen?.();
-    bridge2.close();
-    bridge2.close();
-    expect(second.closes).toBe(1);
-    expect(second.hooks.onopen).toBeNull();
-    expect(second.hooks.onmessage).toBeNull();
-    expect(second.hooks.onclose).toBeNull();
-    expect(secondClosed).not.toHaveBeenCalled();
+
+    const far = pc.channels[0].fake;
+    far.deliver('claude> ');
+    tk.press(ctrlC);
+    expect(tk.ctrl).toBe(true);
+    tk.type('c');
+    expect(tk.ctrl).toBe(false);
+    tk.press(phoneKeys[7]);
+    tk.typeBinary('\x80');
+    expect([written, far.sent]).toEqual([['claude> '], [[3], [13], [0x80]]]);
+
+    tk.handBack();
+    tk.handBack();
+    await vi.waitFor(() => expect(pc.sent('takeover.end')).toHaveLength(1));
+    expect(pc.sent('takeover.end')[0]).toMatchObject({ to: hostId, g: gid, member: memberId });
+    expect([tk.phase, far.closes]).toEqual(['ended', 1]);
+    tk.resize(90, 20);
+    tk.follow(pc.target, direct);
+    expect([pc.resizes.length, pc.sent('takeover.start').length]).toEqual([2, 1]);
+    vi.restoreAllMocks();
+  });
+
+  it('sends takeover.end after the answer when handed back while still opening (A7.6)', async () => {
+    const pc = computer();
+    const tk = new Takeover(gid, memberId, undefined, () => {});
+    tk.follow(pc.target, direct);
+    tk.handBack();
+    expect(tk.phase).toBe('ended');
+    await new Promise((later) => setTimeout(later));
+    expect(pc.sent('takeover.end')).toEqual([]);
+
+    await pc.answer();
+    await vi.waitFor(() => expect(pc.sent('takeover.end')).toHaveLength(1));
+    expect(pc.commands.map((cmd) => cmd.t)).toEqual(['takeover.start', 'takeover.end']);
+    expect([tk.phase, pc.channels]).toEqual(['ended', []]);
+
+    const refused = new Takeover(gid, memberId, undefined, () => {});
+    refused.follow(pc.target, direct);
+    refused.handBack();
+    await pc.answer({ re: 1, err: { code: 'busy', msg: '' } });
+    expect(pc.sent('takeover.end')).toHaveLength(1);
+  });
+
+  it('refuses a relayed path, and closes without takeover.end when the path becomes relayed', async () => {
+    const pc = computer();
+    const tk = new Takeover(gid, memberId, undefined, () => {});
+    tk.follow(pc.target, relay);
+    expect([tk.phase, pc.commands]).toEqual(['relay', []]);
+
+    const live = new Takeover(gid, memberId, undefined, () => {});
+    live.follow(pc.target, direct);
+    live.follow(pc.target, relay);
+    expect(live.phase).toBe('starting');
+    await pc.answer();
+    live.follow(pc.target, relay);
+    expect([live.phase, pc.channels[0].fake.closes]).toEqual(['relayed', 1]);
+    live.handBack();
+    live.follow(pc.target, relay);
+    await new Promise((later) => setTimeout(later));
+    expect([live.phase, pc.sent('takeover.end')]).toEqual(['relayed', []]);
+  });
+
+  it('shows a refusal, a lost channel and the computer closing the terminal', async () => {
+    const pc = computer();
+    const relayed = new Takeover(gid, memberId, undefined, () => {});
+    relayed.follow(pc.target, direct);
+    await pc.answer({ re: 1, err: { code: 'relay', msg: '' } });
+    expect([relayed.phase, relayed.errorCode]).toEqual(['relay', 'relay']);
+
+    const busy = new Takeover(gid, memberId, undefined, () => {});
+    busy.follow(pc.target, direct);
+    await pc.answer({ re: 1, err: { code: 'busy', msg: '' } });
+    expect([busy.phase, busy.errorCode]).toEqual(['error', 'busy']);
+    busy.handBack();
+    expect(busy.phase).toBe('error');
+
+    const closed = new Takeover(gid, memberId, undefined, () => {});
+    closed.follow(pc.target, direct);
+    await pc.answer();
+    pc.channels[0].fake.remoteClose();
+    closed.type('x');
+    closed.handBack();
+    await new Promise((later) => setTimeout(later));
+    expect([closed.phase, pc.sent('takeover.end'), pc.channels[0].fake.sent]).toEqual([
+      'ended',
+      [],
+      [],
+    ]);
+
+    pc.noChannel();
+    const lost = new Takeover(gid, memberId, undefined, () => {});
+    lost.follow(pc.target, direct);
+    await pc.answer();
+    expect([lost.phase, lost.errorCode]).toEqual(['error', 'lost']);
   });
 });

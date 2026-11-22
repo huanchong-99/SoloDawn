@@ -5,7 +5,7 @@ import type { Net } from './net.svelte';
 import { cliName } from './onboard.svelte';
 import { t } from './prefs.svelte';
 import type { AIMemberRow, HostInfoPush, HumanMemberRow, MsgRow, TaskRow } from './proto';
-import { hostHomeOf } from './terminal';
+import { hostHomeOf } from './terminal.svelte';
 
 /** An AI CLI registered on one of the owner's connected computers. */
 export interface Candidate {
@@ -168,13 +168,8 @@ export function pathLabel(ai: AIMemberRow): string {
 }
 
 /** Reason why "Open terminal" on an owned AI card is disabled, or `undefined` when direct. */
-export function terminalDisabledReason(
-  net: Net | undefined,
-  group: Group,
-  ai: AIMemberRow,
-): string | undefined {
-  if (!net) return t('member.terminal.offline');
-  const host = hostHomeOf(net.homes, group, ai.host);
+export function terminalDisabledReason(net: Net, ai: AIMemberRow): string | undefined {
+  const host = hostHomeOf(net.homes, ai.host);
   if (!host?.ctl || ai.state === 'offline') return t('member.terminal.offline');
   return net.path(host)?.kind === 'direct' ? undefined : t('member.terminal.relay');
 }

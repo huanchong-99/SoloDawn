@@ -9,6 +9,8 @@
   "member.ai": "AI",
   "member.ai.empty": "群里还没有 AI。",
   "member.computer": "电脑",
+  "member.handback": "交还",
+  "member.handback.queued": "发给它的消息在排队，交还后送达",
   "member.join.cancel": "取消",
   "member.join.cli": "电脑和 AI",
   "member.join.error.conflict": "这个名字在群里已经有人用了。",

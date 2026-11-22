@@ -6,7 +6,6 @@ import { expect, vi } from 'vitest';
 import { find, Home, homes } from '../src/lib/groups.svelte';
 import { goldens } from '../src/lib/mock';
 import type { Path, Source } from '../src/lib/net.svelte';
-import { nodes } from '../src/lib/nodes.svelte';
 import * as p from '../src/lib/proto';
 import { example, TestHome, user } from './home';
 import { all, closePage, go, one, openPage, texts } from './page';
@@ -48,6 +47,7 @@ const xtermState = vi.hoisted(() => ({
     written: (Uint8Array | string)[];
     onDataCb?: (data: string) => void;
     onBinaryCb?: (data: string) => void;
+    onResizeCb?: (size: { cols: number; rows: number }) => void;
     cleared: number;
     disposed: boolean;
   }[],
@@ -60,6 +60,7 @@ vi.mock('@xterm/xterm', () => ({
     written: (Uint8Array | string)[] = [];
     onDataCb?: (data: string) => void;
     onBinaryCb?: (data: string) => void;
+    onResizeCb?: (size: { cols: number; rows: number }) => void;
     cleared = 0;
     disposed = false;
     constructor() {
@@ -74,11 +75,12 @@ vi.mock('@xterm/xterm', () => ({
     }
     onData(cb: (data: string) => void) {
       this.onDataCb = cb;
-      return { dispose: () => (this.onDataCb = undefined) };
     }
     onBinary(cb: (data: string) => void) {
       this.onBinaryCb = cb;
-      return { dispose: () => (this.onBinaryCb = undefined) };
+    }
+    onResize(cb: (size: { cols: number; rows: number }) => void) {
+      this.onResizeCb = cb;
     }
     focus() {}
     clear() {
@@ -93,11 +95,10 @@ vi.mock('@xterm/xterm', () => ({
 vi.mock('@xterm/addon-fit', () => ({
   FitAddon: class {
     fit() {
-      const latest = xtermState.instances.at(-1);
-      if (latest) {
-        latest.cols = 120;
-        latest.rows = 32;
-      }
+      const latest = xtermState.instances.at(-1)!;
+      latest.cols = 120;
+      latest.rows = 32;
+      latest.onResizeCb?.({ cols: 120, rows: 32 });
     }
   },
 }));
@@ -120,6 +121,7 @@ interface HostRig {
   resizes: p.PTYResize[];
   channels: FakePty[];
   refuseStart?: string;
+  holdStart?: Promise<void>;
   hostInfoCalls: number;
   pushFrame(frame: p.Push): void;
   connect(): Promise<void>;
@@ -180,7 +182,6 @@ function createHostRig(): HostRig {
           get readyState() {
             return state;
           },
-          onopen: null,
           set onmessage(fn: ((ev: { data: unknown }) => void) | null) {
             onmsg = fn;
           },
@@ -208,6 +209,7 @@ function createHostRig(): HostRig {
         if (kind === 'takeover.start') {
           await new Promise((later) => setTimeout(later));
           starts.push(p.decode(p.TakeoverStart, env.p));
+          await rig.holdStart;
           if (rig.refuseStart) {
             return { re: (seq += 1), err: { code: rig.refuseStart, msg: 'refused' } };
           }
@@ -254,7 +256,6 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   AfterEachScenario(async () => {
     await closePage();
     paths.clear();
-    nodes.infos.clear();
     xtermState.instances.length = 0;
     vi.unstubAllEnvs();
   });
@@ -289,7 +290,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   });
 
   Scenario(
-    'Opening an owned AI terminal with a task streams terminal bytes, resizes, updates queued count and renders handback',
+    'Opening an owned AI terminal with a task streams terminal bytes, resizes, says messages wait and renders handback',
     ({ Given, When, Then, And }) => {
       Given(
         '"Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms',
@@ -376,25 +377,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       When(
-        'the host streams prompt bytes, pushes 2 queued messages in "host.info", and the owner presses "Ctrl" then types "c" and presses "Enter"',
+        'the host streams prompt bytes and the owner presses "Ctrl" then types "c" and presses "Enter"',
         () => {
           workstation.channels[0].deliver(new TextEncoder().encode('claude> '));
-          const pushBase = p.decode(p.HostInfoPush, goldens['host-info-push']);
-          workstation.pushFrame({
-            ...pushBase,
-            device: workstationId,
-            agents: [
-              {
-                agent: 'claude',
-                cli_version: '2.1.311',
-                account: 'personal',
-                login_ok: true,
-                caps: {},
-                groups: [{ g: website, member: claudeId, level: 3, state: 'takeover', queued: 2 }],
-              },
-            ],
-          });
-          flushSync();
           const buttons = all<HTMLButtonElement>('.keys button');
           const ctrlBtn = buttons.find((b) => b.textContent!.trim() === 'Ctrl')!;
           const enterBtn = buttons.find((b) => b.getAttribute('aria-label') === 'Enter')!;
@@ -409,13 +394,16 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       Then(
-        'the takeover bar and queue card show 2 queued messages and the channel receives Ctrl-C and Enter',
+        'the takeover bar and the queue card say that messages wait until hand-back, and the channel receives Ctrl-C and Enter',
         () => {
           expect(xtermState.instances[0].written).toHaveLength(1);
-          expect(one('.takeover .grow').textContent).toContain(
-            '2 messages are queued until you hand back.',
+          expect(one('.takeover .grow').textContent!.trim()).toBe(
+            'You took over just now. Messages to this AI are queued until you hand back.',
           );
-          expect(texts('.info .badge.count')).toEqual(['2']);
+          expect(all('.info .badge')).toEqual([]);
+          expect(texts('.info .card .hint')[1]).toBe(
+            'Messages sent to this AI during the takeover are delivered in order when you hand back.',
+          );
           const sentStrings = workstation.channels[0].sent.map((b) => new TextDecoder().decode(b));
           expect(sentStrings).toEqual(['\x03', '\r']);
         },
@@ -636,6 +624,93 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
+    'Handing back while the terminal is still opening ends the takeover once the start is answered',
+    ({ Given, And, When, Then }) => {
+      let release = () => {};
+      Given(
+        '"Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms',
+        () => {
+          paths.set(workstation.store, { kind: 'direct', rtt: 4, since: Date.now() });
+        },
+      );
+      And('"workstation" holds its answer to "takeover.start"', () => {
+        workstation.holdStart = new Promise((resolve) => (release = resolve));
+      });
+      When(
+        'the owner opens "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/1PC8WineBrUQ-apCjx7tug" and clicks "Hand back" while the bar says "Opening terminal…"',
+        async () => {
+          openPage(`#/terminal/${website}/${claudeId}`, 1440);
+          await vi.waitFor(() => expect(workstation.starts).toHaveLength(1));
+          flushSync();
+          expect(texts('.takeover b')).toEqual(['Opening terminal…']);
+          one<HTMLAnchorElement>('.takeover .btn-dawn').click();
+          flushSync();
+        },
+      );
+      Then('no "takeover.end" is sent yet and the chat of "Website" is open', async () => {
+        await new Promise((later) => setTimeout(later, 10));
+        expect(workstation.ends).toEqual([]);
+        expect(location.hash).toBe(`#/groups/${website}`);
+        expect(texts('.chat-head h2')).toEqual(['Website']);
+      });
+      When('"workstation" answers "takeover.start" with ok', () => release());
+      Then(
+        '"workstation" receives one signed "takeover.end" after it, and no pty channel is opened',
+        async () => {
+          await vi.waitFor(() => expect(workstation.ends).toHaveLength(1));
+          expect(workstation.ends[0]).toMatchObject({ to: workstationId, member: claudeId });
+          expect(workstation.channels).toEqual([]);
+        },
+      );
+    },
+  );
+
+  Scenario('The card of an AI in takeover offers to hand it back', ({ Given, When, Then }) => {
+    Given('"Claude Code" is in takeover on a direct path', () => {
+      workstation.home.write(
+        website,
+        example('row-member-ai', {
+          id: claudeId,
+          g: website,
+          user,
+          name: 'Claude Code',
+          cli: 'claude',
+          host: workstationId,
+          host_name: 'workstation',
+          state: 'takeover',
+          task: undefined,
+          path: 'local',
+        }),
+      );
+      paths.set(workstation.store, { kind: 'direct', rtt: 4, since: Date.now() });
+    });
+    When('the owner opens the chat of "Website"', () => openPage(`#/groups/${website}`, 1440));
+    Then(
+      'the "Claude Code" card reads "Owner is driving" and offers "Hand back" with "Messages to it are queued until you hand back"',
+      () => {
+        expect(texts('.member .st span')).toEqual(['Owner is driving']);
+        expect(texts('.member .card-foot .btn-dawn')).toEqual(['Hand back']);
+        expect(texts('.member .card-foot .hint')).toEqual([
+          'Messages to it are queued until you hand back',
+        ]);
+        expect(all('.member .card-foot a')).toEqual([]);
+      },
+    );
+    When('the owner clicks "Hand back" on the card', () => {
+      one<HTMLButtonElement>('.member .card-foot .btn-dawn').click();
+    });
+    Then('"workstation" receives a signed "takeover.end" for "Claude Code"', async () => {
+      await vi.waitFor(() => expect(workstation.ends).toHaveLength(1));
+      expect(workstation.ends[0]).toMatchObject({
+        to: workstationId,
+        g: website,
+        member: claudeId,
+      });
+      expect(workstation.starts).toEqual([]);
+    });
+  });
+
+  Scenario(
     'Tab close via pagehide and remote channel close end takeover cleanly',
     ({ Given, When, Then }) => {
       Given(
@@ -650,7 +725,6 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           openPage(`#/terminal/${website}/${claudeId}`, 1440);
           await vi.waitFor(() => expect(workstation.channels).toHaveLength(1));
           dispatchEvent(new Event('pagehide'));
-          dispatchEvent(new Event('beforeunload'));
           flushSync();
         },
       );

@@ -1,34 +1,24 @@
 <script lang="ts">
-  import { onDestroy, onMount, untrack } from 'svelte';
+  import { onMount } from 'svelte';
   import Failure from '../components/Failure.svelte';
   import Icon from '../components/Icon.svelte';
   import TerminalInfo from '../components/terminal/TerminalInfo.svelte';
-  import { find, type Home } from '../lib/groups.svelte';
-  import { nodes } from '../lib/nodes.svelte';
+  import { find } from '../lib/groups.svelte';
   import { t } from '../lib/prefs.svelte';
   import { href, type PageProps } from '../lib/route.svelte';
   import {
-    applyCtrl,
-    binaryBytes,
-    bridgePty,
-    endTakeover,
     headerSubtitle,
     hostHomeOf,
     linkBadgeOf,
     phoneKeys,
-    ptyLabel,
-    queuedCountOf,
-    sendResize,
     sessionTaskOf,
-    startTakeover,
+    Takeover,
     takeoverBarState,
-    type PhoneKey,
-    type PtyBridge,
-    type TakeoverPhase,
-  } from '../lib/terminal';
+    targetOf,
+  } from '../lib/terminal.svelte';
   import { now } from '../lib/when';
 
-  /** Interactive terminal takeover page (`#/terminal/:g/:member/:task?`, F-12). */
+  /** The terminal of an AI (`#/terminal/<g>/<member>[/<task>]`, `web/design/terminal.html`). */
   let { params, net }: PageProps<'terminal'> = $props();
 
   const termTheme = {
@@ -43,198 +33,48 @@
   };
 
   let termHost = $state<HTMLElement>();
-  let phase = $state<TakeoverPhase>('idle');
-  let errorCode = $state('');
-  let startedAt = $state(0);
-  let ctrl = $state(false);
-  let openedKey = '';
-  let runSeq = 0;
-
-  let pty: PtyBridge | undefined;
-  let activeTarget:
-    { host: Home; to: string; g: string; member: string; ended: boolean } | undefined;
   let term: import('@xterm/xterm').Terminal | undefined;
-  let fitAddon: import('@xterm/addon-fit').FitAddon | undefined;
-  const pendingChunks: (Uint8Array | string)[] = [];
+  // What the computer sends before xterm has loaded.
+  const early: (Uint8Array | string)[] = [];
+  const write = (chunk: Uint8Array | string) => (term ? term.write(chunk) : early.push(chunk));
 
   const group = $derived(find(params.g));
-  const memberRow = $derived(params.member ? group?.member(params.member) : undefined);
-  const ai = $derived(memberRow?.kind === 'ai' ? memberRow : undefined);
-  const owned = $derived(Boolean(group && ai && ai.user === group.home.me.user));
-  const host = $derived(ai ? hostHomeOf(net.homes, group, ai.host) : undefined);
+  const member = $derived(group?.member(params.member));
+  const ai = $derived(member?.kind === 'ai' ? member : undefined);
+  const host = $derived(ai ? hostHomeOf(net.homes, ai.host) : undefined);
   const path = $derived(host ? net.path(host) : undefined);
   const task = $derived(sessionTaskOf(group, ai, params.task));
-  const hostInfo = $derived(host?.hostInfo ?? (host ? nodes.infos.get(host) : undefined));
-  const queued = $derived(ai ? queuedCountOf(hostInfo, params.g, ai.id) : 0);
+  // Another address is another takeover: the effect below hands the previous one back. The shell
+  // hands a new `params` on every `hashchange`, so the takeover is keyed on the values.
+  const g = $derived(params.g);
+  const memberId = $derived(params.member);
+  const taskId = $derived(params.task);
+  const tk = $derived(new Takeover(g, memberId, taskId, write));
   const backHref = $derived(href('chat', { g: params.g }));
   const subtitle = $derived(headerSubtitle(ai, task, group?.name));
-  const link = $derived(linkBadgeOf(Boolean(host?.ctl), path));
   const bar = $derived(
     takeoverBarState({
-      phase,
+      phase: tk.phase,
       ai,
-      owned,
       online: Boolean(host?.ctl),
       path,
-      errorCode,
-      startedAt,
-      nowMs: phase === 'active' ? now() : startedAt,
-      queued,
+      errorCode: tk.errorCode,
+      startedAt: tk.startedAt,
+      nowMs: now(),
     }),
   );
 
-  function fitAndResize() {
-    if (!term || !fitAddon) return;
-    try {
-      fitAddon.fit();
-    } catch {
-      // Unsized test containers keep xterm's default dimensions.
-    }
-    if (activeTarget && !activeTarget.ended) {
-      sendResize(activeTarget.host.ctl, activeTarget.g, activeTarget.member, term.cols, term.rows);
-    }
-  }
-
-  function writeChunk(chunk: Uint8Array | string) {
-    if (term) term.write(chunk);
-    else pendingChunks.push(chunk);
-  }
-
-  function handleInput(raw: string) {
-    const next = applyCtrl(raw, ctrl);
-    ctrl = next.ctrl;
-    pty?.sendText(next.out);
-  }
-
-  function pressPhoneKey(key: PhoneKey) {
-    if (key.ctrl) {
-      ctrl = !ctrl;
-    } else if (key.seq) {
-      handleInput(key.seq);
-    }
-    term?.focus();
-  }
-
-  function handBack() {
-    runSeq += 1;
-    pty?.close();
-    pty = undefined;
-    if (activeTarget && !activeTarget.ended) {
-      activeTarget.ended = true;
-      void endTakeover(activeTarget.host, activeTarget.to, activeTarget.g, activeTarget.member);
-    }
-    if (phase === 'active' || phase === 'starting') phase = 'ended';
-  }
-
-  async function openTakeover(
-    targetHost: Home,
-    to: string,
-    g: string,
-    member: string,
-    taskId?: string,
-  ) {
-    const myRun = (runSeq += 1);
-    const current = { host: targetHost, to, g, member, ended: false };
-    activeTarget = current;
-    phase = 'starting';
-    errorCode = '';
-    const code = await startTakeover(targetHost, to, g, member, taskId);
-    if (myRun !== runSeq) {
-      if (code === '' && !current.ended) {
-        current.ended = true;
-        void endTakeover(targetHost, to, g, member);
-      }
-      return;
-    }
-    if (code === 'relay') {
-      current.ended = true;
-      phase = 'relay';
-      return;
-    }
-    if (code !== '') {
-      current.ended = true;
-      errorCode = code;
-      phase = 'error';
-      return;
-    }
-    if (net.path(targetHost)?.kind === 'relay') {
-      current.ended = true;
-      void endTakeover(targetHost, to, g, member);
-      phase = 'relayed';
-      return;
-    }
-    const ch = targetHost.ctl?.channel?.(ptyLabel(g, member));
-    if (!ch) {
-      current.ended = true;
-      void endTakeover(targetHost, to, g, member);
-      errorCode = 'lost';
-      phase = 'error';
-      return;
-    }
-    startedAt = Date.now();
-    phase = 'active';
-    pty = bridgePty(ch, {
-      onOpen: () => fitAndResize(),
-      onChunk: writeChunk,
-      onClose: () => {
-        current.ended = true;
-        pty = undefined;
-        if (phase === 'active') phase = 'ended';
-      },
-    });
-    fitAndResize();
-  }
-
   $effect(() => {
-    if (host?.ctl) nodes.sync([host]);
+    const current = tk;
+    term?.clear();
+    if (term) current.resize(term.cols, term.rows);
+    return () => current.handBack();
   });
-
-  // Reset when navigating between two terminal addresses while mounted.
-  $effect(() => {
-    const key = `${params.g}/${params.member}/${params.task ?? ''}`;
-    if (openedKey && openedKey !== key) {
-      untrack(() => {
-        handBack();
-        phase = 'idle';
-        errorCode = '';
-        ctrl = false;
-        term?.clear();
-      });
-    }
-    openedKey = key;
-  });
-
-  // Start takeover once the owned AI and a direct path to its host are ready, or refuse on relay.
-  $effect(() => {
-    if (phase !== 'idle' || !ai || !owned || !host?.ctl || ai.state === 'offline' || !path) return;
-    if (path.kind === 'relay') {
-      phase = 'relay';
-      return;
-    }
-    const targetHost = host;
-    const targetAi = ai;
-    const g = params.g;
-    const taskId = params.task;
-    untrack(() => void openTakeover(targetHost, targetAi.host, g, targetAi.id, taskId));
-  });
-
-  // A7.9: when an active pty connection switches to relay, close pty cleanly and keep ctl open.
-  $effect(() => {
-    if (phase === 'active' && path?.kind === 'relay') {
-      untrack(() => {
-        if (activeTarget) activeTarget.ended = true;
-        pty?.close();
-        pty = undefined;
-        phase = 'relayed';
-      });
-    }
-  });
+  $effect(() => tk.follow(targetOf(host, ai), path));
 
   onMount(() => {
     let cancelled = false;
     let observer: ResizeObserver | undefined;
-    let dataSub: { dispose(): void } | undefined;
-    let binSub: { dispose(): void } | undefined;
     void Promise.all([
       import('@xterm/xterm'),
       import('@xterm/addon-fit'),
@@ -253,31 +93,25 @@
       instance.loadAddon(fit);
       instance.open(termHost);
       term = instance;
-      fitAddon = fit;
-      for (const chunk of pendingChunks.splice(0)) instance.write(chunk);
-      dataSub = instance.onData(handleInput);
-      binSub = instance.onBinary((raw) => pty?.send(binaryBytes(raw)));
-      fitAndResize();
-      if (typeof ResizeObserver !== 'undefined') {
-        observer = new ResizeObserver(() => fitAndResize());
-        observer.observe(termHost);
-      }
+      for (const chunk of early.splice(0)) instance.write(chunk);
+      instance.onData((text) => tk.type(text));
+      instance.onBinary((raw) => tk.typeBinary(raw));
+      instance.onResize(({ cols, rows }) => tk.resize(cols, rows));
+      fit.fit();
+      tk.resize(instance.cols, instance.rows);
+      observer = new ResizeObserver(() => fit.fit());
+      observer.observe(termHost);
     });
     return () => {
       cancelled = true;
       observer?.disconnect();
-      dataSub?.dispose();
-      binSub?.dispose();
       term?.dispose();
       term = undefined;
-      fitAddon = undefined;
     };
   });
-
-  onDestroy(handBack);
 </script>
 
-<svelte:window onpagehide={handBack} onbeforeunload={handBack} />
+<svelte:window onpagehide={() => tk.handBack()} />
 
 <div class="terminal-page">
   <header class="term-head">
@@ -302,9 +136,11 @@
           {/if}
         </span>
         {#if bar.handback}
-          <a class="btn btn-dawn" href={backHref} onclick={handBack}>{t('terminal.handback')}</a>
+          <a class="btn btn-dawn" href={backHref} onclick={() => tk.handBack()}>
+            {t('terminal.handback')}
+          </a>
         {:else}
-          <a class="btn btn-sm" href={backHref}>{t('terminal.back')}</a>
+          <a class="btn" href={backHref}>{t('terminal.back')}</a>
         {/if}
       </div>
 
@@ -320,11 +156,11 @@
         {#each phoneKeys as key (key.label)}
           <button
             type="button"
-            class:active={Boolean(key.ctrl && ctrl)}
+            class:active={Boolean(key.ctrl && tk.ctrl)}
             aria-label={key.ariaKey ? t(key.ariaKey) : undefined}
-            aria-pressed={key.ctrl ? ctrl : undefined}
-            disabled={phase !== 'active'}
-            onclick={() => pressPhoneKey(key)}
+            aria-pressed={key.ctrl ? tk.ctrl : undefined}
+            disabled={tk.phase !== 'active'}
+            onclick={() => (tk.press(key), term?.focus())}
           >
             {key.label}
           </button>
@@ -332,7 +168,7 @@
       </div>
     </section>
 
-    <TerminalInfo {ai} {task} {link} {queued} />
+    <TerminalInfo {ai} {task} link={linkBadgeOf(Boolean(host?.ctl), path)} />
   </div>
 </div>
 
@@ -409,9 +245,14 @@
     background: var(--term-bg);
     color: var(--term-fg);
   }
+  /* FitAddon counts the padding of .xterm, not of its parent. xterm.css paints the viewport
+     black, and it spans that padding. */
   .term :global(.xterm) {
     height: 100%;
     padding: var(--sp-3) var(--sp-4);
+  }
+  .term :global(.xterm-viewport) {
+    background-color: var(--term-bg);
   }
   .keys {
     display: flex;

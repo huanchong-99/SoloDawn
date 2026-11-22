@@ -571,16 +571,14 @@ describe('AI status and path projections', () => {
     expect(pathLabel(mk('working', 'mesh'))).toBe('mesh');
   });
 
-  it('computes terminalDisabledReason across missing net, offline host/AI, relay, linking and direct', () => {
-    const { home, group } = makeGroup();
+  it('computes terminalDisabledReason across offline host/AI, relay, linking and direct', () => {
+    const { home } = makeGroup();
     const ai = row<p.AIMemberRow>('row-member-ai', {
       id: 'ai-t',
       g: gid,
-      host: homeDev,
+      host: home.device,
       state: 'working',
     });
-    expect(terminalDisabledReason(undefined, group, ai)).toBe('Computer offline');
-
     const offlineHost = makeHome({ online: false });
     offlineHost.device = 'off-dev';
     const offlineAiHost = row<p.AIMemberRow>('row-member-ai', {
@@ -598,35 +596,30 @@ describe('AI status and path projections', () => {
     expect(
       terminalDisabledReason(
         netOf([offlineHost], () => undefined),
-        group,
         offlineAiHost,
       ),
     ).toBe('Computer offline');
     expect(
       terminalDisabledReason(
         netOf([home], () => ({ kind: 'direct', rtt: 4, since: 1 })),
-        group,
         { ...ai, state: 'offline' },
       ),
     ).toBe('Computer offline');
     expect(
       terminalDisabledReason(
         netOf([home], () => undefined),
-        group,
         ai,
       ),
     ).toBe('Direct link only');
     expect(
       terminalDisabledReason(
         netOf([home], () => ({ kind: 'relay', rtt: 80, since: 1 })),
-        group,
         ai,
       ),
     ).toBe('Direct link only');
     expect(
       terminalDisabledReason(
         netOf([home], () => ({ kind: 'direct', rtt: 4, since: 1 })),
-        group,
         ai,
       ),
     ).toBeUndefined();

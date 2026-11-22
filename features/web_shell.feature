@@ -15,20 +15,14 @@ Feature: Shell of the web client
     And the navigation marks "<entry>"
 
     Examples:
-      | address                         | title                    | drawn by         | entry     |
+      | address                         | title                    | drawn by            | entry     |
       | #/onboarding                    | Connect a computer       | the onboarding page | nothing   |
-      | #/groups                        | Chats                    | the group list   | Chats     |
-      | #/groups/rZNvy-1jH6Z-BcPqA5U5BQ | Chats                    | the group list   | Chats     |
-      | #/terminal/g/m                  | Terminal takeover        | the terminal page | Chats     |
-      | #/nodes                         | My computers and AIs     | its own page     | Computers |
-      | #/settings                      | Settings                 | its own page     | Settings  |
-      | #/states                        | Design system and states | the states sheet | nothing   |
-
-  Scenario: A page that is not built yet says so and leads back to the chats
-    Given a page whose view is not built yet
-    When the person opens the client at "#/terminal/g/m"
-    Then the page says "This page is not built yet"
-    And its link "Back to the chats" leads to "#/groups"
+      | #/groups                        | Chats                    | the group list      | Chats     |
+      | #/groups/rZNvy-1jH6Z-BcPqA5U5BQ | Chats                    | the group list      | Chats     |
+      | #/terminal/g/m                  | Terminal takeover        | the terminal page   | Chats     |
+      | #/nodes                         | My computers and AIs     | its own page        | Computers |
+      | #/settings                      | Settings                 | its own page        | Settings  |
+      | #/states                        | Design system and states | the states sheet    | nothing   |
 
   Scenario: The address gives the page its parameters
     Given the home of the group "Website" is reached
