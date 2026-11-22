@@ -9,6 +9,7 @@
     moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     back: '<path d="M15 5l-7 7 7 7"/>',
+    arrow: '<path d="M5 12h13M13 6l6 6-6 6"/>',
     down: '<path d="M6 9l6 6 6-6"/>',
     at: '<circle cx="12" cy="12" r="3.5"/><path d="M15.5 8.5v5a2.5 2.5 0 0 0 5 0V12a8.5 8.5 0 1 0-3.4 6.8"/>',
     send: '<path d="M4 12l16-8-6 16-3-7-7-1z"/>',

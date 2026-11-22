@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { flushSync } from 'svelte';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { watch } from '../../features/watch.svelte';
 import { callView, formatElapsed, withoutInlineReplies, type CallMsg } from './call';
 import { Group, Home } from './groups.svelte';
 import { goldens } from './mock';
@@ -26,17 +28,16 @@ function makeGroup() {
 }
 
 describe('call helpers', () => {
-  it('formats elapsed durations across every unit boundary and clamps negative values', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('formats elapsed durations in whole units across every boundary and clamps negative values', () => {
     prefs.lang = 'en';
 
-    expect(formatElapsed(-250, true)).toBe('0 ms');
     expect(formatElapsed(-5_000)).toBe('0 s');
-    expect(formatElapsed(500)).toBe('0 s');
-    expect(formatElapsed(0, true)).toBe('0 ms');
-    expect(formatElapsed(500, true)).toBe('500 ms');
-    expect(formatElapsed(999, true)).toBe('999 ms');
-    expect(formatElapsed(1_000, true)).toBe('1 s');
-    expect(formatElapsed(1_900, true)).toBe('1 s');
+    expect(formatElapsed(0)).toBe('0 s');
+    expect(formatElapsed(999)).toBe('0 s');
+    expect(formatElapsed(1_000)).toBe('1 s');
+    expect(formatElapsed(1_900)).toBe('1 s');
     expect(formatElapsed(38_000)).toBe('38 s');
     expect(formatElapsed(59_999)).toBe('59 s');
     expect(formatElapsed(60_000)).toBe('1 min');
@@ -49,7 +50,6 @@ describe('call helpers', () => {
     expect(formatElapsed(259_199_999)).toBe('2 d');
 
     prefs.lang = 'zh-CN';
-    expect(formatElapsed(500, true)).toBe('500 ms');
     expect(formatElapsed(38_000)).toBe('38 秒');
     expect(formatElapsed(120_000)).toBe('2 分钟');
     expect(formatElapsed(7_200_000)).toBe('2 小时');
@@ -57,27 +57,62 @@ describe('call helpers', () => {
     prefs.lang = 'en';
   });
 
-  it('derives waiting and answered call views, mentions, code spans and missing or deleted rows', () => {
+  it('draws a waiting call again every second while it is under a minute old, then every minute', async () => {
+    prefs.lang = 'en';
+    vi.useFakeTimers();
+    const { group } = makeGroup();
+    const waiting = row<CallMsg>('row-msg-call-waiting');
+    vi.setSystemTime(waiting.ts + 58_000);
+    const seen: string[] = [];
+    const stop = watch(() => void seen.push(callView(group, waiting).timing));
+    flushSync();
+    vi.advanceTimersByTime(1_000);
+    flushSync();
+    expect(seen).toEqual(['Waiting for reply · 58 s', 'Waiting for reply · 59 s']);
+    expect(vi.getTimerCount()).toBe(2);
+
+    vi.advanceTimersByTime(1_000);
+    flushSync();
+    await Promise.resolve();
+    expect(seen.at(-1)).toBe('Waiting for reply · 1 min');
+    // Only the minute clock is left.
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(57_999);
+    flushSync();
+    expect(seen).toHaveLength(3);
+    vi.advanceTimersByTime(1);
+    flushSync();
+    expect(seen.at(-1)).toBe('Waiting for reply · 1 min');
+
+    stop();
+    await Promise.resolve();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('starts no clock for an answered call', () => {
+    vi.useFakeTimers();
+    const { group } = makeGroup();
+    const stop = watch(() => void callView(group, row<CallMsg>('row-msg-call-answered')));
+    flushSync();
+    expect(vi.getTimerCount()).toBe(0);
+    stop();
+  });
+
+  it('derives waiting and answered call views and missing or deleted rows', () => {
     prefs.lang = 'en';
     const { group, owner } = makeGroup();
-    const waiting = row<CallMsg>('row-msg-call-waiting', {
-      text: '@Claude Code @Codex check `path`',
-      mentions: [claudeId],
-    });
+    const waiting = row<CallMsg>('row-msg-call-waiting');
 
-    const wView = callView(group, waiting, waiting.ts + 15_000);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(waiting.ts + 15_000);
+    const wView = callView(group, waiting);
     expect(wView).toEqual({
       caller: 'Codex',
       callee: 'Claude Code',
       mode: 'Waits for answer',
       waiting: true,
-      timing: 'Waiting · 15 s',
+      timing: 'Waiting for reply · 15 s',
       depth: 'Depth 1',
-      segs: [
-        { kind: 'at', text: '@Claude Code', id: claudeId },
-        { kind: 'text', text: ' @Codex check ' },
-        { kind: 'code', text: 'path' },
-      ],
       reply: undefined,
     });
 
@@ -86,15 +121,16 @@ describe('call helpers', () => {
       by: 'departed-caller',
       body: { to: 'departed-callee', depth: 3, wait: false },
     };
-    const asyncView = callView(group, asyncWaiting, waiting.ts + 360_000);
+    vi.setSystemTime(waiting.ts + 360_000);
+    const asyncView = callView(group, asyncWaiting);
     expect(asyncView.caller).toBe('Former member');
     expect(asyncView.callee).toBe('Former member');
     expect(asyncView.mode).toBe('Gets a receipt');
-    expect(asyncView.timing).toBe('Waiting · 6 min');
+    expect(asyncView.timing).toBe('Waiting for reply · 6 min');
     expect(asyncView.depth).toBe('Depth 3');
 
     const answered = row<CallMsg>('row-msg-call-answered');
-    expect(callView(group, answered, 0).reply).toBeUndefined();
+    expect(callView(group, answered).reply).toBeUndefined();
 
     group.apply([
       row('row-msg-reply', {
@@ -102,26 +138,22 @@ describe('call helpers', () => {
         mentions: [codexId],
       }),
     ]);
-    const aView = callView(group, answered, 0);
+    const aView = callView(group, answered);
     expect(aView.waiting).toBe(false);
-    expect(aView.timing).toBe('Took 500 ms');
+    expect(aView.timing).toBe('Took 0 s');
     expect(aView.reply).toEqual({
       by: claudeId,
       name: 'Claude Code',
       cli: 'claude',
-      segs: [
-        { kind: 'at', text: '@Codex', id: codexId },
-        { kind: 'text', text: ' use ' },
-        { kind: 'code', text: 'limited' },
-      ],
+      text: '@Codex use `limited`',
+      mentions: [codexId],
     });
 
     prefs.lang = 'zh-CN';
-    const zhAnswered = callView(
-      group,
-      { ...answered, state: { status: 'answered', reply: replyId, ms: 38_000 } },
-      0,
-    );
+    const zhAnswered = callView(group, {
+      ...answered,
+      state: { status: 'answered', reply: replyId, ms: 38_000 },
+    });
     expect([zhAnswered.mode, zhAnswered.timing, zhAnswered.depth].join(' · ')).toBe(
       '当场等结果 · 用时 38 秒 · 调用第 1 层',
     );
@@ -132,17 +164,16 @@ describe('call helpers', () => {
       row('row-msg-reply', { id: 'rep-gone-member', seq: 902, by: 'left-ai', text: 'Done' }),
       { r: 'msg', id: replyId, seq: 950, gone: true },
     ]);
-    expect(callView(group, answered, 0).reply).toBeUndefined();
+    expect(callView(group, answered).reply).toBeUndefined();
     expect(
-      callView(group, { ...answered, state: { status: 'answered', reply: 'rep-human', ms: 10 } }, 0)
+      callView(group, { ...answered, state: { status: 'answered', reply: 'rep-human', ms: 10 } })
         .reply,
     ).toMatchObject({ by: owner.id, name: owner.name, cli: undefined });
     expect(
-      callView(
-        group,
-        { ...answered, state: { status: 'answered', reply: 'rep-gone-member', ms: 10 } },
-        0,
-      ).reply,
+      callView(group, {
+        ...answered,
+        state: { status: 'answered', reply: 'rep-gone-member', ms: 10 },
+      }).reply,
     ).toMatchObject({ by: 'left-ai', name: 'Former member', cli: undefined });
   });
 

@@ -1,29 +1,21 @@
 <script lang="ts">
   import { callView } from '../../lib/call';
-  import type { Part } from '../../lib/compose';
   import type { CardProps } from '../../lib/mounts.svelte';
-  import { now } from '../../lib/when';
   import Avatar from '../Avatar.svelte';
+  import Icon from '../Icon.svelte';
+  import Rich from '../Rich.svelte';
 
   /** An AI-to-AI call block with route, question, waiting or elapsed time, and inline reply. */
   let { group, msg }: CardProps<'call'> = $props();
 
-  const view = $derived(callView(group, msg, msg.state.status === 'waiting' ? now() : 0));
+  const view = $derived(callView(group, msg));
 </script>
-
-{#snippet richText(segs: Part[])}
-  {#each segs as part, i (i)}
-    {#if part.kind === 'code'}<code>{part.text}</code>{:else if part.kind === 'at'}<span class="at">
-        {part.text}
-      </span>{:else}{part.text}{/if}
-  {/each}
-{/snippet}
 
 <div class="call">
   <p class="call-route">
-    <span>{view.caller}</span><svg class="i sm" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M5 12h13M13 6l6 6-6 6" />
-    </svg><span class="sr">→</span><span>{view.callee}</span><span class="muted">
+    <span>{view.caller}</span><Icon name="arrow" sm /><span class="sr">→</span><span>
+      {view.callee}
+    </span><span class="muted">
       {view.mode} ·
       {#if view.waiting}
         <span class="st" data-st="waiting"><i></i>{view.timing}</span>
@@ -34,15 +26,19 @@
     </span>
   </p>
 
-  {#if view.segs.length}
-    <p class="text">{@render richText(view.segs)}</p>
+  {#if msg.text}
+    <p class="text"><Rich {group} text={msg.text} mentions={msg.mentions} /></p>
   {/if}
 
   {#if view.reply}
     <div class="reply">
       <Avatar id={view.reply.by} name={view.reply.name} cli={view.reply.cli} size="sm" />
       <p class="text">
-        <b>{view.reply.name}</b>{' '}{@render richText(view.reply.segs)}
+        <b>{view.reply.name}</b>{' '}<Rich
+          {group}
+          text={view.reply.text}
+          mentions={view.reply.mentions}
+        />
       </p>
     </div>
   {/if}
@@ -81,11 +77,6 @@
   .text {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-  }
-  code {
-    padding: 1px 5px;
-    border-radius: var(--r-sm);
-    background: var(--surface-2);
   }
   .reply {
     display: grid;

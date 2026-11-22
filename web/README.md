@@ -426,7 +426,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
     when a chat opens.
   - "Today" and "yesterday" are read from `now()` of `when.ts`, one clock that moves once a
     minute while something drawn reads it.
-  - A text shows its code spans and the mentions of the members its row names. The composer
+  - A text shows its code spans and the mentions of the members its row names, drawn by the
+    shared `Rich.svelte` in the main line, the thread and the call block. The composer
     completes a mention from the members as it is typed (arrow keys, Enter or Tab, Escape),
     sends with Enter where the person has a keyboard and with the button on a touch screen, and
     never on a key that an input method is composing with. What is typed while a message is on
@@ -442,8 +443,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
     with the dawn edge when it waits for the reader, and a row the home wrote is a quiet line;
     the cards the areas mount replace both. An AI-to-AI `call` (`src/components/call/`) draws its
     route, wait mode, depth, question and either its `waiting` indicator with elapsed time since
-    `ts` or its `answered` duration with the `reply` folded inside, hiding the standalone `reply`
-    row when both are in the same list.
+    `ts`, counted every second while it is under a minute and every minute after, or its
+    `answered` duration with the `reply` folded inside, hiding the standalone `reply` row when
+    both are in the same list.
   - The member panel (`src/components/member/`) mounts at `chat.side` (`order: 10`). It lists the
     group's AI members, placing the secretary first with its corner mark, with each AI's state
     (`working`, `waiting` on the reader in dawn or on another member, `dormant` as sleeping,
@@ -512,7 +514,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/Pending.svelte`          | a page of the route table whose component is not built yet                        |
 | `src/routes/`                 | one component per page; `Groups.svelte` is the list and a chat                    |
 | `src/routes/dev/`             | `States.svelte`: the message examples, for a development server                   |
-| `src/components/`             | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount`                   |
+| `src/components/`             | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount`, `Rich` (a text)  |
 | `src/components/groups/`      | the group list, the cards that wait, the create-group dialog                      |
 | `src/components/chat/`        | the chat of a group: main line, message, composer                                 |
 | `src/components/task/`        | `TaskCard.svelte`, mounted for kind `task`                                        |

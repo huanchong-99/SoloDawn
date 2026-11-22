@@ -1,8 +1,9 @@
 // Pure display derivations for AI-to-AI call blocks (contracts/messages.md 2.6, 3.4; flows/ask.md).
-import { parts, type Part } from './compose';
-import type { Group, Member } from './groups.svelte';
+import { createSubscriber } from 'svelte/reactivity';
+import type { Group } from './groups.svelte';
 import { t } from './prefs.svelte';
 import type { MsgRow } from './proto';
+import { now } from './when';
 
 export type CallMsg = Extract<MsgRow, { kind: 'call' }>;
 
@@ -10,7 +11,8 @@ export interface ReplyView {
   by: string;
   name: string;
   cli: string | undefined;
-  segs: Part[];
+  text: string;
+  mentions: string[];
 }
 
 export interface CallView {
@@ -20,74 +22,71 @@ export interface CallView {
   waiting: boolean;
   timing: string;
   depth: string;
-  segs: Part[];
   reply: ReplyView | undefined;
 }
 
-function formatSpan(ms: number): string {
-  if (ms < 60_000) return t('call.time.s').replace('{n}', String(Math.floor(ms / 1_000)));
-  if (ms < 3_600_000) return t('call.time.m').replace('{n}', String(Math.floor(ms / 60_000)));
-  if (ms < 86_400_000) return t('call.time.h').replace('{n}', String(Math.floor(ms / 3_600_000)));
-  return t('call.time.d').replace('{n}', String(Math.floor(ms / 86_400_000)));
-}
+/** Once a second, while anything that is drawn waits on a call made less than a minute ago. */
+const everySecond = createSubscriber((update) => {
+  const timer = setInterval(update, 1_000);
+  return () => clearInterval(timer);
+});
 
-/** Words an elapsed millisecond span; sub-second values stay in `ms` when `subSecond` is true. */
-export function formatElapsed(ms: number, subSecond = false): string {
+/** Words an elapsed millisecond span in whole seconds, minutes, hours or days. */
+export function formatElapsed(ms: number): string {
   const safe = Math.max(0, ms);
-  if (subSecond && safe < 1_000) return t('call.time.ms').replace('{n}', String(safe));
-  return formatSpan(safe);
+  if (safe < 60_000) return t('call.time.s').replace('{n}', String(Math.floor(safe / 1_000)));
+  if (safe < 3_600_000) return t('call.time.m').replace('{n}', String(Math.floor(safe / 60_000)));
+  if (safe < 86_400_000)
+    return t('call.time.h').replace('{n}', String(Math.floor(safe / 3_600_000)));
+  return t('call.time.d').replace('{n}', String(Math.floor(safe / 86_400_000)));
 }
 
-function textSegments(group: Group, text: string, mentions: string[]): Part[] {
-  return parts(
-    text,
-    group.members.filter((member) => mentions.includes(member.id)),
-  );
+/** How long a call has waited. Under a minute it is counted in seconds, so it is drawn again
+ *  every second; after that `now` draws it again every minute. */
+function waited(msg: CallMsg): number {
+  const age = now() - msg.ts;
+  if (age < 60_000) everySecond();
+  return age;
 }
 
-function memberView(group: Group, id: string): { member: Member | undefined; name: string } {
-  const member = group.member(id);
-  return { member, name: member?.name ?? t('chat.gone') };
-}
-
-function findReply(group: Group, id: string): MsgRow | undefined {
-  const row = group.rows.get(`msg ${id}`);
-  return row && !('gone' in row) ? (row as MsgRow) : undefined;
+function nameOf(group: Group, id: string): string {
+  return group.member(id)?.name ?? t('chat.gone');
 }
 
 function buildReply(group: Group, replyId: string): ReplyView | undefined {
-  const row = findReply(group, replyId);
-  if (!row) return undefined;
-  const { member, name } = memberView(group, row.by);
+  const row = group.rows.get(`msg ${replyId}`);
+  if (!row || 'gone' in row) return undefined;
+  const reply = row as MsgRow;
+  const member = group.member(reply.by);
   return {
-    by: row.by,
-    name,
+    by: reply.by,
+    name: nameOf(group, reply.by),
     cli: member?.kind === 'ai' ? member.cli : undefined,
-    segs: textSegments(group, row.text, row.mentions),
+    text: reply.text,
+    mentions: reply.mentions,
   };
 }
 
-/** Derives all display fields of a `call` message at `nowMs` from cached group rows. */
-export function callView(group: Group, msg: CallMsg, nowMs: number): CallView {
+/** Derives all display fields of a `call` message from cached group rows. */
+export function callView(group: Group, msg: CallMsg): CallView {
   const base = {
-    caller: memberView(group, msg.by).name,
-    callee: memberView(group, msg.body.to).name,
+    caller: nameOf(group, msg.by),
+    callee: nameOf(group, msg.body.to),
     mode: t(msg.body.wait ? 'call.mode.wait' : 'call.mode.async'),
     depth: t('call.depth').replace('{n}', String(msg.body.depth)),
-    segs: textSegments(group, msg.text, msg.mentions),
   };
   if (msg.state.status === 'waiting') {
     return {
       ...base,
       waiting: true,
-      timing: t('call.waiting').replace('{time}', formatElapsed(nowMs - msg.ts)),
+      timing: t('call.waiting').replace('{time}', formatElapsed(waited(msg))),
       reply: undefined,
     };
   }
   return {
     ...base,
     waiting: false,
-    timing: t('call.took').replace('{time}', formatElapsed(msg.state.ms, true)),
+    timing: t('call.took').replace('{time}', formatElapsed(msg.state.ms)),
     reply: buildReply(group, msg.state.reply),
   };
 }

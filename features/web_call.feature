@@ -12,8 +12,10 @@ Feature: AI-to-AI call block
     Given "Claude Code" calls "Codex" in task 12 waiting on the spot at depth 1 made 12 seconds ago
     When the thread of task 12 is mounted
     Then the call row has the sky "Call" badge and shows "Claude Code → Codex"
-    And the call block shows "Waits for answer", waiting status "Waiting · 12 s", "Depth 1" and no reply
+    And the call block shows "Waits for answer", waiting status "Waiting for reply · 12 s", "Depth 1" and no reply
     And the call question appears once inside the call block with mention "@Codex" and code "path"
+    When 5 seconds pass
+    Then the call block counts up to "Waiting for reply · 17 s"
     When "Codex" replies to the call after 38 seconds
     Then the call block shows "Took 38 s" and folds the reply of "Codex" with code "limited" inside it
     And the thread has one item and no separate reply row
@@ -22,9 +24,9 @@ Feature: AI-to-AI call block
   Scenario: An unanswered receipt-first call stays waiting with live elapsed time, and main-line calls fold replies
     Given an unanswered receipt-first call at depth 2 in the main line made 6 minutes ago
     When the reader opens the main line of "Website"
-    Then the main-line call shows "Gets a receipt", waiting status "Waiting · 6 min", "Depth 2" and no dawn highlight
-    When 3 minutes pass and a second main-line call is answered in 500 milliseconds
-    Then the unanswered call shows "Waiting · 9 min" and the answered main-line call folds its reply with "Took 500 ms"
+    Then the main-line call shows "Gets a receipt", waiting status "Waiting for reply · 6 min", "Depth 2" and no dawn highlight
+    When 3 minutes pass and a second main-line call is answered in 2 seconds
+    Then the unanswered call shows "Waiting for reply · 9 min" and the answered main-line call folds its reply with "Took 2 s"
 
   Scenario: The states sheet mounts call under the call area and renders both call wire examples
     When the reader opens "#/states" in a development server

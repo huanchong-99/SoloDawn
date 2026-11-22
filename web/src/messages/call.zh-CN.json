@@ -4,7 +4,6 @@
   "call.waiting": "等待回复 · {time}",
   "call.took": "用时 {time}",
   "call.depth": "调用第 {n} 层",
-  "call.time.ms": "{n} ms",
   "call.time.s": "{n} 秒",
   "call.time.m": "{n} 分钟",
   "call.time.h": "{n} 小时",

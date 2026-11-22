@@ -7,7 +7,7 @@ import { cards } from '../src/lib/mounts.svelte';
 import { prefs } from '../src/lib/prefs.svelte';
 import type * as p from '../src/lib/proto';
 import { browser, example, TestHome } from './home';
-import { all, closePage, one, openPage, show, texts } from './page';
+import { all, closePage, one, openPage, show, text, texts } from './page';
 
 const feature = await loadFeature('../features/web_call.feature');
 
@@ -109,18 +109,15 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         const badge = one('.ti-head .badge');
         expect(badge.textContent).toBe('Call');
         expect(badge.dataset.tone).toBe('sky');
-        expect(one('.call-route').textContent!.replace(/\s+/g, ' ').trim()).toContain(
-          'Claude Code→Codex',
-        );
+        expect(text('.call-route')).toContain('Claude Code→Codex');
       });
       And(
-        'the call block shows "Waits for answer", waiting status "Waiting · 12 s", "Depth 1" and no reply',
+        'the call block shows "Waits for answer", waiting status "Waiting for reply · 12 s", "Depth 1" and no reply',
         () => {
-          const meta = one('.call-route .muted');
-          expect(meta.textContent!.replace(/\s+/g, ' ').trim()).toBe(
-            'Waits for answer · Waiting · 12 s · Depth 1',
+          expect(text('.call-route .muted')).toBe(
+            'Waits for answer · Waiting for reply · 12 s · Depth 1',
           );
-          expect(meta.querySelector('.st')?.getAttribute('data-st')).toBe('waiting');
+          expect(one('.call-route .muted .st').dataset.st).toBe('waiting');
           expect(all('.call .reply')).toEqual([]);
         },
       );
@@ -133,6 +130,15 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(texts('.call > .text code')).toEqual(['path']);
         },
       );
+      When('5 seconds pass', () => {
+        vi.advanceTimersByTime(5_000);
+        flushSync();
+      });
+      Then('the call block counts up to "Waiting for reply · 17 s"', () => {
+        expect(text('.call-route .muted')).toBe(
+          'Waits for answer · Waiting for reply · 17 s · Depth 1',
+        );
+      });
       When('"Codex" replies to the call after 38 seconds', () => {
         home.write(
           website,
@@ -163,9 +169,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then(
         'the call block shows "Took 38 s" and folds the reply of "Codex" with code "limited" inside it',
         () => {
-          expect(one('.call-route .muted').textContent!.replace(/\s+/g, ' ').trim()).toBe(
-            'Waits for answer · Took 38 s · Depth 1',
-          );
+          expect(text('.call-route .muted')).toBe('Waits for answer · Took 38 s · Depth 1');
           expect(all('.call .st')).toEqual([]);
           expect(all('.call .reply .av.ai')).toHaveLength(1);
           expect(texts('.call .reply b')).toEqual(['Codex']);
@@ -182,9 +186,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         () => {
           prefs.lang = 'zh-CN';
           flushSync();
-          expect(one('.call-route .muted').textContent!.replace(/\s+/g, ' ').trim()).toBe(
-            '当场等结果 · 用时 38 秒 · 调用第 1 层',
-          );
+          expect(text('.call-route .muted')).toBe('当场等结果 · 用时 38 秒 · 调用第 1 层');
           prefs.lang = 'en';
           flushSync();
         },
@@ -216,16 +218,15 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         openPage(`#/groups/${website}`);
       });
       Then(
-        'the main-line call shows "Gets a receipt", waiting status "Waiting · 6 min", "Depth 2" and no dawn highlight',
+        'the main-line call shows "Gets a receipt", waiting status "Waiting for reply · 6 min", "Depth 2" and no dawn highlight',
         () => {
-          const card = one('#m-main-wait .call');
-          expect(
-            card.querySelector('.call-route .muted')!.textContent!.replace(/\s+/g, ' ').trim(),
-          ).toBe('Gets a receipt · Waiting · 6 min · Depth 2');
+          expect(text('#m-main-wait .call .call-route .muted')).toBe(
+            'Gets a receipt · Waiting for reply · 6 min · Depth 2',
+          );
           expect(all('#m-main-wait .need, #m-main-wait [data-tone="dawn"]')).toEqual([]);
         },
       );
-      When('3 minutes pass and a second main-line call is answered in 500 milliseconds', () => {
+      When('3 minutes pass and a second main-line call is answered in 2 seconds', () => {
         baseNow += 3 * 60_000;
         vi.advanceTimersByTime(3 * 60_000);
         home.write(
@@ -245,23 +246,23 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             id: 'main-ans',
             thread: null,
             by: codexId,
-            ts: baseNow - 500,
+            ts: baseNow - 2_000,
             text: 'Is the summary ready?',
             body: { to: claudeId, depth: 1, wait: true },
-            state: { status: 'answered', reply: 'main-reply', ms: 500 },
+            state: { status: 'answered', reply: 'main-reply', ms: 2_000 },
           }),
         );
         flushSync();
       });
       Then(
-        'the unanswered call shows "Waiting · 9 min" and the answered main-line call folds its reply with "Took 500 ms"',
+        'the unanswered call shows "Waiting for reply · 9 min" and the answered main-line call folds its reply with "Took 2 s"',
         () => {
-          expect(
-            one('#m-main-wait .call-route .muted').textContent!.replace(/\s+/g, ' ').trim(),
-          ).toBe('Gets a receipt · Waiting · 9 min · Depth 2');
-          expect(
-            one('#m-main-ans .call-route .muted').textContent!.replace(/\s+/g, ' ').trim(),
-          ).toBe('Waits for answer · Took 500 ms · Depth 1');
+          expect(text('#m-main-wait .call-route .muted')).toBe(
+            'Gets a receipt · Waiting for reply · 9 min · Depth 2',
+          );
+          expect(text('#m-main-ans .call-route .muted')).toBe(
+            'Waits for answer · Took 2 s · Depth 1',
+          );
           expect(texts('#m-main-ans .reply .text')).toEqual(['Claude Code Looks ready.']);
           expect(all('#m-main-reply')).toEqual([]);
         },
