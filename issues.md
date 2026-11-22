@@ -86,7 +86,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: a `call` message whose state is `denied` (`row-msg-call-denied`, frozen by P-4a) shows the waiting line and the waiting state in the call area.
 - Cause: `callView` treats every status other than `answered` as waiting (`web/src/lib/call.ts:78`). The states sheet therefore lists three call rows, and `web/features/call.spec.ts` expects them.
-- Status: open, accepted for P-4a. Resolved when U2-2 draws a denied call.
+- Status: resolved in U2-2. The call block shows “Denied” without a waiting timer or reply.
 
 ### 2026-11-22 · limitation · A9.21 lacks a same-connection network-switch driver
 

@@ -2,6 +2,7 @@
   "call.mode.wait": "Waits for answer",
   "call.mode.async": "Gets a receipt",
   "call.waiting": "Waiting for reply · {time}",
+  "call.denied": "Denied",
   "call.took": "Took {time}",
   "call.depth": "Depth {n}",
   "call.time.s": "{n} s",
