@@ -219,14 +219,20 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the dial of `sock` and its removal were not one step (`internal/node/socket.go`, before this fix).
 - Status: resolved. `local.md` section 3, "One node per data directory", now holds the rule: an exclusive lock on `lock` in the data directory, taken by `ListenLocal` (`internal/node/socket.go:38`, `lockData` at `:61`) before the socket is touched.
 
+### 2026-11-20 · limitation · Windows scheduled task expands `%VAR%` in the executable path
+
+- Symptom: when `solodawn.exe` is installed under a directory whose path contains a matching `%VAR%` pair, `Start-ScheduledTask` expands `%VAR%` in `IExecAction.Arguments` (`internal/node/service_windows.go:17`, `taskAction`) and fails to start the binary.
+- Cause: Windows Task Scheduler applies `ExpandEnvironmentStringsW` (which has no `%%` escape) to `IExecAction.Arguments`.
+- Status: open, off the main line.
+
 ### 2026-11-20 · limitation · The start-at-login entries are not run by a real service manager
 
-- Symptom: the tests check the files and the task definition that `solodawn service install` writes, not a service manager starting the node from them. Not verified:
+- Symptom: the unit and acceptance tests check the files and the task definition that `solodawn service install` writes, not a service manager starting the node from them:
   1. a systemd user unit started by a real user manager, with the escaping of `ExecStart` (`$$`, `%%`) and the `Environment="PATH=…"` line (`internal/node/service_linux.go`);
   2. launchd loading the agent with its `EnvironmentVariables` (`internal/node/service_darwin.go`);
-  3. the scheduled task running the node headless through `conhost.exe --headless` (`internal/node/service_windows.go`); Windows CI only builds the action.
+  3. the scheduled task running the node headless through `conhost.exe --headless` (`internal/node/service_windows.go`); Windows unit tests only build the action.
 - Cause: nothing is installed on the development machine, by the coordinator's decision of 2026-11-20.
-- Status: open. Candidate for a CI smoke job on GitHub's throwaway runners (Linux, macOS, Windows) after the quota reset: install, log in or start the manager, check that the node runs with the expected PATH, remove.
+- Status: open, covered in CI by `.github/workflows/service-smoke.yml` on `ubuntu-latest`, `macos-latest` and `windows-latest` against the assembled `solodawn` binary (N-4). Still unverified: a real interactive desktop login and machine reboot on each system (I-11).
 
 ### 2026-11-20 · limitation · `SHA256SUMS` proves the download intact, not where it came from
 
