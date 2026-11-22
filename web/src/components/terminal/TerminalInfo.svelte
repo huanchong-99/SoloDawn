@@ -14,9 +14,12 @@
     task: TaskRow | undefined;
     link: { st: 'ok' | 'limited' | 'linking' | 'down'; text: string };
   } = $props();
+
+  // The column scrolls when the window is short, so the keyboard must reach it.
+  const scrolls = (column: HTMLElement) => void (column.tabIndex = 0);
 </script>
 
-<aside class="info" aria-label={t('terminal.aria.info')}>
+<aside class="info" aria-label={t('terminal.aria.info')} use:scrolls>
   <section class="card">
     <header class="card-head">
       <span class="kind">{t('terminal.info.session')}</span>
@@ -69,6 +72,10 @@
     </p>
   </section>
 
+  <p class="note" id="term-leave">
+    <Icon name="info" sm />
+    <span>{t('terminal.note.keys')}</span>
+  </p>
   <p class="note">
     <Icon name="eye" sm />
     <span>{t('terminal.note.privacy')}</span>
