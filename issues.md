@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · Rendezvous has no explicit room leave
+
+- Symptom: cancelling an invitation stops browser handling, but the rendezvous socket remains in the room until expiry or disconnect. Retrying the same room on the same socket does not trigger a new `joined` from a home already in the room.
+- Cause: `internal/rendezvous/room.go` has no leave frame. It ignores duplicate joins by the same socket and caps membership at 16 rooms per connection.
+- Status: open; the browser must keep the socket alive for existing homes.
+
 ### 2026-11-22 · limitation · Browser invitation joining needs the node and home implementations
 
 - Symptom: a current node does not admit a browser through an invitation; it knows only protocol version 1.
@@ -559,6 +565,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-22 · bug · Starting an invitation join replaced the browser's rendezvous connection
+
+- Symptom: the browser's normal connection and its invitation join would replace each other at rendezvous, dropping room membership.
+- Cause: `web/src/lib/join.ts` opened a second socket with the same device identity. `internal/rendezvous/server.go` keeps one socket per identity and removes the replaced socket from every room.
+- Status: resolved in W2-1 (#307); joining uses the active socket and resubscribes the room if that socket reconnects.
 
 ### 2026-11-22 · bug · HM-13 and HM-15 home tests disagreed on rounds after both landed
 

@@ -3,7 +3,7 @@ import type { DeviceLog } from './devlog';
 import { newId, type Home, type Link } from './groups.svelte';
 import { isDevice, utf8, type Device } from './identity';
 import { mac, parseSecret, room, verifyPair } from './pairing';
-import { connect, type Heard, type Path, type Session } from './peer';
+import type { Heard, Listener, Path, Peer, Session } from './peer';
 import {
   Id,
   type Ctl,
@@ -56,6 +56,8 @@ interface JoinOptions {
   log: DeviceLog;
   browserName: string;
   url: string;
+  session: Pick<Session, 'watchRoom' | 'send'>;
+  dial(listen: () => Listener, onpath: (path: Path | undefined) => void): JoinPeer;
   signal: AbortSignal;
   remember(name: string): Promise<void>;
   link(): Link;
@@ -63,7 +65,9 @@ interface JoinOptions {
   onpath(path: Path | undefined): void;
 }
 
-export function presentLog(ctl: Pick<Ctl, 'send'>, log: DeviceLog) {
+type JoinPeer = Pick<Peer, 'close' | 'send'>;
+
+export function presentLog(ctl: { send?(frame: Devlog): void }, log: DeviceLog) {
   const frame: Devlog = { t: 'devlog', user: log.user, entries: [] };
   for (const entry of log.entries) {
     frame.entries.push(entry);
@@ -121,30 +125,25 @@ function joinRoom(
   options: JoinOptions,
   id: string,
   self: Pair,
-  dial: (session: Session) => void,
+  dial: () => void,
 ) {
-  const { device, browserName, url } = options;
+  const { session, url } = options;
   let offered = false;
   const receivePair = async (data: Pair) => {
     if (!(await invitationPair(invitation, data)) || offered) return;
     offered = true;
-    dial(session);
+    dial();
   };
-  const heard = (_url: string, frame: Heard) => {
-    if (offered) return;
-    if (frame.t === 'ready') return session.send(url, { t: 'join', room: id });
+  const stop = session.watchRoom(url, id, (path, frame) => {
+    if (offered || path !== url) return;
     if (!inRoom(frame, id)) return;
     if (frame.t === 'room') void receivePair(frame.data);
     else session.send(url, { t: 'room', room: id, data: self });
-  };
-  const session = connect({
-    urls: [url],
-    device,
-    known: (key) => key === invitation.home,
-    name: browserName,
-    heard: (path, frame) => void heard(path, frame),
   });
-  return { session, stop: () => (offered = true) };
+  return () => {
+    offered = true;
+    stop();
+  };
 }
 
 function inRoom(frame: Heard, id: string): frame is Extract<Heard, { t: 'joined' | 'room' }> {
@@ -165,45 +164,45 @@ function open(invitation: Invitation, options: JoinOptions, id: string, pair: Pa
   void listed.promise.catch(() => {});
   let step: JoinError['step'] = 'room';
   let start: Link | undefined;
+  let peer: JoinPeer | undefined;
   const failed = (code: string) => {
     const error = new JoinError(step, code);
     ready.reject(error);
     listed.reject(error);
   };
-  const { session, stop } = joinRoom(invitation, options, id, pair, (hub) => {
+  const stop = joinRoom(invitation, options, id, pair, () => {
     step = 'hello';
-    hub.peer(
-      invitation.home,
-      () => {
-        const link = start && options.link();
-        return {
-          online: (ctl, welcome) => {
-            if (!link) return ready.resolve({ ctl, welcome });
-            presentLog(ctl, options.log);
-            link.online(ctl, welcome);
-          },
-          offline: () => {
-            const served = link ?? start;
-            if (served) served.offline();
-            else failed('lost');
-          },
-          refused: failed,
-          push: (frame) => {
-            if (start) return (link ?? start).push(frame);
-            if (frame.t === 'groups' && frame.groups.some((group) => group.g === invitation.g)) {
-              listed.resolve(frame);
-            }
-          },
-        };
-      },
-      options.onpath,
-    );
+    peer = options.dial(() => {
+      const link = start && options.link();
+      return {
+        online: (ctl, welcome) => {
+          if (!link) return ready.resolve({ ctl, welcome });
+          presentLog(ctl, options.log);
+          link.online(ctl, welcome);
+        },
+        offline: () => {
+          const served = link ?? start;
+          if (served) served.offline();
+          else failed('lost');
+        },
+        refused: failed,
+        push: (frame) => {
+          if (start) return (link ?? start).push(frame);
+          if (frame.t === 'groups' && frame.groups.some((group) => group.g === invitation.g)) {
+            listed.resolve(frame);
+          }
+        },
+      };
+    }, options.onpath);
   });
   return {
-    session,
+    stop,
+    get peer() {
+      return peer!;
+    },
     close() {
-      stop();
-      session.close();
+      peer?.close();
+      peer = undefined;
     },
     ready: ready.promise,
     listed: listed.promise,
@@ -228,6 +227,7 @@ export async function joinGroup(invitation: Invitation, name: string, options: J
   const connection = open(invitation, options, id, pair);
   const stop = abortPending(signal, (code) => {
     connection.failed(code);
+    connection.stop();
     connection.close();
   });
   try {
@@ -249,11 +249,12 @@ export async function joinGroup(invitation: Invitation, name: string, options: J
     checkCancel(signal, 'home.add');
     const notices = notify(nodes, envelopes);
     connection.serve(ctl, welcome, groups);
-    return { session: connection.session, notices };
+    return { peer: connection.peer, notices };
   } catch (error) {
     connection.close();
     throw connection.error(error);
   } finally {
+    connection.stop();
     stop();
   }
 }

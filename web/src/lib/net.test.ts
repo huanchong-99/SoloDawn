@@ -62,7 +62,7 @@ const { clients, FakeClient } = vi.hoisted(() => {
     offersFor(target: string) {
       return this.sent
         .filter((f) => f.t === 'to' && f.k === target)
-        .map((f) => JSON.parse((f.env as p.Envelope).p) as { t: string; conn: string })
+        .map((f) => JSON.parse((f.env as p.Envelope).p) as { t: string; conn: string; sdp: string })
         .filter((payload) => payload.t === 'offer');
     }
   }
@@ -184,21 +184,27 @@ async function answerNode(
   client: FakeClient,
   node: Device,
   browserId: string,
-  pcIndex: number,
+  pcIndex: number | undefined,
   stats = transportStats('host', 'host', 0.008),
 ) {
   client.receive(client.url, { t: 'presence', k: node.id, on: true });
   await vi.waitFor(() => expect(client.offersFor(node.id).length).toBeGreaterThan(0), {
     timeout: 3000,
   });
-  const { conn } = client.offersFor(node.id).at(-1)!;
-  const pc = FakePC.made[pcIndex];
+  const { conn, sdp } = client.offersFor(node.id).at(-1)!;
+  const pc = FakePC.made.find(({ local }) => local?.sdp === sdp)!;
+  if (pcIndex !== undefined) expect(pc).toBe(FakePC.made[pcIndex]);
   pc.stats = stats;
   const env = await node.sign(
     JSON.stringify({ t: 'answer', n: makeId(), ts: Date.now(), to: browserId, conn, sdp: 'ans' }),
   );
   if (client.known(node.id)) client.receive(client.url, { t: 'from', k: node.id, env });
-  await vi.waitFor(() => expect(pc.remote).toBeDefined());
+  await vi.waitFor(() =>
+    expect(pc.remote, `answer to connection ${conn} for ${sdp} (closed: ${pc.closes})`).toEqual({
+      type: 'answer',
+      sdp: 'ans',
+    }),
+  );
   pc.ctl.open();
   await vi.waitFor(() => expect(pc.ctl.frames().some((f) => f.t === 'hello')).toBe(true));
   return pc;
@@ -267,11 +273,17 @@ it('joins an invitation without adopting the home and reconnects to it after rel
   expect(clients).toHaveLength(1);
 
   const joined = client.net.join!(invitation, 'Joiner', new AbortController().signal);
-  await vi.waitFor(() => expect(clients).toHaveLength(2));
-  const rv = clients[1];
-  rv.ready();
+  const rv = clients[0];
   const id = await room(crypto, secret);
-  expect(rv.sent).toContainEqual({ t: 'join', room: id });
+  const enter = { t: 'join', room: id };
+  await vi.waitFor(() => expect(rv.sent).toContainEqual(enter));
+  expect(clients).toEqual([rv]);
+  expect(rv.closed).toBe(false);
+  expect(rv.known(home.id)).toBe(true);
+  expect(rv.known(offline.id)).toBe(true);
+  await expect(
+    client.net.join!(invitation, 'Another joiner', new AbortController().signal),
+  ).rejects.toMatchObject({ step: 'room', code: 'conflict' });
   rv.receive(rv.url, { t: 'joined', room: id });
   const self = { role: 'b', k: browser.id, kind: 'browser', name: 'Browser' };
   expect(rv.sent).toContainEqual({
@@ -365,13 +377,37 @@ it('joins an invitation without adopting the home and reconnects to it after rel
   reconnected.ctl.deliver({ t: 'groups', groups: [] });
   expect(sharedHome.groups).toEqual([]);
   await vi.waitFor(() => expect(client.net.path(sharedHome)).toMatchObject({ kind: 'direct' }));
+
+  const refused = client.net.join!(invitation, 'Joiner', new AbortController().signal);
+  const refusal = expect(refused).rejects.toMatchObject({ step: 'hello', code: 'version' });
+  const joins = () => rv.sent.filter((frame) => frame.t === 'join');
+  await vi.waitFor(() => expect(joins()).toEqual([enter, enter]));
+  const pairing = {
+    t: 'room',
+    room: id,
+    data: { t: 'pair', ...remote, mac: await mac(crypto, secret, remote) },
+  };
+  rv.receive(rv.url, pairing);
+  await vi.waitFor(() => expect(rv.offersFor(home.id)).toHaveLength(3));
+  const wrongVersion = await answerNode(rv, home, browser.id, undefined);
+  wrongVersion.ctl.deliver({ ...welcomeFrame(1, home.id, 'Foreign home'), owner: false });
+  await refusal;
+  expect(rv.closed).toBe(false);
+  await vi.waitFor(() => expect(rv.offersFor(home.id)).toHaveLength(4));
+  const restored = await answerNode(rv, home, browser.id, undefined);
+  restored.ctl.deliver({ ...welcomeFrame(1, home.id, 'Foreign home', groups), owner: false, v: 2 });
+  await vi.waitFor(() => expect(sharedHome.groups.map(({ g }) => g)).toEqual([websiteId]));
+
   const pending = client.net.join!(invitation, 'Joiner', new AbortController().signal);
-  const cancelled = expect(pending).rejects.toMatchObject({ step: 'room', code: 'cancelled' });
-  await vi.waitFor(() => expect(clients).toHaveLength(3));
+  const cancelled = expect(pending).rejects.toMatchObject({ step: 'hello', code: 'cancelled' });
+  await vi.waitFor(() => expect(joins()).toEqual([enter, enter, enter]));
+  rv.receive(rv.url, pairing);
+  await vi.waitFor(() => expect(rv.offersFor(home.id)).toHaveLength(5));
+  await answerNode(rv, home, browser.id, undefined);
+  expect(clients).toEqual([rv]);
   location.hash = '#/onboarding';
   dispatchEvent(new HashChangeEvent('hashchange', { newURL: location.href }));
   await cancelled;
-  expect(clients[2].closed).toBe(true);
   expect(rv.closed).toBe(true);
   client.stop();
   await expect(
@@ -390,9 +426,9 @@ it('joins an invitation without adopting the home and reconnects to it after rel
   expect(close).not.toHaveBeenCalled();
   expect(homes[0].owner).toBe(true);
   expect(homes[2].owner).toBe(false);
-  expect(clients[3].known(home.id)).toBe(true);
-  expect(clients[3].known(anotherBrowser.id)).toBe(false);
-  expect(clients.slice(3).map((client) => client.url)).toContain('wss://saved.example/rv');
+  expect(clients[1].known(home.id)).toBe(true);
+  expect(clients[1].known(anotherBrowser.id)).toBe(false);
+  expect(clients.slice(1).map((client) => client.url)).toContain('wss://saved.example/rv');
 });
 
 describe('sourceOf', () => {

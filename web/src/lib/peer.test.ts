@@ -95,6 +95,43 @@ async function wait(ms: number) {
 }
 
 let session: Session;
+
+it('joins a room on its existing path and only rejoins it while watched', async () => {
+  session = connect({ urls: [rv, lan], device, known, name: 'Browser' });
+  const [remote, local] = clients;
+  const heard = vi.fn();
+  const enter = { t: 'join', room: 'invite-room' };
+  const stop = session.watchRoom(rv, enter.room, heard);
+  expect(clients).toEqual([remote, local]);
+  expect(remote.sent.at(-1)).toEqual(enter);
+  expect(local.sent.map(({ t }) => t)).toEqual(['watch']);
+  local.hear({ t: 'closed' });
+  dispatchEvent(new Event('online'));
+  await vi.waitFor(() => expect(clients).toHaveLength(3));
+  expect(clients[2].sent.map(({ t }) => t)).toEqual(['watch']);
+
+  remote.hear({ t: 'closed' });
+  dispatchEvent(new Event('online'));
+  await vi.waitFor(() => expect(clients).toHaveLength(4));
+  const reopened = clients[3];
+  expect(reopened.url).toBe(rv);
+  expect(reopened.sent.at(-1)).toEqual(enter);
+  const joined = { t: 'joined', room: enter.room };
+  reopened.hear(joined);
+  expect(heard).toHaveBeenLastCalledWith(rv, joined);
+
+  stop();
+  reopened.hear({ t: 'closed' });
+  dispatchEvent(new Event('online'));
+  await vi.waitFor(() => expect(clients).toHaveLength(5));
+  expect(clients[4].sent.map(({ t }) => t)).toEqual(['watch']);
+  clients[4].hear(joined);
+  expect(heard.mock.calls).toEqual([
+    [lan, { t: 'closed' }],
+    [rv, { t: 'closed' }],
+    [rv, joined],
+  ]);
+});
 function start(urls = [rv], more: Partial<Options> = {}) {
   session = connect({ urls, device, known, name: 'phone browser', ...more });
   return session;

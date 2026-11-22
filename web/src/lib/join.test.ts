@@ -4,10 +4,8 @@ import type { Home } from './groups.svelte';
 import { encode, type Device } from './identity';
 import { joinGroup, presentLog, readInvitation } from './join';
 import { mac, parseSecret, room } from './pairing';
-import { connect, type Listener, type Options, type Session } from './peer';
+import type { Listener, Session } from './peer';
 import type { Ctl, Devlog, Envelope, Welcome } from './proto';
-
-vi.mock('./peer', () => ({ connect: vi.fn() }));
 
 const g = encode(new Uint8Array(16));
 const home = encode(new Uint8Array(32).fill(2));
@@ -79,15 +77,18 @@ const welcome: Welcome = {
 };
 
 function attempt(valid = true, signal = new AbortController().signal, nodes: Home[] = []) {
-  vi.mocked(connect).mockReset();
-  const options = Promise.withResolvers<Options>();
+  const options = Promise.withResolvers<{ heard: Parameters<Session['watchRoom']>[2] }>();
   const listen = Promise.withResolvers<Listener>();
   const close = vi.fn();
   const send = vi.fn();
-  const peer = vi.fn((_: string, fn: () => Listener) => listen.resolve(fn()));
-  vi.mocked(connect).mockImplementation((opts) => {
-    options.resolve(opts);
-    return { peer, send, close } as unknown as Session;
+  const peer = vi.fn((fn: () => Listener) => {
+    listen.resolve(fn());
+    return { close, send };
+  });
+  const stop = vi.fn();
+  const watchRoom = vi.fn((_: string, _id: string, heard: Parameters<Session['watchRoom']>[2]) => {
+    options.resolve({ heard });
+    return stop;
   });
   const remember = vi.fn(async (_name: string) => {});
   const link = { online: vi.fn(), push: vi.fn(), offline: vi.fn() };
@@ -104,6 +105,8 @@ function attempt(valid = true, signal = new AbortController().signal, nodes: Hom
       entries: [{ p: 'entry', k: browser, s: 's' }],
     } as unknown as DeviceLog,
     url,
+    session: { send, watchRoom },
+    dial: peer,
     signal,
     browserName: 'Web',
     remember,
@@ -131,6 +134,8 @@ function attempt(valid = true, signal = new AbortController().signal, nodes: Hom
     peer,
     send,
     close,
+    stop,
+    watchRoom,
     request,
     push,
     remember,
@@ -140,19 +145,21 @@ function attempt(valid = true, signal = new AbortController().signal, nodes: Hom
 }
 
 it('does not contact rendezvous before onboarding', async () => {
-  await expect(attempt(false).result).rejects.toMatchObject({
+  const run = attempt(false);
+  await expect(run.result).rejects.toMatchObject({
     step: 'onboarding',
     code: 'unpaired',
   });
-  expect(connect).not.toHaveBeenCalled();
+  expect(run.watchRoom).not.toHaveBeenCalled();
 });
 
 it('does not contact rendezvous after cancellation', async () => {
-  await expect(attempt(true, AbortSignal.abort()).result).rejects.toMatchObject({
+  const run = attempt(true, AbortSignal.abort());
+  await expect(run.result).rejects.toMatchObject({
     step: 'room',
     code: 'cancelled',
   });
-  expect(connect).not.toHaveBeenCalled();
+  expect(run.watchRoom).not.toHaveBeenCalled();
 });
 
 it.each([
@@ -177,8 +184,10 @@ it('closes a cancelled room without sending join', async () => {
   const run = attempt(true, cancel.signal);
   const { opts, id } = await run.offer();
   cancel.abort();
+  expect(run.stop).toHaveBeenCalledExactlyOnceWith();
   await expect(run.result).rejects.toMatchObject({ step: 'room', code: 'cancelled' });
-  expect(run.close).toHaveBeenCalled();
+  expect(run.stop).toHaveBeenCalled();
+  expect(run.close).not.toHaveBeenCalled();
   expect(run.request).not.toHaveBeenCalled();
   opts.heard!(url, { t: 'joined', room: id });
   expect(run.send).not.toHaveBeenCalled();
@@ -192,8 +201,8 @@ it('dials only the invited node, from a matching authenticated room message', as
   const foreignMac = await mac(crypto, secret, foreign);
   const otherKindMac = await mac(crypto, secret, otherKind);
   const importKey = vi.spyOn(crypto.subtle, 'importKey');
-  expect(opts.known(home)).toBe(true);
-  expect(opts.known(browser)).toBe(false);
+  expect(run.watchRoom).toHaveBeenCalledExactlyOnceWith(url, id, opts.heard);
+  opts.heard('wss://other.example/rv', { t: 'joined', room: id });
   opts.heard!(url, { t: 'presence', k: home, on: true });
   opts.heard!(url, { t: 'joined', room: 'another room' });
   opts.heard!(url, { t: 'room', room: 'another room', data });
@@ -213,16 +222,13 @@ it('dials only the invited node, from a matching authenticated room message', as
   expect(run.peer).not.toHaveBeenCalled();
   const listener = await run.matched();
   expect(importKey).toHaveBeenCalledTimes(2);
+  opts.heard!(url, { t: 'joined', room: id });
   importKey.mockRestore();
   opts.heard!(url, { t: 'ready', ice: [], ttl: 0 });
   const refusal = { step: 'hello', code: 'forbidden' };
   listener.refused!('forbidden');
   await expect(run.result).rejects.toMatchObject(refusal);
-  expect(run.peer).toHaveBeenCalledExactlyOnceWith(
-    home,
-    expect.any(Function),
-    expect.any(Function),
-  );
+  expect(run.peer).toHaveBeenCalledExactlyOnceWith(expect.any(Function), expect.any(Function));
   expect(run.send).not.toHaveBeenCalled();
 });
 
@@ -263,7 +269,9 @@ it('waits for a groups push containing the invitation despite unrelated groups',
   listener.online(ctl, { ...welcome, groups: [other] });
   await vi.waitFor(() => expect(run.remember).toHaveBeenCalledWith('Home'));
   listener.push({ t: 'groups', groups: [other, shared] });
-  await expect(run.result).resolves.toMatchObject({ session: { close: run.close } });
+  const result = await run.result;
+  expect(await result.notices).toEqual([]);
+  expect(run.stop).toHaveBeenCalledOnce();
   expect(run.link.online).toHaveBeenCalledExactlyOnceWith(ctl, { ...welcome, groups: [other] });
   expect(run.link.push).toHaveBeenCalledExactlyOnceWith({
     t: 'groups',

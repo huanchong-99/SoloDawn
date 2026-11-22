@@ -10,8 +10,8 @@ import { loadDevice, type Device } from './identity';
 import { joinGroup, JoinError, presentLog, type Invitation } from './join';
 import { browserName, signalUrlOf } from './onboard.svelte';
 import { loadJoined, loadOwner, saveJoined, saveOwner, type JoinedHomes } from './owner';
-import { connect, type Peer, type Session } from './peer';
-import type { Ctl, Devlog, Welcome } from './proto';
+import { connect, type Peer } from './peer';
+import type { Devlog, Welcome } from './proto';
 import { parse } from './route.svelte';
 import { runTab } from './tablock';
 import { hello } from './version';
@@ -110,25 +110,21 @@ function startLive(
         ...Object.values(addrs).flat(),
         ...Object.values(joined).map((home) => home.url),
       ];
+      const pendingHomes = new Set<string>();
       const hub = connect({
         urls,
         device,
-        known: (id) => log.valid(id) || Object.hasOwn(joined, id),
+        known: (id) => log.valid(id) || Object.hasOwn(joined, id) || pendingHomes.has(id),
         name: browserName,
       });
-      const peers = new Map<string, Peer>();
+      const peers = new Map<string, Pick<Peer, 'send'>>();
       const joining = new AbortController();
-      const admissions = new Map<string, Session>();
       const pushLog = (): Devlog => ({ t: 'devlog', user: log.user, entries: [...log.entries] });
       const onDevlog = async (frame: Devlog) => {
         if (!(await appendEntries(log, frame.entries)) || joining.signal.aborted) return;
         await saveOwner(() => indexedDB, log, addrs);
         syncPeers();
-        for (const p of peers.values()) p.send(pushLog());
-        const controls = [...admissions.keys()].flatMap(
-          (id) => added.get(id)!.ctl ?? Array.of<Ctl>(),
-        );
-        for (const ctl of controls) presentLog(ctl, log);
+        for (const peer of peers.values()) presentLog(peer, log);
       };
       const dial = (id: string, home: Home) => {
         const peer = hub.peer(
@@ -169,37 +165,49 @@ function startLive(
       setJoin(async (invitation, name, cancel) => {
         const id = invitation.home;
         const url = signalUrlOf();
+        if (pendingHomes.has(id)) throw new JoinError('room', 'conflict');
+        pendingHomes.add(id);
         let trackPath: ((path: Path | undefined) => void) | undefined;
-        const { session: admitted, notices } = await joinGroup(invitation, name, {
-          device,
-          log,
-          url,
-          browserName,
-          signal: AbortSignal.any([cancel, signal, joining.signal]),
-          ownNodes: () => {
-            const own = new Set(pairedNodes(log).map(([id]) => id));
-            return [...added.values()].filter((home) => home.ctl && own.has(home.device));
-          },
-          async remember(homeName) {
-            joined[id] = { name: homeName, url };
-            await saveJoined(() => indexedDB, joined);
-          },
-          link: () => {
-            const home = homeOf(log.user, id, joined[id].name);
-            trackPath = (path) => (path ? paths.set(home, path) : paths.delete(home));
-            return home.connect();
-          },
-          onpath: (path) => trackPath?.(path),
-        });
-        peers.get(id)?.close();
-        admissions.get(id)?.close();
-        admissions.set(id, admitted);
-        return { notifications: await notices };
+        let replaced: Home | undefined;
+        try {
+          const { peer, notices } = await joinGroup(invitation, name, {
+            device,
+            log,
+            url,
+            session: hub,
+            dial(listen, onpath) {
+              replaced = added.get(id);
+              return hub.peer(id, listen, onpath);
+            },
+            browserName,
+            signal: AbortSignal.any([cancel, signal, joining.signal]),
+            ownNodes: () => {
+              const own = new Set(pairedNodes(log).map(([id]) => id));
+              return [...added.values()].filter((home) => home.ctl && own.has(home.device));
+            },
+            async remember(homeName) {
+              joined[id] = { name: homeName, url };
+              await saveJoined(() => indexedDB, joined);
+            },
+            link: () => {
+              const home = homeOf(log.user, id, joined[id].name);
+              trackPath = (path) => (path ? paths.set(home, path) : paths.delete(home));
+              return home.connect();
+            },
+            onpath: (path) => trackPath?.(path),
+          });
+          peers.set(id, peer);
+          return { notifications: await notices };
+        } catch (error) {
+          if (replaced && !joining.signal.aborted) dial(id, replaced);
+          throw error;
+        } finally {
+          pendingHomes.delete(id);
+        }
       });
       return () => {
         joining.abort();
         hub.close();
-        for (const admission of admissions.values()) admission.close();
       };
     };
     const close = () => {
