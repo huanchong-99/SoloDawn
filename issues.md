@@ -23,6 +23,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `host.offline` closes the structured sessions only; a terminal opened by takeover stays open, its member stays `takeover`, and `takeover.start` is accepted while offline. `planning/contracts/commands.md` (`host.offline`) says every session is closed.
 - Cause: `handleHostOffline` (`internal/host/limits.go`) closes structured CLIs only. The terminal is the owner's own work; going offline only stops AI turns.
 - Status: by design (coordinator, 2026-11-22, HS-20 review, decision 2). When such a terminal closes, the hand-back starts no AI turn while the AI is held (offline or rate limited): the session goes `dormant` and the host posts the facts (`handBackTurn` in `internal/host/takeover.go`).
+### 2026-11-22 · limitation · A denied call draws as waiting
+
+- Symptom: a `call` message whose state is `denied` (`row-msg-call-denied`, frozen by P-4a) shows the waiting line and the waiting state in the call area.
+- Cause: `callView` treats every status other than `answered` as waiting (`web/src/lib/call.ts:78`). The states sheet therefore lists three call rows, and `web/features/call.spec.ts` expects them.
+- Status: open, accepted for P-4a. Resolved when U2-2 draws a denied call.
 
 ### 2026-11-21 · deviation · The `rounds_limit` system message has an id derived from the triggering post's nonce
 
