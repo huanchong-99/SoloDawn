@@ -17,6 +17,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a home restart forgets which quiet periods already notified the secretary and can send one more `quiet` notice if an active task stays silent across the restart.
 - Cause: row 23 writes no row (`planning/contracts/task-machine.md` row 23), so `After["quiet"]` records each notified task's last-activity timestamp in the group's `State.quiet` in memory (`rndRememberQuiet` in `internal/home/rounds.go:121`, `internal/home/home.go:69`).
 - Status: open, accepted in step 1.
+
+### 2026-11-22 · limitation · Web Push VAPID `sub` URL is not yet checked against Apple's push service
+
+- Symptom: none observed; `wpushSubscriber` (`https://github.com/huanchong-99/SoloDawn`) has not yet been exercised against Apple's Web Push service on iOS.
+- Cause: `internal/home/webpush.go` (`wpushSubscriber`) sets the VAPID JWT `sub` claim to the repository URL, and no iOS device run is available in automated CI.
+- Status: open for the live iOS check of `A8.3` (`I-10` / `I-11`).
+
 ### 2026-11-22 · limitation · An unanswered AI-to-AI `call` stays `waiting`
 
 - Symptom: when the called AI never answers with `reply`, the `call` message keeps `state.status = "waiting"` for good; the web call block (`U-10`) shows it as waiting, with the time since it was made.
@@ -481,6 +488,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: after `origin/rebuild` (HM-15's `post/call` and `post/reply`) was merged into HM-13, `go test ./internal/home/` panicked with `home: two functions under post/call` in `TestRoundsTenExchangesPauseAndResume`, and two `TestCall*` cases got `thread.rounds` one higher than they expected.
 - Cause: `rounds_test.go` cloned `home.Commands` and added a stand-in `post/call`, written before HM-15 existed; `Table.Add` refuses a second function under a key (`internal/home/home.go:307`). The `TestCall*` cases were written without HM-13's row 21, so they expected a thread call, and a thread reply that mentions an AI, to leave `thread.rounds` unchanged; `task-machine.md` row 21 and `flows/ask.md` A.3 and D count both.
 - Status: resolved on `gemini/HM-13` (#190): the stand-in is gone and the rounds test uses the real `post/call`; the call tests expect the round.
+
+### 2026-11-22 · bug · `Host.Hand` could lose the item that answers a wait when the wait ended at the same moment
+
+- Symptom: an `ask` reply or an approval decision that arrived just as its wait ended was acknowledged and never seen. `Hand` returned `waited = true`, so `tryOpenWait` (`internal/host/deliver.go:528-540`) acked the item and did not queue it, while the waiting tool had already called `done()` and found its channel empty (`awaitApprovalItem`, `internal/host/approve.go:648-665`). The HS-12 reviewer's probe lost 16 of 200,000; `TestHandAndEndOfWaitNeverLoseAnItem` lost 1 to 18 of 200,000 in each of 20 runs without the fix (84 to 162 under `-race`).
+- Cause: `(*Host).Hand` (`internal/host/host.go:293-297` before the fix) removed the wait through `release`, unlocked `h.waiting`, and only then sent into the channel. `done()` and the tool's last look at the channel could run in that gap.
+- Status: resolved in unit `HAND-RACE`: `Hand` removes the wait and sends the item while it holds `h.waiting` (`internal/host/host.go:290-297`); the channel has room for the one item, so the send never blocks. The same test keeps every item in 20 runs, and in 5 under `-race`.
 
 ### 2026-11-22 · bug · `home.Loop.Close` and `node.Sessions` left connection pumps and host commands running into `Store.Close`
 
