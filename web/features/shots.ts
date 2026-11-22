@@ -2,8 +2,8 @@
 // sheet per screen. Run in web/ with
 //   node features/shots.ts <directory> [screen ...]
 // With no screen named it takes them all. `list`, `chat`, `create`, and the shell's `shell` (the
-// settings page in its frame), `pending` (a page not built yet) and `states` (the states sheet
-// of a development server) are taken at every width; `mention`, `long` and `readonly` are states
+// settings page in its frame) and `states` (the states sheet of a development server) are taken
+// at every width; `mention`, `long` and `readonly` are states
 // of the chat, taken at one width. A screen named with a width and a theme, as `chat:820:light`,
 // is one picture.
 // It starts a development server, loads features/demo.ts into the page and uses the Chromium
@@ -81,10 +81,6 @@ const screens: Record<string, (page: Page, ids: Record<string, string>) => Promi
     await page.evaluate(() => (location.hash = '#/settings'));
     await page.getByRole('radio', { name: '跟随系统' }).waitFor();
   },
-  pending: async (page) => {
-    await page.evaluate(() => (location.hash = '#/terminal/g/m'));
-    await page.locator('.pending').waitFor();
-  },
   states: async (page) => {
     await page.evaluate(() => (location.hash = '#/states'));
     await page.locator('.states .kind').first().waitFor();
@@ -136,7 +132,7 @@ const wanted = (screen: string) =>
   named.length === 0 ? single.length === 0 : named.includes(screen);
 
 try {
-  for (const screen of ['list', 'chat', 'create', 'shell', 'pending', 'states'].filter(wanted)) {
+  for (const screen of ['list', 'chat', 'create', 'shell', 'states'].filter(wanted)) {
     const rows: string[][] = [];
     for (const scheme of schemes) {
       const row: string[] = [];

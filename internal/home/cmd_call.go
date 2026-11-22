@@ -133,12 +133,5 @@ func (s *State) calWriteReply(c Command, p proto.Post[proto.EmptyBody], target p
 		Mentions: mentions, Re: (*string)(p.Re), Body: briefJSON(p.Body), Env: &c.Env,
 	}
 	rows := append([]Row{RowOf(target)}, s.postRows(msg)...)
-	return Result{Rows: rows, Items: s.calReplyItems(target.By, postTaskID(thread), replyID)}
-}
-
-func (s *State) calReplyItems(caller, task, msg string) []Item {
-	if _, ok := s.AIs[caller]; !ok {
-		return nil
-	}
-	return []Item{{AI: caller, Why: calWhyReply, Task: task, Msg: msg}}
+	return Result{Rows: rows, Items: s.cardItems([]TaskItem{{Why: calWhyReply, AI: target.By}}, postTaskID(thread), replyID)}
 }

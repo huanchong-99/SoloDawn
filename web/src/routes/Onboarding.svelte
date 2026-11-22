@@ -5,6 +5,7 @@
   import type { Net } from '../lib/net.svelte';
   import { PairingSession, promptFor } from '../lib/onboard.svelte';
   import {
+    announcement,
     isDark,
     otherLang,
     prefs,
@@ -47,6 +48,7 @@
     if (!session.code) return;
     await navigator.clipboard?.writeText(promptText).catch(() => undefined);
     copied = true;
+    announcement.text = t('pairing.prompt.copied');
     clearTimeout(copyTimer);
     copyTimer = setTimeout(() => (copied = false), 1800);
   }
@@ -99,18 +101,31 @@
         <section class="card prompt" aria-labelledby="prompt-h">
           <header class="row">
             <h2 class="kind grow" id="prompt-h">{t('pairing.prompt.title')}</h2>
-            {#if session.code}
-              <button class="btn btn-dawn" onclick={copyPrompt}>
-                <Icon name={copied ? 'check' : 'copy'} sm />
-                <span>{t(copied ? 'pairing.prompt.copied' : 'pairing.prompt.copy')}</span>
-              </button>
-            {:else if !session.enrolled}
-              <button class="btn btn-dawn" onclick={() => void session.start()}>
-                <span>{t('pairing.prompt.renew')}</span>
+            {#if session.code || !session.enrolled}
+              <button
+                type="button"
+                class="btn btn-dawn"
+                onclick={() => void (session.code ? copyPrompt() : session.start())}
+              >
+                {#if session.code}<Icon name={copied ? 'check' : 'copy'} sm />{/if}
+                <span>
+                  {t(
+                    session.code
+                      ? copied
+                        ? 'pairing.prompt.copied'
+                        : 'pairing.prompt.copy'
+                      : 'pairing.prompt.renew',
+                  )}
+                </span>
               </button>
             {/if}
           </header>
-          <pre id="prompt" use:focusable class:muted={!session.code}>{promptText}</pre>
+          <pre
+            id="prompt"
+            use:focusable
+            role="region"
+            aria-labelledby="prompt-h"
+            class:muted={!session.code}>{promptText}</pre>
           <footer class="hint">
             <Icon name="clock" sm />
             <span>{countdownText}</span>
@@ -264,6 +279,9 @@
     overflow-wrap: anywhere;
     font-size: 13.5px;
     line-height: 1.7;
+  }
+  .prompt pre:focus-visible {
+    outline-offset: -2px;
   }
   .prompt footer {
     display: flex;

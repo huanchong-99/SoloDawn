@@ -1,8 +1,5 @@
 {
   "app.skip": "跳到主要内容",
-  "app.pending": "这一页还没做好",
-  "app.pending.body": "它会随客户端后面的版本上线，其他页面照常可用。",
-  "app.home": "回到群聊",
   "app.side": "成员和群资料",
   "app.side.close": "关闭面板",
   "app.otherTab": "SoloDawn 已在另一个标签页中打开。",
