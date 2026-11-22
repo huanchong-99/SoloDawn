@@ -203,11 +203,10 @@ func (s *State) tskFailed(c Command, detail string, task proto.TaskRow, fx Effec
 		items := tskItemCtx{taskID: task.ID, secretary: s.Group.Secretary, detail: detail}.items(fx.Items)
 		return Result{Rows: []Row{RowOf(task)}, Items: items}, nil
 	}
-	body := proto.TaskFailedBody{SystemCode: proto.SystemCode{Code: fx.System}, Task: task.ID, Reason: fx.Reason}
-	msg, refusal := s.tskThreadSystem(c, &task, s.tskFailedMentions(c.Disk, task), body)
-	if refusal != nil {
+	if refusal := tskNonceFree(c); refusal != nil {
 		return Result{}, refusal
 	}
+	msg := s.tskFailedSystem(c, string(c.Nonce), &task, fx)
 	items := tskItemCtx{taskID: task.ID, secretary: s.Group.Secretary, noticeMsg: msg.ID}.items(fx.Items)
 	return Result{Rows: []Row{RowOf(task), RowOf(msg)}, Items: items}, nil
 }
@@ -227,11 +226,11 @@ func tskPreempted(s *State, c Command) (Result, *Refusal) {
 	if refusal != nil {
 		return Result{}, refusal
 	}
-	body := proto.PreemptedBody{SystemCode: proto.SystemCode{Code: fx.System}, Task: task.ID, By: jump}
-	msg, refusal := s.tskThreadSystem(c, &task, []string{}, body)
-	if refusal != nil {
+	if refusal := tskNonceFree(c); refusal != nil {
 		return Result{}, refusal
 	}
+	body := proto.PreemptedBody{SystemCode: proto.SystemCode{Code: fx.System}, Task: task.ID, By: jump}
+	msg := s.tskThreadSystem(c, string(c.Nonce), "system", &task, []string{}, body)
 	return Result{Rows: []Row{RowOf(task), RowOf(msg)}}, nil
 }
 
@@ -243,6 +242,13 @@ func tskJumpAuthor(d Disk, id string) (string, *Refusal) {
 	return msg.By, nil
 }
 
+func tskNonceFree(c Command) *Refusal {
+	if _, taken := c.Disk.Msg(string(c.Nonce)); taken {
+		return &Refusal{"conflict", "a message with the id of the command exists"}
+	}
+	return nil
+}
+
 func (s *State) tskStep(c Command, id proto.ID, ev Event) (proto.TaskRow, Effects, *Refusal) {
 	task, ok := s.Tasks[string(id)]
 	if !ok {
@@ -251,6 +257,7 @@ func (s *State) tskStep(c Command, id proto.ID, ev Event) (proto.TaskRow, Effect
 	ev.By = s.tskSender(c.Who, task.Assignee)
 	ev.Now = c.Now
 	ev.Limits = s.Group.Limits
+	ev.Remote = s.Group.Forge != "none"
 	ev.Pending = tskPending(c.Disk, task.ID)
 	moved, fx, err := Step(task, ev)
 	if err != nil {
@@ -274,19 +281,22 @@ func (s *State) tskSender(w Who, assignee string) Sender {
 	}
 }
 
-func (s *State) tskThreadSystem(c Command, task *proto.TaskRow, mentions []string, body any) (proto.MsgRow, *Refusal) {
-	id := string(c.Nonce)
-	if _, taken := c.Disk.Msg(id); taken {
-		return proto.MsgRow{}, &Refusal{"conflict", "a message with the id of the command exists"}
-	}
-	thread := task.ID
+func (s *State) tskThreadSystem(c Command, id, kind string, task *proto.TaskRow, mentions []string, body any) proto.MsgRow {
 	msg := proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: id}, Group: s.ID, Thread: &thread,
-		By: "system", Kind: "system", Timestamp: c.Now, Mentions: mentions, Body: briefJSON(body),
+		RowHeader: proto.RowHeader{Type: "msg", ID: id}, Group: s.ID,
+		By: "system", Kind: kind, Timestamp: c.Now, Mentions: mentions, Body: briefJSON(body),
 	}
-	task.Thread.Count++
-	task.Thread.Last = &proto.ThreadMessage{By: "system", Kind: "system", Text: "", Timestamp: c.Now}
-	return msg, nil
+	if task != nil {
+		tid := task.ID
+		msg.Thread = &tid
+		*task = postAdvanceThread(*task, msg)
+	}
+	return msg
+}
+
+func (s *State) tskFailedSystem(c Command, id string, task *proto.TaskRow, fx Effects) proto.MsgRow {
+	body := proto.TaskFailedBody{SystemCode: proto.SystemCode{Code: fx.System}, Task: task.ID, Reason: fx.Reason}
+	return s.tskThreadSystem(c, id, "system", task, s.tskFailedMentions(c.Disk, *task), body)
 }
 
 func (s *State) tskFailedMentions(d Disk, task proto.TaskRow) []string {
@@ -425,12 +435,14 @@ func tskSameReview(q store.Item, taskID string, it TaskItem) bool {
 }
 
 type tskItemCtx struct {
-	taskID    string
-	secretary string
-	assignMsg string
-	noticeMsg string
-	detail    string
-	kept      []store.Item
+	taskID      string
+	secretary   string
+	assignMsg   string
+	feedbackMsg string
+	noticeMsg   string
+	detail      string
+	pr          int
+	kept        []store.Item
 }
 
 func (x tskItemCtx) items(raw []TaskItem) []Item {
@@ -450,11 +462,20 @@ func (x tskItemCtx) one(it TaskItem) (Item, bool) {
 	if it.Why == itemNotice {
 		return x.notice(it)
 	}
-	var msg string
-	if it.Why == itemAssign {
-		msg = x.assignMsg
+	return x.work(it), true
+}
+
+func (x tskItemCtx) work(it TaskItem) Item {
+	item := Item{AI: it.AI, Why: it.Why, Task: x.taskID, Commit: it.Commit}
+	switch it.Why {
+	case itemAssign:
+		item.Msg = x.assignMsg
+	case itemChecks, itemReviewed:
+		item.Msg = x.feedbackMsg
+	case itemMerge:
+		item.PR = x.pr
 	}
-	return Item{AI: it.AI, Why: it.Why, Task: x.taskID, Msg: msg, Commit: it.Commit}, true
+	return item
 }
 
 func (x tskItemCtx) notice(it TaskItem) (Item, bool) {

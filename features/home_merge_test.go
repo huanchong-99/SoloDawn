@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"reflect"
 	"slices"
 	"strconv"
@@ -28,7 +27,6 @@ type homeMergeWorld struct {
 	now         time.Time
 	releaseTime int64
 	state       *home.State
-	table       home.Table
 	msgs        map[string]proto.MsgRow
 	order       []string
 	receipts    map[string]store.Outcome
@@ -172,114 +170,7 @@ func (w *homeMergeWorld) initBase(forge string) error {
 	w.order = nil
 	w.receipts = map[string]store.Outcome{}
 	w.items = nil
-	w.table = homeMergeBuildTable()
 	return nil
-}
-
-// homeMergeBuildTable clones home.Commands and attaches minimal stand-ins only
-// when sibling units (HM-9, HM-11) have not yet merged into home.Commands.
-func homeMergeBuildTable() home.Table {
-	tbl := maps.Clone(home.Commands)
-	if tbl["post/review"] == nil {
-		tbl["post/review"] = homeMergeStandInReview
-	}
-	if tbl["task/checked"] == nil {
-		tbl["task/checked"] = homeMergeStandInChecked
-	}
-	if tbl["task/submitted"] == nil {
-		tbl["task/submitted"] = homeMergeStandInSubmitted
-	}
-	if tbl["task/assign"] == nil {
-		tbl["task/assign"] = homeMergeStandInAssign
-	}
-	return tbl
-}
-
-func homeMergeStandInReview(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-	var p proto.Post[proto.ReviewSigned]
-	if refusal := c.Decode(&p); refusal != nil {
-		return home.Result{}, refusal
-	}
-	task := s.Tasks[string(p.Body.Task)]
-	ok := p.Body.Score >= task.Pass
-	moved, fx, err := home.Step(task, home.Event{
-		Kind: home.OnReview, By: home.ByAI, Member: c.Who.AI, Now: c.Now,
-		Limits: s.Group.Limits, Remote: s.Group.Forge != "none", Commit: p.Body.Commit, OK: ok, Score: p.Body.Score,
-	})
-	if err != nil {
-		return home.Result{}, &home.Refusal{Code: err.Error(), Msg: "review refused"}
-	}
-	tid := moved.ID
-	body, _ := json.Marshal(proto.ReviewBody{
-		Task: moved.ID, Num: moved.Num, Title: moved.Title, Commit: p.Body.Commit,
-		Round: moved.Review.Round, Score: p.Body.Score, Pass: moved.Pass, OK: ok, Items: p.Body.Items,
-	})
-	msg := proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: string(c.Nonce)}, Group: s.ID, Thread: &tid,
-		By: c.Who.Member(), Kind: "review", Timestamp: c.Timestamp, Text: p.Text, Mentions: []string{}, Body: body, Env: &c.Env,
-	}
-	moved.Thread.Count++
-	moved.Thread.Last = &proto.ThreadMessage{By: msg.By, Kind: "review", Text: p.Text, Timestamp: c.Timestamp}
-	var items []home.Item
-	for _, raw := range fx.Items {
-		it := home.Item{AI: raw.AI, Why: raw.Why, Task: moved.ID, Commit: raw.Commit}
-		if raw.Why == "merge" && s.Group.Forge != "none" {
-			it.PR = moved.PR
-		}
-		items = append(items, it)
-	}
-	return home.Result{Rows: []home.Row{home.RowOf(msg), home.RowOf(moved)}, Items: items, Answer: store.Outcome{Passed: &ok, Round: moved.Review.Round}}, nil
-}
-
-func homeMergeStandInChecked(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-	var p proto.TaskChecked
-	if refusal := c.Decode(&p); refusal != nil {
-		return home.Result{}, refusal
-	}
-	moved, _, err := home.Step(s.Tasks[string(p.ID)], home.Event{Kind: home.OnChecked, By: home.ByHost, Now: c.Now, Commit: p.Commit, OK: p.OK})
-	if err != nil {
-		return home.Result{}, &home.Refusal{Code: err.Error(), Msg: "checked refused"}
-	}
-	return home.Result{Rows: []home.Row{home.RowOf(moved)}}, nil
-}
-
-func homeMergeStandInSubmitted(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-	var p proto.TaskSubmitted
-	if refusal := c.Decode(&p); refusal != nil {
-		return home.Result{}, refusal
-	}
-	moved, fx, err := home.Step(s.Tasks[string(p.ID)], home.Event{
-		Kind: home.OnSubmitted, By: home.ByHost, Now: c.Now, Commit: p.Commit, Remote: s.Group.Forge != "none",
-	})
-	if err != nil {
-		return home.Result{}, &home.Refusal{Code: err.Error(), Msg: "submitted refused"}
-	}
-	moved.PR, moved.PRURL = p.PR, p.PRURL
-	moved.Stats.Added, moved.Stats.Removed = p.Stats.Added, p.Stats.Removed
-	var items []home.Item
-	for _, raw := range fx.Items {
-		items = append(items, home.Item{AI: raw.AI, Why: raw.Why, Task: moved.ID, Commit: raw.Commit})
-	}
-	return home.Result{Rows: []home.Row{home.RowOf(moved)}, Items: items}, nil
-}
-
-func homeMergeStandInAssign(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-	var p proto.TaskAssign
-	if refusal := c.Decode(&p); refusal != nil {
-		return home.Result{}, refusal
-	}
-	moved, fx, err := home.Step(s.Tasks[string(p.ID)], home.Event{
-		Kind: home.OnAssign, By: home.BySecretary, Member: c.Who.AI, Now: c.Now,
-		Assignee: string(p.Assignee), Reviewer: string(p.Reviewer),
-	})
-	if err != nil {
-		return home.Result{}, &home.Refusal{Code: err.Error(), Msg: "assign refused"}
-	}
-	var items []home.Item
-	for _, raw := range fx.Items {
-		items = append(items, home.Item{AI: raw.AI, Why: raw.Why, Task: moved.ID})
-	}
-	return home.Result{Rows: []home.Row{home.RowOf(moved)}, Items: items}, nil
 }
 
 func (w *homeMergeWorld) initSingleTask(forge, step string, pr int) error {
@@ -346,7 +237,7 @@ func (w *homeMergeWorld) apply(by identity.Key, payload any) error {
 	if err != nil {
 		return err
 	}
-	res, err := w.table.Apply(w.state, w, w, by.ID(), by.Sign(string(raw)), w.now)
+	res, err := home.Commands.Apply(w.state, w, w, by.ID(), by.Sign(string(raw)), w.now)
 	if err != nil {
 		return err
 	}

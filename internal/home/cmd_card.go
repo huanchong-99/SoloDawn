@@ -162,7 +162,7 @@ func (s *State) cardPostOnTask(c Command, spec cardPostSpec) (Result, *Refusal) 
 	if refusal != nil {
 		return Result{}, refusal
 	}
-	return Result{Rows: []Row{RowOf(card), RowOf(cardThread(moved, card))}}, nil
+	return Result{Rows: []Row{RowOf(card), RowOf(postAdvanceThread(moved, card))}}, nil
 }
 
 func (s *State) cardPoster(w Who) Sender {
@@ -181,14 +181,6 @@ func (s *State) cardNewMsg(c Command, kind string, thread *string, text string, 
 		By: c.Who.Member(), Kind: kind, Timestamp: c.Timestamp, Text: text, Mentions: mentions,
 		Re: (*string)(re), Body: briefJSON(body), State: &proto.CardState{Status: cardStatusPending}, Env: &c.Env,
 	}, nil
-}
-
-func cardThread(task proto.TaskRow, msg proto.MsgRow) proto.TaskRow {
-	task.Thread.Count++
-	task.Thread.Last = &proto.ThreadMessage{
-		By: msg.By, Kind: msg.Kind, Text: postPreview(msg.Text), Timestamp: msg.Timestamp,
-	}
-	return task
 }
 
 func cardApprove(s *State, c Command) (Result, *Refusal) {

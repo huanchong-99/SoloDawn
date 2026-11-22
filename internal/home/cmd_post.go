@@ -136,12 +136,15 @@ func (s *State) postRows(msg proto.MsgRow) []Row {
 	if msg.Thread == nil {
 		return []Row{RowOf(msg)}
 	}
-	task := s.Tasks[*msg.Thread]
+	return []Row{RowOf(msg), RowOf(postAdvanceThread(s.Tasks[*msg.Thread], msg))}
+}
+
+func postAdvanceThread(task proto.TaskRow, msg proto.MsgRow) proto.TaskRow {
 	task.Thread.Count++
 	task.Thread.Last = &proto.ThreadMessage{
 		By: msg.By, Kind: msg.Kind, Text: postPreview(msg.Text), Timestamp: msg.Timestamp,
 	}
-	return []Row{RowOf(msg), RowOf(task)}
+	return task
 }
 
 func postPreview(text string) string {
