@@ -86,13 +86,14 @@ func nodeLocalSteps(sc *godog.ScenarioContext, f fixtures) {
 		groups = map[string]string{}
 		// Single reader: the "receives a rows push" step in this scenario.
 		pushes = make(chan proto.Rows, 8)
+		rows := host.Pushes["rows"]
 		host.Pushes["rows"] = func(_ *host.Host, _ string, raw json.RawMessage) {
 			var frame proto.Rows
 			if proto.Decode(raw, &frame) == nil {
 				pushes <- frame
 			}
 		}
-		cleanup(func() { delete(host.Pushes, "rows") })
+		cleanup(func() { host.Pushes["rows"] = rows })
 		cluster = nodetest.Start(scenarioTB{TB: f.t, cleanup: cleanup}, nodetest.Config{
 			BinDir: f.fakeCLIs,
 			Nodes:  n,

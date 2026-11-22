@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -110,6 +111,10 @@ func TestSurfaceDefaultsReadHelpersAndNulls(t *testing.T) {
 	if resizeHost != h || resizeBy != ownerKey.ID() || resizeSeen.Group != gID || resizeSeen.AI != aiID || resizeSeen.Cols != 120 || resizeSeen.Rows != 36 {
 		t.Fatalf("pty.resize forward = host=%p by=%q req=%+v", resizeHost, resizeBy, resizeSeen)
 	}
+	replay := fmt.Sprintf(`{"t":"takeover.start","n":"n1","ts":1,"to":%q,"g":%q,"member":%q}`, nodeKey.ID(), gID, aiID)
+	if _, err := s.Replays["takeover.start"](t.Context(), nil, ownerKey.ID(), json.RawMessage(replay)); err == nil || err.(*host.Error).Code != "conflict" {
+		t.Fatalf("takeover.start replay without a terminal = %v, want conflict", err)
+	}
 }
 
 func mustSurfaceSession(t *testing.T, h *host.Host, home string, key host.SessionKey, kind host.Kind, agent string) {
@@ -148,7 +153,7 @@ func assertSurfaceAgentGroups(t *testing.T, agents []proto.HostAgent, wantGroups
 		byGroup[ag.Group] = ag
 	}
 	for g, want := range wantGroups {
-		if byGroup[g] != want {
+		if !reflect.DeepEqual(byGroup[g], want) {
 			t.Fatalf("group %s = %+v, want %+v", g, byGroup[g], want)
 		}
 	}
@@ -211,10 +216,10 @@ func TestHostInfoAgentsMemberStateAndSettings(t *testing.T) {
 	}
 	assertSurfaceHeader(t, st, savedHomes)
 	assertSurfaceAgentGroups(t, st.Agents, map[proto.ID]proto.AgentGroup{
-		proto.ID(g1): {Group: proto.ID(g1), Member: proto.ID(m1), Level: 3, State: "takeover", Task: proto.ID(tTake), Queued: 0},
-		proto.ID(g2): {Group: proto.ID(g2), Member: proto.ID(m2), Level: 3, State: "working", Task: proto.ID(tWork), Queued: 0},
-		proto.ID(g3): {Group: proto.ID(g3), Member: proto.ID(m3), Level: 3, State: "waiting", Task: proto.ID(tWait), Queued: 0},
-		proto.ID(g4): {Group: proto.ID(g4), Member: proto.ID(m4), Level: 3, State: "dormant", Queued: 0},
+		proto.ID(g1): {Group: proto.ID(g1), Member: proto.ID(m1), Level: 3, State: "takeover", Task: proto.ID(tTake), Queued: 0, Watchers: []string{}},
+		proto.ID(g2): {Group: proto.ID(g2), Member: proto.ID(m2), Level: 3, State: "working", Task: proto.ID(tWork), Queued: 0, Watchers: []string{}},
+		proto.ID(g3): {Group: proto.ID(g3), Member: proto.ID(m3), Level: 3, State: "waiting", Task: proto.ID(tWait), Queued: 0, Watchers: []string{}},
+		proto.ID(g4): {Group: proto.ID(g4), Member: proto.ID(m4), Level: 3, State: "dormant", Queued: 0, Watchers: []string{}},
 	})
 
 	hookErr = errors.New("probe failed")

@@ -5,11 +5,13 @@ import "encoding/json"
 // Outcome contains only replayable fields: notably no request id,
 // pairing secret or terminal handle.
 type Outcome struct {
-	OK     bool   `json:"ok,omitempty"`
-	Num    int    `json:"num,omitempty"`
-	Passed *bool  `json:"passed,omitempty"`
-	Round  int    `json:"round,omitempty"`
-	Code   string `json:"code,omitempty"`
+	OK       bool   `json:"ok,omitempty"`
+	Num      int    `json:"num,omitempty"`
+	Passed   *bool  `json:"passed,omitempty"`
+	Round    int    `json:"round,omitempty"`
+	ID       string `json:"id,omitempty"`
+	Replaced *bool  `json:"replaced,omitempty"`
+	Code     string `json:"code,omitempty"`
 }
 
 func (tx *Tx) PutReceipt(signer, nonce string, ts int64, result Outcome) error {

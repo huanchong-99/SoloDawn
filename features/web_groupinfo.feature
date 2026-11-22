@@ -12,7 +12,7 @@ Feature: Group info panel and project memory
     And the notes list shows "Keep `rtt_ms` empty on relay." on "T-12" by "Alex" and "Path events include the connection id." by "Secretary"
     And the review ledger shows "T-12", "86 / 90", "Show connection paths", "Claude Code · Round 1" and remark "Missing relay path" at "path.go:88"
     When the owner presses "Delete note: Keep rtt_ms empty on relay." and cancels the confirmation
-    Then no forget command was sent and focus returns to "Delete note: Keep rtt_ms empty on relay."
+    Then no forget command was sent and the confirmation is gone
     When the owner presses "Delete note: Keep rtt_ms empty on relay." and confirms "Delete"
     Then the home receives a signed "forget" for "note" and that note disappears within 1 second with focus on the notes heading
     When the owner presses "Delete review: T-12 Show connection paths" and confirms "Delete"

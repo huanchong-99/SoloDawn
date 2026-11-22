@@ -1,5 +1,5 @@
 ---
-description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the session runtime, group sync and inbox delivery, group joining and per-home connection management, the offline scripted Claude Code and Codex processes for host integration tests, the API of the host workspaces and Git commands, and the MCP server and stdio shim.'
+description: 'The host seam (interfaces, tables, hooks, sessions, drivers and driver capability switches), the session runtime, group sync and inbox delivery, group joining and per-home connection management, the offline scripted Claude Code and Codex processes for host integration tests, the API of the host workspaces and Git commands, and the MCP server and stdio shim.'
 kind: reference
 ---
 
@@ -31,7 +31,7 @@ A unit never calls into the file of a unit built beside it. It registers in a ta
 | an interactive pseudo-terminal (`takeover`) | `h.StartPTY(group, member, agent, launch, onDone)`, `p.Attached()`, `p.Resize(cols, rows)`, `p.Close()`, `h.ClosePTY(group, member)` |
 | bridging a `pty:<g>:<member>` data channel | `h.ServeTerminal(t)` |
 | an audit row | `h.Audit(tx, AuditRow{…})`, inside the transaction of what it records |
-| the AI CLIs found here (`host.info`) | `h.Agents(ctx)`: probes `claude` and `codex` on `PATH` (cached 60 s), writes `agent`, returns `[]proto.HostAgent` with `Groups` empty |
+| the AI CLIs found here (`host.info`) | `h.Agents(ctx)`: probes each driver registered in `DriverCaps` on `PATH` (cached 60 s), writes `agent`, returns `[]proto.HostAgent` with `Groups` empty |
 
 ## Tables
 
@@ -40,7 +40,8 @@ Each is a package map. The file that provides an entry adds it from its `init` w
 | Table | Key | Who calls the entry |
 | --- | --- | --- |
 | `Tools` | the tool's name | the MCP server, through `ToolsFor(caller)`: a tool whose `For` refuses the caller is neither listed nor called |
-| `Drivers` | the agent name, `claude` or `codex` | whoever starts a session's process |
+| `Drivers` | the agent name (`claude`, `codex`, …) | whoever starts a session's process |
+| `DriverCaps` | the agent name, matching `Drivers` | `Agents`, `agent.set`, `host.join`, `host.leave`, `Tools["approve"].For`, and `takeover.start` ([step-3/drivers.md](../../planning/contracts/step-3/drivers.md) sections 4 and 5) |
 | `Pushes` | `t` of a frame a home pushes: `inbox`, `rows`, `reset` | `h.Push(home, frame)`, which `node` calls for each push it reads on a connection to a home, and the local link for a home on the same node |
 | `Surface` | `t` of a request or push of the [host surface](../../planning/contracts/datachannel.md) (`audit`, `pty.resize`), or `t` of a [host command](../../planning/contracts/commands.md) (`takeover.start`) | `node`, only for a device of the owner; for a command after the envelope checks and the receipt lookup |
 | `Listeners` | the name of the listening unit | `h.Report(key, event)`, which the session runtime calls for every event of a session's CLI |
@@ -84,12 +85,12 @@ Not in the seam: the one state per AI that others see (sessions.md, section 3), 
 
 ## Turns and instructions
 
-`turn.go` provides `Instructions` and `Compose` ([drivers.md](../../planning/contracts/drivers.md), sections 3 and 4).
+`turn.go` and `turn_info.go` provide `Instructions` and `Compose` ([drivers.md](../../planning/contracts/drivers.md) sections 3 and 4, [step-2/labels.md](../../planning/contracts/step-2/labels.md)).
 
 - `Instructions(s)` returns the embedded English prompt for `s` from `instructions/{group,task,review,secretary}.md` (`secretary.md` when `s.Secretary` is set, otherwise by `s.Kind`).
 - `Compose(h, s, kind, items)` formats `ItemsTurn` (from `items`) and `ReplacedTurn`, `ContinueTurn` and `HandbackTurn` (`items` nil), returning the turn text and `Turn{Kind, Thread, Depth, Jump}` (`N` is set later by `Sessions.SetTurn`).
-- Authority (`instruction` or `information`), speaker labels, and `decided` / `confirmed` outcomes come from `setting` key `owner` in `h.Store`, the `member` rows in `h.Rows`, and `msg.state`, never from message text, envelope re-verification, or `cause`.
-- First task turns, review turns and `ReplacedTurn` fetch the brief (`FetchRow`), the newest 100 notes up to 8 KiB (`FetchKind`), and up to 20 recent thread or main-line messages (`FetchThread`) through `fetchFrom(ctx, h, device, build)`. Because `Compose` reads `h.Store` with `Store.Write` and calls `Home.Request`, call it outside any `Store.Write` or `Sessions.Write` transaction.
+- Item header labels (`== <i of n> · <why> · …`) and carried message or card-decision lines (`-- from … · <label>`, with `from the home` for home-written `checks` and `system` rows) come from `setting` key `owner` in `h.Store`, the `member` rows (`account`, `allow`) in `h.Rows`, and `msg.state` / `body.to`, never from message text, envelope re-verification, or `cause`.
+- First task turns, review turns and `ReplacedTurn` fetch the brief (`FetchRow`), any style preset named by the brief (`FetchKind` `preset` in `turn_preset.go`, outside the 8 KiB note budget; review turns include only `Style preset: "<name>"`), the newest 100 notes up to 8 KiB (`FetchKind`), and up to 20 recent thread or main-line messages (`FetchThread`) through `fetchFrom(ctx, h, device, build)`. Because `Compose` reads `h.Store` with `Store.Write` and calls `Home.Request`, call it outside any `Store.Write` or `Sessions.Write` transaction.
 
 ## Drivers
 
@@ -99,6 +100,7 @@ A `Driver` starts the structured CLI (`Start`) and gives the command line of the
 - `Launch.Shim` is the command line of the MCP server for that start: `h.Shim`, then `--token` and the token. The driver writes it into the CLI's MCP configuration as it is.
 - A driver keeps no timer. Its caller ends the context of `Start`, which kills the process tree, when an interrupt or a close was not answered within 10 s.
 - Sign-in that is not usable and a session id that cannot be resumed are events (`LoginInvalid`, `NoSession`), because a CLI reports them after its process has started.
+- `caps.go` holds `Capabilities`, `DriverCaps` and the switches of [step-3/drivers.md](../../planning/contracts/step-3/drivers.md) sections 4, 5 and 8: every driver registers its `Capabilities` (`Accounts`, `Levels`, `Approvals`, `Takeover`, `Usage`) in `DriverCaps` alongside `Drivers`, `agent.set` refuses an account not in `Accounts` with `bad_request` naming `accounts`, `Tools["approve"].For` checks `Approvals == "tool" && !c.Interactive`, and `takeover.start` refuses `Takeover == "none"` with `conflict` naming `takeover` and runs the structured `assign` turn of a new task first only for `"resume"` (`checkTakeover`). `driver` in `host.info` is added in `T3-2` after `P-5`.
 
 ### Claude Code (`claude.go`)
 
@@ -132,9 +134,18 @@ Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/
 - `Surface["pty.resize"]` decodes `proto.PTYResize`, requires `cols >= 1` and `rows >= 1` (`bad_request` below 1), remembers the size for `(g, ai)` so a `pty.resize` before `StartPTY` sets the initial size, resizes an open `PTY`, and accepts a `pty.resize` after close as a no-op.
 - **Lock order and single-reader channels.** `PTY.mu -> ptyPart.mu`; neither lock waits on I/O, process exit or `onDone`. `closing` is read only by `waitLoop`; `procDone` and `outDone` are read only by `runStop`; `done` is closed once by `runStop` for `Close` callers.
 
+## Terminal takeover (`takeover.go`)
+
+`takeover.go` registers `"takeover.start"` and `"takeover.end"` in `Surface`, `"takeover"` in `Holds` and `Settled`, and exposes `(*Host).ReplayTakeover(ctx, from, by, data)` ([flows/takeover.md](../../planning/flows/takeover.md); [commands.md](../../planning/contracts/commands.md) "Once only" and section 2; [datachannel.md](../../planning/contracts/datachannel.md) section 7). Where the flow is silent, it does this:
+
+- **Start.** `not_found` for an AI not hosted here; `conflict` when its driver's `Takeover` is `none` (`checkTakeover`); `relay` unless the owner's connection is `direct`; `busy` while the AI is taken over and its hand-back has not read the Git facts yet, or the host is merging one of its tasks. From then until its hand-back has read those facts, the takeover holds every delivery of the AI in its group; the session's own state (`takeover`, then `working` in the hand-back turn) holds them from there, so a delivery never sees two holds lift at different moments, and whatever the hand-back reports next (`waiting`, a cancelled task) finds the AI free for the next takeover. It interrupts the AI's running turn in the group (`interruptTurn`, which closes a CLI that has not ended it within 10 s) and picks the session: the secretary's group session (a `task` is ignored); a named task the AI is assignee of; a named task it reviews, only when its review session exists; else `conflict` for a task that is not `active`, `paused` or `failed`, and `not_found` for an unknown one. With no task named, the task session used last whose task is unfinished; with none, `task start` (`origin: "takeover"`, title "Owner takeover", empty plan) and a task row kept until the home's arrives. The session's folder is prepared as delivery does (`prepareTargetSession`). For a new task whose driver's `Takeover` is `resume`, one structured `assign` turn runs first. Then `Runner.Close`, `TakeoverAt` (`git rev-parse HEAD` in a task session with a clone), state `takeover`, an interactive token, `StartPTY`, and `member status`. A failure leaves the session `dormant` and cancels a task this takeover started.
+- **End.** `takeover.end` closes the terminal; so do a closed `pty` channel, the CLI exiting, 60 s without an attached channel (`takeoverAttach`), and the owner's connection ending or its path leaving `direct` (one watch per connection, the single reader of its `PathChanged`). A closed terminal hands back: the facts of [local.md](../../planning/contracts/local.md) section 7 from `TakeoverAt` (none in a group or review session); a task this takeover started and nothing changed is cancelled (`task cancel` by the host, session ended, `member status`, nothing posted); otherwise one `HandbackTurn`, in which `post` kind `handback` carries the facts, and a host-signed `handback` with empty `text` when the AI did not post. While the AI is held (offline or rate limited) no hand-back turn starts: the session goes `dormant`, `member status` is sent and the host posts the facts. Then `Deliver` runs on the takeovers' wait group.
+- **Restart and shutdown.** `Settle` closes open terminals without a hand-back, ends a running hand-back (its wait for the turn's end) and starts no `Deliver` after it; a row left in `takeover` is handed back when its group's state is next read (`cleanupGroupState`), only while no takeover of the AI is registered. A task session whose task ends while taken over closes its terminal (`cleanupTaskSessions`), and the hand-back reports the member's state.
+- **Lock order.** `takeovers.mu` guards the takeovers and is never held across a call out of `takeover.go`.
+
 # Session runtime
 
-`run.go` provides `Runner` (`Turn`, `Answer` and `Close`), registers `"runtime"` in `Attached` and `Settled`, and exposes `(*Host).ReportSaved(ctx, saved)` and `(*Host).MemberState(group, member)`. `AuditKilled` lives in `audit.go`.
+`run.go` provides `Runner` (`Turn`, `Answer` and `Close`), registers `"runtime"` in `Attached` and `Settled`, and exposes `(*Host).ReportSaved(ctx, saved)`, `(*Host).MemberState(group, member)` and, in `deliver.go`, `(*Host).QueuedCount(group, member)` (the held items `host.info` counts). `AuditKilled` lives in `audit.go`.
 
 - **Per-host state.** Everything the runtime remembers lives in `Part[runtimePart](h)` (`procs`, `closing`, `starting`, `limited`, `savedCrash`, and `changed`). No package-level state is shared across hosts, so tests run independent hosts in one process. Every `Attach` flushes queued `savedCrash` reports for that home and sends the current `member status` of each AI hosted here in groups of that home ([flows/connect.md](../../planning/flows/connect.md) step 18).
 - **Lifecycle and C-6.** `Runner.Turn` wakes a `dormant` session by starting its driver with `Launch` (`Folder` under `<dbDir>/projects/<group>/<folder>`, `Session`, `Level` defaulting to 3 across all session kinds unless overridden by `perm` or `default_level`, `Shim` with an `Admit` token, `Instructions`, `RepoConfig` `true` for task and review sessions and `false` for group sessions, `ToolTimeout`), reports `TurnBegan` before writing the turn, stores a non-empty `Ready.Session`, and forwards every `Process.Events()` event in order through `h.Report`. Every switch waits for the previous process's `Events()` channel to close and forgets its token before starting the next process or marking the session `dormant`.
@@ -227,8 +238,8 @@ The rules are in [mcp-tools.md](../../planning/contracts/mcp-tools.md) and [loca
 
 # Talk and group state tools
 
-`tools_talk.go` registers `post`, `read_thread`, `list_members`, `list_tasks`, `note_put` and `note_list` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1 and 5).
-`post` and `note_put` run `CheckOutboundSecret` before signing or sending any command to the home.
+`tools_talk.go` registers `post`, `read_thread`, `list_members`, `list_tasks`, `note_put` and `note_list` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1 and 5), and `tools_kb.go` registers `kb_put` and `kb_search` for every session ([step-3/knowledge.md](../../planning/contracts/step-3/knowledge.md), section 5).
+`post`, `note_put` and `kb_put` (both `name` and `text`) run `CheckOutboundSecret` before signing or sending any command to the home.
 
 # Task and review tools
 
@@ -241,7 +252,7 @@ The rules are in [mcp-tools.md](../../planning/contracts/mcp-tools.md) and [loca
 
 `approve.go` handles permission requests and multiple-choice user questions from both CLIs (`planning/flows/approval.md`, `planning/contracts/mcp-tools.md` section 3):
 
-- `Tools["approve"]` is listed only to structured Claude Code sessions (`c.Agent == "claude" && !c.Interactive`). It maps `AskUserQuestion` to per-question `decision` cards (`options` `"A"`..`"Z"` plus custom free-text answers, posted one card at a time) returning `updatedInput.answers` (and optional `annotations`), and maps `Bash`, `Write`/`Edit`/`NotebookEdit`/`Read`, `WebFetch`/`WebSearch`, and other tool names to `Ask` (`planning/contracts/messages.md` section 2.3).
+- `Tools["approve"]` is listed only to structured sessions of drivers with `Capabilities.Approvals == "tool"` (`usesApproveTool(c.Agent) && !c.Interactive`). It maps `AskUserQuestion` to per-question `decision` cards (`options` `"A"`..`"Z"` plus custom free-text answers, posted one card at a time) returning `updatedInput.answers` (and optional `annotations`), and maps `Bash`, `Write`/`Edit`/`NotebookEdit`/`Read`, `WebFetch`/`WebSearch`, and other tool names to `Ask` (`planning/contracts/messages.md` section 2.3).
 - `Listeners["approve"]` starts a goroutine per `Asked` event so `Report` returns at once, brackets the open request synchronously with `Sessions.Calling`, answers Codex `requestUserInput` questions through `Ask.Reply` (posting per-question `decision` cards) and permission requests through `Runner.Answer`, and cancels open `Asked` contexts of a session on `TurnBegan` or `TurnEnded`.
 - `thread` and `body.task` are set on `approval` and `decision` cards only for `TaskSession` and `ReviewSession`; a `GroupSession` posts main-line cards with `thread: null` and empty or omitted `task`.
 - Permission requests from `callApprove` at level 1 are denied immediately; permission requests raised by a CLI fetch any matching `pending` row's `msg` card from the home (consuming an `approved` card and removing stale `denied`, `expired` or `reassigned` records), check `CheckOutboundSecret` on `Command` and `Why`, shorten `Command` to 3 KiB and `Why` to 256 B as unescaped JSON strings, store a `pending` row, open `Host.Await` (with `nil` check) before sending `post` (`kind: approval`), and wait up to `limits.approval_wait_s` (default 600 s).
@@ -256,6 +267,6 @@ The rules are in [mcp-tools.md](../../planning/contracts/mcp-tools.md) and [loca
 - **Member status reads memory only.** `Part[limitsPart](h)` keeps the owner's offline switch, each CLI's turns today and its latest rate-limit window. `Built` loads the switch and today's turns once from `setting` `'offline'` and `usage`; `host.offline` and `host.online` write the switch to both, and `TurnEnded` counts the turn in the day's `usage` row and in memory in one step. `Held`, `MemberState` and the `usage` of `member status` (`window_pct`, `window_resets`, `turns_today`) never touch the store, so a status sent while the host shuts down cannot reach a closed store.
 - **Offline and online.** `host.offline` sets the switch, closes every session through `Runner.Close` (also during a turn), and sends every AI's home a `member status` with state `offline`, carrying `turn_interrupted` with reason `stop` for an AI whose turn it ended; a stopped home does not fail it (`A4.8`). While offline, `Held` holds every item. `host.online` clears the switch, sends each AI's `member status` and calls `Deliver`.
 - **Turn limits.** On `TurnBegan`, a timer of `group.limits.turn_minutes` (default 60) and, for Codex, a 5-minute silent timer, reset by `Active`, `Asked` and `Used` and deferred while a tool call is open ([drivers.md](../../planning/contracts/drivers.md) section 1.2 step 6), interrupt the turn with reason `timeout`, killing the CLI after 10 s; the runtime then sends `turn_interrupted` and, for a task session, `task fail` with reason `timeout` (`A4.9`). A pause interrupts with reason `stop` and never fails the task.
-- **Vendor rate limits.** `RateLimited` holds the CLI's items until `resets`, then sends `member status` and calls `Deliver`. Its `rate_limited` event goes with the status that ends a running turn, so that it cannot overtake it, or at once outside a turn.
+- **Vendor rate limits.** `RateLimited` holds the CLI's items until `resets`, then sends `member status` and calls `Deliver`. `MemberState` shows the `offline` hold as `offline` and the `rate_limit` hold as `limited`; a takeover's hold is no overlay (the session's own state shows it). Its `rate_limited` event goes with the status that ends a running turn, so that it cannot overtake it, or at once outside a turn.
 - **Shutdown.** `Settle` (entry `"limits"`) sets `settled` under `limitsPart.mu`, stops the timers and waits for `limitsPart.wg`; after that a rate-limit release or event starts nothing and arms no timer.
 - **Lock order.** `limitsPart.mu` is a leaf lock over the maps and timer handles; it is never held across `Store.Write`, `Sessions`, `Rows`, `Host` or runtime locks.

@@ -32,7 +32,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | show the group an accepted device-log entry | a `proto.DeviceRow` in `Result.Rows`; `Commit` applies its entry to the state's log |
 | do after a commit what a pure function cannot, such as a Web Push | a function `func(s *State, res Result)` and `After.Add(name, f)` in its file's `init` |
 | know in a hook which devices are connected | `s.Online[device]` |
-| answer with result fields | `Result.Answer.Num`, `.Passed`, `.Round`, and for `invite`, `Result.Link` and `Result.Expires` |
+| answer with result fields | `Result.Answer.Num`, `.Passed`, `.Round`, `.ID`, `.Replaced`, and for `invite`, `Result.Link` and `Result.Expires` |
 | create or replay an invitation | `Result.InviteBy` (the inviting admin's member id) with `LoopConfig.Invite` / `State.Invite` (`Inviter`) |
 | handle a joining connection | `c.Joining` (`*Joining`: `Group`, `By`, `Open`, `Log`, `Admit`), attached with `conn.SetJoining(fn)` on `Loop` or passed to `Commands.ApplyJoining`; `Result.InviteUsed` marks an accepted `join` that consumes the invitation |
 | refuse | `&Refusal{Code: "conflict", Msg: "…"}`, with a code of [datachannel](../../planning/contracts/datachannel.md) section 9 |
@@ -189,7 +189,9 @@ names that start with `brief`, their tests too, and their test functions start w
 The task commands (`cmd_task.go`) take the names that start with `tsk`, their tests too, and their
 test functions start with `TestTaskCmd`. The posts of HM-6 take the names that start with `post`,
 their tests too, and their test functions start with `TestPost`; the notes and `forget` take the
-names that start with `note`, their tests too, and their test functions start with `TestNote`.
+names that start with `note`, their tests too, and their test functions start with `TestNote`;
+the knowledge base (`kb.go`) takes the names that start with `kb`, and its test functions start
+with `TestKB`.
 The cards take the names that start with `card`, their tests too, and their test functions start
 with `TestCard`. Device-log events (`ev_device.go`) take the names that start with `dev`, and their
 tests start with `TestDevice` and `dev`. Sync takes the names that start with `syn`, its tests too,
@@ -211,6 +213,8 @@ The step-2 people seam (`people_seam.go`) takes the unexported names that start 
 `keyInvite` / `keyJoin` (leaving `ppl` for `cmd_people.go`), and exports `Joining`, `InviteLink`,
 `Inviter`, `(*Conn).SetJoining` and `Table.ApplyJoining`. Web Push (`webpush.go`) takes the names that start with
 `wpush`, its tests too, and its test functions start with `TestWebPush`.
+Style presets (`preset.go`) take the names that start with `preset`, their tests too, and their test
+functions start with `TestPreset`.
 
 ## The run loop
 
@@ -289,10 +293,10 @@ and read again on the next tick. An item that cannot be made into a frame is rep
 once for each connection until its next `Inbox`, and the other items are sent.
 
 **Fetch.** `Fetch(conn, req)` answers a `fetch` request
-([datachannel](../../planning/contracts/datachannel.md), section 4): a page by `kind` (`note` or
-`review`) when `Kind` is set, one live row when `Row` or `RowID` is set, or a page of a task's
+([datachannel](../../planning/contracts/datachannel.md), section 4): a page by `kind` (`note`,
+`preset`, `kb` or `review`) when `Kind` is set, one live row when `Row` or `RowID` is set, or a page of a task's
 thread or of the main line (`Thread` nil) otherwise. Paged reads require `Limit` in 1..100 and
-`Before >= 0` (`bad_request` otherwise). On the goroutine of the group (`ask`), it checks that the
+`Before >= 0` (`bad_request` otherwise). With `kind: kb`, a non-nil `Query` turns the page into a search: it requires `Before` 0 and a non-blank query (`bad_request` otherwise) and returns the matching documents best first (`kbSearchOK`, `store.SearchKB`). On the goroutine of the group (`ask`), it checks that the
 connection is still seated, that the group exists (`not_found` otherwise) and serves the
 connection's device (`forbidden` otherwise), opens and closes a `store.Snapshot`, packs page rows
 with `runBatches` within the 61,440-byte `ctl` limit
@@ -550,18 +554,19 @@ merges in `cmd_merge.go` (unit HM-12). Where the contracts are silent, it does t
 
 ## Posts, notes and forget
 
-`cmd_post.go` holds `post` of kinds `text`, `progress`, `question` and `report`
+`cmd_post.go` holds `post` of kinds `text`, `progress`, `question`, `report` and `handback`
 ([commands](../../planning/contracts/commands.md) 1.3;
-[messages](../../planning/contracts/messages.md) 1 and 2.7;
+[messages](../../planning/contracts/messages.md) 1, 2.7 and 2.10;
 [rows](../../planning/contracts/rows.md) sections 4 and 5), under `post/<kind>`. `cmd_note.go`
 holds `note` and `forget` ([commands](../../planning/contracts/commands.md) 1.6;
 [rows](../../planning/contracts/rows.md) sections 5 and 6). Where the contracts are silent, they do
 this:
 
-- **Who and placement.** `text` is by a person or an AI; `progress`, `question` and `report` are by
-  an AI, else `forbidden`. `progress` and `report` belong in a thread (`thread` not `null`), else
-  `bad_request`. None of the four is raised from a thread, and the row is written with `main`
-  `false`.
+- **Who and placement.** `text` is by a person or an AI; `progress`, `question`, `report` and
+  `handback` are by an AI, else `forbidden`. `progress` and `report` belong in a thread (`thread`
+  not `null`), else `bad_request`; `handback` belongs in a thread unless `as` is the group's
+  secretary, else `bad_request`. None of the five is
+  raised from a thread, and the row is written with `main` `false`.
 - **Thread and mentions.** A non-null `thread` must name a task in `State.Tasks`, else `not_found`;
   for `report`, `as` must be that task's `assignee`, else `forbidden`. `(*State).postMentions`,
   shared with `cmd_brief.go`, checks the `mentions` rule of
@@ -571,8 +576,10 @@ this:
   HTML escaping; a post in a thread follows it with the updated `TaskRow` (`thread.count` + 1, and
   `thread.last` with `text` cut to at most 200 UTF-8 characters). A post never queues an item for
   its own author ([commands](../../planning/contracts/commands.md) 1.3): `text`, `progress` and
-  `question` queue `mention` for each other mentioned AI in `mentions` order, and a main-line `text`
-  from a person that mentions no AI queues `mention` for `Group.Secretary` when set.
+  `question` queue `mention` for each other mentioned AI in `mentions` order, a main-line `text`
+  from a person that mentions no AI queues `mention` for `Group.Secretary` when set, and a
+  `handback` posted in a thread queues `notice` (`code: "handback"`) for `Group.Secretary` when
+  set.
 - **`note` and `forget`.** `note` is by a person or an AI; a non-null `task` that names no task in
   `State.Tasks` is `not_found`, and the `NoteRow` gets `ts` as signed (`c.Timestamp`). `forget` is
   by an admin only (`forbidden`); `r` must be `note` or `msg` (`bad_request`); a missing or already

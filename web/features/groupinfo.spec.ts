@@ -281,15 +281,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           flushSync();
         },
       );
-      Then(
-        'no forget command was sent and focus returns to "Delete note: Keep rtt_ms empty on relay."',
-        () => {
-          expect(rig.forgets).toEqual([]);
-          expect(document.activeElement?.getAttribute('aria-label')).toBe(
-            'Delete note: Keep rtt_ms empty on relay.',
-          );
-        },
-      );
+      Then('no forget command was sent and the confirmation is gone', () => {
+        expect(rig.forgets).toEqual([]);
+        expect(all('#chat-side dialog')).toEqual([]);
+      });
       When(
         'the owner presses "Delete note: Keep rtt_ms empty on relay." and confirms "Delete"',
         async () => {

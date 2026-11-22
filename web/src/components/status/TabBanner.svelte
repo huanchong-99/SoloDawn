@@ -12,7 +12,14 @@
   <div class="tab-ban" role="status">
     <Icon name="info" />
     <span class="grow">{t('app.otherTab')}</span>
-    <button type="button" class="btn btn-sm btn-dawn" onclick={net.useHere}>
+    <button
+      type="button"
+      class="btn btn-sm btn-dawn"
+      onclick={() => {
+        net.useHere!();
+        document.querySelector('main')!.focus();
+      }}
+    >
       {t('app.useHere')}
     </button>
   </div>

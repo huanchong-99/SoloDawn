@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { tick } from 'svelte';
   import Avatar from '../components/Avatar.svelte';
   import Failure from '../components/Failure.svelte';
   import Icon from '../components/Icon.svelte';
@@ -50,15 +49,8 @@
     return card?.contains(document.activeElement) ? card : null;
   }
 
-  function focusNodeCard(card: HTMLElement | null, restoreRadio: boolean) {
+  function focusNodeCard(card: HTMLElement | null) {
     if (!card) return;
-    const radio = restoreRadio
-      ? card.querySelector<HTMLElement>('input[type="radio"]:not([disabled])')
-      : null;
-    if (radio) {
-      radio.focus({ preventScroll: true });
-      return;
-    }
     card.tabIndex = -1;
     card.focus({ preventScroll: true });
   }
@@ -69,14 +61,10 @@
     const key = `${comp.info.device}:${agent}`;
     busyAcct[key] = true;
     acctFailed[key] = '';
-    focusNodeCard(card, false);
+    focusNodeCard(card);
     const answer = await nodes.setAccount(comp.home, comp.info.device, agent, account);
     busyAcct[key] = false;
-    if (answer.err) {
-      acctFailed[key] = answer.err.code;
-      await tick();
-      focusNodeCard(card, true);
-    }
+    if (answer.err) acctFailed[key] = answer.err.code;
   }
 </script>
 
