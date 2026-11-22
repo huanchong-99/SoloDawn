@@ -29,6 +29,7 @@ func (d *rndDisk) Msg(id string) (proto.MsgRow, bool) {
 }
 
 func (d *rndDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
+func (d *rndDisk) TypedNotes(string) []proto.NoteRow         { return nil }
 func (d *rndDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d *rndDisk) Pending() []proto.MsgRow                   { return d.pending }
 func (d *rndDisk) Queued() []store.Item                      { return d.queued }

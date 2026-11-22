@@ -37,6 +37,7 @@ func (d tskDisk) Msg(id string) (proto.MsgRow, bool) {
 }
 
 func (d tskDisk) Note(string) (proto.NoteRow, bool) { return proto.NoteRow{}, false }
+func (d tskDisk) TypedNotes(string) []proto.NoteRow { return nil }
 
 func (d tskDisk) countThread() {
 	if d.threadCalls != nil {
