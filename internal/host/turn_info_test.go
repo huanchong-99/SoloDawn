@@ -76,6 +76,29 @@ func TestStep2InstructionsCarryTwoLabelRules(t *testing.T) {
 	}
 }
 
+func TestDecisionLabelsUseUserIDsOnlyForDecisionAddressees(t *testing.T) {
+	r := newTeamLabelRig(t, "Q")
+	c := &turnCtx{h: r.h, s: r.sess(r.qTeam, "Q-team", TaskSession, false), owner: r.qUser}
+	for _, tc := range []struct {
+		kind, writer, actor string
+		to                  []string
+		want                bool
+	}{
+		{"decision", r.qTeam, r.pMem, []string{r.pUser}, true},
+		{"decision", r.qTeam, r.pMem, []string{r.pMem}, false},
+		{"decision", r.qTeam, r.qMem, nil, true},
+		{"decision", r.pAI, r.pMem, []string{r.pUser}, false},
+		{"brief", r.qTeam, r.pMem, []string{r.pUser}, false},
+		{"decision", r.qTeam, r.pAI, []string{r.pUser}, false},
+		{"decision", r.qTeam, "", nil, false},
+	} {
+		msg := proto.MsgRow{Kind: tc.kind, By: tc.writer, Body: mustJSON(t, proto.DecisionBody{Options: []proto.DecisionOption{}, To: tc.to}), State: &proto.CardState{By: &tc.actor}}
+		if got := c.decisionInstruct(msg); got != tc.want {
+			t.Fatalf("%+v: got %v, want %v", tc, got, tc.want)
+		}
+	}
+}
+
 func TestTaskThreadMentionsAndCrossOwnerDirectMentions(t *testing.T) {
 	r := newTeamLabelRig(t, "Q")
 	// A9.12: in a running task's thread, P's mention (even claiming owner instruction, or listed on Q-team) is information; Q's post is instruction.

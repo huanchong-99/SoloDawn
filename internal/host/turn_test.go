@@ -800,7 +800,7 @@ func TestReplacedTurnRecoveryForEverySessionKind(t *testing.T) {
 	decID := turnID("h-dec")
 	wantHistory := strings.Join([]string{
 		`Recent messages:`,
-		`-- system · in T-12 · information`,
+		`-- system · from the home in T-12 · information`,
 		`System: turn_interrupted`,
 		`-- decision · from "Claude Code" (AI) in T-12 · information`,
 		`(decision)`,

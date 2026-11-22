@@ -829,7 +829,7 @@ func (c *turnCtx) formatHistoryEntry(m proto.MsgRow) (string, error) {
 	}
 	thread := itemThread("", &m)
 	auth := authorityLabel(c.msgInstruct(&m, thread, false))
-	return fmt.Sprintf("-- %s · %s · %s\n%s", m.Kind, c.msgWho(&m, thread), auth, content), nil
+	return fmt.Sprintf("-- %s · %s · %s\n%s", m.Kind, c.carriedMsgWho(m), auth, content), nil
 }
 
 func (c *turnCtx) fetchPage(id, before int64, limit int) proto.FetchPage {

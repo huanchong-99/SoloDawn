@@ -65,7 +65,7 @@ func (c *turnCtx) decisionInstruct(msg proto.MsgRow) bool {
 	if c.wordEnough(by) {
 		return true
 	}
-	if msg.By != c.s.Member {
+	if msg.Kind != "decision" || msg.By != c.s.Member {
 		return false
 	}
 	var body proto.DecisionBody
