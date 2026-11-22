@@ -78,7 +78,7 @@
       <button class="icon-btn only-wide" onclick={toggleTheme} aria-label={t('bar.theme')}>
         {#key isDark()}<span class="swap"><Icon name={isDark() ? 'sun' : 'moon'} /></span>{/key}
       </button>
-      <!-- Named by its visible text first, then in both languages, each part in its own (WCAG 2.2
+      <!-- Named by its visible text first, then in both languages, each part in its own (WCAG 2.1
            SC 2.5.3 and 3.1.2). -->
       <button class="icon-btn only-wide" onclick={toggleLang}>
         {#key prefs.lang}<span class="swap" lang={otherLang()}>{t('bar.lang.other')}</span>{/key}

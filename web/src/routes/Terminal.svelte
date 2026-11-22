@@ -33,6 +33,7 @@
   };
 
   let termHost = $state<HTMLElement>();
+  let exit = $state<HTMLElement>();
   let term: import('@xterm/xterm').Terminal | undefined;
   // What the computer sends before xterm has loaded.
   const early: (Uint8Array | string)[] = [];
@@ -92,6 +93,17 @@
       const fit = new FitAddon();
       instance.loadAddon(fit);
       instance.open(termHost);
+      instance.textarea!.setAttribute('aria-describedby', 'term-leave');
+      // Tab and Shift+Tab belong to the terminal, so Ctrl+M, which a terminal reads as Enter,
+      // is the keyboard's way out of it: to the bar's button.
+      instance.attachCustomKeyEventHandler((event) => {
+        const leave = event.ctrlKey && event.key === 'm';
+        if (leave) {
+          event.preventDefault();
+          exit!.focus();
+        }
+        return !leave;
+      });
       term = instance;
       for (const chunk of early.splice(0)) instance.write(chunk);
       instance.onData((text) => tk.type(text));
@@ -136,11 +148,11 @@
           {/if}
         </span>
         {#if bar.handback}
-          <a class="btn btn-dawn" href={backHref} onclick={() => tk.handBack()}>
+          <a class="btn btn-dawn" href={backHref} bind:this={exit} onclick={() => tk.handBack()}>
             {t('terminal.handback')}
           </a>
         {:else}
-          <a class="btn" href={backHref}>{t('terminal.back')}</a>
+          <a class="btn" href={backHref} bind:this={exit}>{t('terminal.back')}</a>
         {/if}
       </div>
 
@@ -152,7 +164,12 @@
         aria-label={t('terminal.aria.term').replace('{ai}', ai?.name ?? t('terminal.title'))}
       ></div>
 
-      <div class="keys only-narrow" role="toolbar" aria-label={t('terminal.aria.keys')}>
+      <div
+        class="keys only-narrow"
+        role="toolbar"
+        tabindex="0"
+        aria-label={t('terminal.aria.keys')}
+      >
         {#each phoneKeys as key (key.label)}
           <button
             type="button"
@@ -253,6 +270,10 @@
   }
   .term :global(.xterm-viewport) {
     background-color: var(--term-bg);
+  }
+  /* xterm draws faint text at half the foreground's opacity, 4.1 to 1 on --term-bg. */
+  .term :global(.xterm-rows .xterm-dim:not([class*='xterm-fg-'])) {
+    color: var(--term-dim);
   }
   .keys {
     display: flex;

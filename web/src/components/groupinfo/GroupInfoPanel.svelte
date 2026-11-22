@@ -35,8 +35,8 @@
     if (open) memory.sync();
   });
 
-  function askForget(r: ForgetRowType, id: string, label: string, trigger: HTMLButtonElement) {
-    pending = { r, id, label, heading: r === 'note' ? notesHead : ledgerHead, trigger };
+  function askForget(r: ForgetRowType, id: string, label: string) {
+    pending = { r, id, label, heading: r === 'note' ? notesHead : ledgerHead };
   }
 </script>
 
@@ -94,7 +94,7 @@
                       disabled={!group.info || Boolean(forgetReason)}
                       aria-label={t('groupinfo.forget.note').replace('{text}', label)}
                       aria-describedby={forgetReason ? `${uid}-why` : undefined}
-                      onclick={(e) => askForget('note', note.id, label, e.currentTarget)}
+                      onclick={() => askForget('note', note.id, label)}
                     >
                       {t('groupinfo.forget')}
                     </button>
@@ -152,7 +152,7 @@
                       disabled={!group.info || Boolean(forgetReason)}
                       aria-label={t('groupinfo.forget.review').replace('{text}', label)}
                       aria-describedby={forgetReason ? `${uid}-why` : undefined}
-                      onclick={(e) => askForget('msg', review.id, label, e.currentTarget)}
+                      onclick={() => askForget('msg', review.id, label)}
                     >
                       {t('groupinfo.forget')}
                     </button>
