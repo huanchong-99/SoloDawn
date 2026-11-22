@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { parts } from '../../lib/compose';
   import { subject, type Group } from '../../lib/groups.svelte';
   import { jumpToMessage } from '../../lib/jump';
@@ -61,9 +61,30 @@
     }
     return subject(msg) || t(`chat.kind.${msg.kind}`);
   }
+  let root: HTMLElement;
+  let listEl: HTMLElement;
+
+  function moveThreadFocus() {
+    const summary = root.closest('details')?.querySelector<HTMLElement>('summary');
+    const next =
+      root.querySelector<HTMLElement>('.tpage button:not([disabled])') ?? summary ?? listEl;
+    if (next === listEl) listEl.tabIndex = -1;
+    next.focus({ preventScroll: true });
+  }
+
+  async function loadOlder() {
+    const hadFocus = root.contains(document.activeElement);
+    if (hadFocus) {
+      listEl.tabIndex = -1;
+      listEl.focus({ preventScroll: true });
+    }
+    await group.older(task.id);
+    await tick();
+    if (hadFocus) moveThreadFocus();
+  }
 </script>
 
-<div class="thread">
+<div class="thread" bind:this={root}>
   {#if stuck}
     <p class="tpage">{t('thread.older.offline')}</p>
   {:else if paging.more}
@@ -72,14 +93,14 @@
         type="button"
         class="btn btn-sm btn-ghost"
         disabled={paging.busy}
-        onclick={() => void group.older(task.id)}
+        onclick={() => void loadOlder()}
       >
         {t(paging.busy ? 'thread.older.busy' : 'thread.older')}
       </button>
     </div>
   {/if}
 
-  <ol class="tlist">
+  <ol class="tlist" bind:this={listEl}>
     {#each msgs as msg (msg.id)}
       {@const time = clock(msg.ts, prefs.lang)}
       {@const iso = new Date(msg.ts).toISOString()}

@@ -726,11 +726,21 @@ describe('the subject of a message', () => {
 describe('a home', () => {
   it('lists the groups of its node and reads each', () => {
     const home = new Home(me);
-    expect([home.ctl, home.groups, home.name, home.owner]).toEqual([undefined, [], '', false]);
+    expect([home.ctl, home.groups, home.device, home.name, home.owner]).toEqual([
+      undefined,
+      [],
+      '',
+      '',
+      false,
+    ]);
     expect(home.me).toBe(me);
     const { ctl, asked } = connect(home, [listed('one', 'One'), listed('two', 'Two')]);
     expect(home.ctl).toBe(ctl);
-    expect([home.name, home.owner]).toEqual(['workstation', true]);
+    expect([home.device, home.name, home.owner]).toEqual([
+      'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q',
+      'workstation',
+      true,
+    ]);
     expect(home.groups.map((group) => [group.g, group.name])).toEqual([
       ['one', 'One'],
       ['two', 'Two'],

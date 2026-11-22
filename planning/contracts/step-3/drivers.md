@@ -113,17 +113,14 @@ would be refused. The home knows nothing of it, and no row changes.
 | Where | What the declaration switches |
 | --- | --- |
 | `agent.set` | an `account` not in `accounts` is refused with `bad_request` |
-| `perm.set` | a `level` not in `levels` is refused with `bad_request` |
-| the level of a task session | the highest level in `levels` that is not above the level the other rules give: `contracts/commands.md` section 2, and from step 2 the cap of R-44 |
-| `settings.set` | a cap for this CLI whose `unit` is neither `turns` nor in `usage` is refused with `bad_request` |
 | the tool list of a session | `approve` is listed only to a structured session of a driver with `approvals` `tool` (`contracts/mcp-tools.md` section 3) |
 | `takeover.start` | refused with `conflict` when `takeover` is `none`, before the checks that answer `relay`, `busy` or `cli` |
 | `takeover.start` for a working AI without an unfinished task | `new`: the session starts in the terminal. `resume`: the structured `assign` turn comes first |
 
 - Each refusal names the field of the declaration in `msg`.
-- From step 2, a task that someone other than the owner caused runs at
-  level 2 at most (R-44). On a CLI whose `levels` are `1` and `3` that is
-  level 1: such a task can be read and reported on, and not submitted.
+- No switch reads `levels` or `usage` in 1.0: `perm.set` and the caps of
+  `settings.set` are postponed, and R-44 is not applied (coordinator,
+  2026-11-22). They are declared all the same, for when those return.
 - Nothing else in the node asks which CLI a session runs. A difference
   between CLIs that is not in this table lives inside the driver, behind
   the five operations.
@@ -132,25 +129,23 @@ would be refused. The home knows nothing of it, and no row changes.
 
 One addition: each entry of `agents` in `host.info`
 (`contracts/datachannel.md` section 7) carries the declaration as the
-always-present object `driver`, field for field as section 4 gives it.
+always-present object `driver`, with the `accounts` and `takeover` of section 4.
 The name is not `caps`: that field holds the owner's usage caps.
 
 ```json
 {"agent":"codex","cli_version":"0.164.0","account":"team","login_ok":true,
  "caps":{},
- "driver":{"accounts":["personal","team","api_key"],"levels":[1,2,3],
-           "approvals":"conn","takeover":"resume","usage":[]},
+ "driver":{"accounts":["personal","team","api_key"],"takeover":"resume"},
  "groups":[]}
 ```
 
 | Field | Presence | The web client uses it for |
 | --- | --- | --- |
 | `accounts` | always, never `[]` | the account types offered when an AI is registered |
-| `levels` | always, never `[]` | the levels offered where a level is chosen |
-| `approvals` | always | nothing: every driver has a channel (section 3) |
 | `takeover` | always | "open terminal" is absent when it is `none` |
-| `usage` | always; `[]` when the CLI reports none | the cap units offered beside `turns` |
 
+- The other fields of section 4 stay in the host's own table and go on the
+  wire when level control or caps return.
 - `agent` in `host.info` and `cli` in a member row (`contracts/rows.md`
   section 2) take one new value per driver: the name the driver declares,
   made of `a` to `z`, `0` to `9` and `_` (`contracts/conventions.md`
@@ -161,9 +156,8 @@ The name is not `caps`: that field holds the owner's usage caps.
   something says so in the group, like any member.
 - `driver` is a wire shape, so lane PROTO freezes it in both languages in
   one pull request (`contracts/conventions.md` section 5): unit P-5, as
-  the coordinator decided on 2026-11-20. The Fable interface unit U3-3
-  shows it: the account choice, the level control, the cap units and the
-  terminal button. The parallel plan lists both; T3-1 puts nothing on the
+  the coordinator decided on 2026-11-20. The interface unit U3-3 shows it:
+  the account choice and the terminal button (2026-11-22). The parallel plan lists both; T3-1 puts nothing on the
   wire, and T3-2 puts `driver` into `host.info` after P-5.
 
 ## 7. Acceptance
@@ -232,6 +226,5 @@ is in that description. `[documented]` means read there and not run.
 5. The capability tests are A10.1 to A10.4 of
    `steps/step-3-acceptance.md` (unit C2-0).
 6. The answers of `steps/parallel-plan-step-2-3.md` section 1 that this
-   file rests on: D-16 only. The level cap of D-1 is used as R-44 states
-   it.
+   file rests on: D-16 only. R-44 is not applied in 1.0.
 7. Decided on 2026-11-20: the approval channel is required (point 3).
