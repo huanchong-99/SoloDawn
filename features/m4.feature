@@ -68,7 +68,7 @@ Feature: M4 permissions, approvals, decisions and the group pause
     Then "Codex"'s running turn is interrupted within 2 seconds with reason "stop" and system message "group_paused"
     When the M4 owner mentions "Codex" with "@Codex first queued note"
     And the M4 owner mentions "Codex" with "@Codex second queued note"
-    Then the 2 M4 mention items stay on the home while the group is paused
+    Then the M4 home inbox contains 2 items while the group is paused
     When the M4 owner resumes the group
     Then "Codex" posts "Codex answered held mentions." after system message "group_resumed" and the M4 home inbox is empty
     And "Claude"'s approval-waiting task was not woken by the group resume
