@@ -7,8 +7,8 @@ import (
 )
 
 // Messages in the main line and in task threads: post of kinds text, progress,
-// question and report (planning/contracts/commands.md 1.3;
-// planning/contracts/messages.md 1 and 2.7). A message in a thread advances
+// question, report and handback (planning/contracts/commands.md 1.3;
+// planning/contracts/messages.md 1, 2.7 and 2.10). A message in a thread advances
 // the task's thread summary (planning/contracts/rows.md section 4).
 
 func init() {
@@ -16,6 +16,7 @@ func init() {
 	Commands.Add("post/progress", postProgress)
 	Commands.Add("post/question", postQuestion)
 	Commands.Add("post/report", postReport)
+	Commands.Add("post/handback", postHandback)
 }
 
 const (
@@ -23,6 +24,7 @@ const (
 	postKindProgress = "progress"
 	postKindQuestion = "question"
 	postKindReport   = "report"
+	postKindHandback = "handback"
 
 	postMentionWhy   = "mention"
 	postPreviewLimit = 200
@@ -68,6 +70,20 @@ func postReport(s *State, c Command) (Result, *Refusal) {
 		return Result{}, refusal
 	}
 	return Result{Rows: rows}, nil
+}
+
+// postHandback writes a hand-back summary: in a thread, or anywhere when as
+// is the secretary. One in a thread is a notice for the secretary.
+func postHandback(s *State, c Command) (Result, *Refusal) {
+	rows, msg, refusal := postWrite[proto.HandbackBody](s, c, postKindHandback, true, !s.Secretary(c.Who))
+	if refusal != nil {
+		return Result{}, refusal
+	}
+	var items []Item
+	if msg.Thread != nil && s.Group.Secretary != "" {
+		items = []Item{{AI: s.Group.Secretary, Why: "notice", Task: *msg.Thread, Msg: msg.ID, Code: postKindHandback}}
+	}
+	return Result{Rows: rows, Items: items}, nil
 }
 
 func postWrite[B any](s *State, c Command, kind string, aiOnly, inThreadOnly bool) ([]Row, proto.MsgRow, *Refusal) {

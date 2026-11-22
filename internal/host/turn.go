@@ -460,12 +460,19 @@ func (c *turnCtx) taskStartLines(task proto.TaskRow) ([]string, error) {
 		fmt.Sprintf("Task T-%d %q", task.Num, task.Title),
 		fmt.Sprintf("Branch: task/%d-%s (this folder is its worktree)", task.Num, task.Slug),
 	}
-	spec, err := c.taskSpecLines(task)
+	if task.Origin == "takeover" {
+		return append(lines, "Your owner is about to work with you directly in the terminal."), nil
+	}
+	spec, preset, err := c.taskSpecLines(task)
 	if err != nil {
 		return nil, err
 	}
 	lines = append(lines, spec...)
 	lines = append(lines, fmt.Sprintf("Reviewer: %s   Pass score: %d", c.reviewerName(task.Reviewer), task.Pass))
+	lines, err = c.appendTaskPreset(lines, preset)
+	if err != nil {
+		return nil, err
+	}
 	notes, err := c.fetchNotes()
 	if err != nil {
 		return nil, err
@@ -494,26 +501,26 @@ func (c *turnCtx) reviewerName(id string) string {
 	return id
 }
 
-func (c *turnCtx) taskSpecLines(task proto.TaskRow) ([]string, error) {
+func (c *turnCtx) taskSpecLines(task proto.TaskRow) ([]string, string, error) {
 	if task.Origin == "brief" {
 		return c.briefSpecLines(task.Brief)
 	}
 	if task.Plan != "" {
-		return []string{"Plan: " + task.Plan}, nil
+		return []string{"Plan: " + task.Plan}, "", nil
 	}
-	return nil, nil
+	return nil, "", nil
 }
 
-func (c *turnCtx) briefSpecLines(briefID string) ([]string, error) {
+func (c *turnCtx) briefSpecLines(briefID string) ([]string, string, error) {
 	brief, err := c.fetchBrief(briefID)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	lines := []string{"Goal: " + brief.Goal, "Acceptance criteria:"}
 	for i, criterion := range brief.Criteria {
 		lines = append(lines, fmt.Sprintf("%d. %s", i+1, criterion))
 	}
-	return lines, nil
+	return lines, brief.Preset, nil
 }
 
 func (c *turnCtx) buildReview(p parsedItem, _ bool) (itemBlock, int, error) {
@@ -534,13 +541,13 @@ func (c *turnCtx) reviewLines(task proto.TaskRow, commit string) ([]string, erro
 		"Commit: " + commit,
 		"Diff: .solodawn-review.diff",
 	}
-	spec, err := c.taskSpecLines(task)
+	spec, preset, err := c.taskSpecLines(task)
 	if err != nil {
 		return nil, err
 	}
 	lines = append(lines, spec...)
 	lines = append(lines, "Pass score: "+strconv.Itoa(task.Pass))
-	return lines, nil
+	return appendReviewPreset(lines, preset), nil
 }
 
 func (c *turnCtx) buildCarried(p parsedItem, _ bool) (itemBlock, int, error) {
