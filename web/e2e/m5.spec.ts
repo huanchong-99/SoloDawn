@@ -63,10 +63,15 @@ function secretaryM5Script() {
               scope_in: ['Release notes builder', 'Preflight checklist'],
               scope_out: ['External deployment hooks'],
               tasks: [
+                // Deviation from A5.1's literal "each other's AI" wording: T-2 is held in
+                // run_checks (gateT2) until Secretary posts T-1's summary so the two task_merged
+                // wakes stay ordered and uncoalesced, and internal/host/deliver.go (aiGroupKey)
+                // serializes turns per AI member, so T-1 is reviewed by Codex on coordinator
+                // ("Reviewer") while workstation's Codex is still inside T-2's run_checks.
                 {
                   title: 'Build release checklist',
                   assignee: 'Claude Code',
-                  reviewer: 'Codex',
+                  reviewer: 'Reviewer',
                 },
                 {
                   title: 'Build changelog generator',
@@ -504,12 +509,14 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       const node0Claude = join(scriptDir, 'node0-claude.json');
       const node0Codex = join(scriptDir, 'node0-codex.json');
       const node1Claude = join(scriptDir, 'node1-claude.json');
+      const node1Codex = join(scriptDir, 'node1-codex.json');
       const gateT1 = join(scriptDir, 'release-t1');
       const gateT2 = join(scriptDir, 'release-t2');
 
       await writeFile(node0Claude, JSON.stringify(claudeTaskScript()));
       await writeFile(node0Codex, JSON.stringify(codexTaskScript()));
       await writeFile(node1Claude, JSON.stringify(secretaryM5Script()));
+      await writeFile(node1Codex, JSON.stringify(codexReviewScript()));
 
       const active = await startNet({
         nodes: 2,
@@ -523,6 +530,7 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
             : {
                 ...gitIdentityEnv,
                 SOLODAWN_FAKE_CLAUDE_SCRIPT: node1Claude,
+                SOLODAWN_FAKE_CODEX_SCRIPT: node1Codex,
               },
       });
       net = active;
@@ -589,6 +597,14 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(3);
 
+      await members.locator('button', { hasText: 'Add AI' }).click();
+      await poll(() => addDlg.locator('.choice').count()).toBe(4);
+      await addDlg.locator('.choice', { hasText: 'Codex · coordinator' }).locator('input').check();
+      await addDlg.locator('input.input').fill('Reviewer');
+      await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
+      await poll(() => addDlg.count()).toBe(0);
+      await poll(() => members.locator('.member').count()).toBe(4);
+
       // Owner sends plain request in chat -> Secretary posts BriefCard.
       await sendChatMessage(page, 'Build the release checklist and changelog');
 
@@ -613,8 +629,8 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await poll(() => task1Card.count()).toBe(1);
       await poll(() => task2Card.count()).toBe(1);
 
-      // Wait until both task CLIs have started and loaded their task scripts, swap both workstation
-      // scripts to cross-reviewers (Codex reviews T-1, Claude Code reviews T-2), then release T-1.
+      // Wait until both task CLIs have started, swap workstation Claude to its reviewer script for
+      // T-2, then release T-1 (reviewed by Reviewer on coordinator while T-2 stays held at gateT2).
       await vi.waitFor(
         async () => {
           const log = await readFile(homeNode.env.SOLODAWN_FAKECLI_LOG, 'utf8').catch(() => '');
@@ -624,7 +640,6 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
         { timeout: 15_000, interval: 25 },
       );
       await writeFile(node0Claude, JSON.stringify(claudeReviewScript()));
-      await writeFile(node0Codex, JSON.stringify(codexReviewScript()));
       await writeFile(gateT1, 'ok');
 
       // Wait until T-1 merges and Secretary posts SummaryCard #1, then release T-2.
