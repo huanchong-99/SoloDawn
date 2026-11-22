@@ -20,6 +20,12 @@ states, the transactions, the clock and the connections ("The run loop" below).
 
 ## Use this capability
 
+`team.go` restricts team groups to people, main-line text and bulletins, and
+notes. Team creation omits the repository and uses an empty base, forge `none`
+and no checks. Project settings, tasks, threaded or AI posts and AI admission
+are refused. A bulletin preserves its signed project and secretary labels;
+the home does not verify those labels. Team posts queue no AI inbox items.
+
 | Need | Entry |
 | --- | --- |
 | add a command | a function `func(s *State, c Command) (Result, *Refusal)` in a file of its own, and `Commands.Add(key, f)` in that file's `init` |

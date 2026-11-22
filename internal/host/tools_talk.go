@@ -15,7 +15,7 @@ import (
 // Tools holds the superset schema (secretary for post, group for read_thread)
 // while the MCP server projects caller-specific schemas.
 var (
-	postSchema = json.RawMessage(`{"type":"object","properties":{"kind":{"type":"string","enum":["text","progress","question","handback","summary"],"default":"text"},"mentions":{"type":"array","items":{"type":"string"}},"task":{"type":"string"},"text":{"type":"string"},"where":{"type":"string","enum":["thread","main"]}},"required":["text"],"additionalProperties":false}`)
+	postSchema = json.RawMessage(`{"type":"object","properties":{"group":{"type":"string"},"kind":{"type":"string","enum":["text","progress","question","handback","summary"],"default":"text"},"mentions":{"type":"array","items":{"type":"string"}},"task":{"type":"string"},"text":{"type":"string"},"where":{"type":"string","enum":["thread","main"]}},"required":["text"],"additionalProperties":false}`)
 
 	readThreadSchema = json.RawMessage(`{"type":"object","properties":{"before":{"type":"integer","minimum":1},"limit":{"type":"integer","default":30,"minimum":1,"maximum":100},"task":{"type":"string"}},"required":["task"],"additionalProperties":false}`)
 
@@ -169,14 +169,21 @@ func decodeTalkArgs(raw json.RawMessage, dst any) error {
 }
 
 func callPost(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (any, error) {
-	var a postArgs
+	var a bulletinArgs
 	if err := decodeTalkArgs(raw, &a); err != nil {
 		return nil, err
 	}
 	if err := CheckOutboundSecret(a.Text); err != nil {
 		return nil, err
 	}
-	p, err := preparePost(h, c, a)
+	if a.Group != nil {
+		return callBulletin(ctx, h, c, a)
+	}
+	var ordinary postArgs
+	if err := decodeTalkArgs(raw, &ordinary); err != nil {
+		return nil, err
+	}
+	p, err := preparePost(h, c, ordinary)
 	if err != nil {
 		return nil, err
 	}

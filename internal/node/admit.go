@@ -2,11 +2,9 @@ package node
 
 import (
 	"context"
-	"encoding/json"
 	"sync"
 
 	"github.com/huanchong-99/SoloDawn/internal/home"
-	"github.com/huanchong-99/SoloDawn/internal/host"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
@@ -130,15 +128,6 @@ func (p *Pairer) admit(a *pairAttempt, c *sesConn, log *identity.Log, used bool)
 	c.joining.mu.Lock()
 	c.joining.admitted = true
 	c.joining.mu.Unlock()
-}
-
-func (s *Sessions) cmdHomeAdd(_ context.Context, _ Ctl, _ string, payload json.RawMessage) (any, error) {
-	var cmd proto.HomeAdd
-	if proto.Decode(payload, &cmd) != nil {
-		return nil, &host.Error{Code: "bad_request", Message: "invalid home.add fields"}
-	}
-	entry := proto.Home{Group: cmd.Group, Home: cmd.Home, Name: cmd.Name}
-	return nil, s.cfg.Host.RecordHome(entry, cmd.Addrs)
 }
 
 func (n *nodeRuntime) remembersHome(device string) bool {
