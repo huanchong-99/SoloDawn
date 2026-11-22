@@ -708,3 +708,27 @@ func TestNoteListTool(t *testing.T) {
 	_, err = Tools["note_list"].Call(t.Context(), h, grpCaller, json.RawMessage(`{}`))
 	assertErrorCode(t, err, "home_unreachable")
 }
+
+func TestPostToolHandbackCarriesTheFacts(t *testing.T) {
+	h, _ := seamHost(t, seamStore(t))
+	seedTalkGroup(t, h)
+	home := newTalkHomeStub()
+	h.Attach("home-device", home)
+	tid2 := proto.ID(talkTask2ID)
+	facts := proto.HandbackBody{Files: []string{"a.go"}, Commits: []proto.CommitSubject{{SHA: "9f2c1ab", Subject: "Fix"}}, Added: 4, Removed: 1}
+	t2 := &takeover{facts: facts}
+	takeoverState(h).claim(aiSlot{group: talkGroupID, member: talkAI1ID}, t2, true)
+
+	taskCaller := talkCaller(TaskSession, talkAI1ID, talkTask2ID, false, Turn{Kind: HandbackTurn, Thread: talkTask2ID})
+	mustCallTalk[idResult](t, h, taskCaller, "post", `{"text":"Owner asked for X.","kind":"handback"}`)
+	sent := mustDecodeCmd[proto.Post[proto.HandbackBody]](t, home.asked[0], "/re")
+	assertEqual(t, [4]any{sent.Kind, sent.Thread, sent.Main, sent.Text}, [4]any{"handback", &tid2, false, "Owner asked for X."})
+	assertEqual(t, sent.Body, facts)
+	assertEqual(t, t2.posted, true)
+
+	secCaller := talkCaller(GroupSession, talkSecID, "", true, Turn{Kind: HandbackTurn})
+	mustCallTalk[idResult](t, h, secCaller, "post", `{"text":"Read the logs.","kind":"handback"}`)
+	sentSec := mustDecodeCmd[proto.Post[proto.HandbackBody]](t, home.asked[1], "/thread", "/re")
+	assertEqual(t, sentSec.Thread, (*proto.ID)(nil))
+	assertEqual(t, sentSec.Body, proto.HandbackBody{Files: []string{}, Commits: []proto.CommitSubject{}})
+}

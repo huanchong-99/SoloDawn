@@ -37,6 +37,7 @@ export const schemaOf: Record<string, GenericSchema> = {
   beacon: p.Beacon,
   cmd: p.Cmd,
   'cmd-error': p.ErrorResponse,
+  'cmd-invite-link': p.CmdResult,
   'cmd-noted': p.CmdResult,
   'cmd-ok': p.CmdResult,
   'cmd-pair-link': p.CmdResult,
@@ -60,6 +61,7 @@ export const schemaOf: Record<string, GenericSchema> = {
   'group-set': p.GroupSet,
   groups: p.Groups,
   hello: p.Hello,
+  'home-add': p.HomeAdd,
   'host-info-answer': p.HostInfo,
   'host-info-push': p.HostInfoPush,
   'host-info-request': p.HostInfoRequest,
@@ -69,6 +71,7 @@ export const schemaOf: Record<string, GenericSchema> = {
   'host-online': p.HostCommandOnly,
   ice: p.ICECandidate,
   inbox: p.Inbox,
+  invite: p.Invite,
   'item-assign': p.Item,
   'item-checks': p.Item,
   'item-confirmed': p.Item,
@@ -80,10 +83,12 @@ export const schemaOf: Record<string, GenericSchema> = {
   'item-resume': p.Item,
   'item-review': p.Item,
   'item-reviewed': p.Item,
+  join: p.Join,
   jump: p.Jump,
   'member-add_ai': p.MemberAddAI,
   'member-remove': p.MemberCommand,
   'member-set': p.MemberSet,
+  'member-set-role': p.MemberSet,
   'member-status': p.MemberStatus,
   'member-status-cap_reached': p.MemberStatus,
   'member-status-login_invalid': p.MemberStatus,
@@ -100,6 +105,7 @@ export const schemaOf: Record<string, GenericSchema> = {
   'post-approval': p.Post,
   'post-brief': p.Post,
   'post-call': p.Post,
+  'post-confirm': p.Post,
   'post-decision': p.Post,
   'post-handback': p.Post,
   'post-progress': p.Post,
@@ -113,6 +119,7 @@ export const schemaOf: Record<string, GenericSchema> = {
   'push-off': p.PushOff,
   'push-on': p.PushOn,
   'push-reminder': p.Reminder,
+  'push-reminder-confirm': p.Reminder,
   reset: p.Reset,
   'row-device': p.DeviceRow,
   'row-gone': p.GoneRow,
@@ -131,8 +138,13 @@ export const schemaOf: Record<string, GenericSchema> = {
   'row-msg-brief-revise': p.MsgRow,
   'row-msg-brief-superseded': p.MsgRow,
   'row-msg-call-answered': p.MsgRow,
+  'row-msg-call-denied': p.MsgRow,
   'row-msg-call-waiting': p.MsgRow,
   'row-msg-checks': p.MsgRow,
+  'row-msg-confirm-confirmed': p.MsgRow,
+  'row-msg-confirm-denied': p.MsgRow,
+  'row-msg-confirm-expired': p.MsgRow,
+  'row-msg-confirm-pending': p.MsgRow,
   'row-msg-decision-decided': p.MsgRow,
   'row-msg-decision-expired': p.MsgRow,
   'row-msg-decision-pending': p.MsgRow,
@@ -150,6 +162,7 @@ export const schemaOf: Record<string, GenericSchema> = {
   'row-note-kb': p.NoteRow,
   'row-note-preset': p.NoteRow,
   'row-task': p.TaskRow,
+  'row-task-confirm': p.TaskRow,
   'row-task-paused': p.TaskRow,
   'row-task-waiting': p.TaskRow,
   rows: p.Rows,
@@ -201,16 +214,28 @@ const answers = {
   audit: 'audit-answer',
 } as const satisfies Record<p.RequestType, string>;
 
-/** Whether a command creates a group, after which a node pushes the list of groups again. */
-function createsGroup(env: p.Envelope) {
-  const { t, op } = JSON.parse(env.p) as { t?: unknown; op?: unknown };
-  return t === 'group' && op === 'create';
+type CmdFields = { t: string; op?: string; type?: string };
+
+const cmdAnswers: Record<string, string> = {
+  invite: 'cmd-invite-link',
+};
+
+/** Whether a command adds a readable group, after which a node pushes `groups`. */
+function pushesGroups({ t, op }: CmdFields): boolean {
+  return t === 'join' || (t === 'group' && op === 'create');
+}
+
+/** Which golden command answer a node sends for a signed command payload. */
+function cmdAnswer({ t, type }: CmdFields): string {
+  if (t === 'note' && type !== undefined) return 'cmd-noted';
+  return cmdAnswers[t] ?? 'cmd-ok';
 }
 
 /** A connection to a node that knows the examples' one group and is the owner's: it answers
- *  `host.info` and `audit`. `sync` pushes `reset` and `rows`, then answers `synced`; every command
- *  is accepted, and a `group create` pushes `groups` before its answer. Frames are read as real
- *  ones are: answers with `decodeAnswer`, pushes with `Frame`. */
+ *  `host.info` and `audit`. `sync` pushes `reset` and `rows`, then answers `synced`; commands
+ *  answer with their typed example (`cmd-invite-link`, `cmd-noted`, or `cmd-ok`),
+ *  and `group create` or `join` pushes `groups` before its answer. Frames are read as real ones
+ *  are: answers with `decodeAnswer`, pushes with `Frame`. */
 export function mockCtl(onpush: (push: p.Push) => void): p.Ctl {
   let id = 0;
   return {
@@ -221,8 +246,13 @@ export function mockCtl(onpush: (push: p.Push) => void): p.Ctl {
         push('reset');
         push('rows');
       }
-      if (req.t === 'cmd' && createsGroup(req.env!)) push('groups');
-      return { ...p.decodeAnswer(req.t, goldens[answers[req.t]]), re: id };
+      let example: string = answers[req.t];
+      if (req.t === 'cmd') {
+        const fields = JSON.parse(req.env!.p) as CmdFields;
+        if (pushesGroups(fields)) push('groups');
+        example = cmdAnswer(fields);
+      }
+      return { ...p.decodeAnswer(req.t, goldens[example]), re: id };
     },
   } as p.Ctl;
 }

@@ -492,6 +492,9 @@ func (c *turnCtx) taskStartLines(task proto.TaskRow) ([]string, error) {
 		fmt.Sprintf("Task T-%d %q", task.Num, task.Title),
 		fmt.Sprintf("Branch: task/%d-%s (this folder is its worktree)", task.Num, task.Slug),
 	}
+	if task.Origin == "takeover" {
+		return append(lines, "Your owner is about to work with you directly in the terminal."), nil
+	}
 	spec, preset, err := c.taskSpecLines(task)
 	if err != nil {
 		return nil, err

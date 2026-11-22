@@ -143,12 +143,8 @@ func (w *s3KBWorld) bootNode(withSecondBrowser bool) error {
 }
 
 func (w *s3KBWorld) attachMCP(h *host.Host, dir string) error {
-	_, stop, err := listenMCPSocket(h, dir)
-	if err != nil {
-		return err
-	}
-	registerBothCleanups(w.f.t, w.cleanup, stop)
-	return nil
+	_, _, err := attachMCPSocket(w.f.t, w.cleanup, h, dir)
+	return err
 }
 
 func (w *s3KBWorld) attachBrowsers(withSecond bool) {

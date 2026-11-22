@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -17,8 +16,6 @@ import (
 	"reflect"
 	"slices"
 	"strings"
-	"sync"
-	"testing"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -38,27 +35,6 @@ const (
 	m3SecretToken = "sk-proj-EXAMPLEexampleEXAMPLEexample_EXAMPLE-00"
 	m3SecretError = "secret: this looks like a secret; remove it and send again"
 )
-
-// TestM3MCPShim runs host.RunShim when invoked as a child MCP server process
-// with the socket path and --token arguments after "--". During a regular go
-// test run flag.Args() is empty and the test returns at once.
-func TestM3MCPShim(_ *testing.T) {
-	args := flag.Args()
-	if len(args) == 0 {
-		return
-	}
-	dial := func() (net.Conn, error) {
-		return net.Dial("unix", args[0])
-	}
-	os.Exit(host.RunShim(args[1:], dial, os.Stdin, os.Stdout, os.Stderr))
-}
-
-type m3Event struct {
-	kind   string
-	member string
-	state  string
-	text   string
-}
 
 type m3ToolCheck struct {
 	name             string
@@ -83,9 +59,7 @@ type m3World struct {
 	ids         seqIDGen
 	scriptSeq   int
 	groups      map[string]string
-	aiByName    map[string]proto.AIMemberRow
-	msgs        []proto.MsgRow
-	events      []m3Event
+	homeView
 	pendingCard string
 	holdLink    *m3HoldLink
 	restartLink *m3HoldLink
@@ -96,11 +70,11 @@ func m3Steps(sc *godog.ScenarioContext, f fixtures) {
 	w := &m3World{
 		f:        f,
 		groups:   map[string]string{},
-		aiByName: map[string]proto.AIMemberRow{},
+		homeView: newHomeView(),
 	}
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		if w.activeHost != nil {
-			w.waitAllDormant(w.activeHost)
+			waitHostDormant(w.activeHost)
 		}
 		return ctx, nil
 	})
@@ -178,72 +152,13 @@ func (w *m3World) startCluster() error {
 	w.cluster = nodetest.Start(w.tb, nodetest.Config{Root: w.root, BinDir: w.f.fakeCLIs, Nodes: 1})
 	n := w.node()
 	w.activeHost = n.Host
-	if err := w.attachMCPSocket(n.Host, filepath.Join(n.Dir, "mcp")); err != nil {
+	sockPath, stop, err := attachMCPSocket(w.f.t, w.cleanup, n.Host, filepath.Join(n.Dir, "mcp"))
+	if err != nil {
 		return err
 	}
+	w.sockPath, w.closeMCP = sockPath, stop
 	w.attachBrowser()
 	return nil
-}
-
-func (w *m3World) attachMCPSocket(h *host.Host, dir string) error {
-	sockPath, stop, err := listenMCPSocket(h, dir)
-	if err != nil {
-		return err
-	}
-	registerBothCleanups(w.f.t, w.cleanup, stop)
-	w.sockPath, w.closeMCP = sockPath, stop
-	return nil
-}
-
-// listenMCPSocket serves the host's MCP shim socket in dir and points h.Shim at
-// the test binary's shim entry; stop closes the socket and waits for its
-// connections.
-func listenMCPSocket(h *host.Host, dir string) (string, func(), error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", nil, err
-	}
-	local, err := node.ListenLocal(dir)
-	if err != nil {
-		return "", nil, err
-	}
-	sockPath := filepath.Join(dir, "sock")
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go serveM3MCP(ctx, local, h, &wg)
-	stop := sync.OnceFunc(func() {
-		cancel()
-		local.Close()
-		wg.Wait()
-	})
-	h.Shim = []string{exe, "-test.run=^TestM3MCPShim$", "--", sockPath}
-	return sockPath, stop, nil
-}
-
-func serveM3MCP(ctx context.Context, local *node.Local, h *host.Host, wg *sync.WaitGroup) {
-	defer wg.Done()
-	for {
-		conn, err := local.Accept()
-		if err != nil {
-			return
-		}
-		wg.Add(1)
-		go handleM3MCPConn(ctx, conn, h, wg)
-	}
-}
-
-func handleM3MCPConn(ctx context.Context, conn net.Conn, h *host.Host, wg *sync.WaitGroup) {
-	defer wg.Done()
-	open, _, r, err := node.AcceptOpening(conn)
-	if err != nil {
-		return
-	}
-	if open.MCP == "" {
-		conn.Close()
-		return
-	}
-	h.ServeMCP(ctx, open.MCP, r, conn)
 }
 
 func (w *m3World) attachBrowser() {
@@ -321,23 +236,10 @@ func (w *m3World) awaitBrowserReply(reqID int64) error {
 	return replyErr
 }
 
-func decodeReplyMatch(raw json.RawMessage, reqID int64) (bool, error) {
-	var hdr struct {
-		Re *int64 `json:"re,omitempty"`
-	}
-	if proto.Decode(raw, &hdr) != nil || hdr.Re == nil || *hdr.Re != reqID {
-		return false, nil
-	}
-	var wireErr proto.ErrorResponse
-	if proto.Decode(raw, &wireErr) == nil {
-		return true, fmt.Errorf("%s: %s", wireErr.Err.Code, wireErr.Err.Message)
-	}
-	return true, nil
-}
-
 // drainBrowserUntil is the single reader of w.browser.ch.
 func (w *m3World) drainBrowserUntil(timeout time.Duration, stop func() bool, onFrame func(json.RawMessage)) error {
-	return drainFramesUntil(w.browser, timeout, stop, w.applyBrowserFrame, onFrame)
+	apply := func(raw json.RawMessage) { applyRowsFrame(&w.homeView, raw) }
+	return drainFramesUntil(w.browser, timeout, stop, apply, onFrame)
 }
 
 // drainFramesUntil reads client until stop reports true, passing each frame to
@@ -359,94 +261,17 @@ func drainFramesUntil(client homeFrameClient, timeout time.Duration, stop func()
 	return nil
 }
 
-func (w *m3World) applyBrowserFrame(raw json.RawMessage) {
-	var batch proto.Rows
-	if proto.Decode(raw, &batch) != nil || batch.Type != "rows" {
-		return
-	}
-	for _, elem := range batch.Rows {
-		w.recordRow(elem)
-	}
-}
-
-func (w *m3World) recordRow(elem json.RawMessage) {
-	var hdr proto.RowHeader
-	if proto.Decode(elem, &hdr) != nil {
-		return
-	}
-	if hdr.Type == "member" {
-		w.recordMemberRow(elem)
-	}
-	if hdr.Type == "msg" {
-		w.recordMsgRow(elem)
-	}
-}
-
-func (w *m3World) recordMemberRow(elem json.RawMessage) {
-	var ai proto.AIMemberRow
-	if proto.Decode(elem, &ai) != nil || ai.Kind != "ai" {
-		return
-	}
-	w.aiByName[ai.Name] = ai
-	w.events = append(w.events, m3Event{kind: "member", member: ai.Name, state: ai.State})
-}
-
-func (w *m3World) recordMsgRow(elem json.RawMessage) {
-	var msg proto.MsgRow
-	if proto.Decode(elem, &msg) != nil {
-		return
-	}
-	if slices.ContainsFunc(w.msgs, func(cur proto.MsgRow) bool { return cur.ID == msg.ID }) {
-		return
-	}
-	w.msgs = append(w.msgs, msg)
-	w.events = append(w.events, m3Event{kind: "msg", member: w.authorName(msg.By), text: msg.Text})
-}
-
-func (w *m3World) authorName(id string) string {
-	for name, ai := range w.aiByName {
-		if ai.ID == id {
-			return name
-		}
-	}
-	return id
-}
-
 func (w *m3World) configureAI(groupName, aiName, agent string) error {
-	ctx := context.Background()
 	n := w.node()
-	if _, err := n.Host.Agents(ctx); err != nil {
+	gid := proto.ID(w.groups[groupName])
+	if err := configureHostAI(n.Host, n.Link, &w.ids, w.cluster.Owner.ID(), n.Key.ID(), gid, aiName, agent); err != nil {
 		return err
 	}
-	by := w.cluster.Owner.ID()
-	setRaw, err := marshalNoEscape(proto.AgentSet{
-		HostCommand: proto.HostCommand{Type: "agent.set", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), To: n.Key.ID()},
-		Agent:       agent,
-		Account:     "personal",
-	})
-	if err != nil {
-		return err
-	}
-	if _, err := host.Surface["agent.set"](ctx, n.Host, n.Link, by, setRaw); err != nil {
-		return err
-	}
-	joinRaw, err := marshalNoEscape(proto.HostJoin{
-		HostCommand: proto.HostCommand{Type: "host.join", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), To: n.Key.ID()},
-		Group:       proto.ID(w.groups[groupName]),
-		Home:        n.Key.ID(),
-		Agent:       agent,
-		Name:        aiName,
-	})
-	if err != nil {
-		return err
-	}
-	if _, err := host.Surface["host.join"](ctx, n.Host, n.Link, by, joinRaw); err != nil {
-		return err
-	}
-	return w.drainBrowserUntil(5*time.Second, func() bool {
+	hasAI := func() bool {
 		_, ok := w.aiByName[aiName]
 		return ok
-	}, nil)
+	}
+	return w.drainBrowserUntil(5*time.Second, hasAI, nil)
 }
 
 func (w *m3World) givenBareNode() error {
@@ -500,46 +325,25 @@ func (w *m3World) givenHeldAckNode(groupName, aiName, agent string) error {
 	n.Link.Close()
 	w.holdLink = wrapM3HoldLink(n.Host, n.Home, true)
 	w.cleanup(func() { w.holdLink.Close() })
-	return w.awaitHostSynced(n.Host, w.groups[groupName])
+	return awaitHostGroupSynced(n.Host, w.groups[groupName])
 }
 
-func (w *m3World) awaitHostSynced(h *host.Host, gid string) error {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, ok := h.Rows.Get(gid, "group", gid); ok {
-			return nil
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	return errors.New("timed out waiting for host group sync")
-}
-
-func (w *m3World) writeScript(vendor string, doc map[string]any) error {
-	w.scriptSeq++
-	path := filepath.Join(w.root, fmt.Sprintf("%s-%d.json", vendor, w.scriptSeq))
-	data, err := marshalNoEscape(doc)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return err
-	}
-	w.cluster.SetScript(w.tb, vendor, path)
-	return nil
+func (w *m3World) setScript(vendor string, doc map[string]any) error {
+	return writeClusterScript(w.tb, w.cluster, w.root, &w.scriptSeq, vendor, doc)
 }
 
 func (w *m3World) scriptClaudeTwoTurns(_, reply1, reply2 string) error {
 	steps := slices.Concat(claudeTurnSteps(1, true, "", reply1, ""), claudeTurnSteps(2, false, "", reply2, ""))
-	return w.writeScript("claude", map[string]any{"steps": steps})
+	return w.setScript("claude", map[string]any{"steps": steps})
 }
 
 func (w *m3World) scriptClaudePostAndEOF(_, reply string) error {
 	steps := append(claudeTurnSteps(1, true, "", reply, ""), map[string]any{"dir": "eof"})
-	return w.writeScript("claude", map[string]any{"steps": steps})
+	return w.setScript("claude", map[string]any{"steps": steps})
 }
 
 func (w *m3World) scriptClaudeSinglePost(_, reply string) error {
-	return w.writeScript("claude", map[string]any{"steps": claudeTurnSteps(1, true, "", reply, "")})
+	return w.setScript("claude", map[string]any{"steps": claudeTurnSteps(1, true, "", reply, "")})
 }
 
 func (w *m3World) scriptClaudeMidTurnExit(_ string) error {
@@ -547,12 +351,12 @@ func (w *m3World) scriptClaudeMidTurnExit(_ string) error {
 		{"dir": "stdin", "msg": map[string]any{"type": "user", "message": map[string]any{"role": "user"}}},
 		{"dir": "stdout", "msg": map[string]any{"type": "system", "subtype": "init", "session_id": "$session"}},
 	}
-	return w.writeScript("claude", map[string]any{"steps": steps, "exit": 1})
+	return w.setScript("claude", map[string]any{"steps": steps, "exit": 1})
 }
 
 func (w *m3World) scriptClaudeOutsideText(_, out1, post1, out2 string) error {
 	steps := slices.Concat(claudeTurnSteps(1, true, "", post1, out1), claudeTurnSteps(2, false, "", "", out2))
-	return w.writeScript("claude", map[string]any{"steps": steps})
+	return w.setScript("claude", map[string]any{"steps": steps})
 }
 
 func (w *m3World) scriptClaudeSecretPost(_ string) error {
@@ -573,18 +377,18 @@ func (w *m3World) scriptClaudeSecretPost(_ string) error {
 		}},
 		map[string]any{"dir": "stdout", "msg": map[string]any{"type": "result", "subtype": "success", "is_error": false, "session_id": "$session"}},
 	)
-	return w.writeScript("claude", map[string]any{"steps": steps})
+	return w.setScript("claude", map[string]any{"steps": steps})
 }
 
 func (w *m3World) scriptCodexTwoTurns(_, threadID, reply1, reply2 string) error {
 	steps := slices.Concat(codexStartupSteps(), codexTurnSteps("turn-1", 1, "", reply1, false), codexTurnSteps("turn-2", 2, "", reply2, false))
-	return w.writeScript("codex", map[string]any{"session": threadID, "steps": steps})
+	return w.setScript("codex", map[string]any{"session": threadID, "steps": steps})
 }
 
 func (w *m3World) scriptCodexApprovalGate(_, threadID, reply1, reply2 string) error {
 	steps := slices.Concat(codexStartupSteps(), codexTurnSteps("turn-1", 1, "", reply1, false), codexTurnSteps("turn-2", 2, "", reply2, true))
 	steps = append(steps, map[string]any{"dir": "eof"})
-	return w.writeScript("codex", map[string]any{"session": threadID, "steps": steps})
+	return w.setScript("codex", map[string]any{"session": threadID, "steps": steps})
 }
 
 func (w *m3World) whenOwnerPosts(text, groupName string) error {
@@ -606,10 +410,11 @@ func (w *m3World) whenOwnerPosts(text, groupName string) error {
 }
 
 func (w *m3World) whenIdleMinuteElapses() error {
-	return w.drainBrowserUntil(75*time.Second, func() bool {
+	idleDone := func() bool {
 		ai, ok := w.aiByName["Claude Code"]
-		return ok && ai.State == "dormant" && len(w.logLinesMatching("exit claude ")) >= 1
-	}, nil)
+		return ok && ai.State == "dormant" && len(matchingFakeCLILogs(w.cluster.LogPath, "exit claude ")) >= 1
+	}
+	return w.drainBrowserUntil(75*time.Second, idleDone, nil)
 }
 
 func (w *m3World) whenWaitApprovalCard(aiName, _ string) error {
@@ -655,9 +460,11 @@ func (w *m3World) whenHostRestarts() error {
 		return err
 	}
 	w.activeHost = h2
-	if err := w.attachMCPSocket(h2, filepath.Join(n.Dir, "mcp2")); err != nil {
+	sockPath, stop, err := attachMCPSocket(w.f.t, w.cleanup, h2, filepath.Join(n.Dir, "mcp2"))
+	if err != nil {
 		return err
 	}
+	w.sockPath, w.closeMCP = sockPath, stop
 	w.restartLink = wrapM3HoldLink(h2, n.Home, false)
 	w.cleanup(func() { w.restartLink.Close() })
 	return nil
@@ -666,97 +473,35 @@ func (w *m3World) whenHostRestarts() error {
 func (w *m3World) thenAIPostsAndEntersState(aiName, wantText, _, wantState string) error {
 	aiID := w.aiByName[aiName].ID
 	ready := func() bool {
-		return w.hasMsgFrom(aiID, wantText) && w.aiByName[aiName].State == wantState
+		return viewHasMsgFrom(&w.homeView, aiID, wantText) && w.aiByName[aiName].State == wantState
 	}
 	return w.drainBrowserUntil(10*time.Second, ready, nil)
 }
 
 func (w *m3World) thenAIPosts(aiName, wantText, _ string) error {
 	aiID := w.aiByName[aiName].ID
-	return w.drainBrowserUntil(10*time.Second, func() bool {
-		return w.hasMsgFrom(aiID, wantText)
-	}, nil)
-}
-
-func (w *m3World) hasMsgFrom(by, text string) bool {
-	return slices.ContainsFunc(w.msgs, func(m proto.MsgRow) bool {
-		return m.By == by && m.Text == text
-	})
-}
-
-func (w *m3World) waitAllDormant(h *host.Host) {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if !hasNonDormant(h) {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
+	hasMsg := func() bool {
+		return viewHasMsgFrom(&w.homeView, aiID, wantText)
 	}
-}
-
-func hasNonDormant(h *host.Host) bool {
-	return slices.ContainsFunc(h.Sessions.All(), func(s host.Session) bool {
-		return s.State != host.Dormant
-	})
+	return w.drainBrowserUntil(10*time.Second, hasMsg, nil)
 }
 
 func (w *m3World) settleAllDormant() error {
-	w.waitAllDormant(w.activeHost)
-	return w.drainBrowserUntil(5*time.Second, w.allMembersDormant, nil)
+	waitHostDormant(w.activeHost)
+	settled := func() bool { return allMembersSettled(w.activeHost, w.aiByName) }
+	return w.drainBrowserUntil(5*time.Second, settled, nil)
 }
 
-func isSettledMemberState(state string) bool {
-	return state == "dormant" || state == "offline"
-}
-
-func (w *m3World) allMembersDormant() bool {
-	for _, ai := range w.aiByName {
-		if !isSettledMemberState(ai.State) {
-			return false
-		}
-	}
-	return !hasNonDormant(w.activeHost)
-}
-
-func (w *m3World) logLines() []string {
-	data, err := os.ReadFile(w.cluster.LogPath)
-	if err != nil {
-		return nil
-	}
-	trimmed := strings.TrimSpace(string(data))
-	if trimmed == "" {
-		return nil
-	}
-	return strings.Split(trimmed, "\n")
-}
-
-func (w *m3World) logLinesMatching(prefix string) []string {
-	var out []string
-	for _, line := range w.logLines() {
-		if strings.HasPrefix(line, prefix) {
-			out = append(out, line)
-		}
-	}
-	return out
-}
-
-func (w *m3World) waitLogCount(prefix string, want int) ([]string, error) {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if got := w.logLinesMatching(prefix); len(got) >= want {
-			return got, nil
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	return nil, fmt.Errorf("timed out waiting for %d %q lines; got %v", want, prefix, w.logLines())
+func (w *m3World) waitLogs(prefix string, want int) ([]string, error) {
+	return waitFakeCLILogs(w.cluster.LogPath, prefix, want, 5*time.Second)
 }
 
 func (w *m3World) thenOneProcessLogged(vendor string) error {
-	starts, err := w.waitLogCount("start "+vendor+" ", 1)
+	starts, err := w.waitLogs("start "+vendor+" ", 1)
 	if err != nil {
 		return err
 	}
-	exits, err := w.waitLogCount("exit "+vendor+" ", 1)
+	exits, err := w.waitLogs("exit "+vendor+" ", 1)
 	if err != nil {
 		return err
 	}
@@ -782,15 +527,15 @@ func (w *m3World) thenOneSessionLogged(vendor, sessionID string) error {
 		return err
 	}
 	want := "start " + vendor + " " + sessionID
-	if got := w.logLinesMatching("start " + vendor + " "); got[0] != want {
+	if got := matchingFakeCLILogs(w.cluster.LogPath, "start "+vendor+" "); got[0] != want {
 		return fmt.Errorf("got %q, want %q", got[0], want)
 	}
 	return nil
 }
 
 func (w *m3World) thenFirstExitedAndState(vendor, aiName, wantState, _ string) error {
-	if len(w.logLinesMatching("exit "+vendor+" ")) != 1 {
-		return fmt.Errorf("expected 1 %s exit, got %v", vendor, w.logLines())
+	if len(matchingFakeCLILogs(w.cluster.LogPath, "exit "+vendor+" ")) != 1 {
+		return fmt.Errorf("expected 1 %s exit, got %v", vendor, readFakeCLILog(w.cluster.LogPath))
 	}
 	if got := w.aiByName[aiName].State; got != wantState {
 		return fmt.Errorf("%s state = %q, want %q", aiName, got, wantState)
@@ -799,11 +544,11 @@ func (w *m3World) thenFirstExitedAndState(vendor, aiName, wantState, _ string) e
 }
 
 func (w *m3World) thenTwoStartsSameSession(vendor string) error {
-	starts, err := w.waitLogCount("start "+vendor+" ", 2)
+	starts, err := w.waitLogs("start "+vendor+" ", 2)
 	if err != nil {
 		return err
 	}
-	if _, err := w.waitLogCount("exit "+vendor+" ", 2); err != nil {
+	if _, err := w.waitLogs("exit "+vendor+" ", 2); err != nil {
 		return err
 	}
 	if len(starts) != 2 || starts[0] != starts[1] {
@@ -812,7 +557,7 @@ func (w *m3World) thenTwoStartsSameSession(vendor string) error {
 	return w.settleAllDormant()
 }
 
-func (w *m3World) eventIndex(match func(m3Event) bool) int {
+func (w *m3World) eventIndex(match func(homeViewEvent) bool) int {
 	return slices.IndexFunc(w.events, match)
 }
 
@@ -827,12 +572,12 @@ func (w *m3World) thenStateBeforePost(ai1, wantState, ai2, wantText, groupName s
 	if err := w.thenAIPosts(ai2, wantText, groupName); err != nil {
 		return err
 	}
-	dormantIdx := w.eventIndex(func(e m3Event) bool { return e.kind == "member" && e.member == ai1 && e.state == wantState })
-	postIdx := w.eventIndex(func(e m3Event) bool { return e.kind == "msg" && e.member == ai2 && e.text == wantText })
+	dormantIdx := w.eventIndex(func(e homeViewEvent) bool { return e.kind == "member" && e.member == ai1 && e.state == wantState })
+	postIdx := w.eventIndex(func(e homeViewEvent) bool { return e.kind == "msg" && e.member == ai2 && e.text == wantText })
 	if err := checkOrderedIndices(dormantIdx, postIdx, fmt.Sprintf("%+v", w.events)); err != nil {
 		return err
 	}
-	lines := w.logLines()
+	lines := readFakeCLILog(w.cluster.LogPath)
 	exitIdx := slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, "exit claude ") })
 	startIdx := slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, "start codex ") })
 	return checkOrderedIndices(exitIdx, startIdx, strings.Join(lines, "; "))
@@ -843,7 +588,7 @@ func (w *m3World) thenSecondProcessHeld(aiName, workingAI string) error {
 	if err := w.awaitDeliveredCount(agent, 2); err != nil {
 		return err
 	}
-	if starts := w.logLinesMatching("start " + agent + " "); len(starts) != 1 {
+	if starts := matchingFakeCLILogs(w.cluster.LogPath, "start "+agent+" "); len(starts) != 1 {
 		return fmt.Errorf("%s started early while %s was working: %v", aiName, workingAI, starts)
 	}
 	return nil
@@ -880,8 +625,8 @@ func (w *m3World) thenPostBeforePost(ai1, text1, ai2, text2, groupName string) e
 	if err := w.thenAIPosts(ai2, text2, groupName); err != nil {
 		return err
 	}
-	idx1 := w.eventIndex(func(e m3Event) bool { return e.kind == "msg" && e.member == ai1 && e.text == text1 })
-	idx2 := w.eventIndex(func(e m3Event) bool { return e.kind == "msg" && e.member == ai2 && e.text == text2 })
+	idx1 := w.eventIndex(func(e homeViewEvent) bool { return e.kind == "msg" && e.member == ai1 && e.text == text1 })
+	idx2 := w.eventIndex(func(e homeViewEvent) bool { return e.kind == "msg" && e.member == ai2 && e.text == text2 })
 	if err := checkOrderedIndices(idx1, idx2, fmt.Sprintf("%+v", w.events)); err != nil {
 		return err
 	}
@@ -891,28 +636,14 @@ func (w *m3World) thenPostBeforePost(ai1, text1, ai2, text2, groupName string) e
 func (w *m3World) thenTurnInterruptedRow(aiName, wantReason, _ string) error {
 	aiID := w.aiByName[aiName].ID
 	found := func() bool {
-		return slices.ContainsFunc(w.msgs, func(m proto.MsgRow) bool {
-			return isInterruptedMsg(m, aiID, wantReason)
-		})
+		return viewHasInterruptedMsg(&w.homeView, aiID, wantReason)
 	}
 	return w.drainBrowserUntil(10*time.Second, found, nil)
 }
 
-func isInterruptedMsg(m proto.MsgRow, aiID, wantReason string) bool {
-	if m.Kind != "system" {
-		return false
-	}
-	var body proto.TurnInterruptedBody
-	if proto.Decode(m.Body, &body) != nil {
-		return false
-	}
-	return body.Code == "turn_interrupted" && body.AI == aiID && body.Reason == wantReason
-}
-
 func (w *m3World) thenAIHasState(aiName, wantState, _ string) error {
-	return w.drainBrowserUntil(10*time.Second, func() bool {
-		return w.aiByName[aiName].State == wantState
-	}, nil)
+	hasState := func() bool { return w.aiByName[aiName].State == wantState }
+	return w.drainBrowserUntil(10*time.Second, hasState, nil)
 }
 
 func (w *m3World) countMessagesBy(authorID string) int {
@@ -927,7 +658,7 @@ func (w *m3World) countMessagesBy(authorID string) int {
 
 func (w *m3World) thenSilentTurnCompletes(aiName string) error {
 	agent := w.aiByName[aiName].CLI
-	if _, err := w.waitLogCount("exit "+agent+" ", 1); err != nil {
+	if _, err := w.waitLogs("exit "+agent+" ", 1); err != nil {
 		return err
 	}
 	if err := w.settleAllDormant(); err != nil {
@@ -983,7 +714,7 @@ func (w *m3World) homeMsgRows(gid string) ([]string, error) {
 
 func (w *m3World) thenSecretTurnFinishes(aiName string) error {
 	agent := w.aiByName[aiName].CLI
-	if _, err := w.waitLogCount("exit "+agent+" ", 1); err != nil {
+	if _, err := w.waitLogs("exit "+agent+" ", 1); err != nil {
 		return err
 	}
 	if err := w.settleAllDormant(); err != nil {
@@ -1023,7 +754,7 @@ func (w *m3World) thenSecondHeldAckOnly() error {
 	if err := w.holdLink.awaitAcks(1); err != nil {
 		return err
 	}
-	if starts := w.logLinesMatching("start claude "); len(starts) != 1 {
+	if starts := matchingFakeCLILogs(w.cluster.LogPath, "start claude "); len(starts) != 1 {
 		return fmt.Errorf("expected 1 claude start, got %v", starts)
 	}
 	return nil
@@ -1033,38 +764,13 @@ func (w *m3World) thenRestartedAckOnce(aiName string) error {
 	if err := w.restartLink.awaitAcks(1); err != nil {
 		return err
 	}
-	if err := w.awaitHomeInboxEmpty(); err != nil {
+	if err := awaitHomeInboxCount(w.node().Store, 0); err != nil {
 		return err
 	}
 	if got := w.countMessagesBy(w.aiByName[aiName].ID); got != 1 {
 		return fmt.Errorf("got %d AI messages, want 1", got)
 	}
 	return w.thenOneProcessLogged("claude")
-}
-
-func (w *m3World) awaitHomeInboxEmpty() error {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		n, err := w.homeInboxCount()
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return nil
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	n, _ := w.homeInboxCount()
-	return fmt.Errorf("home still has %d queued inbox items", n)
-}
-
-func (w *m3World) homeInboxCount() (int, error) {
-	var count int
-	read := func(tx *store.Tx) error {
-		return tx.QueryRow(`SELECT count(*) FROM inbox`).Scan(&count)
-	}
-	err := w.node().Store.Write(read)
-	return count, err
 }
 
 func (w *m3World) whenListAllSessionTools() error {

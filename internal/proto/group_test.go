@@ -68,6 +68,15 @@ func TestGroupGoldens(t *testing.T) {
 		Thread: ThreadSummary{Count: 2}, Stats: TaskStats{9, 2, ts - 4000, nil}, Created: ts - 4000,
 	}
 	golden(t, "row-task-paused", paused)
+	confirmTitle := "Node: report connection path changes"
+	confirmWait := TaskRow{
+		RowHeader: RowHeader{"task", id("confirm task"), 819}, Group: group, Num: 15, Title: confirmTitle,
+		Slug: MakeSlug(confirmTitle), Origin: "brief", Brief: id("brief"),
+		State: "active", Step: "branch", Assignee: ai, Reviewer: reviewer, Pass: 90,
+		Depends: []string{}, Wait: &TaskWait{Kind: "confirm", Msg: id("confirm"), Who: []string{user}, Since: ts},
+		Stats: TaskStats{Started: ts}, Created: ts,
+	}
+	golden(t, "row-task-confirm", confirmWait)
 
 	msg := decidedExample(t)
 	note := NoteRow{
@@ -118,5 +127,10 @@ func TestGroupGoldens(t *testing.T) {
 	golden(t, "cmd-reviewed", CmdResult{Success: Success{6, true}, Passed: new(false), Round: 1})
 	golden(t, "cmd-pair-link", CmdResult{Success: Success{7, true}, Link: "https://rv.example/#pair=7K2M-9QXD-4F8T-WB3N", Expires: ts + 600000})
 	golden(t, "cmd-noted", CmdResult{Success: Success{9, true}, ID: id("preset note"), Replaced: new(false)})
+	golden(t, "cmd-invite-link", CmdResult{
+		Success: Success{10, true},
+		Link:    "https://rv.example/#join=7K2M-9QXD-4F8T-WB3N&g=" + group + "&home=" + host,
+		Expires: ts + 600000,
+	})
 	golden(t, "cmd-error", ErrorResponse{8, WireError{"conflict", "This card has already been decided."}})
 }

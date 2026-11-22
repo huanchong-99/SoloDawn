@@ -1,0 +1,11 @@
+{
+  "call.mode.wait": "Waits for answer",
+  "call.mode.async": "Gets a receipt",
+  "call.waiting": "Waiting for reply · {time}",
+  "call.took": "Took {time}",
+  "call.depth": "Depth {n}",
+  "call.time.s": "{n} s",
+  "call.time.m": "{n} min",
+  "call.time.h": "{n} h",
+  "call.time.d": "{n} d"
+}

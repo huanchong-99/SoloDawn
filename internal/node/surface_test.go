@@ -110,6 +110,10 @@ func TestSurfaceDefaultsReadHelpersAndNulls(t *testing.T) {
 	if resizeHost != h || resizeBy != ownerKey.ID() || resizeSeen.Group != gID || resizeSeen.AI != aiID || resizeSeen.Cols != 120 || resizeSeen.Rows != 36 {
 		t.Fatalf("pty.resize forward = host=%p by=%q req=%+v", resizeHost, resizeBy, resizeSeen)
 	}
+	replay := fmt.Sprintf(`{"t":"takeover.start","n":"n1","ts":1,"to":%q,"g":%q,"member":%q}`, nodeKey.ID(), gID, aiID)
+	if _, err := s.Replays["takeover.start"](t.Context(), nil, ownerKey.ID(), json.RawMessage(replay)); err == nil || err.(*host.Error).Code != "conflict" {
+		t.Fatalf("takeover.start replay without a terminal = %v, want conflict", err)
+	}
 }
 
 func mustSurfaceSession(t *testing.T, h *host.Host, home string, key host.SessionKey, kind host.Kind, agent string) {
@@ -132,7 +136,7 @@ func assertSurfaceHeader(t *testing.T, st proto.HostState, savedHomes []proto.Ho
 		t.Fatalf("missing Update/Relay: %+v", st)
 	}
 	got := [10]any{st.Name, st.OS, st.Version, st.Open, st.MaxOpen, st.Offline, st.Settings.DefaultLevel, st.Update.Version, st.Relay.Used, slices.Equal(st.Homes, savedHomes)}
-	want := [10]any{"custom-box", "macOS 15.2", "v0.3.1", 3, 6, false, 3, "v0.3.2", int64(10), true}
+	want := [10]any{"custom-box", "macOS 15.2", "v0.3.1", 3, 6, true, 3, "v0.3.2", int64(10), true}
 	if got != want {
 		t.Fatalf("unexpected HostState header: %+v", st)
 	}
