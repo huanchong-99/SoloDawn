@@ -326,10 +326,10 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `app`, `nav`, `bar`, `page` (the title of each page), `pref` (the names of the preferences),
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
-  of its English file to the type `Key`; today the areas are `approval`, `brief`, `chat`,
+  of its English file to the type `Key`; today the areas are `approval`, `brief`, `call`, `chat`,
   `decision`, `groupinfo`, `groups`, `member`, `nodes`, `notify`, `pairing`, `reminder`, `settings`,
-  `states`, `summary`, `task`, `terminal` and `thread`. `src/messages/files.glob.ts` finds every file by its name and
-  `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
+  `states`, `summary`, `task`, `terminal` and `thread`. `src/messages/files.glob.ts` finds every file by
+  its name, and `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
   empty text, or has keys that differ between its two languages, and naming the area when it has
   no file in one of the languages. No key can therefore be given twice: a collision fails at start and in the tests,
@@ -425,7 +425,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
     when a chat opens.
   - "Today" and "yesterday" are read from `now()` of `when.ts`, one clock that moves once a
     minute while something drawn reads it.
-  - A text shows its code spans and the mentions of the members its row names. The composer
+  - A text shows its code spans and the mentions of the members its row names, drawn by the
+    shared `Rich.svelte` in the main line, the thread and the call block. The composer
     completes a mention from the members as it is typed (arrow keys, Enter or Tab, Escape),
     sends with Enter where the person has a keyboard and with the button on a touch screen, and
     never on a key that an input method is composing with. What is typed while a message is on
@@ -439,7 +440,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
     that appears while there was none to choose from is chosen.
   - Only text messages are drawn in full. A card is one line that names its kind and its subject,
     with the dawn edge when it waits for the reader, and a row the home wrote is a quiet line;
-    the cards the areas mount replace both.
+    the cards the areas mount replace both. An AI-to-AI `call` (`src/components/call/`) draws its
+    route, wait mode, depth, question and either its `waiting` indicator with elapsed time since
+    `ts`, counted every second while it is under a minute and every minute after, or its
+    `answered` duration with the `reply` folded inside, hiding the standalone `reply` row when
+    both are in the same list.
   - The member panel (`src/components/member/`) mounts at `chat.side` (`order: 10`). It lists the
     group's AI members, placing the secretary first with its corner mark, with each AI's state
     (`working`, `waiting` on the reader in dawn or on another member, `dormant` as sleeping,
@@ -550,6 +555,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/compose.ts`          | mention being typed, mentions and parts of a text, row size                       |
 | `src/lib/when.ts`             | times in the reader's language; messages by day                                   |
 | `src/lib/task.ts`             | task card derivations: badge, six-step bar, review and thread                     |
+| `src/lib/call.ts`             | AI-to-AI call derivations: elapsed time, route, question and inline reply         |
 | `src/lib/terminal.svelte.ts`  | terminal takeover: commands, `pty` channel, `Takeover`, what the page shows       |
 | `src/lib/push.ts`             | Web Push capability, VAPID keys in IndexedDB, `PushManager`, `push` commands      |
 | `src/sw.ts`                   | service worker: `Reminder` push notifications and `notificationclick` card open   |
@@ -557,11 +563,12 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/Notice.svelte`           | the upgrade notice and the storage notice                                         |
 | `src/routes/`                 | one component per page; `Groups.svelte` is the list and a chat                    |
 | `src/routes/dev/`             | `States.svelte`: the message examples, for a development server                   |
-| `src/components/`             | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount`                   |
+| `src/components/`             | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount`, `Rich` (a text)  |
 | `src/components/groups/`      | the group list, the cards that wait, the create-group dialog                      |
 | `src/components/chat/`        | the chat of a group: main line, message, composer                                 |
 | `src/components/task/`        | `TaskCard.svelte`, mounted for kind `task`                                        |
 | `src/components/thread/`      | a task's thread, scored review block, checks and system notices                   |
+| `src/components/call/`        | `CallBlock.svelte`, mounted for kind `call` in threads and the main line          |
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
 | `src/components/groupinfo/`   | group details and project memory (`chat.side`, `order: 20`)                       |
 | `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
@@ -579,6 +586,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/status.spec.ts`     | steps of `../features/web_status.feature`                                         |
 | `features/task.spec.ts`       | steps of `../features/web_task.feature`                                           |
 | `features/thread.spec.ts`     | steps of `../features/web_thread.feature`                                         |
+| `features/call.spec.ts`       | steps of `../features/web_call.feature`                                           |
 | `features/member.spec.ts`     | steps of `../features/web_member.feature`                                         |
 | `features/groupinfo.spec.ts`  | steps of `../features/web_groupinfo.feature`                                      |
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
