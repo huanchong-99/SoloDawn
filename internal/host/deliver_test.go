@@ -838,6 +838,7 @@ func TestDuplicateWhileTakingSessionAndMergeItems(t *testing.T) {
 	if len(r.audits()) != 1 || r.audits()[0].what != AuditDelivered || len(deliv(r.h).heldKeys()) != 0 {
 		t.Fatalf("duplicate session item result: turns=%d audits=%+v held=%d", len(r.runtime.recorded()), r.audits(), len(deliv(r.h).heldKeys()))
 	}
+	r.h.Settle()
 	verifyDuplicateMergeWhileApplyingAndPreAudit(t)
 }
 
@@ -1007,6 +1008,7 @@ func TestArrivalRefusalsNotHostedAndOpenWaitsWithoutCause(t *testing.T) {
 			t.Fatalf("unexpected refusal audit: %+v", a)
 		}
 	}
+	r.h.Settle()
 	verifyOpenWaitsAndCauselessDecisions(t)
 }
 
@@ -1098,6 +1100,7 @@ func verifyOpenWaitsAndCauselessDecisions(t *testing.T) {
 		return r.home.ackCountFor(300) == 1 && r.home.ackCountFor(309) == 1 && len(deliv(r.h).heldKeys()) == 0
 	})
 	r.waitAIUnbusy(testGroup1, testAI1)
+	r.h.Settle()
 	verifyColdStartDrainOpenWait(t)
 }
 
@@ -1191,6 +1194,7 @@ func TestRoutingHoldsJumpAndBatchSelection(t *testing.T) {
 	r.waitAIUnbusy(testGroup1, testAI1)
 
 	assertRoutedTurns(t, r.runtime.recorded())
+	r.h.Settle()
 	verifyHoldsBatchingAndJump(t)
 	verifyEnqueueHeldOrdering(t)
 }
@@ -1474,6 +1478,7 @@ func TestWorkspacesBranchRetryMergeStatsAndRestartInspect(t *testing.T) {
 	mustGit(t, ctx, wt, "commit", "-m", "c1")
 	c1 := strings.TrimSpace(mustGit(t, ctx, wt, "rev-parse", "HEAD"))
 	verifyReviewRoundsAndMergeStats(t, r, pDir, wt, c1, failed+1)
+	r.h.Settle()
 	verifyConflictRestartInspectAndRemoteForge(t)
 }
 
@@ -1542,6 +1547,7 @@ func verifyConflictRestartInspectAndRemoteForge(t *testing.T) {
 		_, err := r.h.Audit(tx, AuditRow{Group: testGroup1, Agent: "claude", What: AuditMerge, Detail: testTask2 + " " + baseCommit})
 		return err
 	}
+	r.h.Settle()
 	r.db.Write(write)
 	r2 := newDeliverRigOnStore(t, r.db)
 	r2.h.Attach(r2.homeKey.ID(), r2.home)
@@ -1569,6 +1575,7 @@ func verifyConflictRestartInspectAndRemoteForge(t *testing.T) {
 	r2.h.Push(r2.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw}})))
 	r2.waitUntil("restart inspect reported", func() bool { return len(r2.home.cmdPayloads()) == 1 })
 	r2.waitNoActiveMerges()
+	r2.h.Settle()
 	verifyRemoteForgeAndGitHubRepo(t)
 }
 
@@ -1837,9 +1844,11 @@ func checkRemainingWorkspaceAndMergeEdges(t *testing.T, r *deliverRig, pDir stri
 func checkConfigUnmarshalAndDroppedTables(t *testing.T, r *deliverRig) {
 	t.Helper()
 	logs := captureLogs(t)
+	r.h.Settle()
 	mem := newDeliverRig(t, false)
 	runReviewedMerge(mem.h, mem.homeKey.ID(), testGroup1, proto.TaskRow{RowHeader: proto.RowHeader{ID: testTask1}, Num: 1, Slug: "m"}, "c1", 0, false, time.Time{})
 	resumeGroupMerges(mem.h, deliv(mem.h), "unknown-group")
+	mem.h.Settle()
 
 	// Session INSERT trigger fails ensureSessionRow; non-array 'homes' JSON logs and aborts attachHome.
 	writeTrigger := func(tx *store.Tx) error {
@@ -1912,6 +1921,7 @@ func TestResumeHostedChecksAfterRestart(t *testing.T) {
 	tskRequire(t, ctx1.Err() == nil && len(r1.home.cmdPayloads()) == 0, "running check disturbed")
 	noCalls()
 
+	r1.h.Settle()
 	verifyRestartCloudPollOnce(t, r1.db, head, rowsAt)
 }
 
@@ -2170,6 +2180,7 @@ func checkGoneMemberAndRestartCleanup(t *testing.T, r *deliverRig, pDir, c1 stri
 	r.h.Sessions.End(SessionKey{Group: testGroup1, Member: testAI2, Task: task5})
 	r.setSetting("homes", []proto.Home{{Group: testGroup1, Home: r.homeKey.ID(), Name: "W"}})
 
+	r.h.Settle()
 	r2 := newDeliverRigOnStore(t, r.db)
 	merged5 := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: task5, Seq: 50}, Group: testGroup1, Num: 5, Title: "Orphan", Slug: "orphan", Origin: "brief", State: "merged", Step: "merge", Assignee: testAI1, Reviewer: testAI2, Commit: head5}
 	r2.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 49}, Name: "W", Kind: "project", Repo: filepath.Join(pDir, "repo"), Base: "main", Forge: "none", Home: r2.homeKey.ID(), Secretary: testSec, Checks: []string{}})
