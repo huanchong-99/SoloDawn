@@ -73,11 +73,11 @@ kind: reference
 | `Commands` | node-level host commands (`pair.browser` registered by `NewPairer`); other host commands (`to` set in payload) fall back to `host.Surface` |
 | `Replays` | memory-backed replay answers for succeeded host commands (`pair.browser` registered by `NewPairer`, returning the active link while valid and `conflict` once used, expired or lost across restart) |
 
-`SessionConfig.OnAdopt` is invoked once with the adopted owner's user id when an unowned node persists its first valid adoption log (`dvlAdopt`), before forwarding `devlog` frames. `nodeRuntime.onAdopt` registers the node to start at login (`InstallService`), while `home.Loop` reads the dynamic owner through `LoopConfig.OwnerFn` (`logs.Owner`). `home.Loop.Welcome` and `home.Loop` group announcements deliver `welcome.groups` and `groups` pushes over `Sessions`.
+`SessionConfig.OnAdopt` is invoked once with the adopted owner's user id when an unowned node persists its first valid adoption log (`dvlAdopt`), before forwarding `devlog` frames. `SessionConfig.Spawn` starts a host command; `nil` runs it on a bare goroutine. `nodeRuntime.onAdopt` registers the node to start at login (`InstallService`), while `home.Loop` reads the dynamic owner through `LoopConfig.OwnerFn` (`logs.Owner`). `home.Loop.Welcome` and `home.Loop` group announcements deliver `welcome.groups` and `groups` pushes over `Sessions`.
 
 ## Concurrency and lock order
 
-- `nodeRuntime.bg` waits for all inbound `Pairer.Serve` sessions, outgoing `serveClient` sessions, and rendezvous loops before `Close` shuts `LocalLink`, `home.Loop` and `Store`; `nodeRuntime.mu` is a leaf lock guarding `closing`, `rvPaths` and `rvLoops`.
+- `nodeRuntime.bg` waits for all inbound `Pairer.Serve` sessions, outgoing `serveClient` sessions, rendezvous loops, and host commands, which `Sessions` starts through `SessionConfig.Spawn`, before `Close` shuts `LocalLink`, `home.Loop` and `Store`; `nodeRuntime.mu` is a leaf lock guarding `closing`, `rvPaths` and `rvLoops`.
 - `Sessions.cmdMu` guards `inflight` (keyed by signer and nonce) and receipt reads/writes in `Store.Write`; host command handlers and `Replays` handlers run outside `cmdMu`, and duplicate `(signer, nonce)` requests wait on the in-flight channel before reading the stored receipt.
 - `Pairer.mu` guards active `attempts` and nonce-keyed `links`; it is a leaf lock never held across `Store.Write`, `Logs`, `Sessions`, `Peer` or WebSocket operations. Each `pairAttempt.outcome` channel has a single reader (`waitPair` for role `b`, `watchBrowser` for role `a`).
 - `Logs.writeMu` serializes device-log mutations and is acquired before `Store.Write` and before `Logs.mu`; `dvlNotify` runs after `writeMu` is released.

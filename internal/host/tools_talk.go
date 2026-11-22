@@ -4,11 +4,8 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"fmt"
-	"maps"
 	"slices"
 	"strconv"
-	"strings"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
@@ -196,7 +193,7 @@ func preparePost(h *Host, c Caller, a postArgs) (preparedPost, error) {
 	if err != nil {
 		return preparedPost{}, err
 	}
-	mentions, err := resolveMentions(h, c.Group, a.Mentions)
+	mentions, err := resolveMentions(h.Rows, c.Group, a.Mentions)
 	if err != nil {
 		return preparedPost{}, err
 	}
@@ -329,7 +326,7 @@ func fetchThreadMessages(ctx context.Context, h *Host, c Caller, thread *string,
 			Thread:    thread,
 		}
 	}
-	page, err := requestFetched(ctx, h, c.Home, req)
+	page, err := fetchFrom(ctx, h, c.Home, req)
 	if err != nil {
 		return nil, err
 	}
@@ -348,25 +345,6 @@ func fetchThreadMessages(ctx context.Context, h *Host, c Caller, thread *string,
 		}
 	}
 	return readThreadResult{Messages: msgs, More: page.More}, nil
-}
-
-func requestFetched(ctx context.Context, h *Host, device string, build func(int64) any) (proto.Fetched, error) {
-	unreachable := &Error{Code: "home_unreachable", Message: "the home of that group is not connected"}
-	conn, ok := h.Home(device)
-	if !ok {
-		return proto.Fetched{}, unreachable
-	}
-	reply, err := conn.Request(ctx, build)
-	if err != nil {
-		return proto.Fetched{}, unreachable
-	}
-	var wireErr proto.ErrorResponse
-	if proto.Decode(reply, &wireErr) == nil {
-		return proto.Fetched{}, &Error{Code: wireErr.Err.Code, Message: wireErr.Err.Message}
-	}
-	var page proto.Fetched
-	proto.Decode(reply, &page)
-	return page, nil
 }
 
 func callListMembers(_ context.Context, h *Host, c Caller, raw json.RawMessage) (any, error) {
@@ -490,7 +468,7 @@ func callNotePut(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (a
 		return nil, err
 	}
 	hdr := secHomeHeader(h, c, "note")
-	noteID := freshNonce()
+	noteID := proto.NewNonce()
 	cmd := proto.Note{HomeCommand: hdr, ID: noteID, Task: task, Text: a.Text}
 	if _, err := h.Command(ctx, c.Home, marshalWire(cmd)); err != nil {
 		return nil, err
@@ -555,7 +533,7 @@ func fetchNotesPage(ctx context.Context, h *Host, c Caller, before int64) (proto
 			Kind:      "note",
 		}
 	}
-	return requestFetched(ctx, h, c.Home, req)
+	return fetchFrom(ctx, h, c.Home, req)
 }
 
 func appendNoteRows(dst []noteListItem, rows []json.RawMessage, filter string, names, tasks map[string]string) ([]noteListItem, int64) {
@@ -592,9 +570,9 @@ func formatNoteTask(tasks map[string]string, rowTask *string) *string {
 	return &label
 }
 
-func liveMembers(h *Host, group string) []proto.MemberRow {
+func liveMembers(rows *Rows, group string) []proto.MemberRow {
 	var list []proto.MemberRow
-	for _, raw := range h.Rows.Of(group, "member") {
+	for _, raw := range rows.Of(group, "member") {
 		var m proto.MemberRow
 		if proto.Decode(raw, &m) == nil {
 			list = append(list, m)
@@ -605,31 +583,21 @@ func liveMembers(h *Host, group string) []proto.MemberRow {
 
 func memberNamesByID(h *Host, group string) map[string]string {
 	names := map[string]string{}
-	for _, m := range liveMembers(h, group) {
+	for _, m := range liveMembers(h.Rows, group) {
 		names[m.ID] = m.Name
 	}
 	return names
 }
 
-func memberIDsByName(h *Host, group string) (map[string]proto.ID, []string) {
-	byName := map[string]proto.ID{}
-	for _, m := range liveMembers(h, group) {
-		byName[m.Name] = proto.ID(m.ID)
-	}
-	return byName, slices.Sorted(maps.Keys(byName))
-}
-
-func resolveMentions(h *Host, group string, names []string) ([]proto.ID, error) {
-	byName, valid := memberIDsByName(h, group)
+func resolveMentions(rows *Rows, group string, names []string) ([]proto.ID, error) {
+	dir := loadSecDirectory(rows, group)
 	ids := []proto.ID{}
 	for _, name := range names {
-		id, ok := byName[name]
-		if !ok {
-			return nil, unknownNameError("member", name, valid)
+		id, err := dir.memberID(name)
+		if err != nil {
+			return nil, err
 		}
-		if !slices.Contains(ids, id) {
-			ids = append(ids, id)
-		}
+		ids = appendUnique(ids, id)
 	}
 	return ids, nil
 }
@@ -671,13 +639,5 @@ func resolveTaskID(h *Host, group, ref string) (proto.ID, error) {
 			return proto.ID(t.ID), nil
 		}
 	}
-	return "", unknownNameError("task", ref, valid)
-}
-
-func unknownNameError(kind, name string, valid []string) error {
-	listed := "none"
-	if len(valid) > 0 {
-		listed = strings.Join(valid, ", ")
-	}
-	return &Error{Code: "not_found", Message: fmt.Sprintf("unknown %s %q; valid %ss: %s", kind, name, kind, listed)}
+	return "", missingTargetError("task", ref, valid)
 }

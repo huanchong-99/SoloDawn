@@ -250,7 +250,8 @@ func (n *nodeRuntime) wireServices() {
 	nameFn := func() string { return ReadName(n.db) }
 	n.sessions = NewSessions(SessionConfig{
 		ID: n.key.ID(), Version: Version, Store: n.db, Logs: n.logs,
-		Home: n.loop, Host: n.host, Name: nameFn, Addrs: n.addrs, OnAdopt: n.onAdopt,
+		Home: n.loop, Host: n.host, Name: nameFn, Addrs: n.addrs,
+		OnAdopt: n.onAdopt, Spawn: n.spawn,
 	})
 	NewSurface(SurfaceConfig{
 		ID: n.key.ID(), Version: Version, Store: n.db,

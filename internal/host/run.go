@@ -3,8 +3,6 @@ package host
 import (
 	"cmp"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -146,13 +144,20 @@ func readLaunchConfig(h *Host, agent, group string) (launchConfig, error) {
 	return cfg, err
 }
 
-func sessionDir(h *Host, s Session) string {
+func projectDir(h *Host, group string) string {
 	var dbFile string
 	scan := func(tx *store.Tx) error {
 		return tx.QueryRow(queryMainDBFileSQL).Scan(&dbFile)
 	}
 	h.Store.Write(scan)
-	return filepath.Join(filepath.Dir(dbFile), "projects", s.Group, s.Folder)
+	if dbFile == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(dbFile), "projects", group)
+}
+
+func sessionDir(h *Host, s Session) string {
+	return filepath.Join(projectDir(h, s.Group), s.Folder)
 }
 
 func readIdleDuration(h *Host) time.Duration {
@@ -869,7 +874,7 @@ func sendCrashStep(ctx context.Context, h *Host, rt *runtimePart, c *pendingCras
 	if s.Kind != TaskSession {
 		return true
 	}
-	hdr := proto.HomeCommand{Type: "task", Nonce: freshNonce(), Timestamp: h.Now().UnixMilli(), Group: proto.ID(s.Group)}
+	hdr := homeHeader(h, s.Group, "", "task")
 	fail := proto.TaskFail{TaskCommand: proto.TaskCommand{HomeCommand: hdr, Op: "fail", ID: proto.ID(s.Task)}, Reason: "crash", Detail: c.detail}
 	_, err := h.Command(ctx, s.Home, marshalWire(fail))
 	return !isUnreachable(err)
@@ -883,14 +888,14 @@ func isUnreachable(err error) bool {
 func sendMemberStatus(ctx context.Context, h *Host, _ *runtimePart, homeDevice, group, member string, ev any) error {
 	home, ok := h.Home(homeDevice)
 	if !ok {
-		return &Error{"home_unreachable", "the home of that group is not connected"}
+		return errHomeUnreachable
 	}
 	state, task := h.MemberState(group, member)
 	var evPtr *any
 	if ev != nil {
 		evPtr = &ev
 	}
-	hdr := proto.HomeCommand{Type: "member", Nonce: freshNonce(), Timestamp: h.Now().UnixMilli(), Group: proto.ID(group)}
+	hdr := homeHeader(h, group, "", "member")
 	status := proto.MemberStatus[any]{
 		MemberCommand: proto.MemberCommand{HomeCommand: hdr, Op: "status", ID: proto.ID(member)},
 		State:         state, Task: proto.ID(task), Path: home.Path(), Event: evPtr,
@@ -949,10 +954,14 @@ func latestWaitingSession(list []Session) (Session, bool) {
 	return best, found
 }
 
-func freshNonce() proto.ID {
-	var random [16]byte
-	rand.Read(random[:])
-	return proto.ID(base64.RawURLEncoding.EncodeToString(random[:]))
+func homeHeader(h *Host, group, as, kind string) proto.HomeCommand {
+	return proto.HomeCommand{
+		Type:      kind,
+		Nonce:     proto.NewNonce(),
+		Timestamp: h.Now().UnixMilli(),
+		Group:     proto.ID(group),
+		As:        proto.ID(as),
+	}
 }
 
 func marshalWire(v any) string {

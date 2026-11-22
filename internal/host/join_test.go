@@ -967,7 +967,9 @@ func checkJoinCommitRollbacks(t *testing.T) {
 		hasSecretary bool
 		mutateDB     func(*testing.T, *store.Store)
 	}{
-		{name: "demote-secretary-update-fails", hasSecretary: true, mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE session") }},
+		{name: "demote-secretary-update-fails", hasSecretary: true, mutateDB: func(t *testing.T, db *store.Store) {
+			seamSQL(t, db, "CREATE TRIGGER block_demote BEFORE INSERT ON session WHEN NEW.secretary = 0 BEGIN SELECT RAISE(ABORT, 'demote blocked'); END")
+		}},
 		{name: "create-session-fails", mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE session") }},
 		{name: "upsert-homes-scan-fails", mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE setting") }},
 		{name: "upsert-homes-unmarshal-fails", mutateDB: func(t *testing.T, db *store.Store) {
@@ -1006,6 +1008,11 @@ func runJoinRollbackCase(t *testing.T, hasSecretary bool, mutateDB func(*testing
 	if hasSecretary {
 		sec, ok := rig.h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: "sec-1"})
 		joinAssertEqual(t, "prior secretary restored", ok && sec.Secretary, true)
+		seamSQL(t, rig.db, "DROP TRIGGER block_demote")
+		fh.cmdFn = nil
+		rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude", Secretary: true})
+		secAfter, ok := rig.h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: "sec-1"})
+		joinAssertEqual(t, "prior secretary demoted without trigger", ok && !secAfter.Secretary, true)
 	}
 }
 

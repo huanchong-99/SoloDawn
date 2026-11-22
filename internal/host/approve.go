@@ -54,25 +54,24 @@ func approveForCaller(c Caller) bool {
 // Lock order: mu is a leaf lock; nothing called under mu acquires Host, Sessions, Rows or Store locks.
 type approvalState struct {
 	mu      sync.Mutex
-	nextID  uint64
-	cancels map[SessionKey]map[uint64]context.CancelFunc
+	cancels map[SessionKey]map[*byte]context.CancelFunc
 }
 
-func (st *approvalState) registerAsk(key SessionKey, cancel context.CancelFunc) uint64 {
+func (st *approvalState) registerAsk(key SessionKey, cancel context.CancelFunc) *byte {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.cancels == nil {
-		st.cancels = map[SessionKey]map[uint64]context.CancelFunc{}
+		st.cancels = map[SessionKey]map[*byte]context.CancelFunc{}
 	}
 	if st.cancels[key] == nil {
-		st.cancels[key] = map[uint64]context.CancelFunc{}
+		st.cancels[key] = map[*byte]context.CancelFunc{}
 	}
-	st.nextID++
-	st.cancels[key][st.nextID] = cancel
-	return st.nextID
+	id := new(byte)
+	st.cancels[key][id] = cancel
+	return id
 }
 
-func (st *approvalState) unregisterAsk(key SessionKey, id uint64) {
+func (st *approvalState) unregisterAsk(key SessionKey, id *byte) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	delete(st.cancels[key], id)
@@ -111,7 +110,7 @@ func startAskedGoroutine(h *Host, s Session, ask Ask) {
 	go runAskedEvent(ctx, cancel, h, st, s, id, ask, callDone)
 }
 
-func runAskedEvent(ctx context.Context, cancel context.CancelFunc, h *Host, st *approvalState, s Session, id uint64, ask Ask, callDone func()) {
+func runAskedEvent(ctx context.Context, cancel context.CancelFunc, h *Host, st *approvalState, s Session, id *byte, ask Ask, callDone func()) {
 	defer cancel()
 	defer st.unregisterAsk(s.SessionKey, id)
 	defer callDone()
@@ -326,7 +325,7 @@ func buildCodexAnswerValues(chosen, free string) []string {
 func approveDecisionOptions(in []cliQuestionOpt) []proto.DecisionOption {
 	opts := make([]proto.DecisionOption, len(in))
 	for i, opt := range in {
-		opts[i] = proto.DecisionOption{ID: optionID(i), Label: opt.Label, Effect: opt.Description}
+		opts[i] = decisionOption(i, opt.Label, opt.Description)
 	}
 	return opts
 }
@@ -352,7 +351,7 @@ func buildDecisionPostPayload(h *Host, s Session, cardID proto.ID, q cliQuestion
 }
 
 func postAndWaitDecision(ctx context.Context, h *Host, s Session, q cliQuestion) (string, string, string, bool) {
-	cardID := freshNonce()
+	cardID := proto.NewNonce()
 	approvers, mentions := resolveApproversAndMentions(h, s.Group, s.Member)
 	opts := approveDecisionOptions(q.Options)
 	payload := buildDecisionPostPayload(h, s, cardID, q, opts, approvers, mentions)
@@ -540,7 +539,7 @@ func postCardAndWait(ctx context.Context, h *Host, s Session, cardID proto.ID, p
 }
 
 func postAndWaitApproval(ctx context.Context, h *Host, s Session, ask Ask, shortCmd string, full *int, digest string) (bool, string) {
-	cardID := freshNonce()
+	cardID := proto.NewNonce()
 	approvers, mentions := resolveApproversAndMentions(h, s.Group, s.Member)
 	if storePendingApproval(h, cardID, s, ask.Tool, digest) != nil {
 		return false, denyRefusedPrefix + "internal: failed to store approval record"
@@ -626,9 +625,8 @@ func readStoreApprovers(db *store.Store) []string {
 
 func approverMentionIDs(rows *Rows, group string, approvers []string) []proto.ID {
 	mentions := []proto.ID{}
-	for _, raw := range rows.Of(group, "member") {
-		var m proto.MemberRow
-		if proto.Decode(raw, &m) == nil && m.Kind == "human" && slices.Contains(approvers, m.User) {
+	for _, m := range liveMembers(rows, group) {
+		if m.Kind == "human" && slices.Contains(approvers, m.User) {
 			mentions = append(mentions, proto.ID(m.ID))
 		}
 	}

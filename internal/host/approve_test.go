@@ -1282,6 +1282,11 @@ func assertCodexConcurrentWaitAndCancel(t *testing.T, fx *approveFixture, runner
 	})
 	mustApproveEqual(t, fx.h.Sessions.Calls(codexKey), 2, "Calls right after two Reports on codexKey")
 	mustApproveEqual(t, fx.h.Sessions.Calls(groupKey), 1, "Calls right after Report on groupKey")
+	st := Part[approvalState](fx.h)
+	st.mu.Lock()
+	openCodexAsks := len(st.cancels[codexKey])
+	st.mu.Unlock()
+	mustApproveEqual(t, openCodexAsks, 2, "distinct cancel keys for concurrent asks on codexKey")
 
 	postA := recvApproveChan(t, cards, "first card")
 	postB := recvApproveChan(t, cards, "second card")
@@ -1303,7 +1308,6 @@ func assertCodexConcurrentWaitAndCancel(t *testing.T, fx *approveFixture, runner
 	fx.h.Report(groupKey, Event{Kind: TurnBegan})
 	waitCallsZero(t, fx.h, groupKey)
 
-	st := Part[approvalState](fx.h)
 	st.mu.Lock()
 	leftover := len(st.cancels)
 	st.mu.Unlock()
