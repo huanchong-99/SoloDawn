@@ -47,7 +47,9 @@ func TestRoleGateWaitsActivationAndExpiry(t *testing.T) {
 	d.msgs[card.ID] = card
 	task.State = taskCancelled
 	s.Tasks["t"] = task
-	res = s.cftFinish(c, Result{})
+	cardTestSame(t, s.cftFinish(c, Result{}), Result{})
+	d.Disk = cardTestDisk{card}
+	res = cfmExpire(s, d, c.Now)
 	at := int64(10)
 	cardTestSame(t, res.Rows[0].Value().(proto.MsgRow).State, &proto.CardState{Status: "expired", At: &at})
 	cardTestSame(t, s.cftHasRole("missing", "a"), false)
@@ -64,7 +66,6 @@ func TestRoleCardOverlayAndOrdinaryWaits(t *testing.T) {
 	closed.State = &proto.CardState{Status: cardStatusDenied}
 	d.Disk = cardTestDisk{card}
 	d.msgs[card.ID] = closed
-	cardTestSame(t, len(d.Pending()), 0)
 	cardTestSame(t, cftHeld(closed), true)
 	closed.State = &proto.CardState{Status: "expired"}
 	cardTestSame(t, cftHeld(closed), true)
@@ -83,14 +84,44 @@ func TestRoleCardOverlayAndOrdinaryWaits(t *testing.T) {
 	rcard := s.cfmNewCard(c, cfmWhatDirect, d.msgs["b"], s.AIs["r"])
 	d.msgs[rcard.ID] = rcard
 	cardTestSame(t, cftWait(d, task).Msg, rcard.ID)
-	for i, pair := range [][2]proto.MsgRow{{{Pos: 1}, {Pos: 2}}, {{Pos: 0}, {Pos: 1}}, {{Pos: 1}, {Pos: 0}}, {{}, {}}} {
-		cardTestSame(t, cftCardOrder(pair[0], pair[1]), []int{-1, 1, -1, 0}[i])
+	out := Result{Rows: []Row{RowOf(card)}}
+	cftPutTask(&out, task)
+	cardTestSame(t, len(out.Rows), 2)
+	task.Commit = "new"
+	cftPutTask(&out, task)
+	cardTestSame(t, len(out.Rows), 2)
+	cardTestSame(t, out.Rows[1].Value(), task)
+}
+
+func TestRoleFinishingWithoutTaskWorkNeedsNoDisk(t *testing.T) {
+	s := NewState("g", "h", "owner")
+	for _, res := range []Result{
+		{},
+		{Rows: []Row{RowOf(proto.NoteRow{})}},
+		{Rows: []Row{RowOf(proto.MsgRow{})}, Items: []Item{{AI: "a", Why: itemNotice}}},
+	} {
+		cardTestSame(t, s.cftFinish(Command{}, res), res)
 	}
-	out := Result{}
-	cftPutTask(&out, task, proto.TaskRow{})
-	cardTestSame(t, len(out.Rows), 1)
-	cftPutTask(&out, task, task)
-	cardTestSame(t, len(out.Rows), 1)
+}
+
+func TestRoleDecisionsAndItemsLeaveUnchangedTasksAlone(t *testing.T) {
+	s, d, task, card, c := cftFixture()
+	task.Wait = &proto.TaskWait{Kind: waitConfirm, Msg: card.ID, Who: []string{"q"}}
+	s.Tasks[task.ID] = task
+	res := s.cftFinish(c, Result{Items: []Item{{AI: "a", Task: task.ID, Why: postMentionWhy}}})
+	cardTestSame(t, res.Rows, []Row(nil))
+	rcard := s.cfmNewCard(c, cfmWhatDirect, d.msgs["b"], s.AIs["r"])
+	rcard.State = &proto.CardState{Status: briefConfirmed}
+	res = s.cftDecide(c, rcard, proto.ConfirmBody{AI: "r"})
+	cardTestSame(t, res.Rows, []Row{RowOf(rcard)})
+	cardTestSame(t, res.Items, []Item(nil))
+	for _, state := range []string{taskQueued, taskPaused, taskMerged} {
+		task.State = state
+		s.Tasks[task.ID] = task
+		res = s.cftDecide(c, rcard, proto.ConfirmBody{AI: "r"})
+		cardTestSame(t, res.Rows, []Row{RowOf(rcard)})
+		cardTestSame(t, res.Items, []Item(nil))
+	}
 }
 
 func TestNewRoleAuthorityAndDuplicates(t *testing.T) {

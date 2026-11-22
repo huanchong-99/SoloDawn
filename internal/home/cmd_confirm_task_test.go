@@ -58,9 +58,12 @@ func TestRoleBriefCardsAndDecisions(t *testing.T) {
 			equal(t, len(mention.Items), 0)
 			equal(t, cfmCard(t, mention).State.Status, "pending")
 			act := cfmAct(guest, 183, card.ID, action, "")
+			queued := s.Tasks[queuedID]
 			res = cardApply(t, s, d, receipts{}, guest, act)
 			equal(t, res.Answer, store.Outcome{OK: true})
+			equal(t, len(res.Rows), 2)
 			cardCommit(s, d, res)
+			equal(t, s.Tasks[queuedID], queued)
 			if action == "confirm" {
 				equal(t, res.Items, []home.Item{{AI: briefA, Why: "assign", Task: taskID, Msg: taskID}})
 				equal(t, s.Tasks[taskID].Wait, (*proto.TaskWait)(nil))

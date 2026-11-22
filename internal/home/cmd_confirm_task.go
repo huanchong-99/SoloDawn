@@ -1,12 +1,9 @@
 package home
 
 import (
-	"cmp"
 	"encoding/json"
 	"maps"
-	"reflect"
 	"slices"
-	"strings"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
@@ -43,37 +40,10 @@ func (d cftDisk) Msg(id string) (proto.MsgRow, bool) {
 	return d.Disk.Msg(id)
 }
 
-func (d cftDisk) Pending() []proto.MsgRow {
-	cards := maps.Clone(d.msgs)
-	for _, card := range d.Disk.Pending() {
-		if _, changed := cards[card.ID]; !changed {
-			cards[card.ID] = card
-		}
-	}
-	var out []proto.MsgRow
-	for _, card := range cards {
-		if briefStatus(card) == cardStatusPending {
-			out = append(out, card)
-		}
-	}
-	slices.SortFunc(out, cftCardOrder)
-	return out
-}
-
-func cftCardOrder(a, b proto.MsgRow) int {
-	if a.Pos == 0 {
-		a.Pos = 1 << 53
-	}
-	if b.Pos == 0 {
-		b.Pos = 1 << 53
-	}
-	if n := cmp.Compare(a.Pos, b.Pos); n != 0 {
-		return n
-	}
-	return strings.Compare(a.ID, b.ID)
-}
-
 func (s *State) cftFinish(c Command, res Result) Result {
+	if !cftChangesTasks(res) {
+		return res
+	}
 	view := *s
 	view.Tasks = maps.Clone(s.Tasks)
 	d := cftDisk{Disk: c.Disk, msgs: map[string]proto.MsgRow{}}
@@ -82,16 +52,24 @@ func (s *State) cftFinish(c Command, res Result) Result {
 	for _, id := range slices.Sorted(maps.Keys(changed)) {
 		s.cftNewRoles(c, view.Tasks[id], d, &res)
 	}
-	view.cftExpire(c, d, &res)
 	res.Items = view.cftFilterItems(c, d, res.Items, changed, s.Tasks)
 	for _, id := range slices.Sorted(maps.Keys(changed)) {
 		task := view.Tasks[id]
 		if task.State == taskActive {
-			task.Wait = cftWait(d, task)
-			cftPutTask(&res, task, view.Tasks[id])
+			if wait := cftWait(d, task); wait != task.Wait {
+				task.Wait = wait
+				cftPutTask(&res, task)
+			}
 		}
 	}
 	return res
+}
+
+func cftChangesTasks(res Result) bool {
+	return slices.ContainsFunc(res.Rows, func(row Row) bool {
+		_, task := row.Value().(proto.TaskRow)
+		return task
+	}) || slices.ContainsFunc(res.Items, func(it Item) bool { return it.Task != "" })
 }
 
 func cftReadRows(view *State, d cftDisk, changed map[string]bool, rows []Row) {
@@ -144,29 +122,6 @@ func (s *State) cftNewRole(c Command, task proto.TaskRow, ai proto.AIMemberRow, 
 	res.Rows = append(res.Rows, RowOf(card))
 }
 
-func (s *State) cftExpire(c Command, d cftDisk, res *Result) {
-	for _, card := range d.Pending() {
-		if card.Kind != cfmKind {
-			continue
-		}
-		if card.Re == nil {
-			continue
-		}
-		req, _ := d.Msg(*card.Re)
-		if !cftRoleRequest(req) {
-			continue
-		}
-		var body proto.ConfirmBody
-		json.Unmarshal(card.Body, &body)
-		if !s.cftHasRole(req.ID, body.AI) {
-			at := c.Now
-			card.State = &proto.CardState{Status: "expired", At: &at}
-			d.msgs[card.ID] = card
-			res.Rows = append(res.Rows, RowOf(card))
-		}
-	}
-}
-
 func (s *State) cftHasRole(request, ai string) bool {
 	for _, task := range s.Tasks {
 		if cftRequest(task) == request && cftNames(task, ai) && !cftFinal(task.State) {
@@ -216,6 +171,9 @@ func cftRoleWait(d Disk, task proto.TaskRow) *proto.TaskWait {
 	for _, ai := range roles {
 		card := cftCard(d, task, ai)
 		if briefStatus(card) == cardStatusPending {
+			if task.Wait != nil && task.Wait.Msg == card.ID {
+				return task.Wait
+			}
 			var body proto.ConfirmBody
 			json.Unmarshal(card.Body, &body)
 			return &proto.TaskWait{Kind: waitConfirm, Msg: card.ID, Who: body.To, Since: card.Timestamp}
@@ -235,10 +193,7 @@ func cftOrdinaryWait(d Disk, taskID string) *proto.TaskWait {
 	return nil
 }
 
-func cftPutTask(res *Result, task, old proto.TaskRow) {
-	if reflect.DeepEqual(task, old) {
-		return
-	}
+func cftPutTask(res *Result, task proto.TaskRow) {
 	for i, row := range res.Rows {
 		if t, ok := row.Value().(proto.TaskRow); ok && t.ID == task.ID {
 			res.Rows[i] = RowOf(task)
@@ -250,9 +205,13 @@ func cftPutTask(res *Result, task, old proto.TaskRow) {
 
 func (s *State) cftDecide(c Command, card proto.MsgRow, body proto.ConfirmBody) Result {
 	res := Result{Rows: []Row{RowOf(card)}}
+	d := cftDisk{Disk: c.Disk, msgs: map[string]proto.MsgRow{card.ID: card}}
 	for _, task := range s.cftTasksFor(*card.Re, body.AI) {
-		res.Rows = append(res.Rows, RowOf(task))
-		if briefStatus(card) == briefConfirmed && task.State == taskActive {
+		if wait := cftWait(d, task); wait != task.Wait {
+			task.Wait = wait
+			res.Rows = append(res.Rows, RowOf(task))
+		}
+		if briefStatus(card) == briefConfirmed {
 			res.Items = append(res.Items, cftActivation(c.Disk, task, body.AI)...)
 		}
 	}
@@ -266,7 +225,7 @@ func (s *State) cftTasksFor(req, ai string) []proto.TaskRow {
 	var tasks []proto.TaskRow
 	for _, id := range slices.Sorted(maps.Keys(s.Tasks)) {
 		task := s.Tasks[id]
-		if cftRequest(task) == req && cftNames(task, ai) && !cftFinal(task.State) {
+		if cftRequest(task) == req && cftNames(task, ai) && task.State == taskActive {
 			tasks = append(tasks, task)
 		}
 	}

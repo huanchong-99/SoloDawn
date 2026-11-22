@@ -359,9 +359,10 @@ func (m *taskMove) waitFor(kind string) *proto.TaskWait {
 	return &proto.TaskWait{Kind: kind, Since: m.e.Now}
 }
 
-// cardWait prefers role confirmation, then approval, then decision.
+// cardWait is the wait of a task that waits for nothing else: its oldest
+// pending approval card, else its oldest pending decision card, else none.
 func (m *taskMove) cardWait() *proto.TaskWait {
-	for _, kind := range []string{waitConfirm, waitApproval, waitDecision} {
+	for _, kind := range []string{waitApproval, waitDecision} {
 		for _, c := range m.pending {
 			if c.Kind == kind {
 				return taskCardWait(c)

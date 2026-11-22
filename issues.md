@@ -9,7 +9,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-22 · limitation · Task participation history is inferred from current fields
 
 - Symptom: a final task cancelled before its first role item was queued can qualify for the thread exception after its expired card is pruned, as can an assignee newly named by row 11 before its first activation. A reviewer's earlier participation can be lost after a later reassignment/review overwrites its evidence.
-- Cause: `internal/home/cmd_confirm.go:48-80` derives participation from current roles, state, step and latest review, excluding unconfirmed role cards. Acknowledged inbox items are deleted; task rows contain no durable participation history. Row 11 also cannot durably distinguish an owner's reassignment that overrides an earlier closed card from that card; a foreign reassignment to the same AI after expiry needs a new request, since the request's one card is closed (`internal/home/cmd_confirm_task.go:131-145,183-209`).
+- Cause: `internal/home/cmd_confirm.go:48-80` derives participation from current roles, state, step and latest review, excluding unconfirmed role cards. Acknowledged inbox items are deleted; task rows contain no durable participation history. Row 11 also cannot durably distinguish an owner's reassignment that overrides an earlier closed card from that card; a foreign reassignment to the same AI after expiry needs a new request, since the request's one card is closed (`internal/home/cmd_confirm_task.go:109-123,138-154`).
 - Status: open, accepted for T2-2b pending the owner's review: no new table, export format or wire shape. Held role cards no longer qualify; known participation survives finalization while its current fields still show it.
 
 ### 2026-11-22 · limitation · `host.CheckTakeover` awaits `takeover.start` (`HS-20`) and `driver` in `host.info` awaits `P-5` / `T3-2`
@@ -595,6 +595,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-22 · bug · Role finishing read pending cards for commands without task work
+
+- Symptom: the home command-replay acceptance scenario panicked when applying a note command with no disk reader.
+- Cause: `cftFinish` in `internal/home/cmd_confirm_task.go` expired role cards on every successful command through `Disk.Pending`, including commands with no task rows or task items.
+- Status: resolved in #312. Results without task work return unchanged; card expiry belongs to the timer, and role decisions write only changed task waits.
 
 ### 2026-11-22 · bug · Watch confirmation admission rejected fields outside its checks
 
