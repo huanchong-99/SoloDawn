@@ -454,7 +454,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
     `ts`, counted every second while it is under a minute and every minute after, or its
     `answered` duration with the `reply` folded inside, hiding the standalone `reply` row when
     both are in the same list.
-  - The member panel (`src/components/member/`) mounts at `chat.side` (`order: 10`). It lists the
+  - The member panel (`src/components/people/`) mounts at `chat.side` (`order: 10`). It lists the
     group's AI members, placing the secretary first with its corner mark, with each AI's state
     (`working`, `waiting` on the reader in dawn or on another member, `dormant` as sleeping,
     `takeover`, `limited`, `offline`), computer with path (`local`, `direct`, `relay`, `offline`),
@@ -465,7 +465,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
     for owned AIs an "Open terminal" link enabled only when the browser's own
     path to that computer is `direct`, or, while the AI is in `takeover`, a "Hand back" button that
     sends `takeover.end` and says that messages to it wait until then; then the human members with
-    their roles and online status. Its "Add AI" button requires a reachable group home, an admin
+    their roles and online status. Owners and admins can generate a one-time invite with a
+    countdown. The owner's row has no role or removal action. Owners can promote, demote, and
+    remove other people; admins can remove ordinary members; non-owners can leave. Signed
+    commands go to the group home, and its row pushes update the panel. Its "Add AI" button
+    requires a reachable group home, an admin
     reader and at least one connected owned computer, and shows its reason when disabled. The
     add-AI dialog reads `host.info` from the owner's connected computers, suggests an unused member
     name in the group, offers the secretary switch when the group has none or the reader is an
@@ -593,7 +597,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/task/`        | `TaskCard.svelte`, mounted for kind `task`                                        |
 | `src/components/thread/`      | a task's thread, scored review block, checks and system notices                   |
 | `src/components/call/`        | `CallBlock.svelte`, mounted for kind `call` in threads and the main line          |
-| `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
+| `src/components/member/`      | the add-AI dialog                                                                 |
+| `src/components/people/`      | member panel (`chat.side`), invitation dialog, role/removal actions and join form |
 | `src/components/groupinfo/`   | group details and project memory (`chat.side`, `order: 20`)                       |
 | `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |

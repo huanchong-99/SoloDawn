@@ -4,6 +4,7 @@
     addDisabledReason,
     aiMembers,
     humanMembers,
+    isAdmin,
     pathLabel,
     personTags,
     statusOf,
@@ -17,13 +18,16 @@
   import { endTakeover, hostHomeOf } from '../../lib/terminal.svelte';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
-  import AddAI from './AddAI.svelte';
+  import AddAI from '../member/AddAI.svelte';
+  import InvitationDialog from './InvitationDialog.svelte';
+  import PersonActions from './PersonActions.svelte';
 
   /** The member column of a group's chat: AI member cards, people, and the add-AI dialog. */
   let { group, net }: { group: Group; net: Net } = $props();
   const uid = $props.id();
 
   let adding = $state(false);
+  let inviting = $state(false);
 
   const ais = $derived(aiMembers(group));
   const humans = $derived(humanMembers(group));
@@ -33,7 +37,7 @@
 <div class="members">
   <div class="head">
     <div class="row">
-      <h2 class="sec-title grow">{t('member.ai')} · {ais.length}</h2>
+      <h2 class="sec-title grow">{`${t('member.ai')} · ${ais.length}`}</h2>
       <button
         class="btn btn-sm"
         onclick={() => (adding = true)}
@@ -67,18 +71,18 @@
         </span>
         <div class="grow">
           <h3>
-            {ai.name}{#if owner}{' '}<span class="owner">· {owner}</span>{/if}
+            {ai.name}{#if owner}{' '}<span class="owner">{`· ${owner}`}</span>{/if}
           </h3>
           <p class="st" data-st={status.st}><i></i><span>{status.text}</span></p>
         </div>
       </header>
       <dl class="kv">
         <dt>{t('member.computer')}</dt>
-        <dd>{ai.host_name} <span class="muted">· {pathLabel(ai)}</span></dd>
+        <dd>{`${ai.host_name} `}<span class="muted">{`· ${pathLabel(ai)}`}</span></dd>
         <dt>{t('member.account')}</dt>
         <dd>
           {accountLabel(ai.account)}{#if ai.account === 'personal'}{' '}<span class="muted">
-              · {t('member.account.personal.note')}
+              {`· ${t('member.account.personal.note')}`}
             </span>{/if}
         </dd>
       </dl>
@@ -130,18 +134,31 @@
     <p class="hint">{t('member.ai.empty')}</p>
   {/each}
 
-  <h2 class="sec-title people-head">{t('member.people')} · {humans.length}</h2>
+  <div class="row people-head">
+    <h2 class="sec-title grow">{`${t('member.people')} · ${humans.length}`}</h2>
+    {#if isAdmin(group)}
+      <button
+        type="button"
+        class="btn btn-sm"
+        disabled={!group.home.ctl}
+        onclick={() => (inviting = true)}
+      >
+        <Icon name="plus" sm /><span>{t('people.invite.action')}</span>
+      </button>
+    {/if}
+  </div>
   <ul class="people">
     {#each humans as person (person.id)}
       {@const tags = personTags(group, person)}
       <li class="row person">
         <Avatar id={person.user} name={person.name} />
         <span class="grow cut">
-          {person.name}{#if tags}{' '}<span class="muted">· {tags}</span>{/if}
+          {person.name}{#if tags}{' '}<span class="muted">{`· ${tags}`}</span>{/if}
         </span>
         <span class="st" data-st={person.online ? 'ok' : 'offline'}>
           <i></i>{t(person.online ? 'member.online' : 'member.offline')}
         </span>
+        <PersonActions {group} {person} />
       </li>
     {/each}
   </ul>
@@ -149,6 +166,9 @@
 
 {#if adding}
   <AddAI {group} bind:open={adding} />
+{/if}
+{#if inviting}
+  <InvitationDialog {group} bind:open={inviting} />
 {/if}
 
 <style>

@@ -15,7 +15,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-22 · limitation · Browser invitation joining needs the node and home implementations
 
 - Symptom: a current node does not admit a browser through an invitation; it knows only protocol version 1.
-- Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts`. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a. U2-1 supplies the join page.
+- Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts` and U2-1 supplies the join page and member controls. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a.
 - Status: open until those units are integrated. The browser exchange is covered against a simulated home, not a released node.
 
 ### 2026-11-22 · limitation · A hand-back that starts while the node is stopping is lost
