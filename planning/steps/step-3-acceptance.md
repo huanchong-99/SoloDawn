@@ -49,7 +49,8 @@ If spike S-9 shows a clear benefit, its tests are written with its plan.
 
 ## AI models, profiles and escalation (R-165; `contracts/step-3/profiles.md`, `contracts/step-3/drivers.md` section 10)
 
-Cast: AIs S (`strong`), M (`standard`) and L (`light`) of one owner; the
+Cast: working AIs S (`strong`), M (`standard`) and L (`light`) of one
+owner, and the secretary C (`standard` unless a test says otherwise); the
 fake CLIs fail checks and reviews on script.
 
 - **A10.8** A new AI's row has `tier` `standard` and `skills` `""`. `member
@@ -67,28 +68,37 @@ fake CLIs fail checks and reviews on script.
 - **A10.10** M is the assignee. After one failed review nothing differs
   from step 1. After the second in a row: the task row has `stuck` with
   `kind` `review`, `n` 2, `ask` `true`; M's `reviewed` item ends with the
-  line that names S and not L; `submit_task` fails with `conflict`, and
-  nothing is pushed. M calls `ask` to L and L replies: still refused. M
-  calls `ask` to S and S replies: `ask` is `false` and the next
-  `submit_task` succeeds. The same with two failed hosted checks and
-  `kind` `checks`. In the browser: the badge "must ask a stronger AI"
-  while `ask` is `true`.
+  line that names S and neither L nor C; `submit_task` fails with
+  `conflict`, and there is no push, no pull request and no `report`. None
+  of these clears it: L's reply to M's call; S's reply to L's call in
+  this thread; S's reply to M's call in another task's thread. S's host
+  goes offline: still refused. S returns and replies to M's call in this
+  thread: `ask` is `false` and the next `submit_task` succeeds. A third
+  failed review then gives `n` 3, `ask` `true`, the line again and the
+  refusal again. The same with two failed hosted checks and `kind`
+  `checks`. In the browser: the badge "must ask a stronger AI" while `ask`
+  is `true`.
 - **A10.11** S is the assignee, or every AI keeps the default tier: after
   two failed reviews in a row `stuck.ask` is `false`, the item has no added
-  line and `submit_task` succeeds. A1 to A8 pass unchanged with default
+  line and `submit_task` succeeds. With C `strong` and S the assignee: the
+  line names C, and C's reply clears `ask`. A1 to A8 pass with default
   profiles.
 - **A10.12** M fails hosted checks once, then a review once: `n` is 1 and
-  nothing is asked. M fails a review, then passes one: `stuck` is gone, and
-  a later single failure asks nothing. `task assign` to another AI removes
-  `stuck`.
+  nothing is asked. M fails a review, passes hosted checks on the next
+  commit and fails the review again: `n` is 2 and `ask` is `true`, since a
+  passed hosted check clears only `kind` `checks`. M fails a review, then
+  passes one: `stuck` is gone, and a later single failure asks nothing.
+  `task assign` to another AI removes `stuck`.
 - **A10.13** Discovery. With each fake CLI scripted to list two models,
   `host.info` carries them under that agent as `models`, with id, name,
   levels and, where the script says so, `fast`; an id with a word of the
   table has that tier, any other `standard`. A fake CLI whose listing
-  fails, and one without a listing, give `models` `[]`, and `host.info` is
-  otherwise as before. In the browser: the dialog for adding an AI offers
-  the listed models and their levels; with the empty list it offers a text
-  field. For each real CLI, the list is what the CLI's own picker shows.
+  fails, and one without a listing (Qwen Code), give `models` `[]`, and
+  `host.info` is otherwise as before. `gemini-3-pro` is suggested
+  `standard`, `gpt-6-mini` `light`; Claude Code's `default` entry has the
+  tier of its `resolvedModel`. In the browser: the dialog for adding an AI
+  offers the listed models and their levels; with the empty list it offers
+  two text fields. For each real CLI, the list is what the CLI's own picker shows.
   (`live` for the last sentence)
 - **A10.14** Refresh. The fake CLI's list gains a model. A `host.info`
   request within 60 s answers the old list; one with `refresh` the new
@@ -102,7 +112,9 @@ fake CLIs fail checks and reviews on script.
   level in the arguments or parameters of section 10.4; a member with
   `""` passes neither. After `member set` with another model the next
   start of a session of that member, a resume, passes the new one. A
-  model the fake CLI refuses fails the turn as any failed start. (`live`:
+  model the fake CLI refuses is a crash: `turn_interrupted` with `crash`,
+  in a task session `task fail`, no `session_replaced`, and the session
+  keeps its id. (`live`:
   once per real CLI, the model the CLI reports is the one chosen)
 - **A10.16** The owner's edit stays. The owner sets `tier` `light` and
   `skills` on a member whose model is suggested `strong`. After a refresh

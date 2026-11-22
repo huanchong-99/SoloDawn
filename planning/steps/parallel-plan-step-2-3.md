@@ -175,29 +175,32 @@ member is good for. It touches no file of T3-1 and does not wait for it.
 | Id | W | Does | Tests | Owns | Needs | M | Sz |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | C3-3 | 4 | The contracts and this lane | — | `contracts/step-3/profiles.md`, `contracts/step-3/drivers.md` section 10 | — | — | M |
-| P-6 | 5 | Wire shapes: `model`, `effort`, `tier`, `skills` on the AI member row, in `member add_ai`, `member set` and `host.join`; `member` in `host.leave`; `refresh`, `models` and `driver.efforts` in `host.info`; `stuck` on the task row (`profiles.md` section 6) | golden round trip | lane PROTO | C3-3; not at the same time as P-5 | F | S |
-| T3-7 | 6 | Home: the four fields in `add_ai` and `member set`, owner only, with defaults and bounds; `stuck` counted, cleared and answered; row 5 refused (`profiles.md` sections 1, 2, 4) | A10.8, A10.10 to A10.12, A10.16 at the home | `home/profile.go`, `features/profile.feature` | P-6 | A | M |
-| T3-8 | 6 | Host, turns: the member list in every secretary turn, the line on `checks` and `reviewed` items, the instruction sentences, `submit_task` refused before the push (`profiles.md` sections 3, 4) | A10.9; A10.10 at the host | `host/turn_profile.go` | P-6 | A | S |
-| T3-9 | 6 | Host, models: the operation "list models" for Claude Code and Codex with their fake CLIs, on the probe path and on `refresh`; the tier table; `models` in `host.info`; `host.join` and `host.leave` for several members of one CLI; model and level passed at every start (`drivers.md` section 10) | A10.13 to A10.15 at the host | `host/models.go`, `host/tiers.go`, `features/models.feature` | P-6 | A | M |
-| T3-10 | 7 | The same operation and start settings for OpenCode and Qwen Code, in their drivers | A10.13, A10.15 for those CLIs | the files of T3-2 and T3-3 | T3-9, T3-2, T3-3 | A | S |
-| U3-4 | 6 | Web, profile: tier and skills on the AI member panel and card, the owner's editor, the suggestion beside the tier, the badge | A10.8, A10.10, A10.16 as seen | `cmp/profile/` | U-3, P-6 | F | S |
-| U3-5 | 6 | Web, models: model and level in the dialog for adding an AI and on the panel, the text field for an empty list, "not listed", the refresh button, several members of one CLI on the computers page | A10.13 to A10.15 as seen | `cmp/model/` | U-3, P-6 | F | M |
-| I3-2 | 8 | Acceptance of the lane with fake CLIs, at the nodes and in the browsers; the `live` parts once per real CLI | A10.8 to A10.16 | `features/s3_profile*`, `web/e2e/s3-profile.spec.ts` | T3-7 to T3-10, U3-4, U3-5 | A | M |
+| P-6 | 5 | Wire shapes: `model`, `effort`, `tier`, `skills` on the AI member row, in `member add_ai`, `member set` and `host.join`; `member` in `host.leave`; `refresh` and `models` in `host.info`; `stuck` on the task row (`profiles.md` section 6) | golden round trip | lane PROTO | C3-3; not at the same time as P-5 | F | S |
+| T3-7 | 6 | Home: the four fields in `add_ai` and `member set`, owner only, with defaults and bounds; `stuck` counted, cleared and answered; row 5 refused (`profiles.md` sections 1, 2, 4) | A10.8, A10.10 to A10.12, A10.16 at the home | `home/profile.go`, `features/home_profile.feature` | P-6 | A | M |
+| T3-8 | 6 | Host, turns: the member list in every secretary turn, the line on `checks` and `reviewed` items, the instruction sentences, `submit_task` refused before the push (`profiles.md` sections 3, 4) | A10.9; A10.10 at the host | `host/turn_profile.go`, `features/host_profile.feature` | P-6 | A | S |
+| T3-9 | 6 | Host, discovery: the operation "list models" for Claude Code and Codex with their fake CLIs, on the probe path and on `refresh`; the tier table; `models` in `host.info` (`drivers.md` 10.1 to 10.3) | A10.13, A10.14 at the host | `host/models.go`, `host/tiers.go`, `features/host_models.feature` | P-6 | A | M |
+| T3-11 | 6 | Host, choice: `host.join` and `host.leave` for several members of one CLI; model and level passed at every start and in the terminal, for Claude Code and Codex (`profiles.md` section 2, `drivers.md` 10.4) | A10.15 at the host | `host/start_model.go`, `features/host_start_model.feature` | P-6 | A | S |
+| T3-10 | 7 | Listing and start settings for OpenCode; start settings and the empty list for Qwen Code, in their drivers | A10.13, A10.15 for those CLIs | the files of T3-2 and T3-3 | T3-9, T3-11, T3-2, T3-3 | A | S |
+| U3-4 | 6 | Web, profile: tier and skills on the AI member panel and card, the owner's editor, the suggestion beside the tier, the badge. It alone edits `cmp/member/`, and leaves there the two places where U3-5 mounts its parts | A10.8, A10.10, A10.16 as seen | `cmp/profile/`, the changes in `cmp/member/` | U-3, P-6 | F | S |
+| U3-5 | 7 | Web, models: model and level in the dialog for adding an AI and on the panel, the text fields for an empty list, "not listed", the refresh button, several members of one CLI on the computers page | A10.13 to A10.15 as seen | `cmp/model/` | U3-4 | F | M |
+| I3-2 | 8 | Acceptance of the lane with fake CLIs, at the nodes and in the browsers; the `live` parts once per real CLI | A10.8 to A10.16 | `features/a10_profiles*`, `web/e2e/profiles.spec.ts` | T3-7 to T3-11, U3-4, U3-5 | A | M |
 
-After P-6, T3-7, T3-8, T3-9, U3-4 and U3-5 start together; they share no
+After P-6, T3-7, T3-8, T3-9, T3-11 and U3-4 start together; they share no
 file. Each adds its calls to the step 1 files it must
 (`home/cmd_member.go`, `home/machine.go`, `host/turn.go`,
 `host/tools_task.go`, `host/join.go`, `host/claude.go`, `host/codex.go`,
-`host/instructions/`, `cmp/member/`) and keeps its logic in its own.
-T3-9 and T3-1 both touch the two drivers: not at the same time.
+`host/instructions/`) and keeps its logic and its scenarios in its own.
+T3-9, T3-11 and T3-1 each touch the two drivers: one at a time. No file
+of this lane begins with `features/s3`, which is I3-1's; I3-1 tests A10.1
+to A10.7 and I3-2 the rest.
 
 **What depends on a CLI exposing its list**
 (`contracts/step-3/drivers.md` 10.5): only the choice from a list and the
-suggested tier, so of the acceptance items A10.13 and A10.14. Claude
-Code's listing is read from the Agent SDK's documentation and its wire
-form from a third party; Qwen Code has none and a settings file stands
-in. Where a listing does not hold, that driver declares the empty list
-and the owner types the model.
+suggested tier, so of the acceptance items A10.13 and A10.14. The
+listings of Claude Code and Codex were run by the reviewer; OpenCode's
+is documented; Qwen Code has none, so its list is always empty. Where a
+listing does not hold, that driver declares the empty list and the owner
+types the model.
 
 ## 5. Open questions for the coordinator
 
@@ -231,28 +234,24 @@ and the owner types the model.
    account choice and the terminal button only; the rest waits for
    `perm.set`.
 
-5. **Lane PROFILES (R-165), chosen in `contracts/step-3/profiles.md`.**
-   (a) "Checks not passed" counts hosted checks only; a failed
-   `run_checks` reaches no row of the task machine. (b) The refusal of
-   `submit` reuses `conflict`, with no new error code. (c) Whether a
-   stronger AI exists is judged by tier alone, whatever its state: if the
-   only stronger AI is limited or offline the task waits, and the
-   quiet-task notice brings the secretary. The other way (only reachable
-   AIs count) lets a stuck AI go on alone. (d) After the answer, a third
-   failure of the same kind asks again. (e) Nothing was added to
-   `list_members`; the driver declaration gains only `efforts`. (f) The A10 items are
-   in `steps/step-3-acceptance.md`, where A10 lives, not in
-   `steps/step-2-3-acceptance.md`. (g) A changed model applies at the
-   next start of a CLI process, a resume included; the first decision
-   said "no switching models inside a session", read here as: not while
-   a process runs. (h) Fast mode is listed and cannot be chosen; choosing
-   it costs one member field and one start setting per driver. (i)
-   Discovery runs with detection, so the Claude Code listing starts a
-   process (no model call) at most once in 60 s per `host.info` request;
-   the other way is node start and `refresh` only. (j) Qwen Code's list
-   is read from its settings file. (k) Two members of one CLI share one
-   subscription; the secretary is told so, nothing stops it.
-   **Recommended:** all as written.
+5. **Lane PROFILES (R-165): the choices made in writing
+   `contracts/step-3/profiles.md` and `contracts/step-3/drivers.md`
+   section 10.** (a) "Checks not passed" counts hosted checks only; a
+   failed `run_checks` reaches no row of the task machine. (b) The
+   refusal of `submit` reuses `conflict`, with no new error code. (c)
+   Whether a stronger AI exists is judged by tier alone, whatever its
+   state: if the only stronger AI is limited or offline the task waits,
+   and the quiet-task notice brings the secretary. (d) After the answer,
+   a third failure of the same kind asks again. (e) Nothing was added to
+   `list_members` or to the driver declaration. (f) The A10 items are in
+   `steps/step-3-acceptance.md`, where A10 lives. (g) A changed model
+   applies at the next start of a CLI process, a resume included. (h)
+   Fast mode is listed and cannot be chosen. (i) Discovery runs with
+   detection, so the Claude Code listing starts a process (no model
+   call) at most once in 60 s per `host.info` request. (j) Qwen Code's
+   list read from its settings file. (k) Two members of one CLI share
+   one subscription; the secretary is told so, nothing stops it. (l) The
+   secretary is no candidate for an escalation.
 
 ### Decided (2026-11-22)
 
@@ -267,6 +266,14 @@ and the owner types the model.
    `agent.set`, the tool list and `takeover.start` only; U3-3 shows the
    account choice and the terminal button only; the postponed parts of
    `contracts/step-3/drivers.md` section 5 and of A10.1 are dropped.
+5. Lane PROFILES: (a) to (f), (h), (i) and (k) as written; for (h),
+   Codex's fast mode is read from `serviceTiers`; for (k), each member
+   is `limited` only when its own CLI reports it. (g) as written, with
+   no fallback to a new session. (j) rejected: the settings file can hold
+   a credential, so Qwen Code lists nothing and the owner types the
+   model. (l) rejected: the secretary is a candidate; R-21 forbids it
+   writing code, not answering. No host-kept list of levels: without a
+   list from the CLI the level is a text field.
 
 ### Follow-up
 

@@ -236,28 +236,30 @@ them are in `contracts/step-3/profiles.md`; this section owns what the
 host finds, what it suggests and what it passes to the CLI. It changes one
 sentence of `contracts/drivers.md` section 1: a model is passed.
 
+`[verified]` here means run by the reviewer of this contract on
+2026-11-22, with Claude Code 2.1.311 and Codex 0.164.0.
+
 ### 10.1 A sixth operation: list models
 
 Each driver lists the models its CLI offers under the signed-in account,
 by the CLI's own listing and nothing else. The host adds no model, drops
-none and keeps no list of its own, so a new model appears without a
-release of SoloDawn.
+none and keeps no list of its own, neither of models nor of levels, so a
+new model appears without a release of SoloDawn.
 
 | `agent` | How the list is read | Model id, name | Levels | Fast mode |
 | --- | --- | --- | --- | --- |
-| `claude` | start `claude -p --verbose --input-format stream-json --output-format stream-json --no-session-persistence --strict-mcp-config --settings '{"disableAllHooks":true}'`, write one `initialize` control request, read `models` of the `control_response`, close stdin. No prompt is sent, so no model is called. `[documented]` as `supportedModels()` of the Agent SDK; the lines on the wire are `[unverified]` | `value`, `displayName` | `supportedEffortLevels`, when `supportsEffort` | `supportsFastMode` |
-| `codex` | `model/list` on `codex app-server`, after `initialize`; hidden entries are not asked for `[documented]` | `id`, `displayName` | `supportedReasoningEfforts`, in the order given | `additionalSpeedTiers` is not empty |
+| `claude` | start `claude -p --verbose --input-format stream-json --output-format stream-json --no-session-persistence --strict-mcp-config --settings '{"disableAllHooks":true}'`, write one `initialize` control request, read `models` of the `control_response`, close stdin. `[verified]`: it lists the models (14) and calls no model. The field names are `[documented]`, from `ModelInfo` of the Agent SDK | `value`, `displayName` | `supportedEffortLevels`, when `supportsEffort` | `supportsFastMode` |
+| `codex` | `model/list` on `codex app-server`, after `initialize` `[verified]` (8 models); asked again with `cursor` = the answer's `nextCursor` until there is none; hidden entries are not asked for `[documented]` | `model` (not `id`, the name of the catalog entry), `displayName` | `supportedReasoningEfforts[].reasoningEffort`, in the order given | `serviceTiers` is not empty. `[unverified]` that every such tier is a faster one |
 | `opencode` | `GET /api/model` of `opencode serve`; the same list as `opencode models --verbose` `[documented]`; the fields are `[unverified]` | `provider/model`, its name | the model's variants | — |
-| `qwen` | no listing command is documented for headless mode. The host reads `modelProviders` of `~/.qwen/settings.json`, where API-key models are declared `[documented]`; the file holds no credential | `id`, `name` | `capabilities.reasoning.efforts`, where the entry has it | — |
+| `qwen` | not read. No listing is documented for headless mode, and its settings file can hold a credential, which the node never reads (`contracts/drivers.md` 1.4, R-50) | — | — | — |
 
 - **A CLI without a listing**, a listing that fails, and a list in a shape
   the driver does not know all give the empty list. The host guesses
-  nothing: the owner types the model's id (`contracts/step-3/profiles.md`
-  section 2a), and the level is offered from `efforts` of the declaration
-  (10.3) or not at all.
-- A claim marked `[unverified]` is captured from the real CLI by the unit
-  that builds it; a driver whose listing does not work as written here
-  declares the empty list until it does (section 4, last rule).
+  nothing: the owner types the model's id and the level
+  (`contracts/step-3/profiles.md` section 2a).
+- A claim not marked `[verified]` is captured from the real CLI by the
+  unit that builds it; a driver whose listing does not work as written
+  here declares the empty list until it does (section 4, last rule).
 - **When.** With detection (`contracts/drivers.md` 1.4): at node start and
   on a `host.info` request, kept for the same 60 s. A `host.info` request
   with `"refresh":true` skips what was kept; that is the owner's refresh.
@@ -265,29 +267,32 @@ release of SoloDawn.
 
 ### 10.2 The suggested tier
 
-The host ships one table and suggests a tier per listed model: the first
-row whose word is in the model's id, case ignored; no row, `standard`.
+The host ships one table and suggests a tier per listed model. The
+model's id, in lower case, is cut into words at every character that is
+not a letter or a digit; the first row that holds one of those words
+gives the tier; no row, `standard`. So `gemini-3-pro` has the words
+`gemini`, `3`, `pro` and is not `mini`.
 
-| Word in the id | Tier |
+| A word of the id | Tier |
 | --- | --- |
 | `haiku`, `mini`, `nano`, `flash`, `lite` | `light` |
 | `opus`, `fable` | `strong` |
 
+- Claude Code's entries are matched on `resolvedModel`, not on `value`:
+  its entry `default` then gets the tier of the model it stands for.
 - The table is data in one file of the host. T3-9 completes it for the
-  models the four CLIs list on the day it is built, each row with its
-  source; a wrong row costs one click, since the owner sees the
-  suggestion before anything is stored.
+  models the CLIs list on the day it is built, each row with its source;
+  a wrong row costs one click, since the owner sees the suggestion before
+  anything is stored.
 - No `skills` are suggested.
 
 ### 10.3 On the wire (adds to section 6)
 
-Each entry of `agents` in `host.info` carries `models`, always present,
-and `driver` gains `efforts`:
+Each entry of `agents` in `host.info` carries `models`, always present.
+`driver` does not change.
 
 ```json
 {"agent":"claude", …,
- "driver":{"accounts":["personal","team","api_key"],"takeover":"new",
-           "efforts":[]},
  "models":[{"model":"opus","name":"Opus","efforts":["low","medium","high","xhigh","max"],
             "fast":true,"tier":"strong"},
            {"model":"haiku","name":"Haiku","efforts":[],"tier":"light"}]}
@@ -301,7 +306,6 @@ and `driver` gains `efforts`:
 | `models[].efforts` | always, may be `[]` | the levels of that model, in the CLI's order |
 | `models[].fast` | only when `true` | the CLI says the model has a fast mode. Shown; it cannot be chosen |
 | `models[].tier` | always | the suggestion of 10.2 |
-| `driver.efforts` | always, may be `[]` | the levels the CLI's start setting takes for any model, for a CLI without a listing |
 
 `groups` of an agent may hold several entries of one `g`, one per member.
 
@@ -310,21 +314,25 @@ and `driver` gains `efforts`:
 At every start of a CLI process the driver passes the member's `model`
 and `effort`; an empty value passes nothing, as in step 1.
 
-| `agent` | Model | Level |
-| --- | --- | --- |
-| `claude` | `--model <model>` `[documented]` | `--effort <effort>` `[documented]` |
-| `codex` | `model` of `thread/start` and `thread/resume` `[documented]` | `config.model_reasoning_effort` of the same `[documented]` |
-| `opencode` | `POST /api/session/{id}/model` before the first prompt of a process `[documented]` | the variant in the same selection, `provider/model#variant` `[unverified]`: version 1 documents `--variant` instead |
-| `qwen` | `startupConfig.modelServiceId` of `POST /session`, behind the capability `session_startup_config`; `--model` in stream-json mode `[documented]` | `startupConfig.reasoningEffort` `[documented]` |
+| `agent` | Model | Level | In the terminal (`contracts/drivers.md` 1.3) |
+| --- | --- | --- | --- |
+| `claude` | `--model <model>` `[verified]` | `--effort <effort>` `[verified]` | the same two flags |
+| `codex` | `model` of `thread/start` and `thread/resume` `[documented]` | `config.model_reasoning_effort` of the same `[documented]` | `-m <model>` and `-c model_reasoning_effort="<effort>"` on `codex resume` `[documented]` |
+| `opencode` | `POST /api/session/{id}/model` before the first prompt of a process `[documented]` | the variant in the same selection, `provider/model#variant` `[unverified]`: version 1 documents `--variant` instead | no takeover (section 8) |
+| `qwen` | `startupConfig.modelServiceId` of `POST /session`, behind the capability `session_startup_config`; `--model` in stream-json mode `[documented]` | `startupConfig.reasoningEffort` `[documented]` | no takeover (section 8) |
 
-- Takeover (`contracts/drivers.md` 1.3) passes the same two.
-- `[unverified]` for all four: that a resume under another model keeps the
-  history. If one CLI does not, its driver starts a new session for the
-  member's next turn of that kind, and says so in its level table.
+- A changed model or level applies at the next start, a resume included:
+  the session and its history stay. There is no fallback to a new
+  session.
+- **A value the CLI refuses** makes the CLI exit, and that is a crash:
+  row 1 of `flows/agent-turn.md` E (`turn_interrupted` with `crash`, and
+  `task fail` in a task session). It is not "cannot resume the session
+  id": the session is not replaced and keeps its history. The owner
+  reads the notice and corrects the member.
 
 ### 10.5 What depends on a CLI exposing its list
 
 Only the choice from a list and the suggested tier. With the empty list
-the owner still types a model, sets tier and skills, and everything of
-`contracts/step-3/profiles.md` sections 3 and 4 works.
-
+(Qwen Code, always) the owner types model and level, sets tier and
+skills, and everything of `contracts/step-3/profiles.md` sections 3 and
+4 works.
