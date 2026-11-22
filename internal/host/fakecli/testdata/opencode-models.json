@@ -1,0 +1,7 @@
+{
+  "session": "models",
+  "steps": [
+    {"dir":"http","msg":{"call":"GET /api/model","body":null,"res":{"data":[{"providerID":"anthropic","modelID":"claude-opus-5","name":"Opus","variants":[{"id":"low"},{"id":"high"}]},{"providerID":"openai","modelID":"gpt-6-mini","name":"Mini","variants":[]}]}}},
+    {"dir":"http","msg":{"call":"POST /never","body":{}}}
+  ]
+}

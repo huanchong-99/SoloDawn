@@ -1,4 +1,12 @@
-Feature: Host model discovery for Claude Code and Codex
+Feature: Host model discovery
+  Scenario: OpenCode lists provider/model ids and variants while Qwen lists nothing (A10.13 host)
+    Given a model-discovery host with scripted OpenCode and Qwen Code
+    When the model-discovery host receives host.info
+    Then the model-discovery host lists OpenCode variants and tiers and no Qwen models
+    When the OpenCode listing has an unknown shape
+    And the model-discovery host receives host.info with refresh
+    Then both model lists are empty
+
   Scenario: Discovery preserves the CLI listing and applies word-based tier suggestions (A10.13 host)
     Given a model-discovery host with scripted Claude Code and Codex
     When the model-discovery host receives host.info
