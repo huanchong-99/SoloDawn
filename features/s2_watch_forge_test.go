@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -39,6 +40,7 @@ type s2ForgeWorld struct {
 	cfg            s2ForgeConfig
 	group          proto.ID
 	sec            proto.AIMemberRow
+	workers        [2]proto.AIMemberRow
 	tasks          map[int]proto.TaskRow
 	summaries      map[string]proto.SummaryBody
 	short, live    bool
@@ -125,10 +127,14 @@ func (f *s2ForgeWorld) joinProjectAIs() error {
 	if err != nil {
 		return err
 	}
-	if _, err := c.JoinAI(c.P, c.P2, c.P1, f.group, "claude", "Claude", false); err != nil {
+	f.workers[0], err = c.JoinAI(c.P, c.P2, c.P1, f.group, "claude", "Claude", false)
+	if err != nil {
 		return err
 	}
-	_, err = c.JoinAI(c.P, c.P1, c.P1, f.group, "codex", "Codex", false)
+	if err := c.configureNodeAgent(c.P, c.P1, "codex", "team"); err != nil {
+		return err
+	}
+	f.workers[1], err = c.JoinAI(c.P, c.P1, c.P1, f.group, "codex", "Codex", false)
 	return err
 }
 
@@ -299,7 +305,10 @@ func (f *s2ForgeWorld) waitForSummaries(count int) error {
 	}); err != nil {
 		return err
 	}
-	return f.checkTaskResults(count)
+	if err := f.checkTaskResults(count); err != nil {
+		return err
+	}
+	return f.verifyZeroApprovalCards()
 }
 
 func (f *s2ForgeWorld) observeTaskRow(raw json.RawMessage) error {
@@ -341,27 +350,77 @@ func (f *s2ForgeWorld) checkTaskResults(count int) error {
 		}
 	}
 	if count == 2 {
-		return checkS2CrossReview(f.tasks[1], f.tasks[2])
+		return checkS2CrossReview(f.tasks[1], f.tasks[2], [2]string{f.workers[0].ID, f.workers[1].ID})
 	}
 	return nil
 }
 
-func checkS2CrossReview(first, second proto.TaskRow) error {
-	if first.Assignee != second.Review.By || second.Assignee != first.Review.By {
-		return fmt.Errorf("tasks were not cross-reviewed: got %q and %q", first.Review.By, second.Review.By)
+func checkS2CrossReview(first, second proto.TaskRow, workers [2]string) error {
+	for i, task := range []proto.TaskRow{first, second} {
+		if task.Assignee != workers[i] || task.Reviewer != workers[1-i] || task.Review.By != workers[1-i] {
+			return fmt.Errorf("task %d assignee %q, reviewer %q, review by %q; want %q and %q", task.Num, task.Assignee, task.Reviewer, task.Review.By, workers[i], workers[1-i])
+		}
 	}
 	return nil
 }
 
 func (f *s2ForgeWorld) checkTaskResult(task proto.TaskRow) error {
-	if task.Review == nil || !task.Review.OK || task.PR == 0 {
+	if task.Review == nil || !task.Review.OK || task.PR == 0 || task.Review.Commit != task.Commit {
 		return fmt.Errorf("task did not merge after a passing review with a request: %+v", task)
 	}
+	if err := checkS2FinalChecks(task); err != nil {
+		return err
+	}
+	return f.checkTaskSummary(task)
+}
+
+func checkS2FinalChecks(task proto.TaskRow) error {
+	for _, check := range []*proto.Check{task.Checks.Local, task.Checks.Cloud} {
+		if check == nil || !check.OK || check.Commit != task.Commit {
+			return fmt.Errorf("task %d lacks passing checks for final commit %q", task.Num, task.Commit)
+		}
+	}
+	return nil
+}
+
+func (f *s2ForgeWorld) checkTaskSummary(task proto.TaskRow) error {
 	summary := f.summaries[task.ID]
 	if summary.PR == nil || *summary.PR != task.PR {
 		return fmt.Errorf("task %d summary request does not match %d", task.Num, task.PR)
 	}
 	return f.checkTaskCleanup(task)
+}
+
+func (f *s2ForgeWorld) verifyZeroApprovalCards() error {
+	db, err := store.Open(filepath.Join(f.c.P1.Data, "node.db"))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var messages []proto.MsgRow
+	err = db.Write(func(tx *store.Tx) error {
+		rows, err := tx.Query("SELECT data FROM row WHERE g = ? AND r = 'msg' ORDER BY seq", f.group)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var raw []byte
+			if err := rows.Scan(&raw); err != nil {
+				return err
+			}
+			var message proto.MsgRow
+			if err := proto.Decode(raw, &message); err != nil {
+				return err
+			}
+			messages = append(messages, message)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return err
+	}
+	return m5CheckZeroApprovalCards(messages)
 }
 
 func (f *s2ForgeWorld) checkTaskCleanup(task proto.TaskRow) error {
@@ -520,4 +579,99 @@ func (f *s2ForgeWorld) expectedCalls(want map[string]int, task proto.TaskRow) {
 
 func s2WantForge(want map[string]int, n int, args ...string) {
 	want[string(mustMarshalNoEscape(args))] = n
+}
+
+func TestS2ForgeCrossReview(t *testing.T) {
+	workers := [2]string{"claude", "codex"}
+	first := proto.TaskRow{Num: 1, Assignee: "claude", Reviewer: "codex", Review: &proto.Review{By: "codex"}}
+	second := proto.TaskRow{Num: 2, Assignee: "codex", Reviewer: "claude", Review: &proto.Review{By: "claude"}}
+	if err := checkS2CrossReview(first, second, workers); err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range []proto.TaskRow{
+		{Num: 1, Review: &proto.Review{}},
+		{Num: 1, Assignee: "codex", Reviewer: "codex", Review: &proto.Review{By: "codex"}},
+		{Num: 1, Assignee: "claude", Reviewer: "claude", Review: &proto.Review{By: "codex"}},
+		{Num: 1, Assignee: "claude", Reviewer: "codex", Review: &proto.Review{By: "claude"}},
+	} {
+		want := fmt.Sprintf("task 1 assignee %q, reviewer %q, review by %q; want %q and %q", task.Assignee, task.Reviewer, task.Review.By, "claude", "codex")
+		if err := checkS2CrossReview(task, second, workers); err == nil || err.Error() != want {
+			t.Fatalf("got %v, want %s", err, want)
+		}
+	}
+}
+
+func TestS2ForgeFinalChecks(t *testing.T) {
+	passing := &proto.Check{OK: true, Commit: "final"}
+	task := proto.TaskRow{Num: 1, Commit: "final", Checks: proto.TaskChecks{Local: passing, Cloud: passing}}
+	if err := checkS2FinalChecks(task); err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []*proto.Check{nil, {Commit: "final"}, {OK: true, Commit: "old"}} {
+		for _, checks := range []proto.TaskChecks{{Local: check, Cloud: passing}, {Local: passing, Cloud: check}} {
+			task.Checks = checks
+			want := `task 1 lacks passing checks for final commit "final"`
+			if err := checkS2FinalChecks(task); err == nil || err.Error() != want {
+				t.Fatalf("got %v, want %s", err, want)
+			}
+		}
+	}
+}
+
+func TestS2ForgeStaleReview(t *testing.T) {
+	f := &s2ForgeWorld{}
+	for _, review := range []*proto.Review{nil, {OK: true, Commit: "old"}} {
+		task := proto.TaskRow{Commit: "final", PR: 1, Review: review}
+		want := fmt.Sprintf("task did not merge after a passing review with a request: %+v", task)
+		if err := f.checkTaskResult(task); err == nil || err.Error() != want {
+			t.Fatalf("got %v, want %s", err, want)
+		}
+	}
+}
+
+func TestS2ForgeApprovalCards(t *testing.T) {
+	for _, messages := range [][]proto.MsgRow{nil, {{Kind: "summary"}}} {
+		if err := m5CheckZeroApprovalCards(messages); err != nil {
+			t.Fatal(err)
+		}
+	}
+	messages := []proto.MsgRow{{RowHeader: proto.RowHeader{ID: "first-push"}, Kind: "approval"}, {Kind: "summary"}}
+	if err := m5CheckZeroApprovalCards(messages); err == nil || err.Error() != "unexpected approval card first-push" {
+		t.Fatalf("got %v, want unexpected approval card first-push", err)
+	}
+}
+
+func TestS2ForgeApprovalHistory(t *testing.T) {
+	summary := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: "summary", Seq: 2}, Pos: 2,
+		Group: "group", Kind: "summary", Mentions: []string{}, Body: json.RawMessage(`{}`)}
+	approval := summary
+	approval.ID, approval.Seq, approval.Pos, approval.Kind = "first-push", 1, 1, "approval"
+	approval.State = &proto.CardState{Status: "accepted"}
+	for _, tc := range []struct {
+		name     string
+		messages []proto.MsgRow
+		want     string
+	}{
+		{name: "empty", want: "<nil>"},
+		{name: "summary", messages: []proto.MsgRow{summary}, want: "<nil>"},
+		{name: "earlier resolved approval", messages: []proto.MsgRow{approval, summary}, want: "unexpected approval card first-push"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := t.TempDir()
+			f := &s2ForgeWorld{s2WatchWorld: &s2WatchWorld{c: &s2Cast{P1: &s2Node{Data: data}}}, group: proto.ID("group")}
+			db, err := store.Open(filepath.Join(data, "node.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			for _, message := range tc.messages {
+				if err := db.Write(func(tx *store.Tx) error { return store.Put(tx, "group", message.Seq, message) }); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := fmt.Sprint(f.verifyZeroApprovalCards()); got != tc.want {
+				t.Fatalf("got %s, want %s", got, tc.want)
+			}
+		})
+	}
 }

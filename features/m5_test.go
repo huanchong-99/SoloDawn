@@ -1652,7 +1652,11 @@ func (w *m5World) stepVerifyPushBranchAtLevel2() error {
 }
 
 func (w *m5World) verifyZeroApprovalCards() error {
-	for _, m := range w.browserMessages() {
+	return m5CheckZeroApprovalCards(w.browserMessages())
+}
+
+func m5CheckZeroApprovalCards(messages []proto.MsgRow) error {
+	for _, m := range messages {
 		if m.Kind == "approval" {
 			return fmt.Errorf("unexpected approval card %s", m.ID)
 		}
