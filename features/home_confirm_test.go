@@ -125,7 +125,7 @@ func homeConfirmSteps(sc *godog.ScenarioContext) {
 		w.queued = queued
 		return nil
 	})
-	sc.Step(`^the confirmation command answers "([^"]*)"$`, w.checkAnswer)
+	sc.Step(`^the home confirmation command answers "([^"]*)"$`, w.checkAnswer)
 	sc.Step(`^the confirmation card is "([^"]*)"$`, func(status string) error { return w.checkCardStatus(w.card, status) })
 	sc.Step(`^the latest delivery is "([^"]*)"$`, func(why string) error {
 		var got []string

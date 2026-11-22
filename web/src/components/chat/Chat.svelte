@@ -105,7 +105,7 @@
     <div class="bar-title">
       <h2>{group.name}</h2>
       <p>
-        {t('chat.project')} · {t('chat.members')}
+        {t(group.info?.kind === 'team' ? 'team.title' : 'chat.project')} · {t('chat.members')}
         {group.members.length}
         {#if group.home.name}· <Icon name="home" sm /> {group.home.name}{/if}
       </p>
@@ -124,7 +124,9 @@
       </button>
     {/if}
   </header>
-  <div class="top" inert={covered}><Mount at="chat.top" props={{ group }} /></div>
+  <div class="top" inert={covered}>
+    <Mount at="chat.top" props={{ group }} />
+  </div>
 
   <!-- The scroller is reversed and holds one child: its start is the bottom, so the newest
        message is in view when it opens and stays there, and a page added above moves nothing.
@@ -171,7 +173,7 @@
           </div>
         {/if}
       {/each}
-      {#if group.info && !group.info.secretary}
+      {#if group.info?.kind === 'project' && !group.info.secretary}
         <p class="nosec"><Icon name="alert" sm />{t('chat.nosecretary')}</p>
       {/if}
     </div>

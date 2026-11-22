@@ -443,6 +443,7 @@ func cleanupGoneMembers(h *Host, group string) {
 	for _, raw := range h.Rows.Of(group, "member") {
 		var row proto.GoneRow
 		if proto.Decode(raw, &row) == nil && row.Gone {
+			watchGone(h, group, row.ID)
 			leaveGoneMember(h, group, row.ID)
 		}
 	}
@@ -547,6 +548,10 @@ func handleInboxElem(h *Host, d *delivery, home, group string, rawElem json.RawM
 }
 
 func dispatchArrivedItem(h *Host, d *delivery, v verifiedItem) {
+	if v.item.Why == "watch" {
+		watchItem(h, v)
+		return
+	}
 	if ai, local, _ := lookupLocalAI(h, v.group, string(v.item.AI)); local && tryOpenWait(h, v, ai.agent) {
 		return
 	}

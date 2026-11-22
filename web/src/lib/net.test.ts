@@ -232,6 +232,83 @@ function welcomeFrame(
   };
 }
 
+it('shares a temporary watch-host connection and closes it only after the last watch ends', async () => {
+  const browser = await loadDevice({ crypto, idb: () => idb });
+  const own = await newDevice();
+  const foreign = await newDevice();
+  const log = new DeviceLog(crypto, browser.id);
+  await log.apply(
+    await signDeviceEntry(browser, browser.id, 1, 'add', browser.id, 'browser', 'Web'),
+  );
+  await log.apply(await signDeviceEntry(browser, browser.id, 2, 'add', own.id, 'node', 'Computer'));
+  await saveOwner(() => idb, log, {});
+  const { net, stop } = startTracked('live');
+  await vi.waitFor(() => expect(net.watchHost).toBeTypeOf('function'));
+  clients[0].ready();
+  const ownPC = await answerNode(clients[0], own, browser.id, 0);
+  ownPC.ctl.deliver(welcomeFrame(1, own.id, 'Computer'));
+  await vi.waitFor(() => expect(net.homes[0].ctl).toBeDefined());
+  const ownCtl = net.homes[0].ctl;
+  net.watchHost!(own.id)();
+  expect(net.homes[0].ctl).toBe(ownCtl);
+  expect(ownPC.closes).toBe(0);
+  const first = net.watchHost!(foreign.id);
+  const second = net.watchHost!(foreign.id);
+  expect(clients[0].known(foreign.id)).toBe(true);
+  const pc = await answerNode(clients[0], foreign, browser.id, 1);
+  pc.ctl.deliver({ ...welcomeFrame(1, foreign.id, 'AI host'), owner: false });
+  const host = net.homes.find((home) => home.device === foreign.id)!;
+  await vi.waitFor(() => expect(host.ctl).toBeDefined());
+  expect(clients[0].offersFor(foreign.id)).toHaveLength(1);
+  first();
+  expect([pc.closes, clients[0].known(foreign.id)]).toEqual([0, true]);
+  expect(host.ctl).toBeDefined();
+  second();
+  expect([pc.closes, clients[0].known(foreign.id)]).toEqual([1, false]);
+  expect([host.ctl, net.path(host)]).toEqual([undefined, undefined]);
+  expect(net.homes.map((home) => home.device)).toEqual([own.id]);
+  expect(await loadJoined(() => idb)).toEqual({});
+  const last = net.watchHost!(foreign.id);
+  expect(net.homes.map((home) => home.device)).toEqual([own.id, foreign.id]);
+  expect(net.homes[1]).not.toBe(host);
+  stop();
+  const kept = elsewhere();
+  homes.push(kept);
+  last();
+  expect(homes).toEqual([kept]);
+  expect(net.watchHost).toBeUndefined();
+});
+
+it('reuses and keeps the group home when a watch ends on an already joined node', async () => {
+  const browser = await loadDevice({ crypto, idb: () => idb });
+  const own = await newDevice();
+  const home = await newDevice();
+  const log = new DeviceLog(crypto, browser.id);
+  await log.apply(
+    await signDeviceEntry(browser, browser.id, 1, 'add', browser.id, 'browser', 'Web'),
+  );
+  await log.apply(await signDeviceEntry(browser, browser.id, 2, 'add', own.id, 'node', 'Computer'));
+  await saveOwner(() => idb, log, {});
+  await saveJoined(() => idb, { [home.id]: { name: 'Group home', url: 'wss://rv.example/rv' } });
+  const { net } = startTracked('live');
+  await vi.waitFor(() => expect(net.watchHost).toBeTypeOf('function'));
+  clients[0].ready();
+  const pc = await answerNode(clients[0], home, browser.id, undefined);
+  pc.ctl.deliver({
+    ...welcomeFrame(1, home.id, 'Group home', [{ g: websiteId, name: 'Project', seq: 1 }]),
+    owner: false,
+  });
+  const host = net.homes.find((item) => item.device === home.id)!;
+  await vi.waitFor(() => expect(host.ctl).toBeDefined());
+  const ctl = host.ctl;
+  net.watchHost!(home.id)();
+  expect(clients[0].offersFor(home.id)).toHaveLength(1);
+  expect(pc.closes).toBe(0);
+  expect(host.ctl).toBe(ctl);
+  expect(host.groups.map((group) => group.g)).toEqual([websiteId]);
+  expect(net.homes).toContain(host);
+});
+
 it('joins an invitation without adopting the home and reconnects to it after reload', async () => {
   const browser = await loadDevice({ crypto, idb: () => idb });
   const own = await newDevice();

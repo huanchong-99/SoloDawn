@@ -53,11 +53,11 @@ type Home interface {
 	Request(ctx context.Context, build func(id int64) any) (json.RawMessage, error)
 }
 
-// A Terminal is the byte stream of a pty channel (contracts/datachannel.md
-// section 7). *peer.Stream has these methods.
+// A Terminal is the byte stream of a pty or watch channel (contracts/datachannel.md
+// section 7; contracts/step-2/watch-team.md section 4). *peer.Stream has these methods.
 type Terminal interface {
 	io.ReadWriteCloser
-	// Label is the channel's label, "pty:<g>:<member>".
+	// Label is the channel's label, "pty:<g>:<member>" or "watch:<g>:<member>".
 	Label() string
 	// Device is the device the connection was authenticated for.
 	Device() string
@@ -83,6 +83,8 @@ type Host struct {
 	// sets it, and calls Attach for each connection that opens. For a home on
 	// this node the connection is the local link.
 	Connect func(ctx context.Context, device string)
+	// WatchEnded notifies node when a person's last watch grant ends.
+	WatchEnded func(group, user string)
 	// Shim is the command line that starts this node's MCP shim, without the
 	// token (contracts/local.md section 1). node sets it, so that the CLIs of
 	// two nodes in one process reach each their own node.
