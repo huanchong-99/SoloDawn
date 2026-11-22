@@ -50,6 +50,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | send a host its inbox items, on every `hello` | `loop.Inbox(conn)` |
 | record a host's `ack` | `loop.Ack(conn, req)` |
 | run the timers by hand, or tell the home of an event | `loop.Tick(now)`, `loop.Event(name, event)` |
+| expire old store data in a transaction | `Retain(tx, now)` |
 | mark a disconnected host's AIs offline | `HostOfflineEvent`, fired by `Loop` when a device's last `Inbox` connection ends |
 | move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
 | push to a client | the `Client` interface |
@@ -186,6 +187,8 @@ their test functions start with `TestReviewCmd`. The merges and summaries (`cmd_
 names that start with `mrg`, their tests too, and their test functions start with `TestMerge`.
 Host events (`cmd_hostev.go`) take the names that start with `hev`, their tests too, and their test
 functions start with `TestHostEv`; the file exports `HostOfflineEvent`.
+Retention (`retention.go`) takes the names that start with `ret`, exports `Retain`, and its test
+functions start with `TestRetention`.
 
 ## The run loop
 
@@ -525,18 +528,19 @@ merges in `cmd_merge.go` (unit HM-12). Where the contracts are silent, it does t
 
 ## Posts, notes and forget
 
-`cmd_post.go` holds `post` of kinds `text`, `progress`, `question` and `report`
+`cmd_post.go` holds `post` of kinds `text`, `progress`, `question`, `report` and `handback`
 ([commands](../../planning/contracts/commands.md) 1.3;
-[messages](../../planning/contracts/messages.md) 1 and 2.7;
+[messages](../../planning/contracts/messages.md) 1, 2.7 and 2.10;
 [rows](../../planning/contracts/rows.md) sections 4 and 5), under `post/<kind>`. `cmd_note.go`
 holds `note` and `forget` ([commands](../../planning/contracts/commands.md) 1.6;
 [rows](../../planning/contracts/rows.md) sections 5 and 6). Where the contracts are silent, they do
 this:
 
-- **Who and placement.** `text` is by a person or an AI; `progress`, `question` and `report` are by
-  an AI, else `forbidden`. `progress` and `report` belong in a thread (`thread` not `null`), else
-  `bad_request`. None of the four is raised from a thread, and the row is written with `main`
-  `false`.
+- **Who and placement.** `text` is by a person or an AI; `progress`, `question`, `report` and
+  `handback` are by an AI, else `forbidden`. `progress` and `report` belong in a thread (`thread`
+  not `null`), else `bad_request`; `handback` belongs in a thread unless `as` is the group's
+  secretary, else `bad_request`. None of the five is
+  raised from a thread, and the row is written with `main` `false`.
 - **Thread and mentions.** A non-null `thread` must name a task in `State.Tasks`, else `not_found`;
   for `report`, `as` must be that task's `assignee`, else `forbidden`. `(*State).postMentions`,
   shared with `cmd_brief.go`, checks the `mentions` rule of
@@ -546,8 +550,10 @@ this:
   HTML escaping; a post in a thread follows it with the updated `TaskRow` (`thread.count` + 1, and
   `thread.last` with `text` cut to at most 200 UTF-8 characters). A post never queues an item for
   its own author ([commands](../../planning/contracts/commands.md) 1.3): `text`, `progress` and
-  `question` queue `mention` for each other mentioned AI in `mentions` order, and a main-line `text`
-  from a person that mentions no AI queues `mention` for `Group.Secretary` when set.
+  `question` queue `mention` for each other mentioned AI in `mentions` order, a main-line `text`
+  from a person that mentions no AI queues `mention` for `Group.Secretary` when set, and a
+  `handback` posted in a thread queues `notice` (`code: "handback"`) for `Group.Secretary` when
+  set.
 - **`note` and `forget`.** `note` is by a person or an AI; a non-null `task` that names no task in
   `State.Tasks` is `not_found`, and the `NoteRow` gets `ts` as signed (`c.Timestamp`). `forget` is
   by an admin only (`forbidden`); `r` must be `note` or `msg` (`bad_request`); a missing or already
@@ -657,6 +663,21 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
   `Pending` and the newest 50 main-line messages (`PageThread(nil, 0, 50)`) without duplicates in
   increasing `seq` order.
 
+## Retention
+
+`retention.go` exports `Retain(tx, now)`, which reads `retention_days` from SQLite `setting`
+(defaulting to `90` when absent) and calls `tx.Retain(time.UnixMilli(now), days)`
+([storage](../../planning/contracts/storage.md) sections 2 and 4). The daily node schedule in
+`internal/node` calls `Retain` once a day per node.
+
+- **What remains.** In one transaction the store raises `grp.purged` to the highest `seq` among
+  aged-out `gone` markers before deleting those markers, keeps `pending` cards, keeps `note` and
+  `review` rows (`keep = 1`), and deletes older messages and final (`merged` and `cancelled`) task
+  rows whose `mt` is before the cutoff.
+- **In-memory tasks.** After retention deletes rows from the store, finished tasks stay in the
+  in-memory state (`State.Tasks`) until restart ([issues](../../issues.md)). `grp.num` keeps the
+  highest task number given out, so task numbers are not reused after restart.
+
 ## Known limitations
 
 - The table of commands holds the groups, members, briefs, the task commands of HM-9, the four
@@ -664,6 +685,8 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
   summaries, and the host events, and no node starts a loop yet: the remaining command files
   (including thread round counting in HM-13) and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
+- After retention deletes rows, finished tasks stay in the in-memory `State.Tasks` until restart
+  ([issues](../../issues.md)).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
 - A `peer.Connection` takes every frame at once and keeps it in its own buffer, so the limit of
@@ -758,3 +781,7 @@ newest 50 and an older pending card, purge-mark reset, `state_only`) and the fir
 reads, exact 61,440-byte boundaries, page bounds checks, group access checks, detached connections
 and store failures. `features/home_fetch.feature` holds the scroll-back scenarios of A2.2 and the
 deleted-row scenario of A2.7.
+
+`retention_test.go` covers `Retain`: default and configured `retention_days`, store error
+propagation, protected rows, and the purge mark with `Loop.Sync` reset.
+`features/home_retention.feature` holds acceptance test A2.5 and the retention half of A5.14.

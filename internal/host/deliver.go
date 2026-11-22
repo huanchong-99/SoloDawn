@@ -376,6 +376,7 @@ func cleanupGroupState(h *Host, d *delivery, group string) {
 	}
 	cleanupGoneMembers(h, group)
 	cleanupTaskSessions(h, group)
+	handBackSaved(h, group)
 	tasks := liveTasks(h, group)
 	if len(tasks) == 0 {
 		return
@@ -405,6 +406,9 @@ func cleanupTaskSessions(h *Host, group string) {
 		if s.Group == group && s.Task != "" && sessionTaskObsolete(h, group, s) {
 			Runner.Close(h, s.SessionKey)
 			h.Sessions.End(s.SessionKey)
+			if s.State == Takeover {
+				h.ClosePTY(s.Group, s.Member)
+			}
 		}
 	}
 }
@@ -833,6 +837,15 @@ func isItemHeld(h *Host, target routedTarget, v verifiedItem) bool {
 	return aiHasState(h, aiKey, Takeover) || (!bool(v.item.Jump) && aiHasState(h, aiKey, Working))
 }
 
+// QueuedCount returns how many items are held for an AI in a group: the
+// queued count of host.info (contracts/datachannel.md section 7).
+func (h *Host) QueuedCount(group, member string) int {
+	d := deliv(h)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.held[aiGroupKey{group: group, member: member}])
+}
+
 func groupIsPaused(h *Host, group string) bool {
 	grp, ok := lookupRow[proto.GroupRow](h, group, "group", group)
 	return ok && grp.Paused != nil
@@ -864,7 +877,7 @@ func deliverTargetBatch(h *Host, d *delivery, key aiGroupKey, ai aiInfo, target 
 	if len(current) == 0 {
 		return consumed
 	}
-	session, gitErr, err := prepareTargetSession(h, ai, target, current)
+	session, gitErr, err := prepareTargetSession(h, ai, target, current[0].home, current)
 	if gitErr != nil && target.kind != GroupSession {
 		return failTargetSession(h, d, key, ai.agent, target, current, gitErr)
 	}
@@ -933,7 +946,7 @@ func matchesStepCommit(inRole bool, task proto.TaskRow, step, commit string) boo
 	return inRole && task.Step == step && task.Commit == commit
 }
 
-func prepareTargetSession(h *Host, ai aiInfo, target routedTarget, batch []verifiedItem) (Session, error, error) {
+func prepareTargetSession(h *Host, ai aiInfo, target routedTarget, home string, batch []verifiedItem) (Session, error, error) {
 	ctx := context.Background()
 	grp, _ := lookupRow[proto.GroupRow](h, target.key.Group, "group", target.key.Group)
 	pDir := projectDir(h, target.key.Group)
@@ -945,11 +958,11 @@ func prepareTargetSession(h *Host, ai aiInfo, target routedTarget, batch []verif
 	if err != nil {
 		return Session{}, err, nil
 	}
-	session, err := ensureSessionRow(h, ai, target, folder, batch[0].home, exists, existing)
+	session, err := ensureSessionRow(h, ai, target, folder, home, exists, existing)
 	if err != nil {
 		return Session{}, nil, err
 	}
-	if err := reportInitialBranch(ctx, h, batch[0].home, target.key.Group, target.key.Task, branchToReport); err != nil {
+	if err := reportInitialBranch(ctx, h, home, target.key.Group, target.key.Task, branchToReport); err != nil {
 		return Session{}, nil, err
 	}
 	return session, nil, nil
