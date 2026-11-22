@@ -1,52 +1,98 @@
 # Contract, step 3: AI profiles, assignment and escalation
 
-What an owner says about each of their AIs, how the secretary is given it,
-and when a stuck assignee must ask a stronger AI. Rule: R-165. Decided by
+Which model an AI member runs, what its owner says about it, how the
+secretary is given that, and when a stuck assignee must ask a stronger
+AI. Rule: R-165. Decided by
 the coordinator on 2026-11-22; lane PROFILES of
 `steps/parallel-plan-step-2-3.md` section 4.1 builds it.
 
 This file adds to the step 1 contracts and changes nothing in them
 (section 7). The product decides nothing here that needs judgement (R-2):
-it stores two fields, prints them, counts failures and refuses one command.
+it lists what a CLI offers, suggests, stores four fields, prints two of
+them, counts failures and refuses one command.
 
 Not in it: cost or usage caps (postponed with `settings.set`), switching
-models inside a session, permission levels, audit rows, and any check
+models while a CLI process runs, permission levels, audit rows, and any check
 against a peer that lies.
 
-## 1. The profile (adds to `contracts/rows.md` section 2)
+## 1. The member (adds to `contracts/rows.md` section 2)
 
-Two fields on the member row of an AI, always present. A person's row has
-neither.
+An AI member is a CLI on a computer under an account, with a chosen model
+and thinking level, and its profile. Four fields on the member row of an
+AI, always present. A person's row has none of them.
 
 | Field | Values | When never set |
 | --- | --- | --- |
+| `model` | the model's id as the CLI names it, at most 100 code points, no control characters; `""`: the CLI's own default | `""` |
+| `effort` | the thinking level as the CLI names it, at most 32 code points; `""`: the CLI's own default | `""` |
 | `tier` | `strong`, `standard`, `light` | `standard` |
 | `skills` | what the AI is good at: one line of at most 200 Unicode code points, without `\r` or `\n` | `""` |
 
 ```json
-{"r":"member", …, "kind":"ai", "tier":"strong",
+{"r":"member", …, "kind":"ai", "cli":"claude", "model":"opus",
+ "effort":"high", "tier":"strong",
  "skills":"Go backend, protocol design, hard debugging", …}
 ```
 
-- The order is `light` < `standard` < `strong`. An AI is **stronger** than
-  another when its tier is higher. Nothing else in the product reads a
-  tier, and nothing reads `skills` but the turn text of section 3.
-- `member add_ai` carries neither field; the home writes the defaults. A
-  group whose AIs all keep the defaults behaves as in step 1: no AI is
-  stronger than another, so section 4 never asks for anything.
-- The web client shows both on the AI member panel and card, and lets the
-  AI's owner edit them there.
+- `tier` and `skills` are the **profile**. The order is `light` <
+  `standard` < `strong`; an AI is **stronger** than another when its tier
+  is higher. Nothing in the product reads a tier but section 4, and
+  nothing reads `skills` but the turn text of section 3.
+- The home stores `model` and `effort` and checks only their length: it
+  knows no CLI. The host passes them to the CLI at each start
+  (`contracts/step-3/drivers.md` section 10) and checks nothing either: a
+  value the CLI refuses fails the start as the CLI fails it
+  (`flows/agent-turn.md` E).
+- **Several members from one CLI.** A host may add the same CLI to a
+  group more than once, each with its own name, model and level. They
+  share the CLI's account, so its usage and its `limited` state.
+- A member with all four defaults behaves as in step 1. A group whose AIs
+  all keep the default tier has no stronger AI, so section 4 never asks
+  for anything.
+- The web client shows the four on the AI member panel and card, and lets
+  the AI's owner edit them there (section 2a).
 
-## 2. Setting it (adds to `contracts/commands.md` 1.2)
+## 2. Setting it (adds to `contracts/commands.md` 1.2 and section 2)
 
-`member set` takes two more fields in its "any of": `tier` and `skills`.
+| Command | Addition |
+| --- | --- |
+| `host.join` | optional `model`, `effort`, `tier`, `skills`, passed on in `member add_ai`. Joining with an `agent` that already has a member in `g` adds another member |
+| `member add_ai` | the same four, optional; what is absent gets the default of section 1 |
+| `member set` | the same four in its "any of" |
+| `host.leave` | optional `member`, a member id: required when the `agent` has more than one member in `g`, else `bad_request` |
 
-- By the AI's owner only. The AI's host may not send them.
-- A `tier` that is not one of the three values, and a `skills` that breaks
-  the bound of section 1, are `bad_request`.
-- A change takes effect for what happens next: the next turn of the
-  secretary, the next failure of a task. A task that is already waiting
-  for an answer (section 4) keeps waiting.
+- `member set` with any of the four is by the AI's owner only. The AI's
+  host may not send them.
+- A `tier` that is not one of the three values, and a text that breaks a
+  bound of section 1, are `bad_request`.
+- A new `tier` or `skills` takes effect for what happens next: the next
+  turn of the secretary, the next failure of a task. A task that is
+  already waiting for an answer (section 4) keeps waiting.
+- A new `model` or `effort` takes effect when the host next starts a CLI
+  process for a session of that member, a resume included. The host does
+  not stop a running process for it.
+
+## 2a. What the owner sees
+
+The node lists and suggests; the owner chooses; rows change only by the
+owner's `member set`.
+
+- **Adding.** The dialog of `host.join` offers the models of that CLI
+  from `host.info` (`contracts/step-3/drivers.md` section 10), for the
+  chosen model its levels, and "the CLI's default" for both. Choosing a
+  model fills the tier with that model's suggestion; the owner may change
+  it, and write skills, before sending.
+- **Editing.** The AI member panel shows model, level, tier and skills.
+  The owner changes any of them with `member set`. Beside the tier it
+  shows the suggestion for the chosen model when the two differ; taking
+  it is the owner's click.
+- **Refresh.** A button on the panel sends `host.info` with `refresh`.
+  A discovery changes `host.info` only. It never changes a member row,
+  so what the owner set stays, whatever is found later.
+- **No list.** When `models` is empty the model is a text field; the
+  level is offered from `efforts` of the driver declaration, or not at
+  all. A stored model that the list no longer holds is shown as "not
+  listed" and kept.
 
 ## 3. Turn text (adds to `contracts/drivers.md` sections 3 and 4)
 
@@ -56,11 +102,11 @@ included, in the order of their names:
 
 ```
 [SoloDawn] group "Website" · you are "Secretary" · secretary session
-AI members (tier · state · skills):
-- "Claude Code" · strong · working on T-12 · Go backend, protocol design
-- "Codex" · standard · limited
-- "Qwen Code" · light · dormant · small edits, documentation
-- "Secretary" · standard · working
+AI members (CLI on computer · tier · state · skills):
+- "Opus" · claude on workstation · strong · working on T-12 · Go backend, protocol design
+- "Haiku" · claude on workstation · light · dormant · small edits, documentation
+- "Codex" · codex on laptop · standard · limited
+- "Secretary" · claude on workstation · standard · working
 == 1 of 1 · mention · from "owner" (person) in main · instruction
 …
 ```
@@ -78,7 +124,8 @@ choosing assignee and reviewer:
 1. give hard work to `strong` AIs and simple work to `light` ones;
 2. match the work to `skills`;
 3. spread tasks that do not depend on each other over different AIs, so
-   that several subscriptions work at the same time;
+   that several subscriptions work at the same time; members with the
+   same CLI on the same computer share one subscription;
 4. do not choose an AI that is `limited` or `offline`.
 
 The secretary decides; `propose_brief` and `set_task` accept any working
@@ -149,9 +196,10 @@ not a failed `run_checks`, not a conflict (row 9).
 ## 5. What is not built
 
 - No assignment algorithm, no score, no automatic reassignment.
-- No `tier` or `skills` in `list_members`, in `host.info` or in the driver
-  declaration (`contracts/step-3/drivers.md` section 4): the turn text
-  carries them to the two readers that need them.
+- No `tier` or `skills` in `list_members`: the turn text carries them to
+  the two readers that need them. No model or level in any turn text.
+- No check of a model or level against the list, no stored list, no
+  automatic change of any member field.
 - No new inbox item, message kind, card, command, error code, limit or
   storage table. `stuck` is part of the task row.
 - No check that the answer helped, or that the stronger AI is reachable.
@@ -161,9 +209,14 @@ not a failed `run_checks`, not a conflict (row 9).
 Changed golden examples, with the schema in `web/src/lib/proto.ts` and
 `internal/proto/testdata/wire.json`:
 
-- `row-member-ai.json`: `tier` and `skills`, always present.
-- `member-set.json` stays; new `member-set-profile.json` with `tier` and
-  `skills`.
+- `row-member-ai.json`: `model`, `effort`, `tier` and `skills`, always
+  present.
+- `member-set.json` and `member-add_ai.json` stay; new
+  `member-set-profile.json` and `member-add_ai-profile.json` with the
+  four fields.
+- `host.join` with the four fields, `host.leave` with `member`, and
+  `host.info` with `refresh`, `models` and `driver.efforts`
+  (`contracts/step-3/drivers.md` section 10).
 - `row-task.json` stays, without `stuck`; new `row-task-stuck.json` with
   `stuck` and `ask` `true`.
 
@@ -173,17 +226,22 @@ Changed golden examples, with the schema in `web/src/lib/proto.ts` and
 
 | File | Addition |
 | --- | --- |
-| `contracts/rows.md` section 2 | `tier`, `skills` on an AI's row |
+| `contracts/rows.md` section 2 | `model`, `effort`, `tier`, `skills` on an AI's row |
 | `contracts/rows.md` section 4 | the optional `stuck`; one badge |
-| `contracts/commands.md` 1.2 | `tier`, `skills` in `member set` |
+| `contracts/commands.md` 1.2 | the four fields in `member add_ai` and `member set` |
+| `contracts/commands.md` section 2 | the four fields in `host.join`; `member` in `host.leave` |
+| `contracts/datachannel.md` section 7 | `refresh`, `models`, `driver.efforts` in `host.info`; more than one entry of `groups` may name one `g` |
+| `contracts/drivers.md` section 1 | a model and a level are passed at each start (it said: no model) |
 | `contracts/task-machine.md` section 3 | the effects of section 4 on rows 5, 6, 7, 11, 13 and on a `reply` |
 | `contracts/drivers.md` sections 3, 4 | the member list, the escalation line, the instruction sentences |
 | `contracts/mcp-tools.md` section 1 | one more reason for `submit_task` to fail with `conflict` |
 
 ## 8. Decided, and not verified
 
-Decided by the coordinator (2026-11-22): the two fields and their
-defaults; who sets them; that the secretary decides from turn text; the
+Decided by the coordinator (2026-11-22): the profile fields and their
+defaults; who sets them; discovery per driver, the owner's choice of
+model and level, several members from one CLI, the suggested tier, and
+that the owner's value is never overwritten; that the secretary decides from turn text; the
 threshold 2; the refusal of the next submission; nothing without a
 stronger AI.
 
@@ -196,6 +254,11 @@ Chosen here, open to the coordinator
 - Whether a stronger AI exists is decided at the failure, from tiers
   alone, whatever the state of that AI.
 - The refusal reuses `conflict`.
+- A discovery writes no row, so "the owner's value wins" needs no flag.
+- Fast mode is listed and cannot be chosen.
+- A changed model applies at the next process start, a resume included.
+- No `skills` are suggested.
 
 `[unverified]` That a model follows the added line and the four rules; the
-home's refusal holds whether it does or not. Nothing here was run.
+home's refusal holds whether it does or not. That each CLI resumes a
+session under another model with its history. Nothing here was run.

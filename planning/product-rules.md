@@ -211,15 +211,20 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 - **R-115** `[S2]` Authority carries over: my own AIs freely; a colleague's
   personal-subscription AI needs that colleague; team and API-key AIs follow
   their lists.
-- **R-165** `[S3]` An AI's owner gives each of their AIs a profile: how
-  strong it is and what it is good at. The secretary is shown every AI's
+- **R-165** `[S3]` The node lists the models and thinking levels each
+  installed CLI offers, by the CLI's own listing, again whenever the
+  owner asks. The owner chooses model and level for each AI member, may
+  add several members from one CLI, and gives each a profile: how strong
+  it is and what it is good at. The node suggests the strength from the
+  model's name; what the owner set is never overwritten. The secretary is shown every AI's
   profile and state and chooses assignee and reviewer by them: hard work
   to strong AIs, simple work to light ones, independent tasks spread over
   different AIs, none to an AI that is limited or offline. An assignee
   whose task fails twice in a row in the same way (hosted checks, or
   review) must ask a stronger AI and get an answer before it submits
-  again; with no stronger AI in the group nothing changes. Contract:
-  `contracts/step-3/profiles.md`.
+  again; with no stronger AI in the group nothing changes. Contracts:
+  `contracts/step-3/profiles.md`, `contracts/step-3/drivers.md` section
+  10.
 
 ## Sessions
 

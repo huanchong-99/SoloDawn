@@ -47,7 +47,7 @@ If spike S-9 shows a clear benefit, its tests are written with its plan.
   `kb_put` whose text holds a test secret pattern fails with `secret`, and the
   home has no row for it.
 
-## AI profiles and escalation (R-165; `contracts/step-3/profiles.md`)
+## AI models, profiles and escalation (R-165; `contracts/step-3/profiles.md`, `contracts/step-3/drivers.md` section 10)
 
 Cast: AIs S (`strong`), M (`standard`) and L (`light`) of one owner; the
 fake CLIs fail checks and reviews on script.
@@ -81,4 +81,33 @@ fake CLIs fail checks and reviews on script.
   nothing is asked. M fails a review, then passes one: `stuck` is gone, and
   a later single failure asks nothing. `task assign` to another AI removes
   `stuck`.
+- **A10.13** Discovery. With each fake CLI scripted to list two models,
+  `host.info` carries them under that agent as `models`, with id, name,
+  levels and, where the script says so, `fast`; an id with a word of the
+  table has that tier, any other `standard`. A fake CLI whose listing
+  fails, and one without a listing, give `models` `[]`, and `host.info` is
+  otherwise as before. In the browser: the dialog for adding an AI offers
+  the listed models and their levels; with the empty list it offers a text
+  field. For each real CLI, the list is what the CLI's own picker shows.
+  (`live` for the last sentence)
+- **A10.14** Refresh. The fake CLI's list gains a model. A `host.info`
+  request within 60 s answers the old list; one with `refresh` the new
+  one, and a push carries it. In the browser: the refresh button on the
+  AI member panel shows the new model, with no restart of the node.
+- **A10.15** Choosing. `host.join` twice with one agent, two names and two
+  models gives two member rows with `model`, `effort` and the tier the
+  dialog was sent with; `host.info` lists both under that agent;
+  `host.leave` without `member` is `bad_request`, and with it removes that
+  one. Each member's sessions start the fake CLI with its own model and
+  level in the arguments or parameters of section 10.4; a member with
+  `""` passes neither. After `member set` with another model the next
+  start of a session of that member, a resume, passes the new one. A
+  model the fake CLI refuses fails the turn as any failed start. (`live`:
+  once per real CLI, the model the CLI reports is the one chosen)
+- **A10.16** The owner's edit stays. The owner sets `tier` `light` and
+  `skills` on a member whose model is suggested `strong`. After a refresh
+  whose list suggests otherwise, lacks that model, or is empty, and after
+  a restart of the node, the member row is unchanged byte for byte. In the
+  browser: the panel shows the owner's tier, the suggestion beside it, and
+  "not listed" for a model that is gone.
 
