@@ -105,9 +105,9 @@
 
 <div class="composer">
   {#if readonly}
-    <p class="state down" role="status"><i></i>{t('chat.readonly')}</p>
+    <p class="state down" id={`${uid}-state`} role="status"><i></i>{t('chat.readonly')}</p>
   {:else if length !== 'ok'}
-    <p class="state" class:over={length === 'over'} role="status">
+    <p class="state" id={`${uid}-state`} class:over={length === 'over'} role="status">
       <span class="meter" style:--v={Math.min(fill(text, named), 100) / 100}></span>
       {t(`chat.length.${length}`).replace('{n}', String(fill(text, named)))}
     </p>
@@ -165,6 +165,8 @@
       aria-expanded={found.length > 0}
       aria-controls={`${uid}-list`}
       aria-activedescendant={found.length ? `${uid}-${active}` : undefined}
+      aria-invalid={length === 'over' || undefined}
+      aria-describedby={readonly || length !== 'ok' ? `${uid}-state` : undefined}
       placeholder={t('chat.compose.hint')}
       disabled={readonly}
       oninput={read}
