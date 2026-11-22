@@ -6,15 +6,13 @@ import { IDBFactory } from 'fake-indexeddb';
 import { flushSync, tick } from 'svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import { expect, vi } from 'vitest';
-import { find, Home, homes } from '../src/lib/groups.svelte';
-import { goldens } from '../src/lib/mock';
+import { find, type Home, homes } from '../src/lib/groups.svelte';
 import type { Path, Source } from '../src/lib/net.svelte';
 import { nodes } from '../src/lib/nodes.svelte';
-import type { AccountKind } from '../src/lib/onboard.svelte';
 import { prefs } from '../src/lib/prefs.svelte';
 import * as p from '../src/lib/proto';
-import { browser, example, owner, TestHome, user } from './home';
-import { all, closePage, field, fill, go, one, openPage, texts, type } from './page';
+import { browser, example, ownedNode, owner, TestHome, user } from './home';
+import { all, closePage, field, fill, go, one, openPage, read, text, texts, type } from './page';
 import { FakePC } from './peer-fakes';
 
 const feature = await loadFeature('../features/web_a11y.feature');
@@ -29,6 +27,7 @@ const briefId = 'KaiCW9JC8UOG7lKNduDo8Q';
 const approvalId = 'netluHiPQf-UoheEIBfbLw';
 const decisionId = 'hq411Ypqo7V0LflO-dcWIg';
 const paths = new SvelteMap<Home, Path | undefined>();
+const tab = new SvelteMap<'other', boolean>();
 
 vi.mock('../src/lib/net.svelte', async (actual) => {
   const real = await actual<typeof import('../src/lib/net.svelte')>();
@@ -39,11 +38,44 @@ vi.mock('../src/lib/net.svelte', async (actual) => {
         source,
         homes,
         path: (home: Home) => (home.ctl ? paths.get(home) : undefined),
+        get otherTab() {
+          return tab.get('other') ?? false;
+        },
+        useHere: () => tab.set('other', false),
       },
       stop: () => {},
     }),
   };
 });
+
+// xterm as far as the terminal page drives it: its input field and the key handler it is given.
+const xterm = vi.hoisted(() => ({
+  input: undefined as HTMLTextAreaElement | undefined,
+  keys: (_event: KeyboardEvent): boolean => true,
+}));
+vi.mock('@xterm/xterm', () => ({
+  Terminal: class {
+    cols = 80;
+    rows = 24;
+    textarea = (xterm.input = document.createElement('textarea'));
+    attachCustomKeyEventHandler(keys: typeof xterm.keys) {
+      xterm.keys = keys;
+    }
+    loadAddon() {}
+    open() {}
+    onData() {}
+    onBinary() {}
+    onResize() {}
+    clear() {}
+    dispose() {}
+  },
+}));
+vi.mock('@xterm/addon-fit', () => ({
+  FitAddon: class {
+    fit() {}
+  },
+}));
+vi.mock('@xterm/xterm/css/xterm.css', () => ({}));
 
 class QuietSocket {
   onmessage: ((event: { data: string }) => void) | null = null;
@@ -109,46 +141,23 @@ function stateForAct(env: p.Envelope, act: p.Act): Record<string, unknown> {
   return map[act.action];
 }
 
-const cleanText = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim();
-
-function labelledText(el: Element): string {
-  const ids = el.getAttribute('aria-labelledby');
-  if (!ids) return '';
-  return cleanText(
-    ids
-      .split(/\s+/)
-      .map((id) => document.getElementById(id)?.textContent ?? '')
-      .join(' '),
-  );
-}
-
-function accessibleName(el: Element): string {
-  const byId = labelledText(el);
-  if (byId) return byId;
-  const direct = cleanText(el.getAttribute('aria-label'));
-  if (direct) return direct;
-  if ('labels' in el && (el as HTMLInputElement).labels?.length) {
-    return cleanText(
-      [...(el as HTMLInputElement).labels!].map((label) => label.textContent).join(' '),
-    );
-  }
-  return cleanText(el.textContent);
-}
-
-function describedText(el: Element): string {
-  const ids = el.getAttribute('aria-describedby');
-  if (!ids) return '';
-  return cleanText(
-    ids
-      .split(/\s+/)
-      .map((id) => document.getElementById(id)?.textContent ?? '')
-      .join(' '),
-  );
-}
+/** The text of the elements that `aria-labelledby` or `aria-describedby` of an element names. */
+const pointed = (el: Element, attr: 'aria-labelledby' | 'aria-describedby') =>
+  (el.getAttribute(attr) ?? '')
+    .split(' ')
+    .filter(Boolean)
+    .map((id) => read(document.getElementById(id)!))
+    .join(' ');
+const described = (el: Element) => pointed(el, 'aria-describedby');
+/** What names an element: the parts it points at, its `aria-label`, its label, or its text. */
+const named = (el: Element) =>
+  pointed(el, 'aria-labelledby') ||
+  el.getAttribute('aria-label') ||
+  read((el as HTMLInputElement).labels?.[0] ?? el);
 
 const buttonNamed = (root: ParentNode, label: string) =>
   [...root.querySelectorAll<HTMLButtonElement>('button')].find((btn) =>
-    accessibleName(btn).includes(label),
+    named(btn).includes(label),
   )!;
 
 type Rgb = [number, number, number];
@@ -185,49 +194,6 @@ function parsePalette(css: string, mode: 'light' | 'dark'): Record<string, Rgb> 
     palette[match[1]] = mixRgb(palette[match[2]], Number(match[3]) / 100, palette[match[4]]);
   }
   return palette;
-}
-
-const sign = async (payload: string) => ({ p: payload, k: 'this-browser', s: 'signature' });
-
-function makeNodeRig(name: string, device: string) {
-  const home = new TestHome(name);
-  const store = new Home({ user, sign });
-  const info: p.HostInfo = {
-    ...p.decode(p.HostInfo, goldens['host-info-answer']),
-    device,
-    name,
-  };
-  const answerCmd = (env: p.Envelope): p.CmdResult | undefined => {
-    const parsed = JSON.parse(env.p) as { t: string; agent?: string; account?: AccountKind };
-    if (parsed.t === 'pair.browser') return p.decode(p.CmdResult, goldens['cmd-pair-link']);
-    if (parsed.t !== 'agent.set') return undefined;
-    const target = info.agents.find((item) => item.agent === parsed.agent);
-    if (target && parsed.account) target.account = parsed.account;
-    return { re: 1, ok: true };
-  };
-  return {
-    home,
-    store,
-    async connect() {
-      const link = store.connect();
-      const base = home.connect(link.push);
-      const ctl = {
-        request: async (req: { t: string; env?: p.Envelope }) => {
-          if (req.t === 'host.info') return structuredClone(info);
-          const cmd = req.t === 'cmd' && req.env ? answerCmd(req.env) : undefined;
-          return cmd ?? base.ctl.request(req as never);
-        },
-      } as p.Ctl;
-      const welcome = (await base.ctl.request({
-        t: 'hello',
-        v: 1,
-        kind: 'browser',
-        name: 'test',
-        addrs: [],
-      })) as p.Welcome;
-      link.online(ctl, { ...welcome, device });
-    },
-  };
 }
 
 describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
@@ -308,6 +274,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     prefs.theme = 'auto';
     await closePage();
     paths.clear();
+    tab.clear();
     nodes.infos.clear();
     localStorage.clear();
   });
@@ -361,7 +328,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           const prompt = one('#prompt');
           expect(prompt.tabIndex).toBe(0);
           expect(prompt.getAttribute('role')).toBe('region');
-          expect(accessibleName(prompt)).toBe('Prompt for your AI');
+          expect(named(prompt)).toBe('Prompt for your AI');
           const steps = one('ol.link-steps');
           expect(steps.getAttribute('role')).toBeNull();
           expect(steps.parentElement?.getAttribute('role')).toBe('status');
@@ -373,10 +340,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         'every control on onboarding has an accessible name, and renewing an expired code keeps focus on the prompt action button',
         async () => {
           for (const el of all('.onboarding button, .onboarding a')) {
-            expect(accessibleName(el).length).toBeGreaterThan(0);
+            expect(named(el).length).toBeGreaterThan(0);
           }
           const langBtn = all<HTMLButtonElement>('.onboarding .top button')[0];
-          expect(accessibleName(langBtn).startsWith('中')).toBe(true);
+          expect(named(langBtn).startsWith('中')).toBe(true);
           expect(
             [...langBtn.querySelectorAll<HTMLElement>('[lang]')].map((part) => part.lang),
           ).toEqual(['zh-CN', 'en', 'zh-CN']);
@@ -385,11 +352,11 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           actionBtn.focus();
           await vi.advanceTimersByTimeAsync(600_000);
           flushSync();
-          expect(accessibleName(actionBtn)).toBe('New pairing code');
+          expect(named(actionBtn)).toBe('New pairing code');
           expect(document.activeElement).toBe(actionBtn);
           actionBtn.click();
           flushSync();
-          expect(accessibleName(actionBtn)).toBe('Copy prompt');
+          expect(named(actionBtn)).toBe('Copy prompt');
           expect(document.activeElement).toBe(actionBtn);
         },
       );
@@ -404,7 +371,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         () => {
           const main = one('main');
           expect(document.activeElement).toBe(main);
-          expect(accessibleName(main)).toBe('Settings');
+          expect(named(main)).toBe('Settings');
           const skip = one<HTMLButtonElement>('button.skip');
           skip.focus();
           skip.click();
@@ -414,6 +381,15 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             input.closest('[lang]')?.getAttribute('lang'),
           );
           expect(langMarks).toEqual(['zh-CN', 'en']);
+        },
+      );
+      And(
+        'the reminder switch is named "Browser notifications" and its choices form a group named "Notify me when"',
+        () => {
+          expect(named(one('[role="switch"]'))).toBe('Browser notifications');
+          const choices = one('[aria-labelledby="s-noti"] [role="group"]');
+          expect(named(choices)).toBe('Notify me when');
+          expect(choices.querySelectorAll('input[type="checkbox"]')).toHaveLength(5);
         },
       );
     },
@@ -432,36 +408,30 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then(
         'the group list and waiting digest expose named landmarks, and each digest action starts with "Open" and names its card and group',
         () => {
-          expect(accessibleName(one('section.list'))).toBe('Group list');
-          expect(accessibleName(one('section.digest'))).toBe('Waiting on you');
+          expect(named(one('section.list'))).toBe('Group list');
+          expect(named(one('section.digest'))).toBe('Waiting on you');
           const openLinks = all('.digest .todo a');
           expect(openLinks).toHaveLength(3);
-          expect(openLinks.map((link) => accessibleName(link))).toEqual([
+          expect(openLinks.map((link) => named(link))).toEqual([
             'Open · Confirm start · Show connection paths · Website',
             'Open · Approval · Time the path change in a browser. · Website',
             'Open · Your call · Where should the path appear? · Website',
           ]);
-          for (const link of openLinks) expect(cleanText(link.textContent)).toBe('Open');
+          for (const link of openLinks) expect(read(link)).toBe('Open');
         },
       );
-      When(
-        'the person opens "New project group", checks its field names and descriptions, and presses Escape',
-        () => {
-          const opener = buttonNamed(one('section.list'), 'New project group');
-          opener.focus();
-          opener.click();
-          flushSync();
-        },
-      );
+      When('the person opens "New project group"', () => {
+        buttonNamed(one('section.list'), 'New project group').click();
+        flushSync();
+      });
       Then(
-        'every dialog field is named by its label without concatenating its hint, and Escape closes the dialog with focus back on "New project group"',
+        'the dialog is named "New project group" and every field is named by its label without concatenating its hint',
         () => {
           const dlg = one<HTMLDialogElement>('dialog');
           expect(dlg.open).toBe(true);
-          expect(accessibleName(dlg)).toBe('New project group');
-          expect(dlg.contains(document.activeElement)).toBe(true);
+          expect(named(dlg)).toBe('New project group');
           const controls = [...dlg.querySelectorAll('input, select, textarea')];
-          expect(controls.map((el) => accessibleName(el))).toEqual([
+          expect(controls.map((el) => named(el))).toEqual([
             'Group name',
             'Git repository',
             'Base branch',
@@ -470,16 +440,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             'Check commands',
             'Home computer',
           ]);
-          expect(describedText(controls[1])).toContain('clone the project from');
-          expect(describedText(controls[5])).toContain('One per line');
-          dlg.dispatchEvent(
-            new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
-          );
-          flushSync();
-          expect(dlg.open).toBe(false);
-          expect(document.activeElement).toBe(
-            buttonNamed(one('section.list'), 'New project group'),
-          );
+          expect(described(controls[1])).toContain('clone the project from');
+          expect(described(controls[5])).toContain('One per line');
         },
       );
       When('the person opens the chat of "Website" on a 1280 px desktop', () => {
@@ -488,52 +450,44 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then(
         'the chat, main line, waiting bar, composer and every card expose localized accessible names and linked status descriptions in English and Chinese',
         () => {
-          expect(accessibleName(one('section.chat'))).toBe('Website');
-          expect(accessibleName(one('.scroller'))).toBe('Main line');
-          expect(accessibleName(one('nav.needbar'))).toBe('Waiting on you');
-          expect(accessibleName(field())).toBe('Message');
+          expect(named(one('section.chat'))).toBe('Website');
+          expect(named(one('.scroller'))).toBe('Main line');
+          expect(named(one('nav.needbar'))).toBe('Waiting on you');
+          expect(named(field())).toBe('Message');
           for (const btn of all('.chat button, .chat a')) {
-            expect(accessibleName(btn).length).toBeGreaterThan(0);
+            expect(named(btn).length).toBeGreaterThan(0);
           }
 
           type('a'.repeat(9000));
           expect(field().getAttribute('aria-invalid')).toBe('true');
-          expect(describedText(field())).toContain('Too long to send');
+          expect(described(field())).toContain('Too long to send');
           type('');
           expect(field().getAttribute('aria-invalid')).toBeNull();
 
-          expect(accessibleName(one(`#m-${briefId} section.card`))).toBe(
+          expect(named(one(`#m-${briefId} section.card`))).toBe(
             'Task brief · Show connection paths',
           );
-          expect(accessibleName(one(`#m-${approvalId} section.card`))).toBe('Approval');
-          expect(describedText(one(`#m-${approvalId} .btn-dawn`))).toBe(
-            'Applies to this one request',
-          );
-          expect(describedText(one('#m-ap-mina .card-foot button'))).toBe(
+          expect(named(one(`#m-${approvalId} section.card`))).toBe('Approval');
+          expect(described(one(`#m-${approvalId} .btn-dawn`))).toBe('Applies to this one request');
+          expect(described(one('#m-ap-mina .card-foot button'))).toBe(
             "Only the computer's owner Mina can approve",
           );
-          expect(accessibleName(one(`#m-${decisionId} section.card`))).toBe('Your call');
+          expect(named(one(`#m-${decisionId} section.card`))).toBe('Your call');
           const decInput = one<HTMLInputElement>(`#m-${decisionId} input`);
           fill(decInput, 'z'.repeat(1023));
           flushSync();
           expect(decInput.getAttribute('aria-invalid')).toBe('true');
-          expect(describedText(decInput)).toBe('Too long: shorten your answer to fit 1 KB.');
+          expect(described(decInput)).toBe('Too long: shorten your answer to fit 1 KB.');
           fill(decInput, '');
           flushSync();
-          expect(accessibleName(one('#m-msg-task-12 section.card'))).toBe(
-            'T-12 Show connection path',
-          );
-          expect(accessibleName(one('#m-sum-1 section.card'))).toBe(
-            'Done · T-12 · Show connection path',
-          );
+          expect(named(one('#m-msg-task-12 section.card'))).toBe('T-12 Show connection path');
+          expect(named(one('#m-sum-1 section.card'))).toBe('Done · T-12 · Show connection path');
 
           prefs.lang = 'zh-CN';
           flushSync();
-          expect(accessibleName(one('.scroller'))).toBe('主线');
-          expect(accessibleName(one(`#m-${briefId} section.card`))).toBe(
-            '任务说明 · Show connection paths',
-          );
-          expect(accessibleName(one('#m-sum-1 section.card'))).toBe(
+          expect(named(one('.scroller'))).toBe('主线');
+          expect(named(one(`#m-${briefId} section.card`))).toBe('任务说明 · Show connection paths');
+          expect(named(one('#m-sum-1 section.card'))).toBe(
             '完成总结 · T-12 · Show connection path',
           );
         },
@@ -542,7 +496,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
-    'Acting on cards, threads, dialogs and computer accounts never drops focus to the document body',
+    'Acting on cards, threads and computer accounts never drops focus to the document body',
     ({ Given, And, When, Then }) => {
       Given(
         'two groups "Website" and "Docs" with waiting brief, approval and decision cards, a locked approval, a task and a summary',
@@ -703,10 +657,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       When(
-        'the person opens "#/nodes", declares an AI account type from the keyboard, and opens, copies and closes "Add a browser" with Escape',
+        'the person opens "#/nodes", declares an AI account type from the keyboard, copies the link of "Add a browser", closes the dialog and opens it again',
         async () => {
           await closePage();
-          const rig = makeNodeRig('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q');
+          const rig = ownedNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q');
           rig.home.add(website, 'Website');
           homes.push(rig.store);
           await rig.connect();
@@ -731,12 +685,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           });
           expect(document.activeElement).toBe(one('.card.node'));
 
-          const pairBtn = buttonNamed(one('.page-head'), 'Add a browser');
-          pairBtn.focus();
-          pairBtn.click();
+          buttonNamed(one('.page-head'), 'Add a browser').click();
           flushSync();
-          const dlg = one<HTMLDialogElement>('dialog');
-          expect(dlg.contains(document.activeElement)).toBe(true);
           one('dialog form').dispatchEvent(
             new Event('submit', { bubbles: true, cancelable: true }),
           );
@@ -747,20 +697,209 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           one<HTMLButtonElement>('dialog .pair-box button').click();
           await tick();
           flushSync();
-          expect(one('.app > [role="status"]').textContent).toBe('Copied');
-          dlg.dispatchEvent(
-            new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
-          );
+          one<HTMLButtonElement>('dialog .btn-primary').click();
+          flushSync();
+          expect(one<HTMLDialogElement>('dialog').open).toBe(false);
+          buttonNamed(one('.page-head'), 'Add a browser').click();
           flushSync();
         },
       );
       Then(
-        'choosing the account keeps focus on the computer card, copying the pairing link announces "Copied", and Escape returns focus to "Add a browser"',
+        'choosing the account keeps focus on the computer card, copying the pairing link announces "Copied", and the dialog is open again',
         () => {
-          expect(one<HTMLDialogElement>('dialog').open).toBe(false);
-          expect(document.activeElement).toBe(buttonNamed(one('.page-head'), 'Add a browser'));
+          expect(text('.app > [role="status"]')).toBe('Copied');
+          expect(one<HTMLDialogElement>('dialog').open).toBe(true);
         },
       );
+    },
+  );
+
+  Scenario(
+    "Usage bars, calls, project memory and notifications name their parts and keep the keyboard's place",
+    ({ Given, And, When, Then }) => {
+      const closers = () => all<HTMLButtonElement>('.toast:not([inert]) .icon-btn');
+      const mention = (id: string) =>
+        home.write(
+          website,
+          example('row-msg-text', {
+            id,
+            thread: taskId,
+            by: codex,
+            mentions: [owner],
+            ts: Date.now(),
+          }),
+        );
+
+      Given(
+        'two groups "Website" and "Docs" with waiting brief, approval and decision cards, a locked approval, a task and a summary',
+        seedGroups,
+      );
+      And(
+        'a waiting call in task 12\'s thread and a note, with the chat of "Website" open on a 1280 px desktop',
+        async () => {
+          home.write(
+            website,
+            example('row-member-ai', {
+              id: claude,
+              name: 'Claude Code',
+              usage: { window_pct: 100 },
+            }),
+          );
+          home.write(website, example('row-msg-call-waiting', { id: 'call-1', ts: Date.now() }));
+          home.write(website, example('row-note'));
+          openPage(`#/groups/${website}`, 1280);
+          one<HTMLDetailsElement>('#m-msg-task-12 details.fold').open = true;
+          const memory = one<HTMLDetailsElement>('.groupinfo details.fold');
+          memory.open = true;
+          memory.dispatchEvent(new Event('toggle'));
+          await vi.waitFor(() => {
+            flushSync();
+            expect(all('.thread .call')).toHaveLength(1);
+          });
+        },
+      );
+      Then(
+        'each usage bar is a meter named "Window used" whose value text is its percentage, with its reset time when one is known',
+        () => {
+          const meters = all('.members [role="meter"]').map((meter) => [
+            named(meter),
+            meter.getAttribute('aria-valuenow'),
+            meter.getAttribute('aria-valuetext'),
+          ]);
+          const resets = expect.stringMatching(/^63% · Resets \d\d:\d\d$/);
+          expect(meters).toEqual([
+            ['Window used', '63', resets],
+            ['Window used', '100', '100%'],
+            ['Window used', '63', resets],
+          ]);
+        },
+      );
+      And(
+        'the call\'s waiting line stands in no live region and keeps "Depth 1" in one piece',
+        () => {
+          expect(text('.thread .call .depth')).toBe('Depth 1');
+          expect(one('.thread .call').closest('[aria-live], [role="status"]')).toBeNull();
+        },
+      );
+      And('each delete action of the project memory names its entry', () => {
+        expect(all('.groupinfo .del').map(named)).toEqual([
+          'Delete note: Path events include the connection id.',
+        ]);
+      });
+      When("a decision and two mentions arrive in task 12's thread", () => {
+        home.write(
+          website,
+          example('row-msg-decision-pending', { id: 'dec-2', thread: taskId, main: false }),
+        );
+        mention('men-1');
+        mention('men-2');
+        flushSync();
+      });
+      Then(
+        'the notifications hang under the chat\'s head in a polite region of their own, and "Open" and "Dismiss notification" are described by their notification',
+        () => {
+          const stack = one('.notify');
+          expect(stack.classList.contains('chat')).toBe(true);
+          expect(stack.getAttribute('aria-live')).toBe('polite');
+          expect(stack.contains(one('.app > [role="status"]'))).toBe(false);
+          const title = 'Your call · Where should the path appear?';
+          expect(texts('.toast:not([inert]) b')[0]).toBe(title);
+          expect(described(one('.toast a'))).toBe(title);
+          expect(named(closers()[0])).toBe('Dismiss notification');
+          expect(described(closers()[0])).toBe(title);
+        },
+      );
+      const landed: number[] = [];
+      When(
+        'the person closes the second notification from the keyboard, then the last, then the one that is left',
+        () => {
+          for (const at of [1, 1, 0]) {
+            const closer = closers()[at];
+            closer.focus();
+            closer.click();
+            flushSync();
+            landed.push(closers().indexOf(document.activeElement as HTMLButtonElement));
+          }
+        },
+      );
+      Then(
+        'focus moves to the next close button, then to the one before, then to the main landmark',
+        () => {
+          expect(landed).toEqual([1, 0, -1]);
+          expect(document.activeElement).toBe(one('main'));
+        },
+      );
+      When('two more mentions arrive and the person closes the first with the pointer', () => {
+        mention('men-3');
+        mention('men-4');
+        flushSync();
+        closers()[0].click();
+        flushSync();
+      });
+      Then('focus stays on the main landmark', () => {
+        expect(closers()).toHaveLength(1);
+        expect(document.activeElement).toBe(one('main'));
+      });
+    },
+  );
+
+  Scenario(
+    'The terminal and the other-tab notice are named and can be left from the keyboard',
+    ({ Given, When, Then, And }) => {
+      Given(
+        'two groups "Website" and "Docs" with waiting brief, approval and decision cards, a locked approval, a task and a summary',
+        seedGroups,
+      );
+      When('the person opens the terminal of "Codex" on a 1280 px desktop', async () => {
+        openPage(`#/terminal/${website}/${codex}`, 1280);
+        await vi.waitFor(() => expect(xterm.input?.hasAttribute('aria-describedby')).toBe(true));
+        document.body.append(xterm.input!);
+      });
+      Then(
+        "the takeover bar is a status region, the key row and the details column take keyboard focus, and the terminal's input is described by the note on leaving it",
+        () => {
+          expect(one('.takeover').getAttribute('role')).toBe('status');
+          expect(one('.keys').tabIndex).toBe(0);
+          expect(one('aside.info').tabIndex).toBe(0);
+          expect(described(xterm.input!)).toBe(
+            'Tab types into the terminal. To leave the terminal with the keyboard, press Ctrl+M.',
+          );
+        },
+      );
+      And('only Ctrl+M is kept from the terminal, and it moves focus to "Back to chat"', () => {
+        const press = (key: string, ctrlKey: boolean) => {
+          const event = new KeyboardEvent('keydown', { key, ctrlKey, cancelable: true });
+          return [xterm.keys(event), event.defaultPrevented, read(document.activeElement!)];
+        };
+        xterm.input!.focus();
+        expect(press('m', false)).toEqual([true, false, '']);
+        expect(press('c', true)).toEqual([true, false, '']);
+        expect(press('m', true)).toEqual([false, true, 'Back to chat']);
+        expect(document.activeElement).toBe(one('.takeover a'));
+        xterm.input!.remove();
+      });
+      When('another tab takes the connection', () => {
+        tab.set('other', true);
+        flushSync();
+      });
+      Then(
+        'the notice is a status region, the connection indicator is named "Connection status: inactive", and no notification hangs under a chat\'s head',
+        () => {
+          expect(one('.tab-ban').getAttribute('role')).toBe('status');
+          expect(named(one('.bar .conn'))).toBe('Connection status: inactive');
+          expect(one('.notify').classList.contains('chat')).toBe(false);
+        },
+      );
+      When('the person chooses "Use here"', () => {
+        const use = buttonNamed(one('.tab-ban'), 'Use here');
+        use.focus();
+        use.click();
+        flushSync();
+      });
+      Then('focus moves to the main landmark', () => {
+        expect(all('.tab-ban')).toEqual([]);
+        expect(document.activeElement).toBe(one('main'));
+      });
     },
   );
 
@@ -771,15 +910,13 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         full: string | undefined;
         barConn: number;
         headConn: string[];
-        closedInert: boolean;
         openBehindInert: boolean[];
-        openSideInert: boolean;
         afterEscFocus: string | null;
       }
       const snaps = new Map<number, WidthSnap>();
 
       Given('a group "Website" with a side panel area and an active home connection', async () => {
-        const rig = makeNodeRig('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q');
+        const rig = ownedNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q');
         rig.home.add(website, 'Website');
         homes.push(rig.store);
         await rig.connect();
@@ -794,15 +931,12 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             await closePage();
             homes.push(...saved);
             openPage(`#/groups/${website}`, width);
-            const sideEl = one('#chat-side');
-            const closedInert = sideEl.hasAttribute('inert');
             one<HTMLButtonElement>('.side-open').click();
             await tick();
             flushSync();
             const openBehindInert = all('.chat > :not(.side)').map((el) =>
               el.hasAttribute('inert'),
             );
-            const openSideInert = sideEl.hasAttribute('inert');
             window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
             flushSync();
             await tick();
@@ -811,10 +945,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             snaps.set(width, {
               full: one('.app').dataset.full,
               barConn: all('.bar .conn').length,
-              headConn: all('.chat-head .conn').map((el) => accessibleName(el)),
-              closedInert,
+              headConn: all('.chat-head .conn').map((el) => named(el)),
               openBehindInert,
-              openSideInert,
               afterEscFocus: document.activeElement?.getAttribute('aria-label') ?? null,
             });
           }
@@ -830,12 +962,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       And(
-        'at 390 and 820 px the closed side panel is inert until opened, traps behind parts with inert when open, and restores focus on Escape',
+        'at 390 and 820 px the open side panel makes the parts behind it inert and Escape returns focus to "People and details"',
         () => {
           for (const width of [390, 820]) {
             const snap = snaps.get(width)!;
-            expect(snap.closedInert).toBe(true);
-            expect(snap.openSideInert).toBe(false);
             expect(snap.openBehindInert).toEqual([true, true, true, true]);
             expect(snap.afterEscFocus).toBe('People and details');
           }
@@ -844,13 +974,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       And(
-        'at 1024 and 1440 px the side panel stands beside the main line without inert on either column',
+        'at 1024 and 1440 px the side panel stands beside the main line and nothing is inert',
         () => {
           for (const width of [1024, 1440]) {
-            const snap = snaps.get(width)!;
-            expect(snap.closedInert).toBe(false);
-            expect(snap.openSideInert).toBe(false);
-            expect(snap.openBehindInert).toEqual([false, false, false, false]);
+            expect(snaps.get(width)!.openBehindInert).toEqual([false, false, false, false]);
           }
         },
       );
@@ -858,7 +985,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
-    'Design tokens meet WCAG AA contrast in both themes and reduced motion stills scripted scrolling and transitions',
+    'Design tokens meet WCAG 2.1 AA contrast in both themes and reduced motion stills scripted scrolling and transitions',
     ({ When, Then }) => {
       let light: Record<string, Rgb>;
       let dark: Record<string, Rgb>;

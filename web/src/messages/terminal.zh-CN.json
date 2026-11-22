@@ -48,6 +48,7 @@
   "terminal.link.down": "离线",
   "terminal.link.linking": "连接中",
   "terminal.link.relay": "中继 · 受限",
+  "terminal.note.keys": "Tab 键会输入到终端里。要用键盘离开终端，请按 Ctrl+M。",
   "terminal.note.privacy": "SoloDawn 不读取终端里的内容。交还时，会在任务话题里自动发一条摘要：你让它做了什么、改了哪些文件、提交了什么。",
   "terminal.note.relay.body": "这台电脑走中继时，「打开终端」会变灰，并提示先打通直连。",
   "terminal.note.relay.lead": "终端画面只走直连。",
