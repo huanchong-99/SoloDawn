@@ -177,7 +177,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   | `chat.head`  | the head of a chat, after the group's name                                 | `{ group }`                   |
   | `chat.top`   | between the head of a chat and its main line                               | `{ group }`                   |
   | `chat.side`  | beside the main line from 1024 px; below, a panel that slides over         | `{ group, net }`              |
-  | `member.ai`  | inside each AI card, after the profile rows and before the footer          | `{ group, ai }`               |
+  | `member.ai`  | in the rows of each AI card, before the profile rows: `dt` and `dd` pairs  | `{ group, ai }`               |
   | `member.add` | in Add AI, between the computer choices and the name field                 | `{ group, candidate, draft }` |
   | `cards`      | the card of a message, by kind, in the main line and in threads            | `CardProps`                   |
 

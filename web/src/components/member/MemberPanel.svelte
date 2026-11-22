@@ -103,10 +103,10 @@
                         · {t('member.account.personal.note')}
                       </span>{/if}
                   </dd>
+                  <Mount at="member.ai" props={{ group, ai }} />
                   {@render profileRows()}
                   {@render accessRows()}
                 </dl>
-                <Mount at="member.ai" props={{ group, ai }} />
                 {#if meter}
                   <div
                     class="meter"

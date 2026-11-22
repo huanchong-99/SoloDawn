@@ -38,8 +38,8 @@ export interface Points {
   /** Beside the main line of a chat from 1024 px; below that, a panel that slides over the chat
    *  when the person opens it with the button the chat's head then shows. */
   'chat.side': { group: Group; net: Net };
-  /** Inside each AI member card of the member panel, after the profile rows: parts that show or
-   *  edit more of the member. */
+  /** In the rows of each AI member card of the member panel, before the profile: `dt` and `dd`
+   *  pairs that show or edit more of the member. */
   'member.ai': { group: Group; ai: AIMemberRow };
   /** In the dialog for adding an AI, between the computers and the name: a part may set `model`,
    *  `effort` and `tier` of the draft that `host.join` sends. */
