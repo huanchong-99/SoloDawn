@@ -66,14 +66,14 @@ type RelayUse struct {
 
 // HostAgent is a supported CLI found on this machine. Account is null until
 // the owner has declared it (agent.set). Driver carries the CLI driver's
-// capability declaration once populated (contracts/step-3/drivers.md section 6).
+// capability declaration (contracts/step-3/drivers.md section 6).
 type HostAgent struct {
 	Agent      string       `json:"agent"`
 	CLIVersion string       `json:"cli_version"`
 	Account    *string      `json:"account"`
 	LoginOK    bool         `json:"login_ok"`
 	Caps       Caps         `json:"caps"`
-	Driver     *Driver      `json:"driver,omitempty"`
+	Driver     Driver       `json:"driver"`
 	Groups     []AgentGroup `json:"groups"`
 }
 

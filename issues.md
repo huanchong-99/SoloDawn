@@ -6,16 +6,69 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · The Qwen Code driver is declared from documentation, not from a capture
+
+- Symptom: `DriverCaps["qwen"]` declares levels `1` and `3` and approvals `conn`, and `qwenDriver` speaks the `qwen serve` daemon API (`internal/host/qwen.go`), but no run of the real Qwen Code exists: the fake Qwen Code's scripts are written from the documented API, not cut from captures.
+- Cause: T3-0 read Qwen Code 0.28.0's documentation only, and no owner QwenCloud key was available to T3-3. The `serve` flags (`--token`, `--workspace`), the routes (`POST /session`, `/session/<id>/{resume,prompt,cancel,permission/<request>,events}`), the event names (`session_update`, `permission_request`, `turn_complete`, `turn_error`), the option ids `proceed_once` and `cancel`, approval modes `plan` and `yolo`, the address line `qwen serve listening on <url> (mode=..., workspace=...)`, `QWEN_CODE_SYSTEM_SETTINGS_PATH`, instructions taken as the first block of the first prompt, and a `401` in a `turn_error` meaning a bad key are all `[documented]`.
+- Status: open until the live part of M3, M4 and M7 runs once with the real Qwen Code and an owner key (`drivers.md` section 7); then the fake's scripts are replaced by captures and the declaration corrected.
+
+### 2026-11-22 · limitation · A Qwen Code group session may load the repository's configuration
+
+- Symptom: `contracts/step-3/drivers.md` section 3 requires the repository's configuration to be kept out of group sessions. `qwenDriver` cannot do that: a Qwen Code group session may load the project's `.qwen/settings.json`, `QWEN.md` and extensions (`internal/host/qwen.go`).
+- Cause: Qwen Code 0.28.0 documents no switch for it. Folder trust is not one: in an untrusted folder Qwen Code asks before every tool, even at `yolo`, which would turn level 3 into approval cards.
+- Status: accepted by the coordinator (2026-11-22): Qwen Code ships with this limitation, the risk R-45 already accepts (only trusted repositories go into a group; `install.md`). Open until a capture shows a switch that keeps the configuration out and leaves approvals alone.
+### 2026-11-22 · limitation · The multi-person label scenarios cannot admit Q yet
+
+- Symptom: A9.12 and five A9.42 cases (failing review, decision by P, decision by Q, secretary confirmation without Q on the allow list, and secretary confirmation with Q on it) each failed under `-race` in `Given the confirmation cast with Q`. The reply was `bad_request: the home has no such command`; decoding that refusal as a successful command reply reported `proto: a field that is always present is missing`.
+- Cause: the cast sends `invite` before it can admit Q (`features/s2_confirm_test.go:119`), and the current home has no registered handler for it (`internal/home/check.go:109`).
+- Status: pending until the people flow is available (T2-1b for invitation, T2-1a for home join). The label assertions did not run; any later blockers are unverified.
+
+### 2026-11-22 · limitation · The A9.44 quiet-task fixture does not reach the timer
+
+- Symptom: A9.44 remains pending after HM-13. With the scenario enabled, the brief proposed by the replacement secretary never appeared in either acceptance run (`features/s2_confirm.feature:560`).
+- Cause: not verified; both runs stopped in the proposal step before confirming the brief or waiting for the timer.
+- Status: open; HM-13's timer is covered separately by `features/home_rounds.feature:40`.
+
+### 2026-11-22 · limitation · Confirmation browser controls are not yet exercised
+
+- Symptom: the I2-1b scenarios exercise the card and member commands over the browser connection but do not check the rendered buttons, expired card or member editor.
+- Cause: the cast supplies protocol clients, not a rendered browser (`features/s2_cast_test.go:762`); the confirmation controls and member editor are planned in U2-2.
+- Status: open; verify the UI cases of A9.8, A9.9, A9.11 and A9.14 with U2-2.
+
+### 2026-11-22 · limitation · The cast's approval fixture does not execute shell commands
+
+- Symptom: A9.19 verifies the approval tool returns allow and the fake CLI resumes; it does not verify that the command runs in a real CLI.
+- Cause: the replay fixture supports protocol I/O only (`internal/host/fakecli/replay.go:98`).
+- Status: open; actual command execution is unverified.
+
+### 2026-11-22 · deviation · A confirmed brief cannot yet be replaced
+
+- Symptom: a new brief cannot replace a confirmed one as required by A9.13.
+- Cause: `internal/home/cmd_brief.go:153` accepts only pending or revised briefs as predecessors.
+- Status: open; A9.13 remains pending for T2-2b.
+
+### 2026-11-22 · limitation · The OpenCode driver is declared from documentation, not from a capture
+
+- Symptom: `DriverCaps["opencode"]` declares levels `1` and `3` and approvals `conn`, and `openCodeDriver` speaks the `opencode serve` API (`internal/host/opencode.go`), but no run of the real OpenCode exists: the fake OpenCode's scripts are written from the documented API, not cut from captures.
+- Cause: T3-0 read OpenCode 1.19.6's documentation only, and no owner API key for a provider was available to T3-2. `drivers.md` section 4 asks that a value be declared from a run; levels `1` and `3`, the permission names, the event names (`session.idle`, `session.error`, `permission.asked`, `message.part.updated`), `POST /permission/<id>/reply`, and `OPENCODE_DISABLE_PROJECT_CONFIG` keeping the repository's configuration out are all `[documented]`.
+- Status: open until the live part of M3, M4 and M7 runs once with the real OpenCode and an owner key (`drivers.md` section 7); then the fake's scripts are replaced by captures and the declaration corrected.
 ### 2026-11-22 · deviation · The Go export scenarios do not exercise browser UI or an OS timer
 
 - Symptom: A9.27 and A9.28 exercise browser peers at the protocol boundary, not the browser's own follow logic or the owner-only commands in group info. A9.28 takes successive copies without waiting for an OS timer at one-minute intervals.
 - Cause: `features/s2_export.feature:12,19,24` use the I2-0 Go cast and two invocations of the copy command. The product does not schedule copies (`planning/contracts/step-2/export.md:60-62`).
 - Status: open. Browser coverage belongs to I2-2 after U2-5 and W2-1. The OS timer is not verified.
-### 2026-11-22 · limitation · Home task participation needs the role-confirmation lane
 
-- Symptom: mention and call gating infers participation from a running task's assignee, or a reviewer that reached review. It does not yet account for role items held by a confirmation, or retain participation after a task becomes final.
-- Cause: `internal/home/cmd_confirm.go` uses the step-1 task machine's current role and step; T2-2b owns role-item gating and confirmation waits.
-- Status: open for T2-2b integration. Its held role items must not qualify for the thread exception in `planning/contracts/step-2/confirm.md` section 2.
+### 2026-11-22 · limitation · Task participation history is inferred from current fields
+
+- Symptom: a final task cancelled before its first role item was queued can qualify for the thread exception after its expired card is pruned, as can an assignee newly named by row 11 before its first activation. A reviewer's earlier participation can be lost after a later reassignment/review overwrites its evidence.
+- Cause: `internal/home/cmd_confirm.go:48-80` derives participation from current roles, state, step and latest review, excluding unconfirmed role cards. Acknowledged inbox items are deleted; task rows contain no durable participation history. Row 11 also cannot durably distinguish an owner's reassignment that overrides an earlier closed card from that card; a foreign reassignment to the same AI after expiry needs a new request, since the request's one card is closed (`internal/home/cmd_confirm_task.go:109-123,138-154`).
+- Status: open, accepted for T2-2b pending the owner's review: no new table, export format or wire shape. Held role cards no longer qualify; known participation survives finalization while its current fields still show it.
+
+### 2026-11-22 · limitation · A late watch item can outlive hand-back
+
+- Symptom: a watch item arriving between PTY shutdown and the hand-back turn can leave a grant through the next takeover.
+- Cause: `internal/host/pty.go` `runStop` clears grants before `internal/host/takeover.go` starts the hand-back turn; `watchItem` in `internal/host/watch.go` still sees the session in `takeover` during that interval.
+- Status: open.
 
 ### 2026-11-22 · limitation · A failed move can leave a usable export file
 
@@ -50,6 +103,8 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: `host.CheckTakeover` (`internal/host/caps.go`) is not yet wired to a `Surface["takeover.start"]` handler, and `Host.Agents` (`internal/host/agents.go`) does not yet populate a `driver` field on `proto.HostAgent` in `host.info`.
 - Cause: `HS-20` (terminal takeover) is built on a parallel wave-3 branch (`Surface["takeover.start"]` is not on `rebuild` yet), and `planning/contracts/step-3/drivers.md` section 6 / `planning/steps/parallel-plan-step-2-3.md` row `T3-1` assign freezing `driver` on the wire to `P-5` and putting `driver` into `host.info` to `T3-2`.
+- Status: open until `HS-20` calls `host.CheckTakeover` in `takeover.start`. The `driver` half is resolved by `T3-2` (`internal/host/agents.go`, `agtDriverProto`).
+- Status: the `takeover.start` half is resolved in T3-1 (#275): `takeover.start` calls `checkTakeover` first and uses its `assignFirst`. Open until `T3-2` adds `driver` to `host.info`.
 - Status: the `takeover.start` half is resolved in T3-1 (#275): `takeover.start` calls `checkTakeover` first and uses its `assignFirst`. Open until `T3-2` adds `driver` to `host.info`.
 
 ### 2026-11-22 · limitation · A7.9 does not run on Windows
@@ -63,6 +118,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: when the interactive CLI exits on its own while the owner's terminal is open, the last lines it printed (for A7.4's fake CLI, `{"bye":…}` and the echo of the input line) never reach the pty channel. M7's A7.4 therefore does not wait for `"bye":` (`runOneSwitchCycle` in `features/m7_test.go`); it waits for the hand-back post, and the exit entry in the CLI log proves the exit. Seen on `test (windows-latest)` of PR #287; Linux and macOS deliver the line.
 - Cause: on Windows `ptyBeforeExitStop` does nothing (`internal/host/pty_windows.go:16`), so the host closes the terminal as soon as the CLI exits and drops the frame that ConPTY has not rendered yet. Diagnosis: `WIN-CONPTY.review.md`.
 - Status: open, product behaviour (coordinator, 2026-11-22, I-7 decision). The fix is planned in a later Windows unit, before I-11. No product code changes in I-7.
+
+### 2026-11-22 · limitation · A9.20 cannot set up a watcher before home invitation support lands
+
+- Symptom: A9.20 fails in its first Given with `bad_request: the home has no such command`, before opening the owner's terminal or exercising the watch host.
+- Cause: `joinWatcher` in `features/s2_watch_terminal_test.go` sends `invite`; `internal/home/people_seam.go` declares the invite/join command keys but registers no handlers, so `internal/home/check.go` refuses the command. The home invitation/join units T2-1a and T2-1b are outside T2-6.
+- Status: open. A9.20 stays pending; rerun it after the home invitation/join path lands. The later watch-confirmation steps were not reached by this run.
 
 ### 2026-11-22 · deviation · Host turn labels approximate task participation by role
 
@@ -635,6 +696,23 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: when the interactive CLI exits on its own while the owner's terminal is open, the last lines it printed (for A7.4's fake CLI, `{"bye":…}` and the echo of the input line) never reach the pty channel. M7's A7.4 therefore does not wait for `"bye":` (`runOneSwitchCycle` in `features/m7_test.go`); it waits for the hand-back post, and the exit entry in the CLI log proves the exit. Seen on `test (windows-latest)` of PR #287; Linux and macOS deliver the line.
 - Cause: on Windows `ptyBeforeExitStop` does nothing (`internal/host/pty_windows.go:16`), so the host closes the terminal as soon as the CLI exits and drops the frame that ConPTY has not rendered yet. Diagnosis: `WIN-CONPTY.review.md`.
 - Status: resolved in win-pty. On process exit with a terminal attached, `ptyBeforeExitStop` closes the pseudo console but keeps its pipes, and the terminal closes when the output reaches its end (`internal/host/pty_windows.go`); `TestPTYWindowsSelfExitDeliversLastOutput` pins it on Windows CI.
+### 2026-11-22 · bug · Role finishing read pending cards for commands without task work
+
+- Symptom: the home command-replay acceptance scenario panicked when applying a note command with no disk reader.
+- Cause: `cftFinish` in `internal/home/cmd_confirm_task.go` expired role cards on every successful command through `Disk.Pending`, including commands with no task rows or task items.
+- Status: resolved in #312. Results without task work return unchanged; card expiry belongs to the timer, and role decisions write only changed task waits.
+
+### 2026-11-22 · bug · Capability fixture cleanup races with A1.1 onboarding
+
+- Symptom: race acceptance reported `WARNING: DATA RACE` in the A1.1 onboarding scenario even though its steps passed.
+- Cause: the capability fixture registered a `DriverCaps` restore for every scenario (`features/host_caps_test.go:41`); A1.1 did not change the table, but its in-process pairing node read it while handling `host.info` (`internal/host/caps.go:46`). The I2-1b scenarios run after A1.1 and start their nodes as subprocesses.
+- Status: resolved in I2-1b by registering the restore only when a capability step changes the table (`features/host_caps_test.go`, `setDriverCaps`).
+
+### 2026-11-22 · deviation · `driver` in `host.info` was optional until T3-2 filled it
+
+- Symptom: `planning/contracts/step-3/drivers.md` section 6 says each entry of `agents` carries `driver` always, but the frozen shape lets it be absent: Go `Driver *Driver` with `omitempty` (`internal/proto/host.go`, `HostAgent`), TS `v.optional(Driver)` (`web/src/lib/proto.ts`, `HostState.agents`), and `agents.driver` under `optional` in `internal/proto/testdata/wire.json`.
+- Cause: nothing on rebuild fills `driver` yet; a required field now would make the web client reject every real `host.info` until T3-2 lands. P-5 froze `driver` as `accounts` and `takeover` only; the other declaration fields stay in the host's table (coordinator, 2026-11-22).
+- Status: resolved by T3-2: `driver` is required in Go (`internal/proto/host.go`, `HostAgent`), TS (`web/src/lib/proto.ts`) and `wire.json`, and `Host.Agents` fills it for every agent. Before that it was open, accepted for P-5. T3-2, the pull request that fills `driver` for every agent, makes it required: Go ``Driver Driver `json:"driver"` `` (value type, no `omitempty`), TS `driver: Driver`, regenerate `wire.json` with `go test ./internal/proto -update`, and drop "once populated" from `internal/proto/README.md` (the `host.info` bullet). Also accepted: P-5 does not freeze the tool lists in `internal/proto/testdata/tools.json` (`planning/contracts/step-3/knowledge.md` section 7), because `internal/host` tests require it to equal the registered schemas; T3-5 adds `note_list` `type` and `propose_brief` `preset`, T3-6 adds `kb_put` and `kb_search` to all five lists, and the two merge with `go test ./internal/proto -update`.
 ### 2026-11-22 · bug · Watch confirmation admission rejected fields outside its checks
 
 - Symptom: a person's watch request was refused when it carried a thread, reply or text, although the watch admission contract does not restrict them.

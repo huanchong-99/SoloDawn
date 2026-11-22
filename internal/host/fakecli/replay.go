@@ -1,4 +1,4 @@
-// Package fakecli runs the test-only Claude Code and Codex stand-ins. Each
+// Package fakecli runs the test-only Claude Code, Codex, OpenCode and Qwen Code stand-ins. Each
 // start replays one script file of messages the real CLIs sent.
 package fakecli
 
@@ -32,6 +32,7 @@ type process struct {
 	stdout, stderr io.Writer
 	session, id    json.RawMessage
 	mcp            *mcp
+	http           *openCode
 }
 
 // Run is one start of a fake CLI. It returns the exit status.
@@ -41,6 +42,10 @@ func Run(vendor, version string, args []string, stdin io.Reader, stdout, stderr 
 		return 0
 	}
 	p := process{vendor: vendor, args: args, stdin: bufio.NewReader(stdin), stdout: stdout, stderr: stderr}
+	if vendor == "opencode" || vendor == "qwen" {
+		p.listen()
+		defer p.http.send.Close()
+	}
 	code, err := p.replay()
 	if err != nil {
 		fmt.Fprintln(stderr, "fake "+vendor+":", err)
@@ -109,7 +114,7 @@ func (p *process) step(dir string, msg []byte) error {
 	case "mcp<-cli", "mcp->cli":
 		return p.mcpStep(dir, msg)
 	}
-	return fmt.Errorf("unknown direction %q", dir)
+	return p.httpStep(dir, msg)
 }
 
 // A reply quotes the id of the last line from the node as "$id".
@@ -157,14 +162,19 @@ func expect(from *bufio.Reader, want []byte) ([]byte, error) {
 		return nil, err
 	}
 	line = line[:len(line)-1]
+	return line, match(line, want)
+}
+
+// match checks that line has every field of want.
+func match(line, want []byte) error {
 	var got, fields any
 	if err := errors.Join(json.Unmarshal(line, &got), json.Unmarshal(want, &fields)); err != nil {
-		return nil, err
+		return err
 	}
 	if !contains(got, fields) {
-		return nil, fmt.Errorf("expected %s, got %s", want, line)
+		return fmt.Errorf("expected %s, got %s", want, line)
 	}
-	return line, nil
+	return nil
 }
 
 // An object matches when it has the wanted fields; anything else must be equal.

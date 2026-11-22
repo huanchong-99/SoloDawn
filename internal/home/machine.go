@@ -176,7 +176,7 @@ var (
 	stepsChecked     = []string{stepLocal, stepCloud, stepReview}
 	stepsBeforeMerge = []string{stepBranch, stepLocal, stepCloud, stepReview}
 
-	waitsOfCards = []string{"", waitApproval, waitDecision} // no wait, or a card wait
+	waitsOfCards = []string{"", waitConfirm, waitApproval, waitDecision} // no wait, or a card wait
 	waitsKept    = []string{waitReviewer, waitConflict}
 	workItems    = []string{itemAssign, itemChecks, itemReviewed, itemReview, itemResume, itemMerge}
 )

@@ -41,9 +41,14 @@ type (
 func NewSurface(cfg SurfaceConfig) *Surface {
 	sf := &Surface{cfg: srfDefaults(cfg)}
 	cfg.Sessions.Requests["host.info"] = RequestHandler{Type: "host.info", Run: sf.reqHostInfo}
+	cfg.Sessions.Requests["watch.start"] = RequestHandler{Run: sf.reqWatchStart}
 	cfg.Sessions.Pushes["pty.resize"] = sf.pushPTYResize
 	cfg.Sessions.Replays["takeover.start"] = sf.replayTakeoverStart
 	return sf
+}
+
+func (sf *Surface) reqWatchStart(_ context.Context, _ *home.Conn, from Ctl, by string, _ int64, data json.RawMessage) (any, error) {
+	return sf.cfg.Host.WatchStart(from, by, data)
 }
 
 func (sf *Surface) replayTakeoverStart(ctx context.Context, from Ctl, by string, data json.RawMessage) (any, error) {
@@ -163,7 +168,7 @@ func (sf *Surface) groupsForAgent(agent string, sessions []host.Session) []proto
 		state, task := sf.cfg.Host.MemberState(k.group, k.member)
 		out = append(out, proto.AgentGroup{
 			Group: proto.ID(k.group), Member: proto.ID(k.member), Level: 3,
-			State: state, Task: proto.ID(task), Queued: sf.cfg.Host.QueuedCount(k.group, k.member), Watchers: []string{},
+			State: state, Task: proto.ID(task), Queued: sf.cfg.Host.QueuedCount(k.group, k.member), Watchers: sf.cfg.Host.Watchers(k.group, k.member),
 		})
 	}
 	return out

@@ -213,7 +213,15 @@ is in that description. `[documented]` means read there and not run.
 - For both, `accounts` is `["api_key"]`: their other account types did not
   pass T3-0's terms check. `takeover` is `none` until a capture shows the
   same-id handoff. Every other value is declared from that unit's captures
-  (section 4), so neither has a row in the table above yet.
+  (section 4); until a capture exists, a value read only from T3-0's
+  sources is `[unverified]`.
+
+The step 3 drivers:
+
+| `agent` | `accounts` | `levels` | `approvals` | `takeover` | `usage` |
+| --- | --- | --- | --- | --- | --- |
+| `opencode` (T3-2) | `api_key` | `1`, `3` `[unverified]` | `conn` `[unverified]` | `none` | none |
+| `qwen` (T3-3) | `api_key` | `1`, `3` `[unverified]` | `conn` `[unverified]` | `none` | none |
 
 ## 9. Open points and what is not verified
 

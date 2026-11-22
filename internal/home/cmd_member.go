@@ -2,6 +2,7 @@ package home
 
 import (
 	"encoding/json"
+	"regexp"
 	"slices"
 
 	"github.com/huanchong-99/SoloDawn/internal/identity"
@@ -19,7 +20,7 @@ func init() {
 }
 
 var (
-	memCLIs     = []string{"claude", "codex"}
+	memCLI      = regexp.MustCompile(`^[a-z0-9_]+$`)
 	memAccounts = []string{"personal", "team", "api_key"}
 )
 
@@ -55,7 +56,7 @@ func memDevice(log *identity.Log, device string) (name string) {
 }
 
 func memAddValid(p proto.MemberAddAI) *Refusal {
-	if p.Name == "" || !slices.Contains(memCLIs, p.CLI) || !slices.Contains(memAccounts, p.Account) {
+	if p.Name == "" || !memCLI.MatchString(p.CLI) || !slices.Contains(memAccounts, p.Account) {
 		return &Refusal{"bad_request", "member add_ai requires a name, a supported cli and an account type"}
 	}
 	return nil
