@@ -450,7 +450,6 @@ Feature: A request for another person's AI needs its owner's word
       |          | information |
       | "${Q}"   | instruction |
 
-  @pending
   Scenario: A9.42 — A one-person group's choices and confirmations are instruction
     Given the confirmation cast without Q
     And "Secretary" is scripted for confirmation tools:
@@ -475,7 +474,7 @@ Feature: A request for another person's AI needs its owner's word
       """
     When confirmation browser P sends as "choose":
       """
-      {"t":"act","action":"choose","msg":"${decision}","arg":"","text":"Use the direct path"}
+      {"t":"act","action":"choose","msg":"${decision}","text":"Use the direct path"}
       """
     Then the confirmation command answers "ok"
     And "P-work" receives a confirmation turn matching "^== .* · decided · instruction\n-- .*P.* · instruction$"

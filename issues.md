@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · The multi-person label scenarios cannot admit Q yet
+
+- Symptom: A9.12 and five A9.42 cases (failing review, decision by P, decision by Q, secretary confirmation without Q on the allow list, and secretary confirmation with Q on it) each failed under `-race` in `Given the confirmation cast with Q`. The reply was `bad_request: the home has no such command`; decoding that refusal as a successful command reply reported `proto: a field that is always present is missing`.
+- Cause: the cast sends `invite` before it can admit Q (`features/s2_confirm_test.go:119`), and the current home has no registered handler for it (`internal/home/check.go:109`).
+- Status: pending until the people flow is available (T2-1b for invitation, T2-1a for home join). The label assertions did not run; any later blockers are unverified.
+
 ### 2026-11-22 · limitation · The A9.44 quiet-task fixture does not reach the timer
 
 - Symptom: A9.44 remains pending after HM-13. With the scenario enabled, the brief proposed by the replacement secretary never appeared in either acceptance run (`features/s2_confirm.feature:560`).
