@@ -19,8 +19,6 @@ const (
 	agtSelectAgentSQL   = `SELECT account, caps FROM agent WHERE agent = ?`
 )
 
-var agtSupported = []string{"claude", "codex"}
-
 func init() {
 	Register(Surface, "agent.set", agtSet)
 	Register(Listeners, "agents", agtListen)
@@ -115,7 +113,7 @@ func agtDetect(ctx context.Context, h *Host) ([]agtFound, error) {
 
 func agtProbeAll(ctx context.Context) ([]agtFound, error) {
 	var found []agtFound
-	for _, agent := range agtSupported {
+	for _, agent := range driverNames() {
 		version, ok, err := agtProbeOne(ctx, agent)
 		if err != nil {
 			return nil, err
@@ -246,18 +244,12 @@ func agtDecodeSet(data json.RawMessage) (proto.AgentSet, error) {
 	if !agtValidAgent(cmd.Agent) {
 		return proto.AgentSet{}, &Error{Code: "bad_request", Message: "unknown agent: " + cmd.Agent}
 	}
-	if !agtValidAccount(cmd.Account) {
-		return proto.AgentSet{}, &Error{Code: "bad_request", Message: "unknown account: " + cmd.Account}
-	}
-	return cmd, nil
+	return cmd, checkDriverAccount(cmd.Agent, cmd.Account)
 }
 
 func agtValidAgent(agent string) bool {
-	return agent == "claude" || agent == "codex"
-}
-
-func agtValidAccount(account string) bool {
-	return account == "personal" || account == "team" || account == "api_key"
+	_, ok := DriverCaps[agent]
+	return ok
 }
 
 func agtUpdateAccount(tx *store.Tx, agent, account string) (bool, error) {

@@ -24,6 +24,7 @@ import {
   type Welcome,
 } from './proto';
 import { rendezvous } from './rendezvous';
+import { hello } from './version';
 
 const second = 1000;
 const minute = 60 * second;
@@ -356,9 +357,11 @@ export class Connection {
    *  not answered within 10 seconds, the connection closes and the promise rejects. */
   async hello(): Promise<Welcome> {
     const timer = setTimeout(this.close, patience);
-    const hello = { t: 'hello' as const, v: 1, kind: 'browser', name: this.#hub.name, addrs: [] };
     try {
-      const answer = (await this.request(hello)) as Welcome | ErrorResponse;
+      const answer = await hello(
+        (req) => this.request(req) as Promise<Welcome | ErrorResponse>,
+        this.#hub.name,
+      );
       if (!answer.err) return answer;
       this.refused = answer.err.code;
       throw new Error(`hello refused: ${this.refused}`);
@@ -650,6 +653,8 @@ export interface Session {
   peer(target: string, listen: () => Listener, onpath?: (path: Path | undefined) => void): Peer;
   /** Sends a pairing frame on one signalling path. */
   send(url: string, frame: RVJoin | RVRoom): void;
+  /** Joins a room on an existing path and joins it again if that path reconnects. */
+  watchRoom(url: string, id: string, heard: (url: string, frame: Heard) => void): () => void;
   /** Closes every signalling path and connection; nothing opens again. */
   close(): void;
 }
@@ -665,6 +670,11 @@ class Signalling implements Hub, Session {
   readonly #ways = new Map<string, Way>();
   readonly #peers = new Map<string, Peer>();
   readonly #conns = new Map<string, Connection>();
+  readonly #rooms = new Set<{
+    url: string;
+    id: string;
+    heard: (url: string, frame: Heard) => void;
+  }>();
 
   constructor({ urls, device, known, name, heard = () => {} }: Options) {
     this.device = device;
@@ -684,6 +694,9 @@ class Signalling implements Hub, Session {
   #open(url: string) {
     const client = rendezvous([url], this.device, this.#known, this.#hear);
     client.send(this.#watch());
+    for (const room of this.#rooms) {
+      if (room.url === url) client.send({ t: 'join', room: room.id });
+    }
     return client;
   }
 
@@ -719,6 +732,7 @@ class Signalling implements Hub, Session {
     const on = this.#on[frame.t] as ((way: Way, frame: Heard) => void) | undefined;
     on?.(this.#ways.get(url)!, frame);
     this.#heard(url, frame);
+    for (const room of this.#rooms) room.heard(url, frame);
   };
 
   /** The ICE servers of a path are asked for again at half their ttl, and every 10 seconds
@@ -799,6 +813,13 @@ class Signalling implements Hub, Session {
 
   send(url: string, frame: RVJoin | RVRoom) {
     this.#ways.get(url)?.client.send(frame);
+  }
+
+  watchRoom(url: string, id: string, heard: (url: string, frame: Heard) => void) {
+    const room = { url, id, heard };
+    this.#rooms.add(room);
+    this.send(url, { t: 'join', room: id });
+    return () => void this.#rooms.delete(room);
   }
 
   close() {
