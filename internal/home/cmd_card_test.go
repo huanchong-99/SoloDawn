@@ -419,21 +419,21 @@ func TestCardApproveAndDenyRefusals(t *testing.T) {
 		card   func(*proto.MsgRow)
 		code   string
 	}{
-		"invalid msg id":            {action: "approve", msg: "not-an-id", code: "bad_request"},
-		"approve with arg":          {action: "approve", extra: `,"arg":"A"`, code: "bad_request"},
-		"approve with empty arg":    {action: "approve", extra: `,"arg":""`, code: "bad_request"},
-		"deny with text":            {action: "deny", extra: `,"text":"No."`, code: "bad_request"},
-		"deny with empty text":      {action: "deny", extra: `,"text":""`, code: "bad_request"},
-		"missing message":           {action: "approve", msg: id(90), code: "not_found"},
-		"wrong card kind":           {action: "deny", card: func(m *proto.MsgRow) { m.Kind = "decision" }, code: "bad_request"},
-		"by an AI on owner device":                  {action: "approve", by: laptop, extra: `,"as":"` + cardA + `"`, code: "forbidden"},
-		"by admin not in approvers":                 {action: "approve", body: func(b *proto.ApprovalBody) { b.Approvers = []string{guest.ID()} }, code: "forbidden"},
+		"invalid msg id":                              {action: "approve", msg: "not-an-id", code: "bad_request"},
+		"approve with arg":                            {action: "approve", extra: `,"arg":"A"`, code: "bad_request"},
+		"approve with empty arg":                      {action: "approve", extra: `,"arg":""`, code: "bad_request"},
+		"deny with text":                              {action: "deny", extra: `,"text":"No."`, code: "bad_request"},
+		"deny with empty text":                        {action: "deny", extra: `,"text":""`, code: "bad_request"},
+		"missing message":                             {action: "approve", msg: id(90), code: "not_found"},
+		"wrong card kind":                             {action: "deny", card: func(m *proto.MsgRow) { m.Kind = "decision" }, code: "bad_request"},
+		"by an AI on owner device":                    {action: "approve", by: laptop, extra: `,"as":"` + cardA + `"`, code: "forbidden"},
+		"by admin not in approvers":                   {action: "approve", body: func(b *proto.ApprovalBody) { b.Approvers = []string{guest.ID()} }, code: "forbidden"},
 		"by removed delegate still in card.approvers": {action: "approve", by: guest, body: func(b *proto.ApprovalBody) { b.Approvers = []string{browser.ID(), guest.ID()} }, code: "forbidden"},
-		"already approved":          {action: "approve", card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "approved"} }, code: "conflict"},
-		"already denied":            {action: "deny", card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "denied"} }, code: "conflict"},
-		"expired card":              {action: "approve", card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "expired", At: &at} }, code: "conflict"},
-		"reassigned card":           {action: "deny", card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "reassigned", At: &at} }, code: "conflict"},
-		"card with nil state":       {action: "approve", card: func(m *proto.MsgRow) { m.State = nil }, code: "conflict"},
+		"already approved":                            {action: "approve", card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "approved"} }, code: "conflict"},
+		"already denied":                              {action: "deny", card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "denied"} }, code: "conflict"},
+		"expired card":                                {action: "approve", card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "expired", At: &at} }, code: "conflict"},
+		"reassigned card":                             {action: "deny", card: func(m *proto.MsgRow) { m.State = &proto.CardState{Status: "reassigned", At: &at} }, code: "conflict"},
+		"card with nil state":                         {action: "approve", card: func(m *proto.MsgRow) { m.State = nil }, code: "conflict"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, d := cardState(t), cardDisk{}

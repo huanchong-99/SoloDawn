@@ -20,6 +20,7 @@ func init() {
 	Commands["act/confirm"] = cfmRoute(Commands["act/confirm"], briefConfirmed)
 	Commands["act/deny"] = cfmRoute(Commands["act/deny"], cardStatusDenied)
 	Timers.Add("confirm", cfmExpire)
+	wpushExtractors[cfmKind] = cfmReminder
 }
 
 const (
@@ -197,7 +198,9 @@ func (s *State) cfmDeniedResult(c Command, card proto.MsgRow, body proto.Confirm
 	switch body.What {
 	case cfmWhatDirect:
 		req, _ := c.Disk.Msg(*card.Re)
-		if _, byAI := s.AIs[req.By]; byAI {
+		var post proto.HomeCommand
+		json.Unmarshal([]byte(req.Env.Payload), &post)
+		if post.As != "" {
 			return Result{Rows: []Row{RowOf(card)}, Items: s.cfmNotice(card)}
 		}
 		return Result{Rows: []Row{RowOf(card)}}
@@ -205,7 +208,7 @@ func (s *State) cfmDeniedResult(c Command, card proto.MsgRow, body proto.Confirm
 		call, _ := c.Disk.Msg(*card.Re)
 		at := c.Now
 		call.State = &proto.CardState{Status: cardStatusDenied, At: &at}
-		items := append(s.calReplyItems(call.By, postTaskID(call.Thread), card.ID), s.cfmNotice(card)...)
+		items := append(s.cardItems([]TaskItem{{Why: calWhyReply, AI: call.By}}, postTaskID(call.Thread), card.ID), s.cfmNotice(card)...)
 		return Result{Rows: []Row{RowOf(card), RowOf(call)}, Items: items}
 	default:
 		return Result{Rows: []Row{RowOf(card)}}
@@ -250,16 +253,8 @@ func (s *State) cfmDead(d Disk, card proto.MsgRow, body proto.ConfirmBody) bool 
 	return !ok
 }
 
-// ConfirmReminder builds the Web Push reminder and recipient user ids for a
-// newly created confirm card (planning/contracts/step-2/confirm.md section 5).
-func (s *State) ConfirmReminder(msg proto.MsgRow) (proto.Reminder, []string, bool) {
-	if msg.Kind != cfmKind || msg.Pos != msg.Seq {
-		return proto.Reminder{}, nil, false
-	}
+func cfmReminder(s *State, msg proto.MsgRow) wpushEvent {
 	var b proto.ConfirmBody
 	json.Unmarshal(msg.Body, &b)
-	return proto.Reminder{
-		Group: proto.ID(s.ID), Msg: proto.ID(msg.ID), GroupName: s.Group.Name,
-		Kind: cfmKind, Who: s.AIs[b.AI].Name,
-	}, b.To, true
+	return wpushEvent{kind: cfmKind, who: s.AIs[b.AI].Name, users: b.To}
 }

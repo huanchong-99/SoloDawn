@@ -6,17 +6,23 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · Home task participation needs the role-confirmation lane
+
+- Symptom: mention and call gating infers participation from a running task's assignee, or a reviewer that reached review. It does not yet account for role items held by a confirmation, or retain participation after a task becomes final.
+- Cause: `internal/home/cmd_confirm.go` uses the step-1 task machine's current role and step; T2-2b owns role-item gating and confirmation waits.
+- Status: open for T2-2b integration. Its held role items must not qualify for the thread exception in `planning/contracts/step-2/confirm.md` section 2.
+
 ### 2026-11-22 · deviation · Host turn labels approximate task participation by role
 
 - Symptom: a role still held for confirmation counts as participation for host labels, although `planning/contracts/step-2/confirm.md:37-38,156-172` also requires a queued assign or review item.
 - Cause: `internal/host/turn_info.go:13` reads the source task's assignee and reviewer. Ended sessions are deleted (`internal/host/session.go:284-300`), so the session table is not a durable record of queued role items.
 - Status: open, accepted for T2-13; labels enforce nothing.
 
-### 2026-11-22 · limitation · Direct-confirmation labels have no production card producer yet
+### 2026-11-22 · limitation · Direct-confirmation label history is bounded
 
-- Symptom: carried-message and recovery labels can read confirmed direct cards, but the home does not yet write step-2 confirm cards.
-- Cause: `internal/host/turn_info.go:74` fetches `confirm` messages by kind; the producer in `planning/contracts/step-2/confirm.md:43-60` is not implemented in the home. Host state-only sync excludes message rows (`internal/host/deliver.go:259`), so these labels fetch at most one page of 100 confirmation messages per Compose.
-- Status: open; live mention labels continue to trust the home's queueing decision. Confirmation cards older than that page are not consulted unless already present in this Compose's fetched history.
+- Symptom: confirmation cards older than one page are not consulted for carried-message and recovery labels unless already present in the turn's fetched history.
+- Cause: `internal/host/turn_info.go:74` fetches at most one page of 100 `confirm` messages per Compose. Host state-only sync excludes message rows (`internal/host/deliver.go:259`).
+- Status: open; T2-2a supplies the home card producer in `internal/home/cmd_confirm.go`. Live mention labels continue to trust the home's queueing decision.
 
 ### 2026-11-22 · limitation · A hand-back that starts while the node is stopping is lost
 
@@ -572,6 +578,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-22 · deviation · Home confirmation reminders were not sent
+
+- Symptom: cross-owner requests in the unfinished confirmation implementation created cards, but no subscribed browser received a confirmation reminder.
+- Cause: the standalone reminder builder in `internal/home/cmd_confirm.go` was not connected to the Web Push extractor registry.
+- Status: resolved in T2-2a: confirmation cards use the committed-row push path, name the AI, omit the title, and target only `body.to`. Tests decrypt the outgoing push payload.
 
 ### 2026-11-22 · deviation · The home handled only AI member changes
 
