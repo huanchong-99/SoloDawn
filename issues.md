@@ -6,6 +6,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · deviation · The Go export scenarios do not exercise browser UI or an OS timer
+
+- Symptom: A9.27 and A9.28 exercise browser peers at the protocol boundary, not the browser's own follow logic or the owner-only commands in group info. A9.28 takes successive copies without waiting for an OS timer at one-minute intervals.
+- Cause: `features/s2_export.feature:12,19,24` use the I2-0 Go cast and two invocations of the copy command. The product does not schedule copies (`planning/contracts/step-2/export.md:60-62`).
+- Status: open. Browser coverage belongs to I2-2 after U2-5 and W2-1. The OS timer is not verified.
 ### 2026-11-22 · limitation · Home task participation needs the role-confirmation lane
 
 - Symptom: mention and call gating infers participation from a running task's assignee, or a reviewer that reached review. It does not yet account for role items held by a confirmation, or retain participation after a task becomes final.
