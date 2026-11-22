@@ -30,6 +30,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `HS-20` (terminal takeover) is built on a parallel wave-3 branch (`Surface["takeover.start"]` is not on `rebuild` yet), and `planning/contracts/step-3/drivers.md` section 6 / `planning/steps/parallel-plan-step-2-3.md` row `T3-1` assign freezing `driver` on the wire to `P-5` and putting `driver` into `host.info` to `T3-2`.
 - Status: open until `HS-20` calls `host.CheckTakeover` in `takeover.start`. The `driver` half is resolved by `T3-2` (`internal/host/agents.go`, `agtDriverProto`).
 - Status: the `takeover.start` half is resolved in T3-1 (#275): `takeover.start` calls `checkTakeover` first and uses its `assignFirst`. Open until `T3-2` adds `driver` to `host.info`.
+### 2026-11-22 · deviation · Host turn labels approximate task participation by role
+
+- Symptom: a role still held for confirmation counts as participation for host labels, although `planning/contracts/step-2/confirm.md:37-38,156-172` also requires a queued assign or review item.
+- Cause: `internal/host/turn_info.go:13` reads the source task's assignee and reviewer. Ended sessions are deleted (`internal/host/session.go:284-300`), so the session table is not a durable record of queued role items.
+- Status: open, accepted for T2-13; labels enforce nothing.
+
+### 2026-11-22 · limitation · Direct-confirmation labels have no production card producer yet
+
+- Symptom: carried-message and recovery labels can read confirmed direct cards, but the home does not yet write step-2 confirm cards.
+- Cause: `internal/host/turn_info.go:74` fetches `confirm` messages by kind; the producer in `planning/contracts/step-2/confirm.md:43-60` is not implemented in the home. Host state-only sync excludes message rows (`internal/host/deliver.go:259`), so these labels fetch at most one page of 100 confirmation messages per Compose.
+- Status: open; live mention labels continue to trust the home's queueing decision. Confirmation cards older than that page are not consulted unless already present in this Compose's fetched history.
+
 ### 2026-11-22 · limitation · A hand-back that starts while the node is stopping is lost
 
 - Symptom: when the node is stopped with a terminal open and the interactive CLI exits at once, the hand-back can reach `Runner.Turn` after `settleRuntime` has begun. The start is refused, the session goes `dormant`, and nothing is posted because the home connection is already closed, so the next start does not hand the session back as `planning/flows/takeover.md` section E says.
@@ -65,6 +77,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: text a CLI prints faint (SGR 2) in one of the sixteen colours is drawn at half that colour's opacity: 2.8 to 1 (red) to 3.5 to 1 (green) on the terminal's background, for the four colours the page's theme sets. Faint text in the default colour is 5.6 to 1.
 - Cause: xterm.js halves the opacity of faint text (`DomRenderer.ts`, the `.xterm-dim` rules); `web/src/routes/Terminal.svelte` replaces only the default colour's rule with `--term-dim`, since one grey for every colour would drop the colour.
 - Status: open, accepted in U-16b: the colours are the CLI's own.
+
 ### 2026-11-22 · limitation · A denied call draws as waiting
 
 - Symptom: a `call` message whose state is `denied` (`row-msg-call-denied`, frozen by P-4a) shows the waiting line and the waiting state in the call area.
@@ -100,6 +113,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `planning/contracts/step-3/drivers.md` section 6 says each entry of `agents` carries `driver` always, but the frozen shape lets it be absent: Go `Driver *Driver` with `omitempty` (`internal/proto/host.go`, `HostAgent`), TS `v.optional(Driver)` (`web/src/lib/proto.ts`, `HostState.agents`), and `agents.driver` under `optional` in `internal/proto/testdata/wire.json`.
 - Cause: nothing on rebuild fills `driver` yet; a required field now would make the web client reject every real `host.info` until T3-2 lands. P-5 froze `driver` as `accounts` and `takeover` only; the other declaration fields stay in the host's table (coordinator, 2026-11-22).
 - Status: open, accepted for P-5. T3-2, the pull request that fills `driver` for every agent, makes it required: Go: the `Driver` field (JSON `driver`) (value type, no `omitempty`), TS `driver: Driver`, regenerate `wire.json` with `go test ./internal/proto -update`, and drop "once populated" from `internal/proto/README.md` (the `host.info` bullet). Also accepted: P-5 does not freeze the tool lists in `internal/proto/testdata/tools.json` (`planning/contracts/step-3/knowledge.md` section 7), because `internal/host` tests require it to equal the registered schemas; T3-5 adds `note_list` `type` and `propose_brief` `preset`, T3-6 adds `kb_put` and `kb_search` to all five lists, and the two merge with `go test ./internal/proto -update`.
+
 
 ### 2026-11-22 · limitation · Existing stores do not get the `row_named` index
 
@@ -251,7 +265,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: the step-2 planning documents (`planning/contracts/step-2/authority.md:36, 85, 92-93, 104, 108`, `planning/contracts/step-2/confirm.md:145-147, 196-223, 244`, `planning/contracts/step-2/watch-team.md:46-67` and `planning/steps/parallel-plan-step-2-3.md:20-21, 27`) require an inbox item to carry a signed `cause` when a group home belongs to another person, whereas `P-1b` removed `cause` from step-1 items.
 - Cause: step 2 is postponed while step 1 ships with plain unsigned items under the owner's 2026-11-21 decision.
-- Status: open, without effect in step 1. When step 2 resumes, items will need an authority field again.
+- Status: resolved in T2-13; the step-2 contracts now use plain items and host-written context labels, without an item-level `cause`.
 
 ### 2026-11-21 · limitation · Group and review sessions default to permission level 3 and rely on instructions not to edit files
 

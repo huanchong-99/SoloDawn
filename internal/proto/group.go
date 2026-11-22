@@ -85,4 +85,5 @@ type ErrorResponse struct {
 type WireError struct {
 	Code    string `json:"code"`
 	Message string `json:"msg"`
+	Home    string `json:"home,omitempty"`
 }

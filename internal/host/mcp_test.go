@@ -170,6 +170,8 @@ func registerSupersetTools(t *testing.T, lists proto.ToolLists) {
 		"list_tasks":       {Description: "list tasks", Schema: find(lists.Secretary, "list_tasks"), Call: noop},
 		"note_put":         {Description: "save a note", Schema: find(lists.Secretary, "note_put"), Call: noop},
 		"note_list":        {Description: "list notes", Schema: find(lists.Secretary, "note_list"), Call: noop},
+		"kb_put":           {Description: "save a kb doc", Schema: find(lists.Secretary, "kb_put"), Call: noop},
+		"kb_search":        {Description: "search kb", Schema: find(lists.Secretary, "kb_search"), Call: noop},
 		"start_task":       {Description: "start a task", Schema: find(lists.Group, "start_task"), For: func(c Caller) bool { return c.Kind == GroupSession && !c.Secretary }, Call: noop},
 		"push_branch":      {Description: "push branch", Schema: nil, For: func(c Caller) bool { return c.Kind == TaskSession && c.Level > 1 }, Call: noop},
 		"run_checks":       {Description: "run checks", Schema: nil, For: func(c Caller) bool { return c.Kind == TaskSession && c.Level > 1 }, Call: noop},
