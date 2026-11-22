@@ -327,8 +327,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
   of its English file to the type `Key`; today the areas are `approval`, `brief`, `chat`,
-  `decision`, `groupinfo`, `groups`, `member`, `nodes`, `pairing`, `reminder`, `settings`, `states`, `summary`,
-  `task`, `terminal` and `thread`. `src/messages/files.glob.ts` finds every file by its name and
+  `decision`, `groupinfo`, `groups`, `member`, `nodes`, `notify`, `pairing`, `reminder`, `settings`,
+  `states`, `summary`, `task`, `terminal` and `thread`. `src/messages/files.glob.ts` finds every file by its name and
   `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
   empty text, or has keys that differ between its two languages, and naming the area when it has
@@ -483,6 +483,19 @@ file in `src/routes/`. It edits neither the shell nor another area:
   computers with their link path, hosted groups and registered AIs, sends `agent.set` followed by
   a fresh `host.info` read when the owner chooses an unset AI account type, and opens
   `PairBrowserDialog` (`pair.browser`).
+- **In-page notifications.** `src/components/notify/` mounts `Notifications.svelte` at `layer`
+  (`order: 10`), backed by `Notifier` in `src/lib/notify.svelte.ts`. After a group's first sync it
+  shows the live events for the reader: `approval`, `decision` and `brief` waiting on the reader, in
+  dawn, until opened, dismissed or resolved; `done` summaries and `mention`s, in calm neutral, for
+  8 seconds, a delay held while focus or the pointer is on the notification and restarted in full
+  when both leave. Main-line messages of the chat open on screen stay quiet; thread mentions and
+  other groups still notify. Open jumps to the card or message. At most three are shown: a
+  newcomer past that drops the oldest self-closing one, or the oldest waiting card when none is
+  self-closing. The stack sits at the top right of the page's area, under the top bar and the
+  banners (on a phone's chat, under the chat's head), so it never covers the composer or "Use
+  here"; its polite live region is always in the page, and it shows nothing while another tab
+  holds the connection. Notifications slide into place and fade out, both at once under reduced
+  motion.
 - **Web Push reminders.** `src/sw.ts` (built by `vite.config.ts` into a self-contained `sw.js` at
   the root of `webdist/`), `src/lib/push.ts`, and `src/components/reminder/` implement the browser
   side of `planning/contracts/commands.md` section 1.7 and A8.3. `ReminderCard.svelte` on
@@ -533,6 +546,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/members.ts`          | AI card status, path, candidate list, free name, `host.join`                      |
 | `src/lib/groupinfo.svelte.ts` | project-memory `note` and `review` paging, `forget`                               |
 | `src/lib/nodes.svelte.ts`     | connection indicator, `host.info` cache, `agent.set`, pairing                     |
+| `src/lib/notify.svelte.ts`    | live in-page notification store, classification, dismissal and jump               |
 | `src/lib/compose.ts`          | mention being typed, mentions and parts of a text, row size                       |
 | `src/lib/when.ts`             | times in the reader's language; messages by day                                   |
 | `src/lib/task.ts`             | task card derivations: badge, six-step bar, review and thread                     |
@@ -552,6 +566,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/groupinfo/`   | group details and project memory (`chat.side`, `order: 20`)                       |
 | `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
+| `src/components/notify/`      | live in-page notifications mounted at `layer`                                     |
 | `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
 | `src/components/reminder/`    | settings notifications card with iOS hint (`ReminderCard`), `ReminderSync` mount  |
 | `src/components/status/`      | other-tab notice mounted at `banner`                                              |
@@ -568,6 +583,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/groupinfo.spec.ts`  | steps of `../features/web_groupinfo.feature`                                      |
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
+| `features/notify.spec.ts`     | steps of `../features/web_notify.feature`                                         |
 | `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                     |
 | `features/reminder.spec.ts`   | steps of `../features/web_reminder.feature` (A8.3 browser half)                   |
 | `features/a11y.spec.ts`       | steps of `../features/web_a11y.feature`                                           |
