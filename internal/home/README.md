@@ -33,8 +33,10 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | do after a commit what a pure function cannot, such as a Web Push | a function `func(s *State, res Result)` and `After.Add(name, f)` in its file's `init` |
 | know in a hook which devices are connected | `s.Online[device]` |
 | answer with result fields | `Result.Answer.Num`, `.Passed`, `.Round`, `.ID`, `.Replaced`, and for `invite`, `Result.Link` and `Result.Expires` |
-| create or replay an invitation | `Result.InviteBy` (the inviting admin's member id) with `LoopConfig.Invite` / `State.Invite` (`Inviter`) |
-| handle a joining connection | `c.Joining` (`*Joining`: `Group`, `By`, `Open`, `Log`, `Admit`), attached with `conn.SetJoining(fn)` on `Loop` or passed to `Commands.ApplyJoining`; `Result.InviteUsed` marks an accepted `join` that consumes the invitation |
+| create or replay an invitation | `Result.InviteBy` (the inviting admin's member id) with `LoopConfig.Invite` (`Inviter`) |
+| handle a joining connection | `c.Joining`, attached with `conn.SetJoining(fn)` on `Loop`; `Result.InviteUsed` marks consumption |
+| admit or remove a person, or change their role | `cmd_people.go`: `join`, human `member/set` and `member/remove` |
+| check another group's membership in a transaction | `Disk.OtherMember(user)` excludes the current group |
 | refuse | `&Refusal{Code: "conflict", Msg: "…"}`, with a code of [datachannel](../../planning/contracts/datachannel.md) section 9 |
 | read a message, a note, a thread, the pending cards, the queued items | `c.Disk` in a command, the `Disk` argument of a timer or a handler |
 | add a rule that the clock sets off | a function `func(s *State, d Disk, now int64) Result` and `Timers.Add(name, f)` in its file's `init` |
@@ -56,6 +58,10 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | mark a disconnected host's AIs offline | `HostOfflineEvent`, fired by `Loop` when a device's last `Inbox` connection ends |
 | move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
 | push to a client | the `Client` interface |
+
+Joining an existing person writes no rows and does not consume the invitation. Removing a
+person retires their AIs and group devices and drops the group's in-memory device log. Only the
+last local membership deletes the node-wide device log and push subscriptions.
 
 ## Contract
 
@@ -95,8 +101,9 @@ included, with the command's own `ts`. For an accepted `invite` (`Result.InviteB
 home calls `Inviter.Invite(group, by, signer, nonce)` (on a `Loop`, on the group's goroutine outside
 `Store.Write` before writing the `{ok: true}` receipt, so an `Invite` error leaves no receipt and
 never deadlocks `Store.Write`), and carries `Link` and `Expires` on `Result` without storing them in
-the receipt. On a joining connection, when an accepted command commits on `Loop`, `Joining.Admit(res.InviteUsed)` runs before the `ok` answer frame is queued. A repeated refusal is answered with its code and a fixed
-`msg`, because a receipt holds no sentence.
+the receipt. On a joining connection, when an accepted command commits on `Loop`,
+`Joining.Admit(res.InviteUsed)` runs before the `ok` answer frame is queued. A repeated refusal
+is answered with its code and a fixed `msg`, because a receipt holds no sentence.
 
 **Who.** `Who` carries the signer, the person whose log holds it, that person's member id and the
 AI of `as`. A signer without `as` is a person and, where a command's table names a host, also that
@@ -211,7 +218,7 @@ start with `rnd`, their tests too, and their test functions start with `TestRoun
 start with `TestRetention`.
 The step-2 people seam (`people_seam.go`) takes the unexported names that start with `seam` and
 `keyInvite` / `keyJoin` (leaving `ppl` for `cmd_people.go`), and exports `Joining`, `InviteLink`,
-`Inviter`, `(*Conn).SetJoining` and `Table.ApplyJoining`. Web Push (`webpush.go`) takes the names that start with
+`Inviter` and `(*Conn).SetJoining`. Web Push (`webpush.go`) takes the names that start with
 `wpush`, its tests too, and its test functions start with `TestWebPush`.
 Style presets (`preset.go`) take the names that start with `preset`, their tests too, and their test
 functions start with `TestPreset`.
@@ -935,7 +942,7 @@ home half of acceptance tests A6.3 and A6.4.
 propagation, protected rows, and the purge mark with `Loop.Sync` reset.
 `features/home_retention.feature` holds acceptance test A2.5 and the retention half of A5.14.
 
-`people_seam_test.go` covers `people_seam.go` across `Table.ApplyJoining`, `State.Invite`,
+`people_seam_internal_test.go` covers joining dispatch. `people_seam_test.go` covers
 `LoopConfig.Invite` (including `Store.Write` re-entrancy freedom on `Invite` and `ReplayInvite`),
 and `(*Conn).SetJoining` admission callbacks.
 `webpush_test.go` covers `push`, `After["push"]`, `StartLoop` subscription loading and `Close`
