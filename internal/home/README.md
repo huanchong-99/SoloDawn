@@ -719,9 +719,9 @@ row 23), and the thread round transitions (rows 21 and 22, and section 4 "Held b
   retires that item and queues its replacement with `Jump: true` and `NotBefore: 0`, or answers
   `conflict` when none exists.
 - **`quiet` timer.** Registered under `Timers["quiet"]` and `After["quiet"]`. When the group has a
-  secretary and `limits.idle_notice_minutes > 0`, checks each task in sorted id order: if the task
-  has had no thread message for at least `limits.idle_notice_minutes` (measured from
-  `thread.last.ts`, else `stats.started` when non-zero, else `created`), has not already notified
+  secretary, is not paused and has `limits.idle_notice_minutes > 0`, checks each task in sorted id
+  order: if the task has had no thread message for at least `limits.idle_notice_minutes`
+  (measured from `thread.last.ts`, else `stats.started` when non-zero, else `created`), has not already notified
   the secretary at that last-activity timestamp, and passes `Step` with `OnQuiet` (`ByHome`:
   `active`, `wait` `null`, `step` not `merge`), it queues one `notice` (`code: "quiet"`) for
   `group.secretary`. `After["quiet"]` records the task's last-activity timestamp in the group's
