@@ -6,6 +6,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · deviation · The Go export scenarios do not exercise browser UI or an OS timer
+
+- Symptom: A9.27 and A9.28 exercise browser peers at the protocol boundary, not the browser's own follow logic or the owner-only commands in group info. A9.28 takes successive copies without waiting for an OS timer at one-minute intervals.
+- Cause: `features/s2_export.feature:12,19,24` use the I2-0 Go cast and two invocations of the copy command. The product does not schedule copies (`planning/contracts/step-2/export.md:60-62`).
+- Status: open. Browser coverage belongs to I2-2 after U2-5 and W2-1. The OS timer is not verified.
 ### 2026-11-22 · limitation · Home task participation needs the role-confirmation lane
 
 - Symptom: mention and call gating infers participation from a running task's assignee, or a reviewer that reached review. It does not yet account for role items held by a confirmation, or retain participation after a task becomes final.
@@ -17,6 +22,17 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a watch item arriving between PTY shutdown and the hand-back turn can leave a grant through the next takeover.
 - Cause: `internal/host/pty.go` `runStop` clears grants before `internal/host/takeover.go` starts the hand-back turn; `watchItem` in `internal/host/watch.go` still sees the session in `takeover` during that interval.
 - Status: open.
+### 2026-11-22 · limitation · A failed move can leave a usable export file
+
+- Symptom: if committing the source deletion fails after publishing the SQLite file, the command fails and the source remains home, but the export file is already usable as a copy.
+- Cause: `internal/store/export.go` publishes the completed SQLite snapshot before deleting the group's rows in the source transaction. The filesystem rename cannot be rolled back with SQLite.
+- Status: open. Do not import a failed move as a move; retry export first.
+
+### 2026-11-22 · limitation · An inbox item handled just before a move can be handled again
+
+- Symptom: if a host acted on an item before a move but its ack did not reach the old home in time, the item is still unacknowledged in the export. The new home sends it with a new local item ID.
+- Cause: delivery deduplication is keyed by home device and item ID, and the inbox format does not carry the old home's delivery identity.
+- Status: open. Acknowledging the imported item deletes it at its new home.
 
 ### 2026-11-22 · limitation · Remembered addresses are not dialled yet
 
