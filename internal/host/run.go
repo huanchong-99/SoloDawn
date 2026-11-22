@@ -33,9 +33,8 @@ type sessionRunner struct{}
 type aiSlot struct{ group, member string }
 
 type launchConfig struct {
-	maxOpen    int
-	level      int
-	repoConfig bool
+	maxOpen int
+	level   int
 }
 
 const queryMainDBFileSQL = `SELECT coalesce((SELECT file FROM pragma_database_list WHERE name = 'main'), '')`
@@ -43,8 +42,7 @@ const queryMainDBFileSQL = `SELECT coalesce((SELECT file FROM pragma_database_li
 const queryLaunchConfigSQL = `SELECT
 	coalesce((SELECT json_extract(value, '$') FROM setting WHERE key = 'max_open'), 4),
 	iif(coalesce((SELECT json_extract(value, '$') FROM setting WHERE key = 'all_level3'), 0), 3,
-		coalesce((SELECT level FROM perm WHERE agent = ? AND g = ?), (SELECT json_extract(value, '$') FROM setting WHERE key = 'default_level'), 3)),
-	coalesce((SELECT repo_config FROM perm WHERE agent = ? AND g = ?), 0)`
+		coalesce((SELECT level FROM perm WHERE agent = ? AND g = ?), (SELECT json_extract(value, '$') FROM setting WHERE key = 'default_level'), 3))`
 
 const queryIdleMinutesSQL = `SELECT coalesce((SELECT json_extract(value, '$') FROM setting WHERE key = 'idle_minutes'), 15)`
 
@@ -133,15 +131,10 @@ func (lp *liveProc) stopKillTimer() {
 
 func readLaunchConfig(h *Host, agent, group string) (launchConfig, error) {
 	var cfg launchConfig
-	var repoCfg int
 	scan := func(tx *store.Tx) error {
-		return tx.QueryRow(queryLaunchConfigSQL, agent, group, agent, group).Scan(
-			&cfg.maxOpen, &cfg.level, &repoCfg,
-		)
+		return tx.QueryRow(queryLaunchConfigSQL, agent, group).Scan(&cfg.maxOpen, &cfg.level)
 	}
-	err := h.Store.Write(scan)
-	cfg.repoConfig = repoCfg != 0
-	return cfg, err
+	return cfg, h.Store.Write(scan)
 }
 
 func projectDir(h *Host, group string) string {
@@ -408,7 +401,7 @@ func launchSessionProcess(h *Host, rt *runtimePart, s Session, cfg launchConfig,
 	launch := Launch{
 		Folder: sessionDir(h, s), Session: s.CLISession,
 		Level: cfg.level, Shim: append(slices.Clone(h.Shim), "--token", token), Instructions: Instructions(s),
-		RepoConfig: s.Kind != GroupSession && cfg.repoConfig, ToolTimeout: groupToolTimeout(h, s.Group),
+		RepoConfig: s.Kind != GroupSession, ToolTimeout: groupToolTimeout(h, s.Group),
 	}
 	procCtx, procCancel := context.WithCancel(context.Background())
 	proc, err := driver.Start(procCtx, launch)

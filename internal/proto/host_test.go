@@ -14,7 +14,7 @@ func hostState() HostState {
 		Relay: &RelayUse{3250000, 52428800},
 		Agents: []HostAgent{
 			{"claude", "2.1.311", new("personal"), true, Caps{Day: &Cap{"turns", 200}, Task: &Cap{"usd", 12.5}},
-				[]AgentGroup{{ID(group), ID(agent), 2, false, "working", ID(taskID), 1}}},
+				[]AgentGroup{{ID(group), ID(agent), 2, "working", ID(taskID), 1}}},
 			{"codex", "0.164.0", nil, false, Caps{}, []AgentGroup{}},
 		},
 		Settings: HostSettings{90, 15, 2, false, []string{}},
@@ -52,7 +52,7 @@ func TestHostSettingsAndTakeoverGoldens(t *testing.T) {
 	golden(t, "settings-set", SettingsSet{to("settings.set"), new(30), new(20), new(3), new(2), new(false), &[]string{user},
 		&AgentCaps{Claude: &Caps{&Cap{"turns", 200}, &Cap{"turns", 60}}, Codex: &Caps{}}})
 	golden(t, "agent-set", AgentSet{to("agent.set"), "codex", "personal"})
-	golden(t, "perm-set", PermSet{to("perm.set"), "claude", ID(group), 3, true})
+	golden(t, "perm-set", PermSet{to("perm.set"), "claude", ID(group), 3})
 	golden(t, "pair-browser", to("pair.browser"))
 	golden(t, "host-offline", to("host.offline"))
 	golden(t, "host-online", to("host.online"))

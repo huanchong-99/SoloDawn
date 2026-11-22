@@ -119,9 +119,7 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
 - **A3.6** Killing the CLI mid-turn produces a `turn_interrupted` row; the
   next mention works.
 - **A3.7** Text the model prints outside tools does not appear in the group.
-- **A3.8** A repository hook that would create a marker file does not run by
-  default, and runs after the owner enables repository configuration, on
-  each CLI. (`live`)
+- **A3.8** A repository hook that would create a marker file runs in task and review sessions, and does not run in group sessions, on each CLI. (`live`)
 - **A3.9** A `post` from an AI that contains a test secret pattern fails
   with `secret`; no row for it exists on the home.
 - **A3.10** An inbox item sent twice by the home produces one turn, also

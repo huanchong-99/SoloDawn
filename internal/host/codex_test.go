@@ -277,6 +277,7 @@ func TestCodexInteractiveFlagsAcrossLevels(t *testing.T) {
 		Session:     "thr-123",
 		Level:       2,
 		Shim:        []string{"/bin/solodawn&node", "mcp", "--token", "tok-abc"},
+		RepoConfig:  true,
 		ToolTimeout: 600 * time.Second,
 	}
 	argv2, session2, err := drv.Interactive(l2)
@@ -296,18 +297,18 @@ func TestCodexInteractiveFlagsAcrossLevels(t *testing.T) {
 		"-a", "on-request",
 		"-c", "sandbox_workspace_write.exclude_slash_tmp=true",
 		"-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
-		"-c", "project_doc_max_bytes=0",
 	})
 
-	argv1, _, err := drv.Interactive(Launch{Folder: "/repo", Session: "thr-1", Level: 1, Shim: []string{"solodawn"}, RepoConfig: true})
+	argv1, _, err := drv.Interactive(Launch{Folder: "/repo", Session: "thr-1", Level: 1, Shim: []string{"solodawn"}})
 	codexNoErr(t, err)
 	codexCheck(t, slices.Contains(argv1, `mcp_servers.solodawn.args=[]`), "expected empty JSON args array")
-	codexCheck(t, !slices.Contains(argv1, "project_doc_max_bytes=0"), "unexpected project_doc_max_bytes=0")
+	codexEqual(t, argv1[len(argv1)-2:], []string{"-c", "project_doc_max_bytes=0"})
 	codexEqual(t, argv1[slices.Index(argv1, "-s")+1], "read-only")
 	codexEqual(t, argv1[slices.Index(argv1, "-a")+1], "never")
 
-	argv3, _, err := drv.Interactive(Launch{Folder: "/repo", Session: "thr-3", Level: 3, Shim: []string{"solodawn"}, RepoConfig: true})
+	argv3, _, err := drv.Interactive(Launch{Folder: "/work/review-3", Session: "thr-3", Level: 3, Shim: []string{"solodawn"}, RepoConfig: true})
 	codexNoErr(t, err)
+	codexCheck(t, !slices.Contains(argv3, "project_doc_max_bytes=0"), "unexpected project_doc_max_bytes=0")
 	codexEqual(t, argv3[slices.Index(argv3, "-s")+1], "danger-full-access")
 	codexEqual(t, argv3[slices.Index(argv3, "-a")+1], "never")
 }
@@ -546,9 +547,12 @@ func assertThreadParams(t *testing.T, params map[string]any, l Launch, tc codexH
 	codexEqual(t, params["threadId"] == "thr-9", tc.session != "")
 	cfg := params["config"].(map[string]any)
 	_, hasSWW := cfg["sandbox_workspace_write"]
-	_, hasDoc := cfg["project_doc_max_bytes"]
+	docVal, hasDoc := cfg["project_doc_max_bytes"]
 	codexEqual(t, hasSWW, tc.wantSWW)
 	codexEqual(t, hasDoc, tc.wantDocZero)
+	if tc.wantDocZero {
+		codexEqual(t, docVal, float64(0))
+	}
 }
 
 func TestCodexFileChangeApprovalAndUnsupportedServerRequests(t *testing.T) {
