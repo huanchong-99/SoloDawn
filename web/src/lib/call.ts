@@ -75,7 +75,7 @@ export function callView(group: Group, msg: CallMsg): CallView {
     mode: t(msg.body.wait ? 'call.mode.wait' : 'call.mode.async'),
     depth: t('call.depth').replace('{n}', String(msg.body.depth)),
   };
-  if (msg.state.status === 'waiting') {
+  if (msg.state.status !== 'answered') {
     return {
       ...base,
       waiting: true,
