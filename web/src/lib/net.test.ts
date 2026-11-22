@@ -10,7 +10,7 @@ import { Device, ed25519, encode, loadDevice } from './identity';
 import { readInvitation } from './join';
 import { goldens } from './mock';
 import { mockHome, sourceOf, start } from './net.svelte';
-import { loadJoined, loadOwner, saveOwner } from './owner';
+import { loadJoined, loadOwner, saveJoined, saveOwner } from './owner';
 import { mac, parseSecret, room, shown } from './pairing';
 import { prefs } from './prefs.svelte';
 import * as p from './proto';
@@ -276,6 +276,7 @@ it('joins an invitation without adopting the home and reconnects to it after rel
   expect(JSON.parse(command.env.p)).toMatchObject({ t: 'join', g: websiteId, name: 'Joiner' });
   expect(command.env.k).toBe(browser.id);
   const groups = [{ g: websiteId, name: 'Shared', seq: 3 }];
+  pc.ctl.deliver({ t: 'groups', groups: [] });
   pc.ctl.deliver({ t: 'groups', groups });
   pc.ctl.deliver({ t: 'cmd', re: command.id, ok: true });
   await vi.waitFor(() => expect(ownPC.ctl.frames().at(-1)?.t).toBe('cmd'));
@@ -294,6 +295,8 @@ it('joins an invitation without adopting the home and reconnects to it after rel
   expect(homes[1].owner).toBe(false);
   expect(homes[1].groups.map((group) => group.g)).toEqual([websiteId]);
   await vi.waitFor(() => expect(pc.ctl.frames().at(-1)?.t).toBe('sync'));
+  pc.ctl.deliver({ t: 'groups', groups: [] });
+  expect(homes[1].groups).toEqual([]);
   expect((await loadOwner(crypto, () => idb)).log?.entries).toEqual(log.entries);
   expect(await loadJoined(() => idb)).toEqual({ [home.id]: { name: 'Foreign home', url: rv.url } });
   const anotherBrowser = await newDevice();
@@ -312,6 +315,14 @@ it('joins an invitation without adopting the home and reconnects to it after rel
 
   pc.becomes('failed');
   await vi.waitFor(() => expect(homes[1].ctl).toBeUndefined());
+  const offlineEntry = await signDeviceEntry(browser, browser.id, 4, 'revoke', anotherBrowser.id);
+  ownPC.ctl.deliver({ t: 'devlog', user: browser.id, entries: [offlineEntry] });
+  await vi.waitFor(() =>
+    expect(ownPC.ctl.frames().at(-1)).toEqual({
+      ...updated,
+      entries: [...updated.entries, offlineEntry],
+    }),
+  );
   rv.receive(rv.url, { t: 'presence', k: home.id, on: true });
   await vi.waitFor(() => expect(rv.offersFor(home.id)).toHaveLength(2));
   const reconnected = await answerNode(rv, home, browser.id, 2);
@@ -320,14 +331,25 @@ it('joins an invitation without adopting the home and reconnects to it after rel
     owner: false,
     v: 2,
   });
-  await vi.waitFor(() => expect(reconnected.ctl.frames()).toContainEqual(updated));
+  await vi.waitFor(() =>
+    expect(reconnected.ctl.frames()).toContainEqual({
+      ...updated,
+      entries: [...updated.entries, offlineEntry],
+    }),
+  );
   reconnected.ctl.deliver({ t: 'groups', groups: [] });
   expect(homes[1].groups).toEqual([]);
   client.stop();
   expect(rv.closed).toBe(true);
+  await saveJoined(() => idb, {
+    ...(await loadJoined(() => idb)),
+    [own.id]: { name: 'Also joined', url: rv.url },
+  });
   startTracked('live');
   await vi.waitFor(() => expect(homes.map((node) => node.device)).toEqual([own.id, home.id]));
+  expect(homes[0].owner).toBe(true);
   expect(homes[1].owner).toBe(false);
+  expect(clients[2].known(home.id)).toBe(true);
 });
 
 describe('sourceOf', () => {

@@ -168,6 +168,17 @@ it('reports a connection loss before the home confirms the group', async () => {
   expect(run.close).toHaveBeenCalledOnce();
 });
 
+it('reports a failed write while remembering an admitted home', async () => {
+  const run = attempt();
+  const listener = await run.matched();
+  run.request.mockResolvedValue({ re: 2, ok: true });
+  run.remember.mockRejectedValue(new Error('write failed'));
+  listener.online({ request: run.request, send: run.push } as Ctl, welcome);
+  await expect(run.result).rejects.toMatchObject({ step: 'remember', code: 'lost' });
+  expect(run.close).toHaveBeenCalledOnce();
+  expect(run.link.online).not.toHaveBeenCalled();
+});
+
 it('keeps the admitted group when its own nodes refuse or lose the notification', async () => {
   const sign = async (p: string) => ({ p, k: browser, s: 's' });
   const nodes = [
