@@ -197,7 +197,9 @@ func TestMergeMergedUpdatesTaskExpiresCardsAndWritesSystemMessage(t *testing.T) 
 	otherCard := proto.MsgRow{
 		RowHeader: proto.RowHeader{Type: "msg", ID: id(83), Seq: 12}, Pos: 12, Group: groupID,
 		Thread: &otherID, Main: true, By: mrgWorkA, Kind: "approval", Timestamp: clock - 1000,
-		Mentions: []string{ownerID}, State: &proto.CardState{Status: "pending"},
+		Mentions: []string{ownerID},
+		Body:     briefRaw(t, proto.ApprovalBody{Task: otherID, AI: mrgWorkA, Tool: "Bash", Command: "ls", Category: "command", Approvers: []string{browser.ID()}}),
+		State:    &proto.CardState{Status: "pending"},
 	}
 	d := &mrgDisk{pending: []proto.MsgRow{mainCard, appCard, otherCard, decCard}}
 

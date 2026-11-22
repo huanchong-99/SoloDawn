@@ -126,20 +126,29 @@ func (s *State) hevWriteStatus(c Command, ai proto.AIMemberRow, p proto.MemberSt
 	if ev.code == "" {
 		return Result{Rows: []Row{RowOf(ai)}}, nil
 	}
-	if ev.task != "" && !s.hevHasTask(ev.task) {
-		return Result{}, &Refusal{"not_found", "host event names no task of the group"}
+	rows, refusal := s.hevEventRows(c, ai, ev)
+	if refusal != nil {
+		return Result{}, refusal
 	}
-	id := string(c.Nonce)
-	msg := proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: id}, Group: s.ID, Thread: hevPtr(ev.task),
-		By: hevKindSystem, Kind: hevKindSystem, Timestamp: c.Now, Mentions: []string{}, Body: briefJSON(ev.body),
+	var items []Item
+	if ev.notice {
+		items = tskItemCtx{secretary: s.Group.Secretary, noticeMsg: string(c.Nonce)}.items([]TaskItem{{Why: itemNotice, Code: ev.code}})
 	}
-	return Result{Rows: s.hevEventRows(ai, msg, ev.task, c.Now), Items: s.hevNotice(ev, id)}, nil
+	return Result{Rows: rows, Items: items}, nil
 }
 
-func (s *State) hevHasTask(id string) bool {
-	_, ok := s.Tasks[id]
-	return ok
+func (s *State) hevEventRows(c Command, ai proto.AIMemberRow, ev hevEvent) ([]Row, *Refusal) {
+	id := string(c.Nonce)
+	if ev.task == "" {
+		msg := s.tskThreadSystem(c, id, hevKindSystem, nil, []string{}, ev.body)
+		return []Row{RowOf(ai), RowOf(msg)}, nil
+	}
+	task, ok := s.Tasks[ev.task]
+	if !ok {
+		return nil, &Refusal{"not_found", "host event names no task of the group"}
+	}
+	msg := s.tskThreadSystem(c, id, hevKindSystem, &task, []string{}, ev.body)
+	return []Row{RowOf(ai), RowOf(msg), RowOf(task)}, nil
 }
 
 func hevUpdatedAI(ai proto.AIMemberRow, p proto.MemberStatus[proto.SystemCode], now int64) proto.AIMemberRow {
@@ -151,24 +160,6 @@ func hevUpdatedAI(ai proto.AIMemberRow, p proto.MemberStatus[proto.SystemCode], 
 	ai.Usage = p.Usage
 	ai.LastSeen = now
 	return ai
-}
-
-func (s *State) hevEventRows(ai proto.AIMemberRow, msg proto.MsgRow, taskID string, now int64) []Row {
-	rows := []Row{RowOf(ai), RowOf(msg)}
-	if taskID == "" {
-		return rows
-	}
-	task := s.Tasks[taskID]
-	task.Thread.Count++
-	task.Thread.Last = &proto.ThreadMessage{By: hevKindSystem, Kind: hevKindSystem, Text: "", Timestamp: now}
-	return append(rows, RowOf(task))
-}
-
-func (s *State) hevNotice(ev hevEvent, msgID string) []Item {
-	if !ev.notice || s.Group.Secretary == "" {
-		return nil
-	}
-	return []Item{{AI: s.Group.Secretary, Why: itemNotice, Msg: msgID, Code: ev.code}}
 }
 
 // hevHostOffline marks every non-offline AI hosted on a disconnected device as
