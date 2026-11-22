@@ -25,14 +25,14 @@ Feature: Cross-node AI sessions and AI-to-AI calls
   Scenario: A6.1 On one machine one AI asks another and receives the answer in its open tool call
     Given one M6 node over ctl with a project group and joined AIs "Claude" and "Codex"
     When "Claude" on a task asks "Codex" "Which event reports path changes?" and "Codex" replies "Use PathChanged." while the call is open
-    Then "Claude" receives "Use PathChanged." in its running turn, posts "Confirmed in turn: Use PathChanged.", and kept one task session process
+    Then "Claude" receives "Use PathChanged." in its running turn, posts "Confirmed in turn: Use PathChanged.", and started only the group session and one task session process
     And the M6 task thread holds the answered call and reply with elapsed milliseconds
 
   Scenario: A6.2 Across two machines one AI asks another over ctl and receives the answer in its open tool call
     Given two owned nodes over ctl and a project group on the first node
     And the owner joins "claude" on the first node as "Claude" and "codex" on the second node as "Codex"
     When "Claude" on a task asks "Codex" "Which event reports path changes?" and "Codex" replies "Use PathChanged." while the call is open
-    Then "Claude" receives "Use PathChanged." in its running turn, posts "Confirmed in turn: Use PathChanged.", and kept one task session process
+    Then "Claude" receives "Use PathChanged." in its running turn, posts "Confirmed in turn: Use PathChanged.", and started only the group session and one task session process
     And the M6 task thread holds the answered call and reply with elapsed milliseconds
 
   Scenario: A6.3 With a busy callee the caller receives a receipt after the wait and the answer later as a turn
@@ -40,7 +40,7 @@ Feature: Cross-node AI sessions and AI-to-AI calls
     When "Codex" is busy on another task and "Claude" on a task asks "Codex" "Are the fixtures ready?"
     Then after the wait "Claude" receives a pending receipt, posts "Waiting on receipt.", and enters waiting while the call stays waiting
     When busy "Codex" finishes its turn and replies "Fixtures are ready." to the call
-    Then "Claude" receives the reply as a later turn, posts "Late answer: Fixtures are ready.", and kept one task session process
+    Then "Claude" receives the reply as a later turn, posts "Late answer: Fixtures are ready.", and started only the group session and one task session process
     And the M6 task thread holds the answered call and reply with elapsed milliseconds at least 950
 
   Scenario: A6.4 A call at depth 5 is refused with limit

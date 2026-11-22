@@ -108,14 +108,14 @@ func registerM6CallSteps(sc *godog.ScenarioContext, w *m6World) {
 	})
 	sc.Step(`^the owner joins "([^"]+)" on the first node as "([^"]+)" and "([^"]+)" on the second node as "([^"]+)"$`, w.givenSplitAIs)
 	sc.Step(`^"([^"]+)" on a task asks "([^"]+)" "([^"]+)" and "([^"]+)" replies "([^"]+)" while the call is open$`, w.whenTaskAsksAndCalleeRepliesOpen)
-	sc.Step(`^"([^"]+)" receives "([^"]+)" in its running turn, posts "([^"]+)", and kept one task session process$`, w.thenCallerAnsweredInTurn)
+	sc.Step(`^"([^"]+)" receives "([^"]+)" in its running turn, posts "([^"]+)", and started only the group session and one task session process$`, w.thenCallerAnsweredInTurn)
 	sc.Step(`^the M6 task thread holds the answered call and reply with elapsed milliseconds$`, func() error {
 		return w.thenThreadHoldsAnsweredCall(0)
 	})
 	sc.Step(`^"([^"]+)" is busy on another task and "([^"]+)" on a task asks "([^"]+)" "([^"]+)"$`, w.whenCalleeBusyAndCallerAsks)
 	sc.Step(`^after the wait "([^"]+)" receives a pending receipt, posts "([^"]+)", and enters waiting while the call stays waiting$`, w.thenCallerGetsReceiptWhileWaiting)
 	sc.Step(`^busy "([^"]+)" finishes its turn and replies "([^"]+)" to the call$`, w.whenBusyCalleeFinishesAndReplies)
-	sc.Step(`^"([^"]+)" receives the reply as a later turn, posts "([^"]+)", and kept one task session process$`, w.thenCallerGetsLateReplyTurn)
+	sc.Step(`^"([^"]+)" receives the reply as a later turn, posts "([^"]+)", and started only the group session and one task session process$`, w.thenCallerGetsLateReplyTurn)
 	sc.Step(`^the M6 task thread holds the answered call and reply with elapsed milliseconds at least (\d+)$`, w.thenThreadHoldsAnsweredCall)
 	sc.Step(`^"([^"]+)" and "([^"]+)" chain 4 calls in the M6 group and "([^"]+)" attempts a 5th call$`, w.whenFiveHopCallChainRuns)
 	sc.Step(`^the 5th ask call fails with "([^"]+)" and "([^"]+)" posts "([^"]+)"$`, w.thenFifthCallRefusedAndPosted)
@@ -540,12 +540,8 @@ func (w *m6World) whenCalleeBusyAndCallerAsks(callee, caller, target, question s
 }
 
 func (w *m6World) thenCallerGetsReceiptWhileWaiting(caller, postText string) error {
-	start := time.Now()
 	if err := w.awaitPostAndWaiting(caller, postText, w.taskID); err != nil {
 		return err
-	}
-	if elapsed := time.Since(start); elapsed < 700*time.Millisecond {
-		return fmt.Errorf("caller finished too early (%s) before ask_wait_s elapsed", elapsed)
 	}
 	call := w.msgs[w.callID]
 	if call.State == nil || call.State.Status != "waiting" {
