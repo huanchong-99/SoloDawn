@@ -239,7 +239,8 @@ func TestProposeBriefBuildsSignedPostWithPassAndMentions(t *testing.T) {
 			{"title": "Web badge", "assignee": "Codex", "reviewer": "Claude Code", "depends": [0]}
 		],
 		"requester": "Alice",
-		"replaces": "` + secTestToken + `"
+		"replaces": "` + secTestToken + `",
+		"preset": "Calm dashboard"
 	}`)
 	out, err := Tools["propose_brief"].Call(t.Context(), h, c, rawArgs)
 	secMustEq(t, err, nil)
@@ -266,6 +267,7 @@ func TestProposeBriefBuildsSignedPostWithPassAndMentions(t *testing.T) {
 			Pass:      85,
 			Requester: secAliceMID,
 			Replaces:  &replaces,
+			Preset:    "Calm dashboard",
 		},
 	}
 	secMustEq(t, secOpenCmd[proto.Post[proto.BriefBody]](t, h, home.requests[0]), want)
@@ -285,10 +287,22 @@ func TestProposeBriefBuildsSignedPostWithPassAndMentions(t *testing.T) {
 	cmd2 := home.requests[0].(proto.Cmd)
 	secMustTrue(t, strings.Contains(cmd2.Env.Payload, `"replaces":null`), cmd2.Env.Payload)
 	secMustTrue(t, strings.Contains(cmd2.Env.Payload, `"depends":[]`), cmd2.Env.Payload)
+	secMustTrue(t, !strings.Contains(cmd2.Env.Payload, `"preset"`), cmd2.Env.Payload)
 	post2 := secOpenCmd[proto.Post[proto.BriefBody]](t, h, cmd2)
 	secMustTrue(t, out2.(secIDReply).ID != reply.ID, "expected distinct nonces")
 	secMustEq(t, post2.Body.Replaces, (*string)(nil))
+	secMustEq(t, post2.Body.Preset, "")
 	secMustEq(t, post2.Body.Requester, secOwnerMID)
+
+	// A secret in preset is refused locally without sending cmd.
+	home.requests = nil
+	_, err = Tools["propose_brief"].Call(t.Context(), h, c, json.RawMessage(`{
+		"title": "Secret preset", "goal": "Goal", "criteria": ["Done"], "scope_in": [], "scope_out": [],
+		"tasks": [{"title": "Only task", "assignee": "Claude Code", "reviewer": "Codex"}],
+		"requester": "owner", "preset": "`+secTestToken+`"
+	}`))
+	seamCode(t, err, "secret")
+	secMustEq(t, len(home.requests), 0)
 }
 
 func TestProposeBriefDefaultRequesterSingleMultiAndZeroPeople(t *testing.T) {

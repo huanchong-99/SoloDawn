@@ -76,7 +76,7 @@ func everyAI(s session, secretary bool) []Tool {
 		tool("list_members", nil),
 		tool("list_tasks", map[string]ToolArg{"state": choice("queued", "active", "paused", "failed", "merged", "cancelled")}),
 		tool("note_put", map[string]ToolArg{"text": text(), "task": text()}, "text"),
-		tool("note_list", map[string]ToolArg{"task": text()}),
+		tool("note_list", map[string]ToolArg{"task": text(), "type": choice("preset")}),
 		tool("kb_put", map[string]ToolArg{"name": text(), "text": text()}, "name", "text"),
 		tool("kb_search", map[string]ToolArg{"query": text(), "limit": kbLimit}, "query"),
 	}
@@ -107,6 +107,7 @@ func toolLists() ToolLists {
 		}, "title", "assignee", "reviewer"),
 		"requester": text(),
 		"replaces":  text(),
+		"preset":    text(),
 	}, "title", "goal", "criteria", "scope_in", "scope_out", "tasks")
 	setTask := tool("set_task", map[string]ToolArg{
 		"task": text(), "assignee": text(), "reviewer": text(), "action": choice("pause", "resume", "cancel"),

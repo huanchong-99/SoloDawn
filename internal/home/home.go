@@ -87,6 +87,8 @@ type Disk interface {
 	Msg(id string) (msg proto.MsgRow, ok bool)
 	// Note is Msg for a note.
 	Note(id string) (note proto.NoteRow, ok bool)
+	// TypedNotes returns the group's live notes of that type, sorted by name.
+	TypedNotes(noteType string) []proto.NoteRow
 	// Thread returns a page of the thread of a task, or of the main line for
 	// nil: the messages below pos before, newest first, and the newest ones
 	// for before 0 (planning/contracts/datachannel.md section 4).
@@ -230,8 +232,8 @@ func (r Result) Frame(re int64) any {
 	}
 	return proto.CmdResult{
 		Success: proto.Success{Re: re, OK: true}, Num: r.Answer.Num,
-		Passed: r.Answer.Passed, Round: r.Answer.Round, Link: r.Link, Expires: r.Expires,
-		ID: r.Answer.ID, Replaced: r.Answer.Replaced,
+		Passed: r.Answer.Passed, Round: r.Answer.Round, ID: r.Answer.ID,
+		Replaced: r.Answer.Replaced, Link: r.Link, Expires: r.Expires,
 	}
 }
 

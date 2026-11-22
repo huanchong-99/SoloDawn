@@ -163,6 +163,12 @@
           "properties": {
             "task": {
               "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "preset"
+              ]
             }
           },
           "additionalProperties": false
@@ -277,6 +283,9 @@
               }
             },
             "goal": {
+              "type": "string"
+            },
+            "preset": {
               "type": "string"
             },
             "replaces": {
@@ -537,6 +546,12 @@
           "properties": {
             "task": {
               "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "preset"
+              ]
             }
           },
           "additionalProperties": false
@@ -817,6 +832,12 @@
           "properties": {
             "task": {
               "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "preset"
+              ]
             }
           },
           "additionalProperties": false
@@ -1121,6 +1142,12 @@
           "properties": {
             "task": {
               "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "preset"
+              ]
             }
           },
           "additionalProperties": false
@@ -1381,6 +1408,12 @@
           "properties": {
             "task": {
               "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "preset"
+              ]
             }
           },
           "additionalProperties": false

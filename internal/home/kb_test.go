@@ -1,149 +1,27 @@
 package home_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/huanchong-99/SoloDawn/internal/home"
-	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-type kbTestDisk struct {
-	noteDisk
-}
-
-func (d kbTestDisk) NamedNote(noteType, name string) (proto.NoteRow, bool) {
-	for _, n := range d.notes {
-		if n.NoteType == noteType && n.Name == name {
-			return n, true
-		}
-	}
-	return proto.NoteRow{}, false
-}
-
-func TestKBNoteCreateReplaceAndReplay(t *testing.T) {
+func TestKBNoteByAnAI(t *testing.T) {
 	s := noteState(t)
-	d := kbTestDisk{noteDisk{msgs: map[string]proto.MsgRow{}, notes: map[string]proto.NoteRow{}}}
-	r := receipts{}
-
-	// Plain Disk without NamedNoteDisk falls back cleanly to creating the note.
-	plainPayload := fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":null,"type":"kb","name":"Plain disk","text":"v0"}`, id(140), noteTS, groupID, id(141))
-	resPlain := noteApply(t, noteState(t), d.noteDisk, receipts{}, browser, plainPayload)
+	d := noteDisk{msgs: map[string]proto.MsgRow{}, notes: map[string]proto.NoteRow{}}
+	cmd := fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"as":%q,"id":%q,"task":null,"type":"kb","name":"Storage","text":"First body"}`,
+		id(142), noteTS, groupID, noteWorker, id(143))
+	res := noteApply(t, s, d, receipts{}, laptop, cmd)
 	f := false
-	equal(t, resPlain.Answer, store.Outcome{OK: true, ID: id(141), Replaced: &f})
-
-	// Create by AI (80-rune name boundary).
-	name80 := strings.Repeat("决", 80)
-	createCmd := fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"as":%q,"id":%q,"task":null,"type":"kb","name":%q,"text":"First body"}`,
-		id(142), noteTS, groupID, noteWorker, id(143), name80)
-	res := noteApply(t, s, d, r, laptop, createCmd)
 	equal(t, res.Answer, store.Outcome{OK: true, ID: id(143), Replaced: &f})
-	wantCreated := proto.NoteRow{
+	equal(t, []any{res.Rows[0].Value()}, []any{proto.NoteRow{
 		RowHeader: proto.RowHeader{Type: "note", ID: id(143), Seq: 11}, Pos: 11, Group: groupID,
-		NoteType: "kb", Name: name80, Text: "First body", By: noteWorker, Timestamp: noteTS,
-	}
-	equal(t, []any{res.Rows[0].Value()}, []any{wantCreated})
-	noteNulls(t, res.Rows[0].Value(), "/task")
-	frameRaw, _ := json.Marshal(res.Frame(9))
-	equal(t, string(frameRaw), fmt.Sprintf(`{"re":9,"ok":true,"id":%q,"replaced":false}`, id(143)))
-	s.Commit(res)
-	d.notes[wantCreated.ID] = wantCreated
-
-	// Replay returns the same id and replaced: false without writing a second row.
-	replay := noteApply(t, s, d, r, laptop, createCmd)
-	equal(t, replay, home.Result{Answer: store.Outcome{OK: true, ID: id(143), Replaced: &f}})
-
-	// Advance seq, then replace by person: id and pos stay, command's own id is ignored.
-	s.Seq = 20
-	replaceCmd := fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":null,"type":"kb","name":%q,"text":"Updated body"}`,
-		id(144), noteTS+50, groupID, id(143), name80)
-	resRep := noteApply(t, s, d, r, browser, replaceCmd)
-	tr := true
-	equal(t, resRep.Answer, store.Outcome{OK: true, ID: id(143), Replaced: &tr})
-	wantReplaced := proto.NoteRow{
-		RowHeader: proto.RowHeader{Type: "note", ID: id(143), Seq: 21}, Pos: 11, Group: groupID,
-		NoteType: "kb", Name: name80, Text: "Updated body", By: ownerID, Timestamp: noteTS + 50,
-	}
-	equal(t, []any{resRep.Rows[0].Value()}, []any{wantReplaced})
-	noteNulls(t, resRep.Rows[0].Value(), "/task")
-}
-
-func TestKBNoteRefusals(t *testing.T) {
-	tooLong81 := strings.Repeat("a", 81)
-	hugeText := strings.Repeat("x", 16_400)
-	cases := map[string]struct {
-		by      identity.Key
-		payload string
-		code    string
-		wantSub string
-	}{
-		"type without name": {
-			by:      browser,
-			payload: fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":null,"type":"kb","text":"x"}`, id(150), noteTS, groupID, id(151)),
-			code:    "bad_request",
-		},
-		"name without type": {
-			by:      browser,
-			payload: fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":null,"name":"Doc","text":"x"}`, id(150), noteTS, groupID, id(151)),
-			code:    "bad_request",
-		},
-		"unknown type": {
-			by:      browser,
-			payload: fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":null,"type":"other","name":"Doc","text":"x"}`, id(150), noteTS, groupID, id(151)),
-			code:    "bad_request",
-		},
-		"name over 80 runes": {
-			by:      browser,
-			payload: fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":null,"type":"kb","name":%q,"text":"x"}`, id(150), noteTS, groupID, id(151), tooLong81),
-			code:    "bad_request",
-		},
-		"control char newline in name": {
-			by:      browser,
-			payload: fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":null,"type":"kb","name":"a\nb","text":"x"}`, id(150), noteTS, groupID, id(151)),
-			code:    "bad_request",
-		},
-		"control char C1 in name": {
-			by:      browser,
-			payload: fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":null,"type":"kb","name":"a`+"\u0085"+`b","text":"x"}`, id(150), noteTS, groupID, id(151)),
-			code:    "bad_request",
-		},
-		"non-null task": {
-			by:      browser,
-			payload: fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":%q,"type":"kb","name":"Doc","text":"x"}`, id(150), noteTS, groupID, id(151), noteTask),
-			code:    "bad_request",
-		},
-		"row above 16 KiB limit": {
-			by:      browser,
-			payload: fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":null,"type":"kb","name":"Big","text":%q}`, id(150), noteTS, groupID, id(151), hugeText),
-			code:    "bad_request",
-			wantSub: "16384",
-		},
-		"id already used by another note": {
-			by:      browser,
-			payload: fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":null,"type":"kb","name":"Fresh","text":"x"}`, id(150), noteTS, groupID, id(121)),
-			code:    "conflict",
-		},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			s := noteState(t)
-			d := kbTestDisk{noteDisk{
-				msgs: map[string]proto.MsgRow{},
-				notes: map[string]proto.NoteRow{
-					id(121): {RowHeader: proto.RowHeader{Type: "note", ID: id(121)}},
-				},
-			}}
-			res := noteApply(t, s, d, receipts{}, tc.by, tc.payload)
-			noteRefused(t, res, tc.code)
-			if tc.wantSub != "" && !strings.Contains(res.Msg, tc.wantSub) {
-				t.Fatalf("refusal msg %q lacks %q", res.Msg, tc.wantSub)
-			}
-		})
-	}
+		NoteType: "kb", Name: "Storage", Text: "First body", By: noteWorker, Timestamp: noteTS,
+	}})
 }
 
 func fetKBSearch(id int64, group, q string, before int64, limit int) home.Fetch {

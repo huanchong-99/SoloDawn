@@ -25,7 +25,7 @@ var (
 
 	notePutSchema = json.RawMessage(`{"type":"object","properties":{"task":{"type":"string"},"text":{"type":"string"}},"required":["text"],"additionalProperties":false}`)
 
-	noteListSchema = json.RawMessage(`{"type":"object","properties":{"task":{"type":"string"}},"additionalProperties":false}`)
+	noteListSchema = json.RawMessage(`{"type":"object","properties":{"task":{"type":"string"},"type":{"type":"string","enum":["preset"]}},"additionalProperties":false}`)
 )
 
 func init() {
@@ -86,6 +86,7 @@ type notePutArgs struct {
 
 type noteListArgs struct {
 	Task *string `json:"task,omitempty"`
+	Type *string `json:"type,omitempty"`
 }
 
 type idResult struct {
@@ -138,6 +139,7 @@ type listTasksResult struct {
 type noteListItem struct {
 	ID   string  `json:"id"`
 	Task *string `json:"task"`
+	Name string  `json:"name,omitempty"`
 	Text string  `json:"text"`
 	By   string  `json:"by"`
 	At   int64   `json:"at"`
@@ -498,6 +500,10 @@ func callNoteList(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (
 	if err := decodeTalkArgs(raw, &a); err != nil {
 		return nil, err
 	}
+	kind, err := resolveNoteListKind(a.Type)
+	if err != nil {
+		return nil, err
+	}
 	var filter string
 	if a.Task != nil {
 		tid, err := resolveTaskID(h, c.Group, *a.Task)
@@ -506,16 +512,26 @@ func callNoteList(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (
 		}
 		filter = string(tid)
 	}
-	return fetchAllNotes(ctx, h, c, filter)
+	return fetchAllNotes(ctx, h, c, kind, filter)
 }
 
-func fetchAllNotes(ctx context.Context, h *Host, c Caller, filter string) (any, error) {
+func resolveNoteListKind(typeArg *string) (string, error) {
+	if typeArg == nil {
+		return "note", nil
+	}
+	if *typeArg == "preset" {
+		return "preset", nil
+	}
+	return "", badTalkRequest("unsupported note type " + *typeArg)
+}
+
+func fetchAllNotes(ctx context.Context, h *Host, c Caller, kind, filter string) (any, error) {
 	names := memberNamesByID(h, c.Group)
 	tasks := taskLabelsByID(h, c.Group)
 	notes := []noteListItem{}
 	var before int64
 	for {
-		page, err := fetchNotesPage(ctx, h, c, before)
+		page, err := fetchNotesPage(ctx, h, c, kind, before)
 		if err != nil {
 			return nil, err
 		}
@@ -526,11 +542,11 @@ func fetchAllNotes(ctx context.Context, h *Host, c Caller, filter string) (any, 
 	}
 }
 
-func fetchNotesPage(ctx context.Context, h *Host, c Caller, before int64) (proto.Fetched, error) {
+func fetchNotesPage(ctx context.Context, h *Host, c Caller, kind string, before int64) (proto.Fetched, error) {
 	req := func(id int64) any {
 		return proto.FetchKind{
 			FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: c.Group, Before: before, Limit: noteFetchLimit},
-			Kind:      "note",
+			Kind:      kind,
 		}
 	}
 	return fetchFrom(ctx, h, c.Home, req)
@@ -546,6 +562,7 @@ func appendNoteRows(dst []noteListItem, rows []json.RawMessage, filter string, n
 			dst = append(dst, noteListItem{
 				ID:   row.ID,
 				Task: formatNoteTask(tasks, row.Task),
+				Name: row.Name,
 				Text: row.Text,
 				By:   cmp.Or(names[row.By], row.By),
 				At:   row.Timestamp,

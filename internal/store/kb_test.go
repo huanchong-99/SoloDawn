@@ -3,7 +3,6 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -109,76 +108,6 @@ func TestMigrateKBAndSyncErrorBranches(t *testing.T) {
 	}
 }
 
-func TestRowNamedIndexAndPageKindByNoteType(t *testing.T) {
-	s := openDB(t, ":memory:")
-	put(t, s, "g", 10, kbNote("g", "c1", 1, 1, "", "", "context 1"))
-	put(t, s, "g", 10, kbNote("g", "p1", 2, 2, "preset", "Shared", "preset 1"))
-	put(t, s, "g", 10, kbNote("g", "k1", 3, 3, "kb", "Shared", "kb 1"))
-	put(t, s, "g", 10, kbNote("g", "k2", 4, 4, "kb", "Second", "kb 2"))
-	put(t, s, "g", 10, kbNote("g", "c2", 5, 5, "", "", "context 2"))
-	put(t, s, "other", 10, kbNote("other", "o1", 1, 1, "kb", "Shared", "other group"))
-
-	// A second live note of the same (group, type, name) is refused by row_named.
-	err := s.Write(func(tx *Tx) error {
-		return Put(tx, "g", 20, kbNote("g", "k-dup", 6, 6, "kb", "Shared", "dup"))
-	})
-	if err == nil || !strings.Contains(err.Error(), "UNIQUE constraint failed") {
-		t.Fatalf("expected row_named unique failure, got %v", err)
-	}
-
-	// Lookup by name uses row_named; missing or wrong type returns sql.ErrNoRows.
-	got, err := within(t, s, func(tx *Tx) (json.RawMessage, error) {
-		return tx.NamedNote("g", "kb", "Shared")
-	})
-	check(t, err)
-	var decoded proto.NoteRow
-	check(t, json.Unmarshal(got, &decoded))
-	equal(t, decoded.ID, "k1")
-
-	_, err = within(t, s, func(tx *Tx) (json.RawMessage, error) {
-		return tx.NamedNote("g", "kb", "Absent")
-	})
-	equal(t, errors.Is(err, sql.ErrNoRows), true)
-
-	// Verify query plans use row_named and row_keep.
-	planNamed := queryPlan(t, s.db, `EXPLAIN QUERY PLAN SELECT data FROM row
-		WHERE g='g' AND r='note' AND gone=0 AND data->>'type' IS NOT NULL AND data->>'type'='kb' AND data->>'name'='Shared'`)
-	if !strings.Contains(planNamed, "row_named") {
-		t.Fatalf("NamedNote plan = %q; want row_named", planNamed)
-	}
-	for _, kind := range []string{"note", "preset", "kb"} {
-		planKeep := queryPlan(t, s.db, `EXPLAIN QUERY PLAN SELECT data FROM row WHERE g='g' AND keep=1
-			AND r=CASE ? WHEN 'review' THEN 'msg' WHEN 'note' THEN 'note' WHEN 'preset' THEN 'note' WHEN 'kb' THEN 'note' END
-			AND CASE ? WHEN 'review' THEN 1 WHEN 'note' THEN data->>'type' IS NULL ELSE data->>'type'=? END
-			AND pos<999 ORDER BY pos DESC LIMIT 10`, kind, kind, kind)
-		if !strings.Contains(planKeep, "row_keep") {
-			t.Fatalf("PageKind(%s) plan = %q; want row_keep", kind, planKeep)
-		}
-	}
-
-	v, err := s.Snapshot("g")
-	check(t, err)
-	equal(t, pageIDs(t, v, "note", 0, 10), []string{"c2", "c1"})
-	equal(t, pageIDs(t, v, "preset", 0, 10), []string{"p1"})
-	equal(t, pageIDs(t, v, "kb", 0, 10), []string{"k2", "k1"})
-	equal(t, pageIDs(t, v, "kb", 4, 10), []string{"k1"})
-	check(t, v.Close())
-
-	// A gone marker frees the name for a new note.
-	put(t, s, "g", 30, proto.GoneRow{RowHeader: header("note", "k1", 6), Gone: true})
-	_, err = within(t, s, func(tx *Tx) (json.RawMessage, error) {
-		return tx.NamedNote("g", "kb", "Shared")
-	})
-	equal(t, errors.Is(err, sql.ErrNoRows), true)
-	put(t, s, "g", 40, kbNote("g", "k3", 7, 7, "kb", "Shared", "recreated"))
-	got, err = within(t, s, func(tx *Tx) (json.RawMessage, error) {
-		return tx.NamedNote("g", "kb", "Shared")
-	})
-	check(t, err)
-	check(t, json.Unmarshal(got, &decoded))
-	equal(t, decoded.ID, "k3")
-}
-
 func TestKBVerifiedMatchingRankingCJKAndRetention(t *testing.T) {
 	s := openDB(t, ":memory:")
 	now := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
@@ -227,8 +156,8 @@ func TestKBVerifiedMatchingRankingCJKAndRetention(t *testing.T) {
 	equal(t, kbIDs(t, v, "name:star", 10), []string{"d-ops"})
 	equal(t, kbIDs(t, v, "name: star", 10), []string{"d-ops"})
 	equal(t, kbIDs(t, v, `a"b`, 10), []string{"d-ops"})
-	// 7. Punctuation-only or whitespace-only queries match nothing without error.
-	for _, q := range []string{"---", "... //", `""`, "", "   \t\n "} {
+	// 7. Punctuation-only queries match nothing without error (the home refuses a blank q).
+	for _, q := range []string{"---", "... //", `""`} {
 		equal(t, kbIDs(t, v, q, 10), []string{})
 	}
 	check(t, v.Close())

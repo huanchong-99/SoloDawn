@@ -190,8 +190,8 @@ The task commands (`cmd_task.go`) take the names that start with `tsk`, their te
 test functions start with `TestTaskCmd`. The posts of HM-6 take the names that start with `post`,
 their tests too, and their test functions start with `TestPost`; the notes and `forget` take the
 names that start with `note`, their tests too, and their test functions start with `TestNote`;
-the knowledge base (`kb.go`) exports `NamedNoteDisk`, takes the names that start with `kb` (and
-`noteTypes`), and its test functions start with `TestKB`.
+the knowledge base (`kb.go`) takes the names that start with `kb`, and its test functions start
+with `TestKB`.
 The cards take the names that start with `card`, their tests too, and their test functions start
 with `TestCard`. Device-log events (`ev_device.go`) take the names that start with `dev`, and their
 tests start with `TestDevice` and `dev`. Sync takes the names that start with `syn`, its tests too,
@@ -213,6 +213,8 @@ The step-2 people seam (`people_seam.go`) takes the unexported names that start 
 `keyInvite` / `keyJoin` (leaving `ppl` for `cmd_people.go`), and exports `Joining`, `InviteLink`,
 `Inviter`, `(*Conn).SetJoining` and `Table.ApplyJoining`. Web Push (`webpush.go`) takes the names that start with
 `wpush`, its tests too, and its test functions start with `TestWebPush`.
+Style presets (`preset.go`) take the names that start with `preset`, their tests too, and their test
+functions start with `TestPreset`.
 
 ## The run loop
 
@@ -291,8 +293,8 @@ and read again on the next tick. An item that cannot be made into a frame is rep
 once for each connection until its next `Inbox`, and the other items are sent.
 
 **Fetch.** `Fetch(conn, req)` answers a `fetch` request
-([datachannel](../../planning/contracts/datachannel.md), section 4): a page by `kind` (`note` or
-`review`) when `Kind` is set, one live row when `Row` or `RowID` is set, or a page of a task's
+([datachannel](../../planning/contracts/datachannel.md), section 4): a page by `kind` (`note`,
+`preset`, `kb` or `review`) when `Kind` is set, one live row when `Row` or `RowID` is set, or a page of a task's
 thread or of the main line (`Thread` nil) otherwise. Paged reads require `Limit` in 1..100 and
 `Before >= 0` (`bad_request` otherwise). On the goroutine of the group (`ask`), it checks that the
 connection is still seated, that the group exists (`not_found` otherwise) and serves the
