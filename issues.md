@@ -6,6 +6,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · Remembered project homes without local AIs stay connected
+
+- Symptom: remembering a project home now retains a connection even when no AI is hosted locally in that group.
+- Cause: `internal/host/join.go:120-180,420-439` reconciles all remembered homes. The remembered-home wire shape carries no kind; state-only sync supplies it after connection.
+- Status: accepted for T2-7 by the owner's lifecycle decision. Team homes reuse the existing manager without new persistence or wire shapes; connection retention also applies to remembered project homes rather than only AI-session homes.
+
+### 2026-11-22 · limitation · Group moves follow replies, not unsolicited pushes
+
+- Symptom: a browser follows `moved` replies to `cmd`, `sync` and `fetch`; it cannot follow an unsolicited move notification.
+- Cause: the frozen error has a response id and a destination home, but no group id; there is no moved push in `proto.ts`. The export contract specifies request replies, and U2-5 preserves those shapes unchanged.
+- Status: response-based following is implemented. Before import, connection failures use the normal peer retry; a connected destination answering `not_found` is read again when import pushes `groups`. Real CLI export/import and multi-machine WebRTC migration remain unverified.
+
+### 2026-11-22 · limitation · Foreign home attribution depends on a device row
+
+- Symptom: a foreign home with no matching device row shows its computer name but says its owner was not provided.
+- Cause: `welcome` carries the device name and an owner boolean, not its owner's user id. Group details use a matching live `device` row rather than guessing from a person's group role.
+- Status: open when that row is unavailable. Real-host custom forge execution and Windows program resolution are not verified by the browser UI.
+
 ### 2026-11-22 · limitation · The Qwen Code driver is declared from documentation, not from a capture
 
 - Symptom: `DriverCaps["qwen"]` declares levels `1` and `3` and approvals `conn`, and `qwenDriver` speaks the `qwen serve` daemon API (`internal/host/qwen.go`), but no run of the real Qwen Code exists: the fake Qwen Code's scripts are written from the documented API, not cut from captures.
@@ -17,6 +35,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `contracts/step-3/drivers.md` section 3 requires the repository's configuration to be kept out of group sessions. `qwenDriver` cannot do that: a Qwen Code group session may load the project's `.qwen/settings.json`, `QWEN.md` and extensions (`internal/host/qwen.go`).
 - Cause: Qwen Code 0.28.0 documents no switch for it. Folder trust is not one: in an untrusted folder Qwen Code asks before every tool, even at `yolo`, which would turn level 3 into approval cards.
 - Status: accepted by the coordinator (2026-11-22): Qwen Code ships with this limitation, the risk R-45 already accepts (only trusted repositories go into a group; `install.md`). Open until a capture shows a switch that keeps the configuration out and leaves approvals alone.
+
 ### 2026-11-22 · limitation · The multi-person label scenarios cannot admit Q yet
 
 - Symptom: A9.12 and five A9.42 cases (failing review, decision by P, decision by Q, secretary confirmation without Q on the allow list, and secretary confirmation with Q on it) each failed under `-race` in `Given the confirmation cast with Q`. The reply was `bad_request: the home has no such command`; decoding that refusal as a successful command reply reported `proto: a field that is always present is missing`.
@@ -56,7 +75,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: A9.27 and A9.28 exercise browser peers at the protocol boundary, not the browser's own follow logic or the owner-only commands in group info. A9.28 takes successive copies without waiting for an OS timer at one-minute intervals.
 - Cause: `features/s2_export.feature:12,19,24` use the I2-0 Go cast and two invocations of the copy command. The product does not schedule copies (`planning/contracts/step-2/export.md:60-62`).
-- Status: open. Browser coverage belongs to I2-2 after U2-5 and W2-1. The OS timer is not verified.
+- Status: open. The owner-only commands in the group info are covered by `web/e2e/s2.spec.ts` (A9.27); the browser's following of `moved` and the OS timer remain open.
 
 ### 2026-11-22 · limitation · Task participation history is inferred from current fields
 
@@ -112,12 +131,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: on the Windows CI runner the A7.9 scenario (`features/m7.feature`, moving an open takeover PeerConnection from direct to TURN relay) fails with "selected-pair statistics did not transition to relay" (CI run 45037819755, twice). Linux and macOS pass.
 - Cause: the test cannot force the takeover connection from direct to TURN on Windows. pion ICE renominates to the relay pair only when the relay's measured round trip beats the direct pair's by more than 10 ms (`shouldRenominate`).
 - Status: open, accepted. The scenario is tagged `@not-windows`, which the acceptance runner leaves out on Windows (`features/acceptance_test.go`, `tags`); Linux and macOS still run it. Product behaviour is unchanged.
-
-### 2026-11-22 · bug · On Windows the last output of a CLI that exits by itself during a takeover is lost
-
-- Symptom: when the interactive CLI exits on its own while the owner's terminal is open, the last lines it printed (for A7.4's fake CLI, `{"bye":…}` and the echo of the input line) never reach the pty channel. M7's A7.4 therefore does not wait for `"bye":` (`runOneSwitchCycle` in `features/m7_test.go`); it waits for the hand-back post, and the exit entry in the CLI log proves the exit. Seen on `test (windows-latest)` of PR #287; Linux and macOS deliver the line.
-- Cause: on Windows `ptyBeforeExitStop` does nothing (`internal/host/pty_windows.go:16`), so the host closes the terminal as soon as the CLI exits and drops the frame that ConPTY has not rendered yet. Diagnosis: `WIN-CONPTY.review.md`.
-- Status: open, product behaviour (coordinator, 2026-11-22, I-7 decision). The fix is planned in a later Windows unit, before I-11. No product code changes in I-7.
 
 ### 2026-11-22 · limitation · A9.20 cannot set up a watcher before home invitation support lands
 
@@ -691,6 +704,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-22 · bug · On Windows the last output of a CLI that exits by itself during a takeover is lost
+
+- Symptom: when the interactive CLI exits on its own while the owner's terminal is open, the last lines it printed (for A7.4's fake CLI, `{"bye":…}` and the echo of the input line) never reach the pty channel. M7's A7.4 therefore does not wait for `"bye":` (`runOneSwitchCycle` in `features/m7_test.go`); it waits for the hand-back post, and the exit entry in the CLI log proves the exit. Seen on `test (windows-latest)` of PR #287; Linux and macOS deliver the line.
+- Cause: on Windows `ptyBeforeExitStop` does nothing (`internal/host/pty_windows.go:16`), so the host closes the terminal as soon as the CLI exits and drops the frame that ConPTY has not rendered yet. Diagnosis: `WIN-CONPTY.review.md`.
+- Status: resolved in win-pty. On process exit with a terminal attached, `ptyBeforeExitStop` closes the pseudo console but keeps its pipes, and the terminal closes when the output reaches its end (`internal/host/pty_windows.go`); `TestPTYWindowsSelfExitDeliversLastOutput` pins it on Windows CI.
 ### 2026-11-22 · bug · Role finishing read pending cards for commands without task work
 
 - Symptom: the home command-replay acceptance scenario panicked when applying a note command with no disk reader.

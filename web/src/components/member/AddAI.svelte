@@ -15,6 +15,8 @@
   import { t } from '../../lib/prefs.svelte';
   import Avatar from '../Avatar.svelte';
   import Failure from '../Failure.svelte';
+  import Commands from '../forge/Commands.svelte';
+  import SecretaryWarning from '../groupinfo/SecretaryWarning.svelte';
 
   /** The dialog that adds a registered AI from one of the owner's computers to the group
    *  (contracts/commands.md section 2, `host.join`). */
@@ -24,6 +26,9 @@
   const owned = $derived(homes.filter((home) => home.owner && home.ctl));
   const loading = $derived(owned.some((home) => !nodes.infos.has(home)));
   const canSecretary = $derived(canMakeSecretary(group));
+  const people = $derived(
+    group.members.filter((member) => member.kind === 'human').map((member) => member.user),
+  );
 
   let dialog: HTMLDialogElement;
   let name = $state('');
@@ -169,6 +174,9 @@
           />
           <span>{t('member.join.secretary')}</span>
         </label>
+        {#if secretary && chosen?.account}
+          <SecretaryWarning account={chosen.account} owner={chosen.home.me.user} {people} />
+        {/if}
         {#if group.info?.secretary}
           <p class="hint">{t('member.join.secretary.replace')}</p>
         {/if}
@@ -182,6 +190,12 @@
       {:else}
         <Failure code={failed} />
       {/if}
+    {/if}
+    {#if group.info?.kind === 'project'}
+      <details class="fold">
+        <summary>{t('forge.commands')}</summary>
+        <div class="fold-body"><Commands info={group.info} /></div>
+      </details>
     {/if}
     <footer class="row">
       <span class="grow"></span>

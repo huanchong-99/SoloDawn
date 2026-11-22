@@ -178,6 +178,7 @@ func isSessionDefault(item any) bool {
 func projectPostSchema(kind Kind, root map[string]any) {
 	if props, ok := root["properties"].(map[string]any); ok {
 		delete(props, "task")
+		delete(props, "group")
 		trimPostKinds(kind, props)
 	}
 }

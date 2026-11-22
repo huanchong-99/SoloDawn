@@ -70,7 +70,7 @@ export function subject(msg: p.MsgRow): string {
 
 /** One group as this browser holds it. */
 export class Group {
-  readonly home: Home;
+  home = $state.raw<Home>()!;
   readonly g: string;
   /** Every row and deletion marker held, by type and id. A marker stays, unseen, so that an
    *  older copy of its row arriving later cannot bring the row back. */
@@ -173,6 +173,7 @@ export class Group {
       .catch(lost);
     if (this.#late(read, ctl)) return;
     if (answer.err) {
+      this.home.follow(this.g, answer.err);
       // Nothing can page the group until a read succeeds: the top says so, not that it loads.
       this.paging().failed = true;
       return;
@@ -201,8 +202,8 @@ export class Group {
   /** The connection a page can be asked on now. None while the group is being read: the rows a
    *  first page would start from may be about to be dropped by a `reset`, and the page would
    *  then leave a gap that nothing fills. None while the home cannot be reached. */
-  #pageable() {
-    return this.#live ? this.home.ctl : undefined;
+  #pageable(paging: Paging) {
+    return this.#live && paging.ready ? this.home.ctl : undefined;
   }
 
   /** Fetches the page of messages before the ones read so far, of a thread or of the main line.
@@ -211,8 +212,8 @@ export class Group {
    *  a reset it could bring back a row whose deletion the client can no longer be told about. */
   async older(thread: string | null = null) {
     const paging = this.paging(thread);
-    const ctl = this.#pageable();
-    if (!ctl || !paging.ready) return;
+    const ctl = this.#pageable(paging);
+    if (!ctl) return;
     const read = this.#read;
     const before = paging.before ?? this.#start(thread);
     paging.busy = true;
@@ -222,9 +223,14 @@ export class Group {
     paging.busy = false;
     if (this.#late(read, ctl)) return;
     if (answer.err) {
+      this.home.follow(this.g, answer.err);
       paging.failed = true;
       return;
     }
+    this.#page(paging, answer, before);
+  }
+
+  #page(paging: Paging, answer: p.Fetched, before: number) {
     this.apply(answer.rows, false);
     // An empty page is the end, whatever it says: nothing would move the next request on.
     paging.more = answer.rows.length > 0 && answer.more;
@@ -256,6 +262,7 @@ export interface NewGroup {
   forge: string;
   checks: string[];
   member_name: string;
+  templates?: p.GroupCreate['templates'];
 }
 
 /** One connection to a node, from before it exists until it is gone. */
@@ -289,6 +296,8 @@ export class Home {
   owner = $state(false);
   // The connection that is the home's now: the last one to come online, until it is gone.
   #link: Link | undefined;
+  #arrivals = new Set<string>();
+  onmove?: (g: string, device: string) => void;
 
   constructor(me: Me) {
     this.me = me;
@@ -339,7 +348,25 @@ export class Home {
     const { t, g, ...rest } = fields;
     const env = await this.me.sign(JSON.stringify({ t, n, ts: Date.now(), g, ...rest }));
     const ctl = this.ctl;
-    return ctl ? ctl.request({ t: 'cmd', env }).catch(lost) : lost();
+    const answer = await (ctl ? ctl.request({ t: 'cmd', env }).catch(lost) : lost());
+    if (ctl === this.ctl && answer.err) this.follow(g, answer.err);
+    return answer;
+  }
+
+  follow(g: string, error: p.ErrorResponse['err']) {
+    if (error.code === 'moved' && error.home && error.home !== this.device) {
+      this.onmove?.(g, error.home);
+    }
+  }
+
+  move(g: string, destination: Home) {
+    const group = this.#find(g);
+    if (!group) return;
+    this.groups = this.groups.filter((item) => item.g !== g);
+    if (!destination.#find(g)) destination.#arrivals.add(g);
+    destination.groups = [...destination.groups.filter((item) => item.g !== g), group];
+    group.home = destination;
+    if (destination.ctl) void group.sync(destination.ctl);
   }
 
   /** Makes this node the home of a new project group, whose id is the command's nonce. Answers
@@ -363,12 +390,16 @@ export class Home {
   /** Replaces the list. A group listed before keeps its rows; the new ones are returned. */
   #list(listed: p.Welcome['groups']) {
     const fresh: Group[] = [];
-    this.groups = listed.map(({ g, name }) => {
+    const pending = this.groups;
+    const next = listed.map(({ g, name }) => {
       let group = this.#find(g);
       if (!group) fresh.push((group = new Group(this, g)));
+      else if (this.#arrivals.has(g)) fresh.push(group);
+      this.#arrivals.delete(g);
       group.name = name;
       return group;
     });
+    this.groups = [...next, ...pending.filter((group) => this.#arrivals.has(group.g))];
     return fresh;
   }
 }

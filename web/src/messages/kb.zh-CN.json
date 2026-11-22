@@ -1,0 +1,13 @@
+{
+  "kb.title": "知识库",
+  "kb.lead": "决策与参考文档",
+  "kb.query": "搜索知识库",
+  "kb.search": "搜索",
+  "kb.clear": "清除搜索",
+  "kb.loading": "正在加载文档…",
+  "kb.earlier": "加载更早的文档",
+  "kb.empty": "暂无文档。",
+  "kb.noMatch": "没有匹配的文档。",
+  "kb.narrow": "还有更多匹配的文档，请缩小查询范围。",
+  "kb.offline": "无法连接群组主机。文档为只读。"
+}

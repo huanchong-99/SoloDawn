@@ -10,6 +10,7 @@ import { Device, ed25519, encode, loadDevice } from './identity';
 import { readInvitation } from './join';
 import { goldens } from './mock';
 import { mockHome, sourceOf, start } from './net.svelte';
+import * as owner from './owner';
 import { loadJoined, loadOwner, saveJoined, saveOwner } from './owner';
 import { mac, parseSecret, room, shown } from './pairing';
 import { Peer } from './peer';
@@ -231,6 +232,151 @@ function welcomeFrame(
     owner: true,
   };
 }
+
+it('does not open a superseded route read when storage finishes after leaving and returning', async () => {
+  const browser = await loadDevice({ crypto, idb: () => idb });
+  const node = await newDevice();
+  const log = new DeviceLog(crypto, browser.id);
+  await log.apply(
+    await signDeviceEntry(browser, browser.id, 1, 'add', browser.id, 'browser', 'Web'),
+  );
+  await log.apply(
+    await signDeviceEntry(browser, browser.id, 2, 'add', node.id, 'node', 'Computer'),
+  );
+  await saveOwner(() => idb, log, {});
+  const state = await loadOwner(crypto, () => idb);
+  const reads: ReturnType<typeof Promise.withResolvers<typeof state>>[] = [];
+  vi.spyOn(owner, 'loadOwner').mockImplementation(() => {
+    const read = Promise.withResolvers<typeof state>();
+    reads.push(read);
+    return read.promise;
+  });
+  vi.spyOn(owner, 'loadJoined').mockResolvedValue({});
+  vi.stubGlobal('location', new URL('https://client.example/#/groups'));
+  startTracked('live');
+  await vi.waitFor(() => expect(reads).toHaveLength(1));
+  location.hash = '#/onboarding';
+  dispatchEvent(new HashChangeEvent('hashchange', { newURL: location.href }));
+  location.hash = '#/groups';
+  dispatchEvent(new HashChangeEvent('hashchange', { newURL: location.href }));
+  expect(reads).toHaveLength(2);
+  reads[0].resolve(state);
+  await reads[0].promise;
+  await Promise.resolve();
+  expect(homes).toEqual([]);
+  expect(clients).toEqual([]);
+  reads[1].resolve(state);
+  await vi.waitFor(() => expect(homes.map((home) => home.device)).toEqual([node.id]));
+  expect(clients).toHaveLength(1);
+});
+
+it('follows moved to an unknown node on the retained signalling URLs, persists it, and follows back without redialling', async () => {
+  const browser = await loadDevice({ crypto, idb: () => idb });
+  const source = await newDevice();
+  const target = await newDevice();
+  const log = new DeviceLog(crypto, browser.id);
+  await log.apply(
+    await signDeviceEntry(browser, browser.id, 1, 'add', browser.id, 'browser', 'Web'),
+  );
+  await log.apply(
+    await signDeviceEntry(browser, browser.id, 2, 'add', source.id, 'node', 'Source'),
+  );
+  await saveOwner(() => idb, log, { [source.id]: ['wss://old-rv.example/rv'] });
+  const client = startTracked('live');
+  await vi.waitFor(() => expect(clients).toHaveLength(2));
+  const urls = clients.map((way) => way.url);
+  const rv = clients.find((way) => way.url === 'wss://old-rv.example/rv')!;
+  rv.ready();
+  const old = await answerNode(rv, source, browser.id, 0);
+  old.ctl.deliver(
+    welcomeFrame(1, source.id, 'Source', [{ g: websiteId, name: 'Project', seq: 3 }]),
+  );
+  await vi.waitFor(() =>
+    expect(old.ctl.frames().filter((frame) => frame.t === 'sync')).toHaveLength(1),
+  );
+  const home = client.net.homes.find((item) => item.device === source.id)!;
+  const group = home.groups[0];
+  old.ctl.deliver({
+    t: 'rows',
+    g: websiteId,
+    rows: [{ ...JSON.parse(goldens['row-member-human']), user: browser.id }],
+  });
+  old.ctl.deliver({
+    t: 'synced',
+    re: old.ctl.frames().find((frame) => frame.t === 'sync')!.id,
+    ok: true,
+    g: websiteId,
+    seq: 3,
+  });
+  await vi.waitFor(() => expect(group.cursor).toBe(3));
+  const reread = vi.spyOn(group, 'sync').mockResolvedValue(undefined);
+  const command = group.post('do not replay', []);
+  await vi.waitFor(() =>
+    expect(old.ctl.frames().filter((frame) => frame.t === 'cmd')).toHaveLength(1),
+  );
+  const moved = {
+    re: old.ctl.frames().find((frame) => frame.t === 'cmd')!.id,
+    err: { code: 'moved', msg: 'The group has moved.', home: target.id },
+  };
+  old.ctl.deliver(moved);
+  expect(await command).toEqual(moved);
+  expect(reread).toHaveBeenCalledTimes(0);
+  reread.mockRestore();
+  const destination = client.net.homes.find((item) => item.device === target.id)!;
+  expect([group.home, destination.groups[0]]).toEqual([destination, group]);
+  expect(home.groups).toEqual([]);
+  expect(rv.known(target.id)).toBe(true);
+  expect((await loadOwner(crypto, () => idb)).addrs[target.id]).toBeUndefined();
+  expect(await loadJoined(() => idb)).toEqual({ [target.id]: { name: target.id, url: urls[0] } });
+  expect((await loadOwner(crypto, () => idb)).log!.valid(target.id)).toBe(false);
+  const next = await answerNode(rv, target, browser.id, undefined);
+  next.ctl.deliver(welcomeFrame(1, target.id, 'Destination', [], ['wss://new-rv.example/rv']));
+  await vi.waitFor(async () =>
+    expect((await loadOwner(crypto, () => idb)).addrs[target.id]).toEqual([
+      'wss://new-rv.example/rv',
+    ]),
+  );
+  await vi.waitFor(() =>
+    expect(next.ctl.frames().filter((frame) => frame.t === 'sync')).toHaveLength(1),
+  );
+  const first = next.ctl.frames().find((frame) => frame.t === 'sync')!;
+  expect({ ...first, id: 1 }).toEqual({
+    id: 1,
+    t: 'sync',
+    g: websiteId,
+    since: 3,
+    state_only: false,
+  });
+  next.ctl.deliver({ re: first.id, err: { code: 'not_found', msg: 'not imported' } });
+  await vi.waitFor(() => expect(group.paging().failed).toBe(true));
+  expect(destination.groups).toEqual([group]);
+  next.ctl.deliver({ t: 'groups', groups: [{ g: websiteId, name: 'Imported', seq: 3 }] });
+  await vi.waitFor(() =>
+    expect(next.ctl.frames().filter((frame) => frame.t === 'sync')).toHaveLength(2),
+  );
+  const read = next.ctl.frames().filter((frame) => frame.t === 'sync')[1];
+  next.ctl.deliver({ t: 'synced', re: read.id, ok: true, g: websiteId, seq: 3 });
+  await vi.waitFor(() => expect(group.paging().failed).toBe(false));
+  expect([group.name, destination.name]).toEqual(['Imported', 'Destination']);
+  expect(next.ctl.frames().filter((frame) => frame.t === 'cmd')).toEqual([]);
+  const offers = rv.offersFor(source.id).length;
+  const sourceCtl = home.ctl;
+  const back = group.post('move back', []);
+  await vi.waitFor(() =>
+    expect(next.ctl.frames().filter((frame) => frame.t === 'cmd')).toHaveLength(1),
+  );
+  next.ctl.deliver({
+    re: next.ctl.frames().find((frame) => frame.t === 'cmd')!.id,
+    err: { code: 'moved', msg: 'moved back', home: source.id },
+  });
+  await back;
+  expect([group.home, home.groups[0]]).toEqual([home, group]);
+  expect(destination.groups).toEqual([]);
+  expect(rv.offersFor(source.id).length).toBe(offers);
+  expect(old.closes).toBe(0);
+  expect(home.ctl).toBe(sourceCtl);
+  expect(await loadJoined(() => idb)).toEqual({ [target.id]: { name: target.id, url: urls[0] } });
+});
 
 it('shares a temporary watch-host connection and closes it only after the last watch ends', async () => {
   const browser = await loadDevice({ crypto, idb: () => idb });

@@ -1,0 +1,19 @@
+{
+  "forge.custom": "自定义命令模板",
+  "forge.label": "代码托管",
+  "forge.commands": "群组命令",
+  "forge.none": "无",
+  "forge.push": "推送分支",
+  "forge.open": "创建合并请求",
+  "forge.checks": "云端检查",
+  "forge.merge": "合并请求",
+  "forge.program": "程序",
+  "forge.argument": "参数 {n}",
+  "forge.add": "添加参数",
+  "forge.remove": "移除参数 {n}：{operation}",
+  "forge.remove.short": "移除",
+  "forge.arguments.hint": "每个输入框是一项参数，而非 shell 命令。第一项是 PATH 中的程序名，不得包含 /、\\ 或占位符。四种模板均须填写。空参数与空白字符将原样保留。",
+  "forge.places": "各模板均可使用 {branch}、{base} 和 {commit}；{request} 仅限 checks 和 merge；{title} 和 {summary} 仅限 open，且须在字面文本之后，例如 --title={title}。只替换一次，不经过 shell。",
+  "forge.arguments.shown": "每个方框是一项参数，原样传递，不经过 shell。",
+  "forge.warning": "当你的 AI 处理本群组任务时，这些命令会以你的身份在这台计算机上运行，不受沙盒限制。请只加入你愿意亲自运行其命令的群组。"
+}

@@ -68,7 +68,8 @@ removes the directory. The run's teardown kills what a test process that died le
 `fileParallelism: false` so two Playwright WebKit UIProcesses never race to create the macOS
 Keychain WebCrypto master key on a fresh runner. `pnpm test` leaves `e2e/` out. The tests change
 nothing of the test process's own environment; the scenarios of `../features/web_e2e.feature` check
-that.
+that. `e2e/s2.spec.ts` instead runs the step 2 cast of `features/s2_cast.ts` in each page against a
+Vite development server with `?nomock`; the node side of step 2 is tested by integration.
 
 The runtime dependencies are `valibot`, for the wire types, and `@xterm/xterm` 6.0.0 with
 `@xterm/addon-fit` 0.11.0 (MIT) for the terminal page. It is about
@@ -616,7 +617,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
 | `src/components/people/`      | invitation dialog, role/removal actions and join form                             |
 | `src/messages/people.*`       | English and Chinese invitation, member-action and join texts                      |
-| `src/components/groupinfo/`   | group details and project memory (`chat.side`, `order: 20`)                       |
+| `src/components/groupinfo/`   | home, commands, settings (order 19) and project memory (order 20) at `chat.side`  |
+| `src/components/forge/`       | forge choice, argument-by-argument template editor and group command disclosure   |
+| `src/components/preset/`      | style preset editor (`chat.side`, `order: 21`) and brief preset reader            |
+| `src/components/kb/`          | knowledge-base list, search and admin deletion (`chat.side`, `order: 22`)         |
+| `src/components/move/`        | owner's local export/import guidance (`chat.side`, `order: 30`)                   |
 | `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
 | `src/components/watch/`       | receive-only watch channel, standalone request action and watcher stop controls   |
 | `src/components/team/`        | attributed bulletin card; team people use the shared member panel                 |
@@ -640,6 +645,10 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/people.spec.ts`     | steps of `../features/web_people.feature`                                         |
 | `features/people.test.ts`     | focused tests for member actions and the join page                                |
 | `features/groupinfo.spec.ts`  | steps of `../features/web_groupinfo.feature`                                      |
+| `features/preset.spec.ts`     | steps of `../features/web_preset.feature`                                         |
+| `features/kb.spec.ts`         | steps of `../features/web_kb.feature`                                             |
+| `features/move.spec.ts`       | steps of `../features/web_move.feature`                                           |
+| `features/forge.spec.ts`      | steps of `../features/web_forge.feature`                                          |
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
 | `features/watch_team.spec.ts` | steps of `../features/web_watch_team.feature`                                     |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
@@ -648,11 +657,13 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/reminder.spec.ts`   | steps of `../features/web_reminder.feature` (A8.3 browser half)                   |
 | `features/a11y.spec.ts`       | steps of `../features/web_a11y.feature`                                           |
 | `features/home.ts`            | a home and an owned computer in memory for the steps; `page.ts` drives the page   |
+| `features/s2_cast.ts`         | the step 2 cast in a page, as `window.s2`                                         |
 | `features/demo.ts`            | groups with a morning of talk, for a development page                             |
 | `features/watch.svelte.ts`    | an effect outside a component, for tests of what is reactive                      |
 | `features/shots.ts`           | screenshots of the pages from that demo, four widths                              |
 | `e2e/config.ts`               | end-to-end projects per engine, `launch`, the build of a run                      |
 | `e2e/nodes.ts`                | `startNet`: rendezvous and nodes per test, stop, teardown sweep                   |
+| `e2e/s2.spec.ts`              | the In the browser sentences of step 2, one page per person                       |
 | `features/e2e.ts`             | steps of `../features/web_e2e.feature`, run by `e2e/config.ts`                    |
 
 Below 768 px the navigation is the bottom bar and the theme and language buttons of the top bar
@@ -664,11 +675,34 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
 
 ## Known limitations
 
+- A `moved` response to `cmd`, `sync` or `fetch` switches a listed group to the named home and
+  preserves its cache. An existing destination connection is reused; an unknown destination is
+  remembered for reconnecting on the current signalling paths. Its welcome supplies its remembered
+  addresses. Unlisted groups are discarded and read afresh if listed again. Commands are
+  not replayed across a move: their receipts stay on the old home. Before import the cached
+  group remains visible; the destination's `groups` push starts a new read after import.
+- Only a group's owner sees the local `solodawn group export` / `group import` guidance. The
+  browser neither runs these commands nor transfers the file. A copy omits `--to`; scheduling
+  copies belongs to the operating system, not the browser.
+
 - Watching reuses `#/terminal/<g>/<member>` for another person's AI. The terminal acquires its
   host through the existing signalling session, reuses a connected home or node, and releases a
   temporary connection when the last watch ends. Another person's taken-over AI offers Ask to
   watch and Watch; a forbidden watch offers the same request action in the terminal bar. Only
   the owner's terminal shows watchers. Real-host watching and other browsers remain unverified.
+- Custom forges are chosen at group creation. Group settings can edit their four argument-list
+  templates, not change the forge. Each field is one argument; whitespace and empty arguments
+  are preserved, without shell parsing. The home validates template restrictions.
+- The add-AI dialog discloses project commands and warns when a personal-subscription secretary
+  would serve another person. The invitation dialog warns before inviting the first other person.
+  Command chips show arguments as passed; an empty argument is shown as `""`.
+- A shared secretary should use a team plan or an API key, with an explicit allow-list. On a
+  personal subscription every request from someone other than its owner waits for that owner's
+  confirmation, every time; this cannot be switched off.
+- A foreign home stores the group, names its members and decides which requests reach your AIs.
+  Join only groups of people you trust. Group details attribute its computer using a matching
+  device row; if none is available, the owner is shown as not provided, never inferred from a
+  member's group role.
 
 - The theme is applied by the module script, so a browser forced to the theme opposite to its
   system setting can paint one frame in the system theme while loading (`issues.md`).
@@ -692,6 +726,12 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   update `host.info`, and `pair.browser` returns no link.
 - From 768 px the top bar of an open chat says "Chats", and the chat's own
   head with the group's name is below it, where the design has one bar with the group's name.
+- The preset editor and brief preset reader load only the first 50 presets; there is
+  no pagination or read by name. Typed notes stay out of Project memory.
+- Knowledge-base lists load in pages of 50; searches return up to 20 documents in the home's
+  ranking order. If more
+  match, narrow the query rather than paging results. There is no knowledge-base editor; AIs
+  write documents with `kb_put`.
 - The texts of the `states` area are in the build, although only a development server shows
   their page.
 - Cards and the rows a home writes are one line each in the main line, and Safari moves the main
