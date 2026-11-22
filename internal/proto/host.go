@@ -80,11 +80,8 @@ type HostAgent struct {
 // Driver is the capability table a CLI driver declares (contracts/step-3/drivers.md
 // sections 4 and 6).
 type Driver struct {
-	Accounts  []string `json:"accounts"`
-	Levels    []int    `json:"levels"`
-	Approvals string   `json:"approvals"`
-	Takeover  string   `json:"takeover"`
-	Usage     []string `json:"usage"`
+	Accounts []string `json:"accounts"`
+	Takeover string   `json:"takeover"`
 }
 
 // Caps are an agent's usage caps; a cap that is not there is not set.

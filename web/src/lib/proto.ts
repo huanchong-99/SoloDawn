@@ -945,10 +945,7 @@ export type HostInfoRequest = v.InferOutput<typeof HostInfoRequest>;
 /** The capability table a CLI driver declares (contracts/step-3/drivers.md sections 4 and 6). */
 export const Driver = v.object({
   accounts: strs,
-  levels: v.array(int),
-  approvals: str,
   takeover: str,
-  usage: strs,
 });
 export type Driver = v.InferOutput<typeof Driver>;
 
