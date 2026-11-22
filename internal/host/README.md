@@ -131,9 +131,18 @@ Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/
 | 1 | `edit` and `bash` `deny` |
 | 3 | `edit`, `bash`, `webfetch`, `external_directory` and `doom_loop` `allow` |
 
+### Qwen Code
+
+`qwen.go` registers `Drivers["qwen"]` and its declaration (`api_key`; levels `1`, `3`; `conn`; takeover `none`) from the Qwen Code 0.28.0 documentation read by T3-0. Every value below is `[unverified]` ([issues.md](../../issues.md)).
+
+- `Start` writes a settings file from `qwenStart` (`tools.approvalMode` `plan` at level 1 and `yolo` at level 3, and the trusted `solodawn` MCP server from `Launch.Shim`) to a temporary folder, passed as `QWEN_CODE_SYSTEM_SETTINGS_PATH`. It runs `qwen serve --hostname 127.0.0.1 --port 0 --token <random> --workspace <folder>`, then `POST /session/<id>/resume` (a failure is `NoSession`) or `POST /session`, and opens `GET /session/<id>/events`. Every call carries the bearer token and `Content-Type: application/json`.
+- The instructions go as the first text block of the first prompt of a new session; a resumed session has them in its history. `QWEN_SYSTEM_MD` is not used: it replaces Qwen Code's own system prompt.
+- A turn is `POST /session/<id>/prompt`; `turn_complete` ends it (`interrupted` for `stopReason` `cancelled`), `turn_error` ends it `failed` (a `401` in its message also reports `LoginInvalid`). `session_update` is `Active`; `permission_request` is `Asked`, answered with `POST /session/<id>/permission/<request>` choosing `proceed_once` or `cancel`. `Interrupt` is `POST /session/<id>/cancel`. `Close` kills the daemon's process tree and the temporary folder goes when it exits.
+- Limitation: Qwen Code has no known switch that keeps a repository's own configuration (`.qwen/settings.json`, `QWEN.md`, extensions) out, so a Qwen Code group session may load it. Folder trust is not that switch: an untrusted folder also asks before every tool. This is the risk R-45 already accepts: only trusted repositories go into a group (`install.md`).
+
 ### Local servers (`serve.go`)
 
-The drivers whose CLI runs as a local HTTP server share `serve.go`: `serve` starts the server detached from any terminal and returns its standard output and a wait that kills what it left running, `serverAddress` reads the `listening on` line, and `readSSE` reads the event stream with `bufio.Reader`, so an event has no size limit.
+The drivers whose CLI runs as a local HTTP server share `serve.go`: `serve` starts the server detached from any terminal and returns its standard output and a wait that kills what it left running, `serverAddress` reads the `listening on` line up to the first space after the address, and `readSSE` reads the event stream with `bufio.Reader`, so an event has no size limit.
 
 ## CLI detection and sign-in
 

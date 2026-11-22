@@ -2,6 +2,9 @@ package host
 
 import (
 	"context"
+	"errors"
+	"io/fs"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +17,7 @@ func qwenLaunch(t *testing.T, session string, level int) Launch {
 func TestQwenTakesTurnsAndAnswersInOneDaemon(t *testing.T) {
 	proc := startFakeServer(t, "qwen", qwenDriver{}, `{"session":"qs_1","steps":[
 		{"dir":"http","msg":{"call":"POST /session","body":{},"res":{"sessionId":"$session"}}},
-		{"dir":"http","msg":{"call":"POST /session/qs_1/prompt","body":{"prompt":[{"type":"text","text":"hello"}]}}},
+		{"dir":"http","msg":{"call":"POST /session/qs_1/prompt","body":{"prompt":[{"type":"text","text":"Be brief."},{"type":"text","text":"hello"}]}}},
 		{"dir":"sse","msg":{"type":"session_update","data":{"sessionUpdate":"agent_message_chunk"}}},
 		{"dir":"sse","msg":{"type":"permission_request","data":{"requestId":"req_1","toolCall":{"kind":"execute","rawInput":{"command":"git status"},"_meta":{"toolName":"run_shell_command"}}}}},
 		{"dir":"http","msg":{"call":"POST /session/qs_1/permission/req_1","body":{"outcome":{"outcome":"selected","optionId":"cancel"}}}},
@@ -49,6 +52,34 @@ func TestQwenTakesTurnsAndAnswersInOneDaemon(t *testing.T) {
 	codexEqual(t, len(waitEventsClosed(t, proc.Events())), 0)
 }
 
+func TestQwenResumedSessionGetsNoInstructions(t *testing.T) {
+	proc := startFakeServer(t, "qwen", qwenDriver{}, `{"session":"qs_old","steps":[
+		{"dir":"http","msg":{"call":"POST /session/qs_old/resume","body":{}}},
+		{"dir":"http","msg":{"call":"POST /session/qs_old/prompt","body":{"prompt":[{"type":"text","text":"hello"}]}}},
+		{"dir":"sse","msg":{"type":"turn_complete","data":{"stopReason":"end_turn"}}},
+		{"dir":"http","msg":{"call":"POST /never","body":{}}}]}`, qwenLaunch(t, "qs_old", 3))
+	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Ready, Session: "qs_old"})
+	codexNoErr(t, proc.Turn("hello"))
+	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: TurnEnded, Status: "completed"})
+	codexNoErr(t, proc.Close())
+	codexEqual(t, len(waitEventsClosed(t, proc.Events())), 0)
+}
+
+func TestQwenStartPinsSettingsAndArguments(t *testing.T) {
+	mcp := `"mcpServers":{"solodawn":{"args":["mcp"],"command":"solodawn","timeout":60000,"trust":true}}`
+	group := qwenLaunch(t, "", 1)
+	task := qwenLaunch(t, "", 3)
+	task.RepoConfig = true
+	for _, c := range []struct {
+		l    Launch
+		mode string
+	}{{group, "plan"}, {task, "yolo"}} {
+		settings, args := qwenStart(c.l, "tk")
+		codexEqual(t, settings, `{`+mcp+`,"tools":{"approvalMode":"`+c.mode+`"}}`)
+		codexEqual(t, args, []string{"serve", "--hostname", "127.0.0.1", "--port", "0", "--token", "tk", "--workspace", c.l.Folder})
+	}
+}
+
 func TestQwenReportsASessionItCannotResume(t *testing.T) {
 	proc := startFakeServer(t, "qwen", qwenDriver{}, `{"session":"qs_old","steps":[
 		{"dir":"http","msg":{"call":"POST /session/qs_old/resume","body":{},"status":404}},
@@ -73,4 +104,10 @@ func TestQwenStartRefusals(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	_, err = qwenDriver{}.Start(context.Background(), qwenLaunch(t, "", 1))
 	codexWantErr(t, err)
+	missing := filepath.Join(t.TempDir(), "missing")
+	for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(name, missing)
+	}
+	_, err = qwenDriver{}.Start(context.Background(), qwenLaunch(t, "", 1))
+	codexEqual(t, errors.Is(err, fs.ErrNotExist), true)
 }

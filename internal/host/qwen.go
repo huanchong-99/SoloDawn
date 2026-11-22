@@ -33,27 +33,26 @@ func (qwenDriver) Interactive(Launch) ([]string, string, error) {
 	return nil, "", fmt.Errorf("qwen: no terminal takeover")
 }
 
-// Start writes the level's settings and the group instructions to a
-// temporary folder that lives as long as the daemon.
+// Start writes the level's settings to a temporary folder that lives as
+// long as the daemon. A new session gets the instructions with its first
+// prompt; a resumed one has them in its history.
 func (qwenDriver) Start(ctx context.Context, l Launch) (Process, error) {
-	mode, ok := qwenModes[l.Level]
-	if !ok {
+	if _, ok := qwenModes[l.Level]; !ok {
 		return nil, fmt.Errorf("qwen: level %d is not declared", l.Level)
 	}
-	dir, _ := os.MkdirTemp("", "solodawn-qwen-")
-	settings, system := filepath.Join(dir, "settings.json"), filepath.Join(dir, "system.md")
-	os.WriteFile(settings, []byte(marshalWire(map[string]any{
-		"tools":    map[string]string{"approvalMode": mode},
-		"security": map[string]any{"folderTrust": map[string]bool{"enabled": !l.RepoConfig}},
-		"mcpServers": map[string]any{"solodawn": map[string]any{
-			"command": l.Shim[0], "args": l.Shim[1:], "timeout": l.ToolTimeout.Milliseconds(), "trust": true,
-		}},
-	})), 0o600)
-	os.WriteFile(system, []byte(l.Instructions), 0o600)
+	dir, err := os.MkdirTemp("", "solodawn-qwen-")
+	if err != nil {
+		return nil, err
+	}
 	p := &qwenProcess{token: rand.Text(), resume: l.Session, events: make(chan Event, 16), ready: make(chan struct{})}
+	if l.Session == "" {
+		p.instructions = l.Instructions
+	}
+	settings, args := qwenStart(l, p.token)
+	path := filepath.Join(dir, "settings.json")
+	os.WriteFile(path, []byte(settings), 0o600)
 	ctx, p.stop = context.WithCancel(ctx)
-	env := []string{"QWEN_CODE_SYSTEM_SETTINGS_PATH=" + settings, "QWEN_SYSTEM_MD=" + system}
-	out, wait, err := serve(ctx, l.Folder, env, "qwen", "serve", "--hostname", "127.0.0.1", "--port", "0", "--token", p.token, "--workspace", l.Folder)
+	out, wait, err := serve(ctx, l.Folder, []string{"QWEN_CODE_SYSTEM_SETTINGS_PATH=" + path}, "qwen", args...)
 	if err != nil {
 		p.stop()
 		os.RemoveAll(dir)
@@ -67,10 +66,24 @@ func (qwenDriver) Start(ctx context.Context, l Launch) (Process, error) {
 	return p, nil
 }
 
+// qwenStart is what the daemon of l gets: its settings file (the level's
+// approval mode and the trusted solodawn MCP server) and its arguments.
+func qwenStart(l Launch, token string) (string, []string) {
+	settings := marshalWire(map[string]any{
+		"tools": map[string]string{"approvalMode": qwenModes[l.Level]},
+		"mcpServers": map[string]any{"solodawn": map[string]any{
+			"command": l.Shim[0], "args": l.Shim[1:], "timeout": l.ToolTimeout.Milliseconds(), "trust": true,
+		}},
+	})
+	return settings, []string{"serve", "--hostname", "127.0.0.1", "--port", "0", "--token", token, "--workspace", l.Folder}
+}
+
 // qwenProcess drives one qwen daemon. base, session and url (the session's
 // path) are written before ready is closed and only read after it.
+// instructions are sent with the first prompt, then cleared.
 type qwenProcess struct {
 	token, resume      string
+	instructions       string
 	events             chan Event
 	ready              chan struct{}
 	stop               context.CancelFunc
@@ -98,7 +111,12 @@ func (p *qwenProcess) Events() <-chan Event { return p.events }
 
 func (p *qwenProcess) Turn(text string) error {
 	<-p.ready
-	_, err := p.post("/prompt", map[string]any{"prompt": []map[string]string{{"type": "text", "text": text}}})
+	prompt := []map[string]string{{"type": "text", "text": text}}
+	if p.instructions != "" {
+		prompt = append([]map[string]string{{"type": "text", "text": p.instructions}}, prompt...)
+		p.instructions = ""
+	}
+	_, err := p.post("/prompt", map[string]any{"prompt": prompt})
 	return err
 }
 
@@ -128,6 +146,7 @@ func (p *qwenProcess) request(method, path string, body any) (*http.Response, er
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+p.token)
+	req.Header.Set("Content-Type", "application/json")
 	res, err := http.DefaultClient.Do(req)
 	if err == nil && res.StatusCode >= http.StatusMultipleChoices {
 		res.Body.Close()

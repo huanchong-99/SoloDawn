@@ -36,7 +36,11 @@ func (p *process) listen() {
 	p.http = &openCode{token: value(p.args, "--token"), calls: make(chan openCodeCall)}
 	p.http.sse, p.http.send = io.Pipe()
 	srv := httptest.NewServer(p.http)
-	fmt.Fprintln(p.stdout, p.vendor+" server listening on "+srv.URL)
+	line := "opencode server listening on " + srv.URL
+	if p.vendor == "qwen" {
+		line = "qwen serve listening on " + srv.URL + " (mode=http-bridge, workspace=" + value(p.args, "--workspace") + ")"
+	}
+	fmt.Fprintln(p.stdout, line)
 }
 
 func (o *openCode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +58,10 @@ func (o *openCode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "data: %s\n\n", lines.Bytes())
 			w.(http.Flusher).Flush()
 		}
+		return
+	}
+	if r.Header.Get("Content-Type") != "application/json" {
+		w.WriteHeader(http.StatusUnsupportedMediaType)
 		return
 	}
 	body, _ := io.ReadAll(r.Body)
