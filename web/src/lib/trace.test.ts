@@ -141,7 +141,7 @@ function verifyFinalOutcome(trace: p.TaskTrace, state: TraceState, remote: boole
   expect(trace.steps.length).toBe(remote ? 12 : 11);
   expect(state.tasks.size).toBe(1);
   const [task] = [...state.tasks.values()];
-  expect([task.num, task.state, task.step]).toEqual([12, 'merged', 'merge']);
+  expect([task.num, task.state, task.step]).toEqual([trace.num + 1, 'merged', 'merge']);
   expect(task.pr !== undefined).toBe(remote);
   expect(task.checks.cloud !== undefined).toBe(remote);
   const mergedSys = [...state.msgs.values()].find((m) => m.kind === 'system');
