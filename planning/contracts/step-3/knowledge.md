@@ -267,10 +267,8 @@ a client offers presets and the knowledge base, and a host lists `kb_put`,
 `kb_search` and the new arguments, only for a group whose home knows
 step 3: a home that answers `welcome` with `v` 2. Decided: one protocol
 step, `v` 2, covers every addition of steps 2 and 3. A client sends `hello`
-with `v` 2 and, answered `version`, again with `v` 1, as a host does to its
-owner's home only (`contracts/step-2/authority.md` section 3); it then
-offers nothing of steps 2 and 3. A `v` 2 home takes `v` 1 only from a device
-of its owner (coordinator, 2026-11-20). P-4 freezes it; T2-1 builds it.
+with `v` 2 and, answered `version`, again with `v` 1, as a host does; it
+then offers nothing of steps 2 and 3. P-4a freezes it; T2-1 builds it.
 
 ## 9. Verified, not verified, decided
 

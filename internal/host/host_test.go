@@ -8,8 +8,10 @@ import (
 	"maps"
 	"math"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -344,6 +346,72 @@ func TestHandNeverWaitsForTheReceiver(t *testing.T) {
 	close(proceed)
 	if <-handed || len(slow) != 0 {
 		t.Fatal("an item was handed to a wait that had ended")
+	}
+}
+
+func TestHandAndEndOfWaitNeverLoseAnItem(t *testing.T) {
+	h, _ := seamHost(t, seamStore(t))
+	item := json.RawMessage(`{"env":{}}`)
+	const rounds = 200_000
+	var turn, doneRound atomic.Int64
+	turn.Store(-1)
+	doneRound.Store(-1)
+	var waited bool
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		for r := range int64(rounds) {
+			if !spinUntil(&turn, r, rounds) {
+				return
+			}
+			waited, _ = h.Hand("call-1", item)
+			doneRound.Store(r)
+		}
+	}()
+	defer func() {
+		turn.Store(rounds)
+		<-workerDone
+	}()
+	lost := 0
+	for r := range int64(rounds) {
+		ch, done := h.Await("call-1", nil)
+		turn.Store(r)
+		done()
+		read := readHandedItem(ch, item)
+		spinUntil(&doneRound, r, rounds)
+		if waited != read {
+			if !waited {
+				t.Fatalf("an item was read when waited=false at round %d", r)
+			}
+			lost++
+		}
+	}
+	if lost != 0 {
+		t.Fatalf("lost %d of %d items at the end of the wait", lost, rounds)
+	}
+}
+
+func spinUntil(step *atomic.Int64, want, end int64) bool {
+	for spins := 0; ; spins++ {
+		got := step.Load()
+		if got == want {
+			return true
+		}
+		if got == end {
+			return false
+		}
+		if spins&63 == 63 {
+			runtime.Gosched()
+		}
+	}
+}
+
+func readHandedItem(ch <-chan json.RawMessage, want json.RawMessage) bool {
+	select {
+	case got := <-ch:
+		return string(got) == string(want)
+	default:
+		return false
 	}
 }
 
