@@ -9,7 +9,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-22 · limitation · Custom forge results depend on the template program
 
 - Symptom: a checks template can report an older request head, and a successful merge can name a later merge on the base branch.
-- Cause: `internal/host/forge_tmpl.go` supplies the submitted `{commit}` but cannot verify its use by the forge program. After merging it fetches `origin` and reads the base tip, as specified in `checks-forge.md` section 3.
+- Cause: `internal/host/forge_tmpl.go:124-147` supplies the submitted `{commit}` but cannot verify its use by the forge program. After merging it fetches `origin` and reads the base tip, as specified in `checks-forge.md` section 3.
 - Status: accepted contract limitations for T2-8. Real non-GitHub forge behavior and native Windows process execution remain unverified; A9.26 remains pending without a signed-in scratch forge configuration.
 
 ### 2026-11-22 · limitation · Remembered project homes without local AIs stay connected
