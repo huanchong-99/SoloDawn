@@ -12,6 +12,23 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `features/s2_export.feature:12,19,24` use the I2-0 Go cast and two invocations of the copy command. The product does not schedule copies (`planning/contracts/step-2/export.md:60-62`).
 - Status: open. Browser coverage belongs to I2-2 after U2-5 and W2-1. The OS timer is not verified.
 
+### 2026-11-22 · limitation · A screen reader does not read what the terminal prints
+
+- Symptom: on `#/terminal/<g>/<member>` a screen reader reaches the terminal's input field and its description, but hears nothing of what the AI's CLI prints.
+- Cause: xterm.js exposes the screen to assistive technology only with its `screenReaderMode` option, which `web/src/routes/Terminal.svelte` (the `new XTerm({ … })` options) leaves off.
+- Status: open, found in U-16b and left out of its fixed scope. `screenReaderMode: true` is the one-line change; it was not measured with a CLI that redraws its screen.
+
+### 2026-11-22 · limitation · A waiting notification covers "Hand back" on a phone's terminal
+
+- Symptom: on the terminal page below 768 px, an in-page notification that waits on the reader lies over the takeover bar, "Hand back" included, until it is opened or closed (measured in Chrome at 390 px: notification 12 to 378 by 64 to 130, "Hand back" 272 to 374 by 62 to 106). From 768 px it overlaps the button by at most 14 px.
+- Cause: the stack hangs under the page's own head (`web/src/components/notify/Notifications.svelte`, the rule for `.app[data-full='phone']`), and the takeover bar is the first thing under that head.
+- Status: open, found in U-16b, whose scope names the chat only. The notification's own close button stays reachable.
+
+### 2026-11-22 · limitation · Faint text in an ANSI colour stays below 4.5 to 1 in the terminal
+
+- Symptom: text a CLI prints faint (SGR 2) in one of the sixteen colours is drawn at half that colour's opacity: 2.8 to 1 (red) to 3.5 to 1 (green) on the terminal's background, for the four colours the page's theme sets. Faint text in the default colour is 5.6 to 1.
+- Cause: xterm.js halves the opacity of faint text (`DomRenderer.ts`, the `.xterm-dim` rules); `web/src/routes/Terminal.svelte` replaces only the default colour's rule with `--term-dim`, since one grey for every colour would drop the colour.
+- Status: open, accepted in U-16b: the colours are the CLI's own.
 ### 2026-11-22 · limitation · A denied call draws as waiting
 
 - Symptom: a `call` message whose state is `denied` (`row-msg-call-denied`, frozen by P-4a) shows the waiting line and the waiting state in the call area.

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { tick } from 'svelte';
   import { forgetMemory, hasMemoryRow, type ForgetRowType } from '../../lib/groupinfo.svelte';
   import type { Group } from '../../lib/groups.svelte';
   import { t } from '../../lib/prefs.svelte';
@@ -11,7 +10,6 @@
     id: string;
     label: string;
     heading: HTMLElement | undefined;
-    trigger: HTMLButtonElement;
   }
 
   /** Confirmation dialog that sends `forget` for one note or review ledger entry. */
@@ -56,16 +54,10 @@
     dialog.close();
   }
 
-  async function handleClose() {
-    const { trigger, heading } = target;
-    const toHeading = removed;
+  // The dialog itself returns focus to the entry's button; a deleted entry has none left.
+  function handleClose() {
+    if (removed) target.heading?.focus();
     onclose();
-    await tick();
-    if (!toHeading && trigger.isConnected && !trigger.disabled) {
-      trigger.focus();
-    } else {
-      heading?.focus();
-    }
   }
 </script>
 
