@@ -59,6 +59,7 @@
 
 <div class="app" style:--dir={route.dir} data-full={'full' in at ? at.full : undefined}>
   <button class="skip" onclick={() => main.focus()}>{t('app.skip')}</button>
+  <span class="sr" role="status">{announcement.text}</span>
   <nav class="rail" aria-label={t('nav.label')}>
     <a class="logo" href={href('groups')} aria-label="SoloDawn">
       <img class="logo-mark" src="icon.svg" alt="" />
@@ -89,7 +90,6 @@
           <span lang="zh-CN">{textIn('zh-CN', 'bar.lang')}</span>
         </span>
       </button>
-      <span class="sr" role="status">{announcement.text}</span>
     </div>
   </header>
   <div class="ban">
