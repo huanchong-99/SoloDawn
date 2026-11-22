@@ -1086,6 +1086,36 @@ func TestHostJoinSignedEnvelopeVerifiesAsNodeCommand(t *testing.T) {
 	joinAssertEqual(t, "OpenCommand group", hdr.Group, joinTestGroup1)
 }
 
+func TestLeaveGoneMemberClosesAndPrunesIdempotently(t *testing.T) {
+	rig := newJoinRig(t)
+	rig.setAgent("claude", "2.1.311", joinStr("personal"))
+	fh := rig.addHome("home-1")
+	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", rig.makeRepo("r", "main"), "main"))
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"})
+	member := string(fh.addAIs[0].ID)
+	rig.setSetting("homes", []proto.Home{
+		{Group: joinTestGroup1, Home: "home-1", Name: "Website"},
+		{Group: joinTestGroup2, Home: "home-1", Name: "Untouched"},
+	})
+	auditsBefore := countAuditWhat(t, rig.db, AuditSetting)
+
+	// Member with no sessions on this host is a no-op and keeps stored homes intact (even for a group with zero sessions).
+	leaveGoneMember(rig.h, string(joinTestGroup2), "not-hosted-here")
+	joinAssertHomes(t, rig.db, []proto.Home{
+		{Group: joinTestGroup1, Home: "home-1", Name: "Website"},
+		{Group: joinTestGroup2, Home: "home-1", Name: "Untouched"},
+	})
+
+	// Gone local member ends sessions, prunes only its empty group from homes, and writes no AuditSetting row.
+	rig.setSetting("homes", []proto.Home{{Group: joinTestGroup1, Home: "home-1", Name: "Website"}})
+	leaveGoneMember(rig.h, string(joinTestGroup1), member)
+	joinAssertEqual(t, "remaining sessions", len(rig.h.Sessions.All()), 0)
+	joinAssertHomes(t, rig.db, []proto.Home{})
+	joinAssertEqual(t, "home-1 cancelled", rig.lastDialCtx("home-1").Err() != nil, true)
+	joinAssertEqual(t, "no AuditSetting written for gone member", countAuditWhat(t, rig.db, AuditSetting), auditsBefore)
+	leaveGoneMember(rig.h, string(joinTestGroup1), member)
+}
+
 func TestHostJoinSyncCoordinatesWithDeliveryPushesAndInflightSync(t *testing.T) {
 	checkJoinPushResetAndRowsWithoutDuplicateSync(t)
 	checkJoinWaitsOnInflightGroupSync(t)

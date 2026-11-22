@@ -153,6 +153,8 @@ func (r *approveAccRunner) Answer(_ *host.Host, _ host.SessionKey, _ string, all
 	return nil
 }
 
+func (r *approveAccRunner) Close(*host.Host, host.SessionKey) {}
+
 func accSeedKey(b byte) identity.Key {
 	return identity.Key(ed25519.NewKeyFromSeed(bytes.Repeat([]byte{b}, ed25519.SeedSize)))
 }

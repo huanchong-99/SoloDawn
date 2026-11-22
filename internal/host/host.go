@@ -161,6 +161,19 @@ func (h *Host) Attach(device string, home Home) {
 	}
 }
 
+// Settled holds what is to wait for background work of this host before its
+// store closes. Each entry has the name of its unit; Settle calls them in the
+// order of their names.
+var Settled = map[string]func(h *Host){}
+
+// Settle waits for background work of this host to finish before its store
+// closes.
+func (h *Host) Settle() {
+	for _, settle := range inOrder(Settled) {
+		settle(h)
+	}
+}
+
 // Home returns the connection to the home with that device id while it is
 // open.
 func (h *Host) Home(device string) (Home, bool) {
@@ -527,6 +540,9 @@ type Runtime interface {
 	// Answer allows or declines a permission request that the CLI of a
 	// session made: the event Asked.
 	Answer(h *Host, key SessionKey, ask string, allow bool) error
+	// Close closes any open CLI process for key and waits for it to exit
+	// (flows/agent-turn.md C-6, D17, G).
+	Close(h *Host, key SessionKey)
 }
 
 // The hooks through which the units of the session runtime call each other.

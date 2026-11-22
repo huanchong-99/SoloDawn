@@ -106,12 +106,13 @@ func (c *Cluster) Close() {
 	}
 }
 
-// Close detaches the local link, stops the home loop and closes the store.
-// Calling Close more than once is safe.
+// Close detaches the local link, stops the home loop, settles the host and
+// closes the store. Calling Close more than once is safe.
 func (n *Node) Close() {
 	n.once.Do(func() {
 		n.Link.Close()
 		n.Home.Close()
+		n.Host.Settle()
 		n.Store.Close()
 	})
 }

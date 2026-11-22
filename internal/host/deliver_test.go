@@ -59,9 +59,11 @@ type recordedTurn struct {
 type fakeDeliverRuntime struct {
 	mu      sync.Mutex
 	turns   []recordedTurn
+	closed  []SessionKey
 	err     error
 	keepRun bool
 	onTurn  func(h *Host, key SessionKey)
+	onClose func(h *Host, key SessionKey)
 }
 
 func (r *fakeDeliverRuntime) Turn(_ context.Context, h *Host, key SessionKey, text string, turn Turn) error {
@@ -96,6 +98,25 @@ func (r *fakeDeliverRuntime) advanceState(h *Host, key SessionKey, keepWorking b
 }
 
 func (r *fakeDeliverRuntime) Answer(*Host, SessionKey, string, bool) error { return nil }
+
+func (r *fakeDeliverRuntime) Close(h *Host, key SessionKey) {
+	r.mu.Lock()
+	hook := r.onClose
+	r.closed = append(r.closed, key)
+	r.mu.Unlock()
+	if hook != nil {
+		hook(h, key)
+	}
+	if s, ok := h.Sessions.Get(key); ok && s.State != Dormant {
+		h.Sessions.Move(key, s.State, Dormant)
+	}
+}
+
+func (r *fakeDeliverRuntime) closedKeys() []SessionKey {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.closed)
+}
 
 func (r *fakeDeliverRuntime) recorded() []recordedTurn {
 	r.mu.Lock()
@@ -281,19 +302,9 @@ func newDeliverRigOnStore(t *testing.T, db *store.Store) *deliverRig {
 	rig.h = h
 	t.Cleanup(func() {
 		rig.home.closeConn()
-		stopDeliverySyncs(h)
+		h.Settle()
 	})
 	return rig
-}
-
-func stopDeliverySyncs(h *Host) {
-	d := deliv(h)
-	d.mu.Lock()
-	for dev, entry := range d.cancels {
-		entry.cancel()
-		delete(d.cancels, dev)
-	}
-	d.mu.Unlock()
 }
 
 func (r *deliverRig) installHooks() {
@@ -508,7 +519,7 @@ func captureLogs(t *testing.T) *safeLogBuffer {
 
 func assertDeliverRegistrations(t *testing.T) {
 	t.Helper()
-	checks := []bool{Attached["deliver"] != nil, Pushes["inbox"] != nil, Pushes["rows"] != nil, Pushes["reset"] != nil, Deliver != nil}
+	checks := []bool{Attached["deliver"] != nil, Settled["deliver"] != nil, Pushes["inbox"] != nil, Pushes["rows"] != nil, Pushes["reset"] != nil, Deliver != nil}
 	if slices.Contains(checks, false) {
 		t.Fatal("deliver registrations missing")
 	}
@@ -526,7 +537,7 @@ func TestRegistrationsAndHostIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { stopDeliverySyncs(h2) })
+	t.Cleanup(func() { h2.Settle() })
 	r1.seedGroupAndMembers()
 	msg := r1.makeTextMsg(testMsg1, nil, "hello")
 	it := proto.Item{Item: 1, AI: testAI1, Why: "mention", Msg: testMsg1}
@@ -537,6 +548,7 @@ func TestRegistrationsAndHostIsolation(t *testing.T) {
 	if turns[0].host != r1.h || len(deliv(h2).groups) != 0 || len(r1.home.syncSinces()) != 1 {
 		t.Fatalf("isolation or live sync check broken: turns=%+v h2Groups=%d syncs=%v", turns, len(deliv(h2).groups), r1.home.syncSinces())
 	}
+	r1.h.Settle()
 }
 
 func TestAttachGroupsCancelsCleanupAndUnsyncedPush(t *testing.T) {
@@ -2003,4 +2015,218 @@ func cloudCheckRows(r *deliverRig, head string, seq int64) json.RawMessage {
 		raw(human), raw(gone), raw(cloudCheckTask(testGroup1, testTask2, 2, testAI2, head, 9)),
 		raw(cloudCheckTask(testGroup1, testTask1, 1, testAI1, head, seq)),
 	}})
+}
+
+func TestStep17CleanupLifecycleAndRestartIdempotence(t *testing.T) {
+	r, pDir, remoteRepo, c1 := setupStep17Rig(t)
+	checkStep17GuardsAndRoleChanges(t, r, pDir, remoteRepo, c1)
+	checkStep17CancelMergeGoneAndRestart(t, r, pDir, c1)
+}
+
+func setupStep17Rig(t *testing.T) (*deliverRig, string, string, string) {
+	t.Helper()
+	r := newDeliverRig(t, true)
+	r.seedGroupAndMembers()
+	remoteDir := filepath.Join(t.TempDir(), "origin.git")
+	runTestGit(t, "", "init", "--bare", "--initial-branch=main", remoteDir)
+	seed := filepath.Join(t.TempDir(), "seed")
+	runTestGit(t, "", "clone", remoteDir, seed)
+	os.WriteFile(filepath.Join(seed, "README.md"), []byte("base\n"), 0o600)
+	runTestGit(t, seed, "add", "README.md")
+	runTestGit(t, seed, "commit", "-m", "base")
+	runTestGit(t, seed, "push", "origin", "main")
+	c1 := strings.TrimSpace(runTestGit(t, seed, "rev-parse", "HEAD"))
+
+	cfg, err := loadHostConfig(r.h)
+	assertStep17NoErr(t, err)
+	pDir := cfg.projectDir(testGroup1)
+	_, err = EnsureGroupWorkspace(t.Context(), pDir, remoteDir, "main")
+	assertStep17NoErr(t, err)
+	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 5}, Name: "W", Kind: "project", Repo: remoteDir, Base: "main", Forge: "github", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
+	return r, pDir, remoteDir, c1
+}
+
+func runTestGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, stderr, err := runIn(t.Context(), dir, "git", append([]string{"-c", "user.name=T", "-c", "user.email=t@e"}, args...)...)
+	if err != nil {
+		t.Fatalf("git %v: %v (%s)", args, err, stderr)
+	}
+	return out
+}
+
+func checkStep17GuardsAndRoleChanges(t *testing.T, r *deliverRig, pDir, remoteDir, c1 string) {
+	t.Helper()
+	wt1, rev1, kT1, kR1, kNoRow, alphaHead := seedStep17InitialTask(t, r, pDir, c1)
+	d := deliv(r.h)
+	d.mu.Lock()
+	d.groupLocked(testGroup1, r.homeKey.ID()).live = false
+	d.mu.Unlock()
+	cleanupGroupState(r.h, d, testGroup1)
+	d.mu.Lock()
+	d.groupLocked(testGroup1, r.homeKey.ID()).live = true
+	d.mu.Unlock()
+
+	pushTaskState(r, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "Alpha", Slug: "alpha", Origin: "brief", State: "active", Step: "review", Assignee: testAI1, Reviewer: testAI2, Commit: alphaHead})
+	assertStep17True(t, hasSession(r.h, kT1) && hasSession(r.h, kR1) && hasSession(r.h, kNoRow), "active sessions kept")
+	assertStep17True(t, pathExists(wt1) && pathExists(rev1), "active folders kept")
+
+	remoteAI := string(testCanonicalID(77))
+	pushTaskState(r, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 11}, Group: testGroup1, Num: 1, Title: "Alpha", Slug: "alpha", Origin: "brief", State: "active", Step: "review", Assignee: remoteAI, Reviewer: testAI2, Commit: alphaHead})
+	r.waitUntil("reassigned task session and wt removed", func() bool { return !hasSession(r.h, kT1) && !pathExists(wt1) })
+	assertStep17True(t, strings.TrimSpace(runTestGit(t, remoteDir, "rev-parse", "refs/heads/task/1-alpha")) == alphaHead, "github handoff pushed branch")
+	assertStep17True(t, hasSession(r.h, kR1) && pathExists(rev1) && slices.Contains(r.runtime.closedKeys(), kT1), "reviewer kept and kT1 closed")
+
+	kGrpKeep := SessionKey{Group: testGroup1, Member: testAI1}
+	kOtherGroup := SessionKey{Group: testGroup2, Member: testAI1, Task: testTask1}
+	r.h.Sessions.Create(Session{SessionKey: kGrpKeep, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
+	r.h.Sessions.Create(Session{SessionKey: kOtherGroup, Kind: TaskSession, Folder: "wt/1-alpha", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
+
+	unrecordedWT := filepath.Join(pDir, "wt", "1-alpha")
+	os.MkdirAll(unrecordedWT, 0o700)
+	pushTaskState(r, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 12}, Group: testGroup1, Num: 1, Title: "Alpha", Slug: "alpha", Origin: "brief", State: "active", Step: "review", Assignee: remoteAI, Reviewer: remoteAI, Commit: alphaHead})
+	r.waitUntil("changed reviewer session and folders removed", func() bool {
+		return !hasSession(r.h, kR1) && !pathExists(rev1) && !pathExists(unrecordedWT)
+	})
+	assertStep17True(t, hasSession(r.h, kGrpKeep) && hasSession(r.h, kOtherGroup), "group session and other-group session kept")
+	r.h.Sessions.End(kGrpKeep)
+	r.h.Sessions.End(kOtherGroup)
+	r.h.Sessions.End(kNoRow)
+}
+
+func seedStep17InitialTask(t *testing.T, r *deliverRig, pDir, c1 string) (string, string, SessionKey, SessionKey, SessionKey, string) {
+	t.Helper()
+	kNoRow := SessionKey{Group: testGroup1, Member: testAI1, Task: "task-unseen"}
+	r.h.Sessions.Create(Session{SessionKey: kNoRow, Kind: TaskSession, Folder: "wt/99-unseen", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
+	wt1, err := CreateTaskWorkspace(t.Context(), pDir, 1, "alpha", testAI1, "main", true)
+	assertStep17NoErr(t, err)
+	os.WriteFile(filepath.Join(wt1, "a.txt"), []byte("v1\n"), 0o600)
+	runTestGit(t, wt1, "add", "a.txt")
+	runTestGit(t, wt1, "commit", "-m", "c-alpha")
+	alphaHead := strings.TrimSpace(runTestGit(t, wt1, "rev-parse", "HEAD"))
+	os.WriteFile(filepath.Join(wt1, "dirty.txt"), []byte("discard\n"), 0o600)
+	rev1, err := PrepareReviewWorkspace(t.Context(), pDir, 1, testAI2, c1, "main", true)
+	assertStep17NoErr(t, err)
+	kT1 := SessionKey{Group: testGroup1, Member: testAI1, Task: testTask1}
+	kR1 := SessionKey{Group: testGroup1, Member: testAI2, Task: testTask1}
+	r.h.Sessions.Create(Session{SessionKey: kT1, Kind: TaskSession, Folder: "wt/1-alpha", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
+	r.h.Sessions.Create(Session{SessionKey: kR1, Kind: ReviewSession, Folder: "review/1", Agent: "codex", Home: r.homeKey.ID(), Name: "Codex"})
+	return wt1, rev1, kT1, kR1, kNoRow, alphaHead
+}
+
+func assertStep17True(t *testing.T, cond bool, msg string) {
+	t.Helper()
+	if !cond {
+		t.Fatal(msg)
+	}
+}
+
+func assertStep17NoErr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func checkStep17CancelMergeGoneAndRestart(t *testing.T, r *deliverRig, pDir, c1 string) {
+	t.Helper()
+	// Cancelled task removes dirty wt/2-beta and review/2 while keeping local branch task/2-beta.
+	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 20}, Name: "W", Kind: "project", Repo: filepath.Join(pDir, "repo"), Base: "main", Forge: "none", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
+	wt2, kT2, rev2, kR2, head2 := seedTaskAndReview(t, r, pDir, testTask2, 2, "beta", c1)
+	os.WriteFile(filepath.Join(wt2, "dirty2.txt"), []byte("dirty\n"), 0o600)
+	pushTaskState(r, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 21}, Group: testGroup1, Num: 2, Title: "Beta", Slug: "beta", Origin: "brief", State: "cancelled", Step: "local_check", Assignee: testAI1, Reviewer: testAI2, Commit: head2})
+	r.waitUntil("cancelled task cleaned", func() bool {
+		return !hasSession(r.h, kT2) && !hasSession(r.h, kR2) && !pathExists(wt2) && !pathExists(rev2)
+	})
+	if strings.TrimSpace(runTestGit(t, filepath.Join(pDir, "repo"), "rev-parse", "refs/heads/task/2-beta")) != head2 {
+		t.Fatal("cancelled task should keep its local branch")
+	}
+
+	// Merged task removes wt/3-gamma, review/3, both sessions, and deletes local branch task/3-gamma; repeated push is idempotent.
+	task3 := string(testCanonicalID(63))
+	wt3, kT3, rev3, kR3, head3 := seedTaskAndReview(t, r, pDir, task3, 3, "gamma", c1)
+	mergedRow := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: task3, Seq: 30}, Group: testGroup1, Num: 3, Title: "Gamma", Slug: "gamma", Origin: "brief", State: "merged", Step: "merge", Assignee: testAI1, Reviewer: testAI2, Commit: head3}
+	pushTaskState(r, mergedRow)
+	r.waitUntil("merged task cleaned", func() bool {
+		return !hasSession(r.h, kT3) && !hasSession(r.h, kR3) && !pathExists(wt3) && !pathExists(rev3)
+	})
+	if _, _, err := runIn(t.Context(), filepath.Join(pDir, "repo"), "git", "rev-parse", "--verify", "refs/heads/task/3-gamma"); err == nil {
+		t.Fatal("expected merged local branch task/3-gamma to be deleted")
+	}
+	closedBefore := len(r.runtime.closedKeys())
+	mergedRow.Seq = 31
+	pushTaskState(r, mergedRow)
+	cleanupGroupState(r.h, deliv(r.h), testGroup1)
+	if len(r.runtime.closedKeys()) != closedBefore {
+		t.Fatal("repeated merged push was not idempotent")
+	}
+
+	checkGoneMemberAndRestartCleanup(t, r, pDir, c1)
+}
+
+func checkGoneMemberAndRestartCleanup(t *testing.T, r *deliverRig, pDir, c1 string) {
+	t.Helper()
+	// Gone member closes GroupSession + TaskSession + ReviewSession and ends their session rows.
+	task4 := string(testCanonicalID(64))
+	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: testAI1}, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
+	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: testAI2}, Kind: GroupSession, Folder: "repo", Agent: "codex", Home: r.homeKey.ID(), Name: "Codex"})
+	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: testAI1, Task: task4}, Kind: TaskSession, Folder: "wt/4-delta", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
+	r.h.Sessions.Create(Session{SessionKey: SessionKey{Group: testGroup1, Member: testAI2, Task: task4}, Kind: ReviewSession, Folder: "review/4", Agent: "codex", Home: r.homeKey.ID(), Name: "Codex"})
+
+	gone1 := proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI1, Seq: 41}, Gone: true}
+	gone2 := proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: testAI2, Seq: 42}, Gone: true}
+	frame := proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{json.RawMessage(marshalWire(gone1)), json.RawMessage(marshalWire(gone2))}}
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(frame)))
+	r.waitUntil("gone members cleaned", func() bool {
+		return len(r.h.Sessions.All()) == 0
+	})
+
+	// Restart over existing store with an orphan Session row and orphan wt/review folders cleans all of them on sync completion.
+	r.putAIMember(testAI1, "Claude", r.hostKey.ID(), false, 45)
+	r.putAIMember(testAI2, "Codex", r.hostKey.ID(), false, 46)
+	task5 := string(testCanonicalID(65))
+	wt5, kT5, rev5, _, head5 := seedTaskAndReview(t, r, pDir, task5, 5, "orphan", c1)
+	r.h.Sessions.End(SessionKey{Group: testGroup1, Member: testAI2, Task: task5})
+	r.setSetting("homes", []proto.Home{{Group: testGroup1, Home: r.homeKey.ID(), Name: "W"}})
+
+	r2 := newDeliverRigOnStore(t, r.db)
+	merged5 := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: task5, Seq: 50}, Group: testGroup1, Num: 5, Title: "Orphan", Slug: "orphan", Origin: "brief", State: "merged", Step: "merge", Assignee: testAI1, Reviewer: testAI2, Commit: head5}
+	r2.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 49}, Name: "W", Kind: "project", Repo: filepath.Join(pDir, "repo"), Base: "main", Forge: "none", Home: r2.homeKey.ID(), Secretary: testSec, Checks: []string{}})
+	r2.putTask(merged5)
+	r2.h.Attach(r2.homeKey.ID(), r2.home)
+	r2.waitUntil("restart cleaned orphan session and folders", func() bool {
+		return !hasSession(r2.h, kT5) && !pathExists(wt5) && !pathExists(rev5)
+	})
+}
+
+func seedTaskAndReview(t *testing.T, r *deliverRig, pDir, taskID string, num int, slug, baseCommit string) (string, SessionKey, string, SessionKey, string) {
+	t.Helper()
+	numText := strconv.Itoa(num)
+	wt, err := CreateTaskWorkspace(t.Context(), pDir, num, slug, testAI1, "main", false)
+	assertStep17NoErr(t, err)
+	file := "f-" + numText + ".txt"
+	os.WriteFile(filepath.Join(wt, file), []byte("ok\n"), 0o600)
+	runTestGit(t, wt, "add", file)
+	runTestGit(t, wt, "commit", "-m", "work")
+	head := strings.TrimSpace(runTestGit(t, wt, "rev-parse", "HEAD"))
+	rev, err := PrepareReviewWorkspace(t.Context(), pDir, num, testAI2, baseCommit, "main", false)
+	assertStep17NoErr(t, err)
+	kT := SessionKey{Group: testGroup1, Member: testAI1, Task: taskID}
+	kR := SessionKey{Group: testGroup1, Member: testAI2, Task: taskID}
+	r.h.Sessions.Create(Session{SessionKey: kT, Kind: TaskSession, Folder: "wt/" + numText + "-" + slug, Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
+	r.h.Sessions.Create(Session{SessionKey: kR, Kind: ReviewSession, Folder: "review/" + numText, Agent: "codex", Home: r.homeKey.ID(), Name: "Codex"})
+	return wt, kT, rev, kR, head
+}
+
+func pushTaskState(r *deliverRig, row proto.TaskRow) {
+	if row.Depends == nil {
+		row.Depends = []string{}
+	}
+	frame := proto.Rows{Type: "rows", Group: row.Group, Rows: []json.RawMessage{json.RawMessage(marshalWire(row))}}
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(frame)))
+}
+
+func hasSession(h *Host, key SessionKey) bool {
+	_, ok := h.Sessions.Get(key)
+	return ok
 }

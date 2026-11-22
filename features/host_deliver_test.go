@@ -150,6 +150,12 @@ func (r *accRunner) Turn(_ context.Context, h *host.Host, key host.SessionKey, _
 
 func (r *accRunner) Answer(*host.Host, host.SessionKey, string, bool) error { return nil }
 
+func (r *accRunner) Close(h *host.Host, key host.SessionKey) {
+	if s, ok := h.Sessions.Get(key); ok && s.State != host.Dormant {
+		h.Sessions.Move(key, s.State, host.Dormant)
+	}
+}
+
 func (r *accRunner) count(member string) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -323,6 +329,9 @@ func registerDeliverGivenSteps(sc *godog.ScenarioContext, f fixtures, cleanup fu
 		installHooks()
 		cleanup(func() {
 			env.closeHome()
+			if env.h != nil {
+				env.h.Settle()
+			}
 			if env.db != nil {
 				env.db.Close()
 			}

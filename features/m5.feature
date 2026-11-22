@@ -10,6 +10,7 @@ Feature: Tasks from brief to merge
     When the owner confirms the brief and both tasks run through checks, cross-AI review, merge and summary
     Then both tasks are merged onto base with two summary cards in the main line and no approval card
     And each passing review was followed by its merge with no AI turn in between and a task_merged row in the thread
+    And each task ran in its own session and worktree, and after the merge those sessions and folders are gone
 
   Scenario: Two tasks run from brief to merge with a bare remote and fake gh, including push_branch at level 2 (A5.1, A5.12, A5.13)
     Given a project group with forge "github", a bare remote, fake gh, a secretary and working AIs "Claude" and "Codex" at level 2
@@ -18,6 +19,7 @@ Feature: Tasks from brief to merge
     Then push_branch pushed the assigned branch to origin at level 2 with no approval card
     And both tasks are merged on origin with two summary cards carrying pull-request numbers and no approval card
     And each passing review was followed by its merge with no AI turn in between and a task_merged row in the thread
+    And each task ran in its own session and worktree, and after the merge those sessions and folders are gone
 
   Scenario: Clean-tree, passing-check and unchanged-head rules govern submission and merge (A5.3)
     Given an active brief task on forge "none" assigned to "Claude" and reviewed by "Codex"
