@@ -1181,7 +1181,7 @@ func callHostSurface(h *host.Host, from host.Owner, by, name string, payload any
 }
 
 func configureHostAI(h *host.Host, from host.Owner, ids *seqIDGen, ownerID, homeID string, groupID proto.ID, aiName, agent string) error {
-	if _, err := h.Agents(context.Background()); err != nil {
+	if _, err := h.Agents(context.Background(), false); err != nil {
 		return err
 	}
 	setCmd := proto.AgentSet{

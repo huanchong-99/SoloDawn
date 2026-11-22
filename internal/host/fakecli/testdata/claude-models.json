@@ -1,0 +1,11 @@
+{
+  "session": "models",
+  "steps": [
+    {"dir":"stdin","msg":{"type":"control_request","request_id":"models","request":{"subtype":"initialize"}}},
+    {"dir":"stdout","msg":{"type":"control_response","response":{"subtype":"success","request_id":"models","response":{"models":[
+      {"value":"default","resolvedModel":"claude-opus-5","displayName":"Default","supportsEffort":true,"supportedEffortLevels":["low","high"],"supportsFastMode":true},
+      {"value":"haiku","resolvedModel":"claude-haiku-5","displayName":"Haiku","supportsEffort":false}
+    ]}}}},
+    {"dir":"eof"}
+  ]
+}

@@ -166,7 +166,7 @@ func newPairHarness(t *testing.T, ownedBy *identity.Key, withSharedPath bool) *p
 	surface := NewSurface(SurfaceConfig{
 		ID: nodeKey.ID(), OS: "darwin/arm64", Version: "v0.3.1",
 		Store: db, Sessions: sessions, Host: h,
-		Agents: func(context.Context) ([]proto.HostAgent, error) { return []proto.HostAgent{}, nil },
+		Agents: func(context.Context, bool) ([]proto.HostAgent, error) { return []proto.HostAgent{}, nil },
 	})
 	putRV := func(tx *store.Tx) error {
 		_, err := tx.Exec("INSERT INTO setting(key, value) VALUES('rendezvous', ?)", string(dvlMustEncode([]string{rvURL})))

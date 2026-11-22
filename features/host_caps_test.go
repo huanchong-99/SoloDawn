@@ -147,7 +147,7 @@ func (w *hostCapsWorld) givenSyntheticCLI(agent, accountsCSV, approvals, takeove
 		return err
 	}
 	w.h = h
-	_, err = h.Agents(context.Background())
+	_, err = h.Agents(context.Background(), false)
 	return err
 }
 
@@ -254,7 +254,7 @@ func (w *hostCapsWorld) setDriverCaps(agent string, caps host.Capabilities) {
 
 func (w *hostCapsWorld) whenConfigureAPIKeyAI(aiName, agent string) error {
 	n := w.m3.node()
-	if _, err := n.Host.Agents(context.Background()); err != nil {
+	if _, err := n.Host.Agents(context.Background(), false); err != nil {
 		return err
 	}
 	badErr := w.send("agent.set", proto.AgentSet{HostCommand: w.header("agent.set"), Agent: agent, Account: "personal"})

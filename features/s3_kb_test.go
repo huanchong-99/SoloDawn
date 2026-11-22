@@ -162,7 +162,7 @@ func (w *s3KBWorld) attachBrowsers(withSecond bool) {
 func (w *s3KBWorld) declareClaudeAccount() error {
 	ctx := context.Background()
 	n := w.cluster.Nodes[0]
-	if _, err := n.Host.Agents(ctx); err != nil {
+	if _, err := n.Host.Agents(ctx, false); err != nil {
 		return err
 	}
 	setRaw, err := marshalNoEscape(proto.AgentSet{
