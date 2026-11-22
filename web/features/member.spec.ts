@@ -189,7 +189,6 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
                 g: website,
                 member: '1PC8WineBrUQ-apCjx7tug',
                 level: 2,
-                repo_config: false,
                 state: 'working',
                 queued: 0,
               },

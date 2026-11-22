@@ -86,13 +86,13 @@ func TestNewClaudeUUIDFormatAndBits(t *testing.T) {
 }
 
 func TestClaudeCommandArgsStructured(t *testing.T) {
-	launch := Launch{
+	groupLaunch := Launch{
 		Folder:       t.TempDir(),
 		Level:        1,
 		Shim:         []string{"/bin/solodawn", "mcp", "--token", "tok-1"},
 		Instructions: "Speak through <post> & reply.",
 	}
-	argv, session, err := claudeCommandArgs(launch, false, false)
+	argv, session, err := claudeCommandArgs(groupLaunch, false, false)
 	claudeNoErr(t, err)
 	claudeTrue(t, claudeUUIDPattern.MatchString(session), "generated session is not UUID v4")
 	mcpJSON := claudeArgAfter(t, argv, "--mcp-config")
@@ -105,7 +105,13 @@ func TestClaudeCommandArgsStructured(t *testing.T) {
 		"--append-system-prompt", "Speak through <post> & reply.",
 		"--permission-mode", "default", "--tools", "Read,Glob,Grep,AskUserQuestion",
 	}
-	claudeEqual(t, "structured argv", argv, want)
+	claudeEqual(t, "structured group argv", argv, want)
+
+	taskLaunch := groupLaunch
+	taskLaunch.RepoConfig = true
+	taskArgv, _, err := claudeCommandArgs(taskLaunch, false, false)
+	claudeNoErr(t, err)
+	claudeEqual(t, "structured task setting-sources", claudeArgAfter(t, taskArgv, "--setting-sources"), "user,project")
 }
 
 func TestClaudeCommandArgsInteractiveResume(t *testing.T) {
@@ -135,7 +141,7 @@ func TestClaudeInteractiveFirstStartWithInstructions(t *testing.T) {
 		Folder:       t.TempDir(),
 		Level:        1,
 		Shim:         []string{"solodawn", "mcp", "--token", "tok-int"},
-		Instructions: "Task instructions.",
+		Instructions: "Group instructions.",
 	})
 	claudeNoErr(t, err)
 	claudeTrue(t, claudeUUIDPattern.MatchString(session), "session is not UUID v4")
@@ -144,7 +150,7 @@ func TestClaudeInteractiveFirstStartWithInstructions(t *testing.T) {
 	want := []string{
 		"claude", "--session-id", session, "--mcp-config", mcpJSON, "--strict-mcp-config",
 		"--setting-sources", "user", "--allowedTools", "mcp__solodawn",
-		"--append-system-prompt", "Task instructions.",
+		"--append-system-prompt", "Group instructions.",
 		"--permission-mode", "default", "--tools", "Read,Glob,Grep,AskUserQuestion",
 	}
 	claudeEqual(t, "interactive first-start argv", argv, want)

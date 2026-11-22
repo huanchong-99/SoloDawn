@@ -112,6 +112,48 @@ func TestSurfaceDefaultsReadHelpersAndNulls(t *testing.T) {
 	}
 }
 
+func mustSurfaceSession(t *testing.T, h *host.Host, home string, key host.SessionKey, kind host.Kind, agent string) {
+	t.Helper()
+	if err := h.Sessions.Create(host.Session{SessionKey: key, Kind: kind, Folder: "repo", Agent: agent, Home: home, Name: "AI"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustMoveSurfaceSession(t *testing.T, h *host.Host, key host.SessionKey, from, to host.State) {
+	t.Helper()
+	if err := h.Sessions.Move(key, from, to); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertSurfaceHeader(t *testing.T, st proto.HostState, savedHomes []proto.Home) {
+	t.Helper()
+	if st.Update == nil || st.Relay == nil {
+		t.Fatalf("missing Update/Relay: %+v", st)
+	}
+	got := [10]any{st.Name, st.OS, st.Version, st.Open, st.MaxOpen, st.Offline, st.Settings.DefaultLevel, st.Update.Version, st.Relay.Used, slices.Equal(st.Homes, savedHomes)}
+	want := [10]any{"custom-box", "macOS 15.2", "v0.3.1", 3, 6, false, 3, "v0.3.2", int64(10), true}
+	if got != want {
+		t.Fatalf("unexpected HostState header: %+v", st)
+	}
+}
+
+func assertSurfaceAgentGroups(t *testing.T, agents []proto.HostAgent, wantGroups map[proto.ID]proto.AgentGroup) {
+	t.Helper()
+	if len(agents) != 2 || [2]int{len(agents[0].Groups), len(agents[1].Groups)} != [2]int{3, 1} {
+		t.Fatalf("unexpected agent groups: %+v", agents)
+	}
+	byGroup := map[proto.ID]proto.AgentGroup{}
+	for _, ag := range append(slices.Clone(agents[0].Groups), agents[1].Groups...) {
+		byGroup[ag.Group] = ag
+	}
+	for g, want := range wantGroups {
+		if byGroup[g] != want {
+			t.Fatalf("group %s = %+v, want %+v", g, byGroup[g], want)
+		}
+	}
+}
+
 func TestHostInfoAgentsMemberStateAndSettings(t *testing.T) {
 	db := sesOpenStore(t)
 	nodeKey, ownerKey := sesKey("srf-node2"), sesKey("srf-owner2")
@@ -124,29 +166,15 @@ func TestHostInfoAgentsMemberStateAndSettings(t *testing.T) {
 	m1, m2, m3, m4 := string(sesID("m1")), string(sesID("m2")), string(sesID("m3")), string(sesID("m4"))
 	tTake, tWork, tWait := string(sesID("t-take")), string(sesID("t-work")), string(sesID("t-wait"))
 
-	mustSession := func(key host.SessionKey, kind host.Kind, agent string, st host.State) {
-		t.Helper()
-		if err := h.Sessions.Create(host.Session{SessionKey: key, Kind: kind, Folder: "repo", Agent: agent, Home: nodeKey.ID(), Name: "AI"}); err != nil {
-			t.Fatal(err)
-		}
-		if st == host.Waiting {
-			if err := h.Sessions.Move(key, host.Dormant, host.Working); err != nil {
-				t.Fatal(err)
-			}
-			if err := h.Sessions.Move(key, host.Working, host.Waiting); err != nil {
-				t.Fatal(err)
-			}
-		} else if st != host.Dormant {
-			if err := h.Sessions.Move(key, host.Dormant, st); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	mustSession(host.SessionKey{Group: g1, Member: m1}, host.GroupSession, "claude", host.Dormant)
-	mustSession(host.SessionKey{Group: g1, Member: m1, Task: tTake}, host.TaskSession, "claude", host.Takeover)
-	mustSession(host.SessionKey{Group: g2, Member: m2, Task: tWork}, host.TaskSession, "claude", host.Working)
-	mustSession(host.SessionKey{Group: g3, Member: m3, Task: tWait}, host.TaskSession, "claude", host.Waiting)
-	mustSession(host.SessionKey{Group: g4, Member: m4}, host.GroupSession, "codex", host.Dormant)
+	mustSurfaceSession(t, h, nodeKey.ID(), host.SessionKey{Group: g1, Member: m1}, host.GroupSession, "claude")
+	mustSurfaceSession(t, h, nodeKey.ID(), host.SessionKey{Group: g1, Member: m1, Task: tTake}, host.TaskSession, "claude")
+	mustMoveSurfaceSession(t, h, host.SessionKey{Group: g1, Member: m1, Task: tTake}, host.Dormant, host.Takeover)
+	mustSurfaceSession(t, h, nodeKey.ID(), host.SessionKey{Group: g2, Member: m2, Task: tWork}, host.TaskSession, "claude")
+	mustMoveSurfaceSession(t, h, host.SessionKey{Group: g2, Member: m2, Task: tWork}, host.Dormant, host.Working)
+	mustSurfaceSession(t, h, nodeKey.ID(), host.SessionKey{Group: g3, Member: m3, Task: tWait}, host.TaskSession, "claude")
+	mustMoveSurfaceSession(t, h, host.SessionKey{Group: g3, Member: m3, Task: tWait}, host.Dormant, host.Working)
+	mustMoveSurfaceSession(t, h, host.SessionKey{Group: g3, Member: m3, Task: tWait}, host.Working, host.Waiting)
+	mustSurfaceSession(t, h, nodeKey.ID(), host.SessionKey{Group: g4, Member: m4}, host.GroupSession, "codex")
 
 	remoteHome := sesKey("remote-home").ID()
 	savedHomes := []proto.Home{{Group: proto.ID(g1), Home: nodeKey.ID(), Name: "Local"}, {Group: proto.ID(g2), Home: remoteHome, Name: "Remote"}}
@@ -181,29 +209,13 @@ func TestHostInfoAgentsMemberStateAndSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Name != "custom-box" || st.OS != "macOS 15.2" || st.Version != "v0.3.1" || st.Open != 3 || st.MaxOpen != 6 || st.Offline ||
-		st.Update == nil || st.Update.Version != "v0.3.2" || st.Relay == nil || st.Relay.Used != 10 ||
-		!slices.Equal(st.Homes, savedHomes) || st.Settings.DefaultLevel != 3 {
-		t.Fatalf("unexpected HostState: %+v", st)
-	}
-	if len(st.Agents) != 2 || len(st.Agents[0].Groups) != 3 || len(st.Agents[1].Groups) != 1 {
-		t.Fatalf("unexpected agent groups: %+v", st.Agents)
-	}
-	byGroup := map[proto.ID]proto.AgentGroup{}
-	for _, ag := range append(slices.Clone(st.Agents[0].Groups), st.Agents[1].Groups...) {
-		byGroup[ag.Group] = ag
-	}
-	wantGroups := map[proto.ID]proto.AgentGroup{
-		proto.ID(g1): {Group: proto.ID(g1), Member: proto.ID(m1), Level: 3, RepoConfig: false, State: "takeover", Task: proto.ID(tTake), Queued: 0},
-		proto.ID(g2): {Group: proto.ID(g2), Member: proto.ID(m2), Level: 3, RepoConfig: false, State: "working", Task: proto.ID(tWork), Queued: 0},
-		proto.ID(g3): {Group: proto.ID(g3), Member: proto.ID(m3), Level: 3, RepoConfig: false, State: "waiting", Task: proto.ID(tWait), Queued: 0},
-		proto.ID(g4): {Group: proto.ID(g4), Member: proto.ID(m4), Level: 3, RepoConfig: false, State: "dormant", Queued: 0},
-	}
-	for g, want := range wantGroups {
-		if byGroup[g] != want {
-			t.Fatalf("group %s = %+v, want %+v", g, byGroup[g], want)
-		}
-	}
+	assertSurfaceHeader(t, st, savedHomes)
+	assertSurfaceAgentGroups(t, st.Agents, map[proto.ID]proto.AgentGroup{
+		proto.ID(g1): {Group: proto.ID(g1), Member: proto.ID(m1), Level: 3, State: "takeover", Task: proto.ID(tTake), Queued: 0},
+		proto.ID(g2): {Group: proto.ID(g2), Member: proto.ID(m2), Level: 3, State: "working", Task: proto.ID(tWork), Queued: 0},
+		proto.ID(g3): {Group: proto.ID(g3), Member: proto.ID(m3), Level: 3, State: "waiting", Task: proto.ID(tWait), Queued: 0},
+		proto.ID(g4): {Group: proto.ID(g4), Member: proto.ID(m4), Level: 3, State: "dormant", Queued: 0},
+	})
 
 	hookErr = errors.New("probe failed")
 	if _, err := sf.HostState(t.Context()); !errors.Is(err, hookErr) {
