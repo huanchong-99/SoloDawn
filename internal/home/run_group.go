@@ -93,16 +93,7 @@ func runErr(re int64, code, msg string) proto.ErrorResponse {
 
 // command applies one cmd in its transaction and answers it.
 func (g *runGroup) command(c *Conn, re int64, env proto.Envelope) {
-	now := g.loop.cfg.Now()
-	res, err := g.transact(now, func(d Disk, tx *store.Tx) (Result, error) {
-		return g.loop.cfg.Tables.Commands.Apply(g.state, d, tx, env, now)
-	})
-	if err != nil {
-		g.loop.cfg.Report(fmt.Errorf("group %s, a command of %s: %w", g.state.ID, c.device, err))
-		c.send(runErr(re, "internal", "the home could not apply the command; the cause is in its log"))
-		return
-	}
-	g.settle(res, now, func() { c.send(res.Frame(re)) })
+	g.seamCommand(c, re, env)
 }
 
 // tick runs the timers in the order of their names, then sends the inbox
