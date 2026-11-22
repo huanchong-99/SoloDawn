@@ -126,9 +126,9 @@ the type does not name, not with `Decode`.
 
 - `host.info` is answered with `HostInfo` and pushed as `HostInfoPush`, the same
   `HostState` without `re` and `ok`. `relay` and an agent's `account` may be `null`;
-  each agent entry carries `Driver` once populated (`step-3/drivers.md` section 6).
+  each agent entry carries `Driver` (`Accounts`, `Takeover`) once populated (`step-3/drivers.md` section 6).
 - Presets and knowledge-base documents (`step-3/knowledge.md`) add optional `type`
-  (`NoteType`) and `name` on `NoteRow` and `Note` (answered with `id` and `replaced`
+  (the field `NoteType`, JSON `type`) and `name` on `NoteRow` and `Note` (answered with `id` and `replaced`
   in `CmdResult`), `preset` on `BriefBody`, and `q` on `FetchKind`.
 - In `SettingsSet`, `caps` is `AgentCaps`: a member per agent being changed, its
   caps whole. A field per agent, not a map, so that every name on the wire is fixed.

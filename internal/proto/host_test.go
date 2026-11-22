@@ -14,10 +14,10 @@ func hostState() HostState {
 		Relay: &RelayUse{3250000, 52428800},
 		Agents: []HostAgent{
 			{"claude", "2.1.311", new("personal"), true, Caps{Day: &Cap{"turns", 200}, Task: &Cap{"usd", 12.5}},
-				&Driver{[]string{"personal", "team", "api_key"}, []int{1, 2, 3}, "tool", "new", []string{"tokens", "usd", "window_pct"}},
+				&Driver{[]string{"personal", "team", "api_key"}, "new"},
 				[]AgentGroup{{ID(group), ID(agent), 2, "working", ID(taskID), 1}}},
 			{"codex", "0.164.0", nil, false, Caps{},
-				&Driver{[]string{"personal", "team", "api_key"}, []int{1, 2, 3}, "conn", "resume", []string{}},
+				&Driver{[]string{"personal", "team", "api_key"}, "resume"},
 				[]AgentGroup{}},
 		},
 		Settings: HostSettings{90, 15, 2, false, []string{}},
