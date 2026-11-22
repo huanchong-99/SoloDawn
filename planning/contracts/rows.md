@@ -82,7 +82,12 @@ and clears `task`. `last_seen` on an AI member row is set when the AI joins
 and on each accepted `member status`.
 
 `[unverified]` Which usage figures each CLI exposes in structured mode.
-Spikes S-2 and S-3 record them; the card shows what exists.
+Spikes S-2 and S-3 record them; the card shows what exists: the host sends
+`window_pct` and `window_resets` from the CLI's latest rate-limit event and
+`turns_today` from the local day's `usage` row (`{}` before either is
+known). `day_cap_pct`, `spend_today` and `spend_cap` go with caps (the card
+shows spend only against its cap), which are postponed after 1.0 with
+`settings.set`.
 
 ## 3. `device`
 
