@@ -326,9 +326,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `app`, `nav`, `bar`, `page` (the title of each page), `pref` (the names of the preferences),
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
-  of its English file to the type `Key`; today the areas are `approval`, `brief`, `call`, `chat`,
-  `decision`, `groupinfo`, `groups`, `member`, `nodes`, `notify`, `pairing`, `reminder`, `settings`,
-  `states`, `summary`, `task`, `terminal` and `thread`. `src/messages/files.glob.ts` finds every file by
+  of its English file to the type `Key`. Each area has its own pair of files in `src/messages/`
+  (`<area>.en.json` and `<area>.zh-CN.json`); the folder shows which areas exist.
+  `src/messages/files.glob.ts` finds every file by
   its name, and `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
   empty text, or has keys that differ between its two languages, and naming the area when it has
