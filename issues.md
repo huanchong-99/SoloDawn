@@ -12,6 +12,23 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `internal/home/cmd_confirm.go` uses the step-1 task machine's current role and step; T2-2b owns role-item gating and confirmation waits.
 - Status: open for T2-2b integration. Its held role items must not qualify for the thread exception in `planning/contracts/step-2/confirm.md` section 2.
 
+### 2026-11-22 · limitation · Remembered addresses are not dialled yet
+
+- Symptom: `home.add` records signalling addresses, but a node still needs a shared configured rendezvous to reach an external home.
+- Cause: the node's route lookup in `internal/node/node.go` uses active pairing and configured rendezvous paths, not the remembered addresses.
+- Status: open.
+### 2026-11-22 · limitation · Rendezvous has no explicit room leave
+
+- Symptom: cancelling an invitation stops browser handling, but the rendezvous socket remains in the room until expiry or disconnect. Retrying the same room on the same socket does not trigger a new `joined` from a home already in the room.
+- Cause: `internal/rendezvous/room.go` has no leave frame. It ignores duplicate joins by the same socket and caps membership at 16 rooms per connection.
+- Status: open; the browser must keep the socket alive for existing homes.
+
+### 2026-11-22 · limitation · Browser invitation joining needs the node and home implementations
+
+- Symptom: a current node does not admit a browser through an invitation; it knows only protocol version 1.
+- Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts`. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a. U2-1 supplies the join page.
+- Status: open until those units are integrated. The browser exchange is covered against a simulated home, not a released node.
+
 ### 2026-11-22 · limitation · `host.CheckTakeover` awaits `takeover.start` (`HS-20`) and `driver` in `host.info` awaits `P-5` / `T3-2`
 
 - Symptom: `host.CheckTakeover` (`internal/host/caps.go`) is not yet wired to a `Surface["takeover.start"]` handler, and `Host.Agents` (`internal/host/agents.go`) does not yet populate a `driver` field on `proto.HostAgent` in `host.info`.
@@ -82,7 +99,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: a `call` message whose state is `denied` (`row-msg-call-denied`, frozen by P-4a) shows the waiting line and the waiting state in the call area.
 - Cause: `callView` treats every status other than `answered` as waiting (`web/src/lib/call.ts:78`). The states sheet therefore lists three call rows, and `web/features/call.spec.ts` expects them.
-- Status: open, accepted for P-4a. Resolved when U2-2 draws a denied call.
+- Status: resolved in U2-2. The call block shows “Denied” without a waiting timer or reply.
 
 ### 2026-11-22 · limitation · A9.21 lacks a same-connection network-switch driver
 
