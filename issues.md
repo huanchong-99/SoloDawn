@@ -7,10 +7,28 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ## Open
 
 ### 2026-11-22 · limitation · Task participation history is inferred from current fields
+### 2026-11-22 · deviation · The Go export scenarios do not exercise browser UI or an OS timer
+
+- Symptom: A9.27 and A9.28 exercise browser peers at the protocol boundary, not the browser's own follow logic or the owner-only commands in group info. A9.28 takes successive copies without waiting for an OS timer at one-minute intervals.
+- Cause: `features/s2_export.feature:12,19,24` use the I2-0 Go cast and two invocations of the copy command. The product does not schedule copies (`planning/contracts/step-2/export.md:60-62`).
+- Status: open. Browser coverage belongs to I2-2 after U2-5 and W2-1. The OS timer is not verified.
+### 2026-11-22 · limitation · Home task participation needs the role-confirmation lane
 
 - Symptom: a final task cancelled before its first role item was queued can qualify for the thread exception after its expired card is pruned, as can an assignee newly named by row 11 before its first activation. A reviewer's earlier participation can be lost after a later reassignment/review overwrites its evidence.
 - Cause: `internal/home/cmd_confirm.go:48-80` derives participation from current roles, state, step and latest review, excluding unconfirmed role cards. Acknowledged inbox items are deleted; task rows contain no durable participation history. Row 11 also cannot durably distinguish an owner's reassignment that overrides an earlier closed card from that card; a foreign reassignment to the same AI after expiry needs a new request, since the request's one card is closed (`internal/home/cmd_confirm_task.go:109-123,138-154`).
 - Status: open, accepted for T2-2b pending the owner's review: no new table, export format or wire shape. Held role cards no longer qualify; known participation survives finalization while its current fields still show it.
+
+### 2026-11-22 · limitation · A failed move can leave a usable export file
+
+- Symptom: if committing the source deletion fails after publishing the SQLite file, the command fails and the source remains home, but the export file is already usable as a copy.
+- Cause: `internal/store/export.go` publishes the completed SQLite snapshot before deleting the group's rows in the source transaction. The filesystem rename cannot be rolled back with SQLite.
+- Status: open. Do not import a failed move as a move; retry export first.
+
+### 2026-11-22 · limitation · An inbox item handled just before a move can be handled again
+
+- Symptom: if a host acted on an item before a move but its ack did not reach the old home in time, the item is still unacknowledged in the export. The new home sends it with a new local item ID.
+- Cause: delivery deduplication is keyed by home device and item ID, and the inbox format does not carry the old home's delivery identity.
+- Status: open. Acknowledging the imported item deletes it at its new home.
 
 ### 2026-11-22 · limitation · Remembered addresses are not dialled yet
 

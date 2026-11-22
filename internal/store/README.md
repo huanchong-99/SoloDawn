@@ -1,5 +1,12 @@
 # SQLite store
 
+`export.go` writes a standalone SQLite snapshot containing one group's rows
+(including markers), counters, unacknowledged inbox and its people's device
+logs and push subscriptions. A move removes the group's data and records its
+new device in the `moved` setting. Import binds the group to the receiving node,
+rebuilds the knowledge-base index and assigns destination-local inbox IDs.
+Receipts and session rows are not copied.
+
 `Open(path)` migrates the node database and enables WAL for files. Use
 `:memory:` for isolated tests. Each `Write` callback runs on the one writer;
 return its first error to roll back counters, rows, inbox items and receipts
