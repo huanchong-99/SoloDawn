@@ -9,9 +9,9 @@ Feature: Confirmation cards in the home
     When the first owner mentions the other AI
     Then a pending "direct" card exists with no delivery
     When the first owner tries to confirm it
-    Then the confirmation command answers "forbidden"
+    Then the home confirmation command answers "forbidden"
     When the second owner's second device confirms it twice with one nonce
-    Then the confirmation command answers ""
+    Then the home confirmation command answers ""
     And the confirmation card is "confirmed"
     And the latest delivery is "mention"
     When the second owner mentions their own AI
@@ -52,12 +52,12 @@ Feature: Confirmation cards in the home
     When the second owner adds the first owner as an approval delegate
     And the other AI posts an approval card for both owners
     And the first owner approves that approval
-    Then the confirmation command answers ""
+    Then the home confirmation command answers ""
     And the latest delivery is "decided"
     When the other AI posts an approval card for both owners
     And the second owner removes the first owner as an approval delegate
     And the first owner approves that approval
-    Then the confirmation command answers "forbidden"
+    Then the home confirmation command answers "forbidden"
 
   Scenario: Pending cards expire when their request is retained no longer
     When the first owner mentions the other AI
