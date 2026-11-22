@@ -186,6 +186,9 @@ The checks and reviews (`cmd_review.go`) take the names that start with `rev`, t
 their test functions start with `TestReviewCmd`. The merges and summaries (`cmd_merge.go`) take the
 names that start with `mrg`, their tests too, and their test functions start with `TestMerge`.
 Host events (`cmd_hostev.go`) take the names that start with `hev`, their tests too, and their test
+functions start with `TestHostEv`; the file exports `HostOfflineEvent`. The calls (`cmd_call.go`)
+take the names that start with `cal`, their tests too, and their test functions start with
+`TestCall`.
 functions start with `TestHostEv`; the file exports `HostOfflineEvent`.
 Retention (`retention.go`) takes the names that start with `ret`, exports `Retain`, and its test
 functions start with `TestRetention`.
@@ -660,6 +663,25 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
   `Pending` and the newest 50 main-line messages (`PageThread(nil, 0, 50)`) without duplicates in
   increasing `seq` order.
 
+## Calls
+
+`cmd_call.go` holds `post` of kinds `call` and `reply`
+([commands](../../planning/contracts/commands.md) 1.3;
+[messages](../../planning/contracts/messages.md) 1, 2.6 and 3.4;
+[ask](../../planning/flows/ask.md)), under the keys `post/call` and `post/reply`, sharing
+`postCheck`, `postRows` and `postTaskID` with `cmd_post.go`. Where the contracts are silent, it
+does this:
+
+- **Call.** A self-call (`body.to` equal to `as`) is `bad_request`, a non-null `thread` absent from
+  `State.Tasks` is `not_found`, a `body.to` absent from `State.AIs` is `conflict`, and `body.depth`
+  above `Group.Limits.AskDepth` is `limit` (A6.4). One `mention` item is queued for `body.to`, with
+  `task` set when in a thread, even when `mentions` also names `body.to` or other AIs; round
+  counting and held mentions wrap `post/*` in unit HM-13.
+- **Reply.** A `re` `null` or a `thread` that differs from the call's `thread` is `bad_request`; a
+  missing `re` message on `Disk` or a deleted task in `State.Tasks` is `not_found`. Elapsed `ms` on
+  the answered call is `max(0, c.Timestamp - call.Timestamp)` so inter-host clock skew never
+  produces a negative duration, followed by the reply `MsgRow` and, in a thread, the updated
+  `TaskRow`. When `call.By` is still in `State.AIs`, one `reply` item is queued for it (A6.3).
 ## Retention
 
 `retention.go` exports `Retain(tx, now)`, which reads `retention_days` from SQLite `setting`
@@ -679,8 +701,8 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
 
 - The table of commands holds the groups, members, briefs, the task commands of HM-9, the four
   kinds of `post` of HM-6, `note` and `forget`, the cards, the checks and reviews, the merges and
-  summaries, and the host events, and no node starts a loop yet: the remaining command files
-  (including thread round counting in HM-13) and the wiring of the node are separate units
+  summaries, the host events, and the calls, and no node starts a loop yet: the remaining command
+  files (including thread round counting in HM-13) and the wiring of the node are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - After retention deletes rows, finished tasks stay in the in-memory `State.Tasks` until restart
   ([issues](../../issues.md)).
@@ -779,6 +801,10 @@ reads, exact 61,440-byte boundaries, page bounds checks, group access checks, de
 and store failures. `features/home_fetch.feature` holds the scroll-back scenarios of A2.2 and the
 deleted-row scenario of A2.7.
 
+`cmd_call_test.go` sends `post/call` and `post/reply` through `Commands.Apply` with fakes of
+`Receipts` and `Disk`, checking the golden shapes, `UnexpectedNulls`, the 200-character preview,
+elapsed-time clamping, receipts and every refusal boundary. `features/home_call.feature` holds the
+home half of acceptance tests A6.3 and A6.4.
 `retention_test.go` covers `Retain`: default and configured `retention_days`, store error
 propagation, protected rows, and the purge mark with `Loop.Sync` reset.
 `features/home_retention.feature` holds acceptance test A2.5 and the retention half of A5.14.
