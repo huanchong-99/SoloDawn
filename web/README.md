@@ -146,8 +146,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `mockCtl`, read by the person of the wire examples with this browser's device key, and online;
   only a development build has this code, so the build carries neither the mock nor the examples
   (checked in the output of `vite build`). `live` acquires the single-tab Web Lock (`runTab` of
-  `tablock.ts`, showing the other-tab banner with "Use here" in `App.svelte` while another tab
-  holds it) and connects to each paired node from `owner.ts` through `peer.ts` (W-2), one
+  `tablock.ts`, showing the other-tab banner with "Use here" through `components/status/` at
+  `banner` while another tab holds it) and connects to each paired node from `owner.ts` through `peer.ts` (W-2), one
   `session.peer(node, ...)` per node, pausing while `#/onboarding` runs a pairing session and
   forwarding owner `devlog` updates. `net.homes` is `homes` of `groups.svelte.ts`; `net.path(home)`
   is how this browser reaches a home now (`direct` or `relay`, the round trip, since when), and
@@ -459,9 +459,10 @@ file in `src/routes/`. It edits neither the shell nor another area:
     confirmation.
 - **Connection indicator and computers page.** `indicator(net, group)` in `src/lib/nodes.svelte.ts`
   gives the pill mounted at `bar` (and at `chat.head` below 768 px, where an open chat hides the
-  top bar) one of four states, linking to `#/nodes` with an accessible `Connection status: …`
-  label: for an open `#/groups/<g>` chat, the path to that group's home; elsewhere, the summary
-  across `net.homes` (`undefined` before any home is known, `down` when no target home is
+  top bar) its state, linking to `#/nodes` with an accessible `Connection status: …`
+  label: `offline` (`Inactive`) while `net.otherTab` is true; for an open `#/groups/<g>` chat,
+  the path to that group's home; elsewhere, the summary across `net.homes` (`undefined` before
+  any home is known, `down` when no target home is
   connected, `linking` while any connected target has no selected pair yet, `limited` when any
   uses a relay, and `ok` with the first measured `rtt` when all are direct). `routes/Nodes.svelte`
   calls `nodes.sync(net.homes)` to read `host.info` once per online owner connection, lists owned
@@ -523,18 +524,21 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/groupinfo/`   | group details and project memory (`chat.side`, `order: 20`)                       |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
 | `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
+| `src/components/status/`      | other-tab notice mounted at `banner`                                              |
 | `src/styles/`                 | `tokens.css` (design tokens) and `base.css` (shared classes)                      |
 | `public/`                     | manifest, icon and `fonts/`, copied as they are                                   |
 | `features/web.spec.ts`        | steps of `../features/web.feature`                                                |
 | `features/shell.spec.ts`      | steps of `../features/web_shell.feature`; `fixtures/` stand-ins                   |
 | `features/groups.spec.ts`     | steps of `../features/web_groups.feature`                                         |
 | `features/chat.spec.ts`       | steps of `../features/web_chat.feature`                                           |
+| `features/status.spec.ts`     | steps of `../features/web_status.feature`                                         |
 | `features/task.spec.ts`       | steps of `../features/web_task.feature`                                           |
 | `features/thread.spec.ts`     | steps of `../features/web_thread.feature`                                         |
 | `features/member.spec.ts`     | steps of `../features/web_member.feature`                                         |
 | `features/groupinfo.spec.ts`  | steps of `../features/web_groupinfo.feature`                                      |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
 | `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                     |
+| `features/a11y.spec.ts`       | steps of `../features/web_a11y.feature`                                           |
 | `features/home.ts`            | a home in memory for those steps; `page.ts` drives the page                       |
 | `features/demo.ts`            | groups with a morning of talk, for a development page                             |
 | `features/watch.svelte.ts`    | an effect outside a component, for tests of what is reactive                      |
