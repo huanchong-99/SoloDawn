@@ -72,7 +72,7 @@ func hevState(t *testing.T) *home.State {
 
 func hevSend(t *testing.T, s *home.State, d home.Disk, r home.Receipts, by identity.Key, payload string) home.Result {
 	t.Helper()
-	res, err := home.Commands.Apply(s, d, r, by.ID(), by.Sign(payload), now)
+	res, err := home.Commands.Apply(s, d, r, by.Sign(payload), now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestHostEvGoldenWireExamples(t *testing.T) {
 	statusBytes, err := os.ReadFile(filepath.Join("..", "proto", "testdata", "member-status.json"))
 	equal(t, err, nil)
 	s := makeGoldenState(788)
-	res, err := home.Commands.Apply(s, disk{}, receipts{}, laptop.ID(), laptop.Sign(string(statusBytes)), time.UnixMilli(1763600000000))
+	res, err := home.Commands.Apply(s, disk{}, receipts{}, laptop.Sign(string(statusBytes)), time.UnixMilli(1763600000000))
 	equal(t, err, nil)
 	equal(t, res.Answer, store.Outcome{OK: true})
 	gotAI := res.Rows[0].Value().(proto.AIMemberRow)
@@ -153,7 +153,7 @@ func TestHostEvGoldenWireExamples(t *testing.T) {
 	intrBytes, err := os.ReadFile(filepath.Join("..", "proto", "testdata", "member-status-turn_interrupted.json"))
 	equal(t, err, nil)
 	s = makeGoldenState(788)
-	res, err = home.Commands.Apply(s, disk{}, receipts{}, laptop.ID(), laptop.Sign(string(intrBytes)), time.UnixMilli(1763599999500))
+	res, err = home.Commands.Apply(s, disk{}, receipts{}, laptop.Sign(string(intrBytes)), time.UnixMilli(1763599999500))
 	equal(t, err, nil)
 	equal(t, res.Answer, store.Outcome{OK: true})
 	equal(t, len(res.Rows), 3)
@@ -170,7 +170,7 @@ func TestHostEvGoldenWireExamples(t *testing.T) {
 			data, err := os.ReadFile(filepath.Join("..", "proto", "testdata", name+".json"))
 			equal(t, err, nil)
 			st := makeGoldenState(10)
-			out, err := home.Commands.Apply(st, disk{}, receipts{}, laptop.ID(), laptop.Sign(string(data)), time.UnixMilli(1763600000000))
+			out, err := home.Commands.Apply(st, disk{}, receipts{}, laptop.Sign(string(data)), time.UnixMilli(1763600000000))
 			equal(t, err, nil)
 			equal(t, out.Answer, store.Outcome{OK: true})
 		})
@@ -194,7 +194,7 @@ func TestHostEvStatusFieldsAndSince(t *testing.T) {
 	equal(t, briefRows(res), []any{want})
 	s.Commit(res)
 
-	res2, err := home.Commands.Apply(s, disk{}, receipts{}, laptop.ID(), laptop.Sign(hevPayload(2, hevWorker, "working", "relay", "")), time.UnixMilli(clock+900))
+	res2, err := home.Commands.Apply(s, disk{}, receipts{}, laptop.Sign(hevPayload(2, hevWorker, "working", "relay", "")), time.UnixMilli(clock+900))
 	equal(t, err, nil)
 	want.Seq, want.Task, want.Path, want.Usage, want.LastSeen = 12, "", "relay", proto.Usage{}, clock+900
 	equal(t, briefRows(res2), []any{want})
