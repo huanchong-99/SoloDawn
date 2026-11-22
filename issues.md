@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · Web Push VAPID `sub` URL is not yet checked against Apple's push service
+
+- Symptom: none observed; `wpushSubscriber` (`https://github.com/huanchong-99/SoloDawn`) has not yet been exercised against Apple's Web Push service on iOS.
+- Cause: `internal/home/webpush.go` (`wpushSubscriber`) sets the VAPID JWT `sub` claim to the repository URL, and no iOS device run is available in automated CI.
+- Status: open for the live iOS check of `A8.3` (`I-10` / `I-11`).
+
 ### 2026-11-22 · limitation · An unanswered AI-to-AI `call` stays `waiting`
 
 - Symptom: when the called AI never answers with `reply`, the `call` message keeps `state.status = "waiting"` for good; the web call block (`U-10`) shows it as waiting, with the time since it was made.

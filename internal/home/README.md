@@ -208,7 +208,8 @@ Retention (`retention.go`) takes the names that start with `ret`, exports `Retai
 functions start with `TestRetention`.
 The step-2 people seam (`people_seam.go`) takes the unexported names that start with `seam` and
 `keyInvite` / `keyJoin` (leaving `ppl` for `cmd_people.go`), and exports `Joining`, `InviteLink`,
-`Inviter`, `(*Conn).SetJoining` and `Table.ApplyJoining`.
+`Inviter`, `(*Conn).SetJoining` and `Table.ApplyJoining`. Web Push (`webpush.go`) takes the names that start with
+`wpush`, its tests too, and its test functions start with `TestWebPush`.
 
 ## The run loop
 
@@ -714,13 +715,35 @@ does this:
   in-memory state (`State.Tasks`) until restart ([issues](../../issues.md)). `grp.num` keeps the
   highest task number given out, so task numbers are not reused after restart.
 
+## Web Push
+
+`webpush.go` holds the `push` command, the `"push"` hook of `After` and the loop's startup and
+shutdown hooks ([commands](../../planning/contracts/commands.md) 1.7;
+[storage](../../planning/contracts/storage.md) section 1, `push_sub`):
+
+- **Command.** A payload that decodes as `proto.PushOff` (`off: true`) deletes the signing device's
+  row from `push_sub`; any other payload decodes as `proto.PushOn` (`bad_request` otherwise) and
+  writes `push_sub` through `Result.Writes`.
+- **Memory, startup and shutdown.** Subscriptions and the active `*Loop` are held per `State.Home`
+  under a leaf mutex (`wpushMu`, which never calls `Loop`, `Store` or HTTP). `StartLoop` loads
+  `push_sub` from `LoopConfig.Store` for `LoopConfig.Home` before starting group goroutines,
+  `After["push"]` updates memory only after transaction commit so a rolled-back write leaves memory
+  unchanged, and `Loop.Close` drains in-flight Web Push deliveries on `Loop.wg` before detaching.
+- **Eligibility and delivery.** For each newly created `proto.MsgRow` (`Pos == Seq`), `After["push"]`
+  extracts one reminder kind (`approval`, `decision`, `brief`, `done` from `summary`, or `mention`
+  from any other message kind), filters for offline subscribed devices of concerned group members
+  that remain valid in `State.Logs`, encrypts `proto.Reminder` JSON (without HTML escaping) via
+  RFC 8291 (`webpush-go`), and sends each request in its own goroutine with a 5 s context timeout.
+  A `404` or `410` response drops that subscription in memory and from `push_sub` if not replaced
+  since.
+
 ## Known limitations
 
 - The table of commands holds the groups, members, briefs, the task commands of HM-9, the four
   kinds of `post` of HM-6, `note` and `forget`, the cards, the checks and reviews, the merges and
-  summaries, the host events, and the calls, and no node starts a loop yet: the remaining command
-  files (including thread round counting in HM-13) and the wiring of the node are separate units
-  ([units](../../planning/steps/parallel-plan-units.md), section 2).
+  summaries, the host events, `push`, and the calls, and no node starts a loop yet: the remaining
+  command files (including thread round counting in HM-13) and the wiring of the node are separate
+  units ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - After retention deletes rows, finished tasks stay in the in-memory `State.Tasks` until restart
   ([issues](../../issues.md)).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
@@ -826,6 +849,14 @@ home half of acceptance tests A6.3 and A6.4.
 propagation, protected rows, and the purge mark with `Loop.Sync` reset.
 `features/home_retention.feature` holds acceptance test A2.5 and the retention half of A5.14.
 
+<<<<<<< HEAD
 `people_seam_test.go` covers `people_seam.go` across `Table.ApplyJoining`, `State.Invite`,
 `LoopConfig.Invite` (including `Store.Write` re-entrancy freedom on `Invite` and `ReplayInvite`),
 and `(*Conn).SetJoining` admission callbacks.
+=======
+`webpush_test.go` covers `push`, `After["push"]`, `StartLoop` subscription loading and `Close`
+drain, RFC 8291 decryption, per-browser eligibility and revocation, and `404`/`410` eviction in
+memory and `push_sub`. `features/home_webpush.feature` holds the backend half of acceptance test
+A8.3 against a local HTTP push endpoint, verifying that wire payloads are ciphertext only and
+decrypted reminders hold neither message text nor commands.
+>>>>>>> origin/rebuild
