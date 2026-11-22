@@ -61,17 +61,38 @@ func (m *askStepHome) recordCmd(cmd proto.Cmd) (json.RawMessage, error) {
 	if err := proto.Decode([]byte(cmd.Env.Payload), &post); err != nil {
 		return nil, err
 	}
-	m.mu.Lock()
-	m.posts = append(m.posts, post)
-	if post.Kind == "call" {
-		m.calls[string(post.Nonce)] = m.callRowBytes(post, cmd.Env)
+	if refused := m.refuseDeepCall(post); refused != nil {
+		return refused, nil
 	}
-	hook := m.onCall
-	m.mu.Unlock()
-	if post.Kind == "call" && hook != nil {
+	if hook := m.storeRecordedPost(post, cmd.Env); hook != nil {
 		hook(string(post.Nonce))
 	}
 	return json.RawMessage(`{"re":1,"ok":true}`), nil
+}
+
+func (m *askStepHome) refuseDeepCall(post proto.Post[json.RawMessage]) json.RawMessage {
+	if post.Kind != "call" {
+		return nil
+	}
+	var body proto.CallBody
+	if proto.Decode(post.Body, &body) == nil && body.Depth > 4 {
+		return json.RawMessage(accJSON(proto.ErrorResponse{
+			Re:  1,
+			Err: proto.WireError{Code: "limit", Message: fmt.Sprintf("call depth %d exceeds ask_depth limit 4", body.Depth)},
+		}))
+	}
+	return nil
+}
+
+func (m *askStepHome) storeRecordedPost(post proto.Post[json.RawMessage], env proto.Envelope) func(string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.posts = append(m.posts, post)
+	if post.Kind == "call" {
+		m.calls[string(post.Nonce)] = m.callRowBytes(post, env)
+		return m.onCall
+	}
+	return nil
 }
 
 func (m *askStepHome) callRowBytes(post proto.Post[json.RawMessage], env proto.Envelope) json.RawMessage {

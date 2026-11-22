@@ -173,9 +173,9 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 
 `tools_ask.go` registers `ask` and `reply` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md) sections 1 and 5, [flows/ask.md](../../planning/flows/ask.md), [commands.md](../../planning/contracts/commands.md) section 1.3).
 
-- Both tools run `CheckOutboundSecret` on `text` before signing or sending any request to the home, keep no `Part` of their own, and read call depth from `Caller.Turn.Depth` and open call waits from `Host.Await` and `Host.Hand`.
-- When `ask` waits (`wait` defaults to `true`), `sendWaitingCall` opens `itemCh, done := h.Await(callID, nil)` before `h.Command`; `waitAskReply` is the single reader of `itemCh` while the wait (`limits.ask_wait_s`, default 45 s) is open, and on timeout `finishAskTimeout` calls `done()` and checks `itemCh` once more before returning `{"pending": true, "receipt": "<call id>"}`.
-- `ask` resolves `to` among live AI member rows in `h.Rows` (refusing self-calls and human members with `bad_request` and unknown names with `not_found`), refuses `c.Turn.Depth + 1 > limits.ask_depth` (default 4) with `limit`, and places the `call` post in `cmp.Or(c.Task, c.Turn.Thread)` mentioning the callee; `reply` reads the `call` row from `h.Rows` or `fetchFrom`, verifies a `waiting` `call` addressed to `c.Member` (else `conflict`), and posts `kind: "reply"` in the call's thread with `re` set to the call id and `mentions` set to `[callerAI]`.
+- Both tools run `CheckOutboundSecret` on `text` before signing or sending any request to the home, keep no `Part` of their own, and read call depth (`Caller.Turn.Depth + 1`) and open call waits (`Host.Await` and `Host.Hand`) from the host seam.
+- `ask` resolves `to` among other live AI member rows in `h.Rows` (else `not_found`), places the `call` post in `cmp.Or(c.Task, c.Turn.Thread)` mentioning the callee, and when `wait` is true (default) opens `Host.Await(callID, nil)` before `h.Command` and waits `group.limits.ask_wait_s` via `awaitApprovalItem`, returning `{"answer": …}` or `{"pending": true, "receipt": "<call id>"}`.
+- `reply` fetches the `call` message row via `fetchFrom` (returning `not_found` when absent) and posts `kind: "reply"` in the call's thread with `re` set to the call id and `mentions` set to `[callerAI]`; depth and call-state checks run on the home.
 
 # Secretary and decision tools
 
@@ -234,4 +234,3 @@ The rules are in [mcp-tools.md](../../planning/contracts/mcp-tools.md) and [loca
 - `decodeDecidedInbox` decodes the plain `InboxItem` (`P-1b`) and its `msg` row so `postCardAndWait` reads `card.State` directly; a card that is not decided counts as no decision.
 - `Part[approvalState](h)` holds active `Asked` cancel functions per host. Its `mu` is a leaf lock: nothing called under `mu` takes `Host`, `Sessions`, `Rows` or `Store` locks.
 - `awaitApprovalItem` is the single reader of the channel returned by `Host.Await`: when the wait timer or context ends, it calls `done` and checks the channel once more before returning the timeout denial.
->>>>>>> origin/rebuild

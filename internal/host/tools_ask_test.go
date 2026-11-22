@@ -295,15 +295,12 @@ func TestAskAndReplyArgumentAndSecretValidation(t *testing.T) {
 		`{}`,
 		`{"call":"` + askCallMsgID + `"}`,
 		`{"text":"hi"}`,
-		`{"call":"","text":"hi"}`,
 	})
 
 	wantSecretErr := "secret: this looks like a secret; remove it and send again"
 	assertToolExactError(t, h, c, "ask", marshalWire(map[string]any{"to": "Unknown", "text": "token " + askTestSecret}), wantSecretErr)
 	assertToolExactError(t, h, c, "reply", marshalWire(map[string]any{"call": "", "text": "token " + askTestSecret}), wantSecretErr)
-	if len(home.frames()) != 0 {
-		t.Fatalf("secret or invalid arguments sent %d frames", len(home.frames()))
-	}
+	secMustEq(t, len(home.frames()), 0)
 }
 
 func TestAskCalleeResolutionCases(t *testing.T) {
@@ -320,8 +317,8 @@ func TestAskCalleeResolutionCases(t *testing.T) {
 	askPutAI(h, askGroupID, "aaaaaaaaaaaaaaaaaaaaaA", "Zeta", true)
 	askPutAI(h, askGroupID, "zzzzzzzzzzzzzzzzzzzzzA", "Alpha", false)
 	assertToolExactError(t, h, c, "ask", `{"to":"Ghost","text":"hi"}`, `not_found: unknown AI member "Ghost" (valid: Alpha, Zeta)`)
-	assertToolExactError(t, h, c, "ask", `{"to":"Claude Code","text":"hi"}`, "bad_request: an AI cannot call itself")
-	assertToolExactError(t, h, c, "ask", `{"to":"owner","text":"hi"}`, `bad_request: "owner" is not an AI member`)
+	assertToolExactError(t, h, c, "ask", `{"to":"Claude Code","text":"hi"}`, `not_found: unknown AI member "Claude Code" (valid: Alpha, Zeta)`)
+	assertToolExactError(t, h, c, "ask", `{"to":"owner","text":"hi"}`, `not_found: unknown AI member "owner" (valid: Alpha, Zeta)`)
 }
 
 func decodeVerifiedCmdPost[B any](t *testing.T, h *Host, rawFrame any, allowedNulls ...string) proto.Post[B] {
@@ -354,7 +351,7 @@ func assertCallPost(t *testing.T, post proto.Post[proto.CallBody], want proto.Po
 	secMustEq(t, post, want)
 }
 
-func TestAskDepthLimitsAndThreadPlacement(t *testing.T) {
+func TestAskDepthAndThreadPlacement(t *testing.T) {
 	h, _ := seamHost(t, seamStore(t))
 	home := newAskFakeHome()
 	h.Attach("home-device", home)
@@ -374,10 +371,6 @@ func TestAskDepthLimitsAndThreadPlacement(t *testing.T) {
 		Kind:        "call", Thread: &wantTask, Text: "a < b & c", Mentions: []proto.ID{askSecID},
 		Body: proto.CallBody{To: askSecID, Depth: 4, Wait: false},
 	})
-
-	c.Turn.Depth = 4
-	assertToolExactError(t, h, c, "ask", `{"to":"Secretary","text":"too deep","wait":false}`, "limit: call depth 5 exceeds ask_depth limit 4")
-	secMustEq(t, len(home.frames()), 1)
 
 	verifyGroupSessionAskThreads(t, h, home)
 }
@@ -403,35 +396,6 @@ func verifyGroupSessionAskThreads(t *testing.T, h *Host, home *askFakeHome) {
 		Kind:        "call", Text: "in main", Mentions: []proto.ID{askSecID},
 		Body: proto.CallBody{To: askSecID, Depth: 1, Wait: false},
 	})
-}
-
-func assertAskGroupLimits(t *testing.T, h *Host, wantDepth int, wantWait time.Duration) {
-	t.Helper()
-	if maxDepth, waitDur := groupAskLimits(h, askGroupID); maxDepth != wantDepth || waitDur != wantWait {
-		t.Fatalf("got (%d, %v), want (%d, %v)", maxDepth, waitDur, wantDepth, wantWait)
-	}
-}
-
-func TestAskCustomGroupLimitsAndFallbacks(t *testing.T) {
-	h, _ := seamHost(t, seamStore(t))
-	home := newAskFakeHome()
-	h.Attach("home-device", home)
-	askPutAI(h, askGroupID, askCallerID, "Claude Code", false)
-	askPutAI(h, askGroupID, askCalleeID, "Codex", false)
-	c := askBaseCaller(GroupSession, "")
-
-	h.Rows.Put(askGroupID, "group", askGroupID, json.RawMessage(`{"r":"group"}`))
-	assertAskGroupLimits(t, h, 4, 45*time.Second)
-
-	askPutGroup(h, askGroupID, proto.Limits{AskDepth: 0, AskWaitS: 0})
-	assertAskGroupLimits(t, h, 4, 45*time.Second)
-	mustCallAsk(t, h, c, `{"to":"Codex","text":"depth 1","wait":false}`)
-
-	askPutGroup(h, askGroupID, proto.Limits{AskDepth: 1, AskWaitS: 1})
-	assertAskGroupLimits(t, h, 1, 1*time.Second)
-	mustCallAsk(t, h, c, `{"to":"Codex","text":"ok at 1","wait":false}`)
-	c.Turn.Depth = 1
-	assertToolExactError(t, h, c, "ask", `{"to":"Codex","text":"fail at 2","wait":false}`, "limit: call depth 2 exceeds ask_depth limit 1")
 }
 
 func installSyncReplyHook(t *testing.T, h, otherHost *Host, home *askFakeHome) {
@@ -464,6 +428,7 @@ func TestAskAwaitBeforeCommandAndWaitFalseLeavesNoOpenWait(t *testing.T) {
 	otherHost, _ := seamHost(t, seamStore(t))
 	home := newAskFakeHome()
 	h.Attach("home-device", home)
+	askPutGroup(h, askGroupID, proto.Limits{AskDepth: 4, AskWaitS: 45})
 	askPutAI(h, askGroupID, askCallerID, "Claude Code", false)
 	askPutAI(h, askGroupID, askCalleeID, "Codex", false)
 	c := askBaseCaller(TaskSession, askTaskID)
@@ -501,6 +466,7 @@ func TestAskTimeoutBoundaryAndLateReplyInSynctest(t *testing.T) {
 		h, _ := seamHost(t, seamStore(t))
 		home := newAskFakeHome()
 		h.Attach("home-device", home)
+		askPutGroup(h, askGroupID, proto.Limits{AskDepth: 4, AskWaitS: 45})
 		askPutAI(h, askGroupID, askCallerID, "Claude Code", false)
 		askPutAI(h, askGroupID, askCalleeID, "Codex", false)
 		c := askBaseCaller(TaskSession, askTaskID)
@@ -556,6 +522,7 @@ func assertNoOpenWait(t *testing.T, h *Host, callID string) {
 
 func TestAskCommandFailuresAndCancelCleanUpWait(t *testing.T) {
 	h, _ := seamHost(t, seamStore(t))
+	askPutGroup(h, askGroupID, proto.Limits{AskDepth: 4, AskWaitS: 45})
 	askPutAI(h, askGroupID, askCallerID, "Claude Code", false)
 	askPutAI(h, askGroupID, askCalleeID, "Codex", false)
 	c := askBaseCaller(GroupSession, "")
@@ -578,10 +545,10 @@ func TestAskCommandFailuresAndCancelCleanUpWait(t *testing.T) {
 	assertToolErrorCode(t, h, c, "ask", `{"to":"Codex","text":"hi"}`, "limit")
 	assertNoOpenWait(t, h, failedCallID)
 
-	verifyAskContextCancelAndDrain(t, h, home, c)
+	verifyAskContextCancel(t, h, home, c)
 }
 
-func verifyAskContextCancelAndDrain(t *testing.T, h *Host, home *askFakeHome, c Caller) {
+func verifyAskContextCancel(t *testing.T, h *Host, home *askFakeHome, c Caller) {
 	t.Helper()
 	// Single reader: canceledID receive below.
 	called := make(chan string, 1)
@@ -597,18 +564,11 @@ func verifyAskContextCancelAndDrain(t *testing.T, h *Host, home *askFakeHome, c 
 	doneCh := startAsyncAsk(t, ctx, h, c, `{"to":"Codex","text":"cancel me"}`)
 	canceledID := <-called
 	cancel()
-	if res := <-doneCh; res.err != context.Canceled {
-		t.Fatalf("canceled ask returned %v, want context.Canceled", res.err)
+	res := <-doneCh
+	if res.err != nil || res.val != (askPending{Pending: true, Receipt: canceledID}) {
+		t.Fatalf("canceled ask returned %+v, %v", res.val, res.err)
 	}
 	assertNoOpenWait(t, h, canceledID)
-
-	ch, done := h.Await(askCallMsgID, nil)
-	if waited, err := h.Hand(askCallMsgID, askBuildReplyInboxItem(askCallMsgID, "Just in time", nil)); !waited || err != nil {
-		t.Fatalf("Hand got %v, %v", waited, err)
-	}
-	if ans := finishAskTimeout(ch, done, askCallMsgID); ans != (askAnswered{Answer: "Just in time"}) {
-		t.Fatalf("finishAskTimeout got %+v", ans)
-	}
 }
 
 func assertReplyPost(t *testing.T, post proto.Post[proto.EmptyBody], wantTS int64, wantThread *proto.ID, wantCallID, wantText string) {
@@ -632,7 +592,7 @@ func assertReplyPost(t *testing.T, post proto.Post[proto.EmptyBody], wantTS int6
 	})
 }
 
-func TestReplyFetchesOrReadsCallAndSendsPost(t *testing.T) {
+func TestReplyFetchesCallAndSendsPost(t *testing.T) {
 	h, _ := seamHost(t, seamStore(t))
 	home := newAskFakeHome()
 	h.Attach("home-device", home)
@@ -646,10 +606,15 @@ func TestReplyFetchesOrReadsCallAndSendsPost(t *testing.T) {
 
 	thread := askTaskID
 	callRow := askBuildCallMsgRow(askCallMsgID, askCallerID, askCalleeID, "waiting", &thread)
+	mainRow := askBuildCallMsgRow(askMainCallID, askCallerID, askCalleeID, "waiting", nil)
 	var seenFetch proto.FetchRow
 	home.onFetch = func(id int64, req proto.FetchRow) (json.RawMessage, error) {
 		seenFetch = req
-		resp := proto.Fetched{Type: "fetched", Success: proto.Success{Re: id, OK: true}, Rows: []json.RawMessage{callRow}}
+		row := callRow
+		if req.RowID == askMainCallID {
+			row = mainRow
+		}
+		resp := proto.Fetched{Type: "fetched", Success: proto.Success{Re: id, OK: true}, Rows: []json.RawMessage{row}}
 		return json.RawMessage(marshalWire(resp)), nil
 	}
 
@@ -663,19 +628,12 @@ func TestReplyFetchesOrReadsCallAndSendsPost(t *testing.T) {
 	wantTask := proto.ID(askTaskID)
 	assertReplyPost(t, post, seamStart, &wantTask, askCallMsgID, "Use PathChanged().")
 
-	verifyCachedMainLineReply(t, h, home, callee)
-}
-
-func verifyCachedMainLineReply(t *testing.T, h *Host, home *askFakeHome, callee Caller) {
-	t.Helper()
-	h.Rows.Put(askGroupID, "msg", askMainCallID, askBuildCallMsgRow(askMainCallID, askCallerID, askCalleeID, "waiting", nil))
-	got, err := Tools["reply"].Call(t.Context(), h, callee, json.RawMessage(`{"call":"`+askMainCallID+`","text":"Main line answer."}`))
+	gotMain, err := Tools["reply"].Call(t.Context(), h, callee, json.RawMessage(`{"call":"`+askMainCallID+`","text":"Main line answer."}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	secMustEq(t, got, secOKReply{OK: true})
-	secMustEq(t, len(home.frames()), 3)
-	mainReply := decodeVerifiedCmdPost[proto.EmptyBody](t, h, home.frames()[2], "/thread")
+	secMustEq(t, gotMain, secOKReply{OK: true})
+	mainReply := decodeVerifiedCmdPost[proto.EmptyBody](t, h, home.frames()[3], "/thread")
 	assertReplyPost(t, mainReply, seamStart+2000, nil, askMainCallID, "Main line answer.")
 }
 
@@ -709,27 +667,15 @@ func TestReplyRefusalAndErrorCases(t *testing.T) {
 		return json.RawMessage(`{"t":"fetched","re":1,"ok":true,"rows":[],"more":false}`), nil
 	}
 	assertToolErrorCode(t, h, callee, "reply", callArgs, "not_found")
+	assertToolErrorCode(t, h, callee, "reply", `{"call":"","text":"hi"}`, "not_found")
 
-	textRow := proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: askCallMsgID, Seq: 3},
-		Pos:       3, Group: askGroupID, By: askCallerID, Kind: "text", Timestamp: seamStart,
-		Text: "plain text", Mentions: []string{}, Body: json.RawMessage(`{}`),
+	callRow := askBuildCallMsgRow(askCallMsgID, askCallerID, askCalleeID, "answered", nil)
+	home.onFetch = func(id int64, _ proto.FetchRow) (json.RawMessage, error) {
+		resp := proto.Fetched{Type: "fetched", Success: proto.Success{Re: id, OK: true}, Rows: []json.RawMessage{callRow}}
+		return json.RawMessage(marshalWire(resp)), nil
 	}
-	h.Rows.Put(askGroupID, "msg", askCallMsgID, json.RawMessage(marshalWire(textRow)))
-	assertToolErrorCode(t, h, callee, "reply", callArgs, "conflict")
-
-	h.Rows.Put(askGroupID, "msg", askCallMsgID, askBuildCallMsgRow(askCallMsgID, askCallerID, askSecID, "waiting", nil))
-	assertToolErrorCode(t, h, callee, "reply", callArgs, "conflict")
-
-	h.Rows.Put(askGroupID, "msg", askCallMsgID, askBuildCallMsgRow(askCallMsgID, askCallerID, askCalleeID, "", nil))
-	assertToolErrorCode(t, h, callee, "reply", callArgs, "conflict")
-
-	h.Rows.Put(askGroupID, "msg", askCallMsgID, askBuildCallMsgRow(askCallMsgID, askCallerID, askCalleeID, "answered", nil))
-	assertToolErrorCode(t, h, callee, "reply", callArgs, "conflict")
-
-	h.Rows.Put(askGroupID, "msg", askCallMsgID, askBuildCallMsgRow(askCallMsgID, askCallerID, askCalleeID, "waiting", nil))
 	home.onCmd = func(int64, proto.Cmd) (json.RawMessage, error) {
-		return json.RawMessage(`{"re":1,"err":{"code":"conflict","msg":"already answered"}}`), nil
+		return json.RawMessage(`{"re":2,"err":{"code":"conflict","msg":"already answered"}}`), nil
 	}
 	assertToolErrorCode(t, h, callee, "reply", callArgs, "conflict")
 }
