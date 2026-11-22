@@ -376,6 +376,7 @@ describe('start (live)', () => {
 
     await vi.waitFor(() => expect(homes).toHaveLength(2));
     const homeA = homes[1];
+    expect(homeA.device).toBe(nodeA.id);
     expect(homeA.name).toBe('workstation');
     expect(homeA.owner).toBe(true);
     expect(net.path(homeA)).toBeUndefined();

@@ -17,7 +17,7 @@ client or that block its storage; this browser's device
 key with signed envelopes, the device log and pairing; the wire types with their decoding; a
 mock connection that answers from the node's wire examples; the row cache of every group with the
 lists drawn from it; the group list with its create-group dialog; the main line of a group's
-chat with its composer; the connection indicator and the computers and AIs page; and the connection code, signalling and
+chat with its composer; the terminal takeover page and hand-back card; the connection indicator and the computers and AIs page; and the connection code, signalling and
 connections to paired nodes under the single-tab Web Lock. A development server shows the one
 computer and the one group of the wire examples unless the address carries `?nomock`; everywhere
 else the shell connects to each paired node over its rendezvous.
@@ -71,8 +71,8 @@ nothing of the test process's own environment; the scenarios of `../features/web
 that.
 
 The runtime dependencies are `valibot`, for the wire types, and `@xterm/xterm` 6.0.0 with
-`@xterm/addon-fit` 0.11.0 (MIT) for the terminal page. Nothing imports xterm yet; it is about
-337 KiB minified (86 KiB gzipped) with a 7 KiB stylesheet, so the terminal page loads it with a
+`@xterm/addon-fit` 0.11.0 (MIT) for the terminal page. It is about
+337 KiB minified (86 KiB gzipped) with a 7 KiB stylesheet, so `routes/Terminal.svelte` loads it with a
 dynamic `import()` when it opens, and the rest of the client never carries it. Signatures, hashes and macs use the
 browser's WebCrypto only; no signature library is bundled (R-164). `fake-indexeddb` is a
 development dependency, an IndexedDB for the tests.
@@ -298,8 +298,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
     over 60 KiB. Every other request whose connection is lost is sent again after the next `welcome`,
     after the listener's own `sync` requests, in the order first made. The group caches word a
     rejection as `lost`; that code is theirs, not the connection's. `connection.send(frame)` and
-    `peer.send(frame)` send a `devlog` push without a request `id`, throwing a `RangeError` above
-    60 KiB.
+    `peer.send(frame)` send a `devlog` or `pty.resize` push without a request `id`, throwing a
+    `RangeError` above 60 KiB.
   - **What arrives on `ctl`.** A message with an `id` is a request, which a browser never
     serves: `bad_request`. A message with `re` is a response; one that names no waiting request
     is dropped. Anything else is a push when `Frame` reads it and is dropped when not. `ctl` stays
@@ -328,7 +328,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
   of its English file to the type `Key`; today the areas are `chat`, `groups`, `member`, `nodes`,
-  `pairing`, `settings`, `states`, `task` and `thread`. `src/messages/files.glob.ts` finds every file by its name and
+  `pairing`, `settings`, `states`, `task`, `terminal` and `thread`. `src/messages/files.glob.ts` finds every file by its name and
   `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
   empty text, or has keys that differ between its two languages, and naming the area when it has
@@ -440,17 +440,27 @@ file in `src/routes/`. It edits neither the shell nor another area:
   - Only text messages are drawn in full. A card is one line that names its kind and its subject,
     with the dawn edge when it waits for the reader, and a row the home wrote is a quiet line;
     the cards the areas mount replace both.
-  - The member panel (`src/components/member/`) mounts at `chat.side` (`order: 10`). It lists the
-    group's AI members, placing the secretary first with its corner mark, with each AI's state
-    (`working`, `waiting` on the reader in dawn or on another member, `dormant` as sleeping,
-    `limited`, `offline`), computer with path (`local`, `direct`, `relay`, `offline`), and
-    account type; then the human members with their roles and online status. Its "Add AI" button
-    requires a reachable group home, an admin reader and at least one connected owned computer,
-    and shows its reason when disabled. The add-AI dialog reads `host.info` from the owner's
-    connected computers, suggests an unused member name in the group, offers the secretary switch
-    when the group has none or the reader is an admin, signs `host.join` for the chosen computer,
-    and words `home_unreachable`, `conflict` and a lost computer directly before falling back to
-    `Failure`.
+  - The member panel (`src/components/member/`) mounts at `chat.side` (`order: 10`) and captures
+    `net` at `layer`. It lists the group's AI members, placing the secretary first with its corner
+    mark, with each AI's state (`working`, `waiting` on the reader in dawn or on another member,
+    `dormant` as sleeping, `takeover`, `limited`, `offline`), computer with path (`local`,
+    `direct`, `relay`, `offline`), account type, and for owned AIs an "Open terminal" link enabled
+    only when the browser's own path to that computer is `direct`; then the human members with
+    their roles and online status. Its "Add AI" button requires a reachable group home, an admin
+    reader and at least one connected owned computer, and shows its reason when disabled. The
+    add-AI dialog reads `host.info` from the owner's connected computers, suggests an unused member
+    name in the group, offers the secretary switch when the group has none or the reader is an
+    admin, signs `host.join` for the chosen computer, and words `home_unreachable`, `conflict` and
+    a lost computer directly before falling back to `Failure`.
+- **Terminal takeover.** `#/terminal/<g>/<member>[/<task>]` (`routes/Terminal.svelte`,
+  `lib/terminal.ts`, `components/terminal/`) loads `@xterm/xterm` and `@xterm/addon-fit` via
+  dynamic `import()`, refuses takeover locally when the browser's path to the AI's computer is
+  `relay`, signs `takeover.start` (carrying `task` when present in the route), opens the binary
+  `pty:<g>:<member>` data channel, pushes `pty.resize` on fit and resize, streams bytes both ways
+  with a phone toolbar and sticky `Ctrl` modifier, reads held message counts from `host.info`,
+  closes `pty` cleanly while keeping `ctl` open if an active session transitions to `relay`, and
+  sends `takeover.end` on "Hand back", `pagehide`, `beforeunload` or destroy. `HandbackMeta.svelte`
+  mounts for message kind `handback` to render changed files, commits and diff counts.
 - **Connection indicator and computers page.** `indicator(net, group)` in `src/lib/nodes.svelte.ts`
   gives the pill mounted at `bar` (and at `chat.head` below 768 px, where an open chat hides the
   top bar) one of four states, linking to `#/nodes` with an accessible `Connection status: …`
@@ -502,6 +512,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/compose.ts`          | mention being typed, mentions and parts of a text, row size                       |
 | `src/lib/when.ts`             | times in the reader's language; messages by day                                   |
 | `src/lib/task.ts`             | task card derivations: badge, six-step bar, review and thread                     |
+| `src/lib/terminal.ts`         | terminal takeover commands, `pty` channel bridge, resize, status projections      |
 | `src/App.svelte`              | shell: navigation, top bar, banners, the page of the route                        |
 | `src/Notice.svelte`           | the upgrade notice and the storage notice                                         |
 | `src/Pending.svelte`          | a page of the route table whose component is not built yet                        |
@@ -513,6 +524,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/task/`        | `TaskCard.svelte`, mounted for kind `task`                                        |
 | `src/components/thread/`      | a task's thread, scored review block, checks and system notices                   |
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
+| `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
 | `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
 | `src/styles/`                 | `tokens.css` (design tokens) and `base.css` (shared classes)                      |
@@ -524,6 +536,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/task.spec.ts`       | steps of `../features/web_task.feature`                                           |
 | `features/thread.spec.ts`     | steps of `../features/web_thread.feature`                                         |
 | `features/member.spec.ts`     | steps of `../features/web_member.feature`                                         |
+| `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
 | `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                     |
 | `features/home.ts`            | a home in memory for those steps; `page.ts` drives the page                       |
@@ -563,8 +576,7 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   the wire examples, unless the address has `?nomock`; the mock answers every command with a bare
   `ok` and pushes no row, so a message sent there does not appear, an account choice does not
   update `host.info`, and `pair.browser` returns no link.
-- The terminal page is in the route table without its component: it says
-  that it is coming. From 768 px the top bar of an open chat says "Chats", and the chat's own
+- From 768 px the top bar of an open chat says "Chats", and the chat's own
   head with the group's name is below it, where the design has one bar with the group's name.
 - The texts of the `states` area are in the build, although only a development server shows
   their page.

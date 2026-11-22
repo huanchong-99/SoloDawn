@@ -726,11 +726,25 @@ describe('the subject of a message', () => {
 describe('a home', () => {
   it('lists the groups of its node and reads each', () => {
     const home = new Home(me);
-    expect([home.ctl, home.groups, home.name, home.owner]).toEqual([undefined, [], '', false]);
+    expect([home.ctl, home.groups, home.device, home.name, home.owner, home.hostInfo]).toEqual([
+      undefined,
+      [],
+      '',
+      '',
+      false,
+      undefined,
+    ]);
     expect(home.me).toBe(me);
-    const { ctl, asked } = connect(home, [listed('one', 'One'), listed('two', 'Two')]);
+    const { ctl, asked, link } = connect(home, [listed('one', 'One'), listed('two', 'Two')]);
     expect(home.ctl).toBe(ctl);
-    expect([home.name, home.owner]).toEqual(['workstation', true]);
+    expect([home.device, home.name, home.owner]).toEqual([
+      'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q',
+      'workstation',
+      true,
+    ]);
+    const infoPush = p.decode(p.HostInfoPush, goldens['host-info-push']);
+    link.push(infoPush);
+    expect(home.hostInfo).toEqual(infoPush);
     expect(home.groups.map((group) => [group.g, group.name])).toEqual([
       ['one', 'One'],
       ['two', 'Two'],
@@ -783,6 +797,7 @@ describe('a home', () => {
     link.push({ t: 'rows', g: 'gone', rows: [text('c', 7)] });
     link.push({ t: 'reset', g: 'gone' });
     link.push({ t: 'devlog', user, entries: [] });
+    expect(home.hostInfo).toBeUndefined();
     expect([...one.rows.keys()]).toEqual(['msg b']);
     expect([...two.rows.keys()]).toEqual(['msg a']);
     link.push({ t: 'reset', g: 'two' });

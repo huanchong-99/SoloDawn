@@ -1,0 +1,60 @@
+@web
+Feature: Terminal takeover page and handback summary
+  The owner opens the interactive terminal of one of their own AIs over a direct WebRTC connection:
+  the browser sends takeover.start, opens the binary channel pty:<g>:<member>, pushes pty.resize,
+  streams bytes in both directions, shows held message counts and narrow-screen keys, refuses or
+  closes cleanly on a relayed path, and sends takeover.end on hand-back or tab close
+  (planning/flows/takeover.md, planning/contracts/datachannel.md sections 1 and 7,
+  planning/contracts/commands.md section 2; acceptance tests A7.1, A7.5, A7.6, A7.7, A7.9).
+
+  Background:
+    Given a group "Website" with an owned AI "Claude Code" on "workstation", in English
+
+  Scenario: Opening an owned AI terminal with a task streams terminal bytes, resizes, updates queued count and renders handback
+    Given "Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms
+    When the owner clicks "Open terminal" on the "Claude Code" member card
+    Then "workstation" receives a signed "takeover.start" for "Claude Code" without an explicit task id
+    And the browser opens channel "pty:rZNvy-1jH6Z-BcPqA5U5BQ:1PC8WineBrUQ-apCjx7tug" and pushes "pty.resize"
+    And the terminal header reads "Claude Code · Terminal" and "workstation · T-12 · task/12-conn-events"
+    And the takeover bar reads "Owner is driving" and the session card shows "T-12 Fix path events", "task/12-conn-events" and "Direct · 4 ms"
+    When the host streams prompt bytes, pushes 2 queued messages in "host.info", and the owner presses "Ctrl" then types "c" and presses "Enter"
+    Then the takeover bar and queue card show 2 queued messages and the channel receives Ctrl-C and Enter
+    When the owner clicks "Hand back" and the home writes a handback message in the main line
+    Then the channel closes, "workstation" receives a signed "takeover.end", and the chat renders the handback card with "path.go", "9f2c1ab", "Emit path changes" and "+40 −3"
+
+  Scenario: Opening an AI without a task explains new-task creation, route task ids are forwarded, and the secretary is read-only
+    Given "Claude Code" has no task and "Secretary" is the group's secretary on a direct path
+    When the owner opens "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/1PC8WineBrUQ-apCjx7tug"
+    Then the session card says "Opening the terminal of an AI without a task creates one so changes stay on a task branch."
+    When the host creates task 15 "Owner takeover" on branch "task/15-owner-takeover" for "Claude Code"
+    Then the terminal header updates to "workstation · T-15 · task/15-owner-takeover"
+    When the owner navigates to "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/1PC8WineBrUQ-apCjx7tug/O21RWBqThVezWCWeVoSoSQ"
+    Then "workstation" receives "takeover.end" for the previous session and "takeover.start" naming task "O21RWBqThVezWCWeVoSoSQ"
+    When the owner navigates to "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/qBSFMsr2hHYKOMblEA_kdA"
+    Then the session card shows "Read-only group session" and "The secretary's session is read-only and changes no files."
+
+  Scenario: Relayed paths and takeover refusals block terminal takeover clearly
+    Given the path to "workstation" is relayed
+    When the owner opens the chat of "Website"
+    Then the "Open terminal" button on "Claude Code" is disabled with reason "Direct link only"
+    When the owner opens "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/1PC8WineBrUQ-apCjx7tug" directly
+    Then no "takeover.start" is sent and the takeover bar says "Direct connection required"
+    When the path becomes direct and "workstation" refuses "takeover.start" with "relay", then "busy", then "internal"
+    Then the takeover bar shows "Direct connection required", then "This AI is busy with another terminal or a merge right now.", then error code "internal"
+
+  Scenario: Tab close via pagehide and remote channel close end takeover cleanly
+    Given "Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms
+    When the owner opens "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/1PC8WineBrUQ-apCjx7tug" and closes the tab
+    Then the channel closes and "workstation" receives exactly one signed "takeover.end"
+    When the owner reopens "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/1PC8WineBrUQ-apCjx7tug" and the host closes the pty channel
+    Then the takeover bar updates to "Handed back" without sending a duplicate "takeover.end"
+
+  Scenario: An active terminal session closes pty and keeps ctl open when the path switches to relay
+    Given "Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms
+    When the owner opens "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/1PC8WineBrUQ-apCjx7tug" and the path to "workstation" switches to relay
+    Then the pty channel is closed, the takeover bar says "Handed back · switched to relay", and "host.info" still succeeds on the existing ctl connection
+
+  Scenario: The development states sheet mounts the handback card for the wire example
+    Given a development server
+    When the owner opens "#/states"
+    Then the "handback" section is marked "Mounted by terminal" and renders "path.go", "9f2c1ab", "Emit path changes" and "+40 −3"

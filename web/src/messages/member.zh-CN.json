@@ -43,9 +43,13 @@
   "member.state.needyou.task": "等待中 · {task} 等你处理",
   "member.state.offline": "离线",
   "member.state.sleeping": "休眠 · 被 @ 时自动醒来",
+  "member.state.takeover": "主人正在直接操作",
   "member.state.waiting": "等待中",
   "member.state.waiting.approval": "等待中 · {task} 等 {who} 审批",
   "member.state.waiting.task": "等待中 · {task} 等 {who}",
   "member.state.waiting.who": "等待中 · 等 {who}",
-  "member.state.working": "干活中"
+  "member.state.working": "干活中",
+  "member.terminal": "打开终端",
+  "member.terminal.offline": "电脑离线",
+  "member.terminal.relay": "终端画面只走直连"
 }

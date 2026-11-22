@@ -43,9 +43,13 @@
   "member.state.needyou.task": "Waiting · {task} waiting on you",
   "member.state.offline": "Offline",
   "member.state.sleeping": "Sleeping · wakes when @mentioned",
+  "member.state.takeover": "Owner is driving",
   "member.state.waiting": "Waiting",
   "member.state.waiting.approval": "Waiting · {task} waiting for {who}'s approval",
   "member.state.waiting.task": "Waiting · {task} waiting on {who}",
   "member.state.waiting.who": "Waiting · waiting on {who}",
-  "member.state.working": "Working"
+  "member.state.working": "Working",
+  "member.terminal": "Open terminal",
+  "member.terminal.offline": "Computer offline",
+  "member.terminal.relay": "Direct link only"
 }

@@ -6,6 +6,7 @@ import { flushSync, tick } from 'svelte';
 import { expect, vi } from 'vitest';
 import { find, homes } from '../src/lib/groups.svelte';
 import { cards, gather, mounts, points, type Mounts } from '../src/lib/mounts.svelte';
+import { routes } from '../src/lib/route.svelte';
 import { merge } from '../src/messages/texts';
 import en from '../src/messages/en.json';
 import zh from '../src/messages/zh-CN.json';
@@ -52,6 +53,7 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
   }
 
   AfterEachScenario(async () => {
+    (routes.terminal as { view: string }).view = 'Terminal';
     await closePage();
     mount({});
     vi.unstubAllEnvs();
@@ -71,6 +73,7 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
           'a coming page': '.pending',
           'the onboarding page': '.onboarding',
           'the group list': '.groups',
+          'the terminal page': '.terminal-page',
           'its own page': '.page:not(.pending)',
           'the states sheet': '.states',
         }[variables['drawn by'] as string]!;
@@ -90,7 +93,10 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
 
   Scenario(
     'A page that is not built yet says so and leads back to the chats',
-    ({ When, Then, And }) => {
+    ({ Given, When, Then, And }) => {
+      Given('a page whose view is not built yet', () => {
+        (routes.terminal as { view: string }).view = 'Missing';
+      });
       When('the person opens the client at "#/terminal/g/m"', () => openPage('#/terminal/g/m'));
       Then('the page says "This page is not built yet"', () => {
         expect(texts('main .page-head p')).toEqual(['This page is not built yet']);
