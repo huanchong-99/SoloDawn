@@ -695,6 +695,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
                   level: 3,
                   state: 'dormant',
                   queued: 0,
+                  watchers: [],
                 },
                 {
                   g: gid,
@@ -702,6 +703,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
                   level: 3,
                   state: 'working',
                   queued: 0,
+                  watchers: [],
                 },
               ],
             },

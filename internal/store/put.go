@@ -19,8 +19,10 @@ func Put[R wireRow](tx *Tx, group string, modified int64, row R) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(putRow, group, modified, data)
-	return err
+	if _, err := tx.Exec(putRow, group, modified, data); err != nil {
+		return err
+	}
+	return syncKB(tx, group, row)
 }
 
 // encode is json.Marshal without HTML escaping. The size of a row is counted
