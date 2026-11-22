@@ -270,7 +270,7 @@ func (n *nodeRuntime) stepNetwork() error {
 		return err
 	}
 	n.socks = socks
-	n.peer = peer.New(n.key, socks, n.db, n.knownPeer, n.routesFor, n.serveInbound, peer.Channels{"pty:": n.serveTerminal})
+	n.peer = peer.New(n.key, socks, n.db, n.knownPeer, n.routesFor, n.serveInbound, peer.Channels{"pty:": n.serveTerminal, "watch:": func(s *peer.Stream) { n.host.ServeWatch(s) }})
 	n.pairer.Peer = n.peer
 	n.host.Connect = n.sessions.connectHome(n.dialHome)
 	ln, err := listenNodeHTTP(":" + strconv.Itoa(defaultWebPort))

@@ -45,6 +45,7 @@ type ptySize struct {
 // Lock order: PTY.mu -> ptyPart.mu. Neither lock waits on I/O, process exit
 // or callbacks.
 type ptyPart struct {
+	watch    *watchPart
 	mu       sync.Mutex
 	reserved map[aiSlot]bool
 	open     map[aiSlot]*PTY
@@ -55,6 +56,7 @@ func ptyState(h *Host) *ptyPart {
 	part := Part[ptyPart](h)
 	part.mu.Lock()
 	if part.open == nil {
+		part.watch = watchState(h)
 		part.reserved = map[aiSlot]bool{}
 		part.open = map[aiSlot]*PTY{}
 		part.sizes = map[aiSlot]ptySize{}
@@ -298,7 +300,7 @@ func (h *Host) ServeTerminal(t Terminal) {
 		ptyRejectTerminal(t)
 		return
 	}
-	go p.pumpOut(t)
+	go p.pumpOut(watchFanout{t, p.part.watch, p.slot})
 	ptyCopy(p.handle, t)
 	p.Close()
 	ptyCopy(io.Discard, t)
@@ -315,7 +317,7 @@ func (p *PTY) attach(t Terminal) bool {
 	return true
 }
 
-func (p *PTY) pumpOut(t Terminal) {
+func (p *PTY) pumpOut(t io.Writer) {
 	defer close(p.outDone)
 	ptyCopy(t, p.handle)
 	go p.triggerStop()
@@ -364,6 +366,7 @@ func (p *PTY) runStop(term Terminal, needDrain bool) {
 	if needDrain {
 		go p.drainUnattached()
 	}
+	p.part.watch.stop(p.slot)
 	p.handle.Close()
 	<-p.outDone
 	if !ptyWaitSignal(p.procDone, ptyStopTimeout) {
@@ -406,6 +409,7 @@ func ptyResize(_ context.Context, h *Host, _ Owner, _ string, data json.RawMessa
 	if p := ptyState(h).noteSize(slot, req.Cols, req.Rows); p != nil {
 		p.applyStoredSize()
 	}
+	watchState(h).resize(slot, req.Cols, req.Rows)
 	return nil, nil
 }
 

@@ -971,6 +971,15 @@ func TestNodePTYChannelBridge(t *testing.T) {
 	<-ptyDone
 }
 
+func TestNodeWatchChannelWithoutGrant(t *testing.T) {
+	n, err := openNode(t.Context(), socketRoot(t))
+	mustNoErr(t, err)
+	t.Cleanup(n.Close)
+	browser := adoptTestBrowser(t, n)
+	dc, _ := dialBrowserPTYChannel(t, n, browser, "watch:g:m")
+	mustNoErr(t, dc.Close())
+}
+
 func dialBrowserPTYChannel(t *testing.T, n *nodeRuntime, browserKey identity.Key, label string) (*webrtc.DataChannel, <-chan []byte) {
 	t.Helper()
 	var iceServers []proto.ICEServer
