@@ -29,7 +29,7 @@
 </script>
 
 {#snippet body()}
-  {#if text.length}
+  {#if text.length && !(msg.kind === 'call' && Card)}
     <p class="text">
       {#each text as part, i (i)}
         {#if part.kind === 'code'}<code>{part.text}</code>{:else if part.kind === 'at'}<span

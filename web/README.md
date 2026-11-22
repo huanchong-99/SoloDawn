@@ -327,8 +327,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `app`, `nav`, `bar`, `page` (the title of each page), `pref` (the names of the preferences),
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
-  of its English file to the type `Key`; today the areas are `chat`, `groups`, `member`, `nodes`,
-  `pairing`, `settings`, `states`, `task` and `thread`. `src/messages/files.glob.ts` finds every file by its name and
+  of its English file to the type `Key`; today the areas are `approval`, `brief`, `call`, `chat`,
+  `decision`, `groups`, `member`, `nodes`, `pairing`, `settings`, `states`, `summary`, `task` and
+  `thread`. `src/messages/files.glob.ts` finds every file by its name and
   `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
   empty text, or has keys that differ between its two languages, and naming the area when it has
@@ -439,7 +440,10 @@ file in `src/routes/`. It edits neither the shell nor another area:
     that appears while there was none to choose from is chosen.
   - Only text messages are drawn in full. A card is one line that names its kind and its subject,
     with the dawn edge when it waits for the reader, and a row the home wrote is a quiet line;
-    the cards the areas mount replace both.
+    the cards the areas mount replace both. An AI-to-AI `call` (`src/components/call/`) draws its
+    route, wait mode, depth, question and either its `waiting` indicator with elapsed time since
+    `ts` or its `answered` duration with the `reply` folded inside, hiding the standalone `reply`
+    row when both are in the same list.
   - The member panel (`src/components/member/`) mounts at `chat.side` (`order: 10`). It lists the
     group's AI members, placing the secretary first with its corner mark, with each AI's state
     (`working`, `waiting` on the reader in dawn or on another member, `dormant` as sleeping,
@@ -502,6 +506,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/compose.ts`          | mention being typed, mentions and parts of a text, row size                       |
 | `src/lib/when.ts`             | times in the reader's language; messages by day                                   |
 | `src/lib/task.ts`             | task card derivations: badge, six-step bar, review and thread                     |
+| `src/lib/call.ts`             | AI-to-AI call derivations: elapsed time, route, question and inline reply         |
 | `src/App.svelte`              | shell: navigation, top bar, banners, the page of the route                        |
 | `src/Notice.svelte`           | the upgrade notice and the storage notice                                         |
 | `src/Pending.svelte`          | a page of the route table whose component is not built yet                        |
@@ -512,6 +517,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/chat/`        | the chat of a group: main line, message, composer                                 |
 | `src/components/task/`        | `TaskCard.svelte`, mounted for kind `task`                                        |
 | `src/components/thread/`      | a task's thread, scored review block, checks and system notices                   |
+| `src/components/call/`        | `CallBlock.svelte`, mounted for kind `call` in threads and the main line          |
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
 | `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
@@ -523,6 +529,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/chat.spec.ts`       | steps of `../features/web_chat.feature`                                           |
 | `features/task.spec.ts`       | steps of `../features/web_task.feature`                                           |
 | `features/thread.spec.ts`     | steps of `../features/web_thread.feature`                                         |
+| `features/call.spec.ts`       | steps of `../features/web_call.feature`                                           |
 | `features/member.spec.ts`     | steps of `../features/web_member.feature`                                         |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
 | `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                     |

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { withoutInlineReplies } from '../../lib/call';
   import { parts } from '../../lib/compose';
   import { subject, type Group } from '../../lib/groups.svelte';
   import { jumpToMessage } from '../../lib/jump';
@@ -12,7 +13,7 @@
   /** The message list of one task's thread, mounted inside a task card's fold. */
   let { group, task }: { group: Group; task: TaskRow } = $props();
 
-  const msgs = $derived(group.thread(task.id));
+  const msgs = $derived(withoutInlineReplies(group.thread(task.id), Boolean(cardOf('call'))));
   const paging = $derived(group.paging(task.id));
   const stuck = $derived(paging.failed || (paging.more && !group.home.ctl));
 
@@ -32,8 +33,9 @@
   );
   const workMins = $derived(working ? Math.floor((now() - working.since) / 60_000) : 0);
 
-  type Badge = { label: string; tone?: 'ok' | 'danger' | 'dawn' };
+  type Badge = { label: string; tone?: 'ok' | 'danger' | 'dawn' | 'sky' };
   const tones: Partial<Record<MsgRow['kind'], Badge['tone']>> = {
+    call: 'sky',
     report: 'ok',
     summary: 'ok',
   };
@@ -124,7 +126,7 @@
                 msg.text,
                 group.members.filter((member) => msg.mentions.includes(member.id)),
               )}
-              {#if segs.length}
+              {#if segs.length && !(msg.kind === 'call' && Card)}
                 <p class="text">
                   {#each segs as part, i (i)}
                     {#if part.kind === 'code'}<code>
