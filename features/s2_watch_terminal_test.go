@@ -6,7 +6,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -27,13 +26,14 @@ const (
 
 type s2TerminalWorld struct {
 	*s2WatchWorld
-	group               proto.ID
-	ai, card            string
-	owner, watcher      *s2TerminalPeer
-	browser, rtcBrowser *peerBrowser
-	bc                  *peerBrowserConn
-	handBackAt          time.Time
-	handBackClose       chan time.Time
+	group          proto.ID
+	ai, card       string
+	owner, watcher *s2TerminalPeer
+	browser        *peerBrowser
+	rtcKey         identity.Key
+	bc             *peerBrowserConn
+	handBackAt     time.Time
+	handBackClose  chan time.Time
 }
 
 func s2RegisterTerminal(sc *godog.ScenarioContext, w *s2WatchWorld) {
@@ -75,9 +75,8 @@ func (t *s2TerminalWorld) takeover() error {
 
 func (t *s2TerminalWorld) joinWatcher() error {
 	c := t.c
-	var err error
-	t.rtcBrowser, err = c.AddBrowser(c.P, "Watch terminal")
-	if err != nil {
+	t.rtcKey = newRandomPeerKey()
+	if err := c.EnrollBrowser(c.P, t.rtcKey, "Watch terminal"); err != nil {
 		return err
 	}
 	t.browser = c.P.Browser
@@ -87,61 +86,34 @@ func (t *s2TerminalWorld) joinWatcher() error {
 	if err != nil {
 		return err
 	}
-	secret, err := s2WatchInvite(res.Link)
+	link, err := parseS2JoinLink(res.Link, res.Expires)
 	if err != nil {
 		return err
 	}
-	if _, err := t.browser.exchangeRoom(c.Ctx, secret, "b", "a"); err != nil {
-		return err
-	}
-	return t.acceptInvitation()
-}
-
-func s2WatchInvite(link string) (identity.Secret, error) {
-	u, err := url.Parse(link)
-	if err != nil {
-		return "", err
-	}
-	params, err := url.ParseQuery(u.Fragment)
-	if err != nil {
-		return "", err
-	}
-	return identity.ParseSecret(params.Get("join"))
-}
-
-func (t *s2TerminalWorld) acceptInvitation() error {
-	c := t.c
-	bc, err := t.browser.openCtl(c.Ctx, c.addUndo, c.Q1.ID())
+	bc, raw, err := joinGroupWithLink(c.Ctx, c.addUndo, t.browser, c.P.Key, c.P.Entries, link, c.P.Name, c.NextID(), time.Now())
 	if err != nil {
 		return err
 	}
 	t.bc = bc
-	hello := map[string]any{"t": "hello", "v": 2, "kind": "browser", "name": "P browser", "addrs": []string{}}
-	if _, err := bc.conn.Request(c.Ctx, func(id int64) any { hello["id"] = id; return hello }); err != nil {
-		return err
-	}
-	if err := bc.conn.Send(proto.Devlog{Type: "devlog", User: c.P.ID(), Entries: c.P.Entries}); err != nil {
-		return err
-	}
-	return s2WatchCmd(c, c.P, bc.conn, map[string]any{"t": "join", "g": t.group, "name": c.P.Name}, "")
+	return s2WatchReply(raw, "")
 }
 
 func (t *s2TerminalWorld) openOwnerTerminal() error {
 	c := t.c
-	b, err := c.AddBrowser(c.Q, "Owner terminal")
-	if err != nil {
+	key := newRandomPeerKey()
+	if err := c.EnrollBrowser(c.Q, key, "Owner terminal"); err != nil {
 		return err
 	}
 	if _, err := requestHostInfo(c.Ctx, c.Q.Conns[c.Q1.ID()].conn); err != nil {
 		return err
 	}
-	return t.attachOwner(b)
+	return t.attachOwner(key)
 }
 
-func (t *s2TerminalWorld) attachOwner(b *peerBrowser) error {
+func (t *s2TerminalWorld) attachOwner(key identity.Key) error {
 	c := t.c
 	var err error
-	t.owner, err = openS2TerminalPeer(c, c.Q, b, c.Q1, false)
+	t.owner, err = openS2TerminalPeer(c, c.Q, key, c.Q1, false)
 	if err != nil {
 		return err
 	}
@@ -288,7 +260,7 @@ func (t *s2TerminalWorld) grant() error {
 
 func (t *s2TerminalWorld) connectWatcher(withTURN bool) error {
 	var err error
-	t.watcher, err = openS2TerminalPeer(t.c, t.c.P, t.rtcBrowser, t.c.Q1, withTURN)
+	t.watcher, err = openS2TerminalPeer(t.c, t.c.P, t.rtcKey, t.c.Q1, withTURN)
 	return err
 }
 

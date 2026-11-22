@@ -4,6 +4,7 @@
     addDisabledReason,
     aiMembers,
     humanMembers,
+    isAdmin,
     pathLabel,
     personTags,
     statusOf,
@@ -18,6 +19,8 @@
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
   import AllowEditor from '../allow/AllowEditor.svelte';
+  import InvitationDialog from '../people/InvitationDialog.svelte';
+  import PersonActions from '../people/PersonActions.svelte';
   import AddAI from './AddAI.svelte';
 
   /** The member column of a group's chat: AI member cards, people, and the add-AI dialog. */
@@ -25,6 +28,7 @@
   const uid = $props.id();
 
   let adding = $state(false);
+  let inviting = $state(false);
 
   const ais = $derived(aiMembers(group));
   const humans = $derived(humanMembers(group));
@@ -141,18 +145,31 @@
     <p class="hint">{t('member.ai.empty')}</p>
   {/each}
 
-  <h2 class="sec-title people-head">{t('member.people')} · {humans.length}</h2>
+  <div class="row people-head">
+    <h2 class="sec-title grow">{t('member.people')} · {humans.length}</h2>
+    {#if isAdmin(group)}
+      <button
+        type="button"
+        class="btn btn-sm"
+        disabled={!group.home.ctl}
+        onclick={() => (inviting = true)}
+      >
+        <Icon name="plus" sm /><span>{t('people.invite.action')}</span>
+      </button>
+    {/if}
+  </div>
   <ul class="people">
     {#each humans as person (person.id)}
       {@const tags = personTags(group, person)}
-      <li class="row person">
+      <li class="person">
         <Avatar id={person.user} name={person.name} />
-        <span class="grow cut">
+        <span class="person-name grow">
           {person.name}{#if tags}{' '}<span class="muted">· {tags}</span>{/if}
         </span>
         <span class="st" data-st={person.online ? 'ok' : 'offline'}>
           <i></i>{t(person.online ? 'member.online' : 'member.offline')}
         </span>
+        <PersonActions {group} {person} />
       </li>
     {/each}
   </ul>
@@ -160,6 +177,9 @@
 
 {#if adding}
   <AddAI {group} bind:open={adding} />
+{/if}
+{#if inviting}
+  <InvitationDialog {group} bind:open={inviting} />
 {/if}
 
 <style>
@@ -261,11 +281,18 @@
     margin-top: var(--sp-2);
   }
   .people {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) max-content;
   }
   .person {
-    flex-wrap: nowrap;
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    align-items: center;
+    gap: var(--sp-2);
     padding: 6px 0;
+  }
+  .person-name {
+    overflow-wrap: anywhere;
   }
 </style>
