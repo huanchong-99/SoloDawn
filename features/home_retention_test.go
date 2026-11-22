@@ -290,25 +290,30 @@ func (w *homeRetWorld) syncFrom(since int64) (bool, []json.RawMessage, error) {
 	return collectSyncFrames(peer, 1)
 }
 
+type syncFrameHead struct {
+	Type string            `json:"t"`
+	Re   int64             `json:"re"`
+	Rows []json.RawMessage `json:"rows"`
+}
+
+func nextSyncFrame(peer *homeRunPeer) (syncFrameHead, error) {
+	var head syncFrameHead
+	raw, err := peer.next()
+	if err != nil {
+		return head, err
+	}
+	return head, json.Unmarshal([]byte(raw), &head)
+}
+
 func collectSyncFrames(peer *homeRunPeer, re int64) (bool, []json.RawMessage, error) {
 	reset := false
 	var rows []json.RawMessage
 	for {
-		raw, err := peer.next()
+		head, err := nextSyncFrame(peer)
 		if err != nil {
 			return false, nil, err
 		}
-		var head struct {
-			Type string            `json:"t"`
-			Re   int64             `json:"re"`
-			Rows []json.RawMessage `json:"rows"`
-		}
-		if err := json.Unmarshal([]byte(raw), &head); err != nil {
-			return false, nil, err
-		}
-		if head.Type == "reset" {
-			reset = true
-		}
+		reset = reset || head.Type == "reset"
 		rows = append(rows, head.Rows...)
 		if head.Type == "synced" && head.Re == re {
 			return reset, rows, nil
@@ -332,12 +337,17 @@ func (w *homeRetWorld) storeHoldsMessages(wantCSV string) error {
 
 func (w *homeRetWorld) coldSyncDelivers(wantCSV string) error {
 	reset, rows, err := w.syncFrom(0)
-	if err != nil {
-		return err
+	if err != nil || !reset {
+		return fmt.Errorf("cold sync reset=%v err=%v", reset, err)
 	}
-	if !reset {
-		return fmt.Errorf("expected reset on cold sync")
+	got := strings.Join(msgTextsFromRaw(rows), ", ")
+	if got != wantCSV {
+		return fmt.Errorf("cold sync delivered %q; want %q", got, wantCSV)
 	}
+	return nil
+}
+
+func msgTextsFromRaw(rows []json.RawMessage) []string {
 	var texts []string
 	for _, raw := range rows {
 		var m proto.MsgRow
@@ -345,11 +355,7 @@ func (w *homeRetWorld) coldSyncDelivers(wantCSV string) error {
 			texts = append(texts, m.Text)
 		}
 	}
-	got := strings.Join(texts, ", ")
-	if got != wantCSV {
-		return fmt.Errorf("cold sync delivered %q; want %q", got, wantCSV)
-	}
-	return nil
+	return texts
 }
 
 func (w *homeRetWorld) secondTickNoOp() error {
@@ -375,7 +381,7 @@ func (w *homeRetWorld) seedMemoryRows(daysAgo int, noteText, reviewText string) 
 	if err != nil {
 		return err
 	}
-	return w.submitAndReviewTask(taskID, num, "review-target", w.aiOne, w.aiTwo, reviewText)
+	return w.submitAndReviewTask(taskID, num, "review-target", w.aiTwo, reviewText)
 }
 
 func (w *homeRetWorld) startDirectTask(label string) (proto.ID, int, error) {
@@ -413,7 +419,7 @@ func (w *homeRetWorld) startDirectTask(label string) (proto.ID, int, error) {
 	return tid, num, err
 }
 
-func (w *homeRetWorld) submitAndReviewTask(tid proto.ID, num int, title, assignee, reviewer, reviewText string) error {
+func (w *homeRetWorld) submitAndReviewTask(tid proto.ID, num int, title, reviewer, reviewText string) error {
 	slug := proto.MakeSlug(title)
 	branch := proto.TaskBranch{
 		TaskCommand: proto.TaskCommand{
@@ -437,11 +443,8 @@ func (w *homeRetWorld) submitAndReviewTask(tid proto.ID, num int, title, assigne
 	}
 	sub := proto.TaskSubmitted{
 		TaskCommand: proto.TaskCommand{
-			HomeCommand: proto.HomeCommand{
-				Type: "task", Nonce: w.nextID(), Timestamp: w.now.UnixMilli(),
-				Group: proto.ID(w.group), As: proto.ID(assignee),
-			},
-			Op: "submitted", ID: tid,
+			HomeCommand: proto.HomeCommand{Type: "task", Nonce: w.nextID(), Timestamp: w.now.UnixMilli(), Group: proto.ID(w.group)},
+			Op:          "submitted", ID: tid,
 		},
 		Commit: "c1", Stats: proto.DiffStats{Added: 4, Removed: 1},
 	}
@@ -610,7 +613,7 @@ func (w *homeRetWorld) mergeAndRelease() error {
 		return err
 	}
 	drainAvailable(w.hostConn)
-	if err := w.submitAndReviewTask(proto.ID(firstID), firstNum, "Base work", w.aiOne, w.aiTwo, "Ready to merge"); err != nil {
+	if err := w.submitAndReviewTask(proto.ID(firstID), firstNum, "Base work", w.aiTwo, "Ready to merge"); err != nil {
 		return err
 	}
 	merged := proto.TaskMerged{
@@ -646,42 +649,65 @@ func (w *homeRetWorld) waitAssignFor(taskID string) error {
 		if err != nil {
 			return err
 		}
-		var push proto.Inbox
-		if json.Unmarshal([]byte(raw), &push) != nil || push.Type != "inbox" {
-			continue
-		}
-		for _, it := range push.Items {
-			if it.Why == "assign" && string(it.Task) == taskID {
-				return nil
-			}
+		if inboxHasAssign(raw, taskID) {
+			return nil
 		}
 	}
 }
 
+func inboxHasAssign(raw, taskID string) bool {
+	var push proto.Inbox
+	if json.Unmarshal([]byte(raw), &push) != nil || push.Type != "inbox" {
+		return false
+	}
+	return hasAssignItem(push.Items, taskID)
+}
+
+func hasAssignItem(items []proto.InboxItem, taskID string) bool {
+	for _, it := range items {
+		if it.Item.Why == "assign" && string(it.Item.Task) == taskID {
+			return true
+		}
+	}
+	return false
+}
+
 func (w *homeRetWorld) fetchAndCheckBrief(briefID string) error {
-	peer := &homeRunPeer{frames: make(chan any, 16)}
-	peer.conn = w.loop.Attach(w.laptop.ID(), peer)
-	defer w.loop.Detach(peer.conn)
-	w.loop.Fetch(peer.conn, proto.FetchRow{
-		FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: 1}, Group: w.group},
-		Row:       "msg", RowID: briefID,
-	})
-	raw, err := peer.next()
+	raw, err := w.fetchSingleRow("msg", briefID)
 	if err != nil {
 		return err
 	}
-	var fetched proto.Fetched
-	if err := json.Unmarshal([]byte(raw), &fetched); err != nil || len(fetched.Rows) != 1 {
-		return fmt.Errorf("fetch brief got %s (%v)", raw, err)
-	}
 	var card proto.MsgRow
-	if err := json.Unmarshal(fetched.Rows[0], &card); err != nil {
+	if err := json.Unmarshal(raw, &card); err != nil {
 		return err
 	}
-	if card.State == nil || card.State.Status != "confirmed" || card.State.Act == nil || *card.State.Act != w.confirmAct {
+	if !confirmedBriefMatches(card.State, w.confirmAct) {
 		return fmt.Errorf("fetched brief state=%+v; want confirmed with original act", card.State)
 	}
 	return nil
+}
+
+func (w *homeRetWorld) fetchSingleRow(kind, rowID string) (json.RawMessage, error) {
+	peer := &homeRunPeer{frames: make(chan any, 16)}
+	peer.conn = w.loop.Attach(w.laptop.ID(), peer)
+	defer w.loop.Detach(peer.conn)
+	w.loop.Fetch(peer.conn, home.Fetch{
+		FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: 1}, Group: w.group},
+		Row:       kind, RowID: rowID,
+	})
+	raw, err := peer.next()
+	if err != nil {
+		return nil, err
+	}
+	var fetched proto.Fetched
+	if err := json.Unmarshal([]byte(raw), &fetched); err != nil || len(fetched.Rows) != 1 {
+		return nil, fmt.Errorf("fetch row got %s (%v)", raw, err)
+	}
+	return fetched.Rows[0], nil
+}
+
+func confirmedBriefMatches(state *proto.CardState, want proto.Envelope) bool {
+	return state != nil && state.Status == "confirmed" && state.Act != nil && *state.Act == want
 }
 
 func (w *homeRetWorld) checkQueuedBriefDeleted() error {
@@ -704,7 +730,7 @@ func (w *homeRetWorld) seedThreeTasks(daysAgo int) error {
 	if err != nil {
 		return err
 	}
-	if err := w.submitAndReviewTask(mergedID, mergedNum, "task-merged", w.aiOne, w.aiTwo, "Pass"); err != nil {
+	if err := w.submitAndReviewTask(mergedID, mergedNum, "task-merged", w.aiTwo, "Pass"); err != nil {
 		return err
 	}
 	mergeCmd := proto.TaskMerged{
