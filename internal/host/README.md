@@ -236,8 +236,8 @@ The rules are in [mcp-tools.md](../../planning/contracts/mcp-tools.md) and [loca
 
 # Talk and group state tools
 
-`tools_talk.go` registers `post`, `read_thread`, `list_members`, `list_tasks`, `note_put` and `note_list` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1 and 5).
-`post` and `note_put` run `CheckOutboundSecret` before signing or sending any command to the home.
+`tools_talk.go` registers `post`, `read_thread`, `list_members`, `list_tasks`, `note_put` and `note_list` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1 and 5), and `tools_kb.go` registers `kb_put` and `kb_search` for every session ([step-3/knowledge.md](../../planning/contracts/step-3/knowledge.md), section 5).
+`post`, `note_put` and `kb_put` (both `name` and `text`) run `CheckOutboundSecret` before signing or sending any command to the home.
 
 # Task and review tools
 
