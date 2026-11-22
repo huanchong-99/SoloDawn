@@ -19,7 +19,7 @@ kind: reference
 - `session.go`: `Sessions`, serving inbound `ctl` connections (`*peer.Connection` via `Ctl`), `hello` and `welcome`, the bootstrap rule before enrolment, request (`sync`, `fetch`, `host.info`), push (`devlog`, `ack`), command (`pair.browser`) and replay tables, delegation to `home.Loop` and `host.Surface`, and asynchronous execution with envelope checks, in-flight nonce coordination and `receipt` persistence for host commands ([datachannel](../../planning/contracts/datachannel.md), sections 2, 3, 5, 7 and 8; [commands](../../planning/contracts/commands.md), "Once only" and section 2).
 - `client.go`: `clientCtl`, `dialFunc`, `(*Sessions).serveClient` and `(*Sessions).connectHome`, the client side of a host's outgoing `ctl` session to a home on another node ([datachannel](../../planning/contracts/datachannel.md), sections 2, 3 and 3.1; [flows/connect.md](../../planning/flows/connect.md), steps 11 to 18).
 - `pair.go`: `Pairer`, running 10-minute single-use pairing rooms in role `b` (`Pair`, onboarding and adding another computer) and role `a` (`PairBrowser` and `pair.browser`, adding another browser with `#pair=<secret>` links and once-only nonce replay; [pairing](../../planning/flows/pairing.md), sections A to C; [envelope](../../planning/contracts/envelope.md), section 6).
-- `surface.go`: `Surface`, serving `host.info` (`HostState`), forwarding `pty.resize` pushes to `host.Surface["pty.resize"]`, and reading `name`, `max_open`, `offline`, `homes` and `rendezvous` (`ReadName`, `ReadRendezvous`; [datachannel](../../planning/contracts/datachannel.md), sections 3 and 7).
+- `surface.go`: `Surface`, serving `host.info` (`HostState`, including live `QueuedCount` per `(group, member)`), forwarding `pty.resize` pushes to `host.Surface["pty.resize"]`, replaying `takeover.start` via `Host.ReplayTakeover`, and reading `name`, `max_open`, `offline`, `homes` and `rendezvous` (`ReadName`, `ReadRendezvous`; [datachannel](../../planning/contracts/datachannel.md), sections 3 and 7).
 - `netstatus.go`: registers the `net_status` MCP tool in `host.Tools` and reports welcomed `ctl` paths, the local NAT flags, and configured rendezvous reachability ([mcp-tools](../../planning/contracts/mcp-tools.md), section 1).
 - `schedule.go`: runs `home.Retain` on `node.db` at startup and every 24 hours ([storage](../../planning/contracts/storage.md), sections 2 and 4).
 - `local.go`: `AttachLocal` and `LocalLink`, the in-process link between a `*host.Host` and a `*home.Loop` on the same node ([architecture](../../planning/architecture.md), section 2.1).
@@ -79,7 +79,7 @@ The owner's devices can send `home.add` to record a group's home and its signall
 | `Requests` | `ctl` requests (`sync`, `fetch` with `Async: true`; `host.info` registered by `NewSurface` with `Type: "host.info"`) |
 | `Pushes` | `ctl` pushes after enrolment beyond `devlog` and `ack` (`pty.resize` registered by `NewSurface`) |
 | `Commands` | node-level host commands (`pair.browser` registered by `NewPairer`); other host commands (`to` set in payload) fall back to `host.Surface` |
-| `Replays` | memory-backed replay answers for succeeded host commands (`pair.browser` registered by `NewPairer`, returning the active link while valid and `conflict` once used, expired or lost across restart) |
+| `Replays` | memory-backed replay answers for succeeded host commands (`pair.browser` registered by `NewPairer`, returning the active link while valid and `conflict` once used, expired or lost across restart; `takeover.start` registered by `NewSurface`, answering `ok` while that terminal remains open on the same connection and `conflict` otherwise) |
 
 `SessionConfig.OnAdopt` is invoked once with the adopted owner's user id when an unowned node persists its first valid adoption log (`dvlAdopt`), before forwarding `devlog` frames. `SessionConfig.Spawn` starts a host command; `nil` runs it on a bare goroutine. `nodeRuntime.onAdopt` registers the node to start at login (`InstallService`), while `home.Loop` reads the dynamic owner through `LoopConfig.OwnerFn` (`logs.Owner`). `home.Loop.Welcome` and `home.Loop` group announcements deliver `welcome.groups` and `groups` pushes over `Sessions`.
 
@@ -107,7 +107,7 @@ The owner's devices can send `home.add` to record a group's home and its signall
 
 ## Known limitations
 
-- `Surface` answers `host.info` requests and forwards `pty.resize` pushes; there is no `host.info` push yet, `settings.set` is postponed with `U-12`, and `queued` in `host.info` is always `0` because held items live on the home (`not_before`, `HM-7`; [issues](../../issues.md)).
+- `Surface` answers `host.info` requests and forwards `pty.resize` pushes; there is no `host.info` push yet, `settings.set` is postponed with `U-12`.
 - `net_status` omits `rtt_ms` (`*peer.Connection` exposes `Path()` without ICE candidate-pair round-trip statistics) and reports `mapped_ports` as `false` in step 1 ([issues](../../issues.md)).
 - Self-update (`Updater`, `N-6`) is postponed off the step-1 main line ([issues](../../issues.md)).
 - On macOS, Unix socket paths are limited to 103 bytes, so tests that bind `sock` under `HOME` use `/tmp` ([issues](../../issues.md)).
