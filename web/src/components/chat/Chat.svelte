@@ -13,6 +13,7 @@
   import Mount from '../Mount.svelte';
   import Composer from './Composer.svelte';
   import Message from './Message.svelte';
+  import TeamMembers from '../team/TeamMembers.svelte';
 
   /** The chat of one group: its main line, newest at the bottom, and the composer, with what the
    *  areas mount in its head, above its main line and beside it (lib/mounts.svelte.ts). */
@@ -105,12 +106,12 @@
     <div class="bar-title">
       <h2>{group.name}</h2>
       <p>
-        {t('chat.project')} · {t('chat.members')}
+        {t(group.info?.kind === 'team' ? 'team.title' : 'chat.project')} · {t('chat.members')}
         {group.members.length}
         {#if group.home.name}· <Icon name="home" sm /> {group.home.name}{/if}
       </p>
     </div>
-    <Mount at="chat.head" props={{ group }} />
+    {#if group.info?.kind !== 'team'}<Mount at="chat.head" props={{ group }} />{/if}
     {#if sided}
       <button
         class="icon-btn side-open"
@@ -124,7 +125,9 @@
       </button>
     {/if}
   </header>
-  <div class="top" inert={covered}><Mount at="chat.top" props={{ group }} /></div>
+  <div class="top" inert={covered}>
+    {#if group.info?.kind !== 'team'}<Mount at="chat.top" props={{ group }} />{/if}
+  </div>
 
   <!-- The scroller is reversed and holds one child: its start is the bottom, so the newest
        message is in view when it opens and stays there, and a page added above moves nothing.
@@ -171,7 +174,7 @@
           </div>
         {/if}
       {/each}
-      {#if group.info && !group.info.secretary}
+      {#if group.info?.kind === 'project' && !group.info.secretary}
         <p class="nosec"><Icon name="alert" sm />{t('chat.nosecretary')}</p>
       {/if}
     </div>
@@ -196,7 +199,10 @@
       >
         <Icon name="x" />
       </button>
-      <Mount at="chat.side" props={{ group, net }} />
+      {#if group.info?.kind === 'team'}<TeamMembers {group} />{:else}<Mount
+          at="chat.side"
+          props={{ group, net }}
+        />{/if}
     </aside>
   {/if}
 </section>

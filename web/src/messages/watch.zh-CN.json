@@ -1,0 +1,15 @@
+{
+  "watch.ask": "申请旁观",
+  "watch.requested": "已发送旁观申请",
+  "watch.watchers": "旁观",
+  "watch.stop": "停止旁观",
+  "watch.empty": "暂无人旁观。",
+  "watch.idle": "正在连接终端",
+  "watch.starting": "正在打开旁观通道",
+  "watch.active": "旁观中 · 只读",
+  "watch.relay": "旁观需要直连",
+  "watch.ended": "旁观已结束",
+  "watch.error": "无法打开旁观通道",
+  "watch.readonly": "只能观看，不能输入或调整所有者的终端大小。",
+  "watch.privacy": "SoloDawn 不读取终端内容。旁观从新输出开始，不回放之前的内容。"
+}

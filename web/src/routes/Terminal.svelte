@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import Failure from '../components/Failure.svelte';
   import Icon from '../components/Icon.svelte';
   import TerminalInfo from '../components/terminal/TerminalInfo.svelte';
+  import Watchers from '../components/watch/Watchers.svelte';
+  import { Watch } from '../components/watch/watch.svelte';
   import { find } from '../lib/groups.svelte';
   import { t } from '../lib/prefs.svelte';
   import { href, type PageProps } from '../lib/route.svelte';
@@ -34,7 +36,7 @@
 
   let termHost = $state<HTMLElement>();
   let exit = $state<HTMLElement>();
-  let term: import('@xterm/xterm').Terminal | undefined;
+  let term = $state.raw<import('@xterm/xterm').Terminal>();
   // What the computer sends before xterm has loaded.
   const early: (Uint8Array | string)[] = [];
   const write = (chunk: Uint8Array | string) => (term ? term.write(chunk) : early.push(chunk));
@@ -42,6 +44,7 @@
   const group = $derived(find(params.g));
   const member = $derived(group?.member(params.member));
   const ai = $derived(member?.kind === 'ai' ? member : undefined);
+  const watching = $derived(Boolean(ai && group && ai.user !== group.home.me.user));
   const host = $derived(ai ? hostHomeOf(net.homes, ai.host) : undefined);
   const path = $derived(host ? net.path(host) : undefined);
   const task = $derived(sessionTaskOf(group, ai, params.task));
@@ -51,27 +54,42 @@
   const memberId = $derived(params.member);
   const taskId = $derived(params.task);
   const tk = $derived(new Takeover(g, memberId, taskId, write));
+  const watch = $derived(new Watch(g, memberId, write));
+  const session = $derived(watching ? watch : tk);
+  const size = $derived(host?.terminalSizes.get(`${g}:${memberId}`));
   const backHref = $derived(href('chat', { g: params.g }));
   const subtitle = $derived(headerSubtitle(ai, task, group?.name));
   const bar = $derived(
-    takeoverBarState({
-      phase: tk.phase,
-      ai,
-      online: Boolean(host?.ctl),
-      path,
-      errorCode: tk.errorCode,
-      startedAt: tk.startedAt,
-      nowMs: now(),
-    }),
+    watching
+      ? {
+          title: t(`watch.${watch.phase}`),
+          detail: t('watch.readonly'),
+          handback: false,
+          errorCode: watch.errorCode,
+        }
+      : takeoverBarState({
+          phase: tk.phase,
+          ai,
+          online: Boolean(host?.ctl),
+          path,
+          errorCode: tk.errorCode,
+          startedAt: tk.startedAt,
+          nowMs: now(),
+        }),
   );
 
   $effect(() => {
-    const current = tk;
-    term?.clear();
-    if (term) current.resize(term.cols, term.rows);
+    const current = session;
+    untrack(() => {
+      term?.clear();
+      if (term && !watching) tk.resize(term.cols, term.rows);
+    });
     return () => current.handBack();
   });
-  $effect(() => tk.follow(targetOf(host, ai), path));
+  $effect(() => session.follow(targetOf(host, ai), path));
+  $effect(() => {
+    if (watching && term && size) term.resize(size.cols, size.rows);
+  });
 
   onMount(() => {
     let cancelled = false;
@@ -83,7 +101,8 @@
     ]).then(([{ Terminal: XTerm }, { FitAddon }]) => {
       if (cancelled || !termHost) return;
       const instance = new XTerm({
-        cursorBlink: true,
+        cursorBlink: !watching,
+        disableStdin: watching,
         fontFamily:
           "'Geist Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace",
         fontSize: 13,
@@ -106,13 +125,15 @@
       });
       term = instance;
       for (const chunk of early.splice(0)) instance.write(chunk);
-      instance.onData((text) => tk.type(text));
-      instance.onBinary((raw) => tk.typeBinary(raw));
-      instance.onResize(({ cols, rows }) => tk.resize(cols, rows));
-      fit.fit();
-      tk.resize(instance.cols, instance.rows);
-      observer = new ResizeObserver(() => fit.fit());
-      observer.observe(termHost);
+      if (!watching) {
+        instance.onData((text) => tk.type(text));
+        instance.onBinary((raw) => tk.typeBinary(raw));
+        instance.onResize(({ cols, rows }) => tk.resize(cols, rows));
+        fit.fit();
+        tk.resize(instance.cols, instance.rows);
+        observer = new ResizeObserver(() => fit.fit());
+        observer.observe(termHost);
+      }
     });
     return () => {
       cancelled = true;
@@ -123,7 +144,7 @@
   });
 </script>
 
-<svelte:window onpagehide={() => tk.handBack()} />
+<svelte:window onpagehide={() => session.handBack()} />
 
 <div class="terminal-page">
   <header class="term-head">
@@ -141,10 +162,10 @@
       <div class="takeover" role="status">
         <b><i class="sq"></i><span>{bar.title}</span></b>
         <span class="grow">
-          {#if bar.detail}
-            {bar.detail}
-          {:else if bar.errorCode}
+          {#if bar.errorCode}
             <Failure code={bar.errorCode} />
+          {:else if bar.detail}
+            {bar.detail}
           {/if}
         </span>
         {#if bar.handback}
@@ -164,28 +185,30 @@
         aria-label={t('terminal.aria.term').replace('{ai}', ai?.name ?? t('terminal.title'))}
       ></div>
 
-      <div
-        class="keys only-narrow"
-        role="toolbar"
-        tabindex="0"
-        aria-label={t('terminal.aria.keys')}
-      >
-        {#each phoneKeys as key (key.label)}
-          <button
-            type="button"
-            class:active={Boolean(key.ctrl && tk.ctrl)}
-            aria-label={key.ariaKey ? t(key.ariaKey) : undefined}
-            aria-pressed={key.ctrl ? tk.ctrl : undefined}
-            disabled={tk.phase !== 'active'}
-            onclick={() => (tk.press(key), term?.focus())}
-          >
-            {key.label}
-          </button>
-        {/each}
-      </div>
+      {#if !watching}<div
+          class="keys only-narrow"
+          role="toolbar"
+          tabindex="0"
+          aria-label={t('terminal.aria.keys')}
+        >
+          {#each phoneKeys as key (key.label)}
+            <button
+              type="button"
+              class:active={Boolean(key.ctrl && tk.ctrl)}
+              aria-label={key.ariaKey ? t(key.ariaKey) : undefined}
+              aria-pressed={key.ctrl ? tk.ctrl : undefined}
+              disabled={tk.phase !== 'active'}
+              onclick={() => (tk.press(key), term?.focus())}
+            >
+              {key.label}
+            </button>
+          {/each}
+        </div>{/if}
     </section>
 
-    <TerminalInfo {ai} {task} link={linkBadgeOf(Boolean(host?.ctl), path)} />
+    <TerminalInfo {ai} {task} {watching} link={linkBadgeOf(Boolean(host?.ctl), path)}>
+      {#if group && host}<Watchers {group} {host} member={memberId} />{/if}
+    </TerminalInfo>
   </div>
 </div>
 

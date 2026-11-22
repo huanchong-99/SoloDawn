@@ -22,7 +22,7 @@
 </script>
 
 {#snippet body()}
-  {#if msg.text && !(msg.kind === 'call' && Card)}
+  {#if msg.text && !((msg.kind === 'call' || msg.kind === 'bulletin') && Card)}
     <p class="text"><Rich {group} text={msg.text} mentions={msg.mentions} /></p>
   {/if}
   {#if Card}
@@ -38,7 +38,7 @@
   {/if}
 {/snippet}
 
-{#if msg.by === 'system' && Card}
+{#if (msg.by === 'system' || msg.kind === 'bulletin') && Card}
   <!-- Written by the home, and drawn whole by the component mounted for its kind. -->
   <div class="msg sys" id={`m-${msg.id}`}><Card {group} {msg} /></div>
 {:else if msg.by === 'system'}
