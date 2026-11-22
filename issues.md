@@ -6,6 +6,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · deviation · Host turn labels approximate task participation by role
+
+- Symptom: a role still held for confirmation counts as participation for host labels, although `planning/contracts/step-2/confirm.md:37-38,156-172` also requires a queued assign or review item.
+- Cause: `internal/host/turn_info.go:13` reads the source task's assignee and reviewer. Ended sessions are deleted (`internal/host/session.go:284-300`), so the session table is not a durable record of queued role items.
+- Status: open, accepted for T2-13; labels enforce nothing.
+
+### 2026-11-22 · limitation · Direct-confirmation labels have no production card producer yet
+
+- Symptom: carried-message and recovery labels can read confirmed direct cards, but the home does not yet write step-2 confirm cards.
+- Cause: `internal/host/turn_info.go:74` fetches `confirm` messages by kind; the producer in `planning/contracts/step-2/confirm.md:43-60` is not implemented in the home. Host state-only sync excludes message rows (`internal/host/deliver.go:259`), so these labels fetch at most one page of 100 confirmation messages per Compose.
+- Status: open; live mention labels continue to trust the home's queueing decision. Confirmation cards older than that page are not consulted unless already present in this Compose's fetched history.
+
 ### 2026-11-22 · limitation · Web Push VAPID `sub` URL is not yet checked against Apple's push service
 
 - Symptom: none observed; `wpushSubscriber` (`https://github.com/huanchong-99/SoloDawn`) has not yet been exercised against Apple's Web Push service on iOS.

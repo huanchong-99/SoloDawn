@@ -72,15 +72,16 @@ func (r *routedHome) Request(ctx context.Context, build func(int64) any) (json.R
 }
 
 type turnRig struct {
-	t       *testing.T
-	h       *Host
-	ownerID string
-	aliceID string
-	homeKey identity.Key
-	home    *routedHome
-	brief   proto.BriefBody
-	notes   []proto.NoteRow
-	history []proto.MsgRow
+	t        *testing.T
+	h        *Host
+	ownerID  string
+	aliceID  string
+	homeKey  identity.Key
+	home     *routedHome
+	brief    proto.BriefBody
+	notes    []proto.NoteRow
+	history  []proto.MsgRow
+	confirms []proto.MsgRow
 }
 
 func newTurnRig(t *testing.T) *turnRig {
@@ -160,10 +161,16 @@ func (r *turnRig) baseTask() proto.TaskRow {
 
 func (r *turnRig) defaultHomeHandler(req any) (json.RawMessage, error) {
 	rows := []json.RawMessage{}
-	switch req.(type) {
+	switch req := req.(type) {
 	case proto.FetchRow:
 		rows = []json.RawMessage{r.briefMsgJSON(tBriefID, &proto.CardState{Status: "pending"})}
 	case proto.FetchKind:
+		if req.Kind == "confirm" {
+			for _, m := range r.confirms {
+				rows = append(rows, mustJSON(r.t, m))
+			}
+			break
+		}
 		for _, n := range r.notes {
 			rows = append(rows, mustJSON(r.t, n))
 		}
@@ -776,9 +783,7 @@ func checkHandbackAndTaskStartedNotices(t *testing.T, r *turnRig, sec Session) {
 	gotStarted, _, err := Compose(r.h, sec, ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 6, AI: proto.ID(tSecID), Why: "notice", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID), Code: "task_started"}, taskCard, nil),
 	})
-	if err != nil || strings.Contains(gotStarted, "(task)") {
-		t.Fatalf("task_started notice should omit (task): err=%v\n%s", err, gotStarted)
-	}
+	assertContains(t, gotStarted, err, "-- from the home in main · information\n(task)")
 	briefNotice, _, err := Compose(r.h, sec, ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 7, AI: proto.ID(tSecID), Why: "notice", Msg: proto.ID(tBriefID), Code: "brief"}, r.briefMsgJSON(tBriefID, nil), nil),
 	})
@@ -804,11 +809,11 @@ func TestReplacedTurnRecoveryForEverySessionKind(t *testing.T) {
 		`System: turn_interrupted`,
 		`-- decision · from "Claude Code" (AI) in T-12 · information`,
 		`(decision)`,
-		`-- decision · from "Claude Code" (AI) in T-12 · information`,
+		`-- decision · from "owner" in T-12 · instruction`,
 		`Decision (id ` + decID + `): Retry on relay?`,
 		`Choice: A (Yes)`,
 		`Keep backoff short.`,
-		`-- approval · from "Claude Code" (AI) in T-12 · information`,
+		`-- approval · from "owner" in T-12 · instruction`,
 		`Approved. Run exactly the same request again.`,
 		`-- text · from "owner" in T-12 · instruction`,
 		`Owner guidance.`,

@@ -2,11 +2,192 @@ package host
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
+
+func directCard(r *teamLabelRig, ai, request, status string) proto.MsgRow {
+	return proto.MsgRow{
+		RowHeader: proto.RowHeader{Type: "msg", ID: turnID("confirmation"), Seq: 30},
+		Group:     tGroupID, By: "system", Kind: "confirm", Re: &request,
+		Mentions: []string{}, Body: mustJSON(r.t, map[string]any{"what": "direct", "ai": ai, "to": []string{r.qUser}}),
+		State: &proto.CardState{Status: status},
+	}
+}
+
+func TestSourceTaskParticipation(t *testing.T) {
+	r := newTeamLabelRig(t, "Q")
+	r.putTeamAI(r.qTeam, r.qUser, "Q-team", "team", []string{r.pUser}, false)
+	c := &turnCtx{h: r.h, s: r.sess(r.qTeam, "Q-team", GroupSession, false), owner: r.qUser}
+	other := r.baseTask()
+	other.ID, other.Num, other.Assignee, other.Reviewer = turnID("other-task"), 13, r.pAI, r.qTeam
+	r.h.Rows.Put(tGroupID, "task", other.ID, mustJSON(t, other))
+	unrelated := other
+	unrelated.ID, unrelated.Num, unrelated.Reviewer = turnID("unrelated-task"), 14, r.pAI
+	r.h.Rows.Put(tGroupID, "task", unrelated.ID, mustJSON(t, unrelated))
+	for _, tc := range []struct{ thread, want string }{
+		{other.ID, "-- text · from \"P\" in T-13 · information\nScope"},
+		{unrelated.ID, "-- text · from \"P\" in T-14 · instruction\nScope"},
+	} {
+		msg := proto.MsgRow{By: r.pMem, Kind: "text", Thread: &tc.thread, Text: "Scope"}
+		got, err := c.formatHistoryEntry(msg)
+		if err != nil || got != tc.want {
+			t.Fatalf("history = %q, %v; want %q", got, err, tc.want)
+		}
+	}
+}
+
+func TestDirectConfirmationInHistoryAndAssign(t *testing.T) {
+	r := newTeamLabelRig(t, "Q")
+	var msg proto.MsgRow
+	proto.Decode(r.textMsg(tMsg1ID, r.pMem, "", "Request"), &msg)
+	for _, status := range []string{"pending", "confirmed"} {
+		r.confirms = []proto.MsgRow{directCard(r, r.qPersonal, msg.ID, status)}
+		wantLabel := "information"
+		if status == "confirmed" {
+			wantLabel = "instruction"
+		}
+		c := &turnCtx{h: r.h, s: r.sess(r.qPersonal, "Q-personal", GroupSession, false), owner: r.qUser}
+		got, err := c.formatHistoryEntry(msg)
+		want := "-- text · from \"P\" in main · " + wantLabel + "\nRequest"
+		if err != nil || got != want {
+			t.Fatalf("history = %q, %v; want %q", got, err, want)
+		}
+		checkAssignReference(t, r, msg, wantLabel)
+	}
+}
+
+func checkAssignReference(t *testing.T, r *teamLabelRig, msg proto.MsgRow, label string) {
+	t.Helper()
+	c := &turnCtx{h: r.h, s: r.sess(r.qPersonal, "Q-personal", TaskSession, false), owner: r.qUser}
+	task := r.baseTask()
+	task.Origin, task.Plan = "direct", "Plan"
+	want := "-- from \"P\" in main · " + label + "\nRequest"
+	got, err := c.assignBody(task, &msg, false)
+	if err != nil || got != want {
+		t.Fatalf("assign = %q, %v; want %q", got, err, want)
+	}
+	c.s.CLISession = ""
+	r.notes = nil
+	got, err = c.assignBody(task, &msg, true)
+	want = "Task T-12 \"Node: report connection path changes\"\nBranch: task/12-node-report-connection-path-changes (this folder is its worktree)\nPlan: Plan\nReviewer: Codex   Pass score: 90\n" + want
+	if err != nil || got != want {
+		t.Fatalf("first assign = %q, %v; want %q", got, err, want)
+	}
+}
+
+func TestConfirmationFetchOnceAndReuse(t *testing.T) {
+	r := newTeamLabelRig(t, "Q")
+	msg := proto.MsgRow{RowHeader: proto.RowHeader{ID: tMsg1ID}, By: r.pMem, Kind: "text", Text: "Request"}
+	r.confirms = []proto.MsgRow{directCard(r, r.qPersonal, msg.ID, "confirmed")}
+	c := &turnCtx{h: r.h, s: r.sess(r.qPersonal, "Q-personal", GroupSession, false), owner: r.qUser}
+	for _, id := range []string{msg.ID, tMsg2ID, tMsg2ID} {
+		_, err := c.confirmedDirect(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	wantFetch := proto.FetchKind{FetchPage: c.fetchPage(1, 0, 100), Kind: "confirm"}
+	if len(r.home.asked) != 1 || r.home.asked[0] != wantFetch {
+		t.Fatalf("fetches = %+v, want [%+v]", r.home.asked, wantFetch)
+	}
+}
+
+func TestConfirmationReusedFromHistory(t *testing.T) {
+	r := newTeamLabelRig(t, "Q")
+	msg := proto.MsgRow{RowHeader: proto.RowHeader{ID: tMsg1ID}, By: r.pMem, Kind: "text", Text: "Request"}
+	c := &turnCtx{h: r.h, s: r.sess(r.qPersonal, "Q-personal", GroupSession, false), owner: r.qUser}
+	got, err := c.formatHistory([]proto.MsgRow{msg, directCard(r, r.qPersonal, msg.ID, "confirmed")})
+	want := "-- text · from \"P\" in main · instruction\nRequest"
+	if err != nil || got[1] != want || len(r.home.asked) != 0 {
+		t.Fatalf("history = %q, %v; fetches = %+v", got, err, r.home.asked)
+	}
+}
+
+func TestConfirmationFetchErrors(t *testing.T) {
+	r := newTeamLabelRig(t, "Q")
+	for _, tc := range []struct {
+		raw  json.RawMessage
+		err  error
+		want string
+	}{
+		{nil, errors.New("fetch failed"), "home_unreachable: the home of that group is not connected"},
+		{mustJSON(t, proto.Fetched{Type: "fetched", Success: proto.Success{OK: true}, Rows: []json.RawMessage{json.RawMessage(`{}`)}}), nil, "bad_request: invalid confirmation message"},
+	} {
+		r.home.handler = func(any) (json.RawMessage, error) { return tc.raw, tc.err }
+		c := &turnCtx{h: r.h, s: r.sess(r.qPersonal, "Q-personal", GroupSession, false), owner: r.qUser}
+		_, err := c.formatCarriedMsg(proto.MsgRow{By: r.pMem, Kind: "text"})
+		if err == nil || err.Error() != tc.want {
+			t.Fatalf("error = %v, want %q", err, tc.want)
+		}
+	}
+}
+
+func TestDirectCardMatchesSpecificRequestAndAI(t *testing.T) {
+	r := newTeamLabelRig(t, "Q")
+	c := &turnCtx{h: r.h, s: r.sess(r.qPersonal, "Q-personal", GroupSession, false), owner: r.qUser}
+	for _, tc := range []struct {
+		ai, request, status string
+		want                bool
+	}{
+		{r.qPersonal, tMsg1ID, "confirmed", true},
+		{r.qTeam, tMsg1ID, "confirmed", false},
+		{r.qPersonal, tMsg2ID, "confirmed", false},
+		{r.qPersonal, tMsg1ID, "pending", false},
+	} {
+		if got := c.coversDirect(directCard(r, tc.ai, tc.request, tc.status), tMsg1ID); got != tc.want {
+			t.Fatalf("%+v: got %v", tc, got)
+		}
+	}
+	card := directCard(r, r.qPersonal, tMsg1ID, "confirmed")
+	card.Body = json.RawMessage(`{"what":"ask","ai":"` + r.qPersonal + `"}`)
+	if c.coversDirect(card, tMsg1ID) {
+		t.Fatal("ask card covered a direct request")
+	}
+}
+
+func TestResolvedBriefHistoryUsesLiveDecisionLine(t *testing.T) {
+	r := newTeamLabelRig(t, "Q")
+	c := &turnCtx{h: r.h, s: r.sess(r.qTeam, "Q-team", GroupSession, false), owner: r.qUser}
+	msg := proto.MsgRow{By: r.pSec, Kind: "brief", Body: mustJSON(t, r.brief), State: &proto.CardState{Status: "confirmed", By: &r.qMem}}
+	content, err := formatConfirmedBrief(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "-- brief · " + strings.TrimPrefix(c.formatCarriedDecision(msg, content), "-- ")
+	got, err := c.formatHistoryEntry(msg)
+	if err != nil || got != want {
+		t.Fatalf("brief history = %q, %v; want %q", got, err, want)
+	}
+}
+
+func TestHomeReplyAndTaskNotice(t *testing.T) {
+	r := newTurnRig(t)
+	c := &turnCtx{h: r.h, s: r.session(GroupSession, true, "c1"), owner: r.ownerID}
+	msg := proto.MsgRow{By: "system", Kind: "task", Text: "Denied"}
+	got, _, err := c.buildReply(parsedItem{msg: &msg}, false)
+	want := itemBlock{why: "reply", whoPlace: "from the home in main", authority: "information", body: "Denied"}
+	if err != nil || got != want {
+		t.Fatalf("reply = %+v, %v; want %+v", got, err, want)
+	}
+	msg.Text = ""
+	for _, tc := range []struct {
+		msg  *proto.MsgRow
+		want string
+	}{
+		{&msg, "Notice (task_started)\n-- from the home in main · information\n(task)"},
+		{nil, "Notice (task_started)"},
+	} {
+		got, _, err := c.buildNotice(parsedItem{item: proto.Item{Code: "task_started"}, msg: tc.msg}, false)
+		want := itemBlock{why: "notice", authority: "information", body: tc.want}
+		if err != nil || got != want {
+			t.Fatalf("notice = %+v, %v; want %+v", got, err, want)
+		}
+	}
+}
 
 type teamLabelRig struct {
 	*turnRig
@@ -119,6 +300,9 @@ func TestTaskThreadMentionsAndCrossOwnerDirectMentions(t *testing.T) {
 		thread := ""
 		if tc.sess.Task != "" {
 			thread = tTaskID
+			task := r.baseTask()
+			task.Assignee = tc.sess.Member
+			r.h.Rows.Put(tGroupID, "task", tTaskID, mustJSON(t, task))
 		}
 		raw := r.makeInboxItem(proto.Item{Item: 1, AI: proto.ID(tc.sess.Member), Why: "mention", Task: proto.ID(thread), Msg: proto.ID(tMsg1ID)}, r.textMsg(tMsg1ID, tc.by, thread, tc.text), nil)
 		got, _, err := Compose(r.h, tc.sess, ItemsTurn, []json.RawMessage{raw})
@@ -139,7 +323,7 @@ func checkDirectAssignAuthorKinds(t *testing.T, r *teamLabelRig) {
 	humanAssign := r.makeInboxItem(proto.Item{Item: 1, AI: proto.ID(r.qPersonal), Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, r.textMsg(tMsg1ID, r.pMem, "", "Please add badge."), nil)
 	gotHuman, _, err := Compose(r.h, s, ItemsTurn, []json.RawMessage{humanAssign})
 	assertContains(t, gotHuman, err, "== 1 of 1 · assign · instruction\nTask T-12")
-	assertContains(t, gotHuman, err, "-- from \"P\" in main · instruction\nPlease add badge.")
+	assertContains(t, gotHuman, err, "-- from \"P\" in main · information\nPlease add badge.")
 
 	aiAssign := r.makeInboxItem(proto.Item{Item: 2, AI: proto.ID(r.qPersonal), Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg2ID)}, r.textMsg(tMsg2ID, r.pAI, "", "AI requested badge."), nil)
 	gotAI, _, err := Compose(r.h, s, ItemsTurn, []json.RawMessage{aiAssign})
@@ -207,6 +391,9 @@ func checkDecidedAddresseeAndAllowListCases(t *testing.T, r *teamLabelRig, qTeam
 
 	// Personal account ignores allow list (R-51).
 	qPersTask := r.sess(r.qPersonal, "Q-personal", TaskSession, false)
+	task := r.baseTask()
+	task.Assignee = r.qPersonal
+	r.h.Rows.Put(tGroupID, "task", tTaskID, mustJSON(t, task))
 	gotPersonalAllow, _, err := Compose(r.h, qPersTask, ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 7, AI: proto.ID(r.qPersonal), Why: "decided", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg2ID)}, makeDec(r.pSec, &tTaskID, []string{r.qUser}, r.pMem), nil),
 	})

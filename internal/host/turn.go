@@ -51,11 +51,13 @@ func instructionsFor(s Session) string {
 }
 
 type turnCtx struct {
-	h         *Host
-	s         Session
-	kind      TurnKind
-	owner     string
-	itemTasks map[string]proto.TaskRow
+	h               *Host
+	s               Session
+	kind            TurnKind
+	owner           string
+	itemTasks       map[string]proto.TaskRow
+	confirmations   []proto.MsgRow
+	confirmsFetched bool
 }
 
 type parsedItem struct {
@@ -78,8 +80,8 @@ var itemBuilders = map[string]itemBuilder{
 	"reply":     (*turnCtx).buildReply,
 	"assign":    (*turnCtx).buildAssign,
 	"review":    (*turnCtx).buildReview,
-	"reviewed":  (*turnCtx).buildReviewed,
-	"checks":    (*turnCtx).buildChecks,
+	"reviewed":  (*turnCtx).buildCarried,
+	"checks":    (*turnCtx).buildCarried,
 	"resume":    (*turnCtx).buildResume,
 	"decided":   (*turnCtx).buildDecided,
 	"confirmed": (*turnCtx).buildConfirmed,
@@ -324,11 +326,19 @@ func (c *turnCtx) place(thread string) string {
 }
 
 func (c *turnCtx) fromIn(memberID, thread string) string {
-	return "from " + c.memberLabel(memberID) + " " + c.place(thread)
+	who := "unknown"
+	switch memberID {
+	case "system":
+		who = "the home"
+	case "":
+	default:
+		who = c.memberLabel(memberID)
+	}
+	return "from " + who + " " + c.place(thread)
 }
 
 func (c *turnCtx) msgWho(msg *proto.MsgRow, thread string) string {
-	if msg != nil && msg.By != "system" {
+	if msg != nil {
 		return c.fromIn(msg.By, thread)
 	}
 	return c.place(thread)
@@ -339,13 +349,6 @@ func (c *turnCtx) memberLabel(id string) string {
 		return formatSpeaker(m.Name, m.Kind == "ai")
 	}
 	return formatSpeaker(id, false)
-}
-
-func (c *turnCtx) stateActorLabel(state *proto.CardState) string {
-	if by := stateBy(state); by != "" {
-		return c.memberLabel(by)
-	}
-	return "unknown"
 }
 
 func formatSpeaker(name string, ai bool) string {
@@ -396,7 +399,7 @@ func (c *turnCtx) buildMention(p parsedItem, _ bool) (itemBlock, int, error) {
 		return itemBlock{}, 0, err
 	}
 	thread := itemThread(string(p.item.Task), p.msg)
-	auth := authorityLabel(c.msgInstruct(p.msg, thread, true))
+	auth := authorityLabel(c.mentionInstruct(p.msg, thread))
 	return itemBlock{why: "mention", whoPlace: c.msgWho(p.msg, thread), authority: auth, callID: callID, body: msgText(p.msg)}, depth, nil
 }
 
@@ -433,7 +436,7 @@ func (c *turnCtx) assignBody(task proto.TaskRow, msg *proto.MsgRow, first bool) 
 		return c.firstAssignBody(task, msg)
 	}
 	if msg != nil && msg.Kind != "task" {
-		return c.formatCarriedMsg(*msg, true)
+		return c.formatCarriedMsg(*msg)
 	}
 	return fmt.Sprintf("Task T-%d %q assigned to you. Continue the task.", task.Num, task.Title), nil
 }
@@ -447,7 +450,10 @@ func (c *turnCtx) firstAssignBody(task proto.TaskRow, msg *proto.MsgRow) (string
 	if err != nil {
 		return "", err
 	}
-	return c.appendCarriedMsg(lines, msg, true)
+	if msg != nil && msg.Kind == "task" {
+		msg = nil
+	}
+	return c.appendCarriedMsg(lines, msg)
 }
 
 func (c *turnCtx) taskStartLines(task proto.TaskRow) ([]string, error) {
@@ -538,20 +544,12 @@ func (c *turnCtx) reviewLines(task proto.TaskRow, commit string) ([]string, erro
 	return lines, nil
 }
 
-func (c *turnCtx) buildReviewed(p parsedItem, _ bool) (itemBlock, int, error) {
-	body, err := c.formatOptionalCarriedMsg(p.msg)
+func (c *turnCtx) buildCarried(p parsedItem, _ bool) (itemBlock, int, error) {
+	body, err := c.appendCarriedMsg(nil, p.msg)
 	if err != nil {
 		return itemBlock{}, 0, err
 	}
-	return itemBlock{why: "reviewed", authority: "instruction", body: body}, 0, nil
-}
-
-func (c *turnCtx) buildChecks(p parsedItem, _ bool) (itemBlock, int, error) {
-	body, err := c.formatOptionalCarriedMsg(p.msg)
-	if err != nil {
-		return itemBlock{}, 0, err
-	}
-	return itemBlock{why: "checks", authority: "instruction", body: body}, 0, nil
+	return itemBlock{why: p.item.Why, authority: "instruction", body: body}, 0, nil
 }
 
 func (c *turnCtx) buildResume(p parsedItem, _ bool) (itemBlock, int, error) {
@@ -655,7 +653,7 @@ func (c *turnCtx) noticeBody(code, detail, thread string, msg *proto.MsgRow) (st
 	if detail != "" {
 		lines = append(lines, detail)
 	}
-	return c.appendCarriedMsg(lines, msg, false)
+	return c.appendCarriedMsg(lines, msg)
 }
 
 func (c *turnCtx) noticeHeadline(code, thread string) string {
@@ -812,6 +810,7 @@ func (c *turnCtx) formatHistory(msgs []proto.MsgRow) ([]string, error) {
 		return nil, nil
 	}
 	lines := []string{"Recent messages:"}
+	c.confirmations = append(c.confirmations, msgs...)
 	for _, m := range msgs {
 		entry, err := c.formatHistoryEntry(m)
 		if err != nil {
@@ -823,13 +822,26 @@ func (c *turnCtx) formatHistory(msgs []proto.MsgRow) ([]string, error) {
 }
 
 func (c *turnCtx) formatHistoryEntry(m proto.MsgRow) (string, error) {
-	content, err := formatMsgContent(m)
+	content, err := historyContent(m)
 	if err != nil {
 		return "", err
 	}
-	thread := itemThread("", &m)
-	auth := authorityLabel(c.msgInstruct(&m, thread, false))
-	return fmt.Sprintf("-- %s · %s · %s\n%s", m.Kind, c.carriedMsgWho(m), auth, content), nil
+	if resolvedOutcome(m) {
+		return "-- " + m.Kind + " · " + strings.TrimPrefix(c.formatCarriedDecision(m, content), "-- "), nil
+	}
+	instruct, err := c.msgInstruct(m)
+	return fmt.Sprintf("-- %s · %s · %s\n%s", m.Kind, c.fromIn(m.By, strVal(m.Thread)), authorityLabel(instruct), content), err
+}
+
+func historyContent(m proto.MsgRow) (string, error) {
+	if m.Kind == "brief" && resolvedOutcome(m) {
+		return formatConfirmedBrief(m)
+	}
+	return formatMsgContent(m)
+}
+
+func resolvedOutcome(m proto.MsgRow) bool {
+	return slices.Contains([]string{"approved", "denied", "decided", "confirmed", "revise"}, cardStatus(m.State))
 }
 
 func (c *turnCtx) fetchPage(id, before int64, limit int) proto.FetchPage {

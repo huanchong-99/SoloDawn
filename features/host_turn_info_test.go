@@ -147,6 +147,11 @@ func (w *turnInfoWorld) mentionInThread(who, aiName, text string) (err error) {
 	if aiName == "Q-team" {
 		aiID = tiQTeamID
 	}
+	rawTask, _ := w.h.Rows.Get(turnGroupID, "task", turnTaskID)
+	var task proto.TaskRow
+	proto.Decode(rawTask, &task)
+	task.Assignee = aiID
+	w.h.Rows.Put(turnGroupID, "task", turnTaskID, turnMustJSON(task))
 	th := turnTaskID
 	msg := turnMustJSON(proto.MessageRow[proto.EmptyBody, proto.NoCard]{
 		RowHeader: proto.RowHeader{Type: "msg", ID: turnCallID, Seq: 10},

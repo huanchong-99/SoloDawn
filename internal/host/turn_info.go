@@ -1,6 +1,8 @@
 package host
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -9,7 +11,10 @@ import (
 )
 
 func (c *turnCtx) inOwnTask(thread string) bool {
-	return c.s.Task != "" && c.s.Task == thread
+	raw, _ := c.h.Rows.Get(c.s.Group, "task", thread)
+	var task proto.TaskRow
+	proto.Decode(raw, &task)
+	return task.Assignee == c.s.Member || task.Reviewer == c.s.Member
 }
 
 func (c *turnCtx) humanUser(id string) string {
@@ -29,8 +34,7 @@ func isAllowAccount(account string) bool {
 	return account == "team" || account == "api_key"
 }
 
-func (c *turnCtx) wordEnough(id string) bool {
-	u := c.humanUser(id)
+func (c *turnCtx) wordEnough(u string) bool {
 	if u == "" {
 		return false
 	}
@@ -43,17 +47,80 @@ func (c *turnCtx) wordEnough(id string) bool {
 	return isAllowAccount(ai.Account) && slices.Contains(ai.Allow, u)
 }
 
-func (c *turnCtx) msgInstruct(msg *proto.MsgRow, thread string, directOK bool) bool {
+func (c *turnCtx) mentionInstruct(msg *proto.MsgRow, thread string) bool {
 	if msg == nil {
 		return false
 	}
 	if c.inOwnTask(thread) {
 		return c.isOwnerMember(msg.By)
 	}
-	if directOK {
-		return c.humanUser(msg.By) != ""
+	return c.humanUser(msg.By) != ""
+}
+
+func (c *turnCtx) msgInstruct(msg proto.MsgRow) (bool, error) {
+	u := c.humanUser(msg.By)
+	if c.inOwnTask(strVal(msg.Thread)) {
+		return u != "" && u == c.owner, nil
 	}
-	return c.wordEnough(msg.By)
+	if u == "" {
+		return false, nil
+	}
+	if c.wordEnough(u) {
+		return true, nil
+	}
+	return c.confirmedDirect(msg.ID)
+}
+
+func (c *turnCtx) confirmedDirect(id string) (bool, error) {
+	if c.hasDirect(id) {
+		return true, nil
+	}
+	if !c.confirmsFetched {
+		c.confirmsFetched = true
+		build := func(n int64) any {
+			return proto.FetchKind{FetchPage: c.fetchPage(n, 0, 100), Kind: "confirm"}
+		}
+		fetched, err := fetchFrom(context.Background(), c.h, c.s.Home, build)
+		if err != nil {
+			return false, err
+		}
+		if err := c.readConfirmations(fetched.Rows); err != nil {
+			return false, err
+		}
+	}
+	return c.hasDirect(id), nil
+}
+
+func (c *turnCtx) readConfirmations(rows []json.RawMessage) error {
+	for _, raw := range rows {
+		var msg proto.MsgRow
+		if proto.Decode(raw, &msg) != nil {
+			return &Error{"bad_request", "invalid confirmation message"}
+		}
+		c.confirmations = append(c.confirmations, msg)
+	}
+	return nil
+}
+
+func (c *turnCtx) hasDirect(id string) bool {
+	for _, msg := range c.confirmations {
+		if c.coversDirect(msg, id) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *turnCtx) coversDirect(msg proto.MsgRow, id string) bool {
+	if msg.Kind != "confirm" || strVal(msg.Re) != id || cardStatus(msg.State) != "confirmed" {
+		return false
+	}
+	var body struct {
+		What string `json:"what"`
+		AI   string `json:"ai"`
+	}
+	proto.Decode(msg.Body, &body)
+	return body.What == "direct" && body.AI == c.s.Member
 }
 
 func (c *turnCtx) decidedItemInstruct(msg *proto.MsgRow, thread string) bool {
@@ -61,7 +128,7 @@ func (c *turnCtx) decidedItemInstruct(msg *proto.MsgRow, thread string) bool {
 }
 
 func (c *turnCtx) decisionInstruct(msg proto.MsgRow) bool {
-	by := stateBy(msg.State)
+	by := c.humanUser(stateBy(msg.State))
 	if c.wordEnough(by) {
 		return true
 	}
@@ -70,36 +137,21 @@ func (c *turnCtx) decisionInstruct(msg proto.MsgRow) bool {
 	}
 	var body proto.DecisionBody
 	proto.Decode(msg.Body, &body)
-	return slices.Contains(body.To, c.humanUser(by))
+	return slices.Contains(body.To, by)
 }
 
-func (c *turnCtx) carriedMsgWho(msg proto.MsgRow) string {
-	thread := strVal(msg.Thread)
-	if msg.By == "system" {
-		return "from the home " + c.place(thread)
-	}
-	return c.fromIn(msg.By, thread)
-}
-
-func (c *turnCtx) formatCarriedMsg(msg proto.MsgRow, directOK bool) (string, error) {
+func (c *turnCtx) formatCarriedMsg(msg proto.MsgRow) (string, error) {
 	content, err := formatMsgContent(msg)
 	if err != nil {
 		return "", err
 	}
-	auth := authorityLabel(c.msgInstruct(&msg, strVal(msg.Thread), directOK))
-	return fmt.Sprintf("-- %s · %s\n%s", c.carriedMsgWho(msg), auth, content), nil
+	instruct, err := c.msgInstruct(msg)
+	return fmt.Sprintf("-- %s · %s\n%s", c.fromIn(msg.By, strVal(msg.Thread)), authorityLabel(instruct), content), err
 }
 
-func (c *turnCtx) formatOptionalCarriedMsg(msg *proto.MsgRow) (string, error) {
-	if msg == nil {
-		return "", nil
-	}
-	return c.formatCarriedMsg(*msg, false)
-}
-
-func (c *turnCtx) appendCarriedMsg(lines []string, msg *proto.MsgRow, directOK bool) (string, error) {
-	if msg != nil && msg.Kind != "task" {
-		extra, err := c.formatCarriedMsg(*msg, directOK)
+func (c *turnCtx) appendCarriedMsg(lines []string, msg *proto.MsgRow) (string, error) {
+	if msg != nil {
+		extra, err := c.formatCarriedMsg(*msg)
 		if err != nil {
 			return "", err
 		}
@@ -109,7 +161,7 @@ func (c *turnCtx) appendCarriedMsg(lines []string, msg *proto.MsgRow, directOK b
 }
 
 func (c *turnCtx) formatCarriedDecision(msg proto.MsgRow, content string) string {
-	who := "from " + c.stateActorLabel(msg.State) + " " + c.place(strVal(msg.Thread))
+	who := c.fromIn(stateBy(msg.State), strVal(msg.Thread))
 	auth := authorityLabel(c.decisionInstruct(msg))
 	return fmt.Sprintf("-- %s · %s\n%s", who, auth, content)
 }
