@@ -1,0 +1,109 @@
+name: Changes
+
+# Called by the other workflows. Says which parts of the tree a pull request touches, so each job
+# of the caller can say with a job-level "if" whether its files can affect it. A job skipped that
+# way is reported as skipped, not as missing, so a required check on it would still be satisfied.
+#
+# Every event other than a pull request (a push to rebuild, a manual run) reports true for
+# everything: what is merged is always checked in full. So does a change under .github/, a file
+# this list does not know, and a listing that cannot be read.
+#
+#   go      Go checks: any Go file, go.mod, go.sum, cmd/, internal/, features/, install.md (read by
+#           the acceptance tests)
+#   web     web client and browsers: web/, internal/proto/, internal/node/, cmd/, features/web*,
+#           go.mod, go.sum
+#   netsim  network simulation: internal/peer/, internal/rendezvous/, features/netsim/, go.mod, go.sum
+#   smoke   service smoke tests: internal/node/service_*, cmd/solodawn/
+#
+# Documentation changes (*.md, planning/, docs/, issues.md) touch none of them, except the *.md
+# files that are built into the binary (internal/host/instructions/) and install.md.
+
+on:
+  workflow_call:
+    outputs:
+      go:
+        description: Whether the Go checks apply.
+        value: ${{ jobs.detect.outputs.go }}
+      web:
+        description: Whether the web client and browser checks apply.
+        value: ${{ jobs.detect.outputs.web }}
+      netsim:
+        description: Whether the network simulation applies.
+        value: ${{ jobs.detect.outputs.netsim }}
+      smoke:
+        description: Whether the service smoke tests apply.
+        value: ${{ jobs.detect.outputs.smoke }}
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      go: ${{ steps.files.outputs.go }}
+      web: ${{ steps.files.outputs.web }}
+      netsim: ${{ steps.files.outputs.netsim }}
+      smoke: ${{ steps.files.outputs.smoke }}
+    steps:
+      - id: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          go=false web=false netsim=false smoke=false
+          everything() { go=true web=true netsim=true smoke=true; }
+
+          if [[ "$EVENT" != pull_request ]]; then
+            everything
+          elif ! files=$(gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" \
+              --jq '.[] | .filename, (.previous_filename // empty)'); then
+            echo "::warning::The files of the pull request could not be listed; every job runs."
+            everything
+          elif [[ $(printf '%s\n' "$files" | wc -l) -ge 3000 ]]; then
+            echo "::warning::The listing holds up to 3000 files and may be cut; every job runs."
+            everything
+          else
+            while IFS= read -r f; do
+              [[ -n "$f" ]] || continue
+              case "$f" in
+                .github/*) everything; continue ;;
+                planning/* | docs/* | issues.md | LICENSE | .gitignore | */.gitignore | */.gitkeep) continue ;;
+                install.md) go=true; continue ;;
+                internal/host/instructions/*) ;;
+                *.md) continue ;;
+              esac
+              known=false
+              case "$f" in
+                *.go | go.mod | go.sum | cmd/* | internal/* | features/*) go=true known=true ;;
+              esac
+              case "$f" in
+                web/* | internal/proto/* | internal/node/* | cmd/* | features/web* | go.mod | go.sum) web=true known=true ;;
+              esac
+              case "$f" in
+                internal/peer/* | internal/rendezvous/* | features/netsim/* | go.mod | go.sum) netsim=true known=true ;;
+              esac
+              case "$f" in
+                internal/node/service_* | cmd/solodawn/*) smoke=true known=true ;;
+              esac
+              if [[ "$known" == false ]]; then
+                echo "::notice::$f is not a file this list knows; every job runs."
+                everything
+              fi
+            done <<< "$files"
+          fi
+
+          {
+            echo "go=$go"
+            echo "web=$web"
+            echo "netsim=$netsim"
+            echo "smoke=$smoke"
+          } >> "$GITHUB_OUTPUT"
+          printf '| Checks | Run |\n| --- | --- |\n| go | %s |\n| web | %s |\n| netsim | %s |\n| smoke | %s |\n' \
+            "$go" "$web" "$netsim" "$smoke" >> "$GITHUB_STEP_SUMMARY"
