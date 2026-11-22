@@ -365,7 +365,7 @@ func TestProposeBriefSecretGuard(t *testing.T) {
 func TestProposeBriefRefusals(t *testing.T) {
 	h, home := newSecFixture(t)
 	c := secSecretaryCaller("")
-	secMustEq(t, loadSecDirectory(h.Rows, secGroupID).byID[secAliceMID].Name, "Alice")
+	secMustEq(t, loadSecDirectory(h.Rows, secGroupID).byName["Alice"].ID, secAliceMID)
 
 	for _, raw := range []string{
 		`{`,

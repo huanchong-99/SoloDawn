@@ -1,7 +1,6 @@
 package host
 
 import (
-	stdcmp "cmp"
 	"context"
 	stdjson "encoding/json"
 	"fmt"
@@ -97,36 +96,22 @@ func decodeSecInput[T any](raw stdjson.RawMessage) (T, error) {
 }
 
 func secHomeHeader(h *Host, c Caller, kind string) proto.HomeCommand {
-	return proto.HomeCommand{
-		Type:      kind,
-		Nonce:     freshNonce(),
-		Timestamp: h.Now().UnixMilli(),
-		Group:     proto.ID(c.Group),
-		As:        proto.ID(c.Member),
-	}
+	return homeHeader(h, c.Group, c.Member, kind)
 }
 
 type secDirectory struct {
-	byID    map[string]proto.MemberRow
 	byName  map[string]proto.MemberRow
 	members []string
 	people  []string
 }
 
 func loadSecDirectory(rows *Rows, group string) secDirectory {
-	dir := secDirectory{
-		byID:   map[string]proto.MemberRow{},
-		byName: map[string]proto.MemberRow{},
-	}
-	for _, raw := range rows.Of(group, "member") {
-		var m proto.MemberRow
-		if proto.Decode(raw, &m) == nil {
-			dir.byID[m.ID] = m
-			dir.byName[m.Name] = m
-			dir.members = append(dir.members, m.Name)
-			if m.Kind == "human" {
-				dir.people = append(dir.people, m.Name)
-			}
+	dir := secDirectory{byName: map[string]proto.MemberRow{}}
+	for _, m := range liveMembers(rows, group) {
+		dir.byName[m.Name] = m
+		dir.members = append(dir.members, m.Name)
+		if m.Kind == "human" {
+			dir.people = append(dir.people, m.Name)
 		}
 	}
 	slices.Sort(dir.members)
@@ -157,36 +142,6 @@ func missingTargetError(kind, given string, valid []string) error {
 		Code:    "not_found",
 		Message: fmt.Sprintf("unknown %s %q (valid: %s)", kind, given, names),
 	}
-}
-
-func byTaskNumber(a, b proto.TaskRow) int {
-	return stdcmp.Compare(a.Num, b.Num)
-}
-
-func loadGroupTasks(rows *Rows, group string) (map[string]proto.ID, []string) {
-	var list []proto.TaskRow
-	for _, raw := range rows.Of(group, "task") {
-		var row proto.TaskRow
-		if proto.Decode(raw, &row) == nil {
-			list = append(list, row)
-		}
-	}
-	slices.SortFunc(list, byTaskNumber)
-	ids := make(map[string]proto.ID, len(list))
-	labels := make([]string, len(list))
-	for i, row := range list {
-		tag := fmt.Sprintf("T-%d", row.Num)
-		ids[tag], labels[i] = proto.ID(row.ID), tag
-	}
-	return ids, labels
-}
-
-func resolveSecTask(rows *Rows, group, label string) (proto.ID, error) {
-	ids, valid := loadGroupTasks(rows, group)
-	if id, ok := ids[label]; ok {
-		return id, nil
-	}
-	return "", missingTargetError("task", label, valid)
 }
 
 func callProposeBrief(ctx context.Context, h *Host, c Caller, raw stdjson.RawMessage) (any, error) {
@@ -349,7 +304,7 @@ func prepareSetTask(h *Host, c Caller, in setTaskInput) (setTaskPlan, error) {
 	if !hasSetTaskChange(in) {
 		return setTaskPlan{}, &Error{Code: "bad_request", Message: "set_task requires assignee, reviewer or action"}
 	}
-	taskID, err := resolveSecTask(h.Rows, c.Group, in.Task)
+	taskID, err := resolveTaskID(h, c.Group, in.Task)
 	if err != nil {
 		return setTaskPlan{}, err
 	}
@@ -492,7 +447,7 @@ func prepareDecisionPost(h *Host, c Caller, in requestDecisionInput) (proto.Post
 func buildDecisionOptions(inputs []decisionOptionInput, rec *int) ([]proto.DecisionOption, *string, error) {
 	opts := make([]proto.DecisionOption, len(inputs))
 	for i, in := range inputs {
-		opts[i] = proto.DecisionOption{ID: optionID(i), Label: in.Label, Effect: in.Effect}
+		opts[i] = decisionOption(i, in.Label, in.Effect)
 	}
 	if rec == nil {
 		return opts, nil, nil
@@ -504,8 +459,8 @@ func buildDecisionOptions(inputs []decisionOptionInput, rec *int) ([]proto.Decis
 	return opts, &id, nil
 }
 
-func optionID(i int) string {
-	return string(rune('A' + i))
+func decisionOption(i int, label, effect string) proto.DecisionOption {
+	return proto.DecisionOption{ID: string(rune('A' + i)), Label: label, Effect: effect}
 }
 
 func resolveDecisionRecipients(dir secDirectory, explicit *[]string) ([]string, []proto.ID, error) {

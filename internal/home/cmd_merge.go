@@ -1,7 +1,6 @@
 package home
 
 import (
-	"encoding/json"
 	"maps"
 	"slices"
 
@@ -14,13 +13,11 @@ import (
 // planning/contracts/task-machine.md rows 8 and 9).
 
 const (
-	mrgKindChecks   = "checks"
-	mrgKindSummary  = "summary"
-	mrgKindSystem   = "system"
-	mrgStageMerge   = "merge"
-	mrgAuthorSystem = "system"
-	mrgMinuteMS     = 60_000
-	mrgPreviewRunes = 200
+	mrgKindChecks  = "checks"
+	mrgKindSummary = "summary"
+	mrgKindSystem  = "system"
+	mrgStageMerge  = "merge"
+	mrgMinuteMS    = 60_000
 )
 
 func init() {
@@ -38,7 +35,7 @@ func mrgMerged(s *State, c Command) (Result, *Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
 	}
-	moved, fx, refusal := s.mrgStepHost(c, p.ID, OnMerged, p.Commit)
+	moved, fx, refusal := s.tskStep(c, p.ID, Event{Kind: OnMerged, Commit: p.Commit})
 	if refusal != nil {
 		return Result{}, refusal
 	}
@@ -52,14 +49,13 @@ func (s *State) mrgFinishMerged(c Command, p proto.TaskMerged, moved proto.TaskR
 		Commit:      p.Commit,
 		MergeCommit: p.MergeCommit,
 	}
-	sysMsg := s.mrgThreadMsg(c, moved.ID, mrgKindSystem, body)
 	moved.Stats.Added, moved.Stats.Removed = p.Stats.Added, p.Stats.Removed
-	moved = mrgAdvanceThread(moved, sysMsg)
-	rows := append([]Row{RowOf(moved)}, mrgExpireCards(c.Disk, moved.ID, c.Now)...)
+	sysMsg := s.tskThreadSystem(c, string(c.Nonce), mrgKindSystem, &moved, []string{}, body)
+	rows := append([]Row{RowOf(moved)}, tskCardRows(c.Disk, moved.ID, fx.Cards, c.Now)...)
 	rows = append(rows, RowOf(sysMsg))
 	relRows, relItems := s.mrgReleaseDeps(c.Disk, moved.ID, c.Now)
-	items := append(s.mrgItems(moved.ID, sysMsg.ID, fx.Items), relItems...)
-	return Result{Rows: append(rows, relRows...), Items: items}
+	items := tskItemCtx{taskID: moved.ID, secretary: s.Group.Secretary, noticeMsg: sysMsg.ID}.items(fx.Items)
+	return Result{Rows: append(rows, relRows...), Items: append(items, relItems...)}
 }
 
 // mrgConflict records a failed merge attempt through row 9 of the task machine,
@@ -70,13 +66,12 @@ func mrgConflict(s *State, c Command) (Result, *Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
 	}
-	moved, fx, refusal := s.mrgStepHost(c, p.ID, OnConflict, p.Commit)
+	moved, fx, refusal := s.tskStep(c, p.ID, Event{Kind: OnConflict, Commit: p.Commit})
 	if refusal != nil {
 		return Result{}, refusal
 	}
-	checksMsg := s.mrgThreadMsg(c, moved.ID, mrgKindChecks, mrgConflictBody(p.Commit, p.Detail))
-	moved = mrgAdvanceThread(moved, checksMsg)
-	items := s.mrgItems(moved.ID, checksMsg.ID, fx.Items)
+	checksMsg := s.tskThreadSystem(c, string(c.Nonce), mrgKindChecks, &moved, []string{}, mrgConflictBody(p.Commit, p.Detail))
+	items := tskItemCtx{taskID: moved.ID, secretary: s.Group.Secretary, noticeMsg: checksMsg.ID}.items(fx.Items)
 	return Result{Rows: []Row{RowOf(moved), RowOf(checksMsg)}, Items: items}, nil
 }
 
@@ -108,34 +103,25 @@ func mrgSummary(s *State, c Command) (Result, *Refusal) {
 		return Result{}, refusal
 	}
 	msg := s.mrgSummaryMsg(c, p, task, mentions)
-	return Result{Rows: []Row{RowOf(msg), RowOf(mrgAdvanceThread(task, msg))}}, nil
+	return Result{Rows: []Row{RowOf(msg), RowOf(postAdvanceThread(task, msg))}}, nil
 }
 
 func (s *State) mrgSummaryTarget(p proto.Post[proto.EmptyBody]) (proto.TaskRow, []string, *Refusal) {
-	mentions, unique := mrgStrings(p.Mentions)
-	if p.Thread == nil || !unique {
-		return proto.TaskRow{}, nil, &Refusal{Code: "bad_request", Msg: "summary post requires a task thread and distinct mentions"}
+	if p.Thread == nil {
+		return proto.TaskRow{}, nil, &Refusal{Code: "bad_request", Msg: "summary post requires a task thread"}
 	}
 	task, exists := s.Tasks[string(*p.Thread)]
 	if !exists {
 		return proto.TaskRow{}, nil, &Refusal{Code: "not_found", Msg: "summary names no task"}
 	}
-	if refusal := s.mrgSummaryReady(task, mentions); refusal != nil {
+	mentions, refusal := s.postMentions(p.Mentions)
+	if refusal != nil {
 		return proto.TaskRow{}, nil, refusal
 	}
-	return task, mentions, nil
-}
-
-func (s *State) mrgSummaryReady(task proto.TaskRow, mentions []string) *Refusal {
 	if task.State != taskMerged {
-		return &Refusal{Code: "conflict", Msg: "summary requires a merged task"}
+		return proto.TaskRow{}, nil, &Refusal{Code: "conflict", Msg: "summary requires a merged task"}
 	}
-	for _, m := range mentions {
-		if !s.memExists(m) {
-			return &Refusal{Code: "conflict", Msg: "summary mentions someone outside the group"}
-		}
-	}
-	return nil
+	return task, mentions, nil
 }
 
 func (s *State) mrgSummaryMsg(c Command, p proto.Post[proto.EmptyBody], task proto.TaskRow, mentions []string) proto.MsgRow {
@@ -173,87 +159,6 @@ func mrgSummaryBody(task proto.TaskRow) proto.SummaryBody {
 	}
 }
 
-func (s *State) mrgStepHost(c Command, taskID proto.ID, kind EventKind, commit string) (proto.TaskRow, Effects, *Refusal) {
-	current, exists := s.Tasks[string(taskID)]
-	if !exists {
-		return proto.TaskRow{}, Effects{}, &Refusal{Code: "not_found", Msg: "task not found in group"}
-	}
-	ev := Event{
-		Kind:   kind,
-		By:     s.mrgHost(c.Who, current.Assignee),
-		Now:    c.Now,
-		Limits: s.Group.Limits,
-		Commit: commit,
-	}
-	next, fx, stepErr := Step(current, ev)
-	if stepErr != nil {
-		return proto.TaskRow{}, Effects{}, &Refusal{Code: stepErr.Error(), Msg: "task transition refused"}
-	}
-	return next, fx, nil
-}
-
-func (s *State) mrgHost(w Who, assignee string) Sender {
-	if s.Hosts(w, assignee) {
-		return ByHost
-	}
-	return 0
-}
-
-func (s *State) mrgThreadMsg(c Command, taskID, kind string, body any) proto.MsgRow {
-	return proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: string(c.Nonce)},
-		Group:     s.ID,
-		Thread:    &taskID,
-		By:        mrgAuthorSystem,
-		Kind:      kind,
-		Timestamp: c.Now,
-		Mentions:  []string{},
-		Body:      briefJSON(body),
-	}
-}
-
-func mrgAdvanceThread(task proto.TaskRow, msg proto.MsgRow) proto.TaskRow {
-	task.Thread.Count++
-	task.Thread.Last = &proto.ThreadMessage{
-		By:        msg.By,
-		Kind:      msg.Kind,
-		Text:      mrgPreview(msg.Text),
-		Timestamp: msg.Timestamp,
-	}
-	return task
-}
-
-func mrgPreview(text string) string {
-	chars := []rune(text)
-	return string(chars[:min(len(chars), mrgPreviewRunes)])
-}
-
-func mrgExpireCards(d Disk, taskID string, at int64) []Row {
-	var out []Row
-	for _, card := range d.Pending() {
-		if card.Thread != nil && *card.Thread == taskID {
-			when := at
-			card.State = &proto.CardState{Status: "expired", At: &when}
-			out = append(out, RowOf(card))
-		}
-	}
-	return out
-}
-
-func (s *State) mrgItems(taskID, msgID string, raw []TaskItem) []Item {
-	var out []Item
-	for _, it := range raw {
-		ai := it.AI
-		if ai == "" {
-			ai = s.Group.Secretary
-		}
-		if ai != "" {
-			out = append(out, Item{AI: ai, Why: it.Why, Task: taskID, Msg: msgID, Code: it.Code})
-		}
-	}
-	return out
-}
-
 func (s *State) mrgReleaseDeps(d Disk, mergedID string, now int64) ([]Row, []Item) {
 	var rows []Row
 	var items []Item
@@ -277,14 +182,15 @@ func (s *State) mrgReleaseOne(d Disk, dep proto.TaskRow, mergedID string, now in
 		Now:     now,
 		Limits:  s.Group.Limits,
 		Blocked: s.mrgBlocked(dep.Depends, mergedID),
-		Pending: mrgPending(d, dep.ID),
+		Pending: tskPending(d, dep.ID),
 	}
 	released, fx, _ := Step(dep, ev)
 	if released.State != taskActive {
 		return nil, nil, false
 	}
 	released.Stats.Started = now
-	return RowOf(released), s.mrgItems(released.ID, released.ID, fx.Items), true
+	items := tskItemCtx{taskID: released.ID, assignMsg: released.ID}.items(fx.Items)
+	return RowOf(released), items, true
 }
 
 func (s *State) mrgBlocked(depends []string, mergedID string) bool {
@@ -294,41 +200,4 @@ func (s *State) mrgBlocked(depends []string, mergedID string) bool {
 		}
 	}
 	return false
-}
-
-func mrgPending(d Disk, taskID string) []PendingCard {
-	var list []PendingCard
-	for _, m := range d.Pending() {
-		if m.Thread != nil && *m.Thread == taskID {
-			list = append(list, PendingCard{
-				Kind:  m.Kind,
-				Msg:   m.ID,
-				Who:   mrgCardWho(m),
-				Since: m.Timestamp,
-			})
-		}
-	}
-	return list
-}
-
-func mrgCardWho(m proto.MsgRow) []string {
-	if m.Kind == waitApproval {
-		var b proto.ApprovalBody
-		json.Unmarshal(m.Body, &b)
-		return b.Approvers
-	}
-	var b proto.DecisionBody
-	json.Unmarshal(m.Body, &b)
-	return b.To
-}
-
-func mrgStrings(ids []proto.ID) ([]string, bool) {
-	out := make([]string, len(ids))
-	for i, id := range ids {
-		if slices.Contains(ids[:i], id) {
-			return nil, false
-		}
-		out[i] = string(id)
-	}
-	return out, true
 }

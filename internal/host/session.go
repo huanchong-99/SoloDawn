@@ -2,14 +2,13 @@ package host
 
 import (
 	"cmp"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"maps"
 	"slices"
 	"sync"
 	"time"
 
+	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
@@ -354,9 +353,7 @@ func (t *Sessions) All() []Session {
 // kept in memory only (contracts/local.md section 3). Whoever starts the
 // process calls Forget when it has exited.
 func (t *Sessions) Admit(key SessionKey, level int, interactive bool) string {
-	var random [16]byte
-	rand.Read(random[:])
-	token := base64.RawURLEncoding.EncodeToString(random[:])
+	token := string(proto.NewNonce())
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.tokens[token] = &admission{key: key, level: level, interactive: interactive}

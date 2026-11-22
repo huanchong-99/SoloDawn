@@ -3,8 +3,6 @@ package home
 import (
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
-	"slices"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
@@ -23,13 +21,10 @@ func init() {
 }
 
 const (
-	revStageLocal   = "local"
-	revStageCloud   = "cloud"
-	revKindChecks   = "checks"
-	revKindReview   = "review"
-	revKindSystem   = "system"
-	revAuthorSystem = "system"
-	revPreviewMax   = 200
+	revStageLocal = "local"
+	revStageCloud = "cloud"
+	revKindChecks = "checks"
+	revKindReview = "review"
 )
 
 // revChecked records local check results through row 4 of the task machine and
@@ -50,12 +45,12 @@ func (s *State) revRunChecks(c Command, stage string, kind EventKind) (Result, *
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
 	}
-	moved, fx, refusal := s.revStep(c, p.ID, Event{Kind: kind, Commit: p.Commit, OK: p.OK})
+	moved, fx, refusal := s.tskStep(c, p.ID, Event{Kind: kind, Commit: p.Commit, OK: p.OK})
 	if refusal != nil {
 		return Result{}, refusal
 	}
 	body := proto.ChecksBody{Stage: stage, OK: p.OK, Commit: p.Commit, Items: p.Items}
-	msg := s.revSystemMsg(string(c.Nonce), moved.ID, revKindChecks, c.Now, []string{}, body)
+	msg := s.tskThreadSystem(c, string(c.Nonce), revKindChecks, &moved, []string{}, body)
 	return s.revFinishThread(c, moved, fx, msg, store.Outcome{}), nil
 }
 
@@ -67,14 +62,14 @@ func revSubmitted(s *State, c Command) (Result, *Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
 	}
-	moved, fx, refusal := s.revStep(c, p.ID, Event{Kind: OnSubmitted, Commit: p.Commit})
+	moved, fx, refusal := s.tskStep(c, p.ID, Event{Kind: OnSubmitted, Commit: p.Commit})
 	if refusal != nil {
 		return Result{}, refusal
 	}
 	moved.PR, moved.PRURL = p.PR, p.PRURL
 	moved.Stats.Added, moved.Stats.Removed = p.Stats.Added, p.Stats.Removed
-	retire := revRetire(c.Disk.Queued(), moved.ID, fx.Retire)
-	items := s.revMakeItems(fx.Items, moved, "", "")
+	retire, _ := tskSettleQueue(c.Disk.Queued(), moved.ID, fx.Retire)
+	items := tskItemCtx{taskID: moved.ID, secretary: s.Group.Secretary}.items(fx.Items)
 	return Result{Rows: []Row{RowOf(moved)}, Items: items, Retire: retire}, nil
 }
 
@@ -95,15 +90,16 @@ func revPost(s *State, c Command) (Result, *Refusal) {
 func (s *State) revApplyReview(c Command, p proto.Post[proto.ReviewSigned]) (Result, *Refusal) {
 	score, passed := revOutcome(p.Body, s.Tasks[string(p.Body.Task)].Pass)
 	ev := Event{Kind: OnReview, Member: c.Who.AI, Commit: p.Body.Commit, OK: passed, Score: score}
-	moved, fx, refusal := s.revStep(c, p.Body.Task, ev)
+	moved, fx, refusal := s.tskStep(c, p.Body.Task, ev)
 	if refusal != nil {
 		return Result{}, refusal
 	}
-	mentions, refusal := s.revMentions(p.Mentions)
+	mentions, refusal := s.postMentions(p.Mentions)
 	if refusal != nil {
 		return Result{}, refusal
 	}
 	msg := s.revBuildMsg(c, p, moved, mentions, score, passed)
+	moved = postAdvanceThread(moved, msg)
 	return s.revFinishThread(c, moved, fx, msg, store.Outcome{Passed: &passed, Round: moved.Review.Round}), nil
 }
 
@@ -114,23 +110,6 @@ func revOutcome(b proto.ReviewSigned, pass int) (score int, ok bool) {
 		}
 	}
 	return b.Score, b.Score >= pass
-}
-
-func (s *State) revMentions(ids []proto.ID) ([]string, *Refusal) {
-	for i, id := range ids {
-		if slices.Contains(ids[:i], id) {
-			return nil, &Refusal{"bad_request", "the review mentions a member twice"}
-		}
-	}
-	out := make([]string, len(ids))
-	for i, id := range ids {
-		m := string(id)
-		if !s.memExists(m) {
-			return nil, &Refusal{"conflict", "the review mentions someone who is no member of the group"}
-		}
-		out[i] = m
-	}
-	return out, nil
 }
 
 func (s *State) revBuildMsg(c Command, p proto.Post[proto.ReviewSigned], task proto.TaskRow, mentions []string, score int, ok bool) proto.MsgRow {
@@ -146,63 +125,23 @@ func (s *State) revBuildMsg(c Command, p proto.Post[proto.ReviewSigned], task pr
 	}
 }
 
-func (s *State) revStep(c Command, id proto.ID, ev Event) (proto.TaskRow, Effects, *Refusal) {
-	task, ok := s.Tasks[string(id)]
-	if !ok {
-		return proto.TaskRow{}, Effects{}, &Refusal{"not_found", "the group has no such task"}
-	}
-	if s.Hosts(c.Who, task.Assignee) {
-		ev.By = ByHost
-	}
-	ev.Now = c.Now
-	ev.Limits = s.Group.Limits
-	ev.Remote = s.Group.Forge != "none"
-	ev.Pending = revTaskPending(c.Disk, task.ID)
-	moved, fx, err := Step(task, ev)
-	if err != nil {
-		return proto.TaskRow{}, Effects{}, &Refusal{err.Error(), "the task machine refused the command"}
-	}
-	return moved, fx, nil
-}
-
 func (s *State) revFinishThread(c Command, moved proto.TaskRow, fx Effects, primary proto.MsgRow, answer store.Outcome) Result {
-	moved = revAddThread(moved, primary)
 	rows := []Row{RowOf(primary)}
 	var noticeMsg string
 	if fx.System != "" {
-		failed := s.revFailedMsg(c, moved, fx)
-		moved = revAddThread(moved, failed)
+		failed := s.tskFailedSystem(c, revFailedID(c.Nonce), &moved, fx)
 		rows = append(rows, RowOf(failed))
 		noticeMsg = failed.ID
 	}
 	rows = append(rows, RowOf(moved))
-	items := s.revMakeItems(fx.Items, moved, primary.ID, noticeMsg)
+	var pr int
+	if s.Group.Forge != "none" {
+		pr = moved.PR
+	}
+	items := tskItemCtx{
+		taskID: moved.ID, secretary: s.Group.Secretary, feedbackMsg: primary.ID, noticeMsg: noticeMsg, pr: pr,
+	}.items(fx.Items)
 	return Result{Rows: rows, Items: items, Answer: answer}
-}
-
-func revAddThread(task proto.TaskRow, msg proto.MsgRow) proto.TaskRow {
-	task.Thread.Count++
-	task.Thread.Last = &proto.ThreadMessage{
-		By: msg.By, Kind: msg.Kind, Text: revPreview(msg.Text), Timestamp: msg.Timestamp,
-	}
-	return task
-}
-
-func revPreview(text string) string {
-	runes := []rune(text)
-	return string(runes[:min(len(runes), revPreviewMax)])
-}
-
-func (s *State) revSystemMsg(id, taskID, kind string, ts int64, mentions []string, body any) proto.MsgRow {
-	return proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: id}, Group: s.ID, Thread: &taskID,
-		By: revAuthorSystem, Kind: kind, Timestamp: ts, Mentions: mentions, Body: briefJSON(body),
-	}
-}
-
-func (s *State) revFailedMsg(c Command, task proto.TaskRow, fx Effects) proto.MsgRow {
-	body := proto.TaskFailedBody{SystemCode: proto.SystemCode{Code: fx.System}, Task: task.ID, Reason: fx.Reason}
-	return s.revSystemMsg(revFailedID(c.Nonce), task.ID, revKindSystem, c.Now, s.revFailedMentions(c.Disk, task), body)
 }
 
 // revFailedID derives the id of a task_failed system message from the command's
@@ -210,106 +149,4 @@ func (s *State) revFailedMsg(c Command, task proto.TaskRow, fx Effects) proto.Ms
 func revFailedID(nonce proto.ID) string {
 	sum := sha256.Sum256([]byte("SoloDawn task failed " + string(nonce)))
 	return base64.RawURLEncoding.EncodeToString(sum[:16])
-}
-
-func (s *State) revFailedMentions(d Disk, task proto.TaskRow) []string {
-	mentions := []string{}
-	if req := revBriefRequester(d, task.Brief); s.memExists(req) {
-		mentions = append(mentions, req)
-	}
-	owner := s.human(s.AIs[task.Assignee].User)
-	if owner != "" && !slices.Contains(mentions, owner) {
-		mentions = append(mentions, owner)
-	}
-	return mentions
-}
-
-func revBriefRequester(d Disk, briefID string) string {
-	card, _ := d.Msg(briefID)
-	var b proto.BriefBody
-	json.Unmarshal(card.Body, &b)
-	return b.Requester
-}
-
-func revTaskPending(d Disk, taskID string) []PendingCard {
-	var list []PendingCard
-	for _, m := range d.Pending() {
-		if pc, ok := revPendingOf(m, taskID); ok {
-			list = append(list, pc)
-		}
-	}
-	return list
-}
-
-func revPendingOf(m proto.MsgRow, taskID string) (PendingCard, bool) {
-	var b struct {
-		Task      string   `json:"task"`
-		Approvers []string `json:"approvers"`
-		To        []string `json:"to"`
-	}
-	json.Unmarshal(m.Body, &b)
-	if b.Task != taskID {
-		return PendingCard{}, false
-	}
-	who := b.To
-	if m.Kind == waitApproval {
-		who = b.Approvers
-	}
-	return PendingCard{Kind: m.Kind, Msg: m.ID, Who: who, Since: m.Timestamp}, true
-}
-
-func revRetire(queued []store.Item, taskID string, filters []ItemFilter) []int64 {
-	var out []int64
-	for _, q := range queued {
-		if q.Task != nil && *q.Task == taskID && revMatches(q.Why, filters) {
-			out = append(out, q.ID)
-		}
-	}
-	return out
-}
-
-func revMatches(why string, filters []ItemFilter) bool {
-	for _, f := range filters {
-		if f.Why == why {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *State) revMakeItems(list []TaskItem, task proto.TaskRow, feedbackMsg, noticeMsg string) []Item {
-	var out []Item
-	for _, raw := range list {
-		if it, ok := s.revOneItem(raw, task, feedbackMsg, noticeMsg); ok {
-			out = append(out, it)
-		}
-	}
-	return out
-}
-
-func (s *State) revOneItem(raw TaskItem, task proto.TaskRow, feedbackMsg, noticeMsg string) (Item, bool) {
-	if raw.Why == itemNotice {
-		return s.revNoticeItem(raw.Code, task.ID, noticeMsg)
-	}
-	return s.revWorkItem(raw, task, feedbackMsg), true
-}
-
-func (s *State) revNoticeItem(code, taskID, msgID string) (Item, bool) {
-	if s.Group.Secretary == "" {
-		return Item{}, false
-	}
-	return Item{AI: s.Group.Secretary, Why: itemNotice, Task: taskID, Msg: msgID, Code: code}, true
-}
-
-func (s *State) revWorkItem(raw TaskItem, task proto.TaskRow, feedbackMsg string) Item {
-	it := Item{AI: raw.AI, Why: raw.Why, Task: task.ID, Commit: raw.Commit}
-	switch raw.Why {
-	case itemChecks, itemReviewed:
-		it.Msg = feedbackMsg
-	case itemMerge:
-		if s.Group.Forge != "none" {
-			it.PR = task.PR
-		}
-	}
-	return it
 }
