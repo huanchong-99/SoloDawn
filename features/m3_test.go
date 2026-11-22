@@ -40,9 +40,8 @@ const (
 )
 
 var m3PostponedTools = map[string]bool{
-	"ask":        true,
-	"reply":      true,
-	"net_status": true,
+	"ask":   true,
+	"reply": true,
 }
 
 // TestM3MCPShim runs host.RunShim when invoked as a child MCP server process

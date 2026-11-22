@@ -261,6 +261,7 @@ func (n *nodeRuntime) wireServices() {
 		Key: n.key, Store: n.db, Logs: n.logs, Sessions: n.sessions,
 		Paths: n.sharedPaths, WebURL: n.defaultWebURL,
 	})
+	host.Part[netStatusPart](n.host).status = n.netStatus
 }
 
 func (n *nodeRuntime) stepNetwork() error {
@@ -306,6 +307,7 @@ func (n *nodeRuntime) stepStartup() error {
 	}
 	n.host.ReportSaved(n.ctx, n.saved)
 	n.syncRendezvous()
+	n.startRetention()
 	return nil
 }
 
