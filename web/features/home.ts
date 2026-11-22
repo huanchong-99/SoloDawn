@@ -56,6 +56,8 @@ export class TestHome {
   breakAfter: number | undefined;
   /** When set, every `post` is refused with this code. */
   refuse: string | undefined;
+  /** When set, answers every command this home does not apply itself. */
+  reply: ((payload: Fields) => object) | undefined;
   readonly name: string;
   #connections = new Set<Connection>();
   #receipts = new Map<string, object>();
@@ -204,6 +206,7 @@ export class TestHome {
       } as p.Row & Fields);
       return { ok: true };
     }
+    if (this.reply) return this.reply(payload);
     return { err: { code: 'bad_request', msg: 'not a command this home knows' } };
   }
 }
@@ -212,8 +215,8 @@ const sign = async (payload: string) => ({ p: payload, k: 'this-browser', s: 'si
 
 /** A browser of the person, as the client holds it: a `Home` of the store, and its connection to
  *  the test home. `connect` says hello and reads; `drop` is the connection lost. */
-export function browser(home: TestHome) {
-  const store = new Home({ user, sign });
+export function browser(home: TestHome, me = user) {
+  const store = new Home({ user: me, sign });
   /** The type of every push received, in order. */
   const seen: string[] = [];
   let drop = () => {};
