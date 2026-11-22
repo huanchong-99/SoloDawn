@@ -76,6 +76,12 @@ type CallBody struct {
 	Wait  bool   `json:"wait"`
 }
 
+type ConfirmBody struct {
+	What string   `json:"what"`
+	AI   string   `json:"ai"`
+	To   []string `json:"to"`
+}
+
 type ReportBody struct {
 	Commit  string `json:"commit"`
 	Files   int    `json:"files"`
@@ -194,6 +200,19 @@ type SessionReplacedBody struct {
 	SystemCode
 	AI   string  `json:"ai"`
 	Task *string `json:"task,omitempty"`
+}
+
+type MemberJoinedBody struct {
+	SystemCode
+	Member string `json:"member"`
+	By     string `json:"by"`
+}
+
+type MemberRemovedBody struct {
+	SystemCode
+	User string  `json:"user"`
+	Name string  `json:"name"`
+	By   *string `json:"by,omitempty"`
 }
 
 // NoCard is the state of a message that is not a card: null, and nothing else.

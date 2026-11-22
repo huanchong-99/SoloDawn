@@ -307,6 +307,8 @@ describe('message contracts', () => {
     { code: 'task_merged', task: 't', commit: 'abc', merge_commit: 'def' },
     { code: 'no_secretary' },
     { code: 'session_replaced', ai: 'a', task: 't' },
+    { code: 'member_joined', member: 'm2', by: 'm1' },
+    { code: 'member_removed', user: 'u2', name: 'Mina', by: 'm1' },
   ])('reads the fields of system code $code', (body) => {
     const row = { ...JSON.parse(goldens['row-msg-system']), body };
     expect(v.parse(p.MsgRow, row)).toStrictEqual(row);
@@ -315,6 +317,7 @@ describe('message contracts', () => {
       cap_reached: ['task'],
       login_invalid: ['detail'],
       session_replaced: ['task'],
+      member_removed: ['by'],
     };
     for (const key of Object.keys(body)) {
       const missing: Obj = { ...body };
@@ -378,6 +381,7 @@ describe('decode', () => {
     ['cmd-started', 'cmd'],
     ['cmd-reviewed', 'cmd'],
     ['cmd-pair-link', 'cmd'],
+    ['cmd-invite-link', 'cmd'],
     ['cmd-noted', 'cmd'],
     ['host-info-answer', 'host.info'],
     ['audit-answer', 'audit'],
@@ -474,6 +478,14 @@ describe('decode', () => {
     }
   });
 
+  it('reads hello and welcome at protocol step v 2, while keeping v 1 compatible', () => {
+    const hello = p.decode(p.Hello, goldens.hello);
+    const welcome = p.decode(p.Welcome, goldens.welcome);
+    expect([hello.v, welcome.v]).toEqual([2, 2]);
+    expect(v.is(p.Hello, { ...hello, v: 1 })).toBe(true);
+    expect(v.is(p.Welcome, { ...welcome, v: 1 })).toBe(true);
+  });
+
   it('reads a node version as the release tag it was built from (contracts/local.md)', () => {
     expect(p.decode(p.Welcome, goldens.welcome).version).toMatch(/^v\d+\.\d+\.\d+$/);
   });
@@ -521,7 +533,7 @@ describe('slugs', () => {
   });
 
   it("is the type of a task row's slug, and the row's branch follows from it", () => {
-    for (const name of ['row-task', 'row-task-waiting', 'row-task-paused']) {
+    for (const name of ['row-task', 'row-task-waiting', 'row-task-paused', 'row-task-confirm']) {
       const row = p.decode(p.TaskRow, goldens[name]);
       expect(wire.slugs).toContainEqual({ title: row.title, slug: row.slug });
       expect(row.branch ?? `task/${row.num}-${row.slug}`).toBe(`task/${row.num}-${row.slug}`);
@@ -535,22 +547,24 @@ describe('commands', () => {
 
   it.each(posts)('%s is the post its message row carries, signed', (name) => {
     const post = p.decode(p.Post, goldens[name]);
+    const person = p.decode(p.HumanMemberRow, goldens['row-member-human']);
     expect(name).toBe(`post-${post.kind}`);
     const rows = examples
       .filter((row) => row.startsWith(`row-msg-${post.kind}`) && row !== 'row-msg-brief-preset')
-      .map((row) => p.decode(p.MsgRow, goldens[row]));
+      .map((row) => p.decode(p.MsgRow, goldens[row]))
+      .filter((row) => row.by !== 'system');
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(JSON.parse(row.env!.p)).toStrictEqual(post);
-      expect([post.n, post.as, post.text, post.thread, post.main, post.mentions, post.re]).toEqual([
-        row.id,
-        row.by,
-        row.text,
-        row.thread,
-        row.main,
-        row.mentions,
-        row.re,
-      ]);
+      expect([
+        post.n,
+        post.as ?? person.id,
+        post.text,
+        post.thread,
+        post.main,
+        post.mentions,
+        post.re,
+      ]).toEqual([row.id, row.by, row.text, row.thread, row.main, row.mentions, row.re]);
     }
   });
 
@@ -652,6 +666,63 @@ describe('host surface', () => {
         usage: [],
       },
     ]);
+  });
+
+  it('reads step-2 people and confirm shapes across commands, rows, calls, tasks and reminders', () => {
+    const invite = p.decode(p.Invite, goldens.invite);
+    const inviteLink = p.decode(p.CmdResult, goldens['cmd-invite-link']);
+    const welcome = p.decode(p.Welcome, goldens.welcome);
+    expect(invite.t).toBe('invite');
+    expect(inviteLink.link).toBe(
+      `https://rv.example/#join=7K2M-9QXD-4F8T-WB3N&g=${invite.g}&home=${welcome.device}`,
+    );
+    expect(p.decode(p.Join, goldens.join)).toMatchObject({ t: 'join', g: invite.g, name: 'Mina' });
+    expect(p.decode(p.MemberSet, goldens['member-set-role'])).toMatchObject({
+      op: 'set',
+      role: 'admin',
+    });
+    expect(p.decode(p.HomeAdd, goldens['home-add'])).toMatchObject({
+      t: 'home.add',
+      to: welcome.device,
+      g: invite.g,
+      name: 'Website',
+    });
+
+    const pending = p.decode(p.MsgRow, goldens['row-msg-confirm-pending']);
+    const confirmed = p.decode(p.MsgRow, goldens['row-msg-confirm-confirmed']);
+    const denied = p.decode(p.MsgRow, goldens['row-msg-confirm-denied']);
+    const expired = p.decode(p.MsgRow, goldens['row-msg-confirm-expired']);
+    expect(pending.kind === 'confirm' && [pending.body.what, pending.state.status]).toEqual([
+      'watch',
+      'pending',
+    ]);
+    for (const [row, action] of [
+      [confirmed, 'confirm'],
+      [denied, 'deny'],
+    ] as const) {
+      expect(row.by).toBe('system');
+      expect(row.env).toBeUndefined();
+      expect(row.kind === 'confirm' && row.state.status !== 'pending' && 'act' in row.state).toBe(
+        true,
+      );
+      if (row.kind === 'confirm' && 'act' in row.state) {
+        expect(p.decode(p.Act, row.state.act.p)).toMatchObject({ msg: row.id, action });
+      }
+    }
+    expect(expired.by).toBe('system');
+    expect(expired.env).toBeUndefined();
+    expect(expired.kind === 'confirm' && expired.state.status).toBe('expired');
+
+    const callDenied = p.decode(p.MsgRow, goldens['row-msg-call-denied']);
+    expect(callDenied.kind === 'call' && callDenied.state).toEqual({
+      status: 'denied',
+      at: invite.ts,
+    });
+    expect(p.decode(p.PushOn, goldens['push-on']).on).toContain('confirm');
+    const reminder = p.decode(p.Reminder, goldens['push-reminder-confirm']);
+    expect([reminder.kind, reminder.who, reminder.title]).toEqual(['confirm', 'Codex', undefined]);
+    const taskConfirm = p.decode(p.TaskRow, goldens['row-task-confirm']);
+    expect(taskConfirm.wait).toMatchObject({ kind: 'confirm', msg: pending.id });
   });
 
   it('reads step-3 preset and kb notes, brief preset, note answer, and kb search fetch', () => {
@@ -766,7 +837,7 @@ describe('mock connection', () => {
     expect(info).toStrictEqual({ ...JSON.parse(goldens['host-info-answer']), re: 2 });
   });
 
-  it('pushes groups before it answers a group create, and after no other command', async () => {
+  it('pushes groups before group create and join, and answers typed commands with their examples', async () => {
     const seen: string[] = [];
     const ctl = mockCtl((push) => seen.push(push.t));
     const sign = (payload: unknown) => ({ p: JSON.stringify(payload), k: 'k', s: 's' });
@@ -774,9 +845,21 @@ describe('mock connection', () => {
     expect(seen).toEqual([]);
     await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens['group-pause'])) });
     expect(seen).toEqual([]);
+    const plainNote = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens.note)) });
+    expect(plainNote).toStrictEqual({ re: 3, ok: true });
     const created = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens['group-create'])) });
     expect(seen).toEqual(['groups']);
-    expect(created).toStrictEqual({ re: 3, ok: true });
+    expect(created).toStrictEqual({ re: 4, ok: true });
+    const joined = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens.join)) });
+    expect(seen).toEqual(['groups', 'groups']);
+    expect(joined).toStrictEqual({ re: 5, ok: true });
+    const invited = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens.invite)) });
+    expect(invited).toStrictEqual({ ...JSON.parse(goldens['cmd-invite-link']), re: 6 });
+    const paired = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens['pair-browser'])) });
+    expect(paired).toStrictEqual({ ...JSON.parse(goldens['cmd-pair-link']), re: 7 });
+    const noted = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens['note-preset'])) });
+    expect(noted).toStrictEqual({ ...JSON.parse(goldens['cmd-noted']), re: 8 });
+    expect(seen).toEqual(['groups', 'groups']);
   });
 });
 
