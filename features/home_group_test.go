@@ -33,6 +33,7 @@ func newHomeGroupStore() *homeGroupStore {
 
 func (s *homeGroupStore) Msg(id string) (proto.MsgRow, bool)        { m, ok := s.msgs[id]; return m, ok }
 func (s *homeGroupStore) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
+func (s *homeGroupStore) TypedNotes(string) []proto.NoteRow         { return nil }
 func (s *homeGroupStore) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (s *homeGroupStore) Pending() []proto.MsgRow                   { return nil }
 func (s *homeGroupStore) Queued() []store.Item                      { return s.queued }
