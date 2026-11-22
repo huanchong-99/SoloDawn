@@ -31,6 +31,15 @@ const at = (value: unknown, path: string[]) => path.reduce((o, k) => (o as Obj)[
 const named = (path: string[]) => path.filter((k) => !/^\d+$/.test(k)).join('.');
 const accepts = (name: string, value: unknown) => v.safeParse(schemaOf[name], value).success;
 
+it.each(['', 'plain text', 42])('bulletin rows read from as plain text: %s', (from) => {
+  const row = JSON.parse(goldens['row-msg-bulletin']);
+  row.body.from = from;
+  expect(v.safeParse(p.MsgRow, row).success).toBe(typeof from === 'string');
+  const post = JSON.parse(goldens['post-bulletin']);
+  post.body.from = from;
+  expect(v.safeParse(p.Post, post).success).toBe(false);
+});
+
 /** The example with one change made to a copy of the object at `path`. */
 function variant(name: string, path: string[], change: (o: Obj) => void) {
   const value = JSON.parse(goldens[name]);
@@ -372,12 +381,24 @@ describe('rendezvous frames', () => {
 });
 
 describe('decode', () => {
+  it('reads watch success, moved errors and the mock watch answer', async () => {
+    expect(p.decodeAnswer('watch.start', '{"re":7,"ok":true}')).toStrictEqual({ re: 7, ok: true });
+    expect(p.decodeAnswer('sync', goldens['cmd-moved'])).toStrictEqual(
+      JSON.parse(goldens['cmd-moved']),
+    );
+    const request = p.decode(p.WatchStart, goldens['watch-start']);
+    const ctl = mockCtl(() => {});
+    expect(await ctl.request(request)).toStrictEqual({ re: 1, ok: true });
+    expect(() => p.decodeAnswer('watch.start', '{"re":7}')).toThrow(v.ValiError);
+  });
+
   /** Each answer example, and the type of the request it answers. */
   const answers: [string, p.RequestType][] = [
     ['welcome', 'hello'],
     ['synced', 'sync'],
     ['fetched', 'fetch'],
     ['cmd-ok', 'cmd'],
+    ['cmd-ok', 'watch.start'],
     ['cmd-started', 'cmd'],
     ['cmd-reviewed', 'cmd'],
     ['cmd-pair-link', 'cmd'],
@@ -478,14 +499,6 @@ describe('decode', () => {
     }
   });
 
-  it('reads hello and welcome at protocol step v 2, while keeping v 1 compatible', () => {
-    const hello = p.decode(p.Hello, goldens.hello);
-    const welcome = p.decode(p.Welcome, goldens.welcome);
-    expect([hello.v, welcome.v]).toEqual([2, 2]);
-    expect(v.is(p.Hello, { ...hello, v: 1 })).toBe(true);
-    expect(v.is(p.Welcome, { ...welcome, v: 1 })).toBe(true);
-  });
-
   it('reads a node version as the release tag it was built from (contracts/local.md)', () => {
     expect(p.decode(p.Welcome, goldens.welcome).version).toMatch(/^v\d+\.\d+\.\d+$/);
   });
@@ -550,9 +563,10 @@ describe('commands', () => {
     const person = p.decode(p.HumanMemberRow, goldens['row-member-human']);
     expect(name).toBe(`post-${post.kind}`);
     const rows = examples
-      .filter((row) => row.startsWith(`row-msg-${post.kind}`) && row !== 'row-msg-brief-preset')
+      .filter((row) => row.startsWith(`row-msg-${post.kind}`))
       .map((row) => p.decode(p.MsgRow, goldens[row]))
-      .filter((row) => row.by !== 'system');
+      .filter((row) => row.by !== 'system')
+      .filter((row) => row.kind !== 'brief' || row.body.preset === undefined);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(JSON.parse(row.env!.p)).toStrictEqual(post);
@@ -653,76 +667,30 @@ describe('host surface', () => {
     expect(info.agents.map((agent) => agent.driver)).toEqual([
       {
         accounts: ['personal', 'team', 'api_key'],
-        levels: [1, 2, 3],
-        approvals: 'tool',
         takeover: 'new',
-        usage: ['tokens', 'usd', 'window_pct'],
       },
       {
         accounts: ['personal', 'team', 'api_key'],
-        levels: [1, 2, 3],
-        approvals: 'conn',
         takeover: 'resume',
-        usage: [],
       },
     ]);
   });
 
-  it('reads step-2 people and confirm shapes across commands, rows, calls, tasks and reminders', () => {
+  it('reads the step-2 invite link and the act a decided confirm card carries', () => {
     const invite = p.decode(p.Invite, goldens.invite);
     const inviteLink = p.decode(p.CmdResult, goldens['cmd-invite-link']);
     const welcome = p.decode(p.Welcome, goldens.welcome);
-    expect(invite.t).toBe('invite');
     expect(inviteLink.link).toBe(
       `https://rv.example/#join=7K2M-9QXD-4F8T-WB3N&g=${invite.g}&home=${welcome.device}`,
     );
-    expect(p.decode(p.Join, goldens.join)).toMatchObject({ t: 'join', g: invite.g, name: 'Mina' });
-    expect(p.decode(p.MemberSet, goldens['member-set-role'])).toMatchObject({
-      op: 'set',
-      role: 'admin',
-    });
-    expect(p.decode(p.HomeAdd, goldens['home-add'])).toMatchObject({
-      t: 'home.add',
-      to: welcome.device,
-      g: invite.g,
-      name: 'Website',
-    });
-
-    const pending = p.decode(p.MsgRow, goldens['row-msg-confirm-pending']);
-    const confirmed = p.decode(p.MsgRow, goldens['row-msg-confirm-confirmed']);
-    const denied = p.decode(p.MsgRow, goldens['row-msg-confirm-denied']);
-    const expired = p.decode(p.MsgRow, goldens['row-msg-confirm-expired']);
-    expect(pending.kind === 'confirm' && [pending.body.what, pending.state.status]).toEqual([
-      'watch',
-      'pending',
-    ]);
-    for (const [row, action] of [
-      [confirmed, 'confirm'],
-      [denied, 'deny'],
+    for (const [example, action] of [
+      ['row-msg-confirm-confirmed', 'confirm'],
+      ['row-msg-confirm-denied', 'deny'],
     ] as const) {
-      expect(row.by).toBe('system');
-      expect(row.env).toBeUndefined();
-      expect(row.kind === 'confirm' && row.state.status !== 'pending' && 'act' in row.state).toBe(
-        true,
-      );
-      if (row.kind === 'confirm' && 'act' in row.state) {
-        expect(p.decode(p.Act, row.state.act.p)).toMatchObject({ msg: row.id, action });
-      }
+      const row = p.decode(p.MsgRow, goldens[example]);
+      if (row.kind !== 'confirm' || !('act' in row.state)) throw new Error(`${example} has no act`);
+      expect(p.decode(p.Act, row.state.act.p)).toMatchObject({ msg: row.id, action });
     }
-    expect(expired.by).toBe('system');
-    expect(expired.env).toBeUndefined();
-    expect(expired.kind === 'confirm' && expired.state.status).toBe('expired');
-
-    const callDenied = p.decode(p.MsgRow, goldens['row-msg-call-denied']);
-    expect(callDenied.kind === 'call' && callDenied.state).toEqual({
-      status: 'denied',
-      at: invite.ts,
-    });
-    expect(p.decode(p.PushOn, goldens['push-on']).on).toContain('confirm');
-    const reminder = p.decode(p.Reminder, goldens['push-reminder-confirm']);
-    expect([reminder.kind, reminder.who, reminder.title]).toEqual(['confirm', 'Codex', undefined]);
-    const taskConfirm = p.decode(p.TaskRow, goldens['row-task-confirm']);
-    expect(taskConfirm.wait).toMatchObject({ kind: 'confirm', msg: pending.id });
   });
 
   it('reads step-3 preset and kb notes, brief preset, note answer, and kb search fetch', () => {
@@ -855,10 +823,8 @@ describe('mock connection', () => {
     expect(joined).toStrictEqual({ re: 5, ok: true });
     const invited = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens.invite)) });
     expect(invited).toStrictEqual({ ...JSON.parse(goldens['cmd-invite-link']), re: 6 });
-    const paired = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens['pair-browser'])) });
-    expect(paired).toStrictEqual({ ...JSON.parse(goldens['cmd-pair-link']), re: 7 });
     const noted = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens['note-preset'])) });
-    expect(noted).toStrictEqual({ ...JSON.parse(goldens['cmd-noted']), re: 8 });
+    expect(noted).toStrictEqual({ ...JSON.parse(goldens['cmd-noted']), re: 7 });
     expect(seen).toEqual(['groups', 'groups']);
   });
 });

@@ -26,9 +26,12 @@ func TestGroupCommandGoldens(t *testing.T) {
 	// The new group's id is the command's nonce, and g names it like any group.
 	create := GroupCommand{HomeCommand{Type: "group", Nonce: ID(group), Timestamp: ts - 5000, Group: ID(group)}, "create"}
 	golden(t, "group-create", GroupCreate{create, "Website", "project", "https://git.example/team/website.git", "main", "github",
-		[]string{"go vet ./...", "go test ./..."}, "owner"})
+		[]string{"go vet ./...", "go test ./..."}, "owner", nil})
 	golden(t, "group-set", GroupSet{GroupCommand{command("group", "group set"), "set"},
-		new("Website"), &[]string{"go vet ./...", "go test ./..."}, new(90), new(70), &limits, ID(secretary)})
+		new("Website"), &[]string{"go vet ./...", "go test ./..."}, new(90), new(70), &limits, ID(secretary), nil})
+	golden(t, "group-create-team", GroupCreate{GroupCommand: create, Name: "Team", Kind: "team", Forge: "none", Checks: []string{}, MemberName: "owner"})
+	golden(t, "group-create-custom", GroupCreate{GroupCommand: create, Name: "Website", Kind: "project", Repo: "https://git.example/team/website.git", Base: "main", Forge: "custom", Checks: []string{}, MemberName: "owner", Templates: templateExample()})
+	golden(t, "group-set-templates", GroupSet{GroupCommand: GroupCommand{command("group", "group set templates"), "set"}, Templates: templateExample()})
 	golden(t, "group-pause", GroupCommand{command("group", "group pause"), "pause"})
 	golden(t, "group-resume", GroupCommand{command("group", "group resume"), "resume"})
 }
@@ -224,6 +227,16 @@ func TestCommandExamplesAreNamedByWhatSelectsThem(t *testing.T) {
 		switch kind {
 		case "group", "member", "task":
 			want = kind + "-" + fields["op"].(string)
+			if kind == "group" {
+				switch {
+				case fields["kind"] == "team":
+					want += "-team"
+				case fields["forge"] == "custom":
+					want += "-custom"
+				case fields["templates"] != nil:
+					want += "-templates"
+				}
+			}
 			if event, there := fields["event"].(map[string]any); there {
 				want += "-" + event["code"].(string)
 			}
@@ -247,7 +260,7 @@ func TestCommandExamplesAreNamedByWhatSelectsThem(t *testing.T) {
 			}
 			want = kind
 		case "home.add", "host.join", "host.leave", "host.offline", "host.online", "settings.set", "pair.browser", "agent.set", "perm.set",
-			"takeover.start", "takeover.end", "pty.resize":
+			"takeover.start", "takeover.end", "pty.resize", "watch.start", "watch.end":
 			want = strings.ReplaceAll(kind, ".", "-")
 		case "groups", "beacon":
 			want = kind

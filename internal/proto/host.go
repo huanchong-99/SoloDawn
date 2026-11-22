@@ -80,11 +80,8 @@ type HostAgent struct {
 // Driver is the capability table a CLI driver declares (contracts/step-3/drivers.md
 // sections 4 and 6).
 type Driver struct {
-	Accounts  []string `json:"accounts"`
-	Levels    []int    `json:"levels"`
-	Approvals string   `json:"approvals"`
-	Takeover  string   `json:"takeover"`
-	Usage     []string `json:"usage"`
+	Accounts []string `json:"accounts"`
+	Takeover string   `json:"takeover"`
 }
 
 // Caps are an agent's usage caps; a cap that is not there is not set.
@@ -101,14 +98,30 @@ type Cap struct {
 }
 
 // AgentGroup is the agent in one group: its member, the level of its task
-// sessions, its derived state and task, and how many items are held for it.
+// sessions, its derived state and task, how many items are held for it, and watchers.
 type AgentGroup struct {
+	Group    ID       `json:"g"`
+	Member   ID       `json:"member"`
+	Level    int      `json:"level"`
+	State    string   `json:"state"`
+	Task     ID       `json:"task,omitempty"`
+	Queued   int      `json:"queued"`
+	Watchers []string `json:"watchers"`
+}
+
+// WatchStart opens a terminal watch for a granted person.
+type WatchStart struct {
+	Request
+	Group  ID `json:"g"`
+	Member ID `json:"member"`
+}
+
+// WatchEnd revokes a person's terminal watch.
+type WatchEnd struct {
+	HostCommand
 	Group  ID     `json:"g"`
 	Member ID     `json:"member"`
-	Level  int    `json:"level"`
-	State  string `json:"state"`
-	Task   ID     `json:"task,omitempty"`
-	Queued int    `json:"queued"`
+	User   string `json:"user"`
 }
 
 // HostSettings are the node settings that settings.set changes, except

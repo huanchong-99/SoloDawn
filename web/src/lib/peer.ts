@@ -15,6 +15,7 @@ import {
   type Devlog,
   type Envelope,
   type ErrorResponse,
+  type PTYResize,
   type Push,
   type RequestType,
   type RVJoin,
@@ -376,7 +377,7 @@ export class Connection {
   }
 
   /** Sends a push on an open ctl. Throws a RangeError when the frame exceeds 60 KiB. */
-  send(frame: Devlog) {
+  send(frame: Devlog | PTYResize) {
     if (utf8(JSON.stringify(frame)).length > ctlLimit) {
       throw new RangeError('ctl frame exceeds 60 KiB');
     }
@@ -575,7 +576,7 @@ export class Peer {
   }
 
   /** Sends a push on the connection that serves, if any. */
-  send(frame: Devlog) {
+  send(frame: Devlog | PTYResize) {
     this.#conn?.send(frame);
   }
 

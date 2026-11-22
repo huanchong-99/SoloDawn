@@ -45,6 +45,7 @@ func (w *homeMergeWorld) Msg(id string) (proto.MsgRow, bool) {
 }
 
 func (*homeMergeWorld) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
+func (*homeMergeWorld) TypedNotes(string) []proto.NoteRow         { return nil }
 func (*homeMergeWorld) Thread(*string, int64, int) []proto.MsgRow { return nil }
 
 func (w *homeMergeWorld) Pending() []proto.MsgRow {
@@ -58,7 +59,8 @@ func (w *homeMergeWorld) Pending() []proto.MsgRow {
 	return out
 }
 
-func (*homeMergeWorld) Queued() []store.Item { return nil }
+func (*homeMergeWorld) Queued() []store.Item    { return nil }
+func (*homeMergeWorld) OtherMember(string) bool { return false }
 
 func (w *homeMergeWorld) Receipt(signer, nonce string) (store.Outcome, error) {
 	out, ok := w.receipts[signer+" "+nonce]

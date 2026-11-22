@@ -41,11 +41,27 @@
     return match ? t(`nodes.ai.state.${match}`) : state;
   }
 
-  async function chooseAccount(comp: Computer, agent: string, account: AccountKind) {
+  function trackedCard(event: Event): HTMLElement | null {
+    const card =
+      event.currentTarget instanceof Element
+        ? event.currentTarget.closest<HTMLElement>('.node')
+        : null;
+    return card?.contains(document.activeElement) ? card : null;
+  }
+
+  function focusNodeCard(card: HTMLElement | null) {
+    if (!card) return;
+    card.tabIndex = -1;
+    card.focus({ preventScroll: true });
+  }
+
+  async function chooseAccount(event: Event, comp: Computer, agent: string, account: AccountKind) {
     if (!comp.info) return;
+    const card = trackedCard(event);
     const key = `${comp.info.device}:${agent}`;
     busyAcct[key] = true;
     acctFailed[key] = '';
+    focusNodeCard(card);
     const answer = await nodes.setAccount(comp.home, comp.info.device, agent, account);
     busyAcct[key] = false;
     if (answer.err) acctFailed[key] = answer.err.code;
@@ -187,7 +203,7 @@
                         type="radio"
                         name={`${uid}-acct-${idx}-${agent.agent}`}
                         value={acct}
-                        onchange={() => void chooseAccount(comp, agent.agent, acct)}
+                        onchange={(event) => void chooseAccount(event, comp, agent.agent, acct)}
                       />
                       <span>
                         <b>{accountLabel(acct)}</b>

@@ -39,9 +39,11 @@ func (d revDisk) Msg(id string) (proto.MsgRow, bool) {
 }
 
 func (d revDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
+func (d revDisk) TypedNotes(string) []proto.NoteRow         { return nil }
 func (d revDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d revDisk) Pending() []proto.MsgRow                   { return d.pending }
 func (d revDisk) Queued() []store.Item                      { return d.queued }
+func (d revDisk) OtherMember(string) bool                   { return false }
 
 func revEmptyDisk() revDisk {
 	return revDisk{msgs: map[string]proto.MsgRow{}}
@@ -557,7 +559,7 @@ func TestReviewCmdPostPassFailVetoAndSixReviewStop(t *testing.T) {
 		equal(t, gotTask.Step, "merge")
 		equal(t, gotTask.Review, &proto.Review{Round: 1, Failed: 0, Score: 90, OK: true, By: revReviewer, Commit: "c1", At: clock})
 		equal(t, gotTask.Thread, proto.ThreadSummary{
-			Count: 3, Rounds: 1,
+			Count: 3, Rounds: 2,
 			Last: &proto.ThreadMessage{By: revReviewer, Kind: "review", Text: strings.Repeat("评", 200), Timestamp: revCmdTS},
 		})
 		equal(t, res.Items, []home.Item{{AI: revAssignee, Why: "merge", Task: revTaskID, Commit: "c1", PR: 31}})

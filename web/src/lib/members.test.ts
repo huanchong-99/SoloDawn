@@ -16,10 +16,13 @@ import {
   statusOf,
   suggestedName,
   taskWaitKind,
+  terminalDisabledReason,
+  usageMeter,
   waitingOnMe,
   waitingOnOther,
 } from './members';
 import { goldens } from './mock';
+import type { Net } from './net.svelte';
 import { prefs } from './prefs.svelte';
 import * as p from './proto';
 
@@ -554,6 +557,7 @@ describe('AI status and path projections', () => {
       text: 'Sleeping · wakes when @mentioned',
     });
     expect(statusOf(group, mk('limited'))).toEqual({ st: 'limited', text: 'Limited' });
+    expect(statusOf(group, mk('takeover'))).toEqual({ st: 'takeover', text: 'Owner is driving' });
     expect(statusOf(group, mk('offline'))).toEqual({ st: 'offline', text: 'Offline' });
     expect(statusOf(group, mk('unexpected'))).toEqual({ st: 'offline', text: 'Offline' });
   });
@@ -566,6 +570,91 @@ describe('AI status and path projections', () => {
     expect(pathLabel(mk('working', 'direct'))).toBe('direct');
     expect(pathLabel(mk('working', 'relay'))).toBe('relayed, limited');
     expect(pathLabel(mk('working', 'mesh'))).toBe('mesh');
+  });
+
+  it('projects usageMeter from the rate-limit window only', () => {
+    const resetAt = new Date(2026, 10, 20, 15, 0).getTime();
+    const bar = (value: string, fill: number, tone?: 'danger', note?: string) => ({
+      label: 'Window used',
+      value,
+      fill,
+      tone,
+      note,
+    });
+
+    expect(usageMeter({}, 'en')).toBeUndefined();
+    expect(usageMeter({ turns_today: 14, window_resets: resetAt }, 'en')).toBeUndefined();
+    expect(usageMeter({ window_pct: 18 }, 'en')).toEqual(bar('18%', 18));
+    expect(usageMeter({ window_pct: -4 }, 'en')).toEqual(bar('-4%', 0));
+    expect(usageMeter({ window_pct: 62.5, window_resets: resetAt }, 'en')).toEqual(
+      bar('63%', 63, undefined, 'Resets 15:00'),
+    );
+    expect(usageMeter({ window_pct: 99.9 }, 'en')).toEqual(bar('100%', 100));
+    expect(usageMeter({ window_pct: 100 }, 'en')).toEqual(bar('100%', 100, 'danger'));
+    expect(usageMeter({ window_pct: 125 }, 'en')).toEqual(bar('125%', 100, 'danger'));
+
+    prefs.lang = 'zh-CN';
+    expect(usageMeter({ window_pct: 62, window_resets: resetAt }, 'zh-CN')).toEqual({
+      label: '这一轮额度已用',
+      value: '62%',
+      fill: 62,
+      tone: undefined,
+      note: '15:00 重置',
+    });
+  });
+
+  it('computes terminalDisabledReason across offline host/AI, relay, linking and direct', () => {
+    const { home } = makeGroup();
+    const ai = row<p.AIMemberRow>('row-member-ai', {
+      id: 'ai-t',
+      g: gid,
+      host: home.device,
+      state: 'working',
+    });
+    const offlineHost = makeHome({ online: false });
+    offlineHost.device = 'off-dev';
+    const offlineAiHost = row<p.AIMemberRow>('row-member-ai', {
+      id: 'ai-off-h',
+      g: gid,
+      host: 'off-dev',
+      state: 'working',
+    });
+    const netOf = (entries: Home[], pathFn: Net['path']): Net => ({
+      source: 'live',
+      homes: entries,
+      path: pathFn,
+    });
+
+    expect(
+      terminalDisabledReason(
+        netOf([offlineHost], () => undefined),
+        offlineAiHost,
+      ),
+    ).toBe('Computer offline');
+    expect(
+      terminalDisabledReason(
+        netOf([home], () => ({ kind: 'direct', rtt: 4, since: 1 })),
+        { ...ai, state: 'offline' },
+      ),
+    ).toBe('Computer offline');
+    expect(
+      terminalDisabledReason(
+        netOf([home], () => undefined),
+        ai,
+      ),
+    ).toBe('Direct link only');
+    expect(
+      terminalDisabledReason(
+        netOf([home], () => ({ kind: 'relay', rtt: 80, since: 1 })),
+        ai,
+      ),
+    ).toBe('Direct link only');
+    expect(
+      terminalDisabledReason(
+        netOf([home], () => ({ kind: 'direct', rtt: 4, since: 1 })),
+        ai,
+      ),
+    ).toBeUndefined();
   });
 });
 
@@ -606,6 +695,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
                   level: 3,
                   state: 'dormant',
                   queued: 0,
+                  watchers: [],
                 },
                 {
                   g: gid,
@@ -613,6 +703,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
                   level: 3,
                   state: 'working',
                   queued: 0,
+                  watchers: [],
                 },
               ],
             },

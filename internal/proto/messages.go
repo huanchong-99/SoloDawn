@@ -2,6 +2,20 @@ package proto
 
 import "errors"
 
+// BulletinBody identifies the project and secretary shown on a team bulletin.
+type BulletinBody struct {
+	From  string `json:"from"`
+	Group string `json:"group"`
+	AI    string `json:"ai"`
+}
+
+// BulletinSigned is the bulletin body a person posts, with a project group id.
+type BulletinSigned struct {
+	From  ID     `json:"from"`
+	Group string `json:"group"`
+	AI    string `json:"ai"`
+}
+
 // EmptyBody is shared by text, progress, question and reply.
 type EmptyBody struct{}
 
@@ -76,6 +90,8 @@ type CallBody struct {
 	Wait  bool   `json:"wait"`
 }
 
+// ConfirmBody is a confirm card asking a person to approve what an AI wants to do
+// (step-2/confirm.md).
 type ConfirmBody struct {
 	What string   `json:"what"`
 	AI   string   `json:"ai"`
@@ -202,12 +218,15 @@ type SessionReplacedBody struct {
 	Task *string `json:"task,omitempty"`
 }
 
+// MemberJoinedBody is the system row for a member joining a group (step-2/people.md).
 type MemberJoinedBody struct {
 	SystemCode
 	Member string `json:"member"`
 	By     string `json:"by"`
 }
 
+// MemberRemovedBody is the system row for a member leaving or being removed from a
+// group (step-2/people.md).
 type MemberRemovedBody struct {
 	SystemCode
 	User string  `json:"user"`

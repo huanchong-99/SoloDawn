@@ -96,7 +96,7 @@ function startLive(
       let home = added.get(id);
       if (!home) {
         home = new Home({ user, sign: (payload) => device.sign(payload) });
-        Object.assign(home, { name, owner: true });
+        Object.assign(home, { device: id, name, owner: true });
         added.set(id, home);
         homes.push(home);
       }

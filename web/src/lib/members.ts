@@ -1,9 +1,12 @@
 // Member-panel projections and add-AI candidate selection (planning/contracts/rows.md section 2,
 // planning/contracts/commands.md section 1.2 and section 2).
 import { lost, newId, type Group, type Home } from './groups.svelte';
+import type { Net } from './net.svelte';
 import { cliName } from './onboard.svelte';
 import { t } from './prefs.svelte';
 import type { AIMemberRow, HostInfoPush, HumanMemberRow, MsgRow, TaskRow } from './proto';
+import { hostHomeOf } from './terminal.svelte';
+import { clock } from './when';
 
 /** An AI CLI registered on one of the owner's connected computers. */
 export interface Candidate {
@@ -127,10 +130,14 @@ export function waitingOnOther(group: Group, ai: AIMemberRow, task: TaskRow | un
 
 const idleStates: Record<
   string,
-  { st: string; key: 'member.state.sleeping' | 'member.state.limited' }
+  {
+    st: string;
+    key: 'member.state.sleeping' | 'member.state.limited' | 'member.state.takeover';
+  }
 > = {
   dormant: { st: 'sleeping', key: 'member.state.sleeping' },
   limited: { st: 'limited', key: 'member.state.limited' },
+  takeover: { st: 'takeover', key: 'member.state.takeover' },
 };
 
 /** Status badge key and localized status line for an AI member card. */
@@ -159,6 +166,40 @@ export function pathLabel(ai: AIMemberRow): string {
     return t(`member.path.${ai.path}`);
   }
   return ai.path;
+}
+
+/** Usage bar model for an AI member card: the rate-limit window the CLI reported. */
+export interface UsageMeter {
+  label: string;
+  value: string;
+  fill: number;
+  tone?: 'danger';
+  note?: string;
+}
+
+/** Projects `ai.usage` into the card's `.meter` bar, or undefined when no window was reported. */
+export function usageMeter(usage: AIMemberRow['usage'], lang: string): UsageMeter | undefined {
+  const pct = usage.window_pct;
+  if (pct === undefined) return undefined;
+  const shown = Math.round(pct);
+  const resets = usage.window_resets;
+  return {
+    label: t('member.usage.window'),
+    value: `${shown}%`,
+    fill: Math.min(100, Math.max(0, shown)),
+    tone: pct >= 100 ? 'danger' : undefined,
+    note:
+      resets === undefined
+        ? undefined
+        : t('member.usage.resets').replace('{time}', clock(resets, lang)),
+  };
+}
+
+/** Reason why "Open terminal" on an owned AI card is disabled, or `undefined` when direct. */
+export function terminalDisabledReason(net: Net, ai: AIMemberRow): string | undefined {
+  const host = hostHomeOf(net.homes, ai.host);
+  if (!host?.ctl || ai.state === 'offline') return t('member.terminal.offline');
+  return net.path(host)?.kind === 'direct' ? undefined : t('member.terminal.relay');
 }
 
 /** Registered AIs on the owner's connected computers, marking those already in `group`. */

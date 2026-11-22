@@ -1,8 +1,5 @@
 {
   "app.skip": "Skip to content",
-  "app.pending": "This page is not built yet",
-  "app.pending.body": "It arrives with a later version of the client. Everything else works as usual.",
-  "app.home": "Back to the chats",
   "app.side": "People and details",
   "app.side.close": "Close the panel",
   "app.otherTab": "SoloDawn is open in another tab.",

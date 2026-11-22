@@ -55,9 +55,11 @@ type homeHostEvDisk map[string]proto.MsgRow
 
 func (d homeHostEvDisk) Msg(id string) (proto.MsgRow, bool)        { m, ok := d[id]; return m, ok }
 func (d homeHostEvDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
+func (d homeHostEvDisk) TypedNotes(string) []proto.NoteRow         { return nil }
 func (d homeHostEvDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d homeHostEvDisk) Pending() []proto.MsgRow                   { return nil }
 func (d homeHostEvDisk) Queued() []store.Item                      { return nil }
+func (d homeHostEvDisk) OtherMember(string) bool                   { return false }
 
 type homeHostEvReceipts map[string]store.Outcome
 
@@ -218,6 +220,7 @@ func (w *homeHostEvWorld) sendEventCase(state, code, where string) error {
 	}
 	events := map[string]string{
 		"turn_interrupted": fmt.Sprintf(`{"code":"turn_interrupted","reason":"timeout"%s,"detail":"Deadline reached."}`, taskPart),
+		"rate_limited":     `{"code":"rate_limited","resets":1763603600000}`,
 		"login_invalid":    `{"code":"login_invalid","detail":"Signed out."}`,
 		"session_replaced": fmt.Sprintf(`{"code":"session_replaced"%s}`, taskPart),
 	}

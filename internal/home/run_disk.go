@@ -111,6 +111,11 @@ func (d *runDisk) Msg(id string) (proto.MsgRow, bool) { return runOne[proto.MsgR
 
 func (d *runDisk) Note(id string) (proto.NoteRow, bool) { return runOne[proto.NoteRow](d, "note", id) }
 
+func (d *runDisk) TypedNotes(noteType string) []proto.NoteRow {
+	data, err := d.tx.TypedNotes(d.group, noteType)
+	return runList[proto.NoteRow](d, data, err)
+}
+
 func (d *runDisk) Thread(task *string, before int64, limit int) []proto.MsgRow {
 	data, err := d.tx.Thread(d.group, task, before, limit)
 	return runList[proto.MsgRow](d, data, err)
@@ -125,6 +130,13 @@ func (d *runDisk) Queued() []store.Item {
 	items, err := d.tx.Queued(d.group)
 	d.err = errors.Join(d.err, err)
 	return items
+}
+
+func (d *runDisk) OtherMember(user string) (found bool) {
+	err := d.tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM row WHERE g<>? AND r='member' AND gone=0
+		AND data->>'kind'='human' AND data->>'user'=?)`, d.group, user).Scan(&found)
+	d.err = errors.Join(d.err, err)
+	return found
 }
 
 // runOne reads one row that is no marker. A row that is not there is no

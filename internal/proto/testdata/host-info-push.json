@@ -41,18 +41,7 @@
           "team",
           "api_key"
         ],
-        "levels": [
-          1,
-          2,
-          3
-        ],
-        "approvals": "tool",
-        "takeover": "new",
-        "usage": [
-          "tokens",
-          "usd",
-          "window_pct"
-        ]
+        "takeover": "new"
       },
       "groups": [
         {
@@ -61,7 +50,8 @@
           "level": 2,
           "state": "offline",
           "task": "DrtCn6htSBwmMPrFPbHJHA",
-          "queued": 3
+          "queued": 3,
+          "watchers": []
         }
       ]
     },
@@ -77,14 +67,7 @@
           "team",
           "api_key"
         ],
-        "levels": [
-          1,
-          2,
-          3
-        ],
-        "approvals": "conn",
-        "takeover": "resume",
-        "usage": []
+        "takeover": "resume"
       },
       "groups": []
     }

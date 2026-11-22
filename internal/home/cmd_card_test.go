@@ -31,8 +31,10 @@ func (d cardDisk) Msg(id string) (proto.MsgRow, bool) {
 }
 
 func (d cardDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
+func (d cardDisk) TypedNotes(string) []proto.NoteRow         { return nil }
 func (d cardDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d cardDisk) Queued() []store.Item                      { return nil }
+func (d cardDisk) OtherMember(string) bool                   { return false }
 
 func (d cardDisk) Pending() []proto.MsgRow {
 	var list []proto.MsgRow
@@ -48,6 +50,7 @@ func (d cardDisk) Pending() []proto.MsgRow {
 func cardState(t *testing.T) *home.State {
 	t.Helper()
 	s := group(t)
+	s.Group.Limits = proto.Limits{Rounds: 10}
 	s.Logs[browser.ID()] = logOf(t, browser, node, laptop, cardPhone)
 	s.AIs[cardA] = ai(cardA, laptop)
 	s.AIs[cardB] = ai(cardB, laptop)
@@ -172,7 +175,7 @@ func TestCardPostApprovalWritesAPendingCardAndUpdatesTheTask(t *testing.T) {
 	wantTask.Seq = 12
 	wantTask.Wait = &proto.TaskWait{Kind: "approval", Msg: id(60), Who: []string{browser.ID()}, Since: cardPostTS}
 	wantTask.Thread = proto.ThreadSummary{
-		Count: 3, Rounds: 1,
+		Count: 3, Rounds: 2,
 		Last: &proto.ThreadMessage{By: cardA, Kind: "approval", Text: strings.Repeat("中", 200), Timestamp: cardPostTS},
 	}
 	equal(t, res, home.Result{Rows: res.Rows, Answer: store.Outcome{OK: true}})

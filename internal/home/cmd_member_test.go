@@ -15,9 +15,11 @@ type memDisk []store.Item
 
 func (memDisk) Msg(string) (proto.MsgRow, bool)           { return proto.MsgRow{}, false }
 func (memDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
+func (memDisk) TypedNotes(string) []proto.NoteRow         { return nil }
 func (memDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (memDisk) Pending() []proto.MsgRow                   { return nil }
 func (d memDisk) Queued() []store.Item                    { return d }
+func (d memDisk) OtherMember(string) bool                 { return false }
 
 func memAddCmd(n byte, memberID, cli, name, account string, secretary bool) proto.MemberAddAI {
 	return proto.MemberAddAI{
@@ -333,7 +335,7 @@ func TestMemberSetRefusals(t *testing.T) {
 		"for a human member": {
 			target: grpAdmin,
 			set:    func(p *proto.MemberSet) { v := "Renamed"; p.Name = &v },
-			code:   "forbidden",
+			code:   "bad_request",
 		},
 		"by an AI": {
 			by: laptop,
@@ -457,7 +459,7 @@ func TestMemberRemoveRefusals(t *testing.T) {
 			code: "bad_request",
 		},
 		"for an unknown member": {target: id(99), code: "not_found"},
-		"for a human member":    {target: grpAdmin, code: "forbidden"},
+		"for the owner":         {target: grpOwnerID(groupID), code: "forbidden"},
 		"by the AI itself": {
 			by: device(6), as: grpWorkerA,
 			state: func(s *home.State) {

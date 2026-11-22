@@ -4,25 +4,34 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [rebuild]
-    paths:
-      - 'internal/node/service_*'
-      - 'cmd/solodawn/**'
-      - '.github/workflows/service-smoke.yml'
   push:
     branches: [rebuild]
-    paths:
-      - 'internal/node/service_*'
-      - 'cmd/solodawn/**'
-      - '.github/workflows/service-smoke.yml'
 
 permissions:
   contents: read
+
+# A new push to a pull request cancels the run it supersedes; a push to rebuild never does.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# A pull request runs the smoke tests only when it changes internal/node/service_*, cmd/solodawn/ or
+# anything under .github/ (see changes.yml); a push to rebuild always runs them. The job-level
+# condition, not a "paths" filter, so that a skipped job is reported as skipped, not as missing.
 
 # Builds the assembled solodawn binary, installs it as a login service, starts
 # it through the system's service manager, checks that it answers "solodawn status"
 # (and keeps PATH on Linux and macOS), and removes the registration.
 jobs:
+  changes:
+    uses: ./.github/workflows/changes.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
   linux:
+    needs: changes
+    if: needs.changes.outputs.smoke == 'true'
     name: smoke (ubuntu-latest)
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -104,6 +113,8 @@ jobs:
           systemctl --user daemon-reload 2>/dev/null || true
 
   macos:
+    needs: changes
+    if: needs.changes.outputs.smoke == 'true'
     name: smoke (macos-latest)
     runs-on: macos-latest
     timeout-minutes: 5
@@ -180,6 +191,8 @@ jobs:
           rm -f "$HOME/Library/LaunchAgents/org.solodawn.node.plist"
 
   windows:
+    needs: changes
+    if: needs.changes.outputs.smoke == 'true'
     name: smoke (windows-latest)
     runs-on: windows-latest
     timeout-minutes: 5

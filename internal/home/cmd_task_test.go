@@ -37,6 +37,7 @@ func (d tskDisk) Msg(id string) (proto.MsgRow, bool) {
 }
 
 func (d tskDisk) Note(string) (proto.NoteRow, bool) { return proto.NoteRow{}, false }
+func (d tskDisk) TypedNotes(string) []proto.NoteRow { return nil }
 
 func (d tskDisk) countThread() {
 	if d.threadCalls != nil {
@@ -62,7 +63,8 @@ func tskBefore(pos, before int64) bool { return before == 0 || pos < before }
 
 func (d tskDisk) Pending() []proto.MsgRow { return d.pending }
 
-func (d tskDisk) Queued() []store.Item { return d.queued }
+func (d tskDisk) Queued() []store.Item    { return d.queued }
+func (d tskDisk) OtherMember(string) bool { return false }
 
 func tskState(t *testing.T) *home.State {
 	t.Helper()

@@ -136,9 +136,11 @@ type disk map[string]proto.MsgRow
 
 func (d disk) Msg(id string) (proto.MsgRow, bool)        { m, ok := d[id]; return m, ok }
 func (d disk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
+func (d disk) TypedNotes(string) []proto.NoteRow         { return nil }
 func (d disk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d disk) Pending() []proto.MsgRow                   { return nil }
 func (d disk) Queued() []store.Item                      { return nil }
+func (d disk) OtherMember(string) bool                   { return false }
 
 // setting is a fake of home.Write: a row of the setting table.
 type setting struct{ key, value string }

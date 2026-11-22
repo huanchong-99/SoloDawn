@@ -44,6 +44,12 @@ func (tx *Tx) Row(group, r, id string) (json.RawMessage, error) {
 	return json.RawMessage(data), err
 }
 
+// TypedNotes returns the live notes of a type in a group, sorted by name.
+func (tx *Tx) TypedNotes(group, noteType string) ([]json.RawMessage, error) {
+	return tx.data(`SELECT data FROM row WHERE g=? AND r='note' AND gone=0
+		AND data->>'type' IS NOT NULL AND data->>'type'=? ORDER BY data->>'name'`, group, noteType)
+}
+
 // Thread returns a page of the main line (nil) or of a task's thread, newest
 // first: the messages below pos before, and the newest ones for before 0.
 func (tx *Tx) Thread(group string, thread *string, before int64, limit int) ([]json.RawMessage, error) {
