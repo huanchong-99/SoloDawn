@@ -11,7 +11,6 @@
   // A group is created on a node of the person's own that can be reached.
   const owned = $derived(homes.filter((home) => home.owner && home.ctl));
   let dialog: HTMLDialogElement;
-  let opener: HTMLElement | null = null;
   // The computer chosen as the home: the Home itself, not its place in a list that changes as
   // computers come and go.
   let chosen = $state.raw<Home>();
@@ -28,46 +27,10 @@
   /** The computer chosen before, when it is still to be had, or else the first. */
   const pick = () => (chosen = listed() ?? owned[0]);
 
-  function focusFirstControl() {
-    if (dialog.contains(document.activeElement)) return;
-    dialog
-      .querySelector<HTMLElement>(
-        'input:not([disabled]), select:not([disabled]), button:not([disabled])',
-      )
-      ?.focus();
-  }
-
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape' && dialog.open) {
-      event.preventDefault();
-      dialog.close();
-    }
-  }
-
-  function restoreOpener() {
-    if (!opener?.isConnected) return;
-    const lost =
-      document.activeElement === document.body || dialog.contains(document.activeElement);
-    if (lost) opener.focus();
-  }
-
-  function handleClose() {
-    open = false;
-    restoreOpener();
-    opener = null;
-  }
-
   $effect(() => {
-    if (!open) {
-      if (dialog.open) dialog.close();
-      return;
-    }
+    if (!open) return;
     untrack(pick);
-    if (!dialog.open) {
-      opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      dialog.showModal();
-      focusFirstControl();
-    }
+    dialog.showModal();
   });
   // A computer that appears while there was none to choose from is chosen: the select shows it,
   // and what the select shows is what is sent to.
@@ -117,8 +80,7 @@
   bind:this={dialog}
   class="dlg"
   aria-labelledby={`${uid}-title`}
-  onkeydown={handleKeydown}
-  onclose={handleClose}
+  onclose={() => (open = false)}
 >
   <form onsubmit={submit}>
     <header>

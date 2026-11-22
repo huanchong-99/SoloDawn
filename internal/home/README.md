@@ -552,18 +552,19 @@ merges in `cmd_merge.go` (unit HM-12). Where the contracts are silent, it does t
 
 ## Posts, notes and forget
 
-`cmd_post.go` holds `post` of kinds `text`, `progress`, `question` and `report`
+`cmd_post.go` holds `post` of kinds `text`, `progress`, `question`, `report` and `handback`
 ([commands](../../planning/contracts/commands.md) 1.3;
-[messages](../../planning/contracts/messages.md) 1 and 2.7;
+[messages](../../planning/contracts/messages.md) 1, 2.7 and 2.10;
 [rows](../../planning/contracts/rows.md) sections 4 and 5), under `post/<kind>`. `cmd_note.go`
 holds `note` and `forget` ([commands](../../planning/contracts/commands.md) 1.6;
 [rows](../../planning/contracts/rows.md) sections 5 and 6). Where the contracts are silent, they do
 this:
 
-- **Who and placement.** `text` is by a person or an AI; `progress`, `question` and `report` are by
-  an AI, else `forbidden`. `progress` and `report` belong in a thread (`thread` not `null`), else
-  `bad_request`. None of the four is raised from a thread, and the row is written with `main`
-  `false`.
+- **Who and placement.** `text` is by a person or an AI; `progress`, `question`, `report` and
+  `handback` are by an AI, else `forbidden`. `progress` and `report` belong in a thread (`thread`
+  not `null`), else `bad_request`; `handback` belongs in a thread unless `as` is the group's
+  secretary, else `bad_request`. None of the five is
+  raised from a thread, and the row is written with `main` `false`.
 - **Thread and mentions.** A non-null `thread` must name a task in `State.Tasks`, else `not_found`;
   for `report`, `as` must be that task's `assignee`, else `forbidden`. `(*State).postMentions`,
   shared with `cmd_brief.go`, checks the `mentions` rule of
@@ -573,8 +574,10 @@ this:
   HTML escaping; a post in a thread follows it with the updated `TaskRow` (`thread.count` + 1, and
   `thread.last` with `text` cut to at most 200 UTF-8 characters). A post never queues an item for
   its own author ([commands](../../planning/contracts/commands.md) 1.3): `text`, `progress` and
-  `question` queue `mention` for each other mentioned AI in `mentions` order, and a main-line `text`
-  from a person that mentions no AI queues `mention` for `Group.Secretary` when set.
+  `question` queue `mention` for each other mentioned AI in `mentions` order, a main-line `text`
+  from a person that mentions no AI queues `mention` for `Group.Secretary` when set, and a
+  `handback` posted in a thread queues `notice` (`code: "handback"`) for `Group.Secretary` when
+  set.
 - **`note` and `forget`.** `note` is by a person or an AI; a non-null `task` that names no task in
   `State.Tasks` is `not_found`, and the `NoteRow` gets `ts` as signed (`c.Timestamp`). `forget` is
   by an admin only (`forbidden`); `r` must be `note` or `msg` (`bad_request`); a missing or already

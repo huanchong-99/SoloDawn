@@ -83,7 +83,15 @@
         </dd>
       </dl>
       {#if meter}
-        <div class="meter" data-tone={meter.tone} style={`--v: ${meter.fill}%`}>
+        <div
+          class="meter"
+          role="meter"
+          aria-label={meter.label}
+          aria-valuenow={meter.fill}
+          aria-valuetext={meter.note ? `${meter.value} · ${meter.note}` : meter.value}
+          data-tone={meter.tone}
+          style={`--v: ${meter.fill}%`}
+        >
           <span>{meter.label}</span><b>{meter.value}</b><i></i>{#if meter.note}<small>
               {meter.note}
             </small>{/if}

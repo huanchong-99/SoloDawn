@@ -86,7 +86,7 @@ export const one = <E extends Element = HTMLElement>(selector: string) =>
   document.querySelector<E>(selector)!;
 
 /** The text of an element, with white space as a reader sees it. */
-const read = (element: Element) => element.textContent!.replace(/\s+/g, ' ').trim();
+export const read = (element: Element) => element.textContent!.replace(/\s+/g, ' ').trim();
 
 /** The text of the first matching element, with white space as a reader sees it. */
 export const text = (selector: string) => read(one(selector));

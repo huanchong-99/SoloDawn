@@ -188,7 +188,7 @@ func preparePost(h *Host, c Caller, a postArgs) (preparedPost, error) {
 	if a.Kind != nil {
 		kind = *a.Kind
 	}
-	if err := checkPostKind(kind); err != nil {
+	if err := checkPostKind(c, kind); err != nil {
 		return preparedPost{}, err
 	}
 	thread, mainLine, err := resolvePostPlace(h, c, kind, a.Where, a.Task)
@@ -202,10 +202,17 @@ func preparePost(h *Host, c Caller, a postArgs) (preparedPost, error) {
 	return preparedPost{kind: kind, text: a.Text, thread: thread, main: mainLine, mentions: mentions}, nil
 }
 
-func checkPostKind(kind string) error {
+// checkPostKind allows handback only in a hand-back turn: a tool list is
+// fixed per session (contracts/mcp-tools.md section 5).
+func checkPostKind(c Caller, kind string) error {
 	switch kind {
 	case "text", "progress", "question", "summary":
 		return nil
+	case "handback":
+		if c.Turn.Kind == HandbackTurn {
+			return nil
+		}
+		return badTalkRequest("handback is posted only in a hand-back turn")
 	default:
 		return badTalkRequest("unsupported post kind " + kind)
 	}
@@ -264,7 +271,11 @@ func turnThreadPlace(c Caller, where string) (*proto.ID, error) {
 
 func sendPreparedPost(ctx context.Context, h *Host, c Caller, p preparedPost) (any, error) {
 	hdr := secHomeHeader(h, c, "post")
-	payload := marshalWire(proto.Post[proto.EmptyBody]{
+	var body any = proto.EmptyBody{}
+	if p.kind == "handback" {
+		body = takeoverFacts(h, c.SessionKey)
+	}
+	payload := marshalWire(proto.Post[any]{
 		HomeCommand: hdr,
 		Kind:        p.kind,
 		Thread:      p.thread,
@@ -272,7 +283,7 @@ func sendPreparedPost(ctx context.Context, h *Host, c Caller, p preparedPost) (a
 		Text:        p.text,
 		Mentions:    p.mentions,
 		Re:          nil,
-		Body:        proto.EmptyBody{},
+		Body:        body,
 	})
 	if _, err := h.Command(ctx, c.Home, payload); err != nil {
 		return nil, err

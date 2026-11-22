@@ -187,13 +187,7 @@
     <Composer {group} />
   </div>
   {#if sided}
-    <aside
-      id="chat-side"
-      class="side"
-      class:open={side.open}
-      inert={sliding.current && !side.open}
-      aria-label={t('app.side')}
-    >
+    <aside id="chat-side" class="side" class:open={side.open} aria-label={t('app.side')}>
       <button
         class="icon-btn side-close"
         bind:this={closer}
