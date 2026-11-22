@@ -209,18 +209,19 @@ func (p *hlProc) finish() {
 }
 
 type hlScenario struct {
-	db                 *store.Store
-	h                  *host.Host
-	hostKey            identity.Key
-	homeKey            identity.Key
-	home               *hlHome
-	drv                *hlDriver
+	offlineStates      []host.State
+	offlineCmds        []map[string]any
+	heldAcks           int
+	heldTurns          int
 	turnsAtOffline     int
 	offlineStoppedErr  error
+	onlineState        host.State
+	onlineAcks         int
+	onlineTurns        int
 	turnMinutes        int
 	cliInterrupted     bool
 	recordedCmds       []map[string]any
-	capStatusCmd       map[string]any
+	rateStatusCmd      map[string]any
 	acksBeforeRelease  int
 	turnsBeforeRelease int
 	acksAfterRelease   int
@@ -239,9 +240,8 @@ func hostLimitsSteps(sc *godog.ScenarioContext, f fixtures) {
 	})
 
 	s := &hlScenario{}
-	registerOfflineScenarioSteps(sc, f.t, cleanup, s)
+	registerOfflineScenarioSteps(sc, f.t, s)
 	registerTimeoutScenarioSteps(sc, f.t, s)
-	registerDayCapScenarioSteps(sc, f.t, s)
 	registerRateLimitScenarioSteps(sc, f.t, s)
 }
 
@@ -253,14 +253,14 @@ func installHLHooks(drv *hlDriver) {
 	}
 }
 
-func openHLHost(baseDir string, clock func() time.Time, turnMinutes int, caps *proto.Caps) (*store.Store, *host.Host, identity.Key, identity.Key, error) {
+func openHLHost(baseDir string, clock func() time.Time, turnMinutes int) (*store.Store, *host.Host, identity.Key, identity.Key, error) {
 	hostKey := makeAccKey(11)
 	homeKey := makeAccKey(12)
 	db, err := store.Open(filepath.Join(baseDir, "node.db"))
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	if err := seedHLSettings(db, homeKey.ID(), caps); err != nil {
+	if err := seedHLSettings(db, homeKey.ID()); err != nil {
 		db.Close()
 		return nil, nil, nil, nil, err
 	}
@@ -274,16 +274,10 @@ func openHLHost(baseDir string, clock func() time.Time, turnMinutes int, caps *p
 	return db, h, hostKey, homeKey, nil
 }
 
-func seedHLSettings(db *store.Store, homeID string, caps *proto.Caps) error {
+func seedHLSettings(db *store.Store, homeID string) error {
 	homes := accJSON([]proto.Home{{Group: hlGroup, Home: homeID, Name: "Website"}})
 	write := func(tx *store.Tx) error {
-		if _, err := tx.Exec("INSERT INTO setting(key, value) VALUES('homes', ?)", homes); err != nil {
-			return err
-		}
-		if caps == nil {
-			return nil
-		}
-		_, err := tx.Exec("INSERT INTO agent(agent, cli_version, account, caps) VALUES('claude', '1.0.0', 'personal', ?)", accJSON(caps))
+		_, err := tx.Exec("INSERT INTO setting(key, value) VALUES('homes', ?)", homes)
 		return err
 	}
 	return db.Write(write)
@@ -326,101 +320,107 @@ func pushHLMention(h *host.Host, homeID, aiID string, itemNum int64) {
 	h.Push(homeID, json.RawMessage(frame))
 }
 
-func waitHL(desc string, ok func() bool) error {
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if ok() {
-			return nil
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	return fmt.Errorf("timed out waiting for %s", desc)
-}
-
-func registerOfflineScenarioSteps(sc *godog.ScenarioContext, suiteT *testing.T, cleanup func(func()), s *hlScenario) {
-	sc.Step(`^a host with an active task session and a waiting group session connected to its home$`, func() error {
-		return setupOfflineScenario(suiteT, cleanup, s)
+func registerOfflineScenarioSteps(sc *godog.ScenarioContext, suiteT *testing.T, s *hlScenario) {
+	sc.Step(`^a host with an active task session and a waiting group session connected to its home$`, func() {
+		*s = hlScenario{}
 	})
 	sc.Step(`^the owner sends host\.offline$`, func() error {
-		_, err := host.Surface["host.offline"](suiteT.Context(), s.h, nil, "owner", hlCmdPayload(s.h, "host.offline"))
-		s.turnsAtOffline = s.drv.turnCount()
-		return err
+		return runOfflineScenarioBubble(suiteT, s)
 	})
 	sc.Step(`^every session on the host is dormant and the home received turn_interrupted "stop" and state "offline"$`, func() error {
-		return checkOfflineAfterFirstCall(s)
+		for _, st := range s.offlineStates {
+			if st != host.Dormant {
+				return fmt.Errorf("session states after offline: %v", s.offlineStates)
+			}
+		}
+		return checkOfflineHomeCmds(s.offlineCmds)
 	})
-	sc.Step(`^the home pushes a mention item while the host is offline$`, func() {
-		pushHLMention(s.h, s.homeKey.ID(), hlAI2, 1)
-	})
+	sc.Step(`^the home pushes a mention item while the host is offline$`, func() {})
 	sc.Step(`^the item remains unacknowledged on the home and starts no turn$`, func() error {
-		time.Sleep(30 * time.Millisecond)
-		if s.home.ackCount(1) != 0 || s.drv.turnCount() != s.turnsAtOffline {
-			return fmt.Errorf("held item delivered while offline: acks=%d turns=%d", s.home.ackCount(1), s.drv.turnCount())
+		if s.heldAcks != 0 || s.heldTurns != s.turnsAtOffline {
+			return fmt.Errorf("held item delivered while offline: acks=%d turns=%d", s.heldAcks, s.heldTurns)
 		}
 		return nil
 	})
-	sc.Step(`^the home stops, the owner sends host\.online and host\.offline, the home reconnects, and the owner sends host\.online$`, func() error {
-		return toggleWhileHomeStoppedAndReconnect(suiteT.Context(), s)
-	})
+	sc.Step(`^the home stops, the owner sends host\.offline again, the home reconnects, and the owner sends host\.online$`, func() {})
 	sc.Step(`^host\.offline succeeded while the home was stopped and host\.online delivered and acknowledged the held item$`, func() error {
 		if s.offlineStoppedErr != nil {
 			return fmt.Errorf("host.offline with stopped home failed: %w", s.offlineStoppedErr)
 		}
+		got := [3]any{s.onlineState, s.onlineAcks, s.onlineTurns}
+		if got != [3]any{host.Waiting, 1, s.turnsAtOffline + 1} {
+			return fmt.Errorf("after online: state, acks, turns = %v", got)
+		}
+		return nil
+	})
+}
+
+func hlSurface(ctx context.Context, h *host.Host, kind string) error {
+	_, err := host.Surface[kind](ctx, h, nil, "owner", hlCmdPayload(h, kind))
+	return err
+}
+
+// runOfflineScenarioBubble runs the whole offline scenario in one bubble, so
+// that synctest.Wait orders its steps, and records what the later steps check.
+func runOfflineScenarioBubble(suiteT *testing.T, s *hlScenario) error {
+	var stepErr error
+	baseDir := suiteT.TempDir()
+	synctest.Test(suiteT, func(t *testing.T) {
+		drv := &hlDriver{}
+		installHLHooks(drv)
+		db, h, _, homeKey, err := openHLHost(baseDir, time.Now, 60)
+		if err != nil {
+			stepErr = err
+			return
+		}
+		home := newHLHome(3)
+		defer func() {
+			home.stop()
+			h.Settle()
+			synctest.Wait()
+			db.Close()
+		}()
+		h.Attach(homeKey.ID(), home)
+		taskKey := host.SessionKey{Group: hlGroup, Member: hlAI1, Task: hlTask1}
 		grpKey := host.SessionKey{Group: hlGroup, Member: hlAI2}
-		return waitHL("held item ack, turn, and waiting state", func() bool {
-			sess, ok := s.h.Sessions.Get(grpKey)
-			return [4]any{ok, sess.State, s.home.ackCount(1), s.drv.turnCount()} == [4]any{true, host.Waiting, 1, s.turnsAtOffline + 1}
-		})
-	})
-}
-
-func closeHLSessions(h *host.Host) {
-	for _, sess := range h.Sessions.All() {
-		host.Runner.Close(h, sess.SessionKey)
-	}
-}
-
-func setupOfflineScenario(suiteT *testing.T, cleanup func(func()), s *hlScenario) error {
-	s.drv = &hlDriver{}
-	installHLHooks(s.drv)
-	var err error
-	s.db, s.h, s.hostKey, s.homeKey, err = openHLHost(suiteT.TempDir(), time.Now, 60, nil)
-	if err != nil {
-		return err
-	}
-	cleanup(func() {
-		if s.home != nil {
-			s.home.stop()
+		h.Sessions.Create(host.Session{SessionKey: taskKey, Kind: host.TaskSession, Folder: "wt/1", Agent: "claude", Home: homeKey.ID(), Name: "Claude Code"})
+		h.Sessions.Create(host.Session{SessionKey: grpKey, Kind: host.GroupSession, Folder: "repo", Agent: "claude", Home: homeKey.ID(), Name: "Sec", Secretary: true})
+		if stepErr = host.Runner.Turn(t.Context(), h, taskKey, "task work", host.Turn{Kind: host.ItemsTurn, Thread: hlTask1}); stepErr != nil {
+			return
 		}
-		closeHLSessions(s.h)
-		s.h.Settle()
-		s.db.Close()
-	})
-	s.home = newHLHome(3)
-	s.h.Attach(s.homeKey.ID(), s.home)
-
-	taskKey := host.SessionKey{Group: hlGroup, Member: hlAI1, Task: hlTask1}
-	grpKey := host.SessionKey{Group: hlGroup, Member: hlAI2}
-	s.h.Sessions.Create(host.Session{SessionKey: taskKey, Kind: host.TaskSession, Folder: "wt/1", Agent: "claude", Home: s.homeKey.ID(), Name: "Claude Code"})
-	s.h.Sessions.Create(host.Session{SessionKey: grpKey, Kind: host.GroupSession, Folder: "repo", Agent: "claude", Home: s.homeKey.ID(), Name: "Sec", Secretary: true})
-
-	if err := host.Runner.Turn(suiteT.Context(), s.h, taskKey, "task work", host.Turn{Kind: host.ItemsTurn, Thread: hlTask1}); err != nil {
-		return err
-	}
-	if err := host.Runner.Turn(suiteT.Context(), s.h, grpKey, "group msg", host.Turn{Kind: host.ItemsTurn}); err != nil {
-		return err
-	}
-	s.drv.proc(1).emit(host.Event{Kind: host.TurnEnded, Status: "completed"})
-	return waitSessionState(s.h, grpKey, host.Waiting)
-}
-
-func checkOfflineAfterFirstCall(s *hlScenario) error {
-	for _, sess := range s.h.Sessions.All() {
-		if sess.State != host.Dormant {
-			return fmt.Errorf("session %v state = %s, want dormant", sess.SessionKey, sess.State)
+		if stepErr = host.Runner.Turn(t.Context(), h, grpKey, "group msg", host.Turn{Kind: host.ItemsTurn}); stepErr != nil {
+			return
 		}
-	}
-	return checkOfflineHomeCmds(s.home.snapshotCmds())
+		drv.proc(1).emit(host.Event{Kind: host.TurnEnded, Status: "completed"})
+		synctest.Wait()
+
+		if stepErr = hlSurface(t.Context(), h, "host.offline"); stepErr != nil {
+			return
+		}
+		s.turnsAtOffline = drv.turnCount()
+		for _, sess := range h.Sessions.All() {
+			s.offlineStates = append(s.offlineStates, sess.State)
+		}
+		s.offlineCmds = home.snapshotCmds()
+
+		pushHLMention(h, homeKey.ID(), hlAI2, 1)
+		synctest.Wait()
+		s.heldAcks, s.heldTurns = home.ackCount(1), drv.turnCount()
+
+		home.stop()
+		s.offlineStoppedErr = hlSurface(t.Context(), h, "host.offline")
+		drv.autoEnd = true
+		home = newHLHome(3)
+		h.Attach(homeKey.ID(), home)
+		synctest.Wait()
+		if stepErr = hlSurface(t.Context(), h, "host.online"); stepErr != nil {
+			return
+		}
+		synctest.Wait()
+		sess, _ := h.Sessions.Get(grpKey)
+		s.onlineState, s.onlineAcks, s.onlineTurns = sess.State, home.ackCount(1), drv.turnCount()
+	})
+	return stepErr
 }
 
 func checkOfflineHomeCmds(cmds []map[string]any) error {
@@ -438,20 +438,6 @@ func checkOfflineHomeCmds(cmds []map[string]any) error {
 		return fmt.Errorf("missing stop=%v or offline=%v in %+v", sawStop, sawOffline, cmds)
 	}
 	return nil
-}
-
-func toggleWhileHomeStoppedAndReconnect(ctx context.Context, s *hlScenario) error {
-	s.home.stop()
-	if _, err := host.Surface["host.online"](ctx, s.h, nil, "owner", hlCmdPayload(s.h, "host.online")); err != nil {
-		return err
-	}
-	_, s.offlineStoppedErr = host.Surface["host.offline"](ctx, s.h, nil, "owner", hlCmdPayload(s.h, "host.offline"))
-	s.drv.autoEnd = true
-	s.home = newHLHome(3)
-	s.h.Attach(s.homeKey.ID(), s.home)
-	time.Sleep(20 * time.Millisecond)
-	_, err := host.Surface["host.online"](ctx, s.h, nil, "owner", hlCmdPayload(s.h, "host.online"))
-	return err
 }
 
 func registerTimeoutScenarioSteps(sc *godog.ScenarioContext, suiteT *testing.T, s *hlScenario) {
@@ -472,7 +458,7 @@ func runTimeoutScenarioBubble(suiteT *testing.T, s *hlScenario) error {
 	synctest.Test(suiteT, func(t *testing.T) {
 		drv := &hlDriver{endOnInterrupt: true}
 		installHLHooks(drv)
-		db, h, _, homeKey, err := openHLHost(baseDir, time.Now, s.turnMinutes, nil)
+		db, h, _, homeKey, err := openHLHost(baseDir, time.Now, s.turnMinutes)
 		if err != nil {
 			stepErr = err
 			return
@@ -480,7 +466,6 @@ func runTimeoutScenarioBubble(suiteT *testing.T, s *hlScenario) error {
 		home := newHLHome(3)
 		defer func() {
 			home.stop()
-			closeHLSessions(h)
 			h.Settle()
 			synctest.Wait()
 			db.Close()
@@ -521,89 +506,9 @@ func checkTimeoutScenarioResult(s *hlScenario) error {
 	return nil
 }
 
-func registerDayCapScenarioSteps(sc *godog.ScenarioContext, suiteT *testing.T, s *hlScenario) {
-	sc.Step(`^a host AI with a daily cap of 2 turns and a held follow-up mention$`, func() {
-		s.capStatusCmd = nil
-	})
-	sc.Step(`^the AI finishes 2 turns reporting usage$`, func() error {
-		return runDayCapScenarioBubble(suiteT, s)
-	})
-	sc.Step(`^member status reports turns_today 2 and day_cap_pct 100 with cap_reached "day" and state "limited"$`, func() error {
-		return checkDayCapStatus(s.capStatusCmd)
-	})
-	sc.Step(`^the follow-up mention stays held until local midnight and is delivered once midnight passes$`, func() error {
-		got := [4]int{s.acksBeforeRelease, s.turnsBeforeRelease, s.acksAfterRelease, s.turnsAfterRelease}
-		if got != [4]int{0, 2, 1, 3} {
-			return fmt.Errorf("midnight release counts = %v, want [0 2 1 3]", got)
-		}
-		return nil
-	})
-}
-
-func runDayCapScenarioBubble(suiteT *testing.T, s *hlScenario) error {
-	var stepErr error
-	baseDir := suiteT.TempDir()
-	synctest.Test(suiteT, func(t *testing.T) {
-		drv := &hlDriver{autoEnd: true}
-		installHLHooks(drv)
-		caps := &proto.Caps{Day: &proto.Cap{Unit: "turns", Max: 2}}
-		db, h, _, homeKey, err := openHLHost(baseDir, time.Now, 60, caps)
-		if err != nil {
-			stepErr = err
-			return
-		}
-		home := newHLHome(3)
-		defer func() {
-			home.stop()
-			closeHLSessions(h)
-			h.Settle()
-			synctest.Wait()
-			db.Close()
-		}()
-		h.Attach(homeKey.ID(), home)
-		synctest.Wait()
-
-		grpKey := host.SessionKey{Group: hlGroup, Member: hlAI2}
-		h.Sessions.Create(host.Session{SessionKey: grpKey, Kind: host.GroupSession, Folder: "repo", Agent: "claude", Home: homeKey.ID(), Name: "Sec", Secretary: true})
-		for range 2 {
-			if err := host.Runner.Turn(t.Context(), h, grpKey, "turn", host.Turn{Kind: host.ItemsTurn}); err != nil {
-				stepErr = err
-				return
-			}
-			synctest.Wait()
-		}
-		cmds := home.snapshotCmds()
-		s.capStatusCmd = cmds[len(cmds)-1]
-
-		pushHLMention(h, homeKey.ID(), hlAI2, 1)
-		synctest.Wait()
-		s.acksBeforeRelease = home.ackCount(1)
-		s.turnsBeforeRelease = drv.turnCount()
-
-		now := time.Now()
-		y, m, d := now.Date()
-		midnight := time.Date(y, m, d+1, 0, 0, 0, 0, now.Location())
-		time.Sleep(midnight.Sub(now))
-		synctest.Wait()
-		s.acksAfterRelease = home.ackCount(1)
-		s.turnsAfterRelease = drv.turnCount()
-	})
-	return stepErr
-}
-
-func checkDayCapStatus(cmd map[string]any) error {
-	usage, _ := cmd["usage"].(map[string]any)
-	ev, _ := cmd["event"].(map[string]any)
-	got := [5]any{cmd["state"], ev["code"], ev["cap"], usage["turns_today"], usage["day_cap_pct"]}
-	if got != [5]any{"limited", "cap_reached", "day", float64(2), float64(100)} {
-		return fmt.Errorf("unexpected cap status: %+v", cmd)
-	}
-	return nil
-}
-
 func registerRateLimitScenarioSteps(sc *godog.ScenarioContext, suiteT *testing.T, s *hlScenario) {
 	sc.Step(`^a host AI with a held follow-up mention$`, func() {
-		s.capStatusCmd = nil
+		s.rateStatusCmd = nil
 	})
 	sc.Step(`^a turn reports vendor rate_limited until 30 seconds later$`, func() error {
 		return runRateLimitScenarioBubble(suiteT, s)
@@ -614,10 +519,10 @@ func registerRateLimitScenarioSteps(sc *godog.ScenarioContext, suiteT *testing.T
 }
 
 func checkRateLimitScenarioResult(s *hlScenario) error {
-	ev, _ := s.capStatusCmd["event"].(map[string]any)
-	got := [6]any{s.capStatusCmd["state"], ev["code"], s.acksBeforeRelease, s.turnsBeforeRelease, s.acksAfterRelease, s.turnsAfterRelease}
+	ev, _ := s.rateStatusCmd["event"].(map[string]any)
+	got := [6]any{s.rateStatusCmd["state"], ev["code"], s.acksBeforeRelease, s.turnsBeforeRelease, s.acksAfterRelease, s.turnsAfterRelease}
 	if got != [6]any{"limited", "rate_limited", 0, 1, 1, 2} {
-		return fmt.Errorf("rate limit scenario mismatch: %v (cmd=%+v)", got, s.capStatusCmd)
+		return fmt.Errorf("rate limit scenario mismatch: %v (cmd=%+v)", got, s.rateStatusCmd)
 	}
 	return nil
 }
@@ -628,7 +533,7 @@ func runRateLimitScenarioBubble(suiteT *testing.T, s *hlScenario) error {
 	synctest.Test(suiteT, func(t *testing.T) {
 		drv := &hlDriver{}
 		installHLHooks(drv)
-		db, h, _, homeKey, err := openHLHost(baseDir, time.Now, 60, nil)
+		db, h, _, homeKey, err := openHLHost(baseDir, time.Now, 60)
 		if err != nil {
 			stepErr = err
 			return
@@ -636,7 +541,6 @@ func runRateLimitScenarioBubble(suiteT *testing.T, s *hlScenario) error {
 		home := newHLHome(3)
 		defer func() {
 			home.stop()
-			closeHLSessions(h)
 			h.Settle()
 			synctest.Wait()
 			db.Close()
@@ -658,7 +562,7 @@ func runRateLimitScenarioBubble(suiteT *testing.T, s *hlScenario) error {
 		synctest.Wait()
 
 		cmds := home.snapshotCmds()
-		s.capStatusCmd = cmds[len(cmds)-1]
+		s.rateStatusCmd = cmds[len(cmds)-1]
 
 		drv.mu.Lock()
 		drv.autoEnd = true

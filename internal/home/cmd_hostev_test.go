@@ -166,7 +166,6 @@ func TestHostEvGoldenWireExamples(t *testing.T) {
 	equal(t, decodedSys, wantSys)
 
 	for _, name := range []string{
-		"member-status-cap_reached",
 		"member-status-rate_limited",
 		"member-status-login_invalid",
 		"member-status-session_replaced",
@@ -259,23 +258,6 @@ func TestHostEvEventsAndNotices(t *testing.T) {
 			wantBody: proto.TurnInterruptedBody{
 				SystemCode: proto.SystemCode{Code: "turn_interrupted"}, AI: hevWorker, Reason: "stop",
 			},
-		},
-		{
-			name:       "cap_reached for task in thread queues notice",
-			eventJSON:  fmt.Sprintf(`{"code":"cap_reached","cap":"task","task":%q}`, hevTaskA),
-			wantThread: hevTaskA,
-			wantBody: proto.CapReachedBody{
-				SystemCode: proto.SystemCode{Code: "cap_reached"}, AI: hevWorker, Cap: "task", Task: hevStr(hevTaskA),
-			},
-			wantNotice: &home.Item{AI: aiID, Why: "notice", Msg: id(10), Code: "cap_reached"},
-		},
-		{
-			name:      "cap_reached for day in main line queues notice",
-			eventJSON: `{"code":"cap_reached","cap":"day"}`,
-			wantBody: proto.CapReachedBody{
-				SystemCode: proto.SystemCode{Code: "cap_reached"}, AI: hevWorker, Cap: "day",
-			},
-			wantNotice: &home.Item{AI: aiID, Why: "notice", Msg: id(10), Code: "cap_reached"},
 		},
 		{
 			name:      "rate_limited in main line queues notice",
@@ -383,7 +365,7 @@ func TestHostEvStatusRefusals(t *testing.T) {
 		},
 		"event without code":            {extra: `,"event":{}`, wantErr: "bad_request"},
 		"unknown event code":            {extra: `,"event":{"code":"no_secretary"}`, wantErr: "bad_request"},
-		"cap_reached missing cap":       {extra: `,"event":{"code":"cap_reached"}`, wantErr: "bad_request"},
+		"postponed cap_reached code":    {extra: `,"event":{"code":"cap_reached","cap":"day"}`, wantErr: "bad_request"},
 		"rate_limited missing resets":   {extra: `,"event":{"code":"rate_limited"}`, wantErr: "bad_request"},
 		"turn_interrupted no reason":    {extra: `,"event":{"code":"turn_interrupted"}`, wantErr: "bad_request"},
 		"login_invalid non-text detail": {extra: `,"event":{"code":"login_invalid","detail":7}`, wantErr: "bad_request"},

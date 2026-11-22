@@ -658,6 +658,32 @@ kbd,
     min-width: 0;
   }
 }
+.meter {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+
+  b {
+    color: var(--text);
+    font-weight: 600;
+  }
+  i {
+    grid-column: 1 / -1;
+    height: 6px;
+    border-radius: 3px;
+    background: linear-gradient(
+      90deg,
+      var(--tone-text, var(--text-2)) var(--v),
+      var(--surface-3) var(--v)
+    );
+  }
+  small {
+    grid-column: 1 / -1;
+    font-size: inherit;
+  }
+}
 .fold {
   border-top: 1px solid var(--line);
   margin: 0 calc(-1 * var(--sp-4)) -14px;
@@ -1066,6 +1092,15 @@ kbd,
   &[data-st='paused'] i {
     border-radius: 1px;
     background: linear-gradient(90deg, currentColor 34%, transparent 34% 66%, currentColor 66%);
+  }
+  &[data-st='takeover'] {
+    color: var(--text);
+    font-weight: 500;
+
+    i {
+      border-radius: 2px;
+      color: var(--text);
+    }
   }
   &[data-st='ok'] i {
     color: var(--ok);

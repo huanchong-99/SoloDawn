@@ -16,11 +16,13 @@ import {
   statusOf,
   suggestedName,
   taskWaitKind,
+  terminalDisabledReason,
   usageMeter,
   waitingOnMe,
   waitingOnOther,
 } from './members';
 import { goldens } from './mock';
+import type { Net } from './net.svelte';
 import { prefs } from './prefs.svelte';
 import * as p from './proto';
 
@@ -555,6 +557,7 @@ describe('AI status and path projections', () => {
       text: 'Sleeping · wakes when @mentioned',
     });
     expect(statusOf(group, mk('limited'))).toEqual({ st: 'limited', text: 'Limited' });
+    expect(statusOf(group, mk('takeover'))).toEqual({ st: 'takeover', text: 'Owner is driving' });
     expect(statusOf(group, mk('offline'))).toEqual({ st: 'offline', text: 'Offline' });
     expect(statusOf(group, mk('unexpected'))).toEqual({ st: 'offline', text: 'Offline' });
   });
@@ -569,144 +572,89 @@ describe('AI status and path projections', () => {
     expect(pathLabel(mk('working', 'mesh'))).toBe('mesh');
   });
 
-  it('projects usageMeter across window, spend, daily cap, clamping, danger and empty cases', () => {
+  it('projects usageMeter from the rate-limit window only', () => {
     const resetAt = new Date(2026, 10, 20, 15, 0).getTime();
+    const bar = (value: string, fill: number, tone?: 'danger', note?: string) => ({
+      label: 'Window used',
+      value,
+      fill,
+      tone,
+      note,
+    });
 
     expect(usageMeter({}, 'en')).toBeUndefined();
-    expect(usageMeter({ turns_today: 14 }, 'en')).toBeUndefined();
-    expect(usageMeter({ spend_today: 3.2 }, 'en')).toBeUndefined();
-    expect(usageMeter({ spend_cap: 10 }, 'en')).toBeUndefined();
-    expect(usageMeter({ spend_today: 3.2, spend_cap: 0 }, 'en')).toBeUndefined();
-    expect(usageMeter({ spend_today: 3.2, spend_cap: -5 }, 'en')).toBeUndefined();
-
-    expect(usageMeter({ window_pct: 18 }, 'en')).toEqual({
-      label: 'Window used',
-      value: '18%',
-      fill: 18,
-      tone: undefined,
-      note: undefined,
-    });
-    expect(usageMeter({ window_pct: -4 }, 'en')).toEqual({
-      label: 'Window used',
-      value: '-4%',
-      fill: 0,
-      tone: undefined,
-      note: undefined,
-    });
-    expect(usageMeter({ window_pct: 62.5, window_resets: resetAt }, 'en')).toEqual({
-      label: 'Window used',
-      value: '63%',
-      fill: 63,
-      tone: undefined,
-      note: 'Resets 15:00',
-    });
-    expect(usageMeter({ window_pct: 62, day_cap_pct: 80.4 }, 'en')).toEqual({
-      label: 'Window used',
-      value: '62%',
-      fill: 62,
-      tone: undefined,
-      note: 'Daily cap 80%',
-    });
-    expect(
-      usageMeter({ window_pct: 99.9, window_resets: resetAt, day_cap_pct: 99.9 }, 'en'),
-    ).toEqual({
-      label: 'Window used',
-      value: '100%',
-      fill: 100,
-      tone: undefined,
-      note: 'Resets 15:00 · Daily cap 100%',
-    });
-    expect(usageMeter({ window_pct: 100 }, 'en')).toEqual({
-      label: 'Window used',
-      value: '100%',
-      fill: 100,
-      tone: 'danger',
-      note: undefined,
-    });
-    expect(usageMeter({ window_pct: 125 }, 'en')).toEqual({
-      label: 'Window used',
-      value: '125%',
-      fill: 100,
-      tone: 'danger',
-      note: undefined,
-    });
-    expect(usageMeter({ window_pct: 50, day_cap_pct: 100 }, 'en')).toEqual({
-      label: 'Window used',
-      value: '50%',
-      fill: 50,
-      tone: 'danger',
-      note: 'Daily cap 100%',
-    });
-
-    expect(usageMeter({ spend_today: 0, spend_cap: 10 }, 'en')).toEqual({
-      label: "Today's spend",
-      value: '$0 / $10',
-      fill: 0,
-      tone: undefined,
-    });
-    expect(usageMeter({ spend_today: -1, spend_cap: 10 }, 'en')).toEqual({
-      label: "Today's spend",
-      value: '$-1 / $10',
-      fill: 0,
-      tone: undefined,
-    });
-    expect(usageMeter({ spend_today: 3.2, spend_cap: 10 }, 'en')).toEqual({
-      label: "Today's spend",
-      value: '$3.20 / $10',
-      fill: 32,
-      tone: undefined,
-    });
-    expect(usageMeter({ spend_today: 10.5, spend_cap: 10.5 }, 'en')).toEqual({
-      label: "Today's spend",
-      value: '$10.50 / $10.50',
-      fill: 100,
-      tone: 'danger',
-    });
-    expect(usageMeter({ spend_today: 14, spend_cap: 10 }, 'en')).toEqual({
-      label: "Today's spend",
-      value: '$14 / $10',
-      fill: 100,
-      tone: 'danger',
-    });
-
-    expect(usageMeter({ day_cap_pct: 99.4 }, 'en')).toEqual({
-      label: 'Daily cap used',
-      value: '99%',
-      fill: 99,
-      tone: undefined,
-      note: undefined,
-    });
-    expect(usageMeter({ day_cap_pct: 100 }, 'en')).toEqual({
-      label: 'Daily cap used',
-      value: '100%',
-      fill: 100,
-      tone: 'danger',
-      note: undefined,
-    });
-    expect(usageMeter({ day_cap_pct: 112 }, 'en')).toEqual({
-      label: 'Daily cap used',
-      value: '112%',
-      fill: 100,
-      tone: 'danger',
-      note: undefined,
-    });
+    expect(usageMeter({ turns_today: 14, window_resets: resetAt }, 'en')).toBeUndefined();
+    expect(usageMeter({ window_pct: 18 }, 'en')).toEqual(bar('18%', 18));
+    expect(usageMeter({ window_pct: -4 }, 'en')).toEqual(bar('-4%', 0));
+    expect(usageMeter({ window_pct: 62.5, window_resets: resetAt }, 'en')).toEqual(
+      bar('63%', 63, undefined, 'Resets 15:00'),
+    );
+    expect(usageMeter({ window_pct: 99.9 }, 'en')).toEqual(bar('100%', 100));
+    expect(usageMeter({ window_pct: 100 }, 'en')).toEqual(bar('100%', 100, 'danger'));
+    expect(usageMeter({ window_pct: 125 }, 'en')).toEqual(bar('125%', 100, 'danger'));
 
     prefs.lang = 'zh-CN';
-    expect(
-      usageMeter({ window_pct: 62, window_resets: resetAt, day_cap_pct: 80 }, 'zh-CN'),
-    ).toEqual({
+    expect(usageMeter({ window_pct: 62, window_resets: resetAt }, 'zh-CN')).toEqual({
       label: '这一轮额度已用',
       value: '62%',
       fill: 62,
       tone: undefined,
-      note: '15:00 重置 · 今天上限 80%',
+      note: '15:00 重置',
     });
-    expect(usageMeter({ spend_today: 3.2, spend_cap: 10 }, 'zh-CN')).toEqual({
-      label: '今天花费',
-      value: '$3.20 / $10',
-      fill: 32,
-      tone: undefined,
+  });
+
+  it('computes terminalDisabledReason across offline host/AI, relay, linking and direct', () => {
+    const { home } = makeGroup();
+    const ai = row<p.AIMemberRow>('row-member-ai', {
+      id: 'ai-t',
+      g: gid,
+      host: home.device,
+      state: 'working',
     });
+    const offlineHost = makeHome({ online: false });
+    offlineHost.device = 'off-dev';
+    const offlineAiHost = row<p.AIMemberRow>('row-member-ai', {
+      id: 'ai-off-h',
+      g: gid,
+      host: 'off-dev',
+      state: 'working',
+    });
+    const netOf = (entries: Home[], pathFn: Net['path']): Net => ({
+      source: 'live',
+      homes: entries,
+      path: pathFn,
+    });
+
+    expect(
+      terminalDisabledReason(
+        netOf([offlineHost], () => undefined),
+        offlineAiHost,
+      ),
+    ).toBe('Computer offline');
+    expect(
+      terminalDisabledReason(
+        netOf([home], () => ({ kind: 'direct', rtt: 4, since: 1 })),
+        { ...ai, state: 'offline' },
+      ),
+    ).toBe('Computer offline');
+    expect(
+      terminalDisabledReason(
+        netOf([home], () => undefined),
+        ai,
+      ),
+    ).toBe('Direct link only');
+    expect(
+      terminalDisabledReason(
+        netOf([home], () => ({ kind: 'relay', rtt: 80, since: 1 })),
+        ai,
+      ),
+    ).toBe('Direct link only');
+    expect(
+      terminalDisabledReason(
+        netOf([home], () => ({ kind: 'direct', rtt: 4, since: 1 })),
+        ai,
+      ),
+    ).toBeUndefined();
   });
 });
 

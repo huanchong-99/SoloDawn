@@ -142,3 +142,18 @@ func TestPauseResumeWakesTasksByRow24(t *testing.T) {
 	}})
 	equal(t, briefRows(res), []any{want, pauSysRow(id(73), "group_resumed", pauAdminID)})
 }
+
+// Row 23 while the group is paused: the quiet timer queues nothing, so no
+// reminders pile up for the secretary until the group resumes.
+func TestPauseStopsQuietReminders(t *testing.T) {
+	s := pauState(t)
+	s.Group.Limits.IdleNoticeMinutes = 1
+	task := pauTask(31, "active", "local_check", pauWorkA, "", nil)
+	task.Created = clock - 60_000
+	s.Tasks[task.ID] = task
+	quiet := home.Timers["quiet"]
+	s.Group.Paused = &proto.GroupPause{By: ownerID, At: clock - 5000}
+	equal(t, quiet(s, disk{}, clock), home.Result{})
+	s.Group.Paused = nil
+	equal(t, quiet(s, disk{}, clock).Items, []home.Item{{AI: aiID, Why: "notice", Task: id(31), Code: "quiet"}})
+}

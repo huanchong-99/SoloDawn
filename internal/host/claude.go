@@ -300,10 +300,6 @@ func claudeOtherEvent(hdr claudeHeader) Event {
 	return Event{Kind: Active}
 }
 
-type claudeRateLimitMsg struct {
-	Info *claudeRateLimitInfo `json:"rate_limit_info"`
-}
-
 type claudeRateLimitInfo struct {
 	Status         string                      `json:"status"`
 	RateLimitType  string                      `json:"rateLimitType"`
@@ -323,25 +319,19 @@ func (p *claudeProcess) handleRateLimit(line []byte) {
 	}
 }
 
-func parseClaudeRateInfo(line []byte) (claudeRateLimitInfo, bool) {
-	var msg claudeRateLimitMsg
-	if json.Unmarshal(line, &msg) != nil || msg.Info == nil {
-		return claudeRateLimitInfo{}, false
-	}
-	return *msg.Info, true
-}
-
+// claudeRateEvents reads a rate_limit_event: Used with the window, and
+// RateLimited when the limit is hit; Active when it says neither.
 func claudeRateEvents(line []byte) []Event {
-	info, ok := parseClaudeRateInfo(line)
-	if !ok {
-		return []Event{{Kind: Active}}
+	var msg struct {
+		Info claudeRateLimitInfo `json:"rate_limit_info"`
 	}
-	usage, resets := claudeRateUsage(info)
+	json.Unmarshal(line, &msg)
+	usage, resets := claudeRateUsage(msg.Info)
 	var out []Event
 	if usage != (Usage{}) {
 		out = append(out, Event{Kind: Used, Usage: usage})
 	}
-	if isClaudeRateLimited(info.Status) {
+	if isClaudeRateLimited(msg.Info.Status) {
 		out = append(out, Event{Kind: RateLimited, Resets: resets})
 	}
 	if len(out) == 0 {
@@ -372,26 +362,12 @@ func isClaudeRateLimited(status string) bool {
 }
 
 type claudeResultMsg struct {
-	Subtype        string                      `json:"subtype"`
-	IsError        bool                        `json:"is_error"`
-	TerminalReason string                      `json:"terminal_reason"`
-	Result         string                      `json:"result"`
-	Errors         []string                    `json:"errors"`
-	APIErrorStatus int                         `json:"api_error_status"`
-	TotalCostUSD   *float64                    `json:"total_cost_usd"`
-	Usage          *claudeTurnTokens           `json:"usage"`
-	SinceLast      map[string]claudeModelDelta `json:"model_usage_since_last_result"`
-}
-
-type claudeTurnTokens struct {
-	InputTokens              int64 `json:"input_tokens"`
-	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
-	OutputTokens             int64 `json:"output_tokens"`
-}
-
-type claudeModelDelta struct {
-	CostUSD float64 `json:"costUSD"`
+	Subtype        string   `json:"subtype"`
+	IsError        bool     `json:"is_error"`
+	TerminalReason string   `json:"terminal_reason"`
+	Result         string   `json:"result"`
+	Errors         []string `json:"errors"`
+	APIErrorStatus int      `json:"api_error_status"`
 }
 
 func (p *claudeProcess) handleResult(line []byte) bool {
@@ -415,7 +391,6 @@ func claudeResultEvent(msg claudeResultMsg, interrupted, resumed bool) (Event, b
 	return Event{
 		Kind:   TurnEnded,
 		Status: claudeTurnStatus(msg, interrupted, failed),
-		Usage:  claudeResultUsage(msg),
 	}, false
 }
 
@@ -461,23 +436,4 @@ func containsClaudeFold(text string, subs ...string) bool {
 		}
 	}
 	return false
-}
-
-func claudeResultUsage(msg claudeResultMsg) Usage {
-	var u Usage
-	if msg.Usage != nil {
-		tokens := msg.Usage.InputTokens + msg.Usage.CacheCreationInputTokens + msg.Usage.CacheReadInputTokens + msg.Usage.OutputTokens
-		u.Tokens = &tokens
-	}
-	if len(msg.SinceLast) != 0 {
-		var usd float64
-		for _, m := range msg.SinceLast {
-			usd += m.CostUSD
-		}
-		u.USD = &usd
-	} else if msg.TotalCostUSD != nil {
-		usd := *msg.TotalCostUSD
-		u.USD = &usd
-	}
-	return u
 }

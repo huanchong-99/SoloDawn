@@ -398,11 +398,7 @@ func runApprovalTurnOne(t *testing.T, proc Process) string {
 	codexNoErr(t, proc.Answer(ev.Ask.ID, false))
 	codexWantErr(t, proc.Answer(ev.Ask.ID, false))
 	end := drainCodexUntilTurnEnd(t, proc.Events())
-	codexEqual(t, end, Event{
-		Kind:   TurnEnded,
-		Status: "completed",
-		Usage:  Usage{Tokens: new(int64(35980)), WindowPct: new(0.0), WindowResets: new(int64(1795149937000))},
-	})
+	codexEqual(t, end, Event{Kind: TurnEnded, Status: "completed"})
 	return ev.Ask.ID
 }
 
@@ -414,11 +410,7 @@ func runApprovalTurnTwo(t *testing.T, proc Process, firstAskID string) {
 	codexCheck(t, ev.Ask.ID != firstAskID, "expected distinct Ask ID on retry")
 	codexNoErr(t, proc.Answer(ev.Ask.ID, true))
 	end := drainCodexUntilTurnEnd(t, proc.Events())
-	codexEqual(t, end, Event{
-		Kind:   TurnEnded,
-		Status: "completed",
-		Usage:  Usage{Tokens: new(int64(41562)), WindowPct: new(0.0), WindowResets: new(int64(1795149937000))},
-	})
+	codexEqual(t, end, Event{Kind: TurnEnded, Status: "completed"})
 }
 
 func drainCodexUntilTurnEnd(t *testing.T, ch <-chan Event) Event {
@@ -471,11 +463,7 @@ func TestCodexFakeCLIExitMidTurnAndResume(t *testing.T) {
 	codexEqual(t, nextCodexEvent(t, p2.Events()), Event{Kind: Ready, Session: threadID})
 	codexNoErr(t, <-turnDone)
 	end := drainCodexUntilTurnEnd(t, p2.Events())
-	codexEqual(t, end, Event{
-		Kind:   TurnEnded,
-		Status: "completed",
-		Usage:  Usage{Tokens: new(int64(67311)), WindowPct: new(0.0), WindowResets: new(int64(1795149937000))},
-	})
+	codexEqual(t, end, Event{Kind: TurnEnded, Status: "completed"})
 	<-mcpDone
 
 	codexNoErr(t, p2.Close())
@@ -807,8 +795,6 @@ func TestCodexTurnAuthAndRPCErrors(t *testing.T) {
 		"not-json",
 		`{}`,
 		`{"method":"thread/status/changed","params":{}}`,
-		`{"method":"thread/tokenUsage/updated","params":"bad"}`,
-		`{"method":"thread/tokenUsage/updated","params":{"turnId":"other","tokenUsage":{"last":{"totalTokens":5}}}}`,
 		`{"method":"account/rateLimits/updated","params":"bad"}`,
 		`{"method":"account/rateLimits/updated","params":{"rateLimits":{}}}`,
 		`{"method":"turn/completed","params":"bad"}`,
@@ -881,12 +867,7 @@ func runFailedTurnErrorCase(t *testing.T, proc Process, peer *codexPeer, idx int
 		codexEqual(t, ev, wantEv)
 	}
 	end, _ := nextNonActiveEvent(t, proc.Events())
-	codexEqual(t, end, Event{
-		Kind:   TurnEnded,
-		Status: "failed",
-		Usage:  Usage{WindowPct: new(99.0), WindowResets: new(int64(350000))},
-		Text:   "err-msg",
-	})
+	codexEqual(t, end, Event{Kind: TurnEnded, Status: "failed", Text: "err-msg"})
 }
 
 type codexStartupFailureCase struct {

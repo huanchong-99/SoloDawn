@@ -26,8 +26,10 @@ A unit never calls into the file of a unit built beside it. It registers in a ta
 | the turn a tool is called in | `Caller.Turn`: its number, its kind (`HandbackTurn` for a hand-back), the thread of its last item, the depth of the call it answers |
 | whether a tool call or a permission request is open | `done := h.Sessions.Calling(key)` around it; `h.Sessions.Calls(key)` |
 | the state rows of a group | `h.Rows`: `Put` and `Reset` for the unit that handles `rows` and `reset`, `Get` and `Of` for everyone |
-| an item that answers an open tool call | the tool: `item, done := h.Await(id, check)`, then it reads the channel until its wait runs out, calls `done`, and looks at the channel once more. Delivery, before it queues a `reply` or a `decided` item: `h.Hand(id, item)`, which never waits for the tool |
+| an item that answers an open tool call | the tool: `item, done := h.Await(id, check)`, then it reads the channel until its wait runs out, calls `done`, and looks at the channel once more. Delivery, before it queues a `reply` or a `decided` item: `h.Hand(id, item)`, which ends the wait and puts the item into the channel under one lock, so after `done` the item is either in the channel or queued, and never waits for the tool |
 | whether a session's deliveries are held | `h.Held(key)`, before a turn is given; whoever lifts a hold calls `Deliver` |
+| an interactive pseudo-terminal (`takeover`) | `h.StartPTY(group, member, agent, launch, onDone)`, `p.Attached()`, `p.Resize(cols, rows)`, `p.Close()`, `h.ClosePTY(group, member)` |
+| bridging a `pty:<g>:<member>` data channel | `h.ServeTerminal(t)` |
 | an audit row | `h.Audit(tx, AuditRow{…})`, inside the transaction of what it records |
 | the AI CLIs found here (`host.info`) | `h.Agents(ctx)`: probes `claude` and `codex` on `PATH` (cached 60 s), writes `agent`, returns `[]proto.HostAgent` with `Groups` empty |
 
@@ -42,11 +44,12 @@ Each is a package map. The file that provides an entry adds it from its `init` w
 | `Pushes` | `t` of a frame a home pushes: `inbox`, `rows`, `reset` | `h.Push(home, frame)`, which `node` calls for each push it reads on a connection to a home, and the local link for a home on the same node |
 | `Surface` | `t` of a request or push of the [host surface](../../planning/contracts/datachannel.md) (`audit`, `pty.resize`), or `t` of a [host command](../../planning/contracts/commands.md) (`takeover.start`) | `node`, only for a device of the owner; for a command after the envelope checks and the receipt lookup |
 | `Listeners` | the name of the listening unit | `h.Report(key, event)`, which the session runtime calls for every event of a session's CLI |
+| `Built` | the name of the unit | `New`, once, when the host is built |
 | `Attached` | the name of the unit | `h.Attach`, each time a connection to a home opens |
 | `Settled` | the name of the unit | `h.Settle()`, before the host's store closes |
-| `Holds` | the name of the unit that knows of a hold | `h.Held(key)`, which delivery calls. The unit of caps and limits registers the holds of a cap, a rate limit and "all offline"; with no entry nothing is held |
+| `Holds` | the name of the unit that knows of a hold | `h.Held(key)`, which delivery calls. The unit of limits registers the holds of a vendor rate limit and "all offline"; with no entry nothing is held |
 
-`Listeners`, `Attached`, `Settled` and `Holds` are called in the order of their keys. `node` does the rest of the wiring: it registers the subcommands of host features and gives each `Peer` the handlers of their channels.
+`Listeners`, `Built`, `Attached`, `Settled` and `Holds` are called in the order of their keys. `node` does the rest of the wiring: it registers the subcommands of host features and gives each `Peer` the handlers of their channels.
 
 ## Hooks
 
@@ -102,7 +105,7 @@ A `Driver` starts the structured CLI (`Start`) and gives the command line of the
 Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/drivers.md), sections 1.1 and 1.3).
 
 - `claudeProcess.mu` serializes stdin writes (`Turn`, `Interrupt`), `Close`, `reqSeq` and `interrupted`; nothing inside `mu` waits on `events` or the child process. `readLoop` is the sole writer of `events` and closes it after stdout EOF, `Wait` and process-tree cleanup; the caller of `Process.Events` is its single reader.
-- `rate_limit_event` emits `Used` (`WindowPct`, `WindowResets`) and `RateLimited` when `status` is neither `allowed` nor `allowed_warning`; `result` attaches `Usage` (`Tokens` summed across input, cache and output fields, and `USD` from `model_usage_since_last_result` or `total_cost_usd`) to `TurnEnded`.
+- `rate_limit_event` emits `Used` (`WindowPct`, `WindowResets`) and `RateLimited` when `status` is neither `allowed` nor `allowed_warning`.
 - `Process.Answer` returns an error because Claude Code sends permission prompts through the MCP `approve` tool ([mcp-tools.md](../../planning/contracts/mcp-tools.md), section 3).
 - `LoginInvalid` and `NoSession` match HTTP status `401` and Claude Code's English error phrases on `result` and non-zero-exit `stderr` until live failure captures exist ([issues.md](../../issues.md)).
 
@@ -112,13 +115,22 @@ Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/
 
 - `Start` runs `codex app-server` over stdio JSON-RPC (`initialize`, `initialized`, `thread/start` or `thread/resume`, with `-c features.default_mode_request_user_input=true`), detached from any terminal (`detachTerminal`). `Interactive` returns the `codex resume` command line and refuses an empty `Launch.Session`.
 - **One reader per channel and lock order.** `Events()` is written only by `readLoop` and read only by `Start`'s caller, and closes after `cmd.Wait` and tree cleanup finish; `ready` is closed once by `finishReady` for `Turn`. `wmu` (stdin writes and close) and `mu` (protocol, turn, approval, user-input and file-change state) are never nested.
-- **Requests and notifications.** `commandExecution` and `fileChange` approvals emit `Asked` for `Process.Answer`; `item/tool/requestUserInput` emits `Asked` with `Ask.Reply`; invalid parameters and all other server requests get JSON-RPC error `-32601`. Notifications during an active turn emit `Active`; `thread/tokenUsage/updated` accumulates per-turn `Tokens` (`Used` and `TurnEnded`), and `account/rateLimits/updated` selects the higher `usedPercent` window (`Used`, and `RateLimited` at 100 percent or when a limit flag or `usageLimitExceeded` is set). Live behavior of `features.default_mode_request_user_input=true` and `item/tool/requestUserInput` remains unverified ([issues.md](../../issues.md)).
+- **Requests and notifications.** `commandExecution` and `fileChange` approvals emit `Asked` for `Process.Answer`; `item/tool/requestUserInput` emits `Asked` with `Ask.Reply`; invalid parameters and all other server requests get JSON-RPC error `-32601`. Notifications during an active turn emit `Active`; `account/rateLimits/updated` selects the higher `usedPercent` window (`Used`, and `RateLimited` at 100 percent or when a limit flag is set), and a turn that fails with `usageLimitExceeded` emits `RateLimited`. Live behavior of `features.default_mode_request_user_input=true` and `item/tool/requestUserInput` remains unverified ([issues.md](../../issues.md)).
 
 ## CLI detection and sign-in
 
 `agents.go` provides `(*Host).Agents(ctx)`, `"agents"` in `Listeners`, and `"agent.set"` in `Surface`; see [drivers.md](../../planning/contracts/drivers.md) section 1.4 and [commands.md](../../planning/contracts/commands.md) section 2.
 
 - **Lock order.** `agtPart.probeMu` -> `Store.Write` -> `agtPart.mu`. The listener calls `Sessions.Get` (leaf `Sessions` lock) and then takes `agtPart.mu`; nothing under `agtPart.mu` waits on a probe or the store.
+
+## Pseudo-terminals (`pty.go`)
+
+`StartPTY(group, member, agent, launch, onDone)` runs `Drivers[agent].Interactive(launch)` inside a `github.com/aymanbagabas/go-pty` v0.2.3 pseudo-terminal (Unix PTY or Windows ConPTY) in `launch.Folder`, registers the open `*PTY` under `aiSlot{group, member}` in `Part[ptyPart](h)`, applies any stored `pty.resize` dimensions for that slot, and returns the `*PTY` and the CLI session id. A second `StartPTY` while `(group, member)` is already open is refused with `busy`; non-`*Error` CLI launch failures are returned as `&Error{Code: "cli", Message: …}`.
+
+- Closing (`p.Close()`, `h.ClosePTY(group, member)`) never writes `0x03` (`Ctrl+C`) bytes. It closes the pseudo-terminal, waits up to 10 s (`ptyStopTimeout`) for exit, kills the process tree when still running (`SIGKILL` to `-pid` on Unix, `taskkill.exe /f /t /pid` on Windows), releases `(group, member)`, and calls `onDone` once after the process has exited.
+- `ServeTerminal(t)` parses `"pty:<g>:<member>"` strictly; `p.Attached()` reports whether a terminal stream has attached. A malformed label, an unmatched `(g, member)` or a duplicate stream for an already bridged `PTY` is closed and drained so unread messages never hold back the connection's shared SCTP receive window. Otherwise one goroutine copies `PTY -> t` (pausing `PTY` reads while `t.Write` waits on the 1 MiB send-buffer limit) and the caller copies `t -> PTY`; `t` ending closes `PTY`, and `PTY` exiting closes `t`.
+- `Surface["pty.resize"]` decodes `proto.PTYResize`, requires `cols >= 1` and `rows >= 1` (`bad_request` below 1), remembers the size for `(g, ai)` so a `pty.resize` before `StartPTY` sets the initial size, resizes an open `PTY`, and accepts a `pty.resize` after close as a no-op.
+- **Lock order and single-reader channels.** `PTY.mu -> ptyPart.mu`; neither lock waits on I/O, process exit or `onDone`. `closing` is read only by `waitLoop`; `procDone` and `outDone` are read only by `runStop`; `done` is closed once by `runStop` for `Close` callers.
 
 # Session runtime
 
@@ -128,6 +140,7 @@ Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/
 - **Lifecycle and C-6.** `Runner.Turn` wakes a `dormant` session by starting its driver with `Launch` (`Folder` under `<dbDir>/projects/<group>/<folder>`, `Session`, `Level` defaulting to 3 across all session kinds unless overridden by `perm` or `default_level`, `Shim` with an `Admit` token, `Instructions`, `RepoConfig` `true` for task and review sessions and `false` for group sessions, `ToolTimeout`), reports `TurnBegan` before writing the turn, stores a non-empty `Ready.Session`, and forwards every `Process.Events()` event in order through `h.Report`. Every switch waits for the previous process's `Events()` channel to close and forgets its token before starting the next process or marking the session `dormant`.
 - **Dormancy, `max_open` and timeouts.** `TurnEnded` moves an active turn's session to `waiting`, then arms the `idle_minutes` timer (default 15), reports `member status`, and calls `Deliver` on a separate goroutine; a stray `TurnEnded` with no active turn is reported to `Listeners` and ignored. Waking a `dormant` session at `max_open` (default 4) closes the open `waiting` session with the earliest `LastActive` first, or waits on `changed` until an active session frees a slot. Every `Close` arms a 10 s timer that cancels `Start`'s context to kill an unresponsive process tree: outside a turn that records `AuditKilled` (`what = "killed"`, naming the member and task) and nothing else; during a turn the exit is a crash (`turn_interrupted` with reason `crash`, plus `task fail` in a task session).
 - **Failed resume and `login_invalid`.** On `NoSession` during a resume, the runtime closes the failed process, clears `CLISession`, composes `ReplacedTurn`, starts a fresh session in the same folder, and reports `session_replaced`. On `LoginInvalid`, the runtime closes the process, marks the AI `limited`, and sends `LoginInvalidEvent` (with redacted detail) only when entering `limited`.
+- **Shutdown.** `Settle` (entry `"runtime"`) refuses new processes with `busy`, ends every CLI process and waits for each process loop, so that none reaches the store after it closes. A loop that ends while the host settles leaves the session row as it is; the next start turns it `dormant` and reports a turn that was running (`ReportSaved`).
 - **Lock order.** `runtimePart.mu` may call `Sessions.Get` and `Sessions.All`, which acquire only the leaf in-memory `Sessions` lock; nothing called under `runtimePart.mu` acquires `Store`, `Rows`, `Host`, `Driver`, `Process` or hook/listener locks.
 - **One reader per channel.** `Process.Events()` is read only by `runProcessLoop`; `liveProc.loopDone` is read only by `stopProcess` or `writeTurnToWaiting` when waiting for that process to exit; `runtimePart.changed` is closed and replaced under `runtimePart.mu` to wake `waitSignal` callers.
 
@@ -169,6 +182,14 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 - A create works out from the branches whether a task is new, taken over or returning; there is no takeover flag. A slug the home cannot produce, or a `num` below 1, is refused.
 - `cloneLock(repo)` is the one lock per clone, keyed by its real path. Workspace functions and `ReviewedMerge` take it.
 - `HostedChecksToResume(tasks, ais)` selects the `cloud_check` tasks a restarted node polls again, deriving each `Branch` (`task/<num>-<slug>`) from `Num` and `Slug` via `taskName` and skipping rows `taskName` refuses.
+
+# AI-to-AI calls
+
+`tools_ask.go` registers `ask` and `reply` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md) sections 1 and 5, [flows/ask.md](../../planning/flows/ask.md), [commands.md](../../planning/contracts/commands.md) section 1.3).
+
+- Both tools run `CheckOutboundSecret` on `text` before signing or sending any request to the home, keep no `Part` of their own, and read call depth (`Caller.Turn.Depth + 1`) and open call waits (`Host.Await` and `Host.Hand`) from the host seam.
+- `ask` resolves `to` among other live AI member rows in `h.Rows` (else `not_found`), places the `call` post in `cmp.Or(c.Task, c.Turn.Thread)` mentioning the callee, and when `wait` is true (default) opens `Host.Await(callID, nil)` before `h.Command` and waits `group.limits.ask_wait_s` via `awaitApprovalItem`, returning `{"answer": …}` or `{"pending": true, "receipt": "<call id>"}`.
+- `reply` fetches the `call` message row via `fetchFrom` (returning `not_found` when absent) and posts `kind: "reply"` in the call's thread with `re` set to the call id and `mentions` set to `[callerAI]`; depth and call-state checks run on the home.
 
 # Secretary and decision tools
 
@@ -228,11 +249,13 @@ The rules are in [mcp-tools.md](../../planning/contracts/mcp-tools.md) and [loca
 - `Part[approvalState](h)` holds active `Asked` cancel functions per host. Its `mu` is a leaf lock: nothing called under `mu` takes `Host`, `Sessions`, `Rows` or `Store` locks.
 - `awaitApprovalItem` is the single reader of the channel returned by `Host.Await`: when the wait timer or context ends, it calls `done` and checks the channel once more before returning the timeout denial.
 
-# Usage, caps, turn limits and offline
+# Usage, turn limits and offline
 
-`limits.go` registers `"host.offline"` and `"host.online"` in `Surface`, `"limits"` in `Holds`, `"limits"` in `Listeners`, and `"limits"` in `Settled` ([commands.md](../../planning/contracts/commands.md) sections 1.9 and 2, [storage.md](../../planning/contracts/storage.md) sections 2 and 3, [sessions.md](../../planning/sessions.md) sections 2 and 3, [flows/agent-turn.md](../../planning/flows/agent-turn.md) step 9 and section E).
+`limits.go` registers `"host.offline"` and `"host.online"` in `Surface`, and `"limits"` in `Built`, `Holds`, `Listeners` and `Settled` ([commands.md](../../planning/contracts/commands.md) sections 1.9 and 2, [sessions.md](../../planning/sessions.md) sections 2 and 3, [flows/agent-turn.md](../../planning/flows/agent-turn.md) step 3 and section E). Caps are postponed after 1.0 with `settings.set`: nothing here reads `agent.caps` or sends `cap_reached`.
 
-- **Offline and online.** `host.offline` writes `setting` `'offline'` = `true`, interrupts active turns and closes all open sessions to `dormant`, and reports `member status` (`state: "offline"`, with `turn_interrupted` reason `stop` for interrupted turns) to reachable homes while succeeding when a home is stopped (`A4.8`). `host.online` writes `setting` `'offline'` = `false`, reports updated `member status`, and triggers `Deliver`.
-- **Turn timeouts.** On `TurnBegan`, `limits.go` arms a deadline timer for `group.limits.turn_minutes` (default 60) and, on Codex, a 5-minute silent-turn timer that resets on `Active`, `Asked` and `Used` and defers while `Sessions.Calls(key) > 0` ([drivers.md](../../planning/contracts/drivers.md) section 1.2 step 6). Either timeout calls `interruptSessionTurn` (with a 10 s kill fallback), reporting `turn_interrupted` (`timeout`) and `task fail` (`timeout`) on task sessions (`A4.9`).
-- **Usage, caps and vendor rate limits.** `TurnEnded` persists daily and per-task totals (`turns`, `tokens`, `usd`) in `usage(agent, day, data)` keyed by local date, combines them with the latest `WindowPct` and `WindowResets` for `member status`, and queues `cap_reached` (`day` or `task`) when a configured `agent.caps` threshold (`turns`, `tokens`, `usd` or `window_pct`) is newly met. Day caps arm a local-midnight timer that refreshes status and calls `Deliver`; `RateLimited` records `rateUntil[agent]`, queues `rate_limited`, and holds deliveries until `resets`.
-- **Lock order.** `limitsPart.mu` is a leaf lock guarding only in-memory windows, rate/midnight/turn timers, and pending events; it is never held across `Store.Write`, `Sessions`, `Rows`, `Host` or runtime locks.
+- **Member status reads memory only.** `Part[limitsPart](h)` keeps the owner's offline switch, each CLI's turns today and its latest rate-limit window. `Built` loads the switch and today's turns once from `setting` `'offline'` and `usage`; `host.offline` and `host.online` write the switch to both, and `TurnEnded` counts the turn in the day's `usage` row and in memory in one step. `Held`, `MemberState` and the `usage` of `member status` (`window_pct`, `window_resets`, `turns_today`) never touch the store, so a status sent while the host shuts down cannot reach a closed store.
+- **Offline and online.** `host.offline` sets the switch, closes every session through `Runner.Close` (also during a turn), and sends every AI's home a `member status` with state `offline`, carrying `turn_interrupted` with reason `stop` for an AI whose turn it ended; a stopped home does not fail it (`A4.8`). While offline, `Held` holds every item. `host.online` clears the switch, sends each AI's `member status` and calls `Deliver`.
+- **Turn limits.** On `TurnBegan`, a timer of `group.limits.turn_minutes` (default 60) and, for Codex, a 5-minute silent timer, reset by `Active`, `Asked` and `Used` and deferred while a tool call is open ([drivers.md](../../planning/contracts/drivers.md) section 1.2 step 6), interrupt the turn with reason `timeout`, killing the CLI after 10 s; the runtime then sends `turn_interrupted` and, for a task session, `task fail` with reason `timeout` (`A4.9`). A pause interrupts with reason `stop` and never fails the task.
+- **Vendor rate limits.** `RateLimited` holds the CLI's items until `resets`, then sends `member status` and calls `Deliver`. Its `rate_limited` event goes with the status that ends a running turn, so that it cannot overtake it, or at once outside a turn.
+- **Shutdown.** `Settle` (entry `"limits"`) sets `settled` under `limitsPart.mu`, stops the timers and waits for `limitsPart.wg`; after that a rate-limit release or event starts nothing and arms no timer.
+- **Lock order.** `limitsPart.mu` is a leaf lock over the maps and timer handles; it is never held across `Store.Write`, `Sessions`, `Rows`, `Host` or runtime locks.

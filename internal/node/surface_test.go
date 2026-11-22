@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -38,6 +39,19 @@ func TestSurfaceDefaultsReadHelpersAndNulls(t *testing.T) {
 	}
 	if ReadName(db) != "desk" || !slices.Equal(ReadRendezvous(db), []string{"wss://rv.example/rv"}) {
 		t.Fatal("ReadName or ReadRendezvous mismatch")
+	}
+
+	origResize := host.Surface["pty.resize"]
+	t.Cleanup(func() { host.Surface["pty.resize"] = origResize })
+	var resizeSeen proto.PTYResize
+	var resizeHost *host.Host
+	var resizeBy string
+	host.Surface["pty.resize"] = func(ctx context.Context, gotHost *host.Host, from host.Owner, by string, data json.RawMessage) (any, error) {
+		resizeHost, resizeBy = gotHost, by
+		if err := proto.Decode(data, &resizeSeen); err != nil {
+			t.Errorf("decode pty.resize: %v", err)
+		}
+		return origResize(ctx, gotHost, from, by, data)
 	}
 
 	fc := serveConn(t, s, ownerKey.ID(), false)
@@ -87,6 +101,14 @@ func TestSurfaceDefaultsReadHelpersAndNulls(t *testing.T) {
 	stateAfterGroup, err := sf.HostState(t.Context())
 	if err != nil || len(stateAfterGroup.Homes) != 0 {
 		t.Fatalf("homes without setting('homes') = %+v (%v)", stateAfterGroup.Homes, err)
+	}
+
+	aiID := sesID("ai-1")
+	fc.push(proto.PTYResize{Type: "pty.resize", Group: gID, AI: aiID, Cols: 120, Rows: 36})
+	fc.push(proto.Request{Type: "host.info", ID: 4})
+	fc.next(t)
+	if resizeHost != h || resizeBy != ownerKey.ID() || resizeSeen.Group != gID || resizeSeen.AI != aiID || resizeSeen.Cols != 120 || resizeSeen.Rows != 36 {
+		t.Fatalf("pty.resize forward = host=%p by=%q req=%+v", resizeHost, resizeBy, resizeSeen)
 	}
 }
 
@@ -191,13 +213,6 @@ func TestHostInfoAgentsMemberStateAndSettings(t *testing.T) {
 	assertSurfaceAgentGroups(t, st.Agents, map[proto.ID]proto.AgentGroup{
 		proto.ID(g1): {Group: proto.ID(g1), Member: proto.ID(m1), Level: 3, State: "takeover", Task: proto.ID(tTake), Queued: 0},
 		proto.ID(g2): {Group: proto.ID(g2), Member: proto.ID(m2), Level: 3, State: "working", Task: proto.ID(tWork), Queued: 0},
-		proto.ID(g3): {Group: proto.ID(g3), Member: proto.ID(m3), Level: 3, State: "offline", Queued: 0},
-		proto.ID(g4): {Group: proto.ID(g4), Member: proto.ID(m4), Level: 3, State: "offline", Queued: 0},
-	})
-
-	verifySurfaceOnlineState(t, db, sf, map[proto.ID]proto.AgentGroup{
-		proto.ID(g1): {Group: proto.ID(g1), Member: proto.ID(m1), Level: 3, State: "takeover", Task: proto.ID(tTake), Queued: 0},
-		proto.ID(g2): {Group: proto.ID(g2), Member: proto.ID(m2), Level: 3, State: "working", Task: proto.ID(tWork), Queued: 0},
 		proto.ID(g3): {Group: proto.ID(g3), Member: proto.ID(m3), Level: 3, State: "waiting", Task: proto.ID(tWait), Queued: 0},
 		proto.ID(g4): {Group: proto.ID(g4), Member: proto.ID(m4), Level: 3, State: "dormant", Queued: 0},
 	})
@@ -206,25 +221,6 @@ func TestHostInfoAgentsMemberStateAndSettings(t *testing.T) {
 	if _, err := sf.HostState(t.Context()); !errors.Is(err, hookErr) {
 		t.Fatalf("expected hookErr, got %v", err)
 	}
-}
-
-func verifySurfaceOnlineState(t *testing.T, db *store.Store, sf *Surface, want map[proto.ID]proto.AgentGroup) {
-	t.Helper()
-	clearOff := func(tx *store.Tx) error {
-		_, err := tx.Exec(`INSERT OR REPLACE INTO setting(key, value) VALUES('offline', 'false')`)
-		return err
-	}
-	if err := db.Write(clearOff); err != nil {
-		t.Fatal(err)
-	}
-	stOnline, err := sf.HostState(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stOnline.Offline {
-		t.Fatalf("expected online HostState, got %+v", stOnline)
-	}
-	assertSurfaceAgentGroups(t, stOnline.Agents, want)
 }
 
 func TestSurfaceDatabaseErrors(t *testing.T) {

@@ -68,10 +68,10 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
       When('the person opens the client at "<address>"', () => openPage(variables.address));
       Then('the page "<title>" is open, drawn by "<drawn by>"', async () => {
         const drawn = {
-          'a coming page': '.pending',
           'the onboarding page': '.onboarding',
           'the group list': '.groups',
-          'its own page': '.page:not(.pending)',
+          'the terminal page': '.terminal-page',
+          'its own page': '.page',
           'the states sheet': '.states',
         }[variables['drawn by'] as string]!;
         await vi.waitFor(() => {
@@ -84,22 +84,6 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
       And('the navigation marks "<entry>"', () => {
         const entry = variables.entry === 'nothing' ? [] : [variables.entry];
         expect(texts('nav a[aria-current="page"]')).toEqual(entry);
-      });
-    },
-  );
-
-  Scenario(
-    'A page that is not built yet says so and leads back to the chats',
-    ({ When, Then, And }) => {
-      When('the person opens the client at "#/terminal/g/m"', () => openPage('#/terminal/g/m'));
-      Then('the page says "This page is not built yet"', () => {
-        expect(texts('main .page-head p')).toEqual(['This page is not built yet']);
-      });
-      And('its link "Back to the chats" leads to "#/groups"', () => {
-        const link = all<HTMLAnchorElement>('main a').find(
-          (a) => a.textContent!.trim() === 'Back to the chats',
-        );
-        expect(link?.getAttribute('href')).toBe('#/groups');
       });
     },
   );

@@ -594,7 +594,8 @@ func (n *peerNode) initTransport(cfg peerNodeConfig) error {
 		}
 		go n.Pairer.Serve(cfg.Ctx, c.Device, c)
 	}
-	n.Peer = peer.New(n.Key, socks, n.Store, known, routes, inbound, nil)
+	channels := peer.Channels{"pty:": func(s *peer.Stream) { n.Host.ServeTerminal(s) }}
+	n.Peer = peer.New(n.Key, socks, n.Store, known, routes, inbound, channels)
 	n.Pairer.Peer = n.Peer
 	event := func(kind string, data []byte) error {
 		n.Pairer.HandleEvent(cfg.Ctx, rvPath, kind, data)

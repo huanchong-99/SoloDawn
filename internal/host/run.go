@@ -61,7 +61,8 @@ type pendingCrash struct {
 // Host, Driver, Process or hook/listener locks.
 type runtimePart struct {
 	mu         sync.Mutex
-	wg         sync.WaitGroup
+	wg         sync.WaitGroup // the process loops
+	settling   bool           // Settle has begun: no process starts, and a loop that ends leaves the rows as they are
 	procs      map[SessionKey]*liveProc
 	closing    map[SessionKey]bool
 	starting   map[SessionKey]bool
@@ -70,8 +71,21 @@ type runtimePart struct {
 	changed    chan struct{} // closed and replaced under mu to wake waitSignal callers
 }
 
+var errSettling = &Error{"busy", "the host is shutting down"}
+
+// settleRuntime ends every CLI process and waits for its loop, so that no
+// loop reaches the store after it closes. The session rows keep their state:
+// the next start reports a turn that was running (flows/agent-turn.md E).
 func settleRuntime(h *Host) {
-	stateOf(h).wg.Wait()
+	rt := stateOf(h)
+	rt.mu.Lock()
+	rt.settling = true
+	for _, lp := range rt.procs {
+		stopIdleLocked(lp)
+		lp.cancel()
+	}
+	rt.mu.Unlock()
+	rt.wg.Wait()
 }
 
 func stateOf(h *Host) *runtimePart {
@@ -207,7 +221,7 @@ func attachRuntime(h *Host, device string) {
 	delete(rt.savedCrash, device)
 	rt.mu.Unlock()
 	slots := homeAISlots(h, device)
-	rt.wg.Go(func() { flushHomeRuntime(h, rt, device, pending, slots) })
+	go flushHomeRuntime(h, rt, device, pending, slots)
 }
 
 func homeAISlots(h *Host, device string) []aiSlot {
@@ -247,12 +261,17 @@ func (sessionRunner) Answer(h *Host, key SessionKey, ask string, allow bool) err
 }
 
 func (sessionRunner) Close(h *Host, key SessionKey) {
-	rt := stateOf(h)
+	closeSession(h, stateOf(h), key)
+}
+
+// closeSession closes the session's CLI process, also during a turn, and
+// waits for it to exit. It reports whether a turn was running.
+func closeSession(h *Host, rt *runtimePart, key SessionKey) bool {
 	for {
 		lp, wasTurn, waitCh := claimSessionClose(rt, key, true)
 		if waitCh == nil {
 			finishClaimedClose(h, rt, key, lp, wasTurn)
-			return
+			return wasTurn
 		}
 		<-waitCh
 	}
@@ -433,8 +452,17 @@ func launchSessionProcess(h *Host, rt *runtimePart, s Session, cfg launchConfig,
 		loopDone: make(chan struct{}), // single reader: stopProcess or writeTurnToWaiting
 	}
 	rt.mu.Lock()
-	rt.procs[s.SessionKey] = lp
+	settling := rt.settling
+	if !settling {
+		rt.procs[s.SessionKey] = lp
+		rt.wg.Add(1)
+	}
 	rt.mu.Unlock()
+	if settling {
+		procCancel()
+		h.Sessions.Forget(token)
+		return nil, errSettling
+	}
 	go runProcessLoop(h, rt, lp)
 	return lp, nil
 }
@@ -451,6 +479,7 @@ func groupToolTimeout(h *Host, group string) time.Duration {
 
 // runProcessLoop is the single reader of lp.proc.Events().
 func runProcessLoop(h *Host, rt *runtimePart, lp *liveProc) {
+	defer rt.wg.Done()
 	defer close(lp.loopDone)
 	defer lp.stopInterruptTimer()
 	defer lp.stopKillTimer()
@@ -459,7 +488,21 @@ func runProcessLoop(h *Host, rt *runtimePart, lp *liveProc) {
 		handleProcessEvent(h, rt, lp, e)
 	}
 	h.Sessions.Forget(lp.token)
-	finishExitedProcess(h, rt, lp)
+	if !rt.dropIfSettling(lp) {
+		finishExitedProcess(h, rt, lp)
+	}
+}
+
+func (rt *runtimePart) dropIfSettling(lp *liveProc) bool {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if !rt.settling {
+		return false
+	}
+	delete(rt.procs, lp.key)
+	delete(rt.closing, lp.key)
+	rt.notifyLocked()
+	return true
 }
 
 func handleProcessEvent(h *Host, rt *runtimePart, lp *liveProc, e Event) {
@@ -538,19 +581,17 @@ func finishActiveTurn(rt *runtimePart, lp *liveProc, slot aiSlot) (string, strin
 	return why, detail, true
 }
 
+// reportFinishedTurn sends the member status that ends a turn: with the
+// rate_limited event that came during it, or as an interrupt (why: stop or
+// timeout, which also fails a task).
 func reportFinishedTurn(h *Host, rt *runtimePart, s Session, why, detail string) {
 	ev := takePendingLimitEvent(h, s.SessionKey)
 	if why == "" {
 		sendMemberStatus(context.Background(), h, rt, s.Home, s.Group, s.Member, ev)
 		return
 	}
-	if why == "timeout" {
-		c := pendingCrash{session: s, reason: "timeout", detail: detail}
-		sendCrashStep(context.Background(), h, rt, &c)
-		return
-	}
-	intr := proto.TurnInterruptedEvent{SystemCode: proto.SystemCode{Code: "turn_interrupted"}, Reason: why, Task: proto.ID(s.Task), Detail: detail}
-	sendMemberStatus(context.Background(), h, rt, s.Home, s.Group, s.Member, intr)
+	c := pendingCrash{session: s, reason: why, detail: detail}
+	sendCrashStep(context.Background(), h, rt, &c)
 }
 
 func interruptSessionTurn(h *Host, key SessionKey, reason, detail string) {
@@ -569,54 +610,6 @@ func claimTurnInterrupt(rt *runtimePart, key SessionKey, reason, detail string) 
 	lp.interruptWhy, lp.interruptDetail = reason, detail
 	lp.interruptTimer.Store(time.AfterFunc(stopSeconds*time.Second, lp.cancel))
 	return lp
-}
-
-func closeSessionForOffline(h *Host, key SessionKey) (string, bool) {
-	rt := stateOf(h)
-	for {
-		lp, wasTurn, waitCh := claimSessionClose(rt, key, true)
-		if waitCh == nil {
-			return finishOfflineClose(h, rt, key, lp, wasTurn)
-		}
-		<-waitCh
-	}
-}
-
-func finishOfflineClose(h *Host, rt *runtimePart, key SessionKey, lp *liveProc, wasTurn bool) (string, bool) {
-	stopTurnWatch(h, key)
-	takePendingLimitEvent(h, key)
-	if lp == nil {
-		if moveSessionDormant(h, key) {
-			rt.notify()
-		}
-		return "", false
-	}
-	return stopOfflineProc(h, rt, lp, wasTurn), wasTurn
-}
-
-func stopOfflineProc(h *Host, rt *runtimePart, lp *liveProc, wasTurn bool) string {
-	lp.stopInterruptTimer()
-	if wasTurn {
-		lp.proc.Interrupt()
-	}
-	if stopProcess(lp) && !wasTurn {
-		writeKilledAudit(h, lp.session)
-	}
-	moveSessionDormant(h, lp.key)
-	rt.mu.Lock()
-	delete(rt.procs, lp.key)
-	delete(rt.closing, lp.key)
-	rt.notifyLocked()
-	rt.mu.Unlock()
-	return lp.session.Task
-}
-
-func moveSessionDormant(h *Host, key SessionKey) bool {
-	s, ok := h.Sessions.Get(key)
-	if !ok || s.State == Dormant || s.State == Takeover {
-		return false
-	}
-	return h.Sessions.Move(key, s.State, Dormant) == nil
 }
 
 func armTurnIdle(h *Host, rt *runtimePart, lp *liveProc, idle time.Duration) {
@@ -775,7 +768,6 @@ func classifyProcessExit(rt *runtimePart, lp *liveProc) (bool, bool) {
 
 func finishTurnProcessExit(h *Host, rt *runtimePart, lp *liveProc) {
 	stopTurnWatch(h, lp.key)
-	takePendingLimitEvent(h, lp.key)
 	if lp.exitWhy == NoSession {
 		handleNoSession(h, rt, lp)
 		return
@@ -975,7 +967,7 @@ func sendCrashStep(ctx context.Context, h *Host, rt *runtimePart, c *pendingCras
 		}
 		c.statusSent = true
 	}
-	if s.Kind != TaskSession {
+	if s.Kind != TaskSession || reason == "stop" {
 		return true
 	}
 	hdr := homeHeader(h, s.Group, "", "task")
@@ -1019,7 +1011,7 @@ func (h *Host) MemberState(group, member string) (state, task string) {
 	if s, ok := findSessionInState(list, Working); ok {
 		return string(Working), s.Task
 	}
-	if ov := memberOverlayState(h, list, group, member); ov != "" {
+	if ov := memberOverlayState(h, group, member); ov != "" {
 		return ov, ""
 	}
 	if s, ok := latestWaitingSession(list); ok {
@@ -1028,9 +1020,12 @@ func (h *Host) MemberState(group, member string) (state, task string) {
 	return string(Dormant), ""
 }
 
-func memberOverlayState(h *Host, list []Session, group, member string) string {
-	if reason, held := memberHoldReason(h, list, group, member); held {
-		return holdReasonState(reason)
+func memberOverlayState(h *Host, group, member string) string {
+	if reason, held := h.Held(SessionKey{Group: group, Member: member}); held {
+		if reason == "offline" {
+			return "offline"
+		}
+		return "limited"
 	}
 	if stateOf(h).isLimited(aiSlot{group: group, member: member}) {
 		return "limited"
@@ -1039,25 +1034,6 @@ func memberOverlayState(h *Host, list []Session, group, member string) string {
 		return "paused"
 	}
 	return ""
-}
-
-func memberHoldReason(h *Host, list []Session, group, member string) (string, bool) {
-	if reason, held := h.Held(SessionKey{Group: group, Member: member}); held {
-		return reason, true
-	}
-	for _, s := range list {
-		if reason, held := h.Held(s.SessionKey); held {
-			return reason, true
-		}
-	}
-	return "", false
-}
-
-func holdReasonState(reason string) string {
-	if reason == "offline" || reason == "paused" {
-		return reason
-	}
-	return "limited"
 }
 
 func memberSessions(h *Host, group, member string) []Session {

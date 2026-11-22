@@ -14,6 +14,7 @@ type BriefBody struct {
 	Pass      int         `json:"pass"`
 	Requester string      `json:"requester"`
 	Replaces  *string     `json:"replaces"`
+	Preset    string      `json:"preset,omitempty"`
 }
 
 type BriefScope struct {

@@ -1,9 +1,11 @@
 // Member-panel projections and add-AI candidate selection (planning/contracts/rows.md section 2,
 // planning/contracts/commands.md section 1.2 and section 2).
 import { lost, newId, type Group, type Home } from './groups.svelte';
+import type { Net } from './net.svelte';
 import { cliName } from './onboard.svelte';
 import { t } from './prefs.svelte';
 import type { AIMemberRow, HostInfoPush, HumanMemberRow, MsgRow, TaskRow } from './proto';
+import { hostHomeOf } from './terminal.svelte';
 import { clock } from './when';
 
 /** An AI CLI registered on one of the owner's connected computers. */
@@ -128,10 +130,14 @@ export function waitingOnOther(group: Group, ai: AIMemberRow, task: TaskRow | un
 
 const idleStates: Record<
   string,
-  { st: string; key: 'member.state.sleeping' | 'member.state.limited' }
+  {
+    st: string;
+    key: 'member.state.sleeping' | 'member.state.limited' | 'member.state.takeover';
+  }
 > = {
   dormant: { st: 'sleeping', key: 'member.state.sleeping' },
   limited: { st: 'limited', key: 'member.state.limited' },
+  takeover: { st: 'takeover', key: 'member.state.takeover' },
 };
 
 /** Status badge key and localized status line for an AI member card. */
@@ -162,7 +168,7 @@ export function pathLabel(ai: AIMemberRow): string {
   return ai.path;
 }
 
-/** Usage bar model for an AI member card, or undefined when no bar figure was reported. */
+/** Usage bar model for an AI member card: the rate-limit window the CLI reported. */
 export interface UsageMeter {
   label: string;
   value: string;
@@ -171,57 +177,29 @@ export interface UsageMeter {
   note?: string;
 }
 
-const clampPct = (pct: number): number => Math.min(100, Math.max(0, pct));
-
-const formatUSD = (n: number): string => (Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`);
-
-const isAtLimit = (pct: number | undefined): boolean => Number(pct) >= 100;
-
-function windowNote(usage: AIMemberRow['usage'], lang: string): string | undefined {
-  const parts: string[] = [];
-  if (usage.window_resets !== undefined) {
-    parts.push(t('member.usage.resets').replace('{time}', clock(usage.window_resets, lang)));
-  }
-  if (usage.day_cap_pct !== undefined) {
-    parts.push(t('member.usage.dayCap').replace('{pct}', String(Math.round(usage.day_cap_pct))));
-  }
-  return parts.length > 0 ? parts.join(' · ') : undefined;
-}
-
-function pctMeter(label: string, rawPct: number, danger: boolean, note?: string): UsageMeter {
-  const pct = Math.round(rawPct);
-  return {
-    label,
-    value: `${pct}%`,
-    fill: clampPct(pct),
-    tone: danger ? 'danger' : undefined,
-    note,
-  };
-}
-
-function spendMeter(spend: number | undefined, cap: number | undefined): UsageMeter | undefined {
-  if (spend === undefined || cap === undefined || cap <= 0) return undefined;
-  const pct = Math.round((spend / cap) * 100);
-  return {
-    label: t('member.usage.spend'),
-    value: `${formatUSD(spend)} / ${formatUSD(cap)}`,
-    fill: clampPct(pct),
-    tone: spend >= cap ? 'danger' : undefined,
-  };
-}
-
-/** Projects `ai.usage` into the card's `.meter` bar, or undefined when nothing countable is present. */
+/** Projects `ai.usage` into the card's `.meter` bar, or undefined when no window was reported. */
 export function usageMeter(usage: AIMemberRow['usage'], lang: string): UsageMeter | undefined {
-  if (usage.window_pct !== undefined) {
-    const danger = isAtLimit(usage.window_pct) || isAtLimit(usage.day_cap_pct);
-    return pctMeter(t('member.usage.window'), usage.window_pct, danger, windowNote(usage, lang));
-  }
-  const spend = spendMeter(usage.spend_today, usage.spend_cap);
-  if (spend) return spend;
-  if (usage.day_cap_pct !== undefined) {
-    return pctMeter(t('member.usage.day'), usage.day_cap_pct, isAtLimit(usage.day_cap_pct));
-  }
-  return undefined;
+  const pct = usage.window_pct;
+  if (pct === undefined) return undefined;
+  const shown = Math.round(pct);
+  const resets = usage.window_resets;
+  return {
+    label: t('member.usage.window'),
+    value: `${shown}%`,
+    fill: Math.min(100, Math.max(0, shown)),
+    tone: pct >= 100 ? 'danger' : undefined,
+    note:
+      resets === undefined
+        ? undefined
+        : t('member.usage.resets').replace('{time}', clock(resets, lang)),
+  };
+}
+
+/** Reason why "Open terminal" on an owned AI card is disabled, or `undefined` when direct. */
+export function terminalDisabledReason(net: Net, ai: AIMemberRow): string | undefined {
+  const host = hostHomeOf(net.homes, ai.host);
+  if (!host?.ctl || ai.state === 'offline') return t('member.terminal.offline');
+  return net.path(host)?.kind === 'direct' ? undefined : t('member.terminal.relay');
 }
 
 /** Registered AIs on the owner's connected computers, marking those already in `group`. */

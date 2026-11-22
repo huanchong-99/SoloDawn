@@ -780,6 +780,9 @@ describe('ctl', () => {
     const push = { t: 'devlog' as const, user: 'u', entries: [] };
     peer.send(push);
     expect(last().ctl.frames().at(-1)).toStrictEqual(push);
+    const resize = { t: 'pty.resize' as const, g: 'group', ai: 'member', cols: 120, rows: 32 };
+    peer.send(resize);
+    expect(last().ctl.frames().at(-1)).toStrictEqual(resize);
     const fixed = JSON.stringify({ t: 'devlog', user: '', entries: [] }).length;
     expect(() => peer.send({ t: 'devlog', user: 'x'.repeat(61_441 - fixed), entries: [] })).toThrow(
       new RangeError('ctl frame exceeds 60 KiB'),

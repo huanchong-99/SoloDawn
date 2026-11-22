@@ -7,16 +7,20 @@
     pathLabel,
     personTags,
     statusOf,
+    terminalDisabledReason,
     usageMeter,
   } from '../../lib/members';
+  import type { Net } from '../../lib/net.svelte';
   import { accountLabel } from '../../lib/onboard.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
+  import { href } from '../../lib/route.svelte';
+  import { endTakeover, hostHomeOf } from '../../lib/terminal.svelte';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
   import AddAI from './AddAI.svelte';
 
   /** The member column of a group's chat: AI member cards, people, and the add-AI dialog. */
-  let { group }: { group: Group } = $props();
+  let { group, net }: { group: Group; net: Net } = $props();
   const uid = $props.id();
 
   let adding = $state(false);
@@ -46,7 +50,9 @@
 
   {#each ais as ai (ai.id)}
     {@const status = statusOf(group, ai)}
-    {@const owner = ai.user === group.home.me.user ? undefined : group.personName(ai.user)}
+    {@const mine = ai.user === group.home.me.user}
+    {@const owner = mine ? undefined : group.personName(ai.user)}
+    {@const termWhy = mine ? terminalDisabledReason(net, ai) : undefined}
     {@const meter = usageMeter(ai.usage, prefs.lang)}
     <section class="card member">
       <header class="row">
@@ -82,6 +88,34 @@
               {meter.note}
             </small>{/if}
         </div>
+      {/if}
+      {#if mine}
+        <footer class="card-foot">
+          {#if ai.state === 'takeover'}
+            <button
+              type="button"
+              class="btn btn-sm btn-dawn"
+              onclick={() => endTakeover(hostHomeOf(net.homes, ai.host), ai.host, group.g, ai.id)}
+            >
+              {t('member.handback')}
+            </button>
+            <span class="hint">{t('member.handback.queued')}</span>
+          {:else if !termWhy}
+            <a class="btn btn-sm" href={href('terminal', { g: group.g, member: ai.id })}>
+              <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
+            </a>
+          {:else}
+            <button
+              type="button"
+              class="btn btn-sm"
+              disabled
+              aria-describedby={`${uid}-term-${ai.id}`}
+            >
+              <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
+            </button>
+            <span id={`${uid}-term-${ai.id}`} class="hint">{termWhy}</span>
+          {/if}
+        </footer>
       {/if}
     </section>
   {:else}
@@ -188,6 +222,10 @@
   .av-wrap[data-st='sleeping']::after {
     background: var(--surface-3);
   }
+  .av-wrap[data-st='takeover']::after {
+    border-radius: 3px;
+    background: var(--text);
+  }
   .kv {
     display: grid;
     grid-template-columns: max-content minmax(0, 1fr);
@@ -199,31 +237,6 @@
   }
   .kv dd {
     min-width: 0;
-  }
-  .meter {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 4px 8px;
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-  }
-  .meter b {
-    color: var(--text);
-    font-weight: 600;
-  }
-  .meter i {
-    grid-column: 1 / -1;
-    height: 6px;
-    border-radius: 3px;
-    background: linear-gradient(
-      90deg,
-      var(--tone-text, var(--text-2)) var(--v),
-      var(--surface-3) var(--v)
-    );
-  }
-  .meter small {
-    grid-column: 1 / -1;
-    font-size: inherit;
   }
   .people-head {
     margin-top: var(--sp-2);

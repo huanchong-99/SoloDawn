@@ -6,6 +6,42 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-21 · deviation · The `rounds_limit` system message has an id derived from the triggering post's nonce
+
+- Symptom: when a `post` by an AI in a task's thread reaches `limits.rounds` (task-machine row 21), the command writes both the `post` row under `n` and the main-line `rounds_limit` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn rounds limit <n>` in base64url, rather than a random id.
+- Cause: `n` already names the `post` row, and a command function is pure and has no randomness (`revDerivedID` in `internal/home/cmd_review.go:149`, called from `internal/home/rounds.go:176`).
+- Status: open, decided by unit HM-13 on 2026-11-21, for the same reason as `briefTaskID` below.
+
+### 2026-11-21 · limitation · Quiet-period tracking lives in memory
+
+- Symptom: a home restart forgets which quiet periods already notified the secretary and can send one more `quiet` notice if an active task stays silent across the restart.
+- Cause: row 23 writes no row (`planning/contracts/task-machine.md` row 23), so `After["quiet"]` records each notified task's last-activity timestamp in the group's `State.quiet` in memory (`rndRememberQuiet` in `internal/home/rounds.go:121`, `internal/home/home.go:69`).
+- Status: open, accepted in step 1.
+
+### 2026-11-22 · deviation · `driver` in `host.info` is optional until T3-2 fills it
+
+- Symptom: `planning/contracts/step-3/drivers.md` section 6 says each entry of `agents` carries `driver` always, but the frozen shape lets it be absent: Go `Driver *Driver` with `omitempty` (`internal/proto/host.go`, `HostAgent`), TS `v.optional(Driver)` (`web/src/lib/proto.ts`, `HostState.agents`), and `agents.driver` under `optional` in `internal/proto/testdata/wire.json`.
+- Cause: nothing on rebuild fills `driver` yet; a required field now would make the web client reject every real `host.info` until T3-2 lands. P-5 froze `driver` as `accounts` and `takeover` only; the other declaration fields stay in the host's table (coordinator, 2026-11-22).
+- Status: open, accepted for P-5. T3-2, the pull request that fills `driver` for every agent, makes it required: Go: the `Driver` field (JSON `driver`) (value type, no `omitempty`), TS `driver: Driver`, regenerate `wire.json` with `go test ./internal/proto -update`, and drop "once populated" from `internal/proto/README.md` (the `host.info` bullet). Also accepted: P-5 does not freeze the tool lists in `internal/proto/testdata/tools.json` (`planning/contracts/step-3/knowledge.md` section 7), because `internal/host` tests require it to equal the registered schemas; T3-5 adds `note_list` `type` and `propose_brief` `preset`, T3-6 adds `kb_put` and `kb_search` to all five lists, and the two merge with `go test ./internal/proto -update`.
+### 2026-11-22 · limitation · Web Push VAPID `sub` URL is not yet checked against Apple's push service
+
+- Symptom: none observed; `wpushSubscriber` (`https://github.com/huanchong-99/SoloDawn`) has not yet been exercised against Apple's Web Push service on iOS.
+- Cause: `internal/home/webpush.go` (`wpushSubscriber`) sets the VAPID JWT `sub` claim to the repository URL, and no iOS device run is available in automated CI.
+- Status: open for the live iOS check of `A8.3` (`I-10` / `I-11`).
+
+### 2026-11-22 · limitation · An unanswered AI-to-AI `call` stays `waiting`
+
+- Symptom: when the called AI never answers with `reply`, the `call` message keeps `state.status = "waiting"` for good; the web call block (`U-10`) shows it as waiting, with the time since it was made.
+- Cause: `planning/contracts/messages.md` section 3.4 gives a call only `waiting` and `answered`, with no `expired` as decisions have. The caller is not blocked: `ask` returns its receipt after `limits.ask_wait_s` (45 s, `internal/host/tools_ask.go:117-119`) and goes on with its turn.
+- Status: open, accepted for 1.0 (coordinator, 2026-11-22, `HS-12` review): no expiry, less code.
+
+### 2026-11-21 · bug · go-pty v0.2.3 blocks Unix Close during Read, keeps the slave TTY open, and misresolves PATH with Dir on Windows
+
+- Symptom: three defects in `github.com/aymanbagabas/go-pty` v0.2.3 (with `github.com/creack/pty` v1.1.24). (1) On macOS, calling `Pty.Close` while another goroutine is blocked in `Pty.Read` returns without closing the kernel master descriptor, so `Pty.Read` stays blocked and the attached child receives neither `EOF` nor `SIGHUP`. (2) On Unix, when the attached child exits by itself, `Pty.Read` never reaches `EOF`. (3) On Windows, starting a command by bare name (such as `claude` or `codex`) with `Cmd.Dir` set fails to find the executable on `PATH`.
+- Cause: (1) `creack/pty` opens `/dev/ptmx` on Darwin without `O_NONBLOCK` and passes the descriptor to `os.NewFile` (`pty_darwin.go:14-18`), which leaves `poll.FD` in blocking mode (`isBlocking == 1`) and defers `syscall.Close` until `Read` returns. (2) `Cmd.Start` on Unix leaves the parent's copy of `pty.slave` open (`cmd_unix.go:42-52`). (3) `Cmd.Start` on Windows joins `c.Dir` and `c.Path` in `lookExtensions` and `joinExeDirAndFName` (`cmd_windows.go:36-50`, `:240-243`, `:345`) whenever `c.Path` has no volume or separator.
+- Workaround: `ptyWrapStarted` (`internal/host/pty_unix.go`) duplicates the started master descriptor with `F_DUPFD_CLOEXEC`, sets `O_NONBLOCK`, wraps it with `os.NewFile` so Go's netpoller owns it, and closes `go-pty`'s master and slave handles; `ptyResolveExe` (`internal/host/pty.go`) resolves `argv[0]` to an absolute path through `exec.LookPath` before `ptmx.Command`.
+- Status: open, external; avoided in HS-19.
+
 ### 2026-11-21 · limitation · Finished tasks stay in a group's state in memory after retention until a restart
 
 - Symptom: after the daily retention run deletes a `merged` or `cancelled` task row older than `retention_days` from SQLite, `State.Tasks` in the running home still holds that task row until the loop restarts. A rule or a state read that inspects `State.Tasks` before a restart still sees the finished task; a cold read from the store snapshot and a restarted loop do not.
@@ -66,11 +102,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `planning/flows/agent-turn.md` step 5.1 places `max_open` (closing the longest-`waiting` session, or waiting when every open session is `working` or `takeover`) in the session runtime (`HS-15`, #187, `tryReserveSlot`), so delivery does not duplicate it; `Deliver` (`deliverNow` in `internal/host/deliver.go`) walks all held AI keys on each wake so a freed slot reaches waiting AIs.
 - Status: open, coordinated between HS-13 (#186) and HS-15 (#187).
 
-### 2026-11-21 · limitation · `member/status` refuses `cap_reached` and `rate_limited` while `HS-18` is postponed
+### 2026-11-21 · limitation · `member/status` refuses `cap_reached` while `settings.set` is postponed
 
-- Symptom: a `member status` carrying host event code `cap_reached` or `rate_limited` (`planning/contracts/commands.md` section 1.9; `planning/contracts/messages.md` section 2.11) is answered `bad_request` ("unknown host event code").
-- Cause: `internal/home/cmd_hostev.go` (`hevEventReaders`) handled only the three step-1 host codes that `HS-15` sends (`turn_interrupted`, `login_invalid`, `session_replaced`), per the coordinator's decision of 2026-11-21 removing caps and rate limits from the main line.
-- Status: resolved in `HS-18` (`internal/home/cmd_hostev.go`, `internal/host/limits.go`).
+- Symptom: a `member status` carrying host event code `cap_reached` (`planning/contracts/commands.md` section 1.9; `planning/contracts/messages.md` section 2.11) is answered `bad_request` ("unknown host event code").
+- Cause: nothing in 1.0 can set `agent.caps`: `settings.set`, its only writer, is postponed after 1.0 (`planning/contracts/commands.md`), so `HS-18` sends no `cap_reached` and `internal/home/cmd_hostev.go` (`hevEventReaders`) reads `rate_limited` but not `cap_reached` (coordinator's decision of 2026-11-22).
+- Status: open until `settings.set` comes back with caps.
 
 ### 2026-11-21 · limitation · Reassigning a task's assignee also marks a reviewer's pending approval card `reassigned`
 
@@ -102,11 +138,17 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `host.Host` exposes no shutdown method, and CLI processes are started with `context.Background()` (`internal/host/run.go:380`).
 - Status: open, accepted for 1.0 (`N-4` review).
 
+### 2026-11-22 · limitation · `net_status` omits `rtt_ms` and reports `mapped_ports` as `false` in step 1
+
+- Symptom: `net_status` (`internal/node/netstatus.go`) omits `rtt_ms` from `paths` entries and sets `nat.mapped_ports` to `false`.
+- Cause: `*peer.Connection` (`internal/peer/sockets.go`) exposes `Path()` without ICE candidate-pair round-trip statistics (the field and its reporter were removed until it does), and router port mapping (`PR-3`) was cut from step 1 on 2026-11-21 (`planning/contracts/mcp-tools.md` section 1).
+- Status: open, accepted for step 1 (`N-8`).
+
 ### 2026-11-21 · limitation · `host.info` has no live push yet and reports `queued` as `0`
 
 - Symptom: `Surface` (`internal/node/surface.go`) answers `host.info` requests with `HostState` and sends no `host.info` pushes (no `host.info` push yet), and every `AgentGroup.Queued` entry in `host.info` is `0` (`internal/node/surface.go:154`).
 - Cause: `settings.set` is postponed with `U-12`, the 1.0 web client requests `host.info` on connect and after `agent.set`, and held items are held on the home (`not_before`, `HM-7`) rather than counted on the host.
-- Status: open, accepted for 1.0 (`N-3`).
+- Status: open, accepted for 1.0 (`N-3`). The web client shows no held count: the terminal page and the card of an AI in takeover say that messages to it wait until hand-back (`U-11`, coordinator 2026-11-22; `planning/flows/takeover.md` step 9).
 
 ### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
 
@@ -174,7 +216,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-21 · deviation · A `task_failed` row written beside a `checks` or `review` row has an id derived from the command's nonce
 
 - Symptom: when `task cloud` reaches `limits.failures` (row 6 into row 14) or `post` of kind `review` exceeds `limits.review_rounds` (row 7 into row 14), the command writes two message rows in the task's thread: the `checks` or `review` row under `n`, and the `task_failed` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn task failed <n>` in base64url.
-- Cause: `n` already names the `checks` or `review` message row, and a command function is pure and has no randomness (`revFailedID` in `internal/home/cmd_review.go:149`).
+- Cause: `n` already names the `checks` or `review` message row, and a command function is pure and has no randomness (`revDerivedID` in `internal/home/cmd_review.go:149`).
 - Status: open, decided in unit HM-11 on 2026-11-21, for the same reason as `briefTaskID` above.
 
 ### 2026-11-21 · deviation · Passed hosted checks write a `checks` message in the task's thread
@@ -458,6 +500,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-22 · bug · HM-13 and HM-15 home tests disagreed on rounds after both landed
+
+- Symptom: after `origin/rebuild` (HM-15's `post/call` and `post/reply`) was merged into HM-13, `go test ./internal/home/` panicked with `home: two functions under post/call` in `TestRoundsTenExchangesPauseAndResume`, and two `TestCall*` cases got `thread.rounds` one higher than they expected.
+- Cause: `rounds_test.go` cloned `home.Commands` and added a stand-in `post/call`, written before HM-15 existed; `Table.Add` refuses a second function under a key (`internal/home/home.go:307`). The `TestCall*` cases were written without HM-13's row 21, so they expected a thread call, and a thread reply that mentions an AI, to leave `thread.rounds` unchanged; `task-machine.md` row 21 and `flows/ask.md` A.3 and D count both.
+- Status: resolved on `gemini/HM-13` (#190): the stand-in is gone and the rounds test uses the real `post/call`; the call tests expect the round.
+
+### 2026-11-22 · bug · `Host.Hand` could lose the item that answers a wait when the wait ended at the same moment
+
+- Symptom: an `ask` reply or an approval decision that arrived just as its wait ended was acknowledged and never seen. `Hand` returned `waited = true`, so `tryOpenWait` (`internal/host/deliver.go:528-540`) acked the item and did not queue it, while the waiting tool had already called `done()` and found its channel empty (`awaitApprovalItem`, `internal/host/approve.go:648-665`). The HS-12 reviewer's probe lost 16 of 200,000; `TestHandAndEndOfWaitNeverLoseAnItem` lost 1 to 18 of 200,000 in each of 20 runs without the fix (84 to 162 under `-race`).
+- Cause: `(*Host).Hand` (`internal/host/host.go:293-297` before the fix) removed the wait through `release`, unlocked `h.waiting`, and only then sent into the channel. `done()` and the tool's last look at the channel could run in that gap.
+- Status: resolved in unit `HAND-RACE`: `Hand` removes the wait and sends the item while it holds `h.waiting` (`internal/host/host.go:290-297`); the channel has room for the one item, so the send never blocks. The same test keeps every item in 20 runs, and in 5 under `-race`.
 
 ### 2026-11-22 · bug · `home.Loop.Close` and `node.Sessions` left connection pumps and host commands running into `Store.Close`
 
