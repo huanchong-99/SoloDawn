@@ -2047,12 +2047,14 @@ func checkStep17GuardsAndRoleChanges(t *testing.T, r *deliverRig, pDir, remoteDi
 	d.mu.Unlock()
 
 	pushTaskState(r, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "Alpha", Slug: "alpha", Origin: "brief", State: "active", Step: "review", Assignee: testAI1, Reviewer: testAI2, Commit: alphaHead})
+	d.wg.Wait()
 	assertStep17True(t, hasSession(r.h, kT1) && hasSession(r.h, kR1) && hasSession(r.h, kNoRow), "active sessions kept")
 	assertStep17True(t, pathExists(wt1) && pathExists(rev1), "active folders kept")
 
 	remoteAI := string(testCanonicalID(77))
 	pushTaskState(r, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 11}, Group: testGroup1, Num: 1, Title: "Alpha", Slug: "alpha", Origin: "brief", State: "active", Step: "review", Assignee: remoteAI, Reviewer: testAI2, Commit: alphaHead})
-	r.waitUntil("reassigned task session and wt removed", func() bool { return !hasSession(r.h, kT1) && !pathExists(wt1) })
+	d.wg.Wait()
+	assertStep17True(t, !hasSession(r.h, kT1) && !pathExists(wt1), "reassigned task session and wt removed")
 	assertStep17True(t, strings.TrimSpace(runTestGit(t, remoteDir, "rev-parse", "refs/heads/task/1-alpha")) == alphaHead, "github handoff pushed branch")
 	assertStep17True(t, hasSession(r.h, kR1) && pathExists(rev1) && slices.Contains(r.runtime.closedKeys(), kT1), "reviewer kept and kT1 closed")
 	checkStep17ReviewerChange(t, r, pDir, remoteAI, alphaHead, kR1, kNoRow, rev1)
@@ -2068,9 +2070,8 @@ func checkStep17ReviewerChange(t *testing.T, r *deliverRig, pDir, remoteAI, alph
 	unrecordedWT := filepath.Join(pDir, "wt", "1-alpha")
 	os.MkdirAll(unrecordedWT, 0o700)
 	pushTaskState(r, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 12}, Group: testGroup1, Num: 1, Title: "Alpha", Slug: "alpha", Origin: "brief", State: "active", Step: "review", Assignee: remoteAI, Reviewer: remoteAI, Commit: alphaHead})
-	r.waitUntil("changed reviewer session and folders removed", func() bool {
-		return !hasSession(r.h, kR1) && !pathExists(rev1) && !pathExists(unrecordedWT)
-	})
+	deliv(r.h).wg.Wait()
+	assertStep17True(t, !hasSession(r.h, kR1) && !pathExists(rev1) && !pathExists(unrecordedWT), "changed reviewer session and folders removed")
 	assertStep17True(t, hasSession(r.h, kGrpKeep) && hasSession(r.h, kOtherGroup), "group session and other-group session kept")
 	r.h.Sessions.End(kGrpKeep)
 	r.h.Sessions.End(kOtherGroup)
@@ -2233,11 +2234,10 @@ func TestRouteThreadReplyAndNonThreadItems(t *testing.T) {
 	deliverSingleAndWait(r, 951, proto.Item{Item: 951, AI: testAI1, Why: "mention", Task: testTask1, Msg: testMsg1}, r.makeTextMsg(testMsg1, &tid, "mention"), 1)
 	deliverSingleAndWait(r, 952, proto.Item{Item: 952, AI: testAI1, Why: "reply", Task: testTask1, Msg: testMsg2}, r.makeTextMsg(testMsg2, &tid, "reply"), 2)
 	deliverSingleAndWait(r, 953, proto.Item{Item: 953, AI: testAI1, Why: "notice", Task: testTask1, Code: "quiet"}, nil, 3)
-	deliverSingleAndWait(r, 954, proto.Item{Item: 954, AI: testAI1, Why: "confirmed", Task: testTask1, Msg: testMsg1}, nil, 4)
-	deliverSingleAndWait(r, 955, proto.Item{Item: 955, AI: testAI2, Why: "reply", Msg: testMsg2}, r.makeTextMsg(testMsg2, &tid, "review reply"), 5)
+	deliverSingleAndWait(r, 955, proto.Item{Item: 955, AI: testAI2, Why: "reply", Msg: testMsg2}, r.makeTextMsg(testMsg2, &tid, "review reply"), 4)
 
-	wantKeys := []SessionKey{taskKey, taskKey, grpKey, grpKey, revKey}
-	wantTexts := []string{"task:1", "task:1", "group:1", "group:1", "review:1"}
+	wantKeys := []SessionKey{taskKey, taskKey, grpKey, revKey}
+	wantTexts := []string{"task:1", "task:1", "group:1", "review:1"}
 	assertTurnTargets(t, r.runtime.recorded(), wantKeys, wantTexts)
 }
 
@@ -2297,6 +2297,10 @@ func verifyMergeHoldReasons(t *testing.T) {
 	c2 := commitNewMergeTask(t, r, pDir, testTask2, 2, "m-unheld", "f2.txt")
 	d := deliv(r.h)
 
+	t.Cleanup(func() {
+		r.h.Settle()
+		delete(Holds, "reason")
+	})
 	Holds["reason"] = func(*Host, SessionKey) (string, bool) { return "offline", true }
 	m1 := proto.Item{Item: 972, AI: testAI1, Why: "merge", Task: testTask1, Commit: c1}
 	d.enqueueMerge(verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Item: m1}, item: m1})

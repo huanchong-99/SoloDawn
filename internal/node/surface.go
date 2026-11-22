@@ -37,11 +37,16 @@ type (
 	}
 )
 
-// NewSurface constructs a Surface and registers host.info on cfg.Sessions.
+// NewSurface constructs a Surface and registers host.info and pty.resize on cfg.Sessions.
 func NewSurface(cfg SurfaceConfig) *Surface {
 	sf := &Surface{cfg: srfDefaults(cfg)}
 	cfg.Sessions.Requests["host.info"] = RequestHandler{Type: "host.info", Run: sf.reqHostInfo}
+	cfg.Sessions.Pushes["pty.resize"] = sf.pushPTYResize
 	return sf
+}
+
+func (sf *Surface) pushPTYResize(ctx context.Context, _ *home.Conn, from Ctl, by string, data json.RawMessage) {
+	host.Surface["pty.resize"](ctx, sf.cfg.Host, from, by, data)
 }
 
 func srfDefaults(cfg SurfaceConfig) SurfaceConfig {

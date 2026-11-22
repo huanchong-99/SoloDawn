@@ -241,6 +241,14 @@ Never included: message text, the command of an approval, code, file
 names. The browser shows `group · kind · who: title` in the user's language
 and opens the card `msg`.
 
+Each created message row produces at most one reminder kind: `approval`
+(`body.approvers`), `decision` (`body.to`), `brief` (human `body.requester`)
+and `summary` (`done`, every human member of the group) do not also send
+`mention` for their `mentions`; any other created message row sends `mention`
+to the people named in `mentions`. `title` is cut at the first `\r` or `\n` and
+then at 80 Unicode code points, and left out when empty. A `404` or `410` from
+the push service drops that subscription.
+
 ### 1.8 Review outcome
 
 On `post` with `kind = review` the home computes `ok`: `score` ≥

@@ -82,8 +82,10 @@
     away = Math.abs(scroller.scrollTop) > 240;
     if (!away) unseen = false;
   }
-  const toLatest = () =>
+  function toLatest() {
     scroller.scrollTo({ top: 0, behavior: prefersReducedMotion.current ? 'auto' : 'smooth' });
+    scroller.focus({ preventScroll: true });
+  }
 </script>
 
 <svelte:window
@@ -183,7 +185,13 @@
     <Composer {group} />
   </div>
   {#if sided}
-    <aside id="chat-side" class="side" class:open={side.open} aria-label={t('app.side')}>
+    <aside
+      id="chat-side"
+      class="side"
+      class:open={side.open}
+      inert={sliding.current && !side.open}
+      aria-label={t('app.side')}
+    >
       <button
         class="icon-btn side-close"
         bind:this={closer}
@@ -271,6 +279,9 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .chat-head .bar-title {
+    min-width: 3ch;
   }
   .chat-head p :global(.i) {
     vertical-align: -2px;
