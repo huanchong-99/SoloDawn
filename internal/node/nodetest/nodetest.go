@@ -1,5 +1,5 @@
-// Package nodetest starts in-process SoloDawn nodes wired over LocalLink with
-// the fake Claude Code and Codex CLIs built and placed on PATH.
+// Package nodetest starts in-process SoloDawn nodes wired over LocalLink or
+// WebRTC with the fake Claude Code and Codex CLIs built and placed on PATH.
 package nodetest
 
 import (
@@ -32,12 +32,13 @@ const (
 
 // Config configures a Cluster of in-process nodes.
 type Config struct {
-	Root   string
-	BinDir string
-	Nodes  int
-	Tables home.Tables
-	Now    func() time.Time
-	Report func(error)
+	Root          string
+	BinDir        string
+	Nodes         int
+	ExtraBrowsers []identity.Key
+	Tables        home.Tables
+	Now           func() time.Time
+	Report        func(error)
 }
 
 // Cluster holds a set of in-process nodes enrolled under one owner, together
@@ -54,14 +55,16 @@ type Cluster struct {
 // Node is one in-process node with its data directory, store, device key, home
 // loop, host and local link.
 type Node struct {
-	Name  string
-	Dir   string
-	Key   identity.Key
-	Store *store.Store
-	Home  *home.Loop
-	Host  *host.Host
-	Link  *node.LocalLink
-	once  sync.Once
+	Name    string
+	Dir     string
+	Key     identity.Key
+	Store   *store.Store
+	Home    *home.Loop
+	Host    *host.Host
+	Link    *node.LocalLink
+	tb      testing.TB
+	loopCfg home.LoopConfig
+	once    sync.Once
 }
 
 // Start opens a cluster of in-process nodes, prepends the fake CLIs to PATH,
@@ -73,7 +76,7 @@ func Start(t testing.TB, cfg Config) *Cluster {
 	binDir := prepareFakeCLIs(t, cfg.Root, cfg.BinDir)
 	keys, dirs := loadNodeKeys(t, cfg.Root, cfg.Nodes)
 	owner := newKey()
-	entries := buildOwnerLog(owner, keys, cfg.Now().UnixMilli())
+	entries := buildClusterOwnerLog(owner, keys, cfg.ExtraBrowsers, cfg.Now().UnixMilli())
 	c := &Cluster{Root: cfg.Root, BinDir: binDir, LogPath: filepath.Join(cfg.Root, "fakecli.log"), Owner: owner, entries: entries}
 	t.Cleanup(c.Close)
 	for i, dir := range dirs {
@@ -106,15 +109,41 @@ func (c *Cluster) Close() {
 	}
 }
 
+// StopHome detaches the local link and closes the node's home loop while
+// keeping its store and host open.
+func (n *Node) StopHome() {
+	n.Link.Close()
+	n.Home.Close()
+}
+
+// RestartHome stops the current home loop if open and starts a new home loop
+// and local link over the node's store.
+func (n *Node) RestartHome() {
+	n.StopHome()
+	loop, err := home.StartLoop(n.loopCfg)
+	must(n.tb, err)
+	n.Home = loop
+	n.Link = node.AttachLocal(n.Host, loop)
+}
+
 // Close detaches the local link, stops the home loop, settles the host and
 // closes the store. Calling Close more than once is safe.
 func (n *Node) Close() {
 	n.once.Do(func() {
-		n.Link.Close()
-		n.Home.Close()
+		n.StopHome()
 		n.Host.Settle()
 		n.Store.Close()
 	})
+}
+
+// SignDeviceAdd signs a device-log "add" entry under signer for user at ver.
+func SignDeviceAdd(signer identity.Key, user string, ver int, kind, name, dev string, ts int64) proto.Envelope {
+	entry := proto.DeviceEntry{
+		PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: randomID(), Timestamp: ts},
+		DeviceChange:  proto.DeviceChange{User: user, Version: ver, Op: "add", Device: dev, Kind: kind, Name: name},
+	}
+	raw, _ := json.Marshal(entry)
+	return signer.Sign(string(raw))
 }
 
 func must(t testing.TB, err error) {
@@ -164,19 +193,20 @@ func loadNodeKeys(t testing.TB, root string, count int) ([]identity.Key, []strin
 func (c *Cluster) openNode(t testing.TB, cfg Config, name, dir string, key identity.Key) *Node {
 	db, err := store.Open(filepath.Join(dir, "solodawn.db"))
 	must(t, err)
-	must(t, seedOwner(db, c.Owner.ID(), c.entries))
+	must(t, seedOwner(db, c.Owner.ID(), name, c.entries))
 	loopCfg := home.LoopConfig{Store: db, Home: key.ID(), Owner: c.Owner.ID(), Logs: c.Logs, Tables: cfg.Tables, Now: cfg.Now, Report: cfg.Report}
 	loop, err := home.StartLoop(loopCfg)
 	must(t, err)
 	h, _, err := host.New(db, key, cfg.Now)
 	must(t, err)
-	return &Node{Name: name, Dir: dir, Key: key, Store: db, Home: loop, Host: h, Link: node.AttachLocal(h, loop)}
+	return &Node{Name: name, Dir: dir, Key: key, Store: db, Home: loop, Host: h, Link: node.AttachLocal(h, loop), tb: t, loopCfg: loopCfg}
 }
 
-func seedOwner(db *store.Store, owner string, entries []proto.Envelope) error {
+func seedOwner(db *store.Store, owner, name string, entries []proto.Envelope) error {
 	ownerJSON, _ := json.Marshal(owner)
+	nameJSON, _ := json.Marshal(name)
 	write := func(tx *store.Tx) error {
-		_, err := tx.Exec(`INSERT OR REPLACE INTO setting(key, value) VALUES('owner', ?)`, string(ownerJSON))
+		_, err := tx.Exec(`INSERT OR REPLACE INTO setting(key, value) VALUES('owner', ?), ('name', ?)`, string(ownerJSON), string(nameJSON))
 		for i, env := range entries {
 			raw, _ := json.Marshal(env)
 			_, next := tx.Exec(`INSERT OR REPLACE INTO device_log(user, ver, env) VALUES(?, ?, ?)`, owner, i+1, string(raw))
@@ -199,19 +229,13 @@ func randomID() proto.ID {
 	return proto.ID(base64.RawURLEncoding.EncodeToString(raw[:]))
 }
 
-func buildOwnerLog(owner identity.Key, nodes []identity.Key, ts int64) []proto.Envelope {
-	entries := []proto.Envelope{signDeviceAdd(owner, 1, "browser", "owner", owner.ID(), ts)}
+func buildClusterOwnerLog(owner identity.Key, nodes []identity.Key, browsers []identity.Key, ts int64) []proto.Envelope {
+	entries := []proto.Envelope{SignDeviceAdd(owner, owner.ID(), 1, "browser", "owner", owner.ID(), ts)}
 	for i, key := range nodes {
-		entries = append(entries, signDeviceAdd(owner, i+2, "node", nodeName(i), key.ID(), ts))
+		entries = append(entries, SignDeviceAdd(owner, owner.ID(), len(entries)+1, "node", nodeName(i), key.ID(), ts))
+	}
+	for i, key := range browsers {
+		entries = append(entries, SignDeviceAdd(owner, owner.ID(), len(entries)+1, "browser", fmt.Sprintf("browser-%d", i+2), key.ID(), ts))
 	}
 	return entries
-}
-
-func signDeviceAdd(owner identity.Key, ver int, kind, name, dev string, ts int64) proto.Envelope {
-	entry := proto.DeviceEntry{
-		PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: randomID(), Timestamp: ts},
-		DeviceChange:  proto.DeviceChange{User: owner.ID(), Version: ver, Op: "add", Device: dev, Kind: kind, Name: name},
-	}
-	raw, _ := json.Marshal(entry)
-	return owner.Sign(string(raw))
 }

@@ -12,7 +12,7 @@
   "pairing.prompt.copy": "Copy prompt",
   "pairing.prompt.copied": "Copied",
   "pairing.prompt.renew": "New pairing code",
-  "pairing.prompt.text_rv": "Please connect this computer to SoloDawn.\n\n1. Read {install} and follow it.\n2. Download the node program for this system, and verify its SHA-256 before you run it.\n3. Join with pairing code {code} and --rendezvous {rv}, then tell me how it went.\n\nAsk me before you install anything else or change system settings.",
+  "pairing.prompt.text_rv": "Please connect this computer to SoloDawn.\n\n1. Read {install} and follow it.\n2. Download the node program for this system, and verify its SHA-256 before you run it.\n3. Check git config --global user.email; if it is empty, ask me for a name and an email and set them.\n4. Join with pairing code {code} and --rendezvous {rv}, then tell me how it went.\n\nAsk me before you install anything else or change system settings.",
   "pairing.countdown.min_sec": "The pairing code expires in {m} min {s} s and works once.",
   "pairing.countdown.sec": "The pairing code expires in {s} s and works once.",
   "pairing.countdown.expired": "This pairing code has expired and was discarded.",

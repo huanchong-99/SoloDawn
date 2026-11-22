@@ -14,6 +14,7 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/host"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/node"
+	"github.com/huanchong-99/SoloDawn/internal/node/nodetest"
 	"github.com/huanchong-99/SoloDawn/internal/peer"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
@@ -77,7 +78,13 @@ func (w *nodeSessionWorld) initRelayAndNode() error {
 	w.nodeKey = exampleKey("n2-node")
 	w.b1Key = exampleKey("n2-browser-1")
 	w.otherKey = exampleKey("n2-other")
+	if err := w.initNodeServices(); err != nil {
+		return err
+	}
+	return w.startNodePeer()
+}
 
+func (w *nodeSessionWorld) initNodeServices() error {
 	db, err := store.Open(":memory:")
 	if err != nil {
 		return err
@@ -119,7 +126,10 @@ func (w *nodeSessionWorld) initRelayAndNode() error {
 		w.mu.Unlock()
 		return nil, nil
 	}
+	return nil
+}
 
+func (w *nodeSessionWorld) startNodePeer() error {
 	w.pairingDev = w.b1Key.ID()
 	nodePeer, err := w.makePeer(w.nodeKey, func(dev string) bool {
 		w.mu.Lock()
@@ -264,9 +274,10 @@ func (w *nodeSessionWorld) checkPairingForbidden(wantCode string) error {
 }
 
 func (w *nodeSessionWorld) sendWrongSignerLog() error {
-	e1 := w.makeAdd(w.b1Key, w.b1Key.ID(), 1, w.b1Key.ID(), "browser", "b1")
-	e2 := w.makeAdd(w.b1Key, w.b1Key.ID(), 2, w.otherKey.ID(), "browser", "other")
-	e3 := w.makeAdd(w.otherKey, w.b1Key.ID(), 3, w.nodeKey.ID(), "node", "workstation")
+	ts := w.now.UnixMilli()
+	e1 := nodetest.SignDeviceAdd(w.b1Key, w.b1Key.ID(), 1, "browser", "b1", w.b1Key.ID(), ts)
+	e2 := nodetest.SignDeviceAdd(w.b1Key, w.b1Key.ID(), 2, "browser", "other", w.otherKey.ID(), ts)
+	e3 := nodetest.SignDeviceAdd(w.otherKey, w.b1Key.ID(), 3, "node", "workstation", w.nodeKey.ID(), ts)
 	return w.b1Conn.Send(proto.Devlog{Type: "devlog", User: w.b1Key.ID(), Entries: []proto.Envelope{e1, e2, e3}})
 }
 
@@ -281,8 +292,9 @@ func (w *nodeSessionWorld) checkStillUnowned(wantCode string) error {
 }
 
 func (w *nodeSessionWorld) sendValidAdoptionLog() error {
-	e1 := w.makeAdd(w.b1Key, w.b1Key.ID(), 1, w.b1Key.ID(), "browser", "b1")
-	e2 := w.makeAdd(w.b1Key, w.b1Key.ID(), 2, w.nodeKey.ID(), "node", "workstation")
+	ts := w.now.UnixMilli()
+	e1 := nodetest.SignDeviceAdd(w.b1Key, w.b1Key.ID(), 1, "browser", "b1", w.b1Key.ID(), ts)
+	e2 := nodetest.SignDeviceAdd(w.b1Key, w.b1Key.ID(), 2, "node", "workstation", w.nodeKey.ID(), ts)
 	return w.b1Conn.Send(proto.Devlog{Type: "devlog", User: w.b1Key.ID(), Entries: []proto.Envelope{e1, e2}})
 }
 
@@ -290,6 +302,13 @@ func (w *nodeSessionWorld) checkAdoptedSurfaceAndReceipt() error {
 	w.mu.Lock()
 	w.pairingDev = ""
 	w.mu.Unlock()
+	if err := w.verifyAdoptedHostInfo(); err != nil {
+		return err
+	}
+	return w.verifyIdempotentSettingsCmd()
+}
+
+func (w *nodeSessionWorld) verifyAdoptedHostInfo() error {
 	rawInfo, err := w.b1Conn.Request(w.ctx, func(id int64) any {
 		return proto.Request{Type: "host.info", ID: id}
 	})
@@ -303,6 +322,10 @@ func (w *nodeSessionWorld) checkAdoptedSurfaceAndReceipt() error {
 	if err := proto.Decode(rawInfo, &ans); err != nil || ans.Type != "host.info" {
 		return fmt.Errorf("host.info = %s (%v)", rawInfo, err)
 	}
+	return nil
+}
+
+func (w *nodeSessionWorld) verifyIdempotentSettingsCmd() error {
 	env := w.b1Key.Sign(fmt.Sprintf(`{"t":"settings.set","n":%q,"ts":%d,"to":%q,"offline":true}`, exampleID("set-1"), w.now.UnixMilli(), w.nodeKey.ID()))
 	for range 2 {
 		rawCmd, err := w.b1Conn.Request(w.ctx, func(id int64) any {
@@ -344,15 +367,4 @@ func checkWireError(raw json.RawMessage, wantCode string) error {
 		return fmt.Errorf("got code %q, want %q", er.Err.Code, wantCode)
 	}
 	return nil
-}
-
-func (w *nodeSessionWorld) makeAdd(signer identity.Key, user string, ver int, dev, kind, name string) proto.Envelope {
-	p, err := json.Marshal(proto.DeviceEntry{
-		PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: exampleID(fmt.Sprintf("n2-%s-%d", dev, ver)), Timestamp: w.now.UnixMilli()},
-		DeviceChange:  proto.DeviceChange{User: user, Version: ver, Op: "add", Device: dev, Kind: kind, Name: name},
-	})
-	if err != nil {
-		panic(err)
-	}
-	return signer.Sign(string(p))
 }

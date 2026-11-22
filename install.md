@@ -39,7 +39,9 @@ fi | grep -Fxf SHA256SUMS &&
 On success the matching line appears. On macOS the last step clears the
 quarantine mark that a browser download carries, which would otherwise
 stop the unsigned binary from running; it runs only after the checksum
-matched. Add `$HOME/.local/bin` to your `PATH` if needed.
+matched. On macOS with the Application Firewall enabled, allow `solodawn`
+when asked, or direct connections to it fail and only the relay works. Add
+`$HOME/.local/bin` to your `PATH` if needed.
 
 **Windows** (PowerShell)
 
@@ -56,6 +58,13 @@ Copy-Item -LiteralPath $asset -Destination (Join-Path $bin 'solodawn.exe')
 
 Add the installation directory to your user `Path` or run the executable
 by its full path.
+
+## Check Git identity
+
+SoloDawn commits local task merges with your Git identity. Run
+`git config --global user.email`; if it is empty, ask the user for a name
+and an email and set them with `git config --global user.name "<name>"` and
+`git config --global user.email "<email>"`.
 
 ## Pair with the browser
 

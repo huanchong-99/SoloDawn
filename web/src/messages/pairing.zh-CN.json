@@ -12,7 +12,7 @@
   "pairing.prompt.copy": "复制提示词",
   "pairing.prompt.copied": "已复制",
   "pairing.prompt.renew": "重新生成配对码",
-  "pairing.prompt.text_rv": "请帮我把这台电脑接入 SoloDawn。\n\n1. 阅读 {install}，按里面的步骤做。\n2. 下载适合本机系统的节点程序，核对 SHA-256 之后再运行。\n3. 用配对码 {code}，加上 --rendezvous {rv} 接入，完成后把结果告诉我。\n\n过程中如果要安装别的软件或者改系统设置，先问我。",
+  "pairing.prompt.text_rv": "请帮我把这台电脑接入 SoloDawn。\n\n1. 阅读 {install}，按里面的步骤做。\n2. 下载适合本机系统的节点程序，核对 SHA-256 之后再运行。\n3. 检查 git config --global user.email；如果为空，先问我要名字和邮箱并设好。\n4. 用配对码 {code}，加上 --rendezvous {rv} 接入，完成后把结果告诉我。\n\n过程中如果要安装别的软件或者改系统设置，先问我。",
   "pairing.countdown.min_sec": "配对码 {m} 分 {s} 秒后过期，只能用一次。",
   "pairing.countdown.sec": "配对码 {s} 秒后过期，只能用一次。",
   "pairing.countdown.expired": "配对码已过期并已作废。",

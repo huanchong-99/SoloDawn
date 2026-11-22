@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,10 +24,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/huanchong-99/SoloDawn/internal/home"
-	"github.com/huanchong-99/SoloDawn/internal/host"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
-	"github.com/huanchong-99/SoloDawn/internal/node"
+	"github.com/huanchong-99/SoloDawn/internal/node/nodetest"
 	"github.com/huanchong-99/SoloDawn/internal/peer"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/rendezvous"
@@ -65,15 +62,15 @@ func TestNetsimHelper(t *testing.T) {
 	if role == "" {
 		return
 	}
-	must(t, runNetsimRole(role, os.Getenv(netsimPathEnv)))
+	must(t, runNetsimRole(t, role, os.Getenv(netsimPathEnv)))
 }
 
-func runNetsimRole(role, wantPath string) error {
+func runNetsimRole(t *testing.T, role, wantPath string) error {
 	switch role {
 	case "wan":
 		return serveWANHelper()
 	case "node":
-		return serveNodeHelper(wantPath)
+		return serveNodeHelper(t, wantPath)
 	case "browser":
 		return runBrowserHelper(wantPath)
 	default:
@@ -279,40 +276,21 @@ func injectICE(data []byte, ice []proto.ICEServer) []byte {
 	return out
 }
 
-type helperNodeStack struct {
-	db       *store.Store
-	loop     *home.Loop
-	link     *node.LocalLink
-	sessions *node.Sessions
-	logs     *node.Logs
-}
-
-func (s *helperNodeStack) close() {
-	s.link.Close()
-	s.loop.Close()
-	s.db.Close()
-}
-
-func serveNodeHelper(wantPath string) error {
+func serveNodeHelper(t *testing.T, wantPath string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stack, err := openHelperServices()
-	if err != nil {
-		return err
-	}
-	defer stack.close()
-	socks, err := peer.Listen(netsimNodeUDP, netsimNodeTCP)
-	if err != nil {
-		return err
-	}
-	defer socks.Close()
 	pathDone := make(chan string, 1) // single reader: reportNodePath
-	rvPath, p, err := startNodePeer(ctx, socks, stack, wantPath, pathDone)
-	if err != nil {
-		return err
-	}
-	defer rvPath.Close()
-	go rvPath.Serve(ctx, p, func(string, []byte) error { return nil })
+	nodetest.StartPeerNode(t, nodetest.PeerConfig{
+		Ctx:        ctx,
+		Key:        netsimKey("node"),
+		Name:       "netsim-node",
+		Version:    "v0.1.0",
+		Owner:      netsimKey("browser"),
+		Rendezvous: netsimRVURL,
+		UDPPort:    netsimNodeUDP,
+		TCPPort:    netsimNodeTCP,
+		OnInbound:  func(c *peer.Connection) { go observeConnPath(c, wantPath, pathDone) },
+	})
 	fmt.Println("READY")
 	reportNodePath(pathDone)
 	io.Copy(io.Discard, os.Stdin)
@@ -326,68 +304,6 @@ func reportNodePath(pathDone <-chan string) {
 	case <-time.After(15 * time.Second):
 		fmt.Println("NODE_PATH timeout")
 	}
-}
-
-func openHelperServices() (*helperNodeStack, error) {
-	nodeKey, browserKey := netsimKey("node"), netsimKey("browser")
-	db, err := store.Open(":memory:")
-	if err != nil {
-		return nil, err
-	}
-	if err := seedNetsimOwner(db, browserKey, nodeKey); err != nil {
-		db.Close()
-		return nil, err
-	}
-	logs, err := node.OpenLogs(db, nodeKey.ID())
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
-	stack, err := startHelperNodeCore(db, nodeKey, logs)
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
-	return stack, nil
-}
-
-func startHelperNodeCore(db *store.Store, nodeKey identity.Key, logs *node.Logs) (*helperNodeStack, error) {
-	loop, err := home.StartLoop(home.LoopConfig{
-		Store: db, Home: nodeKey.ID(), Owner: logs.Owner(),
-		Logs: logs.Log, Tables: home.NodeTables(),
-	})
-	if err != nil {
-		return nil, err
-	}
-	h, _, err := host.New(db, nodeKey, time.Now)
-	if err != nil {
-		loop.Close()
-		return nil, err
-	}
-	link := node.AttachLocal(h, loop)
-	nameFn := func() string { return "netsim-node" }
-	sessions := node.NewSessions(node.SessionConfig{
-		ID: nodeKey.ID(), Version: "v0.1.0", Store: db, Logs: logs, Home: loop, Host: h, Name: nameFn,
-	})
-	node.NewSurface(node.SurfaceConfig{
-		ID: nodeKey.ID(), Version: "v0.1.0", Store: db, Sessions: sessions, Host: h, Name: nameFn, Agents: h.Agents,
-	})
-	return &helperNodeStack{db: db, loop: loop, link: link, sessions: sessions, logs: logs}, nil
-}
-
-func startNodePeer(ctx context.Context, socks *peer.Sockets, stack *helperNodeStack, wantPath string, pathDone chan<- string) (*peer.Path, *peer.Peer, error) {
-	nodeKey := netsimKey("node")
-	rvPath, err := peer.Dial(ctx, netsimRVURL, nodeKey)
-	if err != nil {
-		return nil, nil, err
-	}
-	routes := func(string) []peer.Route { return []peer.Route{rvPath.Route()} }
-	inbound := func(c *peer.Connection) {
-		go observeConnPath(c, wantPath, pathDone)
-		go stack.sessions.Serve(ctx, c.Device, false, c)
-	}
-	p := peer.New(nodeKey, socks, stack.db, stack.logs.Known, routes, inbound, nil)
-	return rvPath, p, nil
 }
 
 func observeConnPath(c *peer.Connection, want string, out chan<- string) {
@@ -561,42 +477,4 @@ func checkNetsimHostInfo(ctx context.Context, conn *peer.Connection, wantDevice,
 func netsimKey(label string) identity.Key {
 	seed := sha256.Sum256([]byte("SoloDawn netsim M1: " + label))
 	return identity.Key(ed25519.NewKeyFromSeed(seed[:]))
-}
-
-func netsimID(label string) proto.ID {
-	sum := sha256.Sum256([]byte("SoloDawn netsim id: " + label))
-	return proto.ID(base64.RawURLEncoding.EncodeToString(sum[:16]))
-}
-
-func seedNetsimOwner(db *store.Store, owner, nodeKey identity.Key) error {
-	now := time.Now().UnixMilli()
-	e1 := signNetsimAdd(owner, owner.ID(), 1, owner.ID(), "browser", "browser", now)
-	e2 := signNetsimAdd(owner, owner.ID(), 2, nodeKey.ID(), "node", "netsim-node", now)
-	ownerJSON, err := json.Marshal(owner.ID())
-	if err != nil {
-		return err
-	}
-	raw1, err1 := json.Marshal(e1)
-	raw2, err2 := json.Marshal(e2)
-	if err := errors.Join(err1, err2); err != nil {
-		return err
-	}
-	write := func(tx *store.Tx) error {
-		_, wErr1 := tx.Exec("INSERT INTO setting(key, value) VALUES('owner', ?)", string(ownerJSON))
-		_, wErr2 := tx.Exec("INSERT INTO device_log(user, ver, env) VALUES(?, 1, ?), (?, 2, ?)", owner.ID(), string(raw1), owner.ID(), string(raw2))
-		return errors.Join(wErr1, wErr2)
-	}
-	return db.Write(write)
-}
-
-func signNetsimAdd(signer identity.Key, user string, ver int, dev, kind, name string, ts int64) proto.Envelope {
-	entry := proto.DeviceEntry{
-		PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: netsimID(fmt.Sprintf("%s-%d", dev, ver)), Timestamp: ts},
-		DeviceChange:  proto.DeviceChange{User: user, Version: ver, Op: "add", Device: dev, Kind: kind, Name: name},
-	}
-	raw, err := json.Marshal(entry)
-	if err != nil {
-		panic(err)
-	}
-	return signer.Sign(string(raw))
 }

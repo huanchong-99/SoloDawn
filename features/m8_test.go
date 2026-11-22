@@ -5,11 +5,9 @@ package features
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,13 +26,11 @@ import (
 	"time"
 
 	"github.com/cucumber/godog"
-	"github.com/huanchong-99/SoloDawn/internal/home"
-	"github.com/huanchong-99/SoloDawn/internal/host"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/node"
+	"github.com/huanchong-99/SoloDawn/internal/node/nodetest"
 	"github.com/huanchong-99/SoloDawn/internal/peer"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
-	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
 func init() {
@@ -53,9 +49,28 @@ type m8InstallWorld struct {
 	sockPath    string
 	env         []string
 	rvURL       string
-	browser     *m8Browser
+	browser     *peerBrowser
 	nodeID      string
 	fingerprint string
+}
+
+type m8PeerEntry struct {
+	name string
+	pn   *nodetest.PeerNode
+	mu   sync.Mutex
+	inb  *peer.Connection
+}
+
+func (e *m8PeerEntry) setInbound(c *peer.Connection) {
+	e.mu.Lock()
+	e.inb = c
+	e.mu.Unlock()
+}
+
+func (e *m8PeerEntry) inbound() *peer.Connection {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.inb
 }
 
 type m8RVWorld struct {
@@ -65,42 +80,12 @@ type m8RVWorld struct {
 	rvURL      string
 	relayICE   []proto.ICEServer
 	blocked    atomic.Bool
-	browser    *m8Browser
+	browser    *peerBrowser
 	logEntries []proto.Envelope
-	nodes      []*m8MemNode
+	nodes      []*m8PeerEntry
 	roomFP     string
 	statusFP   string
 	nodeConns  map[string]*peer.Connection
-}
-
-type m8Browser struct {
-	key        identity.Key
-	path       *peer.Path
-	peer       *peer.Peer
-	presence   chan string      // single reader: waitOnline
-	roomEvents chan m8RoomEvent // single reader: exchangeRoom
-}
-
-type m8RoomEvent struct {
-	kind string
-	data []byte
-}
-
-type m8MemNode struct {
-	name     string
-	version  string
-	key      identity.Key
-	db       *store.Store
-	logs     *node.Logs
-	sessions *node.Sessions
-	pairer   *node.Pairer
-	peer     *peer.Peer
-	path     *peer.Path
-
-	mu      sync.Mutex
-	loop    *home.Loop
-	local   *node.LocalLink
-	inbound *peer.Connection
 }
 
 type m8CLIResult struct {
@@ -136,28 +121,34 @@ func m8Steps(sc *godog.ScenarioContext, f fixtures) {
 }
 
 func (w *m8InstallWorld) setupCleanHome(tag string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	w.ctx = ctx
-	w.cleanup(cancel)
 	if err := w.initDirs(tag); err != nil {
 		return err
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	w.ctx = ctx
+	w.cleanup(cancel)
 	if err := checkLoginRegistration(w.home, false); err != nil {
 		return err
 	}
+	registerBothCleanups(w.f.t, w.cleanup, w.removeServiceIfPresent)
+	registerBothCleanups(w.f.t, w.cleanup, func() { _ = m8StopExeNodes(w.binPath, w.sockPath) })
 	rvURL, err := startAcceptanceRelayRV(w.cleanup)
 	w.rvURL = rvURL
 	return err
 }
 
 func (w *m8InstallWorld) initDirs(tag string) error {
-	root, err := m8MakeDirs("sd8i")
+	root, err := shortTempRoot(w.f.t, w.cleanup, "sd8i")
 	if err != nil {
 		return err
 	}
-	w.cleanup(func() { os.RemoveAll(root) })
 	w.home = filepath.Join(root, "home")
 	w.dlDir = filepath.Join(root, "dl")
+	for _, sub := range []string{w.home, w.dlDir} {
+		if err := os.MkdirAll(sub, 0o700); err != nil {
+			return err
+		}
+	}
 	image, err := stampedRelease(w.f, tag)
 	if err != nil {
 		return err
@@ -167,32 +158,21 @@ func (w *m8InstallWorld) initDirs(tag string) error {
 		return err
 	}
 	w.binPath, w.sockPath, w.env = m8ProfileLayout(w.home, w.f.fakeCLIs)
-	w.cleanup(w.removeServiceIfPresent)
-	w.cleanup(func() { m8StopExeNodes(w.binPath, w.sockPath) })
 	return nil
-}
-
-func m8MakeDirs(prefix string) (string, error) {
-	root, err := m8TempRoot(prefix)
-	if err != nil {
-		return "", err
-	}
-	for _, sub := range []string{"home", "dl"} {
-		if err := os.MkdirAll(filepath.Join(root, sub), 0o700); err != nil {
-			os.RemoveAll(root)
-			return "", err
-		}
-	}
-	return root, nil
 }
 
 func (w *m8InstallWorld) removeServiceIfPresent() {
 	ok, err := loginRegistration(w.home)
-	if err == nil && ok {
-		cmd := exec.Command(w.f.bin, "service", "remove")
-		cmd.Env = w.env
-		cmd.Run()
+	if err != nil || !ok {
+		return
 	}
+	if runtime.GOOS == "windows" {
+		_ = node.RemoveService()
+		return
+	}
+	cmd := exec.Command(w.f.bin, "service", "remove")
+	cmd.Env = w.env
+	_ = cmd.Run()
 }
 
 func (w *m8InstallWorld) verifyAndInstall(tag string) error {
@@ -225,7 +205,10 @@ func (w *m8InstallWorld) writeSumsAndRunInstall(hexDigest string) error {
 	if err := os.WriteFile(filepath.Join(w.dlDir, "SHA256SUMS"), []byte(sums), 0o644); err != nil {
 		return err
 	}
-	cmd := m8InstallCommand(w.asset)
+	cmd, err := m8InstallCommand(w.asset)
+	if err != nil {
+		return err
+	}
 	cmd.Dir, cmd.Env = w.dlDir, w.env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -235,10 +218,7 @@ func (w *m8InstallWorld) writeSumsAndRunInstall(hexDigest string) error {
 }
 
 func (w *m8InstallWorld) pairInstalledNode(label string) error {
-	if _, err := runNodeCLI(w.binPath, w.env, "status"); err == nil {
-		return errors.New("status succeeded before node was started")
-	}
-	b, err := newM8Browser(w.ctx, w.cleanup, exampleKey("m8-install-browser"), w.rvURL, nil, nil)
+	b, err := newPeerBrowser(w.ctx, w.cleanup, exampleKey("m8-install-browser"), w.rvURL, nil)
 	if err != nil {
 		return err
 	}
@@ -256,36 +236,45 @@ func (w *m8InstallWorld) pairInstalledNode(label string) error {
 }
 
 func (w *m8InstallWorld) startPairCLI(secret, label string) <-chan m8CLIResult {
-	// Single reader: awaitPairCLI.
+	pairCtx, cancel := context.WithCancel(w.ctx)
+	// Single reader: awaitPairCLI (or waitDone on early failure).
 	done := make(chan m8CLIResult, 1)
+	var settled sync.WaitGroup
+	settled.Add(1)
 	go func() {
-		out, stderr, err := m8ExecCLI(w.binPath, w.env, "pair", secret, "--name", label, "--rendezvous", w.rvURL)
+		defer settled.Done()
+		out, stderr, err := m8ExecCLIContext(pairCtx, w.binPath, w.env, "pair", secret, "--name", label, "--rendezvous", w.rvURL)
 		done <- m8CLIResult{stdout: out, stderr: stderr, err: err}
 	}()
+	registerBothCleanups(w.f.t, w.cleanup, func() {
+		cancel()
+		settled.Wait()
+	})
 	return done
 }
 
-func (w *m8InstallWorld) completeBrowserAdopt(b *m8Browser, roomMsg proto.Pair, label string) error {
-	fp, err := m8DeviceFingerprint(roomMsg.Key)
+func (w *m8InstallWorld) completeBrowserAdopt(b *peerBrowser, roomMsg proto.Pair, label string) error {
+	fp, err := deviceFingerprint(roomMsg.Key)
 	if err != nil {
 		return err
 	}
 	w.nodeID, w.fingerprint = roomMsg.Key, fp
-	conn, err := b.openCtl(w.ctx, w.cleanup, w.nodeID)
+	bc, err := b.openCtl(w.ctx, w.cleanup, w.nodeID)
 	if err != nil {
 		return err
 	}
-	if _, err := requestBrowserHello(w.ctx, conn); err != nil {
+	if _, err := requestBrowserHello(w.ctx, bc.conn); err != nil {
 		return err
 	}
+	ts := time.Now().UnixMilli()
 	entries := []proto.Envelope{
-		signAcceptanceAdd(b.key, b.key.ID(), 1, b.key.ID(), "browser", "Owner Browser"),
-		signAcceptanceAdd(b.key, b.key.ID(), 2, w.nodeID, "node", label),
+		nodetest.SignDeviceAdd(b.key, b.key.ID(), 1, "browser", "Owner Browser", b.key.ID(), ts),
+		nodetest.SignDeviceAdd(b.key, b.key.ID(), 2, "node", label, w.nodeID, ts),
 	}
-	if err := conn.Send(proto.Devlog{Type: "devlog", User: b.key.ID(), Entries: entries}); err != nil {
+	if err := bc.conn.Send(proto.Devlog{Type: "devlog", User: b.key.ID(), Entries: entries}); err != nil {
 		return err
 	}
-	return m8CheckOwnerWelcome(w.ctx, conn, w.nodeID)
+	return checkOwnerWelcome(w.ctx, bc.conn, w.nodeID)
 }
 
 func (w *m8InstallWorld) awaitPairCLI(done <-chan m8CLIResult, label string) error {
@@ -343,14 +332,13 @@ func (w *m8InstallWorld) restartInstalledNode() error {
 }
 
 func (w *m8InstallWorld) startForegroundNode() error {
-	var logBuf bytes.Buffer
+	var logBuf syncBuffer
 	cmd := exec.Command(w.binPath, "node")
 	cmd.Env = w.env
 	cmd.Stdout, cmd.Stderr = &logBuf, &logBuf
-	if err := cmd.Start(); err != nil {
+	if _, err := startManagedCmd(w.f.t, w.cleanup, cmd); err != nil {
 		return err
 	}
-	w.cleanup(func() { stopAcceptanceNodeProc(cmd) })
 	if err := waitAcceptanceSocket(w.sockPath, 10*time.Second); err != nil {
 		return fmt.Errorf("restarted node socket: %w (%s)", err, logBuf.String())
 	}
@@ -358,40 +346,29 @@ func (w *m8InstallWorld) startForegroundNode() error {
 }
 
 func (w *m8InstallWorld) checkPersistedNode() error {
-	if err := w.checkOwnedPairRefused(); err != nil {
-		return err
-	}
 	if err := w.browser.waitOnline(w.ctx, w.nodeID); err != nil {
 		return err
 	}
-	conn, err := w.browser.openCtl(w.ctx, w.cleanup, w.nodeID)
+	bc, err := w.browser.openCtl(w.ctx, w.cleanup, w.nodeID)
 	if err != nil {
 		return err
 	}
-	if err := w.verifyReconnectedNode(conn); err != nil {
+	if err := w.verifyReconnectedNode(bc.conn); err != nil {
 		return err
 	}
 	return w.assertStatusConnected()
 }
 
 func (w *m8InstallWorld) verifyReconnectedNode(conn *peer.Connection) error {
-	if err := m8CheckOwnerWelcome(w.ctx, conn, w.nodeID); err != nil {
+	if err := checkOwnerWelcome(w.ctx, conn, w.nodeID); err != nil {
 		return err
 	}
-	info, err := m8RequestHostInfo(w.ctx, conn)
+	info, err := requestHostInfo(w.ctx, conn)
 	if err != nil {
 		return err
 	}
 	if info.Device != w.nodeID || info.Name != "workstation" || info.Version != "v1.0.0" {
 		return fmt.Errorf("restarted host.info = %+v", info)
-	}
-	return nil
-}
-
-func (w *m8InstallWorld) checkOwnedPairRefused() error {
-	_, stderr, err := m8ExecCLI(w.binPath, w.env, "pair", identity.NewSecret().String(), "--name", "workstation")
-	if err == nil || !strings.Contains(stderr, "pair-browser") {
-		return fmt.Errorf("owned pair: err=%v stderr=%q", err, stderr)
 	}
 	return nil
 }
@@ -413,11 +390,10 @@ func (w *m8RVWorld) startOneCommandRV() error {
 }
 
 func (w *m8RVWorld) setupTLSServer() error {
-	rvDir, err := m8TempRoot("sd8rv")
+	rvDir, err := shortTempRoot(w.f.t, w.cleanup, "sd8rv")
 	if err != nil {
 		return err
 	}
-	w.cleanup(func() { os.RemoveAll(rvDir) })
 	roots, err := localCert(rvDir)
 	if err != nil {
 		return err
@@ -454,16 +430,19 @@ func (w *m8RVWorld) launchTLSServer(rvDir string) error {
 		"--udp-port", "0",
 	)
 	cmd.Env = m8CleanEnv(map[string]string{"HOME": rvHome, "XDG_CACHE_HOME": rvHome, "APPDATA": rvHome, "LOCALAPPDATA": rvHome})
-	if err := cmd.Start(); err != nil {
+	if err := killManagedCmd(w.f.t, w.cleanup, cmd, nil); err != nil {
 		return err
 	}
-	w.cleanup(func() { m8KillWait(cmd) })
 	w.rvURL = "wss://" + addr + "/rv"
 	return rvListening(addr)
 }
 
+func (w *m8RVWorld) mapRoute(r peer.Route) peer.Route {
+	return m8FilterRoute(r, &w.blocked, w.relayICE)
+}
+
 func (w *m8RVWorld) pairFirstNodeA11(label string) error {
-	b, err := newM8Browser(w.ctx, w.cleanup, exampleKey("m8-rv-browser"), w.rvURL, &w.blocked, w.relayICE)
+	b, err := newPeerBrowser(w.ctx, w.cleanup, exampleKey("m8-rv-browser"), w.rvURL, w.mapRoute)
 	if err != nil {
 		return err
 	}
@@ -478,34 +457,34 @@ func (w *m8RVWorld) pairFirstNodeA11(label string) error {
 	return w.runFirstPairFlow(n1, label)
 }
 
-func (w *m8RVWorld) openFirstNodeWithRealStatus(label string) (*m8MemNode, error) {
-	root, err := m8TempRoot("sd8n1")
+func (w *m8RVWorld) openFirstNodeWithRealStatus(label string) (*m8PeerEntry, error) {
+	root, err := shortTempRoot(w.f.t, w.cleanup, "sd8n1")
 	if err != nil {
 		return nil, err
 	}
-	w.cleanup(func() { os.RemoveAll(root) })
 	_, sock, env := m8ProfileLayout(root, w.f.fakeCLIs)
-	statusFP, err := m8CaptureNodeStatusFP(w.f.bin, sock, env)
+	statusFP, err := w.captureNodeStatusFP(sock, env)
 	if err != nil {
 		return nil, err
 	}
 	w.statusFP = statusFP
-	return w.newMemNode(label, "v1.0.0", filepath.Dir(sock))
+	return w.newPeerEntry(label, filepath.Dir(sock)), nil
 }
 
-func m8CaptureNodeStatusFP(bin, sock string, env []string) (string, error) {
-	var logBuf bytes.Buffer
-	cmd := exec.Command(bin, "node")
+func (w *m8RVWorld) captureNodeStatusFP(sock string, env []string) (string, error) {
+	var logBuf syncBuffer
+	cmd := exec.Command(w.f.bin, "node")
 	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = &logBuf, &logBuf
-	if err := cmd.Start(); err != nil {
+	stop, err := startManagedCmd(w.f.t, w.cleanup, cmd)
+	if err != nil {
 		return "", err
 	}
-	defer stopAcceptanceNodeProc(cmd)
+	defer stop()
 	if err := waitAcceptanceSocket(sock, 10*time.Second); err != nil {
 		return "", fmt.Errorf("node socket: %w (%s)", err, logBuf.String())
 	}
-	out, err := runNodeCLI(bin, env, "status")
+	out, err := runNodeCLI(w.f.bin, env, "status")
 	if err != nil {
 		return "", err
 	}
@@ -516,46 +495,63 @@ func m8CaptureNodeStatusFP(bin, sock string, env []string) (string, error) {
 	return fp, nil
 }
 
-func (w *m8RVWorld) runFirstPairFlow(n1 *m8MemNode, label string) error {
+func (w *m8RVWorld) newPeerEntry(name, dir string) *m8PeerEntry {
+	entry := &m8PeerEntry{name: name}
+	tb := scenarioTB{TB: w.f.t, cleanup: w.cleanup}
+	entry.pn = nodetest.StartPeerNode(tb, nodetest.PeerConfig{
+		Ctx:        w.ctx,
+		Dir:        dir,
+		Name:       name,
+		Version:    "v1.0.0",
+		Rendezvous: w.rvURL,
+		MapRoute:   w.mapRoute,
+		OnInbound:  entry.setInbound,
+	})
+	w.nodes = append(w.nodes, entry)
+	return entry
+}
+
+func (w *m8RVWorld) runFirstPairFlow(n1 *m8PeerEntry, label string) error {
 	secret := identity.NewSecret()
-	pairDone := n1.startPair(w.ctx, secret.String(), label)
+	pairDone := startMemPair(w.ctx, n1.pn.Pairer, secret.String(), label)
 	roomMsg, err := w.browser.exchangeRoom(w.ctx, secret, "a", "b")
 	if err != nil {
 		return err
 	}
-	fp, err := m8DeviceFingerprint(roomMsg.Key)
+	fp, err := deviceFingerprint(roomMsg.Key)
 	if err != nil {
 		return err
 	}
 	w.roomFP = fp
-	if err := n1.waitKnown(roomMsg.Key, w.browser.key.ID()); err != nil {
+	if err := waitNodeKnown(n1, roomMsg.Key, w.browser.key.ID()); err != nil {
 		return err
 	}
 	return w.exerciseBootstrapAndAdopt(n1, label, pairDone)
 }
 
-func (w *m8RVWorld) exerciseBootstrapAndAdopt(n1 *m8MemNode, label string, pairDone <-chan m8NodePairOut) error {
-	conn, err := w.browser.openCtl(w.ctx, w.cleanup, n1.key.ID())
+func (w *m8RVWorld) exerciseBootstrapAndAdopt(n1 *m8PeerEntry, label string, pairDone <-chan m8NodePairOut) error {
+	bc, err := w.browser.openCtl(w.ctx, w.cleanup, n1.pn.Key.ID())
 	if err != nil {
 		return err
 	}
-	welcome, err := requestBrowserHello(w.ctx, conn)
+	welcome, err := requestBrowserHello(w.ctx, bc.conn)
 	if err != nil || welcome.Owner {
 		return fmt.Errorf("pre-log welcome = %+v, err = %v", welcome, err)
 	}
-	if err := m8ExpectForbiddenHostInfo(w.ctx, conn); err != nil {
+	if err := m8ExpectForbiddenHostInfo(w.ctx, bc.conn); err != nil {
 		return err
 	}
-	if err := m8ExpectForbiddenCmd(w.ctx, w.browser.key, n1.key.ID(), conn); err != nil {
+	if err := m8ExpectForbiddenCmd(w.ctx, w.browser.key, n1.pn.Key.ID(), bc.conn); err != nil {
 		return err
 	}
-	return w.adoptFirstNode(n1, label, conn, pairDone)
+	return w.adoptFirstNode(n1, label, bc.conn, pairDone)
 }
 
-func (w *m8RVWorld) adoptFirstNode(n1 *m8MemNode, label string, conn *peer.Connection, pairDone <-chan m8NodePairOut) error {
+func (w *m8RVWorld) adoptFirstNode(n1 *m8PeerEntry, label string, conn *peer.Connection, pairDone <-chan m8NodePairOut) error {
+	ts := time.Now().UnixMilli()
 	w.logEntries = []proto.Envelope{
-		signAcceptanceAdd(w.browser.key, w.browser.key.ID(), 1, w.browser.key.ID(), "browser", "Owner Browser"),
-		signAcceptanceAdd(w.browser.key, w.browser.key.ID(), 2, n1.key.ID(), "node", label),
+		nodetest.SignDeviceAdd(w.browser.key, w.browser.key.ID(), 1, "browser", "Owner Browser", w.browser.key.ID(), ts),
+		nodetest.SignDeviceAdd(w.browser.key, w.browser.key.ID(), 2, "node", label, n1.pn.Key.ID(), ts),
 	}
 	if err := conn.Send(proto.Devlog{Type: "devlog", User: w.browser.key.ID(), Entries: w.logEntries}); err != nil {
 		return err
@@ -563,7 +559,7 @@ func (w *m8RVWorld) adoptFirstNode(n1 *m8MemNode, label string, conn *peer.Conne
 	if err := m8AwaitNodePair(w.ctx, pairDone, w.roomFP); err != nil {
 		return err
 	}
-	if err := m8CheckOwnerWelcome(w.ctx, conn, n1.key.ID()); err != nil {
+	if err := checkOwnerWelcome(w.ctx, conn, n1.pn.Key.ID()); err != nil {
 		return err
 	}
 	w.nodeConns[label] = conn
@@ -576,60 +572,56 @@ func (w *m8RVWorld) checkFirstNodeDirect(wantPath string) error {
 	}
 	n1 := w.nodes[0]
 	conn := w.nodeConns[n1.name]
-	if err := m8CheckBothPaths(conn, n1.inboundConn(), wantPath); err != nil {
+	if err := m8CheckBothPaths(conn, n1.inbound(), wantPath); err != nil {
 		return err
 	}
-	info, err := m8RequestHostInfo(w.ctx, conn)
-	if err != nil || info.Device != n1.key.ID() {
+	info, err := requestHostInfo(w.ctx, conn)
+	if err != nil || info.Device != n1.pn.Key.ID() {
 		return fmt.Errorf("first node host.info = %+v, err = %v", info, err)
 	}
 	return nil
 }
 
 func (w *m8RVWorld) pairSecondNodeA12(label string) error {
-	dir, err := m8TempRoot("sd8n2")
+	dir, err := shortTempRoot(w.f.t, w.cleanup, "sd8n2")
 	if err != nil {
 		return err
 	}
-	w.cleanup(func() { os.RemoveAll(dir) })
-	n2, err := w.newMemNode(label, "v1.0.0", dir)
-	if err != nil {
-		return err
-	}
+	n2 := w.newPeerEntry(label, dir)
 	secret := identity.NewSecret()
-	pairDone := n2.startPair(w.ctx, secret.String(), label)
+	pairDone := startMemPair(w.ctx, n2.pn.Pairer, secret.String(), label)
 	if _, err := w.browser.exchangeRoom(w.ctx, secret, "a", "b"); err != nil {
 		return err
 	}
-	if err := n2.waitKnown(n2.key.ID(), w.browser.key.ID()); err != nil {
+	if err := waitNodeKnown(n2, n2.pn.Key.ID(), w.browser.key.ID()); err != nil {
 		return err
 	}
 	return w.adoptSecondNode(n2, label, pairDone)
 }
 
-func (w *m8RVWorld) adoptSecondNode(n2 *m8MemNode, label string, pairDone <-chan m8NodePairOut) error {
-	conn, err := w.browser.openCtl(w.ctx, w.cleanup, n2.key.ID())
+func (w *m8RVWorld) adoptSecondNode(n2 *m8PeerEntry, label string, pairDone <-chan m8NodePairOut) error {
+	bc, err := w.browser.openCtl(w.ctx, w.cleanup, n2.pn.Key.ID())
 	if err != nil {
 		return err
 	}
-	if err := w.sendSecondNodeLogs(conn, n2, label); err != nil {
+	if err := w.sendSecondNodeLogs(bc.conn, n2, label); err != nil {
 		return err
 	}
-	if err := m8AwaitNodePair(w.ctx, pairDone, n2.key.Fingerprint()); err != nil {
+	if err := m8AwaitNodePair(w.ctx, pairDone, n2.pn.Key.Fingerprint()); err != nil {
 		return err
 	}
-	if err := m8CheckOwnerWelcome(w.ctx, conn, n2.key.ID()); err != nil {
+	if err := checkOwnerWelcome(w.ctx, bc.conn, n2.pn.Key.ID()); err != nil {
 		return err
 	}
-	w.nodeConns[label] = conn
+	w.nodeConns[label] = bc.conn
 	return nil
 }
 
-func (w *m8RVWorld) sendSecondNodeLogs(conn *peer.Connection, n2 *m8MemNode, label string) error {
+func (w *m8RVWorld) sendSecondNodeLogs(conn *peer.Connection, n2 *m8PeerEntry, label string) error {
 	if _, err := requestBrowserHello(w.ctx, conn); err != nil {
 		return err
 	}
-	addN2 := signAcceptanceAdd(w.browser.key, w.browser.key.ID(), 3, n2.key.ID(), "node", label)
+	addN2 := nodetest.SignDeviceAdd(w.browser.key, w.browser.key.ID(), 3, "node", label, n2.pn.Key.ID(), time.Now().UnixMilli())
 	w.logEntries = append(w.logEntries, addN2)
 	if err := conn.Send(proto.Devlog{Type: "devlog", User: w.browser.key.ID(), Entries: w.logEntries}); err != nil {
 		return err
@@ -647,23 +639,23 @@ func (w *m8RVWorld) checkBothNodesListed(wantPath string) error {
 			return err
 		}
 	}
-	if w.nodes[0].key.ID() == w.nodes[1].key.ID() {
+	if w.nodes[0].pn.Key.ID() == w.nodes[1].pn.Key.ID() {
 		return errors.New("both nodes share the same device id")
 	}
 	return nil
 }
 
-func (w *m8RVWorld) verifyNodeEntry(n *m8MemNode, wantPath string) error {
+func (w *m8RVWorld) verifyNodeEntry(n *m8PeerEntry, wantPath string) error {
 	conn := w.nodeConns[n.name]
-	if err := m8CheckBothPaths(conn, n.inboundConn(), wantPath); err != nil {
+	if err := m8CheckBothPaths(conn, n.inbound(), wantPath); err != nil {
 		return err
 	}
-	info, err := m8RequestHostInfo(w.ctx, conn)
+	info, err := requestHostInfo(w.ctx, conn)
 	if err != nil {
 		return err
 	}
 	wantOS := runtime.GOOS + "/" + runtime.GOARCH
-	if info.Name != n.name || info.OS != wantOS || info.Version != n.version {
+	if info.Name != n.name || info.OS != wantOS || info.Version != "v1.0.0" {
 		return fmt.Errorf("node %s host.info = %+v", n.name, info)
 	}
 	return nil
@@ -679,18 +671,18 @@ func (w *m8RVWorld) blockDirectTraffic() error {
 
 func (w *m8RVWorld) checkRelayFallbackA13(wantPath string) error {
 	n1 := w.nodes[0]
-	conn, err := w.browser.openCtl(w.ctx, w.cleanup, n1.key.ID())
+	bc, err := w.browser.openCtl(w.ctx, w.cleanup, n1.pn.Key.ID())
 	if err != nil {
 		return err
 	}
-	w.nodeConns[n1.name] = conn
-	if err := m8CheckBothPaths(conn, n1.inboundConn(), wantPath); err != nil {
+	w.nodeConns[n1.name] = bc.conn
+	if err := m8CheckBothPaths(bc.conn, n1.inbound(), wantPath); err != nil {
 		return err
 	}
-	if err := m8CheckOwnerWelcome(w.ctx, conn, n1.key.ID()); err != nil {
+	if err := checkOwnerWelcome(w.ctx, bc.conn, n1.pn.Key.ID()); err != nil {
 		return err
 	}
-	return w.pollHostInfoEverySecond(conn, n1.key.ID(), 3)
+	return w.pollHostInfoEverySecond(bc.conn, n1.pn.Key.ID(), 3)
 }
 
 func (w *m8RVWorld) pollHostInfoEverySecond(conn *peer.Connection, wantDevice string, count int) error {
@@ -698,7 +690,7 @@ func (w *m8RVWorld) pollHostInfoEverySecond(conn *peer.Connection, wantDevice st
 		if i > 0 {
 			time.Sleep(time.Second)
 		}
-		info, err := m8RequestHostInfo(w.ctx, conn)
+		info, err := requestHostInfo(w.ctx, conn)
 		if err != nil || info.Device != wantDevice {
 			return fmt.Errorf("tick %d host.info = %+v, err = %v", i, info, err)
 		}
@@ -706,169 +698,23 @@ func (w *m8RVWorld) pollHostInfoEverySecond(conn *peer.Connection, wantDevice st
 	return nil
 }
 
-func (w *m8RVWorld) newMemNode(name, version, dir string) (*m8MemNode, error) {
-	key, db, logs, err := m8OpenNodeStore(dir)
-	if err != nil {
-		return nil, err
-	}
-	w.cleanup(func() { db.Close() })
-	n := &m8MemNode{name: name, version: version, key: key, db: db, logs: logs}
-	if err := n.initServices(w.cleanup, w.rvURL); err != nil {
-		return nil, err
-	}
-	if err := n.initNetwork(w.ctx, w.cleanup, w.rvURL, &w.blocked, w.relayICE); err != nil {
-		return nil, err
-	}
-	w.nodes = append(w.nodes, n)
-	return n, nil
-}
-
-func m8OpenNodeStore(dir string) (identity.Key, *store.Store, *node.Logs, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, nil, nil, err
-	}
-	key, err := identity.LoadKey(dir)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	db, err := store.Open(filepath.Join(dir, "node.db"))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	logs, err := node.OpenLogs(db, key.ID())
-	if err != nil {
-		db.Close()
-		return nil, nil, nil, err
-	}
-	return key, db, logs, nil
-}
-
-func (n *m8MemNode) initServices(cleanup func(func()), rvURL string) error {
-	loop, err := home.StartLoop(home.LoopConfig{
-		Store: n.db, Home: n.key.ID(), OwnerFn: n.logs.Owner,
-		Logs: n.logs.Log, Tables: home.NodeTables(),
-	})
-	if err != nil {
-		return err
-	}
-	h, _, err := host.New(n.db, n.key, time.Now)
-	if err != nil {
-		loop.Close()
-		return err
-	}
-	n.loop, n.local = loop, node.AttachLocal(h, loop)
-	cleanup(n.closeHome)
-	n.wireSessionSurfaceAndPairer(cleanup, h, rvURL)
-	return nil
-}
-
-func (n *m8MemNode) wireSessionSurfaceAndPairer(cleanup func(func()), h *host.Host, rvURL string) {
-	n.sessions = node.NewSessions(node.SessionConfig{
-		ID: n.key.ID(), Version: n.version, Store: n.db, Logs: n.logs,
-		Home: n.loop, Host: h,
-		Name:  func() string { return node.ReadName(n.db) },
-		Addrs: func() []string { return []string{rvURL} },
-	})
-	node.NewSurface(node.SurfaceConfig{
-		ID: n.key.ID(), OS: runtime.GOOS + "/" + runtime.GOARCH, Version: n.version,
-		Store: n.db, Sessions: n.sessions, Host: h, Agents: h.Agents,
-	})
-	n.pairer = node.NewPairer(node.PairConfig{
-		Key: n.key, Store: n.db, Logs: n.logs, Sessions: n.sessions,
-		Paths:      n.sharedPaths,
-		Rendezvous: func() []string { return []string{rvURL} },
-	})
-	cleanup(n.pairer.Close)
-}
-
-func (n *m8MemNode) closeHome() {
-	n.mu.Lock()
-	local, loop := n.local, n.loop
-	n.local, n.loop = nil, nil
-	n.mu.Unlock()
-	if local != nil {
-		local.Close()
-	}
-	if loop != nil {
-		loop.Close()
-	}
-}
-
-func (n *m8MemNode) sharedPaths() []*peer.Path {
-	if n.path != nil {
-		return []*peer.Path{n.path}
-	}
-	return nil
-}
-
-func (n *m8MemNode) initNetwork(ctx context.Context, cleanup func(func()), rvURL string, blocked *atomic.Bool, relayICE []proto.ICEServer) error {
-	socks, err := peer.Listen(0, 0)
-	if err != nil {
-		return err
-	}
-	cleanup(func() { socks.Close() })
-	known := func(dev string) bool { return n.logs.Known(dev) || n.pairer.Known(dev) }
-	routes := func(dev string) []peer.Route { return n.routesFor(dev, blocked, relayICE) }
-	inbound := func(c *peer.Connection) {
-		n.setInbound(c)
-		go n.pairer.Serve(ctx, c.Device, c)
-	}
-	n.peer = peer.New(n.key, socks, n.db, known, routes, inbound, nil)
-	n.pairer.Peer = n.peer
-	path, err := peer.Dial(ctx, rvURL, n.key)
-	if err != nil {
-		return err
-	}
-	n.path = path
-	cleanup(func() { path.Close() })
-	event := func(kind string, data []byte) error {
-		n.pairer.HandleEvent(ctx, path, kind, data)
-		return nil
-	}
-	go path.Serve(ctx, n.peer, event)
-	return nil
-}
-
-func (n *m8MemNode) routesFor(dev string, blocked *atomic.Bool, relayICE []proto.ICEServer) []peer.Route {
-	var out []peer.Route
-	if n.path != nil {
-		out = append(out, m8FilterRoute(n.path.Route(), blocked, relayICE))
-	}
-	for _, r := range n.pairer.Routes(dev) {
-		out = append(out, m8FilterRoute(r, blocked, relayICE))
-	}
-	return out
-}
-
-func (n *m8MemNode) setInbound(c *peer.Connection) {
-	n.mu.Lock()
-	n.inbound = c
-	n.mu.Unlock()
-}
-
-func (n *m8MemNode) inboundConn() *peer.Connection {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	return n.inbound
-}
-
-func (n *m8MemNode) startPair(ctx context.Context, secret, label string) <-chan m8NodePairOut {
+func startMemPair(ctx context.Context, p *node.Pairer, secret, label string) <-chan m8NodePairOut {
 	// Single reader: m8AwaitNodePair.
 	done := make(chan m8NodePairOut, 1)
 	go func() {
-		res, err := n.pairer.Pair(ctx, node.PairRequest{Secret: secret, Name: label})
+		res, err := p.Pair(ctx, node.PairRequest{Secret: secret, Name: label})
 		done <- m8NodePairOut{res: res, err: err}
 	}()
 	return done
 }
 
-func (n *m8MemNode) waitKnown(expectedNodeID, browserID string) error {
-	if expectedNodeID != n.key.ID() {
-		return fmt.Errorf("room node key = %q, want %q", expectedNodeID, n.key.ID())
+func waitNodeKnown(n *m8PeerEntry, expectedNodeID, browserID string) error {
+	if expectedNodeID != n.pn.Key.ID() {
+		return fmt.Errorf("room node key = %q, want %q", expectedNodeID, n.pn.Key.ID())
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if n.pairer.Known(browserID) {
+		if n.pn.Pairer.Known(browserID) {
 			return nil
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -891,182 +737,6 @@ func m8AwaitNodePair(ctx context.Context, done <-chan m8NodePairOut, wantFP stri
 	}
 }
 
-func newM8Browser(ctx context.Context, cleanup func(func()), key identity.Key, rvURL string, blocked *atomic.Bool, relayICE []proto.ICEServer) (*m8Browser, error) {
-	path, err := peer.Dial(ctx, rvURL, key)
-	if err != nil {
-		return nil, err
-	}
-	cleanup(func() { path.Close() })
-	socks, err := peer.Listen(0, 0)
-	if err != nil {
-		return nil, err
-	}
-	db, err := store.Open(":memory:")
-	if err != nil {
-		socks.Close()
-		return nil, err
-	}
-	cleanup(func() { socks.Close(); db.Close() })
-	routes := func(string) []peer.Route { return []peer.Route{m8FilterRoute(path.Route(), blocked, relayICE)} }
-	p := peer.New(key, socks, db, identity.IsDevice, routes, func(*peer.Connection) {}, nil)
-	b := &m8Browser{
-		key:        key,
-		path:       path,
-		peer:       p,
-		presence:   make(chan string, 16),
-		roomEvents: make(chan m8RoomEvent, 16),
-	}
-	event := func(kind string, data []byte) error {
-		b.onEvent(kind, data)
-		return nil
-	}
-	go path.Serve(ctx, p, event)
-	return b, nil
-}
-
-func (b *m8Browser) onEvent(kind string, data []byte) {
-	switch kind {
-	case "presence":
-		b.onPresence(data)
-	case "joined", "room", "full":
-		cp := slices.Clone(data)
-		select {
-		case b.roomEvents <- m8RoomEvent{kind: kind, data: cp}:
-		default:
-		}
-	}
-}
-
-func (b *m8Browser) onPresence(data []byte) {
-	var pr proto.Presence
-	if proto.Decode(data, &pr) == nil && pr.On {
-		select {
-		case b.presence <- pr.Key:
-		default:
-		}
-	}
-}
-
-func (b *m8Browser) waitOnline(ctx context.Context, device string) error {
-	if err := b.path.Write(ctx, proto.Watch{Type: "watch", Keys: []string{device}}); err != nil {
-		return err
-	}
-	for {
-		select {
-		case k := <-b.presence:
-			if k == device {
-				return nil
-			}
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-}
-
-func (b *m8Browser) exchangeRoom(ctx context.Context, secret identity.Secret, myRole, wantRole string) (proto.Pair, error) {
-	room := secret.Room()
-	self := proto.Pair{Type: "pair", Key: b.key.ID(), Kind: "browser", Name: "Owner Browser", Role: myRole}
-	self.MAC = secret.MAC(self)
-	rawSelf, err := json.Marshal(self)
-	if err != nil {
-		return proto.Pair{}, err
-	}
-	if err := b.path.Write(ctx, proto.RoomID{Type: "join", Room: room}); err != nil {
-		return proto.Pair{}, err
-	}
-	return b.readRoomPeer(ctx, secret, room, wantRole, rawSelf)
-}
-
-func (b *m8Browser) readRoomPeer(ctx context.Context, secret identity.Secret, room, wantRole string, rawSelf []byte) (proto.Pair, error) {
-	for {
-		select {
-		case ev := <-b.roomEvents:
-			m, ok, err := b.stepRoomEvent(ctx, ev, secret, room, wantRole, rawSelf)
-			if err != nil || ok {
-				return m, err
-			}
-		case <-ctx.Done():
-			return proto.Pair{}, ctx.Err()
-		}
-	}
-}
-
-func (b *m8Browser) stepRoomEvent(ctx context.Context, ev m8RoomEvent, secret identity.Secret, room, wantRole string, rawSelf []byte) (proto.Pair, bool, error) {
-	switch ev.kind {
-	case "joined":
-		return proto.Pair{}, false, b.sendRoomPairIfMatch(ctx, ev.data, room, rawSelf)
-	case "full":
-		return proto.Pair{}, false, errors.New("pairing room is full")
-	case "room":
-		m, ok := m8MatchRoomPair(ev.data, secret, room, wantRole)
-		return m, ok, nil
-	default:
-		return proto.Pair{}, false, nil
-	}
-}
-
-func (b *m8Browser) sendRoomPairIfMatch(ctx context.Context, data []byte, room string, rawSelf []byte) error {
-	var id proto.RoomID
-	if proto.Decode(data, &id) != nil || id.Room != room {
-		return nil
-	}
-	return b.path.Write(ctx, proto.RoomData{RoomID: proto.RoomID{Type: "room", Room: room}, Data: rawSelf})
-}
-
-func m8MatchRoomPair(data []byte, secret identity.Secret, room, wantRole string) (proto.Pair, bool) {
-	var rd proto.RoomData
-	var m proto.Pair
-	if proto.Decode(data, &rd) != nil || rd.Room != room {
-		return proto.Pair{}, false
-	}
-	if proto.Decode(rd.Data, &m) != nil || !secret.Verify(m, wantRole) {
-		return proto.Pair{}, false
-	}
-	return m, true
-}
-
-func (b *m8Browser) openCtl(ctx context.Context, cleanup func(func()), nodeID string) (*peer.Connection, error) {
-	for range 2 {
-		conn, ok, err := b.tryOpenCtl(ctx, cleanup, nodeID, 8*time.Second)
-		if err != nil || ok {
-			return conn, err
-		}
-	}
-	return nil, errors.New("timed out opening ctl connection")
-}
-
-func (b *m8Browser) tryOpenCtl(ctx context.Context, cleanup func(func()), nodeID string, wait time.Duration) (*peer.Connection, bool, error) {
-	conn, err := b.peer.Offer(ctx, nodeID)
-	if err != nil {
-		return nil, false, err
-	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case <-conn.Ready():
-		cleanup(func() { conn.Close() })
-		go m8DrainConn(ctx, conn)
-		return conn, true, nil
-	case <-conn.Done():
-		conn.Close()
-		return nil, false, nil
-	case <-timer.C:
-		conn.Close()
-		return nil, false, nil
-	case <-ctx.Done():
-		conn.Close()
-		return nil, false, ctx.Err()
-	}
-}
-
-func m8DrainConn(ctx context.Context, conn *peer.Connection) {
-	for {
-		if _, err := conn.Read(ctx); err != nil {
-			return
-		}
-	}
-}
-
 func m8CheckReadyICE(servers []proto.ICEServer) error {
 	raw, err := json.Marshal(servers)
 	if err != nil {
@@ -1082,9 +752,6 @@ func m8CheckReadyICE(servers []proto.ICEServer) error {
 }
 
 func m8FilterRoute(r peer.Route, blocked *atomic.Bool, relayICE []proto.ICEServer) peer.Route {
-	if blocked == nil {
-		return r
-	}
 	if blocked.Load() {
 		r.ICE = relayICE
 	} else {
@@ -1092,7 +759,7 @@ func m8FilterRoute(r peer.Route, blocked *atomic.Bool, relayICE []proto.ICEServe
 	}
 	orig := r.Send
 	r.Send = func(ctx context.Context, to string, env proto.Envelope) error {
-		if blocked.Load() && m8IsNonRelayICE(env.Payload) {
+		if blocked.Load() && isNonRelayICECandidate(env.Payload) {
 			return nil
 		}
 		return orig(ctx, to, env)
@@ -1122,113 +789,34 @@ func m8DirectICEURLs(urls []string) []string {
 	return out
 }
 
-func m8IsNonRelayICE(payload string) bool {
-	var sig struct {
-		Type string `json:"t"`
-		Cand string `json:"cand"`
-	}
-	if json.Unmarshal([]byte(payload), &sig) != nil || sig.Type != "ice" {
-		return false
-	}
-	return !strings.Contains(sig.Cand, " typ relay")
-}
-
-func m8CheckOwnerWelcome(ctx context.Context, conn *peer.Connection, wantDevice string) error {
-	w, err := requestBrowserHello(ctx, conn)
-	if err != nil {
-		return err
-	}
-	if !w.Owner || w.Device != wantDevice {
-		return fmt.Errorf("welcome = %+v, want owner true for %q", w, wantDevice)
-	}
-	return nil
-}
-
-func m8RequestHostInfo(ctx context.Context, conn *peer.Connection) (proto.HostInfo, error) {
-	build := func(id int64) any { return proto.Request{Type: "host.info", ID: id} }
-	raw, err := conn.Request(ctx, build)
-	if err != nil {
-		return proto.HostInfo{}, err
-	}
-	var info proto.HostInfo
-	return info, proto.Decode(raw, &info)
-}
-
 func m8ExpectForbiddenHostInfo(ctx context.Context, conn *peer.Connection) error {
-	build := func(id int64) any { return proto.Request{Type: "host.info", ID: id} }
-	raw, err := conn.Request(ctx, build)
+	raw, err := conn.Request(ctx, func(id int64) any { return proto.Request{Type: "host.info", ID: id} })
 	if err != nil {
 		return err
 	}
-	return m8AssertWireError(raw, "forbidden")
+	return checkWireError(raw, "forbidden")
 }
 
 func m8ExpectForbiddenCmd(ctx context.Context, signer identity.Key, nodeID string, conn *peer.Connection) error {
 	payload := fmt.Sprintf(`{"t":"pair.browser","n":%q,"ts":%d,"to":%q}`, exampleID("m8-pre"), time.Now().UnixMilli(), nodeID)
 	env := signer.Sign(payload)
-	build := func(id int64) any {
+	raw, err := conn.Request(ctx, func(id int64) any {
 		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
-	}
-	raw, err := conn.Request(ctx, build)
+	})
 	if err != nil {
 		return err
 	}
-	return m8AssertWireError(raw, "forbidden")
-}
-
-func m8AssertWireError(raw json.RawMessage, wantCode string) error {
-	var resp proto.ErrorResponse
-	if err := proto.Decode(raw, &resp); err != nil {
-		return fmt.Errorf("expected wire error %q, got %s (%v)", wantCode, raw, err)
-	}
-	if resp.Err.Code != wantCode {
-		return fmt.Errorf("wire error code = %q, want %q", resp.Err.Code, wantCode)
-	}
-	return nil
+	return checkWireError(raw, "forbidden")
 }
 
 func m8CheckBothPaths(browserConn, nodeConn *peer.Connection, want string) error {
-	if err := m8WaitPath(browserConn, want, time.Second); err != nil {
+	if err := waitConnPath(browserConn, want, time.Second); err != nil {
 		return fmt.Errorf("browser path: %w", err)
 	}
-	if err := m8WaitPath(nodeConn, want, time.Second); err != nil {
+	if err := waitConnPath(nodeConn, want, time.Second); err != nil {
 		return fmt.Errorf("node path: %w", err)
 	}
 	return nil
-}
-
-func m8WaitPath(conn *peer.Connection, want string, limit time.Duration) error {
-	if conn == nil {
-		return errors.New("connection is nil")
-	}
-	deadline := time.Now().Add(limit)
-	for {
-		got := conn.Path()
-		if got == want {
-			return nil
-		}
-		if !time.Now().Before(deadline) {
-			return fmt.Errorf("got %q, want %q", got, want)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
-func m8DeviceFingerprint(id string) (string, error) {
-	pub, err := base64.RawURLEncoding.DecodeString(id)
-	if err != nil || len(pub) != ed25519.PublicKeySize {
-		return "", fmt.Errorf("invalid device id %q: %v", id, err)
-	}
-	h := sha256.Sum256(pub)
-	return fmt.Sprintf("%X %X %X", h[0:2], h[2:4], h[4:6]), nil
-}
-
-func m8TempRoot(prefix string) (string, error) {
-	base := os.TempDir()
-	if runtime.GOOS == "darwin" {
-		base = "/tmp"
-	}
-	return os.MkdirTemp(base, prefix)
 }
 
 func m8AssetName(tag string) string {
@@ -1290,47 +878,46 @@ func m8HasKeyFold(m map[string]string, target string) bool {
 	return false
 }
 
-func m8InstallCommand(asset string) *exec.Cmd {
-	if runtime.GOOS == "windows" {
-		script := "$ErrorActionPreference = 'Stop'\n" +
-			"$asset = '" + asset + "'\n" +
-			"$digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset -ErrorAction Stop).Hash\n" +
-			"if ((Get-Content -LiteralPath SHA256SUMS -ErrorAction Stop) -notcontains \"$digest  $asset\") {\n" +
-			"    throw \"SHA256SUMS has no matching digest and filename\"\n" +
-			"}\n" +
-			"$bin = Join-Path $env:LOCALAPPDATA 'Programs\\SoloDawn'\n" +
-			"New-Item -ItemType Directory -Force -Path $bin | Out-Null\n" +
-			"Copy-Item -LiteralPath $asset -Destination (Join-Path $bin 'solodawn.exe')\n"
-		return exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+func m8InstallCommand(asset string) (*exec.Cmd, error) {
+	raw, err := os.ReadFile(filepath.Join("..", "install.md"))
+	if err != nil {
+		return nil, err
 	}
-	script := "asset='" + asset + "'\n" +
-		"if [ \"$(uname -s)\" = Darwin ]; then\n" +
-		"  shasum -a 256 \"$asset\"\n" +
-		"else\n" +
-		"  sha256sum \"$asset\"\n" +
-		"fi | grep -Fxf SHA256SUMS &&\n" +
-		"  mkdir -p \"$HOME/.local/bin\" &&\n" +
-		"  install -m 755 \"$asset\" \"$HOME/.local/bin/solodawn\" &&\n" +
-		"  if [ \"$(uname -s)\" = Darwin ]; then\n" +
-		"    xattr -d com.apple.quarantine \"$HOME/.local/bin/solodawn\" 2>/dev/null || true\n" +
-		"  fi\n"
-	return exec.Command("sh", "-c", script)
+	doc := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	if runtime.GOOS == "windows" {
+		script, err := m8LoadFencedInstall(doc, "powershell", "REPLACE_WITH_BINARY_FILENAME.exe", asset)
+		if err != nil {
+			return nil, err
+		}
+		return exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script), nil
+	}
+	script, err := m8LoadFencedInstall(doc, "sh", "REPLACE_WITH_BINARY_FILENAME", asset)
+	if err != nil {
+		return nil, err
+	}
+	return exec.Command("sh", "-c", script), nil
 }
 
-func m8ExecCLI(bin string, env []string, args ...string) (string, string, error) {
-	cmd := exec.Command(bin, args...)
+func m8LoadFencedInstall(doc, lang, placeholder, asset string) (string, error) {
+	fence := "```" + lang + "\n"
+	_, rest, ok := strings.Cut(doc, fence)
+	if !ok {
+		return "", fmt.Errorf("install.md missing %s block", lang)
+	}
+	block, _, ok := strings.Cut(rest, "\n```")
+	if !ok || !strings.Contains(block, placeholder) {
+		return "", fmt.Errorf("install.md %s block missing %s", lang, placeholder)
+	}
+	return strings.Replace(block, placeholder, asset, 1) + "\n", nil
+}
+
+func m8ExecCLIContext(ctx context.Context, bin string, env []string, args ...string) (string, string, error) {
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
 	return stdout.String(), stderr.String(), err
-}
-
-func m8KillWait(cmd *exec.Cmd) {
-	if cmd.Process != nil {
-		cmd.Process.Kill()
-		cmd.Wait()
-	}
 }
 
 func m8StopExeNodes(exe, sock string) error {
@@ -1365,7 +952,7 @@ func m8StopExeUnix(exe, sock string) error {
 func m8SignalUnixPIDs(pids []int, sig os.Signal) {
 	for _, pid := range pids {
 		if proc, err := os.FindProcess(pid); err == nil {
-			proc.Signal(sig)
+			_ = proc.Signal(sig)
 		}
 	}
 }

@@ -46,7 +46,7 @@ export interface StartOptions {
   env?: (node: number) => Env;
 }
 
-type Proc = ReturnType<typeof leader>;
+export type Proc = ReturnType<typeof leader>;
 
 /** Builds once for the whole run; the teardown kills what tests left and removes the run. */
 export async function setup(project: TestProject) {
@@ -172,7 +172,13 @@ function environment(bin: string, home: string): Env {
 }
 
 /** Starts a process in dir as the leader of a new group, and appends the group to record. */
-function leader(name: string, [command, ...args]: string[], env: Env, dir: string, record: string) {
+export function leader(
+  name: string,
+  [command, ...args]: string[],
+  env: Env,
+  dir: string,
+  record: string,
+) {
   const child = spawn(command, args, { cwd: dir, env, detached: true });
   child.stdin.end();
   let output = '';
@@ -215,7 +221,8 @@ export function alive(pgid: number) {
   return [...rows].some(([, group, stat]) => Number(group) === pgid && !stat.startsWith('Z'));
 }
 
-async function stop(proc: Proc) {
+/** Stops a process group started by `leader` (SIGTERM, 3 s grace, SIGKILL, and reap check). */
+export async function stop(proc: Proc) {
   signal(proc.pid, 'SIGTERM');
   await Promise.race([proc.closed, delay(3000)]);
   signal(proc.pid, 'SIGKILL');
@@ -262,11 +269,16 @@ function freePort() {
 
 function run(command: string, args: string[], options: { cwd: string; env?: Env }) {
   return new Promise<Ran>((resolve, reject) => {
-    execFile(command, args, { ...options, maxBuffer: 1 << 26 }, (error, stdout, stderr) => {
-      const code = error ? error.code : 0;
-      if (typeof code === 'number') resolve({ code, stdout, stderr });
-      else reject(error);
-    });
+    execFile(
+      command,
+      args,
+      { ...options, maxBuffer: 64 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        const code = error ? error.code : 0;
+        if (typeof code === 'number') resolve({ code, stdout, stderr });
+        else reject(error);
+      },
+    );
   });
 }
 

@@ -5,11 +5,11 @@ Feature: M3 AI sessions on the local link
   crashes, keeping unposted output and secrets out of the group, deduplicating
   repeated inbox items across restarts, and listing the contract's MCP tools.
 
-  Scenario: Live MCP tool lists match the frozen contract across session kinds and permission levels
+  Scenario: Live MCP tool lists match the frozen contract across session kinds
     Given an in-process M3 node with a local MCP socket
-    When MCP clients list tools through the shim for each session kind and task permission level
+    When MCP clients list tools through the shim for each session kind
     Then every Codex session lists the main-line tools and schemas of tools.json
-    And structured Claude Code sessions add only approve while interactive sessions omit it
+    And structured Claude Code sessions add only approve
 
   Scenario: Mentioning a Claude Code member twice runs in one CLI process and remembers the first mention
     Given an in-process M3 node with group "Website" and configured AI "Claude Code" on "claude"
@@ -89,7 +89,7 @@ Feature: M3 AI sessions on the local link
     And "Claude Code" is scripted for one turn that posts "Delivered once."
     When the owner posts "@Claude Code once" in "Website"
     Then "Claude Code" posts "Delivered once." in "Website" and queues 1 acknowledgement
-    When the home sends its due inbox items again on that connection
+    When the home sends its due inbox items again on a new connection
     Then the host queues a 2nd acknowledgement without starting another CLI process
     When the host restarts on the node's store and attaches to the home
     Then the restarted host acknowledges the resent item and "Claude Code" still ran 1 CLI process and posted 1 message

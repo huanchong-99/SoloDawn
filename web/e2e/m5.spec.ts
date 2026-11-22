@@ -2,8 +2,8 @@
 // confirmation, two parallel tasks with 6-step progress bars, local checks, cross-AI review,
 // automatic squash-merge, task threads, and secretary summary cards (U-4, U-7, U-8, U-9, A5.1),
 // plus approval card and decision card round-trip in the browser (Owner override 1).
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { delimiter, join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, inject, test, vi } from 'vitest';
 import { launch } from './config';
@@ -66,7 +66,7 @@ function secretaryM5Script() {
                 {
                   title: 'Build release checklist',
                   assignee: 'Claude Code',
-                  reviewer: 'Reviewer',
+                  reviewer: 'Codex',
                 },
                 {
                   title: 'Build changelog generator',
@@ -504,14 +504,12 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       const node0Claude = join(scriptDir, 'node0-claude.json');
       const node0Codex = join(scriptDir, 'node0-codex.json');
       const node1Claude = join(scriptDir, 'node1-claude.json');
-      const node1Codex = join(scriptDir, 'node1-codex.json');
       const gateT1 = join(scriptDir, 'release-t1');
       const gateT2 = join(scriptDir, 'release-t2');
 
       await writeFile(node0Claude, JSON.stringify(claudeTaskScript()));
       await writeFile(node0Codex, JSON.stringify(codexTaskScript()));
       await writeFile(node1Claude, JSON.stringify(secretaryM5Script()));
-      await writeFile(node1Codex, JSON.stringify(codexReviewScript()));
 
       const active = await startNet({
         nodes: 2,
@@ -525,7 +523,6 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
             : {
                 ...gitIdentityEnv,
                 SOLODAWN_FAKE_CLAUDE_SCRIPT: node1Claude,
-                SOLODAWN_FAKE_CODEX_SCRIPT: node1Codex,
               },
       });
       net = active;
@@ -592,14 +589,6 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(3);
 
-      await members.locator('button', { hasText: 'Add AI' }).click();
-      await poll(() => addDlg.locator('.choice').count()).toBe(4);
-      await addDlg.locator('.choice', { hasText: 'Codex · coordinator' }).locator('input').check();
-      await addDlg.locator('input.input').fill('Reviewer');
-      await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
-      await poll(() => addDlg.count()).toBe(0);
-      await poll(() => members.locator('.member').count()).toBe(4);
-
       // Owner sends plain request in chat -> Secretary posts BriefCard.
       await sendChatMessage(page, 'Build the release checklist and changelog');
 
@@ -624,7 +613,8 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await poll(() => task1Card.count()).toBe(1);
       await poll(() => task2Card.count()).toBe(1);
 
-      // Wait until both task CLIs have started, swap scripts to cross-reviewers, then release T-1.
+      // Wait until both task CLIs have started and loaded their task scripts, swap both workstation
+      // scripts to cross-reviewers (Codex reviews T-1, Claude Code reviews T-2), then release T-1.
       await vi.waitFor(
         async () => {
           const log = await readFile(homeNode.env.SOLODAWN_FAKECLI_LOG, 'utf8').catch(() => '');
@@ -634,6 +624,7 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
         { timeout: 15_000, interval: 25 },
       );
       await writeFile(node0Claude, JSON.stringify(claudeReviewScript()));
+      await writeFile(node0Codex, JSON.stringify(codexReviewScript()));
       await writeFile(gateT1, 'ok');
 
       // Wait until T-1 merges and Secretary posts SummaryCard #1, then release T-2.
@@ -685,14 +676,41 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
     'completes approval card and 4-option decision card round-trip in the browser',
     { timeout: 90_000 },
     async () => {
-      const scriptDir = join(inject('e2e').root, `m5-cards-${Date.now()}`);
-      await mkdir(scriptDir, { recursive: true });
+      const { root, bin } = inject('e2e');
+      const scriptDir = join(root, `m5-cards-${Date.now()}`);
+      const wrapperDir = join(scriptDir, 'bin');
+      await mkdir(wrapperDir, { recursive: true });
       const claudePath = join(scriptDir, 'claude-cards.json');
+      const stdinLog = join(scriptDir, 'claude-stdin.log');
+      const claudeWrapper = join(wrapperDir, 'claude');
       await writeFile(claudePath, JSON.stringify(approvalAndDecisionScript()));
+      await writeFile(
+        claudeWrapper,
+        [
+          `#!${process.execPath}`,
+          "const { spawn } = require('node:child_process');",
+          "const { appendFileSync } = require('node:fs');",
+          `const child = spawn(${JSON.stringify(join(bin, 'claude'))}, process.argv.slice(2), {`,
+          "  stdio: ['pipe', 'inherit', 'inherit'],",
+          '});',
+          "process.stdin.on('data', (chunk) => {",
+          `  appendFileSync(${JSON.stringify(stdinLog)}, chunk);`,
+          '  child.stdin.write(chunk);',
+          '});',
+          "process.stdin.on('end', () => child.stdin.end());",
+          "child.on('exit', (code) => process.exit(code ?? 1));",
+          '',
+        ].join('\n'),
+      );
+      await chmod(claudeWrapper, 0o755);
 
       const active = await startNet({
         nodes: 1,
-        env: () => ({ ...gitIdentityEnv, SOLODAWN_FAKE_CLAUDE_SCRIPT: claudePath }),
+        env: () => ({
+          ...gitIdentityEnv,
+          PATH: `${wrapperDir}${delimiter}${bin}${delimiter}${process.env.PATH ?? ''}`,
+          SOLODAWN_FAKE_CLAUDE_SCRIPT: claudePath,
+        }),
       });
       net = active;
       const direct = await startDirectSurface(active.rendezvous, inject('browser'));
@@ -763,10 +781,15 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await poll(() => decisionCard.locator('.opt.chosen').textContent()).toContain('Chosen');
       await poll(() => page.locator('.chat nav.needbar').count()).toBe(0);
 
-      // Turn 2 confirms receipt of both the approval and the chosen decision option.
+      // Turn 2 confirms receipt of both the approval and the chosen decision option, and the
+      // underlying CLI stdin received the formatted decision choice.
       await poll(() => page.locator('.line .msg .text').allTextContents()).toContain(
         'Confirmed approval and selected option B: SQLite table.',
       );
+      const stdinLines = (await readFile(stdinLog, 'utf8')).trim().split('\n');
+      expect(stdinLines).toHaveLength(2);
+      expect(stdinLines[1]).toContain('Which caching backend should we ship?');
+      expect(stdinLines[1]).toContain('Choice: B (SQLite table)');
     },
   );
 });
