@@ -1,6 +1,7 @@
 package home_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -19,9 +20,27 @@ func (d peopleDisk) OtherMember(string) bool { return d.other }
 
 func peopleApply(t *testing.T, s *home.State, d home.Disk, by identity.Key, join *home.Joining, typ, fields string) home.Result {
 	t.Helper()
-	res, err := home.Commands.ApplyJoining(s, d, receipts{}, signed(by, typ, 180, fields), join, now)
-	equal(t, err, nil)
-	return res
+	env := signed(by, typ, 180, fields)
+	if join == nil {
+		res, err := home.Commands.Apply(s, d, receipts{}, env, now)
+		equal(t, err, nil)
+		return res
+	}
+	c := home.Command{Env: env, Disk: d, Joining: join, Now: clock, Who: home.Who{Device: by.ID()}}
+	equal(t, json.Unmarshal([]byte(env.Payload), &c.PayloadHeader), nil)
+	if join.Log != nil && join.Log.Valid(by.ID()) {
+		c.Who.User = join.Log.User
+		for id, person := range s.People {
+			if person.User == c.Who.User {
+				c.Who.Human = id
+			}
+		}
+	}
+	res, refusal := home.Commands["join"](s, c)
+	if refusal != nil {
+		return home.Result{Answer: store.Outcome{Code: refusal.Code}}
+	}
+	return s.Seal(res)
 }
 
 func TestPeopleJoin(t *testing.T) {
@@ -139,12 +158,13 @@ func TestPeopleRemovalCascades(t *testing.T) {
 		res := peopleApply(t, s, d, browser, nil, "member", fmt.Sprintf(`,"op":"remove","id":%q`, person.ID))
 		equal(t, res.Answer, store.Outcome{OK: true})
 		equal(t, res.GroupsChanged, true)
-		wantRows, wantWrites := 6, 1
+		wantWrites := 1
 		if other {
-			wantRows, wantWrites = 5, 0
+			wantWrites = 0
 		}
-		equal(t, len(res.Rows), wantRows)
+		equal(t, len(res.Rows), 6)
 		equal(t, len(res.Writes), wantWrites)
+		equal(t, res.Rows[4].Value(), proto.GoneRow{RowHeader: proto.RowHeader{Type: "device", ID: person.User + ":1", Seq: 15}, Gone: true})
 		msg := res.Rows[len(res.Rows)-1].Value().(proto.MsgRow)
 		equal(t, string(msg.Body), fmt.Sprintf(`{"code":"member_removed","user":%q,"name":"guest-user","by":%q}`, person.User, grpOwnerID(groupID)))
 		noSec := res.Rows[2].Value().(proto.MsgRow)
@@ -153,6 +173,7 @@ func TestPeopleRemovalCascades(t *testing.T) {
 			t.Fatal("system messages share an id")
 		}
 		s.Commit(res)
+		equal(t, s.Logs[person.User], (*identity.Log)(nil))
 		equal(t, s.Group.Secretary, "")
 		equal(t, s.Serves(device(6).ID()), false)
 		equal(t, len(s.People), 2)
