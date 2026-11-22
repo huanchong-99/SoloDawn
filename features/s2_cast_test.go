@@ -116,6 +116,10 @@ func s2RunForge(dir string, args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	if err := s2WatchForgeGit(dir, wd, args); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	fmt.Fprint(os.Stdout, reply.Stdout)
 	fmt.Fprint(os.Stderr, reply.Stderr)
 	return reply.Exit
@@ -176,6 +180,13 @@ func s2RunFakeCLI(vendor, version, logPath string, args []string) int {
 	if slices.Equal(args, []string{"--version"}) {
 		fmt.Fprintln(os.Stdout, version)
 		return 0
+	}
+	if vendor == s2QTeamCLI && s2WatchInteractive(args) {
+		return s2RunWatchInteractive()
+	}
+	if err := s2PrepareForgeTurn(vendor); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
 	obs := newS2CLIObserver(vendor, logPath, args)
 	if s2ScriptExists(vendor) {

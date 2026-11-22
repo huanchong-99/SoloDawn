@@ -21,6 +21,7 @@ func (d cardTestDisk) Msg(id string) (proto.MsgRow, bool) {
 }
 
 func (d cardTestDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
+func (d cardTestDisk) TypedNotes(string) []proto.NoteRow         { return nil }
 func (d cardTestDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d cardTestDisk) Pending() []proto.MsgRow                   { return d }
 func (d cardTestDisk) Queued() []store.Item                      { return nil }
