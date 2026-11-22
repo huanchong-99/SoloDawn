@@ -46,6 +46,7 @@ type dispatchWorld struct {
 	opened   map[string]chan struct{}
 	closed   map[string]chan struct{}
 	received chan []byte // messages the browser got on any channel but ctl
+	ctl      chan json.RawMessage
 }
 
 func dispatchSteps(sc *godog.ScenarioContext) {
@@ -102,35 +103,9 @@ func (w *dispatchWorld) relayed(_ context.Context, _ string, env proto.Envelope)
 // connect offers the node a connection with ctl, as a browser does.
 func (w *dispatchWorld) connect() error {
 	ice := []webrtc.ICEServer{{URLs: w.ice[0].URLs, Username: w.ice[0].Username, Credential: w.ice[0].Credential}}
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{ICEServers: ice, ICETransportPolicy: webrtc.ICETransportPolicyRelay})
-	if err != nil {
-		return err
-	}
-	w.pc, w.channels, w.opened, w.closed, w.received = pc, map[string]*webrtc.DataChannel{}, map[string]chan struct{}{}, map[string]chan struct{}{}, make(chan []byte, 4)
-	w.cleanup(func() { pc.Close() })
-	if err := w.channel("ctl"); err != nil {
-		return err
-	}
 	conn := randomConn()
-	pc.OnICECandidate(func(i *webrtc.ICECandidate) {
-		if i != nil {
-			w.send(proto.ICECandidate{SignalHeader: w.header("ice", conn), Candidate: i.ToJSON().Candidate, MID: i.SDPMid}, nil)
-		}
-	})
-	offer, err := pc.CreateOffer(nil)
-	if err == nil {
-		err = pc.SetLocalDescription(offer)
-	}
-	var answer proto.Answer
-	err = errors.Join(err, w.send(proto.Offer{SignalHeader: w.header("offer", conn), SDP: offer.SDP}, &answer))
-	if err == nil {
-		err = pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: answer.SDP})
-	}
-	if err != nil {
-		return err
-	}
-	go w.candidates()
-	if err := w.wait(w.opened["ctl"]); err != nil {
+	header := func(kind string) proto.SignalHeader { return w.header(kind, conn) }
+	if err := w.connectRTC(webrtc.Configuration{ICEServers: ice, ICETransportPolicy: webrtc.ICETransportPolicyRelay}, header, w.send); err != nil {
 		return err
 	}
 	select {
@@ -139,6 +114,42 @@ func (w *dispatchWorld) connect() error {
 	case w.served = <-w.accepted:
 		return nil
 	}
+}
+
+func (w *dispatchWorld) connectRTC(cfg webrtc.Configuration, header func(string) proto.SignalHeader, send func(any, *proto.Answer) error) error {
+	pc, err := webrtc.NewPeerConnection(cfg)
+	if err != nil {
+		return err
+	}
+	w.pc, w.channels, w.opened, w.closed, w.received = pc, map[string]*webrtc.DataChannel{}, map[string]chan struct{}{}, map[string]chan struct{}{}, make(chan []byte, 32)
+	w.ctl = make(chan json.RawMessage, 128)
+	w.cleanup(func() { pc.Close() })
+	if err := w.channel("ctl"); err != nil {
+		return err
+	}
+	pc.OnICECandidate(func(i *webrtc.ICECandidate) {
+		if i != nil {
+			send(proto.ICECandidate{SignalHeader: header("ice"), Candidate: i.ToJSON().Candidate, MID: i.SDPMid}, nil)
+		}
+	})
+	if err := w.negotiate(header, send); err != nil {
+		return err
+	}
+	go w.candidates()
+	return w.wait(w.opened["ctl"])
+}
+
+func (w *dispatchWorld) negotiate(header func(string) proto.SignalHeader, send func(any, *proto.Answer) error) error {
+	offer, err := w.pc.CreateOffer(nil)
+	if err == nil {
+		err = w.pc.SetLocalDescription(offer)
+	}
+	var answer proto.Answer
+	err = errors.Join(err, send(proto.Offer{SignalHeader: header("offer"), SDP: offer.SDP}, &answer))
+	if err == nil {
+		err = w.pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: answer.SDP})
+	}
+	return err
 }
 
 func randomConn() string {
@@ -198,6 +209,13 @@ func (w *dispatchWorld) channel(label string) error {
 	dc.OnClose(func() { close(closed) })
 	if label != "ctl" {
 		dc.OnMessage(func(m webrtc.DataChannelMessage) { w.received <- m.Data })
+	} else {
+		dc.OnMessage(func(m webrtc.DataChannelMessage) {
+			select {
+			case w.ctl <- json.RawMessage(m.Data):
+			case <-w.ctx.Done():
+			}
+		})
 	}
 	return nil
 }
@@ -247,6 +265,10 @@ func (w *dispatchWorld) crossing() error {
 			return fmt.Errorf("the stream read %q", got)
 		}
 	}
+	return w.streamOutput(out)
+}
+
+func (w *dispatchWorld) streamOutput(out string) error {
 	if _, err := w.stream.Write([]byte(out)); err != nil {
 		return err
 	}

@@ -36,7 +36,8 @@ func (d *mrgDisk) Pending() []proto.MsgRow {
 	return d.pending
 }
 
-func (*mrgDisk) Queued() []store.Item { return nil }
+func (*mrgDisk) Queued() []store.Item    { return nil }
+func (*mrgDisk) OtherMember(string) bool { return false }
 
 func mrgState(t *testing.T) *home.State {
 	t.Helper()
