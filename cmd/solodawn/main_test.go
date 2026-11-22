@@ -60,6 +60,8 @@ func TestRun(t *testing.T) {
 		{[]string{"pair", "secret", "--other", "name"}, 2, "", usage},
 		{[]string{"pair", "secret", "--rendezvous"}, 2, "", usage},
 		{[]string{"pair", "secret", "extra"}, 2, "", usage},
+		{[]string{"mcp"}, 2, "", usage},
+		{[]string{"mcp", "--token", ""}, 2, "", usage},
 	} {
 		var stdout, stderr bytes.Buffer
 		code := run(tc.args, &stdout, &stderr)
@@ -198,5 +200,26 @@ func TestRelayFlags(t *testing.T) {
 		if code != 1 || stderr.String() != "stopped\n" {
 			t.Fatal(code, stderr.String())
 		}
+	}
+}
+
+func TestMCPRoundTrip(t *testing.T) {
+	l := testListener(t, testDataDir(t))
+	received := make(chan string, 1)
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		line, _ := bufio.NewReader(conn).ReadString('\n')
+		received <- line
+	}()
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"mcp", "--token", "tok-9"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("mcp: code %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	}
+	if got := <-received; got != "{\"mcp\":\"tok-9\"}\n" {
+		t.Fatalf("mcp opening = %q", got)
 	}
 }

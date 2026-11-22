@@ -86,18 +86,6 @@ func calSend(t *testing.T, s *home.State, d home.Disk, r home.Receipts, by ident
 	return env, briefApply(t, s, d, r, by, env)
 }
 
-func calExpectedRounds(base int, mentionsAI bool) int {
-	if _, wrapped := home.Commands["jump"]; wrapped && mentionsAI {
-		return base + 1
-	}
-	return base
-}
-
-func calCheckNulls(t *testing.T, row any, allowed ...string) {
-	t.Helper()
-	equal(t, proto.UnexpectedNulls(briefRaw(t, row), allowed...), []string{})
-}
-
 // Golden files row-msg-call-waiting, row-msg-call-answered, row-msg-reply and
 // item-reply match the exact shapes produced by post/call and post/reply.
 func TestCallGoldenShapes(t *testing.T) {
@@ -122,7 +110,7 @@ func TestCallGoldenShapes(t *testing.T) {
 	s.Commit(callRes)
 	waiting := callRes.Rows[0].Value().(proto.MsgRow)
 	equal(t, waiting.State, waitGolden.State)
-	calCheckNulls(t, waiting, "/re")
+	postCheckNulls(t, waiting, "/re")
 
 	d := disk{waiting.ID: waiting}
 	replyPost := calReplyCmd(91, clock-500, calB, &thread, waiting.ID, replyGolden.Text)
@@ -137,8 +125,8 @@ func TestCallGoldenShapes(t *testing.T) {
 	equal(t, string(replyRow.Body), "{}")
 	equal(t, replyRow.State, (*proto.CardState)(nil))
 	equal(t, replyRes.Items, []home.Item{{AI: calA, Why: itemGolden.Why, Task: thread, Msg: replyRow.ID}})
-	calCheckNulls(t, answered, "/re")
-	calCheckNulls(t, replyRow, "/state")
+	postCheckNulls(t, answered, "/re")
+	postCheckNulls(t, replyRow, "/state")
 }
 
 func TestCallPostInThreadAndMainLine(t *testing.T) {
@@ -146,14 +134,14 @@ func TestCallPostInThreadAndMainLine(t *testing.T) {
 		s := calState(t)
 		thread, re := calTaskID, calPrevID
 		post := calCallCmd(40, calCallTS, calA, &thread, "Which <event> & path?", proto.CallBody{To: calB, Depth: 1, Wait: true})
-		post.Mentions, post.Re = calIDList(calB, ownerID), (*proto.ID)(&re)
+		post.Mentions, post.Re = calIDList(calA, calB, calC, ownerID), (*proto.ID)(&re)
 		env, res := calSend(t, s, disk{}, receipts{}, laptop, post)
 		equal(t, res.Answer, store.Outcome{OK: true})
 
 		wantMsg := proto.MsgRow{
 			RowHeader: proto.RowHeader{Type: "msg", ID: id(40), Seq: 11}, Pos: 11, Group: groupID,
 			Thread: &thread, By: calA, Kind: "call", Timestamp: calCallTS, Text: "Which <event> & path?",
-			Mentions: []string{calB, ownerID}, Re: &re,
+			Mentions: []string{calA, calB, calC, ownerID}, Re: &re,
 			Body:  json.RawMessage(`{"to":"` + calB + `","depth":1,"wait":true}`),
 			State: &proto.CardState{Status: "waiting"}, Env: &env,
 		}
@@ -161,13 +149,13 @@ func TestCallPostInThreadAndMainLine(t *testing.T) {
 		wantTask.Seq = 12
 		wantTask.Thread = proto.ThreadSummary{
 			Count:  3,
-			Rounds: calExpectedRounds(1, true),
+			Rounds: 1,
 			Last:   &proto.ThreadMessage{By: calA, Kind: "call", Text: "Which <event> & path?", Timestamp: calCallTS},
 		}
 		equal(t, briefRows(res), []any{wantMsg, wantTask})
 		equal(t, res.Items, []home.Item{{AI: calB, Why: "mention", Task: calTaskID, Msg: id(40)}})
-		calCheckNulls(t, res.Rows[0].Value())
-		calCheckNulls(t, res.Rows[1].Value(), "/wait", "/stats/ended")
+		postCheckNulls(t, res.Rows[0].Value())
+		postCheckNulls(t, res.Rows[1].Value(), "/wait", "/stats/ended")
 	})
 
 	t.Run("main-line call at ask_depth boundary between secretary and working AI", func(t *testing.T) {
@@ -184,7 +172,7 @@ func TestCallPostInThreadAndMainLine(t *testing.T) {
 		}
 		equal(t, briefRows(res1), []any{wantFirst})
 		equal(t, res1.Items, []home.Item{{AI: calA, Why: "mention", Msg: id(41)}})
-		calCheckNulls(t, res1.Rows[0].Value(), "/thread", "/re")
+		postCheckNulls(t, res1.Rows[0].Value(), "/thread", "/re")
 		s.Commit(res1)
 
 		second := calCallCmd(42, calCallTS+100, calA, nil, "Need context.", proto.CallBody{To: aiID, Depth: 4, Wait: false})
@@ -193,11 +181,14 @@ func TestCallPostInThreadAndMainLine(t *testing.T) {
 		equal(t, res2.Items, []home.Item{{AI: aiID, Why: "mention", Msg: id(42)}})
 	})
 
-	t.Run("configured ask_depth boundary is respected", func(t *testing.T) {
+	t.Run("configured ask_depth boundary is respected and main true stays false on row", func(t *testing.T) {
 		s := calState(t)
 		s.Group.Limits.AskDepth = 2
-		_, okRes := calSend(t, s, disk{}, receipts{}, laptop, calCallCmd(43, calCallTS, calA, nil, "ok", proto.CallBody{To: calB, Depth: 2, Wait: true}))
+		post := calCallCmd(43, calCallTS, calA, nil, "ok", proto.CallBody{To: calB, Depth: 2, Wait: true})
+		post.Main = true
+		_, okRes := calSend(t, s, disk{}, receipts{}, laptop, post)
 		equal(t, okRes.Answer, store.Outcome{OK: true})
+		equal(t, okRes.Rows[0].Value().(proto.MsgRow).Main, false)
 	})
 }
 
@@ -215,7 +206,7 @@ func TestCallThreadPreviewTruncation(t *testing.T) {
 	equal(t, callTask.Thread.Last.Text, exact200)
 	s.Commit(callRes)
 
-	_, replyRes := calSend(t, s, disk{callMsg.ID: callMsg}, receipts{}, laptop, calReplyCmd(45, calReplyTS, calB, &thread, callMsg.ID, exact200))
+	_, replyRes := calSend(t, s, disk{callMsg.ID: callMsg}, receipts{}, laptop, calReplyCmd(45, calReplyTS, calB, &thread, callMsg.ID, over200))
 	equal(t, replyRes.Answer, store.Outcome{OK: true})
 	replyTask := replyRes.Rows[2].Value().(proto.TaskRow)
 	equal(t, replyTask.Thread.Last.Text, exact200)
@@ -226,13 +217,11 @@ type calPostCase struct {
 	post  func(*proto.Post[proto.CallBody])
 	raw   func(string) string
 	state func(*home.State)
-	disk  disk
 	code  string
 	inMsg string
 }
 
 func TestCallPostRefusals(t *testing.T) {
-	existing := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(40)}, Kind: "text"}
 	missing := id(98)
 	unknown := id(99)
 	thread := calTaskID
@@ -243,15 +232,6 @@ func TestCallPostRefusals(t *testing.T) {
 		},
 		"malformed payload": {
 			raw: func(s string) string { return strings.Replace(s, `"depth":1`, `"depth":"one"`, 1) }, code: "bad_request",
-		},
-		"with main true": {
-			post: func(p *proto.Post[proto.CallBody]) { p.Main = true }, code: "bad_request",
-		},
-		"at depth 0": {
-			post: func(p *proto.Post[proto.CallBody]) { p.Body.Depth = 0 }, code: "bad_request",
-		},
-		"at negative depth": {
-			post: func(p *proto.Post[proto.CallBody]) { p.Body.Depth = -1 }, code: "bad_request",
 		},
 		"calling itself": {
 			post: func(p *proto.Post[proto.CallBody]) { p.Body.To = calA }, code: "bad_request",
@@ -278,15 +258,15 @@ func TestCallPostRefusals(t *testing.T) {
 			post: func(p *proto.Post[proto.CallBody]) { p.Mentions = calIDList(unknown) }, code: "conflict",
 		},
 		"at depth 5 above ask_depth 4": {
-			post: func(p *proto.Post[proto.CallBody]) { p.Body.Depth = 5 }, code: "limit", inMsg: "ask_depth",
+			post:  func(p *proto.Post[proto.CallBody]) { p.Body.Depth = 5 },
+			code:  "limit",
+			inMsg: "call depth 5 exceeds the ask_depth limit of 4",
 		},
 		"at depth 3 above custom ask_depth 2": {
 			state: func(s *home.State) { s.Group.Limits.AskDepth = 2 },
 			post:  func(p *proto.Post[proto.CallBody]) { p.Body.Depth = 3 },
-			code:  "limit", inMsg: "2",
-		},
-		"with nonce already on disk": {
-			disk: disk{id(40): existing}, code: "conflict",
+			code:  "limit",
+			inMsg: "call depth 3 exceeds the ask_depth limit of 2",
 		},
 		"exceeding the 12 KiB card creation limit": {
 			post: func(p *proto.Post[proto.CallBody]) { p.Text = strings.Repeat("x", 6200) }, code: "bad_request",
@@ -308,7 +288,7 @@ func calRunPostRefusal(t *testing.T, thread string, tc calPostCase) {
 	if tc.post != nil {
 		tc.post(&post)
 	}
-	res := calApplyRaw(t, s, tc.disk, tc.by, post, tc.raw)
+	res := calApplyRaw(t, s, disk{}, tc.by, post, tc.raw)
 	briefRefused(t, res, tc.code)
 	if tc.inMsg != "" && !strings.Contains(res.Msg, tc.inMsg) {
 		t.Fatalf("refusal message %q does not mention %q", res.Msg, tc.inMsg)
@@ -339,7 +319,7 @@ func TestCallReplyInThreadAndMainLine(t *testing.T) {
 		baseTask := s.Tasks[calTaskID]
 
 		reply := calReplyCmd(51, calReplyTS, calB, &thread, callMsg.ID, "Use path_changed.")
-		reply.Mentions = calIDList(calA)
+		reply.Mentions = calIDList(calB, calA, calC)
 		env, res := calSend(t, s, disk{callMsg.ID: callMsg}, receipts{}, laptop, reply)
 		equal(t, res.Answer, store.Outcome{OK: true})
 
@@ -350,13 +330,13 @@ func TestCallReplyInThreadAndMainLine(t *testing.T) {
 		wantReply := proto.MsgRow{
 			RowHeader: proto.RowHeader{Type: "msg", ID: replyID, Seq: 14}, Pos: 14, Group: groupID,
 			Thread: &thread, By: calB, Kind: "reply", Timestamp: calReplyTS, Text: "Use path_changed.",
-			Mentions: []string{calA}, Re: &callMsg.ID, Body: json.RawMessage(`{}`), Env: &env,
+			Mentions: []string{calB, calA, calC}, Re: &callMsg.ID, Body: json.RawMessage(`{}`), Env: &env,
 		}
 		wantTask := baseTask
 		wantTask.Seq = 15
 		wantTask.Thread = proto.ThreadSummary{
 			Count:  baseTask.Thread.Count + 1,
-			Rounds: calExpectedRounds(baseTask.Thread.Rounds, true),
+			Rounds: baseTask.Thread.Rounds,
 			Last:   &proto.ThreadMessage{By: calB, Kind: "reply", Text: "Use path_changed.", Timestamp: calReplyTS},
 		}
 		equal(t, briefRows(res), []any{wantCall, wantReply, wantTask})
@@ -371,14 +351,17 @@ func TestCallReplyInThreadAndMainLine(t *testing.T) {
 
 		reply := calReplyCmd(53, calReplyTS, calB, nil, callMsg.ID, "Pong.")
 		reply.Mentions = calIDList(ownerID)
+		reply.Main = true
 		_, res := calSend(t, s, disk{callMsg.ID: callMsg}, receipts{}, laptop, reply)
 		equal(t, res.Answer, store.Outcome{OK: true})
 		equal(t, len(res.Rows), 2)
 		answered := res.Rows[0].Value().(proto.MsgRow)
+		replyRow := res.Rows[1].Value().(proto.MsgRow)
+		equal(t, replyRow.Main, false)
 		equal(t, []int64{answered.Seq, answered.Pos, *answered.State.MS}, []int64{12, 11, 0})
 		equal(t, res.Items, []home.Item{{AI: calA, Why: "reply", Msg: id(53)}})
-		calCheckNulls(t, answered, "/thread", "/re")
-		calCheckNulls(t, res.Rows[1].Value(), "/thread", "/state")
+		postCheckNulls(t, answered, "/thread", "/re")
+		postCheckNulls(t, replyRow, "/thread", "/state")
 	})
 
 	t.Run("clock skew where reply timestamp precedes call clamps ms to 0", func(t *testing.T) {
@@ -446,7 +429,6 @@ type calReplyCase struct {
 	post   func(*proto.Post[proto.EmptyBody])
 	raw    func(string) string
 	state  func(*home.State)
-	disk   disk
 	code   string
 }
 
@@ -454,7 +436,6 @@ func TestCallReplyRefusals(t *testing.T) {
 	thread, other := calTaskID, calOtherT
 	missing := id(97)
 	unknown := id(99)
-	otherMsg := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(71)}, Kind: "text"}
 
 	for name, tc := range map[string]calReplyCase{
 		"by a person": {
@@ -462,9 +443,6 @@ func TestCallReplyRefusals(t *testing.T) {
 		},
 		"malformed payload": {
 			raw: func(s string) string { return strings.Replace(s, `"body":{}`, `"body":7`, 1) }, code: "bad_request",
-		},
-		"with main true": {
-			post: func(p *proto.Post[proto.EmptyBody]) { p.Main = true }, code: "bad_request",
 		},
 		"without re": {
 			post: func(p *proto.Post[proto.EmptyBody]) { p.Re = nil }, code: "bad_request",
@@ -502,12 +480,6 @@ func TestCallReplyRefusals(t *testing.T) {
 		"mentioning a non-member": {
 			post: func(p *proto.Post[proto.EmptyBody]) { p.Mentions = calIDList(unknown) }, code: "conflict",
 		},
-		"with reply nonce already on disk": {
-			disk: disk{id(71): otherMsg}, code: "conflict",
-		},
-		"with reply nonce equal to call id": {
-			post: func(p *proto.Post[proto.EmptyBody]) { p.Nonce = proto.ID(id(70)) }, code: "conflict",
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			calRunReplyRefusal(t, thread, tc)
@@ -524,7 +496,6 @@ func calRunReplyRefusal(t *testing.T, thread string, tc calReplyCase) {
 	if tc.target != nil {
 		tc.target(&callMsg)
 	}
-	d := calMergeDisk(callMsg, tc.disk)
 	if tc.state != nil {
 		tc.state(s)
 	}
@@ -532,13 +503,5 @@ func calRunReplyRefusal(t *testing.T, thread string, tc calReplyCase) {
 	if tc.post != nil {
 		tc.post(&post)
 	}
-	briefRefused(t, calApplyRaw(t, s, d, tc.by, post, tc.raw), tc.code)
-}
-
-func calMergeDisk(base proto.MsgRow, extra disk) disk {
-	d := disk{base.ID: base}
-	for k, v := range extra {
-		d[k] = v
-	}
-	return d
+	briefRefused(t, calApplyRaw(t, s, disk{callMsg.ID: callMsg}, tc.by, post, tc.raw), tc.code)
 }

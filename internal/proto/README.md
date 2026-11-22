@@ -40,8 +40,11 @@ host command with `HostCommand` (`to` is always there).
 - `MemberStatus[E]` carries a host's fact as one of the event types, which are
   the system bodies without `ai`. Read it as `MemberStatus[SystemCode]` first to
   learn the code.
-- An inbox item's authority is its envelope, whose payload is an `Item`. `Msg`
-  beside it stays as JSON, like a row in a batch; `Task` is a `TaskRow`.
+- An `InboxItem` holds a plain `Item` object (`Item`), with no envelope or
+  `cause`. `Msg` beside it stays as JSON, like a row in a batch; `Task` is a
+  `TaskRow`.
+- `NewNonce` makes a random 16-byte `ID` in canonical base64url spelling
+  ([envelope.md, section 1](../../planning/contracts/envelope.md)).
 - `MakeSlug` makes a task's slug from its title, by the rule of
   [local.md, section 7](../../planning/contracts/local.md). Only the home calls it.
 

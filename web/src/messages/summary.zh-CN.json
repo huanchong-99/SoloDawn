@@ -1,0 +1,14 @@
+{
+  "summary.kind": "完成总结",
+  "summary.merged": "已合并",
+  "summary.score": "评审得分",
+  "summary.rounds": "评审",
+  "summary.rounds.one": "{n} 轮",
+  "summary.rounds.many": "{n} 轮",
+  "summary.time": "用时",
+  "summary.minutes": "{m} 分",
+  "summary.hours": "{h} 小时",
+  "summary.hours_minutes": "{h} 小时 {m} 分",
+  "summary.pr": "PR #{n}",
+  "summary.changes": "改动"
+}

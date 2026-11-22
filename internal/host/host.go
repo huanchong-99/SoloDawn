@@ -161,6 +161,19 @@ func (h *Host) Attach(device string, home Home) {
 	}
 }
 
+// Settled holds what is to wait for background work of this host before its
+// store closes. Each entry has the name of its unit; Settle calls them in the
+// order of their names.
+var Settled = map[string]func(h *Host){}
+
+// Settle waits for background work of this host to finish before its store
+// closes.
+func (h *Host) Settle() {
+	for _, settle := range inOrder(Settled) {
+		settle(h)
+	}
+}
+
 // Home returns the connection to the home with that device id while it is
 // open.
 func (h *Host) Home(device string) (Home, bool) {
@@ -182,6 +195,8 @@ func (h *Host) Home(device string) (Home, bool) {
 // section 4).
 const ctlLimit = 61_440
 
+var errHomeUnreachable = &Error{Code: "home_unreachable", Message: "the home of that group is not connected"}
+
 // Command signs payload, the JSON text of a command, with the node's key and
 // sends it to the home with that device id (contracts/datachannel.md section
 // 5). It returns the home's answer when the command was accepted, the home's
@@ -189,10 +204,9 @@ const ctlLimit = 61_440
 // came (flows/agent-turn.md F). A command too large for a ctl message is not
 // sent: it fails with bad_request, which names the limit and the size.
 func (h *Host) Command(ctx context.Context, device, payload string) (json.RawMessage, error) {
-	unreachable := &Error{"home_unreachable", "the home of that group is not connected"}
 	home, ok := h.Home(device)
 	if !ok {
-		return nil, unreachable
+		return nil, errHomeUnreachable
 	}
 	env := h.Key.Sign(payload)
 	frame := func(id int64) any {
@@ -203,7 +217,7 @@ func (h *Host) Command(ctx context.Context, device, payload string) (json.RawMes
 	}
 	answer, err := home.Request(ctx, frame)
 	if err != nil {
-		return nil, unreachable
+		return nil, errHomeUnreachable
 	}
 	var refused proto.ErrorResponse
 	if proto.Decode(answer, &refused) == nil {
@@ -429,7 +443,7 @@ type Launch struct {
 	Level        int           // 1, 2 or 3 (contracts/drivers.md section 1)
 	Shim         []string      // the command line of the MCP server of this start: Host.Shim, then --token and the session token
 	Instructions string        // the text of the session kind (contracts/drivers.md section 4)
-	RepoConfig   bool          // load the repository's own AI configuration (R-45)
+	RepoConfig   bool          // load the repository's own AI configuration: task and review sessions only (R-45)
 	ToolTimeout  time.Duration // how long a call of one of the node's tools may last
 }
 
@@ -495,6 +509,8 @@ type Ask struct {
 	Command  string          // the request as the CLI presented it
 	Why      string          // the justification the CLI attached; "" without one
 	Input    json.RawMessage // what the digest of the approval record covers (flows/approval.md step 5)
+	// Reply answers a CLI user-input question by question id, or nil when unanswered.
+	Reply func(map[string][]string) error
 }
 
 // Listeners are told every event of every session's CLI. Each has the name
@@ -525,6 +541,9 @@ type Runtime interface {
 	// Answer allows or declines a permission request that the CLI of a
 	// session made: the event Asked.
 	Answer(h *Host, key SessionKey, ask string, allow bool) error
+	// Close closes any open CLI process for key and waits for it to exit
+	// (flows/agent-turn.md C-6, D17, G).
+	Close(h *Host, key SessionKey)
 }
 
 // The hooks through which the units of the session runtime call each other.

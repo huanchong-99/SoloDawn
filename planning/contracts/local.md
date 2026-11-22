@@ -98,7 +98,8 @@ The command reads lines until one has `"done":true`. That line must carry
 command, like an error.
 
 A session token is 16 random bytes created when the node starts a CLI
-process and forgotten when that process exits.
+process and forgotten when that process exits. A connection whose session
+token is unknown or forgotten is closed at once.
 
 ## 4 to 6. Moved
 
@@ -334,12 +335,10 @@ is not applied to what people type.
 
 ## 10. Local web client
 
-`http://localhost:47800/` serves the embedded web client. For the static
-files, requests whose `Host` header is not `localhost` or `127.0.0.1` are
-refused. `/rv` on the same port is served on the node's network addresses
-too and is authenticated by its challenge (`contracts/rendezvous.md`
-section 1). The page gets no special trust: it pairs like any browser
-(`solodawn open`).
+`http://localhost:47800/` serves the embedded web client. `/rv` on the same
+port is served on the node's network addresses too and is authenticated by
+its challenge (`contracts/rendezvous.md` section 1). The page gets no
+special trust: it pairs like any browser (`solodawn open`).
 
 [ak]: https://platform.claude.com/docs/en/get-api-key
 [oa]: https://github.com/openai/openai-openapi/blob/manual_spec/openapi.yaml

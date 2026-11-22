@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync/atomic"
+	"testing"
 	"testing/fstest"
 	"time"
 
@@ -64,6 +65,7 @@ const rvICE = `{"t":"ice","ice":[],"ttl":3600}`
 
 // rvWorld is one scenario: a rendezvous and the connections of up to three devices.
 type rvWorld struct {
+	t          *testing.T
 	bin        string
 	http, ws   string
 	listener   *rvListener
@@ -81,15 +83,15 @@ type rvWorld struct {
 
 func init() {
 	stepSets["rendezvous"] = func(sc *godog.ScenarioContext, f fixtures) {
-		rendezvousSteps(sc, f.bin)
+		rendezvousSteps(sc, f)
 	}
 }
 
 // rvKey gives the other step sets of a scenario its rendezvous world.
 type rvKey struct{}
 
-func rendezvousSteps(sc *godog.ScenarioContext, bin string) {
-	w := &rvWorld{bin: bin, conns: map[string]*websocket.Conn{}, nonces: map[string]string{}}
+func rendezvousSteps(sc *godog.ScenarioContext, f fixtures) {
+	w := &rvWorld{t: f.t, bin: f.bin, conns: map[string]*websocket.Conn{}, nonces: map[string]string{}}
 	const device = `(browser|node|tablet)`
 	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, rvKey{}, w), nil
@@ -161,6 +163,10 @@ func (w *rvWorld) local() {
 	w.http, w.ws = srv.URL, "ws"+strings.TrimPrefix(srv.URL, "http")+"/rv"
 }
 
+func (w *rvWorld) addCleanup(undo func()) {
+	w.cleanup = append(w.cleanup, undo)
+}
+
 func (w *rvWorld) command() error {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -169,10 +175,9 @@ func (w *rvWorld) command() error {
 	addr := l.Addr().String()
 	l.Close()
 	cmd := exec.Command(w.bin, "rendezvous", "--listen", addr)
-	if err := cmd.Start(); err != nil {
+	if err := killManagedCmd(w.t, w.addCleanup, cmd, nil); err != nil {
 		return err
 	}
-	w.cleanup = append(w.cleanup, func() { cmd.Process.Kill(); cmd.Wait() })
 	w.ws = "ws://" + addr + "/rv"
 	return rvListening(addr)
 }

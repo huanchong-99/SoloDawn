@@ -43,34 +43,21 @@ func homeSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^a group home with its owner as the only member$`, func() error { return w.start(cleanup) })
 	sc.Step(`^(the owner's browser|a device that no person owns|a device of a person who is no member) sends a command that writes a note$`, func(who string) error {
 		w.command = w.note(w.keys[who])
-		return w.send(w.keys[who])
+		return w.send()
 	})
-	sc.Step(`^the owner's browser sends the same command again$`, func() error { return w.send(w.keys["the owner's browser"]) })
-	sc.Step(`^a command that the owner's browser signed arrives on the connection of the owner's laptop$`, func() error {
-		w.command = w.note(w.keys["the owner's browser"])
-		return w.send(w.keys["the owner's laptop"])
-	})
+	sc.Step(`^the owner's browser sends the same command again$`, func() error { return w.send() })
 	sc.Step(`^the home has written (\d+) rows?$`, w.written)
 	sc.Step(`^both answers are the same success$`, w.sameSuccess)
 	sc.Step(`^the answer is the error "([^"]*)"$`, w.refusedWith)
-	sc.Step(`^the same command on the browser's own connection is still answered with success$`, func() error {
-		if err := w.send(w.keys["the owner's browser"]); err != nil {
-			return err
-		}
-		if _, ok := w.answers[len(w.answers)-1].(proto.CmdResult); !ok {
-			return fmt.Errorf("answered %+v", w.answers[len(w.answers)-1])
-		}
-		return w.written(1)
-	})
 }
 
-// start makes the home of a group whose owner has a browser, the node that
-// is the home, and a laptop; another person, who is no member, has one
-// device, and one device is in nobody's log.
+// start makes the home of a group whose owner has a browser and the node that
+// is the home; another person, who is no member, has one device, and one
+// device is in nobody's log.
 func (w *homeWorld) start(cleanup func(func())) error {
-	browser, node, laptop, guest := exampleKey("browser"), exampleKey("node"), exampleKey("laptop"), exampleKey("guest")
+	browser, node, guest := exampleKey("browser"), exampleKey("node"), exampleKey("guest")
 	w.keys = map[string]identity.Key{
-		"the owner's browser": browser, "the owner's laptop": laptop,
+		"the owner's browser":                   browser,
 		"a device of a person who is no member": guest, "a device that no person owns": exampleKey("stranger"),
 	}
 	db, err := store.Open(":memory:")
@@ -82,7 +69,7 @@ func (w *homeWorld) start(cleanup func(func())) error {
 
 	group, owner := string(exampleID("group")), string(exampleID("owner"))
 	w.state = home.NewState(group, node.ID(), browser.ID())
-	for _, devices := range [][]identity.Key{{browser, node, laptop}, {guest}} {
+	for _, devices := range [][]identity.Key{{browser, node}, {guest}} {
 		log, err := homeLog(devices)
 		if err != nil {
 			return err
@@ -129,16 +116,15 @@ func (w *homeWorld) note(by identity.Key) proto.Envelope {
 	return by.Sign(payload)
 }
 
-// send hands the scenario's command to the home as a request on the
-// connection of a device, in one transaction of the store, as the run loop
-// of a home does: the answer, then the rows with the sequence numbers the
-// store gives out.
-func (w *homeWorld) send(connection identity.Key) error {
+// send hands the scenario's command to the home as a request, in one
+// transaction of the store, as the run loop of a home does: the answer, then
+// the rows with the sequence numbers the store gives out.
+func (w *homeWorld) send() error {
 	var res home.Result
 	err := w.db.Write(func(tx *store.Tx) error {
 		var err error
 		// The command of these scenarios reads nothing from disk.
-		if res, err = w.table.Apply(w.state, nil, tx, connection.ID(), w.command, w.now); err != nil {
+		if res, err = w.table.Apply(w.state, nil, tx, w.command, w.now); err != nil {
 			return err
 		}
 		for _, row := range res.Rows {

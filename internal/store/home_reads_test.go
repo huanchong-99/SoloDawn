@@ -153,7 +153,7 @@ func TestHomeReadsWhatIsOnDiskOnly(t *testing.T) {
 func TestHomeReadsAndRetiresTheQueue(t *testing.T) {
 	s := openDB(t, ":memory:")
 	task := "task"
-	held := Item{Group: "g", AI: "ai", Host: "host", Why: "review", Task: &task, Cause: json.RawMessage(`{"p":"act","k":"person","s":"sig"}`), NotBefore: 50, Created: 10}
+	held := Item{Group: "g", AI: "ai", Host: "host", Why: "review", Task: &task, NotBefore: 50, Created: 10}
 	plain := Item{Group: "g", AI: "secretary", Host: "other", Why: "notice", Created: 20}
 	check(t, s.Write(func(tx *Tx) error {
 		for _, item := range []Item{held, {Group: "b", AI: "ai", Host: "host", Why: "notice"}, plain} {

@@ -3,7 +3,6 @@ package home
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
@@ -23,9 +22,7 @@ const (
 	calKindReply     = "reply"
 	calStatusWaiting = "waiting"
 	calStatusAnswer  = "answered"
-	calWhyMention    = "mention"
 	calWhyReply      = "reply"
-	calMaxPreview    = 200
 )
 
 // calCall stores a waiting call from an AI to another AI member and queues a
@@ -34,61 +31,44 @@ func calCall(s *State, c Command) (Result, *Refusal) {
 	if c.Who.AI == "" {
 		return Result{}, &Refusal{Code: "forbidden", Msg: "only an AI posts a call"}
 	}
-	var calPost proto.Post[proto.CallBody]
-	if calRefusal := c.Decode(&calPost); calRefusal != nil {
-		return Result{}, calRefusal
+	var p proto.Post[proto.CallBody]
+	if refusal := c.Decode(&p); refusal != nil {
+		return Result{}, refusal
 	}
-	if !calCallShape(calPost, c.Who.AI) {
-		return Result{}, &Refusal{Code: "bad_request", Msg: "the call post does not match the contract"}
+	if p.Body.To == c.Who.AI {
+		return Result{}, &Refusal{Code: "bad_request", Msg: "an AI cannot call itself"}
 	}
-	return s.calApplyCall(c, calPost)
+	return s.calApplyCall(c, p)
 }
 
-func calCallShape(calPost proto.Post[proto.CallBody], caller string) bool {
-	if calPost.Main || calPost.Body.Depth < 1 || calPost.Body.To == caller {
-		return false
+func (s *State) calApplyCall(c Command, p proto.Post[proto.CallBody]) (Result, *Refusal) {
+	mentions, refusal := s.postCheck(c.Who, calKindCall, false, p.Thread, p.Mentions)
+	if refusal != nil {
+		return Result{}, refusal
 	}
-	return calDistinct(calPost.Mentions)
-}
-
-func (s *State) calApplyCall(c Command, calPost proto.Post[proto.CallBody]) (Result, *Refusal) {
-	if !s.calThreadExists(calPost.Thread) {
-		return Result{}, &Refusal{Code: "not_found", Msg: "the call names no task"}
+	if _, ok := s.AIs[p.Body.To]; !ok {
+		return Result{}, &Refusal{Code: "conflict", Msg: "the callee is no AI member of the group"}
 	}
-	calList, calRefusal := s.calCallMembers(calPost.Body.To, calPost.Mentions)
-	if calRefusal != nil {
-		return Result{}, calRefusal
-	}
-	if calPost.Body.Depth > s.Group.Limits.AskDepth {
+	if p.Body.Depth > s.Group.Limits.AskDepth {
 		return Result{}, &Refusal{
 			Code: "limit",
-			Msg:  fmt.Sprintf("call depth %d exceeds the ask_depth limit of %d", calPost.Body.Depth, s.Group.Limits.AskDepth),
+			Msg:  fmt.Sprintf("call depth %d exceeds the ask_depth limit of %d", p.Body.Depth, s.Group.Limits.AskDepth),
 		}
 	}
-	return s.calWriteCall(c, calPost, calList)
+	return s.calWriteCall(c, p, mentions), nil
 }
 
-func (s *State) calCallMembers(callee string, raw []proto.ID) ([]string, *Refusal) {
-	if _, ok := s.AIs[callee]; !ok {
-		return nil, &Refusal{Code: "conflict", Msg: "the callee is no AI member of the group"}
-	}
-	return s.calMentions(raw)
-}
-
-func (s *State) calWriteCall(c Command, calPost proto.Post[proto.CallBody], calList []string) (Result, *Refusal) {
-	calID := string(c.Nonce)
-	if _, taken := c.Disk.Msg(calID); taken {
-		return Result{}, &Refusal{Code: "conflict", Msg: "a message with the id of the call exists"}
-	}
-	calThread := (*string)(calPost.Thread)
-	calMsg := proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: calID}, Group: s.ID, Thread: calThread,
-		By: c.Who.AI, Kind: calKindCall, Timestamp: c.Timestamp, Text: calPost.Text,
-		Mentions: calList, Re: (*string)(calPost.Re), Body: briefJSON(calPost.Body),
+func (s *State) calWriteCall(c Command, p proto.Post[proto.CallBody], mentions []string) Result {
+	id := string(c.Nonce)
+	thread := (*string)(p.Thread)
+	msg := proto.MsgRow{
+		RowHeader: proto.RowHeader{Type: "msg", ID: id}, Group: s.ID, Thread: thread,
+		By: c.Who.AI, Kind: calKindCall, Timestamp: c.Timestamp, Text: p.Text,
+		Mentions: mentions, Re: (*string)(p.Re), Body: briefJSON(p.Body),
 		State: &proto.CardState{Status: calStatusWaiting}, Env: &c.Env,
 	}
-	calItem := Item{AI: calPost.Body.To, Why: calWhyMention, Task: calOptText(calThread), Msg: calID}
-	return Result{Rows: s.calAppendTask([]Row{RowOf(calMsg)}, calMsg), Items: []Item{calItem}}, nil
+	item := Item{AI: p.Body.To, Why: postMentionWhy, Task: postTaskID(thread), Msg: id}
+	return Result{Rows: s.postRows(msg), Items: []Item{item}}
 }
 
 // calReply answers a waiting call addressed to the signing AI, records the
@@ -97,147 +77,68 @@ func calReply(s *State, c Command) (Result, *Refusal) {
 	if c.Who.AI == "" {
 		return Result{}, &Refusal{Code: "forbidden", Msg: "only an AI posts a reply"}
 	}
-	var calPost proto.Post[proto.EmptyBody]
-	if calRefusal := c.Decode(&calPost); calRefusal != nil {
-		return Result{}, calRefusal
+	var p proto.Post[proto.EmptyBody]
+	if refusal := c.Decode(&p); refusal != nil {
+		return Result{}, refusal
 	}
-	if !calReplyShape(calPost) {
-		return Result{}, &Refusal{Code: "bad_request", Msg: "the reply post does not match the contract"}
+	if p.Re == nil {
+		return Result{}, &Refusal{Code: "bad_request", Msg: "a reply names the call in re"}
 	}
-	return s.calApplyReply(c, calPost)
+	return s.calApplyReply(c, p)
 }
 
-func calReplyShape(calPost proto.Post[proto.EmptyBody]) bool {
-	if calPost.Main || calPost.Re == nil {
-		return false
+func (s *State) calApplyReply(c Command, p proto.Post[proto.EmptyBody]) (Result, *Refusal) {
+	target, refusal := calLoadWaiting(c.Disk, string(*p.Re), c.Who.AI)
+	if refusal != nil {
+		return Result{}, refusal
 	}
-	return calDistinct(calPost.Mentions)
+	if postTaskID((*string)(p.Thread)) != postTaskID(target.Thread) {
+		return Result{}, &Refusal{Code: "bad_request", Msg: "a reply belongs in the same thread or main line as its call"}
+	}
+	mentions, refusal := s.postCheck(c.Who, calKindReply, false, p.Thread, p.Mentions)
+	if refusal != nil {
+		return Result{}, refusal
+	}
+	return s.calWriteReply(c, p, target, mentions), nil
 }
 
-func (s *State) calApplyReply(c Command, calPost proto.Post[proto.EmptyBody]) (Result, *Refusal) {
-	calTarget, calRefusal := calLoadWaiting(c.Disk, string(*calPost.Re), c.Who.AI)
-	if calRefusal != nil {
-		return Result{}, calRefusal
-	}
-	if calRefusal := s.calReplyThread(calPost.Thread, calTarget.Thread); calRefusal != nil {
-		return Result{}, calRefusal
-	}
-	calList, calRefusal := s.calMentions(calPost.Mentions)
-	if calRefusal != nil {
-		return Result{}, calRefusal
-	}
-	return s.calWriteReply(c, calPost, calTarget, calList)
-}
-
-func calLoadWaiting(d Disk, calID, responder string) (proto.MsgRow, *Refusal) {
-	calTarget, ok := d.Msg(calID)
+func calLoadWaiting(d Disk, id, responder string) (proto.MsgRow, *Refusal) {
+	target, ok := d.Msg(id)
 	if !ok {
 		return proto.MsgRow{}, &Refusal{Code: "not_found", Msg: "the reply names no call message"}
 	}
-	if !calWaitingFor(calTarget, responder) {
+	if !calWaitingFor(target, responder) {
 		return proto.MsgRow{}, &Refusal{Code: "conflict", Msg: "the call is not waiting for this AI"}
 	}
-	return calTarget, nil
+	return target, nil
 }
 
-func calWaitingFor(calTarget proto.MsgRow, responder string) bool {
-	if calTarget.Kind != calKindCall || briefStatus(calTarget) != calStatusWaiting {
+func calWaitingFor(target proto.MsgRow, responder string) bool {
+	if target.Kind != calKindCall || briefStatus(target) != calStatusWaiting {
 		return false
 	}
-	var calBody proto.CallBody
-	json.Unmarshal(calTarget.Body, &calBody)
-	return calBody.To == responder
+	var body proto.CallBody
+	json.Unmarshal(target.Body, &body)
+	return body.To == responder
 }
 
-func (s *State) calReplyThread(got *proto.ID, want *string) *Refusal {
-	if calOptText((*string)(got)) != calOptText(want) {
-		return &Refusal{Code: "bad_request", Msg: "a reply belongs in the same thread or main line as its call"}
+func (s *State) calWriteReply(c Command, p proto.Post[proto.EmptyBody], target proto.MsgRow, mentions []string) Result {
+	replyID := string(c.Nonce)
+	elapsed := max(int64(0), c.Timestamp-target.Timestamp)
+	target.State = &proto.CardState{Status: calStatusAnswer, Reply: &replyID, MS: &elapsed}
+	thread := (*string)(p.Thread)
+	msg := proto.MsgRow{
+		RowHeader: proto.RowHeader{Type: "msg", ID: replyID}, Group: s.ID, Thread: thread,
+		By: c.Who.AI, Kind: calKindReply, Timestamp: c.Timestamp, Text: p.Text,
+		Mentions: mentions, Re: (*string)(p.Re), Body: briefJSON(p.Body), Env: &c.Env,
 	}
-	if !s.calThreadExists(got) {
-		return &Refusal{Code: "not_found", Msg: "the reply names no task"}
-	}
-	return nil
+	rows := append([]Row{RowOf(target)}, s.postRows(msg)...)
+	return Result{Rows: rows, Items: s.calReplyItems(target.By, postTaskID(thread), replyID)}
 }
 
-func (s *State) calWriteReply(c Command, calPost proto.Post[proto.EmptyBody], calTarget proto.MsgRow, calList []string) (Result, *Refusal) {
-	calReplyID := string(c.Nonce)
-	if _, taken := c.Disk.Msg(calReplyID); taken {
-		return Result{}, &Refusal{Code: "conflict", Msg: "a message with the id of the reply exists"}
-	}
-	calElapsed := max(int64(0), c.Timestamp-calTarget.Timestamp)
-	calTarget.State = &proto.CardState{Status: calStatusAnswer, Reply: &calReplyID, MS: &calElapsed}
-	calThread := (*string)(calPost.Thread)
-	calMsg := proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: calReplyID}, Group: s.ID, Thread: calThread,
-		By: c.Who.AI, Kind: calKindReply, Timestamp: c.Timestamp, Text: calPost.Text,
-		Mentions: calList, Re: (*string)(calPost.Re), Body: briefJSON(calPost.Body), Env: &c.Env,
-	}
-	calRows := s.calAppendTask([]Row{RowOf(calTarget), RowOf(calMsg)}, calMsg)
-	return Result{Rows: calRows, Items: s.calReplyItems(calTarget.By, calOptText(calThread), calReplyID)}, nil
-}
-
-func (s *State) calReplyItems(caller, calTask, calMsg string) []Item {
+func (s *State) calReplyItems(caller, task, msg string) []Item {
 	if _, ok := s.AIs[caller]; !ok {
 		return nil
 	}
-	return []Item{{AI: caller, Why: calWhyReply, Task: calTask, Msg: calMsg}}
-}
-
-func (s *State) calThreadExists(calThread *proto.ID) bool {
-	if calThread == nil {
-		return true
-	}
-	_, ok := s.Tasks[string(*calThread)]
-	return ok
-}
-
-func (s *State) calMentions(calIDs []proto.ID) ([]string, *Refusal) {
-	calOut := make([]string, len(calIDs))
-	for calIdx, calID := range calIDs {
-		calMember := string(calID)
-		if !s.calIsMember(calMember) {
-			return nil, &Refusal{Code: "conflict", Msg: "the post mentions someone who is no member of the group"}
-		}
-		calOut[calIdx] = calMember
-	}
-	return calOut, nil
-}
-
-func (s *State) calIsMember(calID string) bool {
-	_, calHuman := s.People[calID]
-	_, calAI := s.AIs[calID]
-	return calHuman || calAI
-}
-
-func calDistinct(calIDs []proto.ID) bool {
-	for calIdx, calID := range calIDs {
-		if slices.Contains(calIDs[:calIdx], calID) {
-			return false
-		}
-	}
-	return true
-}
-
-func (s *State) calAppendTask(calRows []Row, calMsg proto.MsgRow) []Row {
-	if calMsg.Thread == nil {
-		return calRows
-	}
-	calTask := s.Tasks[*calMsg.Thread]
-	calTask.Thread.Count++
-	calTask.Thread.Last = &proto.ThreadMessage{
-		By: calMsg.By, Kind: calMsg.Kind, Text: calPreview(calMsg.Text), Timestamp: calMsg.Timestamp,
-	}
-	return append(calRows, RowOf(calTask))
-}
-
-func calPreview(calText string) string {
-	calRunes := []rune(calText)
-	return string(calRunes[:min(len(calRunes), calMaxPreview)])
-}
-
-func calOptText(calPtr *string) string {
-	if calPtr == nil {
-		return ""
-	}
-	return *calPtr
+	return []Item{{AI: caller, Why: calWhyReply, Task: task, Msg: msg}}
 }

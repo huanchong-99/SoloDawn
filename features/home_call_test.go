@@ -3,7 +3,6 @@
 package features
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -15,7 +14,6 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/home"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
-	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
 func init() {
@@ -25,42 +23,18 @@ func init() {
 type homeCallWorld struct {
 	now      time.Time
 	state    *home.State
-	disk     homeCallDisk
-	receipts homeCallReceipts
+	disk     homeBriefDisk
+	receipts homeBriefReceipts
 	members  map[string]string
 	keys     map[string]identity.Key
 	taskID   string
 	callID   string
 	callTS   int64
 	replyID  string
-	lastBy   identity.Key
 	lastEnv  proto.Envelope
 	answers  []home.Result
 	items    []home.Item
 	nonce    int
-}
-
-type homeCallDisk map[string]proto.MsgRow
-
-func (d homeCallDisk) Msg(id string) (proto.MsgRow, bool)        { m, ok := d[id]; return m, ok }
-func (d homeCallDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
-func (d homeCallDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
-func (d homeCallDisk) Pending() []proto.MsgRow                   { return nil }
-func (d homeCallDisk) Queued() []store.Item                      { return nil }
-
-type homeCallReceipts map[string]store.Outcome
-
-func (r homeCallReceipts) Receipt(signer, nonce string) (store.Outcome, error) {
-	held, ok := r[signer+" "+nonce]
-	if !ok {
-		return store.Outcome{}, sql.ErrNoRows
-	}
-	return held, nil
-}
-
-func (r homeCallReceipts) PutReceipt(signer, nonce string, _ int64, result store.Outcome) error {
-	r[signer+" "+nonce] = result
-	return nil
 }
 
 func homeCallSteps(sc *godog.ScenarioContext) {
@@ -119,7 +93,7 @@ func (w *homeCallWorld) start() error {
 		Pass: 90, Depends: []string{}, Created: w.now.UnixMilli() - 60_000, Stats: proto.TaskStats{Started: w.now.UnixMilli() - 60_000},
 	}
 	w.state.Seq, w.state.Num = 6, 1
-	w.disk, w.receipts, w.answers, w.items = homeCallDisk{}, homeCallReceipts{}, nil, nil
+	w.disk, w.receipts, w.answers, w.items = homeBriefDisk{}, homeBriefReceipts{}, nil, nil
 	return nil
 }
 
@@ -153,7 +127,7 @@ func (w *homeCallWorld) postCall(by identity.Key, as, to string, thread *proto.I
 	if err != nil {
 		return err
 	}
-	if err := w.send(by, by.Sign(string(raw))); err != nil {
+	if err := w.send(by.Sign(string(raw))); err != nil {
 		return err
 	}
 	if w.answers[len(w.answers)-1].Answer.OK {
@@ -178,7 +152,7 @@ func (w *homeCallWorld) postReply(by identity.Key, as string, thread *proto.ID, 
 	if err != nil {
 		return err
 	}
-	if err := w.send(by, by.Sign(string(raw))); err != nil {
+	if err := w.send(by.Sign(string(raw))); err != nil {
 		return err
 	}
 	if w.answers[len(w.answers)-1].Answer.OK {
@@ -188,7 +162,7 @@ func (w *homeCallWorld) postReply(by identity.Key, as string, thread *proto.ID, 
 }
 
 func (w *homeCallWorld) repeatLast(_ string) error {
-	return w.send(w.lastBy, w.lastEnv)
+	return w.send(w.lastEnv)
 }
 
 func (w *homeCallWorld) invalidAttempt(attempt string) error {
@@ -207,8 +181,8 @@ func (w *homeCallWorld) invalidAttempt(attempt string) error {
 	}
 }
 
-func (w *homeCallWorld) send(by identity.Key, env proto.Envelope) error {
-	res, err := home.Commands.Apply(w.state, w.disk, w.receipts, by.ID(), env, w.now)
+func (w *homeCallWorld) send(env proto.Envelope) error {
+	res, err := home.Commands.Apply(w.state, w.disk, w.receipts, env, w.now)
 	if err != nil {
 		return err
 	}
@@ -218,7 +192,7 @@ func (w *homeCallWorld) send(by identity.Key, env proto.Envelope) error {
 		}
 	}
 	w.state.Commit(res)
-	w.lastBy, w.lastEnv = by, env
+	w.lastEnv = env
 	w.answers = append(w.answers, res)
 	w.items = append(w.items, res.Items...)
 	return nil

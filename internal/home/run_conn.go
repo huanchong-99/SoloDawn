@@ -32,6 +32,8 @@ type Conn struct {
 	// welcomed says that the connection has had its welcome and is pushed
 	// its groups from then on. The lock of the loop guards it.
 	welcomed bool
+	// taker says that the connection takes the inbox items of its device; the lock of the loop guards it.
+	taker bool
 }
 
 // Gone is closed when the loop sends nothing more to the connection: after
@@ -62,6 +64,7 @@ func (c *Conn) leave() {
 
 // pump hands the queued frames to the client, one at a time.
 func (c *Conn) pump() {
+	defer c.loop.wg.Done()
 	for {
 		frame, ok := c.frames.pop()
 		if !ok {
@@ -76,6 +79,7 @@ func (c *Conn) pump() {
 // watch detaches the connection when its client is done, and closes the
 // client of a connection that the loop gave up.
 func (c *Conn) watch() {
+	defer c.loop.wg.Done()
 	select {
 	case <-c.client.Done():
 		c.loop.Detach(c)

@@ -1,14 +1,13 @@
 package store
 
 import (
-	"database/sql"
 	"encoding/json"
 	"math"
 )
 
 // Snapshot is a read transaction at Seq. Close it when done reading.
 type Snapshot struct {
-	tx          *sql.Tx
+	tx          *Tx
 	group       string
 	Seq, Purged int64
 }
@@ -20,7 +19,7 @@ func (s *Store) Snapshot(group string) (*Snapshot, error) {
 		if err != nil {
 			return err
 		}
-		v.tx = tx
+		v.tx = &Tx{tx}
 		// This first read pins the SQLite snapshot, including for a new group.
 		err = tx.QueryRow("SELECT coalesce(max(seq),0), coalesce(max(purged),0) FROM grp WHERE g=?", group).Scan(&v.Seq, &v.Purged)
 		if err != nil {
@@ -36,9 +35,35 @@ func (s *Store) Snapshot(group string) (*Snapshot, error) {
 
 func (v *Snapshot) Close() error { return v.tx.Rollback() }
 
+// StateRows returns the group, member, device and task rows of the group at
+// the snapshot in sequence order, without gone markers.
+func (v *Snapshot) StateRows() ([]json.RawMessage, error) {
+	return v.tx.StateRows(v.group)
+}
+
+// Pending returns the cards of the group that are still pending at the
+// snapshot, oldest first.
+func (v *Snapshot) Pending() ([]json.RawMessage, error) {
+	return v.tx.Pending(v.group)
+}
+
+// DeltaCount returns how many rows of the group have seq in (after, upTo],
+// gone markers included.
+func (v *Snapshot) DeltaCount(after, upTo int64) (int, error) {
+	var n int
+	err := v.tx.QueryRow("SELECT count(*) FROM row WHERE g=? AND seq>? AND seq<=?", v.group, after, upTo).Scan(&n)
+	return n, err
+}
+
 // AfterSeqUpTo returns (after, upTo] in sequence order, including gone markers.
 func (v *Snapshot) AfterSeqUpTo(after, upTo int64) ([]json.RawMessage, error) {
 	return v.rows("SELECT data FROM row WHERE g=? AND seq>? AND seq<=? ORDER BY seq", v.group, after, upTo)
+}
+
+// Row returns one live row of the snapshot's group, or sql.ErrNoRows when
+// there is none or only its marker.
+func (v *Snapshot) Row(r, id string) (json.RawMessage, error) {
+	return v.tx.Row(v.group, r, id)
 }
 
 // below is the pos bound of a page: rows with a lower pos, or all rows for
@@ -76,6 +101,7 @@ func (v *Snapshot) rows(query string, args ...any) ([]json.RawMessage, error) {
 	result := []json.RawMessage{}
 	for rows.Next() {
 		var data string
+		// A Scan failure surfaces through rows.Err() on the next line, because row is STRICT and the driver reads every column before Next returns true.
 		_ = rows.Scan(&data)
 		result = append(result, json.RawMessage(data))
 	}

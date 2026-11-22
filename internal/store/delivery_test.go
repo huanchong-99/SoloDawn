@@ -18,7 +18,7 @@ func TestInboxDelivery(t *testing.T) {
 	s := openDB(t, ":memory:")
 	msg, task, commit := "msg", "task", "commit"
 	review := Item{Group: "g", AI: "ai", Host: "host", Why: "review", Msg: &msg, Task: &task, Commit: &commit,
-		Cause: json.RawMessage(`{"p":"decision", "k":"person","s":"unchanged"}`), NotBefore: 50, Created: 10}
+		NotBefore: 50, Created: 10}
 	notice := Item{Group: "g", AI: "secretary", Host: "host", Why: "notice", Created: 20}
 	check(t, s.Write(func(tx *Tx) error {
 		for i, item := range []Item{review, {Group: "g", Host: "other"}, notice} {
