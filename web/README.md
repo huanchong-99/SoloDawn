@@ -663,8 +663,10 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
 
 ## Known limitations
 
-- A `moved` response to `cmd`, `sync` or `fetch` switches the group to the named home, preserves
-  its cache and signalling URLs, and remembers the destination for reconnecting. Commands are
+- A `moved` response to `cmd`, `sync` or `fetch` switches a listed group to the named home and
+  preserves its cache. An existing destination connection is reused; an unknown destination is
+  remembered for reconnecting on the current signalling paths. Its welcome supplies its remembered
+  addresses. Unlisted groups are discarded and read afresh if listed again. Commands are
   not replayed across a move: their receipts stay on the old home. Before import the cached
   group remains visible; the destination's `groups` push starts a new read after import.
 - Only a group's owner sees the local `solodawn group export` / `group import` guidance. The

@@ -619,6 +619,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-22 · bug · Group moves redialled live destinations and retained unlisted groups
+
+- Symptom: moving to an already connected computer closed its live peer, and listing a removed group again reused a stale cache without a fresh read.
+- Cause: `web/src/lib/net.svelte.ts` dialled every moved destination; `Home.#cache` in `web/src/lib/groups.svelte.ts` retained groups outside the current list.
+- Status: resolved in the U2-5 review fixes. Existing peers are reused, welcome supplies remembered addresses, and unlisted groups are read afresh when listed again. Moved arrivals retain their cache until import.
+
 ### 2026-11-22 · bug · Watch confirmation admission rejected fields outside its checks
 
 - Symptom: a person's watch request was refused when it carried a thread, reply or text, although the watch admission contract does not restrict them.

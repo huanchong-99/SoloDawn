@@ -293,7 +293,6 @@ export class Home {
   owner = $state(false);
   // The connection that is the home's now: the last one to come online, until it is gone.
   #link: Link | undefined;
-  #cache = new Map<string, Group>();
   #arrivals = new Set<string>();
   onmove?: (g: string, device: string) => void;
 
@@ -352,11 +351,9 @@ export class Home {
   }
 
   move(g: string, destination: Home) {
-    const group = this.#cache.get(g);
+    const group = this.#find(g);
     if (!group) return;
-    this.#cache.delete(g);
     this.groups = this.groups.filter((item) => item.g !== g);
-    destination.#cache.set(g, group);
     if (!destination.#find(g)) destination.#arrivals.add(g);
     destination.groups = [...destination.groups.filter((item) => item.g !== g), group];
     group.home = destination;
@@ -386,11 +383,10 @@ export class Home {
     const fresh: Group[] = [];
     const pending = this.groups;
     const next = listed.map(({ g, name }) => {
-      let group = this.#cache.get(g);
+      let group = this.#find(g);
       if (!group) fresh.push((group = new Group(this, g)));
       else if (this.#arrivals.has(g)) fresh.push(group);
       this.#arrivals.delete(g);
-      this.#cache.set(g, group);
       group.name = name;
       return group;
     });

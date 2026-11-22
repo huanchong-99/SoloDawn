@@ -799,6 +799,21 @@ describe('a home', () => {
     expect([one.rows.size, two.rows.size]).toEqual([1, 0]);
   });
 
+  it('reads a fresh group again when an unlisted group is listed again', async () => {
+    const { home, group, link, asked } = await read(815);
+    link.push({ t: 'groups', groups: [] });
+    expect(home.groups).toEqual([]);
+    link.push({ t: 'groups', groups: [listed(website, 'Listed again')] });
+    expect(home.groups).toHaveLength(1);
+    expect(home.groups[0]).not.toBe(group);
+    expect([home.groups[0].name, home.groups[0].cursor, home.groups[0].rows.size]).toEqual([
+      'Listed again',
+      0,
+      0,
+    ]);
+    expect(asked.map(({ req }) => req)).toEqual([sync(0), sync(0)]);
+  });
+
   it('takes pushes from the last connection to come online and from no other', async () => {
     const home = new Home(me);
     const early = home.connect();
@@ -1038,7 +1053,7 @@ describe('following a moved group', () => {
     expect(target.groups).toEqual([]);
   });
 
-  it('uses the remembered group when the old home removed it before answering a command, without replay', async () => {
+  it('does not resurrect an unlisted group when an old command answers moved', async () => {
     const { home, group, asked, link } = await read();
     const target = destination(home);
     const reread = vi.spyOn(group, 'sync').mockResolvedValue(undefined);
@@ -1049,10 +1064,11 @@ describe('following a moved group', () => {
     expect(await command).toEqual(moved);
     expect(reread).toHaveBeenCalledTimes(0);
     reread.mockRestore();
-    expect(target.groups).toEqual([group]);
+    expect(target.groups).toEqual([]);
     expect(home.onmove).toHaveBeenCalledExactlyOnceWith(website, 'destination');
     expect(asked.map(({ req }) => req.t)).toEqual(['sync', 'cmd']);
-    expect(group.home.ctl).toBeUndefined();
+    expect(group.home).toBe(home);
+    expect(home.groups).toEqual([]);
   });
 
   it('ignores missing, empty and self destinations and other errors', () => {

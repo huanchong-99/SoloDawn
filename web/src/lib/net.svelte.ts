@@ -77,7 +77,7 @@ function pairedNodes(log: DeviceLog): [string, string][] {
 async function appendEntries(log: DeviceLog, entries: Devlog['entries']): Promise<boolean> {
   let changed = false;
   for (const env of entries) {
-    if (await log.apply(env).catch(() => {})) changed = true;
+    if (await log.apply(env).catch(() => false)) changed = true;
   }
   return changed;
 }
@@ -130,12 +130,12 @@ function startLive(
       const connectHome = (home: Home) => {
         home.onmove = (g, id) => {
           const destination = homeOf(log, id, id);
-          joined[id] = { name: destination.name, url };
-          addrs[id] = [...urls];
-          void saveJoined(() => indexedDB, joined);
-          void saveOwner(() => indexedDB, log, addrs);
+          if (!peers.has(id)) {
+            joined[id] = { name: destination.name, url };
+            void saveJoined(() => indexedDB, joined);
+            dial(id, destination);
+          }
           home.move(g, destination);
-          dial(id, destination);
         };
         const link = home.connect();
         return {
@@ -292,7 +292,7 @@ export function start(source: Source) {
       ({ home, online }) => {
         if (stopAbort.signal.aborted) return;
         paths.set(home, { kind: 'direct', rtt: undefined, since: Date.now() });
-        added.set(source, home);
+        added.set('mock', home);
         homes.push(home);
         online();
       },

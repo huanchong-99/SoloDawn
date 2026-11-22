@@ -314,7 +314,6 @@ it('follows moved to an unknown node on the retained signalling URLs, persists i
   await vi.waitFor(() =>
     expect(old.ctl.frames().filter((frame) => frame.t === 'cmd')).toHaveLength(1),
   );
-  old.ctl.deliver({ t: 'groups', groups: [] });
   const moved = {
     re: old.ctl.frames().find((frame) => frame.t === 'cmd')!.id,
     err: { code: 'moved', msg: 'The group has moved.', home: target.id },
@@ -327,13 +326,16 @@ it('follows moved to an unknown node on the retained signalling URLs, persists i
   expect([group.home, destination.groups[0]]).toEqual([destination, group]);
   expect(home.groups).toEqual([]);
   expect(rv.known(target.id)).toBe(true);
-  await vi.waitFor(async () =>
-    expect((await loadOwner(crypto, () => idb)).addrs[target.id]).toEqual(urls),
-  );
+  expect((await loadOwner(crypto, () => idb)).addrs[target.id]).toBeUndefined();
   expect(await loadJoined(() => idb)).toEqual({ [target.id]: { name: target.id, url: urls[0] } });
   expect((await loadOwner(crypto, () => idb)).log!.valid(target.id)).toBe(false);
   const next = await answerNode(rv, target, browser.id, undefined);
-  next.ctl.deliver(welcomeFrame(1, target.id, 'Destination'));
+  next.ctl.deliver(welcomeFrame(1, target.id, 'Destination', [], ['wss://new-rv.example/rv']));
+  await vi.waitFor(async () =>
+    expect((await loadOwner(crypto, () => idb)).addrs[target.id]).toEqual([
+      'wss://new-rv.example/rv',
+    ]),
+  );
   await vi.waitFor(() =>
     expect(next.ctl.frames().filter((frame) => frame.t === 'sync')).toHaveLength(1),
   );
@@ -358,6 +360,7 @@ it('follows moved to an unknown node on the retained signalling URLs, persists i
   expect([group.name, destination.name]).toEqual(['Imported', 'Destination']);
   expect(next.ctl.frames().filter((frame) => frame.t === 'cmd')).toEqual([]);
   const offers = rv.offersFor(source.id).length;
+  const sourceCtl = home.ctl;
   const back = group.post('move back', []);
   await vi.waitFor(() =>
     expect(next.ctl.frames().filter((frame) => frame.t === 'cmd')).toHaveLength(1),
@@ -370,6 +373,9 @@ it('follows moved to an unknown node on the retained signalling URLs, persists i
   expect([group.home, home.groups[0]]).toEqual([home, group]);
   expect(destination.groups).toEqual([]);
   expect(rv.offersFor(source.id).length).toBe(offers);
+  expect(old.closes).toBe(0);
+  expect(home.ctl).toBe(sourceCtl);
+  expect(await loadJoined(() => idb)).toEqual({ [target.id]: { name: target.id, url: urls[0] } });
 });
 
 it('joins an invitation without adopting the home and reconnects to it after reload', async () => {

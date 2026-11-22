@@ -8,7 +8,7 @@
   const nodes = $derived(
     net.homes.filter((home) => home.owner && home.device !== group.home.device),
   );
-  const owner = $derived(group.me?.kind === 'human' && group.me.role === 'owner');
+  const owner = $derived(group.me?.role === 'owner');
 </script>
 
 {#if owner}
@@ -44,6 +44,13 @@
     border-top: 1px solid var(--line);
   }
   code {
+    display: block;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    font-size: var(--fs-sm);
+    line-height: 1.5;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
