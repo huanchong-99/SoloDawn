@@ -25,7 +25,7 @@ func TestSurfaceDefaultsReadHelpersAndNulls(t *testing.T) {
 	s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h})
 	sf := NewSurface(SurfaceConfig{
 		ID: nodeKey.ID(), Store: db, Sessions: s, Host: h,
-		Agents: func(context.Context) ([]proto.HostAgent, error) { return nil, nil },
+		Agents: func(context.Context, bool) ([]proto.HostAgent, error) { return nil, nil },
 	})
 
 	if ReadName(db) != "" || len(ReadRendezvous(db)) != 0 {
@@ -205,7 +205,7 @@ func TestHostInfoAgentsMemberStateAndSettings(t *testing.T) {
 		ID: nodeKey.ID(), OS: "macOS 15.2", Version: "v0.3.1",
 		Store: db, Sessions: s, Host: h,
 		Name: func() string { return "custom-box" },
-		Agents: func(context.Context) ([]proto.HostAgent, error) {
+		Agents: func(context.Context, bool) ([]proto.HostAgent, error) {
 			if hookErr != nil {
 				return nil, hookErr
 			}
@@ -245,7 +245,7 @@ func TestSurfaceDatabaseErrors(t *testing.T) {
 	s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h})
 	sf := NewSurface(SurfaceConfig{
 		ID: nodeKey.ID(), Store: db, Sessions: s, Host: h,
-		Agents: func(context.Context) ([]proto.HostAgent, error) { return nil, nil },
+		Agents: func(context.Context, bool) ([]proto.HostAgent, error) { return nil, nil },
 	})
 
 	corrupt := func(tx *store.Tx) error {
