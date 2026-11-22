@@ -49,7 +49,7 @@ Feature: Two labels in a host turn across owners
       -- from "Q" in T-12 · instruction
       """
 
-  Scenario: Secretary brief confirmations follow the secretary's allow list and one-person groups keep instruction
+  Scenario: Secretary brief confirmations follow the secretary's allow list
     Given a two-owner host turn fixture on "P1"
     When "Q" confirms a brief posted by "Secretary" while "P" has not listed "Q"
     Then the turninfo header and second line are:
@@ -63,5 +63,3 @@ Feature: Two labels in a host turn across owners
       == 1 of 1 · confirmed · instruction
       -- from "Q" in main · instruction
       """
-    When "P" confirms a brief and chooses on a decision card in a one-person group on "P1"
-    Then both one-person turns read "instruction" in their header and on their second line

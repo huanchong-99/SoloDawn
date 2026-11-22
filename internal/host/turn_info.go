@@ -10,7 +10,7 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
-func (c *turnCtx) inOwnTask(thread string) bool {
+func (c *turnCtx) takesPart(thread string) bool {
 	raw, _ := c.h.Rows.Get(c.s.Group, "task", thread)
 	var task proto.TaskRow
 	proto.Decode(raw, &task)
@@ -51,7 +51,7 @@ func (c *turnCtx) mentionInstruct(msg *proto.MsgRow, thread string) bool {
 	if msg == nil {
 		return false
 	}
-	if c.inOwnTask(thread) {
+	if c.takesPart(thread) {
 		return c.isOwnerMember(msg.By)
 	}
 	return c.humanUser(msg.By) != ""
@@ -59,7 +59,7 @@ func (c *turnCtx) mentionInstruct(msg *proto.MsgRow, thread string) bool {
 
 func (c *turnCtx) msgInstruct(msg proto.MsgRow) (bool, error) {
 	u := c.humanUser(msg.By)
-	if c.inOwnTask(strVal(msg.Thread)) {
+	if c.takesPart(strVal(msg.Thread)) {
 		return u != "" && u == c.owner, nil
 	}
 	if u == "" {
@@ -124,7 +124,7 @@ func (c *turnCtx) coversDirect(msg proto.MsgRow, id string) bool {
 }
 
 func (c *turnCtx) decidedItemInstruct(msg *proto.MsgRow, thread string) bool {
-	return c.inOwnTask(thread) || (msg != nil && msg.By == c.s.Member)
+	return c.takesPart(thread) || (msg != nil && msg.By == c.s.Member)
 }
 
 func (c *turnCtx) decisionInstruct(msg proto.MsgRow) bool {

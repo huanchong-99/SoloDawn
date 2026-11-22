@@ -165,21 +165,27 @@ func (r *turnRig) defaultHomeHandler(req any) (json.RawMessage, error) {
 	case proto.FetchRow:
 		rows = []json.RawMessage{r.briefMsgJSON(tBriefID, &proto.CardState{Status: "pending"})}
 	case proto.FetchKind:
-		if req.Kind == "confirm" {
-			for _, m := range r.confirms {
-				rows = append(rows, mustJSON(r.t, m))
-			}
-			break
-		}
-		for _, n := range r.notes {
-			rows = append(rows, mustJSON(r.t, n))
-		}
+		rows = r.kindRows(req.Kind)
 	case proto.FetchThread:
 		for _, m := range r.history {
 			rows = append(rows, mustJSON(r.t, m))
 		}
 	}
 	return mustJSON(r.t, proto.Fetched{Type: "fetched", Success: proto.Success{Re: 1, OK: true}, Rows: rows}), nil
+}
+
+func (r *turnRig) kindRows(kind string) []json.RawMessage {
+	rows := []json.RawMessage{}
+	if kind == "confirm" {
+		for _, m := range r.confirms {
+			rows = append(rows, mustJSON(r.t, m))
+		}
+		return rows
+	}
+	for _, n := range r.notes {
+		rows = append(rows, mustJSON(r.t, n))
+	}
+	return rows
 }
 
 func (r *turnRig) briefMsgJSON(id string, state *proto.CardState) json.RawMessage {
@@ -347,7 +353,6 @@ func TestFirstTaskTurnFromBriefAndNotesLimit(t *testing.T) {
 
 func checkNoteByteLimitAndEmpty(t *testing.T, r *turnRig, assignRaw json.RawMessage) {
 	t.Helper()
-	// Exact 8192-byte boundary includes both notes; 8193 bytes stops before the second note (even if a tiny third note would fit).
 	n5000 := strings.Repeat("a", 5000)
 	n3192 := strings.Repeat("b", 3192)
 	r.notes = []proto.NoteRow{
@@ -355,16 +360,15 @@ func checkNoteByteLimitAndEmpty(t *testing.T, r *turnRig, assignRaw json.RawMess
 		{RowHeader: proto.RowHeader{Type: "note", ID: turnID("n2"), Seq: 2}, Pos: 20, Group: tGroupID, Text: n3192, By: tSecID, Timestamp: seamStart},
 	}
 	gotExact, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{assignRaw})
-	if err != nil || !strings.Contains(gotExact, "- "+n5000+"\n- "+n3192) {
-		t.Fatalf("exact 8192 boundary failed: %v", err)
-	}
+	assertContains(t, gotExact, err, "- "+n5000+"\n- "+n3192)
 	r.notes = []proto.NoteRow{
 		{RowHeader: proto.RowHeader{Type: "note", ID: turnID("n1"), Seq: 3}, Pos: 30, Group: tGroupID, Text: n5000, By: tSecID, Timestamp: seamStart},
 		{RowHeader: proto.RowHeader{Type: "note", ID: turnID("n2"), Seq: 2}, Pos: 20, Group: tGroupID, Text: n3192 + "c", By: tSecID, Timestamp: seamStart},
 		{RowHeader: proto.RowHeader{Type: "note", ID: turnID("n3"), Seq: 1}, Pos: 10, Group: tGroupID, Text: "tiny-after", By: tSecID, Timestamp: seamStart},
 	}
 	gotOver, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{assignRaw})
-	if err != nil || !strings.Contains(gotOver, "- "+n5000) || strings.Contains(gotOver, n3192) || strings.Contains(gotOver, "tiny-after") {
+	assertContains(t, gotOver, err, "- "+n5000)
+	if strings.Contains(gotOver, n3192) || strings.Contains(gotOver, "tiny-after") {
 		t.Fatalf("overflow 8193 failed: err=%v", err)
 	}
 	r.notes = nil
@@ -382,12 +386,9 @@ func TestDirectAndNonFirstAssignTurns(t *testing.T) {
 	r.h.Rows.Put(tGroupID, "task", tTaskID, mustJSON(t, directTask))
 	reqMsg := r.textMsg(tMsg1ID, tOwnerM, "", "Please add the status badge.")
 	raw := r.makeInboxItem(proto.Item{Item: 1, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, reqMsg, nil)
-	got, turn, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{raw})
-	if err != nil || turn != (Turn{Kind: ItemsTurn, Thread: tTaskID}) || !strings.Contains(got, "Plan: Update status badge.\nReviewer: none   Pass score: 90\n-- from \"owner\" in main · instruction\nPlease add the status badge.") {
-		t.Fatalf("direct first turn unexpected: err=%v turn=%+v\n%s", err, turn, got)
-	}
+	want := "[SoloDawn] group \"Website\" · you are \"Claude Code\" · task session T-12\n== 1 of 1 · assign · instruction\nTask T-12 \"Node: report connection path changes\"\nBranch: task/12-node-report-connection-path-changes (this folder is its worktree)\nPlan: Update status badge.\nReviewer: none   Pass score: 90\n-- from \"owner\" in main · instruction\nPlease add the status badge."
+	assertComposed(t, r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{raw}, want, Turn{Kind: ItemsTurn, Thread: tTaskID})
 
-	// Direct task with empty Plan, gone reviewer row, and an attached kind="task" card omitted from body.
 	directTask.Plan, directTask.Reviewer = "", turnID("gone-rev")
 	r.h.Rows.Put(tGroupID, "member", directTask.Reviewer, json.RawMessage(`{"r":"member","id":"gone","seq":9,"gone":true}`))
 	r.h.Rows.Put(tGroupID, "task", tTaskID, mustJSON(t, directTask))
@@ -408,21 +409,13 @@ func checkNonFirstAssignVariants(t *testing.T, r *turnRig, rawNoMsg, rawTaskMsg 
 	t.Helper()
 	const shortWant = "Task T-12 \"Node: report connection path changes\" assigned to you. Continue the task."
 	gotResumed, _, err := Compose(r.h, r.session(TaskSession, false, "existing-cli"), ItemsTurn, []json.RawMessage{rawTaskMsg})
-	if err != nil || !strings.HasSuffix(gotResumed, shortWant) {
-		t.Fatalf("existing CLISession assign unexpected: err=%v\n%s", err, gotResumed)
-	}
+	assertSuffix(t, gotResumed, err, shortWant)
 	gotResumedNil, _, err := Compose(r.h, r.session(TaskSession, false, "existing-cli"), ItemsTurn, []json.RawMessage{rawNoMsg})
-	if err != nil || !strings.HasSuffix(gotResumedNil, shortWant) {
-		t.Fatalf("existing CLISession nil-msg assign unexpected: err=%v\n%s", err, gotResumedNil)
-	}
+	assertSuffix(t, gotResumedNil, err, shortWant)
 	gotGroup, _, err := Compose(r.h, r.session(GroupSession, false, ""), ItemsTurn, []json.RawMessage{rawNoMsg})
-	if err != nil || !strings.HasSuffix(gotGroup, shortWant) {
-		t.Fatalf("group session assign unexpected: err=%v\n%s", err, gotGroup)
-	}
+	assertSuffix(t, gotGroup, err, shortWant)
 	gotBatch, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{rawNoMsg, rawNoMsg})
-	if err != nil || !strings.HasSuffix(gotBatch, "== 2 of 2 · assign · instruction\n"+shortWant) {
-		t.Fatalf("second assign in batch unexpected: err=%v\n%s", err, gotBatch)
-	}
+	assertSuffix(t, gotBatch, err, "== 2 of 2 · assign · instruction\n"+shortWant)
 	detail := "merge conflict on a.go"
 	checksMsg := mustJSON(t, proto.MessageRow[proto.ChecksBody, proto.NoCard]{
 		RowHeader: proto.RowHeader{Type: "msg", ID: tMsg2ID, Seq: 18},
@@ -431,9 +424,7 @@ func checkNonFirstAssignVariants(t *testing.T, r *turnRig, rawNoMsg, rawTaskMsg 
 	})
 	rawConflict := r.makeInboxItem(proto.Item{Item: 4, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg2ID)}, checksMsg, nil)
 	gotConflict, _, err := Compose(r.h, r.session(TaskSession, false, "existing-cli"), ItemsTurn, []json.RawMessage{rawConflict})
-	if err != nil || !strings.Contains(gotConflict, "== 1 of 1 · assign · instruction\n-- from the home in T-12 · information\nChecks (merge) on commit 9f2c1ab: failed\n- merge: fail\nmerge conflict on a.go") {
-		t.Fatalf("conflict assign unexpected: err=%v\n%s", err, gotConflict)
-	}
+	assertContains(t, gotConflict, err, "== 1 of 1 · assign · instruction\n-- from the home in T-12 · information\nChecks (merge) on commit 9f2c1ab: failed\n- merge: fail\nmerge conflict on a.go")
 }
 
 func TestAuthorityAndSpeakerFromRows(t *testing.T) {
@@ -570,7 +561,6 @@ func checkChecksResumeAndMissingMsgItems(t *testing.T, r *turnRig) {
 		t.Fatalf("resume turn failed: err=%v\n%s", err, gotResume)
 	}
 
-	// Items whose msg is absent render header only with no body.
 	batchNil := []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 7, Why: "mention"}, nil, nil),
 		r.makeInboxItem(proto.Item{Item: 8, Why: "reply", Task: proto.ID(tTaskID)}, nil, nil),
@@ -629,6 +619,13 @@ func assertContains(t *testing.T, got string, err error, want string) {
 	t.Helper()
 	if err != nil || !strings.Contains(got, want) {
 		t.Fatalf("err=%v\ngot:\n%s\nwant substring:\n%s", err, got, want)
+	}
+}
+
+func assertSuffix(t *testing.T, got string, err error, want string) {
+	t.Helper()
+	if err != nil || !strings.HasSuffix(got, want) {
+		t.Fatalf("err=%v\ngot:\n%s\nwant suffix:\n%s", err, got, want)
 	}
 }
 
@@ -724,15 +721,11 @@ func checkNoticeVariants(t *testing.T, r *turnRig) {
 	sec := r.session(GroupSession, true, "c1")
 	rawTimeout := r.makeInboxItem(proto.Item{Item: 1, AI: proto.ID(tSecID), Why: "notice", Task: proto.ID(tTaskID), Code: "timeout", Detail: "60m limit"}, nil, nil)
 	gotTimeout, _, err := Compose(r.h, sec, ItemsTurn, []json.RawMessage{rawTimeout})
-	if err != nil || !strings.Contains(gotTimeout, "== 1 of 1 · notice · information\nNotice (timeout) on task T-12 \"Node: report connection path changes\"\n60m limit") {
-		t.Fatalf("timeout notice failed: err=%v\n%s", err, gotTimeout)
-	}
+	assertContains(t, gotTimeout, err, "== 1 of 1 · notice · information\nNotice (timeout) on task T-12 \"Node: report connection path changes\"\n60m limit")
 	unknownTask := turnID("unknown-task")
 	rawUncached := r.makeInboxItem(proto.Item{Item: 2, AI: proto.ID(tSecID), Why: "notice", Task: proto.ID(unknownTask), Code: "quiet"}, nil, nil)
 	gotUncached, _, err := Compose(r.h, sec, ItemsTurn, []json.RawMessage{rawUncached})
-	if err != nil || !strings.Contains(gotUncached, "Notice (quiet) on task "+unknownTask) {
-		t.Fatalf("uncached task notice failed: err=%v\n%s", err, gotUncached)
-	}
+	assertContains(t, gotUncached, err, "Notice (quiet) on task "+unknownTask)
 	sysMsg := mustJSON(t, proto.MessageRow[proto.LoginInvalidBody, proto.NoCard]{
 		RowHeader: proto.RowHeader{Type: "msg", ID: tMsg1ID, Seq: 19},
 		Pos:       19, Group: tGroupID, Main: true, By: "system", Kind: "system", Timestamp: seamStart, Mentions: []string{},
@@ -741,9 +734,7 @@ func checkNoticeVariants(t *testing.T, r *turnRig) {
 	gotSys, _, err := Compose(r.h, sec, ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 3, AI: proto.ID(tSecID), Why: "notice", Msg: proto.ID(tMsg1ID), Code: "login_invalid"}, sysMsg, nil),
 	})
-	if err != nil || !strings.Contains(gotSys, "== 1 of 1 · notice · information\nNotice (login_invalid)\n-- from the home in main · information\nSystem: login_invalid") {
-		t.Fatalf("system notice failed: err=%v\n%s", err, gotSys)
-	}
+	assertContains(t, gotSys, err, "== 1 of 1 · notice · information\nNotice (login_invalid)\n-- from the home in main · information\nSystem: login_invalid")
 	gotNoMsgMain, _, err := Compose(r.h, sec, ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 3, AI: proto.ID(tSecID), Why: "notice", Code: "rate_limited"}, nil, nil),
 	})
@@ -762,9 +753,7 @@ func checkHandbackAndTaskStartedNotices(t *testing.T, r *turnRig, sec Session) {
 		r.makeInboxItem(proto.Item{Item: 4, AI: proto.ID(tSecID), Why: "notice", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID), Code: "handback"}, hbMsg, nil),
 	})
 	wantHB := "== 1 of 1 · notice · information\nNotice (handback) on task T-12 \"Node: report connection path changes\"\n-- from \"Claude Code\" (AI) in T-12 · information\nChanges: +40 -3 (2 files, 1 commits)\n- 9f2c1ab Emit path\nFiles: a.go, b.go\nFixed switch-back."
-	if err != nil || !strings.Contains(gotHB, wantHB) {
-		t.Fatalf("handback notice failed: err=%v\n%s", err, gotHB)
-	}
+	assertContains(t, gotHB, err, wantHB)
 	hbEmpty := mustJSON(t, proto.MessageRow[proto.HandbackBody, proto.NoCard]{
 		RowHeader: proto.RowHeader{Type: "msg", ID: tMsg2ID, Seq: 21},
 		Pos:       21, Group: tGroupID, Main: true, By: tSecID, Kind: "handback", Timestamp: seamStart, Mentions: []string{},
@@ -773,7 +762,8 @@ func checkHandbackAndTaskStartedNotices(t *testing.T, r *turnRig, sec Session) {
 	gotHBEmpty, _, err := Compose(r.h, sec, ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 5, AI: proto.ID(tSecID), Why: "notice", Msg: proto.ID(tMsg2ID), Code: "handback"}, hbEmpty, nil),
 	})
-	if err != nil || strings.Contains(gotHBEmpty, "Files:") || !strings.HasSuffix(gotHBEmpty, "Changes: +0 -0 (0 files, 0 commits)") {
+	assertSuffix(t, gotHBEmpty, err, "Changes: +0 -0 (0 files, 0 commits)")
+	if strings.Contains(gotHBEmpty, "Files:") {
 		t.Fatalf("empty handback notice failed: err=%v\n%s", err, gotHBEmpty)
 	}
 	taskCard := mustJSON(t, proto.MessageRow[proto.TaskBody, proto.NoCard]{
@@ -798,10 +788,7 @@ func TestReplacedTurnRecoveryForEverySessionKind(t *testing.T) {
 	if err != nil || turnTask != (Turn{Kind: ReplacedTurn, Thread: tTaskID}) {
 		t.Fatalf("replaced task turn failed: err=%v turn=%+v", err, turnTask)
 	}
-	ftTask, ok := r.home.asked[len(r.home.asked)-1].(proto.FetchThread)
-	if !ok || ftTask.Group != tGroupID || ftTask.Before != 0 || ftTask.Limit != 20 || ftTask.Thread == nil || *ftTask.Thread != tTaskID {
-		t.Fatalf("unexpected task FetchThread: %+v", r.home.asked)
-	}
+	assertHistoryFetch(t, r.home.asked[len(r.home.asked)-1], tTaskID)
 	decID := turnID("h-dec")
 	wantHistory := strings.Join([]string{
 		`Recent messages:`,
@@ -818,9 +805,8 @@ func TestReplacedTurnRecoveryForEverySessionKind(t *testing.T) {
 		`-- text · from "owner" in T-12 · instruction`,
 		`Owner guidance.`,
 	}, "\n")
-	if !strings.Contains(gotTask, "== context · instruction\nTask T-12") || !strings.HasSuffix(gotTask, wantHistory) {
-		t.Fatalf("replaced task session text mismatch:\n%s", gotTask)
-	}
+	assertContains(t, gotTask, err, "== context · instruction\nTask T-12")
+	assertSuffix(t, gotTask, err, wantHistory)
 	checkReplacedReviewAndGroupSessions(t, r, wantHistory)
 }
 
@@ -857,21 +843,30 @@ func buildReplacedTestHistory(t *testing.T, r *turnRig) []proto.MsgRow {
 func checkReplacedReviewAndGroupSessions(t *testing.T, r *turnRig, wantHistory string) {
 	t.Helper()
 	gotRev, turnRev, err := Compose(r.h, r.session(ReviewSession, false, ""), ReplacedTurn, nil)
-	if err != nil || turnRev != (Turn{Kind: ReplacedTurn, Thread: tTaskID}) || !strings.Contains(gotRev, "== context · instruction\nTask T-12 \"Node: report connection path changes\"\nCommit: 9f2c1ab\nDiff: .solodawn-review.diff") || !strings.HasSuffix(gotRev, wantHistory) {
+	if turnRev != (Turn{Kind: ReplacedTurn, Thread: tTaskID}) {
 		t.Fatalf("replaced review session failed: err=%v turn=%+v\n%s", err, turnRev, gotRev)
 	}
+	assertContains(t, gotRev, err, "== context · instruction\nTask T-12 \"Node: report connection path changes\"\nCommit: 9f2c1ab\nDiff: .solodawn-review.diff")
+	assertSuffix(t, gotRev, err, wantHistory)
 
 	gotGroupWithHist, turnGroupHist, err := Compose(r.h, r.session(GroupSession, false, ""), ReplacedTurn, nil)
-	if err != nil || turnGroupHist != (Turn{Kind: ReplacedTurn}) || !strings.Contains(gotGroupWithHist, "== context · instruction\nRecent messages:") {
+	if turnGroupHist != (Turn{Kind: ReplacedTurn}) {
 		t.Fatalf("replaced group session with history failed: err=%v turn=%+v\n%s", err, turnGroupHist, gotGroupWithHist)
 	}
+	assertContains(t, gotGroupWithHist, err, "== context · instruction\nRecent messages:")
 
 	r.history = nil
 	r.home.asked = nil
 	wantEmptyGroup := "[SoloDawn] group \"Website\" · you are \"Claude Code\" · group session\n== context · instruction"
 	assertComposed(t, r.h, r.session(GroupSession, false, ""), ReplacedTurn, nil, wantEmptyGroup, Turn{Kind: ReplacedTurn})
-	if ftGroup, ok := r.home.asked[0].(proto.FetchThread); !ok || ftGroup.Thread != nil || ftGroup.Limit != 20 || ftGroup.Group != tGroupID {
-		t.Fatalf("unexpected group FetchThread: %+v", r.home.asked)
+	assertHistoryFetch(t, r.home.asked[0], "")
+}
+
+func assertHistoryFetch(t *testing.T, req any, thread string) {
+	t.Helper()
+	got, ok := req.(proto.FetchThread)
+	if !ok || got.Group != tGroupID || got.Before != 0 || got.Limit != 20 || strVal(got.Thread) != thread {
+		t.Fatalf("unexpected history FetchThread: %+v; want thread %q", req, thread)
 	}
 }
 
@@ -911,7 +906,6 @@ func checkMalformedItemAndBodyInputs(t *testing.T, r *turnRig, s Session) {
 			t.Fatalf("case %d unexpectedly succeeded", i)
 		}
 	}
-	// First assign with bad attached msg also surfaces the body decode error.
 	badFirstAssign := r.makeInboxItem(proto.Item{Item: 2, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg1ID)}, badMsg("system", nil), nil)
 	_, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{badFirstAssign})
 	seamCode(t, err, "bad_request")

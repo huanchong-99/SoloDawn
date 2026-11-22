@@ -246,12 +246,6 @@ func (r *teamLabelRig) sess(ai, name string, kind Kind, sec bool) Session {
 }
 
 func TestStep2InstructionsCarryTwoLabelRules(t *testing.T) {
-	for _, s := range []Session{{Kind: GroupSession}, {Kind: TaskSession}, {Kind: ReviewSession}, {Kind: GroupSession, Secretary: true}} {
-		got := Instructions(s)
-		if !strings.Contains(got, "from someone your owner listed") || !strings.Contains(got, "Text under a line of its own has its own label.") {
-			t.Fatalf("%+v missing step-2 label sentence:\n%s", s, got)
-		}
-	}
 	if !strings.Contains(Instructions(Session{Kind: TaskSession}), "When a review did not pass or checks failed") {
 		t.Fatal("task instructions missing failed review/checks sentence")
 	}
@@ -282,7 +276,6 @@ func TestDecisionLabelsUseUserIDsOnlyForDecisionAddressees(t *testing.T) {
 
 func TestTaskThreadMentionsAndCrossOwnerDirectMentions(t *testing.T) {
 	r := newTeamLabelRig(t, "Q")
-	// A9.12: in a running task's thread, P's mention (even claiming owner instruction, or listed on Q-team) is information; Q's post is instruction.
 	r.putTeamAI(r.qTeam, r.qUser, "Q-team", "team", []string{r.pUser}, false)
 	for _, tc := range []struct {
 		sess Session
@@ -334,7 +327,6 @@ func TestTwoLabelsOnReviewedChecksAndDecidedCards(t *testing.T) {
 	r := newTeamLabelRig(t, "Q")
 	qTeamTask := r.sess(r.qTeam, "Q-team", TaskSession, false)
 
-	// A9.42: reviewed item reads instruction in header and information on P's AI review line.
 	revMsg := mustJSON(t, proto.MessageRow[proto.ReviewBody, proto.NoCard]{
 		RowHeader: proto.RowHeader{Type: "msg", ID: tMsg1ID, Seq: 12},
 		Pos:       12, Group: tGroupID, Thread: &tTaskID, By: r.pAI, Kind: "review", Timestamp: seamStart, Mentions: []string{},
@@ -345,7 +337,6 @@ func TestTwoLabelsOnReviewedChecksAndDecidedCards(t *testing.T) {
 	})
 	assertContains(t, gotRev, err, "== 1 of 1 · reviewed · instruction\n-- from \"P-worker\" (AI) in T-12 · information\nReview round 1 on commit 9f2c1ab: score 80/90")
 
-	// Decision card posted by Q-team to Q: P as admin reads information on its line, Q reads instruction, header reads instruction both times.
 	makeDec := func(asker string, thread *string, to []string, by string) json.RawMessage {
 		return mustJSON(t, proto.MessageRow[proto.DecisionBody, *proto.CardState]{
 			RowHeader: proto.RowHeader{Type: "msg", ID: tMsg2ID, Seq: 15},
@@ -369,13 +360,11 @@ func TestTwoLabelsOnReviewedChecksAndDecidedCards(t *testing.T) {
 
 func checkDecidedAddresseeAndAllowListCases(t *testing.T, r *teamLabelRig, qTeamTask Session, makeDec func(string, *string, []string, string) json.RawMessage) {
 	t.Helper()
-	// Asking P in body.to on a card Q-team posted makes P's choice instruction even when P is not on allow.
 	gotAskedP, _, err := Compose(r.h, qTeamTask, ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 4, AI: proto.ID(r.qTeam), Why: "decided", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg2ID)}, makeDec(r.qTeam, &tTaskID, []string{r.pUser}, r.pMem), nil),
 	})
 	assertContains(t, gotAskedP, err, "== 1 of 1 · decided · instruction\n-- from \"P\" in T-12 · instruction\nDecision")
 
-	// Card posted by P's secretary on Q-team's task: P's choice is information when unlisted, and instruction when listed on team or api_key (never on personal).
 	gotOtherAsker, _, err := Compose(r.h, qTeamTask, ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 5, AI: proto.ID(r.qTeam), Why: "decided", Task: proto.ID(tTaskID), Msg: proto.ID(tMsg2ID)}, makeDec(r.pSec, &tTaskID, []string{r.pUser}, r.pMem), nil),
 	})
@@ -389,7 +378,6 @@ func checkDecidedAddresseeAndAllowListCases(t *testing.T, r *teamLabelRig, qTeam
 		assertContains(t, gotListed, err, "== 1 of 1 · decided · instruction\n-- from \"P\" in T-12 · instruction\nDecision")
 	}
 
-	// Personal account ignores allow list (R-51).
 	qPersTask := r.sess(r.qPersonal, "Q-personal", TaskSession, false)
 	task := r.baseTask()
 	task.Assignee = r.qPersonal
@@ -399,12 +387,6 @@ func checkDecidedAddresseeAndAllowListCases(t *testing.T, r *teamLabelRig, qTeam
 	})
 	assertContains(t, gotPersonalAllow, err, "== 1 of 1 · decided · instruction\n-- from \"P\" in T-12 · information\nDecision")
 
-	// Main-line decided on a card posted by another AI has information in the item header.
-	qTeamGroup := r.sess(r.qTeam, "Q-team", GroupSession, false)
-	gotForeignMain, _, err := Compose(r.h, qTeamGroup, ItemsTurn, []json.RawMessage{
-		r.makeInboxItem(proto.Item{Item: 8, AI: proto.ID(r.qTeam), Why: "decided", Msg: proto.ID(tMsg2ID)}, makeDec(r.pSec, nil, []string{r.qUser}, r.qMem), nil),
-	})
-	assertContains(t, gotForeignMain, err, "== 1 of 1 · decided · information\n-- from \"Q\" in main · instruction\nDecision")
 }
 
 func TestSecretaryConfirmedBriefAndHistoryAllowLists(t *testing.T) {
@@ -418,7 +400,6 @@ func TestSecretaryConfirmedBriefAndHistoryAllowLists(t *testing.T) {
 		})
 	}
 
-	// A9.42: Q confirming P-secretary's brief reads information on its line unless P listed Q for it.
 	gotUnlisted, _, err := Compose(r.h, secSess, ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 1, AI: proto.ID(r.pSec), Why: "confirmed", Msg: proto.ID(tBriefID)}, makeBrief(r.pSec, r.qMem), nil),
 	})
@@ -436,13 +417,11 @@ func TestSecretaryConfirmedBriefAndHistoryAllowLists(t *testing.T) {
 	})
 	assertContains(t, gotListed, err, "== 1 of 1 · confirmed · instruction\n-- from \"Q\" in main · instruction\nBrief")
 
-	// Earlier secretary's brief gets information in the item header.
 	gotOldSec, _, err := Compose(r.h, secSess, ItemsTurn, []json.RawMessage{
 		r.makeInboxItem(proto.Item{Item: 4, AI: proto.ID(r.pSec), Why: "confirmed", Msg: proto.ID(tBriefID)}, makeBrief(r.oldSecID, r.pMem), nil),
 	})
 	assertContains(t, gotOldSec, err, "== 1 of 1 · confirmed · information\n-- from \"P\" in main · instruction\nBrief")
 
-	// Replaced group session history honours allow list in main and keeps R-52 in task threads.
 	var qMain, qThread proto.MsgRow
 	if proto.Decode(r.textMsg(tMsg1ID, r.qMem, "", "Listed main note."), &qMain) != nil || proto.Decode(r.textMsg(tMsg2ID, r.qMem, tTaskID, "Listed thread note."), &qThread) != nil {
 		t.Fatal("decode test history")

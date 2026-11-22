@@ -164,7 +164,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: the step-2 planning documents (`planning/contracts/step-2/authority.md:36, 85, 92-93, 104, 108`, `planning/contracts/step-2/confirm.md:145-147, 196-223, 244`, `planning/contracts/step-2/watch-team.md:46-67` and `planning/steps/parallel-plan-step-2-3.md:20-21, 27`) require an inbox item to carry a signed `cause` when a group home belongs to another person, whereas `P-1b` removed `cause` from step-1 items.
 - Cause: step 2 is postponed while step 1 ships with plain unsigned items under the owner's 2026-11-21 decision.
-- Status: open, without effect in step 1. When step 2 resumes, items will need an authority field again.
+- Status: resolved in T2-13; the step-2 contracts now use plain items and host-written context labels, without an item-level `cause`.
 
 ### 2026-11-21 · limitation · Group and review sessions default to permission level 3 and rely on instructions not to edit files
 

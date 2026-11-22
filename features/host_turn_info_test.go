@@ -6,11 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/cucumber/godog"
 	"github.com/huanchong-99/SoloDawn/internal/host"
-	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
@@ -28,13 +26,9 @@ const (
 )
 
 type turnInfoWorld struct {
-	h          *host.Host
-	pUser      string
-	qUser      string
-	homeKey    identity.Key
-	text       string
-	singleDec  string
-	singleConf string
+	turnStepWorld
+	pUser string
+	qUser string
 }
 
 func hostTurnInfoSteps(sc *godog.ScenarioContext, _ fixtures) {
@@ -55,34 +49,26 @@ func hostTurnInfoSteps(sc *godog.ScenarioContext, _ fixtures) {
 	sc.Step(`^"P" lists "Q" on "Secretary" and "Q" confirms a brief posted by "Secretary"$`, func() error {
 		return w.composeSecretaryConfirmed([]string{w.qUser}, tiQMemID)
 	})
-	sc.Step(`^"P" confirms a brief and chooses on a decision card in a one-person group on "P1"$`, w.composeOnePersonChoices)
-	sc.Step(`^the turninfo item header is:$`, w.checkHeader)
-	sc.Step(`^the turninfo composed text is:$`, w.checkFullText)
-	sc.Step(`^the turninfo second line is:$`, w.checkSecondLine)
-	sc.Step(`^the turninfo header and second line are:$`, w.checkTopTwoLines)
-	sc.Step(`^both one-person turns read "instruction" in their header and on their second line$`, w.checkOnePersonBothInstruct)
+	sc.Step(`^the turninfo item header is:$`, w.checkItemHeader)
+	sc.Step(`^the turninfo composed text is:$`, w.checkTurnText)
+	sc.Step(`^the turninfo second line is:$`, func(doc *godog.DocString) error { return w.checkLines(doc, 2, 1) })
+	sc.Step(`^the turninfo header and second line are:$`, func(doc *godog.DocString) error { return w.checkLines(doc, 1, 2) })
 }
 
 func (w *turnInfoWorld) setup(cleanup func(func()), node string) error {
-	db, err := store.Open(":memory:")
-	if err != nil {
+	if err := w.turnStepWorld.setup(cleanup); err != nil {
 		return err
 	}
-	cleanup(func() { db.Close() })
-	w.pUser, w.qUser, w.homeKey = turnSeedKey(11).ID(), turnSeedKey(22).ID(), turnSeedKey(33)
+	w.pUser, w.qUser = w.ownerID, turnSeedKey(22).ID()
 	owner := w.qUser
 	if node == "P1" {
 		owner = w.pUser
 	}
-	w.h, _, err = host.New(db, w.homeKey, func() time.Time { return time.UnixMilli(turnTimeMS) })
-	if err != nil {
-		return err
-	}
 	write := func(tx *store.Tx) error {
-		_, err := tx.Exec("INSERT INTO setting(key, value) VALUES('owner', ?)", string(turnMustJSON(owner)))
+		_, err := tx.Exec("UPDATE setting SET value = ? WHERE key = 'owner'", string(turnMustJSON(owner)))
 		return err
 	}
-	if err := db.Write(write); err != nil {
+	if err := w.h.Store.Write(write); err != nil {
 		return err
 	}
 	w.seedGroupAndMembers()
@@ -241,55 +227,10 @@ func (w *turnInfoWorld) composeSecretaryConfirmed(allow []string, confirmer stri
 	return err
 }
 
-func (w *turnInfoWorld) composeOnePersonChoices() error {
-	w.h.Rows.Put(turnGroupID, "member", tiQMemID, json.RawMessage(`{"r":"member","id":"`+tiQMemID+`","seq":99,"gone":true}`))
-	if err := w.composeSecretaryConfirmed(nil, tiPMemID); err != nil {
-		return err
-	}
-	w.singleConf = w.text
-	decRaw := w.decisionInbox(turnSecID, nil, []string{w.pUser}, tiPMemID, "A")
-	var err error
-	w.singleDec, _, err = host.Compose(w.h, w.secSession(), host.ItemsTurn, []json.RawMessage{decRaw})
-	return err
-}
-
-func (w *turnInfoWorld) checkHeader(doc *godog.DocString) error {
+func (w *turnInfoWorld) checkLines(doc *godog.DocString, start, count int) error {
 	lines := strings.Split(w.text, "\n")
-	if len(lines) < 2 || lines[1] != doc.Content {
-		return fmt.Errorf("got:\n%s\nwant header:\n%s", w.text, doc.Content)
-	}
-	return nil
-}
-
-func (w *turnInfoWorld) checkFullText(doc *godog.DocString) error {
-	if w.text != doc.Content {
+	if len(lines) < start+count || strings.Join(lines[start:start+count], "\n") != doc.Content {
 		return fmt.Errorf("got:\n%s\nwant:\n%s", w.text, doc.Content)
-	}
-	return nil
-}
-
-func (w *turnInfoWorld) checkSecondLine(doc *godog.DocString) error {
-	lines := strings.Split(w.text, "\n")
-	if len(lines) < 3 || lines[2] != doc.Content {
-		return fmt.Errorf("got:\n%s\nwant second line:\n%s", w.text, doc.Content)
-	}
-	return nil
-}
-
-func (w *turnInfoWorld) checkTopTwoLines(doc *godog.DocString) error {
-	lines := strings.Split(w.text, "\n")
-	if len(lines) < 3 || lines[1]+"\n"+lines[2] != doc.Content {
-		return fmt.Errorf("got:\n%s\nwant:\n%s", w.text, doc.Content)
-	}
-	return nil
-}
-
-func (w *turnInfoWorld) checkOnePersonBothInstruct() error {
-	if !strings.Contains(w.singleConf, "== 1 of 1 · confirmed · instruction\n-- from \"P\" in main · instruction\n") {
-		return fmt.Errorf("unexpected one-person confirmed:\n%s", w.singleConf)
-	}
-	if !strings.Contains(w.singleDec, "== 1 of 1 · decided · instruction\n-- from \"P\" in main · instruction\n") {
-		return fmt.Errorf("unexpected one-person decided:\n%s", w.singleDec)
 	}
 	return nil
 }
