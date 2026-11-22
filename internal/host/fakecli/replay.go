@@ -41,12 +41,19 @@ func Run(vendor, version string, args []string, stdin io.Reader, stdout, stderr 
 		return 0
 	}
 	p := process{vendor: vendor, args: args, stdin: bufio.NewReader(stdin), stdout: stdout, stderr: stderr}
-	code, err := p.replay()
+	code, err := p.run(stdin)
 	if err != nil {
 		fmt.Fprintln(stderr, "fake "+vendor+":", err)
 		return 1
 	}
 	return code
+}
+
+func (p *process) run(rawStdin io.Reader) (int, error) {
+	if p.vendor == "opencode" {
+		return p.replayOpenCode(rawStdin)
+	}
+	return p.replay()
 }
 
 func (p *process) replay() (int, error) {

@@ -61,7 +61,8 @@ func (p *process) stopMCP() {
 }
 
 // Claude Code takes a configuration file or JSON string; Codex takes -c
-// settings, whose TOML values are also JSON here.
+// settings, whose TOML values are also JSON here; OpenCode takes
+// OPENCODE_CONFIG_CONTENT with mcp.solodawn.command.
 func (p *process) server() (srv server, err error) {
 	if arg := value(p.args, "--mcp-config"); arg != "" {
 		var config struct{ MCPServers map[string]server }
@@ -70,6 +71,9 @@ func (p *process) server() (srv server, err error) {
 			err = json.Unmarshal(data, &config)
 		}
 		return config.MCPServers["solodawn"], err
+	}
+	if raw := os.Getenv("OPENCODE_CONFIG_CONTENT"); p.vendor == "opencode" && raw != "" {
+		return openCodeMCPServer(raw)
 	}
 	for _, arg := range p.args {
 		if value, ok := strings.CutPrefix(arg, "mcp_servers.solodawn.command="); ok {
@@ -80,6 +84,22 @@ func (p *process) server() (srv server, err error) {
 		}
 	}
 	return srv, err
+}
+
+func openCodeMCPServer(raw string) (srv server, err error) {
+	var cfg struct {
+		MCP map[string]struct {
+			Command []string `json:"command"`
+		} `json:"mcp"`
+	}
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return server{}, err
+	}
+	cmd := cfg.MCP["solodawn"].Command
+	if len(cmd) == 0 {
+		return server{}, errors.New("missing mcp.solodawn.command")
+	}
+	return server{Command: cmd[0], Args: cmd[1:]}, nil
 }
 
 func readMCPConfig(arg string) ([]byte, error) {

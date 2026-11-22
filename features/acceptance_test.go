@@ -68,7 +68,7 @@ func TestFeatures(t *testing.T) {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 	fakes := t.TempDir()
-	if out, err := exec.Command("go", "build", "-o", fakes+string(os.PathSeparator), "../internal/host/fakecli/claude", "../internal/host/fakecli/codex").CombinedOutput(); err != nil {
+	if out, err := exec.Command("go", "build", "-o", fakes+string(os.PathSeparator), "../internal/host/fakecli/claude", "../internal/host/fakecli/codex", "../internal/host/fakecli/opencode").CombinedOutput(); err != nil {
 		t.Fatalf("build fake CLIs: %v\n%s", err, out)
 	}
 	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH"))
