@@ -58,6 +58,6 @@ Feature: Member panel and adding an AI to a group
     When the owner opens "Add AI" and "laptop" disconnects before the owner submits
     Then no command is sent to "workstation" and the dialog says "Not sent: the AI's computer cannot be reached."
     When the owner closes the dialog and becomes a non-admin member
-    Then the "Add AI" button is disabled with reason "Only an admin can add an AI."
+    Then the member adds an AI from their connected computer
     When the group home disconnects
     Then the "Add AI" button is disabled with reason "Cannot reach the group home."

@@ -855,7 +855,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         ]);
       },
     );
-    When('the owner closes the dialog and becomes a non-admin member', () => {
+    When('the owner closes the dialog and becomes a non-admin member', async () => {
       one<HTMLButtonElement>('dialog .btn-ghost').click();
       workstation.home.write(
         website,
@@ -869,10 +869,34 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         }),
       );
       flushSync();
+      await syncNode(laptop);
     });
-    Then('the "Add AI" button is disabled with reason "Only an admin can add an AI."', () => {
-      expect(one<HTMLButtonElement>('.members .head button').disabled).toBe(true);
-      expect(texts('.members .add-why')).toEqual(['Only an admin can add an AI.']);
+    Then('the member adds an AI from their connected computer', async () => {
+      const add = one<HTMLButtonElement>('.members .head button');
+      expect(add.disabled).toBe(false);
+      expect(texts('.members .add-why')).toEqual([]);
+      add.click();
+      await vi.waitFor(() =>
+        expect(one<HTMLInputElement>('dialog[open] input[name=candidate]:checked').disabled).toBe(
+          false,
+        ),
+      );
+      one('dialog[open] form').dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      );
+      await vi.waitFor(() =>
+        expect(laptop.joins).toMatchObject([
+          {
+            t: 'host.join',
+            g: website,
+            home: workstationId,
+            agent: 'codex',
+            name: 'Codex',
+            secretary: false,
+          },
+        ]),
+      );
+      await vi.waitFor(() => expect(one('#chat-side dialog[open]')).toBeNull());
     });
     When('the group home disconnects', () => {
       workstation.drop();

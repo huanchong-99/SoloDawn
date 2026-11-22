@@ -158,7 +158,7 @@ describe('member lists, roles and addDisabledReason', () => {
     expect(isAdmin(makeGroup({ role: 'none' }).group)).toBe(false);
   });
 
-  it('returns the exact addDisabledReason for offline home, missing info, non-admin and no owned host', () => {
+  it('returns the exact addDisabledReason for offline home, missing info, non-member and no owned host', () => {
     const ownedOnline = makeHome({ owner: true, online: true });
     const ownedOffline = makeHome({ owner: true, online: false });
     const guestOnline = makeHome({ owner: false, online: true });
@@ -177,8 +177,10 @@ describe('member lists, roles and addDisabledReason', () => {
     expect(addDisabledReason(noInfo.group, [])).toBeUndefined();
 
     const regularMember = makeGroup({ role: 'member', online: true, withInfo: true });
-    expect(addDisabledReason(regularMember.group, [ownedOnline])).toBe(
-      'Only an admin can add an AI.',
+    expect(addDisabledReason(regularMember.group, [guestOnline, ownedOnline])).toBeUndefined();
+    const nonMember = makeGroup({ role: 'none', online: true, withInfo: true });
+    expect(addDisabledReason(nonMember.group, [ownedOnline])).toBe(
+      'Only group members can add an AI.',
     );
 
     const adminNoHost = makeGroup({ role: 'admin', online: true, withInfo: true });
@@ -570,6 +572,8 @@ describe('AI status and path projections', () => {
     expect(pathLabel(mk('working', 'direct'))).toBe('direct');
     expect(pathLabel(mk('working', 'relay'))).toBe('relayed, limited');
     expect(pathLabel(mk('working', 'mesh'))).toBe('mesh');
+    prefs.lang = 'zh-CN';
+    expect(pathLabel(mk('working', 'direct'))).toBe('直连');
   });
 
   it('projects usageMeter from the rate-limit window only', () => {
@@ -627,6 +631,12 @@ describe('AI status and path projections', () => {
 
     expect(
       terminalDisabledReason(
+        netOf([], () => undefined),
+        ai,
+      ),
+    ).toBe('Computer offline');
+    expect(
+      terminalDisabledReason(
         netOf([offlineHost], () => undefined),
         offlineAiHost,
       ),
@@ -669,6 +679,12 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
         id: 'in-rows',
         g: gid,
         host: 'dev-2',
+        cli: 'codex',
+      }),
+      row<p.AIMemberRow>('row-member-ai', {
+        id: 'elsewhere',
+        g: gid,
+        host: 'dev-3',
         cli: 'codex',
       }),
     ]);
@@ -715,7 +731,16 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
               login_ok: false,
               driver: { accounts: ['api_key'], takeover: 'none' },
               caps: {},
-              groups: [],
+              groups: [
+                {
+                  g: 'other-group',
+                  member: 'm2',
+                  level: 3,
+                  state: 'working',
+                  queued: 0,
+                  watchers: [],
+                },
+              ],
             },
           ],
         },

@@ -2,7 +2,7 @@
   "member.account": "Account",
   "member.account.personal.note": "takes orders from owner",
   "member.add": "Add AI",
-  "member.add.forbidden": "Only an admin can add an AI.",
+  "member.add.forbidden": "Only group members can add an AI.",
   "member.add.nohost": "Connect one of your computers first.",
   "member.add.offline": "Cannot reach the group home.",
   "member.admin": "Admin",

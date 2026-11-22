@@ -11,6 +11,29 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `DriverCaps["opencode"]` declares levels `1` and `3` and approvals `conn`, and `openCodeDriver` speaks the `opencode serve` API (`internal/host/opencode.go`), but no run of the real OpenCode exists: the fake OpenCode's scripts are written from the documented API, not cut from captures.
 - Cause: T3-0 read OpenCode 1.19.6's documentation only, and no owner API key for a provider was available to T3-2. `drivers.md` section 4 asks that a value be declared from a run; levels `1` and `3`, the permission names, the event names (`session.idle`, `session.error`, `permission.asked`, `message.part.updated`), `POST /permission/<id>/reply`, and `OPENCODE_DISABLE_PROJECT_CONFIG` keeping the repository's configuration out are all `[documented]`.
 - Status: open until the live part of M3, M4 and M7 runs once with the real OpenCode and an owner key (`drivers.md` section 7); then the fake's scripts are replaced by captures and the declaration corrected.
+### 2026-11-22 · deviation · The Go export scenarios do not exercise browser UI or an OS timer
+
+- Symptom: A9.27 and A9.28 exercise browser peers at the protocol boundary, not the browser's own follow logic or the owner-only commands in group info. A9.28 takes successive copies without waiting for an OS timer at one-minute intervals.
+- Cause: `features/s2_export.feature:12,19,24` use the I2-0 Go cast and two invocations of the copy command. The product does not schedule copies (`planning/contracts/step-2/export.md:60-62`).
+- Status: open. Browser coverage belongs to I2-2 after U2-5 and W2-1. The OS timer is not verified.
+### 2026-11-22 · limitation · Home task participation needs the role-confirmation lane
+
+- Symptom: mention and call gating infers participation from a running task's assignee, or a reviewer that reached review. It does not yet account for role items held by a confirmation, or retain participation after a task becomes final.
+- Cause: `internal/home/cmd_confirm.go` uses the step-1 task machine's current role and step; T2-2b owns role-item gating and confirmation waits.
+- Status: open for T2-2b integration. Its held role items must not qualify for the thread exception in `planning/contracts/step-2/confirm.md` section 2.
+
+### 2026-11-22 · limitation · A failed move can leave a usable export file
+
+- Symptom: if committing the source deletion fails after publishing the SQLite file, the command fails and the source remains home, but the export file is already usable as a copy.
+- Cause: `internal/store/export.go` publishes the completed SQLite snapshot before deleting the group's rows in the source transaction. The filesystem rename cannot be rolled back with SQLite.
+- Status: open. Do not import a failed move as a move; retry export first.
+
+### 2026-11-22 · limitation · An inbox item handled just before a move can be handled again
+
+- Symptom: if a host acted on an item before a move but its ack did not reach the old home in time, the item is still unacknowledged in the export. The new home sends it with a new local item ID.
+- Cause: delivery deduplication is keyed by home device and item ID, and the inbox format does not carry the old home's delivery identity.
+- Status: open. Acknowledging the imported item deletes it at its new home.
+
 ### 2026-11-22 · limitation · Remembered addresses are not dialled yet
 
 - Symptom: `home.add` records signalling addresses, but a node still needs a shared configured rendezvous to reach an external home.
@@ -25,7 +48,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-22 · limitation · Browser invitation joining needs the node and home implementations
 
 - Symptom: a current node does not admit a browser through an invitation; it knows only protocol version 1.
-- Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts`. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a. U2-1 supplies the join page.
+- Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts`. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a. U2-1 supplies the join page and member controls.
 - Status: open until those units are integrated. The browser exchange is covered against a simulated home, not a released node.
 
 ### 2026-11-22 · limitation · `host.CheckTakeover` awaits `takeover.start` (`HS-20`) and `driver` in `host.info` awaits `P-5` / `T3-2`
@@ -35,6 +58,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open until `HS-20` calls `host.CheckTakeover` in `takeover.start`. The `driver` half is resolved by `T3-2` (`internal/host/agents.go`, `agtDriverProto`).
 - Status: the `takeover.start` half is resolved in T3-1 (#275): `takeover.start` calls `checkTakeover` first and uses its `assignFirst`. Open until `T3-2` adds `driver` to `host.info`.
 - Status: the `takeover.start` half is resolved in T3-1 (#275): `takeover.start` calls `checkTakeover` first and uses its `assignFirst`. Open until `T3-2` adds `driver` to `host.info`.
+
 ### 2026-11-22 · limitation · A7.9 does not run on Windows
 
 - Symptom: on the Windows CI runner the A7.9 scenario (`features/m7.feature`, moving an open takeover PeerConnection from direct to TURN relay) fails with "selected-pair statistics did not transition to relay" (CI run 45037819755, twice). Linux and macOS pass.
@@ -46,17 +70,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: when the interactive CLI exits on its own while the owner's terminal is open, the last lines it printed (for A7.4's fake CLI, `{"bye":…}` and the echo of the input line) never reach the pty channel. M7's A7.4 therefore does not wait for `"bye":` (`runOneSwitchCycle` in `features/m7_test.go`); it waits for the hand-back post, and the exit entry in the CLI log proves the exit. Seen on `test (windows-latest)` of PR #287; Linux and macOS deliver the line.
 - Cause: on Windows `ptyBeforeExitStop` does nothing (`internal/host/pty_windows.go:16`), so the host closes the terminal as soon as the CLI exits and drops the frame that ConPTY has not rendered yet. Diagnosis: `WIN-CONPTY.review.md`.
 - Status: open, product behaviour (coordinator, 2026-11-22, I-7 decision). The fix is planned in a later Windows unit, before I-11. No product code changes in I-7.
+
 ### 2026-11-22 · deviation · Host turn labels approximate task participation by role
 
 - Symptom: a role still held for confirmation counts as participation for host labels, although `planning/contracts/step-2/confirm.md:37-38,156-172` also requires a queued assign or review item.
 - Cause: `internal/host/turn_info.go:13` reads the source task's assignee and reviewer. Ended sessions are deleted (`internal/host/session.go:284-300`), so the session table is not a durable record of queued role items.
 - Status: open, accepted for T2-13; labels enforce nothing.
 
-### 2026-11-22 · limitation · Direct-confirmation labels have no production card producer yet
+### 2026-11-22 · limitation · Direct-confirmation label history is bounded
 
-- Symptom: carried-message and recovery labels can read confirmed direct cards, but the home does not yet write step-2 confirm cards.
-- Cause: `internal/host/turn_info.go:74` fetches `confirm` messages by kind; the producer in `planning/contracts/step-2/confirm.md:43-60` is not implemented in the home. Host state-only sync excludes message rows (`internal/host/deliver.go:259`), so these labels fetch at most one page of 100 confirmation messages per Compose.
-- Status: open; live mention labels continue to trust the home's queueing decision. Confirmation cards older than that page are not consulted unless already present in this Compose's fetched history.
+- Symptom: confirmation cards older than one page are not consulted for carried-message and recovery labels unless already present in the turn's fetched history.
+- Cause: `internal/host/turn_info.go:74` fetches at most one page of 100 `confirm` messages per Compose. Host state-only sync excludes message rows (`internal/host/deliver.go:259`).
+- Status: open; T2-2a supplies the home card producer in `internal/home/cmd_confirm.go`. Live mention labels continue to trust the home's queueing decision.
 
 ### 2026-11-22 · limitation · A hand-back that starts while the node is stopping is lost
 
@@ -129,7 +154,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `planning/contracts/step-3/drivers.md` section 6 says each entry of `agents` carries `driver` always, but the frozen shape lets it be absent: Go `Driver *Driver` with `omitempty` (`internal/proto/host.go`, `HostAgent`), TS `v.optional(Driver)` (`web/src/lib/proto.ts`, `HostState.agents`), and `agents.driver` under `optional` in `internal/proto/testdata/wire.json`.
 - Cause: nothing on rebuild fills `driver` yet; a required field now would make the web client reject every real `host.info` until T3-2 lands. P-5 froze `driver` as `accounts` and `takeover` only; the other declaration fields stay in the host's table (coordinator, 2026-11-22).
 - Status: open, accepted for P-5. T3-2, the pull request that fills `driver` for every agent, makes it required: Go: the `Driver` field (JSON `driver`) (value type, no `omitempty`), TS `driver: Driver`, regenerate `wire.json` with `go test ./internal/proto -update`, and drop "once populated" from `internal/proto/README.md` (the `host.info` bullet). Also accepted: P-5 does not freeze the tool lists in `internal/proto/testdata/tools.json` (`planning/contracts/step-3/knowledge.md` section 7), because `internal/host` tests require it to equal the registered schemas; T3-5 adds `note_list` `type` and `propose_brief` `preset`, T3-6 adds `kb_put` and `kb_search` to all five lists, and the two merge with `go test ./internal/proto -update`.
-
 
 ### 2026-11-22 · limitation · Existing stores do not get the `row_named` index
 
@@ -618,6 +642,30 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `planning/contracts/step-3/drivers.md` section 6 says each entry of `agents` carries `driver` always, but the frozen shape lets it be absent: Go `Driver *Driver` with `omitempty` (`internal/proto/host.go`, `HostAgent`), TS `v.optional(Driver)` (`web/src/lib/proto.ts`, `HostState.agents`), and `agents.driver` under `optional` in `internal/proto/testdata/wire.json`.
 - Cause: nothing on rebuild fills `driver` yet; a required field now would make the web client reject every real `host.info` until T3-2 lands. P-5 froze `driver` as `accounts` and `takeover` only; the other declaration fields stay in the host's table (coordinator, 2026-11-22).
 - Status: resolved by T3-2: `driver` is required in Go (`internal/proto/host.go`, `HostAgent`), TS (`web/src/lib/proto.ts`) and `wire.json`, and `Host.Agents` fills it for every agent. Before that it was open, accepted for P-5. T3-2, the pull request that fills `driver` for every agent, makes it required: Go ``Driver Driver `json:"driver"` `` (value type, no `omitempty`), TS `driver: Driver`, regenerate `wire.json` with `go test ./internal/proto -update`, and drop "once populated" from `internal/proto/README.md` (the `host.info` bullet). Also accepted: P-5 does not freeze the tool lists in `internal/proto/testdata/tools.json` (`planning/contracts/step-3/knowledge.md` section 7), because `internal/host` tests require it to equal the registered schemas; T3-5 adds `note_list` `type` and `propose_brief` `preset`, T3-6 adds `kb_put` and `kb_search` to all five lists, and the two merge with `go test ./internal/proto -update`.
+### 2026-11-22 · bug · Watch confirmation admission rejected fields outside its checks
+
+- Symptom: a person's watch request was refused when it carried a thread, reply or text, although the watch admission contract does not restrict them.
+- Cause: `cfmWatchShape` (`internal/home/cmd_confirm.go:137`) checked those fields in addition to the checks in `planning/contracts/step-2/confirm.md` section 3.
+- Status: resolved in #310 by retaining only the contracted watch checks.
+
+### 2026-11-22 · deviation · Home confirmation reminders were not sent
+
+- Symptom: cross-owner requests in the unfinished confirmation implementation created cards, but no subscribed browser received a confirmation reminder.
+- Cause: the standalone reminder builder in `internal/home/cmd_confirm.go` was not connected to the Web Push extractor registry.
+- Status: resolved in T2-2a: confirmation cards use the committed-row push path, name the AI, omit the title, and target only `body.to`. Tests decrypt the outgoing push payload.
+
+### 2026-11-22 · bug · Removing a person left group devices live when another local membership remained
+
+- Symptom: a removed person's device rows and in-memory device log remained in the group when they also belonged to another group homed on the node.
+- Cause: `internal/home/cmd_people.go:124` put group device retirement under the last-local-membership condition intended only for node-wide `device_log` and `push_sub` deletion.
+- Status: resolved in #309. Removal always retires the group's devices and drops its in-memory log; only node-wide deletion waits for the last local membership.
+
+### 2026-11-22 · deviation · The home handled only AI member changes
+
+- Symptom: an invited person could not join, change role or leave through home commands.
+- Cause: `internal/home/cmd_member.go` dispatched only AI members; the joining seam had no production `join` handler.
+- Status: resolved in T2-1a by `internal/home/cmd_people.go`: joining, restore reconnection, owner role changes, and cascading removal with last-membership device-log and push-subscription cleanup. Invitation transport and node connection closure belong to T2-1b.
+
 ### 2026-11-22 · bug · HM-13 and HM-15 home tests disagreed on rounds after both landed
 
 - Symptom: after `origin/rebuild` (HM-15's `post/call` and `post/reply`) was merged into HM-13, `go test ./internal/home/` panicked with `home: two functions under post/call` in `TestRoundsTenExchangesPauseAndResume`, and two `TestCall*` cases got `thread.rounds` one higher than they expected.

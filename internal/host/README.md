@@ -42,7 +42,7 @@ Each is a package map. The file that provides an entry adds it from its `init` w
 | `Tools` | the tool's name | the MCP server, through `ToolsFor(caller)`: a tool whose `For` refuses the caller is neither listed nor called |
 | `Drivers` | the agent name (`claude`, `codex`, …) | whoever starts a session's process |
 | `DriverCaps` | the agent name, matching `Drivers` | `Agents`, `agent.set`, `host.join`, `host.leave`, `Tools["approve"].For`, and `takeover.start` ([step-3/drivers.md](../../planning/contracts/step-3/drivers.md) sections 4 and 5) |
-| `Pushes` | `t` of a frame a home pushes: `inbox`, `rows`, `reset` | `h.Push(home, frame)`, which `node` calls for each push it reads on a connection to a home, and the local link for a home on the same node |
+| `Pushes` | `t` of a frame a home pushes: `inbox`, `rows`, `reset`, `groups` | `h.Push(home, frame)`, which `node` calls for each push it reads on a connection to a home, and the local link for a home on the same node |
 | `Surface` | `t` of a request or push of the [host surface](../../planning/contracts/datachannel.md) (`audit`, `pty.resize`), or `t` of a [host command](../../planning/contracts/commands.md) (`takeover.start`) | `node`, only for a device of the owner; for a command after the envelope checks and the receipt lookup |
 | `Listeners` | the name of the listening unit | `h.Report(key, event)`, which the session runtime calls for every event of a session's CLI |
 | `Built` | the name of the unit | `New`, once, when the host is built |
@@ -51,6 +51,8 @@ Each is a package map. The file that provides an entry adds it from its `init` w
 | `Holds` | the name of the unit that knows of a hold | `h.Held(key)`, which delivery calls. The unit of limits registers the holds of a vendor rate limit and "all offline"; with no entry nothing is held |
 
 `Listeners`, `Built`, `Attached`, `Settled` and `Holds` are called in the order of their keys. `node` does the rest of the wiring: it registers the subcommands of host features and gives each `Peer` the handlers of their channels.
+
+In `home_moved.go`, a `groups` push triggers a new sync if a live group is missing or a tracked group appears before sync succeeds. On `moved`, `followMovedHome` replaces the saved home and keeps the old home's signalling URLs.
 
 ## Hooks
 

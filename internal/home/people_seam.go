@@ -74,9 +74,9 @@ func (c *Conn) seamJoining() *Joining {
 	return (*fn)()
 }
 
-// ApplyJoining is Apply on a connection whose joining state is join (nil on an
+// applyJoining is Apply on a connection whose joining state is join (nil on an
 // ordinary connection).
-func (t Table) ApplyJoining(s *State, disk Disk, receipts Receipts, env proto.Envelope, join *Joining, now time.Time) (Result, error) {
+func (t Table) applyJoining(s *State, disk Disk, receipts Receipts, env proto.Envelope, join *Joining, now time.Time) (Result, error) {
 	res, _, err := t.seamRunTx(s, disk, receipts, env, join, now, false)
 	return res, err
 }
@@ -91,16 +91,18 @@ func (t Table) seamRunTx(s *State, disk Disk, receipts Receipts, env proto.Envel
 
 func (t Table) seamAfterOpen(s *State, disk Disk, receipts Receipts, hdr proto.PayloadHeader, env proto.Envelope, join *Joining, now time.Time, deferInvite bool) (Result, seamDeferred, error) {
 	held, found, err := seamReceipt(receipts, env.Key, string(hdr.Nonce))
-	if err != nil || found {
-		res, def := seamHeld(s.Invite, hdr, env.Key, held, deferInvite)
-		return res, def, err
+	if err != nil {
+		return Result{}, seamDeferred{}, err
+	}
+	if found {
+		res, def := seamHeld(hdr, env.Key, held, deferInvite)
+		return res, def, nil
 	}
 	res := t.run(s, Command{PayloadHeader: hdr, Env: env, Now: now.UnixMilli(), Disk: disk, Joining: join})
 	if deferInvite && res.InviteBy != "" {
 		return res, seamDeferred{create: true, hdr: hdr}, nil
 	}
-	res, err = s.seamFinish(receipts, hdr, env.Key, res)
-	return res, seamDeferred{}, err
+	return res, seamDeferred{}, receipts.PutReceipt(env.Key, string(hdr.Nonce), hdr.Timestamp, res.Answer)
 }
 
 func seamReceipt(receipts Receipts, signer, nonce string) (store.Outcome, bool, error) {
@@ -111,11 +113,11 @@ func seamReceipt(receipts Receipts, signer, nonce string) (store.Outcome, bool, 
 	return held, err == nil, err
 }
 
-func seamHeld(inv Inviter, hdr proto.PayloadHeader, signer string, held store.Outcome, deferInvite bool) (Result, seamDeferred) {
+func seamHeld(hdr proto.PayloadHeader, signer string, held store.Outcome, deferInvite bool) (Result, seamDeferred) {
 	if deferInvite && held.OK && hdr.Type == keyInvite {
 		return Result{}, seamDeferred{replay: true, hdr: hdr, held: held}
 	}
-	return seamReplayWith(inv, hdr.Type, signer, string(hdr.Nonce), held), seamDeferred{}
+	return seamReplayWith(nil, hdr.Type, signer, string(hdr.Nonce), held), seamDeferred{}
 }
 
 func seamReplayWith(inv Inviter, typ, signer, nonce string, held store.Outcome) Result {
@@ -128,17 +130,6 @@ func seamReplayWith(inv Inviter, typ, signer, nonce string, held store.Outcome) 
 		}
 	}
 	return refused(&Refusal{"conflict", "the invitation is no longer open"})
-}
-
-func (s *State) seamFinish(receipts Receipts, hdr proto.PayloadHeader, signer string, res Result) (Result, error) {
-	if res.InviteBy != "" && s.Invite != nil {
-		link, err := s.Invite.Invite(s.ID, res.InviteBy, signer, string(hdr.Nonce))
-		if err != nil {
-			return Result{}, err
-		}
-		res.Link, res.Expires = link.Link, link.Expires
-	}
-	return res, receipts.PutReceipt(signer, string(hdr.Nonce), hdr.Timestamp, res.Answer)
 }
 
 func (s *State) seamKnown(join *Joining) func(string) bool {
