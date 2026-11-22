@@ -92,18 +92,7 @@
       </button>
     </div>
   </header>
-  <div class="ban">
-    {#if net.otherTab}
-      <div class="tab-ban" role="status">
-        <Icon name="info" />
-        <span class="grow">{t('app.otherTab')}</span>
-        <button type="button" class="btn btn-sm btn-dawn" onclick={net.useHere}>
-          {t('app.useHere')}
-        </button>
-      </div>
-    {/if}
-    <Mount at="banner" props={{ net }} />
-  </div>
+  <div class="ban"><Mount at="banner" props={{ net }} /></div>
   <main bind:this={main} tabindex="-1" aria-labelledby="page-title">
     {#if View && !(net.otherTab && route.page === 'onboarding')}
       <View params={route.params} {net} />
@@ -111,15 +100,3 @@
   </main>
   <Mount at="layer" props={{ net }} />
 </div>
-
-<style>
-  .tab-ban {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-3);
-    padding: 8px var(--sp-4);
-    background: var(--dawn-soft);
-    border-bottom: 1px solid color-mix(in srgb, var(--dawn) 35%, var(--line));
-    font-size: var(--fs-sm);
-  }
-</style>
