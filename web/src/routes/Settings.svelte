@@ -1,5 +1,9 @@
 <script lang="ts">
+  import ReminderCard from '../components/reminder/ReminderCard.svelte';
   import { choose, langs, prefs, t, themes } from '../lib/prefs.svelte';
+  import type { PageProps } from '../lib/route.svelte';
+
+  let { net }: PageProps<'settings'> = $props();
 </script>
 
 <div class="page">
@@ -51,6 +55,8 @@
       </fieldset>
     </div>
   </section>
+
+  <ReminderCard {net} />
 </div>
 
 <style>

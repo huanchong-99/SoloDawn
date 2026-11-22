@@ -1,0 +1,18 @@
+{
+  "reminder.title": "Notifications",
+  "reminder.lead": "Only the moments that need a person. AI progress never notifies you.",
+  "reminder.browser": "Browser notifications",
+  "reminder.status.allowed": "Allowed in this browser",
+  "reminder.status.off": "Off in this browser",
+  "reminder.status.denied": "Blocked in browser settings",
+  "reminder.status.ios": "Add to Home Screen first",
+  "reminder.status.unsupported": "Not available in this browser",
+  "reminder.when": "Notify me when",
+  "reminder.kind.mention": "I am @mentioned",
+  "reminder.kind.decision": "A decision is needed",
+  "reminder.kind.approval": "An approval is needed",
+  "reminder.kind.brief": "A brief awaits confirmation",
+  "reminder.kind.done": "A task is done",
+  "reminder.ios": "On iPhone and iPad, add SoloDawn to your Home Screen first; notifications work after that, and Safari keeps this browser's key past seven days.",
+  "reminder.error.subscribe": "Could not enable notifications in this browser."
+}
