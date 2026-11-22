@@ -63,16 +63,10 @@ func (s *Sessions) cliLeave(c *sesConn) {
 func (s *Sessions) cliHandshake(ctx context.Context, c *sesConn, raw clientCtl) bool {
 	helloCtx, cancel := context.WithTimeout(ctx, cliHelloTimeout)
 	defer cancel()
-	build := func(id int64) any {
-		return proto.Hello{
-			Request: proto.Request{Type: "hello", ID: id},
-			V:       1,
-			Kind:    "host",
-			Name:    s.cfg.Name(),
-			Addrs:   s.cfg.Addrs(),
-		}
+	ans, err := s.cliHello(helloCtx, raw, wireVersion)
+	if err == nil && cliVersionRefusal(ans) {
+		ans, err = s.cliHello(helloCtx, raw, legacyVersion)
 	}
-	ans, err := raw.Request(helloCtx, build)
 	if err != nil || !cliWelcomeOK(ans) {
 		return false
 	}

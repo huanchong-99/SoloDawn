@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sync"
 
@@ -16,7 +17,7 @@ import (
 
 const ctlLimit = 61_440
 
-// Logs holds the verified device log of this node's owner.
+// Logs holds the verified device logs of the owner and group members.
 // Lock order: writeMu -> Store.Write / mu; mu is a leaf lock guarding owner,
 // log and onChange, never held across Store.Write, home.Loop or network writes.
 type Logs struct {
@@ -24,13 +25,13 @@ type Logs struct {
 	self, owner string
 	writeMu     sync.Mutex
 	mu          sync.RWMutex
-	log         *identity.Log
+	log         map[string]*identity.Log
 	onChange    func(user string, rows []proto.DeviceRow, adopted bool, skip *sesConn)
 }
 
-// OpenLogs loads the owner setting and verified device log from db.
+// OpenLogs loads the owner setting and verified device logs from db.
 func OpenLogs(db *store.Store, selfID string) (*Logs, error) {
-	l := &Logs{db: db, self: selfID}
+	l := &Logs{db: db, self: selfID, log: map[string]*identity.Log{}}
 	load := func(tx *store.Tx) error { return l.dvlLoad(tx) }
 	if err := db.Write(load); err != nil {
 		return nil, err
@@ -53,43 +54,58 @@ func (l *Logs) dvlLoad(tx *store.Tx) error {
 }
 
 func (l *Logs) dvlLoadEntries(tx *store.Tx) error {
-	rows, err := tx.Query("SELECT env FROM device_log WHERE user = ? ORDER BY ver", l.owner)
+	rows, err := tx.Query("SELECT user, env FROM device_log ORDER BY user, ver")
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
-	log := &identity.Log{User: l.owner}
 	for rows.Next() {
-		var raw string
-		var env proto.Envelope
-		if rows.Scan(&raw); proto.Decode([]byte(raw), &env) != nil {
-			return identity.BadRequest
-		}
-		if _, err := log.Apply(env); err != nil {
+		if err := l.dvlLoadEntry(rows); err != nil {
 			return err
 		}
 	}
-	if len(log.Entries) > 0 {
-		l.log = log
-	}
 	return rows.Err()
+}
+
+func (l *Logs) dvlLoadEntry(rows *sql.Rows) error {
+	var user, raw string
+	if err := rows.Scan(&user, &raw); err != nil {
+		return err
+	}
+	var env proto.Envelope
+	if proto.Decode([]byte(raw), &env) != nil {
+		return identity.BadRequest
+	}
+	log := cmp.Or(l.log[user], &identity.Log{User: user})
+	if _, err := log.Apply(env); err != nil {
+		return err
+	}
+	l.log[user] = log
+	return nil
 }
 
 // Owner returns the user id of this node's owner, or empty before adoption.
 func (l *Logs) Owner() string { l.mu.RLock(); defer l.mu.RUnlock(); return l.owner }
 
-// UserOf returns this node's owner when device is valid in the owner's log, or empty.
+// UserOf returns the person whose log contains device, or empty.
 func (l *Logs) UserOf(device string) string {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	if l.log != nil && l.log.Valid(device) {
-		return l.owner
+	for _, user := range slices.Sorted(maps.Keys(l.log)) {
+		if l.log[user].Valid(device) {
+			return user
+		}
 	}
 	return ""
 }
 
 // IsOwner reports whether device is a currently valid device of this node's owner.
-func (l *Logs) IsOwner(device string) bool { return l.UserOf(device) != "" }
+func (l *Logs) IsOwner(device string) bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	log := l.log[l.owner]
+	return log != nil && log.Valid(device)
+}
 
 // Known reports whether device is valid in the device log kept by this node.
 func (l *Logs) Known(device string) bool { return l.UserOf(device) != "" }
@@ -97,13 +113,13 @@ func (l *Logs) Known(device string) bool { return l.UserOf(device) != "" }
 // Log returns an independent copy of user's verified log, or nil when none is held.
 func (l *Logs) Log(user string) *identity.Log {
 	l.mu.RLock()
-	if l.log == nil || user != l.owner {
+	log := l.log[user]
+	if log == nil {
 		l.mu.RUnlock()
 		return nil
 	}
-	entries := slices.Clone(l.log.Entries)
 	l.mu.RUnlock()
-	copied, _ := identity.Replay(user, entries)
+	copied, _ := identity.Replay(user, log.Entries)
 	return copied
 }
 
@@ -115,20 +131,23 @@ func (l *Logs) frames(user string) []proto.Devlog {
 }
 
 func (l *Logs) dvlReceive(dl proto.Devlog, skip *sesConn) error {
-	rows, err := l.dvlCommitOwner(dl.User, dl.Entries)
+	rows, err := l.dvlCommit(dl.User, dl.Entries)
 	if len(rows) > 0 {
 		l.dvlNotify(dl.User, rows, false, skip)
 	}
 	return err
 }
 
-func (l *Logs) dvlCommitOwner(user string, entries []proto.Envelope) ([]proto.DeviceRow, error) {
+func (l *Logs) dvlCommit(user string, entries []proto.Envelope) ([]proto.DeviceRow, error) {
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
-	if user != l.Owner() {
-		return nil, nil
+	log := l.Log(user)
+	if log == nil {
+		if user != l.Owner() {
+			return nil, nil
+		}
+		log = &identity.Log{User: user}
 	}
-	log := cmp.Or(l.Log(user), &identity.Log{User: user})
 	rows := dvlCollectRows(log, entries)
 	if len(rows) == 0 {
 		return nil, nil
@@ -138,9 +157,29 @@ func (l *Logs) dvlCommitOwner(user string, entries []proto.Envelope) ([]proto.De
 		return nil, err
 	}
 	l.mu.Lock()
-	l.log = log
+	l.log[user] = log
 	l.mu.Unlock()
 	return rows, nil
+}
+
+func (l *Logs) dvlKeep(log *identity.Log, skip *sesConn) {
+	if rows := l.dvlKeepRows(log); len(rows) != 0 {
+		l.dvlNotify(log.User, rows, false, skip)
+	}
+}
+
+func (l *Logs) dvlKeepRows(log *identity.Log) []proto.DeviceRow {
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
+	var rows []proto.DeviceRow
+	if prev := l.Log(log.User); prev != nil {
+		rows = dvlCollectRows(prev, log.Entries)
+		log = prev
+	}
+	l.mu.Lock()
+	l.log[log.User] = log
+	l.mu.Unlock()
+	return rows
 }
 
 func dvlCollectRows(log *identity.Log, entries []proto.Envelope) []proto.DeviceRow {
@@ -183,7 +222,7 @@ func (l *Logs) dvlSaveAdoption(cand *identity.Log, rows []proto.DeviceRow) error
 		return err
 	}
 	l.mu.Lock()
-	l.owner, l.log = cand.User, cand
+	l.owner, l.log[cand.User] = cand.User, cand
 	l.mu.Unlock()
 	return nil
 }
@@ -218,7 +257,7 @@ func (l *Logs) dvlWriteAdd(signer identity.Key, dev, kind, name string, now int6
 		return proto.DeviceRow{}, err
 	}
 	l.mu.Lock()
-	l.log = log
+	l.log[owner] = log
 	l.mu.Unlock()
 	return row, nil
 }
@@ -242,19 +281,34 @@ func (l *Logs) dvlNotify(user string, rows []proto.DeviceRow, adopted bool, skip
 }
 
 func (s *Sessions) sesWelcomeLogs(c *sesConn) []proto.Devlog {
-	if s.sesPeerKeeps(c) {
-		return s.cfg.Logs.frames(s.cfg.Logs.Owner())
+	if c.joining.pending() {
+		return nil
 	}
-	return nil
+	var frames []proto.Devlog
+	for _, user := range slices.Sorted(maps.Keys(s.sesLogUsers(c))) {
+		frames = append(frames, s.cfg.Logs.frames(user)...)
+	}
+	return frames
 }
 
-func (s *Sessions) sesPeerKeeps(c *sesConn) bool {
-	return c.paired || s.cfg.Logs.IsOwner(c.device)
+func (s *Sessions) sesLogUsers(c *sesConn) map[string]bool {
+	users := map[string]bool{}
+	if c.home != nil && s.cfg.Logs.Known(c.device) {
+		users = s.cfg.Home.LogUsers(c.home)
+	}
+	if c.home == nil || c.paired || s.cfg.Logs.IsOwner(c.device) {
+		users[s.cfg.Logs.Owner()] = true
+	}
+	return users
 }
 
 func (s *Sessions) sesDevlog(c *sesConn, data json.RawMessage) {
 	var dl proto.Devlog
 	if proto.Decode(data, &dl) != nil {
+		return
+	}
+	if c.joining.pending() {
+		c.joining.stage(dl)
 		return
 	}
 	if s.cfg.Logs.Owner() == "" {
@@ -304,9 +358,20 @@ func (s *Sessions) sesLogChanged(user string, rows []proto.DeviceRow, adopted bo
 		envs[i] = r.Env
 	}
 	frames := dvlBatchFrames(user, envs)
+	memberLog := user != s.cfg.Logs.Owner()
 	for _, c := range s.sesConns() {
-		s.sesSyncOne(c, frames, skip)
+		if memberLog && dvlRevoked(c.device, rows) {
+			c.Close()
+			continue
+		}
+		s.sesSyncOne(c, user, frames, skip)
 	}
+}
+
+func dvlRevoked(device string, rows []proto.DeviceRow) bool {
+	return slices.ContainsFunc(rows, func(r proto.DeviceRow) bool {
+		return r.Op == "revoke" && r.Device == device
+	})
 }
 
 func (s *Sessions) sesAdopted(user string, skip *sesConn) {
@@ -318,8 +383,8 @@ func (s *Sessions) sesAdopted(user string, skip *sesConn) {
 	}
 }
 
-func (s *Sessions) sesSyncOne(c *sesConn, frames []proto.Devlog, skip *sesConn) {
-	if s.sesShouldForward(c, skip) {
+func (s *Sessions) sesSyncOne(c *sesConn, user string, frames []proto.Devlog, skip *sesConn) {
+	if s.sesShouldForward(c, user, skip) {
 		for _, dl := range frames {
 			if c.send(dl) != nil {
 				return
@@ -328,11 +393,11 @@ func (s *Sessions) sesSyncOne(c *sesConn, frames []proto.Devlog, skip *sesConn) 
 	}
 }
 
-func (s *Sessions) sesShouldForward(c *sesConn, skip *sesConn) bool {
+func (s *Sessions) sesShouldForward(c *sesConn, user string, skip *sesConn) bool {
 	s.mu.Lock()
 	ok := c != skip && c.welcomed
 	s.mu.Unlock()
-	return ok && s.sesPeerKeeps(c)
+	return ok && !c.joining.pending() && s.sesLogUsers(c)[user]
 }
 
 func dvlRowOf(env proto.Envelope) proto.DeviceRow {

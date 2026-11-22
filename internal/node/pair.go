@@ -74,14 +74,22 @@ type (
 		routes                                          []peer.Route
 		peer                                            proto.Pair
 		conn                                            Ctl
-		done                                            bool
+		done, used                                      bool
 		pathsLeft                                       int
 		outcome                                         chan error // single reader: waitPair (role "b") or watchBrowser (role "a")
+		invitation                                      invitation
+		joining                                         map[Ctl]bool
 	}
 )
 
 // NewPairer constructs a Pairer and wires pair.browser into cfg.Sessions.
 func NewPairer(cfg PairConfig) *Pairer {
+	p := newPairer(cfg)
+	p.bind(cfg.Sessions)
+	return p
+}
+
+func newPairer(cfg PairConfig) *Pairer {
 	if cfg.Name == nil {
 		cfg.Name = func() string { return ReadName(cfg.Store) }
 	}
@@ -94,11 +102,14 @@ func NewPairer(cfg PairConfig) *Pairer {
 	if cfg.After == nil {
 		cfg.After = time.After
 	}
-	p := &Pairer{cfg: cfg, attempts: map[*pairAttempt]bool{}, links: map[string]*pairAttempt{}}
-	cfg.Sessions.Commands["pair.browser"] = p.cmdPairBrowser
-	cfg.Sessions.Replays["pair.browser"] = p.replayPairBrowser
-	cfg.Sessions.onPairHello, cfg.Sessions.onPairAdopt = p.onPairHello, p.onPairAdopt
-	return p
+	return &Pairer{cfg: cfg, attempts: map[*pairAttempt]bool{}, links: map[string]*pairAttempt{}}
+}
+
+func (p *Pairer) bind(s *Sessions) {
+	p.cfg.Sessions = s
+	s.Commands["pair.browser"] = p.cmdPairBrowser
+	s.Replays["pair.browser"] = p.replayPairBrowser
+	s.onPairHello, s.onPairAdopt = p.onPairHello, p.onPairAdopt
 }
 
 // Close ends every open pairing attempt and discards its secret.
@@ -128,17 +139,31 @@ func (p *Pairer) Routes(device string) []peer.Route {
 // Serve runs a ctl session on Sessions, marking it paired when device matches
 // an active room exchange.
 func (p *Pairer) Serve(ctx context.Context, device string, raw Ctl) {
-	now := p.cfg.Now().UnixMilli()
-	p.mu.Lock()
-	a := p.findPeerLocked(device, now)
-	if a != nil {
-		a.conn = raw
+	a := p.attachAttempt(device, raw)
+	if a != nil && a.invitation.group != "" {
+		p.serveJoining(ctx, a, device, raw)
+		return
 	}
-	p.mu.Unlock()
 	p.cfg.Sessions.Serve(ctx, device, a != nil, raw)
 	if a != nil {
 		p.finish(a, io.EOF)
 	}
+}
+
+func (p *Pairer) attachAttempt(device string, raw Ctl) *pairAttempt {
+	now := p.cfg.Now().UnixMilli()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	a := p.findPeerLocked(device, now)
+	if a == nil {
+		return nil
+	}
+	if a.invitation.group != "" {
+		a.joining[raw] = true
+	} else {
+		a.conn = raw
+	}
+	return a
 }
 
 // HandleEvent processes a non-signalling rendezvous frame ("joined", "full" or
@@ -250,11 +275,15 @@ func (p *Pairer) startBrowser(ctx context.Context, webURL string) (*pairAttempt,
 	}
 	secret := identity.NewSecret()
 	a := &pairAttempt{role: "a", wantRole: "b", secret: secret, label: p.cfg.Name(), link: PairLink{Link: base + "/#pair=" + secret.String()}}
+	return a, p.openBrowser(ctx, a, urls)
+}
+
+func (p *Pairer) openBrowser(ctx context.Context, a *pairAttempt, urls []string) error {
 	if err := p.openAttempt(ctx, a, p.sharedPaths(), urls); err != nil {
-		return nil, err
+		return err
 	}
 	go p.watchBrowser(a)
-	return a, nil
+	return nil
 }
 
 func (p *Pairer) sharedPaths() []*peer.Path {
@@ -327,6 +356,9 @@ func (p *Pairer) registerAttempt(a *pairAttempt, cancel context.CancelFunc, dial
 	}
 	p.mu.Lock()
 	p.attempts[a] = true
+	if key := a.invitation.key; key != "" {
+		p.links[key] = a
+	}
 	p.mu.Unlock()
 }
 
@@ -352,7 +384,7 @@ func (p *Pairer) servePath(ctx context.Context, a *pairAttempt, path *peer.Path)
 	err := path.Serve(ctx, p.Peer, event)
 	p.mu.Lock()
 	a.pathsLeft--
-	fail := a.pathsLeft == 0 && a.conn == nil
+	fail := a.pathsLeft == 0 && a.conn == nil && len(a.joining) == 0
 	p.mu.Unlock()
 	if fail {
 		p.finish(a, err)
@@ -377,10 +409,17 @@ func (p *Pairer) onPairMsg(a *pairAttempt, data []byte) {
 	if proto.Decode(data, &rd) != nil || proto.Decode(rd.Data, &m) != nil {
 		return
 	}
+	p.acceptPair(a, m)
+}
+
+func (p *Pairer) acceptPair(a *pairAttempt, m proto.Pair) {
 	now := p.cfg.Now().UnixMilli()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if pairLive(a, now) && a.peer.Key == "" && a.secret.Verify(m, a.wantRole) {
+	if a.peer.Key != "" && a.invitation.group == "" {
+		return
+	}
+	if pairLive(a, now) && a.secret.Verify(m, a.wantRole) {
 		a.peer = m
 	}
 }
@@ -405,7 +444,7 @@ func (p *Pairer) onPairAdopt(c *sesConn) {
 func (p *Pairer) takeRole(role, device, pathUsed string, now int64) *pairAttempt {
 	p.mu.Lock()
 	a := p.findPeerLocked(device, now)
-	if a == nil || a.role != role {
+	if a == nil || a.role != role || a.invitation.group != "" {
 		p.mu.Unlock()
 		return nil
 	}
@@ -425,11 +464,11 @@ func (p *Pairer) findPeerLocked(device string, now int64) *pairAttempt {
 }
 
 func pairLive(a *pairAttempt, now int64) bool {
-	return a != nil && !a.done && now < a.link.Expires
+	return a != nil && !a.done && !a.used && now < a.link.Expires
 }
 
 func (p *Pairer) finish(a *pairAttempt, err error) {
-	paths, ok := p.claimFinish(a)
+	paths, joining, ok := p.claimFinish(a)
 	if !ok {
 		return
 	}
@@ -437,23 +476,33 @@ func (p *Pairer) finish(a *pairAttempt, err error) {
 		err = p.saveLabel(a.saveName)
 	}
 	a.cancel()
+	closeJoining(joining)
 	for _, path := range paths {
 		path.Close()
 	}
 	a.outcome <- err
 }
 
-func (p *Pairer) claimFinish(a *pairAttempt) ([]*peer.Path, bool) {
+func closeJoining(joining map[Ctl]bool) {
+	for ctl := range joining {
+		ctl.Close()
+	}
+}
+
+func (p *Pairer) claimFinish(a *pairAttempt) ([]*peer.Path, map[Ctl]bool, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if a.done {
-		return nil, false
+		return nil, nil, false
 	}
 	a.done, a.secret = true, ""
 	delete(p.attempts, a)
 	paths := a.ownedPaths
 	a.ownedPaths, a.routes = nil, nil
-	return paths, true
+	delete(p.links, a.invitation.key)
+	joining := a.joining
+	a.joining = nil
+	return paths, joining, true
 }
 
 func pairWebBase(webURL string, rvURLs []string) (string, error) {

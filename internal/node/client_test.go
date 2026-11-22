@@ -744,11 +744,18 @@ func TestClientHandshakeErrorsAndTimeout(t *testing.T) {
 func checkWelcomeErrorResponseCase(t *testing.T, hostNode *clientNodeRig, homeID string) {
 	t.Helper()
 	p := newCtlPair()
-	p.client.intercept = func(id int64, _ json.RawMessage) ([]json.RawMessage, bool) {
+	var versions []int
+	p.client.intercept = func(id int64, raw json.RawMessage) ([]json.RawMessage, bool) {
+		var h proto.Hello
+		mustNoErr(t, proto.Decode(raw, &h))
+		versions = append(versions, h.V)
 		reply := fmt.Sprintf(`{"re":%d,"err":{"code":"version","msg":"unsupported"}}`, id)
 		return []json.RawMessage{json.RawMessage(reply)}, true
 	}
 	hostNode.sessions.serveClient(t.Context(), homeID, p.client)
+	if !slices.Equal(versions, []int{2, 1}) {
+		t.Fatalf("attempted hello versions = %v, want [2 1]", versions)
+	}
 	if _, ok := hostNode.host.Home(homeID); ok {
 		t.Fatal("refused handshake attached home")
 	}

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -253,7 +254,12 @@ func s2ExportDB(node *s2Node) string {
 }
 
 func readS2SQLiteRows(ctx context.Context, path, query string, args ...any) ([][]any, error) {
-	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro")
+	p := filepath.ToSlash(path)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	dsn := url.URL{Scheme: "file", Path: p, RawQuery: "mode=ro"}
+	db, err := sql.Open("sqlite", dsn.String())
 	if err != nil {
 		return nil, err
 	}
