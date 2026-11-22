@@ -661,7 +661,7 @@ func checkWorkerClientAndRVReconnect(t *testing.T, n *nodeRuntime, browserKey id
 	seedWorkerNode(t, hostDir, browserKey.ID(), append(entries, e3), rvURL, []proto.Home{
 		{Group: gid, Home: n.key.ID()},
 		{Group: sesID("grp-self"), Home: hostKey.ID()},
-	})
+	}, hostKey)
 	nHost, err := openNode(t.Context(), hostDir)
 	mustNoErr(t, err)
 	waitCond(t, func() bool {
@@ -743,7 +743,7 @@ func waitCond(t *testing.T, fn func() bool) {
 	t.Fatal("condition was not met before deadline")
 }
 
-func seedWorkerNode(t *testing.T, dir, owner string, entries []proto.Envelope, rvURL string, homes []proto.Home) {
+func seedWorkerNode(t *testing.T, dir, owner string, entries []proto.Envelope, rvURL string, homes []proto.Home, key identity.Key) {
 	t.Helper()
 	db, err := store.Open(filepath.Join(dir, "node.db"))
 	mustNoErr(t, err)
@@ -763,6 +763,12 @@ func seedWorkerNode(t *testing.T, dir, owner string, entries []proto.Envelope, r
 		return nil
 	})
 	mustNoErr(t, err)
+	h, _, err := host.New(db, key, time.Now)
+	mustNoErr(t, err)
+	mustNoErr(t, h.Sessions.Create(host.Session{
+		SessionKey: host.SessionKey{Group: string(homes[0].Group), Member: string(sesID("worker-ai"))},
+		Home:       homes[0].Home, Kind: host.GroupSession, Agent: "claude", Folder: "repo",
+	}))
 	mustNoErr(t, db.Close())
 }
 
@@ -958,12 +964,26 @@ func TestNodePTYChannelBridge(t *testing.T) {
 	t.Cleanup(func() { delete(host.Drivers, "node-pty-drv") })
 
 	ptyDone := make(chan struct{}) // single reader: TestNodePTYChannelBridge
-	_, _, err = n.host.StartPTY("g1", "m1", "node-pty-drv", host.Launch{Folder: t.TempDir(), Level: 3}, func() {
+	p, _, err := n.host.StartPTY("g1", "m1", "node-pty-drv", host.Launch{Folder: t.TempDir(), Level: 3}, func() {
 		close(ptyDone)
 	})
 	mustNoErr(t, err)
 
-	dc, recvCh := dialBrowserPTYChannel(t, n, browserKey, "pty:g1:m1")
+	member := sesKey("terminal-member")
+	log, err := identity.Replay(member.ID(), []proto.Envelope{sesAddEntry(member, member.ID(), 1, member.ID(), "browser", "Member")})
+	mustNoErr(t, err)
+	n.logs.dvlKeep(log, nil)
+	_, _, _, rejected := dialBrowserPTYChannel(t, n, member, "pty:g1:m1")
+	select {
+	case <-rejected:
+	case <-time.After(5 * time.Second):
+		t.Fatal("member terminal channel was not closed")
+	}
+	if p.Attached() {
+		t.Fatal("member terminal channel attached")
+	}
+	dc, recvCh, opened, _ := dialBrowserPTYChannel(t, n, browserKey, "pty:g1:m1")
+	<-opened
 	waitPTYBytes(t, recvCh, "NODE-PTY-READY")
 	mustNoErr(t, dc.Send([]byte("hello-node\r")))
 	waitPTYBytes(t, recvCh, "ECHO:hello-node")
@@ -976,11 +996,15 @@ func TestNodeWatchChannelWithoutGrant(t *testing.T) {
 	mustNoErr(t, err)
 	t.Cleanup(n.Close)
 	browser := adoptTestBrowser(t, n)
-	dc, _ := dialBrowserPTYChannel(t, n, browser, "watch:g:m")
-	mustNoErr(t, dc.Close())
+	_, _, _, closed := dialBrowserPTYChannel(t, n, browser, "watch:g:m")
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ungranted watch channel was not closed")
+	}
 }
 
-func dialBrowserPTYChannel(t *testing.T, n *nodeRuntime, browserKey identity.Key, label string) (*webrtc.DataChannel, <-chan []byte) {
+func dialBrowserPTYChannel(t *testing.T, n *nodeRuntime, browserKey identity.Key, label string) (*webrtc.DataChannel, <-chan []byte, <-chan struct{}, <-chan struct{}) {
 	t.Helper()
 	var iceServers []proto.ICEServer
 	mustNoErr(t, json.Unmarshal([]byte(startLoopbackTURN(t)), &iceServers))
@@ -1008,9 +1032,11 @@ func dialBrowserPTYChannel(t *testing.T, n *nodeRuntime, browserKey identity.Key
 	mustNoErr(t, err)
 	ptyDC, err := pc.CreateDataChannel(label, nil)
 	mustNoErr(t, err)
-	opened := make(chan struct{})   // single reader: dialBrowserPTYChannel
+	opened := make(chan struct{}) // single reader: dialBrowserPTYChannel
+	closed := make(chan struct{})
 	recvCh := make(chan []byte, 32) // single reader: waitPTYBytes
 	ptyDC.OnOpen(func() { close(opened) })
+	ptyDC.OnClose(func() { close(closed) })
 	ptyDC.OnMessage(func(m webrtc.DataChannelMessage) { recvCh <- m.Data })
 
 	connID := string(sesID("pty-conn"))
@@ -1028,8 +1054,7 @@ func dialBrowserPTYChannel(t *testing.T, n *nodeRuntime, browserKey identity.Key
 		SignalHeader: browserSigHdr(n.key.ID(), connID, "offer"), SDP: offer.SDP,
 	}))
 	go applyNodeSignals(t.Context(), pc, toBrowser)
-	<-opened
-	return ptyDC, recvCh
+	return ptyDC, recvCh, opened, closed
 }
 
 func browserSigHdr(to, connID, kind string) proto.SignalHeader {

@@ -227,9 +227,12 @@ func (n *nodeRuntime) stepServices() error {
 		return err
 	}
 	n.logs = logs
+	n.pairer = newPairer(PairConfig{
+		Key: n.key, Store: n.db, Logs: n.logs, Paths: n.sharedPaths, WebURL: n.defaultWebURL,
+	})
 	loop, err := home.StartLoop(home.LoopConfig{
 		Store: n.db, Home: n.key.ID(), OwnerFn: logs.Owner,
-		Logs: logs.Log, Tables: home.NodeTables(), Every: time.Second,
+		Logs: logs.Log, Tables: home.NodeTables(), Invite: n.pairer, Every: time.Second,
 	})
 	if err != nil {
 		return err
@@ -257,10 +260,7 @@ func (n *nodeRuntime) wireServices() {
 		ID: n.key.ID(), Version: Version, Store: n.db,
 		Sessions: n.sessions, Host: n.host, Name: nameFn, Agents: n.host.Agents,
 	})
-	n.pairer = NewPairer(PairConfig{
-		Key: n.key, Store: n.db, Logs: n.logs, Sessions: n.sessions,
-		Paths: n.sharedPaths, WebURL: n.defaultWebURL,
-	})
+	n.pairer.bind(n.sessions)
 	host.Part[netStatusPart](n.host).status = n.netStatus
 }
 
@@ -409,14 +409,20 @@ func (n *nodeRuntime) defaultWebURL() string {
 }
 
 func (n *nodeRuntime) knownPeer(device string) bool {
-	return n.logs.Known(device) || n.pairer.Known(device)
+	return n.logs.Known(device) || n.pairer.Known(device) || n.remembersHome(device)
 }
 
 func (n *nodeRuntime) serveInbound(c *peer.Connection) {
 	n.spawn(func() { n.pairer.Serve(n.ctx, c.Device, c) })
 }
 
-func (n *nodeRuntime) serveTerminal(s *peer.Stream) { n.host.ServeTerminal(s) }
+func (n *nodeRuntime) serveTerminal(s *peer.Stream) {
+	if !n.logs.IsOwner(s.Device()) {
+		s.Close()
+		return
+	}
+	n.host.ServeTerminal(s)
+}
 
 func (n *nodeRuntime) dialHome(ctx context.Context, device string, run func(clientCtl)) {
 	n.spawn(func() {

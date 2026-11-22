@@ -56,9 +56,15 @@ kind: reference
 
 `(*Sessions).serveClient(ctx, device, raw)` runs one outgoing `ctl` session from this node's host to a remote home `device` over `raw` (`clientCtl`, satisfied by `*peer.Connection`):
 
-- **Reader-first handshake and `devlog` order.** Starts the `Read` loop before sending `hello` (`v: 1`, `kind: "host"`, with `Name` and `Addrs`, under a 10 s timeout) because `*peer.Connection.Read` routes answers after earlier queued frames. Checks that the answer is not an `ErrorResponse`, then sends this node's owner `devlog` frames under `sendMu` before calling `Host.Attach(device, raw)` and closing `ready`. Commands sent from `Attached` hooks (such as `host.join`'s `member add_ai` and `Attached["runtime"]`'s step-18 `member status`) therefore reach the remote home after this node's device log.
+- **Reader-first handshake and `devlog` order.** Starts the `Read` loop before sending `hello` (`v: 2`, `kind: "host"`, with `Name` and `Addrs`, under a 10 s timeout) because `*peer.Connection.Read` routes answers after earlier queued frames. A `version` error retries once with `v: 1` on the same channel. On success it sends this node's owner `devlog` frames under `sendMu` before calling `Host.Attach(device, raw)` and closing `ready`.
 - **Pushes and live `devlog` forwarding.** Incoming `devlog` frames apply to `Logs` at once (and forward to other connected sessions without echoing back to the sender); other frames wait on `ready` until `Host.Attach` has returned and then call `Host.Push(device, frame)` synchronously in read order, so every push sent before an answer is applied before `Request` returns.
 - **`connectHome(dial)`.** Returns a non-blocking `Host.Connect` function that ignores this node's own device id (served by `AttachLocal`) and runs `dial` in the background, calling `serveClient` on each opened connection until `ctx` ends.
+
+## Invitations and group homes
+
+A home `invite` opens an in-memory pairing room for one group. Unlike `pair.browser`, a `#join` invitation never enrols a device of the node's owner. The joining connection only accepts `hello`, its person's `devlog` and `join` for the invitation's group. After the home commits the join, the person keeps their own devices and gains that group's home surface, not the host surface. Stored device logs are sent only to peers that can read a group containing the person; the owner's log is also sent to enrolled or pairing owner devices.
+
+The owner's devices can send `home.add` to record a group's home and its signalling URLs without joining or cloning it. If the node already hosts sessions for that group, their home changes and the host reconnects to it.
 
 ## Multi-node test helper (`nodetest`)
 
@@ -104,7 +110,6 @@ kind: reference
 - `Surface` answers `host.info` requests and forwards `pty.resize` pushes; there is no `host.info` push yet, `settings.set` is postponed with `U-12`.
 - `net_status` omits `rtt_ms` (`*peer.Connection` exposes `Path()` without ICE candidate-pair round-trip statistics) and reports `mapped_ports` as `false` in step 1 ([issues](../../issues.md)).
 - Self-update (`Updater`, `N-6`) is postponed off the step-1 main line ([issues](../../issues.md)).
-- In step 1 `Logs` stores only the node owner's device log; keeping logs of other group members belongs to step 2.
 - On macOS, Unix socket paths are limited to 103 bytes, so tests that bind `sock` under `HOME` use `/tmp` ([issues](../../issues.md)).
 
 ## Verification and sources
