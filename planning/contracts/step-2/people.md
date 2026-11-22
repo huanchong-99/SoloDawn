@@ -226,11 +226,15 @@ A role change writes no message: the row shows it.
    reached H on): the node adds the entry to `host.info.homes`
    (`contracts/datachannel.md` section 7), the groups whose home this node
    knows, each entry with `home`; it keeps such entries across restarts in
-   the `setting` key `homes`, and `addrs` as addresses of `home`. It connects
-   to nothing and clones nothing. A node B did not reach learns the group at
-   `host.join`. When the node has an AI in that group, `home.add` replaces
-   the home it connects to for it (`contracts/step-2/export.md` section 4).
-   Frozen in P-4a, built in T2-1b.
+   the `setting` key `homes`, and `addrs` as addresses of `home`. The node
+   connects to each home in `host.info.homes`, reads the group with
+   `state_only` to learn its kind, and keeps the connection. It clones
+   nothing. A node B did not reach learns the group at `host.join`. When
+   the node has an AI in that group, `home.add` replaces the home it
+   connects to for it (`contracts/step-2/export.md` section 4). P-4a froze
+   `home.add` and T2-1b built it. T2-7 added the connections as specified
+   in [watch-team.md section 9](watch-team.md#9-people-and-messages), decided
+   2026-11-22.
 3. **One web client origin.** A stated limit: a browser is a device per
    origin, and the link opens the web client of the home's rendezvous. A
    person on another origin first adds a browser there
