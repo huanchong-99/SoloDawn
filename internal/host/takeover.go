@@ -49,6 +49,7 @@ type takeover struct {
 	from    Owner
 	nonce   string
 	created bool // the takeover started the session's task
+	assign  bool // a new task runs its assign turn structured first
 	pty     *PTY
 	closed  bool // the terminal has closed
 	facts   proto.HandbackBody
@@ -85,11 +86,10 @@ func (p *takeovers) release(h *Host, slot aiSlot, t *takeover) {
 	if p.open[slot] == t {
 		delete(p.open, slot)
 	}
-	settled := p.settled
-	p.mu.Unlock()
-	if !settled {
-		go Deliver(h, slot.group, slot.member)
+	if !p.settled {
+		p.wg.Go(func() { Deliver(h, slot.group, slot.member) })
 	}
+	p.mu.Unlock()
 }
 
 func takeoverHold(h *Host, key SessionKey) (string, bool) {
@@ -122,13 +122,13 @@ func settleTakeovers(h *Host) {
 }
 
 func takeoverStart(ctx context.Context, h *Host, from Owner, _ string, data json.RawMessage) (any, error) {
-	req, ai, err := checkTakeoverStart(h, from, data)
+	req, ai, assignFirst, err := checkTakeoverStart(h, from, data)
 	if err != nil {
 		return nil, err
 	}
 	slot := aiSlot{group: string(req.Group), member: string(req.Member)}
 	p := takeoverState(h)
-	t := &takeover{from: from, nonce: string(req.Nonce)}
+	t := &takeover{from: from, nonce: string(req.Nonce), assign: assignFirst}
 	if mergeRunning(h, slot) || !p.claim(slot, t, true) {
 		return nil, &Error{"busy", "the AI is taken over or one of its tasks is merging"}
 	}
@@ -139,19 +139,20 @@ func takeoverStart(ctx context.Context, h *Host, from Owner, _ string, data json
 	return nil, nil
 }
 
-func checkTakeoverStart(h *Host, from Owner, data json.RawMessage) (proto.TakeoverStart, aiInfo, error) {
+func checkTakeoverStart(h *Host, from Owner, data json.RawMessage) (proto.TakeoverStart, aiInfo, bool, error) {
 	var req proto.TakeoverStart
 	if err := proto.Decode(data, &req); err != nil {
-		return req, aiInfo{}, &Error{"bad_request", err.Error()}
-	}
-	if from.Path() != "direct" {
-		return req, aiInfo{}, &Error{"relay", "the terminal needs a direct path"}
+		return req, aiInfo{}, false, &Error{"bad_request", err.Error()}
 	}
 	ai, local, _ := lookupLocalAI(h, string(req.Group), string(req.Member))
 	if !local {
-		return req, aiInfo{}, &Error{"not_found", "no such AI on this node"}
+		return req, aiInfo{}, false, &Error{"not_found", "no such AI on this node"}
 	}
-	return req, ai, nil
+	assignFirst, err := checkTakeover(ai.agent)
+	if err == nil && from.Path() != "direct" {
+		err = &Error{"relay", "the terminal needs a direct path"}
+	}
+	return req, ai, assignFirst, err
 }
 
 // mergeRunning reports whether the host is merging a task of the AI.
@@ -188,7 +189,7 @@ func openTerminal(ctx context.Context, h *Host, p *takeovers, slot aiSlot, ai ai
 func openSession(ctx context.Context, h *Host, p *takeovers, ai aiInfo, target routedTarget, home string, t *takeover) error {
 	s, gitErr, err := prepareTargetSession(h, ai, target, home, nil)
 	err = cmp.Or(gitErr, err)
-	if err == nil && t.created {
+	if err == nil && t.created && t.assign {
 		err = warmUp(ctx, h, s)
 	}
 	if err == nil {
@@ -274,13 +275,9 @@ func startTakeoverTask(ctx context.Context, h *Host, slot aiSlot, home string) (
 	return string(id), nil
 }
 
-// warmUp gives a new task session its assign turn in structured mode first
-// when its CLI cannot open a new session in a terminal (flows/takeover.md
-// section A).
+// warmUp gives a new task session its assign turn in structured mode first,
+// for a CLI whose takeover is resume (flows/takeover.md section A).
 func warmUp(ctx context.Context, h *Host, s Session) error {
-	if _, _, err := Drivers[s.Agent].Interactive(Launch{Level: 3, Shim: h.Shim}); err == nil {
-		return nil
-	}
 	task, _ := lookupTaskRow(h, s.Group, s.Task)
 	item, _ := json.Marshal(proto.InboxItem{Item: proto.Item{AI: proto.ID(s.Member), Why: "assign", Task: proto.ID(s.Task)}, Task: &task})
 	text, turn, err := Compose(h, s, ItemsTurn, []json.RawMessage{item})
