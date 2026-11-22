@@ -416,7 +416,13 @@ func (n *nodeRuntime) serveInbound(c *peer.Connection) {
 	n.spawn(func() { n.pairer.Serve(n.ctx, c.Device, c) })
 }
 
-func (n *nodeRuntime) serveTerminal(s *peer.Stream) { n.host.ServeTerminal(s) }
+func (n *nodeRuntime) serveTerminal(s *peer.Stream) {
+	if !n.logs.IsOwner(s.Device()) {
+		s.Close()
+		return
+	}
+	n.host.ServeTerminal(s)
+}
 
 func (n *nodeRuntime) dialHome(ctx context.Context, device string, run func(clientCtl)) {
 	n.spawn(func() {
