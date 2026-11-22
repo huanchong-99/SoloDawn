@@ -69,10 +69,7 @@ func runAskTool(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (an
 	maxDepth, waitDur := groupAskLimits(h, c.Group)
 	depth := c.Turn.Depth + 1
 	if depth > maxDepth {
-		return nil, &Error{
-			Code:    "limit",
-			Message: fmt.Sprintf("call depth %d exceeds ask_depth limit %d", depth, maxDepth),
-		}
+		return nil, &Error{Code: "limit", Message: fmt.Sprintf("call depth %d exceeds ask_depth limit %d", depth, maxDepth)}
 	}
 	return sendAskCall(ctx, h, c, callee, in, depth, waitDur)
 }
@@ -134,16 +131,8 @@ func sendAskCall(ctx context.Context, h *Host, c Caller, callee proto.ID, in ask
 	wait := in.Wait == nil || *in.Wait
 	hdr := homeHeader(h, c.Group, c.Member, "post")
 	payload := marshalWire(proto.Post[proto.CallBody]{
-		HomeCommand: hdr,
-		Kind:        "call",
-		Thread:      askThread(c),
-		Text:        in.Text,
-		Mentions:    []proto.ID{callee},
-		Body: proto.CallBody{
-			To:    string(callee),
-			Depth: depth,
-			Wait:  wait,
-		},
+		HomeCommand: hdr, Kind: "call", Thread: askThread(c), Text: in.Text, Mentions: []proto.ID{callee},
+		Body: proto.CallBody{To: string(callee), Depth: depth, Wait: wait},
 	})
 	if !wait {
 		if _, err := h.Command(ctx, c.Home, payload); err != nil {
@@ -227,11 +216,7 @@ func loadCallMsg(ctx context.Context, h *Host, c Caller, callID string) (proto.M
 		return msg, nil
 	}
 	build := func(id int64) any {
-		return proto.FetchRow{
-			FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: c.Group, Limit: 1},
-			Row:       "msg",
-			RowID:     callID,
-		}
+		return proto.FetchRow{FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: c.Group, Limit: 1}, Row: "msg", RowID: callID}
 	}
 	page, err := fetchFrom(ctx, h, c.Home, build)
 	if err != nil {
@@ -253,12 +238,8 @@ func sendReplyPost(ctx context.Context, h *Host, c Caller, msg proto.MsgRow, tex
 	callID := proto.ID(msg.ID)
 	payload := marshalWire(proto.Post[proto.EmptyBody]{
 		HomeCommand: homeHeader(h, c.Group, c.Member, "post"),
-		Kind:        "reply",
-		Thread:      thread,
-		Text:        text,
-		Mentions:    []proto.ID{callerAI},
-		Re:          &callID,
-		Body:        proto.EmptyBody{},
+		Kind:        "reply", Thread: thread, Text: text, Mentions: []proto.ID{callerAI}, Re: &callID,
+		Body: proto.EmptyBody{},
 	})
 	if _, err := h.Command(ctx, c.Home, payload); err != nil {
 		return nil, err
