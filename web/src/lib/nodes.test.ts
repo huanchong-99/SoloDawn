@@ -72,6 +72,19 @@ afterEach(() => {
 });
 
 describe('indicator', () => {
+  it('reports offline while another tab holds the device lock, regardless of homes or group', () => {
+    const selecting = new Home(me);
+    connectHome(selecting, { groups: [{ g: website, name: 'Website', seq: 0 }] });
+    expect(indicator({ ...netWith([]), otherTab: true })).toStrictEqual({ st: 'offline' });
+    expect(indicator({ ...netWith([selecting]), otherTab: true })).toStrictEqual({ st: 'offline' });
+    expect(
+      indicator({ ...netWith([selecting]), otherTab: true }, selecting.groups[0]),
+    ).toStrictEqual({ st: 'offline' });
+    expect(indicator({ ...netWith([selecting]), otherTab: false })).toStrictEqual({
+      st: 'linking',
+    });
+  });
+
   it('is undefined when no home is known', () => {
     expect(indicator(netWith([]))).toBeUndefined();
   });

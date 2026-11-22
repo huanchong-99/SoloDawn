@@ -3,6 +3,7 @@
   import { prefersReducedMotion } from 'svelte/motion';
   import { MediaQuery } from 'svelte/reactivity';
   import type { Group } from '../../lib/groups.svelte';
+  import type { Net } from '../../lib/net.svelte';
   import { mounts, side } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { dayLabel, days, now } from '../../lib/when';
@@ -14,7 +15,7 @@
 
   /** The chat of one group: its main line, newest at the bottom, and the composer, with what the
    *  areas mount in its head, above its main line and beside it (lib/mounts.svelte.ts). */
-  let { group }: { group: Group } = $props();
+  let { group, net }: { group: Group; net: Net } = $props();
 
   // The side panel has a column from 1024 px; below that it slides over, closed on each chat.
   // While it is over the chat, focus is in it and the chat behind it cannot be reached.
@@ -82,8 +83,10 @@
     away = Math.abs(scroller.scrollTop) > 240;
     if (!away) unseen = false;
   }
-  const toLatest = () =>
+  function toLatest() {
     scroller.scrollTo({ top: 0, behavior: prefersReducedMotion.current ? 'auto' : 'smooth' });
+    scroller.focus({ preventScroll: true });
+  }
 </script>
 
 <svelte:window
@@ -183,7 +186,13 @@
     <Composer {group} />
   </div>
   {#if sided}
-    <aside id="chat-side" class="side" class:open={side.open} aria-label={t('app.side')}>
+    <aside
+      id="chat-side"
+      class="side"
+      class:open={side.open}
+      inert={sliding.current && !side.open}
+      aria-label={t('app.side')}
+    >
       <button
         class="icon-btn side-close"
         bind:this={closer}
@@ -192,7 +201,7 @@
       >
         <Icon name="x" />
       </button>
-      <Mount at="chat.side" props={{ group }} />
+      <Mount at="chat.side" props={{ group, net }} />
     </aside>
   {/if}
 </section>
@@ -271,6 +280,9 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .chat-head .bar-title {
+    min-width: 3ch;
   }
   .chat-head p :global(.i) {
     vertical-align: -2px;

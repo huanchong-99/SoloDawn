@@ -176,7 +176,7 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
       // A screen reader speaks a radio's name in the language of the radio (WCAG 2.2 SC 3.1.2).
       const marks = () =>
         ['English', '简体中文'].map((name) =>
-          [...document.querySelectorAll('input')]
+          [...document.querySelectorAll<HTMLInputElement>('input[name=lang]')]
             .find((i) => i.labels![0].textContent!.trim() === name)!
             .closest('[lang]')!
             .getAttribute('lang'),
@@ -342,7 +342,7 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
         ['设置', '1'],
         ['切换深色 / 浅色', '1'],
         ['EN Switch language / 切换语言', '1'],
-        ['跟随系统', '1'],
+        ['', 'solid'],
       ]);
     });
   });
@@ -395,14 +395,17 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
     When('the address fragment becomes "#/settings"', async () => {
       parts = await motion.waitingParts('#/settings');
     });
-    Then('one frame later part 2 of the page has not moved from where it arrives', () => {
-      expect(parts.map((part) => part.travel)).toEqual(['8.63', '12.00']);
+    Then(
+      'one frame later the later parts of the page have not moved from where they arrive',
+      () => {
+        expect(parts.map((part) => part.travel)).toEqual(['8.63', '12.00', '12.00']);
+      },
+    );
+    And('every part has faded in as far as the others', () => {
+      expect(parts.map((part) => part.opacity)).toEqual(['0.42', '0.42', '0.42']);
     });
-    And('both parts have faded in as far as each other', () => {
-      expect(parts.map((part) => part.opacity)).toEqual(['0.42', '0.42']);
-    });
-    And('both parts are seen in full when no animation runs', () => {
-      expect(parts.map((part) => part.still)).toEqual(['1', '1']);
+    And('every part is seen in full when no animation runs', () => {
+      expect(parts.map((part) => part.still)).toEqual(['1', '1', '1']);
     });
   });
 
@@ -716,8 +719,8 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
         const event: string = variables.event;
         if (event.includes('is changed')) env = { ...env, p: env.p.replace('cmd', 'cme') };
         if (event.includes('revoked')) valid = false;
-        if (event.includes('another device') || event.includes('misdirected')) receiver = 'other';
-        if (event.includes('25 hours') || event.includes('late')) at = now + 25 * 3_600_000;
+        if (/another device|misdirected/.test(event)) receiver = 'other';
+        if (/25 hours|late/.test(event)) at = now + 25 * 3_600_000;
       });
       Then('the answer is "<answer>"', async () => {
         const opened = await openCommand(crypto, env, receiver, () => valid, at);
