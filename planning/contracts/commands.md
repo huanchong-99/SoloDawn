@@ -101,7 +101,9 @@ for one when the group is created.
 | `set` | `id`, any of `name`, `account`, `allow`, `approvers` | the AI's owner; for `approvers` alone, also the AI's host | member row updated. A new `name` must be unused in the group, else `conflict` |
 | `remove` | `id` | the AI's owner, or an admin | refused with `conflict` while the AI is assignee or reviewer of a task that is not final: reassign or cancel first. Otherwise the member row is replaced by a `gone` marker. Removing the secretary clears `group.secretary` and writes `system` `no_secretary` |
 
-Adding people is step 2.
+On `add_ai` and on `set` with `approvers`, the home adds the owner's user id
+to `approvers` when it is missing (`contracts/rows.md` section 2); the owner
+is the person whose host signed `add_ai`. Adding people is step 2.
 
 ### 1.3 `post`
 
@@ -115,12 +117,19 @@ The message id is `n`.
 | `report` | an AI | `thread` is a task whose assignee is `as` | — |
 | `brief` | the secretary | `body.requester` is a member; every assignee and reviewer is a working AI of the group, the two differ, and `depends` names only earlier entries of the same brief; `body.replaces`, when not `null`, is a brief whose `state.status` is `pending` or `revise`, else `conflict` | `state.status = pending`; the brief named in `body.replaces` becomes `superseded` |
 | `summary` | the secretary | `thread` is a `merged` task | the home adds the whole `body` from the task row; `main = true` |
-| `approval` | an AI | `thread` = `body.task`; `as` is that task's assignee and = `body.ai` | `state.status = pending`; `main = true`; task-machine row 17 |
+| `approval` | an AI | `thread` = `body.task`, or `null` when `body.task` is `""`; `as` = `body.ai`; for a task, `as` is its assignee or reviewer | `state.status = pending`; `main = true`; with a task, task-machine row 17 |
 | `decision` | an AI | `thread` = `body.task`, or `null` when the body names no task | `state.status = pending`; `main = true`; task-machine row 19 |
 | `call` | an AI | the callee is another AI member; `body.depth` ≤ `limits.ask_depth` | `state.status = waiting`; item `mention` for the callee |
 | `reply` | an AI | `re` is a `call` addressed to `as` whose `state.status` is still `waiting`, else `conflict`: a call is answered once | the call's `state` becomes `answered` with `reply` and `ms`; item `reply` for the caller |
 | `review` | an AI | `thread` = `body.task`; task-machine row 7 | Result: `passed`, `round` |
-| `handback` | an AI | `body` holds the host's facts | item `notice` for the secretary |
+
+`handback` is postponed with takeover.
+
+Rules for every `post`:
+
+- A member named twice in `mentions` is `bad_request`, and a mentioned id
+  that is no member of the group is `conflict`.
+- A post never queues an item for its own author.
 
 Rules for every `post` by an AI:
 
@@ -139,24 +148,23 @@ Rules for every `post` by an AI:
 | Card | `action` | By | Effect |
 | --- | --- | --- | --- |
 | `brief` | `confirm` | its requester, or an admin | the checks of a `brief` post (1.3) are made again, and a brief that fails one is answered `conflict`. Then `state.status = confirmed`; one task row and one `task` message per entry of `body.tasks`; task-machine row 1 |
-| `brief` | `revise` | same | `state.status = revise`, `state.note = text`; item `confirmed` for the secretary, with this `act` as cause |
+| `brief` | `revise` | same | `state.status = revise`, `state.note = text`; item `confirmed` for the secretary |
 | `approval` | `approve`, `deny` | a person in `body.approvers` | `state` updated; task-machine row 18 |
 | `decision` | `choose` | a person in `body.to`, or an admin | `state.status = decided` with `choice = arg` and `text`; task-machine row 20 |
 
-`choose` has `arg`, the `id` of one of `body.options`, and may have
-`text`; on a decision whose `options` is empty it has `text` and no `arg`.
-`revise` may have `text`. `confirm`, `approve` and `deny` have neither.
-Anything else is `bad_request`.
+On a decision with options, `choose` takes `arg` (the `id` of one of
+`body.options`), `text`, or both, and `text` alone is also accepted on a
+card with options (2026-11-21 owner decision); on a decision whose `options`
+is empty it takes `text` and no `arg`. `revise` may have `text`. `confirm`,
+`approve` and `deny` have neither. Anything else is `bad_request`.
 
 Acting on a card whose `state.status` is not `pending` returns `conflict`.
-A decided card keeps the signed `act` in `state.act`; it is the `cause` of
-the items that follow from it, also of those created later (a dependent
-task that becomes active after a merge).
+A decided card keeps the signed `act` in `state.act`.
 
 `jump` (R-72), fields: `msg`. By the person who wrote message `msg`. The
 newest unacknowledged item that a message of that person in the same
-thread (or the main line, when `msg` has no thread) produced is signed
-again with `jump: true` and sent again; when there is none, `conflict`.
+thread (or the main line, when `msg` has no thread) produced gets
+`jump: true` and is sent again; when there is none, `conflict`.
 The host does the rest (`flows/agent-turn.md` C).
 
 ### 1.5 `task`
@@ -179,8 +187,10 @@ When each is allowed, and what it does, is `contracts/task-machine.md`.
 | `resume` | `id` | the secretary, or an admin (for a `failed` task, or one paused by the round limit, an admin only); the host of the assignee, for its own pre-empted task | — |
 | `cancel` | `id` | the secretary, or an admin (at step `merge` an admin only); the host of the assignee when `origin` is `takeover` | — |
 
-`items` of `checked` and `cloud` has the shape of `items` in a `checks`
-body (`contracts/messages.md` 2.8), which the home writes from it.
+`branch` of `task branch` is `task/<num>-<slug>` (`contracts/local.md`
+section 7); any other value is `bad_request`. `items` of `checked` and
+`cloud` has the shape of `items` in a `checks` body
+(`contracts/messages.md` 2.8), which the home writes from it.
 `stats` of `submitted` and `merged` is `{"added":…,"removed":…}`, the line
 counts of `git diff --shortstat <base-ref>...<commit>` (`contracts/local.md`
 section 7), written into the task row's `stats`.
@@ -259,9 +269,9 @@ device id. Receipts apply as for home commands.
 
 | `t` | Fields | Effect |
 | --- | --- | --- |
-| `agent.set` | `agent`, `account` | declares the account type of a CLI found on this machine (R-50); required before the AI can join a group |
-| `perm.set` | `agent`, `g`, `level` (1, 2, 3), `repo_config` (bool) | permission level for that AI's task sessions in that project (R-40), and whether repository-supplied AI configuration is loaded (R-45; for which sessions: `contracts/drivers.md` 1.1, 1.2); takes effect the next time a session's process starts |
-| `settings.set` | any of `retention_days`, `idle_minutes`, `max_open`, `default_level`, `all_level3`, `approvers`, `caps` | node settings; for `approvers` the node sends `member set` with them for each of its AIs to that AI's home |
+| `agent.set` | `agent`, `account` | declares the account type (`personal`, `team` or `api_key`, else `bad_request`) of a CLI found on this machine (`claude` or `codex`, else `bad_request`; `conflict` when not found here; R-50); sets `login_ok` back to `true` in `host.info` (`flows/agent-turn.md` E) and writes audit `setting` (`account <account>`); required before the AI can join a group |
+| `perm.set` | `agent`, `g`, `level` (1, 2, 3), `repo_config` (bool) | postponed after 1.0 (no level control in 1.0): permission level for that AI's sessions in that project (R-40), and whether repository-supplied AI configuration is loaded (R-45; for which sessions: `contracts/drivers.md` 1.1, 1.2); takes effect the next time a session's process starts |
+| `settings.set` | any of `retention_days`, `idle_minutes`, `max_open`, `default_level`, `all_level3`, `approvers`, `caps` | postponed after 1.0 (with `U-12`): node settings; for `approvers` the node sends `member set` with them for each of its AIs to that AI's home |
 | `host.join` | `g`, `home`, `agent`, `name`, `secretary` | the node connects to `home`, clones the project if this node has no clone of it yet (R-11), and sends `member add_ai` |
 | `host.leave` | `g`, `agent` | the node sends `member remove`; if the home accepts it, the AI's sessions in that group are closed (it is refused while the AI has unfinished tasks) |
 | `takeover.start` | `g`, `member`, `task` (optional) | `flows/takeover.md`; refused with `relay`, `busy` or `cli` |
@@ -269,11 +279,12 @@ device id. Receipts apply as for home commands.
 | `host.offline`, `host.online` | — | R-64: `offline` interrupts and closes every session and tells every home; items stay on the homes, unacknowledged, until `online` |
 | `pair.browser` | — | Result: `link`, `expires` (`flows/pairing.md` C) |
 
-Levels: a task session uses the level set for (agent, group); without one,
-`default_level`; and level 3 whenever `all_level3` is on. Group and review
-sessions are always level 1. Where a CLI cannot enforce level 2 (Claude
-Code on native Windows), `perm.set` and `default_level` follow
-`contracts/drivers.md` 1.1.
+Levels: by the owner's decision of 2026-11-21, `default_level` defaults to 3,
+and group, review and task sessions all use the same effective level: 3
+whenever `all_level3` is on, else the level set by `perm.set` for `(agent,
+group)` (1, 2 or 3), else `default_level` (3 when unset). Where a CLI cannot
+enforce level 2 (Claude Code on native Windows), `perm.set` asking for level 2
+is refused with `conflict` (`contracts/drivers.md` 1.1).
 
 `caps`, per agent: `{"day":{"unit":"turns","max":200},"task":{"unit":
 "turns","max":60}}`. `unit` is `turns` always, and `tokens`, `usd` or
@@ -295,8 +306,8 @@ Except where a Result is named, effects are observed through `host.info`.
 
 ## 3. Inbox items
 
-`why` says what the item is for. It routes; it authorises nothing. The
-authority is the item's signature (`contracts/datachannel.md` section 6).
+`why` says what the item is for; the wire shape and host checks are in
+`contracts/datachannel.md` section 6.
 
 | `why` | For | When |
 | --- | --- | --- |

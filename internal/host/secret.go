@@ -1,12 +1,11 @@
 package host
 
 import (
-	"errors"
 	"regexp"
 	"strings"
 )
 
-var errSecret = errors.New("secret: this looks like a secret; remove it and send again")
+var errSecret = &Error{Code: "secret", Message: "this looks like a secret; remove it and send again"}
 
 // secretPattern is one entry of the list in local.md §8. find is what the
 // check looks for, with MatchString: linear, and no copy of the text.

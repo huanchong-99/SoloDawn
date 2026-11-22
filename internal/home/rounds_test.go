@@ -3,6 +3,7 @@ package home_test
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -98,9 +99,10 @@ func TestRoundsJumpRequeuesNewestMatchingMention(t *testing.T) {
 		threadA, threadB := string([]byte(t1)), string([]byte(t1))
 		d := &rndDisk{
 			msgs: map[string]proto.MsgRow{
-				mT1:   {RowHeader: proto.RowHeader{Type: "msg", ID: mT1}, By: ownerID, Kind: "text", Thread: &threadA},
-				mT2:   {RowHeader: proto.RowHeader{Type: "msg", ID: mT2}, By: ownerID, Kind: "text", Thread: rndPtr(t2)},
-				mMain: {RowHeader: proto.RowHeader{Type: "msg", ID: mMain}, By: ownerID, Kind: "text"},
+				mT1:    {RowHeader: proto.RowHeader{Type: "msg", ID: mT1}, By: ownerID, Kind: "text", Thread: &threadA},
+				mT2:    {RowHeader: proto.RowHeader{Type: "msg", ID: mT2}, By: ownerID, Kind: "text", Thread: rndPtr(t2)},
+				mMain:  {RowHeader: proto.RowHeader{Type: "msg", ID: mMain}, By: ownerID, Kind: "text"},
+				id(64): {RowHeader: proto.RowHeader{Type: "msg", ID: id(64)}, By: ownerID, Kind: "text", Thread: &threadB},
 			},
 			queued: []store.Item{
 				{ID: 21, AI: briefA, Why: "mention", Task: &threadB, Msg: rndPtr(mT1)},
@@ -108,11 +110,9 @@ func TestRoundsJumpRequeuesNewestMatchingMention(t *testing.T) {
 				{ID: 23, AI: aiID, Why: "mention", Msg: rndPtr(mMain)},
 			},
 		}
-		target := mT1
-		d.msgs[id(64)] = proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: id(64)}, By: ownerID, Kind: "text", Thread: &threadB}
 		res := briefApply(t, s, d, receipts{}, browser, rndJumpEnv(browser, 81, id(64), ""))
 		equal(t, res, home.Result{
-			Items:  []home.Item{{AI: briefA, Why: "mention", Task: t1, Msg: target, Jump: true, NotBefore: 0}},
+			Items:  []home.Item{{AI: briefA, Why: "mention", Task: t1, Msg: mT1, Jump: true, NotBefore: 0}},
 			Retire: []int64{21},
 			Answer: store.Outcome{OK: true},
 		})
@@ -156,10 +156,7 @@ func TestRoundsJumpGoldenAndRefusals(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s := rndState(t)
 			d := &rndDisk{msgs: baseMsgs, queued: tc.queued}
-			res := briefApply(t, s, d, receipts{}, tc.by, rndJumpEnv(tc.by, 82, tc.msg, tc.extra))
-			equal(t, res.Answer, store.Outcome{Code: tc.code})
-			equal(t, res.Msg != "", true)
-			equal(t, len(res.Items)+len(res.Retire), 0)
+			briefRefused(t, briefApply(t, s, d, receipts{}, tc.by, rndJumpEnv(tc.by, 82, tc.msg, tc.extra)), tc.code)
 		})
 	}
 }
@@ -225,7 +222,7 @@ func TestRoundsQuietTimerBoundariesAndPeriods(t *testing.T) {
 		equal(t, quietFn(s, d, clock+300_000), home.Result{})
 	})
 
-	t.Run("skips tasks without secretary, non-idle states, or queued quiet item", func(t *testing.T) {
+	t.Run("skips tasks without secretary, non-positive idle limit, non-idle states, or queued quiet item", func(t *testing.T) {
 		s := rndState(t)
 		t1, t2 := rndTaskRow(runID(1), 1), rndTaskRow(runID(2), 2)
 		tPaused := rndTaskRow(runID(3), 3)
@@ -237,27 +234,28 @@ func TestRoundsQuietTimerBoundariesAndPeriods(t *testing.T) {
 		s.Tasks[t1.ID], s.Tasks[t2.ID] = t1, t2
 		s.Tasks[tPaused.ID], s.Tasks[tMerge.ID], s.Tasks[tWaiting.ID] = tPaused, tMerge, tWaiting
 
-		// Without a secretary, nothing is queued and nothing is remembered as notified.
-		s.Group.Secretary = ""
+		// Without a secretary or with a non-positive idle limit, nothing is queued.
 		d := &rndDisk{}
+		s.Group.Secretary = ""
 		equal(t, quietFn(s, d, clock), home.Result{})
 		s.Group.Secretary = aiID
+		s.Group.Limits.IdleNoticeMinutes = 0
+		equal(t, quietFn(s, d, clock), home.Result{})
+		s.Group.Limits.IdleNoticeMinutes = 1
 
 		// Non-quiet notices, notices for other tasks, main-line notices, and mentions do not suppress t2.
-		// Seam JSON on t1 and signed-envelope JSON on t2 both suppress only their own quiet notice.
 		d.queued = []store.Item{
-			{ID: 1, AI: aiID, Why: "notice", Task: nil, Env: json.RawMessage(`{"Code":"quiet"}`)},
-			{ID: 2, AI: aiID, Why: "mention", Task: rndPtr(t2.ID), Env: json.RawMessage(`{"Code":"quiet"}`)},
-			{ID: 3, AI: aiID, Why: "notice", Task: rndPtr(t2.ID), Env: json.RawMessage(`{"Code":"task_started"}`)},
-			{ID: 4, AI: aiID, Why: "notice", Task: rndPtr(t1.ID), Env: json.RawMessage(`{"Code":"quiet"}`)},
+			{ID: 1, AI: aiID, Why: "notice", Task: nil, Env: json.RawMessage(`{"item":1,"ai":"` + aiID + `","why":"notice","code":"quiet"}`)},
+			{ID: 2, AI: aiID, Why: "mention", Task: rndPtr(t2.ID), Env: json.RawMessage(`{"item":2,"ai":"` + aiID + `","why":"mention","code":"quiet"}`)},
+			{ID: 3, AI: aiID, Why: "notice", Task: rndPtr(t2.ID), Env: json.RawMessage(`{"item":3,"ai":"` + aiID + `","why":"notice","code":"task_started"}`)},
+			{ID: 4, AI: aiID, Why: "notice", Task: rndPtr(t1.ID), Env: json.RawMessage(`{"item":4,"ai":"` + aiID + `","why":"notice","code":"quiet"}`)},
 		}
 		res := quietFn(s, d, clock)
 		equal(t, res.Items, []home.Item{{AI: aiID, Why: "notice", Task: t2.ID, Code: "quiet"}})
 
-		// Signed-envelope form in Queued also suppresses duplicate quiet notices.
 		d.queued = append(d.queued, store.Item{
 			ID: 5, AI: aiID, Why: "notice", Task: rndPtr(t2.ID),
-			Env: json.RawMessage(`{"p":"{\"t\":\"item\",\"why\":\"notice\",\"code\":\"quiet\"}","k":"k","s":"s"}`),
+			Env: json.RawMessage(`{"item":5,"ai":"` + aiID + `","why":"notice","task":"` + t2.ID + `","code":"quiet"}`),
 		})
 		equal(t, quietFn(s, d, clock), home.Result{})
 
@@ -273,11 +271,9 @@ func TestRoundsQuietTimerBoundariesAndPeriods(t *testing.T) {
 		})
 
 		// Recording t1 on tick 1 and t2 on tick 2 keeps both recorded on tick 3.
-		r1 := home.Result{Items: []home.Item{{AI: aiID, Why: "notice", Task: t1.ID, Code: "quiet"}}}
-		afterFn(s, r1)
+		afterFn(s, home.Result{Items: []home.Item{{AI: aiID, Why: "notice", Task: t1.ID, Code: "quiet"}}})
 		equal(t, quietFn(s, d, clock).Items, []home.Item{{AI: aiID, Why: "notice", Task: t2.ID, Code: "quiet"}})
-		r2 := home.Result{Items: []home.Item{{AI: aiID, Why: "notice", Task: t2.ID, Code: "quiet"}}}
-		afterFn(s, r2)
+		afterFn(s, home.Result{Items: []home.Item{{AI: aiID, Why: "notice", Task: t2.ID, Code: "quiet"}}})
 		equal(t, quietFn(s, d, clock), home.Result{})
 	})
 }
@@ -287,10 +283,7 @@ func TestRoundsQuietTimerBoundariesAndPeriods(t *testing.T) {
 // fires once across ticks even after acknowledgement.
 func TestRoundsLoopJumpAndQuiet(t *testing.T) {
 	tables := home.NodeTables()
-	localCmds := home.Table{}
-	for k, v := range tables.Commands {
-		localCmds[k] = v
-	}
+	localCmds := maps.Clone(tables.Commands)
 	localCmds["group/create"] = func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
 		grp := proto.GroupRow{
 			RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "Site", Kind: "project",
@@ -298,20 +291,14 @@ func TestRoundsLoopJumpAndQuiet(t *testing.T) {
 			Limits: proto.Limits{Rounds: 10, Failures: 3, ReviewRounds: 5, IdleNoticeMinutes: 1},
 		}
 		own := person(ownerID, browser, "owner")
-		sec := ai(aiID, laptop)
-		worker := ai(briefA, laptop)
+		sec, worker := ai(aiID, laptop), ai(briefA, laptop)
 		task := proto.TaskRow{
 			RowHeader: proto.RowHeader{Type: "task", ID: id(70)}, Group: s.ID, Num: 1,
 			Title: "Direct task", Slug: "direct-task", Origin: "direct", State: "active", Step: "local_check",
 			Assignee: briefA, Pass: 90, Depends: []string{}, Created: c.Now, Stats: proto.TaskStats{Started: c.Now},
 		}
-		msg := proto.MsgRow{
-			RowHeader: proto.RowHeader{Type: "msg", ID: id(60)}, Group: s.ID, By: ownerID, Kind: "text",
-			Timestamp: c.Now, Text: "Quick question", Mentions: []string{briefA}, Body: json.RawMessage(`{}`),
-		}
 		return home.Result{
-			Rows:          []home.Row{home.RowOf(grp), home.RowOf(own), home.RowOf(sec), home.RowOf(worker), home.RowOf(task), home.RowOf(msg)},
-			Items:         []home.Item{{AI: briefA, Why: "mention", Msg: id(60)}},
+			Rows:          []home.Row{home.RowOf(grp), home.RowOf(own), home.RowOf(sec), home.RowOf(worker), home.RowOf(task)},
 			GroupsChanged: true,
 		}, nil
 	}
@@ -324,37 +311,42 @@ func TestRoundsLoopJumpAndQuiet(t *testing.T) {
 	p.next()
 	host.next()
 	w.loop.Inbox(host.conn)
-	firstPush := host.next()
-	equal(t, firstPush, runFrame(home.ItemsPush{
-		Group: groupID,
-		Items: []home.QueuedItem{{ID: 1, Item: home.Item{AI: briefA, Why: "mention", Msg: id(60)}}},
-	}))
+
+	// Main-line text post mentioning briefA passes through rndWrap and pushes item 1.
+	msgID := id(60)
+	env := browser.Sign(fmt.Sprintf(`{"t":"post","n":%q,"ts":%d,"g":%q,"kind":"text","thread":null,"main":false,"text":"Quick question","mentions":[%q],"re":null,"body":{}}`, msgID, clock, groupID, briefA))
+	w.loop.Cmd(p.conn, 2, env)
+	p.next()
+	firstPush := inboxDecode(t, host.next())
+	equal(t, []any{firstPush.Group, len(firstPush.Items), firstPush.Items[0].Item}, []any{
+		proto.ID(groupID), 1, proto.Item{Item: 1, AI: proto.ID(briefA), Why: "mention", Msg: proto.ID(msgID)},
+	})
 
 	// Jump retires item 1 and pushes item 2 with Jump: true.
-	p.does(groupID, "jump", `,"msg":"`+id(60)+`"`)
-	jumpPush := host.next()
-	equal(t, jumpPush, runFrame(home.ItemsPush{
-		Group: groupID,
-		Items: []home.QueuedItem{{ID: 2, Item: home.Item{AI: briefA, Why: "mention", Msg: id(60), Jump: true}}},
-	}))
+	p.does(groupID, "jump", `,"msg":"`+msgID+`"`)
+	jumpPush := inboxDecode(t, host.next())
+	equal(t, []any{len(jumpPush.Items), jumpPush.Items[0].Item}, []any{
+		1, proto.Item{Item: 2, AI: proto.ID(briefA), Why: "mention", Msg: proto.ID(msgID), Jump: true},
+	})
 	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM inbox WHERE id=1"), 0)
 
-	// Acknowledge item 2, then advance the clock to test the quiet timer.
-	runExec(t, w.db, "DELETE FROM inbox WHERE id=2")
+	// Acknowledge item 2 via Loop.Ack, then advance the clock to test the quiet timer.
+	w.loop.Ack(host.conn, proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 2})
+	w.idle()
 	w.clock.Store(clock + 59_999)
 	w.loop.Tick(time.UnixMilli(clock + 59_999))
 	host.quiet()
 
 	w.clock.Store(clock + 60_000)
 	w.loop.Tick(time.UnixMilli(clock + 60_000))
-	quietPush := host.next()
-	equal(t, quietPush, runFrame(home.ItemsPush{
-		Group: groupID,
-		Items: []home.QueuedItem{{ID: 3, Item: home.Item{AI: aiID, Why: "notice", Task: id(70), Code: "quiet"}}},
-	}))
+	quietPush := inboxDecode(t, host.next())
+	equal(t, []any{len(quietPush.Items), quietPush.Items[0].Item}, []any{
+		1, proto.Item{Item: 3, AI: proto.ID(aiID), Why: "notice", Task: proto.ID(id(70)), Code: "quiet"},
+	})
 
 	// Acknowledge the quiet notice; later ticks in the same quiet period send nothing.
-	runExec(t, w.db, "DELETE FROM inbox WHERE id=3")
+	w.loop.Ack(host.conn, proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 3})
+	w.idle()
 	w.clock.Store(clock + 180_000)
 	w.loop.Tick(time.UnixMilli(clock + 180_000))
 	host.quiet()

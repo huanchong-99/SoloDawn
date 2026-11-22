@@ -3,10 +3,9 @@
 package features
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strconv"
@@ -26,7 +25,8 @@ func init() {
 }
 
 type homeRoundsPeer struct {
-	conn   *home.Conn
+	conn *home.Conn
+	// frames has a single reader: nextFrame or checkHostQuiet on the scenario goroutine.
 	frames chan any
 	re     int64
 }
@@ -47,6 +47,7 @@ type homeRoundsWorld struct {
 	clock        atomic.Int64
 	db           *store.Store
 	loop         *home.Loop
+	ghost        *home.Conn
 	keys         map[string]identity.Key
 	peers        map[string]*homeRoundsPeer
 	members      map[string]string
@@ -61,7 +62,7 @@ type homeRoundsWorld struct {
 	midState     string
 	midWait      string
 	lastErrCode  string
-	receivedPush []home.QueuedItem
+	receivedPush []proto.InboxItem
 	nonceSeq     int
 }
 
@@ -98,7 +99,7 @@ func homeRoundsWhenSteps(sc *godog.ScenarioContext, w *homeRoundsWorld) {
 		w.directMsg = id
 		items, err := w.drainHostItems(1)
 		if err == nil && len(items) == 1 {
-			w.firstItemID = items[0].ID
+			w.firstItemID = items[0].Item.Item
 		}
 		return err
 	})
@@ -112,9 +113,7 @@ func homeRoundsWhenSteps(sc *godog.ScenarioContext, w *homeRoundsWorld) {
 		return w.advanceAndTick(int64(sec)*1000, 1)
 	})
 	sc.Step(`^the rounds host acknowledges that quiet notice and (\d+) minutes pass with ticks$`, func(mins int) error {
-		if err := w.ackItem(w.lastQuietID); err != nil {
-			return err
-		}
+		w.ackItem(w.lastQuietID)
 		w.receivedPush = nil
 		return w.advanceAndTick(60_000, mins)
 	})
@@ -181,7 +180,6 @@ func (w *homeRoundsWorld) setup(cleanup func(func()), assignee string, idleMin i
 	cleanup(func() { db.Close() })
 	w.db = db
 
-	tables := w.buildTables(assignee, idleMin)
 	loop, err := home.StartLoop(home.LoopConfig{
 		Store: db, Home: node.ID(), Owner: browser.ID(),
 		Logs: func(user string) *identity.Log {
@@ -195,7 +193,7 @@ func (w *homeRoundsWorld) setup(cleanup func(func()), assignee string, idleMin i
 			}
 			return nil
 		},
-		Tables: tables,
+		Tables: w.buildTables(assignee, idleMin),
 		Now:    func() time.Time { return time.UnixMilli(w.clock.Load()) },
 	})
 	if err != nil {
@@ -203,6 +201,8 @@ func (w *homeRoundsWorld) setup(cleanup func(func()), assignee string, idleMin i
 	}
 	cleanup(loop.Close)
 	w.loop = loop
+	w.ghost = loop.Attach("ghost", &homeRoundsPeer{frames: make(chan any, 1)})
+	loop.Detach(w.ghost)
 	return w.attachPeers()
 }
 
@@ -222,7 +222,6 @@ func (w *homeRoundsWorld) attachPeers() error {
 	if err := w.execCmd("owner", "group", map[string]any{"op": "create"}, true); err != nil {
 		return err
 	}
-	// Drain groups push on all welcomed connections.
 	for _, p := range w.peers {
 		if _, err := p.nextFrame(); err != nil {
 			return err
@@ -232,26 +231,10 @@ func (w *homeRoundsWorld) attachPeers() error {
 	return nil
 }
 
-// buildTables uses NodeTables() and supplies minimal command handlers only for
-// sibling commands not yet merged into rebuild.
 func (w *homeRoundsWorld) buildTables(assignee string, idleMin int) home.Tables {
 	base := home.NodeTables()
-	cmds := home.Table{}
-	for k, v := range base.Commands {
-		cmds[k] = v
-	}
+	cmds := maps.Clone(base.Commands)
 	cmds["group/create"] = w.seedGroupCmd(assignee, idleMin)
-	if cmds["post/text"] == nil {
-		cmds["post/text"] = homeRoundsFallbackPost
-		cmds["post/progress"] = homeRoundsFallbackPost
-		cmds["post/question"] = homeRoundsFallbackPost
-	}
-	if cmds["task/resume"] == nil {
-		cmds["task/resume"] = homeRoundsFallbackResume
-	}
-	if cmds["task/preempted"] == nil {
-		cmds["task/preempted"] = homeRoundsFallbackPreempt
-	}
 	base.Commands = cmds
 	return base
 }
@@ -306,178 +289,9 @@ func (w *homeRoundsWorld) seedGroupCmd(assignee string, idleMin int) home.Func {
 	}
 }
 
-func homeRoundsFallbackPost(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-	var p proto.Post[proto.EmptyBody]
-	if refusal := c.Decode(&p); refusal != nil {
-		return home.Result{}, refusal
-	}
-	msg := proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: string(c.Nonce)}, Group: s.ID,
-		Thread: (*string)(p.Thread), By: c.Who.Member(), Kind: p.Kind,
-		Timestamp: c.Timestamp, Text: p.Text, Mentions: homeRoundsIDStrings(p.Mentions), Body: json.RawMessage(`{}`), Env: &c.Env,
-	}
-	items := homeRoundsPostWakes(s, msg)
-	if msg.Thread == nil {
-		return home.Result{Rows: []home.Row{home.RowOf(msg)}, Items: items}, nil
-	}
-	return homeRoundsStepThreadPost(s, c, msg, items)
-}
-
-func homeRoundsIDStrings(ids []proto.ID) []string {
-	var list []string
-	for _, item := range ids {
-		list = append(list, string(item))
-	}
-	return list
-}
-
-func homeRoundsPostWakes(s *home.State, msg proto.MsgRow) []home.Item {
-	var threadID string
-	if msg.Thread != nil {
-		threadID = *msg.Thread
-	}
-	var items []home.Item
-	for _, m := range msg.Mentions {
-		if _, ok := s.AIs[m]; ok {
-			items = append(items, home.Item{AI: m, Why: "mention", Task: threadID, Msg: msg.ID})
-		}
-	}
-	return items
-}
-
-func homeRoundsStepThreadPost(s *home.State, c home.Command, msg proto.MsgRow, items []home.Item) (home.Result, *home.Refusal) {
-	task := s.Tasks[*msg.Thread]
-	task.Thread.Count++
-	task.Thread.Last = &proto.ThreadMessage{By: msg.By, Kind: msg.Kind, Text: msg.Text, Timestamp: msg.Timestamp}
-	res := home.Result{Rows: []home.Row{home.RowOf(msg), home.RowOf(task)}, Items: items}
-	if c.Who.AI == "" {
-		return homeRoundsFallbackPersonPost(s, c, task, res), nil
-	}
-	return homeRoundsFallbackAIPost(s, c, task, res), nil
-}
-
-func homeRoundsFallbackPersonPost(s *home.State, c home.Command, task proto.TaskRow, res home.Result) home.Result {
-	wasRounds := taskWaitKind(task) == "rounds"
-	moved, _, _ := home.Step(task, home.Event{Kind: home.OnText, By: home.ByPerson, Now: c.Now, Limits: s.Group.Limits})
-	res.Rows[1] = home.RowOf(moved)
-	if wasRounds {
-		retire, released := homeRoundsReleaseQueued(c.Disk.Queued(), moved.ID)
-		res.Retire = retire
-		res.Items = append(released, res.Items...)
-	}
-	return res
-}
-
-func homeRoundsFallbackAIPost(s *home.State, c home.Command, task proto.TaskRow, res home.Result) home.Result {
-	if len(res.Items) > 0 {
-		moved, fx, _ := home.Step(task, home.Event{Kind: home.OnMention, By: home.ByAI, Member: c.Who.AI, Now: c.Now, Limits: s.Group.Limits})
-		res.Rows[1] = home.RowOf(moved)
-		task = moved
-		if fx.System != "" {
-			res = homeRoundsAppendLimit(s, c, moved.ID, res)
-		}
-	}
-	if taskWaitKind(task) == "rounds" {
-		homeRoundsHoldSlice(res.Items)
-	}
-	return res
-}
-
-func homeRoundsAppendLimit(s *home.State, c home.Command, taskID string, res home.Result) home.Result {
-	sum := sha256.Sum256([]byte("SoloDawn rounds limit " + string(c.Nonce)))
-	sysID := base64.RawURLEncoding.EncodeToString(sum[:16])
-	body, _ := json.Marshal(proto.RoundsLimitBody{SystemCode: proto.SystemCode{Code: "rounds_limit"}, Task: taskID, N: s.Group.Limits.Rounds})
-	sysMsg := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: sysID}, Group: s.ID, By: "system", Kind: "system", Timestamp: c.Now, Mentions: []string{}, Body: body}
-	res.Rows = append(res.Rows, home.RowOf(sysMsg))
-	res.Items = append(res.Items, home.Item{AI: s.Group.Secretary, Why: "notice", Task: taskID, Msg: sysID, Code: "rounds_limit"})
-	return res
-}
-
-func homeRoundsHoldSlice(items []home.Item) {
-	for i := range items {
-		if items[i].Why == "mention" {
-			items[i].NotBefore = math.MaxInt64
-		}
-	}
-}
-
-func homeRoundsFallbackResume(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-	var p proto.TaskCommand
-	if refusal := c.Decode(&p); refusal != nil {
-		return home.Result{}, refusal
-	}
-	task := s.Tasks[string(p.ID)]
-	by := homeRoundsResumeSender(s, c.Who, task.Assignee)
-	moved, fx, err := home.Step(task, home.Event{Kind: home.OnResume, By: by, Now: c.Now, Limits: s.Group.Limits})
-	if err != nil {
-		return home.Result{}, &home.Refusal{Code: err.Error(), Msg: "refused"}
-	}
-	items, retire := homeRoundsResumeItems(fx.Items, taskWaitKind(task) == "rounds", c.Disk.Queued(), moved.ID)
-	return home.Result{Rows: []home.Row{home.RowOf(moved)}, Items: items, Retire: retire}, nil
-}
-
-func homeRoundsResumeSender(s *home.State, w home.Who, assignee string) home.Sender {
-	if s.Secretary(w) {
-		return home.BySecretary
-	}
-	if s.Hosts(w, assignee) {
-		return home.ByHost
-	}
-	if s.Admin(w) {
-		return home.ByAdmin
-	}
-	return home.ByPerson
-}
-
-func homeRoundsResumeItems(fxItems []home.TaskItem, wasRounds bool, queued []store.Item, taskID string) ([]home.Item, []int64) {
-	var items []home.Item
-	for _, it := range fxItems {
-		items = append(items, home.Item{AI: it.AI, Why: it.Why, Task: taskID})
-	}
-	if !wasRounds {
-		return items, nil
-	}
-	retire, released := homeRoundsReleaseQueued(queued, taskID)
-	return append(items, released...), retire
-}
-
-func homeRoundsFallbackPreempt(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-	var p proto.TaskPreempted
-	if refusal := c.Decode(&p); refusal != nil {
-		return home.Result{}, refusal
-	}
-	task := s.Tasks[string(p.ID)]
-	moved, _, err := home.Step(task, home.Event{Kind: home.OnPreempted, By: home.ByHost, Now: c.Now, Limits: s.Group.Limits})
-	if err != nil {
-		return home.Result{}, &home.Refusal{Code: err.Error(), Msg: "refused"}
-	}
-	return home.Result{Rows: []home.Row{home.RowOf(moved)}}, nil
-}
-
-func homeRoundsReleaseQueued(queued []store.Item, taskID string) ([]int64, []home.Item) {
-	var retire []int64
-	var released []home.Item
-	for _, q := range queued {
-		if homeRoundsHeldForTask(q, taskID) {
-			retire = append(retire, q.ID)
-			released = append(released, home.Item{AI: q.AI, Why: "mention", Task: taskID, Msg: *q.Msg})
-		}
-	}
-	return retire, released
-}
-
-func homeRoundsHeldForTask(q store.Item, taskID string) bool {
-	if q.Why != "mention" || q.Task == nil {
-		return false
-	}
-	return *q.Task == taskID && q.NotBefore == math.MaxInt64
-}
-
 func (w *homeRoundsWorld) execCmd(peerName, t string, extra map[string]any, wantOK bool) error {
 	withNonce := map[string]any{"n": w.nextID()}
-	for k, v := range extra {
-		withNonce[k] = v
-	}
+	maps.Copy(withNonce, extra)
 	return w.execCmdWithNonce(peerName, t, withNonce, wantOK)
 }
 
@@ -507,9 +321,7 @@ func (w *homeRoundsWorld) postActor(actor string, nonce proto.ID, kind string, t
 
 func (w *homeRoundsWorld) execCmdWithNonce(peerName, t string, extra map[string]any, wantOK bool) error {
 	payload := map[string]any{"t": t, "ts": w.clock.Load(), "g": w.groupID}
-	for k, v := range extra {
-		payload[k] = v
-	}
+	maps.Copy(payload, extra)
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -537,14 +349,14 @@ func (w *homeRoundsWorld) recordOutcome(t string, frame any, wantOK bool) error 
 	return nil
 }
 
-func (w *homeRoundsWorld) drainHostItems(count int) ([]home.QueuedItem, error) {
-	var out []home.QueuedItem
+func (w *homeRoundsWorld) drainHostItems(count int) ([]proto.InboxItem, error) {
+	var out []proto.InboxItem
 	for len(out) < count {
 		frame, err := w.peers["host"].nextFrame()
 		if err != nil {
 			return nil, err
 		}
-		push, ok := frame.(home.ItemsPush)
+		push, ok := frame.(proto.Inbox)
 		if !ok {
 			return nil, fmt.Errorf("unexpected host frame %T", frame)
 		}
@@ -577,17 +389,17 @@ func (w *homeRoundsWorld) exchangeOneRound(aiA, aiB string, i, total int) error 
 		return err
 	}
 	if i < total {
-		return w.ackItem(items[0].ID)
+		w.ackItem(items[0].Item.Item)
+		return nil
 	}
 	w.heldMsgID = msgID
 	w.receivedPush = items
 	return nil
 }
 
-func (w *homeRoundsWorld) ackItem(id int64) error {
-	return w.db.Write(func(tx *store.Tx) error {
-		return tx.Ack(w.groupID, w.keys["host"].ID(), id)
-	})
+func (w *homeRoundsWorld) ackItem(id int64) {
+	w.loop.Ack(w.peers["host"].conn, proto.Ack{Type: "ack", Group: proto.ID(w.groupID), Item: id})
+	w.syncLoop()
 }
 
 func (w *homeRoundsWorld) readTask() (proto.TaskRow, error) {
@@ -603,7 +415,7 @@ func (w *homeRoundsWorld) readTask() (proto.TaskRow, error) {
 }
 
 func (w *homeRoundsWorld) syncLoop() {
-	w.loop.Watch(w.peers["owner"].conn, w.groupID, true)
+	w.loop.Sync(w.ghost, proto.Sync{Group: w.groupID})
 }
 
 func (w *homeRoundsWorld) resumeTask(who string) error {
@@ -623,7 +435,7 @@ func (w *homeRoundsWorld) sendJump(peerName, msgID string, wantOK bool) error {
 	return w.execCmd(peerName, "jump", map[string]any{"msg": msgID}, wantOK)
 }
 
-func (w *homeRoundsWorld) preemptAndResume(aiName string) error {
+func (w *homeRoundsWorld) preemptAndResume(_ string) error {
 	if err := w.execCmd("host", "task", map[string]any{"op": "preempted", "id": w.taskID, "msg": w.directMsg}, true); err != nil {
 		return err
 	}
@@ -631,11 +443,7 @@ func (w *homeRoundsWorld) preemptAndResume(aiName string) error {
 	if err != nil {
 		return err
 	}
-	w.midState = tMid.State
-	w.midWait = "nothing"
-	if tMid.Wait != nil {
-		w.midWait = tMid.Wait.Kind
-	}
+	w.midState, w.midWait = tMid.State, taskWaitKind(tMid)
 	return w.execCmd("host", "task", map[string]any{"op": "resume", "id": w.taskID}, true)
 }
 
@@ -672,7 +480,7 @@ func (w *homeRoundsWorld) seedDirectRequest(aiName, state string) error {
 		return err
 	}
 	if state == "acknowledged" {
-		return w.ackItem(items[0].ID)
+		w.ackItem(items[0].Item.Item)
 	}
 	return nil
 }
@@ -789,8 +597,8 @@ func (w *homeRoundsWorld) checkReleasedMention() error {
 		return err
 	}
 	it := items[0].Item
-	got := []any{it.Why, it.Msg, it.Task, it.NotBefore}
-	want := []any{"mention", w.heldMsgID, w.taskID, int64(0)}
+	got := []any{it.Why, string(it.Msg), string(it.Task)}
+	want := []any{"mention", w.heldMsgID, w.taskID}
 	if !slices.Equal(got, want) {
 		return fmt.Errorf("released item = %+v, want %v", it, want)
 	}
@@ -802,7 +610,7 @@ func (w *homeRoundsWorld) checkResumeAndReleased(wantResume string) error {
 	if err != nil {
 		return err
 	}
-	got := []string{w.formatItem(items[0].Item), items[1].Why + " " + items[1].Msg}
+	got := []string{w.formatItem(items[0].Item), items[1].Item.Why + " " + string(items[1].Item.Msg)}
 	want := []string{wantResume, "mention " + w.heldMsgID}
 	if !slices.Equal(got, want) {
 		return fmt.Errorf("host received %v, want %v", got, want)
@@ -815,9 +623,11 @@ func (w *homeRoundsWorld) checkDirectJump(aiName string) error {
 	if err != nil {
 		return err
 	}
-	want := home.Item{AI: w.members[aiName], Why: "mention", Msg: w.directMsg, Jump: true}
-	if items[0].Item != want {
-		return fmt.Errorf("jump item = %+v, want %+v", items[0].Item, want)
+	got := items[0].Item
+	got.Item = 0
+	want := proto.Item{AI: proto.ID(w.members[aiName]), Why: "mention", Msg: proto.ID(w.directMsg), Jump: true}
+	if got != want {
+		return fmt.Errorf("jump item = %+v, want %+v", got, want)
 	}
 	return w.assertRetired(w.firstItemID)
 }
@@ -845,9 +655,11 @@ func (w *homeRoundsWorld) checkThreadJump(aiName string) error {
 	if err != nil {
 		return err
 	}
-	want := home.Item{AI: w.members[aiName], Why: "mention", Task: w.taskID, Msg: w.threadMsg, Jump: true}
-	if items[0].Item != want {
-		return fmt.Errorf("thread jump item = %+v, want %+v", items[0].Item, want)
+	got := items[0].Item
+	got.Item = 0
+	want := proto.Item{AI: proto.ID(w.members[aiName]), Why: "mention", Task: proto.ID(w.taskID), Msg: proto.ID(w.threadMsg), Jump: true}
+	if got != want {
+		return fmt.Errorf("thread jump item = %+v, want %+v", got, want)
 	}
 	return nil
 }
@@ -867,17 +679,17 @@ func (w *homeRoundsWorld) checkSingleItem(want string) error {
 	if err != nil {
 		return err
 	}
-	w.lastQuietID = items[0].ID
+	w.lastQuietID = items[0].Item.Item
 	if got := w.formatItem(items[0].Item); got != want {
 		return fmt.Errorf("host received %q, want %q", got, want)
 	}
 	return nil
 }
 
-func (w *homeRoundsWorld) formatItem(it home.Item) string {
-	name := it.AI
+func (w *homeRoundsWorld) formatItem(it proto.Item) string {
+	name := string(it.AI)
 	for role, id := range w.members {
-		if id == it.AI {
+		if id == string(it.AI) {
 			name = role
 			break
 		}

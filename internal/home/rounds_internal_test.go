@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"testing"
 	"time"
@@ -122,7 +123,7 @@ func (f *rndFakeStore) retireItems(ids []int64) {
 func (f *rndFakeStore) appendItems(s *State, items []Item) {
 	for _, it := range items {
 		f.nextID++
-		raw, _ := runJSON(it)
+		raw, _ := inboxSeal(it, f.nextID)
 		f.queued = append(f.queued, store.Item{
 			ID: f.nextID, Group: s.ID, AI: it.AI, Host: s.AIs[it.AI].Host,
 			Why: it.Why, Msg: runText(it.Msg), Task: runText(it.Task), Commit: runText(it.Commit),
@@ -178,115 +179,26 @@ func rndTestState(t *testing.T) *State {
 	return s
 }
 
-// rndTestTable builds a command table with minimal post and task/resume
-// handlers and wraps it with rndWrap, exercising the exact seam cmd_post.go,
-// cmd_call.go and cmd_task.go register into.
+// rndTestTable clones the real Commands table and adds a minimal post/call
+// handler (until HM-15 merges) wrapped by rndPost to pin R-114 call rounds.
 func rndTestTable() Table {
-	t := Table{
-		"post/text":     rndStubPost,
-		"post/progress": rndStubPost,
-		"post/question": rndStubPost,
-		"post/call":     rndStubPost,
-		"post/report":   rndStubPost,
-		"post/handback": rndStubPost,
-		"task/resume":   rndStubResume,
-		"jump":          rndJump,
-	}
-	rndWrap(t)
+	t := maps.Clone(Commands)
+	t["post/call"] = rndPost(rndStubCall)
 	return t
 }
 
-func rndStubPost(s *State, c Command) (Result, *Refusal) {
-	var p proto.Post[json.RawMessage]
+func rndStubCall(s *State, c Command) (Result, *Refusal) {
+	var p proto.Post[proto.CallBody]
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
-	}
-	if p.Kind != "text" && c.Who.AI == "" {
-		return Result{}, &Refusal{"forbidden", "AI only"}
 	}
 	msg := proto.MsgRow{
 		RowHeader: proto.RowHeader{Type: "msg", ID: string(c.Nonce)}, Group: s.ID,
 		Thread: (*string)(p.Thread), By: c.Who.Member(), Kind: p.Kind,
-		Timestamp: c.Timestamp, Text: p.Text, Mentions: briefIDs(p.Mentions), Body: p.Body, Env: &c.Env,
+		Timestamp: c.Timestamp, Text: p.Text, Mentions: briefIDs(p.Mentions), Body: briefJSON(p.Body), Env: &c.Env,
 	}
-	return Result{Rows: rndStubPostRows(s, msg), Items: rndStubPostItems(s, p.Kind, msg)}, nil
-}
-
-func rndStubPostRows(s *State, msg proto.MsgRow) []Row {
-	rows := []Row{RowOf(msg)}
-	if msg.Thread != nil {
-		t := s.Tasks[*msg.Thread]
-		t.Thread.Count++
-		t.Thread.Last = &proto.ThreadMessage{By: msg.By, Kind: msg.Kind, Text: msg.Text, Timestamp: msg.Timestamp}
-		rows = append(rows, RowOf(t))
-	}
-	return rows
-}
-
-func rndStubPostItems(s *State, kind string, msg proto.MsgRow) []Item {
-	threadID := rndDeref(msg.Thread)
-	switch kind {
-	case "call":
-		var body proto.CallBody
-		json.Unmarshal(msg.Body, &body)
-		return []Item{{AI: body.To, Why: rndMentionWhy, Task: threadID, Msg: msg.ID}}
-	case "handback":
-		return rndStubHandbackItems(s.Group.Secretary, threadID, msg.ID)
-	case "text", "progress", "question":
-		return rndStubMentionItems(s, threadID, msg)
-	default:
-		return nil
-	}
-}
-
-func rndStubHandbackItems(sec, threadID, msgID string) []Item {
-	if sec == "" {
-		return nil
-	}
-	return []Item{{AI: sec, Why: itemNotice, Task: threadID, Msg: msgID, Code: "handback"}}
-}
-
-func rndStubMentionItems(s *State, threadID string, msg proto.MsgRow) []Item {
-	var items []Item
-	for _, m := range msg.Mentions {
-		if _, ok := s.AIs[m]; ok {
-			items = append(items, Item{AI: m, Why: rndMentionWhy, Task: threadID, Msg: msg.ID})
-		}
-	}
-	return items
-}
-
-func rndStubResume(s *State, c Command) (Result, *Refusal) {
-	var p proto.TaskCommand
-	if refusal := c.Decode(&p); refusal != nil {
-		return Result{}, refusal
-	}
-	task, ok := s.Tasks[string(p.ID)]
-	if !ok {
-		return Result{}, &Refusal{"not_found", "no task"}
-	}
-	ev := Event{
-		Kind: OnResume, By: rndStubSender(s, c.Who, task.Assignee),
-		Now: c.Now, Limits: s.Group.Limits, Pending: rndPending(c.Disk, task.ID),
-	}
-	moved, fx, err := Step(task, ev)
-	if err != nil {
-		return Result{}, &Refusal{err.Error(), "refused"}
-	}
-	return Result{Rows: []Row{RowOf(moved)}, Items: rndReviewItems(fx.Items, moved.ID, c.Disk.Queued())}, nil
-}
-
-func rndStubSender(s *State, w Who, assignee string) Sender {
-	if s.Secretary(w) {
-		return BySecretary
-	}
-	if s.Admin(w) {
-		return ByAdmin
-	}
-	if s.Hosts(w, assignee) {
-		return ByHost
-	}
-	return ByPerson
+	item := Item{AI: p.Body.To, Why: postMentionWhy, Task: postTaskID(msg.Thread), Msg: msg.ID}
+	return Result{Rows: s.postRows(msg), Items: []Item{item}}, nil
 }
 
 func rndSignPost(by identity.Key, n byte, as, kind, thread, text string, mentions []string, body string) proto.Envelope {
@@ -334,7 +246,7 @@ func TestRoundsTenRoundsHoldAndBothResumesRelease(t *testing.T) {
 		t.Run(how, func(t *testing.T) {
 			s, f, table := rndTestState(t), rndNewFakeStore(), rndTestTable()
 
-			// Rounds 1 to 8 via question/progress, round 9 via secretary text, round 10 via call.
+			// Rounds 1 to 8 via question, round 9 via secretary text, round 10 via call.
 			for round := 1; round <= 8; round++ {
 				sender, target := rndAIMemberOne, rndAIMemberTwo
 				if round%2 == 0 {
@@ -357,7 +269,7 @@ func TestRoundsTenRoundsHoldAndBothResumesRelease(t *testing.T) {
 			rndEqual(t, s.Tasks[rndTaskOneID].Thread.Rounds, 9)
 			rndEqual(t, s.Tasks[rndTaskOneID].State, taskActive)
 
-			// Also place a main-line mention, another task's mention, and an assign item in f.queued to pin rndShouldHold.
+			// Place a main-line mention, another task's mention, and an assign item in f.queued to pin rndShouldHold.
 			mainMsg, t1ID, otherTask := rndMakeID(90), rndTaskOneID, rndTaskTwoID
 			f.queued = append(f.queued,
 				store.Item{ID: 50, AI: rndAIMemberTwo, Why: "mention", Msg: &mainMsg, NotBefore: 0},
@@ -404,10 +316,11 @@ func TestRoundsTenRoundsHoldAndBothResumesRelease(t *testing.T) {
 			refused := rndApply(t, table, s, f, rndHostKey, rndSignResume(rndHostKey, 42, rndSecMember, rndTaskOneID))
 			rndEqual(t, refused.Answer, store.Outcome{Code: "forbidden"})
 
-			// Add a held mention on another task and a held non-mention on this task to pin rndIsHeld.
+			// Add a held mention on another task, a held non-mention on this task, and a wake-cap-paced mention to pin rndIsHeld.
 			f.queued = append(f.queued,
 				store.Item{ID: 60, AI: rndAIMemberTwo, Why: "mention", Task: &otherTask, Msg: &mainMsg, NotBefore: runNever},
 				store.Item{ID: 61, AI: rndAIMemberOne, Why: "review", Task: &paused.ID, NotBefore: runNever},
+				store.Item{ID: 62, AI: rndAIMemberTwo, Why: "mention", Task: &paused.ID, Msg: &mainMsg, NotBefore: rndTestClock + 5000},
 			)
 
 			if how == "person_text" {
@@ -442,7 +355,7 @@ func TestRoundsTenRoundsHoldAndBothResumesRelease(t *testing.T) {
 }
 
 func TestRoundsEdgeCasesAndMutantPins(t *testing.T) {
-	t.Run("non-AI mentions, main-line posts, step merge, no secretary, and system id collision", func(t *testing.T) {
+	t.Run("non-AI mentions, main-line posts, multi-message review rows, step merge, and no secretary", func(t *testing.T) {
 		s, f, table := rndTestState(t), rndNewFakeStore(), rndTestTable()
 
 		// Main-line AI post mentioning an AI does not touch task rounds.
@@ -450,38 +363,48 @@ func TestRoundsEdgeCasesAndMutantPins(t *testing.T) {
 		f.commit(s, mainRes)
 		rndEqual(t, s.Tasks[rndTaskOneID].Thread.Rounds, 0)
 
-		// Thread AI posts that mention only a human, or handback (notice item, not mention), count no round.
+		// Thread AI posts that mention only a human, or review without AI mentions (reviewed item, not mention), count no round.
 		humanMention := rndApply(t, table, s, f, rndHostKey, rndSignPost(rndHostKey, 51, rndAIMemberOne, "progress", rndTaskOneID, "hi owner", []string{rndOwnerMember}, ""))
 		f.commit(s, humanMention)
-		handback := rndApply(t, table, s, f, rndHostKey, rndSignPost(rndHostKey, 52, rndAIMemberOne, "handback", rndTaskOneID, "", []string{}, `{"files":[],"commits":[],"added":0,"removed":0}`))
-		f.commit(s, handback)
+		t1 := s.Tasks[rndTaskOneID]
+		t1.Step = stepReview
+		s.Tasks[rndTaskOneID] = t1
+		revBody := fmt.Sprintf(`{"task":%q,"commit":"c1","score":80,"items":[]}`, rndTaskOneID)
+		revNoMention := rndApply(t, table, s, f, rndHostKey, rndSignPost(rndHostKey, 52, rndAIMemberTwo, "review", rndTaskOneID, "needs work", []string{}, revBody))
+		f.commit(s, revNoMention)
 		rndEqual(t, s.Tasks[rndTaskOneID].Thread.Rounds, 0)
 
-		// Report mentioning an AI in Mentions (with no mention item queued by report itself) still counts a round.
-		report := rndApply(t, table, s, f, rndHostKey, rndSignPost(rndHostKey, 53, rndAIMemberOne, "report", rndTaskOneID, "", []string{rndAIMemberTwo}, `{"commit":"c1","files":1,"added":2,"removed":0}`))
-		f.commit(s, report)
+		// Sixth failed review mentioning an AI writes [reviewMsg, taskFailedMsg, taskRow] and still counts the AI mention on reviewMsg.
+		t1 = s.Tasks[rndTaskOneID]
+		t1.Step, t1.Review = stepReview, &proto.Review{Round: 5, Failed: 5, Score: 80, By: rndAIMemberTwo, Commit: "c1", At: rndTestClock - 500}
+		s.Tasks[rndTaskOneID] = t1
+		revSixth := rndApply(t, table, s, f, rndHostKey, rndSignPost(rndHostKey, 53, rndAIMemberTwo, "review", rndTaskOneID, "stop", []string{rndAIMemberOne}, revBody))
+		rndEqual(t, len(revSixth.Rows), 3)
+		f.commit(s, revSixth)
 		rndEqual(t, s.Tasks[rndTaskOneID].Thread.Rounds, 1)
+
+		// Report mentioning an AI in Mentions (with no mention item queued by report itself) still counts a round.
+		t1 = s.Tasks[rndTaskOneID]
+		t1.State, t1.Step, t1.Failures, t1.Review = taskActive, stepLocal, 0, nil
+		s.Tasks[rndTaskOneID] = t1
+		report := rndApply(t, table, s, f, rndHostKey, rndSignPost(rndHostKey, 54, rndAIMemberOne, "report", rndTaskOneID, "", []string{rndAIMemberTwo}, `{"commit":"c1","files":1,"added":2,"removed":0}`))
+		f.commit(s, report)
+		rndEqual(t, s.Tasks[rndTaskOneID].Thread.Rounds, 2)
 
 		// At step merge, reaching limits.rounds increments Thread.Rounds without pausing or writing rounds_limit.
 		mergeTask := s.Tasks[rndTaskOneID]
 		mergeTask.Step, mergeTask.Thread.Rounds = stepMerge, 9
 		s.Tasks[rndTaskOneID] = mergeTask
-		atMerge := rndApply(t, table, s, f, rndHostKey, rndSignPost(rndHostKey, 54, rndAIMemberOne, "question", rndTaskOneID, "q", []string{rndAIMemberTwo}, ""))
-		rndEqual(t, atMerge.Items, []Item{{AI: rndAIMemberTwo, Why: "mention", Task: rndTaskOneID, Msg: rndMakeID(54), NotBefore: 0}})
+		atMerge := rndApply(t, table, s, f, rndHostKey, rndSignPost(rndHostKey, 55, rndAIMemberOne, "question", rndTaskOneID, "q", []string{rndAIMemberTwo}, ""))
+		rndEqual(t, atMerge.Items, []Item{{AI: rndAIMemberTwo, Why: "mention", Task: rndTaskOneID, Msg: rndMakeID(55), NotBefore: 0}})
 		f.commit(s, atMerge)
 		rndEqual(t, []any{s.Tasks[rndTaskOneID].State, s.Tasks[rndTaskOneID].Step, s.Tasks[rndTaskOneID].Thread.Rounds}, []any{"active", "merge", 10})
 
-		// Collision on derived rounds_limit ID refuses the post with conflict.
+		// Without a secretary, reaching limits.rounds writes rounds_limit and holds the mention without queuing a notice.
+		f.queued = nil
 		activeAgain := s.Tasks[rndTaskOneID]
 		activeAgain.Step, activeAgain.Thread.Rounds = stepLocal, 9
 		s.Tasks[rndTaskOneID] = activeAgain
-		collidingNonce := byte(55)
-		f.msgs[rndSystemID(proto.ID(rndMakeID(collidingNonce)))] = proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: rndSystemID(proto.ID(rndMakeID(collidingNonce)))}, Kind: "text"}
-		collided := rndApply(t, table, s, f, rndHostKey, rndSignPost(rndHostKey, collidingNonce, rndAIMemberOne, "question", rndTaskOneID, "q", []string{rndAIMemberTwo}, ""))
-		rndEqual(t, collided.Answer, store.Outcome{Code: "conflict"})
-
-		// Without a secretary, reaching limits.rounds writes rounds_limit and holds the mention without queuing a notice.
-		f.queued = nil
 		s.Group.Secretary = ""
 		noSec := rndApply(t, table, s, f, rndHostKey, rndSignPost(rndHostKey, 56, rndAIMemberOne, "question", rndTaskOneID, "q", []string{rndAIMemberTwo}, ""))
 		rndEqual(t, noSec.Answer, store.Outcome{OK: true})
@@ -499,13 +422,13 @@ func TestRoundsEdgeCasesAndMutantPins(t *testing.T) {
 		t1ID, t2ID := rndTaskOneID, rndTaskTwoID
 		f.pending = []proto.MsgRow{
 			{RowHeader: proto.RowHeader{Type: "msg", ID: rndMakeID(70)}, Kind: "brief", Body: json.RawMessage(`{}`)},
-			{RowHeader: proto.RowHeader{Type: "msg", ID: rndMakeID(71)}, Thread: &t2ID, Kind: "approval", Timestamp: 100, Body: json.RawMessage(`{"approvers":["u2"]}`)},
-			{RowHeader: proto.RowHeader{Type: "msg", ID: rndMakeID(72)}, Thread: &t1ID, Kind: "decision", Timestamp: 200, Body: json.RawMessage(`{"to":["u-dec"]}`)},
-			{RowHeader: proto.RowHeader{Type: "msg", ID: rndMakeID(73)}, Thread: &t1ID, Kind: "approval", Timestamp: 300, Body: json.RawMessage(`{"approvers":["u-app"]}`)},
+			{RowHeader: proto.RowHeader{Type: "msg", ID: rndMakeID(71)}, Thread: &t2ID, Kind: "approval", Timestamp: 100, Body: json.RawMessage(fmt.Sprintf(`{"task":%q,"approvers":["u2"]}`, t2ID))},
+			{RowHeader: proto.RowHeader{Type: "msg", ID: rndMakeID(72)}, Thread: &t1ID, Kind: "decision", Timestamp: 200, Body: json.RawMessage(fmt.Sprintf(`{"task":%q,"to":["u-dec"]}`, t1ID))},
+			{RowHeader: proto.RowHeader{Type: "msg", ID: rndMakeID(73)}, Thread: &t1ID, Kind: "approval", Timestamp: 300, Body: json.RawMessage(fmt.Sprintf(`{"task":%q,"approvers":["u-app"]}`, t1ID))},
 		}
 
 		// Non-matching review items (wrong why, wrong AI, nil/other task, nil/other commit) do not suppress review queueing;
-		// held mention carries Jump: true in signed-envelope form.
+		// held mention carries Jump: true in plain proto.Item JSON.
 		c1, cOld := "c1", "c0"
 		msgHeld := rndMakeID(74)
 		f.queued = []store.Item{
@@ -516,7 +439,7 @@ func TestRoundsEdgeCasesAndMutantPins(t *testing.T) {
 			{ID: 5, AI: rndAIMemberTwo, Why: "review", Task: &t1ID, Commit: nil},
 			{ID: 6, AI: rndAIMemberTwo, Why: "review", Task: &t1ID, Commit: &cOld},
 			{ID: 7, AI: rndAIMemberOne, Why: "mention", Task: &t1ID, Msg: &msgHeld, NotBefore: runNever,
-				Env: json.RawMessage(`{"p":"{\"t\":\"item\",\"why\":\"mention\",\"jump\":true}","k":"k","s":"s"}`)},
+				Env: json.RawMessage(fmt.Sprintf(`{"item":7,"ai":%q,"why":"mention","task":%q,"msg":%q,"jump":true}`, rndAIMemberOne, t1ID, msgHeld))},
 		}
 
 		res := rndApply(t, table, s, f, rndOwnerKey, rndSignPost(rndOwnerKey, 75, "", "text", rndTaskOneID, "continue", []string{}, ""))
@@ -537,64 +460,24 @@ func TestRoundsEdgeCasesAndMutantPins(t *testing.T) {
 		rndEqual(t, len(resDup.Items), 0)
 		f.commit(s, resDup)
 
-		// Person text on an active (non-rounds) task resets rounds without releasing anything.
+		// Person text on an active (non-rounds) task resets rounds without releasing runNever items.
 		t1 = s.Tasks[rndTaskOneID]
 		t1.Thread.Rounds = 4
 		s.Tasks[rndTaskOneID] = t1
+		f.queued = []store.Item{{ID: 99, AI: rndAIMemberTwo, Why: "mention", Task: &t1ID, Msg: &msgHeld, NotBefore: runNever}}
 		resActive := rndApply(t, table, s, f, rndOwnerKey, rndSignPost(rndOwnerKey, 77, "", "text", rndTaskOneID, "reset", []string{}, ""))
+		rndEqual(t, len(resActive.Retire), 0)
 		f.commit(s, resActive)
 		rndEqual(t, s.Tasks[rndTaskOneID].Thread.Rounds, 0)
-	})
 
-	t.Run("helper row shapes and non-rounds resume pass through", func(t *testing.T) {
-		s, f := rndTestState(t), rndNewFakeStore()
-		// Table without task/resume exercises rndWrap's false branch for task/resume,
-		// a custom post returning no MsgRow, a custom non-text person post, and a post omitting TaskRow in Rows.
-		t1ID := rndTaskOneID
-		s.Tasks[rndTaskTwoID] = proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: rndTaskTwoID}, Group: rndGroupID, Num: 2, State: taskActive, Step: stepLocal, Assignee: rndAIMemberTwo}
-		custom := Table{
-			"post/empty": func(*State, Command) (Result, *Refusal) {
-				return Result{Rows: []Row{RowOf(s.Tasks[rndTaskTwoID])}}, nil
-			},
-			"post/custom": func(_ *State, c Command) (Result, *Refusal) {
-				otherMsg := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: rndMakeID(98)}, Kind: "text"}
-				ownMsg := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: string(c.Nonce)}, Thread: &t1ID, By: c.Who.Member(), Kind: "custom"}
-				return Result{Rows: []Row{RowOf(s.Tasks[rndTaskTwoID]), RowOf(otherMsg), RowOf(ownMsg)}}, nil
-			},
-			"post/notask": func(_ *State, c Command) (Result, *Refusal) {
-				ownMsg := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: string(c.Nonce)}, Thread: &t1ID, By: c.Who.Member(), Kind: "text", Mentions: []string{rndAIMemberTwo}}
-				return Result{Rows: []Row{RowOf(s.Tasks[rndTaskTwoID]), RowOf(ownMsg)}, Items: []Item{{AI: rndAIMemberTwo, Why: "mention", Task: t1ID, Msg: ownMsg.ID}}}, nil
-			},
-		}
-		rndWrap(custom)
-
-		rEmpty := rndApply(t, custom, s, f, rndOwnerKey, rndOwnerKey.Sign(fmt.Sprintf(`{"t":"post","n":%q,"ts":%d,"g":%q,"kind":"empty"}`, rndMakeID(80), rndTestClock, rndGroupID)))
-		rndEqual(t, len(rEmpty.Rows), 1)
-
-		rCustom := rndApply(t, custom, s, f, rndOwnerKey, rndOwnerKey.Sign(fmt.Sprintf(`{"t":"post","n":%q,"ts":%d,"g":%q,"kind":"custom"}`, rndMakeID(81), rndTestClock, rndGroupID)))
-		rndEqual(t, len(rCustom.Rows), 3)
-
-		rNoTask := rndApply(t, custom, s, f, rndHostKey, rndHostKey.Sign(fmt.Sprintf(`{"t":"post","n":%q,"ts":%d,"g":%q,"as":%q,"kind":"notask"}`, rndMakeID(82), rndTestClock, rndGroupID, rndAIMemberOne)))
-		rndEqual(t, len(rNoTask.Rows), 3)
-		f.commit(s, rNoTask)
-		rndEqual(t, s.Tasks[rndTaskOneID].Thread.Rounds, 1)
-
-		// Resuming a manual-paused task does not release held items of rounds, and skips non-TaskRow entries in Rows.
+		// Resuming a manual-paused task does not release held items of rounds, and refused post/resume pass through.
 		manual := s.Tasks[rndTaskOneID]
-		manual.State, manual.Wait = taskPaused, &proto.TaskWait{Kind: waitManual, Since: rndTestClock}
+		manual.State, manual.Step, manual.Wait = taskPaused, stepLocal, &proto.TaskWait{Kind: waitManual, Since: rndTestClock}
 		s.Tasks[rndTaskOneID] = manual
-		msgID := rndMakeID(83)
-		f.queued = []store.Item{{ID: 99, AI: rndAIMemberTwo, Why: "mention", Task: &t1ID, Msg: &msgID, NotBefore: runNever}}
-		withResume := Table{
-			"task/resume": func(*State, Command) (Result, *Refusal) {
-				moved := manual
-				moved.State, moved.Wait = taskActive, nil
-				note := proto.NoteRow{RowHeader: proto.RowHeader{Type: "note", ID: rndMakeID(84)}}
-				return Result{Rows: []Row{RowOf(note), RowOf(moved)}}, nil
-			},
-		}
-		rndWrap(withResume)
-		rManual := rndApply(t, withResume, s, f, rndOwnerKey, rndSignResume(rndOwnerKey, 85, "", rndTaskOneID))
-		rndEqual(t, len(rManual.Retire)+len(rManual.Items), 0)
+		rManual := rndApply(t, table, s, f, rndOwnerKey, rndSignResume(rndOwnerKey, 78, "", rndTaskOneID))
+		rndEqual(t, len(rManual.Retire), 0)
+		rndEqual(t, rManual.Items, []Item{{AI: rndAIMemberOne, Why: "resume", Task: rndTaskOneID}})
+		refusedPost := rndApply(t, table, s, f, rndOwnerKey, rndSignPost(rndOwnerKey, 79, "", "progress", rndTaskOneID, "no", []string{}, ""))
+		rndEqual(t, refusedPost.Answer, store.Outcome{Code: "forbidden"})
 	})
 }

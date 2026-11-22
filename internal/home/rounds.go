@@ -28,13 +28,8 @@ func init() {
 }
 
 const (
-	rndMentionWhy = "mention"
-	rndTextKind   = "text"
-	rndSystemBy   = "system"
-	rndSystemKind = "system"
-	rndQuietCode  = "quiet"
-	rndRoundsCode = "rounds_limit"
-	rndMinuteMS   = 60_000
+	rndQuietCode = "quiet"
+	rndMinuteMS  = 60_000
 )
 
 var (
@@ -43,16 +38,14 @@ var (
 )
 
 // rndWrap attaches the thread round rules and held-mention release to every
-// post command and to task/resume present in t.
+// post command and to task/resume in t.
 func rndWrap(t Table) {
 	for key, f := range t {
 		if strings.HasPrefix(key, "post/") {
 			t[key] = rndPost(f)
 		}
 	}
-	if f, ok := t["task/resume"]; ok {
-		t["task/resume"] = rndResume(f)
-	}
+	t["task/resume"] = rndResume(t["task/resume"])
 }
 
 // rndJump implements the jump command (commands.md 1.4, R-72): by the person
@@ -82,7 +75,7 @@ func rndRequeueJump(d Disk, author string, thread *string) (Result, *Refusal) {
 	for i := len(queued) - 1; i >= 0; i-- {
 		q := queued[i]
 		if rndJumpMatch(d, q, author, thread) {
-			it := Item{AI: q.AI, Why: rndMentionWhy, Task: rndDeref(q.Task), Msg: *q.Msg, Jump: true}
+			it := Item{AI: q.AI, Why: postMentionWhy, Task: postTaskID(q.Task), Msg: *q.Msg, Jump: true}
 			return Result{Items: []Item{it}, Retire: []int64{q.ID}}, nil
 		}
 	}
@@ -90,18 +83,11 @@ func rndRequeueJump(d Disk, author string, thread *string) (Result, *Refusal) {
 }
 
 func rndJumpMatch(d Disk, q store.Item, author string, thread *string) bool {
-	if q.Why != rndMentionWhy || q.Msg == nil {
+	if q.Why != postMentionWhy || q.Msg == nil {
 		return false
 	}
 	msg, _ := d.Msg(*q.Msg)
-	return msg.By == author && rndSameThread(msg.Thread, thread)
-}
-
-func rndSameThread(a, b *string) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
+	return msg.By == author && postTaskID(msg.Thread) == postTaskID(thread)
 }
 
 // rndQuiet is the quiet-task timer (task-machine.md row 23): for each active
@@ -109,7 +95,7 @@ func rndSameThread(a, b *string) bool {
 // limits.idle_notice_minutes, it queues one quiet notice for the secretary per
 // quiet period.
 func rndQuiet(s *State, d Disk, now int64) Result {
-	if s.Group.Secretary == "" {
+	if s.Group.Secretary == "" || s.Group.Limits.IdleNoticeMinutes <= 0 {
 		return Result{}
 	}
 	queued := d.Queued()
@@ -123,17 +109,13 @@ func rndQuiet(s *State, d Disk, now int64) Result {
 }
 
 func (s *State) rndQuietTask(task proto.TaskRow, queued []store.Item, now int64) (Item, bool) {
-	if !rndSilentFor(task, s.Group.Limits.IdleNoticeMinutes, now) {
+	if !rndSilentFor(task, s.Group.Limits.IdleNoticeMinutes, now) || rndAlreadyQuiet(s, task, queued) {
 		return Item{}, false
 	}
-	if rndAlreadyQuiet(s, task, queued) {
-		return Item{}, false
+	if _, fx, err := Step(task, Event{Kind: OnQuiet, By: ByHome, Now: now}); err == nil {
+		return Item{AI: s.Group.Secretary, Why: itemNotice, Task: task.ID, Code: fx.Items[0].Code}, true
 	}
-	_, fx, err := Step(task, Event{Kind: OnQuiet, By: ByHome, Now: now})
-	if err != nil {
-		return Item{}, false
-	}
-	return Item{AI: s.Group.Secretary, Why: itemNotice, Task: task.ID, Code: fx.Items[0].Code}, true
+	return Item{}, false
 }
 
 func rndSilentFor(task proto.TaskRow, idleMinutes int, now int64) bool {
@@ -161,18 +143,11 @@ func rndAlreadyQuiet(s *State, task proto.TaskRow, queued []store.Item) bool {
 
 func rndHasQuietItem(queued []store.Item, taskID string) bool {
 	for _, q := range queued {
-		if rndIsQuietNotice(q, taskID) {
+		if q.Why == itemNotice && tskForTask(q, taskID) && rndStoredItem(q).Code == rndQuietCode {
 			return true
 		}
 	}
 	return false
-}
-
-func rndIsQuietNotice(q store.Item, taskID string) bool {
-	if q.Why != itemNotice || !rndPtrIs(q.Task, taskID) {
-		return false
-	}
-	return rndReadItemEnv(q.Env).Code == rndQuietCode
 }
 
 // rndRememberQuiet records on s each task whose quiet period just notified the
@@ -197,31 +172,28 @@ func rndPost(next Func) Func {
 		if refusal != nil {
 			return Result{}, refusal
 		}
-		return s.rndAfterPost(c, res)
+		return s.rndAfterPost(c, res), nil
 	}
 }
 
-func (s *State) rndAfterPost(c Command, res Result) (Result, *Refusal) {
+func (s *State) rndAfterPost(c Command, res Result) Result {
 	msg, inThread := rndThreadMsg(res.Rows, string(c.Nonce))
 	if !inThread {
-		return res, nil
+		return res
 	}
-	task := rndFindTask(s, res.Rows, *msg.Thread)
+	task := rndFindTask(res.Rows)
 	if c.Who.AI == "" {
-		return s.rndPersonPost(c, res, msg, task), nil
+		return s.rndPersonPost(c, res, task)
 	}
 	return s.rndAIPost(c, res, msg, task)
 }
 
-func (s *State) rndPersonPost(c Command, res Result, msg proto.MsgRow, task proto.TaskRow) Result {
-	if msg.Kind != rndTextKind {
-		return res
-	}
+func (s *State) rndPersonPost(c Command, res Result, task proto.TaskRow) Result {
 	wasRounds := rndInRounds(task)
 	queued := c.Disk.Queued()
 	// Row 22 takes any person, admin or member alike.
 	moved, fx, _ := Step(task, Event{
-		Kind: OnText, By: ByPerson, Now: c.Now, Limits: s.Group.Limits, Pending: rndPending(c.Disk, task.ID),
+		Kind: OnText, By: ByPerson, Now: c.Now, Limits: s.Group.Limits, Pending: tskPending(c.Disk, task.ID),
 	})
 	res.Rows = rndPutTask(res.Rows, moved)
 	if !wasRounds {
@@ -229,59 +201,39 @@ func (s *State) rndPersonPost(c Command, res Result, msg proto.MsgRow, task prot
 	}
 	retire, released := rndRelease(queued, moved.ID)
 	res.Retire = append(res.Retire, retire...)
-	extra := append(rndReviewItems(fx.Items, moved.ID, queued), released...)
+	extra := append(tskItemCtx{taskID: moved.ID, kept: queued}.items(fx.Items), released...)
 	res.Items = append(extra, res.Items...)
 	return res
 }
 
-func (s *State) rndAIPost(c Command, res Result, msg proto.MsgRow, task proto.TaskRow) (Result, *Refusal) {
+func (s *State) rndAIPost(c Command, res Result, msg proto.MsgRow, task proto.TaskRow) Result {
 	if s.rndMentionsAI(msg, res.Items) {
-		var refusal *Refusal
-		task, res, refusal = s.rndCountRound(c, res, task)
-		if refusal != nil {
-			return Result{}, refusal
-		}
+		task, res = s.rndCountRound(c, res, task)
 	}
 	if rndInRounds(task) {
 		res = rndHoldMentions(c.Disk.Queued(), res, task.ID)
 	}
-	return res, nil
+	return res
 }
 
-func (s *State) rndCountRound(c Command, res Result, task proto.TaskRow) (proto.TaskRow, Result, *Refusal) {
+func (s *State) rndCountRound(c Command, res Result, task proto.TaskRow) (proto.TaskRow, Result) {
 	// Row 21 counts mentions from working AIs and the secretary alike.
 	moved, fx, _ := Step(task, Event{
 		Kind: OnMention, By: ByAI, Member: c.Who.AI, Now: c.Now, Limits: s.Group.Limits,
 	})
 	res.Rows = rndPutTask(res.Rows, moved)
 	if fx.System == "" {
-		return moved, res, nil
-	}
-	sysMsg, refusal := s.rndRoundsLimitMsg(c, moved.ID)
-	if refusal != nil {
-		return proto.TaskRow{}, Result{}, refusal
-	}
-	res.Rows = append(res.Rows, RowOf(sysMsg))
-	if s.Group.Secretary != "" {
-		res.Items = append(res.Items, Item{AI: s.Group.Secretary, Why: itemNotice, Task: moved.ID, Msg: sysMsg.ID, Code: rndRoundsCode})
-	}
-	return moved, res, nil
-}
-
-func (s *State) rndRoundsLimitMsg(c Command, taskID string) (proto.MsgRow, *Refusal) {
-	id := rndSystemID(c.Nonce)
-	if _, taken := c.Disk.Msg(id); taken {
-		return proto.MsgRow{}, &Refusal{"conflict", "a message with the derived id of rounds_limit exists"}
+		return moved, res
 	}
 	body := proto.RoundsLimitBody{
-		SystemCode: proto.SystemCode{Code: rndRoundsCode},
-		Task:       taskID,
-		N:          s.Group.Limits.Rounds,
+		SystemCode: proto.SystemCode{Code: fx.System}, Task: moved.ID, N: s.Group.Limits.Rounds,
 	}
-	return proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: id}, Group: s.ID, By: rndSystemBy,
-		Kind: rndSystemKind, Timestamp: c.Now, Mentions: []string{}, Body: briefJSON(body),
-	}, nil
+	sysMsg := s.tskThreadSystem(c, rndSystemID(c.Nonce), "system", nil, []string{}, body)
+	res.Rows = append(res.Rows, RowOf(sysMsg))
+	res.Items = append(res.Items, tskItemCtx{
+		taskID: moved.ID, secretary: s.Group.Secretary, noticeMsg: sysMsg.ID,
+	}.items(fx.Items)...)
+	return moved, res
 }
 
 // rndSystemID derives the id of a main-line rounds_limit system message from
@@ -298,7 +250,7 @@ func (s *State) rndMentionsAI(msg proto.MsgRow, items []Item) bool {
 		}
 	}
 	for _, it := range items {
-		if it.Why == rndMentionWhy {
+		if it.Why == postMentionWhy {
 			return true
 		}
 	}
@@ -314,7 +266,7 @@ func rndHoldMentions(queued []store.Item, res Result, taskID string) Result {
 		}
 	}
 	for i := range res.Items {
-		if res.Items[i].Why == rndMentionWhy {
+		if res.Items[i].Why == postMentionWhy {
 			res.Items[i].NotBefore = runNever
 		}
 	}
@@ -323,7 +275,7 @@ func rndHoldMentions(queued []store.Item, res Result, taskID string) Result {
 }
 
 func rndShouldHold(q store.Item, taskID string) bool {
-	return q.Why == rndMentionWhy && rndPtrIs(q.Task, taskID) && q.NotBefore != runNever
+	return q.Why == postMentionWhy && tskForTask(q, taskID) && q.NotBefore != runNever
 }
 
 func rndResume(next Func) Func {
@@ -337,12 +289,11 @@ func rndResume(next Func) Func {
 }
 
 func rndAfterResume(s *State, d Disk, res Result) Result {
-	for _, r := range res.Rows {
-		if moved, ok := r.Value().(proto.TaskRow); ok && rndInRounds(s.Tasks[moved.ID]) {
-			retire, released := rndRelease(d.Queued(), moved.ID)
-			res.Retire = append(res.Retire, retire...)
-			res.Items = append(res.Items, released...)
-		}
+	moved := rndFindTask(res.Rows)
+	if rndInRounds(s.Tasks[moved.ID]) {
+		retire, released := rndRelease(d.Queued(), moved.ID)
+		res.Retire = append(res.Retire, retire...)
+		res.Items = append(res.Items, released...)
 	}
 	return res
 }
@@ -358,114 +309,49 @@ func rndRelease(queued []store.Item, taskID string) (retire []int64, released []
 }
 
 func rndIsHeld(q store.Item, taskID string) bool {
-	return q.Why == rndMentionWhy && rndPtrIs(q.Task, taskID) && q.NotBefore == runNever
+	return q.Why == postMentionWhy && tskForTask(q, taskID) && q.NotBefore == runNever
 }
 
 func rndRequeuedMention(q store.Item, taskID string, notBefore int64) Item {
 	return Item{
-		AI: q.AI, Why: rndMentionWhy, Task: taskID, Msg: rndDeref(q.Msg),
-		Jump: rndReadItemEnv(q.Env).Jump, NotBefore: notBefore,
+		AI: q.AI, Why: postMentionWhy, Task: taskID, Msg: postTaskID(q.Msg),
+		Jump: bool(rndStoredItem(q).Jump), NotBefore: notBefore,
 	}
 }
 
-func rndReviewItems(items []TaskItem, taskID string, queued []store.Item) []Item {
-	var out []Item
-	for _, it := range items {
-		if !rndReviewQueued(queued, taskID, it.AI, it.Commit) {
-			out = append(out, Item{AI: it.AI, Why: it.Why, Task: taskID, Commit: it.Commit})
-		}
-	}
-	return out
-}
-
-func rndReviewQueued(queued []store.Item, taskID, ai, commit string) bool {
-	for _, q := range queued {
-		if rndSameReview(q, taskID, ai, commit) {
-			return true
-		}
-	}
-	return false
-}
-
-func rndSameReview(q store.Item, taskID, ai, commit string) bool {
-	if q.Why != itemReview || q.AI != ai {
-		return false
-	}
-	return rndPtrIs(q.Task, taskID) && rndPtrIs(q.Commit, commit)
-}
-
-func rndPending(d Disk, taskID string) []PendingCard {
-	var pending []PendingCard
-	for _, m := range d.Pending() {
-		if !rndPtrIs(m.Thread, taskID) {
-			continue
-		}
-		var recipients struct {
-			Approvers []string `json:"approvers"`
-			To        []string `json:"to"`
-		}
-		json.Unmarshal(m.Body, &recipients)
-		who := append(recipients.Approvers, recipients.To...)
-		pending = append(pending, PendingCard{Kind: m.Kind, Msg: m.ID, Who: who, Since: m.Timestamp})
-	}
-	return pending
-}
-
-func rndThreadMsg(rows []Row, id string) (proto.MsgRow, bool) {
+func rndThreadMsg(rows []Row, id string) (found proto.MsgRow, inThread bool) {
 	for _, r := range rows {
 		if m, ok := r.Value().(proto.MsgRow); ok && m.ID == id {
-			return m, m.Thread != nil
+			found, inThread = m, m.Thread != nil
 		}
 	}
-	return proto.MsgRow{}, false
+	return found, inThread
 }
 
-func rndFindTask(s *State, rows []Row, taskID string) proto.TaskRow {
+func rndFindTask(rows []Row) (found proto.TaskRow) {
 	for _, r := range rows {
-		if t, ok := r.Value().(proto.TaskRow); ok && t.ID == taskID {
-			return t
+		if t, ok := r.Value().(proto.TaskRow); ok {
+			found = t
 		}
 	}
-	return s.Tasks[taskID]
+	return found
 }
 
 func rndPutTask(rows []Row, task proto.TaskRow) []Row {
 	out := slices.Clone(rows)
 	for i, r := range out {
-		if t, ok := r.Value().(proto.TaskRow); ok && t.ID == task.ID {
+		if _, ok := r.Value().(proto.TaskRow); ok {
 			out[i] = RowOf(task)
-			return out
 		}
 	}
-	return append(out, RowOf(task))
+	return out
 }
 
 func rndInRounds(task proto.TaskRow) bool {
 	return task.Wait != nil && task.Wait.Kind == waitRounds
 }
 
-func rndPtrIs(p *string, want string) bool {
-	return p != nil && *p == want
-}
-
-func rndDeref(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
-}
-
-type rndWireEnv struct {
-	Payload string `json:"p"`
-	Code    string `json:"code"`
-	Jump    bool   `json:"jump"`
-}
-
-func rndReadItemEnv(raw json.RawMessage) rndWireEnv {
-	var env rndWireEnv
-	json.Unmarshal(raw, &env)
-	if env.Payload != "" {
-		json.Unmarshal([]byte(env.Payload), &env)
-	}
-	return env
+func rndStoredItem(q store.Item) (it proto.Item) {
+	json.Unmarshal(q.Env, &it)
+	return it
 }

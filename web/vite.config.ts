@@ -38,5 +38,9 @@ export default defineConfig(({ mode }) => ({
     ...(mode === 'test' && { conditions: ['browser'] }),
   },
   // The end-to-end tests need Go, a build and browsers; only e2e/config.ts runs them.
-  test: { environment: 'happy-dom', exclude: [...configDefaults.exclude, 'e2e/**'] },
+  test: {
+    environment: 'happy-dom',
+    setupFiles: ['./features/setup.ts'],
+    exclude: [...configDefaults.exclude, 'e2e/**'],
+  },
 }));
