@@ -81,4 +81,6 @@ Check the pairing result against the device label and fingerprint shown
 in the browser.
 
 Add only repositories you trust, because their `CLAUDE.md`, `AGENTS.md` and
-hooks are used by the AIs that work on them.
+hooks are used by the AIs that work on them. A Qwen Code AI may load a
+repository's own configuration (`.qwen/settings.json`, `QWEN.md`) even in a
+group session: Qwen Code has no known switch to keep it out.

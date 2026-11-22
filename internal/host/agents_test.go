@@ -201,7 +201,7 @@ func TestAgentsCleanVersionFormats(t *testing.T) {
 
 func TestAgentsDetectsFakeCLIsAndPreservesStoredFields(t *testing.T) {
 	binDir := t.TempDir()
-	cmd := exec.Command("go", "build", "-o", binDir+string(os.PathSeparator), "./fakecli/claude", "./fakecli/codex")
+	cmd := exec.Command("go", "build", "-o", binDir+string(os.PathSeparator), "./fakecli/claude", "./fakecli/codex", "./fakecli/opencode")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build fake CLIs: %v\n%s", err, out)
 	}
@@ -224,6 +224,10 @@ func TestAgentsDetectsFakeCLIsAndPreservesStoredFields(t *testing.T) {
 				Day:  &proto.Cap{Unit: "turns", Max: 200},
 				Task: &proto.Cap{Unit: "usd", Max: 12.5},
 			},
+			Driver: proto.Driver{
+				Accounts: []string{"personal", "team", "api_key"},
+				Takeover: "new",
+			},
 			Groups: []proto.AgentGroup{},
 		},
 		{
@@ -232,16 +236,33 @@ func TestAgentsDetectsFakeCLIsAndPreservesStoredFields(t *testing.T) {
 			Account:    nil,
 			LoginOK:    true,
 			Caps:       proto.Caps{},
-			Groups:     []proto.AgentGroup{},
+			Driver: proto.Driver{
+				Accounts: []string{"personal", "team", "api_key"},
+				Takeover: "resume",
+			},
+			Groups: []proto.AgentGroup{},
+		},
+		{
+			Agent:      "opencode",
+			CLIVersion: "1.19.6",
+			Account:    nil,
+			LoginOK:    true,
+			Caps:       proto.Caps{},
+			Driver: proto.Driver{
+				Accounts: []string{"api_key"},
+				Takeover: "none",
+			},
+			Groups: []proto.AgentGroup{},
 		},
 	}
 	agtEqual(t, got, want)
 	encoded := agtVal(json.Marshal(got))
-	agtEqual(t, proto.UnexpectedNulls(encoded, "/1/account"), []string{})
+	agtEqual(t, proto.UnexpectedNulls(encoded, "/1/account", "/2/account"), []string{})
 
 	wantRows := strings.Join([]string{
 		`claude|2.1.311|team|{"day":{"unit":"turns","max":200},"task":{"unit":"usd","max":12.5}}`,
 		`codex|0.164.0|-|{}`,
+		`opencode|1.19.6|-|{}`,
 	}, "\n")
 	agtEqual(t, agtAgentRows(t, db), wantRows)
 }

@@ -616,9 +616,12 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
 | `src/components/people/`      | invitation dialog, role/removal actions and join form                             |
 | `src/messages/people.*`       | English and Chinese invitation, member-action and join texts                      |
-| `src/components/groupinfo/`   | group details and project memory (`chat.side`, `order: 20`)                       |
+| `src/components/groupinfo/`   | home, commands, settings (order 19) and project memory (order 20) at `chat.side`  |
+| `src/components/forge/`       | forge choice, argument-by-argument template editor and group command disclosure   |
 | `src/components/move/`        | owner's local export/import guidance (`chat.side`, `order: 30`)                   |
 | `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
+| `src/components/watch/`       | receive-only watch channel, standalone request action and watcher stop controls   |
+| `src/components/team/`        | attributed bulletin card; team people use the shared member panel                 |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
 | `src/components/notify/`      | live in-page notifications mounted at `layer`                                     |
 | `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
@@ -640,7 +643,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/people.test.ts`     | focused tests for member actions and the join page                                |
 | `features/groupinfo.spec.ts`  | steps of `../features/web_groupinfo.feature`                                      |
 | `features/move.spec.ts`       | steps of `../features/web_move.feature`                                           |
+| `features/forge.spec.ts`      | steps of `../features/web_forge.feature`                                          |
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
+| `features/watch_team.spec.ts` | steps of `../features/web_watch_team.feature`                                     |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
 | `features/notify.spec.ts`     | steps of `../features/web_notify.feature`                                         |
 | `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                     |
@@ -672,6 +677,25 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
 - Only a group's owner sees the local `solodawn group export` / `group import` guidance. The
   browser neither runs these commands nor transfers the file. A copy omits `--to`; scheduling
   copies belongs to the operating system, not the browser.
+
+- Watching reuses `#/terminal/<g>/<member>` for another person's AI. The terminal acquires its
+  host through the existing signalling session, reuses a connected home or node, and releases a
+  temporary connection when the last watch ends. Another person's taken-over AI offers Ask to
+  watch and Watch; a forbidden watch offers the same request action in the terminal bar. Only
+  the owner's terminal shows watchers. Real-host watching and other browsers remain unverified.
+- Custom forges are chosen at group creation. Group settings can edit their four argument-list
+  templates, not change the forge. Each field is one argument; whitespace and empty arguments
+  are preserved, without shell parsing. The home validates template restrictions.
+- The add-AI dialog discloses project commands and warns when a personal-subscription secretary
+  would serve another person. The invitation dialog warns before inviting the first other person.
+  Command chips show arguments as passed; an empty argument is shown as `""`.
+- A shared secretary should use a team plan or an API key, with an explicit allow-list. On a
+  personal subscription every request from someone other than its owner waits for that owner's
+  confirmation, every time; this cannot be switched off.
+- A foreign home stores the group, names its members and decides which requests reach your AIs.
+  Join only groups of people you trust. Group details attribute its computer using a matching
+  device row; if none is available, the owner is shown as not provided, never inferred from a
+  member's group role.
 
 - The theme is applied by the module script, so a browser forced to the theme opposite to its
   system setting can paint one frame in the system theme while loading (`issues.md`).

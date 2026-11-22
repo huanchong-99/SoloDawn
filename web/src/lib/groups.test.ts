@@ -797,6 +797,8 @@ describe('a home', () => {
     expect([...two.rows.keys()]).toEqual(['msg a']);
     link.push({ t: 'reset', g: 'two' });
     expect([one.rows.size, two.rows.size]).toEqual([1, 0]);
+    expect(home.hostInfo).toBeUndefined();
+    expect([...home.terminalSizes]).toEqual([]);
   });
 
   it('reads a fresh group again when an unlisted group is listed again', async () => {

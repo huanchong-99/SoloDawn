@@ -1,0 +1,16 @@
+{
+  "watch.open": "Watch",
+  "watch.ask": "Ask to watch",
+  "watch.requested": "Watch request sent",
+  "watch.watchers": "Watching",
+  "watch.stop": "Stop watching",
+  "watch.empty": "Nobody is watching.",
+  "watch.idle": "Connecting to the terminal",
+  "watch.starting": "Opening the watch channel",
+  "watch.active": "Watching · receive only",
+  "watch.relay": "Watching requires a direct connection",
+  "watch.ended": "Watching ended",
+  "watch.error": "Could not open the watch channel",
+  "watch.readonly": "You can watch, but cannot type or resize the owner's terminal.",
+  "watch.privacy": "SoloDawn does not read terminal content. Watching starts with the next bytes; earlier output is not replayed."
+}

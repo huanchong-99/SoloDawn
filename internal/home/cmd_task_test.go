@@ -402,7 +402,7 @@ func TestTaskCmdAssignTransitionsAndEffects(t *testing.T) {
 		equal(t, briefRows(res), []any{wantTask, wantCard})
 	})
 
-	t.Run("change only reviewer at step review keeps pending approval card untouched", func(t *testing.T) {
+	t.Run("foreign reviewer waits for consent without changing the approval card", func(t *testing.T) {
 		s := tskState(t)
 		task := tskActive(taskID, 7)
 		task.Step = "review"
@@ -429,8 +429,16 @@ func TestTaskCmdAssignTransitionsAndEffects(t *testing.T) {
 		res := tskSend(t, s, d, receipts{}, tskPeer, cmd)
 		equal(t, res.Answer, store.Outcome{OK: true})
 		equal(t, res.Retire, []int64{10})
-		equal(t, len(res.Rows), 1)
-		equal(t, res.Items, []home.Item{{AI: tskC, Why: "review", Task: taskID, Commit: "c1"}})
+		equal(t, len(res.Rows), 2)
+		equal(t, res.Items, []home.Item{})
+		card := cfmCard(t, res)
+		equal(t, card.Kind, "confirm")
+		equal(t, card.Re, &task.Brief)
+		equal(t, card.Body, briefRaw(t, proto.ConfirmBody{What: "direct", AI: tskC, To: []string{browser.ID()}}))
+		want := task
+		want.Seq, want.Reviewer = 11, tskC
+		want.Wait = &proto.TaskWait{Kind: "confirm", Msg: card.ID, Who: []string{browser.ID()}, Since: clock}
+		equal(t, res.Rows[0].Value(), want)
 	})
 
 	t.Run("first reviewer at step review retires any stale review item", func(t *testing.T) {
