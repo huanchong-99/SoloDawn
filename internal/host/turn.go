@@ -51,11 +51,13 @@ func instructionsFor(s Session) string {
 }
 
 type turnCtx struct {
-	h         *Host
-	s         Session
-	kind      TurnKind
-	owner     string
-	itemTasks map[string]proto.TaskRow
+	h               *Host
+	s               Session
+	kind            TurnKind
+	owner           string
+	itemTasks       map[string]proto.TaskRow
+	confirmations   []proto.MsgRow
+	confirmsFetched bool
 }
 
 type parsedItem struct {
@@ -78,8 +80,8 @@ var itemBuilders = map[string]itemBuilder{
 	"reply":     (*turnCtx).buildReply,
 	"assign":    (*turnCtx).buildAssign,
 	"review":    (*turnCtx).buildReview,
-	"reviewed":  (*turnCtx).buildReviewed,
-	"checks":    (*turnCtx).buildChecks,
+	"reviewed":  (*turnCtx).buildCarried,
+	"checks":    (*turnCtx).buildCarried,
 	"resume":    (*turnCtx).buildResume,
 	"decided":   (*turnCtx).buildDecided,
 	"confirmed": (*turnCtx).buildConfirmed,
@@ -299,11 +301,6 @@ func (c *turnCtx) lookupMember(id string) (proto.MemberRow, bool) {
 	return m, proto.Decode(raw, &m) == nil
 }
 
-func (c *turnCtx) isOwnerMember(id string) bool {
-	m, _ := c.lookupMember(id)
-	return m.Kind == "human" && m.User != "" && m.User == c.owner
-}
-
 func (c *turnCtx) taskRef(id string) string {
 	if row, ok := c.lookupTask(id); ok {
 		return "T-" + strconv.Itoa(row.Num)
@@ -329,11 +326,18 @@ func (c *turnCtx) place(thread string) string {
 }
 
 func (c *turnCtx) fromIn(memberID, thread string) string {
-	return "from " + c.memberLabel(memberID) + " " + c.place(thread)
+	who := "unknown"
+	if memberID != "" {
+		who = c.memberLabel(memberID)
+	}
+	if memberID == "system" {
+		who = "the home"
+	}
+	return "from " + who + " " + c.place(thread)
 }
 
 func (c *turnCtx) msgWho(msg *proto.MsgRow, thread string) string {
-	if msg != nil && msg.By != "system" {
+	if msg != nil {
 		return c.fromIn(msg.By, thread)
 	}
 	return c.place(thread)
@@ -344,13 +348,6 @@ func (c *turnCtx) memberLabel(id string) string {
 		return formatSpeaker(m.Name, m.Kind == "ai")
 	}
 	return formatSpeaker(id, false)
-}
-
-func (c *turnCtx) stateActorLabel(state *proto.CardState) string {
-	if by := stateBy(state); by != "" {
-		return c.memberLabel(by)
-	}
-	return "unknown"
 }
 
 func formatSpeaker(name string, ai bool) string {
@@ -374,25 +371,11 @@ func strVal(p *string) string {
 	return *p
 }
 
-func msgBy(msg *proto.MsgRow) string {
-	if msg == nil {
-		return ""
-	}
-	return msg.By
-}
-
 func msgText(msg *proto.MsgRow) string {
 	if msg == nil {
 		return ""
 	}
 	return msg.Text
-}
-
-func msgState(msg *proto.MsgRow) *proto.CardState {
-	if msg == nil {
-		return nil
-	}
-	return msg.State
 }
 
 func cardStatus(state *proto.CardState) string {
@@ -409,31 +392,13 @@ func stateBy(state *proto.CardState) string {
 	return strVal(state.By)
 }
 
-func formatOptionalMsg(msg *proto.MsgRow) (string, error) {
-	if msg == nil {
-		return "", nil
-	}
-	return formatMsgContent(*msg)
-}
-
-func appendAttachedMsg(lines []string, msg *proto.MsgRow) (string, error) {
-	if msg != nil && msg.Kind != "task" {
-		extra, err := formatMsgContent(*msg)
-		if err != nil {
-			return "", err
-		}
-		lines = append(lines, extra)
-	}
-	return strings.Join(lines, "\n"), nil
-}
-
 func (c *turnCtx) buildMention(p parsedItem, _ bool) (itemBlock, int, error) {
 	callID, depth, err := parseCallInfo(p.msg)
 	if err != nil {
 		return itemBlock{}, 0, err
 	}
 	thread := itemThread(string(p.item.Task), p.msg)
-	auth := authorityLabel(c.isOwnerMember(msgBy(p.msg)))
+	auth := authorityLabel(c.mentionInstruct(p.msg, thread))
 	return itemBlock{why: "mention", whoPlace: c.msgWho(p.msg, thread), authority: auth, callID: callID, body: msgText(p.msg)}, depth, nil
 }
 
@@ -470,7 +435,7 @@ func (c *turnCtx) assignBody(task proto.TaskRow, msg *proto.MsgRow, first bool) 
 		return c.firstAssignBody(task, msg)
 	}
 	if msg != nil && msg.Kind != "task" {
-		return formatMsgContent(*msg)
+		return c.formatCarriedMsg(*msg)
 	}
 	return fmt.Sprintf("Task T-%d %q assigned to you. Continue the task.", task.Num, task.Title), nil
 }
@@ -484,7 +449,10 @@ func (c *turnCtx) firstAssignBody(task proto.TaskRow, msg *proto.MsgRow) (string
 	if err != nil {
 		return "", err
 	}
-	return appendAttachedMsg(lines, msg)
+	if msg != nil && msg.Kind == "task" {
+		msg = nil
+	}
+	return c.appendCarriedMsg(lines, msg)
 }
 
 func (c *turnCtx) taskStartLines(task proto.TaskRow) ([]string, error) {
@@ -582,21 +550,12 @@ func (c *turnCtx) reviewLines(task proto.TaskRow, commit string) ([]string, erro
 	return appendReviewPreset(lines, preset), nil
 }
 
-func (c *turnCtx) buildReviewed(p parsedItem, _ bool) (itemBlock, int, error) {
-	body, err := formatOptionalMsg(p.msg)
+func (c *turnCtx) buildCarried(p parsedItem, _ bool) (itemBlock, int, error) {
+	body, err := c.appendCarriedMsg(nil, p.msg)
 	if err != nil {
 		return itemBlock{}, 0, err
 	}
-	thread := itemThread(string(p.item.Task), p.msg)
-	return itemBlock{why: "reviewed", whoPlace: c.msgWho(p.msg, thread), authority: "instruction", body: body}, 0, nil
-}
-
-func (c *turnCtx) buildChecks(p parsedItem, _ bool) (itemBlock, int, error) {
-	body, err := formatOptionalMsg(p.msg)
-	if err != nil {
-		return itemBlock{}, 0, err
-	}
-	return itemBlock{why: "checks", authority: "instruction", body: body}, 0, nil
+	return itemBlock{why: p.item.Why, authority: "instruction", body: body}, 0, nil
 }
 
 func (c *turnCtx) buildResume(p parsedItem, _ bool) (itemBlock, int, error) {
@@ -605,15 +564,16 @@ func (c *turnCtx) buildResume(p parsedItem, _ bool) (itemBlock, int, error) {
 }
 
 func (c *turnCtx) buildDecided(p parsedItem, _ bool) (itemBlock, int, error) {
-	body, err := formatOptionalMsg(p.msg)
+	thread := itemThread(string(p.item.Task), p.msg)
+	auth := authorityLabel(c.takesPart(thread) || (p.msg != nil && p.msg.By == c.s.Member))
+	if p.msg == nil {
+		return itemBlock{why: "decided", authority: auth}, 0, nil
+	}
+	content, err := formatMsgContent(*p.msg)
 	if err != nil {
 		return itemBlock{}, 0, err
 	}
-	thread := itemThread(string(p.item.Task), p.msg)
-	state := msgState(p.msg)
-	auth := authorityLabel(thread != "" || c.isOwnerMember(stateBy(state)))
-	who := "from " + c.stateActorLabel(state) + " " + c.place(thread)
-	return itemBlock{why: "decided", whoPlace: who, authority: auth, body: body}, 0, nil
+	return itemBlock{why: "decided", authority: auth, body: c.formatCarriedDecision(*p.msg, content)}, 0, nil
 }
 
 func formatApprovalMsg(msg proto.MsgRow) (string, error) {
@@ -660,30 +620,29 @@ func decisionOptionLabel(options []proto.DecisionOption, id string) string {
 
 func (c *turnCtx) buildConfirmed(p parsedItem, _ bool) (itemBlock, int, error) {
 	if p.msg == nil {
-		return itemBlock{why: "confirmed", whoPlace: "in main", authority: "information"}, 0, nil
+		return itemBlock{why: "confirmed", authority: "information"}, 0, nil
 	}
-	verb, body, err := formatConfirmedBrief(*p.msg)
+	content, err := formatConfirmedBrief(*p.msg)
 	if err != nil {
 		return itemBlock{}, 0, err
 	}
-	who := fmt.Sprintf("from %s, %s %s in main", c.memberLabel(p.msg.By), verb, c.stateActorLabel(p.msg.State))
-	auth := authorityLabel(c.isOwnerMember(stateBy(p.msg.State)))
-	return itemBlock{why: "confirmed", whoPlace: who, authority: auth, body: body}, 0, nil
+	auth := authorityLabel(p.msg.By == c.s.Member)
+	return itemBlock{why: "confirmed", authority: auth, body: c.formatCarriedDecision(*p.msg, content)}, 0, nil
 }
 
-func formatConfirmedBrief(msg proto.MsgRow) (string, string, error) {
+func formatConfirmedBrief(msg proto.MsgRow) (string, error) {
 	var brief proto.BriefBody
 	if proto.Decode(msg.Body, &brief) != nil {
-		return "", "", &Error{"bad_request", "invalid brief body"}
+		return "", &Error{"bad_request", "invalid brief body"}
 	}
 	if cardStatus(msg.State) == "revise" {
 		body := fmt.Sprintf("Brief %q (id %s) sent back for revision.", brief.Title, msg.ID)
 		if note := strVal(msg.State.Note); note != "" {
 			body += "\n" + note
 		}
-		return "sent back by", body, nil
+		return body, nil
 	}
-	return "confirmed by", fmt.Sprintf("Brief %q (id %s) confirmed.", brief.Title, msg.ID), nil
+	return fmt.Sprintf("Brief %q (id %s) confirmed.", brief.Title, msg.ID), nil
 }
 
 func (c *turnCtx) buildNotice(p parsedItem, _ bool) (itemBlock, int, error) {
@@ -692,7 +651,7 @@ func (c *turnCtx) buildNotice(p parsedItem, _ bool) (itemBlock, int, error) {
 	if err != nil {
 		return itemBlock{}, 0, err
 	}
-	return itemBlock{why: "notice", whoPlace: c.msgWho(p.msg, thread), authority: "information", body: body}, 0, nil
+	return itemBlock{why: "notice", authority: "information", body: body}, 0, nil
 }
 
 func (c *turnCtx) noticeBody(code, detail, thread string, msg *proto.MsgRow) (string, error) {
@@ -700,7 +659,7 @@ func (c *turnCtx) noticeBody(code, detail, thread string, msg *proto.MsgRow) (st
 	if detail != "" {
 		lines = append(lines, detail)
 	}
-	return appendAttachedMsg(lines, msg)
+	return c.appendCarriedMsg(lines, msg)
 }
 
 func (c *turnCtx) noticeHeadline(code, thread string) string {
@@ -857,6 +816,7 @@ func (c *turnCtx) formatHistory(msgs []proto.MsgRow) ([]string, error) {
 		return nil, nil
 	}
 	lines := []string{"Recent messages:"}
+	c.confirmations = append(c.confirmations, msgs...)
 	for _, m := range msgs {
 		entry, err := c.formatHistoryEntry(m)
 		if err != nil {
@@ -868,13 +828,26 @@ func (c *turnCtx) formatHistory(msgs []proto.MsgRow) ([]string, error) {
 }
 
 func (c *turnCtx) formatHistoryEntry(m proto.MsgRow) (string, error) {
-	content, err := formatMsgContent(m)
+	content, err := historyContent(m)
 	if err != nil {
 		return "", err
 	}
-	thread := itemThread("", &m)
-	auth := authorityLabel(c.isOwnerMember(m.By))
-	return fmt.Sprintf("-- %s · %s · %s\n%s", m.Kind, c.msgWho(&m, thread), auth, content), nil
+	if resolvedOutcome(m) {
+		return "-- " + m.Kind + " · " + strings.TrimPrefix(c.formatCarriedDecision(m, content), "-- "), nil
+	}
+	instruct, err := c.msgInstruct(m)
+	return fmt.Sprintf("-- %s · %s · %s\n%s", m.Kind, c.fromIn(m.By, strVal(m.Thread)), authorityLabel(instruct), content), err
+}
+
+func historyContent(m proto.MsgRow) (string, error) {
+	if m.Kind == "brief" && resolvedOutcome(m) {
+		return formatConfirmedBrief(m)
+	}
+	return formatMsgContent(m)
+}
+
+func resolvedOutcome(m proto.MsgRow) bool {
+	return slices.Contains([]string{"approved", "denied", "decided", "confirmed", "revise"}, cardStatus(m.State))
 }
 
 func (c *turnCtx) fetchPage(id, before int64, limit int) proto.FetchPage {

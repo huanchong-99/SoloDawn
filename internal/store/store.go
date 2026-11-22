@@ -41,7 +41,7 @@ func initialize(db *sql.DB) error {
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		return err
 	}
-	return migrate(db, []string{schema, processedOffers})
+	return migrate(db, []string{schema, processedOffers, kbSchema})
 }
 
 func migrate(db *sql.DB, migrations []string) error {
@@ -55,8 +55,10 @@ func migrate(db *sql.DB, migrations []string) error {
 	for _, migration := range migrations[version:] {
 		version++
 		err := transaction(db, func(tx *Tx) error {
-			_, err := tx.Exec(migration + fmt.Sprintf("; PRAGMA user_version=%d", version))
-			return err
+			if _, err := tx.Exec(migration + fmt.Sprintf("; PRAGMA user_version=%d", version)); err != nil {
+				return err
+			}
+			return afterMigration(tx, migration)
 		})
 		if err != nil {
 			return err
