@@ -293,12 +293,15 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           const figures = [...section.querySelectorAll('figure')];
           expect(figures.map((f) => f.querySelector('figcaption')?.textContent)).toEqual([
             'row-msg-call-answered',
+            'row-msg-call-denied',
             'row-msg-call-waiting',
           ]);
           expect(figures[0].querySelector('.reply .text')?.textContent).toContain(
             'Use the path change event.',
           );
+          // A denied call draws as waiting until U2-2 (issues.md).
           expect(figures[1].querySelector('.st')?.getAttribute('data-st')).toBe('waiting');
+          expect(figures[2].querySelector('.st')?.getAttribute('data-st')).toBe('waiting');
         },
       );
     },

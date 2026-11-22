@@ -7,11 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -38,16 +36,11 @@ const (
 )
 
 type m4Client struct {
-	key      identity.Key
-	frames   homeFrameClient
-	conn     *home.Conn
-	nextReq  int64
-	group    proto.GroupRow
-	aiByName map[string]proto.AIMemberRow
-	ownerMem string
-	tasks    map[string]proto.TaskRow
-	msgs     map[string]proto.MsgRow
-	msgOrder []string
+	key     identity.Key
+	frames  homeFrameClient
+	conn    *home.Conn
+	nextReq int64
+	homeView
 }
 
 func attachM4Client(loop *home.Loop, cleanup func(func()), key identity.Key) *m4Client {
@@ -55,9 +48,7 @@ func attachM4Client(loop *home.Loop, cleanup func(func()), key identity.Key) *m4
 		key: key,
 		// Single reader: drainUntil in m4Client.
 		frames:   newHomeFrameClient(256),
-		aiByName: map[string]proto.AIMemberRow{},
-		tasks:    map[string]proto.TaskRow{},
-		msgs:     map[string]proto.MsgRow{},
+		homeView: newHomeView(),
 	}
 	c.conn = loop.Attach(key.ID(), c.frames)
 	cleanup(func() { loop.Detach(c.conn) })
@@ -71,7 +62,7 @@ func (c *m4Client) drainUntil(timeout time.Duration, stop func() bool, onFrame f
 	for !stop() {
 		select {
 		case raw := <-c.frames.ch:
-			c.applyFrame(raw)
+			applyRowsFrame(&c.homeView, raw)
 			if onFrame != nil {
 				onFrame(raw)
 			}
@@ -80,70 +71,6 @@ func (c *m4Client) drainUntil(timeout time.Duration, stop func() bool, onFrame f
 		}
 	}
 	return nil
-}
-
-func (c *m4Client) applyFrame(raw json.RawMessage) {
-	var batch proto.Rows
-	if proto.Decode(raw, &batch) != nil || batch.Type != "rows" {
-		return
-	}
-	for _, elem := range batch.Rows {
-		c.recordRow(elem)
-	}
-}
-
-func (c *m4Client) recordRow(elem json.RawMessage) {
-	var hdr proto.RowHeader
-	if proto.Decode(elem, &hdr) != nil {
-		return
-	}
-	switch hdr.Type {
-	case "group":
-		c.recordGroup(elem)
-	case "member":
-		c.recordMember(elem)
-	case "task":
-		c.recordTask(elem)
-	case "msg":
-		c.recordMsg(elem)
-	}
-}
-
-func (c *m4Client) recordGroup(elem json.RawMessage) {
-	var grp proto.GroupRow
-	if proto.Decode(elem, &grp) == nil {
-		c.group = grp
-	}
-}
-
-func (c *m4Client) recordMember(elem json.RawMessage) {
-	var ai proto.AIMemberRow
-	if proto.Decode(elem, &ai) == nil && ai.Kind == "ai" {
-		c.aiByName[ai.Name] = ai
-		return
-	}
-	var hum proto.HumanMemberRow
-	if proto.Decode(elem, &hum) == nil && hum.Kind == "human" {
-		c.ownerMem = hum.ID
-	}
-}
-
-func (c *m4Client) recordTask(elem json.RawMessage) {
-	var t proto.TaskRow
-	if proto.Decode(elem, &t) == nil {
-		c.tasks[t.ID] = t
-	}
-}
-
-func (c *m4Client) recordMsg(elem json.RawMessage) {
-	var m proto.MsgRow
-	if proto.Decode(elem, &m) != nil {
-		return
-	}
-	if _, seen := c.msgs[m.ID]; !seen {
-		c.msgOrder = append(c.msgOrder, m.ID)
-	}
-	c.msgs[m.ID] = m
 }
 
 func (c *m4Client) syncGroup(loop *home.Loop, gid string) error {
@@ -182,7 +109,7 @@ func (c *m4Client) awaitReply(reqID int64) (string, error) {
 	var done bool
 	var code string
 	onFrame := func(raw json.RawMessage) {
-		matched, errCode := decodeM4ReplyCode(raw, reqID)
+		matched, errCode := decodeReplyCode(raw, reqID)
 		if matched {
 			done, code = true, errCode
 		}
@@ -192,15 +119,6 @@ func (c *m4Client) awaitReply(reqID int64) (string, error) {
 		return "", err
 	}
 	return code, nil
-}
-
-func decodeM4ReplyCode(raw json.RawMessage, reqID int64) (bool, string) {
-	matched, err := decodeReplyMatch(raw, reqID)
-	if !matched || err == nil {
-		return matched, ""
-	}
-	code, _, _ := strings.Cut(err.Error(), ":")
-	return true, code
 }
 
 type m4World struct {
@@ -228,8 +146,7 @@ type m4World struct {
 	task2AppID    string
 	seenCards     map[string]bool
 	waitElapsed   time.Duration
-	strangerCode  string
-	selfAICode    string
+	pauseStarted  time.Time
 }
 
 func m4Steps(sc *godog.ScenarioContext, f fixtures) {
@@ -239,7 +156,7 @@ func m4Steps(sc *godog.ScenarioContext, f fixtures) {
 	}
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		if w.activeHost != nil {
-			w.waitHostDormant(w.activeHost)
+			waitHostDormant(w.activeHost)
 		}
 		return ctx, nil
 	})
@@ -249,6 +166,7 @@ func m4Steps(sc *godog.ScenarioContext, f fixtures) {
 	registerM4ApprovalSteps(sc, w)
 	registerM4DecisionSteps(sc, w)
 	registerM4LifecycleSteps(sc, w)
+	registerM4PauseSteps(sc, w)
 }
 
 func registerM4SetupSteps(sc *godog.ScenarioContext, w *m4World) {
@@ -257,14 +175,11 @@ func registerM4SetupSteps(sc *godog.ScenarioContext, w *m4World) {
 	})
 	sc.Step(`^an M4 project group with a (\d+)-second approval wait, a second browser and configured AI "([^"]+)"$`, w.givenSingleAIWaitGroup)
 	sc.Step(`^an M4 project group with a (\d+)-second approval wait, a second browser and configured AIs "([^"]+)" and "([^"]+)"$`, w.givenTwoAIGroup)
-	sc.Step(`^an M4 project group with a second browser and configured AI "([^"]+)"$`, func(aiName string) error {
-		return w.givenSingleAIWaitGroup(0, aiName)
-	})
 }
 
 func registerM4ApprovalSteps(sc *godog.ScenarioContext, w *m4World) {
-	sc.Step(`^an M4 task for "([^"]+)" asks permission to run "([^"]+)" with why "([^"]+)"$`, w.whenTaskAsksAllow)
-	sc.Step(`^an M4 task for "([^"]+)" asks command approval for "([^"]+)" with why "([^"]+)"$`, w.whenCodexTaskAsksAllow)
+	sc.Step(`^an M4 task for "([^"]+)" asks permission to run "([^"]+)" with why "([^"]+)" before posting "([^"]+)"$`, w.whenTaskAsksAllow)
+	sc.Step(`^an M4 task for "([^"]+)" asks command approval for "([^"]+)" with why "([^"]+)" before posting "([^"]+)"$`, w.whenCodexTaskAsksAllow)
 	sc.Step(`^an M4 task for "([^"]+)" asks permission to run "([^"]+)" with why "([^"]+)" and expects owner denial$`, w.whenTaskAsksDeny)
 	sc.Step(`^an M4 task for "([^"]+)" asks file approval on "([^"]+)" diff "([^"]+)" with why "([^"]+)" and expects owner denial$`, w.whenCodexFileAsksDeny)
 	sc.Step(`^the M4 (first|second) browser sees a pending approval card on "([^"]+)"'s task for "([^"]+)" command "([^"]+)" with why "([^"]+)"$`, w.thenBrowserSeesApprovalCard)
@@ -278,7 +193,7 @@ func registerM4DecisionSteps(sc *godog.ScenarioContext, w *m4World) {
 	sc.Step(`^an M4 task for "([^"]+)" asks two four-option AskUserQuestion prompts and posts "([^"]+)"$`, w.whenClaudeAsksTwoQuestions)
 	sc.Step(`^the M4 browsers answer "([^"]+)"'s first decision card with option "([^"]+)" and note "([^"]+)" and second with free text "([^"]+)"$`, w.thenAnswerClaudeQuestions)
 	sc.Step(`^"([^"]+)" posts "([^"]+)" in the M4 group$`, w.thenAIPostsAndSettles)
-	sc.Step(`^the M4 owner mentions "([^"]+)" in the main line and "([^"]+)" asks two four-option requestUserInput prompts$`, w.whenCodexMainLineQuestions)
+	sc.Step(`^the M4 owner mentions "([^"]+)" in the main line and it asks two four-option requestUserInput prompts$`, w.whenCodexMainLineQuestions)
 	sc.Step(`^the M4 browsers answer "([^"]+)"'s main-line decision cards with option "([^"]+)" and with free text "([^"]+)"$`, w.thenAnswerCodexQuestions)
 	sc.Step(`^a second M4 task for "([^"]+)" raises a four-option request_decision card and ends its turn$`, w.whenTaskRaisesRequestDecision)
 	sc.Step(`^the M4 second browser chooses option "([^"]+)" with note "([^"]+)" and wakes "([^"]+)" to post "([^"]+)"$`, w.thenChooseAndWakeRequestDecision)
@@ -290,9 +205,9 @@ func registerM4LifecycleSteps(sc *godog.ScenarioContext, w *m4World) {
 	sc.Step(`^the M4 host restarts on the node store$`, w.restartHost)
 	sc.Step(`^"([^"]+)" is scripted on resume to retry "([^"]+)" and then ask to run "([^"]+)" before posting "([^"]+)"$`, w.scriptResumeRetryAndDifferentCmd)
 	sc.Step(`^the M4 second browser approves the first card after the restart$`, w.whenApproveFirstAfterRestart)
-	sc.Step(`^the M4 browsers see no second card for "([^"]+)" and see a new pending approval card for "([^"]+)"$`, w.thenNoRetryCardAndNewCard)
+	sc.Step(`^the M4 browsers see no second card for "([^"]+)" and see a new pending approval card from "([^"]+)" for "([^"]+)"$`, w.thenNoRetryCardAndNewCard)
 	sc.Step(`^the M4 second browser approves that new pending card$`, func() error {
-		return w.actOnCard(w.b2, w.currentCard.ID, "approve", "", "")
+		return w.actOnCard(w.b2, w.currentCard.ID, "approve", "", "", "")
 	})
 	sc.Step(`^"([^"]+)" posts "([^"]+)" in the M4 group after 2 resumed starts of the same CLI session and 2 total approval cards$`, w.thenResumedRetryCompletes)
 	sc.Step(`^an M4 task for "([^"]+)" times out waiting for approval on "([^"]+)"$`, w.whenTaskTimesOutShort)
@@ -301,11 +216,19 @@ func registerM4LifecycleSteps(sc *godog.ScenarioContext, w *m4World) {
 	sc.Step(`^a second M4 task for "([^"]+)" leaves a pending decision card and a timed-out pending approval card on "([^"]+)"$`, w.whenSecondTaskLeavesTwoPendingCards)
 	sc.Step(`^the M4 owner cancels that second task$`, w.whenOwnerCancelsSecondTask)
 	sc.Step(`^both pending M4 cards on the second task have status "([^"]+)" and late actions on them fail with "([^"]+)"$`, w.thenCancelledCardsExpiredAndRefused)
-	sc.Step(`^an unenrolled device and "([^"]+)" itself each try to approve that M4 card$`, w.whenUnauthorizedApproveAttempts)
-	sc.Step(`^the M4 home refuses the unenrolled device with "([^"]+)" and refuses "([^"]+)" with "([^"]+)" while the card stays pending$`, w.thenUnauthorizedAttemptsRefused)
-	sc.Step(`^a late deny from the M4 first browser on the approved card fails with "([^"]+)"$`, func(wantCode string) error {
-		return w.actExpectCode(w.b1, w.currentCard.ID, "deny", "", "", wantCode)
+}
+
+func registerM4PauseSteps(sc *godog.ScenarioContext, w *m4World) {
+	sc.Step(`^"([^"]+)" starts a main-line turn posting "([^"]+)" and is scripted to post "([^"]+)" on its next turn$`, w.whenAIStartsPausableTurn)
+	sc.Step(`^the M4 owner pauses the group$`, w.whenOwnerPausesGroup)
+	sc.Step(`^"([^"]+)"'s running turn is interrupted within 2 seconds with reason "([^"]+)" and system message "([^"]+)"$`, w.thenTurnInterruptedWithinTwoSeconds)
+	sc.Step(`^the M4 owner mentions "([^"]+)" with "([^"]+)"$`, w.postOwnerMention)
+	sc.Step(`^the (\d+) M4 mention items stay on the home while the group is paused$`, func(want int) error {
+		return awaitHomeInboxCount(w.node().Store, want)
 	})
+	sc.Step(`^the M4 owner resumes the group$`, w.whenOwnerResumesGroup)
+	sc.Step(`^"([^"]+)" posts "([^"]+)" after system message "([^"]+)" and the M4 home inbox is empty$`, w.thenResumedGroupDeliversMentions)
+	sc.Step(`^"([^"]+)"'s approval-waiting task was not woken by the group resume$`, w.thenApprovalTaskStayedAsleep)
 }
 
 func (w *m4World) node() *nodetest.Node {
@@ -377,30 +300,11 @@ func (w *m4World) startNode() error {
 }
 
 func (w *m4World) attachMCP(h *host.Host) error {
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
 	w.mcpSeq++
 	dir := filepath.Join(w.node().Dir, fmt.Sprintf("mcp-%d", w.mcpSeq))
-	local, err := node.ListenLocal(dir)
-	if err != nil {
-		return err
-	}
-	sockPath := filepath.Join(dir, "sock")
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go serveM3MCP(ctx, local, h, &wg)
-	stop := sync.OnceFunc(func() {
-		cancel()
-		local.Close()
-		wg.Wait()
-	})
-	registerBothCleanups(w.f.t, w.cleanup, stop)
+	_, stop, err := attachMCPSocket(w.f.t, w.cleanup, h, dir)
 	w.closeMCP = stop
-	h.Shim = []string{exe, "-test.run=^TestM3MCPShim$", "--", sockPath}
-	return nil
+	return err
 }
 
 func (w *m4World) createGroupAndSync() error {
@@ -455,41 +359,15 @@ func m4HostHasWaitLimit(h *host.Host, gid string, want int) bool {
 		return false
 	}
 	var grp proto.GroupRow
-	return proto.Decode(raw, &grp) == nil && (want == 0 || grp.Limits.ApprovalWaitS == want)
+	return proto.Decode(raw, &grp) == nil && grp.Limits.ApprovalWaitS == want
 }
 
 func (w *m4World) joinAI(aiName, agent string) error {
-	ctx := context.Background()
 	n := w.node()
-	if _, err := w.activeHost.Agents(ctx); err != nil {
-		return err
-	}
-	if err := w.callSurface("agent.set", proto.AgentSet{
-		HostCommand: w.hostCmd("agent.set"), Agent: agent, Account: "personal",
-	}); err != nil {
-		return err
-	}
-	if err := w.callSurface("host.join", proto.HostJoin{
-		HostCommand: w.hostCmd("host.join"), Group: w.groupID, Home: n.Key.ID(), Agent: agent, Name: aiName,
-	}); err != nil {
+	if err := configureHostAI(w.activeHost, w.activeLink, &w.ids, w.cluster.Owner.ID(), n.Key.ID(), w.groupID, aiName, agent); err != nil {
 		return err
 	}
 	return w.awaitAISynced(aiName)
-}
-
-func (w *m4World) hostCmd(typ string) proto.HostCommand {
-	return proto.HostCommand{
-		Type: typ, Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), To: w.node().Key.ID(),
-	}
-}
-
-func (w *m4World) callSurface(name string, payload any) error {
-	raw, err := marshalNoEscape(payload)
-	if err != nil {
-		return err
-	}
-	_, err = host.Surface[name](context.Background(), w.activeHost, w.activeLink, w.cluster.Owner.ID(), raw)
-	return err
 }
 
 func (w *m4World) awaitAISynced(aiName string) error {
@@ -512,18 +390,18 @@ func (w *m4World) sendOK(b *m4Client, payload any) error {
 	return nil
 }
 
-func (w *m4World) writeScript(vendor string, doc map[string]any) error {
-	w.scriptSeq++
-	path := filepath.Join(w.root, fmt.Sprintf("%s-%d.json", vendor, w.scriptSeq))
-	data, err := marshalNoEscape(doc)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return err
-	}
-	w.cluster.SetScript(w.tb, vendor, path)
-	return nil
+func (w *m4World) setScript(vendor string, doc map[string]any) error {
+	return writeClusterScript(w.tb, w.cluster, w.root, &w.scriptSeq, vendor, doc)
+}
+
+func (w *m4World) waitLogs(prefix string, want int) ([]string, error) {
+	return waitFakeCLILogs(w.cluster.LogPath, prefix, want, 30*time.Second)
+}
+
+func (w *m4World) settleDormant() error {
+	waitHostDormant(w.activeHost)
+	settled := func() bool { return allMembersSettled(w.activeHost, w.b1.aiByName) }
+	return w.b1.drainUntil(5*time.Second, settled, nil)
 }
 
 func (w *m4World) startTaskFor(aiName, title, plan string) (string, error) {
@@ -611,6 +489,22 @@ func m4CodexTurnDoc(session, turnID string, body []map[string]any, postID int, p
 	return map[string]any{"session": session, "steps": steps}
 }
 
+func m4CodexInterruptTurnSteps(turnID string, postID int, postText string) []map[string]any {
+	steps := []map[string]any{
+		{"dir": "stdin", "msg": map[string]any{"method": "turn/start", "params": map[string]any{"threadId": "$session"}}},
+		{"dir": "stdout", "msg": map[string]any{"id": "$id", "result": map[string]any{"turn": map[string]any{"id": turnID, "status": "inProgress"}}}},
+	}
+	steps = append(steps, mcpPostSteps(postID, postText)...)
+	return append(steps,
+		map[string]any{"dir": "stdin", "msg": map[string]any{"method": "turn/interrupt", "params": map[string]any{"threadId": "$session", "turnId": turnID}}},
+		map[string]any{"dir": "stdout", "msg": map[string]any{"id": "$id", "result": map[string]any{}}},
+		map[string]any{"dir": "stdout", "msg": map[string]any{
+			"method": "turn/completed",
+			"params": map[string]any{"threadId": "$session", "turn": map[string]any{"id": turnID, "status": "interrupted", "error": nil}},
+		}},
+	)
+}
+
 func m4CodexCmdAskSteps(rpcID int, cmd, reason, decision string) []map[string]any {
 	return []map[string]any{
 		{"dir": "stdout", "msg": map[string]any{
@@ -673,13 +567,9 @@ func m4CodexQuestionSteps(rpcID int, qID, header, question string, opts []map[st
 	}
 }
 
-func (w *m4World) whenTaskAsksAllow(aiName, cmd, why string) error {
-	postText := "Claude installed @playwright/test."
-	if strings.Contains(cmd, "sharp") {
-		postText = "Sharp installed."
-	}
+func (w *m4World) whenTaskAsksAllow(aiName, cmd, why, postText string) error {
 	body := m4ClaudeBashAskSteps(1, "toolu_allow", cmd, why, host.ApprovalResult{Behavior: "allow"})
-	if err := w.writeScript("claude", m4ClaudeTurnDoc(body, 2, postText)); err != nil {
+	if err := w.setScript(m4VendorOf(aiName), m4ClaudeTurnDoc(body, 2, postText)); err != nil {
 		return err
 	}
 	tid, err := w.startTaskFor(aiName, "Install dependency", "Add test dependency")
@@ -687,9 +577,9 @@ func (w *m4World) whenTaskAsksAllow(aiName, cmd, why string) error {
 	return err
 }
 
-func (w *m4World) whenCodexTaskAsksAllow(aiName, cmd, why string) error {
+func (w *m4World) whenCodexTaskAsksAllow(aiName, cmd, why, postText string) error {
 	body := m4CodexCmdAskSteps(91, cmd, why, "accept")
-	if err := w.writeScript("codex", m4CodexTurnDoc(m4CodexThread, "turn-1", body, 1, "Codex installed chromium.")); err != nil {
+	if err := w.setScript(m4VendorOf(aiName), m4CodexTurnDoc(m4CodexThread, "turn-1", body, 1, postText)); err != nil {
 		return err
 	}
 	tid, err := w.startTaskFor(aiName, "Install browser", "Add browser binary")
@@ -700,7 +590,7 @@ func (w *m4World) whenCodexTaskAsksAllow(aiName, cmd, why string) error {
 func (w *m4World) whenTaskAsksDeny(aiName, cmd, why string) error {
 	deny := host.ApprovalResult{Behavior: "deny", Message: m4OwnerDenyText}
 	body := m4ClaudeBashAskSteps(1, "toolu_deny", cmd, why, deny)
-	if err := w.writeScript("claude", m4ClaudeTurnDoc(body, 2, "Stopped without publishing.")); err != nil {
+	if err := w.setScript(m4VendorOf(aiName), m4ClaudeTurnDoc(body, 2, "Stopped without publishing.")); err != nil {
 		return err
 	}
 	tid, err := w.startTaskFor(aiName, "Publish release", "Run npm publish")
@@ -715,7 +605,7 @@ func (w *m4World) whenTaskAsksDeny(aiName, cmd, why string) error {
 
 func (w *m4World) whenCodexFileAsksDeny(aiName, path, diff, why string) error {
 	body := m4CodexFileAskSteps(92, "fc-prod", path, diff, why, "decline")
-	if err := w.writeScript("codex", m4CodexTurnDoc(m4CodexThread, "turn-1", body, 1, "Stopped without editing config.")); err != nil {
+	if err := w.setScript(m4VendorOf(aiName), m4CodexTurnDoc(m4CodexThread, "turn-1", body, 1, "Stopped without editing config.")); err != nil {
 		return err
 	}
 	tid, err := w.startTaskFor(aiName, "Edit config", "Touch config file")
@@ -819,18 +709,7 @@ func (w *m4World) awaitTaskCleared(b *m4Client, taskID string) error {
 	return b.drainUntil(5*time.Second, cleared, nil)
 }
 
-func (w *m4World) actOnCard(b *m4Client, cardID, action, arg, text string) error {
-	cmd := proto.Act{
-		HomeCommand: proto.HomeCommand{Type: "act", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), Group: w.groupID},
-		Msg:         proto.ID(cardID),
-		Action:      action,
-		Arg:         arg,
-		Text:        text,
-	}
-	return w.sendOK(b, cmd)
-}
-
-func (w *m4World) actExpectCode(b *m4Client, cardID, action, arg, text, wantCode string) error {
+func (w *m4World) actOnCard(b *m4Client, cardID, action, arg, text, wantCode string) error {
 	cmd := proto.Act{
 		HomeCommand: proto.HomeCommand{Type: "act", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), Group: w.groupID},
 		Msg:         proto.ID(cardID),
@@ -849,14 +728,14 @@ func (w *m4World) actExpectCode(b *m4Client, cardID, action, arg, text, wantCode
 }
 
 func (w *m4World) whenSecondApprovesAndPosts(aiName, wantPost string) error {
-	if err := w.actOnCard(w.b2, w.currentCard.ID, "approve", "", ""); err != nil {
+	if err := w.actOnCard(w.b2, w.currentCard.ID, "approve", "", "", ""); err != nil {
 		return err
 	}
 	return w.thenAIPostsAndSettles(aiName, wantPost)
 }
 
 func (w *m4World) whenBrowserDeniesAndPosts(which, aiName, wantPost string) error {
-	if err := w.actOnCard(w.browserOf(which), w.currentCard.ID, "deny", "", ""); err != nil {
+	if err := w.actOnCard(w.browserOf(which), w.currentCard.ID, "deny", "", "", ""); err != nil {
 		return err
 	}
 	return w.thenAIPostsAndSettles(aiName, wantPost)
@@ -943,7 +822,7 @@ func (w *m4World) whenClaudeAsksTwoQuestions(aiName, postText string) error {
 		m4AskUserSteps(1, "toolu_q1", "Database", m4Q1Text, opts1, "SQLite", "Enable WAL mode"),
 		m4AskUserSteps(2, "toolu_q2", "Migrations", m4Q2Text, opts2, "Embed numbered SQL files", ""),
 	)
-	if err := w.writeScript("claude", m4ClaudeTurnDoc(body, 3, postText)); err != nil {
+	if err := w.setScript(m4VendorOf(aiName), m4ClaudeTurnDoc(body, 3, postText)); err != nil {
 		return err
 	}
 	tid, err := w.startTaskFor(aiName, "Choose storage", "Pick storage and migrations")
@@ -970,7 +849,7 @@ func (w *m4World) answerTaskDecision(b *m4Client, aiID, wantCtx, optID, text str
 	if err := w.awaitTaskWait(b, w.currentTaskID, "decision", card.ID); err != nil {
 		return err
 	}
-	return w.actOnCard(b, card.ID, "choose", optID, text)
+	return w.actOnCard(b, card.ID, "choose", optID, text, "")
 }
 
 func checkDecisionCardBody(card proto.MsgRow, wantTask, wantCtx string, wantOpts int, wantRec string) error {
@@ -1013,20 +892,24 @@ func checkDecisionMeta(body proto.DecisionBody, wantCtx, wantRec string) error {
 	return nil
 }
 
-func (w *m4World) whenCodexMainLineQuestions(aiName, _ string) error {
+func (w *m4World) whenCodexMainLineQuestions(aiName string) error {
 	opts1 := m4ColonOptions("JSONL:Lines", "CBOR:Binary", "Protobuf:Typed", "MsgPack:Compact")
 	opts2 := m4ColonOptions("none:Raw", "gzip:Standard", "lz4:Fast", "snappy:Framed")
 	body := slices.Concat(
 		m4CodexQuestionSteps(101, "q_wire", "Framing", "Which framing?", opts1, []string{"MsgPack"}),
 		m4CodexQuestionSteps(102, "q_dict", "", "Custom compression?", opts2, []string{"zstd dictionary"}),
 	)
-	if err := w.writeScript("codex", m4CodexTurnDoc(m4CodexThread, "turn-q", body, 1, "Codex recorded MsgPack and zstd.")); err != nil {
+	if err := w.setScript(m4VendorOf(aiName), m4CodexTurnDoc(m4CodexThread, "turn-q", body, 1, "Codex recorded MsgPack and zstd.")); err != nil {
 		return err
 	}
+	return w.postOwnerMention(aiName, "@"+aiName+" check framing")
+}
+
+func (w *m4World) postOwnerMention(aiName, text string) error {
 	aiID := w.b1.aiByName[aiName].ID
 	post := proto.Post[proto.EmptyBody]{
 		HomeCommand: proto.HomeCommand{Type: "post", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), Group: w.groupID},
-		Kind:        "text", Text: "@" + aiName + " check framing", Mentions: []proto.ID{proto.ID(aiID)}, Body: proto.EmptyBody{},
+		Kind:        "text", Text: text, Mentions: []proto.ID{proto.ID(aiID)}, Body: proto.EmptyBody{},
 	}
 	return w.sendOK(w.b1, post)
 }
@@ -1040,7 +923,7 @@ func (w *m4World) thenAnswerCodexQuestions(aiName, optID, customText string) err
 	if err := checkDecisionCardBody(card1, "", "Framing", 4, ""); err != nil {
 		return err
 	}
-	if err := w.actOnCard(w.b2, card1.ID, "choose", optID, ""); err != nil {
+	if err := w.actOnCard(w.b2, card1.ID, "choose", optID, "", ""); err != nil {
 		return err
 	}
 	card2, err := w.waitPendingCard(w.b1, "decision", aiID)
@@ -1050,7 +933,7 @@ func (w *m4World) thenAnswerCodexQuestions(aiName, optID, customText string) err
 	if err := checkDecisionCardBody(card2, "", "", 4, ""); err != nil {
 		return err
 	}
-	return w.actOnCard(w.b1, card2.ID, "choose", "", customText)
+	return w.actOnCard(w.b1, card2.ID, "choose", "", customText, "")
 }
 
 func (w *m4World) whenTaskRaisesRequestDecision(aiName string) error {
@@ -1064,7 +947,7 @@ func (w *m4World) whenTaskRaisesRequestDecision(aiName string) error {
 		},
 	}
 	body := m4GenericToolCall(1, "request_decision", reqArgs)
-	if err := w.writeScript("claude", m4ClaudeTurnDoc(body, 0, "")); err != nil {
+	if err := w.setScript(m4VendorOf(aiName), m4ClaudeTurnDoc(body, 0, "")); err != nil {
 		return err
 	}
 	tid, err := w.startTaskFor(aiName, "Badge layout", "Choose badge placement")
@@ -1094,17 +977,17 @@ func (w *m4World) awaitDecisionAndTurnExit(aiName, taskID, wantCtx, wantRec stri
 	if err := checkDecisionCardBody(card, taskID, wantCtx, 4, wantRec); err != nil {
 		return err
 	}
-	if _, err := w.waitLogLines("exit claude ", wantExits); err != nil {
+	if _, err := w.waitLogs("exit "+m4VendorOf(aiName)+" ", wantExits); err != nil {
 		return err
 	}
 	return w.settleDormant()
 }
 
 func (w *m4World) thenChooseAndWakeRequestDecision(optID, note, aiName, wantPost string) error {
-	if err := w.writeScript("claude", m4ClaudeTurnDoc(nil, 1, wantPost)); err != nil {
+	if err := w.setScript(m4VendorOf(aiName), m4ClaudeTurnDoc(nil, 1, wantPost)); err != nil {
 		return err
 	}
-	if err := w.actOnCard(w.b2, w.currentCard.ID, "choose", optID, note); err != nil {
+	if err := w.actOnCard(w.b2, w.currentCard.ID, "choose", optID, note, ""); err != nil {
 		return err
 	}
 	if err := w.thenAIPostsAndSettles(aiName, wantPost); err != nil {
@@ -1113,78 +996,23 @@ func (w *m4World) thenChooseAndWakeRequestDecision(optID, note, aiName, wantPost
 	return w.awaitTaskCleared(w.b1, w.currentTaskID)
 }
 
-func (w *m4World) thenAIPostsAndSettles(aiName, wantPost string) error {
+func (w *m4World) awaitAIPost(aiName, wantPost string, timeout time.Duration) error {
 	aiID := w.b1.aiByName[aiName].ID
-	hasPost := func() bool { return clientHasMsgFrom(w.b1, aiID, wantPost) }
-	if err := w.b1.drainUntil(10*time.Second, hasPost, nil); err != nil {
+	hasPost := func() bool { return viewHasMsgFrom(&w.b1.homeView, aiID, wantPost) }
+	return w.b1.drainUntil(timeout, hasPost, nil)
+}
+
+func (w *m4World) thenAIPostsAndSettles(aiName, wantPost string) error {
+	if err := w.awaitAIPost(aiName, wantPost, 10*time.Second); err != nil {
 		return err
 	}
 	return w.settleDormant()
 }
 
-func clientHasMsgFrom(b *m4Client, by, want string) bool {
-	for _, m := range b.msgs {
-		if m.By == by && m.Text == want {
-			return true
-		}
-	}
-	return false
-}
-
-func (w *m4World) waitHostDormant(h *host.Host) {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if !hasNonDormant(h) {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-}
-
-func (w *m4World) settleDormant() error {
-	w.waitHostDormant(w.activeHost)
-	settled := func() bool { return w.allMembersSettled(w.b1) }
-	return w.b1.drainUntil(5*time.Second, settled, nil)
-}
-
-func (w *m4World) allMembersSettled(b *m4Client) bool {
-	for _, ai := range b.aiByName {
-		if !isSettledMemberState(ai.State) {
-			return false
-		}
-	}
-	return !hasNonDormant(w.activeHost)
-}
-
-func (w *m4World) waitLogLines(prefix string, want int) ([]string, error) {
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if got := w.matchingLogs(prefix); len(got) >= want {
-			return got, nil
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return nil, fmt.Errorf("timed out waiting for %d %q log lines", want, prefix)
-}
-
-func (w *m4World) matchingLogs(prefix string) []string {
-	data, err := os.ReadFile(w.cluster.LogPath)
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-		if strings.HasPrefix(line, prefix) {
-			out = append(out, line)
-		}
-	}
-	return out
-}
-
 func (w *m4World) whenTaskWaitsTwentySeconds(aiName, cmd, why string) error {
 	timeoutDeny := host.ApprovalResult{Behavior: "deny", Message: m4TimeoutText}
 	body := m4ClaudeBashAskSteps(1, "toolu_wait20", cmd, why, timeoutDeny)
-	if err := w.writeScript("claude", m4ClaudeTurnDoc(body, 0, "")); err != nil {
+	if err := w.setScript(m4VendorOf(aiName), m4ClaudeTurnDoc(body, 0, "")); err != nil {
 		return err
 	}
 	started := time.Now()
@@ -1198,16 +1026,19 @@ func (w *m4World) whenTaskWaitsTwentySeconds(aiName, cmd, why string) error {
 		return err
 	}
 	w.currentCard, w.firstCardID = card, card.ID
-	if _, err := w.waitLogLines("exit claude ", 1); err != nil {
+	if _, err := w.waitLogs("exit "+m4VendorOf(aiName)+" ", 1); err != nil {
 		return err
 	}
 	w.waitElapsed = time.Since(started)
 	return w.settleDormant()
 }
 
-func (w *m4World) thenTwentySecondWaitEnded(_ string) error {
+func (w *m4World) thenTwentySecondWaitEnded(aiName string) error {
 	if w.waitElapsed < 19*time.Second {
 		return fmt.Errorf("approval wait ended in %s, want ~20s", w.waitElapsed)
+	}
+	if got := w.b1.aiByName[aiName].State; got != "dormant" {
+		return fmt.Errorf("%s state = %q, want dormant", aiName, got)
 	}
 	if err := w.awaitCardStatus(w.b1, w.firstCardID, "pending"); err != nil {
 		return err
@@ -1243,21 +1074,21 @@ func (w *m4World) restartHost() error {
 	return w.awaitHostWaitLimit(h2, 20)
 }
 
-func (w *m4World) scriptResumeRetryAndDifferentCmd(_, retryCmd, diffCmd, postText string) error {
+func (w *m4World) scriptResumeRetryAndDifferentCmd(aiName, retryCmd, diffCmd, postText string) error {
 	allow := host.ApprovalResult{Behavior: "allow"}
 	body := slices.Concat(
 		m4ClaudeBashAskSteps(1, "toolu_retry2", retryCmd, "Install chalk", allow),
 		m4ClaudeBashAskSteps(2, "toolu_diff1", diffCmd, "Install typescript", allow),
 	)
-	return w.writeScript("claude", m4ClaudeTurnDoc(body, 3, postText))
+	return w.setScript(m4VendorOf(aiName), m4ClaudeTurnDoc(body, 3, postText))
 }
 
 func (w *m4World) whenApproveFirstAfterRestart() error {
-	return w.actOnCard(w.b2, w.firstCardID, "approve", "", "")
+	return w.actOnCard(w.b2, w.firstCardID, "approve", "", "", "")
 }
 
-func (w *m4World) thenNoRetryCardAndNewCard(retryCmd, newCmd string) error {
-	card2, err := w.waitPendingCard(w.b2, "approval", w.b2.aiByName["Claude"].ID)
+func (w *m4World) thenNoRetryCardAndNewCard(retryCmd, aiName, newCmd string) error {
+	card2, err := w.waitPendingCard(w.b2, "approval", w.b2.aiByName[aiName].ID)
 	if err != nil {
 		return err
 	}
@@ -1285,12 +1116,12 @@ func (w *m4World) thenResumedRetryCompletes(aiName, wantPost string) error {
 	if err := w.thenAIPostsAndSettles(aiName, wantPost); err != nil {
 		return err
 	}
-	starts, err := w.waitLogLines("start claude ", 2)
+	starts, err := w.waitLogs("start "+m4VendorOf(aiName)+" ", 2)
 	if err != nil {
 		return err
 	}
 	if len(starts) != 2 || starts[0] != starts[1] {
-		return fmt.Errorf("claude starts = %v, want 2 identical session starts", starts)
+		return fmt.Errorf("%s starts = %v, want 2 identical session starts", aiName, starts)
 	}
 	if got := countApprovalCards(w.b1); got != 2 {
 		return fmt.Errorf("total approval cards = %d, want 2", got)
@@ -1301,7 +1132,7 @@ func (w *m4World) thenResumedRetryCompletes(aiName, wantPost string) error {
 func (w *m4World) whenTaskTimesOutShort(aiName, cmd string) error {
 	timeoutDeny := host.ApprovalResult{Behavior: "deny", Message: m4TimeoutText}
 	body := m4ClaudeBashAskSteps(1, "toolu_short1", cmd, "Short wait", timeoutDeny)
-	if err := w.writeScript("claude", m4ClaudeTurnDoc(body, 0, "")); err != nil {
+	if err := w.setScript(m4VendorOf(aiName), m4ClaudeTurnDoc(body, 0, "")); err != nil {
 		return err
 	}
 	tid, err := w.startTaskFor(aiName, "Short wait task", "Test reassignment")
@@ -1313,15 +1144,15 @@ func (w *m4World) whenTaskTimesOutShort(aiName, cmd string) error {
 	if err != nil {
 		return err
 	}
-	w.currentCard = card
-	if _, err := w.waitLogLines("exit claude ", 1); err != nil {
+	w.currentCard, w.firstCardID = card, card.ID
+	if _, err := w.waitLogs("exit "+m4VendorOf(aiName)+" ", 1); err != nil {
 		return err
 	}
 	return w.settleDormant()
 }
 
 func (w *m4World) whenOwnerReassignsTask(newAI, postText string) error {
-	if err := w.writeScript("codex", m4CodexTurnDoc(m4CodexThread, "turn-r", nil, 1, postText)); err != nil {
+	if err := w.setScript(m4VendorOf(newAI), m4CodexTurnDoc(m4CodexThread, "turn-r", nil, 1, postText)); err != nil {
 		return err
 	}
 	assign := proto.TaskAssign{
@@ -1341,7 +1172,7 @@ func (w *m4World) thenReassignedCardAndRefusal(wantStatus, newAI, wantPost, want
 	if err := w.thenAIPostsAndSettles(newAI, wantPost); err != nil {
 		return err
 	}
-	return w.actExpectCode(w.b1, w.currentCard.ID, "approve", "", "", wantCode)
+	return w.actOnCard(w.b1, w.currentCard.ID, "approve", "", "", wantCode)
 }
 
 func (w *m4World) whenSecondTaskLeavesTwoPendingCards(aiName, cmd string) error {
@@ -1354,7 +1185,7 @@ func (w *m4World) whenSecondTaskLeavesTwoPendingCards(aiName, cmd string) error 
 		m4GenericToolCall(1, "request_decision", reqArgs),
 		m4ClaudeBashAskSteps(2, "toolu_short2", cmd, "Clean dist", timeoutDeny),
 	)
-	if err := w.writeScript("claude", m4ClaudeTurnDoc(body, 0, "")); err != nil {
+	if err := w.setScript(m4VendorOf(aiName), m4ClaudeTurnDoc(body, 0, "")); err != nil {
 		return err
 	}
 	tid, err := w.startTaskFor(aiName, "Second task", "Test cancellation expiry")
@@ -1376,7 +1207,7 @@ func (w *m4World) collectTaskTwoPendingCards(aiName string) error {
 		return err
 	}
 	w.task2DecID, w.task2AppID = decCard.ID, appCard.ID
-	if _, err := w.waitLogLines("exit claude ", 2); err != nil {
+	if _, err := w.waitLogs("exit "+m4VendorOf(aiName)+" ", 2); err != nil {
 		return err
 	}
 	return w.settleDormant()
@@ -1396,8 +1227,8 @@ func (w *m4World) whenOwnerCancelsSecondTask() error {
 func (w *m4World) awaitTaskSessionRemoved(taskID string) error {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		hasTask := slices.ContainsFunc(w.activeHost.Sessions.All(), func(s host.Session) bool { return s.Task == taskID })
-		if !hasTask {
+		hasTask := func(s host.Session) bool { return s.Task == taskID }
+		if !slices.ContainsFunc(w.activeHost.Sessions.All(), hasTask) {
 			return nil
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -1412,55 +1243,85 @@ func (w *m4World) thenCancelledCardsExpiredAndRefused(wantStatus, wantCode strin
 	if err := w.awaitCardStatus(w.b1, w.task2DecID, wantStatus); err != nil {
 		return err
 	}
-	if err := w.actExpectCode(w.b2, w.task2AppID, "approve", "", "", wantCode); err != nil {
+	if err := w.actOnCard(w.b2, w.task2AppID, "approve", "", "", wantCode); err != nil {
 		return err
 	}
-	return w.actExpectCode(w.b2, w.task2DecID, "choose", "A", "", wantCode)
+	return w.actOnCard(w.b2, w.task2DecID, "choose", "A", "", wantCode)
 }
 
-func (w *m4World) whenUnauthorizedApproveAttempts(aiName string) error {
-	stranger := attachM4Client(w.node().Home, w.cleanup, newRandomPeerKey())
-	actStranger := proto.Act{
-		HomeCommand: proto.HomeCommand{Type: "act", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), Group: w.groupID},
-		Msg:         proto.ID(w.currentCard.ID), Action: "approve",
-	}
-	code1, err := stranger.sendCmd(w.node().Home, actStranger)
-	if err != nil {
+func (w *m4World) whenAIStartsPausableTurn(aiName, startPost, nextPost string) error {
+	steps := slices.Concat(
+		codexStartupSteps(),
+		m4CodexInterruptTurnSteps("turn-1", 1, startPost),
+		codexTurnSteps("turn-2", 2, "", nextPost, false),
+	)
+	if err := w.setScript(m4VendorOf(aiName), map[string]any{"session": m4CodexThread, "steps": steps}); err != nil {
 		return err
 	}
-	w.strangerCode = code1
-	return w.attemptSelfAIApprove(aiName)
+	if err := w.postOwnerMention(aiName, "@"+aiName+" begin analysis"); err != nil {
+		return err
+	}
+	return w.awaitAIPost(aiName, startPost, 10*time.Second)
 }
 
-func (w *m4World) attemptSelfAIApprove(aiName string) error {
+func (w *m4World) sendGroupOp(op string) error {
+	cmd := proto.GroupCommand{
+		HomeCommand: proto.HomeCommand{Type: "group", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), Group: w.groupID},
+		Op:          op,
+	}
+	return w.sendOK(w.b1, cmd)
+}
+
+func (w *m4World) whenOwnerPausesGroup() error {
+	w.pauseStarted = time.Now()
+	return w.sendGroupOp("pause")
+}
+
+func (w *m4World) thenTurnInterruptedWithinTwoSeconds(aiName, wantReason, wantCode string) error {
 	aiID := w.b1.aiByName[aiName].ID
-	actAI := proto.Act{
-		HomeCommand: proto.HomeCommand{
-			Type: "act", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), Group: w.groupID, As: proto.ID(aiID),
-		},
-		Msg: proto.ID(w.currentCard.ID), Action: "approve",
+	ready := func() bool {
+		_, paused := m4SystemMsg(w.b1, wantCode)
+		return paused && w.b1.group.Paused != nil && viewHasInterruptedMsg(&w.b1.homeView, aiID, wantReason)
 	}
-	raw, err := marshalNoEscape(actAI)
-	if err != nil {
-		return err
-	}
-	code2, err := w.b1.sendEnv(w.node().Home, w.node().Key.Sign(string(raw)))
-	if err != nil {
-		return err
-	}
-	w.selfAICode = code2
-	return nil
+	return w.b1.drainUntil(time.Until(w.pauseStarted.Add(2*time.Second)), ready, nil)
 }
 
-func (w *m4World) thenUnauthorizedAttemptsRefused(wantStranger, aiName, wantAI string) error {
-	if w.strangerCode != wantStranger || w.selfAICode != wantAI {
-		return fmt.Errorf("codes = (%q, %q), want (%q, %q)", w.strangerCode, w.selfAICode, wantStranger, wantAI)
+func m4SystemMsg(b *m4Client, wantCode string) (proto.MsgRow, bool) {
+	for _, m := range b.msgs {
+		var sc proto.SystemCode
+		if m.Kind == "system" && proto.Decode(m.Body, &sc) == nil && sc.Code == wantCode {
+			return m, true
+		}
 	}
-	if clientHasMsgFrom(w.b1, w.b1.aiByName[aiName].ID, "Sharp installed.") {
-		return errors.New("AI ran before an authorized approval")
-	}
-	if err := w.awaitCardStatus(w.b1, w.currentCard.ID, "pending"); err != nil {
+	return proto.MsgRow{}, false
+}
+
+func (w *m4World) whenOwnerResumesGroup() error {
+	return w.sendGroupOp("resume")
+}
+
+func (w *m4World) thenResumedGroupDeliversMentions(aiName, wantPost, wantCode string) error {
+	if err := w.thenAIPostsAndSettles(aiName, wantPost); err != nil {
 		return err
 	}
-	return w.awaitTaskWait(w.b1, w.currentTaskID, "approval", w.currentCard.ID)
+	resumed, ok := m4SystemMsg(w.b1, wantCode)
+	isAnswer := func(id string) bool { return w.b1.msgs[id].Text == wantPost }
+	if !ok || w.b1.group.Paused != nil || slices.IndexFunc(w.b1.msgOrder, isAnswer) < slices.Index(w.b1.msgOrder, resumed.ID) {
+		return fmt.Errorf("%q was posted before system message %q (found %v), or the group is still paused: %v", wantPost, wantCode, ok, w.b1.msgOrder)
+	}
+	return awaitHomeInboxCount(w.node().Store, 0)
+}
+
+func (w *m4World) thenApprovalTaskStayedAsleep(aiName string) error {
+	if err := w.awaitCardStatus(w.b1, w.firstCardID, "pending"); err != nil {
+		return err
+	}
+	if err := w.awaitTaskWait(w.b1, w.currentTaskID, "approval", w.firstCardID); err != nil {
+		return err
+	}
+	starts := matchingFakeCLILogs(w.cluster.LogPath, "start "+m4VendorOf(aiName)+" ")
+	if len(starts) != 1 {
+		return fmt.Errorf("%s CLI starts = %v, want 1 (task waiting on approval must stay asleep)", aiName, starts)
+	}
+	return nil
 }

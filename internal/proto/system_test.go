@@ -23,6 +23,9 @@ func TestSystemBodies(t *testing.T) {
 		{TaskMergedBody{SystemCode{"task_merged"}, "t", "abc", "def"}, `{"code":"task_merged","task":"t","commit":"abc","merge_commit":"def"}`},
 		{SystemCode{"no_secretary"}, `{"code":"no_secretary"}`},
 		{SessionReplacedBody{SystemCode{"session_replaced"}, "a", nil}, `{"code":"session_replaced","ai":"a"}`},
+		{MemberJoinedBody{SystemCode{"member_joined"}, "m2", "m1"}, `{"code":"member_joined","member":"m2","by":"m1"}`},
+		{MemberRemovedBody{SystemCode{"member_removed"}, "u2", "Mina", new("m1")}, `{"code":"member_removed","user":"u2","name":"Mina","by":"m1"}`},
+		{MemberRemovedBody{SystemCode{"member_removed"}, "u2", "Mina", nil}, `{"code":"member_removed","user":"u2","name":"Mina"}`},
 	} {
 		if got := jsonValue(t, wireJSON(t, tc.body)); !reflect.DeepEqual(got, jsonValue(t, []byte(tc.want))) {
 			t.Errorf("body = %v, want %s", got, tc.want)
