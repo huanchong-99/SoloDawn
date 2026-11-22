@@ -190,6 +190,8 @@ functions start with `TestHostEv`; the file exports `HostOfflineEvent`. The call
 take the names that start with `cal`, their tests too, and their test functions start with
 `TestCall`.
 functions start with `TestHostEv`; the file exports `HostOfflineEvent`.
+Group pause and resume (`cmd_pause.go`) take the names that start with `pau`, their tests too, and
+their test functions start with `TestPause`.
 Retention (`retention.go`) takes the names that start with `ret`, exports `Retain`, and its test
 functions start with `TestRetention`.
 
@@ -682,6 +684,28 @@ does this:
   the answered call is `max(0, c.Timestamp - call.Timestamp)` so inter-host clock skew never
   produces a negative duration, followed by the reply `MsgRow` and, in a thread, the updated
   `TaskRow`. When `call.By` is still in `State.AIs`, one `reply` item is queued for it (A6.3).
+
+## Group pause and resume
+
+`cmd_pause.go` holds `group` `pause` and `resume`
+([commands](../../planning/contracts/commands.md) 1.1;
+[messages](../../planning/contracts/messages.md) 2.11;
+[the task machine](../../planning/contracts/task-machine.md) row 24), under the keys `group/pause`
+and `group/resume`:
+
+- **Who.** Both require `s.Admin(c.Who)` (`forbidden` for a non-admin person or any command carrying
+  `as`); they carry no fields beyond the group command header checked by the seam.
+- **Idempotence.** Pausing a group whose `group.paused` is already set, or resuming one whose
+  `group.paused` is `null`, returns `ok` without writing rows or queuing items.
+- **Rows.** Otherwise `group/pause` sets `group.paused` to `{"by": c.Who.Human, "at": c.Now}` and
+  writes main-line `system` message `group_paused` (`id` `n`, `ts` `c.Now`, `by` `c.Who.Human`)
+  through `tskThreadSystem`. `group/resume` clears `group.paused` to `null` and writes main-line
+  `system` message `group_resumed` with the same fields.
+- **Waking tasks.** On `group/resume` of a paused group, `Step` runs with `OnGroupResume` (`ByHome`)
+  over `State.Tasks` in sorted task-id order and completes items through `tskItemCtx`: `resume` goes
+  to each `active` task with `wait` `null` before step `merge`, and `review` goes to each `active`
+  task at step `review` that has a reviewer unless `c.Disk.Queued` already holds an unacknowledged
+  `review` item for that reviewer, task and commit.
 ## Retention
 
 `retention.go` exports `Retain(tx, now)`, which reads `retention_days` from SQLite `setting`
@@ -699,10 +723,11 @@ does this:
 
 ## Known limitations
 
-- The table of commands holds the groups, members, briefs, the task commands of HM-9, the four
-  kinds of `post` of HM-6, `note` and `forget`, the cards, the checks and reviews, the merges and
-  summaries, the host events, and the calls, and no node starts a loop yet: the remaining command
-  files (including thread round counting in HM-13) and the wiring of the node are separate units
+- The table of commands holds the groups, group pause and resume, members, briefs, the task commands
+  of HM-9, the four kinds of `post` of HM-6, `note` and `forget`, the cards, the checks and reviews,
+  the merges and summaries, the host events, and the calls, and no node starts a loop yet: the
+  remaining command files (including thread round counting in HM-13) and the wiring of the node are
+  separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - After retention deletes rows, finished tasks stay in the in-memory `State.Tasks` until restart
   ([issues](../../issues.md)).
@@ -805,6 +830,11 @@ deleted-row scenario of A2.7.
 `Receipts` and `Disk`, checking the golden shapes, `UnexpectedNulls`, the 200-character preview,
 elapsed-time clamping, receipts and every refusal boundary. `features/home_call.feature` holds the
 home half of acceptance tests A6.3 and A6.4.
+
+`cmd_pause_test.go` covers `group/pause` and `group/resume` through `Commands.Apply`: the admin
+check, both repeats, the rows, and row 24 over tasks with and without waits, at step `merge`, and
+with a review already queued. `features/home_pause.feature` holds the home half of acceptance test
+A4.7 on `StartLoop` over an in-memory store.
 `retention_test.go` covers `Retain`: default and configured `retention_days`, store error
 propagation, protected rows, and the purge mark with `Loop.Sync` reset.
 `features/home_retention.feature` holds acceptance test A2.5 and the retention half of A5.14.
