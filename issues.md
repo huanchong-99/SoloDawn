@@ -6,11 +6,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-22 · deviation · A9.21 selected-pair change is a manual acceptance check
+### 2026-11-22 · limitation · A9.21 lacks a same-connection network-switch driver
 
-- Symptom: `features/s2_watch.feature:15-19` exercises `watch.start` refusal and `ctl` on an established relay. The fixture does not change the selected pair of an already open RTC connection, as required by `planning/steps/step-2-3-acceptance.md:150-154`.
-- Cause: the TURN fixture in `features/s2_watch_peer_test.go:87-95` selects transport policy when the browser connection is created.
-- Status: open. Run `features/s2_watch.md:13-19` to check the transition after T2-6 and U2-3 land.
+- Symptom: the original fixture opened a new relay-only connection instead of moving an established watch to TURN.
+- Cause: a transport-only probe with controlling ICE, renomination, warm relay pairs and bidirectional filtering on every watcher UDP socket kept the direct pair selected. Pion's automatic selector retained that pair; the binding-request selector also failed to move both ends. This is fixture evidence, not an end-to-end watch result.
+- Status: open. Experimental transport code was removed. A9.21 stays pending with direct-watch, same-PeerConnection relay observation, closure and original-ctl assertions; `waitForRelay` in `features/s2_watch_terminal_test.go` observes but does not drive migration. See `features/s2_watch.md`.
 
 ### 2026-11-22 · deviation · A9.26 live M5 forge coverage awaits a configured live run
 

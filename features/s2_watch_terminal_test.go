@@ -47,8 +47,9 @@ func s2RegisterTerminal(sc *godog.ScenarioContext, w *s2WatchWorld) {
 	sc.Step("^Q hands back the takeover$", t.handBack)
 	sc.Step("^P's watch channel closes within 2 seconds$", t.closedOnHandBack)
 	sc.Step("^Q has granted P access to watch$", t.grant)
-	sc.Step("^P connects to Q1 through TURN$", t.connectRelay)
-	sc.Step(`^watch\.start is refused with relay and the same ctl still answers$`, t.refusedOnRelay)
+	sc.Step("^P opens a direct watch on Q1$", t.directWatch)
+	sc.Step("^the same connection selects the cast TURN relay$", t.waitForRelay)
+	sc.Step(`^the watch closes, the original ctl syncs and watch\.start is refused with relay$`, t.refusedOnRelay)
 }
 
 func (t *s2TerminalWorld) takeover() error {
@@ -285,9 +286,9 @@ func (t *s2TerminalWorld) grant() error {
 	return t.confirm()
 }
 
-func (t *s2TerminalWorld) connectWatcher(relay bool) error {
+func (t *s2TerminalWorld) connectWatcher(withTURN bool) error {
 	var err error
-	t.watcher, err = openS2TerminalPeer(t.c, t.c.P, t.rtcBrowser, t.c.Q1, relay)
+	t.watcher, err = openS2TerminalPeer(t.c, t.c.P, t.rtcBrowser, t.c.Q1, withTURN)
 	return err
 }
 
@@ -397,15 +398,36 @@ func (t *s2TerminalWorld) closedOnHandBack() error {
 	}
 }
 
-func (t *s2TerminalWorld) connectRelay() error {
-	return t.connectWatcher(true)
+func (t *s2TerminalWorld) directWatch() error {
+	if err := t.connectWatcher(true); err != nil {
+		return err
+	}
+	return t.openWatch()
+}
+
+func (t *s2TerminalWorld) waitForRelay() error {
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if t.watcher.checkPath(true) == nil {
+			return nil
+		}
+		select {
+		case <-tick.C:
+		case <-t.c.Ctx.Done():
+			return fmt.Errorf("watch connection did not move to TURN: %w", t.c.Ctx.Err())
+		}
+	}
 }
 
 func (t *s2TerminalWorld) refusedOnRelay() error {
-	if err := t.watchStart("relay"); err != nil {
+	if err := t.watcher.wait(t.watcher.closed[t.label("watch")]); err != nil {
 		return err
 	}
-	return t.watcherSync()
+	if err := t.watcherSync(); err != nil {
+		return err
+	}
+	return t.watchStart("relay")
 }
 
 func (t *s2TerminalWorld) watcherSync() error {

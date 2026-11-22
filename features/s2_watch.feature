@@ -12,11 +12,12 @@ Feature: Watch a takeover, post to a team group and use custom forges
     Then P's watch channel closes within 2 seconds
 
   @pending
-  Scenario: A relayed watch request is refused while ctl keeps answering (A9.21)
+  Scenario: An open direct watch closes after the same connection selects TURN (A9.21)
     Given Q-team is in a takeover on Q1
     And Q has granted P access to watch
-    When P connects to Q1 through TURN
-    Then watch.start is refused with relay and the same ctl still answers
+    And P opens a direct watch on Q1
+    When the same connection selects the cast TURN relay
+    Then the watch closes, the original ctl syncs and watch.start is refused with relay
 
   @pending
   Scenario: A team group has no repository, tasks, briefs, or AI members (A9.22)

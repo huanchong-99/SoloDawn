@@ -28,7 +28,7 @@ type s2TerminalPeer struct {
 	ice      proto.ICEConfig
 }
 
-func openS2TerminalPeer(c *s2Cast, person *s2Person, browser *peerBrowser, target *s2Node, relay bool) (*s2TerminalPeer, error) {
+func openS2TerminalPeer(c *s2Cast, person *s2Person, browser *peerBrowser, target *s2Node, withTURN bool) (*s2TerminalPeer, error) {
 	ctx, cancel := context.WithCancel(c.Ctx)
 	browser.path.Close()
 	p := &s2TerminalPeer{key: browser.key, target: target.ID(), connID: randomConn(), ctl: make(chan json.RawMessage, 128)}
@@ -38,10 +38,10 @@ func openS2TerminalPeer(c *s2Cast, person *s2Person, browser *peerBrowser, targe
 	if err := p.dial(c.RVURL); err != nil {
 		return nil, err
 	}
-	if err := p.connect(p.config(relay)); err != nil {
+	if err := p.connect(p.config(withTURN)); err != nil {
 		return nil, err
 	}
-	if err := p.checkPath(relay); err != nil {
+	if err := p.checkPath(false); err != nil {
 		return nil, err
 	}
 	return p, p.helloPerson(person)
@@ -79,10 +79,9 @@ func (p *s2TerminalPeer) dial(url string) error {
 	return wsjson.Read(p.ctx, ws, &p.ice)
 }
 
-func (p *s2TerminalPeer) config(relay bool) webrtc.Configuration {
+func (p *s2TerminalPeer) config(withTURN bool) webrtc.Configuration {
 	var cfg webrtc.Configuration
-	if relay {
-		cfg.ICETransportPolicy = webrtc.ICETransportPolicyRelay
+	if withTURN {
 		for _, server := range p.ice.ICE {
 			cfg.ICEServers = append(cfg.ICEServers, webrtc.ICEServer{URLs: server.URLs, Username: server.Username, Credential: server.Credential})
 		}

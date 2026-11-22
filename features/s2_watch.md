@@ -10,13 +10,23 @@
 
 ## A9.21 selected-pair change
 
-1. Open the owner's takeover and have P start an approved watch over a
-   direct connection. Identify P's selected pair and keep TURN reachable
-   as in [A7.9](../planning/steps/step-1-acceptance.md#m7-terminal-takeover).
-2. Change the network so the same connection selects the relayed pair.
-   Verify the change in the selected-pair statistics. Observe the watch
-   channel close and use the original `ctl` to sync the group.
-3. Attempt `watch.start` again on the relayed pair and verify `relay`.
+A9.21 remains pending: its network-switch driver is unavailable. The
+fixture opens an approved direct watch with the cast's TURN candidates
+available from the start, then waits for the same PeerConnection to select
+a relay. It checks watch closure, a successful sync on the original `ctl`
+and a `relay` refusal when that `ctl` retries `watch.start`. It does not
+induce the network transition.
+
+A transport-only probe used a controlling watcher, policy `all`, Pion
+renomination and frequent checks, a warmed relay/relay pair, and a filter
+on every watcher UDP socket allowing only the cast TURN server after the
+switch. The selected pair stayed direct. A binding-request selector did
+not switch both ends either. The experimental driver was removed.
+
+Once a same-connection switch driver is available, temporarily remove
+A9.21's `@pending` tag and run the scenario, then restore the tag. Do not
+substitute a new relay-only connection. Watch closure and original-ctl
+behavior after migration remain unverified.
 
 ## A9.26 live run
 
