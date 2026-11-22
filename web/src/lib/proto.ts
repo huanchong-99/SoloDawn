@@ -344,6 +344,7 @@ const BriefBody = v.object({
   pass: int,
   requester: str,
   replaces: v.nullable(str),
+  preset: optionalText,
 });
 
 const ApprovalBody = v.object({
@@ -520,6 +521,8 @@ export const NoteRow = v.object({
   pos: int,
   g: str,
   task: v.nullable(str),
+  type: optionalText,
+  name: optionalText,
   text: str,
   by: str,
   ts: int,
@@ -564,8 +567,9 @@ const FetchPage = { t: v.literal('fetch'), id: int, g: str, before: int, limit: 
 export const FetchThread = v.object({ ...FetchPage, thread: v.nullable(str) });
 export type FetchThread = v.InferOutput<typeof FetchThread>;
 
-/** A page of the review messages or of the notes. */
-export const FetchKind = v.object({ ...FetchPage, kind: str });
+/** A page of the review messages, context notes, presets or knowledge-base documents, or a
+ *  knowledge-base search when `q` is set (contracts/step-3/knowledge.md section 3). */
+export const FetchKind = v.object({ ...FetchPage, kind: str, q: optionalText });
 export type FetchKind = v.InferOutput<typeof FetchKind>;
 
 /** One row of the group, by its type and id: `before` is 0 and `limit` 1. */
@@ -592,6 +596,8 @@ export const CmdResult = v.object({
   round: v.optional(int),
   link: v.optional(str),
   expires: v.optional(int),
+  id: v.optional(str),
+  replaced: v.optional(bool),
 });
 export type CmdResult = v.InferOutput<typeof CmdResult>;
 
@@ -818,6 +824,8 @@ export const Note = v.object({
   ...HomeCommand,
   id: Id,
   task: v.nullable(Id),
+  type: optionalText,
+  name: optionalText,
   text: str,
 });
 export type Note = v.InferOutput<typeof Note>;
@@ -934,6 +942,16 @@ export type TakeoverEnd = v.InferOutput<typeof TakeoverEnd>;
 export const HostInfoRequest = v.object({ t: v.literal('host.info'), id: int });
 export type HostInfoRequest = v.InferOutput<typeof HostInfoRequest>;
 
+/** The capability table a CLI driver declares (contracts/step-3/drivers.md sections 4 and 6). */
+export const Driver = v.object({
+  accounts: strs,
+  levels: v.array(int),
+  approvals: str,
+  takeover: str,
+  usage: strs,
+});
+export type Driver = v.InferOutput<typeof Driver>;
+
 const HostState = {
   device: str,
   name: str,
@@ -955,6 +973,7 @@ const HostState = {
       account: v.nullable(str),
       login_ok: bool,
       caps: Caps,
+      driver: v.optional(Driver),
       groups: v.array(
         v.object({
           g: Id,
