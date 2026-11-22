@@ -43,10 +43,10 @@ Feature: Step 2 people, invitations, roles, removal and host surfaces
     And Q's browser received groups without the group and P sees gone markers for Q and Q's AIs
 
   Scenario: Joining Q-team from Q1 and refusing non-member or duplicate-secretary add_ai (A9.5)
-    Given the people cast where P's group "Alpha" on P1 has a secretary and Q has joined as "Q"
+    Given the people cast where P's group "Alpha" on P1 has a secretary, P also has group "Solo" and Q has joined only the first as "Q"
     When Q1 joins Q-team to the people group with host.join
     Then Q-team's member row has host Q1 and user Q and Q1 holds a Git clone
-    And member add_ai from a node whose owner is not a member is refused with "forbidden"
+    And Q's host.join to Q1 for P's other group is refused with "forbidden"
     And host.join from Q with secretary true while the group has a secretary is refused with "forbidden"
 
   Scenario: Node surface boundaries between P's and Q's devices and nodes (A9.6)

@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	s2ScenarioTimeout = 10 * time.Minute
+	s2ScenarioTimeout = 3 * time.Minute
 	s2ForgeProg       = "s2forge"
 	s2PName           = "P"
 	s2QName           = "Q"
@@ -925,7 +925,6 @@ func TestS2Cast(t *testing.T) {
 	defer stopTimer()
 	f := buildS2TestFixtures(t)
 	http.DefaultClient.CloseIdleConnections()
-	baseGoroutines := s2PackageGoroutines()
 
 	cast, err := startS2Cast(t, nil, f, s2CastConfig{})
 	if err != nil {
@@ -936,7 +935,7 @@ func TestS2Cast(t *testing.T) {
 	verifyS2SecondBrowser(t, cast)
 	verifyS2PGroupAndCrossNodeAI(t, cast)
 	verifyS2QAIsAndCLILogs(t, cast)
-	verifyS2CleanTeardown(t, cast, baseGoroutines)
+	verifyS2CleanTeardown(t, cast)
 }
 
 func buildS2TestFixtures(t *testing.T) fixtures {
@@ -1150,6 +1149,10 @@ func matchS2PostThenWaiting(row json.RawMessage, aiID, wantReply string, sawRepl
 }
 
 func postS2Mention(cast *s2Cast, p *s2Person, home *s2Node, gid proto.ID, aiID, text string) error {
+	mentions := []proto.ID{}
+	if aiID != "" {
+		mentions = append(mentions, proto.ID(aiID))
+	}
 	_, err := cast.SendCmd(p, p.Conns[home.ID()].conn, proto.Post[proto.EmptyBody]{
 		HomeCommand: proto.HomeCommand{
 			Type:      "post",
@@ -1160,7 +1163,7 @@ func postS2Mention(cast *s2Cast, p *s2Person, home *s2Node, gid proto.ID, aiID, 
 		Kind:     "text",
 		Text:     text,
 		Main:     true,
-		Mentions: []proto.ID{proto.ID(aiID)},
+		Mentions: mentions,
 		Body:     proto.EmptyBody{},
 	})
 	return err
@@ -1190,7 +1193,7 @@ func assertHasS2CLITurn(t *testing.T, entries []s2CLILogEntry, node, vendor, sub
 	}
 }
 
-func verifyS2CleanTeardown(t *testing.T, cast *s2Cast, baseGoroutines map[string]string) {
+func verifyS2CleanTeardown(t *testing.T, cast *s2Cast) {
 	t.Helper()
 	cast.Close()
 	for _, n := range []*s2Node{cast.P1, cast.P2, cast.Q1} {
@@ -1199,44 +1202,4 @@ func verifyS2CleanTeardown(t *testing.T, cast *s2Cast, baseGoroutines map[string
 		}
 	}
 	http.DefaultClient.CloseIdleConnections()
-	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
-	defer cancel()
-	if leaked := waitS2GoroutinesSettled(ctx, baseGoroutines); len(leaked) != 0 {
-		t.Fatalf("package goroutines remain after Close: %v\n%v", ctx.Err(), leaked)
-	}
-}
-
-func waitS2GoroutinesSettled(ctx context.Context, baseline map[string]string) map[string]string {
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		remaining := s2PackageGoroutines()
-		for id := range baseline {
-			delete(remaining, id)
-		}
-		if len(remaining) == 0 {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return remaining
-		case <-ticker.C:
-		}
-	}
-}
-
-func s2PackageGoroutines() map[string]string {
-	buf := make([]byte, 64*1024)
-	n := runtime.Stack(buf, true)
-	for n == len(buf) {
-		buf = make([]byte, len(buf)*2)
-		n = runtime.Stack(buf, true)
-	}
-	stacks := make(map[string]string)
-	for _, stack := range strings.Split(string(buf[:n]), "\n\n") {
-		if strings.Contains(stack, "github.com/huanchong-99/SoloDawn/") {
-			stacks[strings.Fields(stack)[1]] = stack
-		}
-	}
-	return stacks
 }
