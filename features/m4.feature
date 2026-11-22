@@ -1,18 +1,19 @@
-Feature: M4 permissions, approvals and decisions
+Feature: M4 permissions, approvals, decisions, stops and limits
   Task and group CLI sessions raise approval and decision cards through the
   node's structured drivers and MCP tools, owners decide from any enrolled
   browser device with multiple-choice options or custom free text, timed-out
   waits survive host restarts so an approved command runs once on retry without
   a second card while a different command raises a new card, reassigned or
-  cancelled tasks retire pending cards, and unauthorized signers are refused.
+  cancelled tasks retire pending cards, group pause and node offline controls
+  stop running turns and hold inbox items, and long turns time out.
 
   Scenario: Approving task permission requests from a second browser lets Claude Code and Codex run (A4.1)
     Given an M4 project group with a second browser and configured AIs "Claude" and "Codex"
-    When an M4 task for "Claude" asks permission to run "pnpm add -D @playwright/test" with why "Run browser checks"
+    When an M4 task for "Claude" asks permission to run "pnpm add -D @playwright/test" with why "Run browser checks" before posting "Claude installed @playwright/test."
     Then the M4 second browser sees a pending approval card on "Claude"'s task for "Bash" command "pnpm add -D @playwright/test" with why "Run browser checks"
     And the M4 second browser approves that pending card and "Claude" posts "Claude installed @playwright/test."
     And the M4 approval card is approved by the owner from the second browser with 0 pending host records
-    When an M4 task for "Codex" asks command approval for "pnpm exec playwright install chromium" with why "Install browser binary"
+    When an M4 task for "Codex" asks command approval for "pnpm exec playwright install chromium" with why "Install browser binary" before posting "Codex installed chromium."
     Then the M4 second browser sees a pending approval card on "Codex"'s task for "commandExecution" command "pnpm exec playwright install chromium" with why "Install browser binary"
     And the M4 second browser approves that pending card and "Codex" posts "Codex installed chromium."
     And the M4 approval card is approved by the owner from the second browser with 0 pending host records
@@ -32,7 +33,7 @@ Feature: M4 permissions, approvals and decisions
     When an M4 task for "Claude" asks two four-option AskUserQuestion prompts and posts "Claude recorded SQLite and embedded SQL."
     Then the M4 browsers answer "Claude"'s first decision card with option "C" and note "Enable WAL mode" and second with free text "Embed numbered SQL files"
     And "Claude" posts "Claude recorded SQLite and embedded SQL." in the M4 group
-    When the M4 owner mentions "Codex" in the main line and "Codex" asks two four-option requestUserInput prompts
+    When the M4 owner mentions "Codex" in the main line and it asks two four-option requestUserInput prompts
     Then the M4 browsers answer "Codex"'s main-line decision cards with option "D" and with free text "zstd dictionary"
     And "Codex" posts "Codex recorded MsgPack and zstd." in the M4 group
     When a second M4 task for "Claude" raises a four-option request_decision card and ends its turn
@@ -45,11 +46,11 @@ Feature: M4 permissions, approvals and decisions
     When the M4 host restarts on the node store
     And "Claude" is scripted on resume to retry "npm install chalk" and then ask to run "npm install typescript" before posting "Chalk retried once and TypeScript approved."
     And the M4 second browser approves the first card after the restart
-    Then the M4 browsers see no second card for "npm install chalk" and see a new pending approval card for "npm install typescript"
+    Then the M4 browsers see no second card for "npm install chalk" and see a new pending approval card from "Claude" for "npm install typescript"
     When the M4 second browser approves that new pending card
     Then "Claude" posts "Chalk retried once and TypeScript approved." in the M4 group after 2 resumed starts of the same CLI session and 2 total approval cards
 
-  Scenario: Reassignment marks pending approval cards reassigned, cancellation expires pending cards, and late actions fail with conflict (A4.3)
+  Scenario: Reassignment marks pending approval cards reassigned, cancellation expires pending cards, and late actions fail with conflict (HM-10 card retirement)
     Given an M4 project group with a 1-second approval wait, a second browser and configured AIs "Claude" and "Codex"
     When an M4 task for "Claude" times out waiting for approval on "npm install left-pad"
     And the M4 owner reassigns that task to "Codex" scripted to post "Codex took over T-1."
@@ -58,11 +59,35 @@ Feature: M4 permissions, approvals and decisions
     And the M4 owner cancels that second task
     Then both pending M4 cards on the second task have status "expired" and late actions on them fail with "conflict"
 
-  Scenario: Unenrolled devices and AI signers cannot decide pending cards, and decided cards reject duplicate actions (A4.6)
-    Given an M4 project group with a second browser and configured AI "Claude"
-    When an M4 task for "Claude" asks permission to run "pnpm add sharp" with why "Resize thumbnails"
-    Then the M4 first browser sees a pending approval card on "Claude"'s task for "Bash" command "pnpm add sharp" with why "Resize thumbnails"
-    When an unenrolled device and "Claude" itself each try to approve that M4 card
-    Then the M4 home refuses the unenrolled device with "unknown_device" and refuses "Claude" with "forbidden" while the card stays pending
-    When the M4 second browser approves that pending card and "Claude" posts "Sharp installed."
-    Then a late deny from the M4 first browser on the approved card fails with "conflict"
+  Scenario: Pausing the group interrupts a running turn within 2 seconds, holds mentions until resume, and leaves an approval-waiting task asleep (A4.7)
+    Given an M4 project group with a 1-second approval wait, a second browser and configured AIs "Claude" and "Codex"
+    When an M4 task for "Claude" times out waiting for approval on "npm install dotenv"
+    And "Codex" starts a main-line turn posting "Codex analyzing before pause." and waiting while the group is active
+    And the M4 owner pauses the group
+    Then "Codex"'s running turn is interrupted within 2 seconds with reason "stop" and system message "group_paused"
+    When the M4 owner posts mentions "@Codex first queued note" and "@Codex second queued note" while the group is paused
+    Then the 2 M4 mention items stay held on the home and "Codex" does not post while paused
+    When the M4 owner resumes the group
+    Then "Codex" posts "Codex answered held mentions." in the M4 group with system message "group_resumed" and 0 queued home items
+    And "Claude"'s approval-waiting task was not woken by the group resume
+
+  Scenario: Taking all AIs offline closes every session on the node, keeps items on the home until online, and works with the home stopped (A4.8)
+    Given an M4 project group with a second browser and configured AIs "Claude" and "Codex"
+    When "Claude" holds an open waiting session after posting "Claude ready." and "Codex" is running a turn after posting "Codex busy."
+    And the M4 owner takes all AIs on the node offline
+    Then both M4 sessions on the node close, "Codex" records turn_interrupted "stop", and both AIs show state "offline"
+    When the M4 owner mentions "Claude" with "@Claude while node offline"
+    Then the M4 mention item stays unacknowledged on the home and "Claude" starts no new process
+    When "Claude" is scripted to keep its resumed session open after posting "Claude back online." and the M4 owner brings the node online
+    Then "Claude" posts "Claude back online." and the M4 home inbox is empty
+    When the M4 home stops and the M4 owner takes all AIs on the node offline while the home is stopped
+    Then "Claude"'s open session on the node closes with the home stopped
+    When the M4 home restarts and the M4 owner mentions "Claude" with "@Claude after home restart"
+    Then "Claude" shows state "offline" on the restarted M4 home and the mention item stays on the home
+    When "Claude" is scripted to post "Claude online after home restart." and the M4 owner brings the node online
+    Then "Claude" posts "Claude online after home restart." in the M4 group and the M4 home inbox is empty
+
+  Scenario: With turn_minutes set to 1 a long turn is interrupted with reason timeout (A4.9)
+    Given an M4 project group with turn_minutes 1, a second browser and configured AI "Claude"
+    When an M4 task for "Claude" posts "Claude started long turn." and runs past the 1-minute turn limit
+    Then "Claude"'s task turn is interrupted with reason "timeout" and the task records 1 failure

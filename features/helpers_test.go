@@ -11,7 +11,9 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -925,4 +927,377 @@ func rewriteDirectURLs(urls []string) []string {
 		}
 	}
 	return out
+}
+
+// TestM3MCPShim runs host.RunShim when invoked as a child MCP server process
+// with the socket path and --token arguments after "--". During a regular go
+// test run flag.Args() is empty and the test returns at once.
+func TestM3MCPShim(_ *testing.T) {
+	args := flag.Args()
+	if len(args) == 0 {
+		return
+	}
+	dial := func() (net.Conn, error) {
+		return net.Dial("unix", args[0])
+	}
+	os.Exit(host.RunShim(args[1:], dial, os.Stdin, os.Stdout, os.Stderr))
+}
+
+func attachMCPSocket(t testing.TB, cleanup func(func()), h *host.Host, dir string) (string, func(), error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", nil, err
+	}
+	local, err := node.ListenLocal(dir)
+	if err != nil {
+		return "", nil, err
+	}
+	sockPath := filepath.Join(dir, "sock")
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go serveTestMCP(ctx, local, h, &wg)
+	stop := sync.OnceFunc(func() {
+		cancel()
+		local.Close()
+		wg.Wait()
+	})
+	registerBothCleanups(t, cleanup, stop)
+	h.Shim = []string{exe, "-test.run=^TestM3MCPShim$", "--", sockPath}
+	return sockPath, stop, nil
+}
+
+func serveTestMCP(ctx context.Context, local *node.Local, h *host.Host, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for {
+		conn, err := local.Accept()
+		if err != nil {
+			return
+		}
+		wg.Add(1)
+		go handleTestMCPConn(ctx, conn, h, wg)
+	}
+}
+
+func handleTestMCPConn(ctx context.Context, conn net.Conn, h *host.Host, wg *sync.WaitGroup) {
+	defer wg.Done()
+	open, _, r, err := node.AcceptOpening(conn)
+	if err != nil {
+		return
+	}
+	if open.MCP == "" {
+		conn.Close()
+		return
+	}
+	h.ServeMCP(ctx, open.MCP, r, conn)
+}
+
+func decodeReplyMatch(raw json.RawMessage, reqID int64) (bool, error) {
+	var hdr struct {
+		Re *int64 `json:"re,omitempty"`
+	}
+	if proto.Decode(raw, &hdr) != nil || hdr.Re == nil || *hdr.Re != reqID {
+		return false, nil
+	}
+	var wireErr proto.ErrorResponse
+	if proto.Decode(raw, &wireErr) == nil {
+		return true, fmt.Errorf("%s: %s", wireErr.Err.Code, wireErr.Err.Message)
+	}
+	return true, nil
+}
+
+func decodeReplyCode(raw json.RawMessage, reqID int64) (bool, string) {
+	matched, err := decodeReplyMatch(raw, reqID)
+	if !matched || err == nil {
+		return matched, ""
+	}
+	code, _, _ := strings.Cut(err.Error(), ":")
+	return true, code
+}
+
+type homeViewEvent struct {
+	kind   string
+	member string
+	state  string
+	text   string
+}
+
+type homeView struct {
+	group    proto.GroupRow
+	aiByName map[string]proto.AIMemberRow
+	ownerMem string
+	tasks    map[string]proto.TaskRow
+	msgs     map[string]proto.MsgRow
+	msgOrder []string
+	events   []homeViewEvent
+}
+
+func newHomeView() homeView {
+	return homeView{
+		aiByName: map[string]proto.AIMemberRow{},
+		tasks:    map[string]proto.TaskRow{},
+		msgs:     map[string]proto.MsgRow{},
+	}
+}
+
+func applyRowsFrame(v *homeView, raw json.RawMessage) {
+	var batch proto.Rows
+	if proto.Decode(raw, &batch) != nil || batch.Type != "rows" {
+		return
+	}
+	for _, elem := range batch.Rows {
+		recordViewRow(v, elem)
+	}
+}
+
+func recordViewRow(v *homeView, elem json.RawMessage) {
+	var hdr proto.RowHeader
+	if proto.Decode(elem, &hdr) != nil {
+		return
+	}
+	if hdr.Type == "msg" {
+		recordViewMsg(v, elem)
+		return
+	}
+	recordViewStateRow(v, hdr.Type, elem)
+}
+
+func recordViewStateRow(v *homeView, kind string, elem json.RawMessage) {
+	switch kind {
+	case "group":
+		recordViewGroup(v, elem)
+	case "member":
+		recordViewMember(v, elem)
+	case "task":
+		recordViewTask(v, elem)
+	}
+}
+
+func recordViewGroup(v *homeView, elem json.RawMessage) {
+	var grp proto.GroupRow
+	if proto.Decode(elem, &grp) == nil {
+		v.group = grp
+	}
+}
+
+func recordViewMember(v *homeView, elem json.RawMessage) {
+	var ai proto.AIMemberRow
+	if proto.Decode(elem, &ai) == nil && ai.Kind == "ai" {
+		v.aiByName[ai.Name] = ai
+		v.events = append(v.events, homeViewEvent{kind: "member", member: ai.Name, state: ai.State})
+		return
+	}
+	var hum proto.HumanMemberRow
+	if proto.Decode(elem, &hum) == nil && hum.Kind == "human" {
+		v.ownerMem = hum.ID
+	}
+}
+
+func recordViewTask(v *homeView, elem json.RawMessage) {
+	var t proto.TaskRow
+	if proto.Decode(elem, &t) == nil {
+		v.tasks[t.ID] = t
+	}
+}
+
+func recordViewMsg(v *homeView, elem json.RawMessage) {
+	var m proto.MsgRow
+	if proto.Decode(elem, &m) != nil {
+		return
+	}
+	if _, seen := v.msgs[m.ID]; !seen {
+		v.msgOrder = append(v.msgOrder, m.ID)
+		v.events = append(v.events, homeViewEvent{kind: "msg", member: viewAuthorName(v, m.By), text: m.Text})
+	}
+	v.msgs[m.ID] = m
+}
+
+func viewAuthorName(v *homeView, id string) string {
+	for name, ai := range v.aiByName {
+		if ai.ID == id {
+			return name
+		}
+	}
+	return id
+}
+
+func viewHasMsgFrom(v *homeView, by, want string) bool {
+	for _, m := range v.msgs {
+		if m.By == by && m.Text == want {
+			return true
+		}
+	}
+	return false
+}
+
+func viewHasInterruptedMsg(v *homeView, aiID, wantReason string) bool {
+	for _, m := range v.msgs {
+		if isInterruptedMsg(m, aiID, wantReason) {
+			return true
+		}
+	}
+	return false
+}
+
+func isInterruptedMsg(m proto.MsgRow, aiID, wantReason string) bool {
+	if m.Kind != "system" {
+		return false
+	}
+	var body proto.TurnInterruptedBody
+	if proto.Decode(m.Body, &body) != nil {
+		return false
+	}
+	return body.Code == "turn_interrupted" && body.AI == aiID && body.Reason == wantReason
+}
+
+func writeClusterScript(tb testing.TB, cluster *nodetest.Cluster, root string, seq *int, vendor string, doc map[string]any) error {
+	*seq++
+	path := filepath.Join(root, fmt.Sprintf("%s-%d.json", vendor, *seq))
+	data, err := marshalNoEscape(doc)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+	cluster.SetScript(tb, vendor, path)
+	return nil
+}
+
+func newHostCmd(ids *seqIDGen, to, typ string) proto.HostCommand {
+	return proto.HostCommand{
+		Type: typ, Nonce: ids.next(), Timestamp: time.Now().UnixMilli(), To: to,
+	}
+}
+
+func callHostSurface(ctx context.Context, h *host.Host, from host.Owner, by, name string, payload any) (any, error) {
+	fn := host.Surface[name]
+	if fn == nil {
+		return nil, fmt.Errorf("host surface %q is not registered", name)
+	}
+	raw, err := marshalNoEscape(payload)
+	if err != nil {
+		return nil, err
+	}
+	return fn(ctx, h, from, by, raw)
+}
+
+func configureHostAI(h *host.Host, from host.Owner, ids *seqIDGen, ownerID, homeID string, groupID proto.ID, aiName, agent string) error {
+	ctx := context.Background()
+	if _, err := h.Agents(ctx); err != nil {
+		return err
+	}
+	setCmd := proto.AgentSet{
+		HostCommand: newHostCmd(ids, h.Key.ID(), "agent.set"),
+		Agent:       agent,
+		Account:     "personal",
+	}
+	if _, err := callHostSurface(ctx, h, from, ownerID, "agent.set", setCmd); err != nil {
+		return err
+	}
+	joinCmd := proto.HostJoin{
+		HostCommand: newHostCmd(ids, h.Key.ID(), "host.join"),
+		Group:       groupID,
+		Home:        homeID,
+		Agent:       agent,
+		Name:        aiName,
+	}
+	_, err := callHostSurface(ctx, h, from, ownerID, "host.join", joinCmd)
+	return err
+}
+
+func awaitHostGroupSynced(h *host.Host, gid string) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := h.Rows.Get(gid, "group", gid); ok {
+			return nil
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return errors.New("timed out waiting for host group sync")
+}
+
+func hasNonDormant(h *host.Host) bool {
+	isOpen := func(s host.Session) bool { return s.State != host.Dormant }
+	return slices.ContainsFunc(h.Sessions.All(), isOpen)
+}
+
+func waitHostDormant(h *host.Host) {
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if !hasNonDormant(h) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func isSettledMemberState(state string) bool {
+	return state == "dormant" || state == "offline"
+}
+
+func allMembersSettled(h *host.Host, ais map[string]proto.AIMemberRow) bool {
+	for _, ai := range ais {
+		if !isSettledMemberState(ai.State) {
+			return false
+		}
+	}
+	return !hasNonDormant(h)
+}
+
+func readFakeCLILog(logPath string) []string {
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" {
+		return nil
+	}
+	return strings.Split(trimmed, "\n")
+}
+
+func matchingFakeCLILogs(logPath, prefix string) []string {
+	var out []string
+	for _, line := range readFakeCLILog(logPath) {
+		if strings.HasPrefix(line, prefix) {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func waitFakeCLILogs(logPath, prefix string, want int, timeout time.Duration) ([]string, error) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if got := matchingFakeCLILogs(logPath, prefix); len(got) >= want {
+			return got, nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return nil, fmt.Errorf("timed out waiting for %d %q log lines; got %v", want, prefix, readFakeCLILog(logPath))
+}
+
+func homeInboxCount(db *store.Store) (int, error) {
+	var count int
+	read := func(tx *store.Tx) error {
+		return tx.QueryRow(`SELECT count(*) FROM inbox`).Scan(&count)
+	}
+	return count, db.Write(read)
+}
+
+func awaitHomeInboxCount(db *store.Store, want int) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		n, err := homeInboxCount(db)
+		if err != nil {
+			return err
+		}
+		if n == want {
+			return nil
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	n, _ := homeInboxCount(db)
+	return fmt.Errorf("home inbox count = %d, want %d", n, want)
 }
