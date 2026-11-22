@@ -17,6 +17,7 @@ import {
   suggestedName,
   taskWaitKind,
   terminalDisabledReason,
+  usageMeter,
   waitingOnMe,
   waitingOnOther,
 } from './members';
@@ -569,6 +570,37 @@ describe('AI status and path projections', () => {
     expect(pathLabel(mk('working', 'direct'))).toBe('direct');
     expect(pathLabel(mk('working', 'relay'))).toBe('relayed, limited');
     expect(pathLabel(mk('working', 'mesh'))).toBe('mesh');
+  });
+
+  it('projects usageMeter from the rate-limit window only', () => {
+    const resetAt = new Date(2026, 10, 20, 15, 0).getTime();
+    const bar = (value: string, fill: number, tone?: 'danger', note?: string) => ({
+      label: 'Window used',
+      value,
+      fill,
+      tone,
+      note,
+    });
+
+    expect(usageMeter({}, 'en')).toBeUndefined();
+    expect(usageMeter({ turns_today: 14, window_resets: resetAt }, 'en')).toBeUndefined();
+    expect(usageMeter({ window_pct: 18 }, 'en')).toEqual(bar('18%', 18));
+    expect(usageMeter({ window_pct: -4 }, 'en')).toEqual(bar('-4%', 0));
+    expect(usageMeter({ window_pct: 62.5, window_resets: resetAt }, 'en')).toEqual(
+      bar('63%', 63, undefined, 'Resets 15:00'),
+    );
+    expect(usageMeter({ window_pct: 99.9 }, 'en')).toEqual(bar('100%', 100));
+    expect(usageMeter({ window_pct: 100 }, 'en')).toEqual(bar('100%', 100, 'danger'));
+    expect(usageMeter({ window_pct: 125 }, 'en')).toEqual(bar('125%', 100, 'danger'));
+
+    prefs.lang = 'zh-CN';
+    expect(usageMeter({ window_pct: 62, window_resets: resetAt }, 'zh-CN')).toEqual({
+      label: '这一轮额度已用',
+      value: '62%',
+      fill: 62,
+      tone: undefined,
+      note: '15:00 重置',
+    });
   });
 
   it('computes terminalDisabledReason across offline host/AI, relay, linking and direct', () => {

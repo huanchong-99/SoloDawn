@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // startOpenCode starts the driver on the fake OpenCode replaying script.
@@ -36,18 +35,19 @@ func startFakeServer(t *testing.T, vendor string, d Driver, script string, l Lau
 }
 
 func openCodeLaunch(t *testing.T, session string, level int) Launch {
-	return Launch{Folder: t.TempDir(), Session: session, Level: level, Shim: []string{"solodawn", "mcp"}, Instructions: "Be brief.", ToolTimeout: time.Minute}
+	return Launch{Folder: t.TempDir(), Session: session, Level: level, Shim: []string{"solodawn", "mcp"}, Instructions: "Be brief."}
 }
 
 func TestOpenCodeTakesTurnsAndAnswersInOneServer(t *testing.T) {
 	proc := startOpenCode(t, `{"session":"ses_1","steps":[
 		{"dir":"http","msg":{"call":"POST /session","body":{},"res":{"id":"$session"}}},
 		{"dir":"http","msg":{"call":"POST /session/ses_1/prompt_async","body":{"system":"Be brief.","parts":[{"type":"text","text":"hello"}]},"status":204}},
-		{"dir":"sse","msg":{"type":"message.part.updated","properties":{}}},
+		{"dir":"sse","msg":{"type":"message.part.updated","properties":{"part":{"text":"`+strings.Repeat("x", 70000)+`"}}}},
 		{"dir":"sse","msg":{"type":"permission.asked","properties":{"id":"per_1","sessionID":"$session","permission":"bash","patterns":["git status"]}}},
 		{"dir":"http","msg":{"call":"POST /permission/per_1/reply","body":{"reply":"reject"}}},
 		{"dir":"http","msg":{"call":"POST /session/ses_1/abort","body":{}}},
 		{"dir":"sse","msg":{"type":"session.error","properties":{"sessionID":"$session","error":{"name":"MessageAbortedError"}}}},
+		{"dir":"sse","msg":{"type":"session.error","properties":{"sessionID":"ses_child","error":{"name":"ProviderAuthError"}}}},
 		{"dir":"sse","msg":{"type":"session.idle","properties":{"sessionID":"ses_child"}}},
 		{"dir":"sse","msg":{"type":"session.idle","properties":{"sessionID":"$session"}}},
 		{"dir":"http","msg":{"call":"POST /session/ses_1/prompt_async","body":{"parts":[{"type":"text","text":"again"}]}}},
@@ -101,4 +101,20 @@ func TestOpenCodeStartRefusals(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	_, err = openCodeDriver{}.Start(context.Background(), openCodeLaunch(t, "", 1))
 	codexWantErr(t, err)
+}
+
+func TestOpenCodeEnvPinsLevelShimAndRepoConfig(t *testing.T) {
+	mcp := `"mcp":{"solodawn":{"command":["solodawn","mcp"],"type":"local"}}`
+	group := openCodeLaunch(t, "", 1)
+	task := openCodeLaunch(t, "", 3)
+	task.RepoConfig = true
+	codexEqual(t, openCodeEnv(group, "pw"), []string{
+		"OPENCODE_SERVER_PASSWORD=pw",
+		`OPENCODE_CONFIG_CONTENT={` + mcp + `,"permission":{"bash":"deny","edit":"deny"}}`,
+		"OPENCODE_DISABLE_PROJECT_CONFIG=1",
+	})
+	codexEqual(t, openCodeEnv(task, "pw"), []string{
+		"OPENCODE_SERVER_PASSWORD=pw",
+		`OPENCODE_CONFIG_CONTENT={` + mcp + `,"permission":{"bash":"allow","doom_loop":"allow","edit":"allow","external_directory":"allow","webfetch":"allow"}}`,
+	})
 }

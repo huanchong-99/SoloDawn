@@ -4,12 +4,9 @@ import { flushSync } from 'svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import { expect, vi } from 'vitest';
 import { find, Home, homes } from '../src/lib/groups.svelte';
-import { goldens } from '../src/lib/mock';
 import type { Path, Source } from '../src/lib/net.svelte';
 import { nodes } from '../src/lib/nodes.svelte';
-import type { AccountKind } from '../src/lib/onboard.svelte';
-import * as p from '../src/lib/proto';
-import { example, TestHome } from './home';
+import { example, ownedNode, type OwnedNode } from './home';
 import { all, closePage, go, one, openPage, texts } from './page';
 
 const feature = await loadFeature('../features/web_nodes.feature');
@@ -32,80 +29,9 @@ vi.mock('../src/lib/net.svelte', async (actual) => {
   };
 });
 
-interface Rig {
-  home: TestHome;
-  store: Home;
-  device: string;
-  info: p.HostInfo;
-  commands: p.Envelope[];
-  connect(): Promise<void>;
-  drop(): void;
-}
-
-const user: string = JSON.parse(goldens['row-member-human']).user;
-const sign = async (payload: string) => ({ p: payload, k: 'this-browser', s: 'signature' });
-
-function makeNode(name: string, device: string, overrides: Partial<p.HostInfo> = {}): Rig {
-  const home = new TestHome(name);
-  const store = new Home({ user, sign });
-  const commands: p.Envelope[] = [];
-  let drop = () => {};
-
-  const info: p.HostInfo = {
-    ...p.decode(p.HostInfo, goldens['host-info-answer']),
-    device,
-    name,
-    ...overrides,
-  };
-
-  return {
-    home,
-    store,
-    device,
-    info,
-    commands,
-    async connect() {
-      const link = store.connect();
-      const base = home.connect(link.push);
-      function handleCmd(env: p.Envelope): p.CmdResult | undefined {
-        const parsed = JSON.parse(env.p) as { t: string; agent?: string; account?: AccountKind };
-        if (parsed.t === 'pair.browser') {
-          commands.push(env);
-          return p.decode(p.CmdResult, goldens['cmd-pair-link']);
-        }
-        if (parsed.t !== 'agent.set') return undefined;
-        commands.push(env);
-        const entry = info.agents.find((item) => item.agent === parsed.agent);
-        if (entry && parsed.account) entry.account = parsed.account;
-        return { re: 1, ok: true };
-      }
-      const ctl = {
-        request: async (req: { t: string; env?: p.Envelope }) => {
-          if (req.t === 'host.info') return structuredClone(info);
-          const cmdAnswer = req.t === 'cmd' && req.env ? handleCmd(req.env) : undefined;
-          return cmdAnswer ?? base.ctl.request(req as never);
-        },
-      } as p.Ctl;
-      drop = () => {
-        base.close();
-        link.offline();
-      };
-      const welcome = (await base.ctl.request({
-        t: 'hello',
-        v: 1,
-        kind: 'browser',
-        name: 'test',
-        addrs: [],
-      })) as p.Welcome;
-      link.online(ctl, { ...welcome, device });
-    },
-    drop: () => drop(),
-  };
-}
-
 describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
-  let workstation: Rig;
-  let windowsBox: Rig;
+  let workstation: OwnedNode;
+  let windowsBox: OwnedNode;
 
   AfterEachScenario(async () => {
     await closePage();
@@ -121,7 +47,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     'The indicator shows all four states, names them for screen readers, and shows in phone chats',
     ({ Given, When, Then, And }) => {
       Given('an owned computer "workstation" that hosts the group "Website"', async () => {
-        workstation = makeNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q');
+        workstation = ownedNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q');
         workstation.home.add(website, 'Website');
         homes.push(workstation.store);
         await workstation.connect();
@@ -210,7 +136,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Given(
         'an owned computer "workstation" on "macOS 15.2" running "v0.3.1" with direct path 4 ms and group "Website"',
         async () => {
-          workstation = makeNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q', {
+          workstation = ownedNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q', {
             relay: null,
           });
           workstation.home.add(website, 'Website');
@@ -224,7 +150,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       And(
         'an owned computer "windows-box" on "Windows 11" running "v0.3.1" on a relayed path for 26 minutes with a limited AI in "Website"',
         async () => {
-          windowsBox = makeNode('windows-box', 'W9Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q', {
+          windowsBox = ownedNode('windows-box', 'W9Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q', {
             os: 'Windows 11',
             version: 'v0.3.1',
             open: 1,
@@ -377,7 +303,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Given(
         'an owned computer "workstation" on "macOS 15.2" running "v0.3.1" with direct path 4 ms and group "Website"',
         async () => {
-          workstation = makeNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q');
+          workstation = ownedNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q');
           workstation.home.add(website, 'Website');
           homes.push(workstation.store);
           await workstation.connect();
@@ -460,7 +386,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       When('an owned computer "workstation" connects with 3 open AIs', async () => {
-        workstation = makeNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q', {
+        workstation = ownedNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q', {
           open: 3,
           max_open: 4,
         });

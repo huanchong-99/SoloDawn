@@ -23,6 +23,59 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `host.CheckTakeover` (`internal/host/caps.go`) is not yet wired to a `Surface["takeover.start"]` handler, and `Host.Agents` (`internal/host/agents.go`) does not yet populate a `driver` field on `proto.HostAgent` in `host.info`.
 - Cause: `HS-20` (terminal takeover) is built on a parallel wave-3 branch (`Surface["takeover.start"]` is not on `rebuild` yet), and `planning/contracts/step-3/drivers.md` section 6 / `planning/steps/parallel-plan-step-2-3.md` row `T3-1` assign freezing `driver` on the wire to `P-5` and putting `driver` into `host.info` to `T3-2`.
 - Status: open until `HS-20` calls `host.CheckTakeover` in `takeover.start`. The `driver` half is resolved by `T3-2` (`internal/host/agents.go`, `agtDriverProto`).
+- Status: the `takeover.start` half is resolved in T3-1 (#275): `takeover.start` calls `checkTakeover` first and uses its `assignFirst`. Open until `T3-2` adds `driver` to `host.info`.
+### 2026-11-22 · limitation · A hand-back that starts while the node is stopping is lost
+
+- Symptom: when the node is stopped with a terminal open and the interactive CLI exits at once, the hand-back can reach `Runner.Turn` after `settleRuntime` has begun. The start is refused, the session goes `dormant`, and nothing is posted because the home connection is already closed, so the next start does not hand the session back as `planning/flows/takeover.md` section E says.
+- Cause: `Close` closes the sockets first (`internal/node/node.go`), which closes the owner's terminal and starts the hand-back before `Settle`; a refused start moves the row to `dormant` (`startFromDormant` in `internal/host/run.go`), and `handBackSaved` (`internal/host/takeover.go`) only finds rows left in `takeover`.
+- Status: open, accepted (coordinator, 2026-11-22, HS-20 review): rare, no code.
+
+### 2026-11-22 · limitation · `max_open` is not applied when a takeover starts
+
+- Symptom: a takeover of an AI whose open sessions are already at `max_open` opens its session anyway, so one session more than `max_open` can be open (`planning/flows/agent-turn.md` step 5.1).
+- Cause: `takeoverStart` and `openSession` (`internal/host/takeover.go`) take no `max_open` slot; the hand-back turn takes none either, because a taken-over session already counts as open (`startHandBack` in `internal/host/run.go`).
+- Status: open, accepted (coordinator, 2026-11-22, HS-20 review): least code.
+
+### 2026-11-22 · deviation · `host.offline` leaves an open terminal open
+
+- Symptom: `host.offline` closes the structured sessions only; a terminal opened by takeover stays open, its member stays `takeover`, and `takeover.start` is accepted while offline. `planning/contracts/commands.md` (`host.offline`) says every session is closed.
+- Cause: `handleHostOffline` (`internal/host/limits.go`) closes structured CLIs only. The terminal is the owner's own work; going offline only stops AI turns.
+- Status: by design (coordinator, 2026-11-22, HS-20 review, decision 2). When such a terminal closes, the hand-back starts no AI turn while the AI is held (offline or rate limited): the session goes `dormant` and the host posts the facts (`handBackTurn` in `internal/host/takeover.go`).
+
+### 2026-11-22 · limitation · A screen reader does not read what the terminal prints
+
+- Symptom: on `#/terminal/<g>/<member>` a screen reader reaches the terminal's input field and its description, but hears nothing of what the AI's CLI prints.
+- Cause: xterm.js exposes the screen to assistive technology only with its `screenReaderMode` option, which `web/src/routes/Terminal.svelte` (the `new XTerm({ … })` options) leaves off.
+- Status: open, found in U-16b and left out of its fixed scope. `screenReaderMode: true` is the one-line change; it was not measured with a CLI that redraws its screen.
+
+### 2026-11-22 · limitation · A waiting notification covers "Hand back" on a phone's terminal
+
+- Symptom: on the terminal page below 768 px, an in-page notification that waits on the reader lies over the takeover bar, "Hand back" included, until it is opened or closed (measured in Chrome at 390 px: notification 12 to 378 by 64 to 130, "Hand back" 272 to 374 by 62 to 106). From 768 px it overlaps the button by at most 14 px.
+- Cause: the stack hangs under the page's own head (`web/src/components/notify/Notifications.svelte`, the rule for `.app[data-full='phone']`), and the takeover bar is the first thing under that head.
+- Status: open, found in U-16b, whose scope names the chat only. The notification's own close button stays reachable.
+
+### 2026-11-22 · limitation · Faint text in an ANSI colour stays below 4.5 to 1 in the terminal
+
+- Symptom: text a CLI prints faint (SGR 2) in one of the sixteen colours is drawn at half that colour's opacity: 2.8 to 1 (red) to 3.5 to 1 (green) on the terminal's background, for the four colours the page's theme sets. Faint text in the default colour is 5.6 to 1.
+- Cause: xterm.js halves the opacity of faint text (`DomRenderer.ts`, the `.xterm-dim` rules); `web/src/routes/Terminal.svelte` replaces only the default colour's rule with `--term-dim`, since one grey for every colour would drop the colour.
+- Status: open, accepted in U-16b: the colours are the CLI's own.
+### 2026-11-22 · limitation · A denied call draws as waiting
+
+- Symptom: a `call` message whose state is `denied` (`row-msg-call-denied`, frozen by P-4a) shows the waiting line and the waiting state in the call area.
+- Cause: `callView` treats every status other than `answered` as waiting (`web/src/lib/call.ts:78`). The states sheet therefore lists three call rows, and `web/features/call.spec.ts` expects them.
+- Status: open, accepted for P-4a. Resolved when U2-2 draws a denied call.
+
+### 2026-11-22 · limitation · A9.21 lacks a same-connection network-switch driver
+
+- Symptom: the original fixture opened a new relay-only connection instead of moving an established watch to TURN.
+- Cause: a transport-only probe with controlling ICE, renomination, warm relay pairs and bidirectional filtering on every watcher UDP socket kept the direct pair selected. Pion's automatic selector retained that pair; the binding-request selector also failed to move both ends. This is fixture evidence, not an end-to-end watch result.
+- Status: open. Experimental transport code was removed. A9.21 stays pending with direct-watch, same-PeerConnection relay observation, closure and original-ctl assertions; `waitForRelay` in `features/s2_watch_terminal_test.go` observes but does not drive migration. See `features/s2_watch.md`.
+
+### 2026-11-22 · deviation · A9.26 live M5 forge coverage awaits a configured live run
+
+- Symptom: the original live fixture checked two remote filenames without reusing M5's forge steps or inspecting request heads.
+- Cause: A9.26 used the subprocess fixture instead of M5's two-task forge flow.
+- Status: A9.26 now reuses the applicable M5 steps with live custom templates and independently inspects both request IDs and reviewed heads. Open until an opt-in run with `SOLODAWN_S2_LIVE_FORGE` completes; inspection is test-only, documented in `features/s2_watch.md`.
 
 ### 2026-11-21 · deviation · The `rounds_limit` system message has an id derived from the triggering post's nonce
 
@@ -35,6 +88,16 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a home restart forgets which quiet periods already notified the secretary and can send one more `quiet` notice if an active task stays silent across the restart.
 - Cause: row 23 writes no row (`planning/contracts/task-machine.md` row 23), so `After["quiet"]` records each notified task's last-activity timestamp in the group's `State.quiet` in memory (`rndRememberQuiet` in `internal/home/rounds.go:121`, `internal/home/home.go:69`).
 - Status: open, accepted in step 1.
+
+### 2026-11-22 · deviation · `driver` in `host.info` is optional until T3-2 fills it
+
+- Symptom: `planning/contracts/step-3/drivers.md` section 6 says each entry of `agents` carries `driver` always, but the frozen shape lets it be absent: Go `Driver *Driver` with `omitempty` (`internal/proto/host.go`, `HostAgent`), TS `v.optional(Driver)` (`web/src/lib/proto.ts`, `HostState.agents`), and `agents.driver` under `optional` in `internal/proto/testdata/wire.json`.
+- Cause: nothing on rebuild fills `driver` yet; a required field now would make the web client reject every real `host.info` until T3-2 lands. P-5 froze `driver` as `accounts` and `takeover` only; the other declaration fields stay in the host's table (coordinator, 2026-11-22).
+- Status: open, accepted for P-5. T3-2, the pull request that fills `driver` for every agent, makes it required: Go: the `Driver` field (JSON `driver`) (value type, no `omitempty`), TS `driver: Driver`, regenerate `wire.json` with `go test ./internal/proto -update`, and drop "once populated" from `internal/proto/README.md` (the `host.info` bullet). Also accepted: P-5 does not freeze the tool lists in `internal/proto/testdata/tools.json` (`planning/contracts/step-3/knowledge.md` section 7), because `internal/host` tests require it to equal the registered schemas; T3-5 adds `note_list` `type` and `propose_brief` `preset`, T3-6 adds `kb_put` and `kb_search` to all five lists, and the two merge with `go test ./internal/proto -update`.
+
+### 2026-11-22 · limitation · Existing stores do not get the `row_named` index
+
+- Symptom, cause and status: T3-5 added `row_named` to migration 1 in place (`internal/store/schema.sql`), so a store created before it keeps working without the index and a preset lookup scans the group's notes instead; accepted before 1.0, since migrations are cut.
 
 ### 2026-11-22 · limitation · Web Push VAPID `sub` URL is not yet checked against Apple's push service
 
@@ -115,11 +178,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `planning/flows/agent-turn.md` step 5.1 places `max_open` (closing the longest-`waiting` session, or waiting when every open session is `working` or `takeover`) in the session runtime (`HS-15`, #187, `tryReserveSlot`), so delivery does not duplicate it; `Deliver` (`deliverNow` in `internal/host/deliver.go`) walks all held AI keys on each wake so a freed slot reaches waiting AIs.
 - Status: open, coordinated between HS-13 (#186) and HS-15 (#187).
 
-### 2026-11-21 · limitation · `member/status` refuses `cap_reached` and `rate_limited` while `HS-18` is postponed
+### 2026-11-21 · limitation · `member/status` refuses `cap_reached` while `settings.set` is postponed
 
-- Symptom: a `member status` carrying host event code `cap_reached` or `rate_limited` (`planning/contracts/commands.md` section 1.9; `planning/contracts/messages.md` section 2.11) is answered `bad_request` ("unknown host event code").
-- Cause: `internal/home/cmd_hostev.go` (`hevEventReaders`) handles only the three step-1 host codes that `HS-15` sends (`turn_interrupted`, `login_invalid`, `session_replaced`), per the coordinator's decision of 2026-11-21 removing caps and rate limits from the main line.
-- Status: open until `HS-18` brings usage caps and rate-limit events back.
+- Symptom: a `member status` carrying host event code `cap_reached` (`planning/contracts/commands.md` section 1.9; `planning/contracts/messages.md` section 2.11) is answered `bad_request` ("unknown host event code").
+- Cause: nothing in 1.0 can set `agent.caps`: `settings.set`, its only writer, is postponed after 1.0 (`planning/contracts/commands.md`), so `HS-18` sends no `cap_reached` and `internal/home/cmd_hostev.go` (`hevEventReaders`) reads `rate_limited` but not `cap_reached` (coordinator's decision of 2026-11-22).
+- Status: open until `settings.set` comes back with caps.
 
 ### 2026-11-21 · limitation · Reassigning a task's assignee also marks a reviewer's pending approval card `reassigned`
 
@@ -161,7 +224,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: `Surface` (`internal/node/surface.go`) answers `host.info` requests with `HostState` and sends no `host.info` pushes (no `host.info` push yet), and every `AgentGroup.Queued` entry in `host.info` is `0` (`internal/node/surface.go:154`).
 - Cause: `settings.set` is postponed with `U-12`, the 1.0 web client requests `host.info` on connect and after `agent.set`, and held items are held on the home (`not_before`, `HM-7`) rather than counted on the host.
-- Status: open, accepted for 1.0 (`N-3`). The web client shows no held count: the terminal page and the card of an AI in takeover say that messages to it wait until hand-back (`U-11`, coordinator 2026-11-22; `planning/flows/takeover.md` step 9).
+- Status: open for the push, accepted for 1.0 (`N-3`). `queued` counts the items the host holds since HS-20 (`Host.QueuedCount`, `internal/host/deliver.go`). The web client shows no held count: the terminal page and the card of an AI in takeover say that messages to it wait until hand-back (`U-11`, coordinator 2026-11-22; `planning/flows/takeover.md` step 9).
 
 ### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
 
@@ -248,7 +311,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: `tools.json` lists `handback` among the kinds of `post` in every session a takeover can reach (the secretary's, review and task sessions), because a tool list is fixed per session, not per turn. `planning/contracts/mcp-tools.md` section 1 allows it only in a hand-back turn, so a model can call it in any turn of those sessions.
 - Cause: `tools/list` is read once per session (`internal/proto/tools_test.go`, `toolLists`; `planning/contracts/mcp-tools.md` section 5).
-- Status: open. Terminal takeover is postponed off the main line, so `post` with kind `handback` answers `bad_request` (`internal/host/tools_talk.go`, `checkPostKind`); the hand-back path comes back with takeover.
+- Status: open, by design: `post` refuses `handback` outside a hand-back turn with `bad_request` (`internal/host/tools_talk.go`, `checkPostKind`, HS-20).
 
 ### 2026-11-20 · limitation · A task stopped by its sixth failed review is reviewed again when it is resumed
 
@@ -632,7 +695,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: when the owner hands the secretary's terminal back and a `handback` message is posted in the main line signed for the secretary, the home queued a `notice` (`code: handback`) for `group.secretary`, waking the secretary again for the summary it or its host just posted.
 - Cause: `planning/contracts/commands.md` 1.3 specified `item notice for the secretary` on `handback` without an exception when `as` is the secretary.
-- Status: resolved on branch `gemini/HM-6` (#181): `post` of kind `handback` is removed from `internal/home/cmd_post.go` and marked postponed with takeover in `planning/contracts/commands.md` 1.3, and `planning/contracts/commands.md` 1.3 now states the general rule that a post never queues an item for its own author (`postWakes` skips `msg.By`; tested in `internal/home/cmd_post_test.go`).
+- Status: resolved. `gemini/HM-6` (#181) removed `post` of kind `handback` with takeover and made `planning/contracts/commands.md` 1.3 state that a post never queues an item for its own author (`postWakes` skips `msg.By`; tested in `internal/home/cmd_post_test.go`). HS-20 (#273) brings `handback` back: a hand-back queues the `notice` only when it is posted in a thread (`postHandback` in `internal/home/cmd_post.go`; `planning/contracts/commands.md` 1.3), so the secretary's own main-line hand-back queues none.
 
 ### 2026-11-21 · deviation · `web/src/lib/peer.ts` had no method to send a `ctl` push
 

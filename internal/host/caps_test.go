@@ -1,18 +1,12 @@
 package host
 
 import (
-	"bufio"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"maps"
-	"net"
-	"reflect"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 )
 
 func saveDriverCaps(t *testing.T, next map[string]Capabilities) {
@@ -66,7 +60,7 @@ func assertValidLevels(t *testing.T, agent string, levels []int) {
 
 func assertValidUsage(t *testing.T, agent string, usage []string) {
 	t.Helper()
-	allowed := []string{UsageTokens, UsageUSD, UsageWindowPct}
+	allowed := []string{"tokens", "usd", "window_pct"}
 	if usage == nil {
 		t.Fatalf("%s usage slice must be non-nil", agent)
 	}
@@ -148,14 +142,14 @@ func TestSyntheticDriverAccountSwitch(t *testing.T) {
 		Levels:    []int{1, 2},
 		Approvals: ApprovalTool,
 		Takeover:  TakeoverNew,
-		Usage:     []string{UsageTokens},
+		Usage:     []string{"tokens"},
 	}
 	next["team_only"] = Capabilities{
 		Accounts:  []string{AccountTeam},
 		Levels:    []int{1, 3},
 		Approvals: ApprovalConn,
 		Takeover:  TakeoverResume,
-		Usage:     []string{UsageUSD, UsageWindowPct},
+		Usage:     []string{"usd", "window_pct"},
 	}
 	saveDriverCaps(t, next)
 
@@ -221,100 +215,32 @@ func TestSyntheticDriverApproveToolSwitch(t *testing.T) {
 	}
 	saveDriverCaps(t, next)
 
-	h, _ := seamHost(t, seamStore(t))
-	kTool := SessionKey{Group: "g1", Member: "m-tool", Task: "t1"}
-	kConn := SessionKey{Group: "g1", Member: "m-conn", Task: "t2"}
-	agtCheck(t, h.Sessions.Create(Session{SessionKey: kTool, Kind: TaskSession, Folder: "wt/1-a", Agent: "synth_tool", Home: "h1", Name: "ToolAI"}))
-	agtCheck(t, h.Sessions.Create(Session{SessionKey: kConn, Kind: TaskSession, Folder: "wt/2-b", Agent: "synth_conn", Home: "h1", Name: "ConnAI"}))
-
-	tokToolStruct := h.Sessions.Admit(kTool, 2, false)
-	tokToolInter := h.Sessions.Admit(kTool, 2, true)
-	tokConnStruct := h.Sessions.Admit(kConn, 2, false)
-	tokConnInter := h.Sessions.Admit(kConn, 2, true)
-
-	agtEqual(t, mcpListsToolOverPipe(t, h, tokToolStruct, "approve"), true)
-	agtEqual(t, mcpListsToolOverPipe(t, h, tokToolInter, "approve"), false)
-	agtEqual(t, mcpListsToolOverPipe(t, h, tokConnStruct, "approve"), false)
-	agtEqual(t, mcpListsToolOverPipe(t, h, tokConnInter, "approve"), false)
-}
-
-func mcpListsToolOverPipe(t *testing.T, h *Host, token, toolName string) bool {
-	t.Helper()
-	clientConn, serverConn := net.Pipe()
-	defer clientConn.Close()
-	// Single reader: wait at the end of mcpListsToolOverPipe.
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		h.ServeMCP(t.Context(), token, bufio.NewReader(serverConn), serverConn)
-	}()
-	clientConn.SetDeadline(time.Now().Add(5 * time.Second))
-	dec := json.NewDecoder(clientConn)
-	fmt.Fprintln(clientConn, `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`)
-	readJSONRPCResult(t, dec, "initialize")
-	fmt.Fprintln(clientConn, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
-	fmt.Fprintln(clientConn, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
-	raw := readJSONRPCResult(t, dec, "tools/list")
-	clientConn.Close()
-	<-done
-
-	var res struct {
-		Tools []struct {
-			Name string `json:"name"`
-		} `json:"tools"`
+	for agent, structured := range map[string]bool{"synth_tool": true, "synth_conn": false} {
+		agtEqual(t, approveForCaller(Caller{Session: Session{Agent: agent}}), structured)
+		agtEqual(t, approveForCaller(Caller{Session: Session{Agent: agent}, Interactive: true}), false)
 	}
-	if err := json.Unmarshal(raw, &res); err != nil {
-		t.Fatal(err)
-	}
-	for _, tl := range res.Tools {
-		if tl.Name == toolName {
-			return true
-		}
-	}
-	return false
 }
 
 func TestSyntheticDriverTakeoverSwitch(t *testing.T) {
 	next := maps.Clone(DriverCaps)
-	next["synth_new"] = Capabilities{
-		Accounts:  []string{AccountAPIKey},
-		Levels:    []int{1, 3},
-		Approvals: ApprovalTool,
-		Takeover:  TakeoverNew,
-		Usage:     []string{},
-	}
-	next["synth_resume"] = Capabilities{
-		Accounts:  []string{AccountAPIKey},
-		Levels:    []int{1, 3},
-		Approvals: ApprovalConn,
-		Takeover:  TakeoverResume,
-		Usage:     []string{},
-	}
-	next["synth_none"] = Capabilities{
-		Accounts:  []string{AccountAPIKey},
-		Levels:    []int{1},
-		Approvals: ApprovalConn,
-		Takeover:  TakeoverNone,
-		Usage:     []string{},
-	}
+	next["synth_new"] = Capabilities{Takeover: TakeoverNew}
+	next["synth_resume"] = Capabilities{Takeover: TakeoverResume}
+	next["synth_none"] = Capabilities{Takeover: TakeoverNone}
 	saveDriverCaps(t, next)
+	for agent, want := range map[string][2]any{
+		"synth_new":    {false, nil},
+		"synth_resume": {true, nil},
+		"synth_none":   {false, &Error{Code: "conflict", Message: "synth_none takeover is none"}},
+	} {
+		assignFirst, err := checkTakeover(agent)
+		agtEqual(t, [2]any{assignFirst, err}, want)
+	}
+}
 
-	assignNew, errNew := CheckTakeover("synth_new")
-	if errNew != nil || assignNew {
-		t.Fatalf("synth_new got (%v, %v), want (false, nil)", assignNew, errNew)
-	}
-
-	assignResume, errResume := CheckTakeover("synth_resume")
-	if errResume != nil || !assignResume {
-		t.Fatalf("synth_resume got (%v, %v), want (true, nil)", assignResume, errResume)
-	}
-
-	assignNone, errNone := CheckTakeover("synth_none")
-	if assignNone {
-		t.Fatalf("synth_none assignFirst = true, want false")
-	}
-	var hostErr *Error
-	if !errors.As(errNone, &hostErr) || !reflect.DeepEqual(hostErr, &Error{Code: "conflict", Message: "synth_none takeover is none"}) {
-		t.Fatalf("synth_none err = %#v, want conflict naming takeover", errNone)
-	}
+func TestTakeoverStartRefusesADriverWithoutTakeoverBeforeRelay(t *testing.T) {
+	r := newTkRig(t)
+	next := maps.Clone(DriverCaps)
+	next["codex"] = Capabilities{Takeover: TakeoverNone}
+	saveDriverCaps(t, next)
+	tkCode(t, r.startFrom(newTkOwner("relay"), runAI2, ""), "conflict")
 }

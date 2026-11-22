@@ -48,12 +48,17 @@ func serverAddress(out io.Reader) string {
 	return ""
 }
 
-// readSSE calls handle with the data of each event of an event stream.
+// readSSE calls handle with the data of each event of an event stream. It
+// reads with bufio.Reader, so an event has no size limit.
 func readSSE(stream io.Reader, handle func(data []byte)) {
-	events := bufio.NewScanner(stream)
-	for events.Scan() {
-		if data, ok := strings.CutPrefix(events.Text(), "data: "); ok {
-			handle([]byte(data))
+	events := bufio.NewReader(stream)
+	for {
+		line, err := events.ReadString('\n')
+		if err != nil {
+			return
+		}
+		if data, ok := strings.CutPrefix(line, "data: "); ok {
+			handle([]byte(strings.TrimSpace(data)))
 		}
 	}
 }

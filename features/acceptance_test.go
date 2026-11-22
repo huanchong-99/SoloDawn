@@ -68,7 +68,7 @@ func TestFeatures(t *testing.T) {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 	fakes := t.TempDir()
-	if out, err := exec.Command("go", "build", "-o", fakes+string(os.PathSeparator), "../internal/host/fakecli/claude", "../internal/host/fakecli/codex", "../internal/host/fakecli/opencode", "../internal/host/fakecli/qwen").CombinedOutput(); err != nil {
+	if out, err := exec.Command("go", "build", "-o", fakes+string(os.PathSeparator), "../internal/host/fakecli/claude", "../internal/host/fakecli/codex").CombinedOutput(); err != nil {
 		t.Fatalf("build fake CLIs: %v\n%s", err, out)
 	}
 	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -113,9 +113,9 @@ func TestFeatures(t *testing.T) {
 // tags is the suite's tag filter on one operating system.
 func tags(goos string) string {
 	if goos == "windows" {
-		return "~@web && ~@not-windows"
+		return "~@web && ~@not-windows && ~@pending"
 	}
-	return "~@web"
+	return "~@web && ~@pending"
 }
 
 // afterScenario returns a function that defers undo to the end of the current

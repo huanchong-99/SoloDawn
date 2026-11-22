@@ -53,5 +53,7 @@
   "member.state.working": "Working",
   "member.terminal": "Open terminal",
   "member.terminal.offline": "Computer offline",
-  "member.terminal.relay": "Direct link only"
+  "member.terminal.relay": "Direct link only",
+  "member.usage.resets": "Resets {time}",
+  "member.usage.window": "Window used"
 }

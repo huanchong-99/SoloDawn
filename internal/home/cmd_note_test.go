@@ -28,6 +28,7 @@ type noteDisk struct {
 
 func (d noteDisk) Msg(id string) (proto.MsgRow, bool)        { m, ok := d.msgs[id]; return m, ok }
 func (d noteDisk) Note(id string) (proto.NoteRow, bool)      { n, ok := d.notes[id]; return n, ok }
+func (d noteDisk) TypedNotes(string) []proto.NoteRow         { return nil }
 func (d noteDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d noteDisk) Pending() []proto.MsgRow                   { return nil }
 func (d noteDisk) Queued() []store.Item                      { return nil }

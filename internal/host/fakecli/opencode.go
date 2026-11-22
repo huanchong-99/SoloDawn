@@ -49,6 +49,7 @@ func (o *openCode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.(http.Flusher).Flush()
 		lines := bufio.NewScanner(o.sse)
+		lines.Buffer(nil, 1<<20)
 		for lines.Scan() {
 			fmt.Fprintf(w, "data: %s\n\n", lines.Bytes())
 			w.(http.Flusher).Flush()
