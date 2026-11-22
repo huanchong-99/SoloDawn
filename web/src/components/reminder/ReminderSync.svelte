@@ -16,10 +16,7 @@
   function openTarget(next: ReminderTarget) {
     target = next;
     const chatHash = href('chat', { g: next.g });
-    if (location.hash !== chatHash) {
-      location.hash = chatHash;
-      dispatchEvent(new HashChangeEvent('hashchange', { newURL: location.href }));
-    }
+    if (location.hash !== chatHash) location.hash = chatHash;
   }
 
   onMount(() => {

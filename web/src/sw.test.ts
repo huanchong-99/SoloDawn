@@ -150,23 +150,6 @@ describe('service worker events', () => {
     ]);
   });
 
-  it('closes the notification and ignores clicks missing group or message ids', async () => {
-    const rig = makeScope();
-    for (const data of [
-      undefined,
-      { msg: 'm1' },
-      { g: 'g1' },
-      { g: '', msg: 'm1' },
-      { g: 'g1', msg: '' },
-    ]) {
-      const close = vi.fn();
-      await rig.fire('notificationclick', { notification: { data, close } });
-      expect(close).toHaveBeenCalledTimes(1);
-    }
-    expect(rig.matchAll).not.toHaveBeenCalled();
-    expect(rig.opened).toEqual([]);
-  });
-
   it('focuses an open window in scope and posts the reminder target', async () => {
     const outside: SwClient = {
       url: 'https://other.example/?ref=https://app.example/sub/',
@@ -205,16 +188,10 @@ describe('service worker events', () => {
     const rig = makeScope({ scope: 'https://app.example/sub/' });
     const close = vi.fn();
     await rig.fire('notificationclick', {
-      notification: { data: { g: 'g/1', msg: 'm/2' }, close },
-    });
-    await rig.fire('notificationclick', {
       notification: { data: { g: 'g/1', msg: 'm/2', kind: 'k/3' }, close },
     });
-    expect(close).toHaveBeenCalledTimes(2);
-    expect(rig.opened).toEqual([
-      'https://app.example/sub/?msg=m%2F2&kind=#/groups/g%2F1',
-      'https://app.example/sub/?msg=m%2F2&kind=k%2F3#/groups/g%2F1',
-    ]);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(rig.opened).toEqual(['https://app.example/sub/?msg=m%2F2&kind=k%2F3#/groups/g%2F1']);
   });
 
   it('binds globalThis automatically only when ServiceWorkerGlobalScope exists', async () => {

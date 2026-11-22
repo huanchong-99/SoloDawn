@@ -1,14 +1,7 @@
 <script lang="ts">
   import type { Net } from '../../lib/net.svelte';
   import { t } from '../../lib/prefs.svelte';
-  import {
-    defaultPushEnv,
-    isIosDevice,
-    isStandaloneMode,
-    reminders,
-    type PushState,
-    type ReminderKind,
-  } from '../../lib/push';
+  import { defaultPushEnv, reminders, type PushState, type ReminderKind } from '../../lib/push';
   import Failure from '../Failure.svelte';
   import Icon from '../Icon.svelte';
 
@@ -33,7 +26,6 @@
     return defaultPushEnv();
   });
   const status = $derived(reminders.state(env));
-  const iosInstalled = $derived(isIosDevice(env.navigator) && isStandaloneMode(env));
   const blocked = $derived(status === 'denied' || status === 'ios' || status === 'unsupported');
 
   async function toggleSwitch(event: Event & { currentTarget: HTMLInputElement }) {
@@ -107,8 +99,8 @@
       {/if}
     </div>
   {/if}
-  {#if !iosInstalled}
-    <p class="note ios" data-tone={status === 'ios' ? 'dawn' : undefined}>
+  {#if status === 'ios'}
+    <p class="note ios" data-tone="dawn">
       <Icon name="phone" sm />
       <span>{t('reminder.ios')}</span>
     </p>
@@ -151,9 +143,14 @@
       cursor: not-allowed;
     }
   }
+  .set-row:has(.stack) > div:first-child {
+    flex: none;
+  }
   .stack {
     display: flex;
+    flex: 1;
     flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 6px var(--sp-4);
   }
   .check {
@@ -185,6 +182,9 @@
       flex-direction: column;
       align-items: stretch;
       gap: var(--sp-2);
+    }
+    .stack {
+      justify-content: flex-start;
     }
   }
 </style>

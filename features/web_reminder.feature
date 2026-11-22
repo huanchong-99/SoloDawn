@@ -15,6 +15,7 @@ Feature: Browser push reminders and iOS Home Screen hint
     And the home "workstation" holds the group "Website"
     When the person opens the client at "#/settings"
     Then the browser notifications status reads "Off in this browser"
+    And the Home Screen note is not shown on a desktop browser
     When the person turns browser notifications on
     Then the browser notifications status reads "Allowed in this browser"
     And the service worker "./sw.js?lang=en" is registered with a valid VAPID subscription
@@ -46,6 +47,6 @@ Feature: Browser push reminders and iOS Home Screen hint
     Given an iPhone browser tab that has not been added to the Home Screen
     When the person opens the client at "#/settings"
     Then the browser notifications switch is disabled with status "Add to Home Screen first"
-    And the highlighted Home Screen note explains notifications and keeping the browser key past seven days
+    And the highlighted Home Screen note explains notifications and keeping the browser key after seven days without a visit
     When the same iPhone opens SoloDawn from the Home Screen with Web Push allowed
     Then the browser notifications switch is enabled and the Home Screen note is hidden

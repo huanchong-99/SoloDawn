@@ -19,7 +19,7 @@ export interface SwClient {
 }
 
 export interface SwNotification {
-  readonly data?: Partial<ReminderTarget>;
+  readonly data: ReminderTarget;
   close(): void;
 }
 
@@ -112,10 +112,8 @@ async function onPush(scope: SwScope, raw: string | undefined): Promise<void> {
 
 async function onClick(scope: SwScope, notification: SwNotification): Promise<void> {
   notification.close();
-  const data = notification.data;
-  if (!data?.g || !data.msg) return;
+  const target = notification.data;
   const base = scope.registration.scope;
-  const target: ReminderTarget = { g: data.g, msg: data.msg, kind: data.kind ?? '' };
   const windows = await scope.clients.matchAll({ type: 'window', includeUncontrolled: true });
   const existing = windows.find((win) => win.url.startsWith(base));
   if (existing) {

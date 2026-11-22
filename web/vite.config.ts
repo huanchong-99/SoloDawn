@@ -43,15 +43,6 @@ export default defineConfig(({ mode }) => ({
     },
     {
       name: 'service-worker',
-      configureServer(server) {
-        server.middlewares.use((req, res, next) => {
-          if (req.url?.split('?')[0] !== '/sw.js') return next();
-          buildServiceWorker().then((code) => {
-            res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
-            res.end(code);
-          }, next);
-        });
-      },
       async generateBundle() {
         this.emitFile({ type: 'asset', fileName: 'sw.js', source: await buildServiceWorker() });
       },

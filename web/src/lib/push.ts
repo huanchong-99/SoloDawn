@@ -2,7 +2,7 @@
 // subscription lifecycle, and sending `push` commands to connected homes
 // (planning/contracts/commands.md section 1.7; planning/contracts/storage.md section 5).
 import type { Home } from './groups.svelte';
-import { decode, encode, type KeyStore } from './identity';
+import { decode, encode, keep, type KeyStore } from './identity';
 import { preference, prefs, type Lang, type Preference } from './prefs.svelte';
 import type * as p from './proto';
 
@@ -54,7 +54,6 @@ export interface PushEnv extends KeyStore {
 }
 
 const ecdsaP256 = { name: 'ECDSA', namedCurve: 'P-256' } as const;
-const vapidStoreKey = 'vapid';
 
 /** Default browser environment used in production and integration tests. */
 export function defaultPushEnv(): PushEnv {
@@ -96,39 +95,12 @@ export function inspectPushState(env: PushEnv, enabled: boolean): PushState {
   return permissionState(env.Notification!.permission, enabled);
 }
 
-function keepVapid(idb: () => IDBFactory, fresh: VapidKeys): Promise<VapidKeys> {
-  return new Promise((resolve, reject) => {
-    const opening = idb().open('solodawn', 1);
-    opening.onupgradeneeded = () => opening.result.createObjectStore('device');
-    opening.onerror = () => reject(opening.error);
-    opening.onsuccess = () => {
-      const db = opening.result;
-      const tx = db.transaction('device', 'readwrite', { durability: 'strict' });
-      const store = tx.objectStore('device');
-      const req = store.get(vapidStoreKey);
-      let kept = fresh;
-      req.onsuccess = () => {
-        if (req.result) kept = req.result as VapidKeys;
-        else store.add(fresh, vapidStoreKey);
-      };
-      tx.oncomplete = () => {
-        db.close();
-        resolve(kept);
-      };
-      tx.onabort = () => {
-        db.close();
-        reject(tx.error);
-      };
-    };
-  });
-}
-
 /** Loads this browser's P-256 VAPID key pair from IndexedDB, creating it once if absent. */
 export async function loadVapid({ crypto, idb }: KeyStore): Promise<VapidKeys> {
   const pair = await crypto.subtle.generateKey(ecdsaP256, true, ['sign', 'verify']);
   const pub = encode(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)));
   const jwk = await crypto.subtle.exportKey('jwk', pair.privateKey);
-  return keepVapid(idb, { pub, priv: jwk.d! });
+  return keep(idb, 'vapid', { pub, priv: jwk.d! });
 }
 
 function sameBytes(actual: ArrayBuffer | null, expected: Uint8Array): boolean {
@@ -138,13 +110,10 @@ function sameBytes(actual: ArrayBuffer | null, expected: Uint8Array): boolean {
 }
 
 function readSubscription(sub: BrowserPushSub): p.PushOn['sub'] {
-  const p256dh = sub.getKey('p256dh');
-  const auth = sub.getKey('auth');
-  if (!p256dh || !auth) throw new Error('missing push subscription keys');
   return {
     endpoint: sub.endpoint,
-    p256dh: encode(new Uint8Array(p256dh)),
-    auth: encode(new Uint8Array(auth)),
+    p256dh: encode(new Uint8Array(sub.getKey('p256dh')!)),
+    auth: encode(new Uint8Array(sub.getKey('auth')!)),
   };
 }
 

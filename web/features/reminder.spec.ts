@@ -244,6 +244,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then('the browser notifications status reads "Off in this browser"', () => {
         expect(texts('[aria-labelledby="s-noti"] .st')).toEqual(['Off in this browser']);
       });
+      And('the Home Screen note is not shown on a desktop browser', () => {
+        expect(all('[aria-labelledby="s-noti"] .note.ios')).toEqual([]);
+      });
       When('the person turns browser notifications on', async () => {
         const toggle = one<HTMLInputElement>('[aria-labelledby="s-noti"] .switch');
         toggle.checked = true;
@@ -498,12 +501,12 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       And(
-        'the highlighted Home Screen note explains notifications and keeping the browser key past seven days',
+        'the highlighted Home Screen note explains notifications and keeping the browser key after seven days without a visit',
         () => {
           const note = one('[aria-labelledby="s-noti"] .note.ios');
           expect(note.getAttribute('data-tone')).toBe('dawn');
           expect(note.textContent).toContain('add SoloDawn to your Home Screen first');
-          expect(note.textContent).toContain('past seven days');
+          expect(note.textContent).toContain('after seven days without a visit');
         },
       );
       When(

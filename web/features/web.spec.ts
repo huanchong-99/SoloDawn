@@ -176,7 +176,7 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
       // A screen reader speaks a radio's name in the language of the radio (WCAG 2.2 SC 3.1.2).
       const marks = () =>
         ['English', '简体中文'].map((name) =>
-          [...document.querySelectorAll('input')]
+          [...document.querySelectorAll<HTMLInputElement>('input[name=lang]')]
             .find((i) => i.labels![0].textContent!.trim() === name)!
             .closest('[lang]')!
             .getAttribute('lang'),
@@ -342,7 +342,7 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
         ['设置', '1'],
         ['切换深色 / 浅色', '1'],
         ['EN Switch language / 切换语言', '1'],
-        ['跟随系统', '1'],
+        ['', 'solid'],
       ]);
     });
   });

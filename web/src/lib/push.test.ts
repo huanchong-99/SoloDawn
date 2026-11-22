@@ -367,17 +367,6 @@ describe('ensurePushSubscription and dropPushSubscription', () => {
     }
   });
 
-  it('throws when PushSubscription omits p256dh or auth keys', async () => {
-    const noDh = makeEnv({ createdSub: (k) => makeSub(k.slice().buffer, { p256dh: null }) });
-    await expect(ensurePushSubscription(noDh.env, 'en')).rejects.toThrow(
-      'missing push subscription keys',
-    );
-    const noAuth = makeEnv({ createdSub: (k) => makeSub(k.slice().buffer, { auth: null }) });
-    await expect(ensurePushSubscription(noAuth.env, 'en')).rejects.toThrow(
-      'missing push subscription keys',
-    );
-  });
-
   it('drops an active subscription and tolerates missing serviceWorker, registration, or sub', async () => {
     await expect(dropPushSubscription(makeEnv({ withSw: false }).env)).resolves.toBeUndefined();
 
@@ -465,7 +454,9 @@ describe('Reminders', () => {
 
     const broken = makeEnv({
       permission: 'granted',
-      createdSub: (k) => makeSub(k.slice().buffer, { auth: null }),
+      createdSub: () => {
+        throw new DOMException('push service unavailable', 'AbortError');
+      },
     });
     expect(await store.enable([], broken.env)).toEqual({ code: 'subscribe_failed' });
     expect(store.enabled).toBe(false);

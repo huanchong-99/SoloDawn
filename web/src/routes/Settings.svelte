@@ -14,6 +14,8 @@
     </div>
   </div>
 
+  <ReminderCard {net} />
+
   <section class="card set" aria-labelledby="s-look">
     <header><h3 id="s-look">{t('settings.look')}</h3></header>
     <div class="set-row">
@@ -55,8 +57,6 @@
       </fieldset>
     </div>
   </section>
-
-  <ReminderCard {net} />
 </div>
 
 <style>

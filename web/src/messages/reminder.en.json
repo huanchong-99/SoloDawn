@@ -13,6 +13,6 @@
   "reminder.kind.approval": "An approval is needed",
   "reminder.kind.brief": "A brief awaits confirmation",
   "reminder.kind.done": "A task is done",
-  "reminder.ios": "On iPhone and iPad, add SoloDawn to your Home Screen first; notifications work after that, and Safari keeps this browser's key past seven days.",
+  "reminder.ios": "On iPhone and iPad, add SoloDawn to your Home Screen first. Notifications work after that; it also stops Safari from clearing this browser's key after seven days without a visit.",
   "reminder.error.subscribe": "Could not enable notifications in this browser."
 }
