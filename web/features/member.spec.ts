@@ -320,7 +320,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               host_name: 'laptop',
               path: 'direct',
               account: 'team',
-              usage: { window_pct: 62, window_resets: resetAt, day_cap_pct: 80 },
+              usage: { window_pct: 62, window_resets: resetAt },
             }),
           );
           h.write(
@@ -355,7 +355,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               host_name: 'laptop',
               path: 'direct',
               account: 'team',
-              usage: { day_cap_pct: 100 },
+              usage: { window_pct: 100 },
             }),
           );
           h.write(
@@ -372,7 +372,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               host_name: 'old-box',
               path: 'direct',
               account: 'api_key',
-              usage: { spend_today: 3.2, spend_cap: 10 },
+              usage: { turns_today: 3 },
             }),
           );
           flushSync();
@@ -447,39 +447,29 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           ]);
         },
       );
-      And(
-        'the cards show usage bars for window, daily cap and spend where reported, and no terminal button',
-        () => {
-          expect(all('.member').map((card) => Boolean(card.querySelector('.meter')))).toEqual([
-            true,
-            true,
-            false,
-            true,
-            true,
-          ]);
-          expect(texts('.member .meter span')).toEqual([
-            'Window used',
-            'Window used',
-            'Daily cap used',
-            "Today's spend",
-          ]);
-          expect(texts('.member .meter b')).toEqual(['18%', '62%', '100%', '$3.20 / $10']);
-          expect(all('.member .meter').map((m) => m.getAttribute('style'))).toEqual([
-            '--v: 18%;',
-            '--v: 62%;',
-            '--v: 100%;',
-            '--v: 32%;',
-          ]);
-          expect(all('.member .meter').map((m) => m.dataset.tone)).toEqual([
-            undefined,
-            undefined,
-            'danger',
-            undefined,
-          ]);
-          expect(texts('.member .meter small')).toEqual(['Resets 15:00 · Daily cap 80%']);
-          expect(all('.member button, .member a')).toEqual([]);
-        },
-      );
+      And('the cards show a window usage bar where reported, and no terminal button', () => {
+        expect(all('.member').map((card) => Boolean(card.querySelector('.meter')))).toEqual([
+          true,
+          true,
+          false,
+          true,
+          false,
+        ]);
+        expect(texts('.member .meter span')).toEqual(['Window used', 'Window used', 'Window used']);
+        expect(texts('.member .meter b')).toEqual(['18%', '62%', '100%']);
+        expect(all('.member .meter').map((m) => m.getAttribute('style'))).toEqual([
+          '--v: 18%;',
+          '--v: 62%;',
+          '--v: 100%;',
+        ]);
+        expect(all('.member .meter').map((m) => m.dataset.tone)).toEqual([
+          undefined,
+          undefined,
+          'danger',
+        ]);
+        expect(texts('.member .meter small')).toEqual(['Resets 15:00']);
+        expect(all('.member button, .member a')).toEqual([]);
+      });
       When('the dormant AI wakes to work and two other AIs go offline and hit a limit', () => {
         const h = workstation.home;
         h.write(

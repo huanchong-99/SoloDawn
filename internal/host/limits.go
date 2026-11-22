@@ -12,13 +12,17 @@ import (
 
 const (
 	codexSilentLimit = 5 * time.Minute
-	queryOfflineSQL  = `SELECT coalesce((SELECT json_extract(value, '$') FROM setting WHERE key = 'offline'), 0)`
-	queryCapsSQL     = `SELECT coalesce((SELECT caps FROM agent WHERE agent = ?), '{}')`
+	queryLimitsSQL   = `SELECT coalesce((SELECT value FROM setting WHERE key = 'offline'), 'false'),
+	(SELECT json_group_object(day || ' ' || agent, json_extract(data, '$.turns')) FROM usage)`
+	countTurnSQL = `INSERT INTO usage(agent, day, data) VALUES(?, ?, '{"turns":1}')
+	ON CONFLICT(agent, day) DO UPDATE SET data = json_set(data, '$.turns', coalesce(json_extract(data, '$.turns'), 0) + 1)
+	RETURNING json_extract(data, '$.turns')`
 )
 
 func init() {
 	Register(Surface, "host.offline", handleHostOffline)
 	Register(Surface, "host.online", handleHostOnline)
+	Register(Built, "limits", loadLimits)
 	Register(Holds, "limits", holdLimits)
 	Register(Listeners, "limits", listenLimits)
 	Register(Settled, "limits", settleLimits)
@@ -35,74 +39,69 @@ type turnWatch struct {
 	silent   *time.Timer
 }
 
-type usageTotals struct {
-	Turns     int     `json:"turns"`
-	Tokens    int64   `json:"tokens"`
-	HasTokens bool    `json:"has_tokens,omitempty"`
-	USD       float64 `json:"usd"`
-	HasUSD    bool    `json:"has_usd,omitempty"`
-}
-
-type storedDayUsage struct {
-	usageTotals
-	Tasks map[string]usageTotals `json:"tasks,omitempty"`
-}
-
 type memberHomeSlot struct {
 	home, group, member string
 }
 
-// limitsPart keeps per-host rate windows, active turn timers, hold release
-// timers and queued limit events via Part[limitsPart](h).
+// limitsPart keeps, via Part[limitsPart](h), what the member status reads
+// (offline, today's turns, rate-limit windows) in memory so that it never
+// touches the store, and the timers of running turns and rate limits.
 //
-// Lock order: mu is a strict leaf lock guarding only limitsPart maps and timer
-// handles; nothing called under mu acquires Store, Sessions, Rows, Host or
-// runtime locks.
+// Lock order: mu is a leaf lock guarding only these maps and timer handles;
+// nothing called under mu takes Store, Sessions, Rows, Host or runtime locks.
 type limitsPart struct {
 	mu         sync.Mutex
 	wg         sync.WaitGroup
+	offline    bool
 	seq        uint64
+	turns      map[string]int // by "<local day> <agent>"
 	windows    map[string]windowState
 	rateUntil  map[string]int64
 	rateTimers map[string]*time.Timer
-	dayTimers  map[string]*time.Timer
-	turns      map[SessionKey]*turnWatch
-	pendingEv  map[SessionKey]any
+	watches    map[SessionKey]*turnWatch
+	pending    map[SessionKey]proto.RateLimitedEvent
 }
 
 func limitsOf(h *Host) *limitsPart {
 	lp := Part[limitsPart](h)
 	lp.mu.Lock()
 	if lp.windows == nil {
+		lp.turns = map[string]int{}
 		lp.windows = map[string]windowState{}
 		lp.rateUntil = map[string]int64{}
 		lp.rateTimers = map[string]*time.Timer{}
-		lp.dayTimers = map[string]*time.Timer{}
-		lp.turns = map[SessionKey]*turnWatch{}
-		lp.pendingEv = map[SessionKey]any{}
+		lp.watches = map[SessionKey]*turnWatch{}
+		lp.pending = map[SessionKey]proto.RateLimitedEvent{}
 	}
 	lp.mu.Unlock()
 	return lp
 }
 
+func loadLimits(h *Host) {
+	lp := limitsOf(h)
+	var offline, turns string
+	h.Store.Write(func(tx *store.Tx) error {
+		return tx.QueryRow(queryLimitsSQL).Scan(&offline, &turns)
+	})
+	lp.mu.Lock()
+	lp.offline = offline == "true"
+	json.Unmarshal([]byte(turns), &lp.turns)
+	lp.mu.Unlock()
+}
+
 func settleLimits(h *Host) {
 	lp := limitsOf(h)
 	lp.mu.Lock()
-	stopTimerMap(lp.rateTimers)
-	stopTimerMap(lp.dayTimers)
-	for key, tw := range lp.turns {
+	for agent, t := range lp.rateTimers {
+		t.Stop()
+		delete(lp.rateTimers, agent)
+	}
+	for key, tw := range lp.watches {
 		stopWatchTimers(tw)
-		delete(lp.turns, key)
+		delete(lp.watches, key)
 	}
 	lp.mu.Unlock()
 	lp.wg.Wait()
-}
-
-func stopTimerMap(timers map[string]*time.Timer) {
-	for k, t := range timers {
-		t.Stop()
-		delete(timers, k)
-	}
 }
 
 func stopWatchTimers(tw *turnWatch) {
@@ -115,41 +114,38 @@ func stopWatchTimers(tw *turnWatch) {
 func stopTurnWatch(h *Host, key SessionKey) {
 	lp := limitsOf(h)
 	lp.mu.Lock()
-	if tw := lp.turns[key]; tw != nil {
+	if tw := lp.watches[key]; tw != nil {
 		stopWatchTimers(tw)
-		delete(lp.turns, key)
+		delete(lp.watches, key)
 	}
 	lp.mu.Unlock()
 }
 
+// takePendingLimitEvent returns the rate_limited event that arrived during
+// the session's turn, for the member status that ends the turn.
 func takePendingLimitEvent(h *Host, key SessionKey) any {
 	lp := limitsOf(h)
 	lp.mu.Lock()
-	ev := lp.pendingEv[key]
-	delete(lp.pendingEv, key)
-	lp.mu.Unlock()
+	defer lp.mu.Unlock()
+	ev, ok := lp.pending[key]
+	if !ok {
+		return nil
+	}
+	delete(lp.pending, key)
 	return ev
 }
 
 func handleHostOffline(ctx context.Context, h *Host, _ Owner, _ string, data json.RawMessage) (any, error) {
-	if err := decodeHostCommandOnly(data); err != nil {
+	if err := setOffline(h, data, true); err != nil {
 		return nil, err
 	}
-	if err := writeOfflineSetting(h, "true"); err != nil {
-		return nil, err
-	}
+	rt := stateOf(h)
 	interrupted := map[memberHomeSlot]string{}
 	for _, s := range h.Sessions.All() {
-		if task, wasTurn := closeSessionForOffline(h, s.SessionKey); wasTurn {
-			interrupted[memberHomeSlot{s.Home, s.Group, s.Member}] = task
+		if closeSession(h, rt, s.SessionKey) {
+			interrupted[memberHomeSlot{s.Home, s.Group, s.Member}] = s.Task
 		}
 	}
-	reportOfflineMembers(ctx, h, interrupted)
-	return nil, nil
-}
-
-func reportOfflineMembers(ctx context.Context, h *Host, interrupted map[memberHomeSlot]string) {
-	rt := stateOf(h)
 	for _, slot := range distinctMemberSlots(h, "") {
 		var ev any
 		if task, ok := interrupted[slot]; ok {
@@ -157,47 +153,45 @@ func reportOfflineMembers(ctx context.Context, h *Host, interrupted map[memberHo
 		}
 		sendMemberStatus(ctx, h, rt, slot.home, slot.group, slot.member, ev)
 	}
-}
-
-func handleHostOnline(ctx context.Context, h *Host, _ Owner, _ string, data json.RawMessage) (any, error) {
-	if err := decodeHostCommandOnly(data); err != nil {
-		return nil, err
-	}
-	if err := writeOfflineSetting(h, "false"); err != nil {
-		return nil, err
-	}
-	rt := stateOf(h)
-	slots := distinctMemberSlots(h, "")
-	for _, slot := range slots {
-		sendMemberStatus(ctx, h, rt, slot.home, slot.group, slot.member, nil)
-	}
-	triggerDeliverAfterHold(h, limitsOf(h), slots)
 	return nil, nil
 }
 
-func decodeHostCommandOnly(data json.RawMessage) error {
-	var cmd proto.HostCommand
-	if proto.Decode(data, &cmd) != nil {
+func handleHostOnline(ctx context.Context, h *Host, _ Owner, _ string, data json.RawMessage) (any, error) {
+	if err := setOffline(h, data, false); err != nil {
+		return nil, err
+	}
+	releaseHeld(ctx, h, "")
+	return nil, nil
+}
+
+// setOffline writes the owner's "all offline" switch to the store and to
+// memory, where holds and member status read it.
+func setOffline(h *Host, data json.RawMessage, offline bool) error {
+	if proto.Decode(data, &proto.HostCommand{}) != nil {
 		return &Error{Code: "bad_request", Message: "invalid host command payload"}
 	}
+	write := func(tx *store.Tx) error {
+		_, err := tx.Exec("INSERT OR REPLACE INTO setting(key, value) VALUES('offline', ?)", marshalWire(offline))
+		return err
+	}
+	if err := h.Store.Write(write); err != nil {
+		return err
+	}
+	lp := limitsOf(h)
+	lp.mu.Lock()
+	lp.offline = offline
+	lp.mu.Unlock()
 	return nil
 }
 
-func writeOfflineSetting(h *Host, rawBool string) error {
-	write := func(tx *store.Tx) error {
-		_, err := tx.Exec("INSERT OR REPLACE INTO setting(key, value) VALUES('offline', ?)", rawBool)
-		return err
+// releaseHeld reports the member status of the AIs of agent (every AI when
+// agent is "") and gives held items their turn.
+func releaseHeld(ctx context.Context, h *Host, agent string) {
+	rt := stateOf(h)
+	for _, slot := range distinctMemberSlots(h, agent) {
+		sendMemberStatus(ctx, h, rt, slot.home, slot.group, slot.member, nil)
 	}
-	return h.Store.Write(write)
-}
-
-func isHostOffline(h *Host) bool {
-	var raw int
-	read := func(tx *store.Tx) error {
-		return tx.QueryRow(queryOfflineSQL).Scan(&raw)
-	}
-	h.Store.Write(read)
-	return raw != 0
+	limitsOf(h).wg.Go(func() { Deliver(h, "", "") })
 }
 
 func distinctMemberSlots(h *Host, onlyAgent string) []memberHomeSlot {
@@ -213,53 +207,44 @@ func distinctMemberSlots(h *Host, onlyAgent string) []memberHomeSlot {
 	return out
 }
 
-func triggerDeliverAfterHold(h *Host, lp *limitsPart, slots []memberHomeSlot) {
-	d := Deliver
-	if d == nil {
-		return
-	}
-	var group, member string
-	if len(slots) > 0 {
-		group, member = slots[0].group, slots[0].member
-	}
-	lp.wg.Go(func() { d(h, group, member) })
-}
-
 func holdLimits(h *Host, key SessionKey) (string, bool) {
-	if isHostOffline(h) {
+	agent := memberAgent(h, key.Group, key.Member)
+	lp := limitsOf(h)
+	lp.mu.Lock()
+	defer lp.mu.Unlock()
+	if lp.offline {
 		return "offline", true
 	}
-	agent := memberAgent(h, key)
-	if agent == "" {
-		return "", false
-	}
-	lp := limitsOf(h)
-	if lp.isRateLimited(agent, h.Now().UnixMilli()) {
+	if h.Now().UnixMilli() < lp.rateUntil[agent] {
 		return "rate_limit", true
-	}
-	if agentReachedCap(h, lp, agent, key.Task) {
-		return "cap", true
 	}
 	return "", false
 }
 
-func memberAgent(h *Host, key SessionKey) string {
-	if s, ok := h.Sessions.Get(key); ok {
-		return s.Agent
+func memberAgent(h *Host, group, member string) string {
+	for _, s := range h.Sessions.All() {
+		if s.Group == group && s.Member == member {
+			return s.Agent
+		}
 	}
-	if s, ok := h.Sessions.Get(SessionKey{Group: key.Group, Member: key.Member}); ok {
-		return s.Agent
-	}
-	if ai, local, _ := lookupLocalAI(h, key.Group, key.Member); local {
-		return ai.agent
-	}
-	return ""
+	ai, _, _ := lookupLocalAI(h, group, member)
+	return ai.agent
 }
 
-func (lp *limitsPart) isRateLimited(agent string, nowMS int64) bool {
+// memberUsage is the usage of a member status: the latest rate-limit window
+// of the AI's CLI and its turns today, all read from memory.
+func memberUsage(h *Host, group, member string) proto.Usage {
+	agent := memberAgent(h, group, member)
+	today := h.Now().Format(time.DateOnly)
+	lp := limitsOf(h)
 	lp.mu.Lock()
 	defer lp.mu.Unlock()
-	return nowMS < lp.rateUntil[agent]
+	win := lp.windows[agent]
+	u := proto.Usage{WindowPct: win.pct, WindowResets: win.resets}
+	if n := lp.turns[today+" "+agent]; n > 0 {
+		u.TurnsToday = &n
+	}
+	return u
 }
 
 func listenLimits(h *Host, key SessionKey, e Event) {
@@ -271,77 +256,83 @@ func listenLimits(h *Host, key SessionKey, e Event) {
 	switch e.Kind {
 	case TurnBegan:
 		startTurnWatch(h, lp, s)
-	case RateLimited:
-		onRateLimitedEvent(h, lp, s, e.Resets)
 	case TurnEnded:
-		onTurnEndedEvent(h, lp, s, e.Usage)
+		stopTurnWatch(h, key)
+		countTurn(h, lp, s.Agent)
+	case RateLimited:
+		onRateLimited(h, lp, s, e.Resets)
 	default:
 		onTurnActivity(lp, s, e)
 	}
 }
 
 func onTurnActivity(lp *limitsPart, s Session, e Event) {
-	if e.Kind == Active || e.Kind == Asked || e.Kind == Used {
-		resetSilentWatch(lp, s.SessionKey)
-	}
 	if e.Kind == Used {
 		lp.recordWindow(s.Agent, e.Usage)
 	}
+	if e.Kind == Used || e.Kind == Active || e.Kind == Asked {
+		resetSilentWatch(lp, s.SessionKey)
+	}
+}
+
+// countTurn adds a turn to the agent's usage row of today and keeps the new
+// count in memory for member status.
+func countTurn(h *Host, lp *limitsPart, agent string) {
+	day := h.Now().Format(time.DateOnly)
+	var n int
+	h.Store.Write(func(tx *store.Tx) error {
+		return tx.QueryRow(countTurnSQL, agent, day).Scan(&n)
+	})
+	lp.mu.Lock()
+	lp.turns[day+" "+agent] = n
+	lp.mu.Unlock()
 }
 
 func startTurnWatch(h *Host, lp *limitsPart, s Session) {
 	limit := groupToolTimeout(h, s.Group)
 	lp.mu.Lock()
-	if prev := lp.turns[s.SessionKey]; prev != nil {
+	defer lp.mu.Unlock()
+	if prev := lp.watches[s.SessionKey]; prev != nil {
 		stopWatchTimers(prev)
 	}
-	delete(lp.pendingEv, s.SessionKey)
+	delete(lp.pending, s.SessionKey)
 	lp.seq++
 	gen := lp.seq
-	tw := &turnWatch{
-		gen:      gen,
-		deadline: time.AfterFunc(limit, func() { fireTurnDeadline(h, lp, s.SessionKey, gen) }),
-	}
+	tw := &turnWatch{gen: gen}
+	tw.deadline = time.AfterFunc(limit, func() { fireTurnLimit(h, lp, s.SessionKey, gen, false) })
 	if s.Agent == "codex" {
-		tw.silent = time.AfterFunc(codexSilentLimit, func() { fireCodexSilent(h, lp, s.SessionKey, gen) })
+		tw.silent = time.AfterFunc(codexSilentLimit, func() { fireTurnLimit(h, lp, s.SessionKey, gen, true) })
 	}
-	lp.turns[s.SessionKey] = tw
-	lp.mu.Unlock()
+	lp.watches[s.SessionKey] = tw
 }
 
 func resetSilentWatch(lp *limitsPart, key SessionKey) {
 	lp.mu.Lock()
-	if tw := lp.turns[key]; tw != nil && tw.silent != nil {
+	if tw := lp.watches[key]; tw != nil && tw.silent != nil {
 		tw.silent.Reset(codexSilentLimit)
 	}
 	lp.mu.Unlock()
 }
 
-func fireTurnDeadline(h *Host, lp *limitsPart, key SessionKey, gen uint64) {
-	if lp.hasTurnGen(key, gen) {
+// fireTurnLimit interrupts the turn of watch gen when it still runs. The
+// silent limit of Codex waits while a tool call is open.
+func fireTurnLimit(h *Host, lp *limitsPart, key SessionKey, gen uint64, silent bool) {
+	lp.mu.Lock()
+	tw := lp.watches[key]
+	current := tw != nil && tw.gen == gen
+	lp.mu.Unlock()
+	switch {
+	case !current:
+	case silent && h.Sessions.Calls(key) > 0:
+		resetSilentWatch(lp, key)
+	case silent:
+		interruptSessionTurn(h, key, "timeout", "Turn was silent for 5 minutes.")
+	default:
 		interruptSessionTurn(h, key, "timeout", "Turn time limit reached.")
 	}
 }
 
-func fireCodexSilent(h *Host, lp *limitsPart, key SessionKey, gen uint64) {
-	if !lp.hasTurnGen(key, gen) {
-		return
-	}
-	if h.Sessions.Calls(key) > 0 {
-		resetSilentWatch(lp, key)
-		return
-	}
-	interruptSessionTurn(h, key, "timeout", "Turn was silent for 5 minutes.")
-}
-
-func (lp *limitsPart) hasTurnGen(key SessionKey, gen uint64) bool {
-	lp.mu.Lock()
-	defer lp.mu.Unlock()
-	tw := lp.turns[key]
-	return tw != nil && tw.gen == gen
-}
-
-func (lp *limitsPart) recordWindow(agent string, u Usage) *float64 {
+func (lp *limitsPart) recordWindow(agent string, u Usage) {
 	lp.mu.Lock()
 	defer lp.mu.Unlock()
 	cur := lp.windows[agent]
@@ -352,296 +343,32 @@ func (lp *limitsPart) recordWindow(agent string, u Usage) *float64 {
 		cur.resets = new(*u.WindowResets)
 	}
 	lp.windows[agent] = cur
-	return cloneCodexPtr(cur.pct)
 }
 
-func (lp *limitsPart) getWindow(agent string) windowState {
-	lp.mu.Lock()
-	defer lp.mu.Unlock()
-	cur := lp.windows[agent]
-	return windowState{pct: cloneCodexPtr(cur.pct), resets: cloneCodexPtr(cur.resets)}
-}
-
-func onRateLimitedEvent(h *Host, lp *limitsPart, s Session, resets int64) {
-	nowMS := h.Now().UnixMilli()
+// onRateLimited holds the agent's items until resets. The rate_limited event
+// goes with the member status that ends a running turn, so that it cannot
+// overtake it; outside a turn it is sent at once.
+func onRateLimited(h *Host, lp *limitsPart, s Session, resets int64) {
 	ev := proto.RateLimitedEvent{SystemCode: proto.SystemCode{Code: "rate_limited"}, Resets: resets}
-	if !lp.recordRateLimit(h, s, resets, nowMS, ev) {
-		rt := stateOf(h)
-		lp.wg.Go(func() { sendMemberStatus(context.Background(), h, rt, s.Home, s.Group, s.Member, ev) })
-	}
-}
-
-func (lp *limitsPart) recordRateLimit(h *Host, s Session, resets, nowMS int64, ev proto.RateLimitedEvent) bool {
+	wait := time.Duration(resets-h.Now().UnixMilli()) * time.Millisecond
 	lp.mu.Lock()
 	defer lp.mu.Unlock()
 	if prev := lp.rateTimers[s.Agent]; prev != nil {
 		prev.Stop()
-		delete(lp.rateTimers, s.Agent)
 	}
-	if resets > nowMS {
-		lp.rateUntil[s.Agent] = resets
-		wait := time.Duration(resets-nowMS) * time.Millisecond
-		lp.rateTimers[s.Agent] = time.AfterFunc(wait, func() { releaseAgentHold(h, lp, s.Agent, true) })
-	}
-	inTurn := lp.turns[s.SessionKey] != nil
-	if inTurn {
-		lp.pendingEv[s.SessionKey] = ev
-	}
-	return inTurn
-}
-
-func releaseAgentHold(h *Host, lp *limitsPart, agent string, clearRate bool) {
-	lp.mu.Lock()
-	if clearRate {
-		delete(lp.rateUntil, agent)
-		delete(lp.rateTimers, agent)
-	} else {
-		delete(lp.dayTimers, agent)
-	}
-	lp.mu.Unlock()
-	rt := stateOf(h)
-	slots := distinctMemberSlots(h, agent)
-	for _, slot := range slots {
-		sendMemberStatus(context.Background(), h, rt, slot.home, slot.group, slot.member, nil)
-	}
-	triggerDeliverAfterHold(h, lp, slots)
-}
-
-func onTurnEndedEvent(h *Host, lp *limitsPart, s Session, u Usage) {
-	stopTurnWatch(h, s.SessionKey)
-	winPct := lp.recordWindow(s.Agent, u)
-	now := h.Now()
-	capKind := recordTurnUsage(h, s.Agent, now.Format(time.DateOnly), s.Task, u, winPct)
-	if capKind == "" {
+	lp.rateUntil[s.Agent] = resets
+	lp.rateTimers[s.Agent] = time.AfterFunc(wait, func() { releaseRateLimit(h, lp, s.Agent) })
+	if lp.watches[s.SessionKey] != nil {
+		lp.pending[s.SessionKey] = ev
 		return
 	}
-	ev := proto.CapReachedEvent{SystemCode: proto.SystemCode{Code: "cap_reached"}, Cap: capKind}
-	if capKind == "task" {
-		ev.Task = proto.ID(s.Task)
-	} else {
-		armDayCapTimer(h, lp, s.Agent, now)
-	}
-	lp.queueCapEventIfEmpty(s.SessionKey, ev)
+	lp.wg.Go(func() { sendMemberStatus(context.Background(), h, stateOf(h), s.Home, s.Group, s.Member, ev) })
 }
 
-func (lp *limitsPart) queueCapEventIfEmpty(key SessionKey, ev proto.CapReachedEvent) {
+func releaseRateLimit(h *Host, lp *limitsPart, agent string) {
 	lp.mu.Lock()
-	if lp.pendingEv[key] == nil {
-		lp.pendingEv[key] = ev
-	}
+	delete(lp.rateUntil, agent)
+	delete(lp.rateTimers, agent)
 	lp.mu.Unlock()
-}
-
-func armDayCapTimer(h *Host, lp *limitsPart, agent string, now time.Time) {
-	wait := nextLocalMidnight(now).Sub(now)
-	lp.mu.Lock()
-	if prev := lp.dayTimers[agent]; prev != nil {
-		prev.Stop()
-	}
-	lp.dayTimers[agent] = time.AfterFunc(wait, func() { releaseAgentHold(h, lp, agent, false) })
-	lp.mu.Unlock()
-}
-
-func nextLocalMidnight(now time.Time) time.Time {
-	y, m, d := now.Date()
-	return time.Date(y, m, d+1, 0, 0, 0, 0, now.Location())
-}
-
-func recordTurnUsage(h *Host, agent, today, taskID string, u Usage, winPct *float64) string {
-	var hit string
-	write := func(tx *store.Tx) error {
-		caps, err := readAgentCapsTx(tx, agent)
-		if err != nil {
-			return err
-		}
-		days, err := readAgentUsageTx(tx, agent)
-		if err != nil {
-			return err
-		}
-		wasDay := isCapMet(caps.Day, days[today].usageTotals, winPct)
-		wasTask := taskID != "" && isCapMet(caps.Task, sumTaskUsage(days, taskID), winPct)
-		cur := applyTurnDelta(days[today], taskID, u)
-		days[today] = cur
-		_, err = tx.Exec("INSERT OR REPLACE INTO usage(agent, day, data) VALUES(?, ?, ?)", agent, today, marshalWire(cur))
-		if err == nil {
-			hit = newlyReachedCap(caps, cur.usageTotals, sumTaskUsage(days, taskID), taskID, winPct, wasDay, wasTask)
-		}
-		return err
-	}
-	h.Store.Write(write)
-	return hit
-}
-
-func applyTurnDelta(day storedDayUsage, taskID string, u Usage) storedDayUsage {
-	day.usageTotals = addUsageDelta(day.usageTotals, u)
-	if taskID != "" {
-		if day.Tasks == nil {
-			day.Tasks = map[string]usageTotals{}
-		}
-		day.Tasks[taskID] = addUsageDelta(day.Tasks[taskID], u)
-	}
-	return day
-}
-
-func addUsageDelta(tot usageTotals, u Usage) usageTotals {
-	tot.Turns++
-	if u.Tokens != nil {
-		tot.Tokens += *u.Tokens
-		tot.HasTokens = true
-	}
-	if u.USD != nil {
-		tot.USD += *u.USD
-		tot.HasUSD = true
-	}
-	return tot
-}
-
-func newlyReachedCap(caps proto.Caps, dayTot, taskTot usageTotals, taskID string, winPct *float64, wasDay, wasTask bool) string {
-	if !wasDay && isCapMet(caps.Day, dayTot, winPct) {
-		return "day"
-	}
-	if taskID != "" && !wasTask && isCapMet(caps.Task, taskTot, winPct) {
-		return "task"
-	}
-	return ""
-}
-
-func loadAgentCapsAndUsage(h *Host, agent string) (proto.Caps, map[string]storedDayUsage, bool) {
-	var caps proto.Caps
-	var days map[string]storedDayUsage
-	read := func(tx *store.Tx) error {
-		var err error
-		caps, err = readAgentCapsTx(tx, agent)
-		if err != nil {
-			return err
-		}
-		days, err = readAgentUsageTx(tx, agent)
-		return err
-	}
-	return caps, days, h.Store.Write(read) == nil
-}
-
-func agentReachedCap(h *Host, lp *limitsPart, agent, taskID string) bool {
-	caps, days, ok := loadAgentCapsAndUsage(h, agent)
-	if !ok {
-		return false
-	}
-	win := lp.getWindow(agent)
-	today := h.Now().Format(time.DateOnly)
-	return isCapMet(caps.Day, days[today].usageTotals, win.pct) ||
-		(taskID != "" && isCapMet(caps.Task, sumTaskUsage(days, taskID), win.pct))
-}
-
-func memberUsage(h *Host, group, member string) proto.Usage {
-	agent := memberAgent(h, SessionKey{Group: group, Member: member})
-	if agent == "" {
-		return proto.Usage{}
-	}
-	caps, days, ok := loadAgentCapsAndUsage(h, agent)
-	if !ok {
-		return proto.Usage{}
-	}
-	win := limitsOf(h).getWindow(agent)
-	day, hasDay := days[h.Now().Format(time.DateOnly)]
-	if !hasAnyUsage(hasDay, win) {
-		return proto.Usage{}
-	}
-	return buildProtoUsage(caps.Day, day.usageTotals, hasDay, win)
-}
-
-func hasAnyUsage(hasDay bool, win windowState) bool {
-	return hasDay || win.pct != nil || win.resets != nil
-}
-
-func buildProtoUsage(dayCap *proto.Cap, dayTot usageTotals, hasDay bool, win windowState) proto.Usage {
-	out := proto.Usage{WindowPct: win.pct, WindowResets: win.resets}
-	if hasDay && dayTot.Turns > 0 {
-		out.TurnsToday = new(dayTot.Turns)
-	}
-	if dayTot.HasUSD {
-		out.SpendToday = new(dayTot.USD)
-	}
-	if dayCap != nil && dayCap.Max > 0 {
-		fillDayCapUsage(&out, *dayCap, dayTot, win.pct)
-	}
-	return out
-}
-
-func fillDayCapUsage(out *proto.Usage, dayCap proto.Cap, dayTot usageTotals, winPct *float64) {
-	if dayCap.Unit == "usd" {
-		out.SpendCap = new(dayCap.Max)
-	}
-	if val, ok := usageValue(dayCap.Unit, dayTot, winPct); ok {
-		out.DayCapPct = new(val / dayCap.Max * 100)
-	}
-}
-
-func readAgentCapsTx(tx *store.Tx, agent string) (proto.Caps, error) {
-	var raw string
-	if err := tx.QueryRow(queryCapsSQL, agent).Scan(&raw); err != nil {
-		return proto.Caps{}, err
-	}
-	var caps proto.Caps
-	err := json.Unmarshal([]byte(raw), &caps)
-	return caps, err
-}
-
-func readAgentUsageTx(tx *store.Tx, agent string) (map[string]storedDayUsage, error) {
-	rows, err := tx.Query("SELECT day, data FROM usage WHERE agent = ?", agent)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	days := map[string]storedDayUsage{}
-	for rows.Next() {
-		var day, raw string
-		rows.Scan(&day, &raw)
-		var parsed storedDayUsage
-		if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-			return nil, err
-		}
-		days[day] = parsed
-	}
-	return days, rows.Err()
-}
-
-func sumTaskUsage(days map[string]storedDayUsage, taskID string) usageTotals {
-	var sum usageTotals
-	for _, d := range days {
-		if t, ok := d.Tasks[taskID]; ok {
-			sum.Turns += t.Turns
-			sum.Tokens += t.Tokens
-			sum.HasTokens = sum.HasTokens || t.HasTokens
-			sum.USD += t.USD
-			sum.HasUSD = sum.HasUSD || t.HasUSD
-		}
-	}
-	return sum
-}
-
-func isCapMet(c *proto.Cap, u usageTotals, winPct *float64) bool {
-	if c == nil || c.Max <= 0 {
-		return false
-	}
-	val, ok := usageValue(c.Unit, u, winPct)
-	return ok && val >= c.Max
-}
-
-func usageValue(unit string, u usageTotals, winPct *float64) (float64, bool) {
-	if unit == "window_pct" {
-		if winPct == nil {
-			return 0, false
-		}
-		return *winPct, true
-	}
-	switch unit {
-	case "turns":
-		return float64(u.Turns), u.Turns > 0
-	case "tokens":
-		return float64(u.Tokens), u.HasTokens
-	case "usd":
-		return u.USD, u.HasUSD
-	default:
-		return 0, false
-	}
+	releaseHeld(context.Background(), h, agent)
 }

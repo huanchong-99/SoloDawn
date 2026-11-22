@@ -181,8 +181,6 @@ type codexProcess struct {
 	turnReqID        int64
 	turnActive       bool
 	turnID           string
-	turnTokens       *int64
-	windowPct        *float64
 	windowResets     *int64
 	interruptPending bool
 	asks             map[string]json.RawMessage
@@ -258,33 +256,31 @@ func (p *codexProcess) beginTurn() (int64, string, error) {
 	p.turnReqID = id
 	p.turnActive = true
 	p.turnID = ""
-	p.turnTokens = nil
 	p.interruptPending = false
 	clear(p.files)
 	return id, p.threadID, nil
 }
 
-func (p *codexProcess) finishTurn() (Usage, int64) {
+// finishTurn ends the turn and returns when the latest rate-limit window
+// resets, in Unix milliseconds, or 0.
+func (p *codexProcess) finishTurn() int64 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	usage := Usage{
-		Tokens:       cloneCodexPtr(p.turnTokens),
-		WindowPct:    cloneCodexPtr(p.windowPct),
-		WindowResets: cloneCodexPtr(p.windowResets),
-	}
-	var resets int64
-	if p.windowResets != nil {
-		resets = *p.windowResets
-	}
 	p.resetTurnLocked()
-	return usage, resets
+	return p.resetsMS()
+}
+
+func (p *codexProcess) resetsMS() int64 {
+	if p.windowResets == nil {
+		return 0
+	}
+	return *p.windowResets
 }
 
 func (p *codexProcess) resetTurnLocked() {
 	p.turnReqID = 0
 	p.turnActive = false
 	p.turnID = ""
-	p.turnTokens = nil
 	p.interruptPending = false
 	clear(p.asks)
 	clear(p.inputs)
@@ -520,14 +516,11 @@ func (p *codexProcess) handleNotification(msg codexMessage) {
 	if p.isTurnActive() {
 		p.events <- Event{Kind: Active}
 	}
-	switch msg.Method {
-	case "thread/tokenUsage/updated":
-		p.onTokenUsage(msg.Params)
-	case "account/rateLimits/updated":
+	if msg.Method == "account/rateLimits/updated" {
 		p.onRateLimits(msg.Params)
-	default:
-		p.onItemNotification(msg.Method, msg.Params)
+		return
 	}
+	p.onItemNotification(msg.Method, msg.Params)
 }
 
 func (p *codexProcess) onItemNotification(method string, raw json.RawMessage) {
@@ -545,36 +538,6 @@ func (p *codexProcess) onItemNotification(method string, raw json.RawMessage) {
 		return
 	}
 	p.files[note.Item.ID] = note.Item
-}
-
-func (p *codexProcess) onTokenUsage(raw json.RawMessage) {
-	var note codexTokenParams
-	if json.Unmarshal(raw, &note) != nil {
-		return
-	}
-	usage, ok := p.addTurnTokens(note.TurnID, note.TokenUsage.Last.TotalTokens)
-	if ok {
-		p.events <- Event{Kind: Used, Usage: usage}
-	}
-}
-
-func (p *codexProcess) addTurnTokens(turnID string, delta int64) (Usage, bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.turnID == "" || turnID != p.turnID {
-		return Usage{}, false
-	}
-	var next int64
-	if p.turnTokens != nil {
-		next = *p.turnTokens
-	}
-	next += delta
-	p.turnTokens = new(next)
-	return Usage{
-		Tokens:       new(next),
-		WindowPct:    cloneCodexPtr(p.windowPct),
-		WindowResets: cloneCodexPtr(p.windowResets),
-	}, true
 }
 
 func (p *codexProcess) onRateLimits(raw json.RawMessage) {
@@ -599,18 +562,10 @@ func (p *codexProcess) updateRateLimits(rl codexRateLimits) (Usage, int64, bool,
 	win := selectRateWindow(rl.Primary, rl.Secondary)
 	var usage Usage
 	if win != nil {
-		p.windowPct = new(win.UsedPercent)
 		p.windowResets = codexWindowResetsMs(win.ResetsAt)
-		usage = Usage{
-			WindowPct:    cloneCodexPtr(p.windowPct),
-			WindowResets: cloneCodexPtr(p.windowResets),
-		}
+		usage = Usage{WindowPct: new(win.UsedPercent), WindowResets: p.windowResets}
 	}
-	var resets int64
-	if p.windowResets != nil {
-		resets = *p.windowResets
-	}
-	return usage, resets, win != nil, codexRateLimited(rl, win)
+	return usage, p.resetsMS(), win != nil, codexRateLimited(rl, win)
 }
 
 func selectRateWindow(primary, secondary *codexLimitWindow) *codexLimitWindow {
@@ -642,13 +597,13 @@ func (p *codexProcess) onTurnCompleted(raw json.RawMessage) {
 	if json.Unmarshal(raw, &note) != nil {
 		return
 	}
-	usage, resets := p.finishTurn()
+	resets := p.finishTurn()
 	var errText string
 	if note.Turn.Error != nil {
 		errText = note.Turn.Error.Message
 		p.emitTurnError(note.Turn.Error.CodexErrorInfo, errText, resets)
 	}
-	p.events <- Event{Kind: TurnEnded, Status: note.Turn.Status, Usage: usage, Text: errText}
+	p.events <- Event{Kind: TurnEnded, Status: note.Turn.Status, Text: errText}
 }
 
 func (p *codexProcess) emitTurnError(info json.RawMessage, text string, resets int64) {
@@ -662,17 +617,12 @@ func (p *codexProcess) emitTurnError(info json.RawMessage, text string, resets i
 
 func codexTurnErrorKind(info json.RawMessage) EventKind {
 	var code string
-	if json.Unmarshal(info, &code) == nil {
-		if code == "unauthorized" {
-			return LoginInvalid
-		}
-		if code == "usageLimitExceeded" {
-			return RateLimited
-		}
-		return ""
-	}
-	if codexHTTPStatus(info) == 401 {
+	json.Unmarshal(info, &code)
+	switch {
+	case code == "unauthorized" || codexHTTPStatus(info) == 401:
 		return LoginInvalid
+	case code == "usageLimitExceeded":
+		return RateLimited
 	}
 	return ""
 }
@@ -811,22 +761,6 @@ func (p *codexProcess) declineRequest(rawID json.RawMessage) {
 		ID:    rawID,
 		Error: codexRPCError{Code: -32601, Message: "unsupported server request"},
 	})
-}
-
-func cloneCodexPtr[T any](v *T) *T {
-	if v == nil {
-		return nil
-	}
-	return new(*v)
-}
-
-type codexTokenParams struct {
-	TurnID     string `json:"turnId"`
-	TokenUsage struct {
-		Last struct {
-			TotalTokens int64 `json:"totalTokens"`
-		} `json:"last"`
-	} `json:"tokenUsage"`
 }
 
 type codexRateLimits struct {

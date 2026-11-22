@@ -48,9 +48,6 @@
   "member.state.waiting.task": "等待中 · {task} 等 {who}",
   "member.state.waiting.who": "等待中 · 等 {who}",
   "member.state.working": "干活中",
-  "member.usage.day": "今天额度已用",
-  "member.usage.dayCap": "今天上限 {pct}%",
   "member.usage.resets": "{time} 重置",
-  "member.usage.spend": "今天花费",
   "member.usage.window": "这一轮额度已用"
 }

@@ -213,14 +213,11 @@ func (w *homeHostEvWorld) sendStatus(by identity.Key, member, state, path, extra
 
 func (w *homeHostEvWorld) sendEventCase(state, code, where string) error {
 	taskPart := ""
-	capKind := "day"
 	if where == "task 1" {
 		taskPart = fmt.Sprintf(`,"task":%q`, w.taskID)
-		capKind = "task"
 	}
 	events := map[string]string{
 		"turn_interrupted": fmt.Sprintf(`{"code":"turn_interrupted","reason":"timeout"%s,"detail":"Deadline reached."}`, taskPart),
-		"cap_reached":      fmt.Sprintf(`{"code":"cap_reached","cap":%q%s}`, capKind, taskPart),
 		"rate_limited":     `{"code":"rate_limited","resets":1763603600000}`,
 		"login_invalid":    `{"code":"login_invalid","detail":"Signed out."}`,
 		"session_replaced": fmt.Sprintf(`{"code":"session_replaced"%s}`, taskPart),

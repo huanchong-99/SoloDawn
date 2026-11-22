@@ -200,31 +200,6 @@
   .kv dd {
     min-width: 0;
   }
-  .meter {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 4px 8px;
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-  }
-  .meter b {
-    color: var(--text);
-    font-weight: 600;
-  }
-  .meter i {
-    grid-column: 1 / -1;
-    height: 6px;
-    border-radius: 3px;
-    background: linear-gradient(
-      90deg,
-      var(--tone-text, var(--text-2)) var(--v),
-      var(--surface-3) var(--v)
-    );
-  }
-  .meter small {
-    grid-column: 1 / -1;
-    font-size: inherit;
-  }
   .people-head {
     margin-top: var(--sp-2);
   }

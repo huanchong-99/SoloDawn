@@ -83,11 +83,11 @@ and on each accepted `member status`.
 
 `[unverified]` Which usage figures each CLI exposes in structured mode.
 Spikes S-2 and S-3 record them; the card shows what exists: the host sends
-`window_pct` and `window_resets` from the CLI's latest rate-limit event,
-`turns_today` and `spend_today` (when the CLI reports USD cost) from the
-local day's `usage` row, and `spend_cap` and `day_cap_pct` when the agent
-has a daily cap whose unit has a reported figure (`{}` before any usage or
-window event is recorded for that day).
+`window_pct` and `window_resets` from the CLI's latest rate-limit event and
+`turns_today` from the local day's `usage` row (`{}` before either is
+known). `day_cap_pct`, `spend_today` and `spend_cap` go with caps (the card
+shows spend only against its cap), which are postponed after 1.0 with
+`settings.set`.
 
 ## 3. `device`
 

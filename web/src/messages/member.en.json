@@ -48,9 +48,6 @@
   "member.state.waiting.task": "Waiting · {task} waiting on {who}",
   "member.state.waiting.who": "Waiting · waiting on {who}",
   "member.state.working": "Working",
-  "member.usage.day": "Daily cap used",
-  "member.usage.dayCap": "Daily cap {pct}%",
   "member.usage.resets": "Resets {time}",
-  "member.usage.spend": "Today's spend",
   "member.usage.window": "Window used"
 }

@@ -444,10 +444,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
     group's AI members, placing the secretary first with its corner mark, with each AI's state
     (`working`, `waiting` on the reader in dawn or on another member, `dormant` as sleeping,
     `limited`, `offline`), computer with path (`local`, `direct`, `relay`, `offline`),
-    account type, and usage bar (`.meter` from `usageMeter` in `src/lib/members.ts`, showing
-    rate-limit window percentage with reset time and daily-cap note, today's USD spend against its
-    cap, or daily cap percentage, in danger tone at 100 percent and omitted when `usage` carries no
-    bar figure); then the human members with their roles and online status. Its "Add AI" button
+    account type, and usage bar (`.meter` in `src/styles/base.css`, from `usageMeter` in
+    `src/lib/members.ts`: the rate-limit window percentage with its reset time, in danger tone at
+    100 percent and omitted when `usage` has no `window_pct`); then the human members with their roles and online status. Its "Add AI" button
     requires a reachable group home, an admin reader and at least one connected owned computer,
     and shows its reason when disabled. The add-AI dialog reads `host.info` from the owner's
     connected computers, suggests an unused member name in the group, offers the secretary switch

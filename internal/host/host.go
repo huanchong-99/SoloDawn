@@ -105,8 +105,16 @@ func New(db *store.Store, key identity.Key, now func() time.Time) (h *Host, save
 	}
 	h = &Host{Store: db, Key: key, Sessions: sessions, Rows: &Rows{rows: map[rowKey]json.RawMessage{}}, Now: now,
 		homes: map[string]Home{}, waits: map[string]*wait{}}
+	for _, built := range inOrder(Built) {
+		built(h)
+	}
 	return h, saved, nil
 }
+
+// Built holds what is to happen once when a host is built, such as loading
+// what a unit keeps in memory from the store. Each entry has the name of its
+// unit; New calls them in the order of their names.
+var Built = map[string]func(h *Host){}
 
 // Part returns what one unit keeps for this host: one value per type, made
 // from its zero value at the first call.
@@ -298,9 +306,9 @@ func (h *Host) Hand(id string, item json.RawMessage) (waited bool, err error) {
 }
 
 // Holds says whether a session's deliveries are held, by the name of the
-// unit that knows of one kind of hold: the unit of caps and limits for an AI
-// that reached a cap, is rate limited, or is offline by the owner's command
-// (flows/agent-turn.md step 3). The session table itself holds an AI that is
+// unit that knows of one kind of hold: the unit of limits for an AI that is
+// rate limited, or offline by the owner's command (flows/agent-turn.md step
+// 3). The session table itself holds an AI that is
 // working or taken over (Sessions.Move).
 var Holds = map[string]func(h *Host, key SessionKey) (reason string, held bool){}
 
