@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
-  import { parts } from '../../lib/compose';
+  import { tick, untrack } from 'svelte';
+  import { withoutInlineReplies } from '../../lib/call';
   import { subject, type Group } from '../../lib/groups.svelte';
   import { jumpToMessage } from '../../lib/jump';
   import { card as cardOf } from '../../lib/mounts.svelte';
@@ -8,11 +8,12 @@
   import type { MsgRow, TaskRow } from '../../lib/proto';
   import { clock, now } from '../../lib/when';
   import Avatar from '../Avatar.svelte';
+  import Rich from '../Rich.svelte';
 
   /** The message list of one task's thread, mounted inside a task card's fold. */
   let { group, task }: { group: Group; task: TaskRow } = $props();
 
-  const msgs = $derived(group.thread(task.id));
+  const msgs = $derived(withoutInlineReplies(group.thread(task.id), Boolean(cardOf('call'))));
   const paging = $derived(group.paging(task.id));
   const stuck = $derived(paging.failed || (paging.more && !group.home.ctl));
 
@@ -32,8 +33,9 @@
   );
   const workMins = $derived(working ? Math.floor((now() - working.since) / 60_000) : 0);
 
-  type Badge = { label: string; tone?: 'ok' | 'danger' | 'dawn' };
+  type Badge = { label: string; tone?: 'ok' | 'danger' | 'dawn' | 'sky' };
   const tones: Partial<Record<MsgRow['kind'], Badge['tone']>> = {
+    call: 'sky',
     report: 'ok',
     summary: 'ok',
   };
@@ -61,9 +63,30 @@
     }
     return subject(msg) || t(`chat.kind.${msg.kind}`);
   }
+  let root: HTMLElement;
+  let listEl: HTMLElement;
+
+  function moveThreadFocus() {
+    const summary = root.closest('details')?.querySelector<HTMLElement>('summary');
+    const next =
+      root.querySelector<HTMLElement>('.tpage button:not([disabled])') ?? summary ?? listEl;
+    if (next === listEl) listEl.tabIndex = -1;
+    next.focus({ preventScroll: true });
+  }
+
+  async function loadOlder() {
+    const hadFocus = root.contains(document.activeElement);
+    if (hadFocus) {
+      listEl.tabIndex = -1;
+      listEl.focus({ preventScroll: true });
+    }
+    await group.older(task.id);
+    await tick();
+    if (hadFocus) moveThreadFocus();
+  }
 </script>
 
-<div class="thread">
+<div class="thread" bind:this={root}>
   {#if stuck}
     <p class="tpage">{t('thread.older.offline')}</p>
   {:else if paging.more}
@@ -72,14 +95,14 @@
         type="button"
         class="btn btn-sm btn-ghost"
         disabled={paging.busy}
-        onclick={() => void group.older(task.id)}
+        onclick={() => void loadOlder()}
       >
         {t(paging.busy ? 'thread.older.busy' : 'thread.older')}
       </button>
     </div>
   {/if}
 
-  <ol class="tlist">
+  <ol class="tlist" bind:this={listEl}>
     {#each msgs as msg (msg.id)}
       {@const time = clock(msg.ts, prefs.lang)}
       {@const iso = new Date(msg.ts).toISOString()}
@@ -120,20 +143,8 @@
               </p>
             {:else}
               {@const Card = cardOf(msg.kind)}
-              {@const segs = parts(
-                msg.text,
-                group.members.filter((member) => msg.mentions.includes(member.id)),
-              )}
-              {#if segs.length}
-                <p class="text">
-                  {#each segs as part, i (i)}
-                    {#if part.kind === 'code'}<code>
-                        {part.text}
-                      </code>{:else if part.kind === 'at'}<span class="at">
-                        {part.text}
-                      </span>{:else}{part.text}{/if}
-                  {/each}
-                </p>
+              {#if msg.text && !(msg.kind === 'call' && Card)}
+                <p class="text"><Rich {group} text={msg.text} mentions={msg.mentions} /></p>
               {/if}
               {#if Card}
                 <Card {group} {msg} />
@@ -220,11 +231,6 @@
   .text {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-  }
-  code {
-    padding: 1px 5px;
-    border-radius: var(--r-sm);
-    background: var(--surface-2);
   }
   .typing {
     display: inline-flex;

@@ -69,8 +69,8 @@ func (s *State) Serves(device string) bool {
 // open makes the checks that come before the receipt and leave none: the
 // command's envelope passes (planning/contracts/envelope.md section 3), and
 // it names this group.
-func (s *State) open(env proto.Envelope, now time.Time) (proto.PayloadHeader, *Refusal) {
-	hdr, err := identity.OpenCommand(env, s.Home, s.known, now)
+func (s *State) open(env proto.Envelope, join *Joining, now time.Time) (proto.PayloadHeader, *Refusal) {
+	hdr, err := identity.OpenCommand(env, s.Home, s.seamKnown(join), now)
 	if err != nil {
 		return hdr, &Refusal{err.Error(), "the envelope of the command was refused"}
 	}
@@ -112,16 +112,7 @@ func (t Table) find(s *State, c *Command) (Func, *Refusal) {
 	if !named || f == nil {
 		return nil, &Refusal{"bad_request", "the home has no such command"}
 	}
-	if s.Group.ID == "" && key != keyCreate {
-		return nil, &Refusal{"not_found", "this node is not home to the group"}
-	}
-	as, ok := c.field("as")
-	if !ok {
-		return nil, &Refusal{"bad_request", "as is not a member id"}
-	}
-	who, refusal := s.who(c.Env.Key, as)
-	c.Who = who
-	return f, refusal
+	return f, s.seamFindWho(key, c)
 }
 
 // who names the principal behind a signer and the as of its payload. A home

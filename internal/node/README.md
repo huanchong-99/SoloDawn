@@ -20,6 +20,8 @@ kind: reference
 - `client.go`: `clientCtl`, `dialFunc`, `(*Sessions).serveClient` and `(*Sessions).connectHome`, the client side of a host's outgoing `ctl` session to a home on another node ([datachannel](../../planning/contracts/datachannel.md), sections 2, 3 and 3.1; [flows/connect.md](../../planning/flows/connect.md), steps 11 to 18).
 - `pair.go`: `Pairer`, running 10-minute single-use pairing rooms in role `b` (`Pair`, onboarding and adding another computer) and role `a` (`PairBrowser` and `pair.browser`, adding another browser with `#pair=<secret>` links and once-only nonce replay; [pairing](../../planning/flows/pairing.md), sections A to C; [envelope](../../planning/contracts/envelope.md), section 6).
 - `surface.go`: `Surface`, serving `host.info` (`HostState`, including live `QueuedCount` per `(group, member)`), forwarding `pty.resize` pushes to `host.Surface["pty.resize"]`, replaying `takeover.start` via `Host.ReplayTakeover`, and reading `name`, `max_open`, `homes` and `rendezvous` (`ReadName`, `ReadRendezvous`; [datachannel](../../planning/contracts/datachannel.md), sections 3 and 7).
+- `netstatus.go`: registers the `net_status` MCP tool in `host.Tools` and reports welcomed `ctl` paths, the local NAT flags, and configured rendezvous reachability ([mcp-tools](../../planning/contracts/mcp-tools.md), section 1).
+- `schedule.go`: runs `home.Retain` on `node.db` at startup and every 24 hours ([storage](../../planning/contracts/storage.md), sections 2 and 4).
 - `local.go`: `AttachLocal` and `LocalLink`, the in-process link between a `*host.Host` and a `*home.Loop` on the same node ([architecture](../../planning/architecture.md), section 2.1).
 - `nodetest/`: in-process node clusters with built fake Claude Code and Codex binaries for integration tests.
 
@@ -77,7 +79,7 @@ kind: reference
 
 ## Concurrency and lock order
 
-- `nodeRuntime.bg` waits for all inbound `Pairer.Serve` sessions, outgoing `serveClient` sessions, rendezvous loops, and host commands, which `Sessions` starts through `SessionConfig.Spawn`, before `Close` shuts `LocalLink`, `home.Loop` and `Store`; `nodeRuntime.mu` is a leaf lock guarding `closing`, `rvPaths` and `rvLoops`.
+- `nodeRuntime.bg` waits for all inbound `Pairer.Serve` sessions, outgoing `serveClient` sessions, rendezvous loops, the daily retention schedule (`startRetention`), and host commands, which `Sessions` starts through `SessionConfig.Spawn`, before `Close` shuts `LocalLink`, `home.Loop` and `Store`; `nodeRuntime.mu` is a leaf lock guarding `closing`, `rvPaths` and `rvLoops`.
 - `Sessions.cmdMu` guards `inflight` (keyed by signer and nonce) and receipt reads/writes in `Store.Write`; host command handlers and `Replays` handlers run outside `cmdMu`, and duplicate `(signer, nonce)` requests wait on the in-flight channel before reading the stored receipt.
 - `Pairer.mu` guards active `attempts` and nonce-keyed `links`; it is a leaf lock never held across `Store.Write`, `Logs`, `Sessions`, `Peer` or WebSocket operations. Each `pairAttempt.outcome` channel has a single reader (`waitPair` for role `b`, `watchBrowser` for role `a`).
 - `Logs.writeMu` serializes device-log mutations and is acquired before `Store.Write` and before `Logs.mu`; `dvlNotify` runs after `writeMu` is released.
@@ -95,10 +97,12 @@ kind: reference
 4. `Pairer.Peer` and `Host.Connect` (`Sessions.connectHome`) are set right after `peer.New`.
 5. Local socket `pair` persists `--rendezvous` first, runs `syncRendezvous` and calls `Pairer.Pair`; `pair-browser` and `open` call `Pairer.PairBrowser`.
 6. `SurfaceConfig.Agents` is set to `(*Host).Agents` (`HS-3`), and `peer.New` registers `pty:` channels onto `(*Host).ServeTerminal` (`HS-19`).
+7. `netStatusPart` is wired to `(*nodeRuntime).netStatus` (`netstatus.go`), and `stepStartup` launches `startRetention` (`schedule.go`).
 
 ## Known limitations
 
-- `Surface` answers `host.info` requests and forwards `pty.resize` pushes; there is no `host.info` push yet, `settings.set` is postponed with `U-12`, and `queued` in `host.info` is always `0` because held items live on the home (`not_before`, `HM-7`; [issues](../../issues.md)).
+- `Surface` answers `host.info` requests and forwards `pty.resize` pushes; there is no `host.info` push yet, `settings.set` is postponed with `U-12`.
+- `net_status` omits `rtt_ms` (`*peer.Connection` exposes `Path()` without ICE candidate-pair round-trip statistics) and reports `mapped_ports` as `false` in step 1 ([issues](../../issues.md)).
 - Self-update (`Updater`, `N-6`) is postponed off the step-1 main line ([issues](../../issues.md)).
 - In step 1 `Logs` stores only the node owner's device log; keeping logs of other group members belongs to step 2.
 - On macOS, Unix socket paths are limited to 103 bytes, so tests that bind `sock` under `HOME` use `/tmp` ([issues](../../issues.md)).
