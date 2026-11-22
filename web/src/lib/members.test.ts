@@ -729,7 +729,16 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
               account: null,
               login_ok: false,
               caps: {},
-              groups: [{ g: 'other-group', member: 'm2', level: 3, state: 'working', queued: 0 }],
+              groups: [
+                {
+                  g: 'other-group',
+                  member: 'm2',
+                  level: 3,
+                  state: 'working',
+                  queued: 0,
+                  watchers: [],
+                },
+              ],
             },
           ],
         },
