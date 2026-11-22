@@ -69,6 +69,7 @@ type LoopConfig struct {
 	// holds none. The loop asks for the owner's log for every group.
 	Logs   func(user string) *identity.Log
 	Tables Tables
+	Invite Inviter
 	// Now is the home's clock; time.Now when nil.
 	Now func() time.Time
 	// Report takes every failure that is answered internal or that has no
@@ -367,7 +368,7 @@ func runGroupOf(env proto.Envelope) string {
 // it and it leaves no receipt. Only the owner's devices are known to it.
 func (l *Loop) stray(c *Conn, re int64, env proto.Envelope) {
 	res := refused(&Refusal{"bad_request", "the command names no group in g"})
-	if _, refusal := l.fresh(runNowhere).open(env, l.cfg.Now()); refusal != nil {
+	if _, refusal := l.fresh(runNowhere).open(env, c.seamJoining(), l.cfg.Now()); refusal != nil {
 		res = refused(refusal)
 	}
 	c.send(res.Frame(re))
