@@ -21,7 +21,7 @@ kind: reference
 - `pair.go`: `Pairer`, running 10-minute single-use pairing rooms in role `b` (`Pair`, onboarding and adding another computer) and role `a` (`PairBrowser` and `pair.browser`, adding another browser with `#pair=<secret>` links and once-only nonce replay; [pairing](../../planning/flows/pairing.md), sections A to C; [envelope](../../planning/contracts/envelope.md), section 6).
 - `surface.go`: `Surface`, serving `host.info` (`HostState`) and reading `name`, `max_open`, `homes` and `rendezvous` (`ReadName`, `ReadRendezvous`; [datachannel](../../planning/contracts/datachannel.md), sections 3 and 7).
 - `netstatus.go`: registers the `net_status` MCP tool in `host.Tools` and reports welcomed `ctl` paths, local UDP/IPv6/port-mapping flags, and configured rendezvous reachability ([mcp-tools](../../planning/contracts/mcp-tools.md), section 1).
-- `schedule.go`: runs `(*store.Tx).Retain` on `node.db` at startup and every 24 hours under `setting('retention_days')` (default `90`; [storage](../../planning/contracts/storage.md), sections 2 and 4).
+- `schedule.go`: runs `home.Retain` on `node.db` at startup and every 24 hours ([storage](../../planning/contracts/storage.md), sections 2 and 4).
 - `local.go`: `AttachLocal` and `LocalLink`, the in-process link between a `*host.Host` and a `*home.Loop` on the same node ([architecture](../../planning/architecture.md), section 2.1).
 - `nodetest/`: in-process node clusters with built fake Claude Code and Codex binaries for integration tests.
 
