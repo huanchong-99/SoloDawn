@@ -53,6 +53,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `callView` treats every status other than `answered` as waiting (`web/src/lib/call.ts:78`). The states sheet therefore lists three call rows, and `web/features/call.spec.ts` expects them.
 - Status: open, accepted for P-4a. Resolved when U2-2 draws a denied call.
 
+### 2026-11-22 · limitation · A9.21 lacks a same-connection network-switch driver
+
+- Symptom: the original fixture opened a new relay-only connection instead of moving an established watch to TURN.
+- Cause: a transport-only probe with controlling ICE, renomination, warm relay pairs and bidirectional filtering on every watcher UDP socket kept the direct pair selected. Pion's automatic selector retained that pair; the binding-request selector also failed to move both ends. This is fixture evidence, not an end-to-end watch result.
+- Status: open. Experimental transport code was removed. A9.21 stays pending with direct-watch, same-PeerConnection relay observation, closure and original-ctl assertions; `waitForRelay` in `features/s2_watch_terminal_test.go` observes but does not drive migration. See `features/s2_watch.md`.
+
+### 2026-11-22 · deviation · A9.26 live M5 forge coverage awaits a configured live run
+
+- Symptom: the original live fixture checked two remote filenames without reusing M5's forge steps or inspecting request heads.
+- Cause: A9.26 used the subprocess fixture instead of M5's two-task forge flow.
+- Status: A9.26 now reuses the applicable M5 steps with live custom templates and independently inspects both request IDs and reviewed heads. Open until an opt-in run with `SOLODAWN_S2_LIVE_FORGE` completes; inspection is test-only, documented in `features/s2_watch.md`.
+
 ### 2026-11-21 · deviation · The `rounds_limit` system message has an id derived from the triggering post's nonce
 
 - Symptom: when a `post` by an AI in a task's thread reaches `limits.rounds` (task-machine row 21), the command writes both the `post` row under `n` and the main-line `rounds_limit` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn rounds limit <n>` in base64url, rather than a random id.
@@ -70,6 +82,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `planning/contracts/step-3/drivers.md` section 6 says each entry of `agents` carries `driver` always, but the frozen shape lets it be absent: Go `Driver *Driver` with `omitempty` (`internal/proto/host.go`, `HostAgent`), TS `v.optional(Driver)` (`web/src/lib/proto.ts`, `HostState.agents`), and `agents.driver` under `optional` in `internal/proto/testdata/wire.json`.
 - Cause: nothing on rebuild fills `driver` yet; a required field now would make the web client reject every real `host.info` until T3-2 lands. P-5 froze `driver` as `accounts` and `takeover` only; the other declaration fields stay in the host's table (coordinator, 2026-11-22).
 - Status: open, accepted for P-5. T3-2, the pull request that fills `driver` for every agent, makes it required: Go: the `Driver` field (JSON `driver`) (value type, no `omitempty`), TS `driver: Driver`, regenerate `wire.json` with `go test ./internal/proto -update`, and drop "once populated" from `internal/proto/README.md` (the `host.info` bullet). Also accepted: P-5 does not freeze the tool lists in `internal/proto/testdata/tools.json` (`planning/contracts/step-3/knowledge.md` section 7), because `internal/host` tests require it to equal the registered schemas; T3-5 adds `note_list` `type` and `propose_brief` `preset`, T3-6 adds `kb_put` and `kb_search` to all five lists, and the two merge with `go test ./internal/proto -update`.
+
+### 2026-11-22 · limitation · Existing stores do not get the `row_named` index
+
+- Symptom, cause and status: T3-5 added `row_named` to migration 1 in place (`internal/store/schema.sql`), so a store created before it keeps working without the index and a preset lookup scans the group's notes instead; accepted before 1.0, since migrations are cut.
+
 ### 2026-11-22 · limitation · Web Push VAPID `sub` URL is not yet checked against Apple's push service
 
 - Symptom: none observed; `wpushSubscriber` (`https://github.com/huanchong-99/SoloDawn`) has not yet been exercised against Apple's Web Push service on iOS.
