@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 	"testing/synctest"
@@ -11,6 +12,27 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
+
+type watchOwner struct {
+	*tkOwner
+	sizes []proto.PTYResize
+}
+
+func (o *watchOwner) Send(v any) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.sizes = append(o.sizes, v.(proto.PTYResize))
+	return nil
+}
+
+func (o *watchOwner) wantSizes(t *testing.T, want ...proto.PTYResize) {
+	t.Helper()
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if !reflect.DeepEqual(o.sizes, want) {
+		t.Fatalf("sizes = %+v, want %+v", o.sizes, want)
+	}
+}
 
 func TestWatchLifecycle(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -23,7 +45,7 @@ func TestWatchLifecycle(t *testing.T) {
 		}
 		h.Rows.Put(slot.group, "device", "a:1", json.RawMessage(marshalWire(proto.DeviceRow{RowHeader: proto.RowHeader{Type: "device", ID: "a:1"}, DeviceChange: proto.DeviceChange{User: "a", Version: 1, Op: "add", Device: "owner-browser"}})))
 		data := json.RawMessage(marshalWire(proto.WatchStart{Request: proto.Request{Type: "watch.start", ID: 1}, Group: proto.ID(slot.group), Member: proto.ID(slot.member)}))
-		o := newTkOwner("relay")
+		o := &watchOwner{tkOwner: newTkOwner("relay")}
 		_, err := h.WatchStart(o, "owner-browser", data)
 		tkCode(t, err, "relay")
 		o.setPath("direct")
@@ -36,6 +58,27 @@ func TestWatchLifecycle(t *testing.T) {
 		term := newPTYTestTerminal("watch:" + slot.group + ":" + slot.member)
 		ptyState(h).noteSize(slot, 80, 24)
 		go h.ServeWatch(term)
+		synctest.Wait()
+		size := proto.PTYResize{Type: "pty.resize", Group: proto.ID(slot.group), AI: proto.ID(slot.member), Cols: 80, Rows: 24}
+		o.wantSizes(t, size)
+		h.Rows.Put(slot.group, "device", "a:2", json.RawMessage(marshalWire(proto.DeviceRow{RowHeader: proto.RowHeader{Type: "device", ID: "a:2"}, DeviceChange: proto.DeviceChange{User: "a", Version: 2, Op: "add", Device: "second-browser"}})))
+		second := &watchOwner{tkOwner: newTkOwner("direct")}
+		if _, err := h.WatchStart(second, "second-browser", data); err != nil {
+			t.Fatal(err)
+		}
+		secondTerm := newPTYTestTerminal(term.label)
+		secondTerm.device = "second-browser"
+		go h.ServeWatch(secondTerm)
+		synctest.Wait()
+		o.wantSizes(t, size)
+		second.wantSizes(t, size)
+		p.resize(slot, 100, 40)
+		resized := size
+		resized.Cols, resized.Rows = 100, 40
+		o.wantSizes(t, size, resized)
+		second.wantSizes(t, size, resized)
+		secondTerm.Close()
+		close(second.done)
 		synctest.Wait()
 		duplicate := newPTYTestTerminal(term.label)
 		h.ServeWatch(duplicate)
@@ -79,10 +122,6 @@ func TestWatchLifecycle(t *testing.T) {
 		if got := h.Watchers(slot.group, slot.member); !reflect.DeepEqual(got, []string{"a"}) {
 			t.Fatal(got)
 		}
-		p.stop(slot)
-		if got := h.Watchers(slot.group, slot.member); !reflect.DeepEqual(got, []string{}) {
-			t.Fatal(got)
-		}
 	})
 }
 
@@ -100,6 +139,11 @@ func TestWatchItems(t *testing.T) {
 	}
 	if err := h.Sessions.Move(key, Dormant, Takeover); err != nil {
 		t.Fatal(err)
+	}
+	v.wire.Msg = json.RawMessage(`{`)
+	watchItem(h, v)
+	if got := h.Watchers(slot.group, slot.member); !reflect.DeepEqual(got, []string{}) {
+		t.Fatal(got)
 	}
 	h.Rows.Put(slot.group, "member", "by", json.RawMessage(marshalWire(proto.MemberRow{RowHeader: proto.RowHeader{ID: "by"}, User: "watcher"})))
 	v.item.Item = 2
@@ -129,34 +173,12 @@ func TestWatchItems(t *testing.T) {
 	watchItem(h, v)
 }
 
-func TestWatchInvalidStoredRows(t *testing.T) {
-	for _, kind := range []string{"card", "device"} {
-		t.Run(kind, func(t *testing.T) {
-			h := newPTYTestHost(t)
-			defer func() {
-				if recover() == nil {
-					t.Fatal("invalid row did not panic")
-				}
-			}()
-			if kind == "device" {
-				h.Rows.Put("g", "device", "d", json.RawMessage(`{`))
-				watchDeviceUser(h, "g", "d")
-				return
-			}
-			key := SessionKey{Group: "g", Member: "m"}
-			if err := h.Sessions.Create(Session{SessionKey: key, Kind: GroupSession, Agent: "claude"}); err != nil {
-				t.Fatal(err)
-			}
-			if err := h.Sessions.Move(key, Dormant, Takeover); err != nil {
-				t.Fatal(err)
-			}
-			watchItem(h, verifiedItem{group: "g", item: proto.Item{AI: "m"}, wire: proto.InboxItem{Msg: json.RawMessage(`{`)}})
-		})
-	}
-}
-
 func TestWatchRefusalsAndRevocation(t *testing.T) {
 	h := newPTYTestHost(t)
+	h.Rows.Put("g", "device", "bad", json.RawMessage(`{`))
+	if got := watchDeviceUser(h, "g", "dev"); got != "" {
+		t.Fatal(got)
+	}
 	o := newTkOwner("direct")
 	_, err := h.WatchStart(o, "dev", json.RawMessage(`{`))
 	tkCode(t, err, "bad_request")
@@ -181,7 +203,7 @@ func TestWatchRefusalsAndRevocation(t *testing.T) {
 	key := watchKey{slot, "dev"}
 	p.ok[key] = watchOK{o, "a"}
 	term := newPTYTestTerminal("unused")
-	if _, ok := p.attach(key, term); !ok {
+	if _, from := p.attach(key, term); from != o {
 		t.Fatal("attach")
 	}
 	if res, err := watchEnd(context.Background(), h, o, "dev", end); res != nil || err != nil {
@@ -192,6 +214,64 @@ func TestWatchRefusalsAndRevocation(t *testing.T) {
 	}
 	if got := h.Watchers(slot.group, slot.member); !reflect.DeepEqual(got, []string{}) {
 		t.Fatal(got)
+	}
+}
+
+func TestWatchFanoutError(t *testing.T) {
+	h := newPTYTestHost(t)
+	want := errors.New("owner write failed")
+	n, err := (watchFanout{failWriter{want}, watchState(h), aiSlot{"g", "m"}}).Write([]byte("hello"))
+	if n != 0 || err != want {
+		t.Fatalf("Write = %d, %v", n, err)
+	}
+}
+
+func TestWatchHandBack(t *testing.T) {
+	h := newPTYTestHost(t)
+	registerPTYTestDriver(t, "watch-stop", func(Launch) ([]string, string, error) {
+		return ptyHelperArgv(t, "pty-echo"), "watch-stop", nil
+	})
+	pty, _, err := h.StartPTY("g", "m", "watch-stop", Launch{Folder: t.TempDir()}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := watchState(h)
+	slot := aiSlot{"g", "m"}
+	p.grants[slot] = map[string]string{"a": "by"}
+	key := watchKey{slot, "dev"}
+	p.ok[key] = watchOK{newTkOwner("direct"), "a"}
+	term := newPTYTestTerminal("unused")
+	p.attach(key, term)
+	var ended []string
+	h.WatchEnded = func(group, user string) { ended = append(ended, group+":"+user) }
+	if err := pty.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !term.isClosed() || len(p.ok) != 0 || !reflect.DeepEqual(h.Watchers("g", "m"), []string{}) || !reflect.DeepEqual(ended, []string{"g:a"}) {
+		t.Fatalf("closed=%v, ok=%v, watchers=%v, ended=%v", term.isClosed(), p.ok, h.Watchers("g", "m"), ended)
+	}
+}
+
+func TestWatchAdmission(t *testing.T) {
+	h := newPTYTestHost(t)
+	p := watchState(h)
+	p.grants[aiSlot{"g", "m"}] = map[string]string{"a": "by"}
+	p.grants[aiSlot{"other", "m"}] = map[string]string{"a": "by"}
+	for _, group := range []string{"g", "other"} {
+		h.Rows.Put(group, "device", "a:1", json.RawMessage(marshalWire(proto.DeviceRow{RowHeader: proto.RowHeader{Type: "device", ID: "a:1"}, DeviceChange: proto.DeviceChange{User: "a", Version: 1, Op: "add", Device: "dev"}})))
+	}
+	if !h.Watching("dev") || h.Watching("stranger") {
+		t.Fatal("grant admission mismatch")
+	}
+	var ended []string
+	h.WatchEnded = func(group, user string) { ended = append(ended, group+":"+user) }
+	watchGone(h, "g", "by")
+	if !h.Watching("dev") || ended != nil {
+		t.Fatalf("watching=%v, ended=%v", h.Watching("dev"), ended)
+	}
+	watchGone(h, "other", "by")
+	if h.Watching("dev") || !reflect.DeepEqual(ended, []string{"other:a"}) {
+		t.Fatalf("watching=%v, ended=%v", h.Watching("dev"), ended)
 	}
 }
 

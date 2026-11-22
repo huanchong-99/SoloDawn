@@ -83,6 +83,8 @@ type Host struct {
 	// sets it, and calls Attach for each connection that opens. For a home on
 	// this node the connection is the local link.
 	Connect func(ctx context.Context, device string)
+	// WatchEnded notifies node when a person's last watch grant ends.
+	WatchEnded func(group, user string)
 	// Shim is the command line that starts this node's MCP shim, without the
 	// token (contracts/local.md section 1). node sets it, so that the CLIs of
 	// two nodes in one process reach each their own node.

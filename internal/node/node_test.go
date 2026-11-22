@@ -1004,6 +1004,100 @@ func TestNodeWatchChannelWithoutGrant(t *testing.T) {
 	}
 }
 
+func seedWatchGrant(t *testing.T, h *host.Host, group, member, user, device string, item int64) {
+	t.Helper()
+	h.Rows.Put(group, "member", "by", json.RawMessage(dvlMustEncode(proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: "by"}, Kind: "human", User: user})))
+	h.Rows.Put(group, "device", user+":1", json.RawMessage(dvlMustEncode(proto.DeviceRow{RowHeader: proto.RowHeader{Type: "device", ID: user + ":1"}, DeviceChange: proto.DeviceChange{User: user, Device: device, Version: 1, Op: "add"}})))
+	key := host.SessionKey{Group: group, Member: member}
+	mustNoErr(t, h.Sessions.Create(host.Session{SessionKey: key, Kind: host.GroupSession, Agent: "claude"}))
+	mustNoErr(t, h.Sessions.Move(key, host.Dormant, host.Takeover))
+	card := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: "card"}, By: "by", Kind: "confirm", Mentions: []string{}}
+	h.Push("watch-home", json.RawMessage(dvlMustEncode(proto.Inbox{Type: "inbox", Group: proto.ID(group), Items: []proto.InboxItem{{Item: proto.Item{Item: item, AI: proto.ID(member), Why: "watch"}, Msg: json.RawMessage(dvlMustEncode(card))}}})))
+	mustEqual(t, h.Watchers(group, member), []string{user})
+}
+
+func TestNodeWatchGrantAdmission(t *testing.T) {
+	for _, known := range []bool{false, true} {
+		t.Run(strconv.FormatBool(known), func(t *testing.T) {
+			rvURL := startTestRVWithRelay(t)
+			n, err := openNode(t.Context(), socketRoot(t))
+			mustNoErr(t, err)
+			t.Cleanup(n.Close)
+			owner := adoptTestBrowser(t, n)
+			ownerConn := startAdoptedConn(t, n, owner.ID())
+			defer ownerConn.Close()
+			guest := sesKey("watch-guest")
+			group, first, second := string(sesID("watch-group")), string(sesID("watch-first")), string(sesID("watch-second"))
+			mustEqual(t, n.knownPeer(guest.ID()), false)
+			seedWatchGrant(t, n.host, group, first, guest.ID(), guest.ID(), 1)
+			seedWatchGrant(t, n.host, group, second, guest.ID(), guest.ID(), 2)
+			mustEqual(t, n.knownPeer(guest.ID()), true)
+			mustEqual(t, n.logs.Known(guest.ID()), false)
+			mustEqual(t, n.pairer.Known(guest.ID()), false)
+			mustNoErr(t, n.saveRendezvous([]string{rvURL}))
+			n.syncRendezvous()
+			waitCond(t, func() bool { return len(n.remoteRVPaths()) == 1 })
+			browser, path := newTestBrowserPeer(t, guest, rvURL)
+			go path.Serve(t.Context(), browser, nil)
+			conn := dialTestRTC(t, browser, n.key.ID())
+			checkWatchWelcome(t, conn)
+			entry := sesAddEntry(guest, guest.ID(), 1, guest.ID(), "browser", "Watcher")
+			mustNoErr(t, conn.Send(proto.Devlog{Type: "devlog", User: guest.ID(), Entries: []proto.Envelope{entry}}))
+			checkWatchStart(t, conn, group, first)
+			mustEqual(t, n.logs.Known(guest.ID()), false)
+			endWatchGrant(t, n.host, group, first, guest.ID())
+			mustEqual(t, n.host.Watching(guest.ID()), true)
+			checkWatchStart(t, conn, group, second)
+			if known {
+				log, err := identity.Replay(guest.ID(), []proto.Envelope{entry})
+				mustNoErr(t, err)
+				n.logs.dvlKeep(log, nil)
+			}
+			endWatchGrant(t, n.host, group, second, guest.ID())
+			mustEqual(t, n.host.Watching(guest.ID()), false)
+			mustEqual(t, n.knownPeer(guest.ID()), known)
+			if known {
+				checkWatchWelcome(t, conn)
+				return
+			}
+			select {
+			case <-conn.Done():
+			case <-time.After(5 * time.Second):
+				t.Fatal("last grant left the watcher's connection open")
+			}
+		})
+	}
+}
+
+func checkWatchWelcome(t *testing.T, conn *peer.Connection) {
+	t.Helper()
+	raw, err := conn.Request(t.Context(), func(id int64) any {
+		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 1, Kind: "browser", Name: "Watcher", Addrs: []string{}}
+	})
+	mustNoErr(t, err)
+	var welcome proto.Welcome
+	mustNoErr(t, proto.Decode(raw, &welcome))
+	mustEqual(t, welcome.Owner, false)
+	mustEqual(t, welcome.Groups, []proto.GroupSummary{})
+}
+
+func checkWatchStart(t *testing.T, conn *peer.Connection, group, member string) {
+	t.Helper()
+	raw, err := conn.Request(t.Context(), func(id int64) any {
+		return proto.WatchStart{Request: proto.Request{Type: "watch.start", ID: id}, Group: proto.ID(group), Member: proto.ID(member)}
+	})
+	mustNoErr(t, err)
+	var ok proto.Success
+	mustNoErr(t, proto.Decode(raw, &ok))
+	mustEqual(t, ok.OK, proto.True(true))
+}
+
+func endWatchGrant(t *testing.T, h *host.Host, group, member, user string) {
+	t.Helper()
+	_, err := host.Surface["watch.end"](t.Context(), h, nil, "", json.RawMessage(dvlMustEncode(proto.WatchEnd{HostCommand: proto.HostCommand{Type: "watch.end", Nonce: proto.NewNonce()}, Group: proto.ID(group), Member: proto.ID(member), User: user})))
+	mustNoErr(t, err)
+}
+
 func dialBrowserPTYChannel(t *testing.T, n *nodeRuntime, browserKey identity.Key, label string) (*webrtc.DataChannel, <-chan []byte, <-chan struct{}, <-chan struct{}) {
 	t.Helper()
 	var iceServers []proto.ICEServer

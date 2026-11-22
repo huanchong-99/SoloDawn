@@ -177,6 +177,30 @@ func serveConn(t *testing.T, s *Sessions, device string, paired bool) *fakeCtl {
 	return serveConnCtx(t, t.Context(), s, device, paired)
 }
 
+func TestSessionMemberWatchStart(t *testing.T) {
+	db := sesOpenStore(t)
+	nodeKey, owner, member := sesKey("watch-node"), sesKey("watch-owner"), sesKey("watch-member")
+	logs := seedOwnedLogs(t, db, nodeKey, owner)
+	entry := sesAddEntry(member, member.ID(), 1, member.ID(), "browser", "Member")
+	log, err := identity.Replay(member.ID(), []proto.Envelope{entry})
+	mustNoErr(t, err)
+	logs.dvlKeep(log, nil)
+	loop, h := newTestHomeAndHost(t, db, nodeKey, logs, time.Now(), nil)
+	s := NewSessions(SessionConfig{ID: nodeKey.ID(), Store: db, Logs: logs, Home: loop, Host: h})
+	NewSurface(SurfaceConfig{ID: nodeKey.ID(), Store: db, Sessions: s, Host: h})
+	fc := serveConn(t, s, member.ID(), false)
+	fc.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "Member", Addrs: []string{}})
+	var welcome proto.Welcome
+	mustNoErr(t, proto.Decode(fc.next(t), &welcome))
+	mustEqual(t, welcome.Owner, false)
+	fc.push(proto.WatchStart{Request: proto.Request{Type: "watch.start", ID: 2}, Group: sesID("watch-group"), Member: sesID("watch-ai")})
+	var refusal proto.ErrorResponse
+	mustNoErr(t, proto.Decode(fc.next(t), &refusal))
+	mustEqual(t, refusal.Re, int64(2))
+	mustEqual(t, refusal.Err.Code, "forbidden")
+	mustEqual(t, refusal.Err.Message, "watch grant required")
+}
+
 func TestSessionDefaultsAndWelcomeOrdering(t *testing.T) {
 	db := sesOpenStore(t)
 	nodeKey, browserKey, b2Key := sesKey("node"), sesKey("browser"), sesKey("b2")

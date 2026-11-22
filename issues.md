@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · A late watch item can outlive hand-back
+
+- Symptom: a watch item arriving between PTY shutdown and the hand-back turn can leave a grant through the next takeover.
+- Cause: `internal/host/pty.go` `runStop` clears grants before `internal/host/takeover.go` starts the hand-back turn; `watchItem` in `internal/host/watch.go` still sees the session in `takeover` during that interval.
+- Status: open.
+
 ### 2026-11-22 · limitation · Remembered addresses are not dialled yet
 
 - Symptom: `home.add` records signalling addresses, but a node still needs a shared configured rendezvous to reach an external home.

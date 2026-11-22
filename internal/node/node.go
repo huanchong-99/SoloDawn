@@ -28,6 +28,7 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/host"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/peer"
+	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/rendezvous"
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
@@ -249,6 +250,7 @@ func (n *nodeRuntime) stepServices() error {
 
 func (n *nodeRuntime) wireServices() {
 	n.host.Shim = []string{n.exe, "mcp"}
+	n.host.WatchEnded = n.watchEnded
 	n.local = AttachLocal(n.host, n.loop)
 	nameFn := func() string { return ReadName(n.db) }
 	n.sessions = NewSessions(SessionConfig{
@@ -409,7 +411,28 @@ func (n *nodeRuntime) defaultWebURL() string {
 }
 
 func (n *nodeRuntime) knownPeer(device string) bool {
-	return n.logs.Known(device) || n.pairer.Known(device) || n.remembersHome(device)
+	return n.logs.Known(device) || n.pairer.Known(device) || n.remembersHome(device) || n.host.Watching(device)
+}
+
+func (n *nodeRuntime) watchEnded(group, user string) {
+	for _, raw := range n.host.Rows.Of(group, "device") {
+		var row proto.DeviceRow
+		proto.Decode(raw, &row)
+		if row.User == user {
+			n.closeUnknownDevice(row.Device)
+		}
+	}
+}
+
+func (n *nodeRuntime) closeUnknownDevice(device string) {
+	if n.knownPeer(device) {
+		return
+	}
+	for _, c := range n.sessions.sesConns() {
+		if c.device == device {
+			c.Close()
+		}
+	}
 }
 
 func (n *nodeRuntime) serveInbound(c *peer.Connection) {

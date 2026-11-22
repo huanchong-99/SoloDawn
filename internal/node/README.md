@@ -83,6 +83,8 @@ The owner's devices can send `home.add` to record a group's home and its signall
 
 `SessionConfig.OnAdopt` is invoked once with the adopted owner's user id when an unowned node persists its first valid adoption log (`dvlAdopt`), before forwarding `devlog` frames. `SessionConfig.Spawn` starts a host command; `nil` runs it on a bare goroutine. `nodeRuntime.onAdopt` registers the node to start at login (`InstallService`), while `home.Loop` reads the dynamic owner through `LoopConfig.OwnerFn` (`logs.Owner`). `home.Loop.Welcome` and `home.Loop` group announcements deliver `welcome.groups` and `groups` pushes over `Sessions`.
 
+Non-owner devices may send `watch.start` as well as `sync` and `fetch`. A device whose person holds a watch grant is admitted by `knownPeer` and session enrolment even without a locally known device log. It receives the ordinary peer welcome (`owner: false`, readable groups often empty), may send `hello` and `devlog`, and may start and open its granted watch channels. `Host.WatchEnded` closes that person's device sessions, including their peer connections, after the last grant ends unless `knownPeer` still accepts them for another reason.
+
 ## Concurrency and lock order
 
 - `nodeRuntime.bg` waits for all inbound `Pairer.Serve` sessions, outgoing `serveClient` sessions, rendezvous loops, the daily retention schedule (`startRetention`), and host commands, which `Sessions` starts through `SessionConfig.Spawn`, before `Close` shuts `LocalLink`, `home.Loop` and `Store`; `nodeRuntime.mu` is a leaf lock guarding `closing`, `rvPaths` and `rvLoops`.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -37,6 +38,7 @@ type watchPart struct {
 	ok          map[watchKey]watchOK
 	open        map[watchKey]*watchWriter
 	connections map[Owner]bool
+	ended       func(aiSlot, []string)
 }
 
 func watchState(h *Host) *watchPart {
@@ -48,17 +50,15 @@ func watchState(h *Host) *watchPart {
 		p.ok = map[watchKey]watchOK{}
 		p.open = map[watchKey]*watchWriter{}
 		p.connections = map[Owner]bool{}
+		p.ended = h.watchEnded
 	}
 	return p
 }
 
 func watchItem(h *Host, v verifiedItem) {
 	slot := aiSlot{group: v.group, member: string(v.item.AI)}
-	if state, _ := h.MemberState(slot.group, slot.member); state == "takeover" {
-		var card proto.MsgRow
-		if err := proto.Decode(v.wire.Msg, &card); err != nil {
-			panic(err)
-		}
+	var card proto.MsgRow
+	if state, _ := h.MemberState(slot.group, slot.member); state == "takeover" && proto.Decode(v.wire.Msg, &card) == nil {
 		member, _ := lookupRow[proto.MemberRow](h, slot.group, "member", card.By)
 		p := watchState(h)
 		p.mu.Lock()
@@ -75,6 +75,7 @@ func watchItem(h *Host, v verifiedItem) {
 	}
 }
 
+// WatchStart authorizes a device's direct connection for a granted terminal.
 func (h *Host) WatchStart(from Owner, device string, data json.RawMessage) (any, error) {
 	var req proto.WatchStart
 	if err := proto.Decode(data, &req); err != nil {
@@ -103,8 +104,8 @@ func watchDeviceUser(h *Host, group, device string) string {
 	var latest proto.DeviceRow
 	for _, raw := range h.Rows.Of(group, "device") {
 		var row proto.DeviceRow
-		if err := proto.Decode(raw, &row); err != nil {
-			panic(err)
+		if proto.Decode(raw, &row) != nil {
+			continue
 		}
 		if row.Device == device && row.Version > latest.Version {
 			latest = row
@@ -153,6 +154,7 @@ func (p *watchPart) closeKey(key watchKey) {
 	}
 }
 
+// ServeWatch serves a receive-only terminal channel authorized by WatchStart.
 func (h *Host) ServeWatch(t Terminal) {
 	g, m, valid := watchLabel(t.Label())
 	if !valid {
@@ -161,13 +163,13 @@ func (h *Host) ServeWatch(t Terminal) {
 	}
 	key := watchKey{aiSlot{g, m}, t.Device()}
 	p := watchState(h)
-	w, ok := p.attach(key, t)
-	if !ok {
+	w, from := p.attach(key, t)
+	if from == nil {
 		ptyRejectTerminal(t)
 		return
 	}
 	if size, known := ptyState(h).sizeOf(key.aiSlot); known {
-		p.resize(key.aiSlot, size.cols, size.rows)
+		watchResize(from, key.aiSlot, size.cols, size.rows)
 	}
 	go p.writeLoop(w)
 	var b [1]byte
@@ -188,18 +190,18 @@ func watchLabel(label string) (string, string, bool) {
 	return ptyParseLabel("pty:" + rest)
 }
 
-func (p *watchPart) attach(key watchKey, t Terminal) (*watchWriter, bool) {
+func (p *watchPart) attach(key watchKey, t Terminal) (*watchWriter, Owner) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if _, ok := p.ok[key]; !ok {
-		return nil, false
+		return nil, nil
 	}
 	if p.open[key] != nil {
-		return nil, false
+		return nil, nil
 	}
 	w := &watchWriter{term: t, wake: make(chan struct{}, 1)}
 	p.open[key] = w
-	return w, true
+	return w, p.ok[key].from
 }
 
 func (p *watchPart) next(w *watchWriter) ([]byte, bool) {
@@ -279,13 +281,17 @@ func (p *watchPart) resize(slot aiSlot, cols, rows int) {
 	}
 	p.mu.Unlock()
 	for _, link := range links {
-		link.Send(proto.PTYResize{Type: "pty.resize", Group: proto.ID(slot.group), AI: proto.ID(slot.member), Cols: cols, Rows: rows})
+		watchResize(link, slot, cols, rows)
 	}
+}
+
+func watchResize(link Owner, slot aiSlot, cols, rows int) {
+	link.Send(proto.PTYResize{Type: "pty.resize", Group: proto.ID(slot.group), AI: proto.ID(slot.member), Cols: cols, Rows: rows})
 }
 
 func (p *watchPart) stop(slot aiSlot) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	users := slices.Collect(maps.Keys(p.grants[slot]))
 	for key := range p.ok {
 		if key.aiSlot == slot {
 			p.closeKey(key)
@@ -293,8 +299,11 @@ func (p *watchPart) stop(slot aiSlot) {
 		}
 	}
 	delete(p.grants, slot)
+	p.mu.Unlock()
+	p.ended(slot, users)
 }
 
+// Watchers returns the sorted user IDs holding a grant for this terminal.
 func (h *Host) Watchers(group, member string) []string {
 	p := watchState(h)
 	p.mu.Lock()
@@ -328,28 +337,70 @@ func watchEnd(_ context.Context, h *Host, _ Owner, _ string, data json.RawMessag
 	}
 	p := watchState(h)
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if !p.revoke(aiSlot{string(req.Group), string(req.Member)}, req.User) {
+	slot := aiSlot{string(req.Group), string(req.Member)}
+	ok := p.revoke(slot, req.User)
+	p.mu.Unlock()
+	if !ok {
 		return nil, &Error{"not_found", "watch grant not found"}
 	}
+	p.ended(slot, []string{req.User})
 	return nil, nil
 }
 
 func watchGone(h *Host, group, member string) {
 	p := watchState(h)
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	ended := map[aiSlot][]string{}
 	for slot, grants := range p.grants {
 		if slot.group == group {
-			p.revokeMember(slot, grants, member)
+			ended[slot] = p.revokeMember(slot, grants, member)
 		}
+	}
+	p.mu.Unlock()
+	for slot, users := range ended {
+		p.ended(slot, users)
 	}
 }
 
-func (p *watchPart) revokeMember(slot aiSlot, grants map[string]string, member string) {
+func (p *watchPart) revokeMember(slot aiSlot, grants map[string]string, member string) []string {
+	users := []string{}
 	for user, by := range grants {
 		if by == member {
 			p.revoke(slot, user)
+			users = append(users, user)
+		}
+	}
+	return users
+}
+
+// Watching reports whether the device's person holds any watch grant here.
+func (h *Host) Watching(device string) bool {
+	p := watchState(h)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for slot, grants := range p.grants {
+		if _, ok := grants[watchDeviceUser(h, slot.group, device)]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *watchPart) hasUser(user string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, grants := range p.grants {
+		if _, ok := grants[user]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Host) watchEnded(slot aiSlot, users []string) {
+	for _, user := range users {
+		if !watchState(h).hasUser(user) && h.WatchEnded != nil {
+			h.WatchEnded(slot.group, user)
 		}
 	}
 }
