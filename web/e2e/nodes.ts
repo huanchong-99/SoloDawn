@@ -249,11 +249,14 @@ const answers = (url: string) => fetch(url, { method: 'HEAD' }).then(Boolean, ()
 
 function connects(path: string) {
   return new Promise<boolean>((resolve) => {
+    let reply = '';
     const socket = createConnection(path, () => {
-      socket.destroy();
-      resolve(true);
+      socket.write('{"cmd":"status"}\n');
     });
+    socket.setTimeout(5000, () => socket.destroy());
+    socket.on('data', (chunk: Buffer) => (reply += chunk.toString('utf8')));
     socket.once('error', () => resolve(false));
+    socket.once('close', () => resolve(reply.includes('"ok":true')));
   });
 }
 
