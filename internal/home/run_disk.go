@@ -132,6 +132,13 @@ func (d *runDisk) Queued() []store.Item {
 	return items
 }
 
+func (d *runDisk) OtherMember(user string) (found bool) {
+	err := d.tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM row WHERE g<>? AND r='member' AND gone=0
+		AND data->>'kind'='human' AND data->>'user'=?)`, d.group, user).Scan(&found)
+	d.err = errors.Join(d.err, err)
+	return found
+}
+
 // runOne reads one row that is no marker. A row that is not there is no
 // failure.
 func runOne[R any](d *runDisk, r, id string) (row R, ok bool) {

@@ -140,6 +140,7 @@ func (d disk) TypedNotes(string) []proto.NoteRow         { return nil }
 func (d disk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d disk) Pending() []proto.MsgRow                   { return nil }
 func (d disk) Queued() []store.Item                      { return nil }
+func (d disk) OtherMember(string) bool                   { return false }
 
 // setting is a fake of home.Write: a row of the setting table.
 type setting struct{ key, value string }
