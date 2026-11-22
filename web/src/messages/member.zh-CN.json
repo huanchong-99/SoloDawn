@@ -1,9 +1,6 @@
 {
   "member.account": "账号",
-  "member.account.api_key": "API key",
-  "member.account.personal": "个人订阅",
   "member.account.personal.note": "只听主人的",
-  "member.account.team": "团队方案",
   "member.add": "添加 AI",
   "member.add.forbidden": "只有管理员能添加 AI。",
   "member.add.nohost": "请先连上一台你的电脑。",

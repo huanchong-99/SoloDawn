@@ -1,15 +1,14 @@
 <script lang="ts">
   import { homes, type Group } from '../../lib/groups.svelte';
   import {
-    accountTitle,
     addDisabledReason,
     aiMembers,
     humanMembers,
-    humanName,
     pathLabel,
     personTags,
     statusOf,
   } from '../../lib/members';
+  import { accountLabel } from '../../lib/onboard.svelte';
   import { t } from '../../lib/prefs.svelte';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
@@ -33,7 +32,7 @@
       <button
         class="btn btn-sm"
         onclick={() => (adding = true)}
-        disabled={Boolean(addReason)}
+        disabled={!group.info || Boolean(addReason)}
         aria-describedby={addReason ? `${uid}-add-why` : undefined}
       >
         <Icon name="plus" sm /><span>{t('member.add')}</span>
@@ -46,7 +45,7 @@
 
   {#each ais as ai (ai.id)}
     {@const status = statusOf(group, ai)}
-    {@const owner = ai.user === group.home.me.user ? undefined : humanName(group, ai.user)}
+    {@const owner = ai.user === group.home.me.user ? undefined : group.personName(ai.user)}
     <section class="card member">
       <header class="row">
         <span
@@ -70,7 +69,7 @@
         <dd>{ai.host_name} <span class="muted">· {pathLabel(ai)}</span></dd>
         <dt>{t('member.account')}</dt>
         <dd>
-          {accountTitle(ai.account)}{#if ai.account === 'personal'}{' '}<span class="muted">
+          {accountLabel(ai.account)}{#if ai.account === 'personal'}{' '}<span class="muted">
               · {t('member.account.personal.note')}
             </span>{/if}
         </dd>

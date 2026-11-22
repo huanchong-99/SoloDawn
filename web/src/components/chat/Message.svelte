@@ -63,8 +63,8 @@
     {#if msg.kind === 'system'}
       <code>{msg.body.code}</code>
     {:else if msg.kind === 'task'}
-      {@const task = group.rows.get(`task ${msg.body.task}`)}
-      {#if task && 'title' in task}
+      {@const task = group.task(msg.body.task)}
+      {#if task}
         <span class="cut"><span class="mono">T-{task.num}</span> {task.title}</span>
       {/if}
     {/if}

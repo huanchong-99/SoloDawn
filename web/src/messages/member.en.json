@@ -1,9 +1,6 @@
 {
   "member.account": "Account",
-  "member.account.api_key": "API key",
-  "member.account.personal": "Personal subscription",
   "member.account.personal.note": "takes orders from owner",
-  "member.account.team": "Team plan",
   "member.add": "Add AI",
   "member.add.forbidden": "Only an admin can add an AI.",
   "member.add.nohost": "Connect one of your computers first.",

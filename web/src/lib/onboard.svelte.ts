@@ -25,7 +25,9 @@ import type {
 
 const windowSeconds = 600;
 const second = 1000;
-const browserName = 'Browser';
+
+/** Default device display name used by browser pairing and live sessions. */
+export const browserName = 'Browser';
 
 /** Account types declared with `agent.set` (`contracts/commands.md` section 2). */
 export const accounts = ['personal', 'team', 'api_key'] as const;

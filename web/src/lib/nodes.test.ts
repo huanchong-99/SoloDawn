@@ -3,16 +3,7 @@ import { watch } from '../../features/watch.svelte';
 import { Home, lost } from './groups.svelte';
 import { goldens } from './mock';
 import type { Net, Path } from './net.svelte';
-import {
-  accountLabel,
-  accounts,
-  cliName,
-  indicator,
-  Nodes,
-  nodes,
-  setAccount,
-} from './nodes.svelte';
-import { prefs } from './prefs.svelte';
+import { indicator, Nodes, nodes } from './nodes.svelte';
 import * as p from './proto';
 
 const user = 'akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs';
@@ -77,63 +68,7 @@ function netWith(homes: Home[], paths = new Map<Home, Path | undefined>()): Net 
 
 afterEach(() => {
   signed.length = 0;
-  prefs.lang = 'en';
   vi.restoreAllMocks();
-});
-
-describe('CLI and account helpers', () => {
-  it('lists the three declared account types in order', () => {
-    expect(accounts).toStrictEqual(['personal', 'team', 'api_key']);
-  });
-
-  it('names known CLIs and preserves unknown identifiers', () => {
-    expect(cliName('claude')).toBe('Claude Code');
-    expect(cliName('codex')).toBe('Codex');
-    expect(cliName('gemini')).toBe('gemini');
-  });
-
-  it('returns localized labels for declared accounts and unset for null or unknown values', () => {
-    prefs.lang = 'en';
-    expect(accountLabel('personal')).toBe('Personal subscription');
-    expect(accountLabel('team')).toBe('Team plan');
-    expect(accountLabel('api_key')).toBe('API key');
-    expect(accountLabel(null)).toBe('Account type not set');
-    expect(accountLabel('other')).toBe('Account type not set');
-
-    prefs.lang = 'zh-CN';
-    expect(accountLabel('personal')).toBe('个人订阅');
-    expect(accountLabel(null)).toBe('未选账号类型');
-  });
-
-  it('signs and sends agent.set on ctl, or returns lost when offline or rejected', async () => {
-    vi.spyOn(Date, 'now').mockReturnValue(1763600000000);
-    const { ctl, asked } = connection();
-
-    const call = setAccount(ctl, me, deviceId, 'codex', 'team');
-    await vi.waitFor(() => expect(asked).toHaveLength(1));
-    expect(JSON.parse(signed[0])).toStrictEqual({
-      t: 'agent.set',
-      n: expect.stringMatching(/^[A-Za-z0-9_-]{21}[AQgw]$/),
-      ts: 1763600000000,
-      to: deviceId,
-      agent: 'codex',
-      account: 'team',
-    });
-    expect(asked[0].req).toStrictEqual({
-      t: 'cmd',
-      env: { p: signed[0], k: 'this-browser', s: 'signature' },
-    });
-    asked[0].answer({ re: 1, ok: true });
-    expect(await call).toStrictEqual({ re: 1, ok: true });
-
-    const failing = setAccount(ctl, me, deviceId, 'claude', 'api_key');
-    await vi.waitFor(() => expect(asked).toHaveLength(2));
-    asked[1].fail();
-    expect(await failing).toStrictEqual(lost());
-
-    expect(await setAccount(undefined, me, deviceId, 'claude', 'personal')).toStrictEqual(lost());
-    expect(asked).toHaveLength(2);
-  });
 });
 
 describe('indicator', () => {
@@ -240,6 +175,20 @@ describe('Nodes', () => {
     const { re: _re, ok: _ok, ...expected } = answer;
     expect(store.infos.get(owned)).toStrictEqual(expected);
     expect(seen.at(-1)).toBe(1);
+
+    // Passing again = true re-reads host.info on the same ctl while still skipping non-owners.
+    store.sync([offline, foreign, owned], true);
+    expect(foreignConn.asked).toEqual([]);
+    expect(ownedConn.asked).toHaveLength(2);
+    const refreshed = hostAnswer({ open: 4 });
+    ownedConn.asked[1].answer(refreshed);
+    await settle();
+    const { re: _re2, ok: _ok2, ...expectedRefreshed } = refreshed;
+    expect(store.infos.get(owned)).toStrictEqual(expectedRefreshed);
+
+    // Default again = false still skips an unchanged ctl afterwards.
+    store.sync([offline, foreign, owned]);
+    expect(ownedConn.asked).toHaveLength(2);
     stop();
   });
 

@@ -4,7 +4,7 @@
 import { SvelteMap } from 'svelte/reactivity';
 import { lost, newId, type Group, type Home } from './groups.svelte';
 import type { Net, Path } from './net.svelte';
-import { t } from './prefs.svelte';
+import { setAccount, type AccountKind } from './onboard.svelte';
 import type * as p from './proto';
 
 /** The four visual states of the connection indicator. */
@@ -28,42 +28,6 @@ export interface Computer {
 export interface PairLink {
   link: string;
   expires: number;
-}
-
-/** Account types declared with `agent.set` (planning/contracts/commands.md section 2). */
-export const accounts = ['personal', 'team', 'api_key'] as const;
-/** One of the three AI account types accepted by `agent.set`. */
-export type AccountKind = (typeof accounts)[number];
-
-const cliLabels: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' };
-
-/** Display label of an AI CLI identifier. */
-export const cliName = (agent: string) => cliLabels[agent] ?? agent;
-
-const accountKeys: Record<string, `nodes.account.${AccountKind}` | undefined> = {
-  personal: 'nodes.account.personal',
-  team: 'nodes.account.team',
-  api_key: 'nodes.account.api_key',
-};
-
-/** Localized label of a declared AI account type, or the unset label when `null` or unknown. */
-export const accountLabel = (account: string | null) => {
-  const key = accountKeys[account as string];
-  return t(key ?? 'nodes.account.unset');
-};
-
-/** Sends a signed `agent.set` host command (planning/contracts/commands.md section 2). */
-export async function setAccount(
-  ctl: p.Ctl | undefined,
-  signer: { sign(p: string): Promise<p.Envelope> },
-  to: string,
-  agent: string,
-  account: AccountKind,
-): Promise<p.CmdResult | p.ErrorResponse> {
-  const env = await signer.sign(
-    JSON.stringify({ t: 'agent.set', n: newId(), ts: Date.now(), to, agent, account }),
-  );
-  return ctl ? ctl.request({ t: 'cmd', env }).catch(lost) : lost();
 }
 
 function summary(paths: (Path | undefined)[]): ConnStatus {
@@ -95,11 +59,12 @@ export class Nodes {
   readonly infos = new SvelteMap<Home, p.HostInfoPush>();
   #asked = new WeakMap<Home, p.Ctl | undefined>();
 
-  /** Requests `host.info` once for each newly online owner `Home` in `homes`. */
-  sync(homes: readonly Home[]) {
+  /** Requests `host.info` for each newly online owner `Home` in `homes`, or every online owner
+   *  `Home` when `again` is true. */
+  sync(homes: readonly Home[], again = false) {
     for (const home of homes) {
       const ctl = activeCtl(home);
-      if (this.#asked.get(home) === ctl) continue;
+      if (!again && this.#asked.get(home) === ctl) continue;
       this.#asked.set(home, ctl);
       if (ctl) void this.#read(home, ctl);
     }

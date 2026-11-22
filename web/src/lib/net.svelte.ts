@@ -7,14 +7,12 @@ import { SvelteMap } from 'svelte/reactivity';
 import type { DeviceLog } from './devlog';
 import { Home, homes } from './groups.svelte';
 import { loadDevice, type Device } from './identity';
-import { signalUrlOf } from './onboard.svelte';
+import { browserName, signalUrlOf } from './onboard.svelte';
 import { loadOwner, saveOwner } from './owner';
 import { connect, type Peer, type Session } from './peer';
 import type { Devlog, Welcome } from './proto';
 import { parse } from './route.svelte';
 import { runTab } from './tablock';
-
-const browserName = 'Browser';
 
 /** Where the homes come from: the wire examples, or the nodes. */
 export type Source = 'mock' | 'live';
@@ -222,11 +220,7 @@ export function start(source: Source) {
     stopAbort.abort();
     chooseHere = undefined;
     otherTab = false;
-    for (const home of added.values())
-      homes.splice(
-        homes.findIndex((h) => h === home),
-        1,
-      );
+    for (const home of added.values()) homes.splice(homes.indexOf(home), 1);
     paths.clear();
   };
   return { net, stop };

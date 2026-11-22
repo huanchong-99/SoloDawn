@@ -1,20 +1,18 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { homes, type Group, type Home } from '../../lib/groups.svelte';
+  import { homes, type Group } from '../../lib/groups.svelte';
   import {
-    accountTitle,
     candidatesOf,
     canMakeSecretary,
-    cliTitle,
     joinError,
     joinGroup,
-    readHosts,
     selectableCandidates,
     suggestedName,
     type Candidate,
   } from '../../lib/members';
+  import { nodes } from '../../lib/nodes.svelte';
+  import { accountLabel, cliName } from '../../lib/onboard.svelte';
   import { t } from '../../lib/prefs.svelte';
-  import type { HostInfo } from '../../lib/proto';
   import Avatar from '../Avatar.svelte';
   import Failure from '../Failure.svelte';
 
@@ -24,34 +22,19 @@
   const uid = $props.id();
 
   const owned = $derived(homes.filter((home) => home.owner && home.ctl));
+  const loading = $derived(owned.some((home) => !nodes.infos.has(home)));
   const canSecretary = $derived(canMakeSecretary(group));
 
   let dialog: HTMLDialogElement;
-  let infos = $state.raw(new Map<Home, HostInfo>());
   let name = $state('');
   let customName = $state(false);
   let secretary = $state(false);
-  let loading = $state(false);
   let busy = $state(false);
   let failed = $state('');
-  let asked = new Set<Home>();
 
-  const candidates = $derived(candidatesOf(group, owned, infos));
+  const candidates = $derived(candidatesOf(group, owned, nodes.infos));
   const selectable = $derived(selectableCandidates(candidates));
   let chosen = $state.raw<Candidate>();
-
-  async function syncHosts(targets: Home[]) {
-    loading = true;
-    const next = await readHosts(
-      targets,
-      asked,
-      untrack(() => infos),
-    );
-    loading = false;
-    if (!open || !next) return;
-    infos = next.infos;
-    if (next.error) failed = next.error;
-  }
 
   $effect(() => {
     if (!open) {
@@ -59,20 +42,19 @@
       return;
     }
     untrack(() => {
-      asked = new Set();
-      infos = new Map();
       chosen = undefined;
       name = '';
       customName = false;
       secretary = false;
       failed = '';
+      nodes.sync(homes, true);
     });
     if (!dialog.open) dialog.showModal();
   });
 
   $effect(() => {
     if (!open) return;
-    void syncHosts(owned);
+    nodes.sync(homes);
     if (!chosen && selectable.length) {
       const first = selectable[0];
       chosen = first;
@@ -138,16 +120,16 @@
                 {disabled}
                 onchange={() => pickCandidate(candidate)}
               />
-              <Avatar id={candidate.key} name={cliTitle(candidate.agent)} cli={candidate.agent} />
+              <Avatar id={candidate.key} name={cliName(candidate.agent)} cli={candidate.agent} />
               <span class="grow">
-                <b>{cliTitle(candidate.agent)} · {candidate.hostName}</b>
+                <b>{cliName(candidate.agent)} · {candidate.hostName}</b>
                 <span class="sub">
                   {#if candidate.inGroup}
                     {t('member.join.joined')}
                   {:else if candidate.account === null}
                     {t('member.join.unconfigured')}
                   {:else}
-                    {accountTitle(candidate.account)}{#if !candidate.loginOk}{' '}<span
+                    {accountLabel(candidate.account)}{#if !candidate.loginOk}{' '}<span
                         class="warn"
                       >
                         · {t('member.join.nologin')}
@@ -206,7 +188,7 @@
       <button type="button" class="btn btn-ghost" onclick={() => dialog.close()}>
         {t('member.join.cancel')}
       </button>
-      <button class="btn btn-primary" disabled={busy || loading || (!chosen && !selectable.length)}>
+      <button class="btn btn-primary" disabled={busy || (!chosen && !selectable.length)}>
         {t('member.join.submit')}
       </button>
     </footer>

@@ -1,19 +1,11 @@
 <script lang="ts">
-  import type { Component } from 'svelte';
-  import type { Group } from '../../lib/groups.svelte';
   import { jumpToMessage } from '../../lib/jump';
   import type { CardProps } from '../../lib/mounts.svelte';
   import { t } from '../../lib/prefs.svelte';
-  import type { TaskRow } from '../../lib/proto';
   import { reviewLine, taskBadge, taskSteps, threadPreview, waitBadge } from '../../lib/task';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
-
-  const threads = import.meta.glob<Component<{ group: Group; task: TaskRow }>>(
-    '../thread/Thread.svelte',
-    { eager: true, import: 'default' },
-  );
-  const Thread = threads['../thread/Thread.svelte'];
+  import Thread from '../thread/Thread.svelte';
 
   /** Draws a `task` message in the main line from the live `TaskRow` of its group. */
   let { group, msg }: CardProps<'task'> = $props();
@@ -136,7 +128,7 @@
         <b>{t('task.thread.count').replace('{n}', `${task.thread.count}`)}</b>
         <span class="cut grow" class:muted={!task.thread.last}>{threadPreview(group, task)}</span>
       </summary>
-      {#if open && Thread}
+      {#if open}
         <Thread {group} {task} />
       {/if}
     </details>

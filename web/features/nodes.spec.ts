@@ -6,7 +6,8 @@ import { expect, vi } from 'vitest';
 import { find, Home, homes } from '../src/lib/groups.svelte';
 import { goldens } from '../src/lib/mock';
 import type { Path, Source } from '../src/lib/net.svelte';
-import { nodes, type AccountKind } from '../src/lib/nodes.svelte';
+import { nodes } from '../src/lib/nodes.svelte';
+import type { AccountKind } from '../src/lib/onboard.svelte';
 import * as p from '../src/lib/proto';
 import { example, TestHome } from './home';
 import { all, closePage, go, one, openPage, texts } from './page';
@@ -66,27 +67,23 @@ function makeNode(name: string, device: string, overrides: Partial<p.HostInfo> =
     async connect() {
       const link = store.connect();
       const base = home.connect(link.push);
+      function handleCmd(env: p.Envelope): p.CmdResult | undefined {
+        const parsed = JSON.parse(env.p) as { t: string; agent?: string; account?: AccountKind };
+        if (parsed.t === 'pair.browser') {
+          commands.push(env);
+          return p.decode(p.CmdResult, goldens['cmd-pair-link']);
+        }
+        if (parsed.t !== 'agent.set') return undefined;
+        commands.push(env);
+        const entry = info.agents.find((item) => item.agent === parsed.agent);
+        if (entry && parsed.account) entry.account = parsed.account;
+        return { re: 1, ok: true };
+      }
       const ctl = {
         request: async (req: { t: string; env?: p.Envelope }) => {
           if (req.t === 'host.info') return structuredClone(info);
-          if (req.t === 'cmd' && req.env) {
-            const parsed = JSON.parse(req.env.p) as {
-              t: string;
-              agent?: string;
-              account?: AccountKind;
-            };
-            if (parsed.t === 'pair.browser') {
-              commands.push(req.env);
-              return p.decode(p.CmdResult, goldens['cmd-pair-link']);
-            }
-            if (parsed.t === 'agent.set') {
-              commands.push(req.env);
-              const entry = info.agents.find((item) => item.agent === parsed.agent);
-              if (entry && parsed.account) entry.account = parsed.account;
-              return { re: 1, ok: true } satisfies p.CmdResult;
-            }
-          }
-          return base.ctl.request(req as never);
+          const cmdAnswer = req.t === 'cmd' && req.env ? handleCmd(req.env) : undefined;
+          return cmdAnswer ?? base.ctl.request(req as never);
         },
       } as p.Ctl;
       drop = () => {

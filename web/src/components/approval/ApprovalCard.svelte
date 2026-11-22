@@ -24,10 +24,7 @@
     const member = group.member(msg.body.ai);
     return member?.kind === 'ai' ? member : undefined;
   });
-  const task = $derived.by(() => {
-    const row = group.rows.get(`task ${msg.body.task}`);
-    return row && row.r === 'task' && !('gone' in row) ? row : undefined;
-  });
+  const task = $derived(group.task(msg.body.task));
   const aiMeta = $derived.by(() => {
     const details: string[] = [];
     if (ai?.host_name) {
@@ -39,7 +36,7 @@
   });
   const approvers = $derived(
     msg.body.approvers
-      .map((uid) => group.members.find((m) => m.kind === 'human' && m.user === uid)?.name)
+      .map((uid) => group.personName(uid))
       .filter((name): name is string => Boolean(name))
       .join(t('approval.sep')),
   );
