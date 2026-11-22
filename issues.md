@@ -6,12 +6,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-23 · bug · A9.24 can run hosted checks again for the superseded commit
-
-- Symptom: A9.24 can report an unexpected `watch-checks` call for the first commit of the task that is reassigned.
-- Cause: `internal/host/deliver.go:1378-1379` can select a `cloud_check` row and start its poll after the original poll finishes. `internal/host/tools_task.go:476` releases the polling slot, so the delayed resume can claim it even after the task has reached review. The home acknowledges the result before sending the updated row (`internal/home/run_group.go:170-171`).
-- Status: open. Reproduced by holding the resume call until the original poll released its slot. The fix needs to coordinate completion with row updates while allowing retries after a failed result delivery.
-
 ### 2026-11-23 · limitation · Remembered project homes without local AIs stay connected
 
 - Symptom: remembering a project home now retains a connection even when no AI is hosted locally in that group.
@@ -707,6 +701,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-23 · bug · A9.24 can run hosted checks again for the superseded commit
+
+- Symptom: A9.24 can report an unexpected `watch-checks` call for the first commit of the task that is reassigned.
+- Cause: `internal/host/deliver.go:1378-1379` can select a stale `cloud_check` row after `tskFinishCloud` releases the polling slot, even after the task has reached review. The home acknowledges the result before sending the updated row (`internal/home/run_group.go:170-171`).
+- Status: resolved in `e61a675ef`. The host keeps claims for accepted and superseded commits, while allowing retries after failed result delivery. `TestStaleCloudCheckRowDoesNotRestartCompletedPoll` verifies that resuming from a stale row does not make a second forge call.
 
 ### 2026-11-22 · limitation · `host.CheckTakeover` and `driver` in `host.info`
 
