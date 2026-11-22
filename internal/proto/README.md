@@ -134,6 +134,11 @@ the type does not name, not with `Decode`.
 - `testdata/trace-remote.json` and `testdata/trace-local.json` hold the complete
   signed transcripts of one confirmed task from request to summary, with a
   GitHub remote and with `forge: none`
-  ([trace-task.md](../../planning/flows/trace-task.md)). Both suites decode them
-  through their file maps and verify every key, device-log entry, command
-  signature, row update, plain inbox item and acknowledgement.
+  ([trace-task.md](../../planning/flows/trace-task.md)). Their type is `TaskTrace`
+  ([`trace.go`](trace.go)). The home writes them, not this package:
+  `internal/home/trace_test.go` sends their signed commands through the home's
+  command table and fails when a file differs from what the home answers, pushes
+  and delivers; `go test ./internal/home -run TestTaskTraces -update` writes them
+  again. `web/src/lib/trace.test.ts` verifies them on their own: the device log,
+  every command signature, the rows, the inbox items with their acknowledgements,
+  and that every item, the review and the merge are about the submitted commit.

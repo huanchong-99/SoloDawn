@@ -7,11 +7,12 @@ rows 1, 3 to 8.
 This file is documentation: payloads are abridged. The complete signed golden
 transcripts are `internal/proto/testdata/trace-remote.json` (with a GitHub
 remote) and `internal/proto/testdata/trace-local.json` (`forge: none`, no
-remote), checked by `internal/proto/trace_test.go` and
-`web/src/lib/trace.test.ts`. Each pins the device keys, owner device log,
-initial group and member rows, sequence and task counters, every command
-envelope and `re`-paired response, the resulting `rows` pushes, and all six
-inbox items with their host `ack`s.
+remote). `internal/home/trace_test.go` produces them by sending their signed
+commands through the home and fails when they differ from its output;
+`web/src/lib/trace.test.ts` verifies them on their own. Each pins the device
+keys, owner device log, initial group and member rows, sequence and task
+counters, every command envelope and `re`-paired response, the resulting
+`rows` pushes, and all six inbox items with their host `ack`s.
 
 Cast: the owner's browser, device `OB`. Node A, device `HA`: home of group
 `G`; hosts the secretary `mS` and the AI `mX`. Node B, device `HB`: hosts
@@ -25,7 +26,7 @@ and `ts`, and envelopes as `signed by`.
 | --- | --- | --- | --- | --- |
 | 1 | browser → home, `cmd` | `OB` | `{"t":"post","g":"G","kind":"text","text":"Show the connection path…"}` (id `M1`) | stores `M1`; item 1 for `mS` |
 | 2 | secretary → home, `cmd` | `HA`, `as: mS` | `{"t":"post","kind":"brief","body":{"title":"…","criteria":[…],"tasks":[{"title":"Node: report path changes","assignee":"mX","reviewer":"mY"}],"pass":90,"requester":"<owner>"}}` (id `M2`) | stores the card, pending |
-| 3 | browser → home, `cmd` | `OB` | `{"t":"act","g":"G","msg":"M2","action":"confirm"}` (nonce `C1`) | card confirmed (`state.act` keeps step 3's envelope); task `t1` (T-12) `active`/`branch`; `task` message `t1`; receipt for (`OB`, `C1`); item 2 for `mX`; item 3 for `mS` |
+| 3 | browser → home, `cmd` | `OB` | `{"t":"act","g":"G","msg":"M2","action":"confirm"}` (nonce `C1`) | card confirmed (`state.act` keeps step 3's envelope); task `t1` (T-12) `active`/`branch`; the `task` message, whose id is `t1`; receipt for (`OB`, `C1`); item 2 for `mX`; item 3 for `mS` |
 | 4 | host A → home, `cmd` | `HA` | `{"t":"task","op":"branch","id":"t1","branch":"task/12-node-report-path-changes"}` | step `local_check` |
 | 5 | AI `mX` → home, `cmd` | `HA`, `as: mX` | `{"t":"post","kind":"progress","thread":"t1","text":"Branch created…"}` | stores it |
 | 6 | host A → home, `cmd` | `HA` | `{"t":"task","op":"checked","id":"t1","ok":true,"commit":"c1","items":[…]}` | `checks.local`; a `checks` message |
@@ -45,8 +46,8 @@ with no `env` wrapper and no `cause`, `g` or `to`, alongside copies of the
 
 - Item 1 (`mention` for `mS`, to `HA`): names `M1`, with a copy of `M1`.
 - Item 2 (`assign` for `mX`, to `HA`): names task `t1` and its `task`
-  message `t1`, with copies of both rows; the owner's signed confirmation
-  lives on the confirmed brief row (`M2.state.act`).
+  message, whose id is also `t1`, with copies of both rows; the owner's
+  signed confirmation lives on the confirmed brief row (`M2.state.act`).
 - Item 3 (`confirmed` for `mS`, to `HA`): names `M2`, with a copy of the
   confirmed brief row.
 - Item 4 (`review` for `mY`, to `HB`): names `t1` and `commit` `c1`, with a
