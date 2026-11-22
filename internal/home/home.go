@@ -353,7 +353,7 @@ func (t Table) run(s *State, c Command) Result {
 	if refusal != nil {
 		return refused(refusal)
 	}
-	return s.Seal(res)
+	return s.Seal(s.cftFinish(c, res))
 }
 
 // Seal finishes a result before it is written: it numbers the rows, from
