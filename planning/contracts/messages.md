@@ -229,7 +229,7 @@ row lists below, except `ai`, which the home adds.
 | `turn_interrupted` | host | `ai`, `reason` (`crash`, `timeout`, `stop`) | `task`, `detail` |
 | `group_paused`, `group_resumed` | home | `by` | — |
 | `preempted` | home | `task`, `by` (the author of the `msg` named by `task preempted`, whose jump interrupted the task) | — |
-| `cap_reached` | host | `ai`, `cap` (`day`, `task`) | `task` |
+| `cap_reached` | host, postponed after 1.0 with `settings.set` | `ai`, `cap` (`day`, `task`) | `task` |
 | `rate_limited` | host | `ai`, `resets` | — |
 | `login_invalid` | host | `ai` (R-56) | `detail` |
 | `task_failed` | home | `task`, `reason` (`failures`, `review_rounds`) | — |

@@ -583,6 +583,7 @@ type m5World struct {
 	repoDir string
 	bareDir string
 	ghDir   string
+	live    *s2LiveForgeConfig
 	binDir  string
 	secID   string
 	claudeM string
@@ -1118,6 +1119,10 @@ func m5TaskHasLocalCheck(h *host.Host, group, taskID, commit string) bool {
 }
 
 func (w *m5World) initSourceRepo(withRemote bool) error {
+	if w.live != nil {
+		w.repoDir = w.live.Repo
+		return nil
+	}
 	work := w.f.t.TempDir()
 	if _, err := m5GitOut("", "init", "-b", "main", work); err != nil {
 		return err
@@ -1163,6 +1168,10 @@ func (w *m5World) createGroupAndJoinAIs(forge string, checks []string, level2 bo
 		"t": "group", "op": "create", "n": w.groupID, "ts": n0.Host.Now().UnixMilli(),
 		"g": w.groupID, "name": "Proj", "kind": "project", "repo": w.repoDir,
 		"base": "main", "forge": forge, "checks": checks, "member_name": "Owner",
+	}
+	if w.live != nil {
+		createPayload["base"] = w.live.Base
+		createPayload["templates"] = w.live.Templates
 	}
 	if _, err := w.ownerCmd(createPayload); err != nil {
 		return err
@@ -1330,7 +1339,13 @@ func (w *m5World) syncBrowser() error {
 }
 
 func (w *m5World) waitFor(desc string, check func() bool) error {
-	deadline := time.Now().Add(15 * time.Second)
+	timeout := 15 * time.Second
+	if w.live != nil {
+		timeout = 8 * time.Minute
+	}
+	deadline := time.Now().Add(timeout)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
 	for time.Now().Before(deadline) {
 		if err := w.checkHookErr(); err != nil {
 			return err
@@ -1338,7 +1353,7 @@ func (w *m5World) waitFor(desc string, check func() bool) error {
 		if check() {
 			return nil
 		}
-		time.Sleep(10 * time.Millisecond)
+		<-tick.C
 	}
 	return fmt.Errorf("timed out waiting for %s", desc)
 }
@@ -1494,6 +1509,9 @@ func m5Steps(sc *godog.ScenarioContext, f fixtures) {
 }
 
 func m5RegisterFullFlowSteps(sc *godog.ScenarioContext, w *m5World) {
+	sc.Step(`^a signed-in non-GitHub forge and its scratch repository$`, w.liveProject)
+	sc.Step(`^both assigned branches were pushed without approval cards$`, w.stepVerifyPushBranchAtLevel2)
+	sc.Step(`^the forge reports both distinct requests merged at their reviewed heads$`, w.verifyLiveRequests)
 	sc.Step(`^a project group with forge "none", a secretary and working AIs "Claude" and "Codex" at level 2$`, func() error {
 		return w.setupCluster("none", []string{}, true)
 	})
@@ -1520,12 +1538,8 @@ func m5RegisterFullFlowSteps(sc *godog.ScenarioContext, w *m5World) {
 }
 
 func (w *m5World) stepRequestAndTwoTaskBrief() error {
-	secScript := m5ClaudeScript(
-		[]m5ToolCallSpec{{Name: "propose_brief", Args: m5TwoTaskBriefArgs()}},
-		nil,
-		[]m5ToolCallSpec{{Name: "post", Args: map[string]any{"kind": "summary", "task": "T-1", "text": "Alpha merged."}}},
-		[]m5ToolCallSpec{{Name: "post", Args: map[string]any{"kind": "summary", "task": "T-2", "text": "Beta merged."}}},
-	)
+	turns := append(m5BriefTurns(m5TwoTaskBriefArgs()), m5SummaryTurns("Alpha merged.", "Beta merged.")...)
+	secScript := m5ClaudeScript(turns...)
 	w.writeScriptFile("claude", secScript)
 	if err := w.ownerPostMain("Please add alpha and beta helpers.", nil); err != nil {
 		return err
@@ -1553,9 +1567,7 @@ func (w *m5World) stepConfirmAndRunTwoTasks(withPush bool) error {
 	t1Calls := m5WorkerCalls(withPush, "Alpha ready.")
 	t2Calls := m5WorkerCalls(withPush, "Beta ready.")
 	w.writeScriptFile("claude", m5ClaudeScript(t1Calls))
-	w.writeScriptFile("codex", m5CodexScript("codex-rev-1", []m5ToolCallSpec{{
-		Name: "submit_review", Args: map[string]any{"score": 95, "items": []any{}},
-	}}))
+	w.writeScriptFile("codex", m5CodexScript("codex-rev-1", m5PassingReview(95)))
 	commitHook1 := "run_checks"
 	if withPush {
 		commitHook1 = "push_branch"
@@ -1568,9 +1580,7 @@ func (w *m5World) stepConfirmAndRunTwoTasks(withPush bool) error {
 	})
 	w.addBeforeHook("submit_review", func(_ host.Caller) error {
 		w.writeScriptFile("codex", m5CodexScript("codex-task-2", t2Calls))
-		w.writeScriptFile("claude", m5ClaudeScript([]m5ToolCallSpec{{
-			Name: "submit_review", Args: map[string]any{"score": 96, "items": []any{}},
-		}}))
+		w.writeScriptFile("claude", m5ClaudeScript(m5PassingReview(96)))
 		return nil
 	})
 	w.addBeforeHook(commitHook1, func(c host.Caller) error {
@@ -1580,7 +1590,12 @@ func (w *m5World) stepConfirmAndRunTwoTasks(withPush bool) error {
 	if err := w.ownerConfirmBrief(w.pendingBriefID()); err != nil {
 		return err
 	}
-	return w.waitFor("two summary cards", func() bool { return len(w.summaryCards()) == 2 })
+	hasFirst := func() bool { return len(w.summaryCards()) >= 1 }
+	if err := w.waitFor("first summary card", hasFirst); err != nil {
+		return err
+	}
+	hasBoth := func() bool { return len(w.summaryCards()) == 2 }
+	return w.waitFor("two summary cards", hasBoth)
 }
 
 func (w *m5World) verifyPushedBranchHead(c host.Caller) error {
@@ -1593,11 +1608,37 @@ func (w *m5World) verifyPushedBranchHead(c host.Caller) error {
 	if err != nil {
 		return err
 	}
-	remoteHead, err := m5GitOut(w.bareDir, "rev-parse", "--verify", "refs/heads/"+branch)
+	remoteHead, err := w.remoteBranchHead(dir, branch)
 	if err != nil || remoteHead != localHead {
 		return fmt.Errorf("branch %s remote=%q local=%q err=%v", branch, remoteHead, localHead, err)
 	}
 	return nil
+}
+
+func (w *m5World) remoteBranchHead(dir, branch string) (string, error) {
+	if w.live != nil {
+		out, err := m5GitOut(dir, "ls-remote", "origin", "refs/heads/"+branch)
+		return strings.Split(out, "\t")[0], err
+	}
+	return m5GitOut(w.bareDir, "rev-parse", "--verify", "refs/heads/"+branch)
+}
+
+func m5BriefTurns(args map[string]any) [][]m5ToolCallSpec {
+	return [][]m5ToolCallSpec{{{Name: "propose_brief", Args: args}}, nil}
+}
+
+func m5SummaryTurns(texts ...string) [][]m5ToolCallSpec {
+	var turns [][]m5ToolCallSpec
+	for i, text := range texts {
+		turns = append(turns, []m5ToolCallSpec{{Name: "post", Args: map[string]any{
+			"kind": "summary", "task": fmt.Sprintf("T-%d", i+1), "text": text,
+		}}})
+	}
+	return turns
+}
+
+func m5PassingReview(score int) []m5ToolCallSpec {
+	return []m5ToolCallSpec{{Name: "submit_review", Args: map[string]any{"score": score, "items": []any{}}}}
 }
 
 func m5WorkerCalls(withPush bool, summary string) []m5ToolCallSpec {
@@ -1637,7 +1678,11 @@ func (w *m5World) stepVerifyPushBranchAtLevel2() error {
 }
 
 func (w *m5World) verifyZeroApprovalCards() error {
-	for _, m := range w.browserMessages() {
+	return m5CheckZeroApprovalCards(w.browserMessages())
+}
+
+func m5CheckZeroApprovalCards(messages []proto.MsgRow) error {
+	for _, m := range messages {
 		if m.Kind == "approval" {
 			return fmt.Errorf("unexpected approval card %s", m.ID)
 		}
@@ -1681,21 +1726,37 @@ func (w *m5World) verifySummaries(remote bool) error {
 }
 
 func (w *m5World) verifyBaseHasFiles(remote bool, names ...string) error {
-	target := filepath.Join(w.projectDir(), "repo")
-	if remote {
-		target = w.bareDir
+	target, ref, err := w.baseTree(remote)
+	if err != nil {
+		return err
 	}
-	tree, err := m5GitOut(target, "ls-tree", "--name-only", "refs/heads/main")
+	tree, err := m5GitOut(target, "ls-tree", "--name-only", ref)
 	if err != nil {
 		return err
 	}
 	present := strings.Split(tree, "\n")
 	for _, name := range names {
 		if !slices.Contains(present, name) {
-			return fmt.Errorf("missing %q on main branch (%v)", name, present)
+			return fmt.Errorf("missing %q on base branch (%v)", name, present)
 		}
 	}
 	return nil
+}
+
+func (w *m5World) baseTree(remote bool) (string, string, error) {
+	target := filepath.Join(w.projectDir(), "repo")
+	ref := "refs/heads/main"
+	if remote {
+		target = w.bareDir
+	}
+	if w.live != nil {
+		target = filepath.Join(w.projectDir(), "repo")
+		if _, err := m5GitOut(target, "fetch", "origin", w.live.Base); err != nil {
+			return "", "", err
+		}
+		ref = "FETCH_HEAD"
+	}
+	return target, ref, nil
 }
 
 func (w *m5World) stepVerifyNoTurnBeforeMerge() error {
@@ -2451,6 +2512,7 @@ func (w *m5World) stepVerifyMergeConflictAndNotice() error {
 }
 
 func (w *m5World) stepResolveConflictAndMerge() error {
+	w.setSHA(&w.commit2, "")
 	w.writeScriptFile("claude", m5ClaudeScript([]m5ToolCallSpec{{
 		Name: "set_task", Args: map[string]any{"task": "T-1", "assignee": "Claude"},
 	}}))
@@ -2470,15 +2532,36 @@ func (w *m5World) stepResolveConflictAndMerge() error {
 		if _, err := m5GitOut(dir, "-c", "user.name=test", "-c", "user.email=test@test.invalid", "merge", "-s", "ours", "-m", "Sync base", "main"); err != nil {
 			return err
 		}
-		_, err := m5GitCommitFiles(dir, map[string]string{"shared.txt": "resolved-both\n"}, "Resolve shared.txt")
+		sha, err := m5GitCommitFiles(dir, map[string]string{"shared.txt": "resolved-both\n"}, "Resolve shared.txt")
+		w.setSHA(&w.commit2, sha)
 		return err
 	})
 	w.setMemberHeld(w.secID, false)
 	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.secID)
-	return w.waitFor("task 1 merged after conflict resolution", func() bool {
+	waitCleared := func() bool {
 		t, ok := w.taskByNum(1)
-		return ok && t.State == "merged"
-	})
+		return ok && t.Wait == nil
+	}
+	if err := w.waitFor("secretary cleared conflict wait", waitCleared); err != nil {
+		return err
+	}
+	if err := w.waitFor("conflict resolution submitted for review", w.task1Commit2Submitted); err != nil {
+		return err
+	}
+	return w.waitFor("task 1 merged after conflict resolution", w.task1Merged)
+}
+
+func (w *m5World) task1Commit2Submitted() bool {
+	t, ok := w.taskByNum(1)
+	w.mu.Lock()
+	c2 := w.commit2
+	w.mu.Unlock()
+	return ok && c2 != "" && t.Commit == c2
+}
+
+func (w *m5World) task1Merged() bool {
+	t, ok := w.taskByNum(1)
+	return ok && t.State == "merged"
 }
 
 func (w *m5World) stepVerifyConflictResolvedOnBase() error {
@@ -2683,13 +2766,7 @@ func (w *m5World) stepSubmitTwoCommitsWhileReviewerHeld() error {
 	})
 	w.setMemberHeld(w.claudeM, false)
 	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.claudeM)
-	return w.waitFor("task 1 submitted commit 2", func() bool {
-		t, ok := w.taskByNum(1)
-		w.mu.Lock()
-		c2 := w.commit2
-		w.mu.Unlock()
-		return ok && c2 != "" && t.Commit == c2
-	})
+	return w.waitFor("task 1 submitted commit 2", w.task1Commit2Submitted)
 }
 
 func (w *m5World) recordStaleReviewItemID() error {
@@ -2733,10 +2810,7 @@ func (w *m5World) stepReleaseReviewerForCommit2() error {
 	}}))
 	w.setMemberHeld(w.codexM, false)
 	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.codexM)
-	return w.waitFor("task 1 merged at commit 2", func() bool {
-		t, ok := w.taskByNum(1)
-		return ok && t.State == "merged"
-	})
+	return w.waitFor("task 1 merged at commit 2", w.task1Merged)
 }
 
 func (w *m5World) stepVerifyHostRefusedStaleReview() error {

@@ -32,6 +32,7 @@
     }),
     row('row-member-ai', { id: 'LXCZmuGAXkvO-bSrOkuCfw', name: 'Claude Code', cli: 'claude' }),
     row('row-task'),
+    row('row-msg-reply'),
   ]);
 
   // Every message example, by kind, in the order of the files.

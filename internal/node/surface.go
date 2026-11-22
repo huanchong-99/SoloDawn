@@ -32,15 +32,26 @@ type (
 	srfDBState struct {
 		name    string
 		maxOpen int
+		offline bool
 		homes   []proto.Home
 	}
 )
 
-// NewSurface constructs a Surface and registers host.info on cfg.Sessions.
+// NewSurface constructs a Surface and registers host.info, pty.resize and takeover.start replay on cfg.Sessions.
 func NewSurface(cfg SurfaceConfig) *Surface {
 	sf := &Surface{cfg: srfDefaults(cfg)}
 	cfg.Sessions.Requests["host.info"] = RequestHandler{Type: "host.info", Run: sf.reqHostInfo}
+	cfg.Sessions.Pushes["pty.resize"] = sf.pushPTYResize
+	cfg.Sessions.Replays["takeover.start"] = sf.replayTakeoverStart
 	return sf
+}
+
+func (sf *Surface) replayTakeoverStart(ctx context.Context, from Ctl, by string, data json.RawMessage) (any, error) {
+	return sf.cfg.Host.ReplayTakeover(ctx, from, by, data)
+}
+
+func (sf *Surface) pushPTYResize(ctx context.Context, _ *home.Conn, from Ctl, by string, data json.RawMessage) {
+	host.Surface["pty.resize"](ctx, sf.cfg.Host, from, by, data)
 }
 
 func srfDefaults(cfg SurfaceConfig) SurfaceConfig {
@@ -97,7 +108,7 @@ func (sf *Surface) HostState(ctx context.Context) (proto.HostState, error) {
 	}
 	return proto.HostState{
 		Device: sf.cfg.ID, Name: name, OS: sf.cfg.OS, Version: sf.cfg.Version,
-		Open: srfCountOpen(sessions), MaxOpen: db.maxOpen, Offline: false,
+		Open: srfCountOpen(sessions), MaxOpen: db.maxOpen, Offline: db.offline,
 		Update: sf.cfg.Update(), Homes: db.homes, Relay: sf.cfg.Relay(),
 		Agents:   agents,
 		Settings: proto.HostSettings{RetentionDays: 90, IdleMinutes: 15, DefaultLevel: 3, Approvers: []string{}},
@@ -120,9 +131,9 @@ func srfCountOpen(sessions []host.Session) int {
 
 func (sf *Surface) readDBState() (srfDBState, error) {
 	out := srfDBState{maxOpen: 4, homes: []proto.Home{}}
-	targets := map[string]any{"name": &out.name, "max_open": &out.maxOpen, "homes": &out.homes}
+	targets := map[string]any{"name": &out.name, "max_open": &out.maxOpen, "offline": &out.offline, "homes": &out.homes}
 	read := func(tx *store.Tx) error {
-		rows, err := tx.Query("SELECT key, value FROM setting WHERE key IN ('name', 'max_open', 'homes')")
+		rows, err := tx.Query("SELECT key, value FROM setting WHERE key IN ('name', 'max_open', 'offline', 'homes')")
 		if err != nil {
 			return err
 		}
@@ -152,7 +163,7 @@ func (sf *Surface) groupsForAgent(agent string, sessions []host.Session) []proto
 		state, task := sf.cfg.Host.MemberState(k.group, k.member)
 		out = append(out, proto.AgentGroup{
 			Group: proto.ID(k.group), Member: proto.ID(k.member), Level: 3,
-			State: state, Task: proto.ID(task),
+			State: state, Task: proto.ID(task), Queued: sf.cfg.Host.QueuedCount(k.group, k.member),
 		})
 	}
 	return out

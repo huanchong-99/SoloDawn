@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -38,6 +39,19 @@ func TestSurfaceDefaultsReadHelpersAndNulls(t *testing.T) {
 	}
 	if ReadName(db) != "desk" || !slices.Equal(ReadRendezvous(db), []string{"wss://rv.example/rv"}) {
 		t.Fatal("ReadName or ReadRendezvous mismatch")
+	}
+
+	origResize := host.Surface["pty.resize"]
+	t.Cleanup(func() { host.Surface["pty.resize"] = origResize })
+	var resizeSeen proto.PTYResize
+	var resizeHost *host.Host
+	var resizeBy string
+	host.Surface["pty.resize"] = func(ctx context.Context, gotHost *host.Host, from host.Owner, by string, data json.RawMessage) (any, error) {
+		resizeHost, resizeBy = gotHost, by
+		if err := proto.Decode(data, &resizeSeen); err != nil {
+			t.Errorf("decode pty.resize: %v", err)
+		}
+		return origResize(ctx, gotHost, from, by, data)
 	}
 
 	fc := serveConn(t, s, ownerKey.ID(), false)
@@ -88,6 +102,18 @@ func TestSurfaceDefaultsReadHelpersAndNulls(t *testing.T) {
 	if err != nil || len(stateAfterGroup.Homes) != 0 {
 		t.Fatalf("homes without setting('homes') = %+v (%v)", stateAfterGroup.Homes, err)
 	}
+
+	aiID := sesID("ai-1")
+	fc.push(proto.PTYResize{Type: "pty.resize", Group: gID, AI: aiID, Cols: 120, Rows: 36})
+	fc.push(proto.Request{Type: "host.info", ID: 4})
+	fc.next(t)
+	if resizeHost != h || resizeBy != ownerKey.ID() || resizeSeen.Group != gID || resizeSeen.AI != aiID || resizeSeen.Cols != 120 || resizeSeen.Rows != 36 {
+		t.Fatalf("pty.resize forward = host=%p by=%q req=%+v", resizeHost, resizeBy, resizeSeen)
+	}
+	replay := fmt.Sprintf(`{"t":"takeover.start","n":"n1","ts":1,"to":%q,"g":%q,"member":%q}`, nodeKey.ID(), gID, aiID)
+	if _, err := s.Replays["takeover.start"](t.Context(), nil, ownerKey.ID(), json.RawMessage(replay)); err == nil || err.(*host.Error).Code != "conflict" {
+		t.Fatalf("takeover.start replay without a terminal = %v, want conflict", err)
+	}
 }
 
 func mustSurfaceSession(t *testing.T, h *host.Host, home string, key host.SessionKey, kind host.Kind, agent string) {
@@ -110,7 +136,7 @@ func assertSurfaceHeader(t *testing.T, st proto.HostState, savedHomes []proto.Ho
 		t.Fatalf("missing Update/Relay: %+v", st)
 	}
 	got := [10]any{st.Name, st.OS, st.Version, st.Open, st.MaxOpen, st.Offline, st.Settings.DefaultLevel, st.Update.Version, st.Relay.Used, slices.Equal(st.Homes, savedHomes)}
-	want := [10]any{"custom-box", "macOS 15.2", "v0.3.1", 3, 6, false, 3, "v0.3.2", int64(10), true}
+	want := [10]any{"custom-box", "macOS 15.2", "v0.3.1", 3, 6, true, 3, "v0.3.2", int64(10), true}
 	if got != want {
 		t.Fatalf("unexpected HostState header: %+v", st)
 	}

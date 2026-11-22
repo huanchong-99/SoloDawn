@@ -2,7 +2,6 @@
   import { onDestroy, untrack, type Component } from 'svelte';
   import Icon, { type IconName } from './components/Icon.svelte';
   import Mount from './components/Mount.svelte';
-  import Pending from './Pending.svelte';
   import { sourceOf, start, type Net } from './lib/net.svelte';
   import {
     announcement,
@@ -18,9 +17,9 @@
 
   type View = Component<{ params: Record<string, string | undefined>; net: Net }>;
 
-  // Each page is drawn by the file its route names in routes/, found by name; until that file
-  // exists the page says that it is coming. A page of routes/dev/ reads the node's wire examples:
-  // only a development server loads it, so that the build leaves it out.
+  // Each page is drawn by the file its route names in routes/, found by name. A page of
+  // routes/dev/ reads the node's wire examples: only a development server loads it, so that the
+  // build leaves it out.
   const views = import.meta.glob<View>('./routes/*.svelte', { eager: true, import: 'default' });
   const devViews = import.meta.env.DEV
     ? import.meta.glob<View>('./routes/dev/*.svelte', { import: 'default' })
@@ -34,9 +33,7 @@
   const icons: Record<Tab, IconName> = { groups: 'chat', nodes: 'pc', settings: 'sliders' };
   const at = $derived(routes[route.page]);
   const file = $derived(`./routes/${at.view}.svelte`);
-  const View: View | undefined = $derived(
-    views[file] ?? loaded[file] ?? (file in devViews ? undefined : Pending),
-  );
+  const View: View | undefined = $derived(views[file] ?? loaded[file]);
   const tab = $derived('tab' in at ? at.tab : undefined);
   const pageTitle = $derived(t(`page.${route.page}`));
   let main: HTMLElement;
@@ -59,6 +56,7 @@
 
 <div class="app" style:--dir={route.dir} data-full={'full' in at ? at.full : undefined}>
   <button class="skip" onclick={() => main.focus()}>{t('app.skip')}</button>
+  <span class="sr" role="status">{announcement.text}</span>
   <nav class="rail" aria-label={t('nav.label')}>
     <a class="logo" href={href('groups')} aria-label="SoloDawn">
       <img class="logo-mark" src="icon.svg" alt="" />
@@ -80,7 +78,7 @@
       <button class="icon-btn only-wide" onclick={toggleTheme} aria-label={t('bar.theme')}>
         {#key isDark()}<span class="swap"><Icon name={isDark() ? 'sun' : 'moon'} /></span>{/key}
       </button>
-      <!-- Named by its visible text first, then in both languages, each part in its own (WCAG 2.2
+      <!-- Named by its visible text first, then in both languages, each part in its own (WCAG 2.1
            SC 2.5.3 and 3.1.2). -->
       <button class="icon-btn only-wide" onclick={toggleLang}>
         {#key prefs.lang}<span class="swap" lang={otherLang()}>{t('bar.lang.other')}</span>{/key}
@@ -89,21 +87,9 @@
           <span lang="zh-CN">{textIn('zh-CN', 'bar.lang')}</span>
         </span>
       </button>
-      <span class="sr" role="status">{announcement.text}</span>
     </div>
   </header>
-  <div class="ban">
-    {#if net.otherTab}
-      <div class="tab-ban" role="status">
-        <Icon name="info" />
-        <span class="grow">{t('app.otherTab')}</span>
-        <button type="button" class="btn btn-sm btn-dawn" onclick={net.useHere}>
-          {t('app.useHere')}
-        </button>
-      </div>
-    {/if}
-    <Mount at="banner" props={{ net }} />
-  </div>
+  <div class="ban"><Mount at="banner" props={{ net }} /></div>
   <main bind:this={main} tabindex="-1" aria-labelledby="page-title">
     {#if View && !(net.otherTab && route.page === 'onboarding')}
       <View params={route.params} {net} />
@@ -111,15 +97,3 @@
   </main>
   <Mount at="layer" props={{ net }} />
 </div>
-
-<style>
-  .tab-ban {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-3);
-    padding: 8px var(--sp-4);
-    background: var(--dawn-soft);
-    border-bottom: 1px solid color-mix(in srgb, var(--dawn) 35%, var(--line));
-    font-size: var(--fs-sm);
-  }
-</style>

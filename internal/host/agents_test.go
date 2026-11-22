@@ -288,7 +288,7 @@ func TestAgentsEmptyNonZeroExitAndTimeout(t *testing.T) {
 		agtEqual(t, len(got), 1)
 		agtEqual(t, got[0].Agent, "codex")
 		if elapsed := time.Since(start); elapsed < 4*time.Second || elapsed >= 9*time.Second {
-			t.Fatalf("probe took %v, want bounded by 5s agtProbeTimeout", elapsed)
+			t.Fatalf("probe took %v, want bounded by 5s agtProbeSeconds", elapsed)
 		}
 	})
 }

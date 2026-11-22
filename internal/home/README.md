@@ -32,7 +32,9 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | show the group an accepted device-log entry | a `proto.DeviceRow` in `Result.Rows`; `Commit` applies its entry to the state's log |
 | do after a commit what a pure function cannot, such as a Web Push | a function `func(s *State, res Result)` and `After.Add(name, f)` in its file's `init` |
 | know in a hook which devices are connected | `s.Online[device]` |
-| answer with result fields | `Result.Answer.Num`, `.Passed`, `.Round` |
+| answer with result fields | `Result.Answer.Num`, `.Passed`, `.Round`, and for `invite`, `Result.Link` and `Result.Expires` |
+| create or replay an invitation | `Result.InviteBy` (the inviting admin's member id) with `LoopConfig.Invite` / `State.Invite` (`Inviter`) |
+| handle a joining connection | `c.Joining` (`*Joining`: `Group`, `By`, `Open`, `Log`, `Admit`), attached with `conn.SetJoining(fn)` on `Loop` or passed to `Commands.ApplyJoining`; `Result.InviteUsed` marks an accepted `join` that consumes the invitation |
 | refuse | `&Refusal{Code: "conflict", Msg: "…"}`, with a code of [datachannel](../../planning/contracts/datachannel.md) section 9 |
 | read a message, a note, a thread, the pending cards, the queued items | `c.Disk` in a command, the `Disk` argument of a timer or a handler |
 | add a rule that the clock sets off | a function `func(s *State, d Disk, now int64) Result` and `Timers.Add(name, f)` in its file's `init` |
@@ -67,12 +69,20 @@ does one of those five types without its field. `Add` panics when a key is given
 ([datachannel](../../planning/contracts/datachannel.md), section 5):
 
 1. the envelope checks of [envelope](../../planning/contracts/envelope.md) section 3, with their
-   own codes; a device is known when a log in `State.Logs` holds it as valid, and a `to` must be
-   `State.Home`;
+   own codes; a device is known when a log in `State.Logs` holds it as valid or when the connection
+   carries a non-nil `Joining` ([people](../../planning/contracts/step-2/people.md), section 3),
+   and a `to` must be `State.Home`;
 2. `g` is `State.ID`, else `bad_request`;
-3. the receipt: a command answered before gets that outcome and nothing runs;
+3. the receipt: a command answered before gets that outcome and nothing runs, except a succeeded
+   `invite`, which asks `Inviter.ReplayInvite` and answers with the original `link` and `expires`
+   while the invitation is open, or `conflict` otherwise;
 4. the payload names a key, and the key is in the table, else `bad_request`;
-5. the group exists, else `not_found`; only `group/create` reaches its function without one;
+5. on a joining connection (`c.Joining != nil`), only `join` with `c.Joining.Group == State.ID` is
+   accepted (`forbidden` otherwise), then `State.Group.ID` must exist (`not_found` otherwise), `as`
+   must be absent (`bad_request` for non-text or empty, `forbidden` when present), and `c.Who` gets
+   `Device` plus `User` and `Human` when the signer is valid in `c.Joining.Log`; on an ordinary
+   connection, the group exists (`not_found` otherwise; only `group/create` reaches its function
+   without one);
 6. `as`, when there, is a text that is not empty, else `bad_request`, and names an AI whose
    `host` is the signer, else `forbidden`;
 7. the signer's person is a member of the group, or, for `group/create` on a group that does not
@@ -81,7 +91,11 @@ does one of those five types without its field. `Add` panics when a key is given
 9. no row of its result is above the size limit of a row, else `bad_request`.
 
 Checks 1 and 2 leave no receipt. From check 4 on, the outcome is written as the receipt, a refusal
-included, with the command's own `ts`. A repeated refusal is answered with its code and a fixed
+included, with the command's own `ts`. For an accepted `invite` (`Result.InviteBy` not empty), the
+home calls `Inviter.Invite(group, by, signer, nonce)` (on a `Loop`, on the group's goroutine outside
+`Store.Write` before writing the `{ok: true}` receipt, so an `Invite` error leaves no receipt and
+never deadlocks `Store.Write`), and carries `Link` and `Expires` on `Result` without storing them in
+the receipt. On a joining connection, when an accepted command commits on `Loop`, `Joining.Admit(res.InviteUsed)` runs before the `ok` answer frame is queued. A repeated refusal is answered with its code and a fixed
 `msg`, because a receipt holds no sentence.
 
 **Who.** `Who` carries the signer, the person whose log holds it, that person's member id and the
@@ -187,8 +201,16 @@ their test functions start with `TestReviewCmd`. The merges and summaries (`cmd_
 names that start with `mrg`, their tests too, and their test functions start with `TestMerge`.
 Host events (`cmd_hostev.go`) take the names that start with `hev`, their tests too, and their test
 functions start with `TestHostEv`; the file exports `HostOfflineEvent`.
-Retention (`retention.go`) takes the names that start with `ret`, exports `Retain`, and its test
-functions start with `TestRetention`.
+Group pause and resume (`cmd_pause.go`) take the names that start with `pau`, their tests too, and
+their test functions start with `TestPause`. The calls (`cmd_call.go`) take the names that start
+with `cal`, their tests too, and their test functions start with `TestCall`. Thread rounds, queue jumps and the quiet-task timer (`rounds.go`) take the names that
+start with `rnd`, their tests too, and their test functions start with `TestRounds`. Retention
+(`retention.go`) takes the names that start with `ret`, exports `Retain`, and its test functions
+start with `TestRetention`.
+The step-2 people seam (`people_seam.go`) takes the unexported names that start with `seam` and
+`keyInvite` / `keyJoin` (leaving `ppl` for `cmd_people.go`), and exports `Joining`, `InviteLink`,
+`Inviter`, `(*Conn).SetJoining` and `Table.ApplyJoining`. Web Push (`webpush.go`) takes the names that start with
+`wpush`, its tests too, and its test functions start with `TestWebPush`.
 
 ## The run loop
 
@@ -528,18 +550,19 @@ merges in `cmd_merge.go` (unit HM-12). Where the contracts are silent, it does t
 
 ## Posts, notes and forget
 
-`cmd_post.go` holds `post` of kinds `text`, `progress`, `question` and `report`
+`cmd_post.go` holds `post` of kinds `text`, `progress`, `question`, `report` and `handback`
 ([commands](../../planning/contracts/commands.md) 1.3;
-[messages](../../planning/contracts/messages.md) 1 and 2.7;
+[messages](../../planning/contracts/messages.md) 1, 2.7 and 2.10;
 [rows](../../planning/contracts/rows.md) sections 4 and 5), under `post/<kind>`. `cmd_note.go`
 holds `note` and `forget` ([commands](../../planning/contracts/commands.md) 1.6;
 [rows](../../planning/contracts/rows.md) sections 5 and 6). Where the contracts are silent, they do
 this:
 
-- **Who and placement.** `text` is by a person or an AI; `progress`, `question` and `report` are by
-  an AI, else `forbidden`. `progress` and `report` belong in a thread (`thread` not `null`), else
-  `bad_request`. None of the four is raised from a thread, and the row is written with `main`
-  `false`.
+- **Who and placement.** `text` is by a person or an AI; `progress`, `question`, `report` and
+  `handback` are by an AI, else `forbidden`. `progress` and `report` belong in a thread (`thread`
+  not `null`), else `bad_request`; `handback` belongs in a thread unless `as` is the group's
+  secretary, else `bad_request`. None of the five is
+  raised from a thread, and the row is written with `main` `false`.
 - **Thread and mentions.** A non-null `thread` must name a task in `State.Tasks`, else `not_found`;
   for `report`, `as` must be that task's `assignee`, else `forbidden`. `(*State).postMentions`,
   shared with `cmd_brief.go`, checks the `mentions` rule of
@@ -549,8 +572,10 @@ this:
   HTML escaping; a post in a thread follows it with the updated `TaskRow` (`thread.count` + 1, and
   `thread.last` with `text` cut to at most 200 UTF-8 characters). A post never queues an item for
   its own author ([commands](../../planning/contracts/commands.md) 1.3): `text`, `progress` and
-  `question` queue `mention` for each other mentioned AI in `mentions` order, and a main-line `text`
-  from a person that mentions no AI queues `mention` for `Group.Secretary` when set.
+  `question` queue `mention` for each other mentioned AI in `mentions` order, a main-line `text`
+  from a person that mentions no AI queues `mention` for `Group.Secretary` when set, and a
+  `handback` posted in a thread queues `notice` (`code: "handback"`) for `Group.Secretary` when
+  set.
 - **`note` and `forget`.** `note` is by a person or an AI; a non-null `task` that names no task in
   `State.Tasks` is `not_found`, and the `NoteRow` gets `ts` as signed (`c.Timestamp`). `forget` is
   by an admin only (`forbidden`); `r` must be `note` or `msg` (`bad_request`); a missing or already
@@ -615,8 +640,9 @@ it does this:
 [task-machine](../../planning/contracts/task-machine.md) 5), under `Commands` key `member/status`
 and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does this:
 
-- **Payload and target.** When `event` is present, `code` must be one of the step-1 host codes
-  (`turn_interrupted`, `login_invalid`, `session_replaced`), else `bad_request`; an omitted or `""`
+- **Payload and target.** When `event` is present, `code` must be one of the host codes
+  (`turn_interrupted`, `rate_limited`, `login_invalid`, `session_replaced`; `cap_reached` is postponed
+  with `settings.set`), else `bad_request`; an omitted or `""`
   `detail` is left out of the row body, and a non-empty `event.task` must exist in `State.Tasks`,
   else `not_found`. An `id` not in `State.AIs` is `not_found`; any signer for which
   `State.Hosts(c.Who, id)` is false (another device, or a command carrying `as`) is `forbidden`.
@@ -625,8 +651,8 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
   is unchanged. When `event` is present, the home writes a `system` `MsgRow` (`id` `n`, `by`
   `"system"`, `ts` `c.Now`, `mentions` `[]`, and `ai` set to `id`) in the thread of `event.task`
   when set, advancing `task.Thread.Count` and `task.Thread.Last` (`text` `""`, `ts` `c.Now`) on the
-  task row, or in the main line otherwise. For `login_invalid`, when `State.Group.Secretary` is not
-  empty, it queues `Item{AI: s.Group.Secretary, Why: "notice", Msg: n, Code: "login_invalid"}`.
+  task row, or in the main line otherwise. For `login_invalid` and `rate_limited`, when `State.Group.Secretary` is not
+  empty, it queues `Item{AI: s.Group.Secretary, Why: "notice", Msg: n, Code: code}`.
 - **Closed host connection.** When `Loop.Detach` ends a connection that took inbox items
   (`Conn.taker`, set by `Loop.Inbox`) and no other taker connection of `device` remains on the
   loop, `Loop` fires `HostOfflineEvent` with `device`. For every AI in `State.AIs` in id order with
@@ -660,6 +686,83 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
   `Pending` and the newest 50 main-line messages (`PageThread(nil, 0, 50)`) without duplicates in
   increasing `seq` order.
 
+## Group pause and resume
+
+`cmd_pause.go` holds `group` `pause` and `resume`
+([commands](../../planning/contracts/commands.md) 1.1;
+[messages](../../planning/contracts/messages.md) 2.11;
+[the task machine](../../planning/contracts/task-machine.md) row 24), under the keys `group/pause`
+and `group/resume`:
+
+- **Who.** Both require `s.Admin(c.Who)` (`forbidden` for a non-admin person or any command carrying
+  `as`); they carry no fields beyond the group command header checked by the seam.
+- **Idempotence.** Pausing a group whose `group.paused` is already set, or resuming one whose
+  `group.paused` is `null`, returns `ok` without writing rows or queuing items.
+- **Rows.** Otherwise `group/pause` sets `group.paused` to `{"by": c.Who.Human, "at": c.Now}` and
+  writes main-line `system` message `group_paused` (`id` `n`, `ts` `c.Now`, `by` `c.Who.Human`)
+  through `tskThreadSystem`. `group/resume` clears `group.paused` to `null` and writes main-line
+  `system` message `group_resumed` with the same fields.
+- **Waking tasks.** On `group/resume` of a paused group, `Step` runs with `OnGroupResume` (`ByHome`)
+  over `State.Tasks` in sorted task-id order and completes items through `tskItemCtx`: `resume` goes
+  to each `active` task with `wait` `null` before step `merge`, and `review` goes to each `active`
+  task at step `review` that has a reviewer unless `c.Disk.Queued` already holds an unacknowledged
+  `review` item for that reviewer, task and commit.
+
+## Rounds, jumps and quiet tasks
+
+`rounds.go` holds the `jump` command ([commands](../../planning/contracts/commands.md) 1.4, R-72),
+the `quiet` timer and its `After` hook ([task-machine](../../planning/contracts/task-machine.md)
+row 23), and the thread round transitions (rows 21 and 22, and section 4 "Held by the round limit";
+[messages](../../planning/contracts/messages.md) 2.11):
+
+- **`jump`.** Registered under `jump`. Refuses an AI signer (a non-empty `c.Who.AI`) with
+  `forbidden`, a missing `msg` with `not_found`, and any `msg` whose `by` differs from `c.Who.Human`
+  with `forbidden`.
+  Scans `c.Disk.Queued()` from newest to oldest for an unacknowledged `mention` item whose message
+  was written by `c.Who.Human` in the same thread (or in the main line when `msg` has no thread),
+  retires that item and queues its replacement with `Jump: true` and `NotBefore: 0`, or answers
+  `conflict` when none exists.
+- **`quiet` timer.** Registered under `Timers["quiet"]` and `After["quiet"]`. When the group has a
+  secretary, is not paused and has `limits.idle_notice_minutes > 0`, checks each task in sorted id
+  order: if the task has had no thread message for at least `limits.idle_notice_minutes`
+  (measured from `thread.last.ts`, else `stats.started` when non-zero, else `created`), has not already notified
+  the secretary at that last-activity timestamp, and passes `Step` with `OnQuiet` (`ByHome`:
+  `active`, `wait` `null`, `step` not `merge`), it queues one `notice` (`code: "quiet"`) for
+  `group.secretary`. `After["quiet"]` records the task's last-activity timestamp in the group's
+  `State` (in memory) once the transaction commits, so any new thread message starts a new quiet
+  period ([issues](../../issues.md)).
+- **Rounds.** `Table.Add` wraps every `post/*` entry (`rndWrap`), without depending on file
+  initialisation order. On a thread `post` by an AI that mentions another AI (in `mentions` with
+  `id` other than `msg.By`, or via a queued `mention` item such as `call`), steps `OnMention` (row
+  21); when the round limit pauses the task, writes the main-line `system` message `rounds_limit`
+  (`tskThreadSystem`) under `revDerivedID("SoloDawn rounds limit ", c.Nonce)`
+  ([issues](../../issues.md)) and queues `notice` (`code: "rounds_limit"`) naming it for the
+  secretary when the group has one. Thread `mention` items are queued at once with the updated
+  `paused` task row; the host holds them while the task is `paused` or `failed` and delivers them
+  again once a person's thread `post/text` (row 22, passing `tskPending` and deduplicating `IfNone`
+  `review` items through `tskItemCtx`) or an admin's `task/resume` (row 13) activates the task.
+
+## Calls
+
+`cmd_call.go` holds `post` of kinds `call` and `reply`
+([commands](../../planning/contracts/commands.md) 1.3;
+[messages](../../planning/contracts/messages.md) 1, 2.6 and 3.4;
+[ask](../../planning/flows/ask.md)), under the keys `post/call` and `post/reply`, sharing
+`postCheck`, `postRows` and `postTaskID` with `cmd_post.go` and `cardItems` with `cmd_card.go`.
+Where the contracts are silent, it does this:
+
+- **Call.** A self-call (`body.to` equal to `as`) is `bad_request`, a non-null `thread` absent from
+  `State.Tasks` is `not_found`, a `body.to` absent from `State.AIs` is `conflict`, and `body.depth`
+  above `Group.Limits.AskDepth` is `limit` (A6.4). One `mention` item is queued for `body.to`, with
+  `task` set when in a thread, even when `mentions` also names `body.to` or other AIs. In a thread
+  the call counts a round through that item, and a reply counts one when it mentions another AI
+  (`rndWrap`, see "Rounds"; [ask](../../planning/flows/ask.md) A.3 and D).
+- **Reply.** A `re` `null` or a `thread` that differs from the call's `thread` is `bad_request`; a
+  missing `re` message on `Disk` or a deleted task in `State.Tasks` is `not_found`. Elapsed `ms` on
+  the answered call is `max(0, c.Timestamp - call.Timestamp)` so inter-host clock skew never
+  produces a negative duration, followed by the reply `MsgRow` and, in a thread, the updated
+  `TaskRow`. When `call.By` is still in `State.AIs`, one `reply` item is queued for it (A6.3).
+
 ## Retention
 
 `retention.go` exports `Retain(tx, now)`, which reads `retention_days` from SQLite `setting`
@@ -675,12 +778,35 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
   in-memory state (`State.Tasks`) until restart ([issues](../../issues.md)). `grp.num` keeps the
   highest task number given out, so task numbers are not reused after restart.
 
+## Web Push
+
+`webpush.go` holds the `push` command, the `"push"` hook of `After` and the loop's startup and
+shutdown hooks ([commands](../../planning/contracts/commands.md) 1.7;
+[storage](../../planning/contracts/storage.md) section 1, `push_sub`):
+
+- **Command.** A payload that decodes as `proto.PushOff` (`off: true`) deletes the signing device's
+  row from `push_sub`; any other payload decodes as `proto.PushOn` (`bad_request` otherwise) and
+  writes `push_sub` through `Result.Writes`.
+- **Memory, startup and shutdown.** Subscriptions and the active `*Loop` are held per `State.Home`
+  under a leaf mutex (`wpushMu`, which never calls `Loop`, `Store` or HTTP). `StartLoop` loads
+  `push_sub` from `LoopConfig.Store` for `LoopConfig.Home` before starting group goroutines,
+  `After["push"]` updates memory only after transaction commit so a rolled-back write leaves memory
+  unchanged, and `Loop.Close` drains in-flight Web Push deliveries on `Loop.wg` before detaching.
+- **Eligibility and delivery.** For each newly created `proto.MsgRow` (`Pos == Seq`), `After["push"]`
+  extracts one reminder kind (`approval`, `decision`, `brief`, `done` from `summary`, or `mention`
+  from any other message kind), filters for offline subscribed devices of concerned group members
+  that remain valid in `State.Logs`, encrypts `proto.Reminder` JSON (without HTML escaping) via
+  RFC 8291 (`webpush-go`), and sends each request in its own goroutine with a 5 s context timeout.
+  A `404` or `410` response drops that subscription in memory and from `push_sub` if not replaced
+  since.
+
 ## Known limitations
 
-- The table of commands holds the groups, members, briefs, the task commands of HM-9, the four
-  kinds of `post` of HM-6, `note` and `forget`, the cards, the checks and reviews, the merges and
-  summaries, and the host events, and no node starts a loop yet: the remaining command files
-  (including thread round counting in HM-13) and the wiring of the node are separate units
+- The table of commands holds the groups, group pause and resume, members, briefs, the task
+  commands of HM-9, the four kinds of `post` of HM-6, `note` and `forget`, the cards, the checks and
+  reviews, the merges and summaries, the host events, `push`, the calls, and `jump` and thread rounds
+  of HM-13, and no node starts a loop yet: the remaining command files and the wiring of the node
+  are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - After retention deletes rows, finished tasks stay in the in-memory `State.Tasks` until restart
   ([issues](../../issues.md)).
@@ -762,9 +888,9 @@ card-wait recomputation, veto and row-14 stop, and checking `proto.UnexpectedNul
 written. `features/home_review.feature` holds the home half of acceptance tests A5.3 and A5.4.
 
 `cmd_hostev_test.go` checks `member/status` against the wire golden files, state and `since`
-transitions, the three step-1 host event codes, `login_invalid` secretary notices, refusals, and
+transitions, the four host event codes, `login_invalid` and `rate_limited` secretary notices, refusals, and
 `HostOfflineEvent` both directly and when taker connections end on `StartLoop`.
-`features/home_hostev.feature` holds the home half of acceptance test A3.6 together with the three
+`features/home_hostev.feature` holds the home half of acceptance test A3.6 together with the four
 host event codes, secretary notices and host disconnection.
 
 `sync_test.go` covers `Loop.Sync` against an in-memory and file-backed store: wire frame shapes,
@@ -774,11 +900,42 @@ refusals, detached connections and store failures; `run_internal_test.go` covers
 `runErr`. `features/home_sync.feature` holds acceptance test A2.2 (delta, 1,500-row reset with
 newest 50 and an older pending card, purge-mark reset, `state_only`) and the first-read cut of A2.7.
 
+`trace_test.go` produces the two signed task transcripts of
+[trace-task.md](../../planning/flows/trace-task.md), `internal/proto/testdata/trace-remote.json` and
+`trace-local.json`: it sends their commands through `Commands.Apply` at each command's `ts`, writes
+each result to a store in memory, commits it, and records the answer, the `rows` frame and the
+`inbox` frames that `runLotOf` makes, acknowledging each item. It fails when a file differs from
+that; `go test ./internal/home -run TestTaskTraces -update` writes them.
+
 `fetch_test.go` exercises `Loop.Fetch` across thread pages, `note` and `review` pages, single-row
 reads, exact 61,440-byte boundaries, page bounds checks, group access checks, detached connections
 and store failures. `features/home_fetch.feature` holds the scroll-back scenarios of A2.2 and the
 deleted-row scenario of A2.7.
 
+`cmd_pause_test.go` covers `group/pause` and `group/resume` through `Commands.Apply`: the admin
+check, both repeats, the rows, and row 24 over tasks with and without waits, at step `merge`, and
+with a review already queued. `features/home_pause.feature` holds the home half of acceptance test
+A4.7 on `StartLoop` over an in-memory store.
+
+`rounds_test.go` covers `jump`, the `quiet` timer, `After["quiet"]`, and rows 21 and 22 through
+`Commands.Apply`, `Table.Add` and `StartLoop`, including delivery after a rounds-paused task fails
+and is resumed and wake-up cap ageing. `features/home_rounds.feature` holds acceptance tests A5.8,
+A5.11 (home half) and A5.16 over `StartLoop`.
+
+`cmd_call_test.go` sends `post/call` and `post/reply` through `Commands.Apply` with fakes of
+`Receipts` and `Disk`, checking the golden shapes, `UnexpectedNulls`, the 200-character preview,
+elapsed-time clamping and every refusal boundary. `features/home_call.feature` holds the
+home half of acceptance tests A6.3 and A6.4.
+
 `retention_test.go` covers `Retain`: default and configured `retention_days`, store error
 propagation, protected rows, and the purge mark with `Loop.Sync` reset.
 `features/home_retention.feature` holds acceptance test A2.5 and the retention half of A5.14.
+
+`people_seam_test.go` covers `people_seam.go` across `Table.ApplyJoining`, `State.Invite`,
+`LoopConfig.Invite` (including `Store.Write` re-entrancy freedom on `Invite` and `ReplayInvite`),
+and `(*Conn).SetJoining` admission callbacks.
+`webpush_test.go` covers `push`, `After["push"]`, `StartLoop` subscription loading and `Close`
+drain, RFC 8291 decryption, per-browser eligibility and revocation, and `404`/`410` eviction in
+memory and `push_sub`. `features/home_webpush.feature` holds the backend half of acceptance test
+A8.3 against a local HTTP push endpoint, verifying that wire payloads are ciphertext only and
+decrypted reminders hold neither message text nor commands.

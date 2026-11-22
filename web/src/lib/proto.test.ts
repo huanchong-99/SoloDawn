@@ -240,7 +240,13 @@ const messageFiles = examples.filter((name) => name.startsWith('row-msg-'));
 describe('message contracts', () => {
   it.each(messageFiles)('%s names its kind and card status', (name) => {
     const row = p.decode(p.MsgRow, goldens[name]);
-    expect(name).toBe(['row-msg', row.kind, ...(row.state ? [row.state.status] : [])].join('-'));
+    const suffix =
+      row.kind === 'brief' && row.body.preset !== undefined
+        ? ['preset']
+        : row.state
+          ? [row.state.status]
+          : [];
+    expect(name).toBe(['row-msg', row.kind, ...suffix].join('-'));
   });
 
   it.each(messageFiles)('%s permits null only where the contract names it', (name) => {
@@ -301,6 +307,8 @@ describe('message contracts', () => {
     { code: 'task_merged', task: 't', commit: 'abc', merge_commit: 'def' },
     { code: 'no_secretary' },
     { code: 'session_replaced', ai: 'a', task: 't' },
+    { code: 'member_joined', member: 'm2', by: 'm1' },
+    { code: 'member_removed', user: 'u2', name: 'Mina', by: 'm1' },
   ])('reads the fields of system code $code', (body) => {
     const row = { ...JSON.parse(goldens['row-msg-system']), body };
     expect(v.parse(p.MsgRow, row)).toStrictEqual(row);
@@ -309,6 +317,7 @@ describe('message contracts', () => {
       cap_reached: ['task'],
       login_invalid: ['detail'],
       session_replaced: ['task'],
+      member_removed: ['by'],
     };
     for (const key of Object.keys(body)) {
       const missing: Obj = { ...body };
@@ -372,6 +381,8 @@ describe('decode', () => {
     ['cmd-started', 'cmd'],
     ['cmd-reviewed', 'cmd'],
     ['cmd-pair-link', 'cmd'],
+    ['cmd-invite-link', 'cmd'],
+    ['cmd-noted', 'cmd'],
     ['host-info-answer', 'host.info'],
     ['audit-answer', 'audit'],
   ];
@@ -514,7 +525,7 @@ describe('slugs', () => {
   });
 
   it("is the type of a task row's slug, and the row's branch follows from it", () => {
-    for (const name of ['row-task', 'row-task-waiting', 'row-task-paused']) {
+    for (const name of ['row-task', 'row-task-waiting', 'row-task-paused', 'row-task-confirm']) {
       const row = p.decode(p.TaskRow, goldens[name]);
       expect(wire.slugs).toContainEqual({ title: row.title, slug: row.slug });
       expect(row.branch ?? `task/${row.num}-${row.slug}`).toBe(`task/${row.num}-${row.slug}`);
@@ -528,22 +539,25 @@ describe('commands', () => {
 
   it.each(posts)('%s is the post its message row carries, signed', (name) => {
     const post = p.decode(p.Post, goldens[name]);
+    const person = p.decode(p.HumanMemberRow, goldens['row-member-human']);
     expect(name).toBe(`post-${post.kind}`);
     const rows = examples
       .filter((row) => row.startsWith(`row-msg-${post.kind}`))
-      .map((row) => p.decode(p.MsgRow, goldens[row]));
+      .map((row) => p.decode(p.MsgRow, goldens[row]))
+      .filter((row) => row.by !== 'system')
+      .filter((row) => row.kind !== 'brief' || row.body.preset === undefined);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(JSON.parse(row.env!.p)).toStrictEqual(post);
-      expect([post.n, post.as, post.text, post.thread, post.main, post.mentions, post.re]).toEqual([
-        row.id,
-        row.by,
-        row.text,
-        row.thread,
-        row.main,
-        row.mentions,
-        row.re,
-      ]);
+      expect([
+        post.n,
+        post.as ?? person.id,
+        post.text,
+        post.thread,
+        post.main,
+        post.mentions,
+        post.re,
+      ]).toEqual([row.id, row.by, row.text, row.thread, row.main, row.mentions, row.re]);
     }
   });
 
@@ -629,6 +643,79 @@ describe('host surface', () => {
     expect(info.homes).toEqual([
       { g: info.agents[0].groups[0].g, home: info.device, name: 'Website' },
     ]);
+    expect(info.agents.map((agent) => agent.driver)).toEqual([
+      {
+        accounts: ['personal', 'team', 'api_key'],
+        takeover: 'new',
+      },
+      {
+        accounts: ['personal', 'team', 'api_key'],
+        takeover: 'resume',
+      },
+    ]);
+  });
+
+  it('reads the step-2 invite link and the act a decided confirm card carries', () => {
+    const invite = p.decode(p.Invite, goldens.invite);
+    const inviteLink = p.decode(p.CmdResult, goldens['cmd-invite-link']);
+    const welcome = p.decode(p.Welcome, goldens.welcome);
+    expect(inviteLink.link).toBe(
+      `https://rv.example/#join=7K2M-9QXD-4F8T-WB3N&g=${invite.g}&home=${welcome.device}`,
+    );
+    for (const [example, action] of [
+      ['row-msg-confirm-confirmed', 'confirm'],
+      ['row-msg-confirm-denied', 'deny'],
+    ] as const) {
+      const row = p.decode(p.MsgRow, goldens[example]);
+      if (row.kind !== 'confirm' || !('act' in row.state)) throw new Error(`${example} has no act`);
+      expect(p.decode(p.Act, row.state.act.p)).toMatchObject({ msg: row.id, action });
+    }
+  });
+
+  it('reads step-3 preset and kb notes, brief preset, note answer, and kb search fetch', () => {
+    const presetRow = p.decode(p.NoteRow, goldens['row-note-preset']);
+    const kbRow = p.decode(p.NoteRow, goldens['row-note-kb']);
+    expect([presetRow.type, presetRow.name, presetRow.task]).toEqual([
+      'preset',
+      'Calm dashboard',
+      null,
+    ]);
+    expect([kbRow.type, kbRow.name, kbRow.task]).toEqual([
+      'kb',
+      'Decision: the home is the single writer',
+      null,
+    ]);
+    expect(p.decode(p.Note, goldens['note-preset'])).toMatchObject({
+      type: 'preset',
+      name: 'Calm dashboard',
+      task: null,
+    });
+    expect(p.decode(p.Note, goldens['note-kb'])).toMatchObject({
+      type: 'kb',
+      name: 'Decision: the home is the single writer',
+      task: null,
+    });
+    expect(p.decode(p.CmdResult, goldens['cmd-noted'])).toStrictEqual({
+      re: 9,
+      ok: true,
+      id: presetRow.id,
+      replaced: false,
+    });
+    const briefRow = p.decode(p.MsgRow, goldens['row-msg-brief-preset']);
+    const briefPost = p.decode(p.Post, briefRow.env!.p);
+    expect(briefRow.kind === 'brief' && briefRow.body.preset).toBe('Calm dashboard');
+    expect(briefPost.kind === 'brief' && briefPost.body.preset).toBe('Calm dashboard');
+    expect(p.decode(p.FetchKind, goldens['fetch-preset'])).toMatchObject({
+      kind: 'preset',
+      before: 0,
+      limit: 50,
+    });
+    expect(p.decode(p.FetchKind, goldens['fetch-kb'])).toMatchObject({
+      kind: 'kb',
+      q: 'single writer 路径',
+      before: 0,
+      limit: 5,
+    });
   });
 
   it('reads caps only of the agents it knows, and refuses a cap without its max', () => {
@@ -697,7 +784,7 @@ describe('mock connection', () => {
     expect(info).toStrictEqual({ ...JSON.parse(goldens['host-info-answer']), re: 2 });
   });
 
-  it('pushes groups before it answers a group create, and after no other command', async () => {
+  it('pushes groups before group create and join, and answers typed commands with their examples', async () => {
     const seen: string[] = [];
     const ctl = mockCtl((push) => seen.push(push.t));
     const sign = (payload: unknown) => ({ p: JSON.stringify(payload), k: 'k', s: 's' });
@@ -705,9 +792,19 @@ describe('mock connection', () => {
     expect(seen).toEqual([]);
     await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens['group-pause'])) });
     expect(seen).toEqual([]);
+    const plainNote = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens.note)) });
+    expect(plainNote).toStrictEqual({ re: 3, ok: true });
     const created = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens['group-create'])) });
     expect(seen).toEqual(['groups']);
-    expect(created).toStrictEqual({ re: 3, ok: true });
+    expect(created).toStrictEqual({ re: 4, ok: true });
+    const joined = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens.join)) });
+    expect(seen).toEqual(['groups', 'groups']);
+    expect(joined).toStrictEqual({ re: 5, ok: true });
+    const invited = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens.invite)) });
+    expect(invited).toStrictEqual({ ...JSON.parse(goldens['cmd-invite-link']), re: 6 });
+    const noted = await ctl.request({ t: 'cmd', env: sign(JSON.parse(goldens['note-preset'])) });
+    expect(noted).toStrictEqual({ ...JSON.parse(goldens['cmd-noted']), re: 7 });
+    expect(seen).toEqual(['groups', 'groups']);
   });
 });
 

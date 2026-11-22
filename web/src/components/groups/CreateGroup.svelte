@@ -94,9 +94,11 @@
       <input class="input" bind:value={name} required pattern=".*\S.*" maxlength="80" />
     </label>
     <label class="field">
-      <span>{t('groups.create.repo')}</span>
+      <span id={`${uid}-repo`}>{t('groups.create.repo')}</span>
       <input
         class="input mono"
+        aria-labelledby={`${uid}-repo`}
+        aria-describedby={`${uid}-repo-hint`}
         bind:value={repo}
         required
         pattern=".*\S.*"
@@ -104,7 +106,7 @@
         autocapitalize="off"
         spellcheck="false"
       />
-      <span class="hint">{t('groups.create.repo.hint')}</span>
+      <span class="hint" id={`${uid}-repo-hint`}>{t('groups.create.repo.hint')}</span>
     </label>
     <div class="two">
       <label class="field">
@@ -124,26 +126,28 @@
       </label>
     </div>
     <label class="field">
-      <span>{t('groups.create.forge')}</span>
-      <select class="input" bind:value={forge}>
+      <span id={`${uid}-forge`}>{t('groups.create.forge')}</span>
+      <select class="input" aria-labelledby={`${uid}-forge`} bind:value={forge}>
         <option value="github">{t('groups.create.forge.github')}</option>
         <option value="none">{t('groups.create.forge.none')}</option>
       </select>
     </label>
     <label class="field">
-      <span>{t('groups.create.checks')}</span>
+      <span id={`${uid}-checks`}>{t('groups.create.checks')}</span>
       <textarea
         class="input mono"
+        aria-labelledby={`${uid}-checks`}
+        aria-describedby={`${uid}-checks-hint`}
         bind:value={checks}
         rows="2"
         placeholder={'go vet ./...\ngo test ./...'}
         autocapitalize="off"
         spellcheck="false"></textarea>
-      <span class="hint">{t('groups.create.checks.hint')}</span>
+      <span class="hint" id={`${uid}-checks-hint`}>{t('groups.create.checks.hint')}</span>
     </label>
     <label class="field">
-      <span>{t('groups.create.home')}</span>
-      <select class="input" bind:value={chosen}>
+      <span id={`${uid}-home`}>{t('groups.create.home')}</span>
+      <select class="input" aria-labelledby={`${uid}-home`} bind:value={chosen}>
         {#each owned as home (home)}
           <option value={home}>{home.name}</option>
         {/each}
@@ -174,7 +178,7 @@
   }
   .two {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
     gap: var(--sp-4);
   }
 </style>

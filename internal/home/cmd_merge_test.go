@@ -541,30 +541,31 @@ func TestMergeSummaryBuildsBodyAndUpdatesThread(t *testing.T) {
 		wantMent    []string
 		re          *string
 		wantMinutes int
+		wantRounds  int
 	}{
 		"remote pr 28, 72 minutes, 201 runes cut to 200, main forced true": {
 			started: clock - 72*60_000, ended: clock, pr: 28, wantPR: &pr28,
 			postMain: false, text: over200, wantPreview: exact200,
 			mentions: []proto.ID{proto.ID(ownerID), proto.ID(mrgWorkA)}, wantMent: []string{ownerID, mrgWorkA},
-			re: &reID, wantMinutes: 72,
+			re: &reID, wantMinutes: 72, wantRounds: 6,
 		},
 		"pr boundary 1, exact 1 minute, exact 200 runes": {
 			started: clock - 60_000, ended: clock, pr: 1, wantPR: &pr1,
 			postMain: true, text: exact200, wantPreview: exact200,
 			mentions: []proto.ID{}, wantMent: []string{},
-			re: nil, wantMinutes: 1,
+			re: nil, wantMinutes: 1, wantRounds: 5,
 		},
 		"no remote pr 0 omitted, sub-minute 59999 ms is 0": {
 			started: clock - 59_999, ended: clock, pr: 0, wantPR: nil,
 			postMain: true, text: "Done.", wantPreview: "Done.",
 			mentions: []proto.ID{proto.ID(mrgMember)}, wantMent: []string{mrgMember},
-			re: nil, wantMinutes: 0,
+			re: nil, wantMinutes: 0, wantRounds: 5,
 		},
 		"zero elapsed ms and empty text": {
 			started: clock, ended: clock, pr: 0, wantPR: nil,
 			postMain: true, text: "", wantPreview: "",
 			mentions: []proto.ID{proto.ID(mrgWorkB)}, wantMent: []string{mrgWorkB},
-			re: nil, wantMinutes: 0,
+			re: nil, wantMinutes: 0, wantRounds: 6,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -610,7 +611,7 @@ func TestMergeSummaryBuildsBodyAndUpdatesThread(t *testing.T) {
 			wantTask.Seq = 22
 			wantTask.Thread = proto.ThreadSummary{
 				Count:  8,
-				Rounds: 5,
+				Rounds: tc.wantRounds,
 				Last:   &proto.ThreadMessage{By: aiID, Kind: "summary", Text: tc.wantPreview, Timestamp: mrgSignedTS},
 			}
 			equal(t, briefRows(res), []any{wantMsg, wantTask})

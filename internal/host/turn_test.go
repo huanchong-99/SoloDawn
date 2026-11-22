@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -224,10 +225,10 @@ func TestSessionInstructionsCoverEveryRole(t *testing.T) {
 		s     Session
 		wants []string
 	}{
-		{Session{Kind: GroupSession}, []string{"post", "request_decision", "instruction", "information", "secrets", "read only", "do not edit files", "start_task"}},
-		{Session{Kind: TaskSession}, []string{"post", "request_decision", "instruction", "information", "secrets", "push_branch", "run_checks", "submit_task", "sandbox"}},
-		{Session{Kind: ReviewSession}, []string{"post", "request_decision", "instruction", "information", "secrets", "read only", "do not edit files", ".solodawn-review.diff", "submit_review", "veto"}},
-		{Session{Kind: GroupSession, Secretary: true}, []string{"post", "propose_brief", "set_task", "request_decision", "summary", "note_put"}},
+		{Session{Kind: GroupSession}, []string{"post", "ask", "reply", "request_decision", "instruction", "information", "secrets", "read only", "do not edit files", "start_task"}},
+		{Session{Kind: TaskSession}, []string{"post", "ask", "reply", "request_decision", "instruction", "information", "secrets", "push_branch", "run_checks", "submit_task", "sandbox"}},
+		{Session{Kind: ReviewSession}, []string{"post", "ask", "reply", "request_decision", "instruction", "information", "secrets", "read only", "do not edit files", ".solodawn-review.diff", "submit_review", "veto"}},
+		{Session{Kind: GroupSession, Secretary: true}, []string{"post", "ask", "reply", "propose_brief", "set_task", "request_decision", "summary", "note_put"}},
 		{Session{Kind: TaskSession, Secretary: true}, []string{"propose_brief", "note_put"}},
 	}
 	for _, tc := range cases {
@@ -239,7 +240,7 @@ func checkInstructionCase(t *testing.T, s Session, wants []string) {
 	t.Helper()
 	got := Instructions(s)
 	lines := strings.Count(strings.TrimSuffix(got, "\n"), "\n") + 1
-	if got == "" || lines >= 60 || strings.Contains(got, "`ask`") || strings.Contains(got, "`reply`") {
+	if got == "" || lines >= 60 {
 		t.Fatalf("%+v gave invalid instructions (%d lines):\n%s", s, lines, got)
 	}
 	for _, want := range wants {
@@ -1027,5 +1028,19 @@ func TestFetchFromForwardsCallerContext(t *testing.T) {
 	fetched, err := fetchFrom(ctx, r.h, r.homeKey.ID(), build)
 	if err != nil || len(fetched.Rows) != 1 || r.home.lastCtx.Value(ctxKey{}) != "tool-ctx" {
 		t.Fatalf("fetchFrom failed: err=%v rows=%d ctx=%v", err, len(fetched.Rows), r.home.lastCtx)
+	}
+}
+
+func TestTakeoverTaskFirstTurnSaysOnlyThatTheOwnerIsComing(t *testing.T) {
+	r := newTurnRig(t)
+	task := r.baseTask()
+	task.Origin, task.Brief, task.Title, task.Slug = "takeover", "", "Owner takeover", "owner-takeover"
+	r.h.Rows.Put(tGroupID, "task", tTaskID, mustJSON(t, task))
+	item := mustJSON(t, proto.InboxItem{Item: proto.Item{AI: proto.ID(tAIID), Why: "assign", Task: proto.ID(tTaskID)}, Task: &task})
+	got, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{item})
+	num := strconv.Itoa(task.Num)
+	want := "Task T-" + num + " \"Owner takeover\"\nBranch: task/" + num + "-owner-takeover (this folder is its worktree)\nYour owner is about to work with you directly in the terminal."
+	if err != nil || !strings.HasSuffix(got, want) {
+		t.Fatalf("takeover first turn: err=%v\n%s", err, got)
 	}
 }
