@@ -397,9 +397,12 @@ func runApprovalTurnOne(t *testing.T, proc Process) string {
 	codexEqual(t, ev.Ask, wantAsk)
 	codexNoErr(t, proc.Answer(ev.Ask.ID, false))
 	codexWantErr(t, proc.Answer(ev.Ask.ID, false))
-	end, endActives := nextNonActiveEvent(t, proc.Events())
-	codexCheck(t, endActives > 0, "expected active events before TurnEnded")
-	codexEqual(t, end, Event{Kind: TurnEnded, Status: "completed"})
+	end := drainCodexUntilTurnEnd(t, proc.Events())
+	codexEqual(t, end, Event{
+		Kind:   TurnEnded,
+		Status: "completed",
+		Usage:  Usage{Tokens: new(int64(35980)), WindowPct: new(0.0), WindowResets: new(int64(1795149937000))},
+	})
 	return ev.Ask.ID
 }
 
@@ -410,8 +413,27 @@ func runApprovalTurnTwo(t *testing.T, proc Process, firstAskID string) {
 	codexEqual(t, ev.Kind, Asked)
 	codexCheck(t, ev.Ask.ID != firstAskID, "expected distinct Ask ID on retry")
 	codexNoErr(t, proc.Answer(ev.Ask.ID, true))
-	end, _ := nextNonActiveEvent(t, proc.Events())
-	codexEqual(t, end, Event{Kind: TurnEnded, Status: "completed"})
+	end := drainCodexUntilTurnEnd(t, proc.Events())
+	codexEqual(t, end, Event{
+		Kind:   TurnEnded,
+		Status: "completed",
+		Usage:  Usage{Tokens: new(int64(41562)), WindowPct: new(0.0), WindowResets: new(int64(1795149937000))},
+	})
+}
+
+func drainCodexUntilTurnEnd(t *testing.T, ch <-chan Event) Event {
+	t.Helper()
+	sawUsed := false
+	for {
+		ev, _ := nextNonActiveEvent(t, ch)
+		if ev.Kind == Used {
+			sawUsed = true
+			continue
+		}
+		codexEqual(t, ev.Kind, TurnEnded)
+		codexCheck(t, sawUsed, "TurnEnded arrived without preceding Used events")
+		return ev
+	}
 }
 
 func assertCodexLog(t *testing.T, path string, lines ...string) {
@@ -448,8 +470,12 @@ func TestCodexFakeCLIExitMidTurnAndResume(t *testing.T) {
 
 	codexEqual(t, nextCodexEvent(t, p2.Events()), Event{Kind: Ready, Session: threadID})
 	codexNoErr(t, <-turnDone)
-	end, _ := nextNonActiveEvent(t, p2.Events())
-	codexEqual(t, end, Event{Kind: TurnEnded, Status: "completed"})
+	end := drainCodexUntilTurnEnd(t, p2.Events())
+	codexEqual(t, end, Event{
+		Kind:   TurnEnded,
+		Status: "completed",
+		Usage:  Usage{Tokens: new(int64(67311)), WindowPct: new(0.0), WindowResets: new(int64(1795149937000))},
+	})
 	<-mcpDone
 
 	codexNoErr(t, p2.Close())
@@ -781,17 +807,40 @@ func TestCodexTurnAuthAndRPCErrors(t *testing.T) {
 		"not-json",
 		`{}`,
 		`{"method":"thread/status/changed","params":{}}`,
+		`{"method":"thread/tokenUsage/updated","params":"bad"}`,
+		`{"method":"thread/tokenUsage/updated","params":{"turnId":"other","tokenUsage":{"last":{"totalTokens":5}}}}`,
+		`{"method":"account/rateLimits/updated","params":"bad"}`,
+		`{"method":"account/rateLimits/updated","params":{"rateLimits":{}}}`,
 		`{"method":"turn/completed","params":"bad"}`,
 	} {
 		peer.writeLine(ignored)
 	}
 	peer.writeLine(`{"id":50,"method":"ping","params":{}}`)
 	codexEqual(t, peer.readJSON()["id"], 50.0)
+	exerciseCodexRateLimitNotifications(t, proc, peer)
 	exerciseCodexTurnErrors(t, proc, peer)
 
 	codexNoErr(t, proc.Close())
 	peer.conn.Close()
 	waitEventsClosed(t, proc.Events())
+}
+
+func exerciseCodexRateLimitNotifications(t *testing.T, proc Process, peer *codexPeer) {
+	t.Helper()
+	peer.writeLine(`{"method":"account/rateLimits/updated","params":{"rateLimits":{"secondary":{"usedPercent":40}}}}`)
+	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Used, Usage: Usage{WindowPct: new(40.0)}})
+
+	peer.writeLine(`{"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":50,"resetsAt":100},"secondary":{"usedPercent":75,"resetsAt":200},"rateLimitReachedType":"tokens"}}}`)
+	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Used, Usage: Usage{WindowPct: new(75.0), WindowResets: new(int64(200000))}})
+	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: RateLimited, Resets: 200000})
+
+	peer.writeLine(`{"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":100,"resetsAt":300},"secondary":{"usedPercent":60,"resetsAt":200}}}}`)
+	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Used, Usage: Usage{WindowPct: new(100.0), WindowResets: new(int64(300000))}})
+	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: RateLimited, Resets: 300000})
+
+	peer.writeLine(`{"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":99,"resetsAt":350},"spendControlReached":true}}}`)
+	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Used, Usage: Usage{WindowPct: new(99.0), WindowResets: new(int64(350000))}})
+	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: RateLimited, Resets: 350000})
 }
 
 func exerciseCodexTurnErrors(t *testing.T, proc Process, peer *codexPeer) {
@@ -808,6 +857,7 @@ func exerciseCodexTurnErrors(t *testing.T, proc Process, peer *codexPeer) {
 		wantEv Event
 	}{
 		{`"unauthorized"`, Event{Kind: LoginInvalid, Text: "err-msg"}},
+		{`"usageLimitExceeded"`, Event{Kind: RateLimited, Resets: 350000}},
 		{`"otherError"`, Event{}},
 		{`{"stream":{"httpStatusCode":401}}`, Event{Kind: LoginInvalid, Text: "err-msg"}},
 		{`{"stream":{"httpStatusCode":400}}`, Event{}},
@@ -831,7 +881,12 @@ func runFailedTurnErrorCase(t *testing.T, proc Process, peer *codexPeer, idx int
 		codexEqual(t, ev, wantEv)
 	}
 	end, _ := nextNonActiveEvent(t, proc.Events())
-	codexEqual(t, end, Event{Kind: TurnEnded, Status: "failed", Text: "err-msg"})
+	codexEqual(t, end, Event{
+		Kind:   TurnEnded,
+		Status: "failed",
+		Usage:  Usage{WindowPct: new(99.0), WindowResets: new(int64(350000))},
+		Text:   "err-msg",
+	})
 }
 
 type codexStartupFailureCase struct {

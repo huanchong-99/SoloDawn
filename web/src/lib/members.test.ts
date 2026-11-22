@@ -16,6 +16,7 @@ import {
   statusOf,
   suggestedName,
   taskWaitKind,
+  usageMeter,
   waitingOnMe,
   waitingOnOther,
 } from './members';
@@ -566,6 +567,146 @@ describe('AI status and path projections', () => {
     expect(pathLabel(mk('working', 'direct'))).toBe('direct');
     expect(pathLabel(mk('working', 'relay'))).toBe('relayed, limited');
     expect(pathLabel(mk('working', 'mesh'))).toBe('mesh');
+  });
+
+  it('projects usageMeter across window, spend, daily cap, clamping, danger and empty cases', () => {
+    const resetAt = new Date(2026, 10, 20, 15, 0).getTime();
+
+    expect(usageMeter({}, 'en')).toBeUndefined();
+    expect(usageMeter({ turns_today: 14 }, 'en')).toBeUndefined();
+    expect(usageMeter({ spend_today: 3.2 }, 'en')).toBeUndefined();
+    expect(usageMeter({ spend_cap: 10 }, 'en')).toBeUndefined();
+    expect(usageMeter({ spend_today: 3.2, spend_cap: 0 }, 'en')).toBeUndefined();
+    expect(usageMeter({ spend_today: 3.2, spend_cap: -5 }, 'en')).toBeUndefined();
+
+    expect(usageMeter({ window_pct: 18 }, 'en')).toEqual({
+      label: 'Window used',
+      value: '18%',
+      fill: 18,
+      tone: undefined,
+      note: undefined,
+    });
+    expect(usageMeter({ window_pct: -4 }, 'en')).toEqual({
+      label: 'Window used',
+      value: '-4%',
+      fill: 0,
+      tone: undefined,
+      note: undefined,
+    });
+    expect(usageMeter({ window_pct: 62.5, window_resets: resetAt }, 'en')).toEqual({
+      label: 'Window used',
+      value: '63%',
+      fill: 63,
+      tone: undefined,
+      note: 'Resets 15:00',
+    });
+    expect(usageMeter({ window_pct: 62, day_cap_pct: 80.4 }, 'en')).toEqual({
+      label: 'Window used',
+      value: '62%',
+      fill: 62,
+      tone: undefined,
+      note: 'Daily cap 80%',
+    });
+    expect(
+      usageMeter({ window_pct: 99.9, window_resets: resetAt, day_cap_pct: 99.9 }, 'en'),
+    ).toEqual({
+      label: 'Window used',
+      value: '100%',
+      fill: 100,
+      tone: undefined,
+      note: 'Resets 15:00 · Daily cap 100%',
+    });
+    expect(usageMeter({ window_pct: 100 }, 'en')).toEqual({
+      label: 'Window used',
+      value: '100%',
+      fill: 100,
+      tone: 'danger',
+      note: undefined,
+    });
+    expect(usageMeter({ window_pct: 125 }, 'en')).toEqual({
+      label: 'Window used',
+      value: '125%',
+      fill: 100,
+      tone: 'danger',
+      note: undefined,
+    });
+    expect(usageMeter({ window_pct: 50, day_cap_pct: 100 }, 'en')).toEqual({
+      label: 'Window used',
+      value: '50%',
+      fill: 50,
+      tone: 'danger',
+      note: 'Daily cap 100%',
+    });
+
+    expect(usageMeter({ spend_today: 0, spend_cap: 10 }, 'en')).toEqual({
+      label: "Today's spend",
+      value: '$0 / $10',
+      fill: 0,
+      tone: undefined,
+    });
+    expect(usageMeter({ spend_today: -1, spend_cap: 10 }, 'en')).toEqual({
+      label: "Today's spend",
+      value: '$-1 / $10',
+      fill: 0,
+      tone: undefined,
+    });
+    expect(usageMeter({ spend_today: 3.2, spend_cap: 10 }, 'en')).toEqual({
+      label: "Today's spend",
+      value: '$3.20 / $10',
+      fill: 32,
+      tone: undefined,
+    });
+    expect(usageMeter({ spend_today: 10.5, spend_cap: 10.5 }, 'en')).toEqual({
+      label: "Today's spend",
+      value: '$10.50 / $10.50',
+      fill: 100,
+      tone: 'danger',
+    });
+    expect(usageMeter({ spend_today: 14, spend_cap: 10 }, 'en')).toEqual({
+      label: "Today's spend",
+      value: '$14 / $10',
+      fill: 100,
+      tone: 'danger',
+    });
+
+    expect(usageMeter({ day_cap_pct: 99.4 }, 'en')).toEqual({
+      label: 'Daily cap used',
+      value: '99%',
+      fill: 99,
+      tone: undefined,
+      note: undefined,
+    });
+    expect(usageMeter({ day_cap_pct: 100 }, 'en')).toEqual({
+      label: 'Daily cap used',
+      value: '100%',
+      fill: 100,
+      tone: 'danger',
+      note: undefined,
+    });
+    expect(usageMeter({ day_cap_pct: 112 }, 'en')).toEqual({
+      label: 'Daily cap used',
+      value: '112%',
+      fill: 100,
+      tone: 'danger',
+      note: undefined,
+    });
+
+    prefs.lang = 'zh-CN';
+    expect(
+      usageMeter({ window_pct: 62, window_resets: resetAt, day_cap_pct: 80 }, 'zh-CN'),
+    ).toEqual({
+      label: '这一轮额度已用',
+      value: '62%',
+      fill: 62,
+      tone: undefined,
+      note: '15:00 重置 · 今天上限 80%',
+    });
+    expect(usageMeter({ spend_today: 3.2, spend_cap: 10 }, 'zh-CN')).toEqual({
+      label: '今天花费',
+      value: '$3.20 / $10',
+      fill: 32,
+      tone: undefined,
+    });
   });
 });
 

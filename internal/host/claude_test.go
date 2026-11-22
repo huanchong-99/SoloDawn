@@ -216,24 +216,61 @@ func TestClaudeStreamLineAndRateEvents(t *testing.T) {
 	}
 	cases := []struct {
 		line string
-		want Event
+		want []Event
 	}{
-		{`{"type":"system","subtype":"init","session_id":"s1"}`, Event{Kind: Ready, Session: "s1"}},
-		{`{"type":"assistant","subtype":"init","session_id":"s1"}`, Event{Kind: Active}},
-		{`{"type":"system","subtype":"thinking_tokens","session_id":"s1"}`, Event{Kind: Active}},
-		{`{"type":"system","subtype":"init","session_id":""}`, Event{Kind: Active}},
-		{`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}}`, Event{Kind: Active}},
-		{`{"type":"result","is_error":"bad"}`, Event{Kind: Active}},
+		{`{"type":"system","subtype":"init","session_id":"s1"}`, []Event{{Kind: Ready, Session: "s1"}}},
+		{`{"type":"assistant","subtype":"init","session_id":"s1"}`, []Event{{Kind: Active}}},
+		{`{"type":"system","subtype":"thinking_tokens","session_id":"s1"}`, []Event{{Kind: Active}}},
+		{`{"type":"system","subtype":"init","session_id":""}`, []Event{{Kind: Active}}},
+		{`{"type":"rate_limit_event","rate_limit_info":"bad"}`, []Event{{Kind: Active}}},
+		{`{"type":"rate_limit_event"}`, []Event{{Kind: Active}}},
+		{`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}`, []Event{{Kind: Active}}},
+		{`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning"}}`, []Event{{Kind: Active}}},
+		{`{"type":"rate_limit_event","rate_limit_info":{"status":""}}`, []Event{{Kind: Active}}},
+		{`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}}`, []Event{{Kind: RateLimited, Resets: 0}}},
+		{
+			`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","utilization":0.75,"resetsAt":1700000}}`,
+			[]Event{
+				{Kind: Used, Usage: Usage{WindowPct: new(75.0), WindowResets: new(int64(1700000000))}},
+				{Kind: RateLimited, Resets: 1700000000},
+			},
+		},
+		{
+			`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"seven_day","unifiedWindows":{"seven_day":{"utilization":0.25,"resetsAt":1800000}}}}`,
+			[]Event{{Kind: Used, Usage: Usage{WindowPct: new(25.0), WindowResets: new(int64(1800000000))}}},
+		},
+		{`{"type":"result","is_error":"bad"}`, []Event{{Kind: Active}}},
 	}
 	for _, tc := range cases {
 		claudeTrue(t, !p.handleLine([]byte(tc.line)), "unexpected diagnostic return")
-		claudeEqual(t, tc.line, <-events, tc.want)
+		for _, want := range tc.want {
+			claudeEqual(t, tc.line, <-events, want)
+		}
+		claudeEqual(t, "remaining events", len(events), 0)
 	}
 }
 
 func TestClaudeResultAndDiagnosticMapping(t *testing.T) {
 	checkClaudeStatuses(t)
 	checkClaudeDiagnostics(t)
+	checkClaudeUsageMath(t)
+}
+
+func checkClaudeUsageMath(t *testing.T) {
+	t.Helper()
+	ev1, _ := claudeResultEvent(claudeResultMsg{
+		Subtype:      "success",
+		TotalCostUSD: new(9.99),
+		Usage:        &claudeTurnTokens{InputTokens: 2, CacheCreationInputTokens: 3, CacheReadInputTokens: 5, OutputTokens: 7},
+		SinceLast:    map[string]claudeModelDelta{"m1": {CostUSD: 1.25}, "m2": {CostUSD: 0.75}},
+	}, false, false)
+	claudeEqual(t, "since-last usage", ev1.Usage, Usage{Tokens: new(int64(17)), USD: new(2.0)})
+
+	ev2, _ := claudeResultEvent(claudeResultMsg{
+		Subtype:      "success",
+		TotalCostUSD: new(0.5),
+	}, false, false)
+	claudeEqual(t, "total-cost fallback", ev2.Usage, Usage{USD: new(0.5)})
 }
 
 func checkClaudeStatuses(t *testing.T) {
@@ -334,7 +371,11 @@ func testClaudeApprovalAndResume(t *testing.T) {
 	claudeNoErr(t, proc.Turn("Approved. Run exactly the same request again."))
 	events2 := drainUntilTurnEnded(t, proc.Events())
 	claudeNoErr(t, <-mcpDone)
-	claudeEqual(t, "second turn end", events2[len(events2)-1], Event{Kind: TurnEnded, Status: "completed"})
+	claudeEqual(t, "second turn end", events2[len(events2)-1], Event{
+		Kind:   TurnEnded,
+		Status: "completed",
+		Usage:  Usage{Tokens: new(int64(58510)), USD: new(0.0008861399999999999)},
+	})
 
 	claudeNoErr(t, proc.Close())
 	_, open := <-proc.Events()
@@ -345,7 +386,13 @@ func testClaudeApprovalAndResume(t *testing.T) {
 func checkFirstApprovalTurnEvents(t *testing.T, events []Event) {
 	t.Helper()
 	claudeTrue(t, slices.Contains(events, Event{Kind: Active}), "missing Active event")
-	claudeEqual(t, "first turn end", events[len(events)-1], Event{Kind: TurnEnded, Status: "completed"})
+	wantUsed := Event{Kind: Used, Usage: Usage{WindowPct: new(44.0), WindowResets: new(int64(1795615200000))}}
+	claudeTrue(t, slices.ContainsFunc(events, func(e Event) bool { return reflect.DeepEqual(e, wantUsed) }), "missing rate_limit_event Used")
+	claudeEqual(t, "first turn end", events[len(events)-1], Event{
+		Kind:   TurnEnded,
+		Status: "completed",
+		Usage:  Usage{Tokens: new(int64(57229)), USD: new(0.0038813100000000002)},
+	})
 }
 
 func runClaudeResumeCheck(t *testing.T, session, logFile string) {
@@ -367,7 +414,11 @@ func runClaudeResumeCheck(t *testing.T, session, logFile string) {
 	events := drainUntilTurnEnded(t, proc.Events())
 	claudeNoErr(t, <-mcpDone)
 	claudeEqual(t, "resumed Ready", events[0], Event{Kind: Ready, Session: session})
-	claudeEqual(t, "resumed end", events[len(events)-1], Event{Kind: TurnEnded, Status: "completed"})
+	claudeEqual(t, "resumed end", events[len(events)-1], Event{
+		Kind:   TurnEnded,
+		Status: "completed",
+		Usage:  Usage{Tokens: new(int64(92653)), USD: new(0.0011304000000000002)},
+	})
 	claudeNoErr(t, proc.Close())
 	for range proc.Events() {
 	}

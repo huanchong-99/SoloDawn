@@ -288,6 +288,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               body: { question: 'Which port?', options: [], to: [user] },
             }),
           );
+          const resetAt = new Date(2026, 10, 20, 15, 0).getTime();
           h.write(
             website,
             example('row-member-ai', {
@@ -302,6 +303,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               host_name: 'workstation',
               path: 'local',
               account: 'personal',
+              usage: { window_pct: 18 },
             }),
           );
           h.write(
@@ -318,6 +320,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               host_name: 'laptop',
               path: 'direct',
               account: 'team',
+              usage: { window_pct: 62, window_resets: resetAt, day_cap_pct: 80 },
             }),
           );
           h.write(
@@ -334,6 +337,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               host_name: 'windows',
               path: 'relay',
               account: 'personal',
+              usage: {},
             }),
           );
           h.write(
@@ -351,6 +355,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               host_name: 'laptop',
               path: 'direct',
               account: 'team',
+              usage: { day_cap_pct: 100 },
             }),
           );
           h.write(
@@ -367,6 +372,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
               host_name: 'old-box',
               path: 'direct',
               account: 'api_key',
+              usage: { spend_today: 3.2, spend_cap: 10 },
             }),
           );
           flushSync();
@@ -441,10 +447,39 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           ]);
         },
       );
-      And('no usage bar or terminal button is shown', () => {
-        expect(all('.member .meter')).toEqual([]);
-        expect(all('.member button, .member a')).toEqual([]);
-      });
+      And(
+        'the cards show usage bars for window, daily cap and spend where reported, and no terminal button',
+        () => {
+          expect(all('.member').map((card) => Boolean(card.querySelector('.meter')))).toEqual([
+            true,
+            true,
+            false,
+            true,
+            true,
+          ]);
+          expect(texts('.member .meter span')).toEqual([
+            'Window used',
+            'Window used',
+            'Daily cap used',
+            "Today's spend",
+          ]);
+          expect(texts('.member .meter b')).toEqual(['18%', '62%', '100%', '$3.20 / $10']);
+          expect(all('.member .meter').map((m) => m.getAttribute('style'))).toEqual([
+            '--v: 18%;',
+            '--v: 62%;',
+            '--v: 100%;',
+            '--v: 32%;',
+          ]);
+          expect(all('.member .meter').map((m) => m.dataset.tone)).toEqual([
+            undefined,
+            undefined,
+            'danger',
+            undefined,
+          ]);
+          expect(texts('.member .meter small')).toEqual(['Resets 15:00 · Daily cap 80%']);
+          expect(all('.member button, .member a')).toEqual([]);
+        },
+      );
       When('the dormant AI wakes to work and two other AIs go offline and hit a limit', () => {
         const h = workstation.home;
         h.write(

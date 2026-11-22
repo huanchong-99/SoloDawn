@@ -7,9 +7,10 @@
     pathLabel,
     personTags,
     statusOf,
+    usageMeter,
   } from '../../lib/members';
   import { accountLabel } from '../../lib/onboard.svelte';
-  import { t } from '../../lib/prefs.svelte';
+  import { prefs, t } from '../../lib/prefs.svelte';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
   import AddAI from './AddAI.svelte';
@@ -46,6 +47,7 @@
   {#each ais as ai (ai.id)}
     {@const status = statusOf(group, ai)}
     {@const owner = ai.user === group.home.me.user ? undefined : group.personName(ai.user)}
+    {@const meter = usageMeter(ai.usage, prefs.lang)}
     <section class="card member">
       <header class="row">
         <span
@@ -74,6 +76,13 @@
             </span>{/if}
         </dd>
       </dl>
+      {#if meter}
+        <div class="meter" data-tone={meter.tone} style={`--v: ${meter.fill}%`}>
+          <span>{meter.label}</span><b>{meter.value}</b><i></i>{#if meter.note}<small>
+              {meter.note}
+            </small>{/if}
+        </div>
+      {/if}
     </section>
   {:else}
     <p class="hint">{t('member.ai.empty')}</p>
@@ -190,6 +199,31 @@
   }
   .kv dd {
     min-width: 0;
+  }
+  .meter {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px 8px;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+  .meter b {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .meter i {
+    grid-column: 1 / -1;
+    height: 6px;
+    border-radius: 3px;
+    background: linear-gradient(
+      90deg,
+      var(--tone-text, var(--text-2)) var(--v),
+      var(--surface-3) var(--v)
+    );
+  }
+  .meter small {
+    grid-column: 1 / -1;
+    font-size: inherit;
   }
   .people-head {
     margin-top: var(--sp-2);
