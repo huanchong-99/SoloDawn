@@ -37,12 +37,17 @@ type (
 	}
 )
 
-// NewSurface constructs a Surface and registers host.info and pty.resize on cfg.Sessions.
+// NewSurface constructs a Surface and registers host.info, pty.resize and takeover.start replay on cfg.Sessions.
 func NewSurface(cfg SurfaceConfig) *Surface {
 	sf := &Surface{cfg: srfDefaults(cfg)}
 	cfg.Sessions.Requests["host.info"] = RequestHandler{Type: "host.info", Run: sf.reqHostInfo}
 	cfg.Sessions.Pushes["pty.resize"] = sf.pushPTYResize
+	cfg.Sessions.Replays["takeover.start"] = sf.replayTakeoverStart
 	return sf
+}
+
+func (sf *Surface) replayTakeoverStart(ctx context.Context, from Ctl, by string, data json.RawMessage) (any, error) {
+	return sf.cfg.Host.ReplayTakeover(ctx, from, by, data)
 }
 
 func (sf *Surface) pushPTYResize(ctx context.Context, _ *home.Conn, from Ctl, by string, data json.RawMessage) {
@@ -158,7 +163,7 @@ func (sf *Surface) groupsForAgent(agent string, sessions []host.Session) []proto
 		state, task := sf.cfg.Host.MemberState(k.group, k.member)
 		out = append(out, proto.AgentGroup{
 			Group: proto.ID(k.group), Member: proto.ID(k.member), Level: 3,
-			State: state, Task: proto.ID(task), Watchers: []string{},
+			State: state, Task: proto.ID(task), Queued: sf.cfg.Host.QueuedCount(k.group, k.member), Watchers: []string{},
 		})
 	}
 	return out

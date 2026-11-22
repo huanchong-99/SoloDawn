@@ -111,6 +111,10 @@ func TestSurfaceDefaultsReadHelpersAndNulls(t *testing.T) {
 	if resizeHost != h || resizeBy != ownerKey.ID() || resizeSeen.Group != gID || resizeSeen.AI != aiID || resizeSeen.Cols != 120 || resizeSeen.Rows != 36 {
 		t.Fatalf("pty.resize forward = host=%p by=%q req=%+v", resizeHost, resizeBy, resizeSeen)
 	}
+	replay := fmt.Sprintf(`{"t":"takeover.start","n":"n1","ts":1,"to":%q,"g":%q,"member":%q}`, nodeKey.ID(), gID, aiID)
+	if _, err := s.Replays["takeover.start"](t.Context(), nil, ownerKey.ID(), json.RawMessage(replay)); err == nil || err.(*host.Error).Code != "conflict" {
+		t.Fatalf("takeover.start replay without a terminal = %v, want conflict", err)
+	}
 }
 
 func mustSurfaceSession(t *testing.T, h *host.Host, home string, key host.SessionKey, kind host.Kind, agent string) {
