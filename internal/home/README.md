@@ -202,8 +202,10 @@ names that start with `mrg`, their tests too, and their test functions start wit
 Host events (`cmd_hostev.go`) take the names that start with `hev`, their tests too, and their test
 functions start with `TestHostEv`; the file exports `HostOfflineEvent`. The calls (`cmd_call.go`)
 take the names that start with `cal`, their tests too, and their test functions start with
-`TestCall`. Retention (`retention.go`) takes the names that start with `ret`, exports `Retain`,
-and its test functions start with `TestRetention`.
+`TestCall`. Thread rounds, queue jumps and the quiet-task timer (`rounds.go`) take the names that
+start with `rnd`, their tests too, and their test functions start with `TestRounds`. Retention
+(`retention.go`) takes the names that start with `ret`, exports `Retain`, and its test functions
+start with `TestRetention`.
 The step-2 people seam (`people_seam.go`) takes the unexported names that start with `seam` and
 `keyInvite` / `keyJoin` (leaving `ppl` for `cmd_people.go`), and exports `Joining`, `InviteLink`,
 `Inviter`, `(*Conn).SetJoining` and `Table.ApplyJoining`. Web Push (`webpush.go`) takes the names that start with
@@ -679,6 +681,40 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
   `Pending` and the newest 50 main-line messages (`PageThread(nil, 0, 50)`) without duplicates in
   increasing `seq` order.
 
+## Rounds, jumps and quiet tasks
+
+`rounds.go` holds the `jump` command ([commands](../../planning/contracts/commands.md) 1.4, R-72),
+the `quiet` timer and its `After` hook ([task-machine](../../planning/contracts/task-machine.md)
+row 23), and the thread round transitions (rows 21 and 22, and section 4 "Held by the round limit";
+[messages](../../planning/contracts/messages.md) 2.11):
+
+- **`jump`.** Registered under `jump`. Refuses an AI signer (a non-empty `c.Who.AI`) with
+  `forbidden`, a missing `msg` with `not_found`, and any `msg` whose `by` differs from `c.Who.Human`
+  with `forbidden`.
+  Scans `c.Disk.Queued()` from newest to oldest for an unacknowledged `mention` item whose message
+  was written by `c.Who.Human` in the same thread (or in the main line when `msg` has no thread),
+  retires that item and queues its replacement with `Jump: true` and `NotBefore: 0`, or answers
+  `conflict` when none exists.
+- **`quiet` timer.** Registered under `Timers["quiet"]` and `After["quiet"]`. When the group has a
+  secretary and `limits.idle_notice_minutes > 0`, checks each task in sorted id order: if the task
+  has had no thread message for at least `limits.idle_notice_minutes` (measured from
+  `thread.last.ts`, else `stats.started` when non-zero, else `created`), has not already notified
+  the secretary at that last-activity timestamp, and passes `Step` with `OnQuiet` (`ByHome`:
+  `active`, `wait` `null`, `step` not `merge`), it queues one `notice` (`code: "quiet"`) for
+  `group.secretary`. `After["quiet"]` records the task's last-activity timestamp in the group's
+  `State` (in memory) once the transaction commits, so any new thread message starts a new quiet
+  period ([issues](../../issues.md)).
+- **Rounds.** `Table.Add` wraps every `post/*` entry (`rndWrap`), without depending on file
+  initialisation order. On a thread `post` by an AI that mentions another AI (in `mentions` with
+  `id` other than `msg.By`, or via a queued `mention` item such as `call`), steps `OnMention` (row
+  21); when the round limit pauses the task, writes the main-line `system` message `rounds_limit`
+  (`tskThreadSystem`) under `revDerivedID("SoloDawn rounds limit ", c.Nonce)`
+  ([issues](../../issues.md)) and queues `notice` (`code: "rounds_limit"`) naming it for the
+  secretary when the group has one. Thread `mention` items are queued at once with the updated
+  `paused` task row; the host holds them while the task is `paused` or `failed` and delivers them
+  again once a person's thread `post/text` (row 22, passing `tskPending` and deduplicating `IfNone`
+  `review` items through `tskItemCtx`) or an admin's `task/resume` (row 13) activates the task.
+
 ## Calls
 
 `cmd_call.go` holds `post` of kinds `call` and `reply`
@@ -691,8 +727,9 @@ Where the contracts are silent, it does this:
 - **Call.** A self-call (`body.to` equal to `as`) is `bad_request`, a non-null `thread` absent from
   `State.Tasks` is `not_found`, a `body.to` absent from `State.AIs` is `conflict`, and `body.depth`
   above `Group.Limits.AskDepth` is `limit` (A6.4). One `mention` item is queued for `body.to`, with
-  `task` set when in a thread, even when `mentions` also names `body.to` or other AIs; round
-  counting and held mentions wrap `post/*` in unit HM-13.
+  `task` set when in a thread, even when `mentions` also names `body.to` or other AIs. In a thread
+  the call counts a round through that item, and a reply counts one when it mentions another AI
+  (`rndWrap`, see "Rounds"; [ask](../../planning/flows/ask.md) A.3 and D).
 - **Reply.** A `re` `null` or a `thread` that differs from the call's `thread` is `bad_request`; a
   missing `re` message on `Disk` or a deleted task in `State.Tasks` is `not_found`. Elapsed `ms` on
   the answered call is `max(0, c.Timestamp - call.Timestamp)` so inter-host clock skew never
@@ -740,9 +777,9 @@ shutdown hooks ([commands](../../planning/contracts/commands.md) 1.7;
 
 - The table of commands holds the groups, members, briefs, the task commands of HM-9, the four
   kinds of `post` of HM-6, `note` and `forget`, the cards, the checks and reviews, the merges and
-  summaries, the host events, `push`, and the calls, and no node starts a loop yet: the remaining
-  command files (including thread round counting in HM-13) and the wiring of the node are separate
-  units ([units](../../planning/steps/parallel-plan-units.md), section 2).
+  summaries, the host events, `push`, the calls, and `jump` and thread rounds of HM-13, and no
+  node starts a loop yet: the remaining command files and the wiring of the node are separate units
+  ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - After retention deletes rows, finished tasks stay in the in-memory `State.Tasks` until restart
   ([issues](../../issues.md)).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
@@ -846,6 +883,11 @@ that; `go test ./internal/home -run TestTaskTraces -update` writes them.
 reads, exact 61,440-byte boundaries, page bounds checks, group access checks, detached connections
 and store failures. `features/home_fetch.feature` holds the scroll-back scenarios of A2.2 and the
 deleted-row scenario of A2.7.
+
+`rounds_test.go` covers `jump`, the `quiet` timer, `After["quiet"]`, and rows 21 and 22 through
+`Commands.Apply`, `Table.Add` and `StartLoop`, including delivery after a rounds-paused task fails
+and is resumed and wake-up cap ageing. `features/home_rounds.feature` holds acceptance tests A5.8,
+A5.11 (home half) and A5.16 over `StartLoop`.
 
 `cmd_call_test.go` sends `post/call` and `post/reply` through `Commands.Apply` with fakes of
 `Receipts` and `Disk`, checking the golden shapes, `UnexpectedNulls`, the 200-character preview,

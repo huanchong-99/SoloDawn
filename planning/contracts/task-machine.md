@@ -143,9 +143,10 @@ is a person with role `owner` or `admin`. Items are inbox items
   checks pass (or, without a remote, when a submission is accepted) and
   when a stopped task is resumed or reassigned.
 - **Held by the round limit.** While a task's wait is `rounds`, `mention`
-  items of its thread are not sent. However the wait ends (row 13 or 22),
-  they go out again. Only a person ends it (R-60): an admin's resume or a
-  person's message in the thread.
+  items of its thread are not delivered: the host holds them, as for any
+  paused task (section 2). However the wait ends (row 13 or 22), they go
+  out again. Only a person ends it (R-60): an admin's resume or a person's
+  message in the thread.
 - **Pre-emption is the host's fact.** A host that interrupts a turn to run a
   queue jump in **another** session reports row 16, runs the jump turn,
   reports row 13b when it has ended, and gives the interrupted session a
