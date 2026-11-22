@@ -363,12 +363,11 @@ func runGroupOf(env proto.Envelope) string {
 }
 
 // stray answers a command that names no group with the first check that
-// fails, in the order of every command: the signer, the envelope, then g. No
-// group runs it and it leaves no receipt. Only the owner's devices are known
-// to it.
+// fails, in the order of every command: the envelope, then g. No group runs
+// it and it leaves no receipt. Only the owner's devices are known to it.
 func (l *Loop) stray(c *Conn, re int64, env proto.Envelope) {
 	res := refused(&Refusal{"bad_request", "the command names no group in g"})
-	if _, refusal := l.fresh(runNowhere).open(c.device, env, l.cfg.Now()); refusal != nil {
+	if _, refusal := l.fresh(runNowhere).open(env, l.cfg.Now()); refusal != nil {
 		res = refused(refusal)
 	}
 	c.send(res.Frame(re))

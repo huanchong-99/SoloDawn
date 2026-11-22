@@ -172,11 +172,10 @@ func writeNote(calls *int) home.Func {
 	}
 }
 
-// apply sends a command on the connection of its signer, in a transaction
-// with nothing on disk.
-func apply(t *testing.T, table home.Table, s *home.State, r home.Receipts, by identity.Key, env proto.Envelope) home.Result {
+// apply sends a command in a transaction with nothing on disk.
+func apply(t *testing.T, table home.Table, s *home.State, r home.Receipts, env proto.Envelope) home.Result {
 	t.Helper()
-	res, err := table.Apply(s, disk(nil), r, by.ID(), env, now)
+	res, err := table.Apply(s, disk(nil), r, env, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +188,7 @@ func TestApplyAnswersARepeatedCommandFromItsReceipt(t *testing.T) {
 	table := home.Table{"note": writeNote(&calls)}
 	env := signed(browser, "note", 1, `,"text":"remember this"`)
 
-	first := apply(t, table, s, held, browser, env)
+	first := apply(t, table, s, held, env)
 	equal(t, first.Answer, store.Outcome{OK: true, Num: 7})
 	equal(t, len(first.Rows), 1)
 	equal(t, first.Rows[0].Value(), any(noteRow(id(1), 11, "remember this", ownerID)))
@@ -197,7 +196,7 @@ func TestApplyAnswersARepeatedCommandFromItsReceipt(t *testing.T) {
 	s.Commit(first)
 	equal(t, s.Seq, int64(11))
 
-	second := apply(t, table, s, held, browser, env)
+	second := apply(t, table, s, held, env)
 	equal(t, second, home.Result{Answer: first.Answer})
 	equal(t, second.Frame(4), first.Frame(4))
 	equal(t, calls, 1)
@@ -205,7 +204,7 @@ func TestApplyAnswersARepeatedCommandFromItsReceipt(t *testing.T) {
 	equal(t, s.Seq, int64(11))
 }
 
-// A2.4, and the envelope checks: what is refused here leaves no receipt.
+// The envelope and group checks: what is refused here leaves no receipt.
 func TestApplyRefusesBeforeTheReceipt(t *testing.T) {
 	payload := func(ts int64, rest string) string {
 		return fmt.Sprintf(`{"t":"note","n":%q,"ts":%d%s,"text":"x"}`, id(1), ts, rest)
@@ -213,22 +212,20 @@ func TestApplyRefusesBeforeTheReceipt(t *testing.T) {
 	changed := signed(browser, "note", 1, `,"text":"x"`)
 	changed.Payload += " "
 	for name, c := range map[string]struct {
-		device identity.Key
-		env    proto.Envelope
-		code   string
+		env  proto.Envelope
+		code string
 	}{
-		"signed by another device than the connection's": {laptop, signed(browser, "note", 1, `,"text":"x"`), "forbidden"},
-		"a payload changed on the way":                   {browser, changed, "bad_sig"},
-		"a device in no log":                             {nobody, signed(nobody, "note", 1, `,"text":"x"`), "unknown_device"},
-		"a payload without a nonce":                      {browser, browser.Sign(`{"t":"note","ts":1}`), "bad_request"},
-		"for another node":                               {browser, signed(browser, "note", 1, `,"text":"x","to":"`+laptop.ID()+`"`), "not_for_me"},
-		"signed 25 hours ago":                            {browser, browser.Sign(payload(clock-25*3600*1000, `,"g":"`+groupID+`"`)), "stale"},
-		"for another group":                              {browser, browser.Sign(payload(clock, `,"g":"`+id(8)+`"`)), "bad_request"},
-		"without a group":                                {browser, browser.Sign(payload(clock, ``)), "bad_request"},
+		"a payload changed on the way": {changed, "bad_sig"},
+		"a device in no log":           {signed(nobody, "note", 1, `,"text":"x"`), "unknown_device"},
+		"a payload without a nonce":    {browser.Sign(`{"t":"note","ts":1}`), "bad_request"},
+		"for another node":             {signed(browser, "note", 1, `,"text":"x","to":"`+laptop.ID()+`"`), "not_for_me"},
+		"signed 25 hours ago":          {browser.Sign(payload(clock-25*3600*1000, `,"g":"`+groupID+`"`)), "stale"},
+		"for another group":            {browser.Sign(payload(clock, `,"g":"`+id(8)+`"`)), "bad_request"},
+		"without a group":              {browser.Sign(payload(clock, ``)), "bad_request"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, held, calls := group(t), receipts{}, 0
-			res := apply(t, home.Table{"note": writeNote(&calls)}, s, held, c.device, c.env)
+			res := apply(t, home.Table{"note": writeNote(&calls)}, s, held, c.env)
 			equal(t, res.Answer, store.Outcome{Code: c.code})
 			equal(t, res.Msg != "", true)
 			equal(t, len(res.Rows)+len(held)+calls, 0)
@@ -268,13 +265,13 @@ func TestApplyKeepsARefusalAsTheReceipt(t *testing.T) {
 			table := home.Table{"note": writeNote(&calls), "post/text": writeNote(&calls), "post/": writeNote(&calls), "post/text/more": writeNote(&calls)}
 			env := signed(c.by, c.t, 1, c.more)
 
-			first := apply(t, table, s, held, c.by, env)
+			first := apply(t, table, s, held, env)
 			equal(t, first.Answer, store.Outcome{Code: c.code})
 			equal(t, first.Msg != "", true)
 			equal(t, len(first.Rows), 0)
 			equal(t, held[[2]string{c.by.ID(), id(1)}], receipt{clock, first.Answer})
 
-			second := apply(t, table, s, held, c.by, env)
+			second := apply(t, table, s, held, env)
 			equal(t, second, home.Result{Answer: first.Answer, Msg: "the command was refused when it first arrived"})
 			equal(t, calls, c.calls)
 		})
@@ -297,7 +294,7 @@ func TestApplyFindsTheFunctionByItsKey(t *testing.T) {
 				calls++
 				return home.Result{}, nil
 			}}
-			res := apply(t, table, group(t), receipts{}, browser, signed(browser, c.t, 1, c.more))
+			res := apply(t, table, group(t), receipts{}, signed(browser, c.t, 1, c.more))
 			equal(t, res, home.Result{Answer: store.Outcome{OK: true}})
 			equal(t, calls, 1)
 		})
@@ -323,7 +320,7 @@ func TestApplyNumbersTheRowsOfAResult(t *testing.T) {
 	}}
 	env := signed(browser, "act", 1, `,"action":"choose"`)
 
-	res, err := table.Apply(s, onDisk, receipts{}, browser.ID(), env, now)
+	res, err := table.Apply(s, onDisk, receipts{}, env, now)
 	equal(t, err, nil)
 	created, decided := res.Rows[0].Value().(proto.MsgRow), res.Rows[1].Value().(proto.MsgRow)
 	equal(t, []int64{created.Seq, created.Pos}, []int64{11, 11})
@@ -360,7 +357,7 @@ func TestApplyRefusesARowAboveItsLimit(t *testing.T) {
 				table := home.Table{"post/text": func(*home.State, home.Command) (home.Result, *home.Refusal) {
 					return home.Result{Rows: []home.Row{home.RowOf(noteRow(id(30), 0, "", ownerID)), home.RowOf(row)}}, nil
 				}}
-				return apply(t, table, group(t), receipts{}, browser, signed(browser, "post", 1, `,"kind":"text"`))
+				return apply(t, table, group(t), receipts{}, signed(browser, "post", 1, `,"kind":"text"`))
 			}
 			// The size of the row a result holds: its JSON, with "<" as it is.
 			size := func(res home.Result) int {
@@ -387,12 +384,12 @@ func TestApplyFailsWhenItsReceiptCannotBeReadOrWritten(t *testing.T) {
 	table := home.Table{"note": writeNote(&calls)}
 	env := signed(browser, "note", 1, `,"text":"x"`)
 
-	res, err := table.Apply(group(t), disk(nil), broken{read: failure}, browser.ID(), env, now)
+	res, err := table.Apply(group(t), disk(nil), broken{read: failure}, env, now)
 	equal(t, err, failure)
 	equal(t, res, home.Result{})
 	equal(t, calls, 0)
 
-	_, err = table.Apply(group(t), disk(nil), broken{read: sql.ErrNoRows, write: failure}, browser.ID(), env, now)
+	_, err = table.Apply(group(t), disk(nil), broken{read: sql.ErrNoRows, write: failure}, env, now)
 	equal(t, err, failure)
 }
 
@@ -411,17 +408,17 @@ func TestApplyCreatesAGroup(t *testing.T) {
 	table := home.Table{"group/create": create, "note": writeNote(&calls)}
 	s, held := empty(t), receipts{}
 
-	res := apply(t, table, s, held, browser, signed(browser, "note", 1, `,"text":"x"`))
+	res := apply(t, table, s, held, signed(browser, "note", 1, `,"text":"x"`))
 	equal(t, res.Answer, store.Outcome{Code: "not_found"})
-	res = apply(t, table, s, held, guest, signed(guest, "group", 2, `,"op":"create","kind":"project"`))
+	res = apply(t, table, s, held, signed(guest, "group", 2, `,"op":"create","kind":"project"`))
 	equal(t, res.Answer, store.Outcome{Code: "forbidden"})
 	// The key of group create is no type: only t and op together reach it.
-	res = apply(t, table, s, held, browser, signed(browser, "group/create", 6, ``))
+	res = apply(t, table, s, held, signed(browser, "group/create", 6, ``))
 	equal(t, res.Answer, store.Outcome{Code: "bad_request"})
 	equal(t, founder, home.Who{})
 	equal(t, calls, 0)
 
-	res = apply(t, table, s, held, browser, signed(browser, "group", 3, `,"op":"create","kind":"project"`))
+	res = apply(t, table, s, held, signed(browser, "group", 3, `,"op":"create","kind":"project"`))
 	equal(t, res.Answer, store.Outcome{OK: true})
 	equal(t, founder, home.Who{Device: browser.ID(), User: browser.ID()})
 	s.Commit(res)
@@ -429,10 +426,10 @@ func TestApplyCreatesAGroup(t *testing.T) {
 	equal(t, s.People[ownerID].Seq, int64(2))
 	equal(t, s.Seq, int64(2))
 
-	res = apply(t, table, s, held, browser, signed(browser, "note", 4, `,"text":"x"`))
+	res = apply(t, table, s, held, signed(browser, "note", 4, `,"text":"x"`))
 	equal(t, res.Answer, store.Outcome{OK: true, Num: 7})
 	// A second group create reaches its function, which answers it.
-	res = apply(t, table, s, held, browser, signed(browser, "group", 5, `,"op":"create","kind":"project"`))
+	res = apply(t, table, s, held, signed(browser, "group", 5, `,"op":"create","kind":"project"`))
 	equal(t, res.Answer, store.Outcome{OK: true})
 	equal(t, founder.Human, ownerID)
 }
@@ -457,7 +454,7 @@ func TestApplyInATransactionOfTheStore(t *testing.T) {
 	send := func() (res home.Result) {
 		err := db.Write(func(tx *store.Tx) error {
 			var err error
-			if res, err = table.Apply(s, disk(nil), tx, browser.ID(), env, now); err != nil {
+			if res, err = table.Apply(s, disk(nil), tx, env, now); err != nil {
 				return err
 			}
 			for _, w := range res.Writes {
@@ -560,7 +557,7 @@ func TestAddGivesAKeyOnce(t *testing.T) {
 	calls := 0
 	table := home.Table{}
 	table.Add("note", writeNote(&calls))
-	apply(t, table, group(t), receipts{}, browser, signed(browser, "note", 1, `,"text":"x"`))
+	apply(t, table, group(t), receipts{}, signed(browser, "note", 1, `,"text":"x"`))
 	equal(t, calls, 1)
 	defer func() { equal(t, recover(), any("home: two functions under note")) }()
 	table.Add("note", writeNote(&calls))
@@ -631,7 +628,7 @@ func TestCommitAppliesTheEntryOfADeviceRow(t *testing.T) {
 	table := home.Table{"note": writeNote(&calls)}
 	tablet, stranger := device(8), device(9)
 	send := func(by identity.Key, n byte) store.Outcome {
-		return apply(t, table, s, receipts{}, by, signed(by, "note", n, `,"text":"x"`)).Answer
+		return apply(t, table, s, receipts{}, signed(by, "note", n, `,"text":"x"`)).Answer
 	}
 	commit := func(rows ...proto.DeviceRow) {
 		res := home.Result{}
@@ -691,7 +688,7 @@ func TestAHookGetsACommittedResult(t *testing.T) {
 	})
 	s, calls := group(t), 0
 	s.Online[browser.ID()] = true
-	res := apply(t, home.Table{"note": writeNote(&calls)}, s, receipts{}, browser, signed(browser, "note", 1, `,"text":"x"`))
+	res := apply(t, home.Table{"note": writeNote(&calls)}, s, receipts{}, signed(browser, "note", 1, `,"text":"x"`))
 	s.Commit(res)
 	for _, hook := range after {
 		hook(s, res)

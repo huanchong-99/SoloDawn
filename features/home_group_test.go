@@ -134,7 +134,7 @@ func (w *homeGroupWorld) apply(by identity.Key, payload any) error {
 }
 
 func (w *homeGroupWorld) applyRaw(by identity.Key, payload string) error {
-	res, err := home.Commands.Apply(w.state, w.store, w.store, by.ID(), by.Sign(payload), w.now)
+	res, err := home.Commands.Apply(w.state, w.store, w.store, by.Sign(payload), w.now)
 	if err != nil {
 		return err
 	}

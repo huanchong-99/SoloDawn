@@ -196,7 +196,7 @@ func (w *homeHostEvWorld) sendStatus(by identity.Key, member, state, path, extra
 		`{"t":"member","n":%q,"ts":%d,"g":%q,"op":"status","id":%q,"state":%q,"path":%q,"usage":{}%s}`,
 		id, w.now.UnixMilli(), w.state.ID, member, state, path, extra,
 	)
-	res, err := home.Commands.Apply(w.state, w.disk, w.receipts, by.ID(), by.Sign(payload), w.now)
+	res, err := home.Commands.Apply(w.state, w.disk, w.receipts, by.Sign(payload), w.now)
 	if err != nil {
 		return err
 	}

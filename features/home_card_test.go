@@ -192,7 +192,7 @@ func (w *homeCardWorld) postApproval(aiName, command string) error {
 	if err != nil {
 		return err
 	}
-	if err := w.apply(w.devices["host"], w.devices["host"].Sign(string(raw))); err != nil {
+	if err := w.apply(w.devices["host"].Sign(string(raw))); err != nil {
 		return err
 	}
 	if w.answers[len(w.answers)-1].Answer.OK {
@@ -220,14 +220,14 @@ func (w *homeCardWorld) postDecision(optList string) error {
 		return err
 	}
 	w.decision = string(post.Nonce)
-	return w.apply(w.devices["host"], w.devices["host"].Sign(string(raw)))
+	return w.apply(w.devices["host"].Sign(string(raw)))
 }
 
 func (w *homeCardWorld) actCard(by identity.Key, msg, action, extra string) error {
 	payload := fmt.Sprintf(`{"t":"act","n":%q,"ts":%d,"g":%q,"msg":%q,"action":%q%s}`, w.freshNonce(), w.now.UnixMilli()-100, w.state.ID, msg, action, extra)
 	env := by.Sign(payload)
 	w.lastAct = env
-	return w.apply(by, env)
+	return w.apply(env)
 }
 
 func (w *homeCardWorld) attemptRefusal(attempt string) error {
@@ -243,8 +243,8 @@ func (w *homeCardWorld) attemptRefusal(attempt string) error {
 	}
 }
 
-func (w *homeCardWorld) apply(by identity.Key, env proto.Envelope) error {
-	res, err := home.Commands.Apply(w.state, w.disk, w.receipts, by.ID(), env, w.now)
+func (w *homeCardWorld) apply(env proto.Envelope) error {
+	res, err := home.Commands.Apply(w.state, w.disk, w.receipts, env, w.now)
 	if err != nil {
 		return err
 	}

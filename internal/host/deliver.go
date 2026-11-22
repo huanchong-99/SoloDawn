@@ -259,7 +259,7 @@ func syncOneGroup(ctx context.Context, h *Host, d *delivery, conn Home, device s
 		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: job.group, Since: job.since, StateOnly: true}
 	}
 	answer, err := conn.Request(ctx, build)
-	synced, syncErr := decodeSyncAnswer(answer, err, job.group)
+	synced, syncErr := decodeSyncAnswer(answer, err)
 	ok := syncErr == nil
 	if d.finishGroupSync(job, device, synced.Seq, ok) && ok {
 		d.wg.Go(func() { afterGroupState(h, d, job.group) })
@@ -267,7 +267,7 @@ func syncOneGroup(ctx context.Context, h *Host, d *delivery, conn Home, device s
 	return syncErr
 }
 
-func decodeSyncAnswer(answer json.RawMessage, err error, group string) (proto.Synced, error) {
+func decodeSyncAnswer(answer json.RawMessage, err error) (proto.Synced, error) {
 	if err != nil {
 		return proto.Synced{}, errHomeUnreachable
 	}
@@ -276,7 +276,7 @@ func decodeSyncAnswer(answer json.RawMessage, err error, group string) (proto.Sy
 		return proto.Synced{}, &Error{Code: refused.Err.Code, Message: refused.Err.Message}
 	}
 	var synced proto.Synced
-	if proto.Decode(answer, &synced) != nil || synced.Group != group {
+	if proto.Decode(answer, &synced) != nil {
 		return proto.Synced{}, errHomeUnreachable
 	}
 	return synced, nil
