@@ -30,7 +30,7 @@ does what and why. Step-by-step sequences are in `flows/`.
   safe (R-41). Permission questions come from the CLI; the node's only
   content check is the outbound secret check of R-137.
 - **C-11** For Git and the forge the node runs only `git`, `gh` and, from
-  step 2, a forge program its owner accepted for that group, each signed
+  step 2, the forge program a group's templates name, each signed
   in by the owner on that machine (R-137, widened 2026-11-20). It never
   reads, stores or passes on a token or credential, nor calls a forge API.
 
@@ -172,7 +172,9 @@ AI calling an AI on another machine is two ordinary messages through the home
   devices, so that signature is the owner's instruction (R-136). The
   decision of an approval is checked end to end as well: the host verifies
   the approver's own signature. From step 2 a home may belong to someone
-  else, and an item will also need the owner's signature for that task.
+  else; the host still takes its items, because members of a group trust
+  each other (owner's rules of 2026-11-21 and 2026-11-22;
+  `contracts/step-2/authority.md`).
 - **AI**: has no key. Its host signs for it. A message "from an AI" is
   signed by the device that runs it, which belongs to the AI's owner.
 - **The CLI's own sandbox is the security boundary for level 2.** The node
