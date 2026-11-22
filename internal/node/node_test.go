@@ -29,6 +29,7 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/rendezvous"
 	"github.com/huanchong-99/SoloDawn/internal/store"
 	"github.com/pion/turn/v5"
+	"github.com/pion/webrtc/v4"
 )
 
 func TestBrowserCommandsAndLogRotation(t *testing.T) {
@@ -914,4 +915,178 @@ func verifyStoredReceipt(t *testing.T, dbPath, signer, nonce string) {
 	}
 	mustNoErr(t, db.Write(read))
 	mustEqual(t, out, store.Outcome{OK: true})
+}
+
+type nodePTYTestDriver struct {
+	exe string
+}
+
+func (d nodePTYTestDriver) Start(context.Context, host.Launch) (host.Process, error) {
+	return nil, errors.New("unused structured start")
+}
+
+func (d nodePTYTestDriver) Interactive(host.Launch) ([]string, string, error) {
+	return []string{d.exe, "-test.run=^TestNodePTYHelperProcess$", "--", "node-pty-echo"}, "sess-node-pty", nil
+}
+
+func TestNodePTYHelperProcess(t *testing.T) {
+	if t == nil {
+		return
+	}
+	sep := slices.Index(os.Args, "--")
+	if sep < 0 || sep+1 >= len(os.Args) || os.Args[sep+1] != "node-pty-echo" {
+		return
+	}
+	fmt.Println("NODE-PTY-READY")
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err == nil {
+		fmt.Printf("ECHO:%s\n", strings.TrimRight(line, "\r\n"))
+	}
+	os.Exit(0)
+}
+
+func TestNodePTYChannelBridge(t *testing.T) {
+	dir := socketRoot(t)
+	n, err := openNode(t.Context(), dir)
+	mustNoErr(t, err)
+	t.Cleanup(n.Close)
+	browserKey := adoptTestBrowser(t, n)
+
+	exe, err := os.Executable()
+	mustNoErr(t, err)
+	host.Drivers["node-pty-drv"] = nodePTYTestDriver{exe: exe}
+	t.Cleanup(func() { delete(host.Drivers, "node-pty-drv") })
+
+	ptyDone := make(chan struct{}) // single reader: TestNodePTYChannelBridge
+	_, _, err = n.host.StartPTY("g1", "m1", "node-pty-drv", host.Launch{Folder: t.TempDir(), Level: 3}, func() {
+		close(ptyDone)
+	})
+	mustNoErr(t, err)
+
+	dc, recvCh := dialBrowserPTYChannel(t, n, browserKey, "pty:g1:m1")
+	waitPTYBytes(t, recvCh, "NODE-PTY-READY")
+	mustNoErr(t, dc.Send([]byte("hello-node\r")))
+	waitPTYBytes(t, recvCh, "ECHO:hello-node")
+	mustNoErr(t, dc.Close())
+	<-ptyDone
+}
+
+func dialBrowserPTYChannel(t *testing.T, n *nodeRuntime, browserKey identity.Key, label string) (*webrtc.DataChannel, <-chan []byte) {
+	t.Helper()
+	var iceServers []proto.ICEServer
+	mustNoErr(t, json.Unmarshal([]byte(startLoopbackTURN(t)), &iceServers))
+	toBrowser := make(chan proto.Envelope, 64) // single reader: candidate/answer pump below
+	route := peer.Route{
+		ID:   "pty-test",
+		ICE:  iceServers,
+		Send: func(_ context.Context, _ string, env proto.Envelope) error { toBrowser <- env; return nil },
+	}
+	att := &pairAttempt{
+		peer: proto.Pair{Key: browserKey.ID()}, link: PairLink{Expires: time.Now().Add(time.Hour).UnixMilli()},
+		cancel: func() {}, outcome: make(chan error, 1), routes: []peer.Route{route},
+	}
+	n.pairer.mu.Lock()
+	n.pairer.attempts[att] = true
+	n.pairer.mu.Unlock()
+
+	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{
+		ICEServers:         []webrtc.ICEServer{{URLs: iceServers[0].URLs, Username: iceServers[0].Username, Credential: iceServers[0].Credential}},
+		ICETransportPolicy: webrtc.ICETransportPolicyRelay,
+	})
+	mustNoErr(t, err)
+	t.Cleanup(func() { pc.Close() })
+	_, err = pc.CreateDataChannel("ctl", nil)
+	mustNoErr(t, err)
+	ptyDC, err := pc.CreateDataChannel(label, nil)
+	mustNoErr(t, err)
+	opened := make(chan struct{})   // single reader: dialBrowserPTYChannel
+	recvCh := make(chan []byte, 32) // single reader: waitPTYBytes
+	ptyDC.OnOpen(func() { close(opened) })
+	ptyDC.OnMessage(func(m webrtc.DataChannelMessage) { recvCh <- m.Data })
+
+	connID := string(sesID("pty-conn"))
+	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
+		if c != nil {
+			sendBrowserSignal(t.Context(), n.peer, route, browserKey, n.key.ID(), connID, proto.ICECandidate{
+				SignalHeader: browserSigHdr(n.key.ID(), connID, "ice"), Candidate: c.ToJSON().Candidate, MID: c.SDPMid,
+			})
+		}
+	})
+	offer, err := pc.CreateOffer(nil)
+	mustNoErr(t, err)
+	mustNoErr(t, pc.SetLocalDescription(offer))
+	mustNoErr(t, sendBrowserSignal(t.Context(), n.peer, route, browserKey, n.key.ID(), connID, proto.Offer{
+		SignalHeader: browserSigHdr(n.key.ID(), connID, "offer"), SDP: offer.SDP,
+	}))
+	go applyNodeSignals(t.Context(), pc, toBrowser)
+	<-opened
+	return ptyDC, recvCh
+}
+
+func browserSigHdr(to, connID, kind string) proto.SignalHeader {
+	return proto.SignalHeader{
+		PayloadHeader: proto.PayloadHeader{Type: kind, Nonce: proto.NewNonce(), Timestamp: time.Now().UnixMilli(), To: to},
+		Conn:          connID,
+	}
+}
+
+func sendBrowserSignal(ctx context.Context, p *peer.Peer, route peer.Route, key identity.Key, _, _ string, msg any) error {
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	env := key.Sign(string(raw))
+	envRaw, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
+	return p.Receive(ctx, route, proto.Route{Type: "from", Key: key.ID(), Env: envRaw})
+}
+
+func applyNodeSignals(ctx context.Context, pc *webrtc.PeerConnection, in <-chan proto.Envelope) {
+	var pending []webrtc.ICECandidateInit
+	answered := false
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case env := <-in:
+			answered, pending = applyOneNodeSignal(pc, env, answered, pending)
+		}
+	}
+}
+
+func applyOneNodeSignal(pc *webrtc.PeerConnection, env proto.Envelope, answered bool, pending []webrtc.ICECandidateInit) (bool, []webrtc.ICECandidateInit) {
+	var ans proto.Answer
+	if !answered && proto.Decode([]byte(env.Payload), &ans) == nil && ans.Type == "answer" {
+		pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: ans.SDP})
+		for _, c := range pending {
+			pc.AddICECandidate(c)
+		}
+		return true, nil
+	}
+	var ice proto.ICECandidate
+	if proto.Decode([]byte(env.Payload), &ice) == nil && ice.Type == "ice" {
+		init := webrtc.ICECandidateInit{Candidate: ice.Candidate, SDPMid: &ice.MID}
+		if !answered {
+			return false, append(pending, init)
+		}
+		pc.AddICECandidate(init)
+	}
+	return answered, pending
+}
+
+func waitPTYBytes(t *testing.T, recvCh <-chan []byte, sub string) {
+	t.Helper()
+	var buf strings.Builder
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+	for !strings.Contains(buf.String(), sub) {
+		select {
+		case b := <-recvCh:
+			buf.Write(b)
+		case <-timer.C:
+			t.Fatalf("timed out waiting for %q in %q", sub, buf.String())
+		}
+	}
 }
