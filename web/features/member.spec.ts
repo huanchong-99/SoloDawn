@@ -214,6 +214,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
                 level: 2,
                 state: 'working',
                 queued: 0,
+                watchers: [],
               },
             ],
           },
@@ -445,7 +446,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       And(
         'the computers read "workstation · group home", "laptop · direct" and "windows · relayed, limited"',
         () => {
-          const computers = all('.member .kv').map((dl) =>
+          const computers = all('.member > .kv:first-of-type').map((dl) =>
             dl.querySelectorAll('dd')[0].textContent!.replace(/\s+/g, ' ').trim(),
           );
           expect(computers).toEqual([
@@ -460,7 +461,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       And(
         'the accounts read "Personal subscription · takes orders from owner", "Team plan" and "API key"',
         () => {
-          const accounts = all('.member .kv').map((dl) =>
+          const accounts = all('.member > .kv:first-of-type').map((dl) =>
             dl.querySelectorAll('dd')[1].textContent!.replace(/\s+/g, ' ').trim(),
           );
           expect(accounts).toEqual([
@@ -569,7 +570,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           'waiting',
           'working',
         ]);
-        const codexComputer = all('.member .kv')[2]
+        const codexComputer = all('.member > .kv:first-of-type')[2]
           .querySelectorAll('dd')[0]
           .textContent!.replace(/\s+/g, ' ')
           .trim();

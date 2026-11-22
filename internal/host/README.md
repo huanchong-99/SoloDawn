@@ -85,11 +85,11 @@ Not in the seam: the one state per AI that others see (sessions.md, section 3), 
 
 ## Turns and instructions
 
-`turn.go` provides `Instructions` and `Compose` ([drivers.md](../../planning/contracts/drivers.md), sections 3 and 4).
+`turn.go` and `turn_info.go` provide `Instructions` and `Compose` ([drivers.md](../../planning/contracts/drivers.md) sections 3 and 4, [step-2/labels.md](../../planning/contracts/step-2/labels.md)).
 
 - `Instructions(s)` returns the embedded English prompt for `s` from `instructions/{group,task,review,secretary}.md` (`secretary.md` when `s.Secretary` is set, otherwise by `s.Kind`).
 - `Compose(h, s, kind, items)` formats `ItemsTurn` (from `items`) and `ReplacedTurn`, `ContinueTurn` and `HandbackTurn` (`items` nil), returning the turn text and `Turn{Kind, Thread, Depth, Jump}` (`N` is set later by `Sessions.SetTurn`).
-- Authority (`instruction` or `information`), speaker labels, and `decided` / `confirmed` outcomes come from `setting` key `owner` in `h.Store`, the `member` rows in `h.Rows`, and `msg.state`, never from message text, envelope re-verification, or `cause`.
+- Item header labels (`== <i of n> · <why> · …`) and carried message or card-decision lines (`-- from … · <label>`, with `from the home` for home-written `checks` and `system` rows) come from `setting` key `owner` in `h.Store`, the `member` rows (`account`, `allow`) in `h.Rows`, and `msg.state` / `body.to`, never from message text, envelope re-verification, or `cause`.
 - First task turns, review turns and `ReplacedTurn` fetch the brief (`FetchRow`), any style preset named by the brief (`FetchKind` `preset` in `turn_preset.go`, outside the 8 KiB note budget; review turns include only `Style preset: "<name>"`), the newest 100 notes up to 8 KiB (`FetchKind`), and up to 20 recent thread or main-line messages (`FetchThread`) through `fetchFrom(ctx, h, device, build)`. Because `Compose` reads `h.Store` with `Store.Write` and calls `Home.Request`, call it outside any `Store.Write` or `Sessions.Write` transaction.
 
 ## Drivers
@@ -251,15 +251,15 @@ The rules are in [mcp-tools.md](../../planning/contracts/mcp-tools.md) and [loca
 
 `join.go` implements `host.join`, `host.leave` and per-home connection tracking ([commands.md](../../planning/contracts/commands.md) sections 1.2 and 2, [datachannel.md](../../planning/contracts/datachannel.md) sections 4 and 7, [local.md](../../planning/contracts/local.md) sections 2 and 7).
 
-- **Registrations and startup.** From `init`, `join.go` registers `"host.join"` and `"host.leave"` in `Surface` and `"join"` in `Attached`. At node startup, after setting `h.Connect`, the caller invokes `h.EnsureHomeConnections()` so one persistent connection is opened per distinct home device named in `setting` `'homes'`.
-- **One connection per home.** `Part[joinPart](h)` keeps active `h.Connect` cancellation functions keyed by home device id, each derived from `context.Background()`. Reconciliation starts `h.Connect` once per distinct home needed by any stored `homes` entry or in-flight `host.join`, and cancels a home's context as soon as neither references it.
+- **Registrations and startup.** From `init`, `join.go` registers `"host.join"` and `"host.leave"` in `Surface` and `"join"` in `Attached`. At node startup, after setting `h.Connect`, the caller invokes `h.EnsureHomeConnections()` to connect to the homes of hosted groups.
+- **One connection per home.** `Part[joinPart](h)` keeps active `h.Connect` cancellation functions keyed by home device id, each derived from `context.Background()`. Reconciliation starts `h.Connect` once per distinct home needed by a hosted group or in-flight `host.join`, and cancels a home's context as soon as neither references it. `RecordHome` stores a home and its signalling URLs; for an already hosted group it also updates the sessions and resets group sync for the new home.
 - **`host.join` and `host.leave`.** `host.join` verifies the payload and declared `agent` account, connects to `home` and waits at most 15 s (or until `ctx` ends) for `h.Home(home)` before answering `home_unreachable`, obtains the `group` row from `h.Rows` or a coordinated `state_only` `sync` (`syncGroupState`), clones `projects/<group>/repo` with `EnsureGroupWorkspace`, sends `member add_ai` with the stored `approvers` setting, and atomically creates the dormant `GroupSession`, upserts `setting` `'homes'` and records `AuditSetting`. `host.leave` sends `member remove` first so a refusal leaves sessions and connections untouched, and on success ends all sessions of `(g, member)`, prunes `setting` `'homes'` when no local AI remains in `g`, records `AuditSetting`, and reconciles home connections.
 - **Lock order and channels.** `joinPart.syncMu` serializes connection reconciliation across `Store` reads; `joinPart.mu` is a leaf lock that guards only in-memory `joinPart` fields and never calls into `Host`, `Sessions`, `Rows`, `Store`, `Connect` or cancel functions. Each waiter channel in `joinPart.waiters` has a single reader, `joinWaitChannel` in `joinAwaitAttach`.
 
 # Talk and group state tools
 
-`tools_talk.go` registers `post`, `read_thread`, `list_members`, `list_tasks`, `note_put` and `note_list` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1 and 5).
-`post` and `note_put` run `CheckOutboundSecret` before signing or sending any command to the home.
+`tools_talk.go` registers `post`, `read_thread`, `list_members`, `list_tasks`, `note_put` and `note_list` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1 and 5), and `tools_kb.go` registers `kb_put` and `kb_search` for every session ([step-3/knowledge.md](../../planning/contracts/step-3/knowledge.md), section 5).
+`post`, `note_put` and `kb_put` (both `name` and `text`) run `CheckOutboundSecret` before signing or sending any command to the home.
 
 # Task and review tools
 

@@ -15,7 +15,7 @@ func hostState() HostState {
 		Agents: []HostAgent{
 			{"claude", "2.1.311", new("personal"), true, Caps{Day: &Cap{"turns", 200}, Task: &Cap{"usd", 12.5}},
 				Driver{[]string{"personal", "team", "api_key"}, "new"},
-				[]AgentGroup{{ID(group), ID(agent), 2, "working", ID(taskID), 1}}},
+				[]AgentGroup{{ID(group), ID(agent), 2, "working", ID(taskID), 1, []string{user}}}},
 			{"codex", "0.164.0", nil, false, Caps{},
 				Driver{[]string{"personal", "team", "api_key"}, "resume"},
 				[]AgentGroup{}},
@@ -37,6 +37,7 @@ func TestHostSurfaceGoldens(t *testing.T) {
 	state.Relay = nil
 	state.Agents[0].Groups[0].State, state.Agents[0].Groups[0].Queued = "offline", 3
 	state.Settings.Approvers = []string{user}
+	state.Agents[0].Groups[0].Watchers = []string{}
 	golden(t, "host-info-push", HostInfoPush{"host.info", state})
 
 	// The next page after rows down to 413: the rows whose id is lower.
@@ -57,6 +58,8 @@ func TestHostSettingsAndTakeoverGoldens(t *testing.T) {
 	golden(t, "agent-set", AgentSet{to("agent.set"), "codex", "personal"})
 	golden(t, "perm-set", PermSet{to("perm.set"), "claude", ID(group), 3})
 	golden(t, "pair-browser", to("pair.browser"))
+	golden(t, "watch-start", WatchStart{Request{"watch.start", 7}, ID(group), ID(agent)})
+	golden(t, "watch-end", WatchEnd{to("watch.end"), ID(group), ID(agent), user})
 	golden(t, "host-offline", to("host.offline"))
 	golden(t, "host-online", to("host.online"))
 	golden(t, "takeover-start", TakeoverStart{Takeover{to("takeover.start"), ID(group), ID(agent)}, ID(taskID)})

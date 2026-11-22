@@ -200,6 +200,8 @@ const Limits = v.object({
   idle_notice_minutes: int,
 });
 
+const ForgeTemplates = v.object({ push: strs, open: strs, checks: strs, merge: strs });
+
 export const GroupRow = v.object({
   r: v.literal('group'),
   ...RowHeader,
@@ -208,6 +210,7 @@ export const GroupRow = v.object({
   repo: v.optional(str),
   base: str,
   forge: str,
+  templates: v.optional(ForgeTemplates),
   home: str,
   secretary: v.optional(str),
   checks: strs,
@@ -369,6 +372,8 @@ const DecisionBody = v.object({
 
 const CallBody = v.object({ to: str, depth: int, wait: bool });
 const ConfirmBody = v.object({ what: str, ai: str, to: strs });
+const BulletinBody = v.object({ from: str, group: str, ai: str });
+const BulletinSigned = v.object({ from: Id, group: str, ai: str });
 const ReportBody = v.object({
   commit: str,
   files: int,
@@ -471,6 +476,7 @@ export const MsgRow = v.variant('kind', [
   message('task', v.object({ task: str }), noCard),
   message('approval', ApprovalBody, ApprovalState),
   message('confirm', ConfirmBody, ConfirmState),
+  message('bulletin', BulletinBody, noCard),
   message('decision', DecisionBody, DecisionState),
   message(
     'summary',
@@ -613,7 +619,7 @@ export type CmdResult = v.InferOutput<typeof CmdResult>;
 
 export const ErrorResponse = v.object({
   re: int,
-  err: v.object({ code: str, msg: str }),
+  err: v.object({ code: str, msg: str, home: optionalText }),
 });
 export type ErrorResponse = v.InferOutput<typeof ErrorResponse>;
 
@@ -630,11 +636,12 @@ export const GroupCreate = v.object({
   op: v.literal('create'),
   name: str,
   kind: str,
-  repo: str,
+  repo: optionalText,
   base: str,
   forge: str,
   checks: strs,
   member_name: str,
+  templates: v.optional(ForgeTemplates),
 });
 export type GroupCreate = v.InferOutput<typeof GroupCreate>;
 
@@ -648,6 +655,7 @@ export const GroupSet = v.object({
   pass_foundation: optionalInt,
   limits: v.optional(Limits),
   secretary: v.optional(Id),
+  templates: v.optional(ForgeTemplates),
 });
 export type GroupSet = v.InferOutput<typeof GroupSet>;
 
@@ -750,6 +758,7 @@ export const Post = v.variant('kind', [
   post('summary', EmptyBody),
   post('approval', ApprovalBody),
   post('confirm', ConfirmSigned),
+  post('bulletin', BulletinSigned),
   post('decision', DecisionBody),
   post('call', CallBody),
   post('report', ReportBody),
@@ -974,6 +983,17 @@ export type TakeoverStart = v.InferOutput<typeof TakeoverStart>;
 export const TakeoverEnd = v.object({ t: v.literal('takeover.end'), ...takeover });
 export type TakeoverEnd = v.InferOutput<typeof TakeoverEnd>;
 
+export const WatchStart = v.object({ t: v.literal('watch.start'), id: int, g: Id, member: Id });
+export type WatchStart = v.InferOutput<typeof WatchStart>;
+export const WatchEnd = v.object({
+  t: v.literal('watch.end'),
+  ...HostCommand,
+  g: Id,
+  member: Id,
+  user: str,
+});
+export type WatchEnd = v.InferOutput<typeof WatchEnd>;
+
 // The host surface (datachannel.md section 7): what the owner's browser reads from a node.
 
 export const HostInfoRequest = v.object({ t: v.literal('host.info'), id: int });
@@ -1016,6 +1036,7 @@ const HostState = {
           state: str,
           task: v.optional(Id),
           queued: int,
+          watchers: strs,
         }),
       ),
     }),
@@ -1222,6 +1243,7 @@ export const AnswerOf = {
   cmd: CmdResult,
   'host.info': HostInfo,
   audit: AuditAnswer,
+  'watch.start': CmdResult,
 } as const;
 export type RequestType = keyof typeof AnswerOf;
 export type AnswerTo<T extends RequestType> = v.InferOutput<(typeof AnswerOf)[T]>;
@@ -1272,6 +1294,7 @@ export interface Ctl {
   request(req: Ask<Cmd>): Promise<AnswerTo<'cmd'> | ErrorResponse>;
   request(req: Ask<HostInfoRequest>): Promise<AnswerTo<'host.info'> | ErrorResponse>;
   request(req: Ask<Audit>): Promise<AnswerTo<'audit'> | ErrorResponse>;
+  request(req: Ask<WatchStart>): Promise<AnswerTo<'watch.start'> | ErrorResponse>;
   send?(frame: Devlog | PTYResize): void;
   channel?(label: string): PtyChannel | undefined;
 }
