@@ -269,7 +269,7 @@ device id. Receipts apply as for home commands.
 | `t` | Fields | Effect |
 | --- | --- | --- |
 | `agent.set` | `agent`, `account` | declares the account type (`personal`, `team` or `api_key`, else `bad_request`) of a CLI found on this machine (`claude` or `codex`, else `bad_request`; `conflict` when not found here; R-50); sets `login_ok` back to `true` in `host.info` (`flows/agent-turn.md` E) and writes audit `setting` (`account <account>`); required before the AI can join a group |
-| `perm.set` | `agent`, `g`, `level` (1, 2, 3), `repo_config` (bool) | postponed after 1.0 (no level control in 1.0): permission level for that AI's sessions in that project (R-40), and whether repository-supplied AI configuration is loaded (R-45; for which sessions: `contracts/drivers.md` 1.1, 1.2); takes effect the next time a session's process starts |
+| `perm.set` | `agent`, `g`, `level` (1, 2, 3) | postponed after 1.0 (no level control in 1.0): permission level for that AI's sessions in that project (R-40); takes effect the next time a session's process starts |
 | `settings.set` | any of `retention_days`, `idle_minutes`, `max_open`, `default_level`, `all_level3`, `approvers`, `caps` | postponed after 1.0 (with `U-12`): node settings; for `approvers` the node sends `member set` with them for each of its AIs to that AI's home |
 | `host.join` | `g`, `home`, `agent`, `name`, `secretary` | the node connects to `home`, clones the project if this node has no clone of it yet (R-11), and sends `member add_ai` |
 | `host.leave` | `g`, `agent` | the node sends `member remove`; if the home accepts it, the AI's sessions in that group are closed (it is refused while the AI has unfinished tasks) |

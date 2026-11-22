@@ -106,9 +106,11 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 - **R-43** `[S1]` Approval requests come from the CLI's own permission
   interface. The platform never reads terminal output to detect them.
 - **R-44** `[S2]` Work a colleague assigns to my AI runs at level 2 at most.
-- **R-45** `[S1]` AI configuration shipped inside a repository (plugins,
-  hooks, project MCP servers, the project's own instruction file) is not
-  loaded by default. The owner may enable it per trusted project (Q-24).
+- **R-45** `[S1]` By the owner's decision of 2026-11-22, AI configuration
+  shipped inside a repository (plugins, hooks, project MCP servers, the
+  project's own instruction file) is always loaded in task and review
+  sessions and never loaded in group sessions (`contracts/drivers.md` 1.1,
+  1.2; `risks.md` Q-24, K-25). Add only repositories you trust.
 
 ## Whose instructions an AI follows
 
