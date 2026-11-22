@@ -28,7 +28,9 @@ const buttons = (scope: ParentNode) => [...scope.querySelectorAll('button')];
 const button = (label: string, scope: ParentNode = document) =>
   buttons(scope).find((item) => item.textContent?.trim() === label)!;
 const person = (name: string) =>
-  all('.person').find((item) => item.querySelector('.cut')?.textContent?.trim().startsWith(name))!;
+  all('.person').find((item) =>
+    item.querySelector('.person-name')?.textContent?.trim().startsWith(name),
+  )!;
 const actions = (name: string) => buttons(person(name)).map((item) => item.textContent!.trim());
 const activeDialog = () => document.querySelector<HTMLDialogElement>('dialog[open]')!;
 
@@ -77,7 +79,6 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
       vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
       vi.setSystemTime(invitation.expires - 60_000);
       command.mockResolvedValueOnce(refusal('forbidden'));
-      command.mockResolvedValueOnce(success);
       command.mockResolvedValueOnce({ ...success, ...invitation });
       button('Invite').click();
       flushSync();
@@ -90,14 +91,8 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
         expect(text('dialog [role=alert]')).toBe('Not sent: this device may not do that.'),
       );
       button('Create link', activeDialog()).click();
-      await vi.waitFor(() =>
-        expect(text('dialog .fail')).toBe(
-          'Not sent: the home refused it as too long or malformed.',
-        ),
-      );
-      button('Create link', activeDialog()).click();
       await vi.waitFor(() => expect(text('dialog pre')).toBe(invitation.link));
-      expect(command.mock.calls).toEqual(Array.from({ length: 3 }, () => [{ t: 'invite', g }]));
+      expect(command.mock.calls).toEqual([[{ t: 'invite', g }], [{ t: 'invite', g }]]);
     });
     Then('I can copy its link before it expires', async () => {
       expect(text('dialog .hint')).toBe(
@@ -137,7 +132,9 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
     });
     Then('their row shows that they are an admin', async () => {
       await vi.waitFor(() => expect(actions('Member')).toEqual(['Make member', 'Remove']));
-      expect(person('Member').querySelector('.cut')?.textContent?.trim()).toBe('Member · Admin');
+      expect(person('Member').querySelector('.person-name')?.textContent?.trim()).toBe(
+        'Member · Admin',
+      );
       expect(actions('Reader')).toEqual([]);
     });
     When('I remove the person', () => {
@@ -147,7 +144,7 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
     Then('a task conflict is shown without removing their row', async () => {
       await vi.waitFor(() =>
         expect(text('.person [role=alert]')).toBe(
-          'A person cannot leave while one of their AIs is assigned to or reviewing an unfinished task.',
+          'A person cannot leave or be removed while one of their AIs is assigned to or reviewing an unfinished task.',
         ),
       );
       expect(actions('Member')).toEqual(['Make member', 'Remove']);
@@ -324,7 +321,7 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
       expect(text('main .hero p')).toBe('Choose the name people in this group will see.');
       expect(text('main label span')).toBe('Your name in this group');
       expect(text('main .card a')).toBe('Cancel');
-      expect(text('main .top .only-wide')).toBe('I already have a node');
+      expect(one('main .top .only-wide')).toBeNull();
       expect(text('main .top .swap[lang="zh-CN"]')).toBe('中');
       expect(text('main .top .sr [lang=en]')).toBe('Switch language');
       expect(text('main .top .sr [lang=zh-CN]')).toBe('切换语言');

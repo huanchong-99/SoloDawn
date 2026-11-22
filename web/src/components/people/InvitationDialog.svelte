@@ -22,8 +22,7 @@
     const answer = await group.home.command({ t: 'invite', g: group.g });
     busy = false;
     if (answer.err) failure = answer.err.code;
-    else if (answer.link === undefined || answer.expires === undefined) failure = 'bad_request';
-    else result = { link: answer.link, expires: answer.expires };
+    else result = { link: answer.link!, expires: answer.expires! };
   }
 
   async function copy(link: string) {

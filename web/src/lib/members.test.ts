@@ -177,7 +177,7 @@ describe('member lists, roles and addDisabledReason', () => {
     expect(addDisabledReason(noInfo.group, [])).toBeUndefined();
 
     const regularMember = makeGroup({ role: 'member', online: true, withInfo: true });
-    expect(addDisabledReason(regularMember.group, [ownedOnline])).toBeUndefined();
+    expect(addDisabledReason(regularMember.group, [guestOnline, ownedOnline])).toBeUndefined();
     const nonMember = makeGroup({ role: 'none', online: true, withInfo: true });
     expect(addDisabledReason(nonMember.group, [ownedOnline])).toBe(
       'Only group members can add an AI.',
@@ -572,6 +572,8 @@ describe('AI status and path projections', () => {
     expect(pathLabel(mk('working', 'direct'))).toBe('direct');
     expect(pathLabel(mk('working', 'relay'))).toBe('relayed, limited');
     expect(pathLabel(mk('working', 'mesh'))).toBe('mesh');
+    prefs.lang = 'zh-CN';
+    expect(pathLabel(mk('working', 'direct'))).toBe('直连');
   });
 
   it('projects usageMeter from the rate-limit window only', () => {
@@ -629,6 +631,12 @@ describe('AI status and path projections', () => {
 
     expect(
       terminalDisabledReason(
+        netOf([], () => undefined),
+        ai,
+      ),
+    ).toBe('Computer offline');
+    expect(
+      terminalDisabledReason(
         netOf([offlineHost], () => undefined),
         offlineAiHost,
       ),
@@ -673,6 +681,12 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
         host: 'dev-2',
         cli: 'codex',
       }),
+      row<p.AIMemberRow>('row-member-ai', {
+        id: 'elsewhere',
+        g: gid,
+        host: 'dev-3',
+        cli: 'codex',
+      }),
     ]);
 
     const baseInfo = p.decode(p.HostInfo, goldens['host-info-answer']);
@@ -713,7 +727,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
               account: null,
               login_ok: false,
               caps: {},
-              groups: [],
+              groups: [{ g: 'other-group', member: 'm2', level: 3, state: 'working', queued: 0 }],
             },
           ],
         },

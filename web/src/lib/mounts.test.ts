@@ -1,6 +1,6 @@
 import type { Component } from 'svelte';
 import { describe, expect, it } from 'vitest';
-import MemberPanel from '../components/people/MemberPanel.svelte';
+import MemberPanel from '../components/member/MemberPanel.svelte';
 import { card, cards, gather, mounts, points, side } from './mounts.svelte';
 import { files } from './mounts.glob';
 
@@ -62,7 +62,7 @@ describe('gather', () => {
 
   it('mounts the people panel in the chat sidebar', () => {
     expect(mounts['chat.side']).toContainEqual({
-      area: 'people',
+      area: 'member',
       order: 10,
       component: MemberPanel,
     });

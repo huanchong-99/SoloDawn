@@ -15,7 +15,7 @@
   "people.role.member": "Make member",
   "people.remove": "Remove",
   "people.leave": "Leave",
-  "people.conflict": "A person cannot leave while one of their AIs is assigned to or reviewing an unfinished task.",
+  "people.conflict": "A person cannot leave or be removed while one of their AIs is assigned to or reviewing an unfinished task.",
   "people.join.badge": "Group invitation",
   "people.join.body": "Choose the name people in this group will see.",
   "people.join.name": "Your name in this group",

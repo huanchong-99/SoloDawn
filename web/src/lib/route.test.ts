@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { href, pages, parse, routes, tabs } from './route';
+import { href, pages, parse, routes, tabs } from './route.svelte';
 
 describe('the table', () => {
   it('has the design pages and invitation entry point', () => {

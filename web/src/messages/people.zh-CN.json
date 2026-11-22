@@ -15,7 +15,7 @@
   "people.role.member": "设为普通成员",
   "people.remove": "移除",
   "people.leave": "退出",
-  "people.conflict": "如果成员的 AI 仍在负责或评审未完成的任务，该成员无法退出群聊。",
+  "people.conflict": "如果成员的 AI 仍在负责或评审未完成的任务，该成员不能退出，也不能被移除。",
   "people.join.badge": "群聊邀请",
   "people.join.body": "请选择你在此群聊中显示的名字。",
   "people.join.name": "你在此群聊中的名字",

@@ -18,9 +18,9 @@
   import { endTakeover, hostHomeOf } from '../../lib/terminal.svelte';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
-  import AddAI from '../member/AddAI.svelte';
-  import InvitationDialog from './InvitationDialog.svelte';
-  import PersonActions from './PersonActions.svelte';
+  import InvitationDialog from '../people/InvitationDialog.svelte';
+  import PersonActions from '../people/PersonActions.svelte';
+  import AddAI from './AddAI.svelte';
 
   /** The member column of a group's chat: AI member cards, people, and the add-AI dialog. */
   let { group, net }: { group: Group; net: Net } = $props();
@@ -37,7 +37,7 @@
 <div class="members">
   <div class="head">
     <div class="row">
-      <h2 class="sec-title grow">{`${t('member.ai')} · ${ais.length}`}</h2>
+      <h2 class="sec-title grow"><span>{t('member.ai')}</span> · <span>{ais.length}</span></h2>
       <button
         class="btn btn-sm"
         onclick={() => (adding = true)}
@@ -71,18 +71,20 @@
         </span>
         <div class="grow">
           <h3>
-            {ai.name}{#if owner}{' '}<span class="owner">{`· ${owner}`}</span>{/if}
+            {ai.name}{#if owner}{' '}<span class="owner">· <span>{owner}</span></span>{/if}
           </h3>
           <p class="st" data-st={status.st}><i></i><span>{status.text}</span></p>
         </div>
       </header>
       <dl class="kv">
         <dt>{t('member.computer')}</dt>
-        <dd>{`${ai.host_name} `}<span class="muted">{`· ${pathLabel(ai)}`}</span></dd>
+        <dd>
+          <span>{ai.host_name}</span> <span class="muted">· <span>{pathLabel(ai)}</span></span>
+        </dd>
         <dt>{t('member.account')}</dt>
         <dd>
           {accountLabel(ai.account)}{#if ai.account === 'personal'}{' '}<span class="muted">
-              {`· ${t('member.account.personal.note')}`}
+              · <span>{t('member.account.personal.note')}</span>
             </span>{/if}
         </dd>
       </dl>
@@ -135,7 +137,9 @@
   {/each}
 
   <div class="row people-head">
-    <h2 class="sec-title grow">{`${t('member.people')} · ${humans.length}`}</h2>
+    <h2 class="sec-title grow">
+      <span>{t('member.people')}</span> · <span>{humans.length}</span>
+    </h2>
     {#if isAdmin(group)}
       <button
         type="button"
@@ -150,15 +154,15 @@
   <ul class="people">
     {#each humans as person (person.id)}
       {@const tags = personTags(group, person)}
-      <li class="row person">
+      <li class="person">
         <Avatar id={person.user} name={person.name} />
-        <span class="grow cut">
-          {person.name}{#if tags}{' '}<span class="muted">{`· ${tags}`}</span>{/if}
+        <span class="person-name grow">
+          {person.name}{#if tags}{' '}<span class="muted">· <span>{tags}</span></span>{/if}
         </span>
         <span class="st" data-st={person.online ? 'ok' : 'offline'}>
           <i></i>{t(person.online ? 'member.online' : 'member.offline')}
         </span>
-        <PersonActions {group} {person} />
+        <div class="person-actions row"><PersonActions {group} {person} /></div>
       </li>
     {/each}
   </ul>
@@ -270,11 +274,24 @@
     margin-top: var(--sp-2);
   }
   .people {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) max-content;
   }
   .person {
-    flex-wrap: nowrap;
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    align-items: center;
+    gap: var(--sp-2);
     padding: 6px 0;
+  }
+  .person-name {
+    overflow-wrap: anywhere;
+  }
+  .person-actions {
+    grid-column: 2 / -1;
+  }
+  .person-actions:empty {
+    display: none;
   }
 </style>

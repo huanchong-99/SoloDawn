@@ -5,7 +5,7 @@ import { JoinError, readInvitation } from '../src/lib/join';
 import { goldens } from '../src/lib/mock';
 import type { Net, Source } from '../src/lib/net.svelte';
 import { prefs } from '../src/lib/prefs.svelte';
-import { href } from '../src/lib/route';
+import { href } from '../src/lib/route.svelte';
 import { browser, example, owner, TestHome } from './home';
 import { all, closePage, fill, go, one, openPage, text } from './page';
 
@@ -116,7 +116,10 @@ it.each([
       ['Admin', 'admin'],
     ]) {
       if (target === 'owner' && role === 'owner') continue;
-      home.write(g, example('row-member-human', { id: name, user: name, g, name, role: target }));
+      home.write(
+        g,
+        example('row-member-human', { id: name, user: name, g, name, role: target, online: true }),
+      );
     }
     const client = browser(home);
     homes.push(client.store);
@@ -124,11 +127,17 @@ it.each([
     openPage(href('chat', { g }));
     const row = (name: string) =>
       all('.person').find((row) =>
-        row.querySelector('.cut')?.textContent?.trim().startsWith(name),
+        row.querySelector('.person-name')?.textContent?.trim().startsWith(name),
       )!;
     const actions = (name: string) =>
-      [...row(name).querySelectorAll('button')].map((b) => b.textContent!.trim());
+      [...row(name).querySelectorAll(':scope > .person-actions > button')].map((b) =>
+        b.textContent!.trim(),
+      );
     await vi.waitFor(() => expect(row('Reader')).toBeDefined());
+    expect(row('Admin').querySelector(':scope > .person-name')?.textContent?.trim()).toBe(
+      'Admin · Admin',
+    );
+    expect(row('Admin').querySelector(':scope > .st')?.textContent?.trim()).toBe('Online');
     expect(actions('Reader')).toEqual(own);
     expect(actions('Member')).toEqual(member);
     expect(actions('Admin')).toEqual(admin);
@@ -143,7 +152,8 @@ it('renders the join heading, explanatory text, and bilingual and theme controls
   expect(text('main .badge')).toBe('Group invitation');
   expect(text('main h1')).toBe('Join a group');
   expect(text('main .hero p')).toBe('Choose the name people in this group will see.');
-  expect(text('main .top .only-wide')).toBe('I already have a node');
+  expect(one('main .wrap.single > form.card')).not.toBeNull();
+  expect(one('main .top .only-wide')).toBeNull();
   expect(text('main .top .swap[lang="zh-CN"]')).toBe('中');
   expect(text('main .top .sr [lang=en]')).toBe('Switch language');
   expect(text('main .top .sr [lang=zh-CN]')).toBe('切换语言');
