@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/SherClockHolmes/webpush-go"
-	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
@@ -33,23 +32,21 @@ func init() {
 const (
 	wpushTitleLimit = 80
 	wpushTTL        = 86400
-	wpushSubscriber = "https://solodawn.example"
+	wpushWindow     = 5 * time.Second
+	wpushSubscriber = "https://github.com/huanchong-99/SoloDawn"
 )
 
 var (
 	wpushExtractors = map[string]func(*State, proto.MsgRow) wpushEvent{
 		"approval": wpushApproval, "decision": wpushDecision, "brief": wpushBrief, "summary": wpushSummary,
 	}
-	wpushMu     sync.Mutex
-	wpushHomes  = map[string]*wpushHome{}
-	wpushWindow = 5 * time.Second
-	wpushClient = &http.Client{Timeout: wpushWindow}
+	wpushMu    sync.Mutex
+	wpushHomes = map[string]*wpushHome{}
 )
 
 type wpushHome struct {
 	subs map[string]wpushSub
 	loop *Loop
-	wg   sync.WaitGroup
 }
 
 type wpushSub struct {
@@ -129,10 +126,7 @@ func wpushReadSubs(tx *store.Tx, dst map[string]wpushSub) error {
 	return rows.Err()
 }
 
-func wpushCmd(s *State, c Command) (Result, *Refusal) {
-	if c.Who.AI != "" || !wpushBrowser(s.Logs[c.Who.User], c.Who.Device) {
-		return Result{}, &Refusal{"forbidden", "only a browser of a member may set its push subscription"}
-	}
+func wpushCmd(_ *State, c Command) (Result, *Refusal) {
 	var off proto.PushOff
 	if c.Decode(&off) == nil {
 		return Result{Writes: []Write{wpushDrop{device: c.Who.Device}}}, nil
@@ -143,21 +137,6 @@ func wpushCmd(s *State, c Command) (Result, *Refusal) {
 	}
 	sub := wpushSub{device: c.Who.Device, user: c.Who.User, sub: on.Sub, vapid: on.VAPID, events: slices.Clone(on.On)}
 	return Result{Writes: []Write{wpushPut{sub: sub}}}, nil
-}
-
-func wpushBrowser(log *identity.Log, device string) bool {
-	if log == nil || !log.Valid(device) {
-		return false
-	}
-	kind := ""
-	for _, env := range log.Entries {
-		var e proto.DeviceChange
-		proto.Decode([]byte(env.Payload), &e)
-		if e.Device == device {
-			kind = e.Kind
-		}
-	}
-	return kind == "browser"
 }
 
 func wpushAfter(s *State, res Result) {
@@ -278,37 +257,26 @@ func wpushEligible(s *State, sub wpushSub, ev wpushEvent) bool {
 	return !s.Online[sub.device] &&
 		slices.Contains(sub.events, ev.kind) &&
 		slices.Contains(ev.users, sub.user) &&
-		s.human(sub.user) != "" &&
-		wpushBrowser(s.Logs[sub.user], sub.device)
+		s.user(sub.device) == sub.user
 }
 
 func wpushSend(s *State, ev wpushEvent, payload []byte) {
 	wpushMu.Lock()
 	h := wpushFor(s.Home)
 	loop, targets := h.loop, wpushTargets(s, h.subs, ev)
-	h.wg.Add(len(targets))
-	if loop != nil {
-		loop.wg.Add(len(targets))
-	}
+	loop.wg.Add(len(targets))
 	wpushMu.Unlock()
 	for _, sub := range targets {
-		go wpushRun(h, loop, sub, payload)
+		go wpushDeliver(h, loop, sub, payload)
 	}
-}
-
-func wpushRun(h *wpushHome, loop *Loop, sub wpushSub, payload []byte) {
-	defer h.wg.Done()
-	if loop != nil {
-		defer loop.wg.Done()
-	}
-	wpushDeliver(h, loop, sub, payload)
 }
 
 func wpushDeliver(h *wpushHome, loop *Loop, sub wpushSub, payload []byte) {
+	defer loop.wg.Done()
 	ctx, cancel := context.WithTimeout(context.Background(), wpushWindow)
 	defer cancel()
 	dst := &webpush.Subscription{Endpoint: sub.sub.Endpoint, Keys: webpush.Keys{P256dh: sub.sub.P256DH, Auth: sub.sub.Auth}}
-	opts := &webpush.Options{HTTPClient: wpushClient, Subscriber: wpushSubscriber, TTL: wpushTTL, VAPIDPublicKey: sub.vapid.Public, VAPIDPrivateKey: sub.vapid.Private}
+	opts := &webpush.Options{Subscriber: wpushSubscriber, TTL: wpushTTL, VAPIDPublicKey: sub.vapid.Public, VAPIDPrivateKey: sub.vapid.Private}
 	resp, err := webpush.SendNotificationWithContext(ctx, payload, dst, opts)
 	if err != nil {
 		return
@@ -325,9 +293,6 @@ func wpushEvict(h *wpushHome, loop *Loop, stale wpushSub) {
 		delete(h.subs, stale.device)
 	}
 	wpushMu.Unlock()
-	if loop == nil {
-		return
-	}
 	drop := func(tx *store.Tx) error {
 		_, err := tx.Exec("DELETE FROM push_sub WHERE device = ? AND sub = ?", stale.device, string(briefJSON(stale.sub)))
 		return err

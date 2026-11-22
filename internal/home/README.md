@@ -50,6 +50,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | send a host its inbox items, on every `hello` | `loop.Inbox(conn)` |
 | record a host's `ack` | `loop.Ack(conn, req)` |
 | run the timers by hand, or tell the home of an event | `loop.Tick(now)`, `loop.Event(name, event)` |
+| expire old store data in a transaction | `Retain(tx, now)` |
 | mark a disconnected host's AIs offline | `HostOfflineEvent`, fired by `Loop` when a device's last `Inbox` connection ends |
 | move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
 | push to a client | the `Client` interface |
@@ -185,9 +186,10 @@ The checks and reviews (`cmd_review.go`) take the names that start with `rev`, t
 their test functions start with `TestReviewCmd`. The merges and summaries (`cmd_merge.go`) take the
 names that start with `mrg`, their tests too, and their test functions start with `TestMerge`.
 Host events (`cmd_hostev.go`) take the names that start with `hev`, their tests too, and their test
-functions start with `TestHostEv`; the file exports `HostOfflineEvent`. Web Push (`webpush.go`)
-takes the names that start with `wpush`, its tests too, and its test functions start with
-`TestWebPush`.
+functions start with `TestHostEv`; the file exports `HostOfflineEvent`.
+Retention (`retention.go`) takes the names that start with `ret`, exports `Retain`, and its test
+functions start with `TestRetention`. Web Push (`webpush.go`) takes the names that start with
+`wpush`, its tests too, and its test functions start with `TestWebPush`.
 
 ## The run loop
 
@@ -659,28 +661,42 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
   `Pending` and the newest 50 main-line messages (`PageThread(nil, 0, 50)`) without duplicates in
   increasing `seq` order.
 
+## Retention
+
+`retention.go` exports `Retain(tx, now)`, which reads `retention_days` from SQLite `setting`
+(defaulting to `90` when absent) and calls `tx.Retain(time.UnixMilli(now), days)`
+([storage](../../planning/contracts/storage.md) sections 2 and 4). The daily node schedule in
+`internal/node` calls `Retain` once a day per node.
+
+- **What remains.** In one transaction the store raises `grp.purged` to the highest `seq` among
+  aged-out `gone` markers before deleting those markers, keeps `pending` cards, keeps `note` and
+  `review` rows (`keep = 1`), and deletes older messages and final (`merged` and `cancelled`) task
+  rows whose `mt` is before the cutoff.
+- **In-memory tasks.** After retention deletes rows from the store, finished tasks stay in the
+  in-memory state (`State.Tasks`) until restart ([issues](../../issues.md)). `grp.num` keeps the
+  highest task number given out, so task numbers are not reused after restart.
+
 ## Web Push
 
 `webpush.go` holds the `push` command, the `"push"` hook of `After` and the loop's startup and
 shutdown hooks ([commands](../../planning/contracts/commands.md) 1.7;
 [storage](../../planning/contracts/storage.md) section 1, `push_sub`):
 
-- **Command.** `wpushCmd` accepts only a `browser` device of a member speaking without `as`, else
-  `forbidden`. A payload that decodes as `proto.PushOff` (`off: true`) deletes that device's row
-  from `push_sub`; any other payload decodes as `proto.PushOn` (`bad_request` otherwise) and writes
-  `push_sub` through `Result.Writes`.
+- **Command.** A payload that decodes as `proto.PushOff` (`off: true`) deletes the signing device's
+  row from `push_sub`; any other payload decodes as `proto.PushOn` (`bad_request` otherwise) and
+  writes `push_sub` through `Result.Writes`.
 - **Memory, startup and shutdown.** Subscriptions and the active `*Loop` are held per `State.Home`
   under a leaf mutex (`wpushMu`, which never calls `Loop`, `Store` or HTTP). `StartLoop` loads
   `push_sub` from `LoopConfig.Store` for `LoopConfig.Home` before starting group goroutines,
   `After["push"]` updates memory only after transaction commit so a rolled-back write leaves memory
-  unchanged, and `Loop.Close` waits for in-flight Web Push deliveries before returning.
+  unchanged, and `Loop.Close` drains in-flight Web Push deliveries on `Loop.wg` before detaching.
 - **Eligibility and delivery.** For each newly created `proto.MsgRow` (`Pos == Seq`), `After["push"]`
   extracts one reminder kind (`approval`, `decision`, `brief`, `done` from `summary`, or `mention`
-  from any other message kind), filters for offline subscribed browsers of concerned current group
-  members whose device is still a valid browser in `State.Logs`, encrypts `proto.Reminder` JSON
-  (without HTML escaping) via RFC 8291 (`webpush-go`), and sends each request in its own goroutine
-  with a 5 s timeout. A `404` or `410` response drops that subscription in memory and, when running
-  on a `Loop`, from `push_sub` if not replaced since.
+  from any other message kind), filters for offline subscribed devices of concerned group members
+  that remain valid in `State.Logs`, encrypts `proto.Reminder` JSON (without HTML escaping) via
+  RFC 8291 (`webpush-go`), and sends each request in its own goroutine with a 5 s context timeout.
+  A `404` or `410` response drops that subscription in memory and from `push_sub` if not replaced
+  since.
 
 ## Known limitations
 
@@ -689,6 +705,8 @@ shutdown hooks ([commands](../../planning/contracts/commands.md) 1.7;
   summaries, the host events, and `push`: the remaining command files (including thread round
   counting in HM-13) are separate units ([units](../../planning/steps/parallel-plan-units.md),
   section 2).
+- After retention deletes rows, finished tasks stay in the in-memory `State.Tasks` until restart
+  ([issues](../../issues.md)).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
 - A `peer.Connection` takes every frame at once and keeps it in its own buffer, so the limit of
@@ -784,8 +802,12 @@ reads, exact 61,440-byte boundaries, page bounds checks, group access checks, de
 and store failures. `features/home_fetch.feature` holds the scroll-back scenarios of A2.2 and the
 deleted-row scenario of A2.7.
 
-`webpush_test.go` and `webpush_internal_test.go` cover `push`, `After["push"]`, `StartLoop`
-subscription loading and `Close` drain, RFC 8291 decryption, per-browser eligibility, and
-`404`/`410` eviction in memory and `push_sub`. `features/home_webpush.feature` holds the backend
-half of acceptance test A8.3 against a local HTTP push endpoint, verifying that wire payloads are
-ciphertext only and decrypted reminders hold neither message text nor commands.
+`retention_test.go` covers `Retain`: default and configured `retention_days`, store error
+propagation, protected rows, and the purge mark with `Loop.Sync` reset.
+`features/home_retention.feature` holds acceptance test A2.5 and the retention half of A5.14.
+
+`webpush_test.go` covers `push`, `After["push"]`, `StartLoop` subscription loading and `Close`
+drain, RFC 8291 decryption, per-browser eligibility and revocation, and `404`/`410` eviction in
+memory and `push_sub`. `features/home_webpush.feature` holds the backend half of acceptance test
+A8.3 against a local HTTP push endpoint, verifying that wire payloads are ciphertext only and
+decrypted reminders hold neither message text nor commands.
