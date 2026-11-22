@@ -327,7 +327,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
   of its English file to the type `Key`; today the areas are `approval`, `brief`, `call`, `chat`,
-  `decision`, `groups`, `member`, `nodes`, `pairing`, `reminder`, `settings`, `states`,
+  `decision`, `groupinfo`, `groups`, `member`, `nodes`, `pairing`, `reminder`, `settings`, `states`,
   `summary`, `task`, `terminal` and `thread`. `src/messages/files.glob.ts` finds every file by
   its name, and `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
@@ -458,6 +458,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
     name in the group, offers the secretary switch when the group has none or the reader is an
     admin, signs `host.join` for the chosen computer, and words `home_unreachable`, `conflict` and
     a lost computer directly before falling back to `Failure`.
+  - The group info panel (`src/components/groupinfo/`, `src/lib/groupinfo.svelte.ts`) mounts at
+    `chat.side` (`order: 20`) below the member panel. Its folded "Project memory" section fetches
+    `note` and `review` ledger pages on demand (`fetch` with `kind`), omits `gone` markers, and
+    lets an admin delete a note or review entry with a signed `forget` command after a `<dialog>`
+    confirmation.
 - **Terminal takeover.** `#/terminal/<g>/<member>[/<task>]` (`routes/Terminal.svelte`,
   `lib/terminal.svelte.ts`, `components/terminal/`) loads `@xterm/xterm` and `@xterm/addon-fit`
   with a dynamic `import()`. `Takeover` in `lib/terminal.svelte.ts` is the takeover of one
@@ -531,6 +536,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/peer-fakes.ts`      | a peer connection and its channels for the tests of `peer.ts`                     |
 | `src/lib/groups.svelte.ts`    | `Home`, `Group`: row caches, cursor, paging, lists, commands                      |
 | `src/lib/members.ts`          | AI card status, path, candidate list, free name, `host.join`                      |
+| `src/lib/groupinfo.svelte.ts` | project-memory `note` and `review` paging, `forget`                               |
 | `src/lib/nodes.svelte.ts`     | connection indicator, `host.info` cache, `agent.set`, pairing                     |
 | `src/lib/compose.ts`          | mention being typed, mentions and parts of a text, row size                       |
 | `src/lib/when.ts`             | times in the reader's language; messages by day                                   |
@@ -550,6 +556,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/thread/`      | a task's thread, scored review block, checks and system notices                   |
 | `src/components/call/`        | `CallBlock.svelte`, mounted for kind `call` in threads and the main line          |
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
+| `src/components/groupinfo/`   | group details and project memory (`chat.side`, `order: 20`)                       |
 | `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
 | `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
@@ -566,6 +573,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/thread.spec.ts`     | steps of `../features/web_thread.feature`                                         |
 | `features/call.spec.ts`       | steps of `../features/web_call.feature`                                           |
 | `features/member.spec.ts`     | steps of `../features/web_member.feature`                                         |
+| `features/groupinfo.spec.ts`  | steps of `../features/web_groupinfo.feature`                                      |
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
 | `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                     |

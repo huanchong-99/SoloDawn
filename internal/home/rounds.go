@@ -77,12 +77,12 @@ func rndJumpMatch(d Disk, q store.Item, author string, thread *string) bool {
 	return msg.By == author && postTaskID(msg.Thread) == postTaskID(thread)
 }
 
-// rndQuiet is the quiet-task timer (task-machine.md row 23): for each active
-// task with no wait before step merge that has had no thread message for
-// limits.idle_notice_minutes, it queues one quiet notice for the secretary per
-// quiet period.
+// rndQuiet is the quiet-task timer (task-machine.md row 23): while the group is
+// not paused, for each active task with no wait before step merge that has had
+// no thread message for limits.idle_notice_minutes, it queues one quiet notice
+// for the secretary per quiet period.
 func rndQuiet(s *State, _ Disk, now int64) Result {
-	if s.Group.Secretary == "" || s.Group.Limits.IdleNoticeMinutes <= 0 {
+	if s.Group.Secretary == "" || s.Group.Limits.IdleNoticeMinutes <= 0 || s.Group.Paused != nil {
 		return Result{}
 	}
 	var items []Item

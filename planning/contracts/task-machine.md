@@ -111,7 +111,7 @@ is a person with role `owner` or `admin`. Items are inbox items
 | 20 | `act choose`, by an addressee or an admin | card pending | the card is decided and keeps the signed `act`; wait cleared | `decided` [the asking AI; the assignee if another] | — |
 | 21 | any `post` by an AI in the thread that mentions an AI | — | `thread.rounds` + 1; at or above `limits.rounds`, if `active` and not at step `merge`: `paused`, wait `rounds`, with `kept` (section 2), a `system` message `rounds_limit` in the main line | at the limit: `notice` [SEC] | — |
 | 22 | `post` kind `text` by a person in the thread | — | `thread.rounds` = 0; if wait was `rounds`: `active`, with the wait that `kept` names if there is one, else wait cleared | — | — |
-| 23 | timer in the home | `active`, wait `null`, not at step `merge`, no thread message for `limits.idle_notice_minutes` | unchanged | `notice` [SEC], once per quiet period | — |
+| 23 | timer in the home | the group is not paused; `active`, wait `null`, not at step `merge`, no thread message for `limits.idle_notice_minutes` | unchanged | `notice` [SEC], once per quiet period | — |
 | 24 | `group resume` | the group is paused; a resume of a group that is not paused is accepted and changes nothing | unchanged | `resume` [assignee] for each task that is `active` with wait `null` and not at step `merge`; `review` [reviewer] for each `active` task at step `review` that has a reviewer, unless one is queued | — |
 
 ## 4. What follows from the table
