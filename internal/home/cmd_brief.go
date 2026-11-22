@@ -48,6 +48,9 @@ func briefPost(s *State, c Command) (Result, *Refusal) {
 	if refusal != nil {
 		return Result{}, refusal
 	}
+	if refusal := presetBriefCheck(c.Disk, p.Body.Preset); refusal != nil {
+		return Result{}, refusal
+	}
 	return briefCard(s, c, p, mentions)
 }
 
