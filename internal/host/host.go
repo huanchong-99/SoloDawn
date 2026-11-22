@@ -53,11 +53,11 @@ type Home interface {
 	Request(ctx context.Context, build func(id int64) any) (json.RawMessage, error)
 }
 
-// A Terminal is the byte stream of a pty channel (contracts/datachannel.md
-// section 7). *peer.Stream has these methods.
+// A Terminal is the byte stream of a pty or watch channel (contracts/datachannel.md
+// section 7; contracts/step-2/watch-team.md section 4). *peer.Stream has these methods.
 type Terminal interface {
 	io.ReadWriteCloser
-	// Label is the channel's label, "pty:<g>:<member>".
+	// Label is the channel's label, "pty:<g>:<member>" or "watch:<g>:<member>".
 	Label() string
 	// Device is the device the connection was authenticated for.
 	Device() string

@@ -58,8 +58,9 @@ func watchState(h *Host) *watchPart {
 func watchItem(h *Host, v verifiedItem) {
 	slot := aiSlot{group: v.group, member: string(v.item.AI)}
 	var card proto.MsgRow
-	if state, _ := h.MemberState(slot.group, slot.member); state == "takeover" && proto.Decode(v.wire.Msg, &card) == nil {
-		member, _ := lookupRow[proto.MemberRow](h, slot.group, "member", card.By)
+	err := proto.Decode(v.wire.Msg, &card)
+	member, _ := lookupRow[proto.MemberRow](h, slot.group, "member", card.By)
+	if state, _ := h.MemberState(slot.group, slot.member); state == "takeover" && err == nil && member.User != "" {
 		p := watchState(h)
 		p.mu.Lock()
 		if p.grants[slot] == nil {

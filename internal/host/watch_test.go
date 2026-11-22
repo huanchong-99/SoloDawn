@@ -171,6 +171,12 @@ func TestWatchItems(t *testing.T) {
 		t.Fatal(err)
 	}
 	watchItem(h, v)
+	if got := h.Watchers(slot.group, slot.member); !reflect.DeepEqual(got, []string{}) {
+		t.Fatal(got)
+	}
+	if h.Watching("stranger") {
+		t.Fatal("gone member granted an unknown device")
+	}
 }
 
 func TestWatchRefusalsAndRevocation(t *testing.T) {
