@@ -83,8 +83,8 @@ func TestRoleCardOverlayAndOrdinaryWaits(t *testing.T) {
 	rcard := s.cfmNewCard(c, cfmWhatDirect, d.msgs["b"], s.AIs["r"])
 	d.msgs[rcard.ID] = rcard
 	cardTestSame(t, cftWait(d, task).Msg, rcard.ID)
-	for _, pair := range [][2]proto.MsgRow{{{Pos: 1}, {Pos: 2}}, {{Pos: 0}, {Pos: 1}}, {{Pos: 1}, {Pos: 0}}, {{}, {}}} {
-		_ = cftCardOrder(pair[0], pair[1])
+	for i, pair := range [][2]proto.MsgRow{{{Pos: 1}, {Pos: 2}}, {{Pos: 0}, {Pos: 1}}, {{Pos: 1}, {Pos: 0}}, {{}, {}}} {
+		cardTestSame(t, cftCardOrder(pair[0], pair[1]), []int{-1, 1, -1, 0}[i])
 	}
 	out := Result{}
 	cftPutTask(&out, task, proto.TaskRow{})
