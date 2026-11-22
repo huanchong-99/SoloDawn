@@ -30,6 +30,7 @@ A unit never calls into the file of a unit built beside it. It registers in a ta
 | whether a session's deliveries are held | `h.Held(key)`, before a turn is given; whoever lifts a hold calls `Deliver` |
 | an interactive pseudo-terminal (`takeover`) | `h.StartPTY(group, member, agent, launch, onDone)`, `p.Attached()`, `p.Resize(cols, rows)`, `p.Close()`, `h.ClosePTY(group, member)` |
 | bridging a `pty:<g>:<member>` data channel | `h.ServeTerminal(t)` |
+| watching a takeover terminal | `h.WatchStart(from, device, data)`, then `h.ServeWatch(t)` for `watch:<g>:<member>`; `h.Watchers(group, member)` lists the granted users |
 | an audit row | `h.Audit(tx, AuditRow{…})`, inside the transaction of what it records |
 | the AI CLIs found here (`host.info`) | `h.Agents(ctx)`: probes `claude` and `codex` on `PATH` (cached 60 s), writes `agent`, returns `[]proto.HostAgent` with `Groups` empty |
 
@@ -131,6 +132,15 @@ Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/
 - `ServeTerminal(t)` parses `"pty:<g>:<member>"` strictly; `p.Attached()` reports whether a terminal stream has attached. A malformed label, an unmatched `(g, member)` or a duplicate stream for an already bridged `PTY` is closed and drained so unread messages never hold back the connection's shared SCTP receive window. Otherwise one goroutine copies `PTY -> t` (pausing `PTY` reads while `t.Write` waits on the 1 MiB send-buffer limit) and the caller copies `t -> PTY`; `t` ending closes `PTY`, and `PTY` exiting closes `t`.
 - `Surface["pty.resize"]` decodes `proto.PTYResize`, requires `cols >= 1` and `rows >= 1` (`bad_request` below 1), remembers the size for `(g, ai)` so a `pty.resize` before `StartPTY` sets the initial size, resizes an open `PTY`, and accepts a `pty.resize` after close as a no-op.
 - **Lock order and single-reader channels.** `PTY.mu -> ptyPart.mu`; neither lock waits on I/O, process exit or `onDone`. `closing` is read only by `waitLoop`; `procDone` and `outDone` are read only by `runStop`; `done` is closed once by `runStop` for `Close` callers.
+
+## Terminal watching (`watch.go`)
+
+`watch.go` keeps grants, successful `watch.start` connections and open watch channels in `Part[watchPart](h)` ([watch-team.md](../../planning/contracts/step-2/watch-team.md), sections 2-6).
+
+- **Grants.** An inbox item with `why: "watch"` grants the card's `by` member's user access only while the AI is in `takeover`. It records `delivered` and acknowledges the item without waking a CLI. Grants are in memory only; `Watchers(group, member)` returns sorted user ids, or `[]`.
+- **Start and channel.** `WatchStart(from, device, data)` reads the device's user from the group's device rows, refuses an absent grant with `forbidden` and a non-direct path with `relay`, and otherwise records the connection for that slot and device. `ServeWatch(t)` accepts one `watch:<g>:<member>` channel per device after `watch.start`; an unmatched or duplicate channel is closed and drained. Terminal bytes go to the owner's channel first, then unchanged to each watcher's queue. A queue exceeding 1 MiB closes that watcher without slowing the owner. Any input on a watch channel closes it without forwarding bytes to the PTY. Known dimensions on open and subsequent owner `pty.resize` dimensions are pushed on `ctl` as `proto.PTYResize`.
+- **End.** `Surface["watch.end"]` drops the named user's grant and closes their channels, or returns `not_found`. A gone watcher member drops their grants in that group. Hand-back closes the slot's channels and drops its grants and successful starts before closing the PTY. Channel loss, queue overflow, connection loss and a path leaving `direct` close channels but keep grants; another `watch.start` may reconnect during the same takeover.
+- **State.** One `watchPart.mu` guards grants, successful starts, connection monitors and channel queues; each open watch channel has its own writer goroutine.
 
 ## Terminal takeover (`takeover.go`)
 
