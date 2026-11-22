@@ -11,6 +11,36 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a foreign home with no matching device row shows its computer name but says its owner was not provided.
 - Cause: `welcome` carries the device name and an owner boolean, not its owner's user id. Group details use a matching live `device` row rather than guessing from a person's group role.
 - Status: open when that row is unavailable. Real-host custom forge execution and Windows program resolution are not verified by the browser UI.
+### 2026-11-22 · limitation · The multi-person label scenarios cannot admit Q yet
+
+- Symptom: A9.12 and five A9.42 cases (failing review, decision by P, decision by Q, secretary confirmation without Q on the allow list, and secretary confirmation with Q on it) each failed under `-race` in `Given the confirmation cast with Q`. The reply was `bad_request: the home has no such command`; decoding that refusal as a successful command reply reported `proto: a field that is always present is missing`.
+- Cause: the cast sends `invite` before it can admit Q (`features/s2_confirm_test.go:119`), and the current home has no registered handler for it (`internal/home/check.go:109`).
+- Status: pending until the people flow is available (T2-1b for invitation, T2-1a for home join). The label assertions did not run; any later blockers are unverified.
+
+### 2026-11-22 · limitation · The A9.44 quiet-task fixture does not reach the timer
+
+- Symptom: A9.44 remains pending after HM-13. With the scenario enabled, the brief proposed by the replacement secretary never appeared in either acceptance run (`features/s2_confirm.feature:560`).
+- Cause: not verified; both runs stopped in the proposal step before confirming the brief or waiting for the timer.
+- Status: open; HM-13's timer is covered separately by `features/home_rounds.feature:40`.
+
+### 2026-11-22 · limitation · Confirmation browser controls are not yet exercised
+
+- Symptom: the I2-1b scenarios exercise the card and member commands over the browser connection but do not check the rendered buttons, expired card or member editor.
+- Cause: the cast supplies protocol clients, not a rendered browser (`features/s2_cast_test.go:762`); the confirmation controls and member editor are planned in U2-2.
+- Status: open; verify the UI cases of A9.8, A9.9, A9.11 and A9.14 with U2-2.
+
+### 2026-11-22 · limitation · The cast's approval fixture does not execute shell commands
+
+- Symptom: A9.19 verifies the approval tool returns allow and the fake CLI resumes; it does not verify that the command runs in a real CLI.
+- Cause: the replay fixture supports protocol I/O only (`internal/host/fakecli/replay.go:98`).
+- Status: open; actual command execution is unverified.
+
+### 2026-11-22 · deviation · A confirmed brief cannot yet be replaced
+
+- Symptom: a new brief cannot replace a confirmed one as required by A9.13.
+- Cause: `internal/home/cmd_brief.go:153` accepts only pending or revised briefs as predecessors.
+- Status: open; A9.13 remains pending for T2-2b.
+
 ### 2026-11-22 · limitation · The OpenCode driver is declared from documentation, not from a capture
 
 - Symptom: `DriverCaps["opencode"]` declares levels `1` and `3` and approvals `conn`, and `openCodeDriver` speaks the `opencode serve` API (`internal/host/opencode.go`), but no run of the real OpenCode exists: the fake OpenCode's scripts are written from the documented API, not cut from captures.
@@ -653,6 +683,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-22 · bug · Capability fixture cleanup races with A1.1 onboarding
+
+- Symptom: race acceptance reported `WARNING: DATA RACE` in the A1.1 onboarding scenario even though its steps passed.
+- Cause: the capability fixture registered a `DriverCaps` restore for every scenario (`features/host_caps_test.go:41`); A1.1 did not change the table, but its in-process pairing node read it while handling `host.info` (`internal/host/caps.go:46`). The I2-1b scenarios run after A1.1 and start their nodes as subprocesses.
+- Status: resolved in I2-1b by registering the restore only when a capability step changes the table (`features/host_caps_test.go`, `setDriverCaps`).
 
 ### 2026-11-22 · deviation · `driver` in `host.info` was optional until T3-2 filled it
 
