@@ -121,8 +121,8 @@ func peopleRemoved(s *State, c Command, person proto.HumanMemberRow) Result {
 	res := peopleRemovedAIs(s, c, person.User)
 	res.GroupsChanged = true
 	res.Rows = append(res.Rows, RowOf(proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: person.ID}, Gone: true}))
-	if person.User != s.Owner && !c.Disk.OtherMember(person.User) {
-		res.Rows = append(res.Rows, peopleGoneDevices(s, person.User)...)
+	res.Rows = append(res.Rows, peopleGoneDevices(s, person.User)...)
+	if !c.Disk.OtherMember(person.User) {
 		res.Writes = append(res.Writes, peopleForget{person.User})
 	}
 	body := proto.MemberRemovedBody{SystemCode: proto.SystemCode{Code: "member_removed"}, User: person.User, Name: person.Name}

@@ -18,6 +18,7 @@ func init() {
 		w := &homeGroupWorld{}
 		var join *home.Joining
 		var member string
+		var otherGroup bool
 		admin := exampleKey("people admin")
 		sc.Step(`^a people home with an invited visitor$`, func() error {
 			w.now = time.UnixMilli(1763600000000)
@@ -57,7 +58,26 @@ func init() {
 			if err != nil {
 				return err
 			}
-			w.last, err = home.Commands.ApplyJoining(w.state, w.store, w.store, key.Sign(string(raw)), joining, w.now)
+			env := key.Sign(string(raw))
+			if joining == nil {
+				w.last, err = home.Commands.Apply(w.state, homePeopleDisk{Disk: w.store, other: otherGroup}, w.store, env, w.now)
+			} else {
+				c := home.Command{Env: env, Disk: w.store, Joining: joining, Now: w.now.UnixMilli(), Who: home.Who{Device: key.ID(), User: joining.Log.User}}
+				if err = json.Unmarshal(raw, &c.PayloadHeader); err != nil {
+					return err
+				}
+				for id, person := range w.state.People {
+					if person.User == c.Who.User {
+						c.Who.Human = id
+					}
+				}
+				var refusal *home.Refusal
+				w.last, refusal = home.Commands["join"](w.state, c)
+				if refusal != nil {
+					return fmt.Errorf("join: %s", refusal.Code)
+				}
+				w.last = w.state.Seal(w.last)
+			}
 			if err == nil {
 				w.state.Commit(w.last)
 			}
@@ -114,6 +134,17 @@ func init() {
 		sc.Step(`^the visitor leaves the people group$`, func() error {
 			return apply("visitor", proto.MemberCommand{HomeCommand: proto.HomeCommand{Type: "member", Nonce: w.nextID("leave"), Timestamp: w.now.UnixMilli(), Group: proto.ID(w.state.ID)}, Op: "remove", ID: proto.ID(member)}, nil)
 		})
+		sc.Step(`^the visitor also belongs to another group homed here$`, func() { otherGroup = true })
+		sc.Step(`^only this group's device rows and device log are retired$`, func() error {
+			if !w.last.Answer.OK || len(w.last.Rows) != 3 || len(w.last.Writes) != 0 || w.state.Logs[w.guest.ID()] != nil {
+				return fmt.Errorf("unexpected group-local removal: %+v", w.last)
+			}
+			gone := w.last.Rows[1].Value().(proto.GoneRow)
+			if gone.Type != "device" || gone.ID != w.guest.ID()+":1" || !gone.Gone {
+				return fmt.Errorf("unexpected retired device: %+v", gone)
+			}
+			return nil
+		})
 		sc.Step(`^the visitor and device are gone and a departure message has no remover$`, func() error {
 			if !w.last.Answer.OK || len(w.last.Rows) != 3 || w.state.Serves(w.guest.ID()) {
 				return fmt.Errorf("unexpected removal: %+v", w.last)
@@ -130,3 +161,10 @@ func init() {
 		})
 	}
 }
+
+type homePeopleDisk struct {
+	home.Disk
+	other bool
+}
+
+func (d homePeopleDisk) OtherMember(string) bool { return d.other }

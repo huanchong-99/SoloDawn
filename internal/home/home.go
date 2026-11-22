@@ -32,10 +32,9 @@ type Client interface {
 // disk only is read through a Disk. The function of a command reads a State
 // and changes nothing in it; Commit takes the rows of a result.
 type State struct {
-	ID     string  // the group, also before it exists
-	Home   string  // this node's device id
-	Owner  string  // the user id of this node's owner
-	Invite Inviter // optional invite hook for standalone Apply calls
+	ID    string // the group, also before it exists
+	Home  string // this node's device id
+	Owner string // the user id of this node's owner
 	// Logs holds, by user id, the device log of this node's owner and of
 	// every person in the group. The logs are this state's own values, which
 	// nothing else reads or writes: Commit applies the entry of each device
@@ -341,7 +340,7 @@ func addOnce[F any](table map[string]F, name string, f F) {
 // table, the group and the signer (Table.find) and the function itself. What
 // the last two answer, a refusal included, is the receipt.
 func (t Table) Apply(s *State, disk Disk, receipts Receipts, env proto.Envelope, now time.Time) (Result, error) {
-	return t.ApplyJoining(s, disk, receipts, env, nil, now)
+	return t.applyJoining(s, disk, receipts, env, nil, now)
 }
 
 // run answers a command that has no receipt.
@@ -382,11 +381,6 @@ func (s *State) Commit(res Result) {
 		s.hold(r.Value())
 	}
 	s.Seq += int64(len(res.Rows))
-	for _, w := range res.Writes {
-		if forgotten, ok := w.(peopleForget); ok {
-			delete(s.Logs, forgotten.user)
-		}
-	}
 }
 
 // hold keeps a state row. Messages and notes are not held.
@@ -436,6 +430,9 @@ func (s *State) enrol(r proto.DeviceRow) {
 // member's.
 func (s *State) drop(r proto.GoneRow) {
 	if r.Type == "member" {
+		if person, ok := s.People[r.ID]; ok {
+			delete(s.Logs, person.User)
+		}
 		delete(s.People, r.ID)
 		delete(s.AIs, r.ID)
 	}

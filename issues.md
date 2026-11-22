@@ -589,6 +589,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-22 · bug · Removing a person left group devices live when another local membership remained
+
+- Symptom: a removed person's device rows and in-memory device log remained in the group when they also belonged to another group homed on the node.
+- Cause: `internal/home/cmd_people.go:124` put group device retirement under the last-local-membership condition intended only for node-wide `device_log` and `push_sub` deletion.
+- Status: resolved in #309. Removal always retires the group's devices and drops its in-memory log; only node-wide deletion waits for the last local membership.
+
 ### 2026-11-22 · deviation · The home handled only AI member changes
 
 - Symptom: an invited person could not join, change role or leave through home commands.
