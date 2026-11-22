@@ -1210,6 +1210,16 @@ export function decodeAnswer<T extends RequestType>(
 /** A request as its sender writes it; the connection numbers it. */
 type Ask<R> = Omit<R, 'id'>;
 
+/** A binary data channel opened beside `ctl`, such as `pty:<g>:<member>` (datachannel.md 1, 7). */
+export interface PtyChannel {
+  binaryType: BinaryType;
+  readonly readyState: string;
+  onmessage: ((this: any, event: any) => any) | null;
+  onclose: ((this: any, event: any) => any) | null;
+  send(data: Uint8Array<ArrayBuffer>): void;
+  close(): void;
+}
+
 /** A `ctl` connection. It numbers each request with a new `id` and keeps the request's `t` under
  *  that id. A frame with `re` is the answer to the request of that id: it is read with
  *  `decodeAnswer(t, text)`, settles that request, and the id is forgotten. A frame without `re` is
@@ -1225,4 +1235,6 @@ export interface Ctl {
   request(req: Ask<Cmd>): Promise<AnswerTo<'cmd'> | ErrorResponse>;
   request(req: Ask<HostInfoRequest>): Promise<AnswerTo<'host.info'> | ErrorResponse>;
   request(req: Ask<Audit>): Promise<AnswerTo<'audit'> | ErrorResponse>;
+  send?(frame: Devlog | PTYResize): void;
+  channel?(label: string): PtyChannel | undefined;
 }
