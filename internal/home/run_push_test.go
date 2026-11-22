@@ -720,10 +720,7 @@ func TestRunACloseEndsEverything(t *testing.T) {
 	equal(t, len(late.client.got), 0)
 }
 
-// Close waits until every connection's pump goroutine returns from an
-// in-flight Send, whether the connection is still attached or was detached
-// right before Close, so a Send that writes to the store finishes before the
-// caller closes the store.
+// Close waits for an in-flight Client.Send on attached and detached connections.
 func TestRunCloseWaitsForConnectionSends(t *testing.T) {
 	checkCloseWaitsForSend(t, false)
 	checkCloseWaitsForSend(t, true)

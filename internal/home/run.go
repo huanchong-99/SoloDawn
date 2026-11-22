@@ -144,7 +144,9 @@ func (l *Loop) clock() {
 
 // Close stops the loop: every group finishes the jobs it was given, no
 // connection is sent anything more, and Close returns when the goroutines of
-// the groups and of the connections have ended. The store is closed after it.
+// the groups and of the connections (including every connection's Send in
+// progress and Close of a given-up client) have ended. It must not be called
+// from a client's Send. The store is closed after it.
 func (l *Loop) Close() {
 	l.once.Do(func() { close(l.stop) })
 	l.mu.Lock()

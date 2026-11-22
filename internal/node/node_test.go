@@ -837,10 +837,6 @@ func pumpWS(ctx context.Context, cancel context.CancelFunc, src, dst *websocket.
 }
 
 func TestCloseWaitsForInflightHostCmd(t *testing.T) {
-	savedInstall := installService
-	t.Cleanup(func() { installService = savedInstall })
-	installService = func(string, string) error { return nil }
-
 	dir := socketRoot(t)
 	n, err := openNode(t.Context(), dir)
 	mustNoErr(t, err)
@@ -881,6 +877,9 @@ func TestCloseWaitsForInflightHostCmd(t *testing.T) {
 
 func adoptTestBrowser(t *testing.T, n *nodeRuntime) identity.Key {
 	t.Helper()
+	saved := installService
+	t.Cleanup(func() { installService = saved })
+	installService = func(string, string) error { return nil }
 	browserKey := sesKey("browser")
 	e1 := sesAddEntry(browserKey, browserKey.ID(), 1, browserKey.ID(), "browser", "b1")
 	e2 := sesAddEntry(browserKey, browserKey.ID(), 2, n.key.ID(), "node", "desk")
