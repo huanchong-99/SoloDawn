@@ -1,0 +1,14 @@
+{
+  "confirm.request.direct": "Let {ai} act on this request.",
+  "confirm.request.ask": "Let {ai} answer this call.",
+  "confirm.request.watch": "Let the requester watch {ai}’s terminal.",
+  "confirm.needs_you": "Needs you",
+  "confirm.waiting": "Waiting for {who}",
+  "confirm.confirmed": "Confirmed by {who} · {time}",
+  "confirm.denied": "Denied by {who} · {time}",
+  "confirm.expired": "Expired · {time}",
+  "confirm.yes": "Confirm",
+  "confirm.no": "Deny",
+  "confirm.offline": "The group home is offline.",
+  "confirm.sep": ", "
+}

@@ -271,7 +271,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
-    'The states sheet mounts call under the call area and renders both call wire examples',
+    'The states sheet mounts call under the call area and renders all call wire examples',
     ({ When, Then, And }) => {
       When('the reader opens "#/states" in a development server', async () => {
         vi.stubEnv('MODE', 'development');
@@ -287,7 +287,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         expect(section.querySelector('header .badge')?.textContent).toBe('Mounted by call');
       });
       And(
-        'the sheet renders "row-msg-call-waiting" as waiting and "row-msg-call-answered" with the reply "Use the path change event."',
+        'the sheet renders waiting and denied calls and the answered call with the reply "Use the path change event."',
         () => {
           const section = one('#states-call').closest('section')!;
           const figures = [...section.querySelectorAll('figure')];
@@ -299,11 +299,40 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(figures[0].querySelector('.reply .text')?.textContent).toContain(
             'Use the path change event.',
           );
-          // A denied call draws as waiting until U2-2 (issues.md).
-          expect(figures[1].querySelector('.st')?.getAttribute('data-st')).toBe('waiting');
+          expect(figures[1].querySelector('[data-st="denied"]')?.textContent).toBe('Denied');
           expect(figures[2].querySelector('.st')?.getAttribute('data-st')).toBe('waiting');
         },
       );
     },
   );
+
+  Scenario('An answered call keeps the reply after its author leaves', ({ Given, When, Then }) => {
+    Given('a main-line call whose reply is from a former member', () => {
+      home.write(
+        website,
+        example('row-msg-call-answered', {
+          id: 'answered',
+          thread: null,
+          by: codexId,
+          state: { status: 'answered', reply: 'former-reply', ms: 10 },
+        }),
+      );
+      home.write(
+        website,
+        example('row-msg-reply', {
+          id: 'former-reply',
+          thread: null,
+          by: 'former-ai',
+          text: 'Already done.',
+        }),
+      );
+    });
+    When('the reader opens the main line of "Website"', () => {
+      openPage(`#/groups/${website}`);
+    });
+    Then("the reply text and the former member's avatar remain visible", () => {
+      expect(text('#m-answered .reply .text')).toBe('Former member Already done.');
+      expect(text('#m-answered .reply .av')).toBe('F');
+    });
+  });
 });

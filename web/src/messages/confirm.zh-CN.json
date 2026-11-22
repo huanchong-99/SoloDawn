@@ -1,0 +1,14 @@
+{
+  "confirm.request.direct": "允许 {ai} 按此请求行动。",
+  "confirm.request.ask": "允许 {ai} 回答此次调用。",
+  "confirm.request.watch": "允许请求者观看 {ai} 的终端。",
+  "confirm.needs_you": "等待你处理",
+  "confirm.waiting": "等待 {who}",
+  "confirm.confirmed": "{who} 已确认 · {time}",
+  "confirm.denied": "{who} 已拒绝 · {time}",
+  "confirm.expired": "已过期 · {time}",
+  "confirm.yes": "确认",
+  "confirm.no": "拒绝",
+  "confirm.offline": "群组主机已离线。",
+  "confirm.sep": "、"
+}

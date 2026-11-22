@@ -17,8 +17,10 @@
       {view.callee}
     </span><span class="muted">
       {view.mode} ·
-      {#if view.waiting}
+      {#if view.status === 'waiting'}
         <span class="st" data-st="waiting"><i></i>{view.timing}</span>
+      {:else if view.status === 'denied'}
+        <span class="badge" data-tone="danger" data-st="denied">{view.timing}</span>
       {:else}
         {view.timing}
       {/if}

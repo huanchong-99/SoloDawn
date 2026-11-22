@@ -19,7 +19,7 @@ export interface CallView {
   caller: string;
   callee: string;
   mode: string;
-  waiting: boolean;
+  status: CallMsg['state']['status'];
   timing: string;
   depth: string;
   reply: ReplyView | undefined;
@@ -74,18 +74,20 @@ export function callView(group: Group, msg: CallMsg): CallView {
     callee: nameOf(group, msg.body.to),
     mode: t(msg.body.wait ? 'call.mode.wait' : 'call.mode.async'),
     depth: t('call.depth').replace('{n}', String(msg.body.depth)),
+    status: msg.state.status,
   };
-  if (msg.state.status !== 'answered') {
+  if (msg.state.status === 'denied') {
+    return { ...base, timing: t('call.denied'), reply: undefined };
+  }
+  if (msg.state.status === 'waiting') {
     return {
       ...base,
-      waiting: true,
       timing: t('call.waiting').replace('{time}', formatElapsed(waited(msg))),
       reply: undefined,
     };
   }
   return {
     ...base,
-    waiting: false,
     timing: t('call.took').replace('{time}', formatElapsed(msg.state.ms)),
     reply: buildReply(group, msg.state.reply),
   };
@@ -96,7 +98,12 @@ export function withoutInlineReplies(msgs: MsgRow[], callMounted: boolean): MsgR
   if (!callMounted) return msgs;
   const inline = new Set<string>();
   for (const msg of msgs) {
-    if (msg.kind === 'call' && msg.state.status === 'answered') inline.add(msg.state.reply);
+    if (msg.kind !== 'call') continue;
+    switch (msg.state.status) {
+      case 'answered':
+        inline.add(msg.state.reply);
+        break;
+    }
   }
   return msgs.filter((msg) => !inline.has(msg.id));
 }

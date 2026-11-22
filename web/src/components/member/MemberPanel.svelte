@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AllowEditor from '../../cmp/allow/AllowEditor.svelte';
   import { homes, type Group } from '../../lib/groups.svelte';
   import {
     addDisabledReason,
@@ -125,6 +126,7 @@
           {/if}
         </footer>
       {/if}
+      <AllowEditor {group} {ai} {humans} />
     </section>
   {:else}
     <p class="hint">{t('member.ai.empty')}</p>
