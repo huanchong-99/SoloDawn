@@ -21,6 +21,21 @@ import (
 
 func init() {
 	Register(Drivers, "claude", Driver(claudeDriver{}))
+	Register(DriverCaps, "claude", claudeCapabilities(runtime.GOOS))
+}
+
+func claudeCapabilities(goos string) Capabilities {
+	levels := []int{1, 2, 3}
+	if goos == "windows" {
+		levels = []int{1, 3}
+	}
+	return Capabilities{
+		Accounts:  []string{AccountPersonal, AccountTeam, AccountAPIKey},
+		Levels:    levels,
+		Approvals: ApprovalTool,
+		Takeover:  TakeoverNew,
+		Usage:     []string{},
+	}
 }
 
 var errClaudeAnswer = errors.New("claude: permission requests use the MCP approve tool")
