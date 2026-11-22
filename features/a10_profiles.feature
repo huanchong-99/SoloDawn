@@ -1,8 +1,8 @@
-@pending
 Feature: AI profiles, assignment by skills and escalation to a stronger AI
   Working AIs S (strong), M (standard) and L (light) of one owner, and the
   secretary C (standard unless a scenario says otherwise).
 
+  @pending
   Scenario: The profile of a member (A10.8)
     Given the profiles cast
     When a new AI member "N" joins
@@ -16,8 +16,11 @@ Feature: AI profiles, assignment by skills and escalation to a stronger AI
     Then the member row of "N" has tier "light" and skills "docs"
     And no other person's browser offers the editor of "N"
 
+  @pending
   Scenario: The secretary's member list and rules (A10.9)
     Given the profiles cast
+    And the owner sends member set for "S" with tier "strong" and skills "Go backend"
+    And the owner sends member set for "L" with tier "light" and skills "docs"
     And L is limited and the host of S is offline
     When C takes its next turn
     Then the turn lists every AI member with its tier, state and skills as in section 3 of the profiles contract
@@ -25,12 +28,15 @@ Feature: AI profiles, assignment by skills and escalation to a stronger AI
     And C's instructions hold the four rules of assignment
     And list_members answers as in step 1
 
+  @pending
   Scenario: Escalation of a stuck assignee (A10.10)
     Given the profiles cast with M the assignee of task T
     When M fails a review
-    Then task T has no stuck ask and submit_task by M succeeds as in step 1
+    Then task T has stuck kind "review", n 1 and ask false
+    And the browser shows no badge "must ask a stronger AI" on task T
     When M fails a review
     Then task T has stuck kind "review", n 2 and ask true
+    And the browser shows the badge "must ask a stronger AI" on task T
     And M's reviewed item ends with the line naming S and not L or C
     And submit_task by M fails with "conflict" with no push, no pull request and no report
     When L replies to M's call in the thread of task T
@@ -41,14 +47,25 @@ Feature: AI profiles, assignment by skills and escalation to a stronger AI
     When the host of S returns
     And S replies to M's call in the thread of task T
     Then task T has stuck kind "review", n 2 and ask false
+    And the browser shows no badge "must ask a stronger AI" on task T
     And submit_task by M succeeds
     When M fails a review
     Then task T has stuck kind "review", n 3 and ask true
     And M's reviewed item ends with the line naming S and not L or C
     And submit_task by M fails with "conflict" with no push, no pull request and no report
-    And the same holds with hosted checks failing twice, stuck kind "checks" and M's checks item
-    And the browser shows the badge "must ask a stronger AI" on task T exactly while ask is true
+    Given the profiles cast with M the assignee of task T
+    When M fails hosted checks
+    And M fails hosted checks
+    Then task T has stuck kind "checks", n 2 and ask true
+    And the browser shows the badge "must ask a stronger AI" on task T
+    And M's checks item ends with the line naming S and not L or C
+    And submit_task by M fails with "conflict" with no push, no pull request and no report
+    When S replies to M's call in the thread of task T
+    Then task T has stuck kind "checks", n 2 and ask false
+    And the browser shows no badge "must ask a stronger AI" on task T
+    And submit_task by M succeeds
 
+  @pending
   Scenario: No stronger AI, and the secretary as candidate (A10.11)
     Given the profiles cast with S the assignee of task T
     When S fails a review
@@ -68,13 +85,14 @@ Feature: AI profiles, assignment by skills and escalation to a stronger AI
     Then S's reviewed item ends with the line naming C and not M or L
     When C replies to S's call in the thread of task T
     Then task T has stuck kind "review", n 2 and ask false
-    And the acceptance scenarios A1 to A8 pass with default profiles
 
+  @pending
   Scenario: What counts as failures in a row (A10.12)
     Given the profiles cast with M the assignee of task T
     When M fails hosted checks
     And M fails a review
     Then task T has stuck kind "review", n 1 and ask false
+    Given the profiles cast with M the assignee of task T
     When M fails a review
     And M passes hosted checks on the next commit
     And M fails a review
@@ -88,8 +106,10 @@ Feature: AI profiles, assignment by skills and escalation to a stronger AI
     When task assign gives task T to L
     Then task T has no stuck
 
+  @pending
   Scenario: Discovering models (A10.13)
-    Given a host with fake CLIs "claude,codex,opencode,qwen" each scripted to list two models, one with fast
+    Given a host with fake CLIs "claude,codex,opencode,qwen" each scripted to list two models
+    And the first listed model of each fake CLI is scripted with fast
     When the host reads its agents
     Then host.info lists under each agent but qwen its two models with id, name, levels and fast as scripted
     And each listed model has the tier of the table for its id's words, else "standard"
@@ -101,10 +121,16 @@ Feature: AI profiles, assignment by skills and escalation to a stronger AI
     And the claude entry "default" has the tier of its resolvedModel
     And the browser's dialog for adding an AI offers the listed models and their levels
     And for an agent with no models the dialog offers two text fields
-    And for each real CLI the list is what the CLI's own picker shows
 
+  @pending @live
+  Scenario: Discovering models with each real CLI (A10.13)
+    Given a host with each real CLI signed in
+    When the host reads its agents
+    Then the models of each agent are what the CLI's own picker shows
+
+  @pending
   Scenario: Refreshing models (A10.14)
-    Given a host with fake CLIs "claude" each scripted to list two models, one with fast
+    Given a host with fake CLIs "claude" each scripted to list two models
     And the host reads its agents
     When the fake claude's list gains a model
     And the host reads its agents within 60 seconds
@@ -113,6 +139,7 @@ Feature: AI profiles, assignment by skills and escalation to a stronger AI
     Then host.info answers the new list and a push carries it
     And the refresh button on the browser's AI member panel shows the new model without a restart of the node
 
+  @pending
   Scenario: Choosing a model (A10.15)
     Given the profiles cast
     When host.join adds the agent "claude" as "Opus" with model "opus", effort "high" and tier "strong"
@@ -127,8 +154,14 @@ Feature: AI profiles, assignment by skills and escalation to a stronger AI
     Then the next start of a session of "Opus", a resume, passes model "sonnet"
     When the fake claude exits and the fake codex answers thread/start with an error on a refused model
     Then each emits turn_interrupted with "crash", a task session ends in task fail, no session_replaced is sent and the session keeps its id
-    And with each real CLI the model the CLI reports is the one chosen
 
+  @pending @live
+  Scenario: Choosing a model with each real CLI (A10.15)
+    Given a host with each real CLI signed in
+    When host.join adds each agent with a model from its list
+    Then the model each CLI reports is the one chosen
+
+  @pending
   Scenario: The owner's edit stays (A10.16)
     Given the profiles cast with a member "Opus" whose model "opus" is suggested "strong"
     When the owner sends member set for "Opus" with tier "light" and skills "docs"
