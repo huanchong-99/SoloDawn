@@ -1524,6 +1524,7 @@ func m5RegisterFullFlowSteps(sc *godog.ScenarioContext, w *m5World) {
 	sc.Step(`^both tasks are merged on origin with two summary cards carrying pull-request numbers and no approval card$`, func() error {
 		return w.stepVerifyTwoTasksMerged(true)
 	})
+	sc.Step(`^the owner saw no confirm card \(A9\.40\)$`, w.verifyNoConfirmCard)
 	sc.Step(`^each passing review was followed by its merge with no AI turn in between and a task_merged row in the thread$`, w.stepVerifyNoTurnBeforeMerge)
 	sc.Step(`^each task ran in its own session and worktree, and after the merge those sessions and folders are gone$`, m5FinalStep(w, w.stepVerifySessionsAndFoldersGone))
 }

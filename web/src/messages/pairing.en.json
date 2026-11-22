@@ -62,7 +62,7 @@
   "pairing.acct.team": "Team plan",
   "pairing.acct.team_body": "You can let chosen teammates direct it.",
   "pairing.acct.api_key": "API key",
-  "pairing.acct.api_key_body": "Same as team. Usage is billed to the key's owner.",
+  "pairing.acct.api_key_body": "You can let chosen teammates direct it. Usage is billed to the key's owner.",
   "pairing.acct.hint": "Not sure? Ask your AI to check how it is signed in. SoloDawn never reads your credentials.",
   "pairing.done": "Create your first group",
   "pairing.trust.1.title": "Your data stays on your computers",
