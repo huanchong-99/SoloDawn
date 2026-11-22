@@ -63,11 +63,8 @@ function secretaryM5Script() {
               scope_in: ['Release notes builder', 'Preflight checklist'],
               scope_out: ['External deployment hooks'],
               tasks: [
-                // Deviation from A5.1's literal "each other's AI" wording: T-2 is held in
-                // run_checks (gateT2) until Secretary posts T-1's summary so the two task_merged
-                // wakes stay ordered and uncoalesced, and internal/host/deliver.go (aiGroupKey)
-                // serializes turns per AI member, so T-1 is reviewed by Codex on coordinator
-                // ("Reviewer") while workstation's Codex is still inside T-2's run_checks.
+                // T-1 uses coordinator Codex ("Reviewer"): T-2 stays in gateT2 until T-1's summary card, and
+                // deliver.go (aiGroupKey) serializes turns per AI member, so workstation Codex is busy.
                 {
                   title: 'Build release checklist',
                   assignee: 'Claude Code',

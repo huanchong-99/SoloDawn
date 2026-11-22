@@ -62,8 +62,8 @@ by its full path.
 ## Check Git identity
 
 SoloDawn commits local task merges with your Git identity. Run
-`git config --global user.email`; if it is empty, ask the user for a name
-and an email and set them with `git config --global user.name "<name>"` and
+`git config --global user.email`; if it is empty, set your name and email
+with `git config --global user.name "<name>"` and
 `git config --global user.email "<email>"`.
 
 ## Pair with the browser

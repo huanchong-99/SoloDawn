@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -21,8 +22,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/huanchong-99/SoloDawn/internal/home"
+	"github.com/huanchong-99/SoloDawn/internal/host"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/node"
+	"github.com/huanchong-99/SoloDawn/internal/node/nodetest"
 	"github.com/huanchong-99/SoloDawn/internal/peer"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
@@ -45,40 +49,124 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
+var (
+	activeCleanupsMu sync.Mutex
+	activeCleanups   []activeCleanupEntry
+	nextCleanupID    uint64
+	deadlineFired    bool
+)
+
+type activeCleanupEntry struct {
+	id uint64
+	fn func()
+}
+
+func armDeadlineCleanups(t *testing.T) func() {
+	activeCleanupsMu.Lock()
+	deadlineFired = false
+	activeCleanupsMu.Unlock()
+	d, ok := t.Deadline()
+	if !ok {
+		return func() {}
+	}
+	rem := time.Until(d)
+	lead := min(30*time.Second, max(800*time.Millisecond, rem/6))
+	timer := time.AfterFunc(max(0, rem-lead), runDeadlineCleanups)
+	return func() {
+		timer.Stop()
+		activeCleanupsMu.Lock()
+		deadlineFired = false
+		activeCleanupsMu.Unlock()
+	}
+}
+
+func runDeadlineCleanups() {
+	activeCleanupsMu.Lock()
+	deadlineFired = true
+	pending := slices.Clone(activeCleanups)
+	activeCleanups = nil
+	activeCleanupsMu.Unlock()
+	for _, entry := range slices.Backward(pending) {
+		entry.fn()
+	}
+}
+
+func isDeadlineCleanup() bool {
+	activeCleanupsMu.Lock()
+	defer activeCleanupsMu.Unlock()
+	return deadlineFired
+}
+
+func trackOrRunCleanup(idOut *uint64, fn func()) bool {
+	activeCleanupsMu.Lock()
+	defer activeCleanupsMu.Unlock()
+	if deadlineFired {
+		return true
+	}
+	nextCleanupID++
+	*idOut = nextCleanupID
+	activeCleanups = append(activeCleanups, activeCleanupEntry{id: *idOut, fn: fn})
+	return false
+}
+
+func removeActiveCleanup(id uint64) {
+	activeCleanupsMu.Lock()
+	defer activeCleanupsMu.Unlock()
+	activeCleanups = slices.DeleteFunc(activeCleanups, func(e activeCleanupEntry) bool {
+		return e.id == id
+	})
+}
+
+func registerBothCleanups(t testing.TB, cleanup func(func()), fn func()) {
+	var id uint64
+	once := sync.OnceFunc(func() {
+		fn()
+		removeActiveCleanup(id)
+	})
+	if trackOrRunCleanup(&id, once) {
+		once()
+		return
+	}
+	if cleanup != nil {
+		cleanup(once)
+	}
+	if t != nil {
+		t.Cleanup(once)
+	}
+}
+
 func startManagedCmd(t testing.TB, cleanup func(func()), cmd *exec.Cmd) (func(), error) {
-	prepareManagedCmd(cmd)
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	sigGroup, killGroup := attachManagedGroup(cmd)
+	sigProc, killProc := attachManagedProc(cmd)
 	done := make(chan struct{}) // single reader: stop closure below
 	go func() {
 		_ = cmd.Wait()
 		close(done)
 	}()
 	stop := sync.OnceFunc(func() {
-		if sigGroup(os.Interrupt) != nil {
-			killGroup()
+		if sigProc(os.Interrupt) != nil {
+			killProc()
 		}
-		waitOrKillGroup(done, killGroup)
+		waitOrKillProc(done, killProc)
 	})
 	registerBothCleanups(t, cleanup, stop)
 	return stop, nil
 }
 
 func killManagedCmd(t testing.TB, cleanup func(func()), cmd *exec.Cmd, extra func()) error {
-	prepareManagedCmd(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	_, killGroup := attachManagedGroup(cmd)
+	_, killProc := attachManagedProc(cmd)
 	done := make(chan struct{}) // single reader: stop closure below
 	go func() {
 		_ = cmd.Wait()
 		close(done)
 	}()
 	stop := sync.OnceFunc(func() {
-		killGroup()
+		killProc()
 		<-done
 		if extra != nil {
 			extra()
@@ -88,22 +176,16 @@ func killManagedCmd(t testing.TB, cleanup func(func()), cmd *exec.Cmd, extra fun
 	return nil
 }
 
-func waitOrKillGroup(done <-chan struct{}, killGroup func()) {
+func waitOrKillProc(done <-chan struct{}, killProc func()) {
+	grace := 3 * time.Second
+	if isDeadlineCleanup() {
+		grace = 300 * time.Millisecond
+	}
 	select {
 	case <-done:
-	case <-time.After(3 * time.Second):
-		killGroup()
+	case <-time.After(grace):
+		killProc()
 		<-done
-	}
-}
-
-func registerBothCleanups(t testing.TB, cleanup func(func()), fn func()) {
-	once := sync.OnceFunc(fn)
-	if cleanup != nil {
-		cleanup(once)
-	}
-	if t != nil {
-		t.Cleanup(once)
 	}
 }
 
@@ -127,6 +209,13 @@ func shortTempRoot(t testing.TB, cleanup func(func()), prefix string) (string, e
 	}
 	registerBothCleanups(t, cleanup, func() { _ = os.RemoveAll(root) })
 	return root, nil
+}
+
+func sharedRVURL(ctx context.Context) string {
+	if rv, ok := ctx.Value(rvKey{}).(*rvWorld); ok && rv != nil {
+		return rv.ws
+	}
+	return ""
 }
 
 func marshalNoEscape(v any) ([]byte, error) {
@@ -289,6 +378,236 @@ func codexApprovalSteps() []map[string]any {
 		}},
 		{"dir": "stdin", "msg": map[string]any{"id": 99, "result": map[string]any{"decision": "accept"}}},
 	}
+}
+
+type peerNodeConfig struct {
+	Ctx           context.Context
+	Dir           string
+	Key           identity.Key
+	Name          string
+	Version       string
+	Owner         identity.Key
+	ExtraBrowsers []identity.Key
+	Rendezvous    string
+	Now           func() time.Time
+	MapRoute      func(peer.Route) peer.Route
+	OnInbound     func(*peer.Connection)
+}
+
+type peerNode struct {
+	Key      identity.Key
+	Store    *store.Store
+	Logs     *node.Logs
+	Home     *home.Loop
+	Host     *host.Host
+	Link     *node.LocalLink
+	Sessions *node.Sessions
+	Surface  *node.Surface
+	Pairer   *node.Pairer
+	Sockets  *peer.Sockets
+	Peer     *peer.Peer
+	Path     *peer.Path
+	once     sync.Once
+}
+
+func startPeerNode(t testing.TB, cleanup func(func()), cfg peerNodeConfig) (*peerNode, error) {
+	cfg = withPeerNodeDefaults(cfg)
+	key, db, err := openPeerNodeStore(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := seedPeerNodeData(db, key, cfg); err != nil {
+		db.Close()
+		return nil, err
+	}
+	pn := &peerNode{Key: key, Store: db}
+	if err := pn.initCore(cfg); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := pn.initTransport(cfg); err != nil {
+		pn.closeCore()
+		return nil, err
+	}
+	registerBothCleanups(t, cleanup, pn.Close)
+	return pn, nil
+}
+
+func (n *peerNode) closeCore() {
+	n.Link.Close()
+	n.Home.Close()
+	n.Host.Settle()
+	n.Store.Close()
+}
+
+func (n *peerNode) Close() {
+	n.once.Do(func() {
+		n.Path.Close()
+		n.Pairer.Close()
+		n.Sockets.Close()
+		n.closeCore()
+	})
+}
+
+func withPeerNodeDefaults(cfg peerNodeConfig) peerNodeConfig {
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	if cfg.Version == "" {
+		cfg.Version = "dev"
+	}
+	if cfg.Name == "" {
+		cfg.Name = "node"
+	}
+	if cfg.MapRoute == nil {
+		cfg.MapRoute = func(r peer.Route) peer.Route { return r }
+	}
+	return cfg
+}
+
+func openPeerNodeStore(cfg peerNodeConfig) (identity.Key, *store.Store, error) {
+	if cfg.Dir == "" {
+		key := cfg.Key
+		if key == nil {
+			key = newRandomPeerKey()
+		}
+		db, err := store.Open(":memory:")
+		return key, db, err
+	}
+	if err := os.MkdirAll(cfg.Dir, 0o700); err != nil {
+		return nil, nil, err
+	}
+	key, err := resolvePeerNodeKey(cfg.Dir, cfg.Key)
+	if err != nil {
+		return nil, nil, err
+	}
+	db, err := store.Open(filepath.Join(cfg.Dir, "node.db"))
+	return key, db, err
+}
+
+func resolvePeerNodeKey(dir string, key identity.Key) (identity.Key, error) {
+	if key != nil {
+		return key, nil
+	}
+	return identity.LoadKey(dir)
+}
+
+func newRandomPeerKey() identity.Key {
+	seed := make([]byte, ed25519.SeedSize)
+	rand.Read(seed)
+	return identity.Key(ed25519.NewKeyFromSeed(seed))
+}
+
+func seedPeerNodeData(db *store.Store, nodeKey identity.Key, cfg peerNodeConfig) error {
+	rawRV, _ := json.Marshal([]string{cfg.Rendezvous})
+	writeRV := func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT OR REPLACE INTO setting(key, value) VALUES('rendezvous', ?)`, string(rawRV))
+		return err
+	}
+	if err := db.Write(writeRV); err != nil || cfg.Owner == nil {
+		return err
+	}
+	entries := buildPeerOwnerLog(cfg.Owner, nodeKey, cfg.Name, cfg.ExtraBrowsers, cfg.Now().UnixMilli())
+	return seedPeerOwnerEntries(db, cfg.Owner.ID(), cfg.Name, entries)
+}
+
+func buildPeerOwnerLog(owner, nodeKey identity.Key, name string, browsers []identity.Key, ts int64) []proto.Envelope {
+	entries := []proto.Envelope{
+		nodetest.SignDeviceAdd(owner, owner.ID(), 1, "browser", "owner", owner.ID(), ts),
+		nodetest.SignDeviceAdd(owner, owner.ID(), 2, "node", name, nodeKey.ID(), ts),
+	}
+	for i, key := range browsers {
+		entries = append(entries, nodetest.SignDeviceAdd(owner, owner.ID(), len(entries)+1, "browser", fmt.Sprintf("browser-%d", i+2), key.ID(), ts))
+	}
+	return entries
+}
+
+func seedPeerOwnerEntries(db *store.Store, owner, name string, entries []proto.Envelope) error {
+	ownerJSON, _ := json.Marshal(owner)
+	nameJSON, _ := json.Marshal(name)
+	write := func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT OR REPLACE INTO setting(key, value) VALUES('owner', ?), ('name', ?)`, string(ownerJSON), string(nameJSON))
+		for i, env := range entries {
+			raw, _ := json.Marshal(env)
+			_, next := tx.Exec(`INSERT OR REPLACE INTO device_log(user, ver, env) VALUES(?, ?, ?)`, owner, i+1, string(raw))
+			err = errors.Join(err, next)
+		}
+		return err
+	}
+	return db.Write(write)
+}
+
+func (n *peerNode) initCore(cfg peerNodeConfig) error {
+	logs, err := node.OpenLogs(n.Store, n.Key.ID())
+	if err != nil {
+		return err
+	}
+	loop, err := home.StartLoop(home.LoopConfig{
+		Store: n.Store, Home: n.Key.ID(), OwnerFn: logs.Owner,
+		Logs: logs.Log, Tables: home.NodeTables(), Now: cfg.Now,
+	})
+	if err != nil {
+		return err
+	}
+	h, _, err := host.New(n.Store, n.Key, cfg.Now)
+	if err != nil {
+		loop.Close()
+		return err
+	}
+	n.Logs, n.Home, n.Host, n.Link = logs, loop, h, node.AttachLocal(h, loop)
+	nameFn := func() string { return node.ReadName(n.Store) }
+	addrsFn := func() []string { return []string{cfg.Rendezvous} }
+	n.Sessions = node.NewSessions(node.SessionConfig{
+		ID: n.Key.ID(), Version: cfg.Version, Store: n.Store, Logs: logs,
+		Home: loop, Host: h, Name: nameFn, Addrs: addrsFn, Now: cfg.Now,
+	})
+	n.Surface = node.NewSurface(node.SurfaceConfig{
+		ID: n.Key.ID(), OS: runtime.GOOS + "/" + runtime.GOARCH, Version: cfg.Version,
+		Store: n.Store, Sessions: n.Sessions, Host: h, Name: nameFn, Agents: h.Agents,
+	})
+	return nil
+}
+
+func (n *peerNode) initTransport(cfg peerNodeConfig) error {
+	socks, err := peer.Listen(0, 0)
+	if err != nil {
+		return err
+	}
+	rvPath, err := peer.Dial(cfg.Ctx, cfg.Rendezvous, n.Key)
+	if err != nil {
+		socks.Close()
+		return err
+	}
+	n.Sockets, n.Path = socks, rvPath
+	n.Pairer = node.NewPairer(node.PairConfig{
+		Key: n.Key, Store: n.Store, Logs: n.Logs, Sessions: n.Sessions,
+		Paths: func() []*peer.Path { return []*peer.Path{rvPath} },
+		Now:   cfg.Now,
+	})
+	known := func(dev string) bool { return n.Logs.Known(dev) || n.Pairer.Known(dev) }
+	routes := func(dev string) []peer.Route { return n.routesFor(dev, cfg.MapRoute) }
+	inbound := func(c *peer.Connection) {
+		if cfg.OnInbound != nil {
+			cfg.OnInbound(c)
+		}
+		go n.Pairer.Serve(cfg.Ctx, c.Device, c)
+	}
+	n.Peer = peer.New(n.Key, socks, n.Store, known, routes, inbound, nil)
+	n.Pairer.Peer = n.Peer
+	event := func(kind string, data []byte) error {
+		n.Pairer.HandleEvent(cfg.Ctx, rvPath, kind, data)
+		return nil
+	}
+	go rvPath.Serve(cfg.Ctx, n.Peer, event)
+	return nil
+}
+
+func (n *peerNode) routesFor(dev string, mapRoute func(peer.Route) peer.Route) []peer.Route {
+	out := []peer.Route{mapRoute(n.Path.Route())}
+	for _, r := range n.Pairer.Routes(dev) {
+		out = append(out, mapRoute(r))
+	}
+	return out
 }
 
 func deviceFingerprint(id string) (string, error) {
@@ -526,7 +845,8 @@ func pumpBrowserPushes(ctx context.Context, conn *peer.Connection, pushes chan<-
 		}
 		select {
 		case pushes <- msg:
-		default:
+		case <-ctx.Done():
+			return
 		}
 	}
 }
@@ -541,6 +861,17 @@ func (c *peerBrowserConn) nextPush(ctx context.Context) (json.RawMessage, error)
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+func requestBrowserHello(ctx context.Context, conn *peer.Connection) (proto.Welcome, error) {
+	raw, err := conn.Request(ctx, func(id int64) any {
+		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 1, Kind: "browser", Name: "Owner Browser", Addrs: []string{}}
+	})
+	if err != nil {
+		return proto.Welcome{}, err
+	}
+	var welc proto.Welcome
+	return welc, proto.Decode(raw, &welc)
 }
 
 func requestHostInfo(ctx context.Context, conn *peer.Connection) (proto.HostInfo, error) {
@@ -572,4 +903,26 @@ func isNonRelayICECandidate(payload string) bool {
 		return false
 	}
 	return !strings.Contains(sig.Cand, " typ relay")
+}
+
+func rewriteDirectICE(servers []proto.ICEServer) []proto.ICEServer {
+	var out []proto.ICEServer
+	for _, s := range servers {
+		if urls := rewriteDirectURLs(s.URLs); len(urls) > 0 {
+			cp := s
+			cp.URLs = urls
+			out = append(out, cp)
+		}
+	}
+	return out
+}
+
+func rewriteDirectURLs(urls []string) []string {
+	var out []string
+	for _, u := range urls {
+		if strings.HasPrefix(u, "stun:") {
+			out = append(out, strings.Replace(u, "localhost:", "127.0.0.1:", 1))
+		}
+	}
+	return out
 }

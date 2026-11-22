@@ -39,7 +39,7 @@ kind: reference
 | serve `host.info` and read node settings | `NewSurface(cfg)`, `(*Surface).HostState(ctx)`, `ReadName(db)`, `ReadRendezvous(db)` ([datachannel.md](../../planning/contracts/datachannel.md) section 7) |
 | wire a host to the home on the same node | `AttachLocal(h, loop)` returning `*LocalLink` (`host.Home` with `Path() == "local"`) |
 | run an outgoing host `ctl` session to a remote home | `(*Sessions).serveClient(ctx, device, raw)` and `(*Sessions).connectHome(dial)` |
-| start in-process nodes with fake CLIs or WebRTC peers | `nodetest.Start(t, cfg)`, `nodetest.StartPeerNode(t, cfg)`, `(*nodetest.Node).StopHome()`, `(*nodetest.Node).RestartHome()`, `nodetest.SignDeviceAdd(...)` |
+| start in-process nodes with fake CLIs | `nodetest.Start(t, cfg)`, `(*nodetest.Node).StopHome()`, `(*nodetest.Node).RestartHome()`, `nodetest.SignDeviceAdd(...)` |
 
 ## Local link
 
@@ -60,7 +60,7 @@ kind: reference
 
 ## Multi-node test helper (`nodetest`)
 
-`nodetest.Start(t, cfg)` creates an owner key, loads a `device.key` per node, signs an owner device log enrolling the owner, every node, and any `Config.ExtraBrowsers`, seeds `setting("owner")`, `setting("name")` and `device_log` in each node's SQLite store, starts `home.StartLoop` and `host.New`, and connects each node's own host and home with `AttachLocal` (`StopHome` and `RestartHome` stop and reopen the home loop and local link on the same store). When `Config.BinDir` is empty, `Start` builds `internal/host/fakecli/claude` and `internal/host/fakecli/codex` into `Root/bin`, prepends `BinDir` to `PATH`, and sets `SOLODAWN_FAKECLI_LOG`. `nodetest.StartPeerNode(t, cfg)` assembles an owned or unowned in-process node (`Logs`, `Home`, `Host`, `LocalLink`, `Sessions`, `Surface`, `Pairer` and `Peer`) dialed to `PeerConfig.Rendezvous` over WebRTC.
+`nodetest.Start(t, cfg)` creates an owner key, loads a `device.key` per node, signs an owner device log enrolling the owner, every node, and any `Config.ExtraBrowsers`, seeds `setting("owner")`, `setting("name")` and `device_log` in each node's SQLite store, starts `home.StartLoop` and `host.New`, and connects each node's own host and home with `AttachLocal` (`StopHome` and `RestartHome` stop and reopen the home loop and local link on the same store). When `Config.BinDir` is empty, `Start` builds `internal/host/fakecli/claude` and `internal/host/fakecli/codex` into `Root/bin`, prepends `BinDir` to `PATH`, and sets `SOLODAWN_FAKECLI_LOG`.
 
 ## Plugging into `Sessions`
 

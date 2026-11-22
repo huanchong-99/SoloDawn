@@ -5,23 +5,14 @@ package features
 import (
 	"os"
 	"os/exec"
-	"syscall"
 )
 
-func prepareManagedCmd(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-}
-
-func attachManagedGroup(cmd *exec.Cmd) (func(os.Signal) error, func()) {
-	pid := cmd.Process.Pid
+func attachManagedProc(cmd *exec.Cmd) (func(os.Signal) error, func()) {
 	sigFn := func(sig os.Signal) error {
-		if sig == os.Interrupt {
-			return syscall.Kill(-pid, syscall.SIGINT)
-		}
-		return syscall.Kill(-pid, syscall.SIGKILL)
+		return cmd.Process.Signal(sig)
 	}
 	killFn := func() {
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = cmd.Process.Kill()
 	}
 	return sigFn, killFn
 }

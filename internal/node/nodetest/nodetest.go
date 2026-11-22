@@ -1,5 +1,5 @@
-// Package nodetest starts in-process SoloDawn nodes wired over LocalLink or
-// WebRTC with the fake Claude Code and Codex CLIs built and placed on PATH.
+// Package nodetest starts in-process SoloDawn nodes wired over LocalLink
+// with the fake Claude Code and Codex CLIs built and placed on PATH.
 package nodetest
 
 import (

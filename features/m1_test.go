@@ -14,7 +14,6 @@ import (
 
 	"github.com/cucumber/godog"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
-	"github.com/huanchong-99/SoloDawn/internal/node/nodetest"
 	"github.com/huanchong-99/SoloDawn/internal/peer"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/rendezvous"
@@ -30,7 +29,7 @@ type m1World struct {
 	cleanup    func(func())
 	now        time.Time
 	rvURL      string
-	pn         *nodetest.PeerNode
+	pn         *peerNode
 	accepted   chan *peer.Connection // single reader: acceptInbound
 	browsers   []*peerBrowser
 	conns      []*peerBrowserConn
@@ -65,8 +64,7 @@ func (w *m1World) setupTwoConnectedBrowsers() error {
 		}
 		w.browsers = append(w.browsers, b)
 	}
-	tb := scenarioTB{TB: w.f.t, cleanup: w.cleanup}
-	w.pn = nodetest.StartPeerNode(tb, nodetest.PeerConfig{
+	pn, err := startPeerNode(w.f.t, w.cleanup, peerNodeConfig{
 		Ctx:           w.ctx,
 		Key:           exampleKey("m1-inproc-node"),
 		Name:          "m1-node",
@@ -77,6 +75,10 @@ func (w *m1World) setupTwoConnectedBrowsers() error {
 		Now:           func() time.Time { return w.now },
 		OnInbound:     func(c *peer.Connection) { w.accepted <- c },
 	})
+	if err != nil {
+		return err
+	}
+	w.pn = pn
 	for _, b := range w.browsers {
 		if err := w.connectAndHelloBrowser(b); err != nil {
 			return err

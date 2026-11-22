@@ -67,7 +67,9 @@ func nodeFeatureSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^two foreground nodes running in separate home directories on this machine$`, w.startTwoNodes)
 	sc.Step(`^the owner runs "solodawn status" in each node's environment$`, w.runStatusOnEach)
 	sc.Step(`^each status prints its node's version and distinct device fingerprint$`, w.checkStatuses)
-	sc.Step(`^two foreground nodes running in separate home directories and a shared rendezvous$`, w.startTwoNodesWithRendezvous)
+	sc.Step(`^two foreground nodes running in separate home directories (?:and a shared|on that) rendezvous$`, func(ctx context.Context) error {
+		return w.startTwoNodesWithRendezvous(sharedRVURL(ctx))
+	})
 	sc.Step(`^a fresh browser pairs the first node as "([^"]*)" and adds the second node as "([^"]*)"$`, w.pairBothNodes)
 	sc.Step(`^the browser lists both nodes with their names, system, version and active path$`, w.checkBothNodesListed)
 }
@@ -125,12 +127,12 @@ func checkOneStatus(out string) (string, error) {
 	return fp, nil
 }
 
-func (w *nodeScenarioWorld) startTwoNodesWithRendezvous() error {
+func (w *nodeScenarioWorld) startTwoNodesWithRendezvous(sharedURL string) error {
 	cleanWindowsLoginTaskIfAbsent(w.f.t, w.cleanup)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	w.ctx = ctx
 	w.cleanup(cancel)
-	rvURL, err := startAcceptanceRelayRV(w.cleanup)
+	rvURL, err := startAcceptanceRelayRVWithBack(w.cleanup, sharedURL)
 	if err != nil {
 		return err
 	}
@@ -180,7 +182,25 @@ func (w *nodeScenarioWorld) pairRunningNode(np *runningNodeProc, label string) (
 	if err := w.enrollNodeOverCtl(bc.conn, roomMsg.Key, label, pairDone); err != nil {
 		return nil, err
 	}
+	if err := verifyNodeStatusFP(w.f.bin, np.env, roomMsg.Key); err != nil {
+		return nil, err
+	}
 	return bc.conn, nil
+}
+
+func verifyNodeStatusFP(bin string, env []string, nodeID string) error {
+	wantFP, err := deviceFingerprint(nodeID)
+	if err != nil {
+		return err
+	}
+	out, err := runNodeCLI(bin, env, "status")
+	if err != nil {
+		return err
+	}
+	if got := extractFingerprintLine(out); got != wantFP {
+		return fmt.Errorf("status fingerprint = %q, want %q", got, wantFP)
+	}
+	return nil
 }
 
 func (w *nodeScenarioWorld) startNodePairCLI(env []string, secret, label string) <-chan error {
@@ -226,17 +246,6 @@ func (w *nodeScenarioWorld) waitPairDone(pairDone <-chan error) error {
 	}
 }
 
-func requestBrowserHello(ctx context.Context, conn *peer.Connection) (proto.Welcome, error) {
-	raw, err := conn.Request(ctx, func(id int64) any {
-		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 1, Kind: "browser", Name: "Owner Browser", Addrs: []string{}}
-	})
-	if err != nil {
-		return proto.Welcome{}, err
-	}
-	var welc proto.Welcome
-	return welc, proto.Decode(raw, &welc)
-}
-
 func (w *nodeScenarioWorld) collectListedNodes() error {
 	w.listed = nil
 	for _, conn := range w.conns {
@@ -274,6 +283,10 @@ func checkListedNodeEntry(item listedNode, wantName string) error {
 }
 
 func startAcceptanceRelayRV(cleanup func(func())) (string, error) {
+	return startAcceptanceRelayRVWithBack(cleanup, "")
+}
+
+func startAcceptanceRelayRVWithBack(cleanup func(func()), backURL string) (string, error) {
 	relay := &peersWorld{}
 	err := relay.relayOnly()
 	for _, undo := range relay.cleanup {
@@ -283,9 +296,11 @@ func startAcceptanceRelayRV(cleanup func(func())) (string, error) {
 		return "", err
 	}
 	iceRaw, _ := json.Marshal(relay.relay)
-	back := httptest.NewServer(rendezvous.Handler(fstest.MapFS{}))
-	cleanup(back.Close)
-	backURL := "ws" + strings.TrimPrefix(back.URL, "http") + "/rv"
+	if backURL == "" {
+		back := httptest.NewServer(rendezvous.Handler(fstest.MapFS{}))
+		cleanup(back.Close)
+		backURL = "ws" + strings.TrimPrefix(back.URL, "http") + "/rv"
+	}
 	front := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		proxyAcceptanceRV(rw, r, backURL, string(iceRaw))
 	}))
@@ -299,7 +314,7 @@ func proxyAcceptanceRV(rw http.ResponseWriter, r *http.Request, backURL, iceJSON
 		return
 	}
 	defer cConn.CloseNow()
-	bConn, _, err := websocket.Dial(r.Context(), backURL, nil)
+	bConn, _, err := websocket.Dial(r.Context(), backURL, &websocket.DialOptions{HTTPClient: http.DefaultClient})
 	if err != nil {
 		return
 	}
@@ -308,8 +323,49 @@ func proxyAcceptanceRV(rw http.ResponseWriter, r *http.Request, backURL, iceJSON
 	defer cancel()
 	go pumpAcceptanceWS(ctx, cancel, cConn, bConn, nil)
 	pumpAcceptanceWS(ctx, cancel, bConn, cConn, func(b []byte) []byte {
-		return bytes.Replace(b, []byte(`"ice":[]`), []byte(`"ice":`+iceJSON), 1)
+		return rewriteAcceptanceRVFrame(b, iceJSON)
 	})
+}
+
+func rewriteAcceptanceRVFrame(b []byte, fallbackICE string) []byte {
+	if bytes.Contains(b, []byte(`"ice":[]`)) {
+		return bytes.Replace(b, []byte(`"ice":[]`), []byte(`"ice":`+fallbackICE), 1)
+	}
+	if !bytes.Contains(b, []byte(`"stun:localhost:`)) {
+		return b
+	}
+	var cfg proto.ICEConfig
+	if proto.Decode(b, &cfg) != nil {
+		return b
+	}
+	cfg.ICE = rewriteSubprocICE(cfg.ICE)
+	out, err := marshalNoEscape(cfg)
+	if err != nil {
+		return b
+	}
+	return out
+}
+
+func rewriteSubprocICE(servers []proto.ICEServer) []proto.ICEServer {
+	var out []proto.ICEServer
+	for _, s := range servers {
+		if urls := rewriteSubprocURLs(s.URLs); len(urls) > 0 {
+			cp := s
+			cp.URLs = urls
+			out = append(out, cp)
+		}
+	}
+	return out
+}
+
+func rewriteSubprocURLs(urls []string) []string {
+	var out []string
+	for _, u := range urls {
+		if strings.HasPrefix(u, "stun:") || strings.HasPrefix(u, "turn:") {
+			out = append(out, strings.Replace(u, "localhost:", "127.0.0.1:", 1))
+		}
+	}
+	return out
 }
 
 func pumpAcceptanceWS(ctx context.Context, cancel context.CancelFunc, src, dst *websocket.Conn, mapFn func([]byte) []byte) {

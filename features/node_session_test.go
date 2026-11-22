@@ -243,13 +243,9 @@ func (w *nodeSessionWorld) setupUnownedPairing() error {
 }
 
 func (w *nodeSessionWorld) sendHello(conn *peer.Connection) error {
-	raw, err := conn.Request(w.ctx, func(id int64) any {
-		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 1, Kind: "browser", Name: "browser", Addrs: []string{}}
-	})
-	if err != nil {
-		return err
-	}
-	return proto.Decode(raw, &w.lastWelcome)
+	welc, err := requestBrowserHello(w.ctx, conn)
+	w.lastWelcome = welc
+	return err
 }
 
 func (w *nodeSessionWorld) checkWelcomeOwner(want string) error {

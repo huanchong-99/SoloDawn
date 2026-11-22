@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing/fstest"
@@ -30,11 +31,12 @@ type nodePairWorld struct {
 	ctx     context.Context
 	cleanup func(func())
 
-	mu    sync.Mutex
-	now   time.Time
-	rvURL string
-	ice   []proto.ICEServer
-	pn    *nodetest.PeerNode
+	mu       sync.Mutex
+	now      time.Time
+	rvURL    string
+	ice      []proto.ICEServer
+	mapRoute func(peer.Route) peer.Route
+	pn       *peerNode
 
 	b1, b2       *peerBrowser
 	b1Conn       *peerBrowserConn
@@ -60,13 +62,15 @@ func nodePairSteps(sc *godog.ScenarioContext, f fixtures) {
 		now:          time.UnixMilli(1763600000000),
 		linksByNonce: map[string]proto.CmdResult{},
 	}
-	sc.Step(`^an in-process rendezvous and an unowned pairing node$`, func() error { return w.setupNode(false) })
+	sc.Step(`^an in-process rendezvous and an unowned pairing node$`, func() error { return w.setupNode(false, "") })
+	sc.Step(`^an unowned pairing node on that rendezvous$`, func(ctx context.Context) error { return w.setupNode(false, sharedRVURL(ctx)) })
 	sc.Step(`^a fresh browser creates a pairing secret and joins its room$`, w.browserCreatesSecret)
 	sc.Step(`^the pairing node runs pair with that secret and label "([^"]*)"$`, w.nodeRunsPair)
 	sc.Step(`^the node fingerprint seen in the room equals the node key fingerprint$`, w.checkRoomFingerprint)
 	sc.Step(`^the pairing browser opens ctl and sends hello before any device log$`, w.browserOpensCtlAndSaysHello)
 	sc.Step(`^the pairing welcome reports owner (true|false)$`, w.checkWelcomeOwner)
 	sc.Step(`^host\.info before enrolment is refused with "([^"]*)"$`, w.checkPreEnrolmentForbidden)
+	sc.Step(`^cmd before enrolment is refused with "([^"]*)"$`, w.checkPreEnrolmentCmdForbidden)
 	sc.Step(`^the pairing browser sends a log whose add entry for the node was signed by another device$`, w.sendWrongSignerLog)
 	sc.Step(`^the pairing node still has no owner and refuses host\.info with "([^"]*)"$`, w.checkUnownedForbidden)
 	sc.Step(`^the pairing browser sends a valid device log adding the node signed by the pairing browser$`, w.sendValidAdoptionLog)
@@ -92,11 +96,47 @@ func (w *nodePairWorld) nowTime() time.Time {
 	return w.now
 }
 
-func (w *nodePairWorld) setupNode(owned bool) error {
+func (w *nodePairWorld) setupNode(owned bool, sharedURL string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	w.ctx = ctx
 	w.cleanup(cancel)
+	if err := w.prepareRendezvous(sharedURL); err != nil {
+		return err
+	}
+	b1Key := exampleKey("n3-b1")
+	w.otherKey = exampleKey("n3-other")
+	var owner identity.Key
+	if owned {
+		owner = b1Key
+	}
+	pn, err := startPeerNode(w.f.t, w.cleanup, peerNodeConfig{
+		Ctx:        w.ctx,
+		Key:        exampleKey("n3-node"),
+		Name:       "workstation",
+		Version:    "v0.3.1",
+		Owner:      owner,
+		Rendezvous: w.rvURL,
+		Now:        w.nowTime,
+		MapRoute:   w.mapRoute,
+	})
+	if err != nil {
+		return err
+	}
+	w.pn = pn
+	b1, err := newPeerBrowser(w.ctx, w.cleanup, b1Key, w.rvURL, w.mapRoute)
+	w.b1 = b1
+	return err
+}
 
+func (w *nodePairWorld) prepareRendezvous(sharedURL string) error {
+	if sharedURL != "" {
+		w.rvURL = sharedURL
+		w.mapRoute = func(r peer.Route) peer.Route {
+			r.ICE = rewriteDirectICE(r.ICE)
+			return r
+		}
+		return nil
+	}
 	relay := &peersWorld{}
 	err := relay.relayOnly()
 	for _, undo := range relay.cleanup {
@@ -106,31 +146,11 @@ func (w *nodePairWorld) setupNode(owned bool) error {
 		return err
 	}
 	w.ice = relay.relay
-
 	srv := httptest.NewServer(rendezvous.Handler(fstest.MapFS{}))
 	w.cleanup(srv.Close)
 	w.rvURL = "ws" + strings.TrimPrefix(srv.URL, "http") + "/rv"
-
-	b1Key := exampleKey("n3-b1")
-	w.otherKey = exampleKey("n3-other")
-	var owner identity.Key
-	if owned {
-		owner = b1Key
-	}
-	tb := scenarioTB{TB: w.f.t, cleanup: w.cleanup}
-	w.pn = nodetest.StartPeerNode(tb, nodetest.PeerConfig{
-		Ctx:        w.ctx,
-		Key:        exampleKey("n3-node"),
-		Name:       "workstation",
-		Version:    "v0.3.1",
-		Owner:      owner,
-		Rendezvous: w.rvURL,
-		Now:        w.nowTime,
-		MapRoute:   w.withRelay,
-	})
-	b1, err := newPeerBrowser(w.ctx, w.cleanup, b1Key, w.rvURL, w.withRelay)
-	w.b1 = b1
-	return err
+	w.mapRoute = w.withRelay
+	return nil
 }
 
 func (w *nodePairWorld) withRelay(r peer.Route) peer.Route {
@@ -215,6 +235,14 @@ func (w *nodePairWorld) checkPreEnrolmentForbidden(wantCode string) error {
 	return checkWireError(rawInfo, wantCode)
 }
 
+func (w *nodePairWorld) checkPreEnrolmentCmdForbidden(wantCode string) error {
+	rawCmd, err := w.callPairBrowser("pre")
+	if err != nil {
+		return err
+	}
+	return checkWireError(rawCmd, wantCode)
+}
+
 func (w *nodePairWorld) sendWrongSignerLog() error {
 	ts := w.nowTime().UnixMilli()
 	e1 := nodetest.SignDeviceAdd(w.b1.key, w.b1.key.ID(), 1, "browser", "b1", w.b1.key.ID(), ts)
@@ -261,14 +289,18 @@ func (w *nodePairWorld) checkPairCompleted() error {
 
 func (w *nodePairWorld) checkOwnerSurface() error {
 	info, err := requestHostInfo(w.ctx, w.b1Conn.conn)
-	if err != nil || info.Device != w.pn.Key.ID() || info.Name != "workstation" {
-		return fmt.Errorf("host.info = %+v (%v)", info, err)
+	if err != nil {
+		return err
+	}
+	wantOS := runtime.GOOS + "/" + runtime.GOARCH
+	if info.Device != w.pn.Key.ID() || info.Name != "workstation" || info.OS != wantOS || info.Version != "v0.3.1" {
+		return fmt.Errorf("host.info = %+v", info)
 	}
 	return nil
 }
 
 func (w *nodePairWorld) setupOwnedWithBrowser() error {
-	if err := w.setupNode(true); err != nil {
+	if err := w.setupNode(true, ""); err != nil {
 		return err
 	}
 	bc, err := w.b1.openCtl(w.ctx, w.cleanup, w.pn.Key.ID())
@@ -337,7 +369,7 @@ func (w *nodePairWorld) secondBrowserPairs() error {
 	if err != nil {
 		return err
 	}
-	b2, err := newPeerBrowser(w.ctx, w.cleanup, exampleKey("n3-b2"), w.rvURL, w.withRelay)
+	b2, err := newPeerBrowser(w.ctx, w.cleanup, exampleKey("n3-b2"), w.rvURL, w.mapRoute)
 	if err != nil {
 		return err
 	}

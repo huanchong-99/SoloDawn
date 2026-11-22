@@ -5,23 +5,25 @@ package features
 import (
 	"os"
 	"os/exec"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-func prepareManagedCmd(_ *exec.Cmd) {}
-
-func attachManagedGroup(cmd *exec.Cmd) (func(os.Signal) error, func()) {
+func attachManagedProc(cmd *exec.Cmd) (func(os.Signal) error, func()) {
 	job, err := openKillOnCloseJob(uint32(cmd.Process.Pid))
+	closeJob := sync.OnceFunc(func() {
+		if err == nil {
+			_ = windows.CloseHandle(job)
+		}
+	})
 	sigFn := func(sig os.Signal) error {
 		return cmd.Process.Signal(sig)
 	}
 	killFn := func() {
 		_ = cmd.Process.Kill()
-		if err == nil {
-			_ = windows.CloseHandle(job)
-		}
+		closeJob()
 	}
 	return sigFn, killFn
 }
