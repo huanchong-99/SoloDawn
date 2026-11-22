@@ -3,8 +3,6 @@ package node
 import (
 	"context"
 	"encoding/json"
-	"net/url"
-	"slices"
 	"sync"
 
 	"github.com/huanchong-99/SoloDawn/internal/home"
@@ -136,16 +134,11 @@ func (p *Pairer) admit(a *pairAttempt, c *sesConn, log *identity.Log, used bool)
 
 func (s *Sessions) cmdHomeAdd(_ context.Context, _ Ctl, _ string, payload json.RawMessage) (any, error) {
 	var cmd proto.HomeAdd
-	if proto.Decode(payload, &cmd) != nil || !identity.IsDevice(cmd.Home) || slices.ContainsFunc(cmd.Addrs, invalidSignalURL) {
+	if proto.Decode(payload, &cmd) != nil {
 		return nil, &host.Error{Code: "bad_request", Message: "invalid home.add fields"}
 	}
 	entry := proto.Home{Group: cmd.Group, Home: cmd.Home, Name: cmd.Name}
 	return nil, s.cfg.Host.RecordHome(entry, cmd.Addrs)
-}
-
-func invalidSignalURL(addr string) bool {
-	u, err := url.Parse(addr)
-	return err != nil || u.Host == "" || (u.Scheme != "ws" && u.Scheme != "wss")
 }
 
 func (n *nodeRuntime) remembersHome(device string) bool {

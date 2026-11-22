@@ -10,7 +10,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: `home.add` records signalling addresses, but a node still needs a shared configured rendezvous to reach an external home.
 - Cause: the node's route lookup in `internal/node/node.go` uses active pairing and configured rendezvous paths, not the remembered addresses.
-- Status: open; PR-2 owns remembered-address dialling.
+- Status: open.
 
 ### 2026-11-22 · limitation · A hand-back that starts while the node is stopping is lost
 

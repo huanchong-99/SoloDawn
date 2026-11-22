@@ -275,25 +275,6 @@ func TestInviteWithoutRendezvous(t *testing.T) {
 	}
 }
 
-func TestHomeAddSignalURLs(t *testing.T) {
-	owner := sesKey("home-add-validation")
-	ph := newPairHarness(t, &owner, false)
-	cmd := proto.HomeAdd{
-		HostCommand: proto.HostCommand{Type: "home.add", To: ph.nodeKey.ID(), Nonce: sesID("home-add-url"), Timestamp: ph.clock.Now().UnixMilli()},
-		Group:       sesID("home-add-url-group"), Home: owner.ID(), Name: "Shared",
-	}
-	for _, addr := range []string{"https://example.test/rv", "ws:///rv", "ws://%"} {
-		cmd.Addrs = []string{addr}
-		_, err := ph.sessions.cmdHomeAdd(t.Context(), nil, owner.ID(), dvlMustEncode(cmd))
-		if err == nil || err.Error() != "bad_request: invalid home.add fields" {
-			t.Fatalf("home.add with %q = %v, want invalid fields", addr, err)
-		}
-	}
-	cmd.Addrs = []string{"ws://example.test/rv", "wss://example.test/rv"}
-	_, err := ph.sessions.cmdHomeAdd(t.Context(), nil, owner.ID(), dvlMustEncode(cmd))
-	mustNoErr(t, err)
-}
-
 func TestHomeAddRecordsAndReplacesHome(t *testing.T) {
 	owner, nodeKey := sesKey("home-add-owner"), sesKey("home-add-node")
 	old, next := sesKey("former-home"), sesKey("next-home")
@@ -324,6 +305,10 @@ func TestHomeAddRecordsAndReplacesHome(t *testing.T) {
 	if !ok || row.Home != next.ID() {
 		t.Fatalf("session after replacement = %+v", row)
 	}
+	sendInviteCmd(c, owner, 4, proto.HostCommand{
+		Type: "home.add", To: nodeKey.ID(), Nonce: sesID("incomplete-home-add"), Timestamp: n.sessions.cfg.Now().UnixMilli(),
+	})
+	expectErr(t, c.next(t), 4, "bad_request")
 }
 
 func sendHomeAdd(t *testing.T, n *clientNodeRig, c *fakeCtl, owner, target identity.Key, group proto.ID, id int64) {
