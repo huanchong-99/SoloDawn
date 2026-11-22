@@ -256,6 +256,7 @@ export interface NewGroup {
   forge: string;
   checks: string[];
   member_name: string;
+  templates?: p.GroupCreate['templates'];
 }
 
 /** One connection to a node, from before it exists until it is gone. */

@@ -4,6 +4,7 @@
   import { clock, now } from '../../lib/when';
   import Failure from '../Failure.svelte';
   import Icon from '../Icon.svelte';
+  import SecretaryWarning from '../groupinfo/SecretaryWarning.svelte';
 
   let { open = $bindable(), group }: { open: boolean; group: Group } = $props();
   const uid = $props.id();
@@ -12,6 +13,12 @@
   let failure = $state('');
   let result = $state.raw<{ link: string; expires: number }>();
   let copied = $state(false);
+  const secretary = $derived(
+    group.info!.secretary ? group.member(group.info!.secretary) : undefined,
+  );
+  const people = $derived(
+    group.members.filter((member) => member.kind === 'human').map((member) => member.user),
+  );
 
   $effect(() => dialog.showModal());
 
@@ -46,6 +53,9 @@
   <form onsubmit={invite}>
     <header>
       <h2 id={`${uid}-title`}>{t('people.invite.title')}</h2>
+      {#if secretary?.kind === 'ai'}
+        <SecretaryWarning account={secretary.account} owner={secretary.user} {people} inviting />
+      {/if}
       <p class="lead">{t('people.invite.lead')}</p>
     </header>
     {#if result}

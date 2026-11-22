@@ -3,6 +3,8 @@
   import { homes, type Home } from '../../lib/groups.svelte';
   import { t } from '../../lib/prefs.svelte';
   import Failure from '../Failure.svelte';
+  import ForgeChoice from '../forge/ForgeChoice.svelte';
+  import { emptyTemplates } from '../forge/templates';
 
   /** The create-group dialog (contracts/commands.md 1.1). `open` shows it. */
   let { open = $bindable(false) }: { open?: boolean } = $props();
@@ -18,6 +20,7 @@
   let repo = $state('');
   let base = $state('main');
   let forge = $state('github');
+  let templates = $state(emptyTemplates());
   let checks = $state('');
   let member = $state('');
   let busy = $state(false);
@@ -58,6 +61,7 @@
       repo: repo.trim(),
       base: base.trim(),
       forge,
+      ...(forge === 'custom' ? { templates } : {}),
       checks: checks
         .split('\n')
         .map((line) => line.trim())
@@ -70,6 +74,7 @@
       return;
     }
     name = repo = checks = '';
+    templates = emptyTemplates();
     dialog.close();
     // The group itself arrives in a push; its chat opens as soon as it is listed.
     location.hash = `#/groups/${g}`;
@@ -125,13 +130,7 @@
         <input class="input" bind:value={member} required pattern=".*\S.*" maxlength="40" />
       </label>
     </div>
-    <label class="field">
-      <span id={`${uid}-forge`}>{t('groups.create.forge')}</span>
-      <select class="input" aria-labelledby={`${uid}-forge`} bind:value={forge}>
-        <option value="github">{t('groups.create.forge.github')}</option>
-        <option value="none">{t('groups.create.forge.none')}</option>
-      </select>
-    </label>
+    <ForgeChoice bind:forge bind:templates />
     <label class="field">
       <span id={`${uid}-checks`}>{t('groups.create.checks')}</span>
       <textarea
