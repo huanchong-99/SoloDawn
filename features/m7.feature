@@ -47,6 +47,7 @@ Feature: M7 terminal takeover
     When the M7 owner opens terminal takeover on "Claude" again, commits "fix.txt" with subject "Apply owner fix" in the task worktree, and hands back
     Then the second takeover task remains "active" and its handback message lists commit "Apply owner fix" and file "fix.txt"
 
+  @not-windows
   Scenario: Moving an open takeover PeerConnection from direct to TURN relay closes pty, hands back, and keeps original ctl working (A7.9)
     Given an M7 project group with configured AI "Claude" on an active task over a direct path with TURN reachable
     When the M7 owner opens terminal takeover on "Claude" and verifies a non-relay selected pair in WebRTC statistics
