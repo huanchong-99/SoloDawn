@@ -24,6 +24,7 @@ import {
   type Welcome,
 } from './proto';
 import { rendezvous } from './rendezvous';
+import { hello } from './version';
 
 const second = 1000;
 const minute = 60 * second;
@@ -356,9 +357,11 @@ export class Connection {
    *  not answered within 10 seconds, the connection closes and the promise rejects. */
   async hello(): Promise<Welcome> {
     const timer = setTimeout(this.close, patience);
-    const hello = { t: 'hello' as const, v: 1, kind: 'browser', name: this.#hub.name, addrs: [] };
     try {
-      const answer = (await this.request(hello)) as Welcome | ErrorResponse;
+      const answer = await hello(
+        (req) => this.request(req) as Promise<Welcome | ErrorResponse>,
+        this.#hub.name,
+      );
       if (!answer.err) return answer;
       this.refused = answer.err.code;
       throw new Error(`hello refused: ${this.refused}`);

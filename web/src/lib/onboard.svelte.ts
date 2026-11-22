@@ -22,6 +22,7 @@ import type {
   Push,
   Welcome,
 } from './proto';
+import { hello } from './version';
 
 const windowSeconds = 600;
 const second = 1000;
@@ -109,13 +110,7 @@ async function openMock(onpush: (push: Push) => void) {
   const device = await loadDevice({ crypto, idb: () => indexedDB }).catch(() => undefined);
   if (!device) return undefined;
   const ctl = mockCtl(onpush);
-  const welcome = (await ctl.request({
-    t: 'hello',
-    v: 1,
-    kind: 'browser',
-    name: browserName,
-    addrs: [],
-  })) as Welcome;
+  const welcome = (await hello(ctl.request.bind(ctl), browserName)) as Welcome;
   const nodeFp = await fingerprint(crypto, decode(welcome.device)!);
   return { device, ctl, welcome, nodeFp };
 }
@@ -445,9 +440,7 @@ export class PairingSession {
   }
 
   async #confirmOwner(run: number, ctl: Ctl) {
-    const answer = await ctl
-      .request({ t: 'hello', v: 1, kind: 'browser', name: browserName, addrs: [] })
-      .catch(() => undefined);
+    const answer = await hello(ctl.request.bind(ctl), browserName).catch(() => undefined);
     if (!answer) return this.#fail(run, 3, 'lost');
     if (answer.err) return this.#fail(run, 3, 'refused', answer.err.code);
     if (!answer.owner) return this.#fail(run, 3, 'not_owner');
