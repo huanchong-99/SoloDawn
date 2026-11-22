@@ -449,7 +449,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
     group's AI members, placing the secretary first with its corner mark, with each AI's state
     (`working`, `waiting` on the reader in dawn or on another member, `dormant` as sleeping,
     `takeover`, `limited`, `offline`), computer with path (`local`, `direct`, `relay`, `offline`),
-    account type, and for owned AIs an "Open terminal" link enabled only when the browser's own
+    account type, a usage bar (`.meter` in `src/styles/base.css`, from `usageMeter` in
+    `src/lib/members.ts`: the rate-limit window percentage with its reset time, in danger tone at
+    100 percent and omitted when `usage` has no `window_pct`), and for owned AIs an "Open terminal" link enabled only when the browser's own
     path to that computer is `direct`, or, while the AI is in `takeover`, a "Hand back" button that
     sends `takeover.end` and says that messages to it wait until then; then the human members with
     their roles and online status. Its "Add AI" button requires a reachable group home, an admin
