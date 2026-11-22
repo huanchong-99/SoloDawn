@@ -6,6 +6,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-21 · deviation · The `rounds_limit` system message has an id derived from the triggering post's nonce
+
+- Symptom: when a `post` by an AI in a task's thread reaches `limits.rounds` (task-machine row 21), the command writes both the `post` row under `n` and the main-line `rounds_limit` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn rounds limit <n>` in base64url, rather than a random id.
+- Cause: `n` already names the `post` row, and a command function is pure and has no randomness (`revDerivedID` in `internal/home/cmd_review.go:149`, called from `internal/home/rounds.go:176`).
+- Status: open, decided by unit HM-13 on 2026-11-21, for the same reason as `briefTaskID` below.
+
+### 2026-11-21 · limitation · Quiet-period tracking lives in memory
+
+- Symptom: a home restart forgets which quiet periods already notified the secretary and can send one more `quiet` notice if an active task stays silent across the restart.
+- Cause: row 23 writes no row (`planning/contracts/task-machine.md` row 23), so `After["quiet"]` records each notified task's last-activity timestamp in the group's `State.quiet` in memory (`rndRememberQuiet` in `internal/home/rounds.go:121`, `internal/home/home.go:69`).
+- Status: open, accepted in step 1.
+
 ### 2026-11-22 · deviation · `driver` in `host.info` is optional until T3-2 fills it
 
 - Symptom: `planning/contracts/step-3/drivers.md` section 6 says each entry of `agents` carries `driver` always, but the frozen shape lets it be absent: Go `Driver *Driver` with `omitempty` (`internal/proto/host.go`, `HostAgent`), TS `v.optional(Driver)` (`web/src/lib/proto.ts`, `HostState.agents`), and `agents.driver` under `optional` in `internal/proto/testdata/wire.json`.
@@ -94,11 +106,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `planning/flows/agent-turn.md` step 5.1 places `max_open` (closing the longest-`waiting` session, or waiting when every open session is `working` or `takeover`) in the session runtime (`HS-15`, #187, `tryReserveSlot`), so delivery does not duplicate it; `Deliver` (`deliverNow` in `internal/host/deliver.go`) walks all held AI keys on each wake so a freed slot reaches waiting AIs.
 - Status: open, coordinated between HS-13 (#186) and HS-15 (#187).
 
-### 2026-11-21 · limitation · `member/status` refuses `cap_reached` and `rate_limited` while `HS-18` is postponed
+### 2026-11-21 · limitation · `member/status` refuses `cap_reached` while `settings.set` is postponed
 
-- Symptom: a `member status` carrying host event code `cap_reached` or `rate_limited` (`planning/contracts/commands.md` section 1.9; `planning/contracts/messages.md` section 2.11) is answered `bad_request` ("unknown host event code").
-- Cause: `internal/home/cmd_hostev.go` (`hevEventReaders`) handles only the three step-1 host codes that `HS-15` sends (`turn_interrupted`, `login_invalid`, `session_replaced`), per the coordinator's decision of 2026-11-21 removing caps and rate limits from the main line.
-- Status: open until `HS-18` brings usage caps and rate-limit events back.
+- Symptom: a `member status` carrying host event code `cap_reached` (`planning/contracts/commands.md` section 1.9; `planning/contracts/messages.md` section 2.11) is answered `bad_request` ("unknown host event code").
+- Cause: nothing in 1.0 can set `agent.caps`: `settings.set`, its only writer, is postponed after 1.0 (`planning/contracts/commands.md`), so `HS-18` sends no `cap_reached` and `internal/home/cmd_hostev.go` (`hevEventReaders`) reads `rate_limited` but not `cap_reached` (coordinator's decision of 2026-11-22).
+- Status: open until `settings.set` comes back with caps.
 
 ### 2026-11-21 · limitation · Reassigning a task's assignee also marks a reviewer's pending approval card `reassigned`
 
@@ -208,7 +220,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-21 · deviation · A `task_failed` row written beside a `checks` or `review` row has an id derived from the command's nonce
 
 - Symptom: when `task cloud` reaches `limits.failures` (row 6 into row 14) or `post` of kind `review` exceeds `limits.review_rounds` (row 7 into row 14), the command writes two message rows in the task's thread: the `checks` or `review` row under `n`, and the `task_failed` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn task failed <n>` in base64url.
-- Cause: `n` already names the `checks` or `review` message row, and a command function is pure and has no randomness (`revFailedID` in `internal/home/cmd_review.go:149`).
+- Cause: `n` already names the `checks` or `review` message row, and a command function is pure and has no randomness (`revDerivedID` in `internal/home/cmd_review.go:149`).
 - Status: open, decided in unit HM-11 on 2026-11-21, for the same reason as `briefTaskID` above.
 
 ### 2026-11-21 · deviation · Passed hosted checks write a `checks` message in the task's thread
@@ -492,6 +504,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-22 · bug · HM-13 and HM-15 home tests disagreed on rounds after both landed
+
+- Symptom: after `origin/rebuild` (HM-15's `post/call` and `post/reply`) was merged into HM-13, `go test ./internal/home/` panicked with `home: two functions under post/call` in `TestRoundsTenExchangesPauseAndResume`, and two `TestCall*` cases got `thread.rounds` one higher than they expected.
+- Cause: `rounds_test.go` cloned `home.Commands` and added a stand-in `post/call`, written before HM-15 existed; `Table.Add` refuses a second function under a key (`internal/home/home.go:307`). The `TestCall*` cases were written without HM-13's row 21, so they expected a thread call, and a thread reply that mentions an AI, to leave `thread.rounds` unchanged; `task-machine.md` row 21 and `flows/ask.md` A.3 and D count both.
+- Status: resolved on `gemini/HM-13` (#190): the stand-in is gone and the rounds test uses the real `post/call`; the call tests expect the round.
 
 ### 2026-11-22 · bug · `Host.Hand` could lose the item that answers a wait when the wait ended at the same moment
 

@@ -125,12 +125,15 @@ func TestCallGoldenShapes(t *testing.T) {
 	equal(t, string(replyRow.Body), "{}")
 	equal(t, replyRow.State, (*proto.CardState)(nil))
 	equal(t, replyRes.Items, []home.Item{{AI: calA, Why: itemGolden.Why, Task: thread, Msg: replyRow.ID}})
+	// The call counted a round; the reply mentions no AI and does not (flows/ask.md D).
+	equal(t, replyRes.Rows[2].Value().(proto.TaskRow).Thread.Rounds, 2)
 	postCheckNulls(t, answered, "/re")
 	postCheckNulls(t, replyRow, "/state")
 }
 
 func TestCallPostInThreadAndMainLine(t *testing.T) {
-	t.Run("thread call updates task thread summary and queues one mention for callee", func(t *testing.T) {
+	// A call in a thread counts a round (task-machine.md row 21, flows/ask.md A.3).
+	t.Run("thread call updates task thread summary, counts a round and queues one mention for callee", func(t *testing.T) {
 		s := calState(t)
 		thread, re := calTaskID, calPrevID
 		post := calCallCmd(40, calCallTS, calA, &thread, "Which <event> & path?", proto.CallBody{To: calB, Depth: 1, Wait: true})
@@ -149,7 +152,7 @@ func TestCallPostInThreadAndMainLine(t *testing.T) {
 		wantTask.Seq = 12
 		wantTask.Thread = proto.ThreadSummary{
 			Count:  3,
-			Rounds: 1,
+			Rounds: 2,
 			Last:   &proto.ThreadMessage{By: calA, Kind: "call", Text: "Which <event> & path?", Timestamp: calCallTS},
 		}
 		equal(t, briefRows(res), []any{wantMsg, wantTask})
@@ -310,7 +313,8 @@ func calApplyRaw(t *testing.T, s *home.State, d disk, override identity.Key, pos
 }
 
 func TestCallReplyInThreadAndMainLine(t *testing.T) {
-	t.Run("late thread reply marks call answered with elapsed ms and wakes caller", func(t *testing.T) {
+	// A reply that mentions an AI counts a round (flows/ask.md D).
+	t.Run("late thread reply marks call answered with elapsed ms, counts a round and wakes caller", func(t *testing.T) {
 		s := calState(t)
 		thread := calTaskID
 		_, callRes := calSend(t, s, disk{}, receipts{}, laptop, calCallCmd(50, calCallTS, calA, &thread, "Need event name.", proto.CallBody{To: calB, Depth: 1, Wait: true}))
@@ -336,7 +340,7 @@ func TestCallReplyInThreadAndMainLine(t *testing.T) {
 		wantTask.Seq = 15
 		wantTask.Thread = proto.ThreadSummary{
 			Count:  baseTask.Thread.Count + 1,
-			Rounds: baseTask.Thread.Rounds,
+			Rounds: baseTask.Thread.Rounds + 1,
 			Last:   &proto.ThreadMessage{By: calB, Kind: "reply", Text: "Use path_changed.", Timestamp: calReplyTS},
 		}
 		equal(t, briefRows(res), []any{wantCall, wantReply, wantTask})
