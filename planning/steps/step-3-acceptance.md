@@ -17,8 +17,7 @@ If spike S-9 shows a clear benefit, its tests are written with its plan.
   declare the values of section 8 of that contract, and A9.40 still holds.
   With a declaration made up in the test that varies each field in turn,
   each switch of its section 5 holds, A3.1 passes, and in the browser what
-  is switched off is not offered. On native Windows, `perm.set` level 2 for
-  Claude Code is refused and the browser offers no level 2 (`risks.md` Q-4).
+  is switched off is not offered.
 - **A10.2** For a CLI whose terms allow API keys only, `agent.set` takes
   `api_key`; any other type is refused, and the browser offers none (R-54).
 - **A10.3** For each CLI added, the M3, M4 and M7 tests of step 1 that are not
