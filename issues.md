@@ -571,12 +571,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
-### 2026-11-22 · bug · Starting an invitation join replaced the browser's rendezvous connection
-
-- Symptom: the browser's normal connection and its invitation join would replace each other at rendezvous, dropping room membership.
-- Cause: `web/src/lib/join.ts` opened a second socket with the same device identity. `internal/rendezvous/server.go` keeps one socket per identity and removes the replaced socket from every room.
-- Status: resolved in W2-1 (#307); joining uses the active socket and resubscribes the room if that socket reconnects.
-
 ### 2026-11-22 · bug · HM-13 and HM-15 home tests disagreed on rounds after both landed
 
 - Symptom: after `origin/rebuild` (HM-15's `post/call` and `post/reply`) was merged into HM-13, `go test ./internal/home/` panicked with `home: two functions under post/call` in `TestRoundsTenExchangesPauseAndResume`, and two `TestCall*` cases got `thread.rounds` one higher than they expected.

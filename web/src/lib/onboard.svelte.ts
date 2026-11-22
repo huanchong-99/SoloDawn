@@ -107,14 +107,13 @@ export async function setAccount(
 /** Opens the development mock node; kept at module scope so production builds tree-shake `mock.ts`. */
 async function openMock(onpush: (push: Push) => void) {
   const { mockCtl } = await import('./mock');
-  const device = await loadDevice({ crypto, idb: () => indexedDB });
+  const device = await loadDevice({ crypto, idb: () => indexedDB }).catch(() => undefined);
+  if (!device) return undefined;
   const ctl = mockCtl(onpush);
-  const welcome = (await hello(ctl.request.bind(ctl), browserName)) as Welcome;
+  const welcome = (await hello(ctl.request, browserName)) as Welcome;
   const nodeFp = await fingerprint(crypto, decode(welcome.device)!);
   return { device, ctl, welcome, nodeFp };
 }
-
-const ignoreLog = (_frame: Devlog): void => {};
 
 export type Stage = 'waiting' | 'linking' | 'accounts' | 'ready' | 'expired' | 'failed';
 export type ErrorKey = 'bad_secret' | 'unadopted' | 'not_owner' | 'lost' | 'refused' | 'storage';
@@ -133,28 +132,24 @@ export interface FailureInfo {
   code?: string;
 }
 
-interface PairingRoom {
-  id: string;
-  data: Pair;
-  secret: string;
-}
-
 /** Drives one onboarding pairing session from secret creation (or `#pair=` link) to `agent.set`. */
 export class PairingSession {
-  role = $state<'a' | 'b'>()!;
-  code = $state<string>()!;
-  remaining = $state<number>()!;
-  stage = $state<Stage>()!;
+  role = $state<'a' | 'b'>('a');
+  code = $state('');
+  remaining = $state(windowSeconds);
+  stage = $state<Stage>('waiting');
   browserFingerprint = $state('');
   node = $state<NodeSummary | undefined>();
   path = $state<Path | undefined>();
-  enrolled = $state<boolean>()!;
+  enrolled = $state(false);
   agents = $state<HostInfo['agents'] | undefined>();
-  busy = $state<boolean>()!;
+  busy = $state(false);
   error = $state<FailureInfo | undefined>();
 
   #source: Source;
-  #room: PairingRoom | undefined;
+  #secret = '';
+  #roomId = '';
+  #pairMsg: Pair | undefined;
   #device: Device | undefined;
   #ownerLog: DeviceLog | undefined;
   #candidateLog: DeviceLog | undefined;
@@ -162,10 +157,9 @@ export class PairingSession {
   #session: Session | undefined;
   #peer: Peer | undefined;
   #ctl: Ctl | undefined;
-  #receiveLog = ignoreLog;
   #timer: ReturnType<typeof setInterval> | undefined;
   #expiresAt = 0;
-  #runId = Symbol();
+  #runId = 0;
 
   constructor(source: Source) {
     this.#source = source;
@@ -179,14 +173,12 @@ export class PairingSession {
     this.#resetState();
     if (import.meta.env.DEV && this.#source === 'mock') {
       const secret = newSecret(crypto);
+      this.#secret = secret;
       this.code = shown(secret);
       this.#startCountdown();
-      await openMock((push) => void this.#onPush(run, push)).then(
-        (ready) => {
-          if (this.#active(run)) this.#applyMock(run, ready);
-        },
-        () => {},
-      );
+      const ready = await openMock((push) => void this.#onPush(run, push));
+      if (!ready || !this.#active(run)) return;
+      this.#applyMock(run, ready);
       return;
     }
     await this.#startLive(run);
@@ -194,10 +186,10 @@ export class PairingSession {
 
   /** Declares the account type of one CLI on the paired node (`contracts/commands.md` section 2). */
   async setAccount(agent: string, account: AccountKind) {
-    if (!this.agents) return;
+    if (!this.#device || !this.node || !this.agents) return;
     this.busy = true;
     this.error = undefined;
-    const answer = await setAccount(this.#ctl, this.#device!, this.node!.id, agent, account);
+    const answer = await setAccount(this.#ctl, this.#device, this.node.id, agent, account);
     this.busy = false;
     this.#applyAccountAnswer(this.#runId, agent, account, answer);
   }
@@ -207,12 +199,12 @@ export class PairingSession {
     this.#stop();
   }
 
-  #active(run: symbol) {
+  #active(run: number) {
     return run === this.#runId;
   }
 
   #applyAccountAnswer(
-    run: symbol,
+    run: number,
     agent: string,
     account: AccountKind,
     answer: CmdResult | ErrorResponse,
@@ -228,6 +220,7 @@ export class PairingSession {
 
   #resetState() {
     this.role = 'a';
+    this.code = '';
     this.remaining = windowSeconds;
     this.stage = 'waiting';
     this.node = undefined;
@@ -254,30 +247,31 @@ export class PairingSession {
   }
 
   #discardSecret() {
-    this.#room = undefined;
+    this.#secret = '';
+    this.#roomId = '';
+    this.#pairMsg = undefined;
     this.code = '';
     clearInterval(this.#timer);
     this.#timer = undefined;
   }
 
   #stop() {
-    this.#runId = Symbol();
+    this.#runId += 1;
     this.#discardSecret();
     this.#session?.close();
     this.#session = undefined;
     this.#peer = undefined;
     this.#ctl = undefined;
-    this.#receiveLog = ignoreLog;
   }
 
-  #fail(run: symbol, step: 1 | 2 | 3 | 4, key: ErrorKey, code?: string) {
+  #fail(run: number, step: 1 | 2 | 3 | 4, key: ErrorKey, code?: string) {
     if (!this.#active(run)) return;
     this.#stop();
     this.error = { step, key, code };
     this.stage = 'failed';
   }
 
-  #applyMock(run: symbol, ready: Awaited<ReturnType<typeof openMock>>) {
+  #applyMock(run: number, ready: NonNullable<Awaited<ReturnType<typeof openMock>>>) {
     this.#device = ready.device;
     this.browserFingerprint = ready.device.fingerprint;
     this.#ctl = ready.ctl;
@@ -292,87 +286,88 @@ export class PairingSession {
     void this.#fetchHostInfo(run, ready.ctl);
   }
 
-  async #startLive(run: symbol) {
-    const secret = this.#prepareSecret(run, takeLinkSecret());
-    if (secret === undefined) return;
+  async #startLive(run: number) {
+    if (!this.#prepareSecret(run, takeLinkSecret())) return;
     this.#startCountdown();
-    const loaded = await this.#loadAndSign(run, secret);
+    const loaded = await this.#loadAndSign(run);
     if (!loaded || !this.#active(run)) return;
-    const { device, owner, match } = loaded;
-    this.#device = device;
-    this.#ownerLog = owner.log;
-    this.#addrs = owner.addrs;
-    this.browserFingerprint = device.fingerprint;
-    this.#room = match;
     this.#session = connect({
       urls: [signalUrlOf()],
-      device,
+      device: loaded,
       known: (id) => id === this.node?.id || Boolean(this.#ownerLog?.valid(id)),
       name: browserName,
       heard: (url, frame) => void this.#onHeard(run, url, frame),
     });
   }
 
-  #prepareSecret(run: symbol, linkSecret: string | undefined) {
+  #prepareSecret(run: number, linkSecret: string | undefined): boolean {
     if (linkSecret === undefined) {
-      const secret = newSecret(crypto);
-      this.code = shown(secret);
-      return secret;
+      this.#secret = newSecret(crypto);
+      this.code = shown(this.#secret);
+      return true;
     }
     this.role = 'b';
     try {
-      return parseSecret(linkSecret);
+      this.#secret = parseSecret(linkSecret);
+      return true;
     } catch {
       this.#fail(run, 1, 'bad_secret');
+      return false;
     }
   }
 
-  async #loadAndSign(run: symbol, secret: string) {
+  async #loadAndSign(run: number): Promise<Device | undefined> {
     try {
       const device = await loadDevice({ crypto, idb: () => indexedDB });
       const owner = await loadOwner(crypto, () => indexedDB);
-      const id = await room(crypto, secret);
+      this.#device = device;
+      this.#ownerLog = owner.log;
+      this.#addrs = owner.addrs;
+      this.browserFingerprint = device.fingerprint;
+      this.#roomId = await room(crypto, this.#secret);
       const self = { role: this.role, k: device.id, kind: 'browser', name: browserName };
-      const data: Pair = { t: 'pair', ...self, mac: await mac(crypto, secret, self) };
-      return { device, owner, match: { id, data, secret } };
+      this.#pairMsg = { t: 'pair', ...self, mac: await mac(crypto, this.#secret, self) };
+      return device;
     } catch (err) {
       this.#fail(run, 1, err instanceof StorageBlocked ? 'storage' : 'lost');
       return undefined;
     }
   }
 
-  async #onHeard(run: symbol, url: string, frame: Heard) {
-    const match = this.#room;
-    if (match && this.#active(run)) await this.#dispatchHeard(run, url, frame, match);
+  async #onHeard(run: number, url: string, frame: Heard) {
+    if (!this.#active(run) || !this.#roomId) return;
+    await this.#dispatchHeard(run, url, frame);
   }
 
-  async #dispatchHeard(run: symbol, url: string, frame: Heard, match: PairingRoom) {
-    switch (frame.t) {
-      case 'ready':
-        return this.#joinRoom(url, match.id);
-      case 'joined':
-        if (frame.room === match.id) {
-          this.#session!.send(url, { t: 'room', room: match.id, data: match.data });
-        }
-        break;
-      case 'room':
-        if (frame.room === match.id) await this.#receivePair(run, frame.data, match.secret);
+  async #dispatchHeard(run: number, url: string, frame: Heard) {
+    if (frame.t === 'ready') this.#joinRoom(url);
+    else if (frame.t === 'joined') this.#sendPair(url, frame.room);
+    else if (frame.t === 'room') await this.#receivePair(run, frame.room, frame.data);
+  }
+
+  #joinRoom(url: string) {
+    if (!this.node) this.#session!.send(url, { t: 'join', room: this.#roomId });
+  }
+
+  #sendPair(url: string, roomId: string) {
+    if (roomId === this.#roomId) {
+      this.#session!.send(url, { t: 'room', room: roomId, data: this.#pairMsg! });
     }
   }
 
-  #joinRoom(url: string, id: string) {
-    if (!this.node) this.#session!.send(url, { t: 'join', room: id });
+  #isCandidatePair(roomId: string, data: Pair): boolean {
+    return roomId === this.#roomId && !this.node && data.kind === 'node';
   }
 
-  async #receivePair(run: symbol, data: Pair, secret: string) {
-    if (data.kind !== 'node') return;
+  async #receivePair(run: number, roomId: string, data: Pair) {
+    if (!this.#isCandidatePair(roomId, data)) return;
     const expected = this.role === 'a' ? 'b' : 'a';
-    const valid = await verifyPair(crypto, secret, data, expected);
+    const valid = await verifyPair(crypto, this.#secret, data, expected);
     if (!valid || !this.#active(run)) return;
     await this.#dialNode(run, data);
   }
 
-  async #dialNode(run: symbol, data: Pair) {
+  async #dialNode(run: number, data: Pair) {
     const nodeFp = await fingerprint(crypto, decode(data.k)!);
     if (!this.#active(run) || this.node) return;
     this.node = { id: data.k, name: data.name, fingerprint: nodeFp };
@@ -391,7 +386,7 @@ export class PairingSession {
     );
   }
 
-  async #onOnline(run: symbol, ctl: Ctl, welcome: Welcome) {
+  async #onOnline(run: number, ctl: Ctl, welcome: Welcome) {
     if (!this.#active(run)) return;
     this.#ctl = ctl;
     this.#addrs[welcome.device] = welcome.addrs;
@@ -399,14 +394,13 @@ export class PairingSession {
     if (!this.enrolled) await this.#beginEnrolment(run, ctl, welcome);
   }
 
-  async #beginEnrolment(run: symbol, ctl: Ctl, welcome: Welcome) {
+  async #beginEnrolment(run: number, ctl: Ctl, welcome: Welcome) {
     if (this.role === 'a') return this.#enrolNode(run, ctl);
     if (welcome.owner) return this.#finishEnrolment(run, ctl, welcome);
-    if (this.#ownerLog) return this.#fail(run, 3, 'unadopted');
-    this.#receiveLog = (frame) => this.#onDevlog(run, ctl, frame);
+    if (this.#ownerLog) this.#fail(run, 3, 'unadopted');
   }
 
-  async #enrolNode(run: symbol, ctl: Ctl) {
+  async #enrolNode(run: number, ctl: Ctl) {
     const peer = this.#peer!;
     const log = await this.#ensureNodeInLog();
     peer.send({ t: 'devlog', user: log.user, entries: [...log.entries] });
@@ -445,7 +439,7 @@ export class PairingSession {
     );
   }
 
-  async #confirmOwner(run: symbol, ctl: Ctl) {
+  async #confirmOwner(run: number, ctl: Ctl) {
     const answer = await hello(ctl.request.bind(ctl), browserName).catch(() => undefined);
     if (!answer) return this.#fail(run, 3, 'lost');
     if (answer.err) return this.#fail(run, 3, 'refused', answer.err.code);
@@ -453,36 +447,36 @@ export class PairingSession {
     await this.#finishEnrolment(run, ctl, answer);
   }
 
-  async #onPush(run: symbol, frame: Push) {
+  async #onPush(run: number, frame: Push) {
     if (!this.#active(run)) return;
-    switch (frame.t) {
-      case 'host.info':
-        this.#applyHostInfo(frame);
-        break;
-      case 'devlog':
-        await this.#receiveLog(frame);
-    }
+    if (frame.t === 'host.info') this.#applyHostInfo(frame);
+    else if (frame.t === 'devlog') await this.#onDevlog(run, frame);
   }
 
-  async #onDevlog(run: symbol, ctl: Ctl, frame: Devlog) {
+  #canAdopt(): boolean {
+    return !this.enrolled && this.role === 'b' && !this.#ownerLog && Boolean(this.#ctl);
+  }
+
+  async #onDevlog(run: number, frame: Devlog) {
+    if (!this.#canAdopt()) return;
     const log = (this.#candidateLog ??= new DeviceLog(crypto, frame.user));
-    try {
-      for (const env of frame.entries) await log.apply(env);
-    } catch {
-      return this.#fail(run, 3, 'unadopted');
+    for (const env of frame.entries) {
+      const ok = await log.apply(env).then(
+        () => true,
+        () => false,
+      );
+      if (!ok) return this.#fail(run, 3, 'unadopted');
     }
-    if (log.valid(this.#device!.id)) await this.#adoptLog(run, ctl, log);
+    if (log.valid(this.#device!.id)) await this.#adoptLog(run, log);
   }
 
-  async #adoptLog(run: symbol, ctl: Ctl, log: DeviceLog) {
-    this.#receiveLog = ignoreLog;
+  async #adoptLog(run: number, log: DeviceLog) {
     this.#ownerLog = log;
     await saveOwner(() => indexedDB, log, this.#addrs);
-    await this.#confirmOwner(run, ctl);
+    await this.#confirmOwner(run, this.#ctl!);
   }
 
-  async #finishEnrolment(run: symbol, ctl: Ctl, welcome: Welcome) {
-    this.#receiveLog = ignoreLog;
+  async #finishEnrolment(run: number, ctl: Ctl, welcome: Welcome) {
     this.#addrs[welcome.device] = welcome.addrs;
     if (this.#ownerLog) await saveOwner(() => indexedDB, this.#ownerLog, this.#addrs);
     if (!this.#active(run)) return;
@@ -492,7 +486,7 @@ export class PairingSession {
     await this.#fetchHostInfo(run, ctl);
   }
 
-  async #fetchHostInfo(run: symbol, ctl: Ctl) {
+  async #fetchHostInfo(run: number, ctl: Ctl) {
     const info = await ctl.request({ t: 'host.info' }).catch(() => undefined);
     if (!info) return this.#fail(run, 4, 'lost');
     if (info.err) return this.#fail(run, 4, 'refused', info.err.code);
@@ -510,7 +504,7 @@ export class PairingSession {
     this.stage = undeclared ? 'accounts' : 'ready';
   }
 
-  #onOffline(run: symbol) {
+  #onOffline(run: number) {
     if (this.#active(run) && !this.agents) this.#fail(run, 3, 'lost');
   }
 }
