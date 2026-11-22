@@ -131,3 +131,9 @@ the type does not name, not with `Decode`.
 - `pair.browser`, `host.offline` and `host.online` are a `HostCommand` alone;
   `takeover.end` is a `Takeover`, `takeover.start` a `TakeoverStart`.
 - `Beacon` is the payload of the signed local-network beacon; it has no `g` or `to`.
+- `testdata/trace-remote.json` and `testdata/trace-local.json` hold the complete
+  signed transcripts of one confirmed task from request to summary, with a
+  GitHub remote and with `forge: none`
+  ([trace-task.md](../../planning/flows/trace-task.md)). Both suites decode them
+  through their file maps and verify every key, device-log entry, command
+  signature, row update, plain inbox item and acknowledgement.
