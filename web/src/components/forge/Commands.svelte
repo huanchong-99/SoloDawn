@@ -1,0 +1,45 @@
+<script lang="ts">
+  import { t } from '../../lib/prefs.svelte';
+  import type { GroupRow } from '../../lib/proto';
+  import { operations } from './templates';
+
+  let { info }: { info: GroupRow } = $props();
+</script>
+
+<section aria-label={t('forge.commands')}>
+  <dl class="kv">
+    <dt>{t('groups.create.repo')}</dt>
+    <dd><code>{info.repo ?? t('forge.none')}</code></dd>
+    <dt>{t('groups.create.base')}</dt>
+    <dd><code>{info.base}</code></dd>
+    <dt>{t('forge.label')}</dt>
+    <dd>{info.forge}</dd>
+  </dl>
+  <h3 class="sec-title">{t('groups.create.checks')}</h3>
+  {#each info.checks as check, i (i)}
+    <p><code>{check}</code></p>
+  {:else}<p class="hint">{t('forge.none')}</p>{/each}
+  {#if info.forge === 'custom' && info.templates}
+    {#each operations as operation (operation)}
+      <h3 class="sec-title">{t(`forge.${operation}`)}</h3>
+      <ol class="bul">
+        {#each info.templates[operation] as argument, i (i)}
+          <li><code>{JSON.stringify(argument)}</code></li>
+        {/each}
+      </ol>
+    {/each}
+    <p class="hint">{t('forge.arguments.shown')}</p>
+  {/if}
+  <p class="note" data-tone="dawn">{t('forge.warning')}</p>
+</section>
+
+<style>
+  code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .bul {
+    list-style: decimal;
+    padding-left: 1.2em;
+  }
+</style>

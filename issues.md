@@ -6,6 +6,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · Add-AI command disclosure awaits the member-area seam
+
+- Symptom: group commands and the personal-subscription secretary warning are shown in group info and settings, but not yet in the add-AI dialog.
+- Cause: `web/src/components/member/AddAI.svelte` has no extension point and remains owned by the parallel member unit. U2-4 supplies `forge/Commands.svelte` and `groupinfo/SecretaryWarning.svelte` with plain props without editing that lane.
+- Status: open pending coordinated mounting. The invitation-dialog warning also belongs to the people unit.
+
+### 2026-11-22 · limitation · Foreign home attribution depends on a device row
+
+- Symptom: a foreign home with no matching device row shows its computer name but says its owner was not provided.
+- Cause: `welcome` carries the device name and an owner boolean, not its owner's user id. Group details use a matching live `device` row rather than guessing from a person's group role.
+- Status: open when that row is unavailable. Real-host custom forge execution and Windows program resolution are not verified by the browser UI.
+
 ### 2026-11-22 · limitation · Remembered addresses are not dialled yet
 
 - Symptom: `home.add` records signalling addresses, but a node still needs a shared configured rendezvous to reach an external home.

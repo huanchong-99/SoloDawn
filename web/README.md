@@ -605,7 +605,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/confirm/`     | `ConfirmCard.svelte`, mounted for kind `confirm`                                  |
 | `src/components/allow/`       | `AllowEditor.svelte`, lists and editor for each AI in the member panel            |
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
-| `src/components/groupinfo/`   | group details and project memory (`chat.side`, `order: 20`)                       |
+| `src/components/groupinfo/`   | home, commands, settings (order 19) and project memory (order 20) at `chat.side`  |
+| `src/components/forge/`       | forge choice, argument-by-argument template editor and group command disclosure   |
 | `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
 | `src/components/notify/`      | live in-page notifications mounted at `layer`                                     |
@@ -625,6 +626,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/confirm.spec.ts`    | steps of `../features/web_confirm.feature`                                        |
 | `features/member.spec.ts`     | steps of `../features/web_member.feature`                                         |
 | `features/groupinfo.spec.ts`  | steps of `../features/web_groupinfo.feature`                                      |
+| `features/forge.spec.ts`      | steps of `../features/web_forge.feature`                                          |
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
 | `features/notify.spec.ts`     | steps of `../features/web_notify.feature`                                         |
@@ -647,6 +649,20 @@ navigation and of the segmented controls; the current entry and the chosen optio
 in `Highlight` and `HighlightText` instead (`base.css` section 8).
 
 ## Known limitations
+
+- Custom forges are chosen at group creation. Group settings can edit their four argument-list
+  templates, not change the forge. Each field is one argument; whitespace and empty arguments
+  are preserved, without shell parsing. The home validates template restrictions.
+- `forge/Commands.svelte` accepts `{ info }`; `groupinfo/SecretaryWarning.svelte` accepts
+  `{ account, owner, people }` (account type, owner's user id, human user ids). They are ready
+  for the add-AI dialog but intentionally unmounted there pending the member-area seam.
+- A shared secretary should use a team plan or an API key, with an explicit allow-list. On a
+  personal subscription every request from someone other than its owner waits for that owner's
+  confirmation, every time; this cannot be switched off.
+- A foreign home stores the group, names its members and decides which requests reach your AIs.
+  Join only groups of people you trust. Group details attribute its computer using a matching
+  device row; if none is available, the owner is shown as not provided, never inferred from a
+  member's group role.
 
 - The theme is applied by the module script, so a browser forced to the theme opposite to its
   system setting can paint one frame in the system theme while loading (`issues.md`).
