@@ -14,9 +14,10 @@ UPDATE grp SET purged=max(purged, (SELECT coalesce(max(seq),0) FROM row
   WHERE row.g=grp.g AND gone=1 AND mt<:cut));
 DELETE FROM row WHERE gone=1 AND mt<:cut;
 DELETE FROM row WHERE r='msg' AND gone=0 AND keep=0 AND pending=0 AND ts<:cut
-  AND NOT (data->>'kind' IS 'brief' AND data->>'$.state.status' IS 'confirmed'
-    AND EXISTS (SELECT 1 FROM row AS t WHERE t.g=row.g AND t.r='task'
-      AND t.data->>'state'='queued' AND t.data->>'brief'=row.id));
+  AND NOT EXISTS (SELECT 1 FROM row AS t WHERE t.g=row.g AND t.r='task' AND t.final=0
+    AND (row.id=t.id OR row.id=t.data->>'brief'
+      OR (row.data->>'kind'='confirm' AND row.data->>'$.body.what'='direct'
+        AND (row.data->>'re'=t.id OR row.data->>'re'=t.data->>'brief'))));
 DELETE FROM row WHERE r='task' AND final=1 AND mt<:cut;
 DELETE FROM inbox WHERE created<:cut;
 DELETE FROM audit WHERE ts<:cut;

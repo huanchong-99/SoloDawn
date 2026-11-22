@@ -9,22 +9,27 @@ import (
 	"testing"
 )
 
-// startOpenCode starts the driver on the fake OpenCode, built for this test,
-// replaying script.
+// startOpenCode starts the driver on the fake OpenCode replaying script.
 func startOpenCode(t *testing.T, script string, l Launch) Process {
+	return startFakeServer(t, "opencode", openCodeDriver{}, script, l)
+}
+
+// startFakeServer starts d on the fake vendor CLI, built for this test,
+// replaying script.
+func startFakeServer(t *testing.T, vendor string, d Driver, script string, l Launch) Process {
 	t.Helper()
 	bin := t.TempDir()
-	if out, err := exec.Command("go", "build", "-o", bin+string(os.PathSeparator), "./fakecli/opencode").CombinedOutput(); err != nil {
-		t.Fatalf("build fake opencode: %v\n%s", err, out)
+	if out, err := exec.Command("go", "build", "-o", bin+string(os.PathSeparator), "./fakecli/"+vendor).CombinedOutput(); err != nil {
+		t.Fatalf("build fake %s: %v\n%s", vendor, err, out)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	path := filepath.Join(t.TempDir(), "script.json")
 	codexNoErr(t, os.WriteFile(path, []byte(script), 0600))
-	t.Setenv("SOLODAWN_FAKE_OPENCODE_SCRIPT", path)
+	t.Setenv("SOLODAWN_FAKE_"+strings.ToUpper(vendor)+"_SCRIPT", path)
 	t.Setenv("SOLODAWN_FAKECLI_LOG", filepath.Join(t.TempDir(), "log"))
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	proc, err := openCodeDriver{}.Start(ctx, l)
+	proc, err := d.Start(ctx, l)
 	codexNoErr(t, err)
 	return proc
 }

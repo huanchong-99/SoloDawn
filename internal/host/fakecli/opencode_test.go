@@ -36,6 +36,7 @@ func startOpenCode(t *testing.T, script string) (string, chan int, *bytes.Buffer
 func openCodeRequest(method, url, password, body string) *http.Request {
 	req, _ := http.NewRequest(method, url, strings.NewReader(body))
 	req.SetBasicAuth("opencode", password)
+	req.Header.Set("Content-Type", "application/json")
 	return req
 }
 
