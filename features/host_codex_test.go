@@ -320,7 +320,7 @@ func readNextHostEvent(ch <-chan host.Event) (host.Event, error) {
 func readUntilSignificant(ch <-chan host.Event) (host.Event, error) {
 	for {
 		ev, err := readNextHostEvent(ch)
-		if err != nil || ev.Kind != host.Active {
+		if err != nil || (ev.Kind != host.Active && ev.Kind != host.Used) {
 			return ev, err
 		}
 	}

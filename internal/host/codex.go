@@ -181,6 +181,7 @@ type codexProcess struct {
 	turnReqID        int64
 	turnActive       bool
 	turnID           string
+	windowResets     *int64
 	interruptPending bool
 	asks             map[string]json.RawMessage
 	inputs           map[string]json.RawMessage
@@ -260,10 +261,20 @@ func (p *codexProcess) beginTurn() (int64, string, error) {
 	return id, p.threadID, nil
 }
 
-func (p *codexProcess) finishTurn() {
+// finishTurn ends the turn and returns when the latest rate-limit window
+// resets, in Unix milliseconds, or 0.
+func (p *codexProcess) finishTurn() int64 {
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.resetTurnLocked()
-	p.mu.Unlock()
+	return p.resetsMS()
+}
+
+func (p *codexProcess) resetsMS() int64 {
+	if p.windowResets == nil {
+		return 0
+	}
+	return *p.windowResets
 }
 
 func (p *codexProcess) resetTurnLocked() {
@@ -505,6 +516,10 @@ func (p *codexProcess) handleNotification(msg codexMessage) {
 	if p.isTurnActive() {
 		p.events <- Event{Kind: Active}
 	}
+	if msg.Method == "account/rateLimits/updated" {
+		p.onRateLimits(msg.Params)
+		return
+	}
 	p.onItemNotification(msg.Method, msg.Params)
 }
 
@@ -525,28 +540,91 @@ func (p *codexProcess) onItemNotification(method string, raw json.RawMessage) {
 	p.files[note.Item.ID] = note.Item
 }
 
+func (p *codexProcess) onRateLimits(raw json.RawMessage) {
+	var note struct {
+		RateLimits codexRateLimits `json:"rateLimits"`
+	}
+	if json.Unmarshal(raw, &note) != nil {
+		return
+	}
+	usage, resets, hasWindow, limited := p.updateRateLimits(note.RateLimits)
+	if hasWindow {
+		p.events <- Event{Kind: Used, Usage: usage}
+	}
+	if limited {
+		p.events <- Event{Kind: RateLimited, Resets: resets}
+	}
+}
+
+func (p *codexProcess) updateRateLimits(rl codexRateLimits) (Usage, int64, bool, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	win := selectRateWindow(rl.Primary, rl.Secondary)
+	var usage Usage
+	if win != nil {
+		p.windowResets = codexWindowResetsMs(win.ResetsAt)
+		usage = Usage{WindowPct: new(win.UsedPercent), WindowResets: p.windowResets}
+	}
+	return usage, p.resetsMS(), win != nil, codexRateLimited(rl, win)
+}
+
+func selectRateWindow(primary, secondary *codexLimitWindow) *codexLimitWindow {
+	if primary == nil {
+		return secondary
+	}
+	if secondary != nil && secondary.UsedPercent > primary.UsedPercent {
+		return secondary
+	}
+	return primary
+}
+
+func codexWindowResetsMs(sec *int64) *int64 {
+	if sec == nil {
+		return nil
+	}
+	return new(*sec * 1000)
+}
+
+func codexRateLimited(rl codexRateLimits, win *codexLimitWindow) bool {
+	if win != nil && win.UsedPercent >= 100 {
+		return true
+	}
+	return rl.RateLimitReachedType != "" || rl.SpendControlReached
+}
+
 func (p *codexProcess) onTurnCompleted(raw json.RawMessage) {
 	var note codexTurnCompleted
 	if json.Unmarshal(raw, &note) != nil {
 		return
 	}
-	p.finishTurn()
+	resets := p.finishTurn()
 	var errText string
 	if note.Turn.Error != nil {
 		errText = note.Turn.Error.Message
-		if isCodexTurnAuthError(note.Turn.Error.CodexErrorInfo) {
-			p.events <- Event{Kind: LoginInvalid, Text: errText}
-		}
+		p.emitTurnError(note.Turn.Error.CodexErrorInfo, errText, resets)
 	}
 	p.events <- Event{Kind: TurnEnded, Status: note.Turn.Status, Text: errText}
 }
 
-func isCodexTurnAuthError(info json.RawMessage) bool {
-	var code string
-	if json.Unmarshal(info, &code) == nil {
-		return code == "unauthorized"
+func (p *codexProcess) emitTurnError(info json.RawMessage, text string, resets int64) {
+	switch codexTurnErrorKind(info) {
+	case LoginInvalid:
+		p.events <- Event{Kind: LoginInvalid, Text: text}
+	case RateLimited:
+		p.events <- Event{Kind: RateLimited, Resets: resets}
 	}
-	return codexHTTPStatus(info) == 401
+}
+
+func codexTurnErrorKind(info json.RawMessage) EventKind {
+	var code string
+	json.Unmarshal(info, &code)
+	switch {
+	case code == "unauthorized" || codexHTTPStatus(info) == 401:
+		return LoginInvalid
+	case code == "usageLimitExceeded":
+		return RateLimited
+	}
+	return ""
 }
 
 func codexHTTPStatus(info json.RawMessage) int {
@@ -683,6 +761,18 @@ func (p *codexProcess) declineRequest(rawID json.RawMessage) {
 		ID:    rawID,
 		Error: codexRPCError{Code: -32601, Message: "unsupported server request"},
 	})
+}
+
+type codexRateLimits struct {
+	Primary              *codexLimitWindow `json:"primary"`
+	Secondary            *codexLimitWindow `json:"secondary"`
+	SpendControlReached  bool              `json:"spendControlReached"`
+	RateLimitReachedType string            `json:"rateLimitReachedType"`
+}
+
+type codexLimitWindow struct {
+	UsedPercent float64 `json:"usedPercent"`
+	ResetsAt    *int64  `json:"resetsAt"`
 }
 
 type codexRPCRequest struct {

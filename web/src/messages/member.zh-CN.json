@@ -53,5 +53,7 @@
   "member.state.working": "干活中",
   "member.terminal": "打开终端",
   "member.terminal.offline": "电脑离线",
-  "member.terminal.relay": "终端画面只走直连"
+  "member.terminal.relay": "终端画面只走直连",
+  "member.usage.resets": "{time} 重置",
+  "member.usage.window": "这一轮额度已用"
 }
