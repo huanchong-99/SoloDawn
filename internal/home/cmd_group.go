@@ -24,7 +24,7 @@ const (
 )
 
 var (
-	grpForges = []string{"github", "none"}
+	grpForges = []string{"github", "none", "custom"}
 	grpLimits = proto.Limits{
 		Rounds: 10, WakesPerHour: 20, TurnMinutes: 60, Failures: 3, ReviewRounds: 5,
 		AskDepth: 4, AskWaitS: 45, ApprovalWaitS: 600, IdleNoticeMinutes: 30,
@@ -40,6 +40,9 @@ func grpCreate(s *State, c Command) (Result, *Refusal) {
 	}
 	var p proto.GroupCreate
 	if refusal := c.Decode(&p); refusal != nil {
+		return Result{}, refusal
+	}
+	if refusal := templatesCreate(p.Forge, p.Templates); refusal != nil {
 		return Result{}, refusal
 	}
 	if refusal := grpCreateValid(p); refusal != nil {
@@ -74,7 +77,7 @@ func grpCreateValid(p proto.GroupCreate) *Refusal {
 func grpFounded(s *State, c Command, p proto.GroupCreate) Result {
 	group := proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: p.Name, Kind: p.Kind,
-		Repo: p.Repo, Base: p.Base, Forge: p.Forge, Home: s.Home, Checks: p.Checks,
+		Repo: p.Repo, Base: p.Base, Forge: p.Forge, Templates: p.Templates, Home: s.Home, Checks: p.Checks,
 		Pass: grpPass, PassFoundation: grpPassFoundation, Limits: grpLimits, Created: c.Now,
 	}
 	owner := proto.HumanMemberRow{
@@ -111,8 +114,8 @@ func grpSet(s *State, c Command) (Result, *Refusal) {
 }
 
 func grpSetValid(p proto.GroupSet) *Refusal {
-	present := [6]bool{p.Name != nil, p.Checks != nil, p.Pass != nil, p.PassFoundation != nil, p.Limits != nil, p.Secretary != ""}
-	if present == [6]bool{} {
+	present := [7]bool{p.Name != nil, p.Checks != nil, p.Pass != nil, p.PassFoundation != nil, p.Limits != nil, p.Secretary != "", p.Templates != nil}
+	if present == [7]bool{} {
 		return &Refusal{"bad_request", "group set carries no field to change"}
 	}
 	if p.Name != nil && *p.Name == "" {
@@ -122,6 +125,9 @@ func grpSetValid(p proto.GroupSet) *Refusal {
 }
 
 func (s *State) grpApplySet(p proto.GroupSet) (Result, *Refusal) {
+	if refusal := templatesSet(s.Group.Forge, p.Templates); refusal != nil {
+		return Result{}, refusal
+	}
 	if s.Group.Kind == "team" {
 		if refusal := teamSetValid(p); refusal != nil {
 			return Result{}, refusal
@@ -147,6 +153,9 @@ func grpUpdated(group proto.GroupRow, p proto.GroupSet) proto.GroupRow {
 	grpSetOpt(&group.Pass, p.Pass)
 	grpSetOpt(&group.PassFoundation, p.PassFoundation)
 	grpSetOpt(&group.Limits, p.Limits)
+	if p.Templates != nil {
+		group.Templates = p.Templates
+	}
 	return group
 }
 

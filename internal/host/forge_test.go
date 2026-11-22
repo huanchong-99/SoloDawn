@@ -115,7 +115,7 @@ func forgeRepo(t *testing.T) (TaskForge, string, string) {
 	forgeGit(t, worktree, "-c", "user.name=test", "-c", "user.email=test.invalid", "commit", "--allow-empty", "-m", "base")
 	forgeGit(t, worktree, "remote", "add", "origin", remote)
 	forgeGit(t, worktree, "push", "origin", "base")
-	f := TaskForge{worktree, "task/4-fix"}
+	f := TaskForge{Worktree: worktree, Branch: "task/4-fix"}
 	forgeGit(t, worktree, "switch", "-c", f.Branch)
 	forgeGit(t, worktree, "-c", "user.name=test", "-c", "user.email=test.invalid", "commit", "--allow-empty", "-m", "task")
 	return f, remote, forgeGit(t, worktree, "rev-parse", "HEAD")

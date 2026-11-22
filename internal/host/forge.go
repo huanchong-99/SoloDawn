@@ -16,8 +16,11 @@ import (
 
 // TaskForge is bound by the host to the task's worktree and assigned branch.
 type TaskForge struct {
-	Worktree string
-	Branch   string
+	Worktree  string
+	Branch    string
+	Base      string
+	Templates *proto.ForgeTemplates
+	Request   ForgePullRequest
 }
 
 func (f TaskForge) command(ctx context.Context, name string, args ...string) (string, error) {
@@ -31,6 +34,9 @@ func (f TaskForge) command(ctx context.Context, name string, args ...string) (st
 // PushBranch pushes only the host-assigned branch, without requesting approval.
 // The full refspec keeps the owner's push configuration from redirecting it.
 func (f TaskForge) PushBranch(ctx context.Context) error {
+	if f.Templates != nil {
+		return f.pushTemplate(ctx)
+	}
 	ref := "refs/heads/" + f.Branch
 	_, err := f.command(ctx, "git", "push", "origin", ref+":"+ref)
 	return err
@@ -50,6 +56,13 @@ func (f TaskForge) Submit(ctx context.Context, checkedCommit, base, title, summa
 	if err := f.PushBranch(ctx); err != nil {
 		return nil, err
 	}
+	if f.Templates != nil {
+		return f.openTemplate(ctx, checkedCommit, title, summary)
+	}
+	return f.githubRequest(ctx, base, title, summary)
+}
+
+func (f TaskForge) githubRequest(ctx context.Context, base, title, summary string) (*ForgePullRequest, error) {
 	url, err := f.openPR(ctx, base)
 	if url == "" && err == nil {
 		url, err = f.command(ctx, "gh", "pr", "create", "--head", f.Branch, "--base", base, "--title", title, "--body", summary)
@@ -122,6 +135,13 @@ func pullRequest(url string) (*ForgePullRequest, error) {
 // the items of the last read at that commit. The error is ctx's: cancel ctx
 // on supersession.
 func (f TaskForge) WaitHostedChecks(ctx context.Context, pr int, commit string, since time.Time) (*proto.ChecksBody, error) {
+	if f.Templates != nil {
+		return f.waitTemplateChecks(ctx, pr, commit, since)
+	}
+	return f.waitGitHubChecks(ctx, pr, commit, since)
+}
+
+func (f TaskForge) waitGitHubChecks(ctx context.Context, pr int, commit string, since time.Time) (*proto.ChecksBody, error) {
 	w := hostedWait{commit: commit}
 	deadline := since.Add(60 * time.Minute)
 	for {

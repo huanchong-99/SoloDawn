@@ -434,7 +434,7 @@ func cleanupGroupState(h *Host, d *delivery, group string) {
 	}
 	grp, _ := lookupRow[proto.GroupRow](h, group, "group", group)
 	for _, task := range tasks {
-		cleanupTaskFolder(context.Background(), pDir, grp.Forge == "github", task)
+		cleanupTaskFolder(context.Background(), pDir, grp, task)
 		cleanupReviewFolder(context.Background(), pDir, task)
 	}
 }
@@ -470,7 +470,7 @@ func sessionTaskObsolete(h *Host, group string, s Session) bool {
 	return ok && (task.State == "merged" || task.State == "cancelled" || role != s.Member)
 }
 
-func cleanupTaskFolder(ctx context.Context, pDir string, remote bool, task proto.TaskRow) {
+func cleanupTaskFolder(ctx context.Context, pDir string, grp proto.GroupRow, task proto.TaskRow) {
 	name := strconv.Itoa(task.Num) + "-" + string(task.Slug)
 	wtPath := filepath.Join(pDir, "wt", name)
 	if !pathExists(wtPath) {
@@ -481,16 +481,16 @@ func cleanupTaskFolder(ctx context.Context, pDir string, remote bool, task proto
 		(ReviewedMerge{Repo: filepath.Join(pDir, "repo"), Branch: "task/" + name, Commit: task.Commit}).DeleteBranch(ctx)
 		return
 	}
-	releaseUnmergedWorktree(ctx, pDir, remote, task, name, wtPath)
+	releaseUnmergedWorktree(ctx, pDir, grp, task, name, wtPath)
 }
 
-func releaseUnmergedWorktree(ctx context.Context, pDir string, remote bool, task proto.TaskRow, name, wtPath string) {
+func releaseUnmergedWorktree(ctx context.Context, pDir string, grp proto.GroupRow, task proto.TaskRow, name, wtPath string) {
 	holder := newSlot(pDir, "wt", name, "", "").holder(ctx)
 	if task.State == "cancelled" {
 		RemoveTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), holder, TaskCancelled)
 	} else if holder != task.Assignee {
-		if remote && holder != "" {
-			(TaskForge{Worktree: wtPath, Branch: "task/" + name}).PushBranch(ctx)
+		if grp.Forge != "none" && holder != "" {
+			(TaskForge{Worktree: wtPath, Branch: "task/" + name, Base: grp.Base, Templates: grp.Templates}).PushBranch(ctx)
 		}
 		RemoveTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), holder, TaskGivenAway)
 	}
@@ -1050,7 +1050,7 @@ func hasGitClone(projectDir string) bool {
 }
 
 func prepareSessionFolder(ctx context.Context, h *Host, pDir string, grp proto.GroupRow, target routedTarget, exists bool, existing Session, batch []verifiedItem) (string, string, error) {
-	remote := grp.Forge == "github"
+	remote := grp.Forge != "none"
 	switch target.kind {
 	case TaskSession:
 		return prepareTaskFolder(ctx, h, pDir, grp.Base, remote, target.key, exists, existing.Folder)
@@ -1453,12 +1453,12 @@ func buildReviewedMerge(pDir string, grp proto.GroupRow, task proto.TaskRow, com
 	}
 	var forgePR int
 	var ghRepo string
-	if grp.Forge == "github" {
+	if grp.Forge != "none" {
 		forgePR, ghRepo = pr, githubRepo(grp.Repo)
 	}
 	return ReviewedMerge{
 		Repo: filepath.Join(pDir, "repo"), Base: grp.Base, Branch: branch,
-		Task: task.ID, Commit: commit, PR: forgePR, GitHubRepo: ghRepo, Taken: taken,
+		Task: task.ID, Commit: commit, PR: forgePR, GitHubRepo: ghRepo, Taken: taken, Templates: grp.Templates,
 	}
 }
 

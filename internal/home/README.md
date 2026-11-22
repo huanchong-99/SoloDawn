@@ -20,6 +20,11 @@ states, the transactions, the clock and the connections ("The run loop" below).
 
 ## Use this capability
 
+`templates.go` validates custom forge argument lists on group creation and
+settings changes. Only custom forges carry templates, with all four commands
+required. Program names cannot name repository paths or contain places;
+AI-authored title and summary places require a literal argument prefix.
+
 `team.go` restricts team groups to people, main-line text and bulletins, and
 notes. Team creation omits the repository and uses an empty base, forge `none`
 and no checks. Project settings, tasks, threaded or AI posts and AI admission

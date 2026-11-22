@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -196,7 +197,7 @@ func tskLoadTaskEnv(h *Host, c Caller) (tskTaskEnv, error) {
 }
 
 func tskBaseRef(grp proto.GroupRow) string {
-	if grp.Forge == "github" {
+	if grp.Forge != "none" {
 		return "origin/" + grp.Base
 	}
 	return grp.Base
@@ -237,22 +238,22 @@ func tskPushTool(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (a
 	if err != nil {
 		return nil, err
 	}
-	if grp.Forge != "github" {
+	if grp.Forge == "none" {
 		return nil, &Error{Code: "conflict", Message: "group has no remote repository"}
 	}
 	_, branch, err := tskTaskRow(h, c.Group, c.Task)
 	if err != nil {
 		return nil, err
 	}
-	return tskPushBranch(ctx, sessionDir(h, c.Session), branch)
+	return tskPushBranch(ctx, TaskForge{Worktree: sessionDir(h, c.Session), Branch: branch, Base: grp.Base, Templates: grp.Templates})
 }
 
-func tskPushBranch(ctx context.Context, worktree, branch string) (tskPushResult, error) {
-	out, err := checkGit(ctx, worktree, "rev-parse", "--verify", "refs/heads/"+branch)
+func tskPushBranch(ctx context.Context, forge TaskForge) (tskPushResult, error) {
+	out, err := checkGit(ctx, forge.Worktree, "rev-parse", "--verify", "refs/heads/"+forge.Branch)
 	if err != nil {
 		return tskPushResult{}, tskCLIError(err)
 	}
-	if err := (TaskForge{Worktree: worktree, Branch: branch}).PushBranch(ctx); err != nil {
+	if err := forge.PushBranch(ctx); err != nil {
 		return tskPushResult{}, tskCLIError(err)
 	}
 	return tskPushResult{OK: true, Commit: strings.TrimSpace(out)}, nil
@@ -369,10 +370,12 @@ func tskParseShortstat(text string) (files, added, removed int) {
 }
 
 func tskForgeSubmitIfRemote(ctx context.Context, r tskSubmitReady, summary string) (*ForgePullRequest, error) {
-	if r.grp.Forge != "github" {
+	if r.grp.Forge == "none" {
 		return nil, nil
 	}
-	pr, err := (TaskForge{Worktree: r.worktree, Branch: r.branch}).Submit(ctx, r.head, r.grp.Base, r.task.Title, summary)
+	forge := TaskForge{Worktree: r.worktree, Branch: r.branch, Base: r.grp.Base, Templates: r.grp.Templates,
+		Request: ForgePullRequest{Number: r.task.PR, URL: r.task.PRURL}}
+	pr, err := forge.Submit(ctx, r.head, r.grp.Base, r.task.Title, summary)
 	if err != nil {
 		return nil, tskCLIError(err)
 	}
@@ -439,7 +442,11 @@ func startHostedCheck(h *Host, home, group string, hc HostedCheck) {
 		return
 	}
 	wt := sessionDir(h, Session{SessionKey: SessionKey{Group: group}, Folder: "wt/" + strings.TrimPrefix(hc.Branch, "task/")})
-	forge := TaskForge{Worktree: wt, Branch: hc.Branch}
+	grp, _ := lookupRow[proto.GroupRow](h, group, "group", group)
+	forge := TaskForge{Worktree: wt, Branch: hc.Branch, Base: grp.Base, Templates: grp.Templates}
+	if grp.Forge == "custom" {
+		forge.Worktree = filepath.Join(projectDir(h, group), "repo")
+	}
 	go tskPollHostedChecks(pollCtx, p, h, home, key, run, forge, hc.PR, hc.Commit, hc.Since)
 }
 
