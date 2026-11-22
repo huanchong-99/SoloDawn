@@ -188,10 +188,8 @@ names that start with `mrg`, their tests too, and their test functions start wit
 Host events (`cmd_hostev.go`) take the names that start with `hev`, their tests too, and their test
 functions start with `TestHostEv`; the file exports `HostOfflineEvent`. The calls (`cmd_call.go`)
 take the names that start with `cal`, their tests too, and their test functions start with
-`TestCall`.
-functions start with `TestHostEv`; the file exports `HostOfflineEvent`.
-Retention (`retention.go`) takes the names that start with `ret`, exports `Retain`, and its test
-functions start with `TestRetention`.
+`TestCall`. Retention (`retention.go`) takes the names that start with `ret`, exports `Retain`,
+and its test functions start with `TestRetention`.
 
 ## The run loop
 
@@ -669,8 +667,8 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
 ([commands](../../planning/contracts/commands.md) 1.3;
 [messages](../../planning/contracts/messages.md) 1, 2.6 and 3.4;
 [ask](../../planning/flows/ask.md)), under the keys `post/call` and `post/reply`, sharing
-`postCheck`, `postRows` and `postTaskID` with `cmd_post.go`. Where the contracts are silent, it
-does this:
+`postCheck`, `postRows` and `postTaskID` with `cmd_post.go` and `cardItems` with `cmd_card.go`.
+Where the contracts are silent, it does this:
 
 - **Call.** A self-call (`body.to` equal to `as`) is `bad_request`, a non-null `thread` absent from
   `State.Tasks` is `not_found`, a `body.to` absent from `State.AIs` is `conflict`, and `body.depth`
@@ -682,6 +680,7 @@ does this:
   the answered call is `max(0, c.Timestamp - call.Timestamp)` so inter-host clock skew never
   produces a negative duration, followed by the reply `MsgRow` and, in a thread, the updated
   `TaskRow`. When `call.By` is still in `State.AIs`, one `reply` item is queued for it (A6.3).
+
 ## Retention
 
 `retention.go` exports `Retain(tx, now)`, which reads `retention_days` from SQLite `setting`
@@ -803,8 +802,9 @@ deleted-row scenario of A2.7.
 
 `cmd_call_test.go` sends `post/call` and `post/reply` through `Commands.Apply` with fakes of
 `Receipts` and `Disk`, checking the golden shapes, `UnexpectedNulls`, the 200-character preview,
-elapsed-time clamping, receipts and every refusal boundary. `features/home_call.feature` holds the
+elapsed-time clamping and every refusal boundary. `features/home_call.feature` holds the
 home half of acceptance tests A6.3 and A6.4.
+
 `retention_test.go` covers `Retain`: default and configured `retention_days`, store error
 propagation, protected rows, and the purge mark with `Loop.Sync` reset.
 `features/home_retention.feature` holds acceptance test A2.5 and the retention half of A5.14.
