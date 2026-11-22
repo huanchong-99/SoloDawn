@@ -133,6 +133,8 @@ type NoteRow struct {
 	Pos       int64   `json:"pos"`
 	Group     string  `json:"g"`
 	Task      *string `json:"task"`
+	NoteType  string  `json:"type,omitempty"`
+	Name      string  `json:"name,omitempty"`
 	Text      string  `json:"text"`
 	By        string  `json:"by"`
 	Timestamp int64   `json:"ts"`
