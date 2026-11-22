@@ -223,7 +223,7 @@ func registerM4PauseSteps(sc *godog.ScenarioContext, w *m4World) {
 	sc.Step(`^the M4 owner pauses the group$`, w.whenOwnerPausesGroup)
 	sc.Step(`^"([^"]+)"'s running turn is interrupted within 2 seconds with reason "([^"]+)" and system message "([^"]+)"$`, w.thenTurnInterruptedWithinTwoSeconds)
 	sc.Step(`^the M4 owner mentions "([^"]+)" with "([^"]+)"$`, w.postOwnerMention)
-	sc.Step(`^the (\d+) M4 mention items stay on the home while the group is paused$`, func(want int) error {
+	sc.Step(`^the M4 home inbox contains (\d+) items while the group is paused$`, func(want int) error {
 		return awaitHomeInboxCount(w.node().Store, want)
 	})
 	sc.Step(`^the M4 owner resumes the group$`, w.whenOwnerResumesGroup)
