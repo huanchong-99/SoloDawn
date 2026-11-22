@@ -6,12 +6,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-22 · limitation · Model discovery has synthetic fixtures, not live captures
-
-- Symptom: Claude Code and Codex model discovery is tested against scripted listings, not a current real CLI catalog. Optional model fields and whether every nonempty Codex `serviceTiers` entry means faster service remain unverified.
-- Cause: neither real CLI was available for T3-9. `internal/host/fakecli/testdata/claude-models.json` and `codex-models.json` are synthetic fixtures of `step-3/drivers.md` section 10.1. The two sourced rows in `internal/host/tiers.go` implement section 10.2, without additions from a live catalog.
-- Status: open until real `initialize` and paged `model/list` replies are captured and compared with each CLI's picker. The combined A10.13/A10.14 scenarios remain pending for live, OpenCode and browser coverage; their Claude Code/Codex host behavior is covered by `features/host_models.feature` and the node surface tests.
-
 ### 2026-11-22 · limitation · Custom forge results depend on the template program
 
 - Symptom: a checks template can report an older request head, and a successful merge can name a later merge on the base branch.
@@ -721,6 +715,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a refused model or effort on `thread/resume` could replace the session instead of reporting a crash and retaining its history.
 - Cause: `internal/host/codex.go`, `codexProcess.handleStartupError`, emitted `NoSession` for every error on request 2 when a saved thread id was present, without distinguishing a missing thread from another rejected setting.
 - Status: resolved in T3-11. Only known missing-thread diagnostics emit `NoSession`; other startup errors close the CLI and take the existing crash path. Fake-CLI tests cover refused-value crashes and retained session ids. Live model/effort selection and native terminal behavior remain unverified.
+
+### 2026-11-22 · limitation · Model discovery has synthetic fixtures, not live captures
+
+- Symptom: Claude Code and Codex model discovery was tested only against scripted listings, so the fields of a real catalog and whether a nonempty Codex `serviceTiers` means a fast mode were unverified.
+- Cause: neither real CLI was available for T3-9. `internal/host/fakecli/testdata/claude-models.json` and `codex-models.json` are synthetic fixtures of `step-3/drivers.md` section 10.1.
+- Status: resolved in T3-9 by a live check on 2026-11-23 with Claude Code 2.1.311 and Codex 0.164.0, no model called. Claude: the first stdout line is the `control_response` with 14 models, exit 0 after stdin closes, and some entries (Haiku 4.5) have no `supportsEffort`. Codex: two notifications (`remoteControl/status/changed`, `account/updated`) before the answer, then 8 models in one page with `nextCursor` null, each with `serviceTiers` `[{"id":"priority","name":"Fast",…}]`. The readers in `internal/host/models.go` handle all of it. No listed id has a word beyond the two rows of `internal/host/tiers.go`. The fakecli fixtures stay synthetic.
 
 ### 2026-11-22 · bug · On Windows the last output of a CLI that exits by itself during a takeover is lost
 
