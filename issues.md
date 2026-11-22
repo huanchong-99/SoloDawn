@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · An unanswered AI-to-AI `call` stays `waiting`
+
+- Symptom: when the called AI never answers with `reply`, the `call` message keeps `state.status = "waiting"` for good; the web call block (`U-10`) shows it as waiting, with the time since it was made.
+- Cause: `planning/contracts/messages.md` section 3.4 gives a call only `waiting` and `answered`, with no `expired` as decisions have. The caller is not blocked: `ask` returns its receipt after `limits.ask_wait_s` (45 s, `internal/host/tools_ask.go:117-119`) and goes on with its turn.
+- Status: open, accepted for 1.0 (coordinator, 2026-11-22, `HS-12` review): no expiry, less code.
+
 ### 2026-11-21 · limitation · Finished tasks stay in a group's state in memory after retention until a restart
 
 - Symptom: after the daily retention run deletes a `merged` or `cancelled` task row older than `retention_days` from SQLite, `State.Tasks` in the running home still holds that task row until the loop restarts. A rule or a state read that inspects `State.Tasks` before a restart still sees the finished task; a cold read from the store snapshot and a restarted loop do not.
