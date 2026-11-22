@@ -37,7 +37,7 @@ func postText(s *State, c Command) (Result, *Refusal) {
 	if len(items) == 0 && s.postReachSecretary(c.Who, msg) {
 		items = []Item{{AI: s.Group.Secretary, Why: postMentionWhy, Msg: msg.ID}}
 	}
-	return Result{Rows: rows, Items: items}, nil
+	return s.cfmGateItems(c, cfmWhatDirect, msg, rows, items), nil
 }
 
 // postReachSecretary reports whether a message without AI mentions goes to the
@@ -59,7 +59,7 @@ func postTalk(s *State, c Command, kind string, inThreadOnly bool) (Result, *Ref
 	if refusal != nil {
 		return Result{}, refusal
 	}
-	return Result{Rows: rows, Items: s.postWakes(msg)}, nil
+	return s.cfmGateItems(c, cfmWhatDirect, msg, rows, s.postWakes(msg)), nil
 }
 
 func postReport(s *State, c Command) (Result, *Refusal) {

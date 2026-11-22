@@ -68,7 +68,7 @@ func (s *State) calWriteCall(c Command, p proto.Post[proto.CallBody], mentions [
 		State: &proto.CardState{Status: calStatusWaiting}, Env: &c.Env,
 	}
 	item := Item{AI: p.Body.To, Why: postMentionWhy, Task: postTaskID(thread), Msg: id}
-	return Result{Rows: s.postRows(msg), Items: []Item{item}}
+	return s.cfmGateItems(c, cfmWhatAsk, msg, s.postRows(msg), []Item{item})
 }
 
 // calReply answers a waiting call addressed to the signing AI, records the
