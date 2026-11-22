@@ -124,17 +124,23 @@ type tskCloudKey struct {
 	task  string
 }
 
+type tskCloudHead struct {
+	tskCloudKey
+	commit string
+}
+
 type tskCloudRun struct {
 	commit string
 	cancel context.CancelFunc
 }
 
-// tskPart tracks active hosted-check polling goroutines per host.
+// tskPart tracks active and already handled hosted checks per host.
 // Lock order: mu is a leaf lock; nothing called under mu acquires Host,
 // Sessions, Rows or Store locks.
 type tskPart struct {
 	mu      sync.Mutex
 	cancels map[tskCloudKey]*tskCloudRun
+	claimed map[tskCloudHead]struct{}
 }
 
 func tskDecodeArgs(raw json.RawMessage, dst any) error {
@@ -455,31 +461,37 @@ func tskBeginCloud(p *tskPart, key tskCloudKey, commit string) (context.Context,
 	defer p.mu.Unlock()
 	if p.cancels == nil {
 		p.cancels = map[tskCloudKey]*tskCloudRun{}
+		p.claimed = map[tskCloudHead]struct{}{}
+	}
+	head := tskCloudHead{key, commit}
+	if _, claimed := p.claimed[head]; claimed {
+		return nil, nil
 	}
 	if prev := p.cancels[key]; prev != nil {
-		if prev.commit == commit {
-			return nil, nil
-		}
 		prev.cancel()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	run := &tskCloudRun{commit: commit, cancel: cancel}
 	p.cancels[key] = run
+	p.claimed[head] = struct{}{}
 	return ctx, run
 }
 
-func tskFinishCloud(p *tskPart, key tskCloudKey, run *tskCloudRun) {
+func tskFinishCloud(p *tskPart, key tskCloudKey, run *tskCloudRun, accepted bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	run.cancel()
 	if p.cancels[key] == run {
 		delete(p.cancels, key)
+		if !accepted {
+			delete(p.claimed, tskCloudHead{key, run.commit})
+		}
 	}
 }
 
 func tskPollHostedChecks(ctx context.Context, p *tskPart, h *Host, home string, key tskCloudKey, run *tskCloudRun, forge TaskForge, pr int, commit string, since time.Time) {
-	defer tskFinishCloud(p, key, run)
 	body, err := forge.WaitHostedChecks(ctx, pr, commit, since)
+	defer func() { tskFinishCloud(p, key, run, err == nil) }()
 	if err != nil {
 		return
 	}
@@ -489,7 +501,7 @@ func tskPollHostedChecks(ctx context.Context, p *tskPart, h *Host, home string, 
 		Items:       slices.Concat([]proto.CheckItem{}, body.Items),
 		Commit:      body.Commit,
 	}
-	h.Command(ctx, home, marshalWire(cmd))
+	_, err = h.Command(ctx, home, marshalWire(cmd))
 }
 
 func tskReviewTool(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (any, error) {

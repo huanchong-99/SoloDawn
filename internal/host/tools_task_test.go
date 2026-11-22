@@ -692,6 +692,29 @@ func TestSubmitTaskRemoteAndHostedChecks(t *testing.T) {
 	tskEqual(t, cloud.Items[0].Name, "build")
 }
 
+func TestStaleCloudCheckRowDoesNotRestartCompletedPoll(t *testing.T) {
+	r := newDeliverRig(t, true)
+	tskStopAllCloud(t, r.h)
+	r.seedGroupAndMembers()
+	r.h.Settle()
+	const head = "old-head"
+	r.putTask(cloudCheckTask(testGroup1, testTask1, 1, testAI1, head, 10))
+	calls := fakeForgeGH(t, hostedView(head, passedRun), hostedView(head, passedRun))
+	worktree := sessionDir(r.h, Session{SessionKey: SessionKey{Group: testGroup1}, Folder: "wt/1-cloud"})
+	tskNoErr(t, os.MkdirAll(worktree, 0700))
+
+	p := Part[tskPart](r.h)
+	key := tskCloudKey{group: testGroup1, task: testTask1}
+	ctx, run := tskBeginCloud(p, key, head)
+	forge := TaskForge{Worktree: worktree}
+	tskPollHostedChecks(ctx, p, r.h, r.homeKey.ID(), key, run, forge, 31, head, time.Now())
+	tskEqual(t, len(r.home.cmdPayloads()), 1)
+
+	afterGroupState(r.h, deliv(r.h), testGroup1)
+	waitCloudIdle(r)
+	calls([]string{"pr", "view", "31", "--json", "headRefOid,statusCheckRollup"})
+}
+
 func TestSubmitTaskSupersedesPreviousHostedChecks(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		p := &tskPart{}
@@ -706,11 +729,16 @@ func TestSubmitTaskSupersedesPreviousHostedChecks(t *testing.T) {
 		tskRequire(t, ctx1.Err() != nil, "first cloud context must be cancelled")
 		tskRequire(t, ctx2.Err() == nil, "second cloud context must stay active")
 
-		tskFinishCloud(p, key, run1)
+		tskFinishCloud(p, key, run1, false)
 		tskEqual(t, p.cancels[key] == run2, true)
+		_, staleRun := tskBeginCloud(p, key, "c1")
+		tskEqual(t, staleRun, (*tskCloudRun)(nil))
+		tskRequire(t, ctx2.Err() == nil, "stale claim must leave new check alone")
 
-		tskFinishCloud(p, key, run2)
+		tskFinishCloud(p, key, run2, true)
 		tskEqual(t, len(p.cancels), 0)
+		_, staleRun = tskBeginCloud(p, key, "c1")
+		tskEqual(t, staleRun, (*tskCloudRun)(nil))
 	})
 }
 
