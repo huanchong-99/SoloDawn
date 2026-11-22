@@ -18,7 +18,7 @@ func who(t *testing.T, s *home.State, by identity.Key, more string) home.Who {
 		got = c.Who
 		return home.Result{}, nil
 	}}
-	res := apply(t, table, s, receipts{}, by, signed(by, "note", 1, more))
+	res := apply(t, table, s, receipts{}, signed(by, "note", 1, more))
 	equal(t, res.Answer, store.Outcome{OK: true})
 	return got
 }
@@ -48,7 +48,7 @@ func TestACommandCarriesItsEnvelopeAndTheClock(t *testing.T) {
 		return home.Result{}, nil
 	}}
 	env := signed(laptop, "note", 1, `,"to":"`+node.ID()+`","as":"`+aiID+`"`)
-	apply(t, table, group(t), receipts{}, laptop, env)
+	apply(t, table, group(t), receipts{}, env)
 	equal(t, got, home.Command{
 		PayloadHeader: proto.PayloadHeader{Type: "note", Nonce: proto.ID(id(1)), Timestamp: clock, Group: proto.ID(groupID), To: node.ID()},
 		Env:           env,
@@ -127,7 +127,7 @@ func TestServesTheOwnerAndTheMembers(t *testing.T) {
 		t.Fatal(err)
 	}
 	equal(t, []bool{s.Serves(laptop.ID()), s.Serves(node.ID())}, []bool{false, true})
-	res := apply(t, home.Table{}, s, receipts{}, laptop, signed(laptop, "note", 1, ``))
+	res := apply(t, home.Table{}, s, receipts{}, signed(laptop, "note", 1, ``))
 	equal(t, res.Answer, store.Outcome{Code: "unknown_device"})
 }
 

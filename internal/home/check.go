@@ -11,9 +11,9 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
-// Who may send a command: the connection it came on, its envelope, and the
-// principal behind its signer (planning/contracts/commands.md, "Who";
-// planning/contracts/datachannel.md sections 5 and 8).
+// Who may send a command: its envelope, and the principal behind its signer
+// (planning/contracts/commands.md, "Who"; planning/contracts/datachannel.md
+// sections 5 and 8).
 
 // keyCreate is the key of the one command for a group that does not exist yet.
 const keyCreate = "group/create"
@@ -67,12 +67,9 @@ func (s *State) Serves(device string) bool {
 }
 
 // open makes the checks that come before the receipt and leave none: the
-// command is signed by the device of its connection, its envelope passes
-// (planning/contracts/envelope.md section 3), and it names this group.
-func (s *State) open(device string, env proto.Envelope, now time.Time) (proto.PayloadHeader, *Refusal) {
-	if env.Key != device {
-		return proto.PayloadHeader{}, &Refusal{"forbidden", "the command is signed by another device than this connection's"}
-	}
+// command's envelope passes (planning/contracts/envelope.md section 3), and
+// it names this group.
+func (s *State) open(env proto.Envelope, now time.Time) (proto.PayloadHeader, *Refusal) {
 	hdr, err := identity.OpenCommand(env, s.Home, s.known, now)
 	if err != nil {
 		return hdr, &Refusal{err.Error(), "the envelope of the command was refused"}

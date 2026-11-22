@@ -110,9 +110,9 @@ func cardActEnv(by identity.Key, n byte, action, msg, extra string) proto.Envelo
 	return by.Sign(fmt.Sprintf(`{"t":"act","n":%q,"ts":%d,"g":%q,"msg":%q,"action":%q%s}`, id(n), cardActTS, groupID, msg, action, extra))
 }
 
-func cardApply(t *testing.T, s *home.State, d cardDisk, r home.Receipts, by identity.Key, env proto.Envelope) home.Result {
+func cardApply(t *testing.T, s *home.State, d cardDisk, r home.Receipts, _ identity.Key, env proto.Envelope) home.Result {
 	t.Helper()
-	res, err := home.Commands.Apply(s, d, r, by.ID(), env, now)
+	res, err := home.Commands.Apply(s, d, r, env, now)
 	if err != nil {
 		t.Fatal(err)
 	}

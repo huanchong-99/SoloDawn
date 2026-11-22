@@ -12,8 +12,8 @@ kind: reference
 and `check.go`: the state of a group in memory, the tables of commands, timers and events, the
 checks every command passes before its function runs, and the receipt that answers a repeated
 command. Every other file of the package adds to a table or builds on these types. The seam opens
-no connection, keeps no clock and starts no transaction: it is given a device id, an envelope, a
-time, and the reads and receipts of a transaction, and returns what to write.
+no connection, keeps no clock and starts no transaction: it is given an envelope, a time, and the
+reads and receipts of a transaction, and returns what to write.
 
 The run loop, in the files whose names start with `run`, is "whoever runs the home": it owns the
 states, the transactions, the clock and the connections ("The run loop" below).
@@ -37,7 +37,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | read a message, a note, a thread, the pending cards, the queued items | `c.Disk` in a command, the `Disk` argument of a timer or a handler |
 | add a rule that the clock sets off | a function `func(s *State, d Disk, now int64) Result` and `Timers.Add(name, f)` in its file's `init` |
 | add a rule for an event outside the commands | a function `func(s *State, d Disk, now int64, event any) Result` and `Events.Add(name, f)` in its file's `init` |
-| take a `cmd` from a connection | `Commands.Apply(s, disk, tx, device, env, now)` inside the command's transaction, then `s.Commit(result)` once it is committed, and `result.Frame(re)` for the answer |
+| take a `cmd` from a connection | `Commands.Apply(s, disk, tx, env, now)` inside the command's transaction, then `s.Commit(result)` once it is committed, and `result.Frame(re)` for the answer |
 | run a timer or a handler | `s.Seal(f(s, disk, now, …))` inside a transaction, then write and `s.Commit(result)` as for a command |
 | finish any result | after `s.Commit(result)`, every hook of `After`, on the goroutine of the group |
 | know whether a device may use the home surface of a group | `s.Serves(device)` |
@@ -65,22 +65,21 @@ does one of those five types without its field. `Add` panics when a key is given
 **Order of checks.** `Apply` answers with the first check that fails
 ([datachannel](../../planning/contracts/datachannel.md), section 5):
 
-1. the signer is the device of the connection, else `forbidden`;
-2. the envelope checks of [envelope](../../planning/contracts/envelope.md) section 3, with their
+1. the envelope checks of [envelope](../../planning/contracts/envelope.md) section 3, with their
    own codes; a device is known when a log in `State.Logs` holds it as valid, and a `to` must be
    `State.Home`;
-3. `g` is `State.ID`, else `bad_request`;
-4. the receipt: a command answered before gets that outcome and nothing runs;
-5. the payload names a key, and the key is in the table, else `bad_request`;
-6. the group exists, else `not_found`; only `group/create` reaches its function without one;
-7. `as`, when there, is a text that is not empty, else `bad_request`, and names an AI whose
+2. `g` is `State.ID`, else `bad_request`;
+3. the receipt: a command answered before gets that outcome and nothing runs;
+4. the payload names a key, and the key is in the table, else `bad_request`;
+5. the group exists, else `not_found`; only `group/create` reaches its function without one;
+6. `as`, when there, is a text that is not empty, else `bad_request`, and names an AI whose
    `host` is the signer, else `forbidden`;
-8. the signer's person is a member of the group, or, for `group/create` on a group that does not
+7. the signer's person is a member of the group, or, for `group/create` on a group that does not
    exist, this node's owner, else `forbidden`;
-9. the function;
-10. no row of its result is above the size limit of a row, else `bad_request`.
+8. the function;
+9. no row of its result is above the size limit of a row, else `bad_request`.
 
-Checks 1 to 3 leave no receipt. From check 5 on, the outcome is written as the receipt, a refusal
+Checks 1 and 2 leave no receipt. From check 4 on, the outcome is written as the receipt, a refusal
 included, with the command's own `ts`. A repeated refusal is answered with its code and a fixed
 `msg`, because a receipt holds no sentence.
 

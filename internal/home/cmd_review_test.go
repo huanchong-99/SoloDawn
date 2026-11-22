@@ -83,7 +83,7 @@ func revState(t *testing.T, forge string) (*home.State, revDisk) {
 func revApply(t *testing.T, s *home.State, d revDisk, by identity.Key, payload any) home.Result {
 	t.Helper()
 	env := briefSign(by, payload)
-	res, err := home.Commands.Apply(s, d, receipts{}, by.ID(), env, now)
+	res, err := home.Commands.Apply(s, d, receipts{}, env, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func revApply(t *testing.T, s *home.State, d revDisk, by identity.Key, payload a
 
 func revApplyRaw(t *testing.T, s *home.State, d revDisk, by identity.Key, raw string) home.Result {
 	t.Helper()
-	res, err := home.Commands.Apply(s, d, receipts{}, by.ID(), by.Sign(raw), now)
+	res, err := home.Commands.Apply(s, d, receipts{}, by.Sign(raw), now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,7 +536,7 @@ func TestReviewCmdPostPassFailVetoAndSixReviewStop(t *testing.T) {
 		p.Re = &reID
 		env := briefSign(revReviewBox, p)
 
-		res, err := home.Commands.Apply(s, d, receipts{}, revReviewBox.ID(), env, now)
+		res, err := home.Commands.Apply(s, d, receipts{}, env, now)
 		equal(t, err, nil)
 		equal(t, res.Answer, store.Outcome{OK: true, Passed: revBool(true), Round: 1})
 		revAssertNoNulls(t, res)

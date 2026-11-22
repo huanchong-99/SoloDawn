@@ -95,7 +95,7 @@ func runErr(re int64, code, msg string) proto.ErrorResponse {
 func (g *runGroup) command(c *Conn, re int64, env proto.Envelope) {
 	now := g.loop.cfg.Now()
 	res, err := g.transact(now, func(d Disk, tx *store.Tx) (Result, error) {
-		return g.loop.cfg.Tables.Commands.Apply(g.state, d, tx, c.device, env, now)
+		return g.loop.cfg.Tables.Commands.Apply(g.state, d, tx, env, now)
 	})
 	if err != nil {
 		g.loop.cfg.Report(fmt.Errorf("group %s, a command of %s: %w", g.state.ID, c.device, err))

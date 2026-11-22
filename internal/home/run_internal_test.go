@@ -132,7 +132,7 @@ func TestRunForgetsAGroupThatDoesNotExist(t *testing.T) {
 	}
 	for re := range int64(3) {
 		l.Cmd(c, re, proto.Envelope{Payload: `{"g":"CQkJCQkJCQkJCQkJCQkJCQ"}`})
-		runSame(t, <-client, any(proto.ErrorResponse{Re: re, Err: proto.WireError{Code: "forbidden", Message: "the command is signed by another device than this connection's"}}))
+		runSame(t, <-client, any(proto.ErrorResponse{Re: re, Err: proto.WireError{Code: "bad_sig", Message: "the envelope of the command was refused"}}))
 		for end := time.Now().Add(10 * time.Second); groups() != 0; {
 			if time.Now().After(end) {
 				t.Fatal("the group's goroutine did not end")
