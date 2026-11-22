@@ -132,6 +132,6 @@ func (s *State) calWriteReply(c Command, p proto.Post[proto.EmptyBody], target p
 		By: c.Who.AI, Kind: calKindReply, Timestamp: c.Timestamp, Text: p.Text,
 		Mentions: mentions, Re: (*string)(p.Re), Body: briefJSON(p.Body), Env: &c.Env,
 	}
-	rows := append([]Row{RowOf(target)}, s.postRows(msg)...)
+	rows := append([]Row{RowOf(target)}, s.profileReplyRows(msg, target)...)
 	return Result{Rows: rows, Items: s.cardItems([]TaskItem{{Why: calWhyReply, AI: target.By}}, postTaskID(thread), replyID)}
 }

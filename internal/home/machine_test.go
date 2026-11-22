@@ -323,12 +323,16 @@ func TestMachineHostFacts(t *testing.T) {
 			fx: mcItems(mcNotice("no_reviewer"))},
 		{name: "row 6: failed hosted checks below the limit go back to the assignee",
 			in: cloud, ev: host(home.OnCloud, home.Event{Commit: "c1"}),
-			out: func(t *proto.TaskRow) { t.Checks.Cloud, t.Step, t.Failures = checked(false, "c1"), "local_check", 2 },
-			fx:  mcItems(home.TaskItem{Why: "checks", AI: mcA})},
+			out: func(t *proto.TaskRow) {
+				t.Checks.Cloud, t.Step, t.Failures = checked(false, "c1"), "local_check", 2
+				t.Stuck = &proto.Stuck{Kind: "checks", N: 1}
+			},
+			fx: mcItems(home.TaskItem{Why: "checks", AI: mcA})},
 		{name: "row 14: failed hosted checks at the limit stop the task",
 			in: cloud.wait("approval").set(func(t *proto.TaskRow) { t.Failures = 2 }), ev: host(home.OnCloud, home.Event{Commit: "c1"}),
 			out: func(t *proto.TaskRow) {
 				t.Checks.Cloud, t.Step, t.Failures, t.State, t.Wait = checked(false, "c1"), "local_check", 3, "failed", nil
+				t.Stuck = &proto.Stuck{Kind: "checks", N: 1}
 			},
 			fx: mcStopped("failures")},
 		{name: "row 6: passed while paused queues no review and leaves the wait",
@@ -340,12 +344,16 @@ func TestMachineHostFacts(t *testing.T) {
 			fx:  mcItems(mcNotice("no_reviewer"))},
 		{name: "row 6: failed while paused queues no work item",
 			in: cloud.at("paused", "cloud_check").wait("manual"), ev: host(home.OnCloud, home.Event{Commit: "c1"}),
-			out: func(t *proto.TaskRow) { t.Checks.Cloud, t.Step, t.Failures = checked(false, "c1"), "local_check", 2 }},
+			out: func(t *proto.TaskRow) {
+				t.Checks.Cloud, t.Step, t.Failures = checked(false, "c1"), "local_check", 2
+				t.Stuck = &proto.Stuck{Kind: "checks", N: 1}
+			}},
 		{name: "row 14: a paused task stops at the limit and keeps no wait",
 			in: cloud.at("paused", "cloud_check").wait("manual").keep("conflict").set(func(t *proto.TaskRow) { t.Failures = 2 }),
 			ev: host(home.OnCloud, home.Event{Commit: "c1"}),
 			out: func(t *proto.TaskRow) {
 				t.Checks.Cloud, t.Step, t.Failures, t.State, t.Wait = checked(false, "c1"), "local_check", 3, "failed", nil
+				t.Stuck = &proto.Stuck{Kind: "checks", N: 1}
 			},
 			fx: mcStopped("failures")},
 		{name: "row 6: refused for another commit",
@@ -383,20 +391,29 @@ func TestMachineReview(t *testing.T) {
 			fx:  merge},
 		{name: "row 7: a first review that fails is the first failed one",
 			in: never, ev: by(mcR, home.Event{Commit: "c1", Score: 86}),
-			out: func(t *proto.TaskRow) { t.Review, t.Step = scored(1, 1, 86, false), "local_check" },
-			fx:  reviewed},
+			out: func(t *proto.TaskRow) {
+				t.Review, t.Step = scored(1, 1, 86, false), "local_check"
+				t.Stuck = &proto.Stuck{Kind: "review", N: 1}
+			},
+			fx: reviewed},
 		{name: "row 7: the round counts on, and a passed review leaves the failed ones as they are",
 			in: base, ev: by(mcR, home.Event{Commit: "c1", OK: true, Score: 93}),
 			out: func(t *proto.TaskRow) { t.Review, t.Step = scored(2, 1, 93, true), "merge" },
 			fx:  merge},
 		{name: "row 7: the fifth failed review still sends the work back",
 			in: base.set(failedBefore(4)), ev: by(mcR, home.Event{Commit: "c1", Score: 86}),
-			out: func(t *proto.TaskRow) { t.Review, t.Step = scored(8, 5, 86, false), "local_check" },
-			fx:  reviewed},
+			out: func(t *proto.TaskRow) {
+				t.Review, t.Step = scored(8, 5, 86, false), "local_check"
+				t.Stuck = &proto.Stuck{Kind: "review", N: 1}
+			},
+			fx: reviewed},
 		{name: "row 14: the sixth failed review stops the task",
 			in: base.wait("decision").set(failedBefore(5)), ev: by(mcR, home.Event{Commit: "c1", Score: 86}),
-			out: func(t *proto.TaskRow) { t.Review, t.State, t.Wait = scored(8, 6, 86, false), "failed", nil },
-			fx:  mcStopped("review_rounds")},
+			out: func(t *proto.TaskRow) {
+				t.Review, t.State, t.Wait = scored(8, 6, 86, false), "failed", nil
+				t.Stuck = &proto.Stuck{Kind: "review", N: 1}
+			},
+			fx: mcStopped("review_rounds")},
 		{name: "row 7: refused from the task's own assignee",
 			in: base, ev: by(mcA, home.Event{Commit: "c1", OK: true}), err: home.RefusedForbidden},
 		{name: "row 7: refused from another AI",
