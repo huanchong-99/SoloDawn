@@ -1,5 +1,6 @@
 import type { Component } from 'svelte';
 import { describe, expect, it } from 'vitest';
+import MemberPanel from '../components/member/MemberPanel.svelte';
 import { card, cards, gather, mounts, points, side } from './mounts.svelte';
 import { files } from './mounts.glob';
 
@@ -59,6 +60,14 @@ describe('gather', () => {
     expect(placed(found.at['chat.side'])).toEqual(['Side@member:1']);
   });
 
+  it('mounts the people panel in the chat sidebar', () => {
+    expect(mounts['chat.side']).toContainEqual({
+      area: 'member',
+      order: 10,
+      component: MemberPanel,
+    });
+  });
+
   it('gives the card of each kind, with its area', () => {
     const found = gather({
       '../components/approval/mounts.ts': { cards: { approval: part('Approval') } },
@@ -98,5 +107,9 @@ describe('the mounts of this client', () => {
 
   it('start with the side panel of a chat closed', () => {
     expect(side).toEqual({ open: false });
+  });
+
+  it('registers the confirmation card under the confirm area', () => {
+    expect(cards.get('confirm')).toEqual({ area: 'confirm', component: card('confirm') });
   });
 });

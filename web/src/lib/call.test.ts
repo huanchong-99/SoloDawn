@@ -110,7 +110,7 @@ describe('call helpers', () => {
       caller: 'Codex',
       callee: 'Claude Code',
       mode: 'Waits for answer',
-      waiting: true,
+      status: 'waiting',
       timing: 'Waiting for reply · 15 s',
       depth: 'Depth 1',
       reply: undefined,
@@ -139,7 +139,7 @@ describe('call helpers', () => {
       }),
     ]);
     const aView = callView(group, answered);
-    expect(aView.waiting).toBe(false);
+    expect(aView.status).toBe('answered');
     expect(aView.timing).toBe('Took 0 s');
     expect(aView.reply).toEqual({
       by: claudeId,
@@ -175,6 +175,21 @@ describe('call helpers', () => {
         state: { status: 'answered', reply: 'rep-gone-member', ms: 10 },
       }).reply,
     ).toMatchObject({ by: 'left-ai', name: 'Former member', cli: undefined });
+  });
+
+  it('shows a denial without a wait duration or inline reply', () => {
+    const { group } = makeGroup();
+    const denied = row<CallMsg>('row-msg-call-denied');
+
+    expect(callView(group, denied)).toEqual({
+      caller: 'Codex',
+      callee: 'Claude Code',
+      mode: 'Waits for answer',
+      depth: 'Depth 1',
+      status: 'denied',
+      timing: 'Denied',
+      reply: undefined,
+    });
   });
 
   it('filters inline reply rows only when the call card is mounted and the call is answered', () => {

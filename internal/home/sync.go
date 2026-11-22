@@ -27,10 +27,7 @@ const (
 // the group, as Attach does: it must not be called on the goroutine of a group
 // or inside a transaction of the store.
 func (l *Loop) Sync(c *Conn, req proto.Sync) {
-	job := func(g *runGroup) { synRun(g, c, req) }
-	if !l.ask(req.Group, job) {
-		c.send(runErr(req.ID, "not_found", "this node is not home to the group"))
-	}
+	l.askHome(c, req.ID, req.Group, func(g *runGroup) { synRun(g, c, req) })
 }
 
 func synRun(g *runGroup, c *Conn, req proto.Sync) {

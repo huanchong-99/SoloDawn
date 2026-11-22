@@ -4,6 +4,7 @@
     addDisabledReason,
     aiMembers,
     humanMembers,
+    isAdmin,
     pathLabel,
     personTags,
     statusOf,
@@ -17,6 +18,9 @@
   import { endTakeover, hostHomeOf } from '../../lib/terminal.svelte';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
+  import AllowEditor from '../allow/AllowEditor.svelte';
+  import InvitationDialog from '../people/InvitationDialog.svelte';
+  import PersonActions from '../people/PersonActions.svelte';
   import AddAI from './AddAI.svelte';
 
   /** The member column of a group's chat: AI member cards, people, and the add-AI dialog. */
@@ -24,6 +28,7 @@
   const uid = $props.id();
 
   let adding = $state(false);
+  let inviting = $state(false);
 
   const ais = $derived(aiMembers(group));
   const humans = $derived(humanMembers(group));
@@ -72,76 +77,99 @@
           <p class="st" data-st={status.st}><i></i><span>{status.text}</span></p>
         </div>
       </header>
-      <dl class="kv">
-        <dt>{t('member.computer')}</dt>
-        <dd>{ai.host_name} <span class="muted">· {pathLabel(ai)}</span></dd>
-        <dt>{t('member.account')}</dt>
-        <dd>
-          {accountLabel(ai.account)}{#if ai.account === 'personal'}{' '}<span class="muted">
-              · {t('member.account.personal.note')}
-            </span>{/if}
-        </dd>
-      </dl>
-      {#if meter}
-        <div
-          class="meter"
-          role="meter"
-          aria-label={meter.label}
-          aria-valuenow={meter.fill}
-          aria-valuetext={meter.note ? `${meter.value} · ${meter.note}` : meter.value}
-          data-tone={meter.tone}
-          style={`--v: ${meter.fill}%`}
-        >
-          <span>{meter.label}</span><b>{meter.value}</b><i></i>{#if meter.note}<small>
-              {meter.note}
-            </small>{/if}
-        </div>
-      {/if}
-      {#if mine}
-        <footer class="card-foot">
-          {#if ai.state === 'takeover'}
-            <button
-              type="button"
-              class="btn btn-sm btn-dawn"
-              onclick={() => endTakeover(hostHomeOf(net.homes, ai.host), ai.host, group.g, ai.id)}
+      <AllowEditor {group} {ai} {humans}>
+        {#snippet children(accessRows, editAccess)}
+          <dl class="kv">
+            <dt>{t('member.computer')}</dt>
+            <dd>{ai.host_name} <span class="muted">· {pathLabel(ai)}</span></dd>
+            <dt>{t('member.account')}</dt>
+            <dd>
+              {accountLabel(ai.account)}{#if ai.account === 'personal'}{' '}<span class="muted">
+                  · {t('member.account.personal.note')}
+                </span>{/if}
+            </dd>
+            {@render accessRows()}
+          </dl>
+          {#if meter}
+            <div
+              class="meter"
+              role="meter"
+              aria-label={meter.label}
+              aria-valuenow={meter.fill}
+              aria-valuetext={meter.note ? `${meter.value} · ${meter.note}` : meter.value}
+              data-tone={meter.tone}
+              style={`--v: ${meter.fill}%`}
             >
-              {t('member.handback')}
-            </button>
-            <span class="hint">{t('member.handback.queued')}</span>
-          {:else if !termWhy}
-            <a class="btn btn-sm" href={href('terminal', { g: group.g, member: ai.id })}>
-              <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
-            </a>
-          {:else}
-            <button
-              type="button"
-              class="btn btn-sm"
-              disabled
-              aria-describedby={`${uid}-term-${ai.id}`}
-            >
-              <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
-            </button>
-            <span id={`${uid}-term-${ai.id}`} class="hint">{termWhy}</span>
+              <span>{meter.label}</span><b>{meter.value}</b><i></i>{#if meter.note}<small>
+                  {meter.note}
+                </small>{/if}
+            </div>
           {/if}
-        </footer>
-      {/if}
+          {#if mine}
+            <footer class="card-foot">
+              {#if ai.state === 'takeover'}
+                <button
+                  type="button"
+                  class="btn btn-sm btn-dawn"
+                  onclick={() =>
+                    endTakeover(hostHomeOf(net.homes, ai.host), ai.host, group.g, ai.id)}
+                >
+                  {t('member.handback')}
+                </button>
+              {:else if !termWhy}
+                <a class="btn btn-sm" href={href('terminal', { g: group.g, member: ai.id })}>
+                  <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
+                </a>
+              {:else}
+                <button
+                  type="button"
+                  class="btn btn-sm"
+                  disabled
+                  aria-describedby={`${uid}-term-${ai.id}`}
+                >
+                  <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
+                </button>
+              {/if}
+              {@render editAccess()}
+              {#if ai.state === 'takeover'}
+                <span class="hint">{t('member.handback.queued')}</span>
+              {:else if termWhy}
+                <span id={`${uid}-term-${ai.id}`} class="hint">{termWhy}</span>
+              {/if}
+            </footer>
+          {/if}
+        {/snippet}
+      </AllowEditor>
     </section>
   {:else}
     <p class="hint">{t('member.ai.empty')}</p>
   {/each}
 
-  <h2 class="sec-title people-head">{t('member.people')} · {humans.length}</h2>
+  <div class="row people-head">
+    <h2 class="sec-title grow">{t('member.people')} · {humans.length}</h2>
+    {#if isAdmin(group)}
+      <button
+        type="button"
+        class="btn btn-sm"
+        disabled={!group.home.ctl}
+        onclick={() => (inviting = true)}
+      >
+        <Icon name="plus" sm /><span>{t('people.invite.action')}</span>
+      </button>
+    {/if}
+  </div>
   <ul class="people">
     {#each humans as person (person.id)}
       {@const tags = personTags(group, person)}
-      <li class="row person">
+      <li class="person">
         <Avatar id={person.user} name={person.name} />
-        <span class="grow cut">
+        <span class="person-name grow">
           {person.name}{#if tags}{' '}<span class="muted">· {tags}</span>{/if}
         </span>
         <span class="st" data-st={person.online ? 'ok' : 'offline'}>
           <i></i>{t(person.online ? 'member.online' : 'member.offline')}
         </span>
+        <PersonActions {group} {person} />
       </li>
     {/each}
   </ul>
@@ -149,6 +177,9 @@
 
 {#if adding}
   <AddAI {group} bind:open={adding} />
+{/if}
+{#if inviting}
+  <InvitationDialog {group} bind:open={inviting} />
 {/if}
 
 <style>
@@ -250,11 +281,18 @@
     margin-top: var(--sp-2);
   }
   .people {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) max-content;
   }
   .person {
-    flex-wrap: nowrap;
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    align-items: center;
+    gap: var(--sp-2);
     padding: 6px 0;
+  }
+  .person-name {
+    overflow-wrap: anywhere;
   }
 </style>

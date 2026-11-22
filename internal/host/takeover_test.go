@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -48,7 +49,10 @@ func (o *tkOwner) setPath(p string) {
 	o.mu.Lock()
 	o.path = p
 	o.mu.Unlock()
-	o.changed <- struct{}{}
+	select {
+	case o.changed <- struct{}{}:
+	default:
+	}
 }
 
 type tkDriver struct {
@@ -930,5 +934,45 @@ func TestTakeoverHandsBackOnceWhenRowsArriveDuringItsHandBack(t *testing.T) {
 	takeoverState(r.h).wg.Wait()
 	if posts := r.sent("post", "handback"); len(posts) != 1 || r.drv.count() != 1 {
 		t.Fatalf("one takeover gave %d hand-back posts and %d turns", len(posts), r.drv.count())
+	}
+}
+
+// tkGatedOwner delays the watch's Path call that follows the second path
+// signal until the path is "relay", so the watch leaves with a signal unread.
+type tkGatedOwner struct {
+	*tkOwner
+	calls atomic.Int32
+}
+
+func (o *tkGatedOwner) Path() string {
+	// Call 1 is the start check; calls 2 to 4 are the watch: before any
+	// signal, after signal 1, after signal 2.
+	if o.calls.Add(1) == 4 {
+		for o.tkOwner.Path() != "relay" {
+			time.Sleep(time.Millisecond)
+		}
+	}
+	return o.tkOwner.Path()
+}
+
+func TestTakeoverFakeOwnerSetPathNeverBlocksWhenTheWatchLeavesASignalUnread(t *testing.T) {
+	r := newTkRig(t)
+	if err := r.startFrom(&tkGatedOwner{tkOwner: r.owner}, tkSec, ""); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		r.owner.changed <- struct{}{}
+	}
+	sent := make(chan struct{})
+	go func() {
+		r.owner.setPath("relay")
+		close(sent)
+	}()
+	r.waitReleased(tkSec)
+	select {
+	case <-sent:
+	case <-time.After(3 * time.Second):
+		<-r.owner.changed
+		t.Fatal("setPath stayed blocked on a full signal channel after the watch left")
 	}
 }

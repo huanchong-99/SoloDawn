@@ -47,6 +47,7 @@ func (w *homeReviewWorld) TypedNotes(string) []proto.NoteRow         { return ni
 func (w *homeReviewWorld) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (w *homeReviewWorld) Pending() []proto.MsgRow                   { return nil }
 func (w *homeReviewWorld) Queued() []store.Item                      { return nil }
+func (w *homeReviewWorld) OtherMember(string) bool                   { return false }
 
 func (w *homeReviewWorld) Receipt(signer, nonce string) (store.Outcome, error) {
 	out, ok := w.receipts[signer+" "+nonce]

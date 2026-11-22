@@ -20,9 +20,10 @@ interface Route {
   dev?: true;
 }
 
-/** The seven pages of the design (`web/design/index.html`), in its order. */
+/** The pages of the design (`web/design/index.html`) and the invitation entry point. */
 export const routes = {
   onboarding: { path: 'onboarding', view: 'Onboarding', full: 'always' },
+  join: { path: 'join/:link?', view: 'Join', full: 'always' },
   groups: { path: 'groups', view: 'Groups', tab: 'groups' },
   chat: { path: 'groups/:g', view: 'Groups', tab: 'groups', full: 'phone' },
   terminal: { path: 'terminal/:g/:member/:task?', view: 'Terminal', tab: 'groups', full: 'phone' },
@@ -54,53 +55,46 @@ export interface PageProps<P extends Page = Page> {
   net: import('./net.svelte').Net;
 }
 
-/** Where a page stands along the navigation: the place of its entry; a page without one stands
- *  before the first entry, or after the last when only a development server opens it. */
-function place(page: Page) {
-  const route: Route = routes[page];
-  if (route.tab) return tabs.indexOf(route.tab);
-  return route.dev ? tabs.length : -1;
-}
-
 /** The parameters of a path, when the address fits it: as many segments, every word equal, and
  *  every parameter given but an optional last one. */
 function fit(path: string, parts: string[]) {
   const segments = path.split('/');
   if (parts.length > segments.length) return undefined;
   const params: Record<string, string> = {};
-  for (const [i, segment] of segments.entries()) {
-    const part = parts[i] ?? '';
-    if (!segment.startsWith(':')) {
-      if (part !== segment) return undefined;
-    } else if (part) {
-      params[segment.slice(1).replace('?', '')] = part;
-    } else if (!segment.endsWith('?')) {
-      return undefined;
-    }
+  return segments.every((segment, i) => take(segment, parts[i] ?? '', params)) ? params : undefined;
+}
+
+function take(segment: string, part: string, params: Record<string, string>) {
+  if (!segment.startsWith(':')) return part === segment;
+  if (!part) return segment.endsWith('?');
+  params[segment.slice(1).replace('?', '')] = part;
+  return true;
+}
+
+function decodeParts(hash: string) {
+  try {
+    const parts = hash.slice(2).split('/').map(decodeURIComponent);
+    if (parts.at(-1) === '') parts.pop();
+    return parts;
+  } catch {}
+}
+
+function match(parts: string[], dev: boolean) {
+  for (const page of pages) {
+    const route: Route = routes[page];
+    const params = dev || !route.dev ? fit(route.path, parts) : undefined;
+    if (params) return { page, params };
   }
-  return params;
 }
 
 /** The page an address opens, with its parameters. One slash at the end is no segment. An
  *  address that fits no path, or the page of a development server in the build, opens the
  *  chats. No address fits two paths. */
 export function parse(hash: string, dev = import.meta.env.DEV) {
-  const chats = () => ({ page: 'groups' as Page, params: {} });
-  if (!hash.startsWith('#/')) return chats();
-  let parts: string[];
-  try {
-    parts = hash.slice(2).split('/').map(decodeURIComponent);
-  } catch {
-    // A malformed escape: the address names no page.
-    return chats();
-  }
-  if (parts.at(-1) === '') parts.pop();
-  for (const page of pages) {
-    const route: Route = routes[page];
-    const params = dev || !route.dev ? fit(route.path, parts) : undefined;
-    if (params) return { page, params };
-  }
-  return chats();
+  if (hash.startsWith('#join=')) return { page: 'join' as const, params: { link: hash } };
+  const parts = hash.startsWith('#/') ? decodeParts(hash) : undefined;
+  const found = parts && match(parts, dev);
+  return found ?? { page: 'groups' as const, params: {} };
 }
 
 /** The address of a page with its parameters. */
@@ -115,6 +109,14 @@ export function href<P extends Page>(
     return value === undefined ? undefined : encodeURIComponent(value);
   });
   return `#/${parts.filter((part) => part !== undefined).join('/')}`;
+}
+
+/** Where a page stands along the navigation: the place of its entry; a page without one stands
+ *  before the first entry, or after the last when only a development server opens it. */
+function place(page: Page) {
+  const route: Route = routes[page];
+  if (route.tab) return tabs.indexOf(route.tab);
+  return route.dev ? tabs.length : -1;
 }
 
 const first = parse(location.hash);

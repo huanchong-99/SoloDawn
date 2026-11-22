@@ -211,6 +211,16 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       });
 
       When('the person copies the prompt and gives the code to the node', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        const copy = one<HTMLButtonElement>('.prompt header button');
+        const write = vi
+          .spyOn(navigator.clipboard, 'writeText')
+          .mockRejectedValueOnce(new Error('denied'));
+        copy.click();
+        await expect(write.mock.results[0].value).rejects.toThrow('denied');
+        await vi.advanceTimersByTimeAsync(1800);
+        expect(copy.textContent?.trim()).toBe('Copy prompt');
+        vi.useRealTimers();
         one<HTMLButtonElement>('.prompt header button').click();
         await tick();
         flushSync();

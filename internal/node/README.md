@@ -12,6 +12,7 @@ kind: reference
 - `node.go` and `proc_*.go`: `Foreground()` runtime assembly (`openNode`, `runNode`), `logs/node.log` rotation at 10 MiB (keeping `.1`), `device.key` and `node.db` initialization, `home.StartLoop` (`OwnerFn: logs.Owner`), `host.Host` + `ServeMCP` on the local socket, `AttachLocal`, `Logs` + `Sessions` + `Surface` + `Pairer`, start-at-login registration on adoption (`InstallService`), `peer.Peer` + `Host.Connect`, embedded local web UI (`localhost:47800` with `:0` fallback) + `/rv` local signalling path, and persistent remote rendezvous connections ([local](../../planning/contracts/local.md), sections 1-3 and 10).
 - `dir.go` and `socket*.go`: per-user data directory, exclusive lock on `lock`, and owner-only local Unix socket (`sock`) carrying local CLI commands and MCP sessions ([local](../../planning/contracts/local.md), sections 2 and 3).
 - `cmd.go`: the `Subcommands` table, `MCP` (`solodawn mcp --token <t>`), and local command exchange (`solodawn pair` auto-starts a detached background node when `sock` is absent).
+- `export.go`: `solodawn group export <group id> <file> [--to <device id>]` and `solodawn group import <file>` use the running node's local socket. Export without `--to` keeps the group on the old node; export with it makes the old node answer `moved`. Import requires a node of the same owner and no existing rows for that group. Files resolve relative to the CLI's working directory.
 - `service_*.go`: start-at-login registration on macOS, Linux and Windows ([local](../../planning/contracts/local.md), section 1).
 - `update.go`: `Updater` for SHA-256-verified self-update outside running turns and takeovers ([local](../../planning/contracts/local.md), section 9; postponed off the main line).
 - `rendezvous.go`: standalone signalling, static web assets and ICE service.
@@ -46,6 +47,7 @@ kind: reference
 ## Local link
 
 `AttachLocal(h, loop)` attaches `h.Key.ID()` to `loop` as a `home.Client`, registers the `*LocalLink` on `h` via `h.Attach`, and calls `loop.Inbox` for the node's device.
+The node runtime also subscribes its `LocalLink` to `groups` pushes.
 
 - **Framing.** Every frame in either direction is encoded as JSON without HTML escaping. `host.Command` checks the `ctl` message limit before sending, and the home loop splits `rows` pushes within the limit ([conventions.md](../../planning/contracts/conventions.md) section 4).
 - **Requests and pushes (`Host` to `Home`).** `Request` assigns an increasing request `id`, sends the built frame, and waits on a per-request single-reader channel until the matching `re` arrives, `Done()` closes, or `ctx` is canceled. `cmd`, `sync` and `fetch` requests dispatch to `loop.Cmd`, `loop.Sync` and `loop.Fetch`, and `ack` pushes dispatch to `loop.Ack`; any other frame carrying an integer `id` is answered `bad_request` ([datachannel.md](../../planning/contracts/datachannel.md) section 2), and any other frame without an `id` is dropped.
@@ -56,9 +58,15 @@ kind: reference
 
 `(*Sessions).serveClient(ctx, device, raw)` runs one outgoing `ctl` session from this node's host to a remote home `device` over `raw` (`clientCtl`, satisfied by `*peer.Connection`):
 
-- **Reader-first handshake and `devlog` order.** Starts the `Read` loop before sending `hello` (`v: 1`, `kind: "host"`, with `Name` and `Addrs`, under a 10 s timeout) because `*peer.Connection.Read` routes answers after earlier queued frames. Checks that the answer is not an `ErrorResponse`, then sends this node's owner `devlog` frames under `sendMu` before calling `Host.Attach(device, raw)` and closing `ready`. Commands sent from `Attached` hooks (such as `host.join`'s `member add_ai` and `Attached["runtime"]`'s step-18 `member status`) therefore reach the remote home after this node's device log.
+- **Reader-first handshake and `devlog` order.** Starts the `Read` loop before sending `hello` (`v: 2`, `kind: "host"`, with `Name` and `Addrs`, under a 10 s timeout) because `*peer.Connection.Read` routes answers after earlier queued frames. A `version` error retries once with `v: 1` on the same channel. On success it sends this node's owner `devlog` frames under `sendMu` before calling `Host.Attach(device, raw)` and closing `ready`.
 - **Pushes and live `devlog` forwarding.** Incoming `devlog` frames apply to `Logs` at once (and forward to other connected sessions without echoing back to the sender); other frames wait on `ready` until `Host.Attach` has returned and then call `Host.Push(device, frame)` synchronously in read order, so every push sent before an answer is applied before `Request` returns.
 - **`connectHome(dial)`.** Returns a non-blocking `Host.Connect` function that ignores this node's own device id (served by `AttachLocal`) and runs `dial` in the background, calling `serveClient` on each opened connection until `ctx` ends.
+
+## Invitations and group homes
+
+A home `invite` opens an in-memory pairing room for one group. Unlike `pair.browser`, a `#join` invitation never enrols a device of the node's owner. The joining connection only accepts `hello`, its person's `devlog` and `join` for the invitation's group. After the home commits the join, the person keeps their own devices and gains that group's home surface, not the host surface. Stored device logs are sent only to peers that can read a group containing the person; the owner's log is also sent to enrolled or pairing owner devices.
+
+The owner's devices can send `home.add` to record a group's home and its signalling URLs without joining or cloning it. If the node already hosts sessions for that group, their home changes and the host reconnects to it.
 
 ## Multi-node test helper (`nodetest`)
 
@@ -104,7 +112,6 @@ kind: reference
 - `Surface` answers `host.info` requests and forwards `pty.resize` pushes; there is no `host.info` push yet, `settings.set` is postponed with `U-12`.
 - `net_status` omits `rtt_ms` (`*peer.Connection` exposes `Path()` without ICE candidate-pair round-trip statistics) and reports `mapped_ports` as `false` in step 1 ([issues](../../issues.md)).
 - Self-update (`Updater`, `N-6`) is postponed off the step-1 main line ([issues](../../issues.md)).
-- In step 1 `Logs` stores only the node owner's device log; keeping logs of other group members belongs to step 2.
 - On macOS, Unix socket paths are limited to 103 bytes, so tests that bind `sock` under `HOME` use `/tmp` ([issues](../../issues.md)).
 
 ## Verification and sources

@@ -15,6 +15,7 @@
     toggleTheme,
   } from '../lib/prefs.svelte';
   import { href } from '../lib/route.svelte';
+  import '../styles/onboarding.css';
 
   let { net }: { params: Record<string, string | undefined>; net: Net } = $props();
 
@@ -45,7 +46,6 @@
   });
 
   async function copyPrompt() {
-    if (!session.code) return;
     await navigator.clipboard?.writeText(promptText).catch(() => undefined);
     copied = true;
     announcement.text = t('pairing.prompt.copied');
@@ -183,82 +183,6 @@
 </div>
 
 <style>
-  .top {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    max-width: 1080px;
-    margin: 0 auto;
-    padding: var(--sp-3) var(--sp-5);
-  }
-  .brand {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    color: var(--text);
-    font-weight: 600;
-    font-size: var(--fs-lg);
-    letter-spacing: -0.02em;
-  }
-  .brand:hover {
-    text-decoration: none;
-  }
-  .hero {
-    position: relative;
-    overflow: clip;
-    padding: var(--sp-12) var(--sp-5) 76px;
-    text-align: center;
-  }
-  .hero::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: calc(100% - 52px);
-    width: 2400px;
-    height: 2400px;
-    translate: -50% 0;
-    border-radius: 50%;
-    border-top: 1px solid color-mix(in srgb, var(--dawn) 70%, transparent);
-    background: radial-gradient(
-      closest-side at 50% 0,
-      color-mix(in srgb, var(--dawn) 16%, transparent),
-      transparent 22%
-    );
-    mask-image: linear-gradient(90deg, transparent 36%, #000 46%, #000 54%, transparent 64%);
-    pointer-events: none;
-  }
-  .hero > * {
-    position: relative;
-  }
-  .hero h1 {
-    font-size: var(--fs-3xl);
-    letter-spacing: -0.03em;
-    max-width: 16em;
-    margin: var(--sp-4) auto var(--sp-3);
-    text-wrap: balance;
-  }
-  .hero p {
-    color: var(--text-2);
-    font-size: var(--fs-lg);
-    max-width: 34em;
-    margin: 0 auto;
-    text-wrap: pretty;
-  }
-  .wrap {
-    max-width: 1080px;
-    margin: 0 auto;
-    padding: 0 var(--sp-5) var(--sp-16);
-    display: grid;
-    gap: var(--sp-5);
-    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
-    align-items: start;
-  }
-  .wrap > div {
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-5);
-    min-width: 0;
-  }
   .kind {
     font-weight: 600;
     font-size: var(--fs-sm);
@@ -342,18 +266,9 @@
     margin-bottom: 2px;
   }
   @media (max-width: 860px) {
-    .wrap {
-      grid-template-columns: minmax(0, 1fr);
-    }
     .trust {
       grid-template-columns: minmax(0, 1fr);
       gap: var(--sp-4);
-    }
-    .hero {
-      padding-top: var(--sp-8);
-    }
-    .hero p {
-      font-size: var(--fs-md);
     }
   }
 </style>

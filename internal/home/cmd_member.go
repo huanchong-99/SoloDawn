@@ -125,6 +125,17 @@ func (s *State) memDemote(keep string) []Row {
 
 // memSet updates an AI member's name, account, allow list or approvers.
 func memSet(s *State, c Command) (Result, *Refusal) {
+	var p proto.MemberCommand
+	if refusal := c.Decode(&p); refusal != nil {
+		return Result{}, refusal
+	}
+	if person, ok := s.People[string(p.ID)]; ok {
+		return peopleSetRole(s, c, person)
+	}
+	return memSetAI(s, c)
+}
+
+func memSetAI(s *State, c Command) (Result, *Refusal) {
 	var p proto.MemberSet
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
@@ -192,6 +203,9 @@ func memRemove(s *State, c Command) (Result, *Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
 	}
+	if person, ok := s.People[string(p.ID)]; ok {
+		return peopleRemove(s, c, person)
+	}
 	ai, refusal := s.memAI(string(p.ID))
 	if refusal != nil {
 		return Result{}, refusal
@@ -236,9 +250,6 @@ func memRetired(d Disk, ai string) []int64 {
 func (s *State) memAI(id string) (proto.AIMemberRow, *Refusal) {
 	if ai, ok := s.AIs[id]; ok {
 		return ai, nil
-	}
-	if _, human := s.People[id]; human {
-		return proto.AIMemberRow{}, &Refusal{"forbidden", "only AI members are changed or removed in step 1"}
 	}
 	return proto.AIMemberRow{}, &Refusal{"not_found", "the group has no such member"}
 }
