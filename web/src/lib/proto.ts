@@ -344,6 +344,7 @@ const BriefBody = v.object({
   pass: int,
   requester: str,
   replaces: v.nullable(str),
+  preset: optionalText,
 });
 
 const ApprovalBody = v.object({
@@ -520,6 +521,8 @@ export const NoteRow = v.object({
   pos: int,
   g: str,
   task: v.nullable(str),
+  type: optionalText,
+  name: optionalText,
   text: str,
   by: str,
   ts: int,
@@ -564,8 +567,9 @@ const FetchPage = { t: v.literal('fetch'), id: int, g: str, before: int, limit: 
 export const FetchThread = v.object({ ...FetchPage, thread: v.nullable(str) });
 export type FetchThread = v.InferOutput<typeof FetchThread>;
 
-/** A page of the review messages or of the notes. */
-export const FetchKind = v.object({ ...FetchPage, kind: str });
+/** A page of the review messages, context notes, presets or knowledge-base documents, or a
+ *  knowledge-base search when `q` is set (contracts/step-3/knowledge.md section 3). */
+export const FetchKind = v.object({ ...FetchPage, kind: str, q: optionalText });
 export type FetchKind = v.InferOutput<typeof FetchKind>;
 
 /** One row of the group, by its type and id: `before` is 0 and `limit` 1. */
@@ -592,6 +596,8 @@ export const CmdResult = v.object({
   round: v.optional(int),
   link: v.optional(str),
   expires: v.optional(int),
+  id: v.optional(str),
+  replaced: v.optional(bool),
 });
 export type CmdResult = v.InferOutput<typeof CmdResult>;
 
@@ -818,6 +824,8 @@ export const Note = v.object({
   ...HomeCommand,
   id: Id,
   task: v.nullable(Id),
+  type: optionalText,
+  name: optionalText,
   text: str,
 });
 export type Note = v.InferOutput<typeof Note>;
@@ -934,6 +942,13 @@ export type TakeoverEnd = v.InferOutput<typeof TakeoverEnd>;
 export const HostInfoRequest = v.object({ t: v.literal('host.info'), id: int });
 export type HostInfoRequest = v.InferOutput<typeof HostInfoRequest>;
 
+/** The capability table a CLI driver declares (contracts/step-3/drivers.md sections 4 and 6). */
+export const Driver = v.object({
+  accounts: strs,
+  takeover: str,
+});
+export type Driver = v.InferOutput<typeof Driver>;
+
 const HostState = {
   device: str,
   name: str,
@@ -955,6 +970,7 @@ const HostState = {
       account: v.nullable(str),
       login_ok: bool,
       caps: Caps,
+      driver: Driver,
       groups: v.array(
         v.object({
           g: Id,
@@ -1061,6 +1077,36 @@ export type Inbox = v.InferOutput<typeof Inbox>;
 export const Ack = v.object({ t: v.literal('ack'), g: Id, item: int });
 export type Ack = v.InferOutput<typeof Ack>;
 
+const TraceKey = v.object({ name: str, seed: str, device: str });
+
+const TraceInbox = v.object({
+  to: str,
+  inbox: Inbox,
+  acks: v.array(Ack),
+});
+
+const TraceStep = v.object({
+  from: str,
+  cmd: Cmd,
+  answer: CmdResult,
+  rows: Rows,
+  inboxes: v.array(TraceInbox),
+});
+
+/** A complete signed transcript of one confirmed task from request to summary
+ *  (flows/trace-task.md): `trace-remote.json` and `trace-local.json`. */
+export const TaskTrace = v.object({
+  keys: v.array(TraceKey),
+  devlog: Devlog,
+  group: GroupRow,
+  owner: HumanMemberRow,
+  ais: v.array(AIMemberRow),
+  seq: int,
+  num: int,
+  steps: v.array(TraceStep),
+});
+export type TaskTrace = v.InferOutput<typeof TaskTrace>;
+
 // MCP tools (mcp-tools.md section 5): what a node offers its AI sessions. Not a frame between
 // nodes, so not read by the rules of contracts/conventions.md: the names follow MCP, and a member
 // that the file does not have is refused, as internal/proto's test refuses it.
@@ -1164,6 +1210,16 @@ export function decodeAnswer<T extends RequestType>(
 /** A request as its sender writes it; the connection numbers it. */
 type Ask<R> = Omit<R, 'id'>;
 
+/** A binary data channel opened beside `ctl`, such as `pty:<g>:<member>` (datachannel.md 1, 7). */
+export interface PtyChannel {
+  binaryType: BinaryType;
+  readonly readyState: string;
+  onmessage: ((this: any, event: any) => any) | null;
+  onclose: ((this: any, event: any) => any) | null;
+  send(data: Uint8Array<ArrayBuffer>): void;
+  close(): void;
+}
+
 /** A `ctl` connection. It numbers each request with a new `id` and keeps the request's `t` under
  *  that id. A frame with `re` is the answer to the request of that id: it is read with
  *  `decodeAnswer(t, text)`, settles that request, and the id is forgotten. A frame without `re` is
@@ -1179,4 +1235,6 @@ export interface Ctl {
   request(req: Ask<Cmd>): Promise<AnswerTo<'cmd'> | ErrorResponse>;
   request(req: Ask<HostInfoRequest>): Promise<AnswerTo<'host.info'> | ErrorResponse>;
   request(req: Ask<Audit>): Promise<AnswerTo<'audit'> | ErrorResponse>;
+  send?(frame: Devlog | PTYResize): void;
+  channel?(label: string): PtyChannel | undefined;
 }

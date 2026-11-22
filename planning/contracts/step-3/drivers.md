@@ -129,25 +129,23 @@ would be refused. The home knows nothing of it, and no row changes.
 
 One addition: each entry of `agents` in `host.info`
 (`contracts/datachannel.md` section 7) carries the declaration as the
-always-present object `driver`, field for field as section 4 gives it.
+always-present object `driver`, with the `accounts` and `takeover` of section 4.
 The name is not `caps`: that field holds the owner's usage caps.
 
 ```json
 {"agent":"codex","cli_version":"0.164.0","account":"team","login_ok":true,
  "caps":{},
- "driver":{"accounts":["personal","team","api_key"],"levels":[1,2,3],
-           "approvals":"conn","takeover":"resume","usage":[]},
+ "driver":{"accounts":["personal","team","api_key"],"takeover":"resume"},
  "groups":[]}
 ```
 
 | Field | Presence | The web client uses it for |
 | --- | --- | --- |
 | `accounts` | always, never `[]` | the account types offered when an AI is registered |
-| `levels` | always, never `[]` | nothing in 1.0, which has no level control |
-| `approvals` | always | nothing: every driver has a channel (section 3) |
 | `takeover` | always | "open terminal" is absent when it is `none` |
-| `usage` | always; `[]` when the CLI reports none | nothing in 1.0, whose caps are postponed |
 
+- The other fields of section 4 stay in the host's own table and go on the
+  wire when level control or caps return.
 - `agent` in `host.info` and `cli` in a member row (`contracts/rows.md`
   section 2) take one new value per driver: the name the driver declares,
   made of `a` to `z`, `0` to `9` and `_` (`contracts/conventions.md`
@@ -195,6 +193,7 @@ The two step 1 drivers, from `contracts/drivers.md`
 | --- | --- | --- | --- | --- | --- |
 | `claude` | all three | `1`, `2`, `3`; on native Windows `1`, `3` (`risks.md` Q-4) | `tool` | `new` | `[unverified]` |
 | `codex` | all three | `1`, `2`, `3` | `conn` | `resume` | `[unverified]` |
+| `opencode` (T3-2) | `api_key` | `1`, `3` `[unverified]` | `conn` `[unverified]` | `none` | none |
 
 `usage` of both waits for what the usage unit of step 1 reads from the
 events (`contracts/rows.md` section 2 marks the figures `[unverified]`).

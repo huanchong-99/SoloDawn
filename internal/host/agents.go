@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	agtProbeTimeout     = 5 * time.Second
+	agtProbeSeconds     = 5
 	agtUpsertFoundSQL   = `INSERT INTO agent(agent, cli_version) VALUES(?, ?) ON CONFLICT(agent) DO UPDATE SET cli_version = excluded.cli_version`
 	agtUpdateAccountSQL = `UPDATE agent SET account = ? WHERE agent = ?`
 	agtSelectAgentSQL   = `SELECT account, caps FROM agent WHERE agent = ?`
@@ -126,7 +126,7 @@ func agtProbeAll(ctx context.Context) ([]agtFound, error) {
 }
 
 func agtProbeOne(ctx context.Context, agent string) (string, bool, error) {
-	probeCtx, cancel := context.WithTimeout(ctx, agtProbeTimeout)
+	probeCtx, cancel := context.WithTimeout(ctx, agtProbeSeconds*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(probeCtx, agent, "--version")
 	detachTerminal(cmd)
@@ -199,8 +199,14 @@ func agtReadRow(tx *store.Tx, f agtFound, loginOK bool) (proto.HostAgent, error)
 		Account:    account,
 		LoginOK:    loginOK,
 		Caps:       caps,
+		Driver:     agtDriverProto(f.agent),
 		Groups:     []proto.AgentGroup{},
 	}, nil
+}
+
+func agtDriverProto(agent string) proto.Driver {
+	c := DriverCaps[agent]
+	return proto.Driver{Accounts: c.Accounts, Takeover: c.Takeover}
 }
 
 func agtListen(h *Host, key SessionKey, e Event) {

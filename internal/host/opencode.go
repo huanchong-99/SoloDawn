@@ -1,0 +1,255 @@
+package host
+
+import (
+	"bufio"
+	"cmp"
+	"context"
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+// OpenCode runs as `opencode serve`, one server per session process: turns
+// go over its session API and come back on its event stream
+// (planning/contracts/step-3/drivers.md section 8, [documented]).
+func init() {
+	Register[Driver](Drivers, "opencode", openCodeDriver{})
+	Register(DriverCaps, "opencode", Capabilities{
+		Accounts:  []string{AccountAPIKey},
+		Levels:    []int{1, 3},
+		Approvals: ApprovalConn,
+		Takeover:  TakeoverNone,
+		Usage:     []string{},
+	})
+}
+
+// openCodeLevels holds OpenCode's permission settings by level: at level 1 it
+// edits nothing and runs nothing, at level 3 it asks nothing.
+var openCodeLevels = map[int]map[string]string{
+	1: {"edit": "deny", "bash": "deny"},
+	3: {"edit": "allow", "bash": "allow", "webfetch": "allow", "external_directory": "allow", "doom_loop": "allow"},
+}
+
+var openCodeCategories = map[string]string{"bash": "command", "edit": "file", "webfetch": "network"}
+
+type openCodeDriver struct{}
+
+func (openCodeDriver) Interactive(Launch) ([]string, string, error) {
+	return nil, "", fmt.Errorf("opencode: no terminal takeover")
+}
+
+func (openCodeDriver) Start(ctx context.Context, l Launch) (Process, error) {
+	permission, ok := openCodeLevels[l.Level]
+	if !ok {
+		return nil, fmt.Errorf("opencode: level %d is not declared", l.Level)
+	}
+	config := marshalWire(map[string]any{
+		"permission": permission,
+		"mcp": map[string]any{"solodawn": map[string]any{
+			"type": "local", "command": l.Shim, "timeout": l.ToolTimeout.Milliseconds(),
+		}},
+	})
+	p := &openCodeProcess{launch: l, password: rand.Text(), events: make(chan Event, 16), ready: make(chan struct{})}
+	ctx, p.stop = context.WithCancel(ctx)
+	cmd := exec.CommandContext(ctx, "opencode", "serve", "--hostname", "127.0.0.1", "--port", "0")
+	cmd.Dir = l.Folder
+	cmd.Env = append(os.Environ(), "OPENCODE_SERVER_PASSWORD="+p.password, "OPENCODE_CONFIG_CONTENT="+config)
+	if !l.RepoConfig {
+		cmd.Env = append(cmd.Env, "OPENCODE_DISABLE_PROJECT_CONFIG=1")
+	}
+	detachTerminal(cmd)
+	cmd.WaitDelay = time.Second
+	out, w, _ := os.Pipe()
+	cmd.Stdout = w
+	err := cmd.Start()
+	w.Close()
+	if err != nil {
+		p.stop()
+		out.Close()
+		return nil, err
+	}
+	kill := killCheckTree(cmd)
+	go p.run(out, func() {
+		p.stop()
+		cmd.Wait()
+		kill()
+		out.Close()
+	})
+	return p, nil
+}
+
+// openCodeProcess drives one opencode server. base and session are written
+// before ready is closed and only read after it.
+type openCodeProcess struct {
+	launch   Launch
+	password string
+	events   chan Event
+	ready    chan struct{}
+	stop     context.CancelFunc
+	base     string
+	session  string
+	status   string // how the running turn ends, from session.error
+}
+
+type openCodeEvent struct {
+	Type       string
+	Properties struct {
+		SessionID  string `json:"sessionID"`
+		ID         string
+		Permission string
+		Patterns   []string
+		Error      struct {
+			Name string
+			Data struct{ Message string }
+		}
+	}
+}
+
+func (p *openCodeProcess) Events() <-chan Event { return p.events }
+
+func (p *openCodeProcess) Turn(text string) error {
+	<-p.ready
+	return p.post("/session/"+p.session+"/prompt_async", map[string]any{
+		"system": p.launch.Instructions,
+		"parts":  []map[string]string{{"type": "text", "text": text}},
+	})
+}
+
+func (p *openCodeProcess) Interrupt() error {
+	<-p.ready
+	return p.post("/session/"+p.session+"/abort", struct{}{})
+}
+
+func (p *openCodeProcess) Answer(ask string, allow bool) error {
+	<-p.ready
+	return p.post("/permission/"+ask+"/reply", map[string]string{"reply": map[bool]string{true: "once", false: "reject"}[allow]})
+}
+
+// Close stops the server: it does not exit when its input closes.
+func (p *openCodeProcess) Close() error {
+	p.stop()
+	return nil
+}
+
+func (p *openCodeProcess) post(path string, body any) error {
+	_, err := p.call(http.MethodPost, path, body)
+	return err
+}
+
+func (p *openCodeProcess) request(method, path string, body any) (*http.Response, error) {
+	req, err := http.NewRequest(method, p.base+path, strings.NewReader(marshalWire(body)))
+	if err != nil {
+		return nil, err
+	}
+	req.SetBasicAuth("opencode", p.password)
+	req.Header.Set("Content-Type", "application/json")
+	return http.DefaultClient.Do(req)
+}
+
+func (p *openCodeProcess) call(method, path string, body any) ([]byte, error) {
+	res, err := p.request(method, path, body)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	data, err := io.ReadAll(res.Body)
+	if res.StatusCode >= http.StatusMultipleChoices {
+		err = fmt.Errorf("opencode: %s %s: %s %s", method, path, res.Status, data)
+	}
+	return data, err
+}
+
+// run finds the server's address, then reads its event stream until the
+// server exits.
+func (p *openCodeProcess) run(out io.Reader, wait func()) {
+	defer close(p.events)
+	defer wait()
+	p.base = openCodeAddress(out)
+	go io.Copy(io.Discard, out)
+	stream, err := p.request(http.MethodGet, "/event", nil)
+	if err == nil {
+		defer stream.Body.Close()
+		err = p.open()
+	}
+	close(p.ready)
+	if err != nil {
+		return
+	}
+	p.events <- Event{Kind: Ready, Session: p.session}
+	events := bufio.NewScanner(stream.Body)
+	for events.Scan() {
+		var e openCodeEvent
+		if data, ok := strings.CutPrefix(events.Text(), "data: "); ok && json.Unmarshal([]byte(data), &e) == nil {
+			p.handle(e, json.RawMessage(data))
+		}
+	}
+}
+
+func openCodeAddress(out io.Reader) string {
+	lines := bufio.NewScanner(out)
+	for lines.Scan() {
+		if _, url, ok := strings.Cut(lines.Text(), "listening on "); ok {
+			return url
+		}
+	}
+	return ""
+}
+
+// open resumes the launch's session, or creates one.
+func (p *openCodeProcess) open() error {
+	if p.launch.Session != "" {
+		p.session = p.launch.Session
+		_, err := p.call(http.MethodGet, "/session/"+p.session, nil)
+		if err != nil {
+			p.events <- Event{Kind: NoSession, Text: err.Error()}
+		}
+		return err
+	}
+	data, err := p.call(http.MethodPost, "/session", struct{}{})
+	var s struct{ ID string }
+	if err == nil {
+		err = json.Unmarshal(data, &s)
+	}
+	p.session = s.ID
+	return err
+}
+
+func (p *openCodeProcess) handle(e openCodeEvent, raw json.RawMessage) {
+	props := e.Properties
+	switch e.Type {
+	case "message.part.updated":
+		p.events <- Event{Kind: Active}
+	case "permission.asked":
+		p.events <- Event{Kind: Asked, Ask: &Ask{
+			ID:       props.ID,
+			Tool:     props.Permission,
+			Category: cmp.Or(openCodeCategories[props.Permission], "other"),
+			Command:  strings.Join(props.Patterns, " "),
+			Input:    raw,
+		}}
+	case "session.error":
+		p.failed(props.Error.Name, props.Error.Data.Message)
+	case "session.idle":
+		p.idle(props.SessionID)
+	}
+}
+
+func (p *openCodeProcess) failed(name, text string) {
+	p.status = map[bool]string{true: "interrupted", false: "failed"}[name == "MessageAbortedError"]
+	if name == "ProviderAuthError" {
+		p.events <- Event{Kind: LoginInvalid, Text: text}
+	}
+}
+
+func (p *openCodeProcess) idle(session string) {
+	if session == p.session {
+		p.events <- Event{Kind: TurnEnded, Status: cmp.Or(p.status, "completed")}
+		p.status = ""
+	}
+}

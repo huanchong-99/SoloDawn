@@ -87,12 +87,13 @@ func TestMemberAddAIHostAndPath(t *testing.T) {
 	grpNoNulls(t, briefRows(res)[0])
 	s.Commit(res)
 
-	cmdLocal := memAddCmd(91, localID, "claude", "Local Claude", "api_key", false)
+	// The home takes any driver name; the node checks that it has the driver.
+	cmdLocal := memAddCmd(91, localID, "qwen_code", "Local Claude", "api_key", false)
 	cmdLocal.Approvers = []string{guest.ID(), browser.ID()}
 	res = grpApply(t, s, memDisk{}, receipts{}, node, cmdLocal)
 	wantLocal := wantRemote
 	wantLocal.ID, wantLocal.Seq, wantLocal.Name = localID, 12, "Local Claude"
-	wantLocal.CLI, wantLocal.Host, wantLocal.HostName = "claude", node.ID(), "home-box"
+	wantLocal.CLI, wantLocal.Host, wantLocal.HostName = "qwen_code", node.ID(), "home-box"
 	wantLocal.Account, wantLocal.Approvers, wantLocal.Path = "api_key", []string{guest.ID(), browser.ID()}, "local"
 	equal(t, briefRows(res), []any{wantLocal})
 }
@@ -168,8 +169,8 @@ func TestMemberAddAIRefusals(t *testing.T) {
 			change: func(p *proto.MemberAddAI) { p.Name = "" },
 			code:   "bad_request",
 		},
-		"with an unknown cli": {
-			change: func(p *proto.MemberAddAI) { p.CLI = "gemini" },
+		"with a cli name outside a-z, 0-9 and _": {
+			change: func(p *proto.MemberAddAI) { p.CLI = "Gemini-CLI" },
 			code:   "bad_request",
 		},
 		"with an unknown account": {
