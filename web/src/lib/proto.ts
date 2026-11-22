@@ -1077,6 +1077,36 @@ export type Inbox = v.InferOutput<typeof Inbox>;
 export const Ack = v.object({ t: v.literal('ack'), g: Id, item: int });
 export type Ack = v.InferOutput<typeof Ack>;
 
+const TraceKey = v.object({ name: str, seed: str, device: str });
+
+const TraceInbox = v.object({
+  to: str,
+  inbox: Inbox,
+  acks: v.array(Ack),
+});
+
+const TraceStep = v.object({
+  from: str,
+  cmd: Cmd,
+  answer: CmdResult,
+  rows: Rows,
+  inboxes: v.array(TraceInbox),
+});
+
+/** A complete signed transcript of one confirmed task from request to summary
+ *  (flows/trace-task.md): `trace-remote.json` and `trace-local.json`. */
+export const TaskTrace = v.object({
+  keys: v.array(TraceKey),
+  devlog: Devlog,
+  group: GroupRow,
+  owner: HumanMemberRow,
+  ais: v.array(AIMemberRow),
+  seq: int,
+  num: int,
+  steps: v.array(TraceStep),
+});
+export type TaskTrace = v.InferOutput<typeof TaskTrace>;
+
 // MCP tools (mcp-tools.md section 5): what a node offers its AI sessions. Not a frame between
 // nodes, so not read by the rules of contracts/conventions.md: the names follow MCP, and a member
 // that the file does not have is refused, as internal/proto's test refuses it.
