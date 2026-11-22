@@ -32,7 +32,10 @@ const (
 	ptyTestAIID    = "1PC8WineBrUQ-apCjx7tug"
 )
 
-func TestPTYHelperProcess(_ *testing.T) {
+func TestPTYHelperProcess(t *testing.T) {
+	if t == nil {
+		return
+	}
 	sep := slices.Index(os.Args, "--")
 	if sep < 0 || sep+1 >= len(os.Args) {
 		return
@@ -56,7 +59,10 @@ func TestPTYHelperProcess(_ *testing.T) {
 }
 
 func runPTYEchoHelper() {
-	wd, _ := os.Getwd()
+	wd, err := os.Getwd()
+	if err != nil {
+		os.Exit(2)
+	}
 	fmt.Printf("WD:%s\n", filepath.Base(wd))
 	reader := bufio.NewReader(os.Stdin)
 	for {
@@ -358,16 +364,11 @@ func TestPTYInteractiveRoundTripAndChannelCloseTeardown(t *testing.T) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	mcpFile := filepath.Join(t.TempDir(), "solodawn-mcp.json")
-	if err := os.WriteFile(mcpFile, []byte(`{}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	registerPTYTestDriver(t, "ptytest", func(l Launch) ([]string, string, error) {
 		if l.Folder != workDir || l.Level != 2 {
 			return nil, "", fmt.Errorf("unexpected launch: %+v", l)
 		}
-		argv := append(ptyHelperArgv(t, "pty-echo"), "--mcp-config", mcpFile)
-		return argv, "sess-42", nil
+		return ptyHelperArgv(t, "pty-echo"), "sess-42", nil
 	})
 
 	var doneCount atomic.Int32
@@ -381,6 +382,9 @@ func TestPTYInteractiveRoundTripAndChannelCloseTeardown(t *testing.T) {
 	if err != nil || session != "sess-42" || p == nil {
 		t.Fatalf("StartPTY = (%v, %q, %v), want sess-42", p, session, err)
 	}
+	if p.Attached() {
+		t.Fatal("Attached reported true before ServeTerminal")
+	}
 
 	term := newPTYTestTerminal("pty:" + ptyTestGroupID + ":" + ptyTestAIID)
 	serveDone := make(chan struct{})
@@ -390,6 +394,9 @@ func TestPTYInteractiveRoundTripAndChannelCloseTeardown(t *testing.T) {
 	}()
 
 	term.waitContains(t, "WD:wt-42")
+	if !p.Attached() {
+		t.Fatal("Attached reported false after ServeTerminal")
+	}
 	if _, err := term.inW.Write([]byte("alpha-token\r")); err != nil {
 		t.Fatal(err)
 	}
@@ -407,15 +414,12 @@ func TestPTYInteractiveRoundTripAndChannelCloseTeardown(t *testing.T) {
 	}
 	term.waitContains(t, "ACK:beta-token")
 
-	// Closing the terminal channel ends the bridge, closes the PTY, removes the MCP file and fires onDone once.
+	// Closing the terminal channel ends the bridge, closes the PTY and fires onDone once.
 	term.Close()
 	<-serveDone
 	<-doneCh
 	if got := doneCount.Load(); got != 1 {
 		t.Fatalf("onDone count = %d, want 1", got)
-	}
-	if _, err := os.Stat(mcpFile); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("mcp config still exists or unexpected stat error: %v", err)
 	}
 	// Calling Close and ClosePTY after teardown is idempotent and reports false on ClosePTY.
 	if err := p.Close(); err != nil {
@@ -484,6 +488,10 @@ func TestPTYBackPressureStopsReadingWhileTerminalWriteBlocks(t *testing.T) {
 		t.Fatal(err)
 	}
 	spy := getSpy()
+	if got := spy.recordedResizes(); len(got) != 0 {
+		p.Close()
+		t.Fatalf("unexpected initial resizes without pty.resize: %+v", got)
+	}
 	term := newPTYTestTerminal("pty:g1:m1")
 	term.setBlocked(true)
 
@@ -575,7 +583,7 @@ func TestPTYResizeSurfaceAndBoundaries(t *testing.T) {
 	}
 	spy := getSpy()
 
-	// Exact boundary cols=1, rows=1 via Surface, then cols=132, rows=43 via PTY.Resize.
+	// Exact boundary cols=1, rows=1 via Surface, then cols=1 and rows=1 via PTY.Resize.
 	minResize := fmt.Sprintf(`{"t":"pty.resize","g":%q,"ai":%q,"cols":1,"rows":1}`, ptyTestGroupID, ptyTestAIID)
 	if res, err := handle(context.Background(), h, nil, "dev1", json.RawMessage(minResize)); res != nil || err != nil {
 		t.Fatalf("1x1 pty.resize = (%v, %v)", res, err)
@@ -614,7 +622,7 @@ func TestPTYResizeSurfaceAndBoundaries(t *testing.T) {
 func TestPTYStartRefusalsAndErrorCleanup(t *testing.T) {
 	h := newPTYTestHost(t)
 
-	// 1. Unknown agent -> bad_request.
+	// 1. Unknown agent returns bad_request and releases the slot.
 	_, _, err := h.StartPTY("g1", "m1", "missing-agent", Launch{}, nil)
 	if hostErr, ok := errors.AsType[*Error](err); !ok || hostErr.Code != "bad_request" {
 		t.Fatalf("unknown agent = %v, want bad_request", err)
@@ -637,79 +645,37 @@ func TestPTYStartRefusalsAndErrorCleanup(t *testing.T) {
 		t.Fatalf("plainerr driver = %v, want cli: no thread yet", err)
 	}
 
-	// 3. Empty argv and empty argv[0] (including trailing --mcp-config boundary and temp file cleanup).
-	for _, argv := range [][]string{nil, {}, {""}, {"", "--mcp-config"}, {"", "--mcp-config", filepath.Join(t.TempDir(), "tmp.json")}} {
-		if len(argv) == 3 {
-			if err := os.WriteFile(argv[2], []byte("{}"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
-		cur := argv
-		registerPTYTestDriver(t, "empty-argv", func(Launch) ([]string, string, error) {
-			return cur, "s", nil
-		})
-		_, _, err = h.StartPTY("g1", "m1", "empty-argv", Launch{}, nil)
-		if hostErr, ok := errors.AsType[*Error](err); !ok || hostErr.Code != "bad_request" {
-			t.Fatalf("argv %q = %v, want bad_request", cur, err)
-		}
-		if len(cur) == 3 {
-			if _, statErr := os.Stat(cur[2]); !errors.Is(statErr, os.ErrNotExist) {
-				t.Fatalf("expected %s to be removed, got %v", cur[2], statErr)
-			}
-		}
-	}
-
-	// 4. Trailing --mcp-config without argument on valid command does not panic.
-	if got := ptyMCPConfigPath([]string{"claude", "--mcp-config"}); got != "" {
-		t.Fatalf("trailing --mcp-config = %q, want empty", got)
-	}
-
-	// 5. Missing executable on PATH removes temp MCP file and returns cli.
-	mcpMissingExe := filepath.Join(t.TempDir(), "missing-exe-mcp.json")
-	os.WriteFile(mcpMissingExe, []byte("{}"), 0o600)
+	// 3. Missing executable on PATH returns cli.
 	registerPTYTestDriver(t, "noexe-drv", func(Launch) ([]string, string, error) {
-		return []string{"solodawn-definitely-not-on-path-xyz", "--mcp-config", mcpMissingExe}, "s", nil
+		return []string{"solodawn-definitely-not-on-path-xyz"}, "s", nil
 	})
 	_, _, err = h.StartPTY("g1", "m1", "noexe-drv", Launch{}, nil)
 	if hostErr, ok := errors.AsType[*Error](err); !ok || hostErr.Code != "cli" {
 		t.Fatalf("missing exe = %v, want cli", err)
 	}
-	if _, statErr := os.Stat(mcpMissingExe); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("mcp file not removed on LookPath failure: %v", statErr)
-	}
 
-	// 6. ptyNew failure removes temp MCP file and returns cli.
-	mcpFailOpen := filepath.Join(t.TempDir(), "fail-open-mcp.json")
-	os.WriteFile(mcpFailOpen, []byte("{}"), 0o600)
+	// 4. ptyNew failure returns cli.
 	origNew := ptyNew
 	ptyNew = func() (gopty.Pty, error) { return nil, errors.New("out of ptys") }
 	registerPTYTestDriver(t, "good-drv", func(Launch) ([]string, string, error) {
-		return append(ptyHelperArgv(t, "pty-echo"), "--mcp-config", mcpFailOpen), "s", nil
+		return ptyHelperArgv(t, "pty-echo"), "s", nil
 	})
 	_, _, err = h.StartPTY("g1", "m1", "good-drv", Launch{Folder: t.TempDir()}, nil)
 	ptyNew = origNew
 	if hostErr, ok := errors.AsType[*Error](err); !ok || hostErr.Code != "cli" || hostErr.Message != "out of ptys" {
 		t.Fatalf("ptyNew failure = %v, want cli: out of ptys", err)
 	}
-	if _, statErr := os.Stat(mcpFailOpen); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("mcp file not removed on ptyNew failure: %v", statErr)
-	}
 
-	// 7. cmd.Start failure (missing working folder) closes ptmx, removes temp MCP file and returns cli.
-	mcpBadDir := filepath.Join(t.TempDir(), "bad-dir-mcp.json")
-	os.WriteFile(mcpBadDir, []byte("{}"), 0o600)
+	// 5. cmd.Start failure (missing working folder) closes ptmx and returns cli.
 	registerPTYTestDriver(t, "baddir-drv", func(Launch) ([]string, string, error) {
-		return append(ptyHelperArgv(t, "pty-echo"), "--mcp-config", mcpBadDir), "s", nil
+		return ptyHelperArgv(t, "pty-echo"), "s", nil
 	})
 	_, _, err = h.StartPTY("g1", "m1", "baddir-drv", Launch{Folder: filepath.Join(t.TempDir(), "absent-folder")}, nil)
 	if hostErr, ok := errors.AsType[*Error](err); !ok || hostErr.Code != "cli" {
 		t.Fatalf("cmd.Start failure = %v, want cli", err)
 	}
-	if _, statErr := os.Stat(mcpBadDir); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("mcp file not removed on Start failure: %v", statErr)
-	}
 
-	// 8. Duplicate StartPTY while open returns busy without calling Driver.Interactive a second time.
+	// 6. Duplicate StartPTY while open returns busy without calling Driver.Interactive a second time.
 	var calls atomic.Int32
 	registerPTYTestDriver(t, "once-drv", func(Launch) ([]string, string, error) {
 		calls.Add(1)
@@ -843,7 +809,7 @@ func TestPTYCloseTimeoutAndReentrancy(t *testing.T) {
 	var reentrantErr error
 	var p *PTY
 	p, _, err := h.StartPTY("g1", "m1", "ptyhang", Launch{Folder: t.TempDir()}, func() {
-		// Re-entrant Close inside onDone must not deadlock.
+		// Re-entrant Close inside onDone does not deadlock.
 		reentrantErr = p.Close()
 	})
 	if err != nil {
@@ -858,7 +824,7 @@ func TestPTYCloseTimeoutAndReentrancy(t *testing.T) {
 	// 2. Deterministic check pinning kill-on-timeout vs no-kill-on-prompt-exit on every OS.
 	part := ptyState(h)
 	for _, slow := range []bool{false, true} {
-		slot := ptySlot{group: "g-det", member: fmt.Sprintf("m-%v", slow)}
+		slot := aiSlot{group: "g-det", member: fmt.Sprintf("m-%v", slow)}
 		part.reserve(slot)
 		procDone := make(chan struct{})
 		if !slow {

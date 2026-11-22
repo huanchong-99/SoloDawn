@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -35,11 +34,6 @@ type ptyHandle interface {
 	Resize(cols, rows int) error
 }
 
-type ptySlot struct {
-	group  string
-	member string
-}
-
 type ptySize struct {
 	cols int
 	rows int
@@ -52,24 +46,24 @@ type ptySize struct {
 // or callbacks.
 type ptyPart struct {
 	mu       sync.Mutex
-	reserved map[ptySlot]bool
-	open     map[ptySlot]*PTY
-	sizes    map[ptySlot]ptySize
+	reserved map[aiSlot]bool
+	open     map[aiSlot]*PTY
+	sizes    map[aiSlot]ptySize
 }
 
 func ptyState(h *Host) *ptyPart {
 	part := Part[ptyPart](h)
 	part.mu.Lock()
 	if part.open == nil {
-		part.reserved = map[ptySlot]bool{}
-		part.open = map[ptySlot]*PTY{}
-		part.sizes = map[ptySlot]ptySize{}
+		part.reserved = map[aiSlot]bool{}
+		part.open = map[aiSlot]*PTY{}
+		part.sizes = map[aiSlot]ptySize{}
 	}
 	part.mu.Unlock()
 	return part
 }
 
-func (part *ptyPart) reserve(slot ptySlot) bool {
+func (part *ptyPart) reserve(slot aiSlot) bool {
 	part.mu.Lock()
 	defer part.mu.Unlock()
 	if part.reserved[slot] {
@@ -79,53 +73,41 @@ func (part *ptyPart) reserve(slot ptySlot) bool {
 	return true
 }
 
-func (part *ptyPart) release(slot ptySlot) {
+func (part *ptyPart) release(slot aiSlot) {
 	part.mu.Lock()
 	defer part.mu.Unlock()
 	delete(part.reserved, slot)
 	delete(part.open, slot)
 }
 
-func (part *ptyPart) activate(slot ptySlot, p *PTY) {
+func (part *ptyPart) activate(slot aiSlot, p *PTY) {
 	part.mu.Lock()
 	defer part.mu.Unlock()
 	part.open[slot] = p
 }
 
-func (part *ptyPart) lookup(slot ptySlot) *PTY {
+func (part *ptyPart) lookup(slot aiSlot) *PTY {
 	part.mu.Lock()
 	defer part.mu.Unlock()
 	return part.open[slot]
 }
 
-func (part *ptyPart) noteSize(slot ptySlot, cols, rows int) *PTY {
+func (part *ptyPart) noteSize(slot aiSlot, cols, rows int) *PTY {
 	part.mu.Lock()
 	defer part.mu.Unlock()
 	part.sizes[slot] = ptySize{cols: cols, rows: rows}
 	return part.open[slot]
 }
 
-func (part *ptyPart) sizeOf(slot ptySlot) (ptySize, bool) {
+func (part *ptyPart) sizeOf(slot aiSlot) (ptySize, bool) {
 	part.mu.Lock()
 	defer part.mu.Unlock()
 	sz, ok := part.sizes[slot]
 	return sz, ok
 }
 
-type ptyReaderOnly struct {
-	r io.Reader
-}
-
-func (ro ptyReaderOnly) Read(p []byte) (int, error) {
-	return ro.r.Read(p)
-}
-
-type ptyWriterOnly struct {
-	w io.Writer
-}
-
-func (wo ptyWriterOnly) Write(p []byte) (int, error) {
-	return wo.w.Write(p)
+func ptyCopy(dst io.Writer, src io.Reader) {
+	io.Copy(struct{ io.Writer }{dst}, struct{ io.Reader }{src})
 }
 
 // PTY is one running interactive CLI attached to a pseudo-terminal
@@ -134,17 +116,15 @@ func (wo ptyWriterOnly) Write(p []byte) (int, error) {
 // Lock order: PTY.mu -> ptyPart.mu. Neither lock waits on I/O, process exit
 // or callbacks.
 type PTY struct {
-	part    *ptyPart
-	slot    ptySlot
-	handle  ptyHandle
-	mcpPath string
-	kill    func()
-	onDone  func()
+	part   *ptyPart
+	slot   aiSlot
+	handle ptyHandle
+	kill   func()
+	onDone func()
 
 	mu          sync.Mutex
 	term        Terminal
 	readerTaken bool
-	stopping    bool
 	closed      bool
 
 	// Single reader: waitLoop.
@@ -160,11 +140,11 @@ type PTY struct {
 // StartPTY starts the interactive CLI of agent for (group, member) in a
 // pseudo-terminal in launch.Folder (contracts/drivers.md section 1.3). It
 // returns the open PTY and the CLI session id from Driver.Interactive. When
-// the PTY ends for any reason, onDone (if not nil) runs once after the
-// process has exited.
+// the PTY ends for any reason, onDone (if non-nil) runs once after the process
+// has exited.
 func (h *Host) StartPTY(group, member, agent string, launch Launch, onDone func()) (*PTY, string, error) {
 	part := ptyState(h)
-	slot := ptySlot{group: group, member: member}
+	slot := aiSlot{group: group, member: member}
 	if !part.reserve(slot) {
 		return nil, "", &Error{Code: "busy", Message: "interactive terminal already open"}
 	}
@@ -190,10 +170,6 @@ func ptyInteractiveArgs(agent string, launch Launch) ([]string, string, error) {
 	if err != nil {
 		return nil, "", ptyWrapCLIError(err)
 	}
-	if len(argv) == 0 || argv[0] == "" {
-		os.Remove(ptyMCPConfigPath(argv))
-		return nil, "", &Error{Code: "bad_request", Message: "empty interactive command"}
-	}
 	return argv, session, nil
 }
 
@@ -202,15 +178,6 @@ func ptyWrapCLIError(err error) error {
 		return err
 	}
 	return &Error{Code: "cli", Message: err.Error()}
-}
-
-func ptyMCPConfigPath(argv []string) string {
-	for i := 0; i+1 < len(argv); i++ {
-		if argv[i] == "--mcp-config" {
-			return argv[i+1]
-		}
-	}
-	return ""
 }
 
 func ptyResolveExe(name string) (string, error) {
@@ -233,32 +200,27 @@ func ptyOpenHandle(name string) (string, gopty.Pty, error) {
 	return exePath, ptmx, nil
 }
 
-func ptySpawn(part *ptyPart, slot ptySlot, argv []string, folder string, onDone func()) (*PTY, error) {
-	mcpPath := ptyMCPConfigPath(argv)
+func ptySpawn(part *ptyPart, slot aiSlot, argv []string, folder string, onDone func()) (*PTY, error) {
 	exePath, ptmx, err := ptyOpenHandle(argv[0])
 	if err != nil {
-		os.Remove(mcpPath)
 		return nil, err
 	}
 	cmd := ptmx.Command(exePath, argv[1:]...)
 	cmd.Dir = folder
 	if err := cmd.Start(); err != nil {
 		ptmx.Close()
-		os.Remove(mcpPath)
 		return nil, ptyWrapCLIError(err)
 	}
-	handle := ptyWrap(ptmx)
-	return ptyActivate(part, slot, handle, cmd, mcpPath, onDone), nil
+	return ptyActivate(part, slot, ptyWrap(ptmx), cmd, onDone), nil
 }
 
-func ptyActivate(part *ptyPart, slot ptySlot, handle ptyHandle, cmd *gopty.Cmd, mcpPath string, onDone func()) *PTY {
+func ptyActivate(part *ptyPart, slot aiSlot, handle ptyHandle, cmd *gopty.Cmd, onDone func()) *PTY {
 	pid := cmd.Process.Pid
 	killTree := func() { ptyKillTree(pid) }
 	p := &PTY{
 		part:     part,
 		slot:     slot,
 		handle:   handle,
-		mcpPath:  mcpPath,
 		kill:     killTree,
 		onDone:   onDone,
 		closing:  make(chan struct{}),
@@ -270,6 +232,13 @@ func ptyActivate(part *ptyPart, slot ptySlot, handle ptyHandle, cmd *gopty.Cmd, 
 	p.applyStoredSize()
 	go p.waitLoop(cmd)
 	return p
+}
+
+// Attached reports whether a Terminal stream has attached to p.
+func (p *PTY) Attached() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.term != nil
 }
 
 // Resize sets the terminal dimensions of the pseudo-terminal.
@@ -306,7 +275,7 @@ func (p *PTY) Close() error {
 // ClosePTY closes the open interactive pseudo-terminal of (group, member), if
 // one is open, and reports whether one was found.
 func (h *Host) ClosePTY(group, member string) bool {
-	p := ptyState(h).lookup(ptySlot{group: group, member: member})
+	p := ptyState(h).lookup(aiSlot{group: group, member: member})
 	if p == nil {
 		return false
 	}
@@ -324,15 +293,15 @@ func (h *Host) ServeTerminal(t Terminal) {
 		ptyRejectTerminal(t)
 		return
 	}
-	p := ptyState(h).lookup(ptySlot{group: group, member: member})
+	p := ptyState(h).lookup(aiSlot{group: group, member: member})
 	if p == nil || !p.attach(t) {
 		ptyRejectTerminal(t)
 		return
 	}
 	go p.pumpOut(t)
-	io.Copy(ptyWriterOnly{p.handle}, ptyReaderOnly{t})
+	ptyCopy(p.handle, t)
 	p.Close()
-	io.Copy(io.Discard, ptyReaderOnly{t})
+	ptyCopy(io.Discard, t)
 }
 
 func (p *PTY) attach(t Terminal) bool {
@@ -346,28 +315,21 @@ func (p *PTY) attach(t Terminal) bool {
 	return true
 }
 
-func (p *PTY) hasTerminal() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.term != nil
-}
-
 func (p *PTY) pumpOut(t Terminal) {
 	defer close(p.outDone)
-	io.Copy(ptyWriterOnly{t}, ptyReaderOnly{p.handle})
+	ptyCopy(t, p.handle)
 	go p.triggerStop()
-	io.Copy(io.Discard, ptyReaderOnly{p.handle})
+	ptyCopy(io.Discard, p.handle)
 }
 
 func (p *PTY) drainUnattached() {
 	defer close(p.outDone)
-	io.Copy(io.Discard, ptyReaderOnly{p.handle})
+	ptyCopy(io.Discard, p.handle)
 }
 
 // waitLoop is the single caller of cmd.Wait and the single reader of p.closing.
 func (p *PTY) waitLoop(cmd *gopty.Cmd) {
 	cmd.Wait()
-	os.Remove(p.mcpPath)
 	close(p.procDone)
 	ptyBeforeExitStop(p)
 	p.triggerStop()
@@ -376,10 +338,9 @@ func (p *PTY) waitLoop(cmd *gopty.Cmd) {
 func (p *PTY) beginStop() (Terminal, bool, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.stopping {
+	if p.closed {
 		return nil, false, false
 	}
-	p.stopping = true
 	p.closed = true
 	needDrain := !p.readerTaken
 	p.readerTaken = true
@@ -416,12 +377,12 @@ func (p *PTY) runStop(term Terminal, needDrain bool) {
 	}
 }
 
-func ptyParseLabel(label string) (group, member string, ok bool) {
+func ptyParseLabel(label string) (string, string, bool) {
 	rest, hasPrefix := strings.CutPrefix(label, "pty:")
 	if !hasPrefix {
 		return "", "", false
 	}
-	group, member, _ = strings.Cut(rest, ":")
+	group, member, _ := strings.Cut(rest, ":")
 	if group == "" || member == "" || strings.Contains(member, ":") {
 		return "", "", false
 	}
@@ -430,7 +391,7 @@ func ptyParseLabel(label string) (group, member string, ok bool) {
 
 func ptyRejectTerminal(t Terminal) {
 	t.Close()
-	io.Copy(io.Discard, ptyReaderOnly{t})
+	ptyCopy(io.Discard, t)
 }
 
 func ptyResize(_ context.Context, h *Host, _ Owner, _ string, data json.RawMessage) (any, error) {
@@ -441,9 +402,8 @@ func ptyResize(_ context.Context, h *Host, _ Owner, _ string, data json.RawMessa
 	if req.Type != "pty.resize" || req.Cols < 1 || req.Rows < 1 {
 		return nil, &Error{Code: "bad_request", Message: "invalid pty.resize frame"}
 	}
-	part := ptyState(h)
-	slot := ptySlot{group: string(req.Group), member: string(req.AI)}
-	if p := part.noteSize(slot, req.Cols, req.Rows); p != nil {
+	slot := aiSlot{group: string(req.Group), member: string(req.AI)}
+	if p := ptyState(h).noteSize(slot, req.Cols, req.Rows); p != nil {
 		p.applyStoredSize()
 	}
 	return nil, nil

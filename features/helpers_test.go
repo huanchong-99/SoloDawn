@@ -1,0 +1,929 @@
+//go:build acceptance
+
+package features
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/huanchong-99/SoloDawn/internal/home"
+	"github.com/huanchong-99/SoloDawn/internal/host"
+	"github.com/huanchong-99/SoloDawn/internal/identity"
+	"github.com/huanchong-99/SoloDawn/internal/node"
+	"github.com/huanchong-99/SoloDawn/internal/node/nodetest"
+	"github.com/huanchong-99/SoloDawn/internal/peer"
+	"github.com/huanchong-99/SoloDawn/internal/proto"
+	"github.com/huanchong-99/SoloDawn/internal/store"
+)
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+var (
+	activeCleanupsMu sync.Mutex
+	activeCleanups   []activeCleanupEntry
+	nextCleanupID    uint64
+	deadlineFired    bool
+)
+
+type activeCleanupEntry struct {
+	id uint64
+	fn func()
+}
+
+func armDeadlineCleanups(t *testing.T) func() {
+	activeCleanupsMu.Lock()
+	deadlineFired = false
+	activeCleanupsMu.Unlock()
+	d, ok := t.Deadline()
+	if !ok {
+		return func() {}
+	}
+	rem := time.Until(d)
+	lead := min(30*time.Second, max(800*time.Millisecond, rem/6))
+	timer := time.AfterFunc(max(0, rem-lead), runDeadlineCleanups)
+	return func() {
+		timer.Stop()
+		activeCleanupsMu.Lock()
+		deadlineFired = false
+		activeCleanupsMu.Unlock()
+	}
+}
+
+func runDeadlineCleanups() {
+	activeCleanupsMu.Lock()
+	deadlineFired = true
+	pending := slices.Clone(activeCleanups)
+	activeCleanups = nil
+	activeCleanupsMu.Unlock()
+	for _, entry := range slices.Backward(pending) {
+		entry.fn()
+	}
+}
+
+func isDeadlineCleanup() bool {
+	activeCleanupsMu.Lock()
+	defer activeCleanupsMu.Unlock()
+	return deadlineFired
+}
+
+func trackOrRunCleanup(idOut *uint64, fn func()) bool {
+	activeCleanupsMu.Lock()
+	defer activeCleanupsMu.Unlock()
+	if deadlineFired {
+		return true
+	}
+	nextCleanupID++
+	*idOut = nextCleanupID
+	activeCleanups = append(activeCleanups, activeCleanupEntry{id: *idOut, fn: fn})
+	return false
+}
+
+func removeActiveCleanup(id uint64) {
+	activeCleanupsMu.Lock()
+	defer activeCleanupsMu.Unlock()
+	activeCleanups = slices.DeleteFunc(activeCleanups, func(e activeCleanupEntry) bool {
+		return e.id == id
+	})
+}
+
+func registerBothCleanups(t testing.TB, cleanup func(func()), fn func()) {
+	var id uint64
+	once := sync.OnceFunc(func() {
+		fn()
+		removeActiveCleanup(id)
+	})
+	if trackOrRunCleanup(&id, once) {
+		once()
+		return
+	}
+	if cleanup != nil {
+		cleanup(once)
+	}
+	if t != nil {
+		t.Cleanup(once)
+	}
+}
+
+func startManagedCmd(t testing.TB, cleanup func(func()), cmd *exec.Cmd) (func(), error) {
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	sigProc, killProc := attachManagedProc(cmd)
+	done := make(chan struct{}) // single reader: stop closure below
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+	stop := sync.OnceFunc(func() {
+		if sigProc(os.Interrupt) != nil {
+			killProc()
+		}
+		waitOrKillProc(done, killProc)
+	})
+	registerBothCleanups(t, cleanup, stop)
+	return stop, nil
+}
+
+func killManagedCmd(t testing.TB, cleanup func(func()), cmd *exec.Cmd, extra func()) error {
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	_, killProc := attachManagedProc(cmd)
+	done := make(chan struct{}) // single reader: stop closure below
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+	stop := sync.OnceFunc(func() {
+		killProc()
+		<-done
+		if extra != nil {
+			extra()
+		}
+	})
+	registerBothCleanups(t, cleanup, stop)
+	return nil
+}
+
+func waitOrKillProc(done <-chan struct{}, killProc func()) {
+	grace := 3 * time.Second
+	if isDeadlineCleanup() {
+		grace = 300 * time.Millisecond
+	}
+	select {
+	case <-done:
+	case <-time.After(grace):
+		killProc()
+		<-done
+	}
+}
+
+func cleanWindowsLoginTaskIfAbsent(t testing.TB, cleanup func(func())) {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	if had, err := loginRegistration(""); err == nil && !had {
+		registerBothCleanups(t, cleanup, func() { _ = node.RemoveService() })
+	}
+}
+
+func shortTempRoot(t testing.TB, cleanup func(func()), prefix string) (string, error) {
+	base := os.TempDir()
+	if runtime.GOOS == "darwin" {
+		base = "/tmp"
+	}
+	root, err := os.MkdirTemp(base, prefix)
+	if err != nil {
+		return "", err
+	}
+	registerBothCleanups(t, cleanup, func() { _ = os.RemoveAll(root) })
+	return root, nil
+}
+
+func sharedRVURL(ctx context.Context) string {
+	if rv, ok := ctx.Value(rvKey{}).(*rvWorld); ok && rv != nil {
+		return rv.ws
+	}
+	return ""
+}
+
+func marshalNoEscape(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
+
+func mustMarshalNoEscape(v any) []byte {
+	raw, err := marshalNoEscape(v)
+	if err != nil {
+		panic(err)
+	}
+	return raw
+}
+
+type seqIDGen struct {
+	seq uint64
+}
+
+func (g *seqIDGen) next() proto.ID {
+	g.seq++
+	var raw [16]byte
+	binary.BigEndian.PutUint64(raw[8:], g.seq)
+	return proto.ID(base64.RawURLEncoding.EncodeToString(raw[:]))
+}
+
+type homeFrameClient struct {
+	ch chan []byte // single reader: nextRaw (m2Browser) or drainBrowserUntil (m3World)
+}
+
+func newHomeFrameClient(buf int) homeFrameClient {
+	return homeFrameClient{ch: make(chan []byte, buf)}
+}
+
+func (c homeFrameClient) Done() <-chan struct{} { return nil }
+
+func (c homeFrameClient) Send(frame any) error {
+	raw, err := marshalNoEscape(frame)
+	if err != nil {
+		return err
+	}
+	c.ch <- raw
+	return nil
+}
+
+func runGitIn(dir string, args ...string) error {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git %v: %w (%s)", args, err, out)
+	}
+	return nil
+}
+
+func initLocalGitRepo(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := runGitIn(dir, "init", "-b", "main"); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello\n"), 0o600); err != nil {
+		return err
+	}
+	if err := runGitIn(dir, "add", "README.md"); err != nil {
+		return err
+	}
+	return runGitIn(dir, "-c", "user.name=Owner", "-c", "user.email=owner@example.com", "commit", "-m", "init")
+}
+
+func claudeInitMCP(startID int) []map[string]any {
+	return []map[string]any{
+		{"dir": "mcp<-cli", "msg": map[string]any{
+			"jsonrpc": "2.0", "id": startID, "method": "initialize",
+			"params": map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "claude-code", "version": "1"}},
+		}},
+		{"dir": "mcp->cli", "msg": map[string]any{"jsonrpc": "2.0", "id": startID, "result": map[string]any{}}},
+		{"dir": "mcp<-cli", "msg": map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"}},
+	}
+}
+
+func mcpPostSteps(callID int, text string) []map[string]any {
+	return []map[string]any{
+		{"dir": "mcp<-cli", "msg": map[string]any{
+			"jsonrpc": "2.0", "id": callID, "method": "tools/call",
+			"params": map[string]any{"name": "post", "arguments": map[string]any{"text": text}},
+		}},
+		{"dir": "mcp->cli", "msg": map[string]any{"jsonrpc": "2.0", "id": callID, "result": map[string]any{"isError": false}}},
+	}
+}
+
+func claudeUserStdinStep(stdinText string) map[string]any {
+	msg := map[string]any{"role": "user"}
+	if stdinText != "" {
+		msg["content"] = []map[string]string{{"type": "text", "text": stdinText}}
+	}
+	return map[string]any{"dir": "stdin", "msg": map[string]any{"type": "user", "message": msg}}
+}
+
+func claudeTurnSteps(callID int, first bool, stdinText, postText, outText string) []map[string]any {
+	steps := []map[string]any{claudeUserStdinStep(stdinText)}
+	if first {
+		steps = append(steps, claudeInitMCP(0)...)
+		steps = append(steps, map[string]any{"dir": "stdout", "msg": map[string]any{"type": "system", "subtype": "init", "session_id": "$session"}})
+	}
+	if outText != "" {
+		steps = append(steps, map[string]any{"dir": "stdout", "msg": map[string]any{
+			"type": "assistant", "session_id": "$session",
+			"message": map[string]any{"role": "assistant", "content": []map[string]any{{"type": "text", "text": outText}}},
+		}})
+	}
+	if postText != "" {
+		steps = append(steps, mcpPostSteps(callID, postText)...)
+	}
+	res := map[string]any{"type": "result", "subtype": "success", "is_error": false, "session_id": "$session", "result": outText}
+	return append(steps, map[string]any{"dir": "stdout", "msg": res})
+}
+
+func codexStartupSteps() []map[string]any {
+	steps := []map[string]any{
+		{"dir": "stdin", "msg": map[string]any{"method": "initialize"}},
+		{"dir": "stdout", "msg": map[string]any{"id": "$id", "result": map[string]any{}}},
+		{"dir": "stdin", "msg": map[string]any{"method": "initialized"}},
+		{"dir": "stdin", "msg": map[string]any{"method": "thread/start"}},
+	}
+	steps = append(steps, claudeInitMCP(0)...)
+	return append(steps, map[string]any{"dir": "stdout", "msg": map[string]any{"id": "$id", "result": map[string]any{"thread": map[string]any{"id": "$session"}}}})
+}
+
+func codexTurnSteps(turnID string, callID int, stdinText, postText string, askApproval bool) []map[string]any {
+	params := map[string]any{"threadId": "$session"}
+	if stdinText != "" {
+		params["input"] = []map[string]string{{"type": "text", "text": stdinText}}
+	}
+	steps := []map[string]any{
+		{"dir": "stdin", "msg": map[string]any{"method": "turn/start", "params": params}},
+		{"dir": "stdout", "msg": map[string]any{"id": "$id", "result": map[string]any{"turn": map[string]any{"id": turnID, "status": "inProgress"}}}},
+	}
+	if askApproval {
+		steps = append(steps, codexApprovalSteps()...)
+	}
+	steps = append(steps, mcpPostSteps(callID, postText)...)
+	return append(steps, map[string]any{"dir": "stdout", "msg": map[string]any{
+		"method": "turn/completed",
+		"params": map[string]any{"threadId": "$session", "turn": map[string]any{"id": turnID, "status": "completed", "error": nil}},
+	}})
+}
+
+func codexApprovalSteps() []map[string]any {
+	return []map[string]any{
+		{"dir": "stdout", "msg": map[string]any{
+			"id": 99, "method": "item/commandExecution/requestApproval",
+			"params": map[string]any{"command": "echo hold-slot", "cwd": "/tmp", "reason": "hold slot"},
+		}},
+		{"dir": "stdin", "msg": map[string]any{"id": 99, "result": map[string]any{"decision": "accept"}}},
+	}
+}
+
+type peerNodeConfig struct {
+	Ctx           context.Context
+	Dir           string
+	Key           identity.Key
+	Name          string
+	Version       string
+	Owner         identity.Key
+	ExtraBrowsers []identity.Key
+	Rendezvous    string
+	Now           func() time.Time
+	MapRoute      func(peer.Route) peer.Route
+	OnInbound     func(*peer.Connection)
+}
+
+type peerNode struct {
+	Key      identity.Key
+	Store    *store.Store
+	Logs     *node.Logs
+	Home     *home.Loop
+	Host     *host.Host
+	Link     *node.LocalLink
+	Sessions *node.Sessions
+	Surface  *node.Surface
+	Pairer   *node.Pairer
+	Sockets  *peer.Sockets
+	Peer     *peer.Peer
+	Path     *peer.Path
+	once     sync.Once
+}
+
+func startPeerNode(t testing.TB, cleanup func(func()), cfg peerNodeConfig) (*peerNode, error) {
+	cfg = withPeerNodeDefaults(cfg)
+	key, db, err := openPeerNodeStore(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := seedPeerNodeData(db, key, cfg); err != nil {
+		db.Close()
+		return nil, err
+	}
+	pn := &peerNode{Key: key, Store: db}
+	if err := pn.initCore(cfg); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := pn.initTransport(cfg); err != nil {
+		pn.closeCore()
+		return nil, err
+	}
+	registerBothCleanups(t, cleanup, pn.Close)
+	return pn, nil
+}
+
+func (n *peerNode) closeCore() {
+	n.Link.Close()
+	n.Home.Close()
+	n.Host.Settle()
+	n.Store.Close()
+}
+
+func (n *peerNode) Close() {
+	n.once.Do(func() {
+		n.Path.Close()
+		n.Pairer.Close()
+		n.Sockets.Close()
+		n.closeCore()
+	})
+}
+
+func withPeerNodeDefaults(cfg peerNodeConfig) peerNodeConfig {
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	if cfg.Version == "" {
+		cfg.Version = "dev"
+	}
+	if cfg.Name == "" {
+		cfg.Name = "node"
+	}
+	if cfg.MapRoute == nil {
+		cfg.MapRoute = func(r peer.Route) peer.Route { return r }
+	}
+	return cfg
+}
+
+func openPeerNodeStore(cfg peerNodeConfig) (identity.Key, *store.Store, error) {
+	if cfg.Dir == "" {
+		key := cfg.Key
+		if key == nil {
+			key = newRandomPeerKey()
+		}
+		db, err := store.Open(":memory:")
+		return key, db, err
+	}
+	if err := os.MkdirAll(cfg.Dir, 0o700); err != nil {
+		return nil, nil, err
+	}
+	key, err := resolvePeerNodeKey(cfg.Dir, cfg.Key)
+	if err != nil {
+		return nil, nil, err
+	}
+	db, err := store.Open(filepath.Join(cfg.Dir, "node.db"))
+	return key, db, err
+}
+
+func resolvePeerNodeKey(dir string, key identity.Key) (identity.Key, error) {
+	if key != nil {
+		return key, nil
+	}
+	return identity.LoadKey(dir)
+}
+
+func newRandomPeerKey() identity.Key {
+	seed := make([]byte, ed25519.SeedSize)
+	rand.Read(seed)
+	return identity.Key(ed25519.NewKeyFromSeed(seed))
+}
+
+func seedPeerNodeData(db *store.Store, nodeKey identity.Key, cfg peerNodeConfig) error {
+	rawRV, _ := json.Marshal([]string{cfg.Rendezvous})
+	writeRV := func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT OR REPLACE INTO setting(key, value) VALUES('rendezvous', ?)`, string(rawRV))
+		return err
+	}
+	if err := db.Write(writeRV); err != nil || cfg.Owner == nil {
+		return err
+	}
+	entries := buildPeerOwnerLog(cfg.Owner, nodeKey, cfg.Name, cfg.ExtraBrowsers, cfg.Now().UnixMilli())
+	return seedPeerOwnerEntries(db, cfg.Owner.ID(), cfg.Name, entries)
+}
+
+func buildPeerOwnerLog(owner, nodeKey identity.Key, name string, browsers []identity.Key, ts int64) []proto.Envelope {
+	entries := []proto.Envelope{
+		nodetest.SignDeviceAdd(owner, owner.ID(), 1, "browser", "owner", owner.ID(), ts),
+		nodetest.SignDeviceAdd(owner, owner.ID(), 2, "node", name, nodeKey.ID(), ts),
+	}
+	for i, key := range browsers {
+		entries = append(entries, nodetest.SignDeviceAdd(owner, owner.ID(), len(entries)+1, "browser", fmt.Sprintf("browser-%d", i+2), key.ID(), ts))
+	}
+	return entries
+}
+
+func seedPeerOwnerEntries(db *store.Store, owner, name string, entries []proto.Envelope) error {
+	ownerJSON, _ := json.Marshal(owner)
+	nameJSON, _ := json.Marshal(name)
+	write := func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT OR REPLACE INTO setting(key, value) VALUES('owner', ?), ('name', ?)`, string(ownerJSON), string(nameJSON))
+		for i, env := range entries {
+			raw, _ := json.Marshal(env)
+			_, next := tx.Exec(`INSERT OR REPLACE INTO device_log(user, ver, env) VALUES(?, ?, ?)`, owner, i+1, string(raw))
+			err = errors.Join(err, next)
+		}
+		return err
+	}
+	return db.Write(write)
+}
+
+func (n *peerNode) initCore(cfg peerNodeConfig) error {
+	logs, err := node.OpenLogs(n.Store, n.Key.ID())
+	if err != nil {
+		return err
+	}
+	loop, err := home.StartLoop(home.LoopConfig{
+		Store: n.Store, Home: n.Key.ID(), OwnerFn: logs.Owner,
+		Logs: logs.Log, Tables: home.NodeTables(), Now: cfg.Now,
+	})
+	if err != nil {
+		return err
+	}
+	h, _, err := host.New(n.Store, n.Key, cfg.Now)
+	if err != nil {
+		loop.Close()
+		return err
+	}
+	n.Logs, n.Home, n.Host, n.Link = logs, loop, h, node.AttachLocal(h, loop)
+	nameFn := func() string { return node.ReadName(n.Store) }
+	addrsFn := func() []string { return []string{cfg.Rendezvous} }
+	n.Sessions = node.NewSessions(node.SessionConfig{
+		ID: n.Key.ID(), Version: cfg.Version, Store: n.Store, Logs: logs,
+		Home: loop, Host: h, Name: nameFn, Addrs: addrsFn, Now: cfg.Now,
+	})
+	n.Surface = node.NewSurface(node.SurfaceConfig{
+		ID: n.Key.ID(), OS: runtime.GOOS + "/" + runtime.GOARCH, Version: cfg.Version,
+		Store: n.Store, Sessions: n.Sessions, Host: h, Name: nameFn, Agents: h.Agents,
+	})
+	return nil
+}
+
+func (n *peerNode) initTransport(cfg peerNodeConfig) error {
+	socks, err := peer.Listen(0, 0)
+	if err != nil {
+		return err
+	}
+	rvPath, err := peer.Dial(cfg.Ctx, cfg.Rendezvous, n.Key)
+	if err != nil {
+		socks.Close()
+		return err
+	}
+	n.Sockets, n.Path = socks, rvPath
+	n.Pairer = node.NewPairer(node.PairConfig{
+		Key: n.Key, Store: n.Store, Logs: n.Logs, Sessions: n.Sessions,
+		Paths: func() []*peer.Path { return []*peer.Path{rvPath} },
+		Now:   cfg.Now,
+	})
+	known := func(dev string) bool { return n.Logs.Known(dev) || n.Pairer.Known(dev) }
+	routes := func(dev string) []peer.Route { return n.routesFor(dev, cfg.MapRoute) }
+	inbound := func(c *peer.Connection) {
+		if cfg.OnInbound != nil {
+			cfg.OnInbound(c)
+		}
+		go n.Pairer.Serve(cfg.Ctx, c.Device, c)
+	}
+	channels := peer.Channels{"pty:": func(s *peer.Stream) { n.Host.ServeTerminal(s) }}
+	n.Peer = peer.New(n.Key, socks, n.Store, known, routes, inbound, channels)
+	n.Pairer.Peer = n.Peer
+	event := func(kind string, data []byte) error {
+		n.Pairer.HandleEvent(cfg.Ctx, rvPath, kind, data)
+		return nil
+	}
+	go rvPath.Serve(cfg.Ctx, n.Peer, event)
+	return nil
+}
+
+func (n *peerNode) routesFor(dev string, mapRoute func(peer.Route) peer.Route) []peer.Route {
+	out := []peer.Route{mapRoute(n.Path.Route())}
+	for _, r := range n.Pairer.Routes(dev) {
+		out = append(out, mapRoute(r))
+	}
+	return out
+}
+
+func deviceFingerprint(id string) (string, error) {
+	if !identity.IsDevice(id) {
+		return "", fmt.Errorf("invalid device id %q", id)
+	}
+	pub, _ := base64.RawURLEncoding.DecodeString(id)
+	raw := append(make([]byte, ed25519.SeedSize), pub...)
+	return identity.Key(raw).Fingerprint(), nil
+}
+
+func waitConnPath(conn *peer.Connection, want string, limit time.Duration) error {
+	if conn == nil {
+		return errors.New("connection is nil")
+	}
+	timer := time.NewTimer(limit)
+	defer timer.Stop()
+	for {
+		if conn.Path() == want {
+			return nil
+		}
+		if !waitConnPathSignal(conn, timer.C) {
+			return fmt.Errorf("got %q after %s, want %q", conn.Path(), limit, want)
+		}
+	}
+}
+
+func waitConnPathSignal(conn *peer.Connection, timeout <-chan time.Time) bool {
+	select {
+	case <-conn.PathChanged():
+		return true
+	case <-conn.Done():
+		return false
+	case <-timeout:
+		return false
+	}
+}
+
+type peerRoomEvent struct {
+	kind string
+	data []byte
+}
+
+type peerBrowser struct {
+	key        identity.Key
+	path       *peer.Path
+	peer       *peer.Peer
+	presence   chan string        // single reader: waitOnline
+	roomEvents chan peerRoomEvent // single reader: exchangeRoom
+}
+
+type peerBrowserConn struct {
+	conn   *peer.Connection
+	pushes chan json.RawMessage // single reader: nextPush in scenario steps
+}
+
+func newPeerBrowser(ctx context.Context, cleanup func(func()), key identity.Key, rvURL string, mapRoute func(peer.Route) peer.Route) (*peerBrowser, error) {
+	path, err := peer.Dial(ctx, rvURL, key)
+	if err != nil {
+		return nil, err
+	}
+	cleanup(func() { path.Close() })
+	socks, err := peer.Listen(0, 0)
+	if err != nil {
+		return nil, err
+	}
+	db, err := store.Open(":memory:")
+	if err != nil {
+		socks.Close()
+		return nil, err
+	}
+	cleanup(func() { socks.Close(); db.Close() })
+	if mapRoute == nil {
+		mapRoute = func(r peer.Route) peer.Route { return r }
+	}
+	routes := func(string) []peer.Route { return []peer.Route{mapRoute(path.Route())} }
+	p := peer.New(key, socks, db, identity.IsDevice, routes, func(*peer.Connection) {}, nil)
+	b := &peerBrowser{
+		key:        key,
+		path:       path,
+		peer:       p,
+		presence:   make(chan string, 32),
+		roomEvents: make(chan peerRoomEvent, 32),
+	}
+	go path.Serve(ctx, p, b.onEvent)
+	return b, nil
+}
+
+func (b *peerBrowser) onEvent(kind string, data []byte) error {
+	if kind == "presence" {
+		b.recordPresence(data)
+		return nil
+	}
+	if kind == "joined" || kind == "room" || kind == "full" {
+		select {
+		case b.roomEvents <- peerRoomEvent{kind: kind, data: slices.Clone(data)}:
+		default:
+		}
+	}
+	return nil
+}
+
+func (b *peerBrowser) recordPresence(data []byte) {
+	var pr proto.Presence
+	if proto.Decode(data, &pr) == nil && pr.On {
+		select {
+		case b.presence <- pr.Key:
+		default:
+		}
+	}
+}
+
+func (b *peerBrowser) waitOnline(ctx context.Context, devices ...string) error {
+	if err := b.path.Write(ctx, proto.Watch{Type: "watch", Keys: devices}); err != nil {
+		return err
+	}
+	remaining := map[string]bool{}
+	for _, dev := range devices {
+		remaining[dev] = true
+	}
+	for len(remaining) > 0 {
+		select {
+		case k := <-b.presence:
+			delete(remaining, k)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func (b *peerBrowser) exchangeRoom(ctx context.Context, secret identity.Secret, myRole, wantRole string) (proto.Pair, error) {
+	room := secret.Room()
+	self := proto.Pair{Type: "pair", Key: b.key.ID(), Kind: "browser", Name: "Owner Browser", Role: myRole}
+	self.MAC = secret.MAC(self)
+	rawSelf, err := json.Marshal(self)
+	if err != nil {
+		return proto.Pair{}, err
+	}
+	if err := b.path.Write(ctx, proto.RoomID{Type: "join", Room: room}); err != nil {
+		return proto.Pair{}, err
+	}
+	return b.awaitRoomPeer(ctx, secret, room, wantRole, rawSelf)
+}
+
+func (b *peerBrowser) awaitRoomPeer(ctx context.Context, secret identity.Secret, room, wantRole string, rawSelf []byte) (proto.Pair, error) {
+	for {
+		select {
+		case ev := <-b.roomEvents:
+			m, ok, err := b.handleRoomEvent(ctx, ev, secret, room, wantRole, rawSelf)
+			if err != nil || ok {
+				return m, err
+			}
+		case <-ctx.Done():
+			return proto.Pair{}, ctx.Err()
+		}
+	}
+}
+
+func (b *peerBrowser) handleRoomEvent(ctx context.Context, ev peerRoomEvent, secret identity.Secret, room, wantRole string, rawSelf []byte) (proto.Pair, bool, error) {
+	switch ev.kind {
+	case "joined":
+		return proto.Pair{}, false, b.sendRoomSelf(ctx, ev.data, room, rawSelf)
+	case "full":
+		return proto.Pair{}, false, errors.New("pairing room is full")
+	case "room":
+		m, ok := matchPeerRoomMsg(ev.data, secret, room, wantRole)
+		return m, ok, nil
+	default:
+		return proto.Pair{}, false, nil
+	}
+}
+
+func (b *peerBrowser) sendRoomSelf(ctx context.Context, data []byte, room string, rawSelf []byte) error {
+	var id proto.RoomID
+	if proto.Decode(data, &id) != nil || id.Room != room {
+		return nil
+	}
+	return b.path.Write(ctx, proto.RoomData{RoomID: proto.RoomID{Type: "room", Room: room}, Data: rawSelf})
+}
+
+func matchPeerRoomMsg(data []byte, secret identity.Secret, room, wantRole string) (proto.Pair, bool) {
+	var rd proto.RoomData
+	var m proto.Pair
+	if proto.Decode(data, &rd) != nil || rd.Room != room {
+		return proto.Pair{}, false
+	}
+	if proto.Decode(rd.Data, &m) != nil || !secret.Verify(m, wantRole) {
+		return proto.Pair{}, false
+	}
+	return m, true
+}
+
+func (b *peerBrowser) openCtl(ctx context.Context, cleanup func(func()), nodeID string) (*peerBrowserConn, error) {
+	for range 2 {
+		bc, ok, err := b.tryOpenCtl(ctx, cleanup, nodeID, 8*time.Second)
+		if err != nil || ok {
+			return bc, err
+		}
+	}
+	return nil, errors.New("timed out opening ctl connection")
+}
+
+func (b *peerBrowser) tryOpenCtl(ctx context.Context, cleanup func(func()), nodeID string, wait time.Duration) (*peerBrowserConn, bool, error) {
+	conn, err := b.peer.Offer(ctx, nodeID)
+	if err != nil {
+		return nil, false, err
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-conn.Ready():
+		cleanup(func() { conn.Close() })
+		bc := &peerBrowserConn{conn: conn, pushes: make(chan json.RawMessage, 128)}
+		go pumpBrowserPushes(ctx, conn, bc.pushes)
+		return bc, true, nil
+	case <-conn.Done():
+		conn.Close()
+		return nil, false, nil
+	case <-timer.C:
+		conn.Close()
+		return nil, false, nil
+	case <-ctx.Done():
+		conn.Close()
+		return nil, false, ctx.Err()
+	}
+}
+
+func pumpBrowserPushes(ctx context.Context, conn *peer.Connection, pushes chan<- json.RawMessage) {
+	defer close(pushes)
+	for {
+		msg, err := conn.Read(ctx)
+		if err != nil {
+			return
+		}
+		select {
+		case pushes <- msg:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (c *peerBrowserConn) nextPush(ctx context.Context) (json.RawMessage, error) {
+	select {
+	case msg, ok := <-c.pushes:
+		if !ok {
+			return nil, errors.New("ctl connection closed before push")
+		}
+		return msg, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func requestBrowserHello(ctx context.Context, conn *peer.Connection) (proto.Welcome, error) {
+	raw, err := conn.Request(ctx, func(id int64) any {
+		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 1, Kind: "browser", Name: "Owner Browser", Addrs: []string{}}
+	})
+	if err != nil {
+		return proto.Welcome{}, err
+	}
+	var welc proto.Welcome
+	return welc, proto.Decode(raw, &welc)
+}
+
+func requestHostInfo(ctx context.Context, conn *peer.Connection) (proto.HostInfo, error) {
+	raw, err := conn.Request(ctx, func(id int64) any { return proto.Request{Type: "host.info", ID: id} })
+	if err != nil {
+		return proto.HostInfo{}, err
+	}
+	var info proto.HostInfo
+	return info, proto.Decode(raw, &info)
+}
+
+func checkOwnerWelcome(ctx context.Context, conn *peer.Connection, wantDevice string) error {
+	w, err := requestBrowserHello(ctx, conn)
+	if err != nil {
+		return err
+	}
+	if !w.Owner || w.Device != wantDevice {
+		return fmt.Errorf("welcome = %+v, want owner true for %q", w, wantDevice)
+	}
+	return nil
+}
+
+func isNonRelayICECandidate(payload string) bool {
+	var sig struct {
+		Type string `json:"t"`
+		Cand string `json:"cand"`
+	}
+	if json.Unmarshal([]byte(payload), &sig) != nil || sig.Type != "ice" {
+		return false
+	}
+	return !strings.Contains(sig.Cand, " typ relay")
+}
+
+func rewriteDirectICE(servers []proto.ICEServer) []proto.ICEServer {
+	var out []proto.ICEServer
+	for _, s := range servers {
+		if urls := rewriteDirectURLs(s.URLs); len(urls) > 0 {
+			cp := s
+			cp.URLs = urls
+			out = append(out, cp)
+		}
+	}
+	return out
+}
+
+func rewriteDirectURLs(urls []string) []string {
+	var out []string
+	for _, u := range urls {
+		if strings.HasPrefix(u, "stun:") {
+			out = append(out, strings.Replace(u, "localhost:", "127.0.0.1:", 1))
+		}
+	}
+	return out
+}

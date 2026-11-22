@@ -6,7 +6,7 @@ Feature: Host interactive pseudo-terminals
     And the owner writes "roundtrip-check" to the terminal channel
     Then the terminal channel receives "WD:session-folder" and "ACK:roundtrip-check"
     When the owner closes the terminal channel
-    Then the interactive PTY exits, removes its temporary MCP config and notifies completion once
+    Then the interactive PTY exits and notifies completion once
 
   Scenario: Back-pressure on the terminal stream stops reading from the pseudo-terminal
     Given an interactive PTY host with a session folder

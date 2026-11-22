@@ -32,7 +32,10 @@ func init() {
 	}
 }
 
-func TestHostPTYHelperProcess(_ *testing.T) {
+func TestHostPTYHelperProcess(t *testing.T) {
+	if t == nil {
+		return
+	}
 	sep := slices.Index(os.Args, "--")
 	if sep < 0 || sep+1 >= len(os.Args) {
 		return
@@ -51,7 +54,10 @@ func TestHostPTYHelperProcess(_ *testing.T) {
 }
 
 func runAccPTYEcho() {
-	wd, _ := os.Getwd()
+	wd, err := os.Getwd()
+	if err != nil {
+		os.Exit(2)
+	}
 	fmt.Printf("WD:%s\n", filepath.Base(wd))
 	reader := bufio.NewReader(os.Stdin)
 	for {
@@ -218,7 +224,6 @@ func hostPTYSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
 	var (
 		h             *host.Host
 		workDir       string
-		mcpFile       string
 		activeGroup   string
 		activeMember  string
 		term          *accTerminal
@@ -234,14 +239,10 @@ func hostPTYSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
 		if err != nil {
 			return err
 		}
-		mcpFile = filepath.Join(filepath.Dir(workDir), "acc-mcp.json")
-		if err := os.WriteFile(mcpFile, []byte(`{}`), 0o600); err != nil {
-			return err
-		}
 		driverName := "acc-" + mode
 		host.Drivers[driverName] = accPTYDriver{
 			build: func(host.Launch) ([]string, string, error) {
-				return []string{exe, "-test.run=^TestHostPTYHelperProcess$", "--", mode, "--mcp-config", mcpFile}, "acc-session", nil
+				return []string{exe, "-test.run=^TestHostPTYHelperProcess$", "--", mode}, "acc-session", nil
 			},
 		}
 		cleanup(func() { delete(host.Drivers, driverName) })
@@ -319,14 +320,11 @@ func hostPTYSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
 		term.Close()
 	})
 
-	sc.Step(`^the interactive PTY exits, removes its temporary MCP config and notifies completion once$`, func() error {
+	sc.Step(`^the interactive PTY exits and notifies completion once$`, func() error {
 		<-serveDone
 		<-doneCh
 		if got := doneCount.Load(); got != 1 {
 			return fmt.Errorf("completion count = %d, want 1", got)
-		}
-		if _, err := os.Stat(mcpFile); !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("expected temporary MCP config removed, got %v", err)
 		}
 		return nil
 	})
@@ -369,14 +367,17 @@ func hostPTYSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
 				return err
 			}
 		}
-		raw, _ := json.Marshal(map[string]any{
+		raw, err := json.Marshal(map[string]any{
 			"t":    frameType,
 			"g":    group,
 			"ai":   ai,
 			"cols": cols,
 			"rows": rows,
 		})
-		_, err := host.Surface["pty.resize"](context.Background(), h, nil, "owner-device", raw)
+		if err != nil {
+			return err
+		}
+		_, err = host.Surface["pty.resize"](context.Background(), h, nil, "owner-device", raw)
 		resizeOutcome = "ok"
 		if hostErr, ok := errors.AsType[*host.Error](err); ok {
 			resizeOutcome = hostErr.Code

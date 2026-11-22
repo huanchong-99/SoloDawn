@@ -35,7 +35,8 @@ func ptyWrapStarted(ptmx gopty.Pty) ptyHandle {
 	up := ptmx.(gopty.UnixPty)
 	var dupFD int
 	dup := func(fd uintptr) {
-		dupFD, _ = unix.FcntlInt(fd, unix.F_DUPFD_CLOEXEC, 0)
+		fdInt, _ := unix.FcntlInt(fd, unix.F_DUPFD_CLOEXEC, 0)
+		dupFD = fdInt
 	}
 	up.Control(dup)
 	syscall.SetNonblock(dupFD, true)
@@ -45,7 +46,7 @@ func ptyWrapStarted(ptmx gopty.Pty) ptyHandle {
 }
 
 func ptyBeforeExitStop(p *PTY) {
-	if p.hasTerminal() {
+	if p.Attached() {
 		ptyWaitSignal(p.closing, ptyStopTimeout)
 	}
 }
