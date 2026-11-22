@@ -42,7 +42,11 @@ func TestMemberCommandGoldens(t *testing.T) {
 	golden(t, "member-status", MemberStatus[SystemCode]{MemberCommand: member("status"), State: "working", Task: ID(taskID), Path: "local",
 		Usage: Usage{WindowPct: new(62.5), WindowResets: new(ts + 10000), DayCapPct: new(80.0),
 			SpendToday: new(0.0), SpendCap: new(10.5), TurnsToday: new(14)}})
-	golden(t, "member-set", MemberSet{member("set"), new("Codex 2"), new("team"), &[]string{}, &[]string{user}})
+	golden(t, "member-set", MemberSet{MemberCommand: member("set"), Name: new("Codex 2"), Account: new("team"), Allow: &[]string{}, Approvers: &[]string{user}})
+	golden(t, "member-set-role", MemberSet{
+		MemberCommand: MemberCommand{command("member", "member set role"), "set", ID(id("joined member"))},
+		Role:          new("admin"),
+	})
 	golden(t, "member-remove", member("remove"))
 }
 
@@ -137,6 +141,7 @@ func TestTaskCommandsLeaveOutWhatDoesNotApply(t *testing.T) {
 		{TaskAssign{TaskCommand: task("assign"), Assignee: ID(agent)}, `"id":"` + taskID + `","assignee":"` + agent + `"}`},
 		{GroupSet{GroupCommand: GroupCommand{command("group", "group set"), "set"}, Checks: &[]string{}}, `"op":"set","checks":[]}`},
 		{MemberSet{MemberCommand: member("set"), Approvers: &[]string{}}, `"id":"` + agent + `","approvers":[]}`},
+		{MemberSet{MemberCommand: member("set"), Role: new("admin")}, `"id":"` + agent + `","role":"admin"}`},
 	} {
 		encoded := string(wireJSON(t, tc.command))
 		if got := encoded[len(encoded)-len(tc.want):]; got != tc.want {
@@ -150,16 +155,31 @@ func TestTaskCommandsLeaveOutWhatDoesNotApply(t *testing.T) {
 }
 
 func TestOtherHomeCommandGoldens(t *testing.T) {
+	golden(t, "invite", command("invite", "invite"))
+	golden(t, "join", Join{command("join", "join"), "Mina"})
 	golden(t, "jump", Jump{command("jump", "jump"), ID(id("text"))})
-	golden(t, "note", Note{command("note", "note command"), ID(id("note")), nil, "Path events include the connection id."})
+	golden(t, "note", Note{HomeCommand: command("note", "note command"), ID: ID(id("note")), Text: "Path events include the connection id."})
+	golden(t, "note-preset", Note{
+		HomeCommand: command("note", "note preset command"), ID: ID(id("preset note")),
+		NoteType: "preset", Name: "Calm dashboard",
+		Text: "Principles: one accent colour; no motion longer than 200 ms.",
+	})
+	kbCmd := command("note", "note kb command")
+	kbCmd.As = ID(agent)
+	golden(t, "note-kb", Note{
+		HomeCommand: kbCmd, ID: ID(id("kb note")),
+		NoteType: "kb", Name: "Decision: the home is the single writer",
+		Text: "Every change to a group goes through its home.",
+	})
 	golden(t, "forget", Forget{command("forget", "forget"), "note", ID(id("note"))})
 	on := PushOn{command("push", "push on"),
 		PushSubscription{"https://push.example/send/" + id("subscription"), keyBytes("p256dh", 65), keyBytes("auth", 16)},
 		VAPIDKeys{keyBytes("vapid public", 65), keyBytes("vapid private", 32)},
-		[]string{"mention", "approval", "decision", "brief", "done"}}
+		[]string{"mention", "approval", "decision", "brief", "confirm", "done"}}
 	golden(t, "push-on", on)
 	golden(t, "push-off", PushOff{command("push", "push off"), true})
 	golden(t, "push-reminder", Reminder{ID(group), ID(id("approval")), "Website", "approval", "Codex", "Time the path change in a browser."})
+	golden(t, "push-reminder-confirm", Reminder{Group: ID(group), Msg: ID(id("confirm")), GroupName: "Website", Kind: "confirm", Who: "Codex"})
 }
 
 // A push whose off is true ends the reminders, whatever else it holds; any
@@ -188,6 +208,8 @@ func TestPushIsOffOnlyWhenOffIsTrue(t *testing.T) {
 
 func TestHostCommandGoldens(t *testing.T) {
 	to := func(kind string) HostCommand { return HostCommand{kind, ID(id(kind)), ts, host} }
+	golden(t, "home-add", HomeAdd{to("home.add"), ID(group), device(signer("other home")), "Website",
+		[]string{"ws://192.0.2.10:47800/rv", "wss://rv.example/rv"}})
 	golden(t, "host-join", HostJoin{to("host.join"), ID(group), host, "codex", "Codex", false})
 	golden(t, "host-leave", HostLeave{to("host.leave"), ID(group), "codex"})
 }
@@ -205,13 +227,26 @@ func TestCommandExamplesAreNamedByWhatSelectsThem(t *testing.T) {
 			if event, there := fields["event"].(map[string]any); there {
 				want += "-" + event["code"].(string)
 			}
+			if _, there := fields["role"]; there {
+				want += "-role"
+			}
 		case "post":
 			want = "post-" + fields["kind"].(string)
 		case "act":
 			want = "act-" + fields["action"].(string)
-		case "jump", "note", "forget", "ack", "inbox":
+		case "note":
 			want = kind
-		case "host.join", "host.leave", "host.offline", "host.online", "settings.set", "pair.browser", "agent.set", "perm.set",
+			if noteType, there := fields["type"].(string); there {
+				want += "-" + noteType
+			}
+		case "jump", "forget", "ack", "inbox", "invite":
+			want = kind
+		case "join":
+			if _, homeCmd := fields["g"]; !homeCmd {
+				continue
+			}
+			want = kind
+		case "home.add", "host.join", "host.leave", "host.offline", "host.online", "settings.set", "pair.browser", "agent.set", "perm.set",
 			"takeover.start", "takeover.end", "pty.resize":
 			want = strings.ReplaceAll(kind, ".", "-")
 		case "groups", "beacon":

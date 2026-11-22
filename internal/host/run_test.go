@@ -2089,3 +2089,52 @@ func seamSQLScan(t *testing.T, db *store.Store, dest any, q string, args ...any)
 		t.Fatal(err)
 	}
 }
+
+// A CLI that exits after the store closed must not reach it: Settle ends
+// every CLI and waits for its loop, and member status reads only memory.
+func TestSettleEndsEveryCLIBeforeTheStoreCloses(t *testing.T) {
+	stopAllTestHosts()
+	saveRuntimeGlobals(t)
+	drv := &fakeDriver{}
+	Drivers = map[string]Driver{"claude": drv}
+	Listeners = map[string]func(*Host, SessionKey, Event){}
+	installDefaultHooks()
+	db, _ := openFileStore(t, t.TempDir())
+	h := newRunHost(t, db)
+	rh := newRunHome("local")
+	h.Attach("home-dev", rh)
+	waitKey := SessionKey{Group: runGroup1, Member: runAI1}
+	dormKey := SessionKey{Group: runGroup1, Member: runAI2}
+	h.Sessions.Create(makeRunSession(waitKey, GroupSession, "repo"))
+	h.Sessions.Create(makeRunSession(dormKey, GroupSession, "repo"))
+	if err := Runner.Turn(t.Context(), h, waitKey, "hi", Turn{Kind: ItemsTurn}); err != nil {
+		t.Fatal(err)
+	}
+	p := drv.lastProc()
+	p.emit(Event{Kind: TurnEnded, Status: "completed"})
+	waitForState(t, h, waitKey, Waiting)
+
+	h.Settle()
+	select {
+	case <-p.exitedCh:
+	default:
+		t.Fatal("Settle returned while a CLI was still running")
+	}
+	err := Runner.Turn(t.Context(), h, dormKey, "late", Turn{Kind: ItemsTurn})
+	var herr *Error
+	if !errors.As(err, &herr) || herr.Code != "busy" || drv.count() != 2 {
+		t.Fatalf("a turn after Settle: %v, starts %d", err, drv.count())
+	}
+	db.Close()
+	p.finishExit()
+
+	if s, _ := h.Sessions.Get(waitKey); s.State != Waiting {
+		t.Fatalf("Settle changed the row to %s; the next start reports it", s.State)
+	}
+	if err := sendMemberStatus(t.Context(), h, stateOf(h), "home-dev", runGroup1, runAI1, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := rh.snapshotCmds(); got[len(got)-1].payload["state"] != "waiting" {
+		t.Fatalf("member status after the store closed: %+v", got[len(got)-1].payload)
+	}
+}

@@ -3,7 +3,7 @@
   import type { Home } from '../../lib/groups.svelte';
   import type { Net } from '../../lib/net.svelte';
   import { nodes, type PairLink } from '../../lib/nodes.svelte';
-  import { prefs, t } from '../../lib/prefs.svelte';
+  import { announcement, prefs, t } from '../../lib/prefs.svelte';
   import { clock, now } from '../../lib/when';
   import Failure from '../Failure.svelte';
   import Icon from '../Icon.svelte';
@@ -68,6 +68,7 @@
     if (!result) return;
     await navigator.clipboard?.writeText(result.link).catch(() => undefined);
     copied = true;
+    announcement.text = t('nodes.pair.copied');
   }
 </script>
 
@@ -84,8 +85,13 @@
     </header>
 
     <label class="field">
-      <span>{t('nodes.pair.computer')}</span>
-      <select class="input" bind:value={chosen} onchange={() => (result = undefined)}>
+      <span id={`${uid}-computer`}>{t('nodes.pair.computer')}</span>
+      <select
+        class="input"
+        aria-labelledby={`${uid}-computer`}
+        bind:value={chosen}
+        onchange={() => (result = undefined)}
+      >
         {#each pairable as comp (comp.home)}
           <option value={comp.home}>{comp.info!.name}</option>
         {/each}

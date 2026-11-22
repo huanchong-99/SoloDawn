@@ -4,6 +4,7 @@
 // internal/home.
 import { Home } from '../src/lib/groups.svelte';
 import { goldens } from '../src/lib/mock';
+import type { AccountKind } from '../src/lib/onboard.svelte';
 import * as p from '../src/lib/proto';
 
 /** The person of the wire examples, and their member id there. */
@@ -237,6 +238,80 @@ export function browser(home: TestHome) {
         addrs: [],
       });
       link.online(connection.ctl, welcome as p.Welcome);
+    },
+    drop: () => drop(),
+  };
+}
+
+export interface OwnedNode {
+  home: TestHome;
+  store: Home;
+  device: string;
+  info: p.HostInfo;
+  commands: p.Envelope[];
+  connect(): Promise<void>;
+  drop(): void;
+}
+
+/** A computer of the person's own, as the client holds it: besides what `browser` does, it
+ *  answers `host.info`, `agent.set` and `pair.browser`, and keeps those commands. */
+export function ownedNode(
+  name: string,
+  device: string,
+  overrides: Partial<p.HostInfo> = {},
+): OwnedNode {
+  const home = new TestHome(name);
+  const store = new Home({ user, sign });
+  const commands: p.Envelope[] = [];
+  let drop = () => {};
+
+  const info: p.HostInfo = {
+    ...p.decode(p.HostInfo, goldens['host-info-answer']),
+    device,
+    name,
+    ...overrides,
+  };
+
+  return {
+    home,
+    store,
+    device,
+    info,
+    commands,
+    async connect() {
+      const link = store.connect();
+      const base = home.connect(link.push);
+      function handleCmd(env: p.Envelope): p.CmdResult | undefined {
+        const parsed = JSON.parse(env.p) as { t: string; agent?: string; account?: AccountKind };
+        if (parsed.t === 'pair.browser') {
+          commands.push(env);
+          return p.decode(p.CmdResult, goldens['cmd-pair-link']);
+        }
+        if (parsed.t !== 'agent.set') return undefined;
+        commands.push(env);
+        const entry = info.agents.find((item) => item.agent === parsed.agent);
+        if (entry && parsed.account) entry.account = parsed.account;
+        return { re: 1, ok: true };
+      }
+      const ctl = {
+        request: async (req: { t: string; env?: p.Envelope }) => {
+          if (req.t === 'host.info') return structuredClone(info);
+          const cmdAnswer = req.t === 'cmd' && req.env ? handleCmd(req.env) : undefined;
+          return cmdAnswer ?? base.ctl.request(req as never);
+        },
+      } as p.Ctl;
+      drop = () => {
+        base.close();
+        link.offline();
+      };
+      const welcome = (await base.ctl.request({
+        t: 'hello',
+        v: 1,
+        kind: 'browser',
+        name: 'test',
+        addrs: [],
+      })) as p.Welcome;
+      link.online(ctl, { ...welcome, device });
     },
     drop: () => drop(),
   };

@@ -9,9 +9,22 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run it supersedes; a push to rebuild never does.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # The browsers are those of browser-vectors.yml, set up the same way.
 jobs:
+  changes:
+    uses: ./.github/workflows/changes.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
   e2e:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     name: ${{ matrix.name }} end-to-end
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30

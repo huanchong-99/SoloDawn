@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { actTextLimit, jsonBytes } from '../../lib/compose';
   import type { CardProps } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
@@ -9,7 +10,11 @@
 
   /** A secretary's task brief in all four states (contracts/messages.md 2.1, 3.1). */
   let { group, msg }: CardProps<'brief'> = $props();
+  const uid = $props.id();
 
+  let cardEl: HTMLElement;
+  let focusNote = false;
+  let focusChange = false;
   let revising = $state(false);
   let note = $state('');
   let busy = $state(false);
@@ -39,17 +44,57 @@
     return t('brief.pass').replace('{n}', String(msg.body.pass));
   });
 
+  const takeNoteFocus = (el: HTMLElement) => {
+    if (!focusNote) return;
+    focusNote = false;
+    el.focus({ preventScroll: true });
+  };
+
+  const takeChangeFocus = (el: HTMLElement) => {
+    if (!focusChange) return;
+    focusChange = false;
+    el.focus({ preventScroll: true });
+  };
+
+  function openRevise() {
+    focusNote = true;
+    revising = true;
+    failed = '';
+  }
+
+  function closeRevise() {
+    focusChange = true;
+    revising = false;
+    failed = '';
+  }
+
+  async function settleFocus() {
+    await tick();
+    const next =
+      cardEl.querySelector<HTMLElement>(
+        'summary, textarea:not([disabled]), button:not([disabled])',
+      ) ?? cardEl;
+    if (next === cardEl) cardEl.tabIndex = -1;
+    next.focus({ preventScroll: true });
+  }
+
   async function act(fields: { action: 'confirm' } | { action: 'revise'; text: string }) {
+    const hadFocus = cardEl.contains(document.activeElement);
     busy = true;
     failed = '';
+    if (hadFocus) {
+      cardEl.tabIndex = -1;
+      cardEl.focus({ preventScroll: true });
+    }
     const answer = await group.home.command({ t: 'act', g: group.g, msg: msg.id, ...fields });
     busy = false;
     if (answer.err) {
       failed = answer.err.code;
-      return;
+    } else {
+      revising = false;
+      note = '';
     }
-    revising = false;
-    note = '';
+    if (hadFocus) await settleFocus();
   }
 </script>
 
@@ -120,7 +165,12 @@
   </dl>
 {/snippet}
 
-<section class="card" class:need={canAct}>
+<section
+  bind:this={cardEl}
+  class="card"
+  class:need={canAct}
+  aria-label={`${t('brief.kind')} · ${msg.body.title}`}
+>
   <header class="card-head">
     <Icon name="doc" />
     <span class="kind">{t('brief.kind')}</span>
@@ -164,26 +214,29 @@
         }}
       >
         <textarea
+          use:takeNoteFocus
           class="input"
           rows="2"
           aria-label={t('brief.note.label')}
+          aria-invalid={overLimit || undefined}
+          aria-describedby={overLimit ? `${uid}-over` : undefined}
           placeholder={t('brief.note.hint')}
           bind:value={note}
-          disabled={readonly || busy}></textarea>
+          disabled={readonly || busy}
+          onkeydown={(event) => {
+            if (event.key === 'Escape' && !busy) {
+              event.preventDefault();
+              closeRevise();
+            }
+          }}></textarea>
         <div class="card-foot">
           <button class="btn btn-dawn" disabled={!canSendRevise}>{t('brief.send_changes')}</button>
-          <button
-            type="button"
-            class="btn"
-            disabled={busy}
-            onclick={() => {
-              revising = false;
-              failed = '';
-            }}
-          >
+          <button type="button" class="btn" disabled={busy} onclick={closeRevise}>
             {t('brief.cancel')}
           </button>
-          {#if overLimit}<span class="hint over" role="status">{t('brief.too_long')}</span>{/if}
+          {#if overLimit}
+            <span class="hint over" id={`${uid}-over`} role="status">{t('brief.too_long')}</span>
+          {/if}
         </div>
       </form>
     {:else}
@@ -197,13 +250,11 @@
           <Icon name="check" sm />{t('brief.confirm')}
         </button>
         <button
+          use:takeChangeFocus
           type="button"
           class="btn"
           disabled={!canAct || readonly || busy}
-          onclick={() => {
-            revising = true;
-            failed = '';
-          }}
+          onclick={openRevise}
         >
           {t('brief.change')}
         </button>

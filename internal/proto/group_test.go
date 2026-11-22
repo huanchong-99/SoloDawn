@@ -68,10 +68,34 @@ func TestGroupGoldens(t *testing.T) {
 		Thread: ThreadSummary{Count: 2}, Stats: TaskStats{9, 2, ts - 4000, nil}, Created: ts - 4000,
 	}
 	golden(t, "row-task-paused", paused)
+	confirmTitle := "Node: report connection path changes"
+	confirmWait := TaskRow{
+		RowHeader: RowHeader{"task", id("confirm task"), 819}, Group: group, Num: 15, Title: confirmTitle,
+		Slug: MakeSlug(confirmTitle), Origin: "brief", Brief: id("brief"),
+		State: "active", Step: "branch", Assignee: ai, Reviewer: reviewer, Pass: 90,
+		Depends: []string{}, Wait: &TaskWait{Kind: "confirm", Msg: id("confirm"), Who: []string{user}, Since: ts},
+		Stats: TaskStats{Started: ts}, Created: ts,
+	}
+	golden(t, "row-task-confirm", confirmWait)
 
 	msg := decidedExample(t)
-	note := NoteRow{RowHeader{"note", id("note"), 640}, 640, group, nil, "Path events include the connection id.", human, ts - 4000}
+	note := NoteRow{
+		RowHeader: RowHeader{"note", id("note"), 640}, Pos: 640, Group: group,
+		Text: "Path events include the connection id.", By: human, Timestamp: ts - 4000,
+	}
 	golden(t, "row-note", note)
+	golden(t, "row-note-preset", NoteRow{
+		RowHeader: RowHeader{"note", id("preset note"), 902}, Pos: 871, Group: group,
+		NoteType: "preset", Name: "Calm dashboard",
+		Text: "Principles: one accent colour; no motion longer than 200 ms.",
+		By:   human, Timestamp: ts + 100000,
+	})
+	golden(t, "row-note-kb", NoteRow{
+		RowHeader: RowHeader{"note", id("kb note"), 915}, Pos: 915, Group: group,
+		NoteType: "kb", Name: "Decision: the home is the single writer",
+		Text: "Every change to a group goes through its home.",
+		By:   ai, Timestamp: ts + 101000,
+	})
 	gone := GoneRow{RowHeader{"note", note.ID, 815}, true}
 	golden(t, "row-gone", gone)
 
@@ -83,7 +107,9 @@ func TestGroupGoldens(t *testing.T) {
 	page := FetchPage{Request{"fetch", 3}, group, 800, 50}
 	golden(t, "fetch", FetchThread{page, &task})
 	golden(t, "fetch-main", FetchThread{page, nil})
-	golden(t, "fetch-kind", FetchKind{page, "note"})
+	golden(t, "fetch-kind", FetchKind{FetchPage: page, Kind: "note"})
+	golden(t, "fetch-preset", FetchKind{FetchPage: FetchPage{Request{"fetch", 7}, group, 0, 50}, Kind: "preset"})
+	golden(t, "fetch-kb", FetchKind{FetchPage: FetchPage{Request{"fetch", 9}, group, 0, 5}, Kind: "kb", Query: "single writer 路径"})
 	golden(t, "fetch-row", FetchRow{FetchPage{Request{"fetch", 3}, group, 0, 1}, "task", task})
 	golden(t, "fetched", Fetched{"fetched", Success{3, true}, []json.RawMessage{wireJSON(t, msg)}, false})
 
@@ -100,5 +126,11 @@ func TestGroupGoldens(t *testing.T) {
 	golden(t, "cmd-started", CmdResult{Success: Success{5, true}, Num: 12})
 	golden(t, "cmd-reviewed", CmdResult{Success: Success{6, true}, Passed: new(false), Round: 1})
 	golden(t, "cmd-pair-link", CmdResult{Success: Success{7, true}, Link: "https://rv.example/#pair=7K2M-9QXD-4F8T-WB3N", Expires: ts + 600000})
+	golden(t, "cmd-noted", CmdResult{Success: Success{9, true}, ID: id("preset note"), Replaced: new(false)})
+	golden(t, "cmd-invite-link", CmdResult{
+		Success: Success{10, true},
+		Link:    "https://rv.example/#join=7K2M-9QXD-4F8T-WB3N&g=" + group + "&home=" + host,
+		Expires: ts + 600000,
+	})
 	golden(t, "cmd-error", ErrorResponse{8, WireError{"conflict", "This card has already been decided."}})
 }

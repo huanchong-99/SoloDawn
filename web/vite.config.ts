@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { build as viteBuild } from 'vite';
 import { configDefaults, defineConfig } from 'vitest/config';
 
 // The node embeds the built client from internal/node/webdist (architecture 8.1). The build
@@ -12,6 +13,23 @@ const webdist = '../internal/node/webdist';
 const here = import.meta.dirname;
 const repo = here.includes('.stryker-tmp') ? '../../..' : '..';
 const testdata = resolve(here, repo, 'internal/proto/testdata');
+const targets = ['chrome137', 'edge137', 'firefox136', 'safari17.5', 'ios17.5'];
+
+async function buildServiceWorker(): Promise<string> {
+  const output = await viteBuild({
+    configFile: false,
+    logLevel: 'silent',
+    resolve: { alias: { '@testdata': testdata } },
+    build: {
+      write: false,
+      target: targets,
+      lib: { entry: resolve(here, 'src/sw.ts'), formats: ['iife'], name: 'sw' },
+    },
+  });
+  const chunk = Array.isArray(output) ? output[0]?.output[0] : undefined;
+  if (!chunk || chunk.type !== 'chunk') throw new Error('sw.ts produced no bundle');
+  return chunk.code;
+}
 
 export default defineConfig(({ mode }) => ({
   base: './',
@@ -23,13 +41,19 @@ export default defineConfig(({ mode }) => ({
         this.emitFile({ type: 'asset', fileName: '.gitignore', source: '*\n!.gitignore\n' });
       },
     },
+    {
+      name: 'service-worker',
+      async generateBundle() {
+        this.emitFile({ type: 'asset', fileName: 'sw.js', source: await buildServiceWorker() });
+      },
+    },
   ],
   // The supported browsers (docs/decisions/implemented/architecture/2026-11-20-browser-baseline.md).
   // CSS is minified for the same targets, so light-dark() and nesting ship as written.
   build: {
     outDir: webdist,
     emptyOutDir: true,
-    target: ['chrome137', 'edge137', 'firefox136', 'safari17.5', 'ios17.5'],
+    target: targets,
   },
   server: { fs: { allow: ['.', testdata] } },
   resolve: {

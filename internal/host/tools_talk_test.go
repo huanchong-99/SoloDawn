@@ -696,7 +696,7 @@ func TestPostToolHandbackCarriesTheFacts(t *testing.T) {
 	tid2 := proto.ID(talkTask2ID)
 	facts := proto.HandbackBody{Files: []string{"a.go"}, Commits: []proto.CommitSubject{{SHA: "9f2c1ab", Subject: "Fix"}}, Added: 4, Removed: 1}
 	t2 := &takeover{facts: facts}
-	takeoverState(h).claim(aiSlot{group: talkGroupID, member: talkAI1ID}, t2)
+	takeoverState(h).claim(aiSlot{group: talkGroupID, member: talkAI1ID}, t2, true)
 
 	taskCaller := talkCaller(TaskSession, talkAI1ID, talkTask2ID, false, Turn{Kind: HandbackTurn, Thread: talkTask2ID})
 	mustCallTalk[idResult](t, h, taskCaller, "post", `{"text":"Owner asked for X.","kind":"handback"}`)

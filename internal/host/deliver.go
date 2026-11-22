@@ -361,6 +361,7 @@ func (d *delivery) advanceLiveCursor(group, home string, seq int64) {
 }
 
 func afterGroupState(h *Host, d *delivery, group string) {
+	interruptPausedTurns(h, d, group)
 	cleanupGroupState(h, d, group)
 	stepMerges(h, d, group)
 	resumeGroupMerges(h, d, group)
@@ -368,6 +369,33 @@ func afterGroupState(h *Host, d *delivery, group string) {
 	for _, key := range d.heldKeys() {
 		deliverPair(h, d, key)
 	}
+}
+
+func interruptPausedTurns(h *Host, d *delivery, group string) {
+	if d.groupSyncActive(group) {
+		return
+	}
+	paused := groupIsPaused(h, group)
+	for _, s := range h.Sessions.All() {
+		if shouldInterruptPaused(h, group, paused, s) {
+			interruptSessionTurn(h, s.SessionKey, "stop", "")
+		}
+	}
+}
+
+func shouldInterruptPaused(h *Host, group string, groupPaused bool, s Session) bool {
+	if s.Group != group || s.State != Working {
+		return false
+	}
+	return groupPaused || sessionTaskPaused(h, group, s.Task)
+}
+
+func sessionTaskPaused(h *Host, group, taskID string) bool {
+	if taskID == "" {
+		return false
+	}
+	task, ok := lookupTaskRow(h, group, taskID)
+	return ok && task.State == "paused"
 }
 
 func cleanupGroupState(h *Host, d *delivery, group string) {

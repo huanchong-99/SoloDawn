@@ -209,6 +209,17 @@ func (r *tkRig) sent(t, op string) []map[string]any {
 	return out
 }
 
+// lastState is the state of member in the last member status sent.
+func (r *tkRig) lastState(member string) any {
+	var state any
+	for _, c := range r.sent("member", "status") {
+		if c["id"] == member {
+			state = c["state"]
+		}
+	}
+	return state
+}
+
 func (r *tkRig) waitFor(desc string, ok func() bool) {
 	r.t.Helper()
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
@@ -231,7 +242,12 @@ func (r *tkRig) open(member string) bool {
 // waitReleased waits until the hand-back of member has ended.
 func (r *tkRig) waitReleased(member string) {
 	r.t.Helper()
-	r.waitFor("the hold to lift", func() bool { return !r.held(member) })
+	r.waitFor("the hand-back to end", func() bool {
+		p := takeoverState(r.h)
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.open[aiSlot{group: runGroup1, member: member}] == nil
+	})
 }
 
 func (r *tkRig) session(key SessionKey) Session {
@@ -262,9 +278,11 @@ func TestTakeoverStartRefusals(t *testing.T) {
 	tkCode(t, r.startFrom(newTkOwner("relay"), runAI1, ""), "relay")
 	tkCode(t, r.start("NoSuchAIAAAAAAAAAAAAAA", ""), "not_found")
 
-	takeoverState(r.h).claim(aiSlot{group: runGroup1, member: runAI1}, &takeover{})
+	takeoverState(r.h).claim(aiSlot{group: runGroup1, member: runAI1}, &takeover{}, true)
 	tkCode(t, r.start(runAI1, ""), "busy")
-	takeoverState(r.h).release(r.h, aiSlot{group: runGroup1, member: runAI1})
+	takeoverState(r.h).release(r.h, aiSlot{group: runGroup1, member: runAI1}, &takeover{})
+	tkCode(t, r.start(runAI1, ""), "busy")
+	takeoverState(r.h).open = map[aiSlot]*takeover{}
 
 	r.putTask(tkTask, "active", runAI1, runAI2, 1)
 	d := deliv(r.h)
@@ -342,13 +360,34 @@ func TestTakeoverOfAWorkingAIWithoutATaskIsCancelledWhenNothingChanged(t *testin
 	_, err = r.h.ReplayTakeover(t.Context(), r.owner, "owner-dev", json.RawMessage(strings.Replace(string(replay), "Nn"+runAI1[2:], "Oo"+runAI1[2:], 1)))
 	tkCode(t, err, "conflict")
 
+	cancelling := make(chan struct{})
+	letCancel := sync.OnceFunc(func() { close(cancelling) })
+	t.Cleanup(letCancel)
+	r.home.cmdFn = func(p map[string]any) (json.RawMessage, error) {
+		if p["op"] == "cancel" {
+			<-cancelling
+		}
+		return json.RawMessage(`{"re":1,"ok":true}`), nil
+	}
 	r.end(runAI1)
+	r.waitFor("the cancel", func() bool { return len(r.sent("task", "cancel")) == 1 })
+	p := takeoverState(r.h)
+	p.mu.Lock()
+	free := p.open[aiSlot{group: runGroup1, member: runAI1}].free
+	p.mu.Unlock()
+	if r.held(runAI1) || !free {
+		t.Fatal("the takeover still held its slot when it reported the cancel")
+	}
+	letCancel()
 	r.waitReleased(runAI1)
 	if c := r.sent("task", "cancel"); len(c) != 1 || c[0]["id"] != key.Task || c[0]["as"] != nil {
 		t.Fatalf("task cancel = %v", c)
 	}
 	if _, ok := r.h.Sessions.Get(key); ok || len(r.sent("post", "")) != 0 || r.drv.count() != 0 {
 		t.Fatal("an unchanged takeover task kept its session, posted, or started a hand-back turn")
+	}
+	if state := r.lastState(runAI1); state != "dormant" {
+		t.Fatalf("member state after the cancelled takeover = %v, want dormant", state)
 	}
 	if _, ok := r.h.Sessions.Caller(tokenFromLaunch(l)); ok {
 		t.Fatal("the interactive token outlived the terminal")
@@ -488,6 +527,9 @@ func TestTakeoverStartFailures(t *testing.T) {
 	key := SessionKey{Group: runGroup1, Member: runAI1, Task: tkTask}
 	if s := r.session(key); s.State != Dormant || r.held(runAI1) || len(r.sent("task", "cancel")) != 0 {
 		t.Fatalf("after a failed start: %+v", s)
+	}
+	if state := r.lastState(runAI1); state != "dormant" {
+		t.Fatalf("member state after a failed start = %v, want dormant", state)
 	}
 
 	r.putTask(tkTask, "merged", runAI1, runAI2, 1)
@@ -651,8 +693,13 @@ func TestTakeoverClosesOnRelayOnALostConnectionAndUnattached(t *testing.T) {
 	if err := r.start(tkSec, ""); err != nil {
 		t.Fatal(err)
 	}
-	r.owner.changed <- struct{}{}
-	time.Sleep(50 * time.Millisecond)
+	for range 3 {
+		select {
+		case r.owner.changed <- struct{}{}:
+		case <-time.After(15 * time.Second):
+			t.Fatal("the watch stopped reading path changes")
+		}
+	}
 	if !r.open(tkSec) {
 		t.Fatal("a path change that stays direct closed the terminal")
 	}
@@ -666,7 +713,6 @@ func TestTakeoverClosesOnRelayOnALostConnectionAndUnattached(t *testing.T) {
 	close(second.done)
 	r.waitReleased(tkSec)
 
-	takeoverAttach = 300 * time.Millisecond
 	third := newTkOwner("direct")
 	if err := r.startFrom(third, tkSec, ""); err != nil {
 		t.Fatal(err)
@@ -674,7 +720,7 @@ func TestTakeoverClosesOnRelayOnALostConnectionAndUnattached(t *testing.T) {
 	term := newPTYTestTerminal("pty:" + runGroup1 + ":" + tkSec)
 	go r.h.ServeTerminal(term)
 	term.waitContains(t, "WD:repo")
-	time.Sleep(600 * time.Millisecond)
+	closeUnattached(ptyState(r.h).lookup(aiSlot{group: runGroup1, member: tkSec}))
 	if !r.open(tkSec) {
 		t.Fatal("an attached terminal closed at the attach timeout")
 	}
@@ -706,12 +752,17 @@ func TestTakeoverSettleLeavesTheRowForTheNextStart(t *testing.T) {
 
 	p := takeoverState(r.h)
 	p.mu.Lock()
-	p.open, p.settled, p.stop = map[aiSlot]*takeover{}, false, make(chan struct{})
+	p.open, p.settled = map[aiSlot]*takeover{}, false
+	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.mu.Unlock()
+	rt := stateOf(r.h)
+	rt.mu.Lock()
+	rt.settling = false
+	rt.mu.Unlock()
 	busy := makeRunSession(SessionKey{Group: runGroup1, Member: tkSec}, GroupSession, "repo")
 	r.h.Sessions.Create(busy)
 	r.h.Sessions.Move(busy.SessionKey, Dormant, Takeover)
-	p.claim(aiSlot{group: runGroup1, member: tkSec}, &takeover{})
+	p.claim(aiSlot{group: runGroup1, member: tkSec}, &takeover{}, true)
 	elsewhere := makeRunSession(SessionKey{Group: runGroup2, Member: runAI2}, GroupSession, "repo")
 	r.h.Sessions.Create(elsewhere)
 	r.h.Sessions.Move(elsewhere.SessionKey, Dormant, Takeover)
@@ -735,6 +786,9 @@ func TestTakeoverEndsWithItsTask(t *testing.T) {
 	r.waitReleased(runAI1)
 	if _, ok := r.h.Sessions.Get(key); ok || r.open(runAI1) || len(r.sent("post", "")) != 0 {
 		t.Fatal("a cancelled task's takeover kept its session or terminal, or posted")
+	}
+	if state := r.lastState(runAI1); state != "dormant" {
+		t.Fatalf("member state after the task ended = %v, want dormant", state)
 	}
 }
 
@@ -760,5 +814,121 @@ func TestHandBackTurnFailsWithoutItsLaunchConfig(t *testing.T) {
 	}
 	if s, _ := h.Sessions.Get(key); s.State != Takeover {
 		t.Fatalf("state = %s", s.State)
+	}
+}
+
+func TestTakeoverIsFreeOnceTheHandBackTurnStarts(t *testing.T) {
+	r := newTkRig(t)
+	r.drv.makeProc = nil
+	key := SessionKey{Group: runGroup1, Member: tkSec}
+	if err := r.start(tkSec, ""); err != nil {
+		t.Fatal(err)
+	}
+	r.end(tkSec)
+	r.waitFor("the hand-back turn", func() bool { return r.drv.count() == 1 })
+	proc := r.drv.lastProc()
+	<-proc.turnCh
+	if r.held(tkSec) || r.session(key).State != Working {
+		t.Fatalf("during the hand-back turn: held %v, state %s", r.held(tkSec), r.session(key).State)
+	}
+	posting := make(chan struct{})
+	r.home.cmdFn = func(p map[string]any) (json.RawMessage, error) {
+		if p["kind"] == "handback" {
+			<-posting
+		}
+		return json.RawMessage(`{"re":1,"ok":true}`), nil
+	}
+	proc.emit(Event{Kind: TurnEnded, Status: "completed"})
+	r.waitFor("waiting", func() bool { return r.session(key).State == Waiting })
+	if err := r.start(tkSec, ""); err != nil {
+		t.Fatalf("a takeover right after the hand-back turn = %v", err)
+	}
+	close(posting)
+	if r.session(key).State != Takeover || !r.held(tkSec) {
+		t.Fatal("the second takeover did not take the session")
+	}
+	r.end(tkSec)
+	r.waitFor("the second hand-back turn", func() bool { return r.drv.count() == 2 })
+	r.drv.lastProc().emit(Event{Kind: TurnEnded, Status: "completed"})
+	r.waitReleased(tkSec)
+	if posts := r.sent("post", "handback"); len(posts) != 2 {
+		t.Fatalf("hand-back posts = %d, want 2", len(posts))
+	}
+}
+
+func TestSettleEndsARunningHandBackTurn(t *testing.T) {
+	r := newTkRig(t)
+	r.drv.makeProc = nil
+	if err := r.start(tkSec, ""); err != nil {
+		t.Fatal(err)
+	}
+	r.end(tkSec)
+	r.waitFor("the hand-back turn", func() bool { return r.drv.count() == 1 })
+	<-r.drv.lastProc().turnCh
+	settled := make(chan struct{})
+	go func() {
+		r.h.Settle()
+		close(settled)
+	}()
+	select {
+	case <-settled:
+	case <-time.After(15 * time.Second):
+		t.Fatal("Settle blocked during a hand-back turn")
+	}
+	if len(r.delivered) != 0 {
+		t.Fatal("a hand-back delivered after Settle")
+	}
+}
+
+func TestHandBackOfAHeldAIStartsNoTurn(t *testing.T) {
+	for _, hold := range []string{"offline", "rate_limit"} {
+		t.Run(hold, func(t *testing.T) {
+			r := newTkRig(t)
+			Holds["limits"] = holdLimits
+			if err := r.start(tkSec, ""); err != nil {
+				t.Fatal(err)
+			}
+			lp := limitsOf(r.h)
+			lp.mu.Lock()
+			lp.offline = hold == "offline"
+			lp.rateUntil["claude"] = r.h.Now().Add(time.Hour).UnixMilli()
+			lp.mu.Unlock()
+			r.end(tkSec)
+			r.waitReleased(tkSec)
+			s := r.session(SessionKey{Group: runGroup1, Member: tkSec})
+			if s.State != Dormant || r.drv.count() != 0 || len(r.sent("post", "handback")) != 1 {
+				t.Fatalf("held hand-back: %+v, CLI starts %d, posts %v", s, r.drv.count(), r.sent("post", "handback"))
+			}
+			if reason, _ := r.h.Held(s.SessionKey); reason != hold {
+				t.Fatalf("hold = %q, want %q", reason, hold)
+			}
+		})
+	}
+}
+
+func TestTakeoverHandsBackOnceWhenRowsArriveDuringItsHandBack(t *testing.T) {
+	r := newTkRig(t)
+	composing, letCompose := make(chan struct{}), make(chan struct{})
+	enter := sync.OnceFunc(func() { close(composing) })
+	compose := Compose
+	Compose = func(h *Host, s Session, kind TurnKind, in []json.RawMessage) (string, Turn, error) {
+		if kind == HandbackTurn {
+			enter()
+			<-letCompose
+		}
+		return compose(h, s, kind, in)
+	}
+	if err := r.start(tkSec, ""); err != nil {
+		t.Fatal(err)
+	}
+	r.end(tkSec)
+	<-composing
+	cleanupGroupState(r.h, deliv(r.h), runGroup1)
+	close(letCompose)
+	r.waitReleased(tkSec)
+	close(r.owner.done)
+	takeoverState(r.h).wg.Wait()
+	if posts := r.sent("post", "handback"); len(posts) != 1 || r.drv.count() != 1 {
+		t.Fatalf("one takeover gave %d hand-back posts and %d turns", len(posts), r.drv.count())
 	}
 }

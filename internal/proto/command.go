@@ -80,6 +80,17 @@ type MemberSet struct {
 	Account   *string   `json:"account,omitempty"`
 	Allow     *[]string `json:"allow,omitempty"`
 	Approvers *[]string `json:"approvers,omitempty"`
+	Role      *string   `json:"role,omitempty"`
+}
+
+// Invite asks the home for an invitation link for its group; it is a
+// HomeCommand alone, answered with link and expires in CmdResult.
+type Invite = HomeCommand
+
+// Join admits the person of a joining connection to the invitation's group.
+type Join struct {
+	HomeCommand
+	Name string `json:"name"`
 }
 
 // A host event is the body of a system message without ai, which the home
@@ -134,6 +145,13 @@ type ReviewSigned struct {
 	Commit string       `json:"commit"`
 	Score  int          `json:"score"`
 	Items  []ReviewItem `json:"items"`
+}
+
+// ConfirmSigned is what a person signs to ask to watch an AI's terminal
+// (contracts/step-2/confirm.md section 3); the home adds to.
+type ConfirmSigned struct {
+	What string `json:"what"`
+	AI   ID     `json:"ai"`
 }
 
 // Act decides a card. Which action has arg and text is in
@@ -228,9 +246,11 @@ type TaskAssign struct {
 
 type Note struct {
 	HomeCommand
-	ID   ID     `json:"id"`
-	Task *ID    `json:"task"`
-	Text string `json:"text"`
+	ID       ID     `json:"id"`
+	Task     *ID    `json:"task"`
+	NoteType string `json:"type,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Text     string `json:"text"`
 }
 
 type Forget struct {
@@ -298,4 +318,14 @@ type HostLeave struct {
 	HostCommand
 	Group ID     `json:"g"`
 	Agent string `json:"agent"`
+}
+
+// HomeAdd records the home of a group on one of a member's nodes before any AI
+// on that node joins it (contracts/step-2/people.md section 7).
+type HomeAdd struct {
+	HostCommand
+	Group ID       `json:"g"`
+	Home  string   `json:"home"`
+	Name  string   `json:"name"`
+	Addrs []string `json:"addrs"`
 }

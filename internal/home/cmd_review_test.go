@@ -557,7 +557,7 @@ func TestReviewCmdPostPassFailVetoAndSixReviewStop(t *testing.T) {
 		equal(t, gotTask.Step, "merge")
 		equal(t, gotTask.Review, &proto.Review{Round: 1, Failed: 0, Score: 90, OK: true, By: revReviewer, Commit: "c1", At: clock})
 		equal(t, gotTask.Thread, proto.ThreadSummary{
-			Count: 3, Rounds: 1,
+			Count: 3, Rounds: 2,
 			Last: &proto.ThreadMessage{By: revReviewer, Kind: "review", Text: strings.Repeat("评", 200), Timestamp: revCmdTS},
 		})
 		equal(t, res.Items, []home.Item{{AI: revAssignee, Why: "merge", Task: revTaskID, Commit: "c1", PR: 31}})
