@@ -16,6 +16,7 @@
   "member.join.error.lost": "Not sent: the AI's computer cannot be reached.",
   "member.join.joined": "Already in this group",
   "member.join.lead": "Choose an AI registered on one of your connected computers.",
+  "member.join.loading": "Reading your computers…",
   "member.join.name": "Name in the group",
   "member.join.nologin": "Not signed in",
   "member.join.none": "No AI found on your connected computers.",

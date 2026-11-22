@@ -628,6 +628,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       When('the owner opens "Add AI"', async () => {
         one<HTMLButtonElement>('.members .head button').click();
         flushSync();
+        expect(one('#chat-side dialog .hint').getAttribute('role')).toBe('status');
+        expect(texts('#chat-side dialog .hint')).toEqual(['Reading your computers…']);
         await vi.waitFor(() => expect(all('dialog .choice')).toHaveLength(4));
         flushSync();
       });
@@ -650,7 +652,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       );
       And(
         '"Codex · laptop" is chosen with name "Codex" and "Claude Code · laptop" warns "Not signed in" and suggests "Claude Code 2"',
-        () => {
+        async () => {
           const radios = all<HTMLInputElement>('dialog .choice input');
           const nameInput = one<HTMLInputElement>('dialog input.input');
           expect(radios.map((r) => r.checked)).toEqual([false, false, true, false]);
@@ -662,6 +664,21 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           radios[2].click();
           flushSync();
           expect(nameInput.value).toBe('Codex');
+
+          // Reopening shows cached candidates immediately while refreshing host.info in the background.
+          one<HTMLButtonElement>('dialog .btn-ghost').click();
+          await tick();
+          flushSync();
+          laptop.agents = [laptop.agents[0], { ...laptop.agents[1], login_ok: true }];
+          one<HTMLButtonElement>('.members .head button').click();
+          flushSync();
+          expect(all('dialog .choice')).toHaveLength(4);
+          expect(texts('dialog .choice .sub')[3]).toBe('API key · Not signed in');
+          await vi.waitFor(() => {
+            flushSync();
+            expect(texts('dialog .choice .sub')[3]).toBe('API key');
+          });
+          expect(one<HTMLInputElement>('dialog input.input').value).toBe('Codex');
         },
       );
       When(

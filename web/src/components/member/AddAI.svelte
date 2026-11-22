@@ -22,6 +22,7 @@
   const uid = $props.id();
 
   const owned = $derived(homes.filter((home) => home.owner && home.ctl));
+  const loading = $derived(owned.some((home) => !nodes.infos.has(home)));
   const canSecretary = $derived(canMakeSecretary(group));
 
   let dialog: HTMLDialogElement;
@@ -46,6 +47,7 @@
       customName = false;
       secretary = false;
       failed = '';
+      nodes.sync(homes, true);
     });
     if (!dialog.open) dialog.showModal();
   });
@@ -139,7 +141,9 @@
           {/each}
         </div>
       {:else}
-        <p class="hint">{t('member.join.none')}</p>
+        <p class="hint" role={loading ? 'status' : undefined}>
+          {t(loading ? 'member.join.loading' : 'member.join.none')}
+        </p>
       {/if}
     </fieldset>
 

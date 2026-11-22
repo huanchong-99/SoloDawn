@@ -59,11 +59,12 @@ export class Nodes {
   readonly infos = new SvelteMap<Home, p.HostInfoPush>();
   #asked = new WeakMap<Home, p.Ctl | undefined>();
 
-  /** Requests `host.info` once for each newly online owner `Home` in `homes`. */
-  sync(homes: readonly Home[]) {
+  /** Requests `host.info` for each newly online owner `Home` in `homes`, or every online owner
+   *  `Home` when `again` is true. */
+  sync(homes: readonly Home[], again = false) {
     for (const home of homes) {
       const ctl = activeCtl(home);
-      if (this.#asked.get(home) === ctl) continue;
+      if (!again && this.#asked.get(home) === ctl) continue;
       this.#asked.set(home, ctl);
       if (ctl) void this.#read(home, ctl);
     }

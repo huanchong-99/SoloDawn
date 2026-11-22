@@ -312,7 +312,13 @@ describe('start (live)', () => {
     first.stop();
 
     // 2. Owner log containing only the browser itself (no node entries).
-    const replaySpy = vi.spyOn(DeviceLog, 'replay');
+    const realReplay = DeviceLog.replay.bind(DeviceLog);
+    let entriesIter: ReturnType<typeof vi.spyOn> | undefined;
+    const replaySpy = vi.spyOn(DeviceLog, 'replay').mockImplementation(async (...args) => {
+      const log = await realReplay(...args);
+      entriesIter = vi.spyOn(log.entries, Symbol.iterator);
+      return log;
+    });
     const browserDev = await loadDevice({ crypto, idb: () => idb });
     const browserOnlyLog = new DeviceLog(crypto, browserDev.id);
     await browserOnlyLog.apply(
@@ -320,9 +326,7 @@ describe('start (live)', () => {
     );
     await saveOwner(() => idb, browserOnlyLog, {});
     const second = start('live');
-    await vi.waitFor(() => expect(replaySpy).toHaveBeenCalledOnce());
-    await replaySpy.mock.results[0].value;
-    await new Promise((later) => setTimeout(later, 10));
+    await vi.waitFor(() => expect(entriesIter).toHaveBeenCalledOnce());
     expect(homes).toEqual([]);
     expect(clients).toEqual([]);
     second.stop();

@@ -8,7 +8,6 @@
   import { nodes, type Computer } from '../lib/nodes.svelte';
   import { accountLabel, accounts, cliName, type AccountKind } from '../lib/onboard.svelte';
   import { t } from '../lib/prefs.svelte';
-  import type { TaskRow } from '../lib/proto';
   import { href } from '../lib/route.svelte';
   import { now } from '../lib/when';
 
@@ -209,9 +208,7 @@
                   {@const member = group?.member(entry.member)}
                   {@const isSec = member?.kind === 'ai' && member.secretary}
                   {@const state = comp.online ? entry.state : 'offline'}
-                  {@const taskRow = entry.task
-                    ? (group?.rows.get(`task ${entry.task}`) as TaskRow | undefined)
-                    : undefined}
+                  {@const taskRow = group?.task(entry.task)}
                   <div class="perm">
                     <span class="row">
                       <a href={href('chat', { g: entry.g })}>{groupName}</a>

@@ -6,7 +6,6 @@ import {
   candidatesOf,
   canMakeSecretary,
   humanMembers,
-  humanName,
   isAdmin,
   joinError,
   joinGroup,
@@ -130,8 +129,6 @@ describe('member lists, roles and addDisabledReason', () => {
 
     expect(aiMembers(group).map((m) => m.name)).toEqual(['Zed Secretary', 'Alpha AI', 'Beta AI']);
     expect(humanMembers(group).map((m) => m.name)).toEqual(['Alex', 'Mina']);
-    expect(humanName(group, 'mina-u')).toBe('Mina');
-    expect(humanName(group, 'nobody')).toBeUndefined();
 
     // Also check when secretary is already alphabetically first.
     const { group: g2 } = makeGroup();
@@ -446,8 +443,16 @@ describe('AI status and path projections', () => {
       }),
     ]);
     expect(waitingOnOther(group, ai, undefined)).toBe('Waiting · waiting on Mina');
-    // Task with wait: null + who resolved from main card hits task.wait?.kind fallback
+    // Task with wait: null or empty who: [] falls through to the pending main card.
     expect(waitingOnOther(group, ai, tNullWait)).toBe('Waiting · T-13 waiting on Mina');
+    const tEmptyWho = row<p.TaskRow>('row-task-waiting', {
+      id: 't15',
+      g: gid,
+      num: 15,
+      title: 'Empty who',
+      wait: { kind: 'approval', who: [], since: 1 },
+    });
+    expect(otherWaiter(group, ai, tEmptyWho)).toBe('Mina');
 
     // Pending brief whose requester left the group -> undefined
     const { group: gGone } = makeGroup();

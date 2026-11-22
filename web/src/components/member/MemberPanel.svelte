@@ -4,7 +4,6 @@
     addDisabledReason,
     aiMembers,
     humanMembers,
-    humanName,
     pathLabel,
     personTags,
     statusOf,
@@ -46,7 +45,7 @@
 
   {#each ais as ai (ai.id)}
     {@const status = statusOf(group, ai)}
-    {@const owner = ai.user === group.home.me.user ? undefined : humanName(group, ai.user)}
+    {@const owner = ai.user === group.home.me.user ? undefined : group.personName(ai.user)}
     <section class="card member">
       <header class="row">
         <span

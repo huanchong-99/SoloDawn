@@ -24,7 +24,7 @@ export const lost = (): p.ErrorResponse => ({
  *  group's `create` the group's (contracts/envelope.md section 1). */
 export const newId = () => encode(crypto.getRandomValues(new Uint8Array(16)));
 
-const key = (r: string, id: string) => `${r} ${id}`;
+const key = (r: string, id: string | undefined) => `${r} ${id}`;
 const shown = (row: p.Row) => !('gone' in row);
 const isMsg = (row: p.Row): row is p.MsgRow => row.r === 'msg' && shown(row);
 const isMember = (row: p.Row): row is Member => row.r === 'member' && shown(row);
@@ -127,7 +127,7 @@ export class Group {
   }
 
   /** A task by id; undefined when absent or deleted. */
-  task(id: string) {
+  task(id: string | undefined) {
     const row = this.rows.get(key('task', id));
     return row && shown(row) ? (row as p.TaskRow) : undefined;
   }

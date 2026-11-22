@@ -27,10 +27,6 @@ export function aiMembers(group: Group): AIMemberRow[] {
 export const humanMembers = (group: Group): HumanMemberRow[] =>
   group.members.filter((m): m is HumanMemberRow => m.kind === 'human');
 
-/** Display name of the human member with `userId` in `group`. */
-export const humanName = (group: Group, userId: string | undefined): string | undefined =>
-  humanMembers(group).find((person) => person.user === userId)?.name;
-
 /** Whether the reader at this browser is the group's owner or an admin. */
 export function isAdmin(group: Group): boolean {
   const me = group.me as HumanMemberRow | undefined;
@@ -52,11 +48,6 @@ export function personTags(group: Group, person: HumanMemberRow): string {
   if (person.role === 'owner') tags.push(t('member.owner'));
   else if (person.role === 'admin') tags.push(t('member.admin'));
   return tags.join(' · ');
-}
-
-function taskOf(group: Group, id: string | undefined): TaskRow | undefined {
-  const row = group.rows.get(`task ${id}`);
-  return row && !('gone' in row) ? (row as TaskRow) : undefined;
 }
 
 const cardOfAI = (msg: MsgRow, ai: AIMemberRow): boolean =>
@@ -99,8 +90,10 @@ function cardWaiter(group: Group, msg: MsgRow): string | undefined {
   if (msg.kind === 'brief') return group.member(msg.body.requester)?.name;
   const user =
     msg.kind === 'approval' ? msg.body.approvers[0] : (msg.body as { to: string[] }).to[0];
-  return humanName(group, user);
+  return group.personName(user);
 }
+
+const firstWaiter = (task: TaskRow | undefined): string | undefined => task?.wait?.who?.[0];
 
 // Pending briefs, approvals and decisions sit on main (contracts/commands.md 1.3);
 // group.waiting holds only cards that wait on this browser's user.
@@ -110,7 +103,8 @@ export function otherWaiter(
   ai: AIMemberRow,
   task: TaskRow | undefined,
 ): string | undefined {
-  if (task?.wait?.who) return humanName(group, task.wait.who[0]);
+  const who = firstWaiter(task);
+  if (who) return group.personName(who);
   const card = group.main.find((msg) => msg.state?.status === 'pending' && cardOfAI(msg, ai));
   return card ? cardWaiter(group, card) : undefined;
 }
@@ -141,7 +135,7 @@ const idleStates: Record<
 
 /** Status badge key and localized status line for an AI member card. */
 export function statusOf(group: Group, ai: AIMemberRow): { st: string; text: string } {
-  const task = taskOf(group, ai.task);
+  const task = group.task(ai.task);
   if (ai.state === 'waiting') {
     const mine = waitingOnMe(group, ai, task);
     return mine

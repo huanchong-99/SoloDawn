@@ -16,6 +16,7 @@
   "member.join.error.lost": "没有发出去：连不上 AI 所在的电脑。",
   "member.join.joined": "已在群里",
   "member.join.lead": "从已连接的电脑上选一个登记好的 AI 加进这个群。",
+  "member.join.loading": "正在读取你的电脑…",
   "member.join.name": "在群里的名字",
   "member.join.nologin": "未登录",
   "member.join.none": "已连接的电脑上还没有可用的 AI。",

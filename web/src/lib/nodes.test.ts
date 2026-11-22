@@ -175,6 +175,20 @@ describe('Nodes', () => {
     const { re: _re, ok: _ok, ...expected } = answer;
     expect(store.infos.get(owned)).toStrictEqual(expected);
     expect(seen.at(-1)).toBe(1);
+
+    // Passing again = true re-reads host.info on the same ctl while still skipping non-owners.
+    store.sync([offline, foreign, owned], true);
+    expect(foreignConn.asked).toEqual([]);
+    expect(ownedConn.asked).toHaveLength(2);
+    const refreshed = hostAnswer({ open: 4 });
+    ownedConn.asked[1].answer(refreshed);
+    await settle();
+    const { re: _re2, ok: _ok2, ...expectedRefreshed } = refreshed;
+    expect(store.infos.get(owned)).toStrictEqual(expectedRefreshed);
+
+    // Default again = false still skips an unchanged ctl afterwards.
+    store.sync([offline, foreign, owned]);
+    expect(ownedConn.asked).toHaveLength(2);
     stop();
   });
 

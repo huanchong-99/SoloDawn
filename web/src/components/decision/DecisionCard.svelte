@@ -21,7 +21,7 @@
   const overLimit = $derived(trimmed !== '' && jsonBytes(trimmed) > actTextLimit);
   const canSendText = $derived(canAct && !readonly && !busy && trimmed !== '' && !overLimit);
 
-  const taskRow = $derived(msg.body.task ? group.task(msg.body.task) : undefined);
+  const taskRow = $derived(group.task(msg.body.task));
 
   const memberName = (id: string) => group.member(id)?.name ?? t('chat.gone');
   const waitingOn = $derived(
