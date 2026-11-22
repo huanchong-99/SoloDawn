@@ -35,7 +35,7 @@ export interface Points {
   'chat.top': { group: Group };
   /** Beside the main line of a chat from 1024 px; below that, a panel that slides over the chat
    *  when the person opens it with the button the chat's head then shows. */
-  'chat.side': { group: Group };
+  'chat.side': { group: Group; net: Net };
 }
 export type Point = keyof Points;
 export const points = [

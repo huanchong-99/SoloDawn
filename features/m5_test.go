@@ -1580,7 +1580,12 @@ func (w *m5World) stepConfirmAndRunTwoTasks(withPush bool) error {
 	if err := w.ownerConfirmBrief(w.pendingBriefID()); err != nil {
 		return err
 	}
-	return w.waitFor("two summary cards", func() bool { return len(w.summaryCards()) == 2 })
+	hasFirst := func() bool { return len(w.summaryCards()) >= 1 }
+	if err := w.waitFor("first summary card", hasFirst); err != nil {
+		return err
+	}
+	hasBoth := func() bool { return len(w.summaryCards()) == 2 }
+	return w.waitFor("two summary cards", hasBoth)
 }
 
 func (w *m5World) verifyPushedBranchHead(c host.Caller) error {
@@ -2451,6 +2456,7 @@ func (w *m5World) stepVerifyMergeConflictAndNotice() error {
 }
 
 func (w *m5World) stepResolveConflictAndMerge() error {
+	w.setSHA(&w.commit2, "")
 	w.writeScriptFile("claude", m5ClaudeScript([]m5ToolCallSpec{{
 		Name: "set_task", Args: map[string]any{"task": "T-1", "assignee": "Claude"},
 	}}))
@@ -2470,15 +2476,36 @@ func (w *m5World) stepResolveConflictAndMerge() error {
 		if _, err := m5GitOut(dir, "-c", "user.name=test", "-c", "user.email=test@test.invalid", "merge", "-s", "ours", "-m", "Sync base", "main"); err != nil {
 			return err
 		}
-		_, err := m5GitCommitFiles(dir, map[string]string{"shared.txt": "resolved-both\n"}, "Resolve shared.txt")
+		sha, err := m5GitCommitFiles(dir, map[string]string{"shared.txt": "resolved-both\n"}, "Resolve shared.txt")
+		w.setSHA(&w.commit2, sha)
 		return err
 	})
 	w.setMemberHeld(w.secID, false)
 	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.secID)
-	return w.waitFor("task 1 merged after conflict resolution", func() bool {
+	waitCleared := func() bool {
 		t, ok := w.taskByNum(1)
-		return ok && t.State == "merged"
-	})
+		return ok && t.Wait == nil
+	}
+	if err := w.waitFor("secretary cleared conflict wait", waitCleared); err != nil {
+		return err
+	}
+	if err := w.waitFor("conflict resolution submitted for review", w.task1Commit2Submitted); err != nil {
+		return err
+	}
+	return w.waitFor("task 1 merged after conflict resolution", w.task1Merged)
+}
+
+func (w *m5World) task1Commit2Submitted() bool {
+	t, ok := w.taskByNum(1)
+	w.mu.Lock()
+	c2 := w.commit2
+	w.mu.Unlock()
+	return ok && c2 != "" && t.Commit == c2
+}
+
+func (w *m5World) task1Merged() bool {
+	t, ok := w.taskByNum(1)
+	return ok && t.State == "merged"
 }
 
 func (w *m5World) stepVerifyConflictResolvedOnBase() error {
@@ -2683,13 +2710,7 @@ func (w *m5World) stepSubmitTwoCommitsWhileReviewerHeld() error {
 	})
 	w.setMemberHeld(w.claudeM, false)
 	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.claudeM)
-	return w.waitFor("task 1 submitted commit 2", func() bool {
-		t, ok := w.taskByNum(1)
-		w.mu.Lock()
-		c2 := w.commit2
-		w.mu.Unlock()
-		return ok && c2 != "" && t.Commit == c2
-	})
+	return w.waitFor("task 1 submitted commit 2", w.task1Commit2Submitted)
 }
 
 func (w *m5World) recordStaleReviewItemID() error {
@@ -2733,10 +2754,7 @@ func (w *m5World) stepReleaseReviewerForCommit2() error {
 	}}))
 	w.setMemberHeld(w.codexM, false)
 	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.codexM)
-	return w.waitFor("task 1 merged at commit 2", func() bool {
-		t, ok := w.taskByNum(1)
-		return ok && t.State == "merged"
-	})
+	return w.waitFor("task 1 merged at commit 2", w.task1Merged)
 }
 
 func (w *m5World) stepVerifyHostRefusedStaleReview() error {

@@ -51,8 +51,9 @@ session, and a `takeover.start` that names one is answered `conflict`.
 
 ## C. During takeover
 
-9. Inbox items for this AI in this group are held. `host.info` shows how
-   many are waiting; the terminal page shows that count.
+9. Inbox items for this AI in this group are held. The terminal page and
+   the AI's card say that messages to the AI wait until hand-back, without a
+   count: the node pushes no `host.info` (`issues.md`).
 10. Whatever O and the AI do stays in the task's worktree and branch.
 11. N does not read, store or interpret terminal bytes (R-85).
 

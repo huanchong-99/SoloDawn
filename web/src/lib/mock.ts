@@ -199,6 +199,8 @@ export const schemaOf: Record<string, GenericSchema> = {
   'task-resume': p.TaskCommand,
   'task-start': p.TaskStart,
   'task-submitted': p.TaskSubmitted,
+  'trace-local': p.TaskTrace,
+  'trace-remote': p.TaskTrace,
   welcome: p.Welcome,
 };
 
@@ -216,7 +218,6 @@ type CmdFields = { t: string; op?: string; type?: string };
 
 const cmdAnswers: Record<string, string> = {
   invite: 'cmd-invite-link',
-  'pair.browser': 'cmd-pair-link',
 };
 
 /** Whether a command adds a readable group, after which a node pushes `groups`. */
@@ -232,7 +233,7 @@ function cmdAnswer({ t, type }: CmdFields): string {
 
 /** A connection to a node that knows the examples' one group and is the owner's: it answers
  *  `host.info` and `audit`. `sync` pushes `reset` and `rows`, then answers `synced`; commands
- *  answer with their typed example (`cmd-invite-link`, `cmd-pair-link`, `cmd-noted`, or `cmd-ok`),
+ *  answer with their typed example (`cmd-invite-link`, `cmd-noted`, or `cmd-ok`),
  *  and `group create` or `join` pushes `groups` before its answer. Frames are read as real ones
  *  are: answers with `decodeAnswer`, pushes with `Frame`. */
 export function mockCtl(onpush: (push: p.Push) => void): p.Ctl {

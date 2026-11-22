@@ -97,9 +97,6 @@ func TestRetentionConfiguredDaysProtectedRowsAndSyncReset(t *testing.T) {
 	day8 := int64(clock) + 8*retDay
 	cut8 := time.UnixMilli(day8).AddDate(0, 0, -7).UnixMilli()
 	oldMarkerSeq, freshMarkerSeq := retSeedBoundaryRows(t, db, cut8)
-
-	w.loop.Close()
-	w = runStart(t, db, runTables())
 	retRun(t, db, day8)
 
 	view, err := db.Snapshot(groupID)

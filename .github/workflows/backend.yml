@@ -9,10 +9,40 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run it supersedes. A push to rebuild never does: each of
+# its runs has a group of its own, since one group would drop all but the newest queued run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Which parts of the tree a pull request touches decides which jobs run (see changes.yml); a push
+# to rebuild runs all of them. conflict-markers has no condition: it also checks documentation.
 # Every job builds with the newest Go 1.27 release (check-latest), as development does;
 # go.mod keeps go 1.26.0 as the minimum.
 jobs:
+  changes:
+    uses: ./.github/workflows/changes.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
+  # A merge-conflict marker left in a tracked text file, documentation included.
+  conflict-markers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: |
+          if git grep -nIE '^(<<<<<<<|=======|>>>>>>>)([[:space:]]|$)' -- .; then
+            echo "::error::A merge-conflict marker is left in the files above."
+            exit 1
+          fi
+
   test:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -25,12 +55,28 @@ jobs:
           check-latest: true
       - run: go vet ./...
       - run: go vet -tags acceptance ./features/...
-      - run: go test ./...
+      - run: go test -covermode=atomic -coverprofile=cover.out ./...
       - run: go test -tags acceptance -count=1 ./features/...
+      # The statement coverage gate, on the files this system builds. Not blocking yet: today's tree
+      # has an uncovered statement (func main of cmd/solodawn, which only the acceptance tests run).
+      # The step shows as failed and lists the statements in the run summary until it is made blocking.
+      - name: Uncovered product statements
+        continue-on-error: true
+        run: .github/scripts/go-uncovered.sh cover.out
+      # The cyclomatic complexity limit of .project-standard/gates.toml: crap = 6, which at full
+      # coverage is a complexity of 6. Test files, testdata, the fake CLIs and generated code are left out.
+      - name: Cyclomatic complexity of the product files
+        run: |
+          python3 -m venv "$RUNNER_TEMP/lizard"
+          "$RUNNER_TEMP/lizard/bin/pip" install --quiet lizard==1.26.1
+          "$RUNNER_TEMP/lizard/bin/lizard" -l go -C 6 -w \
+            -x '*_test.go' -x '*/testdata/*' -x '*/fakecli/*' -x '*/generated/*' cmd internal
 
   # The network simulation needs root and the kernel's netns and nftables.
   # Its tests are built with the tag "netsim" and run as root here only.
   netsim:
+    needs: changes
+    if: needs.changes.outputs.netsim == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -48,6 +94,8 @@ jobs:
       - run: sudo ./netsim.test -test.v -test.count=1 -test.timeout=10m
 
   web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -72,6 +120,8 @@ jobs:
       - run: pnpm build
 
   cross-compile:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -102,6 +152,8 @@ jobs:
   # macOS only: Git for Windows checks files out with CRLF unless told not to, as below.
   other-os:
     name: test (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -134,6 +186,10 @@ jobs:
             END { for (f in n) { g = f; sub(/^github\.com\/huanchong-99\/SoloDawn\//, "", g)
               printf "%.1f%% of %d statements in %s\n", 100 * c[f] / n[f], n[f], g } }' cover.out |
             sort -k5 | tee -a "$GITHUB_STEP_SUMMARY"
+      # The statement coverage gate, on the files this system builds (see the Linux job).
+      - name: Uncovered product statements
+        continue-on-error: true
+        run: .github/scripts/go-uncovered.sh cover.out
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-${{ matrix.os }}
