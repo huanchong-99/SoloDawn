@@ -3,7 +3,7 @@
   import type { Home } from '../../lib/groups.svelte';
   import type { Net } from '../../lib/net.svelte';
   import { nodes, type PairLink } from '../../lib/nodes.svelte';
-  import { prefs, t } from '../../lib/prefs.svelte';
+  import { announcement, prefs, t } from '../../lib/prefs.svelte';
   import { clock, now } from '../../lib/when';
   import Failure from '../Failure.svelte';
   import Icon from '../Icon.svelte';
@@ -17,6 +17,7 @@
   );
 
   let dialog: HTMLDialogElement;
+  let opener: HTMLElement | null = null;
   let chosen = $state.raw<Home>();
   let busy = $state(false);
   let failed = $state('');
@@ -26,15 +27,47 @@
   const listed = () => pairable.find((comp) => comp.home === chosen);
   const pick = () => (chosen = (listed() ?? pairable[0])?.home);
 
+  function focusFirstControl() {
+    if (dialog.contains(document.activeElement)) return;
+    dialog.querySelector<HTMLElement>('select:not([disabled]), button:not([disabled])')?.focus();
+  }
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && dialog.open) {
+      event.preventDefault();
+      dialog.close();
+    }
+  }
+
+  function restoreOpener() {
+    if (!opener?.isConnected) return;
+    const lost =
+      document.activeElement === document.body || dialog.contains(document.activeElement);
+    if (lost) opener.focus();
+  }
+
+  function handleClose() {
+    open = false;
+    restoreOpener();
+    opener = null;
+  }
+
   $effect(() => {
-    if (!open) return;
+    if (!open) {
+      if (dialog.open) dialog.close();
+      return;
+    }
     untrack(() => {
       result = undefined;
       failed = '';
       copied = false;
       pick();
     });
-    dialog.showModal();
+    if (!dialog.open) {
+      opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      dialog.showModal();
+      focusFirstControl();
+    }
   });
 
   let none = true;
@@ -68,6 +101,7 @@
     if (!result) return;
     await navigator.clipboard?.writeText(result.link).catch(() => undefined);
     copied = true;
+    announcement.text = t('nodes.pair.copied');
   }
 </script>
 
@@ -75,7 +109,8 @@
   bind:this={dialog}
   class="dlg"
   aria-labelledby={`${uid}-title`}
-  onclose={() => (open = false)}
+  onkeydown={handleKeydown}
+  onclose={handleClose}
 >
   <form onsubmit={submit}>
     <header>
@@ -84,8 +119,13 @@
     </header>
 
     <label class="field">
-      <span>{t('nodes.pair.computer')}</span>
-      <select class="input" bind:value={chosen} onchange={() => (result = undefined)}>
+      <span id={`${uid}-computer`}>{t('nodes.pair.computer')}</span>
+      <select
+        class="input"
+        aria-labelledby={`${uid}-computer`}
+        bind:value={chosen}
+        onchange={() => (result = undefined)}
+      >
         {#each pairable as comp (comp.home)}
           <option value={comp.home}>{comp.info!.name}</option>
         {/each}
