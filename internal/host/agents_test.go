@@ -192,6 +192,7 @@ func TestAgentsCleanVersionFormats(t *testing.T) {
 		{"codex", "codex 0.164.0\r\nextra line\r\n", "0.164.0"},
 		{"opencode", "1.19.6\n", "1.19.6"},
 		{"opencode", "opencode 1.19.6\n", "1.19.6"},
+		{"qwen", "0.28.0\n", "0.28.0"},
 		{"claude", "claude\n", "claude"},
 		{"codex", "0.164.0\n", "0.164.0"},
 		{"claude", "   \n\t\n", ""},

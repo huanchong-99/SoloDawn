@@ -194,6 +194,7 @@ The two step 1 drivers, from `contracts/drivers.md`
 | `claude` | all three | `1`, `2`, `3`; on native Windows `1`, `3` (`risks.md` Q-4) | `tool` | `new` | `[unverified]` |
 | `codex` | all three | `1`, `2`, `3` | `conn` | `resume` | `[unverified]` |
 | `opencode` (T3-2) | `api_key` | `1`, `3` `[unverified]` | `conn` `[unverified]` | `none` | none |
+| `qwen` (T3-3) | `api_key` | `1`, `3` `[unverified]` | `conn` `[unverified]` | `none` | none |
 
 `usage` of both waits for what the usage unit of step 1 reads from the
 events (`contracts/rows.md` section 2 marks the figures `[unverified]`).

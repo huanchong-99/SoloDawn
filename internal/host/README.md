@@ -1,5 +1,5 @@
 ---
-description: 'The host seam (interfaces, tables, hooks, sessions, drivers and driver capability switches), the session runtime, group sync and inbox delivery, group joining and per-home connection management, the offline scripted Claude Code, Codex and OpenCode processes for host integration tests, the API of the host workspaces and Git commands, and the MCP server and stdio shim.'
+description: 'The host seam (interfaces, tables, hooks, sessions, drivers and driver capability switches), the session runtime, group sync and inbox delivery, group joining and per-home connection management, the offline scripted Claude Code, Codex, OpenCode and Qwen Code processes for host integration tests, the API of the host workspaces and Git commands, and the MCP server and stdio shim.'
 kind: reference
 ---
 
@@ -154,13 +154,22 @@ Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/
 | 1 | `edit` and `bash` `deny` |
 | 3 | `edit`, `bash`, `webfetch`, `external_directory` and `doom_loop` `allow` |
 
+`serve.go` holds what both server drivers share: starting the server (`serve`), reading its `listening on` address, and reading an event stream.
+
+### Qwen Code
+
+`qwen.go` registers `Drivers["qwen"]` and its declaration (`api_key`; levels `1`, `3`; `conn`; takeover `none`) from the Qwen Code 0.28.0 documentation read by T3-0. Every value below is `[unverified]` ([issues.md](../../issues.md)).
+
+- `Start` writes a settings file (`tools.approvalMode` `plan` at level 1 and `yolo` at level 3, the trusted `solodawn` MCP server from `Launch.Shim`, and `security.folderTrust.enabled` without `RepoConfig`) and the instructions to a temporary folder, passed as `QWEN_CODE_SYSTEM_SETTINGS_PATH` and `QWEN_SYSTEM_MD`. It runs `qwen serve --hostname 127.0.0.1 --port 0 --token <random> --workspace <folder>`, then `POST /session/<id>/resume` (a failure is `NoSession`) or `POST /session`, and opens `GET /session/<id>/events`. Every call carries the bearer token.
+- A turn is `POST /session/<id>/prompt`; `turn_complete` ends it (`interrupted` for `stopReason` `cancelled`), `turn_error` ends it `failed` (a `401` in its message also reports `LoginInvalid`). `session_update` is `Active`; `permission_request` is `Asked`, answered with `POST /session/<id>/permission/<request>` choosing `proceed_once` or `cancel`. `Interrupt` is `POST /session/<id>/cancel`. `Close` kills the daemon's process tree and the temporary folder goes when it exits.
+
 - **One reader per channel.** `Process.Events()` is read only by `runProcessLoop`; `liveProc.loopDone` is read only by `stopProcess` or `writeTurnToWaiting` when waiting for that process to exit; `runtimePart.changed` is closed and replaced under `runtimePart.mu` to wake `waitSignal` callers.
 
 # Host test CLIs
 
-Build `./internal/host/fakecli/claude`, `./internal/host/fakecli/codex` and `./internal/host/fakecli/opencode` into a temporary directory and prepend it to the test's PATH. All three answer `--version` without a script. For sessions, set:
+Build `./internal/host/fakecli/claude`, `./internal/host/fakecli/codex`, `./internal/host/fakecli/opencode` and `./internal/host/fakecli/qwen` into a temporary directory and prepend it to the test's PATH. All four answer `--version` without a script. For sessions, set:
 
-- `SOLODAWN_FAKE_CLAUDE_SCRIPT`, `SOLODAWN_FAKE_CODEX_SCRIPT` or `SOLODAWN_FAKE_OPENCODE_SCRIPT`: path to the script for the next start of that CLI. Each process reads its script once. Replace it between a first start and a resume; a relative path is resolved in the session's working folder.
+- `SOLODAWN_FAKE_CLAUDE_SCRIPT`, `SOLODAWN_FAKE_CODEX_SCRIPT`, `SOLODAWN_FAKE_OPENCODE_SCRIPT` or `SOLODAWN_FAKE_QWEN_SCRIPT`: path to the script for the next start of that CLI. Each process reads its script once. Replace it between a first start and a resume; a relative path is resolved in the session's working folder.
 - `SOLODAWN_FAKECLI_LOG`: shared append-only file. Each session writes `start <cli> <id>` before its first step and `exit <cli> <id>` after its last step, once its MCP server is stopped. A forced OS kill writes no exit line; to test an exit inside a turn, end the script there.
 
 ## Scripts
@@ -170,17 +179,17 @@ Each [script](fakecli/testdata/) is a span of one of the [macOS captures](https:
 | Step direction | Action |
 | --- | --- |
 | `stdin`, `mcp->cli` | Wait for one JSON line from the node or from the MCP server. An object matches when it has the fields of `msg`, recursively; arrays, numbers and strings must be equal, the text of an MCP result included. |
-| `stdout`, `mcp<-cli` | Write `msg` as one JSON line to the node or to the MCP server. The first MCP step starts the server named `solodawn` in `--mcp-config <file or json>` or in the two `-c mcp_servers.solodawn.{command,args}=…` settings. OpenCode's is `mcp.solodawn.command` in `OPENCODE_CONFIG_CONTENT`. The fake runs nothing else. |
+| `stdout`, `mcp<-cli` | Write `msg` as one JSON line to the node or to the MCP server. The first MCP step starts the server named `solodawn` in `--mcp-config <file or json>` or in the two `-c mcp_servers.solodawn.{command,args}=…` settings. OpenCode's is `mcp.solodawn.command` in `OPENCODE_CONFIG_CONTENT`; Qwen Code's is `mcpServers.solodawn` in the file `QWEN_CODE_SYSTEM_SETTINGS_PATH`. The fake runs nothing else. |
 | `stderr` | Write the string `msg` as one line. |
 | `eof` | Wait for closed stdin; input fails the script. |
-| `http` | OpenCode only. Wait for the next request other than `GET /event`, check `msg.call` (`"<method> <path>"`) and the fields of `msg.body` (`null` for none), then answer with `msg.status` (default 200) and `msg.res`. |
-| `sse` | OpenCode only. Send `msg` on the `GET /event` stream as one `data:` line. |
+| `http` | OpenCode and Qwen Code. Wait for the next request other than the event stream, check `msg.call` (`"<method> <path>"`) and the fields of `msg.body` (`null` for none), then answer with `msg.status` (default 200) and `msg.res`. |
+| `sse` | OpenCode and Qwen Code. Send `msg` on the event stream (`GET /event`, or `GET /session/<id>/events`) as one `data:` line. |
 
 A string value `"$session"` is replaced by the session id. In `stdout`, `"$id"` is replaced by the JSON-RPC id of the last line read from stdin.
 
 A step that does not hold ends the process with status 1 and the reason on stderr. Reads, not sleeps, control order: the next output is written only after the line before it was read. Script timestamps and usage are captured values, not readings of the test machine.
 
-The fake OpenCode prints `opencode server listening on <url>`, refuses a request without the `OPENCODE_SERVER_PASSWORD` basic-auth password, and has no capture: its scripts are written in the tests from the documented API.
+The fake OpenCode prints `opencode server listening on <url>`, refuses a request without the `OPENCODE_SERVER_PASSWORD` basic-auth password, and has no capture: its scripts are written in the tests from the documented API. The fake Qwen Code is the same server: it prints `qwen server listening on <url>`, refuses a request without the `--token` bearer token, takes its session id from the script, and has no capture either.
 
 Two scripts go beyond their capture: `codex-exit-mid-turn.json` ends at the first approval request, and `codex-late-call.json` waits for the tool reply after the call has failed. No capture shows either, and the fake prints nothing for them.
 

@@ -7,5 +7,5 @@ import (
 )
 
 func main() {
-	os.Exit(fakecli.RunQwen("0.28.0", os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+	os.Exit(fakecli.Run("qwen", "0.28.0", os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }

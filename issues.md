@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · The Qwen Code driver is declared from documentation, not from a capture
+
+- Symptom: `DriverCaps["qwen"]` declares levels `1` and `3` and approvals `conn`, and `qwenDriver` speaks the `qwen serve` daemon API (`internal/host/qwen.go`), but no run of the real Qwen Code exists: the fake Qwen Code's scripts are written from the documented API, not cut from captures.
+- Cause: T3-0 read Qwen Code 0.28.0's documentation only, and no owner QwenCloud key was available to T3-3. The `serve` flags (`--token`, `--workspace`), the routes (`POST /session`, `/session/<id>/{resume,prompt,cancel,permission/<request>,events}`), the event names (`session_update`, `permission_request`, `turn_complete`, `turn_error`), the option ids `proceed_once` and `cancel`, approval modes `plan` and `yolo`, `QWEN_CODE_SYSTEM_SETTINGS_PATH`, `QWEN_SYSTEM_MD` (which replaces the built-in system prompt), folder trust keeping the repository's configuration out, and a `401` in a `turn_error` meaning a bad key are all `[documented]`.
+- Status: open until the live part of M3, M4 and M7 runs once with the real Qwen Code and an owner key (`drivers.md` section 7); then the fake's scripts are replaced by captures and the declaration corrected.
+
 ### 2026-11-22 · limitation · The OpenCode driver is declared from documentation, not from a capture
 
 - Symptom: `DriverCaps["opencode"]` declares levels `1` and `3` and approvals `conn`, and `openCodeDriver` speaks the `opencode serve` API (`internal/host/opencode.go`), but no run of the real OpenCode exists: the fake OpenCode's scripts are written from the documented API, not cut from captures.
