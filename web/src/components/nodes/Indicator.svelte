@@ -62,7 +62,8 @@
   }
   @media (hover: hover) {
     .conn[data-st='ok']:hover,
-    .conn[data-st='linking']:hover {
+    .conn[data-st='linking']:hover,
+    .conn[data-st='offline']:hover {
       background: var(--surface-2);
     }
   }

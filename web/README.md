@@ -328,7 +328,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
   of its English file to the type `Key`; today the areas are `approval`, `brief`, `chat`,
-  `decision`, `groups`, `member`, `nodes`, `pairing`, `settings`, `states`, `status`, `summary`,
+  `decision`, `groups`, `member`, `nodes`, `pairing`, `settings`, `states`, `summary`,
   `task` and `thread`. `src/messages/files.glob.ts` finds every file by its name and
   `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
@@ -403,8 +403,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
     `group-create.json`, and answer what the node answered; the client draws from the rows that
     come back, never from its own command. A request whose connection is lost is answered
     `lost()`, a code of the client's own. While `home.ctl` is undefined the group is shown from
-    the rows held, read-only, with `components/status/` mounting the unreachable-home read-only
-    banner at `chat.top` (`order: 10`).
+    the rows held, read-only.
 - **Group pages.** `#/groups` is the group list and `#/groups/<group id>` the chat of that group;
   `routes/Groups.svelte` draws both, from `params.g`. While the group the address names has not
   been read, the chat's place says so, with the way back to the list.
@@ -455,9 +454,10 @@ file in `src/routes/`. It edits neither the shell nor another area:
     `Failure`.
 - **Connection indicator and computers page.** `indicator(net, group)` in `src/lib/nodes.svelte.ts`
   gives the pill mounted at `bar` (and at `chat.head` below 768 px, where an open chat hides the
-  top bar) one of four states, linking to `#/nodes` with an accessible `Connection status: …`
-  label: for an open `#/groups/<g>` chat, the path to that group's home; elsewhere, the summary
-  across `net.homes` (`undefined` before any home is known, `down` when no target home is
+  top bar) its state, linking to `#/nodes` with an accessible `Connection status: …`
+  label: `offline` (`Inactive`) while `net.otherTab` is true; for an open `#/groups/<g>` chat,
+  the path to that group's home; elsewhere, the summary across `net.homes` (`undefined` before
+  any home is known, `down` when no target home is
   connected, `linking` while any connected target has no selected pair yet, `limited` when any
   uses a relay, and `ok` with the first measured `rtt` when all are direct). `routes/Nodes.svelte`
   calls `nodes.sync(net.homes)` to read `host.info` once per online owner connection, lists owned
@@ -517,7 +517,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
 | `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
-| `src/components/status/`      | other-tab notice (`banner`) and unreachable-home read-only notice (`chat.top`)    |
+| `src/components/status/`      | other-tab notice mounted at `banner`                                              |
 | `src/styles/`                 | `tokens.css` (design tokens) and `base.css` (shared classes)                      |
 | `public/`                     | manifest, icon and `fonts/`, copied as they are                                   |
 | `features/web.spec.ts`        | steps of `../features/web.feature`                                                |

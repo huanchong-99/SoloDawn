@@ -9,6 +9,7 @@
   "nodes.conn.linking": "Reconnecting",
   "nodes.conn.down": "Cannot reach group home",
   "nodes.conn.downAll": "Cannot reach computers",
+  "nodes.conn.offline": "Inactive",
   "nodes.conn.label": "Connection status: {status}",
   "nodes.conn.labelRtt": "Connection status: {status}, {rtt} ms",
   "nodes.status.online": "Online",
