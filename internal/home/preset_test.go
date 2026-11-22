@@ -30,6 +30,7 @@ func (d *presetDisk) Thread(*string, int64, int) []proto.MsgRow {
 }
 func (d *presetDisk) Pending() []proto.MsgRow { return nil }
 func (d *presetDisk) Queued() []store.Item    { return nil }
+func (d *presetDisk) OtherMember(string) bool { return false }
 
 func (d *presetDisk) TypedNotes(noteType string) []proto.NoteRow {
 	notes := []proto.NoteRow{}

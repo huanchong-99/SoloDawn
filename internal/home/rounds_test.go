@@ -33,6 +33,7 @@ func (d *rndDisk) TypedNotes(string) []proto.NoteRow         { return nil }
 func (d *rndDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d *rndDisk) Pending() []proto.MsgRow                   { return d.pending }
 func (d *rndDisk) Queued() []store.Item                      { return d.queued }
+func (d *rndDisk) OtherMember(string) bool                   { return false }
 
 func rndPtr(v string) *string { return &v }
 

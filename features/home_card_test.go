@@ -51,6 +51,7 @@ func (d homeCardDisk) Note(string) (proto.NoteRow, bool)         { return proto.
 func (d homeCardDisk) TypedNotes(string) []proto.NoteRow         { return nil }
 func (d homeCardDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d homeCardDisk) Queued() []store.Item                      { return nil }
+func (d homeCardDisk) OtherMember(string) bool                   { return false }
 
 func (d homeCardDisk) Pending() []proto.MsgRow {
 	var list []proto.MsgRow

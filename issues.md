@@ -6,6 +6,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · Remembered addresses are not dialled yet
+
+- Symptom: `home.add` records signalling addresses, but a node still needs a shared configured rendezvous to reach an external home.
+- Cause: the node's route lookup in `internal/node/node.go` uses active pairing and configured rendezvous paths, not the remembered addresses.
+- Status: open.
 ### 2026-11-22 · limitation · Rendezvous has no explicit room leave
 
 - Symptom: cancelling an invitation stops browser handling, but the rendezvous socket remains in the room until expiry or disconnect. Retrying the same room on the same socket does not trigger a new `joined` from a home already in the room.
@@ -600,6 +605,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-22 · bug · Removing a person left group devices live when another local membership remained
+
+- Symptom: a removed person's device rows and in-memory device log remained in the group when they also belonged to another group homed on the node.
+- Cause: `internal/home/cmd_people.go:124` put group device retirement under the last-local-membership condition intended only for node-wide `device_log` and `push_sub` deletion.
+- Status: resolved in #309. Removal always retires the group's devices and drops its in-memory log; only node-wide deletion waits for the last local membership.
+
+### 2026-11-22 · deviation · The home handled only AI member changes
+
+- Symptom: an invited person could not join, change role or leave through home commands.
+- Cause: `internal/home/cmd_member.go` dispatched only AI members; the joining seam had no production `join` handler.
+- Status: resolved in T2-1a by `internal/home/cmd_people.go`: joining, restore reconnection, owner role changes, and cascading removal with last-membership device-log and push-subscription cleanup. Invitation transport and node connection closure belong to T2-1b.
 
 ### 2026-11-22 · bug · HM-13 and HM-15 home tests disagreed on rounds after both landed
 
