@@ -151,7 +151,19 @@ func TestTaskCommandsLeaveOutWhatDoesNotApply(t *testing.T) {
 
 func TestOtherHomeCommandGoldens(t *testing.T) {
 	golden(t, "jump", Jump{command("jump", "jump"), ID(id("text"))})
-	golden(t, "note", Note{command("note", "note command"), ID(id("note")), nil, "Path events include the connection id."})
+	golden(t, "note", Note{HomeCommand: command("note", "note command"), ID: ID(id("note")), Text: "Path events include the connection id."})
+	golden(t, "note-preset", Note{
+		HomeCommand: command("note", "note preset command"), ID: ID(id("preset note")),
+		NoteType: "preset", Name: "Calm dashboard",
+		Text: "Principles: one accent colour; no motion longer than 200 ms.",
+	})
+	kbCmd := command("note", "note kb command")
+	kbCmd.As = ID(agent)
+	golden(t, "note-kb", Note{
+		HomeCommand: kbCmd, ID: ID(id("kb note")),
+		NoteType: "kb", Name: "Decision: the home is the single writer",
+		Text: "Every change to a group goes through its home.",
+	})
 	golden(t, "forget", Forget{command("forget", "forget"), "note", ID(id("note"))})
 	on := PushOn{command("push", "push on"),
 		PushSubscription{"https://push.example/send/" + id("subscription"), keyBytes("p256dh", 65), keyBytes("auth", 16)},
@@ -209,7 +221,12 @@ func TestCommandExamplesAreNamedByWhatSelectsThem(t *testing.T) {
 			want = "post-" + fields["kind"].(string)
 		case "act":
 			want = "act-" + fields["action"].(string)
-		case "jump", "note", "forget", "ack", "inbox":
+		case "note":
+			want = kind
+			if noteType, there := fields["type"].(string); there {
+				want += "-" + noteType
+			}
+		case "jump", "forget", "ack", "inbox":
 			want = kind
 		case "host.join", "host.leave", "host.offline", "host.online", "settings.set", "pair.browser", "agent.set", "perm.set",
 			"takeover.start", "takeover.end", "pty.resize":

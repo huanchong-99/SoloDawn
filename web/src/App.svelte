@@ -2,7 +2,6 @@
   import { onDestroy, untrack, type Component } from 'svelte';
   import Icon, { type IconName } from './components/Icon.svelte';
   import Mount from './components/Mount.svelte';
-  import Pending from './Pending.svelte';
   import { sourceOf, start, type Net } from './lib/net.svelte';
   import {
     announcement,
@@ -18,9 +17,9 @@
 
   type View = Component<{ params: Record<string, string | undefined>; net: Net }>;
 
-  // Each page is drawn by the file its route names in routes/, found by name; until that file
-  // exists the page says that it is coming. A page of routes/dev/ reads the node's wire examples:
-  // only a development server loads it, so that the build leaves it out.
+  // Each page is drawn by the file its route names in routes/, found by name. A page of
+  // routes/dev/ reads the node's wire examples: only a development server loads it, so that the
+  // build leaves it out.
   const views = import.meta.glob<View>('./routes/*.svelte', { eager: true, import: 'default' });
   const devViews = import.meta.env.DEV
     ? import.meta.glob<View>('./routes/dev/*.svelte', { import: 'default' })
@@ -34,9 +33,7 @@
   const icons: Record<Tab, IconName> = { groups: 'chat', nodes: 'pc', settings: 'sliders' };
   const at = $derived(routes[route.page]);
   const file = $derived(`./routes/${at.view}.svelte`);
-  const View: View | undefined = $derived(
-    views[file] ?? loaded[file] ?? (file in devViews ? undefined : Pending),
-  );
+  const View: View | undefined = $derived(views[file] ?? loaded[file]);
   const tab = $derived('tab' in at ? at.tab : undefined);
   const pageTitle = $derived(t(`page.${route.page}`));
   let main: HTMLElement;

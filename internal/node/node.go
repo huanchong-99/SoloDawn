@@ -261,6 +261,7 @@ func (n *nodeRuntime) wireServices() {
 		Key: n.key, Store: n.db, Logs: n.logs, Sessions: n.sessions,
 		Paths: n.sharedPaths, WebURL: n.defaultWebURL,
 	})
+	host.Part[netStatusPart](n.host).status = n.netStatus
 }
 
 func (n *nodeRuntime) stepNetwork() error {
@@ -306,22 +307,35 @@ func (n *nodeRuntime) stepStartup() error {
 	}
 	n.host.ReportSaved(n.ctx, n.saved)
 	n.syncRendezvous()
+	n.startRetention()
 	return nil
 }
 
-func (n *nodeRuntime) withBg(fn func()) {
+func (n *nodeRuntime) enterBg() bool {
 	n.mu.Lock()
+	defer n.mu.Unlock()
 	if n.closing {
-		n.mu.Unlock()
-		return
+		return false
 	}
 	n.bg.Add(1)
-	n.mu.Unlock()
-	defer n.bg.Done()
-	fn()
+	return true
 }
 
-func (n *nodeRuntime) spawn(fn func()) { go n.withBg(fn) }
+func (n *nodeRuntime) withBg(fn func()) {
+	if n.enterBg() {
+		defer n.bg.Done()
+		fn()
+	}
+}
+
+func (n *nodeRuntime) spawn(fn func()) {
+	if n.enterBg() {
+		go func() {
+			defer n.bg.Done()
+			fn()
+		}()
+	}
+}
 
 func (n *nodeRuntime) Close() {
 	n.closeOnce.Do(func() {

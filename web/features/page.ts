@@ -40,6 +40,8 @@ export function openPage(hash = '#/groups', width = 1440) {
         matches: media(query, width),
         addEventListener() {},
         removeEventListener() {},
+        addListener() {},
+        removeListener() {},
       }) as unknown as MediaQueryList,
   );
   prefs.lang = 'en';

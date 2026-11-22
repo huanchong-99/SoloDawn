@@ -4,6 +4,7 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { withoutInlineReplies } from '../../lib/call';
   import type { Group } from '../../lib/groups.svelte';
+  import type { Net } from '../../lib/net.svelte';
   import { card as cardOf, mounts, side } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { dayLabel, days, now } from '../../lib/when';
@@ -15,7 +16,7 @@
 
   /** The chat of one group: its main line, newest at the bottom, and the composer, with what the
    *  areas mount in its head, above its main line and beside it (lib/mounts.svelte.ts). */
-  let { group }: { group: Group } = $props();
+  let { group, net }: { group: Group; net: Net } = $props();
 
   // The side panel has a column from 1024 px; below that it slides over, closed on each chat.
   // While it is over the chat, focus is in it and the chat behind it cannot be reached.
@@ -201,7 +202,7 @@
       >
         <Icon name="x" />
       </button>
-      <Mount at="chat.side" props={{ group }} />
+      <Mount at="chat.side" props={{ group, net }} />
     </aside>
   {/if}
 </section>

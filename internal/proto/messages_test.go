@@ -94,10 +94,10 @@ func TestDecisionGoldens(t *testing.T) {
 func TestBriefGoldens(t *testing.T) {
 	m := messageExample{kind: "brief", author: secretary}
 	body := BriefBody{
-		"Show connection paths", "People can see how a peer is connected.", []string{"Show a path change within 1 s."},
-		BriefScope{[]string{"node events", "web indicator"}, []string{"relay service"}},
-		[]BriefTask{{"Report path changes", agent, reviewer, true, []int{}}, {"Show the path", reviewer, agent, false, []int{0}}},
-		90, person, nil,
+		Title: "Show connection paths", Goal: "People can see how a peer is connected.", Criteria: []string{"Show a path change within 1 s."},
+		Scope: BriefScope{[]string{"node events", "web indicator"}, []string{"relay service"}},
+		Tasks: []BriefTask{{"Report path changes", agent, reviewer, true, []int{}}, {"Show the path", reviewer, agent, false, []int{0}}},
+		Pass:  90, Requester: person, Replaces: nil,
 	}
 	golden(t, "row-msg-brief-pending", exampleRow(t, m, body, StatusOnly{"pending"}, 790))
 	confirmed := ActedState{"confirmed", person, ts, actExample(t, "brief", "confirm", "", "")}
@@ -107,6 +107,19 @@ func TestBriefGoldens(t *testing.T) {
 	golden(t, "row-msg-brief-revise", exampleRow(t, m, body, revise, 814))
 	superseded := CardState{Status: "superseded", By: &revise.By, At: &revise.At, Act: &revise.Act, Note: &note}
 	golden(t, "row-msg-brief-superseded", exampleRow(t, m, body, superseded, 815))
+
+	withPreset := body
+	withPreset.Preset = "Calm dashboard"
+	presetID := id("brief preset")
+	presetPost := wireJSON(t, Post[BriefBody]{
+		HomeCommand{"post", ID(presetID), ts - 500, ID(group), ID(secretary)},
+		"brief", nil, false, "", []ID{}, nil, withPreset,
+	})
+	golden(t, "row-msg-brief-preset", MessageRow[BriefBody, StatusOnly]{
+		RowHeader: RowHeader{"msg", presetID, 903}, Pos: 903, Group: group,
+		By: secretary, Kind: "brief", Timestamp: ts - 500, Mentions: []string{},
+		Body: withPreset, State: StatusOnly{"pending"}, Env: new(signed(node, string(presetPost))),
+	})
 }
 
 func TestApprovalGoldens(t *testing.T) {
