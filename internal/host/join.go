@@ -63,7 +63,7 @@ func joinStateOf(h *Host) *joinPart {
 }
 
 // EnsureHomeConnections opens one persistent connection through h.Connect for
-// each distinct home device named in the host's stored homes setting.
+// each distinct home of a hosted group.
 func (h *Host) EnsureHomeConnections() error {
 	return joinSyncNow(h, joinStateOf(h))
 }
@@ -122,7 +122,7 @@ func joinSyncNow(h *Host, jp *joinPart) error {
 	if err != nil {
 		return err
 	}
-	needed := joinNeededHomes(homes)
+	needed := joinNeededHomes(homes, h.Sessions.All())
 	jp.mu.Lock()
 	for dev := range jp.inflight {
 		needed[dev] = true
@@ -169,10 +169,16 @@ func joinPlanStartsLocked(jp *joinPart, canConnect bool, needed map[string]bool)
 	return starts
 }
 
-func joinNeededHomes(homes []proto.Home) map[string]bool {
+func joinNeededHomes(homes []proto.Home, sessions []Session) map[string]bool {
+	hosted := map[proto.ID]bool{}
+	for _, session := range sessions {
+		hosted[proto.ID(session.Group)] = true
+	}
 	needed := map[string]bool{}
 	for _, entry := range homes {
-		needed[entry.Home] = true
+		if hosted[entry.Group] {
+			needed[entry.Home] = true
+		}
 	}
 	return needed
 }
@@ -414,6 +420,55 @@ func joinUpsertHomeTx(tx *store.Tx, entry proto.Home) error {
 	updated := joinPutHome(homes, entry)
 	_, err = tx.Exec("INSERT OR REPLACE INTO setting(key, value) VALUES('homes', ?)", marshalWire(updated))
 	return err
+}
+
+// RecordHome remembers a home, reconnecting only if it replaces a hosted group's home.
+func (h *Host) RecordHome(entry proto.Home, addrs []string) error {
+	var moved bool
+	write := func(tx *Tx) error {
+		if err := joinUpsertHomeTx(tx.Tx, entry); err != nil {
+			return err
+		}
+		if err := joinPutAddrs(tx.Tx, entry.Home, addrs, h.Now().UnixMilli()); err != nil {
+			return err
+		}
+		var err error
+		moved, err = h.joinMoveSessions(tx, entry)
+		return err
+	}
+	if err := h.Sessions.Write(write); err != nil || !moved {
+		return err
+	}
+	group := string(entry.Group)
+	h.Rows.Reset(group)
+	d := deliv(h)
+	d.replaceHome(group, entry.Home)
+	ensureGroupSynced(h, d, entry.Home, group)
+	return h.EnsureHomeConnections()
+}
+
+func joinPutAddrs(tx *store.Tx, device string, addrs []string, at int64) error {
+	for _, addr := range addrs {
+		if _, err := tx.Exec("INSERT OR REPLACE INTO peer(device, url, ok_at) VALUES(?, ?, ?)", device, addr, at); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (h *Host) joinMoveSessions(tx *Tx, entry proto.Home) (bool, error) {
+	moved := false
+	setHome := func(row *Session) { row.Home = entry.Home }
+	for _, session := range h.Sessions.All() {
+		if session.Group != string(entry.Group) || session.Home == entry.Home {
+			continue
+		}
+		if err := tx.Update(session.SessionKey, setHome); err != nil {
+			return false, err
+		}
+		moved = true
+	}
+	return moved, nil
 }
 
 func joinPutHome(homes []proto.Home, entry proto.Home) []proto.Home {

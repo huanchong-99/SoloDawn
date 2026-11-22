@@ -192,6 +192,16 @@ func (d *delivery) startGroupJobLocked(group, device string) syncJob {
 	return syncJob{group: group, since: gs.cursor, token: gs.token}
 }
 
+func (d *delivery) replaceHome(group, device string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	gs := d.groupLocked(group, device)
+	for _, ch := range gs.waiters {
+		close(ch)
+	}
+	*gs = groupSync{home: device}
+}
+
 func ensureGroupSynced(h *Host, d *delivery, device, group string) {
 	conn, ok := h.Home(device)
 	if !ok {

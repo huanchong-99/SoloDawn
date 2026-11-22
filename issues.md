@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · Remembered addresses are not dialled yet
+
+- Symptom: `home.add` records signalling addresses, but a node still needs a shared configured rendezvous to reach an external home.
+- Cause: the node's route lookup in `internal/node/node.go` uses active pairing and configured rendezvous paths, not the remembered addresses.
+- Status: open; PR-2 owns remembered-address dialling.
+
 ### 2026-11-22 · limitation · A denied call draws as waiting
 
 - Symptom: a `call` message whose state is `denied` (`row-msg-call-denied`, frozen by P-4a) shows the waiting line and the waiting state in the call area.

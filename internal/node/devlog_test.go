@@ -148,6 +148,19 @@ func TestOpenLogsErrors(t *testing.T) {
 		}
 	})
 
+	t.Run("unreadable device row", func(t *testing.T) {
+		db := sesOpenStore(t)
+		putOwner(db)
+		corrupt := func(tx *store.Tx) error {
+			_, err := tx.Exec("DROP TABLE device_log; CREATE TABLE device_log(user, ver, env); INSERT INTO device_log VALUES (NULL, 1, '{}')")
+			return err
+		}
+		mustNoErr(t, db.Write(corrupt))
+		if _, err := OpenLogs(db, nodeKey.ID()); err == nil || !strings.Contains(err.Error(), "converting NULL to string is unsupported") {
+			t.Fatalf("OpenLogs error = %v, want unreadable row", err)
+		}
+	})
+
 	t.Run("invalid owner json", func(t *testing.T) {
 		db := sesOpenStore(t)
 		corrupt := func(tx *store.Tx) error {
@@ -222,6 +235,29 @@ func TestOpenLogsErrors(t *testing.T) {
 			t.Fatal("expected replay error")
 		}
 	})
+}
+
+func TestLogsKeepFirstAtTheSameVersion(t *testing.T) {
+	user, device := sesKey("kept-user"), sesKey("kept-device")
+	logs, err := OpenLogs(sesOpenStore(t), device.ID())
+	mustNoErr(t, err)
+	genesis := sesAddEntry(user, user.ID(), 1, user.ID(), "browser", "Original")
+	first, err := identity.Replay(user.ID(), []proto.Envelope{genesis})
+	mustNoErr(t, err)
+	logs.dvlKeep(first)
+	alternate := sesAddEntry(user, user.ID(), 1, user.ID(), "browser", "Alternate")
+	sameVersion, err := identity.Replay(user.ID(), []proto.Envelope{alternate})
+	mustNoErr(t, err)
+	logs.dvlKeep(sameVersion)
+	if got := logs.Log(user.ID()).Entries[0]; got != genesis {
+		t.Fatalf("kept %v, want first entry %v", got, genesis)
+	}
+	next, err := identity.Replay(user.ID(), []proto.Envelope{genesis, sesAddEntry(user, user.ID(), 2, device.ID(), "node", "New")})
+	mustNoErr(t, err)
+	logs.dvlKeep(next)
+	if !logs.Known(device.ID()) {
+		t.Fatal("longer stored log did not add its device")
+	}
 }
 
 func TestLogsStoreWriteFailures(t *testing.T) {

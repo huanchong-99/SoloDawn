@@ -661,7 +661,7 @@ func checkWorkerClientAndRVReconnect(t *testing.T, n *nodeRuntime, browserKey id
 	seedWorkerNode(t, hostDir, browserKey.ID(), append(entries, e3), rvURL, []proto.Home{
 		{Group: gid, Home: n.key.ID()},
 		{Group: sesID("grp-self"), Home: hostKey.ID()},
-	})
+	}, hostKey)
 	nHost, err := openNode(t.Context(), hostDir)
 	mustNoErr(t, err)
 	waitCond(t, func() bool {
@@ -743,7 +743,7 @@ func waitCond(t *testing.T, fn func() bool) {
 	t.Fatal("condition was not met before deadline")
 }
 
-func seedWorkerNode(t *testing.T, dir, owner string, entries []proto.Envelope, rvURL string, homes []proto.Home) {
+func seedWorkerNode(t *testing.T, dir, owner string, entries []proto.Envelope, rvURL string, homes []proto.Home, key identity.Key) {
 	t.Helper()
 	db, err := store.Open(filepath.Join(dir, "node.db"))
 	mustNoErr(t, err)
@@ -763,6 +763,12 @@ func seedWorkerNode(t *testing.T, dir, owner string, entries []proto.Envelope, r
 		return nil
 	})
 	mustNoErr(t, err)
+	h, _, err := host.New(db, key, time.Now)
+	mustNoErr(t, err)
+	mustNoErr(t, h.Sessions.Create(host.Session{
+		SessionKey: host.SessionKey{Group: string(homes[0].Group), Member: string(sesID("worker-ai"))},
+		Home:       homes[0].Home, Kind: host.GroupSession, Agent: "claude", Folder: "repo",
+	}))
 	mustNoErr(t, db.Close())
 }
 

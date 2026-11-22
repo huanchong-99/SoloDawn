@@ -773,11 +773,70 @@ func TestHostEnsureHomeConnections(t *testing.T) {
 	// Calling EnsureHomeConnections again while already connected opens no duplicate connections.
 	joinAssertEqual(t, "second EnsureHomeConnections", restarted.EnsureHomeConnections(), nil)
 
-	joinAssertEqual(t, "restarted dial count", len(restartedDials), 2)
+	joinAssertEqual(t, "restarted dial count", len(restartedDials), 1)
 	joinAssertEqual(t, "first dial device", restartedDials[0].device, "home-1")
-	joinAssertEqual(t, "second dial device", restartedDials[1].device, "home-2")
 	joinAssertEqual(t, "first dial ctx open", restartedDials[0].ctx.Err(), nil)
-	joinAssertEqual(t, "second dial ctx open", restartedDials[1].ctx.Err(), nil)
+}
+
+func TestRecordHomeKeepsAddressesAndMovesOnlyHostedGroup(t *testing.T) {
+	rig := newJoinRig(t)
+	h := rig.h
+	old := proto.Home{Group: joinTestGroup1, Home: "old", Name: "Shared"}
+	next := proto.Home{Group: joinTestGroup1, Home: "new", Name: "Shared"}
+	addr := "wss://example.test/rv"
+	joinAssertEqual(t, "remember unhosted group", h.RecordHome(old, []string{addr}), nil)
+	joinAssertEqual(t, "unhosted dials", rig.dialCount(old.Home), 0)
+	key := SessionKey{Group: string(old.Group), Member: "ai"}
+	other := SessionKey{Group: string(joinTestGroup2), Member: "ai"}
+	joinAssertEqual(t, "create session", h.Sessions.Create(Session{SessionKey: key, Home: old.Home, Kind: GroupSession}), nil)
+	joinAssertEqual(t, "create another session", h.Sessions.Create(Session{SessionKey: other, Home: old.Home, Kind: GroupSession}), nil)
+	joinAssertEqual(t, "connect hosts", h.EnsureHomeConnections(), nil)
+	waiter := make(chan struct{}, 1)
+	d := deliv(h)
+	d.groupLocked(key.Group, old.Home).waiters = []chan struct{}{waiter}
+
+	joinAssertEqual(t, "move hosted group", h.RecordHome(next, []string{addr}), nil)
+	joinAssertEqual(t, "replacement dials", rig.dialCount(next.Home), 1)
+	joinAssertEqual(t, "old dial cancelled", rig.lastDialCtx(old.Home).Err(), context.Canceled)
+	select {
+	case <-waiter:
+	default:
+		t.Fatal("previous sync waiter was not released")
+	}
+	moved, _ := h.Sessions.Get(key)
+	left, _ := h.Sessions.Get(other)
+	joinAssertEqual(t, "moved session", moved.Home, next.Home)
+	joinAssertEqual(t, "other session", left.Home, old.Home)
+	joinAssertEqual(t, "record same home again", h.RecordHome(next, nil), nil)
+	joinAssertEqual(t, "no duplicate dial", rig.dialCount(next.Home), 1)
+	homes, err := joinSavedHomes(rig.db)
+	joinAssertEqual(t, "read homes", err, nil)
+	joinAssertEqual(t, "saved home count", len(homes), 1)
+	joinAssertEqual(t, "saved home", homes[0], next)
+}
+
+func TestRecordHomeRollsBackFailedWrites(t *testing.T) {
+	for _, table := range []string{"setting", "peer", "session"} {
+		t.Run(table, func(t *testing.T) {
+			rig := newJoinRig(t)
+			h := rig.h
+			entry := proto.Home{Group: joinTestGroup1, Home: "new", Name: "Shared"}
+			key := SessionKey{Group: string(entry.Group), Member: "ai"}
+			joinAssertEqual(t, "create session", h.Sessions.Create(Session{SessionKey: key, Home: "old", Kind: GroupSession}), nil)
+			seamSQL(t, rig.db, "DROP TABLE "+table)
+			if err := h.RecordHome(entry, []string{"wss://example.test/rv"}); err == nil || !strings.Contains(err.Error(), "no such table: "+table) {
+				t.Fatalf("record home error = %v, want missing %s", err, table)
+			}
+			held, _ := h.Sessions.Get(key)
+			joinAssertEqual(t, "unchanged session", held.Home, "old")
+			joinAssertEqual(t, "no replacement dial", rig.dialCount(entry.Home), 0)
+			if table != "setting" {
+				homes, err := joinSavedHomes(rig.db)
+				joinAssertEqual(t, "read homes", err, nil)
+				joinAssertEqual(t, "rolled-back homes", len(homes), 0)
+			}
+		})
+	}
 }
 
 func TestHostLeaveValidationRefusalAndMultiSessionCleanup(t *testing.T) {
