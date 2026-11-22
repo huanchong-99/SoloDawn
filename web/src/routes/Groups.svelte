@@ -5,11 +5,12 @@
   import Waiting from '../components/groups/Waiting.svelte';
   import Icon from '../components/Icon.svelte';
   import { find } from '../lib/groups.svelte';
+  import type { Net } from '../lib/net.svelte';
   import { t } from '../lib/prefs.svelte';
   import { href } from '../lib/route.svelte';
 
   /** The group list (`#/groups`), and the chat of the group the address names (`#/groups/<g>`). */
-  let { params }: { params: { g?: string } } = $props();
+  let { params, net }: { params: { g?: string }; net: Net } = $props();
 
   const open = $derived(find(params.g));
   let creating = $state(false);
@@ -22,7 +23,7 @@
     <GroupList {open} oncreate={() => (creating = true)} />
   </section>
   {#if open}
-    {#key open}<Chat group={open} />{/key}
+    {#key open}<Chat group={open} {net} />{/key}
   {:else if params.g !== undefined}
     <!-- A group this browser has not read: not yet, or it is homed on no computer it reaches. -->
     <div class="missing">

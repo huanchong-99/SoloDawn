@@ -44,7 +44,11 @@
               <b class="cut">{t(`groups.waiting.${kind}`)} · {subject(msg)}</b>
               <p class="muted cut">{group.name}</p>
             </div>
-            <a class="btn btn-sm btn-dawn" href={`#/groups/${group.g}`}>
+            <a
+              class="btn btn-sm btn-dawn"
+              href={`#/groups/${group.g}`}
+              aria-label={`${t('groups.waiting.open')} · ${t(`groups.waiting.${kind}`)} · ${subject(msg)} · ${group.name}`}
+            >
               {t('groups.waiting.open')}
             </a>
           </li>

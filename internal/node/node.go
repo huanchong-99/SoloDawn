@@ -261,6 +261,7 @@ func (n *nodeRuntime) wireServices() {
 		Key: n.key, Store: n.db, Logs: n.logs, Sessions: n.sessions,
 		Paths: n.sharedPaths, WebURL: n.defaultWebURL,
 	})
+	host.Part[netStatusPart](n.host).status = n.netStatus
 }
 
 func (n *nodeRuntime) stepNetwork() error {
@@ -269,7 +270,7 @@ func (n *nodeRuntime) stepNetwork() error {
 		return err
 	}
 	n.socks = socks
-	n.peer = peer.New(n.key, socks, n.db, n.knownPeer, n.routesFor, n.serveInbound, nil)
+	n.peer = peer.New(n.key, socks, n.db, n.knownPeer, n.routesFor, n.serveInbound, peer.Channels{"pty:": n.serveTerminal})
 	n.pairer.Peer = n.peer
 	n.host.Connect = n.sessions.connectHome(n.dialHome)
 	ln, err := listenNodeHTTP(":" + strconv.Itoa(defaultWebPort))
@@ -306,22 +307,35 @@ func (n *nodeRuntime) stepStartup() error {
 	}
 	n.host.ReportSaved(n.ctx, n.saved)
 	n.syncRendezvous()
+	n.startRetention()
 	return nil
 }
 
-func (n *nodeRuntime) withBg(fn func()) {
+func (n *nodeRuntime) enterBg() bool {
 	n.mu.Lock()
+	defer n.mu.Unlock()
 	if n.closing {
-		n.mu.Unlock()
-		return
+		return false
 	}
 	n.bg.Add(1)
-	n.mu.Unlock()
-	defer n.bg.Done()
-	fn()
+	return true
 }
 
-func (n *nodeRuntime) spawn(fn func()) { go n.withBg(fn) }
+func (n *nodeRuntime) withBg(fn func()) {
+	if n.enterBg() {
+		defer n.bg.Done()
+		fn()
+	}
+}
+
+func (n *nodeRuntime) spawn(fn func()) {
+	if n.enterBg() {
+		go func() {
+			defer n.bg.Done()
+			fn()
+		}()
+	}
+}
 
 func (n *nodeRuntime) Close() {
 	n.closeOnce.Do(func() {
@@ -401,6 +415,8 @@ func (n *nodeRuntime) knownPeer(device string) bool {
 func (n *nodeRuntime) serveInbound(c *peer.Connection) {
 	n.spawn(func() { n.pairer.Serve(n.ctx, c.Device, c) })
 }
+
+func (n *nodeRuntime) serveTerminal(s *peer.Stream) { n.host.ServeTerminal(s) }
 
 func (n *nodeRuntime) dialHome(ctx context.Context, device string, run func(clientCtl)) {
 	n.spawn(func() {
