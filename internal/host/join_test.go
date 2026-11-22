@@ -794,6 +794,12 @@ func TestRecordHomeKeepsAddressesAndMovesOnlyHostedGroup(t *testing.T) {
 	waiter := make(chan struct{}, 1)
 	d := deliv(h)
 	d.groupLocked(key.Group, old.Home).waiters = []chan struct{}{waiter}
+	heldKey := aiGroupKey{group: key.Group, member: key.Member}
+	otherKey := aiGroupKey{group: other.Group, member: other.Member}
+	stale := verifiedItem{home: old.Home, group: key.Group, item: proto.Item{Item: 1}}
+	unrelated := verifiedItem{home: old.Home, group: other.Group, item: proto.Item{Item: 2}}
+	d.held[heldKey], d.held[otherKey] = []verifiedItem{stale}, []verifiedItem{unrelated}
+	d.merges[key.Group], d.merges[other.Group] = []verifiedItem{stale}, []verifiedItem{unrelated}
 
 	joinAssertEqual(t, "move hosted group", h.RecordHome(next, []string{addr}), nil)
 	joinAssertEqual(t, "replacement dials", rig.dialCount(next.Home), 1)
@@ -803,6 +809,13 @@ func TestRecordHomeKeepsAddressesAndMovesOnlyHostedGroup(t *testing.T) {
 	default:
 		t.Fatal("previous sync waiter was not released")
 	}
+	fresh := verifiedItem{home: next.Home, group: key.Group, item: stale.item}
+	d.held[heldKey] = enqueueHeld(d.held[heldKey], fresh)
+	d.enqueueMerge(fresh)
+	joinAssertEqual(t, "replacement held home", d.held[heldKey][0].home, next.Home)
+	joinAssertEqual(t, "replacement merge home", d.merges[key.Group][0].home, next.Home)
+	joinAssertEqual(t, "unrelated held home", d.held[otherKey][0].home, old.Home)
+	joinAssertEqual(t, "unrelated merge home", d.merges[other.Group][0].home, old.Home)
 	moved, _ := h.Sessions.Get(key)
 	left, _ := h.Sessions.Get(other)
 	joinAssertEqual(t, "moved session", moved.Home, next.Home)

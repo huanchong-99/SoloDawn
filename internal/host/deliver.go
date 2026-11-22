@@ -200,6 +200,8 @@ func (d *delivery) replaceHome(group, device string) {
 		close(ch)
 	}
 	*gs = groupSync{home: device}
+	maps.DeleteFunc(d.held, func(key aiGroupKey, _ []verifiedItem) bool { return key.group == group })
+	delete(d.merges, group)
 }
 
 func ensureGroupSynced(h *Host, d *delivery, device, group string) {
