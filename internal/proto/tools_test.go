@@ -62,6 +62,7 @@ func everyAI(s session, secretary bool) []Tool {
 		"where":    choice("thread", "main"),
 	}
 	if secretary {
+		post["group"] = text()
 		post["task"] = text()
 	}
 	limit := integer(1, 100)

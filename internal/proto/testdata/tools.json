@@ -6,6 +6,9 @@
         "inputSchema": {
           "type": "object",
           "properties": {
+            "group": {
+              "type": "string"
+            },
             "kind": {
               "type": "string",
               "enum": [

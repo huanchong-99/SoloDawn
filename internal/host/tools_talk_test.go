@@ -202,9 +202,6 @@ func checkRegisteredTalkTool(t *testing.T, sec proto.ToolList, name string) {
 	reg, ok := Tools[name]
 	assertEqual(t, ok && reg.Description != "" && reg.Call != nil && reg.For == nil, true)
 	golden := findGoldenTool(t, sec, name)
-	if name == "post" {
-		golden.InputSchema.Properties["group"] = proto.ToolArg{Type: "string"}
-	}
 	goldenRaw, _ := json.Marshal(golden.InputSchema)
 	assertEqual(t, decodeJSONValue(t, reg.Schema), decodeJSONValue(t, goldenRaw))
 	sdec := json.NewDecoder(bytes.NewReader(reg.Schema))
