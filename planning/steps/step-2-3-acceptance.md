@@ -17,7 +17,7 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   test says so. P is the group's `owner`, Q a `member`. The secretary runs on
   `P1`, a working AI of P on `P2`, and two working AIs of Q on `Q1`:
   **Q-personal** (`account: personal`) and **Q-team** (`account: team`). All
-  are fake CLIs that log each start with its level and each turn's text.
+  are fake CLIs that log each start and each turn's text.
 - **Another forge** is a test program, first on PATH, that records its
   argument list and answers from files.
 - A sentence that starts "In the browser" is checked end to end in the web
