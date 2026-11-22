@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -148,7 +149,7 @@ func assertSurfaceAgentGroups(t *testing.T, agents []proto.HostAgent, wantGroups
 		byGroup[ag.Group] = ag
 	}
 	for g, want := range wantGroups {
-		if byGroup[g] != want {
+		if !reflect.DeepEqual(byGroup[g], want) {
 			t.Fatalf("group %s = %+v, want %+v", g, byGroup[g], want)
 		}
 	}
@@ -211,10 +212,10 @@ func TestHostInfoAgentsMemberStateAndSettings(t *testing.T) {
 	}
 	assertSurfaceHeader(t, st, savedHomes)
 	assertSurfaceAgentGroups(t, st.Agents, map[proto.ID]proto.AgentGroup{
-		proto.ID(g1): {Group: proto.ID(g1), Member: proto.ID(m1), Level: 3, State: "takeover", Task: proto.ID(tTake), Queued: 0},
-		proto.ID(g2): {Group: proto.ID(g2), Member: proto.ID(m2), Level: 3, State: "working", Task: proto.ID(tWork), Queued: 0},
-		proto.ID(g3): {Group: proto.ID(g3), Member: proto.ID(m3), Level: 3, State: "waiting", Task: proto.ID(tWait), Queued: 0},
-		proto.ID(g4): {Group: proto.ID(g4), Member: proto.ID(m4), Level: 3, State: "dormant", Queued: 0},
+		proto.ID(g1): {Group: proto.ID(g1), Member: proto.ID(m1), Level: 3, State: "takeover", Task: proto.ID(tTake), Queued: 0, Watchers: []string{}},
+		proto.ID(g2): {Group: proto.ID(g2), Member: proto.ID(m2), Level: 3, State: "working", Task: proto.ID(tWork), Queued: 0, Watchers: []string{}},
+		proto.ID(g3): {Group: proto.ID(g3), Member: proto.ID(m3), Level: 3, State: "waiting", Task: proto.ID(tWait), Queued: 0, Watchers: []string{}},
+		proto.ID(g4): {Group: proto.ID(g4), Member: proto.ID(m4), Level: 3, State: "dormant", Queued: 0, Watchers: []string{}},
 	})
 
 	hookErr = errors.New("probe failed")

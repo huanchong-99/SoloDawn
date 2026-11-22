@@ -15,19 +15,27 @@ type GoneRow struct {
 
 type GroupRow struct {
 	RowHeader
-	Name           string      `json:"name"`
-	Kind           string      `json:"kind"`
-	Repo           string      `json:"repo,omitempty"`
-	Base           string      `json:"base"`
-	Forge          string      `json:"forge"`
-	Home           string      `json:"home"`
-	Secretary      string      `json:"secretary,omitempty"`
-	Checks         []string    `json:"checks"`
-	Pass           int         `json:"pass"`
-	PassFoundation int         `json:"pass_foundation"`
-	Limits         Limits      `json:"limits"`
-	Paused         *GroupPause `json:"paused"`
-	Created        int64       `json:"created"`
+	Name           string          `json:"name"`
+	Kind           string          `json:"kind"`
+	Repo           string          `json:"repo,omitempty"`
+	Base           string          `json:"base"`
+	Forge          string          `json:"forge"`
+	Templates      *ForgeTemplates `json:"templates,omitempty"`
+	Home           string          `json:"home"`
+	Secretary      string          `json:"secretary,omitempty"`
+	Checks         []string        `json:"checks"`
+	Pass           int             `json:"pass"`
+	PassFoundation int             `json:"pass_foundation"`
+	Limits         Limits          `json:"limits"`
+	Paused         *GroupPause     `json:"paused"`
+	Created        int64           `json:"created"`
+}
+
+type ForgeTemplates struct {
+	Push   []string `json:"push"`
+	Open   []string `json:"open"`
+	Checks []string `json:"checks"`
+	Merge  []string `json:"merge"`
 }
 
 type Limits struct {

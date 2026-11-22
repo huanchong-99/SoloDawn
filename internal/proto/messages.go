@@ -2,6 +2,12 @@ package proto
 
 import "errors"
 
+type BulletinBody struct {
+	From  ID     `json:"from"`
+	Group string `json:"group"`
+	AI    string `json:"ai"`
+}
+
 // EmptyBody is shared by text, progress, question and reply.
 type EmptyBody struct{}
 

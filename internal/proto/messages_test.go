@@ -48,8 +48,12 @@ func exampleRow[B, S any](t *testing.T, m messageExample, body B, state S, seq i
 		if m.signedBody == nil {
 			m.signedBody = body
 		}
+		as := ID(r.By)
+		if m.kind == "bulletin" {
+			as = ""
+		}
 		post := wireJSON(t, Post[any]{
-			HomeCommand{"post", ID(r.ID), r.Timestamp, ID(group), ID(r.By)},
+			HomeCommand{"post", ID(r.ID), r.Timestamp, ID(group), as},
 			r.Kind, (*ID)(r.Thread), r.Main, r.Text, ids(r.Mentions), (*ID)(r.Re), m.signedBody,
 		})
 		goldenJSON(t, "post-"+m.kind, post)
@@ -217,6 +221,7 @@ func TestCardStateRetainsPresentZeroValues(t *testing.T) {
 }
 
 func TestNonCardGoldens(t *testing.T) {
+	nonCard(t, messageExample{kind: "bulletin", author: person, text: "The website is ready."}, BulletinBody{ID(group), "Website", "Claude Code"})
 	nonCard(t, messageExample{kind: "text", author: agent, text: "The path is direct."}, EmptyBody{})
 	nonCard(t, messageExample{kind: "progress", author: agent, thread: &taskID, text: "Added the path indicator."}, EmptyBody{})
 	nonCard(t, messageExample{kind: "question", author: agent, text: "Should the path include latency?"}, EmptyBody{})

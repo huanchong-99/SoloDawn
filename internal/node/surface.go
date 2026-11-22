@@ -158,7 +158,7 @@ func (sf *Surface) groupsForAgent(agent string, sessions []host.Session) []proto
 		state, task := sf.cfg.Host.MemberState(k.group, k.member)
 		out = append(out, proto.AgentGroup{
 			Group: proto.ID(k.group), Member: proto.ID(k.member), Level: 3,
-			State: state, Task: proto.ID(task),
+			State: state, Task: proto.ID(task), Watchers: []string{},
 		})
 	}
 	return out

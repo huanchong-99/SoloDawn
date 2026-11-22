@@ -100,12 +100,26 @@ type Cap struct {
 // AgentGroup is the agent in one group: its member, the level of its task
 // sessions, its derived state and task, and how many items are held for it.
 type AgentGroup struct {
+	Group    ID       `json:"g"`
+	Member   ID       `json:"member"`
+	Level    int      `json:"level"`
+	State    string   `json:"state"`
+	Task     ID       `json:"task,omitempty"`
+	Queued   int      `json:"queued"`
+	Watchers []string `json:"watchers"`
+}
+
+type WatchStart struct {
+	Request
+	Group  ID `json:"g"`
+	Member ID `json:"member"`
+}
+
+type WatchEnd struct {
+	HostCommand
 	Group  ID     `json:"g"`
 	Member ID     `json:"member"`
-	Level  int    `json:"level"`
-	State  string `json:"state"`
-	Task   ID     `json:"task,omitempty"`
-	Queued int    `json:"queued"`
+	User   string `json:"user"`
 }
 
 // HostSettings are the node settings that settings.set changes, except

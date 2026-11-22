@@ -18,6 +18,19 @@ the card state changes.
 
 ## Commands and items
 
+Step 2 adds `watch.start` (plain success, as in `cmd-ok`), host command
+`watch.end`, and item `watch` (always `msg`, never `task`). The required
+`agents[].groups[].watchers` user-id list is `[]` without grants.
+`watch:<g>:<member>` carries ordered, reliable, binary terminal bytes from
+the node only; channel labels have no shared code definitions here.
+
+Team groups omit `repo` and `secretary`; creation omits `repo`, with empty
+`base`, `forge: none` and empty `checks`. Bulletin bodies carry `from`
+(project group id), `group` (name) and `ai` (display name), with null
+state/thread/re, `main: false` and no post `as`. Custom forge `templates`
+hold `push`, `open`, `checks`, `merge` argument lists in rows/create/set.
+Moved errors carry the destination device in `err.home`; codes remain text.
+
 The payload of a command is read in two steps. The receiver reads `t`, and the
 `op`, `kind` or `action` beside it, and then decodes the payload into the type
 of that command ([`command.go`](command.go)): `GroupCreate`, `TaskStart`,
@@ -101,8 +114,9 @@ alone reads four things differently from a browser. An error from `Decode` is
 - **Ids.** A field of type `ID` takes a random id, the canonical base64url spelling of 16 bytes
   (22 characters), and no other text, an empty one included. `n` and `g` of `PayloadHeader` have
   this type, and so has every id in a command payload, in an `Item`, and `g` of `inbox` and `ack`.
-  Of the bodies a `post` carries, only a review's and a confirm card's are checked: `task` of
-  `ReviewSigned`, `ai` of `ConfirmSigned`. Rows, the other message bodies and the frames that read
+  Of the bodies a `post` carries, a review's, a confirm card's and a bulletin's ids are checked:
+  `task` of `ReviewSigned`, `ai` of `ConfirmSigned`, `from` of `BulletinBody` (also in its row).
+  Rows, the other message bodies and the frames that read
   a group still hold ids as plain strings ([issues](../../issues.md)).
 - **Slugs.** A field of type `Slug` takes 1 to 40 characters, groups of `a` to `z` and `0` to `9`
   with one `-` between two, and no other text. The `slug` of `TaskRow` has this type, so a slug

@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · Watch grants are not yet populated in host.info
+
+- Symptom: P-4b freezes the required `agents[].groups[].watchers` list; running nodes emit `[]` until watch grants are implemented.
+- Cause: `internal/node/surface.go` constructs `AgentGroup` with empty watchers; grant tracking belongs to the later watch units.
+- Status: open, accepted for the P-4b shape freeze. The watch units must populate this list from grants.
+
 ### 2026-11-22 · limitation · A screen reader does not read what the terminal prints
 
 - Symptom: on `#/terminal/<g>/<member>` a screen reader reaches the terminal's input field and its description, but hears nothing of what the AI's CLI prints.
@@ -23,6 +29,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: text a CLI prints faint (SGR 2) in one of the sixteen colours is drawn at half that colour's opacity: 2.8 to 1 (red) to 3.5 to 1 (green) on the terminal's background, for the four colours the page's theme sets. Faint text in the default colour is 5.6 to 1.
 - Cause: xterm.js halves the opacity of faint text (`DomRenderer.ts`, the `.xterm-dim` rules); `web/src/routes/Terminal.svelte` replaces only the default colour's rule with `--term-dim`, since one grey for every colour would drop the colour.
 - Status: open, accepted in U-16b: the colours are the CLI's own.
+
 ### 2026-11-22 · limitation · A denied call draws as waiting
 
 - Symptom: a `call` message whose state is `denied` (`row-msg-call-denied`, frozen by P-4a) shows the waiting line and the waiting state in the call area.

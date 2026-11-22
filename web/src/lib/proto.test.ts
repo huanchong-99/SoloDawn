@@ -372,12 +372,24 @@ describe('rendezvous frames', () => {
 });
 
 describe('decode', () => {
+  it('reads watch success, moved errors and the mock watch answer', async () => {
+    expect(p.decodeAnswer('watch.start', '{"re":7,"ok":true}')).toStrictEqual({ re: 7, ok: true });
+    expect(p.decodeAnswer('sync', goldens['cmd-moved'])).toStrictEqual(
+      JSON.parse(goldens['cmd-moved']),
+    );
+    const request = p.decode(p.WatchStart, goldens['watch-start']);
+    const ctl = mockCtl(() => {});
+    expect(await ctl.request(request)).toStrictEqual({ re: 1, ok: true });
+    expect(() => p.decodeAnswer('watch.start', '{"re":7}')).toThrow(v.ValiError);
+  });
+
   /** Each answer example, and the type of the request it answers. */
   const answers: [string, p.RequestType][] = [
     ['welcome', 'hello'],
     ['synced', 'sync'],
     ['fetched', 'fetch'],
     ['cmd-ok', 'cmd'],
+    ['cmd-ok', 'watch.start'],
     ['cmd-started', 'cmd'],
     ['cmd-reviewed', 'cmd'],
     ['cmd-pair-link', 'cmd'],
