@@ -38,11 +38,13 @@ it.each([
 
 it('warns in the invitation dialog before the first other person joins, not afterward', () => {
   const { group, info, ai, person } = setup();
+  show(InvitationDialog, { group, open: true });
+  expect(document.querySelector('dialog header .note')).toBeNull();
   group.apply([
     { ...info, seq: 100, secretary: ai.id },
     { ...ai, seq: 101, account: 'personal' },
   ]);
-  show(InvitationDialog, { group, open: true });
+  flushSync();
   expect(one('dialog header .note').textContent).toBe(warning);
   group.apply([{ ...person, id: 'reader', user: 'reader', name: 'Reader', seq: 102 }]);
   flushSync();

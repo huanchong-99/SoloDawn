@@ -58,4 +58,10 @@
     flex-wrap: wrap;
     gap: 4px;
   }
+  .arguments code {
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+  }
 </style>

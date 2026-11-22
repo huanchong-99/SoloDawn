@@ -14,7 +14,7 @@
   let result = $state.raw<{ link: string; expires: number }>();
   let copied = $state(false);
   const secretary = $derived(
-    group.info?.secretary ? group.member(group.info.secretary) : undefined,
+    group.info!.secretary ? group.member(group.info!.secretary) : undefined,
   );
   const people = $derived(
     group.members.filter((member) => member.kind === 'human').map((member) => member.user),
