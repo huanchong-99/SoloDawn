@@ -322,11 +322,15 @@ export class Home {
   /** A push of the home's connection. A group new in a `groups` push is read at once; rows for a
    *  group that is not listed are dropped. */
   #push(frame: p.Push) {
-    if (frame.t === 'host.info') this.hostInfo = frame;
-    if (frame.t === 'pty.resize') this.terminalSizes.set(`${frame.g}:${frame.ai}`, frame);
+    this.#hostPush(frame);
     if (frame.t === 'groups') this.#readAll(this.#list(frame.groups));
     if (frame.t === 'rows') this.#find(frame.g)?.apply(frame.rows);
     if (frame.t === 'reset') this.#find(frame.g)?.reset();
+  }
+
+  #hostPush(frame: p.Push) {
+    if (frame.t === 'host.info') this.hostInfo = frame;
+    if (frame.t === 'pty.resize') this.terminalSizes.set(`${frame.g}:${frame.ai}`, frame);
   }
 
   /** Sends a signed command and answers what the node answered (contracts/commands.md). `n` is
