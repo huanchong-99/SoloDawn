@@ -40,8 +40,6 @@ type hostCapsWorld struct {
 
 func hostCapsSteps(sc *godog.ScenarioContext, f fixtures) {
 	cleanup := afterScenario(sc)
-	origCaps := maps.Clone(host.DriverCaps)
-	cleanup(func() { host.DriverCaps = origCaps })
 
 	w := &hostCapsWorld{f: f, cleanup: cleanup}
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
@@ -114,15 +112,13 @@ func checkStep1DriverDeclarations() error {
 }
 
 func (w *hostCapsWorld) givenSyntheticCLI(agent, accountsCSV, approvals, takeover string) error {
-	next := maps.Clone(host.DriverCaps)
-	next[agent] = host.Capabilities{
+	w.setDriverCaps(agent, host.Capabilities{
 		Accounts:  strings.Split(accountsCSV, ","),
 		Levels:    []int{1, 2, 3},
 		Approvals: approvals,
 		Takeover:  takeover,
 		Usage:     []string{},
-	}
-	host.DriverCaps = next
+	})
 
 	dir, err := os.MkdirTemp("", "solodawn-caps-*")
 	if err != nil {
@@ -227,15 +223,13 @@ func pipeMCPToolState(h *host.Host, token, toolName string) (string, error) {
 }
 
 func (w *hostCapsWorld) givenRestrictedM3Node(agent string) error {
-	next := maps.Clone(host.DriverCaps)
-	next[agent] = host.Capabilities{
+	w.setDriverCaps(agent, host.Capabilities{
 		Accounts:  []string{host.AccountAPIKey},
 		Levels:    []int{1},
 		Approvals: host.ApprovalConn,
 		Takeover:  host.TakeoverNone,
 		Usage:     []string{},
-	}
-	host.DriverCaps = next
+	})
 	m3 := &m3World{
 		f:        w.f,
 		cleanup:  w.cleanup,
@@ -248,6 +242,14 @@ func (w *hostCapsWorld) givenRestrictedM3Node(agent string) error {
 		return err
 	}
 	return m3.createGroup("Website")
+}
+
+func (w *hostCapsWorld) setDriverCaps(agent string, caps host.Capabilities) {
+	prev := host.DriverCaps
+	next := maps.Clone(prev)
+	next[agent] = caps
+	host.DriverCaps = next
+	w.cleanup(func() { host.DriverCaps = prev })
 }
 
 func (w *hostCapsWorld) whenConfigureAPIKeyAI(aiName, agent string) error {

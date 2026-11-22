@@ -92,9 +92,15 @@ func TestRunStopsPushingToADeviceTheGroupNoLongerServes(t *testing.T) {
 	host, visit := w.attach(laptop), w.attach(guest)
 	host.watch(groupID, false)
 	w.loop.Inbox(host.conn)
+	if users := w.loop.LogUsers(visit.conn); len(users) != 0 {
+		t.Fatalf("nonmember log users = %v", users)
+	}
 	p.does(groupID, "jump", `,"what":"joins"`)
 	host.next()
 	equal(t, visit.watch(groupID, false), int64(5))
+	if users := w.loop.LogUsers(visit.conn); len(users) != 2 || !users[browser.ID()] || !users[guest.ID()] {
+		t.Fatalf("member log users = %v", users)
+	}
 	p.does(groupID, "note", `,"text":"for everyone"`)
 	note := runRows(groupID, runNote(runID(w.nonce.Load()), 6, "for everyone"))
 	host.gets(note)

@@ -108,14 +108,35 @@ func runJSON(v any) (json.RawMessage, error) {
 type runView struct {
 	summary proto.GroupSummary
 	serves  map[string]bool
+	users   map[string]bool
 }
 
 func (g *runGroup) view() runView {
-	v := runView{summary: proto.GroupSummary{Group: g.state.ID, Name: g.state.Group.Name, Seq: g.state.Seq}, serves: map[string]bool{}}
+	v := runView{
+		summary: proto.GroupSummary{Group: g.state.ID, Name: g.state.Group.Name, Seq: g.state.Seq},
+		serves:  map[string]bool{}, users: map[string]bool{g.state.Owner: true},
+	}
+	for _, member := range g.state.People {
+		v.users[member.User] = true
+	}
 	for c := range g.seats {
 		v.serves[c.device] = g.state.Serves(c.device)
 	}
 	return v
+}
+
+func (l *Loop) LogUsers(c *Conn) map[string]bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	users := map[string]bool{}
+	for _, view := range l.views {
+		if view.serves[c.device] {
+			for user := range view.users {
+				users[user] = true
+			}
+		}
+	}
+	return users
 }
 
 // publish replaces the view of a group that exists.
