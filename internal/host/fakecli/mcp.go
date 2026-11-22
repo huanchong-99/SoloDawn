@@ -2,6 +2,7 @@ package fakecli
 
 import (
 	"bufio"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"io"
@@ -67,7 +68,7 @@ func (p *process) stopMCP() {
 // settings, whose TOML values are also JSON here; OpenCode takes a
 // configuration in its environment.
 func (p *process) server() (srv server, err error) {
-	if arg := value(p.args, "--mcp-config"); arg != "" {
+	if arg := cmp.Or(value(p.args, "--mcp-config"), os.Getenv("QWEN_CODE_SYSTEM_SETTINGS_PATH")); arg != "" {
 		var config struct{ MCPServers map[string]server }
 		data, err := readMCPConfig(arg)
 		if err == nil {

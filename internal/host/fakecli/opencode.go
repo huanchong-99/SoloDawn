@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 )
 
 // A fake OpenCode serves its script over the HTTP API of `opencode serve`:
 // "http" takes the next request and answers it, "sse" sends an event on the
 // event stream.
 type openCode struct {
+	token string // Qwen Code's bearer token; OpenCode uses a basic-auth password
 	calls chan openCodeCall
 	sse   *io.PipeReader
 	send  *io.PipeWriter
@@ -31,18 +33,23 @@ type openCodeReply struct {
 }
 
 func (p *process) listen() {
-	p.http = &openCode{calls: make(chan openCodeCall)}
+	p.http = &openCode{token: value(p.args, "--token"), calls: make(chan openCodeCall)}
 	p.http.sse, p.http.send = io.Pipe()
 	srv := httptest.NewServer(p.http)
-	fmt.Fprintln(p.stdout, "opencode server listening on "+srv.URL)
+	line := "opencode server listening on " + srv.URL
+	if p.vendor == "qwen" {
+		line = "qwen serve listening on " + srv.URL + " (mode=http-bridge, workspace=" + value(p.args, "--workspace") + ")"
+	}
+	fmt.Fprintln(p.stdout, line)
 }
 
 func (o *openCode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if _, password, _ := r.BasicAuth(); password != os.Getenv("OPENCODE_SERVER_PASSWORD") {
+	if !o.authorized(r) {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
-	if r.URL.Path == "/event" {
+	// OpenCode streams on /event, Qwen Code on /session/<id>/events.
+	if strings.HasSuffix(strings.TrimSuffix(r.URL.Path, "s"), "/event") {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.(http.Flusher).Flush()
 		lines := bufio.NewScanner(o.sse)
@@ -53,12 +60,24 @@ func (o *openCode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if r.Header.Get("Content-Type") != "application/json" {
+		w.WriteHeader(http.StatusUnsupportedMediaType)
+		return
+	}
 	body, _ := io.ReadAll(r.Body)
 	reply := make(chan openCodeReply)
 	o.calls <- openCodeCall{r.Method + " " + r.URL.Path, string(body), reply}
 	res := <-reply
 	w.WriteHeader(res.status)
 	w.Write(res.body)
+}
+
+func (o *openCode) authorized(r *http.Request) bool {
+	if o.token != "" {
+		return r.Header.Get("Authorization") == "Bearer "+o.token
+	}
+	_, password, _ := r.BasicAuth()
+	return password == os.Getenv("OPENCODE_SERVER_PASSWORD")
 }
 
 func (p *process) httpStep(dir string, msg []byte) error {

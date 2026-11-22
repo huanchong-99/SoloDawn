@@ -221,6 +221,7 @@ The step 3 drivers:
 | `agent` | `accounts` | `levels` | `approvals` | `takeover` | `usage` |
 | --- | --- | --- | --- | --- | --- |
 | `opencode` (T3-2) | `api_key` | `1`, `3` `[unverified]` | `conn` `[unverified]` | `none` | none |
+| `qwen` (T3-3) | `api_key` | `1`, `3` `[unverified]` | `conn` `[unverified]` | `none` | none |
 
 ## 9. Open points and what is not verified
 

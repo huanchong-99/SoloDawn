@@ -1,4 +1,4 @@
-// Package fakecli runs the test-only Claude Code, Codex and OpenCode stand-ins. Each
+// Package fakecli runs the test-only Claude Code, Codex, OpenCode and Qwen Code stand-ins. Each
 // start replays one script file of messages the real CLIs sent.
 package fakecli
 
@@ -42,7 +42,7 @@ func Run(vendor, version string, args []string, stdin io.Reader, stdout, stderr 
 		return 0
 	}
 	p := process{vendor: vendor, args: args, stdin: bufio.NewReader(stdin), stdout: stdout, stderr: stderr}
-	if vendor == "opencode" {
+	if vendor == "opencode" || vendor == "qwen" {
 		p.listen()
 		defer p.http.send.Close()
 	}
