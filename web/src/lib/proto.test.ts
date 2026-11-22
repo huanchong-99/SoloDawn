@@ -763,6 +763,11 @@ describe('MCP tool lists', () => {
 
   it('reads tools.json as it is written, and nothing it does not name', () => {
     expect(lists).toStrictEqual(JSON.parse(goldens.tools));
+    expect(Object.keys(lists.secretary.tools[0].inputSchema.properties)[0]).toBe('group');
+    expect(lists.secretary.tools[0].inputSchema.properties.group).toEqual({ type: 'string' });
+    for (const kind of ['group', 'review', 'task_level_1', 'task_level_2_3'] as const) {
+      expect(lists[kind].tools[0].inputSchema.properties).not.toHaveProperty('group');
+    }
     const described = JSON.parse(goldens.tools);
     described.group.tools[0].description = 'Post a message.';
     expect(v.is(p.ToolLists, described)).toBe(false);

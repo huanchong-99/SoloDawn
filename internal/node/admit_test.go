@@ -287,15 +287,18 @@ func TestHomeAddRecordsAndReplacesHome(t *testing.T) {
 	checkInviteHello(t, c, 1, true, 0)
 	c.next(t)
 	sendHomeAdd(t, n, c, owner, old, group, 2)
+	if got := recvFrame(t, dials); got != old.ID() {
+		t.Fatalf("remembered home dial = %q, want %q", got, old.ID())
+	}
 	mustNoErr(t, n.host.EnsureHomeConnections())
 	if len(dials) != 0 {
-		t.Fatal("recording an unhosted group dialled its home")
+		t.Fatal("remembering an unhosted group dialled its home twice")
 	}
 	key := host.SessionKey{Group: string(group), Member: string(sesID("hosted-ai"))}
 	mustNoErr(t, n.host.Sessions.Create(host.Session{SessionKey: key, Home: old.ID(), Kind: host.GroupSession, Agent: "claude", Folder: "repo"}))
 	mustNoErr(t, n.host.EnsureHomeConnections())
-	if got := recvFrame(t, dials); got != old.ID() {
-		t.Fatalf("prior home dial = %q, want %q", got, old.ID())
+	if len(dials) != 0 {
+		t.Fatal("adding an AI dialled the remembered home twice")
 	}
 	sendHomeAdd(t, n, c, owner, next, group, 3)
 	if got := recvFrame(t, dials); got != next.ID() {

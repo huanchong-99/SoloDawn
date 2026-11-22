@@ -12,6 +12,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the declaration arrives only in `host.info` (`drivers.md` section 6); `offersTerminal` (`web/src/components/driver/driver.ts`) offers the terminal while none is cached, and the host refuses `takeover.start` for such a driver. The pairing and computers pages show account types from `host.info` only, so they offer none before it. The look of the member panel and account cards with fewer choices was not reviewed in screenshots.
 - Status: open, accepted for U3-3.
 
+### 2026-11-22 · limitation · Remembered project homes without local AIs stay connected
+
+- Symptom: remembering a project home now retains a connection even when no AI is hosted locally in that group.
+- Cause: `internal/host/join.go:120-180,420-439` reconciles all remembered homes. The remembered-home wire shape carries no kind; state-only sync supplies it after connection.
+- Status: accepted for T2-7 by the owner's lifecycle decision. Team homes reuse the existing manager without new persistence or wire shapes; connection retention also applies to remembered project homes rather than only AI-session homes.
+
 ### 2026-11-22 · limitation · Group moves follow replies, not unsolicited pushes
 
 - Symptom: a browser follows `moved` replies to `cmd`, `sync` and `fetch`; it cannot follow an unsolicited move notification.

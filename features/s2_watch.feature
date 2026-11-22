@@ -19,14 +19,12 @@ Feature: Watch a takeover, post to a team group and use custom forges
     When the same connection selects the cast TURN relay
     Then the watch closes, the original ctl syncs and watch.start is refused with relay
 
-  @pending
   Scenario: A team group has no repository, tasks, briefs, or AI members (A9.22)
     Given P creates a team group on P2 without a repository
     Then its group row has no repository
     And the team group refuses task start, brief posts, host.join, member add_ai and check settings
     And no node holds a clone for the team group
 
-  @pending
   Scenario: A project secretary can post a bulletin to a known team group (A9.23)
     Given P creates a team group on P2 without a repository
     And the secretary's node knows the team group
