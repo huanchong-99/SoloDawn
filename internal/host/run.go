@@ -264,7 +264,7 @@ func stepSessionTurn(ctx context.Context, h *Host, rt *runtimePart, s Session, t
 		return tryTurnOnWaiting(h, rt, s, text, turn)
 	}
 	if s.State != Dormant {
-		return true, &Error{"conflict", "the session is " + string(s.State)}
+		return true, startHandBack(h, rt, s, text, turn)
 	}
 	cfg, err := readLaunchConfig(h, s.Agent, s.Group)
 	if err != nil {
@@ -274,6 +274,20 @@ func stepSessionTurn(ctx context.Context, h *Host, rt *runtimePart, s Session, t
 		return true, err
 	}
 	return true, startFromDormant(h, rt, s, cfg, text, turn)
+}
+
+// startHandBack starts the structured CLI of a session in takeover for its
+// hand-back turn (flows/takeover.md step 16). The session is open already, so
+// it takes no slot of max_open.
+func startHandBack(h *Host, rt *runtimePart, s Session, text string, turn Turn) error {
+	if s.State != Takeover || turn.Kind != HandbackTurn {
+		return &Error{"conflict", "the session is " + string(s.State)}
+	}
+	cfg, err := readLaunchConfig(h, s.Agent, s.Group)
+	if err != nil {
+		return err
+	}
+	return startFromDormant(h, rt, s, cfg, text, turn)
 }
 
 func waitNotClosing(ctx context.Context, rt *runtimePart, key SessionKey) error {
@@ -353,8 +367,10 @@ func unclaimWaitingProc(h *Host, rt *runtimePart, lp *liveProc) {
 	rt.mu.Unlock()
 }
 
+// startFromDormant starts the CLI of a dormant session, or of one handed back
+// from takeover, for a turn.
 func startFromDormant(h *Host, rt *runtimePart, s Session, cfg launchConfig, text string, turn Turn) error {
-	err := h.Sessions.Move(s.SessionKey, Dormant, Working)
+	err := h.Sessions.Move(s.SessionKey, s.State, Working)
 	rt.releaseStarting(s.SessionKey)
 	if err != nil {
 		return err
@@ -514,6 +530,47 @@ func finishActiveTurn(rt *runtimePart, lp *liveProc, slot aiSlot) bool {
 	lp.turnActive = false
 	delete(rt.limited, slot)
 	return true
+}
+
+// interruptTurn interrupts the turn the AI is running in its group, if any,
+// and waits for its end (flows/takeover.md step 3). A CLI that has not ended
+// it within 10 s is closed (flows/agent-turn.md G).
+func interruptTurn(ctx context.Context, h *Host, slot aiSlot) {
+	rt := stateOf(h)
+	for {
+		s, working := findSessionInState(memberSessions(h, slot.group, slot.member), Working)
+		if !working {
+			return
+		}
+		rt.mu.Lock()
+		lp := rt.procs[s.SessionKey]
+		rt.mu.Unlock()
+		if lp != nil {
+			lp.proc.Interrupt()
+		}
+		wait, cancel := context.WithTimeout(ctx, stopSeconds*time.Second)
+		if waitTurnOver(wait, h, s.SessionKey) != nil {
+			Runner.Close(h, s.SessionKey)
+		}
+		cancel()
+	}
+}
+
+// waitTurnOver waits until a session is no longer working: its turn has
+// ended, or its CLI has exited.
+func waitTurnOver(ctx context.Context, h *Host, key SessionKey) error {
+	rt := stateOf(h)
+	for {
+		rt.mu.Lock()
+		changed := rt.changed
+		rt.mu.Unlock()
+		if s, _ := h.Sessions.Get(key); s.State != Working {
+			return nil
+		}
+		if err := waitSignal(ctx, changed); err != nil {
+			return err
+		}
+	}
 }
 
 func armTurnIdle(h *Host, rt *runtimePart, lp *liveProc, idle time.Duration) {

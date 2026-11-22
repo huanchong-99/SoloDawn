@@ -107,6 +107,7 @@ type fakeProc struct {
 	ignoreClose  bool
 	autoComplete bool
 	autoReadyID  string
+	interrupts   atomic.Int32
 	closedIn     bool
 	eventsClosed bool
 	events       chan Event
@@ -162,7 +163,10 @@ func (p *fakeProc) Turn(text string) error {
 	return nil
 }
 
-func (p *fakeProc) Interrupt() error { return nil }
+func (p *fakeProc) Interrupt() error {
+	p.interrupts.Add(1)
+	return nil
+}
 
 func (p *fakeProc) Answer(ask string, allow bool) error {
 	p.mu.Lock()
