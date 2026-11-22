@@ -326,7 +326,7 @@ func buildCodexAnswerValues(chosen, free string) []string {
 func approveDecisionOptions(in []cliQuestionOpt) []proto.DecisionOption {
 	opts := make([]proto.DecisionOption, len(in))
 	for i, opt := range in {
-		opts[i] = proto.DecisionOption{ID: optionID(i), Label: opt.Label, Effect: opt.Description}
+		opts[i] = decisionOption(i, opt.Label, opt.Description)
 	}
 	return opts
 }
@@ -352,7 +352,7 @@ func buildDecisionPostPayload(h *Host, s Session, cardID proto.ID, q cliQuestion
 }
 
 func postAndWaitDecision(ctx context.Context, h *Host, s Session, q cliQuestion) (string, string, string, bool) {
-	cardID := freshNonce()
+	cardID := proto.NewNonce()
 	approvers, mentions := resolveApproversAndMentions(h, s.Group, s.Member)
 	opts := approveDecisionOptions(q.Options)
 	payload := buildDecisionPostPayload(h, s, cardID, q, opts, approvers, mentions)
@@ -540,7 +540,7 @@ func postCardAndWait(ctx context.Context, h *Host, s Session, cardID proto.ID, p
 }
 
 func postAndWaitApproval(ctx context.Context, h *Host, s Session, ask Ask, shortCmd string, full *int, digest string) (bool, string) {
-	cardID := freshNonce()
+	cardID := proto.NewNonce()
 	approvers, mentions := resolveApproversAndMentions(h, s.Group, s.Member)
 	if storePendingApproval(h, cardID, s, ask.Tool, digest) != nil {
 		return false, denyRefusedPrefix + "internal: failed to store approval record"
@@ -626,9 +626,8 @@ func readStoreApprovers(db *store.Store) []string {
 
 func approverMentionIDs(rows *Rows, group string, approvers []string) []proto.ID {
 	mentions := []proto.ID{}
-	for _, raw := range rows.Of(group, "member") {
-		var m proto.MemberRow
-		if proto.Decode(raw, &m) == nil && m.Kind == "human" && slices.Contains(approvers, m.User) {
+	for _, m := range liveMembers(rows, group) {
+		if m.Kind == "human" && slices.Contains(approvers, m.User) {
 			mentions = append(mentions, proto.ID(m.ID))
 		}
 	}

@@ -74,22 +74,18 @@ func (jh *joinScenarioHome) answerSync(req proto.Sync) (json.RawMessage, error) 
 	grp, ok := jh.groups[req.Group]
 	jh.mu.Unlock()
 	if !ok {
-		return marshalScenarioJSON(proto.ErrorResponse{
+		return json.RawMessage(accJSON(proto.ErrorResponse{
 			Re:  req.ID,
 			Err: proto.WireError{Code: "not_found", Message: "group not found"},
-		})
+		})), nil
 	}
-	raw, err := marshalScenarioJSON(grp)
-	if err != nil {
-		return nil, err
-	}
-	jh.host.Rows.Put(req.Group, "group", req.Group, raw)
-	return marshalScenarioJSON(proto.Synced{
+	jh.host.Rows.Put(req.Group, "group", req.Group, json.RawMessage(accJSON(grp)))
+	return json.RawMessage(accJSON(proto.Synced{
 		Type:    "synced",
 		Success: proto.Success{Re: req.ID, OK: true},
 		Group:   req.Group,
 		Seq:     grp.Seq,
-	})
+	})), nil
 }
 
 func (jh *joinScenarioHome) answerCmd(req proto.Cmd) (json.RawMessage, error) {
@@ -103,12 +99,12 @@ func (jh *joinScenarioHome) answerCmd(req proto.Cmd) (json.RawMessage, error) {
 		return jh.answerAddAI(req.ID, req.Env.Payload)
 	}
 	if jh.shouldRefuseRemove(base) {
-		return marshalScenarioJSON(proto.ErrorResponse{
+		return json.RawMessage(accJSON(proto.ErrorResponse{
 			Re:  req.ID,
 			Err: proto.WireError{Code: jh.refuseCode, Message: "the AI has an unfinished task"},
-		})
+		})), nil
 	}
-	return marshalScenarioJSON(proto.CmdResult{Success: proto.Success{Re: req.ID, OK: true}})
+	return json.RawMessage(accJSON(proto.CmdResult{Success: proto.Success{Re: req.ID, OK: true}})), nil
 }
 
 func (jh *joinScenarioHome) answerAddAI(re int64, payload string) (json.RawMessage, error) {
@@ -117,21 +113,11 @@ func (jh *joinScenarioHome) answerAddAI(re int64, payload string) (json.RawMessa
 		return nil, err
 	}
 	jh.memberAgents[string(add.ID)] = add.CLI
-	return marshalScenarioJSON(proto.CmdResult{Success: proto.Success{Re: re, OK: true}})
+	return json.RawMessage(accJSON(proto.CmdResult{Success: proto.Success{Re: re, OK: true}})), nil
 }
 
 func (jh *joinScenarioHome) shouldRefuseRemove(base proto.MemberCommand) bool {
 	return base.Op == "remove" && jh.refuseCode != "" && jh.memberAgents[string(base.ID)] == jh.refuseAgent
-}
-
-func marshalScenarioJSON(v any) (json.RawMessage, error) {
-	var buf strings.Builder
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
-		return nil, err
-	}
-	return json.RawMessage(strings.TrimSuffix(buf.String(), "\n")), nil
 }
 
 type joinScenarioWorld struct {
@@ -174,7 +160,7 @@ func (w *joinScenarioWorld) join(agent, name string, secretary bool, groupName, 
 	if !ok {
 		return fmt.Errorf("unknown scenario group %q", groupName)
 	}
-	payload, err := marshalScenarioJSON(proto.HostJoin{
+	payload := json.RawMessage(accJSON(proto.HostJoin{
 		HostCommand: proto.HostCommand{
 			Type:      "host.join",
 			Nonce:     w.nextNonce(),
@@ -186,10 +172,7 @@ func (w *joinScenarioWorld) join(agent, name string, secretary bool, groupName, 
 		Agent:     agent,
 		Name:      name,
 		Secretary: secretary,
-	})
-	if err != nil {
-		return err
-	}
+	}))
 	_, callErr := host.Surface["host.join"](context.Background(), w.h, nil, "owner-browser", payload)
 	return callErr
 }
@@ -199,7 +182,7 @@ func (w *joinScenarioWorld) leave(agent, groupName string) error {
 	if !ok {
 		return fmt.Errorf("unknown scenario group %q", groupName)
 	}
-	payload, err := marshalScenarioJSON(proto.HostLeave{
+	payload := json.RawMessage(accJSON(proto.HostLeave{
 		HostCommand: proto.HostCommand{
 			Type:      "host.leave",
 			Nonce:     w.nextNonce(),
@@ -208,10 +191,7 @@ func (w *joinScenarioWorld) leave(agent, groupName string) error {
 		},
 		Group: gid,
 		Agent: agent,
-	})
-	if err != nil {
-		return err
-	}
+	}))
 	_, callErr := host.Surface["host.leave"](context.Background(), w.h, nil, "owner-browser", payload)
 	return callErr
 }

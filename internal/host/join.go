@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
-	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -34,7 +33,6 @@ type joinConfig struct {
 
 const joinConfigQuerySQL = `SELECT
 	coalesce((SELECT account FROM agent WHERE agent = ?), ''),
-	coalesce((SELECT file FROM pragma_database_list WHERE name = 'main'), ''),
 	coalesce((SELECT value FROM setting WHERE key = 'approvers'), '[]')`
 
 const joinHomesSettingSQL = `SELECT coalesce((SELECT value FROM setting WHERE key = 'homes'), '[]')`
@@ -226,9 +224,9 @@ func joinPrepareJoin(h *Host, p proto.HostJoin, group string) (joinConfig, error
 }
 
 func joinLoadConfig(h *Host, agent, group string) (joinConfig, error) {
-	var account, dbFile, listJSON string
+	var account, listJSON string
 	read := func(tx *store.Tx) error {
-		return tx.QueryRow(joinConfigQuerySQL, agent).Scan(&account, &dbFile, &listJSON)
+		return tx.QueryRow(joinConfigQuerySQL, agent).Scan(&account, &listJSON)
 	}
 	if err := h.Store.Write(read); err != nil {
 		return joinConfig{}, err
@@ -242,7 +240,7 @@ func joinLoadConfig(h *Host, agent, group string) (joinConfig, error) {
 	}
 	return joinConfig{
 		account:    account,
-		projectDir: filepath.Join(filepath.Dir(dbFile), "projects", group),
+		projectDir: projectDir(h, group),
 		approvers:  approvers,
 	}, nil
 }
@@ -285,7 +283,7 @@ func joinWaitHome(ctx context.Context, h *Host, jp *joinPart, device string) (Ho
 		return conn, nil
 	}
 	if h.Connect == nil {
-		return nil, joinUnreachable()
+		return nil, errHomeUnreachable
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, joinAttachTimeout)
 	defer cancel()
@@ -301,7 +299,7 @@ func joinAwaitAttach(ctx context.Context, h *Host, jp *joinPart, device string) 
 		}
 		if !joinWaitChannel(ctx, waitCh) {
 			jp.removeWaiter(device, waitCh)
-			return nil, joinUnreachable()
+			return nil, errHomeUnreachable
 		}
 	}
 }
@@ -314,10 +312,6 @@ func joinWaitChannel(ctx context.Context, ch <-chan struct{}) bool {
 	case <-ctx.Done():
 		return false
 	}
-}
-
-func joinUnreachable() *Error {
-	return &Error{Code: "home_unreachable", Message: "the home of that group is not connected"}
 }
 
 func joinFetchGroup(ctx context.Context, h *Host, homeConn Home, device, group string) (proto.GroupRow, error) {
@@ -347,17 +341,12 @@ func joinPrepareWorkspace(ctx context.Context, projectDir string, grp proto.Grou
 }
 
 func joinSendAddAI(ctx context.Context, h *Host, p proto.HostJoin, cfg joinConfig) (proto.ID, error) {
-	memberID := freshNonce()
+	memberID := proto.NewNonce()
 	cmd := proto.MemberAddAI{
 		MemberCommand: proto.MemberCommand{
-			HomeCommand: proto.HomeCommand{
-				Type:      "member",
-				Nonce:     freshNonce(),
-				Timestamp: h.Now().UnixMilli(),
-				Group:     p.Group,
-			},
-			Op: "add_ai",
-			ID: memberID,
+			HomeCommand: homeHeader(h, string(p.Group), "", "member"),
+			Op:          "add_ai",
+			ID:          memberID,
 		},
 		CLI:       p.Agent,
 		Name:      p.Name,
@@ -500,14 +489,9 @@ func joinRemoveFromHome(ctx context.Context, h *Host, jp *joinPart, group proto.
 		return err
 	}
 	cmd := proto.MemberCommand{
-		HomeCommand: proto.HomeCommand{
-			Type:      "member",
-			Nonce:     freshNonce(),
-			Timestamp: h.Now().UnixMilli(),
-			Group:     group,
-		},
-		Op: "remove",
-		ID: proto.ID(member),
+		HomeCommand: homeHeader(h, string(group), "", "member"),
+		Op:          "remove",
+		ID:          proto.ID(member),
 	}
 	_, err := h.Command(ctx, home, marshalWire(cmd))
 	return err

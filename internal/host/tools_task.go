@@ -154,19 +154,9 @@ func tskTreeError(err error) error {
 	return tskCLIError(err)
 }
 
-func tskHomeHeader(h *Host, group, as, cmdType string) proto.HomeCommand {
-	return proto.HomeCommand{
-		Type:      cmdType,
-		Nonce:     freshNonce(),
-		Timestamp: h.Now().UnixMilli(),
-		Group:     proto.ID(group),
-		As:        proto.ID(as),
-	}
-}
-
 func tskCommand(h *Host, group, as, op string, taskID proto.ID) proto.TaskCommand {
 	return proto.TaskCommand{
-		HomeCommand: tskHomeHeader(h, group, as, "task"),
+		HomeCommand: homeHeader(h, group, as, "task"),
 		Op:          op,
 		ID:          taskID,
 	}
@@ -224,7 +214,7 @@ func tskStartTool(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (
 		return nil, err
 	}
 	cmd := proto.TaskStart{
-		TaskCommand: tskCommand(h, c.Group, c.Member, "start", freshNonce()),
+		TaskCommand: tskCommand(h, c.Group, c.Member, "start", proto.NewNonce()),
 		Title:       in.Title,
 		Plan:        in.Plan,
 		Re:          nil,
@@ -412,7 +402,7 @@ func tskReportPost(h *Host, c Caller, r tskSubmitReady, summary string, pr *Forg
 	}
 	taskID := proto.ID(c.Task)
 	return marshalWire(proto.Post[proto.ReportBody]{
-		HomeCommand: tskHomeHeader(h, c.Group, c.Member, "post"),
+		HomeCommand: secHomeHeader(h, c, "post"),
 		Kind:        "report",
 		Thread:      &taskID,
 		Main:        false,
@@ -535,7 +525,7 @@ func tskCheckReviewSecrets(items []proto.ReviewItem) error {
 func tskSendReview(ctx context.Context, h *Host, c Caller, commit string, score int, items []proto.ReviewItem) (tskReviewResult, error) {
 	taskID := proto.ID(c.Task)
 	post := proto.Post[proto.ReviewSigned]{
-		HomeCommand: tskHomeHeader(h, c.Group, c.Member, "post"),
+		HomeCommand: secHomeHeader(h, c, "post"),
 		Kind:        "review",
 		Thread:      &taskID,
 		Main:        false,

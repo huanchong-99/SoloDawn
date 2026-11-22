@@ -2,9 +2,7 @@ package node
 
 import (
 	"cmp"
-	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -207,7 +205,7 @@ func (l *Logs) dvlWriteAdd(signer identity.Key, dev, kind, name string, now int6
 		return proto.DeviceRow{}, errors.New("node has no owner log")
 	}
 	entry := proto.DeviceEntry{
-		PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: dvlNewID(), Timestamp: now},
+		PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: proto.NewNonce(), Timestamp: now},
 		DeviceChange:  proto.DeviceChange{User: owner, Version: len(log.Entries) + 1, Op: "add", Device: dev, Kind: kind, Name: name},
 	}
 	env := signer.Sign(string(dvlMustEncode(entry)))
@@ -223,12 +221,6 @@ func (l *Logs) dvlWriteAdd(signer identity.Key, dev, kind, name string, now int6
 	l.log = log
 	l.mu.Unlock()
 	return row, nil
-}
-
-func dvlNewID() proto.ID {
-	var b [16]byte
-	rand.Read(b[:])
-	return proto.ID(base64.RawURLEncoding.EncodeToString(b[:]))
 }
 
 func dvlPutEntries(tx *store.Tx, user string, rows []proto.DeviceRow) error {

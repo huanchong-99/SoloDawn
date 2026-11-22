@@ -172,7 +172,7 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 # Secretary and decision tools
 
 `tools_sec.go` registers `propose_brief`, `set_task` and `request_decision` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1, 2 and 5): `propose_brief` and `set_task` set `Tool.For` to `c.Secretary`, while `request_decision` registers the `group` schema for every session.
-`loadSecDirectory`, `resolveSecTask`, `prepareDecisionPost` and `buildDecisionOptions` are package helpers shared with the other MCP tool and approval handlers in `host`.
+`loadSecDirectory`, `resolveTaskID`, `prepareDecisionPost`, `buildDecisionOptions` and `decisionOption` are package helpers shared with the other MCP tool and approval handlers in `host`.
 
 # Delivery and group state
 

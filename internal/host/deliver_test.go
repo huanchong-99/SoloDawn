@@ -1391,7 +1391,7 @@ func TestStillCurrentTaskRoleStepCommitMismatches(t *testing.T) {
 	}
 }
 
-func initTestOriginAndGroupRepo(t *testing.T, r *deliverRig, forge string) (originDir, projectDir, baseCommit string) {
+func initTestOriginAndGroupRepo(t *testing.T, r *deliverRig, forge string) (originDir, pDir, baseCommit string) {
 	t.Helper()
 	ctx := t.Context()
 	originDir = filepath.Join(t.TempDir(), "team", "website.git")
@@ -1405,11 +1405,7 @@ func initTestOriginAndGroupRepo(t *testing.T, r *deliverRig, forge string) (orig
 	mustGit(t, ctx, seed, "commit", "-m", "initial")
 	mustGit(t, ctx, seed, "push", originDir, "refs/heads/main:refs/heads/main")
 	baseCommit = strings.TrimSpace(mustGit(t, ctx, seed, "rev-parse", "HEAD"))
-	cfg, err := loadHostConfig(r.h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	projectDir = cfg.projectDir(testGroup1)
+	pDir = projectDir(r.h, testGroup1)
 	r.setSetting("homes", []proto.Home{{Group: testGroup1, Home: r.homeKey.ID(), Name: "Website"}})
 	r.putGroup(proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1},
@@ -1421,7 +1417,7 @@ func initTestOriginAndGroupRepo(t *testing.T, r *deliverRig, forge string) (orig
 	r.putAIMember(testSec, "Sec", r.hostKey.ID(), true, 4)
 	r.h.Attach(r.homeKey.ID(), r.home)
 	r.waitGroupLive(testGroup1)
-	return originDir, projectDir, baseCommit
+	return originDir, pDir, baseCommit
 }
 
 func mustGit(t *testing.T, ctx context.Context, dir string, args ...string) string {
@@ -1673,11 +1669,7 @@ func TestWorkspaceFailureReportingConfigUnmarshalAndStoreErrors(t *testing.T) {
 	logs := captureLogs(t)
 	r := newDeliverRig(t, true)
 	r.seedGroupAndMembers()
-	cfg, err := loadHostConfig(r.h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pDir := cfg.projectDir(testGroup1)
+	pDir := projectDir(r.h, testGroup1)
 
 	// 1) Runner.Turn error is logged; Compose error logs and re-queues without acking.
 	r.runtime.mu.Lock()
@@ -1849,7 +1841,7 @@ func checkConfigUnmarshalAndDroppedTables(t *testing.T, r *deliverRig) {
 	runReviewedMerge(mem.h, mem.homeKey.ID(), testGroup1, proto.TaskRow{RowHeader: proto.RowHeader{ID: testTask1}, Num: 1, Slug: "m"}, "c1", 0, false, time.Time{})
 	resumeGroupMerges(mem.h, deliv(mem.h), "unknown-group")
 
-	// Session INSERT trigger fails ensureSessionRow; non-array 'homes' JSON returns json.Unmarshal error in loadHostConfig.
+	// Session INSERT trigger fails ensureSessionRow; non-array 'homes' JSON logs and aborts attachHome.
 	writeTrigger := func(tx *store.Tx) error {
 		_, err := tx.Exec(`CREATE TRIGGER block_session BEFORE INSERT ON session BEGIN SELECT RAISE(ABORT, 'blocked'); END`)
 		return err
@@ -1863,28 +1855,15 @@ func checkConfigUnmarshalAndDroppedTables(t *testing.T, r *deliverRig) {
 	r.waitAIUnbusy(testGroup1, testAI2)
 
 	r.setSetting("homes", 123)
-	if _, err := loadHostConfig(r.h); err == nil {
-		t.Fatal("expected loadHostConfig unmarshal error for non-array homes")
-	}
 	r.h.Attach(r.homeKey.ID(), r.home)
-	Deliver(r.h, testGroup1, testAI2)
-	runReviewedMerge(r.h, r.homeKey.ID(), testGroup1, proto.TaskRow{RowHeader: proto.RowHeader{ID: testTask1}, Num: 1, Slug: "m"}, "c1", 0, false, time.Time{})
 
-	// Drop audit to cover hasAuditItem error, then drop setting to cover SQLite error in loadHostConfig.
+	// Drop audit to cover hasAuditItem error.
 	dropAudit := func(tx *store.Tx) error {
 		_, err := tx.Exec("DROP TABLE audit")
 		return err
 	}
 	r.db.Write(dropAudit)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 960, AI: testAI1, Why: "notice", Code: "c"}, nil)
-	dropSetting := func(tx *store.Tx) error {
-		_, err := tx.Exec("DROP TABLE setting")
-		return err
-	}
-	r.db.Write(dropSetting)
-	if _, err := loadHostConfig(r.h); err == nil {
-		t.Fatal("expected loadHostConfig error when setting table dropped")
-	}
 }
 
 func addAuditBlockTrigger(t *testing.T, db *store.Store) {
@@ -2037,10 +2016,8 @@ func setupStep17Rig(t *testing.T) (*deliverRig, string, string, string) {
 	runTestGit(t, seed, "push", "origin", "main")
 	c1 := strings.TrimSpace(runTestGit(t, seed, "rev-parse", "HEAD"))
 
-	cfg, err := loadHostConfig(r.h)
-	assertStep17NoErr(t, err)
-	pDir := cfg.projectDir(testGroup1)
-	_, err = EnsureGroupWorkspace(t.Context(), pDir, remoteDir, "main")
+	pDir := projectDir(r.h, testGroup1)
+	_, err := EnsureGroupWorkspace(t.Context(), pDir, remoteDir, "main")
 	assertStep17NoErr(t, err)
 	r.putGroup(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 5}, Name: "W", Kind: "project", Repo: remoteDir, Base: "main", Forge: "github", Home: r.homeKey.ID(), Secretary: testSec, Checks: []string{}})
 	return r, pDir, remoteDir, c1
@@ -2076,7 +2053,11 @@ func checkStep17GuardsAndRoleChanges(t *testing.T, r *deliverRig, pDir, remoteDi
 	r.waitUntil("reassigned task session and wt removed", func() bool { return !hasSession(r.h, kT1) && !pathExists(wt1) })
 	assertStep17True(t, strings.TrimSpace(runTestGit(t, remoteDir, "rev-parse", "refs/heads/task/1-alpha")) == alphaHead, "github handoff pushed branch")
 	assertStep17True(t, hasSession(r.h, kR1) && pathExists(rev1) && slices.Contains(r.runtime.closedKeys(), kT1), "reviewer kept and kT1 closed")
+	checkStep17ReviewerChange(t, r, pDir, remoteAI, alphaHead, kR1, kNoRow, rev1)
+}
 
+func checkStep17ReviewerChange(t *testing.T, r *deliverRig, pDir, remoteAI, alphaHead string, kR1, kNoRow SessionKey, rev1 string) {
+	t.Helper()
 	kGrpKeep := SessionKey{Group: testGroup1, Member: testAI1}
 	kOtherGroup := SessionKey{Group: testGroup2, Member: testAI1, Task: testTask1}
 	r.h.Sessions.Create(Session{SessionKey: kGrpKeep, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"})
