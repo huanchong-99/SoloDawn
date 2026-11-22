@@ -40,8 +40,8 @@ func TestConfirmAuthorityAndParticipation(t *testing.T) {
 	s.AIs["ai"] = proto.AIMemberRow{MemberRow: proto.MemberRow{User: "owner"}}
 	taskID := "task"
 	s.Tasks[taskID] = proto.TaskRow{State: "active", Assignee: "ai"}
-	cardTestSame(t, s.cfmAllowed("other", &taskID, "ai"), true)
-	cardTestSame(t, s.cfmAllowed("other", nil, "ai"), false)
+	cardTestSame(t, s.cfmAllowed(cardTestDisk{}, "other", &taskID, "ai"), true)
+	cardTestSame(t, s.cfmAllowed(cardTestDisk{}, "other", nil, "ai"), false)
 	wakes := map[string][]int64{"ai": {10}}
 	it := Item{AI: "ai", Why: "watch"}
 	cardTestSame(t, inboxWake(wakes, it, 1, 20), it)

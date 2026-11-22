@@ -36,7 +36,7 @@ func (s *State) cfmGateItems(c Command, what string, msg proto.MsgRow, rows []Ro
 	var kept []Item
 	var cards []proto.MsgRow
 	for _, it := range items {
-		if s.cfmAllowed(c.Who.User, msg.Thread, it.AI) {
+		if s.cfmAllowed(c.Disk, c.Who.User, msg.Thread, it.AI) {
 			kept = append(kept, it)
 			continue
 		}
@@ -45,11 +45,15 @@ func (s *State) cfmGateItems(c Command, what string, msg proto.MsgRow, rows []Ro
 	return Result{Rows: cfmAppendCards(rows, cards), Items: kept}
 }
 
-func (s *State) cfmAllowed(user string, thread *string, aiID string) bool {
+func (s *State) cfmAllowed(d Disk, user string, thread *string, aiID string) bool {
 	if cfmEnough(user, s.AIs[aiID]) {
 		return true
 	}
-	return thread != nil && cfmTakesPart(s.Tasks[*thread], aiID)
+	if thread == nil {
+		return false
+	}
+	task := s.Tasks[*thread]
+	return !cftHeld(cftCard(d, task, aiID)) && cfmTakesPart(task, aiID)
 }
 
 func cfmEnough(user string, ai proto.AIMemberRow) bool {
@@ -70,7 +74,7 @@ func cfmTakesPart(task proto.TaskRow, ai string) bool {
 }
 
 func cfmTaskRunning(state string) bool {
-	return state == taskActive || state == taskPaused || state == taskFailed
+	return state != "" && state != taskQueued
 }
 
 func cfmReviewerStarted(task proto.TaskRow) bool {
@@ -81,7 +85,7 @@ func (s *State) cfmNewCard(c Command, what string, req proto.MsgRow, ai proto.AI
 	re := req.ID
 	body := proto.ConfirmBody{What: what, AI: ai.ID, To: []string{ai.User}}
 	return proto.MsgRow{
-		RowHeader: proto.RowHeader{Type: "msg", ID: cfmCardID(c.Nonce, ai.ID)}, Group: s.ID,
+		RowHeader: proto.RowHeader{Type: "msg", ID: cfmCardID(proto.ID(req.ID), ai.ID)}, Group: s.ID,
 		Thread: req.Thread, Main: true, By: "system", Kind: cfmKind, Timestamp: c.Now,
 		Mentions: []string{}, Re: &re, Body: briefJSON(body), State: &proto.CardState{Status: cardStatusPending},
 	}
@@ -180,6 +184,12 @@ func cfmMayDecide(w Who, to []string) bool {
 }
 
 func (s *State) cfmApplyDecision(c Command, card proto.MsgRow, body proto.ConfirmBody, status string) Result {
+	if body.What == cfmWhatDirect {
+		req, _ := c.Disk.Msg(*card.Re)
+		if cftRoleRequest(req) {
+			return s.cftDecide(c, card, body)
+		}
+	}
 	if status == briefConfirmed {
 		return Result{Rows: []Row{RowOf(card)}, Items: s.cfmConfirmedItems(c.Disk, card, body)}
 	}
@@ -249,8 +259,11 @@ func (s *State) cfmDead(d Disk, card proto.MsgRow, body proto.ConfirmBody) bool 
 		_, ok := s.People[card.By]
 		return !ok
 	}
-	_, ok := d.Msg(*card.Re)
-	return !ok
+	req, ok := d.Msg(*card.Re)
+	if !ok {
+		return true
+	}
+	return cftRoleRequest(req) && !s.cftHasRole(req.ID, body.AI)
 }
 
 func cfmReminder(s *State, msg proto.MsgRow) wpushEvent {

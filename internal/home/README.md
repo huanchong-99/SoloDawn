@@ -468,8 +468,18 @@ confirm or deny it; a confirmation delivers once. A denied call becomes `denied`
 caller a `reply` carrying the card, plus a secretary notice. Denied AI-authored direct requests
 also notify the secretary. Human `post/confirm` requests create `watch` cards; confirming one
 queues a host-only `watch` item, outside the wake cap. The confirmation timer expires cards when
-the AI, watch requester or retained request disappears. Role confirmation and waits belong to
-T2-2b. Approval decisions require both the card's approvers and the AI row's current approvers.
+the AI, watch requester or retained request disappears. Approval decisions require both the
+card's approvers and the AI row's current approvers.
+
+`cmd_confirm_task.go` finishes command results before sealing them: rows 1 and 11 create missing
+role cards, including queued tasks and reviewers not yet at review. Cards use the request and AI
+as their stable identity. Pending or denied roles receive no work items. An active assignee waits
+on its pending card at every step; a reviewer waits at review. Confirmation takes priority over
+ordinary card waits. Confirmation releases active role items, while later activations use the same
+grant; denial clears its wait and notifies the secretary. An owner's own reassignment needs no
+card. The retention query keeps non-final tasks' requests and direct grants. Participation for
+thread messages is inferred from existing task fields, with the historical ambiguities recorded
+in `issues.md`; pending/denied role cards never confer participation.
 
 `cmd_brief.go` holds `post` of kind `brief` and `act` `confirm` and `revise` on it
 ([commands](../../planning/contracts/commands.md) 1.3 and 1.4;

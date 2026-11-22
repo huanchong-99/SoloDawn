@@ -1,0 +1,152 @@
+package home
+
+import (
+	"testing"
+
+	"github.com/huanchong-99/SoloDawn/internal/proto"
+)
+
+func cftFixture() (*State, cftDisk, proto.TaskRow, proto.MsgRow, Command) {
+	s := NewState("g", "h", "p")
+	s.AIs["a"] = proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{ID: "a"}, User: "q"}}
+	s.AIs["r"] = proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{ID: "r"}, User: "q"}}
+	s.Group.Secretary = "sec"
+	task := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: "t"}, State: taskActive, Step: stepBranch, Assignee: "a", Reviewer: "r", Brief: "b"}
+	s.Tasks["t"] = task
+	req := "b"
+	card := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: cfmCardID("b", "a")}, Kind: cfmKind, Re: &req,
+		Body: briefJSON(proto.ConfirmBody{What: cfmWhatDirect, AI: "a", To: []string{"q"}}), State: &proto.CardState{Status: cardStatusPending}}
+	d := cftDisk{Disk: cardTestDisk{}, msgs: map[string]proto.MsgRow{"b": {RowHeader: proto.RowHeader{ID: "b"}, Kind: briefKind}, card.ID: card}}
+	c := Command{Disk: d, Now: 10, Who: Who{User: "p"}}
+	return s, d, task, card, c
+}
+
+func TestRoleGateWaitsActivationAndExpiry(t *testing.T) {
+	s, d, task, card, c := cftFixture()
+	cardTestSame(t, cftRequest(proto.TaskRow{RowHeader: proto.RowHeader{ID: "direct"}}), "direct")
+	cardTestSame(t, s.cfmAllowed(d, "p", &task.ID, "a"), false)
+	held := s.cftFinish(c, Result{Rows: []Row{RowOf(task)}, Items: []Item{{AI: "a", Task: "t", Why: itemAssign}, {AI: "sec", Why: itemNotice}}})
+	cardTestSame(t, held.Items, []Item{{AI: "sec", Why: itemNotice}})
+	cardTestSame(t, held.Rows[0].Value().(proto.TaskRow).Wait, &proto.TaskWait{Kind: waitConfirm, Msg: card.ID, Who: []string{"q"}})
+	confirmed := card
+	confirmed.State = &proto.CardState{Status: briefConfirmed}
+	task.Wait = &proto.TaskWait{Kind: waitConfirm, Msg: card.ID}
+	s.Tasks["t"] = task
+	d.msgs[card.ID] = confirmed
+	cardTestSame(t, s.cfmAllowed(d, "p", &task.ID, "a"), true)
+	res := s.cftFinish(c, Result{Rows: []Row{RowOf(task)}, Items: []Item{{AI: "a", Task: "t", Why: itemResume}}})
+	cardTestSame(t, res.Rows[0].Value().(proto.TaskRow).Wait, (*proto.TaskWait)(nil))
+	cardTestSame(t, res.Items, []Item{{AI: "a", Task: "t", Why: itemResume}})
+	task.State = taskPaused
+	cardTestSame(t, s.cftDecide(c, confirmed, proto.ConfirmBody{AI: "a"}).Items, []Item{{AI: "a", Why: itemAssign, Task: "t", Msg: "t"}})
+	s.Tasks["t"] = task
+	cardTestSame(t, s.cftDecide(c, confirmed, proto.ConfirmBody{AI: "a"}).Items, []Item(nil))
+	task.State = taskQueued
+	s.Tasks["t"] = task
+	cardTestSame(t, s.cftDecide(c, confirmed, proto.ConfirmBody{AI: "a"}).Items, []Item(nil))
+	d.msgs[card.ID] = card
+	task.State = taskCancelled
+	s.Tasks["t"] = task
+	res = s.cftFinish(c, Result{})
+	at := int64(10)
+	cardTestSame(t, res.Rows[0].Value().(proto.MsgRow).State, &proto.CardState{Status: "expired", At: &at})
+	cardTestSame(t, s.cftHasRole("missing", "a"), false)
+	cardTestSame(t, s.cftTasksFor("missing", "a"), []proto.TaskRow(nil))
+	cardTestSame(t, cftActivation(d, task, "r"), []Item(nil))
+	task.Step = stepReview
+	task.Commit = "c"
+	cardTestSame(t, cftActivation(d, task, "r"), []Item{{AI: "r", Why: itemReview, Task: "t", Commit: "c"}})
+}
+
+func TestRoleCardOverlayAndOrdinaryWaits(t *testing.T) {
+	s, d, task, card, c := cftFixture()
+	closed := card
+	closed.State = &proto.CardState{Status: cardStatusDenied}
+	d.Disk = cardTestDisk{card}
+	d.msgs[card.ID] = closed
+	cardTestSame(t, len(d.Pending()), 0)
+	cardTestSame(t, cftHeld(closed), true)
+	closed.State = &proto.CardState{Status: "expired"}
+	cardTestSame(t, cftHeld(closed), true)
+	task.Wait = &proto.TaskWait{Kind: waitConfirm}
+	approval := proto.MsgRow{RowHeader: proto.RowHeader{ID: "app"}, Kind: waitApproval, Pos: 3, Timestamp: 1, Body: briefJSON(proto.ApprovalBody{Task: "t", Approvers: []string{"p"}}), State: &proto.CardState{Status: cardStatusPending}}
+	decision := proto.MsgRow{RowHeader: proto.RowHeader{ID: "dec"}, Kind: waitDecision, Pos: 2, Body: briefJSON(proto.DecisionBody{Task: &task.ID, To: []string{"p"}}), State: &proto.CardState{Status: cardStatusPending}}
+	d.Disk = cardTestDisk{approval, decision}
+	cardTestSame(t, cftWait(d, task), &proto.TaskWait{Kind: waitApproval, Msg: "app", Who: []string{"p"}, Since: 1})
+	d.Disk = cardTestDisk{decision}
+	cardTestSame(t, cftWait(d, task), &proto.TaskWait{Kind: waitDecision, Msg: "dec", Who: []string{"p"}})
+	d.Disk = cardTestDisk{}
+	cardTestSame(t, cftWait(d, task), (*proto.TaskWait)(nil))
+	task.Wait = &proto.TaskWait{Kind: waitConflict}
+	cardTestSame(t, cftWait(d, task), task.Wait)
+	task.Step = stepReview
+	rcard := s.cfmNewCard(c, cfmWhatDirect, d.msgs["b"], s.AIs["r"])
+	d.msgs[rcard.ID] = rcard
+	cardTestSame(t, cftWait(d, task).Msg, rcard.ID)
+	for _, pair := range [][2]proto.MsgRow{{{Pos: 1}, {Pos: 2}}, {{Pos: 0}, {Pos: 1}}, {{Pos: 1}, {Pos: 0}}, {{}, {}}} {
+		_ = cftCardOrder(pair[0], pair[1])
+	}
+	out := Result{}
+	cftPutTask(&out, task, proto.TaskRow{})
+	cardTestSame(t, len(out.Rows), 1)
+	cftPutTask(&out, task, task)
+	cardTestSame(t, len(out.Rows), 1)
+}
+
+func TestNewRoleAuthorityAndDuplicates(t *testing.T) {
+	s, d, task, card, c := cftFixture()
+	res := Result{}
+	s.cftNewRole(c, task, s.AIs["a"], false, d, &res)
+	cardTestSame(t, len(res.Rows), 0)
+	delete(d.msgs, card.ID)
+	c.Who.User = "q"
+	c.Who.AI = "owners-ai"
+	s.cftNewRole(c, task, s.AIs["a"], false, d, &res)
+	cardTestSame(t, len(res.Rows), 0)
+	ai := s.AIs["a"]
+	ai.Account, ai.Allow = "team", []string{"p"}
+	c.Who.User = "p"
+	s.cftNewRole(c, task, ai, true, d, &res)
+	cardTestSame(t, len(res.Rows), 0)
+	s.cftNewRole(c, task, ai, false, d, &res)
+	cardTestSame(t, len(res.Rows), 1)
+	old := task
+	old.Assignee = "old"
+	c.Who.User = "q"
+	cardTestSame(t, s.cftHoldItem(c, d, Item{AI: "a", Task: "t", Why: itemAssign}, old), false)
+	cardTestSame(t, cftOwnerChange(c, task, task, "r", "q"), false)
+}
+
+func TestRoleGrantOnDependencyActivationAndMultipleActiveTasks(t *testing.T) {
+	for _, status := range []string{cardStatusPending, briefConfirmed, cardStatusDenied} {
+		s, d, task, card, c := cftFixture()
+		card.State = &proto.CardState{Status: status}
+		d.msgs[card.ID] = card
+		task.State, task.Depends = taskQueued, []string{"dependency"}
+		task.Wait = &proto.TaskWait{Kind: waitDepends}
+		s.Tasks[task.ID] = task
+		row, items, ok := s.mrgReleaseOne(d, task, "dependency", 10)
+		cardTestSame(t, ok, true)
+		res := s.cftFinish(c, Result{Rows: []Row{row}, Items: items})
+		active := res.Rows[0].Value().(proto.TaskRow)
+		cardTestSame(t, active.State, taskActive)
+		cardTestSame(t, active.Stats.Started, int64(10))
+		if status == briefConfirmed {
+			cardTestSame(t, res.Items, []Item{{AI: "a", Task: "t", Why: itemAssign, Msg: "t"}})
+			cardTestSame(t, active.Wait, (*proto.TaskWait)(nil))
+		} else {
+			cardTestSame(t, len(res.Items), 0)
+		}
+	}
+	s, d, task, card, c := cftFixture()
+	task.ID = "second"
+	s.Tasks[task.ID] = task
+	card.State = &proto.CardState{Status: briefConfirmed}
+	res := s.cftDecide(c, card, proto.ConfirmBody{AI: "a"})
+	cardTestSame(t, res.Items, []Item{{AI: "a", Why: itemAssign, Task: "second", Msg: "second"}, {AI: "a", Why: itemAssign, Task: "t", Msg: "t"}})
+	task.Step, task.Commit = stepReview, "c"
+	s.Tasks[task.ID] = task
+	d.msgs[cfmCardID("b", "r")] = proto.MsgRow{State: &proto.CardState{Status: briefConfirmed}}
+	item := Item{AI: "r", Task: task.ID, Why: itemReview, Commit: "c"}
+	cardTestSame(t, s.cftFinish(c, Result{Items: []Item{item}}).Items, []Item{item})
+}

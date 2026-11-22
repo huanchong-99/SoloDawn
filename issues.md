@@ -6,11 +6,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-22 · limitation · Home task participation needs the role-confirmation lane
+### 2026-11-22 · limitation · Task participation history is inferred from current fields
 
-- Symptom: mention and call gating infers participation from a running task's assignee, or a reviewer that reached review. It does not yet account for role items held by a confirmation, or retain participation after a task becomes final.
-- Cause: `internal/home/cmd_confirm.go` uses the step-1 task machine's current role and step; T2-2b owns role-item gating and confirmation waits.
-- Status: open for T2-2b integration. Its held role items must not qualify for the thread exception in `planning/contracts/step-2/confirm.md` section 2.
+- Symptom: a final task cancelled before its first role item was queued can qualify for the thread exception after its expired card is pruned, as can an assignee newly named by row 11 before its first activation. A reviewer's earlier participation can be lost after a later reassignment/review overwrites its evidence.
+- Cause: `internal/home/cmd_confirm.go:48-80` derives participation from current roles, state, step and latest review, excluding unconfirmed role cards. Acknowledged inbox items are deleted; task rows contain no durable participation history. Row 11 also cannot durably distinguish an owner's reassignment that overrides an earlier closed card from that card; a foreign reassignment to the same AI after expiry needs a new request, since the request's one card is closed (`internal/home/cmd_confirm_task.go:131-145,183-209`).
+- Status: open, accepted by the owner for T2-2b: no new table, export format or wire shape. Held role cards no longer qualify; known participation survives finalization while its current fields still show it.
 
 ### 2026-11-22 · deviation · Host turn labels approximate task participation by role
 

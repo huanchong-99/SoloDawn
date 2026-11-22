@@ -176,7 +176,7 @@ var (
 	stepsChecked     = []string{stepLocal, stepCloud, stepReview}
 	stepsBeforeMerge = []string{stepBranch, stepLocal, stepCloud, stepReview}
 
-	waitsOfCards = []string{"", waitApproval, waitDecision} // no wait, or a card wait
+	waitsOfCards = []string{"", waitConfirm, waitApproval, waitDecision} // no wait, or a card wait
 	waitsKept    = []string{waitReviewer, waitConflict}
 	workItems    = []string{itemAssign, itemChecks, itemReviewed, itemReview, itemResume, itemMerge}
 )
@@ -359,10 +359,9 @@ func (m *taskMove) waitFor(kind string) *proto.TaskWait {
 	return &proto.TaskWait{Kind: kind, Since: m.e.Now}
 }
 
-// cardWait is the wait of a task that waits for nothing else: its oldest
-// pending approval card, else its oldest pending decision card, else none.
+// cardWait prefers role confirmation, then approval, then decision.
 func (m *taskMove) cardWait() *proto.TaskWait {
-	for _, kind := range []string{waitApproval, waitDecision} {
+	for _, kind := range []string{waitConfirm, waitApproval, waitDecision} {
 		for _, c := range m.pending {
 			if c.Kind == kind {
 				return taskCardWait(c)
