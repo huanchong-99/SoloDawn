@@ -33,6 +33,7 @@ func TestItemGoldens(t *testing.T) {
 	confirmed := item("confirmed", 4409).about("", id("brief"))
 	confirmed.AI = ID(secretary)
 	golden(t, "item-confirmed", confirmed)
+	golden(t, "item-watch", item("watch", 4420).about("", id("confirm")))
 	notice := item("notice", 4410).about(taskID, "")
 	notice.AI, notice.Code, notice.Detail = ID(secretary), "timeout", "Turn deadline reached."
 	golden(t, "item-notice", notice)

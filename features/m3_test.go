@@ -238,12 +238,19 @@ func (w *m3World) awaitBrowserReply(reqID int64) error {
 
 // drainBrowserUntil is the single reader of w.browser.ch.
 func (w *m3World) drainBrowserUntil(timeout time.Duration, stop func() bool, onFrame func(json.RawMessage)) error {
+	apply := func(raw json.RawMessage) { applyRowsFrame(&w.homeView, raw) }
+	return drainFramesUntil(w.browser, timeout, stop, apply, onFrame)
+}
+
+// drainFramesUntil reads client until stop reports true, passing each frame to
+// apply and then to onFrame (when set); it fails after timeout.
+func drainFramesUntil(client homeFrameClient, timeout time.Duration, stop func() bool, apply, onFrame func(json.RawMessage)) error {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	for !stop() {
 		select {
-		case raw := <-w.browser.ch:
-			applyRowsFrame(&w.homeView, raw)
+		case raw := <-client.ch:
+			apply(raw)
 			if onFrame != nil {
 				onFrame(raw)
 			}
@@ -855,19 +862,25 @@ func listToolsViaShim(sockPath, token string) (json.RawMessage, error) {
 
 func exchangeToolsList(inW io.Writer, outR io.Reader) (json.RawMessage, error) {
 	dec := json.NewDecoder(outR)
-	if _, err := fmt.Fprintln(inW, `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"m3","version":"1"}}}`); err != nil {
-		return nil, err
-	}
-	if _, err := readM3RPC(dec); err != nil {
-		return nil, err
-	}
-	if _, err := fmt.Fprintln(inW, `{"jsonrpc":"2.0","method":"notifications/initialized"}`); err != nil {
+	if err := initMCPSession(inW, dec); err != nil {
 		return nil, err
 	}
 	if _, err := fmt.Fprintln(inW, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`); err != nil {
 		return nil, err
 	}
 	return readM3RPC(dec)
+}
+
+// initMCPSession performs the initialize handshake on a shim stream.
+func initMCPSession(w io.Writer, dec *json.Decoder) error {
+	if _, err := fmt.Fprintln(w, `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"m3","version":"1"}}}`); err != nil {
+		return err
+	}
+	if _, err := readM3RPC(dec); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintln(w, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	return err
 }
 
 func readM3RPC(dec *json.Decoder) (json.RawMessage, error) {
