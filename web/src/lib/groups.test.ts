@@ -969,6 +969,121 @@ describe('every group', () => {
   });
 });
 
+describe('following a moved group', () => {
+  const moved = { re: 1, err: { code: 'moved', msg: 'The group has moved.', home: 'destination' } };
+
+  function destination(home: Home) {
+    home.device = 'source';
+    const target = new Home(me);
+    target.device = 'destination';
+    home.onmove = vi.fn((g, id) => {
+      expect(id).toBe('destination');
+      home.move(g, target);
+    });
+    return target;
+  }
+
+  it('keeps cached rows and the route while following sync, and reads again after import', async () => {
+    const { home, group, asked, link } = joined();
+    group.apply([text('kept', 4)]);
+    const target = destination(home);
+    const read = vi.spyOn(group, 'sync').mockResolvedValue(undefined);
+    homes.push(home, target);
+    asked[0].answer(moved);
+    await settle();
+    expect(read).toHaveBeenCalledTimes(0);
+    read.mockRestore();
+    expect(home.groups).toEqual([]);
+    expect(target.groups).toEqual([group]);
+    expect(find(website)).toBe(group);
+    expect(group.home).toBe(target);
+    expect(group.main.map((msg) => msg.id)).toEqual(['kept']);
+    link.push(rows(text('late', 5)));
+    expect(group.main.map((msg) => msg.id)).toEqual(['kept']);
+    const next = connect(target, [], { device: 'destination' });
+    expect(target.groups).toEqual([group]);
+    expect(next.asked.map(({ req }) => req)).toEqual([sync(0)]);
+    next.asked[0].answer({ re: 1, err: { code: 'not_found', msg: 'not imported' } });
+    await settle();
+    expect(group.paging().failed).toBe(true);
+    next.link.push({ t: 'groups', groups: [listed(website, 'Imported')] });
+    expect(next.asked.map(({ req }) => req)).toEqual([sync(0), sync(0)]);
+    next.asked[1].answer(synced(6));
+    await settle();
+    expect([group.name, group.paging().failed, group.cursor]).toEqual(['Imported', false, 6]);
+    expect(target.groups).toEqual([group]);
+    next.link.push({ t: 'groups', groups: [] });
+    expect(target.groups).toEqual([]);
+  });
+
+  it('follows fetch responses and reads the retained cursor on an already-connected destination', async () => {
+    const { home, group, asked, link } = await read(815);
+    link.push({ t: 'groups', groups: [listed(website), listed('stays')] });
+    asked[1].answer({ ...synced(0), g: 'stays' });
+    await settle();
+    const target = destination(home);
+    const existing = connect(target, [listed('other'), listed(website)]);
+    const page = group.older();
+    asked[2].answer(moved);
+    await page;
+    expect(home.groups.map((item) => item.g)).toEqual(['stays']);
+    expect(target.groups.map((item) => item.g)).toEqual(['other', website]);
+    expect(target.groups[1]).toBe(group);
+    expect(existing.asked.map(({ req }) => req)).toEqual([sync(0, 'other'), sync(0), sync(815)]);
+    home.follow(website, moved.err);
+    expect(existing.asked.map(({ req }) => req)).toEqual([sync(0, 'other'), sync(0), sync(815)]);
+    home.move('absent', target);
+    expect(target.groups.map((item) => item.g)).toEqual(['other', website]);
+    existing.link.push({ t: 'groups', groups: [] });
+    expect(target.groups).toEqual([]);
+  });
+
+  it('uses the remembered group when the old home removed it before answering a command, without replay', async () => {
+    const { home, group, asked, link } = await read();
+    const target = destination(home);
+    const reread = vi.spyOn(group, 'sync').mockResolvedValue(undefined);
+    const command = group.post('once', []);
+    await settle();
+    link.push({ t: 'groups', groups: [] });
+    asked[1].answer(moved);
+    expect(await command).toEqual(moved);
+    expect(reread).toHaveBeenCalledTimes(0);
+    reread.mockRestore();
+    expect(target.groups).toEqual([group]);
+    expect(home.onmove).toHaveBeenCalledExactlyOnceWith(website, 'destination');
+    expect(asked.map(({ req }) => req.t)).toEqual(['sync', 'cmd']);
+    expect(group.home.ctl).toBeUndefined();
+  });
+
+  it('ignores missing, empty and self destinations and other errors', () => {
+    const { home } = joined();
+    destination(home);
+    for (const err of [
+      { code: 'forbidden', home: 'destination' },
+      { code: 'moved' },
+      { code: 'moved', home: '' },
+      { code: 'moved', home: 'source' },
+    ])
+      home.follow(website, { ...err, msg: 'refused' });
+    expect(home.onmove).toHaveBeenCalledTimes(0);
+    const standalone = new Home(me);
+    standalone.follow(website, moved.err);
+    expect(standalone.groups).toEqual([]);
+  });
+
+  it('does not follow a command response from a connection that was replaced or lost', async () => {
+    const { home, group, asked, link } = await read();
+    destination(home);
+    const command = group.post('late', []);
+    await settle();
+    link.offline();
+    asked[1].answer(moved);
+    expect(await command).toEqual(moved);
+    expect(home.onmove).toHaveBeenCalledTimes(0);
+    expect(group.home).toBe(home);
+  });
+});
+
 describe('ids and lost answers', () => {
   it('makes a new random id each time', () => {
     const ids = [newId(), newId()];

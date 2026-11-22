@@ -606,6 +606,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/allow/`       | `AllowEditor.svelte`, lists and editor for each AI in the member panel            |
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
 | `src/components/groupinfo/`   | group details and project memory (`chat.side`, `order: 20`)                       |
+| `src/components/move/`        | owner's local export/import guidance (`chat.side`, `order: 30`)                   |
 | `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
 | `src/components/notify/`      | live in-page notifications mounted at `layer`                                     |
@@ -625,6 +626,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/confirm.spec.ts`    | steps of `../features/web_confirm.feature`                                        |
 | `features/member.spec.ts`     | steps of `../features/web_member.feature`                                         |
 | `features/groupinfo.spec.ts`  | steps of `../features/web_groupinfo.feature`                                      |
+| `features/move.spec.ts`       | steps of `../features/web_move.feature`                                           |
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
 | `features/notify.spec.ts`     | steps of `../features/web_notify.feature`                                         |
@@ -647,6 +649,14 @@ navigation and of the segmented controls; the current entry and the chosen optio
 in `Highlight` and `HighlightText` instead (`base.css` section 8).
 
 ## Known limitations
+
+- A `moved` response to `cmd`, `sync` or `fetch` switches the group to the named home, preserves
+  its cache and signalling URLs, and remembers the destination for reconnecting. Commands are
+  not replayed across a move: their receipts stay on the old home. Before import the cached
+  group remains visible; the destination's `groups` push starts a new read after import.
+- Only a group's owner sees the local `solodawn group export` / `group import` guidance. The
+  browser neither runs these commands nor transfers the file. A copy omits `--to`; scheduling
+  copies belongs to the operating system, not the browser.
 
 - The theme is applied by the module script, so a browser forced to the theme opposite to its
   system setting can paint one frame in the system theme while loading (`issues.md`).
