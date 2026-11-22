@@ -49,7 +49,7 @@ type ForgePullRequest struct {
 }
 
 // Submit pushes a clean, checked task commit and returns its open pull request.
-func (f TaskForge) Submit(ctx context.Context, checkedCommit, base, title, summary string) (*ForgePullRequest, error) {
+func (f TaskForge) Submit(ctx context.Context, checkedCommit, title, summary string) (*ForgePullRequest, error) {
 	if err := f.checkSubmission(ctx, checkedCommit); err != nil {
 		return nil, err
 	}
@@ -59,7 +59,7 @@ func (f TaskForge) Submit(ctx context.Context, checkedCommit, base, title, summa
 	if f.Templates != nil {
 		return f.openTemplate(ctx, checkedCommit, title, summary)
 	}
-	return f.githubRequest(ctx, base, title, summary)
+	return f.githubRequest(ctx, f.Base, title, summary)
 }
 
 func (f TaskForge) githubRequest(ctx context.Context, base, title, summary string) (*ForgePullRequest, error) {

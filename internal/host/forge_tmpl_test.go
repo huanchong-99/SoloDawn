@@ -46,11 +46,11 @@ func TestCustomForgeSubmitAndReuse(t *testing.T) {
 	f, _, head := forgeRepo(t)
 	f.Base, f.Templates = "base", forgeTestTemplates()
 	calls := fakeForgeGH(t, forgeAnswer{}, forgeAnswer{Stdout: "progress\n https://forge.invalid/requests/7?view=1 \nfinished\n"}, forgeAnswer{})
-	pr, err := f.Submit(t.Context(), head, "base", "Title {commit}; $()", "Ready")
+	pr, err := f.Submit(t.Context(), head, "Title {commit}; $()", "Ready")
 	assertForge(t, err, nil)
 	assertForge(t, pr, &ForgePullRequest{Number: 7, URL: "https://forge.invalid/requests/7?view=1"})
 	f.Request = *pr
-	got, err := f.Submit(t.Context(), head, "base", "ignored", "ignored")
+	got, err := f.Submit(t.Context(), head, "ignored", "ignored")
 	assertForge(t, err, nil)
 	assertForge(t, got, pr)
 	calls([]string{"push", f.Branch, "base", head}, []string{"open", "--title=Title {commit}; $()", "--summary=Ready", "{tag}"}, []string{"push", f.Branch, "base", head})

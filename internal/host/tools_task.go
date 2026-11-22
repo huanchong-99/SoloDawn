@@ -375,7 +375,7 @@ func tskForgeSubmitIfRemote(ctx context.Context, r tskSubmitReady, summary strin
 	}
 	forge := TaskForge{Worktree: r.worktree, Branch: r.branch, Base: r.grp.Base, Templates: r.grp.Templates,
 		Request: ForgePullRequest{Number: r.task.PR, URL: r.task.PRURL}}
-	pr, err := forge.Submit(ctx, r.head, r.grp.Base, r.task.Title, summary)
+	pr, err := forge.Submit(ctx, r.head, r.task.Title, summary)
 	if err != nil {
 		return nil, tskCLIError(err)
 	}
