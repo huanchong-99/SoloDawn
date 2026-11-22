@@ -35,13 +35,14 @@ func serve(ctx context.Context, folder string, env []string, name string, args .
 	}, nil
 }
 
-// serverAddress is the URL of a server's `listening on` line. The rest of
-// out is discarded.
+// serverAddress is the URL of a server's `listening on` line, up to the
+// first space after it. The rest of out is discarded.
 func serverAddress(out io.Reader) string {
 	defer func() { go io.Copy(io.Discard, out) }()
 	lines := bufio.NewScanner(out)
 	for lines.Scan() {
 		if _, url, ok := strings.Cut(lines.Text(), "listening on "); ok {
+			url, _, _ = strings.Cut(url, " ")
 			return url
 		}
 	}

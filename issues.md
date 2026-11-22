@@ -12,6 +12,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `internal/host/join.go:120-180,420-439` reconciles all remembered homes. The remembered-home wire shape carries no kind; state-only sync supplies it after connection.
 - Status: accepted for T2-7 by the owner's lifecycle decision. Team homes reuse the existing manager without new persistence or wire shapes; connection retention also applies to remembered project homes rather than only AI-session homes.
 
+### 2026-11-22 · limitation · The Qwen Code driver is declared from documentation, not from a capture
+
+- Symptom: `DriverCaps["qwen"]` declares levels `1` and `3` and approvals `conn`, and `qwenDriver` speaks the `qwen serve` daemon API (`internal/host/qwen.go`), but no run of the real Qwen Code exists: the fake Qwen Code's scripts are written from the documented API, not cut from captures.
+- Cause: T3-0 read Qwen Code 0.28.0's documentation only, and no owner QwenCloud key was available to T3-3. The `serve` flags (`--token`, `--workspace`), the routes (`POST /session`, `/session/<id>/{resume,prompt,cancel,permission/<request>,events}`), the event names (`session_update`, `permission_request`, `turn_complete`, `turn_error`), the option ids `proceed_once` and `cancel`, approval modes `plan` and `yolo`, the address line `qwen serve listening on <url> (mode=..., workspace=...)`, `QWEN_CODE_SYSTEM_SETTINGS_PATH`, instructions taken as the first block of the first prompt, and a `401` in a `turn_error` meaning a bad key are all `[documented]`.
+- Status: open until the live part of M3, M4 and M7 runs once with the real Qwen Code and an owner key (`drivers.md` section 7); then the fake's scripts are replaced by captures and the declaration corrected.
+
+### 2026-11-22 · limitation · A Qwen Code group session may load the repository's configuration
+
+- Symptom: `contracts/step-3/drivers.md` section 3 requires the repository's configuration to be kept out of group sessions. `qwenDriver` cannot do that: a Qwen Code group session may load the project's `.qwen/settings.json`, `QWEN.md` and extensions (`internal/host/qwen.go`).
+- Cause: Qwen Code 0.28.0 documents no switch for it. Folder trust is not one: in an untrusted folder Qwen Code asks before every tool, even at `yolo`, which would turn level 3 into approval cards.
+- Status: accepted by the coordinator (2026-11-22): Qwen Code ships with this limitation, the risk R-45 already accepts (only trusted repositories go into a group; `install.md`). Open until a capture shows a switch that keeps the configuration out and leaves approvals alone.
+
 ### 2026-11-22 · limitation · The multi-person label scenarios cannot admit Q yet
 
 - Symptom: A9.12 and five A9.42 cases (failing review, decision by P, decision by Q, secretary confirmation without Q on the allow list, and secretary confirmation with Q on it) each failed under `-race` in `Given the confirmation cast with Q`. The reply was `bad_request: the home has no such command`; decoding that refusal as a successful command reply reported `proto: a field that is always present is missing`.
