@@ -2,7 +2,7 @@
   "member.account": "账号",
   "member.account.personal.note": "只听主人的",
   "member.add": "添加 AI",
-  "member.add.forbidden": "只有管理员能添加 AI。",
+  "member.add.forbidden": "只有群成员能添加 AI。",
   "member.add.nohost": "请先连上一台你的电脑。",
   "member.add.offline": "连不上群的家。",
   "member.admin": "管理员",

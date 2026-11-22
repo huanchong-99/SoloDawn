@@ -18,27 +18,28 @@ import (
 
 type s2TerminalPeer struct {
 	dispatchWorld
-	path     *websocket.Conn
-	ctl      chan json.RawMessage
-	key      identity.Key
-	target   string
-	connID   string
-	seq      int64
-	earlyICE []webrtc.ICECandidateInit
-	ice      proto.ICEConfig
+	path    *websocket.Conn
+	key     identity.Key
+	target  string
+	connID  string
+	seq     int64
+	answers chan proto.Envelope
+	ice     proto.ICEConfig
 }
 
-func openS2TerminalPeer(c *s2Cast, person *s2Person, browser *peerBrowser, target *s2Node, withTURN bool) (*s2TerminalPeer, error) {
+func openS2TerminalPeer(c *s2Cast, person *s2Person, key identity.Key, target *s2Node, withTURN bool) (*s2TerminalPeer, error) {
 	ctx, cancel := context.WithCancel(c.Ctx)
-	browser.path.Close()
-	p := &s2TerminalPeer{key: browser.key, target: target.ID(), connID: randomConn(), ctl: make(chan json.RawMessage, 128)}
-	p.dispatchWorld = dispatchWorld{ctx: ctx, cleanup: c.addUndo, channels: map[string]*webrtc.DataChannel{},
-		opened: map[string]chan struct{}{}, closed: map[string]chan struct{}{}, received: make(chan []byte, 32)}
+	p := &s2TerminalPeer{key: key, target: target.ID(), connID: randomConn(), answers: make(chan proto.Envelope, 1)}
+	p.dispatchWorld = dispatchWorld{ctx: ctx, cleanup: c.addUndo, toPeer: make(chan proto.Envelope, 64)}
 	c.addUndo(cancel)
 	if err := p.dial(c.RVURL); err != nil {
 		return nil, err
 	}
-	if err := p.connect(p.config(withTURN)); err != nil {
+	go func() {
+		defer cancel()
+		p.readSignals()
+	}()
+	if err := p.connectRTC(p.config(withTURN), p.signalHeader, p.routeSignal); err != nil {
 		return nil, err
 	}
 	if err := p.checkPath(false); err != nil {
@@ -89,71 +90,25 @@ func (p *s2TerminalPeer) config(withTURN bool) webrtc.Configuration {
 	return cfg
 }
 
-func (p *s2TerminalPeer) connect(cfg webrtc.Configuration) error {
-	pc, err := webrtc.NewPeerConnection(cfg)
-	if err != nil {
-		return err
-	}
-	p.pc = pc
-	p.cleanup(func() { pc.Close() })
-	if err := p.channel("ctl"); err != nil {
-		return err
-	}
-	p.channels["ctl"].OnMessage(func(m webrtc.DataChannelMessage) {
-		select {
-		case p.ctl <- json.RawMessage(m.Data):
-		case <-p.ctx.Done():
-		}
-	})
-	if err := p.offer(); err != nil {
-		return err
-	}
-	return p.waitForCtl()
-}
-
-func (p *s2TerminalPeer) waitForCtl() error {
-	failed := make(chan error, 1)
-	go func() {
-		failed <- p.readSignals()
-		p.pc.Close()
-	}()
-	select {
-	case err := <-failed:
-		return fmt.Errorf("terminal signaling: %w", err)
-	case <-p.opened["ctl"]:
-		return nil
-	case <-p.ctx.Done():
-		return p.ctx.Err()
-	}
-}
-
-func (p *s2TerminalPeer) offer() error {
-	p.pc.OnICECandidate(p.sendCandidate)
-	offer, err := p.pc.CreateOffer(nil)
-	if err != nil {
-		return err
-	}
-	if err := p.sendSignal(proto.Offer{SignalHeader: p.signalHeader("offer"), SDP: offer.SDP}); err != nil {
-		return err
-	}
-	return p.pc.SetLocalDescription(offer)
-}
-
-func (p *s2TerminalPeer) sendCandidate(i *webrtc.ICECandidate) {
-	if i == nil {
-		return
-	}
-	_ = p.sendSignal(proto.ICECandidate{SignalHeader: p.signalHeader("ice"), Candidate: i.ToJSON().Candidate, MID: i.SDPMid})
-}
-
 func (p *s2TerminalPeer) signalHeader(kind string) proto.SignalHeader {
 	return proto.SignalHeader{PayloadHeader: proto.PayloadHeader{Type: kind, Nonce: proto.NewNonce(),
 		Timestamp: time.Now().UnixMilli(), To: p.target}, Conn: p.connID}
 }
 
-func (p *s2TerminalPeer) sendSignal(payload any) error {
+func (p *s2TerminalPeer) routeSignal(payload any, answer *proto.Answer) error {
 	env := p.key.Sign(string(mustMarshalNoEscape(payload)))
-	return wsjson.Write(p.ctx, p.path, proto.Route{Type: "to", Key: p.target, Env: mustMarshalNoEscape(env)})
+	if err := wsjson.Write(p.ctx, p.path, proto.Route{Type: "to", Key: p.target, Env: mustMarshalNoEscape(env)}); err != nil {
+		return err
+	}
+	if answer == nil {
+		return nil
+	}
+	select {
+	case env := <-p.answers:
+		return proto.Decode([]byte(env.Payload), answer)
+	case <-p.ctx.Done():
+		return p.ctx.Err()
+	}
 }
 
 func (p *s2TerminalPeer) readSignals() error {
@@ -179,42 +134,12 @@ func (p *s2TerminalPeer) applySignal(raw json.RawMessage) error {
 	if err := proto.Decode([]byte(env.Payload), &header); err != nil || header.Conn != p.connID {
 		return err
 	}
-	return p.applyDescription(header.Type, []byte(env.Payload))
-}
-
-func (p *s2TerminalPeer) applyDescription(kind string, raw []byte) error {
-	switch kind {
+	switch header.Type {
 	case "answer":
-		var answer proto.Answer
-		if err := proto.Decode(raw, &answer); err != nil {
-			return err
-		}
-		return p.applyAnswer(answer.SDP)
+		p.answers <- env
 	case "ice":
-		var ice proto.ICECandidate
-		if err := proto.Decode(raw, &ice); err != nil {
-			return err
-		}
-		candidate := webrtc.ICECandidateInit{Candidate: ice.Candidate, SDPMid: &ice.MID}
-		if p.pc.RemoteDescription() == nil {
-			p.earlyICE = append(p.earlyICE, candidate)
-			return nil
-		}
-		return p.pc.AddICECandidate(candidate)
+		p.toPeer <- env
 	}
-	return nil
-}
-
-func (p *s2TerminalPeer) applyAnswer(sdp string) error {
-	if err := p.pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: sdp}); err != nil {
-		return err
-	}
-	for _, candidate := range p.earlyICE {
-		if err := p.pc.AddICECandidate(candidate); err != nil {
-			return err
-		}
-	}
-	p.earlyICE = nil
 	return nil
 }
 

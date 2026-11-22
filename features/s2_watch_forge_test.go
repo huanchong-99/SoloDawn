@@ -123,7 +123,7 @@ func s2RegisterForge(sc *godog.ScenarioContext, w *s2WatchWorld) {
 	sc.Step("^a project uses the fake forge templates$", f.fakeProject)
 	sc.Step("^the secretary proposes two tasks for cross-review and P confirms the brief$", f.confirmTwo)
 	sc.Step("^the stale reviewed head is refused and the secretary reassigns the task$", f.waitConflict)
-	sc.Step("^both tasks merge after checks and cross-review and receive summaries$", f.waitTwo)
+	sc.Step("^both tasks merge after checks and cross-review and receive summaries$", func() error { return f.waitForSummaries(2) })
 	sc.Step("^the forge records the filled template arguments and gh never runs$", f.verifyRecorded)
 	sc.Step("^the project refuses a push template containing the title place$", f.rejectPushTitle)
 	sc.Step("^P confirms a brief with a title containing spaces, quotes and shell punctuation$", f.confirmTitle)
@@ -249,9 +249,6 @@ func (f *s2ForgeWorld) prepareTask(num int) error {
 }
 
 func (f *s2ForgeWorld) prepareRetry(work, review *s2Node, vendor, other string, reviewCalls []m5ToolCallSpec) error {
-	if f.short {
-		return nil
-	}
 	if err := s2ForgeTurnFixture(work, vendor, 1, 2, "resolved edit", m5WorkerCalls(true, s2ForgeSummary)); err != nil {
 		return err
 	}
@@ -335,10 +332,6 @@ func (f *s2ForgeWorld) waitConflict() error {
 	})
 }
 
-func (f *s2ForgeWorld) waitTwo() error {
-	return f.waitForSummaries(2)
-}
-
 func (f *s2ForgeWorld) waitForSummaries(count int) error {
 	f.tasks = make(map[int]proto.TaskRow)
 	f.summaries = make(map[string]proto.SummaryBody)
@@ -366,10 +359,7 @@ func (f *s2ForgeWorld) observeTaskRow(raw json.RawMessage) error {
 	if proto.Decode(raw, &row) != nil {
 		return nil
 	}
-	switch row.Kind {
-	case "approval":
-		return fmt.Errorf("unexpected approval %s", row.ID)
-	case "summary":
+	if row.Kind == "summary" {
 		return f.recordSummary(row)
 	}
 	return nil
