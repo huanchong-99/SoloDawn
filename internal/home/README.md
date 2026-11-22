@@ -50,6 +50,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | send a host its inbox items, on every `hello` | `loop.Inbox(conn)` |
 | record a host's `ack` | `loop.Ack(conn, req)` |
 | run the timers by hand, or tell the home of an event | `loop.Tick(now)`, `loop.Event(name, event)` |
+| expire old store data in a transaction | `Retain(tx, now)` |
 | mark a disconnected host's AIs offline | `HostOfflineEvent`, fired by `Loop` when a device's last `Inbox` connection ends |
 | move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
 | push to a client | the `Client` interface |
@@ -188,6 +189,8 @@ Host events (`cmd_hostev.go`) take the names that start with `hev`, their tests 
 functions start with `TestHostEv`; the file exports `HostOfflineEvent`.
 Group pause and resume (`cmd_pause.go`) take the names that start with `pau`, their tests too, and
 their test functions start with `TestPause`.
+Retention (`retention.go`) takes the names that start with `ret`, exports `Retain`, and its test
+functions start with `TestRetention`.
 
 ## The run loop
 
@@ -681,6 +684,21 @@ and `group/resume`:
   task at step `review` that has a reviewer unless `c.Disk.Queued` already holds an unacknowledged
   `review` item for that reviewer, task and commit.
 
+## Retention
+
+`retention.go` exports `Retain(tx, now)`, which reads `retention_days` from SQLite `setting`
+(defaulting to `90` when absent) and calls `tx.Retain(time.UnixMilli(now), days)`
+([storage](../../planning/contracts/storage.md) sections 2 and 4). The daily node schedule in
+`internal/node` calls `Retain` once a day per node.
+
+- **What remains.** In one transaction the store raises `grp.purged` to the highest `seq` among
+  aged-out `gone` markers before deleting those markers, keeps `pending` cards, keeps `note` and
+  `review` rows (`keep = 1`), and deletes older messages and final (`merged` and `cancelled`) task
+  rows whose `mt` is before the cutoff.
+- **In-memory tasks.** After retention deletes rows from the store, finished tasks stay in the
+  in-memory state (`State.Tasks`) until restart ([issues](../../issues.md)). `grp.num` keeps the
+  highest task number given out, so task numbers are not reused after restart.
+
 ## Known limitations
 
 - The table of commands holds the groups, group pause and resume, members, briefs, the task commands
@@ -689,6 +707,8 @@ and `group/resume`:
   command files (including thread round counting in HM-13) and the wiring of the node are separate
   units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
+- After retention deletes rows, finished tasks stay in the in-memory `State.Tasks` until restart
+  ([issues](../../issues.md)).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
 - A `peer.Connection` takes every frame at once and keeps it in its own buffer, so the limit of
@@ -788,3 +808,7 @@ deleted-row scenario of A2.7.
 check, both repeats, the rows, and row 24 over tasks with and without waits, at step `merge`, and
 with a review already queued. `features/home_pause.feature` holds the home half of acceptance test
 A4.7 on `StartLoop` over an in-memory store.
+
+`retention_test.go` covers `Retain`: default and configured `retention_days`, store error
+propagation, protected rows, and the purge mark with `Loop.Sync` reset.
+`features/home_retention.feature` holds acceptance test A2.5 and the retention half of A5.14.
