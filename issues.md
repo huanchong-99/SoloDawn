@@ -47,6 +47,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `callView` treats every status other than `answered` as waiting (`web/src/lib/call.ts:78`). The states sheet therefore lists three call rows, and `web/features/call.spec.ts` expects them.
 - Status: open, accepted for P-4a. Resolved when U2-2 draws a denied call.
 
+### 2026-11-22 · limitation · A9.21 lacks a same-connection network-switch driver
+
+- Symptom: the original fixture opened a new relay-only connection instead of moving an established watch to TURN.
+- Cause: a transport-only probe with controlling ICE, renomination, warm relay pairs and bidirectional filtering on every watcher UDP socket kept the direct pair selected. Pion's automatic selector retained that pair; the binding-request selector also failed to move both ends. This is fixture evidence, not an end-to-end watch result.
+- Status: open. Experimental transport code was removed. A9.21 stays pending with direct-watch, same-PeerConnection relay observation, closure and original-ctl assertions; `waitForRelay` in `features/s2_watch_terminal_test.go` observes but does not drive migration. See `features/s2_watch.md`.
+
+### 2026-11-22 · deviation · A9.26 live M5 forge coverage awaits a configured live run
+
+- Symptom: the original live fixture checked two remote filenames without reusing M5's forge steps or inspecting request heads.
+- Cause: A9.26 used the subprocess fixture instead of M5's two-task forge flow.
+- Status: A9.26 now reuses the applicable M5 steps with live custom templates and independently inspects both request IDs and reviewed heads. Open until an opt-in run with `SOLODAWN_S2_LIVE_FORGE` completes; inspection is test-only, documented in `features/s2_watch.md`.
+
 ### 2026-11-21 · deviation · The `rounds_limit` system message has an id derived from the triggering post's nonce
 
 - Symptom: when a `post` by an AI in a task's thread reaches `limits.rounds` (task-machine row 21), the command writes both the `post` row under `n` and the main-line `rounds_limit` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn rounds limit <n>` in base64url, rather than a random id.
