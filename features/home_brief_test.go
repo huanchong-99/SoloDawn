@@ -76,7 +76,7 @@ func homeBriefSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the owner (?:confirms|has confirmed) the brief$`, func() error {
 		return w.act(w.keys["the owner"], "confirm", "")
 	})
-	sc.Step(`^the owner sends the same confirm again$`, func() error { return w.send(w.keys["the owner"], w.sent) })
+	sc.Step(`^the owner sends the same confirm again$`, func() error { return w.send(w.sent) })
 	sc.Step(`^the owner sends the brief back with the note "([^"]*)"$`, func(note string) error {
 		return w.act(w.keys["the owner"], "revise", fmt.Sprintf(`,"text":%q`, note))
 	})
@@ -90,22 +90,22 @@ func homeBriefSteps(sc *godog.ScenarioContext) {
 		if err := w.holds(0); err != nil {
 			return err
 		}
-		return w.queued(nil, proto.Envelope{})
+		return w.queued(nil)
 	})
 	sc.Step(`^the home holds no task$`, func() error { return w.holds(0) })
 	sc.Step(`^the home holds (\d+) tasks$`, w.holds)
 	sc.Step(`^task 1 is "active" and task 2 is "queued" until task 1 is merged$`, w.dependent)
-	sc.Step(`^the home has queued "([^"]*)", each caused by the (confirm|send-back)$`, func(items, _ string) error {
-		return w.queued(strings.Split(items, ", "), w.cause())
+	sc.Step(`^the home has queued "([^"]*)"$`, func(items string) error {
+		return w.queued(strings.Split(items, ", "))
 	})
 	sc.Step(`^the secretary gives task 2 to "([^"]*)" while it is queued$`, w.reassign)
 	sc.Step(`^task 2 is "queued" and the home has queued nothing that makes a worktree$`, w.stillQueued)
 	sc.Step(`^task 1 is merged$`, w.merge)
-	sc.Step(`^task 2 is "active" and the home has queued "([^"]*)", caused by the confirm$`, func(item string) error {
+	sc.Step(`^task 2 is "active" and the home has queued "([^"]*)"$`, func(item string) error {
 		if task := w.task(2); task.State != "active" || task.Wait != nil {
 			return fmt.Errorf("task 2 is %s, waiting for %+v", task.State, task.Wait)
 		}
-		return w.queued([]string{item}, w.cause())
+		return w.queued([]string{item})
 	})
 }
 
@@ -169,13 +169,13 @@ func (w *homeBriefWorld) post(replaces *string) error {
 		w.brief = string(post.Nonce)
 	}
 	laptop := w.keys["the owner's laptop"]
-	return w.send(laptop, laptop.Sign(string(payload)))
+	return w.send(laptop.Sign(string(payload)))
 }
 
 // act sends an act on the brief, signed by a device; more holds further members.
 func (w *homeBriefWorld) act(by identity.Key, action, more string) error {
 	payload := fmt.Sprintf(`{"t":"act","n":%q,"ts":%d,"g":%q,"msg":%q,"action":%q%s}`, w.id(), w.now.UnixMilli()-1000, w.state.ID, w.brief, action, more)
-	return w.send(by, by.Sign(payload))
+	return w.send(by.Sign(payload))
 }
 
 func (w *homeBriefWorld) actAs(who, action string) error {
@@ -193,8 +193,8 @@ func (w *homeBriefWorld) actAs(who, action string) error {
 
 // send applies a command as the run loop of a home does: in a transaction,
 // whose messages land on disk, and whose result the state then commits.
-func (w *homeBriefWorld) send(by identity.Key, env proto.Envelope) error {
-	res, err := home.Commands.Apply(w.state, w.disk, w.receipts, by.ID(), env, w.now)
+func (w *homeBriefWorld) send(env proto.Envelope) error {
+	res, err := home.Commands.Apply(w.state, w.disk, w.receipts, env, w.now)
 	if err != nil {
 		return err
 	}
@@ -263,17 +263,9 @@ func (w *homeBriefWorld) dependent() error {
 	return nil
 }
 
-// cause is the act that decided the brief, as its state keeps it.
-func (w *homeBriefWorld) cause() proto.Envelope {
-	if state := w.disk[w.brief].State; state != nil && state.Act != nil {
-		return *state.Act
-	}
-	return proto.Envelope{}
-}
-
 // queued checks the items queued since the last check, written as "why
-// member [task n]", and that each has the cause.
-func (w *homeBriefWorld) queued(want []string, cause proto.Envelope) error {
+// member [task n]".
+func (w *homeBriefWorld) queued(want []string) error {
 	var got []string
 	for _, it := range w.items {
 		words := []string{it.Why, w.name(it.AI)}
@@ -281,9 +273,6 @@ func (w *homeBriefWorld) queued(want []string, cause proto.Envelope) error {
 			words = append(words, "task", strconv.Itoa(w.state.Tasks[it.Task].Num))
 		}
 		got = append(got, strings.Join(words, " "))
-		if it.Cause == nil || *it.Cause != cause {
-			return fmt.Errorf("the item %q has the cause %+v", got[len(got)-1], it.Cause)
-		}
 	}
 	if !slices.Equal(got, want) {
 		return fmt.Errorf("queued %q", got)
@@ -335,8 +324,7 @@ func (w *homeBriefWorld) stillQueued() error {
 // merge brings task 1 to its merge, as rows 3 to 7 would, and reports it
 // merged, as unit HM-12 will: row 8 for task 1, then the release of each
 // queued task that depends on it, with Blocked while another dependency is
-// not merged. The cause of an assign item of a release is the act that
-// confirmed the brief, which the brief's state keeps.
+// not merged.
 func (w *homeBriefWorld) merge() error {
 	one := w.task(1)
 	one.Step, one.Commit = "merge", "c1"
@@ -356,9 +344,8 @@ func (w *homeBriefWorld) merge() error {
 			return err
 		}
 		w.state.Tasks[released.ID] = released
-		cause := w.cause()
 		for _, it := range fx.Items {
-			w.items = append(w.items, home.Item{AI: it.AI, Why: it.Why, Task: released.ID, Msg: released.ID, Cause: &cause})
+			w.items = append(w.items, home.Item{AI: it.AI, Why: it.Why, Task: released.ID, Msg: released.ID})
 		}
 	}
 	return nil

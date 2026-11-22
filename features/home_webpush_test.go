@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -43,6 +44,12 @@ type homeWebPushBrowser struct {
 	received [][]byte
 }
 
+func (b *homeWebPushBrowser) count() [][]byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([][]byte(nil), b.received...)
+}
+
 func (b *homeWebPushBrowser) take(req *http.Request) int {
 	if req.Method != http.MethodPost || req.Header.Get("Content-Encoding") != "aes128gcm" {
 		return http.StatusBadRequest
@@ -61,27 +68,23 @@ func (b *homeWebPushBrowser) take(req *http.Request) int {
 }
 
 func (b *homeWebPushBrowser) waitCount(want int) ([][]byte, error) {
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		b.mu.Lock()
-		got := append([][]byte(nil), b.received...)
-		b.mu.Unlock()
-		if len(got) == want {
-			if want == 0 {
-				time.Sleep(50 * time.Millisecond)
-				b.mu.Lock()
-				got = append([][]byte(nil), b.received...)
-				b.mu.Unlock()
-			}
-			if len(got) == want {
-				return got, nil
-			}
+	if want == 0 {
+		time.Sleep(50 * time.Millisecond)
+		got := b.count()
+		if len(got) != 0 {
+			return got, fmt.Errorf("push endpoint got %d notifications; want 0", len(got))
 		}
-		if time.Now().After(deadline) {
-			return got, fmt.Errorf("push endpoint got %d notifications; want %d", len(got), want)
+		return got, nil
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := b.count(); len(got) == want {
+			return got, nil
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	got := b.count()
+	return got, fmt.Errorf("push endpoint got %d notifications; want %d", len(got), want)
 }
 
 type homeWebPushWorld struct {
@@ -95,9 +98,7 @@ type homeWebPushWorld struct {
 	hostPeer  *homeRunPeer
 	browsers  map[string]*homeWebPushBrowser
 	groups    map[string]string
-	ownerID   string
 	aiID      string
-	taskID    string
 	lastMsgID string
 	nonce     int
 }
@@ -176,78 +177,6 @@ func (w *homeWebPushWorld) ownerLog() (*identity.Log, error) {
 	return log, nil
 }
 
-func (w *homeWebPushWorld) tables() home.Tables {
-	return home.Tables{
-		Commands: home.Table{
-			"group/create": func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-				var p struct {
-					Name string `json:"name"`
-					AI   string `json:"ai"`
-				}
-				if refusal := c.Decode(&p); refusal != nil {
-					return home.Result{}, refusal
-				}
-				grp := proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: p.Name, Kind: "project", Home: s.Home, Checks: []string{}, Created: c.Now}
-				own := proto.HumanMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.ownerID}, Group: s.ID, Kind: "human", User: c.Who.User, Name: "Owner"}, Role: "owner"}
-				ai := proto.AIMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: w.aiID}, Group: s.ID, Kind: "ai", User: c.Who.User, Name: p.AI}, Host: w.hostKey.ID()}
-				task := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: w.taskID}, Group: s.ID, Num: 1, Title: "Task", Slug: "task", State: "active", Step: "local_check", Assignee: w.aiID}
-				return home.Result{Rows: []home.Row{home.RowOf(grp), home.RowOf(own), home.RowOf(ai), home.RowOf(task)}, GroupsChanged: true}, nil
-			},
-			"post/approval": func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-				var p proto.Post[proto.ApprovalBody]
-				if refusal := c.Decode(&p); refusal != nil {
-					return home.Result{}, refusal
-				}
-				mentions := make([]string, len(p.Mentions))
-				for i, id := range p.Mentions {
-					mentions[i] = string(id)
-				}
-				body, _ := json.Marshal(p.Body)
-				thread := string(*p.Thread)
-				row := proto.MsgRow{
-					RowHeader: proto.RowHeader{Type: "msg", ID: string(c.Nonce)},
-					Group:     s.ID,
-					Thread:    &thread,
-					Main:      true,
-					By:        c.Who.Member(),
-					Kind:      "approval",
-					Timestamp: c.Timestamp,
-					Text:      p.Text,
-					Mentions:  mentions,
-					Body:      body,
-					State:     &proto.CardState{Status: "pending"},
-					Env:       &c.Env,
-				}
-				return home.Result{Rows: []home.Row{home.RowOf(row)}}, nil
-			},
-			"post/text": func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
-				var p proto.Post[proto.EmptyBody]
-				if refusal := c.Decode(&p); refusal != nil {
-					return home.Result{}, refusal
-				}
-				mentions := make([]string, len(p.Mentions))
-				for i, id := range p.Mentions {
-					mentions[i] = string(id)
-				}
-				row := proto.MsgRow{
-					RowHeader: proto.RowHeader{Type: "msg", ID: string(c.Nonce)},
-					Group:     s.ID,
-					By:        c.Who.Member(),
-					Kind:      "text",
-					Timestamp: c.Timestamp,
-					Text:      p.Text,
-					Mentions:  mentions,
-					Body:      json.RawMessage(`{}`),
-					Env:       &c.Env,
-				}
-				return home.Result{Rows: []home.Row{home.RowOf(row)}}, nil
-			},
-			"push": home.Commands["push"],
-		},
-		After: home.Rules[home.Hook]{"push": home.After["push"]},
-	}
-}
-
 func (w *homeWebPushWorld) setup(cleanup func(func()), groupName, aiName string) error {
 	mux := http.NewServeMux()
 	w.server = httptest.NewServer(mux)
@@ -255,9 +184,7 @@ func (w *homeWebPushWorld) setup(cleanup func(func()), groupName, aiName string)
 
 	w.homeKey = exampleKey("wpush home")
 	w.hostKey = exampleKey("wpush host")
-	w.ownerID = string(exampleID("wpush owner member"))
 	w.aiID = string(exampleID("wpush ai member"))
-	w.taskID = string(exampleID("wpush task"))
 	w.groups = map[string]string{}
 	w.browsers = map[string]*homeWebPushBrowser{}
 
@@ -289,6 +216,11 @@ func (w *homeWebPushWorld) setup(cleanup func(func()), groupName, aiName string)
 
 func (w *homeWebPushWorld) startLoop(cleanup func(func()), attachBrowsers bool) error {
 	owner := w.browsers["the first browser"].key.ID()
+	seedLog, err := w.ownerLog()
+	if err != nil {
+		return err
+	}
+	entries := append([]proto.Envelope(nil), seedLog.Entries...)
 	loop, err := home.StartLoop(home.LoopConfig{
 		Store: w.db,
 		Home:  w.homeKey.ID(),
@@ -297,10 +229,13 @@ func (w *homeWebPushWorld) startLoop(cleanup func(func()), attachBrowsers bool) 
 			if user != owner {
 				return nil
 			}
-			log, _ := w.ownerLog()
-			return log
+			replayed, err := identity.Replay(owner, entries)
+			if err != nil {
+				return nil
+			}
+			return replayed
 		},
-		Tables: w.tables(),
+		Tables: home.NodeTables(),
 		Now:    func() time.Time { return w.now },
 	})
 	if err != nil {
@@ -344,14 +279,33 @@ func (w *homeWebPushWorld) execCmd(conn *home.Conn, peer *homeRunPeer, signer id
 	return nil
 }
 
+func (w *homeWebPushWorld) ownerMember(groupID string) proto.ID {
+	sum := sha256.Sum256([]byte("SoloDawn group owner " + groupID))
+	return proto.ID(base64.RawURLEncoding.EncodeToString(sum[:16]))
+}
+
 func (w *homeWebPushWorld) createWith(who, groupName, aiName string) error {
-	gid := string(w.nextID())
-	w.groups[groupName] = gid
+	gid := w.nextID()
+	w.groups[groupName] = string(gid)
 	b := w.browsers[who]
-	return w.execCmd(b.conn, b.peer, b.key, map[string]any{
-		"t": "group", "op": "create", "n": gid, "ts": w.now.UnixMilli(), "g": gid,
-		"name": groupName, "ai": aiName,
-	})
+	create := proto.GroupCreate{
+		GroupCommand: proto.GroupCommand{
+			HomeCommand: proto.HomeCommand{Type: "group", Nonce: gid, Timestamp: w.now.UnixMilli(), Group: gid},
+			Op:          "create",
+		},
+		Name: groupName, Kind: "project", Repo: "repo", Base: "main", Forge: "none", Checks: []string{}, MemberName: "Owner",
+	}
+	if err := w.execCmd(b.conn, b.peer, b.key, create); err != nil {
+		return err
+	}
+	addAI := proto.MemberAddAI{
+		MemberCommand: proto.MemberCommand{
+			HomeCommand: proto.HomeCommand{Type: "member", Nonce: w.nextID(), Timestamp: w.now.UnixMilli(), Group: gid},
+			Op:          "add_ai", ID: proto.ID(w.aiID),
+		},
+		CLI: "codex", Name: aiName, Account: "api_key", Approvers: []string{},
+	}
+	return w.execCmd(w.hostConn, w.hostPeer, w.hostKey, addAI)
 }
 
 func (w *homeWebPushWorld) createGroup(groupName, aiName string) error {
@@ -385,22 +339,19 @@ func (w *homeWebPushWorld) postApproval(_, groupName, command, why, text string)
 	msgID := w.nextID()
 	w.lastMsgID = string(msgID)
 	whyLine := why + "\nAdditional CLI detail line"
-	thread := proto.ID(w.taskID)
+	gid := w.groups[groupName]
 	post := proto.Post[proto.ApprovalBody]{
 		HomeCommand: proto.HomeCommand{
 			Type:      "post",
 			Nonce:     msgID,
 			Timestamp: w.now.UnixMilli(),
-			Group:     proto.ID(w.groups[groupName]),
+			Group:     proto.ID(gid),
 			As:        proto.ID(w.aiID),
 		},
 		Kind:     "approval",
-		Thread:   &thread,
-		Main:     true,
 		Text:     text,
-		Mentions: []proto.ID{proto.ID(w.ownerID)},
+		Mentions: []proto.ID{w.ownerMember(gid)},
 		Body: proto.ApprovalBody{
-			Task:      w.taskID,
 			AI:        w.aiID,
 			Tool:      "Bash",
 			Command:   command,
@@ -415,17 +366,18 @@ func (w *homeWebPushWorld) postApproval(_, groupName, command, why, text string)
 func (w *homeWebPushWorld) postMention(_, text, groupName string) error {
 	msgID := w.nextID()
 	w.lastMsgID = string(msgID)
+	gid := w.groups[groupName]
 	post := proto.Post[proto.EmptyBody]{
 		HomeCommand: proto.HomeCommand{
 			Type:      "post",
 			Nonce:     msgID,
 			Timestamp: w.now.UnixMilli(),
-			Group:     proto.ID(w.groups[groupName]),
+			Group:     proto.ID(gid),
 			As:        proto.ID(w.aiID),
 		},
 		Kind:     "text",
 		Text:     text,
-		Mentions: []proto.ID{proto.ID(w.ownerID)},
+		Mentions: []proto.ID{w.ownerMember(gid)},
 		Body:     proto.EmptyBody{},
 	}
 	return w.execCmd(w.hostConn, w.hostPeer, w.hostKey, post)
@@ -433,10 +385,7 @@ func (w *homeWebPushWorld) postMention(_, text, groupName string) error {
 
 func (w *homeWebPushWorld) restart(cleanup func(func())) error {
 	w.loop.Close()
-	if err := w.startLoop(cleanup, false); err != nil {
-		return err
-	}
-	return w.loop.LoadPushSubscriptions()
+	return w.startLoop(cleanup, false)
 }
 
 func (w *homeWebPushWorld) turnOffFirst() error {
@@ -466,22 +415,16 @@ func (w *homeWebPushWorld) checkCount(who string, want int) error {
 
 func (w *homeWebPushWorld) checkNoMore(who string) error {
 	b := w.browsers[who]
-	b.mu.Lock()
-	before := len(b.received)
-	b.mu.Unlock()
+	before := len(b.count())
 	time.Sleep(50 * time.Millisecond)
-	b.mu.Lock()
-	after := len(b.received)
-	b.mu.Unlock()
-	if after != before {
+	if after := len(b.count()); after != before {
 		return fmt.Errorf("%s received %d further notifications", who, after-before)
 	}
 	return nil
 }
 
 func (w *homeWebPushWorld) checkWireOpaque(a, b, c, d string) error {
-	first := w.browsers["the first browser"]
-	bodies, err := first.waitCount(1)
+	bodies, err := w.browsers["the first browser"].waitCount(1)
 	if err != nil {
 		return err
 	}
@@ -495,26 +438,16 @@ func (w *homeWebPushWorld) checkWireOpaque(a, b, c, d string) error {
 }
 
 func (w *homeWebPushWorld) checkDecrypted(groupName, kind, who, title, leakOne, leakTwo string) error {
-	first := w.browsers["the first browser"]
-	first.mu.Lock()
-	if len(first.received) == 0 {
-		first.mu.Unlock()
+	got := w.browsers["the first browser"].count()
+	if len(got) == 0 {
 		return fmt.Errorf("no notification received")
 	}
-	wire := first.received[len(first.received)-1]
-	first.mu.Unlock()
-
-	plain, err := homeWebPushDecrypt(first, wire)
+	plain, err := homeWebPushDecrypt(w.browsers["the first browser"], got[len(got)-1])
 	if err != nil {
 		return err
 	}
-	for _, forbidden := range []string{leakOne, leakTwo} {
-		if forbidden != "" && bytes.Contains(plain, []byte(forbidden)) {
-			return fmt.Errorf("decrypted reminder leaked %q in %s", forbidden, plain)
-		}
-	}
-	if title == "" && bytes.Contains(plain, []byte(`"title"`)) {
-		return fmt.Errorf("decrypted reminder included empty title: %s", plain)
+	if err := homeWebPushNoLeaks(plain, title, leakOne, leakTwo); err != nil {
+		return err
 	}
 	var rem proto.Reminder
 	if err := proto.Decode(plain, &rem); err != nil {
@@ -534,54 +467,66 @@ func (w *homeWebPushWorld) checkDecrypted(groupName, kind, who, title, leakOne, 
 	return nil
 }
 
+func homeWebPushNoLeaks(plain []byte, title, leakOne, leakTwo string) error {
+	for _, forbidden := range []string{leakOne, leakTwo} {
+		if forbidden != "" && bytes.Contains(plain, []byte(forbidden)) {
+			return fmt.Errorf("decrypted reminder leaked %q in %s", forbidden, plain)
+		}
+	}
+	if title == "" && bytes.Contains(plain, []byte(`"title"`)) {
+		return fmt.Errorf("decrypted reminder included empty title: %s", plain)
+	}
+	return nil
+}
+
 func homeWebPushDecrypt(b *homeWebPushBrowser, wire []byte) ([]byte, error) {
 	if len(wire) < 21 {
 		return nil, fmt.Errorf("push body too short: %d", len(wire))
 	}
-	salt := wire[:16]
 	rs := binary.BigEndian.Uint32(wire[16:20])
 	idLen := int(wire[20])
 	if rs != 4096 || len(wire) < 21+idLen+16 {
 		return nil, fmt.Errorf("push header invalid: rs=%d len=%d", rs, len(wire))
 	}
-	asPubBytes := wire[21 : 21+idLen]
-	ciphertext := wire[21+idLen:]
-	asPub, err := ecdh.P256().NewPublicKey(asPubBytes)
+	return homeWebPushOpen(b, wire[:16], wire[21:21+idLen], wire[21+idLen:])
+}
+
+func homeWebPushAEAD(b *homeWebPushBrowser, salt, ephem []byte) (cipher.AEAD, []byte, error) {
+	peerPub, err := ecdh.P256().NewPublicKey(ephem)
+	if err != nil {
+		return nil, nil, err
+	}
+	secret, err := b.uaPriv.ECDH(peerPub)
+	if err != nil {
+		return nil, nil, err
+	}
+	ctxInfo := append(append([]byte("WebPush: info\x00"), b.uaPriv.PublicKey().Bytes()...), ephem...)
+	prk, err1 := hkdf.Key(sha256.New, secret, b.auth, string(ctxInfo), 32)
+	keyBytes, err2 := hkdf.Key(sha256.New, prk, salt, "Content-Encoding: aes128gcm\x00", 16)
+	ivBytes, err3 := hkdf.Key(sha256.New, prk, salt, "Content-Encoding: nonce\x00", 12)
+	if err := errors.Join(err1, err2, err3); err != nil {
+		return nil, nil, err
+	}
+	ciph, err := aes.NewCipher(keyBytes)
+	if err != nil {
+		return nil, nil, err
+	}
+	aead, err := cipher.NewGCM(ciph)
+	return aead, ivBytes, err
+}
+
+func homeWebPushOpen(b *homeWebPushBrowser, salt, ephem, cipherBytes []byte) ([]byte, error) {
+	aead, ivBytes, err := homeWebPushAEAD(b, salt, ephem)
 	if err != nil {
 		return nil, err
 	}
-	shared, err := b.uaPriv.ECDH(asPub)
+	raw, err := aead.Open(nil, ivBytes, cipherBytes, nil)
 	if err != nil {
 		return nil, err
 	}
-	info := append(append([]byte("WebPush: info\x00"), b.uaPriv.PublicKey().Bytes()...), asPubBytes...)
-	ikm, err := hkdf.Key(sha256.New, shared, b.auth, string(info), 32)
-	if err != nil {
-		return nil, err
-	}
-	cek, err := hkdf.Key(sha256.New, ikm, salt, "Content-Encoding: aes128gcm\x00", 16)
-	if err != nil {
-		return nil, err
-	}
-	nonce, err := hkdf.Key(sha256.New, ikm, salt, "Content-Encoding: nonce\x00", 12)
-	if err != nil {
-		return nil, err
-	}
-	block, err := aes.NewCipher(cek)
-	if err != nil {
-		return nil, err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	padded, err := gcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return nil, err
-	}
-	trimmed := bytes.TrimRight(padded, "\x00")
-	if len(trimmed) == 0 || trimmed[len(trimmed)-1] != 0x02 {
+	cut := bytes.TrimRight(raw, "\x00")
+	if len(cut) == 0 || cut[len(cut)-1] != 0x02 {
 		return nil, fmt.Errorf("missing RFC 8188 delimiter")
 	}
-	return trimmed[:len(trimmed)-1], nil
+	return cut[:len(cut)-1], nil
 }

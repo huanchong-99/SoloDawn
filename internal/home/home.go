@@ -171,19 +171,18 @@ func sizeLimit(row any) int {
 }
 
 // Item is an inbox item that a command queues for an AI, before the home
-// signs it: the fields that planning/contracts/datachannel.md section 6
+// numbers it: the fields that planning/contracts/datachannel.md section 6
 // gives its why. A field the why does not have stays at its zero value.
 type Item struct {
 	AI     string // the member it is for; for merge, the assignee whose host merges
 	Why    string
 	Task   string
 	Msg    string
-	Commit string          // review, merge
-	PR     int             // merge, when the group has a remote
-	Jump   bool            // mention, after the author's jump
-	Code   string          // notice
-	Detail string          // notice, where its case has one
-	Cause  *proto.Envelope // the signed act that led to the item
+	Commit string // review, merge
+	PR     int    // merge, when the group has a remote
+	Jump   bool   // mention, after the author's jump
+	Code   string // notice
+	Detail string // notice, where its case has one
 
 	// NotBefore holds the item back until that time, in Unix milliseconds:
 	// the wake-up cap. 0 sends it at once.
@@ -310,21 +309,20 @@ func addOnce[F any](table map[string]F, name string, f F) {
 	table[name] = f
 }
 
-// Apply answers the cmd that arrived, on the connection authenticated for
-// device, at the home's time now. It runs inside the transaction of the
-// command, which disk reads and which holds the receipts: the caller writes
-// the rows, the items, the retirements and the other writes of the result in
-// that transaction, commits it, and then gives the result to s.Commit. An
-// error is a receipt that could not be read or written: the caller drops the
-// transaction and answers internal.
+// Apply answers the cmd that arrived at the home's time now. It runs inside
+// the transaction of the command, which disk reads and which holds the
+// receipts: the caller writes the rows, the items, the retirements and the
+// other writes of the result in that transaction, commits it, and then gives
+// the result to s.Commit. An error is a receipt that could not be read or
+// written: the caller drops the transaction and answers internal.
 //
 // The checks come in this order, and the first that fails is the answer: the
-// connection and the envelope (State.open), which leave no receipt; then the
+// envelope and the group (State.open), which leave no receipt; then the
 // receipt, which answers a repeated command as the first time; then the
 // table, the group and the signer (Table.find) and the function itself. What
 // the last two answer, a refusal included, is the receipt.
-func (t Table) Apply(s *State, disk Disk, receipts Receipts, device string, env proto.Envelope, now time.Time) (Result, error) {
-	hdr, refusal := s.open(device, env, now)
+func (t Table) Apply(s *State, disk Disk, receipts Receipts, env proto.Envelope, now time.Time) (Result, error) {
+	hdr, refusal := s.open(env, now)
 	if refusal != nil {
 		return refused(refusal), nil
 	}

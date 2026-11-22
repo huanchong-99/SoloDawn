@@ -112,7 +112,7 @@ and B-11, and S-2, S-3, S-5 before B-13.
 | Id | Task | → | Done when |
 | --- | --- | --- | --- |
 | B-16 | A task session, minimal: `task start` and `task branch` on the home with the task row and `task` message; `start_task`; worktree and branch; the session created on `assign`; `task cancel` in its smallest form, ending the session | B-15 | A5.7 |
-| B-17 | Permissions: level by session kind for both CLIs; what the node itself offers at each level; `perm.set`; the `approve` tool and Codex approval requests behind one handler; approval records; `post` kind `approval` and `act approve`/`deny`; the wait and the late decision; the check of `cause` on the host; audit and the `audit` request | B-16, answers of S-2, S-3, S-5 | A4.1 to A4.6, A4.10. The `live` part of A4.1 is run first: R-41 rests on it (`contracts/drivers.md` 1.1) |
+| B-17 | Permissions: level by session kind for both CLIs; what the node itself offers at each level; `perm.set`; the `approve` tool and Codex approval requests behind one handler; approval records; `post` kind `approval` and `act approve`/`deny`; the wait and the late decision; the check of `cause` on the host; audit and the `audit` request | B-16, answers of S-2, S-3, S-5 | A4.1 to A4.6, A4.10. The `live` part of A4.1 is run first: R-41 rests on it (`contracts/drivers.md` 1.1), and `AskUserQuestion` reaches `approve` under each permission mode, and the `updatedInput.answers` reply is honoured |
 | B-18 | Limits and stops: usage recording and caps; turn time limit; wake-up cap; `group pause`/`resume`; `host.offline`/`online` | B-17 | A4.7 to A4.9 |
 
 ### M5 tasks

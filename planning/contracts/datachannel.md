@@ -147,7 +147,9 @@ before `synced` and rows from `fetch` never move it.
 `{"t":"fetched","re":3,"ok":true,"rows":[ … ],"more":true}`: the home stops
 filling `rows` when the next row would exceed the message limit; `more`
 says whether older rows exist. `rows` is `[]` when there is nothing and
-never a `gone` marker, which has no `pos` (`contracts/rows.md`).
+never a `gone` marker, which has no `pos` (`contracts/rows.md`). A group
+this node does not home is answered `not_found`; a peer the group does not
+serve (section 8), `forbidden`.
 
 ## 5. Commands
 
@@ -157,15 +159,13 @@ never a `gone` marker, which has no `pos` (`contracts/rows.md`).
 (`{"re":4,"err":{"code":"forbidden","msg":"…"}}`).
 
 - The payload inside `env` names the command in its own `t`.
-- The signer `env.k` must be the device that this connection was
-  authenticated for; a command signed by another device is `forbidden`.
 - A command that the receiver has already accepted gets the same outcome
   again, under the `re` of the new request, and has no second effect
   (`contracts/commands.md`, "Once only").
 - A home command has `g`; a host command has `to`, the node's device id.
 - A home answers with the first of these that fails, in this order: the
-  signer is the connection's device; the envelope checks
-  (`contracts/envelope.md` section 3); `g` is there, else `bad_request`.
+  envelope checks (`contracts/envelope.md` section 3); `g` is there, else
+  `bad_request`.
   These leave no receipt. Then the receipt answers a command that was
   answered before. Then, with the outcome kept as the receipt: the type
   and, for `group`, `member`, `task`, `post` and `act`, the `op`, `kind`
@@ -177,60 +177,53 @@ never a `gone` marker, which has no `pos` (`contracts/rows.md`).
 
 ## 6. Inbox (home to host)
 
-The home decides which AI must see what and queues an item per AI. Every
-item is an instruction to a host, so every item is signed by the home.
+The home decides which AI must see what and queues an item per AI. By the
+owner's decision of 2026-11-21 (no attack-and-defence code), an inbox item
+carries a plain unsigned `item` object with no `env` signature, no `cause`,
+no `g` and no `to`.
 
 ```json
 {"t":"inbox","g":"Qm1…","items":[
-  {"env":{"p":"{\"t\":\"item\",\"n\":\"…\",\"ts\":1763600000000,\"g\":\"Qm1…\",\"to\":\"<host device>\",\"item\":4411,\"ai\":\"<member id>\",\"why\":\"review\",\"task\":\"t12…\",\"commit\":\"9f2c1ab\"}",
-          "k":"<home device>","s":"…"},
+  {"item":{"item":4411,"ai":"<member id>","why":"review","task":"t12…","commit":"9f2c1ab"},
    "task":{"r":"task", …}}
 ]}
 ```
 
-`env` is the item, built and signed by the home in the transaction that
+`item` is the plain item object, built by the home in the transaction that
 queues it, and stored: what is sent later is what was decided then,
-whatever the task has become. Its payload always has `t` (`item`), `n`,
-`ts`, `g`, `to`, `item`, `ai` and `why`, and the fields the table gives its
-`why`, each there exactly when the table says. `item` is the number that
-`ack` names. In the payload, `task` and `msg` are the ids of those rows,
-and the optional fields are `task`, `msg`, `commit`, `pr`, `jump`, `code`
-and `detail`. Beside `env`, `msg` and
-`task` are copies of the rows `env` names, taken when the item is sent, to
-build the turn from (`msg.env` is the author's own envelope), and `cause`
-is the signed `act` that led to the item, unchanged. `cause` is beside
-`env` only, never in the payload: its own signature is its authority.
-Beside `env`, all three are optional, and `items` is `[]` when a frame has
-none.
+whatever the task has become. It always has `item`, `ai` and `why`, and the
+fields the table gives its `why`, each there exactly when the table says.
+`ack.item` is `items[].item.item`. In `item`, `task` and `msg` are the ids
+of those rows, and the optional fields are `task`, `msg`, `commit`, `pr`,
+`jump`, `code` and `detail`. Beside `item`, `msg` and `task` are optional
+copies of the rows `item` names, taken when the item is sent, to build the
+turn from (`msg.env` is the author's own envelope); `items` is `[]` when a
+frame has none.
 
 | `why` | `task` | `msg` | Other |
 | --- | --- | --- | --- |
 | `mention` | when the message is in a thread | the message | `jump`: `true` after the author's `jump` (R-72), else absent |
 | `reply` | when the reply is in a thread | the reply | — |
-| `assign` | always | the `task` message (task-machine rows 1, 8); `re` of `task start` (row 2); the latest `checks` or `review` message (row 11); absent when there is none | `cause` in rows 1 and 8: the `act` that confirmed the brief |
+| `assign` | always | the `task` message (task-machine rows 1, 8); `re` of `task start` (row 2); the latest `checks` or `review` message (row 11); absent when there is none | — |
 | `review`, `merge` | always | — | `commit`; for `merge`, `pr` when the group has a remote |
 | `reviewed`, `checks` | always | the `review`, or the `checks`, message | — |
 | `resume` | always | — | — |
-| `decided` | when the card names a task | the card | `cause`: the `act` that decided it |
-| `confirmed` | — | the brief | `cause`: the `act` that confirmed it or sent it back |
+| `decided` | when the card names a task | the card | — |
+| `confirmed` | — | the brief | — |
 | `notice` | when the case is about a task | the message that records the case, when there is one | `code`; `detail` where the case has one (`contracts/task-machine.md` section 5) |
 
-- **What a host accepts (step 1).** The item's envelope is signed by the
-  home of that group, that device is in the log of the host's owner, `to`
-  is this host and `ai` runs here. For `decided` on an approval the host
-  also checks `cause` itself: signed by its owner or a named approver, about
-  the request it holds (`flows/approval.md`). Rows without a signature are
-  content, never authority. From step 2 a home may belong to someone else,
-  and an item will also need the owner's own signature for that task.
-- **Still current.** The signature is checked when an item arrives; whether
-  it is still true is checked when the host **uses** it, after it has read
-  the group's state on this connection. For a work item (`assign`,
-  `checks`, `reviewed`, `review`, `resume`, `merge`): the task is active,
-  the AI still has that role, and for `review` and `merge` the task is at
-  that step with the item's commit. If not, the host refuses it (audit
-  `refused`, then `ack`). A `notice` is delivered whatever the task has
-  become. The home pushes a row change before the items it produces, and
-  deletes items that a later change made pointless.
+- **What a host accepts (step 1).** The frame comes from the home of that
+  group and `ai` runs here (owner's decision of 2026-11-21: no
+  attack-and-defence code, so no item signature, no `cause` check and no
+  `to` check).
+- **Still current.** Whether it is still true is checked when the host
+  **uses** it, after it has read the group's state on this connection. For
+  a work item (`assign`, `checks`, `reviewed`, `review`, `resume`, `merge`):
+  the task is active, the AI still has that role, and for `review` and
+  `merge` the task is at that step with the item's commit. If not, the host
+  refuses it (audit `refused`, then `ack`). A `notice` is delivered
+  whatever the task has become. The home pushes a row change before the
+  items it produces, and deletes items that a later change made pointless.
 - The host answers `{"t":"ack","g":"…","item":4411}` when it delivers the
   item to the session or refuses it. The home deletes an acknowledged item
   only if the acknowledging connection is the item's host. On every `hello`

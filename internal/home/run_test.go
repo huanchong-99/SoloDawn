@@ -30,7 +30,7 @@ type runWorld struct {
 	clock   atomic.Int64
 	nonce   atomic.Int64
 	reports chan error
-	ghost   *home.Conn // a connection that is gone: Watch refuses it, after the group's jobs
+	ghost   *home.Conn // a connection that is gone: Sync sends it nothing, after the group's jobs
 }
 
 func runOpen(t *testing.T) *store.Store {
@@ -81,7 +81,7 @@ func runStart(t *testing.T, db *store.Store, tables home.Tables, change ...func(
 // were given so far.
 func (w *runWorld) idle() {
 	for _, group := range []string{groupID, runOther} {
-		w.loop.Watch(w.ghost, group, false)
+		w.loop.Sync(w.ghost, proto.Sync{Group: group})
 	}
 }
 
@@ -287,9 +287,30 @@ func runWait[T any](t *testing.T, ch <-chan T) {
 	}
 }
 
-// settled waits until a group has done every job it was given so far.
-func (p *runPeer) settled(group string) {
-	p.w.loop.Watch(p.conn, group, false)
+// watch subscribes the peer to a group at its current seq through Sync.
+func (p *runPeer) watch(group string, stateOnly bool) int64 {
+	p.w.t.Helper()
+	var since int64
+	for _, g := range p.w.loop.Groups(p.conn) {
+		if g.Group == group {
+			since = g.Seq
+		}
+	}
+	p.re++
+	p.w.loop.Sync(p.conn, proto.Sync{Request: proto.Request{Type: "sync", ID: p.re}, Group: group, Since: since, StateOnly: stateOnly})
+	var synced proto.Synced
+	equal(p.w.t, proto.Decode([]byte(p.next()), &synced), nil)
+	equal(p.w.t, []any{synced.Re, synced.Group, synced.Seq}, []any{p.re, group, since})
+	return synced.Seq
+}
+
+func (p *runPeer) syncRefused(group, code string) {
+	p.w.t.Helper()
+	p.re++
+	p.w.loop.Sync(p.conn, proto.Sync{Request: proto.Request{Type: "sync", ID: p.re}, Group: group})
+	var resp proto.ErrorResponse
+	equal(p.w.t, proto.Decode([]byte(p.next()), &resp), nil)
+	equal(p.w.t, []any{resp.Re, resp.Err.Code}, []any{p.re, code})
 }
 
 func runRows(group string, rows ...any) string {
@@ -414,9 +435,7 @@ func TestRunTellsEveryClientOfAGroup(t *testing.T) {
 	w := runStart(t, runOpen(t), runTables())
 	first, second := w.attach(browser), w.attach(laptop)
 	equal(t, w.loop.Groups(second.conn), []proto.GroupSummary{})
-	if _, ok := w.loop.Watch(second.conn, groupID, false); ok {
-		t.Fatal("a group that does not exist was watched")
-	}
+	second.syncRefused(groupID, "not_found")
 
 	first.does(groupID, "group", runCreateWebsite)
 	listed := runGroupsFrame(proto.GroupSummary{Group: groupID, Name: "Website", Seq: 3})
@@ -424,10 +443,8 @@ func TestRunTellsEveryClientOfAGroup(t *testing.T) {
 	second.gets(listed)
 	equal(t, w.loop.Groups(second.conn), []proto.GroupSummary{{Group: groupID, Name: "Website", Seq: 3}})
 
-	seq, ok := w.loop.Watch(second.conn, groupID, false)
-	equal(t, []any{seq, ok}, []any{int64(3), true})
-	seq, ok = w.loop.Watch(first.conn, groupID, false)
-	equal(t, []any{seq, ok}, []any{int64(3), true})
+	equal(t, second.watch(groupID, false), int64(3))
+	equal(t, first.watch(groupID, false), int64(3))
 
 	re := first.send(groupID, "post", `,"kind":"text","text":"hello"`)
 	posted := runRows(groupID, runMsg(runID(w.nonce.Load()), 4, "hello"))
@@ -537,8 +554,7 @@ func TestRunLoadsItsGroupsAfterARestart(t *testing.T) {
 	// The tablet is known only through the device row of the first group.
 	equal(t, w.loop.Groups(p.conn), []proto.GroupSummary{{Group: groupID, Name: "Website", Seq: 7}})
 	equal(t, w.loop.Groups(w.attach(browser).conn), []proto.GroupSummary{{Group: groupID, Name: "Website", Seq: 7}, {Group: runOther, Name: "Other", Seq: 3}})
-	seq, ok := w.loop.Watch(p.conn, groupID, false)
-	equal(t, []any{seq, ok}, []any{int64(7), true})
+	equal(t, p.watch(groupID, false), int64(7))
 	re = p.send(groupID, "task", `,"op":"start"`)
 	p.gets(fmt.Sprintf(`{"re":%d,"ok":true,"num":3}`, re))
 	p.next()
@@ -587,7 +603,7 @@ func TestRunDoesNotStartOnAStoreItCannotRead(t *testing.T) {
 func TestRunKeepsTheOrderOfAGroup(t *testing.T) {
 	w, first := runFounded(t, runTables())
 	second, watcher := w.attach(laptop), w.attach(browser)
-	watcher.settled(groupID)
+	watcher.watch(groupID, false)
 	var want []string
 	for i := range 60 {
 		p := []*runPeer{first, second}[i%2]
@@ -635,7 +651,7 @@ func TestRunARefusedCommandLeavesOnlyItsReceipt(t *testing.T) {
 	var hooks runRecord
 	tables.After.Add("seen", func(s *home.State, res home.Result) { hooks.add("%d rows at %d", len(res.Rows), s.Seq) })
 	w, p := runFounded(t, tables)
-	p.settled(groupID)
+	p.watch(groupID, false)
 	receipts := func() int { return runQuery[int](t, w.db, "SELECT count(*) FROM receipt") }
 
 	refused := w.cmd(browser, groupID, "note", `,"text":""`)
@@ -646,11 +662,6 @@ func TestRunARefusedCommandLeavesOnlyItsReceipt(t *testing.T) {
 	// The same command again is answered from the receipt.
 	w.loop.Cmd(p.conn, 8, refused)
 	p.gets(`{"re":8,"err":{"code":"conflict","msg":"the command was refused when it first arrived"}}`)
-	// A command on another device's connection is refused before the receipt.
-	other := w.attach(laptop)
-	w.loop.Cmd(other.conn, 1, w.cmd(browser, groupID, "note", `,"text":"x"`))
-	other.gets(`{"re":1,"err":{"code":"forbidden","msg":"the command is signed by another device than this connection's"}}`)
-	equal(t, receipts(), 2)
 
 	p.quiet()
 	equal(t, hooks.all(), []string{"3 rows at 3"})
@@ -681,7 +692,6 @@ func TestRunAnswersACommandWithoutAGroup(t *testing.T) {
 		code string
 	}{
 		{p, browser.Sign(head(``)), "bad_request"},
-		{p, laptop.Sign(head(``)), "forbidden"},
 		{p, proto.Envelope{Payload: head(``), Key: browser.ID(), Signature: "AA"}, "bad_sig"},
 		{stranger, nobody.Sign(head(``)), "unknown_device"},
 		{p, browser.Sign(head(`,"g":"no id"`)), "bad_request"},
@@ -771,7 +781,7 @@ func TestRunAFailedWriteChangesNothing(t *testing.T) {
 		return results[p.How](c), nil
 	}
 	w, p := runFounded(t, tables)
-	p.settled(groupID)
+	p.watch(groupID, false)
 	const internal = `,"err":{"code":"internal","msg":"the home could not apply the command; the cause is in its log"}}`
 	fails := func(how, cause string) {
 		t.Helper()
@@ -872,4 +882,24 @@ func TestRunNodeTables(t *testing.T) {
 	same := func(a, b any) bool { return reflect.ValueOf(a).Pointer() == reflect.ValueOf(b).Pointer() }
 	equal(t, []bool{same(tables.Commands, home.Commands), same(tables.Timers, home.Timers), same(tables.Events, home.Events), same(tables.After, home.After)},
 		[]bool{true, true, true, true})
+}
+
+func TestRunDynamicOwnerFn(t *testing.T) {
+	db := runOpen(t)
+	var owner atomic.Value
+	owner.Store("")
+	loop, err := home.StartLoop(home.LoopConfig{
+		Store: db, Home: node.ID(),
+		OwnerFn: func() string { return owner.Load().(string) },
+		Logs:    runLogs(t), Tables: runTables(),
+	})
+	equal(t, err, nil)
+	defer loop.Close()
+
+	client := runNewClient()
+	conn := loop.Attach(browser.ID(), client)
+	owner.Store(browser.ID())
+	now := time.Now().UnixMilli()
+	loop.Cmd(conn, 1, browser.Sign(fmt.Sprintf(`{"t":"group","n":%q,"ts":%d,"g":%q%s}`, runID(1), now, groupID, runCreateWebsite)))
+	equal(t, runFrame(<-client.got), `{"re":1,"ok":true}`)
 }

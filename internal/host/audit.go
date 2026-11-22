@@ -12,6 +12,7 @@ const (
 	AuditHandback  = "handback"
 	AuditMerge     = "merge"
 	AuditSetting   = "setting"
+	AuditKilled    = "killed" // an idle CLI did not exit within 10 s of closing its input
 )
 
 // An AuditRow is one row of the node's audit record (R-139). A field that
