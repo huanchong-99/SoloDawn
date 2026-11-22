@@ -240,7 +240,13 @@ const messageFiles = examples.filter((name) => name.startsWith('row-msg-'));
 describe('message contracts', () => {
   it.each(messageFiles)('%s names its kind and card status', (name) => {
     const row = p.decode(p.MsgRow, goldens[name]);
-    expect(name).toBe(['row-msg', row.kind, ...(row.state ? [row.state.status] : [])].join('-'));
+    const suffix =
+      row.kind === 'brief' && row.body.preset !== undefined
+        ? ['preset']
+        : row.state
+          ? [row.state.status]
+          : [];
+    expect(name).toBe(['row-msg', row.kind, ...suffix].join('-'));
   });
 
   it.each(messageFiles)('%s permits null only where the contract names it', (name) => {
@@ -372,6 +378,7 @@ describe('decode', () => {
     ['cmd-started', 'cmd'],
     ['cmd-reviewed', 'cmd'],
     ['cmd-pair-link', 'cmd'],
+    ['cmd-noted', 'cmd'],
     ['host-info-answer', 'host.info'],
     ['audit-answer', 'audit'],
   ];
@@ -531,7 +538,8 @@ describe('commands', () => {
     expect(name).toBe(`post-${post.kind}`);
     const rows = examples
       .filter((row) => row.startsWith(`row-msg-${post.kind}`))
-      .map((row) => p.decode(p.MsgRow, goldens[row]));
+      .map((row) => p.decode(p.MsgRow, goldens[row]))
+      .filter((row) => row.kind !== 'brief' || row.body.preset === undefined);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(JSON.parse(row.env!.p)).toStrictEqual(post);
@@ -629,6 +637,62 @@ describe('host surface', () => {
     expect(info.homes).toEqual([
       { g: info.agents[0].groups[0].g, home: info.device, name: 'Website' },
     ]);
+    expect(info.agents.map((agent) => agent.driver)).toEqual([
+      {
+        accounts: ['personal', 'team', 'api_key'],
+        takeover: 'new',
+      },
+      {
+        accounts: ['personal', 'team', 'api_key'],
+        takeover: 'resume',
+      },
+    ]);
+  });
+
+  it('reads step-3 preset and kb notes, brief preset, note answer, and kb search fetch', () => {
+    const presetRow = p.decode(p.NoteRow, goldens['row-note-preset']);
+    const kbRow = p.decode(p.NoteRow, goldens['row-note-kb']);
+    expect([presetRow.type, presetRow.name, presetRow.task]).toEqual([
+      'preset',
+      'Calm dashboard',
+      null,
+    ]);
+    expect([kbRow.type, kbRow.name, kbRow.task]).toEqual([
+      'kb',
+      'Decision: the home is the single writer',
+      null,
+    ]);
+    expect(p.decode(p.Note, goldens['note-preset'])).toMatchObject({
+      type: 'preset',
+      name: 'Calm dashboard',
+      task: null,
+    });
+    expect(p.decode(p.Note, goldens['note-kb'])).toMatchObject({
+      type: 'kb',
+      name: 'Decision: the home is the single writer',
+      task: null,
+    });
+    expect(p.decode(p.CmdResult, goldens['cmd-noted'])).toStrictEqual({
+      re: 9,
+      ok: true,
+      id: presetRow.id,
+      replaced: false,
+    });
+    const briefRow = p.decode(p.MsgRow, goldens['row-msg-brief-preset']);
+    const briefPost = p.decode(p.Post, briefRow.env!.p);
+    expect(briefRow.kind === 'brief' && briefRow.body.preset).toBe('Calm dashboard');
+    expect(briefPost.kind === 'brief' && briefPost.body.preset).toBe('Calm dashboard');
+    expect(p.decode(p.FetchKind, goldens['fetch-preset'])).toMatchObject({
+      kind: 'preset',
+      before: 0,
+      limit: 50,
+    });
+    expect(p.decode(p.FetchKind, goldens['fetch-kb'])).toMatchObject({
+      kind: 'kb',
+      q: 'single writer 路径',
+      before: 0,
+      limit: 5,
+    });
   });
 
   it('reads caps only of the agents it knows, and refuses a cap without its max', () => {

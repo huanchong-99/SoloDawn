@@ -954,7 +954,14 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           );
           const mounted = freshSvelte.mount(Chat, {
             target: document.body,
-            props: { group: reader.store.groups[0] },
+            props: {
+              group: reader.store.groups[0],
+              net: {
+                source: 'mock',
+                homes,
+                path: (home: Home) => (home.ctl ? paths.get(home) : undefined),
+              },
+            },
           });
           freshSvelte.flushSync();
 
