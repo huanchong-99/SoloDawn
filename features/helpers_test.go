@@ -32,7 +32,41 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/peer"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
+	"github.com/pion/turn/v5"
 )
+
+func setScenarioEnv(cleanup func(func()), key, val string) error {
+	old, had := os.LookupEnv(key)
+	if err := os.Setenv(key, val); err != nil {
+		return err
+	}
+	cleanup(func() { restoreVar(key, old, had) })
+	return nil
+}
+
+func startTestTURN(cleanup func(func()), gen turn.RelayAddressGenerator) (string, error) {
+	pkt, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		return "", err
+	}
+	srv, err := turn.NewServer(turn.ServerConfig{
+		Realm: "test",
+		AuthHandler: func(r *turn.RequestAttributes) (string, []byte, bool) {
+			return "peer", turn.GenerateAuthKey("peer", "test", "secret"), r.Username == "peer"
+		},
+		PacketConnConfigs: []turn.PacketConnConfig{{PacketConn: pkt, RelayAddressGenerator: gen}},
+	})
+	if err != nil {
+		_ = pkt.Close()
+		return "", err
+	}
+	cleanup(func() { _ = srv.Close() })
+	return pkt.LocalAddr().String(), nil
+}
+
+func testTURNServer(addr string) proto.ICEServer {
+	return proto.ICEServer{URLs: []string{"turn:" + addr + "?transport=udp"}, Username: "peer", Credential: "secret"}
+}
 
 type syncBuffer struct {
 	mu  sync.Mutex
@@ -306,12 +340,16 @@ func claudeInitMCP(startID int) []map[string]any {
 }
 
 func mcpPostSteps(callID int, text string) []map[string]any {
+	return mcpCallSteps(callID, "post", map[string]any{"text": text}, map[string]any{"isError": false})
+}
+
+func mcpCallSteps(callID int, name string, args, result map[string]any) []map[string]any {
 	return []map[string]any{
 		{"dir": "mcp<-cli", "msg": map[string]any{
 			"jsonrpc": "2.0", "id": callID, "method": "tools/call",
-			"params": map[string]any{"name": "post", "arguments": map[string]any{"text": text}},
+			"params": map[string]any{"name": name, "arguments": args},
 		}},
-		{"dir": "mcp->cli", "msg": map[string]any{"jsonrpc": "2.0", "id": callID, "result": map[string]any{"isError": false}}},
+		{"dir": "mcp->cli", "msg": map[string]any{"jsonrpc": "2.0", "id": callID, "result": result}},
 	}
 }
 
@@ -324,6 +362,14 @@ func claudeUserStdinStep(stdinText string) map[string]any {
 }
 
 func claudeTurnSteps(callID int, first bool, stdinText, postText, outText string) []map[string]any {
+	var body []map[string]any
+	if postText != "" {
+		body = mcpPostSteps(callID, postText)
+	}
+	return claudeToolTurn(first, stdinText, outText, body)
+}
+
+func claudeToolTurn(first bool, stdinText, outText string, body []map[string]any) []map[string]any {
 	steps := []map[string]any{claudeUserStdinStep(stdinText)}
 	if first {
 		steps = append(steps, claudeInitMCP(0)...)
@@ -335,25 +381,35 @@ func claudeTurnSteps(callID int, first bool, stdinText, postText, outText string
 			"message": map[string]any{"role": "assistant", "content": []map[string]any{{"type": "text", "text": outText}}},
 		}})
 	}
-	if postText != "" {
-		steps = append(steps, mcpPostSteps(callID, postText)...)
-	}
+	steps = append(steps, body...)
 	res := map[string]any{"type": "result", "subtype": "success", "is_error": false, "session_id": "$session", "result": outText}
 	return append(steps, map[string]any{"dir": "stdout", "msg": res})
 }
 
 func codexStartupSteps() []map[string]any {
+	return codexThreadSteps(map[string]any{"method": "thread/start"})
+}
+
+func codexThreadSteps(thread map[string]any) []map[string]any {
 	steps := []map[string]any{
 		{"dir": "stdin", "msg": map[string]any{"method": "initialize"}},
 		{"dir": "stdout", "msg": map[string]any{"id": "$id", "result": map[string]any{}}},
 		{"dir": "stdin", "msg": map[string]any{"method": "initialized"}},
-		{"dir": "stdin", "msg": map[string]any{"method": "thread/start"}},
+		{"dir": "stdin", "msg": thread},
 	}
 	steps = append(steps, claudeInitMCP(0)...)
 	return append(steps, map[string]any{"dir": "stdout", "msg": map[string]any{"id": "$id", "result": map[string]any{"thread": map[string]any{"id": "$session"}}}})
 }
 
 func codexTurnSteps(turnID string, callID int, stdinText, postText string, askApproval bool) []map[string]any {
+	var body []map[string]any
+	if askApproval {
+		body = codexApprovalSteps()
+	}
+	return codexToolTurn(turnID, stdinText, append(body, mcpPostSteps(callID, postText)...))
+}
+
+func codexToolTurn(turnID, stdinText string, body []map[string]any) []map[string]any {
 	params := map[string]any{"threadId": "$session"}
 	if stdinText != "" {
 		params["input"] = []map[string]string{{"type": "text", "text": stdinText}}
@@ -362,10 +418,7 @@ func codexTurnSteps(turnID string, callID int, stdinText, postText string, askAp
 		{"dir": "stdin", "msg": map[string]any{"method": "turn/start", "params": params}},
 		{"dir": "stdout", "msg": map[string]any{"id": "$id", "result": map[string]any{"turn": map[string]any{"id": turnID, "status": "inProgress"}}}},
 	}
-	if askApproval {
-		steps = append(steps, codexApprovalSteps()...)
-	}
-	steps = append(steps, mcpPostSteps(callID, postText)...)
+	steps = append(steps, body...)
 	return append(steps, map[string]any{"dir": "stdout", "msg": map[string]any{
 		"method": "turn/completed",
 		"params": map[string]any{"threadId": "$session", "turn": map[string]any{"id": turnID, "status": "completed", "error": nil}},

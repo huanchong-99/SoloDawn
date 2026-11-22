@@ -41,7 +41,8 @@ func member(op string) MemberCommand {
 }
 
 func TestMemberCommandGoldens(t *testing.T) {
-	golden(t, "member-add_ai", MemberAddAI{member("add_ai"), "codex", "Codex", "personal", false, []string{user}})
+	golden(t, "member-add_ai", MemberAddAI{member("add_ai"), "codex", "Codex", "personal", false, []string{user}, ProfileSet{}})
+	golden(t, "member-add_ai-profile", MemberAddAI{member("add_ai"), "codex", "Codex", "personal", false, []string{user}, profile()})
 	golden(t, "member-status", MemberStatus[SystemCode]{MemberCommand: member("status"), State: "working", Task: ID(taskID), Path: "local",
 		Usage: Usage{WindowPct: new(62.5), WindowResets: new(ts + 10000), DayCapPct: new(80.0),
 			SpendToday: new(0.0), SpendCap: new(10.5), TurnsToday: new(14)}})
@@ -50,7 +51,13 @@ func TestMemberCommandGoldens(t *testing.T) {
 		MemberCommand: MemberCommand{command("member", "member set role"), "set", ID(id("joined member"))},
 		Role:          new("admin"),
 	})
+	golden(t, "member-set-profile", MemberSet{MemberCommand: member("set"), ProfileSet: ProfileSet{new(""), new(""), new("light"), new("")}})
 	golden(t, "member-remove", member("remove"))
+}
+
+// profile is a member's choice of model, level, tier and skills.
+func profile() ProfileSet {
+	return ProfileSet{new("gpt-5.4"), new("high"), new("strong"), new("Go backend, protocol design")}
 }
 
 // status is a member status that reports a fact; the home writes the fact as
@@ -213,8 +220,8 @@ func TestHostCommandGoldens(t *testing.T) {
 	to := func(kind string) HostCommand { return HostCommand{kind, ID(id(kind)), ts, host} }
 	golden(t, "home-add", HomeAdd{to("home.add"), ID(group), device(signer("other home")), "Website",
 		[]string{"ws://192.0.2.10:47800/rv", "wss://rv.example/rv"}})
-	golden(t, "host-join", HostJoin{to("host.join"), ID(group), host, "codex", "Codex", false})
-	golden(t, "host-leave", HostLeave{to("host.leave"), ID(group), "codex"})
+	golden(t, "host-join", HostJoin{to("host.join"), ID(group), host, "codex", "Codex", false, profile()})
+	golden(t, "host-leave", HostLeave{to("host.leave"), ID(group), "codex", ID(agent)})
 }
 
 // The example of each command names what a receiver reads to choose its type:
@@ -242,6 +249,9 @@ func TestCommandExamplesAreNamedByWhatSelectsThem(t *testing.T) {
 			}
 			if _, there := fields["role"]; there {
 				want += "-role"
+			}
+			if _, there := fields["tier"]; there {
+				want += "-profile"
 			}
 		case "post":
 			want = "post-" + fields["kind"].(string)

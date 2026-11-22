@@ -29,7 +29,14 @@ type HostState struct {
 	Settings HostSettings `json:"settings"`
 }
 
-// HostInfo answers {"t":"host.info","id":…}, which is a Request.
+// HostInfoRequest asks for host.info; Refresh skips what was kept of the
+// detection and the model lists (contracts/step-3/drivers.md 10.1).
+type HostInfoRequest struct {
+	Request
+	Refresh bool `json:"refresh,omitempty"`
+}
+
+// HostInfo answers a HostInfoRequest.
 type HostInfo struct {
 	Type string `json:"t"`
 	Success
@@ -75,6 +82,17 @@ type HostAgent struct {
 	Caps       Caps         `json:"caps"`
 	Driver     Driver       `json:"driver"`
 	Groups     []AgentGroup `json:"groups"`
+	Models     []Model      `json:"models"`
+}
+
+// Model is one model the CLI lists, with the tier the host suggests for it
+// (contracts/step-3/drivers.md 10.3).
+type Model struct {
+	Model   string   `json:"model"`
+	Name    string   `json:"name"`
+	Efforts []string `json:"efforts"`
+	Fast    True     `json:"fast,omitempty"`
+	Tier    string   `json:"tier"`
 }
 
 // Driver is the capability table a CLI driver declares (contracts/step-3/drivers.md

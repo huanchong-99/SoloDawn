@@ -163,6 +163,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
                 account: 'api_key',
                 login_ok: true,
                 driver: { accounts: ['api_key'], takeover: 'none' },
+                models: [],
                 caps: {},
                 groups: [
                   {

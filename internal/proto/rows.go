@@ -85,6 +85,25 @@ type AIMemberRow struct {
 	Since     int64    `json:"since"`
 	Path      string   `json:"path"`
 	Usage     Usage    `json:"usage"`
+	Profile
+}
+
+// Profile is what the owner chose for an AI member: the CLI's model and
+// thinking level, "" for the CLI's own default, and its tier and skills
+// (contracts/step-3/profiles.md section 1).
+type Profile struct {
+	Model  string `json:"model"`
+	Effort string `json:"effort"`
+	Tier   string `json:"tier"`
+	Skills string `json:"skills"`
+}
+
+// ProfileSet is the four fields of a Profile in a command, each optional.
+type ProfileSet struct {
+	Model  *string `json:"model,omitempty"`
+	Effort *string `json:"effort,omitempty"`
+	Tier   *string `json:"tier,omitempty"`
+	Skills *string `json:"skills,omitempty"`
 }
 
 type Usage struct {

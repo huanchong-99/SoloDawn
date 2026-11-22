@@ -92,7 +92,11 @@
       "state": "waiting",
       "since": 1763599990000,
       "path": "local",
-      "usage": {}
+      "usage": {},
+      "model": "",
+      "effort": "",
+      "tier": "",
+      "skills": ""
     },
     {
       "r": "member",
@@ -115,7 +119,11 @@
       "state": "waiting",
       "since": 1763599990000,
       "path": "local",
-      "usage": {}
+      "usage": {},
+      "model": "",
+      "effort": "",
+      "tier": "",
+      "skills": ""
     },
     {
       "r": "member",
@@ -138,7 +146,11 @@
       "state": "waiting",
       "since": 1763599990000,
       "path": "local",
-      "usage": {}
+      "usage": {},
+      "model": "",
+      "effort": "",
+      "tier": "",
+      "skills": ""
     }
   ],
   "seq": 800,

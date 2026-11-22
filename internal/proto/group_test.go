@@ -44,12 +44,16 @@ func TestGroupGoldens(t *testing.T) {
 		Approvers: []string{user}, State: "working", Task: task, Since: ts - 2000, Path: "local",
 		Usage: Usage{WindowPct: new(62.5), WindowResets: new(ts + 10000), DayCapPct: new(80.0),
 			SpendToday: new(0.0), SpendCap: new(10.5), TurnsToday: new(14)},
+		Profile: Profile{"gpt-5.4", "high", "strong", "Go backend, protocol design"},
 	})
 	golden(t, "row-device", DeviceRow{
 		RowHeader{"device", user + ":2", 41}, addNode.DeviceChange, signed(browser, " "+string(wireJSON(t, addNode))),
 	})
 	taskRow := taskExample()
 	golden(t, "row-task", taskRow)
+	stuck := taskExample()
+	stuck.Stuck = &Stuck{"review", 2, true}
+	golden(t, "row-task-stuck", stuck)
 	waiting := TaskRow{
 		RowHeader: RowHeader{"task", id("local task"), 817}, Group: group, Num: 13, Title: "Choose a label",
 		Slug: MakeSlug("Choose a label"), Origin: "direct", Plan: "Ask the owner which label the path gets.",

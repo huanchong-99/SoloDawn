@@ -704,6 +704,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
               account: 'personal',
               login_ok: true,
               driver: { accounts: ['api_key'], takeover: 'none' },
+              models: [],
               caps: {},
               groups: [
                 {
@@ -730,6 +731,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
               account: null,
               login_ok: false,
               driver: { accounts: ['api_key'], takeover: 'none' },
+              models: [],
               caps: {},
               groups: [
                 {
@@ -758,6 +760,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
               account: 'team',
               login_ok: true,
               driver: { accounts: ['api_key'], takeover: 'none' },
+              models: [],
               caps: {},
               groups: [],
             },
@@ -767,6 +770,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
               account: 'api_key',
               login_ok: false,
               driver: { accounts: ['api_key'], takeover: 'none' },
+              models: [],
               caps: {},
               groups: [],
             },

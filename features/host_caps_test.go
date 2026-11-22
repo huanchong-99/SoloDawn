@@ -55,7 +55,7 @@ func hostCapsSteps(sc *godog.ScenarioContext, f fixtures) {
 }
 
 func registerHostCapsContractSteps(sc *godog.ScenarioContext) {
-	sc.Step(`^every registered host driver declares a valid capability table$`, checkAllDriverDeclarations)
+	sc.Step(`^Drivers and DriverCaps have the same keys$`, checkDriverKeys)
 	sc.Step(`^the Claude Code and Codex capability declarations match section 8 of the step 3 driver contract$`, checkStep1DriverDeclarations)
 }
 
@@ -74,7 +74,7 @@ func registerHostCapsM3Steps(sc *godog.ScenarioContext, w *hostCapsWorld) {
 	sc.Step(`^structured sessions on the capability test node for "([^"]+)" omit MCP tool "([^"]+)" and takeover\.start refuses naming takeover$`, w.thenRestrictedSwitchesHold)
 }
 
-func checkAllDriverDeclarations() error {
+func checkDriverKeys() error {
 	drvKeys := slices.Sorted(maps.Keys(host.Drivers))
 	capKeys := slices.Sorted(maps.Keys(host.DriverCaps))
 	if !slices.Equal(drvKeys, capKeys) {
@@ -196,7 +196,6 @@ func (w *hostCapsWorld) thenMCPToolListing(toolName, agent, wantStruct, wantInte
 func pipeMCPToolState(h *host.Host, token, toolName string) (string, error) {
 	clientConn, serverConn := net.Pipe()
 	defer clientConn.Close()
-	// Single reader: the wait after exchangeToolsList.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

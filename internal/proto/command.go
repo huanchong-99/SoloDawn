@@ -61,6 +61,7 @@ type MemberAddAI struct {
 	Account   string   `json:"account"`
 	Secretary bool     `json:"secretary"`
 	Approvers []string `json:"approvers"`
+	ProfileSet
 }
 
 // MemberStatus carries the fact its host reports as E, one of the events
@@ -83,6 +84,7 @@ type MemberSet struct {
 	Allow     *[]string `json:"allow,omitempty"`
 	Approvers *[]string `json:"approvers,omitempty"`
 	Role      *string   `json:"role,omitempty"`
+	ProfileSet
 }
 
 // Invite asks the home for an invitation link for its group; it is a
@@ -314,12 +316,15 @@ type HostJoin struct {
 	Agent     string `json:"agent"`
 	Name      string `json:"name"`
 	Secretary bool   `json:"secretary"`
+	ProfileSet
 }
 
+// HostLeave names the member when the agent has more than one in the group.
 type HostLeave struct {
 	HostCommand
-	Group ID     `json:"g"`
-	Agent string `json:"agent"`
+	Group  ID     `json:"g"`
+	Agent  string `json:"agent"`
+	Member ID     `json:"member,omitempty"`
 }
 
 // HomeAdd records the home of a group on one of a member's nodes before any AI
