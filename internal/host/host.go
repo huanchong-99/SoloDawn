@@ -428,7 +428,7 @@ func ToolsFor(c Caller) map[string]Tool {
 	return listed
 }
 
-// Drivers holds the driver of each CLI by its agent name: "claude", "codex".
+// Drivers holds the driver of each CLI by its agent name; see DriverCaps.
 var Drivers = map[string]Driver{}
 
 // A Driver starts one vendor's CLI (contracts/drivers.md section 1).
