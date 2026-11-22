@@ -108,4 +108,8 @@ describe('the mounts of this client', () => {
   it('start with the side panel of a chat closed', () => {
     expect(side).toEqual({ open: false });
   });
+
+  it('registers the confirmation card under the confirm area', () => {
+    expect(cards.get('confirm')).toEqual({ area: 'confirm', component: card('confirm') });
+  });
 });

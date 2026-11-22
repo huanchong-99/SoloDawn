@@ -28,7 +28,12 @@ Feature: AI-to-AI call block
     When 3 minutes pass and a second main-line call is answered in 2 seconds
     Then the unanswered call shows "Waiting for reply · 9 min" and the answered main-line call folds its reply with "Took 2 s"
 
-  Scenario: The states sheet mounts call under the call area and renders both call wire examples
+  Scenario: The states sheet mounts call under the call area and renders all call wire examples
     When the reader opens "#/states" in a development server
     Then the states sheet marks "call" as mounted by "call"
-    And the sheet renders "row-msg-call-waiting" as waiting and "row-msg-call-answered" with the reply "Use the path change event."
+    And the sheet renders waiting and denied calls and the answered call with the reply "Use the path change event."
+
+  Scenario: An answered call keeps the reply after its author leaves
+    Given a main-line call with no question whose reply is from a former member
+    When the reader opens the main line of "Website"
+    Then only the reply text and the former member's avatar are shown in the call body

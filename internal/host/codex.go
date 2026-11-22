@@ -15,6 +15,17 @@ import (
 
 func init() {
 	Register[Driver](Drivers, "codex", codexDriver{})
+	Register(DriverCaps, "codex", codexCapabilities())
+}
+
+func codexCapabilities() Capabilities {
+	return Capabilities{
+		Accounts:  []string{AccountPersonal, AccountTeam, AccountAPIKey},
+		Levels:    []int{1, 2, 3},
+		Approvals: ApprovalConn,
+		Takeover:  TakeoverResume,
+		Usage:     []string{},
+	}
 }
 
 type codexDriver struct{}

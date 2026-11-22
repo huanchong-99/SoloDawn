@@ -15,9 +15,25 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-22 · limitation · Browser invitation joining needs the node and home implementations
 
 - Symptom: a current node does not admit a browser through an invitation; it knows only protocol version 1.
-- Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts` and U2-1 supplies the join page and member controls. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a.
+- Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts`. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a. U2-1 supplies the join page and member controls.
 - Status: open until those units are integrated. The browser exchange is covered against a simulated home, not a released node.
 
+### 2026-11-22 · limitation · `host.CheckTakeover` awaits `takeover.start` (`HS-20`) and `driver` in `host.info` awaits `P-5` / `T3-2`
+
+- Symptom: `host.CheckTakeover` (`internal/host/caps.go`) is not yet wired to a `Surface["takeover.start"]` handler, and `Host.Agents` (`internal/host/agents.go`) does not yet populate a `driver` field on `proto.HostAgent` in `host.info`.
+- Cause: `HS-20` (terminal takeover) is built on a parallel wave-3 branch (`Surface["takeover.start"]` is not on `rebuild` yet), and `planning/contracts/step-3/drivers.md` section 6 / `planning/steps/parallel-plan-step-2-3.md` row `T3-1` assign freezing `driver` on the wire to `P-5` and putting `driver` into `host.info` to `T3-2`.
+- Status: the `takeover.start` half is resolved in T3-1 (#275): `takeover.start` calls `checkTakeover` first and uses its `assignFirst`. Open until `T3-2` adds `driver` to `host.info`.
+### 2026-11-22 · limitation · A7.9 does not run on Windows
+
+- Symptom: on the Windows CI runner the A7.9 scenario (`features/m7.feature`, moving an open takeover PeerConnection from direct to TURN relay) fails with "selected-pair statistics did not transition to relay" (CI run 45037819755, twice). Linux and macOS pass.
+- Cause: the test cannot force the takeover connection from direct to TURN on Windows. pion ICE renominates to the relay pair only when the relay's measured round trip beats the direct pair's by more than 10 ms (`shouldRenominate`).
+- Status: open, accepted. The scenario is tagged `@not-windows`, which the acceptance runner leaves out on Windows (`features/acceptance_test.go`, `tags`); Linux and macOS still run it. Product behaviour is unchanged.
+
+### 2026-11-22 · bug · On Windows the last output of a CLI that exits by itself during a takeover is lost
+
+- Symptom: when the interactive CLI exits on its own while the owner's terminal is open, the last lines it printed (for A7.4's fake CLI, `{"bye":…}` and the echo of the input line) never reach the pty channel. M7's A7.4 therefore does not wait for `"bye":` (`runOneSwitchCycle` in `features/m7_test.go`); it waits for the hand-back post, and the exit entry in the CLI log proves the exit. Seen on `test (windows-latest)` of PR #287; Linux and macOS deliver the line.
+- Cause: on Windows `ptyBeforeExitStop` does nothing (`internal/host/pty_windows.go:16`), so the host closes the terminal as soon as the CLI exits and drops the frame that ConPTY has not rendered yet. Diagnosis: `WIN-CONPTY.review.md`.
+- Status: open, product behaviour (coordinator, 2026-11-22, I-7 decision). The fix is planned in a later Windows unit, before I-11. No product code changes in I-7.
 ### 2026-11-22 · deviation · Host turn labels approximate task participation by role
 
 - Symptom: a role still held for confirmation counts as participation for host labels, although `planning/contracts/step-2/confirm.md:37-38,156-172` also requires a queued assign or review item.
@@ -70,7 +86,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: a `call` message whose state is `denied` (`row-msg-call-denied`, frozen by P-4a) shows the waiting line and the waiting state in the call area.
 - Cause: `callView` treats every status other than `answered` as waiting (`web/src/lib/call.ts:78`). The states sheet therefore lists three call rows, and `web/features/call.spec.ts` expects them.
-- Status: open, accepted for P-4a. Resolved when U2-2 draws a denied call.
+- Status: resolved in U2-2. The call block shows “Denied” without a waiting timer or reply.
 
 ### 2026-11-22 · limitation · A9.21 lacks a same-connection network-switch driver
 

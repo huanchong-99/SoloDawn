@@ -456,7 +456,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
     route, wait mode, depth, question and either its `waiting` indicator with elapsed time since
     `ts`, counted every second while it is under a minute and every minute after, or its
     `answered` duration with the `reply` folded inside, hiding the standalone `reply` row when
-    both are in the same list.
+    both are in the same list. A denied call shows “Denied” instead of a timer or reply.
+  - Confirmation cards (`src/components/confirm/`) name who asks to act, answer a call, or watch a
+    terminal. The watch card names its author; other cards name the author of the referenced request.
+    Only a reader named in `body.to` sees the pending card's Confirm and Deny actions;
+    everyone sees whether it is pending, confirmed, denied or expired.
   - The member panel (`src/components/member/`) mounts at `chat.side` (`order: 10`). It lists the
     group's AI members, placing the secretary first with its corner mark, with each AI's state
     (`working`, `waiting` on the reader in dawn or on another member, `dormant` as sleeping,
@@ -471,10 +475,13 @@ file in `src/routes/`. It edits neither the shell nor another area:
     their roles and online status; actions and errors go below the person's name. Owners and
     admins can generate a one-time invite with a countdown. The owner's row has no role or removal
     action. Owners can promote, demote, and remove other people; admins can remove ordinary
-    members; non-owners can leave. Signed
-    commands go to the group home, and its row pushes update the panel. Its "Add AI" button
-    requires a reachable group home, a group member, and at least one connected owned computer,
-    and shows its reason when disabled. The
+    members; non-owners can leave. Signed commands go to the group home, and its row pushes
+    update the panel. The access editor (`src/components/allow/`) places each AI's allow
+    list and approval delegates alongside its computer and account. Only its owner sees "Edit access"
+    next to the terminal action. The home applies the allow list
+    only on a team or API-key account and always retains the owner as an approver.
+    The panel's "Add AI" button requires a reachable group home, a group member, and at least
+    one connected owned computer, and shows its reason when disabled. The
     add-AI dialog reads `host.info` from the owner's connected computers, suggests an unused member
     name in the group, offers the secretary switch when the group has none or the reader is an
     admin, signs `host.join` for the chosen computer, and words `home_unreachable`, `conflict` and
@@ -604,7 +611,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/task/`        | `TaskCard.svelte`, mounted for kind `task`                                        |
 | `src/components/thread/`      | a task's thread, scored review block, checks and system notices                   |
 | `src/components/call/`        | `CallBlock.svelte`, mounted for kind `call` in threads and the main line          |
-| `src/components/member/`      | member panel (`chat.side`) and add-AI dialog                                      |
+| `src/components/confirm/`     | `ConfirmCard.svelte`, mounted for kind `confirm`                                  |
+| `src/components/allow/`       | `AllowEditor.svelte`, lists and editor for each AI in the member panel            |
+| `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
 | `src/components/people/`      | invitation dialog, role/removal actions and join form                             |
 | `src/messages/people.*`       | English and Chinese invitation, member-action and join texts                      |
 | `src/components/groupinfo/`   | group details and project memory (`chat.side`, `order: 20`)                       |
@@ -624,7 +633,10 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/task.spec.ts`       | steps of `../features/web_task.feature`                                           |
 | `features/thread.spec.ts`     | steps of `../features/web_thread.feature`                                         |
 | `features/call.spec.ts`       | steps of `../features/web_call.feature`                                           |
+| `features/confirm.spec.ts`    | steps of `../features/web_confirm.feature`                                        |
 | `features/member.spec.ts`     | steps of `../features/web_member.feature`                                         |
+| `features/people.spec.ts`     | steps of `../features/web_people.feature`                                         |
+| `features/people.test.ts`     | focused tests for member actions and the join page                                |
 | `features/groupinfo.spec.ts`  | steps of `../features/web_groupinfo.feature`                                      |
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |

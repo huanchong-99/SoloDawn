@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte';
   import JoinForm from '../components/people/JoinForm.svelte';
+  import { readInvitation } from '../lib/join';
   import {
     isDark,
     otherLang,
@@ -14,6 +15,13 @@
   import '../styles/onboarding.css';
 
   let { params, net }: PageProps<'join'> = $props();
+  const invitation = $derived(read(params.link));
+
+  function read(link: string | undefined) {
+    try {
+      return readInvitation(link ?? '');
+    } catch {}
+  }
 </script>
 
 <div class="onboarding">
@@ -36,12 +44,12 @@
   <section class="hero">
     <span class="badge">{t('people.join.badge')}</span>
     <h1>{t('page.join')}</h1>
-    <p>{t('people.join.body')}</p>
+    {#if invitation}<p>{t('people.join.body')}</p>{/if}
   </section>
 
   <div class="wrap single">
     {#key params.link}
-      <JoinForm link={params.link} {net} />
+      <JoinForm {invitation} {net} />
     {/key}
   </div>
 </div>

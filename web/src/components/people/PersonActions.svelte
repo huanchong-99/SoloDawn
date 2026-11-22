@@ -5,7 +5,7 @@
   import Failure from '../Failure.svelte';
 
   let { group, person }: { group: Group; person: HumanMemberRow } = $props();
-  const authority = $derived((group.me as HumanMemberRow | undefined)?.role);
+  const authority = $derived(group.me?.role);
   const self = $derived(group.me?.id === person.id);
   const canSet = $derived(authority === 'owner' && person.role !== 'owner');
   const canRemove = $derived(
@@ -31,28 +31,36 @@
   }
 </script>
 
-{#if canSet}
-  <button
-    type="button"
-    class="btn btn-sm"
-    disabled={busy || !group.home.ctl}
-    onclick={() => send('set')}
-  >
-    {t(`people.role.${next}`)}
-  </button>
-{/if}
 {#if canRemove}
-  <button
-    type="button"
-    class="btn btn-sm btn-ghost"
-    disabled={busy || !group.home.ctl}
-    onclick={() => send('remove')}
-  >
-    {t(self ? 'people.leave' : 'people.remove')}
-  </button>
+  <div class="person-actions row">
+    {#if canSet}
+      <button
+        type="button"
+        class="btn btn-sm"
+        disabled={busy || !group.home.ctl}
+        onclick={() => send('set')}
+      >
+        {t(`people.role.${next}`)}
+      </button>
+    {/if}
+    <button
+      type="button"
+      class="btn btn-sm btn-ghost"
+      disabled={busy || !group.home.ctl}
+      onclick={() => send('remove')}
+    >
+      {t(self ? 'people.leave' : 'people.remove')}
+    </button>
+    {#if failure === 'conflict'}
+      <p class="hint" role="alert">{t('people.conflict')}</p>
+    {:else if failure}
+      <Failure code={failure} />
+    {/if}
+  </div>
 {/if}
-{#if failure === 'conflict'}
-  <p class="hint" role="alert">{t('people.conflict')}</p>
-{:else if failure}
-  <Failure code={failure} />
-{/if}
+
+<style>
+  .person-actions {
+    grid-column: 2 / -1;
+  }
+</style>

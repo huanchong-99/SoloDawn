@@ -30,8 +30,10 @@ const submit = () => one<HTMLButtonElement>('main button[type="submit"], main fo
 it('rejects malformed invitations and accepts a valid hash in the same page', () => {
   openPage('#/join');
   expect(text('main [role=alert]')).toBe('This invitation link is invalid.');
+  expect(document.querySelector('main .hero p')).toBeNull();
   go('#join=invalid');
   expect(text('main [role=alert]')).toBe('This invitation link is invalid.');
+  expect(document.querySelector('main .hero p')).toBeNull();
   expect(document.querySelector('main form')).toBeNull();
   go(hash);
   expect(name().value).toBe('');
@@ -141,7 +143,10 @@ it.each([
     expect(actions('Reader')).toEqual(own);
     expect(actions('Member')).toEqual(member);
     expect(actions('Admin')).toEqual(admin);
-    if (role !== 'owner') expect(actions('Owner')).toEqual([]);
+    if (role !== 'owner') {
+      expect(actions('Owner')).toEqual([]);
+      expect(row('Owner').querySelector(':scope > .person-actions')).toBeNull();
+    }
   },
 );
 

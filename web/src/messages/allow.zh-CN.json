@@ -1,0 +1,11 @@
+{
+  "allow.allow": "允许名单",
+  "allow.approvers": "审批受托人",
+  "allow.none": "无",
+  "allow.edit": "编辑权限",
+  "allow.save": "保存权限",
+  "allow.cancel": "取消",
+  "allow.offline": "群组主机已离线。",
+  "allow.personal": "允许名单会保留，但对个人订阅不生效。",
+  "allow.sep": "、"
+}

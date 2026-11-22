@@ -256,12 +256,10 @@ export function suggestedName(
 
 /** Worded error text for `host.join` failures, or undefined for generic `Failure` codes. */
 export function joinError(code: string): string | undefined {
-  switch (code) {
-    case 'home_unreachable':
-    case 'conflict':
-    case 'lost':
-      return t(`member.join.error.${code}`);
+  if (code === 'home_unreachable' || code === 'conflict' || code === 'lost') {
+    return t(`member.join.error.${code}`);
   }
+  return undefined;
 }
 
 /** Signs and sends `host.join` to `target`, returning the refusal code or an empty string on ok. */

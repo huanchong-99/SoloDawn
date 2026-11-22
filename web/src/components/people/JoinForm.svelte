@@ -1,19 +1,11 @@
 <script lang="ts">
-  import { onDestroy, untrack } from 'svelte';
-  import { JoinError, readInvitation, type Invitation } from '../../lib/join';
+  import { onDestroy } from 'svelte';
+  import type { Invitation, JoinError } from '../../lib/join';
   import type { Net } from '../../lib/net.svelte';
   import { t } from '../../lib/prefs.svelte';
   import { href } from '../../lib/route.svelte';
 
-  let { link, net }: { link: string | undefined; net: Net } = $props();
-
-  function read(hash: string) {
-    try {
-      return readInvitation(hash);
-    } catch {}
-  }
-
-  const invitation = untrack(() => link && read(link));
+  let { invitation, net }: { invitation: Invitation | undefined; net: Net } = $props();
   let pending = $state.raw<AbortController>();
   let error = $state.raw<JoinError>();
   let notifiedPartially = $state(false);

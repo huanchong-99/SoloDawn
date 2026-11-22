@@ -18,6 +18,7 @@
   import { endTakeover, hostHomeOf } from '../../lib/terminal.svelte';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
+  import AllowEditor from '../allow/AllowEditor.svelte';
   import InvitationDialog from '../people/InvitationDialog.svelte';
   import PersonActions from '../people/PersonActions.svelte';
   import AddAI from './AddAI.svelte';
@@ -37,7 +38,7 @@
 <div class="members">
   <div class="head">
     <div class="row">
-      <h2 class="sec-title grow"><span>{t('member.ai')}</span> · <span>{ais.length}</span></h2>
+      <h2 class="sec-title grow">{t('member.ai')} · {ais.length}</h2>
       <button
         class="btn btn-sm"
         onclick={() => (adding = true)}
@@ -71,75 +72,81 @@
         </span>
         <div class="grow">
           <h3>
-            {ai.name}{#if owner}{' '}<span class="owner">· <span>{owner}</span></span>{/if}
+            {ai.name}{#if owner}{' '}<span class="owner">· {owner}</span>{/if}
           </h3>
           <p class="st" data-st={status.st}><i></i><span>{status.text}</span></p>
         </div>
       </header>
-      <dl class="kv">
-        <dt>{t('member.computer')}</dt>
-        <dd>
-          <span>{ai.host_name}</span> <span class="muted">· <span>{pathLabel(ai)}</span></span>
-        </dd>
-        <dt>{t('member.account')}</dt>
-        <dd>
-          {accountLabel(ai.account)}{#if ai.account === 'personal'}{' '}<span class="muted">
-              · <span>{t('member.account.personal.note')}</span>
-            </span>{/if}
-        </dd>
-      </dl>
-      {#if meter}
-        <div
-          class="meter"
-          role="meter"
-          aria-label={meter.label}
-          aria-valuenow={meter.fill}
-          aria-valuetext={meter.note ? `${meter.value} · ${meter.note}` : meter.value}
-          data-tone={meter.tone}
-          style={`--v: ${meter.fill}%`}
-        >
-          <span>{meter.label}</span><b>{meter.value}</b><i></i>{#if meter.note}<small>
-              {meter.note}
-            </small>{/if}
-        </div>
-      {/if}
-      {#if mine}
-        <footer class="card-foot">
-          {#if ai.state === 'takeover'}
-            <button
-              type="button"
-              class="btn btn-sm btn-dawn"
-              onclick={() => endTakeover(hostHomeOf(net.homes, ai.host), ai.host, group.g, ai.id)}
+      <AllowEditor {group} {ai} {humans}>
+        {#snippet children(accessRows, editAccess)}
+          <dl class="kv">
+            <dt>{t('member.computer')}</dt>
+            <dd>{ai.host_name} <span class="muted">· {pathLabel(ai)}</span></dd>
+            <dt>{t('member.account')}</dt>
+            <dd>
+              {accountLabel(ai.account)}{#if ai.account === 'personal'}{' '}<span class="muted">
+                  · {t('member.account.personal.note')}
+                </span>{/if}
+            </dd>
+            {@render accessRows()}
+          </dl>
+          {#if meter}
+            <div
+              class="meter"
+              role="meter"
+              aria-label={meter.label}
+              aria-valuenow={meter.fill}
+              aria-valuetext={meter.note ? `${meter.value} · ${meter.note}` : meter.value}
+              data-tone={meter.tone}
+              style={`--v: ${meter.fill}%`}
             >
-              {t('member.handback')}
-            </button>
-            <span class="hint">{t('member.handback.queued')}</span>
-          {:else if !termWhy}
-            <a class="btn btn-sm" href={href('terminal', { g: group.g, member: ai.id })}>
-              <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
-            </a>
-          {:else}
-            <button
-              type="button"
-              class="btn btn-sm"
-              disabled
-              aria-describedby={`${uid}-term-${ai.id}`}
-            >
-              <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
-            </button>
-            <span id={`${uid}-term-${ai.id}`} class="hint">{termWhy}</span>
+              <span>{meter.label}</span><b>{meter.value}</b><i></i>{#if meter.note}<small>
+                  {meter.note}
+                </small>{/if}
+            </div>
           {/if}
-        </footer>
-      {/if}
+          {#if mine}
+            <footer class="card-foot">
+              {#if ai.state === 'takeover'}
+                <button
+                  type="button"
+                  class="btn btn-sm btn-dawn"
+                  onclick={() =>
+                    endTakeover(hostHomeOf(net.homes, ai.host), ai.host, group.g, ai.id)}
+                >
+                  {t('member.handback')}
+                </button>
+              {:else if !termWhy}
+                <a class="btn btn-sm" href={href('terminal', { g: group.g, member: ai.id })}>
+                  <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
+                </a>
+              {:else}
+                <button
+                  type="button"
+                  class="btn btn-sm"
+                  disabled
+                  aria-describedby={`${uid}-term-${ai.id}`}
+                >
+                  <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
+                </button>
+              {/if}
+              {@render editAccess()}
+              {#if ai.state === 'takeover'}
+                <span class="hint">{t('member.handback.queued')}</span>
+              {:else if termWhy}
+                <span id={`${uid}-term-${ai.id}`} class="hint">{termWhy}</span>
+              {/if}
+            </footer>
+          {/if}
+        {/snippet}
+      </AllowEditor>
     </section>
   {:else}
     <p class="hint">{t('member.ai.empty')}</p>
   {/each}
 
   <div class="row people-head">
-    <h2 class="sec-title grow">
-      <span>{t('member.people')}</span> · <span>{humans.length}</span>
-    </h2>
+    <h2 class="sec-title grow">{t('member.people')} · {humans.length}</h2>
     {#if isAdmin(group)}
       <button
         type="button"
@@ -157,12 +164,12 @@
       <li class="person">
         <Avatar id={person.user} name={person.name} />
         <span class="person-name grow">
-          {person.name}{#if tags}{' '}<span class="muted">· <span>{tags}</span></span>{/if}
+          {person.name}{#if tags}{' '}<span class="muted">· {tags}</span>{/if}
         </span>
         <span class="st" data-st={person.online ? 'ok' : 'offline'}>
           <i></i>{t(person.online ? 'member.online' : 'member.offline')}
         </span>
-        <div class="person-actions row"><PersonActions {group} {person} /></div>
+        <PersonActions {group} {person} />
       </li>
     {/each}
   </ul>
@@ -287,11 +294,5 @@
   }
   .person-name {
     overflow-wrap: anywhere;
-  }
-  .person-actions {
-    grid-column: 2 / -1;
-  }
-  .person-actions:empty {
-    display: none;
   }
 </style>

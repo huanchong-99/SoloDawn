@@ -119,25 +119,19 @@ function place(page: Page) {
   return route.dev ? tabs.length : -1;
 }
 
-const initialHash = location.hash;
-const initial = $derived.by(() => parse(initialHash));
-let current = $state.raw<{ page: Page; params: Record<string, string | undefined>; dir: number }>();
+const first = parse(location.hash);
 
 /** The page open now, its parameters, and the way the last change went along the navigation:
  *  1 to a later entry, -1 to an earlier one, 0 within one entry. */
-export const route = {
-  get page() {
-    return current ? current.page : initial.page;
-  },
-  get params(): Record<string, string | undefined> {
-    return current ? current.params : initial.params;
-  },
-  get dir() {
-    return current ? current.dir : 1;
-  },
-};
+export const route = $state({
+  page: first.page,
+  params: first.params as Record<string, string | undefined>,
+  dir: 1,
+});
 
 addEventListener('hashchange', (event) => {
   const { page, params } = parse(new URL(event.newURL).hash);
-  current = { page, params, dir: Math.sign(place(page) - place(route.page)) };
+  route.dir = Math.sign(place(page) - place(route.page));
+  route.page = page;
+  route.params = params;
 });
