@@ -256,7 +256,7 @@ func (s *Sessions) sesRunRequest(ctx context.Context, c *sesConn, id int64, typ 
 }
 
 func (s *Sessions) sesAllowsRequest(c *sesConn, typ string) bool {
-	return typ == "sync" || typ == "fetch" || s.cfg.Logs.IsOwner(c.device)
+	return typ == "sync" || typ == "fetch" || typ == "watch.start" || s.cfg.Logs.IsOwner(c.device)
 }
 
 func (s *Sessions) sesSync(_ context.Context, conn *home.Conn, _ Ctl, _ string, _ int64, data json.RawMessage) (any, error) {
@@ -278,7 +278,7 @@ func (s *Sessions) sesFetch(_ context.Context, conn *home.Conn, _ Ctl, _ string,
 }
 
 func (s *Sessions) sesEnrolled(c *sesConn) bool {
-	return s.sesWelcomed(c) && !c.joining.pending() && s.cfg.Logs.Known(c.device)
+	return s.sesWelcomed(c) && !c.joining.pending() && (s.cfg.Logs.Known(c.device) || s.cfg.Host.Watching(c.device))
 }
 
 func (s *Sessions) sesWelcomed(c *sesConn) bool {

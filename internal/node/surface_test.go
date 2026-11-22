@@ -105,6 +105,14 @@ func TestSurfaceDefaultsReadHelpersAndNulls(t *testing.T) {
 	}
 
 	aiID := sesID("ai-1")
+	fc.push(proto.WatchStart{Request: proto.Request{Type: "watch.start", ID: 40}, Group: gID, Member: aiID})
+	var watchErr proto.ErrorResponse
+	if err := json.Unmarshal(fc.next(t), &watchErr); err != nil {
+		t.Fatal(err)
+	}
+	if watchErr.Re != 40 || watchErr.Err.Code != "forbidden" {
+		t.Fatalf("watch.start = %+v", watchErr)
+	}
 	fc.push(proto.PTYResize{Type: "pty.resize", Group: gID, AI: aiID, Cols: 120, Rows: 36})
 	fc.push(proto.Request{Type: "host.info", ID: 4})
 	fc.next(t)

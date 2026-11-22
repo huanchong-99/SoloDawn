@@ -1,5 +1,5 @@
 ---
-description: 'The host seam (interfaces, tables, hooks, sessions, drivers and driver capability switches), the session runtime, group sync and inbox delivery, group joining and per-home connection management, the offline scripted Claude Code and Codex processes for host integration tests, the API of the host workspaces and Git commands, and the MCP server and stdio shim.'
+description: 'The host seam (interfaces, tables, hooks, sessions, drivers and driver capability switches), the session runtime, group sync and inbox delivery, group joining and per-home connection management, the offline scripted Claude Code, Codex and OpenCode processes for host integration tests, the API of the host workspaces and Git commands, and the MCP server and stdio shim.'
 kind: reference
 ---
 
@@ -30,6 +30,7 @@ A unit never calls into the file of a unit built beside it. It registers in a ta
 | whether a session's deliveries are held | `h.Held(key)`, before a turn is given; whoever lifts a hold calls `Deliver` |
 | an interactive pseudo-terminal (`takeover`) | `h.StartPTY(group, member, agent, launch, onDone)`, `p.Attached()`, `p.Resize(cols, rows)`, `p.Close()`, `h.ClosePTY(group, member)` |
 | bridging a `pty:<g>:<member>` data channel | `h.ServeTerminal(t)` |
+| watching a takeover terminal | `h.WatchStart(from, device, data)`, then `h.ServeWatch(t)` for `watch:<g>:<member>`; `h.Watchers(group, member)` lists the granted users |
 | an audit row | `h.Audit(tx, AuditRow{…})`, inside the transaction of what it records |
 | the AI CLIs found here (`host.info`) | `h.Agents(ctx)`: probes each driver registered in `DriverCaps` on `PATH` (cached 60 s), writes `agent`, returns `[]proto.HostAgent` with `Groups` empty |
 
@@ -121,6 +122,22 @@ Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/
 - **One reader per channel and lock order.** `Events()` is written only by `readLoop` and read only by `Start`'s caller, and closes after `cmd.Wait` and tree cleanup finish; `ready` is closed once by `finishReady` for `Turn`. `wmu` (stdin writes and close) and `mu` (protocol, turn, approval, user-input and file-change state) are never nested.
 - **Requests and notifications.** `commandExecution` and `fileChange` approvals emit `Asked` for `Process.Answer`; `item/tool/requestUserInput` emits `Asked` with `Ask.Reply`; invalid parameters and all other server requests get JSON-RPC error `-32601`. Notifications during an active turn emit `Active`; `account/rateLimits/updated` selects the higher `usedPercent` window (`Used`, and `RateLimited` at 100 percent or when a limit flag is set), and a turn that fails with `usageLimitExceeded` emits `RateLimited`. Live behavior of `features.default_mode_request_user_input=true` and `item/tool/requestUserInput` remains unverified ([issues.md](../../issues.md)).
 
+### OpenCode
+
+`opencode.go` registers `Drivers["opencode"]` and its declaration (`api_key`; levels `1`, `3`; `conn`; takeover `none`) from the OpenCode 1.19.6 documentation read by T3-0. No capture of the real CLI exists yet, so every value below is `[unverified]` ([issues.md](../../issues.md)).
+
+- `Start` runs `opencode serve --hostname 127.0.0.1 --port 0` in the session folder with a random `OPENCODE_SERVER_PASSWORD`, and `OPENCODE_CONFIG_CONTENT` holding the `solodawn` MCP server (`Launch.Shim`) and the level's `permission`. Without `RepoConfig` it also sets `OPENCODE_DISABLE_PROJECT_CONFIG=1`. It reads the address from the `listening on` line (`serverAddress`), opens `GET /event`, then `GET /session/<id>` (a failure is `NoSession`) or `POST /session`.
+- A turn is `POST /session/<id>/prompt_async` with the instructions as `system`; `session.idle` of that session ends it, as `interrupted` after a `MessageAbortedError`, `failed` after any other `session.error` of that session or of none (a `ProviderAuthError` also reports `LoginInvalid`). `message.part.updated` is `Active`, `permission.asked` is `Asked`, answered with `POST /permission/<id>/reply` (`once` or `reject`). `Interrupt` is `POST /session/<id>/abort`. The server does not exit when its input closes, so `Close` kills its process tree.
+
+| Level | `permission` |
+| --- | --- |
+| 1 | `edit` and `bash` `deny` |
+| 3 | `edit`, `bash`, `webfetch`, `external_directory` and `doom_loop` `allow` |
+
+### Local servers (`serve.go`)
+
+The drivers whose CLI runs as a local HTTP server share `serve.go`: `serve` starts the server detached from any terminal and returns its standard output and a wait that kills what it left running, `serverAddress` reads the `listening on` line, and `readSSE` reads the event stream with `bufio.Reader`, so an event has no size limit.
+
 ## CLI detection and sign-in
 
 `agents.go` provides `(*Host).Agents(ctx)`, `"agents"` in `Listeners`, and `"agent.set"` in `Surface`; see [drivers.md](../../planning/contracts/drivers.md) section 1.4 and [commands.md](../../planning/contracts/commands.md) section 2.
@@ -135,6 +152,16 @@ Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/
 - `ServeTerminal(t)` parses `"pty:<g>:<member>"` strictly; `p.Attached()` reports whether a terminal stream has attached. A malformed label, an unmatched `(g, member)` or a duplicate stream for an already bridged `PTY` is closed and drained so unread messages never hold back the connection's shared SCTP receive window. Otherwise one goroutine copies `PTY -> t` (pausing `PTY` reads while `t.Write` waits on the 1 MiB send-buffer limit) and the caller copies `t -> PTY`; `t` ending closes `PTY`, and `PTY` exiting closes `t`.
 - `Surface["pty.resize"]` decodes `proto.PTYResize`, requires `cols >= 1` and `rows >= 1` (`bad_request` below 1), remembers the size for `(g, ai)` so a `pty.resize` before `StartPTY` sets the initial size, resizes an open `PTY`, and accepts a `pty.resize` after close as a no-op.
 - **Lock order and single-reader channels.** `PTY.mu -> ptyPart.mu`; neither lock waits on I/O, process exit or `onDone`. `closing` is read only by `waitLoop`; `procDone` and `outDone` are read only by `runStop`; `done` is closed once by `runStop` for `Close` callers.
+
+## Terminal watching (`watch.go`)
+
+`watch.go` keeps grants, successful `watch.start` connections and open watch channels in `Part[watchPart](h)` ([watch-team.md](../../planning/contracts/step-2/watch-team.md), sections 2-6).
+
+- **Grants.** An inbox item with `why: "watch"` grants the card's `by` member's user access only while the AI is in `takeover`. It records `delivered` and acknowledges the item without waking a CLI. Grants are in memory only; `Watchers(group, member)` returns sorted user ids, or `[]`.
+- **Admission.** `Watching(device)` resolves the device's user from the granted groups' device rows. A grant admits that person's devices even when this host is not the group's home. `WatchEnded(group, user)` notifies node after the person's last grant ends, outside the watch lock, so node can close connections with no other reason to remain open.
+- **Start and channel.** `WatchStart(from, device, data)` reads the device's user from the group's device rows, refuses an absent grant with `forbidden` and a non-direct path with `relay`, and otherwise records the connection for that slot and device. `ServeWatch(t)` accepts one `watch:<g>:<member>` channel per device after `watch.start`; an unmatched or duplicate channel is closed and drained. Terminal bytes go to the owner's channel first, then unchanged to each watcher's queue. A queue exceeding 1 MiB closes that watcher without slowing the owner. Any input on a watch channel closes it without forwarding bytes to the PTY. Known dimensions on open are pushed only to that watcher's link; subsequent owner `pty.resize` dimensions go to every open watcher on `ctl` as `proto.PTYResize`.
+- **End.** `Surface["watch.end"]` drops the named user's grant and closes their channels, or returns `not_found`. A gone watcher member drops their grants in that group. Hand-back closes the slot's channels and drops its grants and successful starts before closing the PTY. Channel loss, queue overflow, connection loss and a path leaving `direct` close channels but keep grants; another `watch.start` may reconnect during the same takeover.
+- **State.** One `watchPart.mu` guards grants, successful starts, connection monitors and channel queues; each open watch channel has its own writer goroutine.
 
 ## Terminal takeover (`takeover.go`)
 
@@ -159,9 +186,9 @@ Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/
 
 # Host test CLIs
 
-Build `./internal/host/fakecli/claude` and `./internal/host/fakecli/codex` into a temporary directory and prepend it to the test's PATH. Both answer `--version` without a script. For sessions, set:
+Build `./internal/host/fakecli/claude`, `./internal/host/fakecli/codex` and `./internal/host/fakecli/opencode` into a temporary directory and prepend it to the test's PATH. All three answer `--version` without a script. For sessions, set:
 
-- `SOLODAWN_FAKE_CLAUDE_SCRIPT` and/or `SOLODAWN_FAKE_CODEX_SCRIPT`: path to the script for the next start of that CLI. Each process reads its script once. Replace it between a first start and a resume; a relative path is resolved in the session's working folder.
+- `SOLODAWN_FAKE_CLAUDE_SCRIPT`, `SOLODAWN_FAKE_CODEX_SCRIPT` or `SOLODAWN_FAKE_OPENCODE_SCRIPT`: path to the script for the next start of that CLI. Each process reads its script once. Replace it between a first start and a resume; a relative path is resolved in the session's working folder.
 - `SOLODAWN_FAKECLI_LOG`: shared append-only file. Each session writes `start <cli> <id>` before its first step and `exit <cli> <id>` after its last step, once its MCP server is stopped. A forced OS kill writes no exit line; to test an exit inside a turn, end the script there.
 
 ## Scripts
@@ -171,13 +198,17 @@ Each [script](fakecli/testdata/) is a span of one of the [macOS captures](https:
 | Step direction | Action |
 | --- | --- |
 | `stdin`, `mcp->cli` | Wait for one JSON line from the node or from the MCP server. An object matches when it has the fields of `msg`, recursively; arrays, numbers and strings must be equal, the text of an MCP result included. |
-| `stdout`, `mcp<-cli` | Write `msg` as one JSON line to the node or to the MCP server. The first MCP step starts the server named `solodawn` in `--mcp-config <file or json>` or in the two `-c mcp_servers.solodawn.{command,args}=…` settings. The fake runs nothing else. |
+| `stdout`, `mcp<-cli` | Write `msg` as one JSON line to the node or to the MCP server. The first MCP step starts the server named `solodawn` in `--mcp-config <file or json>` or in the two `-c mcp_servers.solodawn.{command,args}=…` settings. OpenCode's is `mcp.solodawn.command` in `OPENCODE_CONFIG_CONTENT`. The fake runs nothing else. |
 | `stderr` | Write the string `msg` as one line. |
 | `eof` | Wait for closed stdin; input fails the script. |
+| `http` | OpenCode only. Wait for the next request other than `GET /event`, check `msg.call` (`"<method> <path>"`) and the fields of `msg.body` (`null` for none), then answer with `msg.status` (default 200) and `msg.res`. |
+| `sse` | OpenCode only. Send `msg` on the `GET /event` stream as one `data:` line. |
 
 A string value `"$session"` is replaced by the session id. In `stdout`, `"$id"` is replaced by the JSON-RPC id of the last line read from stdin.
 
 A step that does not hold ends the process with status 1 and the reason on stderr. Reads, not sleeps, control order: the next output is written only after the line before it was read. Script timestamps and usage are captured values, not readings of the test machine.
+
+The fake OpenCode prints `opencode server listening on <url>`, refuses a request without the `OPENCODE_SERVER_PASSWORD` basic-auth password, and has no capture: its scripts are written in the tests from the documented API.
 
 Two scripts go beyond their capture: `codex-exit-mid-turn.json` ends at the first approval request, and `codex-late-call.json` waits for the tool reply after the call has failed. No capture shows either, and the fake prints nothing for them.
 
