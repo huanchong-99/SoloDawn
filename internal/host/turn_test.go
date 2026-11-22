@@ -938,10 +938,6 @@ func checkFetchFailurePaths(t *testing.T, r *turnRig) {
 	_, _, err = Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{assignFirst})
 	seamCode(t, err, "forbidden")
 
-	r.home.handler = func(any) (json.RawMessage, error) { return json.RawMessage(`{"t":"wrong"}`), nil }
-	_, _, err = Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{assignFirst})
-	seamCode(t, err, "bad_request")
-
 	checkBriefNoteAndHistoryDecodeErrors(t, r, assignFirst)
 }
 

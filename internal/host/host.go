@@ -195,6 +195,8 @@ func (h *Host) Home(device string) (Home, bool) {
 // section 4).
 const ctlLimit = 61_440
 
+var errHomeUnreachable = &Error{Code: "home_unreachable", Message: "the home of that group is not connected"}
+
 // Command signs payload, the JSON text of a command, with the node's key and
 // sends it to the home with that device id (contracts/datachannel.md section
 // 5). It returns the home's answer when the command was accepted, the home's
@@ -202,10 +204,9 @@ const ctlLimit = 61_440
 // came (flows/agent-turn.md F). A command too large for a ctl message is not
 // sent: it fails with bad_request, which names the limit and the size.
 func (h *Host) Command(ctx context.Context, device, payload string) (json.RawMessage, error) {
-	unreachable := &Error{"home_unreachable", "the home of that group is not connected"}
 	home, ok := h.Home(device)
 	if !ok {
-		return nil, unreachable
+		return nil, errHomeUnreachable
 	}
 	env := h.Key.Sign(payload)
 	frame := func(id int64) any {
@@ -216,7 +217,7 @@ func (h *Host) Command(ctx context.Context, device, payload string) (json.RawMes
 	}
 	answer, err := home.Request(ctx, frame)
 	if err != nil {
-		return nil, unreachable
+		return nil, errHomeUnreachable
 	}
 	var refused proto.ErrorResponse
 	if proto.Decode(answer, &refused) == nil {

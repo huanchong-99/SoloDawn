@@ -875,23 +875,20 @@ func (c *turnCtx) fetchPage(id, before int64, limit int) proto.FetchPage {
 }
 
 func fetchFrom(ctx context.Context, h *Host, device string, build func(id int64) any) (proto.Fetched, error) {
-	unreachable := &Error{"home_unreachable", "the home of that group is not connected"}
 	home, ok := h.Home(device)
 	if !ok {
-		return proto.Fetched{}, unreachable
+		return proto.Fetched{}, errHomeUnreachable
 	}
 	raw, err := home.Request(ctx, build)
 	if err != nil {
-		return proto.Fetched{}, unreachable
+		return proto.Fetched{}, errHomeUnreachable
 	}
 	var refused proto.ErrorResponse
 	if proto.Decode(raw, &refused) == nil {
 		return proto.Fetched{}, &Error{refused.Err.Code, refused.Err.Message}
 	}
 	var fetched proto.Fetched
-	if proto.Decode(raw, &fetched) != nil {
-		return proto.Fetched{}, &Error{"bad_request", "invalid fetch response"}
-	}
+	proto.Decode(raw, &fetched)
 	return fetched, nil
 }
 

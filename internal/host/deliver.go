@@ -99,48 +99,18 @@ func (d *delivery) groupLocked(group, home string) *groupSync {
 	return gs
 }
 
-type hostConfig struct {
-	DBFile string       `json:"db_file"`
-	Homes  []proto.Home `json:"homes"`
-}
-
-const readHostConfigSQL = `SELECT json_object(
-	'db_file', coalesce((SELECT file FROM pragma_database_list WHERE name = 'main'), ''),
-	'homes', coalesce((SELECT json(value) FROM setting WHERE key = 'homes'), json('[]'))
-)`
-
-func loadHostConfig(h *Host) (hostConfig, error) {
-	var raw string
-	read := func(tx *store.Tx) error { return tx.QueryRow(readHostConfigSQL).Scan(&raw) }
-	err := h.Store.Write(read)
-	var cfg hostConfig
-	if err == nil {
-		err = json.Unmarshal([]byte(raw), &cfg)
-	}
-	if err != nil {
-		log.Printf("host: load config: %v", err)
-	}
-	return cfg, err
-}
-
-func (cfg hostConfig) projectDir(group string) string {
-	if cfg.DBFile == "" {
-		return ""
-	}
-	return filepath.Join(filepath.Dir(cfg.DBFile), "projects", group)
-}
-
 func attachHome(h *Host, device string) {
 	conn, ok := h.Home(device)
 	if !ok {
 		return
 	}
-	cfg, err := loadHostConfig(h)
+	homes, err := joinSavedHomes(h.Store)
 	if err != nil {
+		log.Printf("host: load homes: %v", err)
 		return
 	}
 	d := deliv(h)
-	groups := groupsForHome(d, cfg, device)
+	groups := groupsForHome(d, homes, device)
 	if len(groups) == 0 {
 		return
 	}
@@ -163,7 +133,7 @@ func settleDelivery(h *Host) {
 	d.wg.Wait()
 }
 
-func groupsForHome(d *delivery, cfg hostConfig, device string) []string {
+func groupsForHome(d *delivery, homes []proto.Home, device string) []string {
 	seen := map[string]bool{}
 	d.mu.Lock()
 	for g, gs := range d.groups {
@@ -172,7 +142,7 @@ func groupsForHome(d *delivery, cfg hostConfig, device string) []string {
 		}
 	}
 	d.mu.Unlock()
-	for _, entry := range cfg.Homes {
+	for _, entry := range homes {
 		if entry.Home == device {
 			seen[string(entry.Group)] = true
 		}
@@ -257,7 +227,7 @@ func syncGroupState(ctx context.Context, h *Host, conn Home, device, group strin
 		}
 		if !joinWaitChannel(ctx, waitCh) {
 			d.removeGroupWaiter(group, waitCh)
-			return joinUnreachable()
+			return errHomeUnreachable
 		}
 	}
 }
@@ -299,7 +269,7 @@ func syncOneGroup(ctx context.Context, h *Host, d *delivery, conn Home, device s
 
 func decodeSyncAnswer(answer json.RawMessage, err error, group string) (proto.Synced, error) {
 	if err != nil {
-		return proto.Synced{}, joinUnreachable()
+		return proto.Synced{}, errHomeUnreachable
 	}
 	var refused proto.ErrorResponse
 	if proto.Decode(answer, &refused) == nil {
@@ -307,7 +277,7 @@ func decodeSyncAnswer(answer json.RawMessage, err error, group string) (proto.Sy
 	}
 	var synced proto.Synced
 	if proto.Decode(answer, &synced) != nil || synced.Group != group {
-		return proto.Synced{}, joinUnreachable()
+		return proto.Synced{}, errHomeUnreachable
 	}
 	return synced, nil
 }
@@ -410,8 +380,7 @@ func cleanupGroupState(h *Host, d *delivery, group string) {
 	if len(tasks) == 0 {
 		return
 	}
-	cfg, _ := loadHostConfig(h)
-	pDir := cfg.projectDir(group)
+	pDir := projectDir(h, group)
 	if !hasGitClone(pDir) {
 		return
 	}
@@ -965,13 +934,9 @@ func matchesStepCommit(inRole bool, task proto.TaskRow, step, commit string) boo
 }
 
 func prepareTargetSession(h *Host, ai aiInfo, target routedTarget, batch []verifiedItem) (Session, error, error) {
-	cfg, err := loadHostConfig(h)
-	if err != nil {
-		return Session{}, nil, err
-	}
 	ctx := context.Background()
 	grp, _ := lookupRow[proto.GroupRow](h, target.key.Group, "group", target.key.Group)
-	pDir := cfg.projectDir(target.key.Group)
+	pDir := projectDir(h, target.key.Group)
 	if err := ensureCloneIfConfigured(ctx, pDir, grp); err != nil {
 		return Session{}, err, nil
 	}
@@ -1106,7 +1071,7 @@ func reportWorkspaceFailure(ctx context.Context, h *Host, home string, target ro
 	if conn, ok := h.Home(home); ok {
 		path = conn.Path()
 	}
-	hc := proto.HomeCommand{Type: "member", Nonce: freshNonce(), Timestamp: h.Now().UnixMilli(), Group: proto.ID(target.key.Group)}
+	hc := homeHeader(h, target.key.Group, "", "member")
 	mc := proto.MemberCommand{HomeCommand: hc, Op: "status", ID: proto.ID(target.key.Member)}
 	ev := &proto.TurnInterruptedEvent{SystemCode: proto.SystemCode{Code: "turn_interrupted"}, Reason: "crash", Task: proto.ID(target.key.Task), Detail: detail}
 	sendHostCommand(ctx, h, home, marshalWire(proto.MemberStatus[proto.TurnInterruptedEvent]{MemberCommand: mc, State: state, Path: path, Event: ev}))
@@ -1391,13 +1356,9 @@ func findAuditMergeTS(db *store.Store, group, detail string) (int64, bool) {
 }
 
 func runReviewedMerge(h *Host, home, group string, task proto.TaskRow, commit string, pr int, inspectOnly bool, taken time.Time) {
-	cfg, err := loadHostConfig(h)
-	if err != nil {
-		return
-	}
 	ctx := context.Background()
 	grp, _ := lookupRow[proto.GroupRow](h, group, "group", group)
-	pDir := cfg.projectDir(group)
+	pDir := projectDir(h, group)
 	if pDir == "" {
 		return
 	}
@@ -1407,6 +1368,7 @@ func runReviewedMerge(h *Host, home, group string, task proto.TaskRow, commit st
 	}
 	rm := buildReviewedMerge(pDir, grp, task, commit, pr, taken)
 	var res MergeResult
+	var err error
 	if inspectOnly {
 		res, err = rm.Inspect(ctx)
 	} else {
@@ -1455,6 +1417,5 @@ func githubRepo(raw string) string {
 }
 
 func hostTaskCommand(h *Host, group, op, taskID string) proto.TaskCommand {
-	hc := proto.HomeCommand{Type: "task", Nonce: freshNonce(), Timestamp: h.Now().UnixMilli(), Group: proto.ID(group)}
-	return proto.TaskCommand{HomeCommand: hc, Op: op, ID: proto.ID(taskID)}
+	return tskCommand(h, group, "", op, proto.ID(taskID))
 }

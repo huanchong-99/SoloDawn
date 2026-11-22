@@ -375,24 +375,24 @@ func TestPostToolUnknownNamesAndHomeErrors(t *testing.T) {
 	secCaller := talkCaller(GroupSession, talkSecID, "", true, Turn{Kind: ItemsTurn})
 
 	_, err := Tools["post"].Call(t.Context(), h, grpCaller, json.RawMessage(`{"text":"hi","mentions":["Ghost"]}`))
-	assertEqual(t, assertErrorCode(t, err, "not_found").Message, `unknown member "Ghost"; valid members: Claude Code, Codex, Secretary, owner`)
+	assertEqual(t, assertErrorCode(t, err, "not_found").Message, `unknown member "Ghost" (valid: Claude Code, Codex, Secretary, owner)`)
 
 	_, err = Tools["post"].Call(t.Context(), h, secCaller, json.RawMessage(`{"text":"hi","kind":"summary","task":"T-99"}`))
-	assertEqual(t, assertErrorCode(t, err, "not_found").Message, `unknown task "T-99"; valid tasks: T-1, T-12`)
+	assertEqual(t, assertErrorCode(t, err, "not_found").Message, `unknown task "T-99" (valid: T-1, T-12)`)
 
 	_, err = Tools["post"].Call(t.Context(), h, secCaller, json.RawMessage(`{"text":"hi","task":"T-99"}`))
 	assertErrorCode(t, err, "not_found")
 
 	h.Rows.Reset(talkGroupID)
 	_, err = Tools["post"].Call(t.Context(), h, grpCaller, json.RawMessage(`{"text":"hi","mentions":["Ghost"]}`))
-	assertEqual(t, assertErrorCode(t, err, "not_found").Message, `unknown member "Ghost"; valid members: none`)
+	assertEqual(t, assertErrorCode(t, err, "not_found").Message, `unknown member "Ghost" (valid: none)`)
 
 	talkPutRow(t, h, "member", talkOwnerID, proto.HumanMemberRow{
 		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: talkOwnerID, Seq: 1}, Group: talkGroupID, Kind: "human", User: "u1", Name: "owner", LastSeen: seamStart},
 		Role:      "owner", Online: true,
 	})
 	_, err = Tools["post"].Call(t.Context(), h, grpCaller, json.RawMessage(`{"text":"hi","mentions":["Ghost"]}`))
-	assertEqual(t, assertErrorCode(t, err, "not_found").Message, `unknown member "Ghost"; valid members: owner`)
+	assertEqual(t, assertErrorCode(t, err, "not_found").Message, `unknown member "Ghost" (valid: owner)`)
 	assertEqual(t, len(home.asked), 0)
 
 	home.replies = []json.RawMessage{json.RawMessage(`{"re":50,"err":{"code":"forbidden","msg":"denied"}}`)}
