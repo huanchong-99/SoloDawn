@@ -132,8 +132,9 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
     });
   });
 
-  Scenario('Requests show their kind and outcome (A9.9, A9.11)', ({ Given, Then }) => {
+  Scenario('Requests show their kind and outcome (A9.9, A9.11)', ({ Given, Then, When }) => {
     const { group } = setup(requester);
+    const at = clock(1763600000000, 'en');
     const states = [
       confirmation('pending', 'watch'),
       confirmation('confirmed', 'direct'),
@@ -145,7 +146,6 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
       for (const msg of states) showCard(group, msg);
     });
     Then('the cards show the three kinds, four states and no actions for the observer', () => {
-      const at = clock(1763600000000, 'en');
       expect(texts('.card p')).toEqual([
         'Let the requester watch Codex’s terminal.',
         'Let Codex act on this request.',
@@ -159,6 +159,17 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
         `Expired · ${at}`,
       ]);
       expect(all('.card button')).toHaveLength(0);
+    });
+    When('the person asked is no longer in the group', () => {
+      flushSync(() => group.apply([{ r: 'member', id: owner, seq: 1000, gone: true }]));
+    });
+    Then('the decisions still show their outcomes and times', () => {
+      expect(texts('.card .badge')).toEqual([
+        'Waiting for Former member',
+        `Confirmed by Former member · ${at}`,
+        `Denied by Former member · ${at}`,
+        `Expired · ${at}`,
+      ]);
     });
   });
 

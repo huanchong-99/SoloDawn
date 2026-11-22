@@ -34,7 +34,7 @@
 <div class="members">
   <div class="head">
     <div class="row">
-      <h2 class="sec-title grow">{t('member.ai')} · {ais.length}</h2>
+      <h2 class="sec-title grow">{`${t('member.ai')} · ${ais.length}`}</h2>
       <button
         class="btn btn-sm"
         onclick={() => (adding = true)}
@@ -68,18 +68,18 @@
         </span>
         <div class="grow">
           <h3>
-            {ai.name}{#if owner}{' '}<span class="owner">· {owner}</span>{/if}
+            {ai.name}{#if owner}{' '}<span class="owner">{`· ${owner}`}</span>{/if}
           </h3>
           <p class="st" data-st={status.st}><i></i><span>{status.text}</span></p>
         </div>
       </header>
       <dl class="kv">
         <dt>{t('member.computer')}</dt>
-        <dd>{ai.host_name} <span class="muted">· {pathLabel(ai)}</span></dd>
+        <dd>{`${ai.host_name} `}<span class="muted">{`· ${pathLabel(ai)}`}</span></dd>
         <dt>{t('member.account')}</dt>
         <dd>
           {accountLabel(ai.account)}{#if ai.account === 'personal'}{' '}<span class="muted">
-              · {t('member.account.personal.note')}
+              {`· ${t('member.account.personal.note')}`}
             </span>{/if}
         </dd>
       </dl>
@@ -132,14 +132,14 @@
     <p class="hint">{t('member.ai.empty')}</p>
   {/each}
 
-  <h2 class="sec-title people-head">{t('member.people')} · {humans.length}</h2>
+  <h2 class="sec-title people-head">{`${t('member.people')} · ${humans.length}`}</h2>
   <ul class="people">
     {#each humans as person (person.id)}
       {@const tags = personTags(group, person)}
       <li class="row person">
         <Avatar id={person.user} name={person.name} />
         <span class="grow cut">
-          {person.name}{#if tags}{' '}<span class="muted">· {tags}</span>{/if}
+          {person.name}{#if tags}{' '}<span class="muted">{`· ${tags}`}</span>{/if}
         </span>
         <span class="st" data-st={person.online ? 'ok' : 'offline'}>
           <i></i>{t(person.online ? 'member.online' : 'member.offline')}

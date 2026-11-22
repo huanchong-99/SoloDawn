@@ -34,6 +34,6 @@ Feature: AI-to-AI call block
     And the sheet renders waiting and denied calls and the answered call with the reply "Use the path change event."
 
   Scenario: An answered call keeps the reply after its author leaves
-    Given a main-line call whose reply is from a former member
+    Given a main-line call with no question whose reply is from a former member
     When the reader opens the main line of "Website"
-    Then the reply text and the former member's avatar remain visible
+    Then only the reply text and the former member's avatar are shown in the call body

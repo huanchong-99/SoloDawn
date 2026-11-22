@@ -12,6 +12,8 @@ Feature: Confirmation cards and access to an AI (U2-2)
   Scenario: Requests show their kind and outcome (A9.9, A9.11)
     Given the examples of all four confirmation states
     Then the cards show the three kinds, four states and no actions for the observer
+    When the person asked is no longer in the group
+    Then the decisions still show their outcomes and times
 
   Scenario: Only each AI's owner can change its lists (A9.14)
     Given a team AI and a personal AI with the same owner

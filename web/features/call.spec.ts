@@ -307,13 +307,14 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario('An answered call keeps the reply after its author leaves', ({ Given, When, Then }) => {
-    Given('a main-line call whose reply is from a former member', () => {
+    Given('a main-line call with no question whose reply is from a former member', () => {
       home.write(
         website,
         example('row-msg-call-answered', {
           id: 'answered',
           thread: null,
           by: codexId,
+          text: '',
           state: { status: 'answered', reply: 'former-reply', ms: 10 },
         }),
       );
@@ -330,7 +331,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     When('the reader opens the main line of "Website"', () => {
       openPage(`#/groups/${website}`);
     });
-    Then("the reply text and the former member's avatar remain visible", () => {
+    Then("only the reply text and the former member's avatar are shown in the call body", () => {
+      expect(all('#m-answered .call > .text')).toHaveLength(0);
       expect(text('#m-answered .reply .text')).toBe('Former member Already done.');
       expect(text('#m-answered .reply .av')).toBe('F');
     });

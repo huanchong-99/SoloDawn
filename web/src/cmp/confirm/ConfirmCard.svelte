@@ -16,10 +16,11 @@
   const recipients = $derived(
     msg.body.to.map((user) => group.personName(user) ?? t('chat.gone')).join(t('confirm.sep')),
   );
-  const actor = $derived(
-    'by' in msg.state ? (group.member(msg.state.by)?.name ?? t('chat.gone')) : '',
-  );
-  const at = $derived('at' in msg.state ? clock(msg.state.at, prefs.lang) : '');
+  function outcome(state: Exclude<CardProps<'confirm'>['msg']['state'], { status: 'pending' }>) {
+    const label = t(`confirm.${state.status}`).replace('{time}', clock(state.at, prefs.lang));
+    if (state.status === 'expired') return label;
+    return label.replace('{who}', () => group.member(state.by)?.name ?? t('chat.gone'));
+  }
 
   async function decide(action: 'confirm' | 'deny') {
     card.tabIndex = -1;
@@ -38,16 +39,14 @@
     <span class="kind">{t('chat.kind.confirm')}</span>
     {#if needsMe}
       <span class="badge solid" data-tone="dawn">{t('confirm.needs_you')}</span>
-    {:else if status === 'pending'}
+    {:else if msg.state.status === 'pending'}
       <span class="badge">{t('confirm.waiting').replace('{who}', () => recipients)}</span>
     {:else}
       <span
         class="badge"
         data-tone={status === 'expired' ? undefined : status === 'confirmed' ? 'ok' : 'danger'}
       >
-        {t(`confirm.${status}`)
-          .replace('{time}', at)
-          .replace('{who}', () => actor)}
+        {outcome(msg.state)}
       </span>
     {/if}
   </header>

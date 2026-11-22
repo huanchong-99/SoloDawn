@@ -19,7 +19,6 @@
   const mine = $derived(ai.user === group.home.me.user);
   const offline = $derived(!group.home.ctl);
   const people = $derived(humans.filter((person) => person.user !== ai.user));
-  const changed = $derived(draft ? fields.filter((field) => differs(field, draft![field])) : []);
 
   function differs(field: Field, list: string[]) {
     return (
@@ -41,7 +40,7 @@
     editButton?.focus();
   }
 
-  async function save(list: Pick<AIMemberRow, Field>) {
+  async function save(list: Pick<AIMemberRow, Field>, changed: Field[]) {
     busy = true;
     failed = '';
     const updates = Object.fromEntries(changed.map((field) => [field, list[field]]));
@@ -64,6 +63,7 @@
 
 {#if mine && draft}
   {@const lists = draft}
+  {@const changed = fields.filter((field) => differs(field, lists[field]))}
   <form
     bind:this={form}
     class="field"
@@ -71,7 +71,7 @@
     tabindex="-1"
     onsubmit={(event) => {
       event.preventDefault();
-      void save(lists);
+      void save(lists, changed);
     }}
   >
     {#each fields as field (field)}
