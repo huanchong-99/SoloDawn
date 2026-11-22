@@ -12,13 +12,15 @@ import (
 )
 
 type fetItem struct {
-	Type   string  `json:"row_type"`
-	ID     string  `json:"row_id"`
-	Text   string  `json:"text"`
-	Thread *string `json:"thread"`
-	Main   bool    `json:"main"`
-	Kind   string  `json:"msg_kind"`
-	Gone   bool    `json:"gone"`
+	Type     string  `json:"row_type"`
+	ID       string  `json:"row_id"`
+	Text     string  `json:"text"`
+	NoteType string  `json:"note_type"`
+	Name     string  `json:"note_name"`
+	Thread   *string `json:"thread"`
+	Main     bool    `json:"main"`
+	Kind     string  `json:"msg_kind"`
+	Gone     bool    `json:"gone"`
 }
 
 func fetTables() home.Tables {
@@ -42,6 +44,8 @@ func fetApplyItem(s *home.State, c home.Command) (home.Result, *home.Refusal) {
 		return home.Result{Rows: []home.Row{home.RowOf(proto.NoteRow{
 			RowHeader: proto.RowHeader{Type: "note", ID: p.ID},
 			Group:     s.ID,
+			NoteType:  p.NoteType,
+			Name:      p.Name,
 			Text:      p.Text,
 			By:        ownerID,
 			Timestamp: clock,
@@ -169,12 +173,24 @@ func TestFetchPagesNotesAndReviewsByKind(t *testing.T) {
 	fetWrite(p, fetItem{Type: "msg", ID: "r2", Thread: &taskB, Kind: "review", Text: "review 2"})
 	fetWrite(p, fetItem{Type: "msg", ID: "r3", Thread: &taskB, Kind: "review", Text: "removed review"})
 	fetWrite(p, fetItem{Type: "msg", ID: "r3", Gone: true})
+	fetWrite(p, fetItem{Type: "note", ID: "pr1", NoteType: "preset", Name: "Calm", Text: "preset 1"})
+	fetWrite(p, fetItem{Type: "note", ID: "kb1", NoteType: "kb", Name: "Arch", Text: "kb 1"})
+	fetWrite(p, fetItem{Type: "note", ID: "pr2", NoteType: "preset", Name: "Bold", Text: "preset 2"})
 
 	ids, more := fetParsed(t, 21, fetCall(p, fetKind(21, groupID, "note", 0, 1)))
 	equal(t, []any{ids, more}, []any{[]string{"n2"}, true})
 
 	ids, more = fetParsed(t, 22, fetCall(p, fetKind(22, groupID, "note", 7, 2)))
 	equal(t, []any{ids, more}, []any{[]string{"n1"}, false})
+
+	ids, more = fetParsed(t, 27, fetCall(p, fetKind(27, groupID, "preset", 0, 1)))
+	equal(t, []any{ids, more}, []any{[]string{"pr2"}, true})
+
+	ids, more = fetParsed(t, 28, fetCall(p, fetKind(28, groupID, "preset", 15, 10)))
+	equal(t, []any{ids, more}, []any{[]string{"pr1"}, false})
+
+	ids, more = fetParsed(t, 29, fetCall(p, fetKind(29, groupID, "kb", 0, 10)))
+	equal(t, []any{ids, more}, []any{[]string{"kb1"}, false})
 
 	ids, more = fetParsed(t, 23, fetCall(p, fetKind(23, groupID, "review", 0, 1)))
 	equal(t, []any{ids, more}, []any{[]string{"r2"}, true})

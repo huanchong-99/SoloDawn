@@ -234,10 +234,63 @@ func TestHomeReadsFail(t *testing.T) {
 		_, err := tx.Row("g", "group", "g")
 		return err
 	})
+	failed(list(func(tx *Tx) ([]json.RawMessage, error) { return tx.TypedNotes("g", "preset") }))
 	failed(func(tx *Tx) error {
 		_, _, err := tx.Counters("g")
 		return err
 	})
 	failed(func(tx *Tx) error { return tx.RaiseNum("g", 1) })
 	failed(func(tx *Tx) error { return tx.Retire("g", 1) })
+}
+
+func TestTypedNotesAndUniqueIndex(t *testing.T) {
+	s := openDB(t, ":memory:")
+	calm := proto.NoteRow{RowHeader: header("note", "p1", 1), Pos: 1, Group: "g", NoteType: "preset", Name: "Calm", Text: "v1"}
+	put(t, s, "g", 10, calm)
+	airy := proto.NoteRow{RowHeader: header("note", "p2", 2), Pos: 2, Group: "g", NoteType: "preset", Name: "Airy", Text: "v1"}
+	put(t, s, "g", 10, airy)
+	put(t, s, "g", 10, proto.NoteRow{RowHeader: header("note", "k1", 3), Pos: 3, Group: "g", NoteType: "kb", Name: "Calm", Text: "kb doc"})
+	put(t, s, "g", 10, proto.NoteRow{RowHeader: header("note", "c1", 4), Pos: 4, Group: "g", Text: "context 1"})
+	put(t, s, "g", 10, proto.NoteRow{RowHeader: header("note", "c2", 5), Pos: 5, Group: "g", Text: "context 2"})
+	put(t, s, "other", 10, proto.NoteRow{RowHeader: header("note", "op1", 1), Pos: 1, Group: "other", NoteType: "preset", Name: "Calm", Text: "other"})
+
+	// A second live note of the same (g, type, name) is refused by row_named.
+	dupErr := s.Write(func(tx *Tx) error {
+		return Put(tx, "g", 20, proto.NoteRow{RowHeader: header("note", "p-dup", 6), Pos: 6, Group: "g", NoteType: "preset", Name: "Calm", Text: "dup"})
+	})
+	if dupErr == nil || !strings.Contains(dupErr.Error(), "UNIQUE constraint failed") {
+		t.Fatalf("duplicate named note err = %v; want UNIQUE constraint", dupErr)
+	}
+
+	typed := func(group string) []proto.NoteRow {
+		rows, err := within(t, s, func(tx *Tx) ([]json.RawMessage, error) { return tx.TypedNotes(group, "preset") })
+		check(t, err)
+		notes := []proto.NoteRow{}
+		for _, raw := range rows {
+			var n proto.NoteRow
+			check(t, json.Unmarshal(raw, &n))
+			notes = append(notes, n)
+		}
+		return notes
+	}
+	equal(t, typed("g"), []proto.NoteRow{airy, calm})
+
+	// Replacing the existing row id updates text while keeping id and pos; gone frees the name.
+	calm.Seq, calm.Text = 7, "v2"
+	put(t, s, "g", 30, calm)
+	put(t, s, "g", 40, proto.GoneRow{RowHeader: header("note", "p1", 8), Gone: true})
+	equal(t, typed("g"), []proto.NoteRow{airy})
+
+	put(t, s, "g", 50, proto.NoteRow{RowHeader: header("note", "p3", 9), Pos: 9, Group: "g", NoteType: "preset", Name: "Calm", Text: "recreated"})
+	equal(t, typed("none"), []proto.NoteRow{})
+
+	for _, q := range []string{
+		`EXPLAIN QUERY PLAN SELECT data FROM row WHERE g='g' AND r='note' AND gone=0 AND data->>'type' IS NOT NULL AND data->>'type'='preset' ORDER BY data->>'name'`,
+	} {
+		var detail string
+		check(t, s.db.QueryRow(q).Scan(new(int), new(int), new(int), &detail))
+		if !strings.Contains(detail, "row_named") {
+			t.Fatalf("plan %q does not use row_named", detail)
+		}
+	}
 }
