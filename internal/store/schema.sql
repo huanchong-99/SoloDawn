@@ -20,6 +20,7 @@ CREATE INDEX        row_by_thread ON row (g, thread, pos) WHERE r = 'msg';
 CREATE INDEX        row_main      ON row (g, pos) WHERE r = 'msg' AND in_main = 1;
 CREATE INDEX        row_pending   ON row (g) WHERE pending = 1;
 CREATE INDEX        row_keep      ON row (g, r, pos) WHERE keep = 1;
+CREATE UNIQUE INDEX row_named     ON row (g, data->>'type', data->>'name') WHERE r = 'note' AND gone = 0 AND data->>'type' IS NOT NULL;
 
 CREATE TABLE grp (
   g      TEXT PRIMARY KEY,

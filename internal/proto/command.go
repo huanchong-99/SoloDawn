@@ -24,24 +24,26 @@ type GroupCommand struct {
 // both g and n.
 type GroupCreate struct {
 	GroupCommand
-	Name       string   `json:"name"`
-	Kind       string   `json:"kind"`
-	Repo       string   `json:"repo"`
-	Base       string   `json:"base"`
-	Forge      string   `json:"forge"`
-	Checks     []string `json:"checks"`
-	MemberName string   `json:"member_name"`
+	Name       string          `json:"name"`
+	Kind       string          `json:"kind"`
+	Repo       string          `json:"repo,omitempty"`
+	Base       string          `json:"base"`
+	Forge      string          `json:"forge"`
+	Checks     []string        `json:"checks"`
+	MemberName string          `json:"member_name"`
+	Templates  *ForgeTemplates `json:"templates,omitempty"`
 }
 
 // GroupSet carries only the fields being changed; limits, when sent, is whole.
 type GroupSet struct {
 	GroupCommand
-	Name           *string   `json:"name,omitempty"`
-	Checks         *[]string `json:"checks,omitempty"`
-	Pass           *int      `json:"pass,omitempty"`
-	PassFoundation *int      `json:"pass_foundation,omitempty"`
-	Limits         *Limits   `json:"limits,omitempty"`
-	Secretary      ID        `json:"secretary,omitempty"`
+	Name           *string         `json:"name,omitempty"`
+	Checks         *[]string       `json:"checks,omitempty"`
+	Pass           *int            `json:"pass,omitempty"`
+	PassFoundation *int            `json:"pass_foundation,omitempty"`
+	Limits         *Limits         `json:"limits,omitempty"`
+	Secretary      ID              `json:"secretary,omitempty"`
+	Templates      *ForgeTemplates `json:"templates,omitempty"`
 }
 
 // MemberCommand names the member a member command is about; alone it is

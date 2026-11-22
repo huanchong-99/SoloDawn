@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	proposeBriefSchema = stdjson.RawMessage(`{"type":"object","properties":{"criteria":{"type":"array","items":{"type":"string"}},"goal":{"type":"string"},"replaces":{"type":"string"},"requester":{"type":"string"},"scope_in":{"type":"array","items":{"type":"string"}},"scope_out":{"type":"array","items":{"type":"string"}},"tasks":{"type":"array","items":{"type":"object","properties":{"assignee":{"type":"string"},"depends":{"type":"array","default":[],"items":{"type":"integer","minimum":0}},"foundation":{"type":"boolean","default":false},"reviewer":{"type":"string"},"title":{"type":"string"}},"required":["title","assignee","reviewer"],"additionalProperties":false}},"title":{"type":"string"}},"required":["title","goal","criteria","scope_in","scope_out","tasks"],"additionalProperties":false}`)
+	proposeBriefSchema = stdjson.RawMessage(`{"type":"object","properties":{"criteria":{"type":"array","items":{"type":"string"}},"goal":{"type":"string"},"preset":{"type":"string"},"replaces":{"type":"string"},"requester":{"type":"string"},"scope_in":{"type":"array","items":{"type":"string"}},"scope_out":{"type":"array","items":{"type":"string"}},"tasks":{"type":"array","items":{"type":"object","properties":{"assignee":{"type":"string"},"depends":{"type":"array","default":[],"items":{"type":"integer","minimum":0}},"foundation":{"type":"boolean","default":false},"reviewer":{"type":"string"},"title":{"type":"string"}},"required":["title","assignee","reviewer"],"additionalProperties":false}},"title":{"type":"string"}},"required":["title","goal","criteria","scope_in","scope_out","tasks"],"additionalProperties":false}`)
 
 	setTaskSchema = stdjson.RawMessage(`{"type":"object","properties":{"action":{"type":"string","enum":["pause","resume","cancel"]},"assignee":{"type":"string"},"reviewer":{"type":"string"},"task":{"type":"string"}},"required":["task"],"additionalProperties":false}`)
 
@@ -65,6 +65,7 @@ type proposeBriefInput struct {
 	Tasks     []briefTaskInput `json:"tasks"`
 	Requester *string          `json:"requester,omitempty"`
 	Replaces  *string          `json:"replaces,omitempty"`
+	Preset    string           `json:"preset,omitempty"`
 }
 
 type setTaskInput struct {
@@ -170,13 +171,12 @@ func callProposeBrief(ctx context.Context, h *Host, c Caller, raw stdjson.RawMes
 }
 
 func checkBriefSecrets(in proposeBriefInput) error {
-	for _, s := range slices.Concat([]string{in.Title, in.Goal}, in.Criteria, in.ScopeIn, in.ScopeOut) {
-		if err := CheckOutboundSecret(s); err != nil {
-			return err
-		}
-	}
+	texts := slices.Concat([]string{in.Title, in.Goal, in.Preset}, in.Criteria, in.ScopeIn, in.ScopeOut)
 	for _, t := range in.Tasks {
-		if err := CheckOutboundSecret(t.Title); err != nil {
+		texts = append(texts, t.Title)
+	}
+	for _, s := range texts {
+		if err := CheckOutboundSecret(s); err != nil {
 			return err
 		}
 	}
@@ -206,6 +206,7 @@ func prepareBriefBody(rows *Rows, group string, in proposeBriefInput) (proto.Bri
 		Pass:      pass,
 		Requester: string(requester),
 		Replaces:  in.Replaces,
+		Preset:    in.Preset,
 	}, requester, nil
 }
 
