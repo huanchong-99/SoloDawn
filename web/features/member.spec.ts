@@ -811,6 +811,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             agent: 'codex',
             name: 'Lead Secretary',
             secretary: true,
+            model: '',
+            effort: '',
+            tier: 'standard',
+            skills: '',
           });
           expect(workstation.joins).toEqual([]);
         },

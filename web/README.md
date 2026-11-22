@@ -169,15 +169,20 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `Mounts` (`src/lib/mounts.svelte.ts`), and `gather` finds every such file by name. The points,
   and what a component there is given:
 
-  | Point       | Where                                                                      | Props            |
-  | ----------- | -------------------------------------------------------------------------- | ---------------- |
-  | `bar`       | the top bar, before the theme and language buttons, on every page          | `{ net }`        |
-  | `banner`    | under the top bar, across the page; a banner comes down from under the bar | `{ net }`        |
-  | `layer`     | after the page, above it: dialogs and notifications                        | `{ net }`        |
-  | `chat.head` | the head of a chat, after the group's name                                 | `{ group }`      |
-  | `chat.top`  | between the head of a chat and its main line                               | `{ group }`      |
-  | `chat.side` | beside the main line from 1024 px; below, a panel that slides over         | `{ group, net }` |
-  | `cards`     | the card of a message, by kind, in the main line and in threads            | `CardProps`      |
+  | Point        | Where                                                                      | Props                         |
+  | ------------ | -------------------------------------------------------------------------- | ----------------------------- |
+  | `bar`        | the top bar, before the theme and language buttons, on every page          | `{ net }`                     |
+  | `banner`     | under the top bar, across the page; a banner comes down from under the bar | `{ net }`                     |
+  | `layer`      | after the page, above it: dialogs and notifications                        | `{ net }`                     |
+  | `chat.head`  | the head of a chat, after the group's name                                 | `{ group }`                   |
+  | `chat.top`   | between the head of a chat and its main line                               | `{ group }`                   |
+  | `chat.side`  | beside the main line from 1024 px; below, a panel that slides over         | `{ group, net }`              |
+  | `member.ai`  | inside each AI card, after the profile rows and before the footer          | `{ group, ai }`               |
+  | `member.add` | in Add AI, between the computer choices and the name field                 | `{ group, candidate, draft }` |
+  | `cards`      | the card of a message, by kind, in the main line and in threads            | `CardProps`                   |
+
+  Parts at `member.ai` show or edit more of the member. A part at `member.add` may set the draft's
+  `model`, `effort` and `tier` before `host.join` sends it; `candidate` is undefined until chosen.
 
   An entry is `{ order, component }`: the lower `order` comes first, then the area's name. A
   component with nothing to show draws nothing; an empty banner takes no room. While any area
@@ -487,6 +492,14 @@ file in `src/routes/`. It edits neither the shell nor another area:
     offers the secretary switch when the group has none or the reader is an admin, signs `host.join`
     for the chosen computer, and words `home_unreachable`, `conflict` and a lost computer directly
     before falling back to `Failure`.
+  - AI profiles (`src/components/profile/`) show a tier badge and skills on every AI card.
+    Only the AI's owner can open the inline tier/skills editor or accept a differing model-tier
+    suggestion from `host.info`; accepting sends only the tier, and saving sends only changed
+    tier/skills. The add-AI dialog uses the same fields and sends tier and skills with the CLI
+    model/effort defaults. The live skills counter and input limit count UTF-16 code units.
+  - Task cards (`src/components/task/`, `src/lib/task.ts`) show "Must ask a stronger AI" in dawn
+    when an active task has `stuck.ask` true, after wait badges and before a rejected-review
+    badge. A false or absent `ask` leaves the normal badge selection unchanged.
   - The group info panel (`src/components/groupinfo/`, `src/lib/groupinfo.svelte.ts`) mounts at
     `chat.side` (`order: 20`) below the member panel. Its folded "Project memory" section fetches
     `note` and `review` ledger pages on demand (`fetch` with `kind`), omits `gone` markers, and
@@ -616,6 +629,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/confirm/`     | `ConfirmCard.svelte`, mounted for kind `confirm`                                  |
 | `src/components/allow/`       | `AllowEditor.svelte`, lists and editor for each AI in the member panel            |
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
+| `src/components/profile/`     | tier badge, owner editor, model-tier suggestion and shared add-AI profile fields  |
 | `src/components/people/`      | invitation dialog, role/removal actions and join form                             |
 | `src/messages/people.*`       | English and Chinese invitation, member-action and join texts                      |
 | `src/components/groupinfo/`   | home, commands, settings (order 19) and project memory (order 20) at `chat.side`  |
@@ -640,6 +654,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/chat.spec.ts`       | steps of `../features/web_chat.feature`                                           |
 | `features/status.spec.ts`     | steps of `../features/web_status.feature`                                         |
 | `features/task.spec.ts`       | steps of `../features/web_task.feature`                                           |
+| `features/profile.spec.ts`    | steps of `../features/web_profile.feature`                                        |
 | `features/thread.spec.ts`     | steps of `../features/web_thread.feature`                                         |
 | `features/call.spec.ts`       | steps of `../features/web_call.feature`                                           |
 | `features/confirm.spec.ts`    | steps of `../features/web_confirm.feature`                                        |

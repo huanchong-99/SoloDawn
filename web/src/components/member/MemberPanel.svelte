@@ -20,9 +20,12 @@
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
   import AllowEditor from '../allow/AllowEditor.svelte';
+  import Mount from '../Mount.svelte';
   import { offersTerminal } from '../driver/driver';
   import InvitationDialog from '../people/InvitationDialog.svelte';
   import PersonActions from '../people/PersonActions.svelte';
+  import Profile from '../profile/Profile.svelte';
+  import { suggestedTier } from '../profile/profile';
   import AskToWatch from '../watch/AskToWatch.svelte';
   import AddAI from './AddAI.svelte';
 
@@ -64,7 +67,8 @@
       {@const mine = ai.user === group.home.me.user}
       {@const owner = mine ? undefined : group.personName(ai.user)}
       {@const termWhy = mine ? terminalDisabledReason(net, ai) : undefined}
-      {@const terminal = offersTerminal(hostHomeOf(net.homes, ai.host), ai.cli)}
+      {@const host = hostHomeOf(net.homes, ai.host)}
+      {@const terminal = offersTerminal(host, ai.cli)}
       {@const meter = usageMeter(ai.usage, prefs.lang)}
       <section class="card member">
         <header class="row">
@@ -84,76 +88,85 @@
             <p class="st" data-st={status.st}><i></i><span>{status.text}</span></p>
           </div>
         </header>
-        <AllowEditor {group} {ai} {humans}>
-          {#snippet children(accessRows, editAccess)}
-            <dl class="kv">
-              <dt>{t('member.computer')}</dt>
-              <dd>{ai.host_name} <span class="muted">· {pathLabel(ai)}</span></dd>
-              <dt>{t('member.account')}</dt>
-              <dd>
-                {accountLabel(ai.account)}{#if ai.account === 'personal'}{' '}<span class="muted">
-                    · {t('member.account.personal.note')}
-                  </span>{/if}
-              </dd>
-              {@render accessRows()}
-            </dl>
-            {#if meter}
-              <div
-                class="meter"
-                role="meter"
-                aria-label={meter.label}
-                aria-valuenow={meter.fill}
-                aria-valuetext={meter.note ? `${meter.value} · ${meter.note}` : meter.value}
-                data-tone={meter.tone}
-                style={`--v: ${meter.fill}%`}
-              >
-                <span>{meter.label}</span><b>{meter.value}</b><i></i>{#if meter.note}<small>
-                    {meter.note}
-                  </small>{/if}
-              </div>
-            {/if}
-            {#if mine}
-              <footer class="card-foot">
-                {#if ai.state === 'takeover'}
-                  <button
-                    type="button"
-                    class="btn btn-sm btn-dawn"
-                    onclick={() =>
-                      endTakeover(hostHomeOf(net.homes, ai.host), ai.host, group.g, ai.id)}
+        <Profile {group} {ai} suggested={suggestedTier(host, ai)}>
+          {#snippet children(profileRows, editProfile)}
+            <AllowEditor {group} {ai} {humans}>
+              {#snippet children(accessRows, editAccess)}
+                <dl class="kv">
+                  <dt>{t('member.computer')}</dt>
+                  <dd>{ai.host_name} <span class="muted">· {pathLabel(ai)}</span></dd>
+                  <dt>{t('member.account')}</dt>
+                  <dd>
+                    {accountLabel(ai.account)}{#if ai.account === 'personal'}{' '}<span
+                        class="muted"
+                      >
+                        · {t('member.account.personal.note')}
+                      </span>{/if}
+                  </dd>
+                  {@render profileRows()}
+                  {@render accessRows()}
+                </dl>
+                <Mount at="member.ai" props={{ group, ai }} />
+                {#if meter}
+                  <div
+                    class="meter"
+                    role="meter"
+                    aria-label={meter.label}
+                    aria-valuenow={meter.fill}
+                    aria-valuetext={meter.note ? `${meter.value} · ${meter.note}` : meter.value}
+                    data-tone={meter.tone}
+                    style={`--v: ${meter.fill}%`}
                   >
-                    {t('member.handback')}
-                  </button>
-                {:else if terminal && !termWhy}
-                  <a class="btn btn-sm" href={href('terminal', { g: group.g, member: ai.id })}>
-                    <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
-                  </a>
-                {:else if terminal}
-                  <button
-                    type="button"
-                    class="btn btn-sm"
-                    disabled
-                    aria-describedby={`${uid}-term-${ai.id}`}
-                  >
-                    <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
-                  </button>
+                    <span>{meter.label}</span><b>{meter.value}</b><i></i>{#if meter.note}<small>
+                        {meter.note}
+                      </small>{/if}
+                  </div>
                 {/if}
-                {@render editAccess()}
-                {#if ai.state === 'takeover'}
-                  <span class="hint">{t('member.handback.queued')}</span>
-                {:else if terminal && termWhy}
-                  <span id={`${uid}-term-${ai.id}`} class="hint">{termWhy}</span>
+                {#if mine}
+                  <footer class="card-foot">
+                    {#if ai.state === 'takeover'}
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-dawn"
+                        onclick={() =>
+                          endTakeover(hostHomeOf(net.homes, ai.host), ai.host, group.g, ai.id)}
+                      >
+                        {t('member.handback')}
+                      </button>
+                    {:else if terminal && !termWhy}
+                      <a class="btn btn-sm" href={href('terminal', { g: group.g, member: ai.id })}>
+                        <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
+                      </a>
+                    {:else if terminal}
+                      <button
+                        type="button"
+                        class="btn btn-sm"
+                        disabled
+                        aria-describedby={`${uid}-term-${ai.id}`}
+                      >
+                        <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
+                      </button>
+                    {/if}
+                    {@render editProfile()}
+                    {@render editAccess()}
+                    {#if ai.state === 'takeover'}
+                      <span class="hint">{t('member.handback.queued')}</span>
+                    {:else if terminal && termWhy}
+                      <span id={`${uid}-term-${ai.id}`} class="hint">{termWhy}</span>
+                    {/if}
+                  </footer>
+                {:else if ai.state === 'takeover'}
+                  <footer class="card-foot">
+                    <AskToWatch {group} {ai} />
+                    <a class="btn btn-sm" href={href('terminal', { g: group.g, member: ai.id })}>
+                      {t('watch.open')}
+                    </a>
+                  </footer>
                 {/if}
-              </footer>
-            {:else if ai.state === 'takeover'}
-              <footer class="card-foot">
-                <AskToWatch {group} {ai} />
-                <a class="btn btn-sm" href={href('terminal', { g: group.g, member: ai.id })}>
-                  {t('watch.open')}
-                </a>
-              </footer>
-            {/if}
+              {/snippet}
+            </AllowEditor>
           {/snippet}
-        </AllowEditor>
+        </Profile>
       </section>
     {:else}
       <p class="hint">{t('member.ai.empty')}</p>

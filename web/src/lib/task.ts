@@ -74,6 +74,7 @@ function finalBadge(task: TaskRow): Badge | undefined {
 function activeBadge(group: Group, task: TaskRow): Badge {
   const waiting = waitBadge(group, task.wait);
   if (waiting) return waiting;
+  if (task.stuck?.ask) return { text: t('task.badge.stuck'), tone: 'dawn' };
   if (task.review?.ok === false) {
     return {
       text: t('task.badge.rejected').replace('{n}', `${task.review.round}`),

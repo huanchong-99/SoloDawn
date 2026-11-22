@@ -1,5 +1,6 @@
 // Member-panel projections and add-AI candidate selection (planning/contracts/rows.md section 2,
 // planning/contracts/commands.md section 1.2 and section 2).
+import type { Draft } from '../components/profile/profile';
 import { lost, newId, type Group, type Home } from './groups.svelte';
 import type { Net } from './net.svelte';
 import { cliName } from './onboard.svelte';
@@ -269,6 +270,7 @@ export async function joinGroup(
   candidate: Candidate,
   name: string,
   secretary: boolean,
+  draft: Draft,
 ): Promise<string> {
   if (!target?.ctl) return 'lost';
   const env = await target.me.sign(
@@ -282,6 +284,7 @@ export async function joinGroup(
       agent: candidate.agent,
       name,
       secretary,
+      ...draft,
     }),
   );
   const answer = await target.ctl.request({ t: 'cmd', env }).catch(lost);

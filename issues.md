@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-23 · limitation · The profile skills input counts UTF-16 units
+
+- Symptom: the web profile editor and add-AI dialog allow at most 100 astral characters in skills, although the contract allows 200 Unicode code points.
+- Cause: `web/src/components/profile/ProfileFields.svelte` uses HTML `maxlength="200"` and JavaScript string length for its counter; both count UTF-16 code units rather than the code points of `planning/contracts/step-3/profiles.md` section 1.
+- Status: open. The browser field is stricter than the wire contract for astral characters; ordinary BMP text retains the 200-character limit.
+
 ### 2026-11-23 · bug · A9.24 can run hosted checks again for the superseded commit
 
 - Symptom: A9.24 can report an unexpected `watch-checks` call for the first commit of the task that is reassigned.
