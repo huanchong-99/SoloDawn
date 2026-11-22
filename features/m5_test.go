@@ -583,6 +583,7 @@ type m5World struct {
 	repoDir string
 	bareDir string
 	ghDir   string
+	live    *s2LiveForgeConfig
 	binDir  string
 	secID   string
 	claudeM string
@@ -1118,6 +1119,10 @@ func m5TaskHasLocalCheck(h *host.Host, group, taskID, commit string) bool {
 }
 
 func (w *m5World) initSourceRepo(withRemote bool) error {
+	if w.live != nil {
+		w.repoDir = w.live.Repo
+		return nil
+	}
 	work := w.f.t.TempDir()
 	if _, err := m5GitOut("", "init", "-b", "main", work); err != nil {
 		return err
@@ -1163,6 +1168,10 @@ func (w *m5World) createGroupAndJoinAIs(forge string, checks []string, level2 bo
 		"t": "group", "op": "create", "n": w.groupID, "ts": n0.Host.Now().UnixMilli(),
 		"g": w.groupID, "name": "Proj", "kind": "project", "repo": w.repoDir,
 		"base": "main", "forge": forge, "checks": checks, "member_name": "Owner",
+	}
+	if w.live != nil {
+		createPayload["base"] = w.live.Base
+		createPayload["templates"] = w.live.Templates
 	}
 	if _, err := w.ownerCmd(createPayload); err != nil {
 		return err
@@ -1330,7 +1339,13 @@ func (w *m5World) syncBrowser() error {
 }
 
 func (w *m5World) waitFor(desc string, check func() bool) error {
-	deadline := time.Now().Add(15 * time.Second)
+	timeout := 15 * time.Second
+	if w.live != nil {
+		timeout = 8 * time.Minute
+	}
+	deadline := time.Now().Add(timeout)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
 	for time.Now().Before(deadline) {
 		if err := w.checkHookErr(); err != nil {
 			return err
@@ -1338,7 +1353,7 @@ func (w *m5World) waitFor(desc string, check func() bool) error {
 		if check() {
 			return nil
 		}
-		time.Sleep(10 * time.Millisecond)
+		<-tick.C
 	}
 	return fmt.Errorf("timed out waiting for %s", desc)
 }
@@ -1494,6 +1509,9 @@ func m5Steps(sc *godog.ScenarioContext, f fixtures) {
 }
 
 func m5RegisterFullFlowSteps(sc *godog.ScenarioContext, w *m5World) {
+	sc.Step(`^a signed-in non-GitHub forge and its scratch repository$`, w.liveProject)
+	sc.Step(`^both assigned branches were pushed without approval cards$`, w.stepVerifyPushBranchAtLevel2)
+	sc.Step(`^the forge reports both distinct requests merged at their reviewed heads$`, w.verifyLiveRequests)
 	sc.Step(`^a project group with forge "none", a secretary and working AIs "Claude" and "Codex" at level 2$`, func() error {
 		return w.setupCluster("none", []string{}, true)
 	})
@@ -1590,11 +1608,19 @@ func (w *m5World) verifyPushedBranchHead(c host.Caller) error {
 	if err != nil {
 		return err
 	}
-	remoteHead, err := m5GitOut(w.bareDir, "rev-parse", "--verify", "refs/heads/"+branch)
+	remoteHead, err := w.remoteBranchHead(dir, branch)
 	if err != nil || remoteHead != localHead {
 		return fmt.Errorf("branch %s remote=%q local=%q err=%v", branch, remoteHead, localHead, err)
 	}
 	return nil
+}
+
+func (w *m5World) remoteBranchHead(dir, branch string) (string, error) {
+	if w.live != nil {
+		out, err := m5GitOut(dir, "ls-remote", "origin", "refs/heads/"+branch)
+		return strings.Split(out, "\t")[0], err
+	}
+	return m5GitOut(w.bareDir, "rev-parse", "--verify", "refs/heads/"+branch)
 }
 
 func m5BriefTurns(args map[string]any) [][]m5ToolCallSpec {
@@ -1700,21 +1726,37 @@ func (w *m5World) verifySummaries(remote bool) error {
 }
 
 func (w *m5World) verifyBaseHasFiles(remote bool, names ...string) error {
-	target := filepath.Join(w.projectDir(), "repo")
-	if remote {
-		target = w.bareDir
+	target, ref, err := w.baseTree(remote)
+	if err != nil {
+		return err
 	}
-	tree, err := m5GitOut(target, "ls-tree", "--name-only", "refs/heads/main")
+	tree, err := m5GitOut(target, "ls-tree", "--name-only", ref)
 	if err != nil {
 		return err
 	}
 	present := strings.Split(tree, "\n")
 	for _, name := range names {
 		if !slices.Contains(present, name) {
-			return fmt.Errorf("missing %q on main branch (%v)", name, present)
+			return fmt.Errorf("missing %q on base branch (%v)", name, present)
 		}
 	}
 	return nil
+}
+
+func (w *m5World) baseTree(remote bool) (string, string, error) {
+	target := filepath.Join(w.projectDir(), "repo")
+	ref := "refs/heads/main"
+	if remote {
+		target = w.bareDir
+	}
+	if w.live != nil {
+		target = filepath.Join(w.projectDir(), "repo")
+		if _, err := m5GitOut(target, "fetch", "origin", w.live.Base); err != nil {
+			return "", "", err
+		}
+		ref = "FETCH_HEAD"
+	}
+	return target, ref, nil
 }
 
 func (w *m5World) stepVerifyNoTurnBeforeMerge() error {

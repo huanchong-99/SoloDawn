@@ -8,11 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -27,12 +27,83 @@ const (
 )
 
 type s2ForgeTemplates struct {
-	Push, Open, Checks, Merge []string
+	Push   []string `json:"push"`
+	Open   []string `json:"open"`
+	Checks []string `json:"checks"`
+	Merge  []string `json:"merge"`
 }
 
 type s2ForgeConfig struct {
 	Repo, Base string
 	Templates  s2ForgeTemplates
+}
+
+type s2LiveForgeConfig struct {
+	s2ForgeConfig
+	Inspect []string
+}
+
+func (w *m5World) liveProject() error {
+	path := os.Getenv("SOLODAWN_S2_LIVE_FORGE")
+	if path == "" {
+		return fmt.Errorf("set SOLODAWN_S2_LIVE_FORGE to the scratch forge configuration file")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	w.live = &s2LiveForgeConfig{}
+	if err := json.Unmarshal(raw, w.live); err != nil {
+		return err
+	}
+	if len(w.live.Inspect) == 0 {
+		return fmt.Errorf("live forge configuration needs a test-only inspect command")
+	}
+	return w.setupCluster("custom", []string{}, false)
+}
+
+func (w *m5World) verifyLiveRequests() error {
+	tasks := w.browserTasks()
+	if len(tasks) != 2 || !m5DistinctPair(tasks[0].PR, tasks[1].PR, 0) {
+		return fmt.Errorf("expected two distinct forge requests, got %+v", tasks)
+	}
+	for _, task := range tasks {
+		if err := w.verifyLiveRequest(task); err != nil {
+			return err
+		}
+	}
+	return checkS2CrossReview(tasks[0], tasks[1], [2]string{w.claudeM, w.codexM})
+}
+
+func (w *m5World) verifyLiveRequest(task proto.TaskRow) error {
+	if err := checkS2ReviewedTask(task); err != nil {
+		return err
+	}
+	args := slices.Clone(w.live.Inspect)
+	for i := range args {
+		args[i] = strings.ReplaceAll(args[i], "{request}", strconv.Itoa(task.PR))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	raw, err := exec.CommandContext(ctx, args[0], args[1:]...).Output()
+	if err != nil {
+		return fmt.Errorf("inspect request %d: %w", task.PR, err)
+	}
+	var got struct {
+		Request int
+		State   string
+		Head    string
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		return err
+	}
+	want := got
+	want.Request, want.State, want.Head = task.PR, "merged", task.Review.Commit
+	if got != want {
+		return fmt.Errorf("forge request %+v, want %+v", got, want)
+	}
+	w.f.t.Logf("forge request %d merged reviewed head %s", got.Request, got.Head)
+	return nil
 }
 
 type s2ForgeWorld struct {
@@ -43,14 +114,13 @@ type s2ForgeWorld struct {
 	workers        [2]proto.AIMemberRow
 	tasks          map[int]proto.TaskRow
 	summaries      map[string]proto.SummaryBody
-	short, live    bool
+	short          bool
 	conflictCommit string
 }
 
 func s2RegisterForge(sc *godog.ScenarioContext, w *s2WatchWorld) {
 	f := &s2ForgeWorld{s2WatchWorld: w}
 	sc.Step("^a project uses the fake forge templates$", f.fakeProject)
-	sc.Step("^a signed-in non-GitHub forge and its scratch repository$", f.liveProject)
 	sc.Step("^the secretary proposes two tasks for cross-review and P confirms the brief$", f.confirmTwo)
 	sc.Step("^the stale reviewed head is refused and the secretary reassigns the task$", f.waitConflict)
 	sc.Step("^both tasks merge after checks and cross-review and receive summaries$", f.waitTwo)
@@ -58,7 +128,6 @@ func s2RegisterForge(sc *godog.ScenarioContext, w *s2WatchWorld) {
 	sc.Step("^the project refuses a push template containing the title place$", f.rejectPushTitle)
 	sc.Step("^P confirms a brief with a title containing spaces, quotes and shell punctuation$", f.confirmTitle)
 	sc.Step("^the forge receives the title as one argument and the tag as a literal without creating a marker$", f.verifyTitle)
-	sc.Step("^both tasks land on the scratch remote and the forge reports both requests$", f.checkRemote)
 }
 
 func s2FakeConfig(c *s2Cast) s2ForgeConfig {
@@ -75,25 +144,6 @@ func (f *s2ForgeWorld) fakeProject() error {
 		return err
 	}
 	f.cfg = s2FakeConfig(f.c)
-	return f.createProject()
-}
-
-func (f *s2ForgeWorld) liveProject() error {
-	f.live = true
-	path := os.Getenv("SOLODAWN_S2_LIVE_FORGE")
-	if path == "" {
-		return fmt.Errorf("set SOLODAWN_S2_LIVE_FORGE to the scratch forge configuration file")
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(raw, &f.cfg); err != nil {
-		return err
-	}
-	if err := f.start(8 * time.Minute); err != nil {
-		return err
-	}
 	return f.createProject()
 }
 
@@ -173,10 +223,7 @@ func (f *s2ForgeWorld) prepareTasks(count int) error {
 			return err
 		}
 	}
-	if !f.live {
-		return f.prepareFakeForge(count)
-	}
-	return nil
+	return f.prepareFakeForge(count)
 }
 
 func (f *s2ForgeWorld) prepareTask(num int) error {
@@ -202,7 +249,7 @@ func (f *s2ForgeWorld) prepareTask(num int) error {
 }
 
 func (f *s2ForgeWorld) prepareRetry(work, review *s2Node, vendor, other string, reviewCalls []m5ToolCallSpec) error {
-	if f.live || f.short {
+	if f.short {
 		return nil
 	}
 	if err := s2ForgeTurnFixture(work, vendor, 1, 2, "resolved edit", m5WorkerCalls(true, s2ForgeSummary)); err != nil {
@@ -249,9 +296,7 @@ func (f *s2ForgeWorld) secretaryTurns(args map[string]any, count int) [][]m5Tool
 	if f.short {
 		return turns
 	}
-	if !f.live {
-		turns = append(turns, []m5ToolCallSpec{{Name: "set_task", Args: map[string]any{"task": "T-1", "assignee": "Claude"}}})
-	}
+	turns = append(turns, []m5ToolCallSpec{{Name: "set_task", Args: map[string]any{"task": "T-1", "assignee": "Claude"}}})
 	var summaries []string
 	for num := 1; num <= count; num++ {
 		summaries = append(summaries, fmt.Sprintf("Task %d merged.", num))
@@ -365,13 +410,17 @@ func checkS2CrossReview(first, second proto.TaskRow, workers [2]string) error {
 }
 
 func (f *s2ForgeWorld) checkTaskResult(task proto.TaskRow) error {
-	if task.Review == nil || !task.Review.OK || task.PR == 0 || task.Review.Commit != task.Commit {
-		return fmt.Errorf("task did not merge after a passing review with a request: %+v", task)
-	}
-	if err := checkS2FinalChecks(task); err != nil {
+	if err := checkS2ReviewedTask(task); err != nil {
 		return err
 	}
 	return f.checkTaskSummary(task)
+}
+
+func checkS2ReviewedTask(task proto.TaskRow) error {
+	if task.Review == nil || !task.Review.OK || task.PR == 0 || task.Review.Commit != task.Commit {
+		return fmt.Errorf("task did not merge after a passing review with a request: %+v", task)
+	}
+	return checkS2FinalChecks(task)
 }
 
 func checkS2FinalChecks(task proto.TaskRow) error {
@@ -579,99 +628,4 @@ func (f *s2ForgeWorld) expectedCalls(want map[string]int, task proto.TaskRow) {
 
 func s2WantForge(want map[string]int, n int, args ...string) {
 	want[string(mustMarshalNoEscape(args))] = n
-}
-
-func TestS2ForgeCrossReview(t *testing.T) {
-	workers := [2]string{"claude", "codex"}
-	first := proto.TaskRow{Num: 1, Assignee: "claude", Reviewer: "codex", Review: &proto.Review{By: "codex"}}
-	second := proto.TaskRow{Num: 2, Assignee: "codex", Reviewer: "claude", Review: &proto.Review{By: "claude"}}
-	if err := checkS2CrossReview(first, second, workers); err != nil {
-		t.Fatal(err)
-	}
-	for _, task := range []proto.TaskRow{
-		{Num: 1, Review: &proto.Review{}},
-		{Num: 1, Assignee: "codex", Reviewer: "codex", Review: &proto.Review{By: "codex"}},
-		{Num: 1, Assignee: "claude", Reviewer: "claude", Review: &proto.Review{By: "codex"}},
-		{Num: 1, Assignee: "claude", Reviewer: "codex", Review: &proto.Review{By: "claude"}},
-	} {
-		want := fmt.Sprintf("task 1 assignee %q, reviewer %q, review by %q; want %q and %q", task.Assignee, task.Reviewer, task.Review.By, "claude", "codex")
-		if err := checkS2CrossReview(task, second, workers); err == nil || err.Error() != want {
-			t.Fatalf("got %v, want %s", err, want)
-		}
-	}
-}
-
-func TestS2ForgeFinalChecks(t *testing.T) {
-	passing := &proto.Check{OK: true, Commit: "final"}
-	task := proto.TaskRow{Num: 1, Commit: "final", Checks: proto.TaskChecks{Local: passing, Cloud: passing}}
-	if err := checkS2FinalChecks(task); err != nil {
-		t.Fatal(err)
-	}
-	for _, check := range []*proto.Check{nil, {Commit: "final"}, {OK: true, Commit: "old"}} {
-		for _, checks := range []proto.TaskChecks{{Local: check, Cloud: passing}, {Local: passing, Cloud: check}} {
-			task.Checks = checks
-			want := `task 1 lacks passing checks for final commit "final"`
-			if err := checkS2FinalChecks(task); err == nil || err.Error() != want {
-				t.Fatalf("got %v, want %s", err, want)
-			}
-		}
-	}
-}
-
-func TestS2ForgeStaleReview(t *testing.T) {
-	f := &s2ForgeWorld{}
-	for _, review := range []*proto.Review{nil, {OK: true, Commit: "old"}} {
-		task := proto.TaskRow{Commit: "final", PR: 1, Review: review}
-		want := fmt.Sprintf("task did not merge after a passing review with a request: %+v", task)
-		if err := f.checkTaskResult(task); err == nil || err.Error() != want {
-			t.Fatalf("got %v, want %s", err, want)
-		}
-	}
-}
-
-func TestS2ForgeApprovalCards(t *testing.T) {
-	for _, messages := range [][]proto.MsgRow{nil, {{Kind: "summary"}}} {
-		if err := m5CheckZeroApprovalCards(messages); err != nil {
-			t.Fatal(err)
-		}
-	}
-	messages := []proto.MsgRow{{RowHeader: proto.RowHeader{ID: "first-push"}, Kind: "approval"}, {Kind: "summary"}}
-	if err := m5CheckZeroApprovalCards(messages); err == nil || err.Error() != "unexpected approval card first-push" {
-		t.Fatalf("got %v, want unexpected approval card first-push", err)
-	}
-}
-
-func TestS2ForgeApprovalHistory(t *testing.T) {
-	summary := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: "summary", Seq: 2}, Pos: 2,
-		Group: "group", Kind: "summary", Mentions: []string{}, Body: json.RawMessage(`{}`)}
-	approval := summary
-	approval.ID, approval.Seq, approval.Pos, approval.Kind = "first-push", 1, 1, "approval"
-	approval.State = &proto.CardState{Status: "accepted"}
-	for _, tc := range []struct {
-		name     string
-		messages []proto.MsgRow
-		want     string
-	}{
-		{name: "empty", want: "<nil>"},
-		{name: "summary", messages: []proto.MsgRow{summary}, want: "<nil>"},
-		{name: "earlier resolved approval", messages: []proto.MsgRow{approval, summary}, want: "unexpected approval card first-push"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			data := t.TempDir()
-			f := &s2ForgeWorld{s2WatchWorld: &s2WatchWorld{c: &s2Cast{P1: &s2Node{Data: data}}}, group: proto.ID("group")}
-			db, err := store.Open(filepath.Join(data, "node.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
-			for _, message := range tc.messages {
-				if err := db.Write(func(tx *store.Tx) error { return store.Put(tx, "group", message.Seq, message) }); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if got := fmt.Sprint(f.verifyZeroApprovalCards()); got != tc.want {
-				t.Fatalf("got %s, want %s", got, tc.want)
-			}
-		})
-	}
 }

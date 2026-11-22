@@ -12,11 +12,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the TURN fixture in `features/s2_watch_peer_test.go:87-95` selects transport policy when the browser connection is created.
 - Status: open. Run `features/s2_watch.md:13-19` to check the transition after T2-6 and U2-3 land.
 
-### 2026-11-22 · deviation · A9.26 requires manual checks beyond the automated live task flow
+### 2026-11-22 · deviation · A9.26 live M5 forge coverage awaits a configured live run
 
-- Symptom: `features/s2_watch.feature:54-58` drives the two-task flow on a real forge. A9.26 calls for the M5 run in `planning/steps/step-2-3-acceptance.md:177-178`.
-- Cause: the live fixture exercises cross-review, merge and cleanup. The remaining M5 procedures need to be repeated with the live templates, as described in `features/s2_watch.md:42-47`.
-- Status: open until the live run is complete.
+- Symptom: the original live fixture checked two remote filenames without reusing M5's forge steps or inspecting request heads.
+- Cause: A9.26 used the subprocess fixture instead of M5's two-task forge flow.
+- Status: A9.26 now reuses the applicable M5 steps with live custom templates and independently inspects both request IDs and reviewed heads. Open until an opt-in run with `SOLODAWN_S2_LIVE_FORGE` completes; inspection is test-only, documented in `features/s2_watch.md`.
 
 ### 2026-11-21 · deviation · The `rounds_limit` system message has an id derived from the triggering post's nonce
 

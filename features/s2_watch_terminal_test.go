@@ -164,7 +164,7 @@ func (t *s2TerminalWorld) startOwnerTerminal() error {
 	if err := t.owner.wait(t.owner.opened[label]); err != nil {
 		return err
 	}
-	_, err := t.owner.terminalBytes(s2WatchReady)
+	_, err := t.owner.terminalBytes(s2WatchReady + "\r\n")
 	return err
 }
 
@@ -321,7 +321,7 @@ func (t *s2TerminalWorld) compareTerminalBytes() error {
 	if err != nil {
 		return err
 	}
-	watcher, err := t.watcher.terminalBytes(s2WatchStop)
+	watcher, err := t.watcher.terminalBytes(s2WatchStop + "\r\n")
 	if err != nil {
 		return err
 	}
@@ -333,15 +333,13 @@ func (t *s2TerminalWorld) ownerRoundTrip(input string) (string, error) {
 	if err := dc.Send([]byte(input)); err != nil {
 		return "", err
 	}
-	return t.owner.terminalBytes(s2WatchStop)
+	return t.owner.terminalBytes(s2WatchStop + "\r\n")
 }
 
 func compareS2TerminalBytes(owner, watcher string) error {
 	const first = "91x27 watch first"
 	const second = "91x27 watch second"
-	i := strings.Index(owner, first)
-	j := strings.Index(watcher, first)
-	if i < 0 || j < 0 || owner[i:] != watcher[j:] || !strings.Contains(owner[i:], second) {
+	if owner != watcher || !strings.Contains(owner, first+"\r\n"+second+"\r\n"+s2WatchStop+"\r\n") {
 		return fmt.Errorf("owner terminal %q differs from watch %q or lacks ordered output", owner, watcher)
 	}
 	return nil

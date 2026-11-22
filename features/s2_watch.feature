@@ -53,6 +53,11 @@ Feature: Watch a takeover, post to a team group and use custom forges
   @pending @live
   Scenario: Tasks run from brief to merge on a real non-GitHub forge (A9.26)
     Given a signed-in non-GitHub forge and its scratch repository
-    When the secretary proposes two tasks for cross-review and P confirms the brief
-    Then both tasks merge after checks and cross-review and receive summaries
-    And both tasks land on the scratch remote and the forge reports both requests
+    When the owner posts a feature request in the main line and the secretary proposes a two-task brief
+    Then before confirm no task worktree exists and no assign item is queued on the home
+    When the owner confirms the brief and both tasks push their branches, pass local and hosted checks, review each other, merge and summarize
+    Then both assigned branches were pushed without approval cards
+    And both tasks are merged on origin with two summary cards carrying pull-request numbers and no approval card
+    And each passing review was followed by its merge with no AI turn in between and a task_merged row in the thread
+    And the forge reports both distinct requests merged at their reviewed heads
+    And each task ran in its own session and worktree, and after the merge those sessions and folders are gone
