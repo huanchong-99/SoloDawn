@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1027,5 +1028,19 @@ func TestFetchFromForwardsCallerContext(t *testing.T) {
 	fetched, err := fetchFrom(ctx, r.h, r.homeKey.ID(), build)
 	if err != nil || len(fetched.Rows) != 1 || r.home.lastCtx.Value(ctxKey{}) != "tool-ctx" {
 		t.Fatalf("fetchFrom failed: err=%v rows=%d ctx=%v", err, len(fetched.Rows), r.home.lastCtx)
+	}
+}
+
+func TestTakeoverTaskFirstTurnSaysOnlyThatTheOwnerIsComing(t *testing.T) {
+	r := newTurnRig(t)
+	task := r.baseTask()
+	task.Origin, task.Brief, task.Title, task.Slug = "takeover", "", "Owner takeover", "owner-takeover"
+	r.h.Rows.Put(tGroupID, "task", tTaskID, mustJSON(t, task))
+	item := mustJSON(t, proto.InboxItem{Item: proto.Item{AI: proto.ID(tAIID), Why: "assign", Task: proto.ID(tTaskID)}, Task: &task})
+	got, _, err := Compose(r.h, r.session(TaskSession, false, ""), ItemsTurn, []json.RawMessage{item})
+	num := strconv.Itoa(task.Num)
+	want := "Task T-" + num + " \"Owner takeover\"\nBranch: task/" + num + "-owner-takeover (this folder is its worktree)\nYour owner is about to work with you directly in the terminal."
+	if err != nil || !strings.HasSuffix(got, want) {
+		t.Fatalf("takeover first turn: err=%v\n%s", err, got)
 	}
 }
