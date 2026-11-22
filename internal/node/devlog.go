@@ -163,7 +163,7 @@ func (l *Logs) dvlCommit(user string, entries []proto.Envelope) ([]proto.DeviceR
 }
 
 func (l *Logs) dvlKeep(log *identity.Log, skip *sesConn) {
-	if rows := l.dvlKeepRows(log); len(rows) > 0 {
+	if rows := l.dvlKeepRows(log); len(rows) != 0 {
 		l.dvlNotify(log.User, rows, false, skip)
 	}
 }
