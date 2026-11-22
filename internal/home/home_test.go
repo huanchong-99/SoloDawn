@@ -134,11 +134,13 @@ func (b broken) PutReceipt(string, string, int64, store.Outcome) error { return 
 // disk is the fake of home.Disk: the messages of a test, by id.
 type disk map[string]proto.MsgRow
 
-func (d disk) Msg(id string) (proto.MsgRow, bool)        { m, ok := d[id]; return m, ok }
-func (d disk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
-func (d disk) Thread(*string, int64, int) []proto.MsgRow { return nil }
-func (d disk) Pending() []proto.MsgRow                   { return nil }
-func (d disk) Queued() []store.Item                      { return nil }
+func (d disk) Msg(id string) (proto.MsgRow, bool)             { m, ok := d[id]; return m, ok }
+func (d disk) Note(string) (proto.NoteRow, bool)              { return proto.NoteRow{}, false }
+func (d disk) NamedNote(string, string) (proto.NoteRow, bool) { return proto.NoteRow{}, false }
+func (d disk) NoteNames(string) []string                      { return nil }
+func (d disk) Thread(*string, int64, int) []proto.MsgRow      { return nil }
+func (d disk) Pending() []proto.MsgRow                        { return nil }
+func (d disk) Queued() []store.Item                           { return nil }
 
 // setting is a fake of home.Write: a row of the setting table.
 type setting struct{ key, value string }

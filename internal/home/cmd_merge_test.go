@@ -24,9 +24,11 @@ type mrgDisk struct {
 	pending []proto.MsgRow
 }
 
-func (*mrgDisk) Msg(string) (proto.MsgRow, bool)           { return proto.MsgRow{}, false }
-func (*mrgDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
-func (*mrgDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
+func (*mrgDisk) Msg(string) (proto.MsgRow, bool)                { return proto.MsgRow{}, false }
+func (*mrgDisk) Note(string) (proto.NoteRow, bool)              { return proto.NoteRow{}, false }
+func (*mrgDisk) NamedNote(string, string) (proto.NoteRow, bool) { return proto.NoteRow{}, false }
+func (*mrgDisk) NoteNames(string) []string                      { return nil }
+func (*mrgDisk) Thread(*string, int64, int) []proto.MsgRow      { return nil }
 
 func (d *mrgDisk) Pending() []proto.MsgRow {
 	if d == nil {

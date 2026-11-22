@@ -43,11 +43,13 @@ type homeBriefWorld struct {
 // homeBriefDisk is a home.Disk over the messages in memory.
 type homeBriefDisk map[string]proto.MsgRow
 
-func (d homeBriefDisk) Msg(id string) (proto.MsgRow, bool)        { m, ok := d[id]; return m, ok }
-func (d homeBriefDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
-func (d homeBriefDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
-func (d homeBriefDisk) Pending() []proto.MsgRow                   { return nil }
-func (d homeBriefDisk) Queued() []store.Item                      { return nil }
+func (d homeBriefDisk) Msg(id string) (proto.MsgRow, bool)             { m, ok := d[id]; return m, ok }
+func (d homeBriefDisk) Note(string) (proto.NoteRow, bool)              { return proto.NoteRow{}, false }
+func (d homeBriefDisk) NamedNote(string, string) (proto.NoteRow, bool) { return proto.NoteRow{}, false }
+func (d homeBriefDisk) NoteNames(string) []string                      { return nil }
+func (d homeBriefDisk) Thread(*string, int64, int) []proto.MsgRow      { return nil }
+func (d homeBriefDisk) Pending() []proto.MsgRow                        { return nil }
+func (d homeBriefDisk) Queued() []store.Item                           { return nil }
 
 // homeBriefReceipts is a home.Receipts in memory.
 type homeBriefReceipts map[string]store.Outcome

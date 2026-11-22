@@ -32,7 +32,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | show the group an accepted device-log entry | a `proto.DeviceRow` in `Result.Rows`; `Commit` applies its entry to the state's log |
 | do after a commit what a pure function cannot, such as a Web Push | a function `func(s *State, res Result)` and `After.Add(name, f)` in its file's `init` |
 | know in a hook which devices are connected | `s.Online[device]` |
-| answer with result fields | `Result.Answer.Num`, `.Passed`, `.Round` |
+| answer with result fields | `Result.Answer.Num`, `.Passed`, `.Round`, `.ID`, `.Replaced` |
 | refuse | `&Refusal{Code: "conflict", Msg: "…"}`, with a code of [datachannel](../../planning/contracts/datachannel.md) section 9 |
 | read a message, a note, a thread, the pending cards, the queued items | `c.Disk` in a command, the `Disk` argument of a timer or a handler |
 | add a rule that the clock sets off | a function `func(s *State, d Disk, now int64) Result` and `Timers.Add(name, f)` in its file's `init` |
@@ -189,6 +189,8 @@ Host events (`cmd_hostev.go`) take the names that start with `hev`, their tests 
 functions start with `TestHostEv`; the file exports `HostOfflineEvent`.
 Retention (`retention.go`) takes the names that start with `ret`, exports `Retain`, and its test
 functions start with `TestRetention`.
+Style presets (`preset.go`) take the names that start with `preset`, their tests too, and their test
+functions start with `TestPreset`.
 
 ## The run loop
 
@@ -267,8 +269,8 @@ and read again on the next tick. An item that cannot be made into a frame is rep
 once for each connection until its next `Inbox`, and the other items are sent.
 
 **Fetch.** `Fetch(conn, req)` answers a `fetch` request
-([datachannel](../../planning/contracts/datachannel.md), section 4): a page by `kind` (`note` or
-`review`) when `Kind` is set, one live row when `Row` or `RowID` is set, or a page of a task's
+([datachannel](../../planning/contracts/datachannel.md), section 4): a page by `kind` (`note`,
+`preset`, `kb` or `review`) when `Kind` is set, one live row when `Row` or `RowID` is set, or a page of a task's
 thread or of the main line (`Thread` nil) otherwise. Paged reads require `Limit` in 1..100 and
 `Before >= 0` (`bad_request` otherwise). On the goroutine of the group (`ask`), it checks that the
 connection is still seated, that the group exists (`not_found` otherwise) and serves the

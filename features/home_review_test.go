@@ -42,7 +42,11 @@ func (w *homeReviewWorld) Msg(id string) (proto.MsgRow, bool) {
 	return m, ok
 }
 
-func (w *homeReviewWorld) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
+func (w *homeReviewWorld) Note(string) (proto.NoteRow, bool) { return proto.NoteRow{}, false }
+func (w *homeReviewWorld) NamedNote(string, string) (proto.NoteRow, bool) {
+	return proto.NoteRow{}, false
+}
+func (w *homeReviewWorld) NoteNames(string) []string                 { return nil }
 func (w *homeReviewWorld) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (w *homeReviewWorld) Pending() []proto.MsgRow                   { return nil }
 func (w *homeReviewWorld) Queued() []store.Item                      { return nil }

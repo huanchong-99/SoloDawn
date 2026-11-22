@@ -652,8 +652,10 @@ func TestNoteListTool(t *testing.T) {
 	p1, _ := json.Marshal(proto.Fetched{Type: "fetched", Success: proto.Success{Re: 60, OK: true}, Rows: []json.RawMessage{nRow1, nRow2}, More: true})
 	p2, _ := json.Marshal(proto.Fetched{Type: "fetched", Success: proto.Success{Re: 61, OK: true}, Rows: []json.RawMessage{nRow3}, More: false})
 	pEmptyMore, _ := json.Marshal(proto.Fetched{Type: "fetched", Success: proto.Success{Re: 62, OK: true}, Rows: []json.RawMessage{}, More: true})
+	prRow, _ := json.Marshal(proto.NoteRow{RowHeader: proto.RowHeader{Type: "note", ID: "pr1___________________A", Seq: 40}, Pos: 40, Group: talkGroupID, Task: nil, NoteType: "preset", Name: "Calm dashboard", Text: "One accent", By: talkOwnerID, Timestamp: seamStart})
+	pPresets, _ := json.Marshal(proto.Fetched{Type: "fetched", Success: proto.Success{Re: 63, OK: true}, Rows: []json.RawMessage{prRow}, More: false})
 
-	listHome := newTalkHomeStub(string(p1), string(p2), string(p1), string(p2), string(pEmptyMore))
+	listHome := newTalkHomeStub(string(p1), string(p2), string(p1), string(p2), string(pEmptyMore), string(pPresets))
 	h.Attach("home-device", listHome)
 
 	allOut := mustCallTalk[noteListResult](t, h, taskCaller, "note_list", `{}`)
@@ -671,6 +673,9 @@ func TestNoteListTool(t *testing.T) {
 	assertEqual(t, listHome.asked[1].(proto.FetchKind).Before, int64(25))
 	encodedAll, _ := json.Marshal(allOut)
 	assertNoNulls(t, encodedAll, "/notes/1/task")
+	if strings.Contains(string(encodedAll), `"name"`) {
+		t.Fatalf("context notes unexpectedly included name: %s", encodedAll)
+	}
 
 	filteredOut := mustCallTalk[noteListResult](t, h, grpCaller, "note_list", `{"task":"T-12"}`)
 	assertEqual(t, filteredOut.Notes, wantNotes[:1])
@@ -678,9 +683,25 @@ func TestNoteListTool(t *testing.T) {
 	emptyMoreOut := mustCallTalk[noteListResult](t, h, grpCaller, "note_list", `{}`)
 	assertEqual(t, len(emptyMoreOut.Notes), 0)
 
-	_, err := Tools["note_list"].Call(t.Context(), h, grpCaller, json.RawMessage(`[]`))
-	assertErrorCode(t, err, "bad_request")
-	_, err = Tools["note_list"].Call(t.Context(), h, grpCaller, json.RawMessage(`{"task":"T-99"}`))
+	presetOut := mustCallTalk[noteListResult](t, h, grpCaller, "note_list", `{"type":"preset"}`)
+	assertEqual(t, presetOut.Notes, []noteListItem{
+		{ID: "pr1___________________A", Task: nil, Name: "Calm dashboard", Text: "One accent", By: "owner", At: seamStart},
+	})
+	assertEqual(t, listHome.asked[5].(proto.FetchKind), proto.FetchKind{
+		FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: 55}, Group: talkGroupID, Before: 0, Limit: 100},
+		Kind:      "preset",
+	})
+	encodedPresets, _ := json.Marshal(presetOut)
+	assertNoNulls(t, encodedPresets, "/notes/0/task")
+	if !strings.Contains(string(encodedPresets), `"name":"Calm dashboard"`) {
+		t.Fatalf("preset output missing name: %s", encodedPresets)
+	}
+
+	for _, bad := range []string{`[]`, `{"type":"kb"}`, `{"type":""}`, `{"type":null}`} {
+		_, err := Tools["note_list"].Call(t.Context(), h, grpCaller, json.RawMessage(bad))
+		assertErrorCode(t, err, "bad_request")
+	}
+	_, err := Tools["note_list"].Call(t.Context(), h, grpCaller, json.RawMessage(`{"task":"T-99"}`))
 	assertErrorCode(t, err, "not_found")
 
 	close(listHome.done)

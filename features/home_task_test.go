@@ -34,7 +34,11 @@ func (d *homeTaskStore) Msg(id string) (proto.MsgRow, bool) {
 	return m, ok
 }
 
-func (d *homeTaskStore) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
+func (d *homeTaskStore) Note(string) (proto.NoteRow, bool) { return proto.NoteRow{}, false }
+func (d *homeTaskStore) NamedNote(string, string) (proto.NoteRow, bool) {
+	return proto.NoteRow{}, false
+}
+func (d *homeTaskStore) NoteNames(string) []string                 { return nil }
 func (d *homeTaskStore) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d *homeTaskStore) Pending() []proto.MsgRow                   { return d.pending }
 func (d *homeTaskStore) Queued() []store.Item                      { return d.queued }

@@ -111,6 +111,17 @@ func (d *runDisk) Msg(id string) (proto.MsgRow, bool) { return runOne[proto.MsgR
 
 func (d *runDisk) Note(id string) (proto.NoteRow, bool) { return runOne[proto.NoteRow](d, "note", id) }
 
+func (d *runDisk) NamedNote(noteType, name string) (proto.NoteRow, bool) {
+	data, err := d.tx.NamedNote(d.group, noteType, name)
+	return runRow[proto.NoteRow](d, data, err)
+}
+
+func (d *runDisk) NoteNames(noteType string) []string {
+	names, err := d.tx.NoteNames(d.group, noteType)
+	d.err = errors.Join(d.err, err)
+	return names
+}
+
 func (d *runDisk) Thread(task *string, before int64, limit int) []proto.MsgRow {
 	data, err := d.tx.Thread(d.group, task, before, limit)
 	return runList[proto.MsgRow](d, data, err)
@@ -131,6 +142,10 @@ func (d *runDisk) Queued() []store.Item {
 // failure.
 func runOne[R any](d *runDisk, r, id string) (row R, ok bool) {
 	data, err := d.tx.Row(d.group, r, id)
+	return runRow[R](d, data, err)
+}
+
+func runRow[R any](d *runDisk, data json.RawMessage, err error) (row R, ok bool) {
 	if errors.Is(err, sql.ErrNoRows) {
 		return row, false
 	}

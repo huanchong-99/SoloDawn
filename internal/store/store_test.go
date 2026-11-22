@@ -51,7 +51,7 @@ func TestSchemaAndReopen(t *testing.T) {
 	equal(t, scalar[string](t, s.db, `SELECT group_concat(name,',' ORDER BY name) FROM pragma_table_list
 		WHERE name NOT LIKE 'sqlite_%' AND strict=1`), "agent,approval,audit,device_log,grp,inbox,peer,perm,processed_offer,push_sub,receipt,row,session,setting,usage")
 	equal(t, scalar[string](t, s.db, `SELECT group_concat(name,',' ORDER BY name) FROM sqlite_schema
-		WHERE type='index' AND name NOT LIKE 'sqlite_%'`), "audit_by_ts,audit_item,inbox_by_host,row_by_seq,row_by_thread,row_keep,row_main,row_pending")
+		WHERE type='index' AND name NOT LIKE 'sqlite_%'`), "audit_by_ts,audit_item,inbox_by_host,row_by_seq,row_by_thread,row_keep,row_main,row_named,row_pending")
 	_, err = s.db.Exec("INSERT INTO setting VALUES('name','test')")
 	check(t, err)
 	check(t, s.Close())

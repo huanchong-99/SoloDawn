@@ -13,11 +13,13 @@ import (
 
 type memDisk []store.Item
 
-func (memDisk) Msg(string) (proto.MsgRow, bool)           { return proto.MsgRow{}, false }
-func (memDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
-func (memDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
-func (memDisk) Pending() []proto.MsgRow                   { return nil }
-func (d memDisk) Queued() []store.Item                    { return d }
+func (memDisk) Msg(string) (proto.MsgRow, bool)                { return proto.MsgRow{}, false }
+func (memDisk) Note(string) (proto.NoteRow, bool)              { return proto.NoteRow{}, false }
+func (memDisk) NamedNote(string, string) (proto.NoteRow, bool) { return proto.NoteRow{}, false }
+func (memDisk) NoteNames(string) []string                      { return nil }
+func (memDisk) Thread(*string, int64, int) []proto.MsgRow      { return nil }
+func (memDisk) Pending() []proto.MsgRow                        { return nil }
+func (d memDisk) Queued() []store.Item                         { return d }
 
 func memAddCmd(n byte, memberID, cli, name, account string, secretary bool) proto.MemberAddAI {
 	return proto.MemberAddAI{

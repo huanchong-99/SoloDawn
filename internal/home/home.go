@@ -82,6 +82,10 @@ type Disk interface {
 	Msg(id string) (msg proto.MsgRow, ok bool)
 	// Note is Msg for a note.
 	Note(id string) (note proto.NoteRow, ok bool)
+	// NamedNote returns a typed note by its type and name. ok is false when none exists.
+	NamedNote(noteType, name string) (note proto.NoteRow, ok bool)
+	// NoteNames returns the names of the group's live notes of that type, in order.
+	NoteNames(noteType string) []string
 	// Thread returns a page of the thread of a task, or of the main line for
 	// nil: the messages below pos before, newest first, and the newest ones
 	// for before 0 (planning/contracts/datachannel.md section 4).
@@ -218,7 +222,10 @@ func (r Result) Frame(re int64) any {
 	if r.Answer.Code != "" {
 		return proto.ErrorResponse{Re: re, Err: proto.WireError{Code: r.Answer.Code, Message: r.Msg}}
 	}
-	return proto.CmdResult{Success: proto.Success{Re: re, OK: true}, Num: r.Answer.Num, Passed: r.Answer.Passed, Round: r.Answer.Round}
+	return proto.CmdResult{
+		Success: proto.Success{Re: re, OK: true}, Num: r.Answer.Num,
+		Passed: r.Answer.Passed, Round: r.Answer.Round, ID: r.Answer.ID, Replaced: r.Answer.Replaced,
+	}
 }
 
 // Refusal is the error answer to a command: a code of

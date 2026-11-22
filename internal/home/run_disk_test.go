@@ -22,9 +22,11 @@ func TestRunADiskReadsWhatTheStoreHolds(t *testing.T) {
 	inThread := runMsg("m3", 0, "three")
 	inThread.Thread = &thread
 	tables.Commands["jump"] = runFixed(func(s *home.State, c home.Command) home.Result {
+		preset := runNote("p1", 0, "calm v1")
+		preset.NoteType, preset.Name = "preset", "Calm"
 		return home.Result{Rows: []home.Row{
 			home.RowOf(runMsg("m1", 0, "one")), home.RowOf(runMsg("m2", 0, "two")), home.RowOf(inThread),
-			card("c1", nil), card("c2", &thread), home.RowOf(runNote("n1", 0, "a note")),
+			card("c1", nil), card("c2", &thread), home.RowOf(runNote("n1", 0, "a note")), home.RowOf(preset),
 		}, Items: []home.Item{{AI: aiID, Why: "notice", Code: "first"}, {AI: aiID, Why: "notice", Code: "second", NotBefore: clock + 5000}}}
 	})
 	tables.Commands["push"] = runFixed(func(s *home.State, c home.Command) home.Result {
@@ -47,6 +49,9 @@ func TestRunADiskReadsWhatTheStoreHolds(t *testing.T) {
 		seen.add("m2 %v, m9 %v, a message as a note %v", found, known, mixed)
 		note, found := d.Note("n1")
 		seen.add("n1: %s %v", note.Text, found)
+		named, found := d.NamedNote("preset", "Calm")
+		_, missingNamed := d.NamedNote("preset", "Absent")
+		seen.add("preset: %s %v, absent %v, names %v", named.Text, found, missingNamed, d.NoteNames("preset"))
 		seen.add("main %v, below 7 %v, one %v", ids(d.Thread(nil, 0, 10)), ids(d.Thread(nil, 7, 10)), ids(d.Thread(nil, 0, 1)))
 		seen.add("thread %v, below 8 %v, another %v", ids(d.Thread(&thread, 0, 10)), ids(d.Thread(&thread, 8, 10)), len(d.Thread(&one.ID, 0, 10)))
 		seen.add("pending %v", ids(d.Pending()))
@@ -63,6 +68,7 @@ func TestRunADiskReadsWhatTheStoreHolds(t *testing.T) {
 		"m1: one true",
 		"m2 false, m9 false, a message as a note false",
 		"n1: a note true",
+		"preset: calm v1 true, absent false, names [Calm]",
 		"main [c2@8 c1@7 m1@4], below 7 [m1@4], one [c2@8]",
 		"thread [c2@8 m3@6], below 8 [m3@6], another 0",
 		"pending [c1@7 c2@8]",

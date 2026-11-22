@@ -44,8 +44,10 @@ func (w *homeMergeWorld) Msg(id string) (proto.MsgRow, bool) {
 	return m, ok
 }
 
-func (*homeMergeWorld) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
-func (*homeMergeWorld) Thread(*string, int64, int) []proto.MsgRow { return nil }
+func (*homeMergeWorld) Note(string) (proto.NoteRow, bool)              { return proto.NoteRow{}, false }
+func (*homeMergeWorld) NamedNote(string, string) (proto.NoteRow, bool) { return proto.NoteRow{}, false }
+func (*homeMergeWorld) NoteNames(string) []string                      { return nil }
+func (*homeMergeWorld) Thread(*string, int64, int) []proto.MsgRow      { return nil }
 
 func (w *homeMergeWorld) Pending() []proto.MsgRow {
 	var out []proto.MsgRow

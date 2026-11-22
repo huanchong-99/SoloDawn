@@ -38,10 +38,12 @@ func (d revDisk) Msg(id string) (proto.MsgRow, bool) {
 	return m, ok
 }
 
-func (d revDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
-func (d revDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
-func (d revDisk) Pending() []proto.MsgRow                   { return d.pending }
-func (d revDisk) Queued() []store.Item                      { return d.queued }
+func (d revDisk) Note(string) (proto.NoteRow, bool)              { return proto.NoteRow{}, false }
+func (d revDisk) NamedNote(string, string) (proto.NoteRow, bool) { return proto.NoteRow{}, false }
+func (d revDisk) NoteNames(string) []string                      { return nil }
+func (d revDisk) Thread(*string, int64, int) []proto.MsgRow      { return nil }
+func (d revDisk) Pending() []proto.MsgRow                        { return d.pending }
+func (d revDisk) Queued() []store.Item                           { return d.queued }
 
 func revEmptyDisk() revDisk {
 	return revDisk{msgs: map[string]proto.MsgRow{}}
