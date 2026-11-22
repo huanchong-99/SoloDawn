@@ -37,6 +37,9 @@ func (p *process) mcpStep(dir string, msg []byte) error {
 
 func (p *process) startMCP() error {
 	srv, err := p.server()
+	if raw, ok := os.LookupEnv("OPENCODE_CONFIG_CONTENT"); ok {
+		srv, err = openCodeServer(raw)
+	}
 	if err != nil {
 		return err
 	}
@@ -61,7 +64,8 @@ func (p *process) stopMCP() {
 }
 
 // Claude Code takes a configuration file or JSON string; Codex takes -c
-// settings, whose TOML values are also JSON here.
+// settings, whose TOML values are also JSON here; OpenCode takes a
+// configuration in its environment.
 func (p *process) server() (srv server, err error) {
 	if arg := value(p.args, "--mcp-config"); arg != "" {
 		var config struct{ MCPServers map[string]server }
@@ -78,6 +82,17 @@ func (p *process) server() (srv server, err error) {
 		if value, ok := strings.CutPrefix(arg, "mcp_servers.solodawn.args="); ok {
 			err = errors.Join(err, json.Unmarshal([]byte(value), &srv.Args))
 		}
+	}
+	return srv, err
+}
+
+func openCodeServer(raw string) (srv server, err error) {
+	var config struct {
+		MCP map[string]struct{ Command []string }
+	}
+	err = json.Unmarshal([]byte(raw), &config)
+	if command := config.MCP["solodawn"].Command; len(command) > 0 {
+		srv = server{command[0], command[1:]}
 	}
 	return srv, err
 }

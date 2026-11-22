@@ -199,8 +199,14 @@ func agtReadRow(tx *store.Tx, f agtFound, loginOK bool) (proto.HostAgent, error)
 		Account:    account,
 		LoginOK:    loginOK,
 		Caps:       caps,
+		Driver:     agtDriverProto(f.agent),
 		Groups:     []proto.AgentGroup{},
 	}, nil
+}
+
+func agtDriverProto(agent string) proto.Driver {
+	c := DriverCaps[agent]
+	return proto.Driver{Accounts: c.Accounts, Takeover: c.Takeover}
 }
 
 func agtListen(h *Host, key SessionKey, e Event) {
