@@ -50,7 +50,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | send a host its inbox items, on every `hello` | `loop.Inbox(conn)` |
 | record a host's `ack` | `loop.Ack(conn, req)` |
 | run the timers by hand, or tell the home of an event | `loop.Tick(now)`, `loop.Event(name, event)` |
-| run retention on demand, or in a transaction | `loop.Event(RetainEvent, nil)`, `RetainWrite(now)` |
+| expire old store data in a transaction | `Retain(tx, now)` |
 | mark a disconnected host's AIs offline | `HostOfflineEvent`, fired by `Loop` when a device's last `Inbox` connection ends |
 | move a task | `Step(task, event)`: one task row and one `Event` in, the row and its `Effects` out ("The task machine" below) |
 | push to a client | the `Client` interface |
@@ -187,8 +187,8 @@ their test functions start with `TestReviewCmd`. The merges and summaries (`cmd_
 names that start with `mrg`, their tests too, and their test functions start with `TestMerge`.
 Host events (`cmd_hostev.go`) take the names that start with `hev`, their tests too, and their test
 functions start with `TestHostEv`; the file exports `HostOfflineEvent`.
-Retention (`retention.go`) takes the names that start with `ret`, exports `RetainEvent` and
-`RetainWrite`, and its test functions start with `TestRetention`.
+Retention (`retention.go`) takes the names that start with `ret`, exports `Retain`, and its test
+functions start with `TestRetention`.
 
 ## The run loop
 
@@ -662,24 +662,15 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
 
 ## Retention
 
-`retention.go` runs the daily retention rules of
-[storage](../../planning/contracts/storage.md) sections 2 and 4 under the name `RetainEvent`
-(`"retention"`), registered in `Timers`, `Events` and `After`.
+`retention.go` exports `Retain(tx, now)`, which reads `retention_days` from SQLite `setting`
+(defaulting to `90` when absent) and calls `tx.Retain(time.UnixMilli(now), days)`
+([storage](../../planning/contracts/storage.md) sections 2 and 4). The daily node schedule in
+`internal/node` calls `Retain` once a day per node.
 
-- **Daily schedule and purity.** `retDaily` runs on the first tick of a `State` and again once at
-  least 24 hours (`86,400,000` ms) have elapsed since the previous committed run on that state;
-  earlier ticks return an empty result. `retDaily` returns `RetainWrite(now)` in `Result.Writes`
-  and changes nothing in memory itself. `retNoted` records `now` per state in a weak-keyed map
-  (`weak.Pointer[State]`) only after the transaction commits, so a failed or rolled-back run is
-  retried on the next tick. `Events[RetainEvent]` runs `RetainWrite(now)` on demand and updates
-  the same last-run mark once committed.
-- **Days and what remains.** `RetainWrite(now).Put(tx)` reads `retention_days` from SQLite
-  `setting` (defaulting to `90` when absent) and calls `tx.Retain(time.UnixMilli(now), days)`. In
-  one transaction the store raises `grp.purged` to the highest `seq` among aged-out `gone` markers
-  before deleting those markers, keeps `pending` cards, keeps `note` and `review` rows
-  (`keep = 1`), keeps any `confirmed` brief while a `queued` task in the same group still names
-  it (R3-4), and deletes older messages and final (`merged` and `cancelled`) task rows whose `mt`
-  is before the cutoff.
+- **What remains.** In one transaction the store raises `grp.purged` to the highest `seq` among
+  aged-out `gone` markers before deleting those markers, keeps `pending` cards, keeps `note` and
+  `review` rows (`keep = 1`), and deletes older messages and final (`merged` and `cancelled`) task
+  rows whose `mt` is before the cutoff.
 - **In-memory tasks.** After retention deletes rows from the store, finished tasks stay in the
   in-memory state (`State.Tasks`) until restart ([issues](../../issues.md)). `grp.num` keeps the
   highest task number given out, so task numbers are not reused after restart.
@@ -788,8 +779,6 @@ reads, exact 61,440-byte boundaries, page bounds checks, group access checks, de
 and store failures. `features/home_fetch.feature` holds the scroll-back scenarios of A2.2 and the
 deleted-row scenario of A2.7.
 
-`retention_test.go` runs the node's retention timer, event and hook through `StartLoop` and
-`RetainWrite`: the 24-hour boundary, default and configured `retention_days`, rollback purity when
-a write fails, the purge mark with `Loop.Sync` reset, protected rows and R3-4, and finished tasks
-staying in `State.Tasks` until restart. `features/home_retention.feature` holds acceptance test
-A2.5, the retention half of A5.14, R3-4 and the restart behaviour for finished tasks.
+`retention_test.go` covers `Retain`: default and configured `retention_days`, store error
+propagation, protected rows, and the purge mark with `Loop.Sync` reset.
+`features/home_retention.feature` holds acceptance test A2.5 and the retention half of A5.14.
