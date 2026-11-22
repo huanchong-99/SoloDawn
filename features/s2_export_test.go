@@ -118,10 +118,7 @@ func (w *s2ExportWorld) joinOnInvitation(home *s2Node) error {
 	if err := bc.conn.Send(proto.Devlog{Type: "devlog", User: q.ID(), Entries: q.Entries}); err != nil {
 		return err
 	}
-	result, err := c.SendCmd(q, bc.conn, struct {
-		proto.HomeCommand
-		Name string `json:"name"`
-	}{w.header("join"), q.Name})
+	result, err := c.SendCmd(q, bc.conn, proto.Join{HomeCommand: w.header("join"), Name: q.Name})
 	if err == nil && !result.OK {
 		return errors.New("join did not answer ok")
 	}
@@ -575,13 +572,7 @@ func (w *s2ExportWorld) restoreMember() error {
 
 func (w *s2ExportWorld) followRestored() error {
 	c := w.c
-	_, err := c.SendCmd(c.Q, c.Q.Conns[c.Q1.ID()].conn, struct {
-		proto.HostCommand
-		Group proto.ID `json:"g"`
-		Home  string   `json:"home"`
-		Name  string   `json:"name"`
-		Addrs []string `json:"addrs"`
-	}{
+	_, err := c.SendCmd(c.Q, c.Q.Conns[c.Q1.ID()].conn, proto.HomeAdd{
 		HostCommand: proto.HostCommand{Type: "home.add", Nonce: c.NextID(), Timestamp: time.Now().UnixMilli(), To: c.Q1.ID()},
 		Group:       w.g, Home: c.P2.ID(), Name: w.name, Addrs: []string{c.RVURL},
 	})

@@ -12,6 +12,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `features/s2_export.feature:12,19,24` use the I2-0 Go cast and two invocations of the copy command. The product does not schedule copies (`planning/contracts/step-2/export.md:60-62`).
 - Status: open. Browser coverage belongs to I2-2 after U2-5 and W2-1. The OS timer is not verified.
 
+### 2026-11-22 · limitation · A denied call draws as waiting
+
+- Symptom: a `call` message whose state is `denied` (`row-msg-call-denied`, frozen by P-4a) shows the waiting line and the waiting state in the call area.
+- Cause: `callView` treats every status other than `answered` as waiting (`web/src/lib/call.ts:78`). The states sheet therefore lists three call rows, and `web/features/call.spec.ts` expects them.
+- Status: open, accepted for P-4a. Resolved when U2-2 draws a denied call.
+
 ### 2026-11-21 · deviation · The `rounds_limit` system message has an id derived from the triggering post's nonce
 
 - Symptom: when a `post` by an AI in a task's thread reaches `limits.rounds` (task-machine row 21), the command writes both the `post` row under `n` and the main-line `rounds_limit` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn rounds limit <n>` in base64url, rather than a random id.
@@ -109,11 +115,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `planning/flows/agent-turn.md` step 5.1 places `max_open` (closing the longest-`waiting` session, or waiting when every open session is `working` or `takeover`) in the session runtime (`HS-15`, #187, `tryReserveSlot`), so delivery does not duplicate it; `Deliver` (`deliverNow` in `internal/host/deliver.go`) walks all held AI keys on each wake so a freed slot reaches waiting AIs.
 - Status: open, coordinated between HS-13 (#186) and HS-15 (#187).
 
-### 2026-11-21 · limitation · `member/status` refuses `cap_reached` and `rate_limited` while `HS-18` is postponed
+### 2026-11-21 · limitation · `member/status` refuses `cap_reached` while `settings.set` is postponed
 
-- Symptom: a `member status` carrying host event code `cap_reached` or `rate_limited` (`planning/contracts/commands.md` section 1.9; `planning/contracts/messages.md` section 2.11) is answered `bad_request` ("unknown host event code").
-- Cause: `internal/home/cmd_hostev.go` (`hevEventReaders`) handles only the three step-1 host codes that `HS-15` sends (`turn_interrupted`, `login_invalid`, `session_replaced`), per the coordinator's decision of 2026-11-21 removing caps and rate limits from the main line.
-- Status: open until `HS-18` brings usage caps and rate-limit events back.
+- Symptom: a `member status` carrying host event code `cap_reached` (`planning/contracts/commands.md` section 1.9; `planning/contracts/messages.md` section 2.11) is answered `bad_request` ("unknown host event code").
+- Cause: nothing in 1.0 can set `agent.caps`: `settings.set`, its only writer, is postponed after 1.0 (`planning/contracts/commands.md`), so `HS-18` sends no `cap_reached` and `internal/home/cmd_hostev.go` (`hevEventReaders`) reads `rate_limited` but not `cap_reached` (coordinator's decision of 2026-11-22).
+- Status: open until `settings.set` comes back with caps.
 
 ### 2026-11-21 · limitation · Reassigning a task's assignee also marks a reviewer's pending approval card `reassigned`
 

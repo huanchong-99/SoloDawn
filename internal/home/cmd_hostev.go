@@ -22,12 +22,14 @@ const (
 	hevKindSystem     = "system"
 	hevOffline        = "offline"
 	hevTurnInterrupt  = "turn_interrupted"
+	hevRateLimited    = "rate_limited"
 	hevLoginInvalid   = "login_invalid"
 	hevSessionReplace = "session_replaced"
 )
 
 var hevEventReaders = map[string]func(Command, string) (hevEvent, *Refusal){
 	hevTurnInterrupt:  hevReader(hevTurnInterrupted),
+	hevRateLimited:    hevReader(hevRate),
 	hevLoginInvalid:   hevReader(hevLogin),
 	hevSessionReplace: hevReader(hevReplaced),
 }
@@ -90,6 +92,11 @@ func hevTurnInterrupted(ev proto.TurnInterruptedEvent, ai string) hevEvent {
 		SystemCode: ev.SystemCode, AI: ai, Reason: ev.Reason, Task: hevPtr(task), Detail: hevPtr(ev.Detail),
 	}
 	return hevEvent{code: hevTurnInterrupt, task: task, body: body}
+}
+
+func hevRate(ev proto.RateLimitedEvent, ai string) hevEvent {
+	body := proto.RateLimitedBody{SystemCode: ev.SystemCode, AI: ai, Resets: ev.Resets}
+	return hevEvent{code: hevRateLimited, notice: true, body: body}
 }
 
 func hevLogin(ev proto.LoginInvalidEvent, ai string) hevEvent {
