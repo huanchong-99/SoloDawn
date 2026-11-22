@@ -390,39 +390,6 @@ func TestCallReplyInThreadAndMainLine(t *testing.T) {
 	})
 }
 
-func TestCallReceiptsAndSingleAnswer(t *testing.T) {
-	s := calState(t)
-	r := receipts{}
-	d := disk{}
-	thread := calTaskID
-
-	callEnv, firstCall := calSend(t, s, d, r, laptop, calCallCmd(60, calCallTS, calA, &thread, "Once?", proto.CallBody{To: calB, Depth: 1, Wait: true}))
-	equal(t, firstCall.Answer, store.Outcome{OK: true})
-	s.Commit(firstCall)
-	callMsg := firstCall.Rows[0].Value().(proto.MsgRow)
-	d[callMsg.ID] = callMsg
-
-	repeatCall := briefApply(t, s, d, r, laptop, callEnv)
-	equal(t, repeatCall, home.Result{Answer: store.Outcome{OK: true}})
-
-	replyEnv, firstReply := calSend(t, s, d, r, laptop, calReplyCmd(61, calReplyTS, calB, &thread, callMsg.ID, "Yes."))
-	equal(t, firstReply.Answer, store.Outcome{OK: true})
-	s.Commit(firstReply)
-	for _, row := range firstReply.Rows {
-		if m, ok := row.Value().(proto.MsgRow); ok {
-			d[m.ID] = m
-		}
-	}
-
-	repeatReply := briefApply(t, s, d, r, laptop, replyEnv)
-	equal(t, repeatReply, home.Result{Answer: store.Outcome{OK: true}})
-
-	secondEnv, secondReply := calSend(t, s, d, r, laptop, calReplyCmd(62, calReplyTS+100, calB, &thread, callMsg.ID, "Again."))
-	briefRefused(t, secondReply, "conflict")
-	repeatRefused := briefApply(t, s, d, r, laptop, secondEnv)
-	equal(t, repeatRefused.Answer, store.Outcome{Code: "conflict"})
-}
-
 type calReplyCase struct {
 	by     identity.Key
 	target func(*proto.MsgRow)

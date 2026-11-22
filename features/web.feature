@@ -124,9 +124,9 @@ Feature: Web client
     Given the browser supports Ed25519 in WebCrypto
     And the person opens the client
     When the address fragment becomes "#/settings"
-    Then one frame later part 2 of the page has not moved from where it arrives
-    And both parts have faded in as far as each other
-    And both parts are seen in full when no animation runs
+    Then one frame later the later parts of the page have not moved from where they arrive
+    And every part has faded in as far as the others
+    And every part is seen in full when no animation runs
 
   Scenario: The page cross-fades to a new theme in a browser with view transitions
     Given the browser supports Ed25519 in WebCrypto
