@@ -10,13 +10,25 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: `planning/contracts/step-3/drivers.md` section 6 says each entry of `agents` carries `driver` always, but the frozen shape lets it be absent: Go `Driver *Driver` with `omitempty` (`internal/proto/host.go`, `HostAgent`), TS `v.optional(Driver)` (`web/src/lib/proto.ts`, `HostState.agents`), and `agents.driver` under `optional` in `internal/proto/testdata/wire.json`.
 - Cause: nothing on rebuild fills `driver` yet; a required field now would make the web client reject every real `host.info` until T3-2 lands. P-5 froze `driver` as `accounts` and `takeover` only; the other declaration fields stay in the host's table (coordinator, 2026-11-22).
-- Status: open, accepted for P-5. T3-2, the pull request that fills `driver` for every agent, makes it required: Go `Driver Driver `json:"driver"`` (value type, no `omitempty`), TS `driver: Driver`, regenerate `wire.json` with `go test ./internal/proto -update`, and drop "once populated" from `internal/proto/README.md` (the `host.info` bullet). Also accepted: P-5 does not freeze the tool lists in `internal/proto/testdata/tools.json` (`planning/contracts/step-3/knowledge.md` section 7), because `internal/host` tests require it to equal the registered schemas; T3-5 adds `note_list` `type` and `propose_brief` `preset`, T3-6 adds `kb_put` and `kb_search` to all five lists, and the two merge with `go test ./internal/proto -update`.
+- Status: open, accepted for P-5. T3-2, the pull request that fills `driver` for every agent, makes it required: Go: the `Driver` field (JSON `driver`) (value type, no `omitempty`), TS `driver: Driver`, regenerate `wire.json` with `go test ./internal/proto -update`, and drop "once populated" from `internal/proto/README.md` (the `host.info` bullet). Also accepted: P-5 does not freeze the tool lists in `internal/proto/testdata/tools.json` (`planning/contracts/step-3/knowledge.md` section 7), because `internal/host` tests require it to equal the registered schemas; T3-5 adds `note_list` `type` and `propose_brief` `preset`, T3-6 adds `kb_put` and `kb_search` to all five lists, and the two merge with `go test ./internal/proto -update`.
+### 2026-11-22 · limitation · Web Push VAPID `sub` URL is not yet checked against Apple's push service
+
+- Symptom: none observed; `wpushSubscriber` (`https://github.com/huanchong-99/SoloDawn`) has not yet been exercised against Apple's Web Push service on iOS.
+- Cause: `internal/home/webpush.go` (`wpushSubscriber`) sets the VAPID JWT `sub` claim to the repository URL, and no iOS device run is available in automated CI.
+- Status: open for the live iOS check of `A8.3` (`I-10` / `I-11`).
 
 ### 2026-11-22 · limitation · An unanswered AI-to-AI `call` stays `waiting`
 
 - Symptom: when the called AI never answers with `reply`, the `call` message keeps `state.status = "waiting"` for good; the web call block (`U-10`) shows it as waiting, with the time since it was made.
 - Cause: `planning/contracts/messages.md` section 3.4 gives a call only `waiting` and `answered`, with no `expired` as decisions have. The caller is not blocked: `ask` returns its receipt after `limits.ask_wait_s` (45 s, `internal/host/tools_ask.go:117-119`) and goes on with its turn.
 - Status: open, accepted for 1.0 (coordinator, 2026-11-22, `HS-12` review): no expiry, less code.
+
+### 2026-11-21 · bug · go-pty v0.2.3 blocks Unix Close during Read, keeps the slave TTY open, and misresolves PATH with Dir on Windows
+
+- Symptom: three defects in `github.com/aymanbagabas/go-pty` v0.2.3 (with `github.com/creack/pty` v1.1.24). (1) On macOS, calling `Pty.Close` while another goroutine is blocked in `Pty.Read` returns without closing the kernel master descriptor, so `Pty.Read` stays blocked and the attached child receives neither `EOF` nor `SIGHUP`. (2) On Unix, when the attached child exits by itself, `Pty.Read` never reaches `EOF`. (3) On Windows, starting a command by bare name (such as `claude` or `codex`) with `Cmd.Dir` set fails to find the executable on `PATH`.
+- Cause: (1) `creack/pty` opens `/dev/ptmx` on Darwin without `O_NONBLOCK` and passes the descriptor to `os.NewFile` (`pty_darwin.go:14-18`), which leaves `poll.FD` in blocking mode (`isBlocking == 1`) and defers `syscall.Close` until `Read` returns. (2) `Cmd.Start` on Unix leaves the parent's copy of `pty.slave` open (`cmd_unix.go:42-52`). (3) `Cmd.Start` on Windows joins `c.Dir` and `c.Path` in `lookExtensions` and `joinExeDirAndFName` (`cmd_windows.go:36-50`, `:240-243`, `:345`) whenever `c.Path` has no volume or separator.
+- Workaround: `ptyWrapStarted` (`internal/host/pty_unix.go`) duplicates the started master descriptor with `F_DUPFD_CLOEXEC`, sets `O_NONBLOCK`, wraps it with `os.NewFile` so Go's netpoller owns it, and closes `go-pty`'s master and slave handles; `ptyResolveExe` (`internal/host/pty.go`) resolves `argv[0]` to an absolute path through `exec.LookPath` before `ptmx.Command`.
+- Status: open, external; avoided in HS-19.
 
 ### 2026-11-21 · limitation · Finished tasks stay in a group's state in memory after retention until a restart
 

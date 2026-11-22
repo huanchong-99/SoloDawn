@@ -7,6 +7,9 @@
   let { group, msg }: CardProps<'summary'> = $props();
 
   const taskRow = $derived(group.task(msg.body.task));
+  const cardLabel = $derived(
+    taskRow ? `${t('summary.kind')} · T-${taskRow.num} · ${taskRow.title}` : t('summary.kind'),
+  );
 
   const rounds = $derived(
     t(msg.body.rounds === 1 ? 'summary.rounds.one' : 'summary.rounds.many').replace(
@@ -24,7 +27,7 @@
   });
 </script>
 
-<section class="card">
+<section class="card" aria-label={cardLabel}>
   <header class="card-head">
     <span class="done-icon"><Icon name="check" /></span>
     <span class="kind">{t('summary.kind')}</span>
