@@ -784,7 +784,7 @@ reads, exact 61,440-byte boundaries, page bounds checks, group access checks, de
 and store failures. `features/home_fetch.feature` holds the scroll-back scenarios of A2.2 and the
 deleted-row scenario of A2.7.
 
-`cmd_pause_test.go` covers `group/pause` and `group/resume` through `Commands.Apply` and on
-`StartLoop` with `Loop.Sync` and `Loop.Inbox`, pinning every refusal, idempotence branch, row 24
-task state and queued-item field check. `features/home_pause.feature` holds the home half of
-acceptance test A4.7 on `StartLoop` over an in-memory store.
+`cmd_pause_test.go` covers `group/pause` and `group/resume` through `Commands.Apply`: the admin
+check, both repeats, the rows, and row 24 over tasks with and without waits, at step `merge`, and
+with a review already queued. `features/home_pause.feature` holds the home half of acceptance test
+A4.7 on `StartLoop` over an in-memory store.
