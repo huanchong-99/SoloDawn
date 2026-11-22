@@ -75,7 +75,14 @@ describe('groupNotes, groupReviews and hasMemoryRow', () => {
     const n30 = row<p.NoteRow>('row-note', { id: 'n-30', pos: 30, text: 'Third' });
     const n20 = row<p.NoteRow>('row-note', { id: 'n-20', pos: 20, text: 'Second' });
     const msg = row<p.MsgRow>('row-msg-text', { id: 'm-1', pos: 5 });
-    group.apply([n10, n30, n20, msg]);
+    group.apply([
+      n10,
+      n30,
+      n20,
+      msg,
+      row<p.NoteRow>('row-note', { id: 'preset', type: 'preset', name: 'Style' }),
+      row<p.NoteRow>('row-note', { id: 'kb', type: 'kb', name: 'Decision' }),
+    ]);
 
     expect(groupNotes(group).map((n) => n.id)).toEqual(['n-10', 'n-20', 'n-30']);
     expect(hasMemoryRow(group, 'note', 'n-20')).toBe(true);
