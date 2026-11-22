@@ -17,7 +17,6 @@
   );
 
   let dialog: HTMLDialogElement;
-  let opener: HTMLElement | null = null;
   let chosen = $state.raw<Home>();
   let busy = $state(false);
   let failed = $state('');
@@ -27,47 +26,15 @@
   const listed = () => pairable.find((comp) => comp.home === chosen);
   const pick = () => (chosen = (listed() ?? pairable[0])?.home);
 
-  function focusFirstControl() {
-    if (dialog.contains(document.activeElement)) return;
-    dialog.querySelector<HTMLElement>('select:not([disabled]), button:not([disabled])')?.focus();
-  }
-
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape' && dialog.open) {
-      event.preventDefault();
-      dialog.close();
-    }
-  }
-
-  function restoreOpener() {
-    if (!opener?.isConnected) return;
-    const lost =
-      document.activeElement === document.body || dialog.contains(document.activeElement);
-    if (lost) opener.focus();
-  }
-
-  function handleClose() {
-    open = false;
-    restoreOpener();
-    opener = null;
-  }
-
   $effect(() => {
-    if (!open) {
-      if (dialog.open) dialog.close();
-      return;
-    }
+    if (!open) return;
     untrack(() => {
       result = undefined;
       failed = '';
       copied = false;
       pick();
     });
-    if (!dialog.open) {
-      opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      dialog.showModal();
-      focusFirstControl();
-    }
+    dialog.showModal();
   });
 
   let none = true;
@@ -109,8 +76,7 @@
   bind:this={dialog}
   class="dlg"
   aria-labelledby={`${uid}-title`}
-  onkeydown={handleKeydown}
-  onclose={handleClose}
+  onclose={() => (open = false)}
 >
   <form onsubmit={submit}>
     <header>
