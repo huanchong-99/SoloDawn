@@ -1077,11 +1077,13 @@ func (h *Host) MemberState(group, member string) (state, task string) {
 	return string(Dormant), ""
 }
 
+// memberOverlayState maps the holds of the limits unit to a state. A
+// takeover's hold is no overlay: the session's own state shows it.
 func memberOverlayState(h *Host, group, member string) string {
-	if reason, held := h.Held(SessionKey{Group: group, Member: member}); held {
-		if reason == "offline" {
-			return "offline"
-		}
+	switch reason, _ := h.Held(SessionKey{Group: group, Member: member}); reason {
+	case "offline":
+		return "offline"
+	case "rate_limit":
 		return "limited"
 	}
 	if stateOf(h).isLimited(aiSlot{group: group, member: member}) {

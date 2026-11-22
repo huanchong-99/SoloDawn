@@ -528,6 +528,9 @@ func TestTakeoverStartFailures(t *testing.T) {
 	if s := r.session(key); s.State != Dormant || r.held(runAI1) || len(r.sent("task", "cancel")) != 0 {
 		t.Fatalf("after a failed start: %+v", s)
 	}
+	if state := r.lastState(runAI1); state != "dormant" {
+		t.Fatalf("member state after a failed start = %v, want dormant", state)
+	}
 
 	r.putTask(tkTask, "merged", runAI1, runAI2, 1)
 	tkCode(t, r.start(runAI1, ""), "cli")
@@ -747,6 +750,10 @@ func TestTakeoverSettleLeavesTheRowForTheNextStart(t *testing.T) {
 	p.mu.Lock()
 	p.open, p.settled, p.stop = map[aiSlot]*takeover{}, false, make(chan struct{})
 	p.mu.Unlock()
+	rt := stateOf(r.h)
+	rt.mu.Lock()
+	rt.settling = false
+	rt.mu.Unlock()
 	busy := makeRunSession(SessionKey{Group: runGroup1, Member: tkSec}, GroupSession, "repo")
 	r.h.Sessions.Create(busy)
 	r.h.Sessions.Move(busy.SessionKey, Dormant, Takeover)
