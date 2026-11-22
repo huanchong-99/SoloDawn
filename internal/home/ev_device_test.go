@@ -42,7 +42,7 @@ func devRevokeRow(t *testing.T, signer, user identity.Key, ver int, dev identity
 	}
 }
 
-func TestDeviceEventFiltersAndAppendsNewOwnerRows(t *testing.T) {
+func TestDeviceEventFiltersAndAppendsMemberRows(t *testing.T) {
 	handle := home.Events["device"]
 	s := home.NewState(groupID, node.ID(), browser.ID())
 	s.Group = proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: groupID}, Name: "Website"}
@@ -50,7 +50,11 @@ func TestDeviceEventFiltersAndAppendsNewOwnerRows(t *testing.T) {
 
 	equal(t, len(handle(s, nil, clock, "wrong").Rows), 0)
 	equal(t, len(handle(s, nil, clock, []proto.DeviceRow{}).Rows), 0)
-	equal(t, len(handle(s, nil, clock, []proto.DeviceRow{devAddRow(t, guest, guest, 1, guest, "g")}).Rows), 0)
+	equal(t, len(handle(s, nil, clock, []proto.DeviceRow{devAddRow(t, nobody, nobody, 1, nobody, "stranger")}).Rows), 0)
+	guestEntry := devAddRow(t, guest, guest, 1, guest, "guest")
+	guestResult := handle(s, nil, clock, []proto.DeviceRow{guestEntry})
+	equal(t, len(guestResult.Rows), 1)
+	equal(t, guestResult.Rows[0].Value().(proto.DeviceRow), guestEntry)
 
 	r1 := devAddRow(t, browser, browser, 1, browser, "phone")
 	res := handle(s, nil, clock, []proto.DeviceRow{r1})
