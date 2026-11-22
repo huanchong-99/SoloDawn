@@ -85,11 +85,12 @@ func (v *Snapshot) PageThread(thread *string, before int64, limit int) ([]json.R
 	return v.rows(selectMsg+"thread=?"+newest, v.group, below(before), *thread, limit)
 }
 
-// PageKind reads notes ("note") or the review ledger ("review"), newest first.
+// PageKind reads notes ("note", "preset", "kb") or the review ledger ("review"), newest first.
 func (v *Snapshot) PageKind(kind string, before int64, limit int) ([]json.RawMessage, error) {
-	return v.rows(`SELECT data FROM row WHERE g=? AND keep=1
-		AND r=CASE ? WHEN 'note' THEN 'note' WHEN 'review' THEN 'msg' END
-		AND pos<? ORDER BY pos DESC LIMIT ?`, v.group, kind, below(before), limit)
+	return v.rows(`SELECT data FROM row WHERE g=?1 AND keep=1
+		AND r=CASE ?2 WHEN 'review' THEN 'msg' WHEN 'note' THEN 'note' WHEN 'preset' THEN 'note' WHEN 'kb' THEN 'note' END
+		AND (?2='review' OR (?2='note' AND data->>'type' IS NULL) OR data->>'type'=?2)
+		AND pos<?3 ORDER BY pos DESC LIMIT ?4`, v.group, kind, below(before), limit)
 }
 
 func (v *Snapshot) rows(query string, args ...any) ([]json.RawMessage, error) {
