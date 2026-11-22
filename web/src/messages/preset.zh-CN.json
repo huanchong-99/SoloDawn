@@ -10,6 +10,5 @@
   "preset.empty": "暂无预设。",
   "preset.deleted": "此预设已删除。",
   "preset.offline": "无法连接群组主机。预设为只读。",
-  "preset.readonly": "只有在线的人类成员可以编写预设。",
   "preset.loading": "正在加载预设…"
 }

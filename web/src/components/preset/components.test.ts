@@ -8,8 +8,6 @@ import { all, closePage, one, show, texts } from '../../../features/page';
 import BriefCard from '../brief/BriefCard.svelte';
 import BriefPreset from './BriefPreset.svelte';
 import PresetPanel from './PresetPanel.svelte';
-import States from './States.svelte';
-import StateSheet from '../../routes/dev/States.svelte';
 
 const row = (name: string, overrides: object = {}) =>
   ({ ...decode(Row, goldens[name]), ...overrides }) as Row;
@@ -26,12 +24,6 @@ beforeEach(() => {
   home.ctl = { request: request as Ctl['request'] };
 });
 afterEach(closePage);
-
-it('includes the preset area in the development states sheet', () => {
-  show(StateSheet, {});
-  expect(texts('.preset summary b')).toEqual(['Style presets']);
-  expect(all('.preset h2')).toEqual([]);
-});
 
 async function open(selector = '.preset details') {
   one<HTMLDetailsElement>(selector).open = true;
@@ -62,7 +54,7 @@ async function submit(selector = '.preset form') {
   });
 }
 
-it('shows fetch refusal, an empty list, and the human-member restriction', async () => {
+it('shows fetch refusal and an empty list without requiring member presence', async () => {
   request.mockResolvedValueOnce({ re: 1, err: { code: 'forbidden' } });
   show(PresetPanel, { group });
   await open();
@@ -71,10 +63,8 @@ it('shows fetch refusal, an empty list, and the human-member restriction', async
   group.apply([{ ...group.me!, online: false, seq: group.me!.seq + 1 }]);
   show(PresetPanel, { group });
   await open();
-  expect(texts('.preset .hint')).toEqual([
-    'Only an online human member can write presets.',
-    'No presets yet.',
-  ]);
+  expect(texts('.preset .hint')).toEqual(['No presets yet.']);
+  expect(one<HTMLInputElement>('.preset input').disabled).toBe(false);
 });
 
 it('retains text on write refusal, cancels an edit and reuses the forget dialog', async () => {
@@ -115,8 +105,24 @@ it('shows brief fetch refusal and offline state', async () => {
   expect(texts('.hint')).toEqual(['Cannot reach the group home. Presets are read-only.']);
 });
 
-it('renders the interactive states demo and creates, replaces and deletes a preset', async () => {
-  show(States, {});
+it('creates, replaces and deletes a preset', async () => {
+  group.apply([row('row-note-preset')]);
+  let seq = 10000;
+  request.mockImplementation(async (req) => {
+    if (req.t === 'cmd') {
+      const cmd = JSON.parse(req.env.p);
+      if (cmd.t === 'forget') group.apply([{ r: 'note', id: cmd.id, seq: ++seq, gone: true }]);
+      if (cmd.t === 'note') {
+        const id =
+          [...group.rows.values()].find(
+            (note) => note.r === 'note' && 'name' in note && note.name === cmd.name,
+          )?.id ?? cmd.id;
+        group.apply([{ ...row('row-note-preset'), ...cmd, id, r: 'note', seq: ++seq }]);
+      }
+    }
+    return { re: 1, ok: true, rows: [], more: false };
+  });
+  show(PresetPanel, { group });
   await open();
   input('input', 'New');
   input('textarea', 'First');
@@ -151,4 +157,45 @@ it('shows a brief foundation pass fallback and closes revision with Escape', asy
   await tick();
   flushSync();
   expect(all('textarea')).toEqual([]);
+});
+
+it('retains a revision draft across a temporary loss of permission', async () => {
+  const original = decode(Row, goldens['row-msg-brief-pending']) as Extract<
+    MsgRow,
+    { kind: 'brief' }
+  >;
+  const msg = { ...original, body: { ...original.body, requester: 'another-member' } };
+  show(BriefCard, { group, msg });
+  all<HTMLButtonElement>('button')
+    .find((button) => button.textContent?.trim() === 'Change it')!
+    .click();
+  flushSync();
+  input('textarea', 'Draft');
+  const member = group.me!;
+  group.apply([{ ...member, role: 'member', seq: member.seq + 1 }]);
+  flushSync();
+  expect(all('textarea')).toEqual([]);
+  group.apply([{ ...member, seq: member.seq + 2 }]);
+  flushSync();
+  expect(one<HTMLTextAreaElement>('textarea').value).toBe('Draft');
+});
+
+it('returns focus to the brief when membership disappears during an act', async () => {
+  const msg = decode(Row, goldens['row-msg-brief-pending']) as Extract<MsgRow, { kind: 'brief' }>;
+  request.mockImplementation(async () => {
+    const member = group.me!;
+    group.apply([{ r: 'member', id: member.id, seq: member.seq + 1, gone: true }]);
+    return { re: 1, ok: true };
+  });
+  show(BriefCard, { group, msg });
+  const confirm = all<HTMLButtonElement>('button').find(
+    (button) => button.textContent?.trim() === 'Confirm & start',
+  )!;
+  confirm.focus();
+  confirm.click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(all<HTMLButtonElement>('button').map((button) => button.disabled)).toEqual([true, true]);
+    expect(document.activeElement).toBe(one('.card'));
+  });
 });

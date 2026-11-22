@@ -10,6 +10,5 @@
   "preset.empty": "No presets yet.",
   "preset.deleted": "This preset was deleted.",
   "preset.offline": "Cannot reach the group home. Presets are read-only.",
-  "preset.readonly": "Only an online human member can write presets.",
   "preset.loading": "Loading presets…"
 }

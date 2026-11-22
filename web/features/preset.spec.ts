@@ -23,20 +23,24 @@ async function request(req: Record<string, unknown>) {
   if (req.t === 'cmd') {
     const cmd = JSON.parse((req.env as p.Envelope).p);
     commands.push(cmd);
-    const previous = held.find((row) => row.name === cmd.name);
-    const note = example('row-note', {
-      ...cmd,
-      r: 'note',
-      id: previous?.id ?? cmd.id,
-      by: owner,
-      ts: 1,
-      seq: ++seq,
-    }) as p.NoteRow;
-    held = held.filter((row) => row.id !== note.id).concat(note);
-    group.apply([note]);
+    applyNote(cmd);
     return { re: 1, ok: true };
   }
   return { re: 1, ok: true, rows: [], more: false };
+}
+
+function applyNote(cmd: Record<string, unknown>) {
+  const previous = held.find((row) => row.name === cmd.name);
+  const note = example('row-note', {
+    ...cmd,
+    r: 'note',
+    id: previous?.id ?? cmd.id,
+    by: owner,
+    ts: 1,
+    seq: ++seq,
+  }) as p.NoteRow;
+  held = held.filter((row) => row.id !== note.id).concat(note);
+  group.apply([note]);
 }
 
 function setup() {
@@ -105,7 +109,14 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
       openFold('[aria-label^="Task brief"] dd details'),
     );
     Then('the card names Calm dashboard and shows its text', () => {
-      expect(texts('[aria-label^="Task brief"] dt')[0]).toBe('Style preset');
+      expect(texts('[aria-label^="Task brief"] dt')).toEqual([
+        'Goal',
+        'Acceptance',
+        'Scope',
+        'Split',
+        'Style preset',
+      ]);
+      expect(all('[aria-label^="Task brief"] dd details.fold')).toEqual([]);
       expect(texts('[aria-label^="Task brief"] dd details summary')).toEqual(['Calm dashboard']);
       expect(all('[aria-label^="Task brief"] dd details summary svg.i.sm')).toHaveLength(1);
       expect(texts('[aria-label^="Task brief"] dd details p')).toEqual([style]);

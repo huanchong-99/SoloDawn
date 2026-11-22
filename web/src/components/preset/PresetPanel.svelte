@@ -61,8 +61,7 @@
     </summary>
     {#if open}
       <div class="fold-body mem-body">
-        {#if !group.home.ctl}<p class="hint">{t('preset.offline')}</p>
-        {:else if !writable}<p class="hint">{t('preset.readonly')}</p>{/if}
+        {#if !group.home.ctl}<p class="hint">{t('preset.offline')}</p>{/if}
         {#if view.failed}<Failure code={view.failed} />{/if}
         {#if view.busy}<p class="hint" role="status">{t('preset.loading')}</p>{/if}
         <ul class="mem-list" aria-labelledby={`${uid}-head`}>
@@ -140,8 +139,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--sp-2);
-    padding: var(--sp-4) var(--sp-4) 14px;
-    border-top: 1px solid var(--line);
+    padding: 0 var(--sp-4) 14px;
   }
   .preset > .fold {
     border-top: 0;

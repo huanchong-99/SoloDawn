@@ -10,7 +10,7 @@ export function presets(group: Group): NoteRow[] {
 }
 
 export function canWrite(group: Group): boolean {
-  return Boolean(group.home.ctl && group.me?.kind === 'human' && group.me.online);
+  return Boolean(group.home.ctl && group.me);
 }
 
 export function validName(name: string): boolean {

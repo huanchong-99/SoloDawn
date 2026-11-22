@@ -101,10 +101,6 @@
 
 {#snippet details(folded: boolean)}
   <dl class="kv wide" class:fold-body={folded}>
-    {#if msg.body.preset}
-      <dt>{t('preset.label')}</dt>
-      <dd><BriefPreset {group} name={msg.body.preset} /></dd>
-    {/if}
     <dt>{t('brief.goal')}</dt>
     <dd>{msg.body.goal}</dd>
     <dt>{t('brief.criteria')}</dt>
@@ -167,6 +163,10 @@
         </li>
       </ul>
     </dd>
+    {#if msg.body.preset}
+      <dt>{t('preset.label')}</dt>
+      <dd><BriefPreset {group} name={msg.body.preset} /></dd>
+    {/if}
   </dl>
 {/snippet}
 

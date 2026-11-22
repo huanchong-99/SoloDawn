@@ -33,11 +33,11 @@ describe('preset projections and writing', () => {
     ]);
     expect(presets(group)).toEqual([first, last]);
   });
-  it('allows only online human members with a connection to write', () => {
+  it('allows members with a home connection to write regardless of presence', () => {
     expect(canWrite(group)).toBe(true);
     const owner = group.me!;
     group.apply([{ ...owner, online: false, seq: owner.seq + 1 }]);
-    expect(canWrite(group)).toBe(false);
+    expect(canWrite(group)).toBe(true);
     group.apply([{ r: 'member', id: owner.id, seq: owner.seq + 2, gone: true }]);
     expect(canWrite(group)).toBe(false);
     group.home.ctl = undefined;

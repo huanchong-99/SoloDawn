@@ -14,20 +14,28 @@
   });
 </script>
 
-<details class="fold" bind:open>
+<details bind:open>
   <summary><Icon name="down" sm /><b>{name}</b></summary>
   {#if open}
-    <div class="fold-body">
-      {#if preset}<p class="mem-text">{preset.text}</p>
-      {:else if view.failed}<Failure code={view.failed} />
-      {:else if view.busy}<p class="hint" role="status">{t('preset.loading')}</p>
-      {:else if view.loaded}<p class="hint">{t('preset.deleted')}</p>
-      {:else}<p class="hint">{t('preset.offline')}</p>{/if}
-    </div>
+    {#if preset}<p class="mem-text">{preset.text}</p>
+    {:else if view.failed}<Failure code={view.failed} />
+    {:else if view.busy}<p class="hint" role="status">{t('preset.loading')}</p>
+    {:else if view.loaded}<p class="hint">{t('preset.deleted')}</p>
+    {:else}<p class="hint">{t('preset.offline')}</p>{/if}
   {/if}
 </details>
 
 <style>
+  summary {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    cursor: pointer;
+    list-style: none;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
   .mem-text {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
