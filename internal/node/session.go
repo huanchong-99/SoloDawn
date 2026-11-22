@@ -80,6 +80,7 @@ type sesConn struct {
 	sendMu           sync.Mutex
 	home             *home.Conn
 	staging          map[string]*identity.Log
+	joining          *joinConn
 }
 
 type sesWelcome struct {
@@ -97,6 +98,7 @@ func NewSessions(cfg SessionConfig) *Sessions {
 	}
 	s.Requests["sync"] = RequestHandler{Async: true, Run: s.sesSync}
 	s.Requests["fetch"] = RequestHandler{Async: true, Run: s.sesFetch}
+	s.Commands["home.add"] = s.cmdHomeAdd
 	cfg.Logs.mu.Lock()
 	cfg.Logs.onChange = s.sesLogChanged
 	cfg.Logs.mu.Unlock()
@@ -132,13 +134,18 @@ func sesDefaultConfig(cfg SessionConfig) SessionConfig {
 // Serve runs the ctl session of raw until ctx ends or raw closes.
 func (s *Sessions) Serve(ctx context.Context, device string, paired bool, raw Ctl) {
 	c := &sesConn{device: device, paired: paired, raw: raw, staging: map[string]*identity.Log{}}
-	c.home = s.cfg.Home.Attach(device, c)
+	s.serve(ctx, c, nil)
+}
+
+func (s *Sessions) serve(ctx context.Context, c *sesConn, joining func() *home.Joining) {
+	c.home = s.cfg.Home.Attach(c.device, c)
+	c.home.SetJoining(joining)
 	s.mu.Lock()
 	s.conns[c] = true
 	s.mu.Unlock()
 	defer s.sesLeave(c)
 	for {
-		data, err := raw.Read(ctx)
+		data, err := c.raw.Read(ctx)
 		if err != nil {
 			return
 		}
@@ -204,7 +211,7 @@ func (s *Sessions) sesPush(ctx context.Context, c *sesConn, typ string, data jso
 		s.sesAck(c, data)
 		return
 	}
-	if h := s.Pushes[typ]; h != nil {
+	if h := s.Pushes[typ]; h != nil && s.cfg.Logs.IsOwner(c.device) {
 		h(ctx, c.home, c.raw, c.device, data)
 	}
 }
@@ -221,7 +228,7 @@ func (s *Sessions) sesRequest(ctx context.Context, c *sesConn, id int64, typ str
 		s.sesHello(ctx, c, id, data)
 		return
 	}
-	if !s.sesEnrolled(c) {
+	if !s.sesEnrolled(c) && !(typ == "cmd" && c.joining.pending()) {
 		c.sendErr(id, "forbidden", "only hello and devlog are accepted before enrolment")
 		return
 	}
@@ -233,6 +240,10 @@ func (s *Sessions) sesRequest(ctx context.Context, c *sesConn, id int64, typ str
 }
 
 func (s *Sessions) sesRunRequest(ctx context.Context, c *sesConn, id int64, typ string, data json.RawMessage) {
+	if !s.sesAllowsRequest(c, typ) {
+		c.sendErr(id, "forbidden", "only the owner's devices may use the host surface")
+		return
+	}
 	h, ok := s.Requests[typ]
 	if !ok {
 		c.sendErr(id, "bad_request", "unknown ctl request")
@@ -242,6 +253,10 @@ func (s *Sessions) sesRunRequest(ctx context.Context, c *sesConn, id int64, typ 
 	if !h.Async || err != nil {
 		s.sesReply(c, id, h.Type, res, err)
 	}
+}
+
+func (s *Sessions) sesAllowsRequest(c *sesConn, typ string) bool {
+	return typ == "sync" || typ == "fetch" || s.cfg.Logs.IsOwner(c.device)
 }
 
 func (s *Sessions) sesSync(_ context.Context, conn *home.Conn, _ Ctl, _ string, _ int64, data json.RawMessage) (any, error) {
@@ -263,10 +278,13 @@ func (s *Sessions) sesFetch(_ context.Context, conn *home.Conn, _ Ctl, _ string,
 }
 
 func (s *Sessions) sesEnrolled(c *sesConn) bool {
+	return s.sesWelcomed(c) && !c.joining.pending() && s.cfg.Logs.Known(c.device)
+}
+
+func (s *Sessions) sesWelcomed(c *sesConn) bool {
 	s.mu.Lock()
-	welcomed := c.welcomed
-	s.mu.Unlock()
-	return welcomed && s.cfg.Logs.Known(c.device)
+	defer s.mu.Unlock()
+	return c.welcomed
 }
 
 func (s *Sessions) sesHello(ctx context.Context, c *sesConn, id int64, data json.RawMessage) {
@@ -276,7 +294,11 @@ func (s *Sessions) sesHello(ctx context.Context, c *sesConn, id int64, data json
 		return
 	}
 	sent := make(chan struct{})
-	base := s.sesWelcomeBase(id, c.device)
+	base := s.sesWelcomeBase(id, c.device, h.V)
+	joining := c.joining.pending()
+	if joining {
+		base.Owner = false
+	}
 	s.sesBeforeWelcome(c)
 	onSent := func() []proto.Devlog {
 		s.mu.Lock()
@@ -287,11 +309,14 @@ func (s *Sessions) sesHello(ctx context.Context, c *sesConn, id int64, data json
 	wrap := func(gs []proto.GroupSummary) any {
 		w := base
 		w.Groups = gs
+		if joining {
+			w.Groups = []proto.GroupSummary{}
+		}
 		return sesWelcome{welcome: w, onSent: onSent, sent: sent}
 	}
 	s.cfg.Home.Welcome(c.home, wrap)
 	sesWaitWelcome(ctx, sent, c.home.Gone())
-	if h.Kind == "host" {
+	if h.Kind == "host" && !joining {
 		s.cfg.Home.Inbox(c.home)
 	}
 }
@@ -302,27 +327,9 @@ func (s *Sessions) sesBeforeWelcome(c *sesConn) {
 	}
 }
 
-func sesDecodeHello(data json.RawMessage) (proto.Hello, *host.Error) {
-	var ver struct {
-		proto.Request
-		V int `json:"v"`
-	}
-	if proto.Decode(data, &ver) != nil {
-		return proto.Hello{}, &host.Error{Code: "bad_request", Message: "invalid hello frame"}
-	}
-	if ver.V != 1 {
-		return proto.Hello{}, &host.Error{Code: "version", Message: "unsupported protocol version"}
-	}
-	var h proto.Hello
-	if proto.Decode(data, &h) != nil || (h.Kind != "browser" && h.Kind != "host") {
-		return proto.Hello{}, &host.Error{Code: "bad_request", Message: "invalid hello fields"}
-	}
-	return h, nil
-}
-
-func (s *Sessions) sesWelcomeBase(id int64, device string) proto.Welcome {
+func (s *Sessions) sesWelcomeBase(id int64, device string, version int) proto.Welcome {
 	return proto.Welcome{
-		Type: "welcome", Success: proto.Success{Re: id, OK: true}, V: 1,
+		Type: "welcome", Success: proto.Success{Re: id, OK: true}, V: version,
 		Device: s.cfg.ID, Name: s.cfg.Name(), Version: s.cfg.Version,
 		Time: s.cfg.Now().UnixMilli(), Addrs: s.cfg.Addrs(), Owner: s.cfg.Logs.IsOwner(device),
 	}
@@ -349,11 +356,31 @@ func (s *Sessions) sesCmd(ctx context.Context, c *sesConn, id int64, data json.R
 		c.sendErr(id, "forbidden", "command signer does not match connection device")
 		return
 	}
+	if c.joining.pending() {
+		s.sesJoinCmd(c, id, req.Env)
+		return
+	}
 	if sesIsHostCmd(req.Env.Payload) {
-		s.cfg.Spawn(func() { s.sesHostCmd(ctx, c, id, req.Env) })
+		s.sesDispatchHostCmd(ctx, c, id, req.Env)
 		return
 	}
 	s.cfg.Home.Cmd(c.home, id, req.Env)
+}
+
+func (s *Sessions) sesJoinCmd(c *sesConn, id int64, env proto.Envelope) {
+	if !s.sesWelcomed(c) || !c.joining.accepts(env.Payload) {
+		c.sendErr(id, "forbidden", "a joining connection may only send join for its group after hello")
+		return
+	}
+	s.cfg.Home.Cmd(c.home, id, env)
+}
+
+func (s *Sessions) sesDispatchHostCmd(ctx context.Context, c *sesConn, id int64, env proto.Envelope) {
+	if !s.cfg.Logs.IsOwner(c.device) {
+		c.sendErr(id, "forbidden", "only the owner's devices may use the host surface")
+		return
+	}
+	s.cfg.Spawn(func() { s.sesHostCmd(ctx, c, id, env) })
 }
 
 func sesIsHostCmd(payload string) bool {
@@ -365,7 +392,7 @@ func sesIsHostCmd(payload string) bool {
 }
 
 func (s *Sessions) sesHostCmd(ctx context.Context, c *sesConn, id int64, env proto.Envelope) {
-	hdr, err := identity.OpenCommand(env, s.cfg.ID, s.cfg.Logs.Known, s.cfg.Now())
+	hdr, err := identity.OpenCommand(env, s.cfg.ID, s.cfg.Logs.IsOwner, s.cfg.Now())
 	if err != nil {
 		c.sendErr(id, err.Error(), "the envelope of the command was refused")
 		return

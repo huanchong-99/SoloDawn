@@ -6,6 +6,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · Remembered addresses are not dialled yet
+
+- Symptom: `home.add` records signalling addresses, but a node still needs a shared configured rendezvous to reach an external home.
+- Cause: the node's route lookup in `internal/node/node.go` uses active pairing and configured rendezvous paths, not the remembered addresses.
+- Status: open.
 ### 2026-11-22 · limitation · Rendezvous has no explicit room leave
 
 - Symptom: cancelling an invitation stops browser handling, but the rendezvous socket remains in the room until expiry or disconnect. Retrying the same room on the same socket does not trigger a new `joined` from a home already in the room.
