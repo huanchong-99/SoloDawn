@@ -774,8 +774,13 @@ func assertApproverFallbackChain(t *testing.T, fx *approveFixture) {
 
 	seamSQL(t, fx.db, `UPDATE setting SET value = '[]' WHERE key = 'approvers'`)
 	gotApp2, gotMen2 := resolveApproversAndMentions(fx.h, fx.groupID, fx.memberID)
-	mustApproveDeepEqual(t, gotApp2, []string{}, "empty approvers fallback")
-	mustApproveDeepEqual(t, gotMen2, []proto.ID{}, "empty fallback mentions")
+	mustApproveDeepEqual(t, gotApp2, []string{fx.owner1.ID()}, "owner fallback")
+	mustApproveDeepEqual(t, gotMen2, []proto.ID{}, "owner fallback mentions")
+
+	seamSQL(t, fx.db, `DELETE FROM setting WHERE key = 'owner'`)
+	gotApp3, gotMen3 := resolveApproversAndMentions(fx.h, fx.groupID, fx.memberID)
+	mustApproveDeepEqual(t, gotApp3, []string{}, "empty approvers fallback")
+	mustApproveDeepEqual(t, gotMen3, []proto.ID{}, "empty fallback mentions")
 
 	fx.h.Rows.Put(fx.groupID, "member", fx.memberID, json.RawMessage(`{"r":"member"`))
 	mustApproveTrue(t, memberApprovers(fx.h.Rows, fx.groupID, fx.memberID) == nil, "corrupt member row nil")

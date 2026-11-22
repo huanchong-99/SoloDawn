@@ -888,7 +888,9 @@ func fetchFrom(ctx context.Context, h *Host, device string, build func(id int64)
 		return proto.Fetched{}, &Error{refused.Err.Code, refused.Err.Message}
 	}
 	var fetched proto.Fetched
-	proto.Decode(raw, &fetched)
+	if proto.Decode(raw, &fetched) != nil {
+		return proto.Fetched{}, &Error{"bad_request", "invalid fetch response"}
+	}
 	return fetched, nil
 }
 

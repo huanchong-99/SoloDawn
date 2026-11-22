@@ -603,15 +603,25 @@ func memberApprovers(rows *Rows, group, member string) []string {
 	return slices.Clone(ai.Approvers)
 }
 
-const queryApproversSettingSQL = `SELECT coalesce((SELECT value FROM setting WHERE key = 'approvers'), '[]')`
+const queryApproversFallbackSQL = `SELECT
+	coalesce((SELECT value FROM setting WHERE key = 'approvers'), '[]'),
+	coalesce((SELECT value FROM setting WHERE key = 'owner'), '""')`
 
 func readStoreApprovers(db *store.Store) []string {
-	var raw string
-	read := func(tx *store.Tx) error { return tx.QueryRow(queryApproversSettingSQL).Scan(&raw) }
+	var listJSON, ownerJSON string
+	read := func(tx *store.Tx) error { return tx.QueryRow(queryApproversFallbackSQL).Scan(&listJSON, &ownerJSON) }
 	db.Write(read)
-	list := []string{}
-	json.Unmarshal([]byte(raw), &list)
-	return list
+	var list []string
+	json.Unmarshal([]byte(listJSON), &list)
+	if len(list) != 0 {
+		return list
+	}
+	var owner string
+	json.Unmarshal([]byte(ownerJSON), &owner)
+	if owner != "" {
+		return []string{owner}
+	}
+	return []string{}
 }
 
 func approverMentionIDs(rows *Rows, group string, approvers []string) []proto.ID {
