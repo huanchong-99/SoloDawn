@@ -25,16 +25,6 @@ func init() {
 	stepSets["s2_people"] = s2PeopleSteps
 }
 
-type s2JoinCmd struct {
-	proto.HomeCommand
-	Name string `json:"name"`
-}
-
-type s2RoleSetCmd struct {
-	proto.MemberCommand
-	Role string `json:"role"`
-}
-
 type s2JoinLink struct {
 	Secret  identity.Secret
 	Group   string
@@ -314,8 +304,8 @@ func (w *s2PeopleWorld) pCreatesInvitation() error {
 	return err
 }
 
-func s2InviteCommand(gid, nonce proto.ID, ts int64) proto.HomeCommand {
-	return proto.HomeCommand{Type: "invite", Nonce: nonce, Timestamp: ts, Group: gid}
+func s2InviteCommand(gid, nonce proto.ID, ts int64) proto.Invite {
+	return proto.Invite{Type: "invite", Nonce: nonce, Timestamp: ts, Group: gid}
 }
 
 func parseS2JoinLink(raw string, expires int64) (s2JoinLink, error) {
@@ -381,7 +371,7 @@ func joinGroupWithLink(
 	if err := bc.conn.Send(proto.Devlog{Type: "devlog", User: signer.ID(), Entries: entries}); err != nil {
 		return bc, nil, err
 	}
-	raw, err := sendSignedCmdRaw(ctx, bc.conn, signer, s2JoinCmd{
+	raw, err := sendSignedCmdRaw(ctx, bc.conn, signer, proto.Join{
 		HomeCommand: proto.HomeCommand{Type: "join", Nonce: joinNonce, Timestamp: now.UnixMilli(), Group: proto.ID(link.Group)},
 		Name:        memberName,
 	})
@@ -723,7 +713,7 @@ func (w *s2PeopleWorld) prepareClockProbe(link s2JoinLink) error {
 
 func (w *s2PeopleWorld) expectClockProbeRefused() error {
 	ch := w.clock
-	raw, err := sendSignedCmdRaw(ch.ctx, ch.probeConn.conn, ch.probe.key, s2JoinCmd{
+	raw, err := sendSignedCmdRaw(ch.ctx, ch.probeConn.conn, ch.probe.key, proto.Join{
 		HomeCommand: proto.HomeCommand{Type: "join", Nonce: ch.ids.next(), Timestamp: ch.nowTime().UnixMilli(), Group: ch.gid},
 		Name:        "Joiner",
 	})
@@ -833,13 +823,13 @@ func (w *s2PeopleWorld) expectRoleSetError(conn *peer.Connection, signer identit
 	return w.expectSignedCmdError(conn, signer, w.roleSetCommand(targetID, role), wantCode)
 }
 
-func (w *s2PeopleWorld) roleSetCommand(targetID, role string) s2RoleSetCmd {
-	return s2RoleSetCmd{
+func (w *s2PeopleWorld) roleSetCommand(targetID, role string) proto.MemberSet {
+	return proto.MemberSet{
 		MemberCommand: proto.MemberCommand{
 			HomeCommand: proto.HomeCommand{Type: "member", Nonce: w.cast.NextID(), Timestamp: time.Now().UnixMilli(), Group: w.gid},
 			Op:          "set", ID: proto.ID(targetID),
 		},
-		Role: role,
+		Role: &role,
 	}
 }
 
