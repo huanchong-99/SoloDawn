@@ -146,7 +146,7 @@ the type does not name, not with `Decode`.
 
 - `host.info` is answered with `HostInfo` and pushed as `HostInfoPush`, the same
   `HostState` without `re` and `ok`. `relay` and an agent's `account` may be `null`;
-  each agent entry carries `Driver` (`Accounts`, `Takeover`) once populated (`step-3/drivers.md` section 6).
+  each agent entry carries `Driver` (`Accounts`, `Takeover`) (`step-3/drivers.md` section 6).
 - People and confirmations (`step-2/people.md`, `step-2/confirm.md`) add `Invite`
   (`HomeCommand`, answered with `link` and `expires` in `CmdResult`), `Join`, `Role` on
   `MemberSet`, `MemberJoinedBody` and `MemberRemovedBody`, `HomeAdd` (`home.add`,

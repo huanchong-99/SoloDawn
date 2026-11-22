@@ -1,5 +1,5 @@
 ---
-description: 'The host seam (interfaces, tables, hooks, sessions, drivers and driver capability switches), the session runtime, group sync and inbox delivery, group joining and per-home connection management, the offline scripted Claude Code and Codex processes for host integration tests, the API of the host workspaces and Git commands, and the MCP server and stdio shim.'
+description: 'The host seam (interfaces, tables, hooks, sessions, drivers and driver capability switches), the session runtime, group sync and inbox delivery, group joining and per-home connection management, the offline scripted Claude Code, Codex and OpenCode processes for host integration tests, the API of the host workspaces and Git commands, and the MCP server and stdio shim.'
 kind: reference
 ---
 
@@ -121,6 +121,22 @@ Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/
 - **One reader per channel and lock order.** `Events()` is written only by `readLoop` and read only by `Start`'s caller, and closes after `cmd.Wait` and tree cleanup finish; `ready` is closed once by `finishReady` for `Turn`. `wmu` (stdin writes and close) and `mu` (protocol, turn, approval, user-input and file-change state) are never nested.
 - **Requests and notifications.** `commandExecution` and `fileChange` approvals emit `Asked` for `Process.Answer`; `item/tool/requestUserInput` emits `Asked` with `Ask.Reply`; invalid parameters and all other server requests get JSON-RPC error `-32601`. Notifications during an active turn emit `Active`; `account/rateLimits/updated` selects the higher `usedPercent` window (`Used`, and `RateLimited` at 100 percent or when a limit flag is set), and a turn that fails with `usageLimitExceeded` emits `RateLimited`. Live behavior of `features.default_mode_request_user_input=true` and `item/tool/requestUserInput` remains unverified ([issues.md](../../issues.md)).
 
+### OpenCode
+
+`opencode.go` registers `Drivers["opencode"]` and its declaration (`api_key`; levels `1`, `3`; `conn`; takeover `none`) from the OpenCode 1.19.6 documentation read by T3-0. No capture of the real CLI exists yet, so every value below is `[unverified]` ([issues.md](../../issues.md)).
+
+- `Start` runs `opencode serve --hostname 127.0.0.1 --port 0` in the session folder with a random `OPENCODE_SERVER_PASSWORD`, and `OPENCODE_CONFIG_CONTENT` holding the `solodawn` MCP server (`Launch.Shim`) and the level's `permission`. Without `RepoConfig` it also sets `OPENCODE_DISABLE_PROJECT_CONFIG=1`. It reads the address from the `listening on` line (`serverAddress`), opens `GET /event`, then `GET /session/<id>` (a failure is `NoSession`) or `POST /session`.
+- A turn is `POST /session/<id>/prompt_async` with the instructions as `system`; `session.idle` of that session ends it, as `interrupted` after a `MessageAbortedError`, `failed` after any other `session.error` of that session or of none (a `ProviderAuthError` also reports `LoginInvalid`). `message.part.updated` is `Active`, `permission.asked` is `Asked`, answered with `POST /permission/<id>/reply` (`once` or `reject`). `Interrupt` is `POST /session/<id>/abort`. The server does not exit when its input closes, so `Close` kills its process tree.
+
+| Level | `permission` |
+| --- | --- |
+| 1 | `edit` and `bash` `deny` |
+| 3 | `edit`, `bash`, `webfetch`, `external_directory` and `doom_loop` `allow` |
+
+### Local servers (`serve.go`)
+
+The drivers whose CLI runs as a local HTTP server share `serve.go`: `serve` starts the server detached from any terminal and returns its standard output and a wait that kills what it left running, `serverAddress` reads the `listening on` line, and `readSSE` reads the event stream with `bufio.Reader`, so an event has no size limit.
+
 ## CLI detection and sign-in
 
 `agents.go` provides `(*Host).Agents(ctx)`, `"agents"` in `Listeners`, and `"agent.set"` in `Surface`; see [drivers.md](../../planning/contracts/drivers.md) section 1.4 and [commands.md](../../planning/contracts/commands.md) section 2.
@@ -159,9 +175,9 @@ Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/
 
 # Host test CLIs
 
-Build `./internal/host/fakecli/claude` and `./internal/host/fakecli/codex` into a temporary directory and prepend it to the test's PATH. Both answer `--version` without a script. For sessions, set:
+Build `./internal/host/fakecli/claude`, `./internal/host/fakecli/codex` and `./internal/host/fakecli/opencode` into a temporary directory and prepend it to the test's PATH. All three answer `--version` without a script. For sessions, set:
 
-- `SOLODAWN_FAKE_CLAUDE_SCRIPT` and/or `SOLODAWN_FAKE_CODEX_SCRIPT`: path to the script for the next start of that CLI. Each process reads its script once. Replace it between a first start and a resume; a relative path is resolved in the session's working folder.
+- `SOLODAWN_FAKE_CLAUDE_SCRIPT`, `SOLODAWN_FAKE_CODEX_SCRIPT` or `SOLODAWN_FAKE_OPENCODE_SCRIPT`: path to the script for the next start of that CLI. Each process reads its script once. Replace it between a first start and a resume; a relative path is resolved in the session's working folder.
 - `SOLODAWN_FAKECLI_LOG`: shared append-only file. Each session writes `start <cli> <id>` before its first step and `exit <cli> <id>` after its last step, once its MCP server is stopped. A forced OS kill writes no exit line; to test an exit inside a turn, end the script there.
 
 ## Scripts
@@ -171,13 +187,17 @@ Each [script](fakecli/testdata/) is a span of one of the [macOS captures](https:
 | Step direction | Action |
 | --- | --- |
 | `stdin`, `mcp->cli` | Wait for one JSON line from the node or from the MCP server. An object matches when it has the fields of `msg`, recursively; arrays, numbers and strings must be equal, the text of an MCP result included. |
-| `stdout`, `mcp<-cli` | Write `msg` as one JSON line to the node or to the MCP server. The first MCP step starts the server named `solodawn` in `--mcp-config <file or json>` or in the two `-c mcp_servers.solodawn.{command,args}=…` settings. The fake runs nothing else. |
+| `stdout`, `mcp<-cli` | Write `msg` as one JSON line to the node or to the MCP server. The first MCP step starts the server named `solodawn` in `--mcp-config <file or json>` or in the two `-c mcp_servers.solodawn.{command,args}=…` settings. OpenCode's is `mcp.solodawn.command` in `OPENCODE_CONFIG_CONTENT`. The fake runs nothing else. |
 | `stderr` | Write the string `msg` as one line. |
 | `eof` | Wait for closed stdin; input fails the script. |
+| `http` | OpenCode only. Wait for the next request other than `GET /event`, check `msg.call` (`"<method> <path>"`) and the fields of `msg.body` (`null` for none), then answer with `msg.status` (default 200) and `msg.res`. |
+| `sse` | OpenCode only. Send `msg` on the `GET /event` stream as one `data:` line. |
 
 A string value `"$session"` is replaced by the session id. In `stdout`, `"$id"` is replaced by the JSON-RPC id of the last line read from stdin.
 
 A step that does not hold ends the process with status 1 and the reason on stderr. Reads, not sleeps, control order: the next output is written only after the line before it was read. Script timestamps and usage are captured values, not readings of the test machine.
+
+The fake OpenCode prints `opencode server listening on <url>`, refuses a request without the `OPENCODE_SERVER_PASSWORD` basic-auth password, and has no capture: its scripts are written in the tests from the documented API.
 
 Two scripts go beyond their capture: `codex-exit-mid-turn.json` ends at the first approval request, and `codex-late-call.json` waits for the tool reply after the call has failed. No capture shows either, and the fake prints nothing for them.
 

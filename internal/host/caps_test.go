@@ -112,6 +112,13 @@ func TestStep1DriverDeclarationsMatchContract(t *testing.T) {
 		Takeover:  "resume",
 		Usage:     []string{},
 	})
+	agtEqual(t, DriverCaps["opencode"], Capabilities{
+		Accounts:  []string{"api_key"},
+		Levels:    []int{1, 3},
+		Approvals: "conn",
+		Takeover:  "none",
+		Usage:     []string{},
+	})
 }
 
 func TestSyntheticDriverAccountSwitch(t *testing.T) {

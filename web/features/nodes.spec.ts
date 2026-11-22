@@ -162,6 +162,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
                 cli_version: '0.164.0',
                 account: 'api_key',
                 login_ok: true,
+                driver: { accounts: ['api_key'], takeover: 'none' },
                 caps: {},
                 groups: [
                   {

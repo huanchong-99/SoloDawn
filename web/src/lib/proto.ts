@@ -1027,7 +1027,7 @@ const HostState = {
       account: v.nullable(str),
       login_ok: bool,
       caps: Caps,
-      driver: v.optional(Driver),
+      driver: Driver,
       groups: v.array(
         v.object({
           g: Id,
