@@ -1,0 +1,32 @@
+{
+  "r": "msg",
+  "id": "PyZ8KrQi5QK62OYP-eVWZg",
+  "seq": 814,
+  "pos": 790,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "thread": null,
+  "main": true,
+  "by": "system",
+  "kind": "confirm",
+  "ts": 1763599999500,
+  "text": "",
+  "mentions": [],
+  "re": "mC2ePrmW9VnmM_TRlN7zdg",
+  "body": {
+    "what": "direct",
+    "ai": "1PC8WineBrUQ-apCjx7tug",
+    "to": [
+      "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs"
+    ]
+  },
+  "state": {
+    "status": "confirmed",
+    "by": "4xq2Q8RPeg7IJLWdEZTWDQ",
+    "at": 1763600000000,
+    "act": {
+      "p": "{\"t\":\"act\",\"n\":\"rc_sVtlFyU7QsxeQb1UAuw\",\"ts\":1763600000000,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"msg\":\"PyZ8KrQi5QK62OYP-eVWZg\",\"action\":\"confirm\"}",
+      "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+      "s": "mDlxSm0Qwdx-YXXIFbl8nxS6vvPksjtNgiB5vvSAKZhhR1mJME7aUMUkrwmZ_ayd_IKrzlxdhAoHgf0ahEq3DA"
+    }
+  }
+}
