@@ -618,6 +618,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/messages/people.*`       | English and Chinese invitation, member-action and join texts                      |
 | `src/components/groupinfo/`   | home, commands, settings (order 19) and project memory (order 20) at `chat.side`  |
 | `src/components/forge/`       | forge choice, argument-by-argument template editor and group command disclosure   |
+| `src/components/preset/`      | style preset editor (`chat.side`, `order: 21`) and brief preset reader            |
+| `src/components/kb/`          | knowledge-base list, search and admin deletion (`chat.side`, `order: 22`)         |
+| `src/components/move/`        | owner's local export/import guidance (`chat.side`, `order: 30`)                   |
 | `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
 | `src/components/watch/`       | receive-only watch channel, standalone request action and watcher stop controls   |
 | `src/components/team/`        | attributed bulletin card; team people use the shared member panel                 |
@@ -641,6 +644,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/people.spec.ts`     | steps of `../features/web_people.feature`                                         |
 | `features/people.test.ts`     | focused tests for member actions and the join page                                |
 | `features/groupinfo.spec.ts`  | steps of `../features/web_groupinfo.feature`                                      |
+| `features/preset.spec.ts`     | steps of `../features/web_preset.feature`                                         |
+| `features/kb.spec.ts`         | steps of `../features/web_kb.feature`                                             |
+| `features/move.spec.ts`       | steps of `../features/web_move.feature`                                           |
 | `features/forge.spec.ts`      | steps of `../features/web_forge.feature`                                          |
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
 | `features/watch_team.spec.ts` | steps of `../features/web_watch_team.feature`                                     |
@@ -665,6 +671,16 @@ navigation and of the segmented controls; the current entry and the chosen optio
 in `Highlight` and `HighlightText` instead (`base.css` section 8).
 
 ## Known limitations
+
+- A `moved` response to `cmd`, `sync` or `fetch` switches a listed group to the named home and
+  preserves its cache. An existing destination connection is reused; an unknown destination is
+  remembered for reconnecting on the current signalling paths. Its welcome supplies its remembered
+  addresses. Unlisted groups are discarded and read afresh if listed again. Commands are
+  not replayed across a move: their receipts stay on the old home. Before import the cached
+  group remains visible; the destination's `groups` push starts a new read after import.
+- Only a group's owner sees the local `solodawn group export` / `group import` guidance. The
+  browser neither runs these commands nor transfers the file. A copy omits `--to`; scheduling
+  copies belongs to the operating system, not the browser.
 
 - Watching reuses `#/terminal/<g>/<member>` for another person's AI. The terminal acquires its
   host through the existing signalling session, reuses a connected home or node, and releases a
@@ -707,6 +723,12 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   update `host.info`, and `pair.browser` returns no link.
 - From 768 px the top bar of an open chat says "Chats", and the chat's own
   head with the group's name is below it, where the design has one bar with the group's name.
+- The preset editor and brief preset reader load only the first 50 presets; there is
+  no pagination or read by name. Typed notes stay out of Project memory.
+- Knowledge-base lists load in pages of 50; searches return up to 20 documents in the home's
+  ranking order. If more
+  match, narrow the query rather than paging results. There is no knowledge-base editor; AIs
+  write documents with `kb_put`.
 - The texts of the `states` area are in the build, although only a development server shows
   their page.
 - Cards and the rows a home writes are one line each in the main line, and Safari moves the main

@@ -133,6 +133,15 @@ function startLive(
         for (const p of peers.values()) presentLog(p, log);
       };
       const connectHome = (home: Home) => {
+        home.onmove = (g, id) => {
+          const destination = homeOf(log, id, id);
+          if (!peers.has(id)) {
+            joined[id] = { name: destination.name, url };
+            void saveJoined(() => indexedDB, joined);
+            dial(id, destination);
+          }
+          home.move(g, destination);
+        };
         const link = home.connect();
         return {
           ...link,

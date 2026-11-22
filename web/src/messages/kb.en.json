@@ -1,0 +1,13 @@
+{
+  "kb.title": "Knowledge base",
+  "kb.lead": "Decisions and reference documents",
+  "kb.query": "Search knowledge base",
+  "kb.search": "Search",
+  "kb.clear": "Clear search",
+  "kb.loading": "Loading documents…",
+  "kb.earlier": "Load earlier",
+  "kb.empty": "No documents yet.",
+  "kb.noMatch": "No matching documents.",
+  "kb.narrow": "More documents match. Narrow your query.",
+  "kb.offline": "Cannot reach the group home. Documents are read-only."
+}

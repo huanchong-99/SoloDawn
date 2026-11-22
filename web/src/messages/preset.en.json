@@ -1,0 +1,14 @@
+{
+  "preset.title": "Style presets",
+  "preset.label": "Style preset",
+  "preset.lead": "Styles named by briefs",
+  "preset.name": "Name",
+  "preset.text": "Preset text",
+  "preset.save": "Save preset",
+  "preset.edit": "Edit",
+  "preset.cancel": "Cancel",
+  "preset.empty": "No presets yet.",
+  "preset.deleted": "This preset was deleted.",
+  "preset.offline": "Cannot reach the group home. Presets are read-only.",
+  "preset.loading": "Loading presets…"
+}

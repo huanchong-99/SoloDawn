@@ -1,0 +1,170 @@
+<script lang="ts">
+  import { authorOf } from '../../lib/groupinfo.svelte';
+  import type { Group } from '../../lib/groups.svelte';
+  import { isAdmin } from '../../lib/members';
+  import { prefs, t } from '../../lib/prefs.svelte';
+  import { now, shortWhen } from '../../lib/when';
+  import Failure from '../Failure.svelte';
+  import Icon from '../Icon.svelte';
+  import ForgetDialog, { type ForgetTarget } from '../groupinfo/ForgetDialog.svelte';
+  import { Knowledge } from './knowledge.svelte';
+
+  let { group }: { group: Group } = $props();
+  const uid = $props.id();
+  let open = $state(false);
+  let heading = $state<HTMLElement>();
+  let pending = $state.raw<ForgetTarget>();
+  let query = $state('');
+  const view = $derived(new Knowledge(group));
+  const documents = $derived(view.documents);
+  const offline = $derived(!group.home.ctl);
+  const deletable = $derived(!offline && isAdmin(group));
+
+  $effect(() => {
+    if (open) view.sync();
+  });
+
+  function clear() {
+    query = '';
+    view.clear();
+  }
+
+  function search(event: SubmitEvent) {
+    event.preventDefault();
+    void view.search(query);
+  }
+</script>
+
+<section class="kb" aria-labelledby={`${uid}-title`}>
+  <details class="fold" bind:open>
+    <summary bind:this={heading}>
+      <Icon name="down" sm />
+      <b id={`${uid}-title`}>{t('kb.title')}</b>
+      <span class="cut grow muted">{t('kb.lead')}</span>
+    </summary>
+    {#if open}
+      <div class="fold-body mem-body">
+        {#if offline}<p class="hint">{t('kb.offline')}</p>{/if}
+        <form class="row" onsubmit={search}>
+          <label class="field grow">
+            <span class="sr">{t('kb.query')}</span>
+            <input class="input" bind:value={query} disabled={offline || view.busy} />
+          </label>
+          <button class="btn btn-primary btn-sm" disabled={offline || view.busy || !query.trim()}>
+            {t('kb.search')}
+          </button>
+          {#if view.ids !== undefined}
+            <button type="button" class="btn btn-ghost btn-sm" onclick={clear}>
+              {t('kb.clear')}
+            </button>
+          {/if}
+        </form>
+        {#if view.failed}<Failure code={view.failed} />{/if}
+        {#if view.busy}<p class="hint" role="status">{t('kb.loading')}</p>{/if}
+        {#if view.ids === undefined && view.more}
+          <button
+            type="button"
+            class="btn btn-sm btn-ghost older"
+            disabled={offline || view.busy}
+            onclick={() => void view.older()}
+          >
+            {t('kb.earlier')}
+          </button>
+        {/if}
+        {#if view.narrow}<p class="hint">{t('kb.narrow')}</p>{/if}
+        <ul class="mem-list" aria-labelledby={`${uid}-title`}>
+          {#each documents as document (document.id)}
+            <li class="mem-item">
+              <b>{document.name}</b>
+              <div class="mem-meta">
+                <b>{authorOf(group, document.by)}</b>
+                <time datetime={new Date(document.ts).toISOString()}>
+                  {shortWhen(document.ts, now(), prefs.lang)}
+                </time>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-ghost del"
+                  disabled={!deletable}
+                  aria-label={t('groupinfo.forget.note').replace('{text}', document.name!)}
+                  onclick={() =>
+                    (pending = { r: 'note', id: document.id, label: document.name!, heading })}
+                >
+                  {t('groupinfo.forget')}
+                </button>
+              </div>
+              <p class="mem-text">{document.text}</p>
+            </li>
+          {/each}
+        </ul>
+        {#if !view.busy && !view.failed && documents.length === 0}
+          {#if view.ids !== undefined}<p class="hint">{t('kb.noMatch')}</p>
+          {:else if view.loaded}<p class="hint">{t('kb.empty')}</p>{/if}
+        {/if}
+      </div>
+    {/if}
+  </details>
+</section>
+
+{#if pending}<ForgetDialog {group} target={pending} onclose={() => (pending = undefined)} />{/if}
+
+<style>
+  .kb {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    padding: 0 var(--sp-4) 14px;
+  }
+  .kb > .fold {
+    border-top: 0;
+  }
+  .kb > .fold > summary {
+    border-radius: 0;
+  }
+  .mem-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    padding-top: var(--sp-3);
+  }
+  .older {
+    align-self: flex-start;
+  }
+  .mem-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+  }
+  .mem-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+    min-width: 0;
+  }
+  .mem-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+  .mem-meta b {
+    color: var(--text);
+    font-size: var(--fs-sm);
+  }
+  .del {
+    margin-left: auto;
+  }
+  .del:not([disabled]) {
+    color: var(--danger);
+    --hover: var(--danger-soft);
+  }
+  .mem-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+</style>
