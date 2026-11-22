@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -35,7 +36,8 @@ type s2ExportWorld struct {
 	secretary  string
 	qTeam      string
 	item       int64
-	rows       []string
+	mention    proto.ID
+	rows       [][]any
 	importedAt time.Time
 }
 
@@ -264,10 +266,11 @@ func (w *s2ExportWorld) queueMention() error {
 	}); err != nil {
 		return err
 	}
-	err := s2ExportScalar(c.Ctx, s2ExportDB(c.P1), &w.item,
-		"SELECT id FROM inbox WHERE g=? AND ai=? AND msg=? AND why='mention'", w.g, w.qTeam, h.Nonce)
-	if err != nil {
-		return fmt.Errorf("pending mention on P1: %w", err)
+	w.mention = h.Nonce
+	rows, err := readS2SQLiteRows(c.Ctx, s2ExportDB(c.P1),
+		"SELECT count(*) FROM inbox WHERE g=? AND ai=? AND msg=? AND why='mention'", w.g, w.qTeam, w.mention)
+	if err != nil || !reflect.DeepEqual(rows, [][]any{{int64(1)}}) {
+		return fmt.Errorf("pending mentions on P1 = %v, want 1: %v", rows, err)
 	}
 	return nil
 }
@@ -276,42 +279,42 @@ func s2ExportDB(node *s2Node) string {
 	return filepath.Join(node.Data, "node.db")
 }
 
-func s2ExportOpen(path string) (*sql.DB, error) {
-	return sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro")
-}
-
-func s2ExportScalar(ctx context.Context, path string, dst any, query string, args ...any) error {
-	db, err := s2ExportOpen(path)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	return db.QueryRowContext(ctx, query, args...).Scan(dst)
-}
-
-func (w *s2ExportWorld) groupRows(path string) ([]string, error) {
-	db, err := s2ExportOpen(path)
+func readS2SQLiteRows(ctx context.Context, path, query string, args ...any) ([][]any, error) {
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro")
 	if err != nil {
 		return nil, err
 	}
 	defer db.Close()
-	rows, err := db.QueryContext(w.c.Ctx, `SELECT CASE WHEN r='group' THEN json_remove(data,'$.home') ELSE data END
-		FROM row WHERE g=? ORDER BY r,id`, w.g)
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	return s2ExportCollectRows(rows)
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	return collectS2SQLiteRows(rows, len(columns))
 }
 
-func s2ExportCollectRows(rows *sql.Rows) ([]string, error) {
-	var out []string
+func (w *s2ExportWorld) groupRows(path string) ([][]any, error) {
+	return readS2SQLiteRows(w.c.Ctx, path, `SELECT g,r,id,seq,pos,ts,mt,thread,in_main,pending,final,keep,gone,
+		CASE WHEN r='group' THEN json_remove(data,'$.home') ELSE data END
+		FROM row WHERE g=? ORDER BY r,id`, w.g)
+}
+
+func collectS2SQLiteRows(rows *sql.Rows, columns int) ([][]any, error) {
+	var out [][]any
 	for rows.Next() {
-		var row string
-		if err := rows.Scan(&row); err != nil {
+		values := make([]any, columns)
+		dest := make([]any, columns)
+		for i := range values {
+			dest[i] = &values[i]
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}
-		out = append(out, row)
+		out = append(out, values)
 	}
 	return out, rows.Err()
 }
@@ -324,31 +327,34 @@ func (w *s2ExportWorld) local(node *s2Node, args ...string) (string, error) {
 }
 
 func (w *s2ExportWorld) export(file string, move ...string) error {
-	rows, err := w.groupRows(s2ExportDB(w.c.P1))
-	if err != nil {
-		return err
-	}
-	w.rows = rows
 	w.file = filepath.Join(w.c.Root, file)
 	args := append([]string{"group", "export", string(w.g), w.file}, move...)
 	if out, err := w.local(w.c.P1, args...); err != nil {
 		return fmt.Errorf("export on P1: %w: %s", err, out)
 	}
-	return w.compareRows(w.file)
+	rows, err := w.groupRows(w.file)
+	if err != nil {
+		return err
+	}
+	w.rows = rows
+	if len(move) == 0 {
+		return w.compareRows(s2ExportDB(w.c.P1))
+	}
+	return nil
 }
 
 func (w *s2ExportWorld) moveExport() error {
 	if err := w.export("move.db", "--to", w.c.P2.ID()); err != nil {
 		return err
 	}
-	var item int64
-	if err := s2ExportScalar(w.c.Ctx, w.file, &item, "SELECT id FROM inbox WHERE g=? AND id=?", w.g, w.item); err != nil {
-		return fmt.Errorf("exported mention: %w", err)
+	items, err := readS2SQLiteRows(w.c.Ctx, w.file,
+		"SELECT count(*) FROM inbox WHERE g=? AND ai=? AND msg=? AND why='mention'", w.g, w.qTeam, w.mention)
+	if err != nil || !reflect.DeepEqual(items, [][]any{{int64(1)}}) {
+		return fmt.Errorf("exported mentions = %v, want 1: %v", items, err)
 	}
-	var gone int
-	err := s2ExportScalar(w.c.Ctx, w.file, &gone, "SELECT count(*) FROM row WHERE g=? AND r='note' AND gone=1", w.g)
-	if err != nil || gone != 1 {
-		return fmt.Errorf("exported gone notes = %d, want 1: %v", gone, err)
+	gone, err := readS2SQLiteRows(w.c.Ctx, w.file, "SELECT count(*) FROM row WHERE g=? AND r='note' AND gone=1", w.g)
+	if err != nil || !reflect.DeepEqual(gone, [][]any{{int64(1)}}) {
+		return fmt.Errorf("exported gone notes = %v, want 1: %v", gone, err)
 	}
 	return nil
 }
@@ -421,7 +427,7 @@ func (w *s2ExportWorld) compareRows(path string) error {
 	if err != nil {
 		return err
 	}
-	if !slices.Equal(w.rows, got) {
+	if !reflect.DeepEqual(w.rows, got) {
 		return fmt.Errorf("group rows differ: want %v, got %v", w.rows, got)
 	}
 	return nil
@@ -470,12 +476,17 @@ func (w *s2ExportWorld) followBrowserPeers() error {
 
 func (w *s2ExportWorld) checkDeliveryAndNumber() error {
 	c := w.c
+	items, err := readS2SQLiteRows(c.Ctx, s2ExportDB(c.P2),
+		"SELECT id FROM inbox WHERE g=? AND ai=? AND msg=? AND why='mention'", w.g, w.qTeam, w.mention)
+	if err != nil || len(items) != 1 {
+		return fmt.Errorf("imported mention = %v, want one item: %v", items, err)
+	}
+	w.item = items[0][0].(int64)
 	if err := w.taskOp(c.P2, "resume"); err != nil {
 		return err
 	}
-	var working bool
-	if err := c.readGroupRowsUntil(c.P.Conns[c.P2.ID()], w.g, func(row json.RawMessage) (bool, error) {
-		return matchS2WorkingThenWaiting(row, w.qTeam, &working), nil
+	if err := c.readGroupRowsUntil(c.P.Conns[c.P2.ID()], w.g, func(json.RawMessage) (bool, error) {
+		return w.resumedMentionTurn()
 	}); err != nil {
 		return err
 	}
@@ -485,20 +496,38 @@ func (w *s2ExportWorld) checkDeliveryAndNumber() error {
 	return w.createTask(c.P2, "second task", 2)
 }
 
+func (w *s2ExportWorld) resumedMentionTurn() (bool, error) {
+	entries, err := w.c.CLILogs()
+	if err != nil {
+		return false, err
+	}
+	count := 0
+	for _, entry := range entries {
+		if isS2ExportMentionTurn(entry) {
+			count++
+		}
+	}
+	if count > 1 {
+		return false, fmt.Errorf("resumed mention CLI turns = %d, want exactly 1", count)
+	}
+	return count == 1, nil
+}
+
+func isS2ExportMentionTurn(entry s2CLILogEntry) bool {
+	return entry.Kind == "turn" && entry.Node == "Q1" && entry.Vendor == s2QTeamCLI && strings.Contains(entry.Text, "Carry this over to P2")
+}
+
 func (w *s2ExportWorld) checkDelivery() error {
 	c := w.c
-	var homes string
-	if err := s2ExportScalar(c.Ctx, s2ExportDB(c.Q1), &homes,
-		"SELECT coalesce(group_concat(home), '') FROM audit WHERE g=? AND what='delivered' AND item=?", w.g, w.item); err != nil {
-		return err
+	homes, err := readS2SQLiteRows(c.Ctx, s2ExportDB(c.Q1),
+		"SELECT home FROM audit WHERE g=? AND what='delivered' AND home=? AND item=?", w.g, c.P2.ID(), w.item)
+	if err != nil || !reflect.DeepEqual(homes, [][]any{{c.P2.ID()}}) {
+		return fmt.Errorf("delivery homes = %v, want only P2: %v", homes, err)
 	}
-	if homes != c.P2.ID() {
-		return fmt.Errorf("delivery homes = %q, want only P2", homes)
-	}
-	var pending int
-	err := s2ExportScalar(c.Ctx, s2ExportDB(c.P2), &pending, "SELECT count(*) FROM inbox WHERE g=? AND id=?", w.g, w.item)
-	if err != nil || pending != 0 {
-		return fmt.Errorf("P2 pending copies = %d, want 0: %v", pending, err)
+	pending, err := readS2SQLiteRows(c.Ctx, s2ExportDB(c.P2),
+		"SELECT count(*) FROM inbox WHERE g=? AND ai=? AND msg=? AND why='mention'", w.g, w.qTeam, w.mention)
+	if err != nil || !reflect.DeepEqual(pending, [][]any{{int64(0)}}) {
+		return fmt.Errorf("P2 pending copies = %v, want 0: %v", pending, err)
 	}
 	return nil
 }
