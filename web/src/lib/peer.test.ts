@@ -95,6 +95,43 @@ async function wait(ms: number) {
 }
 
 let session: Session;
+
+it('joins a room on its existing path and only rejoins it while watched', async () => {
+  session = connect({ urls: [rv, lan], device, known, name: 'Browser' });
+  const [remote, local] = clients;
+  const heard = vi.fn();
+  const enter = { t: 'join', room: 'invite-room' };
+  const stop = session.watchRoom(rv, enter.room, heard);
+  expect(clients).toEqual([remote, local]);
+  expect(remote.sent.at(-1)).toEqual(enter);
+  expect(local.sent.map(({ t }) => t)).toEqual(['watch']);
+  local.hear({ t: 'closed' });
+  dispatchEvent(new Event('online'));
+  await vi.waitFor(() => expect(clients).toHaveLength(3));
+  expect(clients[2].sent.map(({ t }) => t)).toEqual(['watch']);
+
+  remote.hear({ t: 'closed' });
+  dispatchEvent(new Event('online'));
+  await vi.waitFor(() => expect(clients).toHaveLength(4));
+  const reopened = clients[3];
+  expect(reopened.url).toBe(rv);
+  expect(reopened.sent.at(-1)).toEqual(enter);
+  const joined = { t: 'joined', room: enter.room };
+  reopened.hear(joined);
+  expect(heard).toHaveBeenLastCalledWith(rv, joined);
+
+  stop();
+  reopened.hear({ t: 'closed' });
+  dispatchEvent(new Event('online'));
+  await vi.waitFor(() => expect(clients).toHaveLength(5));
+  expect(clients[4].sent.map(({ t }) => t)).toEqual(['watch']);
+  clients[4].hear(joined);
+  expect(heard.mock.calls).toEqual([
+    [lan, { t: 'closed' }],
+    [rv, { t: 'closed' }],
+    [rv, joined],
+  ]);
+});
 function start(urls = [rv], more: Partial<Options> = {}) {
   session = connect({ urls, device, known, name: 'phone browser', ...more });
   return session;
@@ -801,7 +838,7 @@ describe('hello', () => {
   it('says who the browser is and hands the welcome to a new listener', async () => {
     const { peer, pc, listen, listeners } = await served();
     expect(pc.ctl.frames()).toStrictEqual([
-      { t: 'hello', v: 1, kind: 'browser', name: 'phone browser', addrs: [], id: 1 },
+      { t: 'hello', v: 2, kind: 'browser', name: 'phone browser', addrs: [], id: 1 },
     ]);
     expect(listen).toHaveBeenCalledTimes(1);
     expect(listeners[0].online.mock.calls).toStrictEqual([[peer, { ...welcome, re: 1 }]]);
@@ -824,9 +861,29 @@ describe('hello', () => {
     const { pc, conn } = await opened();
     const greeted = conn.hello();
     pc.ctl.deliver({ re: 1, err: { code: 'version', msg: 'too new' } });
+    await flush();
+    expect(pc.ctl.frames().at(-1)).toStrictEqual({
+      t: 'hello',
+      v: 1,
+      kind: 'browser',
+      name: 'phone browser',
+      addrs: [],
+      id: 2,
+    });
+    pc.ctl.deliver({ re: 2, err: { code: 'version', msg: 'unsupported' } });
     await expect(greeted).rejects.toThrow(new Error('hello refused: version'));
     expect(pc.closes).toBe(1);
     expect(conn.refused).toBe('version');
+  });
+
+  it('uses the same connection when the node only supports v1', async () => {
+    const { pc, conn } = await opened();
+    const greeted = conn.hello();
+    pc.ctl.deliver({ re: 1, err: { code: 'version', msg: 'too new' } });
+    await flush();
+    pc.ctl.deliver({ ...welcome, re: 2 });
+    await expect(greeted).resolves.toStrictEqual({ ...welcome, re: 2 });
+    expect(pc.closes).toBe(0);
   });
 
   it('gives up a connection whose welcome it cannot read', async () => {
@@ -930,6 +987,10 @@ describe('a peer', () => {
     await flush();
     last().ctl.deliver({ re: 1, err: { code, msg: 'no' } });
     await flush();
+    if (code === 'version') {
+      last().ctl.deliver({ re: 2, err: { code, msg: 'no' } });
+      await flush();
+    }
   }
 
   it('retries a connection whose hello fails for a reason that may pass', async () => {

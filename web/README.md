@@ -149,9 +149,18 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `banner` while another tab holds it; "Use here" moves focus to the main landmark, as the banner
   goes) and connects to each paired node from `owner.ts` through `peer.ts` (W-2), one
   `session.peer(node, ...)` per node, pausing while `#/onboarding` runs a pairing session and
-  forwarding owner `devlog` updates. `net.homes` is `homes` of `groups.svelte.ts`; `net.path(home)`
+  forwarding updates to this person's device log on both paired and joined connections.
+  The browser sends `hello` with `v: 2`; only a `version`
+  refusal makes it try `v: 1` on that connection. `net.homes` is `homes` of `groups.svelte.ts`; `net.path(home)`
   is how this browser reaches a home now (`direct` or `relay`, the round trip, since when), and
   undefined while it does not; the mock's path is direct. `net.source` says which it is.
+- **Joining a group.** `readInvitation` in `src/lib/join.ts` reads a `#join=` fragment without
+  contacting its home. The join page (U2-1) passes the invitation, chosen display name and a
+  cancellation signal to `net.join`. The active browser enters the invitation room on its
+  existing rendezvous connection without adopting either device, presents its own log, and asks
+  the home to admit it. On success, it
+  remembers the home in IndexedDB (store `device`, key `joined`), notifies its connected own
+  nodes with `home.add`, and starts reading the new group on the same connection.
 - **Mounting points.** An area of the interface mounts its components without editing the shell,
   the chat or another area: it adds `src/components/<area>/mounts.ts`, whose default export is a
   `Mounts` (`src/lib/mounts.svelte.ts`), and `gather` finds every such file by name. The points,

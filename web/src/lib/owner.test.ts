@@ -1,8 +1,8 @@
-import { IDBDatabase as FakeDatabase, IDBFactory } from 'fake-indexeddb';
+import { IDBDatabase as FakeDatabase, IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DeviceLog } from './devlog';
 import { Device, ed25519, encode } from './identity';
-import { loadOwner, saveOwner, type StoredOwner } from './owner';
+import { loadJoined, loadOwner, saveJoined, saveOwner, type StoredOwner } from './owner';
 
 const newDevice = async () =>
   Device.of(crypto, await crypto.subtle.generateKey(ed25519, false, ['sign', 'verify']));
@@ -10,6 +10,17 @@ const makeId = () => encode(crypto.getRandomValues(new Uint8Array(16)));
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+it('writes joined homes under their own key with strict durability', async () => {
+  const idb = new IDBFactory();
+  const transaction = vi.spyOn(FakeDatabase.prototype, 'transaction');
+  const put = vi.spyOn(IDBObjectStore.prototype, 'put');
+  const homes = { home: { name: 'Shared', url: 'wss://rv.example/rv' } };
+  await saveJoined(() => idb, homes);
+  expect(transaction).toHaveBeenCalledWith('device', 'readwrite', { durability: 'strict' });
+  expect(put).toHaveBeenCalledExactlyOnceWith(homes, 'joined');
+  expect(await loadJoined(() => idb)).toEqual(homes);
 });
 
 async function makeLog() {

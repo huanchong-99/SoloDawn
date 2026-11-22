@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,7 +17,6 @@ import (
 	"time"
 
 	"github.com/cucumber/godog"
-	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/peer"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
@@ -87,42 +85,20 @@ func (w *s2ExportWorld) joinQ(home *s2Node) error {
 	if err != nil {
 		return err
 	}
-	secret, err := s2ExportInvitation(res.Link, w.g, home.ID())
+	link, err := parseS2JoinLink(res.Link, res.Expires)
 	if err != nil {
 		return err
 	}
-	if _, err := q.Browser.exchangeRoom(c.Ctx, secret, "b", "a"); err != nil {
-		return err
+	if link.Group != string(w.g) || link.Home != home.ID() {
+		return errors.New("invitation does not name the group and home")
 	}
-	return w.joinOnInvitation(home)
-}
-
-func s2ExportInvitation(link string, group proto.ID, home string) (identity.Secret, error) {
-	u, err := url.Parse(link)
-	if err != nil {
-		return "", errors.New("invalid invitation URL")
-	}
-	parts, err := url.ParseQuery(u.Fragment)
-	if err != nil || parts.Get("g") != string(group) || parts.Get("home") != home {
-		return "", errors.New("invitation does not name the group and home")
-	}
-	return identity.ParseSecret(parts.Get("join"))
-}
-
-func (w *s2ExportWorld) joinOnInvitation(home *s2Node) error {
-	c, q := w.c, w.c.Q
-	bc, err := w.dialQ(home.ID())
+	bc, raw, err := joinGroupWithLink(c.Ctx, c.addUndo, q.Browser, q.Key, q.Entries, link, q.Name, c.NextID(), time.Now())
 	if err != nil {
 		return err
 	}
-	if err := bc.conn.Send(proto.Devlog{Type: "devlog", User: q.ID(), Entries: q.Entries}); err != nil {
-		return err
-	}
-	result, err := c.SendCmd(q, bc.conn, proto.Join{HomeCommand: w.header("join"), Name: q.Name})
-	if err == nil && !result.OK {
-		return errors.New("join did not answer ok")
-	}
-	return err
+	q.Conns[home.ID()] = bc
+	var result proto.CmdResult
+	return proto.Decode(raw, &result)
 }
 
 func (w *s2ExportWorld) dialQ(home string) (*peerBrowserConn, error) {
@@ -371,8 +347,11 @@ func (w *s2ExportWorld) checkMoved() error {
 
 func (w *s2ExportWorld) checkMovedRequests(conn *peer.Connection) error {
 	body := proto.Note{HomeCommand: w.header("note"), ID: w.c.NextID(), Text: "note after move"}
-	env := w.c.P.Key.Sign(string(mustMarshalNoEscape(body)))
-	if err := w.expectMoved(conn, "cmd", func(r proto.Request) any { return proto.Cmd{Request: r, Env: env} }); err != nil {
+	raw, err := sendSignedCmdRaw(w.c.Ctx, conn, w.c.P.Key, body)
+	if err != nil {
+		return err
+	}
+	if err := w.checkMovedReply(raw, "cmd"); err != nil {
 		return err
 	}
 	if err := w.movedSync(conn); err != nil {
@@ -392,6 +371,10 @@ func (w *s2ExportWorld) expectMoved(conn *peer.Connection, op string, build func
 	if err != nil {
 		return err
 	}
+	return w.checkMovedReply(raw, op)
+}
+
+func (w *s2ExportWorld) checkMovedReply(raw json.RawMessage, op string) error {
 	var answer proto.ErrorResponse
 	if err := proto.Decode(raw, &answer); err != nil || answer.Err.Code != "moved" || answer.Err.Home != w.c.P2.ID() {
 		return fmt.Errorf("%s answered %s, want moved to P2", op, raw)
