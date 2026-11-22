@@ -470,9 +470,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
   when both leave. Main-line messages of the chat open on screen stay quiet; thread mentions and
   other groups still notify. Open jumps to the card or message. At most three are shown: a
   newcomer past that drops the oldest self-closing one, or the oldest waiting card when none is
-  self-closing. The stack sits at the top right under the top bar (on a phone's chat, under the
-  chat's head), so it never covers the composer; its polite live region is always in the page.
-  Notifications slide into place and fade out, both at once under reduced motion.
+  self-closing. The stack sits at the top right of the page's area, under the top bar and the
+  banners (on a phone's chat, under the chat's head), so it never covers the composer or "Use
+  here"; its polite live region is always in the page, and it shows nothing while another tab
+  holds the connection. Notifications slide into place and fade out, both at once under reduced
+  motion.
 - **Where code goes.** Logic lives in `.ts` and `.svelte.ts` modules, which the gates measure
   (CRAP and mutation); components stay thin. A module that only holds an `import.meta.glob` is
   named `*.glob.ts` and is not mutated; it holds no logic. Stryker would wrap the glob's

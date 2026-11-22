@@ -1,12 +1,15 @@
 import 'fake-indexeddb/auto';
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
 import { flushSync } from 'svelte';
+import { SvelteSet } from 'svelte/reactivity';
 import { expect, vi } from 'vitest';
+import Notifications from '../src/components/notify/Notifications.svelte';
 import { homes } from '../src/lib/groups.svelte';
+import type { Net } from '../src/lib/net.svelte';
 import { autoDismissMs } from '../src/lib/notify.svelte';
 import { prefs } from '../src/lib/prefs.svelte';
 import { browser, example, owner, TestHome } from './home';
-import { all, closePage, go, one, openPage, texts } from './page';
+import { all, closePage, go, one, openPage, show, texts } from './page';
 
 const feature = await loadFeature('../features/web_notify.feature');
 
@@ -316,6 +319,43 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         expect(scrolled.at(-1)).toBe(taskEl);
         expect(taskEl.contains(document.activeElement)).toBe(true);
         expect(toastTexts('p')).toEqual(['Docs · Mina']);
+      });
+    },
+  );
+
+  Scenario(
+    'A tab that another tab holds shows no notification until the person uses it here',
+    ({ Given, When, Then }) => {
+      const held = new SvelteSet(['other tab']);
+      Given(
+        'the notifications are drawn in a tab while another tab of this browser holds the connection',
+        () => {
+          prefs.lang = 'en';
+          go('#/nodes');
+          const net = {
+            homes,
+            get otherTab() {
+              return held.has('other tab');
+            },
+          } as Net;
+          show(Notifications, { net });
+        },
+      );
+      When('"Codex" posts a pending approval in "Website"', () => {
+        home.write(website, example('row-msg-approval-pending', { id: 'ap-tab', by: codex }));
+        flushSync();
+      });
+      Then('no notification is shown and the empty live region stays', () => {
+        expect(all('.toast')).toEqual([]);
+        expect(one('section.notify').getAttribute('aria-live')).toBe('polite');
+      });
+      When('the person chooses "Use here"', () => {
+        held.clear();
+        flushSync();
+      });
+      Then('the notification layer shows the approval for "Website · Codex"', () => {
+        expect(texts('.toast b')).toEqual(['Approval · Time the path change in a browser.']);
+        expect(texts('.toast p')).toEqual(['Website · Codex']);
       });
     },
   );

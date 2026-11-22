@@ -46,6 +46,13 @@ Feature: In-page notifications of the web client
     When the person clicks "Open" on the thread mention notification
     Then the chat stays on "Website" and focus moves to task 12's card
 
+  Scenario: A tab that another tab holds shows no notification until the person uses it here
+    Given the notifications are drawn in a tab while another tab of this browser holds the connection
+    When "Codex" posts a pending approval in "Website"
+    Then no notification is shown and the empty live region stays
+    When the person chooses "Use here"
+    Then the notification layer shows the approval for "Website · Codex"
+
   Scenario: The states sheet lists notify at the shell's layer mounting point
     Given a development server
     When the person opens the states sheet
