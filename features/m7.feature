@@ -27,7 +27,7 @@ Feature: M7 terminal takeover
   Scenario: On a relayed path takeover.start is refused with relay (A7.5)
     Given an M7 project group with configured AI "Claude" accessed over a relayed WebRTC path
     When the M7 owner sends takeover.start for "Claude" over that relayed ctl connection
-    Then takeover.start is refused with error code "relay" and "Claude" starts 0 interactive processes
+    Then takeover.start is refused with error code "relay" and "Claude" starts 0 CLI processes
 
   Scenario: Orderly terminal closes hand back within 2 seconds, a lost connection hands back when ICE fails, and replayed takeover.start returns conflict (A7.6)
     Given an M7 project group on a direct path with configured AI "Claude" on an active task

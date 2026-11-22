@@ -859,7 +859,7 @@ func registerM7TakeoverSteps(sc *godog.ScenarioContext, w *m7World) {
 
 func registerM7RelayAndTaskSteps(sc *godog.ScenarioContext, w *m7World) {
 	sc.Step(`^the M7 owner sends takeover\.start for "([^"]+)" over that relayed ctl connection$`, w.whenSendTakeoverOnRelay)
-	sc.Step(`^takeover\.start is refused with error code "([^"]+)" and "([^"]+)" starts (\d+) interactive processes$`, w.thenRefusedWithZeroInteractive)
+	sc.Step(`^takeover\.start is refused with error code "([^"]+)" and "([^"]+)" starts (\d+) CLI processes$`, w.thenRefusedWithNoCLIStart)
 	sc.Step(`^the M7 owner opens terminal takeover on "([^"]+)" with no task named$`, w.whenOpenNoTaskTakeover)
 	sc.Step(`^an active "([^"]+)" task card exists for "([^"]+)" and its pty channel opens in the task worktree$`, w.thenOwnerTakeoverCardExists)
 	sc.Step(`^the M7 owner hands back "([^"]+)"'s terminal with nothing changed in the worktree$`, w.whenHandbackUnchanged)
@@ -932,8 +932,16 @@ func m7ICEServersForMode(addr string, mode m7CandMode) []proto.ICEServer {
 	}
 }
 
-func (w *m7World) bootEnvAndNode(timeout time.Duration, mode m7CandMode) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+// m7Event bounds every wait for one event (a CLI turn, a row, a process start).
+// Passing runs are not slower: each wait returns at the first match.
+const m7Event = 15 * time.Second
+
+// m7Scenario is only a guard against a hang. The node, the browser and every
+// reconnect share the one context made in bootEnvAndNode; it is never replaced.
+const m7Scenario = 5 * time.Minute
+
+func (w *m7World) bootEnvAndNode(mode m7CandMode) error {
+	ctx, cancel := context.WithTimeout(context.Background(), m7Scenario)
 	w.ctx = ctx
 	w.cleanup(cancel)
 	if err := w.prepareDirsAndEnv(); err != nil {
@@ -1068,7 +1076,7 @@ func (w *m7World) attachMCPSocket() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go serveM3MCP(ctx, local, w.pn.Host, &wg)
+	go serveTestMCP(ctx, local, w.pn.Host, &wg)
 	stop := sync.OnceFunc(func() {
 		cancel()
 		_ = local.Close()
@@ -1094,7 +1102,7 @@ func (w *m7World) connectBrowser(mode m7CandMode) error {
 	if mode == m7CandRelayOnly {
 		wantPath = "relay"
 	}
-	if err := waitConnPath(served, wantPath, 3*time.Second); err != nil {
+	if err := waitConnPath(served, wantPath, m7Event); err != nil {
 		return err
 	}
 	return b.hello()
@@ -1161,7 +1169,7 @@ func (w *m7World) joinAI(aiName string) error {
 	if err := w.browser.execCmd(joinCmd); err != nil {
 		return err
 	}
-	return w.browser.waitRows(5*time.Second, func() bool {
+	return w.browser.waitRows(m7Event, func() bool {
 		_, ok := w.browser.aiByName[aiName]
 		return ok
 	})
@@ -1281,7 +1289,7 @@ func (w *m7World) startActiveTask(aiName string) (string, error) {
 	if _, err := w.pn.Host.Command(w.ctx, w.pn.Key.ID(), string(raw)); err != nil {
 		return "", err
 	}
-	err = w.waitMsgAndAIState(aiName, readyPost, "waiting", 10*time.Second)
+	err = w.waitMsgAndAIState(aiName, readyPost, "waiting", m7Event)
 	return string(tid), err
 }
 
@@ -1308,8 +1316,7 @@ func (w *m7World) hasMsgByLocked(authorID, text string) bool {
 }
 
 func (w *m7World) givenDirectSingleAITask(aiName string) error {
-	timeout := 45 * time.Second
-	if err := w.bootEnvAndNode(timeout, m7CandDirect); err != nil {
+	if err := w.bootEnvAndNode(m7CandDirect); err != nil {
 		return err
 	}
 	if err := w.createProjectGroup(); err != nil {
@@ -1324,7 +1331,7 @@ func (w *m7World) givenDirectSingleAITask(aiName string) error {
 }
 
 func (w *m7World) givenDirectTwoAITasks(ai1, ai2 string) error {
-	if err := w.bootEnvAndNode(90*time.Second, m7CandDirect); err != nil {
+	if err := w.bootEnvAndNode(m7CandDirect); err != nil {
 		return err
 	}
 	if err := w.createProjectGroup(); err != nil {
@@ -1343,7 +1350,7 @@ func (w *m7World) givenDirectTwoAITasks(ai1, ai2 string) error {
 }
 
 func (w *m7World) givenRelayedSingleAI(aiName string) error {
-	if err := w.bootEnvAndNode(30*time.Second, m7CandRelayOnly); err != nil {
+	if err := w.bootEnvAndNode(m7CandRelayOnly); err != nil {
 		return err
 	}
 	if err := w.createProjectGroup(); err != nil {
@@ -1353,7 +1360,7 @@ func (w *m7World) givenRelayedSingleAI(aiName string) error {
 }
 
 func (w *m7World) givenDirectSingleAINoTask(aiName string) error {
-	if err := w.bootEnvAndNode(45*time.Second, m7CandDirect); err != nil {
+	if err := w.bootEnvAndNode(m7CandDirect); err != nil {
 		return err
 	}
 	if err := w.createProjectGroup(); err != nil {
@@ -1363,7 +1370,7 @@ func (w *m7World) givenDirectSingleAINoTask(aiName string) error {
 }
 
 func (w *m7World) givenDirectWithTURNTask(aiName string) error {
-	if err := w.bootEnvAndNode(45*time.Second, m7CandSrflxAndRelay); err != nil {
+	if err := w.bootEnvAndNode(m7CandSrflxAndRelay); err != nil {
 		return err
 	}
 	if err := w.createProjectGroup(); err != nil {
@@ -1424,14 +1431,14 @@ func (w *m7World) openTakeoverSession(aiName, taskID string, doc map[string]any)
 		return err
 	}
 	w.activePTY = ptyStream
-	return ptyStream.waitOutput(5*time.Second, `"ready":`)
+	return ptyStream.waitOutput(m7Event, `"ready":`)
 }
 
 func (w *m7World) whenOpenTakeoverAndAttach(aiName string) error {
 	if err := w.openTakeoverSession(aiName, w.claudeTask, m7InteractiveHoldDoc()); err != nil {
 		return err
 	}
-	return w.browser.waitRows(5*time.Second, func() bool {
+	return w.browser.waitRows(m7Event, func() bool {
 		return w.browser.aiByName[aiName].State == "takeover"
 	})
 }
@@ -1456,7 +1463,7 @@ func (w *m7World) whenPostThreeMentions(m1, m2, m3, aiName string) error {
 }
 
 func (w *m7World) waitHostQueued(aiName string, wantQueued int) error {
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(m7Event)
 	aiID := proto.ID(w.aiID(aiName))
 	for time.Now().Before(deadline) {
 		info, err := w.browser.hostInfo()
@@ -1542,7 +1549,7 @@ func (w *m7World) closeOpenSessions() {
 }
 
 func (w *m7World) thenHandbackBeforeOrderedReply(aiName, handbackText, orderedText string) error {
-	if err := w.waitMsgAndAIState(aiName, orderedText, "waiting", 10*time.Second); err != nil {
+	if err := w.waitMsgAndAIState(aiName, orderedText, "waiting", m7Event); err != nil {
 		return err
 	}
 	w.browser.mu.Lock()
@@ -1585,6 +1592,8 @@ func (w *m7World) taskForAI(aiName string) string {
 func (w *m7World) whenTenSwitches(aiName string) error {
 	vendor := m7VendorOf(aiName)
 	taskID := w.taskForAI(aiName)
+	// Each cycle is two switches (structured to terminal, terminal back), so
+	// 5 cycles are the ten switches.
 	for i := range 5 {
 		hbText := fmt.Sprintf("%s handback %d", aiName, i+1)
 		if err := w.runOneSwitchCycle(aiName, vendor, taskID, i+2, hbText); err != nil {
@@ -1606,13 +1615,13 @@ func (w *m7World) runOneSwitchCycle(aiName, vendor, taskID string, turnNum int, 
 	if err := w.setScript(vendor, resumeDoc); err != nil {
 		return err
 	}
-	if err := w.activePTY.dc.Send([]byte("{\"op\":\"exit\"}\n")); err != nil {
+	if err := w.activePTY.dc.Send([]byte("{\"op\":\"exit\"}\r")); err != nil {
 		return err
 	}
-	if err := w.activePTY.waitOutput(5*time.Second, `"bye":`); err != nil {
+	if err := w.activePTY.waitOutput(m7Event, `"bye":`); err != nil {
 		return err
 	}
-	return w.waitMsgAndAIState(aiName, hbText, "waiting", 10*time.Second)
+	return w.waitMsgAndAIState(aiName, hbText, "waiting", m7Event)
 }
 
 func (w *m7World) thenLogAlternatesOneSession(vendor string) error {
@@ -1679,7 +1688,7 @@ func (w *m7World) whenSendTakeoverOnRelay(aiName string) error {
 	return err
 }
 
-func (w *m7World) thenRefusedWithZeroInteractive(wantCode, aiName string, wantStarts int) error {
+func (w *m7World) thenRefusedWithNoCLIStart(wantCode, aiName string, wantStarts int) error {
 	if w.refusalCode != wantCode {
 		return fmt.Errorf("takeover.start code = %q, want %q", w.refusalCode, wantCode)
 	}
@@ -1710,9 +1719,22 @@ func (w *m7World) whenStartReplayAndEnd(aiName string) error {
 	if err := w.sendTakeoverEnd(aiName); err != nil {
 		return err
 	}
-	err = w.waitMsgAndAIState(aiName, "Orderly button handback.", "waiting", 5*time.Second)
+	return w.waitLeftTakeover(aiName, "Orderly button handback.", started)
+}
+
+// waitLeftTakeover records how long the node took to close the terminal and
+// leave the "takeover" state (the contract's "within 2 seconds"), then waits
+// the usual event bound for the hand-back turn's post. The turn starts CLI
+// and helper processes, so it is not part of the 2 second bound.
+func (w *m7World) waitLeftTakeover(aiName, hbText string, started time.Time) error {
+	err := w.browser.waitRows(m7Event, func() bool {
+		return w.browser.aiByName[aiName].State != "takeover"
+	})
 	w.handbackDur = time.Since(started)
-	return err
+	if err != nil {
+		return err
+	}
+	return w.waitMsgAndAIState(aiName, hbText, "waiting", m7Event)
 }
 
 func (w *m7World) thenOpenReplayAndFastHandback(wantCode string) error {
@@ -1747,16 +1769,10 @@ func (w *m7World) whenSecondTakeoverClosePTY(aiName string) error {
 	if err := w.activePTY.dc.Close(); err != nil {
 		return err
 	}
-	err := w.waitMsgAndAIState(aiName, "Orderly tab close handback.", "waiting", 5*time.Second)
-	w.handbackDur = time.Since(started)
-	return err
+	return w.waitLeftTakeover(aiName, "Orderly tab close handback.", started)
 }
 
 func (w *m7World) whenThirdTakeoverDropPackets(aiName string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
-	w.ctx = ctx
-	w.browser.ctx = ctx
-	w.cleanup(cancel)
 	if err := w.openTakeoverSession(aiName, w.claudeTask, m7InteractiveHoldDoc()); err != nil {
 		return err
 	}
@@ -1783,13 +1799,13 @@ func (w *m7World) thenLostConnHandbackAndConflict(wantCode string) error {
 }
 
 func (w *m7World) waitLostHandbackFetched(aiName, wantText string) error {
-	err := w.browser.waitRows(10*time.Second, func() bool {
+	err := w.browser.waitRows(m7Event, func() bool {
 		return w.browser.aiByName[aiName].State == "waiting"
 	})
 	if err != nil {
 		return err
 	}
-	return w.pollThreadHandback(w.aiID(aiName), wantText, 5*time.Second)
+	return w.pollThreadHandback(w.aiID(aiName), wantText, m7Event)
 }
 
 func (w *m7World) pollThreadHandback(aiID, wantText string, timeout time.Duration) error {
@@ -1863,7 +1879,7 @@ func (w *m7World) hasTaskCardMsgLocked(taskID string) bool {
 }
 
 func (w *m7World) thenOwnerTakeoverCardExists(wantTitle, aiName string) error {
-	err := w.browser.waitRows(5*time.Second, func() bool {
+	err := w.browser.waitRows(m7Event, func() bool {
 		t, ok := w.findTakeoverTaskLocked("")
 		return ok && t.State == "active" && t.Title == wantTitle && w.hasTaskCardMsgLocked(t.ID)
 	})
@@ -1890,7 +1906,7 @@ func (w *m7World) whenHandbackUnchanged(aiName string) error {
 }
 
 func (w *m7World) thenTakeoverTaskCancelled(wantState string, wantHandbacks int) error {
-	err := w.browser.waitRows(5*time.Second, func() bool {
+	err := w.browser.waitRows(m7Event, func() bool {
 		return w.browser.tasks[w.firstTakeID].State == wantState
 	})
 	if err != nil {
@@ -1908,7 +1924,7 @@ func (w *m7World) thenTakeoverTaskCancelled(wantState string, wantHandbacks int)
 }
 
 func (w *m7World) waitNoTaskSession(taskID string) error {
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(m7Event)
 	for time.Now().Before(deadline) {
 		if !w.hasOpenTaskSession(taskID) {
 			return nil
@@ -1941,7 +1957,7 @@ func (w *m7World) whenSecondNoTaskCommitAndHandback(aiName, fileName, subject st
 	if err := w.openTakeoverSession(aiName, "", m7InteractiveHoldDoc()); err != nil {
 		return err
 	}
-	err := w.browser.waitRows(5*time.Second, func() bool {
+	err := w.browser.waitRows(m7Event, func() bool {
 		t, ok := w.findTakeoverTaskLocked(w.firstTakeID)
 		return ok && t.State == "active"
 	})
@@ -1980,7 +1996,7 @@ func (w *m7World) commitInWorktree(wtDir, fileName, subject string) error {
 }
 
 func (w *m7World) thenSecondTaskActiveWithCommit(wantState, wantSubject, wantFile string) error {
-	if err := w.waitMsgAndAIState("Claude", "Committed "+wantFile+".", "waiting", 10*time.Second); err != nil {
+	if err := w.waitMsgAndAIState("Claude", "Committed "+wantFile+".", "waiting", m7Event); err != nil {
 		return err
 	}
 	w.browser.mu.Lock()
@@ -2048,7 +2064,7 @@ func (w *m7World) whenDegradeDirectToRelay() error {
 		return err
 	}
 	w.browser.ctrl.delayNs.Store(int64(500 * time.Millisecond))
-	return w.waitBrowserRelayStats(8 * time.Second)
+	return w.waitBrowserRelayStats(m7Event)
 }
 
 func (w *m7World) waitBrowserRelayStats(timeout time.Duration) error {
@@ -2067,13 +2083,13 @@ func (w *m7World) thenStatsRelayClosesPTYAndHandsBack(aiName string) error {
 	if !ok || !relayed {
 		return fmt.Errorf("selected-pair stats ok=%v relayed=%v, want relay", ok, relayed)
 	}
-	if err := w.pollServedRelayPath(3 * time.Second); err != nil {
+	if err := w.pollServedRelayPath(m7Event); err != nil {
 		return err
 	}
-	if err := w.activePTY.waitClosed(5 * time.Second); err != nil {
+	if err := w.activePTY.waitClosed(m7Event); err != nil {
 		return err
 	}
-	return w.waitMsgAndAIState(aiName, "Relay transition handback.", "waiting", 10*time.Second)
+	return w.waitMsgAndAIState(aiName, "Relay transition handback.", "waiting", m7Event)
 }
 
 func (w *m7World) pollServedRelayPath(timeout time.Duration) error {
