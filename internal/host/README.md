@@ -1,5 +1,5 @@
 ---
-description: 'The host seam (interfaces, tables, hooks, sessions, drivers), the session runtime, group sync and inbox delivery, group joining and per-home connection management, the offline scripted Claude Code and Codex processes for host integration tests, the API of the host workspaces and Git commands, and the MCP server and stdio shim.'
+description: 'The host seam (interfaces, tables, hooks, sessions, drivers and driver capability switches), the session runtime, group sync and inbox delivery, group joining and per-home connection management, the offline scripted Claude Code and Codex processes for host integration tests, the API of the host workspaces and Git commands, and the MCP server and stdio shim.'
 kind: reference
 ---
 
@@ -29,7 +29,8 @@ A unit never calls into the file of a unit built beside it. It registers in a ta
 | an item that answers an open tool call | the tool: `item, done := h.Await(id, check)`, then it reads the channel until its wait runs out, calls `done`, and looks at the channel once more. Delivery, before it queues a `reply` or a `decided` item: `h.Hand(id, item)`, which never waits for the tool |
 | whether a session's deliveries are held | `h.Held(key)`, before a turn is given; whoever lifts a hold calls `Deliver` |
 | an audit row | `h.Audit(tx, AuditRow{…})`, inside the transaction of what it records |
-| the AI CLIs found here (`host.info`) | `h.Agents(ctx)`: probes `claude` and `codex` on `PATH` (cached 60 s), writes `agent`, returns `[]proto.HostAgent` with `Groups` empty |
+| the AI CLIs found here (`host.info`) | `h.Agents(ctx)`: probes each driver registered in `DriverCaps` on `PATH` (cached 60 s), writes `agent`, returns `[]proto.HostAgent` with `Groups` empty |
+| terminal takeover capability check | `CheckTakeover(agent)`: returns `(assignFirst, nil)` for `"new"` (`false`) and `"resume"` (`true`), or `conflict` naming `takeover` when `DriverCaps[agent].Takeover` is `"none"` |
 
 ## Tables
 
@@ -38,7 +39,8 @@ Each is a package map. The file that provides an entry adds it from its `init` w
 | Table | Key | Who calls the entry |
 | --- | --- | --- |
 | `Tools` | the tool's name | the MCP server, through `ToolsFor(caller)`: a tool whose `For` refuses the caller is neither listed nor called |
-| `Drivers` | the agent name, `claude` or `codex` | whoever starts a session's process |
+| `Drivers` | the agent name (`claude`, `codex`, …) | whoever starts a session's process |
+| `DriverCaps` | the agent name, matching `Drivers` | `Agents`, `agent.set`, `host.join`, `host.leave`, `Tools["approve"].For`, and `CheckTakeover` ([step-3/drivers.md](../../planning/contracts/step-3/drivers.md) sections 4 and 5) |
 | `Pushes` | `t` of a frame a home pushes: `inbox`, `rows`, `reset` | `h.Push(home, frame)`, which `node` calls for each push it reads on a connection to a home, and the local link for a home on the same node |
 | `Surface` | `t` of a request or push of the [host surface](../../planning/contracts/datachannel.md) (`audit`, `pty.resize`), or `t` of a [host command](../../planning/contracts/commands.md) (`takeover.start`) | `node`, only for a device of the owner; for a command after the envelope checks and the receipt lookup |
 | `Listeners` | the name of the listening unit | `h.Report(key, event)`, which the session runtime calls for every event of a session's CLI |
@@ -96,6 +98,7 @@ A `Driver` starts the structured CLI (`Start`) and gives the command line of the
 - `Launch.Shim` is the command line of the MCP server for that start: `h.Shim`, then `--token` and the token. The driver writes it into the CLI's MCP configuration as it is.
 - A driver keeps no timer. Its caller ends the context of `Start`, which kills the process tree, when an interrupt or a close was not answered within 10 s.
 - Sign-in that is not usable and a session id that cannot be resumed are events (`LoginInvalid`, `NoSession`), because a CLI reports them after its process has started.
+- `caps.go` holds `Capabilities`, `DriverCaps` and the switches of [step-3/drivers.md](../../planning/contracts/step-3/drivers.md) sections 4, 5 and 8: every driver registers its `Capabilities` (`Accounts`, `Levels`, `Approvals`, `Takeover`, `Usage`) in `DriverCaps` alongside `Drivers`, `agent.set` refuses an account not in `Accounts` with `bad_request` naming `accounts`, `Tools["approve"].For` checks `Approvals == "tool" && !c.Interactive`, and `CheckTakeover(agent)` refuses `Takeover == "none"` with `conflict` naming `takeover` and distinguishes `"new"` (`assignFirst == false`) from `"resume"` (`assignFirst == true`). `driver` in `host.info` is added in `T3-2` after `P-5`.
 
 ### Claude Code (`claude.go`)
 
@@ -219,7 +222,7 @@ The rules are in [mcp-tools.md](../../planning/contracts/mcp-tools.md) and [loca
 
 `approve.go` handles permission requests and multiple-choice user questions from both CLIs (`planning/flows/approval.md`, `planning/contracts/mcp-tools.md` section 3):
 
-- `Tools["approve"]` is listed only to structured Claude Code sessions (`c.Agent == "claude" && !c.Interactive`). It maps `AskUserQuestion` to per-question `decision` cards (`options` `"A"`..`"Z"` plus custom free-text answers, posted one card at a time) returning `updatedInput.answers` (and optional `annotations`), and maps `Bash`, `Write`/`Edit`/`NotebookEdit`/`Read`, `WebFetch`/`WebSearch`, and other tool names to `Ask` (`planning/contracts/messages.md` section 2.3).
+- `Tools["approve"]` is listed only to structured sessions of drivers with `Capabilities.Approvals == "tool"` (`usesApproveTool(c.Agent) && !c.Interactive`). It maps `AskUserQuestion` to per-question `decision` cards (`options` `"A"`..`"Z"` plus custom free-text answers, posted one card at a time) returning `updatedInput.answers` (and optional `annotations`), and maps `Bash`, `Write`/`Edit`/`NotebookEdit`/`Read`, `WebFetch`/`WebSearch`, and other tool names to `Ask` (`planning/contracts/messages.md` section 2.3).
 - `Listeners["approve"]` starts a goroutine per `Asked` event so `Report` returns at once, brackets the open request synchronously with `Sessions.Calling`, answers Codex `requestUserInput` questions through `Ask.Reply` (posting per-question `decision` cards) and permission requests through `Runner.Answer`, and cancels open `Asked` contexts of a session on `TurnBegan` or `TurnEnded`.
 - `thread` and `body.task` are set on `approval` and `decision` cards only for `TaskSession` and `ReviewSession`; a `GroupSession` posts main-line cards with `thread: null` and empty or omitted `task`.
 - Permission requests from `callApprove` at level 1 are denied immediately; permission requests raised by a CLI fetch any matching `pending` row's `msg` card from the home (consuming an `approved` card and removing stale `denied`, `expired` or `reassigned` records), check `CheckOutboundSecret` on `Command` and `Why`, shorten `Command` to 3 KiB and `Why` to 256 B as unescaped JSON strings, store a `pending` row, open `Host.Await` (with `nil` check) before sending `post` (`kind: approval`), and wait up to `limits.approval_wait_s` (default 600 s).

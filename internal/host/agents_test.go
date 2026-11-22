@@ -20,12 +20,12 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-// When SOLODAWN_TEST_AGENTS is set and this test binary is invoked as claude
-// or codex, it acts as a portable stand-in CLI on every OS.
+// When SOLODAWN_TEST_AGENTS is set and this test binary is invoked as a
+// stand-in CLI with a matching .spec file in that folder, it runs the spec.
 func init() {
 	if dir := os.Getenv("SOLODAWN_TEST_AGENTS"); dir != "" {
 		name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
-		if name == "claude" || name == "codex" {
+		if _, err := os.Stat(filepath.Join(dir, name+".spec")); err == nil {
 			os.Exit(agtRunStandIn(dir, name))
 		}
 	}
