@@ -1171,21 +1171,17 @@ func newHostCmd(ids *seqIDGen, to, typ string) proto.HostCommand {
 	}
 }
 
-func callHostSurface(ctx context.Context, h *host.Host, from host.Owner, by, name string, payload any) (any, error) {
-	fn := host.Surface[name]
-	if fn == nil {
-		return nil, fmt.Errorf("host surface %q is not registered", name)
-	}
+func callHostSurface(h *host.Host, from host.Owner, by, name string, payload any) error {
 	raw, err := marshalNoEscape(payload)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return fn(ctx, h, from, by, raw)
+	_, err = host.Surface[name](context.Background(), h, from, by, raw)
+	return err
 }
 
 func configureHostAI(h *host.Host, from host.Owner, ids *seqIDGen, ownerID, homeID string, groupID proto.ID, aiName, agent string) error {
-	ctx := context.Background()
-	if _, err := h.Agents(ctx); err != nil {
+	if _, err := h.Agents(context.Background()); err != nil {
 		return err
 	}
 	setCmd := proto.AgentSet{
@@ -1193,7 +1189,7 @@ func configureHostAI(h *host.Host, from host.Owner, ids *seqIDGen, ownerID, home
 		Agent:       agent,
 		Account:     "personal",
 	}
-	if _, err := callHostSurface(ctx, h, from, ownerID, "agent.set", setCmd); err != nil {
+	if err := callHostSurface(h, from, ownerID, "agent.set", setCmd); err != nil {
 		return err
 	}
 	joinCmd := proto.HostJoin{
@@ -1203,8 +1199,7 @@ func configureHostAI(h *host.Host, from host.Owner, ids *seqIDGen, ownerID, home
 		Agent:       agent,
 		Name:        aiName,
 	}
-	_, err := callHostSurface(ctx, h, from, ownerID, "host.join", joinCmd)
-	return err
+	return callHostSurface(h, from, ownerID, "host.join", joinCmd)
 }
 
 func awaitHostGroupSynced(h *host.Host, gid string) error {
