@@ -43,8 +43,8 @@ func s2WatchSteps(sc *godog.ScenarioContext, f fixtures) {
 	s2RegisterForge(sc, w)
 }
 
-func (w *s2WatchWorld) start() error {
-	c, err := startS2Cast(w.f.t, w.cleanup, w.f, s2CastConfig{Timeout: 3 * time.Minute})
+func (w *s2WatchWorld) start(timeout time.Duration) error {
+	c, err := startS2Cast(w.f.t, w.cleanup, w.f, s2CastConfig{Timeout: timeout})
 	w.c = c
 	return err
 }
@@ -75,15 +75,11 @@ func s2WatchReply(raw json.RawMessage, want string) error {
 		}
 		return nil
 	}
-	var refusal proto.ErrorResponse
-	if err := proto.Decode(raw, &refusal); err != nil || refusal.Err.Code != want {
-		return fmt.Errorf("reply %s, want error %s", raw, want)
-	}
-	return nil
+	return checkWireError(raw, want)
 }
 
 func (w *s2WatchWorld) createTeam() error {
-	if err := w.start(); err != nil {
+	if err := w.start(3 * time.Minute); err != nil {
 		return err
 	}
 	c := w.c

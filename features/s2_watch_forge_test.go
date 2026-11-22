@@ -5,6 +5,7 @@ package features
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -68,7 +69,7 @@ func s2FakeConfig(c *s2Cast) s2ForgeConfig {
 }
 
 func (f *s2ForgeWorld) fakeProject() error {
-	if err := f.startForgeCast(); err != nil {
+	if err := f.start(8 * time.Minute); err != nil {
 		return err
 	}
 	f.cfg = s2FakeConfig(f.c)
@@ -88,16 +89,10 @@ func (f *s2ForgeWorld) liveProject() error {
 	if err := json.Unmarshal(raw, &f.cfg); err != nil {
 		return err
 	}
-	if err := f.startForgeCast(); err != nil {
+	if err := f.start(8 * time.Minute); err != nil {
 		return err
 	}
 	return f.createProject()
-}
-
-func (f *s2ForgeWorld) startForgeCast() error {
-	var err error
-	f.c, err = startS2Cast(f.f.t, f.cleanup, f.f, s2CastConfig{Timeout: 8 * time.Minute})
-	return err
 }
 
 func (f *s2ForgeWorld) groupCreate(id proto.ID) map[string]any {
@@ -187,7 +182,10 @@ func (f *s2ForgeWorld) prepareTask(num int) error {
 	if err := s2ForgeTurnFixture(work, vendor, num, 1, "first edit", m5WorkerCalls(true, s2ForgeSummary)); err != nil {
 		return err
 	}
-	reviewCalls := []m5ToolCallSpec{{Name: "submit_review", Args: map[string]any{"score": 95, "items": []any{}}}}
+	if f.short {
+		return nil
+	}
+	reviewCalls := m5PassingReview(95)
 	if err := s2ForgeTurnFixture(review, other, num, 1, "", reviewCalls); err != nil {
 		return err
 	}
@@ -220,7 +218,7 @@ func (f *s2ForgeWorld) prepareFakeForge(count int) error {
 			return err
 		}
 	}
-	return f.c.SetForgeReplies("default", s2ForgeReply{})
+	return nil
 }
 
 func (f *s2ForgeWorld) confirmBrief(args map[string]any, count int) error {
@@ -241,16 +239,18 @@ func (f *s2ForgeWorld) confirmBrief(args map[string]any, count int) error {
 }
 
 func (f *s2ForgeWorld) secretaryTurns(args map[string]any, count int) [][]m5ToolCallSpec {
-	turns := [][]m5ToolCallSpec{{{Name: "propose_brief", Args: args}}, nil}
-	if !f.live && !f.short {
+	turns := m5BriefTurns(args)
+	if f.short {
+		return turns
+	}
+	if !f.live {
 		turns = append(turns, []m5ToolCallSpec{{Name: "set_task", Args: map[string]any{"task": "T-1", "assignee": "Claude"}}})
 	}
+	var summaries []string
 	for num := 1; num <= count; num++ {
-		turns = append(turns, []m5ToolCallSpec{{Name: "post", Args: map[string]any{
-			"kind": "summary", "task": fmt.Sprintf("T-%d", num), "text": fmt.Sprintf("Task %d merged.", num),
-		}}})
+		summaries = append(summaries, fmt.Sprintf("Task %d merged.", num))
 	}
-	return turns
+	return append(turns, m5SummaryTurns(summaries...)...)
 }
 
 func (f *s2ForgeWorld) waitBrief() (string, error) {
@@ -445,13 +445,35 @@ func (f *s2ForgeWorld) verifyRecorded() error {
 }
 
 func (f *s2ForgeWorld) verifyTitle() error {
-	if err := f.waitForSummaries(1); err != nil {
-		return err
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		calls, err := f.c.ForgeCalls()
+		if err != nil {
+			return err
+		}
+		i := slices.IndexFunc(calls, func(call s2ForgeCall) bool { return len(call.Args) > 0 && call.Args[0] == "watch-open" })
+		if i >= 0 {
+			return f.checkTitleOpen(calls, calls[i])
+		}
+		select {
+		case <-f.c.Ctx.Done():
+			return f.c.Ctx.Err()
+		case <-tick.C:
+		}
 	}
-	if title := f.tasks[1].Title; title != s2ForgeTitle {
-		return fmt.Errorf("task title %q, want %q", title, s2ForgeTitle)
+}
+
+func (f *s2ForgeWorld) checkTitleOpen(calls []s2ForgeCall, open s2ForgeCall) error {
+	if len(open.Args) != 7 {
+		return fmt.Errorf("unexpected open arguments %q", open.Args)
 	}
-	return f.verifyRecorded()
+	if _, err := os.Stat(filepath.Join(open.Dir, "marker")); !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("unexpected worktree marker: %v", err)
+	}
+	want := make(map[string]int)
+	f.expectedCalls(want, proto.TaskRow{Branch: open.Args[1], Commit: open.Args[3], Title: s2ForgeTitle})
+	return checkS2ForgeCallCounts(calls, want)
 }
 
 func (f *s2ForgeWorld) checkCalls(calls []s2ForgeCall) error {
@@ -460,7 +482,9 @@ func (f *s2ForgeWorld) checkCalls(calls []s2ForgeCall) error {
 		f.expectedCalls(want, task)
 	}
 	if f.conflictCommit != "" {
-		f.expectedConflict(want, f.tasks[1])
+		task := f.tasks[1]
+		task.Commit = f.conflictCommit
+		f.expectedCalls(want, task)
 	}
 	return checkS2ForgeCallCounts(calls, want)
 }
@@ -484,19 +508,14 @@ func checkS2ForgeCallCounts(calls []s2ForgeCall, want map[string]int) error {
 func (f *s2ForgeWorld) expectedCalls(want map[string]int, task proto.TaskRow) {
 	branch, base, commit, req := task.Branch, f.cfg.Base, task.Commit, strconv.Itoa(task.PR)
 	s2WantForge(want, 2, "watch-push", branch, base, commit)
-	if task.Num != 1 || f.conflictCommit == "" {
+	if task.Num != 1 || f.conflictCommit == "" || commit == f.conflictCommit {
 		s2WantForge(want, 1, "watch-open", branch, base, commit, "--title="+task.Title, "--summary="+s2ForgeSummary, "{tag}")
+	}
+	if f.short {
+		return
 	}
 	s2WantForge(want, 1, "watch-checks", branch, base, commit, req)
 	s2WantForge(want, 1, "watch-merge", branch, base, commit, req)
-}
-
-func (f *s2ForgeWorld) expectedConflict(want map[string]int, task proto.TaskRow) {
-	branch, base, commit := task.Branch, f.cfg.Base, f.conflictCommit
-	s2WantForge(want, 2, "watch-push", branch, base, commit)
-	s2WantForge(want, 1, "watch-open", branch, base, commit, "--title="+task.Title, "--summary="+s2ForgeSummary, "{tag}")
-	s2WantForge(want, 1, "watch-checks", branch, base, commit, "1")
-	s2WantForge(want, 1, "watch-merge", branch, base, commit, "1")
 }
 
 func s2WantForge(want map[string]int, n int, args ...string) {

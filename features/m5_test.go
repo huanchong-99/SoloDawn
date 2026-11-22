@@ -1520,12 +1520,8 @@ func m5RegisterFullFlowSteps(sc *godog.ScenarioContext, w *m5World) {
 }
 
 func (w *m5World) stepRequestAndTwoTaskBrief() error {
-	secScript := m5ClaudeScript(
-		[]m5ToolCallSpec{{Name: "propose_brief", Args: m5TwoTaskBriefArgs()}},
-		nil,
-		[]m5ToolCallSpec{{Name: "post", Args: map[string]any{"kind": "summary", "task": "T-1", "text": "Alpha merged."}}},
-		[]m5ToolCallSpec{{Name: "post", Args: map[string]any{"kind": "summary", "task": "T-2", "text": "Beta merged."}}},
-	)
+	turns := append(m5BriefTurns(m5TwoTaskBriefArgs()), m5SummaryTurns("Alpha merged.", "Beta merged.")...)
+	secScript := m5ClaudeScript(turns...)
 	w.writeScriptFile("claude", secScript)
 	if err := w.ownerPostMain("Please add alpha and beta helpers.", nil); err != nil {
 		return err
@@ -1553,9 +1549,7 @@ func (w *m5World) stepConfirmAndRunTwoTasks(withPush bool) error {
 	t1Calls := m5WorkerCalls(withPush, "Alpha ready.")
 	t2Calls := m5WorkerCalls(withPush, "Beta ready.")
 	w.writeScriptFile("claude", m5ClaudeScript(t1Calls))
-	w.writeScriptFile("codex", m5CodexScript("codex-rev-1", []m5ToolCallSpec{{
-		Name: "submit_review", Args: map[string]any{"score": 95, "items": []any{}},
-	}}))
+	w.writeScriptFile("codex", m5CodexScript("codex-rev-1", m5PassingReview(95)))
 	commitHook1 := "run_checks"
 	if withPush {
 		commitHook1 = "push_branch"
@@ -1568,9 +1562,7 @@ func (w *m5World) stepConfirmAndRunTwoTasks(withPush bool) error {
 	})
 	w.addBeforeHook("submit_review", func(_ host.Caller) error {
 		w.writeScriptFile("codex", m5CodexScript("codex-task-2", t2Calls))
-		w.writeScriptFile("claude", m5ClaudeScript([]m5ToolCallSpec{{
-			Name: "submit_review", Args: map[string]any{"score": 96, "items": []any{}},
-		}}))
+		w.writeScriptFile("claude", m5ClaudeScript(m5PassingReview(96)))
 		return nil
 	})
 	w.addBeforeHook(commitHook1, func(c host.Caller) error {
@@ -1603,6 +1595,24 @@ func (w *m5World) verifyPushedBranchHead(c host.Caller) error {
 		return fmt.Errorf("branch %s remote=%q local=%q err=%v", branch, remoteHead, localHead, err)
 	}
 	return nil
+}
+
+func m5BriefTurns(args map[string]any) [][]m5ToolCallSpec {
+	return [][]m5ToolCallSpec{{{Name: "propose_brief", Args: args}}, nil}
+}
+
+func m5SummaryTurns(texts ...string) [][]m5ToolCallSpec {
+	var turns [][]m5ToolCallSpec
+	for i, text := range texts {
+		turns = append(turns, []m5ToolCallSpec{{Name: "post", Args: map[string]any{
+			"kind": "summary", "task": fmt.Sprintf("T-%d", i+1), "text": text,
+		}}})
+	}
+	return turns
+}
+
+func m5PassingReview(score int) []m5ToolCallSpec {
+	return []m5ToolCallSpec{{Name: "submit_review", Args: map[string]any{"score": score, "items": []any{}}}}
 }
 
 func m5WorkerCalls(withPush bool, summary string) []m5ToolCallSpec {

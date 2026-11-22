@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"strings"
 	"time"
 
@@ -14,7 +13,6 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
-	"github.com/pion/turn/v5"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -27,6 +25,7 @@ type s2TerminalPeer struct {
 	connID   string
 	seq      int64
 	earlyICE []webrtc.ICECandidateInit
+	ice      proto.ICEConfig
 }
 
 func openS2TerminalPeer(c *s2Cast, person *s2Person, browser *peerBrowser, target *s2Node, relay bool) (*s2TerminalPeer, error) {
@@ -39,11 +38,7 @@ func openS2TerminalPeer(c *s2Cast, person *s2Person, browser *peerBrowser, targe
 	if err := p.dial(c.RVURL); err != nil {
 		return nil, err
 	}
-	cfg, err := p.config(relay)
-	if err != nil {
-		return nil, err
-	}
-	if err := p.connect(cfg); err != nil {
+	if err := p.connect(p.config(relay)); err != nil {
 		return nil, err
 	}
 	if err := p.checkPath(relay); err != nil {
@@ -81,55 +76,18 @@ func (p *s2TerminalPeer) dial(url string) error {
 	if err := wsjson.Write(p.ctx, ws, auth); err != nil {
 		return err
 	}
-	return wsjson.Read(p.ctx, ws, new(proto.ICEConfig))
+	return wsjson.Read(p.ctx, ws, &p.ice)
 }
 
-func (p *s2TerminalPeer) config(relay bool) (webrtc.Configuration, error) {
+func (p *s2TerminalPeer) config(relay bool) webrtc.Configuration {
 	var cfg webrtc.Configuration
-	if !relay {
-		return cfg, nil
-	}
-	cfg.ICETransportPolicy = webrtc.ICETransportPolicyRelay
-	server, err := s2WatchTURN(p.cleanup)
-	cfg.ICEServers = []webrtc.ICEServer{server}
-	return cfg, err
-}
-
-func s2WatchTURN(cleanup func(func())) (webrtc.ICEServer, error) {
-	ip, err := s2WatchLAN()
-	if err != nil {
-		return webrtc.ICEServer{}, err
-	}
-	socket, err := net.ListenPacket("udp4", net.JoinHostPort(ip.String(), "0"))
-	if err != nil {
-		return webrtc.ICEServer{}, err
-	}
-	listener := turn.PacketConnConfig{PacketConn: socket, RelayAddressGenerator: &turn.RelayAddressGeneratorStatic{RelayAddress: ip, Address: ip.String()}}
-	server, err := turn.NewServer(turn.ServerConfig{Realm: "test", PacketConnConfigs: []turn.PacketConnConfig{listener}, AuthHandler: s2WatchTURNAuth})
-	if err != nil {
-		socket.Close()
-		return webrtc.ICEServer{}, err
-	}
-	cleanup(func() { server.Close() })
-	return webrtc.ICEServer{URLs: []string{"turn:" + socket.LocalAddr().String() + "?transport=udp"}, Username: "peer", Credential: "secret"}, nil
-}
-
-func s2WatchLAN() (net.IP, error) {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return nil, err
-	}
-	for _, addr := range addrs {
-		ip, _, err := net.ParseCIDR(addr.String())
-		if err == nil && ip.To4() != nil && ip.IsGlobalUnicast() {
-			return ip, nil
+	if relay {
+		cfg.ICETransportPolicy = webrtc.ICETransportPolicyRelay
+		for _, server := range p.ice.ICE {
+			cfg.ICEServers = append(cfg.ICEServers, webrtc.ICEServer{URLs: server.URLs, Username: server.Username, Credential: server.Credential})
 		}
 	}
-	return nil, fmt.Errorf("no local unicast IPv4 address for watch relay")
-}
-
-func s2WatchTURNAuth(req *turn.RequestAttributes) (string, []byte, bool) {
-	return "peer", turn.GenerateAuthKey("peer", "test", "secret"), req.Username == "peer"
+	return cfg
 }
 
 func (p *s2TerminalPeer) connect(cfg webrtc.Configuration) error {

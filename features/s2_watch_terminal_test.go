@@ -15,6 +15,7 @@ import (
 	"github.com/cucumber/godog"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
+	"golang.org/x/term"
 )
 
 const (
@@ -51,7 +52,7 @@ func s2RegisterTerminal(sc *godog.ScenarioContext, w *s2WatchWorld) {
 }
 
 func (t *s2TerminalWorld) takeover() error {
-	if err := t.start(); err != nil {
+	if err := t.start(3 * time.Minute); err != nil {
 		return err
 	}
 	c := t.c
@@ -433,7 +434,7 @@ func s2RunWatchInteractive() int {
 	fmt.Println(s2WatchReady)
 	in := bufio.NewScanner(os.Stdin)
 	for in.Scan() {
-		cols, rows, err := s2WatchTerminalSize()
+		cols, rows, err := term.GetSize(int(os.Stdin.Fd()))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1

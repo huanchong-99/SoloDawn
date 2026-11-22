@@ -23,9 +23,11 @@ func s2ForgeTurnPath(root, vendor string, num, round int) string {
 }
 
 func s2ForgeTurnFixture(node *s2Node, vendor string, num, round int, edit string, calls []m5ToolCallSpec) error {
-	script := m5ClaudeScript(calls)
+	var script string
 	if vendor == "codex" {
 		script = m5CodexScript(fmt.Sprintf("watch-%d-%d", num, round), calls)
+	} else {
+		script = m5ClaudeScript(calls)
 	}
 	return os.WriteFile(s2ForgeTurnPath(node.Root, vendor, num, round), mustMarshalNoEscape(s2ForgeTurn{Edit: edit, Script: script}), 0600)
 }
@@ -58,12 +60,12 @@ func s2LoadForgeTurn(vendor, cwd string, num int) error {
 		if err != nil {
 			return err
 		}
-		return s2StartForgeTurn(path, cwd, num, round, raw)
+		return s2StartForgeTurn(path, cwd, vendor, num, round, raw)
 	}
 	return nil
 }
 
-func s2StartForgeTurn(path, cwd string, num, round int, raw []byte) error {
+func s2StartForgeTurn(path, cwd, vendor string, num, round int, raw []byte) error {
 	var turn s2ForgeTurn
 	if err := json.Unmarshal(raw, &turn); err != nil {
 		return err
@@ -79,7 +81,6 @@ func s2StartForgeTurn(path, cwd string, num, round int, raw []byte) error {
 	if err := os.WriteFile(path+".script", []byte(turn.Script), 0600); err != nil {
 		return err
 	}
-	vendor := strings.Split(filepath.Base(path), "-")[1]
 	return os.Setenv("SOLODAWN_FAKE_"+strings.ToUpper(vendor)+"_SCRIPT", path+".script")
 }
 
