@@ -10,8 +10,9 @@ This is a new file so that no step 1 contract has two writers while step 1
 is built. It is folded into `contracts/drivers.md` afterwards; section 5
 also into `contracts/commands.md` section 2 and `contracts/mcp-tools.md`
 section 3, and section 6 into `contracts/datachannel.md` section 7 and
-`contracts/rows.md` section 2. Nothing here changes the meaning of a step 1
-shape or of a step 1 driver.
+`contracts/rows.md` section 2. Sections 1 to 9 change the meaning of no
+step 1 shape and of no step 1 driver; section 10 adds fields to step 1
+shapes and passes a model at each start.
 
 Markers: `[verified]`, `[documented]`, `[unverified]` as in
 `contracts/drivers.md`.
@@ -317,18 +318,22 @@ and `effort`; an empty value passes nothing, as in step 1.
 | `agent` | Model | Level | In the terminal (`contracts/drivers.md` 1.3) |
 | --- | --- | --- | --- |
 | `claude` | `--model <model>` `[verified]` | `--effort <effort>` `[verified]` | the same two flags |
-| `codex` | `model` of `thread/start` and `thread/resume` `[documented]` | `config.model_reasoning_effort` of the same `[documented]` | `-m <model>` and `-c model_reasoning_effort="<effort>"` on `codex resume` `[documented]` |
+| `codex` | `model` of `thread/start` and `thread/resume` `[verified]` against the generated schema of 0.164.0 | `config.model_reasoning_effort` of the same `[documented]` | `-m <model>` and `-c model_reasoning_effort="<effort>"` on `codex resume` `[documented]` |
 | `opencode` | `POST /api/session/{id}/model` before the first prompt of a process `[documented]` | the variant in the same selection, `provider/model#variant` `[unverified]`: version 1 documents `--variant` instead | no takeover (section 8) |
 | `qwen` | `startupConfig.modelServiceId` of `POST /session`, behind the capability `session_startup_config`; `--model` in stream-json mode `[documented]` | `startupConfig.reasoningEffort` `[documented]` | no takeover (section 8) |
 
 - A changed model or level applies at the next start, a resume included:
   the session and its history stay. There is no fallback to a new
   session.
-- **A value the CLI refuses** makes the CLI exit, and that is a crash:
-  row 1 of `flows/agent-turn.md` E (`turn_interrupted` with `crash`, and
-  `task fail` in a task session). It is not "cannot resume the session
-  id": the session is not replaced and keeps its history. The owner
-  reads the notice and corrects the member.
+- **A value the CLI refuses.** Whether the CLI exits (Claude Code) or
+  answers the start with an error and stays up (Codex's `thread/start`
+  and `thread/resume` `[verified]` against the schema of 0.164.0;
+  OpenCode's HTTP error `[documented]`), the driver handles it as row 1
+  of `flows/agent-turn.md` E: `turn_interrupted` with `crash`, `task
+  fail` in a task session, state `dormant`, and a CLI process that
+  stayed up is closed. It is not "cannot resume the session id": the
+  session is not replaced and keeps its history. The owner reads the
+  notice and corrects the member.
 
 ### 10.5 What depends on a CLI exposing its list
 

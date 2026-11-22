@@ -27,7 +27,7 @@ AI, always present. A person's row has none of them.
 | Field | Values | When never set |
 | --- | --- | --- |
 | `model` | the model's id as the CLI names it, at most 100 code points, no control characters; `""`: the CLI's own default | `""` |
-| `effort` | the thinking level as the CLI names it, at most 32 code points, no control characters; `""`: the CLI's own default | `""` |
+| `effort` | the thinking level as the CLI names it, not the permission level, which stays the highest (`sessions.md`); at most 32 code points, no control characters; `""`: the CLI's own default | `""` |
 | `tier` | `strong`, `standard`, `light` | `standard` |
 | `skills` | what the AI is good at: one line of at most 200 Unicode code points, without `\r` or `\n` | `""` |
 
@@ -43,8 +43,8 @@ AI, always present. A person's row has none of them.
   nothing reads `skills` but the turn text of section 3.
 - The home stores `model` and `effort` and checks only the bounds of the
   table: it knows no CLI and no model. The host passes them to the CLI at
-  each start and checks nothing either: a value the CLI refuses is a
-  crash, not a lost session (`contracts/step-3/drivers.md` 10.4).
+  each start and checks nothing either: a value the CLI refuses is handled
+  as a crash, not as a lost session (`contracts/step-3/drivers.md` 10.4).
 - **Several members from one CLI.** A host may add the same CLI to a
   group more than once, each with its own name, model and level. They
   share the CLI's account. Each is `limited` only when its own CLI
@@ -116,7 +116,7 @@ AI members (CLI on computer · tier · state · skills):
 ```
 
 - `state` is the member row's `state`, with `on T-<num>` when the row has
-  `task`. `limited` covers a usage cap, a vendor rate limit and a sign-in
+  `task`. `limited` covers a vendor rate limit and a sign-in
   that is not valid; the `notice` that came when it happened says which
   (`contracts/task-machine.md` section 5). No new fact is collected.
 - Empty `skills` leaves out the last part.
@@ -181,6 +181,8 @@ not a failed `run_checks`, not a conflict (row 9).
   has an AI stronger than the assignee, whatever its state; else `false`. The
   threshold 2 is fixed: it is no field of `limits`. Each further failure
   of the same kind asks again.
+- **Without a remote repository** there is no hosted check, so only
+  failed reviews count.
 - **The secretary is a candidate** when its tier is higher: R-21 keeps
   it from writing code, not from answering.
 - **Without a stronger AI nothing changes**: `ask` stays `false`, no line

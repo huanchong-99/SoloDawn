@@ -170,29 +170,31 @@ Added 2026-11-22 (R-165; `contracts/step-3/profiles.md`,
 `contracts/step-3/drivers.md` section 10). It extends what T3-1 gives the
 product to know about an AI: T3-1 says what a CLI can do, this lane which
 models it offers, which one a member runs and what its owner says the
-member is good for. It touches no file of T3-1 and does not wait for it.
+member is good for. Its units change files that units still in flight
+change too, so each waits for those pull requests ("Needs").
 
 | Id | W | Does | Tests | Owns | Needs | M | Sz |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | C3-3 | 4 | The contracts and this lane | — | `contracts/step-3/profiles.md`, `contracts/step-3/drivers.md` section 10 | — | — | M |
-| P-6 | 5 | Wire shapes: `model`, `effort`, `tier`, `skills` on the AI member row, in `member add_ai`, `member set` and `host.join`; `member` in `host.leave`; `refresh` and `models` in `host.info`; `stuck` on the task row (`profiles.md` section 6) | golden round trip | lane PROTO | C3-3; not at the same time as P-5 | F | S |
-| T3-7 | 6 | Home: the four fields in `add_ai` and `member set`, owner only, with defaults and bounds; `stuck` counted, cleared and answered; row 5 refused (`profiles.md` sections 1, 2, 4) | A10.8, A10.10 to A10.12, A10.16 at the home | `home/profile.go`, `features/home_profile.feature` | P-6 | A | M |
-| T3-8 | 6 | Host, turns: the member list in every secretary turn, the line on `checks` and `reviewed` items, the instruction sentences, `submit_task` refused before the push (`profiles.md` sections 3, 4) | A10.9; A10.10 at the host | `host/turn_profile.go`, `features/host_profile.feature` | P-6 | A | S |
-| T3-9 | 6 | Host, discovery: the operation "list models" for Claude Code and Codex with their fake CLIs, on the probe path and on `refresh`; the tier table; `models` in `host.info` (`drivers.md` 10.1 to 10.3) | A10.13, A10.14 at the host | `host/models.go`, `host/tiers.go`, `features/host_models.feature` | P-6 | A | M |
-| T3-11 | 6 | Host, choice: `host.join` and `host.leave` for several members of one CLI; model and level passed at every start and in the terminal, for Claude Code and Codex (`profiles.md` section 2, `drivers.md` 10.4) | A10.15 at the host | `host/start_model.go`, `features/host_start_model.feature` | P-6 | A | S |
-| T3-10 | 7 | Listing and start settings for OpenCode; start settings and the empty list for Qwen Code, in their drivers | A10.13, A10.15 for those CLIs | the files of T3-2 and T3-3 | T3-9, T3-11, T3-2, T3-3 | A | S |
+| P-6 | 5 | Wire shapes: `model`, `effort`, `tier`, `skills` on the AI member row, in `member add_ai`, `member set` and `host.join`; `member` in `host.leave`; `refresh` and `models` in `host.info`; `stuck` on the task row (`profiles.md` section 6) | golden round trip | lane PROTO: `proto/host.go`, the member and task shapes of `internal/proto`, `internal/proto/testdata/` with `wire.json`, `web/src/lib/proto.ts`, `proto.test.ts` | C3-3; #279 (P-4a), #289 (T3-2) and #296 (T3-3) merged | F | S |
+| I3-2a | 5 | The scenarios of A10.8 to A10.16, written now and tagged `@pending`, so the units below build against them | — | `features/a10_profiles*.feature` | C3-3 | A | S |
+| T3-7 | 6 | Home: the four fields in `add_ai` and `member set`, owner only, with defaults and bounds; `stuck` counted, cleared and answered; row 5 refused (`profiles.md` sections 1, 2, 4) | A10.8, A10.10 to A10.12, A10.16 at the home | `home/profile.go`, `features/home_profile.feature`; its calls in `home/cmd_member.go`, `home/machine.go` | P-6; #289 and #296 merged | A | M |
+| T3-8 | 6 | Host, turns: the member list in every secretary turn, the line on `checks` and `reviewed` items, the instruction sentences, `submit_task` refused before the push (`profiles.md` sections 3, 4) | A10.9; A10.10 at the host | `host/turn_profile.go`, `features/host_profile.feature`; its calls in `host/turn.go`, `host/tools_task.go`, `host/instructions/` | P-6; #273 (HS-20), #280 (T3-5), #295 (T2-13) and #297 (T3-6) merged | A | S |
+| T3-9 | 6 | Host, discovery: the operation "list models" for Claude Code and Codex with their fake CLIs, on the probe path and on `refresh`; the tier table; `models` in `host.info` (`drivers.md` 10.1 to 10.3) | A10.13, A10.14 at the host | `host/models.go`, `host/tiers.go`, `features/host_models.feature`; its calls in `host/claude.go`, `host/codex.go`, and in `host/agents.go`, where `host.info` is built | P-6; #275 (T3-1), #289 and #296 merged | A | M |
+| T3-11 | 7 | Host, choice: `host.join` and `host.leave` for several members of one CLI; model and level passed at every start and in the terminal, for Claude Code and Codex (`profiles.md` section 2, `drivers.md` 10.4) | A10.15 at the host | `host/start_model.go`, `features/host_start_model.feature`; its calls in `host/claude.go`, `host/codex.go`, `host/join.go`, `host/takeover.go` | T3-9; #273 merged | A | S |
+| T3-10 | 8 | Listing and start settings for OpenCode; start settings and the empty list for Qwen Code, in their drivers | A10.13, A10.15 for those CLIs | the files of T3-2 and T3-3 | T3-11, T3-2, T3-3 | A | S |
 | U3-4 | 6 | Web, profile: tier and skills on the AI member panel and card, the owner's editor, the suggestion beside the tier, the badge. It alone edits `cmp/member/`, and leaves there the two places where U3-5 mounts its parts | A10.8, A10.10, A10.16 as seen | `cmp/profile/`, the changes in `cmp/member/` | U-3, P-6 | F | S |
 | U3-5 | 7 | Web, models: model and level in the dialog for adding an AI and on the panel, the text fields for an empty list, "not listed", the refresh button, several members of one CLI on the computers page | A10.13 to A10.15 as seen | `cmp/model/` | U3-4 | F | M |
-| I3-2 | 8 | Acceptance of the lane with fake CLIs, at the nodes and in the browsers; the `live` parts once per real CLI | A10.8 to A10.16 | `features/a10_profiles*`, `web/e2e/profiles.spec.ts` | T3-7 to T3-11, U3-4, U3-5 | A | M |
+| I3-2b | 9 | The steps of I3-2a's scenarios with fake CLIs, at the nodes and in the browsers, `@pending` removed; the `live` parts once per real CLI | A10.8 to A10.16 | the step files of `features/a10_profiles*`, `web/e2e/profiles.spec.ts` | I3-2a, T3-7 to T3-11, U3-4, U3-5 | A | M |
 
-After P-6, T3-7, T3-8, T3-9, T3-11 and U3-4 start together; they share no
-file. Each adds its calls to the step 1 files it must
-(`home/cmd_member.go`, `home/machine.go`, `host/turn.go`,
-`host/tools_task.go`, `host/join.go`, `host/claude.go`, `host/codex.go`,
-`host/instructions/`) and keeps its logic and its scenarios in its own.
-T3-9, T3-11 and T3-1 each touch the two drivers: one at a time. No file
-of this lane begins with `features/s3`, which is I3-1's; I3-1 tests A10.1
-to A10.7 and I3-2 the rest.
+After P-6, T3-7, T3-8, T3-9 and U3-4 start together, each once the pull
+requests in its "Needs" are merged; no two of them write one file. T3-11
+follows T3-9, since both write `host/claude.go` and `host/codex.go`, and
+T3-10 follows T3-11. A unit keeps its logic and its scenarios in its own
+files and adds only calls to the step 1 files in its "Owns"; it is their
+only writer while it runs (section 1). No file of this lane begins with
+`features/s3`, which is I3-1's; I3-1 tests A10.1 to A10.7 and this lane
+the rest.
 
 **What depends on a CLI exposing its list**
 (`contracts/step-3/drivers.md` 10.5): only the choice from a list and the
@@ -243,8 +245,7 @@ types the model.
    state: if the only stronger AI is limited or offline the task waits,
    and the quiet-task notice brings the secretary. (d) After the answer,
    a third failure of the same kind asks again. (e) Nothing was added to
-   `list_members` or to the driver declaration. (f) The A10 items are in
-   `steps/step-3-acceptance.md`, where A10 lives. (g) A changed model
+   `list_members` or to the driver declaration. (g) A changed model
    applies at the next start of a CLI process, a resume included. (h)
    Fast mode is listed and cannot be chosen. (i) Discovery runs with
    detection, so the Claude Code listing starts a process (no model
@@ -266,14 +267,17 @@ types the model.
    `agent.set`, the tool list and `takeover.start` only; U3-3 shows the
    account choice and the terminal button only; the postponed parts of
    `contracts/step-3/drivers.md` section 5 and of A10.1 are dropped.
-5. Lane PROFILES: (a) to (f), (h), (i) and (k) as written; for (h),
+5. Lane PROFILES: (a) to (e), (h), (i) and (k) as written; for (a),
+   a task without a remote has no hosted check, so only its failed
+   reviews count; for (h),
    Codex's fast mode is read from `serviceTiers`; for (k), each member
    is `limited` only when its own CLI reports it. (g) as written, with
    no fallback to a new session. (j) rejected: the settings file can hold
    a credential, so Qwen Code lists nothing and the owner types the
    model. (l) rejected: the secretary is a candidate; R-21 forbids it
    writing code, not answering. No host-kept list of levels: without a
-   list from the CLI the level is a text field.
+   list from the CLI the level is a text field. The A10 items of the
+   lane are in `steps/step-3-acceptance.md`, with the rest of A10.
 
 ### Follow-up
 

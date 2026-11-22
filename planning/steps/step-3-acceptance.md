@@ -112,9 +112,10 @@ fake CLIs fail checks and reviews on script.
   level in the arguments or parameters of section 10.4; a member with
   `""` passes neither. After `member set` with another model the next
   start of a session of that member, a resume, passes the new one. A
-  model the fake CLI refuses is a crash: `turn_interrupted` with `crash`,
-  in a task session `task fail`, no `session_replaced`, and the session
-  keeps its id. (`live`:
+  model the CLI refuses, the fake Claude Code exiting and the fake Codex
+  answering `thread/start` with an error, is handled as a crash in both:
+  `turn_interrupted` with `crash`, in a task session `task fail`, no
+  `session_replaced`, and the session keeps its id. (`live`:
   once per real CLI, the model the CLI reports is the one chosen)
 - **A10.16** The owner's edit stays. The owner sets `tier` `light` and
   `skills` on a member whose model is suggested `strong`. After a refresh
