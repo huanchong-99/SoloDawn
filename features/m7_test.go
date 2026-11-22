@@ -239,8 +239,8 @@ type m7Browser struct {
 
 	mu       sync.Mutex
 	nextID   int64
-	waiting  map[int64]chan json.RawMessage // each channel's single reader: request
-	changed  chan struct{}
+	waiting  map[int64]chan json.RawMessage // each channel's single reader: awaitReqReply
+	changed  chan struct{}                  // closed under mu by applyRows; reader: m7WaitChan
 	aiByName map[string]proto.AIMemberRow
 	tasks    map[string]proto.TaskRow
 	msgs     map[string]proto.MsgRow
@@ -322,8 +322,11 @@ func m7WebRTCConfig(servers []proto.ICEServer, mode m7CandMode) webrtc.Configura
 		out = append(out, webrtc.ICEServer{URLs: s.URLs, Username: s.Username, Credential: s.Credential})
 	}
 	cfg := webrtc.Configuration{ICEServers: out}
-	if mode == m7CandRelayOnly {
+	switch mode {
+	case m7CandRelayOnly:
 		cfg.ICETransportPolicy = webrtc.ICETransportPolicyRelay
+	case m7CandSrflxAndRelay:
+		cfg.ICETransportPolicy = webrtc.ICETransportPolicyNoHost
 	}
 	return cfg
 }
@@ -359,9 +362,16 @@ func (b *m7Browser) signalHeader(kind string) proto.SignalHeader {
 func (b *m7Browser) nodeReplyRoute() peer.Route {
 	return peer.Route{
 		ID:   "m7-local",
-		ICE:  b.ice,
+		ICE:  m7NodeICEServers(b.ice, b.mode),
 		Send: b.receiveFromNode,
 	}
+}
+
+func m7NodeICEServers(servers []proto.ICEServer, mode m7CandMode) []proto.ICEServer {
+	if mode == m7CandSrflxAndRelay && len(servers) > 1 {
+		return servers[:1]
+	}
+	return servers
 }
 
 func (b *m7Browser) receiveFromNode(_ context.Context, _ string, env proto.Envelope) error {
@@ -725,28 +735,51 @@ func (b *m7Browser) openPTY(gid, mid string) (*m7PTY, error) {
 	return p, b.ctl.SendText(string(raw))
 }
 
-func (b *m7Browser) selectedCandidateTypes() (webrtc.ICECandidateType, webrtc.ICECandidateType, bool) {
-	report := b.pc.GetStats()
-	pairID := m7SelectedPairID(report)
-	if pairID == "" {
-		return 0, 0, false
-	}
-	pair, ok := report[pairID].(webrtc.ICECandidatePairStats)
-	if !ok {
-		return 0, 0, false
-	}
-	loc, okL := report[pair.LocalCandidateID].(webrtc.ICECandidateStats)
-	rem, okR := report[pair.RemoteCandidateID].(webrtc.ICECandidateStats)
-	return loc.CandidateType, rem.CandidateType, okL && okR
-}
-
-func m7SelectedPairID(report webrtc.StatsReport) string {
-	for _, st := range report {
-		if tr, ok := st.(webrtc.TransportStats); ok && tr.SelectedCandidatePairID != "" {
-			return tr.SelectedCandidatePairID
+func (b *m7Browser) fetchThread(gid, taskID string) ([]proto.MsgRow, error) {
+	build := func(id int64) any {
+		return proto.FetchThread{
+			FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: gid, Limit: 20},
+			Thread:    &taskID,
 		}
 	}
-	return ""
+	raw, err := b.request(b.ctx, build)
+	if err != nil {
+		return nil, err
+	}
+	var fetched proto.Fetched
+	if err := proto.Decode(raw, &fetched); err != nil {
+		return nil, err
+	}
+	return m7DecodeMsgRows(fetched.Rows), nil
+}
+
+func m7DecodeMsgRows(rawRows []json.RawMessage) []proto.MsgRow {
+	var out []proto.MsgRow
+	for _, r := range rawRows {
+		var m proto.MsgRow
+		if proto.Decode(r, &m) == nil {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func (b *m7Browser) selectedCandidateTypes() (webrtc.ICECandidateType, webrtc.ICECandidateType, bool) {
+	pair, ok := b.pc.SCTP().Transport().ICETransport().GetSelectedCandidatePairStats()
+	if !ok || pair.State != webrtc.StatsICECandidatePairStateSucceeded {
+		return 0, 0, false
+	}
+	report := b.pc.GetStats()
+	if _, hasPair := report[pair.ID].(webrtc.ICECandidatePairStats); !hasPair {
+		return 0, 0, false
+	}
+	return m7CandidateTypesFromReport(report, pair.LocalCandidateID, pair.RemoteCandidateID)
+}
+
+func m7CandidateTypesFromReport(report webrtc.StatsReport, locID, remID string) (webrtc.ICECandidateType, webrtc.ICECandidateType, bool) {
+	loc, okL := report[locID].(webrtc.ICECandidateStats)
+	rem, okR := report[remID].(webrtc.ICECandidateStats)
+	return loc.CandidateType, rem.CandidateType, okL && okR
 }
 
 func (b *m7Browser) statsShowRelay() (bool, bool) {
@@ -854,19 +887,12 @@ func m7SetEnv(cleanup func(func()), key, val string) error {
 	return nil
 }
 
-func m7StartTURN(cleanup func(func()), relayOnly bool) (string, []proto.ICEServer, error) {
+func m7StartTURN(cleanup func(func()), mode m7CandMode) (string, []proto.ICEServer, error) {
 	pkt, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	if err != nil {
 		return "", nil, err
 	}
-	ip := net.IPv4(127, 0, 0, 1)
-	var gen turn.RelayAddressGenerator = &turn.RelayAddressGeneratorStatic{RelayAddress: ip, Address: ip.String()}
-	if relayOnly {
-		gen = &relaySockets{
-			RelayAddressGeneratorStatic: turn.RelayAddressGeneratorStatic{RelayAddress: ip, Address: ip.String()},
-			ports:                       map[int]bool{},
-		}
-	}
+	gen := m7RelayGenerator(mode)
 	auth := func(r *turn.RequestAttributes) (string, []byte, bool) {
 		return "peer", turn.GenerateAuthKey("peer", "test", "secret"), r.Username == "peer"
 	}
@@ -881,14 +907,29 @@ func m7StartTURN(cleanup func(func()), relayOnly bool) (string, []proto.ICEServe
 	}
 	cleanup(func() { _ = srv.Close() })
 	addr := pkt.LocalAddr().String()
-	iceList := []proto.ICEServer{
-		{URLs: []string{"stun:" + addr}},
-		{URLs: []string{"turn:" + addr + "?transport=udp"}, Username: "peer", Credential: "secret"},
+	return addr, m7ICEServersForMode(addr, mode), nil
+}
+
+func m7RelayGenerator(mode m7CandMode) turn.RelayAddressGenerator {
+	ip := net.IPv4(127, 0, 0, 1)
+	base := turn.RelayAddressGeneratorStatic{RelayAddress: ip, Address: ip.String()}
+	if mode == m7CandRelayOnly {
+		return &relaySockets{RelayAddressGeneratorStatic: base, ports: map[int]bool{}}
 	}
-	if relayOnly {
-		iceList = iceList[1:]
+	return &base
+}
+
+func m7ICEServersForMode(addr string, mode m7CandMode) []proto.ICEServer {
+	stunSrv := proto.ICEServer{URLs: []string{"stun:" + addr}}
+	turnSrv := proto.ICEServer{URLs: []string{"turn:" + addr + "?transport=udp"}, Username: "peer", Credential: "secret"}
+	switch mode {
+	case m7CandDirect:
+		return []proto.ICEServer{stunSrv}
+	case m7CandRelayOnly:
+		return []proto.ICEServer{turnSrv}
+	default:
+		return []proto.ICEServer{stunSrv, turnSrv}
 	}
-	return addr, iceList, nil
 }
 
 func (w *m7World) bootEnvAndNode(timeout time.Duration, mode m7CandMode) error {
@@ -898,7 +939,7 @@ func (w *m7World) bootEnvAndNode(timeout time.Duration, mode m7CandMode) error {
 	if err := w.prepareDirsAndEnv(); err != nil {
 		return err
 	}
-	turnAddr, iceServers, err := m7StartTURN(w.cleanup, mode == m7CandRelayOnly)
+	turnAddr, iceServers, err := m7StartTURN(w.cleanup, mode)
 	if err != nil {
 		return err
 	}
@@ -982,7 +1023,7 @@ func (w *m7World) settleAndClose() {
 }
 
 func (w *m7World) mapNodeRoute(r peer.Route, mode m7CandMode) peer.Route {
-	r.ICE = w.iceServers
+	r.ICE = m7NodeICEServers(w.iceServers, mode)
 	send := r.Send
 	r.Send = func(ctx context.Context, to string, env proto.Envelope) error {
 		if m7DropSignalledICE(env.Payload, mode) {
@@ -1491,13 +1532,23 @@ func (w *m7World) whenHandbackAndAnswerHeld(aiName, _, handbackText string) erro
 	return w.sendTakeoverEnd(aiName)
 }
 
+func (w *m7World) closeOpenSessions() {
+	if w.pn == nil || w.pn.Host == nil {
+		return
+	}
+	for _, s := range w.pn.Host.Sessions.All() {
+		host.Runner.Close(w.pn.Host, s.SessionKey)
+	}
+}
+
 func (w *m7World) thenHandbackBeforeOrderedReply(aiName, handbackText, orderedText string) error {
 	if err := w.waitMsgAndAIState(aiName, orderedText, "waiting", 10*time.Second); err != nil {
 		return err
 	}
 	w.browser.mu.Lock()
-	defer w.browser.mu.Unlock()
 	hbIdx, replyIdx := w.msgOrderIndicesLocked(w.browser.aiByName[aiName].ID, handbackText, orderedText)
+	w.browser.mu.Unlock()
+	w.closeOpenSessions()
 	if hbIdx < 0 || replyIdx < 0 || hbIdx >= replyIdx {
 		return fmt.Errorf("handback index %d and reply index %d not in order", hbIdx, replyIdx)
 	}
@@ -1723,10 +1774,43 @@ func (w *m7World) thenLostConnHandbackAndConflict(wantCode string) error {
 	if err := w.reconnectAndSync(); err != nil {
 		return err
 	}
-	if err := w.waitMsgAndAIState("Claude", "Lost connection handback.", "waiting", 10*time.Second); err != nil {
+	if err := w.waitLostHandbackFetched("Claude", "Lost connection handback."); err != nil {
 		return err
 	}
-	return w.checkReplayCode(wantCode)
+	err := w.checkReplayCode(wantCode)
+	w.closeOpenSessions()
+	return err
+}
+
+func (w *m7World) waitLostHandbackFetched(aiName, wantText string) error {
+	err := w.browser.waitRows(10*time.Second, func() bool {
+		return w.browser.aiByName[aiName].State == "waiting"
+	})
+	if err != nil {
+		return err
+	}
+	return w.pollThreadHandback(w.aiID(aiName), wantText, 5*time.Second)
+}
+
+func (w *m7World) pollThreadHandback(aiID, wantText string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		rows, err := w.browser.fetchThread(string(w.groupID), w.claudeTask)
+		if err == nil && m7HasHandbackRow(rows, aiID, wantText) {
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return fmt.Errorf("thread %s missing handback %q", w.claudeTask, wantText)
+}
+
+func m7HasHandbackRow(rows []proto.MsgRow, aiID, wantText string) bool {
+	for _, m := range rows {
+		if m.By == aiID && m.Kind == "handback" && m.Text == wantText {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *m7World) waitServedClosed(timeout time.Duration) error {
@@ -1770,12 +1854,12 @@ func (w *m7World) findTakeoverTaskLocked(excludeID string) (proto.TaskRow, bool)
 }
 
 func (w *m7World) hasTaskCardMsgLocked(taskID string) bool {
-	for _, m := range w.browser.msgs {
-		if m.Kind == "task" && m.Thread != nil && *m.Thread == taskID {
-			return true
-		}
+	m, ok := w.browser.msgs[taskID]
+	if !ok || m.Kind != "task" {
+		return false
 	}
-	return false
+	var body proto.TaskBody
+	return proto.Decode(m.Body, &body) == nil && body.Task == taskID
 }
 
 func (w *m7World) thenOwnerTakeoverCardExists(wantTitle, aiName string) error {
@@ -1903,6 +1987,7 @@ func (w *m7World) thenSecondTaskActiveWithCommit(wantState, wantSubject, wantFil
 	t := w.browser.tasks[w.secTakeID]
 	hb, ok := w.findHandbackForTaskLocked(w.secTakeID)
 	w.browser.mu.Unlock()
+	w.closeOpenSessions()
 	if t.State != wantState || !ok {
 		return fmt.Errorf("second task state=%q handbackFound=%v", t.State, ok)
 	}
@@ -1982,7 +2067,7 @@ func (w *m7World) thenStatsRelayClosesPTYAndHandsBack(aiName string) error {
 	if !ok || !relayed {
 		return fmt.Errorf("selected-pair stats ok=%v relayed=%v, want relay", ok, relayed)
 	}
-	if err := waitConnPath(w.served, "relay", 3*time.Second); err != nil {
+	if err := w.pollServedRelayPath(3 * time.Second); err != nil {
 		return err
 	}
 	if err := w.activePTY.waitClosed(5 * time.Second); err != nil {
@@ -1991,7 +2076,19 @@ func (w *m7World) thenStatsRelayClosesPTYAndHandsBack(aiName string) error {
 	return w.waitMsgAndAIState(aiName, "Relay transition handback.", "waiting", 10*time.Second)
 }
 
+func (w *m7World) pollServedRelayPath(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if w.served.Path() == "relay" {
+			return nil
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return fmt.Errorf("served path = %q, want relay", w.served.Path())
+}
+
 func (w *m7World) thenHostInfoOriginalCtl() error {
+	defer w.closeOpenSessions()
 	if got := w.browser.offersSent.Load(); got != 1 {
 		return fmt.Errorf("browser sent %d offers, want 1", got)
 	}
