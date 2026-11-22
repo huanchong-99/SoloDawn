@@ -233,21 +233,6 @@ Changed golden examples, with the schema in `web/src/lib/proto.ts` and
 
 `tools.json` does not change.
 
-Decided in building P-6 (2026-11-23):
-
-- `host-join.json` and `host-leave.json` change in place: the first with
-  the four fields, the second with `member`. `host-info-request.json`
-  carries `"refresh":true`.
-- In all three commands each of the four fields is optional on its own.
-  In `member set` a present `""` for `model` or `effort` returns to the
-  CLI's default; in `member add_ai` and `host.join` a present `""` is the
-  same as absent.
-- `refresh` is a boolean; `false` is the same as absent. `fast` is `true`
-  or absent, and a reader refuses `false`, as for `jump`.
-- The wire readers read `tier` and `stuck.kind` as text; the home checks
-  the values of a command (section 2), and the client shows what a row
-  holds.
-
 ## 7. What grows in the step 1 files
 
 | File | Addition |

@@ -642,6 +642,38 @@ describe('commands', () => {
 });
 
 describe('host surface', () => {
+  it('reads the profile golden files with their command and row schemas', () => {
+    expect(schemaOf['member-add_ai-profile']).toBe(p.MemberAddAI);
+    expect(schemaOf['member-set-profile']).toBe(p.MemberSet);
+    expect(schemaOf['row-task-stuck']).toBe(p.TaskRow);
+    const row = p.decode(p.AIMemberRow, goldens['row-member-ai']);
+    expect([row.model, row.effort, row.tier, row.skills]).toEqual([
+      'gpt-5.4',
+      'high',
+      'strong',
+      'Go backend, protocol design',
+    ]);
+    expect(p.decode(p.TaskRow, goldens['row-task-stuck']).stuck).toEqual({
+      kind: 'review',
+      n: 2,
+      ask: true,
+    });
+    expect(p.decode(p.TaskRow, goldens['row-task']).stuck).toBeUndefined();
+    expect(p.decode(p.HostInfo, goldens['host-info-answer']).agents.map((a) => a.models)).toEqual([
+      [
+        {
+          model: 'opus',
+          name: 'Opus',
+          efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+          fast: true,
+          tier: 'strong',
+        },
+        { model: 'haiku', name: 'Haiku', efforts: [], tier: 'light' },
+      ],
+      [],
+    ]);
+  });
+
   // A host command has `to` and a `t` with a dot; the frames of the host surface have no `to`.
   const hostCommands = examples.filter((name) => {
     const { t, to } = JSON.parse(goldens[name]);

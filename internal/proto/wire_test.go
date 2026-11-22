@@ -164,6 +164,9 @@ func wireCases() []wireCase {
 	}
 	add("a slug the home cannot make, in the task beside an inbox item", "inbox", false, "../x", "items", "0", "task", "slug")
 	add("a slug the home can make, in the task beside an inbox item", "inbox", true, "path", "items", "0", "task", "slug")
+	add("fast that is false", "host-info-answer", false, false, "agents", "0", "models", "0", "fast")
+	add("refresh that is false", "host-info-request", true, false, "refresh")
+	add("ask that is false", "row-task-stuck", true, false, "stuck", "ask")
 
 	for _, c := range []struct {
 		file string
