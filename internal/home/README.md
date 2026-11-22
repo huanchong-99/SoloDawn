@@ -464,6 +464,20 @@ function that moves a task calls it and adds nothing to its rules.
 
 ## Briefs
 
+`cmd_confirm.go` gates mention and call delivery by the AI owner's word
+([step-2 confirmations](../../planning/contracts/step-2/confirm.md) sections 2–5).
+Personal accounts require the owner; team and API-key accounts also accept their allow list.
+Task participants receive thread messages without a new card. Otherwise each AI gets a pending
+`direct` or `ask` card, on the main line and also in the request's thread. Only its owner may
+confirm or deny it; a confirmation delivers once. A denied call becomes `denied` and gives its
+caller a `reply` carrying the card, plus a secretary notice. Denied direct requests from current
+AI members also notify the secretary. Human `post/confirm` requests create `watch` cards; confirming one
+queues a host-only `watch` item, outside the wake cap. The confirmation timer expires cards when
+the AI, watch requester or retained request disappears. Role confirmation and waits belong to
+T2-2b. Approval decisions require both the card's approvers and the AI row's current approvers.
+
+Watch admission checks `body.what`, target ownership and empty `mentions`, not `thread`, `re` or `text`.
+
 `cmd_brief.go` holds `post` of kind `brief` and `act` `confirm` and `revise` on it
 ([commands](../../planning/contracts/commands.md) 1.3 and 1.4;
 [messages](../../planning/contracts/messages.md) 2.1 and 3.1), under the keys `post/brief`,
@@ -804,10 +818,11 @@ shutdown hooks ([commands](../../planning/contracts/commands.md) 1.7;
   `After["push"]` updates memory only after transaction commit so a rolled-back write leaves memory
   unchanged, and `Loop.Close` drains in-flight Web Push deliveries on `Loop.wg` before detaching.
 - **Eligibility and delivery.** For each newly created `proto.MsgRow` (`Pos == Seq`), `After["push"]`
-  extracts one reminder kind (`approval`, `decision`, `brief`, `done` from `summary`, or `mention`
+  extracts one reminder kind (`approval`, `decision`, `brief`, `confirm`, `done` from `summary`, or `mention`
   from any other message kind), filters for offline subscribed devices of concerned group members
   that remain valid in `State.Logs`, encrypts `proto.Reminder` JSON (without HTML escaping) via
   RFC 8291 (`webpush-go`), and sends each request in its own goroutine with a 5 s context timeout.
+  Confirmation reminders go to `body.to`, name the AI in `who`, and omit `title`.
   A `404` or `410` response drops that subscription in memory and from `push_sub` if not replaced
   since.
 
