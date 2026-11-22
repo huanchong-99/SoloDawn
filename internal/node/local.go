@@ -44,6 +44,12 @@ func AttachLocal(h *host.Host, loop *home.Loop) *LocalLink {
 	return l
 }
 
+func (l *LocalLink) watchGroups() {
+	l.loop.Welcome(l.conn, func(groups []proto.GroupSummary) any {
+		return proto.Groups{Type: "groups", Groups: groups}
+	})
+}
+
 // Path returns "local", the path reported for an in-process home.
 func (l *LocalLink) Path() string { return "local" }
 
