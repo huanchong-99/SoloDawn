@@ -76,7 +76,7 @@ func homeBriefSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the owner (?:confirms|has confirmed) the brief$`, func() error {
 		return w.act(w.keys["the owner"], "confirm", "")
 	})
-	sc.Step(`^the owner sends the same confirm again$`, func() error { return w.send(w.keys["the owner"], w.sent) })
+	sc.Step(`^the owner sends the same confirm again$`, func() error { return w.send(w.sent) })
 	sc.Step(`^the owner sends the brief back with the note "([^"]*)"$`, func(note string) error {
 		return w.act(w.keys["the owner"], "revise", fmt.Sprintf(`,"text":%q`, note))
 	})
@@ -169,13 +169,13 @@ func (w *homeBriefWorld) post(replaces *string) error {
 		w.brief = string(post.Nonce)
 	}
 	laptop := w.keys["the owner's laptop"]
-	return w.send(laptop, laptop.Sign(string(payload)))
+	return w.send(laptop.Sign(string(payload)))
 }
 
 // act sends an act on the brief, signed by a device; more holds further members.
 func (w *homeBriefWorld) act(by identity.Key, action, more string) error {
 	payload := fmt.Sprintf(`{"t":"act","n":%q,"ts":%d,"g":%q,"msg":%q,"action":%q%s}`, w.id(), w.now.UnixMilli()-1000, w.state.ID, w.brief, action, more)
-	return w.send(by, by.Sign(payload))
+	return w.send(by.Sign(payload))
 }
 
 func (w *homeBriefWorld) actAs(who, action string) error {
@@ -193,8 +193,8 @@ func (w *homeBriefWorld) actAs(who, action string) error {
 
 // send applies a command as the run loop of a home does: in a transaction,
 // whose messages land on disk, and whose result the state then commits.
-func (w *homeBriefWorld) send(by identity.Key, env proto.Envelope) error {
-	res, err := home.Commands.Apply(w.state, w.disk, w.receipts, by.ID(), env, w.now)
+func (w *homeBriefWorld) send(env proto.Envelope) error {
+	res, err := home.Commands.Apply(w.state, w.disk, w.receipts, env, w.now)
 	if err != nil {
 		return err
 	}

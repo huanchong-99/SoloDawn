@@ -159,15 +159,13 @@ serve (section 8), `forbidden`.
 (`{"re":4,"err":{"code":"forbidden","msg":"…"}}`).
 
 - The payload inside `env` names the command in its own `t`.
-- The signer `env.k` must be the device that this connection was
-  authenticated for; a command signed by another device is `forbidden`.
 - A command that the receiver has already accepted gets the same outcome
   again, under the `re` of the new request, and has no second effect
   (`contracts/commands.md`, "Once only").
 - A home command has `g`; a host command has `to`, the node's device id.
 - A home answers with the first of these that fails, in this order: the
-  signer is the connection's device; the envelope checks
-  (`contracts/envelope.md` section 3); `g` is there, else `bad_request`.
+  envelope checks (`contracts/envelope.md` section 3); `g` is there, else
+  `bad_request`.
   These leave no receipt. Then the receipt answers a command that was
   answered before. Then, with the outcome kept as the receipt: the type
   and, for `group`, `member`, `task`, `post` and `act`, the `op`, `kind`

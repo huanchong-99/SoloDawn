@@ -156,7 +156,7 @@ func (w *homeReviewWorld) apply(by identity.Key, payload any) error {
 	if err != nil {
 		return err
 	}
-	res, err := home.Commands.Apply(w.state, w, w, by.ID(), by.Sign(string(raw)), w.now)
+	res, err := home.Commands.Apply(w.state, w, w, by.Sign(string(raw)), w.now)
 	if err != nil {
 		return err
 	}
