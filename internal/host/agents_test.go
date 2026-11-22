@@ -229,6 +229,7 @@ func TestAgentsDetectsFakeCLIsAndPreservesStoredFields(t *testing.T) {
 				Takeover: "new",
 			},
 			Groups: []proto.AgentGroup{},
+			Models: []proto.Model{},
 		},
 		{
 			Agent:      "codex",
@@ -241,6 +242,7 @@ func TestAgentsDetectsFakeCLIsAndPreservesStoredFields(t *testing.T) {
 				Takeover: "resume",
 			},
 			Groups: []proto.AgentGroup{},
+			Models: []proto.Model{},
 		},
 		{
 			Agent:      "opencode",
@@ -253,6 +255,7 @@ func TestAgentsDetectsFakeCLIsAndPreservesStoredFields(t *testing.T) {
 				Takeover: "none",
 			},
 			Groups: []proto.AgentGroup{},
+			Models: []proto.Model{},
 		},
 	}
 	agtEqual(t, got, want)

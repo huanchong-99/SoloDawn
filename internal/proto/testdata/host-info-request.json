@@ -1,4 +1,5 @@
 {
   "t": "host.info",
-  "id": 9
+  "id": 9,
+  "refresh": true
 }

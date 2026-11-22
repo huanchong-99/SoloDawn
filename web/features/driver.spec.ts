@@ -43,6 +43,7 @@ const agent = (
   login_ok: true,
   caps: {},
   driver: { accounts, takeover },
+  models: [],
   groups: [],
 });
 

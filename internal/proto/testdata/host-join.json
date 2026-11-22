@@ -7,5 +7,9 @@
   "home": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
   "agent": "codex",
   "name": "Codex",
-  "secretary": false
+  "secretary": false,
+  "model": "gpt-5.4",
+  "effort": "high",
+  "tier": "strong",
+  "skills": "Go backend, protocol design"
 }

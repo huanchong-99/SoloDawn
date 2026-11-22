@@ -15,10 +15,11 @@ func hostState() HostState {
 		Agents: []HostAgent{
 			{"claude", "2.1.311", new("personal"), true, Caps{Day: &Cap{"turns", 200}, Task: &Cap{"usd", 12.5}},
 				Driver{[]string{"personal", "team", "api_key"}, "new"},
-				[]AgentGroup{{ID(group), ID(agent), 2, "working", ID(taskID), 1, []string{user}}}},
+				[]AgentGroup{{ID(group), ID(agent), 2, "working", ID(taskID), 1, []string{user}}},
+				[]Model{{"opus", "Opus", []string{"low", "medium", "high", "xhigh", "max"}, true, "strong"}, {"haiku", "Haiku", []string{}, false, "light"}}},
 			{"codex", "0.164.0", nil, false, Caps{},
 				Driver{[]string{"personal", "team", "api_key"}, "resume"},
-				[]AgentGroup{}},
+				[]AgentGroup{}, []Model{}},
 		},
 		Settings: HostSettings{90, 15, 2, false, []string{}},
 	}
@@ -27,7 +28,7 @@ func hostState() HostState {
 func TestHostSurfaceGoldens(t *testing.T) {
 	golden(t, "groups", Groups{"groups", []GroupSummary{{group, "Website", 812}}})
 
-	golden(t, "host-info-request", Request{"host.info", 9})
+	golden(t, "host-info-request", HostInfoRequest{Request{"host.info", 9}, true})
 	golden(t, "host-info-answer", HostInfo{"host.info", Success{9, true}, hostState()})
 	// The owner took all AIs offline after an update was installed, and the
 	// rendezvous is not reachable: what the answer showed changes in a push.

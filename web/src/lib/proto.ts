@@ -268,6 +268,11 @@ export const AIMemberRow = v.object({
   since: int,
   path: str,
   usage: Usage,
+  /** The profile (contracts/step-3/profiles.md section 1): `""` is the CLI's own default. */
+  model: str,
+  effort: str,
+  tier: str,
+  skills: str,
 });
 export type AIMemberRow = v.InferOutput<typeof AIMemberRow>;
 
@@ -316,6 +321,8 @@ export const TaskRow = v.object({
     }),
   ),
   failures: int,
+  /** Failures of one kind in a row; `ask` while a submission is refused (profiles.md section 4). */
+  stuck: v.optional(v.object({ kind: str, n: int, ask: bool })),
   thread: v.object({
     count: int,
     rounds: int,
@@ -664,6 +671,14 @@ export type GroupCommand = v.InferOutput<typeof GroupCommand>;
 
 const member = { t: v.literal('member'), ...HomeCommand, id: Id };
 
+/** The four fields of the profile in a command, each optional (profiles.md section 2). */
+const ProfileSet = {
+  model: optionalText,
+  effort: optionalText,
+  tier: optionalText,
+  skills: optionalText,
+};
+
 export const MemberAddAI = v.object({
   ...member,
   op: v.literal('add_ai'),
@@ -672,6 +687,7 @@ export const MemberAddAI = v.object({
   account: str,
   secretary: bool,
   approvers: strs,
+  ...ProfileSet,
 });
 export type MemberAddAI = v.InferOutput<typeof MemberAddAI>;
 
@@ -710,6 +726,7 @@ export const MemberSet = v.object({
   allow: v.optional(strs),
   approvers: v.optional(strs),
   role: optionalText,
+  ...ProfileSet,
 });
 export type MemberSet = v.InferOutput<typeof MemberSet>;
 
@@ -906,6 +923,7 @@ export const HostJoin = v.object({
   agent: str,
   name: str,
   secretary: bool,
+  ...ProfileSet,
 });
 export type HostJoin = v.InferOutput<typeof HostJoin>;
 
@@ -914,6 +932,8 @@ export const HostLeave = v.object({
   ...HostCommand,
   g: Id,
   agent: str,
+  /** Required when the agent has more than one member in `g`. */
+  member: v.optional(Id),
 });
 export type HostLeave = v.InferOutput<typeof HostLeave>;
 
@@ -996,7 +1016,12 @@ export type WatchEnd = v.InferOutput<typeof WatchEnd>;
 
 // The host surface (datachannel.md section 7): what the owner's browser reads from a node.
 
-export const HostInfoRequest = v.object({ t: v.literal('host.info'), id: int });
+/** `refresh` skips what was kept of the detection and the model lists (drivers.md 10.1). */
+export const HostInfoRequest = v.object({
+  t: v.literal('host.info'),
+  id: int,
+  refresh: v.optional(bool),
+});
 export type HostInfoRequest = v.InferOutput<typeof HostInfoRequest>;
 
 /** The capability table a CLI driver declares (contracts/step-3/drivers.md sections 4 and 6). */
@@ -1028,6 +1053,16 @@ const HostState = {
       login_ok: bool,
       caps: Caps,
       driver: Driver,
+      /** The models the CLI lists, with the suggested tier (drivers.md 10.3). */
+      models: v.array(
+        v.object({
+          model: str,
+          name: str,
+          efforts: strs,
+          fast: v.optional(v.literal(true)),
+          tier: str,
+        }),
+      ),
       groups: v.array(
         v.object({
           g: Id,

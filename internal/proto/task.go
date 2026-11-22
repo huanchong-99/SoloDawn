@@ -24,9 +24,18 @@ type TaskRow struct {
 	Review     *Review       `json:"review,omitempty"`
 	Wait       *TaskWait     `json:"wait"`
 	Failures   int           `json:"failures"`
+	Stuck      *Stuck        `json:"stuck,omitempty"`
 	Thread     ThreadSummary `json:"thread"`
 	Stats      TaskStats     `json:"stats"`
 	Created    int64         `json:"created"`
+}
+
+// Stuck counts the failures of one kind in a row; while Ask is true the home
+// refuses a submission (contracts/step-3/profiles.md section 4).
+type Stuck struct {
+	Kind string `json:"kind"`
+	N    int    `json:"n"`
+	Ask  bool   `json:"ask"`
 }
 
 type TaskChecks struct {
