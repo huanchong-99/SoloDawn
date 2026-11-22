@@ -58,10 +58,7 @@ func s2WatchCmd(c *s2Cast, p *s2Person, conn *peer.Connection, fields map[string
 		_, err := c.SendCmd(p, conn, fields)
 		return err
 	}
-	env := p.Key.Sign(string(mustMarshalNoEscape(fields)))
-	raw, err := conn.Request(c.Ctx, func(id int64) any {
-		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
-	})
+	raw, err := sendSignedCmdRaw(c.Ctx, conn, p.Key, fields)
 	if err != nil {
 		return err
 	}

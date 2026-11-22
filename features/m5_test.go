@@ -1510,12 +1510,12 @@ func m5Steps(sc *godog.ScenarioContext, f fixtures) {
 
 func m5RegisterFullFlowSteps(sc *godog.ScenarioContext, w *m5World) {
 	sc.Step(`^a signed-in non-GitHub forge and its scratch repository$`, w.liveProject)
-	sc.Step(`^both assigned branches were pushed without approval cards$`, w.stepVerifyPushBranchAtLevel2)
+	sc.Step(`^both assigned branches were pushed without approval cards$`, w.stepVerifyPushBranch)
 	sc.Step(`^the forge reports both distinct requests merged at their reviewed heads$`, w.verifyLiveRequests)
-	sc.Step(`^a project group with forge "none", a secretary and working AIs "Claude" and "Codex" at level 2$`, func() error {
+	sc.Step(`^a project group with forge "none", a secretary and working AIs "Claude" and "Codex"$`, func() error {
 		return w.setupCluster("none", []string{}, true)
 	})
-	sc.Step(`^a project group with forge "github", a bare remote, fake gh, a secretary and working AIs "Claude" and "Codex" at level 2$`, func() error {
+	sc.Step(`^a project group with forge "github", a bare remote, fake gh, a secretary and working AIs "Claude" and "Codex"$`, func() error {
 		return w.setupCluster("github", []string{}, true)
 	})
 	sc.Step(`^the owner posts a feature request in the main line and the secretary proposes a two-task brief$`, w.stepRequestAndTwoTaskBrief)
@@ -1529,7 +1529,7 @@ func m5RegisterFullFlowSteps(sc *godog.ScenarioContext, w *m5World) {
 	sc.Step(`^both tasks are merged onto base with two summary cards in the main line and no approval card$`, func() error {
 		return w.stepVerifyTwoTasksMerged(false)
 	})
-	sc.Step(`^push_branch pushed the assigned branch to origin at level 2 with no approval card$`, w.stepVerifyPushBranchAtLevel2)
+	sc.Step(`^push_branch pushed the assigned branch to origin with no approval card$`, w.stepVerifyPushBranch)
 	sc.Step(`^both tasks are merged on origin with two summary cards carrying pull-request numbers and no approval card$`, func() error {
 		return w.stepVerifyTwoTasksMerged(true)
 	})
@@ -1571,7 +1571,6 @@ func (w *m5World) stepConfirmAndRunTwoTasks(withPush bool) error {
 	commitHook1 := "run_checks"
 	if withPush {
 		commitHook1 = "push_branch"
-		w.addBeforeHook("run_checks", w.verifyPushedBranchHead)
 		w.addBeforeHook("run_checks", w.verifyPushedBranchHead)
 	}
 	w.addBeforeHook(commitHook1, func(c host.Caller) error {
@@ -1662,7 +1661,7 @@ func (w *m5World) summaryCards() []proto.MsgRow {
 	return out
 }
 
-func (w *m5World) stepVerifyPushBranchAtLevel2() error {
+func (w *m5World) stepVerifyPushBranch() error {
 	w.mu.Lock()
 	var pushes int
 	for _, rec := range w.tools {

@@ -198,7 +198,7 @@ func (s *State) cardDecideApproval(c Command, status string) (Result, *Refusal) 
 	}
 	var body proto.ApprovalBody
 	json.Unmarshal(card.Body, &body)
-	if !cardMayApprove(c.Who, body.Approvers) {
+	if !s.cardMayApprove(c.Who, body) {
 		return Result{}, &Refusal{"forbidden", "only a listed approver decides an approval card"}
 	}
 	if briefStatus(card) != cardStatusPending {
@@ -208,8 +208,8 @@ func (s *State) cardDecideApproval(c Command, status string) (Result, *Refusal) 
 	return s.cardFinishAct(c, decided, body.Task, OnApprove, body.Approvers, body.AI), nil
 }
 
-func cardMayApprove(w Who, approvers []string) bool {
-	return w.AI == "" && slices.Contains(approvers, w.User)
+func (s *State) cardMayApprove(w Who, body proto.ApprovalBody) bool {
+	return w.AI == "" && slices.Contains(body.Approvers, w.User) && slices.Contains(s.AIs[body.AI].Approvers, w.User)
 }
 
 func cardChoose(s *State, c Command) (Result, *Refusal) {
