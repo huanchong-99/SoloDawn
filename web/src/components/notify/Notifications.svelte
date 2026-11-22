@@ -1,5 +1,8 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { flip } from 'svelte/animate';
+  import { prefersReducedMotion } from 'svelte/motion';
+  import { fade } from 'svelte/transition';
   import type { Net } from '../../lib/net.svelte';
   import { Notifier, titleOf, whoOf, type NotifyKind } from '../../lib/notify.svelte';
   import { t } from '../../lib/prefs.svelte';
@@ -29,42 +32,50 @@
   onDestroy(() => notifier.clear());
 </script>
 
-{#if notifier.items.length}
-  <section class="notify" aria-label={t('notify.label')} aria-live="polite">
-    {#each notifier.items as item (item.key)}
-      {@const title = titleOf(item.group, item.msg)}
-      <article class="toast" class:need={item.needsYou} data-tone={tones[item.kind]}>
-        <span class="glyph"><Icon name={icons[item.kind]} /></span>
-        <div class="grow">
-          <b class="cut">{t(`notify.kind.${item.kind}`)}{title ? ` · ${title}` : ''}</b>
-          <p class="muted cut">{item.group.name} · {whoOf(item.group, item.msg)}</p>
-        </div>
-        <a
-          class="btn btn-sm"
-          class:btn-dawn={item.needsYou}
-          href={href('chat', { g: item.group.g })}
-          onclick={(event) => void notifier.open(event, item)}
-        >
-          {t('notify.open')}
-        </a>
-        <button
-          type="button"
-          class="icon-btn"
-          aria-label={t('notify.dismiss')}
-          onclick={() => notifier.dismiss(item.key)}
-        >
-          <Icon name="x" sm />
-        </button>
-      </article>
-    {/each}
-  </section>
-{/if}
+<section class="notify" aria-label={t('notify.label')} aria-live="polite">
+  {#each notifier.items as item (item.key)}
+    {@const title = titleOf(item.group, item.msg)}
+    <article
+      class="toast"
+      class:need={item.needsYou}
+      data-tone={tones[item.kind]}
+      animate:flip={{ duration: prefersReducedMotion.current ? 0 : 320 }}
+      out:fade={{ duration: prefersReducedMotion.current ? 0 : 200 }}
+      onfocusin={() => notifier.hold(item.key)}
+      onfocusout={() => notifier.release(item.key)}
+      onpointerenter={() => notifier.hold(item.key)}
+      onpointerleave={() => notifier.release(item.key)}
+    >
+      <span class="glyph"><Icon name={icons[item.kind]} /></span>
+      <div class="grow">
+        <b class="cut">{t(`notify.kind.${item.kind}`)}{title ? ` · ${title}` : ''}</b>
+        <p class="muted cut">{item.group.name} · {whoOf(item.group, item.msg)}</p>
+      </div>
+      <a
+        class="btn btn-sm"
+        class:btn-dawn={item.needsYou}
+        href={href('chat', { g: item.group.g })}
+        onclick={(event) => void notifier.open(event, item)}
+      >
+        {t('notify.open')}
+      </a>
+      <button
+        type="button"
+        class="icon-btn"
+        aria-label={t('notify.dismiss')}
+        onclick={() => notifier.dismiss(item.key)}
+      >
+        <Icon name="x" sm />
+      </button>
+    </article>
+  {/each}
+</section>
 
 <style>
   .notify {
     position: fixed;
+    top: calc(var(--bar-h) + var(--sp-3));
     right: var(--sp-4);
-    bottom: var(--sp-4);
     z-index: 10;
     display: flex;
     flex-direction: column;
@@ -83,7 +94,7 @@
     box-shadow: var(--shadow-pop);
     pointer-events: auto;
     animation:
-      rise var(--dur-3) var(--ease-out),
+      drop var(--dur-4) var(--spring),
       appear var(--dur-2) var(--ease-out);
 
     &.need {
@@ -110,7 +121,6 @@
     .notify {
       left: var(--sp-3);
       right: var(--sp-3);
-      bottom: calc(var(--tab-h) + var(--sp-3) + env(safe-area-inset-bottom));
       width: auto;
     }
     .toast {

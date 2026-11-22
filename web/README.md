@@ -463,12 +463,16 @@ file in `src/routes/`. It edits neither the shell nor another area:
   a fresh `host.info` read when the owner chooses an unset AI account type, and opens
   `PairBrowserDialog` (`pair.browser`).
 - **In-page notifications.** `src/components/notify/` mounts `Notifications.svelte` at `layer`
-  (`order: 10`), backed by `Notifier` in `src/lib/notify.svelte.ts`. It watches connected homes
-  after initial sync and surfaces live new events for the reader (`approval`, `decision` and
-  `brief` waiting on the reader in dawn until resolved or dismissed; `done` summaries and
-  `mention`s in calm neutral with an 8-second auto-dismiss, capped at three visible items),
-  staying quiet for main-line messages of the chat already open on screen while still notifying for
-  mentions inside task threads and other groups, and jumping to the target card or message on Open.
+  (`order: 10`), backed by `Notifier` in `src/lib/notify.svelte.ts`. After a group's first sync it
+  shows the live events for the reader: `approval`, `decision` and `brief` waiting on the reader, in
+  dawn, until opened, dismissed or resolved; `done` summaries and `mention`s, in calm neutral, for
+  8 seconds, a delay held while focus or the pointer is on the notification and restarted in full
+  when both leave. Main-line messages of the chat open on screen stay quiet; thread mentions and
+  other groups still notify. Open jumps to the card or message. At most three are shown: a
+  newcomer past that drops the oldest self-closing one, or the oldest waiting card when none is
+  self-closing. The stack sits at the top right under the top bar (on a phone's chat, under the
+  chat's head), so it never covers the composer; its polite live region is always in the page.
+  Notifications slide into place and fade out, both at once under reduced motion.
 - **Where code goes.** Logic lives in `.ts` and `.svelte.ts` modules, which the gates measure
   (CRAP and mutation); components stay thin. A module that only holds an `import.meta.glob` is
   named `*.glob.ts` and is not mutated; it holds no logic. Stryker would wrap the glob's

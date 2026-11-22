@@ -347,47 +347,84 @@ describe('Notifier', () => {
     expect(notifier.items.map((i) => i.msg.id)).toEqual(['live-ap']);
   });
 
-  it('orders simultaneous arrivals by pos, caps at maxNotices, and auto-dismisses only transient kinds', () => {
+  it('orders arrivals by pos, evicts self-closing notices before waiting cards, and holds timers', () => {
     const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
     const notifier = new Notifier();
     const { home, group } = makeReadyGroup();
     notifier.sync([home]);
 
-    const m1 = row<p.MsgRow>('row-msg-text', {
-      id: 'm1',
-      seq: 6,
-      pos: 6,
-      by: codexId,
-      text: 'first',
-      mentions: [ownerId],
-    });
+    const ap1 = row<p.MsgRow>('row-msg-approval-pending', { id: 'ap1', seq: 6, pos: 6 });
     const m2 = row<p.MsgRow>('row-msg-summary', { id: 'm2', seq: 7, pos: 7 });
-    const m3 = row<p.MsgRow>('row-msg-approval-pending', { id: 'm3', seq: 8, pos: 8 });
-    pushLive(group, [m2, m1, m3]);
+    const ap3 = row<p.MsgRow>('row-msg-decision-pending', { id: 'ap3', seq: 8, pos: 8 });
+    pushLive(group, [m2, ap1, ap3]);
     notifier.sync([home]);
     expect(notifier.items.map((i) => [i.msg.id, i.kind, i.needsYou])).toEqual([
-      ['m1', 'mention', false],
+      ['ap1', 'approval', true],
       ['m2', 'done', false],
-      ['m3', 'approval', true],
+      ['ap3', 'decision', true],
     ]);
     expect(notifier.items).toHaveLength(maxNotices);
 
-    // 4th arrival evicts oldest ('m1') and clears its pending timer.
-    const m4 = row<p.MsgRow>('row-msg-decision-pending', { id: 'm4', seq: 9, pos: 9 });
-    pushLive(group, [m4]);
+    // 4th arrival evicts self-closing 'm2' (index 1) rather than older blocking 'ap1' (index 0).
+    const men4 = row<p.MsgRow>('row-msg-text', {
+      id: 'men4',
+      seq: 9,
+      pos: 9,
+      by: codexId,
+      text: 'ping',
+      mentions: [ownerId],
+    });
+    pushLive(group, [men4]);
     notifier.sync([home]);
     expect(clearSpy).toHaveBeenCalledTimes(1);
-    expect(notifier.items.map((i) => i.msg.id)).toEqual(['m2', 'm3', 'm4']);
+    expect(notifier.items.map((i) => i.msg.id)).toEqual(['ap1', 'ap3', 'men4']);
 
-    // Boundary before autoDismissMs keeps 'm2'; exact autoDismissMs dismisses 'm2' only.
+    // Holds by focus and pointer stack: the delay restarts in full only when both let go.
+    const ids = () => notifier.items.map((i) => i.msg.id);
+    const [apKey, , menKey] = notifier.items.map((i) => i.key);
+    vi.advanceTimersByTime(autoDismissMs - 1_000);
+    notifier.hold(menKey);
+    notifier.hold(menKey);
+    vi.advanceTimersByTime(autoDismissMs);
+    notifier.release(menKey);
+    vi.advanceTimersByTime(autoDismissMs);
+    expect(ids()).toEqual(['ap1', 'ap3', 'men4']);
+    notifier.release(menKey);
     vi.advanceTimersByTime(autoDismissMs - 1);
-    expect(notifier.items.map((i) => i.msg.id)).toEqual(['m2', 'm3', 'm4']);
-    vi.advanceTimersByTime(1);
-    expect(notifier.items.map((i) => i.msg.id)).toEqual(['m3', 'm4']);
+    expect(ids()).toEqual(['ap1', 'ap3', 'men4']);
 
-    // Blocking cards ('m3', 'm4') stay across arbitrary elapsed time.
+    // Letting go of a waiting card arms nothing, even while a self-closing one is shown.
+    notifier.hold(apKey);
+    notifier.release(apKey);
+    vi.advanceTimersByTime(1);
+    expect(ids()).toEqual(['ap1', 'ap3']);
     vi.advanceTimersByTime(60_000);
-    expect(notifier.items.map((i) => i.msg.id)).toEqual(['m3', 'm4']);
+    expect(ids()).toEqual(['ap1', 'ap3']);
+
+    // A notification gone while held stays gone when it is let go.
+    pushLive(group, [row<p.MsgRow>('row-msg-summary', { id: 'sum5', seq: 10, pos: 10 })]);
+    notifier.sync([home]);
+    const sum5 = notifier.items[2].key;
+    notifier.hold(sum5);
+    notifier.dismiss(sum5);
+    notifier.release(sum5);
+    vi.advanceTimersByTime(autoDismissMs);
+    expect(ids()).toEqual(['ap1', 'ap3']);
+
+    // With three waiting cards a self-closing newcomer gives way, and a waiting one drops the oldest.
+    clearSpy.mockClear();
+    pushLive(group, [
+      row<p.MsgRow>('row-msg-brief-pending', { id: 'br7', seq: 11, pos: 11 }),
+      row<p.MsgRow>('row-msg-summary', { id: 'sum8', seq: 12, pos: 12 }),
+    ]);
+    notifier.sync([home]);
+    expect(ids()).toEqual(['ap1', 'ap3', 'br7']);
+    expect(clearSpy).toHaveBeenCalledTimes(1);
+    pushLive(group, [row<p.MsgRow>('row-msg-approval-pending', { id: 'ap9', seq: 13, pos: 13 })]);
+    notifier.sync([home]);
+    expect(ids()).toEqual(['ap3', 'br7', 'ap9']);
+    vi.advanceTimersByTime(60_000);
+    expect(ids()).toEqual(['ap3', 'br7', 'ap9']);
   });
 
   it('prunes resolved cards, deleted rows, opened chats and removed groups or homes without looping in $effect', () => {
@@ -538,9 +575,10 @@ describe('Notifier', () => {
     expect(document.activeElement).toBe(taskEl);
     expect(notifier.items).toEqual([]);
 
-    // Opening from terminal route with same g navigates to chat and focuses decision input.
+    // Opening from terminal route with same g waits for real hashchange + tick before focusing.
     setRoute(`#/terminal/${website}/${codexId}`);
     hashSpy.mockClear();
+    const addSpy = vi.spyOn(globalThis, 'addEventListener');
     pushLive(group, [row<p.MsgRow>('row-msg-decision-pending', { id: 'dc-jump', seq: 8, pos: 8 })]);
     notifier.sync([home]);
     const dcEl = document.createElement('div');
@@ -548,18 +586,26 @@ describe('Notifier', () => {
     dcEl.scrollIntoView = vi.fn();
     const input = document.createElement('input');
     dcEl.appendChild(input);
-    document.body.appendChild(dcEl);
+    const stopMount = watch(() => {
+      if (route.page === 'chat' && route.params.g === website) document.body.appendChild(dcEl);
+    });
 
     const crossRouteEvent = new MouseEvent('click', { cancelable: true });
     const opening = notifier.open(crossRouteEvent, notifier.items[0]);
     expect(crossRouteEvent.defaultPrevented).toBe(true);
+    expect(location.hash).toBe(`#/groups/${website}`);
+    expect(hashSpy).not.toHaveBeenCalled();
+    expect(addSpy).toHaveBeenCalledWith('hashchange', expect.any(Function), { once: true });
+    expect(document.activeElement).not.toBe(input);
+    dispatchEvent(new HashChangeEvent('hashchange', { newURL: location.href }));
     await opening;
     expect(route.page).toBe('chat');
     expect(route.params.g).toBe(website);
     expect(hashSpy).toHaveBeenCalledTimes(1);
     expect(document.activeElement).toBe(input);
+    stopMount();
 
-    // Opening from another group's chat switches group.
+    // Opening from another group's chat switches group on hashchange.
     setRoute(`#/groups/${otherGroup}`);
     hashSpy.mockClear();
     pushLive(group, [row<p.MsgRow>('row-msg-brief-pending', { id: 'br-jump', seq: 9, pos: 9 })]);
@@ -571,7 +617,12 @@ describe('Notifier', () => {
     brEl.appendChild(btn);
     document.body.appendChild(brEl);
 
-    await notifier.open(new MouseEvent('click', { cancelable: true }), notifier.items[0]);
+    const otherChatOpening = notifier.open(
+      new MouseEvent('click', { cancelable: true }),
+      notifier.items[0],
+    );
+    dispatchEvent(new HashChangeEvent('hashchange', { newURL: location.href }));
+    await otherChatOpening;
     expect(route.page).toBe('chat');
     expect(route.params.g).toBe(website);
     expect(hashSpy).toHaveBeenCalledTimes(1);

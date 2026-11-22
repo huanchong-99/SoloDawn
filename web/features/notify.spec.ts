@@ -6,7 +6,7 @@ import { homes } from '../src/lib/groups.svelte';
 import { autoDismissMs } from '../src/lib/notify.svelte';
 import { prefs } from '../src/lib/prefs.svelte';
 import { browser, example, owner, TestHome } from './home';
-import { all, closePage, one, openPage, texts } from './page';
+import { all, closePage, go, one, openPage, texts } from './page';
 
 const feature = await loadFeature('../features/web_notify.feature');
 
@@ -17,6 +17,9 @@ const secretary = 'qBSFMsr2hHYKOMblEA_kdA';
 const claude = 'LXCZmuGAXkvO-bSrOkuCfw';
 const taskId = 'DrtCn6htSBwmMPrFPbHJHA';
 const approvalId = 'netluHiPQf-UoheEIBfbLw';
+
+const activeToasts = (sub = '') => all(`.toast:not([inert])${sub ? ` ${sub}` : ''}`);
+const toastTexts = (sub: string) => texts(`.toast:not([inert]) ${sub}`);
 
 describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   let home: TestHome;
@@ -81,9 +84,13 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     'Blocking cards appear in dawn on other pages, jump to the card on Open, and clear when resolved',
     ({ Given, Then, When }) => {
       Given('the person opens the client at "#/nodes"', () => openPage('#/nodes'));
-      Then('no notification is shown for the rows already held', () => {
-        expect(all('.notify')).toEqual([]);
-      });
+      Then(
+        'the polite live region of notifications is in the page, empty, for the rows already held',
+        () => {
+          expect(one('section.notify').getAttribute('aria-live')).toBe('polite');
+          expect(all('.toast')).toEqual([]);
+        },
+      );
       When(
         '"Codex" posts a pending approval in "Website" and a pending approval for "Mina"',
         () => {
@@ -106,10 +113,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         'the notification layer shows one warm notification "Approval · Time the path change in a browser." for "Website · Codex"',
         () => {
           expect(one('section.notify').getAttribute('aria-label')).toBe('Notifications');
-          expect(texts('.toast b')).toEqual(['Approval · Time the path change in a browser.']);
-          expect(texts('.toast p')).toEqual(['Website · Codex']);
-          expect(one('.toast').classList.contains('need')).toBe(true);
-          expect(one('.toast a.btn').classList.contains('btn-dawn')).toBe(true);
+          expect(toastTexts('b')).toEqual(['Approval · Time the path change in a browser.']);
+          expect(toastTexts('p')).toEqual(['Website · Codex']);
+          expect(one('.toast:not([inert])').classList.contains('need')).toBe(true);
+          expect(one('.toast:not([inert]) a.btn').classList.contains('btn-dawn')).toBe(true);
         },
       );
       When('"Secretary" posts a pending decision and a pending brief in "Website"', () => {
@@ -120,7 +127,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then(
         'the notification layer shows the approval, "Your call · Where should the path appear?" and "Confirm start · Show connection paths"',
         () => {
-          expect(texts('.toast b')).toEqual([
+          expect(toastTexts('b')).toEqual([
             'Approval · Time the path change in a browser.',
             'Your call · Where should the path appear?',
             'Confirm start · Show connection paths',
@@ -132,13 +139,14 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         flushSync();
       });
       Then('the approval notification disappears, leaving the decision and the brief', () => {
-        expect(texts('.toast b')).toEqual([
+        expect(toastTexts('b')).toEqual([
           'Your call · Where should the path appear?',
           'Confirm start · Show connection paths',
         ]);
       });
       When('the person clicks "Open" on the brief notification', async () => {
-        all<HTMLAnchorElement>('.toast a.btn')[1].click();
+        all<HTMLAnchorElement>('.toast:not([inert]) a.btn')[1].click();
+        go(location.hash);
         await vi.waitFor(() => expect(texts('.chat-head h2')).toEqual(['Website']));
         flushSync();
       });
@@ -149,14 +157,14 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           const briefEl = document.getElementById('m-br-live')!;
           expect(scrolled.at(-1)).toBe(briefEl);
           expect(document.activeElement?.textContent?.trim()).toBe('Confirm & start');
-          expect(all('.notify')).toEqual([]);
+          expect(activeToasts()).toEqual([]);
         },
       );
     },
   );
 
   Scenario(
-    'Mentions and completed tasks auto-dismiss, cap the stack, and can be dismissed by hand',
+    'Mentions and completed tasks pause under focus or pointer, auto-dismiss after leaving, and yield to blocking cards',
     ({ Given, When, Then }) => {
       Given('the person opens the client at "#/settings"', () => {
         vi.useFakeTimers();
@@ -173,30 +181,82 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then(
         'the notification layer shows two calm notifications: "Mentioned you · Check `path.go` first" and "Task done · T-12 Show connection path"',
         () => {
-          expect(texts('.toast b')).toEqual([
+          expect(toastTexts('b')).toEqual([
             'Mentioned you · Check `path.go` first',
             'Task done · T-12 Show connection path',
           ]);
-          expect(all('.toast.need')).toEqual([]);
-          expect(all('.toast a.btn-dawn')).toEqual([]);
-          expect(all('.toast').map((el) => el.getAttribute('data-tone'))).toEqual(['sky', 'ok']);
+          expect(all('.toast:not([inert]).need')).toEqual([]);
+          expect(activeToasts('a.btn-dawn')).toEqual([]);
+          expect(activeToasts().map((el) => el.getAttribute('data-tone'))).toEqual(['sky', 'ok']);
         },
       );
       When('the person clicks "Dismiss notification" on the mention notification', () => {
-        all<HTMLButtonElement>('.toast button.icon-btn')[0].click();
+        all<HTMLButtonElement>('.toast:not([inert]) button.icon-btn')[0].click();
         flushSync();
       });
       Then('only the task-done notification remains', () => {
-        expect(texts('.toast b')).toEqual(['Task done · T-12 Show connection path']);
-        expect(texts('.toast p')).toEqual(['Website · Secretary']);
+        expect(toastTexts('b')).toEqual(['Task done · T-12 Show connection path']);
+        expect(toastTexts('p')).toEqual(['Website · Secretary']);
       });
-      When('8 seconds pass', () => {
+      When(
+        'keyboard focus lands on "Open" of the task-done notification and 8 seconds pass',
+        () => {
+          const openLink = one<HTMLAnchorElement>('.toast:not([inert]) a.btn');
+          const dismissBtn = one<HTMLButtonElement>('.toast:not([inert]) button.icon-btn');
+          openLink.focus();
+          dismissBtn.focus();
+          openLink.focus();
+          vi.advanceTimersByTime(autoDismissMs);
+          flushSync();
+        },
+      );
+      Then('the task-done notification stays visible with focus on its "Open" link', () => {
+        const openLink = one<HTMLAnchorElement>('.toast:not([inert]) a.btn');
+        expect(toastTexts('b')).toEqual(['Task done · T-12 Show connection path']);
+        expect(document.activeElement).toBe(openLink);
+      });
+      When(
+        'the pointer enters the task-done notification, focus leaves it, and 8 seconds pass',
+        () => {
+          const toast = one('.toast:not([inert])');
+          toast.dispatchEvent(new PointerEvent('pointerenter'));
+          one<HTMLAnchorElement>('.toast:not([inert]) a.btn').blur();
+          vi.advanceTimersByTime(autoDismissMs);
+          flushSync();
+        },
+      );
+      Then('the task-done notification stays visible', () => {
+        expect(toastTexts('b')).toEqual(['Task done · T-12 Show connection path']);
+      });
+      When('the pointer leaves the task-done notification and 8 seconds pass', () => {
+        one('.toast:not([inert])').dispatchEvent(new PointerEvent('pointerleave'));
         vi.advanceTimersByTime(autoDismissMs);
         flushSync();
       });
-      Then('no notification is shown', () => {
-        expect(all('.notify')).toEqual([]);
+      Then('no notification is shown and the empty live region stays', () => {
+        expect(activeToasts()).toEqual([]);
+        expect(one('section.notify').getAttribute('aria-live')).toBe('polite');
       });
+      When(
+        '"Codex" posts a pending approval in "Website", mentions the owner with "Look here", and "Secretary" posts a pending decision and a pending brief',
+        () => {
+          home.write(website, example('row-msg-approval-pending', { id: 'ap-cap', by: codex }));
+          home.say(website, codex, 'Look here', { mentions: [owner] });
+          home.write(website, example('row-msg-decision-pending', { id: 'dc-cap', by: secretary }));
+          home.write(website, example('row-msg-brief-pending', { id: 'br-cap', by: secretary }));
+          flushSync();
+        },
+      );
+      Then(
+        'the mention yields its place so the approval, the decision and the brief stay visible',
+        () => {
+          expect(toastTexts('b')).toEqual([
+            'Approval · Time the path change in a browser.',
+            'Your call · Where should the path appear?',
+            'Confirm start · Show connection paths',
+          ]);
+        },
+      );
     },
   );
 
@@ -215,7 +275,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       Then('no notification is shown', () => {
-        expect(all('.notify')).toEqual([]);
+        expect(activeToasts()).toEqual([]);
       });
       When(
         '"Codex" mentions the owner inside task 12\'s thread in "Website" and "Mina" mentions the owner in "Docs"',
@@ -239,15 +299,15 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then(
         'the notification layer shows the thread mention for "Website · Codex" and the mention for "Docs · Mina"',
         () => {
-          expect(texts('.toast b')).toEqual([
+          expect(toastTexts('b')).toEqual([
             'Mentioned you · @Alex keep fallback?',
             'Mentioned you · @Alex docs are ready',
           ]);
-          expect(texts('.toast p')).toEqual(['Website · Codex', 'Docs · Mina']);
+          expect(toastTexts('p')).toEqual(['Website · Codex', 'Docs · Mina']);
         },
       );
       When('the person clicks "Open" on the thread mention notification', () => {
-        all<HTMLAnchorElement>('.toast a.btn')[0].click();
+        all<HTMLAnchorElement>('.toast:not([inert]) a.btn')[0].click();
         flushSync();
       });
       Then('the chat stays on "Website" and focus moves to task 12\'s card', () => {
@@ -255,7 +315,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         const taskEl = document.getElementById(`m-${taskId}`)!;
         expect(scrolled.at(-1)).toBe(taskEl);
         expect(taskEl.contains(document.activeElement)).toBe(true);
-        expect(texts('.toast p')).toEqual(['Docs · Mina']);
+        expect(toastTexts('p')).toEqual(['Docs · Mina']);
       });
     },
   );

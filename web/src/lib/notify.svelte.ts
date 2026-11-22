@@ -22,7 +22,8 @@ export interface Notice {
 /** Auto-dismiss delay in milliseconds for non-blocking notifications (`mention`, `done`). */
 export const autoDismissMs = 8_000;
 
-/** Maximum number of notifications shown at once; older ones make room for newer ones. */
+/** Maximum number of notifications shown at once. A newcomer past it drops the oldest self-closing
+ *  notification, or the oldest waiting card when none is self-closing. */
 export const maxNotices = 3;
 
 const waitingKinds: Partial<Record<MsgRow['kind'], NotifyKind>> = {
@@ -102,6 +103,7 @@ export class Notifier {
   items = $state<Notice[]>([]);
   #seen = new WeakMap<Group, number>();
   #timers = new Map<string, ReturnType<typeof setTimeout>>();
+  #held = new Map<string, number>();
 
   /** Updates visible notifications from the current `homes` and active route. */
   sync(allHomes: readonly Home[]): void {
@@ -117,6 +119,20 @@ export class Notifier {
     this.items = this.items.filter((item) => item.key !== key);
   }
 
+  /** Holds `key`'s auto-dismissal while focus or the pointer is on its notification. */
+  hold(key: string): void {
+    this.#held.set(key, (this.#held.get(key) ?? 0) + 1);
+    this.#clearTimer(key);
+  }
+
+  /** Lets go of one hold on `key`; the last restarts a self-closing notification's full delay. */
+  release(key: string): void {
+    const held = this.#held.get(key)! - 1;
+    this.#held.set(key, held);
+    if (held > 0) return;
+    if (this.items.some((item) => item.key === key && !item.needsYou)) this.#arm(key);
+  }
+
   /** Clears all timers and visible notifications. */
   clear(): void {
     for (const timer of this.#timers.values()) clearTimeout(timer);
@@ -128,10 +144,12 @@ export class Notifier {
   async open(event: Event, item: Notice): Promise<void> {
     event.preventDefault();
     this.dismiss(item.key);
-    const target = href('chat', { g: item.group.g });
     if (route.page !== 'chat' || route.params.g !== item.group.g) {
-      location.hash = target;
-      dispatchEvent(new HashChangeEvent('hashchange', { newURL: location.href }));
+      const moved = new Promise((resolve) =>
+        addEventListener('hashchange', resolve, { once: true }),
+      );
+      location.hash = href('chat', { g: item.group.g });
+      await moved;
       await tick();
     }
     jumpToMessage(event, item.targetId, item.msg.kind);
@@ -187,17 +205,20 @@ export class Notifier {
 
   #append(notice: Notice): void {
     const next = [...this.items, notice];
+    if (!notice.needsYou) this.#arm(notice.key);
     if (next.length > maxNotices) {
-      const dropped = next.shift() as Notice;
+      const selfClosing = next.findIndex((item) => !item.needsYou);
+      const [dropped] = next.splice(Math.max(0, selfClosing), 1);
       this.#clearTimer(dropped.key);
     }
     this.items = next;
-    if (!notice.needsYou) {
-      this.#timers.set(
-        notice.key,
-        setTimeout(() => this.dismiss(notice.key), autoDismissMs),
-      );
-    }
+  }
+
+  #arm(key: string): void {
+    this.#timers.set(
+      key,
+      setTimeout(() => this.dismiss(key), autoDismissMs),
+    );
   }
 
   #clearTimer(key: string): void {

@@ -12,7 +12,7 @@ Feature: In-page notifications of the web client
 
   Scenario: Blocking cards appear in dawn on other pages, jump to the card on Open, and clear when resolved
     Given the person opens the client at "#/nodes"
-    Then no notification is shown for the rows already held
+    Then the polite live region of notifications is in the page, empty, for the rows already held
     When "Codex" posts a pending approval in "Website" and a pending approval for "Mina"
     Then the notification layer shows one warm notification "Approval · Time the path change in a browser." for "Website · Codex"
     When "Secretary" posts a pending decision and a pending brief in "Website"
@@ -22,14 +22,20 @@ Feature: In-page notifications of the web client
     When the person clicks "Open" on the brief notification
     Then the chat of "Website" opens with focus on the "Confirm & start" button and no notifications remain
 
-  Scenario: Mentions and completed tasks auto-dismiss, cap the stack, and can be dismissed by hand
+  Scenario: Mentions and completed tasks pause under focus or pointer, auto-dismiss after leaving, and yield to blocking cards
     Given the person opens the client at "#/settings"
     When "Codex" mentions the owner in "Website" with "Check `path.go` first" and "Secretary" posts a summary for task 12
     Then the notification layer shows two calm notifications: "Mentioned you · Check `path.go` first" and "Task done · T-12 Show connection path"
     When the person clicks "Dismiss notification" on the mention notification
     Then only the task-done notification remains
-    When 8 seconds pass
-    Then no notification is shown
+    When keyboard focus lands on "Open" of the task-done notification and 8 seconds pass
+    Then the task-done notification stays visible with focus on its "Open" link
+    When the pointer enters the task-done notification, focus leaves it, and 8 seconds pass
+    Then the task-done notification stays visible
+    When the pointer leaves the task-done notification and 8 seconds pass
+    Then no notification is shown and the empty live region stays
+    When "Codex" posts a pending approval in "Website", mentions the owner with "Look here", and "Secretary" posts a pending decision and a pending brief
+    Then the mention yields its place so the approval, the decision and the brief stay visible
 
   Scenario: Main-line arrivals in the open chat stay quiet while thread mentions and other groups notify
     Given the person opens the client at "#/groups/rZNvy-1jH6Z-BcPqA5U5BQ"
