@@ -447,6 +447,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-22 · bug · `home.Loop.Close` and `node.Sessions` left connection pumps and host commands running into `Store.Close`
+
+- Symptom: `A5.19` raced under `-race` between `Store.Close` and `Conn.pump` delivering an inbox frame to the host, and an in-flight host command on `Sessions` could write its receipt after `nodeRuntime.Close` closed `node.db`.
+- Cause: `Loop.Attach` (`internal/home/run.go`) started `Conn.pump` and `Conn.watch` outside `Loop.wg`, and `Sessions.sesCmd` (`internal/node/session.go`) started `sesHostCmd` outside `nodeRuntime.bg`.
+- Status: resolved in #250: `Loop.Attach` tracks `Conn.pump` and `Conn.watch` in `Loop.wg`, `SessionConfig.Spawn` runs `sesHostCmd` inside `nodeRuntime.bg`, and the 30 ms settle in `features/m5_test.go` is removed (`TestRunCloseWaitsForConnectionSends`, `TestCloseWaitsForInflightHostCmd`).
+
 ### 2026-11-21 · deviation · Step 17 session and workspace cleanup awaits a close hook from the session runtime
 
 - Symptom: when a `rows` push marked a task `merged`, `cancelled` or reassigned, changed a task's reviewer, or marked a member `gone`, `deliver.go` did not end the session row or remove the task or review worktree.
