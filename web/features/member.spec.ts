@@ -158,7 +158,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           cli_version: '0.164.0',
           account: 'personal',
           login_ok: true,
-          driver: { accounts: ['api_key'], takeover: 'none' },
+          driver: { accounts: ['personal', 'team', 'api_key'], takeover: 'new' },
           models: [],
           caps: {},
           groups: [],
@@ -168,7 +168,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           cli_version: '2.1.311',
           account: 'api_key',
           login_ok: false,
-          driver: { accounts: ['api_key'], takeover: 'none' },
+          driver: { accounts: ['personal', 'team', 'api_key'], takeover: 'new' },
           models: [],
           caps: {},
           groups: [],
@@ -207,7 +207,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             cli_version: '2.1.311',
             account: 'personal',
             login_ok: true,
-            driver: { accounts: ['api_key'], takeover: 'none' },
+            driver: { accounts: ['personal', 'team', 'api_key'], takeover: 'new' },
             models: [],
             caps: {},
             groups: [
@@ -226,7 +226,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             cli_version: '0.164.0',
             account: null,
             login_ok: false,
-            driver: { accounts: ['api_key'], takeover: 'none' },
+            driver: { accounts: ['personal', 'team', 'api_key'], takeover: 'new' },
             models: [],
             caps: {},
             groups: [],
@@ -480,7 +480,23 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       And(
         'owned AI cards link to "Open terminal" when direct and disable "Open terminal" when relayed or offline, while Mina\'s AI shows none',
         async () => {
-          const winBox = makeNode('windows', 'win-id', [], workstation.home);
+          const winBox = makeNode(
+            'windows',
+            'win-id',
+            [
+              {
+                agent: 'codex',
+                cli_version: '0.164.0',
+                account: 'team',
+                login_ok: true,
+                driver: { accounts: ['personal', 'team', 'api_key'], takeover: 'resume' },
+                models: [],
+                caps: {},
+                groups: [],
+              },
+            ],
+            workstation.home,
+          );
           homes.push(winBox.store);
           await syncNode(winBox);
           paths.set(winBox.store, { kind: 'relay', rtt: 120, since: Date.now() });
@@ -641,7 +657,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             cli_version: '0.164.0',
             account: 'personal',
             login_ok: true,
-            driver: { accounts: ['api_key'], takeover: 'none' },
+            driver: { accounts: ['personal', 'team', 'api_key'], takeover: 'new' },
             models: [],
             caps: {},
             groups: [],
@@ -702,6 +718,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       When('the owner opens "Add AI"', async () => {
+        nodes.infos.clear();
         one<HTMLButtonElement>('.members .head button').click();
         flushSync();
         expect(one('#chat-side dialog .hint').getAttribute('role')).toBe('status');

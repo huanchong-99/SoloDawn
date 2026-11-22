@@ -1,12 +1,7 @@
 <script lang="ts">
   import Icon from '../Icon.svelte';
-  import {
-    accounts,
-    accountLabel,
-    cliName,
-    type PairingSession,
-    type Stage,
-  } from '../../lib/onboard.svelte';
+  import { offeredAccounts } from '../driver/driver';
+  import { accountLabel, cliName, type PairingSession, type Stage } from '../../lib/onboard.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { href } from '../../lib/route.svelte';
 
@@ -160,7 +155,7 @@
     </header>
     <fieldset class="acct" disabled={session.busy}>
       <legend class="sr">{t('pairing.acct.legend')} · {label}</legend>
-      {#each accounts as acct (acct)}
+      {#each offeredAccounts(item.driver) as acct (acct)}
         <label>
           <input
             type="radio"
