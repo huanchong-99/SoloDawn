@@ -17,14 +17,16 @@ test('offeredAccounts keeps the known types the driver allows, in the client ord
   expect(offeredAccounts({ accounts: ['api_key'], takeover: 'none' })).toEqual(['api_key']);
 });
 
-test('offersTerminal is false only when the host declares takeover none for the agent', () => {
+test('offersTerminal is false when a connected host declares no takeover for the agent', () => {
   const home = new Home({ user: 'u', sign });
   expect(offersTerminal(undefined, 'claude')).toBe(true);
   expect(offersTerminal(home, 'claude')).toBe(true);
+  home.ctl = {} as p.Ctl;
+  expect(offersTerminal(home, 'claude')).toBe(false);
   const info = p.decode(p.HostInfoPush, goldens['host-info-push']);
   info.agents[0].driver.takeover = 'none';
   nodes.infos.set(home, info);
   expect(offersTerminal(home, info.agents[0].agent)).toBe(false);
   expect(offersTerminal(home, info.agents[1].agent)).toBe(true);
-  expect(offersTerminal(home, 'opencode')).toBe(true);
+  expect(offersTerminal(home, 'opencode')).toBe(false);
 });

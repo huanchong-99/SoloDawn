@@ -328,6 +328,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       );
       When('the owner clicks "Open terminal" on the "Claude Code" member card', async () => {
         openPage(`#/groups/${website}`, 1440);
+        await vi.waitFor(() => {
+          flushSync();
+          expect(all('.member .card-foot a')).toHaveLength(1);
+        });
         const link = one<HTMLAnchorElement>('.member .card-foot a');
         expect(link.getAttribute('href')).toBe(`#/terminal/${website}/${claudeId}`);
         go(link.getAttribute('href')!);

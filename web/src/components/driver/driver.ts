@@ -9,7 +9,8 @@ import type { Driver } from '../../lib/proto';
 export const offeredAccounts = (driver: Driver) =>
   accounts.filter((acct) => driver.accounts.includes(acct));
 
-/** False when the last `host.info` of `host` declares `takeover` `none` for `agent`. */
+/** False when `host` is connected and its last `host.info` declares no takeover for `agent`. */
 export const offersTerminal = (host: Home | undefined, agent: string) =>
-  !host ||
-  nodes.infos.get(host)?.agents.find((each) => each.agent === agent)?.driver.takeover !== 'none';
+  !host?.ctl ||
+  (nodes.infos.get(host)?.agents.find((each) => each.agent === agent)?.driver.takeover ??
+    'none') !== 'none';

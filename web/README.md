@@ -470,22 +470,22 @@ file in `src/routes/`. It edits neither the shell nor another area:
     100 percent and omitted when `usage` has no `window_pct`; a `meter` to assistive technology,
     named by its label, with the percentage and the reset time as its value text), and
     for owned AIs whose driver has a takeover (`offersTerminal` of `src/components/driver/`) an
-    "Open terminal" link enabled only when the browser's own path to that computer is `direct`, or, while the AI is in `takeover`, a "Hand back" button that
-    sends `takeover.end` and says that messages to it wait until then; then the human members with
-    their roles and online status; actions and errors go below the person's name. Owners and
-    admins can generate a one-time invite with a countdown. The owner's row has no role or removal
-    action. Owners can promote, demote, and remove other people; admins can remove ordinary
-    members; non-owners can leave. Signed commands go to the group home, and its row pushes
-    update the panel. The access editor (`src/components/allow/`) places each AI's allow
-    list and approval delegates alongside its computer and account. Only its owner sees "Edit access"
-    next to the terminal action. The home applies the allow list
-    only on a team or API-key account and always retains the owner as an approver.
-    The panel's "Add AI" button requires a reachable group home, a group member, and at least
-    one connected owned computer, and shows its reason when disabled. The
-    add-AI dialog reads `host.info` from the owner's connected computers, suggests an unused member
-    name in the group, offers the secretary switch when the group has none or the reader is an
-    admin, signs `host.join` for the chosen computer, and words `home_unreachable`, `conflict` and
-    a lost computer directly before falling back to `Failure`.
+    "Open terminal" link enabled only when the browser's own path to that computer is `direct`, or,
+    while the AI is in `takeover`, a "Hand back" button that sends `takeover.end` and says that
+    messages to it wait until then; then the human members with their roles and online status;
+    actions and errors go below the person's name. Owners and admins can generate a one-time invite
+    with a countdown. The owner's row has no role or removal action. Owners can promote, demote, and
+    remove other people; admins can remove ordinary members; non-owners can leave. Signed commands
+    go to the group home, and its row pushes update the panel. The access editor
+    (`src/components/allow/`) places each AI's allow list and approval delegates alongside its
+    computer and account. Only its owner sees "Edit access" next to the terminal action. The home
+    applies the allow list only on a team or API-key account and always retains the owner as an
+    approver. The panel's "Add AI" button requires a reachable group home, a group member, and at
+    least one connected owned computer, and shows its reason when disabled. The add-AI dialog reads
+    `host.info` from the owner's connected computers, suggests an unused member name in the group,
+    offers the secretary switch when the group has none or the reader is an admin, signs `host.join`
+    for the chosen computer, and words `home_unreachable`, `conflict` and a lost computer directly
+    before falling back to `Failure`.
   - The group info panel (`src/components/groupinfo/`, `src/lib/groupinfo.svelte.ts`) mounts at
     `chat.side` (`order: 20`) below the member panel. Its folded "Project memory" section fetches
     `note` and `review` ledger pages on demand (`fetch` with `kind`), omits `gone` markers, and

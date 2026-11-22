@@ -6,12 +6,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-23 · limitation · The member panel offers "Open terminal" until `host.info` is read
-
-- Symptom: for an owned AI whose driver declares `takeover` `none`, the member panel shows "Open terminal" until the browser has read its computer's `host.info`, then removes it.
-- Cause: the declaration arrives only in `host.info` (`drivers.md` section 6); `offersTerminal` (`web/src/components/driver/driver.ts`) offers the terminal while none is cached, and the host refuses `takeover.start` for such a driver. The pairing and computers pages show account types from `host.info` only, so they offer none before it. The look of the member panel and account cards with fewer choices was not reviewed in screenshots.
-- Status: open, accepted for U3-3.
-
 ### 2026-11-22 · limitation · Remembered project homes without local AIs stay connected
 
 - Symptom: remembering a project home now retains a connection even when no AI is hosted locally in that group.

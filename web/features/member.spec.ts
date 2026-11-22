@@ -476,7 +476,22 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       And(
         'owned AI cards link to "Open terminal" when direct and disable "Open terminal" when relayed or offline, while Mina\'s AI shows none',
         async () => {
-          const winBox = makeNode('windows', 'win-id', [], workstation.home);
+          const winBox = makeNode(
+            'windows',
+            'win-id',
+            [
+              {
+                agent: 'codex',
+                cli_version: '0.164.0',
+                account: 'team',
+                login_ok: true,
+                driver: { accounts: ['personal', 'team', 'api_key'], takeover: 'resume' },
+                caps: {},
+                groups: [],
+              },
+            ],
+            workstation.home,
+          );
           homes.push(winBox.store);
           await syncNode(winBox);
           paths.set(winBox.store, { kind: 'relay', rtt: 120, since: Date.now() });
