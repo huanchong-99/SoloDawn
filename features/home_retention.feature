@@ -12,6 +12,7 @@ Feature: Daily retention in the group home
     And 6 days ago the group received the text message "Six days ago"
     When the daily retention job runs today
     Then the store holds the messages "Still waiting, Six days ago"
+    And a cold sync of the group delivers "Still waiting, Six days ago"
     And a second retention tick on the same day changes nothing
 
   Scenario: Notes and review messages remain, and a deletion marker raises the purge mark only once it ages out
@@ -22,16 +23,15 @@ Feature: Daily retention in the group home
     When the daily retention job runs today
     Then the store still holds the note "Keep paths canonical" and the review message "Score 92"
     And the deletion marker for "Obsolete note" is gone while the deletion marker for "Recent forget" remains
-    And the group's purge mark equals the sequence number of the removed marker for "Obsolete note"
-    And a client cursor older than that removed marker is below the purge mark while a cursor at it is not
+    And syncing from before the removed marker for "Obsolete note" resets the client while syncing from that marker sends a delta without reset
 
-  Scenario: A confirmed brief stays while a task made from it is queued and carries its confirmation when released
+  Scenario: A confirmed brief stays while a task made from it is queued and remains fetchable when released
     Given a group home with retention set to 7 days
     And 8 days ago the owner confirmed a brief with a queued dependent task and a second brief without a queued task
     When the daily retention job runs today
     Then the store still holds the brief with the queued task and has deleted the brief without a queued task
     When the dependency merges and releases the queued task
-    Then the released task's assign item carries the exact confirmation of its brief
+    Then the host receives the released task's assign item and can fetch its confirmed brief
     When another day passes and the daily retention job runs again
     Then the store has deleted the brief that had the queued task
 

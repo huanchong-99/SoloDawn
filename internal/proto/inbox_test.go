@@ -3,12 +3,13 @@ package proto
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
-// item starts the payload of an item for the example AI, which the home signs.
+// item starts a plain inbox item for the example AI.
 func item(why string, number int64) Item {
-	return Item{Type: "item", Nonce: ID(id("item " + why)), Timestamp: ts, Group: ID(group), To: host, Item: number, AI: ID(agent), Why: why}
+	return Item{Item: number, AI: ID(agent), Why: why}
 }
 
 func (i Item) about(task, msg string) Item {
@@ -38,6 +39,15 @@ func TestItemGoldens(t *testing.T) {
 	merge := item("merge", 4411).about(taskID, "")
 	merge.Commit, merge.PR = commit, 31
 	golden(t, "item-merge", merge)
+
+	for _, name := range exampleNames(t) {
+		if after, ok := strings.CutPrefix(name, "item-"); ok {
+			var read Item
+			if err := Decode(example(t, name), &read); err != nil || read.Why != after {
+				t.Errorf("%s read as why %q, %v", name, read.Why, err)
+			}
+		}
+	}
 }
 
 func TestInboxGoldens(t *testing.T) {
@@ -46,22 +56,21 @@ func TestInboxGoldens(t *testing.T) {
 	review.AI, review.Commit = ID(reviewer), commit
 	row := taskExample()
 	message := exampleRow[TaskBody, NoCard](t, messageExample{kind: "task", author: "system"}, TaskBody{taskID}, nil, 790)
-	confirm := actExample(t, "brief", "confirm", "", "")
 	inbox := Inbox{"inbox", ID(group), []InboxItem{
-		// The assignment that follows a confirmed brief: its task message, the task, and the act that confirmed.
-		{signed(node, string(wireJSON(t, assign))), wireJSON(t, message), &row, &confirm},
-		{Env: signed(node, string(wireJSON(t, review))), Task: &row},
+		// The assignment that follows a confirmed brief: the plain item, its task message and the task.
+		{assign, wireJSON(t, message), &row},
+		{Item: review, Task: &row},
 	}}
 	golden(t, "inbox", inbox)
 	golden(t, "ack", Ack{"ack", ID(group), 4403})
 
-	// What a host reads from an item: the payload its home signed, and beside it the rows that payload names.
-	var first Item
-	if err := Decode([]byte(inbox.Items[0].Env.Payload), &first); err != nil || first != assign {
-		t.Fatalf("item payload read as %+v, %v", first, err)
+	// What a host reads from an item: the plain item, and beside it the rows that item names.
+	var read Inbox
+	if err := Decode(example(t, "inbox"), &read); err != nil || read.Items[0].Item != assign {
+		t.Fatalf("inbox item read as %+v, %v", read, err)
 	}
 	var copied MessageRow[TaskBody, NoCard]
-	if err := Decode(inbox.Items[0].Msg, &copied); err != nil || ID(copied.ID) != first.Msg || ID(inbox.Items[0].Task.ID) != first.Task {
+	if err := Decode(read.Items[0].Msg, &copied); err != nil || ID(copied.ID) != read.Items[0].Item.Msg || ID(read.Items[0].Task.ID) != read.Items[0].Item.Task {
 		t.Errorf("the rows beside the item: %+v, %v", copied, err)
 	}
 }
@@ -87,11 +96,12 @@ func TestAnItemJumpsOnlyWithTrue(t *testing.T) {
 	}
 }
 
-// An inbox with no items, and an item with nothing beside its envelope, hold no null.
+// An inbox with no items, and an item with nothing beside its plain item, hold no null.
 func TestInboxHoldsNoNull(t *testing.T) {
+	resume := item("resume", 1).about(taskID, "")
 	for _, inbox := range []Inbox{
 		{"inbox", ID(group), []InboxItem{}},
-		{"inbox", ID(group), []InboxItem{{Env: signed(node, string(wireJSON(t, item("resume", 1).about(taskID, ""))))}}},
+		{"inbox", ID(group), []InboxItem{{Item: resume}}},
 	} {
 		encoded := wireJSON(t, inbox)
 		if nulls := UnexpectedNulls(encoded); len(nulls) != 0 {
@@ -102,11 +112,15 @@ func TestInboxHoldsNoNull(t *testing.T) {
 			t.Errorf("read %+v, %v\nwant %+v", read, err, inbox)
 		}
 	}
-	var item InboxItem
-	for _, member := range []string{"msg", "task", "cause"} {
-		if err := Decode([]byte(`{"env":{"p":"{}","k":"k","s":"s"},"`+member+`":null}`), &item); err != errNull {
+	raw := string(wireJSON(t, resume))
+	var got InboxItem
+	if err := Decode([]byte(`{"item":null}`), &got); err != errNull {
+		t.Errorf("item null: %v, want %v", err, errNull)
+	}
+	for _, member := range []string{"msg", "task"} {
+		if err := Decode([]byte(`{"item":`+raw+`,"`+member+`":null}`), &got); err != errNull {
 			t.Errorf("%s null: %v, want %v", member, err, errNull)
 		}
 	}
-	var _ json.RawMessage = item.Msg
+	var _ json.RawMessage = got.Msg
 }

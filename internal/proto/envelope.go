@@ -1,6 +1,11 @@
 // Package proto defines SoloDawn's JSON wire types.
 package proto
 
+import (
+	"crypto/rand"
+	"encoding/base64"
+)
+
 // Envelope keeps the signed JSON text intact; parsing and re-encoding Payload
 // before checking its signature would change the signed bytes.
 type Envelope struct {
@@ -13,6 +18,13 @@ type Envelope struct {
 // characters (contracts/envelope.md section 1). Decode refuses any other text
 // in a field of this type.
 type ID string
+
+// NewNonce returns a random 16-byte ID in canonical base64url spelling.
+func NewNonce() ID {
+	var b [16]byte
+	rand.Read(b[:])
+	return ID(base64.RawURLEncoding.EncodeToString(b[:]))
+}
 
 type PayloadHeader struct {
 	Type      string `json:"t"`

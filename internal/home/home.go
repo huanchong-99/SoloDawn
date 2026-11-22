@@ -171,19 +171,18 @@ func sizeLimit(row any) int {
 }
 
 // Item is an inbox item that a command queues for an AI, before the home
-// signs it: the fields that planning/contracts/datachannel.md section 6
+// numbers it: the fields that planning/contracts/datachannel.md section 6
 // gives its why. A field the why does not have stays at its zero value.
 type Item struct {
 	AI     string // the member it is for; for merge, the assignee whose host merges
 	Why    string
 	Task   string
 	Msg    string
-	Commit string          // review, merge
-	PR     int             // merge, when the group has a remote
-	Jump   bool            // mention, after the author's jump
-	Code   string          // notice
-	Detail string          // notice, where its case has one
-	Cause  *proto.Envelope // the signed act that led to the item
+	Commit string // review, merge
+	PR     int    // merge, when the group has a remote
+	Jump   bool   // mention, after the author's jump
+	Code   string // notice
+	Detail string // notice, where its case has one
 
 	// NotBefore holds the item back until that time, in Unix milliseconds:
 	// the wake-up cap. 0 sends it at once.

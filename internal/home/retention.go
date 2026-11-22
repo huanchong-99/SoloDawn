@@ -1,14 +1,10 @@
 package home
 
 import (
-	"database/sql"
-	"errors"
-	"fmt"
 	"sync"
 	"time"
 	"weak"
 
-	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
@@ -21,9 +17,8 @@ import (
 const RetainEvent = "retention"
 
 const (
-	retDayMS       = 86_400_000
-	retSettingKey  = "retention_days"
-	retDefaultDays = 90
+	retDayMS      = 86_400_000
+	retSettingSQL = "SELECT coalesce((SELECT value FROM setting WHERE key='retention_days'), '90')"
 )
 
 // retMu guards retRuns only and calls nothing while held, so both the store's
@@ -49,8 +44,8 @@ func RetainWrite(now int64) Write {
 type retWrite int64
 
 func (w retWrite) Put(tx *store.Tx) error {
-	days, err := retDays(tx)
-	if err != nil {
+	var days int
+	if err := tx.QueryRow(retSettingSQL).Scan(&days); err != nil {
 		return err
 	}
 	return tx.Retain(time.UnixMilli(int64(w)), days)
@@ -86,27 +81,4 @@ func retRecord(s *State, now int64) {
 	retMu.Lock()
 	defer retMu.Unlock()
 	retRuns[weak.Make(s)] = now
-}
-
-func retDays(tx *store.Tx) (int, error) {
-	var raw string
-	err := tx.QueryRow("SELECT value FROM setting WHERE key=?", retSettingKey).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return retDefaultDays, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	return retParseDays(raw)
-}
-
-func retParseDays(raw string) (int, error) {
-	var days int
-	if err := proto.Decode([]byte(raw), &days); err != nil {
-		return 0, fmt.Errorf("setting %s: %w", retSettingKey, err)
-	}
-	if days < 1 {
-		return 0, fmt.Errorf("setting %s must be at least 1, got %d", retSettingKey, days)
-	}
-	return days, nil
 }
