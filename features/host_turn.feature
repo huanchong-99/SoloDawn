@@ -37,12 +37,15 @@ Feature: A host composes session instructions and turn text
       """
     And the noted turn has depth 2 and thread of task 12
 
-  Scenario: A confirmed brief without cause names its writer and confirmer from card state
+  Scenario: A confirmed brief without cause names its confirmer from card state
     Given a host turn fixture
     When the host composes a confirmed brief turn confirmed by the owner
-    Then the item header is:
+    Then the composed turn text is:
       """
-      == 1 of 1 · confirmed · from "Secretary" (AI), confirmed by "owner" in main · instruction
+      [SoloDawn] group "Website" · you are "Secretary" · secretary session
+      == 1 of 1 · confirmed · instruction
+      -- from "owner" in main · instruction
+      Brief "Connection path" (id KaiCW9JC8UOG7lKNduDo8Q) confirmed.
       """
 
   Scenario: A decided card without cause carries choice and free-text answer from card state
@@ -51,7 +54,8 @@ Feature: A host composes session instructions and turn text
     Then the composed turn text is:
       """
       [SoloDawn] group "Website" · you are "Secretary" · secretary session
-      == 1 of 1 · decided · from "owner" in main · instruction
+      == 1 of 1 · decided · instruction
+      -- from "owner" in main · instruction
       Decision (id Zk3m8vN2pQ5rT7wX9yB1cA): Where should the notice go?
       Choice: A (Top bar)
       Keep it subtle.

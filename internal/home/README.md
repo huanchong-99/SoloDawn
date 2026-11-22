@@ -189,7 +189,9 @@ names that start with `brief`, their tests too, and their test functions start w
 The task commands (`cmd_task.go`) take the names that start with `tsk`, their tests too, and their
 test functions start with `TestTaskCmd`. The posts of HM-6 take the names that start with `post`,
 their tests too, and their test functions start with `TestPost`; the notes and `forget` take the
-names that start with `note`, their tests too, and their test functions start with `TestNote`.
+names that start with `note`, their tests too, and their test functions start with `TestNote`;
+the knowledge base (`kb.go`) takes the names that start with `kb`, and its test functions start
+with `TestKB`.
 The cards take the names that start with `card`, their tests too, and their test functions start
 with `TestCard`. Device-log events (`ev_device.go`) take the names that start with `dev`, and their
 tests start with `TestDevice` and `dev`. Sync takes the names that start with `syn`, its tests too,
@@ -294,7 +296,7 @@ once for each connection until its next `Inbox`, and the other items are sent.
 ([datachannel](../../planning/contracts/datachannel.md), section 4): a page by `kind` (`note`,
 `preset`, `kb` or `review`) when `Kind` is set, one live row when `Row` or `RowID` is set, or a page of a task's
 thread or of the main line (`Thread` nil) otherwise. Paged reads require `Limit` in 1..100 and
-`Before >= 0` (`bad_request` otherwise). On the goroutine of the group (`ask`), it checks that the
+`Before >= 0` (`bad_request` otherwise). With `kind: kb`, a non-nil `Query` turns the page into a search: it requires `Before` 0 and a non-blank query (`bad_request` otherwise) and returns the matching documents best first (`kbSearchOK`, `store.SearchKB`). On the goroutine of the group (`ask`), it checks that the
 connection is still seated, that the group exists (`not_found` otherwise) and serves the
 connection's device (`forbidden` otherwise), opens and closes a `store.Snapshot`, packs page rows
 with `runBatches` within the 61,440-byte `ctl` limit

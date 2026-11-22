@@ -47,7 +47,7 @@ func TestSchemaAndReopen(t *testing.T) {
 	check(t, err)
 	equal(t, scalar[string](t, s.db, "PRAGMA journal_mode"), "wal")
 	equal(t, s.db.Stats().MaxOpenConnections, 0)
-	equal(t, scalar[int](t, s.db, "PRAGMA user_version"), 2)
+	equal(t, scalar[int](t, s.db, "PRAGMA user_version"), 3)
 	equal(t, scalar[string](t, s.db, `SELECT group_concat(name,',' ORDER BY name) FROM pragma_table_list
 		WHERE name NOT LIKE 'sqlite_%' AND strict=1`), "agent,approval,audit,device_log,grp,inbox,peer,perm,processed_offer,push_sub,receipt,row,session,setting,usage")
 	equal(t, scalar[string](t, s.db, `SELECT group_concat(name,',' ORDER BY name) FROM sqlite_schema
