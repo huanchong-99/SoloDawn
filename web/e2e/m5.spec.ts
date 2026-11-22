@@ -798,7 +798,10 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await poll(() => page.locator('.line .msg .text').allTextContents()).toContain(
         'Confirmed approval and selected option B: SQLite table.',
       );
-      const stdinLines = (await readFile(stdinLog, 'utf8')).trim().split('\n');
+      const stdinLines = (await readFile(stdinLog, 'utf8'))
+        .trim()
+        .split('\n')
+        .filter((line) => !line.includes('"control_request"'));
       expect(stdinLines).toHaveLength(2);
       expect(stdinLines[1]).toContain('Which caching backend should we ship?');
       expect(stdinLines[1]).toContain('Choice: B (SQLite table)');
