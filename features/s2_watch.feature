@@ -34,7 +34,6 @@ Feature: Watch a takeover, post to a team group and use custom forges
     When P posts a team message naming the working AI
     Then the team message creates no inbox item
 
-  @pending
   Scenario: Custom forge templates drive tasks from a brief to merge (A9.24)
     Given a project uses the fake forge templates
     When the secretary proposes two tasks for cross-review and P confirms the brief
@@ -42,7 +41,6 @@ Feature: Watch a takeover, post to a team group and use custom forges
     And both tasks merge after checks and cross-review and receive summaries
     And the forge records the filled template arguments and gh never runs
 
-  @pending
   Scenario: Custom forge templates preserve argument boundaries (A9.25)
     Given a project uses the fake forge templates
     And the project refuses a push template containing the title place

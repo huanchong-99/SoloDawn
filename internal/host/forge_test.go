@@ -115,7 +115,7 @@ func forgeRepo(t *testing.T) (TaskForge, string, string) {
 	forgeGit(t, worktree, "-c", "user.name=test", "-c", "user.email=test.invalid", "commit", "--allow-empty", "-m", "base")
 	forgeGit(t, worktree, "remote", "add", "origin", remote)
 	forgeGit(t, worktree, "push", "origin", "base")
-	f := TaskForge{worktree, "task/4-fix"}
+	f := TaskForge{Worktree: worktree, Branch: "task/4-fix", Base: "base"}
 	forgeGit(t, worktree, "switch", "-c", f.Branch)
 	forgeGit(t, worktree, "-c", "user.name=test", "-c", "user.email=test.invalid", "commit", "--allow-empty", "-m", "task")
 	return f, remote, forgeGit(t, worktree, "rev-parse", "HEAD")
@@ -136,7 +136,7 @@ func TestSubmitForge(t *testing.T) {
 	calls := fakeForgeGH(t, forgeAnswer{Stdout: "[]\n"}, forgeAnswer{Stdout: url + "\n"}, open)
 	title, summary := "Task title", "summary with \"quotes\"\nand a second line"
 	for range 2 {
-		pr, err := f.Submit(t.Context(), head, "base", title, summary)
+		pr, err := f.Submit(t.Context(), head, title, summary)
 		assertForge(t, err, nil)
 		assertForge(t, pr, &ForgePullRequest{Number: 12, URL: url})
 		assertForge(t, forgeGit(t, remote, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/task"), "refs/heads/"+f.Branch+" "+head)
@@ -156,7 +156,7 @@ func TestSubmitForgePreconditions(t *testing.T) {
 	calls := fakeForgeGH(t)
 	submitError := func(commit string, want string) {
 		t.Helper()
-		pr, err := f.Submit(t.Context(), commit, "base", "title", "summary")
+		pr, err := f.Submit(t.Context(), commit, "title", "summary")
 		assertForge(t, pr, (*ForgePullRequest)(nil))
 		assertForge(t, err.Error(), want)
 	}
@@ -175,7 +175,7 @@ func TestForgeSubmitCommandFailures(t *testing.T) {
 	f, _, head := forgeRepo(t)
 	prError := func() string {
 		t.Helper()
-		pr, err := f.Submit(t.Context(), head, "base", "title", "body")
+		pr, err := f.Submit(t.Context(), head, "title", "body")
 		assertForge(t, pr, (*ForgePullRequest)(nil))
 		return err.Error()
 	}
@@ -203,7 +203,7 @@ func TestForgeGHCannotStart(t *testing.T) {
 	calls := fakeForgeGH(t)
 	gh := mustForge(exec.LookPath("gh"))
 	forgeOK(os.WriteFile(gh, []byte("invalid executable"), 0700))
-	pr, err := f.Submit(t.Context(), head, "base", "t", "s")
+	pr, err := f.Submit(t.Context(), head, "t", "s")
 	assertForge(t, pr, (*ForgePullRequest)(nil))
 	// The system's own refusal: "exec format error" on Unix, another text on Windows.
 	assertForge(t, err.Error(), fmt.Sprint(exec.Command(gh).Run()))
@@ -396,7 +396,7 @@ func TestSubmitForgeSkipsForkPullRequests(t *testing.T) {
 	both := forgeAnswer{Stdout: fmt.Sprintf(`[{"url":"https://example.invalid/test/repo/pull/9","isCrossRepository":true},{"url":%q,"isCrossRepository":false}]`, own)}
 	calls := fakeForgeGH(t, fork, forgeAnswer{Stdout: own + "\n"}, both)
 	for range 2 {
-		pr, err := f.Submit(t.Context(), head, "base", "t", "s")
+		pr, err := f.Submit(t.Context(), head, "t", "s")
 		assertForge(t, err, nil)
 		assertForge(t, pr, &ForgePullRequest{Number: 12, URL: own})
 	}
