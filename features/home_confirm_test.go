@@ -85,6 +85,10 @@ func homeConfirmSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the first owner asks to watch the other AI$`, func() error {
 		return w.send(w.devices["first"], proto.Post[proto.ConfirmSigned]{HomeCommand: w.command("post", ""), Kind: "confirm", Mentions: []proto.ID{}, Body: proto.ConfirmSigned{What: "watch", AI: proto.ID(other())}})
 	})
+	sc.Step(`^the first owner asks to watch with thread, reply and text fields$`, func() error {
+		context := exampleID("watch context")
+		return w.send(w.devices["first"], proto.Post[proto.ConfirmSigned]{HomeCommand: w.command("post", ""), Kind: "confirm", Thread: &context, Re: &context, Text: "Watch context", Mentions: []proto.ID{}, Body: proto.ConfirmSigned{What: "watch", AI: proto.ID(other())}})
+	})
 	sc.Step(`^the second owner mentions their own AI$`, func() error { return mention(w.devices["guest"]) })
 	sc.Step(`^a pending "([^"]*)" card exists with no delivery$`, func(what string) error {
 		if err := w.checkAnswer(""); err != nil {

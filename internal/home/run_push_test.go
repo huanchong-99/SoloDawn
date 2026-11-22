@@ -77,7 +77,7 @@ func TestRunStopsPushingToADeviceTheGroupNoLongerServes(t *testing.T) {
 	results := map[string]home.Result{
 		"joins":   {Rows: []home.Row{home.RowOf(visitor), home.RowOf(deviceRow(guest, guest, 1, "add", guest))}},
 		"leaves":  {Rows: []home.Row{home.RowOf(runGone("member", "visitor", 0))}},
-		"returns": {Rows: []home.Row{home.RowOf(visitor)}},
+		"returns": {Rows: []home.Row{home.RowOf(visitor), home.RowOf(deviceRow(guest, guest, 1, "add", guest))}},
 		"revokes": {Rows: []home.Row{home.RowOf(deviceRow(browser, browser, 4, "revoke", laptop))}},
 		"wakes":   {Items: []home.Item{{AI: aiID, Why: "notice"}}},
 	}
@@ -110,7 +110,7 @@ func TestRunStopsPushingToADeviceTheGroupNoLongerServes(t *testing.T) {
 	p.does(groupID, "note", `,"text":"not for a connection that did not ask again"`)
 	host.next()
 	visit.quiet()
-	equal(t, visit.watch(groupID, false), int64(9))
+	equal(t, visit.watch(groupID, false), int64(10))
 
 	// The laptop is revoked: its open connection gets no row and no item.
 	p.does(groupID, "jump", `,"what":"wakes"`)

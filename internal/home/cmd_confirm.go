@@ -28,7 +28,6 @@ const (
 	cfmWhatDirect = "direct"
 	cfmWhatAsk    = "ask"
 	cfmWhatWatch  = "watch"
-	cfmWhyWatch   = "watch"
 	cfmDeniedCode = "confirm_denied"
 )
 
@@ -141,7 +140,7 @@ func cfmPost(s *State, c Command) (Result, *Refusal) {
 }
 
 func cfmWatchShape(p proto.Post[proto.ConfirmSigned]) bool {
-	return p.Body.What == cfmWhatWatch && p.Thread == nil && p.Re == nil && p.Text == "" && len(p.Mentions) == 0
+	return p.Body.What == cfmWhatWatch && len(p.Mentions) == 0
 }
 
 func (s *State) cfmWatchTarget(user, aiID string) (proto.AIMemberRow, *Refusal) {
@@ -198,7 +197,7 @@ func (s *State) cfmApplyDecision(c Command, card proto.MsgRow, body proto.Confir
 
 func (s *State) cfmConfirmedItems(d Disk, card proto.MsgRow, body proto.ConfirmBody) []Item {
 	if body.What == cfmWhatWatch {
-		return []Item{{AI: body.AI, Why: cfmWhyWatch, Msg: card.ID}}
+		return []Item{{AI: body.AI, Why: cfmWhatWatch, Msg: card.ID}}
 	}
 	req, _ := d.Msg(*card.Re)
 	return []Item{{AI: body.AI, Why: postMentionWhy, Task: postTaskID(req.Thread), Msg: req.ID}}
@@ -208,9 +207,7 @@ func (s *State) cfmDeniedResult(c Command, card proto.MsgRow, body proto.Confirm
 	switch body.What {
 	case cfmWhatDirect:
 		req, _ := c.Disk.Msg(*card.Re)
-		var post proto.HomeCommand
-		json.Unmarshal([]byte(req.Env.Payload), &post)
-		if post.As != "" {
+		if _, byAI := s.AIs[req.By]; byAI {
 			return Result{Rows: []Row{RowOf(card)}, Items: s.cfmNotice(card)}
 		}
 		return Result{Rows: []Row{RowOf(card)}}

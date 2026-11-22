@@ -18,3 +18,10 @@ Feature: People join and leave a home group
     Then the people command answers forbidden
     When the visitor leaves the people group
     Then the visitor and device are gone and a departure message has no remover
+
+  Scenario: Leaving one group retires its devices without forgetting another local membership
+    Given a people home with an invited visitor
+    When the visitor joins the people group
+    And the visitor also belongs to another group homed here
+    And the visitor leaves the people group
+    Then only this group's device rows and device log are retired

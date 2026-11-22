@@ -70,3 +70,10 @@ Feature: Confirmation cards in the home
     When the second owner confirms it
     Then the confirmation card is "confirmed"
     And the latest delivery is "watch"
+
+  Scenario: Watch admission does not restrict thread, reply or text fields
+    When the first owner asks to watch with thread, reply and text fields
+    Then a pending "watch" card exists with no delivery
+    When the second owner confirms it
+    Then the confirmation card is "confirmed"
+    And the latest delivery is "watch"

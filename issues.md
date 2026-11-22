@@ -596,11 +596,23 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-22 · bug · Watch confirmation admission rejected fields outside its checks
+
+- Symptom: a person's watch request was refused when it carried a thread, reply or text, although the watch admission contract does not restrict them.
+- Cause: `cfmWatchShape` (`internal/home/cmd_confirm.go:137`) checked those fields in addition to the checks in `planning/contracts/step-2/confirm.md` section 3.
+- Status: resolved in #310 by retaining only the contracted watch checks.
+
 ### 2026-11-22 · deviation · Home confirmation reminders were not sent
 
 - Symptom: cross-owner requests in the unfinished confirmation implementation created cards, but no subscribed browser received a confirmation reminder.
 - Cause: the standalone reminder builder in `internal/home/cmd_confirm.go` was not connected to the Web Push extractor registry.
 - Status: resolved in T2-2a: confirmation cards use the committed-row push path, name the AI, omit the title, and target only `body.to`. Tests decrypt the outgoing push payload.
+
+### 2026-11-22 · bug · Removing a person left group devices live when another local membership remained
+
+- Symptom: a removed person's device rows and in-memory device log remained in the group when they also belonged to another group homed on the node.
+- Cause: `internal/home/cmd_people.go:124` put group device retirement under the last-local-membership condition intended only for node-wide `device_log` and `push_sub` deletion.
+- Status: resolved in #309. Removal always retires the group's devices and drops its in-memory log; only node-wide deletion waits for the last local membership.
 
 ### 2026-11-22 · deviation · The home handled only AI member changes
 
