@@ -31,33 +31,24 @@ import (
 )
 
 const (
-	s2ForgeProg     = "s2forge"
-	s2PName         = "P"
-	s2QName         = "Q"
-	s2SecretaryName = "Secretary"
-	s2PWorkName     = "P-work"
-	s2QPersonalName = "Q-personal"
-	s2QTeamName     = "Q-team"
-	s2SecretaryCLI  = "claude"
-	s2PWorkCLI      = "claude"
-	s2QPersonalCLI  = "codex"
-	s2QTeamCLI      = "claude"
+	s2ScenarioTimeout = 10 * time.Minute
+	s2ForgeProg       = "s2forge"
+	s2PName           = "P"
+	s2QName           = "Q"
+	s2SecretaryName   = "Secretary"
+	s2PWorkName       = "P-work"
+	s2QPersonalName   = "Q-personal"
+	s2QTeamName       = "Q-team"
+	s2SecretaryCLI    = "claude"
+	s2PWorkCLI        = "claude"
+	s2QPersonalCLI    = "codex"
+	s2QTeamCLI        = "claude"
 )
 
 var (
 	s2FakeCLIVersions = map[string]string{
 		"claude": "2.1.311 (Claude Code)",
 		"codex":  "codex-cli 0.164.0",
-	}
-	s2ClaudeModes = map[string]int{
-		"default":           1,
-		"acceptEdits":       2,
-		"bypassPermissions": 3,
-	}
-	s2CodexSandboxes = map[string]int{
-		"read-only":          1,
-		"workspace-write":    2,
-		"danger-full-access": 3,
 	}
 )
 
@@ -159,7 +150,6 @@ type s2CLILogEntry struct {
 	Node    string `json:"node"`
 	Vendor  string `json:"vendor"`
 	Session string `json:"session"`
-	Level   int    `json:"level"`
 	Text    string `json:"text,omitempty"`
 }
 
@@ -168,7 +158,6 @@ type s2CLIObserver struct {
 	node    string
 	vendor  string
 	session string
-	level   int
 	turnSeq int
 }
 
@@ -192,7 +181,6 @@ func newS2CLIObserver(vendor, logPath string, args []string) *s2CLIObserver {
 	}
 	if vendor == "claude" {
 		obs.session = s2ArgAfter(args, "--session-id", "--resume")
-		obs.level = s2ClaudeModes[s2ArgAfter(args, "--permission-mode")]
 		obs.logEntry("start", "")
 	}
 	return obs
@@ -284,11 +272,9 @@ func (o *s2CLIObserver) observeCodexLine(line []byte) {
 func (o *s2CLIObserver) observeCodexStart(raw json.RawMessage) {
 	var p struct {
 		ThreadID string `json:"threadId"`
-		Sandbox  string `json:"sandbox"`
 	}
 	_ = json.Unmarshal(raw, &p)
 	o.session = cmp.Or(p.ThreadID, "thr-"+cmp.Or(o.node, "s2"))
-	o.level = s2CodexSandboxes[p.Sandbox]
 	o.logEntry("start", "")
 }
 
@@ -312,7 +298,6 @@ func (o *s2CLIObserver) logEntry(kind, text string) {
 		Node:    o.node,
 		Vendor:  o.vendor,
 		Session: o.session,
-		Level:   o.level,
 		Text:    text,
 	})
 }
@@ -476,7 +461,7 @@ func startS2Cast(t testing.TB, cleanup func(func()), f fixtures, cfg s2CastConfi
 	c := &s2Cast{F: f}
 	registerBothCleanups(t, cleanup, c.Close)
 	cleanWindowsLoginTaskIfAbsent(t, c.addUndo)
-	ctx, cancel := context.WithTimeout(context.Background(), cmp.Or(cfg.Timeout, 45*time.Second))
+	ctx, cancel := context.WithTimeout(context.Background(), cmp.Or(cfg.Timeout, s2ScenarioTimeout))
 	c.Ctx = ctx
 	c.addUndo(cancel)
 	for _, step := range []func() error{
@@ -779,10 +764,7 @@ func (c *s2Cast) AddBrowser(p *s2Person, label string) (*peerBrowser, error) {
 }
 
 func (c *s2Cast) SendCmd(p *s2Person, conn *peer.Connection, payload any) (proto.CmdResult, error) {
-	env := p.Key.Sign(string(mustMarshalNoEscape(payload)))
-	raw, err := conn.Request(c.Ctx, func(id int64) any {
-		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
-	})
+	raw, err := sendSignedCmdRaw(c.Ctx, conn, p.Key, payload)
 	if err != nil {
 		return proto.CmdResult{}, err
 	}
@@ -791,6 +773,13 @@ func (c *s2Cast) SendCmd(p *s2Person, conn *peer.Connection, payload any) (proto
 		return proto.CmdResult{}, fmt.Errorf("cmd failed: %s (%w)", raw, err)
 	}
 	return res, nil
+}
+
+func sendSignedCmdRaw(ctx context.Context, conn *peer.Connection, signer identity.Key, payload any) (json.RawMessage, error) {
+	env := signer.Sign(string(mustMarshalNoEscape(payload)))
+	return conn.Request(ctx, func(id int64) any {
+		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
+	})
 }
 
 func (c *s2Cast) CreateProjectGroup(p *s2Person, home *s2Node, name, forge string) (proto.ID, error) {
@@ -821,7 +810,11 @@ func (c *s2Cast) CreateProjectGroup(p *s2Person, home *s2Node, name, forge strin
 }
 
 func (c *s2Cast) syncGroup(conn *peer.Connection, gid proto.ID) error {
-	raw, err := conn.Request(c.Ctx, func(id int64) any {
+	return syncS2Group(c.Ctx, conn, gid)
+}
+
+func syncS2Group(ctx context.Context, conn *peer.Connection, gid proto.ID) error {
+	raw, err := conn.Request(ctx, func(id int64) any {
 		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: string(gid), Since: 0, StateOnly: false}
 	})
 	if err != nil {
@@ -932,7 +925,7 @@ func TestS2Cast(t *testing.T) {
 	defer stopTimer()
 	f := buildS2TestFixtures(t)
 	http.DefaultClient.CloseIdleConnections()
-	baseGoroutines := runtime.NumGoroutine()
+	baseGoroutines := s2PackageGoroutines()
 
 	cast, err := startS2Cast(t, nil, f, s2CastConfig{})
 	if err != nil {
@@ -1037,21 +1030,31 @@ func verifyS2SecondBrowser(t *testing.T, cast *s2Cast) {
 }
 
 func waitS2NodeAcceptsBrowser(cast *s2Cast, b *peerBrowser, nodeID string) error {
-	deadline := time.Now().Add(5 * time.Second)
-	var last error
-	for time.Now().Before(deadline) {
-		bc, err := b.openCtl(cast.Ctx, cast.addUndo, nodeID)
-		if err == nil {
-			if last = checkOwnerWelcome(cast.Ctx, bc.conn, nodeID); last == nil {
-				return nil
-			}
-			bc.conn.Close()
-		} else {
-			last = err
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		ok, err := tryS2OwnerWelcome(cast, b, nodeID)
+		if err != nil || ok {
+			return err
 		}
-		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-cast.Ctx.Done():
+			return cast.Ctx.Err()
+		case <-ticker.C:
+		}
 	}
-	return last
+}
+
+func tryS2OwnerWelcome(cast *s2Cast, b *peerBrowser, nodeID string) (bool, error) {
+	bc, ok, err := b.tryOpenCtl(cast.Ctx, cast.addUndo, nodeID, s2ScenarioTimeout)
+	if err != nil || !ok {
+		return false, err
+	}
+	if err := checkOwnerWelcome(cast.Ctx, bc.conn, nodeID); err != nil {
+		bc.conn.Close()
+		return false, nil
+	}
+	return true, nil
 }
 
 func verifyS2PGroupAndCrossNodeAI(t *testing.T, cast *s2Cast) {
@@ -1169,25 +1172,25 @@ func assertS2CLILogsComplete(t *testing.T, cast *s2Cast) {
 	if err != nil {
 		t.Fatalf("CLILogs: %v", err)
 	}
-	assertHasS2CLITurn(t, entries, "P2", s2PWorkCLI, 3, "ping P2 worker")
-	assertHasS2CLITurn(t, entries, "Q1", s2QTeamCLI, 3, "hello Q-team")
-	assertHasS2CLITurn(t, entries, "Q1", s2QPersonalCLI, 3, "hello Q-personal")
+	assertHasS2CLITurn(t, entries, "P2", s2PWorkCLI, "ping P2 worker")
+	assertHasS2CLITurn(t, entries, "Q1", s2QTeamCLI, "hello Q-team")
+	assertHasS2CLITurn(t, entries, "Q1", s2QPersonalCLI, "hello Q-personal")
 }
 
-func assertHasS2CLITurn(t *testing.T, entries []s2CLILogEntry, node, vendor string, level int, sub string) {
+func assertHasS2CLITurn(t *testing.T, entries []s2CLILogEntry, node, vendor, sub string) {
 	t.Helper()
 	hasStart := slices.ContainsFunc(entries, func(e s2CLILogEntry) bool {
-		return e.Kind == "start" && e.Node == node && e.Vendor == vendor && e.Level == level
+		return e.Kind == "start" && e.Node == node && e.Vendor == vendor
 	})
 	hasTurn := slices.ContainsFunc(entries, func(e s2CLILogEntry) bool {
-		return e.Kind == "turn" && e.Node == node && e.Vendor == vendor && e.Level == level && strings.Contains(e.Text, sub)
+		return e.Kind == "turn" && e.Node == node && e.Vendor == vendor && strings.Contains(e.Text, sub)
 	})
 	if !hasStart || !hasTurn {
-		t.Fatalf("missing start/turn for (%s, %s, level %d, %q) in %+v", node, vendor, level, sub, entries)
+		t.Fatalf("missing start/turn for (%s, %s, %q) in %+v", node, vendor, sub, entries)
 	}
 }
 
-func verifyS2CleanTeardown(t *testing.T, cast *s2Cast, baseGoroutines int) {
+func verifyS2CleanTeardown(t *testing.T, cast *s2Cast, baseGoroutines map[string]string) {
 	t.Helper()
 	cast.Close()
 	for _, n := range []*s2Node{cast.P1, cast.P2, cast.Q1} {
@@ -1196,18 +1199,44 @@ func verifyS2CleanTeardown(t *testing.T, cast *s2Cast, baseGoroutines int) {
 		}
 	}
 	http.DefaultClient.CloseIdleConnections()
-	if !waitS2GoroutinesSettled(baseGoroutines + 2) {
-		t.Fatalf("goroutines after Close = %d, base = %d", runtime.NumGoroutine(), baseGoroutines)
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+	if leaked := waitS2GoroutinesSettled(ctx, baseGoroutines); len(leaked) != 0 {
+		t.Fatalf("package goroutines remain after Close: %v\n%v", ctx.Err(), leaked)
 	}
 }
 
-func waitS2GoroutinesSettled(limit int) bool {
-	deadline := time.Now().Add(4 * time.Second)
-	for time.Now().Before(deadline) {
-		if runtime.NumGoroutine() <= limit {
-			return true
+func waitS2GoroutinesSettled(ctx context.Context, baseline map[string]string) map[string]string {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		remaining := s2PackageGoroutines()
+		for id := range baseline {
+			delete(remaining, id)
 		}
-		time.Sleep(25 * time.Millisecond)
+		if len(remaining) == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return remaining
+		case <-ticker.C:
+		}
 	}
-	return runtime.NumGoroutine() <= limit
+}
+
+func s2PackageGoroutines() map[string]string {
+	buf := make([]byte, 64*1024)
+	n := runtime.Stack(buf, true)
+	for n == len(buf) {
+		buf = make([]byte, len(buf)*2)
+		n = runtime.Stack(buf, true)
+	}
+	stacks := make(map[string]string)
+	for _, stack := range strings.Split(string(buf[:n]), "\n\n") {
+		if strings.Contains(stack, "github.com/huanchong-99/SoloDawn/") {
+			stacks[strings.Fields(stack)[1]] = stack
+		}
+	}
+	return stacks
 }

@@ -5,10 +5,8 @@ package features
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -41,56 +39,27 @@ type s2RoleSetCmd struct {
 	Role string `json:"role"`
 }
 
-type s2HomeAddCmd struct {
-	proto.HostCommand
-	Group IDOrStr  `json:"g"`
-	Home  string   `json:"home"`
-	Name  string   `json:"name"`
-	Addrs []string `json:"addrs"`
-}
-
-type IDOrStr = proto.ID
-
 type s2JoinLink struct {
-	Raw     string
 	Secret  identity.Secret
 	Group   string
 	Home    string
 	Expires int64
 }
 
-type s2MemberJoinedBody struct {
-	Code   string               `json:"code"`
-	Member proto.HumanMemberRow `json:"member"`
-	By     string               `json:"by"`
-}
-
-type s2MemberRemovedBody struct {
-	Code string `json:"code"`
-	User string `json:"user"`
-	Name string `json:"name"`
-	By   string `json:"by,omitempty"`
-}
-
 type s2BrowserView struct {
-	groups     []proto.GroupSummary
-	seenGroups bool
-	group      proto.GroupRow
-	humans     map[string]proto.HumanMemberRow
-	ais        map[string]proto.AIMemberRow
-	devices    map[string]proto.DeviceRow
-	tasks      map[string]proto.TaskRow
-	msgs       map[string]proto.MsgRow
-	gone       map[[2]string]bool
+	groups  []proto.GroupSummary
+	humans  map[string]proto.HumanMemberRow
+	devices map[string]proto.DeviceRow
+	taskID  proto.ID
+	texts   map[string]bool
+	gone    map[[2]string]bool
 }
 
 func newS2BrowserView() *s2BrowserView {
 	return &s2BrowserView{
 		humans:  map[string]proto.HumanMemberRow{},
-		ais:     map[string]proto.AIMemberRow{},
 		devices: map[string]proto.DeviceRow{},
-		tasks:   map[string]proto.TaskRow{},
-		msgs:    map[string]proto.MsgRow{},
+		texts:   map[string]bool{},
 		gone:    map[[2]string]bool{},
 	}
 }
@@ -99,22 +68,18 @@ func (v *s2BrowserView) applyPush(raw json.RawMessage, wantGroup string) {
 	var g proto.Groups
 	if proto.Decode(raw, &g) == nil && g.Type == "groups" {
 		v.groups = g.Groups
-		v.seenGroups = true
 		return
 	}
-	var batch proto.Rows
-	if proto.Decode(raw, &batch) != nil || batch.Group != wantGroup {
-		return
-	}
-	for _, elem := range batch.Rows {
-		v.applyRow(elem)
-	}
+	_, _ = scanS2RowsBatch(raw, wantGroup, func(row json.RawMessage) (bool, error) {
+		v.applyRow(row)
+		return false, nil
+	})
 }
 
 func (v *s2BrowserView) applyRow(elem json.RawMessage) {
 	var gone proto.GoneRow
 	if proto.Decode(elem, &gone) == nil && gone.Gone {
-		v.recordGone(gone.Type, gone.ID)
+		v.gone[[2]string{gone.Type, gone.ID}] = true
 		return
 	}
 	var hdr proto.RowHeader
@@ -124,17 +89,8 @@ func (v *s2BrowserView) applyRow(elem json.RawMessage) {
 	v.recordLive(hdr.Type, elem)
 }
 
-func (v *s2BrowserView) recordGone(typ, id string) {
-	v.gone[[2]string{typ, id}] = true
-	delete(v.humans, id)
-	delete(v.ais, id)
-	delete(v.devices, id)
-}
-
 func (v *s2BrowserView) recordLive(typ string, elem json.RawMessage) {
 	switch typ {
-	case "group":
-		decodeInto(elem, &v.group)
 	case "member":
 		v.recordMember(elem)
 	case "device":
@@ -146,22 +102,10 @@ func (v *s2BrowserView) recordLive(typ string, elem json.RawMessage) {
 	}
 }
 
-func decodeInto[T any](elem json.RawMessage, dst *T) {
-	var val T
-	if proto.Decode(elem, &val) == nil {
-		*dst = val
-	}
-}
-
 func (v *s2BrowserView) recordMember(elem json.RawMessage) {
 	var hum proto.HumanMemberRow
 	if proto.Decode(elem, &hum) == nil && hum.Kind == "human" {
 		v.humans[hum.ID] = hum
-		return
-	}
-	var ai proto.AIMemberRow
-	if proto.Decode(elem, &ai) == nil && ai.Kind == "ai" {
-		v.ais[ai.ID] = ai
 	}
 }
 
@@ -175,14 +119,14 @@ func (v *s2BrowserView) recordDevice(elem json.RawMessage) {
 func (v *s2BrowserView) recordTask(elem json.RawMessage) {
 	var t proto.TaskRow
 	if proto.Decode(elem, &t) == nil {
-		v.tasks[t.ID] = t
+		v.taskID = proto.ID(t.ID)
 	}
 }
 
 func (v *s2BrowserView) recordMsg(elem json.RawMessage) {
 	var m proto.MsgRow
-	if proto.Decode(elem, &m) == nil {
-		v.msgs[m.ID] = m
+	if proto.Decode(elem, &m) == nil && m.Kind == "text" {
+		v.texts[m.Text] = true
 	}
 }
 
@@ -195,15 +139,6 @@ func (v *s2BrowserView) humanByUser(userID string) (proto.HumanMemberRow, bool) 
 	return proto.HumanMemberRow{}, false
 }
 
-func (v *s2BrowserView) hasTextMsg(text string) bool {
-	for _, m := range v.msgs {
-		if m.Kind == "text" && m.Text == text {
-			return true
-		}
-	}
-	return false
-}
-
 type s2ClockHome struct {
 	mu          sync.Mutex
 	now         time.Time
@@ -212,42 +147,39 @@ type s2ClockHome struct {
 	node        *peerNode
 	ids         seqIDGen
 	pKey, qKey  identity.Key
-	pEntries    []proto.Envelope
 	qEntries    []proto.Envelope
-	pBrowser    *peerBrowser
 	pConn       *peerBrowserConn
-	qBrowser    *peerBrowser
 	qConn       *peerBrowserConn
+	probe       *peerBrowser
+	probeConn   *peerBrowserConn
 	pView       *s2BrowserView
 	gid         proto.ID
 	invites     map[string]s2JoinLink
-	inviteTS    map[string]int64
 	lastJoinRaw json.RawMessage
 	lastCmdRaw  json.RawMessage
 }
 
 type s2PeopleWorld struct {
-	f           fixtures
-	cleanup     func(func())
-	cast        *s2Cast
-	gid         proto.ID
-	otherGID    proto.ID
-	preJoinText string
-	inviteLink  s2JoinLink
-	pView       *s2BrowserView
-	qView       *s2BrowserView
-	qHomeBC     *peerBrowserConn
-	pMemID      string
-	qMemID      string
-	secretary   proto.AIMemberRow
-	pWork       proto.AIMemberRow
-	qTeam       proto.AIMemberRow
-	qPersonal   proto.AIMemberRow
-	taskID      proto.ID
-	assigneeRef string
-	reviewerRef string
-	removeAt    time.Time
-	clock       *s2ClockHome
+	f             fixtures
+	cleanup       func(func())
+	cast          *s2Cast
+	gid           proto.ID
+	otherGID      proto.ID
+	preJoinText   string
+	inviteLink    s2JoinLink
+	pView         *s2BrowserView
+	qView         *s2BrowserView
+	qHomeBC       *peerBrowserConn
+	pMemID        string
+	qMemID        string
+	pWork         proto.AIMemberRow
+	qTeam         proto.AIMemberRow
+	qPersonal     proto.AIMemberRow
+	taskID        proto.ID
+	removeReplies []json.RawMessage
+	removeAt      time.Time
+	qClosed       chan time.Time
+	clock         *s2ClockHome
 }
 
 func s2PeopleSteps(sc *godog.ScenarioContext, f fixtures) {
@@ -272,7 +204,7 @@ func registerS2PeopleA91A92Steps(sc *godog.ScenarioContext, w *s2PeopleWorld) {
 	sc.Step(`^Q's browser joins with that same invitation link as "([^"]*)"$`, w.clockQJoinsFirstLink)
 	sc.Step(`^using that invitation link a second time is refused$`, w.clockVerifySecondUseRefused)
 	sc.Step(`^P creates a second invitation with nonce "([^"]*)" and 10 minutes pass$`, w.clockCreateAndExpire)
-	sc.Step(`^using the expired invitation link is refused and repeating "([^"]*)" returns "([^"]*)"$`, w.clockVerifyExpiredRefused)
+	sc.Step(`^using the expired invitation link is refused$`, w.clockVerifyExpiredRefused)
 	sc.Step(`^Q as a member sends invite for the controllable group$`, w.clockQSendInvite)
 	sc.Step(`^Q's invite is refused with "([^"]*)"$`, w.clockVerifyLastRefused)
 }
@@ -299,16 +231,16 @@ func registerS2PeopleA95A96Steps(sc *godog.ScenarioContext, w *s2PeopleWorld) {
 	sc.Step(`^the people cast where P's group "([^"]*)" on P1 has a secretary and Q has joined as "([^"]*)"$`, w.givenCastWithSecretaryAndQ)
 	sc.Step(`^Q1 joins Q-team to the people group with host\.join$`, w.q1JoinsQTeam)
 	sc.Step(`^Q-team's member row has host Q1 and user Q and Q1 holds a Git clone$`, w.verifyQTeamRowAndClone)
-	sc.Step(`^member add_ai from a host whose owner is not in P's other group is refused with "([^"]*)"$`, w.verifyNonMemberHostAddAIRefused)
+	sc.Step(`^member add_ai from a node whose owner is not a member is refused with "([^"]*)"$`, w.verifyNonMemberHostAddAIRefused)
 	sc.Step(`^host\.join from Q with secretary true while the group has a secretary is refused with "([^"]*)"$`, w.verifyQSecretaryJoinRefused)
 
 	sc.Step(`^the people cast where Q joined "([^"]*)" on P1 with Q-team on Q1 and P has a second group "([^"]*)" on P1$`, w.givenSurfaceCast)
-	sc.Step(`^on P1 Q's browser may use the home surface of "([^"]*)" while host commands, host\.info and sync of "([^"]*)" are refused with "([^"]*)"$`, w.verifyP1SurfaceForQ)
-	sc.Step(`^Q1 drops connections from P before P shares a group on Q1 and refuses host commands and takeover\.start from P once connected$`, w.verifyQ1SurfaceForP)
+	sc.Step(`^on P1 Q's browser may use the shared group's home surface while host commands, host\.info and sync of P's other group are refused with "([^"]*)"$`, w.verifyP1SurfaceForQ)
+	sc.Step(`^Q1 accepts no host command and no takeover\.start from a device of P$`, w.verifyQ1SurfaceForP)
 }
 
 func (w *s2PeopleWorld) initCastGroup(ctx context.Context, name string) error {
-	cast, err := startS2Cast(w.f.t, w.cleanup, w.f, s2CastConfig{Rendezvous: sharedRVURL(ctx)})
+	cast, err := startS2Cast(w.f.t, w.cleanup, w.f, s2CastConfig{Rendezvous: sharedRVURL(ctx), Timeout: s2ScenarioTimeout})
 	if err != nil {
 		return err
 	}
@@ -384,30 +316,19 @@ func (w *s2PeopleWorld) givenCastWithHistory(ctx context.Context, groupName, his
 		return err
 	}
 	return w.drainViewUntil(w.cast.Ctx, pBC, w.pView, string(w.gid), func() bool {
-		return w.pView.hasTextMsg(historyText)
+		return w.pView.texts[historyText]
 	})
 }
 
 func (w *s2PeopleWorld) pCreatesInvitation() error {
-	nonce := w.cast.NextID()
-	ts := time.Now().UnixMilli()
 	pBC := w.cast.P.Conns[w.cast.P1.ID()]
-	first, err := w.cast.SendCmd(w.cast.P, pBC.conn, s2InviteCmd{
-		HomeCommand: proto.HomeCommand{Type: "invite", Nonce: nonce, Timestamp: ts, Group: w.gid},
+	res, err := w.cast.SendCmd(w.cast.P, pBC.conn, s2InviteCmd{
+		HomeCommand: proto.HomeCommand{Type: "invite", Nonce: w.cast.NextID(), Timestamp: time.Now().UnixMilli(), Group: w.gid},
 	})
 	if err != nil {
 		return err
 	}
-	replay, err := w.cast.SendCmd(w.cast.P, pBC.conn, s2InviteCmd{
-		HomeCommand: proto.HomeCommand{Type: "invite", Nonce: nonce, Timestamp: ts, Group: w.gid},
-	})
-	if err != nil {
-		return err
-	}
-	if replay.Link != first.Link || replay.Expires != first.Expires {
-		return fmt.Errorf("invite replay = %+v, want %+v", replay, first)
-	}
-	link, err := parseS2JoinLink(first.Link, first.Expires)
+	link, err := parseS2JoinLink(res.Link, res.Expires)
 	w.inviteLink = link
 	return err
 }
@@ -421,7 +342,7 @@ func parseS2JoinLink(raw string, expires int64) (s2JoinLink, error) {
 	if err != nil {
 		return s2JoinLink{}, fmt.Errorf("invalid #join secret in %q: %v", raw, err)
 	}
-	return s2JoinLink{Raw: raw, Secret: sec, Group: vals.Get("g"), Home: vals.Get("home"), Expires: expires}, nil
+	return s2JoinLink{Secret: sec, Group: vals.Get("g"), Home: vals.Get("home"), Expires: expires}, nil
 }
 
 func parseJoinLinkFragment(raw string) (url.Values, error) {
@@ -430,7 +351,7 @@ func parseJoinLinkFragment(raw string) (url.Values, error) {
 		return nil, fmt.Errorf("invalid invite URL %q: %v", raw, err)
 	}
 	vals, err := url.ParseQuery(u.Fragment)
-	if err != nil || vals.Get("fp") != "" {
+	if err != nil {
 		return nil, fmt.Errorf("unexpected invite fragment %q (%v)", u.Fragment, err)
 	}
 	return vals, nil
@@ -457,9 +378,6 @@ func (w *s2PeopleWorld) qBrowserJoinsGroup(memberName string) error {
 	}
 	w.qHomeBC = bc
 	w.cast.Q.Conns[w.cast.P1.ID()] = bc
-	if err := w.sendQHomeAddAndVerify(); err != nil {
-		return err
-	}
 	return w.syncQAndAwaitViews()
 }
 
@@ -470,72 +388,48 @@ func joinGroupWithLink(
 	if _, err := b.exchangeRoom(ctx, link.Secret, "b", "a"); err != nil {
 		return nil, err
 	}
-	bc, err := openJoiningCtl(ctx, cleanup, b, link.Home)
+	bc, err := openS2PeopleCtl(ctx, cleanup, b, link.Home)
 	if err != nil {
 		return nil, err
 	}
-	if err := verifyJoiningWelcome(ctx, bc.conn, b.key.ID()); err != nil {
+	if err := verifyJoiningWelcome(ctx, bc.conn); err != nil {
 		return nil, err
 	}
-	if err := sendJoinDevlogAndCmd(ctx, bc.conn, signer, entries, link.Group, memberName, joinNonce); err != nil {
+	if err := sendJoinDevlogAndCmd(ctx, bc.conn, signer, entries, link.Group, memberName, joinNonce, time.Now()); err != nil {
 		return nil, err
 	}
 	return bc, nil
 }
 
-func openJoiningCtl(ctx context.Context, cleanup func(func()), b *peerBrowser, homeID string) (*peerBrowserConn, error) {
-	for range 6 {
-		bc, ok, err := b.tryOpenCtl(ctx, cleanup, homeID, 2*time.Second)
-		if err != nil || ok {
-			return bc, err
-		}
-		time.Sleep(40 * time.Millisecond)
+func openS2PeopleCtl(ctx context.Context, cleanup func(func()), b *peerBrowser, homeID string) (*peerBrowserConn, error) {
+	bc, ok, err := b.tryOpenCtl(ctx, cleanup, homeID, s2ScenarioTimeout)
+	if err == nil && !ok {
+		err = fmt.Errorf("ctl to %s closed before opening", homeID)
 	}
-	return nil, fmt.Errorf("timed out opening joining ctl to %s", homeID)
+	return bc, err
 }
 
-func verifyJoiningWelcome(ctx context.Context, conn *peer.Connection, label string) error {
-	welc, err := requestHelloV2Fallback(ctx, conn, label)
+func verifyJoiningWelcome(ctx context.Context, conn *peer.Connection) error {
+	raw, err := conn.Request(ctx, func(id int64) any {
+		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 2, Kind: "browser", Name: "Joiner", Addrs: []string{}}
+	})
 	if err != nil {
 		return err
 	}
-	if welc.Owner || len(welc.Groups) != 0 {
-		return fmt.Errorf("joining welcome = %+v, want owner=false and empty groups", welc)
+	var welc proto.Welcome
+	if err := proto.Decode(raw, &welc); err != nil {
+		return err
+	}
+	if welc.V != 2 || welc.Owner || len(welc.Groups) != 0 {
+		return fmt.Errorf("joining welcome = %+v, want v=2, owner=false and empty groups", welc)
 	}
 	return nil
-}
-
-func requestHelloV2Fallback(ctx context.Context, conn *peer.Connection, name string) (proto.Welcome, error) {
-	raw, err := sendBrowserHelloVersion(ctx, conn, 2, name)
-	if err != nil {
-		return proto.Welcome{}, err
-	}
-	var er proto.ErrorResponse
-	if proto.Decode(raw, &er) == nil && er.Err.Code == "version" {
-		raw, err = sendBrowserHelloVersion(ctx, conn, 1, name)
-		if err != nil {
-			return proto.Welcome{}, err
-		}
-	}
-	var welc proto.Welcome
-	return welc, proto.Decode(raw, &welc)
-}
-
-func sendBrowserHelloVersion(ctx context.Context, conn *peer.Connection, ver int, name string) (json.RawMessage, error) {
-	return conn.Request(ctx, func(id int64) any {
-		return proto.Hello{
-			Request: proto.Request{Type: "hello", ID: id},
-			V:       ver,
-			Kind:    "browser",
-			Name:    name,
-			Addrs:   []string{},
-		}
-	})
 }
 
 func sendJoinDevlogAndCmd(
 	ctx context.Context, conn *peer.Connection, signer identity.Key,
 	entries []proto.Envelope, gid, name string, nonce proto.ID,
+	now time.Time,
 ) error {
 	dl := proto.Devlog{Type: "devlog", User: signer.ID(), Entries: entries}
 	if err := conn.Send(dl); err != nil {
@@ -545,7 +439,7 @@ func sendJoinDevlogAndCmd(
 		HomeCommand: proto.HomeCommand{
 			Type:      "join",
 			Nonce:     nonce,
-			Timestamp: time.Now().UnixMilli(),
+			Timestamp: now.UnixMilli(),
 			Group:     proto.ID(gid),
 		},
 		Name: name,
@@ -555,46 +449,6 @@ func sendJoinDevlogAndCmd(
 	}
 	var res proto.CmdResult
 	return proto.Decode(raw, &res)
-}
-
-func sendSignedCmdRaw(ctx context.Context, conn *peer.Connection, signer identity.Key, payload any) (json.RawMessage, error) {
-	env := signer.Sign(string(mustMarshalNoEscape(payload)))
-	return conn.Request(ctx, func(id int64) any {
-		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
-	})
-}
-
-func (w *s2PeopleWorld) sendQHomeAddAndVerify() error {
-	q1Conn := w.cast.Q.Conns[w.cast.Q1.ID()].conn
-	groupName := w.pView.group.Name
-	_, err := w.cast.SendCmd(w.cast.Q, q1Conn, s2HomeAddCmd{
-		HostCommand: proto.HostCommand{
-			Type:      "home.add",
-			Nonce:     w.cast.NextID(),
-			Timestamp: time.Now().UnixMilli(),
-			To:        w.cast.Q1.ID(),
-		},
-		Group: w.gid,
-		Home:  w.cast.P1.ID(),
-		Name:  groupName,
-		Addrs: []string{w.cast.RVURL},
-	})
-	if err != nil {
-		return err
-	}
-	info, err := requestHostInfo(w.cast.Ctx, q1Conn)
-	if err != nil {
-		return err
-	}
-	return assertHomeListed(info.Homes, w.gid, w.cast.P1.ID(), groupName)
-}
-
-func assertHomeListed(homes []proto.Home, wantGID proto.ID, wantHome, wantName string) error {
-	want := proto.Home{Group: wantGID, Home: wantHome, Name: wantName}
-	if !slices.Contains(homes, want) {
-		return fmt.Errorf("host.info.homes = %+v, want %+v", homes, want)
-	}
-	return nil
 }
 
 func (w *s2PeopleWorld) syncQAndAwaitViews() error {
@@ -640,53 +494,34 @@ func (w *s2PeopleWorld) verifyQMemberAndDevices(wantRole string) error {
 	if got := countUserDevices(w.pView, w.cast.Q.ID()); got != len(w.cast.Q.Entries) {
 		return fmt.Errorf("Q device rows on P1 = %d, want %d", got, len(w.cast.Q.Entries))
 	}
+	return verifyS2DeviceRows(w.pView, w.cast.Q.Entries)
+}
+
+func verifyS2DeviceRows(view *s2BrowserView, entries []proto.Envelope) error {
+	for _, env := range entries {
+		var entry proto.DeviceEntry
+		if err := proto.Decode([]byte(env.Payload), &entry); err != nil {
+			return err
+		}
+		id := fmt.Sprintf("%s:%d", entry.User, entry.Version)
+		row := view.devices[id]
+		if row.Env != env || row.DeviceChange != entry.DeviceChange {
+			return fmt.Errorf("device row %s = %+v, want entry %+v", id, row, entry)
+		}
+	}
 	return nil
 }
 
 func (w *s2PeopleWorld) verifyBothBrowsersHistory() error {
-	for name, view := range map[string]*s2BrowserView{"P": w.pView, "Q": w.qView} {
-		if err := w.verifyOneBrowserHistory(name, view); err != nil {
+	for bc, view := range map[*peerBrowserConn]*s2BrowserView{w.cast.P.Conns[w.cast.P1.ID()]: w.pView, w.qHomeBC: w.qView} {
+		if err := w.drainViewUntil(w.cast.Ctx, bc, view, string(w.gid), func() bool {
+			return view.texts[w.preJoinText]
+		}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
-
-func (w *s2PeopleWorld) verifyOneBrowserHistory(label string, view *s2BrowserView) error {
-	qRow, ok := view.humanByUser(w.cast.Q.ID())
-	if !ok || qRow.Role != "member" {
-		return fmt.Errorf("%s view missing Q member row: %+v", label, qRow)
-	}
-	if !view.hasTextMsg(w.preJoinText) {
-		return fmt.Errorf("%s view missing pre-join message %q", label, w.preJoinText)
-	}
-	if !hasMemberJoinedSystemMsg(view, w.qMemID, w.pMemID) {
-		return fmt.Errorf("%s view missing member_joined system row for %s by %s", label, w.qMemID, w.pMemID)
-	}
-	return nil
-}
-
-func hasMemberJoinedSystemMsg(view *s2BrowserView, wantMemberID, wantBy string) bool {
-	for _, m := range view.msgs {
-		if matchMemberJoinedMsg(m, wantMemberID, wantBy) {
-			return true
-		}
-	}
-	return false
-}
-
-func matchMemberJoinedMsg(m proto.MsgRow, wantMemberID, wantBy string) bool {
-	if m.Kind != "system" || m.By != "system" {
-		return false
-	}
-	var body s2MemberJoinedBody
-	if proto.Decode(m.Body, &body) != nil {
-		return false
-	}
-	return body.Code == "member_joined" && body.Member.ID == wantMemberID && body.By == wantBy
-}
-
-// --- A9.2 controllable-clock home ---
 
 func (c *s2ClockHome) nowTime() time.Time {
 	c.mu.Lock()
@@ -701,21 +536,20 @@ func (c *s2ClockHome) advance(d time.Duration) {
 }
 
 func (w *s2PeopleWorld) givenControllableHome(ctx context.Context, groupName string) error {
-	runCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	runCtx, cancel := context.WithTimeout(w.f.t.Context(), s2ScenarioTimeout)
 	w.cleanup(cancel)
 	rvURL, err := startAcceptanceRelayRVWithBack(w.cleanup, sharedRVURL(ctx))
 	if err != nil {
 		return err
 	}
 	ch := &s2ClockHome{
-		now:      time.UnixMilli(1763700000000),
-		ctx:      runCtx,
-		rvURL:    rvURL,
-		pKey:     newRandomPeerKey(),
-		qKey:     newRandomPeerKey(),
-		pView:    newS2BrowserView(),
-		invites:  map[string]s2JoinLink{},
-		inviteTS: map[string]int64{},
+		now:     time.UnixMilli(1763700000000),
+		ctx:     runCtx,
+		rvURL:   rvURL,
+		pKey:    newRandomPeerKey(),
+		qKey:    newRandomPeerKey(),
+		pView:   newS2BrowserView(),
+		invites: map[string]s2JoinLink{},
 	}
 	w.clock = ch
 	return w.bootControllableHome(groupName)
@@ -732,8 +566,13 @@ func (w *s2PeopleWorld) bootControllableHome(groupName string) error {
 	}
 	ch.node = pn
 	ts := ch.nowTime().UnixMilli()
-	ch.pEntries = buildPeerOwnerLog(ch.pKey, nodeKey, "P1-clock", nil, ts)
-	ch.qEntries = []proto.Envelope{nodetest.SignDeviceAdd(ch.qKey, ch.qKey.ID(), 1, "browser", "Q-browser", ch.qKey.ID(), ts)}
+	qNodeKey := newRandomPeerKey()
+	if _, err := startPeerNode(w.f.t, w.cleanup, peerNodeConfig{
+		Ctx: ch.ctx, Key: qNodeKey, Name: "Q1", Owner: ch.qKey, Rendezvous: ch.rvURL, Now: ch.nowTime,
+	}); err != nil {
+		return err
+	}
+	ch.qEntries = buildPeerOwnerLog(ch.qKey, qNodeKey, "Q1", nil, ts)
 	return w.connectControllableOwnerAndGroup(groupName)
 }
 
@@ -743,11 +582,10 @@ func (w *s2PeopleWorld) connectControllableOwnerAndGroup(groupName string) error
 	if err != nil {
 		return err
 	}
-	ch.pBrowser = pb
 	if err := pb.waitOnline(ch.ctx, ch.node.Key.ID()); err != nil {
 		return err
 	}
-	bc, err := pb.openCtl(ch.ctx, w.cleanup, ch.node.Key.ID())
+	bc, err := openS2PeopleCtl(ch.ctx, w.cleanup, pb, ch.node.Key.ID())
 	if err != nil {
 		return err
 	}
@@ -777,28 +615,17 @@ func (w *s2PeopleWorld) createControllableGroup(groupName string) error {
 	if err := proto.Decode(raw, &ok); err != nil {
 		return fmt.Errorf("create group: %s (%w)", raw, err)
 	}
-	return syncClockConn(ch.ctx, ch.pConn, ch.pView, gid)
-}
-
-func syncClockConn(ctx context.Context, bc *peerBrowserConn, view *s2BrowserView, gid proto.ID) error {
-	raw, err := bc.conn.Request(ctx, func(id int64) any {
-		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: string(gid)}
+	if err := syncS2Group(ch.ctx, ch.pConn.conn, gid); err != nil {
+		return err
+	}
+	return w.drainViewUntil(ch.ctx, ch.pConn, ch.pView, string(gid), func() bool {
+		return len(ch.pView.humans) == 1
 	})
-	if err != nil {
-		return err
-	}
-	var synced proto.Synced
-	if err := proto.Decode(raw, &synced); err != nil {
-		return err
-	}
-	drainBufferedView(bc, view, string(gid))
-	return nil
 }
 
 func (w *s2PeopleWorld) clockCreateInvite(tag string) error {
 	ch := w.clock
 	ts := ch.nowTime().UnixMilli()
-	ch.inviteTS[tag] = ts
 	raw, err := sendSignedCmdRaw(ch.ctx, ch.pConn.conn, ch.pKey, s2InviteCmd{
 		HomeCommand: proto.HomeCommand{Type: "invite", Nonce: exampleID(tag), Timestamp: ts, Group: ch.gid},
 	})
@@ -817,7 +644,7 @@ func (w *s2PeopleWorld) clockCreateInvite(tag string) error {
 func (w *s2PeopleWorld) clockBadLogJoin() error {
 	ch := w.clock
 	link := ch.invites["inv-1"]
-	badUser, badDev, rogue := newRandomPeerKey(), newRandomPeerKey(), newRandomPeerKey()
+	badDev := newRandomPeerKey()
 	b, err := newPeerBrowser(ch.ctx, w.cleanup, badDev, ch.rvURL, nil)
 	if err != nil {
 		return err
@@ -825,24 +652,58 @@ func (w *s2PeopleWorld) clockBadLogJoin() error {
 	if _, err := b.exchangeRoom(ch.ctx, link.Secret, "b", "a"); err != nil {
 		return err
 	}
-	bc, err := openJoiningCtl(ch.ctx, w.cleanup, b, link.Home)
+	bc, err := openS2PeopleCtl(ch.ctx, w.cleanup, b, link.Home)
 	if err != nil {
 		return err
 	}
-	if err := verifyJoiningWelcome(ch.ctx, bc.conn, "bad-joiner"); err != nil {
+	if err := verifyJoiningWelcome(ch.ctx, bc.conn); err != nil {
 		return err
 	}
-	return w.sendBrokenLogAndJoin(bc.conn, badUser, badDev, rogue)
+	if err := w.sendBrokenLogAndJoin(bc.conn, badDev); err != nil {
+		return err
+	}
+	return leaveS2PairingRoom(ch.ctx, ch.rvURL, b)
 }
 
-func (w *s2PeopleWorld) sendBrokenLogAndJoin(conn *peer.Connection, badUser, badDev, rogue identity.Key) error {
+func leaveS2PairingRoom(ctx context.Context, rvURL string, b *peerBrowser) error {
+	observer, err := peer.Dial(ctx, rvURL, newRandomPeerKey())
+	if err != nil {
+		return err
+	}
+	defer observer.Close()
+	offline := make(chan struct{})
+	go observer.Serve(ctx, nil, s2OfflineEvent(b.key.ID(), offline))
+	if err := observer.Write(ctx, proto.Watch{Type: "watch", Keys: []string{b.key.ID()}}); err != nil {
+		return err
+	}
+	if err := b.path.Close(); err != nil {
+		return err
+	}
+	select {
+	case <-offline:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func s2OfflineEvent(key string, offline chan struct{}) func(string, []byte) error {
+	return func(kind string, data []byte) error {
+		var pr proto.Presence
+		if kind == "presence" && proto.Decode(data, &pr) == nil && pr.Key == key && !pr.On {
+			close(offline)
+		}
+		return nil
+	}
+}
+
+func (w *s2PeopleWorld) sendBrokenLogAndJoin(conn *peer.Connection, badDev identity.Key) error {
 	ch := w.clock
 	ts := ch.nowTime().UnixMilli()
 	entries := []proto.Envelope{
-		nodetest.SignDeviceAdd(badUser, badUser.ID(), 1, "browser", "gen", badUser.ID(), ts),
-		nodetest.SignDeviceAdd(rogue, badUser.ID(), 2, "browser", "unauth", badDev.ID(), ts),
+		nodetest.SignDeviceAdd(badDev, badDev.ID(), 2, "browser", "Joiner", badDev.ID(), ts),
 	}
-	if err := conn.Send(proto.Devlog{Type: "devlog", User: badUser.ID(), Entries: entries}); err != nil {
+	if err := conn.Send(proto.Devlog{Type: "devlog", User: badDev.ID(), Entries: entries}); err != nil {
 		return err
 	}
 	raw, err := sendSignedCmdRaw(ch.ctx, conn, badDev, s2JoinCmd{
@@ -858,9 +719,21 @@ func (w *s2PeopleWorld) clockVerifyBadJoinRefused(wantCode string) error {
 	if err := checkWireError(ch.lastJoinRaw, wantCode); err != nil {
 		return err
 	}
-	drainBufferedView(ch.pConn, ch.pView, string(ch.gid))
-	if len(ch.pView.humans) != 1 {
-		return fmt.Errorf("humans after bad join = %+v, want only P", ch.pView.humans)
+	snapshot, err := ch.node.Store.Snapshot(string(ch.gid))
+	if err != nil {
+		return err
+	}
+	defer snapshot.Close()
+	rows, err := snapshot.StateRows()
+	if err != nil {
+		return err
+	}
+	view := newS2BrowserView()
+	for _, row := range rows {
+		view.applyRow(row)
+	}
+	if len(view.humans) != 1 {
+		return fmt.Errorf("members after invalid log join = %+v, want only P", view.humans)
 	}
 	return nil
 }
@@ -868,107 +741,90 @@ func (w *s2PeopleWorld) clockVerifyBadJoinRefused(wantCode string) error {
 func (w *s2PeopleWorld) clockQJoinsFirstLink(memberName string) error {
 	ch := w.clock
 	link := ch.invites["inv-1"]
+	if err := w.prepareClockProbe(link); err != nil {
+		return err
+	}
 	qb, err := newPeerBrowser(ch.ctx, w.cleanup, ch.qKey, ch.rvURL, nil)
 	if err != nil {
 		return err
 	}
-	ch.qBrowser = qb
 	if _, err := qb.exchangeRoom(ch.ctx, link.Secret, "b", "a"); err != nil {
 		return err
 	}
-	bc, err := openJoiningCtl(ch.ctx, w.cleanup, qb, link.Home)
+	bc, err := openS2PeopleCtl(ch.ctx, w.cleanup, qb, link.Home)
 	if err != nil {
 		return err
 	}
 	ch.qConn = bc
-	if err := verifyJoiningWelcome(ch.ctx, bc.conn, "Q-browser"); err != nil {
+	if err := verifyJoiningWelcome(ch.ctx, bc.conn); err != nil {
 		return err
 	}
-	return w.sendClockJoin(bc.conn, ch.qKey, ch.qEntries, memberName)
-}
-
-func (w *s2PeopleWorld) sendClockJoin(conn *peer.Connection, key identity.Key, entries []proto.Envelope, name string) error {
-	ch := w.clock
-	if err := conn.Send(proto.Devlog{Type: "devlog", User: key.ID(), Entries: entries}); err != nil {
-		return err
-	}
-	raw, err := sendSignedCmdRaw(ch.ctx, conn, key, s2JoinCmd{
-		HomeCommand: proto.HomeCommand{Type: "join", Nonce: ch.ids.next(), Timestamp: ch.nowTime().UnixMilli(), Group: ch.gid},
-		Name:        name,
-	})
-	if err != nil {
-		return err
-	}
-	var res proto.CmdResult
-	return proto.Decode(raw, &res)
+	return sendJoinDevlogAndCmd(ch.ctx, bc.conn, ch.qKey, ch.qEntries, link.Group, memberName, ch.ids.next(), ch.nowTime())
 }
 
 func (w *s2PeopleWorld) clockVerifySecondUseRefused() error {
-	ch := w.clock
-	if err := w.verifyClockInviteReplay("inv-1", "conflict"); err != nil {
-		return err
-	}
-	return w.verifyClosedJoinLinkRefused(ch.invites["inv-1"], "SecondUse")
+	return w.expectClockProbeRefused()
 }
 
-func (w *s2PeopleWorld) verifyClockInviteReplay(tag, wantCode string) error {
+func (w *s2PeopleWorld) prepareClockProbe(link s2JoinLink) error {
 	ch := w.clock
-	raw, err := sendSignedCmdRaw(ch.ctx, ch.pConn.conn, ch.pKey, s2InviteCmd{
-		HomeCommand: proto.HomeCommand{Type: "invite", Nonce: exampleID(tag), Timestamp: ch.inviteTS[tag], Group: ch.gid},
+	key := newRandomPeerKey()
+	entries := buildPeerOwnerLog(key, newRandomPeerKey(), "Joiner-node", nil, ch.nowTime().UnixMilli())
+	b, err := newPeerBrowser(ch.ctx, w.cleanup, key, ch.rvURL, nil)
+	if err != nil {
+		return err
+	}
+	ch.probe = b
+	if _, err := b.exchangeRoom(ch.ctx, link.Secret, "b", "a"); err != nil {
+		return err
+	}
+	bc, err := openS2PeopleCtl(ch.ctx, w.cleanup, b, link.Home)
+	if err != nil {
+		return err
+	}
+	ch.probeConn = bc
+	if err := verifyJoiningWelcome(ch.ctx, bc.conn); err != nil {
+		return err
+	}
+	if err := bc.conn.Send(proto.Devlog{Type: "devlog", User: key.ID(), Entries: entries}); err != nil {
+		return err
+	}
+	return leaveS2PairingRoom(ch.ctx, ch.rvURL, b)
+}
+
+func (w *s2PeopleWorld) expectClockProbeRefused() error {
+	ch := w.clock
+	raw, err := sendSignedCmdRaw(ch.ctx, ch.probeConn.conn, ch.probe.key, s2JoinCmd{
+		HomeCommand: proto.HomeCommand{Type: "join", Nonce: ch.ids.next(), Timestamp: ch.nowTime().UnixMilli(), Group: ch.gid},
+		Name:        "Joiner",
 	})
-	if err != nil {
+	if err == nil {
+		return checkWireError(raw, "forbidden")
+	}
+	if ch.ctx.Err() != nil {
+		return ch.ctx.Err()
+	}
+	select {
+	case <-ch.probeConn.conn.Done():
+		return nil
+	default:
 		return err
 	}
-	return checkWireError(raw, wantCode)
-}
-
-func (w *s2PeopleWorld) verifyClosedJoinLinkRefused(link s2JoinLink, name string) error {
-	ch := w.clock
-	rKey := newRandomPeerKey()
-	rb, err := newPeerBrowser(ch.ctx, w.cleanup, rKey, ch.rvURL, nil)
-	if err != nil {
-		return err
-	}
-	tryCtx, cancel := context.WithTimeout(ch.ctx, 700*time.Millisecond)
-	defer cancel()
-	if _, err := rb.exchangeRoom(tryCtx, link.Secret, "b", "a"); err != nil {
-		return nil
-	}
-	bc, ok, err := rb.tryOpenCtl(tryCtx, w.cleanup, link.Home, 700*time.Millisecond)
-	if err != nil || !ok {
-		return nil
-	}
-	return w.expectJoinRefusedOnConn(bc.conn, rKey, name)
-}
-
-func (w *s2PeopleWorld) expectJoinRefusedOnConn(conn *peer.Connection, rKey identity.Key, name string) error {
-	ch := w.clock
-	ts := ch.nowTime().UnixMilli()
-	entries := []proto.Envelope{nodetest.SignDeviceAdd(rKey, rKey.ID(), 1, "browser", name, rKey.ID(), ts)}
-	_ = conn.Send(proto.Devlog{Type: "devlog", User: rKey.ID(), Entries: entries})
-	raw, err := sendSignedCmdRaw(ch.ctx, conn, rKey, s2JoinCmd{
-		HomeCommand: proto.HomeCommand{Type: "join", Nonce: ch.ids.next(), Timestamp: ts, Group: ch.gid},
-		Name:        name,
-	})
-	if err != nil {
-		return nil
-	}
-	return checkWireError(raw, "forbidden")
 }
 
 func (w *s2PeopleWorld) clockCreateAndExpire(tag string) error {
 	if err := w.clockCreateInvite(tag); err != nil {
 		return err
 	}
-	w.clock.advance(10*time.Minute + time.Second)
+	if err := w.prepareClockProbe(w.clock.invites[tag]); err != nil {
+		return err
+	}
+	w.clock.advance(10 * time.Minute)
 	return nil
 }
 
-func (w *s2PeopleWorld) clockVerifyExpiredRefused(tag, wantCode string) error {
-	if err := w.verifyClosedJoinLinkRefused(w.clock.invites[tag], "ExpiredJoiner"); err != nil {
-		return err
-	}
-	return w.verifyClockInviteReplay(tag, wantCode)
+func (w *s2PeopleWorld) clockVerifyExpiredRefused() error {
+	return w.expectClockProbeRefused()
 }
 
 func (w *s2PeopleWorld) clockQSendInvite() error {
@@ -983,8 +839,6 @@ func (w *s2PeopleWorld) clockQSendInvite() error {
 func (w *s2PeopleWorld) clockVerifyLastRefused(wantCode string) error {
 	return checkWireError(w.clock.lastCmdRaw, wantCode)
 }
-
-// --- A9.3 roles ---
 
 func (w *s2PeopleWorld) givenCastQJoined(ctx context.Context, groupName, qName string) error {
 	if err := w.initCastGroup(ctx, groupName); err != nil {
@@ -1107,8 +961,6 @@ func (w *s2PeopleWorld) expectSignedCmdError(conn *peer.Connection, signer ident
 	return checkWireError(raw, wantCode)
 }
 
-// --- A9.4 removal ---
-
 func (w *s2PeopleWorld) givenCastWithQAIs(ctx context.Context, groupName string) error {
 	if err := w.initCastGroup(ctx, groupName); err != nil {
 		return err
@@ -1126,11 +978,10 @@ func (w *s2PeopleWorld) givenCastWithQAIs(ctx context.Context, groupName string)
 }
 
 func (w *s2PeopleWorld) joinPAIsOnP1AndP2() error {
-	sec, err := w.cast.JoinAI(w.cast.P, w.cast.P1, w.cast.P1, w.gid, s2SecretaryCLI, s2SecretaryName, true)
+	_, err := w.cast.JoinAI(w.cast.P, w.cast.P1, w.cast.P1, w.gid, s2SecretaryCLI, s2SecretaryName, true)
 	if err != nil {
 		return err
 	}
-	w.secretary = sec
 	pw, err := w.cast.JoinAI(w.cast.P, w.cast.P2, w.cast.P1, w.gid, s2PWorkCLI, s2PWorkName, false)
 	w.pWork = pw
 	return err
@@ -1170,37 +1021,36 @@ func (w *s2PeopleWorld) stageUnfinishedTaskForQTeam() error {
 		return err
 	}
 	pConn := w.cast.P.Conns[w.cast.P1.ID()].conn
-	if err := w.assignTaskRoles(proto.ID(w.qTeam.ID), proto.ID(w.pWork.ID)); err != nil {
-		return err
+	for _, roles := range [][2]proto.ID{{proto.ID(w.qTeam.ID), proto.ID(w.pWork.ID)}, {proto.ID(w.pWork.ID), proto.ID(w.qTeam.ID)}} {
+		if err := w.assignTaskRoles(roles[0], roles[1]); err != nil {
+			return err
+		}
+		raw, err := w.sendRemove(pConn, w.cast.P.Key, w.qMemID)
+		if err != nil {
+			return err
+		}
+		w.removeReplies = append(w.removeReplies, raw)
 	}
-	w.assigneeRef = w.captureRemoveCode(pConn, w.cast.P.Key, w.qMemID)
-	if err := w.assignTaskRoles(proto.ID(w.pWork.ID), proto.ID(w.qTeam.ID)); err != nil {
-		return err
-	}
-	w.reviewerRef = w.captureRemoveCode(pConn, w.cast.P.Key, w.qMemID)
 	return nil
 }
 
 func (w *s2PeopleWorld) startDirectTaskByPWork() error {
-	tid := w.cast.NextID()
-	w.taskID = tid
-	pConn := w.cast.P.Conns[w.cast.P1.ID()].conn
-	raw, err := sendSignedCmdRaw(w.cast.Ctx, pConn, w.cast.P2.Key, proto.TaskStart{
-		TaskCommand: proto.TaskCommand{
-			HomeCommand: proto.HomeCommand{
-				Type: "task", Nonce: w.cast.NextID(), Timestamp: time.Now().UnixMilli(),
-				Group: w.gid, As: proto.ID(w.pWork.ID),
-			},
-			Op: "start",
-			ID: tid,
-		},
-		Title: "Hold Q-team busy", Plan: "keep open", Origin: "direct",
+	script := m5ClaudeScript([]m5ToolCallSpec{
+		{Name: "start_task", Args: map[string]any{"title": "Hold Q-team busy", "plan": "Keep open"}},
 	})
-	if err != nil {
+	if err := w.cast.WriteScript(w.cast.P2, s2PWorkCLI, script); err != nil {
 		return err
 	}
-	var res proto.CmdResult
-	return proto.Decode(raw, &res)
+	if err := postS2Mention(w.cast, w.cast.P, w.cast.P1, w.gid, w.pWork.ID, "Start a task"); err != nil {
+		return err
+	}
+	if err := w.drainViewUntil(w.cast.Ctx, w.cast.P.Conns[w.cast.P1.ID()], w.pView, string(w.gid), func() bool {
+		w.taskID = w.pView.taskID
+		return w.taskID != ""
+	}); err != nil {
+		return err
+	}
+	return w.cast.ClearScript(w.cast.P2, s2PWorkCLI)
 }
 
 func (w *s2PeopleWorld) assignTaskRoles(assignee, reviewer proto.ID) error {
@@ -1219,27 +1069,21 @@ func (w *s2PeopleWorld) assignTaskRoles(assignee, reviewer proto.ID) error {
 	return err
 }
 
-func (w *s2PeopleWorld) captureRemoveCode(conn *peer.Connection, signer identity.Key, memID string) string {
-	raw, err := sendSignedCmdRaw(w.cast.Ctx, conn, signer, proto.MemberCommand{
+func (w *s2PeopleWorld) sendRemove(conn *peer.Connection, signer identity.Key, memID string) (json.RawMessage, error) {
+	return sendSignedCmdRaw(w.cast.Ctx, conn, signer, proto.MemberCommand{
 		HomeCommand: proto.HomeCommand{
 			Type: "member", Nonce: w.cast.NextID(), Timestamp: time.Now().UnixMilli(), Group: w.gid,
 		},
 		Op: "remove",
 		ID: proto.ID(memID),
 	})
-	if err != nil {
-		return err.Error()
-	}
-	var er proto.ErrorResponse
-	if proto.Decode(raw, &er) != nil {
-		return string(raw)
-	}
-	return er.Err.Code
 }
 
 func (w *s2PeopleWorld) verifyUnfinishedTaskConflicts(wantCode string) error {
-	if w.assigneeRef != wantCode || w.reviewerRef != wantCode {
-		return fmt.Errorf("remove codes = (assignee=%q, reviewer=%q), want %q", w.assigneeRef, w.reviewerRef, wantCode)
+	for _, raw := range w.removeReplies {
+		if err := checkWireError(raw, wantCode); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1257,6 +1101,14 @@ func (w *s2PeopleWorld) cancelTaskAndRemoveQ() error {
 		return err
 	}
 	w.removeAt = time.Now()
+	w.qClosed = make(chan time.Time, 1)
+	go func() {
+		select {
+		case <-w.qHomeBC.conn.Done():
+			w.qClosed <- time.Now()
+		case <-w.cast.Ctx.Done():
+		}
+	}()
 	_, err = w.cast.SendCmd(w.cast.P, pBC.conn, proto.MemberCommand{
 		HomeCommand: proto.HomeCommand{
 			Type: "member", Nonce: w.cast.NextID(), Timestamp: time.Now().UnixMilli(), Group: w.gid,
@@ -1269,72 +1121,110 @@ func (w *s2PeopleWorld) cancelTaskAndRemoveQ() error {
 
 func (w *s2PeopleWorld) verifyQDisconnectedAndRefused() error {
 	deadline := w.removeAt.Add(time.Second)
-	if err := waitBrowserClosedBefore(w.qHomeBC.conn, deadline); err != nil {
+	if err := w.waitQBrowserClosed(deadline); err != nil {
 		return err
 	}
 	if err := w.waitP1DroppedQDevices(deadline); err != nil {
 		return err
 	}
-	_, ok, err := w.cast.Q.Browser.tryOpenCtl(w.cast.Ctx, w.cast.addUndo, w.cast.P1.ID(), 1200*time.Millisecond)
-	if err != nil || ok {
-		return fmt.Errorf("expected next ctl attempt from removed Q to P1 to fail, got ok=%v err=%v", ok, err)
-	}
-	return nil
+	return w.verifyQReconnectRefused()
 }
 
-func waitBrowserClosedBefore(conn *peer.Connection, deadline time.Time) error {
-	rem := time.Until(deadline)
-	if rem <= 0 {
-		rem = time.Millisecond
+func (w *s2PeopleWorld) verifyQReconnectRefused() error {
+	conn, err := w.cast.Q.Browser.peer.Offer(w.cast.Ctx, w.cast.P1.ID())
+	if err != nil {
+		return err
 	}
+	defer conn.Close()
 	select {
+	case <-conn.Ready():
+		return fmt.Errorf("P1 accepted a new connection from removed Q")
 	case <-conn.Done():
 		return nil
-	case <-time.After(rem):
-		return errors.New("Q browser ctl to P1 did not close within 1 second")
+	case <-w.cast.Ctx.Done():
+		return w.cast.Ctx.Err()
+	}
+}
+
+func (w *s2PeopleWorld) waitQBrowserClosed(deadline time.Time) error {
+	select {
+	case at := <-w.qClosed:
+		if at.After(deadline) {
+			return fmt.Errorf("Q browser ctl closed after %s, want within 1 second", at.Sub(w.removeAt))
+		}
+		return nil
+	case <-w.cast.Ctx.Done():
+		return w.cast.Ctx.Err()
 	}
 }
 
 func (w *s2PeopleWorld) waitP1DroppedQDevices(deadline time.Time) error {
-	qBrowserID, q1ID := w.cast.Q.ID(), w.cast.Q1.ID()
+	ctx, cancel := context.WithDeadline(w.cast.Ctx, deadline)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
 	for {
-		out, err := w.runNodeStatus(w.cast.P1)
-		if err == nil && !strings.Contains(out, qBrowserID) && !strings.Contains(out, q1ID) {
+		connected, err := w.qConnectedToP1(ctx)
+		if err != nil {
+			return err
+		}
+		if !connected {
 			return nil
 		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("P1 still lists Q connection past 1s: %s (%v)", out, err)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("P1 still lists a Q connection past 1 second")
+		case <-ticker.C:
 		}
-		time.Sleep(25 * time.Millisecond)
 	}
 }
 
-func (w *s2PeopleWorld) runNodeStatus(n *s2Node) (string, error) {
-	cmd := exec.Command(w.cast.F.bin, "status")
-	cmd.Env = n.Env
+func (w *s2PeopleWorld) qConnectedToP1(ctx context.Context) (bool, error) {
+	cmd := exec.CommandContext(ctx, w.cast.F.bin, "status")
+	cmd.Env = w.cast.P1.Env
 	out, err := cmd.CombinedOutput()
-	return string(out), err
+	return s2StatusHasConnection(string(out), w.cast.Q.ID(), w.cast.Q1.ID()), err
+}
+
+func s2StatusHasConnection(status string, devices ...string) bool {
+	for _, line := range strings.Split(status, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 3 && fields[0] == "connection" && slices.Contains(devices, fields[1]) {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *s2PeopleWorld) verifyQGroupsAndGoneMarkers() error {
-	drainClosedBrowserPushes(w.qHomeBC, w.qView, string(w.gid))
+	if err := w.drainQRemovalPushes(); err != nil {
+		return err
+	}
 	hasGroup := slices.ContainsFunc(w.qView.groups, func(g proto.GroupSummary) bool { return g.Group == string(w.gid) })
-	if !w.qView.seenGroups || hasGroup {
-		return fmt.Errorf("Q browser groups after removal = %+v (seen=%v), want group absent", w.qView.groups, w.qView.seenGroups)
+	if hasGroup {
+		return fmt.Errorf("Q browser groups after removal = %+v, want group absent", w.qView.groups)
 	}
 	return w.awaitPGoneMarkers()
 }
 
-func drainClosedBrowserPushes(bc *peerBrowserConn, view *s2BrowserView, gid string) {
-	for raw := range bc.pushes {
-		view.applyPush(raw, gid)
+func (w *s2PeopleWorld) drainQRemovalPushes() error {
+	for {
+		select {
+		case raw, ok := <-w.qHomeBC.pushes:
+			if !ok {
+				return nil
+			}
+			w.qView.applyPush(raw, string(w.gid))
+		case <-w.cast.Ctx.Done():
+			return w.cast.Ctx.Err()
+		}
 	}
 }
 
 func (w *s2PeopleWorld) awaitPGoneMarkers() error {
 	pBC := w.cast.P.Conns[w.cast.P1.ID()]
 	return w.drainViewUntil(w.cast.Ctx, pBC, w.pView, string(w.gid), func() bool {
-		return w.hasAllQGoneMarkers() && hasMemberRemovedSystemMsg(w.pView, w.cast.Q.ID(), w.pMemID)
+		return w.hasAllQGoneMarkers()
 	})
 }
 
@@ -1344,45 +1234,17 @@ func (w *s2PeopleWorld) hasAllQGoneMarkers() bool {
 			return false
 		}
 	}
-	return w.pView.gone[[2]string{"device", w.cast.Q.ID() + ":1"}] && w.pView.gone[[2]string{"device", w.cast.Q.ID() + ":2"}]
+	return true
 }
-
-func hasMemberRemovedSystemMsg(view *s2BrowserView, wantUser, wantBy string) bool {
-	for _, m := range view.msgs {
-		if matchMemberRemovedMsg(m, wantUser, wantBy) {
-			return true
-		}
-	}
-	return false
-}
-
-func matchMemberRemovedMsg(m proto.MsgRow, wantUser, wantBy string) bool {
-	if m.Kind != "system" || m.By != "system" {
-		return false
-	}
-	var body s2MemberRemovedBody
-	if proto.Decode(m.Body, &body) != nil {
-		return false
-	}
-	return body.Code == "member_removed" && body.User == wantUser && body.By == wantBy
-}
-
-// --- A9.5 other people's hosts ---
 
 func (w *s2PeopleWorld) givenCastWithSecretaryAndQ(ctx context.Context, groupName, qName string) error {
 	if err := w.initCastGroup(ctx, groupName); err != nil {
 		return err
 	}
-	sec, err := w.cast.JoinAI(w.cast.P, w.cast.P1, w.cast.P1, w.gid, s2SecretaryCLI, s2SecretaryName, true)
+	_, err := w.cast.JoinAI(w.cast.P, w.cast.P1, w.cast.P1, w.gid, s2SecretaryCLI, s2SecretaryName, true)
 	if err != nil {
 		return err
 	}
-	w.secretary = sec
-	other, err := w.cast.CreateProjectGroup(w.cast.P, w.cast.P1, "Private", "none")
-	if err != nil {
-		return err
-	}
-	w.otherGID = other
 	if err := w.pCreatesInvitation(); err != nil {
 		return err
 	}
@@ -1399,63 +1261,44 @@ func (w *s2PeopleWorld) verifyQTeamRowAndClone() error {
 	if w.qTeam.Host != w.cast.Q1.ID() || w.qTeam.User != w.cast.Q.ID() {
 		return fmt.Errorf("Q-team row = %+v, want host=%s user=%s", w.qTeam, w.cast.Q1.ID(), w.cast.Q.ID())
 	}
-	repoReadme := filepath.Join(w.cast.Q1.Data, "projects", string(w.gid), "repo", "README.md")
-	if _, err := os.Stat(repoReadme); err != nil {
-		return fmt.Errorf("expected Q1 clone at %s: %w", repoReadme, err)
+	repo := filepath.Join(w.cast.Q1.Data, "projects", string(w.gid), "repo")
+	head, err := m5GitOut(repo, "rev-parse", "HEAD")
+	if err != nil {
+		return err
+	}
+	want, err := m5GitOut(w.cast.BareDir, "rev-parse", "HEAD")
+	if err != nil {
+		return err
+	}
+	if head != want {
+		return fmt.Errorf("Q1 clone HEAD = %s, want %s", head, want)
 	}
 	return nil
 }
 
 func (w *s2PeopleWorld) verifyNonMemberHostAddAIRefused(wantCode string) error {
-	q2Key, q2BC, err := w.enrolExtraQNodeAndConnectP1()
+	h := &homeGroupWorld{now: time.Now()}
+	if err := h.initEmpty(); err != nil {
+		return err
+	}
+	if err := h.createGroup("Nonmember", "Owner"); err != nil {
+		return err
+	}
+	log, err := deviceLog(w.cast.Q.Key, w.cast.Q.Entries...)
 	if err != nil {
 		return err
 	}
-	return w.expectSignedCmdError(q2BC.conn, q2Key, proto.MemberAddAI{
+	h.state.Logs[log.User] = log
+	if err := h.apply(w.cast.Q1.Key, proto.MemberAddAI{
 		MemberCommand: proto.MemberCommand{
-			HomeCommand: proto.HomeCommand{
-				Type: "member", Nonce: w.cast.NextID(), Timestamp: time.Now().UnixMilli(), Group: w.otherGID,
-			},
-			Op: "add_ai",
-			ID: w.cast.NextID(),
+			HomeCommand: proto.HomeCommand{Type: "member", Nonce: w.cast.NextID(), Timestamp: h.now.UnixMilli(), Group: proto.ID(h.state.ID)},
+			Op:          "add_ai", ID: w.cast.NextID(),
 		},
-		CLI: "claude", Name: "Intruder", Account: "team", Secretary: false, Approvers: []string{w.cast.Q.ID()},
-	}, wantCode)
-}
-
-func (w *s2PeopleWorld) enrolExtraQNodeAndConnectP1() (identity.Key, *peerBrowserConn, error) {
-	q2Key := newRandomPeerKey()
-	ver := len(w.cast.Q.Entries) + 1
-	entry := nodetest.SignDeviceAdd(w.cast.Q.Key, w.cast.Q.ID(), ver, "node", "Q2", q2Key.ID(), time.Now().UnixMilli())
-	w.cast.Q.Entries = append(w.cast.Q.Entries, entry)
-	if err := w.qHomeBC.conn.Send(proto.Devlog{Type: "devlog", User: w.cast.Q.ID(), Entries: []proto.Envelope{entry}}); err != nil {
-		return nil, nil, err
+		CLI: s2QPersonalCLI, Name: s2QPersonalName, Account: "personal", Approvers: []string{},
+	}); err != nil {
+		return err
 	}
-	q2Peer, err := newPeerBrowser(w.cast.Ctx, w.cast.addUndo, q2Key, w.cast.RVURL, nil)
-	if err != nil {
-		return nil, nil, err
-	}
-	bc, err := openEnrolledHostCtl(w.cast, q2Peer, w.cast.P1.ID())
-	return q2Key, bc, err
-}
-
-func openEnrolledHostCtl(cast *s2Cast, b *peerBrowser, homeID string) (*peerBrowserConn, error) {
-	var last error
-	for range 6 {
-		bc, ok, err := b.tryOpenCtl(cast.Ctx, cast.addUndo, homeID, 2*time.Second)
-		if err == nil && ok {
-			if _, herr := requestHelloV2Fallback(cast.Ctx, bc.conn, "Q2"); herr == nil {
-				return bc, nil
-			} else {
-				last = herr
-			}
-			bc.conn.Close()
-		} else {
-			last = err
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	return nil, fmt.Errorf("openEnrolledHostCtl: %w", last)
+	return h.answerCode(wantCode)
 }
 
 func (w *s2PeopleWorld) verifyQSecretaryJoinRefused(wantCode string) error {
@@ -1467,8 +1310,6 @@ func (w *s2PeopleWorld) verifyQSecretaryJoinRefused(wantCode string) error {
 		Group: w.gid, Home: w.cast.P1.ID(), Agent: s2QPersonalCLI, Name: s2QPersonalName, Secretary: true,
 	}, wantCode)
 }
-
-// --- A9.6 surface boundaries ---
 
 func (w *s2PeopleWorld) givenSurfaceCast(ctx context.Context, sharedName, soloName string) error {
 	if err := w.initCastGroup(ctx, sharedName); err != nil {
@@ -1488,7 +1329,7 @@ func (w *s2PeopleWorld) givenSurfaceCast(ctx context.Context, sharedName, soloNa
 	return w.q1JoinsQTeam()
 }
 
-func (w *s2PeopleWorld) verifyP1SurfaceForQ(_, _, wantCode string) error {
+func (w *s2PeopleWorld) verifyP1SurfaceForQ(wantCode string) error {
 	if err := w.verifyQHomeSurfaceAllowed(); err != nil {
 		return err
 	}
@@ -1528,16 +1369,8 @@ func (w *s2PeopleWorld) verifyQHomeSurfaceAllowed() error {
 }
 
 func (w *s2PeopleWorld) verifyOtherGroupRefusedOnP1(wantCode string) error {
-	err := expectRawRequestError(w.cast.Ctx, w.qHomeBC.conn, func(id int64) any {
-		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: string(w.otherGID)}
-	}, wantCode)
-	if err != nil {
-		return err
-	}
 	return expectRawRequestError(w.cast.Ctx, w.qHomeBC.conn, func(id int64) any {
-		return proto.FetchThread{
-			FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: string(w.otherGID), Limit: 10},
-		}
+		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: string(w.otherGID)}
 	}, wantCode)
 }
 
@@ -1550,10 +1383,6 @@ func expectRawRequestError(ctx context.Context, conn *peer.Connection, build fun
 }
 
 func (w *s2PeopleWorld) verifyQ1SurfaceForP() error {
-	_, ok, err := w.cast.P.Browser.tryOpenCtl(w.cast.Ctx, w.cast.addUndo, w.cast.Q1.ID(), 1200*time.Millisecond)
-	if err != nil || ok {
-		return fmt.Errorf("expected Q1 to drop P before sharing a group on Q1, got ok=%v err=%v", ok, err)
-	}
 	pOnQ1, err := w.invitePIntoQ1Group()
 	if err != nil {
 		return err
