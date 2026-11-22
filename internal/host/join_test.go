@@ -862,9 +862,9 @@ func TestRecordHomeClearsCachedUnhostedGroupOnlyOnReplacement(t *testing.T) {
 	d := deliv(h)
 	gs := d.groupLocked(group, old.Home)
 	gs.live = true
-	applyGroupRow(h, d, old.Home, group, marshalWire(proto.GroupRow{
+	applyGroupRow(h, d, old.Home, group, json.RawMessage(marshalWire(proto.GroupRow{
 		RowHeader: proto.RowHeader{Type: "group", ID: group, Seq: 4}, Home: old.Home, Base: "old-base",
-	}))
+	})))
 	joinAssertEqual(t, "update same home", h.RecordHome(old, nil), nil)
 	_, cached := h.Rows.Get(group, "group", group)
 	joinAssertEqual(t, "cache retained", cached, true)
