@@ -35,6 +35,25 @@
           "max": 12.5
         }
       },
+      "driver": {
+        "accounts": [
+          "personal",
+          "team",
+          "api_key"
+        ],
+        "levels": [
+          1,
+          2,
+          3
+        ],
+        "approvals": "tool",
+        "takeover": "new",
+        "usage": [
+          "tokens",
+          "usd",
+          "window_pct"
+        ]
+      },
       "groups": [
         {
           "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
@@ -52,6 +71,21 @@
       "account": null,
       "login_ok": false,
       "caps": {},
+      "driver": {
+        "accounts": [
+          "personal",
+          "team",
+          "api_key"
+        ],
+        "levels": [
+          1,
+          2,
+          3
+        ],
+        "approvals": "conn",
+        "takeover": "resume",
+        "usage": []
+      },
       "groups": []
     }
   ],

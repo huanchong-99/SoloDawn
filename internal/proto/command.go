@@ -228,9 +228,11 @@ type TaskAssign struct {
 
 type Note struct {
 	HomeCommand
-	ID   ID     `json:"id"`
-	Task *ID    `json:"task"`
-	Text string `json:"text"`
+	ID       ID     `json:"id"`
+	Task     *ID    `json:"task"`
+	NoteType string `json:"type,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Text     string `json:"text"`
 }
 
 type Forget struct {
