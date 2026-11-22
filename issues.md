@@ -720,6 +720,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-22 · limitation · Model discovery has synthetic fixtures, not live captures
+
+- Symptom: Claude Code and Codex model discovery was tested only against scripted listings, so the fields of a real catalog and whether a nonempty Codex `serviceTiers` means a fast mode were unverified.
+- Cause: neither real CLI was available for T3-9. `internal/host/fakecli/testdata/claude-models.json` and `codex-models.json` are synthetic fixtures of `step-3/drivers.md` section 10.1.
+- Status: resolved in T3-9 by a live check on 2026-11-23 with Claude Code 2.1.311 and Codex 0.164.0, no model called. Claude: the first stdout line is the `control_response` with 14 models, exit 0 after stdin closes, and some entries (Haiku 4.5) have no `supportsEffort`. Codex: two notifications (`remoteControl/status/changed`, `account/updated`) before the answer, then 8 models in one page with `nextCursor` null, each with `serviceTiers` `[{"id":"priority","name":"Fast",…}]`. The readers in `internal/host/models.go` handle all of it. No listed id has a word beyond the two rows of `internal/host/tiers.go`. The fakecli fixtures stay synthetic.
+
 ### 2026-11-22 · limitation · `host.CheckTakeover` and `driver` in `host.info`
 
 - Status: resolved. T3-1 (#275) wired `checkTakeover` into `takeover.start` and uses its `assignFirst` result. T3-2 (#289) added `driver` for each agent in `host.info`.

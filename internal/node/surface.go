@@ -21,7 +21,7 @@ type (
 		Sessions        *Sessions
 		Host            *host.Host
 		Name            func() string
-		Agents          func(context.Context) ([]proto.HostAgent, error)
+		Agents          func(context.Context, bool) ([]proto.HostAgent, error)
 		Update          func() *proto.Update
 		Relay           func() *proto.RelayUse
 	}
@@ -93,11 +93,15 @@ func ReadRendezvous(db *store.Store) []string { return readSetting[[]string](db,
 
 // HostState builds the current host.info state snapshot (datachannel.md 7).
 func (sf *Surface) HostState(ctx context.Context) (proto.HostState, error) {
+	return sf.hostState(ctx, false)
+}
+
+func (sf *Surface) hostState(ctx context.Context, refresh bool) (proto.HostState, error) {
 	db, err := sf.readDBState()
 	if err != nil {
 		return proto.HostState{}, err
 	}
-	rawAgents, err := sf.cfg.Agents(ctx)
+	rawAgents, err := sf.cfg.Agents(ctx, refresh)
 	if err != nil {
 		return proto.HostState{}, err
 	}
@@ -120,8 +124,24 @@ func (sf *Surface) HostState(ctx context.Context) (proto.HostState, error) {
 	}, nil
 }
 
-func (sf *Surface) reqHostInfo(ctx context.Context, _ *home.Conn, _ Ctl, _ string, _ int64, _ json.RawMessage) (any, error) {
-	return sf.HostState(ctx)
+func (sf *Surface) reqHostInfo(ctx context.Context, _ *home.Conn, _ Ctl, _ string, _ int64, data json.RawMessage) (any, error) {
+	var request proto.HostInfoRequest
+	if err := proto.Decode(data, &request); err != nil {
+		return nil, &host.Error{Code: "bad_request", Message: err.Error()}
+	}
+	state, err := sf.hostState(ctx, request.Refresh)
+	if err == nil && request.Refresh {
+		sf.pushHostInfo(state)
+	}
+	return state, err
+}
+
+func (sf *Surface) pushHostInfo(state proto.HostState) {
+	for _, c := range sf.cfg.Sessions.sesConns() {
+		if sf.cfg.Sessions.sesWelcomed(c) && sf.cfg.Sessions.cfg.Logs.IsOwner(c.device) {
+			c.Send(proto.HostInfoPush{Type: "host.info", HostState: state})
+		}
+	}
 }
 
 func srfCountOpen(sessions []host.Session) int {

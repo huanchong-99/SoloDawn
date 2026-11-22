@@ -125,7 +125,7 @@ func hostAgentsSteps(sc *godog.ScenarioContext, f fixtures) {
 
 	sc.Step(`^the host reads its agents$`, func() error {
 		var err error
-		got, err = h.Agents(context.Background())
+		got, err = h.Agents(context.Background(), false)
 		return err
 	})
 

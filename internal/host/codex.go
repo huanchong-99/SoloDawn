@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
 func init() {
@@ -29,6 +31,10 @@ func codexCapabilities() Capabilities {
 }
 
 type codexDriver struct{}
+
+func (codexDriver) Models(ctx context.Context) []proto.Model {
+	return probeModels(ctx, "codex", []string{"app-server"}, readCodexModels)
+}
 
 var errCodexClosed = errors.New("codex: process closed")
 

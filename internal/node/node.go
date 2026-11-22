@@ -305,6 +305,9 @@ func (n *nodeRuntime) rvEvents(ctx context.Context, path *peer.Path) func(string
 }
 
 func (n *nodeRuntime) stepStartup() error {
+	if _, err := n.host.Agents(n.ctx, false); err != nil {
+		return err
+	}
 	if err := n.host.EnsureHomeConnections(); err != nil {
 		return err
 	}

@@ -1177,7 +1177,7 @@ func (w *m5World) createGroupAndJoinAIs(forge string, checks []string, level2 bo
 
 func (w *m5World) declareAndJoinWorkingAIs() error {
 	n0 := w.cluster.Nodes[0]
-	if _, err := n0.Host.Agents(context.Background()); err != nil {
+	if _, err := n0.Host.Agents(context.Background(), false); err != nil {
 		return err
 	}
 	specs := []struct{ agent, name string }{{"claude", "Claude"}, {"codex", "Codex"}}
