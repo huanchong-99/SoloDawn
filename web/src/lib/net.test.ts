@@ -378,6 +378,26 @@ it('joins an invitation without adopting the home and reconnects to it after rel
   expect(sharedHome.groups).toEqual([]);
   await vi.waitFor(() => expect(client.net.path(sharedHome)).toMatchObject({ kind: 'direct' }));
 
+  const newNode = await newDevice();
+  const nodeEntry = await signDeviceEntry(
+    browser,
+    browser.id,
+    6,
+    'add',
+    newNode.id,
+    'node',
+    'New computer',
+  );
+  expect(rv.known(newNode.id)).toBe(false);
+  reconnected.ctl.deliver({ t: 'devlog', user: browser.id, entries: [nodeEntry] });
+  const extended = [...updated.entries, offlineEntry, nodeEntry];
+  await vi.waitFor(() =>
+    expect(ownPC.ctl.frames().at(-1)).toEqual({ ...updated, entries: extended }),
+  );
+  expect(rv.known(newNode.id)).toBe(true);
+  expect(homes.at(-1)).toMatchObject({ device: newNode.id, name: 'New computer', owner: true });
+  expect((await loadOwner(crypto, () => idb)).log?.entries).toEqual(extended);
+
   const refused = client.net.join!(invitation, 'Joiner', new AbortController().signal);
   const refusal = expect(refused).rejects.toMatchObject({ step: 'hello', code: 'version' });
   const joins = () => rv.sent.filter((frame) => frame.t === 'join');
@@ -421,11 +441,11 @@ it('joins an invitation without adopting the home and reconnects to it after rel
   location.hash = '#/groups';
   startTracked('live');
   await vi.waitFor(() =>
-    expect(homes.map((node) => node.device)).toEqual([own.id, offline.id, home.id]),
+    expect(homes.map((node) => node.device)).toEqual([own.id, offline.id, newNode.id, home.id]),
   );
   expect(close).not.toHaveBeenCalled();
   expect(homes[0].owner).toBe(true);
-  expect(homes[2].owner).toBe(false);
+  expect(homes.at(-1)?.owner).toBe(false);
   expect(clients[1].known(home.id)).toBe(true);
   expect(clients[1].known(anotherBrowser.id)).toBe(false);
   expect(clients.slice(1).map((client) => client.url)).toContain('wss://saved.example/rv');

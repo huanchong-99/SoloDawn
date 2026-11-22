@@ -149,7 +149,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `banner` while another tab holds it; "Use here" moves focus to the main landmark, as the banner
   goes) and connects to each paired node from `owner.ts` through `peer.ts` (W-2), one
   `session.peer(node, ...)` per node, pausing while `#/onboarding` runs a pairing session and
-  forwarding owner `devlog` updates. The browser sends `hello` with `v: 2`; only a `version`
+  forwarding updates to this person's device log on both paired and joined connections.
+  The browser sends `hello` with `v: 2`; only a `version`
   refusal makes it try `v: 1` on that connection. `net.homes` is `homes` of `groups.svelte.ts`; `net.path(home)`
   is how this browser reaches a home now (`direct` or `relay`, the round trip, since when), and
   undefined while it does not; the mock's path is direct. `net.source` says which it is.
