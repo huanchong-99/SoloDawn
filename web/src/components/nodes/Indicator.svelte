@@ -51,11 +51,17 @@
 <style>
   .conn {
     height: 32px;
+    min-width: 0;
     padding: 0 10px;
     border: 1px solid var(--line);
     border-radius: var(--r-full);
     font-size: var(--fs-xs);
     white-space: nowrap;
+  }
+  .conn > span:first-of-type {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .conn:hover {
     text-decoration: none;

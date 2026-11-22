@@ -526,6 +526,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/member.spec.ts`     | steps of `../features/web_member.feature`                                         |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
 | `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                     |
+| `features/a11y.spec.ts`       | steps of `../features/web_a11y.feature`                                           |
 | `features/home.ts`            | a home in memory for those steps; `page.ts` drives the page                       |
 | `features/demo.ts`            | groups with a morning of talk, for a development page                             |
 | `features/watch.svelte.ts`    | an effect outside a component, for tests of what is reactive                      |
