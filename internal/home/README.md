@@ -849,14 +849,11 @@ home half of acceptance tests A6.3 and A6.4.
 propagation, protected rows, and the purge mark with `Loop.Sync` reset.
 `features/home_retention.feature` holds acceptance test A2.5 and the retention half of A5.14.
 
-<<<<<<< HEAD
 `people_seam_test.go` covers `people_seam.go` across `Table.ApplyJoining`, `State.Invite`,
 `LoopConfig.Invite` (including `Store.Write` re-entrancy freedom on `Invite` and `ReplayInvite`),
 and `(*Conn).SetJoining` admission callbacks.
-=======
 `webpush_test.go` covers `push`, `After["push"]`, `StartLoop` subscription loading and `Close`
 drain, RFC 8291 decryption, per-browser eligibility and revocation, and `404`/`410` eviction in
 memory and `push_sub`. `features/home_webpush.feature` holds the backend half of acceptance test
 A8.3 against a local HTTP push endpoint, verifying that wire payloads are ciphertext only and
 decrypted reminders hold neither message text nor commands.
->>>>>>> origin/rebuild
