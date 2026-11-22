@@ -73,7 +73,7 @@ Feature: A request for another person's AI needs its owner's word
     Given the confirmation cast with Q
     And "Secretary" is scripted for confirmation tools:
       """
-      [[{"name":"propose_brief","args":{"title":"Two roles","goal":"Check the path","criteria":["Path visible"],"scope_in":["path"],"scope_out":[],"tasks":[{"title":"Implement","assignee":"Q-personal","reviewer":"P-work"},{"title":"Inspect","assignee":"P-work","reviewer":"Q-personal"}]}}],[]]
+      [[{"name":"propose_brief","args":{"title":"Two roles","requester":"P","goal":"Check the path","criteria":["Path visible"],"scope_in":["path"],"scope_out":[],"tasks":[{"title":"Implement","assignee":"Q-personal","reviewer":"P-work"},{"title":"Inspect","assignee":"P-work","reviewer":"Q-personal"}]}}],[]]
       """
     And "P-work" is scripted for confirmation tools:
       """
@@ -194,6 +194,11 @@ Feature: A request for another person's AI needs its owner's word
   @pending
   Scenario Outline: A9.18 — A personal call waits for a reply or a denial after its receipt
     Given the confirmation cast with Q
+    And confirmation browser P sends as "ask-limit":
+      """
+      {"t":"group","op":"set","limits":{"rounds":10,"wakes_per_hour":20,"turn_minutes":60,"failures":3,"review_rounds":5,"ask_depth":4,"ask_wait_s":1,"approval_wait_s":600,"idle_notice_minutes":30}}
+      """
+    And the confirmation command answers "ok"
     And "P-work" is scripted for confirmation tools:
       """
       [[{"name":"ask","args":{"to":"Q-personal","text":"What is the path?"}},{"name":"post","args":{"text":"The ask returned while waiting"}}],[]]
@@ -351,7 +356,7 @@ Feature: A request for another person's AI needs its owner's word
     Then the confirmation command answers "ok"
     Given "Secretary" is scripted for confirmation tools:
       """
-      [[{"name":"propose_brief","args":{"title":"Review labels","goal":"Check the path","criteria":["Path visible"],"scope_in":["path"],"scope_out":[],"tasks":[{"title":"Report the path","assignee":"Q-team","reviewer":"P-work"}]}}],[]]
+      [[{"name":"propose_brief","args":{"title":"Review labels","requester":"P","goal":"Check the path","criteria":["Path visible"],"scope_in":["path"],"scope_out":[],"tasks":[{"title":"Report the path","assignee":"Q-team","reviewer":"P-work"}]}}],[]]
       """
     And "Q-team" is scripted for confirmation tools:
       """

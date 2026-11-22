@@ -5,7 +5,6 @@ package features
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 
 	"github.com/cucumber/godog"
 )
@@ -58,7 +57,7 @@ func (w *s2ConfirmWorld) proposeWithReviewer(ai, title, assignee, reviewer, name
 		args["replaces"] = replaces
 	}
 	agent := w.ais[ai]
-	script := s2ConfirmClaude([][]s2ConfirmTool{{{Name: "propose_brief", Args: args}}, nil})
+	script := m5ClaudeScript([]m5ToolCallSpec{{Name: "propose_brief", Args: args}}, nil)
 	if err := w.cast.WriteScript(w.aiNode(ai), agent.CLI, script); err != nil {
 		return err
 	}
@@ -95,19 +94,13 @@ func (w *s2ConfirmWorld) confirm(actor, card string) error {
 }
 
 func (w *s2ConfirmWorld) replacementTask(title string) error {
-	if err := w.send("P", "", map[string]any{"t": "group", "op": "set", "secretary": w.ids[s2QTeamName]}); err != nil {
+	if err := w.observe(func() (bool, error) {
+		ids, err := w.matchRows("member", map[string]any{"id": w.ais[s2SecretaryName].ID, "state": "dormant"})
+		return len(ids) == 1, err
+	}); err != nil {
 		return err
 	}
-	if err := w.answer("ok"); err != nil {
-		return err
-	}
-	if err := w.send("Q", "", map[string]any{"t": "member", "op": "set", "id": w.ids[s2QTeamName], "allow": []string{w.ids["P"]}}); err != nil {
-		return err
-	}
-	if err := w.answer("ok"); err != nil {
-		return err
-	}
-	return w.propose(s2QTeamName, title, s2QPersonalName, "replacement", w.ids["brief"])
+	return w.propose(s2SecretaryName, title, s2QPersonalName, "replacement", w.ids["brief"])
 }
 
 func (w *s2ConfirmWorld) qOnlyBrief(assigner string) error {
@@ -177,7 +170,13 @@ func (w *s2ConfirmWorld) script(ai string, doc *godog.DocString) error {
 
 func s2ConfirmScript(cli string, turns [][]s2ConfirmTool) string {
 	if cli == "claude" {
-		return s2ConfirmClaude(turns)
+		converted := make([][]m5ToolCallSpec, len(turns))
+		for i, calls := range turns {
+			for _, call := range calls {
+				converted[i] = append(converted[i], m5ToolCallSpec{Name: call.Name, Args: call.Args})
+			}
+		}
+		return m5ClaudeScript(converted...)
 	}
 	steps := codexStartupSteps()
 	id := 2
@@ -186,20 +185,6 @@ func s2ConfirmScript(cli string, turns [][]s2ConfirmTool) string {
 		id += len(calls)
 	}
 	return m5MustJSON(map[string]any{"session": "s2-confirm-codex", "steps": steps})
-}
-
-func s2ConfirmClaude(turns [][]s2ConfirmTool) string {
-	steps := slices.Concat([]map[string]any{claudeUserStdinStep("")}, claudeInitMCP(0), []map[string]any{m6ClaudeInitStdout()})
-	id := 2
-	for i, calls := range turns {
-		if i > 0 {
-			steps = append(steps, claudeUserStdinStep(""))
-		}
-		steps = append(steps, s2ConfirmCalls(calls, id)...)
-		steps = append(steps, m6ClaudeResultStdout())
-		id += len(calls)
-	}
-	return m5MustJSON(map[string]any{"steps": steps})
 }
 
 func s2ConfirmCalls(calls []s2ConfirmTool, id int) []map[string]any {

@@ -6,6 +6,30 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · The A9.44 quiet-task fixture does not reach the timer
+
+- Symptom: A9.44 remains pending after HM-13. With the scenario enabled, the brief proposed by the replacement secretary never appeared in either acceptance run (`features/s2_confirm.feature:560`).
+- Cause: not verified; both runs stopped in the proposal step before confirming the brief or waiting for the timer.
+- Status: open; HM-13's timer is covered separately by `features/home_rounds.feature:40`.
+
+### 2026-11-22 · limitation · Confirmation browser controls are not yet exercised
+
+- Symptom: the I2-1b scenarios exercise the card and member commands over the browser connection but do not check the rendered buttons, expired card or member editor.
+- Cause: the cast supplies protocol clients, not a rendered browser (`features/s2_cast_test.go:762`); the confirmation controls and member editor are planned in U2-2.
+- Status: open; verify the UI cases of A9.8, A9.9, A9.11 and A9.14 with U2-2.
+
+### 2026-11-22 · limitation · The cast's approval fixture does not execute shell commands
+
+- Symptom: A9.19 verifies the approval tool returns allow and the fake CLI resumes; it does not verify that the command runs in a real CLI.
+- Cause: the replay fixture supports protocol I/O only (`internal/host/fakecli/replay.go:98`).
+- Status: open; actual command execution is unverified.
+
+### 2026-11-22 · deviation · A confirmed brief cannot yet be replaced
+
+- Symptom: a new brief cannot replace a confirmed one as required by A9.13.
+- Cause: `internal/home/cmd_brief.go:153` accepts only pending or revised briefs as predecessors.
+- Status: open; A9.13 remains pending for T2-2b.
+
 ### 2026-11-21 · deviation · The `rounds_limit` system message has an id derived from the triggering post's nonce
 
 - Symptom: when a `post` by an AI in a task's thread reaches `limits.rounds` (task-machine row 21), the command writes both the `post` row under `n` and the main-line `rounds_limit` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn rounds limit <n>` in base64url, rather than a random id.
@@ -500,37 +524,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `web/src/messages/files.ts` takes every message file eagerly, and the loader merges them all (`web/src/messages/texts.ts`).
 - Status: open, accepted with U-0 (#170).
 
-### 2026-11-22 · deviation · A confirmed brief cannot yet be replaced
-
-- Symptom: a new brief cannot replace a confirmed one as required by A9.13.
-- Cause: `internal/home/cmd_brief.go:153` accepts only pending or revised briefs as predecessors.
-- Status: open; A9.13 remains pending for T2-2b.
-
-### 2026-11-22 · limitation · The cast's approval fixture does not execute shell commands
-
-- Symptom: A9.19 verifies the approval tool returns allow and the fake CLI resumes; it does not verify that the command runs in a real CLI.
-- Cause: the replay fixture supports protocol I/O only (`internal/host/fakecli/replay.go:98`).
-- Status: open; actual command execution is unverified.
-
-### 2026-11-22 · limitation · Confirmation browser controls are not yet exercised
-
-- Symptom: the I2-1b scenarios exercise the card and member commands over the browser connection but do not check the rendered buttons, expired card or member editor.
-- Cause: the cast supplies protocol clients, not a rendered browser (`features/s2_cast_test.go:762`); the confirmation controls and member editor are planned in U2-2.
-- Status: open; verify the UI cases of A9.8, A9.9, A9.11 and A9.14 with U2-2.
-
-### 2026-11-22 · limitation · The A9.44 quiet-task fixture does not reach the timer
-
-- Symptom: A9.44 remains pending after HM-13. With the scenario enabled, the brief proposed by the replacement secretary never appeared in either acceptance run (`features/s2_confirm.feature:555`).
-- Cause: not verified; both runs stopped in the proposal step before confirming the brief or waiting for the timer.
-- Status: open; HM-13's timer is covered separately by `features/home_rounds.feature:40`.
-
 ## Resolved
-
-### 2026-11-22 · limitation · A quiet task's notice had no runtime timer
-
-- Symptom: a quiet task did not notify the secretary after `idle_notice_minutes`.
-- Cause: the machine could produce a quiet notice (`internal/home/machine.go:230`), but no runtime timer dispatched the event.
-- Status: resolved by HM-13 (#190), which registers the timer in `internal/home/rounds.go:19`.
 
 ### 2026-11-22 · bug · HM-13 and HM-15 home tests disagreed on rounds after both landed
 

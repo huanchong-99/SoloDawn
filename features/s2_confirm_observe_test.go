@@ -174,7 +174,7 @@ func (w *s2ConfirmWorld) aiNode(name string) *s2Node {
 	switch name {
 	case s2SecretaryName:
 		return w.cast.P1
-	case s2PWorkName:
+	case s2PWorkName, "P-review":
 		return w.cast.P2
 	default:
 		return w.cast.Q1

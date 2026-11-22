@@ -779,10 +779,7 @@ func (c *s2Cast) AddBrowser(p *s2Person, label string) (*peerBrowser, error) {
 }
 
 func (c *s2Cast) SendCmd(p *s2Person, conn *peer.Connection, payload any) (proto.CmdResult, error) {
-	env := p.Key.Sign(string(mustMarshalNoEscape(payload)))
-	raw, err := conn.Request(c.Ctx, func(id int64) any {
-		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
-	})
+	raw, err := sendSignedCmdRaw(c.Ctx, conn, p.Key, payload)
 	if err != nil {
 		return proto.CmdResult{}, err
 	}
@@ -791,6 +788,13 @@ func (c *s2Cast) SendCmd(p *s2Person, conn *peer.Connection, payload any) (proto
 		return proto.CmdResult{}, fmt.Errorf("cmd failed: %s (%w)", raw, err)
 	}
 	return res, nil
+}
+
+func sendSignedCmdRaw(ctx context.Context, conn *peer.Connection, signer identity.Key, payload any) (json.RawMessage, error) {
+	env := signer.Sign(string(mustMarshalNoEscape(payload)))
+	return conn.Request(ctx, func(id int64) any {
+		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
+	})
 }
 
 func (c *s2Cast) CreateProjectGroup(p *s2Person, home *s2Node, name, forge string) (proto.ID, error) {

@@ -275,27 +275,17 @@ func (w *s2ConfirmWorld) repeat(actor string) error {
 	if actor == "Q2" {
 		signer = c.Q.Browsers[1].key
 	}
-	env := signer.Sign(string(w.last))
-	raw, err := bc.conn.Request(c.Ctx, func(id int64) any {
-		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
-	})
+	raw, err := sendSignedCmdRaw(c.Ctx, bc.conn, signer, w.last)
 	w.lastActor = string(raw)
 	return err
 }
 
 func (w *s2ConfirmWorld) answer(want string) error {
-	var refusal proto.ErrorResponse
-	if err := proto.Decode([]byte(w.lastActor), &refusal); err == nil {
-		if refusal.Err.Code == want {
-			return nil
-		}
-		return fmt.Errorf("command answered %s, want %s: %s", refusal.Err.Code, want, refusal.Err.Message)
+	if want != "ok" {
+		return checkWireError([]byte(w.lastActor), want)
 	}
 	var ok proto.CmdResult
-	if err := proto.Decode([]byte(w.lastActor), &ok); err == nil && want == "ok" {
-		return nil
-	}
-	return fmt.Errorf("command answered %s, want %s", w.lastActor, want)
+	return proto.Decode([]byte(w.lastActor), &ok)
 }
 
 func s2ConfirmDB(n *s2Node) (*sql.DB, error) {
