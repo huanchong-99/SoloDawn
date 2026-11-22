@@ -136,15 +136,9 @@ func (w *s2ConfirmWorld) admitQ() error {
 
 func (w *s2ConfirmWorld) addQHome() error {
 	c := w.cast
-	_, err := c.SendCmd(c.Q, c.Q.Conns[c.Q1.ID()].conn, struct {
-		proto.HostCommand
-		Group proto.ID `json:"g"`
-		Home  string   `json:"home"`
-		Name  string   `json:"name"`
-		Addrs []string `json:"addrs"`
-	}{
-		proto.HostCommand{Type: "home.add", Nonce: c.NextID(), Timestamp: time.Now().UnixMilli(), To: c.Q1.ID()},
-		w.gid, c.P1.ID(), "Confirmation", []string{c.RVURL},
+	_, err := c.SendCmd(c.Q, c.Q.Conns[c.Q1.ID()].conn, proto.HomeAdd{
+		HostCommand: proto.HostCommand{Type: "home.add", Nonce: c.NextID(), Timestamp: time.Now().UnixMilli(), To: c.Q1.ID()},
+		Group:       w.gid, Home: c.P1.ID(), Name: "Confirmation", Addrs: []string{c.RVURL},
 	})
 	return err
 }
@@ -177,10 +171,7 @@ func (w *s2ConfirmWorld) sendJoin(conn *peer.Connection) error {
 	if err := conn.Send(proto.Devlog{Type: "devlog", User: c.Q.ID(), Entries: c.Q.Entries}); err != nil {
 		return err
 	}
-	join := struct {
-		proto.HomeCommand
-		Name string `json:"name"`
-	}{w.homeCmd("join"), c.Q.Name}
+	join := proto.Join{HomeCommand: w.homeCmd("join"), Name: c.Q.Name}
 	if _, err := c.SendCmd(c.Q, conn, join); err != nil {
 		return err
 	}

@@ -200,9 +200,10 @@ The checks and reviews (`cmd_review.go`) take the names that start with `rev`, t
 their test functions start with `TestReviewCmd`. The merges and summaries (`cmd_merge.go`) take the
 names that start with `mrg`, their tests too, and their test functions start with `TestMerge`.
 Host events (`cmd_hostev.go`) take the names that start with `hev`, their tests too, and their test
-functions start with `TestHostEv`; the file exports `HostOfflineEvent`. The calls (`cmd_call.go`)
-take the names that start with `cal`, their tests too, and their test functions start with
-`TestCall`. Thread rounds, queue jumps and the quiet-task timer (`rounds.go`) take the names that
+functions start with `TestHostEv`; the file exports `HostOfflineEvent`.
+Group pause and resume (`cmd_pause.go`) take the names that start with `pau`, their tests too, and
+their test functions start with `TestPause`. The calls (`cmd_call.go`) take the names that start
+with `cal`, their tests too, and their test functions start with `TestCall`. Thread rounds, queue jumps and the quiet-task timer (`rounds.go`) take the names that
 start with `rnd`, their tests too, and their test functions start with `TestRounds`. Retention
 (`retention.go`) takes the names that start with `ret`, exports `Retain`, and its test functions
 start with `TestRetention`.
@@ -636,8 +637,9 @@ it does this:
 [task-machine](../../planning/contracts/task-machine.md) 5), under `Commands` key `member/status`
 and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does this:
 
-- **Payload and target.** When `event` is present, `code` must be one of the step-1 host codes
-  (`turn_interrupted`, `login_invalid`, `session_replaced`), else `bad_request`; an omitted or `""`
+- **Payload and target.** When `event` is present, `code` must be one of the host codes
+  (`turn_interrupted`, `rate_limited`, `login_invalid`, `session_replaced`; `cap_reached` is postponed
+  with `settings.set`), else `bad_request`; an omitted or `""`
   `detail` is left out of the row body, and a non-empty `event.task` must exist in `State.Tasks`,
   else `not_found`. An `id` not in `State.AIs` is `not_found`; any signer for which
   `State.Hosts(c.Who, id)` is false (another device, or a command carrying `as`) is `forbidden`.
@@ -646,8 +648,8 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
   is unchanged. When `event` is present, the home writes a `system` `MsgRow` (`id` `n`, `by`
   `"system"`, `ts` `c.Now`, `mentions` `[]`, and `ai` set to `id`) in the thread of `event.task`
   when set, advancing `task.Thread.Count` and `task.Thread.Last` (`text` `""`, `ts` `c.Now`) on the
-  task row, or in the main line otherwise. For `login_invalid`, when `State.Group.Secretary` is not
-  empty, it queues `Item{AI: s.Group.Secretary, Why: "notice", Msg: n, Code: "login_invalid"}`.
+  task row, or in the main line otherwise. For `login_invalid` and `rate_limited`, when `State.Group.Secretary` is not
+  empty, it queues `Item{AI: s.Group.Secretary, Why: "notice", Msg: n, Code: code}`.
 - **Closed host connection.** When `Loop.Detach` ends a connection that took inbox items
   (`Conn.taker`, set by `Loop.Inbox`) and no other taker connection of `device` remains on the
   loop, `Loop` fires `HostOfflineEvent` with `device`. For every AI in `State.AIs` in id order with
@@ -681,6 +683,28 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
   `Pending` and the newest 50 main-line messages (`PageThread(nil, 0, 50)`) without duplicates in
   increasing `seq` order.
 
+## Group pause and resume
+
+`cmd_pause.go` holds `group` `pause` and `resume`
+([commands](../../planning/contracts/commands.md) 1.1;
+[messages](../../planning/contracts/messages.md) 2.11;
+[the task machine](../../planning/contracts/task-machine.md) row 24), under the keys `group/pause`
+and `group/resume`:
+
+- **Who.** Both require `s.Admin(c.Who)` (`forbidden` for a non-admin person or any command carrying
+  `as`); they carry no fields beyond the group command header checked by the seam.
+- **Idempotence.** Pausing a group whose `group.paused` is already set, or resuming one whose
+  `group.paused` is `null`, returns `ok` without writing rows or queuing items.
+- **Rows.** Otherwise `group/pause` sets `group.paused` to `{"by": c.Who.Human, "at": c.Now}` and
+  writes main-line `system` message `group_paused` (`id` `n`, `ts` `c.Now`, `by` `c.Who.Human`)
+  through `tskThreadSystem`. `group/resume` clears `group.paused` to `null` and writes main-line
+  `system` message `group_resumed` with the same fields.
+- **Waking tasks.** On `group/resume` of a paused group, `Step` runs with `OnGroupResume` (`ByHome`)
+  over `State.Tasks` in sorted task-id order and completes items through `tskItemCtx`: `resume` goes
+  to each `active` task with `wait` `null` before step `merge`, and `review` goes to each `active`
+  task at step `review` that has a reviewer unless `c.Disk.Queued` already holds an unacknowledged
+  `review` item for that reviewer, task and commit.
+
 ## Rounds, jumps and quiet tasks
 
 `rounds.go` holds the `jump` command ([commands](../../planning/contracts/commands.md) 1.4, R-72),
@@ -696,9 +720,9 @@ row 23), and the thread round transitions (rows 21 and 22, and section 4 "Held b
   retires that item and queues its replacement with `Jump: true` and `NotBefore: 0`, or answers
   `conflict` when none exists.
 - **`quiet` timer.** Registered under `Timers["quiet"]` and `After["quiet"]`. When the group has a
-  secretary and `limits.idle_notice_minutes > 0`, checks each task in sorted id order: if the task
-  has had no thread message for at least `limits.idle_notice_minutes` (measured from
-  `thread.last.ts`, else `stats.started` when non-zero, else `created`), has not already notified
+  secretary, is not paused and has `limits.idle_notice_minutes > 0`, checks each task in sorted id
+  order: if the task has had no thread message for at least `limits.idle_notice_minutes`
+  (measured from `thread.last.ts`, else `stats.started` when non-zero, else `created`), has not already notified
   the secretary at that last-activity timestamp, and passes `Step` with `OnQuiet` (`ByHome`:
   `active`, `wait` `null`, `step` not `merge`), it queues one `notice` (`code: "quiet"`) for
   `group.secretary`. `After["quiet"]` records the task's last-activity timestamp in the group's
@@ -775,10 +799,11 @@ shutdown hooks ([commands](../../planning/contracts/commands.md) 1.7;
 
 ## Known limitations
 
-- The table of commands holds the groups, members, briefs, the task commands of HM-9, the four
-  kinds of `post` of HM-6, `note` and `forget`, the cards, the checks and reviews, the merges and
-  summaries, the host events, `push`, the calls, and `jump` and thread rounds of HM-13, and no
-  node starts a loop yet: the remaining command files and the wiring of the node are separate units
+- The table of commands holds the groups, group pause and resume, members, briefs, the task
+  commands of HM-9, the four kinds of `post` of HM-6, `note` and `forget`, the cards, the checks and
+  reviews, the merges and summaries, the host events, `push`, the calls, and `jump` and thread rounds
+  of HM-13, and no node starts a loop yet: the remaining command files and the wiring of the node
+  are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - After retention deletes rows, finished tasks stay in the in-memory `State.Tasks` until restart
   ([issues](../../issues.md)).
@@ -860,9 +885,9 @@ card-wait recomputation, veto and row-14 stop, and checking `proto.UnexpectedNul
 written. `features/home_review.feature` holds the home half of acceptance tests A5.3 and A5.4.
 
 `cmd_hostev_test.go` checks `member/status` against the wire golden files, state and `since`
-transitions, the three step-1 host event codes, `login_invalid` secretary notices, refusals, and
+transitions, the four host event codes, `login_invalid` and `rate_limited` secretary notices, refusals, and
 `HostOfflineEvent` both directly and when taker connections end on `StartLoop`.
-`features/home_hostev.feature` holds the home half of acceptance test A3.6 together with the three
+`features/home_hostev.feature` holds the home half of acceptance test A3.6 together with the four
 host event codes, secretary notices and host disconnection.
 
 `sync_test.go` covers `Loop.Sync` against an in-memory and file-backed store: wire frame shapes,
@@ -883,6 +908,11 @@ that; `go test ./internal/home -run TestTaskTraces -update` writes them.
 reads, exact 61,440-byte boundaries, page bounds checks, group access checks, detached connections
 and store failures. `features/home_fetch.feature` holds the scroll-back scenarios of A2.2 and the
 deleted-row scenario of A2.7.
+
+`cmd_pause_test.go` covers `group/pause` and `group/resume` through `Commands.Apply`: the admin
+check, both repeats, the rows, and row 24 over tasks with and without waits, at step `merge`, and
+with a review already queued. `features/home_pause.feature` holds the home half of acceptance test
+A4.7 on `StartLoop` over an in-memory store.
 
 `rounds_test.go` covers `jump`, the `quiet` timer, `After["quiet"]`, and rows 21 and 22 through
 `Commands.Apply`, `Table.Add` and `StartLoop`, including delivery after a rounds-paused task fails

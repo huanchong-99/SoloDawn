@@ -2,9 +2,10 @@
   import { tick, untrack } from 'svelte';
   import { prefersReducedMotion } from 'svelte/motion';
   import { MediaQuery } from 'svelte/reactivity';
+  import { withoutInlineReplies } from '../../lib/call';
   import type { Group } from '../../lib/groups.svelte';
   import type { Net } from '../../lib/net.svelte';
-  import { mounts, side } from '../../lib/mounts.svelte';
+  import { card as cardOf, mounts, side } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { dayLabel, days, now } from '../../lib/when';
   import Avatar from '../Avatar.svelte';
@@ -43,7 +44,7 @@
   }
 
   const paging = $derived(group.paging());
-  const line = $derived(days(group.main));
+  const line = $derived(days(withoutInlineReplies(group.main, Boolean(cardOf('call')))));
   const newest = $derived(group.main.at(-1)?.id);
   // Older messages may exist and cannot be had now: the home refused a page, or is not reachable.
   const stuck = $derived(paging.failed || (paging.more && !group.home.ctl));
@@ -186,13 +187,7 @@
     <Composer {group} />
   </div>
   {#if sided}
-    <aside
-      id="chat-side"
-      class="side"
-      class:open={side.open}
-      inert={sliding.current && !side.open}
-      aria-label={t('app.side')}
-    >
+    <aside id="chat-side" class="side" class:open={side.open} aria-label={t('app.side')}>
       <button
         class="icon-btn side-close"
         bind:this={closer}

@@ -10,3 +10,14 @@ if (!navigator.locks) {
     },
   });
 }
+
+// happy-dom eagerly creates `Animation.finished` and rejects it on `cancel()`, which Svelte's
+// `out:` transition calls during normal handoff and unmount.
+if (typeof Element !== 'undefined' && Element.prototype.animate) {
+  const rawAnimate = Element.prototype.animate;
+  Element.prototype.animate = function (...args: Parameters<Element['animate']>) {
+    const animation = rawAnimate.apply(this, args);
+    animation.finished.catch(() => undefined);
+    return animation;
+  };
+}
