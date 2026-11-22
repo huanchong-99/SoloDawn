@@ -100,7 +100,7 @@ const update = (r: string, id: Id, changes: Fields) =>
 
 const remove = (r: string, id: Id) => home.remove(ids.g, r, ids[id]);
 
-const s2 = { ids, cast, sent, update, remove, asked: () => home.asked.length };
+const s2 = { ids, cast, sent, update, remove };
 declare global {
   interface Window {
     s2: typeof s2;
