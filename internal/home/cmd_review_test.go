@@ -723,7 +723,12 @@ func TestReviewCmdPostRefusals(t *testing.T) {
 		},
 		"thread differs from body task": {
 			patch: func(p *proto.Post[proto.ReviewSigned]) { p.Thread = &otherID },
-			code:  "bad_request",
+			state: func(s *home.State) {
+				other := s.Tasks[revTaskID]
+				other.ID, other.Num, other.Branch = revOtherTask, 13, "task/13-other"
+				s.Tasks[revOtherTask] = other
+			},
+			code: "bad_request",
 		},
 		"duplicate mention": {
 			patch: func(p *proto.Post[proto.ReviewSigned]) {
