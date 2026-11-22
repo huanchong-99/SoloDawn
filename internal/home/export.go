@@ -49,9 +49,6 @@ func (l *Loop) askHome(c *Conn, re int64, group string, step func(*runGroup)) {
 
 // ExportGroup takes the cut on the group's goroutine.
 func (l *Loop) ExportGroup(group, file, to string) error {
-	if to == l.cfg.Home {
-		return errors.New("the group is already on this node")
-	}
 	err := errors.New("this node is not home to the group")
 	l.ask(group, func(g *runGroup) {
 		if g.state.Group.ID != "" {

@@ -76,7 +76,7 @@ func verifyExportFile(t *testing.T, path string) {
 	equal(t, scalar[int](t, db, "SELECT count(*) FROM row"), 6)
 	equal(t, scalar[int](t, db, "SELECT count(*) FROM row WHERE gone=1"), 1)
 	equal(t, scalar[int](t, db, "SELECT count(*) FROM inbox"), 1)
-	equal(t, scalar[string](t, db, "SELECT group_concat(user,',' ORDER BY user,ver) FROM device_log"), "owner,person,person")
+	equal(t, scalar[string](t, db, "SELECT group_concat(user,',' ORDER BY user,ver) FROM device_log"), "owner,person")
 	equal(t, scalar[string](t, db, "SELECT user FROM push_sub"), "owner")
 }
 
@@ -119,10 +119,8 @@ func TestExportFailureDoesNotMove(t *testing.T) {
 func TestGroupTransferDatabaseErrors(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "export.sqlite")
-	nodePath := filepath.Join(dir, "node.db")
-	source := openDB(t, nodePath)
+	source := openDB(t, filepath.Join(dir, "node.db"))
 	check(t, source.Write(seedExport))
-	transferError(t, source.ExportGroup("a", nodePath, ""), "the export file is the node database")
 	transferError(t, source.ExportGroup("a", filepath.Join(dir, "absent", "file"), ""), "absent")
 	check(t, source.ExportGroup("a", path, ""))
 	target := openDB(t, ":memory:")
@@ -146,6 +144,7 @@ func TestGroupTransferDatabaseErrors(t *testing.T) {
 	check(t, err)
 	transferError(t, source.ExportGroup("a", path, ""), "no such table: inbox")
 	check(t, source.db.Close())
+	transferError(t, source.ExportGroup("a", path, ""), "database is closed")
 	transferError(t, source.ImportGroup("a", path, "owner", "P2", load), "database is closed")
 }
 
@@ -164,10 +163,6 @@ func TestExportRejectsTransferWriteErrors(t *testing.T) {
 			return nil
 		})
 	}))
-	tx, err := source.db.Begin()
-	check(t, err)
-	check(t, tx.Rollback())
-	transferError(t, (&Tx{tx}).checkExportPath("file"), "transaction has already been committed or rolled back")
 }
 
 func transferError(t *testing.T, got error, want string) {

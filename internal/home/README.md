@@ -205,6 +205,9 @@ tests start with `TestDevice` and `dev`. Sync takes the names that start with `s
 and its test functions start with `TestSync`; it exports `Loop.Sync`. `fetch.go` exports `Fetch`
 and `Loop.Fetch`, takes the names that start with `fet`, its tests too, and its test functions
 start with `TestFetch`.
+`export.go` exports `Loop.ExportGroup` and `Loop.ImportGroup`. The home answers `cmd`, `sync`,
+and `fetch` for moved groups with `moved` and the destination device ID from the `moved` map
+loaded by `StartLoop`.
 The checks and reviews (`cmd_review.go`) take the names that start with `rev`, their tests too, and
 their test functions start with `TestReviewCmd`. The merges and summaries (`cmd_merge.go`) take the
 names that start with `mrg`, their tests too, and their test functions start with `TestMerge`.

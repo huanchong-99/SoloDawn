@@ -37,31 +37,26 @@ func (s *Store) ExportGroup(group, file, to string) error {
 	name := tmp.Name()
 	defer os.Remove(name)
 	tmp.Close()
-	return s.Write(func(tx *Tx) error {
-		if err := tx.checkExportPath(file); err != nil {
-			return err
-		}
+	publish := func(tx *Tx) error {
 		if err := tx.exportCopy(group, name); err != nil {
 			return err
 		}
-		if err := os.Rename(name, file); err != nil || to == "" {
+		return os.Rename(name, file)
+	}
+	if to == "" {
+		view, err := s.Snapshot(group)
+		if err != nil {
+			return err
+		}
+		defer view.Close()
+		return publish(view.tx)
+	}
+	return s.Write(func(tx *Tx) error {
+		if err := publish(tx); err != nil {
 			return err
 		}
 		return tx.moveGroup(group, to)
 	})
-}
-
-func (tx *Tx) checkExportPath(file string) error {
-	var path string
-	if err := tx.QueryRow("SELECT file FROM pragma_database_list WHERE name='main'").Scan(&path); err != nil {
-		return err
-	}
-	source, _ := os.Stat(path)
-	dest, _ := os.Stat(file)
-	if source != nil && dest != nil && os.SameFile(source, dest) {
-		return errors.New("the export file is the node database")
-	}
-	return nil
 }
 
 func (tx *Tx) exportCopy(group, file string) error {
@@ -99,19 +94,10 @@ func (tx *Tx) exportTable(out *Tx, table, group string) error {
 const exportPeople = `(SELECT data->>'user' FROM row
 	WHERE g=?1 AND r='member' AND gone=0 AND data->>'kind'='human')`
 
-const exportLogs = `SELECT user,ver,env FROM device_log WHERE user IN ` + exportPeople + `
-	UNION ALL
-	SELECT r.data->>'user', r.data->>'ver', r.data->'env' FROM row AS r
-	WHERE r.g=?1 AND r.r='device' AND r.gone=0 AND r.data->>'user' IN ` + exportPeople + `
-	AND NOT EXISTS (SELECT 1 FROM device_log AS d
-		WHERE d.user=r.data->>'user' AND d.ver=r.data->>'ver')`
-
 func exportQuery(table string) string {
 	switch table {
-	case "device_log":
-		return exportLogs
-	case "push_sub":
-		return "SELECT * FROM push_sub WHERE user IN " + exportPeople
+	case "device_log", "push_sub":
+		return "SELECT * FROM " + table + " WHERE user IN " + exportPeople
 	default:
 		return "SELECT * FROM " + table + " WHERE g=?"
 	}

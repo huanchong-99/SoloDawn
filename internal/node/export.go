@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"strings"
 
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
@@ -23,16 +22,10 @@ func groupCommand(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if err := cmd.Run(stdout); err != nil {
-		return groupFailure(stderr, err)
+		fmt.Fprintln(stderr, err)
+		return 1
 	}
 	return 0
-}
-
-func groupFailure(stderr io.Writer, err error) int {
-	line := err.Error()
-	line = strings.NewReplacer("\r", " ", "\n", " ").Replace(line)
-	fmt.Fprintln(stderr, line)
-	return 1
 }
 
 func groupArgs(args []string) (Command, error) {

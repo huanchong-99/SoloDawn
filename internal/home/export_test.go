@@ -14,7 +14,6 @@ import (
 func TestMoveIsRememberedAndCanBeImportedBack(t *testing.T) {
 	w, p := runFounded(t, runTables())
 	file := filepath.Join(t.TempDir(), "move.db")
-	equal(t, w.loop.ExportGroup(groupID, file, node.ID()).Error(), "the group is already on this node")
 	equal(t, w.loop.ExportGroup(runOther, file, laptop.ID()).Error(), "this node is not home to the group")
 	equal(t, w.loop.ExportGroup(groupID, file, ""), nil)
 	equal(t, len(w.loop.Groups(p.conn)), 1)
