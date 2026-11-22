@@ -6,6 +6,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · deviation · A9.21 selected-pair change is a manual acceptance check
+
+- Symptom: `features/s2_watch.feature:15-19` exercises `watch.start` refusal and `ctl` on an established relay. The fixture does not change the selected pair of an already open RTC connection, as required by `planning/steps/step-2-3-acceptance.md:150-154`.
+- Cause: the TURN fixture in `features/s2_watch_peer_test.go:87-95` selects transport policy when the browser connection is created.
+- Status: open. Run `features/s2_watch.md:13-19` to check the transition after T2-6 and U2-3 land.
+
+### 2026-11-22 · deviation · A9.26 requires manual checks beyond the automated live task flow
+
+- Symptom: `features/s2_watch.feature:54-58` drives the two-task flow on a real forge. A9.26 calls for the M5 run in `planning/steps/step-2-3-acceptance.md:177-178`.
+- Cause: the live fixture exercises cross-review, merge and cleanup. The remaining M5 procedures need to be repeated with the live templates, as described in `features/s2_watch.md:42-47`.
+- Status: open until the live run is complete.
+
 ### 2026-11-22 · deviation · `driver` in `host.info` is optional until T3-2 fills it
 
 - Symptom: `planning/contracts/step-3/drivers.md` section 6 says each entry of `agents` carries `driver` always, but the frozen shape lets it be absent: Go `Driver *Driver` with `omitempty` (`internal/proto/host.go`, `HostAgent`), TS `v.optional(Driver)` (`web/src/lib/proto.ts`, `HostState.agents`), and `agents.driver` under `optional` in `internal/proto/testdata/wire.json`.
