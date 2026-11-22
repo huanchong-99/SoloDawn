@@ -94,10 +94,9 @@ func (w *relayWorld) startTLS(mib int) error {
 	w.tcp, w.domain = l.Addr().String(), "localhost"
 	l.Close()
 	cmd := exec.Command(w.bin, "rendezvous", "--listen", w.tcp, "--domain", "localhost", "--turn-domain", "TURN.localhost.", "--cert", filepath.Join(dir, "cert"), "--key", filepath.Join(dir, "key"), "--relay-quota-mb", strconv.Itoa(mib), "--udp-port", "0")
-	if err := cmd.Start(); err != nil {
+	if err := killManagedCmd(w.t, w.addCleanup, cmd, nil); err != nil {
 		return err
 	}
-	w.cleanup = append(w.cleanup, func() { cmd.Process.Kill(); cmd.Wait() })
 	w.httpClient = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: w.roots, ServerName: "localhost"}}}
 	w.ws = "wss://" + w.tcp + "/rv"
 	return rvListening(w.tcp)

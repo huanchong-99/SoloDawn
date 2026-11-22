@@ -18,6 +18,7 @@ import (
 
 	"github.com/cucumber/godog"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
+	"github.com/huanchong-99/SoloDawn/internal/node/nodetest"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
@@ -34,16 +35,12 @@ func exampleID(label string) proto.ID {
 }
 
 func logEntry(signer, user identity.Key, ver int, op string, dev identity.Key) (proto.Envelope, error) {
-	return logEntryFor(signer, user, ver, op, dev.ID())
-}
-
-func logEntryFor(signer, user identity.Key, ver int, op, dev string) (proto.Envelope, error) {
+	if op == "add" {
+		return nodetest.SignDeviceAdd(signer, user.ID(), ver, "node", "a device", dev.ID(), 1763600000000), nil
+	}
 	e := proto.DeviceEntry{
 		PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: exampleID(fmt.Sprint("entry-", ver, op)), Timestamp: 1763600000000},
-		DeviceChange:  proto.DeviceChange{User: user.ID(), Version: ver, Op: op, Device: dev},
-	}
-	if op == "add" {
-		e.Kind, e.Name = "node", "a device"
+		DeviceChange:  proto.DeviceChange{User: user.ID(), Version: ver, Op: op, Device: dev.ID()},
 	}
 	b, err := json.Marshal(e)
 	return signer.Sign(string(b)), err
@@ -200,10 +197,7 @@ func identitySteps(sc *godog.ScenarioContext) {
 		return nil
 	})
 	sc.Step(`^a device log refuses to add that key$`, func() error {
-		entry, err := logEntryFor(browser, browser, 3, "add", weakID)
-		if err != nil {
-			return err
-		}
+		entry := nodetest.SignDeviceAdd(browser, browser.ID(), 3, "node", "a device", weakID, 1763600000000)
 		if added, err := log.Apply(entry); err == nil || added || len(log.Entries) != 2 {
 			return fmt.Errorf("the entry was not refused: added %v, %d entries", added, len(log.Entries))
 		}

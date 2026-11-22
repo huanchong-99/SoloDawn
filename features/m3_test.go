@@ -6,8 +6,6 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -15,10 +13,8 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -35,7 +31,7 @@ import (
 )
 
 func init() {
-	stepSets["a_m3"] = m3Steps
+	stepSets["m3"] = m3Steps
 }
 
 const (
@@ -75,7 +71,6 @@ type m3ToolCheck struct {
 	want             proto.ToolList
 	codex            []proto.Tool
 	claudeStructured []proto.Tool
-	claudeTerm       []proto.Tool
 }
 
 type m3World struct {
@@ -88,11 +83,10 @@ type m3World struct {
 	activeHost  *host.Host
 	sockPath    string
 	closeMCP    func()
+	browser     homeFrameClient
 	browserConn *home.Conn
-	// Single reader: drainBrowserUntil in m3World.
-	browserCh   chan json.RawMessage
 	nextReq     int64
-	nonceSeq    uint64
+	ids         seqIDGen
 	scriptSeq   int
 	groups      map[string]string
 	aiByName    map[string]proto.AIMemberRow
@@ -141,18 +135,18 @@ func registerM3SetupSteps(sc *godog.ScenarioContext, w *m3World) {
 }
 
 func registerM3ActionSteps(sc *godog.ScenarioContext, w *m3World) {
-	sc.Step(`^MCP clients list tools through the shim for each session kind and task permission level$`, w.whenListAllSessionTools)
+	sc.Step(`^MCP clients list tools through the shim for each session kind$`, w.whenListAllSessionTools)
 	sc.Step(`^the owner posts "([^"]+)" in "([^"]+)"$`, w.whenOwnerPosts)
 	sc.Step(`^the 1-minute idle period elapses$`, w.whenIdleMinuteElapses)
 	sc.Step(`^the owner waits for the approval card from "([^"]+)" in "([^"]+)"$`, w.whenWaitApprovalCard)
 	sc.Step(`^the owner approves that card in "([^"]+)"$`, w.whenOwnerApprovesCard)
-	sc.Step(`^the home sends its due inbox items again on that connection$`, w.whenHomeResendsInbox)
+	sc.Step(`^the home sends its due inbox items again on a new connection$`, w.whenHomeResendsInbox)
 	sc.Step(`^the host restarts on the node's store and attaches to the home$`, w.whenHostRestarts)
 }
 
 func registerM3AssertSteps(sc *godog.ScenarioContext, w *m3World) {
 	sc.Step(`^every Codex session lists the main-line tools and schemas of tools\.json$`, w.thenCodexToolsMatch)
-	sc.Step(`^structured Claude Code sessions add only approve while interactive sessions omit it$`, w.thenClaudeApproveToolsMatch)
+	sc.Step(`^structured Claude Code sessions add only approve$`, w.thenClaudeApproveToolsMatch)
 	sc.Step(`^"([^"]+)" posts "([^"]+)" in "([^"]+)" and enters state "([^"]+)"$`, w.thenAIPostsAndEntersState)
 	sc.Step(`^"([^"]+)" posts "([^"]+)" in "([^"]+)"$`, w.thenAIPosts)
 	sc.Step(`^the CLI lifecycle log records 1 "([^"]+)" process for the whole conversation$`, w.thenOneProcessLogged)
@@ -177,60 +171,14 @@ func (w *m3World) node() *nodetest.Node {
 	return w.cluster.Nodes[0]
 }
 
-func (w *m3World) nextID() proto.ID {
-	w.nonceSeq++
-	var raw [16]byte
-	binary.BigEndian.PutUint64(raw[8:], w.nonceSeq)
-	return proto.ID(base64.RawURLEncoding.EncodeToString(raw[:]))
-}
-
-func (w *m3World) makeShortRoot() error {
-	base := os.TempDir()
-	if runtime.GOOS == "darwin" {
-		base = "/tmp"
-	}
-	root, err := os.MkdirTemp(base, "sdm3")
+func (w *m3World) startCluster() error {
+	root, err := shortTempRoot(w.f.t, w.cleanup, "sdm3")
 	if err != nil {
 		return err
 	}
 	w.root = root
-	w.cleanup(func() { os.RemoveAll(root) })
-	return nil
-}
-
-func (w *m3World) initSourceRepo() error {
-	dir := filepath.Join(w.root, "src")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	if err := runGitIn(dir, "init", "-b", "main"); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello\n"), 0o600); err != nil {
-		return err
-	}
-	if err := runGitIn(dir, "add", "README.md"); err != nil {
-		return err
-	}
-	w.repoSrc = dir
-	return runGitIn(dir, "-c", "user.name=Owner", "-c", "user.email=owner@example.com", "commit", "-m", "init")
-}
-
-func runGitIn(dir string, args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git %v: %w (%s)", args, err, out)
-	}
-	return nil
-}
-
-func (w *m3World) startCluster() error {
-	if err := w.makeShortRoot(); err != nil {
-		return err
-	}
-	if err := w.initSourceRepo(); err != nil {
+	w.repoSrc = filepath.Join(w.root, "src")
+	if err := initLocalGitRepo(w.repoSrc); err != nil {
 		return err
 	}
 	w.cluster = nodetest.Start(w.tb, nodetest.Config{Root: w.root, BinDir: w.f.fakeCLIs, Nodes: 1})
@@ -262,7 +210,7 @@ func (w *m3World) attachMCPSocket(h *host.Host, dir string) error {
 		local.Close()
 		wg.Wait()
 	})
-	w.cleanup(stop)
+	registerBothCleanups(w.f.t, w.cleanup, stop)
 	w.sockPath, w.closeMCP = sockPath, stop
 	h.Shim = []string{exe, "-test.run=^TestM3MCPShim$", "--", sockPath}
 	return nil
@@ -293,28 +241,11 @@ func handleM3MCPConn(ctx context.Context, conn net.Conn, h *host.Host, wg *sync.
 	h.ServeMCP(ctx, open.MCP, r, conn)
 }
 
-type m3BrowserClient struct {
-	ch chan<- json.RawMessage
-}
-
-func (c m3BrowserClient) Done() <-chan struct{} { return nil }
-
-func (c m3BrowserClient) Send(frame any) error {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(frame); err != nil {
-		return err
-	}
-	c.ch <- bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
-	return nil
-}
-
 func (w *m3World) attachBrowser() {
 	// Single reader: drainBrowserUntil in m3World.
-	w.browserCh = make(chan json.RawMessage, 256)
+	w.browser = newHomeFrameClient(256)
 	n := w.node()
-	w.browserConn = n.Home.Attach(w.cluster.Owner.ID(), m3BrowserClient{ch: w.browserCh})
+	w.browserConn = n.Home.Attach(w.cluster.Owner.ID(), w.browser)
 	w.cleanup(func() { n.Home.Detach(w.browserConn) })
 }
 
@@ -327,7 +258,7 @@ func (w *m3World) writeSetting(key, jsonVal string) error {
 }
 
 func (w *m3World) createGroup(name string) error {
-	gid := w.nextID()
+	gid := w.ids.next()
 	w.groups[name] = string(gid)
 	payload := proto.GroupCreate{
 		GroupCommand: proto.GroupCommand{
@@ -399,13 +330,13 @@ func decodeReplyMatch(raw json.RawMessage, reqID int64) (bool, error) {
 	return true, nil
 }
 
-// drainBrowserUntil is the single reader of w.browserCh.
+// drainBrowserUntil is the single reader of w.browser.ch.
 func (w *m3World) drainBrowserUntil(timeout time.Duration, stop func() bool, onFrame func(json.RawMessage)) error {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	for !stop() {
 		select {
-		case raw := <-w.browserCh:
+		case raw := <-w.browser.ch:
 			w.applyBrowserFrame(raw)
 			if onFrame != nil {
 				onFrame(raw)
@@ -477,21 +408,27 @@ func (w *m3World) configureAI(groupName, aiName, agent string) error {
 		return err
 	}
 	by := w.cluster.Owner.ID()
-	setRaw, _ := marshalNoEscape(proto.AgentSet{
-		HostCommand: proto.HostCommand{Type: "agent.set", Nonce: w.nextID(), Timestamp: time.Now().UnixMilli(), To: n.Key.ID()},
+	setRaw, err := marshalNoEscape(proto.AgentSet{
+		HostCommand: proto.HostCommand{Type: "agent.set", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), To: n.Key.ID()},
 		Agent:       agent,
 		Account:     "personal",
 	})
+	if err != nil {
+		return err
+	}
 	if _, err := host.Surface["agent.set"](ctx, n.Host, n.Link, by, setRaw); err != nil {
 		return err
 	}
-	joinRaw, _ := marshalNoEscape(proto.HostJoin{
-		HostCommand: proto.HostCommand{Type: "host.join", Nonce: w.nextID(), Timestamp: time.Now().UnixMilli(), To: n.Key.ID()},
+	joinRaw, err := marshalNoEscape(proto.HostJoin{
+		HostCommand: proto.HostCommand{Type: "host.join", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), To: n.Key.ID()},
 		Group:       proto.ID(w.groups[groupName]),
 		Home:        n.Key.ID(),
 		Agent:       agent,
 		Name:        aiName,
 	})
+	if err != nil {
+		return err
+	}
 	if _, err := host.Surface["host.join"](ctx, n.Host, n.Link, by, joinRaw); err != nil {
 		return err
 	}
@@ -580,60 +517,18 @@ func (w *m3World) writeScript(vendor string, doc map[string]any) error {
 	return nil
 }
 
-func claudeInitMCP(startID int) []map[string]any {
-	return []map[string]any{
-		{"dir": "mcp<-cli", "msg": map[string]any{
-			"jsonrpc": "2.0", "id": startID, "method": "initialize",
-			"params": map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "claude-code", "version": "1"}},
-		}},
-		{"dir": "mcp->cli", "msg": map[string]any{"jsonrpc": "2.0", "id": startID, "result": map[string]any{}}},
-		{"dir": "mcp<-cli", "msg": map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"}},
-	}
-}
-
-func mcpPostSteps(callID int, text string) []map[string]any {
-	return []map[string]any{
-		{"dir": "mcp<-cli", "msg": map[string]any{
-			"jsonrpc": "2.0", "id": callID, "method": "tools/call",
-			"params": map[string]any{"name": "post", "arguments": map[string]any{"text": text}},
-		}},
-		{"dir": "mcp->cli", "msg": map[string]any{"jsonrpc": "2.0", "id": callID, "result": map[string]any{"isError": false}}},
-	}
-}
-
-func claudeTurnSteps(callID int, first bool, postText, outText string) []map[string]any {
-	steps := []map[string]any{
-		{"dir": "stdin", "msg": map[string]any{"type": "user", "message": map[string]any{"role": "user"}}},
-	}
-	if first {
-		steps = append(steps, claudeInitMCP(0)...)
-		steps = append(steps, map[string]any{"dir": "stdout", "msg": map[string]any{"type": "system", "subtype": "init", "session_id": "$session"}})
-	}
-	if outText != "" {
-		steps = append(steps, map[string]any{"dir": "stdout", "msg": map[string]any{
-			"type": "assistant", "session_id": "$session",
-			"message": map[string]any{"role": "assistant", "content": []map[string]any{{"type": "text", "text": outText}}},
-		}})
-	}
-	if postText != "" {
-		steps = append(steps, mcpPostSteps(callID, postText)...)
-	}
-	res := map[string]any{"type": "result", "subtype": "success", "is_error": false, "session_id": "$session", "result": outText}
-	return append(steps, map[string]any{"dir": "stdout", "msg": res})
-}
-
 func (w *m3World) scriptClaudeTwoTurns(_, reply1, reply2 string) error {
-	steps := slices.Concat(claudeTurnSteps(1, true, reply1, ""), claudeTurnSteps(2, false, reply2, ""))
+	steps := slices.Concat(claudeTurnSteps(1, true, "", reply1, ""), claudeTurnSteps(2, false, "", reply2, ""))
 	return w.writeScript("claude", map[string]any{"steps": steps})
 }
 
 func (w *m3World) scriptClaudePostAndEOF(_, reply string) error {
-	steps := append(claudeTurnSteps(1, true, reply, ""), map[string]any{"dir": "eof"})
+	steps := append(claudeTurnSteps(1, true, "", reply, ""), map[string]any{"dir": "eof"})
 	return w.writeScript("claude", map[string]any{"steps": steps})
 }
 
 func (w *m3World) scriptClaudeSinglePost(_, reply string) error {
-	return w.writeScript("claude", map[string]any{"steps": claudeTurnSteps(1, true, reply, "")})
+	return w.writeScript("claude", map[string]any{"steps": claudeTurnSteps(1, true, "", reply, "")})
 }
 
 func (w *m3World) scriptClaudeMidTurnExit(_ string) error {
@@ -645,14 +540,12 @@ func (w *m3World) scriptClaudeMidTurnExit(_ string) error {
 }
 
 func (w *m3World) scriptClaudeOutsideText(_, out1, post1, out2 string) error {
-	steps := slices.Concat(claudeTurnSteps(1, true, post1, out1), claudeTurnSteps(2, false, "", out2))
+	steps := slices.Concat(claudeTurnSteps(1, true, "", post1, out1), claudeTurnSteps(2, false, "", "", out2))
 	return w.writeScript("claude", map[string]any{"steps": steps})
 }
 
 func (w *m3World) scriptClaudeSecretPost(_ string) error {
-	steps := []map[string]any{
-		{"dir": "stdin", "msg": map[string]any{"type": "user", "message": map[string]any{"role": "user"}}},
-	}
+	steps := []map[string]any{claudeUserStdinStep("")}
 	steps = append(steps, claudeInitMCP(0)...)
 	steps = append(steps,
 		map[string]any{"dir": "stdout", "msg": map[string]any{"type": "system", "subtype": "init", "session_id": "$session"}},
@@ -672,45 +565,13 @@ func (w *m3World) scriptClaudeSecretPost(_ string) error {
 	return w.writeScript("claude", map[string]any{"steps": steps})
 }
 
-func codexStartupSteps() []map[string]any {
-	steps := []map[string]any{
-		{"dir": "stdin", "msg": map[string]any{"method": "initialize"}},
-		{"dir": "stdout", "msg": map[string]any{"id": "$id", "result": map[string]any{}}},
-		{"dir": "stdin", "msg": map[string]any{"method": "initialized"}},
-		{"dir": "stdin", "msg": map[string]any{"method": "thread/start"}},
-	}
-	steps = append(steps, claudeInitMCP(0)...)
-	return append(steps, map[string]any{"dir": "stdout", "msg": map[string]any{"id": "$id", "result": map[string]any{"thread": map[string]any{"id": "$session"}}}})
-}
-
-func codexTurnSteps(turnID string, callID int, postText string, askApproval bool) []map[string]any {
-	steps := []map[string]any{
-		{"dir": "stdin", "msg": map[string]any{"method": "turn/start", "params": map[string]any{"threadId": "$session"}}},
-		{"dir": "stdout", "msg": map[string]any{"id": "$id", "result": map[string]any{"turn": map[string]any{"id": turnID, "status": "inProgress"}}}},
-	}
-	if askApproval {
-		steps = append(steps,
-			map[string]any{"dir": "stdout", "msg": map[string]any{
-				"id": 99, "method": "item/commandExecution/requestApproval",
-				"params": map[string]any{"command": "echo hold-slot", "cwd": "/tmp", "reason": "hold slot"},
-			}},
-			map[string]any{"dir": "stdin", "msg": map[string]any{"id": 99, "result": map[string]any{"decision": "accept"}}},
-		)
-	}
-	steps = append(steps, mcpPostSteps(callID, postText)...)
-	return append(steps, map[string]any{"dir": "stdout", "msg": map[string]any{
-		"method": "turn/completed",
-		"params": map[string]any{"threadId": "$session", "turn": map[string]any{"id": turnID, "status": "completed"}},
-	}})
-}
-
 func (w *m3World) scriptCodexTwoTurns(_, threadID, reply1, reply2 string) error {
-	steps := slices.Concat(codexStartupSteps(), codexTurnSteps("turn-1", 1, reply1, false), codexTurnSteps("turn-2", 2, reply2, false))
+	steps := slices.Concat(codexStartupSteps(), codexTurnSteps("turn-1", 1, "", reply1, false), codexTurnSteps("turn-2", 2, "", reply2, false))
 	return w.writeScript("codex", map[string]any{"session": threadID, "steps": steps})
 }
 
 func (w *m3World) scriptCodexApprovalGate(_, threadID, reply1, reply2 string) error {
-	steps := slices.Concat(codexStartupSteps(), codexTurnSteps("turn-1", 1, reply1, false), codexTurnSteps("turn-2", 2, reply2, true))
+	steps := slices.Concat(codexStartupSteps(), codexTurnSteps("turn-1", 1, "", reply1, false), codexTurnSteps("turn-2", 2, "", reply2, true))
 	steps = append(steps, map[string]any{"dir": "eof"})
 	return w.writeScript("codex", map[string]any{"session": threadID, "steps": steps})
 }
@@ -724,7 +585,7 @@ func (w *m3World) whenOwnerPosts(text, groupName string) error {
 		}
 	}
 	cmd := proto.Post[proto.EmptyBody]{
-		HomeCommand: proto.HomeCommand{Type: "post", Nonce: w.nextID(), Timestamp: time.Now().UnixMilli(), Group: gid},
+		HomeCommand: proto.HomeCommand{Type: "post", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), Group: gid},
 		Kind:        "text",
 		Text:        text,
 		Mentions:    mentions,
@@ -757,7 +618,7 @@ func (w *m3World) whenWaitApprovalCard(aiName, _ string) error {
 func (w *m3World) whenOwnerApprovesCard(groupName string) error {
 	gid := proto.ID(w.groups[groupName])
 	cmd := proto.Act{
-		HomeCommand: proto.HomeCommand{Type: "act", Nonce: w.nextID(), Timestamp: time.Now().UnixMilli(), Group: gid},
+		HomeCommand: proto.HomeCommand{Type: "act", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), Group: gid},
 		Action:      "approve",
 		Msg:         proto.ID(w.pendingCard),
 	}
@@ -980,7 +841,11 @@ func (w *m3World) thenSecondProcessHeld(aiName, workingAI string) error {
 func (w *m3World) awaitDeliveredCount(agent string, want int) error {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if w.deliveredCount(agent) >= want {
+		n, err := w.deliveredCount(agent)
+		if err != nil {
+			return err
+		}
+		if n >= want {
 			return nil
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -988,13 +853,13 @@ func (w *m3World) awaitDeliveredCount(agent string, want int) error {
 	return fmt.Errorf("timed out waiting for %d delivered items for %s", want, agent)
 }
 
-func (w *m3World) deliveredCount(agent string) int {
+func (w *m3World) deliveredCount(agent string) (int, error) {
 	var count int
 	read := func(tx *store.Tx) error {
 		return tx.QueryRow(`SELECT count(*) FROM audit WHERE agent = ? AND what = 'delivered'`, agent).Scan(&count)
 	}
-	w.node().Store.Write(read)
-	return count
+	err := w.node().Store.Write(read)
+	return count, err
 }
 
 func (w *m3World) thenPostBeforePost(ai1, text1, ai2, text2, groupName string) error {
@@ -1073,7 +938,11 @@ func (w *m3World) thenNoMsgContains(groupName, sub1, sub2 string) error {
 			return fmt.Errorf("unexpected outside text in group %s message: %q", groupName, m.Text)
 		}
 	}
-	for _, raw := range w.homeMsgRows(w.groups[groupName]) {
+	stored, err := w.homeMsgRows(w.groups[groupName])
+	if err != nil {
+		return err
+	}
+	for _, raw := range stored {
 		if containsEither(raw, sub1, sub2) {
 			return fmt.Errorf("unexpected outside text stored on home: %s", raw)
 		}
@@ -1081,19 +950,24 @@ func (w *m3World) thenNoMsgContains(groupName, sub1, sub2 string) error {
 	return nil
 }
 
-func (w *m3World) homeMsgRows(gid string) []string {
-	var listJSON string
+func (w *m3World) homeMsgRows(gid string) ([]string, error) {
+	var out []string
 	read := func(tx *store.Tx) error {
-		return tx.QueryRow(`SELECT coalesce(json_group_array(data), '[]') FROM row_by_seq WHERE g = ? AND r = 'msg' ORDER BY seq`, gid).Scan(&listJSON)
+		rows, err := tx.Query(`SELECT data FROM row WHERE g = ? AND r = 'msg' ORDER BY seq`, gid)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var raw string
+			if err := rows.Scan(&raw); err != nil {
+				return err
+			}
+			out = append(out, raw)
+		}
+		return rows.Err()
 	}
-	w.node().Store.Write(read)
-	var rows []json.RawMessage
-	json.Unmarshal([]byte(listJSON), &rows)
-	out := make([]string, len(rows))
-	for i, r := range rows {
-		out[i] = string(r)
-	}
-	return out
+	return out, w.node().Store.Write(read)
 }
 
 func (w *m3World) thenSecretTurnFinishes(aiName string) error {
@@ -1114,7 +988,11 @@ func (w *m3World) thenSecretTurnFinishes(aiName string) error {
 
 func (w *m3World) thenNoMsgFromAIOnHome(aiName, groupName string) error {
 	aiID := w.aiByName[aiName].ID
-	for _, raw := range w.homeMsgRows(w.groups[groupName]) {
+	stored, err := w.homeMsgRows(w.groups[groupName])
+	if err != nil {
+		return err
+	}
+	for _, raw := range stored {
 		var msg proto.MsgRow
 		if proto.Decode([]byte(raw), &msg) == nil && msg.By == aiID {
 			return fmt.Errorf("unexpected row on home from %s: %s", aiName, raw)
@@ -1156,21 +1034,26 @@ func (w *m3World) thenRestartedAckOnce(aiName string) error {
 func (w *m3World) awaitHomeInboxEmpty() error {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if w.homeInboxCount() == 0 {
+		n, err := w.homeInboxCount()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
 			return nil
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	return fmt.Errorf("home still has %d queued inbox items", w.homeInboxCount())
+	n, _ := w.homeInboxCount()
+	return fmt.Errorf("home still has %d queued inbox items", n)
 }
 
-func (w *m3World) homeInboxCount() int {
+func (w *m3World) homeInboxCount() (int, error) {
 	var count int
 	read := func(tx *store.Tx) error {
 		return tx.QueryRow(`SELECT count(*) FROM inbox`).Scan(&count)
 	}
-	w.node().Store.Write(read)
-	return count
+	err := w.node().Store.Write(read)
+	return count, err
 }
 
 func (w *m3World) whenListAllSessionTools() error {
@@ -1183,18 +1066,15 @@ func (w *m3World) whenListAllSessionTools() error {
 		kind      host.Kind
 		secretary bool
 		task      string
-		level     int
 		want      proto.ToolList
 	}{
-		{"secretary", host.GroupSession, true, "", 3, lists.Secretary},
-		{"group", host.GroupSession, false, "", 3, lists.Group},
-		{"review", host.ReviewSession, false, "t-rev", 3, lists.Review},
-		{"task_level_1", host.TaskSession, false, "t-1", 1, lists.TaskLevel1},
-		{"task_level_2", host.TaskSession, false, "t-2", 2, lists.TaskLevel23},
-		{"task_level_3", host.TaskSession, false, "t-3", 3, lists.TaskLevel23},
+		{"secretary", host.GroupSession, true, "", lists.Secretary},
+		{"group", host.GroupSession, false, "", lists.Group},
+		{"review", host.ReviewSession, false, "t-rev", lists.Review},
+		{"task_level_3", host.TaskSession, false, "t-3", lists.TaskLevel23},
 	}
 	for _, sp := range specs {
-		chk, err := w.collectToolCheck(sp.name, sp.kind, sp.secretary, sp.task, sp.level, sp.want)
+		chk, err := w.collectToolCheck(sp.name, sp.kind, sp.secretary, sp.task, sp.want)
 		if err != nil {
 			return err
 		}
@@ -1203,16 +1083,12 @@ func (w *m3World) whenListAllSessionTools() error {
 	return nil
 }
 
-func (w *m3World) collectToolCheck(label string, kind host.Kind, sec bool, task string, level int, want proto.ToolList) (m3ToolCheck, error) {
-	codexTools, err := w.listSessionTools("g-tools", "m-codex-"+label, task, "codex", kind, sec, level, false)
+func (w *m3World) collectToolCheck(label string, kind host.Kind, sec bool, task string, want proto.ToolList) (m3ToolCheck, error) {
+	codexTools, err := w.listSessionTools("g-tools", "m-codex-"+label, task, "codex", kind, sec)
 	if err != nil {
 		return m3ToolCheck{}, err
 	}
-	claudeStruct, err := w.listSessionTools("g-tools", "m-claude-"+label, task, "claude", kind, sec, level, false)
-	if err != nil {
-		return m3ToolCheck{}, err
-	}
-	claudeTerm, err := w.listSessionTools("g-tools", "m-term-"+label, task, "claude", kind, sec, level, true)
+	claudeStruct, err := w.listSessionTools("g-tools", "m-claude-"+label, task, "claude", kind, sec)
 	if err != nil {
 		return m3ToolCheck{}, err
 	}
@@ -1221,11 +1097,10 @@ func (w *m3World) collectToolCheck(label string, kind host.Kind, sec bool, task 
 		want:             want,
 		codex:            codexTools,
 		claudeStructured: claudeStruct,
-		claudeTerm:       claudeTerm,
 	}, nil
 }
 
-func (w *m3World) listSessionTools(group, member, task, agent string, kind host.Kind, sec bool, level int, interactive bool) ([]proto.Tool, error) {
+func (w *m3World) listSessionTools(group, member, task, agent string, kind host.Kind, sec bool) ([]proto.Tool, error) {
 	h := w.node().Host
 	key := host.SessionKey{Group: group, Member: member, Task: task}
 	err := h.Sessions.Create(host.Session{
@@ -1240,13 +1115,13 @@ func (w *m3World) listSessionTools(group, member, task, agent string, kind host.
 	if err != nil {
 		return nil, err
 	}
-	token := h.Sessions.Admit(key, level, interactive)
+	token := h.Sessions.Admit(key, 3, false)
 	defer h.Sessions.Forget(token)
 	raw, err := listToolsViaShim(w.sockPath, token)
 	if err != nil {
 		return nil, err
 	}
-	return decodeListedTools(raw, agent == "claude" && !interactive)
+	return decodeListedTools(raw, agent == "claude")
 }
 
 func listToolsViaShim(sockPath, token string) (json.RawMessage, error) {
@@ -1369,14 +1244,10 @@ func (w *m3World) thenCodexToolsMatch() error {
 
 func (w *m3World) thenClaudeApproveToolsMatch() error {
 	for _, chk := range w.toolChecks {
-		want := mainlineToolList(chk.want)
-		if !reflect.DeepEqual(chk.claudeTerm, want) {
-			return fmt.Errorf("%s interactive claude tools:\ngot  %+v\nwant %+v", chk.name, chk.claudeTerm, want)
-		}
-		wantWithApprove := append(slices.Clone(want), proto.Tool{Name: "approve"})
-		slices.SortFunc(wantWithApprove, func(a, b proto.Tool) int { return cmp.Compare(a.Name, b.Name) })
-		if !reflect.DeepEqual(chk.claudeStructured, wantWithApprove) {
-			return fmt.Errorf("%s structured claude tools:\ngot  %+v\nwant %+v", chk.name, chk.claudeStructured, wantWithApprove)
+		want := append(slices.Clone(mainlineToolList(chk.want)), proto.Tool{Name: "approve"})
+		slices.SortFunc(want, func(a, b proto.Tool) int { return cmp.Compare(a.Name, b.Name) })
+		if !reflect.DeepEqual(chk.claudeStructured, want) {
+			return fmt.Errorf("%s structured claude tools:\ngot  %+v\nwant %+v", chk.name, chk.claudeStructured, want)
 		}
 	}
 	return nil
@@ -1425,14 +1296,4 @@ func (l *m3HoldLink) awaitAcks(want int) error {
 		}
 	}
 	return nil
-}
-
-func marshalNoEscape(v any) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
-		return nil, err
-	}
-	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }

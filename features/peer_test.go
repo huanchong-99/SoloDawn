@@ -62,6 +62,7 @@ func peerSteps(sc *godog.ScenarioContext) {
 		return ctx, nil
 	})
 	sc.Step("^two authorized nodes signed in on two local signalling paths$", w.signedIn)
+	sc.Step("^two authorized nodes signed in on that rendezvous$", w.signedInShared)
 	sc.Step("^two authorized nodes whose signalling the test delivers$", w.delivered)
 	sc.Step("^each node offers the other a connection$", func() error { return errors.Join(w.offer(0), w.offer(1)) })
 	sc.Step("^both directions are direct and answer host.info$", w.directBoth)
@@ -70,6 +71,7 @@ func peerSteps(sc *godog.ScenarioContext) {
 	sc.Step("^a relay on this machine, with UDP and ICE-TCP between the nodes blocked$", w.relayOnly)
 	sc.Step("^the node offers the tablet a connection$", func() error { return w.offer(0) })
 	sc.Step("^both ends report the path relay and the connection answers host.info$", w.relayed)
+	sc.Step(`^host\.info on that connection succeeds every second$`, w.pollInfoEverySecond)
 
 	sc.Step("^the node offers the tablet a connection dated 119 seconds ahead$", func() error { return w.dateOffer(119000) })
 	sc.Step("^the node offers the tablet a newer connection$", w.newerOffer)
@@ -135,17 +137,38 @@ func (w *peersWorld) signedIn() error {
 	return nil
 }
 
+func (w *peersWorld) signedInShared(ctx context.Context) error {
+	var paths [2]*peer.Path
+	err := w.start(func(i int) []peer.Route {
+		return []peer.Route{w.route(i, paths[i].Route())}
+	})
+	if err != nil {
+		return err
+	}
+	rvURL := sharedRVURL(ctx)
+	for i := range w.keys {
+		p, err := peer.Dial(w.ctx, rvURL, w.keys[i])
+		if err != nil {
+			return err
+		}
+		w.cleanup = append(w.cleanup, func() { p.Close() })
+		paths[i] = p
+		go p.Serve(w.ctx, w.nodes[i], func(string, []byte) error { return nil })
+	}
+	return nil
+}
+
 // route passes what node i sends through the conditions of the scenario.
 func (w *peersWorld) route(i int, r peer.Route) peer.Route {
 	send := r.Send
-	r.ICE = slices.Concat(r.ICE, w.relay)
+	r = w.withRouteICE(r)
 	r.Send = func(ctx context.Context, to string, env proto.Envelope) error {
 		var p struct {
 			Type string `json:"t"`
 			Cand string `json:"cand"`
 		}
 		json.Unmarshal([]byte(env.Payload), &p)
-		if p.Type == "ice" && w.blocked && !strings.Contains(p.Cand, " typ relay") {
+		if p.Type == "ice" && w.isBlocked() && !strings.Contains(p.Cand, " typ relay") {
 			return nil
 		}
 		if p.Type == "offer" && i == 0 {
@@ -154,6 +177,23 @@ func (w *peersWorld) route(i int, r peer.Route) peer.Route {
 		return send(ctx, to, env)
 	}
 	return r
+}
+
+func (w *peersWorld) withRouteICE(r peer.Route) peer.Route {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.blocked {
+		r.ICE = w.relay
+		return r
+	}
+	r.ICE = rewriteDirectICE(r.ICE)
+	return r
+}
+
+func (w *peersWorld) isBlocked() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.blocked
 }
 
 // sent signs the node's offer again with its ts moved by shift, and records
@@ -204,18 +244,8 @@ func (w *peersWorld) offer(i int) error {
 	w.conns[i] = c
 	w.pushes[i] = ch
 	w.cleanup = append(w.cleanup, func() { c.Close() })
-	go pumpClientReads(w.ctx, c, ch)
+	go pumpBrowserPushes(w.ctx, c, ch)
 	return nil
-}
-
-func pumpClientReads(ctx context.Context, c *peer.Connection, out chan<- json.RawMessage) {
-	for {
-		msg, err := c.Read(ctx)
-		if err != nil {
-			return
-		}
-		out <- msg
-	}
 }
 
 // open waits until ctl of what node i offered is open at both ends.
@@ -251,8 +281,8 @@ func (w *peersWorld) directBoth() error {
 		if err := w.open(i); err != nil {
 			return err
 		}
-		if path := c.Path(); path != "direct" {
-			return fmt.Errorf("path %q", path)
+		if err := waitConnPath(c, "direct", time.Second); err != nil {
+			return err
 		}
 		if err := w.info(i); err != nil {
 			return err
@@ -279,6 +309,7 @@ func (w *peersWorld) pushBoth() error {
 // datagrams only from relay sockets, and passes no other candidate between
 // the nodes: UDP and ICE-TCP between them are blocked.
 func (w *peersWorld) relayOnly() error {
+	w.closePriorConns()
 	l, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	if err != nil {
 		return err
@@ -292,9 +323,26 @@ func (w *peersWorld) relayOnly() error {
 		return err
 	}
 	w.cleanup = append(w.cleanup, func() { s.Close() })
+	w.mu.Lock()
 	w.relay = []proto.ICEServer{{URLs: []string{"turn:" + l.LocalAddr().String() + "?transport=udp"}, Username: "peer", Credential: "secret"}}
 	w.blocked = true
+	w.mu.Unlock()
 	return nil
+}
+
+func (w *peersWorld) closePriorConns() {
+	for i, c := range w.conns {
+		if c != nil {
+			c.Close()
+			w.conns[i] = nil
+		}
+	}
+	for i, c := range w.served {
+		if c != nil {
+			c.Close()
+			w.served[i] = nil
+		}
+	}
 }
 
 type relaySockets struct {
@@ -338,11 +386,21 @@ func (w *peersWorld) relayed() error {
 		return err
 	}
 	for _, c := range []*peer.Connection{w.conns[0], w.served[1]} {
-		if path := c.Path(); path != "relay" {
-			return fmt.Errorf("path %q", path)
+		if err := waitConnPath(c, "relay", time.Second); err != nil {
+			return err
 		}
 	}
 	return w.info(0)
+}
+
+func (w *peersWorld) pollInfoEverySecond() error {
+	for range 2 {
+		time.Sleep(time.Second)
+		if err := w.info(0); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // dateOffer opens a connection whose offer is dated shift milliseconds ahead.

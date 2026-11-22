@@ -2,6 +2,7 @@ package nodetest_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
@@ -16,6 +17,8 @@ import (
 
 	"github.com/huanchong-99/SoloDawn/internal/home"
 	"github.com/huanchong-99/SoloDawn/internal/host"
+	"github.com/huanchong-99/SoloDawn/internal/identity"
+	"github.com/huanchong-99/SoloDawn/internal/node"
 	"github.com/huanchong-99/SoloDawn/internal/node/nodetest"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
@@ -43,6 +46,12 @@ func nonceID(n int64) string {
 	return base64.RawURLEncoding.EncodeToString(raw[:])
 }
 
+func detKey(seedByte byte) identity.Key {
+	seed := make([]byte, ed25519.SeedSize)
+	seed[0] = seedByte
+	return identity.Key(ed25519.NewKeyFromSeed(seed))
+}
+
 type fatalTB struct {
 	testing.TB
 	fatal bool
@@ -51,7 +60,8 @@ type fatalTB struct {
 func (f *fatalTB) Fatal(...any) { f.fatal = true; panic(f) }
 
 func TestStartMultiNodeAndFakeCLIs(t *testing.T) {
-	c := nodetest.Start(t, nodetest.Config{Nodes: 2})
+	extraBrowser := detKey(9)
+	c := nodetest.Start(t, nodetest.Config{Nodes: 2, ExtraBrowsers: []identity.Key{extraBrowser}})
 	mustEq(t, filepath.IsAbs(c.Root), true)
 	mustEq(t, len(c.Nodes), 2)
 	mustEq(t, []string{c.Nodes[0].Name, c.Nodes[1].Name}, []string{"node-1", "node-2"})
@@ -68,15 +78,16 @@ func TestStartMultiNodeAndFakeCLIs(t *testing.T) {
 	mustEq(t, errors.As(cmdErr, &hostErr), true)
 	mustEq(t, hostErr.Code, "not_found")
 
-	checkOwnerLogs(t, c)
+	checkOwnerLogs(t, c, extraBrowser)
 	for _, n := range c.Nodes {
 		checkNodeSeeded(t, c, n)
 	}
+	checkHomeRestart(t, n0)
 	checkFakeCLIs(t, c)
 	checkCustomStart(t, c.BinDir)
 }
 
-func checkOwnerLogs(t *testing.T, c *nodetest.Cluster) {
+func checkOwnerLogs(t *testing.T, c *nodetest.Cluster, extraBrowser identity.Key) {
 	t.Helper()
 	mustEq(t, c.Logs("stranger") == nil, true)
 	ownerLog := c.Logs(c.Owner.ID())
@@ -84,13 +95,16 @@ func checkOwnerLogs(t *testing.T, c *nodetest.Cluster) {
 	mustEq(t, ownerLog.Valid(c.Owner.ID()), true)
 	mustEq(t, ownerLog.Valid(c.Nodes[0].Key.ID()), true)
 	mustEq(t, ownerLog.Valid(c.Nodes[1].Key.ID()), true)
+	mustEq(t, ownerLog.Valid(extraBrowser.ID()), true)
 	mustEq(t, strings.Contains(ownerLog.Entries[1].Payload, `"name":"node-1"`), true)
 	mustEq(t, strings.Contains(ownerLog.Entries[2].Payload, `"name":"node-2"`), true)
+	mustEq(t, strings.Contains(ownerLog.Entries[3].Payload, `"name":"browser-2"`), true)
 }
 
 func checkNodeSeeded(t *testing.T, c *nodetest.Cluster, n *nodetest.Node) {
 	t.Helper()
 	mustEq(t, n.Link.Path(), "local")
+	mustEq(t, node.ReadName(n.Store), n.Name)
 	gotHome, ok := n.Host.Home(n.Key.ID())
 	mustEq(t, []any{gotHome, ok}, []any{host.Home(n.Link), true})
 
@@ -103,7 +117,21 @@ func checkNodeSeeded(t *testing.T, c *nodetest.Cluster, n *nodetest.Node) {
 	})
 	mustOK(t, err)
 	mustEq(t, storedOwner, c.Owner.ID())
-	mustEq(t, verList, "[1,2,3]")
+	mustEq(t, verList, "[1,2,3,4]")
+}
+
+func checkHomeRestart(t *testing.T, n *nodetest.Node) {
+	t.Helper()
+	oldLink := n.Link
+	n.StopHome()
+	select {
+	case <-oldLink.Done():
+	default:
+		t.Fatal("expected old link Done closed after StopHome")
+	}
+	n.RestartHome()
+	mustEq(t, n.Link != oldLink, true)
+	mustEq(t, n.Link.Path(), "local")
 }
 
 func checkFakeCLIs(t *testing.T, c *nodetest.Cluster) {
@@ -143,6 +171,7 @@ func checkCustomStart(t *testing.T, binDir string) {
 	single := nodetest.Start(t, nodetest.Config{
 		Root:   customRoot,
 		BinDir: binDir,
+		Nodes:  0,
 		Now:    func() time.Time { return time.UnixMilli(fixedMs) },
 		Tables: home.Tables{Commands: home.Table{"group/create": singleGroupCreate}},
 	})
@@ -157,6 +186,7 @@ func checkCustomStart(t *testing.T, binDir string) {
 	mustOK(t, proto.Decode(ans, &res))
 	mustEq(t, res.Num, 3)
 
+	single.Close()
 	single.Close()
 	_, open := n0.Host.Home(n0.Key.ID())
 	mustEq(t, open, false)

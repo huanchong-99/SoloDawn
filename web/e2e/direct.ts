@@ -1,10 +1,11 @@
-// Shared end-to-end helpers for E-M1, E-M2, E-M3, and E-M5: local STUN + rendezvous proxy so
-// direct WebRTC gathers loopback/LAN srflx candidates cleanly across Chromium, Firefox, and
-// WebKit, isolated Git identity environment for clean CI runners, and fake CLI init steps.
+// Shared end-to-end helpers for connect.spec.ts, E-M1, E-M2, E-M3, and E-M5: local STUN
+// responder, rendezvous HTTP + `/rv` WebSocket proxy (with optional TURN-only filtering and
+// downstream early-ICE reordering), node device-id reader, isolated Git identity environment, and
+// fake CLI handshake steps.
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey } from 'node:crypto';
 import { createSocket, type Socket as UdpSocket } from 'node:dgram';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { networkInterfaces } from 'node:os';
@@ -13,12 +14,13 @@ import { promisify } from 'node:util';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { expect, vi } from 'vitest';
 import type { BrowserName } from './config';
-import type { Env, Rendezvous } from './nodes';
+import type { Env, Node, Rendezvous } from './nodes';
 
 export const exec = promisify(execFile);
 
 const wsGuid = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const codePattern = /\b([0-9A-HJKMNP-TV-Z]{4}(?:-[0-9A-HJKMNP-TV-Z]{4}){3})\b/;
+const ed25519Pkcs8Prefix = Buffer.from('302e020100300506032b657004220420', 'hex');
 
 /** Polls an asynchronous assertion with a 15 s default timeout suited for browser E2E flows. */
 export function poll<T>(fn: () => Promise<T> | T, timeout = 15_000) {
@@ -36,16 +38,56 @@ export const gitIdentityEnv: Env = {
   GIT_CONFIG_VALUE_2: 'false',
 };
 
+export interface IceServer {
+  urls: string[];
+  username?: string;
+  credential?: string;
+}
+
+export interface SignallingProxyOptions {
+  targetHttp: string;
+  targetWs: string;
+  ice?: IceServer[];
+  dropDirect?: boolean;
+  reorderEarly?: boolean;
+}
+
+export interface SignallingProxy {
+  url: string;
+  signal: string;
+  earlyReady: Promise<{ nodeIce: string }>;
+  releaseAnswer(): void;
+  replayEarly(): void;
+  close(): Promise<void>;
+}
+
+export interface SignallingEnvelope {
+  outer: { t?: string; k?: string; env?: { p?: string; k?: string } };
+  inner?: { t?: string; cand?: string; mid?: string; conn?: string };
+}
+
 export interface DirectSurface {
   url: string;
   signal: string;
   close(): Promise<void>;
 }
 
-function pickLanIPv4(): string {
+/** Picks a non-loopback IPv4 interface address for Firefox ICE tests, or 127.0.0.1. */
+export function pickLanIPv4(): string {
   const lists = Object.values(networkInterfaces()).flatMap((items) => items ?? []);
   const found = lists.find((entry) => entry.family === 'IPv4' && !entry.internal);
   return found ? found.address : '127.0.0.1';
+}
+
+/** Reads a node's canonical base64url Ed25519 device id from `<dataDir>/device.key`. */
+export async function readNodeDeviceId(node: Node): Promise<string> {
+  const seed = await readFile(join(node.dataDir, 'device.key'));
+  const priv = createPrivateKey({
+    key: Buffer.concat([ed25519Pkcs8Prefix, seed]),
+    format: 'der',
+    type: 'pkcs8',
+  });
+  return String(createPublicKey(priv).export({ format: 'jwk' }).x);
 }
 
 function encodeStunBindingSuccess(req: Buffer, port: number, address: string): Buffer {
@@ -65,7 +107,10 @@ function encodeStunBindingSuccess(req: Buffer, port: number, address: string): B
   return Buffer.concat([hdr, attr]);
 }
 
-async function startStunResponder(host: string): Promise<{ url: string; close(): Promise<void> }> {
+/** Starts an RFC 5389 STUN Binding responder so srflx candidates gather over loopback or LAN. */
+export async function startStunResponder(
+  host: string,
+): Promise<{ url: string; close(): Promise<void> }> {
   const sock: UdpSocket = createSocket('udp4');
   sock.on('message', (msg, rinfo) => {
     if (msg.length < 20 || msg.readUInt16BE(0) !== 0x0001) return;
@@ -186,10 +231,96 @@ function attachWsReader(
   drain();
 }
 
-function injectStun(rawFrame: string, stunUrl: string): string {
-  const parsed = JSON.parse(rawFrame) as { t?: string; ice?: Array<{ urls: string[] }> };
+/** Parses an outer rendezvous frame and, for `to`/`from`, its signed payload JSON. */
+export function parseSignallingEnvelope(rawFrame: string): SignallingEnvelope {
+  const outer = JSON.parse(rawFrame) as SignallingEnvelope['outer'];
+  const relayed = outer.t === 'to' || outer.t === 'from';
+  if (!relayed || typeof outer.env?.p !== 'string') return { outer };
+  return { outer, inner: JSON.parse(outer.env.p) as SignallingEnvelope['inner'] };
+}
+
+function isNonRelayIce(rawFrame: string): boolean {
+  const { inner } = parseSignallingEnvelope(rawFrame);
+  return inner?.t === 'ice' && !(inner.cand ?? '').includes(' typ relay');
+}
+
+function injectIceServers(rawFrame: string, extra: IceServer[] | undefined): string {
+  if (!extra?.length) return rawFrame;
+  const parsed = JSON.parse(rawFrame) as { t?: string; ice?: IceServer[] };
   if (parsed.t !== 'ready' && parsed.t !== 'ice') return rawFrame;
-  return JSON.stringify({ ...parsed, ice: [...(parsed.ice ?? []), { urls: [stunUrl] }] });
+  return JSON.stringify({ ...parsed, ice: [...(parsed.ice ?? []), ...extra] });
+}
+
+interface EarlyReorderer {
+  earlyReady: Promise<{ nodeIce: string }>;
+  releaseAnswer(): void;
+  replayEarly(): void;
+  setBrowserSink(sendDown: (text: string) => void): void;
+  interceptDown(isBrowserConn: boolean, raw: string, sendDown: (text: string) => void): boolean;
+}
+
+function isAnswerOrIceFromPeer(raw: string): {
+  match: boolean;
+  isIce: boolean;
+  isAnswer: boolean;
+} {
+  const { outer, inner } = parseSignallingEnvelope(raw);
+  const isIce = outer.t === 'from' && inner?.t === 'ice';
+  const isAnswer = outer.t === 'from' && inner?.t === 'answer';
+  return { match: isIce || isAnswer, isIce, isAnswer };
+}
+
+function createEarlyReorderer(enabled: boolean): EarlyReorderer {
+  const readyGate = Promise.withResolvers<{ nodeIce: string }>();
+  const answerGate = Promise.withResolvers<void>();
+  let sink: ((text: string) => void) | undefined;
+  let firstNodeIce = '';
+  let hasAnswer = false;
+  let earlySent = false;
+  let released = false;
+  const held: string[] = [];
+
+  const maybeSendEarly = (sendDown: (text: string) => void) => {
+    if (earlySent || !hasAnswer || !firstNodeIce) return;
+    earlySent = true;
+    sendDown(firstNodeIce);
+    sendDown(firstNodeIce);
+    readyGate.resolve({ nodeIce: firstNodeIce });
+    void answerGate.promise.then(() => {
+      released = true;
+      for (const frame of held.splice(0)) sendDown(frame);
+    });
+  };
+
+  const holdFrame = (
+    raw: string,
+    isIce: boolean,
+    isAnswer: boolean,
+    sendDown: (text: string) => void,
+  ) => {
+    if (isIce && !firstNodeIce) firstNodeIce = raw;
+    if (isAnswer) hasAnswer = true;
+    held.push(raw);
+    maybeSendEarly(sendDown);
+  };
+
+  return {
+    earlyReady: readyGate.promise,
+    releaseAnswer: () => answerGate.resolve(),
+    replayEarly: () => {
+      if (firstNodeIce && sink) sink(firstNodeIce);
+    },
+    setBrowserSink: (sendDown) => {
+      sink = sendDown;
+    },
+    interceptDown: (isBrowserConn, raw, sendDown) => {
+      if (!enabled || !isBrowserConn || released) return false;
+      const info = isAnswerOrIceFromPeer(raw);
+      if (!info.match) return false;
+      holdFrame(raw, info.isIce, info.isAnswer, sendDown);
+      return true;
+    },
+  };
 }
 
 async function forwardHttp(targetHttp: string, req: IncomingMessage, res: ServerResponse) {
@@ -207,19 +338,11 @@ async function forwardHttp(targetHttp: string, req: IncomingMessage, res: Server
   }
 }
 
-function bridgeUpgrade(
-  req: IncomingMessage,
-  socket: Socket,
-  head: Buffer,
-  targetWs: string,
-  stunUrl: string,
-  sockets: Set<Socket>,
-  upstreams: Set<WebSocket>,
-) {
+function acceptWsUpgrade(req: IncomingMessage, socket: Socket): boolean {
   const key = req.headers['sec-websocket-key'];
   if (typeof key !== 'string') {
     socket.destroy();
-    return;
+    return false;
   }
   const accept = createHash('sha1')
     .update(key + wsGuid)
@@ -228,11 +351,29 @@ function bridgeUpgrade(
     'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
       `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
   );
+  return true;
+}
+
+function bridgeUpgrade(
+  req: IncomingMessage,
+  socket: Socket,
+  head: Buffer,
+  opts: SignallingProxyOptions,
+  reorder: EarlyReorderer,
+  sockets: Set<Socket>,
+  upstreams: Set<WebSocket>,
+) {
+  if (!acceptWsUpgrade(req, socket)) return;
+  const isBrowserConn = Boolean(req.headers.origin);
   sockets.add(socket);
-  const upstream = new WebSocket(targetWs);
+  const upstream = new WebSocket(opts.targetWs);
   upstreams.add(upstream);
   const pending: string[] = [];
   let closed = false;
+  const sendDown = (text: string) => {
+    if (!closed && !socket.destroyed) socket.write(encodeWsText(text));
+  };
+  if (isBrowserConn) reorder.setBrowserSink(sendDown);
   const shut = () => {
     if (closed) return;
     closed = true;
@@ -245,7 +386,9 @@ function bridgeUpgrade(
     for (const item of pending.splice(0)) upstream.send(item);
   });
   upstream.addEventListener('message', (ev) => {
-    if (!closed) socket.write(encodeWsText(injectStun(String(ev.data), stunUrl)));
+    const raw = injectIceServers(String(ev.data), opts.ice);
+    if (opts.dropDirect && isNonRelayIce(raw)) return;
+    if (!reorder.interceptDown(isBrowserConn, raw, sendDown)) sendDown(raw);
   });
   upstream.addEventListener('close', shut);
   upstream.addEventListener('error', shut);
@@ -253,6 +396,7 @@ function bridgeUpgrade(
     socket,
     head,
     (raw) => {
+      if (opts.dropDirect && isNonRelayIce(raw)) return;
       if (upstream.readyState === WebSocket.OPEN) upstream.send(raw);
       else pending.push(raw);
     },
@@ -260,21 +404,18 @@ function bridgeUpgrade(
   );
 }
 
-/** Wraps a local rendezvous with a UDP STUN responder so direct WebRTC connects across browsers. */
-export async function startDirectSurface(
-  rv: Rendezvous,
-  engine: BrowserName,
-): Promise<DirectSurface> {
-  const stun = await startStunResponder(engine === 'firefox' ? pickLanIPv4() : '127.0.0.1');
+/** Starts a local HTTP and `/rv` WebSocket proxy in front of a real rendezvous server. */
+export async function startSignallingProxy(opts: SignallingProxyOptions): Promise<SignallingProxy> {
   const sockets = new Set<Socket>();
   const upstreams = new Set<WebSocket>();
-  const server: Server = createServer((req, res) => void forwardHttp(rv.url, req, res));
+  const reorder = createEarlyReorderer(Boolean(opts.reorderEarly));
+  const server: Server = createServer((req, res) => void forwardHttp(opts.targetHttp, req, res));
   server.on('connection', (socket) => {
     sockets.add(socket);
     socket.on('close', () => sockets.delete(socket));
   });
   server.on('upgrade', (req, socket: Socket, head: Buffer) =>
-    bridgeUpgrade(req, socket, head, rv.signal, stun.url, sockets, upstreams),
+    bridgeUpgrade(req, socket, head, opts, reorder, sockets, upstreams),
   );
   await new Promise<void>((resolveListen, rejectListen) => {
     server.once('error', rejectListen);
@@ -284,10 +425,33 @@ export async function startDirectSurface(
   return {
     url: `http://127.0.0.1:${port}/`,
     signal: `ws://127.0.0.1:${port}/rv`,
+    earlyReady: reorder.earlyReady,
+    releaseAnswer: reorder.releaseAnswer,
+    replayEarly: reorder.replayEarly,
     close: async () => {
       for (const ws of upstreams) ws.close();
       for (const sock of sockets) sock.destroy();
       await new Promise<void>((done) => server.close(() => done()));
+    },
+  };
+}
+
+/** Wraps a local rendezvous with a UDP STUN responder so direct WebRTC connects across browsers. */
+export async function startDirectSurface(
+  rv: Rendezvous,
+  engine: BrowserName,
+): Promise<DirectSurface> {
+  const stun = await startStunResponder(engine === 'firefox' ? pickLanIPv4() : '127.0.0.1');
+  const proxy = await startSignallingProxy({
+    targetHttp: rv.url,
+    targetWs: rv.signal,
+    ice: [{ urls: [stun.url] }],
+  });
+  return {
+    url: proxy.url,
+    signal: proxy.signal,
+    close: async () => {
+      await proxy.close();
       await stun.close();
     },
   };

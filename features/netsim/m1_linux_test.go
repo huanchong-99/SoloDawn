@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +28,7 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/host"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/node"
+	"github.com/huanchong-99/SoloDawn/internal/node/nodetest"
 	"github.com/huanchong-99/SoloDawn/internal/peer"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/rendezvous"
@@ -563,15 +563,10 @@ func netsimKey(label string) identity.Key {
 	return identity.Key(ed25519.NewKeyFromSeed(seed[:]))
 }
 
-func netsimID(label string) proto.ID {
-	sum := sha256.Sum256([]byte("SoloDawn netsim id: " + label))
-	return proto.ID(base64.RawURLEncoding.EncodeToString(sum[:16]))
-}
-
 func seedNetsimOwner(db *store.Store, owner, nodeKey identity.Key) error {
 	now := time.Now().UnixMilli()
-	e1 := signNetsimAdd(owner, owner.ID(), 1, owner.ID(), "browser", "browser", now)
-	e2 := signNetsimAdd(owner, owner.ID(), 2, nodeKey.ID(), "node", "netsim-node", now)
+	e1 := nodetest.SignDeviceAdd(owner, owner.ID(), 1, "browser", "browser", owner.ID(), now)
+	e2 := nodetest.SignDeviceAdd(owner, owner.ID(), 2, "node", "netsim-node", nodeKey.ID(), now)
 	ownerJSON, err := json.Marshal(owner.ID())
 	if err != nil {
 		return err
@@ -587,16 +582,4 @@ func seedNetsimOwner(db *store.Store, owner, nodeKey identity.Key) error {
 		return errors.Join(wErr1, wErr2)
 	}
 	return db.Write(write)
-}
-
-func signNetsimAdd(signer identity.Key, user string, ver int, dev, kind, name string, ts int64) proto.Envelope {
-	entry := proto.DeviceEntry{
-		PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: netsimID(fmt.Sprintf("%s-%d", dev, ver)), Timestamp: ts},
-		DeviceChange:  proto.DeviceChange{User: user, Version: ver, Op: "add", Device: dev, Kind: kind, Name: name},
-	}
-	raw, err := json.Marshal(entry)
-	if err != nil {
-		panic(err)
-	}
-	return signer.Sign(string(raw))
 }

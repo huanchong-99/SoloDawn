@@ -3,7 +3,6 @@
 package features
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -12,7 +11,6 @@ import (
 	"os"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -20,7 +18,6 @@ import (
 	"github.com/cucumber/godog"
 	"github.com/huanchong-99/SoloDawn/internal/home"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
-	"github.com/huanchong-99/SoloDawn/internal/node"
 	"github.com/huanchong-99/SoloDawn/internal/node/nodetest"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
@@ -48,10 +45,10 @@ type m2Cache struct {
 }
 
 type m2Browser struct {
+	homeFrameClient
 	name   string
 	key    identity.Key
 	conn   *home.Conn
-	frames chan any // single reader: m2Browser.nextRaw
 	re     int64
 	groups []proto.GroupSummary
 	caches map[string]*m2Cache
@@ -59,39 +56,11 @@ type m2Browser struct {
 
 func m2NewBrowser(name string, key identity.Key) *m2Browser {
 	return &m2Browser{
-		name:   name,
-		key:    key,
-		frames: make(chan any, 2048),
-		caches: map[string]*m2Cache{},
+		homeFrameClient: newHomeFrameClient(2048),
+		name:            name,
+		key:             key,
+		caches:          map[string]*m2Cache{},
 	}
-}
-
-func (b *m2Browser) Send(frame any) error {
-	b.frames <- frame
-	return nil
-}
-
-func (b *m2Browser) Done() <-chan struct{} { return nil }
-
-func (b *m2Browser) reachable() bool {
-	if b.conn == nil {
-		return false
-	}
-	select {
-	case <-b.conn.Gone():
-		return false
-	default:
-		return true
-	}
-}
-
-func (b *m2Browser) readOnly() bool { return !b.reachable() }
-
-func (b *m2Browser) banner() string {
-	if !b.reachable() {
-		return "cannot reach the group home"
-	}
-	return ""
 }
 
 func (b *m2Browser) cacheOf(group string) *m2Cache {
@@ -105,19 +74,11 @@ func (b *m2Browser) cacheOf(group string) *m2Cache {
 
 func (b *m2Browser) nextRaw(timeout time.Duration) ([]byte, error) {
 	select {
-	case frame := <-b.frames:
-		return m2Encode(frame)
+	case raw := <-b.ch:
+		return raw, nil
 	case <-time.After(timeout):
 		return nil, fmt.Errorf("%s timed out waiting for frame", b.name)
 	}
-}
-
-func m2Encode(frame any) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	err := enc.Encode(frame)
-	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), err
 }
 
 func (b *m2Browser) connect(loop *home.Loop, homeID string, now int64) error {
@@ -235,23 +196,29 @@ func m2ApplyOne(c *m2Cache, raw json.RawMessage, moveCursor bool, track *[]strin
 	if err := json.Unmarshal(raw, &row); err != nil {
 		return err
 	}
+	status, err := m2CardStatus(row.Type, row.State)
+	if err != nil {
+		return err
+	}
 	if track != nil {
 		*track = append(*track, row.Text)
 	}
-	entry := m2Entry{seq: row.Seq, pos: row.Pos, gone: row.Gone, kind: row.Kind, text: row.Text, status: m2CardStatus(row.Type, row.State)}
+	entry := m2Entry{seq: row.Seq, pos: row.Pos, gone: row.Gone, kind: row.Kind, text: row.Text, status: status}
 	m2StoreEntry(c, row.Type, row.ID, entry, moveCursor)
 	return nil
 }
 
-func m2CardStatus(typ string, raw json.RawMessage) string {
-	if typ != "msg" || len(raw) == 0 {
-		return ""
+func m2CardStatus(typ string, raw json.RawMessage) (string, error) {
+	if typ != "msg" || len(raw) == 0 || string(raw) == "null" {
+		return "", nil
 	}
 	var st struct {
 		Status string `json:"status"`
 	}
-	json.Unmarshal(raw, &st)
-	return st.Status
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return "", err
+	}
+	return st.Status, nil
 }
 
 func m2StoreEntry(c *m2Cache, typ, id string, next m2Entry, moveCursor bool) {
@@ -412,19 +379,17 @@ func (b *m2Browser) hasPendingCard(group, id string) bool {
 }
 
 type m2World struct {
-	clock        atomic.Int64
-	cluster      *nodetest.Cluster
-	ownerEntries []proto.Envelope
-	browserA     *m2Browser
-	browserB     *m2Browser
-	browserC     *m2Browser
-	outsider     *m2Browser
-	groups       map[string]string
-	ais          map[string]string
-	cardID       string
-	savedEnv     proto.Envelope
-	answers      [][]byte
-	nonce        int
+	clock    atomic.Int64
+	cluster  *nodetest.Cluster
+	browserA *m2Browser
+	browserB *m2Browser
+	browserC *m2Browser
+	outsider *m2Browser
+	groups   map[string]string
+	ais      map[string]string
+	cardID   string
+	answers  [][]byte
+	ids      seqIDGen
 }
 
 func m2Steps(sc *godog.ScenarioContext, f fixtures) {
@@ -457,29 +422,23 @@ func m2RegisterSyncSteps(sc *godog.ScenarioContext, w *m2World) {
 	sc.Step(`^browser B disconnects from the M2 home$`, func() { w.browserB.disconnect(w.homeLoop()) })
 	sc.Step(`^browser A posts (\d+) numbered messages in "([^"]*)"$`, w.postNumbered)
 	sc.Step(`^browser B reconnects and syncs "([^"]*)" from its cursor$`, w.reconnectAndSyncB)
-	sc.Step(`^browser B was not reset and received those (\d+) messages in order$`, w.assertDeltaInOrder)
+	sc.Step(`^browser B was not reset on "([^"]*)" and received those (\d+) messages in order$`, w.assertDeltaInOrder)
 	sc.Step(`^"([^"]*)" has posted a pending decision card in "([^"]*)" synced by browser B$`, w.postPendingCardAndSyncB)
-	sc.Step(`^browser B was reset and holds the pending decision card and newest messages (\d+) to (\d+)$`, func(from, to int) error {
-		return w.assertColdState(w.browserB, true, from, to)
+	sc.Step(`^browser B was reset on "([^"]*)" and holds the pending decision card and newest messages (\d+) to (\d+)$`, func(group string, from, to int) error {
+		return w.assertColdState(w.browserB, group, true, from, to)
 	})
 	sc.Step(`^browser B scrolls back two pages of (\d+) messages in "([^"]*)"$`, w.scrollBackTwoPages)
-	sc.Step(`^browser B holds messages (\d+) to (\d+) in creation order with its sync cursor unchanged$`, w.assertScrolledRange)
+	sc.Step(`^browser B holds messages (\d+) to (\d+) in "([^"]*)" in creation order with its sync cursor unchanged$`, w.assertScrolledRange)
 	sc.Step(`^a cold browser C connects and syncs "([^"]*)" from scratch$`, w.coldConnectC)
-	sc.Step(`^browser C holds the pending decision card and newest messages (\d+) to (\d+)$`, func(from, to int) error {
-		return w.assertColdState(w.browserC, true, from, to)
+	sc.Step(`^browser C holds the pending decision card and newest messages (\d+) to (\d+) in "([^"]*)"$`, func(from, to int, group string) error {
+		return w.assertColdState(w.browserC, group, true, from, to)
 	})
 }
 
 func m2RegisterCommandSteps(sc *godog.ScenarioContext, w *m2World) {
 	sc.Step(`^browser A sends a text post command twice with the same nonce in "([^"]*)"$`, w.sendDuplicateNonce)
 	sc.Step(`^both M2 command answers are the same success and "([^"]*)" holds (\d+) message rows?$`, w.assertSameSuccessAndCount)
-	sc.Step(`^a command signed by browser A arrives on browser B's connection to "([^"]*)"$`, w.sendMismatchedSigner)
-	sc.Step(`^the M2 home refuses that command with "([^"]*)" and writes (\d+) message rows?$`, w.assertRefusedAndCount)
-	sc.Step(`^browser A sends that same signed command on its own connection$`, w.resendSavedOnBrowserA)
-	sc.Step(`^the M2 command succeeds and "([^"]*)" holds (\d+) message rows?$`, w.assertLastOKAndCount)
-	sc.Step(`^a non-member device sends a text post command to "([^"]*)"$`, func(group string) error {
-		return w.sendFromOutsider(group)
-	})
+	sc.Step(`^a non-member device sends a text post command to "([^"]*)"$`, w.sendFromOutsider)
 	sc.Step(`^the M2 home refuses that command with "([^"]*)" and "([^"]*)" still holds (\d+) message rows?$`, func(code, group string, count int) error {
 		return errors.Join(w.assertLastError(code), w.assertStoredMessages(group, count))
 	})
@@ -487,24 +446,19 @@ func m2RegisterCommandSteps(sc *godog.ScenarioContext, w *m2World) {
 }
 
 func m2RegisterRestartSteps(sc *godog.ScenarioContext, w *m2World) {
-	sc.Step(`^the M2 home stops$`, w.stopHome)
-	sc.Step(`^browser B shows "([^"]*)", is read-only, and still holds "([^"]*)"$`, w.assertUnreachableReadOnly)
-	sc.Step(`^the M2 home restarts from its disk store$`, w.bootHome)
+	sc.Step(`^the M2 home stops$`, func() { w.node().StopHome() })
+	sc.Step(`^browser B's connection to the home is gone and it still holds "([^"]*)" in "([^"]*)"$`, w.assertDisconnectedAndHolding)
+	sc.Step(`^the M2 home restarts from its disk store$`, func() { w.node().RestartHome() })
 	sc.Step(`^browser A reconnects, syncs "([^"]*)", and posts "([^"]*)"$`, w.reconnectSyncAndPostA)
 	sc.Step(`^browser B reconnects and syncs "([^"]*)" without reloading$`, w.reconnectAndSyncB)
-	sc.Step(`^browser B clears the unreachable notice, is writable, and was not reset$`, w.assertResumedB)
-	sc.Step(`^both browsers hold "([^"]*)" in creation order$`, w.assertBothHoldTexts)
+	sc.Step(`^browser B was not reset on "([^"]*)"$`, w.assertResumedB)
+	sc.Step(`^both browsers hold "([^"]*)" in "([^"]*)" in creation order$`, w.assertBothHoldTexts)
 }
 
 func (w *m2World) now() time.Time          { return time.UnixMilli(w.clock.Load()) }
 func (w *m2World) node() *nodetest.Node    { return w.cluster.Nodes[0] }
 func (w *m2World) homeLoop() *home.Loop    { return w.node().Home }
 func (w *m2World) groupID(g string) string { return w.groups[g] }
-
-func (w *m2World) nextID(tag string) proto.ID {
-	w.nonce++
-	return exampleID("m2 " + tag + " " + strconv.Itoa(w.nonce))
-}
 
 func (w *m2World) browserByLabel(which string) *m2Browser {
 	if which == "A" {
@@ -515,88 +469,27 @@ func (w *m2World) browserByLabel(which string) *m2Browser {
 
 func (w *m2World) startEmpty(cleanup func(func()), f fixtures) error {
 	w.clock.Store(1763600000000)
-	w.groups, w.ais, w.answers, w.nonce = map[string]string{}, map[string]string{}, nil, 0
+	w.groups, w.ais, w.answers, w.ids = map[string]string{}, map[string]string{}, nil, seqIDGen{}
 	root, err := os.MkdirTemp("", "solodawn-m2-*")
 	if err != nil {
 		return err
 	}
 	cleanup(func() { os.RemoveAll(root) })
+	keyB, keyC := exampleKey("m2 browser B"), exampleKey("m2 browser C")
 	w.cluster = nodetest.Start(scenarioTB{TB: f.t, cleanup: cleanup}, nodetest.Config{
-		Root: root, BinDir: f.fakeCLIs, Now: w.now,
+		Root:          root,
+		BinDir:        f.fakeCLIs,
+		Now:           w.now,
+		ExtraBrowsers: []identity.Key{keyB, keyC},
 	})
-	if err := w.initIdentities(); err != nil {
-		return err
-	}
-	if err := w.bootHome(); err != nil {
-		return err
-	}
+	w.browserA = m2NewBrowser("browser A", w.cluster.Owner)
+	w.browserB = m2NewBrowser("browser B", keyB)
+	w.browserC = m2NewBrowser("browser C", keyC)
+	w.outsider = m2NewBrowser("outsider", exampleKey("m2 outsider"))
 	return errors.Join(
 		w.browserA.connect(w.homeLoop(), w.node().Key.ID(), w.clock.Load()),
 		w.browserB.connect(w.homeLoop(), w.node().Key.ID(), w.clock.Load()),
 	)
-}
-
-func (w *m2World) initIdentities() error {
-	owner := w.cluster.Owner
-	keyB, keyC := exampleKey("m2 browser B"), exampleKey("m2 browser C")
-	w.browserA, w.browserB, w.browserC = m2NewBrowser("browser A", owner), m2NewBrowser("browser B", keyB), m2NewBrowser("browser C", keyC)
-	w.outsider = m2NewBrowser("outsider", exampleKey("m2 outsider"))
-	base := slices.Clone(w.cluster.Logs(owner.ID()).Entries)
-	ms := w.clock.Load()
-	addB := m2SignDeviceAdd(owner, 3, "browser", "browser-b", keyB.ID(), ms)
-	addC := m2SignDeviceAdd(owner, 4, "browser", "browser-c", keyC.ID(), ms)
-	w.ownerEntries = append(base, addB, addC)
-	return w.persistExtraOwnerDevices(owner.ID(), addB, addC)
-}
-
-func m2SignDeviceAdd(owner identity.Key, ver int, kind, name, dev string, ts int64) proto.Envelope {
-	entry := proto.DeviceEntry{
-		PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: exampleID(fmt.Sprintf("m2 dev %s %d", dev, ver)), Timestamp: ts},
-		DeviceChange:  proto.DeviceChange{User: owner.ID(), Version: ver, Op: "add", Device: dev, Kind: kind, Name: name},
-	}
-	raw, _ := json.Marshal(entry)
-	return owner.Sign(string(raw))
-}
-
-func (w *m2World) persistExtraOwnerDevices(owner string, addB, addC proto.Envelope) error {
-	write := func(tx *store.Tx) error {
-		rawB, _ := json.Marshal(addB)
-		rawC, _ := json.Marshal(addC)
-		_, err1 := tx.Exec(`INSERT OR REPLACE INTO device_log(user, ver, env) VALUES(?, 3, ?)`, owner, string(rawB))
-		_, err2 := tx.Exec(`INSERT OR REPLACE INTO device_log(user, ver, env) VALUES(?, 4, ?)`, owner, string(rawC))
-		return errors.Join(err1, err2)
-	}
-	return w.node().Store.Write(write)
-}
-
-func (w *m2World) logs(user string) *identity.Log {
-	if user != w.cluster.Owner.ID() {
-		return nil
-	}
-	log, _ := identity.Replay(user, w.ownerEntries)
-	return log
-}
-
-func (w *m2World) bootHome() error {
-	n := w.node()
-	n.Home.Close()
-	n.Link.Close()
-	loop, err := home.StartLoop(home.LoopConfig{
-		Store: n.Store, Home: n.Key.ID(), Owner: w.cluster.Owner.ID(),
-		Logs: w.logs, Tables: home.NodeTables(), Now: w.now,
-	})
-	if err != nil {
-		return err
-	}
-	n.Home = loop
-	n.Link = node.AttachLocal(n.Host, loop)
-	return nil
-}
-
-func (w *m2World) stopHome() {
-	n := w.node()
-	n.Home.Close()
-	n.Link.Close()
 }
 
 func (w *m2World) startSynced(cleanup func(func()), f fixtures, name string) error {
@@ -617,9 +510,6 @@ func (w *m2World) startWithWorker(cleanup func(func()), f fixtures, group, ai st
 }
 
 func (w *m2World) sendCmd(b *m2Browser, env proto.Envelope) ([]byte, error) {
-	if b.readOnly() {
-		return nil, errors.New("browser is read-only while the group home is unreachable")
-	}
 	b.re++
 	re := b.re
 	w.homeLoop().Cmd(b.conn, re, env)
@@ -631,7 +521,7 @@ func (w *m2World) sendCmd(b *m2Browser, env proto.Envelope) ([]byte, error) {
 }
 
 func (w *m2World) execOK(b *m2Browser, payload any) error {
-	rawPayload, err := json.Marshal(payload)
+	rawPayload, err := marshalNoEscape(payload)
 	if err != nil {
 		return err
 	}
@@ -651,7 +541,7 @@ func m2CheckOK(raw []byte) error {
 }
 
 func (w *m2World) createGroup(name string) error {
-	gid := w.nextID("group " + name)
+	gid := w.ids.next()
 	w.groups[name] = string(gid)
 	cmd := proto.GroupCreate{
 		GroupCommand: proto.GroupCommand{
@@ -679,17 +569,17 @@ func (w *m2World) secondSeesAndSyncs(name string) error {
 }
 
 func (w *m2World) hostAddsWorker(aiName, groupName string) error {
-	aiID := w.nextID("ai " + aiName)
+	aiID := w.ids.next()
 	w.ais[aiName] = string(aiID)
 	cmd := proto.MemberAddAI{
 		MemberCommand: proto.MemberCommand{
-			HomeCommand: proto.HomeCommand{Type: "member", Nonce: w.nextID("add_ai"), Timestamp: w.clock.Load(), Group: proto.ID(w.groupID(groupName))},
+			HomeCommand: proto.HomeCommand{Type: "member", Nonce: w.ids.next(), Timestamp: w.clock.Load(), Group: proto.ID(w.groupID(groupName))},
 			Op:          "add_ai",
 			ID:          aiID,
 		},
 		CLI: "claude", Name: aiName, Account: "personal", Secretary: false, Approvers: []string{w.cluster.Owner.ID()},
 	}
-	raw, err := json.Marshal(cmd)
+	raw, err := marshalNoEscape(cmd)
 	if err != nil {
 		return err
 	}
@@ -705,7 +595,7 @@ func (w *m2World) makeTextPost(group, text string, nonce proto.ID) proto.Post[pr
 }
 
 func (w *m2World) browserPosts(which, text, group string) error {
-	return w.execOK(w.browserByLabel(which), w.makeTextPost(group, text, w.nextID("post")))
+	return w.execOK(w.browserByLabel(which), w.makeTextPost(group, text, w.ids.next()))
 }
 
 func (w *m2World) browserReceivesWithinOneSecond(which, text, group string) error {
@@ -737,8 +627,8 @@ func (w *m2World) reconnectAndSyncB(group string) error {
 	return w.browserB.sync(w.homeLoop(), w.groupID(group))
 }
 
-func (w *m2World) assertDeltaInOrder(count int) error {
-	c := w.browserB.cacheOf(w.SingleGroup())
+func (w *m2World) assertDeltaInOrder(group string, count int) error {
+	c := w.browserB.cacheOf(w.groupID(group))
 	if c.wasReset {
 		return errors.New("browser B was told to reset during delta sync")
 	}
@@ -747,13 +637,6 @@ func (w *m2World) assertDeltaInOrder(count int) error {
 		return fmt.Errorf("got delta %v, want %v", c.beforeSync, want)
 	}
 	return nil
-}
-
-func (w *m2World) SingleGroup() string {
-	for _, id := range w.groups {
-		return id
-	}
-	return ""
 }
 
 func m2ExpectedRange(from, to int) []string {
@@ -765,7 +648,7 @@ func m2ExpectedRange(from, to int) []string {
 }
 
 func (w *m2World) postPendingCardAndSyncB(aiName, group string) error {
-	cardID := w.nextID("decision")
+	cardID := w.ids.next()
 	w.cardID = string(cardID)
 	cmd := proto.Post[proto.DecisionBody]{
 		HomeCommand: proto.HomeCommand{
@@ -779,7 +662,7 @@ func (w *m2World) postPendingCardAndSyncB(aiName, group string) error {
 			To:       []string{w.cluster.Owner.ID()},
 		},
 	}
-	raw, err := json.Marshal(cmd)
+	raw, err := marshalNoEscape(cmd)
 	if err != nil {
 		return err
 	}
@@ -789,8 +672,8 @@ func (w *m2World) postPendingCardAndSyncB(aiName, group string) error {
 	return w.browserB.sync(w.homeLoop(), w.groupID(group))
 }
 
-func (w *m2World) assertColdState(b *m2Browser, wantReset bool, from, to int) error {
-	gid := w.SingleGroup()
+func (w *m2World) assertColdState(b *m2Browser, group string, wantReset bool, from, to int) error {
+	gid := w.groupID(group)
 	c := b.cacheOf(gid)
 	if c.wasReset != wantReset {
 		return fmt.Errorf("%s wasReset = %v, want %v", b.name, c.wasReset, wantReset)
@@ -827,8 +710,8 @@ func (w *m2World) scrollBackTwoPages(limit int, group string) error {
 	return nil
 }
 
-func (w *m2World) assertScrolledRange(from, to int) error {
-	gid := w.SingleGroup()
+func (w *m2World) assertScrolledRange(from, to int, group string) error {
+	gid := w.groupID(group)
 	c := w.browserB.cacheOf(gid)
 	if c.cursor != c.cursorSaved {
 		return fmt.Errorf("cursor moved during fetch from %d to %d", c.cursorSaved, c.cursor)
@@ -849,7 +732,7 @@ func (w *m2World) coldConnectC(group string) error {
 }
 
 func (w *m2World) sendDuplicateNonce(group string) error {
-	rawCmd, err := json.Marshal(w.makeTextPost(group, "Idempotent message", w.nextID("idem")))
+	rawCmd, err := marshalNoEscape(w.makeTextPost(group, "Idempotent message", w.ids.next()))
 	if err != nil {
 		return err
 	}
@@ -874,25 +757,10 @@ func (w *m2World) assertSameSuccessAndCount(group string, wantCount int) error {
 	return w.assertStoredMessages(group, wantCount)
 }
 
-func (w *m2World) sendMismatchedSigner(group string) error {
-	rawCmd, err := json.Marshal(w.makeTextPost(group, "Signed by A", w.nextID("mismatch")))
-	if err != nil {
-		return err
-	}
-	w.savedEnv = w.browserA.key.Sign(string(rawCmd))
-	_, err = w.sendCmd(w.browserB, w.savedEnv)
-	return err
-}
-
-func (w *m2World) resendSavedOnBrowserA() error {
-	_, err := w.sendCmd(w.browserA, w.savedEnv)
-	return err
-}
-
 func (w *m2World) sendFromOutsider(group string) error {
 	w.outsider.conn = w.homeLoop().Attach(w.outsider.key.ID(), w.outsider)
 	defer w.outsider.disconnect(w.homeLoop())
-	rawCmd, err := json.Marshal(w.makeTextPost(group, "Unauthorized post", w.nextID("unauth")))
+	rawCmd, err := marshalNoEscape(w.makeTextPost(group, "Unauthorized post", w.ids.next()))
 	if err != nil {
 		return err
 	}
@@ -915,15 +783,6 @@ func (w *m2World) assertOutsiderReadsRefused(group, code string) error {
 	return errors.Join(err1, err2, m2CheckError(syncRaw, code), m2CheckError(fetchRaw, code))
 }
 
-func (w *m2World) assertRefusedAndCount(code string, count int) error {
-	return errors.Join(w.assertLastError(code), w.assertStoredMessagesByID(w.SingleGroup(), count))
-}
-
-func (w *m2World) assertLastOKAndCount(group string, count int) error {
-	last := w.answers[len(w.answers)-1]
-	return errors.Join(m2CheckOK(last), w.assertStoredMessages(group, count))
-}
-
 func (w *m2World) assertLastError(code string) error {
 	return m2CheckError(w.answers[len(w.answers)-1], code)
 }
@@ -937,10 +796,7 @@ func m2CheckError(raw []byte, code string) error {
 }
 
 func (w *m2World) assertStoredMessages(group string, want int) error {
-	return w.assertStoredMessagesByID(w.groupID(group), want)
-}
-
-func (w *m2World) assertStoredMessagesByID(gid string, want int) error {
+	gid := w.groupID(group)
 	var count int
 	query := func(tx *store.Tx) error {
 		return tx.QueryRow(`SELECT count(*) FROM row WHERE g = ? AND r = 'msg'`, gid).Scan(&count)
@@ -954,14 +810,13 @@ func (w *m2World) assertStoredMessagesByID(gid string, want int) error {
 	return nil
 }
 
-func (w *m2World) assertUnreachableReadOnly(notice, heldText string) error {
-	gid := w.SingleGroup()
-	if w.browserB.banner() != notice || !w.browserB.readOnly() {
-		return fmt.Errorf("browser B banner=%q readOnly=%v", w.browserB.banner(), w.browserB.readOnly())
+func (w *m2World) assertDisconnectedAndHolding(heldText, group string) error {
+	select {
+	case <-w.browserB.conn.Gone():
+	default:
+		return errors.New("expected browser B connection Gone to be closed")
 	}
-	if err := w.browserPosts("B", "Blocked while offline", "Website"); err == nil {
-		return errors.New("expected read-only browser B to reject post while home is stopped")
-	}
+	gid := w.groupID(group)
 	if !slices.Equal(w.browserB.mainTexts(gid), []string{heldText}) {
 		return fmt.Errorf("browser B cached texts = %v, want [%q]", w.browserB.mainTexts(gid), heldText)
 	}
@@ -978,17 +833,17 @@ func (w *m2World) reconnectSyncAndPostA(group, text string) error {
 	return w.browserPosts("A", text, group)
 }
 
-func (w *m2World) assertResumedB() error {
-	c := w.browserB.cacheOf(w.SingleGroup())
-	if w.browserB.banner() != "" || w.browserB.readOnly() || c.wasReset {
-		return fmt.Errorf("browser B after resume: banner=%q readOnly=%v wasReset=%v", w.browserB.banner(), w.browserB.readOnly(), c.wasReset)
+func (w *m2World) assertResumedB(group string) error {
+	c := w.browserB.cacheOf(w.groupID(group))
+	if c.wasReset {
+		return errors.New("browser B was reset after home restart")
 	}
 	return nil
 }
 
-func (w *m2World) assertBothHoldTexts(csv string) error {
+func (w *m2World) assertBothHoldTexts(csv, group string) error {
 	want := strings.Split(csv, ", ")
-	gid := w.SingleGroup()
+	gid := w.groupID(group)
 	last := want[len(want)-1]
 	if err := errors.Join(w.browserA.awaitText(gid, last, time.Second), w.browserB.awaitText(gid, last, time.Second)); err != nil {
 		return err

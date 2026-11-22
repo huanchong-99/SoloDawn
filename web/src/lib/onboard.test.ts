@@ -195,6 +195,7 @@ describe('labels, URLs, prompts and #pair= capture', () => {
       host: 'solodawn.org',
     });
     expect(enPrompt).toContain('https://solodawn.org/install.md');
+    expect(enPrompt).toContain('git config --global user.email');
     expect(enPrompt).toContain(code);
     expect(enPrompt).toContain('--rendezvous wss://solodawn.org/rv');
 
@@ -204,6 +205,7 @@ describe('labels, URLs, prompts and #pair= capture', () => {
       host: '127.0.0.1:47800',
     });
     expect(zhPrompt).toContain('http://127.0.0.1:47800/install.md');
+    expect(zhPrompt).toContain('git config --global user.email');
     expect(zhPrompt).toContain(code);
     expect(zhPrompt).toContain('--rendezvous ws://127.0.0.1:47800/rv');
 

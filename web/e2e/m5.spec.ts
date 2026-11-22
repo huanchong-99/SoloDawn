@@ -2,8 +2,8 @@
 // confirmation, two parallel tasks with 6-step progress bars, local checks, cross-AI review,
 // automatic squash-merge, task threads, and secretary summary cards (U-4, U-7, U-8, U-9, A5.1),
 // plus approval card and decision card round-trip in the browser (Owner override 1).
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { delimiter, join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { afterAll, afterEach, beforeAll, describe, expect, inject, test, vi } from 'vitest';
 import { launch } from './config';
@@ -63,6 +63,8 @@ function secretaryM5Script() {
               scope_in: ['Release notes builder', 'Preflight checklist'],
               scope_out: ['External deployment hooks'],
               tasks: [
+                // T-1 uses coordinator Codex ("Reviewer"): T-2 stays in gateT2 until T-1's summary card, and
+                // deliver.go (aiGroupKey) serializes turns per AI member, so workstation Codex is busy.
                 {
                   title: 'Build release checklist',
                   assignee: 'Claude Code',
@@ -624,7 +626,8 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await poll(() => task1Card.count()).toBe(1);
       await poll(() => task2Card.count()).toBe(1);
 
-      // Wait until both task CLIs have started, swap scripts to cross-reviewers, then release T-1.
+      // Wait until both task CLIs have started, swap workstation Claude to its reviewer script for
+      // T-2, then release T-1 (reviewed by Reviewer on coordinator while T-2 stays held at gateT2).
       await vi.waitFor(
         async () => {
           const log = await readFile(homeNode.env.SOLODAWN_FAKECLI_LOG, 'utf8').catch(() => '');
@@ -685,14 +688,41 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
     'completes approval card and 4-option decision card round-trip in the browser',
     { timeout: 90_000 },
     async () => {
-      const scriptDir = join(inject('e2e').root, `m5-cards-${Date.now()}`);
-      await mkdir(scriptDir, { recursive: true });
+      const { root, bin } = inject('e2e');
+      const scriptDir = join(root, `m5-cards-${Date.now()}`);
+      const wrapperDir = join(scriptDir, 'bin');
+      await mkdir(wrapperDir, { recursive: true });
       const claudePath = join(scriptDir, 'claude-cards.json');
+      const stdinLog = join(scriptDir, 'claude-stdin.log');
+      const claudeWrapper = join(wrapperDir, 'claude');
       await writeFile(claudePath, JSON.stringify(approvalAndDecisionScript()));
+      await writeFile(
+        claudeWrapper,
+        [
+          `#!${process.execPath}`,
+          "const { spawn } = require('node:child_process');",
+          "const { appendFileSync } = require('node:fs');",
+          `const child = spawn(${JSON.stringify(join(bin, 'claude'))}, process.argv.slice(2), {`,
+          "  stdio: ['pipe', 'inherit', 'inherit'],",
+          '});',
+          "process.stdin.on('data', (chunk) => {",
+          `  appendFileSync(${JSON.stringify(stdinLog)}, chunk);`,
+          '  child.stdin.write(chunk);',
+          '});',
+          "process.stdin.on('end', () => child.stdin.end());",
+          "child.on('exit', (code) => process.exit(code ?? 1));",
+          '',
+        ].join('\n'),
+      );
+      await chmod(claudeWrapper, 0o755);
 
       const active = await startNet({
         nodes: 1,
-        env: () => ({ ...gitIdentityEnv, SOLODAWN_FAKE_CLAUDE_SCRIPT: claudePath }),
+        env: () => ({
+          ...gitIdentityEnv,
+          PATH: `${wrapperDir}${delimiter}${bin}${delimiter}${process.env.PATH ?? ''}`,
+          SOLODAWN_FAKE_CLAUDE_SCRIPT: claudePath,
+        }),
       });
       net = active;
       const direct = await startDirectSurface(active.rendezvous, inject('browser'));
@@ -763,10 +793,15 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await poll(() => decisionCard.locator('.opt.chosen').textContent()).toContain('Chosen');
       await poll(() => page.locator('.chat nav.needbar').count()).toBe(0);
 
-      // Turn 2 confirms receipt of both the approval and the chosen decision option.
+      // Turn 2 confirms receipt of both the approval and the chosen decision option, and the
+      // underlying CLI stdin received the formatted decision choice.
       await poll(() => page.locator('.line .msg .text').allTextContents()).toContain(
         'Confirmed approval and selected option B: SQLite table.',
       );
+      const stdinLines = (await readFile(stdinLog, 'utf8')).trim().split('\n');
+      expect(stdinLines).toHaveLength(2);
+      expect(stdinLines[1]).toContain('Which caching backend should we ship?');
+      expect(stdinLines[1]).toContain('Choice: B (SQLite table)');
     },
   );
 });

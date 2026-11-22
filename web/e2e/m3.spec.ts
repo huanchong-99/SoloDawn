@@ -269,13 +269,19 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
 
       // Mention @Claude Code using the @ completion popup (A3.1 turn 1).
       const composer = page.locator('.composer textarea');
+      const sendBtn = page.locator('.composer button.send');
       await composer.fill('@Clau');
       const mentionOption = page.locator('.composer .mentions [role="option"]', {
         hasText: 'Claude Code',
       });
       await poll(() => mentionOption.count()).toBe(1);
       await mentionOption.click();
-      await sendChatMessage(page, '@Claude Code remember codeword-amber');
+      await poll(() => composer.inputValue()).toBe('@Claude Code ');
+      await composer.pressSequentially('remember codeword-amber');
+      await poll(() => composer.inputValue()).toBe('@Claude Code remember codeword-amber');
+      await poll(() => sendBtn.isDisabled()).toBe(false);
+      await sendBtn.click();
+      await poll(() => composer.inputValue()).toBe('');
 
       await poll(() => page.locator('.line .msg .text').allTextContents()).toContain(
         'Claude reply one: codeword-amber',

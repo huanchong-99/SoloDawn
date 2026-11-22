@@ -42,6 +42,8 @@ async function pairPrimaryBrowser(page: Page, surface: DirectSurface, node: Node
   await poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
 }
 
+// E-M2 approximates A2.6 in the browser by cutting Browser 2's WebSocket and WebRTC transports;
+// full group-home stop and restart is covered in features/m2.feature.
 async function installNetSwitch(context: BrowserContext) {
   await context.addInitScript(() => {
     const state = {
@@ -291,6 +293,15 @@ function decisionSecretaryScript() {
   };
 }
 
+function assertOrderedDelta(textsAfterDelta: string[], deltaLabels: string[]) {
+  const idxDelta01 = textsAfterDelta.indexOf(deltaLabels[0]);
+  expect(idxDelta01).toBeGreaterThan(-1);
+  expect(textsAfterDelta.slice(idxDelta01, idxDelta01 + deltaLabels.length)).toEqual(deltaLabels);
+  for (const label of deltaLabels) {
+    expect(textsAfterDelta.filter((item) => item === label)).toHaveLength(1);
+  }
+}
+
 describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back', () => {
   let browser: Browser;
   let net: Net | undefined;
@@ -389,30 +400,28 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
         'Keep legacy archive redirects?',
       );
 
-      // Disconnect Browser 2, post 20 messages, reconnect, and verify exact delta sync (A2.2).
+      // Cut Browser 2's transports (browser-side approximation of A2.6), post 20 messages,
+      // reconnect, and verify exact ordered delta sync with each message appearing once (A2.2).
       await setPeerOffline(page2, true);
       await poll(() => page2.locator('.composer .state.down').textContent()).toContain(
         'Cannot reach the group home',
       );
 
-      for (let i = 1; i <= 20; i++) {
-        await sendChatMessage(page1, `Delta message ${String(i).padStart(2, '0')}`);
+      const deltaLabels = Array.from(
+        { length: 20 },
+        (_, idx) => `Delta message ${String(idx + 1).padStart(2, '0')}`,
+      );
+      for (const label of deltaLabels) {
+        await sendChatMessage(page1, label);
       }
 
       await setPeerOffline(page2, false);
       await poll(() => page2.locator('.line .msg .text').allTextContents()).toEqual(
-        expect.arrayContaining([
-          'Hello live across browsers',
-          'Delta message 01',
-          'Delta message 20',
-        ]),
+        expect.arrayContaining(['Hello live across browsers', ...deltaLabels]),
       );
 
       const textsAfterDelta = await page2.locator('.line .msg .text').allTextContents();
-      const idxDelta01 = textsAfterDelta.indexOf('Delta message 01');
-      const idxDelta20 = textsAfterDelta.indexOf('Delta message 20');
-      expect(idxDelta01).toBeGreaterThan(-1);
-      expect(idxDelta20 - idxDelta01).toBe(19);
+      assertOrderedDelta(textsAfterDelta, deltaLabels);
 
       // Disconnect Browser 2 again, post 1500 messages (>1000 cap), and verify cold reset + scroll-back.
       await setPeerOffline(page2, true);
