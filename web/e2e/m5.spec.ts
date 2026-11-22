@@ -572,7 +572,9 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
         .locator('input')
         .check();
       await addDlg.locator('.sec-opt input[type="checkbox"]').check();
-      await poll(() => addDlg.locator('input.input').inputValue()).toBe('Secretary');
+      await poll(() =>
+        addDlg.getByRole('textbox', { name: 'Name in the group' }).inputValue(),
+      ).toBe('Secretary');
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
       await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(1);
@@ -597,7 +599,7 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await members.locator('button', { hasText: 'Add AI' }).click();
       await poll(() => addDlg.locator('.choice').count()).toBe(4);
       await addDlg.locator('.choice', { hasText: 'Codex · coordinator' }).locator('input').check();
-      await addDlg.locator('input.input').fill('Reviewer');
+      await addDlg.getByRole('textbox', { name: 'Name in the group' }).fill('Reviewer');
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
       await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(4);

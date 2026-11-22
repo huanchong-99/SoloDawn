@@ -8,10 +8,10 @@ import type { AIMemberRow, HostInfoPush, HumanMemberRow, MsgRow, TaskRow } from 
 import { hostHomeOf } from './terminal.svelte';
 import { clock } from './when';
 
-/** An AI CLI registered on one of the owner's connected computers. */
 /** The model, level and profile an AI member is added or edited with. */
 export type Draft = Pick<AIMemberRow, 'model' | 'effort' | 'tier' | 'skills'>;
 
+/** An AI CLI registered on one of the owner's connected computers. */
 export interface Candidate {
   key: string;
   home: Home;
