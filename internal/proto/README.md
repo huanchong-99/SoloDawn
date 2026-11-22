@@ -36,7 +36,8 @@ host command with `HostCommand` (`to` is always there).
   `task assign` with neither role decode, and the home refuses them
   ([issues](../../issues.md)).
 - `Post[B]` holds what the author signs of the body: the row's body type,
-  `EmptyBody` for a summary, `ReviewSigned` for a review. The home adds the rest.
+  `EmptyBody` for a summary, `ReviewSigned` for a review, `ConfirmSigned` for a
+  watch confirmation card. The home adds the rest.
 - `MemberStatus[E]` carries a host's fact as one of the event types, which are
   the system bodies without `ai`. Read it as `MemberStatus[SystemCode]` first to
   learn the code.
@@ -100,9 +101,9 @@ alone reads four things differently from a browser. An error from `Decode` is
 - **Ids.** A field of type `ID` takes a random id, the canonical base64url spelling of 16 bytes
   (22 characters), and no other text, an empty one included. `n` and `g` of `PayloadHeader` have
   this type, and so has every id in a command payload, in an `Item`, and `g` of `inbox` and `ack`.
-  Of the bodies a `post` carries, only a review's is checked: `task` of `ReviewSigned`. Rows, the
-  other message bodies and the frames that read a group still hold ids as plain strings
-  ([issues](../../issues.md)).
+  Of the bodies a `post` carries, only a review's and a confirm card's are checked: `task` of
+  `ReviewSigned`, `ai` of `ConfirmSigned`. Rows, the other message bodies and the frames that read
+  a group still hold ids as plain strings ([issues](../../issues.md)).
 - **Slugs.** A field of type `Slug` takes 1 to 40 characters, groups of `a` to `z` and `0` to `9`
   with one `-` between two, and no other text. The `slug` of `TaskRow` has this type, so a slug
   that the home's rule cannot make never reaches a path or a branch name.
@@ -125,7 +126,18 @@ and the node, where names follow MCP (`inputSchema`). Its type is `ToolLists`
 the type does not name, not with `Decode`.
 
 - `host.info` is answered with `HostInfo` and pushed as `HostInfoPush`, the same
-  `HostState` without `re` and `ok`. `relay` and an agent's `account` may be `null`.
+  `HostState` without `re` and `ok`. `relay` and an agent's `account` may be `null`;
+  each agent entry carries `Driver` (`Accounts`, `Takeover`) once populated (`step-3/drivers.md` section 6).
+- People and confirmations (`step-2/people.md`, `step-2/confirm.md`) add `Invite`
+  (`HomeCommand`, answered with `link` and `expires` in `CmdResult`), `Join`, `Role` on
+  `MemberSet`, `MemberJoinedBody` and `MemberRemovedBody`, `HomeAdd` (`home.add`,
+  populating `host.info.homes` with `home`), `ConfirmBody` and `ConfirmSigned` with
+  card states (`pending`, `confirmed`, `denied`, `expired`), `call` state `denied`
+  (`TimedState`), `"confirm"` in `PushOn.On`, `Reminder.Kind` and `TaskWait.Kind`, and
+  protocol step `v: 2` in `Hello` and `Welcome` (`step-3/knowledge.md` section 8).
+- Presets and knowledge-base documents (`step-3/knowledge.md`) add optional `type`
+  (the field `NoteType`, JSON `type`) and `name` on `NoteRow` and `Note` (answered with `id` and `replaced`
+  in `CmdResult`), `preset` on `BriefBody`, and `q` on `FetchKind`.
 - In `SettingsSet`, `caps` is `AgentCaps`: a member per agent being changed, its
   caps whole. A field per agent, not a map, so that every name on the wire is fixed.
 - `pair.browser`, `host.offline` and `host.online` are a `HostCommand` alone;

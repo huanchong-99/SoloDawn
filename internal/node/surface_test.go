@@ -132,7 +132,7 @@ func assertSurfaceHeader(t *testing.T, st proto.HostState, savedHomes []proto.Ho
 		t.Fatalf("missing Update/Relay: %+v", st)
 	}
 	got := [10]any{st.Name, st.OS, st.Version, st.Open, st.MaxOpen, st.Offline, st.Settings.DefaultLevel, st.Update.Version, st.Relay.Used, slices.Equal(st.Homes, savedHomes)}
-	want := [10]any{"custom-box", "macOS 15.2", "v0.3.1", 3, 6, false, 3, "v0.3.2", int64(10), true}
+	want := [10]any{"custom-box", "macOS 15.2", "v0.3.1", 3, 6, true, 3, "v0.3.2", int64(10), true}
 	if got != want {
 		t.Fatalf("unexpected HostState header: %+v", st)
 	}

@@ -1,0 +1,32 @@
+{
+  "r": "msg",
+  "id": "PyZ8KrQi5QK62OYP-eVWZg",
+  "seq": 814,
+  "pos": 790,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "thread": "DrtCn6htSBwmMPrFPbHJHA",
+  "main": true,
+  "by": "system",
+  "kind": "confirm",
+  "ts": 1763599999500,
+  "text": "",
+  "mentions": [],
+  "re": "fts2DwasrvLMgNuhbPVj8Q",
+  "body": {
+    "what": "ask",
+    "ai": "1PC8WineBrUQ-apCjx7tug",
+    "to": [
+      "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs"
+    ]
+  },
+  "state": {
+    "status": "denied",
+    "by": "4xq2Q8RPeg7IJLWdEZTWDQ",
+    "at": 1763600000000,
+    "act": {
+      "p": "{\"t\":\"act\",\"n\":\"eoSVQJsYbqdPA2FqQhGmmw\",\"ts\":1763600000000,\"g\":\"rZNvy-1jH6Z-BcPqA5U5BQ\",\"msg\":\"PyZ8KrQi5QK62OYP-eVWZg\",\"action\":\"deny\"}",
+      "k": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+      "s": "CS42ewH9eFPhvb58q2h6lEv4BQtQFhh1Bmp3z127o8JH95KDQpvt949MGAtR1yU9NNqWK2GTWMttAetxI5BlDA"
+    }
+  }
+}

@@ -344,6 +344,7 @@ const BriefBody = v.object({
   pass: int,
   requester: str,
   replaces: v.nullable(str),
+  preset: optionalText,
 });
 
 const ApprovalBody = v.object({
@@ -367,6 +368,7 @@ const DecisionBody = v.object({
 });
 
 const CallBody = v.object({ to: str, depth: int, wait: bool });
+const ConfirmBody = v.object({ what: str, ai: str, to: strs });
 const ReportBody = v.object({
   commit: str,
   files: int,
@@ -406,6 +408,8 @@ const SystemBody = v.variant('code', [
   v.object({ code: v.literal('task_merged'), task: str, commit: str, merge_commit: str }),
   v.object({ code: v.literal('no_secretary') }),
   v.object({ code: v.literal('session_replaced'), ai: str, task: optionalText }),
+  v.object({ code: v.literal('member_joined'), member: str, by: str }),
+  v.object({ code: v.literal('member_removed'), user: str, name: str, by: optionalText }),
 ]);
 
 const Pending = v.object({ status: v.literal('pending') });
@@ -425,6 +429,11 @@ const ApprovalState = v.variant('status', [
 const DecisionState = v.variant('status', [
   Pending,
   v.object({ status: v.literal('decided'), ...acted, choice: optionalText, text: optionalText }),
+  v.object({ status: v.literal('expired'), at: int }),
+]);
+const ConfirmState = v.variant('status', [
+  Pending,
+  v.object({ status: v.picklist(['confirmed', 'denied']), ...acted }),
   v.object({ status: v.literal('expired'), at: int }),
 ]);
 
@@ -461,6 +470,7 @@ export const MsgRow = v.variant('kind', [
   message('brief', BriefBody, BriefState),
   message('task', v.object({ task: str }), noCard),
   message('approval', ApprovalBody, ApprovalState),
+  message('confirm', ConfirmBody, ConfirmState),
   message('decision', DecisionBody, DecisionState),
   message(
     'summary',
@@ -481,6 +491,7 @@ export const MsgRow = v.variant('kind', [
     v.variant('status', [
       v.object({ status: v.literal('waiting') }),
       v.object({ status: v.literal('answered'), reply: str, ms: int }),
+      v.object({ status: v.literal('denied'), at: int }),
     ]),
   ),
   message('report', ReportBody, noCard),
@@ -520,6 +531,8 @@ export const NoteRow = v.object({
   pos: int,
   g: str,
   task: v.nullable(str),
+  type: optionalText,
+  name: optionalText,
   text: str,
   by: str,
   ts: int,
@@ -564,8 +577,9 @@ const FetchPage = { t: v.literal('fetch'), id: int, g: str, before: int, limit: 
 export const FetchThread = v.object({ ...FetchPage, thread: v.nullable(str) });
 export type FetchThread = v.InferOutput<typeof FetchThread>;
 
-/** A page of the review messages or of the notes. */
-export const FetchKind = v.object({ ...FetchPage, kind: str });
+/** A page of the review messages, context notes, presets or knowledge-base documents, or a
+ *  knowledge-base search when `q` is set (contracts/step-3/knowledge.md section 3). */
+export const FetchKind = v.object({ ...FetchPage, kind: str, q: optionalText });
 export type FetchKind = v.InferOutput<typeof FetchKind>;
 
 /** One row of the group, by its type and id: `before` is 0 and `limit` 1. */
@@ -592,6 +606,8 @@ export const CmdResult = v.object({
   round: v.optional(int),
   link: v.optional(str),
   expires: v.optional(int),
+  id: v.optional(str),
+  replaced: v.optional(bool),
 });
 export type CmdResult = v.InferOutput<typeof CmdResult>;
 
@@ -685,15 +701,29 @@ export const MemberSet = v.object({
   account: optionalText,
   allow: v.optional(strs),
   approvers: v.optional(strs),
+  role: optionalText,
 });
 export type MemberSet = v.InferOutput<typeof MemberSet>;
 
 export const MemberCommand = v.object({ ...member, op: v.literal('remove') });
 export type MemberCommand = v.InferOutput<typeof MemberCommand>;
 
+/** Asks the home for an invitation link for its group; answered with `link` and `expires` in
+ *  `CmdResult` (contracts/step-2/people.md section 2.1). */
+export const Invite = v.object({ t: v.literal('invite'), ...HomeCommand });
+export type Invite = v.InferOutput<typeof Invite>;
+
+/** Admits the person of a joining connection to the invitation's group (people.md section 2.2). */
+export const Join = v.object({ t: v.literal('join'), ...HomeCommand, name: str });
+export type Join = v.InferOutput<typeof Join>;
+
 /** What the reviewer signs of a review body; the home adds the rest and answers `passed` and
  *  `round` (commands.md 1.8). */
 const ReviewSigned = v.object({ task: Id, commit: str, score: int, items: v.array(ReviewItem) });
+
+/** What a person signs to ask to watch an AI's terminal; the home adds `to`
+ *  (contracts/step-2/confirm.md section 3). */
+const ConfirmSigned = v.object({ what: str, ai: Id });
 
 function post<K extends string, B extends v.GenericSchema>(kind: K, body: B) {
   return v.object({
@@ -719,6 +749,7 @@ export const Post = v.variant('kind', [
   post('brief', BriefBody),
   post('summary', EmptyBody),
   post('approval', ApprovalBody),
+  post('confirm', ConfirmSigned),
   post('decision', DecisionBody),
   post('call', CallBody),
   post('report', ReportBody),
@@ -818,6 +849,8 @@ export const Note = v.object({
   ...HomeCommand,
   id: Id,
   task: v.nullable(Id),
+  type: optionalText,
+  name: optionalText,
   text: str,
 });
 export type Note = v.InferOutput<typeof Note>;
@@ -874,6 +907,18 @@ export const HostLeave = v.object({
   agent: str,
 });
 export type HostLeave = v.InferOutput<typeof HostLeave>;
+
+/** Records the home of a group on one of a member's nodes before any AI on that node joins it
+ *  (contracts/step-2/people.md section 7). */
+export const HomeAdd = v.object({
+  t: v.literal('home.add'),
+  ...HostCommand,
+  g: Id,
+  home: str,
+  name: str,
+  addrs: strs,
+});
+export type HomeAdd = v.InferOutput<typeof HomeAdd>;
 
 /** Only the settings being changed. `caps` holds the caps of each agent being changed, whole: a
  *  cap that is not there is no longer set; an agent that is not there keeps its caps. */
@@ -934,6 +979,13 @@ export type TakeoverEnd = v.InferOutput<typeof TakeoverEnd>;
 export const HostInfoRequest = v.object({ t: v.literal('host.info'), id: int });
 export type HostInfoRequest = v.InferOutput<typeof HostInfoRequest>;
 
+/** The capability table a CLI driver declares (contracts/step-3/drivers.md sections 4 and 6). */
+export const Driver = v.object({
+  accounts: strs,
+  takeover: str,
+});
+export type Driver = v.InferOutput<typeof Driver>;
+
 const HostState = {
   device: str,
   name: str,
@@ -955,6 +1007,7 @@ const HostState = {
       account: v.nullable(str),
       login_ok: bool,
       caps: Caps,
+      driver: v.optional(Driver),
       groups: v.array(
         v.object({
           g: Id,

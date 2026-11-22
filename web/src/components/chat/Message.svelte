@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { parts } from '../../lib/compose';
   import { subject, type Group } from '../../lib/groups.svelte';
   import { card as cardOf } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import type { MsgRow } from '../../lib/proto';
   import { clock } from '../../lib/when';
   import Avatar from '../Avatar.svelte';
+  import Rich from '../Rich.svelte';
 
   /** One message of the main line. `joined`: it follows a message of the same author closely, and
    *  is drawn under it without a head of its own. */
@@ -13,13 +13,6 @@
 
   const author = $derived(group.member(msg.by));
   const time = $derived(clock(msg.ts, prefs.lang));
-  // Only the members the row itself names are marked in its text.
-  const text = $derived(
-    parts(
-      msg.text,
-      group.members.filter((member) => msg.mentions.includes(member.id)),
-    ),
-  );
   const plain = $derived(msg.kind === 'text');
   // The component an area mounts for this kind of message (lib/mounts.svelte.ts) draws it under
   // its head and text. A card without one is one line that says what it is.
@@ -29,16 +22,8 @@
 </script>
 
 {#snippet body()}
-  {#if text.length}
-    <p class="text">
-      {#each text as part, i (i)}
-        {#if part.kind === 'code'}<code>{part.text}</code>{:else if part.kind === 'at'}<span
-            class="at"
-          >
-            {part.text}
-          </span>{:else}{part.text}{/if}
-      {/each}
-    </p>
+  {#if msg.text && !(msg.kind === 'call' && Card)}
+    <p class="text"><Rich {group} text={msg.text} mentions={msg.mentions} /></p>
   {/if}
   {#if Card}
     <Card {group} {msg} />

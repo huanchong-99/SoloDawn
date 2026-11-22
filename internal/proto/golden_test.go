@@ -144,8 +144,8 @@ func TestPairingAndSessionGoldens(t *testing.T) {
 		signed(browser, string(wireJSON(t, genesis))),
 		signed(browser, " "+string(wireJSON(t, addNode))),
 	}})
-	golden(t, "hello", Hello{Request{"hello", 1}, 1, "browser", "phone browser", []string{}})
+	golden(t, "hello", Hello{Request{"hello", 1}, 2, "browser", "phone browser", []string{}})
 	// What reaches the node without the rendezvous comes first, then its rendezvous (datachannel.md section 3).
 	addrs := []string{"ws://192.0.2.10:47800/rv", "wss://rv.example/rv"}
-	golden(t, "welcome", Welcome{"welcome", Success{1, true}, 1, host, "workstation", "v0.3.1", ts, addrs, []GroupSummary{{group, "Website", 812}}, true})
+	golden(t, "welcome", Welcome{"welcome", Success{1, true}, 2, host, "workstation", "v0.3.1", ts, addrs, []GroupSummary{{group, "Website", 812}}, true})
 }

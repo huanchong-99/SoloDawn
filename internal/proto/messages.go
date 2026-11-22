@@ -14,6 +14,7 @@ type BriefBody struct {
 	Pass      int         `json:"pass"`
 	Requester string      `json:"requester"`
 	Replaces  *string     `json:"replaces"`
+	Preset    string      `json:"preset,omitempty"`
 }
 
 type BriefScope struct {
@@ -73,6 +74,14 @@ type CallBody struct {
 	To    string `json:"to"`
 	Depth int    `json:"depth"`
 	Wait  bool   `json:"wait"`
+}
+
+// ConfirmBody is a confirm card asking a person to approve what an AI wants to do
+// (step-2/confirm.md).
+type ConfirmBody struct {
+	What string   `json:"what"`
+	AI   string   `json:"ai"`
+	To   []string `json:"to"`
 }
 
 type ReportBody struct {
@@ -193,6 +202,22 @@ type SessionReplacedBody struct {
 	SystemCode
 	AI   string  `json:"ai"`
 	Task *string `json:"task,omitempty"`
+}
+
+// MemberJoinedBody is the system row for a member joining a group (step-2/people.md).
+type MemberJoinedBody struct {
+	SystemCode
+	Member string `json:"member"`
+	By     string `json:"by"`
+}
+
+// MemberRemovedBody is the system row for a member leaving or being removed from a
+// group (step-2/people.md).
+type MemberRemovedBody struct {
+	SystemCode
+	User string  `json:"user"`
+	Name string  `json:"name"`
+	By   *string `json:"by,omitempty"`
 }
 
 // NoCard is the state of a message that is not a card: null, and nothing else.

@@ -129,7 +129,7 @@ func (s *State) revFinishThread(c Command, moved proto.TaskRow, fx Effects, prim
 	rows := []Row{RowOf(primary)}
 	var noticeMsg string
 	if fx.System != "" {
-		failed := s.tskFailedSystem(c, revFailedID(c.Nonce), &moved, fx)
+		failed := s.tskFailedSystem(c, revDerivedID("SoloDawn task failed ", c.Nonce), &moved, fx)
 		rows = append(rows, RowOf(failed))
 		noticeMsg = failed.ID
 	}
@@ -144,9 +144,9 @@ func (s *State) revFinishThread(c Command, moved proto.TaskRow, fx Effects, prim
 	return Result{Rows: rows, Items: items, Answer: answer}
 }
 
-// revFailedID derives the id of a task_failed system message from the command's
-// nonce when that nonce already names the command's checks or review message.
-func revFailedID(nonce proto.ID) string {
-	sum := sha256.Sum256([]byte("SoloDawn task failed " + string(nonce)))
+// revDerivedID derives a 16-byte id from prefix and nonce when that nonce
+// already names another message row of the command.
+func revDerivedID(prefix string, nonce proto.ID) string {
+	sum := sha256.Sum256([]byte(prefix + string(nonce)))
 	return base64.RawURLEncoding.EncodeToString(sum[:16])
 }

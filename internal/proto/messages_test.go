@@ -94,10 +94,10 @@ func TestDecisionGoldens(t *testing.T) {
 func TestBriefGoldens(t *testing.T) {
 	m := messageExample{kind: "brief", author: secretary}
 	body := BriefBody{
-		"Show connection paths", "People can see how a peer is connected.", []string{"Show a path change within 1 s."},
-		BriefScope{[]string{"node events", "web indicator"}, []string{"relay service"}},
-		[]BriefTask{{"Report path changes", agent, reviewer, true, []int{}}, {"Show the path", reviewer, agent, false, []int{0}}},
-		90, person, nil,
+		Title: "Show connection paths", Goal: "People can see how a peer is connected.", Criteria: []string{"Show a path change within 1 s."},
+		Scope: BriefScope{[]string{"node events", "web indicator"}, []string{"relay service"}},
+		Tasks: []BriefTask{{"Report path changes", agent, reviewer, true, []int{}}, {"Show the path", reviewer, agent, false, []int{0}}},
+		Pass:  90, Requester: person, Replaces: nil,
 	}
 	golden(t, "row-msg-brief-pending", exampleRow(t, m, body, StatusOnly{"pending"}, 790))
 	confirmed := ActedState{"confirmed", person, ts, actExample(t, "brief", "confirm", "", "")}
@@ -107,6 +107,19 @@ func TestBriefGoldens(t *testing.T) {
 	golden(t, "row-msg-brief-revise", exampleRow(t, m, body, revise, 814))
 	superseded := CardState{Status: "superseded", By: &revise.By, At: &revise.At, Act: &revise.Act, Note: &note}
 	golden(t, "row-msg-brief-superseded", exampleRow(t, m, body, superseded, 815))
+
+	withPreset := body
+	withPreset.Preset = "Calm dashboard"
+	presetID := id("brief preset")
+	presetPost := wireJSON(t, Post[BriefBody]{
+		HomeCommand{"post", ID(presetID), ts - 500, ID(group), ID(secretary)},
+		"brief", nil, false, "", []ID{}, nil, withPreset,
+	})
+	golden(t, "row-msg-brief-preset", MessageRow[BriefBody, StatusOnly]{
+		RowHeader: RowHeader{"msg", presetID, 903}, Pos: 903, Group: group,
+		By: secretary, Kind: "brief", Timestamp: ts - 500, Mentions: []string{},
+		Body: withPreset, State: StatusOnly{"pending"}, Env: new(signed(node, string(presetPost))),
+	})
 }
 
 func TestApprovalGoldens(t *testing.T) {
@@ -129,6 +142,55 @@ func TestCallGoldens(t *testing.T) {
 	body := CallBody{reviewer, 1, true}
 	golden(t, "row-msg-call-waiting", exampleRow(t, m, body, StatusOnly{"waiting"}, 790))
 	golden(t, "row-msg-call-answered", exampleRow(t, m, body, CallAnsweredState{"answered", id("reply"), 500}, 814))
+	golden(t, "row-msg-call-denied", exampleRow(t, m, body, TimedState{"denied", ts}, 814))
+}
+
+func TestConfirmGoldens(t *testing.T) {
+	confirmID := id("confirm")
+	otherUser := device(signer("other browser"))
+	otherAI := id("other ai")
+
+	// A watch request is posted by a person (no as); the home adds to.
+	watchPost := wireJSON(t, Post[ConfirmSigned]{
+		HomeCommand{Type: "post", Nonce: ID(confirmID), Timestamp: ts - 500, Group: ID(group)},
+		"confirm", nil, true, "", []ID{}, nil, ConfirmSigned{"watch", ID(otherAI)},
+	})
+	goldenJSON(t, "post-confirm", watchPost)
+	golden(t, "row-msg-confirm-pending", MessageRow[ConfirmBody, StatusOnly]{
+		RowHeader: RowHeader{"msg", confirmID, 790}, Pos: 790, Group: group,
+		Main: true, By: person, Kind: "confirm", Timestamp: ts - 500, Mentions: []string{},
+		Body: ConfirmBody{"watch", otherAI, []string{otherUser}}, State: StatusOnly{"pending"},
+		Env: new(signed(browser, string(watchPost))),
+	})
+
+	confirmAct := func(action string) Envelope {
+		act := Act{HomeCommand{Type: "act", Nonce: ID(id("act confirm " + action)), Timestamp: ts, Group: ID(group)}, ID(confirmID), action, "", ""}
+		var decoded Act
+		if err := Decode(wireJSON(t, act), &decoded); err != nil || decoded != act {
+			t.Fatalf("confirm act %s: %+v, %v", action, decoded, err)
+		}
+		return signed(browser, string(wireJSON(t, act)))
+	}
+
+	// Direct and ask cards are written by the home (by "system", no env).
+	golden(t, "row-msg-confirm-confirmed", MessageRow[ConfirmBody, ActedState]{
+		RowHeader: RowHeader{"msg", confirmID, 814}, Pos: 790, Group: group,
+		Main: true, By: "system", Kind: "confirm", Timestamp: ts - 500, Mentions: []string{},
+		Re: new(id("text")), Body: ConfirmBody{"direct", agent, []string{user}},
+		State: ActedState{"confirmed", person, ts, confirmAct("confirm")},
+	})
+	golden(t, "row-msg-confirm-denied", MessageRow[ConfirmBody, ActedState]{
+		RowHeader: RowHeader{"msg", confirmID, 814}, Pos: 790, Group: group,
+		Thread: &taskID, Main: true, By: "system", Kind: "confirm", Timestamp: ts - 500, Mentions: []string{},
+		Re: new(id("call")), Body: ConfirmBody{"ask", agent, []string{user}},
+		State: ActedState{"denied", person, ts, confirmAct("deny")},
+	})
+	golden(t, "row-msg-confirm-expired", MessageRow[ConfirmBody, TimedState]{
+		RowHeader: RowHeader{"msg", confirmID, 814}, Pos: 790, Group: group,
+		Main: true, By: "system", Kind: "confirm", Timestamp: ts - 500, Mentions: []string{},
+		Re: new(id("brief")), Body: ConfirmBody{"direct", agent, []string{user}},
+		State: TimedState{"expired", ts},
+	})
 }
 
 func nonCard[B any](t *testing.T, m messageExample, body B) {

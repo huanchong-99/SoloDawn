@@ -1,0 +1,10 @@
+{
+  "notify.dismiss": "Dismiss notification",
+  "notify.kind.approval": "Approval",
+  "notify.kind.brief": "Confirm start",
+  "notify.kind.decision": "Your call",
+  "notify.kind.done": "Task done",
+  "notify.kind.mention": "Mentioned you",
+  "notify.label": "Notifications",
+  "notify.open": "Open"
+}

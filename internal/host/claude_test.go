@@ -216,18 +216,37 @@ func TestClaudeStreamLineAndRateEvents(t *testing.T) {
 	}
 	cases := []struct {
 		line string
-		want Event
+		want []Event
 	}{
-		{`{"type":"system","subtype":"init","session_id":"s1"}`, Event{Kind: Ready, Session: "s1"}},
-		{`{"type":"assistant","subtype":"init","session_id":"s1"}`, Event{Kind: Active}},
-		{`{"type":"system","subtype":"thinking_tokens","session_id":"s1"}`, Event{Kind: Active}},
-		{`{"type":"system","subtype":"init","session_id":""}`, Event{Kind: Active}},
-		{`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}}`, Event{Kind: Active}},
-		{`{"type":"result","is_error":"bad"}`, Event{Kind: Active}},
+		{`{"type":"system","subtype":"init","session_id":"s1"}`, []Event{{Kind: Ready, Session: "s1"}}},
+		{`{"type":"assistant","subtype":"init","session_id":"s1"}`, []Event{{Kind: Active}}},
+		{`{"type":"system","subtype":"thinking_tokens","session_id":"s1"}`, []Event{{Kind: Active}}},
+		{`{"type":"system","subtype":"init","session_id":""}`, []Event{{Kind: Active}}},
+		{`{"type":"rate_limit_event","rate_limit_info":"bad"}`, []Event{{Kind: Active}}},
+		{`{"type":"rate_limit_event"}`, []Event{{Kind: Active}}},
+		{`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}`, []Event{{Kind: Active}}},
+		{`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning"}}`, []Event{{Kind: Active}}},
+		{`{"type":"rate_limit_event","rate_limit_info":{"status":""}}`, []Event{{Kind: Active}}},
+		{`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}}`, []Event{{Kind: RateLimited, Resets: 0}}},
+		{
+			`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","utilization":0.75,"resetsAt":1700000}}`,
+			[]Event{
+				{Kind: Used, Usage: Usage{WindowPct: new(75.0), WindowResets: new(int64(1700000000))}},
+				{Kind: RateLimited, Resets: 1700000000},
+			},
+		},
+		{
+			`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"seven_day","unifiedWindows":{"seven_day":{"utilization":0.25,"resetsAt":1800000}}}}`,
+			[]Event{{Kind: Used, Usage: Usage{WindowPct: new(25.0), WindowResets: new(int64(1800000000))}}},
+		},
+		{`{"type":"result","is_error":"bad"}`, []Event{{Kind: Active}}},
 	}
 	for _, tc := range cases {
 		claudeTrue(t, !p.handleLine([]byte(tc.line)), "unexpected diagnostic return")
-		claudeEqual(t, tc.line, <-events, tc.want)
+		for _, want := range tc.want {
+			claudeEqual(t, tc.line, <-events, want)
+		}
+		claudeEqual(t, "remaining events", len(events), 0)
 	}
 }
 
@@ -345,6 +364,8 @@ func testClaudeApprovalAndResume(t *testing.T) {
 func checkFirstApprovalTurnEvents(t *testing.T, events []Event) {
 	t.Helper()
 	claudeTrue(t, slices.Contains(events, Event{Kind: Active}), "missing Active event")
+	wantUsed := Event{Kind: Used, Usage: Usage{WindowPct: new(44.0), WindowResets: new(int64(1795615200000))}}
+	claudeTrue(t, slices.ContainsFunc(events, func(e Event) bool { return reflect.DeepEqual(e, wantUsed) }), "missing rate_limit_event Used")
 	claudeEqual(t, "first turn end", events[len(events)-1], Event{Kind: TurnEnded, Status: "completed"})
 }
 
