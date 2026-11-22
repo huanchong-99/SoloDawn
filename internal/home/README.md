@@ -818,6 +818,13 @@ refusals, detached connections and store failures; `run_internal_test.go` covers
 `runErr`. `features/home_sync.feature` holds acceptance test A2.2 (delta, 1,500-row reset with
 newest 50 and an older pending card, purge-mark reset, `state_only`) and the first-read cut of A2.7.
 
+`trace_test.go` produces the two signed task transcripts of
+[trace-task.md](../../planning/flows/trace-task.md), `internal/proto/testdata/trace-remote.json` and
+`trace-local.json`: it sends their commands through `Commands.Apply` at each command's `ts`, writes
+each result to a store in memory, commits it, and records the answer, the `rows` frame and the
+`inbox` frames that `runLotOf` makes, acknowledging each item. It fails when a file differs from
+that; `go test ./internal/home -run TestTaskTraces -update` writes them.
+
 `fetch_test.go` exercises `Loop.Fetch` across thread pages, `note` and `review` pages, single-row
 reads, exact 61,440-byte boundaries, page bounds checks, group access checks, detached connections
 and store failures. `features/home_fetch.feature` holds the scroll-back scenarios of A2.2 and the

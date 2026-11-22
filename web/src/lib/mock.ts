@@ -178,6 +178,8 @@ export const schemaOf: Record<string, GenericSchema> = {
   'task-resume': p.TaskCommand,
   'task-start': p.TaskStart,
   'task-submitted': p.TaskSubmitted,
+  'trace-local': p.TaskTrace,
+  'trace-remote': p.TaskTrace,
   welcome: p.Welcome,
 };
 

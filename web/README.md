@@ -327,7 +327,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
   of its English file to the type `Key`; today the areas are `approval`, `brief`, `chat`,
-  `decision`, `groups`, `member`, `nodes`, `pairing`, `settings`, `states`, `summary`,
+  `decision`, `groups`, `member`, `nodes`, `pairing`, `reminder`, `settings`, `states`, `summary`,
   `task`, `terminal` and `thread`. `src/messages/files.glob.ts` finds every file by its name and
   `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
@@ -478,6 +478,18 @@ file in `src/routes/`. It edits neither the shell nor another area:
   computers with their link path, hosted groups and registered AIs, sends `agent.set` followed by
   a fresh `host.info` read when the owner chooses an unset AI account type, and opens
   `PairBrowserDialog` (`pair.browser`).
+- **Web Push reminders.** `src/sw.ts` (built by `vite.config.ts` into a self-contained `sw.js` at
+  the root of `webdist/`), `src/lib/push.ts`, and `src/components/reminder/` implement the browser
+  side of `planning/contracts/commands.md` section 1.7 and A8.3. `ReminderCard.svelte` on
+  `routes/Settings.svelte` turns browser notifications on or off, selects which of the five
+  event kinds (`mention`, `approval`, `decision`, `brief`, `done`, kept via `preference`) send
+  reminders, and shows the iPhone/iPad Home Screen hint (`risks.md` K-20). `loadVapid` keeps a
+  P-256 VAPID key pair in IndexedDB (`solodawn`, store `device`, key `vapid`); `Reminders`
+  subscribes through `PushManager` and sends `push` (`PushOn` or `{ off: true }`) to connected
+  homes, while `ReminderSync.svelte` (mounted at `layer`) keeps newly connected homes in sync and
+  scrolls to `#m-<msg>` when a notification is clicked. `sw.ts` decodes `Reminder`, displays
+  `group · kind` with `who: title` in the reader's language, and focuses an open tab or opens
+  `#/groups/<g>` at the card.
 - **Where code goes.** Logic lives in `.ts` and `.svelte.ts` modules, which the gates measure
   (CRAP and mutation); components stay thin. A module that only holds an `import.meta.glob` is
   named `*.glob.ts` and is not mutated; it holds no logic. Stryker would wrap the glob's
@@ -519,6 +531,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/when.ts`             | times in the reader's language; messages by day                                   |
 | `src/lib/task.ts`             | task card derivations: badge, six-step bar, review and thread                     |
 | `src/lib/terminal.svelte.ts`  | terminal takeover: commands, `pty` channel, `Takeover`, what the page shows       |
+| `src/lib/push.ts`             | Web Push capability, VAPID keys in IndexedDB, `PushManager`, `push` commands      |
+| `src/sw.ts`                   | service worker: `Reminder` push notifications and `notificationclick` card open   |
 | `src/App.svelte`              | shell: navigation, top bar, banners, the page of the route                        |
 | `src/Notice.svelte`           | the upgrade notice and the storage notice                                         |
 | `src/routes/`                 | one component per page; `Groups.svelte` is the list and a chat                    |
@@ -532,6 +546,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
 | `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
+| `src/components/reminder/`    | settings notifications card with iOS hint (`ReminderCard`), `ReminderSync` mount  |
 | `src/components/status/`      | other-tab notice mounted at `banner`                                              |
 | `src/styles/`                 | `tokens.css` (design tokens) and `base.css` (shared classes)                      |
 | `public/`                     | manifest, icon and `fonts/`, copied as they are                                   |
@@ -546,6 +561,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
 | `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                     |
+| `features/reminder.spec.ts`   | steps of `../features/web_reminder.feature` (A8.3 browser half)                   |
 | `features/a11y.spec.ts`       | steps of `../features/web_a11y.feature`                                           |
 | `features/home.ts`            | a home in memory for those steps; `page.ts` drives the page                       |
 | `features/demo.ts`            | groups with a morning of talk, for a development page                             |
@@ -578,7 +594,7 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   (`net.svelte.ts`).
 - `peer.ts` has run against fakes only. No browser has opened a connection with it, and how each
   browser's statistics name the selected pair is not verified; unit I-8 runs the three browsers.
-- The manifest has an SVG icon only and there is no service worker yet.
+- The manifest has an SVG icon only.
 - Outside onboarding, no page has a connection to a node yet, so the built client lists no group
   and no computer. A development server (`pnpm dev`) shows the one computer and the one group of
   the wire examples, unless the address has `?nomock`; the mock answers every command with a bare
