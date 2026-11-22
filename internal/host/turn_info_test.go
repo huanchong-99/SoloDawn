@@ -40,6 +40,17 @@ func TestSourceTaskParticipation(t *testing.T) {
 	}
 }
 
+func TestParticipationFromItemTask(t *testing.T) {
+	r := newTeamLabelRig(t, "Q")
+	task := r.baseTask()
+	task.ID, task.Num, task.Assignee = turnID("item-only-task"), 13, r.qPersonal
+	s := r.sess(r.qPersonal, "Q-personal", TaskSession, false)
+	s.Task = task.ID
+	raw := r.makeInboxItem(proto.Item{Item: 1, AI: proto.ID(s.Member), Why: "mention", Task: proto.ID(task.ID), Msg: proto.ID(tMsg1ID)}, r.textMsg(tMsg1ID, r.pMem, task.ID, "Scope"), &task)
+	want := "[SoloDawn] group \"Website\" · you are \"Q-personal\" · task session T-13\n== 1 of 1 · mention · from \"P\" in T-13 · information\nScope"
+	assertComposed(t, r.h, s, ItemsTurn, []json.RawMessage{raw}, want, Turn{Kind: ItemsTurn, Thread: task.ID})
+}
+
 func TestDirectConfirmationInHistoryAndAssign(t *testing.T) {
 	r := newTeamLabelRig(t, "Q")
 	var msg proto.MsgRow

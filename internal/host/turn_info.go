@@ -11,9 +11,7 @@ import (
 )
 
 func (c *turnCtx) takesPart(thread string) bool {
-	raw, _ := c.h.Rows.Get(c.s.Group, "task", thread)
-	var task proto.TaskRow
-	proto.Decode(raw, &task)
+	task, _ := c.lookupTask(thread)
 	return task.Assignee == c.s.Member || task.Reviewer == c.s.Member
 }
 
@@ -30,10 +28,6 @@ func (c *turnCtx) isOwnerMember(id string) bool {
 	return u != "" && u == c.owner
 }
 
-func isAllowAccount(account string) bool {
-	return account == "team" || account == "api_key"
-}
-
 func (c *turnCtx) wordEnough(u string) bool {
 	if u == "" {
 		return false
@@ -44,7 +38,7 @@ func (c *turnCtx) wordEnough(u string) bool {
 	raw, _ := c.h.Rows.Get(c.s.Group, "member", c.s.Member)
 	var ai proto.AIMemberRow
 	proto.Decode(raw, &ai)
-	return isAllowAccount(ai.Account) && slices.Contains(ai.Allow, u)
+	return (ai.Account == "team" || ai.Account == "api_key") && slices.Contains(ai.Allow, u)
 }
 
 func (c *turnCtx) mentionInstruct(msg *proto.MsgRow, thread string) bool {
@@ -59,11 +53,11 @@ func (c *turnCtx) mentionInstruct(msg *proto.MsgRow, thread string) bool {
 
 func (c *turnCtx) msgInstruct(msg proto.MsgRow) (bool, error) {
 	u := c.humanUser(msg.By)
-	if c.takesPart(strVal(msg.Thread)) {
-		return u != "" && u == c.owner, nil
-	}
 	if u == "" {
 		return false, nil
+	}
+	if c.takesPart(strVal(msg.Thread)) {
+		return u == c.owner, nil
 	}
 	if c.wordEnough(u) {
 		return true, nil
@@ -121,10 +115,6 @@ func (c *turnCtx) coversDirect(msg proto.MsgRow, id string) bool {
 	}
 	proto.Decode(msg.Body, &body)
 	return body.What == "direct" && body.AI == c.s.Member
-}
-
-func (c *turnCtx) decidedItemInstruct(msg *proto.MsgRow, thread string) bool {
-	return c.takesPart(thread) || (msg != nil && msg.By == c.s.Member)
 }
 
 func (c *turnCtx) decisionInstruct(msg proto.MsgRow) bool {

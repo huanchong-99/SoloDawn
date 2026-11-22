@@ -87,12 +87,9 @@ func (w *turnInfoWorld) seedGroupAndMembers() {
 	w.putAI(tiQTeamID, w.qUser, "Q-team", "team", []string{}, false)
 	w.putAI(tiPAIID, w.pUser, "P-AI", "team", []string{}, false)
 	w.putAI(turnSecID, w.pUser, "Secretary", "team", []string{}, true)
-	w.h.Rows.Put(turnGroupID, "task", turnTaskID, turnMustJSON(proto.TaskRow{
-		RowHeader: proto.RowHeader{Type: "task", ID: turnTaskID, Seq: 6},
-		Group:     turnGroupID, Num: 12, Title: "Node: report connection path changes",
-		Slug: "node-report-connection-path-changes", Origin: "brief", Brief: turnBriefID,
-		State: "active", Step: "branch", Assignee: tiQTeamID, Reviewer: tiPAIID, Pass: 90, Depends: []string{}, Created: turnTimeMS,
-	}))
+	task := w.taskRow()
+	task.Assignee, task.Reviewer = tiQTeamID, tiPAIID
+	w.h.Rows.Put(turnGroupID, "task", turnTaskID, turnMustJSON(task))
 }
 
 func (w *turnInfoWorld) putHuman(id, user, name, role string) {
@@ -111,17 +108,15 @@ func (w *turnInfoWorld) putAI(id, user, name, account string, allow []string, se
 }
 
 func (w *turnInfoWorld) taskSession(aiID, name string) host.Session {
-	return host.Session{
-		SessionKey: host.SessionKey{Group: turnGroupID, Member: aiID, Task: turnTaskID},
-		Kind:       host.TaskSession, Home: w.homeKey.ID(), Name: name, CLISession: "c1",
-	}
+	s := w.sessionFor("task")
+	s.Member, s.Name, s.CLISession = aiID, name, "c1"
+	return s
 }
 
 func (w *turnInfoWorld) secSession() host.Session {
-	return host.Session{
-		SessionKey: host.SessionKey{Group: turnGroupID, Member: turnSecID},
-		Kind:       host.GroupSession, Home: w.homeKey.ID(), Name: "Secretary", Secretary: true, CLISession: "c1",
-	}
+	s := w.sessionFor("secretary")
+	s.CLISession = "c1"
+	return s
 }
 
 func (w *turnInfoWorld) mentionInThread(who, aiName, text string) (err error) {

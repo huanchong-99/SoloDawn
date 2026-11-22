@@ -1,0 +1,13 @@
+{
+  "t": "home.add",
+  "n": "6wNvIc_qLFW5olhEBx3jwg",
+  "ts": 1763600000000,
+  "to": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "home": "qeQgnUqvHtVoJirWoJPmnZPxYN9HAAXmu5jSum-XEns",
+  "name": "Website",
+  "addrs": [
+    "ws://192.0.2.10:47800/rv",
+    "wss://rv.example/rv"
+  ]
+}

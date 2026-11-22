@@ -1,0 +1,39 @@
+{
+  "r": "task",
+  "id": "jYXNNlQQofHDIPgp6o8r2A",
+  "seq": 819,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "num": 15,
+  "title": "Node: report connection path changes",
+  "slug": "node-report-connection-path-changes",
+  "origin": "brief",
+  "brief": "KaiCW9JC8UOG7lKNduDo8Q",
+  "state": "active",
+  "step": "branch",
+  "assignee": "1PC8WineBrUQ-apCjx7tug",
+  "reviewer": "LXCZmuGAXkvO-bSrOkuCfw",
+  "foundation": false,
+  "pass": 90,
+  "depends": [],
+  "checks": {},
+  "wait": {
+    "kind": "confirm",
+    "msg": "PyZ8KrQi5QK62OYP-eVWZg",
+    "who": [
+      "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs"
+    ],
+    "since": 1763600000000
+  },
+  "failures": 0,
+  "thread": {
+    "count": 0,
+    "rounds": 0
+  },
+  "stats": {
+    "added": 0,
+    "removed": 0,
+    "started": 1763600000000,
+    "ended": null
+  },
+  "created": 1763600000000
+}

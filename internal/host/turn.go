@@ -327,12 +327,11 @@ func (c *turnCtx) place(thread string) string {
 
 func (c *turnCtx) fromIn(memberID, thread string) string {
 	who := "unknown"
-	switch memberID {
-	case "system":
-		who = "the home"
-	case "":
-	default:
+	if memberID != "" {
 		who = c.memberLabel(memberID)
+	}
+	if memberID == "system" {
+		who = "the home"
 	}
 	return "from " + who + " " + c.place(thread)
 }
@@ -559,7 +558,7 @@ func (c *turnCtx) buildResume(p parsedItem, _ bool) (itemBlock, int, error) {
 
 func (c *turnCtx) buildDecided(p parsedItem, _ bool) (itemBlock, int, error) {
 	thread := itemThread(string(p.item.Task), p.msg)
-	auth := authorityLabel(c.decidedItemInstruct(p.msg, thread))
+	auth := authorityLabel(c.takesPart(thread) || (p.msg != nil && p.msg.By == c.s.Member))
 	if p.msg == nil {
 		return itemBlock{why: "decided", authority: auth}, 0, nil
 	}

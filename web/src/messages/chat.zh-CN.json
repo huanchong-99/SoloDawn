@@ -36,6 +36,7 @@
   "chat.kind.brief": "任务说明",
   "chat.kind.task": "任务",
   "chat.kind.approval": "审批申请",
+  "chat.kind.confirm": "确认申请",
   "chat.kind.decision": "请拍板",
   "chat.kind.summary": "完成总结",
   "chat.kind.call": "调用",
