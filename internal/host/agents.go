@@ -204,15 +204,9 @@ func agtReadRow(tx *store.Tx, f agtFound, loginOK bool) (proto.HostAgent, error)
 	}, nil
 }
 
-func agtDriverProto(agent string) *proto.Driver {
+func agtDriverProto(agent string) proto.Driver {
 	c := DriverCaps[agent]
-	return &proto.Driver{
-		Accounts:  append([]string{}, c.Accounts...),
-		Levels:    append([]int{}, c.Levels...),
-		Approvals: c.Approvals,
-		Takeover:  c.Takeover,
-		Usage:     append([]string{}, c.Usage...),
-	}
+	return proto.Driver{Accounts: c.Accounts, Takeover: c.Takeover}
 }
 
 func agtListen(h *Host, key SessionKey, e Event) {

@@ -216,10 +216,6 @@ func TestAgentsDetectsFakeCLIsAndPreservesStoredFields(t *testing.T) {
 	h, _ := seamHost(t, db)
 	got := agtReadAgents(t, h)
 	team := "team"
-	claudeLevels := []int{1, 2, 3}
-	if runtime.GOOS == "windows" {
-		claudeLevels = []int{1, 3}
-	}
 	want := []proto.HostAgent{
 		{
 			Agent:      "claude",
@@ -230,12 +226,9 @@ func TestAgentsDetectsFakeCLIsAndPreservesStoredFields(t *testing.T) {
 				Day:  &proto.Cap{Unit: "turns", Max: 200},
 				Task: &proto.Cap{Unit: "usd", Max: 12.5},
 			},
-			Driver: &proto.Driver{
-				Accounts:  []string{"personal", "team", "api_key"},
-				Levels:    claudeLevels,
-				Approvals: "tool",
-				Takeover:  "new",
-				Usage:     []string{},
+			Driver: proto.Driver{
+				Accounts: []string{"personal", "team", "api_key"},
+				Takeover: "new",
 			},
 			Groups: []proto.AgentGroup{},
 		},
@@ -245,12 +238,9 @@ func TestAgentsDetectsFakeCLIsAndPreservesStoredFields(t *testing.T) {
 			Account:    nil,
 			LoginOK:    true,
 			Caps:       proto.Caps{},
-			Driver: &proto.Driver{
-				Accounts:  []string{"personal", "team", "api_key"},
-				Levels:    []int{1, 2, 3},
-				Approvals: "conn",
-				Takeover:  "resume",
-				Usage:     []string{},
+			Driver: proto.Driver{
+				Accounts: []string{"personal", "team", "api_key"},
+				Takeover: "resume",
 			},
 			Groups: []proto.AgentGroup{},
 		},
@@ -260,12 +250,9 @@ func TestAgentsDetectsFakeCLIsAndPreservesStoredFields(t *testing.T) {
 			Account:    nil,
 			LoginOK:    true,
 			Caps:       proto.Caps{},
-			Driver: &proto.Driver{
-				Accounts:  []string{"api_key"},
-				Levels:    []int{1, 3},
-				Approvals: "conn",
-				Takeover:  "none",
-				Usage:     []string{},
+			Driver: proto.Driver{
+				Accounts: []string{"api_key"},
+				Takeover: "none",
 			},
 			Groups: []proto.AgentGroup{},
 		},

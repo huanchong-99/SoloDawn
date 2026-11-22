@@ -199,11 +199,11 @@ func TestHostInfoAgentsMemberStateAndSettings(t *testing.T) {
 			return []proto.HostAgent{
 				{
 					Agent: "claude", CLIVersion: "2.1.311", Account: &acct, LoginOK: true,
-					Driver: &proto.Driver{Accounts: []string{"personal", "team", "api_key"}, Levels: []int{1, 2, 3}, Approvals: "tool", Takeover: "new", Usage: []string{}},
+					Driver: proto.Driver{Accounts: []string{"personal", "team", "api_key"}, Takeover: "new"},
 				},
 				{
 					Agent: "opencode", CLIVersion: "1.19.6", Account: nil, LoginOK: false,
-					Driver: &proto.Driver{Accounts: []string{"api_key"}, Levels: []int{1, 3}, Approvals: "conn", Takeover: "none", Usage: []string{}},
+					Driver: proto.Driver{Accounts: []string{"api_key"}, Takeover: "none"},
 				},
 			}, nil
 		},
@@ -219,7 +219,7 @@ func TestHostInfoAgentsMemberStateAndSettings(t *testing.T) {
 	if nulls := proto.UnexpectedNulls(dvlMustEncode(st), "/agents/1/account"); len(nulls) != 0 {
 		t.Fatalf("unexpected nulls in HostState with driver: %v", nulls)
 	}
-	if st.Agents[1].Driver == nil || st.Agents[1].Driver.Takeover != "none" || !slices.Equal(st.Agents[1].Driver.Accounts, []string{"api_key"}) {
+	if st.Agents[1].Driver.Takeover != "none" || !slices.Equal(st.Agents[1].Driver.Accounts, []string{"api_key"}) {
 		t.Fatalf("unexpected opencode driver in HostState: %+v", st.Agents[1].Driver)
 	}
 	assertSurfaceAgentGroups(t, st.Agents, map[proto.ID]proto.AgentGroup{

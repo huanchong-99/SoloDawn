@@ -598,6 +598,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
               cli_version: '2.0.0',
               account: 'personal',
               login_ok: true,
+              driver: { accounts: ['api_key'], takeover: 'none' },
               caps: {},
               groups: [
                 {
@@ -621,6 +622,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
               cli_version: '0.1.0',
               account: null,
               login_ok: false,
+              driver: { accounts: ['api_key'], takeover: 'none' },
               caps: {},
               groups: [],
             },
@@ -639,6 +641,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
               cli_version: '0.1.0',
               account: 'team',
               login_ok: true,
+              driver: { accounts: ['api_key'], takeover: 'none' },
               caps: {},
               groups: [],
             },
@@ -647,6 +650,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
               cli_version: '2.0.0',
               account: 'api_key',
               login_ok: false,
+              driver: { accounts: ['api_key'], takeover: 'none' },
               caps: {},
               groups: [],
             },
