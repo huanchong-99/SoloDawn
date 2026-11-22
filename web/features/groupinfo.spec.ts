@@ -22,7 +22,7 @@ type StoredRow = p.Row & Record<string, unknown>;
 
 function matchesKind(row: StoredRow, kind: string): boolean {
   if ('gone' in row) return false;
-  if (kind === 'note') return row.r === 'note' && !row.type;
+  if (kind === 'note') return row.r === 'note';
   return row.r === 'msg' && row.kind === 'review';
 }
 
@@ -184,35 +184,6 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   });
 
   Scenario(
-    'Group info shows repository, base branch, forge, home computer and check commands',
-    ({ When, Then }) => {
-      Then(
-        'the group info panel shows repository "https://git.example/team/website.git", base "main · GitHub", home "workstation" and checks "go vet ./..." and "go test ./..."',
-        () => {
-          expect(texts('.groupinfo > h2')).toEqual(['Group info']);
-          const values = texts('.groupinfo .kv dd');
-          expect(values[0]).toBe('https://git.example/team/website.git');
-          expect(values[1]).toBe('main · GitHub');
-          expect(values[2]).toBe('workstation');
-          expect(texts('.groupinfo .checks code')).toEqual(['go vet ./...', 'go test ./...']);
-        },
-      );
-      When('the group is updated to forge "none" with no check commands', () => {
-        rig.home.write(
-          website,
-          example('row-group', { id: website, name: 'Website', forge: 'none', checks: [] }),
-        );
-        flushSync();
-      });
-      Then('the group info panel shows base "main · This computer only" and checks "None"', () => {
-        const values = texts('.groupinfo .kv dd');
-        expect(values[1]).toBe('main · This computer only');
-        expect(values[3]).toBe('None');
-      });
-    },
-  );
-
-  Scenario(
     'Project memory lists notes and the review ledger, and forgetting removes an entry within 1 second',
     ({ Given, When, Then, And }) => {
       Given(
@@ -248,9 +219,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       Then(
-        'no memory fetch has been sent and the project memory summary reads "Kept past retention"',
+        'no memory fetch has been sent and the group info panel folds "Project memory" with "Kept past retention"',
         () => {
           expect(rig.fetches).toEqual([]);
+          expect(texts('.groupinfo > h2')).toEqual(['Group info']);
           expect(texts('.groupinfo details.fold > summary')).toEqual([
             'Project memory Kept past retention',
           ]);
@@ -267,7 +239,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         'the notes list shows "Keep `rtt_ms` empty on relay." on "T-12" by "Alex" and "Path events include the connection id." by "Secretary"',
         () => {
           const noteSecs = all('.groupinfo .mem-sec')[0];
-          expect(noteSecs.querySelector('h3')!.textContent!.trim()).toBe('Notes · 2');
+          expect(noteSecs.querySelector('h3')!.textContent!.trim()).toBe('Notes');
           const items = [...noteSecs.querySelectorAll('.mem-item')];
           expect(items).toHaveLength(2);
           expect(items[0].querySelector('.mem-meta')!.textContent).toContain('Alex');
@@ -285,7 +257,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           rig.home.remove(website, 'task', taskId);
           flushSync();
           const ledgerSec = all('.groupinfo .mem-sec')[1];
-          expect(ledgerSec.querySelector('h3')!.textContent!.trim()).toBe('Review ledger · 1');
+          expect(ledgerSec.querySelector('h3')!.textContent!.trim()).toBe('Review ledger');
           const entry = ledgerSec.querySelector('.mem-item')!;
           expect(entry.querySelector('.mem-meta')!.textContent).toContain('T-12');
           expect(entry.querySelector('.badge')!.textContent!.trim()).toBe('86 / 90');
@@ -298,30 +270,31 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       When(
-        'the owner presses "Delete note: Keep `rtt_ms` empty on relay." and cancels the confirmation',
+        'the owner presses "Delete note: Keep rtt_ms empty on relay." and cancels the confirmation',
         async () => {
-          buttonByLabel('Delete note: Keep `rtt_ms` empty on relay.').click();
+          buttonByLabel('Delete note: Keep rtt_ms empty on relay.').click();
           flushSync();
           expect(texts('#chat-side dialog h2')).toEqual(['Delete this note?']);
+          expect(texts('#chat-side dialog .preview')).toEqual(['Keep rtt_ms empty on relay.']);
           one<HTMLButtonElement>('#chat-side dialog .btn-ghost').click();
           await tick();
           flushSync();
         },
       );
       Then(
-        'no forget command was sent and focus returns to "Delete note: Keep `rtt_ms` empty on relay."',
+        'no forget command was sent and focus returns to "Delete note: Keep rtt_ms empty on relay."',
         () => {
           expect(rig.forgets).toEqual([]);
           expect(document.activeElement?.getAttribute('aria-label')).toBe(
-            'Delete note: Keep `rtt_ms` empty on relay.',
+            'Delete note: Keep rtt_ms empty on relay.',
           );
         },
       );
       When(
-        'the owner presses "Delete note: Keep `rtt_ms` empty on relay." and confirms "Delete"',
+        'the owner presses "Delete note: Keep rtt_ms empty on relay." and confirms "Delete"',
         async () => {
           const started = Date.now();
-          buttonByLabel('Delete note: Keep `rtt_ms` empty on relay.').click();
+          buttonByLabel('Delete note: Keep rtt_ms empty on relay.').click();
           flushSync();
           one('#chat-side dialog form').dispatchEvent(
             new Event('submit', { bubbles: true, cancelable: true }),
@@ -344,7 +317,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             id: note1Id,
           });
           expect(texts('.groupinfo .mem-text')).toEqual(['Path events include the connection id.']);
-          expect(document.activeElement?.textContent?.trim()).toBe('Notes · 1');
+          expect(document.activeElement?.textContent?.trim()).toBe('Notes');
         },
       );
       When(

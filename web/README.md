@@ -453,11 +453,10 @@ file in `src/routes/`. It edits neither the shell nor another area:
     and words `home_unreachable`, `conflict` and a lost computer directly before falling back to
     `Failure`.
   - The group info panel (`src/components/groupinfo/`, `src/lib/groupinfo.svelte.ts`) mounts at
-    `chat.side` (`order: 20`) below the member panel. It shows the group's repository, base branch
-    with forge, home computer and check commands, and a folded "Project memory" section that
-    fetches `note` and `review` ledger pages on demand (`fetch` with `kind`), omits `gone` markers
-    and step-3 typed notes, and lets an admin delete a note or review entry with a signed `forget`
-    command after a `<dialog>` confirmation.
+    `chat.side` (`order: 20`) below the member panel. Its folded "Project memory" section fetches
+    `note` and `review` ledger pages on demand (`fetch` with `kind`), omits `gone` markers, and
+    lets an admin delete a note or review entry with a signed `forget` command after a `<dialog>`
+    confirmation.
 - **Connection indicator and computers page.** `indicator(net, group)` in `src/lib/nodes.svelte.ts`
   gives the pill mounted at `bar` (and at `chat.head` below 768 px, where an open chat hides the
   top bar) one of four states, linking to `#/nodes` with an accessible `Connection status: …`
@@ -505,7 +504,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/peer-fakes.ts`      | a peer connection and its channels for the tests of `peer.ts`                     |
 | `src/lib/groups.svelte.ts`    | `Home`, `Group`: row caches, cursor, paging, lists, commands                      |
 | `src/lib/members.ts`          | AI card status, path, candidate list, free name, `host.join`                      |
-| `src/lib/groupinfo.svelte.ts` | group details, project-memory `note` and `review` paging, `forget`                |
+| `src/lib/groupinfo.svelte.ts` | project-memory `note` and `review` paging, `forget`                               |
 | `src/lib/nodes.svelte.ts`     | connection indicator, `host.info` cache, `agent.set`, pairing                     |
 | `src/lib/compose.ts`          | mention being typed, mentions and parts of a text, row size                       |
 | `src/lib/when.ts`             | times in the reader's language; messages by day                                   |

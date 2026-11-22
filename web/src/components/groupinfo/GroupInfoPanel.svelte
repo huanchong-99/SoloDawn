@@ -2,7 +2,6 @@
   import { parts } from '../../lib/compose';
   import {
     authorOf,
-    forgeLabel,
     forgetDisabledReason,
     groupNotes,
     groupReviews,
@@ -16,7 +15,7 @@
   import Icon from '../Icon.svelte';
   import ForgetDialog, { type ForgetTarget } from './ForgetDialog.svelte';
 
-  /** Group details and project-memory section mounted in `chat.side` below the member list. */
+  /** Group info and project-memory section mounted in `chat.side` below the member list. */
   let { group }: { group: Group } = $props();
   const uid = $props.id();
 
@@ -44,45 +43,11 @@
 <section class="groupinfo" aria-labelledby={`${uid}-head`}>
   <h2 id={`${uid}-head`} class="sec-title">{t('groupinfo.title')}</h2>
 
-  {#if group.info}
-    <dl class="kv">
-      {#if group.info.repo}
-        <dt>{t('groupinfo.repo')}</dt>
-        <dd><code>{group.info.repo}</code></dd>
-      {/if}
-      <dt>{t('groupinfo.base')}</dt>
-      <dd>
-        <code>{group.info.base}</code>
-        <span class="muted">· {forgeLabel(group.info.forge)}</span>
-      </dd>
-      <dt>{t('groupinfo.home')}</dt>
-      <dd>{group.home.name || group.info.home}</dd>
-      <dt>{t('groupinfo.checks')}</dt>
-      <dd>
-        {#if group.info.checks.length}
-          <ul class="checks">
-            {#each group.info.checks as check, i (i)}
-              <li><code>{check}</code></li>
-            {/each}
-          </ul>
-        {:else}
-          <span class="muted">{t('groupinfo.checks.none')}</span>
-        {/if}
-      </dd>
-    </dl>
-  {/if}
-
   <details class="fold" bind:open>
     <summary>
       <Icon name="down" sm />
       <b>{t('groupinfo.memory')}</b>
-      <span class="cut grow muted">
-        {#if notes.length > 0 || reviews.length > 0}
-          {t('groupinfo.notes')} {notes.length} · {t('groupinfo.ledger')} {reviews.length}
-        {:else}
-          {t('groupinfo.memory.lead')}
-        {/if}
-      </span>
+      <span class="cut grow muted">{t('groupinfo.memory.lead')}</span>
     </summary>
 
     {#if open}
@@ -93,7 +58,7 @@
 
         <div class="mem-sec">
           <h3 bind:this={notesHead} id={`${uid}-notes`} class="sec-title" tabindex="-1">
-            {t('groupinfo.notes')} · {notes.length}
+            {t('groupinfo.notes')}
           </h3>
           {#if noteStuck}
             <p class="hint">{t('groupinfo.older.offline')}</p>
@@ -149,7 +114,7 @@
 
         <div class="mem-sec">
           <h3 bind:this={ledgerHead} id={`${uid}-ledger`} class="sec-title" tabindex="-1">
-            {t('groupinfo.ledger')} · {reviews.length}
+            {t('groupinfo.ledger')}
           </h3>
           {#if reviewStuck}
             <p class="hint">{t('groupinfo.older.offline')}</p>
@@ -246,16 +211,16 @@
   .groupinfo {
     display: flex;
     flex-direction: column;
-    gap: var(--sp-3);
+    gap: var(--sp-2);
     padding: var(--sp-4) var(--sp-4) 14px;
     border-top: 1px solid var(--line);
   }
+  .groupinfo > h2 + .fold {
+    border-top: 0;
+    margin-top: -4px;
+  }
   .groupinfo > .fold > summary {
     border-radius: 0;
-  }
-  .checks {
-    display: grid;
-    gap: 4px;
   }
   code {
     padding: 1px 5px;

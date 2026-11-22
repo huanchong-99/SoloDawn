@@ -1,13 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   authorOf,
-  forgeLabel,
   forgetDisabledReason,
   forgetMemory,
   groupNotes,
   groupReviews,
   hasMemoryRow,
-  KindPage,
   MemoryView,
   previewText,
 } from './groupinfo.svelte';
@@ -71,20 +69,13 @@ beforeEach(() => {
 });
 
 describe('groupNotes, groupReviews and hasMemoryRow', () => {
-  it('lists live context notes in pos order and omits gone markers, typed notes and other rows', () => {
+  it('lists live context notes in pos order and omits gone markers and other rows', () => {
     const { group } = makeGroup();
     const n10 = row<p.NoteRow>('row-note', { id: 'n-10', pos: 10, text: 'First' });
     const n30 = row<p.NoteRow>('row-note', { id: 'n-30', pos: 30, text: 'Third' });
     const n20 = row<p.NoteRow>('row-note', { id: 'n-20', pos: 20, text: 'Second' });
-    const preset = row<p.NoteRow>('row-note', {
-      id: 'n-preset',
-      pos: 15,
-      type: 'preset',
-      name: 'Calm',
-    });
-    const kb = row<p.NoteRow>('row-note', { id: 'n-kb', pos: 25, type: 'kb', name: 'Rule' });
     const msg = row<p.MsgRow>('row-msg-text', { id: 'm-1', pos: 5 });
-    group.apply([n10, n30, n20, preset, kb, msg]);
+    group.apply([n10, n30, n20, msg]);
 
     expect(groupNotes(group).map((n) => n.id)).toEqual(['n-10', 'n-20', 'n-30']);
     expect(hasMemoryRow(group, 'note', 'n-20')).toBe(true);
@@ -113,13 +104,7 @@ describe('groupNotes, groupReviews and hasMemoryRow', () => {
   });
 });
 
-describe('forgeLabel, authorOf, forgetDisabledReason, previewText and forgetMemory', () => {
-  it('formats forge labels and preserves unknown values', () => {
-    expect(forgeLabel('github')).toBe('GitHub');
-    expect(forgeLabel('none')).toBe('This computer only');
-    expect(forgeLabel('gitea')).toBe('gitea');
-  });
-
+describe('authorOf, forgetDisabledReason, previewText and forgetMemory', () => {
   it('resolves authorOf for present and departed members', () => {
     const { group } = makeGroup();
     expect(authorOf(group, meMember)).toBe('Alex');
@@ -140,8 +125,10 @@ describe('forgeLabel, authorOf, forgetDisabledReason, previewText and forgetMemo
     expect(forgetDisabledReason(makeGroup({ role: 'owner' }).group)).toBeUndefined();
   });
 
-  it('collapses whitespace and truncates previewText strictly above 60 characters', () => {
-    expect(previewText('  line one\n\tline   two  ')).toBe('line one line two');
+  it('strips backticks, collapses whitespace and truncates previewText strictly above 60 characters', () => {
+    expect(previewText('  Keep `rtt_ms`\n\tempty   on `relay`.  ')).toBe(
+      'Keep rtt_ms empty on relay.',
+    );
     const exact60 = 'a'.repeat(60);
     expect(previewText(exact60)).toBe(exact60);
     expect(previewText(exact60)).toHaveLength(60);
@@ -183,44 +170,14 @@ describe('forgeLabel, authorOf, forgetDisabledReason, previewText and forgetMemo
   });
 });
 
-describe('KindPage and MemoryView paging', () => {
-  it('tracks KindPage readiness and finish boundaries including empty pages', () => {
-    const page = new KindPage();
-    expect(page.before).toBe(0);
-    expect(page.ready).toBe(true);
-
-    page.busy = true;
-    expect(page.ready).toBe(false);
-    page.busy = false;
-    page.failed = true;
-    expect(page.ready).toBe(false);
-    page.failed = false;
-    page.more = false;
-    expect(page.ready).toBe(false);
-
-    page.more = true;
-    const n50 = row<p.NoteRow>('row-note', { id: 'n50', pos: 50 });
-    const n35 = row<p.NoteRow>('row-note', { id: 'n35', pos: 35 });
-    const n20 = row<p.NoteRow>('row-note', { id: 'n20', pos: 20 });
-    page.finish([n50, n35, n20], true);
-    expect(page.more).toBe(true);
-    expect(page.before).toBe(20);
-
-    page.finish([n20], false);
-    expect(page.more).toBe(false);
-    expect(page.before).toBe(20);
-
-    // An empty page always ends paging and keeps the previous before cursor.
-    page.finish([], true);
-    expect(page.more).toBe(false);
-    expect(page.before).toBe(20);
-  });
-
-  it('syncs once per online epoch, pages older entries without moving group.cursor, and re-syncs after group.sync', async () => {
+describe('MemoryView paging', () => {
+  it('syncs once per online epoch, pages older entries without moving group.cursor, handles empty pages, and re-syncs after group.sync', async () => {
     const asked: Record<string, unknown>[] = [];
-    const n2 = row<p.NoteRow>('row-note', { id: 'n-2', seq: 900, pos: 80, text: 'Newer' });
-    const n1 = row<p.NoteRow>('row-note', { id: 'n-1', seq: 901, pos: 40, text: 'Older' });
-    const rev = row<p.MsgRow>('row-msg-review', { id: 'rev-1', seq: 902, pos: 70 });
+    const n3 = row<p.NoteRow>('row-note', { id: 'n-3', seq: 900, pos: 90, text: 'Newest' });
+    const n2 = row<p.NoteRow>('row-note', { id: 'n-2', seq: 901, pos: 80, text: 'Middle' });
+    const n1 = row<p.NoteRow>('row-note', { id: 'n-1', seq: 902, pos: 60, text: 'Older' });
+    const n0 = row<p.NoteRow>('row-note', { id: 'n-0', seq: 903, pos: 40, text: 'Oldest' });
+    const rev = row<p.MsgRow>('row-msg-review', { id: 'rev-1', seq: 904, pos: 70 });
 
     const { home, group } = makeGroup({ online: false });
     const view = new MemoryView(group);
@@ -231,16 +188,18 @@ describe('KindPage and MemoryView paging', () => {
     expect(asked).toEqual([]);
     expect(view.note.more).toBe(true);
 
+    const notePages = new Map<number, p.NoteRow[]>([
+      [0, [n3, n2, n1]],
+      [60, [n0]],
+    ]);
     const ctl = makeCtl(async (req) => {
       asked.push(req);
       if (req.t === 'sync') return { t: 'synced', re: 1, ok: true, g: gid, seq: 600 };
-      if (req.kind === 'note' && req.before === 0) {
-        return { t: 'fetched', re: 2, ok: true, rows: [n2], more: true };
+      if (req.kind === 'note') {
+        const rows = notePages.get(req.before as number) ?? [];
+        return { t: 'fetched', re: 2, ok: true, rows, more: true };
       }
-      if (req.kind === 'note' && req.before === 80) {
-        return { t: 'fetched', re: 3, ok: true, rows: [n1], more: false };
-      }
-      return { t: 'fetched', re: 4, ok: true, rows: [rev], more: false };
+      return { t: 'fetched', re: 3, ok: true, rows: [rev], more: false };
     });
     home.ctl = ctl;
     view.sync();
@@ -254,7 +213,7 @@ describe('KindPage and MemoryView paging', () => {
     // Repeated sync in the same epoch does not re-fetch.
     view.sync();
     await vi.waitFor(() => expect(view.review.more).toBe(false));
-    await vi.waitFor(() => expect(view.note.before).toBe(80));
+    await vi.waitFor(() => expect(view.note.before).toBe(60));
 
     expect(asked).toEqual([
       { t: 'fetch', g: gid, kind: 'note', before: 0, limit: 50 },
@@ -262,13 +221,19 @@ describe('KindPage and MemoryView paging', () => {
     ]);
     // Fetched rows must not advance the live sync cursor.
     expect(group.cursor).toBe(600);
-    expect(groupNotes(group).map((n) => n.id)).toEqual(['n-2']);
+    expect(groupNotes(group).map((n) => n.id)).toEqual(['n-1', 'n-2', 'n-3']);
     expect(groupReviews(group).map((r) => r.id)).toEqual(['rev-1']);
 
     await view.older('note');
-    expect(groupNotes(group).map((n) => n.id)).toEqual(['n-1', 'n-2']);
-    expect(view.note.more).toBe(false);
+    expect(groupNotes(group).map((n) => n.id)).toEqual(['n-0', 'n-1', 'n-2', 'n-3']);
+    expect(view.note.more).toBe(true);
+    expect(view.note.before).toBe(40);
     expect(group.cursor).toBe(600);
+
+    // An empty page ends paging even if more was reported true, keeping the last before cursor.
+    await view.older('note');
+    expect(view.note.more).toBe(false);
+    expect(view.note.before).toBe(40);
 
     // Calling older when ready is false sends nothing.
     const countBefore = asked.length;
@@ -283,7 +248,7 @@ describe('KindPage and MemoryView paging', () => {
   });
 
   it('records failed pages on refusal or rejection and drops stale answers across ctl or epoch changes', async () => {
-    const { home, group } = makeGroup({
+    const { group } = makeGroup({
       handler: async (req) => {
         if (req.kind === 'note') return { re: 1, err: { code: 'forbidden', msg: 'no' } };
         throw new Error('dropped');

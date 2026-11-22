@@ -4,21 +4,16 @@ Feature: Group info panel and project memory
   Background:
     Given a project group "Website" homed on "workstation", open in a browser of its owner in English
 
-  Scenario: Group info shows repository, base branch, forge, home computer and check commands
-    Then the group info panel shows repository "https://git.example/team/website.git", base "main · GitHub", home "workstation" and checks "go vet ./..." and "go test ./..."
-    When the group is updated to forge "none" with no check commands
-    Then the group info panel shows base "main · This computer only" and checks "None"
-
   Scenario: Project memory lists notes and the review ledger, and forgetting removes an entry within 1 second
     Given the home holds two notes and a scored review whose task was removed by retention
-    Then no memory fetch has been sent and the project memory summary reads "Kept past retention"
+    Then no memory fetch has been sent and the group info panel folds "Project memory" with "Kept past retention"
     When the owner opens "Project memory"
     Then the browser fetches kind "note" and kind "review" from 0 with limit 50
     And the notes list shows "Keep `rtt_ms` empty on relay." on "T-12" by "Alex" and "Path events include the connection id." by "Secretary"
     And the review ledger shows "T-12", "86 / 90", "Show connection paths", "Claude Code · Round 1" and remark "Missing relay path" at "path.go:88"
-    When the owner presses "Delete note: Keep `rtt_ms` empty on relay." and cancels the confirmation
-    Then no forget command was sent and focus returns to "Delete note: Keep `rtt_ms` empty on relay."
-    When the owner presses "Delete note: Keep `rtt_ms` empty on relay." and confirms "Delete"
+    When the owner presses "Delete note: Keep rtt_ms empty on relay." and cancels the confirmation
+    Then no forget command was sent and focus returns to "Delete note: Keep rtt_ms empty on relay."
+    When the owner presses "Delete note: Keep rtt_ms empty on relay." and confirms "Delete"
     Then the home receives a signed "forget" for "note" and that note disappears within 1 second with focus on the notes heading
     When the owner presses "Delete review: T-12 Show connection paths" and confirms "Delete"
     Then the home receives a signed "forget" for "msg" and the review ledger reads "No scored reviews yet."
