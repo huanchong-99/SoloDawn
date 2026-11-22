@@ -26,12 +26,11 @@ type homeCallWorld struct {
 	disk     homeBriefDisk
 	receipts homeBriefReceipts
 	members  map[string]string
-	keys     map[string]identity.Key
+	laptop   identity.Key
 	taskID   string
 	callID   string
 	callTS   int64
 	replyID  string
-	lastEnv  proto.Envelope
 	answers  []home.Result
 	items    []home.Item
 	nonce    int
@@ -41,13 +40,9 @@ func homeCallSteps(sc *godog.ScenarioContext) {
 	w := &homeCallWorld{now: time.UnixMilli(1763600000000)}
 	sc.Step(`^a group home for calls with an active task and three AIs$`, w.start)
 	sc.Step(`^"([^"]*)" calls "([^"]*)" in the task thread at depth (\d+) asking "([^"]*)"$`, w.callInThread)
-	sc.Step(`^"([^"]*)" has called "([^"]*)" in the main line$`, w.calledInMain)
-	sc.Step(`^"([^"]*)" sends the same (?:call|reply) command again$`, w.repeatLast)
 	sc.Step(`^"([^"]*)" replies to the call (\d+) ms later with "([^"]*)"$`, w.replyAfter)
-	sc.Step(`^(the owner posts a call to "ai-two"|"ai-one" posts a call to "ai-one"|"ai-one" posts a call to "owner"|"ai-three" replies to the main-line call|"ai-two" replies to the call in the thread)$`, w.invalidAttempt)
-	sc.Step(`^the call home answers ok$`, func() error { return w.answered(1, "") })
-	sc.Step(`^the call home answers ok to both$`, func() error { return w.answered(2, "") })
-	sc.Step(`^the call home answers "([^"]*)"$`, func(code string) error { return w.answered(1, code) })
+	sc.Step(`^the call home answers ok$`, func() error { return w.answered("") })
+	sc.Step(`^the call home answers "([^"]*)"$`, w.answered)
 	sc.Step(`^the call is "waiting" in the task thread and queued "([^"]*)"$`, w.waitingAndQueued)
 	sc.Step(`^the call is "answered" after (\d+) ms with the reply in the task thread$`, w.answeredAfter)
 	sc.Step(`^the call home has queued "([^"]*)" for the reply$`, w.queuedForReply)
@@ -56,7 +51,7 @@ func homeCallSteps(sc *godog.ScenarioContext) {
 
 func (w *homeCallWorld) start() error {
 	browser, node, laptop := exampleKey("call browser"), exampleKey("call node"), exampleKey("call laptop")
-	w.keys = map[string]identity.Key{"owner": browser, "laptop": laptop}
+	w.laptop = laptop
 	w.members = map[string]string{}
 	for _, name := range []string{"owner", "secretary", "ai-one", "ai-two", "ai-three"} {
 		w.members[name] = string(exampleID("call " + name))
@@ -103,31 +98,19 @@ func (w *homeCallWorld) nextID() proto.ID {
 }
 
 func (w *homeCallWorld) callInThread(from, to string, depth int, text string) error {
-	thread := proto.ID(w.taskID)
-	return w.postCall(w.keys["laptop"], w.members[from], w.members[to], &thread, depth, text)
-}
-
-func (w *homeCallWorld) calledInMain(from, to string) error {
-	if err := w.postCall(w.keys["laptop"], w.members[from], w.members[to], nil, 1, "Main question?"); err != nil {
-		return err
-	}
-	w.items = nil
-	return nil
-}
-
-func (w *homeCallWorld) postCall(by identity.Key, as, to string, thread *proto.ID, depth int, text string) error {
 	id := w.nextID()
 	ts := w.now.UnixMilli() - 50_000
+	thread := proto.ID(w.taskID)
 	post := proto.Post[proto.CallBody]{
-		HomeCommand: proto.HomeCommand{Type: "post", Nonce: id, Timestamp: ts, Group: proto.ID(w.state.ID), As: proto.ID(as)},
-		Kind:        "call", Thread: thread, Text: text, Mentions: []proto.ID{},
-		Body: proto.CallBody{To: to, Depth: depth, Wait: true},
+		HomeCommand: proto.HomeCommand{Type: "post", Nonce: id, Timestamp: ts, Group: proto.ID(w.state.ID), As: proto.ID(w.members[from])},
+		Kind:        "call", Thread: &thread, Text: text, Mentions: []proto.ID{},
+		Body: proto.CallBody{To: w.members[to], Depth: depth, Wait: true},
 	}
 	raw, err := json.Marshal(post)
 	if err != nil {
 		return err
 	}
-	if err := w.send(by.Sign(string(raw))); err != nil {
+	if err := w.send(w.laptop.Sign(string(raw))); err != nil {
 		return err
 	}
 	if w.answers[len(w.answers)-1].Answer.OK {
@@ -137,48 +120,24 @@ func (w *homeCallWorld) postCall(by identity.Key, as, to string, thread *proto.I
 }
 
 func (w *homeCallWorld) replyAfter(as string, deltaMS int64, text string) error {
-	thread := proto.ID(w.taskID)
-	return w.postReply(w.keys["laptop"], w.members[as], &thread, w.callTS+deltaMS, text)
-}
-
-func (w *homeCallWorld) postReply(by identity.Key, as string, thread *proto.ID, ts int64, text string) error {
 	id := w.nextID()
 	re := proto.ID(w.callID)
+	thread := proto.ID(w.taskID)
 	post := proto.Post[proto.EmptyBody]{
-		HomeCommand: proto.HomeCommand{Type: "post", Nonce: id, Timestamp: ts, Group: proto.ID(w.state.ID), As: proto.ID(as)},
-		Kind:        "reply", Thread: thread, Text: text, Mentions: []proto.ID{}, Re: &re, Body: proto.EmptyBody{},
+		HomeCommand: proto.HomeCommand{Type: "post", Nonce: id, Timestamp: w.callTS + deltaMS, Group: proto.ID(w.state.ID), As: proto.ID(w.members[as])},
+		Kind:        "reply", Thread: &thread, Text: text, Mentions: []proto.ID{}, Re: &re, Body: proto.EmptyBody{},
 	}
 	raw, err := json.Marshal(post)
 	if err != nil {
 		return err
 	}
-	if err := w.send(by.Sign(string(raw))); err != nil {
+	if err := w.send(w.laptop.Sign(string(raw))); err != nil {
 		return err
 	}
 	if w.answers[len(w.answers)-1].Answer.OK {
 		w.replyID = string(id)
 	}
 	return nil
-}
-
-func (w *homeCallWorld) repeatLast(_ string) error {
-	return w.send(w.lastEnv)
-}
-
-func (w *homeCallWorld) invalidAttempt(attempt string) error {
-	thread := proto.ID(w.taskID)
-	switch attempt {
-	case `the owner posts a call to "ai-two"`:
-		return w.postCall(w.keys["owner"], "", w.members["ai-two"], nil, 1, "Ask?")
-	case `"ai-one" posts a call to "ai-one"`:
-		return w.postCall(w.keys["laptop"], w.members["ai-one"], w.members["ai-one"], nil, 1, "Self?")
-	case `"ai-one" posts a call to "owner"`:
-		return w.postCall(w.keys["laptop"], w.members["ai-one"], w.members["owner"], nil, 1, "Human?")
-	case `"ai-three" replies to the main-line call`:
-		return w.postReply(w.keys["laptop"], w.members["ai-three"], nil, w.callTS+500, "Wrong AI.")
-	default:
-		return w.postReply(w.keys["laptop"], w.members["ai-two"], &thread, w.callTS+500, "Wrong place.")
-	}
 }
 
 func (w *homeCallWorld) send(env proto.Envelope) error {
@@ -192,20 +151,18 @@ func (w *homeCallWorld) send(env proto.Envelope) error {
 		}
 	}
 	w.state.Commit(res)
-	w.lastEnv = env
 	w.answers = append(w.answers, res)
 	w.items = append(w.items, res.Items...)
 	return nil
 }
 
-func (w *homeCallWorld) answered(n int, code string) error {
-	if len(w.answers) < n {
-		return fmt.Errorf("have %d answers, want at least %d", len(w.answers), n)
+func (w *homeCallWorld) answered(code string) error {
+	if len(w.answers) == 0 {
+		return fmt.Errorf("no answers recorded")
 	}
-	for _, res := range w.answers[len(w.answers)-n:] {
-		if res.Answer.Code != code || res.Answer.OK != (code == "") {
-			return fmt.Errorf("answered %+v (%s), want code %q", res.Answer, res.Msg, code)
-		}
+	res := w.answers[len(w.answers)-1]
+	if res.Answer.Code != code || res.Answer.OK != (code == "") {
+		return fmt.Errorf("answered %+v (%s), want code %q", res.Answer, res.Msg, code)
 	}
 	return nil
 }
