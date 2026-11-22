@@ -6,17 +6,23 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-23 · bug · A9.24 can run hosted checks again for the superseded commit
+
+- Symptom: A9.24 can report an unexpected `watch-checks` call for the first commit of the task that is reassigned.
+- Cause: `internal/host/deliver.go:1378-1379` can select a `cloud_check` row and start its poll after the original poll finishes. `internal/host/tools_task.go:476` releases the polling slot, so the delayed resume can claim it even after the task has reached review. The home acknowledges the result before sending the updated row (`internal/home/run_group.go:170-171`).
+- Status: open. Reproduced by holding the resume call until the original poll released its slot. The fix needs to coordinate completion with row updates while allowing retries after a failed result delivery.
+
+### 2026-11-23 · limitation · Remembered project homes without local AIs stay connected
+
+- Symptom: remembering a project home now retains a connection even when no AI is hosted locally in that group.
+- Cause: `internal/host/join.go:120-180,420-439` reconciles all remembered homes. The remembered-home wire shape carries no group kind. State-only sync supplies it after connection, as specified in [watch-team.md section 10 ("Which home")](planning/contracts/step-2/watch-team.md#10-a-secretarys-notice-r-14).
+- Status: the coordinator accepted keeping the connection on 2026-11-23.
+
 ### 2026-11-22 · limitation · Custom forge results depend on the template program
 
 - Symptom: a checks template can report an older request head, and a successful merge can name a later merge on the base branch.
 - Cause: `internal/host/forge_tmpl.go:124-147` supplies the submitted `{commit}` but cannot verify its use by the forge program. After merging it fetches `origin` and reads the base tip, as specified in `checks-forge.md` section 3.
 - Status: accepted contract limitations for T2-8. Real non-GitHub forge behavior and native Windows process execution remain unverified; A9.26 remains pending without a signed-in scratch forge configuration.
-
-### 2026-11-22 · limitation · Remembered project homes without local AIs stay connected
-
-- Symptom: remembering a project home now retains a connection even when no AI is hosted locally in that group.
-- Cause: `internal/host/join.go:120-180,420-439` reconciles all remembered homes. The remembered-home wire shape carries no kind; state-only sync supplies it after connection.
-- Status: accepted for T2-7 by the owner's lifecycle decision. Team homes reuse the existing manager without new persistence or wire shapes; connection retention also applies to remembered project homes rather than only AI-session homes.
 
 ### 2026-11-22 · limitation · Group moves follow replies, not unsolicited pushes
 
@@ -123,14 +129,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a current node does not admit a browser through an invitation; it knows only protocol version 1.
 - Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts`. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a. U2-1 supplies the join page and member controls.
 - Status: open until those units are integrated. The browser exchange is covered against a simulated home, not a released node.
-
-### 2026-11-22 · limitation · `host.CheckTakeover` awaits `takeover.start` (`HS-20`) and `driver` in `host.info` awaits `P-5` / `T3-2`
-
-- Symptom: `host.CheckTakeover` (`internal/host/caps.go`) is not yet wired to a `Surface["takeover.start"]` handler, and `Host.Agents` (`internal/host/agents.go`) does not yet populate a `driver` field on `proto.HostAgent` in `host.info`.
-- Cause: `HS-20` (terminal takeover) is built on a parallel wave-3 branch (`Surface["takeover.start"]` is not on `rebuild` yet), and `planning/contracts/step-3/drivers.md` section 6 / `planning/steps/parallel-plan-step-2-3.md` row `T3-1` assign freezing `driver` on the wire to `P-5` and putting `driver` into `host.info` to `T3-2`.
-- Status: open until `HS-20` calls `host.CheckTakeover` in `takeover.start`. The `driver` half is resolved by `T3-2` (`internal/host/agents.go`, `agtDriverProto`).
-- Status: the `takeover.start` half is resolved in T3-1 (#275): `takeover.start` calls `checkTakeover` first and uses its `assignFirst`. Open until `T3-2` adds `driver` to `host.info`.
-- Status: the `takeover.start` half is resolved in T3-1 (#275): `takeover.start` calls `checkTakeover` first and uses its `assignFirst`. Open until `T3-2` adds `driver` to `host.info`.
 
 ### 2026-11-22 · limitation · A7.9 does not run on Windows
 
@@ -709,6 +707,10 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-22 · limitation · `host.CheckTakeover` and `driver` in `host.info`
+
+- Status: resolved. T3-1 (#275) wired `checkTakeover` into `takeover.start` and uses its `assignFirst` result. T3-2 (#289) added `driver` for each agent in `host.info`.
 
 ### 2026-11-22 · bug · On Windows the last output of a CLI that exits by itself during a takeover is lost
 

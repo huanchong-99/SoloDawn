@@ -640,12 +640,6 @@ func newM5World(sc *godog.ScenarioContext, f fixtures) *m5World {
 	return w
 }
 
-func (w *m5World) setEnv(key, val string) {
-	old, had := os.LookupEnv(key)
-	os.Setenv(key, val)
-	w.cleanup(func() { restoreVar(key, old, had) })
-}
-
 func (w *m5World) nextID() string {
 	n := w.seq.Add(1)
 	var raw [16]byte
@@ -659,7 +653,7 @@ func (w *m5World) writeScriptFile(vendor, content string) string {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		w.recordHookErr(err)
 	}
-	w.setEnv("SOLODAWN_FAKE_"+strings.ToUpper(vendor)+"_SCRIPT", path)
+	w.recordHookErr(setScenarioEnv(w.cleanup, "SOLODAWN_FAKE_"+strings.ToUpper(vendor)+"_SCRIPT", path))
 	return path
 }
 
@@ -1155,8 +1149,7 @@ func (w *m5World) initBareRemote(seedWork string) error {
 	if err := m5SaveGHState(w.ghDir, m5GHState{BareRepo: bare}); err != nil {
 		return err
 	}
-	w.setEnv("SOLODAWN_M5_GH_DIR", w.ghDir)
-	return nil
+	return setScenarioEnv(w.cleanup, "SOLODAWN_M5_GH_DIR", w.ghDir)
 }
 
 func (w *m5World) createGroupAndJoinAIs(forge string, checks []string, level2 bool) error {
@@ -1189,10 +1182,10 @@ func (w *m5World) declareAndJoinWorkingAIs() error {
 	}
 	specs := []struct{ agent, name string }{{"claude", "Claude"}, {"codex", "Codex"}}
 	for _, sp := range specs {
-		if err := w.callHostSurface("agent.set", map[string]any{"agent": sp.agent, "account": "personal"}); err != nil {
+		if err := w.sendHostCommand("agent.set", map[string]any{"agent": sp.agent, "account": "personal"}); err != nil {
 			return err
 		}
-		if err := w.callHostSurface("host.join", map[string]any{"g": w.groupID, "home": n0.Key.ID(), "agent": sp.agent, "name": sp.name, "secretary": false}); err != nil {
+		if err := w.sendHostCommand("host.join", map[string]any{"g": w.groupID, "home": n0.Key.ID(), "agent": sp.agent, "name": sp.name, "secretary": false}); err != nil {
 			return err
 		}
 	}
@@ -1225,15 +1218,13 @@ func (w *m5World) configureCloneGitIdentity() error {
 	return nil
 }
 
-func (w *m5World) callHostSurface(name string, fields map[string]any) error {
+func (w *m5World) sendHostCommand(name string, fields map[string]any) error {
 	n0 := w.cluster.Nodes[0]
 	fields["t"] = name
 	fields["n"] = w.nextID()
 	fields["ts"] = n0.Host.Now().UnixMilli()
 	fields["to"] = n0.Key.ID()
-	raw := []byte(m5MustJSON(fields))
-	_, err := host.Surface[name](context.Background(), n0.Host, n0.Link, w.cluster.Owner.ID(), raw)
-	return err
+	return callHostSurface(n0.Host, n0.Link, w.cluster.Owner.ID(), name, fields)
 }
 
 func (w *m5World) addSecretaryMember() error {
@@ -2228,9 +2219,13 @@ func m5HasFailedSecretsItem(raw json.RawMessage) bool {
 
 func (w *m5World) stepSetupEnvCheckGroup() error {
 	if os.Getenv("HOME") == "" {
-		w.setEnv("HOME", w.f.t.TempDir())
+		if err := setScenarioEnv(w.cleanup, "HOME", w.f.t.TempDir()); err != nil {
+			return err
+		}
 	}
-	w.setEnv("SOLODAWN_M5_TEST_TOKEN", "node-only-token-value")
+	if err := setScenarioEnv(w.cleanup, "SOLODAWN_M5_TEST_TOKEN", "node-only-token-value"); err != nil {
+		return err
+	}
 	return w.givenOneBriefTask("none", []string{"m5envcheck"}, true)
 }
 
