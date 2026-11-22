@@ -620,6 +620,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/forge/`       | forge choice, argument-by-argument template editor and group command disclosure   |
 | `src/components/preset/`      | style preset editor (`chat.side`, `order: 21`) and brief preset reader            |
 | `src/components/kb/`          | knowledge-base list, search and admin deletion (`chat.side`, `order: 22`)         |
+| `src/components/move/`        | owner's local export/import guidance (`chat.side`, `order: 30`)                   |
 | `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
 | `src/components/watch/`       | receive-only watch channel, standalone request action and watcher stop controls   |
 | `src/components/team/`        | attributed bulletin card; team people use the shared member panel                 |
@@ -645,6 +646,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/groupinfo.spec.ts`  | steps of `../features/web_groupinfo.feature`                                      |
 | `features/preset.spec.ts`     | steps of `../features/web_preset.feature`                                         |
 | `features/kb.spec.ts`         | steps of `../features/web_kb.feature`                                             |
+| `features/move.spec.ts`       | steps of `../features/web_move.feature`                                           |
 | `features/forge.spec.ts`      | steps of `../features/web_forge.feature`                                          |
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
 | `features/watch_team.spec.ts` | steps of `../features/web_watch_team.feature`                                     |
@@ -669,6 +671,16 @@ navigation and of the segmented controls; the current entry and the chosen optio
 in `Highlight` and `HighlightText` instead (`base.css` section 8).
 
 ## Known limitations
+
+- A `moved` response to `cmd`, `sync` or `fetch` switches a listed group to the named home and
+  preserves its cache. An existing destination connection is reused; an unknown destination is
+  remembered for reconnecting on the current signalling paths. Its welcome supplies its remembered
+  addresses. Unlisted groups are discarded and read afresh if listed again. Commands are
+  not replayed across a move: their receipts stay on the old home. Before import the cached
+  group remains visible; the destination's `groups` push starts a new read after import.
+- Only a group's owner sees the local `solodawn group export` / `group import` guidance. The
+  browser neither runs these commands nor transfers the file. A copy omits `--to`; scheduling
+  copies belongs to the operating system, not the browser.
 
 - Watching reuses `#/terminal/<g>/<member>` for another person's AI. The terminal acquires its
   host through the existing signalling session, reuses a connected home or node, and releases a

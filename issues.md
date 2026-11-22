@@ -12,6 +12,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `internal/host/join.go:120-180,420-439` reconciles all remembered homes. The remembered-home wire shape carries no kind; state-only sync supplies it after connection.
 - Status: accepted for T2-7 by the owner's lifecycle decision. Team homes reuse the existing manager without new persistence or wire shapes; connection retention also applies to remembered project homes rather than only AI-session homes.
 
+### 2026-11-22 · limitation · Group moves follow replies, not unsolicited pushes
+
+- Symptom: a browser follows `moved` replies to `cmd`, `sync` and `fetch`; it cannot follow an unsolicited move notification.
+- Cause: the frozen error has a response id and a destination home, but no group id; there is no moved push in `proto.ts`. The export contract specifies request replies, and U2-5 preserves those shapes unchanged.
+- Status: response-based following is implemented. Before import, connection failures use the normal peer retry; a connected destination answering `not_found` is read again when import pushes `groups`. Real CLI export/import and multi-machine WebRTC migration remain unverified.
+
 ### 2026-11-22 · limitation · Foreign home attribution depends on a device row
 
 - Symptom: a foreign home with no matching device row shows its computer name but says its owner was not provided.
