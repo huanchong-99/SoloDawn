@@ -136,10 +136,6 @@ func (d *runDisk) Queued() []store.Item {
 // failure.
 func runOne[R any](d *runDisk, r, id string) (row R, ok bool) {
 	data, err := d.tx.Row(d.group, r, id)
-	return runRow[R](d, data, err)
-}
-
-func runRow[R any](d *runDisk, data json.RawMessage, err error) (row R, ok bool) {
 	if errors.Is(err, sql.ErrNoRows) {
 		return row, false
 	}
