@@ -105,7 +105,7 @@ async function notify(nodes: Home[], envelopes: Envelope[]) {
 function abortPending(signal: AbortSignal, failed: (code: string) => void) {
   const abort = () => failed('cancelled');
   const timer = setTimeout(() => failed('timeout'), 600_000);
-  signal.addEventListener('abort', abort, { once: true });
+  signal.addEventListener('abort', abort);
   return () => {
     clearTimeout(timer);
     signal.removeEventListener('abort', abort);
@@ -247,7 +247,6 @@ export async function joinGroup(invitation: Invitation, name: string, options: J
       nodes.map((node) => homeNotice(node, invitation, group, options.url)),
     );
     checkCancel(signal, 'home.add');
-    stop();
     const notices = notify(nodes, envelopes);
     connection.serve(ctl, welcome, groups);
     return { session: connection.session, notices };

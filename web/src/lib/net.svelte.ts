@@ -11,7 +11,7 @@ import { joinGroup, JoinError, presentLog, type Invitation } from './join';
 import { browserName, signalUrlOf } from './onboard.svelte';
 import { loadJoined, loadOwner, saveJoined, saveOwner, type JoinedHomes } from './owner';
 import { connect, type Peer, type Session } from './peer';
-import type { Devlog, Welcome } from './proto';
+import type { Ctl, Devlog, Welcome } from './proto';
 import { parse } from './route.svelte';
 import { runTab } from './tablock';
 import { hello } from './version';
@@ -77,7 +77,7 @@ function pairedNodes(log: DeviceLog): [string, string][] {
 async function appendEntries(log: DeviceLog, entries: Devlog['entries']): Promise<boolean> {
   let changed = false;
   for (const env of entries) {
-    if (await log.apply(env).catch(() => false)) changed = true;
+    if (await log.apply(env).catch(() => {})) changed = true;
   }
   return changed;
 }
@@ -91,11 +91,9 @@ function startLive(
 ) {
   const activeTab = (device: Device, signal: AbortSignal) => {
     if (signal.aborted) return Promise.resolve();
-    let session: Session | undefined;
-    let epoch = 0;
-    let joining = new AbortController();
-    const admissions = new Map<string, Session>();
-    const homeOf = (user: string, id: string, name: string, owner: boolean) => {
+    let session: (() => void) | undefined;
+    let pending: symbol | undefined;
+    const homeOf = (user: string, id: string, name: string, owner = false) => {
       let home = added.get(id);
       if (!home) {
         home = new Home({ user, sign: (payload) => device.sign(payload) });
@@ -119,16 +117,18 @@ function startLive(
         name: browserName,
       });
       const peers = new Map<string, Peer>();
+      const joining = new AbortController();
+      const admissions = new Map<string, Session>();
       const pushLog = (): Devlog => ({ t: 'devlog', user: log.user, entries: [...log.entries] });
       const onDevlog = async (frame: Devlog) => {
-        if (!(await appendEntries(log, frame.entries)) || session !== hub) return;
+        if (!(await appendEntries(log, frame.entries)) || joining.signal.aborted) return;
         await saveOwner(() => indexedDB, log, addrs);
         syncPeers();
         for (const p of peers.values()) p.send(pushLog());
-        for (const id of admissions.keys()) {
-          const ctl = added.get(id)!.ctl;
-          if (ctl) presentLog(ctl, log);
-        }
+        const controls = [...admissions.keys()].flatMap(
+          (id) => added.get(id)!.ctl ?? Array.of<Ctl>(),
+        );
+        for (const ctl of controls) presentLog(ctl, log);
       };
       const dial = (id: string, home: Home) => {
         const peer = hub.peer(
@@ -144,7 +144,10 @@ function startLive(
               },
               push: (frame) => {
                 link.push(frame);
-                if (frame.t === 'devlog' && frame.user === log.user) void onDevlog(frame);
+                switch (frame.t) {
+                  case 'devlog':
+                    if (frame.user === log.user) void onDevlog(frame);
+                }
               },
               offline: () => link.offline(),
             };
@@ -161,55 +164,59 @@ function startLive(
       };
       syncPeers();
       for (const [id, { name }] of Object.entries(joined)) {
-        if (!peers.has(id)) dial(id, homeOf(log.user, id, name, false));
+        if (!peers.has(id)) dial(id, homeOf(log.user, id, name));
       }
       setJoin(async (invitation, name, cancel) => {
         const id = invitation.home;
         const url = signalUrlOf();
+        let trackPath: ((path: Path | undefined) => void) | undefined;
         const { session: admitted, notices } = await joinGroup(invitation, name, {
           device,
           log,
           url,
           browserName,
           signal: AbortSignal.any([cancel, signal, joining.signal]),
-          ownNodes: () => homes.filter((home) => home.owner && home.ctl && log.valid(home.device)),
+          ownNodes: () => {
+            const own = new Set(pairedNodes(log).map(([id]) => id));
+            return [...added.values()].filter((home) => home.ctl && own.has(home.device));
+          },
           async remember(homeName) {
             joined[id] = { name: homeName, url };
             await saveJoined(() => indexedDB, joined);
           },
-          link: () => homeOf(log.user, id, joined[id].name, false).connect(),
-          onpath: (path) => {
-            const home = added.get(id);
-            if (home) path ? paths.set(home, path) : paths.delete(home);
+          link: () => {
+            const home = homeOf(log.user, id, joined[id].name);
+            trackPath = (path) => (path ? paths.set(home, path) : paths.delete(home));
+            return home.connect();
           },
+          onpath: (path) => trackPath?.(path),
         });
         peers.get(id)?.close();
-        peers.delete(id);
         admissions.get(id)?.close();
         admissions.set(id, admitted);
         return { notifications: await notices };
       });
-      return hub;
+      return () => {
+        joining.abort();
+        hub.close();
+        for (const admission of admissions.values()) admission.close();
+      };
     };
     const close = () => {
-      epoch += 1;
+      pending = undefined;
       setJoin(undefined);
-      joining.abort();
-      joining = new AbortController();
-      session?.close();
+      session?.();
       session = undefined;
-      for (const admission of admissions.values()) admission.close();
-      admissions.clear();
     };
     const syncRoute = async () => {
       if (parse(location.hash).page === 'onboarding') return close();
       if (session) return;
-      const run = (epoch += 1);
+      const run = (pending = Symbol());
       const [{ log, addrs }, joined] = await Promise.all([
         loadOwner(crypto, () => indexedDB),
         loadJoined(() => indexedDB),
       ]);
-      if (run === epoch && log) session = openSession(log, addrs, joined);
+      if (run === pending && log) session = openSession(log, addrs, joined);
     };
     addEventListener('hashchange', () => void syncRoute(), { signal });
     void syncRoute();
@@ -220,9 +227,8 @@ function startLive(
 
   loadDevice({ crypto, idb: () => indexedDB }).then(
     (device) => {
-      if (stopSignal.aborted) return;
       const run = (sig: AbortSignal) => activeTab(device, AbortSignal.any([sig, stopSignal]));
-      void runTab(device.id, run, waitForUseHere);
+      if (!stopSignal.aborted) void runTab(device.id, run, waitForUseHere);
     },
     () => {},
   );
@@ -250,21 +256,22 @@ export function start(source: Source) {
       return join(invitation, name, signal);
     },
   };
-  const waitForUseHere = () =>
-    new Promise<void>((resolve) => {
-      otherTab = true;
-      chooseHere = () => {
-        chooseHere = undefined;
-        otherTab = false;
-        resolve();
-      };
-    });
+  function waitForUseHere() {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    otherTab = true;
+    chooseHere = () => {
+      chooseHere = undefined;
+      otherTab = false;
+      resolve();
+    };
+    return promise;
+  }
   if (import.meta.env.DEV && source === 'mock') {
     mockHome().then(
       ({ home, online }) => {
         if (stopAbort.signal.aborted) return;
         paths.set(home, { kind: 'direct', rtt: undefined, since: Date.now() });
-        added.set('mock', home);
+        added.set(home.me.user, home);
         homes.push(home);
         online();
       },

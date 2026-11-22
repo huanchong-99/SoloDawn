@@ -1,7 +1,16 @@
 import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DeviceLog } from './devlog';
-import { Device, ed25519, encode, loadDevice, verifyEnvelope } from './identity';
+import {
+  decode,
+  Device,
+  ed25519,
+  encode,
+  fingerprint,
+  loadDevice,
+  verifyEnvelope,
+} from './identity';
+import { goldens } from './mock';
 import {
   accountLabel,
   accounts,
@@ -198,6 +207,8 @@ describe('labels, URLs, prompts and #pair= capture', () => {
     expect(enPrompt).toContain('git config --global user.email');
     expect(enPrompt).toContain(code);
     expect(enPrompt).toContain('--rendezvous wss://solodawn.org/rv');
+    expect(enPrompt).toContain('Read https://solodawn.org/install.md and follow it.');
+    expect(enPrompt).toContain(`Join with pairing code ${code} and --rendezvous`);
 
     const zhPrompt = promptFor('zh-CN', code, {
       origin: 'http://127.0.0.1:47800',
@@ -283,6 +294,9 @@ describe('PairingSession mock, countdown and storage checks', () => {
     expect(session.enrolled).toBe(true);
     expect(session.browserFingerprint).toMatch(/^[0-9A-F]{4} [0-9A-F]{4} [0-9A-F]{4}$/);
     expect(session.node?.name).toBe('workstation');
+    const welcome = JSON.parse(goldens.welcome) as Welcome;
+    expect(session.node?.id).toBe(welcome.device);
+    expect(session.node?.fingerprint).toBe(await fingerprint(crypto, decode(welcome.device)!));
     expect(session.path?.kind).toBe('direct');
     expect(session.path?.rtt).toBe(12);
     expect(session.agents?.map((a) => [a.agent, a.account])).toEqual([
@@ -290,7 +304,11 @@ describe('PairingSession mock, countdown and storage checks', () => {
       ['codex', null],
     ]);
 
-    await session.setAccount('codex', 'team');
+    expect(session.busy).toBe(false);
+    const setting = session.setAccount('codex', 'team');
+    expect(session.busy).toBe(true);
+    await setting;
+    expect(session.busy).toBe(false);
     expect(session.agents?.map((a) => [a.agent, a.account])).toEqual([
       ['claude', 'personal'],
       ['codex', 'team'],
@@ -353,12 +371,28 @@ describe('PairingSession mock, countdown and storage checks', () => {
     expect(hubs[0].closed).toBe(1);
   });
 
+  it('starts the mock pairing countdown and clears it on destroy', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    vi.setSystemTime(1_000_000);
+    const session = new PairingSession('mock');
+    expect(session.browserFingerprint).toBe('');
+    expect(session.remaining).toBe(600);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(session.remaining).toBe(599);
+    session.destroy();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(session.remaining).toBe(599);
+  });
+
   it('distinguishes StorageBlocked from other loadOwner failures and bad #pair= secrets', async () => {
+    const generate = vi.spyOn(crypto.subtle, 'generateKey');
     location.hash = '#pair=not-valid';
     const bad = new PairingSession('live');
     expect(bad.role).toBe('b');
     expect(bad.stage).toBe('failed');
     expect(bad.error).toStrictEqual({ step: 1, key: 'bad_secret', code: undefined });
+    expect(generate).not.toHaveBeenCalled();
+    generate.mockRestore();
     bad.destroy();
 
     vi.stubGlobal('indexedDB', {
@@ -434,15 +468,25 @@ describe('PairingSession live role a and role b flows', () => {
 
     hub.options.heard!(url, { t: 'joined', room: roomId });
     expect(hub.sent).toHaveLength(2);
+    expect(hub.sent[1]).toEqual({
+      url,
+      frame: { t: 'room', room: roomId, data: expect.objectContaining({ t: 'pair' }) },
+    });
     const ourPair = (hub.sent[1].frame as { data: Pair }).data;
     expect(await verifyPair(crypto, secret, ourPair, 'a')).toBe(true);
 
     // Ignore wrong room, non-node kind, wrong role, and forged mac; dial only once on race.
     const validSelf = { role: 'b' as const, k: node1.id, kind: 'node' as const, name: 'mac-1' };
     const validPair: Pair = { t: 'pair', ...validSelf, mac: await mac(crypto, secret, validSelf) };
+    const otherKind = { ...validSelf, k: stranger.id, kind: 'browser' };
     const wrongRole = { role: 'a' as const, k: node1.id, kind: 'node' as const, name: 'mac-1' };
     hub.options.heard!(url, { t: 'room', room: 'other', data: validPair });
     hub.options.heard!(url, { t: 'room', room: roomId, data: ourPair });
+    hub.options.heard!(url, {
+      t: 'room',
+      room: roomId,
+      data: { t: 'pair', ...otherKind, mac: await mac(crypto, secret, otherKind) },
+    });
     hub.options.heard!(url, {
       t: 'room',
       room: roomId,
@@ -468,9 +512,13 @@ describe('PairingSession live role a and role b flows', () => {
     expect(session.path?.kind).toBe('relay');
 
     const requests: unknown[] = [];
+    const confirmed = {
+      ...welcomeOf(node1.id, true, 'Mac One'),
+      addrs: ['wss://confirmed.example/rv'],
+    };
     const ctl = makeCtl(async (req) => {
       requests.push(req);
-      if (req.t === 'hello') return welcomeOf(node1.id, true, 'Mac One');
+      if (req.t === 'hello') return confirmed;
       return hostInfoOf(node1.id, [
         {
           agent: 'claude',
@@ -494,8 +542,12 @@ describe('PairingSession live role a and role b flows', () => {
     peer.listener.online(ctl, welcomeOf(node1.id, false, 'Mac One'));
     await vi.waitFor(() => expect(session.stage).toBe('accounts'));
     expect(peer.sent).toHaveLength(1);
+    expect(peer.sent[0].t).toBe('devlog');
     expect(peer.sent[0].entries).toHaveLength(2);
     expect(persistCalls).toBe(1);
+    expect((await loadOwner(crypto, () => idb)).addrs).toEqual({
+      [node1.id]: confirmed.addrs,
+    });
     expect(session.code).toBe('');
     expect(session.enrolled).toBe(true);
 
@@ -503,9 +555,13 @@ describe('PairingSession live role a and role b flows', () => {
     hub.options.heard!(url, { t: 'ready', ice: [], ttl: 60 });
     peer.listener.push({ t: 'groups', groups: [] });
     peer.listener.push({ t: 'devlog', user: node1.id, entries: [] });
+    const open = vi.spyOn(idb, 'open');
     peer.listener.online(ctl, welcomeOf(node1.id, true, 'Mac One v2'));
+    expect(open).not.toHaveBeenCalled();
+    open.mockRestore();
     expect(session.node?.name).toBe('Mac One v2');
     expect(peer.sent).toHaveLength(1);
+    expect(requests).toHaveLength(2);
     peer.listener.offline();
     expect(session.stage).toBe('accounts');
 
@@ -527,6 +583,7 @@ describe('PairingSession live role a and role b flows', () => {
     await session.setAccount('claude', 'team');
     expect(session.stage).toBe('failed');
     expect(session.error).toStrictEqual({ step: 4, key: 'lost', code: undefined });
+    expect(hub.closed).toBe(1);
 
     // Pairing a second computer appends entry 3 to the stored owner log; re-pairing node2 adds nothing.
     await session.start();
@@ -554,6 +611,9 @@ describe('PairingSession live role a and role b flows', () => {
     // Re-pairing an already valid node sends the 3-entry log unchanged.
     await session.start();
     await vi.waitFor(() => expect(hubs).toHaveLength(3));
+    expect(hub2.closed).toBe(1);
+    hub2.options.heard!(url, { t: 'ready', ice: [], ttl: 60 });
+    expect(hubs[2].sent).toEqual([]);
     const secret3 = parseSecret(session.code);
     const room3 = await room(crypto, secret3);
     hubs[2].options.heard!(url, {
@@ -645,10 +705,13 @@ describe('PairingSession live role a and role b flows', () => {
     hubs[2].peers[0].onpath({ kind: 'direct', rtt: 5, since: 2 });
     hubs[2].peers[0].listener.online(ctl, welcomeOf(node.id, true, 'stale'));
     hubs[2].peers[0].listener.push({ t: 'groups', groups: [] });
+    const { re: _re, ok: _ok, ...lateInfo } = hostInfoOf(node.id, [], 'late');
+    hubs[2].peers[0].listener.push(lateInfo);
     hubs[2].peers[0].listener.offline();
     hubs[2].peers[0].listener.refused!('forbidden');
     expect(quick.stage).toBe('ready');
     expect(quick.path).toBeUndefined();
+    expect(quick.node?.name).toBe('MacBook');
     session.destroy();
   });
 
@@ -691,9 +754,12 @@ describe('PairingSession live role a and role b flows', () => {
     // Destroy mid-flight during live startup, dial, enrol, finishEnrolment and fetchHostInfo.
     {
       const cancelledStart = new PairingSession('live');
+      const count = hubs.length;
+      const starting = cancelledStart.start();
       cancelledStart.destroy();
-      await new Promise((r) => setTimeout(r, 15));
+      await starting;
       expect(cancelledStart.stage).toBe('waiting');
+      expect(hubs).toHaveLength(count);
     }
     {
       Object.defineProperty(navigator, 'storage', { configurable: true, value: {} });

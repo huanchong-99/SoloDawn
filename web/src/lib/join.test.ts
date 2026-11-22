@@ -175,18 +175,23 @@ it.each([
 it('closes a cancelled room without sending join', async () => {
   const cancel = new AbortController();
   const run = attempt(true, cancel.signal);
-  await run.options;
+  const { opts, id } = await run.offer();
   cancel.abort();
   await expect(run.result).rejects.toMatchObject({ step: 'room', code: 'cancelled' });
   expect(run.close).toHaveBeenCalled();
   expect(run.request).not.toHaveBeenCalled();
+  opts.heard!(url, { t: 'joined', room: id });
+  expect(run.send).not.toHaveBeenCalled();
 });
 
 it('dials only the invited node, from a matching authenticated room message', async () => {
   const run = attempt();
   const { opts, id, data } = await run.offer();
   const foreign = { role: 'a', k: browser, kind: 'node', name: 'Foreign' };
-  const otherKind = { ...data, kind: 'browser' };
+  const otherKind = { role: data.role, k: data.k, name: data.name, kind: 'browser' };
+  const foreignMac = await mac(crypto, secret, foreign);
+  const otherKindMac = await mac(crypto, secret, otherKind);
+  const importKey = vi.spyOn(crypto.subtle, 'importKey');
   expect(opts.known(home)).toBe(true);
   expect(opts.known(browser)).toBe(false);
   opts.heard!(url, { t: 'presence', k: home, on: true });
@@ -195,16 +200,20 @@ it('dials only the invited node, from a matching authenticated room message', as
   opts.heard!(url, {
     t: 'room',
     room: id,
-    data: { t: 'pair', ...foreign, mac: await mac(crypto, secret, foreign) },
+    data: { t: 'pair', ...foreign, mac: foreignMac },
   });
   opts.heard!(url, {
     t: 'room',
     room: id,
-    data: { ...otherKind, mac: await mac(crypto, secret, otherKind) },
+    data: { t: 'pair', ...otherKind, mac: otherKindMac },
   });
+  expect(importKey).not.toHaveBeenCalled();
   expect(run.send).not.toHaveBeenCalled();
+  await Promise.resolve();
   expect(run.peer).not.toHaveBeenCalled();
   const listener = await run.matched();
+  expect(importKey).toHaveBeenCalledTimes(2);
+  importKey.mockRestore();
   opts.heard!(url, { t: 'ready', ice: [], ttl: 0 });
   const refusal = { step: 'hello', code: 'forbidden' };
   listener.refused!('forbidden');
@@ -242,6 +251,24 @@ it('reports a connection loss before the home confirms the group', async () => {
   listener.offline();
   await expect(run.result).rejects.toMatchObject({ step: 'groups', code: 'lost' });
   expect(run.close).toHaveBeenCalledOnce();
+});
+
+it('waits for a groups push containing the invitation despite unrelated groups', async () => {
+  const run = attempt();
+  const listener = await run.matched();
+  const other = { g: encode(new Uint8Array(16).fill(1)), name: 'Other', seq: 1 };
+  const shared = { g, name: 'Shared', seq: 2 };
+  const ctl = { request: run.request, send: run.push } as Ctl;
+  run.request.mockResolvedValue({ re: 2, ok: true });
+  listener.online(ctl, { ...welcome, groups: [other] });
+  await vi.waitFor(() => expect(run.remember).toHaveBeenCalledWith('Home'));
+  listener.push({ t: 'groups', groups: [other, shared] });
+  await expect(run.result).resolves.toMatchObject({ session: { close: run.close } });
+  expect(run.link.online).toHaveBeenCalledExactlyOnceWith(ctl, { ...welcome, groups: [other] });
+  expect(run.link.push).toHaveBeenCalledExactlyOnceWith({
+    t: 'groups',
+    groups: [other, shared],
+  });
 });
 
 it('reports a failed write while remembering an admitted home', async () => {
@@ -291,6 +318,24 @@ it('clears the invitation timer and cancellation listener after joining', async 
   } finally {
     vi.useRealTimers();
   }
+});
+
+it.each(['cancelled', 'lost'])('reports %s while signing home.add', async (code) => {
+  const cancel = new AbortController();
+  const signed = Promise.withResolvers<Envelope>();
+  const sign = vi.fn(() => signed.promise);
+  const run = attempt(true, cancel.signal, [{ me: { sign }, device: home } as unknown as Home]);
+  const listener = await run.matched();
+  const ctl = { request: run.request, send: run.push } as Ctl;
+  run.request.mockResolvedValue({ re: 2, ok: true });
+  listener.online(ctl, { ...welcome, groups: [{ g, name: 'Shared', seq: 1 }] });
+  await vi.waitFor(() => expect(sign).toHaveBeenCalledOnce());
+  if (code === 'cancelled') {
+    cancel.abort();
+    signed.resolve({ p: 'notice', k: browser, s: 's' });
+  } else signed.reject(new Error('sign failed'));
+  await expect(run.result).rejects.toMatchObject({ step: 'home.add', code });
+  expect(run.link.online).not.toHaveBeenCalled();
 });
 
 it('keeps the admitted group when its own nodes refuse or lose the notification', async () => {
