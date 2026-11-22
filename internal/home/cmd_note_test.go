@@ -44,7 +44,7 @@ func noteState(t *testing.T) *home.State {
 	return s
 }
 
-func noteApply(t *testing.T, s *home.State, d noteDisk, r home.Receipts, by identity.Key, payload string) home.Result {
+func noteApply(t *testing.T, s *home.State, d home.Disk, r home.Receipts, by identity.Key, payload string) home.Result {
 	t.Helper()
 	res, err := home.Commands.Apply(s, d, r, by.Sign(payload), now)
 	if err != nil {
@@ -119,10 +119,16 @@ func TestNotePutRefusals(t *testing.T) {
 			payload: fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":%q,"text":"x"}`, id(114), noteTS, groupID, id(115), id(119)),
 			code:    "not_found",
 		},
+		"duplicate note id": {
+			payload: fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":null,"text":"x"}`, id(114), noteTS, groupID, id(118)),
+			code:    "conflict",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := noteState(t)
-			d := noteDisk{msgs: map[string]proto.MsgRow{}, notes: map[string]proto.NoteRow{}}
+			d := noteDisk{msgs: map[string]proto.MsgRow{}, notes: map[string]proto.NoteRow{
+				id(118): {RowHeader: proto.RowHeader{Type: "note", ID: id(118)}},
+			}}
 			noteRefused(t, noteApply(t, s, d, receipts{}, browser, tc.payload), tc.code)
 		})
 	}

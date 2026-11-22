@@ -218,7 +218,10 @@ func (r Result) Frame(re int64) any {
 	if r.Answer.Code != "" {
 		return proto.ErrorResponse{Re: re, Err: proto.WireError{Code: r.Answer.Code, Message: r.Msg}}
 	}
-	return proto.CmdResult{Success: proto.Success{Re: re, OK: true}, Num: r.Answer.Num, Passed: r.Answer.Passed, Round: r.Answer.Round}
+	return proto.CmdResult{
+		Success: proto.Success{Re: re, OK: true}, Num: r.Answer.Num, Passed: r.Answer.Passed,
+		Round: r.Answer.Round, ID: r.Answer.ID, Replaced: r.Answer.Replaced,
+	}
 }
 
 // Refusal is the error answer to a command: a code of

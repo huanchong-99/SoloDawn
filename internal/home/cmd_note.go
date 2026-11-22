@@ -22,6 +22,16 @@ func notePut(s *State, c Command) (Result, *Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
 	}
+	if p.NoteType != "" || p.Name != "" {
+		return kbNotePut(s, c, p)
+	}
+	return noteContextPut(s, c, p)
+}
+
+func noteContextPut(s *State, c Command, p proto.Note) (Result, *Refusal) {
+	if _, taken := c.Disk.Note(string(p.ID)); taken {
+		return Result{}, &Refusal{"conflict", "the note id is already in use"}
+	}
 	if p.Task != nil {
 		if _, ok := s.Tasks[string(*p.Task)]; !ok {
 			return Result{}, &Refusal{"not_found", "the note names no task"}

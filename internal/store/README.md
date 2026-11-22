@@ -9,12 +9,16 @@ Allocate a sequence with `NextSeq` for each changed row. Use it as the new
 row's `seq` and, for a new message, its `pos`; keep the original `pos` and
 creation time on updates. Pass the resulting proto value to `Put`.
 
-A `Snapshot` (`read.go`) pins the group's sequence and purge mark in the
+A `Snapshot` (`read.go`, `kb.go`) pins the group's sequence and purge mark in the
 writer's order. Read deltas (`AfterSeqUpTo`, `DeltaCount`), cold-sync sets
 (`StateRows` and `Pending`, delegating to `Tx`), pages (`PageThread`,
-`PageKind`), or one live row (`Row`, delegating to `Tx`) from it, then close
+`PageKind`), knowledge-base full-text search (`SearchKB`), or one live row
+(`Row`, delegating to `Tx`) from it, then close
 it. A page holds the rows below `before` in `pos` order, newest first; `before`
-0 asks for the newest page. `Row` returns `sql.ErrNoRows` when the row does not
+0 asks for the newest page. `PageKind` filters `"note"` to context notes without
+a `type` and `"preset"` / `"kb"` to notes of that type. `Put` maintains the FTS5
+`kb` table (with CJK character spreading) in the same transaction as `row`, and
+`NamedNote` looks up a live typed note via `row_named`. `Row` returns `sql.ErrNoRows` when the row does not
 exist or is a `gone` marker. A file-backed WAL reader does not block new
 writes; the single-connection in-memory database must release its snapshot
 before another transaction can run.

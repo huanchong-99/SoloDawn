@@ -66,6 +66,8 @@ func everyAI(s session, secretary bool) []Tool {
 	}
 	limit := integer(1, 100)
 	limit.Default = 30
+	kbLimit := integer(1, 20)
+	kbLimit.Default = 3
 	return []Tool{
 		tool("post", post, "text"),
 		tool("ask", map[string]ToolArg{"to": text(), "text": text(), "wait": boolean(true)}, "to", "text"),
@@ -75,6 +77,8 @@ func everyAI(s session, secretary bool) []Tool {
 		tool("list_tasks", map[string]ToolArg{"state": choice("queued", "active", "paused", "failed", "merged", "cancelled")}),
 		tool("note_put", map[string]ToolArg{"text": text(), "task": text()}, "text"),
 		tool("note_list", map[string]ToolArg{"task": text()}),
+		tool("kb_put", map[string]ToolArg{"name": text(), "text": text()}, "name", "text"),
+		tool("kb_search", map[string]ToolArg{"query": text(), "limit": kbLimit}, "query"),
 	}
 }
 
@@ -178,7 +182,7 @@ func names(list ToolList) []string {
 // the notes of section 1, and section 2.
 func TestToolListsFollowTheSessionKinds(t *testing.T) {
 	lists := readTools(t, example(t, "tools"))
-	everyone := []string{"post", "ask", "reply", "read_thread", "list_members", "list_tasks", "note_put", "note_list", "request_decision", "net_status"}
+	everyone := []string{"post", "ask", "reply", "read_thread", "list_members", "list_tasks", "note_put", "note_list", "kb_put", "kb_search", "request_decision", "net_status"}
 	for kind, c := range map[string]struct {
 		list ToolList
 		also []string

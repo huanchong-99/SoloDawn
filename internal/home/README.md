@@ -32,7 +32,7 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | show the group an accepted device-log entry | a `proto.DeviceRow` in `Result.Rows`; `Commit` applies its entry to the state's log |
 | do after a commit what a pure function cannot, such as a Web Push | a function `func(s *State, res Result)` and `After.Add(name, f)` in its file's `init` |
 | know in a hook which devices are connected | `s.Online[device]` |
-| answer with result fields | `Result.Answer.Num`, `.Passed`, `.Round` |
+| answer with result fields | `Result.Answer.Num`, `.Passed`, `.Round`, `.ID`, `.Replaced` |
 | refuse | `&Refusal{Code: "conflict", Msg: "…"}`, with a code of [datachannel](../../planning/contracts/datachannel.md) section 9 |
 | read a message, a note, a thread, the pending cards, the queued items | `c.Disk` in a command, the `Disk` argument of a timer or a handler |
 | add a rule that the clock sets off | a function `func(s *State, d Disk, now int64) Result` and `Timers.Add(name, f)` in its file's `init` |
@@ -175,7 +175,9 @@ names that start with `brief`, their tests too, and their test functions start w
 The task commands (`cmd_task.go`) take the names that start with `tsk`, their tests too, and their
 test functions start with `TestTaskCmd`. The posts of HM-6 take the names that start with `post`,
 their tests too, and their test functions start with `TestPost`; the notes and `forget` take the
-names that start with `note`, their tests too, and their test functions start with `TestNote`.
+names that start with `note`, their tests too, and their test functions start with `TestNote`;
+the knowledge base (`kb.go`) exports `NamedNoteDisk`, takes the names that start with `kb` (and
+`noteTypes`), and its test functions start with `TestKB`.
 The cards take the names that start with `card`, their tests too, and their test functions start
 with `TestCard`. Device-log events (`ev_device.go`) take the names that start with `dev`, and their
 tests start with `TestDevice` and `dev`. Sync takes the names that start with `syn`, its tests too,
