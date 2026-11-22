@@ -97,6 +97,7 @@ type Disk interface {
 	Pending() []proto.MsgRow
 	// Queued returns the inbox items that no host has acknowledged, oldest first.
 	Queued() []store.Item
+	OtherMember(user string) bool
 }
 
 // Receipts holds the outcome of every command a home has answered
@@ -381,6 +382,11 @@ func (s *State) Commit(res Result) {
 		s.hold(r.Value())
 	}
 	s.Seq += int64(len(res.Rows))
+	for _, w := range res.Writes {
+		if forgotten, ok := w.(peopleForget); ok {
+			delete(s.Logs, forgotten.user)
+		}
+	}
 }
 
 // hold keeps a state row. Messages and notes are not held.

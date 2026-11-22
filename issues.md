@@ -559,6 +559,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-22 · deviation · The home handled only AI member changes
+
+- Symptom: an invited person could not join, change role or leave through home commands.
+- Cause: `internal/home/cmd_member.go` dispatched only AI members; the joining seam had no production `join` handler.
+- Status: resolved in T2-1a by `internal/home/cmd_people.go`: joining, restore reconnection, owner role changes, and cascading removal with last-membership device-log and push-subscription cleanup. Invitation transport and node connection closure belong to T2-1b.
+
 ### 2026-11-22 · bug · HM-13 and HM-15 home tests disagreed on rounds after both landed
 
 - Symptom: after `origin/rebuild` (HM-15's `post/call` and `post/reply`) was merged into HM-13, `go test ./internal/home/` panicked with `home: two functions under post/call` in `TestRoundsTenExchangesPauseAndResume`, and two `TestCall*` cases got `thread.rounds` one higher than they expected.

@@ -43,6 +43,7 @@ func (d revDisk) TypedNotes(string) []proto.NoteRow         { return nil }
 func (d revDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d revDisk) Pending() []proto.MsgRow                   { return d.pending }
 func (d revDisk) Queued() []store.Item                      { return d.queued }
+func (d revDisk) OtherMember(string) bool                   { return false }
 
 func revEmptyDisk() revDisk {
 	return revDisk{msgs: map[string]proto.MsgRow{}}
