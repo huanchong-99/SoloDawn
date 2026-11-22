@@ -25,6 +25,7 @@ const postTS = clock - 400
 func postState(t *testing.T) *home.State {
 	t.Helper()
 	s := group(t)
+	s.Group.Limits = proto.Limits{Rounds: 10}
 	s.AIs[postA] = ai(postA, laptop)
 	s.AIs[postB] = ai(postB, laptop)
 	s.People[postGuest] = person(postGuest, guest, "member")
@@ -161,7 +162,7 @@ func TestPostThreadSummaryAndPreviewBoundary(t *testing.T) {
 	wantTask := s.Tasks[postTask]
 	wantTask.Seq = 12
 	wantTask.Thread = proto.ThreadSummary{
-		Count: 4, Rounds: 2,
+		Count: 4, Rounds: 0,
 		Last: &proto.ThreadMessage{By: ownerID, Kind: "text", Text: exact200, Timestamp: postTS},
 	}
 	equal(t, []any{res.Rows[0].Value(), res.Rows[1].Value()}, []any{wantMsg, wantTask})
@@ -175,7 +176,7 @@ func TestPostThreadSummaryAndPreviewBoundary(t *testing.T) {
 	equal(t, res.Rows[0].Value().(proto.MsgRow).Text, over200)
 	updated := res.Rows[1].Value().(proto.TaskRow)
 	equal(t, updated.Thread, proto.ThreadSummary{
-		Count: 5, Rounds: 2,
+		Count: 5, Rounds: 0,
 		Last: &proto.ThreadMessage{By: ownerID, Kind: "text", Text: exact200, Timestamp: postTS},
 	})
 	equal(t, res.Items, []home.Item{{AI: postB, Why: "mention", Task: postTask, Msg: id(81)}})
@@ -315,4 +316,41 @@ func TestPostRefusals(t *testing.T) {
 			postAssertRefused(t, res, tc.code)
 		})
 	}
+}
+
+func TestPostHandback(t *testing.T) {
+	thread := postTask
+	facts := proto.HandbackBody{Files: []string{"a.go"}, Commits: []proto.CommitSubject{{SHA: "9f2c1ab", Subject: "Fix"}}, Added: 40, Removed: 3}
+	t.Run("an AI in a thread notifies the secretary", func(t *testing.T) {
+		s := postState(t)
+		env, res := postSend(t, s, disk{}, laptop, postMake(100, postA, "handback", &thread, nil, nil, "Owner asked for X.", facts))
+		equal(t, res.Answer, store.Outcome{OK: true})
+		equal(t, res.Rows[0].Value(), any(postExpectedMsg(100, 11, postA, "handback", &thread, "Owner asked for X.", []string{}, nil, postRawJSON(t, facts), env)))
+		equal(t, res.Rows[1].Value().(proto.TaskRow).Thread.Last.Kind, "handback")
+		equal(t, res.Items, []home.Item{{AI: aiID, Why: "notice", Task: postTask, Msg: id(100), Code: "handback"}})
+	})
+	t.Run("the secretary posts in the main line and notifies nobody", func(t *testing.T) {
+		s := postState(t)
+		_, res := postSend(t, s, disk{}, laptop, postMake(101, aiID, "handback", nil, nil, nil, "", proto.HandbackBody{Files: []string{}, Commits: []proto.CommitSubject{}}))
+		equal(t, res.Answer, store.Outcome{OK: true})
+		equal(t, len(res.Rows), 1)
+		equal(t, res.Items, ([]home.Item)(nil))
+	})
+	t.Run("without a secretary a thread hand-back notifies nobody", func(t *testing.T) {
+		s := postState(t)
+		s.Group.Secretary = ""
+		_, res := postSend(t, s, disk{}, laptop, postMake(102, postA, "handback", &thread, nil, nil, "", facts))
+		equal(t, res.Answer, store.Outcome{OK: true})
+		equal(t, res.Items, ([]home.Item)(nil))
+	})
+	t.Run("another AI in the main line is refused", func(t *testing.T) {
+		s := postState(t)
+		_, res := postSend(t, s, disk{}, laptop, postMake(103, postA, "handback", nil, nil, nil, "", facts))
+		postAssertRefused(t, res, "bad_request")
+	})
+	t.Run("a person is refused", func(t *testing.T) {
+		s := postState(t)
+		_, res := postSend(t, s, disk{}, browser, postMake(104, "", "handback", &thread, nil, nil, "", facts))
+		postAssertRefused(t, res, "forbidden")
+	})
 }

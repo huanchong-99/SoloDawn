@@ -8,10 +8,11 @@
     personTags,
     statusOf,
     terminalDisabledReason,
+    usageMeter,
   } from '../../lib/members';
   import type { Net } from '../../lib/net.svelte';
   import { accountLabel } from '../../lib/onboard.svelte';
-  import { t } from '../../lib/prefs.svelte';
+  import { prefs, t } from '../../lib/prefs.svelte';
   import { href } from '../../lib/route.svelte';
   import { endTakeover, hostHomeOf } from '../../lib/terminal.svelte';
   import Avatar from '../Avatar.svelte';
@@ -52,6 +53,7 @@
     {@const mine = ai.user === group.home.me.user}
     {@const owner = mine ? undefined : group.personName(ai.user)}
     {@const termWhy = mine ? terminalDisabledReason(net, ai) : undefined}
+    {@const meter = usageMeter(ai.usage, prefs.lang)}
     <section class="card member">
       <header class="row">
         <span
@@ -80,6 +82,21 @@
             </span>{/if}
         </dd>
       </dl>
+      {#if meter}
+        <div
+          class="meter"
+          role="meter"
+          aria-label={meter.label}
+          aria-valuenow={meter.fill}
+          aria-valuetext={meter.note ? `${meter.value} · ${meter.note}` : meter.value}
+          data-tone={meter.tone}
+          style={`--v: ${meter.fill}%`}
+        >
+          <span>{meter.label}</span><b>{meter.value}</b><i></i>{#if meter.note}<small>
+              {meter.note}
+            </small>{/if}
+        </div>
+      {/if}
       {#if mine}
         <footer class="card-foot">
           {#if ai.state === 'takeover'}

@@ -296,11 +296,16 @@ func (p *claudeProcess) handleLine(line []byte) bool {
 	if json.Unmarshal(line, &hdr) != nil || hdr.Type == "" {
 		return false
 	}
-	if hdr.Type == "result" {
+	switch hdr.Type {
+	case "rate_limit_event":
+		p.handleRateLimit(line)
+		return false
+	case "result":
 		return p.handleResult(line)
+	default:
+		p.events <- claudeOtherEvent(hdr)
+		return false
 	}
-	p.events <- claudeOtherEvent(hdr)
-	return false
 }
 
 func claudeOtherEvent(hdr claudeHeader) Event {
@@ -308,6 +313,67 @@ func claudeOtherEvent(hdr claudeHeader) Event {
 		return Event{Kind: Ready, Session: hdr.SessionID}
 	}
 	return Event{Kind: Active}
+}
+
+type claudeRateLimitInfo struct {
+	Status         string                      `json:"status"`
+	RateLimitType  string                      `json:"rateLimitType"`
+	Utilization    *float64                    `json:"utilization"`
+	ResetsAt       *int64                      `json:"resetsAt"`
+	UnifiedWindows map[string]claudeRateWindow `json:"unifiedWindows"`
+}
+
+type claudeRateWindow struct {
+	Utilization *float64 `json:"utilization"`
+	ResetsAt    *int64   `json:"resetsAt"`
+}
+
+func (p *claudeProcess) handleRateLimit(line []byte) {
+	for _, ev := range claudeRateEvents(line) {
+		p.events <- ev
+	}
+}
+
+// claudeRateEvents reads a rate_limit_event: Used with the window, and
+// RateLimited when the limit is hit; Active when it says neither.
+func claudeRateEvents(line []byte) []Event {
+	var msg struct {
+		Info claudeRateLimitInfo `json:"rate_limit_info"`
+	}
+	json.Unmarshal(line, &msg)
+	usage, resets := claudeRateUsage(msg.Info)
+	var out []Event
+	if usage != (Usage{}) {
+		out = append(out, Event{Kind: Used, Usage: usage})
+	}
+	if isClaudeRateLimited(msg.Info.Status) {
+		out = append(out, Event{Kind: RateLimited, Resets: resets})
+	}
+	if len(out) == 0 {
+		return []Event{{Kind: Active}}
+	}
+	return out
+}
+
+func claudeRateUsage(info claudeRateLimitInfo) (Usage, int64) {
+	win := info.UnifiedWindows[info.RateLimitType]
+	pct := cmp.Or(info.Utilization, win.Utilization)
+	resets := cmp.Or(info.ResetsAt, win.ResetsAt)
+	var u Usage
+	var resetsMS int64
+	if pct != nil {
+		v := *pct * 100
+		u.WindowPct = &v
+	}
+	if resets != nil {
+		resetsMS = *resets * 1000
+		u.WindowResets = &resetsMS
+	}
+	return u, resetsMS
+}
+
+func isClaudeRateLimited(status string) bool {
+	return status != "" && status != "allowed" && status != "allowed_warning"
 }
 
 type claudeResultMsg struct {

@@ -113,9 +113,9 @@ func TestFeatures(t *testing.T) {
 // tags is the suite's tag filter on one operating system.
 func tags(goos string) string {
 	if goos == "windows" {
-		return "~@web && ~@not-windows"
+		return "~@web && ~@not-windows && ~@pending"
 	}
-	return "~@web"
+	return "~@web && ~@pending"
 }
 
 // afterScenario returns a function that defers undo to the end of the current

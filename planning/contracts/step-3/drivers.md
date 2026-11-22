@@ -10,8 +10,9 @@ This is a new file so that no step 1 contract has two writers while step 1
 is built. It is folded into `contracts/drivers.md` afterwards; section 5
 also into `contracts/commands.md` section 2 and `contracts/mcp-tools.md`
 section 3, and section 6 into `contracts/datachannel.md` section 7 and
-`contracts/rows.md` section 2. Nothing here changes the meaning of a step 1
-shape or of a step 1 driver.
+`contracts/rows.md` section 2. Sections 1 to 9 change the meaning of no
+step 1 shape and of no step 1 driver; section 10 adds fields to step 1
+shapes and passes a model at each start.
 
 Markers: `[verified]`, `[documented]`, `[unverified]` as in
 `contracts/drivers.md`.
@@ -229,3 +230,115 @@ is in that description. `[documented]` means read there and not run.
 6. The answers of `steps/parallel-plan-step-2-3.md` section 1 that this
    file rests on: D-16 only. R-44 is not applied in 1.0.
 7. Decided on 2026-11-20: the approval channel is required (point 3).
+
+## 10. Models: discovery, suggestion and start
+
+Added 2026-11-22 (R-165). The member fields and what the owner does with
+them are in `contracts/step-3/profiles.md`; this section owns what the
+host finds, what it suggests and what it passes to the CLI. It changes one
+sentence of `contracts/drivers.md` section 1: a model is passed.
+
+`[verified]` here means run by the reviewer of this contract on
+2026-11-22, with Claude Code 2.1.311 and Codex 0.164.0.
+
+### 10.1 A sixth operation: list models
+
+Each driver lists the models its CLI offers under the signed-in account,
+by the CLI's own listing and nothing else. The host adds no model, drops
+none and keeps no list of its own, neither of models nor of levels, so a
+new model appears without a release of SoloDawn.
+
+| `agent` | How the list is read | Model id, name | Levels | Fast mode |
+| --- | --- | --- | --- | --- |
+| `claude` | start `claude -p --verbose --input-format stream-json --output-format stream-json --no-session-persistence --strict-mcp-config --settings '{"disableAllHooks":true}'`, write one `initialize` control request, read `models` of the `control_response`, close stdin. `[verified]`: it lists the models (14) and calls no model. The field names are `[documented]`, from `ModelInfo` of the Agent SDK | `value`, `displayName` | `supportedEffortLevels`, when `supportsEffort` | `supportsFastMode` |
+| `codex` | `model/list` on `codex app-server`, after `initialize` `[verified]` (8 models); asked again with `cursor` = the answer's `nextCursor` until there is none; hidden entries are not asked for `[documented]` | `model` (not `id`, the name of the catalog entry), `displayName` | `supportedReasoningEfforts[].reasoningEffort`, in the order given | `serviceTiers` is not empty. `[unverified]` that every such tier is a faster one |
+| `opencode` | `GET /api/model` of `opencode serve`; the same list as `opencode models --verbose` `[documented]`; the fields are `[unverified]` | `provider/model`, its name | the model's variants | — |
+| `qwen` | not read. No listing is documented for headless mode, and its settings file can hold a credential, which the node never reads (`contracts/drivers.md` 1.4, R-50) | — | — | — |
+
+- **A CLI without a listing**, a listing that fails, and a list in a shape
+  the driver does not know all give the empty list. The host guesses
+  nothing: the owner types the model's id and the level
+  (`contracts/step-3/profiles.md` section 2a).
+- A claim not marked `[verified]` is captured from the real CLI by the
+  unit that builds it; a driver whose listing does not work as written
+  here declares the empty list until it does (section 4, last rule).
+- **When.** With detection (`contracts/drivers.md` 1.4): at node start and
+  on a `host.info` request, kept for the same 60 s. A `host.info` request
+  with `"refresh":true` skips what was kept; that is the owner's refresh.
+  Nothing is stored on disk.
+
+### 10.2 The suggested tier
+
+The host ships one table and suggests a tier per listed model. The
+model's id, in lower case, is cut into words at every character that is
+not a letter or a digit; the first row that holds one of those words
+gives the tier; no row, `standard`. So `gemini-3-pro` has the words
+`gemini`, `3`, `pro` and is not `mini`.
+
+| A word of the id | Tier |
+| --- | --- |
+| `haiku`, `mini`, `nano`, `flash`, `lite` | `light` |
+| `opus`, `fable` | `strong` |
+
+- Claude Code's entries are matched on `resolvedModel`, not on `value`:
+  its entry `default` then gets the tier of the model it stands for.
+- The table is data in one file of the host. T3-9 completes it for the
+  models the CLIs list on the day it is built, each row with its source;
+  a wrong row costs one click, since the owner sees the suggestion before
+  anything is stored.
+- No `skills` are suggested.
+
+### 10.3 On the wire (adds to section 6)
+
+Each entry of `agents` in `host.info` carries `models`, always present.
+`driver` does not change.
+
+```json
+{"agent":"claude", …,
+ "models":[{"model":"opus","name":"Opus","efforts":["low","medium","high","xhigh","max"],
+            "fast":true,"tier":"strong"},
+           {"model":"haiku","name":"Haiku","efforts":[],"tier":"light"}]}
+```
+
+| Field | Presence | Meaning |
+| --- | --- | --- |
+| `models` | always; `[]` when nothing was listed | what 10.1 found, in the CLI's order |
+| `models[].model` | always | what `member` `model` takes |
+| `models[].name` | always | the CLI's display name; the id when it gives none |
+| `models[].efforts` | always, may be `[]` | the levels of that model, in the CLI's order |
+| `models[].fast` | only when `true` | the CLI says the model has a fast mode. Shown; it cannot be chosen |
+| `models[].tier` | always | the suggestion of 10.2 |
+
+`groups` of an agent may hold several entries of one `g`, one per member.
+
+### 10.4 Starting with the choice
+
+At every start of a CLI process the driver passes the member's `model`
+and `effort`; an empty value passes nothing, as in step 1.
+
+| `agent` | Model | Level | In the terminal (`contracts/drivers.md` 1.3) |
+| --- | --- | --- | --- |
+| `claude` | `--model <model>` `[verified]` | `--effort <effort>` `[verified]` | the same two flags |
+| `codex` | `model` of `thread/start` and `thread/resume` `[verified]` against the generated schema of 0.164.0 | `config.model_reasoning_effort` of the same `[documented]` | `-m <model>` and `-c model_reasoning_effort="<effort>"` on `codex resume` `[documented]` |
+| `opencode` | `POST /api/session/{id}/model` before the first prompt of a process `[documented]` | the variant in the same selection, `provider/model#variant` `[unverified]`: version 1 documents `--variant` instead | no takeover (section 8) |
+| `qwen` | `startupConfig.modelServiceId` of `POST /session`, behind the capability `session_startup_config`; `--model` in stream-json mode `[documented]` | `startupConfig.reasoningEffort` `[documented]` | no takeover (section 8) |
+
+- A changed model or level applies at the next start, a resume included:
+  the session and its history stay. There is no fallback to a new
+  session.
+- **A value the CLI refuses.** Whether the CLI exits (Claude Code) or
+  answers the start with an error and stays up (Codex's `thread/start`
+  and `thread/resume` `[verified]` against the schema of 0.164.0;
+  OpenCode's HTTP error `[documented]`), the driver handles it as row 1
+  of `flows/agent-turn.md` E: `turn_interrupted` with `crash`, `task
+  fail` in a task session, state `dormant`, and a CLI process that
+  stayed up is closed. It is not "cannot resume the session id": the
+  session is not replaced and keeps its history. The owner reads the
+  notice and corrects the member.
+
+### 10.5 What depends on a CLI exposing its list
+
+Only the choice from a list and the suggested tier. With the empty list
+(Qwen Code, always) the owner types model and level, sets tier and
+skills, and everything of `contracts/step-3/profiles.md` sections 3 and
+4 works.

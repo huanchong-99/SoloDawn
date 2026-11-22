@@ -28,14 +28,6 @@ const (
 	TakeoverNone   = "none"
 )
 
-// Usage units a CLI driver may list in Capabilities.Usage
-// (planning/contracts/step-3/drivers.md section 4).
-const (
-	UsageTokens    = "tokens"
-	UsageUSD       = "usd"
-	UsageWindowPct = "window_pct"
-)
-
 // Capabilities is the capability table a CLI driver declares
 // (planning/contracts/step-3/drivers.md section 4).
 type Capabilities struct {
@@ -65,11 +57,11 @@ func usesApproveTool(agent string) bool {
 	return DriverCaps[agent].Approvals == ApprovalTool
 }
 
-// CheckTakeover checks a driver's takeover declaration for takeover.start
-// before relay, busy or cli checks, and reports whether a working AI without
-// an unfinished task runs its assign turn in structured mode first
+// checkTakeover checks a driver's takeover declaration for takeover.start
+// before its relay, busy and cli checks, and reports whether a working AI
+// without an unfinished task runs its assign turn in structured mode first
 // (planning/contracts/step-3/drivers.md section 5).
-func CheckTakeover(agent string) (assignFirst bool, err error) {
+func checkTakeover(agent string) (assignFirst bool, err error) {
 	switch DriverCaps[agent].Takeover {
 	case TakeoverNew:
 		return false, nil
