@@ -98,7 +98,7 @@ type Cap struct {
 }
 
 // AgentGroup is the agent in one group: its member, the level of its task
-// sessions, its derived state and task, and how many items are held for it.
+// sessions, its derived state and task, how many items are held for it, and watchers.
 type AgentGroup struct {
 	Group    ID       `json:"g"`
 	Member   ID       `json:"member"`
@@ -109,12 +109,14 @@ type AgentGroup struct {
 	Watchers []string `json:"watchers"`
 }
 
+// WatchStart opens a terminal watch for a granted person.
 type WatchStart struct {
 	Request
 	Group  ID `json:"g"`
 	Member ID `json:"member"`
 }
 
+// WatchEnd revokes a person's terminal watch.
 type WatchEnd struct {
 	HostCommand
 	Group  ID     `json:"g"`

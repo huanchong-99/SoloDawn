@@ -31,6 +31,15 @@ const at = (value: unknown, path: string[]) => path.reduce((o, k) => (o as Obj)[
 const named = (path: string[]) => path.filter((k) => !/^\d+$/.test(k)).join('.');
 const accepts = (name: string, value: unknown) => v.safeParse(schemaOf[name], value).success;
 
+it.each(['', 'plain text', 42])('bulletin rows read from as plain text: %s', (from) => {
+  const row = JSON.parse(goldens['row-msg-bulletin']);
+  row.body.from = from;
+  expect(v.safeParse(p.MsgRow, row).success).toBe(typeof from === 'string');
+  const post = JSON.parse(goldens['post-bulletin']);
+  post.body.from = from;
+  expect(v.safeParse(p.Post, post).success).toBe(false);
+});
+
 /** The example with one change made to a copy of the object at `path`. */
 function variant(name: string, path: string[], change: (o: Obj) => void) {
   const value = JSON.parse(goldens[name]);

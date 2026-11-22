@@ -104,7 +104,7 @@ var shapes = map[string]reflect.Type{
 	"perm-set":                       of[PermSet](),
 	"post-approval":                  of[Post[ApprovalBody]](),
 	"post-brief":                     of[Post[BriefBody]](),
-	"post-bulletin":                  of[Post[BulletinBody]](),
+	"post-bulletin":                  of[Post[BulletinSigned]](),
 	"post-call":                      of[Post[CallBody]](),
 	"post-confirm":                   of[Post[ConfirmSigned]](),
 	"post-decision":                  of[Post[DecisionBody]](),

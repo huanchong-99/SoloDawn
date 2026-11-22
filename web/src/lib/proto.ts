@@ -372,7 +372,8 @@ const DecisionBody = v.object({
 
 const CallBody = v.object({ to: str, depth: int, wait: bool });
 const ConfirmBody = v.object({ what: str, ai: str, to: strs });
-const BulletinBody = v.object({ from: Id, group: str, ai: str });
+const BulletinBody = v.object({ from: str, group: str, ai: str });
+const BulletinSigned = v.object({ from: Id, group: str, ai: str });
 const ReportBody = v.object({
   commit: str,
   files: int,
@@ -757,7 +758,7 @@ export const Post = v.variant('kind', [
   post('summary', EmptyBody),
   post('approval', ApprovalBody),
   post('confirm', ConfirmSigned),
-  post('bulletin', BulletinBody),
+  post('bulletin', BulletinSigned),
   post('decision', DecisionBody),
   post('call', CallBody),
   post('report', ReportBody),

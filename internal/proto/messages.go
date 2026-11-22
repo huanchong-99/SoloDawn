@@ -2,7 +2,15 @@ package proto
 
 import "errors"
 
+// BulletinBody identifies the project and secretary shown on a team bulletin.
 type BulletinBody struct {
+	From  string `json:"from"`
+	Group string `json:"group"`
+	AI    string `json:"ai"`
+}
+
+// BulletinSigned is the bulletin body a person posts, with a project group id.
+type BulletinSigned struct {
 	From  ID     `json:"from"`
 	Group string `json:"group"`
 	AI    string `json:"ai"`

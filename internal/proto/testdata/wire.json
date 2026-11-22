@@ -121,7 +121,7 @@
   "row-msg-brief-preset": {"optional":["body.preset","env"],"nullable":["body.replaces","re","thread"],"fraction":[],"id":[],"opaque":[]},
   "row-msg-brief-revise": {"optional":["env","state.note"],"nullable":["body.replaces","re","thread"],"fraction":[],"id":[],"opaque":[]},
   "row-msg-brief-superseded": {"optional":["env","state.act","state.at","state.by","state.note"],"nullable":["body.replaces","re","thread"],"fraction":[],"id":[],"opaque":[]},
-  "row-msg-bulletin": {"optional":["env"],"nullable":["re","state","thread"],"fraction":[],"id":["body.from"],"opaque":[]},
+  "row-msg-bulletin": {"optional":["env"],"nullable":["re","state","thread"],"fraction":[],"id":[],"opaque":[]},
   "row-msg-call-answered": {"optional":["env"],"nullable":["re","thread"],"fraction":[],"id":[],"opaque":[]},
   "row-msg-call-denied": {"optional":["env"],"nullable":["re","thread"],"fraction":[],"id":[],"opaque":[]},
   "row-msg-call-waiting": {"optional":["env"],"nullable":["re","thread"],"fraction":[],"id":[],"opaque":[]},

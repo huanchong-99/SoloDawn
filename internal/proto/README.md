@@ -25,10 +25,15 @@ Step 2 adds `watch.start` (plain success, as in `cmd-ok`), host command
 the node only; channel labels have no shared code definitions here.
 
 Team groups omit `repo` and `secretary`; creation omits `repo`, with empty
-`base`, `forge: none` and empty `checks`. Bulletin bodies carry `from`
+`base`, `forge: none` and empty `checks`.
+
+Bulletin bodies carry `from`
 (project group id), `group` (name) and `ai` (display name), with null
-state/thread/re, `main: false` and no post `as`. Custom forge `templates`
-hold `push`, `open`, `checks`, `merge` argument lists in rows/create/set.
+state/thread/re, `main: false` and no post `as`.
+
+Custom forge `templates` hold `push`, `open`, `checks`, `merge` argument lists
+in rows/create/set.
+
 Moved errors carry the destination device in `err.home`; codes remain text.
 
 The payload of a command is read in two steps. The receiver reads `t`, and the
@@ -115,7 +120,7 @@ alone reads four things differently from a browser. An error from `Decode` is
   (22 characters), and no other text, an empty one included. `n` and `g` of `PayloadHeader` have
   this type, and so has every id in a command payload, in an `Item`, and `g` of `inbox` and `ack`.
   Of the bodies a `post` carries, a review's, a confirm card's and a bulletin's ids are checked:
-  `task` of `ReviewSigned`, `ai` of `ConfirmSigned`, `from` of `BulletinBody` (also in its row).
+  `task` of `ReviewSigned`, `ai` of `ConfirmSigned`, `from` of `BulletinSigned`.
   Rows, the other message bodies and the frames that read
   a group still hold ids as plain strings ([issues](../../issues.md)).
 - **Slugs.** A field of type `Slug` takes 1 to 40 characters, groups of `a` to `z` and `0` to `9`

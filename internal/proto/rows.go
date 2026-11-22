@@ -31,6 +31,7 @@ type GroupRow struct {
 	Created        int64           `json:"created"`
 }
 
+// ForgeTemplates holds the argument lists for custom forge commands.
 type ForgeTemplates struct {
 	Push   []string `json:"push"`
 	Open   []string `json:"open"`

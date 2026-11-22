@@ -221,7 +221,7 @@ func TestCardStateRetainsPresentZeroValues(t *testing.T) {
 }
 
 func TestNonCardGoldens(t *testing.T) {
-	nonCard(t, messageExample{kind: "bulletin", author: person, text: "The website is ready."}, BulletinBody{ID(group), "Website", "Claude Code"})
+	nonCard(t, messageExample{kind: "bulletin", author: person, text: "The website is ready.", signedBody: BulletinSigned{ID(group), "Website", "Claude Code"}}, BulletinBody{group, "Website", "Claude Code"})
 	nonCard(t, messageExample{kind: "text", author: agent, text: "The path is direct."}, EmptyBody{})
 	nonCard(t, messageExample{kind: "progress", author: agent, thread: &taskID, text: "Added the path indicator."}, EmptyBody{})
 	nonCard(t, messageExample{kind: "question", author: agent, text: "Should the path include latency?"}, EmptyBody{})
