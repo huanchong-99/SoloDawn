@@ -469,8 +469,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
     countdown. The owner's row has no role or removal action. Owners can promote, demote, and
     remove other people; admins can remove ordinary members; non-owners can leave. Signed
     commands go to the group home, and its row pushes update the panel. Its "Add AI" button
-    requires a reachable group home, an admin
-    reader and at least one connected owned computer, and shows its reason when disabled. The
+    requires a reachable group home, a group member, and at least one connected owned computer,
+    and shows its reason when disabled. The
     add-AI dialog reads `host.info` from the owner's connected computers, suggests an unused member
     name in the group, offers the secretary switch when the group has none or the reader is an
     admin, signs `host.join` for the chosen computer, and words `home_unreachable`, `conflict` and
