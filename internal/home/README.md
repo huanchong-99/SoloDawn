@@ -666,8 +666,9 @@ the `quiet` timer and its `After` hook ([task-machine](../../planning/contracts/
 row 23), and the thread round and held-mention transitions (rows 13, 21 and 22, and section 4
 "Held by the round limit"; [messages](../../planning/contracts/messages.md) 2.11):
 
-- **`jump`.** Registered under `jump`. Refuses an AI signer (`c.Who.AI != ""`) with `forbidden`, a
-  missing `msg` with `not_found`, and any `msg` whose `by` is not `c.Who.Human` with `forbidden`.
+- **`jump`.** Registered under `jump`. Refuses an AI signer (a non-empty `c.Who.AI`) with
+  `forbidden`, a missing `msg` with `not_found`, and any `msg` whose `by` differs from `c.Who.Human`
+  with `forbidden`.
   Scans `c.Disk.Queued()` from newest to oldest for an unacknowledged `mention` item whose message
   was written by `c.Who.Human` in the same thread (or in the main line when `msg` has no thread),
   retires that item and queues its replacement with `Jump: true` and `NotBefore: 0`, or answers

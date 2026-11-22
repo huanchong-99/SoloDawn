@@ -9,13 +9,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-21 · deviation · The `rounds_limit` system message has an id derived from the triggering post's nonce
 
 - Symptom: when a `post` by an AI in a task's thread reaches `limits.rounds` (task-machine row 21), the command writes both the `post` row under `n` and the main-line `rounds_limit` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn rounds limit <n>` in base64url, rather than a random id.
-- Cause: `n` already names the `post` row, and a command function is pure and has no randomness (`rndSystemID` in `internal/home/rounds.go:240`).
+- Cause: `n` already names the `post` row, and a command function is pure and has no randomness (`rndSystemID` in `internal/home/rounds.go:232`).
 - Status: open, decided by unit HM-13 on 2026-11-21, for the same reason as `briefTaskID` below.
 
 ### 2026-11-21 · limitation · Quiet-period tracking after `ack` and `runNever` wake entries live in memory
 
 - Symptom: (1) once a host acknowledges a `quiet` `notice` item (`tx.Ack` deletes it from `inbox`), a home restart forgets that the current quiet period was already reported and can send one more `quiet` notice if the task stays silent; while the item is unacknowledged in `inbox`, no duplicate is queued across a restart. (2) Holding a thread `mention` item at `NotBefore = math.MaxInt64` while `wait.kind` is `rounds` and retiring and re-queuing it when the wait ends leaves a `math.MaxInt64` entry in `State.Wakes[ai]` until the home restarts.
-- Cause: row 23 writes no row (`planning/contracts/task-machine.md` row 23), so `After["quiet"]` records notified quiet periods per `*State` in memory (`rndRememberQuiet` in `internal/home/rounds.go:154`); `(*runGroup).count` (`internal/home/run_group.go:194`) and `inboxWake` (`internal/home/inbox.go:109`) append `max(now, it.NotBefore)` to `State.Wakes[it.AI]` and do not remove entries on retirement (`internal/home/README.md`, "The wake-up cap").
+- Cause: row 23 writes no row (`planning/contracts/task-machine.md` row 23), so `After["quiet"]` records notified quiet periods per `*State` in memory (`rndRememberQuiet` in `internal/home/rounds.go:152`); `(*runGroup).count` (`internal/home/run_group.go:194`) and `inboxWake` (`internal/home/inbox.go:109`) append `max(now, it.NotBefore)` to `State.Wakes[it.AI]` and do not remove entries on retirement (`internal/home/README.md`, "The wake-up cap").
 - Status: open, accepted in step 1.
 
 ### 2026-11-22 · limitation · macOS Application Firewall blocks incoming direct connections to an unsigned `solodawn` binary

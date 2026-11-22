@@ -192,10 +192,14 @@ func rndStubCall(s *State, c Command) (Result, *Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
 	}
+	mentions, refusal := s.postMentions(p.Mentions)
+	if refusal != nil {
+		return Result{}, refusal
+	}
 	msg := proto.MsgRow{
 		RowHeader: proto.RowHeader{Type: "msg", ID: string(c.Nonce)}, Group: s.ID,
 		Thread: (*string)(p.Thread), By: c.Who.Member(), Kind: p.Kind,
-		Timestamp: c.Timestamp, Text: p.Text, Mentions: briefIDs(p.Mentions), Body: briefJSON(p.Body), Env: &c.Env,
+		Timestamp: c.Timestamp, Text: p.Text, Mentions: mentions, Body: briefJSON(p.Body), Env: &c.Env,
 	}
 	item := Item{AI: p.Body.To, Why: postMentionWhy, Task: postTaskID(msg.Thread), Msg: msg.ID}
 	return Result{Rows: s.postRows(msg), Items: []Item{item}}, nil
@@ -229,9 +233,9 @@ func rndSignResume(by identity.Key, n byte, as, taskID string) proto.Envelope {
 	return by.Sign(payload)
 }
 
-func rndApply(t *testing.T, table Table, s *State, f *rndFakeStore, by identity.Key, env proto.Envelope) Result {
+func rndApply(t *testing.T, table Table, s *State, f *rndFakeStore, _ identity.Key, env proto.Envelope) Result {
 	t.Helper()
-	res, err := table.Apply(s, f, f, by.ID(), env, rndTestNow)
+	res, err := table.Apply(s, f, f, env, rndTestNow)
 	if err != nil {
 		t.Fatal(err)
 	}
