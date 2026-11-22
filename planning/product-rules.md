@@ -106,6 +106,8 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 - **R-43** `[S1]` Approval requests come from the CLI's own permission
   interface. The platform never reads terminal output to detect them.
 - **R-44** `[S2]` Work a colleague assigns to my AI runs at level 2 at most.
+  Not in 1.0 (2026-11-22): every session runs at the highest level, with no
+  level control; R-44 returns with level control.
 - **R-45** `[S1]` By the owner's decision of 2026-11-22, AI configuration
   shipped inside a repository (plugins, hooks, project MCP servers, the
   project's own instruction file) is always loaded in task and review

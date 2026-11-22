@@ -104,20 +104,10 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   defence in code; members of a group trust each other): the list is the
   member row; no host checks a list its owner signed (D-2).
 
-### Level cap (D-1; `contracts/step-2/authority.md`)
+### Level cap (D-1)
 
-A9.16 and A9.17 wait for the open question on R-44
-(`steps/parallel-plan-step-2-3.md`); they are removed if 1.0 drops the cap.
-
-- **A9.16** Q sets level 3 for Q-team in the group. A task from a brief that P
-  confirmed starts at level 2: the fake CLI's log says so, and a request to
-  write outside the worktree produces a card. A task from a brief that Q
-  confirmed starts at level 3. With Q's level at 1, P's task starts there too.
-  `all_level3` on `Q1` does not lift the cap.
-- **A9.17** The owner's confirmation does not make the owner the cause: with
-  Q's level at 3, a task of Q-personal from a brief that P confirmed starts at
-  level 2 after Q confirmed the card. A direct request: `start_task` by Q-team
-  after a mention by P gives level 2, after one by Q level 3.
+- **A9.16**, **A9.17** Removed on 2026-11-22: R-44 is not in 1.0, where
+  every session runs at the highest level.
 
 ### Calls across owners (D-8; `contracts/step-2/confirm.md`)
 
@@ -139,8 +129,8 @@ A9.16 and A9.17 wait for the open question on R-44
 - **A9.43** A role the brief does not give. P makes Q `admin` and confirms a
   brief that names only Q's AIs. Q gives its task to P's working AI with
   `task assign`: a `confirm` card for P appears, and the task starts on `P2`
-  once P confirms (at level 2 if R-44 is kept). When P gives it, or P's
-  secretary with `set_task`: no card.
+  once P confirms. When P gives it, or P's secretary with `set_task`: no
+  card.
 - **A9.44** `group set` with `secretary` naming Q-team, by an admin, makes it
   the secretary: `Q1` then lists the secretary's tools for Q-team and
   delivers a `notice`. In a one-person group the owner names another of their
@@ -187,31 +177,23 @@ A9.16 and A9.17 wait for the open question on R-44
 - **A9.26** The M5 run against one real forge other than GitHub, with its own
   signed-in command-line program. (`live`)
 
-### Home changes (D-11)
+### Home changes (D-11; `contracts/step-2/export.md`)
 
-A9.27 to A9.32 wait for the open question on how a group moves
-(`steps/parallel-plan-step-2-3.md`); with an export and an import they shrink
-to two tests. The signature checks they held were removed on 2026-11-22.
-
-- **A9.27** P moves the group from `P1` to `P2`. While it moves, `P1` refuses
-  commands for the group and writes no row. Afterwards the group row names
-  `P2`; the rows on `P2` equal those `P1` held; the next task gets the next
-  number; an item that was unacknowledged on `P1` is delivered once, by `P2`.
-- **A9.28** Both browsers and `Q1` follow the `groups` push: within 5 seconds,
-  without a reload, they sync from `P2`. An envelope `P1` accepted before the
-  move, sent to `P2` again, gets the same answer with no second effect.
-- **A9.29** Only the owner moves a group: a move by another admin is refused.
-  After a move, `P1` refuses the group's commands.
-- **A9.30** `P2` becomes unreachable in the middle of a move: `P1` stays the
-  home and writes again, and `P2` holds no part of the group. `P1` is
-  restarted in the middle of a move: exactly one of the two is the home.
-- **A9.31** With a copy to `P2` scheduled every minute, `P2` holds the group's
-  rows as of the last run. The copy is read-only: `P2` answers no `sync` and
-  no command for the group, and no client is told of it as a home.
-- **A9.32** The data directory of `P1` is deleted. P restores the copy on `P2`
-  by hand: `P2` is the home with the rows of the last copy and none written
-  later, and clients follow as in A9.28. In the browser: move, copy and the
-  last copy's time.
+- **A9.27** P runs `solodawn group export` with `--to` `P2` on `P1`, and
+  `solodawn group import` of that file on `P2`. The rows on `P2` equal those
+  `P1` held; the next task gets the next number; an item that was
+  unacknowledged on `P1` is delivered once, by `P2`. `P1` answers the group's
+  requests with `moved` naming `P2`, and both browsers and `Q1` follow within
+  5 seconds of the import, without a reload. Importing the file on `Q1` fails,
+  and so does exporting the group on a node that is not its home. In the
+  browser: the group info shows the two commands to P only.
+- **A9.28** A copy of the group is exported from `P1` every minute, then the
+  data directory of `P1` is deleted. P imports the last copy on `P2`: `P2` is
+  the home with the rows of that copy and none written later. P sends an
+  invitation from `P2`; Q opens it, `join` answers `ok` with no new member
+  row, and Q's browser and `Q1` follow `P2`.
+- **A9.29** to **A9.32** Removed on 2026-11-22: export and import replace
+  the move and the copy (A9.27, A9.28).
 
 ### Checks in a sandbox; accepted check lists (cut)
 
@@ -251,5 +233,4 @@ The answers are silent on these; the contract of each group decides.
 | A9.14 | decided on 2026-11-20: for an AI on a team plan and a person not on its list, the owner is asked with the same card | D-8 names personal subscriptions only |
 | A9.20 | there is a terminal to watch only during a takeover | D-14, "the bridge of step 1" |
 | A9.23 | a secretary's node may post in a team group although no AI is a member of it | D-15 refuses `host.join` there |
-| A9.27 to A9.32 | decided: the new home is another node of the group's owner | D-7: the owner is the home's owner |
-| A9.28 | receipts travel in the snapshot | `contracts/commands.md`, "Once only" |
+| A9.27, A9.28 | decided: the new home is another node of the group's owner | D-7: the owner is the home's owner |

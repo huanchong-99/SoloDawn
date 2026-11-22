@@ -20,7 +20,7 @@ A person's `member` row has `role` (`contracts/rows.md` section 2).
 
 - A group has exactly one owner, the owner of the home, and the role never
   changes: it is never given, taken or left, and a move takes the group to
-  another node of the same owner.
+  another node of the same owner (`contracts/step-2/export.md`).
 - "Admin" in every contract means role `owner` or `admin`, as in step 1.
 - A role is read from the row when a command is handled. Nothing is
   cached and no command is judged again after a role changed.
@@ -70,7 +70,9 @@ The home accepts it when all of this holds:
    is valid, and at its end the signer `k` is a valid device: else
    `forbidden`. The person is the `user` of that log.
 3. That person is not a member of `g`, and `name` is unused in the group:
-   else `conflict`.
+   else `conflict`. One exception, for a group restored from a copy
+   (`contracts/step-2/export.md` section 4): a person who is already a
+   member gets `ok`, nothing is written, and the invitation stays open.
 
 A refused `join` leaves the invitation open. An accepted one writes, in
 one transaction:
@@ -226,7 +228,9 @@ A role change writes no message: the row shows it.
    knows, each entry with `home`; it keeps such entries across restarts in
    the `setting` key `homes`, and `addrs` as addresses of `home`. It connects
    to nothing and clones nothing. A node B did not reach learns the group at
-   `host.join`. Frozen in P-4a, built in T2-1.
+   `host.join`. When the node has an AI in that group, `home.add` replaces
+   the home it connects to for it (`contracts/step-2/export.md` section 4).
+   Frozen in P-4a, built in T2-1b.
 3. **One web client origin.** A stated limit: a browser is a device per
    origin, and the link opens the web client of the home's rendezvous. A
    person on another origin first adds a browser there

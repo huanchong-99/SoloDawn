@@ -153,6 +153,7 @@ Change: <files and sections edited, or the reason for rejecting>
 | `contracts/step-2/confirm.md` | step 2: the owner's `confirm` card before an AI works for someone else, and the `information` label (D-8, D-9) |
 | `contracts/step-2/checks-forge.md` | step 2: forges other than GitHub, and where a group's commands are shown (D-10) |
 | `contracts/step-2/watch-team.md` | step 2: watching a takeover terminal, and the group kind `team` (D-14, D-15) |
+| `contracts/step-2/export.md` | step 2: exporting and importing a group, to move it or keep a copy (D-11) |
 | `contracts/step-3/drivers.md` | step 3: what a driver for a further CLI must have, its capability table (refines `steps/step-2-3.md` 3.1) |
 | `contracts/step-3/knowledge.md` | step 3: style presets and the knowledge base (D-17, D-18) |
 | `steps/step-1.md` | step 1 scope, spikes, order of the milestones |

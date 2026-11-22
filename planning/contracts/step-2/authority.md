@@ -2,7 +2,7 @@
 
 Who decides what an AI does when a group's home belongs to someone else:
 the allow list and approver delegates (D-13), the secretary, and the level
-of a task that another person caused (D-1). The design points are in
+of a task that another person caused (D-1, not in 1.0). The design points are in
 `steps/parallel-plan-step-2-3.md` section 1. Rules: R-42, R-44, R-51, R-53,
 R-115, R-136.
 
@@ -57,25 +57,13 @@ group row names X.
 
 ## 5. The level of a task session (D-1)
 
-Open: R-44 caps a task that someone other than the owner caused at level 2,
-and by the owner's decision of 2026-11-21 every session of 1.0 runs at the
-highest level with no level control. The coordinator chooses
-(`steps/parallel-plan-step-2-3.md`, "Open questions for the coordinator").
-If R-44 is kept, the rule is:
-
-- **Who caused a task**: the person who confirmed its brief (the brief's
-  `state.by`), or for a task without a brief the person whose message led
-  to its `task start`. An owner who confirmed a `confirm` card let the AI
-  take part and caused nothing.
-- The home marks an `assign` or `review` item `capped` when that person is
-  not the owner of the item's AI. The host starts the task session at the
-  lower of its usual level and 2, and at 1 where the node cannot enforce
-  level 2 for that CLI (`contracts/drivers.md` 1.1), and keeps it for the
-  life of that session, a takeover included.
+No cap in 1.0 (coordinator, 2026-11-22): R-44 is not applied, and a task
+session runs at the level of step 1 (`contracts/commands.md` section 2,
+"Levels"), whoever caused the task. R-44 returns with level control.
 
 ## 6. Limits
 
 | | Limit | Consequence |
 | --- | --- | --- |
-| 1 | The home says who may direct an AI, who caused a task and who is the secretary | a member who runs a home can put another member's AI to work; the deployment guide says to join only groups of people you trust |
+| 1 | The home says who may direct an AI and who is the secretary | a member who runs a home can put another member's AI to work; the deployment guide says to join only groups of people you trust |
 | 2 | A delegate removed while their `act` is on the way | the home handles it by the row at that moment |

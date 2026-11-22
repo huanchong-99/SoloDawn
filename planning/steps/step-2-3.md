@@ -17,13 +17,13 @@ Several people in one group, each with their own computers and AIs.
 | Whose instructions | A new card kind `confirm`: when someone mentions another person's personal-subscription AI, the home asks that owner, and queues the item once the owner confirms. No auto-accept switch. | R-51 |
 | After a task started | Messages from others in the thread are delivered labelled `information`. A change of direction needs a new confirmation. | R-52 |
 | Allow lists | For team-plan and API-key AIs the owner lists who may direct them (`member.allow`); the home reads the row. | R-53 |
-| Level cap | A task caused by someone other than the owner gets a task session at level 2 at most. Open for 1.0, where every session runs at the highest level (`steps/parallel-plan-step-2-3.md`, "Open questions for the coordinator"). | R-44 |
+| Level cap | A task caused by someone other than the owner gets a task session at level 2 at most. Not in 1.0 (2026-11-22): every session runs at the highest level. | R-44 |
 | Calls across owners | `ask` to someone else's AI follows the same confirmation or allow list. | R-115 |
 | Approver delegates | The owner names people who may decide approvals for their AIs. | R-42 |
 | Watching | A member asks to watch a terminal; the owner confirms; a receive-only terminal channel. | R-81 |
 | Team-wide group | Group kind `team`: no repository, no tasks. Secretaries post cross-project notices there. | R-14 |
 | Other forges | The forge commands of `contracts/local.md` section 7 become per-group templates (`risks.md` Q-9). The client shows a group's check commands and templates before an AI joins it. | R-92 |
-| Home changes | Moving a group to another home; a copy of the group for safekeeping (`risks.md` Q-12). | R-134, R-135 |
+| Home changes | Moving a group to another home; a copy of the group for safekeeping (`risks.md` Q-12): one export on the old node and one import on the new (`contracts/step-2/export.md`). | R-134, R-135 |
 | Checks in a sandbox | Cut on 2026-11-22: no sandbox for checks in 1.0; `risks.md` K-8 stays a stated limit. | R-40 |
 
 ### What step 1 already provides for it
@@ -37,10 +37,8 @@ Several people in one group, each with their own computers and AIs.
 
 ### Known design points to settle at the start of step 2
 
-1. **Level of a task session.** Each task has its own session, so the
-   level cap of R-44 is set when that session is created. What remains to
-   settle is who counts as having caused a task: the person who confirmed
-   the brief, or the owner who confirmed the request for their AI.
+1. **Level of a task session.** Not in 1.0 (2026-11-22): R-44 is not
+   applied, and every session runs at the highest level.
 2. **Check commands on other people's machines.** Cut on 2026-11-22: no
    acceptance per machine; the client shows the commands.
 3. **What a browser trusts.** Cut on 2026-11-22: it shows what the home

@@ -19,7 +19,7 @@ sessions, never in group sessions.
 
 | # | Point | Answer |
 | --- | --- | --- |
-| D-1 | Who caused a task, for the level cap of R-44 | Open: question 1 below. If R-44 is kept: the person who confirmed the brief, or who made the direct request, caused the task; the home marks the item, the host caps the session (`contracts/step-2/authority.md` section 5) |
+| D-1 | Who caused a task, for the level cap of R-44 | Not in 1.0 (decided 2026-11-22): R-44 is not applied; every session runs at the highest level (`contracts/step-2/authority.md` section 5) |
 | D-2 | What a host requires before it acts for a home that is not its owner's | Cut: the host takes its home's items as in step 1 |
 | D-3 | Check commands on other people's machines | Cut: no acceptance and no gate. The client shows a group's commands before an AI joins it (`contracts/step-2/checks-forge.md` section 1) |
 | D-4 | Stolen-device race in the device log | Cut: the step 1 rule stays, `risks.md` K-4 a stated limit |
@@ -29,7 +29,7 @@ sessions, never in group sessions.
 | D-8 | The `confirm` card | One card kind for three requests: directing someone's personal-subscription AI, calling it with `ask`, and watching its terminal. `act confirm` names the card; the home queues the item (`contracts/step-2/confirm.md`) |
 | D-9 | Messages from others after a task started (R-52) | Delivered with the label `information`, read from the rows the home sent (`contracts/step-2/labels.md`) |
 | D-10 | Other forges | Per group: four templates (push, open request, read checks, merge) as argument lists with named places, never a shell string; the home checks them (`contracts/step-2/checks-forge.md`) |
-| D-11 | Moving a group; a copy for safekeeping | Open: question 2 below |
+| D-11 | Moving a group; a copy for safekeeping | One export on the old node and one import on the new; a copy is an export, scheduled by the owner; clients follow the error `moved` (decided 2026-11-22; `contracts/step-2/export.md`) |
 | D-12 | Checks in a sandbox | Cut: none in 1.0; `risks.md` K-8 stays a stated limit |
 | D-13 | Approver delegates (R-42) | The `approvers` of the member row, set by the owner with `member set` of step 1; the home checks the row when a decision comes (`contracts/step-2/authority.md` section 3) |
 | D-14 | Watching a terminal (R-81) | A receive-only channel `watch:*` served by the AI's host on a `direct` path, opened after a `confirm` card with `what: watch`; the home's `watch` item gives the grant (`contracts/step-2/watch-team.md`) |
@@ -43,8 +43,8 @@ sessions, never in group sessions.
 
 The contract units C2-0 to C2-5, C2-7, C3-1 and C3-2 are merged and cut
 to the rules above by this file's pull request. C2-6 (moving and copying,
-`move.md` and `copy.md`) is still open as pull request #166 and waits for
-question 2. Spikes S-10 and T3-0 have reported; S-10 is not used, since
+pull request #166) is replaced by `contracts/step-2/export.md`, written in
+this pull request; the coordinator closes #166. Spikes S-10 and T3-0 have reported; S-10 is not used, since
 D-12 is cut.
 
 ## 3. Step 2 in lanes
@@ -77,15 +77,15 @@ goes first.
 | Id | Does | Owns | Needs | Sz | Start |
 | --- | --- | --- | --- | --- | --- |
 | P-4a | Freeze people and confirm: `invite` and its result, `join`, `member set` with `role`, the `system` bodies `member_joined` and `member_removed`, `home.add` and `home` in `host.info.homes` (`people.md`); kind `confirm` with its body and four states, `act confirm` and `act deny` on it, the call status `denied`, `ask` returning `{"denied":true}`, `push` with `confirm`, `wait.kind` `confirm` (`confirm.md` sections 3 to 6); `hello` with `v` 2 (`contracts/step-3/knowledge.md` section 8). Golden files and mock answers | lane PROTO files | — | M | now |
-| P-4b | Freeze watch, team and forge: item `watch`, `watch.start` and its answer, the label `watch:<g>:<member>`, `watchers` in `host.info`, `watch.end` (`watch-team.md` sections 2 to 5); group kind `team`, kind `bulletin` and its body (sections 7 to 10); `forge: custom` and `templates` in the group row, `group create` and `group set` (`checks-forge.md` section 2) | lane PROTO files | P-4a | S | after P-4a |
+| P-4b | Freeze watch, team, forge and export: item `watch`, `watch.start` and its answer, the label `watch:<g>:<member>`, `watchers` in `host.info`, `watch.end` (`watch-team.md` sections 2 to 5); group kind `team`, kind `bulletin` and its body (sections 7 to 10); `forge: custom` and `templates` in the group row, `group create` and `group set` (`checks-forge.md` section 2); the error `moved` with `home` (`export.md` section 3) | lane PROTO files | P-4a | S | after P-4a |
 
 ### 3.2 Lane PEOPLE: invitations, joining, roles, removal
 
 | Id | Does | Tests | Owns | Needs | Sz | Start |
 | --- | --- | --- | --- | --- | --- | --- |
 | X2-1 | Types-only seam for joining: the field of a command's context that says a connection is joining, for which group, with which presented log; the hook the home calls for `invite` | build passes | `home/people_seam.go` | — | S | now |
-| T2-1a | Home: `join`, `member set` with `role`, `member remove` of a person with its `device` and `push_sub` rows (`people.md` sections 1, 2, 6) | A9.3, A9.4 (home half) | `home/cmd_people.go` | P-4a, X2-1 | M | after P-4a |
-| T2-1b | Node: `invite` (the secret, the room, the link, in memory), joining connections (`people.md` sections 3 to 5), device logs of several people, `home.add`, `hello` `v` 2 with its fallback | A9.1, A9.2, A9.6 (node half) | `node/admit.go`, `node/version.go`; names `node/pair.go`, `node/devlog.go` | P-4a, X2-1 | M | after P-4a |
+| T2-1a | Home: `join`, also by a member after a restore (`export.md` section 4), `member set` with `role`, `member remove` of a person with its `device` and `push_sub` rows (`people.md` sections 1, 2, 6) | A9.3, A9.4 (home half) | `home/cmd_people.go` | P-4a, X2-1 | M | after P-4a |
+| T2-1b | Node: `invite` (the secret, the room, the link, in memory), joining connections (`people.md` sections 3 to 5), device logs of several people, `home.add`, also replacing the home of a group with an AI here, `hello` `v` 2 with its fallback | A9.1, A9.2, A9.6 (node half) | `node/admit.go`, `node/version.go`; names `node/pair.go`, `node/devlog.go` | P-4a, X2-1 | M | after P-4a |
 | W2-1 | Browser: open a `#join=` link, join the room as in a pairing, present the log, send `join`, then `home.add` to the person's own nodes; `hello` `v` 2 with its fallback | unit | `lib/join.ts`, `lib/version.ts` | P-4a | M | after P-4a |
 | U2-1 | Members and roles, the invitation dialog with its countdown, the join page, removal | A9.1 to A9.4 as seen | `cmp/people/`, `routes/Join.svelte` | P-4a; the join page also W2-1 | M | after P-4a |
 
@@ -96,7 +96,6 @@ goes first.
 | T2-2a | Home: when to ask (`confirm.md` section 2) for mentions and calls; the card, `act confirm` and `act deny`, expiry, reminders; the call's denial; approvals by the current `approvers` of the row (`authority.md` section 3) | A9.8, A9.9, A9.14, A9.18, A9.19 (home half) | `home/cmd_confirm.go`; names `home/cmd_post.go`, `home/cmd_card.go` | P-4a | M | after P-4a |
 | T2-2b | Home: a role needs its owner's word (`confirm.md` section 6): the card at task-machine rows 1 and 11, the wait `confirm`, items after a confirmation, a kept request | A9.11, A9.13, A9.43 | `home/cmd_confirm_task.go`; names `home/machine.go`, `home/cmd_task.go` | T2-2a | M | after T2-2a |
 | T2-13 | Host: the labels in turn text, read from the rows the home sent (`labels.md`) | A9.12, A9.42 | `host/turn_info.go` | — | S | now |
-| T2-3 | Level cap, only if question 1 keeps R-44: the home marks the item, the host caps the session (`authority.md` section 5); its one item field goes into whichever of P-4a, P-4b is not merged yet | A9.16, A9.17 | `home/cap.go`, `host/cap.go` | question 1, P-4a | S | after question 1 |
 | U2-2 | The `confirm` card in its three kinds and four states, actions for `body.to` only; the allow list and delegates editor on the AI member panel (`member set` with `allow`, `approvers`) | A9.8, A9.9, A9.11, A9.14 as seen | `cmp/confirm/`, `cmp/allow/` | P-4a | M | after P-4a |
 
 ### 3.4 Lane WATCH AND TEAM
@@ -116,13 +115,13 @@ goes first.
 
 ### 3.6 Lane HOME CHANGES
 
-Waits for question 2. With the recommended answer: a short contract
-(C2-6b, S: the export file, the import command, how clients learn the new
-home), its shapes in lane PROTO (S), one backend unit T2-10 (M: export and
-import on the node and home), one web unit U2-5 (S: export, import, the
-last export's time), and A9.27 to A9.32 rewritten as two tests. With the
-other answer: pull request #166 cut by A-15 and merged, then T2-10 (move)
-and T2-11 (copy) as first planned, M each.
+The contract is `contracts/step-2/export.md`, in this pull request; its one
+shape is in P-4b.
+
+| Id | Does | Tests | Owns | Needs | Sz | Start |
+| --- | --- | --- | --- | --- | --- | --- |
+| T2-10 | Node and store: `group export` and `group import`, the file, the `moved` setting and answers, a node with an AI following `moved` (`export.md` sections 1 to 3) | A9.27, A9.28 (node half) | `node/export.go`, `internal/store/export.go`; names `node/local.go` | P-4b | M | after P-4b |
+| U2-5 | Browser: follow `moved`; the group info shows the owner the two commands with the group id and the owner's other nodes | A9.27 as seen | `cmp/move/`; names `lib/groups.svelte.ts` | P-4b | S | after P-4b |
 
 ### 3.7 Lane ACCEPTANCE
 
@@ -132,21 +131,20 @@ and T2-11 (copy) as first planned, M each.
 | I2-1a | Scenarios and steps of A9.1 to A9.6 | `features/s2_people*` | I2-0 to run | S | now |
 | I2-1b | A9.8 to A9.19, A9.42 to A9.44 | `features/s2_confirm*` | I2-0 to run | M | now |
 | I2-1c | A9.20 to A9.26 | `features/s2_watch*` | I2-0 to run | M | now |
+| I2-1e | A9.27, A9.28 | `features/s2_export*` | I2-0 to run | S | now |
 | I2-1d | A9.40, A9.41 | `features/s2_whole*` | the other I2-1 | S | after the lanes merge |
 | I2-2 | Step 2 in the browsers and on three systems | `web/e2e/s2.spec.ts` | the U2 units | M | after the U2 units |
 
-The scenarios of I2-1a to I2-1c are written now; each turns green when the
+The scenarios of I2-1a, I2-1b, I2-1c and I2-1e are written now; each turns green when the
 units it names merge.
 
 ### 3.8 What can start at once
 
 - **Now**, once this plan is merged: P-4a (or P-5 first, 3.1), X2-1, T2-13,
-  I2-0 and the scenarios of I2-1a to I2-1c.
+  I2-0 and the scenarios of I2-1a, I2-1b, I2-1c and I2-1e.
 - **After P-4a**: T2-1a, T2-1b, W2-1, U2-1, T2-2a, U2-2, and P-4b.
-- **After P-4b**: T2-7, T2-8, U2-4; T2-6 and U2-3 also need the terminal
-  units of step 1 (HS-19, HS-20, U-11).
-- **After the coordinator's answers**: T2-3 (question 1), lane HOME CHANGES
-  (question 2).
+- **After P-4b**: T2-7, T2-8, U2-4, T2-10, U2-5; T2-6 and U2-3 also need
+  the terminal units of step 1 (HS-19, HS-20, U-11).
 
 ## 4. Code units of step 3
 
@@ -154,13 +152,13 @@ units it names merge.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | T3-0 | 1 | Desk research: terms and capabilities of each candidate CLI, each claim with its source (no code; the answer goes into C3-1) | — | pull request description | — | A | S |
 | P-5 | 5 | Wire shapes: note types `preset` and `kb`, the brief's preset field, `kb_put`, `kb_search`; the `driver` object of `host.info` (`contracts/step-3/drivers.md` section 6) | golden round trip | lane PROTO | C3-1, C3-2; not at the same time as P-4a or P-4b | F | S |
-| T3-1 | 4 | The capability table and the switches it drives, and nothing on the wire: `driver` in `host.info` comes with T3-2, after P-5 | A10 capabilities | `host/caps.go` | C3-1, HS-1, HS-2 | A | S |
+| T3-1 | 4 | The capability table and the switches of `agent.set`, the tool list and `takeover.start` only (decided 2026-11-22), and nothing on the wire: `driver` in `host.info` comes with T3-2, after P-5 | A10 capabilities | `host/caps.go` | C3-1, HS-1, HS-2 | A | S |
 | T3-2, T3-3 | 5+ | One driver and one fake CLI each for OpenCode and Qwen Code, the CLIs that passed T3-0, one at a time. T3-2 also puts the declaration into `host.info` as `driver`, in the shape P-5 froze | M3, M4, M7 tests for that CLI | `host/<cli>.go`, `host/fakecli/<cli>/` | T3-1, captures; T3-2 also P-5 | A | 2 × M |
 | T3-5 | 6 | Presets: the note type, the brief field, the turn text | A10 presets | `home/preset.go`, `host/turn_preset.go` | P-5 | A | S |
 | T3-6 | 6 | Knowledge base: index, `kb_put`, `kb_search`, exempt from retention | A10 knowledge | `internal/store/kb.go`, `home/kb.go`, `host/tools_kb.go` | P-5 | A | M |
 | U3-1 | 6 | Preset choice in the brief card; the preset editor | A10 as seen | `cmp/preset/` | U-7, P-5 | F | S |
 | U3-2 | 6 | Knowledge base panel in the group info | A10 as seen | `cmp/kb/` | U-14, P-5 | F | S |
-| U3-3 | 6 | What `driver` offers: the account choice, the level control, the cap units, the terminal button (`contracts/step-3/drivers.md` section 6) | A10.1, A10.2 as seen | `cmp/driver/` | U-3, U-5, U-11, U-12, P-5 | F | S |
+| U3-3 | 6 | What `driver` offers: the account choice and the terminal button only (decided 2026-11-22; `contracts/step-3/drivers.md` section 6) | A10.1, A10.2 as seen | `cmp/driver/` | U-3, U-11, P-5 | F | S |
 | I3-1 | 7 | Step 3 acceptance, for the CLIs that passed T3-0 only | A10.x | `features/s3*` | T3-1 to T3-3, T3-5, T3-6, U3-1 to U3-3 | A | M |
 
 Columns as in `steps/parallel-plan-units.md`. Amp is deferred
@@ -198,6 +196,26 @@ Columns as in `steps/parallel-plan-units.md`. Amp is deferred
    account choice and the terminal button only; the rest waits for
    `perm.set`.
 
+### Decided (2026-11-22)
+
+1. R-44: dropped for 1.0, answer (a). T2-3 is cancelled, with A9.16 and
+   A9.17; `contracts/step-2/authority.md` section 5 and R-44 say so.
+2. Moving and copying: export and import, answer (b).
+   `contracts/step-2/export.md` is the short contract; T2-10 (M) and U2-5
+   (S) are its units; A9.27 and A9.28 its two tests. Pull request #166 is
+   left to the coordinator, who closes it.
+3. The `hello` `v` 1 fallback stays for now.
+4. Step 3 and level control: as recommended. T3-1 builds the switches of
+   `agent.set`, the tool list and `takeover.start` only; U3-3 shows the
+   account choice and the terminal button only; the postponed parts of
+   `contracts/step-3/drivers.md` section 5 and of A10.1 are dropped.
+
+### Follow-up
+
+- Cut the `hello` `v` 1 fallback (SLIMMING D-4: about 60 lines in T2-1b and
+  W2-1, and `contracts/step-3/knowledge.md` section 8) in a small pull
+  request after Gemini's step 3 units merge.
+
 ## 6. Not verified
 
 - The lanes were read against the contracts and the file tree of `rebuild`;
@@ -222,7 +240,7 @@ are those of the files before the cut.
 | 3 | `authority.md` section 6: `req`, `body.start`, a brief's `arg`, unique titles in a brief | a home that swaps a request | A-8, A-11 |
 | 4 | The secretary by consent: `secretary_by`, `secretary_joined`, the host's check; `group set` names the secretary | a dishonest admin or home | A-8 |
 | 5 | `authority-record.md`, deleted | its rules are cut | A-8 |
-| 6 | Unit T2-3 as planned (owner-signature rule, signed list, merge reading the pull request's base and head); a cap-only T2-3 waits for question 1 | a dishonest home | A-8, A-16 |
+| 6 | Unit T2-3 as planned (owner-signature rule, signed list, merge reading the pull request's base and head) | a dishonest home | A-8, A-16 |
 | 7 | `authority.md` section 7, the fork rule of the device log; `fork-vectors.md` deleted; its decision record moved to `docs/decisions/rejected/`; `risks.md` K-4 back to the step 1 rule | a stolen device | A-9 |
 | 8 | Unit T2-4 (the fork rule and its vectors); the device-list notices of U2-4 | a stolen device | A-9, overview |
 | 9 | `browser-trust.md` sections 1 to 6, 8.1, the fingerprints of 8.2, 9 to 12: the browser's check of every envelope and the "unverified" mark | a dishonest home | A-10 |
@@ -245,6 +263,9 @@ are those of the files before the cut.
 | 26 | `steps/step-2-3.md`: known points 2 to 4, the sandbox row, the signed-item paragraph; R-136, R-137 and C-11 (`architecture.md`) reworded | follow from the cuts above | A-8, C-4, C-5 |
 | 27 | P-4 as planned: `allow.set`, `req`, `body.start`, `secretary_by`, `secretary_joined`, `arg`, `checks.accept`, the `pair` role `join`, the snapshot; it is now P-4a and P-4b | their rules are cut | A-8, A-11, A-12, C-4 |
 | 28 | Unit T3-4 (Amp) removed from the unit table; it was never scheduled | no approval channel (`contracts/step-3/drivers.md` section 8) | — |
+| 29 | The level cap of R-44: `authority.md` section 5's rule, the `capped` item field, unit T2-3 (cancelled), A9.16 and A9.17 | R-44 is not in 1.0 (decision 1 above) | — |
+| 30 | The live move and the scheduled copy of D-11 (PR #166: snapshot, redirect, epoch, stop-and-transfer), unit T2-11, A9.29 to A9.32 | export and import instead (decision 2 above); least code | D-3, A-15 |
+| 31 | `contracts/step-3/drivers.md` section 5: the switches of `perm.set`, `settings.set` caps and the task session's level; U3-3's level control and cap units; the `perm.set` sentence of A10.1 | no level control or caps in 1.0 (decision 4 above) | — |
 
 Changed, not cut: `settings.teams` became "the team groups a node knows"
 (homed there, or added with `home.add`), because `settings.set` is postponed
