@@ -1,11 +1,12 @@
-Feature: M4 permissions, approvals, decisions, stops and limits
+Feature: M4 permissions, approvals, decisions and the group pause
   Task and group CLI sessions raise approval and decision cards through the
   node's structured drivers and MCP tools, owners decide from any enrolled
   browser device with multiple-choice options or custom free text, timed-out
   waits survive host restarts so an approved command runs once on retry without
   a second card while a different command raises a new card, reassigned or
-  cancelled tasks retire pending cards, group pause and node offline controls
-  stop running turns and hold inbox items, and long turns time out.
+  cancelled tasks retire pending cards, and pausing the group stops a running
+  turn and holds mentions until the resume. The offline switch (A4.8) and the
+  turn time limit (A4.9) are in host_limits.feature.
 
   Scenario: Approving task permission requests from a second browser lets Claude Code and Codex run (A4.1)
     Given an M4 project group with a second browser and configured AIs "Claude" and "Codex"
@@ -62,32 +63,12 @@ Feature: M4 permissions, approvals, decisions, stops and limits
   Scenario: Pausing the group interrupts a running turn within 2 seconds, holds mentions until resume, and leaves an approval-waiting task asleep (A4.7)
     Given an M4 project group with a 1-second approval wait, a second browser and configured AIs "Claude" and "Codex"
     When an M4 task for "Claude" times out waiting for approval on "npm install dotenv"
-    And "Codex" starts a main-line turn posting "Codex analyzing before pause." and waiting while the group is active
+    And "Codex" starts a main-line turn posting "Codex analyzing before pause." and is scripted to post "Codex answered held mentions." on its next turn
     And the M4 owner pauses the group
     Then "Codex"'s running turn is interrupted within 2 seconds with reason "stop" and system message "group_paused"
-    When the M4 owner posts mentions "@Codex first queued note" and "@Codex second queued note" while the group is paused
-    Then the 2 M4 mention items stay held on the home and "Codex" does not post while paused
+    When the M4 owner mentions "Codex" with "@Codex first queued note"
+    And the M4 owner mentions "Codex" with "@Codex second queued note"
+    Then the 2 M4 mention items stay on the home while the group is paused
     When the M4 owner resumes the group
-    Then "Codex" posts "Codex answered held mentions." in the M4 group with system message "group_resumed" and 0 queued home items
+    Then "Codex" posts "Codex answered held mentions." after system message "group_resumed" and the M4 home inbox is empty
     And "Claude"'s approval-waiting task was not woken by the group resume
-
-  Scenario: Taking all AIs offline closes every session on the node, keeps items on the home until online, and works with the home stopped (A4.8)
-    Given an M4 project group with a second browser and configured AIs "Claude" and "Codex"
-    When "Claude" holds an open waiting session after posting "Claude ready." and "Codex" is running a turn after posting "Codex busy."
-    And the M4 owner takes all AIs on the node offline
-    Then both M4 sessions on the node close, "Codex" records turn_interrupted "stop", and both AIs show state "offline"
-    When the M4 owner mentions "Claude" with "@Claude while node offline"
-    Then the M4 mention item stays unacknowledged on the home and "Claude" starts no new process
-    When "Claude" is scripted to keep its resumed session open after posting "Claude back online." and the M4 owner brings the node online
-    Then "Claude" posts "Claude back online." and the M4 home inbox is empty
-    When the M4 home stops and the M4 owner takes all AIs on the node offline while the home is stopped
-    Then "Claude"'s open session on the node closes with the home stopped
-    When the M4 home restarts and the M4 owner mentions "Claude" with "@Claude after home restart"
-    Then "Claude" shows state "offline" on the restarted M4 home and the mention item stays on the home
-    When "Claude" is scripted to post "Claude online after home restart." and the M4 owner brings the node online
-    Then "Claude" posts "Claude online after home restart." in the M4 group and the M4 home inbox is empty
-
-  Scenario: With turn_minutes set to 1 a long turn is interrupted with reason timeout (A4.9)
-    Given an M4 project group with turn_minutes 1, a second browser and configured AI "Claude"
-    When an M4 task for "Claude" posts "Claude started long turn." and runs past the 1-minute turn limit
-    Then "Claude"'s task turn is interrupted with reason "timeout" and the task records 1 failure

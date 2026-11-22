@@ -147,7 +147,6 @@ type m4World struct {
 	seenCards     map[string]bool
 	waitElapsed   time.Duration
 	pauseStarted  time.Time
-	turnStarted   time.Time
 }
 
 func m4Steps(sc *godog.ScenarioContext, f fixtures) {
@@ -167,7 +166,7 @@ func m4Steps(sc *godog.ScenarioContext, f fixtures) {
 	registerM4ApprovalSteps(sc, w)
 	registerM4DecisionSteps(sc, w)
 	registerM4LifecycleSteps(sc, w)
-	registerM4StopAndLimitSteps(sc, w)
+	registerM4PauseSteps(sc, w)
 }
 
 func registerM4SetupSteps(sc *godog.ScenarioContext, w *m4World) {
@@ -176,7 +175,6 @@ func registerM4SetupSteps(sc *godog.ScenarioContext, w *m4World) {
 	})
 	sc.Step(`^an M4 project group with a (\d+)-second approval wait, a second browser and configured AI "([^"]+)"$`, w.givenSingleAIWaitGroup)
 	sc.Step(`^an M4 project group with a (\d+)-second approval wait, a second browser and configured AIs "([^"]+)" and "([^"]+)"$`, w.givenTwoAIGroup)
-	sc.Step(`^an M4 project group with turn_minutes (\d+), a second browser and configured AI "([^"]+)"$`, w.givenSingleAITurnLimitGroup)
 }
 
 func registerM4ApprovalSteps(sc *godog.ScenarioContext, w *m4World) {
@@ -209,7 +207,7 @@ func registerM4LifecycleSteps(sc *godog.ScenarioContext, w *m4World) {
 	sc.Step(`^the M4 second browser approves the first card after the restart$`, w.whenApproveFirstAfterRestart)
 	sc.Step(`^the M4 browsers see no second card for "([^"]+)" and see a new pending approval card from "([^"]+)" for "([^"]+)"$`, w.thenNoRetryCardAndNewCard)
 	sc.Step(`^the M4 second browser approves that new pending card$`, func() error {
-		return w.actOnCard(w.b2, w.currentCard.ID, "approve", "", "")
+		return w.actOnCard(w.b2, w.currentCard.ID, "approve", "", "", "")
 	})
 	sc.Step(`^"([^"]+)" posts "([^"]+)" in the M4 group after 2 resumed starts of the same CLI session and 2 total approval cards$`, w.thenResumedRetryCompletes)
 	sc.Step(`^an M4 task for "([^"]+)" times out waiting for approval on "([^"]+)"$`, w.whenTaskTimesOutShort)
@@ -220,30 +218,17 @@ func registerM4LifecycleSteps(sc *godog.ScenarioContext, w *m4World) {
 	sc.Step(`^both pending M4 cards on the second task have status "([^"]+)" and late actions on them fail with "([^"]+)"$`, w.thenCancelledCardsExpiredAndRefused)
 }
 
-func registerM4StopAndLimitSteps(sc *godog.ScenarioContext, w *m4World) {
-	sc.Step(`^"([^"]+)" starts a main-line turn posting "([^"]+)" and waiting while the group is active$`, w.whenAIStartsPausableTurn)
+func registerM4PauseSteps(sc *godog.ScenarioContext, w *m4World) {
+	sc.Step(`^"([^"]+)" starts a main-line turn posting "([^"]+)" and is scripted to post "([^"]+)" on its next turn$`, w.whenAIStartsPausableTurn)
 	sc.Step(`^the M4 owner pauses the group$`, w.whenOwnerPausesGroup)
 	sc.Step(`^"([^"]+)"'s running turn is interrupted within 2 seconds with reason "([^"]+)" and system message "([^"]+)"$`, w.thenTurnInterruptedWithinTwoSeconds)
-	sc.Step(`^the M4 owner posts mentions "([^"]+)" and "([^"]+)" while the group is paused$`, w.whenOwnerPostsTwoMentions)
-	sc.Step(`^the (\d+) M4 mention items stay held on the home and "([^"]+)" does not post while paused$`, w.thenMentionsHeldWhilePaused)
+	sc.Step(`^the M4 owner mentions "([^"]+)" with "([^"]+)"$`, w.postOwnerMention)
+	sc.Step(`^the (\d+) M4 mention items stay on the home while the group is paused$`, func(want int) error {
+		return awaitHomeInboxCount(w.node().Store, want)
+	})
 	sc.Step(`^the M4 owner resumes the group$`, w.whenOwnerResumesGroup)
-	sc.Step(`^"([^"]+)" posts "([^"]+)" in the M4 group with system message "([^"]+)" and 0 queued home items$`, w.thenResumedGroupDeliversMentions)
+	sc.Step(`^"([^"]+)" posts "([^"]+)" after system message "([^"]+)" and the M4 home inbox is empty$`, w.thenResumedGroupDeliversMentions)
 	sc.Step(`^"([^"]+)"'s approval-waiting task was not woken by the group resume$`, w.thenApprovalTaskStayedAsleep)
-	sc.Step(`^"([^"]+)" holds an open waiting session after posting "([^"]+)" and "([^"]+)" is running a turn after posting "([^"]+)"$`, w.whenOneWaitingAndOneWorking)
-	sc.Step(`^the M4 owner takes all AIs on the node offline$`, w.whenOwnerTakesNodeOffline)
-	sc.Step(`^both M4 sessions on the node close, "([^"]+)" records turn_interrupted "([^"]+)", and both AIs show state "([^"]+)"$`, w.thenSessionsClosedAndOffline)
-	sc.Step(`^the M4 owner mentions "([^"]+)" with "([^"]+)"$`, w.whenOwnerMentionsAI)
-	sc.Step(`^the M4 mention item stays unacknowledged on the home and "([^"]+)" starts no new process$`, w.thenOfflineMentionStaysOnHome)
-	sc.Step(`^"([^"]+)" is scripted to keep its resumed session open after posting "([^"]+)" and the M4 owner brings the node online$`, w.whenScriptOpenResumeAndOnline)
-	sc.Step(`^"([^"]+)" posts "([^"]+)" and the M4 home inbox is empty$`, w.thenOpenOnlineDelivered)
-	sc.Step(`^the M4 home stops and the M4 owner takes all AIs on the node offline while the home is stopped$`, w.whenHomeStopsAndOffline)
-	sc.Step(`^"([^"]+)"'s open session on the node closes with the home stopped$`, w.thenOpenSessionClosedWithStoppedHome)
-	sc.Step(`^the M4 home restarts and the M4 owner mentions "([^"]+)" with "([^"]+)"$`, w.whenHomeRestartsAndOwnerMentions)
-	sc.Step(`^"([^"]+)" shows state "([^"]+)" on the restarted M4 home and the mention item stays on the home$`, w.thenRestartedHomeSeesOfflineAndHolds)
-	sc.Step(`^"([^"]+)" is scripted to post "([^"]+)" and the M4 owner brings the node online$`, w.whenScriptFinalResumeAndOnline)
-	sc.Step(`^"([^"]+)" posts "([^"]+)" in the M4 group and the M4 home inbox is empty$`, w.thenFinalOnlineDelivered)
-	sc.Step(`^an M4 task for "([^"]+)" posts "([^"]+)" and runs past the 1-minute turn limit$`, w.whenTaskRunsPastTurnLimit)
-	sc.Step(`^"([^"]+)"'s task turn is interrupted with reason "([^"]+)" and the task records (\d+) failure$`, w.thenTaskTurnTimedOut)
 }
 
 func (w *m4World) node() *nodetest.Node {
@@ -258,16 +243,6 @@ func (w *m4World) givenSingleAIWaitGroup(waitS int, aiName string) error {
 		return err
 	}
 	return w.applyOptionalWait(waitS)
-}
-
-func (w *m4World) givenSingleAITurnLimitGroup(turnMin int, aiName string) error {
-	if err := w.startNode(); err != nil {
-		return err
-	}
-	if err := w.joinAI(aiName, m4VendorOf(aiName)); err != nil {
-		return err
-	}
-	return w.setTurnMinutes(turnMin)
 }
 
 func (w *m4World) givenTwoAIGroup(waitS int, ai1, ai2 string) error {
@@ -354,22 +329,6 @@ func (w *m4World) createGroupAndSync() error {
 func (w *m4World) setApprovalWait(waitS int) error {
 	limits := w.b1.group.Limits
 	limits.ApprovalWaitS = waitS
-	if err := w.sendGroupLimits(limits); err != nil {
-		return err
-	}
-	return w.awaitHostWaitLimit(w.activeHost, waitS)
-}
-
-func (w *m4World) setTurnMinutes(turnMin int) error {
-	limits := w.b1.group.Limits
-	limits.TurnMinutes = turnMin
-	if err := w.sendGroupLimits(limits); err != nil {
-		return err
-	}
-	return w.awaitHostTurnLimit(w.activeHost, turnMin)
-}
-
-func (w *m4World) sendGroupLimits(limits proto.Limits) error {
 	setCmd := proto.GroupSet{
 		GroupCommand: proto.GroupCommand{
 			HomeCommand: proto.HomeCommand{Type: "group", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), Group: w.groupID},
@@ -377,7 +336,10 @@ func (w *m4World) sendGroupLimits(limits proto.Limits) error {
 		},
 		Limits: &limits,
 	}
-	return w.sendOK(w.b1, setCmd)
+	if err := w.sendOK(w.b1, setCmd); err != nil {
+		return err
+	}
+	return w.awaitHostWaitLimit(w.activeHost, waitS)
 }
 
 func (w *m4World) awaitHostWaitLimit(h *host.Host, want int) error {
@@ -391,34 +353,13 @@ func (w *m4World) awaitHostWaitLimit(h *host.Host, want int) error {
 	return fmt.Errorf("timed out waiting for host approval_wait_s %d", want)
 }
 
-func (w *m4World) awaitHostTurnLimit(h *host.Host, want int) error {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if m4HostHasTurnLimit(h, string(w.groupID), want) {
-			return nil
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	return fmt.Errorf("timed out waiting for host turn_minutes %d", want)
-}
-
 func m4HostHasWaitLimit(h *host.Host, gid string, want int) bool {
-	grp, ok := m4DecodeHostGroup(h, gid)
-	return ok && grp.Limits.ApprovalWaitS == want
-}
-
-func m4HostHasTurnLimit(h *host.Host, gid string, want int) bool {
-	grp, ok := m4DecodeHostGroup(h, gid)
-	return ok && grp.Limits.TurnMinutes == want
-}
-
-func m4DecodeHostGroup(h *host.Host, gid string) (proto.GroupRow, bool) {
 	raw, ok := h.Rows.Get(gid, "group", gid)
 	if !ok {
-		return proto.GroupRow{}, false
+		return false
 	}
 	var grp proto.GroupRow
-	return grp, proto.Decode(raw, &grp) == nil
+	return proto.Decode(raw, &grp) == nil && grp.Limits.ApprovalWaitS == want
 }
 
 func (w *m4World) joinAI(aiName, agent string) error {
@@ -427,12 +368,6 @@ func (w *m4World) joinAI(aiName, agent string) error {
 		return err
 	}
 	return w.awaitAISynced(aiName)
-}
-
-func (w *m4World) callHostCmd(typ string) error {
-	cmd := newHostCmd(&w.ids, w.node().Key.ID(), typ)
-	_, err := callHostSurface(context.Background(), w.activeHost, w.activeLink, w.cluster.Owner.ID(), typ, cmd)
-	return err
 }
 
 func (w *m4World) awaitAISynced(aiName string) error {
@@ -534,30 +469,6 @@ func m4ClaudeTurnDoc(body []map[string]any, postID int, postText string) map[str
 	steps = append(steps, map[string]any{"dir": "stdout", "msg": map[string]any{
 		"type": "result", "subtype": "success", "is_error": false, "session_id": "$session",
 	}})
-	return map[string]any{"steps": steps}
-}
-
-func m4ClaudeTurnEOFDoc(postText string) map[string]any {
-	steps := []map[string]any{claudeUserStdinStep("")}
-	steps = append(steps, claudeInitMCP(0)...)
-	steps = append(steps, map[string]any{"dir": "stdout", "msg": map[string]any{"type": "system", "subtype": "init", "session_id": "$session"}})
-	steps = append(steps, mcpPostSteps(1, postText)...)
-	steps = append(steps,
-		map[string]any{"dir": "stdout", "msg": map[string]any{"type": "result", "subtype": "success", "is_error": false, "session_id": "$session"}},
-		map[string]any{"dir": "eof"},
-	)
-	return map[string]any{"steps": steps}
-}
-
-func m4ClaudeInterruptDoc(postText string) map[string]any {
-	steps := []map[string]any{claudeUserStdinStep("")}
-	steps = append(steps, claudeInitMCP(0)...)
-	steps = append(steps, map[string]any{"dir": "stdout", "msg": map[string]any{"type": "system", "subtype": "init", "session_id": "$session"}})
-	steps = append(steps, mcpPostSteps(1, postText)...)
-	steps = append(steps,
-		map[string]any{"dir": "stdin", "msg": map[string]any{"type": "control_request", "request": map[string]any{"subtype": "interrupt"}}},
-		map[string]any{"dir": "stdout", "msg": map[string]any{"type": "result", "subtype": "error_during_execution", "is_error": true, "session_id": "$session"}},
-	)
 	return map[string]any{"steps": steps}
 }
 
@@ -798,11 +709,7 @@ func (w *m4World) awaitTaskCleared(b *m4Client, taskID string) error {
 	return b.drainUntil(5*time.Second, cleared, nil)
 }
 
-func (w *m4World) actOnCard(b *m4Client, cardID, action, arg, text string) error {
-	return w.actExpectCode(b, cardID, action, arg, text, "")
-}
-
-func (w *m4World) actExpectCode(b *m4Client, cardID, action, arg, text, wantCode string) error {
+func (w *m4World) actOnCard(b *m4Client, cardID, action, arg, text, wantCode string) error {
 	cmd := proto.Act{
 		HomeCommand: proto.HomeCommand{Type: "act", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), Group: w.groupID},
 		Msg:         proto.ID(cardID),
@@ -821,14 +728,14 @@ func (w *m4World) actExpectCode(b *m4Client, cardID, action, arg, text, wantCode
 }
 
 func (w *m4World) whenSecondApprovesAndPosts(aiName, wantPost string) error {
-	if err := w.actOnCard(w.b2, w.currentCard.ID, "approve", "", ""); err != nil {
+	if err := w.actOnCard(w.b2, w.currentCard.ID, "approve", "", "", ""); err != nil {
 		return err
 	}
 	return w.thenAIPostsAndSettles(aiName, wantPost)
 }
 
 func (w *m4World) whenBrowserDeniesAndPosts(which, aiName, wantPost string) error {
-	if err := w.actOnCard(w.browserOf(which), w.currentCard.ID, "deny", "", ""); err != nil {
+	if err := w.actOnCard(w.browserOf(which), w.currentCard.ID, "deny", "", "", ""); err != nil {
 		return err
 	}
 	return w.thenAIPostsAndSettles(aiName, wantPost)
@@ -942,7 +849,7 @@ func (w *m4World) answerTaskDecision(b *m4Client, aiID, wantCtx, optID, text str
 	if err := w.awaitTaskWait(b, w.currentTaskID, "decision", card.ID); err != nil {
 		return err
 	}
-	return w.actOnCard(b, card.ID, "choose", optID, text)
+	return w.actOnCard(b, card.ID, "choose", optID, text, "")
 }
 
 func checkDecisionCardBody(card proto.MsgRow, wantTask, wantCtx string, wantOpts int, wantRec string) error {
@@ -1016,7 +923,7 @@ func (w *m4World) thenAnswerCodexQuestions(aiName, optID, customText string) err
 	if err := checkDecisionCardBody(card1, "", "Framing", 4, ""); err != nil {
 		return err
 	}
-	if err := w.actOnCard(w.b2, card1.ID, "choose", optID, ""); err != nil {
+	if err := w.actOnCard(w.b2, card1.ID, "choose", optID, "", ""); err != nil {
 		return err
 	}
 	card2, err := w.waitPendingCard(w.b1, "decision", aiID)
@@ -1026,7 +933,7 @@ func (w *m4World) thenAnswerCodexQuestions(aiName, optID, customText string) err
 	if err := checkDecisionCardBody(card2, "", "", 4, ""); err != nil {
 		return err
 	}
-	return w.actOnCard(w.b1, card2.ID, "choose", "", customText)
+	return w.actOnCard(w.b1, card2.ID, "choose", "", customText, "")
 }
 
 func (w *m4World) whenTaskRaisesRequestDecision(aiName string) error {
@@ -1080,7 +987,7 @@ func (w *m4World) thenChooseAndWakeRequestDecision(optID, note, aiName, wantPost
 	if err := w.setScript(m4VendorOf(aiName), m4ClaudeTurnDoc(nil, 1, wantPost)); err != nil {
 		return err
 	}
-	if err := w.actOnCard(w.b2, w.currentCard.ID, "choose", optID, note); err != nil {
+	if err := w.actOnCard(w.b2, w.currentCard.ID, "choose", optID, note, ""); err != nil {
 		return err
 	}
 	if err := w.thenAIPostsAndSettles(aiName, wantPost); err != nil {
@@ -1177,7 +1084,7 @@ func (w *m4World) scriptResumeRetryAndDifferentCmd(aiName, retryCmd, diffCmd, po
 }
 
 func (w *m4World) whenApproveFirstAfterRestart() error {
-	return w.actOnCard(w.b2, w.firstCardID, "approve", "", "")
+	return w.actOnCard(w.b2, w.firstCardID, "approve", "", "", "")
 }
 
 func (w *m4World) thenNoRetryCardAndNewCard(retryCmd, aiName, newCmd string) error {
@@ -1265,7 +1172,7 @@ func (w *m4World) thenReassignedCardAndRefusal(wantStatus, newAI, wantPost, want
 	if err := w.thenAIPostsAndSettles(newAI, wantPost); err != nil {
 		return err
 	}
-	return w.actExpectCode(w.b1, w.currentCard.ID, "approve", "", "", wantCode)
+	return w.actOnCard(w.b1, w.currentCard.ID, "approve", "", "", wantCode)
 }
 
 func (w *m4World) whenSecondTaskLeavesTwoPendingCards(aiName, cmd string) error {
@@ -1336,17 +1243,17 @@ func (w *m4World) thenCancelledCardsExpiredAndRefused(wantStatus, wantCode strin
 	if err := w.awaitCardStatus(w.b1, w.task2DecID, wantStatus); err != nil {
 		return err
 	}
-	if err := w.actExpectCode(w.b2, w.task2AppID, "approve", "", "", wantCode); err != nil {
+	if err := w.actOnCard(w.b2, w.task2AppID, "approve", "", "", wantCode); err != nil {
 		return err
 	}
-	return w.actExpectCode(w.b2, w.task2DecID, "choose", "A", "", wantCode)
+	return w.actOnCard(w.b2, w.task2DecID, "choose", "A", "", wantCode)
 }
 
-func (w *m4World) whenAIStartsPausableTurn(aiName, startPost string) error {
+func (w *m4World) whenAIStartsPausableTurn(aiName, startPost, nextPost string) error {
 	steps := slices.Concat(
 		codexStartupSteps(),
 		m4CodexInterruptTurnSteps("turn-1", 1, startPost),
-		codexTurnSteps("turn-2", 2, "", "Codex answered held mentions.", false),
+		codexTurnSteps("turn-2", 2, "", nextPost, false),
 	)
 	if err := w.setScript(m4VendorOf(aiName), map[string]any{"session": m4CodexThread, "steps": steps}); err != nil {
 		return err
@@ -1357,83 +1264,50 @@ func (w *m4World) whenAIStartsPausableTurn(aiName, startPost string) error {
 	return w.awaitAIPost(aiName, startPost, 10*time.Second)
 }
 
-func (w *m4World) whenOwnerPausesGroup() error {
-	w.pauseStarted = time.Now()
+func (w *m4World) sendGroupOp(op string) error {
 	cmd := proto.GroupCommand{
 		HomeCommand: proto.HomeCommand{Type: "group", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), Group: w.groupID},
-		Op:          "pause",
+		Op:          op,
 	}
 	return w.sendOK(w.b1, cmd)
+}
+
+func (w *m4World) whenOwnerPausesGroup() error {
+	w.pauseStarted = time.Now()
+	return w.sendGroupOp("pause")
 }
 
 func (w *m4World) thenTurnInterruptedWithinTwoSeconds(aiName, wantReason, wantCode string) error {
 	aiID := w.b1.aiByName[aiName].ID
 	ready := func() bool {
-		return w.b1.group.Paused != nil &&
-			m4HasSystemCode(w.b1, wantCode) &&
-			viewHasInterruptedMsg(&w.b1.homeView, aiID, wantReason)
+		_, paused := m4SystemMsg(w.b1, wantCode)
+		return paused && w.b1.group.Paused != nil && viewHasInterruptedMsg(&w.b1.homeView, aiID, wantReason)
 	}
-	if err := w.b1.drainUntil(2*time.Second, ready, nil); err != nil {
-		return err
-	}
-	if elapsed := time.Since(w.pauseStarted); elapsed > 2*time.Second {
-		return fmt.Errorf("group pause interrupt took %s, want <= 2s", elapsed)
-	}
-	return nil
+	return w.b1.drainUntil(time.Until(w.pauseStarted.Add(2*time.Second)), ready, nil)
 }
 
-func m4HasSystemCode(b *m4Client, wantCode string) bool {
+func m4SystemMsg(b *m4Client, wantCode string) (proto.MsgRow, bool) {
 	for _, m := range b.msgs {
-		if m4MsgHasSystemCode(m, wantCode) {
-			return true
+		var sc proto.SystemCode
+		if m.Kind == "system" && proto.Decode(m.Body, &sc) == nil && sc.Code == wantCode {
+			return m, true
 		}
 	}
-	return false
-}
-
-func m4MsgHasSystemCode(m proto.MsgRow, wantCode string) bool {
-	if m.Kind != "system" {
-		return false
-	}
-	var sc proto.SystemCode
-	return proto.Decode(m.Body, &sc) == nil && sc.Code == wantCode
-}
-
-func (w *m4World) whenOwnerPostsTwoMentions(text1, text2 string) error {
-	if err := w.postOwnerMention("Codex", text1); err != nil {
-		return err
-	}
-	return w.postOwnerMention("Codex", text2)
-}
-
-func (w *m4World) thenMentionsHeldWhilePaused(wantItems int, aiName string) error {
-	if err := awaitHomeInboxCount(w.node().Store, wantItems); err != nil {
-		return err
-	}
-	aiID := w.b1.aiByName[aiName].ID
-	if viewHasMsgFrom(&w.b1.homeView, aiID, "Codex answered held mentions.") {
-		return fmt.Errorf("%s posted while group was paused", aiName)
-	}
-	return nil
+	return proto.MsgRow{}, false
 }
 
 func (w *m4World) whenOwnerResumesGroup() error {
-	cmd := proto.GroupCommand{
-		HomeCommand: proto.HomeCommand{Type: "group", Nonce: w.ids.next(), Timestamp: time.Now().UnixMilli(), Group: w.groupID},
-		Op:          "resume",
-	}
-	return w.sendOK(w.b1, cmd)
+	return w.sendGroupOp("resume")
 }
 
 func (w *m4World) thenResumedGroupDeliversMentions(aiName, wantPost, wantCode string) error {
 	if err := w.thenAIPostsAndSettles(aiName, wantPost); err != nil {
 		return err
 	}
-	ready := func() bool {
-		return w.b1.group.Paused == nil && m4HasSystemCode(w.b1, wantCode)
-	}
-	if err := w.b1.drainUntil(5*time.Second, ready, nil); err != nil {
-		return err
+	resumed, ok := m4SystemMsg(w.b1, wantCode)
+	isAnswer := func(id string) bool { return w.b1.msgs[id].Text == wantPost }
+	if !ok || w.b1.group.Paused != nil || slices.IndexFunc(w.b1.msgOrder, isAnswer) < slices.Index(w.b1.msgOrder, resumed.ID) {
+		return fmt.Errorf("%q was posted before system message %q (found %v), or the group is still paused: %v", wantPost, wantCode, ok, w.b1.msgOrder)
 	}
 	return awaitHomeInboxCount(w.node().Store, 0)
 }
@@ -1450,171 +1324,4 @@ func (w *m4World) thenApprovalTaskStayedAsleep(aiName string) error {
 		return fmt.Errorf("%s CLI starts = %v, want 1 (task waiting on approval must stay asleep)", aiName, starts)
 	}
 	return nil
-}
-
-func (w *m4World) whenOneWaitingAndOneWorking(waitAI, waitPost, workAI, workPost string) error {
-	if err := w.setScript(m4VendorOf(waitAI), m4ClaudeTurnEOFDoc(waitPost)); err != nil {
-		return err
-	}
-	if err := w.postOwnerMention(waitAI, "@"+waitAI+" warm up"); err != nil {
-		return err
-	}
-	if err := w.awaitAIWaitingWithPost(waitAI, waitPost); err != nil {
-		return err
-	}
-	workSteps := append(slices.Concat(codexStartupSteps(), m4CodexInterruptTurnSteps("turn-1", 1, workPost)), map[string]any{"dir": "eof"})
-	if err := w.setScript(m4VendorOf(workAI), map[string]any{"session": m4CodexThread, "steps": workSteps}); err != nil {
-		return err
-	}
-	if err := w.postOwnerMention(workAI, "@"+workAI+" keep working"); err != nil {
-		return err
-	}
-	return w.awaitAIPost(workAI, workPost, 10*time.Second)
-}
-
-func (w *m4World) awaitAIWaitingWithPost(aiName, wantPost string) error {
-	aiID := w.b1.aiByName[aiName].ID
-	ready := func() bool {
-		return viewHasMsgFrom(&w.b1.homeView, aiID, wantPost) && w.b1.aiByName[aiName].State == "waiting"
-	}
-	return w.b1.drainUntil(10*time.Second, ready, nil)
-}
-
-func (w *m4World) whenOwnerTakesNodeOffline() error {
-	return w.callHostCmd("host.offline")
-}
-
-func (w *m4World) thenSessionsClosedAndOffline(workAI, wantReason, wantState string) error {
-	waitHostDormant(w.activeHost)
-	if _, err := w.waitLogs("exit claude ", 1); err != nil {
-		return err
-	}
-	if _, err := w.waitLogs("exit codex ", 1); err != nil {
-		return err
-	}
-	workID := w.b1.aiByName[workAI].ID
-	ready := func() bool {
-		return viewHasInterruptedMsg(&w.b1.homeView, workID, wantReason) &&
-			w.b1.aiByName["Claude"].State == wantState &&
-			w.b1.aiByName[workAI].State == wantState
-	}
-	return w.b1.drainUntil(5*time.Second, ready, nil)
-}
-
-func (w *m4World) whenOwnerMentionsAI(aiName, text string) error {
-	return w.postOwnerMention(aiName, text)
-}
-
-func (w *m4World) thenOfflineMentionStaysOnHome(aiName string) error {
-	if err := awaitHomeInboxCount(w.node().Store, 1); err != nil {
-		return err
-	}
-	starts := matchingFakeCLILogs(w.cluster.LogPath, "start "+m4VendorOf(aiName)+" ")
-	if len(starts) != 1 {
-		return fmt.Errorf("%s starts while offline = %v, want 1", aiName, starts)
-	}
-	return nil
-}
-
-func (w *m4World) whenScriptOpenResumeAndOnline(aiName, postText string) error {
-	if err := w.setScript(m4VendorOf(aiName), m4ClaudeTurnEOFDoc(postText)); err != nil {
-		return err
-	}
-	return w.callHostCmd("host.online")
-}
-
-func (w *m4World) thenOpenOnlineDelivered(aiName, wantPost string) error {
-	if err := w.awaitAIWaitingWithPost(aiName, wantPost); err != nil {
-		return err
-	}
-	return awaitHomeInboxCount(w.node().Store, 0)
-}
-
-func (w *m4World) whenHomeStopsAndOffline() error {
-	w.node().StopHome()
-	return w.callHostCmd("host.offline")
-}
-
-func (w *m4World) thenOpenSessionClosedWithStoppedHome(aiName string) error {
-	waitHostDormant(w.activeHost)
-	if hasNonDormant(w.activeHost) {
-		return fmt.Errorf("%s session stayed open after host.offline with home stopped", aiName)
-	}
-	_, err := w.waitLogs("exit "+m4VendorOf(aiName)+" ", 2)
-	return err
-}
-
-func (w *m4World) whenHomeRestartsAndOwnerMentions(aiName, text string) error {
-	n := w.node()
-	n.RestartHome()
-	w.activeLink = n.Link
-	w.b1 = attachM4Client(n.Home, w.cleanup, w.cluster.Owner)
-	w.b2 = attachM4Client(n.Home, w.cleanup, w.browser2Key)
-	if err := w.b1.syncGroup(n.Home, string(w.groupID)); err != nil {
-		return err
-	}
-	if err := w.b2.syncGroup(n.Home, string(w.groupID)); err != nil {
-		return err
-	}
-	if err := awaitHostGroupSynced(w.activeHost, string(w.groupID)); err != nil {
-		return err
-	}
-	return w.postOwnerMention(aiName, text)
-}
-
-func (w *m4World) thenRestartedHomeSeesOfflineAndHolds(aiName, wantState string) error {
-	isOffline := func() bool { return w.b1.aiByName[aiName].State == wantState }
-	if err := w.b1.drainUntil(5*time.Second, isOffline, nil); err != nil {
-		return err
-	}
-	if err := awaitHomeInboxCount(w.node().Store, 1); err != nil {
-		return err
-	}
-	starts := matchingFakeCLILogs(w.cluster.LogPath, "start "+m4VendorOf(aiName)+" ")
-	if len(starts) != 2 {
-		return fmt.Errorf("%s starts while offline after restart = %v, want 2", aiName, starts)
-	}
-	return nil
-}
-
-func (w *m4World) whenScriptFinalResumeAndOnline(aiName, postText string) error {
-	if err := w.setScript(m4VendorOf(aiName), m4ClaudeTurnDoc(nil, 1, postText)); err != nil {
-		return err
-	}
-	return w.callHostCmd("host.online")
-}
-
-func (w *m4World) thenFinalOnlineDelivered(aiName, wantPost string) error {
-	if err := w.thenAIPostsAndSettles(aiName, wantPost); err != nil {
-		return err
-	}
-	return awaitHomeInboxCount(w.node().Store, 0)
-}
-
-func (w *m4World) whenTaskRunsPastTurnLimit(aiName, startPost string) error {
-	if err := w.setScript(m4VendorOf(aiName), m4ClaudeInterruptDoc(startPost)); err != nil {
-		return err
-	}
-	w.turnStarted = time.Now()
-	tid, err := w.startTaskFor(aiName, "Long migration", "Run past 1-minute turn limit")
-	w.currentTaskID = tid
-	if err != nil {
-		return err
-	}
-	return w.awaitAIPost(aiName, startPost, 10*time.Second)
-}
-
-func (w *m4World) thenTaskTurnTimedOut(aiName, wantReason string, wantFailures int) error {
-	aiID := w.b1.aiByName[aiName].ID
-	ready := func() bool {
-		t, ok := w.b1.tasks[w.currentTaskID]
-		return ok && t.Failures == wantFailures && viewHasInterruptedMsg(&w.b1.homeView, aiID, wantReason)
-	}
-	if err := w.b1.drainUntil(75*time.Second, ready, nil); err != nil {
-		return err
-	}
-	if elapsed := time.Since(w.turnStarted); elapsed < 55*time.Second {
-		return fmt.Errorf("turn timed out after %s, want ~1m", elapsed)
-	}
-	return w.settleDormant()
 }
