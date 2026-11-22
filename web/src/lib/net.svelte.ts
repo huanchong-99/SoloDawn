@@ -5,7 +5,7 @@
 // under the single-tab Web Lock of tablock.ts.
 import { SvelteMap } from 'svelte/reactivity';
 import type { DeviceLog } from './devlog';
-import { Home, homes } from './groups.svelte';
+import { Home, homes, type Link } from './groups.svelte';
 import { loadDevice, type Device } from './identity';
 import { joinGroup, JoinError, presentLog, type Invitation } from './join';
 import { browserName, signalUrlOf } from './onboard.svelte';
@@ -126,11 +126,24 @@ function startLive(
         syncPeers();
         for (const peer of peers.values()) presentLog(peer, log);
       };
+      const connectHome = (home: Home): Link => {
+        const link = home.connect();
+        return {
+          ...link,
+          push(frame) {
+            link.push(frame);
+            switch (frame.t) {
+              case 'devlog':
+                if (frame.user === log.user) void onDevlog(frame);
+            }
+          },
+        };
+      };
       const dial = (id: string, home: Home) => {
         const peer = hub.peer(
           id,
           () => {
-            const link = home.connect();
+            const link = connectHome(home);
             return {
               online: (ctl, welcome) => {
                 addrs[id] = welcome.addrs;
@@ -138,14 +151,8 @@ function startLive(
                 peer.send(pushLog());
                 link.online(ctl, welcome);
               },
-              push: (frame) => {
-                link.push(frame);
-                switch (frame.t) {
-                  case 'devlog':
-                    if (frame.user === log.user) void onDevlog(frame);
-                }
-              },
-              offline: () => link.offline(),
+              push: link.push,
+              offline: link.offline,
             };
           },
           (path) => (path ? paths.set(home, path) : paths.delete(home)),
@@ -192,7 +199,7 @@ function startLive(
             link: () => {
               const home = homeOf(log.user, id, joined[id].name);
               trackPath = (path) => (path ? paths.set(home, path) : paths.delete(home));
-              return home.connect();
+              return connectHome(home);
             },
             onpath: (path) => trackPath?.(path),
           });
