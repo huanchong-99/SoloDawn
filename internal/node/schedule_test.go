@@ -3,34 +3,31 @@ package node
 import (
 	"bytes"
 	"context"
-	"errors"
 	"log"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-func TestRetainOnceDelegatesToHomeRetain(t *testing.T) {
-	if retentionEvery != 24*time.Hour {
-		t.Fatalf("retentionEvery = %v, want 24h", retentionEvery)
-	}
+func TestRunRetentionStartupRunUsesHomeRetain(t *testing.T) {
+	db := newRetentionStore(t)
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC).Truncate(time.Millisecond)
+	seedDefaultRetentionRows(t, db, now)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	runRetention(ctx, db, now, nil)
+	verifyDefaultRetentionRows(t, db)
+}
+
+func newRetentionStore(t *testing.T) *store.Store {
+	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "node.db"))
 	mustNoErr(t, err)
 	t.Cleanup(func() { db.Close() })
-
-	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC).Truncate(time.Millisecond)
-	seedDefaultRetentionRows(t, db, now)
-	mustNoErr(t, retainOnce(db, now))
-	verifyDefaultRetentionRows(t, db)
-
-	setRetentionRaw(t, db, `"bad"`)
-	if err := retainOnce(db, now); err == nil {
-		t.Fatal("expected error for non-integer retention_days")
-	}
+	return db
 }
 
 func seedDefaultRetentionRows(t *testing.T, db *store.Store, now time.Time) {
@@ -82,79 +79,68 @@ func setRetentionRaw(t *testing.T, db *store.Store, raw string) {
 	mustNoErr(t, db.Write(put))
 }
 
-func TestRunRetentionScheduleAndNodeStartup(t *testing.T) {
-	checkLogRetentionError(t)
-	checkScheduleTicksAndErrors(t)
-	checkOpenNodeRunsRetention(t)
-}
-
-func checkLogRetentionError(t *testing.T) {
-	t.Helper()
+func TestRunRetentionLogsErrorsAndKeepsRunning(t *testing.T) {
+	db := newRetentionStore(t)
+	setRetentionRaw(t, db, `"bad"`)
 	var buf bytes.Buffer
 	prev := log.Writer()
 	log.SetOutput(&buf)
 	defer log.SetOutput(prev)
-	logRetentionError(errors.New("disk full"))
-	if !strings.Contains(buf.String(), "node: retention: disk full") {
-		t.Fatalf("log output = %q", buf.String())
+
+	tick := make(chan time.Time)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{}) // single reader: TestRunRetentionLogsErrorsAndKeepsRunning
+	go func() {
+		runRetention(ctx, db, time.Now(), tick)
+		close(done)
+	}()
+	tick <- time.Now()
+	cancel()
+	<-done
+	if got := strings.Count(buf.String(), "node: retention: "); got != 2 {
+		t.Fatalf("logged %d retention errors, want 2: %q", got, buf.String())
 	}
 }
 
-func checkScheduleTicksAndErrors(t *testing.T) {
-	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "node.db"))
-	mustNoErr(t, err)
-	t.Cleanup(func() { db.Close() })
-
-	base := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	day1Cut := base.AddDate(0, 0, -7).UnixMilli()
-	day2Cut := base.AddDate(0, 0, -6).UnixMilli()
+func TestRunRetentionRunsAtEveryTick(t *testing.T) {
+	db := newRetentionStore(t)
+	setRetentionRaw(t, db, `7`)
+	day := 24 * time.Hour
+	base := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
+	cut1, cut2 := base.Add(-7*day).UnixMilli(), base.Add(-6*day).UnixMilli()
 	seed := func(tx *store.Tx) error {
-		if _, txErr := tx.Exec(`INSERT INTO setting(key, value) VALUES('retention_days', '"bad"')`); txErr != nil {
-			return txErr
-		}
-		_, txErr := tx.Exec(`INSERT INTO audit(ts, what, detail) VALUES(?, 'delivered', 'first'), (?, 'delivered', 'second')`, day1Cut-1, day2Cut-1)
-		return txErr
+		_, err := tx.Exec(`INSERT INTO audit(ts, what, detail) VALUES(?, 'delivered', 'first'), (?, 'delivered', 'second'), (?, 'delivered', 'keep')`, cut1-1, cut2-1, cut2)
+		return err
 	}
 	mustNoErr(t, db.Write(seed))
 
-	var mu sync.Mutex
-	cur := base
-	var reported []error
-	nowFn := func() time.Time { mu.Lock(); defer mu.Unlock(); return cur }
-	reportFn := func(e error) { mu.Lock(); reported = append(reported, e); mu.Unlock() }
-
+	tick := make(chan time.Time)
 	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan struct{}) // single reader: checkScheduleTicksAndErrors
+	done := make(chan struct{}) // single reader: TestRunRetentionRunsAtEveryTick
 	go func() {
-		runRetention(ctx, db, 5*time.Millisecond, nowFn, reportFn)
+		runRetention(ctx, db, base, tick)
 		close(done)
 	}()
-
-	waitCond(t, func() bool { mu.Lock(); defer mu.Unlock(); return len(reported) >= 1 })
-	setRetentionRaw(t, db, `7`)
-	waitCond(t, func() bool { return queryInt(t, db, `SELECT count(*) FROM audit`) == 1 })
-	checkSingleString(t, db, `SELECT detail FROM audit`, "second")
-
-	mu.Lock()
-	cur = base.Add(24 * time.Hour)
-	mu.Unlock()
-	waitCond(t, func() bool { return queryInt(t, db, `SELECT count(*) FROM audit`) == 0 })
+	tick <- base.Add(day)
 	cancel()
 	<-done
+	checkSingleString(t, db, `SELECT detail FROM audit`, "keep")
 }
 
-func checkOpenNodeRunsRetention(t *testing.T) {
-	t.Helper()
+func TestOpenNodeRunsRetentionAtStartup(t *testing.T) {
 	dir := seedNodeDB(t, func(tx *store.Tx) error {
 		_, err := tx.Exec(`INSERT INTO audit(ts, what, detail) VALUES(1, 'delivered', 'startup-aged')`)
 		return err
 	})
 	n, err := openNode(t.Context(), dir)
 	mustNoErr(t, err)
-	t.Cleanup(n.Close)
-	waitCond(t, func() bool { return queryInt(t, n.db, `SELECT count(*) FROM audit`) == 0 })
 	n.Close()
+	db, err := store.Open(filepath.Join(dir, "node.db"))
+	mustNoErr(t, err)
+	defer db.Close()
+	if got := queryInt(t, db, `SELECT count(*) FROM audit`); got != 0 {
+		t.Fatalf("audit rows after start-up = %d, want 0", got)
+	}
 }
 
 func queryInt(t *testing.T, db *store.Store, q string) int {

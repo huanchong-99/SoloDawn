@@ -28,9 +28,8 @@ type (
 		Rendezvous []netRendezvous `json:"rendezvous"`
 	}
 	netPath struct {
-		Peer  string `json:"peer"`
-		Path  string `json:"path"`
-		RTTMS *int   `json:"rtt_ms,omitempty"`
+		Peer string `json:"peer"`
+		Path string `json:"path"`
 	}
 	netNAT struct {
 		UDP         bool `json:"udp"`
@@ -40,9 +39,6 @@ type (
 	netRendezvous struct {
 		URL string `json:"url"`
 		OK  bool   `json:"ok"`
-	}
-	rttReporter interface {
-		RTTMillis() (int, bool)
 	}
 	sesPeer struct {
 		device string
@@ -60,21 +56,13 @@ func callNetStatus(_ context.Context, h *host.Host, _ host.Caller, raw json.RawM
 	if fn := host.Part[netStatusPart](h).status; fn != nil {
 		return fn(), nil
 	}
-	return defaultNetStatus(h), nil
-}
-
-func defaultNetStatus(h *host.Host) netStatusResult {
-	return netStatusResult{
-		Paths:      []netPath{},
-		NAT:        netNAT{IPv6: hasIPv6(localIPs())},
-		Rendezvous: buildNetRendezvous(ReadRendezvous(h.Store), nil),
-	}
+	return netStatusResult{Paths: []netPath{}, Rendezvous: []netRendezvous{}}, nil
 }
 
 func (n *nodeRuntime) netStatus() netStatusResult {
 	return netStatusResult{
 		Paths:      n.sessions.netPaths(),
-		NAT:        netNAT{UDP: n.socks != nil, IPv6: hasIPv6(localIPs())},
+		NAT:        netNAT{UDP: true, IPv6: hasIPv6(localIPs())},
 		Rendezvous: buildNetRendezvous(ReadRendezvous(n.db), n.connectedRVSet()),
 	}
 }
@@ -117,13 +105,7 @@ func buildNetPath(device string, raw Ctl) (netPath, bool) {
 	if path == "" {
 		return netPath{}, false
 	}
-	var rtt *int
-	if rep, ok := raw.(rttReporter); ok {
-		if ms, measured := rep.RTTMillis(); measured {
-			rtt = &ms
-		}
-	}
-	return netPath{Peer: device, Path: path, RTTMS: rtt}, true
+	return netPath{Peer: device, Path: path}, true
 }
 
 func compareNetPath(a, b netPath) int {

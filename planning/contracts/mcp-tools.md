@@ -74,12 +74,12 @@ Notes:
   credential (`contracts/local.md` section 7).
 - `net_status` reads the node's current state without probing the network:
   `paths` lists welcomed `ctl` connections that have selected a `direct` or
-  `relay` path (`rtt_ms` is optional and omitted when unmeasured), `nat`
-  reports whether the node's UDP ICE listener is bound (`udp`), router port
-  mappings are active (`mapped_ports`, `false` in step 1) and a usable local
-  IPv6 address is present (`ipv6`), and `rendezvous` lists each configured
-  rendezvous URL with `ok: true` while its authenticated signalling WebSocket
-  is open.
+  `relay` path (`rtt_ms` is omitted in step 1), `nat` reports that the node's
+  UDP ICE listener is bound (`udp`, always `true` in a running node), that
+  router port mappings are active (`mapped_ports`, `false` in step 1) and
+  whether a usable local IPv6 address is present (`ipv6`), and `rendezvous`
+  lists each configured rendezvous URL with `ok: true` while its
+  authenticated signalling WebSocket is open.
 
 ## 2. Tools for the secretary only
 

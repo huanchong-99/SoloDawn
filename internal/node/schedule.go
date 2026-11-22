@@ -9,38 +9,23 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-var retentionEvery = 24 * time.Hour
-
 func (n *nodeRuntime) startRetention() {
-	n.spawn(func() { runRetention(n.ctx, n.db, retentionEvery, time.Now, logRetentionError) })
+	t := time.NewTicker(24 * time.Hour)
+	n.spawn(func() {
+		defer t.Stop()
+		runRetention(n.ctx, n.db, time.Now(), t.C)
+	})
 }
 
-func logRetentionError(err error) {
-	log.Printf("node: retention: %v", err)
-}
-
-func runRetention(ctx context.Context, db *store.Store, every time.Duration, now func() time.Time, report func(error)) {
-	retainAndReport(db, now(), report)
-	ticker := time.NewTicker(every)
-	defer ticker.Stop()
+func runRetention(ctx context.Context, db *store.Store, now time.Time, tick <-chan time.Time) {
 	for {
+		if err := db.Write(func(tx *store.Tx) error { return home.Retain(tx, now.UnixMilli()) }); err != nil {
+			log.Printf("node: retention: %v", err)
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			retainAndReport(db, now(), report)
+		case now = <-tick:
 		}
 	}
-}
-
-func retainAndReport(db *store.Store, now time.Time, report func(error)) {
-	if err := retainOnce(db, now); err != nil {
-		report(err)
-	}
-}
-
-func retainOnce(db *store.Store, now time.Time) error {
-	nowMS := now.UnixMilli()
-	run := func(tx *store.Tx) error { return home.Retain(tx, nowMS) }
-	return db.Write(run)
 }

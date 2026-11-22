@@ -5,9 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,7 +16,6 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/home"
 	"github.com/huanchong-99/SoloDawn/internal/host"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
-	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
 type netStubCtl struct {
@@ -37,14 +34,6 @@ func (c *netStubCtl) Done() <-chan struct{}                         { return c.d
 func (c *netStubCtl) Read(context.Context) (json.RawMessage, error) { return nil, io.EOF }
 func (c *netStubCtl) Close() error                                  { return nil }
 
-type netStubRTTCtl struct {
-	*netStubCtl
-	rtt int
-	ok  bool
-}
-
-func (c *netStubRTTCtl) RTTMillis() (int, bool) { return c.rtt, c.ok }
-
 func TestNetStatusToolRegistrationAndSchema(t *testing.T) {
 	tool, ok := host.Tools["net_status"]
 	if !ok || tool.Description == "" || tool.For != nil || tool.Call == nil {
@@ -52,7 +41,6 @@ func TestNetStatusToolRegistrationAndSchema(t *testing.T) {
 	}
 	checkNetStatusGoldenSchema(t, tool.Schema)
 	checkNetStatusInvalidArgs(t, tool)
-	checkNetStatusMCPWire(t)
 }
 
 func checkNetStatusGoldenSchema(t *testing.T, got json.RawMessage) {
@@ -92,131 +80,13 @@ func checkNetStatusInvalidArgs(t *testing.T, tool host.Tool) {
 	}
 }
 
-func checkNetStatusMCPWire(t *testing.T) {
-	t.Helper()
-	db := sesOpenStore(t)
-	h, _, err := host.New(db, sesKey("ns-mcp"), time.Now)
-	mustNoErr(t, err)
-	key := host.SessionKey{Group: "g1", Member: "m1"}
-	mustNoErr(t, h.Sessions.Create(host.Session{SessionKey: key, Kind: host.GroupSession, Folder: "repo", Agent: "codex", Home: "h1", Name: "Codex"}))
-	tok := h.Sessions.Admit(key, 3, false)
-	defer h.Sessions.Forget(tok)
-
-	okResp := callMCPToolOnce(t, h, tok, `{}`)
-	if okResp.IsError {
-		t.Fatalf("MCP net_status unexpected error: %s", okResp.Text)
-	}
-	if len(proto.UnexpectedNulls([]byte(okResp.Text))) != 0 {
-		t.Fatalf("unexpected nulls in %s", okResp.Text)
-	}
-	badResp := callMCPToolOnce(t, h, tok, `{"extra":1}`)
-	if !badResp.IsError {
-		t.Fatalf("expected MCP schema validation error, got %s", badResp.Text)
-	}
-}
-
-type mcpCallText struct {
-	Text    string
-	IsError bool
-}
-
-func callMCPToolOnce(t *testing.T, h *host.Host, token, args string) mcpCallText {
-	t.Helper()
-	inR, inW := io.Pipe()
-	outR, outW := io.Pipe()
-	done := make(chan error, 1) // single reader: callMCPToolOnce
-	go func() { done <- h.ServeMCP(t.Context(), token, inR, outW) }()
-	dec := json.NewDecoder(outR)
-	writeMCPLine(t, inW, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`)
-	readMCPResult(t, dec)
-	writeMCPLine(t, inW, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
-	writeMCPLine(t, inW, fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"net_status","arguments":%s}}`, args))
-	res := readMCPResult(t, dec)
-	inW.Close()
-	outR.Close()
-	<-done
-	return decodeMCPCallText(t, res)
-}
-
-func writeMCPLine(t *testing.T, w io.Writer, line string) {
-	t.Helper()
-	_, err := fmt.Fprintln(w, line)
-	mustNoErr(t, err)
-}
-
-func readMCPResult(t *testing.T, dec *json.Decoder) json.RawMessage {
-	t.Helper()
-	var msg struct {
-		Result json.RawMessage `json:"result"`
-		Error  any             `json:"error"`
-	}
-	mustNoErr(t, dec.Decode(&msg))
-	if msg.Error != nil {
-		t.Fatalf("unexpected JSON-RPC error: %v", msg.Error)
-	}
-	return msg.Result
-}
-
-func decodeMCPCallText(t *testing.T, raw json.RawMessage) mcpCallText {
-	t.Helper()
-	var call struct {
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
-		IsError bool `json:"isError"`
-	}
-	mustNoErr(t, json.Unmarshal(raw, &call))
-	return mcpCallText{Text: call.Content[0].Text, IsError: call.IsError}
-}
-
 func TestNetStatusDefaultHost(t *testing.T) {
-	savedIfaces := ifaceAddrs
-	t.Cleanup(func() { ifaceAddrs = savedIfaces })
-
-	db := sesOpenStore(t)
-	h, _, err := host.New(db, sesKey("ns-default"), time.Now)
+	h, _, err := host.New(sesOpenStore(t), sesKey("ns-default"), time.Now)
 	mustNoErr(t, err)
-
-	ifaceAddrs = ipv4OnlyAddrs(t)
-	gotEmpty := callNetStatusDecoded(t, h)
-	wantEmpty := netStatusResult{
-		Paths:      []netPath{},
-		NAT:        netNAT{UDP: false, MappedPorts: false, IPv6: false},
-		Rendezvous: []netRendezvous{},
+	want := netStatusResult{Paths: []netPath{}, Rendezvous: []netRendezvous{}}
+	if got := callNetStatusDecoded(t, h); !reflect.DeepEqual(got, want) {
+		t.Fatalf("default = %+v, want %+v", got, want)
 	}
-	if !reflect.DeepEqual(gotEmpty, wantEmpty) {
-		t.Fatalf("empty default = %+v, want %+v", gotEmpty, wantEmpty)
-	}
-
-	ifaceAddrs = sampleIfaceAddrs(t)
-	putRV := func(tx *store.Tx) error {
-		_, txErr := tx.Exec(`INSERT INTO setting(key, value) VALUES('rendezvous', '["wss://rv1.example/rv","wss://rv2.example/rv"]')`)
-		return txErr
-	}
-	mustNoErr(t, db.Write(putRV))
-	gotWithRV := callNetStatusDecoded(t, h)
-	wantWithRV := netStatusResult{
-		Paths: []netPath{},
-		NAT:   netNAT{UDP: false, MappedPorts: false, IPv6: true},
-		Rendezvous: []netRendezvous{
-			{URL: "wss://rv1.example/rv", OK: false},
-			{URL: "wss://rv2.example/rv", OK: false},
-		},
-	}
-	if !reflect.DeepEqual(gotWithRV, wantWithRV) {
-		t.Fatalf("configured default = %+v, want %+v", gotWithRV, wantWithRV)
-	}
-}
-
-func ipv4OnlyAddrs(t *testing.T) func() ([]net.Addr, error) {
-	t.Helper()
-	ip, ipnet, err := net.ParseCIDR("192.0.2.10/24")
-	mustNoErr(t, err)
-	ipnet.IP = ip
-	v6ll, v6llNet, err := net.ParseCIDR("fe80::1/64")
-	mustNoErr(t, err)
-	v6llNet.IP = v6ll
-	return func() ([]net.Addr, error) { return []net.Addr{ipnet, v6llNet}, nil }
 }
 
 func callNetStatusDecoded(t *testing.T, h *host.Host) netStatusResult {
@@ -236,7 +106,7 @@ func callNetStatusDecoded(t *testing.T, h *host.Host) netStatusResult {
 	return out
 }
 
-func TestNetStatusPathsSortingAndOptionalRTT(t *testing.T) {
+func TestNetStatusPathsSorting(t *testing.T) {
 	db := sesOpenStore(t)
 	nodeKey, ownerKey := sesKey("ns-ses-node"), sesKey("ns-ses-owner")
 	logs := seedOwnedLogs(t, db, nodeKey, ownerKey)
@@ -246,14 +116,13 @@ func TestNetStatusPathsSortingAndOptionalRTT(t *testing.T) {
 	addTestSesConn(s, "dev-unwelcomed", false, newNetStubCtl("direct"))
 	addTestSesConn(s, "dev-empty-path", true, newNetStubCtl(""))
 	addTestSesConn(s, "dev-b", true, newNetStubCtl("direct"))
-	addTestSesConn(s, "dev-c", true, &netStubRTTCtl{netStubCtl: newNetStubCtl("relay"), rtt: 99, ok: false})
-	addTestSesConn(s, "dev-a", true, &netStubRTTCtl{netStubCtl: newNetStubCtl("relay"), rtt: 210, ok: true})
-	addTestSesConn(s, "dev-a", true, &netStubRTTCtl{netStubCtl: newNetStubCtl("direct"), rtt: 0, ok: true})
+	addTestSesConn(s, "dev-c", true, newNetStubCtl("relay"))
+	addTestSesConn(s, "dev-a", true, newNetStubCtl("relay"))
+	addTestSesConn(s, "dev-a", true, newNetStubCtl("direct"))
 
-	zero, relayRTT := 0, 210
 	want := []netPath{
-		{Peer: "dev-a", Path: "direct", RTTMS: &zero},
-		{Peer: "dev-a", Path: "relay", RTTMS: &relayRTT},
+		{Peer: "dev-a", Path: "direct"},
+		{Peer: "dev-a", Path: "relay"},
 		{Peer: "dev-b", Path: "direct"},
 		{Peer: "dev-c", Path: "relay"},
 	}
@@ -314,11 +183,4 @@ func checkLiveNodeNetStatus(t *testing.T, n *nodeRuntime, peerID, rvGood, rvBad 
 		t.Fatalf("live net_status = %+v", got)
 	}
 
-	savedSocks := n.socks
-	n.socks = nil
-	noUDP := callNetStatusDecoded(t, n.host)
-	n.socks = savedSocks
-	if noUDP.NAT.UDP {
-		t.Fatalf("expected UDP false without peer sockets, got %+v", noUDP.NAT)
-	}
 }

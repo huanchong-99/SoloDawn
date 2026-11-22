@@ -108,10 +108,10 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `host.Host` exposes no shutdown method, and CLI processes are started with `context.Background()` (`internal/host/run.go:380`).
 - Status: open, accepted for 1.0 (`N-4` review).
 
-### 2026-11-22 · limitation · `net_status` omits `rtt_ms` on `*peer.Connection` and reports `mapped_ports` as `false` in step 1
+### 2026-11-22 · limitation · `net_status` omits `rtt_ms` and reports `mapped_ports` as `false` in step 1
 
-- Symptom: `net_status` (`internal/node/netstatus.go`) omits `rtt_ms` on live `*peer.Connection` entries in `paths` and sets `nat.mapped_ports` to `false`.
-- Cause: `*peer.Connection` (`internal/peer/sockets.go`) exposes `Path()` without ICE candidate-pair round-trip statistics, and router port mapping (`PR-3`) was cut from step 1 on 2026-11-21 (`planning/contracts/mcp-tools.md` section 1).
+- Symptom: `net_status` (`internal/node/netstatus.go`) omits `rtt_ms` from `paths` entries and sets `nat.mapped_ports` to `false`.
+- Cause: `*peer.Connection` (`internal/peer/sockets.go`) exposes `Path()` without ICE candidate-pair round-trip statistics (the field and its reporter were removed until it does), and router port mapping (`PR-3`) was cut from step 1 on 2026-11-21 (`planning/contracts/mcp-tools.md` section 1).
 - Status: open, accepted for step 1 (`N-8`).
 
 ### 2026-11-21 · limitation · `host.info` has no live push yet and reports `queued` as `0`
