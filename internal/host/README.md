@@ -169,6 +169,14 @@ The rules are in `planning/contracts/local.md` section 7; this is the API that c
 - `cloneLock(repo)` is the one lock per clone, keyed by its real path. Workspace functions and `ReviewedMerge` take it.
 - `HostedChecksToResume(tasks, ais)` selects the `cloud_check` tasks a restarted node polls again, deriving each `Branch` (`task/<num>-<slug>`) from `Num` and `Slug` via `taskName` and skipping rows `taskName` refuses.
 
+# AI-to-AI calls
+
+`tools_ask.go` registers `ask` and `reply` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md) sections 1 and 5, [flows/ask.md](../../planning/flows/ask.md), [commands.md](../../planning/contracts/commands.md) section 1.3).
+
+- Both tools run `CheckOutboundSecret` on `text` before signing or sending any request to the home, keep no `Part` of their own, and read call depth (`Caller.Turn.Depth + 1`) and open call waits (`Host.Await` and `Host.Hand`) from the host seam.
+- `ask` resolves `to` among other live AI member rows in `h.Rows` (else `not_found`), places the `call` post in `cmp.Or(c.Task, c.Turn.Thread)` mentioning the callee, and when `wait` is true (default) opens `Host.Await(callID, nil)` before `h.Command` and waits `group.limits.ask_wait_s` via `awaitApprovalItem`, returning `{"answer": …}` or `{"pending": true, "receipt": "<call id>"}`.
+- `reply` fetches the `call` message row via `fetchFrom` (returning `not_found` when absent) and posts `kind: "reply"` in the call's thread with `re` set to the call id and `mentions` set to `[callerAI]`; depth and call-state checks run on the home.
+
 # Secretary and decision tools
 
 `tools_sec.go` registers `propose_brief`, `set_task` and `request_decision` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1, 2 and 5): `propose_brief` and `set_task` set `Tool.For` to `c.Secretary`, while `request_decision` registers the `group` schema for every session.
