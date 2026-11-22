@@ -186,13 +186,26 @@ func (w *m3World) startCluster() error {
 }
 
 func (w *m3World) attachMCPSocket(h *host.Host, dir string) error {
-	exe, err := os.Executable()
+	sockPath, stop, err := listenMCPSocket(h, dir)
 	if err != nil {
 		return err
 	}
+	registerBothCleanups(w.f.t, w.cleanup, stop)
+	w.sockPath, w.closeMCP = sockPath, stop
+	return nil
+}
+
+// listenMCPSocket serves the host's MCP shim socket in dir and points h.Shim at
+// the test binary's shim entry; stop closes the socket and waits for its
+// connections.
+func listenMCPSocket(h *host.Host, dir string) (string, func(), error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", nil, err
+	}
 	local, err := node.ListenLocal(dir)
 	if err != nil {
-		return err
+		return "", nil, err
 	}
 	sockPath := filepath.Join(dir, "sock")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -204,10 +217,8 @@ func (w *m3World) attachMCPSocket(h *host.Host, dir string) error {
 		local.Close()
 		wg.Wait()
 	})
-	registerBothCleanups(w.f.t, w.cleanup, stop)
-	w.sockPath, w.closeMCP = sockPath, stop
 	h.Shim = []string{exe, "-test.run=^TestM3MCPShim$", "--", sockPath}
-	return nil
+	return sockPath, stop, nil
 }
 
 func serveM3MCP(ctx context.Context, local *node.Local, h *host.Host, wg *sync.WaitGroup) {
@@ -326,12 +337,18 @@ func decodeReplyMatch(raw json.RawMessage, reqID int64) (bool, error) {
 
 // drainBrowserUntil is the single reader of w.browser.ch.
 func (w *m3World) drainBrowserUntil(timeout time.Duration, stop func() bool, onFrame func(json.RawMessage)) error {
+	return drainFramesUntil(w.browser, timeout, stop, w.applyBrowserFrame, onFrame)
+}
+
+// drainFramesUntil reads client until stop reports true, passing each frame to
+// apply and then to onFrame (when set); it fails after timeout.
+func drainFramesUntil(client homeFrameClient, timeout time.Duration, stop func() bool, apply, onFrame func(json.RawMessage)) error {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	for !stop() {
 		select {
-		case raw := <-w.browser.ch:
-			w.applyBrowserFrame(raw)
+		case raw := <-client.ch:
+			apply(raw)
 			if onFrame != nil {
 				onFrame(raw)
 			}
@@ -1139,19 +1156,25 @@ func listToolsViaShim(sockPath, token string) (json.RawMessage, error) {
 
 func exchangeToolsList(inW io.Writer, outR io.Reader) (json.RawMessage, error) {
 	dec := json.NewDecoder(outR)
-	if _, err := fmt.Fprintln(inW, `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"m3","version":"1"}}}`); err != nil {
-		return nil, err
-	}
-	if _, err := readM3RPC(dec); err != nil {
-		return nil, err
-	}
-	if _, err := fmt.Fprintln(inW, `{"jsonrpc":"2.0","method":"notifications/initialized"}`); err != nil {
+	if err := initMCPSession(inW, dec); err != nil {
 		return nil, err
 	}
 	if _, err := fmt.Fprintln(inW, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`); err != nil {
 		return nil, err
 	}
 	return readM3RPC(dec)
+}
+
+// initMCPSession performs the initialize handshake on a shim stream.
+func initMCPSession(w io.Writer, dec *json.Decoder) error {
+	if _, err := fmt.Fprintln(w, `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"m3","version":"1"}}}`); err != nil {
+		return err
+	}
+	if _, err := readM3RPC(dec); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintln(w, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	return err
 }
 
 func readM3RPC(dec *json.Decoder) (json.RawMessage, error) {

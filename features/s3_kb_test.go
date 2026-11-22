@@ -13,7 +13,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -21,7 +20,6 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/home"
 	"github.com/huanchong-99/SoloDawn/internal/host"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
-	"github.com/huanchong-99/SoloDawn/internal/node"
 	"github.com/huanchong-99/SoloDawn/internal/node/nodetest"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
@@ -145,26 +143,11 @@ func (w *s3KBWorld) bootNode(withSecondBrowser bool) error {
 }
 
 func (w *s3KBWorld) attachMCP(h *host.Host, dir string) error {
-	exe, err := os.Executable()
+	_, stop, err := listenMCPSocket(h, dir)
 	if err != nil {
 		return err
 	}
-	local, err := node.ListenLocal(dir)
-	if err != nil {
-		return err
-	}
-	sockPath := filepath.Join(dir, "sock")
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go serveM3MCP(ctx, local, h, &wg)
-	stop := sync.OnceFunc(func() {
-		cancel()
-		local.Close()
-		wg.Wait()
-	})
 	registerBothCleanups(w.f.t, w.cleanup, stop)
-	h.Shim = []string{exe, "-test.run=^TestM3MCPShim$", "--", sockPath}
 	return nil
 }
 
@@ -270,39 +253,25 @@ func (w *s3KBWorld) syncPeer(conn *home.Conn, client homeFrameClient, gid string
 }
 
 func (w *s3KBWorld) awaitReply(client homeFrameClient, reqID int64, onFrame func(json.RawMessage)) error {
-	deadline := time.NewTimer(5 * time.Second)
-	defer deadline.Stop()
-	for {
-		select {
-		case raw := <-client.ch:
-			if onFrame != nil {
-				onFrame(raw)
-			}
-			matched, err := decodeReplyMatch(raw, reqID)
-			if matched {
-				return err
-			}
-		case <-deadline.C:
-			return errors.New("timed out waiting for home reply")
+	var done bool
+	var replyErr error
+	check := func(raw json.RawMessage) {
+		if matched, err := decodeReplyMatch(raw, reqID); matched {
+			done, replyErr = true, err
 		}
 	}
+	if err := drainFramesUntil(client, 5*time.Second, func() bool { return done }, func(raw json.RawMessage) {
+		if onFrame != nil {
+			onFrame(raw)
+		}
+	}, check); err != nil {
+		return err
+	}
+	return replyErr
 }
 
 func (w *s3KBWorld) drainB1Until(timeout time.Duration, stop func() bool, onFrame func(json.RawMessage)) error {
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
-	for !stop() {
-		select {
-		case raw := <-w.b1.ch:
-			w.recordB1Frame(raw)
-			if onFrame != nil {
-				onFrame(raw)
-			}
-		case <-deadline.C:
-			return errors.New("timed out waiting on home pushes")
-		}
-	}
-	return nil
+	return drainFramesUntil(w.b1, timeout, stop, w.recordB1Frame, onFrame)
 }
 
 func (w *s3KBWorld) recordB1Frame(raw json.RawMessage) {
@@ -361,7 +330,7 @@ func callMCPToolViaShim(sockPath, token, tool string, args any) ([]byte, bool, e
 		return nil, false, err
 	}
 	dec := json.NewDecoder(conn)
-	if err := initShimSession(conn, dec); err != nil {
+	if err := initMCPSession(conn, dec); err != nil {
 		return nil, false, err
 	}
 	callReq, _ := marshalNoEscape(map[string]any{
@@ -385,17 +354,6 @@ func callMCPToolViaShim(sockPath, token, tool string, args any) ([]byte, bool, e
 		return nil, false, fmt.Errorf("bad tool result: %s (%v)", resRaw, err)
 	}
 	return []byte(toolRes.Content[0].Text), toolRes.IsError, nil
-}
-
-func initShimSession(conn net.Conn, dec *json.Decoder) error {
-	if _, err := fmt.Fprintln(conn, `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"s3","version":"1"}}}`); err != nil {
-		return err
-	}
-	if _, err := readM3RPC(dec); err != nil {
-		return err
-	}
-	_, err := fmt.Fprintln(conn, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
-	return err
 }
 
 func (w *s3KBWorld) givenTwoGroups(g1, g2, ai1, ai2 string) error {

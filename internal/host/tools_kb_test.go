@@ -9,7 +9,7 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
-func TestKBToolsSchemasvisibilityAndInstructions(t *testing.T) {
+func TestKBToolsSchemasVisibilityAndInstructions(t *testing.T) {
 	lists := loadGoldenToolLists(t)
 	allLists := []proto.ToolList{lists.Secretary, lists.Group, lists.Review, lists.TaskLevel1, lists.TaskLevel23}
 	for _, name := range []string{"kb_put", "kb_search"} {

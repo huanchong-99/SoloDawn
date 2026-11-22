@@ -34,7 +34,7 @@ func presetNotePut(s *State, c Command, p proto.Note) (Result, *Refusal) {
 }
 
 func presetCheckNote(c Command, p proto.Note) *Refusal {
-	if !kbKnownType(p.NoteType) || !presetNameOK(p.Name) || p.Task != nil {
+	if !slices.Contains([]string{presetType, kbType}, p.NoteType) || !presetNameOK(p.Name) || p.Task != nil {
 		return &Refusal{"bad_request", "a typed note requires a valid type, a name of 1 to 80 printable characters, and a null task"}
 	}
 	if p.NoteType == presetType && c.Who.AI != "" {

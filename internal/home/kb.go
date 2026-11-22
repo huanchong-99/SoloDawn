@@ -11,7 +11,3 @@ const kbType = "kb"
 func kbSearchOK(req Fetch) bool {
 	return req.Kind == kbType && req.Before == 0 && fetPageOK(req) && strings.TrimSpace(*req.Query) != ""
 }
-
-func kbKnownType(noteType string) bool {
-	return noteType == presetType || noteType == kbType
-}
