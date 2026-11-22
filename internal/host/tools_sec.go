@@ -65,7 +65,7 @@ type proposeBriefInput struct {
 	Tasks     []briefTaskInput `json:"tasks"`
 	Requester *string          `json:"requester,omitempty"`
 	Replaces  *string          `json:"replaces,omitempty"`
-	Preset    *string          `json:"preset,omitempty"`
+	Preset    string           `json:"preset,omitempty"`
 }
 
 type setTaskInput struct {
@@ -171,10 +171,7 @@ func callProposeBrief(ctx context.Context, h *Host, c Caller, raw stdjson.RawMes
 }
 
 func checkBriefSecrets(in proposeBriefInput) error {
-	texts := slices.Concat([]string{in.Title, in.Goal}, in.Criteria, in.ScopeIn, in.ScopeOut)
-	if in.Preset != nil {
-		texts = append(texts, *in.Preset)
-	}
+	texts := slices.Concat([]string{in.Title, in.Goal, in.Preset}, in.Criteria, in.ScopeIn, in.ScopeOut)
 	for _, t := range in.Tasks {
 		texts = append(texts, t.Title)
 	}
@@ -187,10 +184,6 @@ func checkBriefSecrets(in proposeBriefInput) error {
 }
 
 func prepareBriefBody(rows *Rows, group string, in proposeBriefInput) (proto.BriefBody, proto.ID, error) {
-	preset, err := resolveBriefPreset(in.Preset)
-	if err != nil {
-		return proto.BriefBody{}, "", err
-	}
 	pass, err := readGroupPass(rows, group)
 	if err != nil {
 		return proto.BriefBody{}, "", err
@@ -213,18 +206,8 @@ func prepareBriefBody(rows *Rows, group string, in proposeBriefInput) (proto.Bri
 		Pass:      pass,
 		Requester: string(requester),
 		Replaces:  in.Replaces,
-		Preset:    preset,
+		Preset:    in.Preset,
 	}, requester, nil
-}
-
-func resolveBriefPreset(preset *string) (string, error) {
-	if preset == nil {
-		return "", nil
-	}
-	if *preset == "" {
-		return "", &Error{Code: "bad_request", Message: "preset name must not be empty"}
-	}
-	return *preset, nil
 }
 
 func readGroupPass(rows *Rows, group string) (int, error) {

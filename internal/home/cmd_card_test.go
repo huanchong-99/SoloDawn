@@ -30,11 +30,10 @@ func (d cardDisk) Msg(id string) (proto.MsgRow, bool) {
 	return m, ok
 }
 
-func (d cardDisk) Note(string) (proto.NoteRow, bool)              { return proto.NoteRow{}, false }
-func (d cardDisk) NamedNote(string, string) (proto.NoteRow, bool) { return proto.NoteRow{}, false }
-func (d cardDisk) NoteNames(string) []string                      { return nil }
-func (d cardDisk) Thread(*string, int64, int) []proto.MsgRow      { return nil }
-func (d cardDisk) Queued() []store.Item                           { return nil }
+func (d cardDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
+func (d cardDisk) TypedNotes(string) []proto.NoteRow         { return nil }
+func (d cardDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
+func (d cardDisk) Queued() []store.Item                      { return nil }
 
 func (d cardDisk) Pending() []proto.MsgRow {
 	var list []proto.MsgRow

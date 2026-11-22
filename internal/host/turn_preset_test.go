@@ -93,10 +93,10 @@ func TestTurnPresetDeletedAndErrors(t *testing.T) {
 	r.brief.Preset = "Calm dashboard"
 	assignRaw := r.makeInboxItem(proto.Item{Item: 1, Why: "assign", Task: proto.ID(tTaskID), Msg: proto.ID(tTaskID)}, nil, nil)
 
-	// Deleted preset (empty page, even with More=true) inserts the deleted notice and keeps notes.
+	// A deleted preset (a last page without it) inserts the deleted notice and keeps notes.
 	r.home = newRoutedHome(func(req any) (json.RawMessage, error) {
 		if fk, ok := req.(proto.FetchKind); ok && fk.Kind == "preset" {
-			return mustJSON(t, proto.Fetched{Type: "fetched", Success: proto.Success{Re: 2, OK: true}, Rows: []json.RawMessage{}, More: true}), nil
+			return mustJSON(t, proto.Fetched{Type: "fetched", Success: proto.Success{Re: 2, OK: true}, Rows: []json.RawMessage{}, More: false}), nil
 		}
 		return r.defaultHomeHandler(req)
 	})

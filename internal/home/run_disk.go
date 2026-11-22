@@ -111,15 +111,9 @@ func (d *runDisk) Msg(id string) (proto.MsgRow, bool) { return runOne[proto.MsgR
 
 func (d *runDisk) Note(id string) (proto.NoteRow, bool) { return runOne[proto.NoteRow](d, "note", id) }
 
-func (d *runDisk) NamedNote(noteType, name string) (proto.NoteRow, bool) {
-	data, err := d.tx.NamedNote(d.group, noteType, name)
-	return runRow[proto.NoteRow](d, data, err)
-}
-
-func (d *runDisk) NoteNames(noteType string) []string {
-	names, err := d.tx.NoteNames(d.group, noteType)
-	d.err = errors.Join(d.err, err)
-	return names
+func (d *runDisk) TypedNotes(noteType string) []proto.NoteRow {
+	data, err := d.tx.TypedNotes(d.group, noteType)
+	return runList[proto.NoteRow](d, data, err)
 }
 
 func (d *runDisk) Thread(task *string, before int64, limit int) []proto.MsgRow {

@@ -47,11 +47,10 @@ func (d homeCardDisk) Msg(id string) (proto.MsgRow, bool) {
 	return m, ok
 }
 
-func (d homeCardDisk) Note(string) (proto.NoteRow, bool)              { return proto.NoteRow{}, false }
-func (d homeCardDisk) NamedNote(string, string) (proto.NoteRow, bool) { return proto.NoteRow{}, false }
-func (d homeCardDisk) NoteNames(string) []string                      { return nil }
-func (d homeCardDisk) Thread(*string, int64, int) []proto.MsgRow      { return nil }
-func (d homeCardDisk) Queued() []store.Item                           { return nil }
+func (d homeCardDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
+func (d homeCardDisk) TypedNotes(string) []proto.NoteRow         { return nil }
+func (d homeCardDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
+func (d homeCardDisk) Queued() []store.Item                      { return nil }
 
 func (d homeCardDisk) Pending() []proto.MsgRow {
 	var list []proto.MsgRow

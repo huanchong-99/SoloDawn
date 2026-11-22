@@ -53,12 +53,9 @@ func (c homeHostEvClient) Done() <-chan struct{} { return nil }
 
 type homeHostEvDisk map[string]proto.MsgRow
 
-func (d homeHostEvDisk) Msg(id string) (proto.MsgRow, bool) { m, ok := d[id]; return m, ok }
-func (d homeHostEvDisk) Note(string) (proto.NoteRow, bool)  { return proto.NoteRow{}, false }
-func (d homeHostEvDisk) NamedNote(string, string) (proto.NoteRow, bool) {
-	return proto.NoteRow{}, false
-}
-func (d homeHostEvDisk) NoteNames(string) []string                 { return nil }
+func (d homeHostEvDisk) Msg(id string) (proto.MsgRow, bool)        { m, ok := d[id]; return m, ok }
+func (d homeHostEvDisk) Note(string) (proto.NoteRow, bool)         { return proto.NoteRow{}, false }
+func (d homeHostEvDisk) TypedNotes(string) []proto.NoteRow         { return nil }
 func (d homeHostEvDisk) Thread(*string, int64, int) []proto.MsgRow { return nil }
 func (d homeHostEvDisk) Pending() []proto.MsgRow                   { return nil }
 func (d homeHostEvDisk) Queued() []store.Item                      { return nil }

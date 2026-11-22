@@ -294,14 +294,8 @@ func TestProposeBriefBuildsSignedPostWithPassAndMentions(t *testing.T) {
 	secMustEq(t, post2.Body.Preset, "")
 	secMustEq(t, post2.Body.Requester, secOwnerMID)
 
-	// Empty preset is bad_request; secret in preset is refused locally without sending cmd.
+	// A secret in preset is refused locally without sending cmd.
 	home.requests = nil
-	_, err = Tools["propose_brief"].Call(t.Context(), h, c, json.RawMessage(`{
-		"title": "Bad preset", "goal": "Goal", "criteria": ["Done"], "scope_in": [], "scope_out": [],
-		"tasks": [{"title": "Only task", "assignee": "Claude Code", "reviewer": "Codex"}],
-		"requester": "owner", "preset": ""
-	}`))
-	seamCode(t, err, "bad_request")
 	_, err = Tools["propose_brief"].Call(t.Context(), h, c, json.RawMessage(`{
 		"title": "Secret preset", "goal": "Goal", "criteria": ["Done"], "scope_in": [], "scope_out": [],
 		"tasks": [{"title": "Only task", "assignee": "Claude Code", "reviewer": "Codex"}],

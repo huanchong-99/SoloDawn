@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import type { CardProps } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { clock } from '../../lib/when';
@@ -8,9 +9,11 @@
 
   /** An AI's permission request in any of its five states (contracts/messages.md 2.3 and 3.2). */
   let { group, msg }: CardProps<'approval'> = $props();
+  const uid = $props.id();
 
   type Category = 'command' | 'file' | 'network' | 'other';
 
+  let cardEl: HTMLElement;
   let busy = $state(false);
   let failed = $state('');
 
@@ -45,17 +48,29 @@
   );
   const at = $derived('at' in msg.state ? clock(msg.state.at, prefs.lang) : '');
 
+  async function settleFocus() {
+    await tick();
+    const btn = cardEl.querySelector<HTMLElement>('button:not([disabled])');
+    if (btn) btn.focus({ preventScroll: true });
+  }
+
   async function decide(action: 'approve' | 'deny') {
     if (!canAct) return;
+    const hadFocus = cardEl.contains(document.activeElement);
     busy = true;
     failed = '';
+    if (hadFocus) {
+      cardEl.tabIndex = -1;
+      cardEl.focus({ preventScroll: true });
+    }
     const answer = await group.home.command({ t: 'act', g: group.g, msg: msg.id, action });
     busy = false;
     if (answer.err) failed = answer.err.code;
+    if (hadFocus) await settleFocus();
   }
 </script>
 
-<section class="card" class:need={needsMe} aria-label={t('approval.kind')}>
+<section bind:this={cardEl} class="card" class:need={needsMe} aria-label={t('approval.kind')}>
   <header class="card-head">
     <Icon name="shield" />
     <span class="kind">{t('approval.kind')}</span>
@@ -118,22 +133,35 @@
       <button
         type="button"
         class="btn btn-dawn"
+        aria-describedby={`${uid}-hint`}
         disabled={!canAct}
         onclick={() => decide('approve')}
       >
         <Icon name="check" sm /><span>{t('approval.approve')}</span>
       </button>
-      <button type="button" class="btn" disabled={!canAct} onclick={() => decide('deny')}>
+      <button
+        type="button"
+        class="btn"
+        aria-describedby={`${uid}-hint`}
+        disabled={!canAct}
+        onclick={() => decide('deny')}
+      >
         {t('approval.deny')}
       </button>
-      <span class="hint">{t(readonly ? 'approval.hint.offline' : 'approval.hint.once')}</span>
+      <span class="hint" id={`${uid}-hint`}>
+        {t(readonly ? 'approval.hint.offline' : 'approval.hint.once')}
+      </span>
     </footer>
     {#if failed}<Failure code={failed} />{/if}
   {:else if pending}
     <footer class="card-foot">
-      <button type="button" class="btn" disabled>{t('approval.approve')}</button>
-      <button type="button" class="btn" disabled>{t('approval.deny')}</button>
-      <span class="hint">
+      <button type="button" class="btn" aria-describedby={`${uid}-hint`} disabled>
+        {t('approval.approve')}
+      </button>
+      <button type="button" class="btn" aria-describedby={`${uid}-hint`} disabled>
+        {t('approval.deny')}
+      </button>
+      <span class="hint" id={`${uid}-hint`}>
         <svg class="i sm" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3" />
         </svg>

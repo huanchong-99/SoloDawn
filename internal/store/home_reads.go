@@ -44,20 +44,10 @@ func (tx *Tx) Row(group, r, id string) (json.RawMessage, error) {
 	return json.RawMessage(data), err
 }
 
-// NamedNote returns one typed note of a group by its type and name, or
-// sql.ErrNoRows when there is none.
-func (tx *Tx) NamedNote(group, noteType, name string) (json.RawMessage, error) {
-	var data string
-	err := tx.QueryRow(`SELECT data FROM row WHERE g=? AND r='note' AND gone=0
-		AND data->>'type' IS NOT NULL AND data->>'type'=? AND data->>'name'=?`, group, noteType, name).Scan(&data)
-	return json.RawMessage(data), err
-}
-
-// NoteNames returns the names of the live notes of a type in a group, sorted.
-func (tx *Tx) NoteNames(group, noteType string) ([]string, error) {
-	rows, err := tx.Query(`SELECT data->>'name' FROM row WHERE g=? AND r='note' AND gone=0
+// TypedNotes returns the live notes of a type in a group, sorted by name.
+func (tx *Tx) TypedNotes(group, noteType string) ([]json.RawMessage, error) {
+	return tx.data(`SELECT data FROM row WHERE g=? AND r='note' AND gone=0
 		AND data->>'type' IS NOT NULL AND data->>'type'=? ORDER BY data->>'name'`, group, noteType)
-	return collect(rows, err, scanOne[string])
 }
 
 // Thread returns a page of the main line (nil) or of a task's thread, newest

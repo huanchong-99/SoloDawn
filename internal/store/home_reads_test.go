@@ -234,15 +234,7 @@ func TestHomeReadsFail(t *testing.T) {
 		_, err := tx.Row("g", "group", "g")
 		return err
 	})
-	failed(func(tx *Tx) error {
-		_, err := tx.NamedNote("g", "preset", "Calm")
-		return err
-	})
-	failed(func(tx *Tx) error {
-		names, err := tx.NoteNames("g", "preset")
-		equal(t, names, []string(nil))
-		return err
-	})
+	failed(list(func(tx *Tx) ([]json.RawMessage, error) { return tx.TypedNotes("g", "preset") }))
 	failed(func(tx *Tx) error {
 		_, _, err := tx.Counters("g")
 		return err
@@ -251,11 +243,12 @@ func TestHomeReadsFail(t *testing.T) {
 	failed(func(tx *Tx) error { return tx.Retire("g", 1) })
 }
 
-func TestNamedNotesAndUniqueIndex(t *testing.T) {
+func TestTypedNotesAndUniqueIndex(t *testing.T) {
 	s := openDB(t, ":memory:")
 	calm := proto.NoteRow{RowHeader: header("note", "p1", 1), Pos: 1, Group: "g", NoteType: "preset", Name: "Calm", Text: "v1"}
 	put(t, s, "g", 10, calm)
-	put(t, s, "g", 10, proto.NoteRow{RowHeader: header("note", "p2", 2), Pos: 2, Group: "g", NoteType: "preset", Name: "Airy", Text: "v1"})
+	airy := proto.NoteRow{RowHeader: header("note", "p2", 2), Pos: 2, Group: "g", NoteType: "preset", Name: "Airy", Text: "v1"}
+	put(t, s, "g", 10, airy)
 	put(t, s, "g", 10, proto.NoteRow{RowHeader: header("note", "k1", 3), Pos: 3, Group: "g", NoteType: "kb", Name: "Calm", Text: "kb doc"})
 	put(t, s, "g", 10, proto.NoteRow{RowHeader: header("note", "c1", 4), Pos: 4, Group: "g", Text: "context 1"})
 	put(t, s, "g", 10, proto.NoteRow{RowHeader: header("note", "c2", 5), Pos: 5, Group: "g", Text: "context 2"})
@@ -269,31 +262,30 @@ func TestNamedNotesAndUniqueIndex(t *testing.T) {
 		t.Fatalf("duplicate named note err = %v; want UNIQUE constraint", dupErr)
 	}
 
-	gotRaw, err := within(t, s, func(tx *Tx) (json.RawMessage, error) { return tx.NamedNote("g", "preset", "Calm") })
-	check(t, err)
-	var got proto.NoteRow
-	check(t, json.Unmarshal(gotRaw, &got))
-	equal(t, got, calm)
-
-	names, err := within(t, s, func(tx *Tx) ([]string, error) { return tx.NoteNames("g", "preset") })
-	equal(t, []any{names, err}, []any{[]string{"Airy", "Calm"}, nil})
+	typed := func(group string) []proto.NoteRow {
+		rows, err := within(t, s, func(tx *Tx) ([]json.RawMessage, error) { return tx.TypedNotes(group, "preset") })
+		check(t, err)
+		notes := []proto.NoteRow{}
+		for _, raw := range rows {
+			var n proto.NoteRow
+			check(t, json.Unmarshal(raw, &n))
+			notes = append(notes, n)
+		}
+		return notes
+	}
+	equal(t, typed("g"), []proto.NoteRow{airy, calm})
 
 	// Replacing the existing row id updates text while keeping id and pos; gone frees the name.
 	calm.Seq, calm.Text = 7, "v2"
 	put(t, s, "g", 30, calm)
 	put(t, s, "g", 40, proto.GoneRow{RowHeader: header("note", "p1", 8), Gone: true})
-	_, err = within(t, s, func(tx *Tx) (json.RawMessage, error) { return tx.NamedNote("g", "preset", "Calm") })
-	equal(t, errors.Is(err, sql.ErrNoRows), true)
-	names, err = within(t, s, func(tx *Tx) ([]string, error) { return tx.NoteNames("g", "preset") })
-	equal(t, []any{names, err}, []any{[]string{"Airy"}, nil})
+	equal(t, typed("g"), []proto.NoteRow{airy})
 
 	put(t, s, "g", 50, proto.NoteRow{RowHeader: header("note", "p3", 9), Pos: 9, Group: "g", NoteType: "preset", Name: "Calm", Text: "recreated"})
-	names, err = within(t, s, func(tx *Tx) ([]string, error) { return tx.NoteNames("none", "preset") })
-	equal(t, []any{names, err}, []any{[]string{}, nil})
+	equal(t, typed("none"), []proto.NoteRow{})
 
 	for _, q := range []string{
-		`EXPLAIN QUERY PLAN SELECT data FROM row WHERE g='g' AND r='note' AND gone=0 AND data->>'type' IS NOT NULL AND data->>'type'='preset' AND data->>'name'='Calm'`,
-		`EXPLAIN QUERY PLAN SELECT data->>'name' FROM row WHERE g='g' AND r='note' AND gone=0 AND data->>'type' IS NOT NULL AND data->>'type'='preset' ORDER BY data->>'name'`,
+		`EXPLAIN QUERY PLAN SELECT data FROM row WHERE g='g' AND r='note' AND gone=0 AND data->>'type' IS NOT NULL AND data->>'type'='preset' ORDER BY data->>'name'`,
 	} {
 		var detail string
 		check(t, s.db.QueryRow(q).Scan(new(int), new(int), new(int), &detail))

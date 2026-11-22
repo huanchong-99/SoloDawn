@@ -32,7 +32,9 @@ states, the transactions, the clock and the connections ("The run loop" below).
 | show the group an accepted device-log entry | a `proto.DeviceRow` in `Result.Rows`; `Commit` applies its entry to the state's log |
 | do after a commit what a pure function cannot, such as a Web Push | a function `func(s *State, res Result)` and `After.Add(name, f)` in its file's `init` |
 | know in a hook which devices are connected | `s.Online[device]` |
-| answer with result fields | `Result.Answer.Num`, `.Passed`, `.Round`, `.ID`, `.Replaced` |
+| answer with result fields | `Result.Answer.Num`, `.Passed`, `.Round`, `.ID`, `.Replaced`, and for `invite`, `Result.Link` and `Result.Expires` |
+| create or replay an invitation | `Result.InviteBy` (the inviting admin's member id) with `LoopConfig.Invite` / `State.Invite` (`Inviter`) |
+| handle a joining connection | `c.Joining` (`*Joining`: `Group`, `By`, `Open`, `Log`, `Admit`), attached with `conn.SetJoining(fn)` on `Loop` or passed to `Commands.ApplyJoining`; `Result.InviteUsed` marks an accepted `join` that consumes the invitation |
 | refuse | `&Refusal{Code: "conflict", Msg: "…"}`, with a code of [datachannel](../../planning/contracts/datachannel.md) section 9 |
 | read a message, a note, a thread, the pending cards, the queued items | `c.Disk` in a command, the `Disk` argument of a timer or a handler |
 | add a rule that the clock sets off | a function `func(s *State, d Disk, now int64) Result` and `Timers.Add(name, f)` in its file's `init` |
@@ -67,12 +69,20 @@ does one of those five types without its field. `Add` panics when a key is given
 ([datachannel](../../planning/contracts/datachannel.md), section 5):
 
 1. the envelope checks of [envelope](../../planning/contracts/envelope.md) section 3, with their
-   own codes; a device is known when a log in `State.Logs` holds it as valid, and a `to` must be
-   `State.Home`;
+   own codes; a device is known when a log in `State.Logs` holds it as valid or when the connection
+   carries a non-nil `Joining` ([people](../../planning/contracts/step-2/people.md), section 3),
+   and a `to` must be `State.Home`;
 2. `g` is `State.ID`, else `bad_request`;
-3. the receipt: a command answered before gets that outcome and nothing runs;
+3. the receipt: a command answered before gets that outcome and nothing runs, except a succeeded
+   `invite`, which asks `Inviter.ReplayInvite` and answers with the original `link` and `expires`
+   while the invitation is open, or `conflict` otherwise;
 4. the payload names a key, and the key is in the table, else `bad_request`;
-5. the group exists, else `not_found`; only `group/create` reaches its function without one;
+5. on a joining connection (`c.Joining != nil`), only `join` with `c.Joining.Group == State.ID` is
+   accepted (`forbidden` otherwise), then `State.Group.ID` must exist (`not_found` otherwise), `as`
+   must be absent (`bad_request` for non-text or empty, `forbidden` when present), and `c.Who` gets
+   `Device` plus `User` and `Human` when the signer is valid in `c.Joining.Log`; on an ordinary
+   connection, the group exists (`not_found` otherwise; only `group/create` reaches its function
+   without one);
 6. `as`, when there, is a text that is not empty, else `bad_request`, and names an AI whose
    `host` is the signer, else `forbidden`;
 7. the signer's person is a member of the group, or, for `group/create` on a group that does not
@@ -81,7 +91,11 @@ does one of those five types without its field. `Add` panics when a key is given
 9. no row of its result is above the size limit of a row, else `bad_request`.
 
 Checks 1 and 2 leave no receipt. From check 4 on, the outcome is written as the receipt, a refusal
-included, with the command's own `ts`. A repeated refusal is answered with its code and a fixed
+included, with the command's own `ts`. For an accepted `invite` (`Result.InviteBy` not empty), the
+home calls `Inviter.Invite(group, by, signer, nonce)` (on a `Loop`, on the group's goroutine outside
+`Store.Write` before writing the `{ok: true}` receipt, so an `Invite` error leaves no receipt and
+never deadlocks `Store.Write`), and carries `Link` and `Expires` on `Result` without storing them in
+the receipt. On a joining connection, when an accepted command commits on `Loop`, `Joining.Admit(res.InviteUsed)` runs before the `ok` answer frame is queued. A repeated refusal is answered with its code and a fixed
 `msg`, because a receipt holds no sentence.
 
 **Who.** `Who` carries the signer, the person whose log holds it, that person's member id and the
@@ -186,9 +200,14 @@ The checks and reviews (`cmd_review.go`) take the names that start with `rev`, t
 their test functions start with `TestReviewCmd`. The merges and summaries (`cmd_merge.go`) take the
 names that start with `mrg`, their tests too, and their test functions start with `TestMerge`.
 Host events (`cmd_hostev.go`) take the names that start with `hev`, their tests too, and their test
-functions start with `TestHostEv`; the file exports `HostOfflineEvent`.
-Retention (`retention.go`) takes the names that start with `ret`, exports `Retain`, and its test
-functions start with `TestRetention`.
+functions start with `TestHostEv`; the file exports `HostOfflineEvent`. The calls (`cmd_call.go`)
+take the names that start with `cal`, their tests too, and their test functions start with
+`TestCall`. Retention (`retention.go`) takes the names that start with `ret`, exports `Retain`,
+and its test functions start with `TestRetention`.
+The step-2 people seam (`people_seam.go`) takes the unexported names that start with `seam` and
+`keyInvite` / `keyJoin` (leaving `ppl` for `cmd_people.go`), and exports `Joining`, `InviteLink`,
+`Inviter`, `(*Conn).SetJoining` and `Table.ApplyJoining`. Web Push (`webpush.go`) takes the names that start with
+`wpush`, its tests too, and its test functions start with `TestWebPush`.
 Style presets (`preset.go`) take the names that start with `preset`, their tests too, and their test
 functions start with `TestPreset`.
 
@@ -662,6 +681,26 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
   `Pending` and the newest 50 main-line messages (`PageThread(nil, 0, 50)`) without duplicates in
   increasing `seq` order.
 
+## Calls
+
+`cmd_call.go` holds `post` of kinds `call` and `reply`
+([commands](../../planning/contracts/commands.md) 1.3;
+[messages](../../planning/contracts/messages.md) 1, 2.6 and 3.4;
+[ask](../../planning/flows/ask.md)), under the keys `post/call` and `post/reply`, sharing
+`postCheck`, `postRows` and `postTaskID` with `cmd_post.go` and `cardItems` with `cmd_card.go`.
+Where the contracts are silent, it does this:
+
+- **Call.** A self-call (`body.to` equal to `as`) is `bad_request`, a non-null `thread` absent from
+  `State.Tasks` is `not_found`, a `body.to` absent from `State.AIs` is `conflict`, and `body.depth`
+  above `Group.Limits.AskDepth` is `limit` (A6.4). One `mention` item is queued for `body.to`, with
+  `task` set when in a thread, even when `mentions` also names `body.to` or other AIs; round
+  counting and held mentions wrap `post/*` in unit HM-13.
+- **Reply.** A `re` `null` or a `thread` that differs from the call's `thread` is `bad_request`; a
+  missing `re` message on `Disk` or a deleted task in `State.Tasks` is `not_found`. Elapsed `ms` on
+  the answered call is `max(0, c.Timestamp - call.Timestamp)` so inter-host clock skew never
+  produces a negative duration, followed by the reply `MsgRow` and, in a thread, the updated
+  `TaskRow`. When `call.By` is still in `State.AIs`, one `reply` item is queued for it (A6.3).
+
 ## Retention
 
 `retention.go` exports `Retain(tx, now)`, which reads `retention_days` from SQLite `setting`
@@ -677,13 +716,35 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
   in-memory state (`State.Tasks`) until restart ([issues](../../issues.md)). `grp.num` keeps the
   highest task number given out, so task numbers are not reused after restart.
 
+## Web Push
+
+`webpush.go` holds the `push` command, the `"push"` hook of `After` and the loop's startup and
+shutdown hooks ([commands](../../planning/contracts/commands.md) 1.7;
+[storage](../../planning/contracts/storage.md) section 1, `push_sub`):
+
+- **Command.** A payload that decodes as `proto.PushOff` (`off: true`) deletes the signing device's
+  row from `push_sub`; any other payload decodes as `proto.PushOn` (`bad_request` otherwise) and
+  writes `push_sub` through `Result.Writes`.
+- **Memory, startup and shutdown.** Subscriptions and the active `*Loop` are held per `State.Home`
+  under a leaf mutex (`wpushMu`, which never calls `Loop`, `Store` or HTTP). `StartLoop` loads
+  `push_sub` from `LoopConfig.Store` for `LoopConfig.Home` before starting group goroutines,
+  `After["push"]` updates memory only after transaction commit so a rolled-back write leaves memory
+  unchanged, and `Loop.Close` drains in-flight Web Push deliveries on `Loop.wg` before detaching.
+- **Eligibility and delivery.** For each newly created `proto.MsgRow` (`Pos == Seq`), `After["push"]`
+  extracts one reminder kind (`approval`, `decision`, `brief`, `done` from `summary`, or `mention`
+  from any other message kind), filters for offline subscribed devices of concerned group members
+  that remain valid in `State.Logs`, encrypts `proto.Reminder` JSON (without HTML escaping) via
+  RFC 8291 (`webpush-go`), and sends each request in its own goroutine with a 5 s context timeout.
+  A `404` or `410` response drops that subscription in memory and from `push_sub` if not replaced
+  since.
+
 ## Known limitations
 
 - The table of commands holds the groups, members, briefs, the task commands of HM-9, the four
   kinds of `post` of HM-6, `note` and `forget`, the cards, the checks and reviews, the merges and
-  summaries, and the host events, and no node starts a loop yet: the remaining command files
-  (including thread round counting in HM-13) and the wiring of the node are separate units
-  ([units](../../planning/steps/parallel-plan-units.md), section 2).
+  summaries, the host events, `push`, and the calls, and no node starts a loop yet: the remaining
+  command files (including thread round counting in HM-13) and the wiring of the node are separate
+  units ([units](../../planning/steps/parallel-plan-units.md), section 2).
 - After retention deletes rows, finished tasks stay in the in-memory `State.Tasks` until restart
   ([issues](../../issues.md)).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
@@ -776,11 +837,32 @@ refusals, detached connections and store failures; `run_internal_test.go` covers
 `runErr`. `features/home_sync.feature` holds acceptance test A2.2 (delta, 1,500-row reset with
 newest 50 and an older pending card, purge-mark reset, `state_only`) and the first-read cut of A2.7.
 
+`trace_test.go` produces the two signed task transcripts of
+[trace-task.md](../../planning/flows/trace-task.md), `internal/proto/testdata/trace-remote.json` and
+`trace-local.json`: it sends their commands through `Commands.Apply` at each command's `ts`, writes
+each result to a store in memory, commits it, and records the answer, the `rows` frame and the
+`inbox` frames that `runLotOf` makes, acknowledging each item. It fails when a file differs from
+that; `go test ./internal/home -run TestTaskTraces -update` writes them.
+
 `fetch_test.go` exercises `Loop.Fetch` across thread pages, `note` and `review` pages, single-row
 reads, exact 61,440-byte boundaries, page bounds checks, group access checks, detached connections
 and store failures. `features/home_fetch.feature` holds the scroll-back scenarios of A2.2 and the
 deleted-row scenario of A2.7.
 
+`cmd_call_test.go` sends `post/call` and `post/reply` through `Commands.Apply` with fakes of
+`Receipts` and `Disk`, checking the golden shapes, `UnexpectedNulls`, the 200-character preview,
+elapsed-time clamping and every refusal boundary. `features/home_call.feature` holds the
+home half of acceptance tests A6.3 and A6.4.
+
 `retention_test.go` covers `Retain`: default and configured `retention_days`, store error
 propagation, protected rows, and the purge mark with `Loop.Sync` reset.
 `features/home_retention.feature` holds acceptance test A2.5 and the retention half of A5.14.
+
+`people_seam_test.go` covers `people_seam.go` across `Table.ApplyJoining`, `State.Invite`,
+`LoopConfig.Invite` (including `Store.Write` re-entrancy freedom on `Invite` and `ReplayInvite`),
+and `(*Conn).SetJoining` admission callbacks.
+`webpush_test.go` covers `push`, `After["push"]`, `StartLoop` subscription loading and `Close`
+drain, RFC 8291 decryption, per-browser eligibility and revocation, and `404`/`410` eviction in
+memory and `push_sub`. `features/home_webpush.feature` holds the backend half of acceptance test
+A8.3 against a local HTTP push endpoint, verifying that wire payloads are ciphertext only and
+decrypted reminders hold neither message text nor commands.

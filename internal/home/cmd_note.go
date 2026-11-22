@@ -22,7 +22,7 @@ func notePut(s *State, c Command) (Result, *Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return Result{}, refusal
 	}
-	if presetTyped(c) {
+	if p.NoteType != "" || p.Name != "" {
 		return presetNotePut(s, c, p)
 	}
 	if p.Task != nil {

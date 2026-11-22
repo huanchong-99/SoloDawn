@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { actTextLimit, jsonBytes } from '../../lib/compose';
   import type { CardProps } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
@@ -8,7 +9,9 @@
 
   /** A decision card with multiple-choice options and a free-text answer field (messages.md 2.4, 3.3). */
   let { group, msg }: CardProps<'decision'> = $props();
+  const uid = $props.id();
 
+  let cardEl: HTMLElement;
   let freeText = $state('');
   let busy = $state(false);
   let failed = $state('');
@@ -19,7 +22,8 @@
   const canAct = $derived(pending && inTo);
   const trimmed = $derived(freeText.trim());
   const overLimit = $derived(trimmed !== '' && jsonBytes(trimmed) > actTextLimit);
-  const canSendText = $derived(canAct && !readonly && !busy && trimmed !== '' && !overLimit);
+  const ready = $derived(canAct && !readonly && !busy && !overLimit);
+  const canSendText = $derived(ready && trimmed !== '');
 
   const taskRow = $derived(group.task(msg.body.task));
 
@@ -28,29 +32,43 @@
     msg.body.to.map((uid) => group.personName(uid) ?? uid).join(t('decision.sep')),
   );
 
-  async function choose(arg?: string) {
-    if (!canAct || readonly || busy || overLimit) return;
-    if (arg === undefined && trimmed === '') return;
-    busy = true;
-    failed = '';
-    const answer = await group.home.command({
-      t: 'act',
+  const allowed = (arg?: string) => ready && (arg !== undefined || trimmed !== '');
+
+  function requestBody(arg?: string) {
+    return {
+      t: 'act' as const,
       g: group.g,
       msg: msg.id,
-      action: 'choose',
+      action: 'choose' as const,
       ...(arg !== undefined ? { arg } : {}),
       ...(trimmed !== '' ? { text: trimmed } : {}),
-    });
-    busy = false;
-    if (answer.err) {
-      failed = answer.err.code;
-      return;
+    };
+  }
+
+  async function settleFocus() {
+    await tick();
+    const next = cardEl.querySelector<HTMLElement>('button:not([disabled]), input:not([disabled])');
+    if (next) next.focus({ preventScroll: true });
+  }
+
+  async function choose(arg?: string) {
+    if (!allowed(arg)) return;
+    const hadFocus = cardEl.contains(document.activeElement);
+    busy = true;
+    failed = '';
+    if (hadFocus) {
+      cardEl.tabIndex = -1;
+      cardEl.focus({ preventScroll: true });
     }
-    freeText = '';
+    const answer = await group.home.command(requestBody(arg));
+    busy = false;
+    if (answer.err) failed = answer.err.code;
+    else freeText = '';
+    if (hadFocus) await settleFocus();
   }
 </script>
 
-<section class="card" class:need={canAct} aria-label={t('decision.kind')}>
+<section bind:this={cardEl} class="card" class:need={canAct} aria-label={t('decision.kind')}>
   <header class="card-head">
     <Icon name="fork" />
     <span class="kind">{t('decision.kind')}</span>
@@ -130,6 +148,8 @@
           aria-label={msg.body.options.length
             ? t('decision.custom.label')
             : t('decision.answer.label')}
+          aria-invalid={overLimit || undefined}
+          aria-describedby={`${uid}-hint`}
           placeholder={msg.body.options.length
             ? t('decision.custom.hint')
             : t('decision.answer.hint')}
@@ -144,9 +164,9 @@
         </button>
       </form>
       {#if overLimit}
-        <p class="hint over" role="status">{t('decision.too_long')}</p>
+        <p class="hint over" id={`${uid}-hint`} role="status">{t('decision.too_long')}</p>
       {:else}
-        <p class="hint">
+        <p class="hint" id={`${uid}-hint`}>
           {msg.body.options.length ? t('decision.hint') : t('decision.hint.free')}
         </p>
       {/if}

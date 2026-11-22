@@ -2,6 +2,7 @@ package home
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -19,18 +20,11 @@ const (
 	presetNameLimit = 80
 )
 
-// presetTyped reports whether a note command carries type or name.
-func presetTyped(c Command) bool {
-	kind, kindOK := c.field("type")
-	name, nameOK := c.field("name")
-	return !kindOK || !nameOK || kind != "" || name != ""
-}
-
 func presetNotePut(s *State, c Command, p proto.Note) (Result, *Refusal) {
 	if refusal := presetCheckNote(c, p); refusal != nil {
 		return Result{}, refusal
 	}
-	if old, ok := c.Disk.NamedNote(p.NoteType, p.Name); ok {
+	if old, ok := presetFind(c.Disk.TypedNotes(p.NoteType), p.Name); ok {
 		return presetWrite(s, c, p, old.ID, old.Pos, true), nil
 	}
 	if _, taken := c.Disk.Note(string(p.ID)); taken {
@@ -65,23 +59,27 @@ func presetWrite(s *State, c Command, p proto.Note, id string, pos int64, replac
 	}
 }
 
-func presetBriefCheck(d Disk, c Command, preset string) *Refusal {
-	if preset == "" && presetBriefAbsent(c) {
+func presetBriefCheck(d Disk, preset string) *Refusal {
+	if preset == "" {
 		return nil
 	}
-	if _, ok := d.NamedNote(presetType, preset); ok {
+	notes := d.TypedNotes(presetType)
+	if _, ok := presetFind(notes, preset); ok {
 		return nil
 	}
-	return &Refusal{"not_found", presetUnknownMsg(preset, d.NoteNames(presetType))}
+	names := make([]string, len(notes))
+	for i, n := range notes {
+		names[i] = n.Name
+	}
+	return &Refusal{"not_found", presetUnknownMsg(preset, names)}
 }
 
-func presetBriefAbsent(c Command) bool {
-	var raw struct {
-		Body map[string]any `json:"body"`
+func presetFind(notes []proto.NoteRow, name string) (proto.NoteRow, bool) {
+	i := slices.IndexFunc(notes, func(n proto.NoteRow) bool { return n.Name == name })
+	if i < 0 {
+		return proto.NoteRow{}, false
 	}
-	proto.Decode([]byte(c.Env.Payload), &raw)
-	_, there := raw.Body["preset"]
-	return !there
+	return notes[i], true
 }
 
 func presetUnknownMsg(given string, valid []string) string {

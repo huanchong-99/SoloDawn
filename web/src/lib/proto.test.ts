@@ -537,8 +537,9 @@ describe('commands', () => {
     const post = p.decode(p.Post, goldens[name]);
     expect(name).toBe(`post-${post.kind}`);
     const rows = examples
-      .filter((row) => row.startsWith(`row-msg-${post.kind}`) && row !== 'row-msg-brief-preset')
-      .map((row) => p.decode(p.MsgRow, goldens[row]));
+      .filter((row) => row.startsWith(`row-msg-${post.kind}`))
+      .map((row) => p.decode(p.MsgRow, goldens[row]))
+      .filter((row) => row.kind !== 'brief' || row.body.preset === undefined);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(JSON.parse(row.env!.p)).toStrictEqual(post);
@@ -639,17 +640,11 @@ describe('host surface', () => {
     expect(info.agents.map((agent) => agent.driver)).toEqual([
       {
         accounts: ['personal', 'team', 'api_key'],
-        levels: [1, 2, 3],
-        approvals: 'tool',
         takeover: 'new',
-        usage: ['tokens', 'usd', 'window_pct'],
       },
       {
         accounts: ['personal', 'team', 'api_key'],
-        levels: [1, 2, 3],
-        approvals: 'conn',
         takeover: 'resume',
-        usage: [],
       },
     ]);
   });

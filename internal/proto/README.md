@@ -126,12 +126,23 @@ the type does not name, not with `Decode`.
 
 - `host.info` is answered with `HostInfo` and pushed as `HostInfoPush`, the same
   `HostState` without `re` and `ok`. `relay` and an agent's `account` may be `null`;
-  each agent entry carries `Driver` once populated (`step-3/drivers.md` section 6).
+  each agent entry carries `Driver` (`Accounts`, `Takeover`) once populated (`step-3/drivers.md` section 6).
 - Presets and knowledge-base documents (`step-3/knowledge.md`) add optional `type`
-  (`NoteType`) and `name` on `NoteRow` and `Note` (answered with `id` and `replaced`
+  (the field `NoteType`, JSON `type`) and `name` on `NoteRow` and `Note` (answered with `id` and `replaced`
   in `CmdResult`), `preset` on `BriefBody`, and `q` on `FetchKind`.
 - In `SettingsSet`, `caps` is `AgentCaps`: a member per agent being changed, its
   caps whole. A field per agent, not a map, so that every name on the wire is fixed.
 - `pair.browser`, `host.offline` and `host.online` are a `HostCommand` alone;
   `takeover.end` is a `Takeover`, `takeover.start` a `TakeoverStart`.
 - `Beacon` is the payload of the signed local-network beacon; it has no `g` or `to`.
+- `testdata/trace-remote.json` and `testdata/trace-local.json` hold the complete
+  signed transcripts of one confirmed task from request to summary, with a
+  GitHub remote and with `forge: none`
+  ([trace-task.md](../../planning/flows/trace-task.md)). Their type is `TaskTrace`
+  ([`trace.go`](trace.go)). The home writes them, not this package:
+  `internal/home/trace_test.go` sends their signed commands through the home's
+  command table and fails when a file differs from what the home answers, pushes
+  and delivers; `go test ./internal/home -run TestTaskTraces -update` writes them
+  again. `web/src/lib/trace.test.ts` verifies them on their own: the device log,
+  every command signature, the rows, the inbox items with their acknowledgements,
+  and that every item, the review and the merge are about the submitted commit.

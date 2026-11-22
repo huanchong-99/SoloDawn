@@ -54,7 +54,7 @@ func (b *s3PresetHomeBridge) Done() <-chan struct{}        { return b.done }
 func (b *s3PresetHomeBridge) Path() string                 { return "local" }
 func (b *s3PresetHomeBridge) PathChanged() <-chan struct{} { return nil }
 
-func (b *s3PresetHomeBridge) Request(_ context.Context, build func(int64) any) (json.RawMessage, error) {
+func (b *s3PresetHomeBridge) Request(ctx context.Context, build func(int64) any) (json.RawMessage, error) {
 	const reqID = 77
 	req := build(reqID)
 	raw, err := json.Marshal(req)
@@ -64,14 +64,23 @@ func (b *s3PresetHomeBridge) Request(_ context.Context, build func(int64) any) (
 	var cmd proto.Cmd
 	if proto.Decode(raw, &cmd) == nil && cmd.Type == "cmd" {
 		b.loop.Cmd(b.conn, cmd.ID, cmd.Env)
-		return <-b.ch, nil
+		return b.answer(ctx)
 	}
 	var fk home.Fetch
 	if proto.Decode(raw, &fk) == nil && fk.Type == "fetch" {
 		b.loop.Fetch(b.conn, fk)
-		return <-b.ch, nil
+		return b.answer(ctx)
 	}
 	return nil, fmt.Errorf("unsupported bridge request: %s", raw)
+}
+
+func (b *s3PresetHomeBridge) answer(ctx context.Context) (json.RawMessage, error) {
+	select {
+	case raw := <-b.ch:
+		return raw, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 type s3PresetWorld struct {

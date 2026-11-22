@@ -3,7 +3,6 @@ package host
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
@@ -17,16 +16,16 @@ func (c *turnCtx) appendTaskPreset(lines []string, name string) ([]string, error
 		return nil, err
 	}
 	if !ok {
-		return append(lines, fmt.Sprintf("Style preset %q: deleted since the brief was proposed.", name)), nil
+		return append(lines, "Style preset \""+name+"\": deleted since the brief was proposed."), nil
 	}
-	return append(lines, fmt.Sprintf("Style preset %q:", name), text), nil
+	return append(lines, "Style preset \""+name+"\":", text), nil
 }
 
 func appendReviewPreset(lines []string, name string) []string {
 	if name == "" {
 		return lines
 	}
-	return append(lines, fmt.Sprintf("Style preset: %q", name))
+	return append(lines, "Style preset: \""+name+"\"")
 }
 
 func (c *turnCtx) fetchPresetText(name string) (string, bool, error) {
@@ -44,10 +43,7 @@ func (c *turnCtx) fetchPresetText(name string) (string, bool, error) {
 }
 
 func stopPresetScan(found bool, err error, page proto.Fetched) bool {
-	if found || err != nil {
-		return true
-	}
-	return !page.More || len(page.Rows) == 0
+	return found || err != nil || !page.More
 }
 
 func (c *turnCtx) fetchPresetPage(before int64) (proto.Fetched, error) {

@@ -31,24 +31,15 @@ func (d *presetDisk) Thread(*string, int64, int) []proto.MsgRow {
 func (d *presetDisk) Pending() []proto.MsgRow { return nil }
 func (d *presetDisk) Queued() []store.Item    { return nil }
 
-func (d *presetDisk) NamedNote(noteType, name string) (proto.NoteRow, bool) {
-	for _, n := range d.notes {
-		if n.NoteType == noteType && n.Name == name {
-			return n, true
-		}
-	}
-	return proto.NoteRow{}, false
-}
-
-func (d *presetDisk) NoteNames(noteType string) []string {
-	names := []string{}
+func (d *presetDisk) TypedNotes(noteType string) []proto.NoteRow {
+	notes := []proto.NoteRow{}
 	for _, n := range d.notes {
 		if n.NoteType == noteType {
-			names = append(names, n.Name)
+			notes = append(notes, n)
 		}
 	}
-	slices.SortFunc(names, cmp.Compare[string])
-	return names
+	slices.SortFunc(notes, func(a, b proto.NoteRow) int { return cmp.Compare(a.Name, b.Name) })
+	return notes
 }
 
 func (d *presetDisk) record(res home.Result) {
@@ -139,11 +130,6 @@ func TestPresetNoteRefusals(t *testing.T) {
 			payload: fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":null,"name":"Calm","text":"x"}`, id(151), noteTS, groupID, id(152)),
 			code:    "bad_request",
 		},
-		"empty type and empty name": {
-			by:      browser,
-			payload: fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":null,"type":"","name":"","text":"x"}`, id(151), noteTS, groupID, id(152)),
-			code:    "bad_request",
-		},
 		"empty name": {
 			by:      browser,
 			payload: fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":null,"type":"preset","name":"","text":"x"}`, id(151), noteTS, groupID, id(152)),
@@ -222,7 +208,7 @@ func TestPresetBriefPostAndConfirmAfterForget(t *testing.T) {
 		t.Fatalf("unexpected refusal msg: %q", res.Msg)
 	}
 
-	// Seed two presets; unknown preset or explicit empty preset lists sorted valid names.
+	// Seed two presets; an unknown preset lists sorted valid names.
 	d.notes[id(161)] = proto.NoteRow{RowHeader: proto.RowHeader{Type: "note", ID: id(161)}, NoteType: "preset", Name: "Calm dashboard"}
 	d.notes[id(162)] = proto.NoteRow{RowHeader: proto.RowHeader{Type: "note", ID: id(162)}, NoteType: "preset", Name: "Airy"}
 	missingEnv2 := briefSign(laptop, briefPost(163, missingBody))
@@ -237,12 +223,6 @@ func TestPresetBriefPostAndConfirmAfterForget(t *testing.T) {
 	if !strings.Contains(res.Msg, `unknown preset "Neon" (valid: Airy, Calm dashboard)`) {
 		t.Fatalf("unexpected refusal msg: %q", res.Msg)
 	}
-
-	// Explicit empty "preset":"" in raw payload is also refused as unknown preset.
-	rawPost, _ := json.Marshal(briefPost(164, briefBody()))
-	emptyPresetPayload := strings.Replace(string(rawPost), `"replaces":null`, `"replaces":null,"preset":""`, 1)
-	resEmpty := presetApply(t, s, d, r, laptop, emptyPresetPayload)
-	noteRefused(t, resEmpty, "not_found")
 
 	// Valid preset is stored on the brief card; confirming after the preset is forgotten still succeeds.
 	validEnv := briefSign(laptop, briefPost(165, missingBody))
