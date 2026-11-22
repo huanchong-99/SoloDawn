@@ -2,11 +2,12 @@
   import Avatar from '../components/Avatar.svelte';
   import Failure from '../components/Failure.svelte';
   import Icon from '../components/Icon.svelte';
+  import { offeredAccounts } from '../components/driver/driver';
   import PairBrowserDialog from '../components/nodes/PairBrowserDialog.svelte';
   import { find } from '../lib/groups.svelte';
   import type { Net } from '../lib/net.svelte';
   import { nodes, type Computer } from '../lib/nodes.svelte';
-  import { accountLabel, accounts, cliName, type AccountKind } from '../lib/onboard.svelte';
+  import { accountLabel, cliName, type AccountKind } from '../lib/onboard.svelte';
   import { t } from '../lib/prefs.svelte';
   import { href } from '../lib/route.svelte';
   import { now } from '../lib/when';
@@ -197,7 +198,7 @@
                 </header>
                 <fieldset class="acct" disabled={!comp.online || busyAcct[acctKey]}>
                   <legend class="sr">{t('pairing.acct.legend')} · {label}</legend>
-                  {#each accounts as acct (acct)}
+                  {#each offeredAccounts(agent.driver) as acct (acct)}
                     <label>
                       <input
                         type="radio"

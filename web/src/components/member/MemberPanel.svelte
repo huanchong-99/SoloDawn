@@ -12,6 +12,7 @@
     usageMeter,
   } from '../../lib/members';
   import type { Net } from '../../lib/net.svelte';
+  import { nodes } from '../../lib/nodes.svelte';
   import { accountLabel } from '../../lib/onboard.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { href } from '../../lib/route.svelte';
@@ -19,6 +20,7 @@
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
   import AllowEditor from '../allow/AllowEditor.svelte';
+  import { offersTerminal } from '../driver/driver';
   import InvitationDialog from '../people/InvitationDialog.svelte';
   import PersonActions from '../people/PersonActions.svelte';
   import AskToWatch from '../watch/AskToWatch.svelte';
@@ -34,6 +36,8 @@
   const ais = $derived(aiMembers(group));
   const humans = $derived(humanMembers(group));
   const addReason = $derived(addDisabledReason(group, homes));
+
+  $effect(() => nodes.sync(net.homes));
 </script>
 
 <div class="members">
@@ -60,6 +64,7 @@
       {@const mine = ai.user === group.home.me.user}
       {@const owner = mine ? undefined : group.personName(ai.user)}
       {@const termWhy = mine ? terminalDisabledReason(net, ai) : undefined}
+      {@const terminal = offersTerminal(hostHomeOf(net.homes, ai.host), ai.cli)}
       {@const meter = usageMeter(ai.usage, prefs.lang)}
       <section class="card member">
         <header class="row">
@@ -118,11 +123,11 @@
                   >
                     {t('member.handback')}
                   </button>
-                {:else if !termWhy}
+                {:else if terminal && !termWhy}
                   <a class="btn btn-sm" href={href('terminal', { g: group.g, member: ai.id })}>
                     <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
                   </a>
-                {:else}
+                {:else if terminal}
                   <button
                     type="button"
                     class="btn btn-sm"
@@ -135,7 +140,7 @@
                 {@render editAccess()}
                 {#if ai.state === 'takeover'}
                   <span class="hint">{t('member.handback.queued')}</span>
-                {:else if termWhy}
+                {:else if terminal && termWhy}
                   <span id={`${uid}-term-${ai.id}`} class="hint">{termWhy}</span>
                 {/if}
               </footer>
