@@ -10,12 +10,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
 // ReviewedMerge identifies a merge item taken by the host after checking
 // that the task is still active at the merge step for this commit.
 type ReviewedMerge struct {
 	Repo, Base, Branch string
+	Templates          *proto.ForgeTemplates
 	Task, Commit       string
 	PR                 int    // zero for a local-only group
 	GitHubRepo         string // <owner>/<repo> of the group's GitHub repository
@@ -36,6 +39,9 @@ type MergeResult struct {
 // the caller must use Inspect instead. The command output in a conflict goes
 // to the group, so a secret in it is redacted (local.md 8).
 func (m ReviewedMerge) Apply(ctx context.Context) (MergeResult, error) {
+	if m.Templates != nil {
+		return m.mergeTemplate(ctx)
+	}
 	if m.PR == 0 {
 		// Local tasks share the clone's base checkout and index: the squash
 		// and its commit (or reset) run under the clone's lock.
@@ -152,6 +158,9 @@ func (m ReviewedMerge) expectGit(ctx context.Context, want string, args ...strin
 // gets the reset of a failed merge, which undoes a squash interrupted before
 // its commit.
 func (m ReviewedMerge) Inspect(ctx context.Context) (MergeResult, error) {
+	if m.Templates != nil {
+		return MergeResult{Conflict: "custom forge merge was interrupted; inspect the request before retrying"}, nil
+	}
 	if m.PR != 0 {
 		since := m.Taken
 		if since.IsZero() {

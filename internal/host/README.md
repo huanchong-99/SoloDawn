@@ -293,6 +293,14 @@ refused. Team state is read state-only when it is not already cached.
 
 # Task and review tools
 
+`forge_tmpl.go` runs custom forge templates as argument lists through the
+existing bounded, non-interactive process runner, never through a shell.
+Replacement is single-pass; unknown braces remain literal. Custom projects
+use remote workspaces and run their push, open, checks and merge commands
+instead of GitHub commands. Checks poll at 30-second intervals; exit 8 is
+pending. A merge interrupted by a restart is reported as a conflict without
+a second attempt. Windows programs must resolve to `.exe` files.
+
 - `tools_task.go` lists `start_task` to working AIs' group sessions, `push_branch`, `run_checks` and `submit_task` to task sessions above level 1, and `submit_review` to review sessions ([mcp-tools.md](../../planning/contracts/mcp-tools.md)).
 - `push_branch` and `submit_task` derive `task/<num>-<slug>` from `num` and `slug` via `taskName`, ignoring `TaskRow.Branch`.
 - `start_task`, `submit_task` and `submit_review` check outbound text arguments with `CheckOutboundSecret` before running Git or signing commands.
