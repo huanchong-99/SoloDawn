@@ -392,12 +392,7 @@ func (w *s2ExportWorld) expectMoved(conn *peer.Connection, op string, build func
 	if err != nil {
 		return err
 	}
-	var answer struct {
-		Err struct {
-			proto.WireError
-			Home string `json:"home"`
-		} `json:"err"`
-	}
+	var answer proto.ErrorResponse
 	if err := proto.Decode(raw, &answer); err != nil || answer.Err.Code != "moved" || answer.Err.Home != w.c.P2.ID() {
 		return fmt.Errorf("%s answered %s, want moved to P2", op, raw)
 	}
