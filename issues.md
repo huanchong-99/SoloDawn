@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · Model discovery has synthetic fixtures, not live captures
+
+- Symptom: Claude Code and Codex model discovery is tested against scripted listings, not a current real CLI catalog. Optional model fields and whether every nonempty Codex `serviceTiers` entry means faster service remain unverified.
+- Cause: neither real CLI was available for T3-9. `internal/host/fakecli/testdata/claude-models.json` and `codex-models.json` are synthetic fixtures of `step-3/drivers.md` section 10.1. The two sourced rows in `internal/host/tiers.go` implement section 10.2, without additions from a live catalog.
+- Status: open until real `initialize` and paged `model/list` replies are captured and compared with each CLI's picker. The combined A10.13/A10.14 scenarios remain pending for live, OpenCode and browser coverage; their Claude Code/Codex host behavior is covered by `features/host_models.feature` and the node surface tests.
+
 ### 2026-11-22 · limitation · Custom forge results depend on the template program
 
 - Symptom: a checks template can report an older request head, and a successful merge can name a later merge on the base branch.
