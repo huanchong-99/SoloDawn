@@ -6,29 +6,17 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-22 · limitation · A quiet task's notice has no runtime timer
+### 2026-11-21 · deviation · The `rounds_limit` system message has an id derived from the triggering post's nonce
 
-- Symptom: a quiet task does not notify the secretary after `idle_notice_minutes`.
-- Cause: the machine can produce a quiet notice (`internal/home/machine.go:230`), but the runtime does not dispatch that event.
-- Status: open; A9.44's one-person quiet-task case remains pending independently of the confirmation units.
+- Symptom: when a `post` by an AI in a task's thread reaches `limits.rounds` (task-machine row 21), the command writes both the `post` row under `n` and the main-line `rounds_limit` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn rounds limit <n>` in base64url, rather than a random id.
+- Cause: `n` already names the `post` row, and a command function is pure and has no randomness (`revDerivedID` in `internal/home/cmd_review.go:149`, called from `internal/home/rounds.go:176`).
+- Status: open, decided by unit HM-13 on 2026-11-21, for the same reason as `briefTaskID` below.
 
-### 2026-11-22 · deviation · A confirmed brief cannot yet be replaced
+### 2026-11-21 · limitation · Quiet-period tracking lives in memory
 
-- Symptom: a new brief cannot replace a confirmed one as required by A9.13.
-- Cause: `internal/home/cmd_brief.go:153` accepts only pending or revised briefs as predecessors.
-- Status: open; A9.13 remains pending for T2-2b.
-
-### 2026-11-22 · limitation · The cast's approval fixture does not execute shell commands
-
-- Symptom: A9.19 verifies the approval tool returns allow and the fake CLI resumes; it does not verify that the command runs in a real CLI.
-- Cause: the replay fixture supports protocol I/O only (`internal/host/fakecli/replay.go:98`).
-- Status: open; actual command execution is unverified.
-
-### 2026-11-22 · limitation · Confirmation browser controls are not yet exercised
-
-- Symptom: the I2-1b scenarios exercise the card and member commands over the browser connection but do not check the rendered buttons, expired card or member editor.
-- Cause: the cast supplies protocol clients, not a rendered browser (`features/s2_cast_test.go:762`); the confirmation controls and member editor are planned in U2-2.
-- Status: open; verify the UI cases of A9.8, A9.9, A9.11 and A9.14 with U2-2.
+- Symptom: a home restart forgets which quiet periods already notified the secretary and can send one more `quiet` notice if an active task stays silent across the restart.
+- Cause: row 23 writes no row (`planning/contracts/task-machine.md` row 23), so `After["quiet"]` records each notified task's last-activity timestamp in the group's `State.quiet` in memory (`rndRememberQuiet` in `internal/home/rounds.go:121`, `internal/home/home.go:69`).
+- Status: open, accepted in step 1.
 
 ### 2026-11-22 · deviation · `driver` in `host.info` is optional until T3-2 fills it
 
@@ -229,7 +217,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-21 · deviation · A `task_failed` row written beside a `checks` or `review` row has an id derived from the command's nonce
 
 - Symptom: when `task cloud` reaches `limits.failures` (row 6 into row 14) or `post` of kind `review` exceeds `limits.review_rounds` (row 7 into row 14), the command writes two message rows in the task's thread: the `checks` or `review` row under `n`, and the `task_failed` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn task failed <n>` in base64url.
-- Cause: `n` already names the `checks` or `review` message row, and a command function is pure and has no randomness (`revFailedID` in `internal/home/cmd_review.go:149`).
+- Cause: `n` already names the `checks` or `review` message row, and a command function is pure and has no randomness (`revDerivedID` in `internal/home/cmd_review.go:149`).
 - Status: open, decided in unit HM-11 on 2026-11-21, for the same reason as `briefTaskID` above.
 
 ### 2026-11-21 · deviation · Passed hosted checks write a `checks` message in the task's thread
@@ -512,7 +500,43 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `web/src/messages/files.ts` takes every message file eagerly, and the loader merges them all (`web/src/messages/texts.ts`).
 - Status: open, accepted with U-0 (#170).
 
+### 2026-11-22 · deviation · A confirmed brief cannot yet be replaced
+
+- Symptom: a new brief cannot replace a confirmed one as required by A9.13.
+- Cause: `internal/home/cmd_brief.go:153` accepts only pending or revised briefs as predecessors.
+- Status: open; A9.13 remains pending for T2-2b.
+
+### 2026-11-22 · limitation · The cast's approval fixture does not execute shell commands
+
+- Symptom: A9.19 verifies the approval tool returns allow and the fake CLI resumes; it does not verify that the command runs in a real CLI.
+- Cause: the replay fixture supports protocol I/O only (`internal/host/fakecli/replay.go:98`).
+- Status: open; actual command execution is unverified.
+
+### 2026-11-22 · limitation · Confirmation browser controls are not yet exercised
+
+- Symptom: the I2-1b scenarios exercise the card and member commands over the browser connection but do not check the rendered buttons, expired card or member editor.
+- Cause: the cast supplies protocol clients, not a rendered browser (`features/s2_cast_test.go:762`); the confirmation controls and member editor are planned in U2-2.
+- Status: open; verify the UI cases of A9.8, A9.9, A9.11 and A9.14 with U2-2.
+
+### 2026-11-22 · limitation · The A9.44 quiet-task fixture does not reach the timer
+
+- Symptom: A9.44 remains pending after HM-13. With the scenario enabled, the brief proposed by the replacement secretary never appeared in either acceptance run (`features/s2_confirm.feature:555`).
+- Cause: not verified; both runs stopped in the proposal step before confirming the brief or waiting for the timer.
+- Status: open; HM-13's timer is covered separately by `features/home_rounds.feature:40`.
+
 ## Resolved
+
+### 2026-11-22 · limitation · A quiet task's notice had no runtime timer
+
+- Symptom: a quiet task did not notify the secretary after `idle_notice_minutes`.
+- Cause: the machine could produce a quiet notice (`internal/home/machine.go:230`), but no runtime timer dispatched the event.
+- Status: resolved by HM-13 (#190), which registers the timer in `internal/home/rounds.go:19`.
+
+### 2026-11-22 · bug · HM-13 and HM-15 home tests disagreed on rounds after both landed
+
+- Symptom: after `origin/rebuild` (HM-15's `post/call` and `post/reply`) was merged into HM-13, `go test ./internal/home/` panicked with `home: two functions under post/call` in `TestRoundsTenExchangesPauseAndResume`, and two `TestCall*` cases got `thread.rounds` one higher than they expected.
+- Cause: `rounds_test.go` cloned `home.Commands` and added a stand-in `post/call`, written before HM-15 existed; `Table.Add` refuses a second function under a key (`internal/home/home.go:307`). The `TestCall*` cases were written without HM-13's row 21, so they expected a thread call, and a thread reply that mentions an AI, to leave `thread.rounds` unchanged; `task-machine.md` row 21 and `flows/ask.md` A.3 and D count both.
+- Status: resolved on `gemini/HM-13` (#190): the stand-in is gone and the rounds test uses the real `post/call`; the call tests expect the round.
 
 ### 2026-11-22 · bug · `Host.Hand` could lose the item that answers a wait when the wait ended at the same moment
 
