@@ -27,7 +27,7 @@ AI, always present. A person's row has none of them.
 | Field | Values | When never set |
 | --- | --- | --- |
 | `model` | the model's id as the CLI names it, at most 100 code points, no control characters; `""`: the CLI's own default | `""` |
-| `effort` | the thinking level as the CLI names it, not the permission level, which stays the highest (`sessions.md`); at most 32 code points, no control characters; `""`: the CLI's own default | `""` |
+| `effort` | the thinking level as the CLI names it, not the permission level of `sessions.md`, which it does not change; at most 32 code points, no control characters; `""`: the CLI's own default | `""` |
 | `tier` | `strong`, `standard`, `light` | `standard` |
 | `skills` | what the AI is good at: one line of at most 200 Unicode code points, without `\r` or `\n` | `""` |
 
