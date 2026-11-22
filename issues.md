@@ -22,6 +22,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a watch item arriving between PTY shutdown and the hand-back turn can leave a grant through the next takeover.
 - Cause: `internal/host/pty.go` `runStop` clears grants before `internal/host/takeover.go` starts the hand-back turn; `watchItem` in `internal/host/watch.go` still sees the session in `takeover` during that interval.
 - Status: open.
+
 ### 2026-11-22 · limitation · A failed move can leave a usable export file
 
 - Symptom: if committing the source deletion fails after publishing the SQLite file, the command fails and the source remains home, but the export file is already usable as a copy.
