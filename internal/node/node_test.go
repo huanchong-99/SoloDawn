@@ -837,6 +837,10 @@ func pumpWS(ctx context.Context, cancel context.CancelFunc, src, dst *websocket.
 }
 
 func TestCloseWaitsForInflightHostCmd(t *testing.T) {
+	savedInstall := installService
+	t.Cleanup(func() { installService = savedInstall })
+	installService = func(string, string) error { return nil }
+
 	dir := socketRoot(t)
 	n, err := openNode(t.Context(), dir)
 	mustNoErr(t, err)
