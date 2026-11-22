@@ -491,6 +491,8 @@ func TestRunChecksSuccessAndUnreachable(t *testing.T) {
 	seamCode(t, err, "home_unreachable")
 
 	// Remote group compares against origin/<base> rather than local <base>.
+	tskEqual(t, tskBaseRef(tskGroupFixture("github")), "origin/base")
+	tskEqual(t, tskBaseRef(tskGroupFixture("none")), "base")
 	rh, rDataDir := tskDiskHost(t)
 	rProjectDir, _, rWtDir, rBaseSHA := tskInitWorktree(t, rDataDir, true)
 	rHome := newTskScriptHome()
@@ -500,11 +502,16 @@ func TestRunChecksSuccessAndUnreachable(t *testing.T) {
 	forgeGit(t, rWtDir, "push", "origin", "HEAD:base")
 	forgeGit(t, filepath.Join(rProjectDir, "repo"), "fetch", "origin", "base")
 	forgeGit(t, filepath.Join(rProjectDir, "repo"), "update-ref", "refs/heads/base", rBaseSHA)
-	rHead := tskCommitFiles(t, rWtDir, map[string]string{"only_test.go": "package p\n"}, "tested relative to origin/base")
+	rHead := tskCommitFiles(t, rWtDir, map[string]string{"docs.md": "# docs\n"}, "docs relative to origin/base")
 	rRes, err := call(t.Context(), rh, caller, json.RawMessage(`{}`))
 	tskNoErr(t, err)
 	tskEqual(t, rRes.(tskChecksResult).OK, true)
 	tskEqual(t, rRes.(tskChecksResult).Commit, rHead)
+
+	tskPutRow(t, rh, "group", tskTestGroupID, tskGroupFixture("none"))
+	nRes, err := call(t.Context(), rh, caller, json.RawMessage(`{}`))
+	tskNoErr(t, err)
+	tskEqual(t, nRes.(tskChecksResult).OK, false)
 }
 
 func TestSubmitTaskPreconditions(t *testing.T) {

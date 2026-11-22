@@ -2211,3 +2211,216 @@ func hasSession(h *Host, key SessionKey) bool {
 	_, ok := h.Sessions.Get(key)
 	return ok
 }
+
+func TestRouteThreadReplyAndNonThreadItems(t *testing.T) {
+	r := newDeliverRig(t, false)
+	r.seedGroupAndMembers()
+	r.putTask(proto.TaskRow{
+		RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10},
+		Group:     testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief",
+		State: "active", Step: "review", Commit: "c1", Assignee: testAI1, Reviewer: testAI2,
+	})
+	taskKey := SessionKey{Group: testGroup1, Member: testAI1, Task: testTask1}
+	revKey := SessionKey{Group: testGroup1, Member: testAI2, Task: testTask1}
+	grpKey := SessionKey{Group: testGroup1, Member: testAI1}
+	assertStep17NoErr(t, r.h.Sessions.Create(Session{SessionKey: taskKey, Kind: TaskSession, Folder: "wt/1-t1", Agent: "claude", Home: r.homeKey.ID(), Name: "Claude"}))
+	assertStep17NoErr(t, r.h.Sessions.Create(Session{SessionKey: revKey, Kind: ReviewSession, Folder: "review/1", Agent: "codex", Home: r.homeKey.ID(), Name: "Codex"}))
+
+	tid := testTask1
+	deliverSingleAndWait(r, 951, proto.Item{Item: 951, AI: testAI1, Why: "mention", Task: testTask1, Msg: testMsg1}, r.makeTextMsg(testMsg1, &tid, "mention"), 1)
+	deliverSingleAndWait(r, 952, proto.Item{Item: 952, AI: testAI1, Why: "reply", Task: testTask1, Msg: testMsg2}, r.makeTextMsg(testMsg2, &tid, "reply"), 2)
+	deliverSingleAndWait(r, 953, proto.Item{Item: 953, AI: testAI1, Why: "notice", Task: testTask1, Code: "quiet"}, nil, 3)
+	deliverSingleAndWait(r, 954, proto.Item{Item: 954, AI: testAI1, Why: "confirmed", Task: testTask1, Msg: testMsg1}, nil, 4)
+	deliverSingleAndWait(r, 955, proto.Item{Item: 955, AI: testAI2, Why: "reply", Msg: testMsg2}, r.makeTextMsg(testMsg2, &tid, "review reply"), 5)
+
+	wantKeys := []SessionKey{taskKey, taskKey, grpKey, grpKey, revKey}
+	wantTexts := []string{"task:1", "task:1", "group:1", "group:1", "review:1"}
+	assertTurnTargets(t, r.runtime.recorded(), wantKeys, wantTexts)
+}
+
+func deliverSingleAndWait(r *deliverRig, id int64, it proto.Item, msg *proto.MsgRow, wantTurns int) {
+	r.t.Helper()
+	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, it, msg)
+	r.waitUntil("turn "+strconv.Itoa(wantTurns), func() bool {
+		return len(r.runtime.recorded()) == wantTurns && r.home.ackCountFor(id) == 1
+	})
+	r.waitAIUnbusy(testGroup1, string(it.AI))
+}
+
+func assertTurnTargets(t *testing.T, turns []recordedTurn, wantKeys []SessionKey, wantTexts []string) {
+	t.Helper()
+	if len(turns) != len(wantKeys) {
+		t.Fatalf("got %d turns, want %d", len(turns), len(wantKeys))
+	}
+	for i := range wantKeys {
+		if turns[i].key != wantKeys[i] || turns[i].text != wantTexts[i] {
+			t.Fatalf("turn %d got (%+v, %q), want (%+v, %q)", i, turns[i].key, turns[i].text, wantKeys[i], wantTexts[i])
+		}
+	}
+}
+
+func TestRecordAuditLogAndMergeHoldReasons(t *testing.T) {
+	verifyRecordAuditLogging(t)
+	verifyMergeHoldReasons(t)
+}
+
+func verifyRecordAuditLogging(t *testing.T) {
+	t.Helper()
+	logs := captureLogs(t)
+	r := newDeliverRig(t, false)
+	r.seedGroupAndMembers()
+
+	refuseItem(r.h, verifiedItem{home: r.homeKey.ID(), group: testGroup1, item: proto.Item{Item: 970}}, "claude", "stale_task")
+	if r.home.ackCountFor(970) != 1 || strings.Contains(logs.String(), "host: write audit") {
+		t.Fatalf("unexpected log or missing ack on valid audit write: acks=%d logs=%q", r.home.ackCountFor(970), logs.String())
+	}
+
+	addAuditBlockTrigger(t, r.db)
+	refuseItem(r.h, verifiedItem{home: r.homeKey.ID(), group: testGroup1, item: proto.Item{Item: 971}}, "claude", "stale_task")
+	if r.home.ackCountFor(971) != 0 || !strings.Contains(logs.String(), "host: write audit refused:") {
+		t.Fatalf("missing audit failure log or unexpected ack: acks=%d logs=%q", r.home.ackCountFor(971), logs.String())
+	}
+	dropAuditBlockTrigger(t, r.db)
+	r.h.Settle()
+}
+
+func verifyMergeHoldReasons(t *testing.T) {
+	t.Helper()
+	r := newDeliverRig(t, true)
+	originDir, pDir, _ := initTestOriginAndGroupRepo(t, r, "none")
+	_, err := EnsureGroupWorkspace(t.Context(), pDir, originDir, "main")
+	assertStep17NoErr(t, err)
+	c1 := commitNewMergeTask(t, r, pDir, testTask1, 1, "m-rate", "f1.txt")
+	c2 := commitNewMergeTask(t, r, pDir, testTask2, 2, "m-unheld", "f2.txt")
+	d := deliv(r.h)
+
+	Holds["reason"] = func(*Host, SessionKey) (string, bool) { return "offline", true }
+	m1 := proto.Item{Item: 972, AI: testAI1, Why: "merge", Task: testTask1, Commit: c1}
+	d.enqueueMerge(verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Item: m1}, item: m1})
+	stepMerges(r.h, d, testGroup1)
+	joinAssertEqual(t, "offline mergeHeldNow", mergeHeldNow(r.h, d, testGroup1, testAI1), true)
+	joinAssertEqual(t, "offline merge acks", r.home.ackCountFor(972), 0)
+	joinAssertEqual(t, "offline merge cmds", len(r.home.cmdPayloads()), 0)
+
+	Holds["reason"] = func(*Host, SessionKey) (string, bool) { return "rate_limit", true }
+	stepMerges(r.h, d, testGroup1)
+	joinAssertEqual(t, "rate_limit mergeHeldNow", mergeHeldNow(r.h, d, testGroup1, testAI1), false)
+	joinAssertEqual(t, "rate_limit merge acks", r.home.ackCountFor(972), 1)
+	joinAssertEqual(t, "rate_limit merge cmds", len(r.home.cmdPayloads()), 1)
+
+	delete(Holds, "reason")
+	m2 := proto.Item{Item: 973, AI: testAI1, Why: "merge", Task: testTask2, Commit: c2}
+	d.enqueueMerge(verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Item: m2}, item: m2})
+	stepMerges(r.h, d, testGroup1)
+	joinAssertEqual(t, "unheld mergeHeldNow", mergeHeldNow(r.h, d, testGroup1, testAI1), false)
+	joinAssertEqual(t, "unheld merge acks", r.home.ackCountFor(973), 1)
+	joinAssertEqual(t, "unheld merge cmds", len(r.home.cmdPayloads()), 2)
+	r.h.Settle()
+}
+
+func commitNewMergeTask(t *testing.T, r *deliverRig, pDir, taskID string, num int, slug, file string) string {
+	t.Helper()
+	ctx := t.Context()
+	wt, err := CreateTaskWorkspace(ctx, pDir, num, slug, testAI1, "main", false)
+	assertStep17NoErr(t, err)
+	mustGit(t, ctx, wt, "config", "user.name", "AI")
+	mustGit(t, ctx, wt, "config", "user.email", "ai@example.invalid")
+	assertStep17NoErr(t, os.WriteFile(filepath.Join(wt, file), []byte(file+"\n"), 0o600))
+	mustGit(t, ctx, wt, "add", file)
+	mustGit(t, ctx, wt, "commit", "-m", slug)
+	commit := strings.TrimSpace(mustGit(t, ctx, wt, "rev-parse", "HEAD"))
+	r.putTask(proto.TaskRow{
+		RowHeader: proto.RowHeader{Type: "task", ID: taskID, Seq: int64(20 + num)},
+		Group:     testGroup1, Num: num, Title: slug, Slug: proto.Slug(slug), Origin: "brief",
+		State: "active", Step: "merge", Commit: commit, Assignee: testAI1,
+	})
+	return commit
+}
+
+func TestRecordMergeTakenAndResumeAuditMergeTS(t *testing.T) {
+	verifyRecordMergeTakenConditions(t)
+	verifyResumeGroupMergesRequiresAuditTS(t)
+}
+
+func verifyRecordMergeTakenConditions(t *testing.T) {
+	t.Helper()
+	r := newDeliverRig(t, false)
+	r.seedGroupAndMembers()
+	v := verifiedItem{
+		home:  r.homeKey.ID(),
+		group: testGroup1,
+		item:  proto.Item{Item: 980, AI: testAI1, Why: "merge", Task: testTask1, Commit: "c-merge"},
+	}
+
+	execDeliveredTrigger(t, r.db, true)
+	written, err := recordMergeTaken(r.h, "claude", v, testTask1)
+	joinAssertEqual(t, "delivered trigger err", err != nil, true)
+	joinAssertEqual(t, "delivered trigger written", written, false)
+	joinAssertEqual(t, "delivered trigger audits", len(r.audits()), 0)
+	execDeliveredTrigger(t, r.db, false)
+
+	written, err = recordMergeTaken(r.h, "claude", v, testTask1)
+	audits := r.audits()
+	joinAssertEqual(t, "first merge err", err, nil)
+	joinAssertEqual(t, "first merge written", written, true)
+	joinAssertEqual(t, "first merge audit count", len(audits), 2)
+	joinAssertEqual(t, "first merge AuditMerge what", audits[1].what, AuditMerge)
+	joinAssertEqual(t, "first merge AuditMerge detail", audits[1].detail, testTask1+" c-merge")
+
+	written, err = recordMergeTaken(r.h, "claude", v, testTask1)
+	joinAssertEqual(t, "duplicate merge err", err, nil)
+	joinAssertEqual(t, "duplicate merge written", written, false)
+	joinAssertEqual(t, "duplicate merge audit count", len(r.audits()), 2)
+	r.h.Settle()
+}
+
+func execDeliveredTrigger(t *testing.T, db *store.Store, create bool) {
+	t.Helper()
+	stmt := "DROP TRIGGER block_delivered_only"
+	if create {
+		stmt = "CREATE TRIGGER block_delivered_only BEFORE INSERT ON audit WHEN NEW.what = 'delivered' BEGIN SELECT RAISE(ABORT, 'blocked'); END"
+	}
+	run := func(tx *store.Tx) error {
+		_, err := tx.Exec(stmt)
+		return err
+	}
+	assertStep17NoErr(t, db.Write(run))
+}
+
+func verifyResumeGroupMergesRequiresAuditTS(t *testing.T) {
+	t.Helper()
+	r := newDeliverRig(t, true)
+	originDir, pDir, baseCommit := initTestOriginAndGroupRepo(t, r, "none")
+	_, err := EnsureGroupWorkspace(t.Context(), pDir, originDir, "main")
+	assertStep17NoErr(t, err)
+
+	r.putTask(proto.TaskRow{
+		RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10},
+		Group:     testGroup1, Num: 1, Title: "NoAudit", Slug: "no-audit", Origin: "brief",
+		State: "active", Step: "merge", Commit: baseCommit, Assignee: testAI1,
+	})
+	ts0, found0 := findAuditMergeTS(r.db, testGroup1, testTask1+" "+baseCommit)
+	resumeGroupMerges(r.h, deliv(r.h), testGroup1)
+	joinAssertEqual(t, "unaudited ts", ts0, int64(0))
+	joinAssertEqual(t, "unaudited found", found0, false)
+	joinAssertEqual(t, "unaudited resume cmds", len(r.home.cmdPayloads()), 0)
+
+	writeAudit := func(tx *store.Tx) error {
+		_, err := r.h.Audit(tx, AuditRow{Group: testGroup1, Agent: "claude", What: AuditMerge, Detail: testTask2 + " " + baseCommit})
+		return err
+	}
+	assertStep17NoErr(t, r.db.Write(writeAudit))
+	r.putTask(proto.TaskRow{
+		RowHeader: proto.RowHeader{Type: "task", ID: testTask2, Seq: 11},
+		Group:     testGroup1, Num: 2, Title: "Audited", Slug: "audited", Origin: "brief",
+		State: "active", Step: "merge", Commit: baseCommit, Assignee: testAI1,
+	})
+	ts2, found2 := findAuditMergeTS(r.db, testGroup1, testTask2+" "+baseCommit)
+	resumeGroupMerges(r.h, deliv(r.h), testGroup1)
+	cmds := r.home.cmdPayloads()
+	joinAssertEqual(t, "audited ts", ts2, testStartMS)
+	joinAssertEqual(t, "audited found", found2, true)
+	joinAssertEqual(t, "audited resume cmds", len(cmds), 1)
+	joinAssertEqual(t, "audited resume task id", strings.Contains(cmds[0], `"id":"`+testTask2+`"`), true)
+	r.h.Settle()
+}

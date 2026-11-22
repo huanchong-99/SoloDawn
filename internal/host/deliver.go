@@ -33,14 +33,14 @@ type groupSync struct {
 	home          string
 	cursor        int64
 	live, syncing bool
-	token         uint64
+	token         *byte
 	waiters       []chan struct{}
 }
 
 type syncJob struct {
 	group string
 	since int64
-	token uint64
+	token *byte
 }
 
 type homeSync struct {
@@ -187,7 +187,7 @@ func (d *delivery) beginHomeSync(device string, conn Home, groups []string) (con
 
 func (d *delivery) startGroupJobLocked(group, device string) syncJob {
 	gs := d.groupLocked(group, device)
-	gs.token++
+	gs.token = new(byte)
 	gs.syncing, gs.live = true, false
 	return syncJob{group: group, since: gs.cursor, token: gs.token}
 }
