@@ -31,6 +31,15 @@ const at = (value: unknown, path: string[]) => path.reduce((o, k) => (o as Obj)[
 const named = (path: string[]) => path.filter((k) => !/^\d+$/.test(k)).join('.');
 const accepts = (name: string, value: unknown) => v.safeParse(schemaOf[name], value).success;
 
+it.each(['', 'plain text', 42])('bulletin rows read from as plain text: %s', (from) => {
+  const row = JSON.parse(goldens['row-msg-bulletin']);
+  row.body.from = from;
+  expect(v.safeParse(p.MsgRow, row).success).toBe(typeof from === 'string');
+  const post = JSON.parse(goldens['post-bulletin']);
+  post.body.from = from;
+  expect(v.safeParse(p.Post, post).success).toBe(false);
+});
+
 /** The example with one change made to a copy of the object at `path`. */
 function variant(name: string, path: string[], change: (o: Obj) => void) {
   const value = JSON.parse(goldens[name]);
@@ -372,12 +381,24 @@ describe('rendezvous frames', () => {
 });
 
 describe('decode', () => {
+  it('reads watch success, moved errors and the mock watch answer', async () => {
+    expect(p.decodeAnswer('watch.start', '{"re":7,"ok":true}')).toStrictEqual({ re: 7, ok: true });
+    expect(p.decodeAnswer('sync', goldens['cmd-moved'])).toStrictEqual(
+      JSON.parse(goldens['cmd-moved']),
+    );
+    const request = p.decode(p.WatchStart, goldens['watch-start']);
+    const ctl = mockCtl(() => {});
+    expect(await ctl.request(request)).toStrictEqual({ re: 1, ok: true });
+    expect(() => p.decodeAnswer('watch.start', '{"re":7}')).toThrow(v.ValiError);
+  });
+
   /** Each answer example, and the type of the request it answers. */
   const answers: [string, p.RequestType][] = [
     ['welcome', 'hello'],
     ['synced', 'sync'],
     ['fetched', 'fetch'],
     ['cmd-ok', 'cmd'],
+    ['cmd-ok', 'watch.start'],
     ['cmd-started', 'cmd'],
     ['cmd-reviewed', 'cmd'],
     ['cmd-pair-link', 'cmd'],

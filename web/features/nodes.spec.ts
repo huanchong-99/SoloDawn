@@ -170,6 +170,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
                     level: 2,
                     state: 'limited',
                     queued: 0,
+                    watchers: [],
                   },
                 ],
               },
