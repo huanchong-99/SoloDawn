@@ -244,19 +244,12 @@ func agtDecodeSet(data json.RawMessage) (proto.AgentSet, error) {
 	if !agtValidAgent(cmd.Agent) {
 		return proto.AgentSet{}, &Error{Code: "bad_request", Message: "unknown agent: " + cmd.Agent}
 	}
-	if !agtValidAccount(cmd.Account) {
-		return proto.AgentSet{}, &Error{Code: "bad_request", Message: "unknown account: " + cmd.Account}
-	}
 	return cmd, checkDriverAccount(cmd.Agent, cmd.Account)
 }
 
 func agtValidAgent(agent string) bool {
 	_, ok := DriverCaps[agent]
 	return ok
-}
-
-func agtValidAccount(account string) bool {
-	return account == "personal" || account == "team" || account == "api_key"
 }
 
 func agtUpdateAccount(tx *store.Tx, agent, account string) (bool, error) {

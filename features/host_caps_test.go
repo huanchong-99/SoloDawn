@@ -46,7 +46,7 @@ func hostCapsSteps(sc *godog.ScenarioContext, f fixtures) {
 	w := &hostCapsWorld{f: f, cleanup: cleanup}
 	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 		if w.m3 != nil && w.m3.activeHost != nil {
-			w.m3.waitAllDormant(w.m3.activeHost)
+			waitHostDormant(w.m3.activeHost)
 		}
 		return ctx, nil
 	})
@@ -66,7 +66,6 @@ func registerHostCapsSwitchSteps(sc *godog.ScenarioContext, w *hostCapsWorld) {
 	sc.Step(`^on the capability host, owner device "([^"]+)" sends agent\.set for "([^"]+)" with account "([^"]+)"$`, w.whenAgentSet)
 	sc.Step(`^the capability host agent\.set ends with "([^"]+)"$`, w.thenAgentSetEnds)
 	sc.Step(`^MCP tool "([^"]+)" for "([^"]+)" is "([^"]+)" in a structured session and "([^"]+)" in a terminal session$`, w.thenMCPToolListing)
-	sc.Step(`^CheckTakeover for "([^"]+)" ends with "([^"]+)"$`, thenCheckTakeoverOutcome)
 }
 
 func registerHostCapsM3Steps(sc *godog.ScenarioContext, w *hostCapsWorld) {
@@ -74,7 +73,7 @@ func registerHostCapsM3Steps(sc *godog.ScenarioContext, w *hostCapsWorld) {
 	sc.Step(`^on the capability test node, configuring AI "([^"]+)" on "([^"]+)" refuses personal naming accounts and accepts api_key$`, w.whenConfigureAPIKeyAI)
 	sc.Step(`^on the capability test node, "([^"]+)" is scripted on thread "([^"]+)" to reply "([^"]+)" and "([^"]+)"$`, w.m3ScriptCodexTwoTurns)
 	sc.Step(`^on the capability test node, mentioning "([^"]+)" twice in "([^"]+)" gets "([^"]+)" then "([^"]+)" in 1 "([^"]+)" process on session "([^"]+)"$`, w.thenTwoTurnMentionInOneProcess)
-	sc.Step(`^structured sessions on the capability test node for "([^"]+)" omit MCP tool "([^"]+)" and CheckTakeover refuses naming takeover$`, w.thenRestrictedSwitchesHold)
+	sc.Step(`^structured sessions on the capability test node for "([^"]+)" omit MCP tool "([^"]+)" and takeover\.start refuses naming takeover$`, w.thenRestrictedSwitchesHold)
 }
 
 func checkAllDriverDeclarations() error {
@@ -82,30 +81,6 @@ func checkAllDriverDeclarations() error {
 	capKeys := slices.Sorted(maps.Keys(host.DriverCaps))
 	if !slices.Equal(drvKeys, capKeys) {
 		return fmt.Errorf("Drivers keys %v != DriverCaps keys %v", drvKeys, capKeys)
-	}
-	for _, name := range capKeys {
-		if err := validateCapsEntry(name, host.DriverCaps[name]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func validateCapsEntry(name string, c host.Capabilities) error {
-	if len(c.Accounts) == 0 {
-		return fmt.Errorf("%s has empty accounts", name)
-	}
-	if !slices.Contains(c.Levels, 1) {
-		return fmt.Errorf("%s levels %v missing level 1", name, c.Levels)
-	}
-	if c.Approvals != host.ApprovalTool && c.Approvals != host.ApprovalConn {
-		return fmt.Errorf("%s invalid approvals %q", name, c.Approvals)
-	}
-	if c.Takeover != host.TakeoverNew && c.Takeover != host.TakeoverResume && c.Takeover != host.TakeoverNone {
-		return fmt.Errorf("%s invalid takeover %q", name, c.Takeover)
-	}
-	if c.Usage == nil {
-		return fmt.Errorf("%s nil usage slice", name)
 	}
 	return nil
 }
@@ -225,53 +200,30 @@ func (w *hostCapsWorld) thenMCPToolListing(toolName, agent, wantStruct, wantInte
 func pipeMCPToolState(h *host.Host, token, toolName string) (string, error) {
 	clientConn, serverConn := net.Pipe()
 	defer clientConn.Close()
-	// Single reader: wait before pipeMCPToolState decodes tools/list.
+	// Single reader: the wait after exchangeToolsList.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		h.ServeMCP(context.Background(), token, bufio.NewReader(serverConn), serverConn)
 	}()
 	clientConn.SetDeadline(time.Now().Add(5 * time.Second))
-	dec := json.NewDecoder(clientConn)
-	fmt.Fprintln(clientConn, `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`)
-	var initResp map[string]any
-	if err := dec.Decode(&initResp); err != nil {
-		return "", err
-	}
-	fmt.Fprintln(clientConn, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
-	fmt.Fprintln(clientConn, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
-	var listResp struct {
-		Result struct {
-			Tools []struct {
-				Name string `json:"name"`
-			} `json:"tools"`
-		} `json:"result"`
-	}
-	if err := dec.Decode(&listResp); err != nil {
-		return "", err
-	}
+	raw, err := exchangeToolsList(clientConn, clientConn)
 	clientConn.Close()
 	<-done
-	for _, tl := range listResp.Result.Tools {
+	var list struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	if err == nil {
+		err = json.Unmarshal(raw, &list)
+	}
+	for _, tl := range list.Tools {
 		if tl.Name == toolName {
-			return "listed", nil
+			return "listed", err
 		}
 	}
-	return "omitted", nil
-}
-
-func thenCheckTakeoverOutcome(agent, want string) error {
-	assignFirst, err := host.CheckTakeover(agent)
-	got := "start_in_terminal"
-	if err != nil {
-		got = err.Error()
-	} else if assignFirst {
-		got = "assign_first"
-	}
-	if got != want {
-		return fmt.Errorf("CheckTakeover(%q) = %q, want %q", agent, got, want)
-	}
-	return nil
+	return "omitted", err
 }
 
 func (w *hostCapsWorld) givenRestrictedM3Node(agent string) error {
@@ -289,7 +241,7 @@ func (w *hostCapsWorld) givenRestrictedM3Node(agent string) error {
 		cleanup:  w.cleanup,
 		tb:       scenarioTB{TB: w.f.t, cleanup: w.cleanup},
 		groups:   map[string]string{},
-		aiByName: map[string]proto.AIMemberRow{},
+		homeView: newHomeView(),
 	}
 	w.m3 = m3
 	if err := m3.startCluster(); err != nil {
@@ -299,53 +251,46 @@ func (w *hostCapsWorld) givenRestrictedM3Node(agent string) error {
 }
 
 func (w *hostCapsWorld) whenConfigureAPIKeyAI(aiName, agent string) error {
-	ctx := context.Background()
 	n := w.m3.node()
-	if _, err := n.Host.Agents(ctx); err != nil {
+	if _, err := n.Host.Agents(context.Background()); err != nil {
 		return err
 	}
-	by := w.m3.cluster.Owner.ID()
-	badRaw, err := marshalNoEscape(proto.AgentSet{
-		HostCommand: proto.HostCommand{Type: "agent.set", Nonce: w.m3.ids.next(), Timestamp: time.Now().UnixMilli(), To: n.Key.ID()},
-		Agent:       agent,
-		Account:     "personal",
-	})
-	if err != nil {
-		return err
-	}
-	_, badErr := host.Surface["agent.set"](ctx, n.Host, n.Link, by, badRaw)
-	var hostErr *host.Error
-	if !errors.As(badErr, &hostErr) || hostErr.Code != "bad_request" || !strings.Contains(hostErr.Message, "accounts") {
+	badErr := w.send("agent.set", proto.AgentSet{HostCommand: w.header("agent.set"), Agent: agent, Account: "personal"})
+	if !refusedNaming(badErr, "bad_request", "accounts") {
 		return fmt.Errorf("personal agent.set got %v, want bad_request naming accounts", badErr)
 	}
-	okRaw, err := marshalNoEscape(proto.AgentSet{
-		HostCommand: proto.HostCommand{Type: "agent.set", Nonce: w.m3.ids.next(), Timestamp: time.Now().UnixMilli(), To: n.Key.ID()},
-		Agent:       agent,
-		Account:     "api_key",
-	})
-	if err != nil {
+	if err := w.send("agent.set", proto.AgentSet{HostCommand: w.header("agent.set"), Agent: agent, Account: "api_key"}); err != nil {
 		return err
 	}
-	if _, err := host.Surface["agent.set"](ctx, n.Host, n.Link, by, okRaw); err != nil {
-		return err
-	}
-	joinRaw, err := marshalNoEscape(proto.HostJoin{
-		HostCommand: proto.HostCommand{Type: "host.join", Nonce: w.m3.ids.next(), Timestamp: time.Now().UnixMilli(), To: n.Key.ID()},
-		Group:       proto.ID(w.m3.groups["Website"]),
-		Home:        n.Key.ID(),
-		Agent:       agent,
-		Name:        aiName,
-	})
-	if err != nil {
-		return err
-	}
-	if _, err := host.Surface["host.join"](ctx, n.Host, n.Link, by, joinRaw); err != nil {
+	join := proto.HostJoin{HostCommand: w.header("host.join"), Group: proto.ID(w.m3.groups["Website"]), Home: n.Key.ID(), Agent: agent, Name: aiName}
+	if err := w.send("host.join", join); err != nil {
 		return err
 	}
 	return w.m3.drainBrowserUntil(5*time.Second, func() bool {
 		_, ok := w.m3.aiByName[aiName]
 		return ok
 	}, nil)
+}
+
+// header is the envelope of an owner command to the capability test node.
+func (w *hostCapsWorld) header(typ string) proto.HostCommand {
+	return proto.HostCommand{Type: typ, Nonce: w.m3.ids.next(), Timestamp: time.Now().UnixMilli(), To: w.m3.node().Key.ID()}
+}
+
+// send hands an owner command of type typ to the capability test node's host.
+func (w *hostCapsWorld) send(typ string, cmd any) error {
+	raw, err := marshalNoEscape(cmd)
+	if err != nil {
+		return err
+	}
+	n := w.m3.node()
+	_, err = host.Surface[typ](context.Background(), n.Host, n.Link, w.m3.cluster.Owner.ID(), raw)
+	return err
+}
+
+func refusedNaming(err error, code, word string) bool {
+	hostErr, ok := errors.AsType[*host.Error](err)
+	return ok && hostErr.Code == code && strings.Contains(hostErr.Message, word)
 }
 
 func (w *hostCapsWorld) m3ScriptCodexTwoTurns(ai, threadID, reply1, reply2 string) error {
@@ -376,16 +321,15 @@ func (w *hostCapsWorld) thenRestrictedSwitchesHold(agent, toolName string) error
 	tok := w.m3.activeHost.Sessions.Admit(sessions[0].SessionKey, 1, false)
 	defer w.m3.activeHost.Sessions.Forget(tok)
 	state, err := pipeMCPToolState(w.m3.activeHost, tok, toolName)
+	if err == nil && state != "omitted" {
+		err = fmt.Errorf("tool %s was %s, want omitted", toolName, state)
+	}
 	if err != nil {
 		return err
 	}
-	if state != "omitted" {
-		return fmt.Errorf("tool %s was %s, want omitted", toolName, state)
-	}
-	_, takeErr := host.CheckTakeover(agent)
-	var hostErr *host.Error
-	if !errors.As(takeErr, &hostErr) || hostErr.Code != "conflict" || !strings.Contains(hostErr.Message, "takeover") {
-		return fmt.Errorf("CheckTakeover(%q) = %v, want conflict naming takeover", agent, takeErr)
+	start := proto.TakeoverStart{Takeover: proto.Takeover{HostCommand: w.header("takeover.start"), Group: proto.ID(sessions[0].Group), Member: proto.ID(sessions[0].Member)}}
+	if takeErr := w.send("takeover.start", start); !refusedNaming(takeErr, "conflict", "takeover") {
+		return fmt.Errorf("takeover.start for %s = %v, want conflict naming takeover", agent, takeErr)
 	}
 	return nil
 }

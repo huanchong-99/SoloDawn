@@ -461,8 +461,8 @@ func TestAgentSetRefusals(t *testing.T) {
 	}{
 		{agtSetPayload("gemini", "personal"), "bad_request: unknown agent: gemini"},
 		{agtSetPayload("", "personal"), "bad_request: unknown agent: "},
-		{agtSetPayload("claude", "enterprise"), "bad_request: unknown account: enterprise"},
-		{agtSetPayload("claude", ""), "bad_request: unknown account: "},
+		{agtSetPayload("claude", "enterprise"), "bad_request: account enterprise is not in claude accounts"},
+		{agtSetPayload("claude", ""), "bad_request: account  is not in claude accounts"},
 		{agtSetPayload("codex", "personal"), "conflict: codex is not found on this machine"},
 	} {
 		res, err := handle(t.Context(), h, nil, "owner-dev", bad.raw)
