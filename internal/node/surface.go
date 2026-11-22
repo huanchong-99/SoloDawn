@@ -32,6 +32,7 @@ type (
 	srfDBState struct {
 		name    string
 		maxOpen int
+		offline bool
 		homes   []proto.Home
 	}
 )
@@ -97,7 +98,7 @@ func (sf *Surface) HostState(ctx context.Context) (proto.HostState, error) {
 	}
 	return proto.HostState{
 		Device: sf.cfg.ID, Name: name, OS: sf.cfg.OS, Version: sf.cfg.Version,
-		Open: srfCountOpen(sessions), MaxOpen: db.maxOpen, Offline: false,
+		Open: srfCountOpen(sessions), MaxOpen: db.maxOpen, Offline: db.offline,
 		Update: sf.cfg.Update(), Homes: db.homes, Relay: sf.cfg.Relay(),
 		Agents:   agents,
 		Settings: proto.HostSettings{RetentionDays: 90, IdleMinutes: 15, DefaultLevel: 3, Approvers: []string{}},
@@ -120,9 +121,9 @@ func srfCountOpen(sessions []host.Session) int {
 
 func (sf *Surface) readDBState() (srfDBState, error) {
 	out := srfDBState{maxOpen: 4, homes: []proto.Home{}}
-	targets := map[string]any{"name": &out.name, "max_open": &out.maxOpen, "homes": &out.homes}
+	targets := map[string]any{"name": &out.name, "max_open": &out.maxOpen, "offline": &out.offline, "homes": &out.homes}
 	read := func(tx *store.Tx) error {
-		rows, err := tx.Query("SELECT key, value FROM setting WHERE key IN ('name', 'max_open', 'homes')")
+		rows, err := tx.Query("SELECT key, value FROM setting WHERE key IN ('name', 'max_open', 'offline', 'homes')")
 		if err != nil {
 			return err
 		}

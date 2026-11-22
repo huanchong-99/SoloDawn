@@ -1864,6 +1864,7 @@ func checkConfigUnmarshalAndDroppedTables(t *testing.T, r *deliverRig) {
 	}
 	r.db.Write(dropAudit)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 960, AI: testAI1, Why: "notice", Code: "c"}, nil)
+	r.h.Settle()
 }
 
 func addAuditBlockTrigger(t *testing.T, db *store.Store) {

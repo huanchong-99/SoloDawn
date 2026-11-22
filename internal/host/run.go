@@ -26,6 +26,7 @@ const (
 func init() {
 	Provide(&Runner, Runtime(sessionRunner{}))
 	Register(Attached, "runtime", attachRuntime)
+	Register(Settled, "runtime", settleRuntime)
 }
 
 type sessionRunner struct{}
@@ -48,6 +49,7 @@ const queryIdleMinutesSQL = `SELECT coalesce((SELECT json_extract(value, '$') FR
 
 type pendingCrash struct {
 	session    Session
+	reason     string
 	detail     string
 	statusSent bool
 }
@@ -59,12 +61,17 @@ type pendingCrash struct {
 // Host, Driver, Process or hook/listener locks.
 type runtimePart struct {
 	mu         sync.Mutex
+	wg         sync.WaitGroup
 	procs      map[SessionKey]*liveProc
 	closing    map[SessionKey]bool
 	starting   map[SessionKey]bool
 	limited    map[aiSlot]bool
 	savedCrash map[string][]pendingCrash
 	changed    chan struct{} // closed and replaced under mu to wake waitSignal callers
+}
+
+func settleRuntime(h *Host) {
+	stateOf(h).wg.Wait()
 }
 
 func stateOf(h *Host) *runtimePart {
@@ -90,23 +97,26 @@ func (rt *runtimePart) notify() {
 }
 
 type liveProc struct {
-	key        SessionKey
-	session    Session
-	token      string
-	proc       Process
-	cancel     context.CancelFunc
-	closeOnce  sync.Once
-	killTimer  atomic.Pointer[time.Timer]
-	killed     atomic.Bool
-	idleTimer  *time.Timer
-	idleGen    uint64
-	turnActive bool
-	resumed    bool
-	origTurn   Turn
-	exitWhy    EventKind
-	eventText  string
-	replacedOK bool
-	replaceErr error
+	key             SessionKey
+	session         Session
+	token           string
+	proc            Process
+	cancel          context.CancelFunc
+	closeOnce       sync.Once
+	killTimer       atomic.Pointer[time.Timer]
+	interruptTimer  atomic.Pointer[time.Timer]
+	killed          atomic.Bool
+	idleTimer       *time.Timer
+	idleGen         uint64
+	turnActive      bool
+	resumed         bool
+	origTurn        Turn
+	interruptWhy    string
+	interruptDetail string
+	exitWhy         EventKind
+	eventText       string
+	replacedOK      bool
+	replaceErr      error
 	// Single reader: stopProcess or writeTurnToWaiting.
 	loopDone chan struct{}
 }
@@ -125,6 +135,12 @@ func (lp *liveProc) triggerClose() {
 
 func (lp *liveProc) stopKillTimer() {
 	if t := lp.killTimer.Load(); t != nil {
+		t.Stop()
+	}
+}
+
+func (lp *liveProc) stopInterruptTimer() {
+	if t := lp.interruptTimer.Load(); t != nil {
 		t.Stop()
 	}
 }
@@ -191,7 +207,7 @@ func attachRuntime(h *Host, device string) {
 	delete(rt.savedCrash, device)
 	rt.mu.Unlock()
 	slots := homeAISlots(h, device)
-	go flushHomeRuntime(h, rt, device, pending, slots)
+	rt.wg.Go(func() { flushHomeRuntime(h, rt, device, pending, slots) })
 }
 
 func homeAISlots(h *Host, device string) []aiSlot {
@@ -318,6 +334,7 @@ func claimWaitingProc(rt *runtimePart, key SessionKey) (*liveProc, bool, error) 
 	}
 	stopIdleLocked(lp)
 	lp.turnActive = true
+	lp.interruptWhy, lp.interruptDetail = "", ""
 	return lp, false, nil
 }
 
@@ -435,6 +452,7 @@ func groupToolTimeout(h *Host, group string) time.Duration {
 // runProcessLoop is the single reader of lp.proc.Events().
 func runProcessLoop(h *Host, rt *runtimePart, lp *liveProc) {
 	defer close(lp.loopDone)
+	defer lp.stopInterruptTimer()
 	defer lp.stopKillTimer()
 	defer lp.cancel()
 	for e := range lp.proc.Events() {
@@ -492,7 +510,8 @@ func onProcessLoginInvalid(h *Host, lp *liveProc, e Event) {
 
 func onProcessTurnEnded(h *Host, rt *runtimePart, lp *liveProc, slot aiSlot, e Event) {
 	h.Report(lp.key, e)
-	if lp.exitWhy != "" || !finishActiveTurn(rt, lp, slot) {
+	why, detail, ok := finishActiveTurn(rt, lp, slot)
+	if lp.exitWhy != "" || !ok {
 		return
 	}
 	lp.resumed = false
@@ -500,20 +519,104 @@ func onProcessTurnEnded(h *Host, rt *runtimePart, lp *liveProc, slot aiSlot, e E
 	idle := readIdleDuration(h)
 	h.Sessions.Move(lp.key, Working, Waiting)
 	armTurnIdle(h, rt, lp, idle)
-	sendMemberStatus(context.Background(), h, rt, lp.session.Home, lp.key.Group, lp.key.Member, nil)
+	reportFinishedTurn(h, rt, lp.session, why, detail)
 	rt.notify()
 	go Deliver(h, slot.group, slot.member)
 }
 
-func finishActiveTurn(rt *runtimePart, lp *liveProc, slot aiSlot) bool {
+func finishActiveTurn(rt *runtimePart, lp *liveProc, slot aiSlot) (string, string, bool) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	if !lp.turnActive {
-		return false
+		return "", "", false
 	}
 	lp.turnActive = false
+	lp.stopInterruptTimer()
+	why, detail := lp.interruptWhy, lp.interruptDetail
+	lp.interruptWhy, lp.interruptDetail = "", ""
 	delete(rt.limited, slot)
-	return true
+	return why, detail, true
+}
+
+func reportFinishedTurn(h *Host, rt *runtimePart, s Session, why, detail string) {
+	ev := takePendingLimitEvent(h, s.SessionKey)
+	if why == "" {
+		sendMemberStatus(context.Background(), h, rt, s.Home, s.Group, s.Member, ev)
+		return
+	}
+	if why == "timeout" {
+		c := pendingCrash{session: s, reason: "timeout", detail: detail}
+		sendCrashStep(context.Background(), h, rt, &c)
+		return
+	}
+	intr := proto.TurnInterruptedEvent{SystemCode: proto.SystemCode{Code: "turn_interrupted"}, Reason: why, Task: proto.ID(s.Task), Detail: detail}
+	sendMemberStatus(context.Background(), h, rt, s.Home, s.Group, s.Member, intr)
+}
+
+func interruptSessionTurn(h *Host, key SessionKey, reason, detail string) {
+	if lp := claimTurnInterrupt(stateOf(h), key, reason, detail); lp != nil {
+		lp.proc.Interrupt()
+	}
+}
+
+func claimTurnInterrupt(rt *runtimePart, key SessionKey, reason, detail string) *liveProc {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	lp := rt.procs[key]
+	if lp == nil || !lp.turnActive || rt.closing[key] || lp.interruptWhy != "" {
+		return nil
+	}
+	lp.interruptWhy, lp.interruptDetail = reason, detail
+	lp.interruptTimer.Store(time.AfterFunc(stopSeconds*time.Second, lp.cancel))
+	return lp
+}
+
+func closeSessionForOffline(h *Host, key SessionKey) (string, bool) {
+	rt := stateOf(h)
+	for {
+		lp, wasTurn, waitCh := claimSessionClose(rt, key, true)
+		if waitCh == nil {
+			return finishOfflineClose(h, rt, key, lp, wasTurn)
+		}
+		<-waitCh
+	}
+}
+
+func finishOfflineClose(h *Host, rt *runtimePart, key SessionKey, lp *liveProc, wasTurn bool) (string, bool) {
+	stopTurnWatch(h, key)
+	takePendingLimitEvent(h, key)
+	if lp == nil {
+		if moveSessionDormant(h, key) {
+			rt.notify()
+		}
+		return "", false
+	}
+	return stopOfflineProc(h, rt, lp, wasTurn), wasTurn
+}
+
+func stopOfflineProc(h *Host, rt *runtimePart, lp *liveProc, wasTurn bool) string {
+	lp.stopInterruptTimer()
+	if wasTurn {
+		lp.proc.Interrupt()
+	}
+	if stopProcess(lp) && !wasTurn {
+		writeKilledAudit(h, lp.session)
+	}
+	moveSessionDormant(h, lp.key)
+	rt.mu.Lock()
+	delete(rt.procs, lp.key)
+	delete(rt.closing, lp.key)
+	rt.notifyLocked()
+	rt.mu.Unlock()
+	return lp.session.Task
+}
+
+func moveSessionDormant(h *Host, key SessionKey) bool {
+	s, ok := h.Sessions.Get(key)
+	if !ok || s.State == Dormant || s.State == Takeover {
+		return false
+	}
+	return h.Sessions.Move(key, s.State, Dormant) == nil
 }
 
 func armTurnIdle(h *Host, rt *runtimePart, lp *liveProc, idle time.Duration) {
@@ -671,29 +774,36 @@ func classifyProcessExit(rt *runtimePart, lp *liveProc) (bool, bool) {
 }
 
 func finishTurnProcessExit(h *Host, rt *runtimePart, lp *liveProc) {
+	stopTurnWatch(h, lp.key)
+	takePendingLimitEvent(h, lp.key)
 	if lp.exitWhy == NoSession {
 		handleNoSession(h, rt, lp)
 		return
 	}
 	slot := aiSlot{group: lp.key.Group, member: lp.key.Member}
-	beginTurnExitClose(rt, lp)
+	why, intrDetail := beginTurnExitClose(rt, lp)
 	h.Sessions.Move(lp.key, Working, Dormant)
 	if lp.exitWhy == LoginInvalid {
 		finishLoginInvalid(h, rt, lp.session, slot, lp.eventText)
 	} else {
-		c := pendingCrash{session: lp.session, detail: RedactSecrets(lp.eventText)}
+		detail := cmp.Or(RedactSecrets(lp.eventText), intrDetail)
+		c := pendingCrash{session: lp.session, reason: why, detail: detail}
 		sendCrashStep(context.Background(), h, rt, &c)
 	}
 	go Deliver(h, slot.group, slot.member)
 	endTurnExitClose(rt, lp.key)
 }
 
-func beginTurnExitClose(rt *runtimePart, lp *liveProc) {
+func beginTurnExitClose(rt *runtimePart, lp *liveProc) (string, string) {
 	rt.mu.Lock()
 	lp.turnActive = false
+	lp.stopInterruptTimer()
+	why, detail := lp.interruptWhy, lp.interruptDetail
+	lp.interruptWhy, lp.interruptDetail = "", ""
 	delete(rt.procs, lp.key)
 	rt.closing[lp.key] = true
 	rt.mu.Unlock()
+	return why, detail
 }
 
 func endTurnExitClose(rt *runtimePart, key SessionKey) {
@@ -857,8 +967,9 @@ func eligibleWaitingLocked(rt *runtimePart, s Session) bool {
 
 func sendCrashStep(ctx context.Context, h *Host, rt *runtimePart, c *pendingCrash) bool {
 	s := c.session
+	reason := cmp.Or(c.reason, "crash")
 	if !c.statusSent {
-		ev := proto.TurnInterruptedEvent{SystemCode: proto.SystemCode{Code: "turn_interrupted"}, Reason: "crash", Task: proto.ID(s.Task), Detail: c.detail}
+		ev := proto.TurnInterruptedEvent{SystemCode: proto.SystemCode{Code: "turn_interrupted"}, Reason: reason, Task: proto.ID(s.Task), Detail: c.detail}
 		if err := sendMemberStatus(ctx, h, rt, s.Home, s.Group, s.Member, ev); err != nil {
 			return !isUnreachable(err)
 		}
@@ -868,7 +979,7 @@ func sendCrashStep(ctx context.Context, h *Host, rt *runtimePart, c *pendingCras
 		return true
 	}
 	hdr := homeHeader(h, s.Group, "", "task")
-	fail := proto.TaskFail{TaskCommand: proto.TaskCommand{HomeCommand: hdr, Op: "fail", ID: proto.ID(s.Task)}, Reason: "crash", Detail: c.detail}
+	fail := proto.TaskFail{TaskCommand: proto.TaskCommand{HomeCommand: hdr, Op: "fail", ID: proto.ID(s.Task)}, Reason: reason, Detail: c.detail}
 	_, err := h.Command(ctx, s.Home, marshalWire(fail))
 	return !isUnreachable(err)
 }
@@ -891,7 +1002,8 @@ func sendMemberStatus(ctx context.Context, h *Host, _ *runtimePart, homeDevice, 
 	hdr := homeHeader(h, group, "", "member")
 	status := proto.MemberStatus[any]{
 		MemberCommand: proto.MemberCommand{HomeCommand: hdr, Op: "status", ID: proto.ID(member)},
-		State:         state, Task: proto.ID(task), Path: home.Path(), Event: evPtr,
+		State:         state, Task: proto.ID(task), Path: home.Path(),
+		Usage: memberUsage(h, group, member), Event: evPtr,
 	}
 	_, err := h.Command(ctx, homeDevice, marshalWire(status))
 	return err
@@ -907,13 +1019,45 @@ func (h *Host) MemberState(group, member string) (state, task string) {
 	if s, ok := findSessionInState(list, Working); ok {
 		return string(Working), s.Task
 	}
-	if stateOf(h).isLimited(aiSlot{group: group, member: member}) {
-		return "limited", ""
+	if ov := memberOverlayState(h, list, group, member); ov != "" {
+		return ov, ""
 	}
 	if s, ok := latestWaitingSession(list); ok {
 		return string(Waiting), s.Task
 	}
 	return string(Dormant), ""
+}
+
+func memberOverlayState(h *Host, list []Session, group, member string) string {
+	if reason, held := memberHoldReason(h, list, group, member); held {
+		return holdReasonState(reason)
+	}
+	if stateOf(h).isLimited(aiSlot{group: group, member: member}) {
+		return "limited"
+	}
+	if groupIsPaused(h, group) {
+		return "paused"
+	}
+	return ""
+}
+
+func memberHoldReason(h *Host, list []Session, group, member string) (string, bool) {
+	if reason, held := h.Held(SessionKey{Group: group, Member: member}); held {
+		return reason, true
+	}
+	for _, s := range list {
+		if reason, held := h.Held(s.SessionKey); held {
+			return reason, true
+		}
+	}
+	return "", false
+}
+
+func holdReasonState(reason string) string {
+	if reason == "offline" || reason == "paused" {
+		return reason
+	}
+	return "limited"
 }
 
 func memberSessions(h *Host, group, member string) []Session {

@@ -14,7 +14,7 @@ Feature: Member panel and adding an AI to a group
     And the cards show "Waiting · 2 items waiting on you", "Working · T-12 Fix review remarks", "Waiting · T-13 waiting for your approval", "Waiting · T-11 waiting for Mina's approval" and "Sleeping · wakes when @mentioned"
     And the computers read "workstation · group home", "laptop · direct" and "windows · relayed, limited"
     And the accounts read "Personal subscription · takes orders from owner", "Team plan" and "API key"
-    And no usage bar or terminal button is shown
+    And the cards show usage bars for window, daily cap and spend where reported, and no terminal button
     When the dormant AI wakes to work and two other AIs go offline and hit a limit
     Then those cards update to "Working", "Offline" with "offline" and "Limited"
 
