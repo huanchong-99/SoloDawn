@@ -4,7 +4,6 @@
   // it, through the card that an area mounts for its kind or the one-line stub, and what each
   // mounting point holds. It reads the examples, so only a development server loads it.
   import Message from '../../components/chat/Message.svelte';
-  import KnowledgeStates from '../../components/kb/States.svelte';
   import { Group, Home } from '../../lib/groups.svelte';
   import { goldens } from '../../lib/mock';
   import { cards, mounts, points } from '../../lib/mounts.svelte';
@@ -69,8 +68,6 @@
       {/each}
     </dl>
   </section>
-
-  <KnowledgeStates />
 
   {#each kinds as [kind, examples] (kind)}
     <section class="kind" aria-labelledby={`states-${kind}`}>

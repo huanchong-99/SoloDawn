@@ -9,6 +9,5 @@
   "kb.empty": "No documents yet.",
   "kb.noMatch": "No matching documents.",
   "kb.narrow": "More documents match. Narrow your query.",
-  "kb.offline": "Cannot reach the group home. Documents are read-only.",
-  "kb.admin": "Only an admin can delete documents."
+  "kb.offline": "Cannot reach the group home. Documents are read-only."
 }

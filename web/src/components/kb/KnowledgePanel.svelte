@@ -44,21 +44,20 @@
     </summary>
     {#if open}
       <div class="fold-body mem-body">
-        {#if offline}<p class="hint">{t('kb.offline')}</p>
-        {:else if !deletable}<p class="hint">{t('kb.admin')}</p>{/if}
-        <form class="mem-body" onsubmit={search}>
-          <label class="field">
-            <span>{t('kb.query')}</span>
+        {#if offline}<p class="hint">{t('kb.offline')}</p>{/if}
+        <form class="row" onsubmit={search}>
+          <label class="field grow">
+            <span class="sr">{t('kb.query')}</span>
             <input class="input" bind:value={query} disabled={offline || view.busy} />
           </label>
-          <div class="row">
-            <button class="btn btn-primary btn-sm" disabled={offline || view.busy || !query.trim()}>
-              {t('kb.search')}
-            </button>
+          <button class="btn btn-primary btn-sm" disabled={offline || view.busy || !query.trim()}>
+            {t('kb.search')}
+          </button>
+          {#if view.ids !== undefined}
             <button type="button" class="btn btn-ghost btn-sm" onclick={clear}>
               {t('kb.clear')}
             </button>
-          </div>
+          {/if}
         </form>
         {#if view.failed}<Failure code={view.failed} />{/if}
         {#if view.busy}<p class="hint" role="status">{t('kb.loading')}</p>{/if}
@@ -113,8 +112,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--sp-2);
-    padding: var(--sp-4) var(--sp-4) 14px;
-    border-top: 1px solid var(--line);
+    padding: 0 var(--sp-4) 14px;
   }
   .kb > .fold {
     border-top: 0;
