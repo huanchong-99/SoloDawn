@@ -39,10 +39,6 @@ const (
 	m3SecretError = "secret: this looks like a secret; remove it and send again"
 )
 
-var m3PostponedTools = map[string]bool{
-	"net_status": true,
-}
-
 // TestM3MCPShim runs host.RunShim when invoked as a child MCP server process
 // with the socket path and --token arguments after "--". During a regular go
 // test run flag.Args() is empty and the test returns at once.
@@ -66,7 +62,7 @@ type m3Event struct {
 
 type m3ToolCheck struct {
 	name             string
-	want             proto.ToolList
+	want             []proto.Tool
 	codex            []proto.Tool
 	claudeStructured []proto.Tool
 }
@@ -1092,7 +1088,7 @@ func (w *m3World) collectToolCheck(label string, kind host.Kind, sec bool, task 
 	}
 	return m3ToolCheck{
 		name:             label,
-		want:             want,
+		want:             slices.SortedFunc(slices.Values(want.Tools), func(a, b proto.Tool) int { return cmp.Compare(a.Name, b.Name) }),
 		codex:            codexTools,
 		claudeStructured: claudeStruct,
 	}, nil
@@ -1219,22 +1215,10 @@ func loadM3GoldenTools() (proto.ToolLists, error) {
 	return lists, dec.Decode(&lists)
 }
 
-func mainlineToolList(list proto.ToolList) []proto.Tool {
-	var out []proto.Tool
-	for _, tl := range list.Tools {
-		if !m3PostponedTools[tl.Name] {
-			out = append(out, tl)
-		}
-	}
-	slices.SortFunc(out, func(a, b proto.Tool) int { return cmp.Compare(a.Name, b.Name) })
-	return out
-}
-
 func (w *m3World) thenCodexToolsMatch() error {
 	for _, chk := range w.toolChecks {
-		want := mainlineToolList(chk.want)
-		if !reflect.DeepEqual(chk.codex, want) {
-			return fmt.Errorf("%s codex tools:\ngot  %+v\nwant %+v", chk.name, chk.codex, want)
+		if !reflect.DeepEqual(chk.codex, chk.want) {
+			return fmt.Errorf("%s codex tools:\ngot  %+v\nwant %+v", chk.name, chk.codex, chk.want)
 		}
 	}
 	return nil
@@ -1242,7 +1226,7 @@ func (w *m3World) thenCodexToolsMatch() error {
 
 func (w *m3World) thenClaudeApproveToolsMatch() error {
 	for _, chk := range w.toolChecks {
-		want := append(slices.Clone(mainlineToolList(chk.want)), proto.Tool{Name: "approve"})
+		want := append(slices.Clone(chk.want), proto.Tool{Name: "approve"})
 		slices.SortFunc(want, func(a, b proto.Tool) int { return cmp.Compare(a.Name, b.Name) })
 		if !reflect.DeepEqual(chk.claudeStructured, want) {
 			return fmt.Errorf("%s structured claude tools:\ngot  %+v\nwant %+v", chk.name, chk.claudeStructured, want)

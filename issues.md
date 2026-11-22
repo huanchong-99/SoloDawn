@@ -6,6 +6,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · deviation · `driver` in `host.info` is optional until T3-2 fills it
+
+- Symptom: `planning/contracts/step-3/drivers.md` section 6 says each entry of `agents` carries `driver` always, but the frozen shape lets it be absent: Go `Driver *Driver` with `omitempty` (`internal/proto/host.go`, `HostAgent`), TS `v.optional(Driver)` (`web/src/lib/proto.ts`, `HostState.agents`), and `agents.driver` under `optional` in `internal/proto/testdata/wire.json`.
+- Cause: nothing on rebuild fills `driver` yet; a required field now would make the web client reject every real `host.info` until T3-2 lands. P-5 froze `driver` as `accounts` and `takeover` only; the other declaration fields stay in the host's table (coordinator, 2026-11-22).
+- Status: open, accepted for P-5. T3-2, the pull request that fills `driver` for every agent, makes it required: Go: the `Driver` field (JSON `driver`) (value type, no `omitempty`), TS `driver: Driver`, regenerate `wire.json` with `go test ./internal/proto -update`, and drop "once populated" from `internal/proto/README.md` (the `host.info` bullet). Also accepted: P-5 does not freeze the tool lists in `internal/proto/testdata/tools.json` (`planning/contracts/step-3/knowledge.md` section 7), because `internal/host` tests require it to equal the registered schemas; T3-5 adds `note_list` `type` and `propose_brief` `preset`, T3-6 adds `kb_put` and `kb_search` to all five lists, and the two merge with `go test ./internal/proto -update`.
 ### 2026-11-22 · limitation · Web Push VAPID `sub` URL is not yet checked against Apple's push service
 
 - Symptom: none observed; `wpushSubscriber` (`https://github.com/huanchong-99/SoloDawn`) has not yet been exercised against Apple's Web Push service on iOS.
@@ -121,11 +126,17 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `host.Host` exposes no shutdown method, and CLI processes are started with `context.Background()` (`internal/host/run.go:380`).
 - Status: open, accepted for 1.0 (`N-4` review).
 
+### 2026-11-22 · limitation · `net_status` omits `rtt_ms` and reports `mapped_ports` as `false` in step 1
+
+- Symptom: `net_status` (`internal/node/netstatus.go`) omits `rtt_ms` from `paths` entries and sets `nat.mapped_ports` to `false`.
+- Cause: `*peer.Connection` (`internal/peer/sockets.go`) exposes `Path()` without ICE candidate-pair round-trip statistics (the field and its reporter were removed until it does), and router port mapping (`PR-3`) was cut from step 1 on 2026-11-21 (`planning/contracts/mcp-tools.md` section 1).
+- Status: open, accepted for step 1 (`N-8`).
+
 ### 2026-11-21 · limitation · `host.info` has no live push yet and reports `queued` as `0`
 
 - Symptom: `Surface` (`internal/node/surface.go`) answers `host.info` requests with `HostState` and sends no `host.info` pushes (no `host.info` push yet), and every `AgentGroup.Queued` entry in `host.info` is `0` (`internal/node/surface.go:154`).
 - Cause: `settings.set` is postponed with `U-12`, the 1.0 web client requests `host.info` on connect and after `agent.set`, and held items are held on the home (`not_before`, `HM-7`) rather than counted on the host.
-- Status: open, accepted for 1.0 (`N-3`).
+- Status: open, accepted for 1.0 (`N-3`). The web client shows no held count: the terminal page and the card of an AI in takeover say that messages to it wait until hand-back (`U-11`, coordinator 2026-11-22; `planning/flows/takeover.md` step 9).
 
 ### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
 

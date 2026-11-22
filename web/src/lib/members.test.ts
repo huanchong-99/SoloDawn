@@ -16,11 +16,13 @@ import {
   statusOf,
   suggestedName,
   taskWaitKind,
+  terminalDisabledReason,
   usageMeter,
   waitingOnMe,
   waitingOnOther,
 } from './members';
 import { goldens } from './mock';
+import type { Net } from './net.svelte';
 import { prefs } from './prefs.svelte';
 import * as p from './proto';
 
@@ -555,6 +557,7 @@ describe('AI status and path projections', () => {
       text: 'Sleeping · wakes when @mentioned',
     });
     expect(statusOf(group, mk('limited'))).toEqual({ st: 'limited', text: 'Limited' });
+    expect(statusOf(group, mk('takeover'))).toEqual({ st: 'takeover', text: 'Owner is driving' });
     expect(statusOf(group, mk('offline'))).toEqual({ st: 'offline', text: 'Offline' });
     expect(statusOf(group, mk('unexpected'))).toEqual({ st: 'offline', text: 'Offline' });
   });
@@ -598,6 +601,60 @@ describe('AI status and path projections', () => {
       tone: undefined,
       note: '15:00 重置',
     });
+  });
+
+  it('computes terminalDisabledReason across offline host/AI, relay, linking and direct', () => {
+    const { home } = makeGroup();
+    const ai = row<p.AIMemberRow>('row-member-ai', {
+      id: 'ai-t',
+      g: gid,
+      host: home.device,
+      state: 'working',
+    });
+    const offlineHost = makeHome({ online: false });
+    offlineHost.device = 'off-dev';
+    const offlineAiHost = row<p.AIMemberRow>('row-member-ai', {
+      id: 'ai-off-h',
+      g: gid,
+      host: 'off-dev',
+      state: 'working',
+    });
+    const netOf = (entries: Home[], pathFn: Net['path']): Net => ({
+      source: 'live',
+      homes: entries,
+      path: pathFn,
+    });
+
+    expect(
+      terminalDisabledReason(
+        netOf([offlineHost], () => undefined),
+        offlineAiHost,
+      ),
+    ).toBe('Computer offline');
+    expect(
+      terminalDisabledReason(
+        netOf([home], () => ({ kind: 'direct', rtt: 4, since: 1 })),
+        { ...ai, state: 'offline' },
+      ),
+    ).toBe('Computer offline');
+    expect(
+      terminalDisabledReason(
+        netOf([home], () => undefined),
+        ai,
+      ),
+    ).toBe('Direct link only');
+    expect(
+      terminalDisabledReason(
+        netOf([home], () => ({ kind: 'relay', rtt: 80, since: 1 })),
+        ai,
+      ),
+    ).toBe('Direct link only');
+    expect(
+      terminalDisabledReason(
+        netOf([home], () => ({ kind: 'direct', rtt: 4, since: 1 })),
+        ai,
+      ),
+    ).toBeUndefined();
   });
 });
 

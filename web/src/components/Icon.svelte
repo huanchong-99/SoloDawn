@@ -31,6 +31,8 @@
       '<circle cx="4.5" cy="17" r="2.2"/><circle cx="12" cy="6" r="2.2"/><circle cx="19.5" cy="17" r="2.2"/><path d="M5.8 15.2l4.9-7.4M13.3 7.8l4.9 7.4"/>',
     key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/>',
     phone: '<path d="M7 3h10v18H7zM11 18h2"/>',
+    lock: '<path d="M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3"/>',
+    eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   };
   export type IconName = keyof typeof icons;
 </script>

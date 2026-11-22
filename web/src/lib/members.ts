@@ -1,9 +1,11 @@
 // Member-panel projections and add-AI candidate selection (planning/contracts/rows.md section 2,
 // planning/contracts/commands.md section 1.2 and section 2).
 import { lost, newId, type Group, type Home } from './groups.svelte';
+import type { Net } from './net.svelte';
 import { cliName } from './onboard.svelte';
 import { t } from './prefs.svelte';
 import type { AIMemberRow, HostInfoPush, HumanMemberRow, MsgRow, TaskRow } from './proto';
+import { hostHomeOf } from './terminal.svelte';
 import { clock } from './when';
 
 /** An AI CLI registered on one of the owner's connected computers. */
@@ -128,10 +130,14 @@ export function waitingOnOther(group: Group, ai: AIMemberRow, task: TaskRow | un
 
 const idleStates: Record<
   string,
-  { st: string; key: 'member.state.sleeping' | 'member.state.limited' }
+  {
+    st: string;
+    key: 'member.state.sleeping' | 'member.state.limited' | 'member.state.takeover';
+  }
 > = {
   dormant: { st: 'sleeping', key: 'member.state.sleeping' },
   limited: { st: 'limited', key: 'member.state.limited' },
+  takeover: { st: 'takeover', key: 'member.state.takeover' },
 };
 
 /** Status badge key and localized status line for an AI member card. */
@@ -187,6 +193,13 @@ export function usageMeter(usage: AIMemberRow['usage'], lang: string): UsageMete
         ? undefined
         : t('member.usage.resets').replace('{time}', clock(resets, lang)),
   };
+}
+
+/** Reason why "Open terminal" on an owned AI card is disabled, or `undefined` when direct. */
+export function terminalDisabledReason(net: Net, ai: AIMemberRow): string | undefined {
+  const host = hostHomeOf(net.homes, ai.host);
+  if (!host?.ctl || ai.state === 'offline') return t('member.terminal.offline');
+  return net.path(host)?.kind === 'direct' ? undefined : t('member.terminal.relay');
 }
 
 /** Registered AIs on the owner's connected computers, marking those already in `group`. */

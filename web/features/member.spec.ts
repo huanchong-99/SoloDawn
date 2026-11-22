@@ -1,14 +1,33 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
 import { flushSync, tick } from 'svelte';
+import { SvelteMap } from 'svelte/reactivity';
 import { expect, vi } from 'vitest';
 import { Home, homes } from '../src/lib/groups.svelte';
 import { goldens } from '../src/lib/mock';
+import type { Path, Source } from '../src/lib/net.svelte';
 import { nodes } from '../src/lib/nodes.svelte';
 import * as p from '../src/lib/proto';
 import { example, owner, TestHome, user } from './home';
 import { all, closePage, fill, one, openPage, texts } from './page';
 
 const feature = await loadFeature('../features/web_member.feature');
+
+const paths = new SvelteMap<Home, Path | undefined>();
+
+vi.mock('../src/lib/net.svelte', async (actual) => {
+  const real = await actual<typeof import('../src/lib/net.svelte')>();
+  return {
+    ...real,
+    start: (source: Source) => ({
+      net: {
+        source,
+        homes,
+        path: (home: Home) => (home.ctl ? paths.get(home) : undefined),
+      },
+      stop: () => {},
+    }),
+  };
+});
 
 const website = 'rZNvy-1jH6Z-BcPqA5U5BQ';
 const workstationId = 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q';
@@ -103,14 +122,14 @@ function makeNode(
           return connection.ctl.request(req as Parameters<p.Ctl['request']>[0]);
         }) as p.Ctl['request'],
       };
-      const welcome = await ctl.request({
+      const welcome = (await ctl.request({
         t: 'hello',
         v: 1,
         kind: 'browser',
         name: 'test',
         addrs: [],
-      });
-      link.online(ctl, welcome as p.Welcome);
+      })) as p.Welcome;
+      link.online(ctl, { ...welcome, device: node.device });
     },
     drop: () => drop(),
   };
@@ -170,6 +189,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
 
   AfterEachScenario(async () => {
     await closePage();
+    paths.clear();
     nodes.infos.clear();
   });
 
@@ -220,6 +240,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         );
         homes.push(workstation.store);
         await syncNode(workstation);
+        paths.set(workstation.store, { kind: 'direct', rtt: 8, since: Date.now() });
         openPage(`#/groups/${website}`, 1440);
         expect(texts('.chat-head h2')).toEqual(['Website']);
       },
@@ -447,7 +468,28 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           ]);
         },
       );
-      And('the cards show a window usage bar where reported, and no terminal button', () => {
+      And(
+        'owned AI cards link to "Open terminal" when direct and disable "Open terminal" when relayed or offline, while Mina\'s AI shows none',
+        async () => {
+          const winBox = makeNode('windows', 'win-id', [], workstation.home);
+          homes.push(winBox.store);
+          await syncNode(winBox);
+          paths.set(winBox.store, { kind: 'relay', rtt: 120, since: Date.now() });
+          flushSync();
+
+          const cards = all('.member');
+          expect(cards[0].querySelector('a')!.getAttribute('href')).toBe(
+            `#/terminal/${website}/sec-ai`,
+          );
+          expect(cards[1].querySelector<HTMLButtonElement>('button')!.disabled).toBe(true);
+          expect(cards[1].querySelector('.card-foot .hint')!.textContent).toBe('Computer offline');
+          expect(cards[2].querySelector<HTMLButtonElement>('button')!.disabled).toBe(true);
+          expect(cards[2].querySelector('.card-foot .hint')!.textContent).toBe('Direct link only');
+          expect(cards[3].querySelector('.card-foot')).toBeNull();
+          expect(cards[4].querySelector<HTMLButtonElement>('button')!.disabled).toBe(true);
+        },
+      );
+      And('the cards show a window usage bar where reported', () => {
         expect(all('.member').map((card) => Boolean(card.querySelector('.meter')))).toEqual([
           true,
           true,
@@ -468,7 +510,6 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           'danger',
         ]);
         expect(texts('.member .meter small')).toEqual(['Resets 15:00']);
-        expect(all('.member button, .member a')).toEqual([]);
       });
       When('the dormant AI wakes to work and two other AIs go offline and hit a limit', () => {
         const h = workstation.home;
