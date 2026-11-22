@@ -465,6 +465,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-22 · bug · `Host.Hand` could lose the item that answers a wait when the wait ended at the same moment
+
+- Symptom: an `ask` reply or an approval decision that arrived just as its wait ended was acknowledged and never seen. `Hand` returned `waited = true`, so `tryOpenWait` (`internal/host/deliver.go:528-540`) acked the item and did not queue it, while the waiting tool had already called `done()` and found its channel empty (`awaitApprovalItem`, `internal/host/approve.go:648-665`). The HS-12 reviewer's probe lost 16 of 200,000; `TestHandAndEndOfWaitNeverLoseAnItem` lost 1 to 18 of 200,000 in each of 20 runs without the fix (84 to 162 under `-race`).
+- Cause: `(*Host).Hand` (`internal/host/host.go:293-297` before the fix) removed the wait through `release`, unlocked `h.waiting`, and only then sent into the channel. `done()` and the tool's last look at the channel could run in that gap.
+- Status: resolved in unit `HAND-RACE`: `Hand` removes the wait and sends the item while it holds `h.waiting` (`internal/host/host.go:290-297`); the channel has room for the one item, so the send never blocks. The same test keeps every item in 20 runs, and in 5 under `-race`.
+
 ### 2026-11-22 · bug · `home.Loop.Close` and `node.Sessions` left connection pumps and host commands running into `Store.Close`
 
 - Symptom: `A5.19` raced under `-race` between `Store.Close` and `Conn.pump` delivering an inbox frame to the host, and an in-flight host command on `Sessions` could write its receipt after `nodeRuntime.Close` closed `node.db`.
