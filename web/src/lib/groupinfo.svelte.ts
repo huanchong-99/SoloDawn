@@ -19,7 +19,10 @@ const isReview = (row: p.Row): row is ReviewRow => (row as { kind?: string }).ki
 
 /** Live context notes held for `group`, ordered by `pos`. */
 export function groupNotes(group: Group): p.NoteRow[] {
-  return [...group.rows.values()].filter(isNote).sort((a, b) => a.pos - b.pos);
+  return [...group.rows.values()]
+    .filter(isNote)
+    .filter((row) => row.type === undefined)
+    .sort((a, b) => a.pos - b.pos);
 }
 
 /** Live scored-review ledger entries held for `group`, ordered by `pos`. */

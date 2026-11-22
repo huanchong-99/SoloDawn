@@ -7,6 +7,7 @@
   import Avatar from '../Avatar.svelte';
   import Failure from '../Failure.svelte';
   import Icon from '../Icon.svelte';
+  import BriefPreset from '../preset/BriefPreset.svelte';
 
   /** A secretary's task brief in all four states (contracts/messages.md 2.1, 3.1). */
   let { group, msg }: CardProps<'brief'> = $props();
@@ -100,6 +101,10 @@
 
 {#snippet details(folded: boolean)}
   <dl class="kv wide" class:fold-body={folded}>
+    {#if msg.body.preset}
+      <dt>{t('preset.label')}</dt>
+      <dd><BriefPreset {group} name={msg.body.preset} /></dd>
+    {/if}
     <dt>{t('brief.goal')}</dt>
     <dd>{msg.body.goal}</dd>
     <dt>{t('brief.criteria')}</dt>

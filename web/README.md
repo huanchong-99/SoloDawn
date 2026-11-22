@@ -617,6 +617,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/people/`      | invitation dialog, role/removal actions and join form                             |
 | `src/messages/people.*`       | English and Chinese invitation, member-action and join texts                      |
 | `src/components/groupinfo/`   | group details and project memory (`chat.side`, `order: 20`)                       |
+| `src/components/preset/`      | style preset editor (`chat.side`, `order: 30`) and brief preset reader            |
 | `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
 | `src/components/watch/`       | receive-only watch channel, standalone request action and watcher stop controls   |
 | `src/components/team/`        | attributed bulletin card; team people use the shared member panel                 |
@@ -640,6 +641,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/people.spec.ts`     | steps of `../features/web_people.feature`                                         |
 | `features/people.test.ts`     | focused tests for member actions and the join page                                |
 | `features/groupinfo.spec.ts`  | steps of `../features/web_groupinfo.feature`                                      |
+| `features/preset.spec.ts`     | steps of `../features/web_preset.feature`                                         |
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
 | `features/watch_team.spec.ts` | steps of `../features/web_watch_team.feature`                                     |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
@@ -692,6 +694,9 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   update `host.info`, and `pair.browser` returns no link.
 - From 768 px the top bar of an open chat says "Chats", and the chat's own
   head with the group's name is below it, where the design has one bar with the group's name.
+- The preset editor and brief preset reader load only the first 50 presets; there is
+  no pagination or read by name. Typed notes stay out of Project memory. The preset states sheet
+  includes an interactive demo of the editor and brief reader.
 - The texts of the `states` area are in the build, although only a development server shows
   their page.
 - Cards and the rows a home writes are one line each in the main line, and Safari moves the main
