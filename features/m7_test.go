@@ -872,44 +872,6 @@ func registerM7RelayAndTaskSteps(sc *godog.ScenarioContext, w *m7World) {
 	sc.Step(`^host\.info still succeeds on the original M7 ctl connection without sending a new offer$`, w.thenHostInfoOriginalCtl)
 }
 
-func m7SetEnv(cleanup func(func()), key, val string) error {
-	old, had := os.LookupEnv(key)
-	if err := os.Setenv(key, val); err != nil {
-		return err
-	}
-	cleanup(func() {
-		if had {
-			_ = os.Setenv(key, old)
-			return
-		}
-		_ = os.Unsetenv(key)
-	})
-	return nil
-}
-
-func m7StartTURN(cleanup func(func()), mode m7CandMode) (string, []proto.ICEServer, error) {
-	pkt, err := net.ListenPacket("udp4", "127.0.0.1:0")
-	if err != nil {
-		return "", nil, err
-	}
-	gen := m7RelayGenerator(mode)
-	auth := func(r *turn.RequestAttributes) (string, []byte, bool) {
-		return "peer", turn.GenerateAuthKey("peer", "test", "secret"), r.Username == "peer"
-	}
-	srv, err := turn.NewServer(turn.ServerConfig{
-		Realm:             "test",
-		AuthHandler:       auth,
-		PacketConnConfigs: []turn.PacketConnConfig{{PacketConn: pkt, RelayAddressGenerator: gen}},
-	})
-	if err != nil {
-		_ = pkt.Close()
-		return "", nil, err
-	}
-	cleanup(func() { _ = srv.Close() })
-	addr := pkt.LocalAddr().String()
-	return addr, m7ICEServersForMode(addr, mode), nil
-}
-
 func m7RelayGenerator(mode m7CandMode) turn.RelayAddressGenerator {
 	ip := net.IPv4(127, 0, 0, 1)
 	base := turn.RelayAddressGeneratorStatic{RelayAddress: ip, Address: ip.String()}
@@ -921,7 +883,7 @@ func m7RelayGenerator(mode m7CandMode) turn.RelayAddressGenerator {
 
 func m7ICEServersForMode(addr string, mode m7CandMode) []proto.ICEServer {
 	stunSrv := proto.ICEServer{URLs: []string{"stun:" + addr}}
-	turnSrv := proto.ICEServer{URLs: []string{"turn:" + addr + "?transport=udp"}, Username: "peer", Credential: "secret"}
+	turnSrv := testTURNServer(addr)
 	switch mode {
 	case m7CandDirect:
 		return []proto.ICEServer{stunSrv}
@@ -947,11 +909,11 @@ func (w *m7World) bootEnvAndNode(mode m7CandMode) error {
 	if err := w.prepareDirsAndEnv(); err != nil {
 		return err
 	}
-	turnAddr, iceServers, err := m7StartTURN(w.cleanup, mode)
+	turnAddr, err := startTestTURN(w.cleanup, m7RelayGenerator(mode))
 	if err != nil {
 		return err
 	}
-	w.turnAddr, w.iceServers = turnAddr, iceServers
+	w.turnAddr, w.iceServers = turnAddr, m7ICEServersForMode(turnAddr, mode)
 	if err := w.startNode(mode); err != nil {
 		return err
 	}
@@ -975,9 +937,9 @@ func (w *m7World) prepareDirsAndEnv() error {
 		return err
 	}
 	return errors.Join(
-		m7SetEnv(w.cleanup, "SOLODAWN_FAKECLI_LOG", w.cliLogPath),
-		m7SetEnv(w.cleanup, "SOLODAWN_FAKE_CLAUDE_SCRIPT", filepath.Join(root, "claude-init.json")),
-		m7SetEnv(w.cleanup, "SOLODAWN_FAKE_CODEX_SCRIPT", filepath.Join(root, "codex-init.json")),
+		setScenarioEnv(w.cleanup, "SOLODAWN_FAKECLI_LOG", w.cliLogPath),
+		setScenarioEnv(w.cleanup, "SOLODAWN_FAKE_CLAUDE_SCRIPT", filepath.Join(root, "claude-init.json")),
+		setScenarioEnv(w.cleanup, "SOLODAWN_FAKE_CODEX_SCRIPT", filepath.Join(root, "codex-init.json")),
 	)
 }
 
@@ -1194,23 +1156,11 @@ func m7ClaudeWaitingDoc(postText string) map[string]any {
 }
 
 func m7HandbackPostSteps(callID int, text string) []map[string]any {
-	return []map[string]any{
-		{"dir": "mcp<-cli", "msg": map[string]any{
-			"jsonrpc": "2.0", "id": callID, "method": "tools/call",
-			"params": map[string]any{"name": "post", "arguments": map[string]any{"kind": "handback", "text": text}},
-		}},
-		{"dir": "mcp->cli", "msg": map[string]any{"jsonrpc": "2.0", "id": callID, "result": map[string]any{"isError": false}}},
-	}
+	return mcpCallSteps(callID, "post", map[string]any{"kind": "handback", "text": text}, map[string]any{"isError": false})
 }
 
 func m7ClaudeHandbackDoc(handbackText string, extraTurn []map[string]any) map[string]any {
-	steps := []map[string]any{claudeUserStdinStep("")}
-	steps = append(steps, claudeInitMCP(0)...)
-	steps = append(steps, map[string]any{"dir": "stdout", "msg": map[string]any{"type": "system", "subtype": "init", "session_id": "$session"}})
-	steps = append(steps, m7HandbackPostSteps(1, handbackText)...)
-	steps = append(steps, map[string]any{"dir": "stdout", "msg": map[string]any{
-		"type": "result", "subtype": "success", "is_error": false, "session_id": "$session",
-	}})
+	steps := claudeToolTurn(true, "", "", m7HandbackPostSteps(1, handbackText))
 	steps = append(steps, extraTurn...)
 	steps = append(steps, map[string]any{"dir": "eof"})
 	return map[string]any{"steps": steps}
@@ -1223,26 +1173,9 @@ func m7CodexFirstTaskDoc(postText string) map[string]any {
 }
 
 func m7CodexResumeHandbackDoc(turnID, handbackText string) map[string]any {
-	steps := []map[string]any{
-		{"dir": "stdin", "msg": map[string]any{"method": "initialize"}},
-		{"dir": "stdout", "msg": map[string]any{"id": "$id", "result": map[string]any{}}},
-		{"dir": "stdin", "msg": map[string]any{"method": "initialized"}},
-		{"dir": "stdin", "msg": map[string]any{"method": "thread/resume", "params": map[string]any{"threadId": "$session"}}},
-	}
-	steps = append(steps, claudeInitMCP(0)...)
-	steps = append(steps,
-		map[string]any{"dir": "stdout", "msg": map[string]any{"id": "$id", "result": map[string]any{"thread": map[string]any{"id": "$session"}}}},
-		map[string]any{"dir": "stdin", "msg": map[string]any{"method": "turn/start", "params": map[string]any{"threadId": "$session"}}},
-		map[string]any{"dir": "stdout", "msg": map[string]any{"id": "$id", "result": map[string]any{"turn": map[string]any{"id": turnID, "status": "inProgress"}}}},
-	)
-	steps = append(steps, m7HandbackPostSteps(1, handbackText)...)
-	steps = append(steps,
-		map[string]any{"dir": "stdout", "msg": map[string]any{
-			"method": "turn/completed",
-			"params": map[string]any{"threadId": "$session", "turn": map[string]any{"id": turnID, "status": "completed", "error": nil}},
-		}},
-		map[string]any{"dir": "eof"},
-	)
+	steps := codexThreadSteps(map[string]any{"method": "thread/resume", "params": map[string]any{"threadId": "$session"}})
+	steps = append(steps, codexToolTurn(turnID, "", m7HandbackPostSteps(1, handbackText))...)
+	steps = append(steps, map[string]any{"dir": "eof"})
 	return map[string]any{"session": m7CodexThread, "steps": steps}
 }
 

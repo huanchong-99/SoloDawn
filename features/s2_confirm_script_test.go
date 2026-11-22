@@ -181,7 +181,7 @@ func s2ConfirmScript(cli string, turns [][]s2ConfirmTool) string {
 	steps := codexStartupSteps()
 	id := 2
 	for i, calls := range turns {
-		steps = append(steps, m6CodexToolTurn(fmt.Sprintf("confirm-%d", i+1), "", s2ConfirmCalls(calls, id))...)
+		steps = append(steps, codexToolTurn(fmt.Sprintf("confirm-%d", i+1), "", s2ConfirmCalls(calls, id))...)
 		id += len(calls)
 	}
 	return m5MustJSON(map[string]any{"session": "s2-confirm-codex", "steps": steps})
@@ -198,7 +198,7 @@ func s2ConfirmCalls(calls []s2ConfirmTool, id int) []map[string]any {
 		if call.Result != "" {
 			result = m6ToolTextResult(false, call.Result)
 		}
-		steps = append(steps, m6MCPCallSteps(id+i, call.Name, args, result)...)
+		steps = append(steps, mcpCallSteps(id+i, call.Name, args, result)...)
 	}
 	return steps
 }

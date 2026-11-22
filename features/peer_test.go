@@ -310,21 +310,14 @@ func (w *peersWorld) pushBoth() error {
 // the nodes: UDP and ICE-TCP between them are blocked.
 func (w *peersWorld) relayOnly() error {
 	w.closePriorConns()
-	l, err := net.ListenPacket("udp4", "127.0.0.1:0")
-	if err != nil {
-		return err
-	}
 	ip := net.IPv4(127, 0, 0, 1)
 	gen := &relaySockets{RelayAddressGeneratorStatic: turn.RelayAddressGeneratorStatic{RelayAddress: ip, Address: ip.String()}, ports: map[int]bool{}}
-	s, err := turn.NewServer(turn.ServerConfig{Realm: "test", AuthHandler: func(r *turn.RequestAttributes) (string, []byte, bool) {
-		return "peer", turn.GenerateAuthKey("peer", "test", "secret"), r.Username == "peer"
-	}, PacketConnConfigs: []turn.PacketConnConfig{{PacketConn: l, RelayAddressGenerator: gen}}})
+	addr, err := startTestTURN(func(undo func()) { w.cleanup = append(w.cleanup, undo) }, gen)
 	if err != nil {
 		return err
 	}
-	w.cleanup = append(w.cleanup, func() { s.Close() })
 	w.mu.Lock()
-	w.relay = []proto.ICEServer{{URLs: []string{"turn:" + l.LocalAddr().String() + "?transport=udp"}, Username: "peer", Credential: "secret"}}
+	w.relay = []proto.ICEServer{testTURNServer(addr)}
 	w.blocked = true
 	w.mu.Unlock()
 	return nil

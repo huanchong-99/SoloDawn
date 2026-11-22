@@ -653,45 +653,28 @@ func m6ClaudeSetupDoc(caller string) map[string]any {
 			}},
 		},
 	}
-	steps := slices.Concat(
-		[]map[string]any{claudeUserStdinStep(stdinText)},
-		claudeInitMCP(0),
-		[]map[string]any{m6ClaudeInitStdout()},
-		m6MCPCallSteps(1, "start_task", map[string]any{"title": "Hold slot", "plan": "Wait on approval"}, okRes),
-		m6MCPCallSteps(2, "start_task", map[string]any{"title": m6TaskTitle, "plan": m6TaskPlan}, okRes),
-		m6MCPCallSteps(3, "approve", askQ, okRes),
-		[]map[string]any{m6ClaudeResultStdout(), {"dir": "eof"}},
+	body := slices.Concat(
+		mcpCallSteps(1, "start_task", map[string]any{"title": "Hold slot", "plan": "Wait on approval"}, okRes),
+		mcpCallSteps(2, "start_task", map[string]any{"title": m6TaskTitle, "plan": m6TaskPlan}, okRes),
+		mcpCallSteps(3, "approve", askQ, okRes),
 	)
-	return map[string]any{"steps": steps}
+	return map[string]any{"steps": append(claudeToolTurn(true, stdinText, "", body), map[string]any{"dir": "eof"})}
 }
 
 func (w *m6World) scriptOpenAskTurn(caller, callee, question, answer, postText string) error {
 	assignTurn := formatM6TaskAssignTurn(caller)
 	wantRes := m6ToolTextResult(false, string(mustMarshalNoEscape(map[string]string{"answer": answer})))
-	askSteps := m6MCPCallSteps(1, "ask", map[string]any{"to": callee, "text": question}, wantRes)
-	steps := slices.Concat(
-		[]map[string]any{claudeUserStdinStep(assignTurn)},
-		claudeInitMCP(0),
-		[]map[string]any{m6ClaudeInitStdout()},
-		askSteps,
-		mcpPostSteps(2, postText),
-		[]map[string]any{m6ClaudeResultStdout(), {"dir": "eof"}},
-	)
+	askSteps := mcpCallSteps(1, "ask", map[string]any{"to": callee, "text": question}, wantRes)
+	steps := claudeToolTurn(true, assignTurn, "", append(askSteps, mcpPostSteps(2, postText)...))
+	steps = append(steps, map[string]any{"dir": "eof"})
 	return writeM6Script(w.nodeByAI[caller], "claude", map[string]any{"steps": steps})
 }
 
 func (w *m6World) scriptBusyAskAndLateReply(caller, callee, question string) error {
 	assignTurn := formatM6TaskAssignTurn(caller)
 	replyTurn := formatM6ReplyTurn(caller, callee, "Fixtures are ready.")
-	askSteps := m6MCPCallSteps(1, "ask", map[string]any{"to": callee, "text": question}, map[string]any{"isError": false})
-	turn1 := slices.Concat(
-		[]map[string]any{claudeUserStdinStep(assignTurn)},
-		claudeInitMCP(0),
-		[]map[string]any{m6ClaudeInitStdout()},
-		askSteps,
-		mcpPostSteps(2, "Waiting on receipt."),
-		[]map[string]any{m6ClaudeResultStdout()},
-	)
+	askSteps := mcpCallSteps(1, "ask", map[string]any{"to": callee, "text": question}, map[string]any{"isError": false})
+	turn1 := claudeToolTurn(true, assignTurn, "", append(askSteps, mcpPostSteps(2, "Waiting on receipt.")...))
 	turn2 := claudeTurnSteps(3, false, replyTurn, "Late answer: Fixtures are ready.", "")
 	steps := append(slices.Concat(turn1, turn2), map[string]any{"dir": "eof"})
 	return writeM6Script(w.nodeByAI[caller], "claude", map[string]any{"steps": steps})
@@ -781,74 +764,35 @@ func buildM6ClaudeChainDoc(caller, callee, wantErr, finalPost string) map[string
 	t1In := formatM6MentionTurn(caller, "Run five-hop call chain.")
 	okRes := map[string]any{"isError": false}
 	errRes := m6ToolTextResult(true, wantErr)
-	t1 := slices.Concat(
-		[]map[string]any{claudeUserStdinStep(t1In)},
-		claudeInitMCP(0),
-		[]map[string]any{m6ClaudeInitStdout()},
-		m6MCPCallSteps(1, "ask", map[string]any{"to": callee, "text": "Hop 1", "wait": false}, okRes),
-		[]map[string]any{m6ClaudeResultStdout()},
-	)
-	t2 := slices.Concat(
-		[]map[string]any{claudeUserStdinStep("")},
-		m6MCPCallSteps(2, "ask", map[string]any{"to": callee, "text": "Hop 3", "wait": false}, okRes),
-		[]map[string]any{m6ClaudeResultStdout()},
-	)
-	t3 := slices.Concat(
-		[]map[string]any{claudeUserStdinStep("")},
-		m6MCPCallSteps(3, "ask", map[string]any{"to": callee, "text": "Hop 5"}, errRes),
-		mcpPostSteps(4, finalPost),
-		[]map[string]any{m6ClaudeResultStdout(), {"dir": "eof"}},
-	)
-	return map[string]any{"steps": slices.Concat(t1, t2, t3)}
+	t1 := claudeToolTurn(true, t1In, "", mcpCallSteps(1, "ask", map[string]any{"to": callee, "text": "Hop 1", "wait": false}, okRes))
+	t2 := claudeToolTurn(false, "", "", mcpCallSteps(2, "ask", map[string]any{"to": callee, "text": "Hop 3", "wait": false}, okRes))
+	lastCall := mcpCallSteps(3, "ask", map[string]any{"to": callee, "text": "Hop 5"}, errRes)
+	t3 := claudeToolTurn(false, "", "", append(lastCall, mcpPostSteps(4, finalPost)...))
+	steps := append(slices.Concat(t1, t2, t3), map[string]any{"dir": "eof"})
+	return map[string]any{"steps": steps}
 }
 
 func buildM6CodexChainDoc(caller string) map[string]any {
 	okRes := map[string]any{"isError": false}
 	steps := slices.Concat(
 		codexStartupSteps(),
-		m6CodexToolTurn("turn-1", "", m6MCPCallSteps(1, "ask", map[string]any{"to": caller, "text": "Hop 2", "wait": false}, okRes)),
-		m6CodexToolTurn("turn-2", "", m6MCPCallSteps(2, "ask", map[string]any{"to": caller, "text": "Hop 4", "wait": false}, okRes)),
+		codexToolTurn("turn-1", "", mcpCallSteps(1, "ask", map[string]any{"to": caller, "text": "Hop 2", "wait": false}, okRes)),
+		codexToolTurn("turn-2", "", mcpCallSteps(2, "ask", map[string]any{"to": caller, "text": "Hop 4", "wait": false}, okRes)),
 		[]map[string]any{{"dir": "eof"}},
 	)
 	return map[string]any{"session": "thr-m6-codex-chain", "steps": steps}
 }
 
 func m6CodexHoldDoc() map[string]any {
-	steps := slices.Concat(codexStartupSteps(), m6CodexToolTurn("turn-hold", "", codexApprovalSteps()), []map[string]any{{"dir": "eof"}})
+	steps := slices.Concat(codexStartupSteps(), codexToolTurn("turn-hold", "", codexApprovalSteps()), []map[string]any{{"dir": "eof"}})
 	return map[string]any{"session": "thr-m6-codex-hold", "steps": steps}
 }
 
 func m6CodexReplyDoc(stdinText, callID, answer string) map[string]any {
 	okRes := m6ToolTextResult(false, `{"ok":true}`)
-	call := m6MCPCallSteps(1, "reply", map[string]any{"call": callID, "text": answer}, okRes)
-	steps := slices.Concat(codexStartupSteps(), m6CodexToolTurn("turn-reply", stdinText, call), []map[string]any{{"dir": "eof"}})
+	call := mcpCallSteps(1, "reply", map[string]any{"call": callID, "text": answer}, okRes)
+	steps := slices.Concat(codexStartupSteps(), codexToolTurn("turn-reply", stdinText, call), []map[string]any{{"dir": "eof"}})
 	return map[string]any{"session": "thr-m6-codex-reply", "steps": steps}
-}
-
-func m6CodexToolTurn(turnID, stdinText string, bodySteps []map[string]any) []map[string]any {
-	params := map[string]any{"threadId": "$session"}
-	if stdinText != "" {
-		params["input"] = []map[string]string{{"type": "text", "text": stdinText}}
-	}
-	head := []map[string]any{
-		{"dir": "stdin", "msg": map[string]any{"method": "turn/start", "params": params}},
-		{"dir": "stdout", "msg": map[string]any{"id": "$id", "result": map[string]any{"turn": map[string]any{"id": turnID, "status": "inProgress"}}}},
-	}
-	tail := map[string]any{
-		"dir": "stdout",
-		"msg": map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "$session", "turn": map[string]any{"id": turnID, "status": "completed", "error": nil}}},
-	}
-	return append(slices.Concat(head, bodySteps), tail)
-}
-
-func m6MCPCallSteps(callID int, name string, args map[string]any, result map[string]any) []map[string]any {
-	return []map[string]any{
-		{"dir": "mcp<-cli", "msg": map[string]any{
-			"jsonrpc": "2.0", "id": callID, "method": "tools/call",
-			"params": map[string]any{"name": name, "arguments": args},
-		}},
-		{"dir": "mcp->cli", "msg": map[string]any{"jsonrpc": "2.0", "id": callID, "result": result}},
-	}
 }
 
 func m6ToolTextResult(isErr bool, text string) map[string]any {
@@ -856,14 +800,6 @@ func m6ToolTextResult(isErr bool, text string) map[string]any {
 		"isError": isErr,
 		"content": []map[string]any{{"type": "text", "text": text}},
 	}
-}
-
-func m6ClaudeInitStdout() map[string]any {
-	return map[string]any{"dir": "stdout", "msg": map[string]any{"type": "system", "subtype": "init", "session_id": "$session"}}
-}
-
-func m6ClaudeResultStdout() map[string]any {
-	return map[string]any{"dir": "stdout", "msg": map[string]any{"type": "result", "subtype": "success", "is_error": false, "session_id": "$session", "result": ""}}
 }
 
 func formatM6TaskAssignTurn(caller string) string {
