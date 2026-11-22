@@ -6,9 +6,7 @@ takeover, with the owner's consent (R-81, design point D-14). Sections 7 to
 design point D-15).
 The design points are in `steps/parallel-plan-step-2-3.md` section 1.
 
-The `confirm` card is in `contracts/step-2/confirm.md`; what a host checks
-on an item from a home that is not its owner's, in
-`contracts/step-2/authority.md`; people and roles, in
+The `confirm` card is in `contracts/step-2/confirm.md`; people and roles, in
 `contracts/step-2/people.md`. This file changes no step 1 contract; it is
 folded into them when step 1 is built (section 11).
 
@@ -34,42 +32,26 @@ session has no terminal and there is nothing to watch.
 
 1. W asks with a `confirm` card whose `body.what` is `watch` and which names
    the AI (who may ask and the card's states: `contracts/step-2/confirm.md`).
-2. O confirms on any of O's devices: the signed `act confirm`.
+2. O confirms on any of O's devices with `act confirm`.
 3. H queues an inbox item for N with `why: "watch"`. Like `merge`, it is for
    the host itself and not for a session. It is never held: not during the
    takeover, not while the group is paused.
 
 ```json
-{"env":{"p":"{\"t\":\"item\",\"n\":\"…\",\"ts\":1763600000000,\"g\":\"Qm1…\",\"to\":\"<host device>\",\"item\":4420,\"ai\":\"<member id>\",\"why\":\"watch\",\"msg\":\"<card id>\"}",
-        "k":"<home device>","s":"…"},
- "msg":{"r":"msg","kind":"confirm", …},
- "cause":{"p":"…","k":"<a device of O>","s":"…"}}
+{"item":{"item":4420,"ai":"<member id>","why":"watch","msg":"<card id>"},
+ "msg":{"r":"msg","kind":"confirm", …}}
 ```
 
-The item has no `task`; `msg` and `cause` are always present in it. N
-checks the item as every item (`contracts/datachannel.md` section 6,
-`contracts/step-2/authority.md`), and then, in this order:
+The item has no `task`; `msg` is always present in it. The watcher is the
+person whose member row is the card's `by`. N takes the item from its home
+as every item (`contracts/datachannel.md` section 6) and checks only that
+the AI is in `takeover` in this group now.
 
-| # | Check |
-| --- | --- |
-| 1 | `cause` passes checks 1, 3 and 5 of `contracts/envelope.md` section 3 as a command, its signer is a currently valid device of N's owner, and it is an `act` for the item's group with `action: confirm` whose `msg` is the item's `msg` and whose `arg` is the digest of `contracts/step-2/confirm.md` section 6 for the item's `ai` and `msg.env` |
-| 2 | `msg.env` passes checks 1 and 3, and is a `post` of kind `confirm` whose `n` is that id, whose `g` is the item's group, whose `body.what` is `watch` and which names the item's `ai` |
-| 3 | the signer of `msg.env` is a currently valid device in the log of a person, by the `device` rows of the group, each of which carries its signed entry (`contracts/rows.md` section 3). That person is the watcher |
-| 4 | no audit row `watch` names this card: N acts on a card once |
-| 5 | the AI is in `takeover` in this group now |
-
-N reads the card from `msg.env`: the unsigned parts of `msg` are content,
-and so is the watcher's `member` row. That W is a member is the home's
-check when it stores the card, and what O confirms is the person.
-
-- All pass: N keeps the **grant** (group, AI, watcher's user id) in memory,
-  writes the audit row `watch` with the card id as `detail`, the device that
-  signed `cause` as `by` and result `granted`, and acknowledges the item.
-- Any fails: audit row `refused`, then `ack`, as for every refused item.
-- The grant is for the takeover that is running when the item arrives. When
-  only check 5 fails, N also writes the audit row `watch` for the card,
-  with result `late`: the card cannot be used in a later takeover, and W
-  asks again during one.
+- It is: N keeps the **grant** (group, AI, watcher's user id) in memory
+  and acknowledges the item.
+- It is not: N acknowledges the item and keeps nothing. The grant is for
+  the takeover that is running when the item arrives; W asks again during
+  a later one.
 
 ## 3. The watcher's connection
 
@@ -105,10 +87,9 @@ Answered `{"re":7,"ok":true}`, or with one of:
 | `forbidden` | N holds no grant for this peer's person and that AI: none arrived yet, it was refused, or it has ended |
 | `relay` | N's own path to this peer is not `direct` |
 
-It is a plain request, like `host.info`, with no receipt: the authority is
-O's signature on the card, and the connection says which device asks. N
-writes an audit row `watch` with WB's device as `by` and result `opened`.
-After `ok`, WB opens the channel (`contracts/datachannel.md` section 1):
+It is a plain request, like `host.info`, with no receipt: the grant is the
+authority, and the connection says which device asks. After `ok`, WB opens
+the channel (`contracts/datachannel.md` section 1):
 
 | Label | Created by | Type | Carries |
 | --- | --- | --- | --- |
@@ -141,7 +122,7 @@ A host command, by O as every host command (`contracts/commands.md` 2):
 
 | `t` | Fields | Effect |
 | --- | --- | --- |
-| `watch.end` | `g`, `member`, `user` | N drops that person's grant for that AI and closes their `watch` channels; audit row `watch`, result `ended`. `not_found` when there is no such grant |
+| `watch.end` | `g`, `member`, `user` | N drops that person's grant for that AI and closes their `watch` channels. `not_found` when there is no such grant |
 
 ## 6. How watching ends
 
@@ -194,7 +175,7 @@ by the step 1 rules. No inbox item is ever queued in a team group.
 
 - People join, get roles and are removed as in any group
   (`contracts/step-2/people.md`); the group is moved and copied as any
-  group (`contracts/step-2/move.md`).
+  group.
 - A person writes `post` of kind `text` in the main line. Mentions name
   people, who are reminded as in any group (`contracts/commands.md` 1.7).
 - `sync`, `fetch`, `note`, `forget`, `push`, `group set` with `name`,
@@ -239,21 +220,23 @@ person in `by`. One row for the `post` table of `contracts/commands.md` 1.3:
 person, with no `as`. The home cannot tell such a post from one the person
 sent from a browser; only its kind, `bulletin`, says a node wrote it.
 
-**Which home.** The owner names the team groups to their node, in a new key of
-`settings.set` (`contracts/commands.md` section 2) that `host.info` shows in
-`settings`: `"teams":[{"g":"<team group id>","home":"<device id>"}]`, replaced
-as a whole, `[]` by default. The node connects to each `home` as a device of a
-member (`contracts/datachannel.md` section 8, third row) and reads the group
-with `state_only`. Nothing is cloned and no AI joins.
+**Which home.** A node knows the team groups homed on itself and those in
+`host.info.homes` (`contracts/step-2/people.md` section 7, point 2): the
+browser sends `home.add` to each of its person's nodes after it creates or
+joins a team group, as after any join. (`settings.set` is postponed after
+1.0, so there is no `settings.teams`; decided 2026-11-22.) The node connects
+to each such `home` as a device of a member (`contracts/datachannel.md`
+section 8, third row) and reads the group with `state_only`, which gives its
+kind. Nothing is cloned and no AI joins.
 
 **The tool.** `post` (`contracts/mcp-tools.md` section 1) gains one
 argument, listed for the secretary only:
 
 | Argument | Meaning |
 | --- | --- |
-| `group` | the id of a team group in `settings.teams`. With it, only `text` and `mentions` are read; `mentions` are names of people of that group. Returns `{"id":"…"}`. Maps to `post` kind `bulletin` on that group's home |
+| `group` | the id of a team group this node knows (above). With it, only `text` and `mentions` are read; `mentions` are names of people of that group. Returns `{"id":"…"}`. Maps to `post` kind `bulletin` on that group's home |
 
-Tool errors: `not_found` when `group` is not in `settings.teams` (the text
+Tool errors: `not_found` when the node knows no group `group` (the text
 lists the valid ids with the group names); `conflict` when that group is
 not of kind `team`; `home_unreachable`; `secret` (R-137, as on every post).
 
@@ -262,17 +245,16 @@ A secretary writes there and reads nothing there (`read_thread` takes no
 
 ## 11. Where each part goes when it is folded
 
-Unit P-4 freezes the new shapes (`contracts/conventions.md` section 5).
+Unit P-4b freezes the new shapes (`contracts/conventions.md` section 5).
 
 | Step 1 file | Gains |
 | --- | --- |
-| `contracts/datachannel.md` | section 1: the `watch` channel; section 7: `watch.start`, `pty.resize` to watchers, `watchers` in `host.info`, `teams` in its `settings`; section 8: the grant row |
-| `contracts/envelope.md` | section 3, check 2: the two reasons of section 3 here, and a node's reason to listen to the home of each team group in its `settings.teams` (section 10) |
-| `contracts/commands.md` | 1.1: `create` of kind `team`, and the `set` it refuses (section 7); 1.3: `bulletin`; section 2: `watch.end`, `teams` in `settings.set`; section 3: item `watch`; the refusals of section 8 here |
+| `contracts/datachannel.md` | section 1: the `watch` channel; section 7: `watch.start`, `pty.resize` to watchers, `watchers` in `host.info`; section 8: the grant row |
+| `contracts/envelope.md` | section 3, check 2: the two reasons of section 3 here, and a node's reason to listen to the home of each team group it knows (section 10) |
+| `contracts/commands.md` | 1.1: `create` of kind `team`, and the `set` it refuses (section 7); 1.3: `bulletin`; section 2: `watch.end`; section 3: item `watch`; the refusals of section 8 here |
 | `contracts/messages.md` | kind `bulletin` and its body |
 | `contracts/rows.md` | section 1: the values of a team group |
 | `contracts/mcp-tools.md` | `post` with `group`; the secretary's list in `tools.json` |
-| `contracts/storage.md` | audit `what` gains `watch`; `setting` key `teams` |
 | `flows/takeover.md`, `flows/agent-turn.md`, `architecture.md` | takeover section G becomes sections 1 to 6 here; agent-turn A and B step 3: the item `watch` goes to no session and is never held (section 2); architecture section 3: a watcher's browser to the AI's host (`ctl`, `watch:*`), a node to the home of a team group |
 
 ## 12. Settled by the coordinator (2026-11-20)
@@ -280,11 +262,8 @@ Unit P-4 freezes the new shapes (`contracts/conventions.md` section 5).
 1. **How a secretary reaches the team group**: the `bulletin` of section 10,
    with the person-level post path it states. Joining the AI as a member
    without a clone would need a refusal on every path that wakes an AI.
-2. **The confirmation binds the card's signer**: the digest of
-   `contracts/step-2/confirm.md` section 6 covers the request's `k`, so
-   check 1 of section 2 fails for the same `p` signed by another person.
-3. **The item `why: watch`** is the one `confirm.md` section 5 names.
-4. **Consent lasts one takeover and can be withdrawn** (sections 2, 5),
+2. **The item `why: watch`** is the one `confirm.md` section 5 names.
+3. **Consent lasts one takeover and can be withdrawn** (sections 2, 5),
    with the list `watchers` and the command `watch.end`. A grant also ends
    when the watcher is removed from the group (section 6).
 
@@ -297,4 +276,3 @@ Unit P-4 freezes the new shapes (`contracts/conventions.md` section 5).
   on a resize. If not, the remedy is for O to resize, not for N to replay.
 - `[unverified]` That every engine of the baseline sees promptly that a
   channel with a full send buffer was closed.
-- `contracts/step-2/move.md` did not exist yet.

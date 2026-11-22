@@ -6,7 +6,7 @@ how a person leaves or is removed. It settles design point D-7 of
 `steps/step-2-3.md`. Rules: R-134, R-136, R-138, R-140.
 
 This file adds to the step 1 contracts and changes nothing in them (section
-8). Whose signature a host requires is `contracts/step-2/authority.md`.
+8). Who decides what an AI does is `contracts/step-2/authority.md`.
 
 ## 1. Roles
 
@@ -20,7 +20,7 @@ A person's `member` row has `role` (`contracts/rows.md` section 2).
 
 - A group has exactly one owner, the owner of the home, and the role never
   changes: it is never given, taken or left, and a move takes the group to
-  another node of the same owner (`contracts/step-2/move.md`).
+  another node of the same owner.
 - "Admin" in every contract means role `owner` or `admin`, as in step 1.
 - A role is read from the row when a command is handled. Nothing is
   cached and no command is judged again after a role changed.
@@ -40,7 +40,7 @@ rendezvous services and joins the room of the secret. It writes no row:
 an invitation lives in memory and ends with the node process.
 
 ```
-https://<web client>/#join=<secret>&g=<group id>&home=<device id>&fp=3F9A0C2177BE
+https://<web client>/#join=<secret>&g=<group id>&home=<device id>
 ```
 
 | Part | Content |
@@ -48,8 +48,7 @@ https://<web client>/#join=<secret>&g=<group id>&home=<device id>&fp=3F9A0C2177B
 | `<web client>` | the address the link of `pair.browser` uses |
 | `join` | the secret, as section 6 shows it |
 | `g` | the group id |
-| `home` | the device id of the home |
-| `fp` | the fingerprint of `home` (`contracts/envelope.md` section 2), its 12 hex digits without spaces |
+| `home` | the device id of the home, which the joiner connects to |
 
 `expires` is the time the secret ends. An invitation admits one person
 and is open until a `join` succeeds on it or that time is reached; no
@@ -138,46 +137,16 @@ clone on their machines and whatever their clients had read.
 
 Section 6 of `contracts/envelope.md` enrols a device into a person: roles
 `a` and `b`, an `add` entry, adoption. An invitation uses the same secret,
-room and `mac`, and must never have that effect. Four rules:
+room, `pair` messages and `mac`, unchanged, and must never have that
+effect:
 
 1. **A secret has one purpose**, fixed by the device that created it:
-   pairing or invitation. It is never used for the other.
-2. **A third role.** In the `pair` message of the joiner, `role` is
-   `join`. The home, which created the secret, sends `role: a` as in
-   section 6. `mac` is computed as there, over the role as it stands in
-   the message, so the rendezvous service cannot turn `join` into `b` or
-   back.
-3. **Acceptance by purpose.** The acceptance rule of section 6 stands,
-   with "the other role" read as:
-
-   | Side | Holds | Accepts only |
-   | --- | --- | --- |
-   | creator of a pairing secret | a pairing secret | `b` |
-   | the other side of a pairing | a pairing secret | `a` |
-   | home | an invitation | `join` |
-   | joiner | a link with `join=` | `a`, with `k` equal to `home` of the link |
-
-   Any other `pair` message is ignored. So the holder of an invitation
-   who sends `b` is not enrolled, and a browser that opened a `#pair=`
-   link never sends `join`.
-4. **No log entry, no adoption.** A device accepted with `join` is a
-   **joining peer**, not a pairing peer. The home writes no `add` entry
-   for it and sends it no log before it is a member. No device adopts a
-   person on a joining connection, whatever arrives on it: adoption
-   needs a connection paired with roles `a` and `b`. Both logs stay as
-   they were; the joiner's person becomes a member, with all its devices.
-
-For check 2 of `contracts/envelope.md` section 3, the home listens to a
-joining peer, and the joiner to the `home` of its link, like a pairing
-peer: for 10 minutes from the creation of the secret, for signalling and,
-at the home, for the one command of section 5.
-
-The shared vectors gain (`contracts/vectors.md`): in `pairing`, a field
-`role` in `b`, which is `b` or `join`, and cases of a joiner, whose `mac`
-follows from role `join`; in `pair_messages`, the fields `for` (`pair` or
-`invite`) and `home` beside `me`, where `home` is the device id of the link
-when `me` is `join` and `""` otherwise, and the cases of the table above,
-each refused case with the `mac` that follows from its role.
+   pairing or invitation. The home remembers which, and handles a peer on
+   an invitation as a **joining peer**.
+2. **No log entry, no adoption.** The home writes no `add` entry for a
+   joining peer and sends it no log before it is a member. A browser that
+   opened a `#join=` link adopts nobody. Both logs stay as they were; the
+   joiner's person becomes a member, with all its devices.
 
 ## 4. Flow: joining
 
@@ -185,16 +154,14 @@ Actors: A, an admin; H, the home; P, the person joining; B, P's browser;
 RV, the rendezvous service.
 
 1. A opens "invite" and A's browser sends `invite` to H. The dialog shows
-   the link, its countdown and the fingerprint of H.
-2. A gives the link to P by any means. Who holds the link can join.
+   the link and its countdown.
+2. A gives the link to P by a private channel. Who holds the link can join.
 3. B opens the link. B must belong to a person: a browser without one
    shows onboarding (`flows/pairing.md` A) and does not join.
-4. B reads the four parts and contacts nobody unless `join` is a secret
-   as section 6 reads a typed one, `g` is an id, `home` is a device id,
-   and `fp` is the fingerprint of `home`. It shows the fingerprint and
-   asks P to confirm. P can compare it with what A's dialog shows.
+4. B reads the three parts and contacts nobody unless `join` is a secret
+   as section 6 reads a typed one, `g` is an id and `home` is a device id.
 5. B authenticates to RV and joins the room. RV sends `joined` to both. H
-   and B exchange `pair` messages and accept them by section 3.
+   and B exchange `pair` messages as in a pairing (section 3).
 6. B sends a signed `offer` to H; ICE runs (`flows/connect.md`); `ctl` opens.
    B sends `hello`; the `welcome` has `groups: []` and `owner: false`.
 7. B sends its person's whole log in `devlog` frames. H judges the
@@ -209,18 +176,8 @@ RV, the rendezvous service.
     of P's nodes. That node connects to H, and H accepts its signalling
     because the node is a valid device of a member.
 
-What each side does to admit the other:
-
-| Side | Checks, in order |
-| --- | --- |
-| B, before it sends anything about P | the link agrees with itself (step 4); H's `pair` has role `a`, the `mac` of the secret, and `k` = `home`; H's `answer` is signed by `home`. The channel is then tied to that key (`architecture.md` section 4), and RV could not stand in for H |
-| H, before P is a member | B's `pair` has role `join` and the `mac` of an open invitation; B's `offer` is signed by the `k` of that message; the log B presents is valid and holds that `k` as a valid device; `join` is signed by it |
-| P's node, for `host.join` | the command is signed by a device of its owner and names `home`; the node accepts signalling only from that device id |
-| H, for P's node | the node is a valid device in the log of a member |
-
-So the nodes of two people verify each other by keys their own owners signed
-for (R-140). Failure at any step is shown with the step and the reason. B
-closes the connection; the invitation stays open until its time is reached.
+Failure at any step is shown with the step and the reason. B closes the
+connection; the invitation stays open until its time is reached.
 
 ## 5. What a node accepts from a joining peer and from a member
 
@@ -241,7 +198,7 @@ Two rows of `contracts/datachannel.md` section 8 in step 2:
   member's device sends its own person's new entries to every home it is
   connected to, as in step 1, and the home writes each accepted entry as
   a `device` row in every group of that person. Two entries for one
-  version are judged by `contracts/step-2/authority.md`.
+  version are judged as in step 1: the first accepted wins.
 - A device that a member's log revokes is closed and refused as in
   `flows/pairing.md` D.
 
@@ -255,8 +212,7 @@ the home:
 | `member_joined` | `member` (the new row), `by` (the admin who invited) | — |
 | `member_removed` | `user`, `name` (of the removed row, which is gone) | `by`, the member who removed them; absent when the person left |
 
-So a link that reached the wrong person is seen in the history. A role
-change writes no message: the row shows it.
+A role change writes no message: the row shows it.
 
 ## 7. Points the owner settled (2026-11-20)
 
@@ -270,7 +226,7 @@ change writes no message: the row shows it.
    knows, each entry with `home`; it keeps such entries across restarts in
    the `setting` key `homes`, and `addrs` as addresses of `home`. It connects
    to nothing and clones nothing. A node B did not reach learns the group at
-   `host.join`. Frozen in P-4, built in T2-1.
+   `host.join`. Frozen in P-4a, built in T2-1.
 3. **One web client origin.** A stated limit: a browser is a device per
    origin, and the link opens the web client of the home's rendezvous. A
    person on another origin first adds a browser there
@@ -286,15 +242,14 @@ change writes no message: the row shows it.
 | Part | Folded into |
 | --- | --- |
 | sections 1 and 2; section 7, point 2 | `contracts/commands.md` 1.2, a section for `invite` and `join`, and section 2 (`home.add`); the link of `invite` among the results that live only in memory ("Once only"; `contracts/storage.md` section 2, `receipt`); `contracts/storage.md` section 2, `setting` key `homes` |
-| section 3 | `contracts/envelope.md` section 3 (check 2: a joining peer) and section 6; `contracts/vectors.md` |
+| section 3 | `contracts/envelope.md` section 3 (check 2: a joining peer) and section 6 |
 | section 4 | a new `flows/joining.md` |
 | section 5; section 7, point 2 | `contracts/datachannel.md` sections 3.1, 7 (`homes`: the groups whose home the node knows, each entry with `home`) and 8 |
 | section 6 | `contracts/messages.md` 2.11 |
 
-Unit P-4 freezes the wire shapes: the payloads of `invite` (with its
-result) and `join`, `member set` with `role`, the `pair` message with
-role `join`, the two `system` bodies, `home.add` and `home` in
-`host.info.homes` (section 7), and the vectors of section 3.
+Unit P-4a freezes the wire shapes: the payloads of `invite` (with its
+result) and `join`, `member set` with `role`, the two `system` bodies,
+`home.add` and `home` in `host.info.homes` (section 7).
 
 `[unverified]` Nothing here was run. That one rendezvous connection holds
 several rooms was read in the code of the service, not tested.
