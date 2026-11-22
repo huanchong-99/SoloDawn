@@ -1618,10 +1618,15 @@ func (w *m7World) runOneSwitchCycle(aiName, vendor, taskID string, turnNum int, 
 	if err := w.activePTY.dc.Send([]byte("{\"op\":\"exit\"}\r")); err != nil {
 		return err
 	}
-	if err := w.activePTY.waitOutput(m7Event, `"bye":`); err != nil {
-		return err
+	// The CLI's "bye" line is not awaited: when the CLI exits right after
+	// printing it, Windows ConPTY can drop its last frame (the echo and "bye"
+	// together), so the line may never reach the channel. The hand-back post and
+	// the exit entry in the CLI log (thenLogAlternatesOneSession) prove the
+	// exit; on a timeout the error carries what the terminal showed.
+	if err := w.waitMsgAndAIState(aiName, hbText, "waiting", m7Event); err != nil {
+		return fmt.Errorf("%w; terminal output %q", err, w.activePTY.text())
 	}
-	return w.waitMsgAndAIState(aiName, hbText, "waiting", m7Event)
+	return nil
 }
 
 func (w *m7World) thenLogAlternatesOneSession(vendor string) error {
