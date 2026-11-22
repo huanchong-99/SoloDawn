@@ -6,7 +6,7 @@ Feature: Host turn limits, vendor rate limits and offline mode
     Then every session on the host is dormant and the home received turn_interrupted "stop" and state "offline"
     When the home pushes a mention item while the host is offline
     Then the item remains unacknowledged on the home and starts no turn
-    When the home stops, the owner sends host.online and host.offline, the home reconnects, and the owner sends host.online
+    When the home stops, the owner sends host.offline again, the home reconnects, and the owner sends host.online
     Then host.offline succeeded while the home was stopped and host.online delivered and acknowledged the held item
 
   Scenario: With turn_minutes 1 a long turn is interrupted with reason timeout

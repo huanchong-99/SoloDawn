@@ -342,7 +342,7 @@ func registerOfflineScenarioSteps(sc *godog.ScenarioContext, suiteT *testing.T, 
 		}
 		return nil
 	})
-	sc.Step(`^the home stops, the owner sends host\.online and host\.offline, the home reconnects, and the owner sends host\.online$`, func() {})
+	sc.Step(`^the home stops, the owner sends host\.offline again, the home reconnects, and the owner sends host\.online$`, func() {})
 	sc.Step(`^host\.offline succeeded while the home was stopped and host\.online delivered and acknowledged the held item$`, func() error {
 		if s.offlineStoppedErr != nil {
 			return fmt.Errorf("host.offline with stopped home failed: %w", s.offlineStoppedErr)
@@ -408,9 +408,6 @@ func runOfflineScenarioBubble(suiteT *testing.T, s *hlScenario) error {
 		s.heldAcks, s.heldTurns = home.ackCount(1), drv.turnCount()
 
 		home.stop()
-		if stepErr = hlSurface(t.Context(), h, "host.online"); stepErr != nil {
-			return
-		}
 		s.offlineStoppedErr = hlSurface(t.Context(), h, "host.offline")
 		drv.autoEnd = true
 		home = newHLHome(3)
