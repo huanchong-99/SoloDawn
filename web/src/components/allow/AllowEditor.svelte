@@ -1,11 +1,21 @@
 <script lang="ts">
-  import { tick } from 'svelte';
-  import Failure from '../../components/Failure.svelte';
+  import { tick, type Snippet } from 'svelte';
   import type { Group } from '../../lib/groups.svelte';
   import { t } from '../../lib/prefs.svelte';
   import type { AIMemberRow, HumanMemberRow } from '../../lib/proto';
+  import Failure from '../Failure.svelte';
 
-  let { group, ai, humans }: { group: Group; ai: AIMemberRow; humans: HumanMemberRow[] } = $props();
+  let {
+    group,
+    ai,
+    humans,
+    children,
+  }: {
+    group: Group;
+    ai: AIMemberRow;
+    humans: HumanMemberRow[];
+    children: Snippet<[Snippet, Snippet]>;
+  } = $props();
   const fields = ['allow', 'approvers'] as const;
   type Field = (typeof fields)[number];
 
@@ -16,7 +26,6 @@
   let busy = $state(false);
   let failed = $state('');
 
-  const mine = $derived(ai.user === group.home.me.user);
   const offline = $derived(!group.home.ctl);
   const people = $derived(humans.filter((person) => person.user !== ai.user));
 
@@ -61,7 +70,27 @@
   }
 </script>
 
-{#if mine && draft}
+{#snippet accessRows()}
+  {#each fields as field (field)}
+    {@const names = people
+      .filter((person) => ai[field].includes(person.user))
+      .map((person) => person.name)}
+    <dt>{t(`allow.${field}`)}</dt>
+    <dd>{names.join(t('allow.sep')) || t('allow.none')}</dd>
+  {/each}
+{/snippet}
+
+{#snippet editAccess()}
+  {#if !draft}
+    <button bind:this={editButton} type="button" class="btn btn-sm" onclick={edit}>
+      {t('allow.edit')}
+    </button>
+  {/if}
+{/snippet}
+
+{@render children(accessRows, editAccess)}
+
+{#if draft}
   {@const lists = draft}
   {@const changed = fields.filter((field) => differs(field, lists[field]))}
   <form
@@ -104,23 +133,6 @@
       </button>
     </div>
   </form>
-{:else}
-  <dl class="kv">
-    {#each fields as field (field)}
-      {@const names = people
-        .filter((person) => ai[field].includes(person.user))
-        .map((person) => person.name)}
-      <dt>{t(`allow.${field}`)}</dt>
-      <dd>{names.join(t('allow.sep')) || t('allow.none')}</dd>
-    {/each}
-  </dl>
-  {#if mine}
-    <div class="card-foot">
-      <button bind:this={editButton} type="button" class="btn btn-sm" onclick={edit}>
-        {t('allow.edit')}
-      </button>
-    </div>
-  {/if}
 {/if}
 
 <style>

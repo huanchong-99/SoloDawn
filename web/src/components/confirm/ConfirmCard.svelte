@@ -2,8 +2,8 @@
   import type { CardProps } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { clock } from '../../lib/when';
-  import Failure from '../../components/Failure.svelte';
-  import Icon from '../../components/Icon.svelte';
+  import Failure from '../Failure.svelte';
+  import Icon from '../Icon.svelte';
 
   let { group, msg }: CardProps<'confirm'> = $props();
   let card: HTMLElement;
@@ -12,14 +12,33 @@
 
   const status = $derived(msg.state.status);
   const needsMe = $derived(status === 'pending' && msg.body.to.includes(group.home.me.user));
-  const ai = $derived(group.member(msg.body.ai)?.name ?? t('chat.gone'));
+  const nameOf = (id: string) => group.member(id)?.name ?? t('chat.gone');
   const recipients = $derived(
     msg.body.to.map((user) => group.personName(user) ?? t('chat.gone')).join(t('confirm.sep')),
   );
   function outcome(state: Exclude<CardProps<'confirm'>['msg']['state'], { status: 'pending' }>) {
     const label = t(`confirm.${state.status}`).replace('{time}', clock(state.at, prefs.lang));
     if (state.status === 'expired') return label;
-    return label.replace('{who}', () => group.member(state.by)?.name ?? t('chat.gone'));
+    return label.replace('{who}', () => nameOf(state.by));
+  }
+
+  function requestLabel() {
+    const { what, ai } = msg.body;
+    const label =
+      what === 'watch'
+        ? 'confirm.request.watch'
+        : what === 'ask'
+          ? 'confirm.request.ask'
+          : 'confirm.request.direct';
+    return t(label)
+      .replace('{ai}', () => nameOf(ai))
+      .replace('{who}', requester);
+  }
+
+  function requester() {
+    if (msg.body.what === 'watch') return nameOf(msg.by);
+    const request = group.rows.get(`msg ${msg.re}`);
+    return request && 'by' in request ? nameOf(request.by) : t('confirm.requester_unknown');
   }
 
   async function decide(action: 'confirm' | 'deny') {
@@ -51,9 +70,7 @@
     {/if}
   </header>
 
-  <p>
-    {t(`confirm.request.${msg.body.what as 'direct' | 'ask' | 'watch'}`).replace('{ai}', () => ai)}
-  </p>
+  <p>{requestLabel()}</p>
 
   {#if needsMe}
     <footer class="card-foot">

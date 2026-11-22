@@ -15,6 +15,7 @@ const feature = await loadFeature('../features/web_confirm.feature');
 const g = 'rZNvy-1jH6Z-BcPqA5U5BQ';
 const aiId = '1PC8WineBrUQ-apCjx7tug';
 const requester = 'p-user';
+const requesterMember = 'p-member';
 const failed = { err: { code: 'forbidden' } };
 
 type Confirm = Extract<MsgRow, { kind: 'confirm' }>;
@@ -36,7 +37,8 @@ function setup(reader: string, account = 'team') {
   group.apply([
     example('row-group'),
     example('row-member-human', { name: 'Owner' }),
-    example('row-member-human', { id: 'p-member', name: 'Requester', user: requester }),
+    example('row-member-human', { id: requesterMember, name: 'Requester', user: requester }),
+    example('row-msg-text', { id: 'request-pending', by: requesterMember }),
     ai,
   ]);
   const sent: Envelope[] = [];
@@ -53,7 +55,12 @@ function setup(reader: string, account = 'team') {
 
 function confirmation(status: Confirm['state']['status'], what: string): Confirm {
   const row = example(`row-msg-confirm-${status}`) as Confirm;
-  return { ...row, body: { ai: aiId, what, to: [user] } };
+  return {
+    ...row,
+    by: what === 'watch' ? requesterMember : 'system',
+    re: what === 'watch' ? null : `request-${status}`,
+    body: { ai: aiId, what, to: [user] },
+  };
 }
 
 function showCard(group: Group, msg: Confirm) {
@@ -74,6 +81,7 @@ function command(env: Envelope) {
 }
 
 const save = () => one<HTMLButtonElement>('form button[type="submit"]');
+const accessValues = () => texts('.member > .kv dd:nth-of-type(n + 3)');
 
 async function edit(card = 0) {
   const buttons = all<HTMLButtonElement>('.member button').filter(
@@ -101,7 +109,7 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
       showCard(setup(requester, 'personal').group, msg);
     });
     Then('the requester sees whom it waits for and no actions', () => {
-      expect(text('.card p')).toBe('Let Codex act on this request.');
+      expect(text('.card p')).toBe('Let Codex act on the request from Requester.');
       expect(text('.card .badge')).toBe('Waiting for Owner');
       expect(all('.card button')).toHaveLength(0);
     });
@@ -133,7 +141,7 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
   });
 
   Scenario('Requests show their kind and outcome (A9.9, A9.11)', ({ Given, Then, When }) => {
-    const { group } = setup(requester);
+    const { group, ai } = setup(requester);
     const at = clock(1763600000000, 'en');
     const states = [
       confirmation('pending', 'watch'),
@@ -142,15 +150,21 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
       confirmation('expired', 'direct'),
     ];
     Given('the examples of all four confirmation states', () => {
-      group.apply([example('row-member-human', { id: owner, name: 'Owner' })]);
+      group.apply([
+        example('row-member-human', { id: owner, name: 'Owner' }),
+        example('row-msg-text', { id: 'request-confirmed', by: requesterMember }),
+        { ...ai, id: 'caller', name: 'Caller' },
+        example('row-msg-call-waiting', { id: 'request-denied', by: 'caller' }),
+        { r: 'msg', id: 'request-expired', seq: 1000, gone: true },
+      ]);
       for (const msg of states) showCard(group, msg);
     });
     Then('the cards show the three kinds, four states and no actions for the observer', () => {
       expect(texts('.card p')).toEqual([
-        'Let the requester watch Codex’s terminal.',
-        'Let Codex act on this request.',
-        'Let Codex answer this call.',
-        'Let Codex act on this request.',
+        'Let Requester watch Codex’s terminal.',
+        'Let Codex act on the request from Requester.',
+        'Let Codex answer the call from Caller.',
+        'Let Codex act on the request from an unknown requester.',
       ]);
       expect(texts('.card .badge')).toEqual([
         'Waiting for Owner',
@@ -171,6 +185,12 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
         `Expired · ${at}`,
       ]);
     });
+    When('the referenced call has not been loaded', () => {
+      showCard(setup(requester).group, states[2]);
+    });
+    Then('the card identifies the requester as unknown', () => {
+      expect(texts('.card p').at(-1)).toBe('Let Codex answer the call from an unknown requester.');
+    });
   });
 
   Scenario("Only each AI's owner can change its lists (A9.14)", ({ Given, Then, When }) => {
@@ -185,12 +205,14 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
       showPanel(observer.group);
     });
     Then('a different member sees the access lists without edit controls', () => {
-      expect(texts('.member dl:last-of-type dd')).toEqual([
-        'Requester',
-        'None',
-        'Requester',
-        'None',
+      expect(all('.member > dl')).toHaveLength(2);
+      expect(texts('.member > dl dt').slice(0, 4)).toEqual([
+        'Computer',
+        'Account',
+        'Allow list',
+        'Approval delegates',
       ]);
+      expect(accessValues()).toEqual(['Requester', 'None', 'Requester', 'None']);
       expect(all('.member button')).toHaveLength(0);
     });
     When('the owner changes both lists on the team AI', async () => {
@@ -204,6 +226,7 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
         return { ok: true };
       });
       showPanel(group);
+      expect(text('.member footer button + button')).toBe('Edit access');
       await edit();
       expect(save().disabled).toBe(true);
       change(0);
@@ -221,12 +244,7 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
         allow: [],
         approvers: [user, requester],
       });
-      expect(texts('.member dl:last-of-type dd').slice(-4)).toEqual([
-        'None',
-        'Requester',
-        'Requester',
-        'None',
-      ]);
+      expect(accessValues().slice(-4)).toEqual(['None', 'Requester', 'Requester', 'None']);
       expect(document.activeElement?.textContent).toBe('Edit access');
     });
     When('the owner clears the allow list on the personal AI', async () => {
@@ -281,7 +299,7 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
       expect(save().disabled).toBe(false);
       one<HTMLButtonElement>('form button[type="button"]').click();
       await tick();
-      expect(texts('.member dl:last-of-type dd')).toEqual(['Requester', 'None']);
+      expect(accessValues()).toEqual(['Requester', 'None']);
     });
   });
 

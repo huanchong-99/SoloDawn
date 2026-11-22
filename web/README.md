@@ -446,8 +446,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
     `ts`, counted every second while it is under a minute and every minute after, or its
     `answered` duration with the `reply` folded inside, hiding the standalone `reply` row when
     both are in the same list. A denied call shows “Denied” instead of a timer or reply.
-  - Confirmation cards (`src/cmp/confirm/`) show requests to act, answer a call, or watch a
-    terminal. Only a reader named in `body.to` sees the pending card's Confirm and Deny actions;
+  - Confirmation cards (`src/components/confirm/`) name who asks to act, answer a call, or watch a
+    terminal. The watch card names its author; other cards name the author of the referenced request.
+    Only a reader named in `body.to` sees the pending card's Confirm and Deny actions;
     everyone sees whether it is pending, confirmed, denied or expired.
   - The member panel (`src/components/member/`) mounts at `chat.side` (`order: 10`). It lists the
     group's AI members, placing the secretary first with its corner mark, with each AI's state
@@ -460,8 +461,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
     for owned AIs an "Open terminal" link enabled only when the browser's own
     path to that computer is `direct`, or, while the AI is in `takeover`, a "Hand back" button that
     sends `takeover.end` and says that messages to it wait until then; then the human members with
-    their roles and online status. The access editor (`src/cmp/allow/`) shows each AI's allow
-    list and approval delegates; only its owner can edit them. The home applies the allow list
+    their roles and online status. The access editor (`src/components/allow/`) places each AI's allow
+    list and approval delegates alongside its computer and account. Only its owner sees "Edit access"
+    next to the terminal action. The home applies the allow list
     only on a team or API-key account and always retains the owner as an approver.
     The panel's "Add AI" button requires a reachable group home, an admin
     reader and at least one connected owned computer, and shows its reason when disabled. The
@@ -591,8 +593,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/task/`        | `TaskCard.svelte`, mounted for kind `task`                                        |
 | `src/components/thread/`      | a task's thread, scored review block, checks and system notices                   |
 | `src/components/call/`        | `CallBlock.svelte`, mounted for kind `call` in threads and the main line          |
-| `src/cmp/confirm/`            | `ConfirmCard.svelte`, registered by `src/components/confirm/mounts.ts`            |
-| `src/cmp/allow/`              | `AllowEditor.svelte`, lists and editor for each AI in the member panel            |
+| `src/components/confirm/`     | `ConfirmCard.svelte`, mounted for kind `confirm`                                  |
+| `src/components/allow/`       | `AllowEditor.svelte`, lists and editor for each AI in the member panel            |
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
 | `src/components/groupinfo/`   | group details and project memory (`chat.side`, `order: 20`)                       |
 | `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |

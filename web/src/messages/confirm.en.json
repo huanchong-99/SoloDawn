@@ -1,7 +1,8 @@
 {
-  "confirm.request.direct": "Let {ai} act on this request.",
-  "confirm.request.ask": "Let {ai} answer this call.",
-  "confirm.request.watch": "Let the requester watch {ai}’s terminal.",
+  "confirm.request.direct": "Let {ai} act on the request from {who}.",
+  "confirm.request.ask": "Let {ai} answer the call from {who}.",
+  "confirm.request.watch": "Let {who} watch {ai}’s terminal.",
+  "confirm.requester_unknown": "an unknown requester",
   "confirm.needs_you": "Needs you",
   "confirm.waiting": "Waiting for {who}",
   "confirm.confirmed": "Confirmed by {who} · {time}",
