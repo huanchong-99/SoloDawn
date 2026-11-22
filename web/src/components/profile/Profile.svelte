@@ -77,7 +77,6 @@
         type="button"
         class="suggest"
         disabled={busy || offline}
-        aria-label={label}
         title={label}
         onclick={() => send({ tier: suggested! })}
       >

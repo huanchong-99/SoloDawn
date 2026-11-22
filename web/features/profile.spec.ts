@@ -156,7 +156,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       expect(read(other().querySelector('.skills')!)).toBe('未填写');
       const suggestion = card().querySelector('.suggest')!;
       expect(read(suggestion)).toBe('强 采用');
-      expect(suggestion.getAttribute('aria-label')).toBe('建议：强');
+      expect(suggestion.getAttribute('aria-label')).toBeNull();
       expect(suggestion.getAttribute('title')).toBe('建议：强');
     });
   });
@@ -212,7 +212,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     Then("the owner's card offers Strong and Use labelled Suggested: Strong", () => {
       const suggestion = card().querySelector('.suggest')!;
       expect(read(suggestion)).toBe('Strong Use');
-      expect(suggestion.getAttribute('aria-label')).toBe('Suggested: Strong');
+      expect(suggestion.getAttribute('aria-label')).toBeNull();
       expect(suggestion.getAttribute('title')).toBe('Suggested: Strong');
     });
     When('the owner uses the suggestion', async () => {

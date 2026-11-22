@@ -68,6 +68,6 @@
     font-weight: 400;
   }
   .count.over {
-    color: var(--dawn);
+    color: var(--dawn-text);
   }
 </style>

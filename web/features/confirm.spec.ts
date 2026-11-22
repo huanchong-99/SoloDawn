@@ -209,7 +209,15 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
     });
     Then('a different member sees the access lists without edit controls', () => {
       expect(all('.member > dl')).toHaveLength(2);
-      expect(texts('.member > dl dt').slice(0, 8)).toEqual([
+      expect(texts('.member > dl dt')).toEqual([
+        'Computer',
+        'Account',
+        'Model',
+        'Level',
+        'Tier',
+        'Skills',
+        'Allow list',
+        'Approval delegates',
         'Computer',
         'Account',
         'Model',
