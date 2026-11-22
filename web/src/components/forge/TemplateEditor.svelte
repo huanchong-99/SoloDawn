@@ -9,7 +9,7 @@
 <p class="hint">{t('forge.places')}</p>
 {#each operations as operation (operation)}
   <fieldset class="field">
-    <legend>{t(`forge.${operation}`)}</legend>
+    <legend class="sec-title">{t(`forge.${operation}`)}</legend>
     {#each templates[operation] as _, i (i)}
       <div class="row">
         <label class="field grow">
@@ -24,7 +24,7 @@
         </label>
         <button
           type="button"
-          class="btn btn-sm"
+          class="btn btn-sm btn-ghost"
           disabled={templates[operation].length === 1}
           aria-label={t('forge.remove').replace('{n}', String(i)).replace('{operation}', operation)}
           onclick={() => (templates[operation] = templates[operation].filter((_, at) => at !== i))}
@@ -35,10 +35,19 @@
     {/each}
     <button
       type="button"
-      class="btn btn-sm"
+      class="btn btn-sm btn-ghost"
       onclick={() => (templates[operation] = [...templates[operation], ''])}
     >
-      {t('forge.add').replace('{operation}', operation)}
+      {t('forge.add')}
     </button>
   </fieldset>
 {/each}
+
+<style>
+  .row {
+    align-items: flex-end;
+  }
+  fieldset > button {
+    justify-self: start;
+  }
+</style>

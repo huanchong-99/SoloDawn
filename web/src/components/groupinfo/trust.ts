@@ -12,6 +12,7 @@ export function secretaryWarning(
   account: string,
   owner: string,
   people: readonly string[],
+  inviting = false,
 ): boolean {
-  return account === 'personal' && people.some((user) => user !== owner);
+  return account === 'personal' && people.some((user) => user !== owner) !== inviting;
 }

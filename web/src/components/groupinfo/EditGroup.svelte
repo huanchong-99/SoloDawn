@@ -43,7 +43,6 @@
 <dialog bind:this={dialog} class="dlg" aria-labelledby={`${uid}-title`} {onclose}>
   <form onsubmit={save}>
     <header><h2 id={`${uid}-title`}>{t('groupinfo.edit')}</h2></header>
-    <p class="hint">{t('forge.fixed').replace('{forge}', info.forge)}</p>
     {#if info.forge === 'custom'}<TemplateEditor bind:templates />{/if}
     {#if candidates.length}
       <label class="field">

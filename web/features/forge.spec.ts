@@ -48,28 +48,21 @@ describeFeature(feature, ({ AfterEachScenario, Scenario }) => {
           expect(all('details dd').map((el) => el.textContent)).toEqual([
             'https://git.example/team/website.git',
             'main',
-            'custom',
+            'Custom command templates',
           ]);
           expect(all('details section > p code').map((el) => el.textContent)).toEqual([
             'pnpm check',
             'pnpm test',
           ]);
           expect(
-            all('details ol').map((list) =>
+            all('details .arguments').map((list) =>
               [...list.querySelectorAll('code')].map((el) => el.textContent),
             ),
           ).toEqual([
-            ['"git"', '"push"', '"origin"', '"{branch}"'],
-            [
-              '"forge"',
-              '"open"',
-              '"--title={title}"',
-              '"--body={summary}"',
-              '"{base}"',
-              '"{commit}"',
-            ],
-            ['"forge"', '"checks"', '"{request}"', '"{commit}"'],
-            ['"forge"', '"merge"', '"{request}"', '"{commit}"'],
+            ['git', 'push', 'origin', '{branch}'],
+            ['forge', 'open', '--title={title}', '--body={summary}', '{base}', '{commit}'],
+            ['forge', 'checks', '{request}', '{commit}'],
+            ['forge', 'merge', '{request}', '{commit}'],
           ]);
           expect(text('details .note')).toBe(
             'These commands run on this computer as you, outside any sandbox, whenever an AI of yours works on a task of this group. Join only groups whose commands you would run yourself.',
@@ -92,17 +85,12 @@ describeFeature(feature, ({ AfterEachScenario, Scenario }) => {
         one<HTMLButtonElement>('section.field > button').click();
         flushSync();
       });
-      Then(
-        'the forge is described as fixed and no forge selector or template editor is offered',
-        () => {
-          expect(text('dialog > form > p.hint')).toBe(
-            'Forge: github. The forge is chosen when the group is created and cannot be changed.',
-          );
-          expect(document.querySelector('dialog fieldset')).toBeNull();
-          expect(document.querySelectorAll('dialog select').length).toBe(1);
-          expect(text('dialog label > span')).toBe('Secretary');
-        },
-      );
+      Then('no forge selector or template editor is offered', () => {
+        expect(document.querySelector('dialog > form > p.hint')).toBeNull();
+        expect(document.querySelector('dialog fieldset')).toBeNull();
+        expect(document.querySelectorAll('dialog select').length).toBe(1);
+        expect(text('dialog label > span')).toBe('Secretary');
+      });
     },
   );
 });

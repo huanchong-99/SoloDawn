@@ -10,4 +10,4 @@ Feature: Forge commands and group trust (U2-4)
   Scenario: A built-in forge remains fixed when editing group settings
     Given a project using the built-in GitHub forge
     When the owner opens group settings
-    Then the forge is described as fixed and no forge selector or template editor is offered
+    Then no forge selector or template editor is offered

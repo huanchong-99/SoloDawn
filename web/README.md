@@ -666,9 +666,9 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
 - Custom forges are chosen at group creation. Group settings can edit their four argument-list
   templates, not change the forge. Each field is one argument; whitespace and empty arguments
   are preserved, without shell parsing. The home validates template restrictions.
-- `forge/Commands.svelte` accepts `{ info }`; `groupinfo/SecretaryWarning.svelte` accepts
-  `{ account, owner, people }` (account type, owner's user id, human user ids). They are ready
-  for the add-AI dialog but intentionally unmounted there pending the member-area seam.
+- The add-AI dialog discloses project commands and warns when a personal-subscription secretary
+  would serve another person. The invitation dialog warns before inviting the first other person.
+  Command chips show arguments as passed; an empty argument is shown as `""`.
 - A shared secretary should use a team plan or an API key, with an explicit allow-list. On a
   personal subscription every request from someone other than its owner waits for that owner's
   confirmation, every time; this cannot be switched off.

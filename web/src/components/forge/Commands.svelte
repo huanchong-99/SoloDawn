@@ -13,7 +13,15 @@
     <dt>{t('groups.create.base')}</dt>
     <dd><code>{info.base}</code></dd>
     <dt>{t('forge.label')}</dt>
-    <dd>{info.forge}</dd>
+    <dd>
+      {t(
+        info.forge === 'github'
+          ? 'groups.create.forge.github'
+          : info.forge === 'none'
+            ? 'groups.create.forge.none'
+            : 'forge.custom',
+      )}
+    </dd>
   </dl>
   <h3 class="sec-title">{t('groups.create.checks')}</h3>
   {#each info.checks as check, i (i)}
@@ -21,12 +29,14 @@
   {:else}<p class="hint">{t('forge.none')}</p>{/each}
   {#if info.forge === 'custom' && info.templates}
     {#each operations as operation (operation)}
-      <h3 class="sec-title">{t(`forge.${operation}`)}</h3>
-      <ol class="bul">
-        {#each info.templates[operation] as argument, i (i)}
-          <li><code>{JSON.stringify(argument)}</code></li>
-        {/each}
-      </ol>
+      <div class="field">
+        <h3 class="sec-title">{t(`forge.${operation}`)}</h3>
+        <div class="arguments">
+          {#each info.templates[operation] as argument, i (i)}
+            <code>{argument || '""'}</code>
+          {/each}
+        </div>
+      </div>
     {/each}
     <p class="hint">{t('forge.arguments.shown')}</p>
   {/if}
@@ -34,12 +44,18 @@
 </section>
 
 <style>
+  section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+  }
   code {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
-  .bul {
-    list-style: decimal;
-    padding-left: 1.2em;
+  .arguments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
   }
 </style>

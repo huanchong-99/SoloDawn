@@ -146,36 +146,39 @@ it('omits templates when changing back to a built-in forge and shows refusals wi
   expect(one<HTMLDialogElement>('dialog').open).toBe(true);
 });
 
-it('discloses all checks and each custom template argument as a JSON string', () => {
+it('discloses checks and each custom argument verbatim, marking empty arguments', () => {
   const info = p.decode(p.GroupRow, goldens['row-group-custom']);
   info.checks = ['printf "two  spaces"\nnext', 'pnpm test'];
   info.templates!.open.push('', 'line\nbreak');
   show(Commands, { info });
-  expect(all('dd').map((el) => el.textContent)).toEqual([info.repo, info.base, 'custom']);
+  expect(all('dd').map((el) => el.textContent)).toEqual([
+    info.repo,
+    info.base,
+    'Custom command templates',
+  ]);
   expect(all('section > p code').map((el) => el.textContent)).toEqual(info.checks);
   expect(
-    all('ol').map((el) => [...el.querySelectorAll('code')].map((code) => code.textContent)),
+    all('.arguments').map((el) => [...el.querySelectorAll('code')].map((code) => code.textContent)),
   ).toEqual(
-    operations.map((operation) =>
-      info.templates![operation].map((argument) => JSON.stringify(argument)),
-    ),
+    operations.map((operation) => info.templates![operation].map((argument) => argument || '""')),
   );
   expect(one('.note').textContent).toBe(
     'These commands run on this computer as you, outside any sandbox, whenever an AI of yours works on a task of this group. Join only groups whose commands you would run yourself.',
   );
 });
 
-it.each(['github', 'none', 'custom'])(
-  'discloses an empty command list without inventing templates for %s',
-  (forge) => {
-    const info = p.decode(p.GroupRow, goldens['row-group']);
-    delete info.repo;
-    delete info.templates;
-    info.forge = forge;
-    info.checks = [];
-    show(Commands, { info });
-    expect(all('dd').map((el) => el.textContent)).toEqual(['None', info.base, forge]);
-    expect(one('section > p.hint').textContent).toBe('None');
-    expect(document.querySelector('ol')).toBeNull();
-  },
-);
+it.each([
+  ['github', 'GitHub, through gh'],
+  ['none', 'None, this computer only'],
+  ['custom', 'Custom command templates'],
+])('discloses an empty command list without inventing templates for %s', (forge, label) => {
+  const info = p.decode(p.GroupRow, goldens['row-group']);
+  delete info.repo;
+  delete info.templates;
+  info.forge = forge;
+  info.checks = [];
+  show(Commands, { info });
+  expect(all('dd').map((el) => el.textContent)).toEqual(['None', info.base, label]);
+  expect(one('section > p.hint').textContent).toBe('None');
+  expect(document.querySelector('ol')).toBeNull();
+});

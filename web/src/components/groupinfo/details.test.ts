@@ -1,13 +1,18 @@
 import { flushSync } from 'svelte';
+import { SvelteMap } from 'svelte/reactivity';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { all, choose, closePage, fill, one, show } from '../../../features/page';
-import { Group, Home } from '../../lib/groups.svelte';
+import { Group, Home, homes } from '../../lib/groups.svelte';
+import { nodes } from '../../lib/nodes.svelte';
+import { operations } from '../forge/templates';
 import { goldens } from '../../lib/mock';
 import { prefs } from '../../lib/prefs.svelte';
 import * as p from '../../lib/proto';
 import EditGroup from './EditGroup.svelte';
 import GroupDetails from './GroupDetails.svelte';
 import SecretaryWarning from './SecretaryWarning.svelte';
+import AddAI from '../member/AddAI.svelte';
+import InvitationDialog from '../people/InvitationDialog.svelte';
 import mounts from './mounts';
 import { homeOwner, secretaryWarning } from './trust';
 
@@ -15,6 +20,93 @@ beforeEach(() => {
   prefs.lang = 'en';
 });
 afterEach(closePage);
+
+const warning =
+  "Every request to this personal-subscription secretary from someone other than its owner waits for the owner's confirmation, each time. With a team plan or an API key, the owner can list who may direct it.";
+
+it.each([
+  ['personal', [], true],
+  ['personal', ['owner'], true],
+  ['personal', ['owner', 'reader'], false],
+  ['team', ['owner'], false],
+  ['api_key', [], false],
+])('warns before inviting another person for %s and %j', (account, people, expected) => {
+  expect(secretaryWarning(account, 'owner', people, true)).toBe(expected);
+  show(SecretaryWarning, { account, owner: 'owner', people, inviting: true });
+  expect(document.querySelector('.note')?.textContent ?? '').toBe(expected ? warning : '');
+});
+
+it('warns in the invitation dialog before the first other person joins, not afterward', () => {
+  const { group, info, ai, person } = setup();
+  group.apply([
+    { ...info, seq: 100, secretary: ai.id },
+    { ...ai, seq: 101, account: 'personal' },
+  ]);
+  show(InvitationDialog, { group, open: true });
+  expect(one('dialog header .note').textContent).toBe(warning);
+  group.apply([{ ...person, id: 'reader', user: 'reader', name: 'Reader', seq: 102 }]);
+  flushSync();
+  expect(document.querySelector('dialog header .note')).toBeNull();
+});
+
+it('discloses project commands and the selected personal secretary warning in Add AI', async () => {
+  const { group, home, info, person, request } = setup();
+  home.owner = true;
+  homes.push(home);
+  const hostInfo = p.decode(p.HostInfoPush, goldens['host-info-push']);
+  hostInfo.agents = [
+    { ...hostInfo.agents[0], agent: 'other-cli', account: 'personal', groups: [] },
+  ];
+  nodes.infos.set(home, hostInfo);
+  request.mockResolvedValue({ ...hostInfo, re: 1, ok: true });
+  group.apply([{ ...person, id: 'reader', user: 'reader', name: 'Reader', seq: 102 }]);
+  show(AddAI, { group, open: true });
+  await vi.waitFor(() =>
+    expect(one<HTMLInputElement>('dialog input[type=radio]').checked).toBe(true),
+  );
+  expect(one('dialog details summary').textContent).toBe('Group commands');
+  expect(all('dialog .arguments code').map((el) => el.textContent)).toEqual(
+    operations.flatMap((op) => info.templates![op]),
+  );
+  expect(document.querySelector('dialog .sec-opt .note')).toBeNull();
+  one<HTMLInputElement>('dialog input[type=checkbox]').click();
+  flushSync();
+  expect(one('dialog .sec-opt .note').textContent).toBe(warning);
+  expect(one<HTMLButtonElement>('dialog footer .btn-primary').disabled).toBe(false);
+  one<HTMLInputElement>('dialog input[type=checkbox]').click();
+  flushSync();
+  expect(document.querySelector('dialog .sec-opt .note')).toBeNull();
+  expect(one('dialog .av').textContent?.trim()).toBe('O');
+  fill(one<HTMLInputElement>('dialog input.input'), '   ');
+  one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  expect(request.mock.calls.map(([req]) => req.t)).toEqual(['host.info']);
+  fill(one<HTMLInputElement>('dialog input.input'), 'Project AI');
+  request.mockResolvedValueOnce({ re: 1, err: { code: 'forbidden', msg: 'refused' } });
+  one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() =>
+    expect(one('[role=alert]')?.textContent?.trim()).toBe('Not sent: this device may not do that.'),
+  );
+  group.apply([{ ...info, kind: 'team', seq: 103 }]);
+  flushSync();
+  expect(document.querySelector('dialog details')).toBeNull();
+});
+
+it('closes Add AI when the parent withdraws the dialog', () => {
+  const { group } = setup();
+  const state = new SvelteMap([['open', true]]);
+  show(AddAI, {
+    group,
+    get open() {
+      return state.get('open')!;
+    },
+  });
+  expect(one<HTMLDialogElement>('dialog').open).toBe(true);
+  one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  expect(one<HTMLDialogElement>('dialog').open).toBe(true);
+  state.set('open', false);
+  flushSync();
+  expect(one<HTMLDialogElement>('dialog').open).toBe(false);
+});
 
 function setup(forge = 'custom') {
   const person = p.decode(p.HumanMemberRow, goldens['row-member-human']);
