@@ -162,15 +162,24 @@ func (l *Logs) dvlCommit(user string, entries []proto.Envelope) ([]proto.DeviceR
 	return rows, nil
 }
 
-func (l *Logs) dvlKeep(log *identity.Log) {
+func (l *Logs) dvlKeep(log *identity.Log, skip *sesConn) {
+	if rows := l.dvlKeepRows(log); len(rows) > 0 {
+		l.dvlNotify(log.User, rows, false, skip)
+	}
+}
+
+func (l *Logs) dvlKeepRows(log *identity.Log) []proto.DeviceRow {
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	prev := l.log[log.User]
-	if prev == nil || len(prev.Entries) < len(log.Entries) {
-		l.log[log.User] = log
+	var rows []proto.DeviceRow
+	if prev := l.Log(log.User); prev != nil {
+		rows = dvlCollectRows(prev, log.Entries)
+		log = prev
 	}
+	l.mu.Lock()
+	l.log[log.User] = log
+	l.mu.Unlock()
+	return rows
 }
 
 func dvlCollectRows(log *identity.Log, entries []proto.Envelope) []proto.DeviceRow {

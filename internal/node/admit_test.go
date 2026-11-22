@@ -19,11 +19,12 @@ import (
 type inviteLogWrite struct{ log *identity.Log }
 
 func (w inviteLogWrite) Put(tx *store.Tx) error {
-	rows := make([]proto.DeviceRow, 0, len(w.log.Entries))
 	for _, env := range w.log.Entries {
-		rows = append(rows, dvlRowOf(env))
+		if _, err := tx.Exec("INSERT OR IGNORE INTO device_log(user, ver, env) VALUES(?, ?, ?)", w.log.User, dvlRowOf(env).Version, string(dvlMustEncode(env))); err != nil {
+			return err
+		}
 	}
-	return dvlPutEntries(tx, w.log.User, rows)
+	return nil
 }
 
 func testJoin(s *home.State, c home.Command) (home.Result, *home.Refusal) {
@@ -126,7 +127,7 @@ func TestInvitationJoinAndMemberSurface(t *testing.T) {
 	}
 	ctl.pushRaw(`{"t":"host.info","id":9}`)
 	expectErr(t, ctl.next(t), 9, "forbidden")
-	checkMemberLogUpdate(t, ph, owner, ctl, guest)
+	checkMemberLogUpdate(t, ph, owner, ctl, admin, guest)
 }
 
 func inviteCommand(ph *pairHarness, kind string, group proto.ID, nonce string) proto.HomeCommand {
@@ -207,7 +208,7 @@ func checkJoinAdmission(t *testing.T, ph *pairHarness, ctl *fakeCtl, guest ident
 	}
 }
 
-func checkMemberLogUpdate(t *testing.T, ph *pairHarness, owner, ctl *fakeCtl, guest identity.Key) {
+func checkMemberLogUpdate(t *testing.T, ph *pairHarness, owner, ctl *fakeCtl, admin, guest identity.Key) {
 	t.Helper()
 	hostCmd := proto.HostCommand{Type: "home.add", To: ph.nodeKey.ID(), Nonce: sesID("member-host-command"), Timestamp: ph.clock.Now().UnixMilli()}
 	sendInviteCmd(ctl, guest, 10, hostCmd)
@@ -222,8 +223,17 @@ func checkMemberLogUpdate(t *testing.T, ph *pairHarness, owner, ctl *fakeCtl, gu
 	}
 	node := serveConn(t, ph.sessions, device.ID(), false)
 	checkInviteHello(t, node, 1, false, 1)
+	second := openSecondInvitation(t, ph, owner, admin)
 	revoke := guest.Sign(fmt.Sprintf(`{"t":"device","user":%q,"ver":3,"op":"revoke","dev":%q}`, guest.ID(), device.ID()))
-	ctl.push(proto.Devlog{Type: "devlog", User: guest.ID(), Entries: []proto.Envelope{revoke}})
+	joining := startJoiningCtl(t, ph, second, guest)
+	entries := append(ph.logs.Log(guest.ID()).Entries, revoke)
+	joining.push(proto.Devlog{Type: "devlog", User: guest.ID(), Entries: entries})
+	sendInviteCmd(joining, guest, 2, proto.Join{HomeCommand: inviteCommand(ph, "join", sesID("second-group"), "second-join"), Name: "Guest"})
+	var joined proto.CmdResult
+	mustNoErr(t, proto.Decode(joining.next(t), &joined))
+	if !joined.OK {
+		t.Fatalf("second join = %+v", joined)
+	}
 	select {
 	case <-node.Done():
 	case <-time.After(5 * time.Second):
@@ -232,6 +242,21 @@ func checkMemberLogUpdate(t *testing.T, ph *pairHarness, owner, ctl *fakeCtl, gu
 	if ph.logs.Known(device.ID()) {
 		t.Fatal("revoked device remains known")
 	}
+}
+
+func openSecondInvitation(t *testing.T, ph *pairHarness, owner *fakeCtl, admin identity.Key) *pairAttempt {
+	t.Helper()
+	group := sesID("second-group")
+	sendInviteCmd(owner, admin, 11, proto.GroupCreate{
+		GroupCommand: proto.GroupCommand{HomeCommand: inviteCommand(ph, "group", group, "second-create"), Op: "create"},
+		Name:         "Second", Checks: []string{},
+	})
+	var result proto.CmdResult
+	mustNoErr(t, proto.Decode(owner.next(t), &result))
+	owner.next(t)
+	sendInviteCmd(owner, admin, 12, inviteCommand(ph, "invite", group, "second-invitation"))
+	mustNoErr(t, proto.Decode(owner.next(t), &result))
+	return checkInviteLink(t, ph, group, result)
 }
 
 func TestInviteWithoutRendezvous(t *testing.T) {

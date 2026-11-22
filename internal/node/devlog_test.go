@@ -244,17 +244,17 @@ func TestLogsKeepFirstAtTheSameVersion(t *testing.T) {
 	genesis := sesAddEntry(user, user.ID(), 1, user.ID(), "browser", "Original")
 	first, err := identity.Replay(user.ID(), []proto.Envelope{genesis})
 	mustNoErr(t, err)
-	logs.dvlKeep(first)
+	logs.dvlKeep(first, nil)
 	alternate := sesAddEntry(user, user.ID(), 1, user.ID(), "browser", "Alternate")
 	sameVersion, err := identity.Replay(user.ID(), []proto.Envelope{alternate})
 	mustNoErr(t, err)
-	logs.dvlKeep(sameVersion)
+	logs.dvlKeep(sameVersion, nil)
 	if got := logs.Log(user.ID()).Entries[0]; got != genesis {
 		t.Fatalf("kept %v, want first entry %v", got, genesis)
 	}
 	next, err := identity.Replay(user.ID(), []proto.Envelope{genesis, sesAddEntry(user, user.ID(), 2, device.ID(), "node", "New")})
 	mustNoErr(t, err)
-	logs.dvlKeep(next)
+	logs.dvlKeep(next, nil)
 	if !logs.Known(device.ID()) {
 		t.Fatal("longer stored log did not add its device")
 	}

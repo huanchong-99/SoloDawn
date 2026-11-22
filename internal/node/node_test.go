@@ -972,7 +972,7 @@ func TestNodePTYChannelBridge(t *testing.T) {
 	member := sesKey("terminal-member")
 	log, err := identity.Replay(member.ID(), []proto.Envelope{sesAddEntry(member, member.ID(), 1, member.ID(), "browser", "Member")})
 	mustNoErr(t, err)
-	n.logs.dvlKeep(log)
+	n.logs.dvlKeep(log, nil)
 	_, _, _, rejected := dialBrowserPTYChannel(t, n, member, "pty:g1:m1")
 	select {
 	case <-rejected:

@@ -120,7 +120,7 @@ func (p *Pairer) joinSnapshot(a *pairAttempt, c *sesConn) *home.Joining {
 }
 
 func (p *Pairer) admit(a *pairAttempt, c *sesConn, log *identity.Log, used bool) {
-	p.cfg.Logs.dvlKeep(log)
+	p.cfg.Logs.dvlKeep(log, c)
 	p.mu.Lock()
 	delete(a.joining, c.raw)
 	if used {
