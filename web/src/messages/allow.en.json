@@ -1,0 +1,11 @@
+{
+  "allow.allow": "Allow list",
+  "allow.approvers": "Approval delegates",
+  "allow.none": "None",
+  "allow.edit": "Edit access",
+  "allow.save": "Save access",
+  "allow.cancel": "Cancel",
+  "allow.offline": "The group home is offline.",
+  "allow.personal": "The allow list is saved but has no effect on a personal account.",
+  "allow.sep": ", "
+}

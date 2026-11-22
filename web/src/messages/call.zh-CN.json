@@ -2,6 +2,7 @@
   "call.mode.wait": "当场等结果",
   "call.mode.async": "先拿回执",
   "call.waiting": "等待回复 · {time}",
+  "call.denied": "已拒绝",
   "call.took": "用时 {time}",
   "call.depth": "调用第 {n} 层",
   "call.time.s": "{n} 秒",
