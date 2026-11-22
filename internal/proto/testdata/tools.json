@@ -175,6 +175,46 @@
         }
       },
       {
+        "name": "kb_put",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "kb_search",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "default": 3,
+              "minimum": 1,
+              "maximum": 20
+            },
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
         "name": "request_decision",
         "inputSchema": {
           "type": "object",
@@ -518,6 +558,46 @@
         }
       },
       {
+        "name": "kb_put",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "kb_search",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "default": 3,
+              "minimum": 1,
+              "maximum": 20
+            },
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
         "name": "start_task",
         "inputSchema": {
           "type": "object",
@@ -760,6 +840,46 @@
               ]
             }
           },
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "kb_put",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "kb_search",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "default": 3,
+              "minimum": 1,
+              "maximum": 20
+            },
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
           "additionalProperties": false
         }
       },
@@ -1034,6 +1154,46 @@
         }
       },
       {
+        "name": "kb_put",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "kb_search",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "default": 3,
+              "minimum": 1,
+              "maximum": 20
+            },
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
         "name": "request_decision",
         "inputSchema": {
           "type": "object",
@@ -1256,6 +1416,46 @@
               ]
             }
           },
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "kb_put",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "kb_search",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "default": 3,
+              "minimum": 1,
+              "maximum": 20
+            },
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
           "additionalProperties": false
         }
       },

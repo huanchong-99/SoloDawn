@@ -132,5 +132,23 @@ func TestGroupGoldens(t *testing.T) {
 		Link:    "https://rv.example/#join=7K2M-9QXD-4F8T-WB3N&g=" + group + "&home=" + host,
 		Expires: ts + 600000,
 	})
-	golden(t, "cmd-error", ErrorResponse{8, WireError{"conflict", "This card has already been decided."}})
+	golden(t, "cmd-error", ErrorResponse{8, WireError{Code: "conflict", Message: "This card has already been decided."}})
+	golden(t, "cmd-moved", ErrorResponse{8, WireError{Code: "moved", Message: "The group has moved.", Home: host}})
+}
+
+func templateExample() *ForgeTemplates {
+	return &ForgeTemplates{
+		Push:   []string{"git", "push", "origin", "{branch}"},
+		Open:   []string{"forge", "open", "--title={title}", "--body={summary}", "{base}", "{commit}"},
+		Checks: []string{"forge", "checks", "{request}", "{commit}"},
+		Merge:  []string{"forge", "merge", "{request}", "{commit}"},
+	}
+}
+
+func TestStepTwoGroupGoldens(t *testing.T) {
+	row := GroupRow{RowHeader: RowHeader{"group", group, 1}, Name: "Team", Kind: "team", Forge: "none", Home: host, Checks: []string{}, Pass: 90, PassFoundation: 70, Limits: limits, Created: ts}
+	golden(t, "row-group-team", row)
+	row.Name, row.Kind, row.Repo, row.Base, row.Forge, row.Secretary = "Website", "project", "https://git.example/team/website.git", "main", "custom", secretary
+	row.Templates = templateExample()
+	golden(t, "row-group-custom", row)
 }

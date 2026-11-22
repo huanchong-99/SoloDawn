@@ -27,7 +27,7 @@ Feature: Detecting AI CLIs, sign-in status and declaring accounts
       | claude       | claude | api_key    | ok                                        | claude\|account api_key\|owner-1  |
       | claude       | codex  | personal   | conflict: codex is not found on this machine |                                  |
       | claude,codex | gemini | personal   | bad_request: unknown agent: gemini        |                                  |
-      | claude,codex | claude | enterprise | bad_request: unknown account: enterprise  |                                  |
+      | claude,codex | claude | enterprise | bad_request: account enterprise is not in claude accounts |                                  |
 
   Scenario: Sign-in status follows CLI events and agent.set without reading credentials
     Given a host with fake CLIs "claude,codex" on PATH

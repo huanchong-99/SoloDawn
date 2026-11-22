@@ -17,6 +17,7 @@ type Fetch struct {
 	proto.FetchPage
 	Thread *string `json:"thread,omitempty"`
 	Kind   string  `json:"kind,omitempty"`
+	Query  *string `json:"q,omitempty"`
 	Row    string  `json:"r,omitempty"`
 	RowID  string  `json:"row,omitempty"`
 }
@@ -30,10 +31,8 @@ type Fetch struct {
 // not be called on the goroutine of a group or inside a transaction of the
 // store.
 func (l *Loop) Fetch(c *Conn, req Fetch) {
-	read := fetPageRead
-	if fetIsRow(req) {
-		read = fetOneRow
-	} else if !fetPageOK(req) {
+	read, ok := fetSelectRead(req)
+	if !ok {
 		c.send(runErr(req.ID, "bad_request", "the fetch limit must be 1 to 100 and before at least 0"))
 		return
 	}
@@ -41,6 +40,16 @@ func (l *Loop) Fetch(c *Conn, req Fetch) {
 	if !l.ask(req.Group, step) {
 		c.send(runErr(req.ID, "not_found", "this node is not home to the group"))
 	}
+}
+
+func fetSelectRead(req Fetch) (func(Fetch, *store.Snapshot) (proto.Fetched, error), bool) {
+	if req.Query != nil {
+		return fetPageRead, kbSearchOK(req)
+	}
+	if fetIsRow(req) {
+		return fetOneRow, true
+	}
+	return fetPageRead, fetPageOK(req)
 }
 
 func fetIsRow(req Fetch) bool {
@@ -94,6 +103,9 @@ func fetPageRead(req Fetch, snap *store.Snapshot) (proto.Fetched, error) {
 }
 
 func fetQueryRows(req Fetch, snap *store.Snapshot) ([]json.RawMessage, error) {
+	if req.Query != nil {
+		return snap.SearchKB(*req.Query, req.Limit+1)
+	}
 	if req.Kind != "" {
 		return snap.PageKind(req.Kind, req.Before, req.Limit+1)
 	}

@@ -37,6 +37,7 @@
   "chat.kind.task": "Task",
   "chat.kind.approval": "Approval",
   "chat.kind.confirm": "Confirmation",
+  "chat.kind.bulletin": "Bulletin",
   "chat.kind.decision": "Decision",
   "chat.kind.summary": "Summary",
   "chat.kind.call": "Call",

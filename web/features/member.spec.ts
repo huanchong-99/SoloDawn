@@ -211,6 +211,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
                 level: 2,
                 state: 'working',
                 queued: 0,
+                watchers: [],
               },
             ],
           },
