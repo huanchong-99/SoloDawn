@@ -1,0 +1,5 @@
+{
+  "status.down": "只读 · 连不上群的家。",
+  "status.down.host": "只读 · 连不上群的家（{home}）。",
+  "status.readonly": "恢复连接前仍可查看已有记录。"
+}

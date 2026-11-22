@@ -1,0 +1,5 @@
+{
+  "status.down": "Read-only · cannot reach the group home.",
+  "status.down.host": "Read-only · cannot reach the group home ({home}).",
+  "status.readonly": "Messages already here stay readable until it returns."
+}

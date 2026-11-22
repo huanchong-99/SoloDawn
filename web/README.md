@@ -146,8 +146,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `mockCtl`, read by the person of the wire examples with this browser's device key, and online;
   only a development build has this code, so the build carries neither the mock nor the examples
   (checked in the output of `vite build`). `live` acquires the single-tab Web Lock (`runTab` of
-  `tablock.ts`, showing the other-tab banner with "Use here" in `App.svelte` while another tab
-  holds it) and connects to each paired node from `owner.ts` through `peer.ts` (W-2), one
+  `tablock.ts`, showing the other-tab banner with "Use here" through `components/status/` at
+  `banner` while another tab holds it) and connects to each paired node from `owner.ts` through `peer.ts` (W-2), one
   `session.peer(node, ...)` per node, pausing while `#/onboarding` runs a pairing session and
   forwarding owner `devlog` updates. `net.homes` is `homes` of `groups.svelte.ts`; `net.path(home)`
   is how this browser reaches a home now (`direct` or `relay`, the round trip, since when), and
@@ -327,8 +327,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `app`, `nav`, `bar`, `page` (the title of each page), `pref` (the names of the preferences),
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
-  of its English file to the type `Key`; today the areas are `chat`, `groups`, `member`, `nodes`,
-  `pairing`, `settings`, `states`, `task` and `thread`. `src/messages/files.glob.ts` finds every file by its name and
+  of its English file to the type `Key`; today the areas are `approval`, `brief`, `chat`,
+  `decision`, `groups`, `member`, `nodes`, `pairing`, `settings`, `states`, `status`, `summary`,
+  `task` and `thread`. `src/messages/files.glob.ts` finds every file by its name and
   `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
   empty text, or has keys that differ between its two languages, and naming the area when it has
@@ -402,7 +403,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
     `group-create.json`, and answer what the node answered; the client draws from the rows that
     come back, never from its own command. A request whose connection is lost is answered
     `lost()`, a code of the client's own. While `home.ctl` is undefined the group is shown from
-    the rows held, read-only.
+    the rows held, read-only, with `components/status/` mounting the unreachable-home read-only
+    banner at `chat.top` (`order: 10`).
 - **Group pages.** `#/groups` is the group list and `#/groups/<group id>` the chat of that group;
   `routes/Groups.svelte` draws both, from `params.g`. While the group the address names has not
   been read, the chat's place says so, with the way back to the list.
@@ -515,12 +517,14 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
 | `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
+| `src/components/status/`      | other-tab notice (`banner`) and unreachable-home read-only notice (`chat.top`)    |
 | `src/styles/`                 | `tokens.css` (design tokens) and `base.css` (shared classes)                      |
 | `public/`                     | manifest, icon and `fonts/`, copied as they are                                   |
 | `features/web.spec.ts`        | steps of `../features/web.feature`                                                |
 | `features/shell.spec.ts`      | steps of `../features/web_shell.feature`; `fixtures/` stand-ins                   |
 | `features/groups.spec.ts`     | steps of `../features/web_groups.feature`                                         |
 | `features/chat.spec.ts`       | steps of `../features/web_chat.feature`                                           |
+| `features/status.spec.ts`     | steps of `../features/web_status.feature`                                         |
 | `features/task.spec.ts`       | steps of `../features/web_task.feature`                                           |
 | `features/thread.spec.ts`     | steps of `../features/web_thread.feature`                                         |
 | `features/member.spec.ts`     | steps of `../features/web_member.feature`                                         |
