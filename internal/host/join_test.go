@@ -852,6 +852,31 @@ func TestRecordHomeRollsBackFailedWrites(t *testing.T) {
 	}
 }
 
+func TestRecordHomeClearsCachedUnhostedGroupOnlyOnReplacement(t *testing.T) {
+	rig := newJoinRig(t)
+	h := rig.h
+	group := string(joinTestGroup1)
+	old := proto.Home{Group: joinTestGroup1, Home: "old", Name: "Shared"}
+	next := proto.Home{Group: joinTestGroup1, Home: "new", Name: "Shared"}
+	joinAssertEqual(t, "remember old home", h.RecordHome(old, nil), nil)
+	d := deliv(h)
+	gs := d.groupLocked(group, old.Home)
+	gs.live = true
+	applyGroupRow(h, d, old.Home, group, marshalWire(proto.GroupRow{
+		RowHeader: proto.RowHeader{Type: "group", ID: group, Seq: 4}, Home: old.Home, Base: "old-base",
+	}))
+	joinAssertEqual(t, "update same home", h.RecordHome(old, nil), nil)
+	_, cached := h.Rows.Get(group, "group", group)
+	joinAssertEqual(t, "cache retained", cached, true)
+	joinAssertEqual(t, "cursor retained", gs.cursor, int64(4))
+	joinAssertEqual(t, "replace home", h.RecordHome(next, nil), nil)
+	_, cached = h.Rows.Get(group, "group", group)
+	joinAssertEqual(t, "old cache cleared", cached, false)
+	joinAssertEqual(t, "cursor reset", gs.cursor, int64(0))
+	joinAssertEqual(t, "new sync home", gs.home, next.Home)
+	joinAssertEqual(t, "unhosted replacement dials", rig.dialCount(next.Home), 0)
+}
+
 func TestHostLeaveValidationRefusalAndMultiSessionCleanup(t *testing.T) {
 	rig, fhA := setupLeaveRig(t)
 	checkInvalidAndMissingLeaves(t, rig)

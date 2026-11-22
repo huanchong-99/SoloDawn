@@ -192,16 +192,20 @@ func (d *delivery) startGroupJobLocked(group, device string) syncJob {
 	return syncJob{group: group, since: gs.cursor, token: gs.token}
 }
 
-func (d *delivery) replaceHome(group, device string) {
+func (d *delivery) replaceHome(group, device string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	gs := d.groupLocked(group, device)
+	gs := d.groups[group]
+	if gs == nil || gs.home == device {
+		return false
+	}
 	for _, ch := range gs.waiters {
 		close(ch)
 	}
 	*gs = groupSync{home: device}
 	maps.DeleteFunc(d.held, func(key aiGroupKey, _ []verifiedItem) bool { return key.group == group })
 	delete(d.merges, group)
+	return true
 }
 
 func ensureGroupSynced(h *Host, d *delivery, device, group string) {

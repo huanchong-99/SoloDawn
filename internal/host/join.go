@@ -426,25 +426,33 @@ func joinUpsertHomeTx(tx *store.Tx, entry proto.Home) error {
 func (h *Host) RecordHome(entry proto.Home, addrs []string) error {
 	var moved bool
 	write := func(tx *Tx) error {
-		if err := joinUpsertHomeTx(tx.Tx, entry); err != nil {
-			return err
-		}
-		if err := joinPutAddrs(tx.Tx, entry.Home, addrs, h.Now().UnixMilli()); err != nil {
-			return err
-		}
 		var err error
-		moved, err = h.joinMoveSessions(tx, entry)
+		moved, err = h.joinRecordHome(tx, entry, addrs)
 		return err
 	}
-	if err := h.Sessions.Write(write); err != nil || !moved {
+	if err := h.Sessions.Write(write); err != nil {
 		return err
 	}
 	group := string(entry.Group)
-	h.Rows.Reset(group)
 	d := deliv(h)
-	d.replaceHome(group, entry.Home)
+	if d.replaceHome(group, entry.Home) || moved {
+		h.Rows.Reset(group)
+	}
+	if !moved {
+		return nil
+	}
 	ensureGroupSynced(h, d, entry.Home, group)
 	return h.EnsureHomeConnections()
+}
+
+func (h *Host) joinRecordHome(tx *Tx, entry proto.Home, addrs []string) (bool, error) {
+	if err := joinUpsertHomeTx(tx.Tx, entry); err != nil {
+		return false, err
+	}
+	if err := joinPutAddrs(tx.Tx, entry.Home, addrs, h.Now().UnixMilli()); err != nil {
+		return false, err
+	}
+	return h.joinMoveSessions(tx, entry)
 }
 
 func joinPutAddrs(tx *store.Tx, device string, addrs []string, at int64) error {
