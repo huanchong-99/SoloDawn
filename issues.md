@@ -6,6 +6,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · A hand-back that starts while the node is stopping is lost
+
+- Symptom: when the node is stopped with a terminal open and the interactive CLI exits at once, the hand-back can reach `Runner.Turn` after `settleRuntime` has begun. The start is refused, the session goes `dormant`, and nothing is posted because the home connection is already closed, so the next start does not hand the session back as `planning/flows/takeover.md` section E says.
+- Cause: `Close` closes the sockets first (`internal/node/node.go`), which closes the owner's terminal and starts the hand-back before `Settle`; a refused start moves the row to `dormant` (`startFromDormant` in `internal/host/run.go`), and `handBackSaved` (`internal/host/takeover.go`) only finds rows left in `takeover`.
+- Status: open, accepted (coordinator, 2026-11-22, HS-20 review): rare, no code.
+
+### 2026-11-22 · limitation · `max_open` is not applied when a takeover starts
+
+- Symptom: a takeover of an AI whose open sessions are already at `max_open` opens its session anyway, so one session more than `max_open` can be open (`planning/flows/agent-turn.md` step 5.1).
+- Cause: `takeoverStart` and `openSession` (`internal/host/takeover.go`) take no `max_open` slot; the hand-back turn takes none either, because a taken-over session already counts as open (`startHandBack` in `internal/host/run.go`).
+- Status: open, accepted (coordinator, 2026-11-22, HS-20 review): least code.
+
+### 2026-11-22 · deviation · `host.offline` leaves an open terminal open
+
+- Symptom: `host.offline` closes the structured sessions only; a terminal opened by takeover stays open, its member stays `takeover`, and `takeover.start` is accepted while offline. `planning/contracts/commands.md` (`host.offline`) says every session is closed.
+- Cause: `handleHostOffline` (`internal/host/limits.go`) closes structured CLIs only. The terminal is the owner's own work; going offline only stops AI turns.
+- Status: by design (coordinator, 2026-11-22, HS-20 review, decision 2). When such a terminal closes, the hand-back starts no AI turn while the AI is held (offline or rate limited): the session goes `dormant` and the host posts the facts (`handBackTurn` in `internal/host/takeover.go`).
+
 ### 2026-11-21 · deviation · The `rounds_limit` system message has an id derived from the triggering post's nonce
 
 - Symptom: when a `post` by an AI in a task's thread reaches `limits.rounds` (task-machine row 21), the command writes both the `post` row under `n` and the main-line `rounds_limit` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn rounds limit <n>` in base64url, rather than a random id.
@@ -613,7 +631,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: when the owner hands the secretary's terminal back and a `handback` message is posted in the main line signed for the secretary, the home queued a `notice` (`code: handback`) for `group.secretary`, waking the secretary again for the summary it or its host just posted.
 - Cause: `planning/contracts/commands.md` 1.3 specified `item notice for the secretary` on `handback` without an exception when `as` is the secretary.
-- Status: resolved on branch `gemini/HM-6` (#181): `post` of kind `handback` is removed from `internal/home/cmd_post.go` and marked postponed with takeover in `planning/contracts/commands.md` 1.3, and `planning/contracts/commands.md` 1.3 now states the general rule that a post never queues an item for its own author (`postWakes` skips `msg.By`; tested in `internal/home/cmd_post_test.go`).
+- Status: resolved. `gemini/HM-6` (#181) removed `post` of kind `handback` with takeover and made `planning/contracts/commands.md` 1.3 state that a post never queues an item for its own author (`postWakes` skips `msg.By`; tested in `internal/home/cmd_post_test.go`). HS-20 (#273) brings `handback` back: a hand-back queues the `notice` only when it is posted in a thread (`postHandback` in `internal/home/cmd_post.go`; `planning/contracts/commands.md` 1.3), so the secretary's own main-line hand-back queues none.
 
 ### 2026-11-21 · deviation · `web/src/lib/peer.ts` had no method to send a `ctl` push
 
