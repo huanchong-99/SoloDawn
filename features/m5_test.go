@@ -1248,10 +1248,10 @@ func (w *m5World) configureLevels(level2 bool) error {
 		claudeLvl = 3
 	}
 	write := func(tx *store.Tx) error {
-		if _, err := tx.Exec(`INSERT OR REPLACE INTO perm(agent, g, level, repo_config) VALUES('codex', ?, 2, 0)`, w.groupID); err != nil {
+		if _, err := tx.Exec(`INSERT OR REPLACE INTO perm(agent, g, level) VALUES('codex', ?, 2)`, w.groupID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`INSERT OR REPLACE INTO perm(agent, g, level, repo_config) VALUES('claude', ?, ?, 0)`, w.groupID, claudeLvl)
+		_, err := tx.Exec(`INSERT OR REPLACE INTO perm(agent, g, level) VALUES('claude', ?, ?)`, w.groupID, claudeLvl)
 		return err
 	}
 	return w.cluster.Nodes[0].Store.Write(write)

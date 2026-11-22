@@ -252,7 +252,7 @@ and without `re` and `ok` (`contracts/conventions.md` section 3):
  "relay":{"used":3250000,"limit":52428800},
  "agents":[{"agent":"claude","cli_version":"2.1.311","account":"personal",
    "login_ok":true,"caps":{"day":{"unit":"turns","max":200}},
-   "groups":[{"g":"Qm1…","member":"<member id>","level":2,"repo_config":false,
+   "groups":[{"g":"Qm1…","member":"<member id>","level":2,
               "state":"working","task":"<task id>","queued":0}]}],
  "settings":{"retention_days":90,"idle_minutes":15,"default_level":2,"all_level3":false,"approvers":[]}}
 ```
