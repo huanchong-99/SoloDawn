@@ -1,6 +1,6 @@
 # Agent Note: Device log forks: the earlier device wins, and what followed is applied again
 
-Status: proposed
+Status: rejected — the owner's rule of 2026-11-21 keeps stolen-device defence out of the code; step 2 keeps the step 1 rule (cut 2026-11-22)
 
 ## Problem
 
@@ -8,9 +8,9 @@ Every node and browser replays a person's device log by the same rules
 ([envelope contract](../../../../planning/contracts/envelope.md) section 4). Two entries for one
 version make a fork. Step 1 keeps the entry a receiver saw first, so two receivers can hold
 different logs for one person (`planning/risks.md` K-4). From step 2 the homes of other people
-hold a copy of the log, and a host reads it to decide whose word it acts on
-([authority contract](../../../../planning/contracts/step-2/authority.md) section 1), so a
-disagreement about a log becomes a disagreement about authority.
+hold a copy of the log, and a host read it to decide whose word it acts on (section 1 of the
+step 2 authority contract as it stood on 2026-11-20), so a disagreement about a log became a
+disagreement about authority.
 
 The owner accepted design answer D-4 of `planning/steps/parallel-plan-step-2-3.md` as written:
 "Two entries for one version: the one signed by the device that is earlier in the log wins, on
@@ -81,8 +81,8 @@ receiver already forwards every entry it accepts, and peers exchange whole logs 
 
 ## Acceptance criteria
 
-- The part `forks` of `internal/proto/testdata/crypto.json` holds the cases of
-  [the fork vectors](../../../../planning/contracts/step-2/fork-vectors.md), and every listed
+- The part `forks` of `internal/proto/testdata/crypto.json` holds the cases of the fork
+  vectors (`planning/contracts/step-2/fork-vectors.md`, deleted on 2026-11-22), and every listed
   order ends with the same log in the Go node and in the web client.
 - Acceptance test A9.7 of `planning/steps/step-2-3-acceptance.md` passes end to end.
 - `planning/contracts/envelope.md` section 4 carries the rule when step 2 is folded into it, and
@@ -117,3 +117,12 @@ as point 3 now says.
   a log. With the `revoke` appended, 1,099 logs changed.
 
 The model does not cover signature checks, the 2 KiB limit or entries that arrive out of order.
+
+## Why rejected
+
+On 2026-11-22 the step 2 plan was cut to the owner's rules of 2026-11-21: least code, and no
+defence in code against a stolen device or a dishonest party (`planning/steps/parallel-plan-step-2-3.md`,
+"Cuts of 2026-11-22"). A host no longer reads other people's logs to decide whose word it acts on;
+the home of a group decides. The step 1 rule stays: for a version already held, the first entry
+accepted wins, and `planning/risks.md` K-4 stays a stated limit (add one device at a time; recover
+by hand). Unit T2-4, which would have built this rule, is cancelled.
