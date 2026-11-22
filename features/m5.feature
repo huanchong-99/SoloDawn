@@ -9,6 +9,7 @@ Feature: Tasks from brief to merge
     Then before confirm no task worktree exists and no assign item is queued on the home
     When the owner confirms the brief and both tasks run through checks, cross-AI review, merge and summary
     Then both tasks are merged onto base with two summary cards in the main line and no approval card
+    And the owner saw no confirm card (A9.40)
     And each passing review was followed by its merge with no AI turn in between and a task_merged row in the thread
     And each task ran in its own session and worktree, and after the merge those sessions and folders are gone
 
@@ -18,6 +19,7 @@ Feature: Tasks from brief to merge
     And the owner confirms the brief and both tasks push their branches, pass local and hosted checks, review each other, merge and summarize
     Then push_branch pushed the assigned branch to origin with no approval card
     And both tasks are merged on origin with two summary cards carrying pull-request numbers and no approval card
+    And the owner saw no confirm card (A9.40)
     And each passing review was followed by its merge with no AI turn in between and a task_merged row in the thread
     And each task ran in its own session and worktree, and after the merge those sessions and folders are gone
 
