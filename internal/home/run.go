@@ -26,7 +26,7 @@ import (
 // Who waits for whom, so that nothing waits in a circle:
 //
 //   - A caller of an entry never waits for a client and holds no lock while
-//     it waits for a group (Attach, Watch).
+//     it waits for a group (Attach, Sync).
 //   - The goroutine of a group waits for the store's writer and for nothing
 //     else. It never waits for a client: a frame goes into the queue of its
 //     connection. It never waits for another group or for itself: the jobs of
@@ -58,11 +58,12 @@ func NodeTables() Tables {
 // LoopConfig is what a loop is started with. The loop calls Logs, Now and
 // Report on the goroutines of its groups, and Logs and Now also on the
 // caller of Cmd. So none of the three may wait for a lock that is held
-// around a call of Attach, Watch, Close or Cmd, and none may call those.
+// around a call of Attach, Sync, Close or Cmd, and none may call those.
 type LoopConfig struct {
-	Store *store.Store
-	Home  string // this node's device id
-	Owner string // the user id of this node's owner
+	Store   *store.Store
+	Home    string        // this node's device id
+	Owner   string        // the user id of this node's owner when OwnerFn is nil
+	OwnerFn func() string // dynamic owner user id; overrides Owner when non-nil
 	// Logs returns the node's verified device log of a person, as a value
 	// that nothing else reads or writes from then on, or nil when the node
 	// holds none. The loop asks for the owner's log for every group.
@@ -81,7 +82,7 @@ type LoopConfig struct {
 // Loop runs the groups a node is home to.
 type Loop struct {
 	cfg  LoopConfig
-	wg   sync.WaitGroup // the goroutines of the groups and of the clock
+	wg   sync.WaitGroup // the goroutines of the groups, the connections and the clock
 	stop chan struct{}
 	once sync.Once
 
@@ -113,6 +114,10 @@ func StartLoop(cfg LoopConfig) (*Loop, error) {
 }
 
 func runDefaults(cfg LoopConfig) LoopConfig {
+	if cfg.OwnerFn == nil {
+		owner := cfg.Owner
+		cfg.OwnerFn = func() string { return owner }
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -139,7 +144,9 @@ func (l *Loop) clock() {
 
 // Close stops the loop: every group finishes the jobs it was given, no
 // connection is sent anything more, and Close returns when the goroutines of
-// the groups have ended. The store is closed after it.
+// the groups and of the connections (including every connection's Send in
+// progress and Close of a given-up client) have ended. It must not be called
+// from a client's Send. The store is closed after it.
 func (l *Loop) Close() {
 	l.once.Do(func() { close(l.stop) })
 	l.mu.Lock()
@@ -172,15 +179,16 @@ func (l *Loop) spawn(s *State) *runGroup {
 // fresh is the state of a group before its rows: the owner's log is all it
 // knows.
 func (l *Loop) fresh(group string) *State {
-	s := NewState(group, l.cfg.Home, l.cfg.Owner)
+	s := NewState(group, l.cfg.Home, l.cfg.OwnerFn())
 	l.adopt(s)
 	return s
 }
 
 // adopt gives a state the owner's log as the node holds it now.
 func (l *Loop) adopt(s *State) {
-	if log := l.cfg.Logs(l.cfg.Owner); log != nil {
-		s.Logs[l.cfg.Owner] = log
+	owner := l.cfg.OwnerFn()
+	if log := l.cfg.Logs(owner); log != nil {
+		s.Logs[owner] = log
 	}
 }
 
@@ -195,7 +203,7 @@ func (l *Loop) route(group string, job func(g *runGroup)) {
 	}
 	g := l.groups[group]
 	if g == nil {
-		g = l.spawn(NewState(group, l.cfg.Home, l.cfg.Owner))
+		g = l.spawn(NewState(group, l.cfg.Home, l.cfg.OwnerFn()))
 		g.jobs.push(func() { l.adopt(g.state) }) // not under l.mu: Logs is the node's code
 	}
 	g.jobs.push(func() { job(g) })
@@ -264,6 +272,7 @@ func (l *Loop) Attach(device string, client Client) *Conn {
 		return c
 	}
 	l.conns[c] = true
+	l.wg.Add(2)
 	seen := l.each(func(g *runGroup) { g.attach(c) })
 	l.mu.Unlock()
 	go c.pump()
@@ -273,15 +282,34 @@ func (l *Loop) Attach(device string, client Client) *Conn {
 }
 
 // Detach ends a connection: nothing more is sent to it, and every group
-// forgets it. It does not close the client. Detaching twice is harmless.
-// Every group has the job of forgetting the connection before Gone is
-// closed, so what is handed in after Gone finds the device gone.
+// forgets it. When the last connection taking inbox items for its device
+// ends, HostOfflineEvent runs for that device. It does not close the client.
+// Detaching twice is harmless. Every group has the job of forgetting the
+// connection before Gone is closed, so what is handed in after Gone finds
+// the device gone.
 func (l *Loop) Detach(c *Conn) {
+	if l.drop(c) {
+		l.Event(HostOfflineEvent, c.device)
+	}
+	c.leave()
+}
+
+func (l *Loop) drop(c *Conn) bool {
 	l.mu.Lock()
+	defer l.mu.Unlock()
+	wasTaker := l.conns[c] && c.taker
 	delete(l.conns, c)
 	l.each(func(g *runGroup) { g.detach(c) })
-	l.mu.Unlock()
-	c.leave()
+	return wasTaker && !l.hasTaker(c.device)
+}
+
+func (l *Loop) hasTaker(device string) bool {
+	for other := range l.conns {
+		if other.device == device && other.taker {
+			return true
+		}
+	}
+	return false
 }
 
 // Welcome sends c the answer to its hello: the frame that build makes from
@@ -346,25 +374,16 @@ func (l *Loop) stray(c *Conn, re int64, env proto.Envelope) {
 	c.send(res.Frame(re))
 }
 
-// Watch subscribes c to every change of a group after the sequence number it
-// returns: from then on c is pushed the rows of each result, only the group,
-// member, device and task rows with stateOnly. ok is false when the node is
-// not home to the group, when the group is not open to the device of c, and
-// for a connection that is gone. It is the subscription of sync
-// (planning/contracts/datachannel.md section 4), without the rows before it.
-// Watch waits for the group, as Attach does.
-func (l *Loop) Watch(c *Conn, group string, stateOnly bool) (seq int64, ok bool) {
-	l.ask(group, func(g *runGroup) { seq, ok = g.watch(c, stateOnly) })
-	return seq, ok
-}
-
 // Inbox makes c the connection that takes the inbox items of its device, in
 // every group: the items that no host has acknowledged are sent to it now,
 // again if they were sent before, and new ones as they are queued. A node
 // calls it on every hello of a host (planning/contracts/datachannel.md
 // section 6).
 func (l *Loop) Inbox(c *Conn) {
-	l.all(func(g *runGroup) { g.inbox(c) })
+	l.mu.Lock()
+	c.taker = true
+	l.each(func(g *runGroup) { g.inbox(c) })
+	l.mu.Unlock()
 }
 
 // Groups returns the groups homed here that the device of c may read, as

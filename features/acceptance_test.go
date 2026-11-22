@@ -61,6 +61,8 @@ func cmdSteps(sc *godog.ScenarioContext, f fixtures) {
 // TestFeatures runs every scenario in this directory except @web; the vitest-cucumber suite under web/ runs those.
 // On Windows it also leaves out @not-windows: a scenario whose fixture Windows cannot provide, as its feature file says.
 func TestFeatures(t *testing.T) {
+	stopDeadlineTimer := armDeadlineCleanups(t)
+	defer stopDeadlineTimer()
 	bin := filepath.Join(t.TempDir(), "solodawn.exe")
 	if out, err := exec.Command("go", "build", "-o", bin, "../cmd/solodawn").CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)

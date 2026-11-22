@@ -69,6 +69,7 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
       Then('the page "<title>" is open, drawn by "<drawn by>"', async () => {
         const drawn = {
           'a coming page': '.pending',
+          'the onboarding page': '.onboarding',
           'the group list': '.groups',
           'its own page': '.page:not(.pending)',
           'the states sheet': '.states',
@@ -77,7 +78,7 @@ describeFeature(feature, ({ Background, Scenario, ScenarioOutline, AfterEachScen
           flushSync();
           expect(all(drawn)).toHaveLength(1);
         });
-        expect(texts('h1')).toEqual([variables.title]);
+        expect(texts('#page-title')).toEqual([variables.title]);
         expect(document.title).toBe(`${variables.title} · SoloDawn`);
       });
       And('the navigation marks "<entry>"', () => {

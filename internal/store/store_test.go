@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -135,14 +136,21 @@ func lockDB(t *testing.T, path string) func() {
 	t.Helper()
 	lock, err := sql.Open("sqlite", path)
 	check(t, err)
+	lock.SetMaxOpenConns(1)
+	t.Cleanup(func() { check(t, lock.Close()) })
 	_, err = lock.Exec("BEGIN IMMEDIATE")
 	check(t, err)
-	return func() {
+	var once sync.Once
+	unlock := func() {
 		t.Helper()
-		_, err := lock.Exec("ROLLBACK")
-		check(t, err)
-		check(t, lock.Close())
+		once.Do(func() {
+			_, err := lock.Exec("ROLLBACK")
+			check(t, err)
+			check(t, lock.Close())
+		})
 	}
+	t.Cleanup(unlock)
+	return unlock
 }
 
 func TestWriteBeginFailure(t *testing.T) {

@@ -5,8 +5,6 @@ package features
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -82,12 +80,11 @@ func (m *askStepHome) callRowBytes(post proto.Post[json.RawMessage], env proto.E
 		tid := string(*post.Thread)
 		thread = &tid
 	}
-	row := proto.MsgRow{
+	return json.RawMessage(accJSON(proto.MsgRow{
 		RowHeader: proto.RowHeader{Type: "msg", ID: string(post.Nonce), Seq: 1},
 		Pos:       1,
 		Group:     string(post.Group),
 		Thread:    thread,
-		Main:      false,
 		By:        string(post.As),
 		Kind:      "call",
 		Timestamp: post.Timestamp,
@@ -96,9 +93,7 @@ func (m *askStepHome) callRowBytes(post proto.Post[json.RawMessage], env proto.E
 		Body:      post.Body,
 		State:     &proto.CardState{Status: "waiting"},
 		Env:       &env,
-	}
-	raw, _ := json.Marshal(row)
-	return raw
+	}))
 }
 
 func (m *askStepHome) answerFetch(req proto.FetchRow) json.RawMessage {
@@ -109,24 +104,20 @@ func (m *askStepHome) answerFetch(req proto.FetchRow) json.RawMessage {
 	if ok {
 		rows = append(rows, row)
 	}
-	raw, _ := json.Marshal(proto.Fetched{
+	return json.RawMessage(accJSON(proto.Fetched{
 		Type:    "fetched",
 		Success: proto.Success{Re: 1, OK: true},
 		Rows:    rows,
-	})
-	return raw
-}
-
-func askStepID(label string) string {
-	sum := sha256.Sum256([]byte("SoloDawn ask feature: " + label))
-	return base64.RawURLEncoding.EncodeToString(sum[:16])
+	}))
 }
 
 type askStepWorld struct {
 	h          *host.Host
 	home       *askStepHome
+	ids        seqIDGen
 	groupID    string
 	taskID     string
+	ownerUID   string
 	members    map[string]string
 	lastResult map[string]any
 	lastErr    error
@@ -146,18 +137,19 @@ func (w *askStepWorld) setup(cleanup func(func()), waitSec int) error {
 	}
 	w.home = newAskStepHome()
 	w.h.Attach("home-device", w.home)
-	w.groupID = askStepID("group")
-	w.taskID = askStepID("T-12")
+	w.groupID = string(w.ids.next())
+	w.taskID = string(w.ids.next())
+	w.ownerUID = string(w.ids.next())
 	w.members = map[string]string{
-		"Claude Code": askStepID("Claude Code"),
-		"Codex":       askStepID("Codex"),
+		"Claude Code": string(w.ids.next()),
+		"Codex":       string(w.ids.next()),
 	}
 	w.seedRows(waitSec)
 	return nil
 }
 
 func (w *askStepWorld) seedRows(waitSec int) {
-	grp, _ := json.Marshal(proto.GroupRow{
+	w.h.Rows.Put(w.groupID, "group", w.groupID, json.RawMessage(accJSON(proto.GroupRow{
 		RowHeader:      proto.RowHeader{Type: "group", ID: w.groupID, Seq: 1},
 		Name:           "Website",
 		Kind:           "project",
@@ -170,15 +162,14 @@ func (w *askStepWorld) seedRows(waitSec int) {
 		PassFoundation: 70,
 		Limits:         proto.Limits{AskDepth: 4, AskWaitS: waitSec},
 		Created:        1_763_600_000_000,
-	})
-	w.h.Rows.Put(w.groupID, "group", w.groupID, grp)
+	})))
 	for name, id := range w.members {
-		mem, _ := json.Marshal(proto.AIMemberRow{
+		w.h.Rows.Put(w.groupID, "member", id, json.RawMessage(accJSON(proto.AIMemberRow{
 			MemberRow: proto.MemberRow{
 				RowHeader: proto.RowHeader{Type: "member", ID: id, Seq: 2},
 				Group:     w.groupID,
 				Kind:      "ai",
-				User:      askStepID("owner"),
+				User:      w.ownerUID,
 				Name:      name,
 				LastSeen:  1_763_600_000_000,
 			},
@@ -187,13 +178,11 @@ func (w *askStepWorld) seedRows(waitSec int) {
 			HostName:  "workstation",
 			Account:   "personal",
 			Allow:     []string{},
-			Approvers: []string{askStepID("owner")},
+			Approvers: []string{w.ownerUID},
 			State:     "working",
 			Since:     1_763_600_000_000,
 			Path:      "local",
-			Usage:     proto.Usage{},
-		})
-		w.h.Rows.Put(w.groupID, "member", id, mem)
+		})))
 	}
 }
 
@@ -213,25 +202,23 @@ func (w *askStepWorld) caller(name string, depth int) host.Caller {
 	}
 }
 
-func (w *askStepWorld) callTool(name string, c host.Caller, args map[string]any) {
-	rawArgs, _ := json.Marshal(args)
-	val, err := host.Tools[name].Call(context.Background(), w.h, c, rawArgs)
+func (w *askStepWorld) callTool(name string, c host.Caller, args map[string]any) error {
+	val, err := host.Tools[name].Call(context.Background(), w.h, c, json.RawMessage(accJSON(args)))
 	w.lastErr = err
 	w.lastResult = nil
 	if err == nil {
-		encoded, _ := json.Marshal(val)
-		json.Unmarshal(encoded, &w.lastResult)
+		return json.Unmarshal([]byte(accJSON(val)), &w.lastResult)
 	}
+	return nil
 }
 
 func (w *askStepWorld) replyInboxItem(callID, byName, text string) json.RawMessage {
-	replyID := askStepID("reply-" + callID)
-	msgBytes, _ := json.Marshal(proto.MessageRow[proto.EmptyBody, proto.NoCard]{
-		RowHeader: proto.RowHeader{Type: "msg", ID: replyID, Seq: 5},
+	replyID := w.ids.next()
+	msg := proto.MessageRow[proto.EmptyBody, proto.NoCard]{
+		RowHeader: proto.RowHeader{Type: "msg", ID: string(replyID), Seq: 5},
 		Pos:       5,
 		Group:     w.groupID,
 		Thread:    &w.taskID,
-		Main:      false,
 		By:        w.members[byName],
 		Kind:      "reply",
 		Timestamp: 1_763_600_000_500,
@@ -239,12 +226,11 @@ func (w *askStepWorld) replyInboxItem(callID, byName, text string) json.RawMessa
 		Mentions:  []string{},
 		Re:        &callID,
 		Body:      proto.EmptyBody{},
-	})
-	raw, _ := json.Marshal(proto.InboxItem{
-		Env: w.h.Key.Sign(`{"t":"item"}`),
-		Msg: msgBytes,
-	})
-	return raw
+	}
+	return json.RawMessage(accJSON(proto.InboxItem{
+		Item: proto.Item{Item: 1, AI: proto.ID(w.members["Claude Code"]), Why: "reply", Task: proto.ID(w.taskID), Msg: replyID},
+		Msg:  json.RawMessage(accJSON(msg)),
+	}))
 }
 
 func hostAskToolSteps(sc *godog.ScenarioContext) {
@@ -260,11 +246,15 @@ func hostAskToolSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^"([^"]+)" calls ask to "([^"]+)" with "([^"]+)" and "([^"]+)" replies "([^"]+)"$`, func(caller, callee, q, replier, ans string) error {
 		var replyErr error
 		w.home.onCall = func(callID string) {
-			rawArgs, _ := json.Marshal(map[string]any{"call": callID, "text": ans})
+			rawArgs := json.RawMessage(accJSON(map[string]any{"call": callID, "text": ans}))
 			_, replyErr = host.Tools["reply"].Call(context.Background(), w.h, w.caller(replier, 1), rawArgs)
-			w.h.Hand(callID, w.replyInboxItem(callID, replier, ans))
+			if _, handErr := w.h.Hand(callID, w.replyInboxItem(callID, replier, ans)); replyErr == nil {
+				replyErr = handErr
+			}
 		}
-		w.callTool("ask", w.caller(caller, 0), map[string]any{"to": callee, "text": q})
+		if err := w.callTool("ask", w.caller(caller, 0), map[string]any{"to": callee, "text": q}); err != nil {
+			return err
+		}
 		return replyErr
 	})
 	sc.Step(`^the open ask call returns answer "([^"]+)"$`, func(want string) error {
@@ -273,69 +263,77 @@ func hostAskToolSteps(sc *godog.ScenarioContext) {
 		}
 		return nil
 	})
-	sc.Step(`^the home received a call post at depth (\d+) and a reply post in task "T-12"$`, func(wantDepth int) error {
-		return w.verifyCallAndReplyPosts(wantDepth)
+	sc.Step(`^the home received a call post at depth (\d+) and a reply post in task "T-12"$`, w.verifyCallAndReplyPosts)
+	sc.Step(`^"([^"]+)" calls ask to "([^"]+)" with "([^"]+)" and "([^"]+)" does not reply in time$`, func(caller, callee, q, _ string) error {
+		return w.callTool("ask", w.caller(caller, 0), map[string]any{"to": callee, "text": q})
 	})
-	sc.Step(`^"([^"]+)" calls ask to "([^"]+)" with "([^"]+)" and "([^"]+)" does not reply in time$`, func(caller, callee, q, _ string) {
-		w.callTool("ask", w.caller(caller, 0), map[string]any{"to": callee, "text": q})
-	})
-	sc.Step(`^the ask call returns a pending receipt for the call$`, func() error {
-		receipt, _ := w.lastResult["receipt"].(string)
-		if w.lastErr != nil || w.lastResult["pending"] != true || len(receipt) != 22 {
-			return fmt.Errorf("got %v (%v), want pending receipt", w.lastResult, w.lastErr)
-		}
-		w.receipt = receipt
-		return nil
-	})
-	sc.Step(`^when "([^"]+)" replies "([^"]+)" later the reply item is not taken by an open call$`, func(replier, ans string) error {
-		rawArgs, _ := json.Marshal(map[string]any{"call": w.receipt, "text": ans})
-		if _, err := host.Tools["reply"].Call(context.Background(), w.h, w.caller(replier, 1), rawArgs); err != nil {
-			return err
-		}
-		if waited, err := w.h.Hand(w.receipt, w.replyInboxItem(w.receipt, replier, ans)); waited || err != nil {
-			return fmt.Errorf("expected waited=false err=nil, got %v, %v", waited, err)
-		}
-		return nil
-	})
-	registerAskLimitAndSecretSteps(sc, w)
+	registerAskReceiptAndLimitSteps(sc, w)
 }
 
-func registerAskLimitAndSecretSteps(sc *godog.ScenarioContext, w *askStepWorld) {
-	sc.Step(`^"([^"]+)" calls ask to "([^"]+)" while answering a call of depth (\d+) without waiting$`, func(caller, callee string, depth int) {
-		w.callTool("ask", w.caller(caller, depth), map[string]any{"to": callee, "text": "Nested call", "wait": false})
+func registerAskReceiptAndLimitSteps(sc *godog.ScenarioContext, w *askStepWorld) {
+	sc.Step(`^the ask call returns a pending receipt for the call$`, w.checkPendingReceipt)
+	sc.Step(`^when "([^"]+)" replies "([^"]+)" later the reply item is not taken by an open call$`, w.checkLateReplyNotTaken)
+	sc.Step(`^"([^"]+)" calls ask to "([^"]+)" while answering a call of depth (\d+) without waiting$`, func(caller, callee string, depth int) error {
+		return w.callTool("ask", w.caller(caller, depth), map[string]any{"to": callee, "text": "Nested call", "wait": false})
 	})
-	sc.Step(`^the home received a call post at depth (\d+)$`, func(wantDepth int) error {
-		if w.lastErr != nil || len(w.home.posts) == 0 {
-			return fmt.Errorf("err=%v posts=%d", w.lastErr, len(w.home.posts))
-		}
-		var body proto.CallBody
-		last := w.home.posts[len(w.home.posts)-1]
-		if proto.Decode(last.Body, &body) != nil || body.Depth != wantDepth {
-			return fmt.Errorf("got call body %+v, want depth %d", body, wantDepth)
-		}
-		return nil
+	sc.Step(`^the home received a call post at depth (\d+)$`, w.checkLastCallDepth)
+	sc.Step(`^"([^"]+)" calls ask to "([^"]+)" while answering a call of depth (\d+)$`, func(caller, callee string, depth int) error {
+		return w.callTool("ask", w.caller(caller, depth), map[string]any{"to": callee, "text": "Too deep"})
 	})
-	sc.Step(`^"([^"]+)" calls ask to "([^"]+)" while answering a call of depth (\d+)$`, func(caller, callee string, depth int) {
-		w.callTool("ask", w.caller(caller, depth), map[string]any{"to": callee, "text": "Too deep"})
-	})
-	sc.Step(`^"([^"]+)" calls ask to "([^"]+)" containing a GitHub personal access token$`, func(caller, callee string) {
-		w.callTool("ask", w.caller(caller, 0), map[string]any{
+	sc.Step(`^"([^"]+)" calls ask to "([^"]+)" containing a GitHub personal access token$`, func(caller, callee string) error {
+		return w.callTool("ask", w.caller(caller, 0), map[string]any{
 			"to":   callee,
 			"text": "token ghp_1234567890abcdefghijklmnopqrstuvwxyz",
 		})
 	})
-	sc.Step(`^the ask call fails with "([^"]+)"$`, func(want string) error {
-		if w.lastErr == nil || w.lastErr.Error() != want {
-			return fmt.Errorf("got %v, want %q", w.lastErr, want)
-		}
-		return nil
-	})
-	sc.Step(`^no command was sent to the home$`, func() error {
-		if len(w.home.posts) != 0 {
-			return fmt.Errorf("home received %d posts, want 0", len(w.home.posts))
-		}
-		return nil
-	})
+	sc.Step(`^the ask call fails with "([^"]+)"$`, w.checkAskFailedWith)
+	sc.Step(`^no command was sent to the home$`, w.checkNoPostsSent)
+}
+
+func (w *askStepWorld) checkPendingReceipt() error {
+	receipt, ok := w.lastResult["receipt"].(string)
+	if !ok || w.lastErr != nil || w.lastResult["pending"] != true || len(receipt) != 22 {
+		return fmt.Errorf("got %v (%v), want pending receipt", w.lastResult, w.lastErr)
+	}
+	w.receipt = receipt
+	return nil
+}
+
+func (w *askStepWorld) checkLateReplyNotTaken(replier, ans string) error {
+	rawArgs := json.RawMessage(accJSON(map[string]any{"call": w.receipt, "text": ans}))
+	if _, err := host.Tools["reply"].Call(context.Background(), w.h, w.caller(replier, 1), rawArgs); err != nil {
+		return err
+	}
+	if waited, err := w.h.Hand(w.receipt, w.replyInboxItem(w.receipt, replier, ans)); waited || err != nil {
+		return fmt.Errorf("expected waited=false err=nil, got %v, %v", waited, err)
+	}
+	return nil
+}
+
+func (w *askStepWorld) checkLastCallDepth(wantDepth int) error {
+	if w.lastErr != nil || len(w.home.posts) == 0 {
+		return fmt.Errorf("err=%v posts=%d", w.lastErr, len(w.home.posts))
+	}
+	var body proto.CallBody
+	last := w.home.posts[len(w.home.posts)-1]
+	if proto.Decode(last.Body, &body) != nil || body.Depth != wantDepth {
+		return fmt.Errorf("got call body %+v, want depth %d", body, wantDepth)
+	}
+	return nil
+}
+
+func (w *askStepWorld) checkAskFailedWith(want string) error {
+	if w.lastErr == nil || w.lastErr.Error() != want {
+		return fmt.Errorf("got %v, want %q", w.lastErr, want)
+	}
+	return nil
+}
+
+func (w *askStepWorld) checkNoPostsSent() error {
+	if len(w.home.posts) != 0 {
+		return fmt.Errorf("home received %d posts, want 0", len(w.home.posts))
+	}
+	return nil
 }
 
 func (w *askStepWorld) verifyCallAndReplyPosts(wantDepth int) error {

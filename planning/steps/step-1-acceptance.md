@@ -40,10 +40,12 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
 - **A1.4** With the rendezvous stopped, open **direct** connections keep
   working for 10 minutes. One of two nodes on the same network is
   restarted; they reconnect without the rendezvous.
-- **A1.5** A test rendezvous that alters the description in transit causes
-  the connection to be refused.
-- **A1.6** Revoking a browser closes its connection within 1 second; its
-  next attempt is refused.
+- **A1.5** Removed under the owner's rule of 2026-11-21: no defence in code
+  against a dishonest rendezvous; handled outside the product in the
+  deployment guide.
+- **A1.6** Removed by the owner's decision of 2026-11-21 (no stolen-device
+  defence in code; revoking is postponed, and a lost device is handled outside
+  the product in the deployment guide).
 - **A1.7** When the relay quota is used up, an allocation that is already
   open stops forwarding, and `quota` reports it.
 - **A1.8** Six targets build with cgo disabled. Binary size and idle memory
@@ -56,10 +58,8 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   not processed and closes nothing: no connection is created for it, and the
   live connection keeps answering `host.info`. A copy of the offer for the
   current `conn` gets the same answer again, on the path it came by, and
-  nothing else happens (`contracts/rendezvous.md` 2.3). Repeat with a
-  future-dated offer that passed check 5 on receipt. At exactly `ts + 120000`,
-  replaying the retired offer still leaves the newer connection answering
-  `host.info`.
+  nothing else happens (`contracts/rendezvous.md` 2.3; covered by
+  `features/peer.feature:14-21`).
 - **A1.11** Deliver two copies of an offerer candidate before the offer and
   two copies of an answerer candidate before the answer. Each receiver makes
   zero calls to add that candidate before setting the corresponding remote
@@ -125,10 +125,8 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   each CLI. (`live`)
 - **A3.9** A `post` from an AI that contains a test secret pattern fails
   with `secret`; no row for it exists on the home.
-- **A3.10** An inbox item that is not signed by the group's home, injected
-  by a test hook, is refused by the host; the audit says `refused`. An item
-  sent twice by the home produces one turn, also across a restart of the
-  host.
+- **A3.10** An inbox item sent twice by the home produces one turn, also
+  across a restart of the host.
 
 ## M4. Permissions and approvals
 
@@ -138,9 +136,12 @@ These tests need a task session, so they follow the first slice of M5
 - **A4.1** At level 2 an AI that needs to install a package produces a card
   with the exact command. Approving from a second device lets it run. The
   audit shows the request and the decision with the deciding device. With
-  the real CLIs (`live`): a command that the sandbox blocks for want of
-  the network becomes a card once the AI asks through its CLI. R-41 rests
-  on this; `contracts/drivers.md` 1.1 says what changes if it fails.
+  the real CLIs (`live`): `--mcp-config` takes a JSON string on Claude Code,
+  and a command that the sandbox blocks for want of the network becomes a
+  card once the AI asks through its CLI (R-41 rests on this;
+  `contracts/drivers.md` 1.1 says what changes if it fails), and on Claude
+  Code `AskUserQuestion` reaches `approve` under each permission mode, and
+  the `updatedInput.answers` reply is honoured.
 - **A4.2** Denying tells the AI; the command does not run.
 - **A4.3** With the wait set to 20 seconds and no answer, the turn ends and
   the task waits. The host is restarted. Approving afterwards makes the AI
@@ -162,6 +163,12 @@ These tests need a task session, so they follow the first slice of M5
 - **A4.10** On each CLI at level 2, an AI asked to write a marker file
   outside its worktree produces a card, and no file exists before approval.
   (`live`)
+- **A4.11** On the real Codex CLI with
+  `-c features.default_mode_request_user_input=true`, an AI in Default mode
+  asked to present a multiple-choice question with its ask-the-user tool
+  emits `item/tool/requestUserInput`, produces a `decision` card, and
+  receives the chosen option (run in B-17 / I-11; `contracts/drivers.md` 1.2
+  says what changes if the flag does not work). (`live`)
 
 ## M5. Tasks
 

@@ -119,12 +119,8 @@ func start(t *testing.T, vendor, script, token string, args ...string) *fake {
 	program, _ := os.Executable()
 	srv := server{program, []string{"mcp", "--token", token}}
 	if vendor == "claude" {
-		path := filepath.Join(t.TempDir(), "mcp.json")
 		data, _ := json.Marshal(map[string]any{"mcpServers": map[string]server{"solodawn": srv}})
-		if err := os.WriteFile(path, data, 0600); err != nil {
-			t.Fatal(err)
-		}
-		args = append(args, "--mcp-config", path)
+		args = append(args, "--mcp-config", string(data))
 	} else {
 		command, _ := json.Marshal(srv.Command)
 		list, _ := json.Marshal(srv.Args)

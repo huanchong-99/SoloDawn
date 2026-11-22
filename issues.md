@@ -6,6 +6,135 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · macOS Application Firewall blocks incoming direct connections to an unsigned `solodawn` binary
+
+- Symptom: on macOS with the Application Firewall enabled, incoming UDP and ICE-TCP flows to an unsigned `solodawn` (or test) binary are blocked (`verdict: 2 (Block)`) unless the user clicks Allow when macOS asks or adds `solodawn` under System Settings → Network → Firewall → Options, so direct connections fail and fall back to the relay.
+- Cause: release and development binaries are not code-signed (`install.md`, "Verify and install"), and the macOS Application Firewall blocks unsolicited incoming connections to unsigned executables until allowed.
+- Status: open, documented in `install.md`.
+
+### 2026-11-21 · limitation · Windows `AF_UNIX` half-close does not always deliver EOF; a shim may outlive its CLI until the session closes
+
+- Symptom: on Windows, `solodawn mcp --token <t>` can stay blocked in `bridgeShim`'s socket-to-stdout copy (`internal/host/shim.go:60`) after its CLI has closed `stdin`, and `TestRunShimArgumentsErrorsAndHalfClose` hung on Windows CI (`internal/host/mcp_test.go:827,908,914`) when `verifyShimUnixHalfClose` waited for end-of-input after the shim half-closed the socket.
+- Cause: when `stdin` reaches EOF, `copyShimInput` calls `half.CloseWrite()` on `*net.UnixConn` (`internal/host/shim.go:74-76`, `shutdown` with `SD_SEND`) without closing the connection, and Windows `afunix.sys` occasionally fails to deliver `io.EOF` when `CloseWrite` races with a concurrent `WSARecv` on the peer (`golang/go#73140`).
+- Status: open, accepted on 2026-11-21 with no product code changed per the owner's rule on rare cases. When the node closes the session (`internal/host/run.go`), closing the session kills the CLI's process tree (`detachTerminal`), which includes the shim, and `ServeMCP` closes its socket end when the session ends.
+
+### 2026-11-21 · limitation · `AskUserQuestion` reaching `approve` under each permission mode is not yet verified by a live CLI capture
+
+- Symptom: no spike capture or scripted fake-CLI test shows Claude Code invoking `--permission-prompt-tool mcp__solodawn__approve` when the model calls `AskUserQuestion` under `--permission-mode bypassPermissions` (level 3, the default), or honouring the `updatedInput.answers` reply (`planning/contracts/mcp-tools.md` section 3).
+- Cause: the macOS spike captures (`spikes/b-04-macos/captures/claude/*.jsonl`) mention `AskUserQuestion` only in the `system/init` tool list, and `internal/host/approve_test.go` calls `Tools["approve"]` directly.
+- Status: open; marked `[unverified]` in `planning/contracts/mcp-tools.md` section 3 and added to the `live` checks of `A4.1` (`B-17`) and `I-11`.
+
+### 2026-11-21 · limitation · Claude Code `AskUserQuestion` with `multiSelect` uses a single-choice `decision` card
+
+- Symptom: when Claude Code calls `approve` for an `AskUserQuestion` entry with `multiSelect: true`, the host posts a single-choice `decision` card (`internal/host/approve.go`, `postAndWaitDecision`) whose `act choose` carries at most one option id, so `updatedInput.answers[question]` holds one option label unless the owner enters multiple picks in the free-text field.
+- Cause: `decision` cards (`planning/contracts/messages.md` section 2.4, `planning/contracts/commands.md` section 1.4) take a single `arg` option id plus optional `text`, and owner override 1 of 2026-11-21 does not add multi-select cards.
+- Status: open, accepted for 1.0 (`planning/contracts/mcp-tools.md` section 3); multiple picks are given in the free-text field.
+
+### 2026-11-21 · limitation · An immediate `submit_task` after `run_checks` can read `checks.local` before the home's row push
+
+- Symptom: a scripted CLI that calls `submit_task` immediately after `run_checks` returns can read a stale `task` row in `Host.Rows` and fail with `conflict` (`local checks have not passed`), whereas with a real model the gap between the two tool calls is seconds.
+- Cause: the home answers `task checked` before pushing the `rows` frame that carries the updated `checks.local` (`internal/home/README.md`), and `tskPrepareSubmit` (`internal/host/tools_task.go:318`) reads `checks.local` from `Host.Rows`.
+- Status: open, accepted by the coordinator's decision of 2026-11-21 (#206).
+
+### 2026-11-21 · deviation · Host derives the data folder from SQLite's `pragma_database_list`
+
+- Symptom: for an in-memory store (`:memory:`), `projectDir` returns `""` and delivery skips disk clone and worktree creation; for a disk store it derives `projects/<group>` from the directory of the `main` database file (`filepath.Join(filepath.Dir(dbFile), "projects", group)`), tying the host to the store's file layout.
+- Cause: `host.Host` (`internal/host/host.go:75`) has no `Dir` field yet, so `projectDir` (`internal/host/run.go`, shared by `sessionDir`, `deliver.go` and `join.go`) reads `file` from `pragma_database_list WHERE name = 'main'`.
+- Status: open (`gemini/host-dedupe` unified the three `pragma_database_list` lookups in `deliver.go`, `run.go` and `join.go` into `projectDir`). `node` setting a `Dir` field on `Host` can replace the `pragma_database_list` lookup.
+
+### 2026-11-22 · limitation · Step 17 cleanup leaves narrow turn-start windows and retries dirty merged worktrees
+
+- Symptom: a `notice` or `mention` arriving during step 17 cleanup can start one more turn in an obsolete session (whose CLI then stays open until `idle_minutes` expires), and a merged task worktree left with untracked files fails the non-forced `git worktree remove` and retries one Git call on each later `rows` push.
+- Cause: `finishSessionClose` (`internal/host/run.go`) starts `go Deliver` before the caller's `Sessions.End` (`internal/host/deliver.go`), `Runner.Close` finds no `liveProc` while `startFromDormant` is between `Move(Dormant, Working)` and `rt.procs[key] = lp`, and `RemoveTaskWorkspace(..., TaskMerged)` omits `--force` so unsaved files in a merged worktree are preserved (`planning/contracts/local.md` section 7).
+- Status: open, accepted on 2026-11-22 (`HS-23` review).
+
+### 2026-11-21 · limitation · `reportWorkspaceFailure` duplicates `member status` assembly from the session runtime
+
+- Symptom: on a task or review workspace Git failure, `reportWorkspaceFailure` (`internal/host/deliver.go:934`) builds `member status` (`turn_interrupted`) by hand and infers `state` (`waiting` when any session of the AI is `waiting`, else `dormant`) instead of sharing the session runtime's status builder.
+- Cause: HS-13 (#186) and HS-15 (#187) were built on separate branches without a shared status helper on `host.Runtime`.
+- Status: open, until N-4 consolidates `member status` assembly into one helper.
+
+### 2026-11-21 · limitation · `max_open` is enforced in the session runtime rather than in delivery
+
+- Symptom: `deliver.go` composes and hands an eligible turn to `Runner.Turn` without counting open sessions against `max_open` itself.
+- Cause: `planning/flows/agent-turn.md` step 5.1 places `max_open` (closing the longest-`waiting` session, or waiting when every open session is `working` or `takeover`) in the session runtime (`HS-15`, #187, `tryReserveSlot`), so delivery does not duplicate it; `Deliver` (`deliverNow` in `internal/host/deliver.go`) walks all held AI keys on each wake so a freed slot reaches waiting AIs.
+- Status: open, coordinated between HS-13 (#186) and HS-15 (#187).
+
+### 2026-11-21 · limitation · `member/status` refuses `cap_reached` and `rate_limited` while `HS-18` is postponed
+
+- Symptom: a `member status` carrying host event code `cap_reached` or `rate_limited` (`planning/contracts/commands.md` section 1.9; `planning/contracts/messages.md` section 2.11) is answered `bad_request` ("unknown host event code").
+- Cause: `internal/home/cmd_hostev.go` (`hevEventReaders`) handles only the three step-1 host codes that `HS-15` sends (`turn_interrupted`, `login_invalid`, `session_replaced`), per the coordinator's decision of 2026-11-21 removing caps and rate limits from the main line.
+- Status: open until `HS-18` brings usage caps and rate-limit events back.
+
+### 2026-11-21 · limitation · Reassigning a task's assignee also marks a reviewer's pending approval card `reassigned`
+
+- Symptom: if a task's assignee changes while the task's reviewer has a pending approval card on that task, the reviewer's card becomes `reassigned` along with the old assignee's cards, so it can no longer be approved or denied and the reviewer's waiting CLI receives no decision.
+- Cause: row 17 allows both the assignee and the reviewer to post approval cards on the task (`internal/home/machine.go:224`), while row 11 sets `Effects.Cards = "reassigned"` for all pending approval cards of the task whenever `Assignee` changes (`internal/home/machine.go:617`; `planning/contracts/task-machine.md` row 11) without distinguishing who asked. Hitting this requires a review session asking for approval and an assignee reassignment while that request is open.
+- Status: open, accepted as a rare limitation by the coordinator's decision of 2026-11-21 (#184).
+
+### 2026-11-21 · limitation · A member's `limited` state from `login_invalid` ends at its next completed turn, not at `agent.set`
+
+- Symptom: after `login_invalid` puts an AI member into `limited`, fixing sign-in and sending `agent.set` sets `login_ok` back to `true` in `host.info`, while the group still shows the member as `limited` until the next item arrives and its turn completes.
+- Cause: `agent.set` clears `agtPart.invalid` (`internal/host/agents.go`) and is not a session `Event`, while the member status overlay `runtimePart.limited` (`internal/host/run.go:69`, set at `:664-680`) is cleared in `finishActiveTurn` (`internal/host/run.go:473-482`) when a turn finishes. `runtimePart.isLimited` (`:682-686`) feeds member status only and holds no delivery.
+- Status: open, accepted by the coordinator's decision of 2026-11-21 (`HS-3`, `HS-15`); `planning/contracts/commands.md` section 2 and `planning/flows/agent-turn.md` section E match this behaviour.
+
+### 2026-11-21 · limitation · Claude driver matches English error text for `LoginInvalid` and `NoSession`
+
+- Symptom: `claudeDiagEvent` (`internal/host/claude.go`) recognises an unresumable session or invalid sign-in from HTTP status `401` and English error substrings (`no conversation found`, `session not found`, `/login`, `not logged in`, `invalid api key`, `authentication`) in `result` or non-zero-exit `stderr`, so a wording change in a newer Claude Code release can report a failed turn or crash instead.
+- Cause: Claude Code has no dedicated stream-json event type for sign-in or missing-session errors (see also the open entry on missing invalid-login captures).
+- Status: open. Revisit error patterns when live failure captures are added.
+
+### 2026-11-21 · limitation · Codex `default_mode_request_user_input` and `item/tool/requestUserInput` are unverified against a live session
+
+- Symptom: Codex CLI 0.164.0 hides its `request_user_input` tool in Default mode (`codex features list` reports `default_mode_request_user_input` as `under development`, default `false`), and no spike capture covers `item/tool/requestUserInput` (`planning/contracts/drivers.md` section 1.2, step 4).
+- Cause: `codexBaseFlags` (`internal/host/codex.go`) passes `-c features.default_mode_request_user_input=true` on `codex app-server` and `codex resume`, and `onUserInputRequest` maps `item/tool/requestUserInput` from the generated schema (`[documented]`), without a live run on the owner's sign-in yet.
+- Status: open for the live check in B-17 / I-11 (`planning/steps/step-1-acceptance.md` A4.11). If the flag does not offer a working `request_user_input` tool in Default mode, record in `planning/contracts/drivers.md` section 1.2 that a Codex AI asks through `request_decision` (`HS-11`) instead.
+
+### 2026-11-21 · limitation · The host has no shutdown hook for open CLI processes
+
+- Symptom: when `solodawn node` stops on `SIGINT` or `SIGTERM`, open AI CLI processes are not closed explicitly before `node.db` closes; they end on stdin EOF when the node process exits.
+- Cause: `host.Host` exposes no shutdown method, and CLI processes are started with `context.Background()` (`internal/host/run.go:380`).
+- Status: open, accepted for 1.0 (`N-4` review).
+
+### 2026-11-21 · limitation · `host.info` has no live push yet and reports `queued` as `0`
+
+- Symptom: `Surface` (`internal/node/surface.go`) answers `host.info` requests with `HostState` and sends no `host.info` pushes (no `host.info` push yet), and every `AgentGroup.Queued` entry in `host.info` is `0` (`internal/node/surface.go:154`).
+- Cause: `settings.set` is postponed with `U-12`, the 1.0 web client requests `host.info` on connect and after `agent.set`, and held items are held on the home (`not_before`, `HM-7`) rather than counted on the host.
+- Status: open, accepted for 1.0 (`N-3`).
+
+### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
+
+- Symptom, from the independent review of `internal/node`:
+  1. `Apply` checks `Busy` and then calls `Restart` (`internal/node/update.go:98`). A turn or a takeover admitted between the two is restarted.
+  2. `Status` (`internal/node/update.go:40`) is written by `Check` and read for `host.info`; read from another goroutine, it races.
+  3. `Restart` (`:39`) must replace the process in place (exec on Unix). launchd and systemd stop the whole process group when the node's process ends, so a child started before the exit would be stopped with it.
+- Cause: the `Updater` holds no lock and does not restart by itself; the owner of the runtime is to call `Check` and `Apply` under the lock that admits turns and takeovers, copy `Status` under it, and supply a `Restart` that execs.
+- Status: open, postponed off the step-1 main line (`N-6`).
+
+### 2026-11-21 · limitation · `Sessions` handlers and runtime pairing/surface wiring across `HM-2`, `HM-3`, `N-3` and `N-4`
+
+- Symptom: before runtime assembly, inbound `ctl` requests for `sync`, `fetch` and `host.info` were answered `bad_request` on a bare `Sessions` hub (`internal/node/session.go`), and `Pairer.Serve`, `Pairer.Known`/`Pairer.Routes`, `Pairer.HandleEvent`/`PairConfig.Paths`, `Pairer.Peer`, local socket `pair`/`pair-browser`/`open`, and `SurfaceConfig.Agents` (`(*Host).Agents`) awaited assembly in `internal/node/node.go`.
+- Cause: `Sessions`, `HM-2`, `HM-3`, `HM-7`, `N-3` and `N-4` were built as separate units (`settings.set` is postponed with `U-12`).
+- Status: resolved in `HM-7` (#221), `HM-2` (#205), `HM-3` (#207), `N-3` (#223) and `N-4` (#226).
+
+### 2026-11-21 · limitation · Postponed step-2 contracts still assume an item-level `cause`
+
+- Symptom: the step-2 planning documents (`planning/contracts/step-2/authority.md:36, 85, 92-93, 104, 108`, `planning/contracts/step-2/confirm.md:145-147, 196-223, 244`, `planning/contracts/step-2/watch-team.md:46-67` and `planning/steps/parallel-plan-step-2-3.md:20-21, 27`) require an inbox item to carry a signed `cause` when a group home belongs to another person, whereas `P-1b` removed `cause` from step-1 items.
+- Cause: step 2 is postponed while step 1 ships with plain unsigned items under the owner's 2026-11-21 decision.
+- Status: open, without effect in step 1. When step 2 resumes, items will need an authority field again.
+
+### 2026-11-21 · limitation · Group and review sessions default to permission level 3 and rely on instructions not to edit files
+
+- Symptom: at the default permission level of 3 (owner's decision of 2026-11-21), a group session or a review session starts its CLI with full tool access rather than a CLI-enforced read-only sandbox, so a model that ignores its prompt could edit files in `repo/` or `review/<num>/`.
+- Cause: `readLaunchConfig` (`internal/host/run.go`) applies `perm.level` or `default_level` (default 3) to every session kind so that group and review sessions keep the CLI's ask-the-user tool and their multiple-choice questions reach the owner as decision cards (`planning/sessions.md` section 1). At level 1 Claude Code runs with `--tools Read,Glob,Grep` (`planning/contracts/drivers.md` section 1.1), which strips that tool.
+- Status: open, accepted by the coordinator's decision of 2026-11-21 (#187). Each session's instructions (`planning/contracts/drivers.md` section 4) tell group and review sessions not to change code.
+
+### 2026-11-21 · limitation · A late duplicate `TurnEnded` from a CLI can end the next turn
+
+- Symptom: if a CLI process emits a duplicate `TurnEnded` for a finished turn and `runProcessLoop` handles that event after `Runner.Turn` has started the next turn on the same `waiting` process, the runtime ends the new turn prematurely, moves the session back to `waiting`, reports `waiting` status, and calls `Deliver` early.
+- Cause: `liveProc` tracks an open turn with a boolean `turnActive` rather than a per-turn identifier (`internal/host/run.go:107`). Once `claimWaitingProc` sets `lp.turnActive = true` for the next turn (`internal/host/run.go:285`), `onProcessTurnEnded` (`internal/host/run.go:458`) passes `finishActiveTurn` (`internal/host/run.go:473`) for the stale event, clears `lp.turnActive` (`internal/host/run.go:479`), and moves the session from `working` to `waiting` (`internal/host/run.go:466`).
+- Status: open, accepted on 2026-11-21 with no product code added per the owner's rule on rare cases. In production the next turn starts only after `Deliver` (`internal/host/run.go:470`) fetches held items from the home, leaving a small window for a duplicate event from the previous turn to arrive that late.
+
 ### 2026-11-21 · limitation · The jobs of a group in the home's run loop have no bound
 
 - Symptom: not observed. A client that sends `cmd` frames faster than its group applies them makes the list of that group's jobs grow, and with it the memory of the node, until the client stops. A group applies a command in one transaction of the store, so this needs a client that sends on purpose or a store that has become slow. Ticks and events are jobs as well: while a group does not keep up, each tick of `LoopConfig.Every` and each `Event` adds one job to its list.
@@ -17,12 +146,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: not observed. The run loop gives a connection up when 1,024 frames wait for it. A `peer.Connection` never lets a frame wait: its `Send` hands the text to the data channel, which keeps it in its own send buffer without a limit. A browser that stops reading while its connection stays open so makes that buffer grow, and the loop does not see it.
 - Cause: `(*Connection).Send` calls `SendText` and returns (`internal/peer/ctl.go:174`); `home.Client` has `Send` and `Done` only (`internal/home/home.go:27`), so the loop cannot ask how much is buffered. The limit (`runBacklog`, `internal/home/run_conn.go`) applies to a client whose `Send` waits, such as a local link.
 - Status: open. Either `peer.Connection.Send` waits, or fails, above a buffered amount, or the node closes a connection whose buffer stays above a limit; owner N-2 or the owner of `internal/peer`.
-
-### 2026-11-21 · deviation · Inbox items are stored and pushed unsigned
-
-- Symptom: the run loop stores an item with the seam's `Item` as JSON in the `env` column and pushes it as `home.ItemsPush`, one `home.QueuedItem` per frame, where `planning/contracts/datachannel.md` section 6 has an `inbox` frame of items signed by the home. A host that follows the contract accepts none of them.
-- Cause: signing and the wire `item` belong to unit HM-7; the loop has two functions in their place, `runSeal` and `runItemFrame` (`internal/home/run_push.go`).
-- Status: open until HM-7, which replaces those two functions, fills a frame as far as a `ctl` message goes, and adds `ack`. Storing, holding, sending again on a hello and the count of the wake-up cap are in the loop and stay.
 
 ### 2026-11-21 · limitation · A command without `g` knows only the devices of the node's owner
 
@@ -36,29 +159,35 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the contract lists the post's checks without saying which of them are about the group when the brief is confirmed. `(*State).briefStill` (`internal/home/cmd_brief.go:243`) makes the others again: the shape of the body, the requester a member, every assignee and reviewer a working AI. That an entry's assignee is not its reviewer is made again by the task machine's role rule, which `Step` answers `conflict` (`internal/home/machine.go:253`).
 - Status: open, decided by unit HM-8 on 2026-11-21. The contract should say that the `replaces` check is the post's only.
 
-### 2026-11-21 · deviation · The tasks of a confirmed brief have ids that follow from the act, not random ones
+### 2026-11-21 · deviation · Derived member and task ids where the home creates rows without a client id
 
-- Symptom: `planning/contracts/rows.md` says that the ids of tasks and messages are random ids. The home gives the task of entry `i` of a confirmed brief, and its `task` message, the id made of the first 16 bytes of the SHA-256 of `SoloDawn brief task <n of the act> <i>`.
-- Cause: the function of a command is pure and has no randomness (`internal/home/README.md`, "Functions are pure"); `briefTaskID` (`internal/home/cmd_brief.go:286`). The id has the form of a random id, and nobody knows it before the act arrives, because the act's `n` is random. An id that a task or a message already has is answered `conflict` (`internal/home/cmd_brief.go:272`).
-- Status: open, decided by unit HM-8 on 2026-11-21. Should the seam ever give functions a source of random ids, the derivation can go.
+- Symptom: `planning/contracts/rows.md` says that the ids of members, tasks and messages are random ids. The home gives the owner's `member` row in `group create` the first 16 bytes of the SHA-256 of `SoloDawn group owner <n>`, and the task of entry `i` of a confirmed brief (with its `task` message) the first 16 bytes of the SHA-256 of `SoloDawn brief task <n of the act> <i>`.
+- Cause: the function of a command is pure and has no randomness (`internal/home/README.md`, "Functions are pure"); `grpOwnerID` (`internal/home/cmd_group.go:89`) and `briefTaskID` (`internal/home/cmd_brief.go:286`). Each id has the form of a random id, and nobody knows it before the command arrives, because `n` is random. An id that a task or a message already has is answered `conflict` (`internal/home/cmd_brief.go:272`).
+- Status: open, decided by units HM-8 and HM-5 on 2026-11-21. Should the seam ever give functions a source of random ids, the derivations can go.
 
-### 2026-11-21 · limitation · A queued task's `stats.started` is the time its brief was confirmed
+### 2026-11-21 · deviation · A `task_failed` row written beside a `checks` or `review` row has an id derived from the command's nonce
 
-- Symptom: a task created queued by a confirm has `stats.started` set when it is created, and it keeps that time when the merge of its dependency makes it active. The minutes a summary counts for it include the time it waited.
-- Cause: `briefCreate` sets `created` and `stats.started` to the home's time (`internal/home/cmd_brief.go:307`); row 8 of `planning/contracts/task-machine.md` does not name `stats.started`, and `Step` does not set it on a release (`internal/home/machine.go:577`). The contracts do not say when a task starts.
-- Status: open. Unit HM-12, which releases queued tasks and writes the summary, or the coordinator, decides whether a release sets it.
+- Symptom: when `task cloud` reaches `limits.failures` (row 6 into row 14) or `post` of kind `review` exceeds `limits.review_rounds` (row 7 into row 14), the command writes two message rows in the task's thread: the `checks` or `review` row under `n`, and the `task_failed` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn task failed <n>` in base64url.
+- Cause: `n` already names the `checks` or `review` message row, and a command function is pure and has no randomness (`revFailedID` in `internal/home/cmd_review.go:149`).
+- Status: open, decided in unit HM-11 on 2026-11-21, for the same reason as `briefTaskID` above.
+
+### 2026-11-21 · deviation · Passed hosted checks write a `checks` message in the task's thread
+
+- Symptom: `task cloud` with `ok: true` writes a `checks` message (`stage: "cloud"`, `ok: true`) in the task's thread, where `planning/contracts/task-machine.md` row 6 and `planning/flows/trace-task.md` step 8 mention a `checks` message only when hosted checks do not pass.
+- Cause: `planning/contracts/commands.md` 1.5 and `planning/contracts/messages.md` 2.8 state that the home writes a `checks` message from `task checked` (`local`) and `task cloud` (`cloud`), and `internal/proto/testdata/task-cloud.json` carries `items` when `ok` is `true`, which `TaskRow.Checks.Cloud` does not store (`revCloud` in `internal/home/cmd_review.go:39`).
+- Status: open, decided in unit HM-11 on 2026-11-21.
 
 ### 2026-11-20 · limitation · `tools.json` freezes JSON Schema keywords that the MCP SDK may write otherwise
 
 - Symptom: `internal/proto/testdata/tools.json` (#165, P-2) freezes each tool's `inputSchema` with a fixed set of keywords: `properties` always there, `{}` for a tool without arguments, `required` only when an argument must be given, and `"additionalProperties": false` (`planning/contracts/mcp-tools.md` section 5). The node's MCP server builds its tools with `github.com/modelcontextprotocol/go-sdk` v1.8.0 and `github.com/google/jsonschema-go`, and it is not shown that they write exactly these keywords: for example `properties: {}` for a struct without fields, or a `$schema` or `title` of their own.
 - Cause: the file was written from the contract, before any server code (`internal/proto/tools_test.go`, `toolLists`).
-- Status: open. HS-8 (the tool list test of the MCP server) and I-1 (the full list against `tools.json`) must check it, and normalise what the SDK writes or raise a change of the file.
+- Status: open until I-1 checks the live registered tools together; the MCP server half is settled in HS-8 (`internal/host/mcp.go`). Every tool registers a hand-written `json.RawMessage` rather than calling `jsonschema.For`, and the server takes the tools' schemas as they are (`emptyToolSchema` when empty), projecting only the per-caller differences of `mcp-tools.md` section 5 (`projectCallerSchema`); each tool's own golden test pins its schema, and `TestToolListsMatchGoldenSchemas` (`internal/host/mcp_test.go`) checks all five session lists of `tools.json` by tool name.
 
 ### 2026-11-20 · limitation · The `post` tool lists `handback` for a whole session, not for a hand-back turn
 
 - Symptom: `tools.json` lists `handback` among the kinds of `post` in every session a takeover can reach (the secretary's, review and task sessions), because a tool list is fixed per session, not per turn. `planning/contracts/mcp-tools.md` section 1 allows it only in a hand-back turn, so a model can call it in any turn of those sessions.
 - Cause: `tools/list` is read once per session (`internal/proto/tools_test.go`, `toolLists`; `planning/contracts/mcp-tools.md` section 5).
-- Status: open. The node refuses `post` with kind `handback` outside a hand-back turn, with `bad_request`: unit HS-9, through `Caller.Turn.Kind`.
+- Status: open. Terminal takeover is postponed off the main line, so `post` with kind `handback` answers `bad_request` (`internal/host/tools_talk.go`, `checkPostKind`); the hand-back path comes back with takeover.
 
 ### 2026-11-20 · limitation · A task stopped by its sixth failed review is reviewed again when it is resumed
 
@@ -84,48 +213,32 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `run_checks` runs in the task's worktree (`internal/host/checks.go`, `cleanCheckHead`), where such files can exist.
 - Status: open. Step 2 closes it by running the checks on a clean export of the commit.
 
-### 2026-11-20 · deviation · `solodawn pair` does not start a node that is not running
-
-- Symptom: `local.md` section 1 says `solodawn pair` "starts the node if needed". With no node running, `solodawn pair <secret>` fails on the dial of the local socket and pairs nothing.
-- Cause: `pair` (`cmd/solodawn/main.go:61`) only sends the command through `Command.send` (`internal/node/cmd.go:40`). No unit owned starting the node.
-- Status: open. Added to N-4's row in `planning/steps/parallel-plan-units.md` by the coordinator's decision of 2026-11-20 (independent review of `internal/node`).
-
 ### 2026-11-20 · bug · Two nodes starting together could each remove the other's socket
 
 - Symptom: two nodes that started together on one data directory both ran over a stale `sock`: one removed the other's live socket, and the first one's close then removed the second's (89 of 3000 rounds in the independent review of `internal/node`).
 - Cause: the dial of `sock` and its removal were not one step (`internal/node/socket.go`, before this fix).
 - Status: resolved. `local.md` section 3, "One node per data directory", now holds the rule: an exclusive lock on `lock` in the data directory, taken by `ListenLocal` (`internal/node/socket.go:38`, `lockData` at `:61`) before the socket is touched.
 
+### 2026-11-20 · limitation · Windows scheduled task expands `%VAR%` in the executable path
+
+- Symptom: when `solodawn.exe` is installed under a directory whose path contains a matching `%VAR%` pair, `Start-ScheduledTask` expands `%VAR%` in `IExecAction.Arguments` (`internal/node/service_windows.go:17`, `taskAction`) and fails to start the binary.
+- Cause: Windows Task Scheduler applies `ExpandEnvironmentStringsW` (which has no `%%` escape) to `IExecAction.Arguments`.
+- Status: open, off the main line.
+
 ### 2026-11-20 · limitation · The start-at-login entries are not run by a real service manager
 
-- Symptom: the tests check the files and the task definition that `solodawn service install` writes, not a service manager starting the node from them. Not verified:
+- Symptom: the unit and acceptance tests check the files and the task definition that `solodawn service install` writes, not a service manager starting the node from them:
   1. a systemd user unit started by a real user manager, with the escaping of `ExecStart` (`$$`, `%%`) and the `Environment="PATH=…"` line (`internal/node/service_linux.go`);
   2. launchd loading the agent with its `EnvironmentVariables` (`internal/node/service_darwin.go`);
-  3. the scheduled task running the node headless through `conhost.exe --headless` (`internal/node/service_windows.go`); Windows CI only builds the action.
+  3. the scheduled task running the node headless through `conhost.exe --headless` (`internal/node/service_windows.go`); Windows unit tests only build the action.
 - Cause: nothing is installed on the development machine, by the coordinator's decision of 2026-11-20.
-- Status: open. Candidate for a CI smoke job on GitHub's throwaway runners (Linux, macOS, Windows) after the quota reset: install, log in or start the manager, check that the node runs with the expected PATH, remove.
-
-### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
-
-- Symptom, from the independent review of `internal/node`:
-  1. `Apply` checks `Busy` and then calls `Restart` (`internal/node/update.go:98`). A turn or a takeover admitted between the two is restarted.
-  2. `Status` (`internal/node/update.go:40`) is written by `Check` and read for `host.info`; read from another goroutine, it races.
-  3. `Restart` (`:39`) must replace the process in place (exec on Unix). launchd and systemd stop the whole process group when the node's process ends, so a child started before the exit would be stopped with it.
-- Cause: the `Updater` holds no lock and does not restart by itself; the owner of the runtime is to call `Check` and `Apply` under the lock that admits turns and takeovers, copy `Status` under it, and supply a `Restart` that execs.
-- Status: open, for N-4.
+- Status: open, covered in CI by `.github/workflows/service-smoke.yml` on `ubuntu-latest`, `macos-latest` and `windows-latest` against the assembled `solodawn` binary (N-4). Still unverified: a real interactive desktop login and machine reboot on each system (I-11).
 
 ### 2026-11-20 · limitation · `SHA256SUMS` proves the download intact, not where it came from
 
 - Symptom: the node checks the binary against `SHA256SUMS` from the same release (`local.md` section 9). Whoever can replace the binary there can replace `SHA256SUMS` too, so the check catches a damaged or cut download, not a forged release.
 - Cause: the contract has no signature over releases; binaries are not signed (decided). The download itself is https only, follows at most five redirects, each to https, is limited in size, and is given up after 60 s without data, whatever its total time (`internal/node/update.go`, `get`).
 - Status: accepted trade-off of the contract.
-
-### 2026-11-20 · limitation · The gate measures CRAP 6.01 for `deliver`, which Go covers fully
-
-- Symptom: `crap.py` gives `deliver` in `internal/peer/ctl.go` a CRAP score of 6.01, above the limit of 6, while `go test -cover` reports `internal/peer` at 100% of statements.
-- Cause: the empty `case <-c.Done():` of the `select` in `deliver` (`internal/peer/ctl.go:91`) is a cover block with no statements and count 0. Go leaves it out of its percentage; the gate's conversion of the cover profile into lines (the last command of `stages.fast` in `.project-standard/gates.toml`) counts its line as an uncovered line. That gives `deliver` 13 of 14 lines, 92.9%, at complexity 6. The same before PR-0 (9c09938f6).
-- Effect: none on a change that leaves `deliver` alone, because the gate measures changed functions only. A change to `deliver`, or a CRAP run over the whole repository, reports it.
-- Status: open. No code change, by the coordinator's decision of 2026-11-20.
 
 ### 2026-11-20 · bug · go-nat v0.2.0 gets four things wrong in port mapping
 
@@ -164,12 +277,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: with 14 busy loops on 12 cores, `web/src/main.test.ts:4`, `web/src/lib/motion.test.ts:29` and `web/src/lib/prefs.test.ts:26` exceeded Vitest's 5 s test limit; one idle run right after `pnpm install` also failed two tests in two files (output not kept). CI passed.
 - Cause: each is the first test of its file to import the client's modules afresh inside the test, so their transformation counts against the test's limit.
 - Status: open; the gate can fail spuriously while other work loads the machine.
-
-### 2026-11-20 · limitation · End-to-end tests cannot run a node until the node runtime is wired
-
-- Symptom: `startNet` of `web/e2e/nodes.ts` waits until each node answers on its local socket. Every node exits with status 1 and `node runtime is unavailable` right after it makes its data directory and binds the socket, so a start that awaits nodes fails with that message. The harness's own scenarios start nodes with `awaitNodes: false`. A node is started with no flags, because `solodawn node` takes none yet: it has no signalling or web port and no rendezvous address, and the harness hands over only its HOME, data directory, socket and environment.
-- Cause: `startNode` is a stub that returns that error until N-4 assembles the runtime (`internal/node/socket.go:181-183`); `cmd/solodawn/main.go:26-28` registers `node` without arguments.
-- Status: open until N-4. What I-8 needs from N-4 is listed in [#132](https://github.com/huanchong-99/SoloDawn/pull/132).
 
 ### 2026-11-20 · limitation · A node's socket does not fit under a long HOME on macOS
 
@@ -235,18 +342,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: only those fields have the type (`ID` in `internal/proto/envelope.go`, `command.go` and `inbox.go`; `Id` in `web/src/lib/proto.ts`). The row types and the body types a row shares with its `post` were frozen before the type existed, and code outside `internal/proto` builds them from plain strings (`internal/store`, `internal/host`), so a change of their field types is a change in those packages too. For rows, `contracts/rows.md` says "random ids unless stated" without saying per field which values stand beside the id (the `by` of a message row may be `"system"`, a device row's `id` is `<user id>:<ver>`).
 - Status: open, by the coordinator's decision of 2026-11-20: they stay as they are in P-1. A home looks up every id that a body names (`contracts/commands.md` 1.3), so a text that is no id names nothing there. The rows and bodies get the type in one change with `internal/store` and `internal/host`.
 
-### 2026-11-20 · limitation · A task's `branch` is text that no reader checks
-
-- Symptom: `proto.Decode` and the web client refuse a task row whose `slug` the home's rule cannot make (unit P-1), but take any text as its `branch`, and as the `branch` of `task branch`. `contracts/local.md` section 7 derives the branch from `num` and `slug` (`task/<num>-<slug>`); `HostedChecksToResume` instead copies `branch` from the row (`internal/host/forge.go:219`), from where it would reach `git` and `gh` arguments.
-- Cause: `TaskRow.Branch` and `TaskBranch.Branch` are plain strings (`internal/proto/task.go`, `internal/proto/command.go`). Giving the field a type of its own changes `internal/host`, which unit P-1 does not own; and whether the home must refuse a `task branch` whose `branch` is not `task/<num>-<slug>` is not in `contracts/commands.md` 1.5.
-- Status: open. Decided by the coordinator on 2026-11-20: hosts build the branch from `num` and `slug` only, and the home refuses any other `branch`. The host side (`internal/host/forge.go`, `HostedChecksToResume`) goes to the owner of the host forge after P-1 and pull request 156 merge; the home side is unit HM-9.
-
-### 2026-11-20 · deviation · A `set` that changes nothing and a `task assign` without a role are not refused yet
-
-- Symptom: `contracts/commands.md` gives `group set` and `member set` "any of" their fields, and `task assign` at least one of `assignee` and `reviewer`. A `group set` with no field, a `member set` with nothing but `id`, and a `task assign` with neither role are read by `proto.Decode` and by the web client's schemas, and nothing refuses them yet.
-- Cause: each of those fields is optional by itself (`GroupSet`, `MemberSet`, `TaskAssign` in `internal/proto/command.go`; the schemas of the same names in `web/src/lib/proto.ts`), and "at least one" is a rule across fields, which the wire types do not state. The command functions of the home are not written yet.
-- Status: open. Decided by the coordinator on 2026-11-20, and now in `contracts/commands.md` (the list of optional fields): the home answers `bad_request`. Unit HM-9 does it for `task assign`, unit HM-5 for `group set`; `member set` is the same case in HM-5's file.
-
 ### 2026-11-20 · limitation · The shared wire test does not show where one reader is stricter about a text
 
 - Symptom: `internal/proto/testdata/wire.json` lists, per example, the texts that are random ids, and both test suites check that such a text refuses a value that is no id. The reverse is not checked: that a text which is not listed takes any text on both sides. So a value rule that only one reader has passes unnoticed. Two are known, both in the web client alone: `conn` of a signalling payload is an `Id` (`web/src/lib/proto.ts:41`) where Go has a plain string (`internal/proto/envelope.go:27`), and a pairing room is 32 lower-case hex digits (`web/src/lib/proto.ts:130`) where Go has a plain string (`internal/proto/rendezvous.go:67`). The independent review of P-1 probed for more and found none.
@@ -278,12 +373,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the rendezvous answers each `to` it cannot deliver with `{"t":"offline","k":…}`, which names the target but not the `conn` (`planning/contracts/rendezvous.md` section 2.2). `internal/peer/path.go:140-145` passes every such report to `Peer.Offline`, which takes it for each unanswered offer to that target and removes the reporting path (`internal/peer/unanswered.go:38-43`). A report for an earlier frame (the earlier offer or one of its candidates) still on its way when the next offer leaves therefore counts against the new one. The back-off of at least one second makes this rare; a presence report can end the back-off sooner (`planning/flows/connect.md` step 16).
 - Status: open, accepted by the coordinator on 2026-11-20 with no contract change.
 
-### 2026-11-20 · deviation · Nothing resumes hosted checks after a node restart yet
-
-- Symptom: after a restart, a task at step `cloud_check` is not polled again, so it stays there until something else moves it (decision D3 of the host-contract audit).
-- Cause: `HostedChecksToResume` (`internal/host/forge.go`) selects the tasks to poll again and gives each its PR, commit, branch and `checks.local.at`, where the 60-minute limit counts from, but no code runs at node start yet to call it and then `WaitHostedChecks` for each.
-- Status: open. The node must call it at start; owner N-4, or HS-0 if it lands first.
-
 ### 2026-11-20 · deviation · No receiver check or shared vector for a beacon yet
 
 - Symptom: `planning/contracts/envelope.md` section 3, checks 4 and 5, now gives a beacon (`planning/contracts/rendezvous.md` section 4) a third set of receiver checks: no `to`, and a two-minute window. The code and the vectors know two kinds only. `OpenSignal` requires `to`, and `OpenCommand` allows 24 hours. So neither reads a beacon as the contract says.
@@ -295,12 +384,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a browser that joins a pairing room that already has two members is answered `{"t":"full","room":"<room id>"}` (`planning/contracts/rendezvous.md` section 2.2), but the web client drops the frame without telling the page, so a third browser keeps waiting for `joined`.
 - Cause: `full` is not among the frames the web rendezvous client reads (`web/src/lib/rendezvous.ts:21`); a frame that does not parse is ignored (`web/src/lib/rendezvous.ts:165-168`). The server sends it from `internal/rendezvous/room.go` (`join`).
 - Status: open, owner W-2.
-
-### 2026-11-20 · limitation · `ReviewedMerge.GitHubRepo` is not filled from the group's repository yet
-
-- Symptom: the merge with a remote runs `gh pr merge <pr> --repo <owner>/<repo>` (`planning/contracts/local.md` section 7, row "merge, with a remote"), but no code sets `<owner>/<repo>` from the group's repository; an empty `GitHubRepo` would make the merge fail.
-- Cause: `ReviewedMerge.GitHubRepo` (`internal/host/merge.go`) is set by its caller, and no unit calls the merge yet. The claim that `--repo` makes gh skip every local step (worktree removal, local branch deletion) rests on the gh 2.102.0 source (`pkg/cmd/pr/merge/merge.go`: `CanDeleteLocalBranch = !cmd.Flags().Changed("repo")`), not on a run against GitHub or on older gh versions.
-- Status: open. The unit that wires the merge (HS-10 or N-4) sets `GitHubRepo` from the group's repository.
 
 ### 2026-11-20 · limitation · A8.4 does not run on Windows
 
@@ -319,12 +402,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: the relay's 128 allocations and the shared TLS port's 256 connections are counted per IPv4 address or IPv6 /64 (`planning/contracts/rendezvous.md` sections 3 and 6). Devices behind one NAT or carrier-grade NAT share one count, so busy neighbours can leave a device without relay. A sender that can forge UDP source addresses can, with TURN credentials of its own (any device key it makes gets them), create allocations from a victim's address without seeing the answers; each holds one of the victim's places for its lifetime, up to an hour, and blind refreshes can keep it.
 - Cause: the server can tell sources apart only by their address (`internal/rendezvous/limits.go:41-50`, `source`; `internal/rendezvous/tls.go:192-205`, `admit`), and pion's nonces are not tied to the client's address (pion/turn v5.1.3 `internal/server/util.go:59`, `NonceHash.Generate`), so a nonce fetched from the sender's own address works for forged ones.
 - Status: open, accepted by the coordinator on 2026-11-20 after the rendezvous security review (F9).
-
-### 2026-11-20 · deviation · The audit record has no `what` for a CLI killed on an idle close
-
-- Symptom: `planning/flows/agent-turn.md` section G has the node write an audit row, and nothing else, when it kills a CLI that did not answer a close within 10 s outside a turn. `planning/contracts/storage.md` section 3 lists eight values of `what` (`delivered`, `refused`, `requested`, `approval`, `takeover`, `handback`, `merge`, `setting`), and none of them says that.
-- Cause: the list of `what` was written before that rule. The audit write takes any text as `what` and has a constant for each of the eight only (`internal/host/audit.go:6-15`); nothing kills a CLI yet.
-- Status: open. HS-15 adds the value to `storage.md` section 3 and a constant beside the others when it builds the idle close (coordinator, 2026-11-20).
 
 ### 2026-11-20 · limitation · The host gives no notice when something `host.info` shows has changed
 
@@ -375,6 +452,144 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-22 · bug · `home.Loop.Close` and `node.Sessions` left connection pumps and host commands running into `Store.Close`
+
+- Symptom: `A5.19` raced under `-race` between `Store.Close` and `Conn.pump` delivering an inbox frame to the host, and an in-flight host command on `Sessions` could write its receipt after `nodeRuntime.Close` closed `node.db`.
+- Cause: `Loop.Attach` (`internal/home/run.go`) started `Conn.pump` and `Conn.watch` outside `Loop.wg`, and `Sessions.sesCmd` (`internal/node/session.go`) started `sesHostCmd` outside `nodeRuntime.bg`.
+- Status: resolved in #250: `Loop.Attach` tracks `Conn.pump` and `Conn.watch` in `Loop.wg`, `SessionConfig.Spawn` runs `sesHostCmd` inside `nodeRuntime.bg`, and the 30 ms settle in `features/m5_test.go` is removed (`TestRunCloseWaitsForConnectionSends`, `TestCloseWaitsForInflightHostCmd`).
+
+### 2026-11-21 · deviation · Step 17 session and workspace cleanup awaits a close hook from the session runtime
+
+- Symptom: when a `rows` push marked a task `merged`, `cancelled` or reassigned, changed a task's reviewer, or marked a member `gone`, `deliver.go` did not end the session row or remove the task or review worktree.
+- Cause: `planning/flows/agent-turn.md` D17 and G require closing any open CLI process and waiting for its exit (C-6) before ending the session row or deleting its working folder, and `host.Runtime` exposed `Turn` and `Answer` only.
+- Status: resolved in unit `HS-23`: `Runtime.Close` (`internal/host/host.go`, `internal/host/run.go`) closes any open CLI process for a session and waits for its exit, and `cleanupGroupState` (`internal/host/deliver.go`) closes and ends obsolete task, review and gone-member sessions and removes obsolete `wt/<num>-<slug>` (plus `DeleteBranch` on `merged` and `PushBranch` on `github` handoff) and `review/<num>` worktrees idempotently across pushes and restarts.
+
+### 2026-11-21 · limitation · Ending a session through `Sessions.End` does not close an open CLI process
+
+- Symptom: when a session ended (`planning/flows/agent-turn.md` section D, step 17) and its caller removed the row with `Sessions.End`, an open CLI process for that session stayed in `runtimePart.procs` until its `idle_minutes` timer expired or `max_open` evicted a slot.
+- Cause: `Runtime` exposed `Turn` and `Answer` only, and `Sessions.End` (`internal/host/session.go`) runs inside a `Store.Write` transaction without calling into the session runtime.
+- Status: resolved in unit `HS-23`: `Runtime.Close` closes and waits for any open process outside `Store.Write`, and both step 17 cleanup (`internal/host/deliver.go`) and `host.leave` (`internal/host/join.go`) call `Runner.Close` before `Sessions.End`.
+
+### 2026-11-22 · bug · Uncoordinated group sync in `host.join` raced with `pushRows` and wiped `Host.Rows`
+
+- Symptom: on macOS CI (`features/m3_test.go:128-131`), M3 setup steps calling `host.join` over `LocalLink` occasionally failed within 0.1 s with `not_found: the group does not exist` (`internal/host/join.go:333`).
+- Cause: `joinFetchGroup` (`internal/host/join.go:327` before the fix) called `joinSyncState`, which sent `proto.Sync{Group: group, Since: 0, StateOnly: true}` without marking `groupSync.syncing = true` in `Part[delivery](h)`. When the home pushed `reset` and `rows` before `synced`, `pushRows` -> `ensureGroupSynced` (`internal/host/deliver.go:279`) saw `syncing == false && live == false` and launched a concurrent `syncOneGroup` (`Since: 0`), whose `reset` push wiped `Host.Rows` (`internal/host/deliver.go:266`) after `LocalLink` queued `synced` for `joinSyncState` and before `joinFetchGroup` checked `joinCachedGroup` (`internal/host/join.go:330`).
+- Status: resolved in branch `gemini/flaky-tests-6`: `joinFetchGroup` coordinates state synchronization through `syncGroupState` (`internal/host/deliver.go`), which claims `groupSync.syncing` (or waits on an in-flight sync) and shares `syncOneGroup` and `decodeSyncAnswer` so `pushRows` starts no duplicate cold sync. Test: `TestHostJoinSyncCoordinatesWithDeliveryPushesAndInflightSync`.
+
+### 2026-11-21 · limitation · Background hosted-check polling sends `task cloud` once
+
+- Symptom: if the home connection was unreachable at the moment `TaskForge.WaitHostedChecks` settled, the `task cloud` command failed and the task stayed in `cloud_check`.
+- Cause: `tskPollHostedChecks` (`internal/host/tools_task.go`) calls `Host.Command` once without a separate retry loop on `home_unreachable`.
+- Status: resolved in unit `HS-22`: once `tskFinishCloud` releases the claim after the failed command, the group sync on reconnect (`Attach` -> `syncOneGroup`) and any `rows` push run `afterGroupState` -> `resumeGroupHostedChecks`, which polls the `cloud_check` task again and sends `task cloud`. Test: `TestResumeHostedChecksAfterRestart`.
+
+### 2026-11-21 · limitation · `Sessions` implements only the server side of a `ctl` connection
+
+- Symptom: a host on one node had no outgoing `ctl` client session yet to a home on another node (sending `hello` with `kind: "host"`, reading `welcome`, exchanging `devlog` both ways, and passing pushes to `Host.Push`), so cross-node AI sessions (`A3.3`, unit `I-6`) had no transport path.
+- Cause: `internal/node/session.go` (`N-2`) served inbound `ctl` connections (`Serve`); the client side of a `ctl` session was split out by the coordinator's decision of 2026-11-21.
+- Status: resolved in unit `N-2b` (#222, `internal/node/client.go`: `(*Sessions).serveClient` and `(*Sessions).connectHome`, plus `attachRuntime` in `internal/host/run.go`) and wired in `N-4` (`internal/node/node.go`, `Host.Connect` -> `connectHome` -> `peer.Peer.Connect`).
+
+### 2026-11-21 · deviation · The local link routes `cmd`, `sync` and `ack` until `fetch` lands
+
+- Symptom: on `LocalLink`, a `fetch` request from the host was answered `bad_request`.
+- Cause: `LocalLink.toHome` (`internal/node/local.go`) dispatched `cmd` to `Loop.Cmd`, `sync` to `Loop.Sync` and `ack` to `Loop.Ack`, while `Fetch` (`HM-3`, #207) landed in a separate unit.
+- Status: resolved in branch `gemini/N-4` after `HM-3` (#207): `LocalLink.toHome` (`internal/node/local.go`) and `NewSessions` (`internal/node/session.go`) both route `fetch` requests to `Loop.Fetch` (`TestLocalLinkCommandAndRowPush`, `TestHomeLoopIntegrationAndDevlogForwarding`).
+
+### 2026-11-21 · limitation · `home.Loop` keeps the `Owner` it was started with across adoption
+
+- Symptom: when an unowned node starts `home.Loop` with `Owner: ""` and is later adopted over a pairing `ctl` session, `Logs.Owner()` becomes the adopter's user id (`internal/node/devlog.go`, `dvlAdopt`), while the running `home.Loop` still has `LoopConfig.Owner == ""` (`internal/home/run.go:65`) and refuses `group create` until the loop is restarted.
+- Cause: `LoopConfig.Owner` was read as a static string when `StartLoop` constructed group states (`internal/home/run.go:175`, `:198`).
+- Status: resolved in branch `gemini/N-4`: `LoopConfig.OwnerFn` (`internal/home/run.go`) reads the node's owner dynamically (`logs.Owner`), so an unowned node's `home.Loop` sees the adopted owner immediately without restarting (`TestRunDynamicOwnerFn`, `TestAdoptionRendezvousAndForegroundStop`).
+
+### 2026-11-20 · deviation · Nothing resumes hosted checks after a node restart yet
+
+- Symptom: after a restart, a task at step `cloud_check` is not polled again, so it stays there until something else moves it (decision D3 of the host-contract audit).
+- Cause: `HostedChecksToResume` (`internal/host/forge.go`) selects the tasks to poll again and gives each its PR, commit, branch and `checks.local.at`, where the 60-minute limit counts from, but no code ran on group-state sync or `rows` pushes to call it and start `WaitHostedChecks` for each.
+- Status: resolved in unit `HS-22`: `afterGroupState` (`internal/host/deliver.go`) calls `resumeGroupHostedChecks`, passing the group's task rows and local AI member ids to `HostedChecksToResume`, and `startHostedCheck` (`internal/host/tools_task.go`) claims `(group, task)` idempotently by commit in `Part[tskPart](h)` so a second `rows` push or a duplicate `submit_task` leaves a running check alone. Test: `TestResumeHostedChecksAfterRestart`.
+
+### 2026-11-20 · deviation · `solodawn pair` does not start a node that is not running
+
+- Symptom: `local.md` section 1 says `solodawn pair` "starts the node if needed". With no node running, `solodawn pair <secret>` fails on the dial of the local socket and pairs nothing.
+- Cause: `pair` (`cmd/solodawn/main.go:61` before the fix) only sent the command through `Command.send` (`internal/node/cmd.go:40` before the fix).
+- Status: resolved in branch `gemini/N-4`: `(Command).dialOrStart` (`internal/node/cmd.go`) spawns a detached `solodawn node` (`startDetached` in `proc_unix.go` / `proc_windows.go`) when `c.Cmd == "pair"` and `sock` is absent, then polls until `sock` accepts (`TestPairAutoStartsNode`).
+
+### 2026-11-20 · limitation · End-to-end tests cannot run a node until the node runtime is wired
+
+- Symptom: `startNet` of `web/e2e/nodes.ts` waits until each node answers on its local socket. Every node exits with status 1 and `node runtime is unavailable` right after it makes its data directory and binds the socket, so a start that awaits nodes fails with that message. The harness's own scenarios start nodes with `awaitNodes: false`. A node is started with no flags, because `solodawn node` takes none yet: it has no signalling or web port and no rendezvous address, and the harness hands over only its HOME, data directory, socket and environment.
+- Cause: `startNode` was a stub that returned that error until N-4 assembled the runtime (`internal/node/socket.go:181-183` before the fix).
+- Status: resolved in branch `gemini/N-4`: `startNode` points to `runForegroundNode` (`internal/node/node.go`), starting the full node runtime (`node.db`, `device.key`, `logs/node.log`, `home.Loop`, `host.Host` + `ServeMCP`, `AttachLocal`, `Logs` + `Sessions`, `peer.Peer`, embedded web UI + `/rv` with `:47800` to `:0` multi-node fallback, and local socket commands).
+
+### 2026-11-21 · deviation · `peer.Connection` delivers `re` responses without waiting for earlier queued pushes
+
+- Symptom: on a WebRTC `*peer.Connection`, when a remote home sends `rows` pushes immediately followed by a `synced` response (`planning/contracts/datachannel.md` section 4), `(*peer.Connection).Request` could return `synced` before the `serveClient` reader goroutine had read `rows` from `(*peer.Connection).Read` and applied them to `Host.Rows`. A caller such as `host.join` (`HS-21`) that reads `Host.Rows` immediately after `sync` returns could see `not_found` if scheduled ahead of the reader goroutine.
+- Cause: `(*peer.Connection).deliver` (`internal/peer/ctl.go`) previously wrote non-`re` frames to the buffered `incoming` channel (`Read`) and wrote `re` frames directly to `waiting[re]` (`Request`) on Pion's callback goroutine, with no ordering barrier between the two channels.
+- Status: resolved in #222: `(*peer.Connection).deliver` queues valid `re` responses in `incoming` alongside requests and pushes, and `(*peer.Connection).Read` hands any queued `re` frame to `response` before reading on; `(*Sessions).serveClient` (`internal/node/client.go`) starts its read loop before sending `hello`, applies `devlog` pushes at once, and holds other pushes until `Host.Attach` has returned. Test: `TestPushesDeliveredBeforeAnswer`.
+
+### 2026-11-20 · limitation · The gate measures CRAP 6.01 for `deliver`, which Go covers fully
+
+- Symptom: `crap.py` gave `deliver` in `internal/peer/ctl.go` a CRAP score of 6.01, above the limit of 6, while `go test -cover` reported `internal/peer` at 100% of statements.
+- Cause: the empty `case <-c.Done():` of the `select` previously in `deliver` was a cover block with no statements and count 0, counted as an uncovered line at complexity 6.
+- Status: resolved in #222: `queue` holds the `select`, `validFrame` checks incoming `ctl` framing, and `deliver` has complexity 2 (`lizard -C 6 -w` clean, 100.0% statement coverage).
+
+### 2026-11-21 · deviation · Dead `cause` path in `internal/home` and `internal/store`
+
+- Symptom: the home and store still carried, wrote and read an item `cause`, although `P-1b` re-froze `InboxItem` and `Item` without `cause` under the owner's 2026-11-21 decision (no attack-and-defence code). Nothing on the wire or on the host read it.
+- Cause: `internal/home/home.go` (`Item.Cause`), `internal/home/run_group.go` (`runCause`), `internal/home/cmd_brief.go`, `internal/home/machine.go` and `internal/store/inbox.go` together with the `inbox.cause` column were built before `P-1b` dropped `cause`.
+- Status: resolved in branch `gemini/HM-7`: removed `Item.Cause`, `runCause`, the dead `cause` assignments and assertions across `home`, `store` and `features/home_brief*`, and the `inbox.cause` column in `internal/store/schema.sql`.
+
+### 2026-11-21 · deviation · Inbox items are not yet pushed in the wire `inbox` frame
+
+- Symptom: the run loop stored an item with the seam's `Item` as JSON in the `env` column and pushed it as `home.ItemsPush`, one `home.QueuedItem` per frame, where `planning/contracts/datachannel.md` section 6 (re-frozen in P-1b as a plain unsigned `item` object) has an `inbox` frame of `InboxItem`s with optional `msg` and `task` row copies.
+- Cause: the wire `item` and `inbox` frame belonged to unit HM-7; the loop had `runSeal` and `runItemFrame` (`internal/home/run_push.go`) in their place.
+- Status: resolved in branch `gemini/HM-7`: `internal/home/inbox.go` encodes plain `proto.Item` JSON in `inbox.env`, copies live `msg` and `task` rows into `proto.InboxItem` when sent, batches due items per connection into `proto.Inbox` frames up to `runRoom` (61,376 bytes), implements `(*Loop).Ack` (routed from `LocalLink.toHome` and `Sessions.sesPush`), and paces excess wakes under `limits.wakes_per_hour` (`TestInboxGoldensAndRowCopies`, `TestInboxBatchesItemsToTheCtlLimit`, `TestInboxAckDeletesOnlyTheHostsOwnItem`, `TestInboxWakeUpCapHoldsAndReleasesItems`, `TestLocalLinkAckDeletesQueuedItem`).
+
+### 2026-11-21 · limitation · A queued task's `stats.started` is the time its brief was confirmed
+
+- Symptom: a task created queued by a confirm has `stats.started` set when it is created, and it keeps that time when the merge of its dependency makes it active. The minutes a summary counts for it include the time it waited.
+- Cause: `briefCreate` sets `created` and `stats.started` to the home's time (`internal/home/cmd_brief.go:307`); row 8 of `planning/contracts/task-machine.md` does not name `stats.started`, and `Step` does not set it on a release (`internal/home/machine.go:577`). The contracts did not say when a queued task starts.
+- Status: resolved in unit HM-12: when `task merged` releases a `queued` task into `active`, `mrgReleaseOne` (`internal/home/cmd_merge.go`) sets `stats.started` to the home's time (`c.Now`), and `planning/contracts/rows.md` section 4 states the rule.
+
+### 2026-11-21 · limitation · A secretary's own hand-back summary queues a `notice` for the secretary
+
+- Symptom: when the owner hands the secretary's terminal back and a `handback` message is posted in the main line signed for the secretary, the home queued a `notice` (`code: handback`) for `group.secretary`, waking the secretary again for the summary it or its host just posted.
+- Cause: `planning/contracts/commands.md` 1.3 specified `item notice for the secretary` on `handback` without an exception when `as` is the secretary.
+- Status: resolved on branch `gemini/HM-6` (#181): `post` of kind `handback` is removed from `internal/home/cmd_post.go` and marked postponed with takeover in `planning/contracts/commands.md` 1.3, and `planning/contracts/commands.md` 1.3 now states the general rule that a post never queues an item for its own author (`postWakes` skips `msg.By`; tested in `internal/home/cmd_post_test.go`).
+
+### 2026-11-21 · deviation · `web/src/lib/peer.ts` had no method to send a `ctl` push
+
+- Symptom: onboarding (`flows/pairing.md` step 10) and device management must push `devlog` frames (`{"t":"devlog","user":"…","entries":[…]}`) without a request `id` (`planning/contracts/conventions.md` section 3). `Connection` and `Peer` in `web/src/lib/peer.ts` exposed `request(req)` only, which always attaches an `id` and awaits a response, while `#ctl` and `#send` were private.
+- Cause: unit W-2 implemented `request` and incoming `onpush`, omitting outgoing pushes (`internal/peer/ctl.go` has `Send` beside `Request`).
+- Status: resolved in #212: `Connection.send` and `Peer.send` send a `Devlog` frame without `id` and enforce the 60 KiB `ctl` frame limit (`web/src/lib/peer.ts`). Tests in `web/src/lib/peer.test.ts`.
+
+### 2026-11-20 · limitation · A task's `branch` is text that no reader checks
+
+- Symptom: `proto.Decode` and the web client refuse a task row whose `slug` the home's rule cannot make (unit P-1), but take any text as its `branch`, and as the `branch` of `task branch`. `contracts/local.md` section 7 derives the branch from `num` and `slug` (`task/<num>-<slug>`); `HostedChecksToResume` previously copied `branch` from the row (`internal/host/forge.go:220` before `HOST-BRANCH`), from where it would reach `git` and `gh` arguments.
+- Cause: `TaskRow.Branch` and `TaskBranch.Branch` are plain strings (`internal/proto/task.go`, `internal/proto/command.go`). Giving the field a type of its own changes `internal/host`, which unit P-1 does not own; and whether the home must refuse a `task branch` whose `branch` is not `task/<num>-<slug>` was not in `contracts/commands.md` 1.5.
+- Status: resolved on the host in #203 (`HostedChecksToResume` in `internal/host/forge.go` derives `task/<num>-<slug>` from `Num` and `Slug` through `taskName`, skips rows that fail `taskName`, and ignores `TaskRow.Branch`) and on the home in #183 (`tskBranch` in `internal/home/cmd_task.go:76` answers `bad_request` to any `branch` other than `task/<num>-<slug>`, and `planning/contracts/commands.md` 1.5 states the rule).
+
+### 2026-11-20 · deviation · A `set` that changes nothing and a `task assign` without a role were not refused
+
+- Symptom: `contracts/commands.md` gives `group set` and `member set` "any of" their fields, and `task assign` at least one of `assignee` and `reviewer`. A `group set` with no field, a `member set` with nothing but `id`, and a `task assign` with neither role were read by `proto.Decode` and by the web client's schemas without refusal.
+- Cause: each of those fields is optional by itself (`GroupSet`, `MemberSet`, `TaskAssign` in `internal/proto/command.go`; the schemas of the same names in `web/src/lib/proto.ts`), and "at least one" is a rule across fields, which the wire types do not state.
+- Status: resolved in #179 (`grpSetValid` in `internal/home/cmd_group.go:110` and `memSetValid` in `internal/home/cmd_member.go:144`) and #183 (`tskAssign` in `internal/home/cmd_task.go:94`), which answer `bad_request` as `contracts/commands.md` specifies.
+
+### 2026-11-21 · bug · `Loop.Inbox` marked only the groups that existed when it was called
+
+- Symptom: after `Loop.Inbox(conn)` had made a host connection the inbox taker (`internal/home/run.go:366`), a group created later on that home spawned its `runGroup` with `seat.inbox` false (`internal/home/run_group.go:52`) and did not deliver queued items to `conn` until `Loop.Inbox(conn)` was called again (which `LocalLink` never does, because it sends no `hello`).
+- Cause: `Conn` recorded `welcomed` across groups (`internal/home/run_conn.go:34`), whereas `inbox` was kept per group seat (`internal/home/run_group.go:31`) and `spawn` called `seat` with `inbox` false (`internal/home/run.go:162`).
+- Status: resolved in #209: `Conn.taker` (`internal/home/run_conn.go:36`) is set under `Loop.mu` in `Loop.Inbox` (`internal/home/run.go:366`), and `runGroup.seat` initialises `runSeat{inbox: c.taker}` (`internal/home/run_group.go:53`), covering both local and remote hosts. Test: `TestLocalLinkInboxForGroupCreatedAfterAttach`.
+
+### 2026-11-20 · limitation · `ReviewedMerge.GitHubRepo` is not filled from the group's repository
+
+- Symptom: the merge with a remote runs `gh pr merge <pr> --repo <owner>/<repo>` (`planning/contracts/local.md` section 7, row "merge, with a remote"), but no code sets `<owner>/<repo>` from the group's repository; an empty `GitHubRepo` would make the merge fail.
+- Cause: `ReviewedMerge.GitHubRepo` (`internal/host/merge.go`) is set by its caller, and no unit called the merge before HS-13. The claim that `--repo` makes gh skip every local step (worktree removal, local branch deletion) rests on the gh 2.102.0 source (`pkg/cmd/pr/merge/merge.go`: `CanDeleteLocalBranch = !cmd.Flags().Changed("repo")`), not on a run against GitHub or on older gh versions.
+- Status: resolved in HS-13: `githubRepo` (`internal/host/deliver.go`, `buildReviewedMerge`) extracts `<owner>/<repo>` from the group row's `repo` field when `forge` is `github`.
+
+### 2026-11-20 · deviation · The audit record has no `what` for a CLI killed on an idle close
+
+- Symptom: `planning/flows/agent-turn.md` section G has the node write an audit row, and nothing else, when it kills a CLI that did not answer a close within 10 s outside a turn. `planning/contracts/storage.md` section 3 lists eight values of `what` (`delivered`, `refused`, `requested`, `approval`, `takeover`, `handback`, `merge`, `setting`), and none of them says that.
+- Cause: the list of `what` was written before that rule. The audit write takes any text as `what` and has a constant for each of the eight only (`internal/host/audit.go:6-15`); nothing kills a CLI yet.
+- Status: resolved in #187: `planning/contracts/storage.md` section 3 adds `killed` to `audit.what`, `internal/host/audit.go` defines `AuditKilled`, and `internal/host/run.go` writes the row naming the member and task when an idle close does not finish within 10 s (`TestCloseTimeoutOnAllPathsAuditAndC6SwitchOrdering`).
 
 ### 2026-11-21 · bug · A missing clone folder was reported as a failed start of git
 
@@ -759,8 +974,8 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Cause: `plain` (`web/src/lib/compose.ts` before the fix) was recursive and spread the result of the rest of the text into a new list at each mention, so the cost grew with the square of the mentions and the depth with their number.
 - Status: resolved in PR #169: `plain` builds the list with a loop (`web/src/lib/compose.ts:53`), same output. Test in `web/src/lib/compose.test.ts` (2300 mentions give the same parts; 6000 take under ten times what 1500 do).
 
-### 2026-11-20 · deviation · Seven error paths in `internal/store` had no unit tests and two `Scan` checks were unreachable
+### 2026-11-21 · deviation · Seven error paths in `internal/store` had no unit tests and two `Scan` checks were unreachable
 
 - Symptom: `go test -cover ./internal/store/` reported 93.7% of statements, leaving nine error-return blocks uncovered across `inbox.go`, `read.go` and `store.go`.
 - Cause: unit tests did not exercise locked or closed database paths in `Enqueue` (`internal/store/inbox.go:20-22`), `Inbox` (`internal/store/inbox.go:35-37`), `Snapshot` (`internal/store/read.go:20-22`, `:26-28`, `:31-33`), `Snapshot.rows` (`internal/store/read.go:72-74`) and `transaction` (`internal/store/store.go:78-80`); and `Inbox` (`internal/store/inbox.go:44-46` before the fix) and `Snapshot.rows` (`internal/store/read.go:79-81` before the fix) checked `rows.Scan` errors that cannot occur. Both `inbox` and `row` are SQLite `STRICT` tables (`internal/store/schema.sql:1-17`, `:31-44`; `planning/contracts/storage.md` section 1) whose selected columns match the non-nil Go destination types (`INTEGER NOT NULL` and `INTEGER PRIMARY KEY` to `*int64`, `TEXT NOT NULL` to `*string` or `*[]byte`, nullable `TEXT` to `**string` or `*[]byte`), while `modernc.org/sqlite` steps and reads column values inside `rows.Next()`, surfacing any SQLite or I/O failure through `rows.Err()`.
-- Status: resolved on branch `gemini/store-coverage`: removed the two unreachable `rows.Scan` error branches in `internal/store/inbox.go` and `internal/store/read.go`, and added unit tests covering all seven reachable error paths (`TestInboxFailures` in `internal/store/delivery_test.go`, `TestSnapshotAndQueryFailures` in `internal/store/read_test.go`, `TestWriteBeginFailure` in `internal/store/store_test.go`), bringing `internal/store` to 100.0% statement coverage.
+- Status: resolved in #174: removed the two unreachable `rows.Scan` error branches in `internal/store/inbox.go` and `internal/store/read.go`, and added unit tests covering all seven reachable error paths (`TestInboxFailures` in `internal/store/delivery_test.go`, `TestSnapshotAndQueryFailures` in `internal/store/read_test.go`, `TestWriteBeginFailure` in `internal/store/store_test.go`), bringing `internal/store` to 100.0% statement coverage.
