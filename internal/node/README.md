@@ -19,7 +19,7 @@ kind: reference
 - `session.go`: `Sessions`, serving inbound `ctl` connections (`*peer.Connection` via `Ctl`), `hello` and `welcome`, the bootstrap rule before enrolment, request (`sync`, `fetch`, `host.info`), push (`devlog`, `ack`), command (`pair.browser`) and replay tables, delegation to `home.Loop` and `host.Surface`, and asynchronous execution with envelope checks, in-flight nonce coordination and `receipt` persistence for host commands ([datachannel](../../planning/contracts/datachannel.md), sections 2, 3, 5, 7 and 8; [commands](../../planning/contracts/commands.md), "Once only" and section 2).
 - `client.go`: `clientCtl`, `dialFunc`, `(*Sessions).serveClient` and `(*Sessions).connectHome`, the client side of a host's outgoing `ctl` session to a home on another node ([datachannel](../../planning/contracts/datachannel.md), sections 2, 3 and 3.1; [flows/connect.md](../../planning/flows/connect.md), steps 11 to 18).
 - `pair.go`: `Pairer`, running 10-minute single-use pairing rooms in role `b` (`Pair`, onboarding and adding another computer) and role `a` (`PairBrowser` and `pair.browser`, adding another browser with `#pair=<secret>` links and once-only nonce replay; [pairing](../../planning/flows/pairing.md), sections A to C; [envelope](../../planning/contracts/envelope.md), section 6).
-- `surface.go`: `Surface`, serving `host.info` (`HostState`) and reading `name`, `max_open`, `homes` and `rendezvous` (`ReadName`, `ReadRendezvous`; [datachannel](../../planning/contracts/datachannel.md), sections 3 and 7).
+- `surface.go`: `Surface`, serving `host.info` (`HostState`), forwarding `pty.resize` pushes to `host.Surface["pty.resize"]`, and reading `name`, `max_open`, `homes` and `rendezvous` (`ReadName`, `ReadRendezvous`; [datachannel](../../planning/contracts/datachannel.md), sections 3 and 7).
 - `netstatus.go`: registers the `net_status` MCP tool in `host.Tools` and reports welcomed `ctl` paths, the local NAT flags, and configured rendezvous reachability ([mcp-tools](../../planning/contracts/mcp-tools.md), section 1).
 - `schedule.go`: runs `home.Retain` on `node.db` at startup and every 24 hours ([storage](../../planning/contracts/storage.md), sections 2 and 4).
 - `local.go`: `AttachLocal` and `LocalLink`, the in-process link between a `*host.Host` and a `*home.Loop` on the same node ([architecture](../../planning/architecture.md), section 2.1).
@@ -71,7 +71,7 @@ kind: reference
 | Map | Purpose |
 | --- | --- |
 | `Requests` | `ctl` requests (`sync`, `fetch` with `Async: true`; `host.info` registered by `NewSurface` with `Type: "host.info"`) |
-| `Pushes` | `ctl` pushes after enrolment beyond `devlog` and `ack` (`pty.resize`) |
+| `Pushes` | `ctl` pushes after enrolment beyond `devlog` and `ack` (`pty.resize` registered by `NewSurface`) |
 | `Commands` | node-level host commands (`pair.browser` registered by `NewPairer`); other host commands (`to` set in payload) fall back to `host.Surface` |
 | `Replays` | memory-backed replay answers for succeeded host commands (`pair.browser` registered by `NewPairer`, returning the active link while valid and `conflict` once used, expired or lost across restart) |
 
@@ -96,13 +96,13 @@ kind: reference
 3. `Pairer.HandleEvent` receives `joined`, `full` and `room` frames from both the local `/rv` path and remote rendezvous paths, and `PairConfig.Paths` returns `n.sharedPaths`.
 4. `Pairer.Peer` and `Host.Connect` (`Sessions.connectHome`) are set right after `peer.New`.
 5. Local socket `pair` persists `--rendezvous` first, runs `syncRendezvous` and calls `Pairer.Pair`; `pair-browser` and `open` call `Pairer.PairBrowser`.
-6. `SurfaceConfig.Agents` is set to `(*Host).Agents` (`HS-3`).
+6. `SurfaceConfig.Agents` is set to `(*Host).Agents` (`HS-3`), and `peer.New` registers `pty:` channels onto `(*Host).ServeTerminal` (`HS-19`).
 7. `netStatusPart` is wired to `(*nodeRuntime).netStatus` (`netstatus.go`), and `stepStartup` launches `startRetention` (`schedule.go`).
 
 ## Known limitations
 
+- `Surface` answers `host.info` requests and forwards `pty.resize` pushes; there is no `host.info` push yet, `settings.set` is postponed with `U-12`, and `queued` in `host.info` is always `0` because held items live on the home (`not_before`, `HM-7`; [issues](../../issues.md)).
 - `net_status` omits `rtt_ms` (`*peer.Connection` exposes `Path()` without ICE candidate-pair round-trip statistics) and reports `mapped_ports` as `false` in step 1 ([issues](../../issues.md)).
-- `Surface` answers `host.info` requests only; there is no `host.info` push yet, `settings.set` is postponed with `U-12`, and `queued` in `host.info` is always `0` because held items live on the home (`not_before`, `HM-7`; [issues](../../issues.md)).
 - Self-update (`Updater`, `N-6`) is postponed off the step-1 main line ([issues](../../issues.md)).
 - In step 1 `Logs` stores only the node owner's device log; keeping logs of other group members belongs to step 2.
 - On macOS, Unix socket paths are limited to 103 bytes, so tests that bind `sock` under `HOME` use `/tmp` ([issues](../../issues.md)).

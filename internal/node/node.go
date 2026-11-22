@@ -270,7 +270,7 @@ func (n *nodeRuntime) stepNetwork() error {
 		return err
 	}
 	n.socks = socks
-	n.peer = peer.New(n.key, socks, n.db, n.knownPeer, n.routesFor, n.serveInbound, nil)
+	n.peer = peer.New(n.key, socks, n.db, n.knownPeer, n.routesFor, n.serveInbound, peer.Channels{"pty:": n.serveTerminal})
 	n.pairer.Peer = n.peer
 	n.host.Connect = n.sessions.connectHome(n.dialHome)
 	ln, err := listenNodeHTTP(":" + strconv.Itoa(defaultWebPort))
@@ -415,6 +415,8 @@ func (n *nodeRuntime) knownPeer(device string) bool {
 func (n *nodeRuntime) serveInbound(c *peer.Connection) {
 	n.spawn(func() { n.pairer.Serve(n.ctx, c.Device, c) })
 }
+
+func (n *nodeRuntime) serveTerminal(s *peer.Stream) { n.host.ServeTerminal(s) }
 
 func (n *nodeRuntime) dialHome(ctx context.Context, device string, run func(clientCtl)) {
 	n.spawn(func() {

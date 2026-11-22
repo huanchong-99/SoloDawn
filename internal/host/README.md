@@ -28,6 +28,8 @@ A unit never calls into the file of a unit built beside it. It registers in a ta
 | the state rows of a group | `h.Rows`: `Put` and `Reset` for the unit that handles `rows` and `reset`, `Get` and `Of` for everyone |
 | an item that answers an open tool call | the tool: `item, done := h.Await(id, check)`, then it reads the channel until its wait runs out, calls `done`, and looks at the channel once more. Delivery, before it queues a `reply` or a `decided` item: `h.Hand(id, item)`, which ends the wait and puts the item into the channel under one lock, so after `done` the item is either in the channel or queued, and never waits for the tool |
 | whether a session's deliveries are held | `h.Held(key)`, before a turn is given; whoever lifts a hold calls `Deliver` |
+| an interactive pseudo-terminal (`takeover`) | `h.StartPTY(group, member, agent, launch, onDone)`, `p.Attached()`, `p.Resize(cols, rows)`, `p.Close()`, `h.ClosePTY(group, member)` |
+| bridging a `pty:<g>:<member>` data channel | `h.ServeTerminal(t)` |
 | an audit row | `h.Audit(tx, AuditRow{…})`, inside the transaction of what it records |
 | the AI CLIs found here (`host.info`) | `h.Agents(ctx)`: probes `claude` and `codex` on `PATH` (cached 60 s), writes `agent`, returns `[]proto.HostAgent` with `Groups` empty |
 
@@ -118,6 +120,15 @@ Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/
 `agents.go` provides `(*Host).Agents(ctx)`, `"agents"` in `Listeners`, and `"agent.set"` in `Surface`; see [drivers.md](../../planning/contracts/drivers.md) section 1.4 and [commands.md](../../planning/contracts/commands.md) section 2.
 
 - **Lock order.** `agtPart.probeMu` -> `Store.Write` -> `agtPart.mu`. The listener calls `Sessions.Get` (leaf `Sessions` lock) and then takes `agtPart.mu`; nothing under `agtPart.mu` waits on a probe or the store.
+
+## Pseudo-terminals (`pty.go`)
+
+`StartPTY(group, member, agent, launch, onDone)` runs `Drivers[agent].Interactive(launch)` inside a `github.com/aymanbagabas/go-pty` v0.2.3 pseudo-terminal (Unix PTY or Windows ConPTY) in `launch.Folder`, registers the open `*PTY` under `aiSlot{group, member}` in `Part[ptyPart](h)`, applies any stored `pty.resize` dimensions for that slot, and returns the `*PTY` and the CLI session id. A second `StartPTY` while `(group, member)` is already open is refused with `busy`; non-`*Error` CLI launch failures are returned as `&Error{Code: "cli", Message: …}`.
+
+- Closing (`p.Close()`, `h.ClosePTY(group, member)`) never writes `0x03` (`Ctrl+C`) bytes. It closes the pseudo-terminal, waits up to 10 s (`ptyStopTimeout`) for exit, kills the process tree when still running (`SIGKILL` to `-pid` on Unix, `taskkill.exe /f /t /pid` on Windows), releases `(group, member)`, and calls `onDone` once after the process has exited.
+- `ServeTerminal(t)` parses `"pty:<g>:<member>"` strictly; `p.Attached()` reports whether a terminal stream has attached. A malformed label, an unmatched `(g, member)` or a duplicate stream for an already bridged `PTY` is closed and drained so unread messages never hold back the connection's shared SCTP receive window. Otherwise one goroutine copies `PTY -> t` (pausing `PTY` reads while `t.Write` waits on the 1 MiB send-buffer limit) and the caller copies `t -> PTY`; `t` ending closes `PTY`, and `PTY` exiting closes `t`.
+- `Surface["pty.resize"]` decodes `proto.PTYResize`, requires `cols >= 1` and `rows >= 1` (`bad_request` below 1), remembers the size for `(g, ai)` so a `pty.resize` before `StartPTY` sets the initial size, resizes an open `PTY`, and accepts a `pty.resize` after close as a no-op.
+- **Lock order and single-reader channels.** `PTY.mu -> ptyPart.mu`; neither lock waits on I/O, process exit or `onDone`. `closing` is read only by `waitLoop`; `procDone` and `outDone` are read only by `runStop`; `done` is closed once by `runStop` for `Close` callers.
 
 # Session runtime
 
