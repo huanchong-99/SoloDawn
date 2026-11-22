@@ -212,7 +212,7 @@ func (w *homeTaskWorld) dispatch(by identity.Key, payload any) error {
 }
 
 func (w *homeTaskWorld) sendEnv(by identity.Key, env proto.Envelope) error {
-	res, err := home.Commands.Apply(w.state, w.store, w.store, by.ID(), env, w.now)
+	res, err := home.Commands.Apply(w.state, w.store, w.store, env, w.now)
 	if err != nil {
 		return err
 	}

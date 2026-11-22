@@ -58,7 +58,7 @@ func postSend(t *testing.T, s *home.State, d home.Disk, by identity.Key, payload
 		t.Fatal(err)
 	}
 	env := by.Sign(string(data))
-	res, err := home.Commands.Apply(s, d, receipts{}, by.ID(), env, now)
+	res, err := home.Commands.Apply(s, d, receipts{}, env, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestPostRefusals(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			env := postRefusalEnv{s: postState(t), by: laptop}
 			tc.setup(&env)
-			res, err := home.Commands.Apply(env.s, disk{}, receipts{}, env.by.ID(), env.by.Sign(env.payload), now)
+			res, err := home.Commands.Apply(env.s, disk{}, receipts{}, env.by.Sign(env.payload), now)
 			if err != nil {
 				t.Fatal(err)
 			}
