@@ -21,16 +21,6 @@ type clientCtl interface {
 
 type dialFunc func(ctx context.Context, device string, session func(clientCtl))
 
-func (s *Sessions) connectHome(dial dialFunc) func(ctx context.Context, device string) {
-	return func(ctx context.Context, device string) {
-		if device == s.cfg.ID {
-			return
-		}
-		run := func(raw clientCtl) { s.serveClient(ctx, device, raw) }
-		go dial(ctx, device, run)
-	}
-}
-
 func (s *Sessions) serveClient(ctx context.Context, device string, raw clientCtl) {
 	runCtx, cancel := context.WithCancel(ctx)
 	c := &sesConn{device: device, raw: raw}

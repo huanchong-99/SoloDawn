@@ -773,9 +773,11 @@ func TestHostEnsureHomeConnections(t *testing.T) {
 	// Calling EnsureHomeConnections again while already connected opens no duplicate connections.
 	joinAssertEqual(t, "second EnsureHomeConnections", restarted.EnsureHomeConnections(), nil)
 
-	joinAssertEqual(t, "restarted dial count", len(restartedDials), 1)
+	joinAssertEqual(t, "restarted dial count", len(restartedDials), 2)
 	joinAssertEqual(t, "first dial device", restartedDials[0].device, "home-1")
 	joinAssertEqual(t, "first dial ctx open", restartedDials[0].ctx.Err(), nil)
+	joinAssertEqual(t, "unhosted dial device", restartedDials[1].device, "home-2")
+	joinAssertEqual(t, "unhosted dial ctx open", restartedDials[1].ctx.Err(), nil)
 }
 
 func TestRecordHomeKeepsAddressesAndMovesOnlyHostedGroup(t *testing.T) {
@@ -785,7 +787,7 @@ func TestRecordHomeKeepsAddressesAndMovesOnlyHostedGroup(t *testing.T) {
 	next := proto.Home{Group: joinTestGroup1, Home: "new", Name: "Shared"}
 	addr := "wss://example.test/rv"
 	joinAssertEqual(t, "remember unhosted group", h.RecordHome(old, []string{addr}), nil)
-	joinAssertEqual(t, "unhosted dials", rig.dialCount(old.Home), 0)
+	joinAssertEqual(t, "unhosted dials", rig.dialCount(old.Home), 1)
 	key := SessionKey{Group: string(old.Group), Member: "ai"}
 	other := SessionKey{Group: string(joinTestGroup2), Member: "ai"}
 	joinAssertEqual(t, "create session", h.Sessions.Create(Session{SessionKey: key, Home: old.Home, Kind: GroupSession}), nil)
@@ -874,7 +876,7 @@ func TestRecordHomeClearsCachedUnhostedGroupOnlyOnReplacement(t *testing.T) {
 	joinAssertEqual(t, "old cache cleared", cached, false)
 	joinAssertEqual(t, "cursor reset", gs.cursor, int64(0))
 	joinAssertEqual(t, "new sync home", gs.home, next.Home)
-	joinAssertEqual(t, "unhosted replacement dials", rig.dialCount(next.Home), 0)
+	joinAssertEqual(t, "unhosted replacement dials", rig.dialCount(next.Home), 1)
 }
 
 func TestHostLeaveValidationRefusalAndMultiSessionCleanup(t *testing.T) {

@@ -63,7 +63,7 @@ func joinStateOf(h *Host) *joinPart {
 }
 
 // EnsureHomeConnections opens one persistent connection through h.Connect for
-// each distinct home of a hosted group.
+// each distinct remembered home.
 func (h *Host) EnsureHomeConnections() error {
 	return joinSyncNow(h, joinStateOf(h))
 }
@@ -122,7 +122,7 @@ func joinSyncNow(h *Host, jp *joinPart) error {
 	if err != nil {
 		return err
 	}
-	needed := joinNeededHomes(homes, h.Sessions.All())
+	needed := joinNeededHomes(homes)
 	jp.mu.Lock()
 	for dev := range jp.inflight {
 		needed[dev] = true
@@ -169,16 +169,10 @@ func joinPlanStartsLocked(jp *joinPart, canConnect bool, needed map[string]bool)
 	return starts
 }
 
-func joinNeededHomes(homes []proto.Home, sessions []Session) map[string]bool {
-	hosted := map[proto.ID]bool{}
-	for _, session := range sessions {
-		hosted[proto.ID(session.Group)] = true
-	}
+func joinNeededHomes(homes []proto.Home) map[string]bool {
 	needed := map[string]bool{}
 	for _, entry := range homes {
-		if hosted[entry.Group] {
-			needed[entry.Home] = true
-		}
+		needed[entry.Home] = true
 	}
 	return needed
 }
@@ -261,6 +255,9 @@ func joinExecuteJoin(ctx context.Context, h *Host, jp *joinPart, p proto.HostJoi
 	grp, err := joinFetchGroup(ctx, h, homeConn, p.Home, string(p.Group))
 	if err != nil {
 		return err
+	}
+	if grp.Kind == "team" {
+		return &Error{Code: "conflict", Message: "a team group has no AI members"}
 	}
 	if err := joinPrepareWorkspace(ctx, cfg.projectDir, grp); err != nil {
 		return err
@@ -422,7 +419,7 @@ func joinUpsertHomeTx(tx *store.Tx, entry proto.Home) error {
 	return err
 }
 
-// RecordHome remembers a home, reconnecting only if it replaces a hosted group's home.
+// RecordHome remembers a home and reconciles connections and state subscriptions.
 func (h *Host) RecordHome(entry proto.Home, addrs []string) error {
 	var moved bool
 	write := func(tx *Tx) error {
@@ -437,9 +434,6 @@ func (h *Host) RecordHome(entry proto.Home, addrs []string) error {
 	d := deliv(h)
 	if d.replaceHome(group, entry.Home) || moved {
 		h.Rows.Reset(group)
-	}
-	if !moved {
-		return nil
 	}
 	ensureGroupSynced(h, d, entry.Home, group)
 	return h.EnsureHomeConnections()

@@ -108,6 +108,11 @@ func (s *State) human(user string) string {
 // find returns the function of a command and fills in who sent it.
 func (t Table) find(s *State, c *Command) (Func, *Refusal) {
 	key, named := c.key()
+	if s.Group.ID != "" {
+		if refusal := teamRefusal(s, *c, key); refusal != nil {
+			return nil, refusal
+		}
+	}
 	f := t[key]
 	if !named || f == nil {
 		return nil, &Refusal{"bad_request", "the home has no such command"}
