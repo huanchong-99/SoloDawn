@@ -1,6 +1,8 @@
 package home_test
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -41,6 +43,37 @@ func rndJumpEnv(by identity.Key, n byte, msg, extra string) proto.Envelope {
 	return by.Sign(fmt.Sprintf(`{"t":"jump","n":%q,"ts":%d,"g":%q%s%s}`, id(n), clock-200, groupID, msgPart, extra))
 }
 
+func rndPostEnv(by identity.Key, n byte, as, kind, thread, text string, mentions []string, body string) proto.Envelope {
+	th := "null"
+	if thread != "" {
+		th = fmt.Sprintf("%q", thread)
+	}
+	asPart := ""
+	if as != "" {
+		asPart = fmt.Sprintf(`,"as":%q`, as)
+	}
+	mJSON, _ := json.Marshal(mentions)
+	if body == "" {
+		body = `{}`
+	}
+	payload := fmt.Sprintf(`{"t":"post","n":%q,"ts":%d,"g":%q%s,"kind":%q,"thread":%s,"main":false,"text":%q,"mentions":%s,"re":null,"body":%s}`,
+		id(n), clock-100, groupID, asPart, kind, th, text, mJSON, body)
+	return by.Sign(payload)
+}
+
+func rndResumeEnv(by identity.Key, n byte, as, taskID string) proto.Envelope {
+	asPart := ""
+	if as != "" {
+		asPart = fmt.Sprintf(`,"as":%q`, as)
+	}
+	return by.Sign(fmt.Sprintf(`{"t":"task","op":"resume","n":%q,"ts":%d,"g":%q%s,"id":%q}`, id(n), clock-100, groupID, asPart, taskID))
+}
+
+func rndLimitID(n byte) string {
+	sum := sha256.Sum256([]byte("SoloDawn rounds limit " + id(n)))
+	return base64.RawURLEncoding.EncodeToString(sum[:16])
+}
+
 func rndState(t *testing.T) *home.State {
 	t.Helper()
 	s := briefState(t)
@@ -52,10 +85,43 @@ func rndTaskRow(taskID string, num int) proto.TaskRow {
 	return proto.TaskRow{
 		RowHeader: proto.RowHeader{Type: "task", ID: taskID, Seq: 8},
 		Group:     groupID, Num: num, Title: "Report path", Slug: "report-path",
-		Origin: "brief", State: "active", Step: "local_check",
+		Origin: "brief", State: "active", Step: "local_check", Commit: "c1",
 		Assignee: briefA, Reviewer: briefB, Pass: 90, Depends: []string{},
 		Stats: proto.TaskStats{Started: clock - 120_000}, Created: clock - 200_000,
 	}
+}
+
+func rndTableWithCall() home.Table {
+	tbl := maps.Clone(home.Commands)
+	tbl.Add("post/call", func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
+		var p proto.Post[proto.CallBody]
+		if refusal := c.Decode(&p); refusal != nil {
+			return home.Result{}, refusal
+		}
+		tid := string(*p.Thread)
+		msg := proto.MsgRow{
+			RowHeader: proto.RowHeader{Type: "msg", ID: string(c.Nonce)}, Group: s.ID, Thread: &tid,
+			By: c.Who.Member(), Kind: p.Kind, Timestamp: c.Timestamp, Text: p.Text,
+			Mentions: []string{}, Body: json.RawMessage(`{}`), Env: &c.Env,
+		}
+		task := s.Tasks[tid]
+		task.Thread.Count++
+		task.Thread.Last = &proto.ThreadMessage{By: msg.By, Kind: msg.Kind, Text: msg.Text, Timestamp: msg.Timestamp}
+		return home.Result{
+			Rows:  []home.Row{home.RowOf(msg), home.RowOf(task)},
+			Items: []home.Item{{AI: p.Body.To, Why: "mention", Task: tid, Msg: msg.ID}},
+		}, nil
+	})
+	return tbl
+}
+
+func rndApplyTable(t *testing.T, tbl home.Table, s *home.State, d home.Disk, env proto.Envelope) home.Result {
+	t.Helper()
+	res, err := tbl.Apply(s, d, receipts{}, env, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
 }
 
 // Jump retires the newest unacknowledged mention item produced by a message of
@@ -163,14 +229,13 @@ func TestRoundsJumpGoldenAndRefusals(t *testing.T) {
 
 // A5.16 and row 23: the quiet timer checks thread.last.ts (else stats.started,
 // else created) against limits.idle_notice_minutes, notifies the secretary once
-// per quiet period, and resets when a thread message arrives or the task changes.
+// per quiet period of each group, and resets when last activity advances.
 func TestRoundsQuietTimerBoundariesAndPeriods(t *testing.T) {
 	quietFn := home.Timers["quiet"]
 	afterFn := home.After["quiet"]
 
 	t.Run("exact millisecond boundary on started, created and thread.last.ts", func(t *testing.T) {
 		s := rndState(t)
-		// Limits.IdleNoticeMinutes is 2 (120,000 ms).
 		tStarted := rndTaskRow(runID(1), 1)
 		tStarted.Stats.Started, tStarted.Created = clock-120_000, clock-500_000
 
@@ -200,15 +265,15 @@ func TestRoundsQuietTimerBoundariesAndPeriods(t *testing.T) {
 		s.Commit(res)
 		afterFn(s, res)
 
-		// Even with an empty queue (all notices acknowledged), the same quiet period sends nothing.
+		// Same quiet period sends nothing on later ticks.
 		equal(t, quietFn(s, d, clock+60_000), home.Result{})
 
-		// A separate group state with the same group ID and task IDs does not share quiet tracking.
+		// Another group does not share quiet tracking.
 		otherGroup := rndState(t)
 		otherGroup.Tasks[tStarted.ID] = tStarted
 		equal(t, quietFn(otherGroup, d, clock).Items, []home.Item{{AI: aiID, Why: "notice", Task: tStarted.ID, Code: "quiet"}})
 
-		// Updating a task row (new thread message or task change) starts a new quiet period.
+		// Advancing thread.last.ts starts a new quiet period.
 		updated := tLast
 		updated.Seq = 9
 		updated.Thread.Count = 1
@@ -222,7 +287,7 @@ func TestRoundsQuietTimerBoundariesAndPeriods(t *testing.T) {
 		equal(t, quietFn(s, d, clock+300_000), home.Result{})
 	})
 
-	t.Run("skips tasks without secretary, non-positive idle limit, non-idle states, or queued quiet item", func(t *testing.T) {
+	t.Run("skips tasks without secretary, non-positive idle limit, or non-idle states", func(t *testing.T) {
 		s := rndState(t)
 		t1, t2 := rndTaskRow(runID(1), 1), rndTaskRow(runID(2), 2)
 		tPaused := rndTaskRow(runID(3), 3)
@@ -234,7 +299,6 @@ func TestRoundsQuietTimerBoundariesAndPeriods(t *testing.T) {
 		s.Tasks[t1.ID], s.Tasks[t2.ID] = t1, t2
 		s.Tasks[tPaused.ID], s.Tasks[tMerge.ID], s.Tasks[tWaiting.ID] = tPaused, tMerge, tWaiting
 
-		// Without a secretary or with a non-positive idle limit, nothing is queued.
 		d := &rndDisk{}
 		s.Group.Secretary = ""
 		equal(t, quietFn(s, d, clock), home.Result{})
@@ -243,24 +307,7 @@ func TestRoundsQuietTimerBoundariesAndPeriods(t *testing.T) {
 		equal(t, quietFn(s, d, clock), home.Result{})
 		s.Group.Limits.IdleNoticeMinutes = 1
 
-		// Non-quiet notices, notices for other tasks, main-line notices, and mentions do not suppress t2.
-		d.queued = []store.Item{
-			{ID: 1, AI: aiID, Why: "notice", Task: nil, Env: json.RawMessage(`{"item":1,"ai":"` + aiID + `","why":"notice","code":"quiet"}`)},
-			{ID: 2, AI: aiID, Why: "mention", Task: rndPtr(t2.ID), Env: json.RawMessage(`{"item":2,"ai":"` + aiID + `","why":"mention","code":"quiet"}`)},
-			{ID: 3, AI: aiID, Why: "notice", Task: rndPtr(t2.ID), Env: json.RawMessage(`{"item":3,"ai":"` + aiID + `","why":"notice","code":"task_started"}`)},
-			{ID: 4, AI: aiID, Why: "notice", Task: rndPtr(t1.ID), Env: json.RawMessage(`{"item":4,"ai":"` + aiID + `","why":"notice","code":"quiet"}`)},
-		}
-		res := quietFn(s, d, clock)
-		equal(t, res.Items, []home.Item{{AI: aiID, Why: "notice", Task: t2.ID, Code: "quiet"}})
-
-		d.queued = append(d.queued, store.Item{
-			ID: 5, AI: aiID, Why: "notice", Task: rndPtr(t2.ID),
-			Env: json.RawMessage(`{"item":5,"ai":"` + aiID + `","why":"notice","task":"` + t2.ID + `","code":"quiet"}`),
-		})
-		equal(t, quietFn(s, d, clock), home.Result{})
-
-		// Non-quiet items passed to After["quiet"] do not mark t2 as quiet-notified.
-		d.queued = nil
+		// Non-quiet items passed to After["quiet"] do not mark tasks as quiet-notified.
 		afterFn(s, home.Result{Items: []home.Item{
 			{AI: aiID, Why: "notice", Task: t2.ID, Code: "task_started"},
 			{AI: aiID, Why: "mention", Task: t2.ID, Code: "quiet"},
@@ -275,6 +322,284 @@ func TestRoundsQuietTimerBoundariesAndPeriods(t *testing.T) {
 		equal(t, quietFn(s, d, clock).Items, []home.Item{{AI: aiID, Why: "notice", Task: t2.ID, Code: "quiet"}})
 		afterFn(s, home.Result{Items: []home.Item{{AI: aiID, Why: "notice", Task: t2.ID, Code: "quiet"}}})
 		equal(t, quietFn(s, d, clock), home.Result{})
+	})
+}
+
+// A5.8: ten AI-to-AI exchanges in a thread pause the task with wait rounds,
+// write rounds_limit in the main line, queue the 10th mention with the paused
+// task, and notify the secretary; a person's thread text and an admin's task
+// resume each end the wait.
+func TestRoundsTenExchangesPauseAndResume(t *testing.T) {
+	for _, how := range []string{"person_text", "admin_resume"} {
+		t.Run(how, func(t *testing.T) {
+			s, d, tbl := rndState(t), &rndDisk{msgs: map[string]proto.MsgRow{}}, rndTableWithCall()
+			taskID := id(70)
+			s.Tasks[taskID] = rndTaskRow(taskID, 1)
+
+			// Rounds 1 to 8 via question, round 9 via secretary text, round 10 via call.
+			for round := 1; round <= 8; round++ {
+				sender, target := briefA, briefB
+				if round%2 == 0 {
+					sender, target = briefB, briefA
+				}
+				res := rndApplyTable(t, tbl, s, d, rndPostEnv(laptop, byte(30+round), sender, "question", taskID, "q", []string{target}, ""))
+				equal(t, res.Items, []home.Item{{AI: target, Why: "mention", Task: taskID, Msg: id(byte(30 + round))}})
+				s.Commit(res)
+				equal(t, s.Tasks[taskID].Thread.Rounds, round)
+			}
+
+			r9 := rndApplyTable(t, tbl, s, d, rndPostEnv(laptop, 39, aiID, "text", taskID, "check", []string{briefA}, ""))
+			s.Commit(r9)
+			equal(t, []any{s.Tasks[taskID].State, s.Tasks[taskID].Thread.Rounds}, []any{"active", 9})
+
+			// Round 10: a call with empty mentions[] counts via its mention item (R-114).
+			callBody := fmt.Sprintf(`{"to":%q,"depth":1,"wait":true}`, briefB)
+			r10 := rndApplyTable(t, tbl, s, d, rndPostEnv(laptop, 40, briefA, "call", taskID, "ask", []string{}, callBody))
+			sysID := rndLimitID(40)
+			equal(t, r10.Items, []home.Item{
+				{AI: briefB, Why: "mention", Task: taskID, Msg: id(40)},
+				{AI: aiID, Why: "notice", Task: taskID, Msg: sysID, Code: "rounds_limit"},
+			})
+			s.Commit(r10)
+
+			paused := s.Tasks[taskID]
+			equal(t, []any{paused.State, paused.Wait.Kind, paused.Wait.Since, paused.Thread.Rounds, paused.Thread.Count},
+				[]any{"paused", "rounds", int64(clock), 10, 10})
+			sysRow := r10.Rows[2].Value().(proto.MsgRow)
+			rawSys := briefRaw(t, sysRow)
+			var decodedSys proto.MsgRow
+			equal(t, proto.Decode(rawSys, &decodedSys), nil)
+			equal(t, proto.UnexpectedNulls(rawSys), []string{"/re", "/state", "/thread"})
+			equal(t, []any{sysRow.Group, sysRow.Timestamp, sysRow.Thread == nil, sysRow.Main, sysRow.By, sysRow.Kind, string(sysRow.Body)},
+				[]any{groupID, int64(clock), true, false, "system", "system", fmt.Sprintf(`{"code":"rounds_limit","task":%q,"n":10}`, taskID)})
+
+			// Round 11 while already paused at rounds increments rounds to 11 without writing a second rounds_limit.
+			r11 := rndApplyTable(t, tbl, s, d, rndPostEnv(laptop, 41, briefB, "question", taskID, "more", []string{briefA}, ""))
+			equal(t, len(r11.Rows), 2)
+			equal(t, r11.Items, []home.Item{{AI: briefA, Why: "mention", Task: taskID, Msg: id(41)}})
+			s.Commit(r11)
+			equal(t, s.Tasks[taskID].Thread.Rounds, 11)
+
+			// Secretary cannot end the round limit via task/resume.
+			briefRefused(t, rndApplyTable(t, tbl, s, d, rndResumeEnv(laptop, 42, aiID, taskID)), "forbidden")
+
+			if how == "person_text" {
+				resumed := rndApplyTable(t, tbl, s, d, rndPostEnv(guest, 43, "", "text", taskID, "go ahead", []string{briefB}, ""))
+				equal(t, resumed.Items, []home.Item{{AI: briefB, Why: "mention", Task: taskID, Msg: id(43)}})
+				s.Commit(resumed)
+			} else {
+				resumed := rndApplyTable(t, tbl, s, d, rndResumeEnv(browser, 44, "", taskID))
+				equal(t, resumed.Items, []home.Item{{AI: briefA, Why: "resume", Task: taskID}})
+				s.Commit(resumed)
+			}
+			after := s.Tasks[taskID]
+			equal(t, []any{after.State, after.Wait == nil, after.Thread.Rounds}, []any{"active", true, 0})
+		})
+	}
+}
+
+func TestRoundsThreadPostRulesAndStepMerge(t *testing.T) {
+	t.Run("main-line, human-only, self-only, review rows, report, step merge, and no secretary", func(t *testing.T) {
+		s, d := rndState(t), &rndDisk{msgs: map[string]proto.MsgRow{}}
+		taskID := id(70)
+		s.Tasks[taskID] = rndTaskRow(taskID, 1)
+
+		// Main-line AI post, thread AI post mentioning only a human, and thread AI post mentioning only itself count no round.
+		s.Commit(briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 50, briefA, "question", "", "main", []string{briefB}, "")))
+		s.Commit(briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 51, briefA, "progress", taskID, "hi owner", []string{ownerID}, "")))
+		s.Commit(briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 52, briefA, "progress", taskID, "self note", []string{briefA}, "")))
+		equal(t, s.Tasks[taskID].Thread.Rounds, 0)
+
+		// Review without AI mentions (reviewed item, not mention) counts no round.
+		t1 := s.Tasks[taskID]
+		t1.Step = "review"
+		s.Tasks[taskID] = t1
+		revBody := fmt.Sprintf(`{"task":%q,"commit":"c1","score":80,"items":[]}`, taskID)
+		s.Commit(briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 53, briefB, "review", taskID, "needs work", []string{}, revBody)))
+		equal(t, s.Tasks[taskID].Thread.Rounds, 0)
+
+		// Sixth failed review mentioning another AI writes [reviewMsg, taskFailedMsg, taskRow] and counts 1 round.
+		t1 = s.Tasks[taskID]
+		t1.Step, t1.Review = "review", &proto.Review{Round: 5, Failed: 5, Score: 80, By: briefB, Commit: "c1", At: clock - 500}
+		s.Tasks[taskID] = t1
+		revSixth := briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 54, briefB, "review", taskID, "stop", []string{briefA}, revBody))
+		equal(t, len(revSixth.Rows), 3)
+		s.Commit(revSixth)
+		equal(t, s.Tasks[taskID].Thread.Rounds, 1)
+
+		// Report mentioning another AI counts 1 round even though report queues no mention item.
+		t1 = s.Tasks[taskID]
+		t1.State, t1.Step, t1.Failures, t1.Review = "active", "local_check", 0, nil
+		s.Tasks[taskID] = t1
+		s.Commit(briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 55, briefA, "report", taskID, "", []string{briefB}, `{"commit":"c1","files":1,"added":2,"removed":0}`)))
+		equal(t, s.Tasks[taskID].Thread.Rounds, 2)
+
+		// A5.18: at step merge, reaching limits.rounds increments Thread.Rounds without pausing or writing rounds_limit.
+		mergeTask := s.Tasks[taskID]
+		mergeTask.Step, mergeTask.Thread.Rounds = "merge", 9
+		s.Tasks[taskID] = mergeTask
+		atMerge := briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 56, briefA, "question", taskID, "q", []string{briefB}, ""))
+		equal(t, len(atMerge.Rows), 2)
+		equal(t, atMerge.Items, []home.Item{{AI: briefB, Why: "mention", Task: taskID, Msg: id(56)}})
+		s.Commit(atMerge)
+		equal(t, []any{s.Tasks[taskID].State, s.Tasks[taskID].Step, s.Tasks[taskID].Thread.Rounds}, []any{"active", "merge", 10})
+
+		// Without a secretary, reaching limits.rounds writes rounds_limit without queuing a secretary notice.
+		activeAgain := s.Tasks[taskID]
+		activeAgain.Step, activeAgain.Thread.Rounds = "local_check", 9
+		s.Tasks[taskID] = activeAgain
+		s.Group.Secretary = ""
+		noSec := briefApply(t, s, d, receipts{}, laptop, rndPostEnv(laptop, 57, briefA, "question", taskID, "q", []string{briefB}, ""))
+		equal(t, len(noSec.Rows), 3)
+		equal(t, noSec.Items, []home.Item{{AI: briefB, Why: "mention", Task: taskID, Msg: id(57)}})
+
+		// Refused post passes through rndPost untouched.
+		briefRefused(t, briefApply(t, s, d, receipts{}, browser, rndPostEnv(browser, 58, "", "progress", taskID, "no", []string{}, "")), "forbidden")
+	})
+
+	t.Run("person post at step review deduplicates IfNone review item and restores pending card wait", func(t *testing.T) {
+		s := rndState(t)
+		t1ID, t2ID := id(70), id(71)
+		t1 := rndTaskRow(t1ID, 1)
+		t1.State, t1.Step, t1.Thread.Rounds = "paused", "review", 10
+		t1.Wait = &proto.TaskWait{Kind: "rounds", Since: clock - 2000}
+		s.Tasks[t1ID] = t1
+
+		d := &rndDisk{
+			pending: []proto.MsgRow{
+				{RowHeader: proto.RowHeader{Type: "msg", ID: id(80)}, Thread: &t2ID, Kind: "approval", Timestamp: 100, Body: json.RawMessage(fmt.Sprintf(`{"task":%q,"approvers":["u2"]}`, t2ID))},
+				{RowHeader: proto.RowHeader{Type: "msg", ID: id(81)}, Thread: &t1ID, Kind: "decision", Timestamp: 200, Body: json.RawMessage(fmt.Sprintf(`{"task":%q,"to":["u-dec"]}`, t1ID))},
+				{RowHeader: proto.RowHeader{Type: "msg", ID: id(82)}, Thread: &t1ID, Kind: "approval", Timestamp: 300, Body: json.RawMessage(fmt.Sprintf(`{"task":%q,"approvers":["u-app"]}`, t1ID))},
+			},
+			queued: []store.Item{
+				{ID: 1, AI: briefB, Why: "review", Task: &t2ID, Commit: rndPtr("c1")},
+				{ID: 2, AI: briefB, Why: "review", Task: &t1ID, Commit: rndPtr("c0")},
+			},
+		}
+
+		res := briefApply(t, s, d, receipts{}, browser, rndPostEnv(browser, 85, "", "text", t1ID, "continue", []string{briefA}, ""))
+		equal(t, res.Items, []home.Item{
+			{AI: briefB, Why: "review", Task: t1ID, Commit: "c1"},
+			{AI: briefA, Why: "mention", Task: t1ID, Msg: id(85)},
+		})
+		s.Commit(res)
+		equal(t, s.Tasks[t1ID].Wait, &proto.TaskWait{Kind: "approval", Msg: id(82), Who: []string{"u-app"}, Since: 300})
+
+		// Matching queued review suppresses duplicate review item on row 22 activation.
+		t1 = s.Tasks[t1ID]
+		t1.State, t1.Wait, t1.Thread.Rounds = "paused", &proto.TaskWait{Kind: "rounds", Since: clock}, 10
+		s.Tasks[t1ID] = t1
+		d.queued = []store.Item{{ID: 3, AI: briefB, Why: "review", Task: &t1ID, Commit: rndPtr("c1")}}
+		resDup := briefApply(t, s, d, receipts{}, browser, rndPostEnv(browser, 86, "", "text", t1ID, "again", []string{}, ""))
+		equal(t, len(resDup.Items), 0)
+	})
+}
+
+// A mention queued at the round limit reaches the host after failed hosted
+// checks turn the rounds-paused task failed and an admin resumes it, and the
+// mentions of a rounds-paused task leave the wake-up cap after an hour.
+func TestRoundsFailedTaskDeliveryAndWakeCap(t *testing.T) {
+	t.Run("mention at rounds limit is delivered after task becomes failed and is resumed", func(t *testing.T) {
+		tables := home.NodeTables()
+		localCmds := maps.Clone(tables.Commands)
+		taskID := id(70)
+		localCmds["group/create"] = func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
+			grp := proto.GroupRow{
+				RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "Site", Kind: "project",
+				Home: s.Home, Secretary: aiID, Forge: "github", Pass: 90, PassFoundation: 70,
+				Limits: proto.Limits{Rounds: 10, Failures: 3, ReviewRounds: 5, IdleNoticeMinutes: 30},
+			}
+			task := proto.TaskRow{
+				RowHeader: proto.RowHeader{Type: "task", ID: taskID}, Group: s.ID, Num: 1,
+				Title: "Cloud task", Slug: "cloud-task", Origin: "direct", State: "active", Step: "cloud_check",
+				Commit: "c1", Failures: 2, Assignee: briefA, Reviewer: briefB, Pass: 90, Depends: []string{},
+				Thread: proto.ThreadSummary{Count: 9, Rounds: 9}, Created: c.Now, Stats: proto.TaskStats{Started: c.Now},
+			}
+			return home.Result{
+				Rows:          []home.Row{home.RowOf(grp), home.RowOf(person(ownerID, browser, "owner")), home.RowOf(ai(aiID, laptop)), home.RowOf(ai(briefA, laptop)), home.RowOf(ai(briefB, laptop)), home.RowOf(task)},
+				GroupsChanged: true,
+			}, nil
+		}
+		tables.Commands = localCmds
+
+		w := runStart(t, runOpen(t), tables)
+		p, host := w.attach(browser), w.attach(laptop)
+		p.does(groupID, "group", `,"op":"create"`)
+		p.next()
+		host.next()
+
+		// 10th mention pauses task with wait rounds; failed cloud check moves it to failed (wait null);
+		// admin task/resume and person thread text make it active again.
+		m10 := id(60)
+		w.loop.Cmd(host.conn, 2, rndPostEnv(laptop, 60, briefA, "question", taskID, "10th", []string{briefB}, ""))
+		host.next()
+		w.loop.Cmd(host.conn, 3, laptop.Sign(fmt.Sprintf(`{"t":"task","op":"cloud","n":%q,"ts":%d,"g":%q,"id":%q,"commit":"c1","ok":false,"items":[{"name":"ci","ok":false}]}`, id(61), clock, groupID, taskID)))
+		host.next()
+		w.loop.Cmd(p.conn, 2, rndResumeEnv(browser, 62, "", taskID))
+		p.next()
+		w.loop.Cmd(p.conn, 3, rndPostEnv(browser, 63, "", "text", taskID, "fixed", []string{}, ""))
+		p.next()
+
+		// When the host takes its inbox, the 10th mention is due at once, its task active.
+		w.loop.Inbox(host.conn)
+		push := inboxDecode(t, host.next())
+		equal(t, []any{push.Items[0].Item.Why, string(push.Items[0].Item.Msg), push.Items[0].Task.State}, []any{"mention", m10, "active"})
+	})
+
+	t.Run("mentions at rounds limit age out of wakes_per_hour after an hour", func(t *testing.T) {
+		tables := home.NodeTables()
+		localCmds := maps.Clone(tables.Commands)
+		taskID := id(71)
+		localCmds["group/create"] = func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
+			grp := proto.GroupRow{
+				RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "Cap", Kind: "project",
+				Home: s.Home, Secretary: aiID, Forge: "none", Pass: 90, PassFoundation: 70,
+				Limits: proto.Limits{Rounds: 10, WakesPerHour: 2, Failures: 3, ReviewRounds: 5, IdleNoticeMinutes: 30},
+			}
+			task := proto.TaskRow{
+				RowHeader: proto.RowHeader{Type: "task", ID: taskID}, Group: s.ID, Num: 1,
+				Title: "Cap task", Slug: "cap-task", Origin: "direct", State: "active", Step: "local_check",
+				Assignee: briefA, Reviewer: briefB, Pass: 90, Depends: []string{},
+				Thread: proto.ThreadSummary{Count: 9, Rounds: 9}, Created: c.Now, Stats: proto.TaskStats{Started: c.Now},
+			}
+			return home.Result{
+				Rows:          []home.Row{home.RowOf(grp), home.RowOf(person(ownerID, browser, "owner")), home.RowOf(ai(aiID, laptop)), home.RowOf(ai(briefA, laptop)), home.RowOf(ai(briefB, laptop)), home.RowOf(task)},
+				GroupsChanged: true,
+			}, nil
+		}
+		tables.Commands = localCmds
+
+		w := runStart(t, runOpen(t), tables)
+		p, host := w.attach(browser), w.attach(laptop)
+		p.does(groupID, "group", `,"op":"create"`)
+		p.next()
+		host.next()
+		w.loop.Inbox(host.conn)
+
+		// Rounds 10 and 11 both mention briefB at clock (filling WakesPerHour = 2 at clock).
+		for i, n := range []byte{64, 65} {
+			w.loop.Cmd(host.conn, int64(2+i), rndPostEnv(laptop, n, briefA, "question", taskID, "q", []string{briefB}, ""))
+			host.next()
+			inboxDecode(t, host.next())
+		}
+
+		// After 61 minutes, both round-limit wakes have aged out: two new mentions go out immediately, and the third is held for 1 hour.
+		later := int64(clock + 61*60_000)
+		w.clock.Store(later)
+		for i, n := range []byte{66, 67} {
+			env := browser.Sign(fmt.Sprintf(`{"t":"post","n":%q,"ts":%d,"g":%q,"kind":"text","thread":null,"main":false,"text":"m","mentions":[%q],"re":null,"body":{}}`, id(n), later, groupID, briefB))
+			w.loop.Cmd(p.conn, int64(10+i), env)
+			p.next()
+			got := inboxDecode(t, host.next())
+			equal(t, string(got.Items[0].Item.Msg), id(n))
+		}
+		thirdEnv := browser.Sign(fmt.Sprintf(`{"t":"post","n":%q,"ts":%d,"g":%q,"kind":"text","thread":null,"main":false,"text":"m3","mentions":[%q],"re":null,"body":{}}`, id(68), later, groupID, briefB))
+		w.loop.Cmd(p.conn, 12, thirdEnv)
+		p.next()
+		host.quiet()
+		w.clock.Store(later + 3_600_000)
+		w.loop.Tick(time.UnixMilli(later + 3_600_000))
+		equal(t, string(inboxDecode(t, host.next()).Items[0].Item.Msg), id(68))
 	})
 }
 

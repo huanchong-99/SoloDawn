@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -56,9 +55,9 @@ type homeRoundsWorld struct {
 	directMsg    string
 	guestMsg     string
 	threadMsg    string
+	tenthMsg     string
 	firstItemID  int64
 	lastQuietID  int64
-	heldMsgID    string
 	midState     string
 	midWait      string
 	lastErrCode  string
@@ -130,15 +129,7 @@ func homeRoundsWhenSteps(sc *godog.ScenarioContext, w *homeRoundsWorld) {
 func homeRoundsThenSteps(sc *godog.ScenarioContext, w *homeRoundsWorld) {
 	sc.Step(`^the rounds task is "([^"]*)" waiting for "([^"]*)" at (\d+) rounds$`, w.checkTaskRounds)
 	sc.Step(`^the main line of the rounds home holds a "([^"]*)" system message for the task$`, w.checkMainSystemMsg)
-	sc.Step(`^the rounds host has received "([^"]*)" and the 10th mention is held$`, w.checkHeldAtLimit)
-	sc.Step(`^the rounds host receives the released mention$`, w.checkReleasedMention)
-	sc.Step(`^the rounds home refuses with "([^"]*)" and the 10th mention stays held$`, func(code string) error {
-		if w.lastErrCode != code {
-			return fmt.Errorf("got refusal %q, want %q", w.lastErrCode, code)
-		}
-		return w.assertMentionStillHeld()
-	})
-	sc.Step(`^the rounds host receives "([^"]*)" and the released mention$`, w.checkResumeAndReleased)
+	sc.Step(`^the rounds host has received the 10th mention with the task "([^"]*)" and "([^"]*)"$`, w.checkTenthPush)
 	sc.Step(`^the first mention item is retired and the rounds host receives a jump mention for "([^"]*)"$`, w.checkDirectJump)
 	sc.Step(`^the rounds task was "([^"]*)" waiting for "([^"]*)" meanwhile and is "([^"]*)" waiting for "([^"]*)" afterwards$`, w.checkPreemptCycle)
 	sc.Step(`^the rounds host receives a jump mention for "([^"]*)" on the task$`, w.checkThreadJump)
@@ -384,16 +375,19 @@ func (w *homeRoundsWorld) exchangeOneRound(aiA, aiB string, i, total int) error 
 	if err != nil {
 		return err
 	}
-	items, err := w.drainHostItems(1)
-	if err != nil {
-		return err
-	}
 	if i < total {
+		items, err := w.drainHostItems(1)
+		if err != nil {
+			return err
+		}
 		w.ackItem(items[0].Item.Item)
 		return nil
 	}
-	w.heldMsgID = msgID
-	w.receivedPush = items
+	items, err := w.drainHostItems(2)
+	if err != nil {
+		return err
+	}
+	w.tenthMsg, w.receivedPush = msgID, items
 	return nil
 }
 
@@ -548,74 +542,23 @@ func homeRoundsMatchesLimit(raw []byte, code, taskID string) bool {
 		return false
 	}
 	var body proto.RoundsLimitBody
-	json.Unmarshal(m.Body, &body)
+	if json.Unmarshal(m.Body, &body) != nil {
+		return false
+	}
 	return body.Code == code && body.Task == taskID && body.N == 10
 }
 
-func (w *homeRoundsWorld) checkHeldAtLimit(want string) error {
-	if len(w.receivedPush) != 1 || w.formatItem(w.receivedPush[0].Item) != want {
-		return fmt.Errorf("host received %+v; want %q", w.receivedPush, want)
+func (w *homeRoundsWorld) checkTenthPush(wantState, wantNotice string) error {
+	if len(w.receivedPush) != 2 || w.receivedPush[0].Task == nil {
+		return fmt.Errorf("host received %+v; want 10th mention and notice", w.receivedPush)
 	}
-	if err := w.checkHostQuiet(); err != nil {
-		return err
-	}
-	return w.assertMentionStillHeld()
-}
-
-func (w *homeRoundsWorld) assertMentionStillHeld() error {
-	var queued []store.Item
-	err := w.db.Write(func(tx *store.Tx) error {
-		var txErr error
-		queued, txErr = tx.Queued(w.groupID)
-		return txErr
-	})
-	if err != nil {
-		return err
-	}
-	var held int
-	for _, q := range queued {
-		if homeRoundsHeldMsg(q, w.heldMsgID) {
-			held++
-		}
-	}
-	if held != 1 {
-		return fmt.Errorf("held mention count = %d, want 1", held)
-	}
-	return nil
-}
-
-func homeRoundsHeldMsg(q store.Item, msgID string) bool {
-	if q.Why != "mention" || q.Msg == nil {
-		return false
-	}
-	return *q.Msg == msgID && q.NotBefore == math.MaxInt64
-}
-
-func (w *homeRoundsWorld) checkReleasedMention() error {
-	items, err := w.drainHostItems(1)
-	if err != nil {
-		return err
-	}
-	it := items[0].Item
-	got := []any{it.Why, string(it.Msg), string(it.Task)}
-	want := []any{"mention", w.heldMsgID, w.taskID}
+	first := w.receivedPush[0]
+	got := []string{first.Item.Why, string(first.Item.Msg), first.Task.State, taskWaitKind(*first.Task), w.formatItem(w.receivedPush[1].Item)}
+	want := []string{"mention", w.tenthMsg, wantState, "rounds", wantNotice}
 	if !slices.Equal(got, want) {
-		return fmt.Errorf("released item = %+v, want %v", it, want)
+		return fmt.Errorf("got %v; want %v", got, want)
 	}
-	return nil
-}
-
-func (w *homeRoundsWorld) checkResumeAndReleased(wantResume string) error {
-	items, err := w.drainHostItems(2)
-	if err != nil {
-		return err
-	}
-	got := []string{w.formatItem(items[0].Item), items[1].Item.Why + " " + string(items[1].Item.Msg)}
-	want := []string{wantResume, "mention " + w.heldMsgID}
-	if !slices.Equal(got, want) {
-		return fmt.Errorf("host received %v, want %v", got, want)
-	}
-	return nil
+	return w.checkHostQuiet()
 }
 
 func (w *homeRoundsWorld) checkDirectJump(aiName string) error {

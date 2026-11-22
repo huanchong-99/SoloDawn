@@ -61,6 +61,12 @@ type State struct {
 	// Whoever runs the home keeps it, on the goroutine of the group; a Hook
 	// reads it.
 	Online map[string]bool
+
+	// quiet holds, by task id, the last activity of each task whose quiet
+	// period has already notified the secretary (task-machine.md row 23). It
+	// is kept in memory, on the goroutine of the group, and starts again with
+	// the home.
+	quiet map[string]int64
 }
 
 // NewState returns the state of a group that does not exist yet, on the home
@@ -68,7 +74,7 @@ type State struct {
 func NewState(group, home, owner string) *State {
 	return &State{ID: group, Home: home, Owner: owner, Logs: map[string]*identity.Log{},
 		People: map[string]proto.HumanMemberRow{}, AIs: map[string]proto.AIMemberRow{}, Tasks: map[string]proto.TaskRow{},
-		Wakes: map[string][]int64{}, Online: map[string]bool{}}
+		Wakes: map[string][]int64{}, Online: map[string]bool{}, quiet: map[string]int64{}}
 }
 
 // Disk is what the rules read of a group beyond its state rows: messages,
@@ -296,8 +302,9 @@ var (
 	After    = Rules[Hook]{}
 )
 
-// Add puts a function under its key. A key is given once.
-func (t Table) Add(key string, f Func) { addOnce(t, key, f) }
+// Add puts a function under its key. A key is given once. A post command
+// gets the thread round rules around it (rndWrap).
+func (t Table) Add(key string, f Func) { addOnce(t, key, rndWrap(key, f)) }
 
 // Add puts a function under its name. A name is given once.
 func (r Rules[F]) Add(name string, f F) { addOnce(r, name, f) }

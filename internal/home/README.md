@@ -663,8 +663,8 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
 
 `rounds.go` holds the `jump` command ([commands](../../planning/contracts/commands.md) 1.4, R-72),
 the `quiet` timer and its `After` hook ([task-machine](../../planning/contracts/task-machine.md)
-row 23), and the thread round and held-mention transitions (rows 13, 21 and 22, and section 4
-"Held by the round limit"; [messages](../../planning/contracts/messages.md) 2.11):
+row 23), and the thread round transitions (rows 21 and 22, and section 4 "Held by the round limit";
+[messages](../../planning/contracts/messages.md) 2.11):
 
 - **`jump`.** Registered under `jump`. Refuses an AI signer (a non-empty `c.Who.AI`) with
   `forbidden`, a missing `msg` with `not_found`, and any `msg` whose `by` differs from `c.Who.Human`
@@ -676,24 +676,22 @@ row 23), and the thread round and held-mention transitions (rows 13, 21 and 22, 
 - **`quiet` timer.** Registered under `Timers["quiet"]` and `After["quiet"]`. When the group has a
   secretary and `limits.idle_notice_minutes > 0`, checks each task in sorted id order: if the task
   has had no thread message for at least `limits.idle_notice_minutes` (measured from
-  `thread.last.ts`, else `stats.started` when non-zero, else `created`), has neither an
-  unacknowledged `quiet` notice in `Disk.Queued()` nor already notified the secretary in the current
-  quiet period, and passes `Step` with `OnQuiet` (`ByHome`: `active`, `wait` `null`, `step` not
-  `merge`), it queues one `notice` (`code: "quiet"`) for `group.secretary`. `After["quiet"]` records
-  the task row as notified on `weak.Make(s)` once the transaction commits, so a new thread message
-  or any change to the task row resets the quiet period without sharing state across groups
-  ([issues](../../issues.md)).
-- **Rounds and held mentions.** Wraps every `post/*` entry and `task/resume` in `Commands` at
-  `init` (`rndWrap`). On a thread `post` by an AI that mentions an AI (in `mentions` or via a
-  queued `mention` item such as `call`), steps `OnMention` (row 21); when the round limit pauses
-  the task, writes the main-line `system` message `rounds_limit` (`tskThreadSystem`) under the first
-  16 bytes of the SHA-256 of `SoloDawn rounds limit <n>` in base64url ([issues](../../issues.md))
-  and queues `notice` (`code: "rounds_limit"`) naming it for the secretary when the group has one.
-  While a task's `wait.kind` is `rounds`, thread `mention` items are held with `NotBefore = runNever`
-  (`math.MaxInt64`), including any earlier unacknowledged thread `mention` still in `Disk.Queued()`.
-  When `wait` leaves `rounds` via a person's thread `post/text` (row 22, passing `tskPending` and
-  deduplicating `IfNone` `review` items through `tskItemCtx`) or an admin's `task/resume` (row 13),
-  held thread `mention` items in `Disk.Queued()` are retired and re-queued with `NotBefore = 0`.
+  `thread.last.ts`, else `stats.started` when non-zero, else `created`), has not already notified
+  the secretary at that last-activity timestamp, and passes `Step` with `OnQuiet` (`ByHome`:
+  `active`, `wait` `null`, `step` not `merge`), it queues one `notice` (`code: "quiet"`) for
+  `group.secretary`. `After["quiet"]` records the task's last-activity timestamp in the group's
+  `State` (in memory) once the transaction commits, so any new thread message starts a new quiet
+  period ([issues](../../issues.md)).
+- **Rounds.** `Table.Add` wraps every `post/*` entry (`rndWrap`), without depending on file
+  initialisation order. On a thread `post` by an AI that mentions another AI (in `mentions` with
+  `id` other than `msg.By`, or via a queued `mention` item such as `call`), steps `OnMention` (row
+  21); when the round limit pauses the task, writes the main-line `system` message `rounds_limit`
+  (`tskThreadSystem`) under `revDerivedID("SoloDawn rounds limit ", c.Nonce)`
+  ([issues](../../issues.md)) and queues `notice` (`code: "rounds_limit"`) naming it for the
+  secretary when the group has one. Thread `mention` items are queued at once with the updated
+  `paused` task row; the host holds them while the task is `paused` or `failed` and delivers them
+  again once a person's thread `post/text` (row 22, passing `tskPending` and deduplicating `IfNone`
+  `review` items through `tskItemCtx`) or an admin's `task/resume` (row 13) activates the task.
 
 ## Known limitations
 
@@ -797,7 +795,7 @@ reads, exact 61,440-byte boundaries, page bounds checks, group access checks, de
 and store failures. `features/home_fetch.feature` holds the scroll-back scenarios of A2.2 and the
 deleted-row scenario of A2.7.
 
-`rounds_test.go` and `rounds_internal_test.go` cover `jump`, the `quiet` timer, `After["quiet"]`,
-rows 21 and 22, and held-mention holding and release through `Commands.Apply`, `rndWrap` and
-`StartLoop`. `features/home_rounds.feature` holds acceptance tests A5.8, A5.11 (home half) and
-A5.16 over `StartLoop`.
+`rounds_test.go` covers `jump`, the `quiet` timer, `After["quiet"]`, and rows 21 and 22 through
+`Commands.Apply`, `Table.Add` and `StartLoop`, including delivery after a rounds-paused task fails
+and is resumed and wake-up cap ageing. `features/home_rounds.feature` holds acceptance tests A5.8,
+A5.11 (home half) and A5.16 over `StartLoop`.

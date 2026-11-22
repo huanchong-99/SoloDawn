@@ -1,30 +1,30 @@
-Feature: Rounds in threads, held mentions, queue jumps and the quiet-task timer
+Feature: Rounds in threads, queue jumps and the quiet-task timer
   AI-to-AI exchanges in a task thread count rounds up to the group's limit, where the task pauses
   with wait "rounds", a "rounds_limit" system message is written in the main line, the secretary is
-  notified, and mentions in that thread are held until a person's message in the thread or an
-  admin's "task resume" ends the wait. "jump" retires the newest unacknowledged mention item from a
-  message of that person in the same thread or main line and sends a jump replacement at once. The
-  "quiet" timer notifies the secretary once per quiet period for an active task with no wait before
-  step "merge" that has had no thread message for "idle_notice_minutes".
+  notified, and the host holds thread mentions while the task is paused until a person's message in
+  the thread or an admin's "task resume" ends the wait. "jump" retires the newest unacknowledged
+  mention item from a message of that person in the same thread or main line and sends a jump
+  replacement at once. The "quiet" timer notifies the secretary once per quiet period for an active
+  task with no wait before step "merge" that has had no thread message for "idle_notice_minutes".
 
-  Scenario: Ten AI rounds pause the task and hold mentions until a person posts in the thread
+  Scenario: Ten AI rounds pause the task until a person posts in the thread
     Given a rounds home with a secretary, two working AIs and an active task for "ai-one"
     When "ai-one" and "ai-two" exchange 10 thread mentions
     Then the rounds task is "paused" waiting for "rounds" at 10 rounds
     And the main line of the rounds home holds a "rounds_limit" system message for the task
-    And the rounds host has received "notice secretary rounds_limit" and the 10th mention is held
+    And the rounds host has received the 10th mention with the task "paused" and "notice secretary rounds_limit"
     When the owner posts "Keep the direct path simple." in the rounds task thread
     Then the rounds task is "active" waiting for "nothing" at 0 rounds
-    And the rounds host receives the released mention
 
-  Scenario: Task resume by an admin releases held mentions while the secretary is refused
+  Scenario: Task resume by an admin activates a rounds-paused task while the secretary is refused
     Given a rounds home with a secretary, two working AIs and an active task for "ai-one"
     And "ai-one" and "ai-two" have exchanged 10 thread mentions
     When the secretary tries to resume the rounds task
-    Then the rounds home refuses with "forbidden" and the 10th mention stays held
+    Then the rounds home refuses with "forbidden"
+    And the rounds task is "paused" waiting for "rounds" at 10 rounds
     When the owner resumes the rounds task
     Then the rounds task is "active" waiting for "nothing" at 0 rounds
-    And the rounds host receives "resume ai-one" and the released mention
+    And the rounds host receives "resume ai-one"
 
   Scenario: Jump the queue on a direct request and on a running task thread
     Given a rounds home with a secretary, two working AIs and an active task for "ai-one"
@@ -55,9 +55,9 @@ Feature: Rounds in threads, held mentions, queue jumps and the quiet-task timer
     Then the rounds home refuses with "<code>"
 
     Examples:
-      | queue_state    | actor          | target               | code      |
-      | unacknowledged | "ai-one"       | the direct request   | forbidden |
-      | unacknowledged | a guest member | the direct request   | forbidden |
-      | unacknowledged | the owner      | a guest's message    | forbidden |
-      | unacknowledged | the owner      | a missing message    | not_found |
-      | acknowledged   | the owner      | the direct request   | conflict  |
+      | queue_state    | actor          | target             | code      |
+      | unacknowledged | "ai-one"       | the direct request | forbidden |
+      | unacknowledged | a guest member | the direct request | forbidden |
+      | unacknowledged | the owner      | a guest's message  | forbidden |
+      | unacknowledged | the owner      | a missing message  | not_found |
+      | acknowledged   | the owner      | the direct request | conflict  |

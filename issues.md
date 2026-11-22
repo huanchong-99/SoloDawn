@@ -9,13 +9,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-21 · deviation · The `rounds_limit` system message has an id derived from the triggering post's nonce
 
 - Symptom: when a `post` by an AI in a task's thread reaches `limits.rounds` (task-machine row 21), the command writes both the `post` row under `n` and the main-line `rounds_limit` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn rounds limit <n>` in base64url, rather than a random id.
-- Cause: `n` already names the `post` row, and a command function is pure and has no randomness (`rndSystemID` in `internal/home/rounds.go:232`).
+- Cause: `n` already names the `post` row, and a command function is pure and has no randomness (`revDerivedID` in `internal/home/cmd_review.go:149`, called from `internal/home/rounds.go:176`).
 - Status: open, decided by unit HM-13 on 2026-11-21, for the same reason as `briefTaskID` below.
 
-### 2026-11-21 · limitation · Quiet-period tracking after `ack` and `runNever` wake entries live in memory
+### 2026-11-21 · limitation · Quiet-period tracking lives in memory
 
-- Symptom: (1) once a host acknowledges a `quiet` `notice` item (`tx.Ack` deletes it from `inbox`), a home restart forgets that the current quiet period was already reported and can send one more `quiet` notice if the task stays silent; while the item is unacknowledged in `inbox`, no duplicate is queued across a restart. (2) Holding a thread `mention` item at `NotBefore = math.MaxInt64` while `wait.kind` is `rounds` and retiring and re-queuing it when the wait ends leaves a `math.MaxInt64` entry in `State.Wakes[ai]` until the home restarts.
-- Cause: row 23 writes no row (`planning/contracts/task-machine.md` row 23), so `After["quiet"]` records notified quiet periods per `*State` in memory (`rndRememberQuiet` in `internal/home/rounds.go:152`); `(*runGroup).count` (`internal/home/run_group.go:194`) and `inboxWake` (`internal/home/inbox.go:109`) append `max(now, it.NotBefore)` to `State.Wakes[it.AI]` and do not remove entries on retirement (`internal/home/README.md`, "The wake-up cap").
+- Symptom: a home restart forgets which quiet periods already notified the secretary and can send one more `quiet` notice if an active task stays silent across the restart.
+- Cause: row 23 writes no row (`planning/contracts/task-machine.md` row 23), so `After["quiet"]` records each notified task's last-activity timestamp in the group's `State.quiet` in memory (`rndRememberQuiet` in `internal/home/rounds.go:121`, `internal/home/home.go:69`).
 - Status: open, accepted in step 1.
 
 ### 2026-11-22 · limitation · macOS Application Firewall blocks incoming direct connections to an unsigned `solodawn` binary
@@ -146,7 +146,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: if a CLI process emits a duplicate `TurnEnded` for a finished turn and `runProcessLoop` handles that event after `Runner.Turn` has started the next turn on the same `waiting` process, the runtime ends the new turn prematurely, moves the session back to `waiting`, reports `waiting` status, and calls `Deliver` early.
 - Cause: `liveProc` tracks an open turn with a boolean `turnActive` rather than a per-turn identifier (`internal/host/run.go:107`). Once `claimWaitingProc` sets `lp.turnActive = true` for the next turn (`internal/host/run.go:285`), `onProcessTurnEnded` (`internal/host/run.go:458`) passes `finishActiveTurn` (`internal/host/run.go:473`) for the stale event, clears `lp.turnActive` (`internal/host/run.go:479`), and moves the session from `working` to `waiting` (`internal/host/run.go:466`).
 - Status: open, accepted on 2026-11-21 with no product code added per the owner's rule on rare cases. In production the next turn starts only after `Deliver` (`internal/host/run.go:470`) fetches held items from the home, leaving a small window for a duplicate event from the previous turn to arrive that late.
->>>>>>> origin/rebuild
 
 ### 2026-11-21 · limitation · The jobs of a group in the home's run loop have no bound
 
@@ -181,7 +180,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-21 · deviation · A `task_failed` row written beside a `checks` or `review` row has an id derived from the command's nonce
 
 - Symptom: when `task cloud` reaches `limits.failures` (row 6 into row 14) or `post` of kind `review` exceeds `limits.review_rounds` (row 7 into row 14), the command writes two message rows in the task's thread: the `checks` or `review` row under `n`, and the `task_failed` `system` row under the first 16 bytes of the SHA-256 of `SoloDawn task failed <n>` in base64url.
-- Cause: `n` already names the `checks` or `review` message row, and a command function is pure and has no randomness (`revFailedID` in `internal/home/cmd_review.go:149`).
+- Cause: `n` already names the `checks` or `review` message row, and a command function is pure and has no randomness (`revDerivedID` in `internal/home/cmd_review.go:149`).
 - Status: open, decided in unit HM-11 on 2026-11-21, for the same reason as `briefTaskID` above.
 
 ### 2026-11-21 · deviation · Passed hosted checks write a `checks` message in the task's thread
