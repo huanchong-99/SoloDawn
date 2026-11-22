@@ -334,7 +334,9 @@ none of the three may wait for a lock that is held around a call of `Attach`, `S
 groups: they must not be called on the goroutine of a group, which is where a hook runs, or on the
 store's writer, which is where the function of a command, a timer, a handler, a `Disk` and a
 `Write.Put` run. A client's `Send` runs on the goroutine of its connection and may call every
-entry. A hook may start transactions of the store; what runs on the store's writer may not. The
+entry except `Close`. `Close` waits for every connection's `Send` in progress, and for `Close` of
+a given-up client, so a `Send` must return once its connection is gone. A hook may start
+transactions of the store; what runs on the store's writer may not. The
 goroutine of a group waits for the store's writer and for nothing else, and what runs on the writer
 takes no lock of the loop: so no lock of a client, of a host's session or of the node can close a
 circle through the loop, as long as that code keeps to this paragraph.

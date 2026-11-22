@@ -719,3 +719,48 @@ func TestRunACloseEndsEverything(t *testing.T) {
 	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM row"), 4)
 	equal(t, len(late.client.got), 0)
 }
+
+// Close waits for an in-flight Client.Send on attached and detached connections.
+func TestRunCloseWaitsForConnectionSends(t *testing.T) {
+	checkCloseWaitsForSend(t, false)
+	checkCloseWaitsForSend(t, true)
+}
+
+func checkCloseWaitsForSend(t *testing.T, detachFirst bool) {
+	t.Helper()
+	db, err := store.Open(":memory:")
+	equal(t, err, nil)
+	loop, err := home.StartLoop(home.LoopConfig{Store: db, Home: node.ID(), Owner: browser.ID(), Logs: runLogs(t), Tables: runTables()})
+	equal(t, err, nil)
+
+	var sentDone atomic.Bool
+	client := runNewClient()
+	client.hold = make(chan struct{})
+	client.during = func(any) {
+		runExec(t, db, "INSERT INTO setting(key, value) VALUES('during', '1')")
+		sentDone.Store(true)
+	}
+	conn := loop.Attach(browser.ID(), client)
+	idle := loop.Attach(laptop.ID(), runNewClient())
+	loop.Welcome(conn, runWelcome)
+	runWait(t, client.started)
+	if detachFirst {
+		loop.Detach(conn)
+	}
+
+	closed := make(chan struct{}) // single reader: checkCloseWaitsForSend
+	go func() {
+		loop.Close()
+		db.Close()
+		close(closed)
+	}()
+	runWait(t, idle.Gone())
+	select {
+	case <-closed:
+		t.Fatal("Close returned while Client.Send was still running")
+	default:
+	}
+	close(client.hold)
+	runWait(t, closed)
+	equal(t, sentDone.Load(), true)
+}

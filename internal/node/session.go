@@ -53,6 +53,7 @@ type SessionConfig struct {
 	Now         func() time.Time
 	Report      func(error)
 	OnAdopt     func(owner string)
+	Spawn       func(func())
 }
 
 // Sessions serves ctl connections, dispatches home and host surfaces, forwards
@@ -121,6 +122,9 @@ func sesDefaultConfig(cfg SessionConfig) SessionConfig {
 	}
 	if cfg.Report == nil {
 		cfg.Report = func(err error) { log.Printf("node: %v", err) }
+	}
+	if cfg.Spawn == nil {
+		cfg.Spawn = func(fn func()) { go fn() }
 	}
 	return cfg
 }
@@ -346,7 +350,7 @@ func (s *Sessions) sesCmd(ctx context.Context, c *sesConn, id int64, data json.R
 		return
 	}
 	if sesIsHostCmd(req.Env.Payload) {
-		go s.sesHostCmd(ctx, c, id, req.Env)
+		s.cfg.Spawn(func() { s.sesHostCmd(ctx, c, id, req.Env) })
 		return
 	}
 	s.cfg.Home.Cmd(c.home, id, req.Env)

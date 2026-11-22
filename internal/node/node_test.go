@@ -835,3 +835,83 @@ func pumpWS(ctx context.Context, cancel context.CancelFunc, src, dst *websocket.
 		}
 	}
 }
+
+func TestCloseWaitsForInflightHostCmd(t *testing.T) {
+	dir := socketRoot(t)
+	n, err := openNode(t.Context(), dir)
+	mustNoErr(t, err)
+	t.Cleanup(n.Close)
+
+	browserKey := adoptTestBrowser(t, n)
+	started := make(chan struct{}) // single reader: TestCloseWaitsForInflightHostCmd
+	release := make(chan struct{}) // single reader: host.join handler
+	n.sessions.Commands["host.join"] = func(ctx context.Context, _ Ctl, _ string, _ json.RawMessage) (any, error) {
+		close(started)
+		<-ctx.Done()
+		<-release
+		return nil, nil
+	}
+
+	fc := startAdoptedConn(t, n, browserKey.ID())
+	nonce := sesID("inflight-close")
+	joinEnv := browserKey.Sign(fmt.Sprintf(`{"t":"host.join","n":%q,"ts":%d,"to":%q}`, nonce, time.Now().UnixMilli(), n.key.ID()))
+	fc.push(proto.Cmd{Request: proto.Request{Type: "cmd", ID: 2}, Env: joinEnv})
+	<-started
+
+	closed := make(chan struct{}) // single reader: TestCloseWaitsForInflightHostCmd
+	go func() {
+		n.Close()
+		close(closed)
+	}()
+	<-n.ctx.Done()
+	<-fc.Done()
+	select {
+	case <-closed:
+		t.Fatal("Close returned while host command was still running")
+	default:
+	}
+	close(release)
+	<-closed
+	verifyStoredReceipt(t, filepath.Join(dir, "node.db"), browserKey.ID(), string(nonce))
+}
+
+func adoptTestBrowser(t *testing.T, n *nodeRuntime) identity.Key {
+	t.Helper()
+	saved := installService
+	t.Cleanup(func() { installService = saved })
+	installService = func(string, string) error { return nil }
+	browserKey := sesKey("browser")
+	e1 := sesAddEntry(browserKey, browserKey.ID(), 1, browserKey.ID(), "browser", "b1")
+	e2 := sesAddEntry(browserKey, browserKey.ID(), 2, n.key.ID(), "node", "desk")
+	cand, err := identity.Replay(browserKey.ID(), []proto.Envelope{e1, e2})
+	mustNoErr(t, err)
+	adopted, err := n.logs.dvlAdopt(browserKey.ID(), cand, nil)
+	mustNoErr(t, err)
+	mustEqual(t, adopted, true)
+	return browserKey
+}
+
+func startAdoptedConn(t *testing.T, n *nodeRuntime, device string) *fakeCtl {
+	t.Helper()
+	fc := newFakeCtl()
+	n.spawn(func() { n.sessions.Serve(n.ctx, device, false, fc) })
+	fc.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "b1", Addrs: []string{}})
+	fc.next(t)
+	fc.next(t)
+	return fc
+}
+
+func verifyStoredReceipt(t *testing.T, dbPath, signer, nonce string) {
+	t.Helper()
+	db, err := store.Open(dbPath)
+	mustNoErr(t, err)
+	defer db.Close()
+	var out store.Outcome
+	read := func(tx *store.Tx) error {
+		var err error
+		out, err = tx.Receipt(signer, nonce)
+		return err
+	}
+	mustNoErr(t, db.Write(read))
+	mustEqual(t, out, store.Outcome{OK: true})
+}
