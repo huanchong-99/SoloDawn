@@ -114,7 +114,7 @@ func (st *codexAcceptanceState) baseLaunch(session, token string) host.Launch {
 		Session:      session,
 		Level:        2,
 		Shim:         []string{exe, "codex-mcp-shim", "--token", token},
-		Instructions: "Task instructions.",
+		Instructions: "Group instructions.",
 		ToolTimeout:  300 * time.Second,
 	}
 }
