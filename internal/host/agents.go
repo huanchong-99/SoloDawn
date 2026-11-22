@@ -201,6 +201,7 @@ func agtReadRow(tx *store.Tx, f agtFound, loginOK bool) (proto.HostAgent, error)
 		Caps:       caps,
 		Driver:     agtDriverProto(f.agent),
 		Groups:     []proto.AgentGroup{},
+		Models:     []proto.Model{},
 	}, nil
 }
 

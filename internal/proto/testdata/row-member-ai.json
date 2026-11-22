@@ -27,5 +27,9 @@
     "spend_today": 0,
     "spend_cap": 10.5,
     "turns_today": 14
-  }
+  },
+  "model": "gpt-5.4",
+  "effort": "high",
+  "tier": "strong",
+  "skills": "Go backend, protocol design"
 }

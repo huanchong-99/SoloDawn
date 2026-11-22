@@ -53,6 +53,27 @@
           "queued": 3,
           "watchers": []
         }
+      ],
+      "models": [
+        {
+          "model": "opus",
+          "name": "Opus",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "fast": true,
+          "tier": "strong"
+        },
+        {
+          "model": "haiku",
+          "name": "Haiku",
+          "efforts": [],
+          "tier": "light"
+        }
       ]
     },
     {
@@ -69,7 +90,8 @@
         ],
         "takeover": "resume"
       },
-      "groups": []
+      "groups": [],
+      "models": []
     }
   ],
   "settings": {
