@@ -3,6 +3,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	_ "embed"
 	"fmt"
@@ -75,8 +76,10 @@ func (s *Store) Close() error {
 
 type Tx struct{ *sql.Tx }
 
-func transaction(db *sql.DB, run func(*Tx) error) error {
-	tx, err := db.Begin()
+func transaction(db interface {
+	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+}, run func(*Tx) error) error {
+	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {
 		return err
 	}

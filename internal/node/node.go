@@ -250,6 +250,7 @@ func (n *nodeRuntime) stepServices() error {
 func (n *nodeRuntime) wireServices() {
 	n.host.Shim = []string{n.exe, "mcp"}
 	n.local = AttachLocal(n.host, n.loop)
+	n.local.watchGroups()
 	nameFn := func() string { return ReadName(n.db) }
 	n.sessions = NewSessions(SessionConfig{
 		ID: n.key.ID(), Version: Version, Store: n.db, Logs: n.logs,
@@ -638,6 +639,8 @@ func (n *nodeRuntime) runLocalCmd(cmd string, line []byte) ([]string, error) {
 		return n.cmdPairBrowser()
 	case "open":
 		return n.cmdOpen()
+	case "group.export", "group.import":
+		return nil, n.cmdGroup(line)
 	default:
 		return nil, fmt.Errorf("unknown command: %s", cmd)
 	}

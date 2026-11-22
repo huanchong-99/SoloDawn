@@ -27,6 +27,16 @@ func afterMigration(tx *Tx, migration string) error {
 func (tx *Tx) backfillKB() error {
 	rows, err := tx.Query(`SELECT g, id, data->>'name', data->>'text' FROM row
 		WHERE r='note' AND gone=0 AND data->>'type'='kb'`)
+	return tx.fillKB(rows, err)
+}
+
+func (tx *Tx) backfillGroupKB(group string) error {
+	rows, err := tx.Query(`SELECT g, id, data->>'name', data->>'text' FROM row
+		WHERE g=? AND r='note' AND gone=0 AND data->>'type'='kb'`, group)
+	return tx.fillKB(rows, err)
+}
+
+func (tx *Tx) fillKB(rows *sql.Rows, err error) error {
 	items, err := collect(rows, err, scanKBEntry)
 	if err != nil {
 		return err

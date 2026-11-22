@@ -35,15 +35,22 @@ func (l *Loop) load() (states []*State, err error) {
 		return err
 	})
 	for _, held := range stored {
-		s := l.fresh(held.group)
-		slices.SortStableFunc(held.rows, func(a, b json.RawMessage) int { return cmp.Compare(runVersion(a), runVersion(b)) })
-		for _, data := range held.rows {
-			err = errors.Join(err, runHold(s, data))
-		}
-		s.Seq, s.Num = held.seq, max(s.Num, int(held.num))
+		s, failed := l.restoreState(held)
+		err = errors.Join(err, failed)
 		states = append(states, s)
 	}
 	return states, err
+}
+
+func (l *Loop) restoreState(held runStored) (*State, error) {
+	s := l.fresh(held.group)
+	slices.SortStableFunc(held.rows, func(a, b json.RawMessage) int { return cmp.Compare(runVersion(a), runVersion(b)) })
+	var err error
+	for _, data := range held.rows {
+		err = errors.Join(err, runHold(s, data))
+	}
+	s.Seq, s.Num = held.seq, max(s.Num, int(held.num))
+	return s, err
 }
 
 // runVersion is the version of the entry of a device row, and 0 for every
@@ -60,11 +67,16 @@ func runVersion(data json.RawMessage) int {
 func runRead(tx *store.Tx) (stored []runStored, err error) {
 	groups, err := tx.Groups()
 	for _, group := range groups {
-		rows, failed := tx.StateRows(group)
-		seq, num, missed := tx.Counters(group)
-		stored, err = append(stored, runStored{group, rows, seq, num}), errors.Join(err, failed, missed)
+		held, failed := runReadGroup(tx, group)
+		stored, err = append(stored, held), errors.Join(err, failed)
 	}
 	return stored, err
+}
+
+func runReadGroup(tx *store.Tx, group string) (runStored, error) {
+	rows, failed := tx.StateRows(group)
+	seq, num, missed := tx.Counters(group)
+	return runStored{group, rows, seq, num}, errors.Join(failed, missed)
 }
 
 // runHolders reads a stored state row into the state, by its r, and for a
