@@ -354,7 +354,8 @@ func TestRoundsTenExchangesPauseAndResume(t *testing.T) {
 
 			if how == "person_text" {
 				resumed := briefApply(t, s, d, receipts{}, laptop, rndPostEnv(guest, 43, "", "text", taskID, "go ahead", []string{briefB}, ""))
-				equal(t, resumed.Items, []home.Item{{AI: briefB, Why: "mention", Task: taskID, Msg: id(43)}})
+				equal(t, resumed.Items, []home.Item(nil))
+				equal(t, cfmCard(t, resumed).State.Status, "pending")
 				s.Commit(resumed)
 			} else {
 				resumed := briefApply(t, s, d, receipts{}, laptop, rndResumeEnv(browser, 44, "", taskID))
