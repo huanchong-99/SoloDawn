@@ -62,8 +62,13 @@ func TestPagesAndDelta(t *testing.T) {
 	card.Seq = 8
 	card.State = &proto.CardState{Status: "decided"}
 	put(t, s, "g", 20, card)
+	put(t, s, "g", 20, proto.NoteRow{RowHeader: header("note", "preset1", 9), Pos: 9, Group: "g", NoteType: "preset", Name: "Calm"})
+	put(t, s, "g", 20, proto.NoteRow{RowHeader: header("note", "kb1", 10), Pos: 10, Group: "g", NoteType: "kb", Name: "Calm"})
+	put(t, s, "g", 20, proto.NoteRow{RowHeader: header("note", "preset2", 11), Pos: 11, Group: "g", NoteType: "preset", Name: "Bold"})
+	put(t, s, "g", 30, proto.NoteRow{RowHeader: header("note", "preset1", 12), Pos: 9, Group: "g", NoteType: "preset", Name: "Calm", Text: "updated"})
 	put(t, s, "other", 10, msg("elsewhere", 1, nil, true, "review"))
 	put(t, s, "other", 10, proto.NoteRow{RowHeader: header("note", "elsewhere-note", 2), Pos: 2, Group: "other"})
+	put(t, s, "other", 10, proto.NoteRow{RowHeader: header("note", "elsewhere-preset", 3), Pos: 3, Group: "other", NoteType: "preset", Name: "Calm"})
 
 	v := snapshot(t, s, "g")
 	rows, err := v.AfterSeqUpTo(3, 7)
@@ -100,6 +105,10 @@ func TestPagesAndDelta(t *testing.T) {
 		{"note", 0, []string{"note"}},
 		{"note", 6, []string{"note"}},
 		{"note", 5, []string{}},
+		{"preset", 0, []string{"preset2", "preset1"}},
+		{"preset", 11, []string{"preset1"}},
+		{"preset", 9, []string{}},
+		{"kb", 0, []string{"kb1"}},
 		{"text", 0, []string{}},
 	} {
 		rows, err = v.PageKind(c.kind, c.before, 10)
@@ -190,8 +199,25 @@ func TestStoredWireRows(t *testing.T) {
 	roundTripGolden[proto.DeviceRow](t, "device")
 	roundTripGolden[proto.TaskRow](t, "task-waiting")
 	roundTripGolden[proto.MsgRow](t, "msg-decision-decided")
+	roundTripGolden[proto.MsgRow](t, "msg-brief-preset")
 	roundTripGolden[proto.NoteRow](t, "note")
+	roundTripGolden[proto.NoteRow](t, "note-preset")
+	roundTripGolden[proto.NoteRow](t, "note-kb")
 	roundTripGolden[proto.GoneRow](t, "gone")
+}
+
+func TestPageKindUsesRowKeepIndex(t *testing.T) {
+	s := openDB(t, ":memory:")
+	for _, kind := range []string{"note", "preset", "kb", "review"} {
+		var detail string
+		check(t, s.db.QueryRow(`EXPLAIN QUERY PLAN SELECT data FROM row WHERE g=?1 AND keep=1
+			AND r=CASE ?2 WHEN 'review' THEN 'msg' WHEN 'note' THEN 'note' WHEN 'preset' THEN 'note' WHEN 'kb' THEN 'note' END
+			AND (?2='review' OR (?2='note' AND data->>'type' IS NULL) OR data->>'type'=?2)
+			AND pos<?3 ORDER BY pos DESC LIMIT ?4`, "g", kind, 100, 10).Scan(new(int), new(int), new(int), &detail))
+		if !strings.Contains(detail, "row_keep") {
+			t.Fatalf("PageKind(%q) plan %q does not use row_keep", kind, detail)
+		}
+	}
 }
 
 func TestInvalidBodyNotWritten(t *testing.T) {
