@@ -657,7 +657,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       When(
-        'the person opens "#/nodes", declares an AI account type from the keyboard, and copies the link of "Add a browser"',
+        'the person opens "#/nodes", declares an AI account type from the keyboard, copies the link of "Add a browser", closes the dialog and opens it again',
         async () => {
           await closePage();
           const rig = ownedNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q');
@@ -697,11 +697,19 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           one<HTMLButtonElement>('dialog .pair-box button').click();
           await tick();
           flushSync();
+          one<HTMLButtonElement>('dialog .btn-primary').click();
+          flushSync();
+          expect(one<HTMLDialogElement>('dialog').open).toBe(false);
+          buttonNamed(one('.page-head'), 'Add a browser').click();
+          flushSync();
         },
       );
       Then(
-        'choosing the account keeps focus on the computer card and copying the pairing link announces "Copied"',
-        () => expect(text('.app > [role="status"]')).toBe('Copied'),
+        'choosing the account keeps focus on the computer card, copying the pairing link announces "Copied", and the dialog is open again',
+        () => {
+          expect(text('.app > [role="status"]')).toBe('Copied');
+          expect(one<HTMLDialogElement>('dialog').open).toBe(true);
+        },
       );
     },
   );

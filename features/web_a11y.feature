@@ -37,8 +37,8 @@ Feature: Accessibility across the pages and design widths
     Then focus stays on each card instead of falling to the document body, and returns to the action button when the home refuses an action
     When the person scrolls back, activates "Back to the latest", expands task 12's thread and loads the remaining earlier messages
     Then "Back to the latest" returns focus to the main line and finishing thread paging moves focus to the task's thread summary
-    When the person opens "#/nodes", declares an AI account type from the keyboard, and copies the link of "Add a browser"
-    Then choosing the account keeps focus on the computer card and copying the pairing link announces "Copied"
+    When the person opens "#/nodes", declares an AI account type from the keyboard, copies the link of "Add a browser", closes the dialog and opens it again
+    Then choosing the account keeps focus on the computer card, copying the pairing link announces "Copied", and the dialog is open again
 
   Scenario: Usage bars, calls, project memory and notifications name their parts and keep the keyboard's place
     Given two groups "Website" and "Docs" with waiting brief, approval and decision cards, a locked approval, a task and a summary
