@@ -14,6 +14,7 @@ import { launch } from './config';
 import {
   parseSignallingEnvelope,
   pickLanIPv4,
+  poll,
   readNodeDeviceId,
   startSignallingProxy,
   startStunResponder,
@@ -810,21 +811,19 @@ describe('web client connections against real nodes (I-8)', () => {
 
     const tab1 = await ctx.newPage();
     await openTrackedAppTab(tab1, proxy.url, proxy.signal, nodeId);
-    await expect
-      .poll(() => tab1.locator('.bar a.conn').getAttribute('data-st'), { timeout: 15_000 })
-      .toBe('ok');
-    await expect
-      .poll(() => tab1.locator('section.card.node header .st').textContent(), { timeout: 15_000 })
-      .toContain('Online');
+    await poll(() => tab1.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
+    await poll(() => tab1.locator('section.card.node header .st').textContent()).toContain(
+      'Online',
+    );
     expect(await tab1.evaluate(() => (window as Record<string, any>).__netTrack.hostInfo())).toBe(
       true,
     );
 
     const tab2 = await ctx.newPage();
     await openTrackedAppTab(tab2, proxy.url, proxy.signal, nodeId);
-    await expect
-      .poll(() => tab2.locator('.tab-ban').textContent())
-      .toContain('SoloDawn is open in another tab.');
+    await poll(() => tab2.locator('.tab-ban').textContent()).toContain(
+      'SoloDawn is open in another tab.',
+    );
 
     expect(await tab2.evaluate(() => (window as Record<string, any>).__netTrack.wsCount())).toBe(0);
     expect(await tab2.evaluate(() => (window as Record<string, any>).__netTrack.pcCount())).toBe(0);
@@ -842,16 +841,16 @@ describe('web client connections against real nodes (I-8)', () => {
     // Choose "Use here" in the second tab: it steals the lock and connects, while the first tab
     // closes its signalling and peer connections and renders the other-tab banner.
     await tab2.locator('.tab-ban button', { hasText: 'Use here' }).click();
-    await expect.poll(() => tab2.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
-    await expect.poll(() => tab2.locator('.tab-ban').count()).toBe(0);
-    await expect
-      .poll(() => tab1.locator('.tab-ban').textContent())
-      .toContain('SoloDawn is open in another tab.');
+    await poll(() => tab2.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
+    await poll(() => tab2.locator('.tab-ban').count()).toBe(0);
+    await poll(() => tab1.locator('.tab-ban').textContent()).toContain(
+      'SoloDawn is open in another tab.',
+    );
     await tab1.waitForFunction(
       () => (window as Record<string, any>).__netTrack.allClosed() === true,
     );
-    expect(
-      await tab1.evaluate(() => (window as Record<string, any>).__netTrack.offlineCount()),
+    await poll(() =>
+      tab1.evaluate(() => (window as Record<string, any>).__netTrack.offlineCount()),
     ).toBe(1);
     expect(await tab2.evaluate(() => (window as Record<string, any>).__netTrack.hostInfo())).toBe(
       true,
@@ -874,9 +873,9 @@ describe('web client connections against real nodes (I-8)', () => {
     expect(await tab1.evaluate(() => (window as Record<string, any>).__netTrack.pcCount())).toBe(
       pcBeforeTrigger,
     );
-    await expect
-      .poll(() => tab1.locator('.tab-ban').textContent())
-      .toContain('SoloDawn is open in another tab.');
+    await poll(() => tab1.locator('.tab-ban').textContent()).toContain(
+      'SoloDawn is open in another tab.',
+    );
     expect(await tab2.evaluate(() => (window as Record<string, any>).__netTrack.hostInfo())).toBe(
       true,
     );

@@ -91,13 +91,12 @@ type Cap struct {
 // AgentGroup is the agent in one group: its member, the level of its task
 // sessions, its derived state and task, and how many items are held for it.
 type AgentGroup struct {
-	Group      ID     `json:"g"`
-	Member     ID     `json:"member"`
-	Level      int    `json:"level"`
-	RepoConfig bool   `json:"repo_config"`
-	State      string `json:"state"`
-	Task       ID     `json:"task,omitempty"`
-	Queued     int    `json:"queued"`
+	Group  ID     `json:"g"`
+	Member ID     `json:"member"`
+	Level  int    `json:"level"`
+	State  string `json:"state"`
+	Task   ID     `json:"task,omitempty"`
+	Queued int    `json:"queued"`
 }
 
 // HostSettings are the node settings that settings.set changes, except
@@ -176,14 +175,12 @@ type AgentSet struct {
 	Account string `json:"account"`
 }
 
-// PermSet sets the level of an agent's task sessions in a group, and whether
-// they load the repository's own AI configuration.
+// PermSet sets the level of an agent's sessions in a group.
 type PermSet struct {
 	HostCommand
-	Agent      string `json:"agent"`
-	Group      ID     `json:"g"`
-	Level      int    `json:"level"`
-	RepoConfig bool   `json:"repo_config"`
+	Agent string `json:"agent"`
+	Group ID     `json:"g"`
+	Level int    `json:"level"`
 }
 
 // Takeover names the AI a takeover is about; alone it is takeover.end.

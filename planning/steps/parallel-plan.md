@@ -75,7 +75,7 @@ differ, which the unit tables state. Lanes never share files.
 
 | Lane | Owns | Units |
 | --- | --- | --- |
-| PROTO | `internal/proto/**`, `web/src/lib/proto.ts`, `proto.test.ts`, `mock.ts` | P-1 → P-2 → P-3 → P-4 → P-5, strictly serial |
+| PROTO | `internal/proto/**`, `web/src/lib/proto.ts`, `proto.test.ts`, `mock.ts` | P-1 → P-2 → P-3, then P-4a → P-4b and P-5 one at a time, strictly serial |
 | HOME | `internal/home/<file>.go`, one file per unit; `features/home*` | HM-* |
 | HOST | `internal/host/<file>.go`, one file per unit; `internal/host/instructions/`; `features/host*` | HS-* |
 | NODE | `internal/node/<file>.go`, `cmd/solodawn/`, `features/node*`, `features/cmd*` | N-* |
@@ -121,10 +121,10 @@ Each arrow is one wave of 45 minutes.
   and move) and N-4 (wiring) → I-2 (M1 on real transport) and I-8 (browser
   against a real node) → I-9 → I-11 → second pass. Seven waves, the same
   length; a slip of B-08 moves the whole chain.
-- **Steps 2 and 3**: C2-* (wave 1) → P-4 (wave 4; lane PROTO is strictly
-  serial: P-1, P-2, P-3, P-4, P-5) → T2-* (wave 5) → I2-1 (wave 6) → I2-2
-  (wave 7). It ends with the step 1 path. Step 3 drivers are built one at
-  a time, so each driver after the first adds a wave after wave 7.
+- **Steps 2 and 3**: replaced on 2026-11-22 by the lanes of
+  `steps/parallel-plan-step-2-3.md` section 3: P-4a (lane PROTO, strictly
+  serial with P-4b and P-5) → the backend, web and acceptance units of each
+  lane at once. Step 3 drivers are built one at a time.
 
 With one fix wave per integration wave that fails, the estimate is **7 to 8
 hours**, which leaves two hours of the ten. The path cannot be shortened by

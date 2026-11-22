@@ -106,9 +106,13 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 - **R-43** `[S1]` Approval requests come from the CLI's own permission
   interface. The platform never reads terminal output to detect them.
 - **R-44** `[S2]` Work a colleague assigns to my AI runs at level 2 at most.
-- **R-45** `[S1]` AI configuration shipped inside a repository (plugins,
-  hooks, project MCP servers, the project's own instruction file) is not
-  loaded by default. The owner may enable it per trusted project (Q-24).
+  Not in 1.0 (2026-11-22): every session runs at the highest level, with no
+  level control; R-44 returns with level control.
+- **R-45** `[S1]` By the owner's decision of 2026-11-22, AI configuration
+  shipped inside a repository (plugins, hooks, project MCP servers, the
+  project's own instruction file) is always loaded in task and review
+  sessions and never loaded in group sessions (`contracts/drivers.md` 1.1,
+  1.2; `risks.md` Q-24, K-25). Add only repositories you trust.
 
 ## Whose instructions an AI follows
 
@@ -249,20 +253,26 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   three months, rolling daily; adjustable. The ledger and the notes are
   exempt (R-102). Moving a group to another home, and copies for
   safekeeping, come in step 2 (Q-12).
-- **R-136** `[S1]` A node acts only on instructions signed by its owner.
+- **R-136** `[S1]` A node acts only on instructions signed by its owner, and
+  on the items of the homes of its groups. From step 2 a home may belong to
+  another member, whom the owner trusts by joining the group (2026-11-22: no
+  defence in code against a dishonest home).
 - **R-137** `[S1]` Secrets never leave the machine. The node reads no AI
   credential, and project secret files are never posted to a group. An
   outbound check refuses what an AI sends to the group when it matches
   common secret formats or looks like an environment file (Q-11). For Git
   and the forge the node runs only `git`, `gh` and, from step 2, a forge
-  program its owner accepted for that group (widened 2026-11-20 for D-10),
+  program a group's templates name, shown to the owner before their AI joins
+  the group (widened 2026-11-20 for D-10; no acceptance step since 2026-11-22),
   each signed in by the owner; it never reads a token or credential (Q-16).
 - **R-138** `[S1]` Every computer and every browser has its own identity key.
   A lost device can be revoked from another device.
 - **R-139** `[S1]` Each node keeps a local audit record of who made its AIs
   do what and what was approved; the owner can read it; it follows retention.
-- **R-140** `[S2]` Invitations carry the group's identity fingerprint; nodes
-  verify each other; the server cannot impersonate anyone.
+- **R-140** `[S2]` An invitation is a one-time link, valid 10 minutes, that
+  admits one person to one group. (2026-11-22: no fingerprint and no check
+  against a rendezvous that stands in for a home; the deployment guide says
+  to send the link privately and to use a trusted rendezvous.)
 
 ## Distribution
 
