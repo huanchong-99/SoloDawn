@@ -20,12 +20,12 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-// When SOLODAWN_TEST_AGENTS is set and this test binary is invoked as claude
-// or codex, it acts as a portable stand-in CLI on every OS.
+// When SOLODAWN_TEST_AGENTS is set and this test binary is invoked as a
+// stand-in CLI with a matching .spec file in that folder, it runs the spec.
 func init() {
 	if dir := os.Getenv("SOLODAWN_TEST_AGENTS"); dir != "" {
 		name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
-		if name == "claude" || name == "codex" {
+		if _, err := os.Stat(filepath.Join(dir, name+".spec")); err == nil {
 			os.Exit(agtRunStandIn(dir, name))
 		}
 	}
@@ -461,8 +461,8 @@ func TestAgentSetRefusals(t *testing.T) {
 	}{
 		{agtSetPayload("gemini", "personal"), "bad_request: unknown agent: gemini"},
 		{agtSetPayload("", "personal"), "bad_request: unknown agent: "},
-		{agtSetPayload("claude", "enterprise"), "bad_request: unknown account: enterprise"},
-		{agtSetPayload("claude", ""), "bad_request: unknown account: "},
+		{agtSetPayload("claude", "enterprise"), "bad_request: account enterprise is not in claude accounts"},
+		{agtSetPayload("claude", ""), "bad_request: account  is not in claude accounts"},
 		{agtSetPayload("codex", "personal"), "conflict: codex is not found on this machine"},
 	} {
 		res, err := handle(t.Context(), h, nil, "owner-dev", bad.raw)
