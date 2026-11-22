@@ -17,7 +17,13 @@ import (
 // session (section A) and switches it to the interactive CLI in a
 // pseudo-terminal (section B); the terminal closing for any reason hands it
 // back (section D). A takeover holds the AI's deliveries in its group from
-// takeover.start until the hand-back has posted.
+// takeover.start until its hand-back turn starts.
+
+// The takeover frees its slot when the hand-back turn starts, while the
+// session itself still holds every delivery (state takeover, then working):
+// a delivery that runs while the slot is freed then sees one hold, not two
+// that lift at different moments, and when the turn ends the AI is waiting
+// and free for the next takeover at once.
 
 // takeoverAttach is how long an open terminal waits for the browser's pty
 // channel before it hands back (flows/takeover.md step 7).
@@ -52,6 +58,7 @@ type takeover struct {
 	closed  bool // the terminal has closed
 	facts   proto.HandbackBody
 	posted  bool // the AI posted its hand-back
+	free    bool // the hand-back turn has started: the takeover holds nothing
 }
 
 func takeoverState(h *Host) *takeovers {
@@ -67,17 +74,19 @@ func takeoverState(h *Host) *takeovers {
 func (p *takeovers) claim(slot aiSlot, t *takeover) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.open[slot] != nil {
+	if old := p.open[slot]; old != nil && !old.free {
 		return false
 	}
 	p.open[slot] = t
 	return true
 }
 
-// release lifts the hold of a takeover and delivers what it held.
-func (p *takeovers) release(h *Host, slot aiSlot) {
+// release ends a takeover and delivers what it held.
+func (p *takeovers) release(h *Host, slot aiSlot, t *takeover) {
 	p.mu.Lock()
-	delete(p.open, slot)
+	if p.open[slot] == t {
+		delete(p.open, slot)
+	}
 	p.mu.Unlock()
 	go Deliver(h, slot.group, slot.member)
 }
@@ -86,7 +95,8 @@ func takeoverHold(h *Host, key SessionKey) (string, bool) {
 	p := takeoverState(h)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return "takeover", p.open[aiSlot{group: key.Group, member: key.Member}] != nil
+	t := p.open[aiSlot{group: key.Group, member: key.Member}]
+	return "takeover", t != nil && !t.free
 }
 
 // settleTakeovers closes the open terminals without handing them back: their
@@ -124,7 +134,7 @@ func takeoverStart(ctx context.Context, h *Host, from Owner, _ string, data json
 		return nil, &Error{"busy", "the AI is taken over or one of its tasks is merging"}
 	}
 	if err := openTerminal(ctx, h, p, slot, ai, t, string(req.Task)); err != nil {
-		p.release(h, slot)
+		p.release(h, slot, t)
 		return nil, err
 	}
 	return nil, nil
@@ -432,7 +442,7 @@ func handBackSaved(h *Host, group string) {
 // handBack runs flows/takeover.md steps 14 to 18.
 func handBack(h *Host, p *takeovers, t *takeover) {
 	ctx := context.Background()
-	defer p.release(h, aiSlot{group: t.key.Group, member: t.key.Member})
+	defer p.release(h, aiSlot{group: t.key.Group, member: t.key.Member}, t)
 	s, ok := h.Sessions.Get(t.key)
 	if !ok || s.State != Takeover {
 		return
@@ -444,7 +454,7 @@ func handBack(h *Host, p *takeovers, t *takeover) {
 		return
 	}
 	p.mu.Lock()
-	t.facts = facts
+	t.facts, t.free = facts, true
 	p.mu.Unlock()
 	handBackTurn(ctx, h, s)
 	p.mu.Lock()

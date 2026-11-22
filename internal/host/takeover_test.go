@@ -231,7 +231,12 @@ func (r *tkRig) open(member string) bool {
 // waitReleased waits until the hand-back of member has ended.
 func (r *tkRig) waitReleased(member string) {
 	r.t.Helper()
-	r.waitFor("the hold to lift", func() bool { return !r.held(member) })
+	r.waitFor("the hand-back to end", func() bool {
+		p := takeoverState(r.h)
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.open[aiSlot{group: runGroup1, member: member}] == nil
+	})
 }
 
 func (r *tkRig) session(key SessionKey) Session {
@@ -264,7 +269,9 @@ func TestTakeoverStartRefusals(t *testing.T) {
 
 	takeoverState(r.h).claim(aiSlot{group: runGroup1, member: runAI1}, &takeover{})
 	tkCode(t, r.start(runAI1, ""), "busy")
-	takeoverState(r.h).release(r.h, aiSlot{group: runGroup1, member: runAI1})
+	takeoverState(r.h).release(r.h, aiSlot{group: runGroup1, member: runAI1}, &takeover{})
+	tkCode(t, r.start(runAI1, ""), "busy")
+	takeoverState(r.h).open = map[aiSlot]*takeover{}
 
 	r.putTask(tkTask, "active", runAI1, runAI2, 1)
 	d := deliv(r.h)
@@ -760,5 +767,44 @@ func TestHandBackTurnFailsWithoutItsLaunchConfig(t *testing.T) {
 	}
 	if s, _ := h.Sessions.Get(key); s.State != Takeover {
 		t.Fatalf("state = %s", s.State)
+	}
+}
+
+func TestTakeoverIsFreeOnceTheHandBackTurnStarts(t *testing.T) {
+	r := newTkRig(t)
+	r.drv.makeProc = nil
+	key := SessionKey{Group: runGroup1, Member: tkSec}
+	if err := r.start(tkSec, ""); err != nil {
+		t.Fatal(err)
+	}
+	r.end(tkSec)
+	r.waitFor("the hand-back turn", func() bool { return r.drv.count() == 1 })
+	proc := r.drv.lastProc()
+	<-proc.turnCh
+	if r.held(tkSec) || r.session(key).State != Working {
+		t.Fatalf("during the hand-back turn: held %v, state %s", r.held(tkSec), r.session(key).State)
+	}
+	posting := make(chan struct{})
+	r.home.cmdFn = func(p map[string]any) (json.RawMessage, error) {
+		if p["kind"] == "handback" {
+			<-posting
+		}
+		return json.RawMessage(`{"re":1,"ok":true}`), nil
+	}
+	proc.emit(Event{Kind: TurnEnded, Status: "completed"})
+	r.waitFor("waiting", func() bool { return r.session(key).State == Waiting })
+	if err := r.start(tkSec, ""); err != nil {
+		t.Fatalf("a takeover right after the hand-back turn = %v", err)
+	}
+	close(posting)
+	if r.session(key).State != Takeover || !r.held(tkSec) {
+		t.Fatal("the second takeover did not take the session")
+	}
+	r.end(tkSec)
+	r.waitFor("the second hand-back turn", func() bool { return r.drv.count() == 2 })
+	r.drv.lastProc().emit(Event{Kind: TurnEnded, Status: "completed"})
+	r.waitReleased(tkSec)
+	if posts := r.sent("post", "handback"); len(posts) != 2 {
+		t.Fatalf("hand-back posts = %d, want 2", len(posts))
 	}
 }
