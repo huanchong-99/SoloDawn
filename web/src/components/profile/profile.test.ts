@@ -3,7 +3,7 @@ import { Home } from '../../lib/groups.svelte';
 import { goldens } from '../../lib/mock';
 import { nodes } from '../../lib/nodes.svelte';
 import { AIMemberRow, decode, HostInfoPush } from '../../lib/proto';
-import { newDraft, profileChanges, suggestedTier, tiers } from './profile';
+import { newDraft, profileChanges, suggestedTier, tiers, tooLong } from './profile';
 
 const ai = decode(AIMemberRow, goldens['row-member-ai']);
 const home = new Home({ user: ai.user, sign: () => new Promise(() => {}) });
@@ -30,6 +30,17 @@ describe('profile helpers', () => {
       agents: [{ ...info.agents[0], agent: ai.cli, models: [] }],
     });
     expect(suggestedTier(home, ai)).toBeUndefined();
+  });
+
+  it('limits skills to 200 Unicode code points rather than UTF-16 units', () => {
+    const draft = newDraft();
+    expect(tooLong(draft)).toBe(false);
+    expect(tooLong({ ...draft, skills: 'a'.repeat(200) })).toBe(false);
+    expect(tooLong({ ...draft, skills: 'a'.repeat(201) })).toBe(true);
+    expect(tooLong({ ...draft, skills: '😀'.repeat(200) })).toBe(false);
+    expect(tooLong({ ...draft, skills: '😀'.repeat(201) })).toBe(true);
+    expect(tooLong({ ...draft, skills: '😀'.repeat(100) + 'a'.repeat(100) })).toBe(false);
+    expect(tooLong({ ...draft, skills: '😀'.repeat(100) + 'a'.repeat(101) })).toBe(true);
   });
 
   it('matches the CLI and model rather than taking the first listed suggestion', () => {

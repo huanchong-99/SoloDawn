@@ -19,7 +19,7 @@
   import SecretaryWarning from '../groupinfo/SecretaryWarning.svelte';
   import Mount from '../Mount.svelte';
   import ProfileFields from '../profile/ProfileFields.svelte';
-  import { newDraft } from '../profile/profile';
+  import { newDraft, tooLong } from '../profile/profile';
 
   /** The dialog that adds a registered AI from one of the owner's computers to the group
    *  (contracts/commands.md section 2, `host.join`). */
@@ -211,7 +211,10 @@
       <button type="button" class="btn btn-ghost" onclick={() => dialog.close()}>
         {t('member.join.cancel')}
       </button>
-      <button class="btn btn-primary" disabled={busy || (!chosen && !selectable.length)}>
+      <button
+        class="btn btn-primary"
+        disabled={busy || (!chosen && !selectable.length) || tooLong(draft)}
+      >
         {t('member.join.submit')}
       </button>
     </footer>

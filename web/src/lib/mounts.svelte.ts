@@ -3,9 +3,8 @@
 // `components/<area>/mounts.ts`, whose default export is a `Mounts`; mounts.glob.ts finds every
 // such file by its name, and `gather` here puts them in order. `Mount.svelte` draws a point.
 import type { Component } from 'svelte';
-import type { Draft } from '../components/profile/profile';
 import type { Group } from './groups.svelte';
-import type { Candidate } from './members';
+import type { Candidate, Draft } from './members';
 import { files } from './mounts.glob';
 import type { Net } from './net.svelte';
 import type { AIMemberRow, MsgRow } from './proto';

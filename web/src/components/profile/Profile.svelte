@@ -6,7 +6,7 @@
   import Failure from '../Failure.svelte';
   import ProfileFields from './ProfileFields.svelte';
   import TierMark from './TierMark.svelte';
-  import { newDraft, profileChanges, type Draft, type Tier } from './profile';
+  import { newDraft, profileChanges, tooLong, type Draft, type Tier } from './profile';
 
   /** Tier and skills of an AI member card, with the suggestion and editor for its owner
    *  (contracts/step-3/profiles.md section 2a). */
@@ -33,6 +33,9 @@
   const offline = $derived(!group.home.ctl);
   const changes = $derived(profileChanges(ai, draft));
   const offer = $derived(mine && suggested !== undefined && suggested !== ai.tier);
+  const label = $derived(
+    t('profile.suggest').replace('{tier}', t(`profile.tier.${suggested as Tier}`)),
+  );
 
   async function send(updates: Partial<Draft>) {
     busy = true;
@@ -74,11 +77,11 @@
         type="button"
         class="suggest"
         disabled={busy || offline}
+        aria-label={label}
+        title={label}
         onclick={() => send({ tier: suggested! })}
       >
-        <span>
-          {t('profile.suggest').replace('{tier}', t(`profile.tier.${suggested as Tier}`))}
-        </span>
+        <span>{t(`profile.tier.${suggested as Tier}`)}</span>
         <b>{t('profile.suggest.use')}</b>
       </button>
     {/if}
@@ -116,7 +119,7 @@
       </button>
       <button
         class="btn btn-sm btn-primary"
-        disabled={busy || offline || !Object.keys(changes).length}
+        disabled={busy || offline || !Object.keys(changes).length || tooLong(draft)}
       >
         {t('profile.save')}
       </button>
@@ -147,6 +150,7 @@
     color: var(--text-3);
     font: inherit;
     font-size: var(--fs-xs);
+    white-space: nowrap;
     cursor: pointer;
     animation: -global-appear var(--dur-2) var(--ease-out);
   }

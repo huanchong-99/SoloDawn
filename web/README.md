@@ -496,7 +496,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
     Only the AI's owner can open the inline tier/skills editor or accept a differing model-tier
     suggestion from `host.info`; accepting sends only the tier, and saving sends only changed
     tier/skills. The add-AI dialog uses the same fields and sends tier and skills with the CLI
-    model/effort defaults. The live skills counter and input limit count UTF-16 code units.
+    model/effort defaults. The skills counter counts code points; over 200, Save and Add are disabled.
   - Task cards (`src/components/task/`, `src/lib/task.ts`) show "Must ask a stronger AI" in dawn
     when an active task has `stuck.ask` true, after wait badges and before a rejected-review
     badge. A false or absent `ask` leaves the normal badge selection unchanged.

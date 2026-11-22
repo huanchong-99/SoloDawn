@@ -23,7 +23,7 @@ Feature: AI profiles and stronger-AI escalation
     Then focus returns to Edit profile
 
   Scenario: A model suggestion is an explicit owner choice
-    Then the owner's card offers Suggested: Strong and Use
+    Then the owner's card offers Strong and Use labelled Suggested: Strong
     When the owner uses the suggestion
     Then exactly one member set sends only tier strong
     When the suggestion matches the stored tier
@@ -31,6 +31,10 @@ Feature: AI profiles and stronger-AI escalation
     When the model is no longer listed
     Then no suggestion is offered for the unlisted model
     And the other person's card has no suggestion
+
+  Scenario: Profile skills count Unicode code points at the limit
+    When the owner opens the profile editor
+    Then 200 astral characters allow Save and 201 mark skills invalid and disable Save
 
   Scenario: A stuck task asks for a stronger AI
     When a task card arrives with stuck ask true

@@ -1,15 +1,19 @@
 import type { Home } from '../../lib/groups.svelte';
 import { nodes } from '../../lib/nodes.svelte';
+import type { Draft } from '../../lib/members';
 import type { AIMemberRow } from '../../lib/proto';
 
 export const tiers = ['light', 'standard', 'strong'] as const;
 export type Tier = (typeof tiers)[number];
 
-export type Draft = Pick<AIMemberRow, 'model' | 'effort' | 'tier' | 'skills'>;
+export type { Draft };
 
 export function newDraft(): Draft {
   return { model: '', effort: '', tier: 'standard', skills: '' };
 }
+
+/** Whether the draft's skills exceed the 200 code points of the contract. */
+export const tooLong = (draft: Draft) => [...draft.skills].length > 200;
 
 export function suggestedTier(host: Home | undefined, ai: AIMemberRow): string | undefined {
   if (!host) return undefined;

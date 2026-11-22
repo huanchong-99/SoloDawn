@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '../../lib/prefs.svelte';
   import Bars from './Bars.svelte';
-  import { tiers, type Draft } from './profile';
+  import { tiers, tooLong, type Draft } from './profile';
 
   /** Tier and skills of a draft profile, for the add-AI dialog and the owner's editor. */
   let { draft = $bindable(), disabled = false }: { draft: Draft; disabled?: boolean } = $props();
@@ -22,12 +22,14 @@
 <label class="field">
   <span class="row">
     <span class="grow">{t('profile.skills')}</span>
-    <small class="count" aria-hidden="true">{draft.skills.length}/200</small>
+    <small class="count" class:over={tooLong(draft)} aria-hidden="true">
+      {[...draft.skills].length}/200
+    </small>
   </span>
   <input
     class="input"
     bind:value={draft.skills}
-    maxlength="200"
+    aria-invalid={tooLong(draft)}
     placeholder={t('profile.skills.hint')}
     {disabled}
   />
@@ -64,5 +66,8 @@
     font-size: var(--fs-xs);
     font-variant-numeric: tabular-nums;
     font-weight: 400;
+  }
+  .count.over {
+    color: var(--dawn);
   }
 </style>

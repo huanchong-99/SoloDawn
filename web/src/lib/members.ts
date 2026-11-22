@@ -1,6 +1,5 @@
 // Member-panel projections and add-AI candidate selection (planning/contracts/rows.md section 2,
 // planning/contracts/commands.md section 1.2 and section 2).
-import type { Draft } from '../components/profile/profile';
 import { lost, newId, type Group, type Home } from './groups.svelte';
 import type { Net } from './net.svelte';
 import { cliName } from './onboard.svelte';
@@ -10,6 +9,9 @@ import { hostHomeOf } from './terminal.svelte';
 import { clock } from './when';
 
 /** An AI CLI registered on one of the owner's connected computers. */
+/** The model, level and profile an AI member is added or edited with. */
+export type Draft = Pick<AIMemberRow, 'model' | 'effort' | 'tier' | 'skills'>;
+
 export interface Candidate {
   key: string;
   home: Home;

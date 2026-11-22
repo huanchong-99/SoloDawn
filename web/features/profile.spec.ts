@@ -45,6 +45,23 @@ const commands = (node: OwnedNode) =>
     .filter((cmd) => cmd.t === 'member' || cmd.t === 'host.join');
 const withoutEnvelope = ({ n, ts, ...body }: Record<string, unknown>) => body;
 
+function assertSkillsLimit(input: HTMLInputElement, within: HTMLElement, save: HTMLButtonElement) {
+  expect(input.hasAttribute('maxlength')).toBe(false);
+  fill(input, '😀'.repeat(200));
+  flushSync();
+  const count = within.querySelector('.count')!;
+  expect(read(count)).toBe('200/200');
+  expect(count.classList.contains('over')).toBe(false);
+  expect(input.getAttribute('aria-invalid')).toBe('false');
+  expect(save.disabled).toBe(false);
+  fill(input, '😀'.repeat(201));
+  flushSync();
+  expect(read(count)).toBe('201/200');
+  expect(count.classList.contains('over')).toBe(true);
+  expect(input.getAttribute('aria-invalid')).toBe('true');
+  expect(save.disabled).toBe(true);
+}
+
 describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   let node: OwnedNode;
   let resolveAnswer: (answer: p.CmdResult | p.ErrorResponse) => void;
@@ -137,6 +154,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       expect([...other().querySelectorAll('dt')].map(read)).toContain('档位');
       expect([...other().querySelectorAll('dt')].map(read)).toContain('擅长');
       expect(read(other().querySelector('.skills')!)).toBe('未填写');
+      const suggestion = card().querySelector('.suggest')!;
+      expect(read(suggestion)).toBe('强 采用');
+      expect(suggestion.getAttribute('aria-label')).toBe('建议：强');
+      expect(suggestion.getAttribute('title')).toBe('建议：强');
     });
   });
 
@@ -145,7 +166,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     Then('Save is disabled until something changes', () => {
       expect(button('Save').disabled).toBe(true);
       expect(document.activeElement).toBe(form());
-      expect(skills().maxLength).toBe(200);
+      expect(skills().hasAttribute('maxlength')).toBe(false);
     });
     When('the owner chooses Light and writes Documentation', () => {
       one<HTMLInputElement>('.editor input[value="light"]').click();
@@ -179,10 +200,21 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     );
   });
 
+  Scenario('Profile skills count Unicode code points at the limit', ({ When, Then }) => {
+    When('the owner opens the profile editor', openEditor);
+    Then('200 astral characters allow Save and 201 mark skills invalid and disable Save', () => {
+      assertSkillsLimit(skills(), form(), button('Save'));
+      expect(commands(node)).toEqual([]);
+    });
+  });
+
   Scenario('A model suggestion is an explicit owner choice', ({ Then, When, And }) => {
-    Then("the owner's card offers Suggested: Strong and Use", () =>
-      expect(read(card().querySelector('.suggest')!)).toBe('Suggested: Strong Use'),
-    );
+    Then("the owner's card offers Strong and Use labelled Suggested: Strong", () => {
+      const suggestion = card().querySelector('.suggest')!;
+      expect(read(suggestion)).toBe('Strong Use');
+      expect(suggestion.getAttribute('aria-label')).toBe('Suggested: Strong');
+      expect(suggestion.getAttribute('title')).toBe('Suggested: Strong');
+    });
     When('the owner uses the suggestion', async () => {
       one<HTMLButtonElement>('.suggest').click();
       await vi.waitFor(() => expect(commands(node)).toHaveLength(1));
@@ -248,8 +280,13 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         expect(all('dialog .choice')).toHaveLength(2);
       });
       one<HTMLInputElement>('dialog input[value="light"]').click();
-      fill(one<HTMLInputElement>('dialog input[maxlength="200"]'), 'Documentation');
+      const input = one<HTMLInputElement>(
+        'dialog input[placeholder="What this AI is good at, in one line"]',
+      );
+      assertSkillsLimit(input, one('dialog'), one<HTMLButtonElement>('dialog .btn-primary'));
+      fill(input, 'Documentation');
       flushSync();
+      expect(one<HTMLButtonElement>('dialog .btn-primary').disabled).toBe(false);
     });
     And('submits the add-AI dialog', async () => {
       submit(one<HTMLFormElement>('dialog form'));
