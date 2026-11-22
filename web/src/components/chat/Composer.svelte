@@ -167,7 +167,7 @@
       aria-activedescendant={found.length ? `${uid}-${active}` : undefined}
       aria-invalid={length === 'over' || undefined}
       aria-describedby={readonly || length !== 'ok' ? `${uid}-state` : undefined}
-      placeholder={t('chat.compose.hint')}
+      placeholder={t(group.info?.kind === 'team' ? 'team.compose' : 'chat.compose.hint')}
       disabled={readonly}
       oninput={read}
       onkeyup={read}

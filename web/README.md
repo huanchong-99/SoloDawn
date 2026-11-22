@@ -618,6 +618,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/messages/people.*`       | English and Chinese invitation, member-action and join texts                      |
 | `src/components/groupinfo/`   | group details and project memory (`chat.side`, `order: 20`)                       |
 | `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
+| `src/components/watch/`       | receive-only watch channel, standalone request action and watcher stop controls   |
+| `src/components/team/`        | attributed bulletin card; team people use the shared member panel                 |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
 | `src/components/notify/`      | live in-page notifications mounted at `layer`                                     |
 | `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
@@ -639,6 +641,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/people.test.ts`     | focused tests for member actions and the join page                                |
 | `features/groupinfo.spec.ts`  | steps of `../features/web_groupinfo.feature`                                      |
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
+| `features/watch_team.spec.ts` | steps of `../features/web_watch_team.feature`                                     |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
 | `features/notify.spec.ts`     | steps of `../features/web_notify.feature`                                         |
 | `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                     |
@@ -660,6 +663,12 @@ navigation and of the segmented controls; the current entry and the chosen optio
 in `Highlight` and `HighlightText` instead (`base.css` section 8).
 
 ## Known limitations
+
+- Watching reuses `#/terminal/<g>/<member>` for another person's AI. The terminal acquires its
+  host through the existing signalling session, reuses a connected home or node, and releases a
+  temporary connection when the last watch ends. Another person's taken-over AI offers Ask to
+  watch and Watch; a forbidden watch offers the same request action in the terminal bar. Only
+  the owner's terminal shows watchers. Real-host watching and other browsers remain unverified.
 
 - The theme is applied by the module script, so a browser forced to the theme opposite to its
   system setting can paint one frame in the system theme while loading (`issues.md`).
