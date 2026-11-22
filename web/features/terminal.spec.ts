@@ -63,9 +63,11 @@ vi.mock('@xterm/xterm', () => ({
     onResizeCb?: (size: { cols: number; rows: number }) => void;
     cleared = 0;
     disposed = false;
+    textarea = document.createElement('textarea');
     constructor() {
       xtermState.instances.push(this);
     }
+    attachCustomKeyEventHandler() {}
     loadAddon() {}
     open(el: HTMLElement) {
       el.dataset.xterm = 'mounted';

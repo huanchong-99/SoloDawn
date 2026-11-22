@@ -146,7 +146,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
   only a development build has this code, so the build carries neither the mock nor the examples
   (checked in the output of `vite build`). `live` acquires the single-tab Web Lock (`runTab` of
   `tablock.ts`, showing the other-tab banner with "Use here" through `components/status/` at
-  `banner` while another tab holds it) and connects to each paired node from `owner.ts` through `peer.ts` (W-2), one
+  `banner` while another tab holds it; "Use here" moves focus to the main landmark, as the banner
+  goes) and connects to each paired node from `owner.ts` through `peer.ts` (W-2), one
   `session.peer(node, ...)` per node, pausing while `#/onboarding` runs a pairing session and
   forwarding owner `devlog` updates. The browser sends `hello` with `v: 2`; only a `version`
   refusal makes it try `v: 1` on that connection. `net.homes` is `homes` of `groups.svelte.ts`; `net.path(home)`
@@ -343,7 +344,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   never replacing a text. A text with a number in it carries `{n}`, which its component replaces. Chat
   content is never translated. The options of the language choice are named in their own
   language in both files and carry its `lang`, so a screen reader speaks each in its language
-  (WCAG 2.2 SC 3.1.2). The language button of the top bar has no `aria-label`: its name is its
+  (WCAG 2.1 SC 3.1.2). The language button of the top bar has no `aria-label`: its name is its
   visible text (`bar.lang.other`, marked with the language it names) followed by a visually
   hidden "Switch language / 切换语言", each half in its own language from its own file
   (`textIn`), so speech input can use the visible text (SC 2.5.3).
@@ -458,7 +459,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
     `takeover`, `limited`, `offline`), computer with path (`local`, `direct`, `relay`, `offline`),
     account type, a usage bar (`.meter` in `src/styles/base.css`, from `usageMeter` in
     `src/lib/members.ts`: the rate-limit window percentage with its reset time, in danger tone at
-    100 percent and omitted when `usage` has no `window_pct`), and for owned AIs an "Open terminal" link enabled only when the browser's own
+    100 percent and omitted when `usage` has no `window_pct`; a `meter` to assistive technology,
+    named by its label, with the percentage and the reset time as its value text), and
+    for owned AIs an "Open terminal" link enabled only when the browser's own
     path to that computer is `direct`, or, while the AI is in `takeover`, a "Hand back" button that
     sends `takeover.end` and says that messages to it wait until then; then the human members with
     their roles and online status. Its "Add AI" button requires a reachable group home, an admin
@@ -483,8 +486,13 @@ file in `src/routes/`. It edits neither the shell nor another area:
   address; while `takeover.start` is still unanswered, `takeover.end` waits for the answer, so a
   hand-back cannot reach the computer before its terminal opens (A7.6). The page says that
   messages to the AI wait until hand-back, without a count: the node pushes no `host.info`
-  (`../issues.md`). `HandbackMeta.svelte` mounts for message kind `handback` to render changed
-  files, commits and diff counts.
+  (`../issues.md`). Tab and Shift+Tab are typed into the terminal, so Ctrl+M, which a terminal
+  reads as Enter, is kept from it and moves focus to the takeover bar's button; a note in the
+  details column says so and describes the terminal's input field. Faint text in the default
+  colour is drawn in `--term-dim`, 5.6 to 1 on `--term-bg`, where xterm's own half opacity gives
+  4.1 to 1 (`../issues.md` for faint text in a colour). The key row and the details column scroll, and take keyboard focus for that.
+  `HandbackMeta.svelte` mounts for message kind `handback` to render changed files, commits and
+  diff counts.
 - **Connection indicator and computers page.** `indicator(net, group)` in `src/lib/nodes.svelte.ts`
   gives the pill mounted at `bar` (and at `chat.head` below 768 px, where an open chat hides the
   top bar) its state, linking to `#/nodes` with an accessible `Connection status: …`
@@ -506,16 +514,22 @@ file in `src/routes/`. It edits neither the shell nor another area:
   other groups still notify. Open jumps to the card or message. At most three are shown: a
   newcomer past that drops the oldest self-closing one, or the oldest waiting card when none is
   self-closing. The stack sits at the top right of the page's area, under the top bar and the
-  banners (on a phone's chat, under the chat's head), so it never covers the composer or "Use
-  here"; its polite live region is always in the page, and it shows nothing while another tab
-  holds the connection. Notifications slide into place and fade out, both at once under reduced
-  motion.
+  banners, so it never covers the composer or "Use here". On a chat it hangs under the chat's
+  head at every width, and from 1024 px it is as wide as the cards of the side column it lies
+  over, so it covers neither the head's buttons, the waiting bar nor "Add AI"; below 1024 px the
+  side panel opens over it. Its polite live region is always in the page, apart from the shell's
+  status region, and it shows nothing while another tab holds the connection. "Open" and the
+  close button of a notification are described by its title. Closing one from the keyboard moves
+  focus to the next notification's close button, else to the one before, else to the main
+  landmark; a close by pointer leaves focus alone. Notifications slide into place and fade out,
+  both at once under reduced motion.
 - **Web Push reminders.** `src/sw.ts` (built by `vite.config.ts` into a self-contained `sw.js` at
   the root of `webdist/`), `src/lib/push.ts`, and `src/components/reminder/` implement the browser
   side of `planning/contracts/commands.md` section 1.7 and A8.3. `ReminderCard.svelte` on
   `routes/Settings.svelte` turns browser notifications on or off, selects which of the five
   event kinds (`mention`, `approval`, `decision`, `brief`, `done`, kept via `preference`) send
-  reminders, and shows the iPhone/iPad Home Screen hint (`risks.md` K-20). `loadVapid` keeps a
+  reminders, in a group named by "Notify me when", and shows the iPhone/iPad Home Screen hint
+  (`risks.md` K-20). `loadVapid` keeps a
   P-256 VAPID key pair in IndexedDB (`solodawn`, store `device`, key `vapid`); `Reminders`
   subscribes through `PushManager` and sends `push` (`PushOn` or `{ off: true }`) to connected
   homes, while `ReminderSync.svelte` (mounted at `layer`) keeps newly connected homes in sync and
@@ -604,7 +618,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                     |
 | `features/reminder.spec.ts`   | steps of `../features/web_reminder.feature` (A8.3 browser half)                   |
 | `features/a11y.spec.ts`       | steps of `../features/web_a11y.feature`                                           |
-| `features/home.ts`            | a home in memory for those steps; `page.ts` drives the page                       |
+| `features/home.ts`            | a home and an owned computer in memory for the steps; `page.ts` drives the page   |
 | `features/demo.ts`            | groups with a morning of talk, for a development page                             |
 | `features/watch.svelte.ts`    | an effect outside a component, for tests of what is reactive                      |
 | `features/shots.ts`           | screenshots of the pages from that demo, four widths                              |
@@ -705,4 +719,15 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
 - Both pages were looked at in headless Chromium at 375, 820, 1100 and 1440 px in both themes,
   with `features/demo.ts` loaded into a development page, on 2026-11-20. They have not been opened
   in Safari or Firefox, nor on a real phone, and nobody walked through them with a screen reader.
+- Accessibility (U-16, U-16b): on 2026-11-22 axe-core 4.10.3 (tags wcag2a, wcag2aa, wcag21a,
+  wcag21aa) ran in the system Chrome on the group list, the chat with calls and a thread, the
+  member panel, the project memory and its delete dialog, the add-AI dialog, the terminal (active
+  and refused), settings (also as an iPhone), computers, the add-a-browser and create-group
+  dialogs, onboarding, the states sheet and the other-tab notice, each with notifications where
+  they show, in both themes at 1280 by 800 and 390 by 844 with a touch pointer: no violation.
+  Tab order, focus after each close and the way out of the terminal were walked with real key
+  presses there. `../features/web_a11y.feature` holds what the test DOM can check; it has no
+  layout, no native dialog focus and no colour, so the placement of notifications, the focus a
+  `<dialog>` gives and returns, and contrast on the page were checked in Chrome only. Nobody
+  walked the pages with a screen reader.
 - Rules: `planning/architecture.md` section 8, `planning/product-rules.md` R-160 to R-164.
