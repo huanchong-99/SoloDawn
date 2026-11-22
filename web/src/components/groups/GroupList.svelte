@@ -138,6 +138,12 @@
       opacity: 1;
     }
   }
+  @media (forced-colors: active) {
+    .gitem[aria-current] {
+      outline: 2px solid Highlight;
+      outline-offset: -2px;
+    }
+  }
   .gbody {
     display: flex;
     flex-direction: column;

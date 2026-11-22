@@ -277,7 +277,9 @@ export class Home {
   ctl = $state.raw<p.Ctl>();
   /** The groups homed here that this person may read, as the node last listed them. */
   groups = $state.raw<Group[]>([]);
-  /** The node's name, and whether this person owns it: only then can a group be created here. */
+  /** The node's device id and name, and whether this person owns it: only then can a group be
+   *  created here. */
+  device = $state('');
   name = $state('');
   owner = $state(false);
   // The connection that is the home's now: the last one to come online, until it is gone.
@@ -297,6 +299,7 @@ export class Home {
       online: (ctl, welcome) => {
         this.#link = link;
         this.ctl = ctl;
+        this.device = welcome.device;
         this.name = welcome.name;
         this.owner = welcome.owner;
         this.#list(welcome.groups);
