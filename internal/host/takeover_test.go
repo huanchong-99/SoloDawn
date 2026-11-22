@@ -376,7 +376,8 @@ func TestTakeoverHandBackAfterACommitPostsTheFacts(t *testing.T) {
 	term := newPTYTestTerminal("pty:" + runGroup1 + ":" + runAI1)
 	go r.h.ServeTerminal(term)
 	term.waitContains(t, "WD:7-owner-takeover")
-	term.inW.Write([]byte("quit\n"))
+	term.inW.Write([]byte("quit\r"))
+	term.waitContains(t, "BYE-NOW")
 
 	r.waitFor("the hand-back turn", func() bool { return r.drv.count() == 1 })
 	proc := r.drv.lastProc()
