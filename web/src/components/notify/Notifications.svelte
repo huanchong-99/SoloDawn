@@ -6,7 +6,7 @@
   import type { Net } from '../../lib/net.svelte';
   import { Notifier, titleOf, whoOf, type NotifyKind } from '../../lib/notify.svelte';
   import { t } from '../../lib/prefs.svelte';
-  import { href } from '../../lib/route.svelte';
+  import { href, route } from '../../lib/route.svelte';
   import Icon, { type IconName } from '../Icon.svelte';
 
   /** Live in-page notifications mounted in the shell's overlay layer. */
@@ -30,9 +30,27 @@
   const notifier = new Notifier();
   $effect(() => notifier.sync(net.homes));
   onDestroy(() => notifier.clear());
+
+  let stack: HTMLElement;
+  /** Closing from the keyboard hands focus to the next notification's close button, or to the
+   *  page when it was the last. */
+  function close(button: HTMLElement, key: string) {
+    if (button.matches(':focus-visible')) {
+      const closers = [...stack.querySelectorAll<HTMLElement>('.toast:not([inert]) .icon-btn')];
+      const at = closers.indexOf(button);
+      (closers[at + 1] ?? closers[at - 1] ?? document.querySelector('main'))!.focus();
+    }
+    notifier.dismiss(key);
+  }
 </script>
 
-<section class="notify" aria-label={t('notify.label')} aria-live="polite">
+<section
+  class="notify"
+  class:chat={route.page === 'chat'}
+  bind:this={stack}
+  aria-label={t('notify.label')}
+  aria-live="polite"
+>
   {#if !net.otherTab}
     {#each notifier.items as item (item.key)}
       {@const title = titleOf(item.group, item.msg)}
@@ -49,13 +67,16 @@
       >
         <span class="glyph"><Icon name={icons[item.kind]} /></span>
         <div class="grow">
-          <b class="cut">{t(`notify.kind.${item.kind}`)}{title ? ` · ${title}` : ''}</b>
+          <b class="cut" id={`n-${item.key}`}>
+            {t(`notify.kind.${item.kind}`)}{title ? ` · ${title}` : ''}
+          </b>
           <p class="muted cut">{item.group.name} · {whoOf(item.group, item.msg)}</p>
         </div>
         <a
           class="btn btn-sm"
           class:btn-dawn={item.needsYou}
           href={href('chat', { g: item.group.g })}
+          aria-describedby={`n-${item.key}`}
           onclick={(event) => void notifier.open(event, item)}
         >
           {t('notify.open')}
@@ -64,7 +85,8 @@
           type="button"
           class="icon-btn"
           aria-label={t('notify.dismiss')}
-          onclick={() => notifier.dismiss(item.key)}
+          aria-describedby={`n-${item.key}`}
+          onclick={(event) => close(event.currentTarget, item.key)}
         >
           <Icon name="x" sm />
         </button>
@@ -74,18 +96,30 @@
 </section>
 
 <style>
-  /* Over the top of the page's area, so under the top bar and the banners at every width. */
+  /* Over the top of the page's area, so under the top bar and the banners at every width, and
+     under a chat's side panel while that is open over the chat (z-index 5). */
   .notify {
     grid-area: main;
     align-self: start;
     justify-self: end;
-    z-index: 10;
+    z-index: 4;
     display: flex;
     flex-direction: column;
     gap: var(--sp-2);
     width: min(380px, calc(100% - 2 * var(--sp-4)));
     margin: var(--sp-3) var(--sp-4) 0;
     pointer-events: none;
+  }
+  /* An open chat has its own head: the stack hangs under it, clear of the head's buttons and of
+     "Add AI" beside it. */
+  .notify.chat {
+    margin-top: calc(var(--bar-h) + var(--sp-3));
+  }
+  /* There it lies over the side column, as wide as that column's cards. */
+  @media (min-width: 1024px) {
+    .notify.chat {
+      width: calc(var(--side-w) - 2 * var(--sp-4));
+    }
   }
   .toast {
     display: flex;
@@ -127,7 +161,7 @@
       width: auto;
       margin-inline: var(--sp-3);
     }
-    /* A phone's chat has its own head where the top bar was. */
+    /* A phone's terminal, like its chat, has its own head where the top bar was. */
     :global(.app[data-full='phone']) > .notify {
       margin-top: calc(var(--bar-h) + var(--sp-3));
     }

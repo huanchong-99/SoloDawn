@@ -76,8 +76,8 @@
     />
   </div>
   <div class="set-row">
-    <div><b>{t('reminder.when')}</b></div>
-    <div class="stack">
+    <div><b id="s-when">{t('reminder.when')}</b></div>
+    <div class="stack" role="group" aria-labelledby="s-when">
       {#each order as kind (kind)}
         <label class="check">
           <input

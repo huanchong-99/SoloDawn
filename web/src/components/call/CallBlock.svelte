@@ -22,7 +22,7 @@
       {:else}
         {view.timing}
       {/if}
-      · {view.depth}
+      · <span class="depth">{view.depth}</span>
     </span>
   </p>
 
@@ -73,6 +73,9 @@
     font-size: inherit;
     font-weight: inherit;
     vertical-align: baseline;
+  }
+  .depth {
+    white-space: nowrap;
   }
   .text {
     white-space: pre-wrap;
