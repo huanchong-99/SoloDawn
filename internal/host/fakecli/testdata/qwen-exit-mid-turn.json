@@ -1,0 +1,7 @@
+{
+  "session": "550e8400-e29b-41d4-a716-446655440091",
+  "steps": [
+    {"dir": "http<-node", "msg": {"route": "prompt", "sessionId": "$session", "body": {"prompt": [{"type": "text", "text": "Try the write."}]}}},
+    {"dir": "sse->node", "msg": {"id": 1, "v": 1, "type": "permission_request", "data": {"requestId": "req-exit-1", "sessionId": "$session", "toolCall": {"toolCallId": "call_exit", "kind": "execute", "rawInput": {"command": "pnpm test", "description": "Run test suite"}, "_meta": {"toolName": "run_shell_command"}}, "options": [{"optionId": "proceed_once", "kind": "allow_once"}, {"optionId": "cancel", "kind": "reject_once"}]}}}
+  ]
+}

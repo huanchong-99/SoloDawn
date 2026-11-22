@@ -1,0 +1,20 @@
+{
+  "session": "550e8400-e29b-41d4-a716-446655440091",
+  "steps": [
+    {"dir": "http<-node", "msg": {"route": "prompt", "sessionId": "$session", "body": {"prompt": [{"type": "text", "text": "Try the write."}]}}},
+    {"dir": "mcp<-cli", "msg": {"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "qwen-code", "version": "0.28.0"}}}},
+    {"dir": "mcp->cli", "msg": {"jsonrpc": "2.0", "id": 0, "result": {"capabilities": {"tools": {}}}}},
+    {"dir": "mcp<-cli", "msg": {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}},
+    {"dir": "mcp->cli", "msg": {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}}},
+    {"dir": "sse->node", "msg": {"id": 1, "v": 1, "type": "session_update", "data": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Checking command permission."}, "usage": {"totalTokens": 128}}}},
+    {"dir": "sse->node", "msg": {"id": 2, "v": 1, "type": "permission_request", "data": {"requestId": "req-qwen-1", "sessionId": "$session", "toolCall": {"toolCallId": "call_1", "kind": "execute", "rawInput": {"command": "pnpm test", "description": "Run test suite"}, "_meta": {"toolName": "run_shell_command"}}, "options": [{"optionId": "proceed_once", "kind": "allow_once"}, {"optionId": "cancel", "kind": "reject_once"}]}}},
+    {"dir": "http<-node", "msg": {"route": "permission", "sessionId": "$session", "requestId": "req-qwen-1", "body": {"outcome": {"outcome": "selected", "optionId": "cancel"}}}},
+    {"dir": "sse->node", "msg": {"id": 3, "v": 1, "type": "permission_resolved", "data": {"requestId": "req-qwen-1", "outcome": {"outcome": "selected", "optionId": "cancel"}}}},
+    {"dir": "sse->node", "msg": {"id": 4, "v": 1, "type": "turn_complete", "data": {"sessionId": "$session", "stopReason": "end_turn", "promptId": "$session########1"}}},
+    {"dir": "http<-node", "msg": {"route": "prompt", "sessionId": "$session", "body": {"prompt": [{"type": "text", "text": "Approved. Retry."}]}}},
+    {"dir": "sse->node", "msg": {"id": 5, "v": 1, "type": "permission_request", "data": {"requestId": "req-qwen-2", "sessionId": "$session", "toolCall": {"toolCallId": "call_2", "kind": "execute", "rawInput": {"command": "pnpm test", "description": "Run test suite"}, "_meta": {"toolName": "run_shell_command"}}, "options": [{"optionId": "proceed_once", "kind": "allow_once"}, {"optionId": "cancel", "kind": "reject_once"}]}}},
+    {"dir": "http<-node", "msg": {"route": "permission", "sessionId": "$session", "requestId": "req-qwen-2", "body": {"outcome": {"outcome": "selected", "optionId": "proceed_once"}}}},
+    {"dir": "sse->node", "msg": {"id": 6, "v": 1, "type": "turn_complete", "data": {"sessionId": "$session", "stopReason": "end_turn", "promptId": "$session########1", "usage": {"totalTokens": 256}}}},
+    {"dir": "eof"}
+  ]
+}
