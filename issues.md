@@ -6,13 +6,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-22 · limitation · Task participation history is inferred from current fields
 ### 2026-11-22 · deviation · The Go export scenarios do not exercise browser UI or an OS timer
 
 - Symptom: A9.27 and A9.28 exercise browser peers at the protocol boundary, not the browser's own follow logic or the owner-only commands in group info. A9.28 takes successive copies without waiting for an OS timer at one-minute intervals.
 - Cause: `features/s2_export.feature:12,19,24` use the I2-0 Go cast and two invocations of the copy command. The product does not schedule copies (`planning/contracts/step-2/export.md:60-62`).
 - Status: open. Browser coverage belongs to I2-2 after U2-5 and W2-1. The OS timer is not verified.
-### 2026-11-22 · limitation · Home task participation needs the role-confirmation lane
+
+### 2026-11-22 · limitation · Task participation history is inferred from current fields
 
 - Symptom: a final task cancelled before its first role item was queued can qualify for the thread exception after its expired card is pruned, as can an assignee newly named by row 11 before its first activation. A reviewer's earlier participation can be lost after a later reassignment/review overwrites its evidence.
 - Cause: `internal/home/cmd_confirm.go:48-80` derives participation from current roles, state, step and latest review, excluding unconfirmed role cards. Acknowledged inbox items are deleted; task rows contain no durable participation history. Row 11 also cannot durably distinguish an owner's reassignment that overrides an earlier closed card from that card; a foreign reassignment to the same AI after expiry needs a new request, since the request's one card is closed (`internal/home/cmd_confirm_task.go:109-123,138-154`).
