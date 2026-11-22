@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-22 · limitation · `host.CheckTakeover` awaits `takeover.start` (`HS-20`) and `driver` in `host.info` awaits `P-5` / `T3-2`
+
+- Symptom: `host.CheckTakeover` (`internal/host/caps.go`) is not yet wired to a `Surface["takeover.start"]` handler, and `Host.Agents` (`internal/host/agents.go`) does not yet populate a `driver` field on `proto.HostAgent` in `host.info`.
+- Cause: `HS-20` (terminal takeover) is built on a parallel wave-3 branch (`Surface["takeover.start"]` is not on `rebuild` yet), and `planning/contracts/step-3/drivers.md` section 6 / `planning/steps/parallel-plan-step-2-3.md` row `T3-1` assign freezing `driver` on the wire to `P-5` and putting `driver` into `host.info` to `T3-2`.
+- Status: open until `HS-20` calls `host.CheckTakeover` in `takeover.start` and `T3-2` adds `driver` to `host.info` after `P-5`.
+
 ### 2026-11-21 · limitation · Finished tasks stay in a group's state in memory after retention until a restart
 
 - Symptom: after the daily retention run deletes a `merged` or `cancelled` task row older than `retention_days` from SQLite, `State.Tasks` in the running home still holds that task row until the loop restarts. A rule or a state read that inspects `State.Tasks` before a restart still sees the finished task; a cold read from the store snapshot and a restarted loop do not.
