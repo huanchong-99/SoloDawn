@@ -40,8 +40,6 @@ const (
 )
 
 var m3PostponedTools = map[string]bool{
-	"ask":        true,
-	"reply":      true,
 	"net_status": true,
 }
 
