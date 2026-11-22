@@ -24,6 +24,7 @@ func init() {
 	Register(Pushes, "inbox", pushInbox)
 	Register(Pushes, "rows", pushRows)
 	Register(Pushes, "reset", pushReset)
+	Register(Pushes, "groups", pushHomeGroups)
 	Provide(&Deliver, deliverNow)
 }
 
@@ -33,6 +34,7 @@ type groupSync struct {
 	home          string
 	cursor        int64
 	live, syncing bool
+	refresh       bool
 	token         *byte
 	waiters       []chan struct{}
 }
@@ -277,8 +279,8 @@ func syncOneGroup(ctx context.Context, h *Host, d *delivery, conn Home, device s
 	answer, err := conn.Request(ctx, build)
 	synced, syncErr := decodeSyncAnswer(answer, err)
 	ok := syncErr == nil
-	if d.finishGroupSync(job, device, synced.Seq, ok) && ok {
-		d.wg.Go(func() { afterGroupState(h, d, job.group) })
+	if current, refresh := d.finishGroupSync(job, device, synced.Seq, ok); current {
+		settleHomeSync(h, d, device, job.group, answer, ok, refresh)
 	}
 	return syncErr
 }
@@ -298,24 +300,25 @@ func decodeSyncAnswer(answer json.RawMessage, err error) (proto.Synced, error) {
 	return synced, nil
 }
 
-func (d *delivery) finishGroupSync(job syncJob, device string, seq int64, ok bool) bool {
+func (d *delivery) finishGroupSync(job syncJob, device string, seq int64, ok bool) (bool, bool) {
 	d.mu.Lock()
 	gs := d.groupLocked(job.group, device)
 	if gs.token != job.token {
 		d.mu.Unlock()
-		return false
+		return false, false
 	}
 	gs.syncing = false
 	if ok {
 		gs.cursor, gs.live = seq, true
 	}
-	waiters := gs.waiters
-	gs.waiters = nil
+	waiters, refresh := gs.waiters, gs.refresh
+	gs.waiters, gs.refresh = nil, false
+	gs.live = gs.live && !refresh
 	d.mu.Unlock()
 	for _, ch := range waiters {
 		close(ch)
 	}
-	return true
+	return true, refresh
 }
 
 func pushReset(h *Host, home string, frame json.RawMessage) {
@@ -440,6 +443,7 @@ func cleanupGoneMembers(h *Host, group string) {
 	for _, raw := range h.Rows.Of(group, "member") {
 		var row proto.GoneRow
 		if proto.Decode(raw, &row) == nil && row.Gone {
+			watchGone(h, group, row.ID)
 			leaveGoneMember(h, group, row.ID)
 		}
 	}
@@ -544,6 +548,10 @@ func handleInboxElem(h *Host, d *delivery, home, group string, rawElem json.RawM
 }
 
 func dispatchArrivedItem(h *Host, d *delivery, v verifiedItem) {
+	if v.item.Why == "watch" {
+		watchItem(h, v)
+		return
+	}
 	if ai, local, _ := lookupLocalAI(h, v.group, string(v.item.AI)); local && tryOpenWait(h, v, ai.agent) {
 		return
 	}

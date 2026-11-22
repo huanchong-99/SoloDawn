@@ -33,13 +33,12 @@ type Fetch struct {
 func (l *Loop) Fetch(c *Conn, req Fetch) {
 	read, ok := fetSelectRead(req)
 	if !ok {
-		c.send(runErr(req.ID, "bad_request", "the fetch limit must be 1 to 100 and before at least 0"))
+		if !l.replyMoved(c, req.ID, req.Group) {
+			c.send(runErr(req.ID, "bad_request", "the fetch limit must be 1 to 100 and before at least 0"))
+		}
 		return
 	}
-	step := func(g *runGroup) { g.fetRun(c, req, read) }
-	if !l.ask(req.Group, step) {
-		c.send(runErr(req.ID, "not_found", "this node is not home to the group"))
-	}
+	l.askHome(c, req.ID, req.Group, func(g *runGroup) { g.fetRun(c, req, read) })
 }
 
 func fetSelectRead(req Fetch) (func(Fetch, *store.Snapshot) (proto.Fetched, error), bool) {

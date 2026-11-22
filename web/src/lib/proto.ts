@@ -1027,7 +1027,7 @@ const HostState = {
       account: v.nullable(str),
       login_ok: bool,
       caps: Caps,
-      driver: v.optional(Driver),
+      driver: Driver,
       groups: v.array(
         v.object({
           g: Id,
@@ -1228,9 +1228,9 @@ export type ToolLists = v.InferOutput<typeof ToolLists>;
 /** What a client can receive on `ctl` without asking: every push, which has no `re`, and the
  *  error answer. A frame with `re` is the answer to a request: read it with `decodeAnswer`, by the
  *  type of the request whose `id` it names. */
-export const Frame = v.union([ErrorResponse, Rows, Reset, Devlog, Groups, HostInfoPush]);
+export const Frame = v.union([ErrorResponse, Rows, Reset, Devlog, Groups, HostInfoPush, PTYResize]);
 export type Frame = v.InferOutput<typeof Frame>;
-export type Push = Rows | Reset | Devlog | Groups | HostInfoPush;
+export type Push = Rows | Reset | Devlog | Groups | HostInfoPush | PTYResize;
 
 /** The schema of the answer to each request, by the request's `t`. An answer is read with the
  *  schema of the request it answers, not by what it holds: the answers to `cmd` and `audit` have no

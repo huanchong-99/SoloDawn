@@ -12,6 +12,7 @@ kind: reference
 - `node.go` and `proc_*.go`: `Foreground()` runtime assembly (`openNode`, `runNode`), `logs/node.log` rotation at 10 MiB (keeping `.1`), `device.key` and `node.db` initialization, `home.StartLoop` (`OwnerFn: logs.Owner`), `host.Host` + `ServeMCP` on the local socket, `AttachLocal`, `Logs` + `Sessions` + `Surface` + `Pairer`, start-at-login registration on adoption (`InstallService`), `peer.Peer` + `Host.Connect`, embedded local web UI (`localhost:47800` with `:0` fallback) + `/rv` local signalling path, and persistent remote rendezvous connections ([local](../../planning/contracts/local.md), sections 1-3 and 10).
 - `dir.go` and `socket*.go`: per-user data directory, exclusive lock on `lock`, and owner-only local Unix socket (`sock`) carrying local CLI commands and MCP sessions ([local](../../planning/contracts/local.md), sections 2 and 3).
 - `cmd.go`: the `Subcommands` table, `MCP` (`solodawn mcp --token <t>`), and local command exchange (`solodawn pair` auto-starts a detached background node when `sock` is absent).
+- `export.go`: `solodawn group export <group id> <file> [--to <device id>]` and `solodawn group import <file>` use the running node's local socket. Export without `--to` keeps the group on the old node; export with it makes the old node answer `moved`. Import requires a node of the same owner and no existing rows for that group. Files resolve relative to the CLI's working directory.
 - `service_*.go`: start-at-login registration on macOS, Linux and Windows ([local](../../planning/contracts/local.md), section 1).
 - `update.go`: `Updater` for SHA-256-verified self-update outside running turns and takeovers ([local](../../planning/contracts/local.md), section 9; postponed off the main line).
 - `rendezvous.go`: standalone signalling, static web assets and ICE service.
@@ -19,7 +20,7 @@ kind: reference
 - `session.go`: `Sessions`, serving inbound `ctl` connections (`*peer.Connection` via `Ctl`), `hello` and `welcome`, the bootstrap rule before enrolment, request (`sync`, `fetch`, `host.info`), push (`devlog`, `ack`), command (`pair.browser`) and replay tables, delegation to `home.Loop` and `host.Surface`, and asynchronous execution with envelope checks, in-flight nonce coordination and `receipt` persistence for host commands ([datachannel](../../planning/contracts/datachannel.md), sections 2, 3, 5, 7 and 8; [commands](../../planning/contracts/commands.md), "Once only" and section 2).
 - `client.go`: `clientCtl`, `dialFunc`, `(*Sessions).serveClient` and `(*Sessions).connectHome`, the client side of a host's outgoing `ctl` session to a home on another node ([datachannel](../../planning/contracts/datachannel.md), sections 2, 3 and 3.1; [flows/connect.md](../../planning/flows/connect.md), steps 11 to 18).
 - `pair.go`: `Pairer`, running 10-minute single-use pairing rooms in role `b` (`Pair`, onboarding and adding another computer) and role `a` (`PairBrowser` and `pair.browser`, adding another browser with `#pair=<secret>` links and once-only nonce replay; [pairing](../../planning/flows/pairing.md), sections A to C; [envelope](../../planning/contracts/envelope.md), section 6).
-- `surface.go`: `Surface`, serving `host.info` (`HostState`, including live `QueuedCount` per `(group, member)`), forwarding `pty.resize` pushes to `host.Surface["pty.resize"]`, replaying `takeover.start` via `Host.ReplayTakeover`, and reading `name`, `max_open`, `offline`, `homes` and `rendezvous` (`ReadName`, `ReadRendezvous`; [datachannel](../../planning/contracts/datachannel.md), sections 3 and 7).
+- `surface.go`: `Surface`, serving `host.info` (`HostState`, including live `QueuedCount` and sorted granted `watchers` per `(group, member)`), forwarding `watch.start` requests to `Host.WatchStart` and `pty.resize` pushes to `host.Surface["pty.resize"]`, replaying `takeover.start` via `Host.ReplayTakeover`, and reading `name`, `max_open`, `offline`, `homes` and `rendezvous` (`ReadName`, `ReadRendezvous`; [datachannel](../../planning/contracts/datachannel.md), sections 3 and 7; [watch-team](../../planning/contracts/step-2/watch-team.md), sections 2-6).
 - `netstatus.go`: registers the `net_status` MCP tool in `host.Tools` and reports welcomed `ctl` paths, the local NAT flags, and configured rendezvous reachability ([mcp-tools](../../planning/contracts/mcp-tools.md), section 1).
 - `schedule.go`: runs `home.Retain` on `node.db` at startup and every 24 hours ([storage](../../planning/contracts/storage.md), sections 2 and 4).
 - `local.go`: `AttachLocal` and `LocalLink`, the in-process link between a `*host.Host` and a `*home.Loop` on the same node ([architecture](../../planning/architecture.md), section 2.1).
@@ -46,6 +47,7 @@ kind: reference
 ## Local link
 
 `AttachLocal(h, loop)` attaches `h.Key.ID()` to `loop` as a `home.Client`, registers the `*LocalLink` on `h` via `h.Attach`, and calls `loop.Inbox` for the node's device.
+The node runtime also subscribes its `LocalLink` to `groups` pushes.
 
 - **Framing.** Every frame in either direction is encoded as JSON without HTML escaping. `host.Command` checks the `ctl` message limit before sending, and the home loop splits `rows` pushes within the limit ([conventions.md](../../planning/contracts/conventions.md) section 4).
 - **Requests and pushes (`Host` to `Home`).** `Request` assigns an increasing request `id`, sends the built frame, and waits on a per-request single-reader channel until the matching `re` arrives, `Done()` closes, or `ctx` is canceled. `cmd`, `sync` and `fetch` requests dispatch to `loop.Cmd`, `loop.Sync` and `loop.Fetch`, and `ack` pushes dispatch to `loop.Ack`; any other frame carrying an integer `id` is answered `bad_request` ([datachannel.md](../../planning/contracts/datachannel.md) section 2), and any other frame without an `id` is dropped.
@@ -76,12 +78,14 @@ The owner's devices can send `home.add` to record a group's home and its signall
 
 | Map | Purpose |
 | --- | --- |
-| `Requests` | `ctl` requests (`sync`, `fetch` with `Async: true`; `host.info` registered by `NewSurface` with `Type: "host.info"`) |
+| `Requests` | `ctl` requests (`sync`, `fetch` with `Async: true`; `host.info` registered by `NewSurface` with `Type: "host.info"`; `watch.start` registered by `NewSurface` with an untyped `ok` answer after the host checks the grant and direct path) |
 | `Pushes` | `ctl` pushes after enrolment beyond `devlog` and `ack` (`pty.resize` registered by `NewSurface`) |
-| `Commands` | node-level host commands (`pair.browser` registered by `NewPairer`); other host commands (`to` set in payload) fall back to `host.Surface` |
+| `Commands` | node-level host commands (`pair.browser` registered by `NewPairer`); other host commands (`to` set in payload), including `watch.end` to revoke a user's grant and close their channels, fall back to `host.Surface` |
 | `Replays` | memory-backed replay answers for succeeded host commands (`pair.browser` registered by `NewPairer`, returning the active link while valid and `conflict` once used, expired or lost across restart; `takeover.start` registered by `NewSurface`, answering `ok` while that terminal remains open on the same connection and `conflict` otherwise) |
 
 `SessionConfig.OnAdopt` is invoked once with the adopted owner's user id when an unowned node persists its first valid adoption log (`dvlAdopt`), before forwarding `devlog` frames. `SessionConfig.Spawn` starts a host command; `nil` runs it on a bare goroutine. `nodeRuntime.onAdopt` registers the node to start at login (`InstallService`), while `home.Loop` reads the dynamic owner through `LoopConfig.OwnerFn` (`logs.Owner`). `home.Loop.Welcome` and `home.Loop` group announcements deliver `welcome.groups` and `groups` pushes over `Sessions`.
+
+Non-owner devices may send `watch.start` as well as `sync` and `fetch`. A device whose person holds a watch grant is admitted by `knownPeer` and session enrolment even without a locally known device log. It receives the ordinary peer welcome (`owner: false`, readable groups often empty), may send `hello` and `devlog`, and may start and open its granted watch channels. `Host.WatchEnded` closes that person's device sessions, including their peer connections, after the last grant ends unless `knownPeer` still accepts them for another reason.
 
 ## Concurrency and lock order
 
@@ -102,7 +106,7 @@ The owner's devices can send `home.add` to record a group's home and its signall
 3. `Pairer.HandleEvent` receives `joined`, `full` and `room` frames from both the local `/rv` path and remote rendezvous paths, and `PairConfig.Paths` returns `n.sharedPaths`.
 4. `Pairer.Peer` and `Host.Connect` (`Sessions.connectHome`) are set right after `peer.New`.
 5. Local socket `pair` persists `--rendezvous` first, runs `syncRendezvous` and calls `Pairer.Pair`; `pair-browser` and `open` call `Pairer.PairBrowser`.
-6. `SurfaceConfig.Agents` is set to `(*Host).Agents` (`HS-3`), and `peer.New` registers `pty:` channels onto `(*Host).ServeTerminal` (`HS-19`).
+6. `SurfaceConfig.Agents` is set to `(*Host).Agents` (`HS-3`), and `peer.New` registers `pty:` channels onto `(*Host).ServeTerminal` (`HS-19`) and receive-only `watch:` channels onto `(*Host).ServeWatch` (`T2-6`). Watch grants and channel lifetimes belong to the host; `host.info` exposes them as `agents[].groups[].watchers`.
 7. `netStatusPart` is wired to `(*nodeRuntime).netStatus` (`netstatus.go`), and `stepStartup` launches `startRetention` (`schedule.go`).
 
 ## Known limitations

@@ -42,10 +42,12 @@ export interface Net {
   /** Steals the device's connection lock for this tab after the person chooses "Use here". */
   useHere?(): void;
   join?(invitation: Invitation, name: string, signal: AbortSignal): Promise<JoinResult>;
+  watchHost?(id: string): () => void;
 }
 
 type JoinResult = { notifications: Awaited<Awaited<ReturnType<typeof joinGroup>>['notices']> };
 type Join = NonNullable<Net['join']>;
+type WatchHost = NonNullable<Net['watchHost']>;
 
 /** The mock answers in a development server only, and not when the address has `nomock`. */
 export const sourceOf = (mode: string, search: string): Source =>
@@ -88,6 +90,7 @@ function startLive(
   stopSignal: AbortSignal,
   waitForUseHere: () => Promise<void>,
   setJoin: (join: Join | undefined) => void,
+  setWatchHost: (watch: WatchHost | undefined) => void,
 ) {
   const activeTab = (device: Device, signal: AbortSignal) => {
     if (signal.aborted) return Promise.resolve();
@@ -113,13 +116,15 @@ function startLive(
         ...Object.values(joined).map((h) => h.url),
       ];
       const invited = new Set<string>();
+      const watches = new Map<string, number>();
       const hub = connect({
         urls,
         device,
-        known: (id) => log.valid(id) || Object.hasOwn(joined, id) || invited.has(id),
+        known: (id) =>
+          log.valid(id) || Object.hasOwn(joined, id) || invited.has(id) || watches.has(id),
         name: browserName,
       });
-      const peers = new Map<string, Pick<Peer, 'send'>>();
+      const peers = new Map<string, Pick<Peer, 'send' | 'close'>>();
       const controller = (joining = new AbortController());
       const onDevlog = async (frame: Devlog) => {
         if (!(await appendEntries(log, frame.entries)) || session !== hub) return;
@@ -170,6 +175,26 @@ function startLive(
       for (const [id, { name }] of Object.entries(joined)) {
         if (!peers.has(id)) dial(id, homeOf(log, id, name));
       }
+      const releaseWatch = (id: string) => {
+        if (controller.signal.aborted) return;
+        const remaining = watches.get(id)! - 1;
+        if (remaining) {
+          watches.set(id, remaining);
+          return;
+        }
+        watches.delete(id);
+        if (log.valid(id) || Object.hasOwn(joined, id) || invited.has(id)) return;
+        peers.get(id)!.close();
+        peers.delete(id);
+        const home = added.get(id)!;
+        added.delete(id);
+        homes.splice(homes.indexOf(home), 1);
+      };
+      setWatchHost((id) => {
+        watches.set(id, (watches.get(id) ?? 0) + 1);
+        if (!peers.has(id)) dial(id, homeOf(log, id, id));
+        return () => releaseWatch(id);
+      });
       setJoin(async (invitation, name, cancel) => {
         const id = invitation.home;
         let trackPath: ((path: Path | undefined) => void) | undefined;
@@ -216,6 +241,7 @@ function startLive(
     const close = () => {
       epoch += 1;
       setJoin(undefined);
+      setWatchHost(undefined);
       joining?.abort();
       session?.close();
       session = undefined;
@@ -256,9 +282,13 @@ export function start(source: Source) {
   let otherTab = $state(false);
   let chooseHere: (() => void) | undefined;
   let join: Join | undefined;
+  let watchHost = $state.raw<WatchHost>();
   const net: Net = {
     source,
     homes,
+    get watchHost() {
+      return watchHost;
+    },
     path: (home) => (home.ctl ? paths.get(home) : undefined),
     get otherTab() {
       return otherTab;
@@ -291,7 +321,14 @@ export function start(source: Source) {
       (error: unknown) => console.error('The mock home could not start:', error),
     );
   } else {
-    startLive(added, paths, stopAbort.signal, waitForUseHere, (run) => (join = run));
+    startLive(
+      added,
+      paths,
+      stopAbort.signal,
+      waitForUseHere,
+      (run) => (join = run),
+      (run) => (watchHost = run),
+    );
   }
   const stop = () => {
     stopAbort.abort();

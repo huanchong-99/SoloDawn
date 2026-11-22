@@ -619,6 +619,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/groupinfo/`   | home, commands, settings (order 19) and project memory (order 20) at `chat.side`  |
 | `src/components/forge/`       | forge choice, argument-by-argument template editor and group command disclosure   |
 | `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
+| `src/components/watch/`       | receive-only watch channel, standalone request action and watcher stop controls   |
+| `src/components/team/`        | attributed bulletin card; team people use the shared member panel                 |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
 | `src/components/notify/`      | live in-page notifications mounted at `layer`                                     |
 | `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
@@ -641,6 +643,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/groupinfo.spec.ts`  | steps of `../features/web_groupinfo.feature`                                      |
 | `features/forge.spec.ts`      | steps of `../features/web_forge.feature`                                          |
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
+| `features/watch_team.spec.ts` | steps of `../features/web_watch_team.feature`                                     |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
 | `features/notify.spec.ts`     | steps of `../features/web_notify.feature`                                         |
 | `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                     |
@@ -663,6 +666,11 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
 
 ## Known limitations
 
+- Watching reuses `#/terminal/<g>/<member>` for another person's AI. The terminal acquires its
+  host through the existing signalling session, reuses a connected home or node, and releases a
+  temporary connection when the last watch ends. Another person's taken-over AI offers Ask to
+  watch and Watch; a forbidden watch offers the same request action in the terminal bar. Only
+  the owner's terminal shows watchers. Real-host watching and other browsers remain unverified.
 - Custom forges are chosen at group creation. Group settings can edit their four argument-list
   templates, not change the forge. Each field is one argument; whitespace and empty arguments
   are preserved, without shell parsing. The home validates template restrictions.

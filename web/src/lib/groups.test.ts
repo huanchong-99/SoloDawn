@@ -797,6 +797,8 @@ describe('a home', () => {
     expect([...two.rows.keys()]).toEqual(['msg a']);
     link.push({ t: 'reset', g: 'two' });
     expect([one.rows.size, two.rows.size]).toEqual([1, 0]);
+    expect(home.hostInfo).toBeUndefined();
+    expect([...home.terminalSizes]).toEqual([]);
   });
 
   it('takes pushes from the last connection to come online and from no other', async () => {

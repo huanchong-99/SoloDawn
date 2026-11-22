@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import { t } from '../../lib/prefs.svelte';
   import type { AIMemberRow, TaskRow } from '../../lib/proto';
   import Avatar from '../Avatar.svelte';
@@ -9,10 +10,14 @@
     ai,
     task,
     link,
+    children,
+    watching = false,
   }: {
     ai: AIMemberRow | undefined;
     task: TaskRow | undefined;
     link: { st: 'ok' | 'limited' | 'linking' | 'down'; text: string };
+    children?: Snippet;
+    watching?: boolean;
   } = $props();
 
   // The column scrolls when the window is short, so the keyboard must reach it.
@@ -51,34 +56,36 @@
         <span class="st" data-st={link.st}><i></i><span>{link.text}</span></span>
       </dd>
     </dl>
-    <p class="hint">
-      {#if ai?.secretary}
-        {t('terminal.hint.secretary')}
-      {:else if !task}
-        {t('terminal.hint.newTask')}
-      {:else}
-        {t('terminal.hint.branch')}
-      {/if}
-    </p>
+    {#if !watching}<p class="hint">
+        {#if ai?.secretary}
+          {t('terminal.hint.secretary')}
+        {:else if !task}
+          {t('terminal.hint.newTask')}
+        {:else}
+          {t('terminal.hint.branch')}
+        {/if}
+      </p>{/if}
   </section>
 
-  <section class="card">
-    <header class="card-head">
-      <span class="kind">{t('terminal.queue.title')}</span>
-    </header>
-    <p class="hint">
-      <Icon name="lock" sm />
-      <span>{t('terminal.queue.body')}</span>
-    </p>
-  </section>
+  {#if !watching}<section class="card">
+      <header class="card-head">
+        <span class="kind">{t('terminal.queue.title')}</span>
+      </header>
+      <p class="hint">
+        <Icon name="lock" sm />
+        <span>{t('terminal.queue.body')}</span>
+      </p>
+    </section>{/if}
+
+  {@render children?.()}
 
   <p class="note" id="term-leave">
     <Icon name="info" sm />
-    <span>{t('terminal.note.keys')}</span>
+    <span>{t(watching ? 'watch.readonly' : 'terminal.note.keys')}</span>
   </p>
   <p class="note">
     <Icon name="eye" sm />
-    <span>{t('terminal.note.privacy')}</span>
+    <span>{t(watching ? 'watch.privacy' : 'terminal.note.privacy')}</span>
   </p>
   <p class="note" data-tone="dawn">
     <Icon name="relay" sm />
