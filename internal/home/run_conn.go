@@ -64,6 +64,7 @@ func (c *Conn) leave() {
 
 // pump hands the queued frames to the client, one at a time.
 func (c *Conn) pump() {
+	defer c.loop.wg.Done()
 	for {
 		frame, ok := c.frames.pop()
 		if !ok {
@@ -78,6 +79,7 @@ func (c *Conn) pump() {
 // watch detaches the connection when its client is done, and closes the
 // client of a connection that the loop gave up.
 func (c *Conn) watch() {
+	defer c.loop.wg.Done()
 	select {
 	case <-c.client.Done():
 		c.loop.Detach(c)

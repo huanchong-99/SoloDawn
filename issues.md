@@ -447,6 +447,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-22 · bug · `home.Loop.Close` and `node.Sessions` left connection pumps and host commands running into `Store.Close`
+
+- Symptom: removing the 30 ms post-scenario settle in `features/m5_test.go` exposed a data race in `A5.19` under `-race` between `store.(*Store).Close` (`internal/store/store.go:70`) and `home.(*Conn).pump` (`internal/home/run_conn.go:72`) delivering a popped inbox frame through `LocalLink` into `Store.Write` (`internal/host/deliver.go`), and an in-flight host command on `node.Sessions` could likewise write its receipt in `sesFinishHostCmd` (`internal/node/session.go`) after `nodeRuntime.Close` closed `node.db`.
+- Cause: `Loop.Attach` (`internal/home/run.go:275-276` before the fix) started `Conn.pump` and `Conn.watch` outside `Loop.wg`, so `Loop.Close` returned while an already-popped frame was still inside `Client.Send`, and `Sessions.sesCmd` (`internal/node/session.go:349` before the fix) launched `sesHostCmd` with a bare `go` statement outside `nodeRuntime.bg`.
+- Status: resolved in branch `gemini/shutdown-order`: `Loop.Attach` tracks `Conn.pump` and `Conn.watch` in `Loop.wg` (`internal/home/run.go`, `internal/home/run_conn.go`) so `Loop.Close` waits for all connection goroutines before `Host.Settle` and `Store.Close`, `SessionConfig.Spawn` (`internal/node/session.go`, `internal/node/node.go`) runs `sesHostCmd` inside `nodeRuntime.bg` so `nodeRuntime.Close` waits for running host commands and their receipt writes before `closeCore`, and the 30 ms settle in `features/m5_test.go` is removed (`TestRunCloseWaitsForConnectionSends`, `TestCloseWaitsForInflightHostCmd`).
+
 ### 2026-11-21 · deviation · Step 17 session and workspace cleanup awaits a close hook from the session runtime
 
 - Symptom: when a `rows` push marked a task `merged`, `cancelled` or reassigned, changed a task's reviewer, or marked a member `gone`, `deliver.go` did not end the session row or remove the task or review worktree.
