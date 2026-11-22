@@ -146,15 +146,14 @@ Change: <files and sections edited, or the reason for rejecting>
 | `contracts/task-machine.md` | the one table of task transitions |
 | `contracts/drivers.md` | how each CLI is started, levels, turn format, instructions |
 | `contracts/local.md` | local interfaces: command line, MCP shim socket, Git commands, outbound secret check, self-update |
-| `contracts/step-2/authority.md` | step 2: whose word a host accepts on someone else's home, the list its owner signs, the level cap, delegates, the fork rule of the device log (D-1, D-2, D-4, D-13) |
-| `contracts/step-2/authority-record.md` | step 2: where `authority.md` is folded, what the coordinator settled, what is not verified |
-| `contracts/step-2/fork-vectors.md` | step 2: the shared vectors of the fork rule, split from `authority.md` (D-4) |
+| `contracts/step-2/authority.md` | step 2: the home decides on someone else's home; allow list, delegates, the secretary, the level cap (D-1, D-13) |
 | `contracts/step-2/labels.md` | step 2: the two labels of a turn, split from `confirm.md` (D-9) |
 | `contracts/step-2/people.md` | step 2: a second person in a group, the three roles, leaving and removal (D-7) |
-| `contracts/step-2/browser-trust.md` | step 2: what a browser checks before it shows who wrote or decided something (D-5, D-6) |
+| `contracts/step-2/browser-trust.md` | step 2: what a browser shows about a home of another, the secretary warning (D-6) |
 | `contracts/step-2/confirm.md` | step 2: the owner's `confirm` card before an AI works for someone else, and the `information` label (D-8, D-9) |
-| `contracts/step-2/checks-forge.md` | step 2: accepting a group's check commands, and forges other than GitHub (D-3, D-10) |
+| `contracts/step-2/checks-forge.md` | step 2: forges other than GitHub, and where a group's commands are shown (D-10) |
 | `contracts/step-2/watch-team.md` | step 2: watching a takeover terminal, and the group kind `team` (D-14, D-15) |
+| `contracts/step-2/export.md` | step 2: exporting and importing a group, to move it or keep a copy (D-11) |
 | `contracts/step-3/drivers.md` | step 3: what a driver for a further CLI must have, its capability table (refines `steps/step-2-3.md` 3.1) |
 | `contracts/step-3/knowledge.md` | step 3: style presets and the knowledge base (D-17, D-18) |
 | `steps/step-1.md` | step 1 scope, spikes, order of the milestones |
