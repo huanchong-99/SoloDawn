@@ -716,6 +716,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-22 · bug · Codex treated every failed thread resume as a lost session
+
+- Symptom: a refused model or effort on `thread/resume` could replace the session instead of reporting a crash and retaining its history.
+- Cause: `internal/host/codex.go`, `codexProcess.handleStartupError`, emitted `NoSession` for every error on request 2 when a saved thread id was present, without distinguishing a missing thread from another rejected setting.
+- Status: resolved in T3-11. Only known missing-thread diagnostics emit `NoSession`; other startup errors close the CLI and take the existing crash path. Fake-CLI tests cover refused-value crashes and retained session ids. Live model/effort selection and native terminal behavior remain unverified.
+
 ### 2026-11-22 · bug · On Windows the last output of a CLI that exits by itself during a takeover is lost
 
 - Symptom: when the interactive CLI exits on its own while the owner's terminal is open, the last lines it printed (for A7.4's fake CLI, `{"bye":…}` and the echo of the input line) never reach the pty channel. M7's A7.4 therefore does not wait for `"bye":` (`runOneSwitchCycle` in `features/m7_test.go`); it waits for the hand-back post, and the exit entry in the CLI log proves the exit. Seen on `test (windows-latest)` of PR #287; Linux and macOS deliver the line.

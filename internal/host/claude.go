@@ -85,6 +85,7 @@ func claudeCommandArgs(l Launch, interactive, windows bool) ([]string, string, e
 	}
 	session, sessionFlags := claudeSessionFlags(l.Session)
 	argv := claudeBaseArgs(interactive, l.RepoConfig, l.Instructions, mcpJSON, sessionFlags)
+	argv = append(argv, claudeModelFlags(l)...)
 	return append(argv, levelFlags...), session, nil
 }
 
