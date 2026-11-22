@@ -1,0 +1,10 @@
+{
+  "move.title": "Move group",
+  "move.commands": "Export and import",
+  "move.lead": "Run these commands in the local command line, not in this browser. A group can move only to another computer of its owner.",
+  "move.export": "On {computer}, export to one of your other computers:",
+  "move.none": "No other computer of yours is known. Replace DEVICE_ID with the destination computer's device id.",
+  "move.import": "Copy group.sqlite to the chosen computer by any means, then run there:",
+  "move.warning": "Export with --to stops this computer from being the home immediately. The group is unavailable until import finishes. Do not resend an unanswered command: receipts stay on the old computer, so it could run twice.",
+  "move.copy": "For a safekeeping copy, omit --to and the device id; the current computer stays the home. If import fails, you can import the file on the old computer again."
+}
