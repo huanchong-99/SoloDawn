@@ -327,8 +327,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `app`, `nav`, `bar`, `page` (the title of each page), `pref` (the names of the preferences),
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
-  of its English file to the type `Key`; today the areas are `chat`, `groups`, `member`, `nodes`,
-  `pairing`, `settings`, `states`, `task` and `thread`. `src/messages/files.glob.ts` finds every file by its name and
+  of its English file to the type `Key`; today the areas are `approval`, `brief`, `chat`, `decision`, `groups`, `member`, `nodes`,
+  `notify`, `pairing`, `settings`, `states`, `summary`, `task` and `thread`. `src/messages/files.glob.ts` finds every file by its name and
   `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
   empty text, or has keys that differ between its two languages, and naming the area when it has
@@ -462,6 +462,13 @@ file in `src/routes/`. It edits neither the shell nor another area:
   computers with their link path, hosted groups and registered AIs, sends `agent.set` followed by
   a fresh `host.info` read when the owner chooses an unset AI account type, and opens
   `PairBrowserDialog` (`pair.browser`).
+- **In-page notifications.** `src/components/notify/` mounts `Notifications.svelte` at `layer`
+  (`order: 10`), backed by `Notifier` in `src/lib/notify.svelte.ts`. It watches connected homes
+  after initial sync and surfaces live new events for the reader (`approval`, `decision` and
+  `brief` waiting on the reader in dawn until resolved or dismissed; `done` summaries and
+  `mention`s in calm neutral with an 8-second auto-dismiss, capped at three visible items),
+  staying quiet for main-line messages of the chat already open on screen while still notifying for
+  mentions inside task threads and other groups, and jumping to the target card or message on Open.
 - **Where code goes.** Logic lives in `.ts` and `.svelte.ts` modules, which the gates measure
   (CRAP and mutation); components stay thin. A module that only holds an `import.meta.glob` is
   named `*.glob.ts` and is not mutated; it holds no logic. Stryker would wrap the glob's
@@ -499,6 +506,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/groups.svelte.ts`    | `Home`, `Group`: row caches, cursor, paging, lists, commands                      |
 | `src/lib/members.ts`          | AI card status, path, candidate list, free name, `host.join`                      |
 | `src/lib/nodes.svelte.ts`     | connection indicator, `host.info` cache, `agent.set`, pairing                     |
+| `src/lib/notify.svelte.ts`    | live in-page notification store, classification, dismissal and jump               |
 | `src/lib/compose.ts`          | mention being typed, mentions and parts of a text, row size                       |
 | `src/lib/when.ts`             | times in the reader's language; messages by day                                   |
 | `src/lib/task.ts`             | task card derivations: badge, six-step bar, review and thread                     |
@@ -514,6 +522,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/thread/`      | a task's thread, scored review block, checks and system notices                   |
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
+| `src/components/notify/`      | live in-page notifications mounted at `layer`                                     |
 | `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
 | `src/styles/`                 | `tokens.css` (design tokens) and `base.css` (shared classes)                      |
 | `public/`                     | manifest, icon and `fonts/`, copied as they are                                   |
@@ -525,6 +534,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/thread.spec.ts`     | steps of `../features/web_thread.feature`                                         |
 | `features/member.spec.ts`     | steps of `../features/web_member.feature`                                         |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
+| `features/notify.spec.ts`     | steps of `../features/web_notify.feature`                                         |
 | `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                     |
 | `features/home.ts`            | a home in memory for those steps; `page.ts` drives the page                       |
 | `features/demo.ts`            | groups with a morning of talk, for a development page                             |
