@@ -9,8 +9,21 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run it supersedes; a push to rebuild never does.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  changes:
+    uses: ./.github/workflows/changes.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
   vectors:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     name: ${{ matrix.name }} vectors
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20

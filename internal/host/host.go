@@ -240,7 +240,7 @@ func frameSize(frame any) int {
 // A wait is one tool call that waits for the item that answers a message.
 type wait struct {
 	check func(item json.RawMessage) error
-	item  chan json.RawMessage // has room for the one item a wait is given
+	item  chan json.RawMessage // buffered for 1 item; single reader is Await's caller
 }
 
 // Await opens the wait of a tool call for the item that answers the message
@@ -259,16 +259,13 @@ func (h *Host) Await(id string, check func(item json.RawMessage) error) (item <-
 	return w.item, func() { h.release(id, w) }
 }
 
-// release ends a wait and reports whether it was open. It is true once for
-// a wait at most, which is why the one send into its channel never blocks.
-func (h *Host) release(id string, w *wait) bool {
+// release ends a wait when it is still open.
+func (h *Host) release(id string, w *wait) {
 	h.waiting.Lock()
 	defer h.waiting.Unlock()
-	open := h.waits[id] == w
-	if open {
+	if h.waits[id] == w {
 		delete(h.waits, id)
 	}
-	return open
 }
 
 // Hand gives an item to the tool call that waits for the answer to the
@@ -290,9 +287,12 @@ func (h *Host) Hand(id string, item json.RawMessage) (waited bool, err error) {
 			return true, err
 		}
 	}
-	if !h.release(id, w) {
+	h.waiting.Lock()
+	defer h.waiting.Unlock()
+	if h.waits[id] != w {
 		return false, nil
 	}
+	delete(h.waits, id)
 	w.item <- item
 	return true, nil
 }

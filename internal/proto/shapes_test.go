@@ -173,6 +173,8 @@ var shapes = map[string]reflect.Type{
 	"task-resume":                    of[TaskCommand](),
 	"task-start":                     of[TaskStart](),
 	"task-submitted":                 of[TaskSubmitted](),
+	"trace-local":                    of[TaskTrace](),
+	"trace-remote":                   of[TaskTrace](),
 	"welcome":                        of[Welcome](),
 }
 
