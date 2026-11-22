@@ -13,8 +13,6 @@ import (
 	"time"
 
 	"github.com/cucumber/godog"
-	"github.com/huanchong-99/SoloDawn/internal/identity"
-	"github.com/huanchong-99/SoloDawn/internal/peer"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
@@ -120,63 +118,22 @@ func (w *s2ConfirmWorld) admitQ() error {
 	if err != nil {
 		return err
 	}
-	bc, err := w.openInvitation(res.Link)
+	link, err := parseS2JoinLink(res.Link, res.Expires)
 	if err != nil {
+		return err
+	}
+	nonce := c.NextID()
+	bc, raw, err := joinGroupWithLink(c.Ctx, c.addUndo, c.Q.Browser, c.Q.Key, c.Q.Entries, link, c.Q.Name, nonce, time.Now())
+	if err != nil {
+		return err
+	}
+	var joined proto.CmdResult
+	if err := proto.Decode(raw, &joined); err != nil {
 		return err
 	}
 	w.browsers["Q"], c.Q.Conns[c.P1.ID()] = bc, bc
-	if err := w.sendJoin(bc.conn); err != nil {
-		return err
-	}
-	if err := w.addQHome(); err != nil {
-		return err
-	}
+	w.ids["Q-member"] = string(nonce)
 	return c.syncGroup(bc.conn, w.gid)
-}
-
-func (w *s2ConfirmWorld) addQHome() error {
-	c := w.cast
-	_, err := c.SendCmd(c.Q, c.Q.Conns[c.Q1.ID()].conn, proto.HomeAdd{
-		HostCommand: proto.HostCommand{Type: "home.add", Nonce: c.NextID(), Timestamp: time.Now().UnixMilli(), To: c.Q1.ID()},
-		Group:       w.gid, Home: c.P1.ID(), Name: "Confirmation", Addrs: []string{c.RVURL},
-	})
-	return err
-}
-
-func (w *s2ConfirmWorld) openInvitation(link string) (*peerBrowserConn, error) {
-	u, err := url.Parse(link)
-	if err != nil {
-		return nil, err
-	}
-	fields, err := url.ParseQuery(u.Fragment)
-	if err != nil {
-		return nil, err
-	}
-	secret, err := identity.ParseSecret(fields.Get("join"))
-	if err != nil {
-		return nil, err
-	}
-	c, b := w.cast, w.cast.Q.Browser
-	if _, err := b.exchangeRoom(c.Ctx, secret, "b", "a"); err != nil {
-		return nil, err
-	}
-	return b.openCtl(c.Ctx, c.addUndo, fields.Get("home"))
-}
-
-func (w *s2ConfirmWorld) sendJoin(conn *peer.Connection) error {
-	c := w.cast
-	if _, err := requestBrowserHello(c.Ctx, conn); err != nil {
-		return err
-	}
-	if err := conn.Send(proto.Devlog{Type: "devlog", User: c.Q.ID(), Entries: c.Q.Entries}); err != nil {
-		return err
-	}
-	join := proto.Join{HomeCommand: w.homeCmd("join"), Name: c.Q.Name}
-	if _, err := c.SendCmd(c.Q, conn, join); err != nil {
-		return err
-	}
-	w.ids["Q-member"] = string(join.Nonce)
-	return nil
 }
 
 func (w *s2ConfirmWorld) secondBrowser() error {
