@@ -38,9 +38,8 @@ receiver's clock is refused with `stale`; receipts are kept for that long
 (`contracts/storage.md`).
 
 A command is accepted, in this sense, once it passed the checks that
-`contracts/datachannel.md` section 5 puts before the receipt: it arrived on
-the connection of its signer, passed the envelope checks and, as a home
-command, has its `g`. Whatever the receiver answers after that, a refusal
+`contracts/datachannel.md` section 5 puts before the receipt: it passed the
+envelope checks and, as a home command, has its `g`. Whatever the receiver answers after that, a refusal
 included, is the outcome its receipt keeps; a command that one of those
 checks refused leaves no receipt. The answer to a repeated refusal has the
 same code. Its `msg` is not kept, and need not be the same.

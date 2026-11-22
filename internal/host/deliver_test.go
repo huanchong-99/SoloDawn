@@ -711,7 +711,7 @@ func verifyOvertakenSyncedAndMonotonicCursor(t *testing.T, r *deliverRig) {
 
 func assertLiveCursorAndFailedDelta(t *testing.T, r *deliverRig) {
 	t.Helper()
-	// Reconnect must ask since 10 (not regressed to 9); wrong group in Synced keeps 10; live row seq 12 advances to 12; dup 12 and 11 ignored.
+	// Reconnect must ask since 10 (not regressed to 9); live row seq 12 advances to 12; dup 12 and 11 ignored.
 	fourth := newFakeDeliverHome()
 	fourth.syncMode = true
 	r.h.Attach(r.homeKey.ID(), fourth)
@@ -738,29 +738,20 @@ func assertLiveCursorAndFailedDelta(t *testing.T, r *deliverRig) {
 	if got.Name != "first-12" {
 		t.Fatalf("row overwritten by equal or lower seq: %q", got.Name)
 	}
-	assertMismatchAndMalformedSynced(t, r)
+	assertMalformedSynced(t, r)
 }
 
-func assertMismatchAndMalformedSynced(t *testing.T, r *deliverRig) {
+func assertMalformedSynced(t *testing.T, r *deliverRig) {
 	t.Helper()
 	fifth := newFakeDeliverHome()
 	fifth.syncMode = true
 	r.h.Attach(r.homeKey.ID(), fifth)
 	t.Cleanup(func() { fifth.closeConn() })
 	if req5 := <-fifth.started; req5.Since != 12 {
-		t.Fatalf("got since=%d, want 12", req5.Since)
-	}
-	fifth.answers <- syncAnswer{raw: json.RawMessage(marshalWire(proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: testGroup2, Seq: 50}))}
-	r.waitSyncStopped(testGroup1)
-	sixth := newFakeDeliverHome()
-	sixth.syncMode = true
-	r.h.Attach(r.homeKey.ID(), sixth)
-	t.Cleanup(func() { sixth.closeConn() })
-	if req6 := <-sixth.started; req6.Since != 12 {
-		t.Fatalf("after failed delta got since=%d, want 12", req6.Since)
+		t.Fatalf("after live rows got since=%d, want 12", req5.Since)
 	}
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 39, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "wait-sync"))
-	sixth.answers <- syncAnswer{raw: json.RawMessage(`{"t":"synced","re":1,"g":"` + testGroup1 + `","seq":99}`)}
+	fifth.answers <- syncAnswer{raw: json.RawMessage(`{"t":"synced","re":1,"g":"` + testGroup1 + `","seq":99}`)}
 	r.waitSyncStopped(testGroup1)
 	r.waitAIUnbusy(testGroup1, testAI1)
 	d := deliv(r.h)

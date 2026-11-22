@@ -48,7 +48,7 @@ func grpApply(t *testing.T, s *home.State, d home.Disk, r home.Receipts, by iden
 
 func grpApplyRaw(t *testing.T, s *home.State, d home.Disk, r home.Receipts, by identity.Key, payload string) home.Result {
 	t.Helper()
-	res, err := home.Commands.Apply(s, d, r, by.ID(), by.Sign(payload), now)
+	res, err := home.Commands.Apply(s, d, r, by.Sign(payload), now)
 	if err != nil {
 		t.Fatal(err)
 	}

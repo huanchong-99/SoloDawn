@@ -662,11 +662,6 @@ func TestRunARefusedCommandLeavesOnlyItsReceipt(t *testing.T) {
 	// The same command again is answered from the receipt.
 	w.loop.Cmd(p.conn, 8, refused)
 	p.gets(`{"re":8,"err":{"code":"conflict","msg":"the command was refused when it first arrived"}}`)
-	// A command on another device's connection is refused before the receipt.
-	other := w.attach(laptop)
-	w.loop.Cmd(other.conn, 1, w.cmd(browser, groupID, "note", `,"text":"x"`))
-	other.gets(`{"re":1,"err":{"code":"forbidden","msg":"the command is signed by another device than this connection's"}}`)
-	equal(t, receipts(), 2)
 
 	p.quiet()
 	equal(t, hooks.all(), []string{"3 rows at 3"})
@@ -697,7 +692,6 @@ func TestRunAnswersACommandWithoutAGroup(t *testing.T) {
 		code string
 	}{
 		{p, browser.Sign(head(``)), "bad_request"},
-		{p, laptop.Sign(head(``)), "forbidden"},
 		{p, proto.Envelope{Payload: head(``), Key: browser.ID(), Signature: "AA"}, "bad_sig"},
 		{stranger, nobody.Sign(head(``)), "unknown_device"},
 		{p, browser.Sign(head(`,"g":"no id"`)), "bad_request"},
