@@ -218,6 +218,7 @@ func (w *homeHostEvWorld) sendEventCase(state, code, where string) error {
 	}
 	events := map[string]string{
 		"turn_interrupted": fmt.Sprintf(`{"code":"turn_interrupted","reason":"timeout"%s,"detail":"Deadline reached."}`, taskPart),
+		"rate_limited":     `{"code":"rate_limited","resets":1763603600000}`,
 		"login_invalid":    `{"code":"login_invalid","detail":"Signed out."}`,
 		"session_replaced": fmt.Sprintf(`{"code":"session_replaced"%s}`, taskPart),
 	}

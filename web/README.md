@@ -326,10 +326,10 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `app`, `nav`, `bar`, `page` (the title of each page), `pref` (the names of the preferences),
   `upgrade` and `storage`. Each area of the interface has `src/messages/<area>.zh-CN.json` and
   `<area>.en.json`, whose keys all begin with `<area>.`, and `<area>.d.ts`, which adds the keys
-  of its English file to the type `Key`; today the areas are `approval`, `brief`, `chat`,
-  `decision`, `groups`, `member`, `nodes`, `pairing`, `reminder`, `settings`, `states`, `summary`,
-  `task`, `terminal` and `thread`. `src/messages/files.glob.ts` finds every file by its name and
-  `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
+  of its English file to the type `Key`. Each area has its own pair of files in `src/messages/`
+  (`<area>.en.json` and `<area>.zh-CN.json`); the folder shows which areas exist.
+  `src/messages/files.glob.ts` finds every file by
+  its name, and `src/messages/texts.ts` merges them. It throws, naming the file, when an area takes a
   namespace of the shell, holds a key outside its own name, holds a value that is no text or an
   empty text, or has keys that differ between its two languages, and naming the area when it has
   no file in one of the languages. No key can therefore be given twice: a collision fails at start and in the tests,
@@ -425,7 +425,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
     when a chat opens.
   - "Today" and "yesterday" are read from `now()` of `when.ts`, one clock that moves once a
     minute while something drawn reads it.
-  - A text shows its code spans and the mentions of the members its row names. The composer
+  - A text shows its code spans and the mentions of the members its row names, drawn by the
+    shared `Rich.svelte` in the main line, the thread and the call block. The composer
     completes a mention from the members as it is typed (arrow keys, Enter or Tab, Escape),
     sends with Enter where the person has a keyboard and with the button on a touch screen, and
     never on a key that an input method is composing with. What is typed while a message is on
@@ -439,12 +440,18 @@ file in `src/routes/`. It edits neither the shell nor another area:
     that appears while there was none to choose from is chosen.
   - Only text messages are drawn in full. A card is one line that names its kind and its subject,
     with the dawn edge when it waits for the reader, and a row the home wrote is a quiet line;
-    the cards the areas mount replace both.
+    the cards the areas mount replace both. An AI-to-AI `call` (`src/components/call/`) draws its
+    route, wait mode, depth, question and either its `waiting` indicator with elapsed time since
+    `ts`, counted every second while it is under a minute and every minute after, or its
+    `answered` duration with the `reply` folded inside, hiding the standalone `reply` row when
+    both are in the same list.
   - The member panel (`src/components/member/`) mounts at `chat.side` (`order: 10`). It lists the
     group's AI members, placing the secretary first with its corner mark, with each AI's state
     (`working`, `waiting` on the reader in dawn or on another member, `dormant` as sleeping,
     `takeover`, `limited`, `offline`), computer with path (`local`, `direct`, `relay`, `offline`),
-    account type, and for owned AIs an "Open terminal" link enabled only when the browser's own
+    account type, a usage bar (`.meter` in `src/styles/base.css`, from `usageMeter` in
+    `src/lib/members.ts`: the rate-limit window percentage with its reset time, in danger tone at
+    100 percent and omitted when `usage` has no `window_pct`), and for owned AIs an "Open terminal" link enabled only when the browser's own
     path to that computer is `direct`, or, while the AI is in `takeover`, a "Hand back" button that
     sends `takeover.end` and says that messages to it wait until then; then the human members with
     their roles and online status. Its "Add AI" button requires a reachable group home, an admin
@@ -453,6 +460,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
     name in the group, offers the secretary switch when the group has none or the reader is an
     admin, signs `host.join` for the chosen computer, and words `home_unreachable`, `conflict` and
     a lost computer directly before falling back to `Failure`.
+  - The group info panel (`src/components/groupinfo/`, `src/lib/groupinfo.svelte.ts`) mounts at
+    `chat.side` (`order: 20`) below the member panel. Its folded "Project memory" section fetches
+    `note` and `review` ledger pages on demand (`fetch` with `kind`), omits `gone` markers, and
+    lets an admin delete a note or review entry with a signed `forget` command after a `<dialog>`
+    confirmation.
 - **Terminal takeover.** `#/terminal/<g>/<member>[/<task>]` (`routes/Terminal.svelte`,
   `lib/terminal.svelte.ts`, `components/terminal/`) loads `@xterm/xterm` and `@xterm/addon-fit`
   with a dynamic `import()`. `Takeover` in `lib/terminal.svelte.ts` is the takeover of one
@@ -478,6 +490,19 @@ file in `src/routes/`. It edits neither the shell nor another area:
   computers with their link path, hosted groups and registered AIs, sends `agent.set` followed by
   a fresh `host.info` read when the owner chooses an unset AI account type, and opens
   `PairBrowserDialog` (`pair.browser`).
+- **In-page notifications.** `src/components/notify/` mounts `Notifications.svelte` at `layer`
+  (`order: 10`), backed by `Notifier` in `src/lib/notify.svelte.ts`. After a group's first sync it
+  shows the live events for the reader: `approval`, `decision` and `brief` waiting on the reader, in
+  dawn, until opened, dismissed or resolved; `done` summaries and `mention`s, in calm neutral, for
+  8 seconds, a delay held while focus or the pointer is on the notification and restarted in full
+  when both leave. Main-line messages of the chat open on screen stay quiet; thread mentions and
+  other groups still notify. Open jumps to the card or message. At most three are shown: a
+  newcomer past that drops the oldest self-closing one, or the oldest waiting card when none is
+  self-closing. The stack sits at the top right of the page's area, under the top bar and the
+  banners (on a phone's chat, under the chat's head), so it never covers the composer or "Use
+  here"; its polite live region is always in the page, and it shows nothing while another tab
+  holds the connection. Notifications slide into place and fade out, both at once under reduced
+  motion.
 - **Web Push reminders.** `src/sw.ts` (built by `vite.config.ts` into a self-contained `sw.js` at
   the root of `webdist/`), `src/lib/push.ts`, and `src/components/reminder/` implement the browser
   side of `planning/contracts/commands.md` section 1.7 and A8.3. `ReminderCard.svelte` on
@@ -526,10 +551,13 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/peer-fakes.ts`      | a peer connection and its channels for the tests of `peer.ts`                     |
 | `src/lib/groups.svelte.ts`    | `Home`, `Group`: row caches, cursor, paging, lists, commands                      |
 | `src/lib/members.ts`          | AI card status, path, candidate list, free name, `host.join`                      |
+| `src/lib/groupinfo.svelte.ts` | project-memory `note` and `review` paging, `forget`                               |
 | `src/lib/nodes.svelte.ts`     | connection indicator, `host.info` cache, `agent.set`, pairing                     |
+| `src/lib/notify.svelte.ts`    | live in-page notification store, classification, dismissal and jump               |
 | `src/lib/compose.ts`          | mention being typed, mentions and parts of a text, row size                       |
 | `src/lib/when.ts`             | times in the reader's language; messages by day                                   |
 | `src/lib/task.ts`             | task card derivations: badge, six-step bar, review and thread                     |
+| `src/lib/call.ts`             | AI-to-AI call derivations: elapsed time, route, question and inline reply         |
 | `src/lib/terminal.svelte.ts`  | terminal takeover: commands, `pty` channel, `Takeover`, what the page shows       |
 | `src/lib/push.ts`             | Web Push capability, VAPID keys in IndexedDB, `PushManager`, `push` commands      |
 | `src/sw.ts`                   | service worker: `Reminder` push notifications and `notificationclick` card open   |
@@ -537,14 +565,17 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/Notice.svelte`           | the upgrade notice and the storage notice                                         |
 | `src/routes/`                 | one component per page; `Groups.svelte` is the list and a chat                    |
 | `src/routes/dev/`             | `States.svelte`: the message examples, for a development server                   |
-| `src/components/`             | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount`                   |
+| `src/components/`             | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount`, `Rich` (a text)  |
 | `src/components/groups/`      | the group list, the cards that wait, the create-group dialog                      |
 | `src/components/chat/`        | the chat of a group: main line, message, composer                                 |
 | `src/components/task/`        | `TaskCard.svelte`, mounted for kind `task`                                        |
 | `src/components/thread/`      | a task's thread, scored review block, checks and system notices                   |
+| `src/components/call/`        | `CallBlock.svelte`, mounted for kind `call` in threads and the main line          |
 | `src/components/member/`      | the chat's member panel (`chat.side`) and the add-AI dialog                       |
+| `src/components/groupinfo/`   | group details and project memory (`chat.side`, `order: 20`)                       |
 | `src/components/terminal/`    | terminal session sidebar and `handback` message card                              |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
+| `src/components/notify/`      | live in-page notifications mounted at `layer`                                     |
 | `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
 | `src/components/reminder/`    | settings notifications card with iOS hint (`ReminderCard`), `ReminderSync` mount  |
 | `src/components/status/`      | other-tab notice mounted at `banner`                                              |
@@ -557,9 +588,12 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/status.spec.ts`     | steps of `../features/web_status.feature`                                         |
 | `features/task.spec.ts`       | steps of `../features/web_task.feature`                                           |
 | `features/thread.spec.ts`     | steps of `../features/web_thread.feature`                                         |
+| `features/call.spec.ts`       | steps of `../features/web_call.feature`                                           |
 | `features/member.spec.ts`     | steps of `../features/web_member.feature`                                         |
+| `features/groupinfo.spec.ts`  | steps of `../features/web_groupinfo.feature`                                      |
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
+| `features/notify.spec.ts`     | steps of `../features/web_notify.feature`                                         |
 | `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                     |
 | `features/reminder.spec.ts`   | steps of `../features/web_reminder.feature` (A8.3 browser half)                   |
 | `features/a11y.spec.ts`       | steps of `../features/web_a11y.feature`                                           |
