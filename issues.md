@@ -596,6 +596,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-22 · bug · Watch confirmation admission rejected fields outside its checks
+
+- Symptom: a person's watch request was refused when it carried a thread, reply or text, although the watch admission contract does not restrict them.
+- Cause: `cfmWatchShape` (`internal/home/cmd_confirm.go:137`) checked those fields in addition to the checks in `planning/contracts/step-2/confirm.md` section 3.
+- Status: resolved in #310 by retaining only the contracted watch checks.
+
 ### 2026-11-22 · deviation · Home confirmation reminders were not sent
 
 - Symptom: cross-owner requests in the unfinished confirmation implementation created cards, but no subscribed browser received a confirmation reminder.

@@ -107,7 +107,7 @@ func inboxPace(s *State, items []Item, now int64) []Item {
 // has limit due times in the last hour. Merge and watch items are for the AI's
 // host rather than a session, so they neither wait on nor count toward the cap.
 func inboxWake(wakes map[string][]int64, it Item, limit int, now int64) Item {
-	if it.Why == itemMerge || it.Why == cfmWhyWatch {
+	if it.Why == itemMerge || it.Why == cfmWhatWatch {
 		return it
 	}
 	recent := runRecent(wakes[it.AI], now)

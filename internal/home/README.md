@@ -470,11 +470,13 @@ Personal accounts require the owner; team and API-key accounts also accept their
 Task participants receive thread messages without a new card. Otherwise each AI gets a pending
 `direct` or `ask` card, on the main line and also in the request's thread. Only its owner may
 confirm or deny it; a confirmation delivers once. A denied call becomes `denied` and gives its
-caller a `reply` carrying the card, plus a secretary notice. Denied AI-authored direct requests
-also notify the secretary. Human `post/confirm` requests create `watch` cards; confirming one
+caller a `reply` carrying the card, plus a secretary notice. Denied direct requests from current
+AI members also notify the secretary. Human `post/confirm` requests create `watch` cards; confirming one
 queues a host-only `watch` item, outside the wake cap. The confirmation timer expires cards when
 the AI, watch requester or retained request disappears. Role confirmation and waits belong to
 T2-2b. Approval decisions require both the card's approvers and the AI row's current approvers.
+
+Watch admission checks `body.what`, target ownership and empty `mentions`, not `thread`, `re` or `text`.
 
 `cmd_brief.go` holds `post` of kind `brief` and `act` `confirm` and `revise` on it
 ([commands](../../planning/contracts/commands.md) 1.3 and 1.4;

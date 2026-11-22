@@ -127,9 +127,13 @@ func TestConfirmMultipleCardsThreadAndSecretary(t *testing.T) {
 }
 
 func TestConfirmCallsAndAIMentions(t *testing.T) {
-	for _, kind := range []string{"call", "question"} {
+	for _, tc := range []struct {
+		kind    string
+		removed bool
+	}{{"call", false}, {"question", false}, {"question", true}} {
+		kind := tc.kind
 		for _, action := range []string{"confirm", "deny"} {
-			t.Run(kind+"/"+action, func(t *testing.T) {
+			t.Run(fmt.Sprintf("%s/removed=%t/%s", kind, tc.removed, action), func(t *testing.T) {
 				s, d := cfmState(t), cardDisk{}
 				var res home.Result
 				if kind == "call" {
@@ -140,7 +144,7 @@ func TestConfirmCallsAndAIMentions(t *testing.T) {
 				equal(t, res.Answer.OK, true)
 				card := cfmCard(t, res)
 				cardCommit(s, d, res)
-				if kind == "question" {
+				if tc.removed {
 					delete(s.AIs, calA)
 				}
 				act := cfmAct(guest, 141, card.ID, action, "")
@@ -151,6 +155,9 @@ func TestConfirmCallsAndAIMentions(t *testing.T) {
 					equal(t, res.Items, []home.Item{{AI: calC, Why: "mention", Task: calOtherT, Msg: id(140)}})
 				} else {
 					want := []home.Item{{AI: aiID, Why: "notice", Task: calOtherT, Msg: card.ID, Code: "confirm_denied"}}
+					if tc.removed {
+						want = nil
+					}
 					if kind == "call" {
 						want = append([]home.Item{{AI: calA, Why: "reply", Task: calOtherT, Msg: card.ID}}, want...)
 						at := int64(clock)
@@ -165,6 +172,22 @@ func TestConfirmCallsAndAIMentions(t *testing.T) {
 
 func cfmWatch(n byte, ai string) proto.Post[proto.ConfirmSigned] {
 	return postMake(n, "", "confirm", nil, nil, nil, "", proto.ConfirmSigned{What: "watch", AI: proto.ID(ai)})
+}
+
+func TestConfirmWatchContextFields(t *testing.T) {
+	s, d := cfmState(t), cardDisk{}
+	p := postMake(166, "", "confirm", &calOtherT, nil, &calOtherT, "Watch context", proto.ConfirmSigned{What: "watch", AI: proto.ID(calB)})
+	_, res := postSend(t, s, d, browser, p)
+	equal(t, res.Answer, store.Outcome{OK: true})
+	equal(t, len(res.Rows), 1)
+	card := cfmCard(t, res)
+	equal(t, card.Main, true)
+	equal(t, card.Thread, (*string)(nil))
+	equal(t, card.Re, (*string)(nil))
+	equal(t, card.Text, "")
+	p.Nonce, p.Mentions = proto.ID(id(167)), []proto.ID{proto.ID(calB)}
+	_, res = postSend(t, s, d, browser, p)
+	equal(t, res.Answer.Code, "bad_request")
 }
 
 func TestConfirmWatchAndExpiry(t *testing.T) {
