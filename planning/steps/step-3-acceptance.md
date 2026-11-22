@@ -46,3 +46,39 @@ If spike S-9 shows a clear benefit, its tests are written with its plan.
 - **A10.7** A5.14 holds for a document; after `forget` no search finds it. A
   `kb_put` whose text holds a test secret pattern fails with `secret`, and the
   home has no row for it.
+
+## AI profiles and escalation (R-165; `contracts/step-3/profiles.md`)
+
+Cast: AIs S (`strong`), M (`standard`) and L (`light`) of one owner; the
+fake CLIs fail checks and reviews on script.
+
+- **A10.8** A new AI's row has `tier` `standard` and `skills` `""`. `member
+  set` by its owner with `tier` and `skills` changes the row; by its host,
+  by another person or by an admin who is not its owner it is `forbidden`;
+  a `tier` outside the three values, and `skills` of 201 code points or
+  with a line break, are `bad_request`. In the browser: the AI member panel
+  shows both, the owner edits them there, and nobody else is offered the
+  editor.
+- **A10.9** The next turn of the secretary after A10.8 lists every AI member
+  with its tier, state and skills as in section 3 of the contract; an AI
+  that is `limited`, and one whose host is offline, are listed so. The
+  secretary's instructions hold the four rules. `list_members` is as in
+  step 1.
+- **A10.10** M is the assignee. After one failed review nothing differs
+  from step 1. After the second in a row: the task row has `stuck` with
+  `kind` `review`, `n` 2, `ask` `true`; M's `reviewed` item ends with the
+  line that names S and not L; `submit_task` fails with `conflict`, and
+  nothing is pushed. M calls `ask` to L and L replies: still refused. M
+  calls `ask` to S and S replies: `ask` is `false` and the next
+  `submit_task` succeeds. The same with two failed hosted checks and
+  `kind` `checks`. In the browser: the badge "must ask a stronger AI"
+  while `ask` is `true`.
+- **A10.11** S is the assignee, or every AI keeps the default tier: after
+  two failed reviews in a row `stuck.ask` is `false`, the item has no added
+  line and `submit_task` succeeds. A1 to A8 pass unchanged with default
+  profiles.
+- **A10.12** M fails hosted checks once, then a review once: `n` is 1 and
+  nothing is asked. M fails a review, then passes one: `stuck` is gone, and
+  a later single failure asks nothing. `task assign` to another AI removes
+  `stuck`.
+

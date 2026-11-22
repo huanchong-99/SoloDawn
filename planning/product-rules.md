@@ -211,6 +211,15 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 - **R-115** `[S2]` Authority carries over: my own AIs freely; a colleague's
   personal-subscription AI needs that colleague; team and API-key AIs follow
   their lists.
+- **R-165** `[S3]` An AI's owner gives each of their AIs a profile: how
+  strong it is and what it is good at. The secretary is shown every AI's
+  profile and state and chooses assignee and reviewer by them: hard work
+  to strong AIs, simple work to light ones, independent tasks spread over
+  different AIs, none to an AI that is limited or offline. An assignee
+  whose task fails twice in a row in the same way (hosted checks, or
+  review) must ask a stronger AI and get an answer before it submits
+  again; with no stronger AI in the group nothing changes. Contract:
+  `contracts/step-3/profiles.md`.
 
 ## Sessions
 

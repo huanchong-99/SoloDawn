@@ -164,6 +164,27 @@ units it names merge.
 Columns as in `steps/parallel-plan-units.md`. Amp is deferred
 (`contracts/step-3/drivers.md` section 8) and has no unit.
 
+### 4.1 Lane PROFILES: AI profiles, assignment and escalation
+
+Added 2026-11-22 (R-165; `contracts/step-3/profiles.md`). It extends what
+T3-1 gives the product to know about an AI: T3-1 says what a CLI can do,
+this lane what its owner says the AI is good for. It touches no file of
+T3-1 and does not wait for it.
+
+| Id | W | Does | Tests | Owns | Needs | M | Sz |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| C3-3 | 4 | The contract and this lane | — | `contracts/step-3/profiles.md` | — | — | S |
+| P-6 | 5 | Wire shapes: `tier` and `skills` on the AI member row and in `member set`; `stuck` on the task row (section 6 of the contract) | golden round trip | lane PROTO | C3-3; not at the same time as P-5 | F | S |
+| T3-7 | 6 | Home: `member set` takes and checks the two fields, owner only; defaults on `add_ai`; `stuck` counted, cleared and answered; row 5 refused (sections 1, 2, 4) | A10.8, A10.10 to A10.12 at the home | `home/profile.go`, `features/profile.feature` | P-6 | A | M |
+| T3-8 | 6 | Host: the member list in every secretary turn, the line on `checks` and `reviewed` items, the instruction sentences, `submit_task` refused before the push (sections 3, 4) | A10.9; A10.10 at the host | `host/turn_profile.go` | P-6 | A | S |
+| U3-4 | 6 | Web: tier and skills on the AI member panel and card, the owner's editor, the badge | A10.8, A10.10 as seen | `cmp/profile/` | U-3, P-6 | F | S |
+| I3-2 | 7 | Acceptance of the lane with fake CLIs, at the nodes and in the browsers | A10.8 to A10.12 | `features/s3_profile*`, `web/e2e/s3-profile.spec.ts` | T3-7, T3-8, U3-4 | A | S |
+
+After P-6, T3-7, T3-8 and U3-4 start together; they share no file. Each
+adds its calls to the step 1 files it must (`home/cmd_member.go`,
+`home/machine.go`, `host/turn.go`, `host/tools_task.go`,
+`host/instructions/`, `cmp/member/`) and keeps its logic in its own.
+
 ## 5. Open questions for the coordinator
 
 1. **R-44 against "highest level, no control" in 1.0.** (a) Drop the cap
@@ -195,6 +216,19 @@ Columns as in `steps/parallel-plan-units.md`. Amp is deferred
    `agent.set`, the tool list and `takeover.start` only; U3-3 shows the
    account choice and the terminal button only; the rest waits for
    `perm.set`.
+
+5. **Lane PROFILES (R-165), chosen in `contracts/step-3/profiles.md`.**
+   (a) "Checks not passed" counts hosted checks only; a failed
+   `run_checks` reaches no row of the task machine. (b) The refusal of
+   `submit` reuses `conflict`, with no new error code. (c) Whether a
+   stronger AI exists is judged by tier alone, whatever its state: if the
+   only stronger AI is limited or offline the task waits, and the
+   quiet-task notice brings the secretary. The other way (only reachable
+   AIs count) lets a stuck AI go on alone. (d) After the answer, a third
+   failure of the same kind asks again. (e) Nothing was added to the
+   driver declaration of T3-1 or to `list_members`. (f) The A10 items are
+   in `steps/step-3-acceptance.md`, where A10 lives, not in
+   `steps/step-2-3-acceptance.md`. **Recommended:** all as written.
 
 ### Decided (2026-11-22)
 
