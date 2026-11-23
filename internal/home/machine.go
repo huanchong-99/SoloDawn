@@ -72,8 +72,9 @@ type Event struct {
 	Member string // the AI the command is signed for (`as`), when there is one
 	Now    int64  // the home's clock, in milliseconds
 
-	Limits proto.Limits // the group's limits
-	Remote bool         // the group has a remote (`forge` is not `none`)
+	Limits   proto.Limits // the group's limits
+	Remote   bool         // the group has a remote (`forge` is not `none`)
+	Stronger bool         // the group has an AI stronger than the assignee
 
 	Commit   string // rows 4 to 9: the commit the command names
 	OK       bool   // rows 4 and 6: the checks passed; row 7: the review passed (commands.md 1.8)
@@ -247,6 +248,9 @@ func Step(t proto.TaskRow, e Event) (proto.TaskRow, Effects, error) {
 	rule, err := m.rule()
 	if err != nil {
 		return t, Effects{}, err
+	}
+	if e.Kind == OnSubmitted && profileMustAsk(t) {
+		return t, Effects{}, RefusedConflict
 	}
 	rule.do(&m)
 	// Roles (section 2): assignee and reviewer are never the same AI.
@@ -472,6 +476,9 @@ func (m *taskMove) stop(reason string) {
 // passed is row 6 for checks that passed, and row 5 without a remote.
 func (m *taskMove) passed() {
 	m.t.Step, m.t.Failures = stepReview, 0
+	if stuck := m.t.Stuck; stuck != nil && stuck.Kind == "checks" {
+		m.t.Stuck = nil
+	}
 	if m.t.Reviewer == "" {
 		m.notice("no_reviewer")
 	}
@@ -481,6 +488,7 @@ func (m *taskMove) passed() {
 // forgive starts the counters of R-63 again (rows 11 and 13, from failed).
 func (m *taskMove) forgive() {
 	m.t.Failures = 0
+	m.t.Stuck = nil
 	if m.t.Review != nil {
 		review := *m.t.Review
 		review.Failed = 0
@@ -542,6 +550,7 @@ func (m *taskMove) cloud() {
 	}
 	m.t.Step = stepLocal
 	m.strike(TaskItem{Why: itemChecks, AI: m.t.Assignee})
+	m.t.Stuck = profileFailure(m.t.Stuck, "checks", m.e.Stronger)
 }
 
 // reviewed is row 7.
@@ -553,10 +562,12 @@ func (m *taskMove) reviewed() {
 	r.Round++
 	m.t.Review = &r
 	if m.e.OK {
+		m.t.Stuck = nil
 		m.t.Step = stepMerge
 		m.queue(TaskItem{Why: itemMerge, AI: m.t.Assignee, Commit: m.t.Commit})
 		return
 	}
+	m.t.Stuck = profileFailure(m.t.Stuck, "review", m.e.Stronger)
 	r.Failed++
 	if r.Failed > m.e.Limits.ReviewRounds {
 		m.stop("review_rounds")
@@ -614,6 +625,7 @@ func (m *taskMove) setAssignee() {
 		return
 	}
 	m.t.Assignee = m.e.Assignee
+	m.t.Stuck = nil
 	m.x.Cards = "reassigned"
 	m.retire(ItemFilter{AI: old})
 	m.forget(func(c PendingCard) bool { return c.Kind == waitApproval })

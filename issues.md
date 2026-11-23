@@ -30,6 +30,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `internal/host/join.go:120-180,420-439` reconciles all remembered homes. The remembered-home wire shape carries no group kind. State-only sync supplies it after connection, as specified in [watch-team.md section 10 ("Which home")](planning/contracts/step-2/watch-team.md#10-a-secretarys-notice-r-14).
 - Status: the coordinator accepted keeping the connection on 2026-11-23.
 
+### 2026-11-22 · deviation · Two profile acceptance sequences need clarification
+
+- Symptom: A10.11 expects the strong secretary to be stronger than the assignee S, which the cast also calls strong. A10.12 asks the same task to fail a review after passing one.
+- Cause: [the profiles contract](planning/contracts/step-3/profiles.md) orders tiers strictly. The task machine moves a passing review to `merge` and accepts a review only at `review` (`internal/home/machine.go`).
+- Status: open. The pending scenarios are unchanged. The home scenarios give the secretary a higher tier than the assignee and test passing and subsequent first failures in separate task flows.
+
+### 2026-11-22 · limitation · Stored AI rows written before profiles are not migrated
+
+- Symptom: syncing an untouched AI row written before profiles may omit the four fields, or carry an empty tier if written after the wire freeze but before the home assigned defaults.
+- Cause: home sync sends stored state and deltas without rewriting them (`internal/home/sync.go`). The home treats an empty stored tier as standard for escalation and writes the default on the next member edit.
+- Status: open for existing rows. New AI rows always have all four fields, and saved owner edits survive a home restart.
+
 ### 2026-11-22 · limitation · Custom forge results depend on the template program
 
 - Symptom: a checks template can report an older request head, and a successful merge can name a later merge on the base branch.
