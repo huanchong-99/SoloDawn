@@ -22,6 +22,7 @@
   "chat.mention": "@ 一位成员或 AI",
   "chat.mention.list": "可以 @ 的成员和 AI",
   "chat.readonly": "连不上群的家，现在只能看已有的记录。",
+  "chat.otherTab": "这个群正在另一个标签页中使用。",
   "chat.length.near": "消息很长：已用单条消息上限的 {n}%。",
   "chat.length.over": "太长，发不出去：是单条消息上限的 {n}%。删短一些，或者分几条发。",
   "chat.error.lost": "没有发出去：连不上群的家。",

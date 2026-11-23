@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
-import { build as viteBuild } from 'vite';
+import { type Rollup, build as viteBuild } from 'vite';
 import { configDefaults, defineConfig } from 'vitest/config';
 
 // The node embeds the built client from internal/node/webdist (architecture 8.1). The build
@@ -26,9 +26,7 @@ async function buildServiceWorker(): Promise<string> {
       lib: { entry: resolve(here, 'src/sw.ts'), formats: ['iife'], name: 'sw' },
     },
   });
-  const chunk = Array.isArray(output) ? output[0]?.output[0] : undefined;
-  if (!chunk || chunk.type !== 'chunk') throw new Error('sw.ts produced no bundle');
-  return chunk.code;
+  return (output as Rollup.RollupOutput[])[0].output[0].code;
 }
 
 export default defineConfig(({ mode }) => ({

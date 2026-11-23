@@ -115,7 +115,7 @@ export class Notifier {
 
   /** Dismisses one notification by `key`. */
   dismiss(key: string): void {
-    this.#clearTimer(key);
+    this.#drop(key);
     this.items = this.items.filter((item) => item.key !== key);
   }
 
@@ -127,9 +127,9 @@ export class Notifier {
 
   /** Lets go of one hold on `key`; the last restarts a self-closing notification's full delay. */
   release(key: string): void {
-    const held = this.#held.get(key)! - 1;
-    this.#held.set(key, held);
-    if (held > 0) return;
+    const held = (this.#held.get(key) ?? 1) - 1;
+    if (held > 0) return void this.#held.set(key, held);
+    this.#held.delete(key);
     if (this.items.some((item) => item.key === key && !item.needsYou)) this.#arm(key);
   }
 
@@ -137,6 +137,7 @@ export class Notifier {
   clear(): void {
     for (const timer of this.#timers.values()) clearTimeout(timer);
     this.#timers.clear();
+    this.#held.clear();
     this.items = [];
   }
 
@@ -159,7 +160,7 @@ export class Notifier {
     const kept: Notice[] = [];
     for (const item of this.items) {
       if (stillValid(allHomes, item)) kept.push(item);
-      else this.#clearTimer(item.key);
+      else this.#drop(item.key);
     }
     if (kept.length !== this.items.length) this.items = kept;
   }
@@ -209,7 +210,7 @@ export class Notifier {
     if (next.length > maxNotices) {
       const selfClosing = next.findIndex((item) => !item.needsYou);
       const [dropped] = next.splice(Math.max(0, selfClosing), 1);
-      this.#clearTimer(dropped.key);
+      this.#drop(dropped.key);
     }
     this.items = next;
   }
@@ -219,6 +220,11 @@ export class Notifier {
       key,
       setTimeout(() => this.dismiss(key), autoDismissMs),
     );
+  }
+
+  #drop(key: string): void {
+    this.#clearTimer(key);
+    this.#held.delete(key);
   }
 
   #clearTimer(key: string): void {

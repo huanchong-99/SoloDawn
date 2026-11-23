@@ -2,7 +2,9 @@
   import { onDestroy } from 'svelte';
   import { flip } from 'svelte/animate';
   import { prefersReducedMotion } from 'svelte/motion';
+  import { MediaQuery } from 'svelte/reactivity';
   import { fade } from 'svelte/transition';
+  import { side } from '../../lib/mounts.svelte';
   import type { Net } from '../../lib/net.svelte';
   import { Notifier, titleOf, whoOf, type NotifyKind } from '../../lib/notify.svelte';
   import { t } from '../../lib/prefs.svelte';
@@ -27,6 +29,7 @@
     mention: 'sky',
   };
 
+  const sliding = new MediaQuery('max-width: 1023px');
   const notifier = new Notifier();
   $effect(() => notifier.sync(net.homes));
   onDestroy(() => notifier.clear());
@@ -48,6 +51,7 @@
   class="notify"
   class:chat={route.page === 'chat'}
   bind:this={stack}
+  inert={route.page === 'chat' && side.open && sliding.current}
   aria-label={t('notify.label')}
   aria-live="polite"
 >

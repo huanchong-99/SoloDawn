@@ -12,8 +12,6 @@ import {
   dropPushSubscription,
   ensurePushSubscription,
   inspectPushState,
-  isIosDevice,
-  isStandaloneMode,
   loadVapid,
   reminderKinds,
   Reminders,
@@ -200,26 +198,26 @@ describe('reminderKinds and defaultPushEnv', () => {
   });
 });
 
-describe('isIosDevice, isStandaloneMode, and inspectPushState', () => {
-  it('detects iPhone, iPad, iPod, and touch-capable Macintosh iPadOS only', () => {
-    expect(isIosDevice({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5)' })).toBe(true);
-    expect(isIosDevice({ userAgent: 'Mozilla/5.0 (iPad; CPU OS 17_5)' })).toBe(true);
-    expect(isIosDevice({ userAgent: 'Mozilla/5.0 (iPod touch; CPU iPhone OS 17_5)' })).toBe(true);
-    expect(isIosDevice({ userAgent: 'Mozilla/5.0 (Macintosh)', maxTouchPoints: 2 })).toBe(true);
-    expect(isIosDevice({ userAgent: 'Mozilla/5.0 (Macintosh)', maxTouchPoints: 1 })).toBe(false);
-    expect(isIosDevice({ userAgent: 'Mozilla/5.0 (Macintosh)' })).toBe(false);
-    expect(isIosDevice({ userAgent: 'Mozilla/5.0 (Linux; Android 15)', maxTouchPoints: 5 })).toBe(
-      false,
-    );
+describe('inspectPushState', () => {
+  it('treats iPhone, iPad, iPod, and touch-capable Macintosh outside standalone mode as ios', () => {
+    const state = (userAgent: string, maxTouchPoints?: number) =>
+      inspectPushState(makeEnv({ userAgent, maxTouchPoints, standalone: false }).env, true);
+    expect(state('Mozilla/5.0 (iPhone; CPU iPhone OS 17_5)')).toBe('ios');
+    expect(state('Mozilla/5.0 (iPad; CPU OS 17_5)')).toBe('ios');
+    expect(state('Mozilla/5.0 (iPod touch; CPU iPhone OS 17_5)')).toBe('ios');
+    expect(state('Mozilla/5.0 (Macintosh)', 2)).toBe('ios');
+    expect(state('Mozilla/5.0 (Macintosh)', 1)).toBe('allowed');
+    expect(state('Mozilla/5.0 (Macintosh)')).toBe('allowed');
+    expect(state('Mozilla/5.0 (Linux; Android 15)', 5)).toBe('allowed');
   });
 
-  it('detects standalone mode from navigator.standalone or display-mode media query', () => {
-    expect(isStandaloneMode(makeEnv({ standalone: true }).env)).toBe(true);
-    const mediaOnly = makeEnv({ standalone: false, standaloneMedia: true });
-    expect(isStandaloneMode(mediaOnly.env)).toBe(true);
+  it('reads standalone mode from navigator.standalone or the display-mode media query', () => {
+    const iphone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5)';
+    const mediaOnly = makeEnv({ userAgent: iphone, standalone: false, standaloneMedia: true });
+    expect(inspectPushState(mediaOnly.env, true)).toBe('allowed');
     expect(mediaOnly.env.matchMedia).toHaveBeenCalledWith('(display-mode: standalone)');
-    expect(isStandaloneMode(makeEnv({ standalone: false, standaloneMedia: false }).env)).toBe(
-      false,
+    expect(inspectPushState(makeEnv({ userAgent: iphone, standalone: true }).env, true)).toBe(
+      'allowed',
     );
   });
 

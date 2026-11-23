@@ -211,6 +211,55 @@ export class TestHome {
   }
 }
 
+/** A TestHome that also applies `act` commands to card rows, checking every received command
+ *  against `proto.Act` and every resulting row against `proto.MsgRow`. While `hold` is set, an act
+ *  waits for `release`. */
+export class ActHome extends TestHome {
+  hold = false;
+  release: (() => void) | undefined;
+
+  override connect(push: (frame: p.Push) => void) {
+    const conn = super.connect(push);
+    const base = conn.ctl.request as (req: Fields) => Promise<unknown>;
+    const ctl = { request: (req: Fields) => this.#request(base, req) } as p.Ctl;
+    return { ctl, close: conn.close };
+  }
+
+  async #request(base: (req: Fields) => Promise<unknown>, req: Fields) {
+    if (req.t !== 'cmd') return base(req);
+    const env = req.env as p.Envelope;
+    if ((JSON.parse(env.p) as Fields).t !== 'act') return base(req);
+    if (this.hold) await new Promise<void>((resolve) => (this.release = resolve));
+    else await new Promise((later) => setTimeout(later));
+    this.asked.push(req);
+    const re = this.asked.length;
+    if (this.refuse) return { re, err: { code: this.refuse, msg: 'refused by the test' } };
+    return { re, ...this.#act(env, p.decode(p.Act, env.p)) };
+  }
+
+  #act(env: p.Envelope, act: p.Act) {
+    const current = this.groups.get(act.g)?.rows.get(`msg ${act.msg}`);
+    if (!current) return { err: { code: 'not_found', msg: 'no such card' } };
+    const base = { by: owner, at: act.ts, act: env };
+    const states: Record<p.Act['action'], Fields> = {
+      confirm: { status: 'confirmed', ...base },
+      revise: { status: 'revise', ...base, ...(act.text ? { note: act.text } : {}) },
+      approve: { status: 'approved', ...base },
+      deny: { status: 'denied', ...base },
+      choose: {
+        status: 'decided',
+        ...base,
+        ...(act.arg ? { choice: act.arg } : {}),
+        ...(act.text ? { text: act.text } : {}),
+      },
+    };
+    const state = states[act.action];
+    const updated = p.decode(p.MsgRow, JSON.stringify({ ...current, state }));
+    this.write(act.g, updated as p.Row & Fields);
+    return { ok: true };
+  }
+}
+
 const sign = async (payload: string) => ({ p: payload, k: 'this-browser', s: 'signature' });
 
 /** A browser of the person, as the client holds it: a `Home` of the store, and its connection to

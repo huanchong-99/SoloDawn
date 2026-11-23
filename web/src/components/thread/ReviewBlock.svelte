@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { parts } from '../../lib/compose';
   import type { CardProps } from '../../lib/mounts.svelte';
   import { t } from '../../lib/prefs.svelte';
+  import Rich from '../Rich.svelte';
 
   /** Scored review block: score against pass threshold and itemized remarks. */
-  let { msg }: CardProps<'review'> = $props();
+  let { group, msg }: CardProps<'review'> = $props();
   const body = $derived(msg.body);
 </script>
 
@@ -19,9 +19,7 @@
           {#if item.veto}
             <span class="badge solid veto" data-tone="danger">{t('thread.review.veto')}</span>
           {/if}
-          {#each parts(item.text, []) as part, j (j)}
-            {#if part.kind === 'code'}<code>{part.text}</code>{:else}{part.text}{/if}
-          {/each}
+          <Rich {group} text={item.text} mentions={[]} />
           {#if item.file}
             <code class="loc">
               {item.line !== undefined ? `${item.file}:${item.line}` : item.file}
