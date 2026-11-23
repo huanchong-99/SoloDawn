@@ -23,6 +23,7 @@ func (l *Loop) Ack(c *Conn, req proto.Ack) {
 }
 
 func (g *runGroup) ack(device string, item int64) {
+	g.loop.diag.Info("ack.recv", "g", g.state.ID, "dev", diagDevice(device), "item", item)
 	g.failed(g.loop.cfg.Store.Write(func(tx *store.Tx) error {
 		return tx.Ack(g.state.ID, device, item)
 	}))

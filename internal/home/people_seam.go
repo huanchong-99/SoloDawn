@@ -207,10 +207,15 @@ func (g *runGroup) seamCommand(c *Conn, re int64, env proto.Envelope) {
 	res, err = g.seamResolveInvite(env.Key, res, def, err)
 	if err != nil {
 		g.loop.cfg.Report(fmt.Errorf("group %s, a command of %s: %w", g.state.ID, c.device, err))
+		g.loop.diagReply(c, g.state.ID, re, env, "internal")
 		c.send(runErr(re, "internal", "the home could not apply the command; the cause is in its log"))
 		return
 	}
-	g.settle(res, now, func() { seamAdmit(join, res); c.send(res.Frame(re)) })
+	g.settle(res, now, func() {
+		seamAdmit(join, res)
+		g.loop.diagReply(c, g.state.ID, re, env, res.Answer.Code)
+		c.send(res.Frame(re))
+	})
 }
 
 func (g *runGroup) seamResolveInvite(signer string, res Result, def seamDeferred, err error) (Result, error) {
