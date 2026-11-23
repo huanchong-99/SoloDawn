@@ -116,8 +116,8 @@ func attachHome(h *Host, device string) {
 	if len(groups) == 0 {
 		return
 	}
-	ctx, jobs := d.beginHomeSync(device, conn, groups)
-	d.wg.Go(func() {
+	ctx, jobs := d.beginHomeSync(h, device, conn, groups)
+	h.bg(d.wg.Go, "home_sync", func() {
 		for _, job := range jobs {
 			syncOneGroup(ctx, h, d, conn, device, job)
 		}
@@ -152,20 +152,21 @@ func groupsForHome(d *delivery, homes []proto.Home, device string) []string {
 	return slices.Sorted(maps.Keys(seen))
 }
 
-func (d *delivery) setHomeEntryLocked(device string, conn Home) *homeSync {
+func (d *delivery) setHomeEntryLocked(h *Host, device string, conn Home) *homeSync {
 	if prev := d.cancels[device]; prev != nil {
 		prev.cancel()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	entry := &homeSync{ctx: ctx, cancel: cancel}
 	d.cancels[device] = entry
-	go watchHomeConn(d, device, conn, entry)
+	go watchHomeConn(h, d, device, conn, entry)
 	return entry
 }
 
-func watchHomeConn(d *delivery, device string, conn Home, entry *homeSync) {
+func watchHomeConn(h *Host, d *delivery, device string, conn Home, entry *homeSync) {
 	select {
 	case <-conn.Done():
+		h.diag.Info("host.detach", "home", diagDevice(device))
 		entry.cancel()
 		d.mu.Lock()
 		if d.cancels[device] == entry {
@@ -176,10 +177,10 @@ func watchHomeConn(d *delivery, device string, conn Home, entry *homeSync) {
 	}
 }
 
-func (d *delivery) beginHomeSync(device string, conn Home, groups []string) (context.Context, []syncJob) {
+func (d *delivery) beginHomeSync(h *Host, device string, conn Home, groups []string) (context.Context, []syncJob) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	entry := d.setHomeEntryLocked(device, conn)
+	entry := d.setHomeEntryLocked(h, device, conn)
 	jobs := make([]syncJob, 0, len(groups))
 	for _, g := range groups {
 		jobs = append(jobs, d.startGroupJobLocked(g, device))
@@ -215,12 +216,12 @@ func ensureGroupSynced(h *Host, d *delivery, device, group string) {
 	if !ok {
 		return
 	}
-	if ctx, job, started := d.beginSingleGroupSync(device, conn, group); started {
-		d.wg.Go(func() { syncOneGroup(ctx, h, d, conn, device, job) })
+	if ctx, job, started := d.beginSingleGroupSync(h, device, conn, group); started {
+		h.bg(d.wg.Go, "group_sync", func() { syncOneGroup(ctx, h, d, conn, device, job) }, "g", group)
 	}
 }
 
-func (d *delivery) beginSingleGroupSync(device string, conn Home, group string) (context.Context, syncJob, bool) {
+func (d *delivery) beginSingleGroupSync(h *Host, device string, conn Home, group string) (context.Context, syncJob, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if gs := d.groups[group]; gs != nil && (gs.syncing || gs.live) {
@@ -228,7 +229,7 @@ func (d *delivery) beginSingleGroupSync(device string, conn Home, group string) 
 	}
 	entry := d.cancels[device]
 	if entry == nil {
-		entry = d.setHomeEntryLocked(device, conn)
+		entry = d.setHomeEntryLocked(h, device, conn)
 	}
 	return entry.ctx, d.startGroupJobLocked(group, device), true
 }
@@ -276,9 +277,11 @@ func syncOneGroup(ctx context.Context, h *Host, d *delivery, conn Home, device s
 	build := func(id int64) any {
 		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: job.group, Since: job.since, StateOnly: true}
 	}
+	h.diag.Info("sync.begin", "g", job.group, "home", diagDevice(device))
 	answer, err := conn.Request(ctx, build)
 	synced, syncErr := decodeSyncAnswer(answer, err)
 	ok := syncErr == nil
+	h.diag.Info("sync.end", "g", job.group, "home", diagDevice(device), "seq", synced.Seq, "ok", ok)
 	if current, refresh := d.finishGroupSync(job, device, synced.Seq, ok); current {
 		settleHomeSync(h, d, device, job.group, answer, ok, refresh)
 	}
@@ -339,12 +342,13 @@ func pushRows(h *Host, home string, frame json.RawMessage) {
 	if proto.Decode(frame, &batch) != nil || batch.Group == "" {
 		return
 	}
+	h.diag.Info("rows.recv", "g", batch.Group, "home", diagDevice(home), "seq", diagSpan(batch.Rows))
 	d := deliv(h)
 	ensureGroupSynced(h, d, home, batch.Group)
 	for _, raw := range batch.Rows {
 		applyGroupRow(h, d, home, batch.Group, raw)
 	}
-	d.wg.Go(func() { afterGroupState(h, d, batch.Group) })
+	h.bg(d.wg.Go, "group_state", func() { afterGroupState(h, d, batch.Group) }, "g", batch.Group)
 }
 
 func applyGroupRow(h *Host, d *delivery, home, group string, raw json.RawMessage) {
@@ -540,6 +544,7 @@ func handleInboxElem(h *Host, d *delivery, home, group string, rawElem json.RawM
 		log.Printf("host: check audit item %d: %v", it.Item, err)
 		return
 	}
+	h.diag.Info("inbox.recv", "g", group, "item", it.Item, "ai", string(it.AI), "kind", it.Why, "seen", seen)
 	if seen {
 		sendAck(h, home, group, it.Item)
 		return
@@ -585,6 +590,7 @@ func tryOpenWait(h *Host, v verifiedItem, agent string) bool {
 	if !waited {
 		return false
 	}
+	h.diag.Info("inbox.hand", "g", v.group, "item", v.item.Item, "wait", target)
 	if err != nil {
 		refuseItem(h, v, agent, err.Error())
 		return true
@@ -605,7 +611,7 @@ func enqueueVerified(h *Host, d *delivery, v verifiedItem) {
 		d.held[key] = enqueueHeld(d.held[key], v)
 		d.mu.Unlock()
 	}
-	d.wg.Go(func() { deliverNow(h, v.group, string(v.item.AI)) })
+	h.bg(d.wg.Go, "deliver", func() { deliverNow(h, v.group, string(v.item.AI)) }, "g", v.group)
 }
 
 func (d *delivery) enqueueMerge(v verifiedItem) {
@@ -845,8 +851,16 @@ func takeEligibleBatch(h *Host, d *delivery, key aiGroupKey, ai aiInfo) (routedT
 	d.mu.Lock()
 	queue := slices.Clone(d.held[key])
 	d.mu.Unlock()
-	readPause := func() bool { return groupIsPaused(h, key.group) }
+	var paused bool
+	readPause := func() bool {
+		paused = groupIsPaused(h, key.group)
+		return paused
+	}
 	target, taken, takenIDs := selectEligibleBatch(h, ai, queue, readPause)
+	if len(queue) > 0 {
+		left := slices.DeleteFunc(queue, func(v verifiedItem) bool { return takenIDs[v.item.Item] })
+		h.diag.Info("inbox.take", "g", key.group, "ai", key.member, "task", target.key.Task, "took", diagItems(taken), "left", diagItems(left), "paused", paused)
+	}
 	if len(taken) == 0 {
 		return routedTarget{}, nil, false
 	}
@@ -1216,6 +1230,7 @@ func ackBatch(h *Host, batch []verifiedItem) {
 
 func sendAck(h *Host, home, group string, item int64) {
 	if conn, ok := h.Home(home); ok {
+		h.diag.Info("ack.send", "g", group, "home", diagDevice(home), "item", item)
 		conn.Send(proto.Ack{Type: "ack", Group: proto.ID(group), Item: item})
 	}
 }

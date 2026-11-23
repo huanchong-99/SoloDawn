@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"math"
 	"reflect"
@@ -95,6 +96,7 @@ type Host struct {
 	waiting sync.Mutex
 	waits   map[string]*wait
 	parts   sync.Map
+	diag    *slog.Logger
 }
 
 // New loads the session table as the node starts (sessions.md section 2).
@@ -106,7 +108,7 @@ func New(db *store.Store, key identity.Key, now func() time.Time) (h *Host, save
 		return nil, nil, err
 	}
 	h = &Host{Store: db, Key: key, Sessions: sessions, Rows: &Rows{rows: map[rowKey]json.RawMessage{}}, Now: now,
-		homes: map[string]Home{}, waits: map[string]*wait{}}
+		homes: map[string]Home{}, waits: map[string]*wait{}, diag: slog.With("node", diagDevice(key.ID()))}
 	for _, built := range inOrder(Built) {
 		built(h)
 	}
@@ -166,6 +168,7 @@ func (h *Host) Attach(device string, home Home) {
 	h.mu.Lock()
 	h.homes[device] = home
 	h.mu.Unlock()
+	h.diag.Info("host.attach", "home", diagDevice(device))
 	for _, attached := range inOrder(Attached) {
 		attached(h, device)
 	}
@@ -179,9 +182,11 @@ var Settled = map[string]func(h *Host){}
 // Settle waits for background work of this host to finish before its store
 // closes.
 func (h *Host) Settle() {
+	h.diag.Info("settle.begin")
 	for _, settle := range inOrder(Settled) {
 		settle(h)
 	}
+	h.diag.Info("settle.end")
 }
 
 // Home returns the connection to the home with that device id while it is

@@ -655,7 +655,7 @@ func verifySecondUnsyncedGroupAndCancelCleanup(t *testing.T, r *deliverRig) {
 	stale := newFakeDeliverHome()
 	stale.closeConn()
 	staleCtx, staleCancel := context.WithCancel(context.Background())
-	watchHomeConn(d, r.homeKey.ID(), stale, &homeSync{ctx: staleCtx, cancel: staleCancel})
+	watchHomeConn(r.h, d, r.homeKey.ID(), stale, &homeSync{ctx: staleCtx, cancel: staleCancel})
 	d.mu.Lock()
 	stillPresent := d.cancels[r.homeKey.ID()] != nil
 	d.mu.Unlock()
