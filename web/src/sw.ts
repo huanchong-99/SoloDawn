@@ -93,10 +93,9 @@ export function formatReminder(reminder: Reminder, lang: ReminderLang) {
 }
 
 async function onPush(scope: SwScope, raw: string | undefined): Promise<void> {
-  if (!raw) return;
   let reminder: Reminder;
   try {
-    reminder = decode(Reminder, raw);
+    reminder = decode(Reminder, raw!);
   } catch {
     return;
   }

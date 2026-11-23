@@ -79,7 +79,7 @@ function pairedNodes(log: DeviceLog): [string, string][] {
 async function appendEntries(log: DeviceLog, entries: Devlog['entries']): Promise<boolean> {
   let changed = false;
   for (const env of entries) {
-    if (await log.apply(env).catch(() => false)) changed = true;
+    if (await log.apply(env).catch(() => undefined)) changed = true;
   }
   return changed;
 }
@@ -147,7 +147,10 @@ function startLive(
           ...link,
           push(frame: Parameters<typeof link.push>[0]) {
             link.push(frame);
-            if (frame.t === 'devlog' && frame.user === log.user) void onDevlog(frame);
+            switch (frame.t) {
+              case 'devlog':
+                if (frame.user === log.user) void onDevlog(frame);
+            }
           },
         };
       };
@@ -319,7 +322,7 @@ export function start(source: Source) {
       ({ home, online }) => {
         if (stopAbort.signal.aborted) return;
         paths.set(home, { kind: 'direct', rtt: undefined, since: Date.now() });
-        added.set('mock', home);
+        added.set(home.me.user, home);
         homes.push(home);
         online();
       },
