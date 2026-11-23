@@ -194,13 +194,12 @@ type hrCLIDriver struct {
 	logFile   string
 }
 
-func newHRCLIDriver(h *host.Host, cleanup func(func()), logFile string, scripts ...string) *hrCLIDriver {
+func newHRCLIDriver(cleanup func(func()), logFile string, scripts ...string) *hrCLIDriver {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &hrCLIDriver{parentCtx: ctx, scripts: scripts, logFile: logFile}
 	cleanup(func() {
 		cancel()
 		d.wg.Wait()
-		waitAllSessionsIdle(h)
 	})
 	return d
 }
@@ -312,6 +311,12 @@ func (p *hrCLIProc) Turn(text string) error {
 
 func hostRunSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
 	cleanup := afterScenario(sc)
+	registerIdleAndMaxOpenSteps(sc, suiteT, cleanup)
+	registerCLICrashAndSwitchSteps(sc, suiteT, cleanup)
+	registerReplaceSteps(sc, suiteT, cleanup)
+}
+
+func installHRDefaultHooks(cleanup func(func())) {
 	origDrivers := maps.Clone(host.Drivers)
 	origCompose := host.Compose
 	origDeliver := host.Deliver
@@ -322,13 +327,6 @@ func hostRunSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
 		host.Deliver = origDeliver
 		host.Instructions = origInstructions
 	})
-
-	registerIdleAndMaxOpenSteps(sc, suiteT)
-	registerCLICrashAndSwitchSteps(sc, suiteT, cleanup)
-	registerReplaceSteps(sc, suiteT, cleanup)
-}
-
-func installHRDefaultHooks() {
 	host.Deliver = func(*host.Host, string, string) {}
 	host.Instructions = func(host.Session) string { return "" }
 	host.Compose = func(_ *host.Host, s host.Session, kind host.TurnKind, _ []json.RawMessage) (string, host.Turn, error) {
@@ -337,7 +335,7 @@ func installHRDefaultHooks() {
 }
 
 func newTestHost(suiteT *testing.T, cleanup func(func()), maxOpen, idleMin int) (*host.Host, *hrHome, context.Context, error) {
-	installHRDefaultHooks()
+	installHRDefaultHooks(cleanup)
 	procCtx, cancelProcs := context.WithCancel(context.Background())
 	dbPath := filepath.Join(suiteT.TempDir(), "node.db")
 	db, err := store.Open(dbPath)
@@ -373,18 +371,14 @@ func newTestHost(suiteT *testing.T, cleanup func(func()), maxOpen, idleMin int) 
 	cleanup(func() { db.Close() })
 	cleanup(func() {
 		cancelProcs()
-		waitAllSessionsIdle(h)
+		h.Settle()
 	})
 	rh := newHRHome()
 	h.Attach("home-dev", rh)
 	return h, rh, procCtx, nil
 }
 
-func waitAllSessionsIdle(h *host.Host) {
-	_ = waitUntil(5*time.Second, "every host session dormant", func() error { return sessionsDormant(h) })
-}
-
-func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
+func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T, cleanup func(func())) {
 	// Scenario 1 (A3.4): honest steps inside synctest.Test.
 	var idleMinutes int
 	var idleStateBeforeSecond host.State
@@ -401,7 +395,7 @@ func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
 		var stepErr error
 		baseDir := suiteT.TempDir()
 		synctest.Test(suiteT, func(t *testing.T) {
-			installHRDefaultHooks()
+			installHRDefaultHooks(cleanup)
 			procCtx, cancelProcs := context.WithCancel(context.Background())
 			db, err := store.Open(filepath.Join(baseDir, "node.db"))
 			if err != nil {
@@ -489,7 +483,7 @@ func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
 		var stepErr error
 		baseDir := suiteT.TempDir()
 		synctest.Test(suiteT, func(t *testing.T) {
-			installHRDefaultHooks()
+			installHRDefaultHooks(cleanup)
 			procCtx, cancelProcs := context.WithCancel(context.Background())
 			db, err := store.Open(filepath.Join(baseDir, "node.db"))
 			if err != nil {
@@ -596,7 +590,7 @@ func registerCLICrashAndSwitchSteps(sc *godog.ScenarioContext, suiteT *testing.T
 		if err != nil {
 			return err
 		}
-		cliDrv = newHRCLIDriver(h, cleanup, logFile)
+		cliDrv = newHRCLIDriver(cleanup, logFile)
 		host.Drivers = map[string]host.Driver{"claude": cliDrv}
 		return h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: "wt/1-task", Agent: "claude", Home: "home-dev", Name: "Claude"})
 	})
@@ -660,7 +654,7 @@ func registerCLICrashAndSwitchSteps(sc *godog.ScenarioContext, suiteT *testing.T
 		if err != nil {
 			return err
 		}
-		cliDrv = newHRCLIDriver(h, cleanup, logFile, script)
+		cliDrv = newHRCLIDriver(cleanup, logFile, script)
 		host.Drivers = map[string]host.Driver{"claude": cliDrv}
 		if err := h.Sessions.Create(host.Session{SessionKey: kA, Kind: host.GroupSession, Folder: "repo-a", Agent: "claude", Home: "home-dev", Name: "A", CLISession: "sess-a"}); err != nil {
 			return err

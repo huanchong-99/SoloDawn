@@ -70,7 +70,7 @@ func (d *fakeDriver) Interactive(l Launch) ([]string, string, error) {
 func (d *fakeDriver) count() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return len(d.launches)
+	return len(d.procs)
 }
 
 func (d *fakeDriver) proc(i int) *fakeProc {
@@ -89,6 +89,26 @@ func (d *fakeDriver) lastLaunch() Launch {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.launches[len(d.launches)-1]
+}
+
+func TestFakeDriverCountsAStartOnlyWithItsProcess(t *testing.T) {
+	entered, release, started := make(chan struct{}), make(chan struct{}), make(chan Process)
+	want := &fakeProc{}
+	drv := &fakeDriver{makeProc: func(context.Context, int, Launch) (*fakeProc, error) {
+		close(entered)
+		<-release
+		return want, nil
+	}}
+	go func() {
+		p, _ := drv.Start(t.Context(), Launch{})
+		started <- p
+	}()
+	<-entered
+	assertEqual(t, drv.count(), 0)
+	close(release)
+	assertEqual(t, <-started, Process(want))
+	assertEqual(t, drv.count(), 1)
+	assertEqual(t, drv.lastProc(), want)
 }
 
 type recordedAsk struct {
@@ -2159,6 +2179,37 @@ func TestSettleWaitsForRuntimeDelivery(t *testing.T) {
 			t.Fatal(err)
 		}
 		drv.lastProc().emit(Event{Kind: TurnEnded, Status: "completed"})
+		<-started
+		go func() {
+			h.Settle()
+			close(settled)
+		}()
+		synctest.Wait()
+		select {
+		case <-settled:
+			t.Error("Settle returned before delivery finished")
+		default:
+		}
+		close(release)
+		<-settled
+	})
+}
+
+func TestSettleWaitsForDeliveryAfterAnExitMidTurn(t *testing.T) {
+	saveRuntimeGlobals(t)
+	base := t.TempDir()
+	synctest.Test(t, func(t *testing.T) {
+		h, _, drv, shutdown := setupBubbleEnv(t, base)
+		defer shutdown()
+		started, release, settled := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		Deliver = func(*Host, string, string) {
+			close(started)
+			<-release
+		}
+		key := SessionKey{Group: runGroup1, Member: runAI1}
+		assertEqual(t, h.Sessions.Create(makeRunSession(key, GroupSession, "repo")), nil)
+		assertEqual(t, Runner.Turn(t.Context(), h, key, "hi", Turn{Kind: ItemsTurn}), nil)
+		drv.lastProc().finishExit()
 		<-started
 		go func() {
 			h.Settle()
