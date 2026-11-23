@@ -1,5 +1,8 @@
 Feature: Host model choice
-  Scenario Outline: Server CLI choice is sent at its supported process start (A10.15 host)
+  Scenario Outline: Server CLI choice reaches each process launch (A10.15 host)
+    For Qwen, resume retains the daemon's creation settings; changed model and
+    level apply only to the next new session, not this resumed session.
+
     Given a model-choice host with fake OpenCode and Qwen Code
     When the model-choice host joins "<agent>" as "One" with model "provider/unlisted", effort "custom" and tier "standard"
     And model-choice member "One" starts a turn
