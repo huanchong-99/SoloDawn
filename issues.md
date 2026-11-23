@@ -734,6 +734,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-24 · bug · A scenario could restore the host drivers while another node discovered agents
+
+- Symptom: the Linux `-race` acceptance job reported a data race in A1.1 (`features/node_pair.feature:5`): a write of `host.Drivers` at `features/host_limits_test.go:237` against a read in `agtModels` (`internal/host/models.go:17`), from a `Pairer.Serve` goroutine started at `features/helpers_test.go:648`.
+- Cause: `hostLimitsSteps` registered the restore of `host.Drivers`, `host.Compose` and `host.Instructions` in `afterScenario` for every scenario of the suite (`features/host_limits_test.go:232-240`), not only for the host limits scenarios that replace them. So A1.1's own cleanup rewrote the global while its paired node, still serving, read it.
+- Status: resolved on `devin/race-store-drivers` in the test harness: `saveHLHooks` saves the three hooks and the three host limits bubbles and the host external run restore them with `defer` around the work that replaced them, so no other scenario writes them. `Drivers` stays a package-level registry: the product writes it only at package init (`Register` in each driver file), and only tests replace it.
+
+### 2026-11-24 · bug · A store could close while a home push was still reaching its host
+
+- Symptom: the Linux `-race` acceptance job reported a data race in A4.3: `Store.Close` closing the write queue (`internal/store/store.go:73`, from `nodetest.Node.Close`) against `onWriter` sending on it (`:95`), from `projectDir` (`internal/host/run.go:184`) in `cleanupGroupState`, started by `pushRows` (`internal/host/deliver.go:347`).
+- Cause: `LocalLink.Close` (`internal/node/local.go:63`) detached the link but did not wait for a push that the home loop's pump was already delivering (`:209`). `nodetest.Node.Close` closes the link, settles the host and closes the store; when the push reached `pushRows` after `Host.Settle` had waited on the delivery wait group, `pushRows` started `afterGroupState` on it after the wait and wrote to the closed store.
+- Status: resolved on `devin/race-store-drivers` in the product: `LocalLink.Close` returns only once a push in progress has returned from the host, and no push starts after it (`startPush`), so a host settled after its link closes has no delivery left. `TestLocalLinkCloseWaitsForAPushInProgress` holds a push and pins that `Close` waits for it and that a later push is dropped. The M3 restart host (`features/m3_test.go:470`) is now settled after its link closes.
+
 ### 2026-11-23 · bug · An external AI's timer callback could outlive Settle
 
 - Symptom: `Settle` could return while an external AI's run timeout (`extEnd`, which calls `Deliver`) or presence report (`extReport`) was still running, and a `leave` or a hand-out during shutdown armed a new timer, such as a 180 s presence timer.

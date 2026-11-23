@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/home"
@@ -557,4 +558,35 @@ func recvFrame[T any](t *testing.T, ch <-chan T) T {
 		t.Fatal("timed out waiting for frame")
 		return zero
 	}
+}
+
+func TestLocalLinkCloseWaitsForAPushInProgress(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rig := newLocalRig(t, nil)
+		link := AttachLocal(rig.host, rig.loop)
+		// Single reader per channel: this test.
+		entered, release, closed := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		pushes := 0
+		link.push = func(string, json.RawMessage) {
+			pushes++
+			entered <- struct{}{}
+			<-release
+		}
+		go link.fromHome([]byte(`{"t":"rows"}`))
+		<-entered
+		go func() {
+			link.Close()
+			close(closed)
+		}()
+		synctest.Wait()
+		select {
+		case <-closed:
+			t.Fatal("Close returned during a push")
+		default:
+		}
+		close(release)
+		<-closed
+		link.fromHome([]byte(`{"t":"rows"}`))
+		mustEqual(t, pushes, 1)
+	})
 }
