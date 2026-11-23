@@ -6,6 +6,7 @@
   "groups.none": "还没有消息",
   "groups.colon": "：",
   "groups.down": "连不上群的家",
+  "groups.otherTab": "在另一个标签页",
   "groups.empty.title": "还没有群",
   "groups.empty.body": "一个群就是一个项目：它的代码仓库、AI 和任务。在已经连接的电脑上新建一个。",
   "groups.empty.offline": "还没有连接你的任何一台电脑。群要住在其中一台上。",

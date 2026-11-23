@@ -2,13 +2,14 @@
   import { flip } from 'svelte/animate';
   import { prefersReducedMotion } from 'svelte/motion';
   import { homes, recent, subject, type Group } from '../../lib/groups.svelte';
+  import type { Net } from '../../lib/net.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { now, shortWhen } from '../../lib/when';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
 
   /** `open` is the group whose chat is shown; `oncreate` opens the create-group dialog. */
-  let { open, oncreate }: { open?: Group; oncreate: () => void } = $props();
+  let { open, net, oncreate }: { open?: Group; net: Net; oncreate: () => void } = $props();
 
   const groups = $derived(recent());
   // A group is created on a node of the person's own that can be reached.
@@ -50,7 +51,11 @@
             <b class="cut">{group.name}</b>
             <span class="gprev cut">{preview(group)}</span>
             {#if !group.home.ctl}
-              <span class="gdown cut"><i></i>{group.home.name} · {t('groups.down')}</span>
+              <span class="gdown cut" class:away={net.otherTab}>
+                <i></i>{net.otherTab
+                  ? t('groups.otherTab')
+                  : `${group.home.name} · ${t('groups.down')}`}
+              </span>
             {/if}
           </span>
           <span class="gside">
@@ -161,6 +166,9 @@
     gap: 6px;
     color: var(--danger);
     font-size: var(--fs-xs);
+  }
+  .gdown.away {
+    color: var(--text-2);
   }
   /* Cannot reach the home: a hollow circle, told by its shape as well as its colour. */
   .gdown i {
