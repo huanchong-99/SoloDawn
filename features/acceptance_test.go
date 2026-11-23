@@ -83,12 +83,14 @@ func TestFeatures(t *testing.T) {
 		t.Fatal(err)
 	}
 	var env map[string]string
+	defer diagCapture()()
 	suite := godog.TestSuite{
 		// godog sets its own variables (GODOG_SEED) before the suite starts.
 		TestSuiteInitializer: func(ts *godog.TestSuiteContext) {
 			ts.BeforeSuite(func() { env = environ() })
 		},
 		ScenarioInitializer: func(sc *godog.ScenarioContext) {
+			diagHooks(sc)
 			for _, name := range names {
 				stepSets[name](sc, f)
 			}

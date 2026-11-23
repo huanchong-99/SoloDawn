@@ -291,7 +291,7 @@ func (w *m8InstallWorld) startForegroundNode() error {
 	cmd := exec.Command(w.binPath, "node")
 	cmd.Env = w.env
 	cmd.Stdout, cmd.Stderr = &logBuf, &logBuf
-	if _, err := startManagedCmd(w.f.t, w.cleanup, cmd); err != nil {
+	if _, err := startNodeCmd(w.f.t, w.cleanup, cmd, "node", filepath.Dir(w.sockPath), &logBuf); err != nil {
 		return err
 	}
 	if err := waitAcceptanceSocket(w.sockPath, 10*time.Second); err != nil {
