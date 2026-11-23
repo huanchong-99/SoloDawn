@@ -65,6 +65,7 @@ func a10ModelSteps(sc *godog.ScenarioContext, f fixtures, cleanup func(func())) 
 }
 
 func (w *a10ModelsWorld) setupModels(all bool) error {
+	path := os.Getenv("PATH")
 	git, err := exec.LookPath("git")
 	if err != nil {
 		return err
@@ -76,7 +77,7 @@ func (w *a10ModelsWorld) setupModels(all bool) error {
 	if err := w.hostModelsWorld.setup(f, w.cleanup); err != nil {
 		return err
 	}
-	if err := a10ModelGit(git, f.fakeCLIs); err != nil {
+	if err := a10ModelGit(git, f.fakeCLIs, path); err != nil {
 		return err
 	}
 	w.f = f
@@ -84,10 +85,9 @@ func (w *a10ModelsWorld) setupModels(all bool) error {
 	return w.connect()
 }
 
-func a10ModelGit(git, dir string) error {
+func a10ModelGit(git, dir, path string) error {
 	if runtime.GOOS == "windows" {
-		root := filepath.Dir(filepath.Dir(git))
-		return os.Setenv("PATH", strings.Join([]string{os.Getenv("PATH"), filepath.Dir(git), filepath.Join(root, "mingw64", "bin"), filepath.Join(root, "usr", "bin")}, string(os.PathListSeparator)))
+		return os.Setenv("PATH", dir+string(os.PathListSeparator)+path)
 	}
 	return hostAgentsLinkOrCopy(git, filepath.Join(dir, hostAgentsExe("git")))
 }
