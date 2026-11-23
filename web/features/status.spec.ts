@@ -117,9 +117,9 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
       });
 
       And(
-        'the group list says "In use in another tab" and neither is styled as unreachable',
+        'the group list says "In another tab" and neither is styled as unreachable',
         () => {
-          expect(texts('.gdown')).toEqual(['In use in another tab']);
+          expect(texts('.gdown')).toEqual(['In another tab']);
           expect(one('.composer .state').className).toContain('away');
           expect(one('.gdown').className).toContain('away');
           expect(all('.composer .state.down, .gdown:not(.away)')).toEqual([]);
