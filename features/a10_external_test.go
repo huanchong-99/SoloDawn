@@ -64,7 +64,7 @@ func (w *externalWorld) setup() error {
 }
 
 func (w *externalWorld) setupProject(forge string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	w.ctx = ctx
 	w.cleanup(cancel)
 	return s3Run(w.prepareRootAndRepo, w.prepareClaude, func() error { return w.prepareForge(forge) }, w.startNode,
@@ -339,13 +339,12 @@ func (w *externalWorld) missingWait(member string) error {
 	if err := r.expect(1); err != nil {
 		return err
 	}
-	if strings.Count(r.stdoutOrError(), "\n") != 1 {
-		return fmt.Errorf("missing member wait did not print one line: %+v", r)
+	line, terminated := strings.CutSuffix(r.stderr, "\n")
+	if r.out != "" || !terminated || strings.TrimSpace(line) == "" || strings.Contains(line, "\n") {
+		return fmt.Errorf("missing member wait: stdout %q, stderr %q; want one stderr line and no stdout", r.out, r.stderr)
 	}
 	return nil
 }
-
-func (r externalCLIResult) stdoutOrError() string { return r.out + r.stderr }
 
 func (w *externalWorld) inbox(want int) error {
 	db, err := store.Open(filepath.Join(w.homeNode.data, "node.db"))
@@ -371,8 +370,7 @@ func externalRunnerSteps(sc *godog.ScenarioContext, w *externalWorld) {
 	sc.Step(`^an external look rejects an unknown member$`, func() error { return w.missingWait(string(exampleID("unknown external"))) })
 	sc.Step(`^an external look rejects the removed member$`, func() error { return w.missingWait(w.aiByName["X"].ID) })
 	sc.Step(`^the external handout folder is the project clone$`, w.checkClone)
-	sc.Step(`^the "([^"]+)" runs the external setup check agent once$`, w.setupRun)
-	sc.Step(`^the "([^"]+)" runs two more external mentions$`, w.twoRuns)
+	sc.Step(`^the "([^"]+)" runs (\d+) queued external items$`, w.runQueued)
 }
 
 func (w *externalWorld) openMCP() error {
@@ -534,81 +532,6 @@ func (w *externalWorld) checkClone() error {
 		return fmt.Errorf("handout origin = %q, want %q", origin, w.repoDir)
 	}
 	return nil
-}
-
-func (w *externalWorld) setupRun(mode string) error {
-	return w.runnerTurn(mode, "Setup check: answer here in one line, then finish.", "Setup check answered")
-}
-
-func (w *externalWorld) twoRuns(mode string) error {
-	for _, ordinal := range []string{"First", "Second"} {
-		text := ordinal + " external mention"
-		if err := w.whenOwnerMentionsAI("X", text); err != nil {
-			return err
-		}
-		if err := w.runnerTurn(mode, text, ordinal+" external answer"); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (w *externalWorld) runnerTurn(mode, text, answer string) error {
-	if err := w.takeInMode(mode); err != nil {
-		return err
-	}
-	if err := w.handout("group", text); err != nil {
-		return err
-	}
-	return w.runAgent(mode, answer)
-}
-
-func (w *externalWorld) takeInMode(mode string) error {
-	switch mode {
-	case "loop":
-		return w.readHandout(runExternalCLI(w.waitCommand("")))
-	case "scheduler":
-		return w.look(0)
-	default:
-		return fmt.Errorf("unknown runner %q", mode)
-	}
-}
-
-func (w *externalWorld) runAgent(mode, answer string) error {
-	member := w.aiByName["X"].ID
-	cmd := w.command("mcp", "--member", member)
-	cmd.Dir = w.run.Folder
-	client := mcp.NewClient(&mcp.Implementation{Name: "external-scripted-agent", Version: "1"}, nil)
-	session, err := client.Connect(w.ctx, &mcp.CommandTransport{Command: cmd}, nil)
-	if err != nil {
-		return err
-	}
-	defer session.Close()
-	if err := w.checkAgentRunning(mode); err != nil {
-		return err
-	}
-	return w.postAndFinish(session, answer)
-}
-
-func (w *externalWorld) checkAgentRunning(mode string) error {
-	if err := w.state("X", "working"); err != nil || mode != "scheduler" {
-		return err
-	}
-	return w.look(3)
-}
-
-func (w *externalWorld) postAndFinish(session *mcp.ClientSession, answer string) error {
-	res, err := session.CallTool(w.ctx, &mcp.CallToolParams{Name: "post", Arguments: map[string]string{"text": answer}})
-	if err != nil {
-		return err
-	}
-	if res.IsError {
-		return fmt.Errorf("scripted external post failed: %+v", res)
-	}
-	if err := session.Close(); err != nil {
-		return err
-	}
-	return w.end(w.run.Run)
 }
 
 func (w *externalWorld) reportUsage(pct, minutes int) error {

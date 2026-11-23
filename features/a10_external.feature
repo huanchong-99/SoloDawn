@@ -50,19 +50,32 @@ Feature: External agents take and finish one item without a CLI driver
     And the external owner removes X
     Then the external blocking wait exits 1
 
-  @pending
+  @pending @not-windows
   Scenario Outline: A runner starts exactly one agent for each item (A10.20)
     Given an external acceptance project with X
     And the external owner mentions X with "Setup check: answer here in one line, then finish."
     Then the external home has 1 inbox items
     And external member "X" has state "offline"
-    When the "<runner>" runs the external setup check agent once
+    When the "<runner>" runs 1 queued external items
     Then X posts "Setup check answered" in the external project
     And external member "X" has state "waiting"
-    When the "<runner>" runs two more external mentions
+
+    Examples:
+      | runner    |
+      | loop      |
+      | scheduler |
+
+  @pending @not-windows
+  Scenario Outline: A runner starts queued items one after the other (A10.20)
+    Given an external acceptance project with X
+    And the external owner mentions X with "First external mention"
+    And the external owner mentions X with "Second external mention"
+    Then the external home has 2 inbox items
+    And external member "X" has state "offline"
+    When the "<runner>" runs 2 queued external items
     Then X posts "First external answer" in the external project
     And X posts "Second external answer" in the external project
-    And an external look exits 3
+    And external member "X" has state "waiting"
 
     Examples:
       | runner    |

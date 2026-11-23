@@ -158,13 +158,22 @@ func (w *externalWorld) scriptManagedToolCheck() error {
 }
 
 func (w *externalWorld) secretaryUsage(usage string) error {
+	return w.secretaryTurn("waiting", usage)
+}
+
+const externalRosterSkills = "Rust, reviews"
+
+func (w *externalWorld) setRosterSkills() error {
 	cmd := proto.MemberSet{MemberCommand: proto.MemberCommand{HomeCommand: w.homeHeader("member"),
-		Op: "set", ID: proto.ID(w.aiByName["X"].ID)}, ProfileSet: proto.ProfileSet{Skills: new("Rust, reviews")}}
-	return s3Run(func() error { return w.hostCommand(cmd) }, func() error { return w.secretaryTurn("waiting", usage) })
+		Op: "set", ID: proto.ID(w.aiByName["X"].ID)}, ProfileSet: proto.ProfileSet{Skills: new(externalRosterSkills)}}
+	return s3Run(func() error { return w.hostCommand(cmd) },
+		func() error {
+			return w.waitState(func() bool { return w.aiByName["X"].Skills == externalRosterSkills })
+		})
 }
 
 func (w *externalWorld) secretaryTurn(state, usage string) error {
-	return s3Run(w.ensureSecretary, w.mentionSecretary,
+	return s3Run(w.ensureSecretary, w.setRosterSkills, w.mentionSecretary,
 		func() error { return w.checkSecretaryInput(state, usage) })
 }
 
@@ -187,20 +196,16 @@ func (w *externalWorld) checkSecretaryInput(state, usage string) error {
 	}
 	defer f.Close()
 	prefix := fmt.Sprintf(`- "X" · external (ZCode) on %s · standard · %s`, w.aiByName["X"].HostName, state)
-	suffix := ""
-	if usage != "" {
-		suffix = " · Rust, reviews"
-	}
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		if externalRosterLine(scanner.Bytes(), prefix, usage, suffix) {
+		if externalRosterLine(scanner.Bytes(), prefix, usage) {
 			return nil
 		}
 	}
 	return fmt.Errorf("no secretary turn contained X's roster line %q including %q (%v)", prefix, usage, scanner.Err())
 }
 
-func externalRosterLine(raw []byte, prefix, usage, suffix string) bool {
+func externalRosterLine(raw []byte, prefix, usage string) bool {
 	var input struct {
 		Message struct{ Content []struct{ Text string } }
 	}
@@ -209,7 +214,7 @@ func externalRosterLine(raw []byte, prefix, usage, suffix string) bool {
 	}
 	for _, content := range input.Message.Content {
 		for _, line := range strings.Split(content.Text, "\n") {
-			if externalRosterMatches(line, prefix, usage, suffix) {
+			if externalRosterMatches(line, prefix, usage) {
 				return true
 			}
 		}
@@ -217,8 +222,12 @@ func externalRosterLine(raw []byte, prefix, usage, suffix string) bool {
 	return false
 }
 
-func externalRosterMatches(line, prefix, usage, suffix string) bool {
-	return strings.HasPrefix(line, prefix) && strings.Contains(line, usage) && strings.HasSuffix(line, suffix)
+func externalRosterMatches(line, prefix, usage string) bool {
+	want := prefix
+	if usage != "" {
+		want += " · " + usage
+	}
+	return line == want+" · "+externalRosterSkills
 }
 
 func (w *externalWorld) runBrief(role string) error {
