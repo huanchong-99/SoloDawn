@@ -414,7 +414,7 @@ func startAcceptanceNode(t testing.TB, bin string, cleanup func(func())) (*runni
 	cmd := exec.Command(bin, "node")
 	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = &np.output, &np.output
-	if _, err := startManagedCmd(t, cleanup, cmd); err != nil {
+	if _, err := startNodeCmd(t, cleanup, cmd, "node", filepath.Dir(sock), &np.output); err != nil {
 		return nil, err
 	}
 	np.cmd = cmd

@@ -639,7 +639,7 @@ func (c *s2Cast) seedAndStartNode(t testing.TB, n *s2Node) error {
 	cmd := exec.Command(c.F.bin, "node")
 	cmd.Env = n.Env
 	cmd.Stdout, cmd.Stderr = &n.Out, &n.Out
-	stop, err := startManagedCmd(t, c.addUndo, cmd)
+	stop, err := startNodeCmd(t, c.addUndo, cmd, n.Name, n.Data, &n.Out)
 	if err != nil {
 		return err
 	}
