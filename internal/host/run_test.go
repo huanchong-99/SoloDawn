@@ -70,7 +70,7 @@ func (d *fakeDriver) Interactive(l Launch) ([]string, string, error) {
 func (d *fakeDriver) count() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return len(d.launches)
+	return len(d.procs)
 }
 
 func (d *fakeDriver) proc(i int) *fakeProc {
@@ -89,6 +89,26 @@ func (d *fakeDriver) lastLaunch() Launch {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.launches[len(d.launches)-1]
+}
+
+func TestFakeDriverCountsAStartOnlyWithItsProcess(t *testing.T) {
+	entered, release, started := make(chan struct{}), make(chan struct{}), make(chan Process)
+	want := &fakeProc{}
+	drv := &fakeDriver{makeProc: func(context.Context, int, Launch) (*fakeProc, error) {
+		close(entered)
+		<-release
+		return want, nil
+	}}
+	go func() {
+		p, _ := drv.Start(t.Context(), Launch{})
+		started <- p
+	}()
+	<-entered
+	assertEqual(t, drv.count(), 0)
+	close(release)
+	assertEqual(t, <-started, Process(want))
+	assertEqual(t, drv.count(), 1)
+	assertEqual(t, drv.lastProc(), want)
 }
 
 type recordedAsk struct {

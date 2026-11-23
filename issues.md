@@ -728,6 +728,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-23 · bug · FLAKY-28: a takeover test read the last process before the fake driver stored it
+
+- Symptom: `TestTakeoverHandBackAfterACommitPostsTheFacts` panicked on Windows CI with index -1 in `fakeDriver.lastProc` (`internal/host/run_test.go:85`).
+- Cause: `fakeDriver.Start` records the launch (`internal/host/run_test.go:43`) and stores the process only after it is made, under a second lock (`:61`). `count` returned the number of launches (`:73`), so the wait for the hand-back turn (`internal/host/takeover_test.go:425`) could end while `procs` was still empty, and `lastProc` (`:426`) indexed it at -1.
+- Status: resolved on `devin/host-teardown-race`: `count` returns the number of stored processes, and `TestFakeDriverCountsAStartOnlyWithItsProcess` holds a start inside its process maker and pins that it is not counted until its process is stored.
+
 ### 2026-11-23 · bug · Host acceptance teardown restored hooks while host delivery still ran
 
 - Symptom: under `-race`, the host acceptance scenarios reported a data race between restoring `host.Deliver` in `afterScenario` (`features/host_run_test.go:322`) and a delivery wakeup reading it (`internal/host/run.go:592` in `onProcessTurnEnded`, and `:851` in `finishTurnProcessExit`, reached from `:813`).
