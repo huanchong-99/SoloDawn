@@ -794,6 +794,29 @@ func (ptyNopHandle) Write(b []byte) (int, error) { return len(b), nil }
 func (ptyNopHandle) Close() error                { return nil }
 func (ptyNopHandle) Resize(int, int) error       { return nil }
 
+func TestPTYActivateKillsAProcessThatOutlivesTheStopTimeout(t *testing.T) {
+	saved := ptyStopTimeout
+	ptyStopTimeout = time.Millisecond
+	t.Cleanup(func() { ptyStopTimeout = saved })
+	ptmx, err := gopty.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ptmx.Close()
+	argv := ptyHelperArgv(t, "pty-hangleaf", filepath.Join(t.TempDir(), "leaf.addr"))
+	cmd := ptmx.Command(argv[0], argv[1:]...)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	part := ptyState(newPTYTestHost(t))
+	slot := aiSlot{group: "g-kill", member: "m-kill"}
+	part.reserve(slot)
+	ptyActivate(part, slot, ptyNopHandle{}, cmd, nil).Close()
+	if cmd.ProcessState.Success() {
+		t.Fatalf("helper ended with %v, want it killed", cmd.ProcessState)
+	}
+}
+
 func TestPTYCloseTimeoutAndReentrancy(t *testing.T) {
 	saved := ptyStopTimeout
 	ptyStopTimeout = 30 * time.Millisecond
