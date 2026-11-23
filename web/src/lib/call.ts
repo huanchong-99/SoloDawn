@@ -98,7 +98,7 @@ export function withoutInlineReplies(msgs: MsgRow[], callMounted: boolean): MsgR
   if (!callMounted) return msgs;
   const inline = new Set<string>();
   for (const msg of msgs) {
-    if (msg.kind === 'call' && msg.state.status === 'answered') inline.add(msg.state.reply);
+    if (msg.kind === 'call' && 'reply' in msg.state) inline.add(msg.state.reply);
   }
   return msgs.filter((msg) => !inline.has(msg.id));
 }

@@ -111,10 +111,10 @@ function activeStepFailed(task: TaskRow, at: number): boolean {
 }
 
 function waitsOnViewer(group: Group, task: TaskRow): boolean {
-  const kind = task.wait?.kind;
+  const { wait } = task;
   return (
-    (kind === 'approval' || kind === 'decision') &&
-    Boolean(task.wait?.who?.includes(group.home.me.user))
+    (wait?.kind === 'approval' || wait?.kind === 'decision') &&
+    Boolean(wait.who?.includes(group.home.me.user))
   );
 }
 

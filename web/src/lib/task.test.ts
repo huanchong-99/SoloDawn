@@ -217,6 +217,19 @@ describe('task helpers', () => {
       'In progress',
     );
     expect(openPr.summary).toBe('Open PR · 3 / 6');
+    expect(
+      taskSteps(
+        group,
+        {
+          ...base,
+          step: 'local_check',
+          checks: { local: { ok: true, at: 1, commit: 'c1' } },
+          review: { ...rejected, ok: true },
+          wait: null,
+        },
+        'In progress',
+      ).summary,
+    ).toBe('Open PR · 3 / 6');
     expect(openPr.aria).toBe('Progress: step 3 of 6, Open PR (In progress)');
 
     expect(

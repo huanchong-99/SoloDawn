@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Home } from './groups.svelte';
 import { decode, encode } from './identity';
 import { goldens } from './mock';
-import { prefs } from './prefs.svelte';
+import { preference, prefs } from './prefs.svelte';
 import * as p from './proto';
 import {
   defaultPushEnv,
@@ -171,7 +171,8 @@ function makeHomeRig(groups: string[] = [sampleGroup], online = true) {
     groups: groups.map((g, idx) => ({ g, name: `Group ${idx + 1}`, seq: 0 })),
   });
 
-  if (online) link.online(makeCtl(), welcome());
+  let ctl = makeCtl();
+  if (online) link.online(ctl, welcome());
 
   return {
     home,
@@ -182,7 +183,12 @@ function makeHomeRig(groups: string[] = [sampleGroup], online = true) {
     drop: () => link.offline(),
     reconnect() {
       link = home.connect();
-      link.online(makeCtl(), welcome());
+      ctl = makeCtl();
+      link.online(ctl, welcome());
+    },
+    resume() {
+      link = home.connect();
+      link.online(ctl, welcome());
     },
   };
 }
@@ -355,7 +361,7 @@ describe('ensurePushSubscription and dropPushSubscription', () => {
     const wrongKey = validKey.slice();
     wrongKey[64] ^= 0xff;
 
-    for (const badKey of [null, new Uint8Array(10).buffer, wrongKey.buffer]) {
+    for (const badKey of [null, validKey.slice(0, 10).buffer, wrongKey.buffer]) {
       const stale = makeSub(badKey, { endpoint: 'https://push.example/stale' });
       const rig = makeEnv({ idb: () => idb, existingSub: stale });
       const fresh = await ensurePushSubscription(rig.env, 'en');
@@ -522,6 +528,24 @@ describe('Reminders', () => {
     expect(await store.disable([bad1.home, bad2.home], rig.env)).toEqual({ code: 'conflict' });
   });
 
+  it('skips homes that are connected to no node, and keeps each choice under its own name', async () => {
+    const store = new Reminders();
+    const rig = makeEnv({ permission: 'granted' });
+    const home = makeHomeRig([sampleGroup]);
+    await store.enable([home.home], rig.env);
+    home.drop();
+    expect(await store.sync([home.home], rig.env)).toEqual({ ok: true });
+    expect(await store.disable([home.home], rig.env)).toEqual({ ok: true });
+    expect(home.sent).toHaveLength(1);
+
+    for (const kind of reminderKinds) {
+      await store.setKind(kind, false, [], rig.env);
+      expect(localStorage.getItem(`sd-reminder-${kind}`)).toBe('off');
+      await store.setKind(kind, true, [], rig.env);
+    }
+    expect(() => preference('reminder', ['off', 'on'] as const, 'off')).not.toThrow();
+  });
+
   it('does not cache a sent subscription if disabled or disconnected while command is in flight', async () => {
     const store = new Reminders();
     const rig = makeEnv({ permission: 'granted' });
@@ -537,7 +561,7 @@ describe('Reminders', () => {
 
     await store.enable([home.home], rig.env);
     mode = 'none';
-    home.reconnect();
+    home.resume();
     await store.sync([home.home], rig.env);
     expect(home.sent).toHaveLength(2);
 
