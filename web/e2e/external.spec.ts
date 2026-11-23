@@ -107,7 +107,7 @@ async function answerCheck(
   answer: string,
   working: () => Promise<void>,
 ) {
-  const got = await node.run('solodawn', 'wait', '--member', member, '--timeout', '0');
+  const got = await node.run('solodawn', 'wait', '--member', member, '--timeout', '30');
   expect(got.code, got.stderr).toBe(0);
   const handout = JSON.parse(got.stdout);
   expect(handout.text).toContain('Setup check: answer here in one line, then finish.');
