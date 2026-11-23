@@ -272,7 +272,7 @@ func (r *externalRunner) expectLook(code int, since time.Time) error {
 	for {
 		select {
 		case result := <-r.looks:
-			if result.expect(3) == nil && (code == 0 || result.started.Before(since)) {
+			if result.earlierEmptyLook(code, since) {
 				continue
 			}
 			return result.expect(code)
@@ -280,6 +280,10 @@ func (r *externalRunner) expectLook(code int, since time.Time) error {
 			return r.ctx.Err()
 		}
 	}
+}
+
+func (result externalScheduledLook) earlierEmptyLook(code int, since time.Time) bool {
+	return result.expect(3) == nil && (code == 0 || result.started.Before(since))
 }
 
 func (r *externalRunner) finish(answer string) error {
