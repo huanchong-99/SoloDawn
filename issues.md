@@ -728,6 +728,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-23 · bug · FLAKY-30: the kill of a PTY that outlives its stop timeout was covered only by timing on Windows
+
+- Symptom: the Windows CI step "Uncovered Windows product statements" sometimes reported `internal/host/pty.go:194.23,194.41`, the `killTree` closure of `ptyActivate`.
+- Cause: the closure runs only when the process is still running once `ptyStopTimeout` has passed after the handle closes (`internal/host/pty.go:336-337`). The only test that reached it, `TestPTYCloseTimeoutAndReentrancy` (`internal/host/pty_test.go:819`), starts a helper that ignores `SIGHUP` and sets the timeout to 30 ms (`:821`). On Unix the helper outlives the close every time. On Windows, closing the pseudo console (`internal/host/pty_windows.go:48`) ends its client processes, so when the helper ended within 30 ms the kill was skipped.
+- Status: resolved on `devin/host-teardown-race`: `TestPTYActivateKillsAProcessThatOutlivesTheStopTimeout` (`internal/host/pty_test.go:796`) activates a running helper with a handle whose close leaves it running, so the stop timeout passes and the tree is killed on every OS.
+
 ### 2026-11-23 · bug · FLAKY-28: a takeover test read the last process before the fake driver stored it
 
 - Symptom: `TestTakeoverHandBackAfterACommitPostsTheFacts` panicked on Windows CI with index -1 in `fakeDriver.lastProc` (`internal/host/run_test.go:85`).
