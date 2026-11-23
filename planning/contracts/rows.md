@@ -62,13 +62,13 @@ AI:
 | Field | Values |
 | --- | --- |
 | `role` | `owner`, `admin`, `member` (people) |
-| `cli` | `claude`, `codex`; more in step 3 |
+| `cli` | `claude`, `codex`; more in step 3, among them `external`: an agent the node does not start, whose row may also have `tool` (`contracts/step-3/external.md` section 1) |
 | `account` | `personal`, `team`, `api_key` (R-50) |
 | `allow` | user ids that may direct this AI without confirmation (step 2, R-53) |
 | `approvers` | user ids that may decide its approvals: the owner, plus delegates |
 | `state` | `working`, `waiting`, `dormant`, `takeover`, `paused`, `limited`, `offline` |
 | `path` | path between the AI's host and the home: `local` (same node), `direct`, `relay`, or `""` before a pair is selected (`flows/connect.md` step 8) |
-| `usage` | what the CLI reports. Always an object; `{}` when nothing was reported |
+| `usage` | what the CLI reports; for an external AI, what the agent itself reported. Always an object; `{}` when nothing was reported |
 
 Optional, AI only: `task` (absent when its state names no task); every key
 of `usage`: `window_pct`, `window_resets`, `day_cap_pct`, `spend_today`,

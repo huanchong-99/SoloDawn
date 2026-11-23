@@ -21,6 +21,7 @@ Markers: `[verified]` observed in the driver experiments or in a spike;
 | `solodawn status` | prints version, device fingerprint, connections and their paths, open sessions |
 | `solodawn service install`, `service remove` | registers or removes start-at-login for the current user (launchd agent, systemd user unit, Windows scheduled task) |
 | `solodawn mcp --token <t>` | the MCP shim; started by a CLI, not by people |
+| `solodawn mcp --member <id>`, `solodawn wait --member <id> [--timeout <s>]`, `solodawn done --member <id> --run <n> [--failed <text>]` | step 3, for an external AI and its runner: the shim under a member id, taking an item, ending a run (`contracts/step-3/external.md` sections 3 and 5) |
 | `solodawn version` | prints the version |
 
 `version` prints the version of its own binary, and `service install` and
@@ -100,6 +101,10 @@ command, like an error.
 A session token is 16 random bytes created when the node starts a CLI
 process and forgotten when that process exits. A connection whose session
 token is unknown or forgotten is closed at once.
+
+From step 3 the node also takes, in `mcp`, the member id of an external AI
+it hosts, and the commands `wait` and `done`
+(`contracts/step-3/external.md` sections 3 and 5).
 
 ## 4 to 6. Moved
 

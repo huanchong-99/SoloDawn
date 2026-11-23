@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-23 · deviation · An agent without a driver cannot join a group
+
+- Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
+- Cause: only the second tier was planned and built. The MCP shim takes only the session token that the node creates when it starts a CLI itself ([local.md](planning/contracts/local.md), section 3), `host.join` takes only an agent with a driver (`agtValidAgent`, `internal/host/agents.go:258`), and nothing lets an agent take an inbox item.
+- Status: open, found 2026-11-23 and planned in this change as the external AI (R-166, [external.md](planning/contracts/step-3/external.md)); units P-7, T3-12 to T3-15, U3-6 and I3-3 of the [parallel plan](planning/steps/parallel-plan-step-2-3.md), section 4.2. By the owner's refinement of 2026-11-23 the agent writes its own runner around `solodawn wait`, and no driver is built for a further CLI. Nothing of it is built yet.
+
 ### 2026-11-23 · limitation · A required escalation can outlast its last stronger candidate
 
 - Symptom: if the owner lowers the last stronger AI's tier while `stuck.ask` is true, the turn and the host submission refusal say no candidate is currently listed.

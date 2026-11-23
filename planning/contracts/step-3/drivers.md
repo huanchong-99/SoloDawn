@@ -17,6 +17,13 @@ shapes and passes a model at each start.
 Markers: `[verified]`, `[documented]`, `[unverified]` as in
 `contracts/drivers.md`.
 
+**No further driver is built** (owner, 2026-11-23; R-166). The four of
+section 8 stay, because a driver adds what only a node that starts the CLI
+can do: takeover, approval routing, levels, usage read from events. Every
+other agent joins as an external AI, through MCP and its own runner
+(`contracts/step-3/external.md`). Sections 1 to 3 say how the four were
+chosen and what each of them has.
+
 ## 1. When a driver is built
 
 - Drivers are built one at a time, and only for a CLI that passed both
@@ -209,7 +216,8 @@ is in that description. `[documented]` means read there and not run.
 | Amp | deferred | | | | none for an outside program, so it cannot meet R-43 | |
 
 - Units: T3-2 builds the OpenCode driver and T3-3 the Qwen Code driver, one
-  at a time. T3-4 (Amp) is not scheduled.
+  at a time. T3-4 (Amp) is not scheduled: Amp, like any agent without a
+  driver, joins as an external AI (`contracts/step-3/external.md`).
 - For both, `accounts` is `["api_key"]`: their other account types did not
   pass T3-0's terms check. `takeover` is `none` until a capture shows the
   same-id handoff. Every other value is declared from that unit's captures
