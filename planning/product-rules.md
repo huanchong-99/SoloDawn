@@ -225,6 +225,18 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   again; with no stronger AI in the group nothing changes. Contracts:
   `contracts/step-3/profiles.md`, `contracts/step-3/drivers.md` section
   10.
+- **R-166** `[S3]` Any agent that speaks MCP joins a group as an external
+  AI, without a driver (owner, 2026-11-19 and 2026-11-23). The owner adds
+  it in the browser and pastes one setup prompt into the agent. The agent
+  adds the node's MCP server to its own configuration and writes its own
+  runner, which waits for items with a command of the node and starts the
+  agent once per item. Waiting never keeps an AI session running. The node
+  names the folder to work in; it neither starts, stops nor sandboxes the
+  agent, and the agent reports its own quota. Terminal takeover,
+  permission levels, approval routing by the CLI's own channel, usage read
+  from events and the owner's choice of model belong to the four CLIs
+  that have a driver; no driver is built for a further CLI. Contract:
+  `contracts/step-3/external.md`.
 
 ## Sessions
 

@@ -104,6 +104,10 @@ On `add_ai` and on `set` with `approvers`, the home adds the owner's user id
 to `approvers` when it is missing (`contracts/rows.md` section 2); the owner
 is the person whose host signed `add_ai`. Adding people is step 2.
 
+Step 3 adds the member's profile to `add_ai` and `set`
+(`contracts/step-3/profiles.md` section 2), and `tool` for an external AI
+(`contracts/step-3/external.md` section 2).
+
 ### 1.3 `post`
 
 Fields: `kind`, `text`, `thread`, `main`, `mentions`, `re`, `body`, `as`.
@@ -312,6 +316,10 @@ of the AI in group `g`, as in the label `pty:<g>:<member>`
 (`contracts/datachannel.md` section 1); `task`, when there, is a task id.
 
 Except where a Result is named, effects are observed through `host.info`.
+
+Step 3: `host.join` with `agent` `external` adds an agent that the node
+does not start; it carries `account` and may carry `tool`, and needs no
+`agent.set` (`contracts/step-3/external.md` section 2).
 
 ## 3. Inbox items
 

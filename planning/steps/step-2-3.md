@@ -67,9 +67,26 @@ Several people in one group, each with their own computers and AIs.
 Three items decided by the owner, and one conditional item added by the
 coordinator (3.4).
 
-### 3.1 More CLIs, one at a time
+### 3.1 More CLIs: four drivers, then one interface
 
-For each candidate, in this order:
+By the owner's decision of 2026-11-23 no driver is written for a further
+CLI (R-166):
+
+- **The four drivers stay**: Claude Code and Codex from step 1, OpenCode
+  and Qwen Code from units T3-2 and T3-3. A driver adds what only a node
+  that starts the CLI itself can do: terminal takeover, approval routing,
+  levels, and usage read from the CLI's events.
+- **Every other agent joins as an external AI**: ZCode, an agent harness,
+  a self-built agent, any program that speaks MCP and can run a command.
+  The node opens one interface and the agent adapts itself: given the
+  setup prompt, it adds the node's MCP server and writes its own runner,
+  which waits with `solodawn wait` and starts the agent once per item.
+  Waiting never keeps an AI session running. Contract:
+  `contracts/step-3/external.md`; units: lane EXTERNAL of
+  `steps/parallel-plan-step-2-3.md` section 4.2.
+
+How the four were chosen, kept as the record. For each candidate, in this
+order:
 
 1. **Terms.** Is starting the vendor's official program under the user's
    own sign-in, from another program, allowed for that account type? If the
@@ -85,7 +102,7 @@ For each candidate, in this order:
 
 A CLI that lacks one capability is offered with that feature switched off
 (for example no takeover) only if the product still makes sense without it;
-otherwise it waits.
+otherwise it joins as an external AI.
 
 `[unverified]` From earlier desk research, candidates that appear to have
 headless mode, resume and MCP: Qwen Code, OpenCode, Amp. Others had gaps.

@@ -157,6 +157,7 @@ Change: <files and sections edited, or the reason for rejecting>
 | `contracts/step-3/drivers.md` | step 3: what a driver for a further CLI must have, its capability table (refines `steps/step-2-3.md` 3.1) |
 | `contracts/step-3/knowledge.md` | step 3: style presets and the knowledge base (D-17, D-18) |
 | `contracts/step-3/profiles.md` | step 3: AI profiles, what the secretary is shown, escalation to a stronger AI (R-165) |
+| `contracts/step-3/external.md` | step 3: external AIs, agents that join through MCP and their own runner, without a driver (R-166) |
 | `steps/step-1.md` | step 1 scope, spikes, order of the milestones |
 | `steps/step-1-acceptance.md` | step 1 milestones M1 to M8 and their acceptance tests |
 | `steps/step-1-backend.md` | step 1 backend task list |
