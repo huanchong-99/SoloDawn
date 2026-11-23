@@ -147,6 +147,11 @@ the type does not name, not with `Decode`.
 - `host.info` is answered with `HostInfo` and pushed as `HostInfoPush`, the same
   `HostState` without `re` and `ok`. `relay` and an agent's `account` may be `null`;
   each agent entry carries `Driver` (`Accounts`, `Takeover`) (`step-3/drivers.md` section 6).
+- External AIs add the optional `tool` to AI member rows, `member add_ai`,
+  `member set` and `host.join`, which also takes `account` for an external AI.
+  Both `host.info` frames carry `exe` and an `external` agent entry. The
+  `external` MCP tool list adds `next_item`, `done` and `report_usage`.
+  `Handout` is the result of `wait` or a successful `next_item` that found work.
 - People and confirmations (`step-2/people.md`, `step-2/confirm.md`) add `Invite`
   (`HomeCommand`, answered with `link` and `expires` in `CmdResult`), `Join`, `Role` on
   `MemberSet`, `MemberJoinedBody` and `MemberRemovedBody`, `HomeAdd` (`home.add`,

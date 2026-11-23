@@ -119,14 +119,24 @@ func toolLists() ToolLists {
 		"items": list(map[string]ToolArg{"text": text(), "file": text(), "line": integer(1), "veto": boolean(false)}, "text"),
 	}, "score", "items")
 	level1 := slices.Concat(everyAI(task, false), []Tool{requestDecision(task), netStatus})
+	work := []Tool{
+		tool("push_branch", nil), tool("run_checks", nil), tool("submit_task", map[string]ToolArg{"summary": text()}, "summary"),
+	}
+	external := session{posts: group.posts}
 	return ToolLists{
-		Secretary:  ToolList{slices.Concat(everyAI(secretary, true), []Tool{requestDecision(secretary), netStatus, brief, setTask})},
-		Group:      ToolList{slices.Concat(everyAI(group, false), []Tool{startTask, requestDecision(group), netStatus})},
-		Review:     ToolList{slices.Concat(everyAI(task, false), []Tool{review, requestDecision(task), netStatus})},
-		TaskLevel1: ToolList{level1},
-		TaskLevel23: ToolList{slices.Concat(everyAI(task, false), []Tool{
-			tool("push_branch", nil), tool("run_checks", nil), tool("submit_task", map[string]ToolArg{"summary": text()}, "summary"),
-			requestDecision(task), netStatus,
+		Secretary:   ToolList{slices.Concat(everyAI(secretary, true), []Tool{requestDecision(secretary), netStatus, brief, setTask})},
+		Group:       ToolList{slices.Concat(everyAI(group, false), []Tool{startTask, requestDecision(group), netStatus})},
+		Review:      ToolList{slices.Concat(everyAI(task, false), []Tool{review, requestDecision(task), netStatus})},
+		TaskLevel1:  ToolList{level1},
+		TaskLevel23: ToolList{slices.Concat(everyAI(task, false), work, []Tool{requestDecision(task), netStatus})},
+		External: ToolList{slices.Concat(everyAI(external, false), work, []Tool{
+			startTask, review, requestDecision(external), netStatus,
+			tool("next_item", nil),
+			tool("done", map[string]ToolArg{"run": {Type: "integer"}}, "run"),
+			tool("report_usage", map[string]ToolArg{
+				"window_pct":    {Type: "number", Minimum: new(0), Maximum: new(100)},
+				"window_resets": {Type: "integer"},
+			}, "window_pct"),
 		})},
 	}
 }
@@ -194,6 +204,7 @@ func TestToolListsFollowTheSessionKinds(t *testing.T) {
 		"review":         {lists.Review, []string{"submit_review"}},
 		"task_level_1":   {lists.TaskLevel1, nil},
 		"task_level_2_3": {lists.TaskLevel23, []string{"push_branch", "run_checks", "submit_task"}},
+		"external":       {lists.External, []string{"start_task", "submit_review", "push_branch", "run_checks", "submit_task", "next_item", "done", "report_usage"}},
 	} {
 		got, want := names(c.list), slices.Concat(everyone, c.also)
 		slices.Sort(got)

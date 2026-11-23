@@ -74,6 +74,7 @@ type HumanMemberRow struct {
 type AIMemberRow struct {
 	MemberRow
 	CLI       string   `json:"cli"`
+	Tool      string   `json:"tool,omitempty"`
 	Host      string   `json:"host"`
 	HostName  string   `json:"host_name"`
 	Secretary bool     `json:"secretary"`

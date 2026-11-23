@@ -4,6 +4,7 @@
   "name": "workstation",
   "os": "macOS 15.2",
   "version": "v0.3.1",
+  "exe": "/usr/local/bin/solodawn",
   "open": 0,
   "max_open": 4,
   "offline": true,
@@ -91,6 +92,32 @@
         "takeover": "resume"
       },
       "groups": [],
+      "models": []
+    },
+    {
+      "agent": "external",
+      "cli_version": "",
+      "account": null,
+      "login_ok": true,
+      "caps": {},
+      "driver": {
+        "accounts": [
+          "personal",
+          "team",
+          "api_key"
+        ],
+        "takeover": "none"
+      },
+      "groups": [
+        {
+          "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+          "member": "NgjkvQ5pMXc2nhf0jN91Dg",
+          "level": 3,
+          "state": "offline",
+          "queued": 0,
+          "watchers": []
+        }
+      ],
       "models": []
     }
   ],

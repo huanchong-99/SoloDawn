@@ -5,11 +5,11 @@ import (
 	"testing"
 )
 
-// hostState is a node with two CLIs: Claude Code, declared and working on a
-// task in the examples' group, and Codex, found but not declared yet.
+// hostState lists Claude Code, Codex and the external tier.
 func hostState() HostState {
 	return HostState{
 		Device: host, Name: "workstation", OS: "macOS 15.2", Version: "v0.3.1", Open: 2, MaxOpen: 4,
+		Exe:   "/usr/local/bin/solodawn",
 		Homes: []Home{{ID(group), host, "Website"}},
 		Relay: &RelayUse{3250000, 52428800},
 		Agents: []HostAgent{
@@ -20,6 +20,10 @@ func hostState() HostState {
 			{"codex", "0.164.0", nil, false, Caps{},
 				Driver{[]string{"personal", "team", "api_key"}, "resume"},
 				[]AgentGroup{}, []Model{}},
+			{"external", "", nil, true, Caps{},
+				Driver{[]string{"personal", "team", "api_key"}, "none"},
+				[]AgentGroup{{ID(group), ID(id("scout")), 3, "waiting", "", 0, []string{}}},
+				[]Model{}},
 		},
 		Settings: HostSettings{90, 15, 2, false, []string{}},
 	}
@@ -37,6 +41,7 @@ func TestHostSurfaceGoldens(t *testing.T) {
 	state.Update = &Update{"v0.3.2", "pending"}
 	state.Relay = nil
 	state.Agents[0].Groups[0].State, state.Agents[0].Groups[0].Queued = "offline", 3
+	state.Agents[2].Groups[0].State = "offline"
 	state.Settings.Approvers = []string{user}
 	state.Agents[0].Groups[0].Watchers = []string{}
 	golden(t, "host-info-push", HostInfoPush{"host.info", state})
@@ -97,8 +102,8 @@ func TestSettingsSetTellsAZeroFromNothing(t *testing.T) {
 // no quota answer the relay null; anything else there is a value.
 func TestHostInfoNullsAreTheContractsNulls(t *testing.T) {
 	for name, allowed := range map[string][]string{
-		"host-info-answer": {"/agents/1/account", "/update"},
-		"host-info-push":   {"/agents/1/account", "/relay"},
+		"host-info-answer": {"/agents/1/account", "/agents/2/account", "/update"},
+		"host-info-push":   {"/agents/1/account", "/agents/2/account", "/relay"},
 	} {
 		if nulls := UnexpectedNulls(example(t, name), allowed...); len(nulls) != 0 {
 			t.Errorf("%s has null at %q", name, nulls)

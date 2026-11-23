@@ -1550,5 +1550,407 @@
         }
       }
     ]
+  },
+  "external": {
+    "tools": [
+      {
+        "name": "post",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "text",
+                "progress",
+                "question"
+              ],
+              "default": "text"
+            },
+            "mentions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "text": {
+              "type": "string"
+            },
+            "where": {
+              "type": "string",
+              "enum": [
+                "thread",
+                "main"
+              ]
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "ask",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "to": {
+              "type": "string"
+            },
+            "wait": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "to",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "reply",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "call": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "call",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "read_thread",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "before": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "limit": {
+              "type": "integer",
+              "default": 30,
+              "minimum": 1,
+              "maximum": 100
+            },
+            "task": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "list_members",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "list_tasks",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "queued",
+                "active",
+                "paused",
+                "failed",
+                "merged",
+                "cancelled"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "note_put",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "note_list",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "preset"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "kb_put",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "kb_search",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "default": 3,
+              "minimum": 1,
+              "maximum": 20
+            },
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "push_branch",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "run_checks",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "submit_task",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "summary"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "start_task",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "plan": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "plan"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "submit_review",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string"
+                  },
+                  "line": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "veto": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                },
+                "required": [
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "score": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "score",
+            "items"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "request_decision",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "context": {
+              "type": "string"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "effect": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label",
+                  "effect"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "question": {
+              "type": "string"
+            },
+            "recommended": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "to": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "question",
+            "options"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "net_status",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "next_item",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "done",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "report_usage",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "window_pct": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "window_resets": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "window_pct"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ]
   }
 }

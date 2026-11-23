@@ -57,6 +57,7 @@ type MemberCommand struct {
 type MemberAddAI struct {
 	MemberCommand
 	CLI       string   `json:"cli"`
+	Tool      *string  `json:"tool,omitempty"`
 	Name      string   `json:"name"`
 	Account   string   `json:"account"`
 	Secretary bool     `json:"secretary"`
@@ -81,6 +82,7 @@ type MemberSet struct {
 	MemberCommand
 	Name      *string   `json:"name,omitempty"`
 	Account   *string   `json:"account,omitempty"`
+	Tool      *string   `json:"tool,omitempty"`
 	Allow     *[]string `json:"allow,omitempty"`
 	Approvers *[]string `json:"approvers,omitempty"`
 	Role      *string   `json:"role,omitempty"`
@@ -311,11 +313,13 @@ type HostCommand struct {
 
 type HostJoin struct {
 	HostCommand
-	Group     ID     `json:"g"`
-	Home      string `json:"home"`
-	Agent     string `json:"agent"`
-	Name      string `json:"name"`
-	Secretary bool   `json:"secretary"`
+	Group     ID      `json:"g"`
+	Home      string  `json:"home"`
+	Agent     string  `json:"agent"`
+	Name      string  `json:"name"`
+	Secretary bool    `json:"secretary"`
+	Account   string  `json:"account,omitempty"`
+	Tool      *string `json:"tool,omitempty"`
 	ProfileSet
 }
 

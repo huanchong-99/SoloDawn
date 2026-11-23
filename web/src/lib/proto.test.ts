@@ -671,6 +671,7 @@ describe('host surface', () => {
         { model: 'haiku', name: 'Haiku', efforts: [], tier: 'light' },
       ],
       [],
+      [],
     ]);
   });
 
@@ -682,7 +683,7 @@ describe('host surface', () => {
 
   it.each(hostCommands)('%s is named by its t, and is for one node', (name) => {
     const command = JSON.parse(goldens[name]);
-    expect(name).toBe(command.t.replace('.', '-'));
+    expect(name.replace(/-external$/, '')).toBe(command.t.replace('.', '-'));
     expect(command.to).toBe(p.decode(p.Welcome, goldens.welcome).device);
     expect(accepts(name, { ...command, t: 'host.unknown' })).toBe(false);
   });
@@ -690,13 +691,14 @@ describe('host surface', () => {
   it('holds the agent of host.info as settings.set and agent.set name it', () => {
     const info = p.decode(p.HostInfo, goldens['host-info-answer']);
     const set = p.decode(p.SettingsSet, goldens['settings-set']);
-    expect(info.agents.map((agent) => agent.agent)).toEqual(Object.keys(set.caps!));
-    expect(info.agents.map((agent) => agent.account)).toEqual(['personal', null]);
+    const managed = info.agents.filter((agent) => agent.agent !== 'external');
+    expect(managed.map((agent) => agent.agent)).toEqual(Object.keys(set.caps!));
+    expect(managed.map((agent) => agent.account)).toEqual(['personal', null]);
     expect(p.decode(p.AgentSet, goldens['agent-set'])).toMatchObject({ agent: 'codex' });
     expect(info.homes).toEqual([
       { g: info.agents[0].groups[0].g, home: info.device, name: 'Website' },
     ]);
-    expect(info.agents.map((agent) => agent.driver)).toEqual([
+    expect(managed.map((agent) => agent.driver)).toEqual([
       {
         accounts: ['personal', 'team', 'api_key'],
         takeover: 'new',
@@ -706,6 +708,29 @@ describe('host surface', () => {
         takeover: 'resume',
       },
     ]);
+  });
+
+  it('matches the external host agent to its join command and member row', () => {
+    const info = p.decode(p.HostInfo, goldens['host-info-answer']);
+    const join = p.decode(p.HostJoin, goldens['host-join-external']);
+    const add = p.decode(p.MemberAddAI, goldens['member-add_ai-external']);
+    const row = p.decode(p.AIMemberRow, goldens['row-member-ai-external']);
+    const set = p.decode(p.MemberSet, goldens['member-set-tool']);
+    const external = info.agents.find((agent) => agent.agent === row.cli);
+    expect(info.exe).toBe('/usr/local/bin/solodawn');
+    expect(join).toMatchObject({ agent: row.cli, account: row.account, tool: row.tool });
+    expect(add).toMatchObject({ id: row.id, cli: row.cli, account: row.account, tool: row.tool });
+    expect(set).toMatchObject({ id: row.id, tool: '' });
+    expect(external).toStrictEqual({
+      agent: 'external',
+      cli_version: '',
+      account: null,
+      login_ok: true,
+      caps: {},
+      driver: { accounts: ['personal', 'team', 'api_key'], takeover: 'none' },
+      groups: [{ g: row.g, member: row.id, level: 3, state: row.state, queued: 0, watchers: [] }],
+      models: [],
+    });
   });
 
   it('reads the step-2 invite link and the act a decided confirm card carries', () => {
@@ -797,7 +822,7 @@ describe('MCP tool lists', () => {
     expect(lists).toStrictEqual(JSON.parse(goldens.tools));
     expect(Object.keys(lists.secretary.tools[0].inputSchema.properties)[0]).toBe('group');
     expect(lists.secretary.tools[0].inputSchema.properties.group).toEqual({ type: 'string' });
-    for (const kind of ['group', 'review', 'task_level_1', 'task_level_2_3'] as const) {
+    for (const kind of ['group', 'review', 'task_level_1', 'task_level_2_3', 'external'] as const) {
       expect(lists[kind].tools[0].inputSchema.properties).not.toHaveProperty('group');
     }
     const described = JSON.parse(goldens.tools);
@@ -814,6 +839,45 @@ describe('MCP tool lists', () => {
     expect(names('secretary')).toEqual(expect.arrayContaining(['propose_brief', 'set_task']));
     expect(names('task_level_1')).not.toContain('submit_task');
     expect(names('task_level_2_3')).toContain('submit_task');
+  });
+
+  it('lists the external tools with task and decision recipients optional', () => {
+    const tools = Object.fromEntries(
+      lists.external.tools.map((tool) => [tool.name, tool.inputSchema]),
+    );
+    expect(names('external')).toEqual([
+      'post',
+      'ask',
+      'reply',
+      'read_thread',
+      'list_members',
+      'list_tasks',
+      'note_put',
+      'note_list',
+      'kb_put',
+      'kb_search',
+      'push_branch',
+      'run_checks',
+      'submit_task',
+      'start_task',
+      'submit_review',
+      'request_decision',
+      'net_status',
+      'next_item',
+      'done',
+      'report_usage',
+    ]);
+    expect(tools.post.properties.kind.enum).toEqual(['text', 'progress', 'question']);
+    expect(tools.read_thread.required).toBeUndefined();
+    expect(tools.request_decision.required).toEqual(['question', 'options']);
+    expect(tools.next_item.properties).toEqual({});
+    expect(tools.done.properties).toEqual({ run: { type: 'integer' } });
+    expect(tools.done.required).toEqual(['run']);
+    expect(tools.report_usage.properties).toEqual({
+      window_pct: { type: 'number', minimum: 0, maximum: 100 },
+      window_resets: { type: 'integer' },
+    });
+    expect(tools.report_usage.required).toEqual(['window_pct']);
   });
 });
 
@@ -840,6 +904,15 @@ describe('mock connection', () => {
     await ctl.request({ t: 'host.info' });
     const info = await ctl.request({ t: 'host.info' });
     expect(info).toStrictEqual({ ...JSON.parse(goldens['host-info-answer']), re: 2 });
+  });
+
+  it('answers an external host.join command with success', async () => {
+    const ctl = mockCtl(() => {});
+    const answer = await ctl.request({
+      t: 'cmd',
+      env: { p: goldens['host-join-external'], k: 'k', s: 's' },
+    });
+    expect(answer).toStrictEqual({ re: 1, ok: true });
   });
 
   it('pushes groups before group create and join, and answers typed commands with their examples', async () => {

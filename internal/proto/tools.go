@@ -18,6 +18,7 @@ type ToolLists struct {
 	// 2 or 3.
 	TaskLevel1  ToolList `json:"task_level_1"`
 	TaskLevel23 ToolList `json:"task_level_2_3"`
+	External    ToolList `json:"external"`
 }
 
 // ToolList is the result of tools/list, in the order of the tables of
