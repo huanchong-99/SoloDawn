@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { newDraft } from '../components/profile/profile';
 import { Group, Home } from './groups.svelte';
 import {
   addDisabledReason,
@@ -876,10 +877,11 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
       inGroup: false,
     };
 
-    expect(await joinGroup(undefined, group, candidate, 'Codex', false)).toBe('lost');
-    expect(await joinGroup(makeHome({ online: false }), group, candidate, 'Codex', false)).toBe(
-      'lost',
-    );
+    const draft = { model: 'o3', effort: 'high', tier: 'strong', skills: 'Protocol design' };
+    expect(await joinGroup(undefined, group, candidate, 'Codex', false, draft)).toBe('lost');
+    expect(
+      await joinGroup(makeHome({ online: false }), group, candidate, 'Codex', false, draft),
+    ).toBe('lost');
 
     const sent: unknown[] = [];
     const target = makeHome();
@@ -889,7 +891,7 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
       return { re: 1, ok: true };
     });
 
-    expect(await joinGroup(target, group, candidate, 'Lead', true)).toBe('');
+    expect(await joinGroup(target, group, candidate, 'Lead', true, draft)).toBe('');
     expect(sent).toHaveLength(1);
     const frame = sent[0] as { t: string; env: p.Envelope };
     expect(frame.t).toBe('cmd');
@@ -904,18 +906,41 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
       agent: 'codex',
       name: 'Lead',
       secretary: true,
+      model: 'o3',
+      effort: 'high',
+      tier: 'strong',
+      skills: 'Protocol design',
+    });
+
+    expect(await joinGroup(target, group, candidate, 'Default', false, newDraft())).toBe('');
+    expect(JSON.parse((sent[1] as { env: p.Envelope }).env.p)).toEqual({
+      t: 'host.join',
+      n: expect.stringMatching(/^[A-Za-z0-9_-]{21}[AQgw]$/),
+      ts: 1763600000123,
+      to: 'dev-2',
+      g: gid,
+      home: homeDev,
+      agent: 'codex',
+      name: 'Default',
+      secretary: false,
+      model: '',
+      effort: '',
+      tier: 'standard',
+      skills: '',
     });
 
     target.ctl = makeOnlineCtl(async () => ({
       re: 2,
       err: { code: 'home_unreachable', msg: 'timeout' },
     }));
-    expect(await joinGroup(target, group, candidate, 'Lead', false)).toBe('home_unreachable');
+    expect(await joinGroup(target, group, candidate, 'Lead', false, draft)).toBe(
+      'home_unreachable',
+    );
 
     target.ctl = makeOnlineCtl(async () => {
       throw new Error('closed');
     });
-    expect(await joinGroup(target, group, candidate, 'Lead', false)).toBe('lost');
+    expect(await joinGroup(target, group, candidate, 'Lead', false, draft)).toBe('lost');
     vi.restoreAllMocks();
   });
 });

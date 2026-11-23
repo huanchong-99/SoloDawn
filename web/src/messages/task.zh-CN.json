@@ -1,6 +1,7 @@
 {
   "task.badge.queued": "排队中",
   "task.badge.active": "进行中",
+  "task.badge.stuck": "须先请教更强的 AI",
   "task.badge.rejected": "打回 · 第 {n} 轮",
   "task.badge.reviewer": "等派评审",
   "task.badge.conflict": "合并冲突",

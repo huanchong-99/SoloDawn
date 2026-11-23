@@ -242,7 +242,9 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       const addDlg = page.locator('dialog.dlg[open]');
       await poll(() => addDlg.locator('.choice').count()).toBe(2);
       await addDlg.locator('.choice', { hasText: 'Claude Code · studio' }).locator('input').check();
-      await poll(() => addDlg.locator('input.input').inputValue()).toBe('Claude Code');
+      await poll(() =>
+        addDlg.getByRole('textbox', { name: 'Name in the group' }).inputValue(),
+      ).toBe('Claude Code');
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
       await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(1);
@@ -253,7 +255,9 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
         addDlg.locator('.choice', { hasText: 'Claude Code · studio' }).textContent(),
       ).toContain('Already in this group');
       await addDlg.locator('.choice', { hasText: 'Codex · studio' }).locator('input').check();
-      await poll(() => addDlg.locator('input.input').inputValue()).toBe('Codex');
+      await poll(() =>
+        addDlg.getByRole('textbox', { name: 'Name in the group' }).inputValue(),
+      ).toBe('Codex');
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
       await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(2);

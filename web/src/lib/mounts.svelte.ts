@@ -4,9 +4,10 @@
 // such file by its name, and `gather` here puts them in order. `Mount.svelte` draws a point.
 import type { Component } from 'svelte';
 import type { Group } from './groups.svelte';
+import type { Candidate, Draft } from './members';
 import { files } from './mounts.glob';
 import type { Net } from './net.svelte';
-import type { MsgRow } from './proto';
+import type { AIMemberRow, MsgRow } from './proto';
 
 export type Kind = MsgRow['kind'];
 
@@ -36,6 +37,12 @@ export interface Points {
   /** Beside the main line of a chat from 1024 px; below that, a panel that slides over the chat
    *  when the person opens it with the button the chat's head then shows. */
   'chat.side': { group: Group; net: Net };
+  /** In the rows of each AI member card of the member panel, before the profile: `dt` and `dd`
+   *  pairs that show or edit more of the member. */
+  'member.ai': { group: Group; ai: AIMemberRow };
+  /** In the dialog for adding an AI, between the computers and the name: a part may set `model`,
+   *  `effort` and `tier` of the draft that `host.join` sends. */
+  'member.add': { group: Group; candidate: Candidate | undefined; draft: Draft };
 }
 export type Point = keyof Points;
 export const points = [
@@ -45,6 +52,8 @@ export const points = [
   'chat.head',
   'chat.top',
   'chat.side',
+  'member.ai',
+  'member.add',
 ] as const satisfies readonly Point[];
 
 /** One component at a point. The lower `order` comes first; the order of areas breaks a tie. A

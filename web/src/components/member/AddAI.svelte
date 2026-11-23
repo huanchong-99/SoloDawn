@@ -17,6 +17,9 @@
   import Failure from '../Failure.svelte';
   import Commands from '../forge/Commands.svelte';
   import SecretaryWarning from '../groupinfo/SecretaryWarning.svelte';
+  import Mount from '../Mount.svelte';
+  import ProfileFields from '../profile/ProfileFields.svelte';
+  import { newDraft, tooLong } from '../profile/profile';
 
   /** The dialog that adds a registered AI from one of the owner's computers to the group
    *  (contracts/commands.md section 2, `host.join`). */
@@ -36,6 +39,7 @@
   let secretary = $state(false);
   let busy = $state(false);
   let failed = $state('');
+  let draft = $state(newDraft());
 
   const candidates = $derived(candidatesOf(group, owned, nodes.infos));
   const selectable = $derived(selectableCandidates(candidates));
@@ -52,6 +56,7 @@
       customName = false;
       secretary = false;
       failed = '';
+      draft = newDraft();
       nodes.sync(homes, true);
     });
     if (!dialog.open) dialog.showModal();
@@ -91,7 +96,7 @@
     if (!trimmed) return;
     const target = owned.find((home) => home === chosen!.home);
     busy = true;
-    const code = await joinGroup(target, group, chosen, trimmed, secretary);
+    const code = await joinGroup(target, group, chosen, trimmed, secretary, draft);
     busy = false;
     if (code === 'lost' && !target?.ctl) chosen = selectable[0];
     if (code) failed = code;
@@ -152,6 +157,8 @@
       {/if}
     </fieldset>
 
+    <Mount at="member.add" props={{ group, candidate: chosen, draft }} />
+
     <label class="field">
       <span>{t('member.join.name')}</span>
       <input
@@ -163,6 +170,8 @@
         maxlength="40"
       />
     </label>
+
+    <ProfileFields bind:draft />
 
     {#if canSecretary}
       <div class="sec-opt">
@@ -202,7 +211,10 @@
       <button type="button" class="btn btn-ghost" onclick={() => dialog.close()}>
         {t('member.join.cancel')}
       </button>
-      <button class="btn btn-primary" disabled={busy || (!chosen && !selectable.length)}>
+      <button
+        class="btn btn-primary"
+        disabled={busy || (!chosen && !selectable.length) || tooLong(draft)}
+      >
         {t('member.join.submit')}
       </button>
     </footer>

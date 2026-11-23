@@ -1,6 +1,7 @@
 {
   "task.badge.queued": "Queued",
   "task.badge.active": "In progress",
+  "task.badge.stuck": "Must ask a stronger AI",
   "task.badge.rejected": "Sent back · round {n}",
   "task.badge.reviewer": "Waiting for a reviewer",
   "task.badge.conflict": "Merge conflict",
