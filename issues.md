@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-23 · bug · FLAKY-24 invitation test assumes the join reply precedes group pushes
+
+- Symptom: `TestInvitationJoinAndMemberSurface` intermittently fails with "proto: a field that is always present is missing" while decoding the second join reply.
+- Cause: `internal/node/admit_test.go:233` decoded the next frame as a command result. Admission adopts the staged device revocation (`internal/node/admit.go:119`), which fans out device events (`internal/node/devlog.go:355`) to group goroutines. The first group's revocation can announce `groups` (`internal/home/run_push.go:155`) before the second group's join reply is queued. Unsolicited pushes are not ordered against replies from another group.
+- Status: resolved in this change. The test accepts intervening `groups` frames and checks the join reply's request id and success.
+
 ### 2026-11-23 · limitation · Qwen Code model and level changes wait for a new session
 
 - Symptom: a changed model or level of a Qwen Code member applies only to its next new session; the serve protocol documents startupConfig only at creation.
