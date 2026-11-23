@@ -901,7 +901,7 @@ func waitHandBackTurn(t *testing.T, started <-chan *fakeProc) {
 		}
 	case <-timeout:
 	}
-	t.Fatal("hand-back turn did not start")
+	t.Fatal(timedOut(15*time.Second, "the hand-back turn to start", nil))
 }
 
 func TestHandBackOfAHeldAIStartsNoTurn(t *testing.T) {
