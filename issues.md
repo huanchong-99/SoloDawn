@@ -740,6 +740,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `startReplacementProcess` in `internal/host/run.go` sends the replacement status before setting the turn and writing it to the CLI. In `internal/host/forge_test.go`, the fake GitHub CLI inherited the race detector's exit delay for each invocation. In `internal/host/run_test.go`, the fake driver records a launch before it constructs and publishes the corresponding process.
 - Status: the tests wait for the replacement turn, merged command and hand-back process; the fake forge CLI disables its race-detector exit delay.
 
+### 2026-11-23 · bug · The terminal page stayed at "Direct connection required" after the path recovered
+
+- Symptom: a terminal page opened on a relayed path kept saying "Direct connection required" when the path became direct again, until the page was reopened.
+- Cause: `follow` in `web/src/lib/terminal.svelte.ts` (`:305`) starts a takeover only from `idle`, and two routes left the phase at `relay`: `Takeover.#relayed` (`:368`) set an idle takeover to `relay` when the browser's path was relayed, and `#refused` (`:364`) sets `relay` when the computer refuses `takeover.start` with `relay` while the browser's path still reads direct.
+- Status: resolved in U11. `#relayed` no longer moves an idle takeover to `relay`, and it returns a `relay` phase to `idle`, so the takeover starts once the path is direct again; the takeover bar already says "Direct connection required" for an idle takeover on a relayed path. The `web_terminal.feature` scenario "A relayed path that recovers to direct opens the terminal without reopening the page" and two `terminal.test.ts` cases cover both routes.
+
 ### 2026-11-23 · bug · A9.24 can stall before submitting the retry commit
 
 - Symptom: A9.24 times out at “both tasks merge after checks and cross-review and receive summaries.” In a stalled run, the retry commit gets its standalone `watch-push` but no submission push or `watch-checks` call, and the task stays at `active/local_check`.
