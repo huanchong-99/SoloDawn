@@ -491,7 +491,7 @@ func hevSeedStore(t *testing.T, db *store.Store) {
 	equal(t, err, nil)
 }
 
-func hevExpectAIState(t *testing.T, watcher *hevLoopClient, wantCount int, wantState, wantTask string, wantSince int64) {
+func hevExpectAIState(t *testing.T, watcher *hevLoopClient, wantCount int, wantState, wantTask string, wantSince int64) int64 {
 	t.Helper()
 	select {
 	case frame := <-watcher.ch:
@@ -504,8 +504,10 @@ func hevExpectAIState(t *testing.T, watcher *hevLoopClient, wantCount int, wantS
 		equal(t, got.State, wantState)
 		equal(t, got.Task, wantTask)
 		equal(t, got.Since, wantSince)
+		return got.Seq
 	case <-time.After(2 * time.Second):
 		t.Fatalf("timed out waiting for %s rows push", wantState)
+		return 0
 	}
 }
 
@@ -518,15 +520,14 @@ func hevSyncWatch(t *testing.T, loop *home.Loop, conn *home.Conn, watcher *hevLo
 	equal(t, <-watcher.ch, proto.Synced{Type: "synced", Success: proto.Success{Re: 1, OK: true}, Group: groupID, Seq: 6})
 }
 
-func hevSyncBarrier(t *testing.T, loop *home.Loop, conn *home.Conn, watcher *hevLoopClient, re int64) {
+func hevSyncBarrier(t *testing.T, loop *home.Loop, conn *home.Conn, watcher *hevLoopClient, re, seq int64) {
 	t.Helper()
-	seq := loop.Groups(conn)[0].Seq
 	loop.Sync(conn, proto.Sync{Request: proto.Request{Type: "sync", ID: re}, Group: groupID, Since: seq, StateOnly: true})
-	for {
-		if reply, ok := (<-watcher.ch).(proto.Synced); ok && reply.Re == re {
-			equal(t, reply, proto.Synced{Type: "synced", Success: proto.Success{Re: re, OK: true}, Group: groupID, Seq: seq})
-			return
-		}
+	select {
+	case reply := <-watcher.ch:
+		equal(t, reply, proto.Synced{Type: "synced", Success: proto.Success{Re: re, OK: true}, Group: groupID, Seq: seq})
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for sync reply %d", re)
 	}
 }
 
@@ -553,9 +554,10 @@ func TestHostEvOfflineThroughRunLoop(t *testing.T) {
 	watchConn := loop.Attach(browser.ID(), watcher)
 	hevSyncWatch(t, loop, watchConn, watcher)
 	var syncRe int64 = 1
+	var seq int64 = 6
 	syncLoop := func() {
 		syncRe++
-		hevSyncBarrier(t, loop, watchConn, watcher, syncRe)
+		hevSyncBarrier(t, loop, watchConn, watcher, syncRe, seq)
 	}
 
 	// Another host's taker stays attached throughout; browser and non-taker laptop detaches do nothing.
@@ -584,7 +586,7 @@ func TestHostEvOfflineThroughRunLoop(t *testing.T) {
 	// Setting hevWorker working again on nonTaker and re-detaching connTwo does not fire offline a second time.
 	current.Store(clock + 3000)
 	loop.Cmd(nonTaker, 1, laptop.Sign(hevPayload(40, hevWorker, "working", "direct", fmt.Sprintf(`,"task":%q`, hevTaskA))))
-	hevExpectAIState(t, watcher, 1, "working", hevTaskA, clock+3000)
+	seq = hevExpectAIState(t, watcher, 1, "working", hevTaskA, clock+3000)
 	loop.Detach(connTwo)
 	loop.Detach(nonTaker)
 	syncLoop()
