@@ -3,6 +3,8 @@ name: Mutation
 # The final mutation gate (`nightly` in .project-standard/gates.toml) run in parallel on GitHub's runners
 # instead of one machine overnight. It starts on a push to a branch named mutation-run/<n>: push the commit
 # to test there. A shard is one gremlins run over one package, or over a range of the files of a big one.
+# Shards took 2 to 85 minutes (host/run.go, one file whose mutants often time out, is the longest); with the
+# 20 or so runners GitHub gives at once, a full run is estimated at 2.5 hours.
 on:
   push:
     branches: ['mutation-run/**']
@@ -51,7 +53,8 @@ jobs:
           - { name: node-misc, pkg: internal/node, own: '^(ne|nodetest|proc)' }
           - { name: rendezvous-limits-room, pkg: internal/rendezvous, own: '^(l|q|r)' }
           - { name: rendezvous-server-tls, pkg: internal/rendezvous, own: '^(s|t)' }
-          - { name: peer-candidates-path, pkg: internal/peer, own: '^[cpr]' }
+          - { name: peer-ctl, pkg: internal/peer, own: '^ctl' }
+          - { name: peer-candidates-path, pkg: internal/peer, own: '^(ca|p|r)' }
           - { name: peer-signal-stream, pkg: internal/peer, own: '^[su]' }
           - { name: store, pkg: internal/store }
           - { name: identity, pkg: internal/identity }
