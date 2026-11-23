@@ -33,7 +33,11 @@ func (c *turnCtx) profileRoster() string {
 }
 
 func (c *turnCtx) profileMemberLine(ai proto.AIMemberRow) string {
-	line := fmt.Sprintf("- %q · %s on %s · %s · %s", ai.Name, ai.CLI, ai.HostName, profileTier(ai), ai.State)
+	cli := ai.CLI
+	if ai.Tool != "" {
+		cli += " (" + ai.Tool + ")"
+	}
+	line := fmt.Sprintf("- %q · %s on %s · %s · %s", ai.Name, cli, ai.HostName, profileTier(ai), ai.State)
 	if ai.Task != "" {
 		line += " on " + c.taskRef(ai.Task)
 	}
