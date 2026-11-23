@@ -47,7 +47,7 @@ func init() {
 }
 
 func approveForCaller(c Caller) bool {
-	return usesApproveTool(c.Agent) && !c.Interactive
+	return (usesApproveTool(c.Agent) || c.External) && !c.Interactive
 }
 
 // approvalState tracks open Asked listener goroutines per host via Part[approvalState](h).

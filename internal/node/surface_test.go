@@ -144,8 +144,8 @@ func assertSurfaceHeader(t *testing.T, st proto.HostState, savedHomes []proto.Ho
 	if st.Update == nil || st.Relay == nil {
 		t.Fatalf("missing Update/Relay: %+v", st)
 	}
-	got := [10]any{st.Name, st.OS, st.Version, st.Open, st.MaxOpen, st.Offline, st.Settings.DefaultLevel, st.Update.Version, st.Relay.Used, slices.Equal(st.Homes, savedHomes)}
-	want := [10]any{"custom-box", "macOS 15.2", "v0.3.1", 3, 6, true, 3, "v0.3.2", int64(10), true}
+	got := [11]any{st.Exe, st.Name, st.OS, st.Version, st.Open, st.MaxOpen, st.Offline, st.Settings.DefaultLevel, st.Update.Version, st.Relay.Used, slices.Equal(st.Homes, savedHomes)}
+	want := [11]any{"solodawn-exe", "custom-box", "macOS 15.2", "v0.3.1", 3, 6, true, 3, "v0.3.2", int64(10), true}
 	if got != want {
 		t.Fatalf("unexpected HostState header: %+v", st)
 	}
@@ -202,7 +202,7 @@ func TestHostInfoAgentsMemberStateAndSettings(t *testing.T) {
 	var hookErr error
 	acct := "personal"
 	sf := NewSurface(SurfaceConfig{
-		ID: nodeKey.ID(), OS: "macOS 15.2", Version: "v0.3.1",
+		ID: nodeKey.ID(), OS: "macOS 15.2", Version: "v0.3.1", Exe: "solodawn-exe",
 		Store: db, Sessions: s, Host: h,
 		Name: func() string { return "custom-box" },
 		Agents: func(context.Context, bool) ([]proto.HostAgent, error) {
