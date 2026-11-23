@@ -53,17 +53,57 @@ func init() {
 		os.Exit(m5RunMCPShim(os.Args[2], os.Args[3:]))
 	}
 	host.Register(host.Listeners, "m5_turns", m5OnHostEvent)
+	compose := host.Compose
+	host.Compose = func(h *host.Host, s host.Session, kind host.TurnKind, items []json.RawMessage) (string, host.Turn, error) {
+		text, turn, err := compose(h, s, kind, items)
+		if w := m5CurrentWorld.Load(); w != nil && err == nil {
+			w.recordComposedTurn(s, kind, items)
+		}
+		return text, turn, err
+	}
 	host.Register(host.Holds, "m5_hold", m5OnHostHold)
 	stepSets["m5"] = m5Steps
 }
 
-func m5OnHostEvent(_ *host.Host, _ host.SessionKey, e host.Event) {
+func m5OnHostEvent(_ *host.Host, key host.SessionKey, e host.Event) {
 	w := m5CurrentWorld.Load()
 	if w != nil && e.Kind == host.TurnBegan {
 		w.mu.Lock()
 		w.turns++
+		trace := w.composedTurns[key]
+		trace.Key = key
+		w.turnTrace = append(w.turnTrace, trace)
+		delete(w.composedTurns, key)
 		w.mu.Unlock()
 	}
+}
+
+type m5TurnTrace struct {
+	Vendor string
+	Key    host.SessionKey
+	Kind   host.TurnKind
+	Items  []m5ItemTrace
+}
+
+type m5ItemTrace struct {
+	ID   int64
+	Why  string
+	Task proto.ID
+	Msg  proto.ID
+}
+
+func (w *m5World) recordComposedTurn(s host.Session, kind host.TurnKind, items []json.RawMessage) {
+	trace := m5TurnTrace{Vendor: s.Agent, Key: s.SessionKey, Kind: kind}
+	for _, raw := range items {
+		var item proto.InboxItem
+		if proto.Decode(raw, &item) == nil {
+			i := item.Item
+			trace.Items = append(trace.Items, m5ItemTrace{ID: i.Item, Why: i.Why, Task: i.Task, Msg: i.Msg})
+		}
+	}
+	w.mu.Lock()
+	w.composedTurns[s.SessionKey] = trace
+	w.mu.Unlock()
 }
 
 func m5OnHostHold(h *host.Host, key host.SessionKey) (string, bool) {
@@ -593,6 +633,8 @@ type m5World struct {
 
 	mu                sync.Mutex
 	turns             int
+	composedTurns     map[host.SessionKey]m5TurnTrace
+	turnTrace         []m5TurnTrace
 	turnsAtReviewPass map[string]int
 	turnsAtMerged     map[string]int
 	sawTaskSess       map[int]host.SessionKey
@@ -621,6 +663,7 @@ type m5World struct {
 func newM5World(sc *godog.ScenarioContext, f fixtures) *m5World {
 	w := &m5World{
 		f:                 f,
+		composedTurns:     map[host.SessionKey]m5TurnTrace{},
 		turnsAtReviewPass: map[string]int{},
 		turnsAtMerged:     map[string]int{},
 		sawTaskSess:       map[int]host.SessionKey{},
@@ -1586,7 +1629,34 @@ func (w *m5World) stepConfirmAndRunTwoTasks(withPush bool) error {
 		return err
 	}
 	hasBoth := func() bool { return len(w.summaryCards()) == 2 }
-	return w.waitFor("two summary cards", hasBoth)
+	if err := w.waitFor("two summary cards", hasBoth); err != nil {
+		return w.twoTaskFailure(err)
+	}
+	return nil
+}
+
+func (w *m5World) twoTaskFailure(cause error) error {
+	var tasks, queued, deliveries string
+	var summaries int
+	n := w.cluster.Nodes[0]
+	err := n.Store.Write(func(tx *store.Tx) error {
+		return tx.QueryRow(`SELECT
+			(SELECT json_group_array(json_object('id',id,'num',data->>'num','state',data->>'state','step',data->>'step'))
+				FROM row WHERE g=? AND r='task' AND gone=0),
+			(SELECT json_group_array(json_object('id',id,'why',why,'task',task,'ai',ai,'not_before',not_before))
+				FROM inbox WHERE g=?),
+			(SELECT json_group_array(json_object('item',item,'what',what,'agent',agent,'detail',detail))
+				FROM (SELECT item,what,agent,detail FROM audit
+					WHERE g=? AND what IN ('delivered','refused') ORDER BY id DESC LIMIT 12)),
+			(SELECT count(*) FROM row WHERE g=? AND r='msg' AND gone=0 AND data->>'kind'='summary')`,
+			w.groupID, w.groupID, w.groupID, w.groupID).Scan(&tasks, &queued, &deliveries, &summaries)
+	})
+	log, logErr := os.ReadFile(w.cluster.LogPath)
+	w.mu.Lock()
+	turns := slices.Clone(w.turnTrace)
+	w.mu.Unlock()
+	return fmt.Errorf("%w; summaries browser=%d home=%d; home tasks=%s queued=%s; host item audit=%s; db=%v; hooks=%v; turns=%+v; fake CLI log err=%v:\n%s",
+		cause, len(w.summaryCards()), summaries, tasks, queued, deliveries, err, w.checkHookErr(), turns, logErr, log)
 }
 
 func (w *m5World) verifyPushedBranchHead(c host.Caller) error {
@@ -1765,7 +1835,7 @@ func (w *m5World) verifyTaskMergedOrder(taskID string) error {
 	atMerge, ok2 := w.turnsAtMerged[taskID]
 	w.mu.Unlock()
 	if !ok1 || !ok2 || atPass != atMerge {
-		return fmt.Errorf("task %s turns at review pass=%d (ok=%v), at merge=%d (ok=%v)", taskID, atPass, ok1, atMerge, ok2)
+		return w.twoTaskFailure(fmt.Errorf("task %s turns at review pass=%d (ok=%v), at merge=%d (ok=%v)", taskID, atPass, ok1, atMerge, ok2))
 	}
 	if !w.hasThreadTaskMergedMsg(taskID) {
 		return fmt.Errorf("task %s missing system task_merged message in thread", taskID)
