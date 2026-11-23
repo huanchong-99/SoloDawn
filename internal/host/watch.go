@@ -159,19 +159,17 @@ func (p *watchPart) closeKey(key watchKey) {
 func (h *Host) ServeWatch(t Terminal) {
 	g, m, valid := watchLabel(t.Label())
 	if !valid {
-		ptyRejectTerminal(t)
+		rejectWatch(t)
 		return
 	}
 	key := watchKey{aiSlot{g, m}, t.Device()}
 	p := watchState(h)
 	w, from := p.attach(key, t)
 	if from == nil {
-		ptyRejectTerminal(t)
+		rejectWatch(t)
 		return
 	}
-	if size, known := ptyState(h).sizeOf(key.aiSlot); known {
-		watchResize(from, key.aiSlot, size.cols, size.rows)
-	}
+	sendWatchSize(h, key.aiSlot, from)
 	go p.writeLoop(w)
 	var b [1]byte
 	t.Read(b[:])
@@ -180,7 +178,23 @@ func (h *Host) ServeWatch(t Terminal) {
 		p.closeKey(key)
 	}
 	p.mu.Unlock()
-	ptyCopy(io.Discard, t)
+	io.Copy(io.Discard, t)
+}
+
+func rejectWatch(t Terminal) {
+	t.Close()
+	io.Copy(io.Discard, t)
+}
+
+func sendWatchSize(h *Host, slot aiSlot, link Owner) {
+	if p := ptyState(h).lookup(slot); p != nil {
+		p.mu.Lock()
+		size := p.watchSize
+		p.mu.Unlock()
+		if size.Type != "" {
+			link.Send(size)
+		}
+	}
 }
 
 func watchLabel(label string) (string, string, bool) {

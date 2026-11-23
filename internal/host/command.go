@@ -7,8 +7,13 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"strconv"
 	"time"
 )
+
+func taskkill(pid int) error {
+	return exec.Command("taskkill.exe", "/f", "/t", "/pid", strconv.Itoa(pid)).Run()
+}
 
 // commandUnit is the unit of the command limits: a minute. Tests shorten it.
 var commandUnit = time.Minute

@@ -10,7 +10,6 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -230,7 +229,7 @@ func checkShell(ctx context.Context, command string, windows bool, fields reflec
 		cmd := exec.CommandContext(ctx, os.Getenv("ComSpec"))
 		fields.FieldByName("CmdLine").SetString(`cmd.exe /d /s /c "` + command + `"`)
 		cmd.Cancel = func() error {
-			return exec.Command("taskkill.exe", "/f", "/t", "/pid", strconv.Itoa(cmd.Process.Pid)).Run()
+			return taskkill(cmd.Process.Pid)
 		}
 		return cmd
 	}

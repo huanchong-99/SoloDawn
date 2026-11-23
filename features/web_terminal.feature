@@ -43,6 +43,11 @@ Feature: Terminal takeover page and handback summary
     When the path becomes direct and "workstation" refuses "takeover.start" with "relay", then "busy", then "internal"
     Then the takeover bar shows "Direct connection required", then "This AI is busy with another terminal or a merge right now.", then error code "internal"
 
+  Scenario: A relayed path that recovers to direct opens the terminal without reopening the page
+    Given the path to "workstation" is relayed
+    When the owner opens "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/1PC8WineBrUQ-apCjx7tug" and the path becomes direct
+    Then one "takeover.start" is sent, the pty channel opens and the takeover bar no longer says "Direct connection required"
+
   Scenario: Handing back while the terminal is still opening ends the takeover once the start is answered
     Given "Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms
     And "workstation" holds its answer to "takeover.start"

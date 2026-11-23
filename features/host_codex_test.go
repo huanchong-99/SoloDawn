@@ -88,23 +88,22 @@ func hostCodexSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^Codex asks user-input questions that the host answers and leaves unanswered$`, st.handleUserInputQuestions)
 }
 
-func (st *codexAcceptanceState) setEnv(key, value string) {
-	old, had := os.LookupEnv(key)
-	os.Setenv(key, value)
-	st.undo(func() { restoreVar(key, old, had) })
-}
-
 func (st *codexAcceptanceState) configureScript(name string) error {
 	script, err := filepath.Abs(filepath.Join("..", "internal", "host", "fakecli", "testdata", name))
 	if err != nil {
 		return err
 	}
+	return st.configureScriptPath(script)
+}
+
+func (st *codexAcceptanceState) configureScriptPath(script string) error {
 	if st.logPath == "" {
 		st.logPath = filepath.Join(st.f.t.TempDir(), "codex-lifecycle.log")
-		st.setEnv("SOLODAWN_FAKECLI_LOG", st.logPath)
+		if err := setScenarioEnv(st.undo, "SOLODAWN_FAKECLI_LOG", st.logPath); err != nil {
+			return err
+		}
 	}
-	st.setEnv("SOLODAWN_FAKE_CODEX_SCRIPT", script)
-	return nil
+	return setScenarioEnv(st.undo, "SOLODAWN_FAKE_CODEX_SCRIPT", script)
 }
 
 func (st *codexAcceptanceState) baseLaunch(session, token string) host.Launch {
@@ -125,7 +124,9 @@ func (st *codexAcceptanceState) startMCPResponder() error {
 		return err
 	}
 	st.undo(func() { ln.Close() })
-	st.setEnv("SOLODAWN_ACCEPTANCE_MCP_PEER", ln.Addr().String())
+	if err := setScenarioEnv(st.undo, "SOLODAWN_ACCEPTANCE_MCP_PEER", ln.Addr().String()); err != nil {
+		return err
+	}
 	go st.serveOneMCP(ln)
 	return nil
 }
@@ -373,12 +374,7 @@ func (st *codexAcceptanceState) configureUserInputScript() error {
 	if err := os.WriteFile(path, []byte(rawScript), 0600); err != nil {
 		return err
 	}
-	if st.logPath == "" {
-		st.logPath = filepath.Join(st.f.t.TempDir(), "codex-lifecycle.log")
-		st.setEnv("SOLODAWN_FAKECLI_LOG", st.logPath)
-	}
-	st.setEnv("SOLODAWN_FAKE_CODEX_SCRIPT", path)
-	return nil
+	return st.configureScriptPath(path)
 }
 
 func (st *codexAcceptanceState) handleUserInputQuestions() error {
