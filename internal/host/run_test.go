@@ -328,6 +328,7 @@ func stopHostNow(h *Host) {
 		}
 		rt.mu.Unlock()
 		if busy == 0 {
+			rt.wg.Wait()
 			return
 		}
 		<-ch
@@ -1621,14 +1622,14 @@ func TestNoSessionFailedResumeSyncAsyncAndFailures(t *testing.T) {
 	if drv.count() != 2 || drv.lastLaunch().Session != "" {
 		t.Fatalf("replacement launch wrong: count=%d session=%q", drv.count(), drv.lastLaunch().Session)
 	}
+	pNew := drv.proc(1)
+	if got := <-pNew.turnCh; got != "replaced prompt with 20 msgs" {
+		t.Fatalf("replacement turn text = %q", got)
+	}
 	newTok := tokenFromLaunch(drv.lastLaunch())
 	cNew, ok := h.Sessions.Caller(newTok)
 	if !ok || cNew.Turn.Kind != ReplacedTurn || cNew.Turn.Depth != 2 || cNew.Turn.Thread != runTask1 {
 		t.Fatalf("replacement Caller.Turn metadata lost: %+v", cNew.Turn)
-	}
-	pNew := drv.proc(1)
-	if got := <-pNew.turnCh; got != "replaced prompt with 20 msgs" {
-		t.Fatalf("replacement turn text = %q", got)
 	}
 	pNew.emit(Event{Kind: Ready, Session: "fresh-id"})
 	pNew.emit(Event{Kind: TurnEnded, Status: "completed"})
@@ -2122,7 +2123,7 @@ func TestSettleEndsEveryCLIBeforeTheStoreCloses(t *testing.T) {
 	}
 	err := Runner.Turn(t.Context(), h, dormKey, "late", Turn{Kind: ItemsTurn})
 	var herr *Error
-	if !errors.As(err, &herr) || herr.Code != "busy" || drv.count() != 2 {
+	if !errors.As(err, &herr) || herr.Code != "busy" || drv.count() != 1 {
 		t.Fatalf("a turn after Settle: %v, starts %d", err, drv.count())
 	}
 	db.Close()
@@ -2137,4 +2138,74 @@ func TestSettleEndsEveryCLIBeforeTheStoreCloses(t *testing.T) {
 	if got := rh.snapshotCmds(); got[len(got)-1].payload["state"] != "waiting" {
 		t.Fatalf("member status after the store closed: %+v", got[len(got)-1].payload)
 	}
+}
+
+func TestSettleWaitsForRuntimeDelivery(t *testing.T) {
+	saveRuntimeGlobals(t)
+	base := t.TempDir()
+	synctest.Test(t, func(t *testing.T) {
+		h, _, drv, shutdown := setupBubbleEnv(t, base)
+		defer shutdown()
+		started, release, settled := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		Deliver = func(*Host, string, string) {
+			close(started)
+			<-release
+		}
+		key := SessionKey{Group: runGroup1, Member: runAI1}
+		if err := h.Sessions.Create(makeRunSession(key, GroupSession, "repo")); err != nil {
+			t.Fatal(err)
+		}
+		if err := Runner.Turn(t.Context(), h, key, "hi", Turn{Kind: ItemsTurn}); err != nil {
+			t.Fatal(err)
+		}
+		drv.lastProc().emit(Event{Kind: TurnEnded, Status: "completed"})
+		<-started
+		go func() {
+			h.Settle()
+			close(settled)
+		}()
+		synctest.Wait()
+		select {
+		case <-settled:
+			t.Error("Settle returned before delivery finished")
+		default:
+		}
+		close(release)
+		<-settled
+	})
+}
+
+func TestSettleUnblocksAWaitingOpenSlot(t *testing.T) {
+	saveRuntimeGlobals(t)
+	base := t.TempDir()
+	synctest.Test(t, func(t *testing.T) {
+		h, _, _, shutdown := setupBubbleEnv(t, base)
+		defer shutdown()
+		key := SessionKey{Group: runGroup1, Member: runAI1}
+		assertEqual(t, h.Sessions.Create(makeRunSession(key, GroupSession, "repo")), nil)
+		assertEqual(t, h.Sessions.Move(key, Dormant, Working), nil)
+		rt := stateOf(h)
+		result := make(chan error, 1)
+		rt.startBackground(func() {
+			other := SessionKey{Group: runGroup1, Member: runAI2}
+			result <- acquireOpenSlot(t.Context(), h, rt, other, 1)
+		})
+		synctest.Wait()
+		h.Settle()
+		assertEqual(t, <-result, errSettling)
+	})
+}
+
+func TestSettleDuringDriverStart(t *testing.T) {
+	h, _, drv, _ := setupRunEnv(t)
+	key := SessionKey{Group: runGroup1, Member: runAI1}
+	assertEqual(t, h.Sessions.Create(makeRunSession(key, GroupSession, "repo")), nil)
+	drv.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
+		h.Settle()
+		return newFakeProc(ctx, l), nil
+	}
+	assertEqual(t, Runner.Turn(t.Context(), h, key, "hi", Turn{Kind: ItemsTurn}), errSettling)
+	<-drv.lastProc().exitedCh
+	_, ok := h.Sessions.Caller(tokenFromLaunch(drv.lastLaunch()))
+	assertEqual(t, ok, false)
 }

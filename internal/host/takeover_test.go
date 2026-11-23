@@ -862,13 +862,17 @@ func TestTakeoverIsFreeOnceTheHandBackTurnStarts(t *testing.T) {
 
 func TestSettleEndsARunningHandBackTurn(t *testing.T) {
 	r := newTkRig(t)
-	r.drv.makeProc = nil
+	started := make(chan *fakeProc, 1)
+	r.drv.makeProc = func(ctx context.Context, _ int, l Launch) (*fakeProc, error) {
+		p := newFakeProc(ctx, l)
+		started <- p
+		return p, nil
+	}
 	if err := r.start(tkSec, ""); err != nil {
 		t.Fatal(err)
 	}
 	r.end(tkSec)
-	r.waitFor("the hand-back turn", func() bool { return r.drv.count() == 1 })
-	<-r.drv.lastProc().turnCh
+	waitHandBackTurn(t, started)
 	settled := make(chan struct{})
 	go func() {
 		r.h.Settle()
@@ -882,6 +886,21 @@ func TestSettleEndsARunningHandBackTurn(t *testing.T) {
 	if len(r.delivered) != 0 {
 		t.Fatal("a hand-back delivered after Settle")
 	}
+}
+
+func waitHandBackTurn(t *testing.T, started <-chan *fakeProc) {
+	t.Helper()
+	timeout := time.After(15 * time.Second)
+	select {
+	case p := <-started:
+		select {
+		case <-p.turnCh:
+			return
+		case <-timeout:
+		}
+	case <-timeout:
+	}
+	t.Fatal("hand-back turn did not start")
 }
 
 func TestHandBackOfAHeldAIStartsNoTurn(t *testing.T) {
