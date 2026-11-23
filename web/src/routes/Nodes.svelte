@@ -218,7 +218,7 @@
               {/if}
 
               {#if agent.groups.length}
-                {#each agent.groups as entry (entry.g)}
+                {#each agent.groups as entry (entry.member)}
                   {@const group = find(entry.g)}
                   {@const groupName =
                     group?.name ?? comp.info.homes.find((h) => h.g === entry.g)?.name ?? entry.g}
@@ -229,6 +229,7 @@
                   <div class="perm">
                     <span class="row">
                       <a href={href('chat', { g: entry.g })}>{groupName}</a>
+                      {#if member}<span class="muted">· {member.name}</span>{/if}
                       {#if isSec}
                         <span class="badge">{t('nodes.ai.secretary')}</span>
                       {/if}

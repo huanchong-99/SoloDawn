@@ -279,6 +279,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         flushSync();
         expect(all('dialog .choice')).toHaveLength(2);
       });
+      all<HTMLInputElement>('dialog .choice input')[1].click();
+      flushSync();
       one<HTMLInputElement>('dialog input[value="light"]').click();
       const input = one<HTMLInputElement>(
         'dialog input[placeholder="What this AI is good at, in one line"]',

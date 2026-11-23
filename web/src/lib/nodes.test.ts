@@ -158,6 +158,26 @@ describe('indicator', () => {
 });
 
 describe('Nodes', () => {
+  it('refreshes the model list explicitly without adding refresh to ordinary reads', async () => {
+    const store = new Nodes();
+    const home = new Home(me);
+    const { asked } = connectHome(home, { owner: true });
+    store.sync([home]);
+    expect(asked.map((ask) => ask.req)).toEqual([{ t: 'host.info' }]);
+    asked[0].answer(hostAnswer());
+    await settle();
+    const refreshing = store.refresh(home);
+    expect(asked.map((ask) => ask.req)).toEqual([
+      { t: 'host.info' },
+      { t: 'host.info', refresh: true },
+    ]);
+    const answer = hostAnswer({ agents: [] });
+    asked[1].answer(answer);
+    await refreshing;
+    const { re, ok, ...info } = answer;
+    expect(store.infos.get(home)).toEqual(info);
+  });
+
   it('exports a shared Nodes instance', () => {
     expect(nodes).toBeInstanceOf(Nodes);
   });

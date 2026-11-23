@@ -1,0 +1,14 @@
+{
+  "model.model": "Model",
+  "model.effort": "Level",
+  "model.default": "The CLI's default",
+  "model.notlisted": "Not listed",
+  "model.fast": "Fast mode",
+  "model.model.hint": "e.g. opus",
+  "model.effort.hint": "e.g. high",
+  "model.refresh": "Refresh the models",
+  "model.edit": "Change model",
+  "model.save": "Save",
+  "model.cancel": "Cancel",
+  "model.change": "Change"
+}

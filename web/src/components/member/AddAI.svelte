@@ -121,7 +121,7 @@
       {#if candidates.length}
         <div class="choices">
           {#each candidates as candidate (candidate.key)}
-            {@const disabled = candidate.account === null || candidate.inGroup}
+            {@const disabled = candidate.account === null}
             <label class="choice" class:disabled>
               <input
                 type="radio"
@@ -157,7 +157,19 @@
       {/if}
     </fieldset>
 
-    <Mount at="member.add" props={{ group, candidate: chosen, draft }} />
+    <Mount
+      at="member.add"
+      props={{
+        group,
+        candidate: chosen,
+        get draft() {
+          return draft;
+        },
+        set draft(value) {
+          draft = value;
+        },
+      }}
+    />
 
     <label class="field">
       <span>{t('member.join.name')}</span>
