@@ -9,7 +9,7 @@
   "nodes.conn.linking": "重连中",
   "nodes.conn.down": "连不上群的家",
   "nodes.conn.downAll": "连不上电脑",
-  "nodes.conn.offline": "未连接",
+  "nodes.conn.offline": "未激活",
   "nodes.conn.label": "连接状态：{status}",
   "nodes.conn.labelRtt": "连接状态：{status}，{rtt} ms",
   "nodes.status.online": "在线",

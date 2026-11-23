@@ -147,10 +147,7 @@ function startLive(
           ...link,
           push(frame: Parameters<typeof link.push>[0]) {
             link.push(frame);
-            switch (frame.t) {
-              case 'devlog':
-                if (frame.user === log.user) void onDevlog(frame);
-            }
+            if (frame.t === 'devlog' && frame.user === log.user) void onDevlog(frame);
           },
         };
       };

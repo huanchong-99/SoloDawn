@@ -16,7 +16,7 @@
     <span>{view.caller}</span><Icon name="arrow" sm /><span class="sr">→</span><span>
       {view.callee}
     </span><span class="muted">
-      {`${view.mode} · `}
+      {view.mode} ·
       {#if view.status === 'waiting'}
         <span class="st" data-st="waiting"><i></i>{view.timing}</span>
       {:else if view.status === 'denied'}

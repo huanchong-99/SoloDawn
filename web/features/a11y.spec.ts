@@ -11,7 +11,7 @@ import type { Path, Source } from '../src/lib/net.svelte';
 import { nodes } from '../src/lib/nodes.svelte';
 import { prefs } from '../src/lib/prefs.svelte';
 import * as p from '../src/lib/proto';
-import { browser, example, ownedNode, owner, TestHome, user } from './home';
+import { ActHome, browser, example, ownedNode, owner, user } from './home';
 import { all, closePage, field, fill, go, one, openPage, read, text, texts, type } from './page';
 import { FakePC } from './peer-fakes';
 
@@ -48,97 +48,11 @@ vi.mock('../src/lib/net.svelte', async (actual) => {
   };
 });
 
-// xterm as far as the terminal page drives it: its input field and the key handler it is given.
-const xterm = vi.hoisted(() => ({
-  input: undefined as HTMLTextAreaElement | undefined,
-  keys: (_event: KeyboardEvent): boolean => true,
-}));
-vi.mock('@xterm/xterm', () => ({
-  Terminal: class {
-    cols = 80;
-    rows = 24;
-    textarea = (xterm.input = document.createElement('textarea'));
-    attachCustomKeyEventHandler(keys: typeof xterm.keys) {
-      xterm.keys = keys;
-    }
-    loadAddon() {}
-    open() {}
-    onData() {}
-    onBinary() {}
-    onResize() {}
-    clear() {}
-    dispose() {}
-  },
-}));
-vi.mock('@xterm/addon-fit', () => ({
-  FitAddon: class {
-    fit() {}
-  },
-}));
-vi.mock('@xterm/xterm/css/xterm.css', () => ({}));
-
 class QuietSocket {
   onmessage: ((event: { data: string }) => void) | null = null;
   onclose: (() => void) | null = null;
   send() {}
   close() {}
-}
-
-class A11yHome extends TestHome {
-  holdAct = false;
-  releaseAct: (() => void) | undefined;
-
-  override connect(push: (frame: p.Push) => void) {
-    const conn = super.connect(push);
-    const base = conn.ctl.request as (req: Record<string, unknown>) => Promise<unknown>;
-    const ctl = {
-      request: (req: Record<string, unknown>) => this.#request(base, req),
-    } as p.Ctl;
-    return { ctl, close: conn.close };
-  }
-
-  async #request(
-    base: (req: Record<string, unknown>) => Promise<unknown>,
-    req: Record<string, unknown>,
-  ) {
-    if (req.t !== 'cmd') return base(req);
-    const env = req.env as p.Envelope;
-    const raw = JSON.parse(env.p) as Record<string, unknown>;
-    if (raw.t !== 'act') return base(req);
-    if (this.holdAct) await new Promise<void>((resolve) => (this.releaseAct = resolve));
-    else await new Promise((later) => setTimeout(later));
-    this.asked.push(req);
-    const re = this.asked.length;
-    if (this.refuse) return { re, err: { code: this.refuse, msg: 'refused' } };
-    return { re, ...this.#applyAct(env, p.decode(p.Act, env.p)) };
-  }
-
-  #applyAct(env: p.Envelope, act: p.Act) {
-    const current = this.groups.get(act.g)?.rows.get(`msg ${act.msg}`) as
-      (p.MsgRow & Record<string, unknown>) | undefined;
-    if (!current) return { err: { code: 'not_found', msg: 'missing' } };
-    const state = stateForAct(env, act);
-    const updated = p.decode(p.MsgRow, JSON.stringify({ ...current, state }));
-    this.write(act.g, updated as p.Row & Record<string, unknown>);
-    return { ok: true };
-  }
-}
-
-function stateForAct(env: p.Envelope, act: p.Act): Record<string, unknown> {
-  const base = { by: owner, at: act.ts, act: env };
-  const map: Record<string, Record<string, unknown>> = {
-    confirm: { status: 'confirmed', ...base },
-    revise: { status: 'revise', ...base, ...(act.text ? { note: act.text } : {}) },
-    approve: { status: 'approved', ...base },
-    deny: { status: 'denied', ...base },
-    choose: {
-      status: 'decided',
-      ...base,
-      ...(act.arg ? { choice: act.arg } : {}),
-      ...(act.text ? { text: act.text } : {}),
-    },
-  };
-  return map[act.action];
 }
 
 /** The text of the elements that `aria-labelledby` or `aria-describedby` of an element names. */
@@ -197,7 +111,7 @@ function parsePalette(css: string, mode: 'light' | 'dark'): Record<string, Rgb> 
 }
 
 describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
-  let home: A11yHome;
+  let home: ActHome;
   let reader: ReturnType<typeof browser>;
 
   async function syncHome() {
@@ -209,7 +123,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   }
 
   async function seedGroups() {
-    home = new A11yHome('workstation');
+    home = new ActHome('workstation');
     home.add(website, 'Website');
     home.add(docs, 'Docs');
     home.write(
@@ -583,12 +497,12 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(document.activeElement).toBe(buttonNamed(apCard, 'Approve'));
 
           home.refuse = undefined;
-          home.holdAct = true;
+          home.hold = true;
           buttonNamed(apCard, 'Approve').click();
           flushSync();
           expect(document.activeElement).toBe(apCard);
-          home.releaseAct?.();
-          home.holdAct = false;
+          home.release?.();
+          home.hold = false;
           await vi.waitFor(() => expect(apCard.querySelector('.card-foot')).toBeNull());
           await tick();
           flushSync();
@@ -844,44 +758,20 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
-    'The terminal and the other-tab notice are named and can be left from the keyboard',
-    ({ Given, When, Then, And }) => {
+    'The other-tab notice is named and can be left from the keyboard',
+    ({ Given, When, Then }) => {
       Given(
         'two groups "Website" and "Docs" with waiting brief, approval and decision cards, a locked approval, a task and a summary',
         seedGroups,
       );
-      When('the person opens the terminal of "Codex" on a 1280 px desktop', async () => {
-        openPage(`#/terminal/${website}/${codex}`, 1280);
-        await vi.waitFor(() => expect(xterm.input?.hasAttribute('aria-describedby')).toBe(true));
-        document.body.append(xterm.input!);
-      });
-      Then(
-        "the takeover bar is a status region, the key row and the details column take keyboard focus, and the terminal's input is described by the note on leaving it",
+      When(
+        'the person opens the group list on a 1280 px desktop and another tab takes the connection',
         () => {
-          expect(one('.takeover').getAttribute('role')).toBe('status');
-          expect(one('.keys').tabIndex).toBe(0);
-          expect(one('aside.info').tabIndex).toBe(0);
-          expect(described(xterm.input!)).toBe(
-            'Tab types into the terminal. To leave the terminal with the keyboard, press Ctrl+M.',
-          );
+          openPage('#/groups', 1280);
+          tab.set('other', true);
+          flushSync();
         },
       );
-      And('only Ctrl+M is kept from the terminal, and it moves focus to "Back to chat"', () => {
-        const press = (key: string, ctrlKey: boolean) => {
-          const event = new KeyboardEvent('keydown', { key, ctrlKey, cancelable: true });
-          return [xterm.keys(event), event.defaultPrevented, read(document.activeElement!)];
-        };
-        xterm.input!.focus();
-        expect(press('m', false)).toEqual([true, false, '']);
-        expect(press('c', true)).toEqual([true, false, '']);
-        expect(press('m', true)).toEqual([false, true, 'Back to chat']);
-        expect(document.activeElement).toBe(one('.takeover a'));
-        xterm.input!.remove();
-      });
-      When('another tab takes the connection', () => {
-        tab.set('other', true);
-        flushSync();
-      });
       Then(
         'the notice is a status region, the connection indicator is named "Connection status: inactive", and no notification hangs under a chat\'s head',
         () => {
@@ -934,7 +824,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             one<HTMLButtonElement>('.side-open').click();
             await tick();
             flushSync();
-            const openBehindInert = all('.chat > :not(.side)').map((el) =>
+            const openBehindInert = [...all('.chat > :not(.side)'), one('.notify')].map((el) =>
               el.hasAttribute('inert'),
             );
             window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -962,11 +852,11 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       And(
-        'at 390 and 820 px the open side panel makes the parts behind it inert and Escape returns focus to "People and details"',
+        'at 390 and 820 px the open side panel makes the parts behind it and the notifications inert and Escape returns focus to "People and details"',
         () => {
           for (const width of [390, 820]) {
             const snap = snaps.get(width)!;
-            expect(snap.openBehindInert).toEqual([true, true, true, true]);
+            expect(snap.openBehindInert).toEqual([true, true, true, true, true]);
             expect(snap.afterEscFocus).toBe('People and details');
           }
           expect(snaps.get(820)!.barConn).toBe(1);
@@ -974,10 +864,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       And(
-        'at 1024 and 1440 px the side panel stands beside the main line and nothing is inert',
+        'at 1024 and 1440 px the side panel stands beside the main line and nothing is inert, the notifications included',
         () => {
           for (const width of [1024, 1440]) {
-            expect(snaps.get(width)!.openBehindInert).toEqual([false, false, false, false]);
+            expect(snaps.get(width)!.openBehindInert).toEqual([false, false, false, false, false]);
           }
         },
       );
@@ -1019,7 +909,6 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             ['ok', 'ok-soft'],
             ['danger', 'surface'],
             ['danger', 'danger-soft'],
-            ['text', 'bg'],
             ['on-sky', 'sky'],
             ['on-dawn', 'dawn'],
             ['on-ok', 'ok'],

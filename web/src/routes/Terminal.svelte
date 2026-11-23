@@ -121,7 +121,7 @@
       // Tab and Shift+Tab belong to the terminal, so Ctrl+M, which a terminal reads as Enter,
       // is the keyboard's way out of it: to the bar's button.
       instance.attachCustomKeyEventHandler((event) => {
-        const leave = event.ctrlKey && event.key === 'm';
+        const leave = event.ctrlKey && event.code === 'KeyM';
         if (leave) {
           event.preventDefault();
           exit!.focus();
@@ -196,7 +196,6 @@
       {#if !watching}<div
           class="keys only-narrow"
           role="toolbar"
-          tabindex="0"
           aria-label={t('terminal.aria.keys')}
         >
           {#each phoneKeys as key (key.label)}

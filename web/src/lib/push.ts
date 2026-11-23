@@ -69,13 +69,13 @@ export function defaultPushEnv(): PushEnv {
 }
 
 /** True on iPhone, iPod, iPad, and iPadOS reporting a desktop Macintosh user agent with touch. */
-export function isIosDevice(nav: { userAgent: string; maxTouchPoints?: number }): boolean {
+function isIosDevice(nav: { userAgent: string; maxTouchPoints?: number }): boolean {
   if (/iPad|iPhone|iPod/.test(nav.userAgent)) return true;
   return /Macintosh/.test(nav.userAgent) && (nav.maxTouchPoints ?? 0) > 1;
 }
 
 /** True when opened as an installed Home Screen / standalone web application. */
-export function isStandaloneMode(env: Pick<PushEnv, 'navigator' | 'matchMedia'>): boolean {
+function isStandaloneMode(env: Pick<PushEnv, 'navigator' | 'matchMedia'>): boolean {
   return env.navigator.standalone === true || env.matchMedia('(display-mode: standalone)').matches;
 }
 

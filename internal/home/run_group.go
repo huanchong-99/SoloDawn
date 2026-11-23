@@ -155,7 +155,7 @@ func (g *runGroup) transact(now time.Time, run func(d Disk, tx *store.Tx) (Resul
 // nothing (a refusal, a repeated command, a rule with nothing to do) only
 // gets its answer. Any other is taken into the state, counted for the
 // wake-up cap and given to every hook, in the order of their names; then
-// comes the answer, and then what the clients are told.
+// the changed rows are pushed, the answer is sent, and the other pushes follow.
 func (g *runGroup) settle(res Result, now time.Time, answer func()) {
 	if runIdle(res) {
 		answer()
@@ -167,6 +167,7 @@ func (g *runGroup) settle(res Result, now time.Time, answer func()) {
 	for _, name := range slices.Sorted(maps.Keys(hooks)) {
 		hooks[name](g.state, res)
 	}
+	g.pushRows(res.Rows)
 	answer()
 	g.tell(res, now)
 }

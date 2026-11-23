@@ -234,26 +234,32 @@ func (w *homeRunWorld) read(seq int64) error {
 }
 
 // pushed checks that the next frame of both connections is a rows push with
-// that one message. The step before it has taken the sender's answer.
+// that one message.
 func (w *homeRunWorld) pushed(text string, seq int64) error {
 	for who, p := range w.peers {
 		got, err := p.next()
 		if err != nil {
 			return fmt.Errorf("%s: %w", who, err)
 		}
-		var frame proto.Rows
-		if err := json.Unmarshal([]byte(got), &frame); err != nil || frame.Type != "rows" || frame.Group != w.group || len(frame.Rows) != 1 {
-			return fmt.Errorf("%s got %s (%v); want one row of the group", who, got, err)
-		}
-		var row proto.MsgRow
-		if err := json.Unmarshal(frame.Rows[0], &row); err != nil {
-			return err
+		row, err := homeRunReadMessage(got, w.group)
+		if err != nil {
+			return fmt.Errorf("%s: %w", who, err)
 		}
 		if have, want := []any{row.Type, row.Text, row.Seq, row.Pos}, []any{"msg", text, seq, seq}; !reflect.DeepEqual(have, want) {
 			return fmt.Errorf("%s got the row %v; want %v", who, have, want)
 		}
 	}
 	return nil
+}
+
+func homeRunReadMessage(raw, group string) (proto.MsgRow, error) {
+	var frame proto.Rows
+	var row proto.MsgRow
+	if err := json.Unmarshal([]byte(raw), &frame); err != nil || frame.Type != "rows" || frame.Group != group || len(frame.Rows) != 1 {
+		return row, fmt.Errorf("got %s (%v); want one row of the group", raw, err)
+	}
+	err := json.Unmarshal(frame.Rows[0], &row)
+	return row, err
 }
 
 // again checks what the connections of a home that started again are told
