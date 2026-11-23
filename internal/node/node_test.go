@@ -472,6 +472,20 @@ func TestPairingSurfaceClientAndForegroundStop(t *testing.T) {
 	checkForegroundContextStop(t)
 }
 
+func TestPairRoutesShareSignallingPath(t *testing.T) {
+	n := &nodeRuntime{localPath: &peer.Path{}, pairer: newPairer(PairConfig{})}
+	stale := n.localPath.Route()
+	stale.ICE = []proto.ICEServer{{URLs: []string{"stun:expired.invalid"}}}
+	n.pairer.attempts[&pairAttempt{
+		peer: proto.Pair{Key: "browser"}, link: PairLink{Expires: time.Now().Add(pairWindow).UnixMilli()},
+		routes: []peer.Route{stale, {ID: "pair-only"}},
+	}] = true
+	routes := n.routesFor("browser")
+	if len(routes) != 2 || routes[0].ID != stale.ID || len(routes[0].ICE) != 0 || routes[1].ID != "pair-only" {
+		t.Fatalf("routes = %+v, want current shared route followed by pair-only", routes)
+	}
+}
+
 func pairNodeOverRendezvous(t *testing.T, dir string, n *nodeRuntime, rvURL, label string) (identity.Key, *peer.Connection, []proto.Envelope) {
 	t.Helper()
 	browserKey := sesKey("owner-browser")

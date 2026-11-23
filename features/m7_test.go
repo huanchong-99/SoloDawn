@@ -53,17 +53,19 @@ const (
 )
 
 type m7NetControl struct {
-	turnAddr string
-	cut      atomic.Bool
-	delayNs  atomic.Int64
+	turnAddr  string
+	cut       atomic.Bool
+	relayOnly atomic.Bool
 }
 
-func (c *m7NetControl) delayFor(addr net.Addr) time.Duration {
-	d := time.Duration(c.delayNs.Load())
-	if d <= 0 || addr == nil || addr.String() == c.turnAddr {
-		return 0
+func (c *m7NetControl) drops(addr net.Addr) bool {
+	if c.cut.Load() {
+		return true
 	}
-	return d
+	if c.relayOnly.Load() {
+		return addr.String() != c.turnAddr
+	}
+	return !addr.(*net.UDPAddr).IP.IsLoopback()
 }
 
 type m7UDPConn struct {
@@ -72,12 +74,7 @@ type m7UDPConn struct {
 }
 
 func (u *m7UDPConn) WriteTo(p []byte, addr net.Addr) (int, error) {
-	if u.ctrl.cut.Load() {
-		return len(p), nil
-	}
-	if d := u.ctrl.delayFor(addr); d > 0 {
-		cp := bytes.Clone(p)
-		time.AfterFunc(d, func() { _, _ = u.UDPConn.WriteTo(cp, addr) })
+	if u.ctrl.drops(addr) {
 		return len(p), nil
 	}
 	return u.UDPConn.WriteTo(p, addr)
@@ -90,7 +87,7 @@ func (u *m7UDPConn) WriteToUDP(p []byte, addr *net.UDPAddr) (int, error) {
 func (u *m7UDPConn) ReadFrom(p []byte) (int, net.Addr, error) {
 	for {
 		n, addr, err := u.UDPConn.ReadFrom(p)
-		if err != nil || !u.ctrl.cut.Load() {
+		if err != nil || !u.ctrl.drops(addr) {
 			return n, addr, err
 		}
 	}
@@ -99,7 +96,7 @@ func (u *m7UDPConn) ReadFrom(p []byte) (int, net.Addr, error) {
 func (u *m7UDPConn) ReadFromUDP(p []byte) (int, *net.UDPAddr, error) {
 	for {
 		n, addr, err := u.UDPConn.ReadFromUDP(p)
-		if err != nil || !u.ctrl.cut.Load() {
+		if err != nil || !u.ctrl.drops(addr) {
 			return n, addr, err
 		}
 	}
@@ -234,6 +231,7 @@ type m7Browser struct {
 	ctlClosed  chan struct{}           // closed once by ctl.OnClose
 	answers    chan proto.Answer       // single reader: awaitAnswer
 	remoteICE  chan proto.ICECandidate // single reader: applyRemoteICE
+	cutDirect  chan struct{}
 	connID     string
 	offersSent atomic.Int32
 
@@ -259,6 +257,7 @@ func newM7Browser(ctx context.Context, key identity.Key, nodeID string, mode m7C
 		ctlClosed: make(chan struct{}),
 		answers:   make(chan proto.Answer, 4),
 		remoteICE: make(chan proto.ICECandidate, 64),
+		cutDirect: make(chan struct{}),
 		waiting:   map[int64]chan json.RawMessage{},
 		changed:   make(chan struct{}),
 		aiByName:  map[string]proto.AIMemberRow{},
@@ -278,8 +277,8 @@ func m7KeepCandidate(mode m7CandMode, cand string) bool {
 	}
 }
 
-func (b *m7Browser) connect(cleanup func(func()), nodePeer *peer.Peer) error {
-	pc, err := b.buildPeerConnection()
+func (b *m7Browser) connect(cleanup func(func()), nodePeer *peer.Peer, relayIP net.IP) error {
+	pc, err := b.buildPeerConnection(relayIP)
 	if err != nil {
 		return err
 	}
@@ -297,7 +296,7 @@ func (b *m7Browser) connect(cleanup func(func()), nodePeer *peer.Peer) error {
 	return b.waitCtlOpen()
 }
 
-func (b *m7Browser) buildPeerConnection() (*webrtc.PeerConnection, error) {
+func (b *m7Browser) buildPeerConnection(relayIP net.IP) (*webrtc.PeerConnection, error) {
 	baseNet, err := stdnet.NewNet()
 	if err != nil {
 		return nil, err
@@ -306,11 +305,13 @@ func (b *m7Browser) buildPeerConnection() (*webrtc.PeerConnection, error) {
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
 	se.SetIncludeLoopbackCandidate(true)
 	se.SetIPFilter(net.IP.IsLoopback)
-	se.SetRemoteIPFilter(net.IP.IsLoopback)
 	se.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
 	se.SetNet(&m7TransportNet{Net: baseNet, ctrl: b.ctrl})
-	if err := se.SetICERenomination(webrtc.WithRenominationInterval(100 * time.Millisecond)); err != nil {
-		return nil, err
+	se.SetRemoteIPFilter(func(ip net.IP) bool { return ip.IsLoopback() || ip.Equal(relayIP) })
+	if b.mode == m7CandSrflxAndRelay {
+		if err := se.SetICERenomination(webrtc.WithRenominationInterval(100 * time.Millisecond)); err != nil {
+			return nil, err
+		}
 	}
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(se))
 	return api.NewPeerConnection(m7WebRTCConfig(b.ice, b.mode))
@@ -402,13 +403,17 @@ func (b *m7Browser) queueAnswer(payload string) {
 
 func (b *m7Browser) queueRemoteICE(payload string) {
 	var cand proto.ICECandidate
-	if proto.Decode([]byte(payload), &cand) != nil || !m7KeepCandidate(b.mode, cand.Candidate) {
+	if proto.Decode([]byte(payload), &cand) != nil || !b.keepRemoteCandidate(cand.Candidate) {
 		return
 	}
 	select {
 	case b.remoteICE <- cand:
 	default:
 	}
+}
+
+func (b *m7Browser) keepRemoteCandidate(candidate string) bool {
+	return m7KeepCandidate(b.mode, candidate) || b.mode == m7CandSrflxAndRelay && strings.Contains(candidate, " typ host")
 }
 
 func (b *m7Browser) sendSignal(nodePeer *peer.Peer, payload any) error {
@@ -466,14 +471,37 @@ func (b *m7Browser) awaitAnswer() (proto.Answer, error) {
 }
 
 func (b *m7Browser) applyRemoteICE() {
+	cut := b.cutDirect
+	var held []proto.ICECandidate
 	for {
 		select {
 		case c := <-b.remoteICE:
-			_ = b.pc.AddICECandidate(webrtc.ICECandidateInit{Candidate: c.Candidate, SDPMid: &c.MID})
+			if b.holdHostICE(c, cut) {
+				held = append(held, c)
+			} else {
+				b.addICE(c)
+			}
+		case <-cut:
+			cut = nil
+			b.addHeldICE(held)
 		case <-b.ctx.Done():
 			return
 		}
 	}
+}
+
+func (b *m7Browser) addHeldICE(held []proto.ICECandidate) {
+	for _, c := range held {
+		b.addICE(c)
+	}
+}
+
+func (b *m7Browser) holdHostICE(c proto.ICECandidate, cut <-chan struct{}) bool {
+	return b.mode == m7CandSrflxAndRelay && cut != nil && strings.Contains(c.Candidate, " typ host")
+}
+
+func (b *m7Browser) addICE(c proto.ICECandidate) {
+	_ = b.pc.AddICECandidate(webrtc.ICECandidateInit{Candidate: c.Candidate, SDPMid: &c.MID})
 }
 
 func (b *m7Browser) waitCtlOpen() error {
@@ -801,6 +829,7 @@ type m7World struct {
 	cliLogPath  string
 	rvURL       string
 	turnAddr    string
+	relayIP     net.IP
 	iceServers  []proto.ICEServer
 	pn          *peerNode
 	accepted    chan *peer.Connection // single reader: acceptServed
@@ -867,18 +896,40 @@ func registerM7RelayAndTaskSteps(sc *godog.ScenarioContext, w *m7World) {
 	sc.Step(`^the M7 owner opens terminal takeover on "([^"]+)" again, commits "([^"]+)" with subject "([^"]+)" in the task worktree, and hands back$`, w.whenSecondNoTaskCommitAndHandback)
 	sc.Step(`^the second takeover task remains "([^"]+)" and its handback message lists commit "([^"]+)" and file "([^"]+)"$`, w.thenSecondTaskActiveWithCommit)
 	sc.Step(`^the M7 owner opens terminal takeover on "([^"]+)" and verifies a non-relay selected pair in WebRTC statistics$`, w.whenOpenTakeoverVerifyDirectStats)
-	sc.Step(`^direct UDP latency degrades while TURN stays reachable so the same PeerConnection selects a relayed pair$`, w.whenDegradeDirectToRelay)
+	sc.Step(`^direct UDP is cut while TURN stays reachable so the same PeerConnection selects a relayed pair$`, w.whenCutDirectToRelay)
 	sc.Step(`^WebRTC selected-pair statistics report a relay candidate, the pty channel closes, and the node hands back "([^"]+)"$`, w.thenStatsRelayClosesPTYAndHandsBack)
 	sc.Step(`^host\.info still succeeds on the original M7 ctl connection without sending a new offer$`, w.thenHostInfoOriginalCtl)
 }
 
-func m7RelayGenerator(mode m7CandMode) turn.RelayAddressGenerator {
+func (w *m7World) relayGenerator(mode m7CandMode) (turn.RelayAddressGenerator, error) {
 	ip := net.IPv4(127, 0, 0, 1)
+	if mode == m7CandSrflxAndRelay {
+		var err error
+		ip, err = m7RelayHostIP()
+		if err != nil {
+			return nil, err
+		}
+	}
+	w.relayIP = ip
 	base := turn.RelayAddressGeneratorStatic{RelayAddress: ip, Address: ip.String()}
 	if mode == m7CandRelayOnly {
-		return &relaySockets{RelayAddressGeneratorStatic: base, ports: map[int]bool{}}
+		return &relaySockets{RelayAddressGeneratorStatic: base, ports: map[int]bool{}}, nil
 	}
-	return &base
+	return &base, nil
+}
+
+func m7RelayHostIP() (net.IP, error) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil, err
+	}
+	for _, addr := range addrs {
+		ip := addr.(*net.IPNet).IP
+		if ip.To4() != nil && !ip.IsLoopback() && ip.IsGlobalUnicast() {
+			return ip, nil
+		}
+	}
+	return nil, errors.New("no non-loopback IPv4 address for the TURN relay")
 }
 
 func m7ICEServersForMode(addr string, mode m7CandMode) []proto.ICEServer {
@@ -909,7 +960,11 @@ func (w *m7World) bootEnvAndNode(mode m7CandMode) error {
 	if err := w.prepareDirsAndEnv(); err != nil {
 		return err
 	}
-	turnAddr, err := startTestTURN(w.cleanup, m7RelayGenerator(mode))
+	gen, err := w.relayGenerator(mode)
+	if err != nil {
+		return err
+	}
+	turnAddr, err := startTestTURN(w.cleanup, gen)
 	if err != nil {
 		return err
 	}
@@ -996,11 +1051,11 @@ func (w *m7World) mapNodeRoute(r peer.Route, mode m7CandMode) peer.Route {
 	r.ICE = m7NodeICEServers(w.iceServers, mode)
 	send := r.Send
 	r.Send = func(ctx context.Context, to string, env proto.Envelope) error {
-		if m7DropSignalledICE(env.Payload, mode) {
-			return nil
-		}
 		if to == w.browserKey.ID() {
 			return w.forwardNodeSignal(ctx, to, env)
+		}
+		if m7DropSignalledICE(env.Payload, mode) {
+			return nil
 		}
 		return send(ctx, to, env)
 	}
@@ -1052,7 +1107,7 @@ func (w *m7World) attachMCPSocket() error {
 func (w *m7World) connectBrowser(mode m7CandMode) error {
 	b := newM7Browser(w.ctx, w.browserKey, w.pn.Key.ID(), mode, w.turnAddr, w.iceServers)
 	w.setBrowser(b)
-	if err := b.connect(w.cleanup, w.pn.Peer); err != nil {
+	if err := b.connect(w.cleanup, w.pn.Peer, w.relayIP); err != nil {
 		return err
 	}
 	served, err := w.acceptServed()
@@ -1997,23 +2052,25 @@ func (w *m7World) whenOpenTakeoverVerifyDirectStats(aiName string) error {
 	return nil
 }
 
-func (w *m7World) whenDegradeDirectToRelay() error {
+func (w *m7World) whenCutDirectToRelay() error {
 	if err := w.setScript("claude", m7ClaudeHandbackDoc("Relay transition handback.", nil)); err != nil {
 		return err
 	}
-	w.browser.ctrl.delayNs.Store(int64(500 * time.Millisecond))
-	return w.waitBrowserRelayStats(m7Event)
-}
-
-func (w *m7World) waitBrowserRelayStats(timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if relayed, ok := w.browser.statsShowRelay(); ok && relayed {
-			return nil
+	relay := make(chan struct{}, 1)
+	w.browser.pc.SCTP().Transport().ICETransport().OnSelectedCandidatePairChange(func(pair *webrtc.ICECandidatePair) {
+		if pair.Local.Typ == webrtc.ICECandidateTypeRelay {
+			select {
+			case relay <- struct{}{}:
+			default:
+			}
 		}
-		time.Sleep(40 * time.Millisecond)
+	})
+	w.browser.ctrl.relayOnly.Store(true)
+	close(w.browser.cutDirect)
+	if !m7WaitChan(relay, time.After(m7Event)) {
+		return errors.New("browser did not select its TURN allocation")
 	}
-	return errors.New("selected-pair statistics did not transition to relay")
+	return nil
 }
 
 func (w *m7World) thenStatsRelayClosesPTYAndHandsBack(aiName string) error {
@@ -2021,24 +2078,13 @@ func (w *m7World) thenStatsRelayClosesPTYAndHandsBack(aiName string) error {
 	if !ok || !relayed {
 		return fmt.Errorf("selected-pair stats ok=%v relayed=%v, want relay", ok, relayed)
 	}
-	if err := w.pollServedRelayPath(m7Event); err != nil {
-		return err
-	}
 	if err := w.activePTY.waitClosed(m7Event); err != nil {
 		return err
 	}
-	return w.waitMsgAndAIState(aiName, "Relay transition handback.", "waiting", m7Event)
-}
-
-func (w *m7World) pollServedRelayPath(timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if w.served.Path() == "relay" {
-			return nil
-		}
-		time.Sleep(25 * time.Millisecond)
+	if got := w.served.Path(); got != "relay" {
+		return fmt.Errorf("served path = %q, want relay", got)
 	}
-	return fmt.Errorf("served path = %q, want relay", w.served.Path())
+	return w.waitMsgAndAIState(aiName, "Relay transition handback.", "waiting", m7Event)
 }
 
 func (w *m7World) thenHostInfoOriginalCtl() error {

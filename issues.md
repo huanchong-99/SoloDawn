@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-23 · bug · FLAKY-29: Qwen A4.9 can exit before its first MCP post
+
+- Symptom: step 4 times out waiting for the browser to see `Long turn.` (`features/s3_driver_limits_test.go:77`).
+- Reproduced cause: the fake CLI reads Qwen's MCP settings, then overwrites them whenever `OPENCODE_CONFIG_CONTENT` is present (`internal/host/fakecli/mcp.go:40–47`). With an empty OpenCode MCP map on #363, Qwen started and exited, the host received no MCP post, and the home had zero posts and a failed task. The same example passed with that variable unset.
+- Status: open in the host fake CLI. The original run recorded only the browser deadline. Its environment and the stage at which its post stopped are unknown. #363 fixes the teardown race and still admits the reproduced failure.
+
 ### 2026-11-23 · deviation · An agent without a driver cannot join a group
 
 - Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
@@ -14,7 +20,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-23 · deviation · An intermittent failure cannot be explained from one occurrence
 
-- Symptom: several tests called flaky were product races (A9.24 twice, the A9.23 bulletin attach, the A10.3 pause read, a host teardown race). Each took hours of stress runs to find, and A7.9 on Windows still has no cause. The owner's rule of 2026-11-23: an intermittent failure must not depend on being reproduced; the logs of its one occurrence, in CI or on the owner's machines, must point at the cause.
+- Symptom: several tests called flaky were product races (A9.24 twice, the A9.23 bulletin attach, the A10.3 pause read, a host teardown race). Each took hours of stress runs to find, and the first Windows A7.9 failure contained no candidate-pair trace. The owner's rule of 2026-11-23: an intermittent failure must not depend on being reproduced; the logs of its one occurrence, in CI or on the owner's machines, must point at the cause.
 - Cause: the node logs only errors, in prose (`log.Printf` in `internal/host/deliver.go`, `internal/home/run.go`, `internal/node/session.go`). A wait in a test that times out says only that it did (`features/m4_test.go:70`, "timed out waiting on M4 home frames"). CI keeps nothing from a failed scenario (`.github/workflows/backend.yml`).
 - Status: open. The contract is [diagnostics](planning/contracts/diagnostics.md); the units are DG-1 to DG-7 of `planning/steps/parallel-plan-step-2-3.md` section 4.3.
 
@@ -155,12 +161,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: cancelling an invitation stops browser handling, but the rendezvous socket remains in the room until expiry or disconnect. Retrying the same room on the same socket does not trigger a new `joined` from a home already in the room.
 - Cause: `internal/rendezvous/room.go` has no leave frame. It ignores duplicate joins by the same socket and caps membership at 16 rooms per connection.
 - Status: open; the browser must keep the socket alive for existing homes.
-
-### 2026-11-22 · limitation · A7.9 does not run on Windows
-
-- Symptom: on the Windows CI runner the A7.9 scenario (`features/m7.feature`, moving an open takeover PeerConnection from direct to TURN relay) fails with "selected-pair statistics did not transition to relay" (CI run 45037819755, twice). Linux and macOS pass.
-- Cause: the test cannot force the takeover connection from direct to TURN on Windows. pion ICE renominates to the relay pair only when the relay's measured round trip beats the direct pair's by more than 10 ms (`shouldRenominate`).
-- Status: open, accepted. The scenario is tagged `@not-windows`, which the acceptance runner leaves out on Windows (`features/acceptance_test.go`, `tags`); Linux and macOS still run it. Product behaviour is unchanged.
 
 ### 2026-11-22 · limitation · A9.20 cannot set up a watcher before home invitation support lands
 
@@ -733,6 +733,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-23 · bug · FLAKY-21: a paired node duplicated ICE candidates on the same socket
+
+- Symptom: `TestNetStatusLiveNodeRuntime` timed out before the browser's `ctl` opened.
+- Cause: pairing saved the shared paths (`internal/node/pair.go:345–349`) and `routesFor` appended them again (`internal/node/node.go:471`). Each candidate went twice over one socket. With the writer held during gathering, all 16 sender slots filled before the SDP answer and the server dropped it (`internal/rendezvous/server.go:159`).
+- Status: fixed by using each path ID once and retaining the current ICE configuration. In the same schedule the answer entered the queue and `ctl` opened.
+
+### 2026-11-23 · bug · Windows A7.9 could keep the direct pair selected
+
+- Symptom: Windows kept a working 500 ms direct pair even with a succeeded sub-millisecond relay pair. A7.9 needs a direct-to-relay transition on the original connection to exercise terminal handback.
+- Cause: the fixture delayed direct packets but still delivered them (`features/m7_test.go:2004` before this fix). Pion v4.4.8 ranks succeeded pairs before it tests the RTT improvement (`selection.go:276–287`, `agent.go:2394–2459`). A relay nomination through a different interface could also reach the node as a peer-reflexive address.
+- Status: the fixture cuts direct UDP, pairs the browser's TURN allocation with the node interface that owns the advertised relay IP, and waits for ICE selection. The Windows exclusion is removed. The separate relay-to-direct probe was dropped from version 1 in [#172](https://github.com/huanchong-99/SoloDawn/pull/172#issuecomment-7057401511).
 
 ### 2026-11-23 · bug · External AI removal could be triggered by one click
 
