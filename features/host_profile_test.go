@@ -53,7 +53,19 @@ func (w *profileTurnWorld) setupRoster(cleanup func(func())) error {
 	w.putProfile(turnAIID, "strong", "offline", "", "Go backend")
 	w.putProfile(turnPeerID, "light", "limited", "", "docs")
 	w.putProfile(turnSecID, "standard", "working", turnTaskID, "")
+	w.putUsage(turnAIID, proto.Usage{WindowPct: new(40.0), WindowResets: new(int64(turnTimeMS + 9_000_000))})
+	w.putUsage(turnPeerID, proto.Usage{WindowPct: new(100.0)})
 	return nil
+}
+
+func (w *profileTurnWorld) putUsage(id string, usage proto.Usage) {
+	raw, _ := w.h.Rows.Get(turnGroupID, "member", id)
+	var ai proto.AIMemberRow
+	if err := proto.Decode(raw, &ai); err != nil {
+		panic(err)
+	}
+	ai.Usage = usage
+	w.h.Rows.Put(turnGroupID, "member", id, turnMustJSON(ai))
 }
 
 func (w *profileTurnWorld) putProfile(id, tier, state, task, skills string) {
@@ -79,6 +91,7 @@ func (w *profileTurnWorld) checkAssignmentRules() error {
 		"Match the work to their skills",
 		"Spread independent tasks over different AIs",
 		"members with the same CLI on the same computer share one subscription",
+		"Prefer AIs with more of their window left",
 		"Do not choose an AI that is `limited` or `offline`")
 }
 
