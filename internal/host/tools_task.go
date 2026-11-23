@@ -140,7 +140,7 @@ type tskCloudRun struct {
 type tskPart struct {
 	mu      sync.Mutex
 	cancels map[tskCloudKey]*tskCloudRun
-	claimed map[tskCloudHead]*tskCloudRun
+	claimed map[tskCloudHead]struct{}
 }
 
 func tskDecodeArgs(raw json.RawMessage, dst any) error {
@@ -392,11 +392,6 @@ func tskSendSubmission(ctx context.Context, h *Host, c Caller, r tskSubmitReady,
 	if _, err := h.Command(ctx, c.Home, tskReportPost(h, c, r, summary, pr)); err != nil {
 		return tskSubmitResult{}, err
 	}
-	p := Part[tskPart](h)
-	head := tskCloudHead{tskCloudKey{group: c.Group, task: c.Task}, r.head}
-	p.mu.Lock()
-	prior := p.claimed[head]
-	p.mu.Unlock()
 	if _, err := h.Command(ctx, c.Home, tskSubmittedCmd(h, c, r, pr)); err != nil {
 		return tskSubmitResult{}, err
 	}
@@ -404,8 +399,11 @@ func tskSendSubmission(ctx context.Context, h *Host, c Caller, r tskSubmitReady,
 		return tskSubmitResult{OK: true, Commit: r.head}, nil
 	}
 	hc := HostedCheck{Task: c.Task, Branch: r.branch, Commit: r.head, PR: pr.Number, Since: time.UnixMilli(r.task.Checks.Local.At)}
-	pollCtx, run := p.beginCloud(head, prior)
-	tskLaunchHostedCheck(pollCtx, run, p, h, c.Home, head.tskCloudKey, hc)
+	p := Part[tskPart](h)
+	p.mu.Lock()
+	delete(p.claimed, tskCloudHead{tskCloudKey{group: c.Group, task: c.Task}, r.head})
+	p.mu.Unlock()
+	startHostedCheck(h, c.Home, c.Group, hc)
 	return tskSubmitResult{OK: true, Commit: r.head, PR: pr.Number}, nil
 }
 
@@ -450,14 +448,9 @@ func startHostedCheck(h *Host, home, group string, hc HostedCheck) {
 	p := Part[tskPart](h)
 	key := tskCloudKey{group: group, task: hc.Task}
 	pollCtx, run := tskBeginCloud(p, key, hc.Commit)
-	tskLaunchHostedCheck(pollCtx, run, p, h, home, key, hc)
-}
-
-func tskLaunchHostedCheck(pollCtx context.Context, run *tskCloudRun, p *tskPart, h *Host, home string, key tskCloudKey, hc HostedCheck) {
 	if run == nil {
 		return
 	}
-	group := key.group
 	wt := sessionDir(h, Session{SessionKey: SessionKey{Group: group}, Folder: "wt/" + strings.TrimPrefix(hc.Branch, "task/")})
 	grp, _ := lookupRow[proto.GroupRow](h, group, "group", group)
 	forge := TaskForge{Worktree: wt, Branch: hc.Branch, Base: grp.Base, Templates: grp.Templates}
@@ -468,27 +461,23 @@ func tskLaunchHostedCheck(pollCtx context.Context, run *tskCloudRun, p *tskPart,
 }
 
 func tskBeginCloud(p *tskPart, key tskCloudKey, commit string) (context.Context, *tskCloudRun) {
-	return p.beginCloud(tskCloudHead{key, commit}, nil)
-}
-
-func (p *tskPart) beginCloud(head tskCloudHead, replace *tskCloudRun) (context.Context, *tskCloudRun) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.cancels == nil {
 		p.cancels = map[tskCloudKey]*tskCloudRun{}
-		p.claimed = map[tskCloudHead]*tskCloudRun{}
+		p.claimed = map[tskCloudHead]struct{}{}
 	}
-	if claim := p.claimed[head]; claim != nil && claim != replace {
+	head := tskCloudHead{key, commit}
+	if _, claimed := p.claimed[head]; claimed {
 		return nil, nil
 	}
-	key := head.tskCloudKey
 	if prev := p.cancels[key]; prev != nil {
 		prev.cancel()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	run := &tskCloudRun{commit: head.commit, cancel: cancel}
+	run := &tskCloudRun{commit: commit, cancel: cancel}
 	p.cancels[key] = run
-	p.claimed[head] = run
+	p.claimed[head] = struct{}{}
 	return ctx, run
 }
 
