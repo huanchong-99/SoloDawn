@@ -86,7 +86,8 @@ func (w *a10ModelsWorld) setupModels(all bool) error {
 
 func a10ModelGit(git, dir string) error {
 	if runtime.GOOS == "windows" {
-		return os.Setenv("PATH", os.Getenv("PATH")+string(os.PathListSeparator)+filepath.Dir(git))
+		root := filepath.Dir(filepath.Dir(git))
+		return os.Setenv("PATH", strings.Join([]string{os.Getenv("PATH"), filepath.Dir(git), filepath.Join(root, "mingw64", "bin"), filepath.Join(root, "usr", "bin")}, string(os.PathListSeparator)))
 	}
 	return hostAgentsLinkOrCopy(git, filepath.Join(dir, hostAgentsExe("git")))
 }
