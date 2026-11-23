@@ -942,22 +942,20 @@ func TestTakeoverHandsBackOnceWhenRowsArriveDuringItsHandBack(t *testing.T) {
 type tkGatedOwner struct {
 	*tkOwner
 	calls atomic.Int32
+	relay <-chan struct{}
 }
 
 func (o *tkGatedOwner) Path() string {
-	// Call 1 is the start check; calls 2 to 4 are the watch: before any
-	// signal, after signal 1, after signal 2.
 	if o.calls.Add(1) == 4 {
-		for o.tkOwner.Path() != "relay" {
-			time.Sleep(time.Millisecond)
-		}
+		<-o.relay
 	}
 	return o.tkOwner.Path()
 }
 
 func TestTakeoverFakeOwnerSetPathNeverBlocksWhenTheWatchLeavesASignalUnread(t *testing.T) {
 	r := newTkRig(t)
-	if err := r.startFrom(&tkGatedOwner{tkOwner: r.owner}, tkSec, ""); err != nil {
+	relay := make(chan struct{})
+	if err := r.startFrom(&tkGatedOwner{tkOwner: r.owner, relay: relay}, tkSec, ""); err != nil {
 		t.Fatal(err)
 	}
 	for range 3 {
@@ -968,11 +966,39 @@ func TestTakeoverFakeOwnerSetPathNeverBlocksWhenTheWatchLeavesASignalUnread(t *t
 		r.owner.setPath("relay")
 		close(sent)
 	}()
-	r.waitReleased(tkSec)
 	select {
 	case <-sent:
 	case <-time.After(3 * time.Second):
 		<-r.owner.changed
+		<-sent
+		close(relay)
 		t.Fatal("setPath stayed blocked on a full signal channel after the watch left")
 	}
+	close(relay)
+	r.waitReleased(tkSec)
+}
+
+func TestTakeoverFakeOwnerSetPathWithFullSignalChannel(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		owner := newTkOwner("direct")
+		owner.changed <- struct{}{}
+		sent := make(chan struct{})
+		go func() {
+			owner.setPath("relay")
+			close(sent)
+		}()
+		synctest.Wait()
+		select {
+		case <-sent:
+		default:
+			<-owner.changed
+			t.Fatal("setPath blocked on a full signal channel")
+		}
+		if path := owner.Path(); path != "relay" {
+			t.Fatalf("path = %q, want relay", path)
+		}
+		if got := len(owner.changed); got != 1 {
+			t.Fatalf("pending signals = %d, want 1", got)
+		}
+	})
 }

@@ -4,7 +4,6 @@ package host
 
 import (
 	"os/exec"
-	"strconv"
 	"syscall"
 )
 
@@ -16,6 +15,6 @@ const createNoWindow = 0x08000000
 func detachTerminal(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow}
 	cmd.Cancel = func() error {
-		return exec.Command("taskkill.exe", "/f", "/t", "/pid", strconv.Itoa(cmd.Process.Pid)).Run()
+		return taskkill(cmd.Process.Pid)
 	}
 }

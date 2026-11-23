@@ -482,7 +482,7 @@ describe('a takeover', () => {
     const pc = computer();
     const tk = new Takeover(gid, memberId, undefined, () => {});
     tk.follow(pc.target, relay);
-    expect([tk.phase, pc.commands]).toEqual(['relay', []]);
+    expect([tk.phase, pc.commands]).toEqual(['idle', []]);
 
     const live = new Takeover(gid, memberId, undefined, () => {});
     live.follow(pc.target, direct);
@@ -495,6 +495,26 @@ describe('a takeover', () => {
     live.follow(pc.target, relay);
     await new Promise((later) => setTimeout(later));
     expect([live.phase, pc.sent('takeover.end')]).toEqual(['relayed', []]);
+  });
+
+  it('starts when a relayed path recovers to direct', async () => {
+    const pc = computer();
+    const tk = new Takeover(gid, memberId, undefined, () => {});
+    tk.follow(pc.target, relay);
+    tk.follow(pc.target, direct);
+    expect(tk.phase).toBe('starting');
+    await pc.answer();
+    expect([tk.phase, pc.channels.length]).toEqual(['active', 1]);
+  });
+
+  it('starts again when a path refused as relayed turns relay and recovers to direct', async () => {
+    const pc = computer();
+    const tk = new Takeover(gid, memberId, undefined, () => {});
+    tk.follow(pc.target, direct);
+    await pc.answer({ re: 1, err: { code: 'relay', msg: '' } });
+    tk.follow(pc.target, relay);
+    tk.follow(pc.target, direct);
+    expect(tk.phase).toBe('starting');
   });
 
   it('shows a refusal, a lost channel and the computer closing the terminal', async () => {
