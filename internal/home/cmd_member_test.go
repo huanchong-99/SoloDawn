@@ -82,6 +82,7 @@ func TestMemberAddAIHostAndPath(t *testing.T) {
 		CLI: "codex", Host: laptop.ID(), HostName: "studio", Secretary: false,
 		Account: "team", Allow: []string{}, Approvers: []string{browser.ID()},
 		State: "dormant", Since: clock, Path: "direct", Usage: proto.Usage{},
+		Profile: proto.Profile{Tier: "standard"},
 	}
 	equal(t, res.Answer, store.Outcome{OK: true})
 	equal(t, res.GroupsChanged, false)
@@ -260,6 +261,7 @@ func TestMemberSetEachFieldIndividually(t *testing.T) {
 			s.AIs[grpWorkerA] = initial
 			want := initial
 			want.Seq = 11
+			want.Tier = "standard"
 			c.want(&want)
 			cmd := memSetCmd(100, grpWorkerA)
 			c.set(&cmd)

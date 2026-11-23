@@ -259,9 +259,10 @@ func (s *State) tskStep(c Command, id proto.ID, ev Event) (proto.TaskRow, Effect
 	ev.Limits = s.Group.Limits
 	ev.Remote = s.Group.Forge != "none"
 	ev.Pending = tskPending(c.Disk, task.ID)
+	ev.Stronger = s.profileHasStronger(task, ev)
 	moved, fx, err := Step(task, ev)
 	if err != nil {
-		return proto.TaskRow{}, Effects{}, &Refusal{err.Error(), "the task machine refused the command"}
+		return proto.TaskRow{}, Effects{}, profileStepRefusal(task, ev, err)
 	}
 	return moved, fx, nil
 }
