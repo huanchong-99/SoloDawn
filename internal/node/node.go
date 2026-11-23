@@ -152,7 +152,6 @@ type nodeRuntime struct {
 	pairer    *Pairer
 	socks     *peer.Sockets
 	peer      *peer.Peer
-	rvSignal  peer.SignalReceiver
 	httpSrv   *http.Server
 	httpPort  int
 	localPath *peer.Path
@@ -285,7 +284,6 @@ func (n *nodeRuntime) stepNetwork() error {
 		"watch:": func(s *peer.Stream) { n.host.ServeWatch(s) },
 	})
 	n.pairer.Peer = n.peer
-	n.rvSignal = n.peer
 	n.host.Connect = n.sessions.connectHome(n.dialHome)
 	ln, err := listenNodeHTTP(":" + strconv.Itoa(defaultWebPort))
 	if err != nil {
@@ -612,11 +610,10 @@ func (n *nodeRuntime) serveOneRV(ctx context.Context, url string, loop *rvLoop) 
 	opened := time.Now()
 	n.mu.Lock()
 	n.rvPaths[url] = path
-	receiver := n.rvSignal
 	n.mu.Unlock()
 	loop.finishFirst(nil)
 	stop := context.AfterFunc(ctx, func() { path.Close() })
-	path.Serve(ctx, receiver, n.rvEvents(ctx, path))
+	path.Serve(ctx, n.peer, n.rvEvents(ctx, path))
 	stop()
 	path.Close()
 	n.mu.Lock()

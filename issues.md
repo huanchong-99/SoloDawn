@@ -6,23 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-23 · bug · FLAKY-29: Qwen A4.9 did not observe the initial post
+### 2026-11-23 · bug · FLAKY-31: two-task flow did not observe its second summary
 
-- Symptom: A10.3/A4.9 for Qwen Code failed with `step 4: timed out waiting on home pushes`.
-- Fixture audit: A4.9 creates a fresh node, store and MCP socket under a unique root (`features/m3_test.go:143`–`:164`, `features/helpers_test.go:238`–`:250`). Each fake server binds a fresh ephemeral port (`internal/host/fakecli/opencode.go:35`–`:43`); the new launch inherits A4.9's script path, not A4.8's (`features/node_local_test.go:34`–`:37`, `features/helpers_test.go:1212`–`:1223`). Scenario cleanup closes the MCP listener and waits for its handlers; node cleanup cancels and waits for the host runtime, which reaps Qwen and its children (`features/helpers_test.go:1016`–`:1021`, `internal/node/nodetest/nodetest.go:131`–`:136`, `internal/host/run.go:79`–`:90`, `internal/host/serve.go:30`–`:35`). Neither example replaces `host.Drivers`. The separate unconditional restore of `host.Deliver` in `features/host_run_test.go:322` races with `internal/host/run.go:592`; it was observed with the scenario steps passing, not with the step-4 timeout.
-- Status: open. These lifetimes rule out A4.9 reusing A4.8's socket, server port configuration or script selection; they do not guarantee a new CLI launch and its post complete within ten seconds. The step-4 failure now reports MCP input receipt, the task and member states and message row at home, and the fake CLI log (`features/s3_driver_limits_test.go:111`–`:132`). In a negative control, changing only the expected browser text correctly reported an MCP request and a stored message.
-
-### 2026-11-23 · bug · FLAKY-21: WebRTC ctl did not open in the live net-status test
-
-- Symptom: `TestNetStatusLiveNodeRuntime` once reported `WebRTC ctl connection did not open` on Linux.
-- Signaling audit: the pair command opens the remote rendezvous path before starting the room exchange (`internal/node/node.go:698`–`:716`). The browser writes the room frame before dialing (`internal/node/node_test.go:491`–`:496`, `:532`–`:539`); the server forwards both frames on the same ordered path and the node handles them in order (`internal/rendezvous/room.go:28`–`:38`, `internal/rendezvous/server.go:100`–`:117`, `:284`–`:293`, `internal/peer/path.go:178`–`:188`). The offer cannot overtake a delivered room frame. In 500 Linux race iterations the node accepted all 500 offers, with no unknown browser at receipt. The browser applies the answer before flushing early candidates (`internal/peer/signal.go:209`–`:226`); an accepted offer by itself does not prove the answer was applied or ctl opened.
-- Status: open. Another 450 Linux race iterations measured 1,350 TURN relay socket allocations without errors (maximum 3.22 ms) and 900 completed ICE gathers (maximum 347.30 ms), with no ctl failure. This does not bound TURN, ICE or ctl in the original failing iteration. The 10-second guard now reports the node's offer receipt and pairing status plus browser ICE, gathering, signaling and selected pair (`internal/node/node_test.go:563`–`:599`). A forced offer refusal verified the output.
-
-### 2026-11-23 · limitation · A7.9 does not run on Windows
-
-- Symptom: the Windows runner reached the initial direct pair, but A7.9 then reported `selected-pair statistics did not transition to relay` twice (CI run 45037819755). A7.9 tests **direct to relay** on the same connection, not the client's return to direct (`features/m7.feature:51`–`:56`).
-- Cause: the fixture delays direct traffic, rather than disabling the direct path (`features/m7_test.go:61`–`:83`, `:2000`–`:2016`). On the Windows lab runner (PR #361, job 137682872332), samples 1, 3 and 5 of 5 stayed connected with gathering complete. The selected, nominated srflx/srflx pairs measured 500.045, 500.253 and 500.421 ms. Each relay/srflx alternative was succeeded but not nominated (0.331, 0.304 and 0 ms respectively; zero is no RTT measurement). Pion ICE v4.4.8 ranks succeeded pairs by candidate types, RTT and recent responses before applying the 10 ms switch rule to the top-ranked pair (`selection.go:276`–`:295`, `agent.go:2324`–`:2388`, `:2394`–`:2459`). In sample 5 the unmeasured relay can score at most 20, below the direct pair's minimum 23.01. In samples 1 and 3 the relay had a faster measured RTT but was never nominated; the timeout snapshots do not identify the exact score or selection decision on each tick.
-- Status: keep `@not-windows`: a reachable relay and a 500 ms delay do not reliably force this test-only renomination (`features/m7_test.go:312`); three Windows samples failed before the node's handback and ctl assertions and two passed. No product relay-to-direct behavior is implicated.
+- Symptom: Windows run 45174609834, job 137696879496, failed the confirm-and-run step at `features/m5_test.go:1589` with `timed out waiting for two summary cards` after 17.76 s. The first summary wait passed; the following merge assertion was skipped.
+- Script swap: `writeScriptFile` uses a new numbered path for every write and publishes it after the write returns (`features/m5_test.go:650`–`:657`). The fake CLI reads its inherited file once with `os.ReadFile` (`internal/host/fakecli/replay.go:57`–`:66`, `:83`–`:92`). The first task holding its old file cannot prevent the fixture from creating the new one. The review hook switches both paths before forwarding the review request that can lead to the merge (`features/m5_test.go:913`–`:926`, `:1568`–`:1581`).
+- Assignment and hooks: the home releases the dependent task and queues its assignment in the same result as the first merge, not on a later timer (`internal/home/cmd_merge.go:45`–`:58`, `:162`–`:194`). Host delivery can still hold it for pause or member state (`internal/host/deliver.go:856`–`:869`, `:886`–`:895`). The two commit hooks are FIFO under the world mutex and the dependency prevents the second task from normally calling checks first (`features/m5_test.go:677`–`:692`, `:1483`–`:1484`). A hook error is checked by the wait; the original log records a timeout, not a hook error.
+- Status: open, no second-summary timeout in 400 mixed-CPU or 200 single-CPU Linux race samples; three mixed-CPU samples failed a later review/merge turn-count assertion. The timeout now shows task states, queued and recently delivered/refused items, hook errors, CLI launches and summary counts at the home and browser (`features/m5_test.go:1595`–`:1614`). The original log cannot distinguish held assignment, a stalled task/review or summary turn, or a stored summary not reaching the browser.
 
 ### 2026-11-23 · deviation · An agent without a driver cannot join a group
 
@@ -167,6 +156,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: cancelling an invitation stops browser handling, but the rendezvous socket remains in the room until expiry or disconnect. Retrying the same room on the same socket does not trigger a new `joined` from a home already in the room.
 - Cause: `internal/rendezvous/room.go` has no leave frame. It ignores duplicate joins by the same socket and caps membership at 16 rooms per connection.
 - Status: open; the browser must keep the socket alive for existing homes.
+
+### 2026-11-22 · limitation · A7.9 does not run on Windows
+
+- Symptom: on the Windows CI runner the A7.9 scenario (`features/m7.feature`, moving an open takeover PeerConnection from direct to TURN relay) fails with "selected-pair statistics did not transition to relay" (CI run 45037819755, twice). Linux and macOS pass.
+- Cause: the test cannot force the takeover connection from direct to TURN on Windows. pion ICE renominates to the relay pair only when the relay's measured round trip beats the direct pair's by more than 10 ms (`shouldRenominate`).
+- Status: open, accepted. The scenario is tagged `@not-windows`, which the acceptance runner leaves out on Windows (`features/acceptance_test.go`, `tags`); Linux and macOS still run it. Product behaviour is unchanged.
 
 ### 2026-11-22 · limitation · A9.20 cannot set up a watcher before home invitation support lands
 

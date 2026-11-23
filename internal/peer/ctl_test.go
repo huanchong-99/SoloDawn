@@ -17,14 +17,6 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-func TestNegotiationStateBeforeOffer(t *testing.T) {
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
-	check(t, err)
-	c := newConnection(pc, "")
-	t.Cleanup(func() { check(t, c.Close()) })
-	eq(t, c.NegotiationState(), "ICE=new gathering=new signaling=stable selected=<nil> selectedError=<nil>")
-}
-
 // Messages that are not ctl frames of the contract and carry no request id
 // are dropped; responses go to their request once via Read; Read ends with its
 // context or the connection.

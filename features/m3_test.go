@@ -53,7 +53,6 @@ type m3World struct {
 	activeHost  *host.Host
 	sockPath    string
 	closeMCP    func()
-	mcpInput    io.Writer
 	browser     homeFrameClient
 	browserConn *home.Conn
 	nextReq     int64
@@ -153,7 +152,7 @@ func (w *m3World) startCluster() error {
 	w.cluster = nodetest.Start(w.tb, nodetest.Config{Root: w.root, BinDir: w.f.fakeCLIs, Nodes: 1})
 	n := w.node()
 	w.activeHost = n.Host
-	sockPath, stop, err := attachMCPSocket(w.f.t, w.cleanup, n.Host, filepath.Join(n.Dir, "mcp"), w.mcpInput)
+	sockPath, stop, err := attachMCPSocket(w.f.t, w.cleanup, n.Host, filepath.Join(n.Dir, "mcp"))
 	if err != nil {
 		return err
 	}

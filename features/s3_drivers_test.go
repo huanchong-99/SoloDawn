@@ -24,7 +24,6 @@ type s3DriverWorld struct {
 	cleanup func(func())
 	caps    *hostCapsWorld
 	agent   string
-	mcp     s3MCPInput
 }
 
 func s3DriverSteps(sc *godog.ScenarioContext, f fixtures) {
@@ -61,7 +60,7 @@ func (w *s3DriverWorld) setup(agent string) error {
 		}
 		w.f = f
 	}
-	m := &m3World{f: w.f, cleanup: w.cleanup, tb: scenarioTB{TB: w.f.t, cleanup: w.cleanup}, groups: map[string]string{}, homeView: newHomeView(), mcpInput: &w.mcp}
+	m := &m3World{f: w.f, cleanup: w.cleanup, tb: scenarioTB{TB: w.f.t, cleanup: w.cleanup}, groups: map[string]string{}, homeView: newHomeView()}
 	w.caps = &hostCapsWorld{f: w.f, cleanup: w.cleanup, m3: m}
 	return s3Run(
 		m.startCluster,
