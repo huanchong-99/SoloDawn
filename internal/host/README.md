@@ -300,6 +300,7 @@ and person mentions are used, and the post is signed as the node owner without
 `as`. It carries the source project's id and name and the secretary's name.
 An unknown destination lists valid ids and names; non-team destinations are
 refused. Team state is read state-only when it is not already cached.
+Bulletin `post` waits for the team home's attach, with the same bound as `host.join`, before answering `home_unreachable`.
 
 `tools_talk.go` registers `post`, `read_thread`, `list_members`, `list_tasks`, `note_put` and `note_list` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1 and 5), and `tools_kb.go` registers `kb_put` and `kb_search` for every session ([step-3/knowledge.md](../../planning/contracts/step-3/knowledge.md), section 5).
 `post`, `note_put` and `kb_put` (both `name` and `text`) run `CheckOutboundSecret` before signing or sending any command to the home.
