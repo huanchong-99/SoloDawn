@@ -1,6 +1,6 @@
 # Agent Note: Mutation gate: declarations, case lines and equivalent mutants
 
-Status: proposed
+Status: implemented
 
 ## Problem
 
@@ -16,7 +16,9 @@ Separately, two LIVED mutants are equivalent: no test can tell the mutant from t
 
 The 22nd NOT COVERED mutant (`internal/node/schedule.go:22:97`) is not dropped by this proposal; it is a fix unit's job.
 
-## Proposal
+## Decision
+
+Approval: approved by the owner and applied to `.project-standard/` on 2026-11-23 with `.claude/rules-apply/apply-rules-364-114.sh` (Rules proposal #364); the tamper check passed after applying.
 
 1. Language, thresholds, tiers, modules, dependency rules, protected paths: unchanged. Zero surviving or uncovered mutants stays the rule.
 2. A new protected script, `.project-standard/scripts/mutants.py`, reads gremlins' output and prints the LIVED and NOT COVERED lines that stay. It exits 1 if any stays. It drops:
@@ -112,16 +114,7 @@ sys.exit(main())
 - **Go AST tool.** Exact, but a new build target for a filter; the text rule is checked by the verification below and fails closed (a line it misreads stays reported).
 - **Changing code to dodge the tool** (turning constants into functions). It adds code for a tool defect; the owner's rule is least code.
 
-## Acceptance criteria
-
-After the owner applies both files:
-
-- On `rebuild` at `f5d63a914`, fed the findings of #358: 21 of 22 NOT COVERED lines and the two equivalent LIVED lines are dropped; 28 LIVED and `internal/node/schedule.go:22:97` stay; exit 1.
-- A NOT COVERED mutant on an ordinary statement still fails the gate.
-- `python3 .project-standard/scripts/gate.py --stage harden` passes on this branch (no Go change).
-- On approval, the record moves to `docs/decisions/implemented/process/` with `Status: implemented` in the same branch before the merge, and `PROJECT.md` records the change.
-
-## Risks
+## Consequences
 
 - **Case conditions go unmeasured when a case is never reached.** A `case` expression whose clause no test reaches is not reported through its expression line; the clause body lines still are.
 - **Text matching.** A `var x = func() {` line is kept, but a multi-line declaration is judged by bracket depth, with strings and comments stripped by regular expression; a raw string holding unbalanced brackets could misjudge a declaration's end. Misjudging only keeps or drops lines in that declaration.
