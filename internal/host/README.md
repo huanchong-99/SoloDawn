@@ -291,6 +291,14 @@ The rules are in [mcp-tools.md](../../planning/contracts/mcp-tools.md) and [loca
 `host.join` forwards optional `model`, `effort`, `tier` and `skills` unchanged and permits several members of the same CLI in one group. `host.leave` selects `member` within the given group and agent; omitting it is `bad_request` when more than one distinct member matches. Multiple sessions of one member do not make the selection ambiguous.
 - **Lock order and channels.** `joinPart.syncMu` serializes connection reconciliation across `Store` reads; `joinPart.mu` is a leaf lock that guards only in-memory `joinPart` fields and never calls into `Host`, `Sessions`, `Rows`, `Store`, `Connect` or cancel functions. Each waiter channel in `joinPart.waiters` has a single reader, `joinWaitChannel` in `joinAwaitAttach`.
 
+# External AIs
+
+`external.go` implements the host side of the external AI ([external.md](../../planning/contracts/step-3/external.md) sections 2 to 4, 6, 9 and 10).
+
+- **Joining.** `host.join` with `agent` `external` needs `account` (`personal`, `team` or `api_key`), takes an optional `tool`, refuses `secretary` `true` and reads no `agent.set`. It sends `member add_ai` with `cli` `external` and that `tool`, creates an ordinary `GroupSession` with `Agent` `external` and no `CLISession`, then reports the state. `host.leave` and `member remove` are unchanged. `Agents` ends with one entry `external`; the node fills its `groups`.
+- **Runs.** Delivery never starts a turn for an external member. `ExternalTake` hands out the next batch: it reuses delivery's selection, routing, folder, `delivered` audit and acknowledgement, moves the session row to `Working` and opens the member's one run, numbered by the batch's first item. `context` is the session instructions, `instructions/external.md` and the replaced-session context. `ExternalDone` with the open run moves the row to `Waiting`; with `failed` it reports `turn_interrupted` `crash` with that text, which fails a task session. After `limits.turn_minutes` the run ends the same way with `timeout`, and the process is not stopped. A `done` for any other run changes nothing. A restart reports `crash` through `ReportSaved`.
+- **Presence and state.** `ExternalPresent` marks a command or MCP connection open until its `leave`; the member stays present for 180 s after the last one. The reported state is `working` while a run is open, then `offline` (absent or all AIs offline), `paused`, and otherwise `waiting`.
+
 # Talk and group state tools
 
 `tools_bulletin.go` handles the secretary-only `post.group` argument. It uses

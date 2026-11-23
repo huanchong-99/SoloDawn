@@ -566,7 +566,7 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       // Add Secretary on coordinator (Node 1), Claude Code on workstation (Node 0), Codex on workstation (Node 0).
       await members.locator('button', { hasText: 'Add AI' }).click();
       const addDlg = page.locator('dialog.dlg[open]');
-      await poll(() => addDlg.locator('.choice').count()).toBe(4);
+      await poll(() => addDlg.locator('.choice').count()).toBe(6);
       await addDlg
         .locator('.choice', { hasText: 'Claude Code · coordinator' })
         .locator('input')
@@ -580,7 +580,7 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await poll(() => members.locator('.member').count()).toBe(1);
 
       await members.locator('button', { hasText: 'Add AI' }).click();
-      await poll(() => addDlg.locator('.choice').count()).toBe(4);
+      await poll(() => addDlg.locator('.choice').count()).toBe(6);
       await addDlg
         .locator('.choice', { hasText: 'Claude Code · workstation' })
         .locator('input')
@@ -590,14 +590,14 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await poll(() => members.locator('.member').count()).toBe(2);
 
       await members.locator('button', { hasText: 'Add AI' }).click();
-      await poll(() => addDlg.locator('.choice').count()).toBe(4);
+      await poll(() => addDlg.locator('.choice').count()).toBe(6);
       await addDlg.locator('.choice', { hasText: 'Codex · workstation' }).locator('input').check();
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
       await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(3);
 
       await members.locator('button', { hasText: 'Add AI' }).click();
-      await poll(() => addDlg.locator('.choice').count()).toBe(4);
+      await poll(() => addDlg.locator('.choice').count()).toBe(6);
       await addDlg.locator('.choice', { hasText: 'Codex · coordinator' }).locator('input').check();
       await addDlg.getByRole('textbox', { name: 'Name in the group' }).fill('Reviewer');
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
@@ -751,7 +751,7 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       const members = page.locator('#chat-side .members');
       await members.locator('button', { hasText: 'Add AI' }).click();
       const addDlg = page.locator('dialog.dlg[open]');
-      await poll(() => addDlg.locator('.choice').count()).toBe(2);
+      await poll(() => addDlg.locator('.choice').count()).toBe(3);
       await addDlg
         .locator('.choice', { hasText: 'Claude Code · workstation' })
         .locator('input')
