@@ -24,6 +24,7 @@ import (
 
 	gopty "github.com/aymanbagabas/go-pty"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
+	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
@@ -277,6 +278,11 @@ type ptySpyHandle struct {
 	resizes []ptySize
 }
 
+type ptySize struct {
+	cols int
+	rows int
+}
+
 func (s *ptySpyHandle) Read(p []byte) (int, error) {
 	s.reads.Add(1)
 	return s.ptyHandle.Read(p)
@@ -303,12 +309,16 @@ func installPTYSpy(t *testing.T) func() *ptySpyHandle {
 	origWrap := ptyWrap
 	var mu sync.Mutex
 	var latest *ptySpyHandle
-	ptyWrap = func(ptmx gopty.Pty) ptyHandle {
-		spy := &ptySpyHandle{ptyHandle: origWrap(ptmx)}
+	ptyWrap = func(ptmx gopty.Pty) (ptyHandle, error) {
+		handle, err := origWrap(ptmx)
+		if err != nil {
+			return nil, err
+		}
+		spy := &ptySpyHandle{ptyHandle: handle}
 		mu.Lock()
 		latest = spy
 		mu.Unlock()
-		return spy
+		return spy, nil
 	}
 	t.Cleanup(func() { ptyWrap = origWrap })
 	return func() *ptySpyHandle {
@@ -402,7 +412,7 @@ func TestPTYInteractiveRoundTripAndChannelCloseTeardown(t *testing.T) {
 	}
 	term.waitContains(t, "ACK:alpha-token")
 
-	// A duplicate channel for the same (group, member) is closed and drained without disturbing the active bridge.
+	// A duplicate channel for the same (group, member) is closed without disturbing the active bridge.
 	dup := newPTYTestTerminal("pty:" + ptyTestGroupID + ":" + ptyTestAIID)
 	h.ServeTerminal(dup)
 	if !dup.isClosed() {
@@ -541,13 +551,8 @@ func TestPTYBackPressureStopsReadingWhileTerminalWriteBlocks(t *testing.T) {
 	<-serveDone
 }
 
-func TestPTYResizeSurfaceAndBoundaries(t *testing.T) {
+func TestPTYResizeSurfaceRejectsInvalidFrames(t *testing.T) {
 	h := newPTYTestHost(t)
-	getSpy := installPTYSpy(t)
-	registerPTYTestDriver(t, "ptyresize", func(Launch) ([]string, string, error) {
-		return ptyHelperArgv(t, "pty-echo"), "sess-resize", nil
-	})
-
 	handle := Surface["pty.resize"]
 	if handle == nil {
 		t.Fatal("Surface[\"pty.resize\"] is not registered")
@@ -565,58 +570,48 @@ func TestPTYResizeSurfaceAndBoundaries(t *testing.T) {
 	}
 	for _, raw := range badPayloads {
 		res, err := handle(context.Background(), h, nil, "dev1", json.RawMessage(raw))
-		hostErr, ok := errors.AsType[*Error](err)
-		if res != nil || !ok || hostErr.Code != "bad_request" {
-			t.Fatalf("payload %s: got (%v, %v), want bad_request", raw, res, err)
-		}
+		assertEqual(t, res, nil)
+		assertErrorCode(t, err, "bad_request")
 	}
+}
 
-	// Pre-open pty.resize sets the initial size applied during StartPTY.
-	preResize := fmt.Sprintf(`{"t":"pty.resize","g":%q,"ai":%q,"cols":100,"rows":30}`, ptyTestGroupID, ptyTestAIID)
-	if res, err := handle(context.Background(), h, nil, "dev1", json.RawMessage(preResize)); res != nil || err != nil {
-		t.Fatalf("pre-open pty.resize = (%v, %v)", res, err)
-	}
+func sendTestPTYResize(t *testing.T, h *Host, cols, rows int) {
+	t.Helper()
+	raw := fmt.Sprintf(`{"t":"pty.resize","g":%q,"ai":%q,"cols":%d,"rows":%d}`, ptyTestGroupID, ptyTestAIID, cols, rows)
+	res, err := Surface["pty.resize"](context.Background(), h, nil, "dev1", json.RawMessage(raw))
+	assertEqual(t, res, nil)
+	assertEqual(t, err, nil)
+}
 
+func TestPTYResizeSurfaceAndBoundaries(t *testing.T) {
+	h := newPTYTestHost(t)
+	getSpy := installPTYSpy(t)
+	registerPTYTestDriver(t, "ptyresize", func(Launch) ([]string, string, error) {
+		return ptyHelperArgv(t, "pty-echo"), "sess-resize", nil
+	})
+
+	sendTestPTYResize(t, h, 100, 30)
 	p, _, err := h.StartPTY(ptyTestGroupID, ptyTestAIID, "ptyresize", Launch{Folder: t.TempDir(), Level: 1}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	spy := getSpy()
+	assertEqual(t, spy.recordedResizes(), []ptySize(nil))
 
-	// Exact boundary cols=1, rows=1 via Surface, then cols=1 and rows=1 via PTY.Resize.
-	minResize := fmt.Sprintf(`{"t":"pty.resize","g":%q,"ai":%q,"cols":1,"rows":1}`, ptyTestGroupID, ptyTestAIID)
-	if res, err := handle(context.Background(), h, nil, "dev1", json.RawMessage(minResize)); res != nil || err != nil {
-		t.Fatalf("1x1 pty.resize = (%v, %v)", res, err)
-	}
-	if err := p.Resize(1, 24); err != nil {
-		t.Fatalf("Resize(1, 24) = %v", err)
-	}
-	if err := p.Resize(80, 1); err != nil {
-		t.Fatalf("Resize(80, 1) = %v", err)
-	}
-	for _, bad := range []ptySize{{0, 24}, {80, 0}} {
-		err := p.Resize(bad.cols, bad.rows)
-		hostErr, ok := errors.AsType[*Error](err)
-		if !ok || hostErr.Code != "bad_request" {
-			t.Fatalf("Resize(%d, %d) = %v, want bad_request", bad.cols, bad.rows, err)
-		}
-	}
+	sendTestPTYResize(t, h, 1, 1)
+	sendTestPTYResize(t, h, 1, 24)
+	sendTestPTYResize(t, h, 80, 1)
 
 	p.Close()
-
-	// Resize after Close is a clean no-op both directly and through Surface["pty.resize"].
-	if err := p.Resize(90, 25); err != nil {
-		t.Fatalf("Resize after Close = %v", err)
+	assertEqual(t, p.resize(proto.PTYResize{Cols: 90, Rows: 25}), nil)
+	sendTestPTYResize(t, h, 90, 25)
+	assertEqual(t, spy.recordedResizes(), []ptySize{{1, 1}, {1, 24}, {80, 1}})
+	next, _, err := h.StartPTY(ptyTestGroupID, ptyTestAIID, "ptyresize", Launch{Folder: t.TempDir(), Level: 1}, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	postResize := fmt.Sprintf(`{"t":"pty.resize","g":%q,"ai":%q,"cols":90,"rows":25}`, ptyTestGroupID, ptyTestAIID)
-	if res, err := handle(context.Background(), h, nil, "dev1", json.RawMessage(postResize)); res != nil || err != nil {
-		t.Fatalf("post-close pty.resize = (%v, %v)", res, err)
-	}
-
-	wantSizes := []ptySize{{100, 30}, {1, 1}, {1, 24}, {80, 1}}
-	if got := spy.recordedResizes(); !slices.Equal(got, wantSizes) {
-		t.Fatalf("recorded resizes = %+v, want %+v", got, wantSizes)
-	}
+	defer next.Close()
+	assertEqual(t, getSpy().recordedResizes(), []ptySize(nil))
 }
 
 func TestPTYStartRefusalsAndErrorCleanup(t *testing.T) {
@@ -695,44 +690,47 @@ func TestPTYStartRefusalsAndErrorCleanup(t *testing.T) {
 	}
 }
 
-type ptyDrainVerifyTerminal struct {
-	label   string
-	payload []byte
-	closed  bool
-	drained bool
-}
-
-func (d *ptyDrainVerifyTerminal) Label() string  { return d.label }
-func (d *ptyDrainVerifyTerminal) Device() string { return "dev" }
-
-func (d *ptyDrainVerifyTerminal) Read(p []byte) (int, error) {
-	if len(d.payload) == 0 {
-		d.drained = true
-		return 0, io.EOF
-	}
-	n := copy(p, d.payload)
-	d.payload = d.payload[n:]
-	return n, nil
-}
-
-func (d *ptyDrainVerifyTerminal) Write(p []byte) (int, error) {
-	return len(p), nil
-}
-
-func (d *ptyDrainVerifyTerminal) Close() error {
-	d.closed = true
-	return nil
-}
-
-func TestPTYRejectsAndDrainsInvalidOrUnmatchedStreams(t *testing.T) {
+func TestPTYRejectsInvalidOrUnmatchedStreams(t *testing.T) {
 	h := newPTYTestHost(t)
 	for _, label := range []string{"pty:invalid", "pty:g1:absent"} {
-		st := &ptyDrainVerifyTerminal{label: label, payload: []byte("unread-sctp-bytes")}
+		st := newPTYTestTerminal(label)
 		h.ServeTerminal(st)
-		if !st.closed || !st.drained {
-			t.Fatalf("label %q: closed=%v drained=%v, want both true", label, st.closed, st.drained)
+		if !st.isClosed() {
+			t.Fatalf("label %q was not closed", label)
 		}
 	}
+}
+
+func TestPTYWrapFailureReleasesSlot(t *testing.T) {
+	h := newPTYTestHost(t)
+	registerPTYTestDriver(t, "wrap-error", func(Launch) ([]string, string, error) {
+		return ptyHelperArgv(t, "pty-selfexit"), "session", nil
+	})
+	original := ptyWrap
+	t.Cleanup(func() { ptyWrap = original })
+	ptyWrap = func(gopty.Pty) (ptyHandle, error) { return nil, errors.New("cannot wrap master") }
+	p, session, err := h.StartPTY("g1", "m1", "wrap-error", Launch{Folder: t.TempDir()}, nil)
+	assertEqual(t, p, (*PTY)(nil))
+	assertEqual(t, session, "")
+	assertEqual(t, assertErrorCode(t, err, "cli").Message, "cannot wrap master")
+	if !ptyState(h).reserve(aiSlot{group: "g1", member: "m1"}) {
+		t.Fatal("slot was not released")
+	}
+}
+
+type ptyResizeErrorHandle struct{ ptyNopHandle }
+
+func (ptyResizeErrorHandle) Resize(int, int) error { return errors.New("cannot resize master") }
+
+func TestPTYResizeFailure(t *testing.T) {
+	h := newPTYTestHost(t)
+	part := ptyState(h)
+	slot := aiSlot{group: ptyTestGroupID, member: ptyTestAIID}
+	part.activate(slot, &PTY{part: part, handle: ptyResizeErrorHandle{}})
+	raw := fmt.Sprintf(`{"t":"pty.resize","g":%q,"ai":%q,"cols":80,"rows":24}`, slot.group, slot.member)
+	res, err := Surface["pty.resize"](context.Background(), h, nil, "dev1", json.RawMessage(raw))
+	assertEqual(t, res, nil)
+	assertEqual(t, assertErrorCode(t, err, "cli").Message, "cannot resize master")
 }
 
 func waitLeafListening(t *testing.T, addrFile string) string {

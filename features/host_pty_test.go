@@ -97,8 +97,6 @@ type accTerminal struct {
 	label    string
 	inR      *io.PipeReader
 	inW      *io.PipeWriter
-	unread   []byte
-	drained  bool
 	mu       sync.Mutex
 	out      bytes.Buffer
 	closed   bool
@@ -116,15 +114,6 @@ func (at *accTerminal) Label() string  { return at.label }
 func (at *accTerminal) Device() string { return "owner-device" }
 
 func (at *accTerminal) Read(p []byte) (int, error) {
-	if at.unread != nil {
-		if len(at.unread) == 0 {
-			at.drained = true
-			return 0, io.EOF
-		}
-		n := copy(p, at.unread)
-		at.unread = at.unread[n:]
-		return n, nil
-	}
 	return at.inR.Read(p)
 }
 
@@ -407,20 +396,20 @@ func hostPTYSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
 		return nil
 	})
 
-	sc.Step(`^an unmatched terminal channel "([^"]+)" and a malformed channel "([^"]+)" arrive with unread bytes$`, func(unmatched, malformed string) {
+	sc.Step(`^an unmatched terminal channel "([^"]+)" and a malformed channel "([^"]+)" arrive$`, func(unmatched, malformed string) {
 		rejected = []*accTerminal{
-			{label: unmatched, unread: []byte("queued-1")},
-			{label: malformed, unread: []byte("queued-2")},
+			newAccTerminal(unmatched),
+			newAccTerminal(malformed),
 		}
 		for _, ch := range rejected {
 			h.ServeTerminal(ch)
 		}
 	})
 
-	sc.Step(`^both terminal channels are closed and drained$`, func() error {
+	sc.Step(`^both terminal channels are closed$`, func() error {
 		for _, ch := range rejected {
-			if !ch.closed || !ch.drained {
-				return fmt.Errorf("channel %q: closed=%v drained=%v", ch.label, ch.closed, ch.drained)
+			if !ch.isClosed() {
+				return fmt.Errorf("channel %q remained open", ch.label)
 			}
 		}
 		return nil

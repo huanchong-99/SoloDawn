@@ -56,10 +56,15 @@ func TestWatchLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 		term := newPTYTestTerminal("watch:" + slot.group + ":" + slot.member)
-		ptyState(h).noteSize(slot, 80, 24)
+		part := ptyState(h)
+		entry := &PTY{part: part, slot: slot, handle: ptyNopHandle{}}
+		part.activate(slot, entry)
+		sendWatchSize(h, slot, o)
+		o.wantSizes(t)
+		size := proto.PTYResize{Type: "pty.resize", Group: proto.ID(slot.group), AI: proto.ID(slot.member), Cols: 80, Rows: 24}
+		assertEqual(t, entry.resize(size), nil)
 		go h.ServeWatch(term)
 		synctest.Wait()
-		size := proto.PTYResize{Type: "pty.resize", Group: proto.ID(slot.group), AI: proto.ID(slot.member), Cols: 80, Rows: 24}
 		o.wantSizes(t, size)
 		h.Rows.Put(slot.group, "device", "a:2", json.RawMessage(marshalWire(proto.DeviceRow{RowHeader: proto.RowHeader{Type: "device", ID: "a:2"}, DeviceChange: proto.DeviceChange{User: "a", Version: 2, Op: "add", Device: "second-browser"}})))
 		second := &watchOwner{tkOwner: newTkOwner("direct")}
@@ -72,9 +77,9 @@ func TestWatchLifecycle(t *testing.T) {
 		synctest.Wait()
 		o.wantSizes(t, size)
 		second.wantSizes(t, size)
-		p.resize(slot, 100, 40)
 		resized := size
 		resized.Cols, resized.Rows = 100, 40
+		assertEqual(t, entry.resize(resized), nil)
 		o.wantSizes(t, size, resized)
 		second.wantSizes(t, size, resized)
 		secondTerm.Close()
@@ -122,6 +127,9 @@ func TestWatchLifecycle(t *testing.T) {
 		if got := h.Watchers(slot.group, slot.member); !reflect.DeepEqual(got, []string{"a"}) {
 			t.Fatal(got)
 		}
+		part.release(slot)
+		sendWatchSize(h, slot, o)
+		o.wantSizes(t, size, resized, resized)
 	})
 }
 

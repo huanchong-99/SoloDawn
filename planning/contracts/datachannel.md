@@ -295,14 +295,14 @@ paging by time could do for rows with the same `ts`. `limit` is at most
 
 - The browser pushes `{"t":"pty.resize","g":"Qm1…","ai":"<member id>","cols":120,"rows":32}`.
   `cols` and `rows` are at least 1 (`bad_request` below 1). A `pty.resize`
-  received before the pseudo-terminal opens sets its initial size; one
-  received after it has closed has no effect.
+  only resizes an open pseudo-terminal. A resize received before it opens
+  or after it has closed does not affect the next takeover.
 - After the host accepted `takeover.start`, the browser opens a data channel
   labelled `pty:<g>:<member>`. Each message is a chunk of raw bytes. The
   host stops reading from the pseudo-terminal while the channel's send
   buffer is above 1 MiB. The channel closing, for any reason, is hand-back.
   A `pty:` channel whose label matches no open takeover, or a second channel
-  for one that is already bridged, is closed and drained.
+  for one that is already bridged, is closed.
 - The host refuses `takeover.start` with `relay` and closes an open `pty`
   channel unless its own path is `direct` (`flows/connect.md` steps 8, 9).
 

@@ -448,14 +448,15 @@ type Driver interface {
 
 // A Launch is what a driver is told about the session it starts.
 type Launch struct {
-	Model, Effort string
-	Folder        string        // the session's working folder, an absolute path
-	Session       string        // the CLI's session or thread id; "" before the first start
-	Level         int           // 1, 2 or 3 (contracts/drivers.md section 1)
-	Shim          []string      // the command line of the MCP server of this start: Host.Shim, then --token and the session token
-	Instructions  string        // the text of the session kind (contracts/drivers.md section 4)
-	RepoConfig    bool          // load the repository's own AI configuration: task and review sessions only (R-45)
-	ToolTimeout   time.Duration // how long a call of one of the node's tools may last
+	Model        string        // the CLI model to use; "" uses the CLI default
+	Effort       string        // the model's reasoning effort; "" uses the CLI default
+	Folder       string        // the session's working folder, an absolute path
+	Session      string        // the CLI's session or thread id; "" before the first start
+	Level        int           // 1, 2 or 3 (contracts/drivers.md section 1)
+	Shim         []string      // the command line of the MCP server of this start: Host.Shim, then --token and the session token
+	Instructions string        // the text of the session kind (contracts/drivers.md section 4)
+	RepoConfig   bool          // load the repository's own AI configuration: task and review sessions only (R-45)
+	ToolTimeout  time.Duration // how long a call of one of the node's tools may last
 }
 
 // A Process is one running structured CLI. Its caller owns the timing: it
