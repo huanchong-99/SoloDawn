@@ -381,20 +381,7 @@ func newTestHost(suiteT *testing.T, cleanup func(func()), maxOpen, idleMin int) 
 }
 
 func waitAllSessionsIdle(h *host.Host) {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		allDormant := true
-		for _, s := range h.Sessions.All() {
-			if s.State != host.Dormant {
-				allDormant = false
-				break
-			}
-		}
-		if allDormant {
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
+	_ = waitUntil(5*time.Second, "every host session dormant", func() error { return sessionsDormant(h) })
 }
 
 func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
@@ -634,10 +621,10 @@ func registerCLICrashAndSwitchSteps(sc *godog.ScenarioContext, suiteT *testing.T
 		return waitSessionState(h, tKey, host.Dormant)
 	})
 	sc.Step(`^the host reports turn_interrupted "crash" and task fail "crash"$`, func() error {
-		deadline := time.Now().Add(5 * time.Second)
-		for time.Now().Before(deadline) {
+		return waitUntil(5*time.Second, "the crash commands of the host", func() error {
 			var sawInt, sawFail bool
-			for _, cmd := range rh.snapshot() {
+			cmds := rh.snapshot()
+			for _, cmd := range cmds {
 				if ev, ok := cmd["event"].(map[string]any); ok && ev["code"] == "turn_interrupted" && ev["reason"] == "crash" {
 					sawInt = true
 				}
@@ -645,12 +632,11 @@ func registerCLICrashAndSwitchSteps(sc *godog.ScenarioContext, suiteT *testing.T
 					sawFail = true
 				}
 			}
-			if sawInt && sawFail {
-				return nil
+			if !sawInt || !sawFail {
+				return fmt.Errorf("turn_interrupted=%v task fail=%v in %+v", sawInt, sawFail, cmds)
 			}
-			time.Sleep(5 * time.Millisecond)
-		}
-		return fmt.Errorf("missing crash commands in %+v", rh.snapshot())
+			return nil
+		})
 	})
 	sc.Step(`^the next turn on the task session resumes "([^"]+)" and completes$`, func(id string) error {
 		if err := host.Runner.Turn(suiteT.Context(), h, tKey, "resume turn", host.Turn{Kind: host.ItemsTurn, Thread: hrTask1}); err != nil {
@@ -764,13 +750,10 @@ func registerReplaceSteps(sc *godog.ScenarioContext, suiteT *testing.T, cleanup 
 }
 
 func waitSessionState(h *host.Host, key host.SessionKey, want host.State) error {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if s, ok := h.Sessions.Get(key); ok && s.State == want {
-			return nil
+	return waitUntil(5*time.Second, fmt.Sprintf("session %v in state %s", key, want), func() error {
+		if s, ok := h.Sessions.Get(key); !ok || s.State != want {
+			return fmt.Errorf("state %q, present %v", s.State, ok)
 		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	s, _ := h.Sessions.Get(key)
-	return fmt.Errorf("session %v state = %s, want %s", key, s.State, want)
+		return nil
+	})
 }
