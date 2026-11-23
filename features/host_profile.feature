@@ -6,8 +6,8 @@ Feature: Host profile turns and escalation
       """
       [SoloDawn] group "Website" · you are "Secretary" · secretary session
       AI members (CLI on computer · tier · state · skills):
-      - "Claude Code" · claude on node · strong · offline · Go backend
-      - "Codex" · codex on node · light · limited · docs
+      - "Claude Code" · claude on node · strong · offline · window 40% used, resets in 3 h · Go backend
+      - "Codex" · codex on node · light · limited · window 100% used · docs
       - "Secretary" · claude on node · standard · working on T-12
       == 1 of 1 · confirmed · instruction
       """
@@ -15,8 +15,8 @@ Feature: Host profile turns and escalation
     And list_members still returns:
       """
       {"members":[
-        {"name":"Claude Code","kind":"ai","state":"offline","host":"node","account":"personal","usage":{}},
-        {"name":"Codex","kind":"ai","state":"limited","host":"node","account":"personal","usage":{}},
+        {"name":"Claude Code","kind":"ai","state":"offline","host":"node","account":"personal","usage":{"window_pct":40,"window_resets":1763609000000}},
+        {"name":"Codex","kind":"ai","state":"limited","host":"node","account":"personal","usage":{"window_pct":100}},
         {"name":"Secretary","kind":"ai","state":"working","host":"node","account":"personal","task":"T-12","usage":{}},
         {"name":"owner","kind":"human","state":"online"}
       ]}

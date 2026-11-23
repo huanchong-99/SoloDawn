@@ -168,9 +168,13 @@ fake CLIs fail checks and reviews on script.
   shows both, the owner edits them there, and nobody else is offered the
   editor.
 - **A10.9** The next turn of the secretary after A10.8 lists every AI member
-  with its tier, state and skills as in section 3 of the contract; an AI
-  that is `limited`, and one whose host is offline, are listed so. The
-  secretary's instructions hold the four rules. `list_members` is as in
+  with its tier, state, usage and skills as in section 3 of the
+  contract; an AI that is `limited`, and one whose host is offline, are
+  listed so; an AI whose usage has a window and a reset shows
+  `window 40% used, resets in 3 h`, one with a window only `window 100%
+  used`, and one without usage nothing. The secretary's instructions hold
+  the four rules, rule 3 with "prefer AIs with more of their window
+  left". `list_members` is as in
   step 1.
 - **A10.10** M is the assignee. After one failed review nothing differs
   from step 1. After the second in a row: the task row has `stuck` with

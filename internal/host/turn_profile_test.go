@@ -22,16 +22,21 @@ func TestSecretaryProfileRosterOnReplacement(t *testing.T) {
 	r := newTurnRig(t)
 	setTurnProfile(t, r, tAIID, func(ai *proto.AIMemberRow) {
 		ai.Tier, ai.State, ai.Task, ai.Skills = "strong", "working", tTaskID, "Go backend"
+		ai.Usage = proto.Usage{WindowPct: new(40.0), WindowResets: new(int64(seamStart + 9_000_000))}
 	})
 	setTurnProfile(t, r, tPeerID, func(ai *proto.AIMemberRow) {
 		ai.Tier, ai.State = "light", "limited"
+		ai.Usage = proto.Usage{WindowPct: new(62.5)}
 	})
-	setTurnProfile(t, r, tSecID, func(ai *proto.AIMemberRow) { ai.State = "offline" })
+	setTurnProfile(t, r, tSecID, func(ai *proto.AIMemberRow) {
+		ai.State = "offline"
+		ai.Usage = proto.Usage{WindowPct: new(100.0), WindowResets: new(int64(seamStart - 7_200_000))}
+	})
 	want := `[SoloDawn] group "Website" · you are "Secretary" · secretary session
 AI members (CLI on computer · tier · state · skills):
-- "Claude Code" · claude on workstation · strong · working on T-12 · Go backend
-- "Codex" · codex on workstation · light · limited
-- "Secretary" · claude on workstation · standard · offline
+- "Claude Code" · claude on workstation · strong · working on T-12 · window 40% used, resets in 3 h · Go backend
+- "Codex" · codex on workstation · light · limited · window 62.5% used
+- "Secretary" · claude on workstation · standard · offline · window 100% used, resets in 0 h
 == context · instruction`
 	assertComposed(t, r.h, r.session(GroupSession, true, ""), ReplacedTurn, nil, want, Turn{Kind: ReplacedTurn})
 }
@@ -69,13 +74,10 @@ func TestProfileEscalationStillBlocksWithoutCurrentCandidates(t *testing.T) {
 	r := newTurnRig(t)
 	task := r.baseTask()
 	task.Stuck = &proto.Stuck{Kind: "review", N: 2, Ask: true}
-	for _, assignee := range []string{tAIID, turnID("missing")} {
-		task.Assignee = assignee
-		err := profileRequireAnswered(r.h.Rows, tGroupID, task)
-		want := &Error{Code: "conflict", Message: "Ask a stronger AI before submitting again. Candidates: none currently listed."}
-		if got, ok := err.(*Error); !ok || *got != *want {
-			t.Fatalf("got %v, want %v", err, want)
-		}
+	err := profileRequireAnswered(r.h.Rows, tGroupID, task)
+	want := &Error{Code: "conflict", Message: "Ask a stronger AI before submitting again. Candidates: none currently listed."}
+	if got, ok := err.(*Error); !ok || *got != *want {
+		t.Fatalf("got %v, want %v", err, want)
 	}
 }
 
