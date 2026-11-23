@@ -1,6 +1,6 @@
 # Agent Note: Mutation gate: gremlins exclusions, zero-context diff, Stryker through pnpm
 
-Status: proposed
+Status: implemented
 
 ## Problem
 
@@ -14,7 +14,9 @@ The Go part of the mutation gate (`[mutation] command` for the harden stage, the
 
 **Stryker can fetch a legacy release.** Both Stryker calls are `npx stryker run`. When `web/node_modules` is not installed, npx does not fail: it downloads the npm package named `stryker` into `~/.npm/_npx/` and runs it. That package is Stryker's legacy 1.x release (`stryker` 1.0.1, published before the project moved to `@stryker-mutator/core`), not the Stryker this project pins, `@stryker-mutator/core` 10.1.1 with `@stryker-mutator/vitest-runner` in `web/package.json`. This happened on 2026-11-20 while the subagent checked pull request #117 in a fresh worktree: npx installed `stryker` 1.0.1 into `~/.npm/_npx/49301fa88e4fa3d5` (50 MB) and ran it, and it crashed with `Cannot find module 'rx'` before testing anything. The gate failed by accident, after silently fetching and running an unpinned package.
 
-## Proposal
+## Decision
+
+Approval: approved by the owner and applied to `.project-standard/` on 2026-11-23 with `.claude/rules-apply/apply-rules-364-114.sh` (Rules proposal #114); the tamper check passed after applying.
 
 ### Summary
 1. Language and roots: unchanged.
@@ -136,19 +138,7 @@ On approval, the `Rules approved on` row gains, after the go-mutation entry: `; 
 
 **A Windows mutation run now.** It is the answer to the coverage gap, and it is left as separate, later work by the coordinator's direction; this proposal states the gap instead.
 
-## Acceptance criteria
-
-After the coordinator applies the diff:
-
-- On a branch containing `internal/node/socket_windows.go` (for example `devin/N-0-local-cli`), the harden command prints `gremlins: not built for this host, not mutated here: internal/node/socket_windows[.]go`, reports no mutant in that file, and exits 0 when the other mutants are killed or timed out.
-- The nightly command on `rebuild` reports no mutant under `features/`.
-- A non-test Go file behind a custom build tag outside the test roots still fails as NOT COVERED.
-- On pull request #117 (head `af7af0e11`), the harden command kills the mutant at `internal/proto/session.go:23`.
-- With `web/node_modules` missing, the web part fails with `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN` and nothing new appears under `~/.npm/_npx/`.
-- `python3 .project-standard/scripts/gate.py --stage harden` passes on this branch (no Go change).
-- On approval, the record moves to `docs/decisions/implemented/process/` with `Status: implemented` in the same branch before the merge, and `PROJECT.md` records the change.
-
-## Risks
+## Consequences
 
 - **No mutation coverage for foreign-platform files until the Windows run exists.** `internal/node/socket_windows.go` (#107) and HS-19's `pty_windows.go` will carry untested-by-mutation lines; the gate prints which files it skipped, so the gap is visible in every run's output.
 - **The platform list is fixed in the rule.** A new shipped platform needs a rules proposal. A file built only for a platform outside the list stays in the walk and fails as NOT COVERED, so the rule fails closed.
