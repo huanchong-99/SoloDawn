@@ -16,3 +16,4 @@ Feature: Other-tab banner and inactive connection indicator
     Given a group "Website" read before another tab took the lock
     When the browser opens the chat of "Website"
     Then the composer is disabled and says "This group is in use in another tab."
+    And the group list says the same and neither is styled as unreachable

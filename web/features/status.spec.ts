@@ -93,7 +93,7 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
 
   Scenario(
     'The composer of an inactive tab says the group is in use in another tab',
-    ({ Given, When, Then }) => {
+    ({ Given, When, Then, And }) => {
       Given('a group "Website" read before another tab took the lock', async () => {
         const home = new TestHome('workstation');
         home.add(website, 'Website');
@@ -114,6 +114,13 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
       Then('the composer is disabled and says "This group is in use in another tab."', () => {
         expect(field().disabled).toBe(true);
         expect(texts('.composer [role=status]')).toEqual(['This group is in use in another tab.']);
+      });
+
+      And('the group list says the same and neither is styled as unreachable', () => {
+        expect(texts('.gdown')).toEqual(['This group is in use in another tab.']);
+        expect(one('.composer .state').className).toContain('away');
+        expect(one('.gdown').className).toContain('away');
+        expect(all('.composer .state.down, .gdown:not(.away)')).toEqual([]);
       });
     },
   );

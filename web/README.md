@@ -150,7 +150,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
   (checked in the output of `vite build`). `live` acquires the single-tab Web Lock (`runTab` of
   `tablock.ts`, showing the other-tab banner with "Use here" through `components/status/` at
   `banner` while another tab holds it; "Use here" moves focus to the main landmark, as the banner
-  goes) and connects to each paired node from `owner.ts` through `peer.ts` (W-2), one
+  goes; meanwhile the composer and the group list say the group is in use in another tab, in the
+  secondary text colour rather than the danger colour of a home that cannot be reached) and connects to each paired node from `owner.ts` through `peer.ts` (W-2), one
   `session.peer(node, ...)` per node, pausing while `#/onboarding` runs a pairing session and
   forwarding updates to this person's device log on both paired and joined connections.
   The browser sends `hello` with `v: 2`; only a `version`
