@@ -6,12 +6,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-23 · bug · FLAKY-26 bulletin scenario posts before its node attaches to the team home
-
-- Symptom: A9.23 intermittently times out waiting for the team bulletin after the secretary's fake CLI crashes.
-- Cause: `prepareBulletin` (`features/s2_watch_test.go:170-180`) waits only on P's own connection to P2, not P1's attachment. `home.add` replies before P1 attaches: `internal/host/join.go:417-433` reconciles connections, but `internal/node/teams.go:17` runs the dial with `go dial`. An early bulletin post gets `home_unreachable` (`internal/host/tools_bulletin.go:90-95`); the fake CLI expects `isError:false` and crashes. Suppressing P1's dial in a throwaway overlay proved this error and crash path.
-- Status: open, unfixed. No existing surface exposes attachment: `welcomed` is set at `internal/node/client.go:75` before `Host.Attach` at line 37, and synchronized rows live only in `host.Rows` memory. A scenario-only wait cannot establish attachment through those surfaces; changing an existing status surface or retaining in-process node runtimes would require a separately approved change.
-
 ### 2026-11-23 · limitation · A required escalation can outlast its last stronger candidate
 
 - Symptom: if the owner lowers the last stronger AI's tier while `stuck.ask` is true, the turn and the host submission refusal say no candidate is currently listed.
@@ -733,6 +727,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-23 · bug · FLAKY-26 bulletin scenario posts before its node attaches to the team home
+
+- Symptom: A9.23 intermittently times out waiting for the team bulletin after the secretary's fake CLI crashes.
+- Cause: `prepareBulletin` (`features/s2_watch_test.go:170-180`) waits only on P's own connection to P2, not P1's attachment. `home.add` replies before P1 attaches: `internal/host/join.go:417-433` reconciles connections, but `internal/node/teams.go:17` runs the dial with `go dial`. An early bulletin post gets `home_unreachable` (`internal/host/tools_bulletin.go:90-95`); the fake CLI expects `isError:false` and crashes. Suppressing P1's dial in a throwaway overlay proved this error and crash path.
+- Status: resolved in this change. For an uncached team, `bulletinTeam` uses `joinWaitHome` to await the team home's attachment with the same bound as `host.join`, preserving `home_unreachable` when the wait times out or is cancelled. Cached groups are still checked first. Deterministic tests cover attachment during the wait and cancellation; the attachment test fails without the fix.
 
 ### 2026-11-23 · bug · FLAKY-24 invitation test assumes the join reply precedes group pushes
 

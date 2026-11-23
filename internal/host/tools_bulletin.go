@@ -89,11 +89,10 @@ func bulletinHomes(db *store.Store) ([]proto.Home, error) {
 func bulletinTeam(ctx context.Context, h *Host, home proto.Home) error {
 	group, ok := joinCachedGroup(h, string(home.Group))
 	if !ok {
-		conn, connected := h.Home(home.Home)
-		if !connected {
-			return errHomeUnreachable
+		conn, err := joinWaitHome(ctx, h, joinStateOf(h), home.Home)
+		if err != nil {
+			return err
 		}
-		var err error
 		group, err = joinFetchGroup(ctx, h, conn, home.Home, string(home.Group))
 		if err != nil {
 			return err
