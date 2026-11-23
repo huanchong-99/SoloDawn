@@ -12,7 +12,7 @@ import (
 
 func init() {
 	Register(Tools, "next_item", Tool{
-		Description: "Take the next item of work, or none; never waits.",
+		Description: "Take one item of work when a person asks, or none; never call it in a loop.",
 		Schema:      json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 		For:         onlyExternal,
 		Call:        extNextItem,

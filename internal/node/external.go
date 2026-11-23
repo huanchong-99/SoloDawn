@@ -22,14 +22,16 @@ func init() {
 // wrong arguments (contracts/step-3/external.md 3.1).
 func Wait(args []string, stdout, stderr io.Writer) int {
 	flags, member := extFlags("wait")
-	timeout := flags.Int("timeout", -1, "")
-	if !extParse(flags, args) || *timeout < -1 {
+	timeout := flags.Int("timeout", 0, "")
+	if !extParse(flags, args) || *timeout < 0 {
 		return extUsage(stderr)
 	}
 	c := Command{Cmd: "wait", Member: *member}
-	if *timeout >= 0 {
-		c.Timeout = timeout
-	}
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "timeout" {
+			c.Timeout = timeout
+		}
+	})
 	var out bytes.Buffer
 	if err := c.Run(&out); err != nil {
 		return extFailed(stderr, err)

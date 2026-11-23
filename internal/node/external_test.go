@@ -48,7 +48,7 @@ func runExternal(cmd func([]string, io.Writer, io.Writer) int, args ...string) (
 
 func TestExternalCommandArguments(t *testing.T) {
 	mustEqual(t, Subcommands["wait"] != nil && Subcommands["done"] != nil, true)
-	for _, args := range [][]string{nil, {"--member"}, {"--member", "m1", "x"}, {"--member", "m1", "--timeout", "-2"}, {"--timeout", "1"}} {
+	for _, args := range [][]string{nil, {"--member"}, {"--member", "m1", "x"}, {"--member", "m1", "--timeout", "-1"}, {"--timeout", "1"}} {
 		code, _, stderr := runExternal(Wait, args...)
 		mustEqual(t, [2]any{code, stderr}, [2]any{2, "usage: solodawn <command> [arguments]\n"})
 	}
