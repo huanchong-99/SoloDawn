@@ -1586,31 +1586,7 @@ func (w *m5World) stepConfirmAndRunTwoTasks(withPush bool) error {
 		return err
 	}
 	hasBoth := func() bool { return len(w.summaryCards()) == 2 }
-	if err := w.waitFor("two summary cards", hasBoth); err != nil {
-		return w.twoTaskFailure(err)
-	}
-	return nil
-}
-
-func (w *m5World) twoTaskFailure(cause error) error {
-	var tasks, queued, deliveries string
-	var summaries int
-	n := w.cluster.Nodes[0]
-	err := n.Store.Write(func(tx *store.Tx) error {
-		return tx.QueryRow(`SELECT
-			(SELECT json_group_array(json_object('id',id,'num',data->>'num','state',data->>'state','step',data->>'step'))
-				FROM row WHERE g=? AND r='task' AND gone=0),
-			(SELECT json_group_array(json_object('id',id,'why',why,'task',task,'ai',ai,'not_before',not_before))
-				FROM inbox WHERE g=?),
-			(SELECT json_group_array(json_object('item',item,'what',what,'agent',agent,'detail',detail))
-				FROM (SELECT item,what,agent,detail FROM audit
-					WHERE g=? AND what IN ('delivered','refused') ORDER BY id DESC LIMIT 12)),
-			(SELECT count(*) FROM row WHERE g=? AND r='msg' AND gone=0 AND data->>'kind'='summary')`,
-			w.groupID, w.groupID, w.groupID, w.groupID).Scan(&tasks, &queued, &deliveries, &summaries)
-	})
-	log, logErr := os.ReadFile(w.cluster.LogPath)
-	return fmt.Errorf("%w; summaries browser=%d home=%d; home tasks=%s queued=%s; host item audit=%s; db=%v; hooks=%v; fake CLI log err=%v:\n%s",
-		cause, len(w.summaryCards()), summaries, tasks, queued, deliveries, err, w.checkHookErr(), logErr, log)
+	return w.waitFor("two summary cards", hasBoth)
 }
 
 func (w *m5World) verifyPushedBranchHead(c host.Caller) error {

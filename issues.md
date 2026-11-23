@@ -6,24 +6,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-23 · bug · FLAKY-29: Qwen A4.9 did not observe the initial post
-
-- Symptom: A10.3/A4.9 for Qwen Code failed with `step 4: timed out waiting on home pushes`.
-- Cause: not established. Step 4 waits up to 10 seconds for the initial `Long turn.` post from Worker; it does not wait for the turn limit or the failed task, which are checked in step 5 (`features/s3_driver_limits_test.go:77`, `features/m3_test.go:481`). The error alone cannot distinguish a missing post from a late post or a missing push.
-- Status: open. Linux race stress did not reproduce the reported timeout in the completed samples. It did expose a separate teardown race: the host-runtime step set restores the global `host.Deliver` even after other scenarios (`features/host_run_test.go:313`, `:322`), while a tracked host goroutine reads it after a turn ends (`internal/host/run.go:592`). The affected A4.9 steps passed before the race detector failed the run, so this is not evidence for the step-4 timeout.
-
-### 2026-11-23 · bug · FLAKY-21: WebRTC ctl did not open in the live net-status test
-
-- Symptom: `TestNetStatusLiveNodeRuntime` once reported `WebRTC ctl connection did not open` on Linux.
-- Cause: not established. The test has already seen the rendezvous room peer before offering (`internal/node/node_test.go:488`–`:492`). Its 10-second guard (`:558`–`:561`) can expire if signaling, ICE or data-channel setup fails or stalls; the guard reports none of those states. The channel it waits on closes only when the ctl data channel opens (`internal/peer/ctl.go:66`). The failure precedes the net-status assertion (`internal/node/netstatus_test.go:163`–`:169`).
-- Status: reproduced once under Linux race stress (`GOMAXPROCS=1`, `-count=200 -cpu 1,4`), but not in 200 additional runs with `-cpu 1` and a same-core CPU burner or in 400 runs with Pion ICE and peer-connection logging enabled. The failing log does not identify the negotiation stage. ICE and data-channel state at the next failure would distinguish a transport stall from a signaling failure. No code change.
-
-### 2026-11-23 · limitation · A7.9 does not run on Windows
-
-- Symptom: the Windows runner reached the initial direct pair, but A7.9 then reported `selected-pair statistics did not transition to relay` twice (CI run 45037819755). A7.9 tests **direct to relay** on the same connection, not the client's return to direct (`features/m7.feature:51`–`:56`).
-- Cause: the failing assertion depends on the fixture first making Pion choose a different pair (`features/m7_test.go:2000`–`:2016`). Delaying sends by destination and exempting the TURN server address (`:61`–`:83`) does not assert that ICE has measured a better relay pair. Pion ICE v4.4.8's `shouldRenominate` (`agent.go:2394`) accepts a succeeded host-to-host pair over a relay without any RTT threshold; otherwise it can switch for an RTT improvement greater than 10 ms or a sufficient quality-score gain. The Windows log has no measurements identifying which condition failed.
-- Status: the existing `@not-windows` remains. The failure occurs before the node's takeover handback and ctl assertions, so it is not evidence of a product failure or of a failed return to direct. Native Windows path behavior was not verified.
-
 ### 2026-11-23 · deviation · An agent without a driver cannot join a group
 
 - Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
@@ -167,6 +149,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: cancelling an invitation stops browser handling, but the rendezvous socket remains in the room until expiry or disconnect. Retrying the same room on the same socket does not trigger a new `joined` from a home already in the room.
 - Cause: `internal/rendezvous/room.go` has no leave frame. It ignores duplicate joins by the same socket and caps membership at 16 rooms per connection.
 - Status: open; the browser must keep the socket alive for existing homes.
+
+### 2026-11-22 · limitation · A7.9 does not run on Windows
+
+- Symptom: on the Windows CI runner the A7.9 scenario (`features/m7.feature`, moving an open takeover PeerConnection from direct to TURN relay) fails with "selected-pair statistics did not transition to relay" (CI run 45037819755, twice). Linux and macOS pass.
+- Cause: the test cannot force the takeover connection from direct to TURN on Windows. pion ICE renominates to the relay pair only when the relay's measured round trip beats the direct pair's by more than 10 ms (`shouldRenominate`).
+- Status: open, accepted. The scenario is tagged `@not-windows`, which the acceptance runner leaves out on Windows (`features/acceptance_test.go`, `tags`); Linux and macOS still run it. Product behaviour is unchanged.
 
 ### 2026-11-22 · limitation · A9.20 cannot set up a watcher before home invitation support lands
 
@@ -739,12 +727,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
-
-### 2026-11-23 · bug · FLAKY-19b: the offline test used an older sync sequence
-
-- Symptom: under Linux race stress, the test expected sequence 8 but received sequence 9 in the matching `Synced` reply for request 4, in nine runs.
-- Cause: the test read `Loop.Groups` after observing the working row, but the run loop pushes changed rows before publishing the group summary (`internal/home/run_group.go:170`–`:172`, `internal/home/run_push.go:32`–`:33`). The test could sample the old summary; the queued sync then read the committed sequence (`internal/home/sync.go:41`).
-- Status: fixed in `internal/home/cmd_hostev_test.go:523` and `:589`. The negative sync barrier uses the observed row sequence and checks the next frame. No product change.
 
 ### 2026-11-23 · bug · External AI removal could be triggered by one click
 
