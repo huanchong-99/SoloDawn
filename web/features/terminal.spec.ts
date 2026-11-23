@@ -8,7 +8,7 @@ import { goldens } from '../src/lib/mock';
 import type { Path, Source } from '../src/lib/net.svelte';
 import * as p from '../src/lib/proto';
 import { example, TestHome, user } from './home';
-import { all, closePage, go, one, openPage, texts } from './page';
+import { all, closePage, go, one, openPage, read, texts } from './page';
 
 const feature = await loadFeature('../features/web_terminal.feature');
 
@@ -50,7 +50,9 @@ const xtermState = vi.hoisted(() => ({
     onResizeCb?: (size: { cols: number; rows: number }) => void;
     cleared: number;
     disposed: boolean;
+    textarea: HTMLTextAreaElement;
   }[],
+  keys: (_event: KeyboardEvent): boolean => true,
 }));
 
 vi.mock('@xterm/xterm', () => ({
@@ -67,7 +69,9 @@ vi.mock('@xterm/xterm', () => ({
     constructor() {
       xtermState.instances.push(this);
     }
-    attachCustomKeyEventHandler() {}
+    attachCustomKeyEventHandler(keys: typeof xtermState.keys) {
+      xtermState.keys = keys;
+    }
     loadAddon() {}
     open(el: HTMLElement) {
       el.dataset.xterm = 'mounted';
@@ -695,6 +699,53 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(workstation.channels).toEqual([]);
         },
       );
+    },
+  );
+
+  Scenario(
+    'The terminal is named and can be left from the keyboard',
+    ({ Given, When, Then, And }) => {
+      let input: HTMLTextAreaElement;
+      Given(
+        '"Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms',
+        () => {
+          paths.set(workstation.store, { kind: 'direct', rtt: 4, since: Date.now() });
+        },
+      );
+      When(
+        'the owner opens "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/1PC8WineBrUQ-apCjx7tug" on a 1280 px desktop',
+        async () => {
+          openPage(`#/terminal/${website}/${claudeId}`, 1280);
+          await vi.waitFor(() =>
+            expect(xtermState.instances[0]?.textarea.hasAttribute('aria-describedby')).toBe(true),
+          );
+          input = xtermState.instances[0].textarea;
+          document.body.append(input);
+        },
+      );
+      Then(
+        "the takeover bar is a status region, the key row is no tab stop of its own, the details column takes keyboard focus, and the terminal's input is described by the note on leaving it",
+        () => {
+          expect(one('.takeover').getAttribute('role')).toBe('status');
+          expect(one('.keys').hasAttribute('tabindex')).toBe(false);
+          expect(one('aside.info').tabIndex).toBe(0);
+          expect(read(document.getElementById(input.getAttribute('aria-describedby')!)!)).toBe(
+            'Tab types into the terminal. To leave the terminal with the keyboard, press Ctrl+M.',
+          );
+        },
+      );
+      And('only Ctrl+M is kept from the terminal, and it moves focus to "Hand back"', () => {
+        const press = (key: string, code: string, ctrlKey: boolean) => {
+          const event = new KeyboardEvent('keydown', { key, code, ctrlKey, cancelable: true });
+          return [xtermState.keys(event), event.defaultPrevented, document.activeElement];
+        };
+        input.focus();
+        expect(press('m', 'KeyM', false)).toEqual([true, false, input]);
+        expect(press('c', 'KeyC', true)).toEqual([true, false, input]);
+        expect(press('µ', 'KeyM', true)).toEqual([false, true, one('.takeover a')]);
+        expect(read(document.activeElement!)).toBe('Hand back');
+        input.remove();
+      });
     },
   );
 

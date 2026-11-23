@@ -6,10 +6,10 @@ import { expect, vi } from 'vitest';
 import { homes } from '../src/lib/groups.svelte';
 import type { Home } from '../src/lib/groups.svelte';
 import type { Source } from '../src/lib/net.svelte';
-import { prefs } from '../src/lib/prefs.svelte';
 import { browser, TestHome } from './home';
-import { all, closePage, one, openPage, texts } from './page';
+import { all, closePage, field, one, openPage, texts } from './page';
 
+const website = 'rZNvy-1jH6Z-BcPqA5U5BQ';
 const feature = await loadFeature('../features/web_status.feature');
 const tabState = new SvelteMap<'otherTab', boolean>();
 
@@ -37,7 +37,6 @@ vi.mock('../src/lib/net.svelte', async (actual) => {
 describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
   AfterEachScenario(async () => {
     tabState.clear();
-    prefs.lang = 'en';
     vi.unstubAllEnvs();
     await closePage();
   });
@@ -75,24 +74,6 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
         },
       );
 
-      And(
-        'in Chinese the banner reads "SoloDawn 已在另一个标签页中打开。" with "在此使用" and the indicator reads "未连接"',
-        () => {
-          prefs.lang = 'zh-CN';
-          flushSync();
-          const ban = one('.ban .tab-ban[role="status"]');
-          expect(ban.querySelector('.grow')?.textContent?.trim()).toBe(
-            'SoloDawn 已在另一个标签页中打开。',
-          );
-          expect(ban.querySelector('button')?.textContent?.trim()).toBe('在此使用');
-          const conn = one<HTMLAnchorElement>('.bar .conn');
-          expect(texts('.bar .conn')).toEqual(['未连接']);
-          expect(conn.getAttribute('aria-label')).toBe('连接状态：未连接');
-          prefs.lang = 'en';
-          flushSync();
-        },
-      );
-
       When('the person chooses "Use here"', () => {
         one<HTMLButtonElement>('.tab-ban button').click();
         flushSync();
@@ -110,24 +91,30 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
     },
   );
 
-  Scenario('The states sheet lists the status mount at banner only', ({ When, Then }) => {
-    When('the person opens "#/states" in a development server', async () => {
-      vi.stubEnv('MODE', 'development');
-      openPage('#/states');
-      await vi.waitFor(() => {
-        flushSync();
-        expect(all('.states')).toHaveLength(1);
+  Scenario(
+    'The composer of an inactive tab says the group is in use in another tab',
+    ({ Given, When, Then }) => {
+      Given('a group "Website" read before another tab took the lock', async () => {
+        const home = new TestHome('workstation');
+        home.add(website, 'Website');
+        const client = browser(home);
+        homes.push(client.store);
+        await client.connect();
+        await vi.waitFor(() =>
+          expect(client.store.groups.map((group) => group.g)).toEqual([website]),
+        );
+        client.drop();
+        tabState.set('otherTab', true);
       });
-    });
 
-    Then(
-      'the mounting points show "status · 10" at "banner" and do not list "status" at "chat.top"',
-      () => {
-        const dts = texts('.points dt');
-        const dds = all('.points dd');
-        expect(dds[dts.indexOf('banner')].textContent).toContain('status · 10');
-        expect(dds[dts.indexOf('chat.top')].textContent).not.toContain('status');
-      },
-    );
-  });
+      When('the browser opens the chat of "Website"', () => {
+        openPage(`#/groups/${website}`);
+      });
+
+      Then('the composer is disabled and says "This group is in use in another tab."', () => {
+        expect(field().disabled).toBe(true);
+        expect(texts('.composer [role=status]')).toEqual(['This group is in use in another tab.']);
+      });
+    },
+  );
 });

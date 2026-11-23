@@ -114,6 +114,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `DriverCaps["opencode"]` declares levels `1` and `3` and approvals `conn`, and `openCodeDriver` speaks the `opencode serve` API (`internal/host/opencode.go`), but no run of the real OpenCode exists: the fake OpenCode's scripts are written from the documented API, not cut from captures.
 - Cause: T3-0 read OpenCode 1.19.6's documentation only, and no owner API key for a provider was available to T3-2. `drivers.md` section 4 asks that a value be declared from a run; levels `1` and `3`, the permission names, the event names (`session.idle`, `session.error`, `permission.asked`, `message.part.updated`), `POST /permission/<id>/reply`, and `OPENCODE_DISABLE_PROJECT_CONFIG` keeping the repository's configuration out are all `[documented]`.
 - Status: open until the live part of M3, M4 and M7 runs once with the real OpenCode and an owner key (`drivers.md` section 7); then the fake's scripts are replaced by captures and the declaration corrected.
+
 ### 2026-11-22 · deviation · The Go export scenarios do not exercise browser UI or an OS timer
 
 - Symptom: A9.27 and A9.28 exercise browser peers at the protocol boundary, not the browser's own follow logic or the owner-only commands in group info. A9.28 takes successive copies without waiting for an OS timer at one-minute intervals.
@@ -149,17 +150,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `home.add` records signalling addresses, but a node still needs a shared configured rendezvous to reach an external home.
 - Cause: the node's route lookup in `internal/node/node.go` uses active pairing and configured rendezvous paths, not the remembered addresses.
 - Status: open.
+
 ### 2026-11-22 · limitation · Rendezvous has no explicit room leave
 
 - Symptom: cancelling an invitation stops browser handling, but the rendezvous socket remains in the room until expiry or disconnect. Retrying the same room on the same socket does not trigger a new `joined` from a home already in the room.
 - Cause: `internal/rendezvous/room.go` has no leave frame. It ignores duplicate joins by the same socket and caps membership at 16 rooms per connection.
 - Status: open; the browser must keep the socket alive for existing homes.
-
-### 2026-11-22 · limitation · Browser invitation joining needs the node and home implementations
-
-- Symptom: a current node does not admit a browser through an invitation; it knows only protocol version 1.
-- Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts`. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a. U2-1 supplies the join page and member controls.
-- Status: open until those units are integrated. The browser exchange is covered against a simulated home, not a released node.
 
 ### 2026-11-22 · limitation · A7.9 does not run on Windows
 
@@ -751,6 +747,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `internal/host/deliver.go:1378-1379` can select a stale `cloud_check` row after `tskFinishCloud` releases the polling slot, even after the task has reached review. The home acknowledges the result before sending the updated row (`internal/home/run_group.go:170-171`).
 - Status: resolved in PR #335. The host keeps claims for accepted and superseded commits, while allowing retries after failed result delivery or an accepted resubmission. `TestStaleCloudCheckRowDoesNotRestartCompletedPoll` verifies that resuming from a stale row does not make a second forge call.
 
+### 2026-11-22 · limitation · Browser invitation joining needs the node and home implementations
+
+- Symptom: a current node does not admit a browser through an invitation; it knows only protocol version 1.
+- Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts`. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a. U2-1 supplies the join page and member controls.
+- Status: resolved. T2-1a (#309), T2-1b (#304) and W2-1 (#307) are merged.
+
 ### 2026-11-22 · bug · Codex treated every failed thread resume as a lost session
 
 - Symptom: a refused model or effort on `thread/resume` could replace the session instead of reporting a crash and retaining its history.
@@ -772,6 +774,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: when the interactive CLI exits on its own while the owner's terminal is open, the last lines it printed (for A7.4's fake CLI, `{"bye":…}` and the echo of the input line) never reach the pty channel. M7's A7.4 therefore does not wait for `"bye":` (`runOneSwitchCycle` in `features/m7_test.go`); it waits for the hand-back post, and the exit entry in the CLI log proves the exit. Seen on `test (windows-latest)` of PR #287; Linux and macOS deliver the line.
 - Cause: on Windows `ptyBeforeExitStop` does nothing (`internal/host/pty_windows.go:16`), so the host closes the terminal as soon as the CLI exits and drops the frame that ConPTY has not rendered yet. Diagnosis: `WIN-CONPTY.review.md`.
 - Status: resolved in win-pty. On process exit with a terminal attached, `ptyBeforeExitStop` closes the pseudo console but keeps its pipes, and the terminal closes when the output reaches its end (`internal/host/pty_windows.go`); `TestPTYWindowsSelfExitDeliversLastOutput` pins it on Windows CI.
+
 ### 2026-11-22 · bug · Role finishing read pending cards for commands without task work
 
 - Symptom: the home command-replay acceptance scenario panicked when applying a note command with no disk reader.
@@ -789,6 +792,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `planning/contracts/step-3/drivers.md` section 6 says each entry of `agents` carries `driver` always, but the frozen shape lets it be absent: Go `Driver *Driver` with `omitempty` (`internal/proto/host.go`, `HostAgent`), TS `v.optional(Driver)` (`web/src/lib/proto.ts`, `HostState.agents`), and `agents.driver` under `optional` in `internal/proto/testdata/wire.json`.
 - Cause: nothing on rebuild fills `driver` yet; a required field now would make the web client reject every real `host.info` until T3-2 lands. P-5 froze `driver` as `accounts` and `takeover` only; the other declaration fields stay in the host's table (coordinator, 2026-11-22).
 - Status: resolved by T3-2: `driver` is required in Go (`internal/proto/host.go`, `HostAgent`), TS (`web/src/lib/proto.ts`) and `wire.json`, and `Host.Agents` fills it for every agent. Before that it was open, accepted for P-5. T3-2, the pull request that fills `driver` for every agent, makes it required: Go ``Driver Driver `json:"driver"` `` (value type, no `omitempty`), TS `driver: Driver`, regenerate `wire.json` with `go test ./internal/proto -update`, and drop "once populated" from `internal/proto/README.md` (the `host.info` bullet). Also accepted: P-5 does not freeze the tool lists in `internal/proto/testdata/tools.json` (`planning/contracts/step-3/knowledge.md` section 7), because `internal/host` tests require it to equal the registered schemas; T3-5 adds `note_list` `type` and `propose_brief` `preset`, T3-6 adds `kb_put` and `kb_search` to all five lists, and the two merge with `go test ./internal/proto -update`.
+
 ### 2026-11-22 · bug · Watch confirmation admission rejected fields outside its checks
 
 - Symptom: a person's watch request was refused when it carried a thread, reply or text, although the watch admission contract does not restrict them.
@@ -1167,6 +1171,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-20 · bug · Go acceptance steps acted beyond their own scenario
 
 Found in the audit of the harness; each was reproduced before the fix (lines are those before it).
+
 - A failing step could end the whole suite: later scenarios and their After hooks did not run, godog printed no summary, go test said "subtest may have called FailNow on a parent test". Steps called `Fatal` on the suite's own test from a scenario's subtest (`features/node_update_test.go:98`, `:104`, `features/host_forge_test.go:26`, and `features/host_checks_test.go:36`, fixed on branch `ci/go127-windows-macos`).
 - `go test -tags acceptance -count=2 ./features/` failed with `open …/TestFeatures…/017/v0.3.1: no such file or directory`: the cache of release builds was a package variable that outlived the TempDir of the first run (`features/node_update_test.go:89`).
 - The fake node's socket stayed listening through every later scenario, and each node-update scenario left an HTTP server listening (five by the end): cleanups were registered with `f.t.Cleanup` (`features/cmd_local_test.go:38`, `:44`, `features/node_update_test.go:54`).
@@ -1298,15 +1303,15 @@ Found in the audit of the harness; each was reproduced before the fix (lines are
 
 F-01c measurements. The first two results are native `subtle.verify`; the last is SoloDawn's receiver result for **each** of the fourteen weak-key vectors. CI runs four builds on every pull request; the others ran by hand on macOS 26.6.2.
 
-| Browser | Run by | Identity-point vector | Valid empty message (RFC 8032 §7.1 test 1) | Receiver |
-| --- | --- | --- | --- | --- |
-| Chrome for Testing 137.0.7151.119 | CI, Ubuntu 24.04; by hand, macOS | true | true | `bad_sig` |
-| Edge 137.0.3296.93 | CI, Ubuntu 24.04 | true | true | `bad_sig` |
-| Firefox 136.0 (Playwright build 1478) | CI, Ubuntu 24.04; by hand, macOS | true | true | `bad_sig` |
-| WebKit 27.2 (Playwright build 2370) | CI, macOS 26; by hand, macOS | true | false | `bad_sig` |
-| Chromium 156.0.8078.4 (Playwright) | by hand, macOS | true | true | `bad_sig` |
-| Firefox 157.0 (Playwright) | by hand, macOS | true | true | `bad_sig` |
-| Safari 26.6.2 | by hand, macOS, once, with Vitest's preview provider, which is not in the repository | true | false | `bad_sig` |
+| Browser                               | Run by                                                                               | Identity-point vector | Valid empty message (RFC 8032 §7.1 test 1) | Receiver  |
+| ------------------------------------- | ------------------------------------------------------------------------------------ | --------------------- | ------------------------------------------ | --------- |
+| Chrome for Testing 137.0.7151.119     | CI, Ubuntu 24.04; by hand, macOS                                                     | true                  | true                                       | `bad_sig` |
+| Edge 137.0.3296.93                    | CI, Ubuntu 24.04                                                                     | true                  | true                                       | `bad_sig` |
+| Firefox 136.0 (Playwright build 1478) | CI, Ubuntu 24.04; by hand, macOS                                                     | true                  | true                                       | `bad_sig` |
+| WebKit 27.2 (Playwright build 2370)   | CI, macOS 26; by hand, macOS                                                         | true                  | false                                      | `bad_sig` |
+| Chromium 156.0.8078.4 (Playwright)    | by hand, macOS                                                                       | true                  | true                                       | `bad_sig` |
+| Firefox 157.0 (Playwright)            | by hand, macOS                                                                       | true                  | true                                       | `bad_sig` |
+| Safari 26.6.2                         | by hand, macOS, once, with Vitest's preview provider, which is not in the repository | true                  | false                                      | `bad_sig` |
 
 No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all. Playwright's WebKit is a current build of Apple's port, so its row shows that the vectors pass on Apple's Ed25519 implementation of today, not on that of Safari 17.5. For Safari 17.5 the baseline still rests on the sources cited in the browser-baseline decision, not on a run.
 
