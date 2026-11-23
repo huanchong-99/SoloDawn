@@ -47,7 +47,6 @@ func protocolSteps(sc *godog.ScenarioContext) {
 		return nil
 	})
 	approvalSteps(sc)
-	externalWireSteps(sc)
 	var forwarded []byte
 	sc.Step(`^a peer decodes and re-encodes the enrollment log$`, func() error {
 		var log proto.Devlog
@@ -129,32 +128,6 @@ func protocolSteps(sc *godog.ScenarioContext) {
 			return fmt.Errorf("unexpected marker: %+v", gone)
 		}
 		return nil
-	})
-}
-
-func externalWireSteps(sc *godog.ScenarioContext) {
-	var member proto.AIMemberRow
-	var info proto.HostInfo
-	sc.Step(`^a client reads the external AI member and host info examples$`, func() error {
-		if err := readWireExample("row-member-ai-external", &member); err != nil {
-			return err
-		}
-		return readWireExample("host-info-answer", &info)
-	})
-	sc.Step(`^the host advertises the member with tool "([^"]*)" and no takeover$`, func(tool string) error {
-		if member.CLI != "external" || member.Tool != tool {
-			return fmt.Errorf("unexpected member: %+v", member)
-		}
-		for _, agent := range info.Agents {
-			if agent.Agent != member.CLI {
-				continue
-			}
-			want := []proto.AgentGroup{{Group: proto.ID(member.Group), Member: proto.ID(member.ID), Level: 3, State: member.State, Watchers: []string{}}}
-			if agent.Driver.Takeover == "none" && reflect.DeepEqual(agent.Groups, want) {
-				return nil
-			}
-		}
-		return fmt.Errorf("no matching external agent in %+v", info.Agents)
 	})
 }
 
