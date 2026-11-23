@@ -3,12 +3,70 @@ package host
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
+
+func TestQwenStartupIncludesOnlyExplicitChoices(t *testing.T) {
+	for _, tc := range []struct{ model, effort, body string }{
+		{"", "", `{}`},
+		{"service", "", `{"startupConfig":{"modelServiceId":"service"}}`},
+		{"", "high", `{"startupConfig":{"reasoningEffort":"high"}}`},
+		{"service", "high", `{"startupConfig":{"modelServiceId":"service","reasoningEffort":"high"}}`},
+	} {
+		codexEqual(t, marshalWire(qwenStartup(Launch{Model: tc.model, Effort: tc.effort})), tc.body)
+	}
+	codexEqual(t, agtModels(t.Context(), "qwen"), []proto.Model{})
+}
+
+func TestQwenAppliesStartupChoiceOnlyOnNewSession(t *testing.T) {
+	for _, session := range []string{"", "qs_choice"} {
+		l := qwenLaunch(t, session, 3)
+		l.Instructions = ""
+		l.Model, l.Effort = "service", "high"
+		open := `{"dir":"http","msg":{"call":"POST /session","body":{"startupConfig":{"modelServiceId":"service","reasoningEffort":"high"}},"res":{"sessionId":"$session"}}},`
+		if session != "" {
+			open = `{"dir":"http","msg":{"call":"POST /session/qs_choice/resume","body":{},"res":{"sessionId":"$session"}}},`
+		}
+		proc := startFakeServer(t, "qwen", qwenDriver{}, `{"session":"qs_choice","steps":[`+open+`{"dir":"http","msg":{"call":"POST /session/qs_choice/prompt","body":{"prompt":[{"type":"text","text":"hello"}]}}},{"dir":"sse","msg":{"type":"turn_complete","data":{}}},{"dir":"http","msg":{"call":"POST /never","body":{}}}]}`, l)
+		codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Ready, Session: "qs_choice"})
+		codexNoErr(t, proc.Turn("hello"))
+		codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: TurnEnded, Status: "completed"})
+		codexNoErr(t, proc.Close())
+		codexEqual(t, waitEventsClosed(t, proc.Events()), []Event(nil))
+	}
+}
+
+func TestQwenRefusedStartupChoiceClosesWithoutLostSession(t *testing.T) {
+	l := qwenLaunch(t, "", 3)
+	l.Effort = "refused"
+	proc := startFakeServer(t, "qwen", qwenDriver{}, `{"session":"qs_choice","steps":[{"dir":"http","msg":{"call":"POST /session","body":{"startupConfig":{"reasoningEffort":"refused"}},"status":400}},{"dir":"http","msg":{"call":"POST /never","body":{}}}]}`, l)
+	codexEqual(t, waitEventsClosed(t, proc.Events()), []Event(nil))
+	codexEqual(t, fmt.Sprint(proc.Turn("never")), "qwen: POST /session: 400 Bad Request")
+}
+
+func TestQwenResumeOmitsStartupConfiguration(t *testing.T) {
+	calls := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		calls <- r.Method + " " + r.URL.Path + " " + string(data)
+		fmt.Fprint(w, `{"sessionId":"saved"}`)
+	}))
+	defer server.Close()
+	p := qwenProcess{base: server.URL, resume: "saved", startup: qwenStartup(Launch{Model: "changed", Effort: "high"})}
+	codexNoErr(t, p.open())
+	codexEqual(t, <-calls, "POST /session/saved/resume {}")
+	codexEqual(t, []string{p.session, p.url}, []string{"saved", "/session/saved"})
+}
 
 func qwenLaunch(t *testing.T, session string, level int) Launch {
 	return Launch{Folder: t.TempDir(), Session: session, Level: level, Shim: []string{"solodawn", "mcp"}, Instructions: "Be brief.", ToolTimeout: time.Minute}

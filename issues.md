@@ -6,6 +6,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-23 · limitation · Qwen Code model and level changes wait for a new session
+
+- Symptom: a changed model or level of a Qwen Code member applies only to its next new session; the serve protocol documents startupConfig only at creation.
+- Cause: the [serve protocol](https://qwenlm.github.io/qwen-code-docs/en/developers/qwen-serve-protocol/) documents `startupConfig.modelServiceId` and `startupConfig.reasoningEffort` for `POST /session`, not resume. `qwenProcess.open` in `internal/host/qwen.go:218` sends `{}` on resume. The driver reads no capabilities and adds no capability probe.
+- Status: accepted for T3-10. New-session refusals use the crash path; resumes preserve history and their original selection. Real daemon behavior remains unverified.
+
+### 2026-11-23 · deviation · OpenCode model selection uses the documented structured reference
+
+- Symptom: model selection does not send the contract's unverified `provider/model#variant` notation.
+- Cause: the [OpenAPI](https://opencode.ai/docs/openapi.json) documents `POST /api/session/{sessionID}/model` with `{"model":{"id":"…","providerID":"…","variant":"…"}}`. `openCodeProcess.selectModel` in `internal/host/opencode.go:245` splits the public `provider/model` id on the first `/`, omits an empty variant, and skips an empty model. Discovery reads `{data: Model.Info[]}`; unknown shapes yield `[]`.
+- Status: accepted for T3-10; the coordinator will flag the contract in the PR. Fixtures are synthetic, with no real CLI capture.
+
 ### 2026-11-23 · bug · A9.24 can run hosted checks again for the superseded commit
 
 - Symptom: A9.24 can report an unexpected `watch-checks` call for the first commit of the task that is reassigned.

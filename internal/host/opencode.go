@@ -9,6 +9,9 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
 // OpenCode runs as `opencode serve`, one server per session process: turns
@@ -35,6 +38,59 @@ var openCodeLevels = map[int]map[string]string{
 var openCodeCategories = map[string]string{"bash": "command", "edit": "file", "webfetch": "network"}
 
 type openCodeDriver struct{}
+
+func (openCodeDriver) Models(ctx context.Context) []proto.Model {
+	ctx, cancel := context.WithTimeout(ctx, agtProbeSeconds*time.Second)
+	defer cancel()
+	p := &openCodeProcess{password: rand.Text()}
+	out, wait, err := serve(ctx, "", []string{"OPENCODE_SERVER_PASSWORD=" + p.password}, "opencode", "serve", "--hostname", "127.0.0.1", "--port", "0")
+	if err != nil {
+		return []proto.Model{}
+	}
+	defer func() { cancel(); wait() }()
+	p.base = serverAddress(out)
+	data, err := p.call(http.MethodGet, "/api/model", nil)
+	if err != nil {
+		return []proto.Model{}
+	}
+	return openCodeModels(data)
+}
+
+type openCodeModel struct {
+	ProviderID, ModelID, Name string
+	Variants                  []struct{ ID string }
+}
+
+func openCodeModels(data []byte) []proto.Model {
+	var reply struct{ Data []openCodeModel }
+	if json.Unmarshal(data, &reply) != nil || reply.Data == nil {
+		return []proto.Model{}
+	}
+	models := []proto.Model{}
+	for _, m := range reply.Data {
+		model, ok := m.listed()
+		if !ok {
+			return []proto.Model{}
+		}
+		models = append(models, model)
+	}
+	return models
+}
+
+func (m openCodeModel) listed() (proto.Model, bool) {
+	if m.ProviderID == "" || m.ModelID == "" || m.Variants == nil {
+		return proto.Model{}, false
+	}
+	efforts := []string{}
+	for _, variant := range m.Variants {
+		if variant.ID == "" {
+			return proto.Model{}, false
+		}
+		efforts = append(efforts, variant.ID)
+	}
+	id := m.ProviderID + "/" + m.ModelID
+	return proto.Model{Model: id, Name: cmp.Or(m.Name, id), Efforts: efforts, Tier: modelTier(id)}, true
+}
 
 func (openCodeDriver) Interactive(Launch) ([]string, string, error) {
 	return nil, "", fmt.Errorf("opencode: no terminal takeover")
@@ -84,6 +140,7 @@ type openCodeProcess struct {
 	base     string
 	session  string
 	status   string // how the running turn ends, from session.error
+	startErr error
 }
 
 type openCodeEvent struct {
@@ -104,6 +161,9 @@ func (p *openCodeProcess) Events() <-chan Event { return p.events }
 
 func (p *openCodeProcess) Turn(text string) error {
 	<-p.ready
+	if p.startErr != nil {
+		return p.startErr
+	}
 	return p.post("/session/"+p.session+"/prompt_async", map[string]any{
 		"system": p.launch.Instructions,
 		"parts":  []map[string]string{{"type": "text", "text": text}},
@@ -165,6 +225,10 @@ func (p *openCodeProcess) run(out io.Reader, wait func()) {
 		defer stream.Body.Close()
 		err = p.open()
 	}
+	if err == nil {
+		err = p.selectModel()
+	}
+	p.startErr = err
 	close(p.ready)
 	if err != nil {
 		return
@@ -176,6 +240,18 @@ func (p *openCodeProcess) run(out io.Reader, wait func()) {
 			p.handle(e, data)
 		}
 	})
+}
+
+func (p *openCodeProcess) selectModel() error {
+	if p.launch.Model == "" {
+		return nil
+	}
+	provider, id, _ := strings.Cut(p.launch.Model, "/")
+	model := map[string]string{"id": id, "providerID": provider}
+	if p.launch.Effort != "" {
+		model["variant"] = p.launch.Effort
+	}
+	return p.post("/api/session/"+p.session+"/model", map[string]any{"model": model})
 }
 
 // open resumes the launch's session, or creates one.

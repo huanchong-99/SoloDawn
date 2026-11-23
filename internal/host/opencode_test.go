@@ -2,11 +2,17 @@ package host
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
 // startOpenCode starts the driver on the fake OpenCode replaying script.
@@ -18,6 +24,16 @@ func startOpenCode(t *testing.T, script string, l Launch) Process {
 // replaying script.
 func startFakeServer(t *testing.T, vendor string, d Driver, script string, l Launch) Process {
 	t.Helper()
+	fakeServerCLI(t, vendor, script)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	proc, err := d.Start(ctx, l)
+	codexNoErr(t, err)
+	return proc
+}
+
+func fakeServerCLI(t *testing.T, vendor, script string) {
+	t.Helper()
 	bin := t.TempDir()
 	if out, err := exec.Command("go", "build", "-o", bin+string(os.PathSeparator), "./fakecli/"+vendor).CombinedOutput(); err != nil {
 		t.Fatalf("build fake %s: %v\n%s", vendor, err, out)
@@ -27,11 +43,104 @@ func startFakeServer(t *testing.T, vendor string, d Driver, script string, l Lau
 	codexNoErr(t, os.WriteFile(path, []byte(script), 0600))
 	t.Setenv("SOLODAWN_FAKE_"+strings.ToUpper(vendor)+"_SCRIPT", path)
 	t.Setenv("SOLODAWN_FAKECLI_LOG", filepath.Join(t.TempDir(), "log"))
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	proc, err := d.Start(ctx, l)
+}
+
+func TestOpenCodeModelDiscovery(t *testing.T) {
+	script, err := os.ReadFile("fakecli/testdata/opencode-models.json")
 	codexNoErr(t, err)
-	return proc
+	fakeServerCLI(t, "opencode", string(script))
+	codexEqual(t, (openCodeDriver{}).Models(t.Context()), []proto.Model{
+		{Model: "anthropic/claude-opus-5", Name: "Opus", Efforts: []string{"low", "high"}, Tier: "strong"},
+		{Model: "openai/gpt-6-mini", Name: "Mini", Efforts: []string{}, Tier: "light"},
+	})
+	modelScript(t, "opencode", `{"session":"models","steps":[{"dir":"http","msg":{"call":"GET /api/model","body":null,"status":503}},{"dir":"http","msg":{"call":"POST /never","body":{}}}]}`)
+	codexEqual(t, (openCodeDriver{}).Models(t.Context()), []proto.Model{})
+	t.Setenv("PATH", t.TempDir())
+	codexEqual(t, (openCodeDriver{}).Models(t.Context()), []proto.Model{})
+}
+
+func TestOpenCodeModelListingBoundary(t *testing.T) {
+	for _, data := range []string{
+		`{`, `null`, `{}`, `{"data":null}`, `{"data":{}}`,
+		`{"data":[{"modelID":"opus","variants":[]}]}`,
+		`{"data":[{"providerID":"p","variants":[]}]}`,
+		`{"data":[{"providerID":"p","modelID":"opus"}]}`,
+		`{"data":[{"providerID":"p","modelID":"opus","variants":[{}]}]}`,
+		`{"data":[{"providerID":"p","modelID":"opus","variants":[],"name":1}]}`,
+	} {
+		codexEqual(t, openCodeModels([]byte(data)), []proto.Model{})
+	}
+	codexEqual(t, openCodeModels([]byte(`{"data":[]}`)), []proto.Model{})
+	codexEqual(t, openCodeModels([]byte(`{"data":[{"providerID":"p","modelID":"haiku","variants":[]}]}`)), []proto.Model{{Model: "p/haiku", Name: "p/haiku", Efforts: []string{}, Tier: "light"}})
+}
+
+func TestOpenCodeChoicePrecedesOnlyTheFirstPromptOfEachProcess(t *testing.T) {
+	for _, session := range []string{"", "ses_choice"} {
+		for _, effort := range []string{"", "custom"} {
+			l := openCodeLaunch(t, session, 3)
+			l.Model, l.Effort = "provider/model/part", effort
+			open := `{"dir":"http","msg":{"call":"POST /session","body":{},"res":{"id":"$session"}}},`
+			if session != "" {
+				open = `{"dir":"http","msg":{"call":"GET /session/ses_choice","body":null,"res":{"id":"$session"}}},`
+			}
+			model := map[string]string{"providerID": "provider", "id": "model/part"}
+			if effort != "" {
+				model["variant"] = effort
+			}
+			script := `{"session":"ses_choice","steps":[` + open + `{"dir":"http","msg":{"call":"POST /api/session/ses_choice/model","body":{"model":` + marshalWire(model) + `},"status":204}},`
+			for range 2 {
+				script += `{"dir":"http","msg":{"call":"POST /session/ses_choice/prompt_async","body":{"parts":[{"type":"text","text":"hello"}]}}},{"dir":"sse","msg":{"type":"session.idle","properties":{"sessionID":"$session"}}},`
+			}
+			proc := startOpenCode(t, script+`{"dir":"http","msg":{"call":"POST /never","body":{}}}]}`, l)
+			codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Ready, Session: "ses_choice"})
+			assertOpenCodeTwoTurns(t, proc)
+		}
+	}
+}
+
+func assertOpenCodeTwoTurns(t *testing.T, proc Process) {
+	t.Helper()
+	for range 2 {
+		codexNoErr(t, proc.Turn("hello"))
+		codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: TurnEnded, Status: "completed"})
+	}
+	codexNoErr(t, proc.Close())
+	codexEqual(t, waitEventsClosed(t, proc.Events()), []Event(nil))
+}
+
+func TestOpenCodeSkipsEffortWithoutModel(t *testing.T) {
+	l := openCodeLaunch(t, "", 3)
+	l.Effort = "high"
+	proc := startOpenCode(t, `{"session":"ses_choice","steps":[{"dir":"http","msg":{"call":"POST /session","body":{},"res":{"id":"$session"}}},{"dir":"http","msg":{"call":"POST /never","body":{}}}]}`, l)
+	codexEqual(t, nextCodexEvent(t, proc.Events()), Event{Kind: Ready, Session: "ses_choice"})
+	codexNoErr(t, proc.Close())
+	codexEqual(t, waitEventsClosed(t, proc.Events()), []Event(nil))
+}
+
+func TestOpenCodeRefusedChoiceClosesWithoutLosingSession(t *testing.T) {
+	l := openCodeLaunch(t, "ses_choice", 3)
+	l.Model, l.Effort = "p/refused", "high"
+	proc := startOpenCode(t, `{"session":"ses_choice","steps":[{"dir":"http","msg":{"call":"GET /session/ses_choice","body":null,"res":{"id":"$session"}}},{"dir":"http","msg":{"call":"POST /api/session/ses_choice/model","body":{"model":{"providerID":"p","id":"refused","variant":"high"}},"status":400,"res":{"error":"refused"}}},{"dir":"http","msg":{"call":"POST /never","body":{}}}]}`, l)
+	codexEqual(t, waitEventsClosed(t, proc.Events()), []Event(nil))
+	codexEqual(t, fmt.Sprint(proc.Turn("never")), `opencode: POST /api/session/ses_choice/model: 400 Bad Request {"error":"refused"}`)
+}
+
+func TestOpenCodeModelPayloadOmitsEmptyVariant(t *testing.T) {
+	for _, tc := range []struct{ effort, body string }{
+		{"", `{"model":{"id":"x","providerID":"p"}}`},
+		{"custom", `{"model":{"id":"x","providerID":"p","variant":"custom"}}`},
+	} {
+		calls := make(chan string, 1)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			data, _ := io.ReadAll(r.Body)
+			calls <- r.Method + " " + r.URL.Path + " " + string(data)
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		p := openCodeProcess{base: server.URL, session: "saved", launch: Launch{Model: "p/x", Effort: tc.effort}}
+		codexNoErr(t, p.selectModel())
+		codexEqual(t, <-calls, "POST /api/session/saved/model "+tc.body)
+		server.Close()
+	}
 }
 
 func openCodeLaunch(t *testing.T, session string, level int) Launch {

@@ -51,6 +51,17 @@ func hostModelsSteps(sc *godog.ScenarioContext, f fixtures) {
 	w := &hostModelsWorld{now: time.UnixMilli(1763600000000)}
 	cleanup := afterScenario(sc)
 	sc.Step(`^a model-discovery host with scripted Claude Code and Codex$`, func() error { return w.setup(f, cleanup) })
+	sc.Step(`^a model-discovery host with scripted OpenCode and Qwen Code$`, func() error {
+		server, err := serverProfileFixtures(f, cleanup)
+		if err != nil {
+			return err
+		}
+		return w.setup(server, cleanup)
+	})
+	sc.Step(`^the model-discovery host lists OpenCode variants and tiers and no Qwen models$`, w.serverListed)
+	sc.Step(`^the OpenCode listing has an unknown shape$`, func() error {
+		return w.script("opencode", `{"session":"models","steps":[{"dir":"http","msg":{"call":"GET /api/model","body":null,"res":{"models":[]}}},{"dir":"http","msg":{"call":"POST /never","body":{}}}]}`)
+	})
 	sc.Step(`^the model-discovery host receives host.info$`, func() error { return w.read(false) })
 	sc.Step(`^the model-discovery host receives host.info with refresh$`, func() error { return w.read(true) })
 	sc.Step(`^the model-discovery host lists the scripted ids, names, efforts, fast flags and tiers$`, w.listed)
@@ -86,10 +97,11 @@ func (w *hostModelsWorld) setup(f fixtures, cleanup func(func())) error {
 	w.dir = dir
 	cleanup(func() { os.RemoveAll(dir) })
 	for key, value := range map[string]string{
-		"PATH":                        hostAgentsIsolatedPath(f.fakeCLIs),
-		"SOLODAWN_FAKE_CLAUDE_SCRIPT": filepath.Join(dir, "claude.json"),
-		"SOLODAWN_FAKE_CODEX_SCRIPT":  filepath.Join(dir, "codex.json"),
-		"SOLODAWN_FAKECLI_LOG":        filepath.Join(dir, "log"),
+		"PATH":                          hostAgentsIsolatedPath(f.fakeCLIs),
+		"SOLODAWN_FAKE_CLAUDE_SCRIPT":   filepath.Join(dir, "claude.json"),
+		"SOLODAWN_FAKE_CODEX_SCRIPT":    filepath.Join(dir, "codex.json"),
+		"SOLODAWN_FAKE_OPENCODE_SCRIPT": filepath.Join(dir, "opencode.json"),
+		"SOLODAWN_FAKECLI_LOG":          filepath.Join(dir, "log"),
 	} {
 		previous, had := os.LookupEnv(key)
 		if err := os.Setenv(key, value); err != nil {
@@ -125,7 +137,7 @@ func (w *hostModelsWorld) open(cleanup func(func())) error {
 }
 
 func (w *hostModelsWorld) copyScripts() error {
-	for _, agent := range []string{"claude", "codex"} {
+	for _, agent := range []string{"claude", "codex", "opencode"} {
 		raw, err := os.ReadFile(filepath.Join("..", "internal", "host", "fakecli", "testdata", agent+"-models.json"))
 		if err != nil {
 			return err
