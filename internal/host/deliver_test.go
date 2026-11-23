@@ -204,6 +204,31 @@ func (f *fakeDeliverHome) recordReqLocked(req any) {
 	}
 }
 
+func (f *fakeDeliverHome) watchMerged() <-chan struct{} {
+	merged := make(chan struct{}, 1)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onCmd = func(_ context.Context, cmd proto.Cmd) (json.RawMessage, error) {
+		if strings.Contains(cmd.Env.Payload, `"op":"merged"`) {
+			select {
+			case merged <- struct{}{}:
+			default:
+			}
+		}
+		return json.RawMessage(`{"re":1,"ok":true}`), nil
+	}
+	return merged
+}
+
+func waitMerged(t *testing.T, merged <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-merged:
+	case <-time.After(30 * time.Second):
+		t.Fatal("no TaskMerged command")
+	}
+}
+
 func (f *fakeDeliverHome) waitSyncAnswer(ctx context.Context, req proto.Sync) (json.RawMessage, error) {
 	f.started <- req
 	select {
@@ -1510,9 +1535,11 @@ func verifyReviewRoundsAndMergeStats(t *testing.T, r *deliverRig, pDir, wt, c1 s
 		t.Fatal("merge ran while offline")
 	}
 	holdReason.Store("cap")
+	merged := r.home.watchMerged()
 	Deliver(r.h, "", "")
-	r.waitUntil("TaskMerged after offline lifted", func() bool { return len(r.home.cmdPayloads()) == baseCmds+1 })
+	waitMerged(t, merged)
 	cmds := r.home.cmdPayloads()
+	assertEqual(t, len(cmds), baseCmds+1)
 	if !strings.Contains(cmds[baseCmds], `"op":"merged"`) || !strings.Contains(cmds[baseCmds], `"added":17`) || !strings.Contains(cmds[baseCmds], `"removed":5`) {
 		t.Fatalf("expected TaskMerged with TaskRow.Stats 17/5, got %v", cmds)
 	}
@@ -1604,8 +1631,9 @@ func verifyRemoteForgeAndGitHubRepo(t *testing.T) {
 		forgeAnswer{Stderr: "down", Code: 1},
 	)
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 20}, Group: testGroup1, Num: 1, Title: "Remote", Slug: "remote", Origin: "brief", State: "active", Step: "merge", Commit: "deadbeef", PR: 42, Assignee: testAI1, Stats: proto.TaskStats{Added: 9, Removed: 4}})
+	merged := r.home.watchMerged()
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 853, AI: testAI1, Why: "merge", Task: testTask1, Commit: "deadbeef", PR: 42}, nil)
-	r.waitUntil("remote TaskMerged", func() bool { return len(r.home.cmdPayloads()) == 1 })
+	waitMerged(t, merged)
 	if !strings.Contains(r.home.cmdPayloads()[0], `"merge_commit":"merged-oid"`) || !strings.Contains(r.home.cmdPayloads()[0], `"added":9`) {
 		t.Fatalf("unexpected remote TaskMerged: %v", r.home.cmdPayloads())
 	}

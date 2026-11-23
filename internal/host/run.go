@@ -61,7 +61,7 @@ type pendingCrash struct {
 // Host, Driver, Process or hook/listener locks.
 type runtimePart struct {
 	mu         sync.Mutex
-	wg         sync.WaitGroup // the process loops
+	wg         sync.WaitGroup // the process loops and background callbacks
 	settling   bool           // Settle has begun: no process starts, and a loop that ends leaves the rows as they are
 	procs      map[SessionKey]*liveProc
 	closing    map[SessionKey]bool
@@ -73,13 +73,14 @@ type runtimePart struct {
 
 var errSettling = &Error{"busy", "the host is shutting down"}
 
-// settleRuntime ends every CLI process and waits for its loop, so that no
-// loop reaches the store after it closes. The session rows keep their state:
+// settleRuntime ends every CLI process and waits for its loop and the
+// runtime's callbacks. The session rows keep their state:
 // the next start reports a turn that was running (flows/agent-turn.md E).
 func settleRuntime(h *Host) {
 	rt := stateOf(h)
 	rt.mu.Lock()
 	rt.settling = true
+	rt.notifyLocked()
 	for _, lp := range rt.procs {
 		stopIdleLocked(lp)
 		lp.cancel()
@@ -108,6 +109,14 @@ func (rt *runtimePart) notify() {
 	rt.mu.Lock()
 	rt.notifyLocked()
 	rt.mu.Unlock()
+}
+
+func (rt *runtimePart) startBackground(work func()) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if !rt.settling {
+		rt.wg.Go(work)
+	}
 }
 
 type liveProc struct {
@@ -221,7 +230,7 @@ func attachRuntime(h *Host, device string) {
 	delete(rt.savedCrash, device)
 	rt.mu.Unlock()
 	slots := homeAISlots(h, device)
-	go flushHomeRuntime(h, rt, device, pending, slots)
+	rt.startBackground(func() { flushHomeRuntime(h, rt, device, pending, slots) })
 }
 
 func homeAISlots(h *Host, device string) []aiSlot {
@@ -580,7 +589,7 @@ func onProcessTurnEnded(h *Host, rt *runtimePart, lp *liveProc, slot aiSlot, e E
 	armTurnIdle(h, rt, lp, idle)
 	reportFinishedTurn(h, rt, lp.session, why, detail)
 	rt.notify()
-	go Deliver(h, slot.group, slot.member)
+	rt.startBackground(func() { Deliver(h, slot.group, slot.member) })
 }
 
 func finishActiveTurn(rt *runtimePart, lp *liveProc, slot aiSlot) (string, string, bool) {
@@ -751,7 +760,7 @@ func finishSessionClose(h *Host, rt *runtimePart, lp *liveProc, wasTurn bool) {
 	}
 	completeWaitingDormant(h, rt, lp)
 	if wasTurn {
-		go Deliver(h, lp.key.Group, lp.key.Member)
+		rt.startBackground(func() { Deliver(h, lp.key.Group, lp.key.Member) })
 	}
 }
 
@@ -839,7 +848,7 @@ func finishTurnProcessExit(h *Host, rt *runtimePart, lp *liveProc) {
 		c := pendingCrash{session: lp.session, reason: why, detail: detail}
 		sendCrashStep(context.Background(), h, rt, &c)
 	}
-	go Deliver(h, slot.group, slot.member)
+	rt.startBackground(func() { Deliver(h, slot.group, slot.member) })
 	endTurnExitClose(rt, lp.key)
 }
 
@@ -941,7 +950,7 @@ func failReplacement(h *Host, rt *runtimePart, lp *liveProc, err error) {
 	lp.replaceErr = err
 	h.Sessions.Move(lp.key, Working, Dormant)
 	sendMemberStatus(context.Background(), h, rt, lp.session.Home, lp.key.Group, lp.key.Member, nil)
-	go Deliver(h, lp.key.Group, lp.key.Member)
+	rt.startBackground(func() { Deliver(h, lp.key.Group, lp.key.Member) })
 	endTurnExitClose(rt, lp.key)
 }
 
@@ -955,6 +964,9 @@ func acquireOpenSlot(ctx context.Context, h *Host, rt *runtimePart, key SessionK
 			closeWaitingSession(h, rt, *victim)
 			continue
 		}
+		if waitCh == nil {
+			return errSettling
+		}
 		if err := waitSignal(ctx, waitCh); err != nil {
 			return err
 		}
@@ -967,6 +979,9 @@ func tryReserveSlot(h *Host, rt *runtimePart, key SessionKey, maxOpen int) (*Ses
 	}
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
+	if rt.settling {
+		return nil, nil, false
+	}
 	sessions := h.Sessions.All()
 	if countOpenLocked(rt, sessions) < maxOpen {
 		rt.starting[key] = true

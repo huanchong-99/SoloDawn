@@ -728,6 +728,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-23 · bug · Runtime work could outlive host shutdown
+
+- Symptom: the macOS race detector reported a shared hold hook being restored while a host still read it.
+- Cause: runtime callbacks in `internal/host/run.go` could deliver queued items or flush member status from an untracked goroutine. Member status calls `Host.Held` in `internal/host/host.go`.
+- Status: runtime shutdown now joins those callbacks before returning. The reported macOS failure was not reproduced on Linux.
+
+### 2026-11-23 · bug · Host tests observed status before work completed
+
+- Symptom: a replacement CLI sometimes appeared to have its old turn metadata, the workspace test could time out before fake GitHub finished merging, and the hand-back test could look up a process before one existed.
+- Cause: `startReplacementProcess` in `internal/host/run.go` sends the replacement status before setting the turn and writing it to the CLI. In `internal/host/forge_test.go`, the fake GitHub CLI inherited the race detector's exit delay for each invocation. In `internal/host/run_test.go`, the fake driver records a launch before it constructs and publishes the corresponding process.
+- Status: the tests wait for the replacement turn, merged command and hand-back process; the fake forge CLI disables its race-detector exit delay.
+
 ### 2026-11-23 · bug · The terminal page stayed at "Direct connection required" after the path recovered
 
 - Symptom: a terminal page opened on a relayed path kept saying "Direct connection required" when the path became direct again, until the page was reopened.

@@ -1,12 +1,23 @@
 package node
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"golang.org/x/sys/windows"
 )
+
+func TestPrivateDirReportsInvalidDirectoryName(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "invalid\x00name")
+	err := privateDir(path)
+	var pathErr *os.PathError
+	if !errors.As(err, &pathErr) || pathErr.Op != "mkdir" || pathErr.Path != path {
+		t.Fatalf("mkdir invalid directory: %v", err)
+	}
+}
 
 func TestSocketDACLIsOwnerOnly(t *testing.T) {
 	dir := socketRoot(t)
