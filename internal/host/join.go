@@ -604,7 +604,9 @@ func joinCommitLeft(h *Host, group, agent, member, by string) error {
 		})
 		return err
 	}
-	return h.Sessions.Write(run)
+	err := h.Sessions.Write(run)
+	extWake(h, aiGroupKey{group: group, member: member})
+	return err
 }
 
 func closeMemberSessions(h *Host, group, member string) []Session {

@@ -858,6 +858,7 @@ func verifyShimUsageErrors(t *testing.T) {
 		{"--token"},
 		{"--unknown"},
 		{"--token", "tok", "extra"},
+		{"--token", "tok", "--member", "m1"},
 	} {
 		var out, errBuf bytes.Buffer
 		code := RunShim(badArgs, neverDial, strings.NewReader(""), &out, &errBuf)

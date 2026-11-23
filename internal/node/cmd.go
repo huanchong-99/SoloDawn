@@ -60,6 +60,10 @@ type Command struct {
 	Group      proto.ID `json:"g,omitempty"`
 	File       string   `json:"file,omitempty"`
 	To         string   `json:"to,omitempty"`
+	Member     string   `json:"member,omitempty"`
+	Timeout    *int     `json:"timeout,omitempty"`
+	RunID      int64    `json:"run,omitempty"`
+	Failed     string   `json:"failed,omitempty"`
 }
 
 // Run submits a command to the user's running node and prints each text line

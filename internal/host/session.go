@@ -91,6 +91,7 @@ type Caller struct {
 	Session
 	Level       int  // the level the process was started with
 	Interactive bool // started in a terminal, for a takeover
+	External    bool // an external AI, by its member id
 	Turn        Turn
 }
 
