@@ -148,7 +148,6 @@ type extBubble struct {
 	h      *host.Host
 	home   *hlHome
 	homeID string
-	base   string
 	leave  func()
 }
 
@@ -183,7 +182,7 @@ func runExtBubble(suiteT *testing.T, run func(*extBubble) error) error {
 		synctest.Wait()
 		leave := h.ExternalPresent(hlGroup, hlAI1)
 		defer leave()
-		b := &extBubble{t: t, h: h, home: home, homeID: homeKey.ID(), base: base, leave: leave}
+		b := &extBubble{t: t, h: h, home: home, homeID: homeKey.ID(), leave: leave}
 		stepErr = run(b)
 	})
 	return stepErr
@@ -234,8 +233,6 @@ func (s *extScenario) runEnds(b *extBubble) error {
 	synctest.Wait()
 	s.states = append(s.states, b.state())
 	s.cmds = b.home.snapshotCmds()
-	base, _ := filepath.EvalSymlinks(b.base)
-	s.first.Folder = strings.TrimPrefix(s.first.Folder, filepath.Join(base, "projects", hlGroup))
 	return nil
 }
 
@@ -290,11 +287,12 @@ func runNumbers(runs []proto.Handout) []int64 {
 
 func (s *extScenario) checkFirst() error {
 	h := s.first
-	if h.Run != 1 || h.Kind != "group" || h.Task != "" || h.Folder != string(filepath.Separator)+"repo" || h.Text != "items=1" {
+	folder := string(filepath.Separator) + filepath.Join("projects", hlGroup, "repo")
+	got := fmt.Sprintf("%d|%s|%s|%s|%t|%t|%t|%t", h.Run, h.Kind, h.Task, h.Text,
+		filepath.IsAbs(h.Folder), strings.HasSuffix(h.Folder, folder),
+		strings.HasPrefix(h.Context, "instructions of group\n# External run\n"), strings.Contains(h.Context, "Never wait or poll"))
+	if got != "1|group||items=1|true|true|true|true" {
 		return fmt.Errorf("first hand-out %+v", h)
-	}
-	if !strings.HasPrefix(h.Context, "instructions of group\n# External run\n") || !strings.Contains(h.Context, "Never wait or poll") {
-		return fmt.Errorf("context %q", h.Context)
 	}
 	return nil
 }
