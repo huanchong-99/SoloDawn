@@ -19,6 +19,7 @@ type HostState struct {
 	Name     string       `json:"name"`
 	OS       string       `json:"os"`
 	Version  string       `json:"version"`
+	Exe      string       `json:"exe"`
 	Open     int          `json:"open"`
 	MaxOpen  int          `json:"max_open"`
 	Offline  bool         `json:"offline"`

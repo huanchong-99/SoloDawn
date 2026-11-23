@@ -41,8 +41,14 @@ func member(op string) MemberCommand {
 }
 
 func TestMemberCommandGoldens(t *testing.T) {
-	golden(t, "member-add_ai", MemberAddAI{member("add_ai"), "codex", "Codex", "personal", false, []string{user}, ProfileSet{}})
-	golden(t, "member-add_ai-profile", MemberAddAI{member("add_ai"), "codex", "Codex", "personal", false, []string{user}, profile()})
+	scout := func(op string) MemberCommand {
+		c := member(op)
+		c.ID = ID(id("scout"))
+		return c
+	}
+	golden(t, "member-add_ai", MemberAddAI{member("add_ai"), "codex", nil, "Codex", "personal", false, []string{user}, ProfileSet{}})
+	golden(t, "member-add_ai-profile", MemberAddAI{member("add_ai"), "codex", nil, "Codex", "personal", false, []string{user}, profile()})
+	golden(t, "member-add_ai-external", MemberAddAI{scout("add_ai"), "external", new("ZCode"), "Scout", "api_key", false, []string{user}, ProfileSet{}})
 	golden(t, "member-status", MemberStatus[SystemCode]{MemberCommand: member("status"), State: "working", Task: ID(taskID), Path: "local",
 		Usage: Usage{WindowPct: new(62.5), WindowResets: new(ts + 10000), DayCapPct: new(80.0),
 			SpendToday: new(0.0), SpendCap: new(10.5), TurnsToday: new(14)}})
@@ -52,6 +58,7 @@ func TestMemberCommandGoldens(t *testing.T) {
 		Role:          new("admin"),
 	})
 	golden(t, "member-set-profile", MemberSet{MemberCommand: member("set"), ProfileSet: ProfileSet{new(""), new(""), new("light"), new("")}})
+	golden(t, "member-set-tool", MemberSet{MemberCommand: scout("set"), Tool: new("")})
 	golden(t, "member-remove", member("remove"))
 }
 
@@ -220,7 +227,8 @@ func TestHostCommandGoldens(t *testing.T) {
 	to := func(kind string) HostCommand { return HostCommand{kind, ID(id(kind)), ts, host} }
 	golden(t, "home-add", HomeAdd{to("home.add"), ID(group), device(signer("other home")), "Website",
 		[]string{"ws://192.0.2.10:47800/rv", "wss://rv.example/rv"}})
-	golden(t, "host-join", HostJoin{to("host.join"), ID(group), host, "codex", "Codex", false, profile()})
+	golden(t, "host-join", HostJoin{to("host.join"), ID(group), host, "codex", "Codex", false, "", nil, profile()})
+	golden(t, "host-join-external", HostJoin{to("host.join"), ID(group), host, "external", "Scout", false, "api_key", new("ZCode"), ProfileSet{}})
 	golden(t, "host-leave", HostLeave{to("host.leave"), ID(group), "codex", ID(agent)})
 }
 
@@ -281,6 +289,7 @@ func TestCommandExamplesAreNamedByWhatSelectsThem(t *testing.T) {
 		default:
 			continue
 		}
+		name = strings.TrimSuffix(strings.TrimSuffix(name, "-external"), "-tool")
 		if name != want {
 			t.Errorf("%s holds the example of %s", name, want)
 		}

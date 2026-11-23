@@ -1,0 +1,16 @@
+{
+  "t": "member",
+  "n": "eS_j3OiWABlRuJAcS_RR5w",
+  "ts": 1763600000000,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "op": "add_ai",
+  "id": "NgjkvQ5pMXc2nhf0jN91Dg",
+  "cli": "external",
+  "tool": "ZCode",
+  "name": "Scout",
+  "account": "api_key",
+  "secretary": false,
+  "approvers": [
+    "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs"
+  ]
+}

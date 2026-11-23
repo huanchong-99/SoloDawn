@@ -1,0 +1,31 @@
+{
+  "r": "member",
+  "id": "NgjkvQ5pMXc2nhf0jN91Dg",
+  "seq": 812,
+  "g": "rZNvy-1jH6Z-BcPqA5U5BQ",
+  "kind": "ai",
+  "user": "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs",
+  "name": "Scout",
+  "last_seen": 1763600000000,
+  "cli": "external",
+  "tool": "ZCode",
+  "host": "J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q",
+  "host_name": "workstation",
+  "secretary": false,
+  "account": "api_key",
+  "allow": [],
+  "approvers": [
+    "akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs"
+  ],
+  "state": "waiting",
+  "since": 1763599000000,
+  "path": "local",
+  "usage": {
+    "window_pct": 40,
+    "window_resets": 1763611200000
+  },
+  "model": "",
+  "effort": "",
+  "tier": "standard",
+  "skills": "Rust, reviews"
+}

@@ -146,6 +146,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       name: "Alex's MacBook",
       os: 'macOS 15.2',
       version: 'v0.3.1',
+      exe: '/usr/local/bin/solodawn',
       open: 0,
       max_open: 4,
       offline: false,

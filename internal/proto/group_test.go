@@ -46,6 +46,13 @@ func TestGroupGoldens(t *testing.T) {
 			SpendToday: new(0.0), SpendCap: new(10.5), TurnsToday: new(14)},
 		Profile: Profile{"gpt-5.4", "high", "strong", "Go backend, protocol design"},
 	})
+	golden(t, "row-member-ai-external", AIMemberRow{
+		MemberRow: MemberRow{RowHeader{"member", id("scout"), 812}, group, "ai", user, "Scout", ts},
+		CLI:       "external", Tool: "ZCode", Host: host, HostName: "workstation", Account: "api_key",
+		Allow: []string{}, Approvers: []string{user}, State: "waiting", Since: ts - 1000000, Path: "local",
+		Usage:   Usage{WindowPct: new(40.0), WindowResets: new(ts + 11200000)},
+		Profile: Profile{Tier: "standard", Skills: "Rust, reviews"},
+	})
 	golden(t, "row-device", DeviceRow{
 		RowHeader{"device", user + ":2", 41}, addNode.DeviceChange, signed(browser, " "+string(wireJSON(t, addNode))),
 	})

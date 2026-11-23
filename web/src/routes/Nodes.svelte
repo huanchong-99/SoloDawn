@@ -168,7 +168,7 @@
         {/if}
 
         {#if comp.info}
-          {#each comp.info.agents as agent (agent.agent)}
+          {#each comp.info.agents.filter((entry) => entry.agent !== 'external') as agent (agent.agent)}
             {@const label = cliName(agent.agent)}
             {@const acctKey = `${comp.info.device}:${agent.agent}`}
             <div class="ai-row">

@@ -125,6 +125,7 @@ function hostInfoOf(device: string, agents: HostInfo['agents'], name = 'MacBook'
     name,
     os: 'macOS 15',
     version: 'v0.4.0',
+    exe: '/usr/local/bin/solodawn',
     open: 0,
     max_open: 4,
     offline: false,

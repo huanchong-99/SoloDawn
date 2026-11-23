@@ -495,7 +495,7 @@ export class PairingSession {
 
   #applyHostInfo(info: HostInfo | HostInfoPush) {
     this.node = { ...this.node!, name: info.name, os: info.os, version: info.version };
-    this.agents = info.agents;
+    this.agents = info.agents.filter((agent) => agent.agent !== 'external');
     this.#syncStage();
   }
 

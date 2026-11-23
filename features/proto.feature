@@ -18,3 +18,7 @@ Feature: Protocol wire compatibility
     When a client reads the pending approval and its approved update
     Then both show the same signed request for "pnpm exec playwright install chromium"
     And the update carries the approver's signed "approve" action for that card
+
+  Scenario: A client matches an external AI in host info to its member row
+    When a client reads the external AI member and host info examples
+    Then the host advertises the member with tool "ZCode" and no takeover

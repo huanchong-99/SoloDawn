@@ -257,6 +257,7 @@ export const AIMemberRow = v.object({
   ...MemberRow,
   kind: v.literal('ai'),
   cli: str,
+  tool: v.optional(str),
   host: str,
   host_name: str,
   secretary: bool,
@@ -683,6 +684,7 @@ export const MemberAddAI = v.object({
   ...member,
   op: v.literal('add_ai'),
   cli: str,
+  tool: optionalText,
   name: str,
   account: str,
   secretary: bool,
@@ -723,6 +725,7 @@ export const MemberSet = v.object({
   op: v.literal('set'),
   name: optionalText,
   account: optionalText,
+  tool: optionalText,
   allow: v.optional(strs),
   approvers: v.optional(strs),
   role: optionalText,
@@ -923,6 +926,8 @@ export const HostJoin = v.object({
   agent: str,
   name: str,
   secretary: bool,
+  account: optionalText,
+  tool: optionalText,
   ...ProfileSet,
 });
 export type HostJoin = v.InferOutput<typeof HostJoin>;
@@ -1036,6 +1041,7 @@ const HostState = {
   name: str,
   os: str,
   version: str,
+  exe: str,
   open: int,
   max_open: int,
   offline: bool,
@@ -1200,6 +1206,15 @@ export const TaskTrace = v.object({
 });
 export type TaskTrace = v.InferOutput<typeof TaskTrace>;
 
+export const Handout = v.object({
+  run: int,
+  kind: str,
+  task: optionalText,
+  folder: str,
+  context: str,
+  text: str,
+});
+
 // MCP tools (mcp-tools.md section 5): what a node offers its AI sessions. Not a frame between
 // nodes, so not read by the rules of contracts/conventions.md: the names follow MCP, and a member
 // that the file does not have is refused, as internal/proto's test refuses it.
@@ -1255,6 +1270,7 @@ export const ToolLists = v.strictObject({
   review: ToolList,
   task_level_1: ToolList,
   task_level_2_3: ToolList,
+  external: ToolList,
 });
 export type ToolLists = v.InferOutput<typeof ToolLists>;
 
