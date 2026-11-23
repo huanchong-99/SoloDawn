@@ -121,7 +121,7 @@ describe('AI profiles with fake CLIs', () => {
     await createGroup(page, surface, net.nodes[0], repo);
     await page.locator('.members').getByRole('button', { name: 'Add AI', exact: true }).click();
     const dialog = page.locator('dialog.dlg[open]');
-    await poll(() => dialog.locator('.choice').count()).toBe(4);
+    await poll(() => dialog.locator('.choice').count()).toBe(5);
     await dialog.locator('.choice', { hasText: 'Codex · studio' }).locator('input').check();
     await poll(() =>
       dialog
