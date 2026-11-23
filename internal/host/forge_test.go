@@ -75,6 +75,7 @@ func fakeForgeGH(t *testing.T, answers ...forgeAnswer) func(...[]string) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("SOLODAWN_TEST_FORGE", dir)
+	t.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
 	return func(want ...[]string) {
 		t.Helper()
 		var expected []byte

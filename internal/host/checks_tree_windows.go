@@ -1,11 +1,21 @@
 package host
 
 import (
+	"context"
+	"os"
 	"os/exec"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
+
+func checkShell(ctx context.Context, command string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, os.Getenv("ComSpec"))
+	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd.exe /d /s /c "` + command + `"`}
+	cmd.Cancel = func() error { return taskkill(cmd.Process.Pid) }
+	return cmd
+}
 
 // killCheckTree returns what kills a started check with every process it
 // left behind. Once cmd.exe has exited, taskkill /t no longer finds its
@@ -14,7 +24,7 @@ import (
 // Wait: Go has released the process by then, and Cancel (taskkill /t)
 // still stops a running shell.
 func killCheckTree(cmd *exec.Cmd) func() {
-	job, err := newCheckJob(uint32(cmd.Process.Pid))
+	job, err := newCheckJob(uint32(cmd.Process.Pid), windows.CreateJobObject)
 	if err != nil {
 		return func() {}
 	}
@@ -23,8 +33,8 @@ func killCheckTree(cmd *exec.Cmd) func() {
 
 // newCheckJob puts the process in a new job that kills it, and every
 // process it starts, when the job is closed. On an error the job is closed.
-func newCheckJob(pid uint32) (windows.Handle, error) {
-	job, err := windows.CreateJobObject(nil, nil)
+func newCheckJob(pid uint32, create func(*windows.SecurityAttributes, *uint16) (windows.Handle, error)) (windows.Handle, error) {
+	job, err := create(nil, nil)
 	if err != nil {
 		return 0, err
 	}

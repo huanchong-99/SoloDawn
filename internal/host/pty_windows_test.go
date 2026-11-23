@@ -8,6 +8,13 @@ import (
 	"time"
 )
 
+func TestPTYWindowsResizeAfterConsoleCloses(t *testing.T) {
+	w := ptyWinHandle{closed: true}
+	if err := w.Resize(90, 25); err != nil {
+		t.Fatalf("resize closed console: %v", err)
+	}
+}
+
 // TestPTYWindowsSelfExitDeliversLastOutput starts a CLI in a ConPTY with a
 // terminal attached, makes it print BYE-NOW and exit at once, and expects
 // BYE-NOW in the terminal before the terminal closes. ptyStopTimeout is an

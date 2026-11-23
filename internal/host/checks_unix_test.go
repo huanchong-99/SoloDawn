@@ -114,6 +114,23 @@ func TestCheckThatCannotStart(t *testing.T) {
 	}
 }
 
+func TestTaskkillArgs(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "args")
+	t.Setenv("TASKKILL_ARGS", out)
+	if err := os.WriteFile(filepath.Join(dir, "taskkill.exe"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$TASKKILL_ARGS\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	if err := taskkill(12345); err != nil {
+		t.Fatal(err)
+	}
+	args, err := os.ReadFile(out)
+	if err != nil || string(args) != "/f\n/t\n/pid\n12345\n" {
+		t.Fatalf("taskkill arguments: %q (%v)", args, err)
+	}
+}
+
 // fakeCheckGit puts a git on PATH that runs script, a POSIX shell case on
 // the subcommand, and answers anything else with nothing.
 func fakeCheckGit(t *testing.T, cases string) string {
