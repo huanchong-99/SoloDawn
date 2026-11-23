@@ -335,12 +335,20 @@ and `effort`; an empty value passes nothing, as in step 1.
 | --- | --- | --- | --- |
 | `claude` | `--model <model>` `[verified]` | `--effort <effort>` `[verified]` | the same two flags |
 | `codex` | `model` of `thread/start` and `thread/resume` `[verified]` against the generated schema of 0.164.0 | `config.model_reasoning_effort` of the same `[documented]` | `-m <model>` and `-c model_reasoning_effort="<effort>"` on `codex resume` `[documented]` |
-| `opencode` | `POST /api/session/{id}/model` before the first prompt of a process `[documented]` | the variant in the same selection, `provider/model#variant` `[unverified]`: version 1 documents `--variant` instead | no takeover (section 8) |
+| `opencode` | `POST /api/session/{id}/model` before the first prompt of a process `[documented]` | `variant` in the structured selection body `[documented]` | no takeover (section 8) |
 | `qwen` | `startupConfig.modelServiceId` of `POST /session`, behind the capability `session_startup_config`; `--model` in stream-json mode `[documented]` | `startupConfig.reasoningEffort` `[documented]` | no takeover (section 8) |
 
-- A changed model or level applies at the next start, a resume included:
+- Except for Qwen Code, a changed model or level applies at the next start, a resume included:
   the session and its history stay. There is no fallback to a new
   session.
+- A changed model or level of a Qwen Code member applies only to its next
+  new session. The serve protocol documents `startupConfig` only at creation;
+  resume keeps the original choice and history.
+- OpenCode uses the [OpenAPI](https://opencode.ai/docs/openapi.json) structured
+  body `{"model":{"providerID":"provider","id":"model","variant":"effort"}}`,
+  not `provider/model#variant`. The public model id remains `provider/model`,
+  split on its first `/`; an empty effort omits `variant`, and an empty model
+  skips selection.
 - **A value the CLI refuses.** Whether the CLI exits (Claude Code) or
   answers the start with an error and stays up (Codex's `thread/start`
   and `thread/resume` `[verified]` against the schema of 0.164.0;
