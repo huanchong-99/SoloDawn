@@ -734,6 +734,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-23 · bug · FLAKY-29: the fake Qwen Code started OpenCode's MCP server
+
+- Symptom: Qwen A4.9 failed with `timed out waiting on home pushes`, and failed every time at step 4 with `OPENCODE_CONFIG_CONTENT='{"mcp":{}}'` in the environment (#373).
+- Cause: `startMCP` (`internal/host/fakecli/mcp.go:40-43`) replaced the server of any fake CLI with the one in `OPENCODE_CONFIG_CONTENT` whenever that variable was set. The Qwen Code driver passes only `QWEN_CODE_SYSTEM_SETTINGS_PATH` and inherits the rest of the environment, so the fake Qwen Code launched an empty command and never posted.
+- Status: resolved on `devin/host-handout-task-flaky29`: only the fake OpenCode reads `OPENCODE_CONFIG_CONTENT`. `TestQwenServesItsScriptBehindTheBearerToken` sets it and checks that the fake Qwen Code starts its own server.
+
+### 2026-11-23 · bug · An external AI's task hand-out named the task by its id
+
+- Symptom: a task or review hand-out carried the task's internal id in `task`; `external.md` section 3.2 requires `T-<num>`. This blocked A10.22, A10.23, the paused-task half of A10.24 and A10.26.
+- Cause: `extHandOut` sent `Task: s.Task` (`internal/host/external.go:307`).
+- Status: resolved on `devin/host-handout-task-flaky29`: `task` is formatted by `turnCtx.taskRef` and stays empty for a group run. `TestExternalTaskHandOutNamesTheTaskByItsNumber` pins `T-7`.
+
 ### 2026-11-23 · bug · An external AI's timer callback could outlive Settle
 
 - Symptom: `Settle` could return while an external AI's run timeout (`extEnd`, which calls `Deliver`) or presence report (`extReport`) was still running, and a `leave` or a hand-out during shutdown armed a new timer, such as a 180 s presence timer.

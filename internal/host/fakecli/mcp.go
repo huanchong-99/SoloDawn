@@ -38,8 +38,8 @@ func (p *process) mcpStep(dir string, msg []byte) error {
 
 func (p *process) startMCP() error {
 	srv, err := p.server()
-	if raw, ok := os.LookupEnv("OPENCODE_CONFIG_CONTENT"); ok {
-		srv, err = openCodeServer(raw)
+	if p.vendor == "opencode" {
+		srv, err = openCodeServer(os.Getenv("OPENCODE_CONFIG_CONTENT"))
 	}
 	if err != nil {
 		return err

@@ -231,3 +231,15 @@ func TestSettleExternalWaitsForItsTimersAndArmsNoMore(t *testing.T) {
 		}
 	})
 }
+
+func TestExternalTaskHandOutNamesTheTaskByItsNumber(t *testing.T) {
+	r := newExternalRig(t, true)
+	initTestOriginAndGroupRepo(t, r, "none")
+	putExternalMember(r.h, r.hostKey.ID(), testAI1)
+	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 7, Title: "T", Slug: "t", Origin: "brief", State: "active", Step: "work", Assignee: testAI1})
+	r.pushExternalItem(proto.Item{Item: 8, Why: "assign", Task: testTask1})
+	got, ok, err := r.h.ExternalTake(testGroup1, testAI1)
+	if !ok || err != nil || got.Kind != "task" || got.Task != "T-7" {
+		t.Fatalf("task take = %+v %v %v", got, ok, err)
+	}
+}
