@@ -507,6 +507,16 @@ describe('a takeover', () => {
     expect([tk.phase, pc.channels.length]).toEqual(['active', 1]);
   });
 
+  it('starts again when a path refused as relayed turns relay and recovers to direct', async () => {
+    const pc = computer();
+    const tk = new Takeover(gid, memberId, undefined, () => {});
+    tk.follow(pc.target, direct);
+    await pc.answer({ re: 1, err: { code: 'relay', msg: '' } });
+    tk.follow(pc.target, relay);
+    tk.follow(pc.target, direct);
+    expect(tk.phase).toBe('starting');
+  });
+
   it('shows a refusal, a lost channel and the computer closing the terminal', async () => {
     const pc = computer();
     const relayed = new Takeover(gid, memberId, undefined, () => {});
