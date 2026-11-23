@@ -728,6 +728,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-23 · bug · An external AI's timer callback could outlive Settle
+
+- Symptom: `Settle` could return while an external AI's run timeout (`extEnd`, which calls `Deliver`) or presence report (`extReport`) was still running, and a `leave` or a hand-out during shutdown armed a new timer, such as a 180 s presence timer.
+- Cause: `settleExternal` (`internal/host/external.go:56`) stopped the run and presence timers but did not wait for a callback already running, and `extLeave` (`:209`) and `extOpenRun` (`:298`) armed `time.AfterFunc` timers after it.
+- Status: resolved on `devin/host-teardown-race`, with the pattern of `limits.go`: `extPart` has `settled` and `wg`, every timer callback starts on `wg` under `extPart.mu` unless settled (`extPart.after`), no timer is armed once settled, and `settleExternal` waits on `wg`. `TestSettleExternalWaitsForItsTimersAndArmsNoMore` holds a run timeout inside `Deliver` and pins that `Settle` waits for it and that a `leave` and a hand-out after it arm nothing.
+
 ### 2026-11-23 · bug · FLAKY-30: the kill of a PTY that outlives its stop timeout was covered only by timing on Windows
 
 - Symptom: the Windows CI step "Uncovered Windows product statements" sometimes reported `internal/host/pty.go:194.23,194.41`, the `killTree` closure of `ptyActivate`.
