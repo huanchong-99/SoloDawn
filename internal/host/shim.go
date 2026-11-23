@@ -37,13 +37,11 @@ func parseShimToken(args []string) (string, bool) {
 	flags := flag.NewFlagSet("mcp", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	token := flags.String("token", "", "")
-	if flags.Parse(args) != nil {
+	member := flags.String("member", "", "")
+	if flags.Parse(args) != nil || flags.NArg() != 0 || (*token == "") == (*member == "") {
 		return "", false
 	}
-	if flags.NArg() != 0 {
-		return "", false
-	}
-	return *token, *token != ""
+	return *token + *member, true
 }
 
 func bridgeShim(token string, dial func() (net.Conn, error), stdin io.Reader, stdout io.Writer) error {

@@ -69,7 +69,7 @@ func sendGroupCmd(n *nodeRuntime, cmd Command) error {
 	if err != nil {
 		return err
 	}
-	_, err = n.runLocalCmd(cmd.Cmd, raw)
+	_, err = n.runLocalCmd(n.ctx, cmd.Cmd, raw)
 	return err
 }
 
@@ -157,6 +157,7 @@ func TestGroupCLIUsageAndErrors(t *testing.T) {
 
 func serveGroupCLI(t *testing.T, runtime *nodeRuntime) string {
 	t.Helper()
+	runtime.ctx = t.Context()
 	dir := nodeTestDir(t)
 	socket := openSocket(t, dir)
 	go func() {

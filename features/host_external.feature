@@ -22,3 +22,20 @@ Feature: External AIs on a host
     When the group is paused, all AIs go offline and the runner stops, each with an item waiting
     Then "Scout" was "paused", "offline" and "offline" in turn, and no item was handed out
     And after the resume, the return online and the runner's return each waiting item was handed out
+
+  Scenario: The wait command looks once or waits, and done ends the run (A10.18, A10.19 host)
+    Given a host whose external AI "Scout" is present and whose group has turn_minutes 1
+    When the runner looks, waits and ends runs of "Scout" by its member id
+    Then a look with nothing waiting printed nothing, and after a mention one line of run 1 of kind "group"
+    And a look while run 1 was open printed nothing, the next look after its done printed run 2, and a late done for run 1 succeeded
+    And a blocking wait printed run 3 after a mention, a wait of 2 seconds printed nothing after 2 seconds, and an unknown id was "not_found"
+    And a wait open when "Scout" was removed failed with "not_found"
+
+  Scenario: Tools under the member id (A10.21, A10.25, A10.26 host)
+    Given a host whose external AI "Scout" is present and whose group has turn_minutes 1
+    When a client connects with the member id of "Scout" and calls its tools
+    Then it was listed the tools of "external" in tools.json and "approve"
+    And "run_checks" and "submit_review" failed with "conflict" with no run open
+    And "next_item" answered {"none":true}, then after a mention run 1, and "done" ended that run
+    And report_usage 40 with a reset time, then 55, was reported in the member status, and 101 was "bad_request"
+    And a client whose id names no external AI was closed at once
