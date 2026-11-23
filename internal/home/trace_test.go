@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -105,7 +106,7 @@ func (r *traceRun) start(cast []identity.Key, names []string) {
 	for _, ai := range r.tr.AIs {
 		s.AIs[ai.ID] = ai
 	}
-	r.run = &runGroup{loop: &Loop{cfg: LoopConfig{Store: r.db}}, state: s}
+	r.run = &runGroup{loop: &Loop{cfg: LoopConfig{Store: r.db}, diag: slog.Default()}, state: s}
 	r.write(func(tx *store.Tx) error {
 		_, err := tx.Exec("INSERT INTO grp(g, seq, num) VALUES (?, ?, ?)", r.g, r.tr.Seq, r.tr.Num)
 		return err
