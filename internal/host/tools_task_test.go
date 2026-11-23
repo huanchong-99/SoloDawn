@@ -749,6 +749,27 @@ func TestStaleCloudCheckRowDoesNotRestartCompletedPoll(t *testing.T) {
 	calls([]string{"pr", "view", "31", "--json", "headRefOid,statusCheckRollup"})
 }
 
+func TestSubmitTaskDoesNotRestartRunningHostedCheckForSameCommit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := &tskPart{}
+		key := tskCloudKey{group: tskTestGroupID, task: tskTestTaskID}
+		const commit = "c1"
+		ctx, run := tskBeginCloud(p, key, commit)
+		p.mu.Lock()
+		delete(p.claimed, tskCloudHead{key, commit})
+		p.mu.Unlock()
+
+		dupCtx, dupRun := tskBeginCloud(p, key, commit)
+		tskEqual(t, dupCtx, context.Context(nil))
+		tskEqual(t, dupRun, (*tskCloudRun)(nil))
+		tskEqual(t, ctx.Err(), nil)
+
+		tskFinishCloud(p, key, run, true)
+		_, staleRun := tskBeginCloud(p, key, commit)
+		tskEqual(t, staleRun, (*tskCloudRun)(nil))
+	})
+}
+
 func TestSubmitTaskSupersedesPreviousHostedChecks(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		p := &tskPart{}

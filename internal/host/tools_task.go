@@ -472,6 +472,10 @@ func tskBeginCloud(p *tskPart, key tskCloudKey, commit string) (context.Context,
 		return nil, nil
 	}
 	if prev := p.cancels[key]; prev != nil {
+		if prev.commit == commit {
+			p.claimed[head] = struct{}{}
+			return nil, nil
+		}
 		prev.cancel()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
