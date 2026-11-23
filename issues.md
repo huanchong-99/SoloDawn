@@ -708,12 +708,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
-### 2026-11-23 · bug · Svelte interpolated model input pattern quantifiers
-
-- Symptom: the empty-catalog model and level inputs rendered `.100` and `.32` as their patterns, and the type check reported unused comma operands.
-- Cause: `web/src/components/model/ModelFields.svelte:64,74` put regex quantifiers in quoted Svelte attributes, where braces introduce expressions.
-- Status: resolved in U3-5 by passing literal pattern strings as expressions. Acceptance checks cover native Chromium validity and blocked submissions for 101 astral model code points, with 100 valid.
-
 ### 2026-11-22 · limitation · Model discovery has synthetic fixtures, not live captures
 
 - Symptom: Claude Code and Codex model discovery was tested only against scripted listings, so the fields of a real catalog and whether a nonempty Codex `serviceTiers` means a fast mode were unverified.
