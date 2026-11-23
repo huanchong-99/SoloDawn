@@ -315,7 +315,7 @@ a second attempt. Windows programs must resolve to `.exe` files.
 - `tools_task.go` lists `start_task` to working AIs' group sessions, `push_branch`, `run_checks` and `submit_task` to task sessions above level 1, and `submit_review` to review sessions ([mcp-tools.md](../../planning/contracts/mcp-tools.md)).
 - `push_branch` and `submit_task` derive `task/<num>-<slug>` from `num` and `slug` via `taskName`, ignoring `TaskRow.Branch`.
 - `start_task`, `submit_task` and `submit_review` check outbound text arguments with `CheckOutboundSecret` before running Git or signing commands.
-- With a remote forge, `submit_task` and group-state resume (`afterGroupState`) share `startHostedCheck`, which claims `(group, task, commit)` in `Part[tskPart](h)`, runs `TaskForge.WaitHostedChecks` in the background, and sends `task cloud`. Starting a new commit cancels the previous poll. The running host remembers accepted and superseded commits so stale rows cannot restart them; a poll that stopped without acceptance or supersession can be retried.
+- With a remote forge, `submit_task` and group-state resume (`afterGroupState`) claim `(group, task, commit)` in `Part[tskPart](h)`, run `TaskForge.WaitHostedChecks` in the background, and send `task cloud`. Starting a new poll cancels the previous poll for the task. The host remembers accepted and superseded commits so stale rows cannot restart them; an accepted `submit_task` can poll the same commit again. A poll that stopped without acceptance or supersession can also be resumed.
 
 # Approvals
 

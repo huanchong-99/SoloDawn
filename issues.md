@@ -737,7 +737,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: A9.24 can report an unexpected `watch-checks` call for the first commit of the task that is reassigned.
 - Cause: `internal/host/deliver.go:1378-1379` can select a stale `cloud_check` row after `tskFinishCloud` releases the polling slot, even after the task has reached review. The home acknowledges the result before sending the updated row (`internal/home/run_group.go:170-171`).
-- Status: resolved in `e61a675ef`. The host keeps claims for accepted and superseded commits, while allowing retries after failed result delivery. `TestStaleCloudCheckRowDoesNotRestartCompletedPoll` verifies that resuming from a stale row does not make a second forge call.
+- Status: resolved in PR #335. The host keeps claims for accepted and superseded commits, while allowing retries after failed result delivery or an accepted resubmission. `TestStaleCloudCheckRowDoesNotRestartCompletedPoll` verifies that resuming from a stale row does not make a second forge call.
 
 ### 2026-11-22 · bug · Codex treated every failed thread resume as a lost session
 

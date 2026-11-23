@@ -692,6 +692,40 @@ func TestSubmitTaskRemoteAndHostedChecks(t *testing.T) {
 	tskEqual(t, cloud.Items[0].Name, "build")
 }
 
+func TestSubmitTaskRepollsSameCommitAfterFailedHostedCheck(t *testing.T) {
+	h, dataDir := tskDiskHost(t)
+	_, _, wtDir, head := tskInitWorktree(t, dataDir, true)
+	tskStopAllCloud(t, h)
+	since := time.Now()
+	task := tskTaskFixture(12, "fix-path", "task/12-fix-path", &proto.Check{OK: true, At: since.UnixMilli(), Commit: head})
+	task.Commit, task.PR, task.PRURL = head, 31, "https://example.invalid/org/repo/pull/31"
+	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("github"))
+	home := newTskScriptHome()
+	h.Attach("home-device", home)
+	calls := fakeForgeGH(t, hostedView(head, failedRun), forgeAnswer{Stdout: `[{"url":"` + task.PRURL + `"}]`}, hostedView(head, passedRun))
+	key := tskCloudKey{group: tskTestGroupID, task: tskTestTaskID}
+	p := Part[tskPart](h)
+	ctx, run := tskBeginCloud(p, key, head)
+	tskPollHostedChecks(ctx, p, h, "home-device", key, run, TaskForge{Worktree: wtDir}, task.PR, head, since)
+	failed := tskOpenSignedCmd[proto.TaskChecked](t, h, home.snapshotAsked()[0])
+	tskEqual(t, failed.Op, "cloud")
+	tskEqual(t, failed.Commit, head)
+	tskEqual(t, failed.OK, false)
+	task.Checks.Cloud = &proto.Check{At: time.Now().UnixMilli(), Commit: head}
+	tskPutRow(t, h, "task", tskTestTaskID, task)
+
+	caller := tskTaskCaller("wt/12-fix-path", 2)
+	res, err := Tools["submit_task"].Call(t.Context(), h, caller, json.RawMessage(`{"summary":"Retry checks"}`))
+	tskNoErr(t, err)
+	tskEqual(t, res, tskSubmitResult{OK: true, Commit: head, PR: 31})
+	passed := tskOpenSignedCmd[proto.TaskChecked](t, h, home.waitAsked(t, 4)[3])
+	tskEqual(t, passed.Op, "cloud")
+	tskEqual(t, passed.Commit, head)
+	tskEqual(t, passed.OK, true)
+	view := []string{"pr", "view", "31", "--json", "headRefOid,statusCheckRollup"}
+	calls(view, []string{"pr", "list", "--head", task.Branch, "--base", "base", "--state", "open", "--json", "number,headRefOid,url,state,baseRefName,isCrossRepository"}, view)
+}
+
 func TestStaleCloudCheckRowDoesNotRestartCompletedPoll(t *testing.T) {
 	r := newDeliverRig(t, true)
 	tskStopAllCloud(t, r.h)
