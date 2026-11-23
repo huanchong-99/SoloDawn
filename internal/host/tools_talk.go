@@ -62,11 +62,10 @@ func init() {
 }
 
 type postArgs struct {
-	Text     string   `json:"text"`
-	Kind     *string  `json:"kind,omitempty"`
-	Mentions []string `json:"mentions,omitempty"`
-	Where    *string  `json:"where,omitempty"`
-	Task     *string  `json:"task,omitempty"`
+	bulletinArgs
+	Kind  *string `json:"kind,omitempty"`
+	Where *string `json:"where,omitempty"`
+	Task  *string `json:"task,omitempty"`
 }
 
 type readThreadArgs struct {
@@ -169,6 +168,24 @@ func decodeTalkArgs(raw json.RawMessage, dst any) error {
 }
 
 func callPost(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (any, error) {
+	var a postArgs
+	if err := decodeTalkArgs(raw, &a); err != nil {
+		return callPostIgnoringPlacement(ctx, h, c, raw)
+	}
+	if err := CheckOutboundSecret(a.Text); err != nil {
+		return nil, err
+	}
+	if a.Group != nil {
+		return callBulletin(ctx, h, c, a.bulletinArgs)
+	}
+	p, err := preparePost(h, c, a)
+	if err != nil {
+		return nil, err
+	}
+	return sendPreparedPost(ctx, h, c, p)
+}
+
+func callPostIgnoringPlacement(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (any, error) {
 	var a bulletinArgs
 	if err := decodeTalkArgs(raw, &a); err != nil {
 		return nil, err
@@ -176,18 +193,10 @@ func callPost(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (any,
 	if err := CheckOutboundSecret(a.Text); err != nil {
 		return nil, err
 	}
-	if a.Group != nil {
-		return callBulletin(ctx, h, c, a)
+	if a.Group == nil {
+		return nil, badTalkRequest("invalid tool arguments")
 	}
-	var ordinary postArgs
-	if err := decodeTalkArgs(raw, &ordinary); err != nil {
-		return nil, err
-	}
-	p, err := preparePost(h, c, ordinary)
-	if err != nil {
-		return nil, err
-	}
-	return sendPreparedPost(ctx, h, c, p)
+	return callBulletin(ctx, h, c, a)
 }
 
 func preparePost(h *Host, c Caller, a postArgs) (preparedPost, error) {

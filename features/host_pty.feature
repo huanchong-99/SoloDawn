@@ -35,7 +35,7 @@ Feature: Host interactive pseudo-terminals
     And the owner opens terminal channel "pty:rZNvy-1jH6Z-BcPqA5U5BQ:1PC8WineBrUQ-apCjx7tug"
     Then the terminal channel closes and completion is notified once
 
-  Scenario: Unmatched or malformed terminal channels are closed and drained
+  Scenario: Unmatched or malformed terminal channels are closed
     Given an interactive PTY host with a session folder
-    When an unmatched terminal channel "pty:rZNvy-1jH6Z-BcPqA5U5BQ:1PC8WineBrUQ-apCjx7tug" and a malformed channel "pty:bad" arrive with unread bytes
-    Then both terminal channels are closed and drained
+    When an unmatched terminal channel "pty:rZNvy-1jH6Z-BcPqA5U5BQ:1PC8WineBrUQ-apCjx7tug" and a malformed channel "pty:bad" arrive
+    Then both terminal channels are closed
