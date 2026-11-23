@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -34,13 +33,7 @@ type ptyHandle interface {
 	Resize(cols, rows int) error
 }
 
-type ptySize struct {
-	cols int
-	rows int
-}
-
-// ptyPart keeps the open interactive pseudo-terminals and remembered terminal
-// sizes of one Host, stored via Part[ptyPart](h).
+// ptyPart keeps the open interactive pseudo-terminals of one Host, stored via Part[ptyPart](h).
 //
 // Lock order: PTY.mu -> ptyPart.mu. Neither lock waits on I/O, process exit
 // or callbacks.
@@ -49,7 +42,6 @@ type ptyPart struct {
 	mu       sync.Mutex
 	reserved map[aiSlot]bool
 	open     map[aiSlot]*PTY
-	sizes    map[aiSlot]ptySize
 }
 
 func ptyState(h *Host) *ptyPart {
@@ -59,7 +51,6 @@ func ptyState(h *Host) *ptyPart {
 		part.watch = watchState(h)
 		part.reserved = map[aiSlot]bool{}
 		part.open = map[aiSlot]*PTY{}
-		part.sizes = map[aiSlot]ptySize{}
 	}
 	part.mu.Unlock()
 	return part
@@ -94,24 +85,6 @@ func (part *ptyPart) lookup(slot aiSlot) *PTY {
 	return part.open[slot]
 }
 
-func (part *ptyPart) noteSize(slot aiSlot, cols, rows int) *PTY {
-	part.mu.Lock()
-	defer part.mu.Unlock()
-	part.sizes[slot] = ptySize{cols: cols, rows: rows}
-	return part.open[slot]
-}
-
-func (part *ptyPart) sizeOf(slot aiSlot) (ptySize, bool) {
-	part.mu.Lock()
-	defer part.mu.Unlock()
-	sz, ok := part.sizes[slot]
-	return sz, ok
-}
-
-func ptyCopy(dst io.Writer, src io.Reader) {
-	io.Copy(struct{ io.Writer }{dst}, struct{ io.Reader }{src})
-}
-
 // PTY is one running interactive CLI attached to a pseudo-terminal
 // (contracts/drivers.md section 1.3, flows/takeover.md steps 6 to 13).
 //
@@ -128,6 +101,7 @@ type PTY struct {
 	term        Terminal
 	readerTaken bool
 	closed      bool
+	watchSize   proto.PTYResize
 
 	// Single reader: waitLoop.
 	closing chan struct{}
@@ -182,16 +156,8 @@ func ptyWrapCLIError(err error) error {
 	return &Error{Code: "cli", Message: err.Error()}
 }
 
-func ptyResolveExe(name string) (string, error) {
-	path, err := exec.LookPath(name)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Abs(path)
-}
-
 func ptyOpenHandle(name string) (string, gopty.Pty, error) {
-	exePath, err := ptyResolveExe(name)
+	exePath, err := exec.LookPath(name)
 	if err != nil {
 		return "", nil, ptyWrapCLIError(err)
 	}
@@ -213,7 +179,14 @@ func ptySpawn(part *ptyPart, slot aiSlot, argv []string, folder string, onDone f
 		ptmx.Close()
 		return nil, ptyWrapCLIError(err)
 	}
-	return ptyActivate(part, slot, ptyWrap(ptmx), cmd, onDone), nil
+	handle, err := ptyWrap(ptmx)
+	if err != nil {
+		ptmx.Close()
+		ptyKillTree(cmd.Process.Pid)
+		cmd.Wait()
+		return nil, ptyWrapCLIError(err)
+	}
+	return ptyActivate(part, slot, handle, cmd, onDone), nil
 }
 
 func ptyActivate(part *ptyPart, slot aiSlot, handle ptyHandle, cmd *gopty.Cmd, onDone func()) *PTY {
@@ -231,7 +204,6 @@ func ptyActivate(part *ptyPart, slot aiSlot, handle ptyHandle, cmd *gopty.Cmd, o
 		done:     make(chan struct{}),
 	}
 	part.activate(slot, p)
-	p.applyStoredSize()
 	go p.waitLoop(cmd)
 	return p
 }
@@ -243,26 +215,20 @@ func (p *PTY) Attached() bool {
 	return p.term != nil
 }
 
-// Resize sets the terminal dimensions of the pseudo-terminal.
-func (p *PTY) Resize(cols, rows int) error {
-	if cols < 1 || rows < 1 {
-		return &Error{Code: "bad_request", Message: "cols and rows must be at least 1"}
-	}
-	p.part.noteSize(p.slot, cols, rows)
-	return p.applyStoredSize()
-}
-
-func (p *PTY) applyStoredSize() error {
+func (p *PTY) resize(req proto.PTYResize) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.closed {
+		p.mu.Unlock()
 		return nil
 	}
-	sz, ok := p.part.sizeOf(p.slot)
-	if !ok {
-		return nil
+	if err := p.handle.Resize(req.Cols, req.Rows); err != nil {
+		p.mu.Unlock()
+		return ptyWrapCLIError(err)
 	}
-	return p.handle.Resize(sz.cols, sz.rows)
+	p.watchSize = req
+	p.mu.Unlock()
+	p.part.watch.resize(p.slot, req.Cols, req.Rows)
+	return nil
 }
 
 // Close ends the interactive CLI by closing its pseudo-terminal, waiting up to
@@ -287,23 +253,21 @@ func (h *Host) ClosePTY(group, member string) bool {
 
 // ServeTerminal bridges t, a "pty:<g>:<member>" stream, to the open
 // interactive pseudo-terminal of (g, member) (contracts/datachannel.md
-// sections 1 and 7). An unrecognised, unmatched or duplicate stream is closed
-// and drained so it never holds back the connection's receive window.
+// sections 1 and 7). An unrecognised, unmatched or duplicate stream is closed.
 func (h *Host) ServeTerminal(t Terminal) {
 	group, member, ok := ptyParseLabel(t.Label())
 	if !ok {
-		ptyRejectTerminal(t)
+		t.Close()
 		return
 	}
 	p := ptyState(h).lookup(aiSlot{group: group, member: member})
 	if p == nil || !p.attach(t) {
-		ptyRejectTerminal(t)
+		t.Close()
 		return
 	}
 	go p.pumpOut(watchFanout{t, p.part.watch, p.slot})
-	ptyCopy(p.handle, t)
+	io.Copy(p.handle, t)
 	p.Close()
-	ptyCopy(io.Discard, t)
 }
 
 func (p *PTY) attach(t Terminal) bool {
@@ -319,14 +283,14 @@ func (p *PTY) attach(t Terminal) bool {
 
 func (p *PTY) pumpOut(t io.Writer) {
 	defer close(p.outDone)
-	ptyCopy(t, p.handle)
+	io.Copy(t, p.handle)
 	go p.triggerStop()
-	ptyCopy(io.Discard, p.handle)
+	io.Copy(io.Discard, p.handle)
 }
 
 func (p *PTY) drainUnattached() {
 	defer close(p.outDone)
-	ptyCopy(io.Discard, p.handle)
+	io.Copy(io.Discard, p.handle)
 }
 
 // waitLoop is the single caller of cmd.Wait and the single reader of p.closing.
@@ -392,11 +356,6 @@ func ptyParseLabel(label string) (string, string, bool) {
 	return group, member, true
 }
 
-func ptyRejectTerminal(t Terminal) {
-	t.Close()
-	ptyCopy(io.Discard, t)
-}
-
 func ptyResize(_ context.Context, h *Host, _ Owner, _ string, data json.RawMessage) (any, error) {
 	var req proto.PTYResize
 	if err := proto.Decode(data, &req); err != nil {
@@ -406,11 +365,11 @@ func ptyResize(_ context.Context, h *Host, _ Owner, _ string, data json.RawMessa
 		return nil, &Error{Code: "bad_request", Message: "invalid pty.resize frame"}
 	}
 	slot := aiSlot{group: string(req.Group), member: string(req.AI)}
-	if p := ptyState(h).noteSize(slot, req.Cols, req.Rows); p != nil {
-		p.applyStoredSize()
+	p := ptyState(h).lookup(slot)
+	if p == nil {
+		return nil, nil
 	}
-	watchState(h).resize(slot, req.Cols, req.Rows)
-	return nil, nil
+	return nil, p.resize(req)
 }
 
 func ptyWaitSignal(sig <-chan struct{}, d time.Duration) bool {

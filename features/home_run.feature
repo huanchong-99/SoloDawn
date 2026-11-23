@@ -15,8 +15,8 @@ Feature: The run loop of a group home
     Given a home that the owner's browser and the owner's laptop are connected to
     And the group "Website", which both connections read
     When the owner's laptop posts "Shall we start with the landing page?"
-    Then the owner's laptop is answered with success
-    And both connections are pushed the message "Shall we start with the landing page?" with the sequence number 3
+    Then both connections are pushed the message "Shall we start with the landing page?" with the sequence number 3
+    And the owner's laptop is answered with success
 
   Scenario: A home that starts again goes on where it stopped
     Given a home that the owner's browser and the owner's laptop are connected to
@@ -25,5 +25,5 @@ Feature: The run loop of a group home
     When the home stops and starts again
     Then the home lists the group "Website" to both connections that connect again
     When the owner's browser posts "After the restart."
-    Then the owner's browser is answered with success
-    And both connections are pushed the message "After the restart." with the sequence number 4
+    Then both connections are pushed the message "After the restart." with the sequence number 4
+    And the owner's browser is answered with success

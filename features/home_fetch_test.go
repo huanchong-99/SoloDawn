@@ -36,6 +36,7 @@ type homeFetchWorld struct {
 	lastRaw   string
 	lastPage  proto.Fetched
 	stalePage proto.Fetched
+	pushed    proto.Rows
 	cache     map[[2]string]homeFetchCached
 }
 
@@ -182,6 +183,13 @@ func homeFetchMsg(group, by string, now int64, p homeFetchWrite) home.Result {
 }
 
 func (w *homeFetchWorld) execCmd(t string, fields map[string]any) error {
+	if err := w.sendCmd(t, fields); err != nil {
+		return err
+	}
+	return w.expectOK()
+}
+
+func (w *homeFetchWorld) sendCmd(t string, fields map[string]any) error {
 	w.sent++
 	w.re++
 	payload := map[string]any{"t": t, "n": exampleID(fmt.Sprint("home fetch ", w.sent)), "ts": w.now.UnixMilli(), "g": w.group}
@@ -193,6 +201,10 @@ func (w *homeFetchWorld) execCmd(t string, fields map[string]any) error {
 		return err
 	}
 	w.loop.Cmd(w.conn, w.re, w.browser.Sign(string(raw)))
+	return nil
+}
+
+func (w *homeFetchWorld) expectOK() error {
 	got, err := w.nextJSON()
 	if want := fmt.Sprintf(`{"re":%d,"ok":true}`, w.re); err != nil || got != want {
 		return fmt.Errorf("command %d got %s (%v); want %s", w.re, got, err, want)
@@ -381,19 +393,21 @@ func (w *homeFetchWorld) takeStaleThenForget(id string) error {
 		return err
 	}
 	w.stalePage = w.lastPage
-	return w.writeItem(homeFetchWrite{Op: "forget", Kind: "note", ID: id})
-}
-
-func (w *homeFetchWorld) applyPushThenStalePage() error {
+	if err := w.sendCmd("note", map[string]any{"op": "forget", "kind": "note", "id": id}); err != nil {
+		return err
+	}
 	pushed, err := w.nextJSON()
 	if err != nil {
 		return err
 	}
-	var rows proto.Rows
-	if err := proto.Decode([]byte(pushed), &rows); err != nil {
+	if err := proto.Decode([]byte(pushed), &w.pushed); err != nil {
 		return err
 	}
-	w.applyRows(rows.Rows)
+	return w.expectOK()
+}
+
+func (w *homeFetchWorld) applyPushThenStalePage() error {
+	w.applyRows(w.pushed.Rows)
 	w.applyRows(w.stalePage.Rows)
 	return nil
 }

@@ -13,6 +13,24 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/node"
 )
 
+func TestMainUsesCommandExitCode(t *testing.T) {
+	previous, args, stderr := exit, os.Args, os.Stderr
+	t.Cleanup(func() { exit, os.Args, os.Stderr = previous, args, stderr })
+	var err error
+	os.Stderr, err = os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Stderr.Close()
+	code := -1
+	exit = func(n int) { code = n }
+	os.Args = []string{"solodawn", "unknown"}
+	main()
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+}
+
 func TestRun(t *testing.T) {
 	const usage = "usage: solodawn <command> [arguments]\n"
 	flags := strings.ReplaceAll(`Usage of rendezvous:

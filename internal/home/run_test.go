@@ -428,9 +428,18 @@ func (r *runRecord) all() []string {
 	return append([]string{}, r.lines...)
 }
 
+func TestRunPushesChangedRowsBeforeCommandReply(t *testing.T) {
+	w, p := runFounded(t, runTables())
+	p.watch(groupID, false)
+
+	re := p.send(groupID, "note", `,"text":"before the reply"`)
+	p.gets(runRows(groupID, runNote(runID(w.nonce.Load()), 4, "before the reply")),
+		fmt.Sprintf(`{"re":%d,"ok":true}`, re))
+}
+
 // A2.1, the home half: a group created on one connection shows up on a
 // second connection of the same person, and a message posted on one reaches
-// the other. The sender gets its answer first, then the rows.
+// the other. The sender gets the rows before its answer.
 func TestRunTellsEveryClientOfAGroup(t *testing.T) {
 	w := runStart(t, runOpen(t), runTables())
 	first, second := w.attach(browser), w.attach(laptop)
@@ -448,11 +457,11 @@ func TestRunTellsEveryClientOfAGroup(t *testing.T) {
 
 	re := first.send(groupID, "post", `,"kind":"text","text":"hello"`)
 	posted := runRows(groupID, runMsg(runID(w.nonce.Load()), 4, "hello"))
-	first.gets(fmt.Sprintf(`{"re":%d,"ok":true}`, re), posted)
+	first.gets(posted, fmt.Sprintf(`{"re":%d,"ok":true}`, re))
 	second.gets(posted)
-	second.does(groupID, "note", `,"text":"seen"`)
+	re = second.send(groupID, "note", `,"text":"seen"`)
 	noted := runRows(groupID, runNote(runID(w.nonce.Load()), 5, "seen"))
-	second.gets(noted)
+	second.gets(noted, fmt.Sprintf(`{"re":%d,"ok":true}`, re))
 	first.gets(noted)
 
 	// The rows went through to the store as they were pushed.
@@ -556,8 +565,8 @@ func TestRunLoadsItsGroupsAfterARestart(t *testing.T) {
 	equal(t, w.loop.Groups(w.attach(browser).conn), []proto.GroupSummary{{Group: groupID, Name: "Website", Seq: 7}, {Group: runOther, Name: "Other", Seq: 3}})
 	equal(t, p.watch(groupID, false), int64(7))
 	re = p.send(groupID, "task", `,"op":"start"`)
-	p.gets(fmt.Sprintf(`{"re":%d,"ok":true,"num":3}`, re))
 	p.next()
+	p.gets(fmt.Sprintf(`{"re":%d,"ok":true,"num":3}`, re))
 	equal(t, seen.all()[2], "num 2, 1 tasks, secretary "+aiID+", host "+laptop.ID())
 	equal(t, runQuery[int64](t, db, "SELECT num FROM grp WHERE g=?", groupID), int64(3))
 	// The next row follows the last one of the run before.
@@ -667,13 +676,13 @@ func TestRunARefusedCommandLeavesOnlyItsReceipt(t *testing.T) {
 	equal(t, hooks.all(), []string{"3 rows at 3"})
 	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM row"), 3)
 	// The next command gets the next sequence number.
-	p.does(groupID, "note", `,"text":"x"`)
-	p.gets(runRows(groupID, runNote(runID(w.nonce.Load()), 4, "x")))
+	re := p.send(groupID, "note", `,"text":"x"`)
+	p.gets(runRows(groupID, runNote(runID(w.nonce.Load()), 4, "x")), fmt.Sprintf(`{"re":%d,"ok":true}`, re))
 	// An accepted command sent again has no second effect and reaches no hook.
 	again := w.cmd(browser, groupID, "note", `,"text":"once"`)
 	w.loop.Cmd(p.conn, 20, again)
 	w.loop.Cmd(p.conn, 21, again)
-	p.gets(`{"re":20,"ok":true}`, runRows(groupID, runNote(runID(w.nonce.Load()), 5, "once")), `{"re":21,"ok":true}`)
+	p.gets(runRows(groupID, runNote(runID(w.nonce.Load()), 5, "once")), `{"re":20,"ok":true}`, `{"re":21,"ok":true}`)
 	p.quiet()
 	equal(t, hooks.all(), []string{"3 rows at 3", "1 rows at 4", "1 rows at 5"})
 }
@@ -804,18 +813,18 @@ func TestRunAFailedWriteChangesNothing(t *testing.T) {
 	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM receipt"), 1)
 	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM setting"), 0)
 	equal(t, runQuery[int64](t, w.db, "SELECT seq FROM grp WHERE g=?", groupID), int64(3))
-	p.does(groupID, "note", `,"text":"x"`)
-	p.gets(runRows(groupID, runNote(runID(w.nonce.Load()), 4, "x")))
+	re := p.send(groupID, "note", `,"text":"x"`)
+	p.gets(runRows(groupID, runNote(runID(w.nonce.Load()), 4, "x")), fmt.Sprintf(`{"re":%d,"ok":true}`, re))
 	equal(t, hooks.all(), []string{"hook", "hook"})
 
 	// The store's counter and the state's must move together.
 	runExec(t, w.db, "UPDATE grp SET seq=seq+1")
-	re := p.send(groupID, "note", `,"text":"y"`)
+	re = p.send(groupID, "note", `,"text":"y"`)
 	p.gets(fmt.Sprintf(`{"re":%d`, re) + internal)
 	equal(t, strings.HasSuffix(w.reported(), ": a row is numbered 5 where the store gives out 6"), true)
 	runExec(t, w.db, "UPDATE grp SET seq=seq-1")
-	p.does(groupID, "note", `,"text":"y"`)
-	p.next()
+	re = p.send(groupID, "note", `,"text":"y"`)
+	p.gets(runRows(groupID, runNote(runID(w.nonce.Load()), 5, "y")), fmt.Sprintf(`{"re":%d,"ok":true}`, re))
 
 	// A store without its tables fails each step that needs one.
 	equal(t, hooks.all(), []string{"hook", "hook", "hook"})

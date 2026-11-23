@@ -67,6 +67,7 @@ func TestBulletinToolRefusals(t *testing.T) {
 		{"empty", `{"group":"","text":"x"}`, "not_found", func(*Host, *talkHomeStub, *Caller) {}},
 		{"mention", `{"group":"` + bulletinGroup + `","text":"x","mentions":["absent"]}`, "not_found", func(*Host, *talkHomeStub, *Caller) {}},
 		{"secret", `{"group":"` + bulletinGroup + `","text":"ghp_1234567890abcdefghijklmnopqrstuvwxyz"}`, "secret", func(*Host, *talkHomeStub, *Caller) {}},
+		{"secret with malformed placement", `{"group":"` + bulletinGroup + `","text":"ghp_1234567890abcdefghijklmnopqrstuvwxyz","where":[]}`, "secret", func(*Host, *talkHomeStub, *Caller) {}},
 		{"disconnected", `{"group":"` + bulletinGroup + `","text":"x"}`, "home_unreachable", func(_ *Host, home *talkHomeStub, _ *Caller) { close(home.done) }},
 		{"request", `{"group":"` + bulletinGroup + `","text":"x"}`, "home_unreachable", func(_ *Host, home *talkHomeStub, _ *Caller) { home.err = io.EOF }},
 		{"source", `{"group":"` + bulletinGroup + `","text":"x"}`, "not_found", func(h *Host, _ *talkHomeStub, _ *Caller) { h.Rows.Reset(talkGroupID) }},

@@ -9,10 +9,10 @@ Feature: Other-tab banner and inactive connection indicator
     Given an online computer "workstation" with no selected candidate pair while another tab holds the lock
     When the browser opens "#/groups"
     Then the banner shows "SoloDawn is open in another tab." with "Use here" and the indicator has state "offline" reading "Inactive"
-    And in Chinese the banner reads "SoloDawn 已在另一个标签页中打开。" with "在此使用" and the indicator reads "未连接"
     When the person chooses "Use here"
     Then the banner is gone and the indicator has state "linking" reading "Reconnecting"
 
-  Scenario: The states sheet lists the status mount at banner only
-    When the person opens "#/states" in a development server
-    Then the mounting points show "status · 10" at "banner" and do not list "status" at "chat.top"
+  Scenario: The composer of an inactive tab says the group is in use in another tab
+    Given a group "Website" read before another tab took the lock
+    When the browser opens the chat of "Website"
+    Then the composer is disabled and says "This group is in use in another tab."

@@ -3,13 +3,14 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { complete, fill, matching, mentioned, room, typing, unsent } from '../../lib/compose';
   import type { Group, Member } from '../../lib/groups.svelte';
+  import type { Net } from '../../lib/net.svelte';
   import { t } from '../../lib/prefs.svelte';
   import Avatar from '../Avatar.svelte';
   import Failure from '../Failure.svelte';
   import Icon from '../Icon.svelte';
 
   /** Where a message is written: mention completion, a hint before the length limit, send. */
-  let { group }: { group: Group } = $props();
+  let { group, net }: { group: Group; net: Net } = $props();
   const uid = $props.id();
 
   let field: HTMLTextAreaElement;
@@ -105,7 +106,9 @@
 
 <div class="composer">
   {#if readonly}
-    <p class="state down" id={`${uid}-state`} role="status"><i></i>{t('chat.readonly')}</p>
+    <p class="state down" id={`${uid}-state`} role="status">
+      <i></i>{t(net.otherTab ? 'chat.otherTab' : 'chat.readonly')}
+    </p>
   {:else if length !== 'ok'}
     <p class="state" id={`${uid}-state`} class:over={length === 'over'} role="status">
       <span class="meter" style:--v={Math.min(fill(text, named), 100) / 100}></span>

@@ -4,8 +4,6 @@ package host
 
 import (
 	"errors"
-	"os/exec"
-	"strconv"
 	"sync"
 
 	gopty "github.com/aymanbagabas/go-pty"
@@ -24,8 +22,8 @@ type ptyWinHandle struct {
 	closed bool // the pseudo console has been closed
 }
 
-func ptyWrapStarted(ptmx gopty.Pty) ptyHandle {
-	return &ptyWinHandle{ConPty: ptmx.(gopty.ConPty)}
+func ptyWrapStarted(ptmx gopty.Pty) (ptyHandle, error) {
+	return &ptyWinHandle{ConPty: ptmx.(gopty.ConPty)}, nil
 }
 
 func (w *ptyWinHandle) closeConsole() {
@@ -71,5 +69,5 @@ func ptyCloseConsoleAndWait(p *PTY) {
 }
 
 func ptyKillTree(pid int) {
-	exec.Command("taskkill.exe", "/f", "/t", "/pid", strconv.Itoa(pid)).Run()
+	taskkill(pid)
 }

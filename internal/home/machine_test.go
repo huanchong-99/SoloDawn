@@ -315,6 +315,13 @@ func TestMachineHostFacts(t *testing.T) {
 			in: cloud, ev: host(home.OnCloud, home.Event{Commit: "c1", OK: true}),
 			out: func(t *proto.TaskRow) { t.Checks.Cloud, t.Step, t.Failures = checked(true, "c1"), "review", 0 },
 			fx:  mcItems(review)},
+		{name: "row 6: passing hosted checks clears a checks escalation",
+			in: cloud.set(func(t *proto.TaskRow) { t.Stuck = &proto.Stuck{Kind: "checks", N: 1} }),
+			ev: host(home.OnCloud, home.Event{Commit: "c1", OK: true}),
+			out: func(t *proto.TaskRow) {
+				t.Checks.Cloud, t.Step, t.Failures, t.Stuck = checked(true, "c1"), "review", 0, nil
+			},
+			fx: mcItems(review)},
 		{name: "row 6: passed without a reviewer, the reviewer wait replaces a card wait",
 			in: cloud.reviewer("").set(func(t *proto.TaskRow) { t.Wait = mcCardWait(mcApproval1) }), ev: host(home.OnCloud, home.Event{Commit: "c1", OK: true}),
 			out: func(t *proto.TaskRow) {

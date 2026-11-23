@@ -318,6 +318,9 @@ func tskPrepareSubmit(ctx context.Context, h *Host, c Caller) (tskSubmitReady, e
 	if err != nil {
 		return tskSubmitReady{}, err
 	}
+	if err := profileRequireAnswered(h.Rows, c.Group, env.task); err != nil {
+		return tskSubmitReady{}, err
+	}
 	if err := tskRequireLocalChecks(env.task.Checks.Local); err != nil {
 		return tskSubmitReady{}, err
 	}

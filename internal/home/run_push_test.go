@@ -44,16 +44,16 @@ func TestRunPushesTheRowsEachClientAskedFor(t *testing.T) {
 	full.watch(groupID, false)
 	equal(t, host.watch(groupID, true), int64(3))
 
-	full.does(groupID, "jump", ``)
+	re := full.send(groupID, "jump", ``)
 	added := deviceRow(browser, browser, 4, "add", device(8))
 	added.Seq = 8
 	full.gets(runRows(groupID, runTask("t1", 4), runNote("n1", 5, "a note"), runGone("member", "m9", 6), runGone("note", "n0", 7),
-		added, runMsg("m1", 9, "a message"), runAI(10), runGroupRow(groupID, "Site", 11)))
+		added, runMsg("m1", 9, "a message"), runAI(10), runGroupRow(groupID, "Site", 11)), fmt.Sprintf(`{"re":%d,"ok":true}`, re))
 	host.gets(runRows(groupID, runTask("t1", 4), runGone("member", "m9", 6), added, runAI(10), runGroupRow(groupID, "Site", 11)))
 
 	// A result without a state row is no frame for a state_only reader.
-	full.does(groupID, "note", `,"text":"only a note"`)
-	full.next()
+	re = full.send(groupID, "note", `,"text":"only a note"`)
+	full.gets(runRows(groupID, runNote(runID(w.nonce.Load()), 12, "only a note")), fmt.Sprintf(`{"re":%d,"ok":true}`, re))
 	host.quiet()
 	idle.quiet()
 	// The list of groups is pushed only for a result that says it changed,
@@ -145,7 +145,7 @@ func TestRunSplitsTheRowsOfALargeResult(t *testing.T) {
 	})
 	_, p := runFounded(t, tables)
 	p.watch(groupID, false)
-	p.does(groupID, "jump", ``)
+	re := p.send(groupID, "jump", ``)
 	var counts []int
 	for range 2 {
 		frame := p.next()
@@ -157,6 +157,7 @@ func TestRunSplitsTheRowsOfALargeResult(t *testing.T) {
 		counts = append(counts, len(rows.Rows))
 	}
 	equal(t, counts, []int{3, 2})
+	p.gets(fmt.Sprintf(`{"re":%d,"ok":true}`, re))
 	p.quiet()
 }
 
@@ -369,8 +370,9 @@ func TestRunCountsTheItemsOfTheLastHour(t *testing.T) {
 func TestRunGivesUpAClientThatStopsReading(t *testing.T) {
 	for name, last := range map[string]func(w *runWorld, p, slow *runPeer){
 		"a rows frame": func(w *runWorld, p, slow *runPeer) {
-			p.does(groupID, "note", `,"text":"x"`)
+			re := p.send(groupID, "note", `,"text":"x"`)
 			p.next()
+			p.gets(fmt.Sprintf(`{"re":%d,"ok":true}`, re))
 		},
 		"a groups frame": func(w *runWorld, p, slow *runPeer) {
 			p.does(groupID, "jump", ``)
@@ -393,8 +395,9 @@ func TestRunGivesUpAClientThatStopsReading(t *testing.T) {
 			p.watch(groupID, false)
 			note := func(n int) {
 				for range n {
-					p.does(groupID, "note", `,"text":"x"`)
+					re := p.send(groupID, "note", `,"text":"x"`)
 					p.next()
+					p.gets(fmt.Sprintf(`{"re":%d,"ok":true}`, re))
 				}
 			}
 			w.loop.Welcome(slow.conn, runWelcome)
@@ -690,11 +693,11 @@ func TestRunAClientMayCallBackWhileItIsSent(t *testing.T) {
 	reader = w.attachClient(laptop, client, client)
 	reader.watch(groupID, false)
 	p.does(groupID, "note", `,"text":"first"`)
-	for range 40 {
-		rows, synced, answer := reader.next(), reader.next(), reader.next()
-		equal(t, []bool{strings.HasPrefix(rows, `{"t":"rows"`), strings.HasPrefix(synced, `{"t":"synced","re":99,`), answer == `{"re":100,"ok":true}`}, []bool{true, true, true})
-	}
 	equal(t, strings.HasPrefix(reader.next(), `{"t":"rows"`), true)
+	for range 40 {
+		synced, rows, answer := reader.next(), reader.next(), reader.next()
+		equal(t, []bool{strings.HasPrefix(synced, `{"t":"synced","re":99,`), strings.HasPrefix(rows, `{"t":"rows"`), answer == `{"re":100,"ok":true}`}, []bool{true, true, true})
+	}
 	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM row WHERE r='note'"), 41)
 	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM setting"), 40)
 }

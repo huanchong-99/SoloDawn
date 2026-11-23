@@ -269,36 +269,3 @@ func TestCheckDetailIsErrorThenRedactedTail(t *testing.T) {
 		}
 	}
 }
-
-func TestWindowsCheckShellCommandLine(t *testing.T) {
-	t.Setenv("ComSpec", "cmd.exe")
-	var attributes struct{ CmdLine string }
-	command := `echo "two words" && echo %PATH%`
-	cmd := checkShell(t.Context(), command, true, reflect.ValueOf(&attributes).Elem())
-	if !slices.Equal(cmd.Args, []string{"cmd.exe"}) || attributes.CmdLine != `cmd.exe /d /s /c "echo "two words" && echo %PATH%"` {
-		t.Fatalf("cmd arguments %q and command line %q", cmd.Args, attributes.CmdLine)
-	}
-	if runtime.GOOS == "windows" {
-		return
-	}
-	checkTaskkillArgs(t, cmd)
-}
-
-func checkTaskkillArgs(t *testing.T, cmd *exec.Cmd) {
-	t.Helper()
-	dir := t.TempDir()
-	out := filepath.Join(dir, "args")
-	t.Setenv("TASKKILL_ARGS", out)
-	if err := os.WriteFile(filepath.Join(dir, "taskkill.exe"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$TASKKILL_ARGS\"\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir)
-	cmd.Process = &os.Process{Pid: 12345}
-	if err := cmd.Cancel(); err != nil {
-		t.Fatal(err)
-	}
-	args, err := os.ReadFile(out)
-	if err != nil || string(args) != "/f\n/t\n/pid\n12345\n" {
-		t.Fatalf("taskkill arguments: %q (%v)", args, err)
-	}
-}

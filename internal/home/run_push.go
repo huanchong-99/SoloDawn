@@ -28,9 +28,8 @@ const runNever = math.MaxInt64
 // runStateRows are the row types a state_only reader gets.
 var runStateRows = map[string]bool{"group": true, "member": true, "device": true, "task": true}
 
-// tell pushes a committed result.
+// tell sends the remaining pushes for a committed result.
 func (g *runGroup) tell(res Result, now time.Time) {
-	g.pushRows(res.Rows)
 	g.publish()
 	if res.GroupsChanged {
 		g.loop.announce()

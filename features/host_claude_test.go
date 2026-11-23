@@ -64,35 +64,19 @@ func hostClaudeSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^the resumed Claude session completes the turn and calls the MCP shim with the new token$`, st.thenResumedCompletedWithNewToken)
 }
 
-func (s *claudeAcceptanceState) setEnv(key, value string) {
-	prev, had := os.LookupEnv(key)
-	os.Setenv(key, value)
-	s.cleanup(func() {
-		if had {
-			os.Setenv(key, prev)
-		} else {
-			os.Unsetenv(key)
-		}
-	})
-}
-
-func (s *claudeAcceptanceState) prepareDir() {
-	if s.dir != "" {
-		return
-	}
-	s.dir = s.t.TempDir()
-	s.logPath = filepath.Join(s.dir, "lifecycle.log")
-	s.setEnv("SOLODAWN_FAKECLI_LOG", s.logPath)
-}
-
 func (s *claudeAcceptanceState) writeScript(name, steps string) error {
-	s.prepareDir()
+	if s.dir == "" {
+		s.dir = s.t.TempDir()
+		s.logPath = filepath.Join(s.dir, "lifecycle.log")
+		if err := setScenarioEnv(s.cleanup, "SOLODAWN_FAKECLI_LOG", s.logPath); err != nil {
+			return err
+		}
+	}
 	path := filepath.Join(s.dir, name)
 	if err := os.WriteFile(path, []byte(`{"steps":[`+steps+`]}`), 0600); err != nil {
 		return err
 	}
-	s.setEnv("SOLODAWN_FAKE_CLAUDE_SCRIPT", path)
-	return nil
+	return setScenarioEnv(s.cleanup, "SOLODAWN_FAKE_CLAUDE_SCRIPT", path)
 }
 
 func (s *claudeAcceptanceState) startMCP(token string, calls int) ([]string, error) {
@@ -101,7 +85,9 @@ func (s *claudeAcceptanceState) startMCP(token string, calls int) ([]string, err
 		return nil, err
 	}
 	s.cleanup(func() { peer.Close() })
-	s.setEnv("SOLODAWN_ACCEPTANCE_CLAUDE_MCP", peer.Addr().String())
+	if err := setScenarioEnv(s.cleanup, "SOLODAWN_ACCEPTANCE_CLAUDE_MCP", peer.Addr().String()); err != nil {
+		return nil, err
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, err

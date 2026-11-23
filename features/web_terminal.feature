@@ -43,6 +43,11 @@ Feature: Terminal takeover page and handback summary
     When the path becomes direct and "workstation" refuses "takeover.start" with "relay", then "busy", then "internal"
     Then the takeover bar shows "Direct connection required", then "This AI is busy with another terminal or a merge right now.", then error code "internal"
 
+  Scenario: A relayed path that recovers to direct opens the terminal without reopening the page
+    Given the path to "workstation" is relayed
+    When the owner opens "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/1PC8WineBrUQ-apCjx7tug" and the path becomes direct
+    Then one "takeover.start" is sent, the pty channel opens and the takeover bar no longer says "Direct connection required"
+
   Scenario: Handing back while the terminal is still opening ends the takeover once the start is answered
     Given "Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms
     And "workstation" holds its answer to "takeover.start"
@@ -50,6 +55,12 @@ Feature: Terminal takeover page and handback summary
     Then no "takeover.end" is sent yet and the chat of "Website" is open
     When "workstation" answers "takeover.start" with ok
     Then "workstation" receives one signed "takeover.end" after it, and no pty channel is opened
+
+  Scenario: The terminal is named and can be left from the keyboard
+    Given "Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms
+    When the owner opens "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/1PC8WineBrUQ-apCjx7tug" on a 1280 px desktop
+    Then the takeover bar is a status region, the key row is no tab stop of its own, the details column takes keyboard focus, and the terminal's input is described by the note on leaving it
+    And only Ctrl+M is kept from the terminal, and it moves focus to "Hand back"
 
   Scenario: The card of an AI in takeover offers to hand it back
     Given "Claude Code" is in takeover on a direct path

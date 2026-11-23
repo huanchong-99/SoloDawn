@@ -7,12 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"reflect"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
@@ -187,9 +184,7 @@ func (t *checkTail) Write(p []byte) (int, error) {
 }
 
 func runProjectCheck(ctx context.Context, dir, command string) proto.CheckItem {
-	attrs := new(syscall.SysProcAttr)
-	cmd := checkShell(ctx, command, runtime.GOOS == "windows", reflect.ValueOf(attrs).Elem())
-	cmd.SysProcAttr = attrs
+	cmd := checkShell(ctx, command)
 	cmd.WaitDelay = time.Second
 	cmd.Dir = dir
 	cmd.Env = checkEnvironment(os.Environ(), runtime.GOOS == "windows")
@@ -220,27 +215,6 @@ func checkDetail(err error, output string) *string {
 		return nil
 	}
 	return new(strings.Join(parts, "\n"))
-}
-
-// Go exposes CmdLine only on Windows and Setpgid only on Unix. Set the
-// native attribute before starting the shell. CmdLine preserves cmd.exe's
-// quoting; a separate Unix process group lets cancellation reach a pipeline.
-func checkShell(ctx context.Context, command string, windows bool, fields reflect.Value) *exec.Cmd {
-	if windows {
-		cmd := exec.CommandContext(ctx, os.Getenv("ComSpec"))
-		fields.FieldByName("CmdLine").SetString(`cmd.exe /d /s /c "` + command + `"`)
-		cmd.Cancel = func() error {
-			return exec.Command("taskkill.exe", "/f", "/t", "/pid", strconv.Itoa(cmd.Process.Pid)).Run()
-		}
-		return cmd
-	}
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
-	fields.FieldByName("Setpgid").SetBool(true)
-	cmd.Cancel = func() error {
-		group, _ := os.FindProcess(-cmd.Process.Pid) // FindProcess always succeeds on Unix.
-		return group.Kill()
-	}
-	return cmd
 }
 
 func checkedItem(name string, err error) proto.CheckItem {

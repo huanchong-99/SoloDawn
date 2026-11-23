@@ -186,7 +186,7 @@
         {#if unseen}<i class="dot"></i>{/if}
       </button>
     {/if}
-    <Composer {group} />
+    <Composer {group} {net} />
   </div>
   {#if sided}
     <aside id="chat-side" class="side" class:open={side.open} aria-label={t('app.side')}>

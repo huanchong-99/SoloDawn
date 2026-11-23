@@ -273,7 +273,7 @@ store that cannot be read, or a state row that does not decode, starts no loop.
 2. If anything failed, a read of the `Disk` included, the transaction is dropped, the failure
    goes to `LoopConfig.Report`, a command is answered `internal`, and the state is as before.
 3. Otherwise, for a result that holds something: `State.Commit`, the count of the wake-up cap,
-   every hook of `After` in the order of their names, the answer, the pushes.
+   every hook of `After` in the order of their names, the row pushes, the answer, the other pushes.
 
 A result that holds nothing only gets its answer: a refusal (whose receipt is committed), a
 command answered from its receipt, a timer with nothing to do. It reaches no hook. A timer's or a
@@ -874,8 +874,6 @@ shutdown hooks ([commands](../../planning/contracts/commands.md) 1.7;
   of HM-13, and no node starts a loop yet: the remaining command files and the wiring of the node
   are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
-- After retention deletes rows, finished tasks stay in the in-memory `State.Tasks` until restart
-  ([issues](../../issues.md)).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
 - A `peer.Connection` takes every frame at once and keeps it in its own buffer, so the limit of

@@ -12,6 +12,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `internal/node/admit_test.go:233` decoded the next frame as a command result. Admission adopts the staged device revocation (`internal/node/admit.go:119`), which fans out device events (`internal/node/devlog.go:355`) to group goroutines. The first group's revocation can announce `groups` (`internal/home/run_push.go:155`) before the second group's join reply is queued. Unsolicited pushes are not ordered against replies from another group.
 - Status: resolved in this change. The test accepts intervening `groups` frames and checks the join reply's request id and success.
 
+### 2026-11-23 · limitation · A required escalation can outlast its last stronger candidate
+
+- Symptom: if the owner lowers the last stronger AI's tier while `stuck.ask` is true, the turn and the host submission refusal say no candidate is currently listed.
+- Cause: the task row is authoritative. The profile contract does not clear an existing escalation on profile edits, and the host cannot clear it.
+- Status: the host still refuses without pushing. The owner can restore a stronger tier or arrange reassignment.
+
 ### 2026-11-23 · limitation · Qwen Code model and level changes wait for a new session
 
 - Symptom: a changed model or level of a Qwen Code member applies only to its next new session; the serve protocol documents startupConfig only at creation.
@@ -23,13 +29,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: model selection does not send the contract's unverified `provider/model#variant` notation.
 - Cause: the [OpenAPI](https://opencode.ai/docs/openapi.json) documents `POST /api/session/{sessionID}/model` with `{"model":{"id":"…","providerID":"…","variant":"…"}}`. `openCodeProcess.selectModel` in `internal/host/opencode.go:245` splits the public `provider/model` id on the first `/`, omits an empty variant, and skips an empty model. Discovery reads `{data: Model.Info[]}`; unknown shapes yield `[]`.
 - Status: accepted for T3-10; the coordinator will flag the contract in the PR. Fixtures are synthetic, with no real CLI capture.
-
-### 2026-11-23 · bug · A9.24 can stall before submitting the retry commit
-
-- Symptom: A9.24 times out at “both tasks merge after checks and cross-review and receive summaries.” In a stalled run, the retry commit gets its standalone `watch-push` but no submission push or `watch-checks` call, and the task stays at `active/local_check`.
-- Reproduce: use a Go overlay to set `godog.Options.Paths` in `features/acceptance_test.go` to `[]string{"s2_watch.feature:37"}`, then run `go test -overlay <overlay.json> -tags acceptance -race -run '^TestFeatures$' -count=50 -timeout=35m ./features/`. The same step timed out on `origin/rebuild` at `aee115ba9` with `-count=8`.
-- Cause: unverified. The timeout predates the stale-check claims, and the stalled retry does not reach hosted-check polling.
-- Status: open.
 
 ### 2026-11-23 · limitation · Remembered project homes without local AIs stay connected
 
@@ -114,6 +113,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `DriverCaps["opencode"]` declares levels `1` and `3` and approvals `conn`, and `openCodeDriver` speaks the `opencode serve` API (`internal/host/opencode.go`), but no run of the real OpenCode exists: the fake OpenCode's scripts are written from the documented API, not cut from captures.
 - Cause: T3-0 read OpenCode 1.19.6's documentation only, and no owner API key for a provider was available to T3-2. `drivers.md` section 4 asks that a value be declared from a run; levels `1` and `3`, the permission names, the event names (`session.idle`, `session.error`, `permission.asked`, `message.part.updated`), `POST /permission/<id>/reply`, and `OPENCODE_DISABLE_PROJECT_CONFIG` keeping the repository's configuration out are all `[documented]`.
 - Status: open until the live part of M3, M4 and M7 runs once with the real OpenCode and an owner key (`drivers.md` section 7); then the fake's scripts are replaced by captures and the declaration corrected.
+
 ### 2026-11-22 · deviation · The Go export scenarios do not exercise browser UI or an OS timer
 
 - Symptom: A9.27 and A9.28 exercise browser peers at the protocol boundary, not the browser's own follow logic or the owner-only commands in group info. A9.28 takes successive copies without waiting for an OS timer at one-minute intervals.
@@ -149,17 +149,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `home.add` records signalling addresses, but a node still needs a shared configured rendezvous to reach an external home.
 - Cause: the node's route lookup in `internal/node/node.go` uses active pairing and configured rendezvous paths, not the remembered addresses.
 - Status: open.
+
 ### 2026-11-22 · limitation · Rendezvous has no explicit room leave
 
 - Symptom: cancelling an invitation stops browser handling, but the rendezvous socket remains in the room until expiry or disconnect. Retrying the same room on the same socket does not trigger a new `joined` from a home already in the room.
 - Cause: `internal/rendezvous/room.go` has no leave frame. It ignores duplicate joins by the same socket and caps membership at 16 rooms per connection.
 - Status: open; the browser must keep the socket alive for existing homes.
-
-### 2026-11-22 · limitation · Browser invitation joining needs the node and home implementations
-
-- Symptom: a current node does not admit a browser through an invitation; it knows only protocol version 1.
-- Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts`. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a. U2-1 supplies the join page and member controls.
-- Status: open until those units are integrated. The browser exchange is covered against a simulated home, not a released node.
 
 ### 2026-11-22 · limitation · A7.9 does not run on Windows
 
@@ -277,7 +272,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: three defects in `github.com/aymanbagabas/go-pty` v0.2.3 (with `github.com/creack/pty` v1.1.24). (1) On macOS, calling `Pty.Close` while another goroutine is blocked in `Pty.Read` returns without closing the kernel master descriptor, so `Pty.Read` stays blocked and the attached child receives neither `EOF` nor `SIGHUP`. (2) On Unix, when the attached child exits by itself, `Pty.Read` never reaches `EOF`. (3) On Windows, starting a command by bare name (such as `claude` or `codex`) with `Cmd.Dir` set fails to find the executable on `PATH`.
 - Cause: (1) `creack/pty` opens `/dev/ptmx` on Darwin without `O_NONBLOCK` and passes the descriptor to `os.NewFile` (`pty_darwin.go:14-18`), which leaves `poll.FD` in blocking mode (`isBlocking == 1`) and defers `syscall.Close` until `Read` returns. (2) `Cmd.Start` on Unix leaves the parent's copy of `pty.slave` open (`cmd_unix.go:42-52`). (3) `Cmd.Start` on Windows joins `c.Dir` and `c.Path` in `lookExtensions` and `joinExeDirAndFName` (`cmd_windows.go:36-50`, `:240-243`, `:345`) whenever `c.Path` has no volume or separator.
-- Workaround: `ptyWrapStarted` (`internal/host/pty_unix.go`) duplicates the started master descriptor with `F_DUPFD_CLOEXEC`, sets `O_NONBLOCK`, wraps it with `os.NewFile` so Go's netpoller owns it, and closes `go-pty`'s master and slave handles; `ptyResolveExe` (`internal/host/pty.go`) resolves `argv[0]` to an absolute path through `exec.LookPath` before `ptmx.Command`.
+- Workaround: `ptyWrapStarted` (`internal/host/pty_unix.go`) duplicates the started master descriptor with `F_DUPFD_CLOEXEC`, sets `O_NONBLOCK`, wraps it with `os.NewFile` so Go's netpoller owns it, and closes `go-pty`'s master and slave handles; `ptyOpenHandle` (`internal/host/pty.go`) resolves `argv[0]` through `exec.LookPath` before `ptmx.Command`.
 - Status: open, external; avoided in HS-19.
 
 ### 2026-11-21 · limitation · Finished tasks stay in a group's state in memory after retention until a restart
@@ -739,11 +734,42 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-23 · bug · Runtime work could outlive host shutdown
+
+- Symptom: the macOS race detector reported a shared hold hook being restored while a host still read it.
+- Cause: runtime callbacks in `internal/host/run.go` could deliver queued items or flush member status from an untracked goroutine. Member status calls `Host.Held` in `internal/host/host.go`.
+- Status: runtime shutdown now joins those callbacks before returning. The reported macOS failure was not reproduced on Linux.
+
+### 2026-11-23 · bug · Host tests observed status before work completed
+
+- Symptom: a replacement CLI sometimes appeared to have its old turn metadata, the workspace test could time out before fake GitHub finished merging, and the hand-back test could look up a process before one existed.
+- Cause: `startReplacementProcess` in `internal/host/run.go` sends the replacement status before setting the turn and writing it to the CLI. In `internal/host/forge_test.go`, the fake GitHub CLI inherited the race detector's exit delay for each invocation. In `internal/host/run_test.go`, the fake driver records a launch before it constructs and publishes the corresponding process.
+- Status: the tests wait for the replacement turn, merged command and hand-back process; the fake forge CLI disables its race-detector exit delay.
+
+### 2026-11-23 · bug · The terminal page stayed at "Direct connection required" after the path recovered
+
+- Symptom: a terminal page opened on a relayed path kept saying "Direct connection required" when the path became direct again, until the page was reopened.
+- Cause: `follow` in `web/src/lib/terminal.svelte.ts` (`:305`) starts a takeover only from `idle`, and two routes left the phase at `relay`: `Takeover.#relayed` (`:368`) set an idle takeover to `relay` when the browser's path was relayed, and `#refused` (`:364`) sets `relay` when the computer refuses `takeover.start` with `relay` while the browser's path still reads direct.
+- Status: resolved in U11. `#relayed` no longer moves an idle takeover to `relay`, and it returns a `relay` phase to `idle`, so the takeover starts once the path is direct again; the takeover bar already says "Direct connection required" for an idle takeover on a relayed path. The `web_terminal.feature` scenario "A relayed path that recovers to direct opens the terminal without reopening the page" and two `terminal.test.ts` cases cover both routes.
+
+### 2026-11-23 · bug · A9.24 can stall before submitting the retry commit
+
+- Symptom: A9.24 times out at “both tasks merge after checks and cross-review and receive summaries.” In a stalled run, the retry commit gets its standalone `watch-push` but no submission push or `watch-checks` call, and the task stays at `active/local_check`.
+- Reproduce: use a Go overlay to set `godog.Options.Paths` in `features/acceptance_test.go` to `[]string{"s2_watch.feature:37"}`, then run `go test -overlay <overlay.json> -tags acceptance -race -run '^TestFeatures$' -count=50 -timeout=35m ./features/`. The same step timed out on `origin/rebuild` at `aee115ba9` with `-count=8`.
+- Cause: The home replied to `task checked` before publishing the updated task row. The next `submit_task` could compare the retry commit to the previous commit's cached check and reject it before pushing.
+- Status: resolved in PR #338. The home sends changed rows before command replies; `TestRunPushesChangedRowsBeforeCommandReply` verifies the order.
+
 ### 2026-11-23 · bug · A9.24 can run hosted checks again for the superseded commit
 
 - Symptom: A9.24 can report an unexpected `watch-checks` call for the first commit of the task that is reassigned.
 - Cause: `internal/host/deliver.go:1378-1379` can select a stale `cloud_check` row after `tskFinishCloud` releases the polling slot, even after the task has reached review. The home acknowledges the result before sending the updated row (`internal/home/run_group.go:170-171`).
 - Status: resolved in PR #335. The host keeps claims for accepted and superseded commits, while allowing retries after failed result delivery or an accepted resubmission. `TestStaleCloudCheckRowDoesNotRestartCompletedPoll` verifies that resuming from a stale row does not make a second forge call.
+
+### 2026-11-22 · limitation · Browser invitation joining needs the node and home implementations
+
+- Symptom: a current node does not admit a browser through an invitation; it knows only protocol version 1.
+- Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts`. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a. U2-1 supplies the join page and member controls.
+- Status: resolved. T2-1a (#309), T2-1b (#304) and W2-1 (#307) are merged.
 
 ### 2026-11-22 · bug · Codex treated every failed thread resume as a lost session
 
@@ -766,6 +792,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: when the interactive CLI exits on its own while the owner's terminal is open, the last lines it printed (for A7.4's fake CLI, `{"bye":…}` and the echo of the input line) never reach the pty channel. M7's A7.4 therefore does not wait for `"bye":` (`runOneSwitchCycle` in `features/m7_test.go`); it waits for the hand-back post, and the exit entry in the CLI log proves the exit. Seen on `test (windows-latest)` of PR #287; Linux and macOS deliver the line.
 - Cause: on Windows `ptyBeforeExitStop` does nothing (`internal/host/pty_windows.go:16`), so the host closes the terminal as soon as the CLI exits and drops the frame that ConPTY has not rendered yet. Diagnosis: `WIN-CONPTY.review.md`.
 - Status: resolved in win-pty. On process exit with a terminal attached, `ptyBeforeExitStop` closes the pseudo console but keeps its pipes, and the terminal closes when the output reaches its end (`internal/host/pty_windows.go`); `TestPTYWindowsSelfExitDeliversLastOutput` pins it on Windows CI.
+
 ### 2026-11-22 · bug · Role finishing read pending cards for commands without task work
 
 - Symptom: the home command-replay acceptance scenario panicked when applying a note command with no disk reader.
@@ -783,6 +810,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `planning/contracts/step-3/drivers.md` section 6 says each entry of `agents` carries `driver` always, but the frozen shape lets it be absent: Go `Driver *Driver` with `omitempty` (`internal/proto/host.go`, `HostAgent`), TS `v.optional(Driver)` (`web/src/lib/proto.ts`, `HostState.agents`), and `agents.driver` under `optional` in `internal/proto/testdata/wire.json`.
 - Cause: nothing on rebuild fills `driver` yet; a required field now would make the web client reject every real `host.info` until T3-2 lands. P-5 froze `driver` as `accounts` and `takeover` only; the other declaration fields stay in the host's table (coordinator, 2026-11-22).
 - Status: resolved by T3-2: `driver` is required in Go (`internal/proto/host.go`, `HostAgent`), TS (`web/src/lib/proto.ts`) and `wire.json`, and `Host.Agents` fills it for every agent. Before that it was open, accepted for P-5. T3-2, the pull request that fills `driver` for every agent, makes it required: Go ``Driver Driver `json:"driver"` `` (value type, no `omitempty`), TS `driver: Driver`, regenerate `wire.json` with `go test ./internal/proto -update`, and drop "once populated" from `internal/proto/README.md` (the `host.info` bullet). Also accepted: P-5 does not freeze the tool lists in `internal/proto/testdata/tools.json` (`planning/contracts/step-3/knowledge.md` section 7), because `internal/host` tests require it to equal the registered schemas; T3-5 adds `note_list` `type` and `propose_brief` `preset`, T3-6 adds `kb_put` and `kb_search` to all five lists, and the two merge with `go test ./internal/proto -update`.
+
 ### 2026-11-22 · bug · Watch confirmation admission rejected fields outside its checks
 
 - Symptom: a person's watch request was refused when it carried a thread, reply or text, although the watch admission contract does not restrict them.
@@ -1161,6 +1189,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-20 · bug · Go acceptance steps acted beyond their own scenario
 
 Found in the audit of the harness; each was reproduced before the fix (lines are those before it).
+
 - A failing step could end the whole suite: later scenarios and their After hooks did not run, godog printed no summary, go test said "subtest may have called FailNow on a parent test". Steps called `Fatal` on the suite's own test from a scenario's subtest (`features/node_update_test.go:98`, `:104`, `features/host_forge_test.go:26`, and `features/host_checks_test.go:36`, fixed on branch `ci/go127-windows-macos`).
 - `go test -tags acceptance -count=2 ./features/` failed with `open …/TestFeatures…/017/v0.3.1: no such file or directory`: the cache of release builds was a package variable that outlived the TempDir of the first run (`features/node_update_test.go:89`).
 - The fake node's socket stayed listening through every later scenario, and each node-update scenario left an HTTP server listening (five by the end): cleanups were registered with `f.t.Cleanup` (`features/cmd_local_test.go:38`, `:44`, `features/node_update_test.go:54`).
@@ -1292,15 +1321,15 @@ Found in the audit of the harness; each was reproduced before the fix (lines are
 
 F-01c measurements. The first two results are native `subtle.verify`; the last is SoloDawn's receiver result for **each** of the fourteen weak-key vectors. CI runs four builds on every pull request; the others ran by hand on macOS 26.6.2.
 
-| Browser | Run by | Identity-point vector | Valid empty message (RFC 8032 §7.1 test 1) | Receiver |
-| --- | --- | --- | --- | --- |
-| Chrome for Testing 137.0.7151.119 | CI, Ubuntu 24.04; by hand, macOS | true | true | `bad_sig` |
-| Edge 137.0.3296.93 | CI, Ubuntu 24.04 | true | true | `bad_sig` |
-| Firefox 136.0 (Playwright build 1478) | CI, Ubuntu 24.04; by hand, macOS | true | true | `bad_sig` |
-| WebKit 27.2 (Playwright build 2370) | CI, macOS 26; by hand, macOS | true | false | `bad_sig` |
-| Chromium 156.0.8078.4 (Playwright) | by hand, macOS | true | true | `bad_sig` |
-| Firefox 157.0 (Playwright) | by hand, macOS | true | true | `bad_sig` |
-| Safari 26.6.2 | by hand, macOS, once, with Vitest's preview provider, which is not in the repository | true | false | `bad_sig` |
+| Browser                               | Run by                                                                               | Identity-point vector | Valid empty message (RFC 8032 §7.1 test 1) | Receiver  |
+| ------------------------------------- | ------------------------------------------------------------------------------------ | --------------------- | ------------------------------------------ | --------- |
+| Chrome for Testing 137.0.7151.119     | CI, Ubuntu 24.04; by hand, macOS                                                     | true                  | true                                       | `bad_sig` |
+| Edge 137.0.3296.93                    | CI, Ubuntu 24.04                                                                     | true                  | true                                       | `bad_sig` |
+| Firefox 136.0 (Playwright build 1478) | CI, Ubuntu 24.04; by hand, macOS                                                     | true                  | true                                       | `bad_sig` |
+| WebKit 27.2 (Playwright build 2370)   | CI, macOS 26; by hand, macOS                                                         | true                  | false                                      | `bad_sig` |
+| Chromium 156.0.8078.4 (Playwright)    | by hand, macOS                                                                       | true                  | true                                       | `bad_sig` |
+| Firefox 157.0 (Playwright)            | by hand, macOS                                                                       | true                  | true                                       | `bad_sig` |
+| Safari 26.6.2                         | by hand, macOS, once, with Vitest's preview provider, which is not in the repository | true                  | false                                      | `bad_sig` |
 
 No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all. Playwright's WebKit is a current build of Apple's port, so its row shows that the vectors pass on Apple's Ed25519 implementation of today, not on that of Safari 17.5. For Safari 17.5 the baseline still rests on the sources cited in the browser-baseline decision, not on a run.
 
