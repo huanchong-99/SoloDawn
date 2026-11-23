@@ -10,6 +10,7 @@
     suggestedName,
     type Candidate,
   } from '../../lib/members';
+  import type { Points } from '../../lib/mounts.svelte';
   import { nodes } from '../../lib/nodes.svelte';
   import { accountLabel, cliName } from '../../lib/onboard.svelte';
   import { t } from '../../lib/prefs.svelte';
@@ -23,12 +24,19 @@
 
   /** The dialog that adds a registered AI from one of the owner's computers to the group
    *  (contracts/commands.md section 2, `host.join`). */
-  let { group, open = $bindable(false) }: { group: Group; open?: boolean } = $props();
+  let {
+    group,
+    open = $bindable(false),
+    onjoined,
+  }: {
+    group: Group;
+    open?: boolean;
+    onjoined?: (event: Points['member.joined']) => void;
+  } = $props();
   const uid = $props.id();
 
   const owned = $derived(homes.filter((home) => home.owner && home.ctl));
   const loading = $derived(owned.some((home) => !nodes.infos.has(home)));
-  const canSecretary = $derived(canMakeSecretary(group));
   const people = $derived(
     group.members.filter((member) => member.kind === 'human').map((member) => member.user),
   );
@@ -44,6 +52,7 @@
   const candidates = $derived(candidatesOf(group, owned, nodes.infos));
   const selectable = $derived(selectableCandidates(candidates));
   let chosen = $state.raw<Candidate>();
+  const canSecretary = $derived(chosen?.agent !== 'external' && canMakeSecretary(group));
 
   $effect(() => {
     if (!open) {
@@ -80,6 +89,7 @@
 
   function pickCandidate(candidate: Candidate) {
     chosen = candidate;
+    if (candidate.agent === 'external') secretary = false;
     if (!customName) name = suggestedName(group, candidate.agent, secretary);
   }
 
@@ -91,16 +101,19 @@
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     failed = '';
-    if (!chosen || !group.info) return;
+    const candidate = chosen;
     const trimmed = name.trim();
-    if (!trimmed) return;
-    const target = owned.find((home) => home === chosen!.home);
+    if (!candidate || !group.info || !trimmed) return;
+    const target = owned.find((home) => home === candidate.home);
     busy = true;
-    const code = await joinGroup(target, group, chosen, trimmed, secretary, draft);
+    const code = await joinGroup(target, group, candidate, trimmed, secretary, draft);
     busy = false;
     if (code === 'lost' && !target?.ctl) chosen = selectable[0];
     if (code) failed = code;
-    else dialog.close();
+    else {
+      dialog.close();
+      onjoined?.({ group, candidate, name: trimmed });
+    }
   }
 </script>
 
@@ -121,7 +134,8 @@
       {#if candidates.length}
         <div class="choices">
           {#each candidates as candidate (candidate.key)}
-            {@const disabled = candidate.account === null}
+            {@const external = candidate.agent === 'external'}
+            {@const disabled = !selectable.includes(candidate)}
             <label class="choice" class:disabled>
               <input
                 type="radio"
@@ -136,6 +150,8 @@
                 <span class="sub">
                   {#if candidate.inGroup}
                     {t('member.join.joined')}
+                  {:else if external}
+                    {t('external.join.hint')}
                   {:else if candidate.account === null}
                     {t('member.join.unconfigured')}
                   {:else}

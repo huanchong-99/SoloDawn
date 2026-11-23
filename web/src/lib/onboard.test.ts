@@ -276,6 +276,9 @@ describe('setAccount', () => {
 });
 
 describe('PairingSession mock, countdown and storage checks', () => {
+  it('names the external agent in the reader’s language', () => {
+    expect(cliName('external')).toBe('External AI');
+  });
   it('loads mock state, reacts to host.info pushes, and declares accounts', async () => {
     const session = new PairingSession('mock');
     await vi.waitFor(() => expect(session.stage).toBe('accounts'));

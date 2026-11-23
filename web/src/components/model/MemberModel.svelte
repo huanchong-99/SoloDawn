@@ -29,6 +29,7 @@
   const mine = $derived(ai.user === group.home.me.user);
   const offline = $derived(!group.home.ctl);
   const changes = $derived(modelChanges(ai, draft));
+  const emptyValue = $derived(t(ai.cli === 'external' ? 'model.unset' : 'model.default'));
 
   async function refresh() {
     refreshing = true;
@@ -73,12 +74,14 @@
   <span class="what">
     {#if ai.model}
       <span class="name">{listed?.name ?? ai.model}</span>
-      {#if models && !listed}<span class="badge" data-tone="dawn">{t('model.notlisted')}</span>{/if}
+      {#if ai.cli !== 'external' && models && !listed}<span class="badge" data-tone="dawn">
+          {t('model.notlisted')}
+        </span>{/if}
     {:else}
-      <span class="muted">{t('model.default')}</span>
+      <span class="muted">{emptyValue}</span>
     {/if}
   </span>
-  {#if mine && (models || !editing)}
+  {#if mine && ai.cli !== 'external' && (models || !editing)}
     <span class="acts">
       {#if !editing}
         <button
@@ -108,7 +111,7 @@
   {/if}
 </dd>
 <dt>{t('model.effort')}</dt>
-<dd class:muted={!ai.effort}>{ai.effort || t('model.default')}</dd>
+<dd class:muted={!ai.effort}>{ai.effort || emptyValue}</dd>
 {#if editing || failed}
   <dd class="wide">
     {#if editing}

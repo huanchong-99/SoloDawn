@@ -20,6 +20,7 @@ test('offeredAccounts keeps the known types the driver allows, in the client ord
 test('offersTerminal is false when a connected host declares no takeover for the agent', () => {
   const home = new Home({ user: 'u', sign });
   expect(offersTerminal(undefined, 'claude')).toBe(true);
+  expect(offersTerminal(undefined, 'external')).toBe(false);
   expect(offersTerminal(home, 'claude')).toBe(true);
   home.ctl = {} as p.Ctl;
   expect(offersTerminal(home, 'claude')).toBe(false);

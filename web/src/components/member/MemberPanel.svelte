@@ -11,6 +11,7 @@
     terminalDisabledReason,
     usageMeter,
   } from '../../lib/members';
+  import type { Points } from '../../lib/mounts.svelte';
   import type { Net } from '../../lib/net.svelte';
   import { nodes } from '../../lib/nodes.svelte';
   import { accountLabel } from '../../lib/onboard.svelte';
@@ -34,6 +35,7 @@
   const uid = $props.id();
 
   let adding = $state(false);
+  let joined = $state.raw<Points['member.joined']>();
   let inviting = $state(false);
 
   const ais = $derived(aiMembers(group));
@@ -204,7 +206,12 @@
 </div>
 
 {#if adding}
-  <AddAI {group} bind:open={adding} />
+  <AddAI {group} bind:open={adding} onjoined={(event) => (joined = event)} />
+{/if}
+{#if joined}
+  {#key joined}
+    <Mount at="member.joined" props={joined} />
+  {/key}
 {/if}
 {#if inviting}
   <InvitationDialog {group} bind:open={inviting} />
