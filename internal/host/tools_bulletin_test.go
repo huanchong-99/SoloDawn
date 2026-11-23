@@ -1,10 +1,12 @@
 package host
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"testing"
+	"testing/synctest"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
@@ -147,4 +149,75 @@ func TestBulletinSchemaOnlyForSecretary(t *testing.T) {
 		_, hasGroup := input.Properties["group"]
 		assertEqual(t, hasGroup, secretary)
 	}
+}
+
+func TestBulletinPostWaitsForHomeAttach(t *testing.T) {
+	for _, cancelWait := range []bool{false, true} {
+		t.Run(map[bool]string{false: "attached", true: "cancelled"}[cancelWait], func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) { checkBulletinAttachWait(t, cancelWait) })
+		})
+	}
+}
+
+func checkBulletinAttachWait(t *testing.T, cancelWait bool) {
+	t.Helper()
+	h, old, caller := bulletinFixture(t)
+	close(old.done)
+	h.Rows.Reset(bulletinGroup)
+	h.Connect = func(context.Context, string) {}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	result := make(chan struct {
+		out any
+		err error
+	}, 1)
+	go func() {
+		out, err := Tools["post"].Call(ctx, h, caller, json.RawMessage(`{"group":"`+bulletinGroup+`","text":"Ready"}`))
+		result <- struct {
+			out any
+			err error
+		}{out, err}
+	}()
+	synctest.Wait()
+	jp := joinStateOf(h)
+	jp.mu.Lock()
+	waiters := len(jp.waiters["team-home"])
+	jp.mu.Unlock()
+	assertEqual(t, waiters, 1)
+	posted := make(chan json.RawMessage, 1)
+	if cancelWait {
+		cancel()
+	} else {
+		h.Attach("team-home", bulletinWaitingHome(h, posted))
+	}
+	got := <-result
+	if cancelWait {
+		assertEqual(t, got.out, nil)
+		assertEqual(t, got.err, errHomeUnreachable)
+		return
+	}
+	assertEqual(t, got.err, nil)
+	assertBulletinWaitingPost(t, <-posted, got.out.(idResult))
+}
+
+func bulletinWaitingHome(h *Host, posted chan<- json.RawMessage) *joinFakeHome {
+	remote := newJoinFakeHome(h, "team-home")
+	grp := makeGroupRow(bulletinGroup, "team-home", "Team", "", "")
+	grp.Kind = "team"
+	remote.putGroup(grp)
+	remote.cmdFn = func(env proto.Envelope) (json.RawMessage, error) {
+		posted <- json.RawMessage(env.Payload)
+		return json.RawMessage(`{"re":7,"ok":true}`), nil
+	}
+	return remote
+}
+
+func assertBulletinWaitingPost(t *testing.T, raw json.RawMessage, out idResult) {
+	t.Helper()
+	sent := mustDecodeCmd[proto.Post[proto.BulletinSigned]](t, proto.Cmd{Env: proto.Envelope{Payload: string(raw)}}, "/thread", "/re")
+	assertEqual(t, sent, proto.Post[proto.BulletinSigned]{
+		HomeCommand: proto.HomeCommand{Type: "post", Nonce: proto.ID(out.ID), Timestamp: seamStart, Group: bulletinGroup},
+		Kind:        "bulletin", Text: "Ready", Mentions: []proto.ID{},
+		Body: proto.BulletinSigned{From: talkGroupID, Group: "Website", AI: "AI"},
+	})
 }
