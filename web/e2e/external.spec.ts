@@ -56,7 +56,7 @@ async function joinExternal(page: Page, nodes: Node[]) {
     .locator('input')
     .check();
   await form.getByRole('textbox', { name: 'Name in the group' }).fill('Scout');
-  await form.getByLabel('Account type').selectOption('api_key');
+  await form.getByRole('combobox', { name: /^Account/ }).selectOption('api_key');
   await form.getByRole('textbox', { name: 'Tool label' }).fill('ZCode');
   await form.getByRole('button', { name: 'Add AI' }).click();
 }
@@ -107,7 +107,7 @@ async function answerCheck(
   answer: string,
   working: () => Promise<void>,
 ) {
-  const got = await node.run('solodawn', 'wait', '--member', member, '--timeout', '0');
+  const got = await node.run('solodawn', 'wait', '--member', member, '--timeout', '30');
   expect(got.code, got.stderr).toBe(0);
   const handout = JSON.parse(got.stdout);
   expect(handout.text).toContain('Setup check: answer here in one line, then finish.');
@@ -116,8 +116,7 @@ async function answerCheck(
   expect(done.code, done.stderr).toBe(0);
 }
 
-// @pending: T3-13, T3-14, T3-15 and U3-6 must land before this runs.
-test.skip('external setup, usage and removal (A10.17, A10.20, A10.25, A10.27)', async () => {
+test('external setup, usage and removal (A10.17, A10.20, A10.25, A10.27)', async () => {
   const net = await startNet({ nodes: 2, env: () => gitIdentityEnv });
   const surface = await startDirectSurface(net.rendezvous, inject('browser'));
   const browser = await launch(inject('browser'));
@@ -142,13 +141,13 @@ test.skip('external setup, usage and removal (A10.17, A10.20, A10.25, A10.27)', 
     const card = page.locator('#chat-side .member', { hasText: 'Scout' });
     await poll(() => card.textContent()).toMatch(/external.*ZCode/is);
     expect(await card.getByRole('button', { name: /terminal/i }).count()).toBe(0);
-    const panel = page.getByRole('dialog', { name: /external setup/i });
-    const setup = await panel.innerText();
+    const panel = page.getByRole('dialog', { name: /external AI setup/i });
+    const setup = await panel.getByRole('textbox', { name: 'Self-setup prompt' }).inputValue();
     const exe = join(inject('e2e').bin, 'solodawn');
     expect(setup).toContain(exe);
     const serverText = await panel.locator('pre').last().innerText();
     const server = JSON.parse(serverText);
-    const { command, args } = server.mcpServers.solodawn;
+    const { command, args } = server.solodawn;
     expect(command).toBe(exe);
     expect(args).toEqual(['mcp', '--member', expect.any(String)]);
     const member = args[2] as string;
@@ -166,14 +165,10 @@ test.skip('external setup, usage and removal (A10.17, A10.20, A10.25, A10.27)', 
     await poll(() => page.getByText('Second scripted setup reply', { exact: true }).count()).toBe(
       1,
     );
-    await panel.getByRole('button', { name: 'Close' }).click();
+    await panel.getByRole('button', { name: 'Close setup' }).click();
     await poll(() => card.textContent()).toContain('40%');
-    await card.getByRole('button', { name: 'Scout' }).click();
-    await page.getByRole('button', { name: /remove (ai|member)/i }).click();
-    await page
-      .getByRole('dialog')
-      .getByRole('button', { name: /^remove$/i })
-      .click();
+    await card.getByRole('button', { name: 'Remove AI' }).click();
+    await card.getByRole('button', { name: 'Confirm removal' }).click();
     await poll(() => card.count()).toBe(0);
   } finally {
     await browser.close();
