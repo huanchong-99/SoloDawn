@@ -728,6 +728,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-23 · bug · External AI removal could be triggered by one click
+
+- Symptom: a click on Remove AI next to Setup revoked the member ID used by the runner and MCP configuration.
+- Cause: the member card sent `member remove` directly from the button's click handler (`web/src/components/external/MemberExternal.svelte`).
+- Status: resolved in U3-6. Removal requires inline confirmation, which Escape or moving focus cancels.
+
 ### 2026-11-23 · bug · FLAKY-27: paused mentions could be delivered out of order
 
 - Symptom: the OpenCode and Qwen A10.3/A4.7 examples intermittently failed at step 10 with `timed out waiting on M4 home frames`, even after the resumed reply had been posted.

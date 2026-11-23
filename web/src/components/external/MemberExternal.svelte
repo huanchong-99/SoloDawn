@@ -6,11 +6,18 @@
 
   let { group, ai }: Points['member.ai'] = $props();
   let open = $state(false);
+  let confirming = $state(false);
   let busy = $state(false);
   let failed = $state('');
   const mine = $derived(ai.user === group.home.me.user);
 
-  async function remove() {
+  async function remove(event: MouseEvent & { currentTarget: HTMLButtonElement }) {
+    if (!confirming) {
+      event.currentTarget.focus();
+      confirming = true;
+      return;
+    }
+    confirming = false;
     busy = true;
     failed = '';
     const answer = await group.home.command({ t: 'member', g: group.g, op: 'remove', id: ai.id });
@@ -31,11 +38,18 @@
       </button>
       <button
         type="button"
-        class="btn btn-sm btn-ghost"
+        class="btn btn-sm {confirming ? 'btn-danger' : 'btn-ghost'}"
         disabled={busy || !group.home.ctl}
         onclick={remove}
+        onblur={() => (confirming = false)}
+        onkeydown={(event) => {
+          if (confirming && event.key === 'Escape') {
+            event.preventDefault();
+            confirming = false;
+          }
+        }}
       >
-        {t('external.remove')}
+        {t(confirming ? 'external.remove.confirm' : 'external.remove')}
       </button>
       {#if failed === 'conflict'}
         <p class="hint" role="alert">{t('external.remove.conflict')}</p>

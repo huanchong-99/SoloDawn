@@ -102,7 +102,7 @@
         class="input mono"
         readonly
         value={prompt}
-        rows="7"
+        rows="10"
         lang="en"
         aria-labelledby={`${uid}-prompt`}></textarea>
       {#if clipboard}
@@ -175,7 +175,7 @@
   }
   .marks {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--sp-2);
     margin: 0;
     padding: 0;

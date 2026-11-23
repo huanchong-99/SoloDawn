@@ -38,6 +38,8 @@ const expected = {
   close: ['Close setup', '关闭设置'],
   resend: ['Send setup check again', '再次发送连接检查'],
   remove: ['Remove AI', '移除 AI'],
+  confirm: ['Confirm removal', '确认移除'],
+  unset: ['Not set', '未设置'],
   terminal: ['Open terminal', '打开终端'],
 };
 
@@ -113,7 +115,14 @@ test.each(layouts)(
     expect(JSON.parse((await setup.locator('pre').textContent())!)).toEqual({
       solodawn: { command: exe, args: ['mcp', '--member', id] },
     });
-    const prompt = await setup.getByRole('textbox').inputValue();
+    const textbox = setup.getByRole('textbox');
+    expect(await textbox.getAttribute('rows')).toBe('10');
+    expect(
+      await setup
+        .locator('.marks')
+        .evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ')),
+    ).toHaveLength(2);
+    const prompt = await textbox.inputValue();
     expect(prompt).toContain(
       'You are joining the SoloDawn group "Website" as the AI member "Scout".',
     );
@@ -145,16 +154,30 @@ test.each(layouts)(
     await setup.getByRole('button', { name: label('close') }).click();
     const card = page.locator('.members .member', { hasText: 'Scout' });
     expect(await card.getByText(`${label('external')} · ZCode`).count()).toBe(1);
+    expect(await card.getByText(label('unset'), { exact: true }).count()).toBe(2);
     expect(await card.getByRole('meter').getAttribute('aria-valuenow')).toBe('40');
     await publish('offline', { window_pct: 40 });
     await expect.poll(() => card.locator('.st').getAttribute('data-st')).toBe('offline');
     expect(await card.getByText(label('terminal')).count()).toBe(0);
-    await card.getByRole('button', { name: label('open') }).click();
+    const open = card.getByRole('button', { name: label('open'), exact: true });
+    await open.click();
     await setup.getByRole('button', { name: label('resend') }).click();
     await expect.poll(commands).toEqual([check, check]);
     await expect.poll(() => marks.count()).toBe(0);
     await setup.getByRole('button', { name: label('close') }).click();
-    await card.getByRole('button', { name: label('remove') }).click();
+    const remove = card.getByRole('button', { name: label('remove'), exact: true });
+    const confirm = card.getByRole('button', { name: label('confirm'), exact: true });
+    await remove.click();
+    await confirm.press('Escape');
+    await remove.waitFor();
+    await remove.click();
+    await confirm.waitFor();
+    await open.focus();
+    await remove.waitFor();
+    await remove.click();
+    await confirm.waitFor();
+    expect(await commands()).toEqual([check, check]);
+    await confirm.click();
     await expect.poll(commands).toEqual([check, check, { t: 'member', g, op: 'remove', id }]);
     await card.waitFor({ state: 'detached' });
   },

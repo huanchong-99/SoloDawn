@@ -7,6 +7,7 @@ import { mounts } from '../../lib/mounts.svelte';
 import { nodes } from '../../lib/nodes.svelte';
 import { prefs } from '../../lib/prefs.svelte';
 import * as p from '../../lib/proto';
+import MemberModel from '../model/MemberModel.svelte';
 import { newDraft } from '../profile/profile';
 import AddExternal from './AddExternal.svelte';
 import AfterJoin from './AfterJoin.svelte';
@@ -241,7 +242,18 @@ it('renders live progress, reports duplicate responses and copies the complete p
   );
 });
 
-it('keeps the setup action with the owner and shows removal refusals on the card', async () => {
+it('uses the unset profile label for external AI and keeps the default for managed AI', () => {
+  show(MemberModel, { group, ai: { ...member, model: '', effort: '' } });
+  show(MemberModel, { group, ai: { ...member, cli: 'codex', model: '', effort: '' } });
+  expect(texts('dd')).toEqual([
+    'Not set',
+    'Not set',
+    "The CLI's default Change",
+    "The CLI's default",
+  ]);
+});
+
+it('keeps setup with the owner and confirms removal before sending the command', async () => {
   show(MemberExternal, { group, ai: { ...member, cli: 'codex' } });
   expect(all('dt, dd')).toEqual([]);
   show(MemberExternal, { group, ai: { ...member, user: 'other-user', tool: undefined } });
@@ -255,7 +267,27 @@ it('keeps the setup action with the owner and shows removal refusals on the card
   one('dialog header button').click();
   await vi.waitFor(() => expect(all('dialog')).toHaveLength(0));
   const remove = one<HTMLButtonElement>('.actions button:nth-child(2)');
+  const confirm = async () => {
+    remove.click();
+    await tick();
+    expect(remove.textContent?.trim()).toBe('Confirm removal');
+    expect(remove.classList.contains('btn-danger')).toBe(true);
+  };
+  await confirm();
+  expect(request).not.toHaveBeenCalled();
+  const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  remove.dispatchEvent(escape);
+  await tick();
+  expect(escape.defaultPrevented).toBe(true);
+  expect(remove.textContent?.trim()).toBe('Remove AI');
+  await confirm();
+  remove.blur();
+  await tick();
+  expect(remove.textContent?.trim()).toBe('Remove AI');
+  expect(request).not.toHaveBeenCalled();
+
   request.mockResolvedValueOnce({ re: 1, err: { code: 'conflict' } });
+  await confirm();
   remove.click();
   await vi.waitFor(() =>
     expect(texts('.actions [role=alert]')).toEqual([
@@ -263,10 +295,12 @@ it('keeps the setup action with the owner and shows removal refusals on the card
     ]),
   );
   request.mockResolvedValueOnce({ re: 1, err: { code: 'forbidden' } });
+  await confirm();
   remove.click();
   await vi.waitFor(() =>
     expect(texts('.actions [role=alert]')).toEqual(['Not sent: this device may not do that.']),
   );
+  await confirm();
   remove.click();
   await vi.waitFor(() => expect(texts('.actions [role=alert]')).toEqual([]));
 });

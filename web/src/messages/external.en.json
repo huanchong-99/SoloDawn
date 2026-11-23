@@ -25,5 +25,6 @@
   "external.check.multiple": "The member posted more than one response. The check expects one.",
   "external.check.send": "Send setup check again",
   "external.remove": "Remove AI",
+  "external.remove.confirm": "Confirm removal",
   "external.remove.conflict": "Reassign the AI’s unfinished tasks before removing it."
 }
