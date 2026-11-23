@@ -12,6 +12,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: only the second tier was planned and built. The MCP shim takes only the session token that the node creates when it starts a CLI itself ([local.md](planning/contracts/local.md), section 3), `host.join` takes only an agent with a driver (`agtValidAgent`, `internal/host/agents.go:258`), and nothing lets an agent take an inbox item.
 - Status: open, found 2026-11-23 and planned as the external AI (R-166, [external.md](planning/contracts/step-3/external.md); [parallel plan](planning/steps/parallel-plan-step-2-3.md), section 4.2). The wire shapes are frozen (P-7), the home accepts external tool labels and owner edits (T3-12), the secretary's roster shows window usage (T3-15), the browser provides setup and its check (U3-6), the host joins external AIs, hands out items and reports runs, presence and state (T3-13), and the MCP tools under a member id with the `wait` and `done` commands serve them (T3-14). The [I3-3 scenarios](features/a10_external.feature) and [browser test](web/e2e/external.spec.ts) stay pending until they are wired to these; A10.28 needs a live agent. The agent writes its own runner around `solodawn wait`.
 
+### 2026-11-23 · deviation · An intermittent failure cannot be explained from one occurrence
+
+- Symptom: several tests called flaky were product races (A9.24 twice, the A9.23 bulletin attach, the A10.3 pause read, a host teardown race). Each took hours of stress runs to find, and A7.9 on Windows still has no cause. The owner's rule of 2026-11-23: an intermittent failure must not depend on being reproduced; the logs of its one occurrence, in CI or on the owner's machines, must point at the cause.
+- Cause: the node logs only errors, in prose (`log.Printf` in `internal/host/deliver.go`, `internal/home/run.go`, `internal/node/session.go`). A wait in a test that times out says only that it did (`features/m4_test.go:70`, "timed out waiting on M4 home frames"). CI keeps nothing from a failed scenario (`.github/workflows/backend.yml`).
+- Status: open. The contract is [diagnostics](planning/contracts/diagnostics.md); the units are DG-1 to DG-7 of `planning/steps/parallel-plan-step-2-3.md` section 4.3.
+
 ### 2026-11-23 · limitation · A required escalation can outlast its last stronger candidate
 
 - Symptom: if the owner lowers the last stronger AI's tier while `stuck.ask` is true, the turn and the host submission refusal say no candidate is currently listed.

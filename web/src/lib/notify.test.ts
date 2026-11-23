@@ -152,7 +152,7 @@ describe('classify, whoOf, titleOf and targetIdOf', () => {
       by: ownerId,
       mentions: [ownerId],
     });
-    const sysMsg = row<p.MsgRow>('row-msg-system', { seq: 10, pos: 10 });
+    const sysMsg = row<p.MsgRow>('row-msg-system', { seq: 10, pos: 10, mentions: [ownerId] });
     pushLive(group, [summary, mention, plain, ownMention, sysMsg]);
 
     expect(classify(group, summary)).toBe('done');
@@ -294,7 +294,7 @@ describe('Notifier', () => {
 
     // Non-message rows, gone markers, card updates (where pos differs from seq), and plain messages do not notify.
     pushLive(group, [
-      row('row-note', { id: 'note-live', seq: 13, pos: 13 }),
+      row('row-note', { id: 'note-live', seq: 13, pos: 13, by: codexId, mentions: [ownerId] }),
       row('row-task', { id: 't-new', seq: 14 }),
       { r: 'msg', id: 'gone-msg', seq: 15, gone: true },
       row<p.MsgRow>('row-msg-approval-pending', { id: 'updated-card', seq: 16, pos: 11 }),
@@ -320,9 +320,9 @@ describe('Notifier', () => {
       ],
       false,
     );
+    group.cursor = 3;
     notifier.sync([home]);
     expect(notifier.items).toEqual([]);
-    group.cursor = 3;
     pushLive(group, [
       row<p.MsgRow>('row-msg-approval-pending', { id: 'after-reset', seq: 4, pos: 4 }),
     ]);
@@ -345,6 +345,16 @@ describe('Notifier', () => {
     ]);
     notifier.sync([home]);
     expect(notifier.items.map((i) => i.msg.id)).toEqual(['live-ap']);
+
+    const unsynced = new Group(home, otherGroup);
+    home.groups = [unsynced];
+    unsynced.apply([row('row-member-human', { g: otherGroup, seq: 2, name: 'Alex' })], false);
+    notifier.sync([home]);
+    pushLive(unsynced, [
+      row<p.MsgRow>('row-msg-approval-pending', { id: 'cold-ap', g: otherGroup, seq: 3, pos: 3 }),
+    ]);
+    notifier.sync([home]);
+    expect(notifier.items.map((i) => i.msg.id)).toEqual(['cold-ap']);
   });
 
   it('orders arrivals by pos, evicts self-closing notices before waiting cards, and holds timers', () => {
@@ -425,6 +435,40 @@ describe('Notifier', () => {
     expect(ids()).toEqual(['ap3', 'br7', 'ap9']);
     vi.advanceTimersByTime(60_000);
     expect(ids()).toEqual(['ap3', 'br7', 'ap9']);
+  });
+
+  it('forgets the holds of a notification that is let go, dismissed or cleared', () => {
+    const notifier = new Notifier();
+    const { home, group } = makeReadyGroup();
+    notifier.sync([home]);
+    let seq = 5;
+    const arrive = () => {
+      seq += 1;
+      pushLive(group, [row<p.MsgRow>('row-msg-summary', { id: 'sum', seq, pos: seq })]);
+      notifier.sync([home]);
+      return notifier.items[0].key;
+    };
+    const holdOnceAndLetGo = (key: string) => {
+      notifier.hold(key);
+      notifier.release(key);
+    };
+
+    const key = arrive();
+    holdOnceAndLetGo(key);
+    holdOnceAndLetGo(key);
+    vi.advanceTimersByTime(autoDismissMs);
+    expect(notifier.items).toEqual([]);
+
+    for (const end of [() => notifier.dismiss(key), () => notifier.clear()]) {
+      arrive();
+      notifier.hold(key);
+      notifier.hold(key);
+      end();
+      arrive();
+      holdOnceAndLetGo(key);
+      vi.advanceTimersByTime(autoDismissMs);
+      expect(notifier.items).toEqual([]);
+    }
   });
 
   it('prunes resolved cards, deleted rows, opened chats and removed groups or homes without looping in $effect', () => {

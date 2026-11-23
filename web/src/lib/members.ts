@@ -3,7 +3,7 @@
 import { lost, newId, type Group, type Home } from './groups.svelte';
 import type { Net } from './net.svelte';
 import { cliName } from './onboard.svelte';
-import { t } from './prefs.svelte';
+import { t, type Key } from './prefs.svelte';
 import type { AIMemberRow, HostInfoPush, HostJoin, HumanMemberRow, MsgRow, TaskRow } from './proto';
 import { hostHomeOf } from './terminal.svelte';
 import { clock } from './when';
@@ -265,10 +265,7 @@ export function suggestedName(
 
 /** Worded error text for `host.join` failures, or undefined for generic `Failure` codes. */
 export function joinError(code: string): string | undefined {
-  if (code === 'home_unreachable' || code === 'conflict' || code === 'lost') {
-    return t(`member.join.error.${code}`);
-  }
-  return undefined;
+  return t(`member.join.error.${code}` as Key);
 }
 
 /** Signs and sends `host.join` to `target`, returning the refusal code or an empty string on ok. */

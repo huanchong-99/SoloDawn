@@ -322,7 +322,11 @@ describe('the takeover commands and the channel', () => {
     await endTakeover(offline, hostId, gid, memberId);
     expect(signed).toEqual([]);
 
-    const host = onlineHome();
+    const asked: unknown[] = [];
+    const host = onlineHome(hostId, async (req) => {
+      asked.push(req);
+      return { re: 1, ok: true };
+    });
     expect(await startTakeover(host, hostId, gid, memberId)).toBe('');
     expect(JSON.parse(signed[0])).toEqual({
       t: 'takeover.start',
@@ -335,6 +339,7 @@ describe('the takeover commands and the channel', () => {
     expect(await startTakeover(host, hostId, gid, memberId, taskId)).toBe('');
     expect(p.decode(p.TakeoverStart, signed[1]).task).toBe(taskId);
     await endTakeover(host, hostId, gid, memberId);
+    expect(asked.map((req) => (req as { t: string }).t)).toEqual(['cmd', 'cmd', 'cmd']);
     expect(p.decode(p.TakeoverEnd, signed[2])).toMatchObject({
       t: 'takeover.end',
       ts: 1763600000000,
@@ -536,6 +541,7 @@ describe('a takeover', () => {
     await pc.answer();
     pc.channels[0].fake.remoteClose();
     closed.type('x');
+    closed.typeBinary('x');
     closed.handBack();
     await new Promise((later) => setTimeout(later));
     expect([closed.phase, pc.sent('takeover.end'), pc.channels[0].fake.sent]).toEqual([
@@ -549,5 +555,11 @@ describe('a takeover', () => {
     lost.follow(pc.target, direct);
     await pc.answer();
     expect([lost.phase, lost.errorCode]).toEqual(['error', 'lost']);
+
+    const dropped = new Takeover(gid, memberId, undefined, () => {});
+    dropped.follow(pc.target, direct);
+    pc.home.ctl = undefined;
+    await pc.answer();
+    expect([dropped.phase, dropped.errorCode]).toEqual(['error', 'lost']);
   });
 });

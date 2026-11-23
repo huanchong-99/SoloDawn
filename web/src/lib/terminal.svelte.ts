@@ -182,9 +182,7 @@ export function applyCtrl(input: string, ctrl: boolean): { out: string; ctrl: bo
 
 /** An xterm binary string, one byte per code unit, as bytes. */
 export function binaryBytes(data: string): Uint8Array<ArrayBuffer> {
-  const out = new Uint8Array(data.length);
-  for (let i = 0; i < data.length; i += 1) out[i] = data.charCodeAt(i) & 0xff;
-  return out;
+  return Uint8Array.from({ length: data.length }, (_, i) => data.charCodeAt(i) & 0xff);
 }
 
 /** A message of the `pty` channel as xterm writes it, whole bytes so UTF-8 is not split. */
@@ -285,7 +283,7 @@ export class Takeover {
   errorCode = $state('');
   startedAt = $state(0);
   ctrl = $state(false);
-  #run = 0;
+  #run = Symbol();
   #open: Target | undefined;
   #pty: PtyBridge | undefined;
   #cols = 0;
@@ -307,7 +305,7 @@ export class Takeover {
 
   /** Ends the takeover. */
   handBack() {
-    this.#run += 1;
+    this.#run = Symbol();
     if (this.phase === 'starting' || this.phase === 'active') this.#close('ended');
   }
 
@@ -337,7 +335,7 @@ export class Takeover {
   }
 
   async #start(target: Target) {
-    const run = (this.#run += 1);
+    const run = (this.#run = Symbol());
     this.phase = 'starting';
     const code = await startTakeover(target.host, target.to, this.g, this.member, this.task);
     if (run !== this.#run) {
