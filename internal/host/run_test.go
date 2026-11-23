@@ -2175,6 +2175,37 @@ func TestSettleWaitsForRuntimeDelivery(t *testing.T) {
 	})
 }
 
+func TestSettleWaitsForDeliveryAfterAnExitMidTurn(t *testing.T) {
+	saveRuntimeGlobals(t)
+	base := t.TempDir()
+	synctest.Test(t, func(t *testing.T) {
+		h, _, drv, shutdown := setupBubbleEnv(t, base)
+		defer shutdown()
+		started, release, settled := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		Deliver = func(*Host, string, string) {
+			close(started)
+			<-release
+		}
+		key := SessionKey{Group: runGroup1, Member: runAI1}
+		assertEqual(t, h.Sessions.Create(makeRunSession(key, GroupSession, "repo")), nil)
+		assertEqual(t, Runner.Turn(t.Context(), h, key, "hi", Turn{Kind: ItemsTurn}), nil)
+		drv.lastProc().finishExit()
+		<-started
+		go func() {
+			h.Settle()
+			close(settled)
+		}()
+		synctest.Wait()
+		select {
+		case <-settled:
+			t.Error("Settle returned before delivery finished")
+		default:
+		}
+		close(release)
+		<-settled
+	})
+}
+
 func TestSettleUnblocksAWaitingOpenSlot(t *testing.T) {
 	saveRuntimeGlobals(t)
 	base := t.TempDir()

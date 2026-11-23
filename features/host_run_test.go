@@ -194,13 +194,12 @@ type hrCLIDriver struct {
 	logFile   string
 }
 
-func newHRCLIDriver(h *host.Host, cleanup func(func()), logFile string, scripts ...string) *hrCLIDriver {
+func newHRCLIDriver(cleanup func(func()), logFile string, scripts ...string) *hrCLIDriver {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &hrCLIDriver{parentCtx: ctx, scripts: scripts, logFile: logFile}
 	cleanup(func() {
 		cancel()
 		d.wg.Wait()
-		waitAllSessionsIdle(h)
 	})
 	return d
 }
@@ -373,28 +372,11 @@ func newTestHost(suiteT *testing.T, cleanup func(func()), maxOpen, idleMin int) 
 	cleanup(func() { db.Close() })
 	cleanup(func() {
 		cancelProcs()
-		waitAllSessionsIdle(h)
+		h.Settle()
 	})
 	rh := newHRHome()
 	h.Attach("home-dev", rh)
 	return h, rh, procCtx, nil
-}
-
-func waitAllSessionsIdle(h *host.Host) {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		allDormant := true
-		for _, s := range h.Sessions.All() {
-			if s.State != host.Dormant {
-				allDormant = false
-				break
-			}
-		}
-		if allDormant {
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
 }
 
 func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
@@ -609,7 +591,7 @@ func registerCLICrashAndSwitchSteps(sc *godog.ScenarioContext, suiteT *testing.T
 		if err != nil {
 			return err
 		}
-		cliDrv = newHRCLIDriver(h, cleanup, logFile)
+		cliDrv = newHRCLIDriver(cleanup, logFile)
 		host.Drivers = map[string]host.Driver{"claude": cliDrv}
 		return h.Sessions.Create(host.Session{SessionKey: tKey, Kind: host.TaskSession, Folder: "wt/1-task", Agent: "claude", Home: "home-dev", Name: "Claude"})
 	})
@@ -674,7 +656,7 @@ func registerCLICrashAndSwitchSteps(sc *godog.ScenarioContext, suiteT *testing.T
 		if err != nil {
 			return err
 		}
-		cliDrv = newHRCLIDriver(h, cleanup, logFile, script)
+		cliDrv = newHRCLIDriver(cleanup, logFile, script)
 		host.Drivers = map[string]host.Driver{"claude": cliDrv}
 		if err := h.Sessions.Create(host.Session{SessionKey: kA, Kind: host.GroupSession, Folder: "repo-a", Agent: "claude", Home: "home-dev", Name: "A", CLISession: "sess-a"}); err != nil {
 			return err

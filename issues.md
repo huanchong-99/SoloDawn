@@ -728,6 +728,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-23 · bug · Host acceptance teardown restored hooks while host delivery still ran
+
+- Symptom: under `-race`, the host acceptance scenarios reported a data race between restoring `host.Deliver` in `afterScenario` (`features/host_run_test.go:322`) and a delivery wakeup reading it (`internal/host/run.go:592` in `onProcessTurnEnded`, and `:851` in `finishTurnProcessExit`, reached from `:813`).
+- Cause: the test host's teardown (`features/host_run_test.go:374-377`, and `:203` for the CLI driver) cancelled the processes and polled the session rows until they were `dormant` (`waitAllSessionsIdle`, `:383-398`), but never called `h.Settle()`. A row turns `dormant` or `waiting` before the loop starts its delivery wakeup, so the poll returned while that goroutine ran. The product already closes a host with `Settle`, which waits for those wakeups (`settleRuntime`, `internal/host/run.go:79-91`).
+- Status: resolved on `devin/host-teardown-race`: the teardown settles the host instead of polling, and `TestSettleWaitsForDeliveryAfterAnExitMidTurn` pins that `Settle` waits for the wakeup after a mid-turn exit, as `TestSettleWaitsForRuntimeDelivery` does after a turn's end.
+
 ### 2026-11-23 · bug · External AI removal could be triggered by one click
 
 - Symptom: a click on Remove AI next to Setup revoked the member ID used by the runner and MCP configuration.
