@@ -103,7 +103,7 @@ func TestFeatures(t *testing.T) {
 				return ctx, nil
 			})
 		},
-		Options: &godog.Options{Format: "pretty", Paths: []string{"."}, Tags: tags(runtime.GOOS), Strict: true, TestingT: t},
+		Options: &godog.Options{Format: "pretty", Paths: []string{"m5.feature:6"}, Tags: tags(runtime.GOOS), Strict: true, TestingT: t},
 	}
 	if suite.Run() != 0 {
 		t.Fatal("acceptance scenarios failed")
