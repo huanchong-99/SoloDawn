@@ -2013,7 +2013,25 @@ func (w *m7World) waitBrowserRelayStats(timeout time.Duration) error {
 		}
 		time.Sleep(40 * time.Millisecond)
 	}
-	return errors.New("selected-pair statistics did not transition to relay")
+	return fmt.Errorf("selected-pair statistics did not transition to relay; ICE state=%s gathering=%s\n%s", w.browser.pc.ICEConnectionState(), w.browser.pc.ICEGatheringState(), w.browser.candidatePairDump())
+}
+
+func (b *m7Browser) candidatePairDump() string {
+	transport := b.pc.SCTP().Transport().ICETransport()
+	selected, _ := transport.GetSelectedCandidatePairStats()
+	report := b.pc.GetStats()
+	var lines []string
+	for _, stat := range report {
+		pair, ok := stat.(webrtc.ICECandidatePairStats)
+		if !ok {
+			continue
+		}
+		local, remote, _ := m7CandidateTypesFromReport(report, pair.LocalCandidateID, pair.RemoteCandidateID)
+		lines = append(lines, fmt.Sprintf("pair=%s selected=%t state=%s nominated=%t currentRoundTripTime=%.6fs local=%s remote=%s",
+			pair.ID, pair.ID == selected.ID, pair.State, pair.Nominated, pair.CurrentRoundTripTime, local, remote))
+	}
+	slices.Sort(lines)
+	return fmt.Sprintf("candidate pairs (%d):\n%s", len(lines), strings.Join(lines, "\n"))
 }
 
 func (w *m7World) thenStatsRelayClosesPTYAndHandsBack(aiName string) error {
