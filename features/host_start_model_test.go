@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -106,7 +107,14 @@ type choiceWorld struct {
 func hostStartModelSteps(sc *godog.ScenarioContext, f fixtures) {
 	w := &choiceWorld{profiles: map[string]proto.Profile{}, members: map[string]string{}, drivers: map[string]*choiceDriver{}}
 	cleanup := afterScenario(sc)
-	sc.Step(`^a model-choice host with fake Claude Code and Codex$`, func() error { return w.setup(f, cleanup) })
+	sc.Step(`^a model-choice host with fake Claude Code and Codex$`, func() error { return w.setup(f, cleanup, "claude", "codex") })
+	sc.Step(`^a model-choice host with fake OpenCode and Qwen Code$`, func() error {
+		server, err := serverProfileFixtures(f, cleanup)
+		if err != nil {
+			return err
+		}
+		return w.setup(server, cleanup, "opencode", "qwen")
+	})
 	sc.Step(`^the model-choice host joins "([^"]*)" as "([^"]*)" with model "([^"]*)", effort "([^"]*)" and tier "([^"]*)"$`, w.joinProfile)
 	sc.Step(`^both model-choice profiles are forwarded unchanged to the home$`, w.forwarded)
 	sc.Step(`^model-choice host.info lists both members under claude$`, w.hostInfo)
@@ -136,8 +144,8 @@ func hostStartModelSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^model-choice reports a crash and task fail with the original session id$`, w.crashed)
 }
 
-func (w *choiceWorld) setup(f fixtures, cleanup func(func())) error {
-	if err := w.initHostOnDisk("claude", "codex", "home-remote", cleanup); err != nil {
+func (w *choiceWorld) setup(f fixtures, cleanup func(func()), first, second string) error {
+	if err := w.initHostOnDisk(first, second, "home-remote", cleanup); err != nil {
 		return err
 	}
 	cleanup(w.h.Settle)
@@ -148,7 +156,7 @@ func (w *choiceWorld) setup(f fixtures, cleanup func(func())) error {
 	w.home = &choiceHome{joinScenarioHome: w.remoteHome, notices: make(chan json.RawMessage, 64)}
 	w.h.Connect = func(_ context.Context, device string) { w.h.Attach(device, w.home) }
 	w.h.Attach("home-remote", w.home)
-	for _, agent := range []string{"claude", "codex"} {
+	for _, agent := range []string{first, second} {
 		original := host.Drivers[agent]
 		w.drivers[agent] = &choiceDriver{Driver: original}
 		host.Drivers[agent] = w.drivers[agent]
@@ -277,7 +285,7 @@ func (w *choiceWorld) run(name string, resume, refused bool) error {
 		return err
 	}
 	s, _ := w.current()
-	restore, err := w.setScript(s, refused)
+	restore, err := w.setScript(s, w.profiles[name], refused)
 	if err != nil {
 		return err
 	}
@@ -306,12 +314,17 @@ func (w *choiceWorld) prepareRun(name string, resume, refused bool) error {
 	return nil
 }
 
-func (w *choiceWorld) setScript(s host.Session, refused bool) (func(), error) {
+func (w *choiceWorld) setScript(s host.Session, profile proto.Profile, refused bool) (func(), error) {
 	path := filepath.Join(w.root, s.Agent+"-choice.json")
-	if err := os.WriteFile(path, []byte(choiceScript(s, refused)), 0600); err != nil {
+	script := choiceScript(s, refused)
+	switch s.Agent {
+	case "opencode", "qwen":
+		script = serverChoiceScript(s, profile, refused)
+	}
+	if err := os.WriteFile(path, []byte(script), 0600); err != nil {
 		return nil, err
 	}
-	key := "SOLODAWN_FAKE_" + map[string]string{"claude": "CLAUDE", "codex": "CODEX"}[s.Agent] + "_SCRIPT"
+	key := "SOLODAWN_FAKE_" + strings.ToUpper(s.Agent) + "_SCRIPT"
 	previous, had := os.LookupEnv(key)
 	if err := os.Setenv(key, path); err != nil {
 		return nil, err
@@ -349,6 +362,9 @@ func (w *choiceWorld) taskSession() error {
 	s, _ := w.current()
 	w.key.Task = hrTask1
 	s.SessionKey, s.Kind, s.CLISession = w.key, host.TaskSession, "existing"
+	if s.Agent == "qwen" {
+		s.CLISession = ""
+	}
 	w.cliID = s.CLISession
 	return w.h.Sessions.Create(s)
 }

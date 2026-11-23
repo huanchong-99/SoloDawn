@@ -44,7 +44,7 @@ func (qwenDriver) Start(ctx context.Context, l Launch) (Process, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &qwenProcess{token: rand.Text(), resume: l.Session, events: make(chan Event, 16), ready: make(chan struct{})}
+	p := &qwenProcess{token: rand.Text(), resume: l.Session, startup: qwenStartup(l), events: make(chan Event, 16), ready: make(chan struct{})}
 	if l.Session == "" {
 		p.instructions = l.Instructions
 	}
@@ -88,6 +88,23 @@ type qwenProcess struct {
 	ready              chan struct{}
 	stop               context.CancelFunc
 	base, session, url string
+	startup            map[string]any
+	startErr           error
+}
+
+func qwenStartup(l Launch) map[string]any {
+	body := map[string]any{}
+	config := map[string]string{}
+	if l.Model != "" {
+		config["modelServiceId"] = l.Model
+	}
+	if l.Effort != "" {
+		config["reasoningEffort"] = l.Effort
+	}
+	if len(config) != 0 {
+		body["startupConfig"] = config
+	}
+	return body
 }
 
 type qwenEvent struct {
@@ -111,6 +128,9 @@ func (p *qwenProcess) Events() <-chan Event { return p.events }
 
 func (p *qwenProcess) Turn(text string) error {
 	<-p.ready
+	if p.startErr != nil {
+		return p.startErr
+	}
 	prompt := []map[string]string{{"type": "text", "text": text}}
 	if p.instructions != "" {
 		prompt = append([]map[string]string{{"type": "text", "text": p.instructions}}, prompt...)
@@ -179,6 +199,7 @@ func (p *qwenProcess) run(out *os.File, wait func()) {
 	if err == nil {
 		stream, err = p.request(http.MethodGet, p.url+"/events", nil)
 	}
+	p.startErr = err
 	close(p.ready)
 	if err != nil {
 		return
@@ -197,7 +218,7 @@ func (p *qwenProcess) run(out *os.File, wait func()) {
 func (p *qwenProcess) open() error {
 	if p.resume == "" {
 		p.url = "/session"
-		id, err := p.post("", map[string]any{})
+		id, err := p.post("", p.startup)
 		p.session, p.url = id, "/session/"+id
 		return err
 	}
