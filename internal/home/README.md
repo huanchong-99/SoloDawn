@@ -273,7 +273,7 @@ store that cannot be read, or a state row that does not decode, starts no loop.
 2. If anything failed, a read of the `Disk` included, the transaction is dropped, the failure
    goes to `LoopConfig.Report`, a command is answered `internal`, and the state is as before.
 3. Otherwise, for a result that holds something: `State.Commit`, the count of the wake-up cap,
-   every hook of `After` in the order of their names, the answer, the pushes.
+   every hook of `After` in the order of their names, the row pushes, the answer, the other pushes.
 
 A result that holds nothing only gets its answer: a refusal (whose receipt is committed), a
 command answered from its receipt, a timer with nothing to do. It reaches no hook. A timer's or a
