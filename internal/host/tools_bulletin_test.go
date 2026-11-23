@@ -184,17 +184,12 @@ func checkBulletinAttachWait(t *testing.T, cancelWait bool) {
 	waiters := len(jp.waiters["team-home"])
 	jp.mu.Unlock()
 	assertEqual(t, waiters, 1)
-	registered := make(chan struct{})
 	posted := make(chan json.RawMessage, 1)
-	go func() {
-		<-registered
-		if cancelWait {
-			cancel()
-			return
-		}
+	if cancelWait {
+		cancel()
+	} else {
 		h.Attach("team-home", bulletinWaitingHome(h, posted))
-	}()
-	close(registered)
+	}
 	got := <-result
 	if cancelWait {
 		assertEqual(t, got.out, nil)
