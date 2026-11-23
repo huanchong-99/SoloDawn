@@ -41,7 +41,9 @@
         class="btn btn-sm {confirming ? 'btn-danger' : 'btn-ghost'}"
         disabled={busy || !group.home.ctl}
         onclick={remove}
-        onblur={() => (confirming = false)}
+        onblur={(event) => {
+          if (event.relatedTarget) confirming = false;
+        }}
         onkeydown={(event) => {
           if (confirming && event.key === 'Escape') {
             event.preventDefault();
