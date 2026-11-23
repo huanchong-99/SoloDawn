@@ -6,6 +6,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-23 · bug · A9.24 can stall before submitting the retry commit
+
+- Symptom: A9.24 times out at “both tasks merge after checks and cross-review and receive summaries.” In a stalled run, the retry commit gets its standalone `watch-push` but no submission push or `watch-checks` call, and the task stays at `active/local_check`.
+- Reproduce: use a Go overlay to set `godog.Options.Paths` in `features/acceptance_test.go` to `[]string{"s2_watch.feature:37"}`, then run `go test -overlay <overlay.json> -tags acceptance -race -run '^TestFeatures$' -count=50 -timeout=35m ./features/`. The same step timed out on `origin/rebuild` at `aee115ba9` with `-count=8`.
+- Cause: unverified. The timeout predates the stale-check claims, and the stalled retry does not reach hosted-check polling.
+- Status: open.
+
 ### 2026-11-23 · limitation · Remembered project homes without local AIs stay connected
 
 - Symptom: remembering a project home now retains a connection even when no AI is hosted locally in that group.
