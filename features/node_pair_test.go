@@ -5,6 +5,7 @@ package features
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"runtime"
@@ -185,14 +186,12 @@ func (w *nodePairWorld) nodeRunsPair(label string) error {
 }
 
 func (w *nodePairWorld) awaitKnown(device string) error {
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if w.pn.Pairer.Known(device) {
-			return nil
+	return waitUntil(3*time.Second, fmt.Sprintf("the node to record pairing peer %q", device), func() error {
+		if !w.pn.Pairer.Known(device) {
+			return errors.New("peer unknown")
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	return fmt.Errorf("timed out waiting for node to record pairing peer %q", device)
+		return nil
+	})
 }
 
 func (w *nodePairWorld) checkRoomFingerprint() error {
@@ -273,18 +272,17 @@ func (w *nodePairWorld) sendValidAdoptionLog() error {
 }
 
 func (w *nodePairWorld) checkPairCompleted() error {
-	select {
-	case out := <-w.pairDone:
-		if out.err != nil {
-			return out.err
-		}
-		if out.res.Fingerprint != w.pn.Key.Fingerprint() || out.res.Path == "" {
-			return fmt.Errorf("pair result = %+v", out.res)
-		}
-		return nil
-	case <-w.ctx.Done():
-		return w.ctx.Err()
+	out, err := recvCtx(w.ctx, w.pairDone, "the pairing to complete", nil)
+	if err != nil {
+		return err
 	}
+	if out.err != nil {
+		return out.err
+	}
+	if out.res.Fingerprint != w.pn.Key.Fingerprint() || out.res.Path == "" {
+		return fmt.Errorf("pair result = %+v", out.res)
+	}
+	return nil
 }
 
 func (w *nodePairWorld) checkOwnerSurface() error {

@@ -247,6 +247,7 @@ func (w *externalWorld) observeRunnerItem(r *externalRunner, count int, item [2]
 }
 
 func (r *externalRunner) nextStart() (string, error) {
+	start := time.Now()
 	for {
 		select {
 		case run := <-r.ready:
@@ -256,7 +257,7 @@ func (r *externalRunner) nextStart() (string, error) {
 				return "", err
 			}
 		case <-r.ctx.Done():
-			return "", fmt.Errorf("external agent did not start: %w", r.ctx.Err())
+			return "", ctxEnded(r.ctx, start, "the external agent to start", nil)
 		}
 	}
 }
@@ -269,6 +270,7 @@ func (r *externalRunner) expectLook(code int, since time.Time) error {
 	if r.looks == nil {
 		return nil
 	}
+	start := time.Now()
 	for {
 		select {
 		case result := <-r.looks:
@@ -277,7 +279,7 @@ func (r *externalRunner) expectLook(code int, since time.Time) error {
 			}
 			return result.expect(code)
 		case <-r.ctx.Done():
-			return r.ctx.Err()
+			return ctxEnded(r.ctx, start, fmt.Sprintf("a look with exit code %d", code), nil)
 		}
 	}
 }
@@ -287,11 +289,12 @@ func (result externalScheduledLook) earlierEmptyLook(code int, since time.Time) 
 }
 
 func (r *externalRunner) finish(answer string) error {
+	start := time.Now()
 	select {
 	case r.answer <- answer:
 		return r.expectLook(0, time.Time{})
 	case <-r.ctx.Done():
-		return r.ctx.Err()
+		return ctxEnded(r.ctx, start, "the runner to take the answer", nil)
 	}
 }
 

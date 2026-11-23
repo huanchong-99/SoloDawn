@@ -4,6 +4,7 @@ package features
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	ossignal "os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -229,4 +231,38 @@ func readFile(t *testing.T, dir, name string) string {
 		t.Error(err)
 	}
 	return string(raw)
+}
+
+func TestRecvCtx(t *testing.T) {
+	ch := make(chan int, 1)
+	ch <- 7
+	if got, err := recvCtx(t.Context(), ch, "a number", nil); got != 7 || err != nil {
+		t.Fatalf("got %d, %v", got, err)
+	}
+	var seen trail
+	seen.see("t=rows seq=1")
+	late, cancelLate := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancelLate()
+	_, err := recvCtx(late, ch, "a number", &seen)
+	if want := regexp.MustCompile(`^timed out after \d+ms waiting for a number; saw 1: t=rows seq=1$`); err == nil || !want.MatchString(err.Error()) {
+		t.Fatalf("got %v", err)
+	}
+	gone, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := recvCtx(gone, ch, "a number", nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want the cancellation", err)
+	}
+}
+
+func TestRecvFrameListsTheFramesTaken(t *testing.T) {
+	ch := make(chan any, 2)
+	ch <- map[string]any{"t": "rows", "g": "g1"}
+	var seen trail
+	if _, err := recvFrame(ch, time.Second, &seen, briefAny); err != nil {
+		t.Fatal(err)
+	}
+	_, err := recvFrame(ch, time.Millisecond, &seen, briefAny)
+	if want := "timed out after 1ms waiting for a frame; saw 1: t=rows g=g1"; err == nil || err.Error() != want {
+		t.Fatalf("got %v, want %q", err, want)
+	}
 }

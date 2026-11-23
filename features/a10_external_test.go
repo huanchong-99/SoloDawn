@@ -301,15 +301,14 @@ func (w *externalWorld) startWait() {
 }
 
 func (w *externalWorld) finishWait(code int) error {
-	select {
-	case got := <-w.wait:
-		if code == 0 {
-			return w.readHandout(got)
-		}
-		return got.expect(code)
-	case <-w.ctx.Done():
-		return w.ctx.Err()
+	got, err := recvCtx(w.ctx, w.wait, "the blocking wait to exit", nil)
+	if err != nil {
+		return err
 	}
+	if code == 0 {
+		return w.readHandout(got)
+	}
+	return got.expect(code)
 }
 
 func (w *externalWorld) keepWaiting() error {

@@ -216,13 +216,11 @@ func (w *nodeSessionWorld) dialNode(clientKey identity.Key) (*peer.Peer, *peer.C
 		return nil, nil, err
 	}
 	w.cleanup(func() { conn.Close() })
-	select {
-	case <-w.ctx.Done():
-		return nil, nil, w.ctx.Err()
-	case <-conn.Ready():
-		go drainBrowserConn(w.ctx, conn)
-		return cp, conn, nil
+	if _, err := recvCtx(w.ctx, conn.Ready(), "the connection to be ready", nil); err != nil {
+		return nil, nil, err
 	}
+	go drainBrowserConn(w.ctx, conn)
+	return cp, conn, nil
 }
 
 func drainBrowserConn(ctx context.Context, conn *peer.Connection) {

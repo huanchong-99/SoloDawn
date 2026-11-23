@@ -284,11 +284,12 @@ func (g *seqIDGen) next() proto.ID {
 }
 
 type homeFrameClient struct {
-	ch chan []byte // single reader: nextRaw (m2Browser) or drainBrowserUntil (m3World)
+	ch  chan []byte // single reader: nextRaw (m2Browser) or drainBrowserUntil (m3World)
+	saw *trail      // the frames sent, as frameBrief names them
 }
 
 func newHomeFrameClient(buf int) homeFrameClient {
-	return homeFrameClient{ch: make(chan []byte, buf)}
+	return homeFrameClient{ch: make(chan []byte, buf), saw: new(trail)}
 }
 
 func (c homeFrameClient) Done() <-chan struct{} { return nil }
@@ -298,6 +299,7 @@ func (c homeFrameClient) Send(frame any) error {
 	if err != nil {
 		return err
 	}
+	c.saw.see(frameBrief(raw))
 	c.ch <- raw
 	return nil
 }
@@ -679,16 +681,15 @@ func waitConnPath(conn *peer.Connection, want string, limit time.Duration) error
 	if conn == nil {
 		return errors.New("connection is nil")
 	}
-	timer := time.NewTimer(limit)
-	defer timer.Stop()
-	for {
-		if conn.Path() == want {
-			return nil
-		}
-		if !waitConnPathSignal(conn, timer.C) {
-			return fmt.Errorf("got %q after %s, want %q", conn.Path(), limit, want)
+	w := newWait(limit, fmt.Sprintf("connection path %q", want), nil)
+	defer w.stop()
+	for conn.Path() != want {
+		w.saw.read(conn.Path())
+		if !waitConnPathSignal(conn, w.timer.C) {
+			return w.fail()
 		}
 	}
+	return nil
 }
 
 func waitConnPathSignal(conn *peer.Connection, timeout <-chan time.Time) bool {
@@ -717,6 +718,7 @@ type peerBrowser struct {
 
 type peerBrowserConn struct {
 	conn   *peer.Connection
+	saw    trail
 	pushes chan json.RawMessage // single reader: nextPush in scenario steps
 }
 
@@ -784,12 +786,15 @@ func (b *peerBrowser) waitOnline(ctx context.Context, devices ...string) error {
 	for _, dev := range devices {
 		remaining[dev] = true
 	}
+	var saw trail
+	start := time.Now()
 	for len(remaining) > 0 {
 		select {
 		case k := <-b.presence:
 			delete(remaining, k)
+			saw.see(k)
 		case <-ctx.Done():
-			return ctx.Err()
+			return ctxEnded(ctx, start, fmt.Sprintf("devices %v to come online", devices), &saw)
 		}
 	}
 	return nil
@@ -810,15 +815,18 @@ func (b *peerBrowser) exchangeRoom(ctx context.Context, secret identity.Secret, 
 }
 
 func (b *peerBrowser) awaitRoomPeer(ctx context.Context, secret identity.Secret, room, wantRole string, rawSelf []byte) (proto.Pair, error) {
+	var saw trail
+	start := time.Now()
 	for {
 		select {
 		case ev := <-b.roomEvents:
+			saw.see(ev.kind)
 			m, ok, err := b.handleRoomEvent(ctx, ev, secret, room, wantRole, rawSelf)
 			if err != nil || ok {
 				return m, err
 			}
 		case <-ctx.Done():
-			return proto.Pair{}, ctx.Err()
+			return proto.Pair{}, ctxEnded(ctx, start, "the pairing partner in the room", &saw)
 		}
 	}
 }
@@ -858,16 +866,18 @@ func matchPeerRoomMsg(data []byte, secret identity.Secret, room, wantRole string
 }
 
 func (b *peerBrowser) openCtl(ctx context.Context, cleanup func(func()), nodeID string) (*peerBrowserConn, error) {
-	for range 2 {
-		bc, ok, err := b.tryOpenCtl(ctx, cleanup, nodeID, 8*time.Second)
+	const tries, wait = 2, 8 * time.Second
+	var saw trail
+	for range tries {
+		bc, ok, err := b.tryOpenCtl(ctx, cleanup, nodeID, wait, &saw)
 		if err != nil || ok {
 			return bc, err
 		}
 	}
-	return nil, errors.New("timed out opening ctl connection")
+	return nil, saw.timedOut(tries*wait, "ctl connection to "+nodeID)
 }
 
-func (b *peerBrowser) tryOpenCtl(ctx context.Context, cleanup func(func()), nodeID string, wait time.Duration) (*peerBrowserConn, bool, error) {
+func (b *peerBrowser) tryOpenCtl(ctx context.Context, cleanup func(func()), nodeID string, wait time.Duration, saw *trail) (*peerBrowserConn, bool, error) {
 	conn, err := b.peer.Offer(ctx, nodeID)
 	if err != nil {
 		return nil, false, err
@@ -881,9 +891,11 @@ func (b *peerBrowser) tryOpenCtl(ctx context.Context, cleanup func(func()), node
 		go pumpBrowserPushes(ctx, conn, bc.pushes)
 		return bc, true, nil
 	case <-conn.Done():
+		saw.see("connection ended before it was ready")
 		conn.Close()
 		return nil, false, nil
 	case <-timer.C:
+		saw.see("not ready after " + wait.String())
 		conn.Close()
 		return nil, false, nil
 	case <-ctx.Done():
@@ -908,15 +920,15 @@ func pumpBrowserPushes(ctx context.Context, conn *peer.Connection, pushes chan<-
 }
 
 func (c *peerBrowserConn) nextPush(ctx context.Context) (json.RawMessage, error) {
-	select {
-	case msg, ok := <-c.pushes:
-		if !ok {
-			return nil, errors.New("ctl connection closed before push")
-		}
-		return msg, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	msg, err := recvCtx(ctx, c.pushes, "a push on ctl", &c.saw)
+	if err != nil {
+		return nil, err
 	}
+	if msg == nil {
+		return nil, errors.New("ctl connection closed before push")
+	}
+	c.saw.see(frameBrief(msg))
+	return msg, nil
 }
 
 func requestBrowserHello(ctx context.Context, conn *peer.Connection) (proto.Welcome, error) {
@@ -1256,14 +1268,12 @@ func configureHostAI(h *host.Host, from host.Owner, ids *seqIDGen, ownerID, home
 }
 
 func awaitHostGroupSynced(h *host.Host, gid string) error {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, ok := h.Rows.Get(gid, "group", gid); ok {
-			return nil
+	return waitUntil(5*time.Second, "host group sync of "+gid, func() error {
+		if _, ok := h.Rows.Get(gid, "group", gid); !ok {
+			return errors.New("no group row")
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	return errors.New("timed out waiting for host group sync")
+		return nil
+	})
 }
 
 func hasNonDormant(h *host.Host) bool {
@@ -1272,13 +1282,20 @@ func hasNonDormant(h *host.Host) bool {
 }
 
 func waitHostDormant(h *host.Host) {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if !hasNonDormant(h) {
-			return
+	_ = waitUntil(5*time.Second, "every host session dormant", func() error { return sessionsDormant(h) })
+}
+
+func sessionsDormant(h *host.Host) error {
+	var open []string
+	for _, s := range h.Sessions.All() {
+		if s.State != host.Dormant {
+			open = append(open, fmt.Sprintf("%v=%s", s.SessionKey, s.State))
 		}
-		time.Sleep(5 * time.Millisecond)
 	}
+	if len(open) > 0 {
+		return fmt.Errorf("not dormant: %s", strings.Join(open, " "))
+	}
+	return nil
 }
 
 func isSettledMemberState(state string) bool {
@@ -1317,14 +1334,14 @@ func matchingFakeCLILogs(logPath, prefix string) []string {
 }
 
 func waitFakeCLILogs(logPath, prefix string, want int, timeout time.Duration) ([]string, error) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if got := matchingFakeCLILogs(logPath, prefix); len(got) >= want {
-			return got, nil
+	var got []string
+	err := waitUntil(timeout, fmt.Sprintf("%d %q fake CLI log lines", want, prefix), func() error {
+		if got = matchingFakeCLILogs(logPath, prefix); len(got) < want {
+			return fmt.Errorf("%d: %v", len(got), readFakeCLILog(logPath))
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return nil, fmt.Errorf("timed out waiting for %d %q log lines; got %v", want, prefix, readFakeCLILog(logPath))
+		return nil
+	})
+	return got, err
 }
 
 func homeInboxCount(db *store.Store) (int, error) {
@@ -1336,17 +1353,14 @@ func homeInboxCount(db *store.Store) (int, error) {
 }
 
 func awaitHomeInboxCount(db *store.Store, want int) error {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	return waitUntil(5*time.Second, fmt.Sprintf("home inbox count %d", want), func() error {
 		n, err := homeInboxCount(db)
 		if err != nil {
-			return err
+			return abort(err)
 		}
-		if n == want {
-			return nil
+		if n != want {
+			return fmt.Errorf("count %d", n)
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	n, _ := homeInboxCount(db)
-	return fmt.Errorf("home inbox count = %d, want %d", n, want)
+		return nil
+	})
 }

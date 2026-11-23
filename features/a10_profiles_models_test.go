@@ -133,6 +133,7 @@ func (w *a10ModelsWorld) connect() error {
 }
 
 func (w *a10ModelsWorld) nextFrame(typ string) (json.RawMessage, error) {
+	start := time.Now()
 	for {
 		select {
 		case raw := <-w.ctl.ch:
@@ -146,7 +147,7 @@ func (w *a10ModelsWorld) nextFrame(typ string) (json.RawMessage, error) {
 				return raw, nil
 			}
 		case <-w.ctx.Done():
-			return nil, w.ctx.Err()
+			return nil, ctxEnded(w.ctx, start, "a "+typ+" frame", w.ctl.saw)
 		}
 	}
 }

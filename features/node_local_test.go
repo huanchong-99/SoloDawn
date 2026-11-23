@@ -43,6 +43,7 @@ func nodeLocalSteps(sc *godog.ScenarioContext, f fixtures) {
 		cluster *nodetest.Cluster
 		groups  map[string]string
 		pushes  chan proto.Rows
+		pushSaw trail
 		seq     int64
 	)
 	nextID := func() string {
@@ -111,7 +112,7 @@ func nodeLocalSteps(sc *godog.ScenarioContext, f fixtures) {
 	})
 
 	sc.Step(`^the node's host syncs group "([^"]+)" over its local link$`, func(name string) error {
-		return syncLocalGroup(cluster.Nodes[0], groups[name], pushes)
+		return syncLocalGroup(cluster.Nodes[0], groups[name], pushes, &pushSaw)
 	})
 
 	sc.Step(`^the node's host writes note "([^"]+)" to group "([^"]+)"$`, func(text, name string) error {
@@ -122,15 +123,14 @@ func nodeLocalSteps(sc *godog.ScenarioContext, f fixtures) {
 	})
 
 	sc.Step(`^the node's host receives a rows push for group "([^"]+)" containing "([^"]+)"$`, func(name, text string) error {
-		select {
-		case frame := <-pushes:
-			if frame.Group != groups[name] || len(frame.Rows) != 1 || !strings.Contains(string(frame.Rows[0]), text) {
-				return fmt.Errorf("got push %+v, want group %q containing %q", frame, groups[name], text)
-			}
-			return nil
-		case <-time.After(5 * time.Second):
-			return fmt.Errorf("timed out waiting for rows push for %q", name)
+		frame, err := recvFrame(pushes, 5*time.Second, &pushSaw, briefAny)
+		if err != nil {
+			return err
 		}
+		if frame.Group != groups[name] || len(frame.Rows) != 1 || !strings.Contains(string(frame.Rows[0]), text) {
+			return fmt.Errorf("got push %+v, want group %q containing %q", frame, groups[name], text)
+		}
+		return nil
 	})
 
 	sc.Step(`^the node's local link reports path "([^"]+)"$`, func(want string) error {
@@ -141,7 +141,7 @@ func nodeLocalSteps(sc *godog.ScenarioContext, f fixtures) {
 	})
 }
 
-func syncLocalGroup(n *nodetest.Node, gid string, pushes <-chan proto.Rows) error {
+func syncLocalGroup(n *nodetest.Node, gid string, pushes <-chan proto.Rows, saw *trail) error {
 	ans, err := n.Link.Request(context.Background(), func(id int64) any {
 		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: gid, Since: 0, StateOnly: false}
 	})
@@ -152,17 +152,16 @@ func syncLocalGroup(n *nodetest.Node, gid string, pushes <-chan proto.Rows) erro
 	if err := proto.Decode(ans, &synced); err != nil || synced.Seq != 2 {
 		return fmt.Errorf("sync(%q) = %s (%v)", gid, ans, err)
 	}
-	return awaitSyncRows(gid, pushes)
+	return awaitSyncRows(gid, pushes, saw)
 }
 
-func awaitSyncRows(gid string, pushes <-chan proto.Rows) error {
-	select {
-	case initRows := <-pushes:
-		if initRows.Group != gid || len(initRows.Rows) != 2 {
-			return fmt.Errorf("initial sync rows = %+v", initRows)
-		}
-		return nil
-	case <-time.After(5 * time.Second):
-		return fmt.Errorf("timed out waiting for initial sync rows")
+func awaitSyncRows(gid string, pushes <-chan proto.Rows, saw *trail) error {
+	initRows, err := recvFrame(pushes, 5*time.Second, saw, briefAny)
+	if err != nil {
+		return err
 	}
+	if initRows.Group != gid || len(initRows.Rows) != 2 {
+		return fmt.Errorf("initial sync rows = %+v", initRows)
+	}
+	return nil
 }

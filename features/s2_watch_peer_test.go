@@ -103,12 +103,11 @@ func (p *s2TerminalPeer) routeSignal(payload any, answer *proto.Answer) error {
 	if answer == nil {
 		return nil
 	}
-	select {
-	case env := <-p.answers:
-		return proto.Decode([]byte(env.Payload), answer)
-	case <-p.ctx.Done():
-		return p.ctx.Err()
+	env, err := recvCtx(p.ctx, p.answers, "the peer's answer", nil)
+	if err != nil {
+		return err
 	}
+	return proto.Decode([]byte(env.Payload), answer)
 }
 
 func (p *s2TerminalPeer) readSignals() error {
@@ -162,16 +161,19 @@ func (p *s2TerminalPeer) request(frame map[string]any) (json.RawMessage, error) 
 }
 
 func (p *s2TerminalPeer) nextCtl(match func(json.RawMessage) bool) (json.RawMessage, error) {
+	var saw trail
+	start := time.Now()
 	for {
 		select {
 		case raw := <-p.ctl:
 			if match(raw) {
 				return raw, nil
 			}
+			saw.see(frameBrief(raw))
 		case <-p.closed["ctl"]:
 			return nil, fmt.Errorf("ctl closed")
 		case <-p.ctx.Done():
-			return nil, p.ctx.Err()
+			return nil, ctxEnded(p.ctx, start, "a matching frame on ctl", &saw)
 		}
 	}
 }
@@ -201,6 +203,7 @@ func (p *s2TerminalPeer) command(fields map[string]any, want string) error {
 
 func (p *s2TerminalPeer) terminalBytes(want string) (string, error) {
 	var text []byte
+	start := time.Now()
 	for {
 		select {
 		case data := <-p.received:
@@ -209,7 +212,9 @@ func (p *s2TerminalPeer) terminalBytes(want string) (string, error) {
 				return string(text[:i+len(want)]), nil
 			}
 		case <-p.ctx.Done():
-			return "", fmt.Errorf("terminal waiting for %q in %q: %w", want, text, p.ctx.Err())
+			var saw trail
+			saw.see(tailOf(string(text)))
+			return "", ctxEnded(p.ctx, start, fmt.Sprintf("%q in the terminal", want), &saw)
 		}
 	}
 }

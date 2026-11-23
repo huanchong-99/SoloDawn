@@ -233,12 +233,11 @@ func (w *m8InstallWorld) completeBrowserAdopt(b *peerBrowser, roomMsg proto.Pair
 }
 
 func (w *m8InstallWorld) awaitPairCLI(done <-chan m8CLIResult, label string) error {
-	select {
-	case res := <-done:
-		return w.verifyPairCLIResult(res, label)
-	case <-w.ctx.Done():
-		return w.ctx.Err()
+	res, err := recvCtx(w.ctx, done, "the pairing CLI "+label+" to finish", nil)
+	if err != nil {
+		return err
 	}
+	return w.verifyPairCLIResult(res, label)
 }
 
 func (w *m8InstallWorld) verifyPairCLIResult(res m8CLIResult, label string) error {
@@ -530,14 +529,11 @@ func m8StopExeWindows(exe, sock string) error {
 
 func m8StopExeUnix(exe, sock string) error {
 	m8SignalUnixPIDs(m8FindUnixPIDs(exe), os.Interrupt)
-	if m8WaitUnixStopped(exe, sock, 3*time.Second) {
+	if m8WaitUnixStopped(exe, sock, 3*time.Second) == nil {
 		return nil
 	}
 	m8SignalUnixPIDs(m8FindUnixPIDs(exe), os.Kill)
-	if m8WaitUnixStopped(exe, sock, 2*time.Second) {
-		return nil
-	}
-	return fmt.Errorf("processes for %s did not stop", exe)
+	return m8WaitUnixStopped(exe, sock, 2*time.Second)
 }
 
 func m8SignalUnixPIDs(pids []int, sig os.Signal) {
@@ -548,26 +544,22 @@ func m8SignalUnixPIDs(pids []int, sig os.Signal) {
 	}
 }
 
-func m8WaitUnixStopped(exe, sock string, wait time.Duration) bool {
-	deadline := time.Now().Add(wait)
-	for time.Now().Before(deadline) {
-		if len(m8FindUnixPIDs(exe)) == 0 && !m8CanDialUnix(sock) {
-			return true
+func m8WaitUnixStopped(exe, sock string, wait time.Duration) error {
+	return waitUntilEvery(25*time.Millisecond, wait, "the processes of "+exe+" to stop", func() error {
+		if pids := m8FindUnixPIDs(exe); len(pids) != 0 || m8CanDialUnix(sock) {
+			return fmt.Errorf("pids %v, socket reachable %v", pids, m8CanDialUnix(sock))
 		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	return false
+		return nil
+	})
 }
 
 func m8WaitSocketGone(sock string, wait time.Duration) error {
-	deadline := time.Now().Add(wait)
-	for time.Now().Before(deadline) {
-		if !m8CanDialUnix(sock) {
-			return nil
+	return waitUntilEvery(25*time.Millisecond, wait, "the socket "+sock+" to go", func() error {
+		if m8CanDialUnix(sock) {
+			return errors.New("socket reachable")
 		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	return fmt.Errorf("socket %s stayed reachable", sock)
+		return nil
+	})
 }
 
 func m8CanDialUnix(sock string) bool {

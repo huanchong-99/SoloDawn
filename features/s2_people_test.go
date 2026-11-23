@@ -5,6 +5,7 @@ package features
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os/exec"
@@ -393,9 +394,10 @@ func openJoiningCtl(ctx context.Context, cleanup func(func()), b *peerBrowser, l
 }
 
 func openS2PeopleCtl(ctx context.Context, cleanup func(func()), b *peerBrowser, homeID string) (*peerBrowserConn, error) {
-	bc, ok, err := b.tryOpenCtl(ctx, cleanup, homeID, s2ScenarioTimeout)
+	var saw trail
+	bc, ok, err := b.tryOpenCtl(ctx, cleanup, homeID, s2ScenarioTimeout, &saw)
 	if err == nil && !ok {
-		err = fmt.Errorf("ctl to %s closed before opening", homeID)
+		err = saw.timedOut(s2ScenarioTimeout, "ctl to "+homeID)
 	}
 	return bc, err
 }
@@ -1037,22 +1039,16 @@ func (w *s2PeopleWorld) waitQBrowserClosed(deadline time.Time) error {
 func (w *s2PeopleWorld) waitP1DroppedQDevices(deadline time.Time) error {
 	ctx, cancel := context.WithDeadline(w.cast.Ctx, deadline)
 	defer cancel()
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
+	return waitUntilCtx(ctx, 100*time.Millisecond, "P1 to drop the Q connection", func() error {
 		connected, err := w.qConnectedToP1(ctx)
 		if err != nil {
-			return err
+			return abort(err)
 		}
-		if !connected {
-			return nil
+		if connected {
+			return errors.New("P1 lists a Q connection")
 		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("P1 still lists a Q connection past 1 second")
-		case <-ticker.C:
-		}
-	}
+		return nil
+	})
 }
 
 func (w *s2PeopleWorld) qConnectedToP1(ctx context.Context) (bool, error) {

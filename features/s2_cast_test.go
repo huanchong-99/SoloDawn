@@ -1047,23 +1047,20 @@ func verifyS2SecondBrowser(t *testing.T, cast *s2Cast) {
 }
 
 func waitS2NodeAcceptsBrowser(cast *s2Cast, b *peerBrowser, nodeID string) error {
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-	for {
+	return waitUntilEvery(500*time.Millisecond, s2ScenarioTimeout, "the node to welcome the second browser", func() error {
 		ok, err := tryS2OwnerWelcome(cast, b, nodeID)
-		if err != nil || ok {
-			return err
+		if err != nil {
+			return abort(err)
 		}
-		select {
-		case <-cast.Ctx.Done():
-			return cast.Ctx.Err()
-		case <-ticker.C:
+		if !ok {
+			return errors.New("no welcome")
 		}
-	}
+		return nil
+	})
 }
 
 func tryS2OwnerWelcome(cast *s2Cast, b *peerBrowser, nodeID string) (bool, error) {
-	bc, ok, err := b.tryOpenCtl(cast.Ctx, cast.addUndo, nodeID, s2ScenarioTimeout)
+	bc, ok, err := b.tryOpenCtl(cast.Ctx, cast.addUndo, nodeID, s2ScenarioTimeout, new(trail))
 	if err != nil || !ok {
 		return false, err
 	}

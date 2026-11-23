@@ -110,12 +110,7 @@ func (w *m1World) connectAndHelloBrowser(b *peerBrowser) error {
 }
 
 func (w *m1World) acceptInbound() (*peer.Connection, error) {
-	select {
-	case <-w.ctx.Done():
-		return nil, w.ctx.Err()
-	case c := <-w.accepted:
-		return c, nil
-	}
+	return recvCtx(w.ctx, w.accepted, "an inbound connection", nil)
 }
 
 func m1DrainInitialDevlog(ctx context.Context, bc *peerBrowserConn) error {
@@ -157,7 +152,7 @@ func (w *m1World) checkSecondBrowserGroupsPush(wantName string) error {
 	for {
 		raw, err := w.conns[1].nextPush(readCtx)
 		if err != nil {
-			return fmt.Errorf("waiting for groups push within 1s: %w", err)
+			return err
 		}
 		var push proto.Groups
 		if proto.Decode(raw, &push) == nil && push.Type == "groups" {
@@ -208,7 +203,7 @@ func (w *m1World) checkSecondBrowserMessageRow() error {
 	for {
 		raw, err := w.conns[1].nextPush(readCtx)
 		if err != nil {
-			return fmt.Errorf("waiting for message row within 1s: %w", err)
+			return err
 		}
 		if m1HasMessageRow(raw, wantID) {
 			return nil
