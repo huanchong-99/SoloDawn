@@ -260,7 +260,7 @@ func (n *nodeRuntime) wireServices() {
 		OnAdopt: n.onAdopt, Spawn: n.spawn,
 	})
 	NewSurface(SurfaceConfig{
-		ID: n.key.ID(), Version: Version, Store: n.db,
+		ID: n.key.ID(), Version: Version, Exe: n.exe, Store: n.db,
 		Sessions: n.sessions, Host: n.host, Name: nameFn, Agents: n.host.Agents,
 	})
 	n.pairer.bind(n.sessions)
@@ -652,25 +652,42 @@ func (n *nodeRuntime) handleLocal(conn net.Conn) {
 		n.host.ServeMCP(n.ctx, open.MCP, r, conn)
 		return
 	}
-	lines, cmdErr := n.runLocalCmd(open.Cmd, line)
+	ctx, closed := context.WithCancel(n.ctx)
+	read := make(chan struct{})
+	go func() {
+		r.ReadByte()
+		closed()
+		close(read)
+	}()
+	lines, cmdErr := n.runLocalCmd(ctx, open.Cmd, line)
 	writeLocalReplies(conn, lines, cmdErr)
+	conn.Close()
+	<-read
 }
 
-func (n *nodeRuntime) runLocalCmd(cmd string, line []byte) ([]string, error) {
-	switch cmd {
-	case "status":
-		return n.cmdStatus(), nil
-	case "pair":
-		return n.cmdPair(line)
-	case "pair-browser":
-		return n.cmdPairBrowser()
-	case "open":
-		return n.cmdOpen()
-	case "group.export", "group.import":
-		return nil, n.cmdGroup(line)
-	default:
+type localCmd func(n *nodeRuntime, ctx context.Context, line []byte) ([]string, error)
+
+var localCmds = map[string]localCmd{
+	"wait":         (*nodeRuntime).cmdWait,
+	"done":         func(n *nodeRuntime, _ context.Context, line []byte) ([]string, error) { return nil, n.cmdDone(line) },
+	"status":       func(n *nodeRuntime, _ context.Context, _ []byte) ([]string, error) { return n.cmdStatus(), nil },
+	"pair":         func(n *nodeRuntime, _ context.Context, line []byte) ([]string, error) { return n.cmdPair(line) },
+	"pair-browser": func(n *nodeRuntime, _ context.Context, _ []byte) ([]string, error) { return n.cmdPairBrowser() },
+	"open":         func(n *nodeRuntime, _ context.Context, _ []byte) ([]string, error) { return n.cmdOpen() },
+	"group.export": groupLocalCmd,
+	"group.import": groupLocalCmd,
+}
+
+func groupLocalCmd(n *nodeRuntime, _ context.Context, line []byte) ([]string, error) {
+	return nil, n.cmdGroup(line)
+}
+
+func (n *nodeRuntime) runLocalCmd(ctx context.Context, cmd string, line []byte) ([]string, error) {
+	run := localCmds[cmd]
+	if run == nil {
 		return nil, fmt.Errorf("unknown command: %s", cmd)
 	}
+	return run(n, ctx, line)
 }
 
 func (n *nodeRuntime) cmdStatus() []string {

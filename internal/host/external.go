@@ -37,6 +37,8 @@ type extPart struct {
 	open  map[aiGroupKey]int
 	until map[aiGroupKey]time.Time
 	away  map[aiGroupKey]*time.Timer
+	usage map[aiGroupKey]proto.Usage
+	wake  map[aiGroupKey]chan struct{}
 }
 
 func extOf(h *Host) *extPart {
@@ -45,6 +47,7 @@ func extOf(h *Host) *extPart {
 	if ep.runs == nil {
 		ep.runs, ep.open = map[aiGroupKey]*extRun{}, map[aiGroupKey]int{}
 		ep.until, ep.away = map[aiGroupKey]time.Time{}, map[aiGroupKey]*time.Timer{}
+		ep.usage, ep.wake = map[aiGroupKey]proto.Usage{}, map[aiGroupKey]chan struct{}{}
 	}
 	ep.mu.Unlock()
 	return ep
@@ -75,10 +78,106 @@ func externalHostAgent() proto.HostAgent {
 func (h *Host) ExternalMember(member string) (group string, ok bool) {
 	for _, s := range h.Sessions.All() {
 		if s.Member == member && s.Agent == externalAgent {
-			return s.Group, true
+			ai, local, _ := lookupLocalAI(h, s.Group, member)
+			return s.Group, local && ai.agent == externalAgent
 		}
 	}
 	return "", false
+}
+
+// ExternalWait hands out the next item of the external AI member, waiting at
+// most timeout for one, or until ctx ends; nil waits without a limit. The
+// member is present while it waits (contracts/step-3/external.md 3.1).
+func (h *Host) ExternalWait(ctx context.Context, member string, timeout *time.Duration) (proto.Handout, bool, error) {
+	group, ok := h.ExternalMember(member)
+	if !ok {
+		return proto.Handout{}, false, errNotExternal
+	}
+	defer h.ExternalPresent(group, member)()
+	expired := extExpiry(timeout)
+	for {
+		woken := extWaker(h, aiGroupKey{group: group, member: member})
+		if ho, ok, err := h.ExternalTake(group, member); ok || err != nil {
+			return ho, ok, err
+		}
+		if again, err := extSlept(ctx, h, member, woken, expired); !again {
+			return proto.Handout{}, false, err
+		}
+	}
+}
+
+func extExpiry(timeout *time.Duration) <-chan time.Time {
+	if timeout == nil {
+		return nil
+	}
+	return time.After(*timeout)
+}
+
+// extSlept waits for a wake, the timeout or the end of ctx, and reports
+// whether to look again.
+func extSlept(ctx context.Context, h *Host, member string, woken <-chan struct{}, expired <-chan time.Time) (bool, error) {
+	select {
+	case <-woken:
+		if _, ok := h.ExternalMember(member); !ok {
+			return false, errNotExternal
+		}
+		return true, nil
+	case <-expired:
+		return false, nil
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+}
+
+// ExternalWaitLines is ExternalWait for the wait command: the hand-out as one
+// JSON line, or no line.
+func (h *Host) ExternalWaitLines(ctx context.Context, member string, timeout *time.Duration) ([]string, error) {
+	ho, ok, err := h.ExternalWait(ctx, member, timeout)
+	if !ok {
+		return nil, err
+	}
+	return []string{marshalWire(ho)}, nil
+}
+
+// ExternalEnd ends the external AI member's run with that number, failed when
+// failed is not empty; a run that is not open changes nothing.
+func (h *Host) ExternalEnd(member string, run int64, failed string) error {
+	group, ok := h.ExternalMember(member)
+	if !ok {
+		return errNotExternal
+	}
+	defer h.ExternalPresent(group, member)()
+	h.ExternalDone(group, member, run, failed)
+	return nil
+}
+
+var errNotExternal = &Error{Code: "not_found", Message: "the id names no external AI of this node"}
+
+func extWaker(h *Host, key aiGroupKey) <-chan struct{} {
+	ep := extOf(h)
+	ep.mu.Lock()
+	defer ep.mu.Unlock()
+	if ep.wake[key] == nil {
+		ep.wake[key] = make(chan struct{})
+	}
+	return ep.wake[key]
+}
+
+func extWake(h *Host, key aiGroupKey) {
+	ep := extOf(h)
+	ep.mu.Lock()
+	defer ep.mu.Unlock()
+	if ch := ep.wake[key]; ch != nil {
+		close(ch)
+		delete(ep.wake, key)
+	}
+}
+
+func extUsage(h *Host, key aiGroupKey) proto.Usage {
+	ep := extOf(h)
+	ep.mu.Lock()
+	defer ep.mu.Unlock()
+	return ep.usage[key]
 }
 
 // ExternalPresent notes a command or MCP connection of an external AI as

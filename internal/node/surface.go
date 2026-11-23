@@ -16,14 +16,14 @@ type (
 	// SurfaceConfig configures the node-level host surface on Sessions.
 	// Store, Sessions, Host and Agents are required.
 	SurfaceConfig struct {
-		ID, OS, Version string
-		Store           *store.Store
-		Sessions        *Sessions
-		Host            *host.Host
-		Name            func() string
-		Agents          func(context.Context, bool) ([]proto.HostAgent, error)
-		Update          func() *proto.Update
-		Relay           func() *proto.RelayUse
+		ID, OS, Version, Exe string
+		Store                *store.Store
+		Sessions             *Sessions
+		Host                 *host.Host
+		Name                 func() string
+		Agents               func(context.Context, bool) ([]proto.HostAgent, error)
+		Update               func() *proto.Update
+		Relay                func() *proto.RelayUse
 	}
 	// Surface serves host.info on a Sessions hub.
 	Surface struct {
@@ -116,7 +116,7 @@ func (sf *Surface) hostState(ctx context.Context, refresh bool) (proto.HostState
 		agents[i] = a
 	}
 	return proto.HostState{
-		Device: sf.cfg.ID, Name: name, OS: sf.cfg.OS, Version: sf.cfg.Version,
+		Device: sf.cfg.ID, Name: name, OS: sf.cfg.OS, Version: sf.cfg.Version, Exe: sf.cfg.Exe,
 		Open: srfCountOpen(sessions), MaxOpen: db.maxOpen, Offline: db.offline,
 		Update: sf.cfg.Update(), Homes: db.homes, Relay: sf.cfg.Relay(),
 		Agents:   agents,

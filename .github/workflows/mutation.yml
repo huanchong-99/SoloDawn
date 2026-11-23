@@ -1,0 +1,204 @@
+name: Mutation
+
+# The final mutation gate (`nightly` in .project-standard/gates.toml) run in parallel on GitHub's runners
+# instead of one machine overnight. It starts on a push to a branch named mutation-run/<n>: push the commit
+# to test there. A shard is one gremlins run over one package, or over a range of the files of a big one.
+# Shards took 2 to 85 minutes (host/run.go, one file whose mutants often time out, is the longest); with the
+# 20 or so runners GitHub gives at once, a full run is estimated at 2.5 hours.
+on:
+  push:
+    branches: ['mutation-run/**']
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: go ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      # Largest first, so they start first. `own` is a regex on the file path relative to the package
+      # (default: every file); the shard excludes the package's other files. The summary job checks that
+      # each product file of the module belongs to exactly one shard.
+      matrix:
+        include:
+          - { name: host-run, pkg: internal/host, own: '^run\.go' }
+          - { name: host-deliver, pkg: internal/host, own: '^d' }
+          - { name: node-node, pkg: internal/node, own: '^node\.go' }
+          - { name: host-a-checks, pkg: internal/host, own: '^(a|ca|checks)' }
+          - { name: host-f-l, pkg: internal/host, own: '^(f|j|l)' }
+          - { name: host-turn, pkg: internal/host, own: '^turn\.go' }
+          - { name: host-s-takeover, pkg: internal/host, own: '^(s|ta|ti|tools_[abk])' }
+          - { name: host-tools-talk-task, pkg: internal/host, own: '^tools_ta' }
+          - { name: host-models-opencode, pkg: internal/host, own: '^(mo|o)' }
+          - { name: host-mcp-merge, pkg: internal/host, own: '^(mc|me)' }
+          - { name: host-pty-qwen, pkg: internal/host, own: '^[pq]' }
+          - { name: host-claude-codex, pkg: internal/host, own: '^c[lo]' }
+          - { name: host-tools-sec-turn-info, pkg: internal/host, own: '^(tools_s|turn_)' }
+          - { name: host-h-w, pkg: internal/host, own: '^(h|w)' }
+          - { name: home-cmd-task-ev, pkg: internal/home, own: '^(cmd_t|e)' }
+          - { name: home-fetch-kb, pkg: internal/home, own: '^(f|h|i|k)' }
+          - { name: home-machine-profile, pkg: internal/home, own: '^[m-p]' }
+          - { name: home-run-rounds, pkg: internal/home, own: '^r' }
+          - { name: home-cmd-confirm-hostev, pkg: internal/home, own: '^cmd_(co|g|h)' }
+          - { name: home-cmd-member-review, pkg: internal/home, own: '^cmd_[m-r]' }
+          - { name: home-check-card, pkg: internal/home, own: '^(check|cmd_b|cmd_ca)' }
+          - { name: home-sync-webpush, pkg: internal/home, own: '^[s-w]' }
+          - { name: node-pair, pkg: internal/node, own: '^pair' }
+          - { name: node-service-session, pkg: internal/node, own: '^(r|sc|se)' }
+          - { name: node-socket-update, pkg: internal/node, own: '^(so|su|t|u|v)' }
+          - { name: node-admit-local, pkg: internal/node, own: '^[a-l]' }
+          - { name: node-misc, pkg: internal/node, own: '^(ne|nodetest|proc)' }
+          - { name: rendezvous-limits-room, pkg: internal/rendezvous, own: '^(l|q|r)' }
+          - { name: rendezvous-server-tls, pkg: internal/rendezvous, own: '^(s|t)' }
+          - { name: peer-ctl, pkg: internal/peer, own: '^ctl' }
+          - { name: peer-candidates-path, pkg: internal/peer, own: '^(ca|p|r)' }
+          - { name: peer-signal-stream, pkg: internal/peer, own: '^[su]' }
+          - { name: store, pkg: internal/store }
+          - { name: identity, pkg: internal/identity }
+          - { name: proto, pkg: internal/proto }
+          - { name: cmd, pkg: cmd/solodawn }
+          - { name: netsim, pkg: features/netsim }
+    env:
+      PKG: ${{ matrix.pkg }}
+      OWN: ${{ matrix.own || '.' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+      - run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
+      # gremlins matches --exclude-files against the path relative to the directory it is given, so a
+      # shard names the files it does not own one by one. The gate's internal/host/fakecli/ is fakecli/ here.
+      - name: Files of this shard
+        run: |
+          git ls-files "$PKG/*.go" | grep -v '_test\.go$' | sed "s#^$PKG/##" | grep -v '^fakecli/' > package.txt
+          grep -E "$OWN" package.txt > own.txt || true
+          grep -vE "$OWN" package.txt | sed 's/[.]/\\./g; s/.*/^&$/' > other.txt || true
+          sed "s#^#$PKG/#" own.txt > files.txt
+          echo "$(wc -l < files.txt) of $(wc -l < package.txt) files of $PKG:"
+          cat files.txt
+      - name: Mutate
+        run: |
+          set +e
+          exclude=(--exclude-files '(^|/)fakecli/')
+          while read -r f; do exclude+=(--exclude-files "$f"); done < other.txt
+          # --workers 8 is four parallel mutants (gremlins halves it in integration mode): a mutant that
+          # hangs waits ten times the baseline run, and most of a shard's time goes to those.
+          # A flaky test that fails the baseline run stops gremlins before any mutant runs: try again.
+          for attempt in 1 2 3; do
+            echo "attempt $attempt"
+            GOFLAGS=-count=1 nice -n 10 gremlins unleash -i --timeout-coefficient 10 --workers 8 "${exclude[@]}" "./$PKG" 2>&1 | tee gremlins.log
+            s=${PIPESTATUS[0]}
+            grep -q 'failed to gather coverage' gremlins.log || break
+          done
+          echo "gremlins exit status $s"
+          # gremlins v0.6.0 exits 0 at 0% efficacy: the verdict is its exit status and the mutant lines.
+          grep -E '^ *(LIVED|NOT COVERED) ' gremlins.log | sed 's/^/::error::/'
+          [ $s -eq 0 ] && ! grep -Eq '^ *(LIVED|NOT COVERED) ' gremlins.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: go-${{ matrix.name }}
+          path: |
+            gremlins.log
+            files.txt
+
+  web:
+    name: web ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      # proto.ts takes about as long as all the other files together. `skip` is the other shard's `only`.
+      matrix:
+        include:
+          - { name: proto, only: 'src/lib/proto.ts' }
+          - { name: rest, skip: 'src/lib/proto.ts' }
+    env:
+      ONLY: ${{ matrix.only }}
+      SKIP: ${{ matrix.skip }}
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps --only-shell chromium
+      # The files are those of web/stryker.config.json, its exclusions included. thresholds.break = 100
+      # makes Stryker exit non-zero below a perfect score.
+      - name: Mutate
+        run: |
+          set +e
+          mutate=$(jq -r '
+            if $ENV.ONLY != "" then [$ENV.ONLY] + [.mutate[] | select(startswith("!"))]
+            else .mutate + [$ENV.SKIP | "!" + .] end | join(",")' stryker.config.json)
+          echo "--mutate $mutate"
+          pnpm exec stryker run --mutate "$mutate" 2>&1 | tee stryker.log
+          exit ${PIPESTATUS[0]}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: web-${{ matrix.name }}
+          path: web/stryker.log
+
+  summary:
+    needs: [go, web]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: results
+      - name: Summary
+        run: |
+          {
+            echo '| shard | killed | lived | not covered | timed out | took |'
+            echo '| --- | ---: | ---: | ---: | ---: | --- |'
+            for log in results/go-*/gremlins.log; do
+              awk -v n="$(basename "$(dirname "$log")")" '
+                /^Mutation testing completed in / { took = substr($0, 31) }
+                /^Killed: /     { gsub(/[,:]/, ""); k = $2; l = $4; c = $7 }
+                /^Timed out: /  { gsub(/[,:]/, ""); t = $3 }
+                END { printf "| %s | %s | %s | %s | %s | %s |\n", n, k, l, c, t, took }' "$log"
+            done
+            echo
+            echo '| web shard | score | killed | timed out | survived | no coverage |'
+            echo '| --- | ---: | ---: | ---: | ---: | ---: |'
+            for log in results/web-*/stryker.log; do
+              awk -F'|' -v n="$(basename "$(dirname "$log")")" '
+                /^All files/ { printf "| %s | %s | %s | %s | %s | %s |\n", n, $2, $4, $5, $6, $7 }' "$log"
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Mutants that lived or are not covered
+        run: |
+          { echo '```'; grep -HE '^ *(LIVED|NOT COVERED) ' results/go-*/gremlins.log | sed 's#results/go-\([^/]*\)/gremlins.log:#\1 #' || true; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+      # Every product file of the module in exactly one shard.
+      - name: Files in exactly one shard
+        run: |
+          cat results/go-*/files.txt | sort > shards.txt
+          git ls-files '*.go' | grep -v '_test\.go$' | grep -v '/fakecli/' | grep -vE '^[^/]+\.go$' | sort > module.txt
+          sort -u shards.txt | diff - module.txt && [ -z "$(uniq -d shards.txt)" ]
+      - name: Shards passed
+        run: |
+          echo '${{ toJSON(needs.*.result) }}'
+          [ "${{ needs.go.result }}" = success ] && [ "${{ needs.web.result }}" = success ]

@@ -293,11 +293,13 @@ The rules are in [mcp-tools.md](../../planning/contracts/mcp-tools.md) and [loca
 
 # External AIs
 
-`external.go` implements the host side of the external AI ([external.md](../../planning/contracts/step-3/external.md) sections 2 to 4, 6, 9 and 10).
+`external.go` and `tools_external.go` implement the host side of the external AI ([external.md](../../planning/contracts/step-3/external.md) sections 2 to 10).
 
 - **Joining.** `host.join` with `agent` `external` needs `account` (`personal`, `team` or `api_key`), takes an optional `tool`, refuses `secretary` `true` and reads no `agent.set`. It sends `member add_ai` with `cli` `external` and that `tool`, creates an ordinary `GroupSession` with `Agent` `external` and no `CLISession`, then reports the state. `host.leave` and `member remove` are unchanged. `Agents` ends with one entry `external`; the node fills its `groups`.
 - **Runs.** Delivery never starts a turn for an external member. `ExternalTake` hands out the next batch: it reuses delivery's selection, routing, folder, `delivered` audit and acknowledgement, moves the session row to `Working` and opens the member's one run, numbered by the batch's first item. `context` is the session instructions, `instructions/external.md` and the replaced-session context. `ExternalDone` with the open run moves the row to `Waiting`; with `failed` it reports `turn_interrupted` `crash` with that text, which fails a task session. After `limits.turn_minutes` the run ends the same way with `timeout`, and the process is not stopped. A `done` for any other run changes nothing. A restart reports `crash` through `ReportSaved`.
 - **Presence and state.** `ExternalPresent` marks a command or MCP connection open until its `leave`; the member stays present for 180 s after the last one. The reported state is `working` while a run is open, then `offline` (absent or all AIs offline), `paused`, and otherwise `waiting`.
+- **Member id.** `ServeMCP` and `RunShim --member <id>` accept the member id of an external AI on this node in place of a session token; an id that names none closes the connection. The caller is the session of the open run, or the group session without one, at level 3, and the connection counts as present. `ExternalWait` serves both `solodawn wait` and `next_item`: it takes a hand-out, or waits until delivery or removal wakes it, the timeout passes or the caller goes; `ExternalEnd` serves `solodawn done` and `done`, and a run that is not open changes nothing.
+- **Tools.** An external connection lists every tool of a group, task or review session plus `next_item`, `done`, `report_usage` and `approve`; a tool the open run's kind does not allow answers `conflict` naming the kinds it needs. `report_usage` replaces the member's usage, which `memberUsage` reports in `member status` and the roster.
 
 # Talk and group state tools
 

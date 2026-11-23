@@ -37,6 +37,7 @@ type extScenario struct {
 func hostExternalSteps(sc *godog.ScenarioContext, f fixtures) {
 	cleanup := afterScenario(sc)
 	s := &extScenario{}
+	hostExternalWaitSteps(sc, f)
 	sc.Step(`^a host on disk whose remote home "([^"]+)" hosts the project group "([^"]+)"$`, func(remote, group string) error {
 		if err := s.join.initHostOnDisk("claude", "codex", remote, cleanup); err != nil {
 			return err
