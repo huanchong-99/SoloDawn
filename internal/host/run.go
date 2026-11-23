@@ -456,7 +456,7 @@ func launchSessionProcess(h *Host, rt *runtimePart, s Session, cfg launchConfig,
 		RepoConfig: s.Kind != GroupSession, ToolTimeout: groupToolTimeout(h, s.Group),
 	}
 	procCtx, procCancel := context.WithCancel(context.Background())
-	proc, err := driver.Start(procCtx, launch)
+	proc, err := driver.Start(procCtx, memberLaunch(h, s, launch))
 	if err != nil {
 		procCancel()
 		h.Sessions.Forget(token)
