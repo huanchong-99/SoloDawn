@@ -266,3 +266,21 @@ func TestRecvFrameListsTheFramesTaken(t *testing.T) {
 		t.Fatalf("got %v, want %q", err, want)
 	}
 }
+
+func TestWaitUntilCtx(t *testing.T) {
+	still := func() error { return errors.New("n") }
+	if err := waitUntilCtx(t.Context(), time.Millisecond, "x", func() error { return nil }); err != nil {
+		t.Fatalf("a passing check failed the wait: %v", err)
+	}
+	gone, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := waitUntilCtx(gone, time.Millisecond, "x", still); !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want the cancellation", err)
+	}
+	short, cancelShort := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancelShort()
+	want := regexp.MustCompile(`^timed out after [\d.]+ms waiting for x; saw 1: n$`)
+	if err := waitUntilCtx(short, time.Millisecond, "x", still); err == nil || !want.MatchString(err.Error()) {
+		t.Fatalf("got %v", err)
+	}
+}
