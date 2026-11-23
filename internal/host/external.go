@@ -31,14 +31,16 @@ type extRun struct {
 }
 
 type extPart struct {
-	take  sync.Mutex
-	mu    sync.Mutex
-	runs  map[aiGroupKey]*extRun
-	open  map[aiGroupKey]int
-	until map[aiGroupKey]time.Time
-	away  map[aiGroupKey]*time.Timer
-	usage map[aiGroupKey]proto.Usage
-	wake  map[aiGroupKey]chan struct{}
+	take    sync.Mutex
+	mu      sync.Mutex
+	runs    map[aiGroupKey]*extRun
+	open    map[aiGroupKey]int
+	until   map[aiGroupKey]time.Time
+	away    map[aiGroupKey]*time.Timer
+	usage   map[aiGroupKey]proto.Usage
+	wake    map[aiGroupKey]chan struct{}
+	settled bool
+	wg      sync.WaitGroup
 }
 
 func extOf(h *Host) *extPart {
@@ -56,13 +58,26 @@ func extOf(h *Host) *extPart {
 func settleExternal(h *Host) {
 	ep := extOf(h)
 	ep.mu.Lock()
-	defer ep.mu.Unlock()
+	ep.settled = true
 	for _, r := range ep.runs {
 		r.timer.Stop()
 	}
 	for _, t := range ep.away {
 		t.Stop()
 	}
+	ep.mu.Unlock()
+	ep.wg.Wait()
+}
+
+// after runs f on wg once d has passed, unless the part has settled.
+func (ep *extPart) after(d time.Duration, f func()) *time.Timer {
+	return time.AfterFunc(d, func() {
+		ep.mu.Lock()
+		defer ep.mu.Unlock()
+		if !ep.settled {
+			ep.wg.Go(f)
+		}
+	})
 }
 
 func externalHostAgent() proto.HostAgent {
@@ -206,7 +221,9 @@ func extLeave(h *Host, ep *extPart, key aiGroupKey) {
 		t.Stop()
 	}
 	ep.until[key] = time.Now().Add(externalPresence)
-	ep.away[key] = time.AfterFunc(externalPresence, func() { extReport(h, key) })
+	if !ep.settled {
+		ep.away[key] = ep.after(externalPresence, func() { extReport(h, key) })
+	}
 }
 
 func (ep *extPart) presentLocked(key aiGroupKey) bool {
@@ -295,9 +312,11 @@ func extHandOut(h *Host, ep *extPart, d *delivery, key aiGroupKey, s Session, ba
 func extOpenRun(h *Host, ep *extPart, key aiGroupKey, s Session, run int64) {
 	h.Sessions.Move(s.SessionKey, s.State, Working)
 	ep.mu.Lock()
-	ep.runs[key] = &extRun{id: run, key: s.SessionKey, timer: time.AfterFunc(groupToolTimeout(h, s.Group), func() {
-		extEnd(h, key, run, "timeout", "")
-	})}
+	if !ep.settled {
+		ep.runs[key] = &extRun{id: run, key: s.SessionKey, timer: ep.after(groupToolTimeout(h, s.Group), func() {
+			extEnd(h, key, run, "timeout", "")
+		})}
+	}
 	ep.mu.Unlock()
 	extReport(h, key)
 }
