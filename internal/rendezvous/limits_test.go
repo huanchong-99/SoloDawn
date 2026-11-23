@@ -59,7 +59,7 @@ func waitAllocations(t *testing.T, s *turn.Server, n int) {
 	t.Helper()
 	for deadline := time.Now().Add(2 * time.Second); s.AllocationCount() != n; time.Sleep(time.Millisecond) {
 		if time.Now().After(deadline) {
-			t.Fatalf("%d allocations; want %d", s.AllocationCount(), n)
+			t.Fatalf("timed out after 2s waiting for %d allocations; saw 1: %d allocations", n, s.AllocationCount())
 		}
 	}
 }
@@ -335,7 +335,7 @@ func TestSendOutsideTheLedgerLock(t *testing.T) {
 			t.Fatal(q)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("the quota is locked during a send")
+		t.Fatal("timed out after 1s waiting for the quota during a send; saw 0: ")
 	}
 	close(conn.release)
 }

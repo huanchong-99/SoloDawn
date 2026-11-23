@@ -88,7 +88,7 @@ func (f *tskScriptHome) waitAsked(t *testing.T, want int) []any {
 		select {
 		case <-f.askedCh:
 		case <-time.After(10 * time.Second):
-			t.Fatalf("timed out waiting for %d requests", want)
+			t.Fatal(timedOut(10*time.Second, fmt.Sprintf("%d requests", want), []string{fmt.Sprint(len(f.snapshotAsked()))}))
 		}
 	}
 }

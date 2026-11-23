@@ -6,6 +6,7 @@ import (
 	ed25519 "crypto/ed25519"
 	b64 "encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"reflect"
 	"slices"
@@ -60,20 +61,19 @@ func recvApproveChan[T any](t *testing.T, ch <-chan T, label string) T {
 		return val
 	case <-timer.C:
 		var zero T
-		t.Fatalf("timed out waiting for %s", label)
+		t.Fatal(timedOut(5*time.Second, label, nil))
 		return zero
 	}
 }
 
 func waitCallsZero(t *testing.T, h *Host, key SessionKey) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for h.Sessions.Calls(key) != 0 {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for Calls(%v) == 0", key)
+	poll(t, 5*time.Second, fmt.Sprintf("Calls(%v) == 0", key), func() string {
+		if n := h.Sessions.Calls(key); n != 0 {
+			return fmt.Sprintf("Calls = %d", n)
 		}
-		time.Sleep(time.Millisecond)
-	}
+		return ""
+	})
 }
 
 func approveTestClock() func() time.Time {
