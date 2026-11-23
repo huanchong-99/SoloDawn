@@ -311,6 +311,12 @@ func (p *hrCLIProc) Turn(text string) error {
 
 func hostRunSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
 	cleanup := afterScenario(sc)
+	registerIdleAndMaxOpenSteps(sc, suiteT, cleanup)
+	registerCLICrashAndSwitchSteps(sc, suiteT, cleanup)
+	registerReplaceSteps(sc, suiteT, cleanup)
+}
+
+func installHRDefaultHooks(cleanup func(func())) {
 	origDrivers := maps.Clone(host.Drivers)
 	origCompose := host.Compose
 	origDeliver := host.Deliver
@@ -321,13 +327,6 @@ func hostRunSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
 		host.Deliver = origDeliver
 		host.Instructions = origInstructions
 	})
-
-	registerIdleAndMaxOpenSteps(sc, suiteT)
-	registerCLICrashAndSwitchSteps(sc, suiteT, cleanup)
-	registerReplaceSteps(sc, suiteT, cleanup)
-}
-
-func installHRDefaultHooks() {
 	host.Deliver = func(*host.Host, string, string) {}
 	host.Instructions = func(host.Session) string { return "" }
 	host.Compose = func(_ *host.Host, s host.Session, kind host.TurnKind, _ []json.RawMessage) (string, host.Turn, error) {
@@ -336,7 +335,7 @@ func installHRDefaultHooks() {
 }
 
 func newTestHost(suiteT *testing.T, cleanup func(func()), maxOpen, idleMin int) (*host.Host, *hrHome, context.Context, error) {
-	installHRDefaultHooks()
+	installHRDefaultHooks(cleanup)
 	procCtx, cancelProcs := context.WithCancel(context.Background())
 	dbPath := filepath.Join(suiteT.TempDir(), "node.db")
 	db, err := store.Open(dbPath)
@@ -379,7 +378,7 @@ func newTestHost(suiteT *testing.T, cleanup func(func()), maxOpen, idleMin int) 
 	return h, rh, procCtx, nil
 }
 
-func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
+func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T, cleanup func(func())) {
 	// Scenario 1 (A3.4): honest steps inside synctest.Test.
 	var idleMinutes int
 	var idleStateBeforeSecond host.State
@@ -396,7 +395,7 @@ func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
 		var stepErr error
 		baseDir := suiteT.TempDir()
 		synctest.Test(suiteT, func(t *testing.T) {
-			installHRDefaultHooks()
+			installHRDefaultHooks(cleanup)
 			procCtx, cancelProcs := context.WithCancel(context.Background())
 			db, err := store.Open(filepath.Join(baseDir, "node.db"))
 			if err != nil {
@@ -484,7 +483,7 @@ func registerIdleAndMaxOpenSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
 		var stepErr error
 		baseDir := suiteT.TempDir()
 		synctest.Test(suiteT, func(t *testing.T) {
-			installHRDefaultHooks()
+			installHRDefaultHooks(cleanup)
 			procCtx, cancelProcs := context.WithCancel(context.Background())
 			db, err := store.Open(filepath.Join(baseDir, "node.db"))
 			if err != nil {
