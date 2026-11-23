@@ -138,6 +138,9 @@ that knows a node's address can signal to it without any server (R-133).
   tool.
 - Receives group messages as user turns written by the node. It does not
   poll.
+- From step 3 an agent without a driver joins as an external AI. The node
+  does not start it: its own runner waits with a command of the node and
+  starts it once per item (`contracts/step-3/external.md`).
 
 ## 3. Who talks to whom
 

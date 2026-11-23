@@ -139,7 +139,8 @@ func (r *traceRun) aiRows() []proto.AIMemberRow {
 		return proto.AIMemberRow{
 			MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: id, Seq: seq}, Group: r.g, Kind: "ai", User: r.ob.ID(), Name: name, LastSeen: traceTS - 10000},
 			CLI:       cli, Host: host.ID(), HostName: hostName, Secretary: secretary, Account: "personal",
-			Allow: []string{}, Approvers: []string{r.ob.ID()}, State: "waiting", Since: traceTS - 10000, Path: path, Usage: proto.Usage{},
+			Profile: proto.Profile{Tier: "standard"},
+			Allow:   []string{}, Approvers: []string{r.ob.ID()}, State: "waiting", Since: traceTS - 10000, Path: path, Usage: proto.Usage{},
 		}
 	}
 	revName, revPath := "workstation", "local"

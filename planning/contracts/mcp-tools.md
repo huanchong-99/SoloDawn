@@ -8,6 +8,11 @@ identity Claude Code gives a server; it still names the right session after
 a resume and in a takeover `[verified]`. Codex also sends its thread id
 with each call (`_meta`), which the node may compare.
 
+An external AI (step 3) is not started by the node and has no session
+token: its member id names it. Its tool list, its three own tools
+(`next_item`, `done`, `report_usage`) and how its calls are judged are in
+`contracts/step-3/external.md` section 5.
+
 Conventions:
 
 - Members are named by their display name, unique in the group (`"Codex"`).
@@ -186,6 +191,8 @@ review session, and a task session twice, at level 1 and at level 2 or 3,
 because the two differ. `approve` is not in the file: the node adds it for
 a structured Claude Code session only (section 3). The names and argument
 schemas in that file are the contract; this document explains them.
+Step 3 adds the member `external` (`contracts/step-3/external.md`
+section 12).
 
 The file is one object with a member per kind of session: `secretary`,
 `group` (a working AI's group session), `review`, `task_level_1` and

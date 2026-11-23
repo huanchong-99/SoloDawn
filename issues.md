@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-23 · deviation · An agent without a driver cannot join a group
+
+- Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
+- Cause: only the second tier was planned and built. The MCP shim takes only the session token that the node creates when it starts a CLI itself ([local.md](planning/contracts/local.md), section 3), `host.join` takes only an agent with a driver (`agtValidAgent`, `internal/host/agents.go:258`), and nothing lets an agent take an inbox item.
+- Status: open, found 2026-11-23 and planned in this change as the external AI (R-166, [external.md](planning/contracts/step-3/external.md)); units P-7, T3-12 to T3-15, U3-6 and I3-3 of the [parallel plan](planning/steps/parallel-plan-step-2-3.md), section 4.2. By the owner's refinement of 2026-11-23 the agent writes its own runner around `solodawn wait`, and no driver is built for a further CLI. Nothing of it is built yet.
+
 ### 2026-11-23 · limitation · A required escalation can outlast its last stronger candidate
 
 - Symptom: if the owner lowers the last stronger AI's tier while `stuck.ask` is true, the turn and the host submission refusal say no candidate is currently listed.
@@ -29,12 +35,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: remembering a project home now retains a connection even when no AI is hosted locally in that group.
 - Cause: `internal/host/join.go:120-180,420-439` reconciles all remembered homes. The remembered-home wire shape carries no group kind. State-only sync supplies it after connection, as specified in [watch-team.md section 10 ("Which home")](planning/contracts/step-2/watch-team.md#10-a-secretarys-notice-r-14).
 - Status: the coordinator accepted keeping the connection on 2026-11-23.
-
-### 2026-11-22 · deviation · Two profile acceptance sequences need clarification
-
-- Symptom: A10.11 expects the strong secretary to be stronger than the assignee S, which the cast also calls strong. A10.12 asks the same task to fail a review after passing one.
-- Cause: [the profiles contract](planning/contracts/step-3/profiles.md) orders tiers strictly. The task machine moves a passing review to `merge` and accepts a review only at `review` (`internal/home/machine.go`).
-- Status: open. The pending scenarios are unchanged. The home scenarios give the secretary a higher tier than the assignee and test passing and subsequent first failures in separate task flows.
 
 ### 2026-11-22 · limitation · Stored AI rows written before profiles are not migrated
 
@@ -727,6 +727,30 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-23 · bug · FLAKY-27: paused mentions could be delivered out of order
+
+- Symptom: the OpenCode and Qwen A10.3/A4.7 examples intermittently failed at step 10 with `timed out waiting on M4 home frames`, even after the resumed reply had been posted.
+- Cause: `selectEligibleBatch` in `internal/host/deliver.go:853` read the live group pause state for each queued item. A resume between checks left the older mention held and sent the newer one first. The older mention then started another turn, which could prevent settlement. The M4 waiter already matched replies by `re` and kept rows that arrived before them.
+- Status: fixed in #348. Each batch uses one group pause snapshot; the acceptance timeout is unchanged.
+
+### 2026-11-23 · bug · FLAKY-26 bulletin scenario posts before its node attaches to the team home
+
+- Symptom: A9.23 intermittently times out waiting for the team bulletin after the secretary's fake CLI crashes.
+- Cause: `prepareBulletin` (`features/s2_watch_test.go:170-180`) waits only on P's own connection to P2, not P1's attachment. `home.add` replies before P1 attaches: `internal/host/join.go:417-433` reconciles connections, but `internal/node/teams.go:17` runs the dial with `go dial`. An early bulletin post gets `home_unreachable` (`internal/host/tools_bulletin.go:90-95`); the fake CLI expects `isError:false` and crashes. Suppressing P1's dial in a throwaway overlay proved this error and crash path.
+- Status: resolved in this change. For an uncached team, `bulletinTeam` uses `joinWaitHome` to await the team home's attachment with the same bound as `host.join`, preserving `home_unreachable` when the wait times out or is cancelled. Cached groups are still checked first. Deterministic tests cover attachment during the wait and cancellation; the attachment test fails without the fix.
+
+### 2026-11-23 · bug · FLAKY-24 invitation test assumes the join reply precedes group pushes
+
+- Symptom: `TestInvitationJoinAndMemberSurface` intermittently fails with "proto: a field that is always present is missing" while decoding the second join reply.
+- Cause: `internal/node/admit_test.go:233` decoded the next frame as a command result. Admission adopts the staged device revocation (`internal/node/admit.go:119`), which fans out device events (`internal/node/devlog.go:355`) to group goroutines. The first group's revocation can announce `groups` (`internal/home/run_push.go:155`) before the second group's join reply is queued. Unsolicited pushes are not ordered against replies from another group.
+- Status: resolved in this change. The test accepts intervening `groups` frames and checks the join reply's request id and success.
+
+### 2026-11-23 · deviation · Two profile acceptance sequences need clarification
+
+- Symptom: A10.11 expected the strong secretary to be stronger than the assignee S, which the cast also called strong. A10.12 asked the same task to fail a review after passing one.
+- Cause: [the profiles contract](planning/contracts/step-3/profiles.md) orders tiers strictly. A passing review moves the task to `merge`, but a merge conflict can return it to `local_check` (row 9, `conflicted` in `internal/home/machine.go`), so a later failure on the same task is reachable.
+- Status: decided in the I3-2b review on 2026-11-23: A10.11 makes S standard and C strong in the secretary subcase; A10.12 uses a fresh task flow to test the same failure counter starting from nil after clearing. No product change is needed.
 
 ### 2026-11-23 · bug · Runtime work could outlive host shutdown
 

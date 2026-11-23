@@ -223,15 +223,19 @@ func checkMemberLogUpdate(t *testing.T, ph *pairHarness, owner, ctl *fakeCtl, ad
 	}
 	node := serveConn(t, ph.sessions, device.ID(), false)
 	checkInviteHello(t, node, 1, false, 1)
+	checkMemberRevocation(t, ph, owner, node, admin, guest, device)
+}
+
+func checkMemberRevocation(t *testing.T, ph *pairHarness, owner, node *fakeCtl, admin, guest, device identity.Key) {
+	t.Helper()
 	second := openSecondInvitation(t, ph, owner, admin)
 	revoke := guest.Sign(fmt.Sprintf(`{"t":"device","user":%q,"ver":3,"op":"revoke","dev":%q}`, guest.ID(), device.ID()))
 	joining := startJoiningCtl(t, ph, second, guest)
 	entries := append(ph.logs.Log(guest.ID()).Entries, revoke)
 	joining.push(proto.Devlog{Type: "devlog", User: guest.ID(), Entries: entries})
 	sendInviteCmd(joining, guest, 2, proto.Join{HomeCommand: inviteCommand(ph, "join", sesID("second-group"), "second-join"), Name: "Guest"})
-	var joined proto.CmdResult
-	mustNoErr(t, proto.Decode(joining.next(t), &joined))
-	if !joined.OK {
+	joined := inviteJoinResult(t, joining)
+	if joined.Re != 2 || !joined.OK {
 		t.Fatalf("second join = %+v", joined)
 	}
 	select {
@@ -241,6 +245,45 @@ func checkMemberLogUpdate(t *testing.T, ph *pairHarness, owner, ctl *fakeCtl, ad
 	}
 	if ph.logs.Known(device.ID()) {
 		t.Fatal("revoked device remains known")
+	}
+}
+
+func inviteJoinResult(t *testing.T, ctl *fakeCtl) proto.CmdResult {
+	t.Helper()
+	for {
+		raw := ctl.next(t)
+		var header struct {
+			Type string `json:"t,omitempty"`
+		}
+		mustNoErr(t, proto.Decode(raw, &header))
+		if header.Type == "groups" {
+			var groups proto.Groups
+			mustNoErr(t, proto.Decode(raw, &groups))
+			continue
+		}
+		var result proto.CmdResult
+		mustNoErr(t, proto.Decode(raw, &result))
+		return result
+	}
+}
+
+func TestInviteJoinResult(t *testing.T) {
+	for _, pushes := range []int{0, 1, 2} {
+		t.Run(fmt.Sprint(pushes), func(t *testing.T) {
+			ctl := newFakeCtl()
+			for range pushes {
+				mustNoErr(t, ctl.Send(proto.Groups{Type: "groups", Groups: []proto.GroupSummary{}}))
+			}
+			want := proto.CmdResult{Success: proto.Success{Re: 2, OK: true}}
+			mustNoErr(t, ctl.Send(want))
+			mustNoErr(t, ctl.Send(proto.Groups{Type: "groups", Groups: []proto.GroupSummary{}}))
+			if got := inviteJoinResult(t, ctl); got != want {
+				t.Fatalf("join result = %+v, want %+v", got, want)
+			}
+			if got := string(ctl.next(t)); got != `{"t":"groups","groups":[]}` {
+				t.Fatalf("following push = %s", got)
+			}
+		})
 	}
 }
 

@@ -106,7 +106,7 @@
 
 <div class="composer">
   {#if readonly}
-    <p class="state down" id={`${uid}-state`} role="status">
+    <p class={net.otherTab ? 'state away' : 'state down'} id={`${uid}-state`} role="status">
       <i></i>{t(net.otherTab ? 'chat.otherTab' : 'chat.readonly')}
     </p>
   {:else if length !== 'ok'}
@@ -246,7 +246,11 @@
   .state.down {
     color: var(--danger);
   }
-  .down i {
+  .state.away {
+    color: var(--text-2);
+  }
+  .down i,
+  .away i {
     flex: none;
     width: 8px;
     height: 8px;

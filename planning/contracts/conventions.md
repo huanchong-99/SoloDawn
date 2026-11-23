@@ -195,6 +195,7 @@ hold them as text and only the schemas name them.
 | `inbox` and `item-*` re-frozen with a plain unsigned `item` object (`item`, `ai`, `why` and the optional fields of `contracts/datachannel.md` section 6), with no `env` wrapper and no `cause`, `g` or `to` (owner's decision of 2026-11-21: no attack-and-defence code) | P-1b |
 | one confirmed task end to end, with and without a remote | B-01 slice (c) |
 | the additions of `contracts/step-3/profiles.md` section 6: the four fields of an AI member, `member` in `host.leave`, `refresh` and `models` in `host.info`, `stuck` on the task row | P-6 |
+| the additions of `contracts/step-3/external.md` section 12: `tool` on an AI member, `host.join` for `external`, `exe` and the `external` agent in `host.info`, the tool list `external`, the hand-out | P-7 |
 
 **Feature files of the parallel plan** (`steps/parallel-plan.md` section 2).
 The module's seam unit owns `features/<module>.feature`. A Go slice puts

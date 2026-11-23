@@ -49,6 +49,10 @@ AI, always present. A person's row has none of them.
   group more than once, each with its own name, model and level. They
   share the CLI's account. Each is `limited` only when its own CLI
   reports it.
+- **An external AI** (`contracts/step-3/external.md`) has the four fields
+  too. Its `model` and `effort` are text for people to read: no listing
+  offers them and nothing passes them to the agent. Its `tier` and
+  `skills` count like any other.
 - A member with all four defaults behaves as in step 1, with one
   difference: the secretary's turns carry the member list of section 3
   whatever the values. A group whose AIs
@@ -120,6 +124,12 @@ AI members (CLI on computer · tier · state · skills):
   that is not valid; the `notice` that came when it happened says which
   (`contracts/task-machine.md` section 5). No new fact is collected.
 - Empty `skills` leaves out the last part.
+- An external AI has `external` where the CLI stands, with its `tool` in
+  brackets when the row has one, and one of the states of
+  `contracts/step-3/external.md` section 6:
+  `- "Scout" · external (ZCode) on workstation · standard · offline · Rust, reviews`
+- Unit T3-15 adds each AI's usage to this line, and to rule 3 below
+  (`steps/parallel-plan-step-2-3.md` section 4.2).
 - The host reads the rows it holds when it composes the turn.
 
 **The secretary's instructions** gain the four rules of assignment. When
@@ -129,7 +139,8 @@ choosing assignee and reviewer:
 2. match the work to `skills`;
 3. spread tasks that do not depend on each other over different AIs, so
    that several subscriptions work at the same time; members with the
-   same CLI on the same computer share one subscription;
+   same CLI on the same computer share one subscription (not two
+   external AIs);
 4. do not choose an AI that is `limited` or `offline`.
 
 The secretary decides; `propose_brief` and `set_task` accept any working

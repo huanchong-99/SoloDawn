@@ -80,3 +80,7 @@ otherwise `waiting` if any session is open, otherwise `dormant`. The task
 is that of the session the state comes from, when it has one. The home
 itself sets `offline` when the host's connection closes
 (`contracts/commands.md` 1.9).
+
+An external AI (step 3) has no session that the host starts or closes. Its
+state is `working`, `waiting`, `paused` or `offline`, as
+`contracts/step-3/external.md` section 6 says.

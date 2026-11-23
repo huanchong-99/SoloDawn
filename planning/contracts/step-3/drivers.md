@@ -17,6 +17,13 @@ shapes and passes a model at each start.
 Markers: `[verified]`, `[documented]`, `[unverified]` as in
 `contracts/drivers.md`.
 
+**No further driver is built** (owner, 2026-11-23; R-166). The four of
+section 8 stay, because a driver adds what only a node that starts the CLI
+can do: takeover, approval routing, levels, usage read from events. Every
+other agent joins as an external AI, through MCP and its own runner
+(`contracts/step-3/external.md`). Sections 1 to 3 say how the four were
+chosen and what each of them has.
+
 ## 1. When a driver is built
 
 - Drivers are built one at a time, and only for a CLI that passed both
@@ -209,7 +216,8 @@ is in that description. `[documented]` means read there and not run.
 | Amp | deferred | | | | none for an outside program, so it cannot meet R-43 | |
 
 - Units: T3-2 builds the OpenCode driver and T3-3 the Qwen Code driver, one
-  at a time. T3-4 (Amp) is not scheduled.
+  at a time. T3-4 (Amp) is not scheduled: Amp, like any agent without a
+  driver, joins as an external AI (`contracts/step-3/external.md`).
 - For both, `accounts` is `["api_key"]`: their other account types did not
   pass T3-0's terms check. `takeover` is `none` until a capture shows the
   same-id handoff. Every other value is declared from that unit's captures
@@ -327,12 +335,20 @@ and `effort`; an empty value passes nothing, as in step 1.
 | --- | --- | --- | --- |
 | `claude` | `--model <model>` `[verified]` | `--effort <effort>` `[verified]` | the same two flags |
 | `codex` | `model` of `thread/start` and `thread/resume` `[verified]` against the generated schema of 0.164.0 | `config.model_reasoning_effort` of the same `[documented]` | `-m <model>` and `-c model_reasoning_effort="<effort>"` on `codex resume` `[documented]` |
-| `opencode` | `POST /api/session/{id}/model` before the first prompt of a process `[documented]` | the variant in the same selection, `provider/model#variant` `[unverified]`: version 1 documents `--variant` instead | no takeover (section 8) |
+| `opencode` | `POST /api/session/{id}/model` before the first prompt of a process `[documented]` | `variant` in the structured selection body `[documented]` | no takeover (section 8) |
 | `qwen` | `startupConfig.modelServiceId` of `POST /session`, behind the capability `session_startup_config`; `--model` in stream-json mode `[documented]` | `startupConfig.reasoningEffort` `[documented]` | no takeover (section 8) |
 
-- A changed model or level applies at the next start, a resume included:
+- Except for Qwen Code, a changed model or level applies at the next start, a resume included:
   the session and its history stay. There is no fallback to a new
   session.
+- A changed model or level of a Qwen Code member applies only to its next
+  new session. The serve protocol documents `startupConfig` only at creation;
+  resume keeps the original choice and history.
+- OpenCode uses the [OpenAPI](https://opencode.ai/docs/openapi.json) structured
+  body `{"model":{"providerID":"provider","id":"model","variant":"effort"}}`,
+  not `provider/model#variant`. The public model id remains `provider/model`,
+  split on its first `/`; an empty effort omits `variant`, and an empty model
+  skips selection.
 - **A value the CLI refuses.** Whether the CLI exits (Claude Code) or
   answers the start with an error and stays up (Codex's `thread/start`
   and `thread/resume` `[verified]` against the schema of 0.164.0;
