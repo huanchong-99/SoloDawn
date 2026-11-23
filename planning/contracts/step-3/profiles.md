@@ -128,6 +128,8 @@ AI members (CLI on computer · tier · state · skills):
   brackets when the row has one, and one of the states of
   `contracts/step-3/external.md` section 6:
   `- "Scout" · external (ZCode) on workstation · standard · offline · Rust, reviews`
+- Unit T3-15 adds each AI's usage to this line, and to rule 3 below
+  (`steps/parallel-plan-step-2-3.md` section 4.2).
 - The host reads the rows it holds when it composes the turn.
 
 **The secretary's instructions** gain the four rules of assignment. When

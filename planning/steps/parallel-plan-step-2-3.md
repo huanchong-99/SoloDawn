@@ -217,13 +217,15 @@ the node's MCP server and its own runner. No driver follows T3-2 and T3-3.
 | C3-4 | 4 | The contract and this lane | — | `contracts/step-3/external.md`; the pointers in the files its section 13 names | — | — | M |
 | P-7 | 5 | Wire shapes: `tool` on the AI member row, in `member add_ai` and `member set`; `host.join` for `external` with `account` and `tool`; `exe` and the `external` agent in `host.info`; the tool list `external` with `next_item`, `done`, `report_usage`; the hand-out (`external.md` section 12). Mock answers for `host.join` and `host.info` | golden round trip | lane PROTO: `proto/host.go`, `proto/tools.go`, the member shapes of `internal/proto`, a new `proto/handout.go`, `internal/proto/testdata/` with `wire.json` and `tools.json`, `lib/proto.ts`, `lib/proto.test.ts`, `lib/mock.ts` | C3-4; not at the same time as another PROTO unit | F | S |
 | T3-12 | 6 | Home: `tool` in `member add_ai` and `member set`, by the AI's owner only, with its bound (`external.md` sections 1, 2) | A10.17 at the home | `home/external.go`, `features/home_external.feature`; its calls in `home/cmd_member.go`, `home/profile.go` | P-7 | A | S |
-| T3-13 | 6 | Host, runs: `host.join` and `host.leave` for the agent `external`, with `account` and `tool` and no `agent.set`; its entry in `agents`; the hand-out, built on delivery's batch, folder and turn text, with `context`; a run and its four ends; presence and the reported state; the member list line (`external.md` sections 2 to 4, 6, 9, 10) | A10.17, A10.22 to A10.25, A10.27 at the host | `host/external.go`, `host/instructions/external.md`, `features/host_external.feature`; its calls in `host/deliver.go`, `host/join.go`, `host/agents.go`, `host/turn_profile.go`; `host/README.md` | P-7; #348 merged (`host/deliver.go`, `host/README.md`) | F | M |
+| T3-13 | 6 | Host, runs: `host.join` and `host.leave` for the agent `external`, with `account` and `tool` and no `agent.set`; its entry in `agents`; the hand-out, built on delivery's batch, folder and turn text, with `context`; a run and its four ends; presence and the reported state; the member list line (`external.md` sections 2 to 4, 6, 9, 10) | A10.17, A10.22 to A10.25, A10.27 at the host | `host/external.go`, `host/instructions/external.md`, `features/host_external.feature`; its calls in `host/deliver.go`, `host/join.go`, `host/agents.go`, `host/turn_profile.go`; `host/README.md` | P-7; #348 merged (`host/deliver.go`, `host/README.md`); T3-15 (`host/turn_profile.go`) | F | M |
 | T3-14 | 7 | Host and node, the two surfaces: a member id where a session token stands, and `mcp --member`; the list `external`, each call judged by the open run; `next_item`, `done`, `report_usage`; `approve` for an external connection; `solodawn wait` and `solodawn done` with their socket commands and exit codes; `exe` in `host.info` (`external.md` sections 3, 5, 7) | A10.18 to A10.21, A10.25, A10.26 at the node | `host/tools_external.go`, `node/external.go`, `features/host_tools_external.feature`, `features/cmd_external.feature`; its calls in `host/shim.go`, `host/mcp.go`, `host/approve.go`, `node/socket.go` and where `host.info` is built | T3-13 | A | M |
+| T3-15 | 6 | Host, the member list of the secretary's turn: every AI whose `usage` is known gets `window <pct>% until <HH:MM>`, a managed AI from its CLI's events and an external one from `report_usage`; assignment rule 3 gains "prefer AIs with more of their window left". No caps (owner, 2026-11-23) | A10.9, A10.25 at the host | `host/turn_profile.go`, `features/host_profile.feature`; the member list text of A10.9 in `steps/step-3-acceptance.md` and of `contracts/step-3/profiles.md` section 3 | I3-2b (#343) merged: it changes the steps of A10.9 | A | S |
 | U3-6 | 6 | Web: `external` in the dialog that adds an AI, with account, tool label and text fields; the setup panel with the prompt, the server entry, the setup check and its four marks; the tool label on the member card and panel (`external.md` sections 8, 10). The prompt text lives in its one file | A10.17, A10.20, A10.25, A10.27 as seen | `cmp/external/` with its `mounts.ts` and `prompt.md`; a mount point in `cmp/member/` only where none fits | P-7 | F | M |
 | I3-3 | 8 | The scenarios and steps of A10.17 to A10.28, at the nodes and in the browsers. Its test agent is a stdio MCP client behind `solodawn mcp --member` and a runner around `solodawn wait` and `solodawn done`. The `live` test once, with a real agent given the prompt | A10.17 to A10.28 | `features/a10_external*`, `web/e2e/external.spec.ts` | T3-12 to T3-14, U3-6 | A | M |
 
 After P-7, T3-12, T3-13 and U3-6 start together; no two of them write one
-file. T3-14 follows T3-13 and is given to the same builder, since it calls
+file. T3-15 needs no shape of P-7 and starts when #343 is merged; it and
+T3-13 both write `host/turn_profile.go`, so T3-13 waits for it. T3-14 follows T3-13 and is given to the same builder, since it calls
 what T3-13 makes. As in lane PROFILES, a unit keeps its logic and its
 scenarios in its own files and adds only calls to the files named in its
 "Owns".
@@ -330,6 +332,13 @@ an external AI: what it finds goes into I3-3's `live` test.
    writing code, not answering. No host-kept list of levels: without a
    list from the CLI the level is a text field. The A10 items of the
    lane are in `steps/step-3-acceptance.md`, with the rest of A10.
+
+### Decided (2026-11-23)
+
+6. Lane EXTERNAL: (a) to (i) as written. For (f), the setup check stays
+   the client's message. (j) changed: the owner wants each AI's quota on
+   the member list line, for scheduling, so the line changes for every
+   AI. Unit T3-15 of section 4.2 does it and owns the text.
 
 ### Follow-up
 

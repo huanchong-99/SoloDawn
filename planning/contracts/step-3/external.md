@@ -227,7 +227,9 @@ New tools, for an external connection only:
 - `report_usage` replaces what was reported before. A value outside its
   bounds is `bad_request`. Managed AIs are not listed it: their usage is
   read from their CLI's events.
-- The secretary reads every AI's `usage` with `list_members`, as today.
+- The secretary reads every AI's `usage` with `list_members`, as today;
+  unit T3-15 also puts it on the member list of its turn
+  (`contracts/step-3/profiles.md` section 3).
 
 ## 6. States (adds to `sessions.md` section 3)
 
@@ -471,9 +473,9 @@ In `internal/proto`, with golden files, `wire.json` and the web schema
 
 ## 14. Decided, and not verified
 
-The choices made in writing this file, for the coordinator to confirm, are
-in `steps/parallel-plan-step-2-3.md` section 5, question 6, and only
-there.
+The choices made in writing this file, and the coordinator's decisions of
+2026-11-23 on them, are in `steps/parallel-plan-step-2-3.md` section 5,
+question 6, and only there.
 
 `[unverified]`, all of it until unit I3-3 has run:
 
