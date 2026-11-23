@@ -37,12 +37,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `internal/host/join.go:120-180,420-439` reconciles all remembered homes. The remembered-home wire shape carries no group kind. State-only sync supplies it after connection, as specified in [watch-team.md section 10 ("Which home")](planning/contracts/step-2/watch-team.md#10-a-secretarys-notice-r-14).
 - Status: the coordinator accepted keeping the connection on 2026-11-23.
 
-### 2026-11-22 · deviation · Two profile acceptance sequences need clarification
-
-- Symptom: A10.11 expects the strong secretary to be stronger than the assignee S, which the cast also calls strong. A10.12 asks the same task to fail a review after passing one.
-- Cause: [the profiles contract](planning/contracts/step-3/profiles.md) orders tiers strictly. The task machine moves a passing review to `merge` and accepts a review only at `review` (`internal/home/machine.go`).
-- Status: open. The pending scenarios are unchanged. The home scenarios give the secretary a higher tier than the assignee and test passing and subsequent first failures in separate task flows.
-
 ### 2026-11-22 · limitation · Stored AI rows written before profiles are not migrated
 
 - Symptom: syncing an untouched AI row written before profiles may omit the four fields, or carry an empty tier if written after the wire freeze but before the home assigned defaults.
@@ -738,6 +732,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-23 · deviation · Two profile acceptance sequences need clarification
+
+- Symptom: A10.11 expected the strong secretary to be stronger than the assignee S, which the cast also called strong. A10.12 asked the same task to fail a review after passing one.
+- Cause: [the profiles contract](planning/contracts/step-3/profiles.md) orders tiers strictly. The task machine moves a passing review to `merge` and accepts a review only at `review` (`internal/home/machine.go`).
+- Status: resolved in I3-2b with the coordinator's approved wording: A10.11 makes S standard and C strong in the secretary subcase; A10.12 tests the first failure after clearing in a fresh task flow. No product change is needed.
 
 ### 2026-11-23 · bug · A9.24 can run hosted checks again for the superseded commit
 
