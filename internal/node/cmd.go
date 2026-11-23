@@ -28,7 +28,7 @@ var (
 	pairStartWait  = 5 * time.Second
 )
 
-// MCP runs the stdio MCP shim ("solodawn mcp --token <t>") against the running
+// MCP runs the stdio MCP shim ("solodawn mcp --token <t>" or "--member <id>") against the running
 // node's local socket (local.md 1, 3).
 func MCP(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return host.RunShim(args, dialLocal, stdin, stdout, stderr)
