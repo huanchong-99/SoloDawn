@@ -44,6 +44,7 @@
   "member.state.needyou.one": "Waiting · 1 item waiting on you",
   "member.state.needyou.task": "Waiting · {task} waiting on you",
   "member.state.offline": "Offline",
+  "member.state.paused": "Paused",
   "member.state.sleeping": "Sleeping · wakes when @mentioned",
   "member.state.takeover": "Owner is driving",
   "member.state.waiting": "Waiting",

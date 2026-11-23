@@ -2,6 +2,7 @@
   "model.model": "Model",
   "model.effort": "Level",
   "model.default": "The CLI's default",
+  "model.unset": "Not set",
   "model.notlisted": "Not listed",
   "model.fast": "Fast mode",
   "model.model.hint": "e.g. opus",

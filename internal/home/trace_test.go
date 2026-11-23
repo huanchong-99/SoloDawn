@@ -86,8 +86,7 @@ func (r *traceRun) start(cast []identity.Key, names []string) {
 	kinds, devNames := []string{"browser", "node", "node"}, []string{"phone browser", "workstation", "laptop"}
 	r.tr.Devlog = proto.Devlog{Type: "devlog", User: r.ob.ID()}
 	for i, k := range cast {
-		seed := base64.RawURLEncoding.EncodeToString(ed25519.PrivateKey(k).Seed())
-		r.tr.Keys = append(r.tr.Keys, proto.TraceKey{Name: names[i], Seed: seed, Device: k.ID()})
+		r.tr.Keys = append(r.tr.Keys, proto.TraceKey{Name: names[i], Device: k.ID()})
 		entry := proto.DeviceEntry{
 			PayloadHeader: proto.PayloadHeader{Type: "device", Nonce: proto.ID(traceID(fmt.Sprintf("trace dev %d", i+1))), Timestamp: traceTS - 70000 + int64(i)*1000},
 			DeviceChange:  proto.DeviceChange{User: r.ob.ID(), Version: i + 1, Op: "add", Device: k.ID(), Kind: kinds[i], Name: devNames[i]},

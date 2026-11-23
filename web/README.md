@@ -171,22 +171,28 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `Mounts` (`src/lib/mounts.svelte.ts`), and `gather` finds every such file by name. The points,
   and what a component there is given:
 
-  | Point        | Where                                                                      | Props                         |
-  | ------------ | -------------------------------------------------------------------------- | ----------------------------- |
-  | `bar`        | the top bar, before the theme and language buttons, on every page          | `{ net }`                     |
-  | `banner`     | under the top bar, across the page; a banner comes down from under the bar | `{ net }`                     |
-  | `layer`      | after the page, above it: dialogs and notifications                        | `{ net }`                     |
-  | `chat.head`  | the head of a chat, after the group's name                                 | `{ group }`                   |
-  | `chat.top`   | between the head of a chat and its main line                               | `{ group }`                   |
-  | `chat.side`  | beside the main line from 1024 px; below, a panel that slides over         | `{ group, net }`              |
-  | `member.ai`  | in the rows of each AI card, before the profile rows: `dt` and `dd` pairs  | `{ group, ai }`               |
-  | `member.add` | in Add AI, between the computer choices and the name field                 | `{ group, candidate, draft }` |
-  | `cards`      | the card of a message, by kind, in the main line and in threads            | `CardProps`                   |
+  | Point           | Where                                                                      | Props                         |
+  | --------------- | -------------------------------------------------------------------------- | ----------------------------- |
+  | `bar`           | the top bar, before the theme and language buttons, on every page          | `{ net }`                     |
+  | `banner`        | under the top bar, across the page; a banner comes down from under the bar | `{ net }`                     |
+  | `layer`         | after the page, above it: dialogs and notifications                        | `{ net }`                     |
+  | `chat.head`     | the head of a chat, after the group's name                                 | `{ group }`                   |
+  | `chat.top`      | between the head of a chat and its main line                               | `{ group }`                   |
+  | `chat.side`     | beside the main line from 1024 px; below, a panel that slides over         | `{ group, net }`              |
+  | `member.ai`     | in the rows of each AI card, before the profile rows: `dt` and `dd` pairs  | `{ group, ai }`               |
+  | `member.add`    | in Add AI, between the computer choices and the name field                 | `{ group, candidate, draft }` |
+  | `member.joined` | after Add AI successfully sends `host.join`                                | `{ group, candidate, name }`  |
+  | `cards`         | the card of a message, by kind, in the main line and in threads            | `CardProps`                   |
 
   Parts at `member.ai` show or edit more of the member. A part at `member.add` may set the draft's
   `model`, `effort` and `tier` before `host.join` sends it; `candidate` is undefined until chosen.
   The model area uses both points at order 10: `MemberModel` displays and edits the member's
   model/level, and `AddModel` supplies the chosen candidate's model/level fields.
+
+  The external AI area adds an account type and optional tool label to the same draft. A part
+  at `member.joined` receives `{ group, candidate, name }` after a successful `host.join`; the
+  external AI area uses it to open setup when the new member row reaches the browser.
+  Removing an external AI takes an inline confirmation, which Escape cancels.
 
   An entry is `{ order, component }`: the lower `order` comes first, then the area's name. A
   component with nothing to show draws nothing; an empty banner takes no room. While any area

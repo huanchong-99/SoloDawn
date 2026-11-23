@@ -37,7 +37,8 @@ export type AccountKind = (typeof accounts)[number];
 const cliLabels: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' };
 
 /** Display label of an AI CLI identifier. */
-export const cliName = (agent: string) => cliLabels[agent] ?? agent;
+export const cliName = (agent: string) =>
+  agent === 'external' ? t('external.agent') : (cliLabels[agent] ?? agent);
 
 const accountKeys: Record<string, `pairing.acct.${AccountKind}`> = {
   personal: 'pairing.acct.personal',
