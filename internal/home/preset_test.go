@@ -111,6 +111,8 @@ func TestPresetNoteCreatesReplacesAndReplays(t *testing.T) {
 	maxCmd := fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":null,"type":"preset","name":%q,"text":"ok"}`, id(144), noteTS, groupID, id(145), maxName)
 	res3 := presetApply(t, s, d, r, browser, maxCmd)
 	equal(t, res3.Answer, store.Outcome{OK: true, ID: id(145), Replaced: &f})
+	minCmd := fmt.Sprintf(`{"t":"note","n":%q,"ts":%d,"g":%q,"id":%q,"task":null,"type":"preset","name":"静","text":"ok"}`, id(146), noteTS, groupID, id(147))
+	equal(t, presetApply(t, s, d, r, browser, minCmd).Answer, store.Outcome{OK: true, ID: id(147), Replaced: &f})
 }
 
 func TestPresetNoteRefusals(t *testing.T) {
