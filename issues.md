@@ -731,7 +731,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: A9.24 times out at “both tasks merge after checks and cross-review and receive summaries.” In a stalled run, the retry commit gets its standalone `watch-push` but no submission push or `watch-checks` call, and the task stays at `active/local_check`.
 - Reproduce: use a Go overlay to set `godog.Options.Paths` in `features/acceptance_test.go` to `[]string{"s2_watch.feature:37"}`, then run `go test -overlay <overlay.json> -tags acceptance -race -run '^TestFeatures$' -count=50 -timeout=35m ./features/`. The same step timed out on `origin/rebuild` at `aee115ba9` with `-count=8`.
 - Cause: The home replied to `task checked` before publishing the updated task row. The next `submit_task` could compare the retry commit to the previous commit's cached check and reject it before pushing.
-- Status: resolved in PR #TBD. The home sends changed rows before command replies; `TestRunPushesChangedRowsBeforeCommandReply` verifies the order.
+- Status: resolved in PR #338. The home sends changed rows before command replies; `TestRunPushesChangedRowsBeforeCommandReply` verifies the order.
 
 ### 2026-11-23 · bug · A9.24 can run hosted checks again for the superseded commit
 
