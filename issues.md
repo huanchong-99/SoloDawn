@@ -24,13 +24,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the [OpenAPI](https://opencode.ai/docs/openapi.json) documents `POST /api/session/{sessionID}/model` with `{"model":{"id":"…","providerID":"…","variant":"…"}}`. `openCodeProcess.selectModel` in `internal/host/opencode.go:245` splits the public `provider/model` id on the first `/`, omits an empty variant, and skips an empty model. Discovery reads `{data: Model.Info[]}`; unknown shapes yield `[]`.
 - Status: accepted for T3-10; the coordinator will flag the contract in the PR. Fixtures are synthetic, with no real CLI capture.
 
-### 2026-11-23 · bug · A9.24 can stall before submitting the retry commit
-
-- Symptom: A9.24 times out at “both tasks merge after checks and cross-review and receive summaries.” In a stalled run, the retry commit gets its standalone `watch-push` but no submission push or `watch-checks` call, and the task stays at `active/local_check`.
-- Reproduce: use a Go overlay to set `godog.Options.Paths` in `features/acceptance_test.go` to `[]string{"s2_watch.feature:37"}`, then run `go test -overlay <overlay.json> -tags acceptance -race -run '^TestFeatures$' -count=50 -timeout=35m ./features/`. The same step timed out on `origin/rebuild` at `aee115ba9` with `-count=8`.
-- Cause: unverified. The timeout predates the stale-check claims, and the stalled retry does not reach hosted-check polling.
-- Status: open.
-
 ### 2026-11-23 · limitation · Remembered project homes without local AIs stay connected
 
 - Symptom: remembering a project home now retains a connection even when no AI is hosted locally in that group.
@@ -740,6 +733,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a terminal page opened on a relayed path kept saying "Direct connection required" when the path became direct again, until the page was reopened.
 - Cause: `follow` in `web/src/lib/terminal.svelte.ts` (`:305`) starts a takeover only from `idle`, and two routes left the phase at `relay`: `Takeover.#relayed` (`:368`) set an idle takeover to `relay` when the browser's path was relayed, and `#refused` (`:364`) sets `relay` when the computer refuses `takeover.start` with `relay` while the browser's path still reads direct.
 - Status: resolved in U11. `#relayed` no longer moves an idle takeover to `relay`, and it returns a `relay` phase to `idle`, so the takeover starts once the path is direct again; the takeover bar already says "Direct connection required" for an idle takeover on a relayed path. The `web_terminal.feature` scenario "A relayed path that recovers to direct opens the terminal without reopening the page" and two `terminal.test.ts` cases cover both routes.
+
+### 2026-11-23 · bug · A9.24 can stall before submitting the retry commit
+
+- Symptom: A9.24 times out at “both tasks merge after checks and cross-review and receive summaries.” In a stalled run, the retry commit gets its standalone `watch-push` but no submission push or `watch-checks` call, and the task stays at `active/local_check`.
+- Reproduce: use a Go overlay to set `godog.Options.Paths` in `features/acceptance_test.go` to `[]string{"s2_watch.feature:37"}`, then run `go test -overlay <overlay.json> -tags acceptance -race -run '^TestFeatures$' -count=50 -timeout=35m ./features/`. The same step timed out on `origin/rebuild` at `aee115ba9` with `-count=8`.
+- Cause: The home replied to `task checked` before publishing the updated task row. The next `submit_task` could compare the retry commit to the previous commit's cached check and reject it before pushing.
+- Status: resolved in PR #338. The home sends changed rows before command replies; `TestRunPushesChangedRowsBeforeCommandReply` verifies the order.
 
 ### 2026-11-23 · bug · A9.24 can run hosted checks again for the superseded commit
 
