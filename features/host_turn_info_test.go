@@ -52,7 +52,7 @@ func hostTurnInfoSteps(sc *godog.ScenarioContext, _ fixtures) {
 	sc.Step(`^the turninfo item header is:$`, w.checkItemHeader)
 	sc.Step(`^the turninfo composed text is:$`, w.checkTurnText)
 	sc.Step(`^the turninfo second line is:$`, func(doc *godog.DocString) error { return w.checkLines(doc, 2, 1) })
-	sc.Step(`^the turninfo header and second line are:$`, func(doc *godog.DocString) error { return w.checkLines(doc, 1, 2) })
+	sc.Step(`^the turninfo header and second line are:$`, w.checkFirstItem)
 }
 
 func (w *turnInfoWorld) setup(cleanup func(func()), node string) error {
@@ -220,6 +220,15 @@ func (w *turnInfoWorld) composeSecretaryConfirmed(allow []string, confirmer stri
 	raw := turnMustJSON(proto.InboxItem{Item: proto.Item{Item: 5, AI: proto.ID(turnSecID), Why: "confirmed", Msg: proto.ID(turnBriefID)}, Msg: msg})
 	w.text, _, err = host.Compose(w.h, w.secSession(), host.ItemsTurn, []json.RawMessage{raw})
 	return err
+}
+
+func (w *turnInfoWorld) checkFirstItem(doc *godog.DocString) error {
+	for i, line := range strings.Split(w.text, "\n") {
+		if strings.HasPrefix(line, "== 1 of ") {
+			return w.checkLines(doc, i, 2)
+		}
+	}
+	return fmt.Errorf("first item missing from:\n%s", w.text)
 }
 
 func (w *turnInfoWorld) checkLines(doc *godog.DocString, start, count int) error {
