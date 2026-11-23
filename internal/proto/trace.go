@@ -15,10 +15,9 @@ type TaskTrace struct {
 	Steps  []TraceStep    `json:"steps"`
 }
 
-// TraceKey is the Ed25519 seed and the device id of one device of the cast.
+// TraceKey is the name and device id of one device of the cast.
 type TraceKey struct {
 	Name   string `json:"name"`
-	Seed   string `json:"seed"`
 	Device string `json:"device"`
 }
 
