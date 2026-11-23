@@ -282,7 +282,7 @@ func (w *m6World) startNodeProc(np *m6NodeProc) error {
 	cmd := exec.Command(w.f.bin, "node")
 	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = &np.out, &np.out
-	if _, err := startManagedCmd(w.f.t, w.cleanup, cmd); err != nil {
+	if _, err := startNodeCmd(w.f.t, w.cleanup, cmd, np.name, np.data, &np.out); err != nil {
 		return err
 	}
 	np.cmd = cmd
