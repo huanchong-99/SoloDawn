@@ -330,14 +330,7 @@ func (c *turnCtx) place(thread string) string {
 }
 
 func (c *turnCtx) fromIn(memberID, thread string) string {
-	who := "unknown"
-	if memberID != "" {
-		who = c.memberLabel(memberID)
-	}
-	if memberID == "system" {
-		who = "the home"
-	}
-	return "from " + who + " " + c.place(thread)
+	return "from " + c.memberLabel(memberID) + " " + c.place(thread)
 }
 
 func (c *turnCtx) msgWho(msg *proto.MsgRow, thread string) string {
@@ -348,6 +341,12 @@ func (c *turnCtx) msgWho(msg *proto.MsgRow, thread string) string {
 }
 
 func (c *turnCtx) memberLabel(id string) string {
+	switch id {
+	case "":
+		return "unknown"
+	case "system":
+		return "the home"
+	}
 	if m, ok := c.lookupMember(id); ok {
 		return formatSpeaker(m.Name, m.Kind == "ai")
 	}
