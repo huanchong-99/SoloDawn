@@ -901,13 +901,34 @@ func registerM7RelayAndTaskSteps(sc *godog.ScenarioContext, w *m7World) {
 	sc.Step(`^host\.info still succeeds on the original M7 ctl connection without sending a new offer$`, w.thenHostInfoOriginalCtl)
 }
 
-func m7RelayGenerator(mode m7CandMode) turn.RelayAddressGenerator {
+func m7RelayGenerator(mode m7CandMode) (turn.RelayAddressGenerator, error) {
 	ip := net.IPv4(127, 0, 0, 1)
+	if mode == m7CandSrflxAndRelay {
+		var err error
+		ip, err = m7RelayHostIP()
+		if err != nil {
+			return nil, err
+		}
+	}
 	base := turn.RelayAddressGeneratorStatic{RelayAddress: ip, Address: ip.String()}
 	if mode == m7CandRelayOnly {
-		return &relaySockets{RelayAddressGeneratorStatic: base, ports: map[int]bool{}}
+		return &relaySockets{RelayAddressGeneratorStatic: base, ports: map[int]bool{}}, nil
 	}
-	return &base
+	return &base, nil
+}
+
+func m7RelayHostIP() (net.IP, error) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil, err
+	}
+	for _, addr := range addrs {
+		ip := addr.(*net.IPNet).IP
+		if ip.To4() != nil && !ip.IsLoopback() && ip.IsGlobalUnicast() {
+			return ip, nil
+		}
+	}
+	return nil, errors.New("no non-loopback IPv4 address for the TURN relay")
 }
 
 func m7ICEServersForMode(addr string, mode m7CandMode) []proto.ICEServer {
@@ -938,7 +959,11 @@ func (w *m7World) bootEnvAndNode(mode m7CandMode) error {
 	if err := w.prepareDirsAndEnv(); err != nil {
 		return err
 	}
-	turnAddr, err := startTestTURN(w.cleanup, m7RelayGenerator(mode))
+	gen, err := m7RelayGenerator(mode)
+	if err != nil {
+		return err
+	}
+	turnAddr, err := startTestTURN(w.cleanup, gen)
 	if err != nil {
 		return err
 	}
