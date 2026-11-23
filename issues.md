@@ -6,12 +6,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-23 · limitation · Model and level text inputs count UTF-16 units
-
-- Symptom: with an empty model catalog, the model and level inputs can stop accepting astral characters before the contract's limits of 100 and 32 code points.
-- Cause: `web/src/components/model/ModelFields.svelte:64,74` uses HTML `maxlength`, which counts UTF-16 code units rather than Unicode code points.
-- Status: open. ASCII values reach the full limits; astral characters consume two units each. The skills field already counts code points, but these model-area inputs do not.
-
 ### 2026-11-23 · bug · A9.24 can run hosted checks again for the superseded commit
 
 - Symptom: A9.24 can report an unexpected `watch-checks` call for the first commit of the task that is reassigned.
@@ -713,6 +707,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-23 · bug · Svelte interpolated model input pattern quantifiers
+
+- Symptom: the empty-catalog model and level inputs rendered `.100` and `.32` as their patterns, and the type check reported unused comma operands.
+- Cause: `web/src/components/model/ModelFields.svelte:64,74` put regex quantifiers in quoted Svelte attributes, where braces introduce expressions.
+- Status: resolved in U3-5 by passing literal pattern strings as expressions. Acceptance checks cover native Chromium validity and blocked submissions for 101 astral model code points, with 100 valid.
 
 ### 2026-11-22 · limitation · Model discovery has synthetic fixtures, not live captures
 

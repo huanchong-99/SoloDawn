@@ -69,7 +69,7 @@
 </script>
 
 <dt>{t('model.model')}</dt>
-<dd class="line">
+<dd>
   <span class="what">
     {#if ai.model}
       <span class="name">{listed?.name ?? ai.model}</span>
@@ -78,29 +78,33 @@
       <span class="muted">{t('model.default')}</span>
     {/if}
   </span>
-  {#if models && mine}
-    <button
-      type="button"
-      class="icon-btn spin"
-      class:on={refreshing}
-      aria-label={t('model.refresh')}
-      title={t('model.refresh')}
-      disabled={refreshing || !host?.ctl}
-      onclick={refresh}
-    >
-      <Icon name="refresh" sm />
-    </button>
-  {/if}
-  {#if mine && !editing}
-    <button
-      bind:this={editButton}
-      type="button"
-      class="change"
-      aria-label={t('model.edit')}
-      onclick={edit}
-    >
-      {t('model.change')}
-    </button>
+  {#if mine && (models || !editing)}
+    <span class="acts">
+      {#if !editing}
+        <button
+          bind:this={editButton}
+          type="button"
+          class="change"
+          aria-label={t('model.edit')}
+          onclick={edit}
+        >
+          {t('model.change')}
+        </button>
+      {/if}
+      {#if models}
+        <button
+          type="button"
+          class="icon-btn spin"
+          class:on={refreshing}
+          aria-label={t('model.refresh')}
+          title={t('model.refresh')}
+          disabled={refreshing || !host?.ctl}
+          onclick={refresh}
+        >
+          <Icon name="refresh" sm />
+        </button>
+      {/if}
+    </span>
   {/if}
 </dd>
 <dt>{t('model.effort')}</dt>
@@ -141,24 +145,24 @@
     grid-column: 1 / -1;
     margin: 4px 0;
   }
-  .line {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 22px;
-  }
   .what {
     display: flex;
-    flex: 1;
     flex-wrap: wrap;
     align-items: center;
     gap: 4px 6px;
-    min-width: 0;
+  }
+  .acts {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin-top: 2px;
+    animation: -global-appear var(--dur-2) var(--ease-out);
   }
   .name {
     overflow-wrap: anywhere;
   }
   .spin {
+    margin-left: -4px;
     width: 24px;
     height: 22px;
     min-height: 0;

@@ -36,7 +36,7 @@ Feature: Member panel and adding an AI to a group
   Scenario: Adding an AI reads connected computers, suggests a free name and sends host.join
     Given the group has no secretary yet and a second computer "laptop" is connected
     When the owner opens "Add AI"
-    Then "Claude Code · workstation" is selectable again and "Codex · workstation" is disabled as "Choose an account type on the Computers page first"
+    Then "Claude Code · workstation" says "In this group · adds another member" and is selectable again and "Codex · workstation" is disabled as "Choose an account type on the Computers page first"
     And "Claude Code · workstation" is initially chosen with name "Claude Code 2" and the owner chooses "Codex · laptop"
     When the owner toggles "Make this AI the group's secretary" on and off, then checks it and names the AI "Lead Secretary"
     And the owner submits the add-AI dialog

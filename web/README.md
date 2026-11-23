@@ -503,7 +503,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
     capability. Empty catalogs offer model and level text inputs; stored models absent from a
     catalog remain visible as "Not listed". Choosing a model in Add AI fills its suggested tier,
     which the owner can override. The same CLI can be selected repeatedly with distinct member
-    names; Computers lists each hosted member separately. Only the AI's owner can edit model/level
+    names; the candidate reads "In this group · adds another member". Computers lists each hosted
+    member separately. Add AI passes the draft through the mount with a getter/setter, and the
+    model fields bind it back to the dialog. Empty-catalog text inputs use native pattern validation
+    for the model's 100-code-point and level's 32-code-point limits, including astral characters.
+    The card's Change and refresh actions sit below the model value. Only the AI's owner can edit model/level
     or refresh its catalog. Refresh sends `host.info` with `refresh: true`, updates the live list
     without restarting, and never changes the stored model, level, tier or skills.
   - Task cards (`src/components/task/`, `src/lib/task.ts`) show "Must ask a stronger AI" in dawn

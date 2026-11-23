@@ -735,7 +735,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         flushSync();
       });
       Then(
-        '"Claude Code · workstation" is selectable again and "Codex · workstation" is disabled as "Choose an account type on the Computers page first"',
+        '"Claude Code · workstation" says "In this group · adds another member" and is selectable again and "Codex · workstation" is disabled as "Choose an account type on the Computers page first"',
         () => {
           const labels = texts('dialog .choice b');
           const subs = texts('dialog .choice .sub');
@@ -746,7 +746,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             'Codex · laptop',
             'Claude Code · laptop',
           ]);
-          expect(subs[0]).toBe('Already in this group');
+          expect(subs[0]).toBe('In this group · adds another member');
           expect(subs[1]).toBe('Choose an account type on the Computers page first');
           expect(radios.map((r) => r.disabled)).toEqual([false, true, false, false]);
         },

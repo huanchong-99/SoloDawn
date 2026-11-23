@@ -157,7 +157,19 @@
       {/if}
     </fieldset>
 
-    <Mount at="member.add" props={{ group, candidate: chosen, draft }} />
+    <Mount
+      at="member.add"
+      props={{
+        group,
+        candidate: chosen,
+        get draft() {
+          return draft;
+        },
+        set draft(value) {
+          draft = value;
+        },
+      }}
+    />
 
     <label class="field">
       <span>{t('member.join.name')}</span>

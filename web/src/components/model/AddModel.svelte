@@ -5,8 +5,10 @@
   import { listedModels } from './model';
 
   /** Model and level in the dialog for adding an AI, from the chosen computer's list. */
-  let { candidate, draft }: { group: Group; candidate: Candidate | undefined; draft: Draft } =
-    $props();
+  let {
+    candidate,
+    draft = $bindable(),
+  }: { group: Group; candidate: Candidate | undefined; draft: Draft } = $props();
 
   const models = $derived(candidate && (listedModels(candidate.home, candidate.agent) ?? []));
 
@@ -17,5 +19,5 @@
 </script>
 
 {#if models}
-  <ModelFields {draft} {models} suggest />
+  <ModelFields bind:draft {models} suggest />
 {/if}

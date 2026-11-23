@@ -16,7 +16,7 @@
   "member.join.error.conflict": "That name is already used in this group.",
   "member.join.error.home_unreachable": "The AI's computer cannot reach this group's home right now. Try again when both are online.",
   "member.join.error.lost": "Not sent: the AI's computer cannot be reached.",
-  "member.join.joined": "Already in this group",
+  "member.join.joined": "In this group · adds another member",
   "member.join.lead": "Choose an AI registered on one of your connected computers.",
   "member.join.loading": "Reading your computers…",
   "member.join.name": "Name in the group",

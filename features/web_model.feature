@@ -8,7 +8,7 @@ Feature: Choosing AI models and levels
 
   Scenario: Adding another member of the same CLI chooses a listed model
     When the owner opens Add AI
-    Then the existing CLI is selectable again with a free member name
+    Then the existing CLI says In this group · adds another member and has a free member name
     When the owner chooses Opus and high
     Then fast mode is shown and the suggested tier is Strong
     When the owner submits Add AI
@@ -20,6 +20,13 @@ Feature: Choosing AI models and levels
     And types a custom model and level
     And the owner submits Add AI
     Then host.join sends the exact typed model and level
+
+  Scenario: Model text limits count code points and block invalid submissions
+    Given the CLI lists no models
+    When the owner opens the model editor
+    Then 101 astral model code points cannot be saved but 100 are valid
+    When the owner opens Add AI
+    And 101 astral model code points cannot join but 100 are valid
 
   Scenario: Model choices reset dependent values and candidates reset the draft
     When the owner opens Add AI

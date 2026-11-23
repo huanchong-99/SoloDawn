@@ -1,4 +1,5 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
+import { chromium } from 'playwright';
 import { flushSync, tick } from 'svelte';
 import { expect, vi } from 'vitest';
 import { homes } from '../src/lib/groups.svelte';
@@ -45,13 +46,40 @@ const options = (select: HTMLSelectElement) => [...select.options].map((o) => [o
 const kv = (within: Element, label: string) =>
   [...within.querySelectorAll('dt')].find((dt) => read(dt) === label)!.nextElementSibling!;
 const modelText = (within: ParentNode) =>
-  within.querySelector<HTMLInputElement>(
-    'input[placeholder="Model id; empty for the CLI\'s default"]',
-  )!;
+  within.querySelector<HTMLInputElement>('input[placeholder="e.g. opus"]')!;
 const effortText = (within: ParentNode) =>
-  within.querySelector<HTMLInputElement>(
-    'input[placeholder="Level; empty for the CLI\'s default"]',
-  )!;
+  within.querySelector<HTMLInputElement>('input[placeholder="e.g. high"]')!;
+
+async function nativeLimits(form: HTMLFormElement) {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.setContent(form.outerHTML);
+    return await page.evaluate(
+      (values) => {
+        const form = document.querySelector('form')!;
+        form.querySelectorAll('input').forEach((input, index) => {
+          input.value = values[index];
+        });
+        const input = form.querySelector<HTMLInputElement>('input[pattern=".{0,100}"]')!;
+        let submits = 0;
+        form.addEventListener('submit', (event) => {
+          event.preventDefault();
+          submits++;
+        });
+        return [101, 100].map((length) => {
+          input.value = '😀'.repeat(length);
+          const mismatch = input.validity.patternMismatch;
+          form.requestSubmit();
+          return { length, mismatch, submits };
+        });
+      },
+      [...form.querySelectorAll('input')].map((input) => input.value),
+    );
+  } finally {
+    await browser.close();
+  }
+}
 
 describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   let node: OwnedNode;
@@ -149,20 +177,24 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
 
   Scenario('Adding another member of the same CLI chooses a listed model', ({ When, Then }) => {
     When('the owner opens Add AI', openAdd);
-    Then('the existing CLI is selectable again with a free member name', () => {
-      expect(
-        all<HTMLInputElement>('dialog .choice input').map((i) => [i.disabled, i.checked]),
-      ).toEqual([
-        [false, true],
-        [false, false],
-      ]);
-      expect(one<HTMLInputElement>('dialog input[required]').value).toBe('Claude Code');
-      expect(options(selects(one('dialog'))[0])).toEqual([
-        ['', "The CLI's default"],
-        ['opus', 'Opus'],
-        ['haiku', 'Haiku'],
-      ]);
-    });
+    Then(
+      'the existing CLI says In this group · adds another member and has a free member name',
+      () => {
+        expect(
+          all<HTMLInputElement>('dialog .choice input').map((i) => [i.disabled, i.checked]),
+        ).toEqual([
+          [false, true],
+          [false, false],
+        ]);
+        expect(one<HTMLInputElement>('dialog input[required]').value).toBe('Claude Code');
+        expect(texts('dialog .choice .sub')[0]).toBe('In this group · adds another member');
+        expect(options(selects(one('dialog'))[0])).toEqual([
+          ['', "The CLI's default"],
+          ['opus', 'Opus'],
+          ['haiku', 'Haiku'],
+        ]);
+      },
+    );
     When('the owner chooses Opus and high', pickOpus);
     Then('fast mode is shown and the suggested tier is Strong', () => {
       expect(texts('dialog .fast')).toEqual(['Fast mode']);
@@ -218,6 +250,44 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   });
 
   Scenario(
+    'Model text limits count code points and block invalid submissions',
+    ({ Given, When, Then, And }) => {
+      Given('the CLI lists no models', () => setModels([]));
+      When('the owner opens the model editor', openEditor);
+      Then('101 astral model code points cannot be saved but 100 are valid', async () => {
+        fill(modelText(editor()), '😀'.repeat(101));
+        flushSync();
+        expect(modelText(editor()).getAttribute('pattern')).toBe('.{0,100}');
+        expect(effortText(editor()).getAttribute('pattern')).toBe('.{0,32}');
+        expect(modelText(editor()).validity.patternMismatch).toBe(true);
+        editor().requestSubmit();
+        await tick();
+        expect(body()).toEqual([]);
+        expect(await nativeLimits(editor())).toEqual([
+          { length: 101, mismatch: true, submits: 0 },
+          { length: 100, mismatch: false, submits: 1 },
+        ]);
+        one<HTMLButtonElement>('form[aria-label="Change model"] .btn-ghost').click();
+        await tick();
+      });
+      When('the owner opens Add AI', openAdd);
+      And('101 astral model code points cannot join but 100 are valid', async () => {
+        const form = one<HTMLFormElement>('dialog form');
+        fill(modelText(form), '😀'.repeat(101));
+        flushSync();
+        expect(modelText(form).validity.patternMismatch).toBe(true);
+        form.requestSubmit();
+        await tick();
+        expect(body()).toEqual([]);
+        expect(await nativeLimits(form)).toEqual([
+          { length: 101, mismatch: true, submits: 0 },
+          { length: 100, mismatch: false, submits: 1 },
+        ]);
+      });
+    },
+  );
+
+  Scenario(
     'Model choices reset dependent values and candidates reset the draft',
     ({ When, And, Then }) => {
       When('the owner opens Add AI', openAdd);
@@ -258,6 +328,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       Then('the owner card shows Opus and high and the other card shows CLI defaults', () => {
         expect(read(kv(card(), 'Model').querySelector('.name')!)).toBe('Opus');
         expect(read(kv(card(), 'Level'))).toBe('high');
+        expect(kv(card(), 'Model').classList.contains('line')).toBe(false);
+        expect(read(kv(card(), 'Model').querySelector('.what')!)).toBe('Opus');
+        expect(read(kv(card(), 'Model').querySelector('.acts')!)).toBe('Change');
         expect(read(kv(all('.member')[1], 'Model'))).toBe("The CLI's default");
         expect(read(kv(all('.member')[1], 'Level'))).toBe("The CLI's default");
       });
@@ -280,6 +353,13 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         choose(selects(one('form[aria-label="更改模型"]'))[0], 'Opus');
         flushSync();
         expect(texts('form[aria-label="更改模型"] .fast')).toEqual(['快速模式']);
+        setModels([]);
+        expect(one<HTMLInputElement>('input[placeholder="如 opus"]').placeholder).toBe('如 opus');
+        expect(one<HTMLInputElement>('input[placeholder="如 high"]').placeholder).toBe('如 high');
+        one<HTMLButtonElement>('form[aria-label="更改模型"] .btn-ghost').click();
+        await tick();
+        await openAdd();
+        expect(texts('dialog .choice .sub')[0]).toBe('已在群里 · 再加一位');
       });
     },
   );

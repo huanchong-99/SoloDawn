@@ -61,7 +61,7 @@
       <input
         class="input mono"
         bind:value={draft.model}
-        maxlength="100"
+        pattern={'.{0,100}'}
         placeholder={t('model.model.hint')}
         {disabled}
       />
@@ -71,7 +71,7 @@
       <input
         class="input mono"
         bind:value={draft.effort}
-        maxlength="32"
+        pattern={'.{0,32}'}
         placeholder={t('model.effort.hint')}
         {disabled}
       />
