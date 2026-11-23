@@ -6,12 +6,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-23 · bug · FLAKY-27: paused mentions can be delivered out of order
-
-- Symptom: the OpenCode and Qwen A10.3/A4.7 examples intermittently fail at step 10 with `timed out waiting on M4 home frames`, even after the resumed reply has been posted.
-- Cause: `selectEligibleBatch` in `internal/host/deliver.go:858` checks the live group pause state for each queued item. A resume between two checks leaves the older mention held and sends the newer one in its own turn. The older mention starts another turn after the scripted resumed turn, so the settlement wait can time out. The M4 waiter already matches replies by `re` and keeps rows that arrive before them.
-- Status: open. The test exposed a host delivery bug; no acceptance timeout or product behavior was changed.
-
 ### 2026-11-23 · limitation · A required escalation can outlast its last stronger candidate
 
 - Symptom: if the owner lowers the last stronger AI's tier while `stuck.ask` is true, the turn and the host submission refusal say no candidate is currently listed.
@@ -733,6 +727,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-23 · bug · FLAKY-27: paused mentions could be delivered out of order
+
+- Symptom: the OpenCode and Qwen A10.3/A4.7 examples intermittently failed at step 10 with `timed out waiting on M4 home frames`, even after the resumed reply had been posted.
+- Cause: `selectEligibleBatch` in `internal/host/deliver.go:853` read the live group pause state for each queued item. A resume between checks left the older mention held and sent the newer one first. The older mention then started another turn, which could prevent settlement. The M4 waiter already matched replies by `re` and kept rows that arrived before them.
+- Status: fixed in #348. Each batch uses one group pause snapshot; the acceptance timeout is unchanged.
 
 ### 2026-11-23 · bug · Runtime work could outlive host shutdown
 

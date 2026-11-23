@@ -841,7 +841,8 @@ func takeEligibleBatch(h *Host, d *delivery, key aiGroupKey, ai aiInfo) (routedT
 	d.mu.Lock()
 	queue := slices.Clone(d.held[key])
 	d.mu.Unlock()
-	target, taken, takenIDs := selectEligibleBatch(h, ai, queue)
+	readPause := func() bool { return groupIsPaused(h, key.group) }
+	target, taken, takenIDs := selectEligibleBatch(h, ai, queue, readPause)
 	if len(taken) == 0 {
 		return routedTarget{}, nil, false
 	}
@@ -849,13 +850,14 @@ func takeEligibleBatch(h *Host, d *delivery, key aiGroupKey, ai aiInfo) (routedT
 	return target, taken, true
 }
 
-func selectEligibleBatch(h *Host, ai aiInfo, queue []verifiedItem) (routedTarget, []verifiedItem, map[int64]bool) {
+func selectEligibleBatch(h *Host, ai aiInfo, queue []verifiedItem, readPause func() bool) (routedTarget, []verifiedItem, map[int64]bool) {
+	groupPaused := readPause()
 	var target routedTarget
 	var taken []verifiedItem
 	takenIDs := map[int64]bool{}
 	for _, v := range queue {
 		cand := routeSessionItem(h, ai, v)
-		if (len(taken) == 0 || cand == target) && !isItemHeld(h, cand, v) {
+		if (len(taken) == 0 || cand == target) && !isItemHeld(h, cand, v, groupPaused) {
 			target = cand
 			taken = append(taken, v)
 			takenIDs[v.item.Item] = true
@@ -878,8 +880,8 @@ func (d *delivery) prependHeld(key aiGroupKey, items []verifiedItem) {
 	setQueue(d.held, key, append(items, d.held[key]...))
 }
 
-func isItemHeld(h *Host, target routedTarget, v verifiedItem) bool {
-	if groupIsPaused(h, v.group) || taskIsHeld(h, v) {
+func isItemHeld(h *Host, target routedTarget, v verifiedItem, groupPaused bool) bool {
+	if groupPaused || taskIsHeld(h, v) {
 		return true
 	}
 	if _, held := h.Held(target.key); held {
