@@ -47,6 +47,11 @@ type Route struct {
 	ICE  []proto.ICEServer
 }
 
+type SignalReceiver interface {
+	Receive(context.Context, Route, proto.Route) error
+	Offline(pathID, target string)
+}
+
 type Path struct {
 	id     string
 	ws     *websocket.Conn
@@ -170,7 +175,7 @@ func (p *Path) send(ctx context.Context, to string, env proto.Envelope) error {
 
 // Serve reads this path until closure. Bad envelopes are dropped in isolation;
 // non-signalling events (presence, pairing, quota) belong to the caller.
-func (p *Path) Serve(ctx context.Context, node *Peer, event func(string, []byte) error) error {
+func (p *Path) Serve(ctx context.Context, node SignalReceiver, event func(string, []byte) error) error {
 	p.startRenewal(ctx)
 	defer p.renew.Stop()
 	for {
@@ -203,7 +208,7 @@ func (p *Path) ask(ctx context.Context) {
 		p.renew.Stop()
 	}
 }
-func (p *Path) handle(ctx context.Context, kind string, data []byte, node *Peer, event func(string, []byte) error) error {
+func (p *Path) handle(ctx context.Context, kind string, data []byte, node SignalReceiver, event func(string, []byte) error) error {
 	switch kind {
 	case "from":
 		return p.from(ctx, node, data)
@@ -218,7 +223,7 @@ func (p *Path) handle(ctx context.Context, kind string, data []byte, node *Peer,
 	}
 	return event(kind, data)
 }
-func (p *Path) from(ctx context.Context, node *Peer, data []byte) error {
+func (p *Path) from(ctx context.Context, node SignalReceiver, data []byte) error {
 	var f proto.Route
 	if err := proto.Decode(data, &f); err != nil {
 		return err

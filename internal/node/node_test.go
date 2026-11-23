@@ -479,6 +479,10 @@ func pairNodeOverRendezvous(t *testing.T, dir string, n *nodeRuntime, rvURL, lab
 	bPeer, bPath := newTestBrowserPeer(t, browserKey, rvURL)
 	gotPeer := startBrowserRoomJoin(t, bPath, bPeer, browserKey, secret)
 
+	offers := &pairingSignalTrace{Peer: n.peer, pairer: n.pairer}
+	n.mu.Lock()
+	n.rvSignal = offers
+	n.mu.Unlock()
 	pairErr := make(chan error, 1) // single reader: pairNodeOverRendezvous
 	var pairOut bytes.Buffer
 	go func() {
@@ -489,7 +493,7 @@ func pairNodeOverRendezvous(t *testing.T, dir string, n *nodeRuntime, rvURL, lab
 	if roomMsg.Key != n.key.ID() {
 		t.Fatalf("room peer key = %q, want %q", roomMsg.Key, n.key.ID())
 	}
-	rtcConn := dialTestRTC(t, bPeer, n.key.ID())
+	rtcConn := dialTestRTC(t, bPeer, n.key.ID(), offers)
 	sendBrowserHello(t, rtcConn, false)
 
 	e1 := sesAddEntry(browserKey, browserKey.ID(), 1, browserKey.ID(), "browser", "b1")
@@ -550,7 +554,39 @@ func decodeVerifiedRoomPeer(data []byte, room string, secret identity.Secret) (p
 	return m, secret.Verify(m, "b")
 }
 
-func dialTestRTC(t *testing.T, bPeer *peer.Peer, nodeID string) *peer.Connection {
+type pairingSignalTrace struct {
+	*peer.Peer
+	pairer *Pairer
+	offer  atomic.Pointer[string]
+}
+
+func (s *pairingSignalTrace) Receive(ctx context.Context, path peer.Route, frame proto.Route) error {
+	var env proto.Envelope
+	var header proto.PayloadHeader
+	if proto.Decode(frame.Env, &env) != nil || proto.Decode([]byte(env.Payload), &header) != nil || header.Type != "offer" {
+		return s.Peer.Receive(ctx, path, frame)
+	}
+	known := s.pairer.Known(frame.Key)
+	started := fmt.Sprintf("Pairer.Known=%t; Peer.Receive did not return", known)
+	s.offer.Store(&started)
+	err := s.Peer.Receive(ctx, path, frame)
+	finished := fmt.Sprintf("Pairer.Known=%t; Peer.Receive=%v", known, err)
+	s.offer.Store(&finished)
+	return err
+}
+
+func (s *pairingSignalTrace) String() string {
+	if s == nil {
+		return "not traced"
+	}
+	got := s.offer.Load()
+	if got == nil {
+		return "not received"
+	}
+	return *got
+}
+
+func dialTestRTC(t *testing.T, bPeer *peer.Peer, nodeID string, offers *pairingSignalTrace) *peer.Connection {
 	t.Helper()
 	rtcConn, err := bPeer.Offer(t.Context(), nodeID)
 	mustNoErr(t, err)
@@ -558,7 +594,7 @@ func dialTestRTC(t *testing.T, bPeer *peer.Peer, nodeID string) *peer.Connection
 	select {
 	case <-rtcConn.Ready():
 	case <-time.After(10 * time.Second):
-		t.Fatal("WebRTC ctl connection did not open")
+		t.Fatalf("WebRTC ctl connection did not open: %s; node offer: %s", rtcConn.NegotiationState(), offers)
 	}
 	go func() {
 		for {
@@ -1039,7 +1075,7 @@ func TestNodeWatchGrantAdmission(t *testing.T) {
 			waitCond(t, func() bool { return len(n.remoteRVPaths()) == 1 })
 			browser, path := newTestBrowserPeer(t, guest, rvURL)
 			go path.Serve(t.Context(), browser, nil)
-			conn := dialTestRTC(t, browser, n.key.ID())
+			conn := dialTestRTC(t, browser, n.key.ID(), nil)
 			checkWatchWelcome(t, conn)
 			entry := sesAddEntry(guest, guest.ID(), 1, guest.ID(), "browser", "Watcher")
 			mustNoErr(t, conn.Send(proto.Devlog{Type: "devlog", User: guest.ID(), Entries: []proto.Envelope{entry}}))

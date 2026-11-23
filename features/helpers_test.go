@@ -13,6 +13,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -997,7 +998,7 @@ func TestM3MCPShim(_ *testing.T) {
 	os.Exit(host.RunShim(args[1:], dial, os.Stdin, os.Stdout, os.Stderr))
 }
 
-func attachMCPSocket(t testing.TB, cleanup func(func()), h *host.Host, dir string) (string, func(), error) {
+func attachMCPSocket(t testing.TB, cleanup func(func()), h *host.Host, dir string, input ...io.Writer) (string, func(), error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", nil, err
@@ -1010,7 +1011,7 @@ func attachMCPSocket(t testing.TB, cleanup func(func()), h *host.Host, dir strin
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go serveTestMCP(ctx, local, h, &wg)
+	go serveTestMCP(ctx, local, h, &wg, input...)
 	stop := sync.OnceFunc(func() {
 		cancel()
 		local.Close()
@@ -1021,7 +1022,7 @@ func attachMCPSocket(t testing.TB, cleanup func(func()), h *host.Host, dir strin
 	return sockPath, stop, nil
 }
 
-func serveTestMCP(ctx context.Context, local *node.Local, h *host.Host, wg *sync.WaitGroup) {
+func serveTestMCP(ctx context.Context, local *node.Local, h *host.Host, wg *sync.WaitGroup, input ...io.Writer) {
 	defer wg.Done()
 	for {
 		conn, err := local.Accept()
@@ -1029,11 +1030,11 @@ func serveTestMCP(ctx context.Context, local *node.Local, h *host.Host, wg *sync
 			return
 		}
 		wg.Add(1)
-		go handleTestMCPConn(ctx, conn, h, wg)
+		go handleTestMCPConn(ctx, conn, h, wg, input...)
 	}
 }
 
-func handleTestMCPConn(ctx context.Context, conn net.Conn, h *host.Host, wg *sync.WaitGroup) {
+func handleTestMCPConn(ctx context.Context, conn net.Conn, h *host.Host, wg *sync.WaitGroup, input ...io.Writer) {
 	defer wg.Done()
 	open, _, r, err := node.AcceptOpening(conn)
 	if err != nil {
@@ -1043,7 +1044,11 @@ func handleTestMCPConn(ctx context.Context, conn net.Conn, h *host.Host, wg *syn
 		conn.Close()
 		return
 	}
-	h.ServeMCP(ctx, open.MCP, r, conn)
+	var reader io.Reader = r
+	if len(input) != 0 && input[0] != nil {
+		reader = io.TeeReader(reader, input[0])
+	}
+	h.ServeMCP(ctx, open.MCP, reader, conn)
 }
 
 func decodeReplyMatch(raw json.RawMessage, reqID int64) (bool, error) {

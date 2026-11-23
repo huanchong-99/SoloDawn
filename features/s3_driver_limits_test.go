@@ -3,11 +3,15 @@
 package features
 
 import (
+	"bytes"
 	"fmt"
+	"os"
+	"sync"
 	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/host"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
+	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
 func (w *s3DriverWorld) m4() *m4World {
@@ -74,12 +78,57 @@ func (w *s3DriverWorld) timeout() error {
 			taskID, err = m4.startTaskFor("Worker", "Long task", "Exceed the turn limit")
 			return err
 		},
-		func() error { return m.thenAIPosts("Worker", "Long turn.", "Website") },
+		func() error { return w.waitInitialTimeoutPost(taskID) },
 		func() error {
 			return m.drainBrowserUntil(75*time.Second, func() bool {
 				return viewHasInterruptedMsg(&m.homeView, m.aiByName["Worker"].ID, "timeout") && m.tasks[taskID].State == "failed"
 			}, nil)
 		})
+}
+
+type s3MCPInput struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (p *s3MCPInput) Write(b []byte) (int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.buf.Write(b)
+}
+
+func (p *s3MCPInput) receivedPost(text string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for line := range bytes.SplitSeq(p.buf.Bytes(), []byte{'\n'}) {
+		if bytes.Contains(line, []byte(`"name":"post"`)) && bytes.Contains(line, []byte(text)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (w *s3DriverWorld) waitInitialTimeoutPost(taskID string) error {
+	m := w.caps.m3
+	const text = "Long turn."
+	err := m.thenAIPosts("Worker", text, "Website")
+	if err == nil {
+		return nil
+	}
+	received := w.mcp.receivedPost(text)
+	log, logErr := os.ReadFile(m.cluster.LogPath)
+	gid := m.groups["Website"]
+	var member, task string
+	var posts int
+	readErr := m.node().Store.Write(func(tx *store.Tx) error {
+		return tx.QueryRow(`SELECT
+			coalesce((SELECT data->>'state' FROM row WHERE g=? AND r='member' AND id=?), ''),
+			coalesce((SELECT data->>'state' FROM row WHERE g=? AND r='task' AND id=?), ''),
+			(SELECT count(*) FROM row WHERE g=? AND r='msg' AND gone=0 AND data->>'by'=? AND data->>'text'=?)
+		`, gid, m.aiByName["Worker"].ID, gid, taskID, gid, m.aiByName["Worker"].ID, text).Scan(&member, &task, &posts)
+	})
+	return fmt.Errorf("%w; host MCP receipt=%t; home member=%q task=%q posts=%d db=%v; fake CLI log err=%v:\n%s",
+		err, received, member, task, posts, readErr, logErr, log)
 }
 
 func (w *s3DriverWorld) readOnly() error {

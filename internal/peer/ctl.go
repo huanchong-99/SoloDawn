@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -45,6 +46,12 @@ func (c *Connection) Ready() <-chan struct{} { return c.ready }
 func (c *Connection) Done() <-chan struct{}  { return c.ctx.Done() }
 func (c *Connection) Close() error           { return c.close() }
 func (c *Connection) isClosed() bool         { return c.ctx.Err() != nil }
+
+func (c *Connection) NegotiationState() string {
+	pair, err := c.pc.SCTP().Transport().ICETransport().GetSelectedCandidatePair()
+	return fmt.Sprintf("ICE=%s gathering=%s signaling=%s selected=%v selectedError=%v",
+		c.pc.ICEConnectionState(), c.pc.ICEGatheringState(), c.pc.SignalingState(), pair, err)
+}
 
 // acceptCtl takes the channel labelled ctl; dispatch has checked the label.
 func (c *Connection) acceptCtl(dc *webrtc.DataChannel, onOpen func(*Connection)) {
