@@ -259,7 +259,11 @@ func renderBlock(index, total int, b itemBlock) string {
 }
 
 func (c *turnCtx) sessionHeader() string {
-	return fmt.Sprintf("[SoloDawn] group %q · you are %q · %s", c.groupName(), c.s.Name, c.sessionLabel())
+	header := fmt.Sprintf("[SoloDawn] group %q · you are %q · %s", c.groupName(), c.s.Name, c.sessionLabel())
+	if c.s.Secretary {
+		return header + "\n" + c.profileRoster()
+	}
+	return header
 }
 
 func (c *turnCtx) groupName() string {
@@ -555,7 +559,7 @@ func (c *turnCtx) buildCarried(p parsedItem, _ bool) (itemBlock, int, error) {
 	if err != nil {
 		return itemBlock{}, 0, err
 	}
-	return itemBlock{why: p.item.Why, authority: "instruction", body: body}, 0, nil
+	return itemBlock{why: p.item.Why, authority: "instruction", body: c.appendEscalation(body, p)}, 0, nil
 }
 
 func (c *turnCtx) buildResume(p parsedItem, _ bool) (itemBlock, int, error) {
