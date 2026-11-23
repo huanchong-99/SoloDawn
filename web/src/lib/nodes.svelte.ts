@@ -108,8 +108,13 @@ export class Nodes {
     return { link: answer.link!, expires: answer.expires! };
   }
 
-  async #read(home: Home, ctl: p.Ctl) {
-    const answer = await ctl.request({ t: 'host.info' }).catch(lost);
+  /** Asks the online owner node `home` for `host.info` with `refresh`: its models listed again. */
+  refresh(home: Home) {
+    return this.#read(home, home.ctl!, true);
+  }
+
+  async #read(home: Home, ctl: p.Ctl, refresh?: true) {
+    const answer = await ctl.request({ t: 'host.info', ...(refresh && { refresh }) }).catch(lost);
     if (home.ctl !== ctl || answer.err) return;
     const { re: _re, ok: _ok, ...info } = answer;
     this.infos.set(home, info);

@@ -249,11 +249,11 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(1);
 
-      // Add Codex via AddAI dialog; Claude Code now shows "Already in this group".
+      // Add Codex via AddAI dialog; Claude Code remains selectable.
       await members.locator('button', { hasText: 'Add AI' }).click();
       await poll(() =>
         addDlg.locator('.choice', { hasText: 'Claude Code · studio' }).textContent(),
-      ).toContain('Already in this group');
+      ).toContain('In this group · adds another member');
       await addDlg.locator('.choice', { hasText: 'Codex · studio' }).locator('input').check();
       await poll(() =>
         addDlg.getByRole('textbox', { name: 'Name in the group' }).inputValue(),

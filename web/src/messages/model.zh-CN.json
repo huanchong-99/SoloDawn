@@ -1,0 +1,14 @@
+{
+  "model.model": "模型",
+  "model.effort": "思考级别",
+  "model.default": "CLI 默认",
+  "model.notlisted": "未列出",
+  "model.fast": "快速模式",
+  "model.model.hint": "如 opus",
+  "model.effort.hint": "如 high",
+  "model.refresh": "刷新模型列表",
+  "model.edit": "更改模型",
+  "model.save": "保存",
+  "model.cancel": "取消",
+  "model.change": "更改"
+}

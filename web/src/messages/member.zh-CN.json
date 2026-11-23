@@ -16,7 +16,7 @@
   "member.join.error.conflict": "这个名字在群里已经有人用了。",
   "member.join.error.home_unreachable": "AI 所在的电脑现在连不上这个群的家。等两边都在线后再试。",
   "member.join.error.lost": "没有发出去：连不上 AI 所在的电脑。",
-  "member.join.joined": "已在群里",
+  "member.join.joined": "已在群里 · 再加一位",
   "member.join.lead": "从已连接的电脑上选一个登记好的 AI 加进这个群。",
   "member.join.loading": "正在读取你的电脑…",
   "member.join.name": "在群里的名字",
