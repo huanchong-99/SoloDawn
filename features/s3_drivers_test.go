@@ -7,11 +7,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
-	"testing"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -20,29 +18,6 @@ import (
 )
 
 func init() { stepSets["s3_drivers"] = s3DriverSteps }
-
-func TestS3Features(t *testing.T) {
-	dir := t.TempDir()
-	args := []string{"build", "-o", dir + string(os.PathSeparator), "../internal/host/fakecli/claude", "../internal/host/fakecli/codex", "../internal/host/fakecli/opencode", "../internal/host/fakecli/qwen"}
-	if out, err := exec.Command("go", args...).CombinedOutput(); err != nil {
-		t.Fatalf("build fake CLIs: %v\n%s", err, out)
-	}
-	f := fixtures{t: t, fakeCLIs: dir}
-	suite := godog.TestSuite{
-		ScenarioInitializer: func(sc *godog.ScenarioContext) {
-			s3DriverSteps(sc, f)
-			hostCapsSteps(sc, f)
-			s3PresetSteps(sc)
-			s3KBSteps(sc, f)
-		},
-		Options: &godog.Options{Format: "pretty", Paths: []string{"s3_drivers.feature", "host_caps.feature", "s3_preset.feature", "s3_kb.feature"}, Tags: tagsForS3(), Strict: true, TestingT: t},
-	}
-	if suite.Run() != 0 {
-		t.Fatal("S3 acceptance scenarios failed")
-	}
-}
-
-func tagsForS3() string { return "~@pending && ~@live && ~@web" }
 
 type s3DriverWorld struct {
 	f       fixtures
