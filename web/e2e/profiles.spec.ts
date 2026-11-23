@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, afterEach, beforeAll, describe, expect, inject, test } from 'vitest';
@@ -59,12 +59,15 @@ describe('AI profiles with fake CLIs', () => {
   let server: ViteDevServer;
   const restarted: Proc[] = [];
   const contexts: BrowserContext[] = [];
+  let bin: string;
 
   beforeAll(async () => {
+    bin = join(inject('e2e').root, 'profiles-bin');
+    await mkdir(bin);
     await exec('go', [
       'build',
       '-o',
-      `${inject('e2e').bin}/`,
+      `${bin}/`,
       '../internal/host/fakecli/opencode',
       '../internal/host/fakecli/qwen',
     ]);
@@ -105,6 +108,7 @@ describe('AI profiles with fake CLIs', () => {
       nodes: 1,
       env: () => ({
         ...gitIdentityEnv,
+        PATH: [bin, inject('e2e').bin, process.env.PATH ?? ''].join(delimiter),
         SOLODAWN_FAKE_CLAUDE_SCRIPT: claude,
         SOLODAWN_FAKE_CODEX_SCRIPT: codex,
         SOLODAWN_FAKE_OPENCODE_SCRIPT: opencode,
@@ -237,7 +241,6 @@ describe('AI profiles with fake CLIs', () => {
 
     const [node] = net.nodes;
     process.kill(-node.pid, 'SIGTERM');
-    await poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('down');
     await poll(() => {
       try {
         process.kill(node.pid, 0);

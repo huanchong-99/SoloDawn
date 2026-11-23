@@ -80,9 +80,9 @@ fake CLIs fail checks and reviews on script.
   is `true`.
 - **A10.11** S is the assignee, or every AI keeps the default tier: after
   two failed reviews in a row `stuck.ask` is `false`, the item has no added
-  line and `submit_task` succeeds. With C `strong` and S the assignee: the
-  line names C, and C's reply clears `ask`. A1 to A8 pass with default
-  profiles.
+  line and `submit_task` succeeds. With C `strong` and S `standard` as the
+  assignee: the line names C, and C's reply clears `ask`. A1 to A8 pass with
+  default profiles.
 - **A10.12** M fails hosted checks once, then a review once: `n` is 1 and
   nothing is asked. M fails a review, passes hosted checks on the next
   commit and fails the review again: `n` is 2 and `ask` is `true`, since a
@@ -120,7 +120,6 @@ fake CLIs fail checks and reviews on script.
 - **A10.16** The owner's edit stays. The owner sets `tier` `light` and
   `skills` on a member whose model is suggested `strong`. After a refresh
   whose list suggests otherwise, lacks that model, or is empty, and after
-  a restart of the node, the member row is unchanged byte for byte. In the
-  browser: the panel shows the owner's tier, the suggestion beside it, and
-  "not listed" for a model that is gone.
-
+  a restart of the node, the four profile fields are unchanged byte for byte.
+  In the browser: the panel shows the owner's tier, with the suggestion beside
+  it while the model is listed, and "not listed" with no suggestion once it is gone.

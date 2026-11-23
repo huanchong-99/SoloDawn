@@ -187,7 +187,11 @@ jobs:
               printf "%.1f%% of %d statements in %s\n", 100 * c[f] / n[f], n[f], g } }' cover.out |
             sort -k5 | tee -a "$GITHUB_STEP_SUMMARY"
       # The statement coverage gate, on the files this system builds (see the Linux job).
-      - name: Uncovered product statements
+      - name: Uncovered Windows product statements
+        if: runner.os == 'Windows'
+        run: .github/scripts/go-uncovered.sh cover.out
+      - name: Uncovered macOS product statements
+        if: runner.os == 'macOS'
         continue-on-error: true
         run: .github/scripts/go-uncovered.sh cover.out
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -72,15 +73,22 @@ func (w *a10ModelsWorld) setupModels(all bool) error {
 	if err != nil {
 		return err
 	}
-	if err := hostAgentsLinkOrCopy(git, filepath.Join(f.fakeCLIs, hostAgentsExe("git"))); err != nil {
+	if err := w.hostModelsWorld.setup(f, w.cleanup); err != nil {
 		return err
 	}
-	if err := w.hostModelsWorld.setup(f, w.cleanup); err != nil {
+	if err := a10ModelGit(git, f.fakeCLIs); err != nil {
 		return err
 	}
 	w.f = f
 	w.cluster = nodetest.Start(scenarioTB{TB: f.t, cleanup: w.cleanup}, nodetest.Config{Root: w.dir, BinDir: f.fakeCLIs, Nodes: 1, Now: func() time.Time { return w.now }})
 	return w.connect()
+}
+
+func a10ModelGit(git, dir string) error {
+	if runtime.GOOS == "windows" {
+		return os.Setenv("PATH", os.Getenv("PATH")+string(os.PathListSeparator)+filepath.Dir(git))
+	}
+	return hostAgentsLinkOrCopy(git, filepath.Join(dir, hostAgentsExe("git")))
 }
 
 func (w *a10ModelsWorld) modelBins(all bool) (fixtures, error) {

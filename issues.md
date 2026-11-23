@@ -725,8 +725,20 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-23 · deviation · Two profile acceptance sequences need clarification
 
 - Symptom: A10.11 expected the strong secretary to be stronger than the assignee S, which the cast also called strong. A10.12 asked the same task to fail a review after passing one.
-- Cause: [the profiles contract](planning/contracts/step-3/profiles.md) orders tiers strictly. The task machine moves a passing review to `merge` and accepts a review only at `review` (`internal/home/machine.go`).
-- Status: resolved in I3-2b with the coordinator's approved wording: A10.11 makes S standard and C strong in the secretary subcase; A10.12 tests the first failure after clearing in a fresh task flow. No product change is needed.
+- Cause: [the profiles contract](planning/contracts/step-3/profiles.md) orders tiers strictly. A passing review moves the task to `merge`, but a merge conflict can return it to `local_check` (row 9, `conflicted` in `internal/home/machine.go`), so a later failure on the same task is reachable.
+- Status: decided in the I3-2b review on 2026-11-23: A10.11 makes S standard and C strong in the secretary subcase; A10.12 uses a fresh task flow to test the same failure counter starting from nil after clearing. No product change is needed.
+
+### 2026-11-23 · bug · Runtime work could outlive host shutdown
+
+- Symptom: the macOS race detector reported a shared hold hook being restored while a host still read it.
+- Cause: runtime callbacks in `internal/host/run.go` could deliver queued items or flush member status from an untracked goroutine. Member status calls `Host.Held` in `internal/host/host.go`.
+- Status: runtime shutdown now joins those callbacks before returning. The reported macOS failure was not reproduced on Linux.
+
+### 2026-11-23 · bug · Host tests observed status before work completed
+
+- Symptom: a replacement CLI sometimes appeared to have its old turn metadata, the workspace test could time out before fake GitHub finished merging, and the hand-back test could look up a process before one existed.
+- Cause: `startReplacementProcess` in `internal/host/run.go` sends the replacement status before setting the turn and writing it to the CLI. In `internal/host/forge_test.go`, the fake GitHub CLI inherited the race detector's exit delay for each invocation. In `internal/host/run_test.go`, the fake driver records a launch before it constructs and publishes the corresponding process.
+- Status: the tests wait for the replacement turn, merged command and hand-back process; the fake forge CLI disables its race-detector exit delay.
 
 ### 2026-11-23 · bug · The terminal page stayed at "Direct connection required" after the path recovered
 
