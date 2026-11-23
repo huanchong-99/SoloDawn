@@ -43,6 +43,10 @@ Feature: A host composes session instructions and turn text
     Then the composed turn text is:
       """
       [SoloDawn] group "Website" · you are "Secretary" · secretary session
+      AI members (CLI on computer · tier · state · skills):
+      - "Claude Code" · claude on node · standard · waiting
+      - "Codex" · codex on node · standard · waiting
+      - "Secretary" · claude on node · standard · waiting
       == 1 of 1 · confirmed · instruction
       -- from "owner" in main · instruction
       Brief "Connection path" (id KaiCW9JC8UOG7lKNduDo8Q) confirmed.
@@ -54,6 +58,10 @@ Feature: A host composes session instructions and turn text
     Then the composed turn text is:
       """
       [SoloDawn] group "Website" · you are "Secretary" · secretary session
+      AI members (CLI on computer · tier · state · skills):
+      - "Claude Code" · claude on node · standard · waiting
+      - "Codex" · codex on node · standard · waiting
+      - "Secretary" · claude on node · standard · waiting
       == 1 of 1 · decided · instruction
       -- from "owner" in main · instruction
       Decision (id Zk3m8vN2pQ5rT7wX9yB1cA): Where should the notice go?
