@@ -403,6 +403,29 @@ func TestHostJoinPayloadValidation(t *testing.T) {
 	joinAssertEqual(t, "invalid payload dials", rig.dialCount("home-1"), 0)
 }
 
+func TestHostJoinExternal(t *testing.T) {
+	rig := newJoinRig(t)
+	fh := rig.addHome("home-1")
+	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", rig.makeRepo("web", "main"), "main"))
+	for _, bad := range []proto.HostJoin{
+		{Group: joinTestGroup1, Home: "home-1", Agent: "external", Name: "Z"},
+		{Group: joinTestGroup1, Home: "home-1", Agent: "external", Name: "Z", Account: "free"},
+		{Group: joinTestGroup1, Home: "home-1", Agent: "external", Name: "Z", Account: "team", Secretary: true},
+	} {
+		seamCode(t, rig.callJoin(t.Context(), bad), "bad_request")
+	}
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "external", Name: "Z", Account: "team", Tool: joinStr("ZCode")})
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "external", Name: "Y", Account: "api_key"})
+	add := fh.addAIs[0]
+	joinAssertEqual(t, "add_ai cli", add.CLI, "external")
+	joinAssertEqual(t, "add_ai tool", *add.Tool, "ZCode")
+	joinAssertEqual(t, "add_ai account", add.Account, "team")
+	joinAssertEqual(t, "second add_ai tool", fh.addAIs[1].Tool, (*string)(nil))
+	s, _ := rig.h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: string(add.ID)})
+	joinAssertEqual(t, "session", s, Session{SessionKey: s.SessionKey, Kind: GroupSession, Folder: "repo", Agent: "external", Home: "home-1", Name: "Z", State: Dormant, LastActive: s.LastActive})
+	seamCode(t, rig.callLeave(t.Context(), joinTestGroup1, "external"), "bad_request")
+}
+
 func TestHostJoinPreconditions(t *testing.T) {
 	rig := newJoinRig(t)
 	fh := rig.addHome("home-1")

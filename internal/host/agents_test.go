@@ -260,10 +260,11 @@ func TestAgentsDetectsFakeCLIsAndPreservesStoredFields(t *testing.T) {
 			Groups: []proto.AgentGroup{},
 			Models: []proto.Model{},
 		},
+		externalHostAgent(),
 	}
 	agtEqual(t, got, want)
 	encoded := agtVal(json.Marshal(got))
-	agtEqual(t, proto.UnexpectedNulls(encoded, "/1/account", "/2/account"), []string{})
+	agtEqual(t, proto.UnexpectedNulls(encoded, "/1/account", "/2/account", "/3/account"), []string{})
 
 	wantRows := strings.Join([]string{
 		`claude|2.1.311|team|{"day":{"unit":"turns","max":200},"task":{"unit":"usd","max":12.5}}`,
@@ -281,13 +282,13 @@ func TestAgentsEmptyNonZeroExitAndTimeout(t *testing.T) {
 		h.Now = func() time.Time { return now }
 
 		got := agtReadAgents(t, h)
-		agtEqual(t, got, []proto.HostAgent{})
-		agtEqual(t, string(agtVal(json.Marshal(got))), "[]")
+		agtEqual(t, got, []proto.HostAgent{externalHostAgent()})
+		agtEqual(t, string(agtVal(json.Marshal(got))), `[{"agent":"external","cli_version":"","account":null,"login_ok":true,"caps":{},"driver":{"accounts":["personal","team","api_key"],"takeover":"none"},"groups":[],"models":[]}]`)
 
 		// Install claude after the empty probe: still cached within 60 s.
 		standIns.install("claude", agtStandInSpec{Stdout: "2.1.311 (Claude Code)\n"})
 		now = now.Add(30 * time.Second)
-		agtEqual(t, agtReadAgents(t, h), []proto.HostAgent{})
+		agtEqual(t, agtReadAgents(t, h), []proto.HostAgent{externalHostAgent()})
 		agtEqual(t, standIns.calls("claude"), 0)
 		agtEqual(t, agtAgentRows(t, h.Store), "")
 	})
@@ -299,7 +300,7 @@ func TestAgentsEmptyNonZeroExitAndTimeout(t *testing.T) {
 		})
 		h, _ := seamHost(t, seamStore(t))
 		got := agtReadAgents(t, h)
-		agtEqual(t, len(got), 1)
+		agtEqual(t, len(got), 2)
 		agtEqual(t, got[0].Agent, "codex")
 		agtEqual(t, got[0].CLIVersion, "0.164.0")
 	})
@@ -312,7 +313,7 @@ func TestAgentsEmptyNonZeroExitAndTimeout(t *testing.T) {
 		h, _ := seamHost(t, seamStore(t))
 		start := time.Now()
 		got := agtReadAgents(t, h)
-		agtEqual(t, len(got), 1)
+		agtEqual(t, len(got), 2)
 		agtEqual(t, got[0].Agent, "codex")
 		if elapsed := time.Since(start); elapsed < 4*time.Second || elapsed >= 9*time.Second {
 			t.Fatalf("probe took %v, want bounded by 5s agtProbeSeconds", elapsed)
@@ -370,7 +371,7 @@ func TestAgentsCancelledContextDoesNotCache(t *testing.T) {
 	agtEqual(t, got, []proto.HostAgent(nil))
 
 	live := agtReadAgents(t, h)
-	agtEqual(t, len(live), 1)
+	agtEqual(t, len(live), 2)
 	agtEqual(t, live[0].Agent, "claude")
 	agtEqual(t, standIns.calls("claude"), 1)
 }

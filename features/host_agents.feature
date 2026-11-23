@@ -3,15 +3,16 @@ Feature: Detecting AI CLIs, sign-in status and declaring accounts
     Given a host with fake CLIs "claude,codex" on PATH
     When the host reads its agents
     Then the host reports agents:
-      | agent  | cli_version | account | login_ok |
-      | claude | 2.1.311     | -       | true     |
-      | codex  | 0.164.0     | -       | true     |
+      | agent    | cli_version | account | login_ok |
+      | claude   | 2.1.311     | -       | true     |
+      | codex    | 0.164.0     | -       | true     |
+      | external |             | -       | true     |
     When fake CLIs on PATH change to "" and 59 seconds pass
     And the host reads its agents
-    Then the host reports 2 agents
+    Then the host reports 3 agents
     When 1 more second passes
     And the host reads its agents
-    Then the host reports 0 agents
+    Then the host reports 1 agents
 
   Scenario Outline: Declaring an agent account checks the agent, account and PATH
     Given a host with fake CLIs "<installed>" on PATH
@@ -35,9 +36,10 @@ Feature: Detecting AI CLIs, sign-in status and declaring accounts
     When that session reports "login_invalid"
     And the host reads its agents
     Then the host reports agents:
-      | agent  | cli_version | account | login_ok |
-      | claude | 2.1.311     | -       | false    |
-      | codex  | 0.164.0     | -       | true     |
+      | agent    | cli_version | account | login_ok |
+      | claude   | 2.1.311     | -       | false    |
+      | codex    | 0.164.0     | -       | true     |
+      | external |             | -       | true     |
     When that session ends a turn with status "failed"
     And the host reads its agents
     Then agent "claude" has login_ok "false"
@@ -48,6 +50,7 @@ Feature: Detecting AI CLIs, sign-in status and declaring accounts
     And owner device "owner-1" sends agent.set for "claude" with account "personal"
     And the host reads its agents
     Then the host reports agents:
-      | agent  | cli_version | account  | login_ok |
-      | claude | 2.1.311     | personal | true     |
-      | codex  | 0.164.0     | -        | true     |
+      | agent    | cli_version | account  | login_ok |
+      | claude   | 2.1.311     | personal | true     |
+      | codex    | 0.164.0     | -        | true     |
+      | external |             | -        | true     |

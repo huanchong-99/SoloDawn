@@ -996,7 +996,7 @@ func tryReserveSlot(h *Host, rt *runtimePart, key SessionKey, maxOpen int) (*Ses
 func countOpenLocked(rt *runtimePart, sessions []Session) int {
 	open := 0
 	for _, s := range sessions {
-		if s.State != Dormant || rt.starting[s.SessionKey] {
+		if (s.State != Dormant && s.Agent != externalAgent) || rt.starting[s.SessionKey] {
 			open++
 		}
 	}
@@ -1022,7 +1022,7 @@ func longestWaitingLocked(rt *runtimePart, sessions []Session) *SessionKey {
 }
 
 func eligibleWaitingLocked(rt *runtimePart, s Session) bool {
-	if s.State != Waiting || rt.closing[s.SessionKey] {
+	if s.State != Waiting || s.Agent == externalAgent || rt.closing[s.SessionKey] {
 		return false
 	}
 	lp := rt.procs[s.SessionKey]
@@ -1089,6 +1089,9 @@ func (h *Host) MemberState(group, member string) (state, task string) {
 	if s, ok := latestWaitingSession(list); ok {
 		return string(Waiting), s.Task
 	}
+	if memberAgent(h, group, member) == externalAgent {
+		return string(Waiting), ""
+	}
 	return string(Dormant), ""
 }
 
@@ -1103,6 +1106,9 @@ func memberOverlayState(h *Host, group, member string) string {
 	}
 	if stateOf(h).isLimited(aiSlot{group: group, member: member}) {
 		return "limited"
+	}
+	if extAbsent(h, group, member) {
+		return "offline"
 	}
 	if groupIsPaused(h, group) {
 		return "paused"
