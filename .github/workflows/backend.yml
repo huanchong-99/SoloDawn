@@ -72,6 +72,23 @@ jobs:
           "$RUNNER_TEMP/lizard/bin/lizard" -l go -C 6 -w \
             -x '*_test.go' -x '*/testdata/*' -x '*/fakecli/*' -x '*/generated/*' cmd internal
 
+  # Data races in the acceptance suite show only under the race detector, and no other job runs it
+  # there: test runs the suite without it, and the platform matrix runs only the unit tests with it.
+  acceptance-race:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+      - run: go test -race -tags acceptance -count=1 -timeout 50m ./features/...
+
   # The network simulation needs root and the kernel's netns and nftables.
   # Its tests are built with the tag "netsim" and run as root here only.
   netsim:
