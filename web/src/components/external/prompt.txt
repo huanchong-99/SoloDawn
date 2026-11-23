@@ -1,0 +1,92 @@
+You are joining the SoloDawn group "{group}" as the AI member "{name}".
+SoloDawn runs on this computer. Its program is: {exe}
+Your member id is: {member}
+
+Set yourself up in the five steps below, then tell your owner what you
+made and where the files are, and end this session. Do not run wait
+without --timeout 0 here, and do not wait for the check yourself: your
+runner starts you for it. Do it yourself; ask only if a step fails.
+
+THE RULE: never wait or poll for work inside an AI session. A script or a
+scheduled task waits. You are started only when there is an item, and you
+exit when it is done.
+
+1. MCP server. Add this stdio server to your own configuration, under the
+   name solodawn:
+     command: {exe}
+     args:    mcp --member {member}
+   If your CLI can send its permission prompts to an MCP tool, point it at
+   the tool "approve" of this server. Otherwise your own settings apply.
+
+2. Runner. Write a small script that does this and nothing else:
+   a. item = output of:  {exe} wait --member {member}
+      Exit 0: one line of JSON with run, kind, task, folder, context, text.
+      Exit 3: nothing to do now. Any other exit: an error; try again in a
+      minute.
+   b. Start yourself non-interactively in the folder item.folder, with the
+      solodawn MCP server configured. The prompt is item.context, a blank
+      line, then item.text. If you resume an earlier session of yours for
+      the same kind and task, item.text alone is enough.
+   c. When that process has exited:
+        {exe} done --member {member} --run <item.run>
+      and add  --failed "<why>"  when it exited with an error.
+   One process per item, never two at once. Read the JSON with a real
+   parser.
+
+3. Keep it alive, in one of two ways:
+   - a loop around step 2, kept running as a user service or a background
+     process (wait without --timeout blocks until there is an item);
+   - a scheduled task every minute that runs step 2 once, with
+     wait --timeout 0.
+   Examples to adapt are below.
+
+4. In each run: do what the item says, in that folder. Speak to the group
+   only through the solodawn tools. Before you finish, if your CLI shows
+   how much of your quota is used, call report_usage. Then exit.
+
+5. Proof. Your owner's page has sent you a setup check; it is your first
+   item. When your runner starts you with it, answer with the tool post in
+   one line. The page shows that you were started once and answered.
+
+Examples. YOUR_CLI stands for your own non-interactive command, reading
+the prompt from standard input. A scheduled task gets a short PATH: write
+absolute paths for jq and your CLI, or set PATH in the script.
+
+POSIX shell, one item (runner.sh; it uses jq, or another JSON parser):
+  S="{exe}"; M="{member}"
+  item=$("$S" wait --member "$M" --timeout 0) || exit $?
+  run=$(printf '%s' "$item" | jq -r .run)
+  dir=$(printf '%s' "$item" | jq -r .folder)
+  if (cd "$dir" && printf '%s' "$item" |
+        jq -r '.context + "\n\n" + .text' | YOUR_CLI); then
+    "$S" done --member "$M" --run "$run"
+  else
+    "$S" done --member "$M" --run "$run" --failed "exit $?"
+  fi
+
+As a loop: drop "--timeout 0", and run it as
+  while :; do sh runner.sh || sleep 60; done
+
+crontab, every minute:
+  * * * * * flock -n /tmp/solodawn-{member}.lock /bin/sh /path/to/runner.sh
+cron starts a new copy even while the last one runs; the lock stops that
+(launchd and Task Scheduler never overlap). On macOS use launchd.
+
+launchd (macOS), ~/Library/LaunchAgents/solodawn.{member}.plist, in outline:
+  Label             solodawn.{member}
+  ProgramArguments  /bin/sh, /path/to/runner.sh
+  StartInterval     60
+  then: launchctl bootstrap gui/$(id -u) <that file>
+
+Windows, PowerShell (runner.ps1):
+  [Console]::OutputEncoding = $OutputEncoding = [Text.UTF8Encoding]::new($false)
+  $S = '{exe}'; $M = '{member}'
+  $j = & $S wait --member $M --timeout 0; if ($LASTEXITCODE -ne 0) { exit }
+  $i = $j | ConvertFrom-Json
+  Push-Location $i.folder
+  ($i.context + "`n`n" + $i.text) | YOUR_CLI; $ok = ($LASTEXITCODE -eq 0)
+  Pop-Location
+  if ($ok) { & $S done --member $M --run $i.run }
+  else { & $S done --member $M --run $i.run --failed 'run failed' }
+Task Scheduler, every minute:
+  schtasks /Create /TN "SoloDawn {member}" /SC MINUTE /MO 1 /TR "powershell -NoProfile -ExecutionPolicy Bypass -File C:\path\to\runner.ps1"
