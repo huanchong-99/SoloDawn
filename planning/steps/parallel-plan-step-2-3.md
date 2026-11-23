@@ -238,6 +238,46 @@ changes `host/turn.go` and #343 `features/a10_profiles*`,
 this lane writes. #349 adds `planning/spikes/zcode.md`, a check of ZCode as
 an external AI: what it finds goes into I3-3's `live` test.
 
+### 4.3 Lane DIAGNOSTICS: logs and tests that explain a failure
+
+Added 2026-11-23 (the owner's rule of that day, `issues.md`;
+`contracts/diagnostics.md`). Several tests called flaky were product races,
+and each took hours of stress runs to find. The lane makes one occurrence
+enough: the node logs its decisions, and a failing test says what it saw
+and leaves the logs behind. It adds no command and no package.
+
+| Id | Does | Tests | Owns | Needs | Sz | Start |
+| --- | --- | --- | --- | --- | --- | --- |
+| DG-1 | Harness: `log` into a buffer emptied per scenario, at `debug`; the folder of a failed scenario; the one wait helper of `features/` with the message form; the upload in CI (`diagnostics.md` section 4, points 1, 2 and 4) | a scenario made to fail leaves the folder; unit of the helper | `features/diag_test.go`; one hook in `features/acceptance_test.go`; one line where a child node starts (`features/node_test.go`, `m6_test.go`, `m8_test.go`, `s2_cast_test.go`) and the `SIGQUIT` in `features/proc_unix_test.go`; `.github/workflows/backend.yml` | — | S | now |
+| DG-2 | `features/`: every wait that can time out goes through the helper of DG-1. It changes waits only, in every step file | the scenarios still pass | the waits of `features/*_test.go`; `helpers_test.go`, `m3_test.go`, `s3_driver_limits_test.go` and `s3_drivers_test.go` last, after #360; `host_run_test.go` after #363 | DG-1 | M | after DG-1 |
+| DG-3 | `internal/`: the same for the waits in the test files of `home`, `node`, `peer` and `host`, with each package's own helpers; the root test that holds the form in `features/` and `internal/` (section 4, point 1) | the root test | `waits_test.go`; the waits of `internal/**/*_test.go`; `home/cmd_hostev_test.go`, `node/node_test.go` and `peer/ctl_test.go` after #360; `host/pty_test.go` and `host/run_test.go` after #363 | DG-2 | M | after DG-2 |
+| DG-4 | Node: the flags of `log`, the level file, the logger with `node`; `node.start`, `node.stop`, `home.dial`, `bg.*` for the runtime's own work; the section "After a failure" at the end of `install.md` (sections 1, 3, 5) | unit: each line once, with its fields; the level file | `node/diag.go`; its calls in `node/node.go`, `node/teams.go`; `install.md`; `node/README.md` | #360 merged or closed | S | after #360 |
+| DG-5 | Home: `home.attach`, `home.detach`, `cmd.reply`, `rows.send`, `inbox.send`, `ack.recv`, `bg.*` (section 2) | unit: each line once, with its fields; `rows.send` before the `cmd.reply` of one command | `home/diag.go`; its calls in `home/run.go`, `run_conn.go`, `run_group.go`, `run_push.go`, `inbox.go`; `home/README.md` | — | S | now |
+| DG-6 | Host: `host.attach` to `settle.end` of section 2, and `bg.*` through one wrapper for the work its wait groups start | unit: each line once, with its fields; `inbox.take` with the pause reading and what it left | `host/diag.go`; its calls in `host/host.go`, `deliver.go`, `run.go`, `external.go`, `mcp.go`, `tools_task.go`, `limits.go`, `takeover.go`, `home_moved.go`; `host/README.md` | #363 and the fixes of FLAKY-28 and FLAKY-30 merged | M | after those |
+| DG-7 | Peer: `sig.send`, `sig.recv`, `ice.state`, `ice.pair`, `ctl.open`, `conn.close` (section 2) | unit with two peers in one process: each line once, with its fields | `peer/diag.go`; its calls in `peer/signal.go`, `peer/ctl.go`, `peer/sockets.go` | #360 merged or closed | S | after #360 |
+
+- **Order.** DG-1, DG-2 and DG-3 are one chain for one builder, bottom up;
+  it starts now and needs no product unit. DG-5 starts now beside it. DG-4
+  and DG-7 start when #360 is merged or closed, DG-6 when `internal/host`
+  is free. The four product units write no common file and merge in any
+  order: each package makes its own logger from the key or id it already
+  has.
+- **Checked against the open pull requests on 2026-11-23.** #360 changes
+  `features/helpers_test.go`, `m3_test.go`, `s3_driver_limits_test.go`,
+  `s3_drivers_test.go`, `home/cmd_hostev_test.go`, `node/node.go`,
+  `node/node_test.go`, `peer/ctl.go`, `peer/ctl_test.go` and
+  `peer/path.go`; #363 changes `features/host_run_test.go`,
+  `host/pty_test.go` and `host/run_test.go`; #365 changes
+  `features/a10_external.feature`, which no unit here writes; #361 is a lab
+  branch that is not merged. DG-2 and DG-3 check the list again when they
+  start, and take a file another open pull request holds last.
+- A test that reads what `log` wrote (`host/deliver_test.go`,
+  `node/update_test.go`, `node/schedule_test.go`, `home/run_test.go`) now
+  sees the event lines too; the unit of that package adjusts it.
+- When the lines exist, the hooks that #360 added to look into one failure
+  (`Connection.NegotiationState`, the signal receiver of `node/node.go`)
+  can go; that is a follow-up, not a unit here.
+
 ## 5. Open questions for the coordinator
 
 1. **R-44 against "highest level, no control" in 1.0.** (a) Drop the cap
@@ -309,6 +349,20 @@ an external AI: what it finds goes into I3-3's `live` test.
    AI; the secretary reads it with `list_members`. Adding it to that line
    is a change for every AI and is not made here.
 
+7. **Lane DIAGNOSTICS: the choices made in writing
+   `contracts/diagnostics.md`.** (a) The lines go through the default
+   logger of `log/slog`; no package or handler of our own. (b) Every
+   event is on by default, so a machine that was not prepared still
+   explains its failure; the cost is about ten lines per turn. (c)
+   Background work and ICE candidates are `debug`: at `info`, a stale
+   background poll on an installed node is not seen. (d) The switch is a
+   file the node reads when it starts. An environment variable does not
+   reach a node started at login, and a socket command is more code; the
+   price is a restart. (e) No `solodawn logs` command: one shell line per
+   system sends the folder, which is no code. An installed node then has
+   no goroutine dump. (f) The web client and the rendezvous service log
+   nothing new. (g) A root test holds the message form of the waits.
+
 ### Decided (2026-11-22)
 
 1. R-44: dropped for 1.0, answer (a). T2-3 is cancelled, with A9.16 and
@@ -356,6 +410,9 @@ an external AI: what it finds goes into I3-3's `live` test.
   section 8).
 - Lane EXTERNAL: no agent was given the setup prompt, and no unit was
   sized by trying it (`contracts/step-3/external.md` section 14).
+- Lane DIAGNOSTICS: the events were chosen by reading `issues.md`, none
+  was tried against a failing run, and no unit was sized by trying it
+  (`contracts/diagnostics.md` section 6).
 
 ## Cuts of 2026-11-22
 

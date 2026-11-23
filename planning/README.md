@@ -146,6 +146,7 @@ Change: <files and sections edited, or the reason for rejecting>
 | `contracts/task-machine.md` | the one table of task transitions |
 | `contracts/drivers.md` | how each CLI is started, levels, turn format, instructions |
 | `contracts/local.md` | local interfaces: command line, MCP shim socket, Git commands, outbound secret check, self-update |
+| `contracts/diagnostics.md` | what a node logs and what a failing test leaves behind, so that one occurrence of a failure names its cause |
 | `contracts/step-2/authority.md` | step 2: the home decides on someone else's home; allow list, delegates, the secretary, the level cap (D-1, D-13) |
 | `contracts/step-2/labels.md` | step 2: the two labels of a turn, split from `confirm.md` (D-9) |
 | `contracts/step-2/people.md` | step 2: a second person in a group, the three roles, leaving and removal (D-7) |
