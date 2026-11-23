@@ -63,14 +63,13 @@ Feature: External agents take and finish one item without a CLI driver
       | loop      |
       | scheduler |
 
-  @pending @not-windows
+  @not-windows
   Scenario Outline: A runner starts queued items one after the other (A10.20)
     Given an external acceptance project with X
     And the external owner mentions X with "First external mention"
-    And the external owner mentions X with "Second external mention"
-    Then the external home has 2 inbox items
+    Then the external home has 1 inbox items
     And external member "X" has state "offline"
-    When the "<runner>" runs 2 queued external items
+    When the "<runner>" runs 2 queued external items, with the second mention arriving while X is working on the first
     Then X posts "First external answer" in the external project
     And X posts "Second external answer" in the external project
     And external member "X" has state "waiting"
