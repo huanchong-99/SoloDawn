@@ -6,13 +6,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-23 · bug · FLAKY-31: two-task flow did not observe its second summary
-
-- Symptom: Windows run 45174609834, job 137696879496, failed the confirm-and-run step at `features/m5_test.go:1589` with `timed out waiting for two summary cards` after 17.76 s. The first summary wait passed; the following merge assertion was skipped.
-- Script swap: `writeScriptFile` uses a new numbered path for every write and publishes it after the write returns (`features/m5_test.go:650`–`:657`). The fake CLI reads its inherited file once with `os.ReadFile` (`internal/host/fakecli/replay.go:57`–`:66`, `:83`–`:92`). The first task holding its old file cannot prevent the fixture from creating the new one. The review hook switches both paths before forwarding the review request that can lead to the merge (`features/m5_test.go:913`–`:926`, `:1568`–`:1581`).
-- Assignment and hooks: the home releases the dependent task and queues its assignment in the same result as the first merge, not on a later timer (`internal/home/cmd_merge.go:45`–`:58`, `:162`–`:194`). Host delivery can still hold it for pause or member state (`internal/host/deliver.go:857`–`:871`, `:887`–`:896`). The two commit hooks are FIFO under the world mutex and the dependency prevents the second task from normally calling checks first (`features/m5_test.go:677`–`:692`, `:1483`–`:1484`). A hook error is checked by the wait; the original log records a timeout, not a hook error.
-- Status: open, no second-summary timeout in 400 mixed-CPU or 200 single-CPU Linux race samples; three mixed-CPU samples failed a later review/merge turn-count assertion. The timeout now shows task states, queued and recently delivered/refused items, hook errors, CLI launches and summary counts at the home and browser (`features/m5_test.go:1595`–`:1614`). The original log cannot distinguish held assignment, a stalled task/review or summary turn, or a stored summary not reaching the browser.
-
 ### 2026-11-23 · deviation · An agent without a driver cannot join a group
 
 - Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
@@ -734,6 +727,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-23 · bug · FLAKY-31: the two-task fixture assumed one notice per turn and immediate browser delivery
+
+- Turn-count cause: in 12 of 400 traced Linux race samples, the Claude secretary began turn 8 on item 10, the second task's `task_merged` notice. The home queues that notice in the committed merge result (`internal/home/machine.go:581–585`, `internal/home/cmd_merge.go:45–58`), but browser rows and host inbox frames have independent connection pumps (`internal/home/run_conn.go:46–75`). The former browser callback could record eight turns after the home had already merged at seven. All 12 failures had `summaries browser=2 home=2`; this turn did not make a third card.
+- Summary timeout: holding the secretary after confirmation until both merge notices were queued deterministically reproduced `timed out waiting for two summary cards; summaries browser=1 home=1` with both tasks merged. The host routes both notices to the secretary's group session and delivers them together (`internal/host/deliver.go:734–739`, `:857–871`). The fake CLI consumes one script entry per turn, and the fixture scripts one summary per notice (`features/m5_test.go:1702–1714`). Windows job 137765616100 passed all 100 traced samples; the log from the original Windows timeout (job 137696879496) did not capture the count or the notices, so that occurrence cannot be attributed to batching with certainty.
+- Fix: count review pass and merge in the home's existing post-commit hook (`features/m5_test.go:722–743`); still verify the merge message in the browser. In the scripted fixture, release task 1 after the confirmation turn starts and task 2 after the first summary arrives (`features/m5_test.go:1613–1651`), so the notices cannot share a turn. The forced-delay run then produced both summaries. No product change or timeout increase.
 
 ### 2026-11-23 · bug · FLAKY-19b: the offline test used an older sync sequence
 
