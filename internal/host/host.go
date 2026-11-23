@@ -426,8 +426,16 @@ var Tools = map[string]Tool{}
 // each call with Sessions.Calling.
 func ToolsFor(c Caller) map[string]Tool {
 	listed := maps.Clone(Tools)
-	maps.DeleteFunc(listed, func(_ string, tool Tool) bool { return tool.For != nil && !tool.For(c) })
+	maps.DeleteFunc(listed, func(_ string, tool Tool) bool { return !listedTo(c, tool) })
 	return listed
+}
+
+// listedTo lists an external caller every tool of a kind of its runs.
+func listedTo(c Caller, tool Tool) bool {
+	if tool.For == nil || tool.For(c) {
+		return true
+	}
+	return c.External && len(neededKinds(c, tool.For)) > 0
 }
 
 // Drivers holds the driver of each CLI by its agent name; see DriverCaps.

@@ -26,10 +26,13 @@ var emptyToolSchema = json.RawMessage(`{"type":"object","properties":{},"additio
 // contracts/mcp-tools.md). It closes out before returning, and refuses a token
 // that names no active session.
 func (h *Host) ServeMCP(ctx context.Context, token string, in io.Reader, out io.WriteCloser) error {
-	caller, ok := h.Sessions.Caller(token)
+	caller, ok := h.mcpCaller(token)
 	if !ok {
 		out.Close()
 		return &Error{Code: "forbidden", Message: "unknown session token"}
+	}
+	if caller.External {
+		defer h.ExternalPresent(caller.Group, caller.Member)()
 	}
 	srv := h.newMCPServer(token, caller)
 	tr := &mcpTransport{
@@ -88,7 +91,7 @@ func (h *Host) addMCPTool(srv *mcp.Server, token string, initial Caller, name st
 }
 
 func (h *Host) invokeTool(ctx context.Context, token, name string, raw json.RawMessage) *mcp.CallToolResult {
-	caller, ok := h.Sessions.Caller(token)
+	caller, ok := h.mcpCaller(token)
 	if !ok {
 		return toolErrorResult(&Error{Code: "forbidden", Message: "unknown session token"})
 	}
@@ -96,9 +99,21 @@ func (h *Host) invokeTool(ctx context.Context, token, name string, raw json.RawM
 	if !allowed {
 		return toolErrorResult(&Error{Code: "forbidden", Message: "tool is not available in this session"})
 	}
+	if tool.For != nil && !tool.For(caller) {
+		return toolErrorResult(refuseForRun(name, neededKinds(caller, tool.For)))
+	}
 	done := h.Sessions.Calling(caller.SessionKey)
 	defer done()
 	return h.runToolCall(ctx, caller, tool.Call, raw)
+}
+
+// mcpCaller is the caller a session token, or an external AI's member id,
+// stands for.
+func (h *Host) mcpCaller(token string) (Caller, bool) {
+	if c, ok := h.Sessions.Caller(token); ok {
+		return c, true
+	}
+	return externalCaller(h, token)
 }
 
 func (h *Host) runToolCall(ctx context.Context, caller Caller, call func(context.Context, *Host, Caller, json.RawMessage) (any, error), raw json.RawMessage) *mcp.CallToolResult {
@@ -152,12 +167,20 @@ func schemaForCaller(name string, caller Caller, raw json.RawMessage) json.RawMe
 // projectCallerSchema adapts the superset tool schemas registered in Tools to
 // the caller's session kind and secretary role (contracts/mcp-tools.md section 5).
 func projectCallerSchema(caller Caller, name string, root map[string]any) {
-	if caller.Kind != GroupSession && name != "ask" {
+	if (caller.External || caller.Kind != GroupSession) && name != "ask" {
 		dropSessionDefaults(root)
 	}
 	if name == "post" && !caller.Secretary {
-		projectPostSchema(caller.Kind, root)
+		projectPostSchema(postKind(caller), root)
 	}
+}
+
+// postKind gives an external caller the post kinds of a group session.
+func postKind(c Caller) Kind {
+	if c.External {
+		return GroupSession
+	}
+	return c.Kind
 }
 
 func dropSessionDefaults(root map[string]any) {

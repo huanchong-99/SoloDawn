@@ -165,7 +165,7 @@ func TestSyntheticDriverAccountSwitch(t *testing.T) {
 	for _, a := range found {
 		names = append(names, a.Agent)
 	}
-	agtEqual(t, names, []string{"api_only", "claude", "personal_only", "team_only"})
+	agtEqual(t, names, []string{"api_only", "claude", "personal_only", "team_only", "external"})
 
 	assertAccountRefusal := func(agent, account string) {
 		t.Helper()

@@ -793,6 +793,10 @@ func stepAI(h *Host, d *delivery, key aiGroupKey) bool {
 		return false
 	}
 	drainOpenWaits(h, d, key, ai.agent)
+	if ai.agent == externalAgent {
+		extWake(h, key)
+		return false
+	}
 	target, batch, ok := takeEligibleBatch(h, d, key, ai)
 	if !ok {
 		return false

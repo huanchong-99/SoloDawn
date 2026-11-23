@@ -247,6 +247,9 @@ func memberAgent(h *Host, group, member string) string {
 // of the AI's CLI and its turns today, all read from memory.
 func memberUsage(h *Host, group, member string) proto.Usage {
 	agent := memberAgent(h, group, member)
+	if agent == externalAgent {
+		return extUsage(h, aiGroupKey{group: group, member: member})
+	}
 	today := h.Now().Format(time.DateOnly)
 	lp := limitsOf(h)
 	lp.mu.Lock()

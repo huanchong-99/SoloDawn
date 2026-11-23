@@ -240,7 +240,7 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       // Add Claude Code via AddAI dialog.
       await members.locator('button', { hasText: 'Add AI' }).click();
       const addDlg = page.locator('dialog.dlg[open]');
-      await poll(() => addDlg.locator('.choice').count()).toBe(2);
+      await poll(() => addDlg.locator('.choice').count()).toBe(3);
       await addDlg.locator('.choice', { hasText: 'Claude Code · studio' }).locator('input').check();
       await poll(() =>
         addDlg.getByRole('textbox', { name: 'Name in the group' }).inputValue(),

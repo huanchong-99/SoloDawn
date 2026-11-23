@@ -197,7 +197,7 @@ func handleHostJoin(ctx context.Context, h *Host, _ Owner, by string, data json.
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := joinLoadConfig(h, p.Agent, string(p.Group))
+	cfg, err := joinLoadConfig(h, p)
 	if err != nil {
 		return nil, err
 	}
@@ -213,16 +213,23 @@ func joinParseJoin(data json.RawMessage) (proto.HostJoin, error) {
 }
 
 func joinValidJoin(p proto.HostJoin) bool {
-	return p.Home != "" && p.Name != "" && agtValidAgent(p.Agent)
+	return p.Home != "" && p.Name != "" && (agtValidAgent(p.Agent) || joinValidExternal(p))
 }
 
-func joinLoadConfig(h *Host, agent, group string) (joinConfig, error) {
+func joinValidExternal(p proto.HostJoin) bool {
+	return p.Agent == externalAgent && !p.Secretary && slices.Contains(externalAccounts, p.Account)
+}
+
+func joinLoadConfig(h *Host, p proto.HostJoin) (joinConfig, error) {
 	var account, listJSON string
 	read := func(tx *store.Tx) error {
-		return tx.QueryRow(joinConfigQuerySQL, agent).Scan(&account, &listJSON)
+		return tx.QueryRow(joinConfigQuerySQL, p.Agent).Scan(&account, &listJSON)
 	}
 	if err := h.Store.Write(read); err != nil {
 		return joinConfig{}, err
+	}
+	if p.Agent == externalAgent {
+		account = p.Account
 	}
 	if account == "" {
 		return joinConfig{}, &Error{Code: "conflict", Message: "declare the agent's account with agent.set before joining a group"}
@@ -233,7 +240,7 @@ func joinLoadConfig(h *Host, agent, group string) (joinConfig, error) {
 	}
 	return joinConfig{
 		account:    account,
-		projectDir: projectDir(h, group),
+		projectDir: projectDir(h, string(p.Group)),
 		approvers:  approvers,
 	}, nil
 }
@@ -259,7 +266,17 @@ func joinExecuteJoin(ctx context.Context, h *Host, jp *joinPart, p proto.HostJoi
 	if err != nil {
 		return err
 	}
-	return joinCommitJoined(h, p, string(memberID), grp.Name, by)
+	return joinFinishJoined(h, p, string(memberID), grp.Name, by)
+}
+
+func joinFinishJoined(h *Host, p proto.HostJoin, member, groupName, by string) error {
+	if err := joinCommitJoined(h, p, member, groupName, by); err != nil {
+		return err
+	}
+	if p.Agent == externalAgent {
+		extReport(h, aiGroupKey{group: string(p.Group), member: member})
+	}
+	return nil
 }
 
 func joinFinishPin(h *Host, jp *joinPart, device string) {
@@ -345,6 +362,7 @@ func joinSendAddAI(ctx context.Context, h *Host, p proto.HostJoin, cfg joinConfi
 			ID:          memberID,
 		},
 		CLI:        p.Agent,
+		Tool:       p.Tool,
 		Name:       p.Name,
 		Account:    cfg.account,
 		Secretary:  p.Secretary,
@@ -586,7 +604,9 @@ func joinCommitLeft(h *Host, group, agent, member, by string) error {
 		})
 		return err
 	}
-	return h.Sessions.Write(run)
+	err := h.Sessions.Write(run)
+	extWake(h, aiGroupKey{group: group, member: member})
+	return err
 }
 
 func closeMemberSessions(h *Host, group, member string) []Session {
