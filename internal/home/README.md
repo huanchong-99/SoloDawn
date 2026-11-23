@@ -417,6 +417,19 @@ connection, `g.transact` and `g.settle` write and finish a result, `g.deliver` s
 take a typed request on `(conn, req)` and read their `store.Snapshot` on the goroutine of the
 group through `loop.ask`. `runDisk` is the `Disk` of a transaction.
 
+**Diagnostics** ([diagnostics](../../planning/contracts/diagnostics.md), `diag.go`). The loop logs
+through `log/slog` with a logger that holds `node`, the first 8 characters of `LoopConfig.Home`;
+a line holds ids, counts and states, never the text of a message. `home.attach` and `home.detach`
+(`why`: `gave_up` for a connection the loop gave up, `ended` otherwise; once per connection,
+`dev` is the device cut to 8 characters); `cmd.reply` (`g`, `dev`, `re`, `t` the key of the
+command table, `code` `ok` or the error code) for the answer of every command, written before the
+answer is queued and so after the `rows.send` of the same command; `rows.send` (`g`, `seq` the
+first and last row, `to` the connections that were sent a frame); `inbox.send` (`g`, `dev`,
+`items`) for each connection that is sent items; `ack.recv` (`g`, `dev`, `item`); `bg.start` and
+`bg.stop` (`name`: `clock`, `group`, `pump`, `watch`, `webpush`; `g` for `group` and `webpush`)
+around every goroutine the loop starts, the stop written before the goroutine's `Done`, so that
+`Close` returns after it.
+
 ## The task machine
 
 `machine.go` holds the table of [the task machine](../../planning/contracts/task-machine.md) as one
@@ -900,6 +913,8 @@ to a store in memory, because no command file exists yet. The choices behind the
 
 The run loop is covered through its entries by `run_test.go`, `run_push_test.go` and
 `run_disk_test.go`, on a store in memory with clients that keep, hold or refuse their frames, and
+`diag_test.go` reads the lines of the diagnostics events from the standard logger and
+checks each once with its fields, and `rows.send` before the `cmd.reply` of one command;
 `run_internal_test.go` pins its arithmetic: where a frame is cut, when an item is due, how many
 values a queue takes. `features/home_run.feature` holds the home half of acceptance test A2.1 and
 a restart, with commands of its own. The choices behind the loop are in

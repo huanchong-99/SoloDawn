@@ -6,12 +6,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-23 · bug · FLAKY-29: Qwen A4.9 can exit before its first MCP post
-
-- Symptom: step 4 times out waiting for the browser to see `Long turn.` (`features/s3_driver_limits_test.go:77`).
-- Reproduced cause: the fake CLI reads Qwen's MCP settings, then overwrites them whenever `OPENCODE_CONFIG_CONTENT` is present (`internal/host/fakecli/mcp.go:40–47`). With an empty OpenCode MCP map on #363, Qwen started and exited, the host received no MCP post, and the home had zero posts and a failed task. The same example passed with that variable unset.
-- Status: open in the host fake CLI. The original run recorded only the browser deadline. Its environment and the stage at which its post stopped are unknown. #363 fixes the teardown race and still admits the reproduced failure.
-
 ### 2026-11-23 · deviation · An agent without a driver cannot join a group
 
 - Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
@@ -734,6 +728,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-23 · bug · FLAKY-29: the fake Qwen Code started OpenCode's MCP server
+
+- Symptom: Qwen A4.9 failed with `timed out waiting on home pushes`, and failed every time at step 4 with `OPENCODE_CONFIG_CONTENT='{"mcp":{}}'` in the environment (#373). The original timeout log did not record the environment or whether the post reached MCP.
+- Cause: `startMCP` (`internal/host/fakecli/mcp.go:40-43`) replaced the server of any fake CLI with the one in `OPENCODE_CONFIG_CONTENT` whenever that variable was set. The Qwen Code driver passes only `QWEN_CODE_SYSTEM_SETTINGS_PATH` and inherits the rest of the environment, so the fake Qwen Code launched an empty command and never posted.
+- Status: resolved on `devin/host-handout-task-flaky29`: only the fake OpenCode reads `OPENCODE_CONFIG_CONTENT`. `TestQwenServesItsScriptBehindTheBearerToken` sets it and checks that the fake Qwen Code starts its own server.
+
+### 2026-11-23 · bug · An external AI's task hand-out named the task by its id
+
+- Symptom: a task or review hand-out carried the task's internal id in `task`; `external.md` section 3.2 requires `T-<num>`. This blocked A10.22, A10.23, the paused-task half of A10.24 and A10.26.
+- Cause: `extHandOut` sent `Task: s.Task` (`internal/host/external.go:307`).
+- Status: resolved on `devin/host-handout-task-flaky29`: `task` is formatted by `turnCtx.taskRef` and stays empty for a group run. `TestExternalTaskHandOutNamesTheTaskByItsNumber` pins `T-7`.
+
 ### 2026-11-23 · bug · An external AI's timer callback could outlive Settle
 
 - Symptom: `Settle` could return while an external AI's run timeout (`extEnd`, which calls `Deliver`) or presence report (`extReport`) was still running, and a `leave` or a hand-out during shutdown armed a new timer, such as a 180 s presence timer.
@@ -757,6 +763,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: under `-race`, the host acceptance scenarios reported a data race between restoring `host.Deliver`, the seam provided at `internal/host/deliver.go:28`, in `afterScenario` (`features/host_run_test.go:322`) and a delivery wakeup reading it (`internal/host/run.go:592` in `onProcessTurnEnded`, and `:851` in `finishTurnProcessExit`, reached from `:813`). The wakeups at `internal/host/run.go:763`, `internal/host/takeover.go:90` and `internal/host/limits.go:196` read it the same way.
 - Cause: `hostRunSteps` (`features/host_run_test.go:313-323`) wrote the four hooks back in its After hook in every scenario, not only in its own. Each step set has its own After hook, and they run in the order of the sorted step set names, so in a later step set's scenario the hooks were written back before that step set settled its host (for example `cleanup(w.h.Settle)` in `features/host_start_model_test.go:151`). In the step set's own scenarios, the teardown (`features/host_run_test.go:374-377`) polled the session rows until they were `dormant` (`waitAllSessionsIdle`, `:383-398`) instead of settling the host, and a row changes before the loop starts its delivery wakeup. The product closes a host with `Settle` (`internal/node/node.go:390`), which already waits for all of those wakeups (`settleRuntime`, `internal/host/run.go:79`; `settleTakeovers`, `internal/host/takeover.go:106`; `settleLimits`, `internal/host/limits.go:93`).
 - Status: resolved on `devin/host-teardown-race`: `installHRDefaultHooks` saves and restores the hooks in the scenarios that install them, the teardown settles the host instead of polling, and `TestSettleWaitsForDeliveryAfterAnExitMidTurn` pins that `Settle` waits for the wakeup after a mid-turn exit, as `TestSettleWaitsForRuntimeDelivery` does after a turn's end.
+
+### 2026-11-23 · bug · FLAKY-31: the two-task fixture assumed one notice per turn and immediate browser delivery
+
+- Turn-count cause: in 12 of 400 traced Linux race samples, the Claude secretary began turn 8 on item 10, the second task's `task_merged` notice. The home queues that notice in the committed merge result (`internal/home/machine.go:581–585`, `internal/home/cmd_merge.go:45–58`), but browser rows and host inbox frames have independent connection pumps (`internal/home/run_conn.go:46–75`). The former browser callback could record eight turns after the home had already merged at seven. All 12 failures had `summaries browser=2 home=2`; this turn did not make a third card.
+- Summary timeout: holding the secretary after confirmation until both merge notices were queued deterministically reproduced `timed out waiting for two summary cards; summaries browser=1 home=1` with both tasks merged. The host routes both notices to the secretary's group session and delivers them together (`internal/host/deliver.go:734–739`, `:857–871`). The fake CLI consumes one script entry per turn, and the fixture scripts one summary per notice (`features/m5_test.go:1702–1714`). Windows job 137765616100 passed all 100 traced samples; the log from the original Windows timeout (job 137696879496) did not capture the count or the notices, so that occurrence cannot be attributed to batching with certainty.
+- Fix: count review pass and merge in the home's existing post-commit hook (`features/m5_test.go:722–743`); still verify the merge message in the browser. In the scripted fixture, release task 1 after the confirmation turn starts and task 2 after the first summary arrives (`features/m5_test.go:1613–1651`), so the notices cannot share a turn. The forced-delay run then produced both summaries. No product change or timeout increase.
+
+### 2026-11-23 · bug · FLAKY-19b: the offline test used an older sync sequence
+
+- Symptom: under Linux race stress, the test expected sequence 8 but received sequence 9 in the matching `Synced` reply for request 4, in nine runs.
+- Cause: the test read `Loop.Groups` after observing the working row, but the run loop pushes changed rows before publishing the group summary (`internal/home/run_group.go:170`–`:172`, `internal/home/run_push.go:32`–`:33`). The test could sample the old summary; the queued sync then read the committed sequence (`internal/home/sync.go:41`).
+- Status: fixed in `internal/home/cmd_hostev_test.go:523` and `:589`. The negative sync barrier uses the observed row sequence and checks the next frame. No product change.
 
 ### 2026-11-23 · bug · FLAKY-21: a paired node duplicated ICE candidates on the same socket
 
