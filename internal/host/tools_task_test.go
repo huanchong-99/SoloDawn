@@ -692,6 +692,84 @@ func TestSubmitTaskRemoteAndHostedChecks(t *testing.T) {
 	tskEqual(t, cloud.Items[0].Name, "build")
 }
 
+func TestSubmitTaskRepollsSameCommitAfterFailedHostedCheck(t *testing.T) {
+	h, dataDir := tskDiskHost(t)
+	_, _, wtDir, head := tskInitWorktree(t, dataDir, true)
+	tskStopAllCloud(t, h)
+	since := time.Now()
+	task := tskTaskFixture(12, "fix-path", "task/12-fix-path", &proto.Check{OK: true, At: since.UnixMilli(), Commit: head})
+	task.Commit, task.PR, task.PRURL = head, 31, "https://example.invalid/org/repo/pull/31"
+	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("github"))
+	home := newTskScriptHome()
+	h.Attach("home-device", home)
+	calls := fakeForgeGH(t, hostedView(head, failedRun), forgeAnswer{Stdout: `[{"url":"` + task.PRURL + `"}]`}, hostedView(head, passedRun))
+	key := tskCloudKey{group: tskTestGroupID, task: tskTestTaskID}
+	p := Part[tskPart](h)
+	ctx, run := tskBeginCloud(p, key, head)
+	tskPollHostedChecks(ctx, p, h, "home-device", key, run, TaskForge{Worktree: wtDir}, task.PR, head, since)
+	failed := tskOpenSignedCmd[proto.TaskChecked](t, h, home.snapshotAsked()[0])
+	tskEqual(t, failed.Op, "cloud")
+	tskEqual(t, failed.Commit, head)
+	tskEqual(t, failed.OK, false)
+	task.Checks.Cloud = &proto.Check{At: time.Now().UnixMilli(), Commit: head}
+	tskPutRow(t, h, "task", tskTestTaskID, task)
+
+	caller := tskTaskCaller("wt/12-fix-path", 2)
+	res, err := Tools["submit_task"].Call(t.Context(), h, caller, json.RawMessage(`{"summary":"Retry checks"}`))
+	tskNoErr(t, err)
+	tskEqual(t, res, tskSubmitResult{OK: true, Commit: head, PR: 31})
+	passed := tskOpenSignedCmd[proto.TaskChecked](t, h, home.waitAsked(t, 4)[3])
+	tskEqual(t, passed.Op, "cloud")
+	tskEqual(t, passed.Commit, head)
+	tskEqual(t, passed.OK, true)
+	view := []string{"pr", "view", "31", "--json", "headRefOid,statusCheckRollup"}
+	calls(view, []string{"pr", "list", "--head", task.Branch, "--base", "base", "--state", "open", "--json", "number,headRefOid,url,state,baseRefName,isCrossRepository"}, view)
+}
+
+func TestStaleCloudCheckRowDoesNotRestartCompletedPoll(t *testing.T) {
+	r := newDeliverRig(t, true)
+	tskStopAllCloud(t, r.h)
+	r.seedGroupAndMembers()
+	r.h.Settle()
+	const head = "old-head"
+	r.putTask(cloudCheckTask(testGroup1, testTask1, 1, testAI1, head, 10))
+	calls := fakeForgeGH(t, hostedView(head, passedRun), hostedView(head, passedRun))
+	worktree := sessionDir(r.h, Session{SessionKey: SessionKey{Group: testGroup1}, Folder: "wt/1-cloud"})
+	tskNoErr(t, os.MkdirAll(worktree, 0700))
+
+	p := Part[tskPart](r.h)
+	key := tskCloudKey{group: testGroup1, task: testTask1}
+	ctx, run := tskBeginCloud(p, key, head)
+	forge := TaskForge{Worktree: worktree}
+	tskPollHostedChecks(ctx, p, r.h, r.homeKey.ID(), key, run, forge, 31, head, time.Now())
+	tskEqual(t, len(r.home.cmdPayloads()), 1)
+
+	afterGroupState(r.h, deliv(r.h), testGroup1)
+	waitCloudIdle(r)
+	calls([]string{"pr", "view", "31", "--json", "headRefOid,statusCheckRollup"})
+}
+
+func TestSubmitTaskDoesNotRestartRunningHostedCheckForSameCommit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := &tskPart{}
+		key := tskCloudKey{group: tskTestGroupID, task: tskTestTaskID}
+		const commit = "c1"
+		ctx, run := tskBeginCloud(p, key, commit)
+		p.mu.Lock()
+		delete(p.claimed, tskCloudHead{key, commit})
+		p.mu.Unlock()
+
+		dupCtx, dupRun := tskBeginCloud(p, key, commit)
+		tskEqual(t, dupCtx, context.Context(nil))
+		tskEqual(t, dupRun, (*tskCloudRun)(nil))
+		tskEqual(t, ctx.Err(), nil)
+
+		tskFinishCloud(p, key, run, true)
+		_, staleRun := tskBeginCloud(p, key, commit)
+		tskEqual(t, staleRun, (*tskCloudRun)(nil))
+	})
+}
+
 func TestSubmitTaskSupersedesPreviousHostedChecks(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		p := &tskPart{}
@@ -706,11 +784,16 @@ func TestSubmitTaskSupersedesPreviousHostedChecks(t *testing.T) {
 		tskRequire(t, ctx1.Err() != nil, "first cloud context must be cancelled")
 		tskRequire(t, ctx2.Err() == nil, "second cloud context must stay active")
 
-		tskFinishCloud(p, key, run1)
+		tskFinishCloud(p, key, run1, false)
 		tskEqual(t, p.cancels[key] == run2, true)
+		_, staleRun := tskBeginCloud(p, key, "c1")
+		tskEqual(t, staleRun, (*tskCloudRun)(nil))
+		tskRequire(t, ctx2.Err() == nil, "stale claim must leave new check alone")
 
-		tskFinishCloud(p, key, run2)
+		tskFinishCloud(p, key, run2, true)
 		tskEqual(t, len(p.cancels), 0)
+		_, staleRun = tskBeginCloud(p, key, "c1")
+		tskEqual(t, staleRun, (*tskCloudRun)(nil))
 	})
 }
 
