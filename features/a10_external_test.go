@@ -149,6 +149,27 @@ func (w *externalWorld) state(name, state string) error {
 	return w.waitState(func() bool { return w.aiByName[name].State == state })
 }
 
+func (w *externalWorld) waitExternalPush(what string, ready func() bool) error {
+	wait := newWait(5*time.Second, what, nil)
+	defer wait.stop()
+	for !ready() {
+		raw, err := recvWait(wait, w.homeLink.pushes)
+		if err != nil {
+			return err
+		}
+		if raw == nil {
+			return errors.New("ctl connection closed before push")
+		}
+		var header struct {
+			Type string `json:"t"`
+		}
+		_ = json.Unmarshal(raw, &header)
+		wait.saw.see(header.Type)
+		w.recordRowsFrame(raw)
+	}
+	return nil
+}
+
 func (w *externalWorld) relabel(tool string) error {
 	cmd := proto.MemberSet{MemberCommand: proto.MemberCommand{HomeCommand: w.homeHeader("member"),
 		Op: "set", ID: proto.ID(w.aiByName["X"].ID)}, Tool: &tool}
