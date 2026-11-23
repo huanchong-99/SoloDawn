@@ -192,7 +192,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   The external AI area adds an account type and optional tool label to the same draft. A part
   at `member.joined` receives `{ group, candidate, name }` after a successful `host.join`; the
   external AI area uses it to open setup when the new member row reaches the browser.
-  Removing an external AI takes an inline confirmation, which Escape or moving focus cancels.
+  Removing an external AI takes an inline confirmation, which Escape cancels.
 
   An entry is `{ order, component }`: the lower `order` comes first, then the area's name. A
   component with nothing to show draws nothing; an empty banner takes no room. While any area

@@ -172,10 +172,6 @@ test.each(layouts)(
     await remove.waitFor();
     await remove.click();
     await confirm.waitFor();
-    await open.focus();
-    await remove.waitFor();
-    await remove.click();
-    await confirm.waitFor();
     expect(await commands()).toEqual([check, check]);
     await confirm.click();
     await expect.poll(commands).toEqual([check, check, { t: 'member', g, op: 'remove', id }]);

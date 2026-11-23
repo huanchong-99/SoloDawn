@@ -261,8 +261,7 @@ it('keeps setup with the owner and confirms removal before sending the command',
   expect(all('button')).toEqual([]);
   show(MemberExternal, { group, ai: member });
   expect(texts('dd.tool')).toEqual(['External AI', 'External AI · ZCode']);
-  const setup = one<HTMLButtonElement>('.actions button');
-  setup.click();
+  one('.actions button').click();
   await tick();
   expect(one<HTMLDialogElement>('dialog').open).toBe(true);
   one('dialog header button').click();
@@ -281,17 +280,10 @@ it('keeps setup with the owner and confirms removal before sending the command',
   await tick();
   expect(escape.defaultPrevented).toBe(true);
   expect(remove.textContent?.trim()).toBe('Remove AI');
-  await confirm();
-  setup.focus();
-  await tick();
-  expect(remove.textContent?.trim()).toBe('Remove AI');
   expect(request).not.toHaveBeenCalled();
 
   request.mockResolvedValueOnce({ re: 1, err: { code: 'conflict' } });
   await confirm();
-  remove.blur();
-  await tick();
-  expect(remove.textContent?.trim()).toBe('Confirm removal');
   remove.click();
   await vi.waitFor(() =>
     expect(texts('.actions [role=alert]')).toEqual([
