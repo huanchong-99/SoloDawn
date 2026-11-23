@@ -53,7 +53,7 @@
             {#if !group.home.ctl}
               <span class="gdown cut" class:away={net.otherTab}>
                 <i></i>{net.otherTab
-                  ? t('chat.otherTab')
+                  ? t('groups.otherTab')
                   : `${group.home.name} · ${t('groups.down')}`}
               </span>
             {/if}

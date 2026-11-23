@@ -116,12 +116,15 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
         expect(texts('.composer [role=status]')).toEqual(['This group is in use in another tab.']);
       });
 
-      And('the group list says the same and neither is styled as unreachable', () => {
-        expect(texts('.gdown')).toEqual(['This group is in use in another tab.']);
-        expect(one('.composer .state').className).toContain('away');
-        expect(one('.gdown').className).toContain('away');
-        expect(all('.composer .state.down, .gdown:not(.away)')).toEqual([]);
-      });
+      And(
+        'the group list says "In use in another tab" and neither is styled as unreachable',
+        () => {
+          expect(texts('.gdown')).toEqual(['In use in another tab']);
+          expect(one('.composer .state').className).toContain('away');
+          expect(one('.gdown').className).toContain('away');
+          expect(all('.composer .state.down, .gdown:not(.away)')).toEqual([]);
+        },
+      );
     },
   );
 });
