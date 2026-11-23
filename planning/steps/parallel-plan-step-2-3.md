@@ -248,12 +248,12 @@ and leaves the logs behind. It adds no command and no package.
 
 | Id | Does | Tests | Owns | Needs | Sz | Start |
 | --- | --- | --- | --- | --- | --- | --- |
-| DG-1 | Harness: `log` into a buffer emptied per scenario, at `debug`; the folder of a failed scenario; the one wait helper of `features/` with the message form; the upload in CI (`diagnostics.md` section 4, points 1, 2 and 4) | a scenario made to fail leaves the folder; unit of the helper | `features/diag_test.go`; one hook in `features/acceptance_test.go`; one line where a child node starts (`features/node_test.go`, `m6_test.go`, `m8_test.go`, `s2_cast_test.go`) and the `SIGQUIT` in `features/proc_unix_test.go`; `.github/workflows/backend.yml` | — | S | now |
+| DG-1 | Harness: `log` into a buffer emptied per scenario, at `debug`; the folder of a failed scenario; the one wait helper of `features/` with the message form; the upload in CI (`diagnostics.md` section 4, points 1, 2 and 4) | a scenario made to fail leaves the folder; unit of the helper | `features/diag_test.go`; one hook in `features/acceptance_test.go`; one line where a child node starts (`features/node_test.go`, `m6_test.go`, `m8_test.go`, `s2_cast_test.go`) and the `SIGQUIT` in `features/proc_unix_test.go`; `.github/workflows/backend.yml` | — | M | now |
 | DG-2 | `features/`: every wait that can time out goes through the helper of DG-1. It changes waits only, in every step file | the scenarios still pass | the waits of `features/*_test.go`; `helpers_test.go`, `m3_test.go`, `s3_driver_limits_test.go` and `s3_drivers_test.go` last, after #360; `host_run_test.go` after #363 | DG-1 | M | after DG-1 |
 | DG-3 | `internal/`: the same for the waits in the test files of `home`, `node`, `peer` and `host`, with each package's own helpers; the root test that holds the form in `features/` and `internal/` (section 4, point 1) | the root test | `waits_test.go`; the waits of `internal/**/*_test.go`; `home/cmd_hostev_test.go`, `node/node_test.go` and `peer/ctl_test.go` after #360; `host/pty_test.go` and `host/run_test.go` after #363 | DG-2 | M | after DG-2 |
 | DG-4 | Node: the flags of `log`, the level file, the logger with `node`; `node.start`, `node.stop`, `home.dial`, `bg.*` for the runtime's own work; the section "After a failure" at the end of `install.md` (sections 1, 3, 5) | unit: each line once, with its fields; the level file | `node/diag.go`; its calls in `node/node.go`, `node/teams.go`; `install.md`; `node/README.md` | #360 merged or closed | S | after #360 |
 | DG-5 | Home: `home.attach`, `home.detach`, `cmd.reply`, `rows.send`, `inbox.send`, `ack.recv`, `bg.*` (section 2) | unit: each line once, with its fields; `rows.send` before the `cmd.reply` of one command | `home/diag.go`; its calls in `home/run.go`, `run_conn.go`, `run_group.go`, `run_push.go`, `inbox.go`; `home/README.md` | — | S | now |
-| DG-6 | Host: `host.attach` to `settle.end` of section 2, and `bg.*` through one wrapper for the work its wait groups start | unit: each line once, with its fields; `inbox.take` with the pause reading and what it left | `host/diag.go`; its calls in `host/host.go`, `deliver.go`, `run.go`, `external.go`, `mcp.go`, `tools_task.go`, `limits.go`, `takeover.go`, `home_moved.go`; `host/README.md` | #363 and the fixes of FLAKY-28 and FLAKY-30 merged | M | after those |
+| DG-6 | Host: `host.attach` to `settle.end` of section 2, and `bg.*` through one wrapper for the work its wait groups start | unit: each line once, with its fields; `inbox.take` with the pause reading and what it left | `host/diag.go`; its calls in `host/host.go`, `deliver.go`, `run.go`, `external.go`, `mcp.go`, `tools_task.go`, `limits.go`, `takeover.go`, `home_moved.go`; `host/README.md` | #363 merged (it holds the FLAKY-28 and FLAKY-30 fixes) | M | after those |
 | DG-7 | Peer: `sig.send`, `sig.recv`, `ice.state`, `ice.pair`, `ctl.open`, `conn.close` (section 2) | unit with two peers in one process: each line once, with its fields | `peer/diag.go`; its calls in `peer/signal.go`, `peer/ctl.go`, `peer/sockets.go` | #360 merged or closed | S | after #360 |
 
 - **Order.** DG-1, DG-2 and DG-3 are one chain for one builder, bottom up;
@@ -274,9 +274,8 @@ and leaves the logs behind. It adds no command and no package.
 - A test that reads what `log` wrote (`host/deliver_test.go`,
   `node/update_test.go`, `node/schedule_test.go`, `home/run_test.go`) now
   sees the event lines too; the unit of that package adjusts it.
-- When the lines exist, the hooks that #360 added to look into one failure
-  (`Connection.NegotiationState`, the signal receiver of `node/node.go`)
-  can go; that is a follow-up, not a unit here.
+- Removing the hooks of #360 once the lines exist is in the follow-up list
+  of section 5, not a unit here.
 
 ## 5. Open questions for the coordinator
 
@@ -349,20 +348,6 @@ and leaves the logs behind. It adds no command and no package.
    AI; the secretary reads it with `list_members`. Adding it to that line
    is a change for every AI and is not made here.
 
-7. **Lane DIAGNOSTICS: the choices made in writing
-   `contracts/diagnostics.md`.** (a) The lines go through the default
-   logger of `log/slog`; no package or handler of our own. (b) Every
-   event is on by default, so a machine that was not prepared still
-   explains its failure; the cost is about ten lines per turn. (c)
-   Background work and ICE candidates are `debug`: at `info`, a stale
-   background poll on an installed node is not seen. (d) The switch is a
-   file the node reads when it starts. An environment variable does not
-   reach a node started at login, and a socket command is more code; the
-   price is a restart. (e) No `solodawn logs` command: one shell line per
-   system sends the folder, which is no code. An installed node then has
-   no goroutine dump. (f) The web client and the rendezvous service log
-   nothing new. (g) A root test holds the message form of the waits.
-
 ### Decided (2026-11-22)
 
 1. R-44: dropped for 1.0, answer (a). T2-3 is cancelled, with A9.16 and
@@ -395,11 +380,27 @@ and leaves the logs behind. It adds no command and no package.
    the member list line, for scheduling, so the line changes for every
    AI. Unit T3-15 of section 4.2 does it and owns the text.
 
+7. Lane DIAGNOSTICS: (a) the lines go through the default logger of
+   `log/slog`; no package or handler of our own. (b) Every event is on by
+   default, so a machine that was not prepared still explains its failure;
+   the cost is about ten lines per turn. (c) Only ICE candidates are
+   `debug`; `bg.start` and `bg.stop` are `info`, because the owner wants a
+   failure on his machines explained with no preparation and accepts the
+   extra lines. (d) The switch is the file `logs/level`, read when the node
+   starts; the price is a restart. (e) No `solodawn logs` command: one
+   shell line per system sends the folder. An installed node has no
+   goroutine dump, for now. (f) The web client and the rendezvous service
+   log nothing new. (g) A root test holds the message form of the waits.
+   The Windows `tar` line is checked in I-11.
+
 ### Follow-up
 
 - Cut the `hello` `v` 1 fallback (SLIMMING D-4: about 60 lines in T2-1b and
   W2-1, and `contracts/step-3/knowledge.md` section 8) in a small pull
   request after Gemini's step 3 units merge.
+- Remove the one-off hooks that #360 added to look into one failure
+  (`Connection.NegotiationState`, the signal receiver of `node/node.go`)
+  once the DIAGNOSTICS events are merged.
 
 ## 6. Not verified
 

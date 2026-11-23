@@ -67,7 +67,7 @@ today; the builder may move a line to the nearest place that has the fields.
 | `ack.send` | `host`: `sendAck` | `g`, `home`, `item` |
 | `turn.begin`, `turn.end` | `host`: one entry in `Listeners` | `g`, `ai`, `task`; at the end `status` |
 | `turn.interrupt` | `host`: `claimTurnInterrupt` | `g`, `ai`, `task`, `why` (the runtime's reason: `stop`, `timeout`, …) |
-| `proc.start`, `proc.exit` | `host`: a CLI process starts; has exited | `g`, `ai`, `task`, `agent`; `resume` at the start, `why` at the exit |
+| `proc.start`, `proc.exit` | `host`: a CLI process starts; has exited | `g`, `ai`, `task`, `agent`; `resume` at the start, `why` (the runtime's reason, as for `turn.interrupt`) at the exit |
 | `run.open`, `run.close` | `host`: `extOpenRun`, `extEnd` (external AIs) | `g`, `ai`, `run`; at the close `why`: `done`, `crash`, `timeout` |
 | `tool` | `host`: `invokeTool`, when the call returns | `g`, `ai`, `task`, `name`, `code`, `ms` |
 | `settle.begin`, `settle.end` | `host`: `Host.Settle` | — |
@@ -75,7 +75,7 @@ today; the builder may move a line to the nearest place that has the fields.
 | `ice.state` | `peer`: the connection state changes | `dev`, `conn`, `state` |
 | `ice.pair` | `peer`: the selected pair changes | `dev`, `conn`, `local`, `remote` (candidate types), `proto`, `path` (`direct`, `relay`) |
 | `ctl.open`, `conn.close` | `peer`: `ctl` is ready; the connection is done | `dev`, `conn`; at the close `why` (`ice_failed`, `ctl_closed`, `closed`), `ms` open |
-| `bg.start`, `bg.stop` (`debug`) | `host`, `home`, `node`: each goroutine the package starts for work that outlives the call (a delivery, a group sync, a poll of hosted checks, a status flush, a connection's pump); not the read loop of a CLI process, which `proc.*` covers | `name`; `g` and `task` when the work has them |
+| `bg.start`, `bg.stop` | `host`, `home`, `node`: each goroutine the package starts for work that outlives the call (a delivery, a group sync, a poll of hosted checks, a status flush, a connection's pump); not the read loop of a CLI process, which `proc.*` covers | `name`; `g` and `task` when the work has them |
 
 A change of path is two `ice.pair` lines of one `conn` with different
 `path`. A turn that ran out is `turn.interrupt` with `why=timeout`. A pause
@@ -85,19 +85,19 @@ What each of the failures of 2026-11-23 would have shown (`issues.md`):
 
 | Failure | Lines |
 | --- | --- |
-| A9.24, the retry commit not submitted | `cmd.reply t=task/checked` before the `rows.send` of the same `seq`; then `tool name=submit_task` with its refusal |
-| A9.24, hosted checks run again | `bg.start name=cloud_poll` for a task after the `rows.recv` that moved it on (`debug`) |
+| A9.24, the retry commit not submitted | `cmd.reply t=task/checked` logged before the `rows.send` that carries its rows; then `tool name=submit_task` with its refusal |
+| A9.24, hosted checks run again | a second `bg.start name=cloud_poll` for the task after the `bg.stop` of the first |
 | A9.23, the bulletin before the attach | `tool name=post code=home_unreachable` between `home.dial` and `host.attach` of that home |
 | A10.3, the pause read (FLAKY-27) | `inbox.take` with the newer item in `took` and the older in `left` |
-| Host teardown | a `bg.stop` (`debug`), or any line of that node, after `settle.end` |
+| Host teardown | any line of that node, a `bg.stop` too, after `settle.end` |
 | A7.9 on Windows, open | `ice.pair` and `ice.state` of the takeover connection on the next failing run |
 
 ## 3. Levels and the switch
 
 - `info` is the default and writes every event not marked `debug`: a
   failure on a machine that was not prepared is still explained.
-- `debug` adds the marked lines: background work and ICE candidates. The
-  acceptance harness runs at `debug`.
+- `debug` adds the marked lines: ICE candidates. The acceptance harness
+  runs at `debug`.
 - The switch is the file `logs/level` in the data directory. The node reads
   it once when it starts: the word `debug` sets `debug`; a missing file or
   any other content is `info`. The owner writes or deletes the file and
@@ -159,15 +159,17 @@ tar czf ~/solodawn-logs.tgz -C "${XDG_DATA_HOME:-$HOME/.local/share}/solodawn" l
 tar -a -cf "$env:USERPROFILE\Desktop\solodawn-logs.zip" -C "$env:LocalAppData\solodawn" logs
 ```
 
-## 6. Not covered, not verified
+## 6. Not built, not verified
 
-- The web client and the rendezvous service log nothing new. A connection
+- The web client and the rendezvous service log nothing new (coordinator,
+  2026-11-23). A connection
   between a browser and a node is seen from the node's side only.
 - An installed node has no goroutine dump; the events are meant to make it
-  unnecessary.
+  unnecessary (coordinator, 2026-11-23).
 - `[unverified]` The events were chosen by reading the entries of
   `issues.md`; none was tried against a failing run. The volume was not
   measured: the estimate is about ten lines per turn and four per inbox
-  item, which the two files of 10 MB hold for days of work.
+  item, plus the `bg.*` lines, which the two files of 10 MB hold for days of work.
 - `[unverified]` The three shell lines of section 5 were not run; whether
-  the Windows line reads the file while the node writes it is not known.
+  the Windows `tar` line works, and reads the file while the node writes it,
+  is not known. The owner's real-machine test I-11 checks it.
