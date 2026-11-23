@@ -370,7 +370,7 @@ func externalRunnerSteps(sc *godog.ScenarioContext, w *externalWorld) {
 	sc.Step(`^an external look rejects an unknown member$`, func() error { return w.missingWait(string(exampleID("unknown external"))) })
 	sc.Step(`^an external look rejects the removed member$`, func() error { return w.missingWait(w.aiByName["X"].ID) })
 	sc.Step(`^the external handout folder is the project clone$`, w.checkClone)
-	sc.Step(`^the "([^"]+)" runs (\d+) queued external items$`, w.runQueued)
+	sc.Step(`^the "([^"]+)" runs (\d+) queued external items(?:, with the second mention arriving while X is working on the first)?$`, w.runQueued)
 }
 
 func (w *externalWorld) openMCP() error {
