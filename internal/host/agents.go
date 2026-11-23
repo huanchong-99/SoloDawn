@@ -87,10 +87,11 @@ func (h *Host) Agents(ctx context.Context, refresh bool) ([]proto.HostAgent, err
 	if err != nil {
 		return nil, err
 	}
-	if len(found) == 0 {
-		return []proto.HostAgent{}, nil
+	agents, err := agtLoadAgents(h.Store, Part[agtPart](h), found)
+	if err != nil {
+		return nil, err
 	}
-	return agtLoadAgents(h.Store, Part[agtPart](h), found)
+	return append(agents, externalHostAgent()), nil
 }
 
 func agtDetect(ctx context.Context, h *Host, refresh bool) ([]agtFound, error) {
