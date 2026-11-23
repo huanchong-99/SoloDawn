@@ -83,11 +83,23 @@ jobs:
           sed "s#^#$PKG/#" own.txt > files.txt
           echo "$(wc -l < files.txt) of $(wc -l < package.txt) files of $PKG:"
           cat files.txt
+      # gremlins ignores build constraints, so a file built for another platform has no coverage here and
+      # every mutant in it reads NOT COVERED. Same computation as the nightly command in gates.toml: the
+      # files that some shipped platform builds and this runner does not are left out of the run.
+      - name: Files not built on this runner
+        run: |
+          t='{{$d := slice .Dir (len .Module.Dir)}}{{range .GoFiles}}{{$d}}/{{.}}{{println}}{{end}}{{range .CgoFiles}}{{$d}}/{{.}}{{println}}{{end}}'
+          h=$(echo /; go list -e -f "$t" ./...)
+          a=$(for p in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do CGO_ENABLED=0 GOOS=${p%/*} GOARCH=${p#*/} go list -e -f "$t" ./... || exit 1; done)
+          printf "%s\n" "$a" | sort -u | grep -vxF "$h" | sed 's#^/##' | grep "^$PKG/" | sed "s#^$PKG/##; s/[.]/\\./g; s/.*/^&\$/" > foreign.txt || true
+          echo "not built on this runner, not mutated here:"
+          cat foreign.txt
       - name: Mutate
         run: |
           set +e
           exclude=(--exclude-files '(^|/)fakecli/')
           while read -r f; do exclude+=(--exclude-files "$f"); done < other.txt
+          while read -r f; do exclude+=(--exclude-files "$f"); done < foreign.txt
           # --workers 8 is four parallel mutants (gremlins halves it in integration mode): a mutant that
           # hangs waits ten times the baseline run, and most of a shard's time goes to those.
           # A flaky test that fails the baseline run stops gremlins before any mutant runs: try again.
@@ -98,9 +110,17 @@ jobs:
             grep -q 'failed to gather coverage' gremlins.log || break
           done
           echo "gremlins exit status $s"
-          # gremlins v0.6.0 exits 0 at 0% efficacy: the verdict is its exit status and the mutant lines.
-          grep -E '^ *(LIVED|NOT COVERED) ' gremlins.log | sed 's/^/::error::/'
-          [ $s -eq 0 ] && ! grep -Eq '^ *(LIVED|NOT COVERED) ' gremlins.log
+          # gremlins v0.6.0 exits 0 at 0% efficacy: the verdict is its exit status and the mutant lines,
+          # read through the same filter as the local gate (.github/scripts/mutants.py is a copy of
+          # .project-standard/scripts/mutants.py). gremlins prints paths relative to the package; the
+          # filter reads the source and matches its list by the path from the module root.
+          grep -E '^ *(LIVED|NOT COVERED) ' gremlins.log | sed "s# at # at $PKG/#" > found.txt
+          python3 .github/scripts/mutants.py < found.txt | sed '/^$/d' > left.txt
+          v=${PIPESTATUS[0]}
+          grep -vxF -f left.txt found.txt > filtered.txt
+          echo "filtered, not a failure:"; cat filtered.txt
+          sed 's/^/::error::/' left.txt
+          [ $s -eq 0 ] && [ $v -eq 0 ] && [ ! -s left.txt ]
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -108,6 +128,8 @@ jobs:
           path: |
             gremlins.log
             files.txt
+            left.txt
+            filtered.txt
 
   web:
     name: web ${{ matrix.name }}
@@ -191,7 +213,11 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Mutants that lived or are not covered
         run: |
-          { echo '```'; grep -HE '^ *(LIVED|NOT COVERED) ' results/go-*/gremlins.log | sed 's#results/go-\([^/]*\)/gremlins.log:#\1 #' || true; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+          { echo '```'; grep -H '' results/go-*/left.txt | sed 's#results/go-\([^/]*\)/left.txt:#\1 #' || true; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+      # Dropped by .github/scripts/mutants.py: declarations, case lines and the listed equivalent mutants.
+      - name: Mutants filtered out
+        run: |
+          { echo '```'; grep -H '' results/go-*/filtered.txt | sed 's#results/go-\([^/]*\)/filtered.txt:#\1 #' || true; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
       # Every product file of the module in exactly one shard.
       - name: Files in exactly one shard
         run: |

@@ -184,3 +184,50 @@ func TestExternalPresenceAndTimeLimit(t *testing.T) {
 		extOpenRun(h, ep, aiGroupKey{group: testGroup1, member: testAI1}, s, 4)
 	})
 }
+
+func TestSettleExternalWaitsForItsTimersAndArmsNoMore(t *testing.T) {
+	saveRuntimeGlobals(t)
+	synctest.Test(t, func(t *testing.T) {
+		db, err := store.Open(":memory:")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		h, _, err := New(db, testSeedKey(12), time.Now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.Rows.Put(testGroup1, "group", testGroup1, json.RawMessage(marshalWire(proto.GroupRow{
+			RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "Proj", Kind: "project", Base: "main", Forge: "none",
+			Home: "home", Secretary: testSec, Checks: []string{}, Limits: proto.Limits{TurnMinutes: 1},
+		})))
+		putExternalMember(h, h.Key.ID(), testAI1)
+		started, release, settled := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		Deliver = func(*Host, string, string) {
+			close(started)
+			<-release
+		}
+		ep, key := extOf(h), aiGroupKey{group: testGroup1, member: testAI1}
+		s, _ := h.Sessions.Get(SessionKey{Group: testGroup1, Member: testAI1})
+		extOpenRun(h, ep, key, s, 1)
+		<-started
+		leave := h.ExternalPresent(testGroup1, testAI1)
+		go func() {
+			h.Settle()
+			close(settled)
+		}()
+		synctest.Wait()
+		select {
+		case <-settled:
+			t.Error("Settle returned before the run's timeout finished")
+		default:
+		}
+		leave()
+		extOpenRun(h, ep, key, s, 2)
+		close(release)
+		<-settled
+		if len(ep.away) != 0 || len(ep.runs) != 0 {
+			t.Fatalf("armed after settle: away %v runs %v", ep.away, ep.runs)
+		}
+	})
+}
