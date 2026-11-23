@@ -90,7 +90,8 @@ seconds of presence and the turn limit.
   the client's check message is in the main line and its item waits.
   With the test runner as a loop: the agent is started once, in `folder`,
   with `context` and `text`; it answers with `post`; the runner ends the
-  run; X went `offline`, `waiting`, `working`, `waiting`. The same with
+  run; X was `offline` before, `working` while the agent ran, and
+  `waiting` after. The same with
   the runner as a task that looks every second with `--timeout 0`: while
   the agent runs, every look exits 3 and no second agent is started. Two
   mentions then start the agent twice, one after the other. In the
@@ -132,8 +133,9 @@ seconds of presence and the turn limit.
   40 and a reset time puts both into X's row, and `list_members` shows
   them; a second report replaces them; 101 is `bad_request`; M is not
   listed the tool. The secretary's next turn lists X as `external` with
-  its label, computer, tier, state and skills. In the browser: the member
-  card shows the reported usage.
+  its label, computer, tier, state, usage (`window 40% used, resets in
+  …`) and skills. In the browser: the member card shows the reported
+  usage.
 - **A10.26** Approval. In a task run, a call of `approve` with Claude
   Code's input gives an approval card for the owner in that task; after
   the owner approves the call returns `{"behavior":"allow"}`, and after a

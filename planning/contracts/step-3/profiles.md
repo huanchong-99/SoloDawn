@@ -139,7 +139,8 @@ choosing assignee and reviewer:
 2. match the work to `skills`;
 3. spread tasks that do not depend on each other over different AIs, so
    that several subscriptions work at the same time; members with the
-   same CLI on the same computer share one subscription;
+   same CLI on the same computer share one subscription (not two
+   external AIs);
 4. do not choose an AI that is `limited` or `offline`.
 
 The secretary decides; `propose_brief` and `set_task` accept any working

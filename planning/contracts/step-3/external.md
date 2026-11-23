@@ -106,6 +106,9 @@ One implementation in the node, behind two surfaces:
 `next_item` takes no argument and never waits: it is `--timeout 0`. Its
 result is the hand-out, or `{"none":true}`.
 
+`solodawn done` exits 0 when the node took it, also for a run that is no
+longer open, and 1 or 2 as `wait` does.
+
 On the local socket `wait` and `done` are commands like `pair`:
 `{"cmd":"wait","member":"<id>","timeout":0}`, `timeout` left out to block,
 and `{"cmd":"done","member":"<id>","run":4412,"failed":"exit 1"}`, `failed`
@@ -177,6 +180,10 @@ project's remote is not the exchange point.
 - The node makes, reuses and removes these folders exactly as for a
   managed AI (`contracts/local.md` section 7). The runner starts the agent
   in `folder`.
+- An external AI has session rows as a managed AI (`session` table,
+  `agent` `external`, no `cli_session`): a hand-out sets the row of its
+  session `working`, the end of the run sets it `waiting`; so the folders,
+  `flows/agent-turn.md` step 17 and the restart row apply unchanged.
 - So `run_checks`, `push_branch`, `submit_task`, `submit_review`, the hard
   checks and the merge are the step 1 code, unchanged, and a group without
   a remote works too.
@@ -280,7 +287,9 @@ SoloDawn runs on this computer. Its program is: {exe}
 Your member id is: {member}
 
 Set yourself up in the five steps below, then tell your owner what you
-made and where the files are. Do it yourself; ask only if a step fails.
+made and where the files are, and end this session. Do not run wait
+without --timeout 0 here, and do not wait for the check yourself: your
+runner starts you for it. Do it yourself; ask only if a step fails.
 
 THE RULE: never wait or poll for work inside an AI session. A script or a
 scheduled task waits. You are started only when there is an item, and you
@@ -324,9 +333,10 @@ exit when it is done.
    one line. The page shows that you were started once and answered.
 
 Examples. YOUR_CLI stands for your own non-interactive command, reading
-the prompt from standard input.
+the prompt from standard input. A scheduled task gets a short PATH: write
+absolute paths for jq and your CLI, or set PATH in the script.
 
-POSIX shell, one item (runner.sh):
+POSIX shell, one item (runner.sh; it uses jq, or another JSON parser):
   S="{exe}"; M="{member}"
   item=$("$S" wait --member "$M" --timeout 0) || exit $?
   run=$(printf '%s' "$item" | jq -r .run)
@@ -342,25 +352,28 @@ As a loop: drop "--timeout 0", and run it as
   while :; do sh runner.sh || sleep 60; done
 
 crontab, every minute:
-  * * * * * /bin/sh /path/to/runner.sh
+  * * * * * flock -n /tmp/solodawn-{member}.lock /bin/sh /path/to/runner.sh
+cron starts a new copy even while the last one runs; the lock stops that
+(launchd and Task Scheduler never overlap). On macOS use launchd.
 
-launchd (macOS), ~/Library/LaunchAgents/solodawn.{name}.plist, in outline:
-  Label             solodawn.{name}
+launchd (macOS), ~/Library/LaunchAgents/solodawn.{member}.plist, in outline:
+  Label             solodawn.{member}
   ProgramArguments  /bin/sh, /path/to/runner.sh
   StartInterval     60
-  then: launchctl load <that file>
+  then: launchctl bootstrap gui/$(id -u) <that file>
 
 Windows, PowerShell (runner.ps1):
+  [Console]::OutputEncoding = $OutputEncoding = [Text.UTF8Encoding]::new($false)
   $S = '{exe}'; $M = '{member}'
   $j = & $S wait --member $M --timeout 0; if ($LASTEXITCODE -ne 0) { exit }
   $i = $j | ConvertFrom-Json
   Push-Location $i.folder
-  ($i.context + "`n`n" + $i.text) | YOUR_CLI; $ok = $?
+  ($i.context + "`n`n" + $i.text) | YOUR_CLI; $ok = ($LASTEXITCODE -eq 0)
   Pop-Location
   if ($ok) { & $S done --member $M --run $i.run }
   else { & $S done --member $M --run $i.run --failed 'run failed' }
 Task Scheduler, every minute:
-  schtasks /Create /TN "SoloDawn {name}" /SC MINUTE /MO 1 /TR "powershell -NoProfile -File C:\path\to\runner.ps1"
+  schtasks /Create /TN "SoloDawn {member}" /SC MINUTE /MO 1 /TR "powershell -NoProfile -ExecutionPolicy Bypass -File C:\path\to\runner.ps1"
 ````
 
 - The prompt is English, like the instruction texts: its reader is an AI.
