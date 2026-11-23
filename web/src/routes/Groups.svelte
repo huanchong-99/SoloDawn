@@ -20,7 +20,7 @@
 <div class="groups" class:open={params.g !== undefined}>
   <section class="list" aria-label={t('groups.list')}>
     <Waiting bar />
-    <GroupList {open} oncreate={() => (creating = true)} />
+    <GroupList {open} {net} oncreate={() => (creating = true)} />
   </section>
   {#if open}
     {#key open}<Chat group={open} {net} />{/key}
