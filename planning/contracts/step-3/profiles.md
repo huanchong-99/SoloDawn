@@ -111,9 +111,9 @@ included, in the order of their names:
 ```
 [SoloDawn] group "Website" · you are "Secretary" · secretary session
 AI members (CLI on computer · tier · state · skills):
-- "Opus" · claude on workstation · strong · working on T-12 · Go backend, protocol design
-- "Haiku" · claude on workstation · light · dormant · small edits, documentation
-- "Codex" · codex on laptop · standard · limited
+- "Opus" · claude on workstation · strong · working on T-12 · window 40% used, resets in 3 h · Go backend, protocol design
+- "Haiku" · claude on workstation · light · dormant · window 40% used, resets in 3 h · small edits, documentation
+- "Codex" · codex on laptop · standard · limited · window 100% used
 - "Secretary" · claude on workstation · standard · working
 == 1 of 1 · mention · from "owner" (person) in main · instruction
 …
@@ -128,8 +128,12 @@ AI members (CLI on computer · tier · state · skills):
   brackets when the row has one, and one of the states of
   `contracts/step-3/external.md` section 6:
   `- "Scout" · external (ZCode) on workstation · standard · offline · Rust, reviews`
-- Unit T3-15 adds each AI's usage to this line, and to rule 3 below
-  (`steps/parallel-plan-step-2-3.md` section 4.2).
+- An AI whose member row's `usage` has `window_pct` gets
+  `window <pct>% used, resets in <n> h` after its state, `n` being the
+  hours until `window_resets`, rounded up; without `window_resets` the
+  "resets" part is left out. There is no clock time and no date. A
+  managed AI's `usage` comes from its CLI's events, an external AI's from
+  `report_usage`. No caps.
 - The host reads the rows it holds when it composes the turn.
 
 **The secretary's instructions** gain the four rules of assignment. When
@@ -140,7 +144,7 @@ choosing assignee and reviewer:
 3. spread tasks that do not depend on each other over different AIs, so
    that several subscriptions work at the same time; members with the
    same CLI on the same computer share one subscription (not two
-   external AIs);
+   external AIs); prefer AIs with more of their window left;
 4. do not choose an AI that is `limited` or `offline`.
 
 The secretary decides; `propose_brief` and `set_task` accept any working

@@ -3,8 +3,11 @@ package host
 import (
 	"cmp"
 	"fmt"
+	"math"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
@@ -34,10 +37,23 @@ func (c *turnCtx) profileMemberLine(ai proto.AIMemberRow) string {
 	if ai.Task != "" {
 		line += " on " + c.taskRef(ai.Task)
 	}
+	line += profileUsage(ai.Usage, c.h.Now())
 	if ai.Skills != "" {
 		line += " · " + ai.Skills
 	}
 	return line
+}
+
+func profileUsage(u proto.Usage, now time.Time) string {
+	if u.WindowPct == nil {
+		return ""
+	}
+	text := " · window " + strconv.FormatFloat(*u.WindowPct, 'f', -1, 64) + "% used"
+	if u.WindowResets != nil {
+		hours := math.Ceil(float64(*u.WindowResets-now.UnixMilli()) / float64(time.Hour.Milliseconds()))
+		text += fmt.Sprintf(", resets in %d h", int(max(hours, 0)))
+	}
+	return text
 }
 
 func profileTier(ai proto.AIMemberRow) string {
@@ -51,9 +67,6 @@ func profileStrength(ai proto.AIMemberRow) int {
 func profileCandidates(rows *Rows, group, assignee string) string {
 	members := profileMembers(rows, group)
 	index := slices.IndexFunc(members, func(ai proto.AIMemberRow) bool { return ai.ID == assignee })
-	if index < 0 {
-		return "none currently listed"
-	}
 	var names []string
 	strength := profileStrength(members[index])
 	for _, ai := range members {
