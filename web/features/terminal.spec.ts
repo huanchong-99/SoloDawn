@@ -630,6 +630,33 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
+    'A relayed path that recovers to direct opens the terminal without reopening the page',
+    ({ Given, When, Then }) => {
+      Given('the path to "workstation" is relayed', () => {
+        paths.set(workstation.store, { kind: 'relay', rtt: 140, since: Date.now() });
+      });
+      When(
+        'the owner opens "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/1PC8WineBrUQ-apCjx7tug" and the path becomes direct',
+        () => {
+          openPage(`#/terminal/${website}/${claudeId}`, 1440);
+          expect(texts('.takeover b')).toEqual(['Direct connection required']);
+          paths.set(workstation.store, { kind: 'direct', rtt: 8, since: Date.now() });
+          flushSync();
+        },
+      );
+      Then(
+        'one "takeover.start" is sent, the pty channel opens and the takeover bar no longer says "Direct connection required"',
+        async () => {
+          await vi.waitFor(() => expect(workstation.channels).toHaveLength(1));
+          flushSync();
+          expect(workstation.starts).toHaveLength(1);
+          expect(texts('.takeover b')).not.toEqual(['Direct connection required']);
+        },
+      );
+    },
+  );
+
+  Scenario(
     'Handing back while the terminal is still opening ends the takeover once the start is answered',
     ({ Given, And, When, Then }) => {
       let release = () => {};

@@ -365,7 +365,6 @@ export class Takeover {
   }
 
   #relayed() {
-    if (this.phase === 'idle') this.phase = 'relay';
     if (this.phase !== 'active') return;
     // The computer closes the channel on a relayed path itself: that is its hand-back.
     this.#open = undefined;

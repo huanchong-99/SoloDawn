@@ -739,6 +739,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-23 · bug · The terminal page stayed at "Direct connection required" after the path recovered
+
+- Symptom: a terminal page opened on a relayed path kept saying "Direct connection required" when the path became direct again, until the page was reopened.
+- Cause: `web/src/lib/terminal.svelte.ts:368`, `Takeover.#relayed`, set an idle takeover's phase to `relay`, and `follow` (`:305`) starts a takeover only from `idle`.
+- Status: resolved in U11. An idle takeover stays `idle` on a relayed path; the takeover bar already says "Direct connection required" for an idle takeover on a relayed path. The `web_terminal.feature` scenario "A relayed path that recovers to direct opens the terminal without reopening the page" covers it.
+
 ### 2026-11-23 · bug · A9.24 can run hosted checks again for the superseded commit
 
 - Symptom: A9.24 can report an unexpected `watch-checks` call for the first commit of the task that is reassigned.
