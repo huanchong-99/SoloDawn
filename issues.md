@@ -6,7 +6,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-12-07 · limitation · A required escalation can outlast its last stronger candidate
+### 2026-11-23 · limitation · A required escalation can outlast its last stronger candidate
 
 - Symptom: if the owner lowers the last stronger AI's tier while `stuck.ask` is true, the turn and the host submission refusal say no candidate is currently listed.
 - Cause: the task row is authoritative. The profile contract does not clear an existing escalation on profile edits, and the host cannot clear it.
