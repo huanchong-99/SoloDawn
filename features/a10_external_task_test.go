@@ -273,7 +273,14 @@ func (w *externalWorld) reconnectNode() error {
 		return err
 	}
 	w.homeLink = link
-	return w.requestGroupSync()
+	raw, err := link.conn.Request(w.ctx, func(id int64) any {
+		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: string(w.groupID), Since: w.currentTask().Seq}
+	})
+	if err != nil {
+		return err
+	}
+	var synced proto.Synced
+	return proto.Decode(raw, &synced)
 }
 
 func (w *externalWorld) interrupted(reason string) error {

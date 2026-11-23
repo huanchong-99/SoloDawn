@@ -118,7 +118,6 @@ Feature: External agents take and finish one item without a CLI driver
       | github | assignee |
       | github | reviewer |
 
-  @pending
   Scenario: A task started in a group run waits for that run to end (A10.22)
     Given an external acceptance project with X
     And a scripted stdio MCP client connects as X
@@ -130,7 +129,6 @@ Feature: External agents take and finish one item without a CLI driver
     Then an external look exits 0
     And the external handout is a "task" run containing "External criteria"
 
-  @pending
   Scenario Outline: Interrupted runs are retired and notify the secretary (A10.23)
     Given an external acceptance project with X
     And an external task run and a managed secretary
@@ -170,7 +168,6 @@ Feature: External agents take and finish one item without a CLI driver
     Then the external blocking wait exits 0
     And the external handout is a "group" run containing "Held offline"
 
-  @pending
   Scenario: A paused task holds its item and a jump goes first (A10.24)
     Given an external acceptance project with X
     And a queued, paused external task
@@ -197,7 +194,6 @@ Feature: External agents take and finish one item without a CLI driver
     Then X's member row and list_members contain that usage
     And external MCP calls "report_usage" with {"window_pct":101} and gets "bad_request"
 
-  @pending
   Scenario: External approvals are opt-in and return the owner's decision (A10.26)
     Given an external acceptance project with X
     And a scripted stdio MCP client connects as X
