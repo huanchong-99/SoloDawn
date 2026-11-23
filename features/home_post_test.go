@@ -227,14 +227,17 @@ func (w *homePostWorld) sendOK(who string, payload any) error {
 	if err != nil {
 		return err
 	}
+	if who == "b1" {
+		raw, err = w.peers["b1"].next()
+		if err != nil {
+			return err
+		}
+	}
 	want := fmt.Sprintf(`{"re":%d,"ok":true}`, w.peers[who].re)
 	if raw != want {
 		return fmt.Errorf("%s answered %s; want %s", who, raw, want)
 	}
-	if who == "b1" {
-		_, err = w.peers["b1"].next()
-	}
-	return err
+	return nil
 }
 
 func (w *homePostWorld) sendRaw(who string, payload any) (string, error) {

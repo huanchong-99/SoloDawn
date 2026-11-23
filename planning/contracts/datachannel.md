@@ -163,6 +163,7 @@ serve (section 8), `forbidden`.
   again, under the `re` of the new request, and has no second effect
   (`contracts/commands.md`, "Once only").
 - A home command has `g`; a host command has `to`, the node's device id.
+- When a requester receives a home command's reply, it has already received any rows changed by that command that its connection is still allowed to receive under its subscription.
 - A home answers with the first of these that fails, in this order: the
   envelope checks (`contracts/envelope.md` section 3); `g` is there, else
   `bad_request`.

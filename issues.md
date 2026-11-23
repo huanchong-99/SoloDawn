@@ -24,13 +24,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the [OpenAPI](https://opencode.ai/docs/openapi.json) documents `POST /api/session/{sessionID}/model` with `{"model":{"id":"…","providerID":"…","variant":"…"}}`. `openCodeProcess.selectModel` in `internal/host/opencode.go:245` splits the public `provider/model` id on the first `/`, omits an empty variant, and skips an empty model. Discovery reads `{data: Model.Info[]}`; unknown shapes yield `[]`.
 - Status: accepted for T3-10; the coordinator will flag the contract in the PR. Fixtures are synthetic, with no real CLI capture.
 
-### 2026-11-23 · bug · A9.24 can stall before submitting the retry commit
-
-- Symptom: A9.24 times out at “both tasks merge after checks and cross-review and receive summaries.” In a stalled run, the retry commit gets its standalone `watch-push` but no submission push or `watch-checks` call, and the task stays at `active/local_check`.
-- Reproduce: use a Go overlay to set `godog.Options.Paths` in `features/acceptance_test.go` to `[]string{"s2_watch.feature:37"}`, then run `go test -overlay <overlay.json> -tags acceptance -race -run '^TestFeatures$' -count=50 -timeout=35m ./features/`. The same step timed out on `origin/rebuild` at `aee115ba9` with `-count=8`.
-- Cause: unverified. The timeout predates the stale-check claims, and the stalled retry does not reach hosted-check polling.
-- Status: open.
-
 ### 2026-11-23 · limitation · Remembered project homes without local AIs stay connected
 
 - Symptom: remembering a project home now retains a connection even when no AI is hosted locally in that group.
@@ -734,6 +727,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: A10.11 expected the strong secretary to be stronger than the assignee S, which the cast also called strong. A10.12 asked the same task to fail a review after passing one.
 - Cause: [the profiles contract](planning/contracts/step-3/profiles.md) orders tiers strictly. The task machine moves a passing review to `merge` and accepts a review only at `review` (`internal/home/machine.go`).
 - Status: resolved in I3-2b with the coordinator's approved wording: A10.11 makes S standard and C strong in the secretary subcase; A10.12 tests the first failure after clearing in a fresh task flow. No product change is needed.
+
+### 2026-11-23 · bug · A9.24 can stall before submitting the retry commit
+
+- Symptom: A9.24 times out at “both tasks merge after checks and cross-review and receive summaries.” In a stalled run, the retry commit gets its standalone `watch-push` but no submission push or `watch-checks` call, and the task stays at `active/local_check`.
+- Reproduce: use a Go overlay to set `godog.Options.Paths` in `features/acceptance_test.go` to `[]string{"s2_watch.feature:37"}`, then run `go test -overlay <overlay.json> -tags acceptance -race -run '^TestFeatures$' -count=50 -timeout=35m ./features/`. The same step timed out on `origin/rebuild` at `aee115ba9` with `-count=8`.
+- Cause: The home replied to `task checked` before publishing the updated task row. The next `submit_task` could compare the retry commit to the previous commit's cached check and reject it before pushing.
+- Status: resolved in PR #338. The home sends changed rows before command replies; `TestRunPushesChangedRowsBeforeCommandReply` verifies the order.
 
 ### 2026-11-23 · bug · A9.24 can run hosted checks again for the superseded commit
 
