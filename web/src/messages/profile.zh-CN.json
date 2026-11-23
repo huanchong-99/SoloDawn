@@ -1,0 +1,14 @@
+{
+  "profile.tier": "档位",
+  "profile.tier.light": "轻量",
+  "profile.tier.standard": "标准",
+  "profile.tier.strong": "强",
+  "profile.skills": "擅长",
+  "profile.skills.none": "未填写",
+  "profile.skills.hint": "一句话写下它擅长什么",
+  "profile.suggest": "建议：{tier}",
+  "profile.suggest.use": "采用",
+  "profile.edit": "编辑档案",
+  "profile.save": "保存",
+  "profile.cancel": "取消"
+}

@@ -314,7 +314,7 @@ func startTerminal(ctx context.Context, h *Host, p *takeovers, key SessionKey, t
 	p.mu.Lock()
 	t.key = key
 	p.mu.Unlock()
-	pt, id, err := h.StartPTY(s.Group, s.Member, s.Agent, launch, func() { p.closed(h, t, token) })
+	pt, id, err := h.StartPTY(s.Group, s.Member, s.Agent, memberLaunch(h, s, launch), func() { p.closed(h, t, token) })
 	if err != nil {
 		h.Sessions.Forget(token)
 		h.Sessions.Move(key, Takeover, Dormant)

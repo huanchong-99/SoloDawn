@@ -1,0 +1,14 @@
+{
+  "session": "models",
+  "steps": [
+    {"dir":"stdin","msg":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"solodawn","version":"1"}}}},
+    {"dir":"stdout","msg":{"id":1,"result":{}}},
+    {"dir":"stdout","msg":{"method":"remoteControl/status/changed","params":{"status":"disabled"}}},
+    {"dir":"stdin","msg":{"method":"initialized"}},
+    {"dir":"stdin","msg":{"id":2,"method":"model/list","params":{"includeHidden":false}}},
+    {"dir":"stdout","msg":{"id":2,"result":{"data":[{"id":"catalog-entry","model":"gpt-6-mini","displayName":"Mini","supportedReasoningEfforts":[{"reasoningEffort":"medium"},{"reasoningEffort":"high"}],"serviceTiers":[{"id":"fast"}]}],"nextCursor":"page-2"}}},
+    {"dir":"stdin","msg":{"id":3,"method":"model/list","params":{"cursor":"page-2","includeHidden":false}}},
+    {"dir":"stdout","msg":{"id":3,"result":{"data":[{"id":"catalog-other","model":"gpt-6-luna","displayName":"Luna","supportedReasoningEfforts":[],"serviceTiers":[]}],"nextCursor":null}}},
+    {"dir":"eof"}
+  ]
+}

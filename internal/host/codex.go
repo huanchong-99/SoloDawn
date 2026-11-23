@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
 func init() {
@@ -29,6 +31,10 @@ func codexCapabilities() Capabilities {
 }
 
 type codexDriver struct{}
+
+func (codexDriver) Models(ctx context.Context) []proto.Model {
+	return probeModels(ctx, "codex", []string{"app-server"}, readCodexModels)
+}
 
 var errCodexClosed = errors.New("codex: process closed")
 
@@ -52,6 +58,7 @@ func (codexDriver) Interactive(l Launch) ([]string, string, error) {
 		"-C", l.Folder,
 	}
 	argv = append(argv, flags...)
+	argv = append(argv, codexModelFlags(l)...)
 	argv = append(argv,
 		"-s", sandbox,
 		"-a", approval,
@@ -154,6 +161,9 @@ func codexLevel(level int) (sandbox, approval string, err error) {
 
 func codexThreadConfig(l Launch) map[string]any {
 	cfg := map[string]any{}
+	if l.Effort != "" {
+		cfg["model_reasoning_effort"] = l.Effort
+	}
 	if l.Level == 2 {
 		cfg["sandbox_workspace_write"] = map[string]bool{
 			"exclude_slash_tmp":      true,
@@ -425,6 +435,9 @@ func (p *codexProcess) sendThreadOpen() {
 		"config":                codexThreadConfig(p.launch),
 	}
 	method := "thread/start"
+	if p.launch.Model != "" {
+		params["model"] = p.launch.Model
+	}
 	if p.launch.Session != "" {
 		method = "thread/resume"
 		params["threadId"] = p.launch.Session
@@ -488,8 +501,9 @@ func (p *codexProcess) handleResponseError(id int64, text string) {
 }
 
 func (p *codexProcess) handleStartupError(id int64, text string) {
+	defer p.Close()
 	p.finishReady("", errors.New(text))
-	if id == 2 && p.launch.Session != "" {
+	if id == 2 && p.launch.Session != "" && codexSessionMissing(text) {
 		p.events <- Event{Kind: NoSession, Text: text}
 		return
 	}

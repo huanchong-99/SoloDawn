@@ -116,6 +116,30 @@ describe('task helpers', () => {
     });
   });
 
+  it('puts the stronger-AI badge after waits and before rejected review, only while active', () => {
+    const { group } = makeGroup();
+    const task = row<TaskRow>('row-task', {
+      stuck: { kind: 'review', n: 2, ask: true },
+    });
+    expect(taskBadge(group, task)).toEqual({ text: 'Must ask a stronger AI', tone: 'dawn' });
+    expect(taskBadge(group, { ...task, stuck: { ...task.stuck!, ask: false } })).toEqual({
+      text: 'Sent back · round 1',
+      tone: 'danger',
+    });
+    expect(taskBadge(group, { ...task, wait: { kind: 'reviewer', since: 1 } })).toEqual({
+      text: 'Waiting for a reviewer',
+    });
+    expect(taskBadge(group, { ...task, state: 'queued' })).toEqual({ text: 'Queued' });
+    expect(taskBadge(group, { ...task, state: 'paused' })).toEqual({
+      text: 'Paused',
+      dot: 'paused',
+    });
+    expect(taskBadge(group, { ...task, state: 'cancelled' })).toEqual({ text: 'Cancelled' });
+    prefs.lang = 'zh-CN';
+    expect(taskBadge(group, task)).toEqual({ text: '须先请教更强的 AI', tone: 'dawn' });
+    prefs.lang = 'en';
+  });
+
   it('maps step segments across all states, steps and forge modes', () => {
     const { group, owner } = makeGroup('github', false);
     const base = row<TaskRow>('row-task-waiting', { wait: null });

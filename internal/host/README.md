@@ -32,7 +32,7 @@ A unit never calls into the file of a unit built beside it. It registers in a ta
 | bridging a `pty:<g>:<member>` data channel | `h.ServeTerminal(t)` |
 | watching a takeover terminal | `h.WatchStart(from, device, data)`, then `h.ServeWatch(t)` for `watch:<g>:<member>`; `h.Watchers(group, member)` lists the granted users |
 | an audit row | `h.Audit(tx, AuditRow{…})`, inside the transaction of what it records |
-| the AI CLIs found here (`host.info`) | `h.Agents(ctx)`: probes each driver registered in `DriverCaps` on `PATH` (cached 60 s), writes `agent`, returns `[]proto.HostAgent` with `Groups` empty |
+| the AI CLIs found here (`host.info`) | `h.Agents(ctx, refresh)`: probes each driver registered in `DriverCaps` on `PATH` (cached 60 s; `refresh` skips the cache), writes `agent`, returns `[]proto.HostAgent` with `Groups` empty and live `Models` |
 
 ## Tables
 
@@ -100,6 +100,7 @@ Not in the seam: the one state per AI that others see (sessions.md, section 3), 
 A `Driver` starts the structured CLI (`Start`) and gives the command line of the interactive one (`Interactive`), both from a `Launch`. A running `Process` takes turns, an interrupt, answers to permission requests and a close, and reports through `Events`. Only the session runtime holds a `Process`; the other units hear its events through `Listeners` and reach it through `Runner`.
 
 - `Launch.Session` is empty before the first start. A structured start reports the id in force with a `Ready` event; `Interactive` returns the id it put on the command line. Whoever started the CLI stores the id with `Update` ([drivers.md](../../planning/contracts/drivers.md), section 1).
+- `start_model.go` reads `Launch.Model` and `Launch.Effort` from the current member row at every structured or terminal start, including resume. Row changes leave running processes alone. Claude uses `--model` and `--effort`; Codex uses `model` and `config.model_reasoning_effort` on thread start/resume, and `-m` / `-c model_reasoning_effort="…"` in a terminal. Empty values add nothing. Refused values follow the crash path without replacing the session. `features/host_start_model.feature` covers the host portion of A10.15.
 - `Launch.Shim` is the command line of the MCP server for that start: `h.Shim`, then `--token` and the token. The driver writes it into the CLI's MCP configuration as it is.
 - A driver keeps no timer. Its caller ends the context of `Start`, which kills the process tree, when an interrupt or a close was not answered within 10 s.
 - Sign-in that is not usable and a session id that cannot be resumed are events (`LoginInvalid`, `NoSession`), because a CLI reports them after its process has started.
@@ -202,6 +203,8 @@ Build `./internal/host/fakecli/claude`, `./internal/host/fakecli/codex`, `./inte
 
 ## Scripts
 
+`models.go` lists Claude Code models with an `initialize` control request and Codex models with paged `model/list` requests after initialization. Drivers that implement `Models(context.Context) []proto.Model` participate in detection; the others return an empty list. Listings share detection's 60-second memory cache. A failed or unknown listing is empty. `tiers.go` contains the sourced, ordered word table for suggestions; Claude entries use `resolvedModel`. `features/host_models.feature` covers the host portion of A10.13 and A10.14, including cache expiry and forced refresh.
+
 Each [script](fakecli/testdata/) is a span of one of the [macOS captures](https://github.com/huanchong-99/SoloDawn/tree/f258f040c1275054d901271086708ccae26d6649/spikes/b-04-macos/captures), line for line and in the captured order: a JSON file with a `steps` array. The session id is the argument after `--session-id`, `--resume` or `resume`; a Codex app-server script sets `session` to the thread id it issues. `exit` is the exit status after the last step (default 0, the only status the captures show).
 
 | Step direction | Action |
@@ -220,6 +223,8 @@ A step that does not hold ends the process with status 1 and the reason on stder
 The fake OpenCode prints `opencode server listening on <url>`, refuses a request without the `OPENCODE_SERVER_PASSWORD` basic-auth password, and has no capture: its scripts are written in the tests from the documented API. The fake Qwen Code is the same server: it prints `qwen server listening on <url>`, refuses a request without the `--token` bearer token, takes its session id from the script, and has no capture either.
 
 Two scripts go beyond their capture: `codex-exit-mid-turn.json` ends at the first approval request, and `codex-late-call.json` waits for the tool reply after the call has failed. No capture shows either, and the fake prints nothing for them.
+
+`claude-models.json` and `codex-models.json` are synthetic discovery scripts, not CLI captures. Both verify the initialization handshake and closed stdin; Codex also verifies `includeHidden:false` and the cursor on the second page. They require no model call or MCP server.
 
 To add a captured case, add a file; no code changes. Copy every line of the span in order: `stdout`, `stderr` and `mcp<-cli` lines unchanged except for `"$session"` and `"$id"`; for `stdin` and `mcp->cli` lines keep the fields the case depends on.
 
@@ -276,6 +281,8 @@ The rules are in [mcp-tools.md](../../planning/contracts/mcp-tools.md) and [loca
 - **Registrations and startup.** From `init`, `join.go` registers `"host.join"` and `"host.leave"` in `Surface` and `"join"` in `Attached`. At node startup, after setting `h.Connect`, the caller invokes `h.EnsureHomeConnections()` to connect to all remembered homes, including groups with no local AI.
 - **One connection per home.** `Part[joinPart](h)` keeps active `h.Connect` cancellation functions keyed by home device id, each derived from `context.Background()`. Reconciliation starts `h.Connect` once per distinct remembered home or in-flight `host.join`, and cancels a home's context as soon as neither references it. `RecordHome` stores a home and its signalling URLs, reconciles connections and starts state-only sync; for an already hosted group it also updates the sessions and resets group sync for the new home. `host.join` refuses a team group after reading its kind, before cloning or sending `member add_ai`.
 - **`host.join` and `host.leave`.** `host.join` verifies the payload and declared `agent` account, connects to `home` and waits at most 15 s (or until `ctx` ends) for `h.Home(home)` before answering `home_unreachable`, obtains the `group` row from `h.Rows` or a coordinated `state_only` `sync` (`syncGroupState`), clones `projects/<group>/repo` with `EnsureGroupWorkspace`, sends `member add_ai` with the stored `approvers` setting, and atomically creates the dormant `GroupSession`, upserts `setting` `'homes'` and records `AuditSetting`. `host.leave` sends `member remove` first so a refusal leaves sessions and connections untouched, and on success ends all sessions of `(g, member)`, prunes `setting` `'homes'` when no local AI remains in `g`, records `AuditSetting`, and reconciles home connections.
+
+`host.join` forwards optional `model`, `effort`, `tier` and `skills` unchanged and permits several members of the same CLI in one group. `host.leave` selects `member` within the given group and agent; omitting it is `bad_request` when more than one distinct member matches. Multiple sessions of one member do not make the selection ambiguous.
 - **Lock order and channels.** `joinPart.syncMu` serializes connection reconciliation across `Store` reads; `joinPart.mu` is a leaf lock that guards only in-memory `joinPart` fields and never calls into `Host`, `Sessions`, `Rows`, `Store`, `Connect` or cancel functions. Each waiter channel in `joinPart.waiters` has a single reader, `joinWaitChannel` in `joinAwaitAttach`.
 
 # Talk and group state tools

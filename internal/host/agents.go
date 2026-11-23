@@ -27,6 +27,7 @@ func init() {
 type agtFound struct {
 	agent   string
 	version string
+	models  []proto.Model
 }
 
 // agtPart keeps the 60 s CLI detection cache and sign-in status for one Host.
@@ -81,8 +82,8 @@ func (p *agtPart) storeCache(expiresAt time.Time, found []agtFound) {
 // Groups is an empty slice for the caller to fill from session and permission
 // state. If ctx ends during a probe, Agents returns ctx.Err() bare (not an
 // *Error) for the caller to map to a wire code.
-func (h *Host) Agents(ctx context.Context) ([]proto.HostAgent, error) {
-	found, err := agtDetect(ctx, h)
+func (h *Host) Agents(ctx context.Context, refresh bool) ([]proto.HostAgent, error) {
+	found, err := agtDetect(ctx, h, refresh)
 	if err != nil {
 		return nil, err
 	}
@@ -92,12 +93,12 @@ func (h *Host) Agents(ctx context.Context) ([]proto.HostAgent, error) {
 	return agtLoadAgents(h.Store, Part[agtPart](h), found)
 }
 
-func agtDetect(ctx context.Context, h *Host) ([]agtFound, error) {
+func agtDetect(ctx context.Context, h *Host, refresh bool) ([]agtFound, error) {
 	part := Part[agtPart](h)
 	part.probeMu.Lock()
 	defer part.probeMu.Unlock()
 	now := h.Now()
-	if found, ok := part.cached(now); ok {
+	if found, ok := part.cached(now); ok && !refresh {
 		return found, nil
 	}
 	found, err := agtProbeAll(ctx)
@@ -119,10 +120,10 @@ func agtProbeAll(ctx context.Context) ([]agtFound, error) {
 			return nil, err
 		}
 		if ok {
-			found = append(found, agtFound{agent: agent, version: version})
+			found = append(found, agtFound{agent: agent, version: version, models: agtModels(ctx, agent)})
 		}
 	}
-	return found, nil
+	return found, ctx.Err()
 }
 
 func agtProbeOne(ctx context.Context, agent string) (string, bool, error) {
@@ -201,7 +202,7 @@ func agtReadRow(tx *store.Tx, f agtFound, loginOK bool) (proto.HostAgent, error)
 		Caps:       caps,
 		Driver:     agtDriverProto(f.agent),
 		Groups:     []proto.AgentGroup{},
-		Models:     []proto.Model{},
+		Models:     f.models,
 	}, nil
 }
 

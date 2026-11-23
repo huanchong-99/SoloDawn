@@ -59,7 +59,7 @@ func memAddValid(p proto.MemberAddAI) *Refusal {
 	if p.Name == "" || !memCLI.MatchString(p.CLI) || !slices.Contains(memAccounts, p.Account) {
 		return &Refusal{"bad_request", "member add_ai requires a name, a supported cli and an account type"}
 	}
-	return nil
+	return profileValidate(p.ProfileSet)
 }
 
 func (s *State) memCreateAI(c Command, p proto.MemberAddAI, hostName string) (Result, *Refusal) {
@@ -91,6 +91,7 @@ func memNewAI(s *State, c Command, p proto.MemberAddAI, hostName string) proto.A
 		CLI: p.CLI, Host: c.Who.Device, HostName: hostName, Secretary: p.Secretary,
 		Account: p.Account, Allow: []string{}, Approvers: memApprovers(c.Who.User, p.Approvers),
 		State: "dormant", Since: c.Now, Path: path, Usage: proto.Usage{},
+		Profile: profileUpdate(proto.Profile{}, p.ProfileSet),
 	}
 }
 
@@ -123,7 +124,7 @@ func (s *State) memDemote(keep string) []Row {
 	return []Row{RowOf(old)}
 }
 
-// memSet updates an AI member's name, account, allow list or approvers.
+// memSet updates a person's role or an AI member's settings.
 func memSet(s *State, c Command) (Result, *Refusal) {
 	var p proto.MemberCommand
 	if refusal := c.Decode(&p); refusal != nil {
@@ -154,11 +155,14 @@ func memSetAI(s *State, c Command) (Result, *Refusal) {
 }
 
 func memSetValid(p proto.MemberSet) *Refusal {
-	present := [4]bool{p.Name != nil, p.Account != nil, p.Allow != nil, p.Approvers != nil}
-	if present == [4]bool{} || !memSetFieldsOK(p) {
+	if !memSetPresent(p) || !memSetFieldsOK(p) {
 		return &Refusal{"bad_request", "member set carries no field, an empty name, or an unknown account"}
 	}
-	return nil
+	return profileValidate(p.ProfileSet)
+}
+
+func memSetPresent(p proto.MemberSet) bool {
+	return p.Name != nil || p.Account != nil || p.Allow != nil || p.Approvers != nil || profilePresent(p.ProfileSet)
 }
 
 func memSetFieldsOK(p proto.MemberSet) bool {
@@ -169,6 +173,9 @@ func memSetFieldsOK(p proto.MemberSet) bool {
 }
 
 func (s *State) memMaySet(w Who, ai proto.AIMemberRow, p proto.MemberSet) bool {
+	if w.Device == ai.Host && profilePresent(p.ProfileSet) {
+		return false
+	}
 	if w.AI == "" && w.User == ai.User {
 		return true
 	}
@@ -190,6 +197,7 @@ func memUpdated(ai proto.AIMemberRow, p proto.MemberSet) proto.AIMemberRow {
 	grpSetOpt(&ai.Name, p.Name)
 	grpSetOpt(&ai.Account, p.Account)
 	grpSetOpt(&ai.Allow, p.Allow)
+	ai.Profile = profileUpdate(ai.Profile, p.ProfileSet)
 	if p.Approvers != nil {
 		ai.Approvers = memApprovers(ai.User, *p.Approvers)
 	}

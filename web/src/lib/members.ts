@@ -8,6 +8,9 @@ import type { AIMemberRow, HostInfoPush, HumanMemberRow, MsgRow, TaskRow } from 
 import { hostHomeOf } from './terminal.svelte';
 import { clock } from './when';
 
+/** The model, level and profile an AI member is added or edited with. */
+export type Draft = Pick<AIMemberRow, 'model' | 'effort' | 'tier' | 'skills'>;
+
 /** An AI CLI registered on one of the owner's connected computers. */
 export interface Candidate {
   key: string;
@@ -269,6 +272,7 @@ export async function joinGroup(
   candidate: Candidate,
   name: string,
   secretary: boolean,
+  draft: Draft,
 ): Promise<string> {
   if (!target?.ctl) return 'lost';
   const env = await target.me.sign(
@@ -282,6 +286,7 @@ export async function joinGroup(
       agent: candidate.agent,
       name,
       secretary,
+      ...draft,
     }),
   );
   const answer = await target.ctl.request({ t: 'cmd', env }).catch(lost);

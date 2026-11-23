@@ -572,7 +572,9 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
         .locator('input')
         .check();
       await addDlg.locator('.sec-opt input[type="checkbox"]').check();
-      await poll(() => addDlg.locator('input.input').inputValue()).toBe('Secretary');
+      await poll(() =>
+        addDlg.getByRole('textbox', { name: 'Name in the group' }).inputValue(),
+      ).toBe('Secretary');
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
       await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(1);
@@ -597,7 +599,7 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await members.locator('button', { hasText: 'Add AI' }).click();
       await poll(() => addDlg.locator('.choice').count()).toBe(4);
       await addDlg.locator('.choice', { hasText: 'Codex · coordinator' }).locator('input').check();
-      await addDlg.locator('input.input').fill('Reviewer');
+      await addDlg.getByRole('textbox', { name: 'Name in the group' }).fill('Reviewer');
       await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
       await poll(() => addDlg.count()).toBe(0);
       await poll(() => members.locator('.member').count()).toBe(4);
@@ -798,7 +800,10 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await poll(() => page.locator('.line .msg .text').allTextContents()).toContain(
         'Confirmed approval and selected option B: SQLite table.',
       );
-      const stdinLines = (await readFile(stdinLog, 'utf8')).trim().split('\n');
+      const stdinLines = (await readFile(stdinLog, 'utf8'))
+        .trim()
+        .split('\n')
+        .filter((line) => !line.includes('"control_request"'));
       expect(stdinLines).toHaveLength(2);
       expect(stdinLines[1]).toContain('Which caching backend should we ship?');
       expect(stdinLines[1]).toContain('Choice: B (SQLite table)');

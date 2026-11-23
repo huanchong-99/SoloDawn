@@ -50,6 +50,9 @@ func agtVal[T any](v T, err error) T {
 }
 
 func agtRunStandIn(dir, name string) int {
+	if len(os.Args) != 2 || os.Args[1] != "--version" {
+		return 1
+	}
 	if len(agtVal(io.ReadAll(os.Stdin))) != 0 {
 		return 2
 	}
@@ -87,7 +90,7 @@ func agtErrText(t *testing.T, err error, want string) {
 
 func agtReadAgents(t *testing.T, h *Host) []proto.HostAgent {
 	t.Helper()
-	got, err := h.Agents(t.Context())
+	got, err := h.Agents(t.Context(), false)
 	agtCheck(t, err)
 	return got
 }
@@ -360,7 +363,7 @@ func TestAgentsCancelledContextDoesNotCache(t *testing.T) {
 	cancelled, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	got, err := h.Agents(cancelled)
+	got, err := h.Agents(cancelled, false)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled Agents err = %v, want context.Canceled", err)
 	}
@@ -505,7 +508,7 @@ func TestAgentsStoreErrorsAndTransactionAtomicity(t *testing.T) {
 		db := seamStore(t)
 		seamSQL(t, db, "DROP TABLE agent")
 		h, _ := seamHost(t, db)
-		if _, err := h.Agents(t.Context()); err == nil || !strings.Contains(err.Error(), "no such table: agent") {
+		if _, err := h.Agents(t.Context(), false); err == nil || !strings.Contains(err.Error(), "no such table: agent") {
 			t.Fatalf("got %v, want no such table: agent", err)
 		}
 	})
@@ -515,7 +518,7 @@ func TestAgentsStoreErrorsAndTransactionAtomicity(t *testing.T) {
 		h, _ := seamHost(t, db)
 		agtReadAgents(t, h)
 		seamSQL(t, db, "UPDATE agent SET caps = '{' WHERE agent = 'claude'")
-		if _, err := h.Agents(t.Context()); err == nil {
+		if _, err := h.Agents(t.Context(), false); err == nil {
 			t.Fatal("expected JSON unmarshal error for malformed caps")
 		}
 	})
@@ -542,7 +545,7 @@ func TestAgentsStoreErrorsAndTransactionAtomicity(t *testing.T) {
 		h, _ := seamHost(t, db)
 		agtReadAgents(t, h)
 		seamSQL(t, db, "DROP TABLE agent")
-		if _, err := h.Agents(t.Context()); err == nil || !strings.Contains(err.Error(), "no such table: agent") {
+		if _, err := h.Agents(t.Context(), false); err == nil || !strings.Contains(err.Error(), "no such table: agent") {
 			t.Fatalf("Agents got %v, want no such table: agent", err)
 		}
 		if _, err := Surface["agent.set"](t.Context(), h, nil, "owner-dev", agtSetPayload("claude", "personal")); err == nil || !strings.Contains(err.Error(), "no such table: agent") {
@@ -566,7 +569,7 @@ func TestAgentsConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			if _, err := h.Agents(t.Context()); err != nil {
+			if _, err := h.Agents(t.Context(), false); err != nil {
 				t.Errorf("Agents: %v", err)
 			}
 			if n%2 == 0 {

@@ -1,0 +1,14 @@
+{
+  "profile.tier": "Tier",
+  "profile.tier.light": "Light",
+  "profile.tier.standard": "Standard",
+  "profile.tier.strong": "Strong",
+  "profile.skills": "Skills",
+  "profile.skills.none": "Not set",
+  "profile.skills.hint": "What this AI is good at, in one line",
+  "profile.suggest": "Suggested: {tier}",
+  "profile.suggest.use": "Use",
+  "profile.edit": "Edit profile",
+  "profile.save": "Save",
+  "profile.cancel": "Cancel"
+}

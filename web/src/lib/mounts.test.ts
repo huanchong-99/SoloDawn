@@ -53,11 +53,15 @@ describe('gather', () => {
         'chat.head': [at(1, 'Head')],
         'chat.top': [at(1, 'Top')],
         'chat.side': [at(1, 'Side')],
+        'member.ai': [at(1, 'AI')],
+        'member.add': [at(1, 'Add')],
       },
     });
     expect(placed(found.at['chat.head'])).toEqual(['Head@member:1']);
     expect(placed(found.at['chat.top'])).toEqual(['Top@member:1']);
     expect(placed(found.at['chat.side'])).toEqual(['Side@member:1']);
+    expect(placed(found.at['member.ai'])).toEqual(['AI@member:1']);
+    expect(placed(found.at['member.add'])).toEqual(['Add@member:1']);
   });
 
   it('mounts the people panel in the chat sidebar', () => {

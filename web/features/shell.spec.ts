@@ -15,6 +15,8 @@ import { all, closePage, go, one, openPage, texts } from './page';
 
 const feature = await loadFeature('../features/web_shell.feature');
 
+vi.mock('../src/lib/mounts.glob', () => ({ files: {} }));
+
 // The client's mounting points hold, for each scenario, what its stand-in areas mount.
 vi.mock('../src/lib/mounts.svelte', async (actual) => {
   const real = await actual<typeof import('../src/lib/mounts.svelte')>();
