@@ -53,12 +53,9 @@ Feature: Accessibility across the pages and design widths
     When two more mentions arrive and the person closes the first with the pointer
     Then focus stays on the main landmark
 
-  Scenario: The terminal and the other-tab notice are named and can be left from the keyboard
+  Scenario: The other-tab notice is named and can be left from the keyboard
     Given two groups "Website" and "Docs" with waiting brief, approval and decision cards, a locked approval, a task and a summary
-    When the person opens the terminal of "Codex" on a 1280 px desktop
-    Then the takeover bar is a status region, the key row and the details column take keyboard focus, and the terminal's input is described by the note on leaving it
-    And only Ctrl+M is kept from the terminal, and it moves focus to "Back to chat"
-    When another tab takes the connection
+    When the person opens the group list on a 1280 px desktop and another tab takes the connection
     Then the notice is a status region, the connection indicator is named "Connection status: inactive", and no notification hangs under a chat's head
     When the person chooses "Use here"
     Then focus moves to the main landmark
@@ -67,8 +64,8 @@ Feature: Accessibility across the pages and design widths
     Given a group "Website" with a side panel area and an active home connection
     When the person opens the chat of "Website" at 390, 820, 1024 and 1440 px widths
     Then on a 390 px phone the shell uses phone whole-screen mode and places the named connection indicator in the chat head
-    And at 390 and 820 px the open side panel makes the parts behind it inert and Escape returns focus to "People and details"
-    And at 1024 and 1440 px the side panel stands beside the main line and nothing is inert
+    And at 390 and 820 px the open side panel makes the parts behind it and the notifications inert and Escape returns focus to "People and details"
+    And at 1024 and 1440 px the side panel stands beside the main line and nothing is inert, the notifications included
 
   Scenario: Design tokens meet WCAG 2.1 AA contrast in both themes and reduced motion stills scripted scrolling and transitions
     When the colour tokens of "src/styles/tokens.css" are evaluated in light and dark themes

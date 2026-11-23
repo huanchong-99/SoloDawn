@@ -533,7 +533,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
   reads as Enter, is kept from it and moves focus to the takeover bar's button; a note in the
   details column says so and describes the terminal's input field. Faint text in the default
   colour is drawn in `--term-dim`, 5.6 to 1 on `--term-bg`, where xterm's own half opacity gives
-  4.1 to 1 (`../issues.md` for faint text in a colour). The key row and the details column scroll, and take keyboard focus for that.
+  4.1 to 1 (`../issues.md` for faint text in a colour). The key row scrolls; the details column
+  scrolls and takes keyboard focus for that.
   `HandbackMeta.svelte` mounts for message kind `handback` to render changed files, commits and
   diff counts.
 - **Connection indicator and computers page.** `indicator(net, group)` in `src/lib/nodes.svelte.ts`
@@ -559,9 +560,10 @@ file in `src/routes/`. It edits neither the shell nor another area:
   newcomer past that drops the oldest self-closing one, or the oldest waiting card when none is
   self-closing. The stack sits at the top right of the page's area, under the top bar and the
   banners, so it never covers the composer or "Use here". On a chat it hangs under the chat's
-  head at every width, and from 1024 px it is as wide as the cards of the side column it lies
-  over, so it covers neither the head's buttons, the waiting bar nor "Add AI"; below 1024 px the
-  side panel opens over it. Its polite live region is always in the page, apart from the shell's
+  head at every width. From 1024 px it is as wide as the cards of the side column it lies over,
+  so it covers neither the head's buttons, the waiting bar nor "Add AI"; this holds only at
+  1024 px and wider. Below 1024 px the side panel opens over it, and while the panel is open the
+  stack is inert, so Tab does not reach it. Its polite live region is always in the page, apart from the shell's
   status region, and it shows nothing while another tab holds the connection. "Open" and the
   close button of a notification are described by its title. Closing one from the keyboard moves
   focus to the next notification's close button, else to the one before, else to the main

@@ -3,7 +3,7 @@ import { flushSync } from 'svelte';
 import { expect, vi } from 'vitest';
 import { homes } from '../src/lib/groups.svelte';
 import * as p from '../src/lib/proto';
-import { browser, example, owner, TestHome, user } from './home';
+import { ActHome, browser, example, user } from './home';
 import { all, closePage, fill, one, openPage, texts } from './page';
 
 const feature = await loadFeature('../features/web_cards.feature');
@@ -14,64 +14,8 @@ const codex = '1PC8WineBrUQ-apCjx7tug';
 const claude = 'LXCZmuGAXkvO-bSrOkuCfw';
 const taskId = 'DrtCn6htSBwmMPrFPbHJHA';
 
-/** A TestHome that also applies `act` commands (`confirm`, `revise`, `choose`) to card rows,
- *  checking every received command against `proto.Act` and every resulting row against `proto.MsgRow`. */
-class CardHome extends TestHome {
-  override connect(push: (frame: p.Push) => void) {
-    const conn = super.connect(push);
-    const base = conn.ctl.request as (req: Record<string, unknown>) => Promise<unknown>;
-    const ctl = {
-      request: async (req: Record<string, unknown>) => {
-        if (req.t !== 'cmd') return base(req);
-        const env = req.env as p.Envelope;
-        const raw = JSON.parse(env.p) as Record<string, unknown>;
-        if (raw.t !== 'act') return base(req);
-        await new Promise((later) => setTimeout(later));
-        this.asked.push(req);
-        const re = this.asked.length;
-        if (this.refuse) return { re, err: { code: this.refuse, msg: 'refused by the test' } };
-        const act = p.decode(p.Act, env.p);
-        return { re, ...this.#act(env, act) };
-      },
-    } as p.Ctl;
-    return { ctl, close: conn.close };
-  }
-
-  #act(env: p.Envelope, act: p.Act) {
-    const group = this.groups.get(act.g);
-    const current = group?.rows.get(`msg ${act.msg}`) as
-      (p.MsgRow & Record<string, unknown>) | undefined;
-    if (!current) return { err: { code: 'not_found', msg: 'no such card' } };
-    const at = act.ts;
-    let state: Record<string, unknown>;
-    if (act.action === 'confirm') {
-      state = { status: 'confirmed', by: owner, at, act: env };
-    } else if (act.action === 'revise') {
-      state = {
-        status: 'revise',
-        by: owner,
-        at,
-        act: env,
-        ...(act.text ? { note: act.text } : {}),
-      };
-    } else {
-      state = {
-        status: 'decided',
-        by: owner,
-        at,
-        act: env,
-        ...(act.arg ? { choice: act.arg } : {}),
-        ...(act.text ? { text: act.text } : {}),
-      };
-    }
-    const updated = p.decode(p.MsgRow, JSON.stringify({ ...current, state }));
-    this.write(act.g, updated as p.Row & Record<string, unknown>);
-    return { ok: true };
-  }
-}
-
 describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
-  let home: CardHome;
+  let home: ActHome;
   let reader: ReturnType<typeof browser>;
 
   const acts = () =>
@@ -97,7 +41,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     Given(
       'the chat of "Website" open with its secretary, working AIs and task "T-12"',
       async () => {
-        home = new CardHome();
+        home = new ActHome();
         home.add(website, 'Website');
         home.write(
           website,
