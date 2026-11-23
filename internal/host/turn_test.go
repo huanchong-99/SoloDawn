@@ -263,6 +263,12 @@ func checkInstructionCase(t *testing.T, s Session, wants []string) {
 	}
 }
 
+const secretaryTurnHeader = "[SoloDawn] group \"Website\" · you are \"Secretary\" · secretary session\n" +
+	"AI members (CLI on computer · tier · state · skills):\n" +
+	"- \"Claude Code\" · claude on workstation · standard · waiting\n" +
+	"- \"Codex\" · codex on workstation · standard · waiting\n" +
+	"- \"Secretary\" · claude on workstation · standard · waiting\n"
+
 func TestOwnTurnsContinueAndHandback(t *testing.T) {
 	r := newTurnRig(t)
 	cases := []struct {
@@ -293,7 +299,7 @@ func TestOwnTurnsContinueAndHandback(t *testing.T) {
 		},
 		{
 			r.session(GroupSession, true, "c1"), HandbackTurn,
-			"[SoloDawn] group \"Website\" · you are \"Secretary\" · secretary session\n== 1 of 1 · handback · instruction\nYour owner worked with you directly in the terminal. Post a short account of what was asked and what was done (`post`, kind `handback`).",
+			secretaryTurnHeader + "== 1 of 1 · handback · instruction\nYour owner worked with you directly in the terminal. Post a short account of what was asked and what was done (`post`, kind `handback`).",
 			"",
 		},
 		{
@@ -645,7 +651,7 @@ func checkDecisionVariants(t *testing.T, r *turnRig) {
 		})
 	}
 	sec := r.session(GroupSession, true, "c1")
-	const secHead = "[SoloDawn] group \"Website\" · you are \"Secretary\" · secretary session\n"
+	const secHead = secretaryTurnHeader
 	decLine := "Decision (id " + tMsg1ID + "): Where should the notice go?"
 
 	bothRaw := r.makeInboxItem(proto.Item{Item: 5, AI: proto.ID(tSecID), Why: "decided", Msg: proto.ID(tMsg1ID)},
