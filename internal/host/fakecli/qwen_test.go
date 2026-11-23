@@ -19,6 +19,7 @@ func TestQwenServesItsScriptBehindTheBearerToken(t *testing.T) {
 	t.Setenv("SOLODAWN_FAKE_QWEN_SCRIPT", filepath.Join(dir, "script.json"))
 	t.Setenv("SOLODAWN_FAKECLI_LOG", filepath.Join(dir, "log"))
 	t.Setenv("QWEN_CODE_SYSTEM_SETTINGS_PATH", filepath.Join(dir, "settings.json"))
+	t.Setenv("OPENCODE_CONFIG_CONTENT", `{"mcp":{}}`)
 	out, stdout, _ := os.Pipe()
 	exit, stderr := make(chan int, 1), &strings.Builder{}
 	go func() {
@@ -42,5 +43,5 @@ func TestQwenServesItsScriptBehindTheBearerToken(t *testing.T) {
 	event, _ := bufio.NewReader(stream.Body).ReadString('\n')
 	openCodeCheck(t, event == `data: {"type":"turn_complete","data":{}}`+"\n", "event %q", event)
 	code = <-exit
-	openCodeCheck(t, code == 1 && strings.HasPrefix(stderr.String(), "fake qwen: step 2 (mcp<-cli): "), "exit %d, stderr %q", code, stderr)
+	openCodeCheck(t, code == 1 && strings.HasPrefix(stderr.String(), "fake qwen: step 2 (mcp<-cli): ") && strings.Contains(stderr.String(), filepath.ToSlash(filepath.Join(dir, "none"))), "exit %d, stderr %q", code, stderr)
 }

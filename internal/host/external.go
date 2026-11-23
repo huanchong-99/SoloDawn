@@ -304,7 +304,7 @@ func extHandOut(h *Host, ep *extPart, d *delivery, key aiGroupKey, s Session, ba
 	run := batch[0].item.Item
 	extOpenRun(h, ep, key, s, run)
 	return proto.Handout{
-		Run: run, Kind: string(s.Kind), Task: s.Task, Folder: sessionDir(h, s),
+		Run: run, Kind: string(s.Kind), Task: (&turnCtx{h: h, s: s}).taskRef(s.Task), Folder: sessionDir(h, s),
 		Context: Instructions(s) + "\n" + externalInstructions + "\n" + replaced, Text: text,
 	}, true, nil
 }
