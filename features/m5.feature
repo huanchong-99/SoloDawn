@@ -3,7 +3,7 @@ Feature: Tasks from brief to merge
   CLIs, covering briefs, worktrees, local and hosted checks, reviews, merges,
   conflicts, direct tasks, idempotency and stale-item retirement.
 
-  Scenario: Two tasks run from brief to merge without a remote, with no human action beyond confirm (A5.1, A5.2, A5.12)
+  Scenario Outline: Two tasks run from brief to merge without a remote, with no human action beyond confirm (A5.1, A5.2, A5.12, sample <sample>)
     Given a project group with forge "none", a secretary and working AIs "Claude" and "Codex"
     When the owner posts a feature request in the main line and the secretary proposes a two-task brief
     Then before confirm no task worktree exists and no assign item is queued on the home
@@ -12,6 +12,14 @@ Feature: Tasks from brief to merge
     And the owner saw no confirm card (A9.40)
     And each passing review was followed by its merge with no AI turn in between and a task_merged row in the thread
     And each task ran in its own session and worktree, and after the merge those sessions and folders are gone
+
+    Examples:
+      | sample |
+      | 1      |
+      | 2      |
+      | 3      |
+      | 4      |
+      | 5      |
 
   Scenario: Two tasks run from brief to merge with a bare remote and fake gh, including push_branch (A5.1, A5.12, A5.13)
     Given a project group with forge "github", a bare remote, fake gh, a secretary and working AIs "Claude" and "Codex"
