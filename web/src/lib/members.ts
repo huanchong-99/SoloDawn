@@ -4,12 +4,13 @@ import { lost, newId, type Group, type Home } from './groups.svelte';
 import type { Net } from './net.svelte';
 import { cliName } from './onboard.svelte';
 import { t } from './prefs.svelte';
-import type { AIMemberRow, HostInfoPush, HumanMemberRow, MsgRow, TaskRow } from './proto';
+import type { AIMemberRow, HostInfoPush, HostJoin, HumanMemberRow, MsgRow, TaskRow } from './proto';
 import { hostHomeOf } from './terminal.svelte';
 import { clock } from './when';
 
 /** The model, level and profile an AI member is added or edited with. */
-export type Draft = Pick<AIMemberRow, 'model' | 'effort' | 'tier' | 'skills'>;
+export type Draft = Pick<AIMemberRow, 'model' | 'effort' | 'tier' | 'skills'> &
+  Pick<HostJoin, 'account' | 'tool'>;
 
 /** An AI CLI registered on one of the owner's connected computers. */
 export interface Candidate {
@@ -135,12 +136,17 @@ const idleStates: Record<
   string,
   {
     st: string;
-    key: 'member.state.sleeping' | 'member.state.limited' | 'member.state.takeover';
+    key:
+      | 'member.state.sleeping'
+      | 'member.state.limited'
+      | 'member.state.takeover'
+      | 'member.state.paused';
   }
 > = {
   dormant: { st: 'sleeping', key: 'member.state.sleeping' },
   limited: { st: 'limited', key: 'member.state.limited' },
   takeover: { st: 'takeover', key: 'member.state.takeover' },
+  paused: { st: 'paused', key: 'member.state.paused' },
 };
 
 /** Status badge key and localized status line for an AI member card. */
@@ -232,7 +238,7 @@ export function candidatesOf(
 
 /** Candidates that have an account type set; one already in the group adds another member. */
 export const selectableCandidates = (candidates: readonly Candidate[]): Candidate[] =>
-  candidates.filter((c) => c.account !== null);
+  candidates.filter((c) => c.agent === 'external' || c.account !== null);
 
 /** Whether the add-AI dialog offers making the new AI the group's secretary. */
 export const canMakeSecretary = (group: Group): boolean => !group.info?.secretary || isAdmin(group);
@@ -275,6 +281,8 @@ export async function joinGroup(
   draft: Draft,
 ): Promise<string> {
   if (!target?.ctl) return 'lost';
+  const external = candidate.agent === 'external';
+  const { account, tool, ...profile } = draft;
   const env = await target.me.sign(
     JSON.stringify({
       t: 'host.join',
@@ -285,8 +293,9 @@ export async function joinGroup(
       home: group.info!.home,
       agent: candidate.agent,
       name,
-      secretary,
-      ...draft,
+      secretary: !external && secretary,
+      ...profile,
+      ...(external && { account, tool: tool || undefined }),
     }),
   );
   const answer = await target.ctl.request({ t: 'cmd', env }).catch(lost);

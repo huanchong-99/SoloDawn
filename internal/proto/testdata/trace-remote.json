@@ -2,17 +2,14 @@
   "keys": [
     {
       "name": "OB",
-      "seed": "xoXUDPXtMboz-1RVTWYDzSYqKonuNnGYa5W9luOvWmU",
       "device": "NAUOqgEGgQ0PpAIC8GihuQZOqv9IDQGZdsciRN4YXU0"
     },
     {
       "name": "HA",
-      "seed": "oRiZlX6L89D94CJn2cwIrqoZrF9SCTdirajilCULBI8",
       "device": "VdDrV4Ekj7W0LTzaWIOTUjKNREoHaUZW3IQEp3wqxhM"
     },
     {
       "name": "HB",
-      "seed": "PNRyXOpiJCdpW9lYFJsIur2OjCGrE3d2_L3YtRddPeQ",
       "device": "pzxhT0qJV9YMD-eAz4cCpWsVG0qOSfAvI0mS5rBD4VA"
     }
   ],

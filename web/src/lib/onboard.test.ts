@@ -276,6 +276,9 @@ describe('setAccount', () => {
 });
 
 describe('PairingSession mock, countdown and storage checks', () => {
+  it('names the external agent in the reader’s language', () => {
+    expect(cliName('external')).toBe('External AI');
+  });
   it('loads mock state, reacts to host.info pushes, and declares accounts', async () => {
     const session = new PairingSession('mock');
     await vi.waitFor(() => expect(session.stage).toBe('accounts'));
@@ -307,6 +310,32 @@ describe('PairingSession mock, countdown and storage checks', () => {
     expect(session.node?.name).toBe('renamed-mac');
     expect(session.agents).toEqual([]);
     session.destroy();
+  });
+
+  it('finishes onboarding without declaring an account for an external agent', async () => {
+    const session = new PairingSession('mock');
+    try {
+      await vi.waitFor(() => expect(session.stage).toBe('accounts'));
+      const managed = session.agents!.find((agent) => agent.agent === 'claude')!;
+      const info = hostInfoOf(session.node!.id, [
+        managed,
+        {
+          agent: 'external',
+          cli_version: '',
+          account: null,
+          login_ok: true,
+          driver: { accounts: ['personal', 'team', 'api_key'], takeover: 'none' },
+          models: [],
+          caps: {},
+          groups: [],
+        },
+      ]);
+      mockPushes[0]({ ...info, re: undefined, ok: undefined } as never);
+      expect(session.stage).toBe('ready');
+      expect(session.agents).toEqual([managed]);
+    } finally {
+      session.destroy();
+    }
   });
 
   it('stops mock setup cleanly on destroy or blocked IndexedDB, and skips mock outside DEV', async () => {

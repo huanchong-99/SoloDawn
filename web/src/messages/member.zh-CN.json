@@ -44,6 +44,7 @@
   "member.state.needyou.one": "等待中 · 等你处理 1 件事",
   "member.state.needyou.task": "等待中 · {task} 等你处理",
   "member.state.offline": "离线",
+  "member.state.paused": "已暂停",
   "member.state.sleeping": "休眠 · 被 @ 时自动醒来",
   "member.state.takeover": "主人正在直接操作",
   "member.state.waiting": "等待中",

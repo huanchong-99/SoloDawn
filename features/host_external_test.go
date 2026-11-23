@@ -235,7 +235,8 @@ func (s *extScenario) runEnds(b *extBubble) error {
 	synctest.Wait()
 	s.states = append(s.states, b.state())
 	s.cmds = b.home.snapshotCmds()
-	s.first.Folder = strings.TrimPrefix(s.first.Folder, filepath.Join(b.base, "projects", hlGroup))
+	base, _ := filepath.EvalSymlinks(b.base)
+	s.first.Folder = strings.TrimPrefix(s.first.Folder, filepath.Join(base, "projects", hlGroup))
 	return nil
 }
 
