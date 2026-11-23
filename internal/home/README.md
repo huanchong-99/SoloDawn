@@ -874,8 +874,6 @@ shutdown hooks ([commands](../../planning/contracts/commands.md) 1.7;
   of HM-13, and no node starts a loop yet: the remaining command files and the wiring of the node
   are separate units
   ([units](../../planning/steps/parallel-plan-units.md), section 2).
-- After retention deletes rows, finished tasks stay in the in-memory `State.Tasks` until restart
-  ([issues](../../issues.md)).
 - The jobs of a group have no bound: a client that sends commands faster than its group applies
   them makes the list grow ([issues](../../issues.md)).
 - A `peer.Connection` takes every frame at once and keeps it in its own buffer, so the limit of

@@ -522,7 +522,17 @@ func hevSyncBarrier(t *testing.T, loop *home.Loop, conn *home.Conn, watcher *hev
 	t.Helper()
 	seq := loop.Groups(conn)[0].Seq
 	loop.Sync(conn, proto.Sync{Request: proto.Request{Type: "sync", ID: re}, Group: groupID, Since: seq, StateOnly: true})
-	equal(t, <-watcher.ch, proto.Synced{Type: "synced", Success: proto.Success{Re: re, OK: true}, Group: groupID, Seq: seq})
+	for {
+		select {
+		case frame := <-watcher.ch:
+			if reply, ok := frame.(proto.Synced); ok && reply.Re == re {
+				equal(t, reply, proto.Synced{Type: "synced", Success: proto.Success{Re: re, OK: true}, Group: groupID, Seq: seq})
+				return
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for synced reply")
+		}
+	}
 }
 
 // Loop automatically fires HostOfflineEvent when a device's last taker
