@@ -734,6 +734,30 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-23 · bug · An external AI's timer callback could outlive Settle
+
+- Symptom: `Settle` could return while an external AI's run timeout (`extEnd`, which calls `Deliver`) or presence report (`extReport`) was still running, and a `leave` or a hand-out during shutdown armed a new timer, such as a 180 s presence timer.
+- Cause: `settleExternal` (`internal/host/external.go:56`) stopped the run and presence timers but did not wait for a callback already running, and `extLeave` (`:209`) and `extOpenRun` (`:298`) armed `time.AfterFunc` timers after it.
+- Status: resolved on `devin/host-teardown-race`, with the pattern of `limits.go`: `extPart` has `settled` and `wg`, every timer callback starts on `wg` under `extPart.mu` unless settled (`extPart.after`), no timer is armed once settled, and `settleExternal` waits on `wg`. `TestSettleExternalWaitsForItsTimersAndArmsNoMore` holds a run timeout inside `Deliver` and pins that `Settle` waits for it and that a `leave` and a hand-out after it arm nothing.
+
+### 2026-11-23 · bug · FLAKY-30: the kill of a PTY that outlives its stop timeout was covered only by timing on Windows
+
+- Symptom: the Windows CI step "Uncovered Windows product statements" sometimes reported `internal/host/pty.go:194.23,194.41`, the `killTree` closure of `ptyActivate`.
+- Cause: the closure runs only when the process is still running once `ptyStopTimeout` has passed after the handle closes (`internal/host/pty.go:336-337`). The only test that reached it, `TestPTYCloseTimeoutAndReentrancy` (`internal/host/pty_test.go:819`), starts a helper that ignores `SIGHUP` and sets the timeout to 30 ms (`:821`). On Unix the helper outlives the close every time. On Windows, closing the pseudo console (`internal/host/pty_windows.go:48`) ends its client processes, so when the helper ended within 30 ms the kill was skipped.
+- Status: resolved on `devin/host-teardown-race`: `TestPTYActivateKillsAProcessThatOutlivesTheStopTimeout` (`internal/host/pty_test.go:796`) activates a running helper with a handle whose close leaves it running, so the stop timeout passes and the tree is killed on every OS.
+
+### 2026-11-23 · bug · FLAKY-28: a takeover test read the last process before the fake driver stored it
+
+- Symptom: `TestTakeoverHandBackAfterACommitPostsTheFacts` panicked on Windows CI with index -1 in `fakeDriver.lastProc` (`internal/host/run_test.go:85`).
+- Cause: `fakeDriver.Start` records the launch (`internal/host/run_test.go:43`) and stores the process only after it is made, under a second lock (`:61`). `count` returned the number of launches (`:73`), so the wait for the hand-back turn (`internal/host/takeover_test.go:425`) could end while `procs` was still empty, and `lastProc` (`:426`) indexed it at -1.
+- Status: resolved on `devin/host-teardown-race`: `count` returns the number of stored processes, and `TestFakeDriverCountsAStartOnlyWithItsProcess` holds a start inside its process maker and pins that it is not counted until its process is stored.
+
+### 2026-11-23 · bug · Host acceptance teardown restored hooks while host delivery still ran
+
+- Symptom: under `-race`, the host acceptance scenarios reported a data race between restoring `host.Deliver`, the seam provided at `internal/host/deliver.go:28`, in `afterScenario` (`features/host_run_test.go:322`) and a delivery wakeup reading it (`internal/host/run.go:592` in `onProcessTurnEnded`, and `:851` in `finishTurnProcessExit`, reached from `:813`). The wakeups at `internal/host/run.go:763`, `internal/host/takeover.go:90` and `internal/host/limits.go:196` read it the same way.
+- Cause: `hostRunSteps` (`features/host_run_test.go:313-323`) wrote the four hooks back in its After hook in every scenario, not only in its own. Each step set has its own After hook, and they run in the order of the sorted step set names, so in a later step set's scenario the hooks were written back before that step set settled its host (for example `cleanup(w.h.Settle)` in `features/host_start_model_test.go:151`). In the step set's own scenarios, the teardown (`features/host_run_test.go:374-377`) polled the session rows until they were `dormant` (`waitAllSessionsIdle`, `:383-398`) instead of settling the host, and a row changes before the loop starts its delivery wakeup. The product closes a host with `Settle` (`internal/node/node.go:390`), which already waits for all of those wakeups (`settleRuntime`, `internal/host/run.go:79`; `settleTakeovers`, `internal/host/takeover.go:106`; `settleLimits`, `internal/host/limits.go:93`).
+- Status: resolved on `devin/host-teardown-race`: `installHRDefaultHooks` saves and restores the hooks in the scenarios that install them, the teardown settles the host instead of polling, and `TestSettleWaitsForDeliveryAfterAnExitMidTurn` pins that `Settle` waits for the wakeup after a mid-turn exit, as `TestSettleWaitsForRuntimeDelivery` does after a turn's end.
+
 ### 2026-11-23 · bug · FLAKY-31: the two-task fixture assumed one notice per turn and immediate browser delivery
 
 - Turn-count cause: in 12 of 400 traced Linux race samples, the Claude secretary began turn 8 on item 10, the second task's `task_merged` notice. The home queues that notice in the committed merge result (`internal/home/machine.go:581–585`, `internal/home/cmd_merge.go:45–58`), but browser rows and host inbox frames have independent connection pumps (`internal/home/run_conn.go:46–75`). The former browser callback could record eight turns after the home had already merged at seven. All 12 failures had `summaries browser=2 home=2`; this turn did not make a third card.
