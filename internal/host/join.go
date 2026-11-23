@@ -197,7 +197,7 @@ func handleHostJoin(ctx context.Context, h *Host, _ Owner, by string, data json.
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := joinPrepareJoin(h, p, string(p.Group))
+	cfg, err := joinLoadConfig(h, p.Agent, string(p.Group))
 	if err != nil {
 		return nil, err
 	}
@@ -214,13 +214,6 @@ func joinParseJoin(data json.RawMessage) (proto.HostJoin, error) {
 
 func joinValidJoin(p proto.HostJoin) bool {
 	return p.Home != "" && p.Name != "" && agtValidAgent(p.Agent)
-}
-
-func joinPrepareJoin(h *Host, p proto.HostJoin, group string) (joinConfig, error) {
-	if _, _, exists := joinFindAgentMember(h, group, p.Agent); exists {
-		return joinConfig{}, &Error{Code: "conflict", Message: "that agent is already in the group"}
-	}
-	return joinLoadConfig(h, p.Agent, group)
 }
 
 func joinLoadConfig(h *Host, agent, group string) (joinConfig, error) {
@@ -351,11 +344,12 @@ func joinSendAddAI(ctx context.Context, h *Host, p proto.HostJoin, cfg joinConfi
 			Op:          "add_ai",
 			ID:          memberID,
 		},
-		CLI:       p.Agent,
-		Name:      p.Name,
-		Account:   cfg.account,
-		Secretary: p.Secretary,
-		Approvers: cfg.approvers,
+		CLI:        p.Agent,
+		Name:       p.Name,
+		Account:    cfg.account,
+		Secretary:  p.Secretary,
+		Approvers:  cfg.approvers,
+		ProfileSet: p.ProfileSet,
 	}
 	_, err := h.Command(ctx, p.Home, marshalWire(cmd))
 	return memberID, err
@@ -508,9 +502,9 @@ func handleHostLeave(ctx context.Context, h *Host, _ Owner, by string, data json
 		return nil, err
 	}
 	group := string(p.Group)
-	member, home, ok := joinFindAgentMember(h, group, p.Agent)
-	if !ok {
-		return nil, &Error{Code: "not_found", Message: "that agent is not in the group"}
+	member, home, err := joinLeaveMember(h, p)
+	if err != nil {
+		return nil, err
 	}
 	jp := joinStateOf(h)
 	if err := joinRemoveFromHome(ctx, h, jp, p.Group, member, home); err != nil {
@@ -532,13 +526,31 @@ func joinParseLeave(data json.RawMessage) (proto.HostLeave, error) {
 	return p, nil
 }
 
-func joinFindAgentMember(h *Host, group, agent string) (member, home string, ok bool) {
+func joinAgentMembers(h *Host, group, agent string) map[string]string {
+	members := map[string]string{}
 	for _, s := range h.Sessions.All() {
 		if s.Group == group && s.Agent == agent {
-			return s.Member, s.Home, true
+			members[s.Member] = s.Home
 		}
 	}
-	return "", "", false
+	return members
+}
+
+func joinLeaveMember(h *Host, p proto.HostLeave) (member, home string, err error) {
+	members := joinAgentMembers(h, string(p.Group), p.Agent)
+	if p.Member != "" {
+		if home, ok := members[string(p.Member)]; ok {
+			return string(p.Member), home, nil
+		}
+	} else {
+		if len(members) > 1 {
+			return "", "", &Error{Code: "bad_request", Message: "member is required when an agent has several members in the group"}
+		}
+		for member, home := range members {
+			return member, home, nil
+		}
+	}
+	return "", "", &Error{Code: "not_found", Message: "that agent member is not in the group"}
 }
 
 func joinRemoveFromHome(ctx context.Context, h *Host, jp *joinPart, group proto.ID, member, home string) error {

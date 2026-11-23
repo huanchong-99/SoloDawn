@@ -420,8 +420,7 @@ func TestHostJoinPreconditions(t *testing.T) {
 	rig.setAgent("codex", "0.164.0", joinStr("team"))
 	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude"})
 
-	// Already-joined (group, agent) is refused, while (same group, other agent) and (other group, same agent) succeed.
-	seamCode(t, rig.callJoin(t.Context(), proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude Again"}), "conflict")
+	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude Again"})
 	rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "codex", Name: "Codex"})
 	rig.mustJoin(proto.HostJoin{Group: joinTestGroup2, Home: "home-1", Agent: "claude", Name: "Claude Backend"})
 }
@@ -1097,8 +1096,7 @@ func runJoinRollbackCase(t *testing.T, hasSecretary bool, mutateDB func(*testing
 		Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude", Secretary: true,
 	})
 	assertRawStoreFailure(t, err)
-	_, _, found := joinFindAgentMember(rig.h, string(joinTestGroup1), "claude")
-	joinAssertEqual(t, "rolled-back claude absent", found, false)
+	joinAssertEqual(t, "rolled-back claude absent", len(joinAgentMembers(rig.h, string(joinTestGroup1), "claude")), 0)
 	if hasSecretary {
 		sec, ok := rig.h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: "sec-1"})
 		joinAssertEqual(t, "prior secretary restored", ok && sec.Secretary, true)
@@ -1163,8 +1161,7 @@ func runLeaveRollbackCase(t *testing.T, mutateDB func(*testing.T, *store.Store))
 	}
 	err := rig.callLeave(t.Context(), joinTestGroup1, "claude")
 	assertRawStoreFailure(t, err)
-	_, _, found := joinFindAgentMember(rig.h, string(joinTestGroup1), "claude")
-	joinAssertEqual(t, "rolled-back leave preserved session", found, true)
+	joinAssertEqual(t, "rolled-back leave preserved session", len(joinAgentMembers(rig.h, string(joinTestGroup1), "claude")), 1)
 }
 
 func TestHostJoinSignedEnvelopeVerifiesAsNodeCommand(t *testing.T) {
