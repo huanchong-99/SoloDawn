@@ -10,7 +10,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
 - Cause: only the second tier was planned and built. The MCP shim takes only the session token that the node creates when it starts a CLI itself ([local.md](planning/contracts/local.md), section 3), `host.join` takes only an agent with a driver (`agtValidAgent`, `internal/host/agents.go:258`), and nothing lets an agent take an inbox item.
-- Status: open, found 2026-11-23 and planned in this change as the external AI (R-166, [external.md](planning/contracts/step-3/external.md)); units P-7, T3-12 to T3-15, U3-6 and I3-3 of the [parallel plan](planning/steps/parallel-plan-step-2-3.md), section 4.2. By the owner's refinement of 2026-11-23 the agent writes its own runner around `solodawn wait`, and no driver is built for a further CLI. Built so far: the host's join, hand-out, runs, presence and state (T3-13); the MCP tools and the `wait` and `done` commands are not.
+- Status: open, found 2026-11-23 and planned as the external AI (R-166, [external.md](planning/contracts/step-3/external.md); [parallel plan](planning/steps/parallel-plan-step-2-3.md), section 4.2). The wire shapes are frozen (P-7), the home accepts external tool labels and owner edits (T3-12), the secretary's roster shows window usage (T3-15), the browser provides setup and its check (U3-6), and the host joins external AIs, hands out items and reports runs, presence and state (T3-13). The MCP tools with the `wait` and `done` commands (T3-14) and end-to-end verification (I3-3) remain. The agent writes its own runner around `solodawn wait`.
 
 ### 2026-11-23 · limitation · A required escalation can outlast its last stronger candidate
 
@@ -727,6 +727,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-23 · bug · External AI removal could be triggered by one click
+
+- Symptom: a click on Remove AI next to Setup revoked the member ID used by the runner and MCP configuration.
+- Cause: the member card sent `member remove` directly from the button's click handler (`web/src/components/external/MemberExternal.svelte`).
+- Status: resolved in U3-6. Removal requires inline confirmation, which Escape cancels.
 
 ### 2026-11-23 · bug · FLAKY-27: paused mentions could be delivered out of order
 

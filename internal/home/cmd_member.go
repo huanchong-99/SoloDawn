@@ -59,6 +59,9 @@ func memAddValid(p proto.MemberAddAI) *Refusal {
 	if p.Name == "" || !memCLI.MatchString(p.CLI) || !slices.Contains(memAccounts, p.Account) {
 		return &Refusal{"bad_request", "member add_ai requires a name, a supported cli and an account type"}
 	}
+	if refusal := externalToolValidate(p.CLI, p.Tool, false); refusal != nil {
+		return refusal
+	}
 	return profileValidate(p.ProfileSet)
 }
 
@@ -83,7 +86,7 @@ func memNewAI(s *State, c Command, p proto.MemberAddAI, hostName string) proto.A
 	if c.Who.Device == s.Home {
 		path = "local"
 	}
-	return proto.AIMemberRow{
+	ai := proto.AIMemberRow{
 		MemberRow: proto.MemberRow{
 			RowHeader: proto.RowHeader{Type: "member", ID: string(p.ID)},
 			Group:     s.ID, Kind: "ai", User: c.Who.User, Name: p.Name, LastSeen: c.Now,
@@ -93,6 +96,8 @@ func memNewAI(s *State, c Command, p proto.MemberAddAI, hostName string) proto.A
 		State: "dormant", Since: c.Now, Path: path, Usage: proto.Usage{},
 		Profile: profileUpdate(proto.Profile{}, p.ProfileSet),
 	}
+	grpSetOpt(&ai.Tool, p.Tool)
+	return ai
 }
 
 func memApprovers(owner string, list []string) []string {
@@ -162,7 +167,7 @@ func memSetValid(p proto.MemberSet) *Refusal {
 }
 
 func memSetPresent(p proto.MemberSet) bool {
-	return p.Name != nil || p.Account != nil || p.Allow != nil || p.Approvers != nil || profilePresent(p.ProfileSet)
+	return p.Name != nil || p.Account != nil || p.Allow != nil || p.Approvers != nil || p.Tool != nil || profilePresent(p.ProfileSet)
 }
 
 func memSetFieldsOK(p proto.MemberSet) bool {
@@ -183,10 +188,13 @@ func (s *State) memMaySet(w Who, ai proto.AIMemberRow, p proto.MemberSet) bool {
 }
 
 func memApproversOnly(p proto.MemberSet) bool {
-	return p.Name == nil && p.Account == nil && p.Allow == nil
+	return p.Name == nil && p.Account == nil && p.Allow == nil && p.Tool == nil
 }
 
 func (s *State) memFinishSet(ai proto.AIMemberRow, p proto.MemberSet) (Result, *Refusal) {
+	if refusal := externalToolValidate(ai.CLI, p.Tool, true); refusal != nil {
+		return Result{}, refusal
+	}
 	if p.Name != nil && s.memNameTaken(*p.Name, ai.ID) {
 		return Result{}, &Refusal{"conflict", "another member in the group already has that name"}
 	}
@@ -197,6 +205,7 @@ func memUpdated(ai proto.AIMemberRow, p proto.MemberSet) proto.AIMemberRow {
 	grpSetOpt(&ai.Name, p.Name)
 	grpSetOpt(&ai.Account, p.Account)
 	grpSetOpt(&ai.Allow, p.Allow)
+	grpSetOpt(&ai.Tool, p.Tool)
 	ai.Profile = profileUpdate(ai.Profile, p.ProfileSet)
 	if p.Approvers != nil {
 		ai.Approvers = memApprovers(ai.User, *p.Approvers)

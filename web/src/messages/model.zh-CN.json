@@ -2,6 +2,7 @@
   "model.model": "模型",
   "model.effort": "思考级别",
   "model.default": "CLI 默认",
+  "model.unset": "未设置",
   "model.notlisted": "未列出",
   "model.fast": "快速模式",
   "model.model.hint": "如 opus",

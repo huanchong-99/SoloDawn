@@ -1176,7 +1176,7 @@ export type Inbox = v.InferOutput<typeof Inbox>;
 export const Ack = v.object({ t: v.literal('ack'), g: Id, item: int });
 export type Ack = v.InferOutput<typeof Ack>;
 
-const TraceKey = v.object({ name: str, seed: str, device: str });
+const TraceKey = v.object({ name: str, device: str });
 
 const TraceInbox = v.object({
   to: str,

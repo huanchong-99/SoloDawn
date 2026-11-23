@@ -562,6 +562,7 @@ describe('AI status and path projections', () => {
     expect(statusOf(group, mk('limited'))).toEqual({ st: 'limited', text: 'Limited' });
     expect(statusOf(group, mk('takeover'))).toEqual({ st: 'takeover', text: 'Owner is driving' });
     expect(statusOf(group, mk('offline'))).toEqual({ st: 'offline', text: 'Offline' });
+    expect(statusOf(group, mk('paused'))).toEqual({ st: 'paused', text: 'Paused' });
     expect(statusOf(group, mk('unexpected'))).toEqual({ st: 'offline', text: 'Offline' });
   });
 
@@ -931,6 +932,50 @@ describe('add-AI candidates, suggested names, errors and host commands', () => {
       effort: '',
       tier: 'standard',
       skills: '',
+    });
+
+    const external = { ...candidate, agent: 'external', account: null, key: 'dev-2:external' };
+    expect(selectableCandidates([external, { ...candidate, account: null }])).toEqual([external]);
+    expect(
+      await joinGroup(target, group, external, 'Scout', true, {
+        ...draft,
+        account: 'api_key',
+        tool: 'ZCode',
+      }),
+    ).toBe('');
+    const fields = (i: number) => {
+      const { n, ts, ...payload } = JSON.parse((sent[i] as { env: p.Envelope }).env.p);
+      return payload;
+    };
+    expect(fields(2)).toEqual({
+      t: 'host.join',
+      to: 'dev-2',
+      g: gid,
+      home: homeDev,
+      agent: 'external',
+      name: 'Scout',
+      secretary: false,
+      ...draft,
+      account: 'api_key',
+      tool: 'ZCode',
+    });
+    expect(
+      await joinGroup(target, group, external, 'Scout', false, {
+        ...draft,
+        account: 'team',
+        tool: '',
+      }),
+    ).toBe('');
+    expect(fields(3)).toEqual({ ...fields(2), account: 'team', tool: undefined });
+    expect(
+      await joinGroup(target, group, candidate, 'Lead', true, {
+        ...draft,
+        account: 'team',
+        tool: 'other',
+      }),
+    ).toBe('');
+    expect(fields(4)).toEqual({
+      ...fields(0),
     });
 
     target.ctl = makeOnlineCtl(async () => ({

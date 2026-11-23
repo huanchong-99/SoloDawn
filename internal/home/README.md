@@ -37,6 +37,12 @@ unless the join supplies values. Only the AI's owner can edit these fields;
 the AI's host cannot send a profile edit. The home checks bounds, not which
 models or efforts a CLI offers.
 
+`external.go` validates the optional `tool` label for `cli: external`.
+The label has 1–32 Unicode code points without control characters. The
+joining host may supply it on `member/add_ai`; only the AI's owner may
+change it with `member/set`, where an empty string removes it. Managed
+AIs do not carry a tool label.
+
 The task machine keeps `stuck` for consecutive failed hosted checks or
 reviews. A second or later failure blocks submission if a stronger AI
 exists, even if it is offline or is the secretary. An answer from a stronger

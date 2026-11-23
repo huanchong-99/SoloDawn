@@ -13,7 +13,7 @@ func profilePresent(p proto.ProfileSet) bool {
 }
 
 func profileValidate(p proto.ProfileSet) *Refusal {
-	if !profileText(p.Model, 100) || !profileText(p.Effort, 32) {
+	if !boundedMemberText(p.Model, 100) || !boundedMemberText(p.Effort, 32) {
 		return &Refusal{"bad_request", "model and effort allow up to 100 and 32 code points, respectively, without control characters"}
 	}
 	if !profileTierValid(p.Tier) {
@@ -25,7 +25,7 @@ func profileValidate(p proto.ProfileSet) *Refusal {
 	return nil
 }
 
-func profileText(text *string, limit int) bool {
+func boundedMemberText(text *string, limit int) bool {
 	return text == nil || (utf8.RuneCountInString(*text) <= limit && strings.IndexFunc(*text, unicode.IsControl) == -1)
 }
 

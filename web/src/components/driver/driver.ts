@@ -11,6 +11,7 @@ export const offeredAccounts = (driver: Driver) =>
 
 /** False when `host` is connected and its last `host.info` declares no takeover for `agent`. */
 export const offersTerminal = (host: Home | undefined, agent: string) =>
-  !host?.ctl ||
-  (nodes.infos.get(host)?.agents.find((each) => each.agent === agent)?.driver.takeover ??
-    'none') !== 'none';
+  agent !== 'external' &&
+  (!host?.ctl ||
+    (nodes.infos.get(host)?.agents.find((each) => each.agent === agent)?.driver.takeover ??
+      'none') !== 'none');

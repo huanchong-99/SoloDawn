@@ -43,6 +43,8 @@ export interface Points {
   /** In the dialog for adding an AI, between the computers and the name: a part may set `model`,
    *  `effort` and `tier` of the draft that `host.join` sends. */
   'member.add': { group: Group; candidate: Candidate | undefined; draft: Draft };
+  /** After a successful host.join from the add-AI dialog. */
+  'member.joined': { group: Group; candidate: Candidate; name: string };
 }
 export type Point = keyof Points;
 export const points = [
@@ -54,6 +56,7 @@ export const points = [
   'chat.side',
   'member.ai',
   'member.add',
+  'member.joined',
 ] as const satisfies readonly Point[];
 
 /** One component at a point. The lower `order` comes first; the order of areas breaks a tie. A

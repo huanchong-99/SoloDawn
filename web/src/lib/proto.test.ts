@@ -29,7 +29,8 @@ function objects(value: unknown, path: string[] = []): string[][] {
 
 const at = (value: unknown, path: string[]) => path.reduce((o, k) => (o as Obj)[k], value) as Obj;
 const named = (path: string[]) => path.filter((k) => !/^\d+$/.test(k)).join('.');
-const accepts = (name: string, value: unknown) => v.safeParse(schemaOf[name], value).success;
+const accepts = (name: string, value: unknown) =>
+  v.safeParse(schemaOf[name], value, { abortEarly: true }).success;
 
 it.each(['', 'plain text', 42])('bulletin rows read from as plain text: %s', (from) => {
   const row = JSON.parse(goldens['row-msg-bulletin']);
