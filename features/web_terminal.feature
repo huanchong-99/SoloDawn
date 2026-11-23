@@ -51,6 +51,12 @@ Feature: Terminal takeover page and handback summary
     When "workstation" answers "takeover.start" with ok
     Then "workstation" receives one signed "takeover.end" after it, and no pty channel is opened
 
+  Scenario: The terminal is named and can be left from the keyboard
+    Given "Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms
+    When the owner opens "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/1PC8WineBrUQ-apCjx7tug" on a 1280 px desktop
+    Then the takeover bar is a status region, the key row is no tab stop of its own, the details column takes keyboard focus, and the terminal's input is described by the note on leaving it
+    And only Ctrl+M is kept from the terminal, and it moves focus to "Hand back"
+
   Scenario: The card of an AI in takeover offers to hand it back
     Given "Claude Code" is in takeover on a direct path
     When the owner opens the chat of "Website"

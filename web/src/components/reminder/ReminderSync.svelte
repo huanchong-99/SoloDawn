@@ -31,10 +31,8 @@
     const sw = navigator.serviceWorker;
     if (!sw) return;
     const onMessage = (event: MessageEvent) => {
-      const data = event.data as ({ t?: string } & Partial<ReminderTarget>) | undefined;
-      if (data?.t === 'reminder' && data.g && data.msg) {
-        openTarget({ g: data.g, msg: data.msg, kind: data.kind ?? '' });
-      }
+      const data = event.data as { t: string } & ReminderTarget;
+      if (data.t === 'reminder') openTarget({ g: data.g, msg: data.msg, kind: data.kind });
     };
     sw.addEventListener('message', onMessage);
     return () => sw.removeEventListener('message', onMessage);

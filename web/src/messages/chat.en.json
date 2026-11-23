@@ -22,6 +22,7 @@
   "chat.mention": "Mention a person or an AI",
   "chat.mention.list": "People and AIs to mention",
   "chat.readonly": "Cannot reach the group home. What is already here can still be read.",
+  "chat.otherTab": "This group is in use in another tab.",
   "chat.length.near": "Long message: {n}% of what one message can hold.",
   "chat.length.over": "Too long to send: {n}% of what one message can hold. Shorten it, or send it in parts.",
   "chat.error.lost": "Not sent: the group home cannot be reached.",
