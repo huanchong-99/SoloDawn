@@ -195,21 +195,15 @@ func hostSteps(sc *godog.ScenarioContext, t *testing.T, bin string) {
 		}
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancel()
+		start := time.Now()
 		for i := 0; i <= switches; i++ {
-			args := []string{"app-server"}
-			switch {
-			case vendor == "claude" && i == 0:
-				args = []string{"-p", "--session-id", id}
-			case vendor == "claude" && i%2 == 0:
-				args = []string{"-p", "--resume", id}
-			case vendor == "claude":
-				args = []string{"--resume", id}
-			case i%2 == 1:
-				args = []string{"resume", id}
-			}
-			cmd := exec.CommandContext(ctx, vendor, args...)
+			cmd := exec.CommandContext(ctx, vendor, switchFakeArgs(vendor, id, i)...)
 			cmd.Env = append(os.Environ(), "SOLODAWN_FAKE_"+strings.ToUpper(vendor)+"_SCRIPT="+script, "SOLODAWN_FAKECLI_LOG="+log)
-			if out, err := cmd.CombinedOutput(); err != nil || len(out) != 0 {
+			out, err := cmd.CombinedOutput()
+			if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return ctxEnded(ctx, start, fmt.Sprintf("CLI switch %d (%s)", i, vendor), nil)
+			}
+			if err != nil || len(out) != 0 {
 				return fmt.Errorf("start %d: %q (%v)", i, out, err)
 			}
 		}
@@ -226,4 +220,19 @@ func hostSteps(sc *godog.ScenarioContext, t *testing.T, bin string) {
 		}
 		return nil
 	})
+}
+
+func switchFakeArgs(vendor, id string, i int) []string {
+	switch {
+	case vendor == "claude" && i == 0:
+		return []string{"-p", "--session-id", id}
+	case vendor == "claude" && i%2 == 0:
+		return []string{"-p", "--resume", id}
+	case vendor == "claude":
+		return []string{"--resume", id}
+	case i%2 == 1:
+		return []string{"resume", id}
+	default:
+		return []string{"app-server"}
+	}
 }

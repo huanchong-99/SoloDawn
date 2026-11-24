@@ -2698,7 +2698,7 @@ func (w *m5World) sendHostEnvelope(env proto.Envelope) (proto.CmdResult, error) 
 	build := func(id int64) any {
 		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
 	}
-	raw, err := n0.Link.Request(context.Background(), build)
+	raw, err := requestWait(context.Background(), n0.Link, nil, build)
 	if err != nil {
 		return proto.CmdResult{}, err
 	}

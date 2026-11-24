@@ -387,9 +387,10 @@ func launchOneCommandRV(f fixtures, cleanup func(func()), rvDir string) (string,
 func verifyOneCommandRVICE(wsURL string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	start := time.Now()
 	path, err := peer.Dial(ctx, wsURL, exampleKey("m8-rv-probe"))
 	if err != nil {
-		return err
+		return ctxCallErr(ctx, start, "rendezvous probe dial", nil, err)
 	}
 	defer path.Close()
 	return m8CheckReadyICE(path.Route().ICE)
@@ -502,11 +503,12 @@ func m8LoadFencedInstall(doc, lang, placeholder, asset string) (string, error) {
 }
 
 func m8ExecCLIContext(ctx context.Context, bin string, env []string, args ...string) (string, string, error) {
+	start := time.Now()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
+	err := ctxCallErr(ctx, start, "CLI command "+strings.Join(args, " "), nil, cmd.Run())
 	return stdout.String(), stderr.String(), err
 }
 

@@ -98,16 +98,17 @@ func externalAgentAnswer(run string) (string, error) {
 func externalAgentPost(answer string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	start := time.Now()
 	cmd := exec.CommandContext(ctx, os.Getenv("EXTERNAL_SOLODAWN"), "mcp", "--member", os.Getenv("EXTERNAL_MEMBER"))
 	client := mcp.NewClient(&mcp.Implementation{Name: "external-scripted-agent", Version: "1"}, nil)
 	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
 	if err != nil {
-		return err
+		return ctxCallErr(ctx, start, "external scripted MCP connect", nil, err)
 	}
 	defer session.Close()
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "post", Arguments: map[string]string{"text": answer}})
 	if err != nil {
-		return err
+		return ctxCallErr(ctx, start, "external scripted MCP post", nil, err)
 	}
 	if res.IsError {
 		return fmt.Errorf("scripted external post failed: %+v", res)

@@ -142,7 +142,7 @@ func nodeLocalSteps(sc *godog.ScenarioContext, f fixtures) {
 }
 
 func syncLocalGroup(n *nodetest.Node, gid string, pushes <-chan proto.Rows, saw *trail) error {
-	ans, err := n.Link.Request(context.Background(), func(id int64) any {
+	ans, err := requestWait(context.Background(), n.Link, saw, func(id int64) any {
 		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: gid, Since: 0, StateOnly: false}
 	})
 	if err != nil {

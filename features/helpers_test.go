@@ -723,9 +723,10 @@ type peerBrowserConn struct {
 }
 
 func newPeerBrowser(ctx context.Context, cleanup func(func()), key identity.Key, rvURL string, mapRoute func(peer.Route) peer.Route) (*peerBrowser, error) {
+	dialStart := time.Now()
 	path, err := peer.Dial(ctx, rvURL, key)
 	if err != nil {
-		return nil, err
+		return nil, ctxCallErr(ctx, dialStart, "rendezvous dial", nil, err)
 	}
 	cleanup(func() { path.Close() })
 	socks, err := peer.Listen(0, 0)
@@ -878,9 +879,10 @@ func (b *peerBrowser) openCtl(ctx context.Context, cleanup func(func()), nodeID 
 }
 
 func (b *peerBrowser) tryOpenCtl(ctx context.Context, cleanup func(func()), nodeID string, wait time.Duration, saw *trail) (*peerBrowserConn, bool, error) {
+	offerStart := time.Now()
 	conn, err := b.peer.Offer(ctx, nodeID)
 	if err != nil {
-		return nil, false, err
+		return nil, false, ctxCallErr(ctx, offerStart, "ctl offer to "+nodeID, saw, err)
 	}
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
@@ -900,7 +902,7 @@ func (b *peerBrowser) tryOpenCtl(ctx context.Context, cleanup func(func()), node
 		return nil, false, nil
 	case <-ctx.Done():
 		conn.Close()
-		return nil, false, ctx.Err()
+		return nil, false, ctxCallErr(ctx, offerStart, "ctl connection to "+nodeID, saw, ctx.Err())
 	}
 }
 
@@ -919,6 +921,10 @@ func pumpBrowserPushes(ctx context.Context, conn *peer.Connection, pushes chan<-
 	}
 }
 
+func (c *peerBrowserConn) request(ctx context.Context, build func(int64) any) (json.RawMessage, error) {
+	return requestWait(ctx, c.conn, &c.saw, build)
+}
+
 func (c *peerBrowserConn) nextPush(ctx context.Context) (json.RawMessage, error) {
 	msg, err := recvCtx(ctx, c.pushes, "a push on ctl", &c.saw)
 	if err != nil {
@@ -932,7 +938,7 @@ func (c *peerBrowserConn) nextPush(ctx context.Context) (json.RawMessage, error)
 }
 
 func requestBrowserHello(ctx context.Context, conn *peer.Connection) (proto.Welcome, error) {
-	raw, err := conn.Request(ctx, func(id int64) any {
+	raw, err := requestWait(ctx, conn, nil, func(id int64) any {
 		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 1, Kind: "browser", Name: "Owner Browser", Addrs: []string{}}
 	})
 	if err != nil {
@@ -943,7 +949,7 @@ func requestBrowserHello(ctx context.Context, conn *peer.Connection) (proto.Welc
 }
 
 func requestHostInfo(ctx context.Context, conn *peer.Connection) (proto.HostInfo, error) {
-	raw, err := conn.Request(ctx, func(id int64) any { return proto.Request{Type: "host.info", ID: id} })
+	raw, err := requestWait(ctx, conn, nil, func(id int64) any { return proto.Request{Type: "host.info", ID: id} })
 	if err != nil {
 		return proto.HostInfo{}, err
 	}

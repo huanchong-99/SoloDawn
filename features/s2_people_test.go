@@ -403,7 +403,7 @@ func openS2PeopleCtl(ctx context.Context, cleanup func(func()), b *peerBrowser, 
 }
 
 func verifyJoiningWelcome(ctx context.Context, conn *peer.Connection) error {
-	raw, err := conn.Request(ctx, func(id int64) any {
+	raw, err := requestWait(ctx, conn, nil, func(id int64) any {
 		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 2, Kind: "browser", Name: "Joiner", Addrs: []string{}}
 	})
 	if err != nil {
@@ -1207,7 +1207,7 @@ func (w *s2PeopleWorld) verifyP1SurfaceForQ(wantCode string) error {
 }
 
 func (w *s2PeopleWorld) verifyQHomeSurfaceAllowed() error {
-	raw, err := w.qHomeBC.conn.Request(w.cast.Ctx, func(id int64) any {
+	raw, err := w.qHomeBC.request(w.cast.Ctx, func(id int64) any {
 		return proto.FetchThread{
 			FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: string(w.gid), Limit: 10},
 		}
@@ -1229,7 +1229,7 @@ func (w *s2PeopleWorld) verifyOtherGroupRefusedOnP1(wantCode string) error {
 }
 
 func expectRawRequestError(ctx context.Context, conn *peer.Connection, build func(int64) any, wantCode string) error {
-	raw, err := conn.Request(ctx, build)
+	raw, err := requestWait(ctx, conn, nil, build)
 	if err != nil {
 		return err
 	}

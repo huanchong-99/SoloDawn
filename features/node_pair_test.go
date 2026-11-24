@@ -227,7 +227,7 @@ func (w *nodePairWorld) checkWelcomeOwner(want string) error {
 }
 
 func (w *nodePairWorld) checkPreEnrolmentForbidden(wantCode string) error {
-	rawInfo, err := w.b1Conn.conn.Request(w.ctx, func(id int64) any { return proto.Request{Type: "host.info", ID: id} })
+	rawInfo, err := w.b1Conn.request(w.ctx, func(id int64) any { return proto.Request{Type: "host.info", ID: id} })
 	if err != nil {
 		return err
 	}
@@ -251,7 +251,7 @@ func (w *nodePairWorld) sendWrongSignerLog() error {
 }
 
 func (w *nodePairWorld) checkUnownedForbidden(wantCode string) error {
-	rawInfo, err := w.b1Conn.conn.Request(w.ctx, func(id int64) any { return proto.Request{Type: "host.info", ID: id} })
+	rawInfo, err := w.b1Conn.request(w.ctx, func(id int64) any { return proto.Request{Type: "host.info", ID: id} })
 	if err != nil {
 		return err
 	}
@@ -348,7 +348,7 @@ func (w *nodePairWorld) sendPairBrowserRaw(nonceTag string) error {
 func (w *nodePairWorld) callPairBrowser(nonceTag string) (json.RawMessage, error) {
 	ts := time.UnixMilli(1763600000000).UnixMilli()
 	env := w.b1.key.Sign(fmt.Sprintf(`{"t":"pair.browser","n":%q,"ts":%d,"to":%q}`, exampleID("pb-"+nonceTag), ts, w.pn.Key.ID()))
-	return w.b1Conn.conn.Request(w.ctx, func(id int64) any {
+	return w.b1Conn.request(w.ctx, func(id int64) any {
 		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
 	})
 }
