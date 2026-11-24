@@ -11,7 +11,6 @@ Feature: External agents take and finish one item without a CLI driver
     When the owner joins external member "Y" with account "team" and tool "Other"
     Then host info advertises both external members and the node executable
 
-  @pending
   Scenario: A nonblocking look hands out each mention once (A10.18)
     Given an external acceptance project with X
     Then an external look exits 3
@@ -35,7 +34,6 @@ Feature: External agents take and finish one item without a CLI driver
     Then an external look exits 3
     And an external look rejects an unknown member
 
-  @pending
   Scenario: Blocking and timed waits end for the right reason (A10.19)
     Given an external acceptance project with X
     When an external blocking wait starts
@@ -50,7 +48,7 @@ Feature: External agents take and finish one item without a CLI driver
     And the external owner removes X
     Then the external blocking wait exits 1
 
-  @pending @not-windows
+  @not-windows
   Scenario Outline: A runner starts exactly one agent for each item (A10.20)
     Given an external acceptance project with X
     And the external owner mentions X with "Setup check: answer here in one line, then finish."
@@ -65,14 +63,13 @@ Feature: External agents take and finish one item without a CLI driver
       | loop      |
       | scheduler |
 
-  @pending @not-windows
+  @not-windows
   Scenario Outline: A runner starts queued items one after the other (A10.20)
     Given an external acceptance project with X
     And the external owner mentions X with "First external mention"
-    And the external owner mentions X with "Second external mention"
-    Then the external home has 2 inbox items
+    Then the external home has 1 inbox items
     And external member "X" has state "offline"
-    When the "<runner>" runs 2 queued external items
+    When the "<runner>" runs 2 queued external items, with the second mention arriving while X is working on the first
     Then X posts "First external answer" in the external project
     And X posts "Second external answer" in the external project
     And external member "X" has state "waiting"
@@ -151,7 +148,6 @@ Feature: External agents take and finish one item without a CLI driver
       | timeout   | timeout |
       | restart   | crash   |
 
-  @pending
   Scenario: A paused group and an offline host hold waiting mentions (A10.24)
     Given an external acceptance project with X
     When the external owner sets group to "pause"

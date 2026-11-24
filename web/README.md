@@ -786,8 +786,7 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
 ## Verification and sources
 
 - `e2e/external.spec.ts` covers the external AI add dialog, setup prompt, reported usage and
-  removal (A10.17, A10.20, A10.25 and A10.27). It is skipped until the external host, node,
-  secretary usage and browser units are available (T3-13 to T3-15 and U3-6).
+  removal (A10.17, A10.20, A10.25 and A10.27).
 - Unit tests sit beside the modules (`src/**/*.test.ts`); `../features/web.feature` is the
   acceptance feature. `stryker.config.json` breaks below a mutation score of 100.
 - `src/lib/peer.test.ts` runs `peer.ts` against a fake `RTCPeerConnection` and fake signalling
