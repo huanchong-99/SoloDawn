@@ -906,10 +906,11 @@ func firstJump(h *Host, d *delivery, key aiGroupKey, ai aiInfo) (verifiedItem, r
 	d.mu.Lock()
 	queue := slices.Clone(d.held[key])
 	d.mu.Unlock()
-	look := lookAt(h, key)
-	if len(queue) > 0 {
-		diagTake(h, key, "", nil, queue, look.paused)
+	if len(queue) == 0 {
+		return verifiedItem{}, routedTarget{}, false
 	}
+	look := lookAt(h, key)
+	diagTake(h, key, "", nil, queue, look.paused)
 	for _, v := range itemsToGo(queue, true) {
 		target := routeSessionItem(h, ai, v)
 		if seen, _ := hasAuditItem(h.Store, v.home, v.item.Item); !seen && !look.heldBesidesTurn(v) {
@@ -1101,12 +1102,13 @@ func takeEligibleBatch(h *Host, d *delivery, key aiGroupKey, ai aiInfo) (routedT
 	jumpsOnly := len(d.pre[key]) > 0
 	d.giving[key] = len(queue) > 0 || jumpsOnly // before the holds are read
 	d.mu.Unlock()
+	if len(queue) == 0 {
+		return routedTarget{}, nil, false
+	}
 	look := lookAt(h, key)
 	target, taken, takenIDs := selectEligibleBatch(look, ai, itemsToGo(queue, jumpsOnly))
-	if len(queue) > 0 {
-		left := slices.DeleteFunc(queue, func(v verifiedItem) bool { return takenIDs[v.item.Item] })
-		diagTake(h, key, target.key.Task, taken, left, look.paused)
-	}
+	left := slices.DeleteFunc(queue, func(v verifiedItem) bool { return takenIDs[v.item.Item] })
+	diagTake(h, key, target.key.Task, taken, left, look.paused)
 	if len(taken) == 0 {
 		return routedTarget{}, nil, false
 	}
