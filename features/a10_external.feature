@@ -90,6 +90,8 @@ Feature: External agents take and finish one item without a CLI driver
     And external MCP calls "note_put" with {"text":"X's note"} and gets "ok"
     And external MCP calls "kb_put" with {"name":"external-note","text":"X's memory"} and gets "ok"
     And external MCP calls "kb_search" with {"query":"memory"} and gets "ok"
+    And X's note "X's note" and document "external-note" with "X's memory" are on the home as X's
+    And X's search for "memory" returns document "external-note" with "X's memory" by X
     And X asks the managed member and gets its scripted answer
     And external MCP calls "run_checks" with {} and gets "conflict"
     And external MCP calls "submit_review" with {"score":100,"items":[]} and gets "conflict"
@@ -114,6 +116,19 @@ Feature: External agents take and finish one item without a CLI driver
       | none   | reviewer |
       | github | assignee |
       | github | reviewer |
+
+  Scenario Outline: Two tasks run from brief to merge with X as one of the two AIs (A10.22, A5.1)
+    Given a project with external X, a managed AI that works and reviews, and forge "<forge>"
+    And a scripted stdio MCP client connects as X
+    When the owner confirms a brief of two tasks that X and the managed AI do and review for each other
+    Then X works on its task while the review of the other waits, and X's next run is that review
+    And both external tasks are on the base with two summary cards, and the owner saw no card but the brief
+    And each task and review had a folder of its own, and the folders and branches are gone
+
+    Examples:
+      | forge  |
+      | none   |
+      | github |
 
   Scenario: An external AI's progress appears in its task's thread (A10.22)
     Given a project with external X and forge "none"

@@ -38,8 +38,9 @@ tasks that make each test pass are in `steps/step-1-backend.md` and
   interval plus 5 seconds. A `host.info` request sent every second is
   answered throughout.
 - **A1.4** With the rendezvous stopped, open **direct** connections keep
-  working for 10 minutes. One of two nodes on the same network is
-  restarted; they reconnect without the rendezvous.
+  working for 10 minutes. (The sentence on reconnecting without the
+  rendezvous was removed by the decisions of 2026-11-21, no local-network
+  beacon, and 2026-11-22, PR-2 cancelled.)
 - **A1.5** Removed under the owner's rule of 2026-11-21: no defence in code
   against a dishonest rendezvous; handled outside the product in the
   [deployment guide](../../docs/cookbook/self-hosting.md).

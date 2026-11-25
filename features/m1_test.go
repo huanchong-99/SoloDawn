@@ -5,10 +5,14 @@ package features
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http/httptest"
+	"os/exec"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing/fstest"
 	"time"
 
@@ -28,7 +32,9 @@ type m1World struct {
 	ctx        context.Context
 	cleanup    func(func())
 	now        time.Time
+	passed     atomic.Int64 // of the node's clock, after now
 	rvURL      string
+	stopRV     func()
 	pn         *peerNode
 	accepted   chan *peer.Connection // single reader: acceptInbound
 	browsers   []*peerBrowser
@@ -47,6 +53,10 @@ func m1Steps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^the second M1 browser receives a groups push listing "([^"]*)" within 1 second without reconnecting$`, w.checkSecondBrowserGroupsPush)
 	sc.Step(`^the second M1 browser syncs "([^"]*)" and the first M1 browser posts "([^"]*)"$`, w.syncSecondAndPostFirst)
 	sc.Step(`^the second M1 browser receives that message row within 1 second$`, w.checkSecondBrowserMessageRow)
+	sc.Step(`^an M1 owned node with two directly connected browsers and a rendezvous process$`, w.setupWithRendezvousProcess)
+	sc.Step(`^the M1 rendezvous process stops and every signalling path to it has ended$`, w.stopRendezvous)
+	sc.Step(`^10 minutes pass on the M1 node's clock$`, func() { w.passed.Store(int64(10 * time.Minute)) })
+	sc.Step(`^both M1 connections are still the direct ones and answer host\.info$`, w.checkStillDirect)
 }
 
 func (w *m1World) setupTwoConnectedBrowsers() error {
@@ -56,6 +66,10 @@ func (w *m1World) setupTwoConnectedBrowsers() error {
 	srv := httptest.NewServer(rendezvous.Handler(fstest.MapFS{}))
 	w.cleanup(srv.Close)
 	w.rvURL = "ws" + strings.TrimPrefix(srv.URL, "http") + "/rv"
+	return w.connectTwoBrowsers()
+}
+
+func (w *m1World) connectTwoBrowsers() error {
 	w.accepted = make(chan *peer.Connection, 8)
 	for i := range 2 {
 		b, err := newPeerBrowser(w.ctx, w.cleanup, exampleKey(fmt.Sprintf("m1-browser-%d", i)), w.rvURL, nil)
@@ -72,7 +86,7 @@ func (w *m1World) setupTwoConnectedBrowsers() error {
 		Owner:         w.browsers[0].key,
 		ExtraBrowsers: []identity.Key{w.browsers[1].key},
 		Rendezvous:    w.rvURL,
-		Now:           func() time.Time { return w.now },
+		Now:           w.clock,
 		OnInbound:     func(c *peer.Connection) { w.accepted <- c },
 	})
 	if err != nil {
@@ -82,6 +96,67 @@ func (w *m1World) setupTwoConnectedBrowsers() error {
 	for _, b := range w.browsers {
 		if err := w.connectAndHelloBrowser(b); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func (w *m1World) clock() time.Time { return w.now.Add(time.Duration(w.passed.Load())) }
+
+// setupWithRendezvousProcess signs everyone in at a rendezvous of its own
+// process, which a scenario can stop.
+func (w *m1World) setupWithRendezvousProcess() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	w.ctx = ctx
+	w.cleanup(cancel)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	addr := l.Addr().String()
+	l.Close()
+	if w.stopRV, err = startManagedCmd(w.f.t, w.cleanup, exec.Command(w.f.bin, "rendezvous", "--listen", addr)); err != nil {
+		return err
+	}
+	if err := rvListening(addr); err != nil {
+		return err
+	}
+	w.rvURL = "ws://" + addr + "/rv"
+	return w.connectTwoBrowsers()
+}
+
+func (w *m1World) stopRendezvous() error {
+	w.stopRV()
+	for _, path := range []*peer.Path{w.pn.Path, w.browsers[0].path, w.browsers[1].path} {
+		err := waitUntil(5*time.Second, "a signalling path to end", func() error {
+			if path.Write(w.ctx, proto.RVFrame{Type: "ice"}) == nil {
+				return errors.New("it still takes a frame")
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	if path, err := peer.Dial(w.ctx, w.rvURL, w.pn.Key); err == nil {
+		path.Close()
+		return errors.New("the rendezvous still answers")
+	}
+	return nil
+}
+
+func (w *m1World) checkStillDirect() error {
+	for i, bc := range w.conns {
+		select {
+		case <-bc.conn.Done():
+			return fmt.Errorf("connection %d of the browsers ended", i+1)
+		default:
+		}
+		if got := bc.conn.Path(); got != "direct" {
+			return fmt.Errorf("path of connection %d = %q, want direct", i+1, got)
+		}
+		if _, err := bc.request(w.ctx, func(id int64) any { return proto.Request{Type: "host.info", ID: id} }); err != nil {
+			return fmt.Errorf("host.info on connection %d: %w", i+1, err)
 		}
 	}
 	return nil
@@ -134,7 +209,7 @@ func (w *m1World) createGroupFromFirstBrowser(name string) error {
 	gid := exampleID("m1-group-" + name)
 	w.createdGrp = gid
 	payload := fmt.Sprintf(`{"t":"group","op":"create","n":%q,"ts":%d,"g":%q,"name":%q,"kind":"project","repo":"/tmp/website","base":"main","forge":"none","checks":[],"member_name":"Owner"}`,
-		gid, w.now.UnixMilli(), gid, name)
+		gid, w.clock().UnixMilli(), gid, name)
 	env := b.key.Sign(payload)
 	raw, err := bc.request(w.ctx, func(id int64) any {
 		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
@@ -184,7 +259,7 @@ func (w *m1World) syncSecondAndPostFirst(_, text string) error {
 	}
 	msgID := exampleID("m1-post-1")
 	payload := fmt.Sprintf(`{"t":"post","n":%q,"ts":%d,"g":%q,"kind":"text","text":%q,"thread":null,"main":true,"mentions":[],"re":null,"body":{}}`,
-		msgID, w.now.UnixMilli(), w.createdGrp, text)
+		msgID, w.clock().UnixMilli(), w.createdGrp, text)
 	env := b1.key.Sign(payload)
 	rawCmd, err := bc1.request(w.ctx, func(id int64) any {
 		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}

@@ -26,6 +26,18 @@ Feature: Rounds in threads, queue jumps and the quiet-task timer
     Then the rounds task is "active" waiting for "nothing" at 0 rounds
     And the rounds host receives "resume ai-one"
 
+  Scenario Outline: A mention held by the round limit goes out when the pause ends (A5.8)
+    Given a project whose AIs Claude and Codex answer each other in the thread of Claude's task
+    When their 10th mention pauses the task with wait "rounds"
+    Then Claude answers a newer mention in the main line while the 10th mention stays on the home, in no turn
+    When the owner ends the pause by <end>
+    Then the host gives Claude's task session a turn with the 10th mention, and the home has no item left
+
+    Examples:
+      | end                     |
+      | a message in the thread |
+      | task resume             |
+
   Scenario: Jump the queue on a direct request and on a running task thread
     Given a rounds home with a secretary, two working AIs and an active task for "ai-one"
     When the owner posts a direct request mentioning "ai-one" in the main line

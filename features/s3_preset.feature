@@ -36,4 +36,4 @@ Feature: Step 3 style presets (A10.5)
     And daily retention runs on the preset group today
     Then the old text message "Old chatter" is purged while preset "Calm dashboard" remains
     When a browser watches the preset group and the owner forgets the preset "Calm dashboard"
-    Then the browser receives a gone marker for that preset, fetch kind "preset" is empty, and the name "Calm dashboard" can be created again
+    Then the browser receives a gone marker for that preset within 1 second, fetch kind "preset" is empty, and the name "Calm dashboard" can be created again

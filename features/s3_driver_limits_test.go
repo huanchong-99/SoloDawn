@@ -54,6 +54,29 @@ func (w *s3DriverWorld) offline() error {
 		},
 		func() error { return w.hostSwitch("host.online") },
 		func() error { return w.posted("Online again.") },
+		func() error { return awaitHomeInboxCount(m.node().Store, 0) },
+		w.offlineWhileStopped)
+}
+
+// offlineWhileStopped goes on from a waiting session whose process is open:
+// the home stops first, then the owner sends host.offline.
+func (w *s3DriverWorld) offlineWhileStopped() error {
+	m := w.caps.m3
+	return s3Run(func() error { return w.script(true, true, s3PostTurn(1, "Online once more.")) },
+		func() error {
+			m.node().StopHome()
+			return w.hostSwitch("host.offline")
+		},
+		func() error { return sessionsDormant(m.activeHost) },
+		func() error {
+			m.node().RestartHome()
+			m.attachBrowser()
+			return m.syncBrowserGroup(m.groups["Website"])
+		},
+		func() error { return m.thenAIHasState("Worker", "offline", "Website") }, w.mention,
+		func() error { return awaitHomeInboxCount(m.node().Store, 1) },
+		func() error { return w.hostSwitch("host.online") },
+		func() error { return w.posted("Online once more.") },
 		func() error { return awaitHomeInboxCount(m.node().Store, 0) })
 }
 
@@ -84,7 +107,8 @@ func (w *s3DriverWorld) timeout() error {
 
 func (w *s3DriverWorld) readOnly() error {
 	a := newApproveAccWorld(w.cleanup)
-	return s3Run(func() error { return a.setupHost(w.agent, "task", 60) },
+	return s3Run(w.readOnlyEdit,
+		func() error { return a.setupHost(w.agent, "task", 60) },
 		func() error { return a.callSyncBash("touch marker", "", 1) },
 		func() error { return a.assertDenyResult("Denied: this session is read only.") },
 		func() error {
@@ -93,6 +117,18 @@ func (w *s3DriverWorld) readOnly() error {
 			}
 			return nil
 		})
+}
+
+func (w *s3DriverWorld) readOnlyAsked() error {
+	e := newEditWorld(w.caps.m3, w.agent)
+	return s3Run(func() error { return useEditCLIs(w.f, w.cleanup) }, e.askReadOnly, e.unchanged)
+}
+
+// readOnlyEdit runs the member with a CLI that edits a file on every turn.
+func (w *s3DriverWorld) readOnlyEdit() error {
+	e := newEditWorld(w.caps.m3, w.agent)
+	return s3Run(func() error { return useEditCLIs(w.f, w.cleanup) },
+		e.tryReadOnly, e.unchanged, e.tryLevel3, e.changed)
 }
 
 func (w *s3DriverWorld) levelThree() error {

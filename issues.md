@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-26 · bug · At level 1 a request of Codex, OpenCode or Qwen Code produces a card
+
+- Symptom: a level 1 session of a CLI that asks on its connection (`ApprovalConn`) gets an `approval` card for the owner, who can allow it. [approval](planning/flows/approval.md) B.2 and [drivers](planning/contracts/drivers.md) section 2 say the host denies it at once, without a card.
+- Cause: the level is checked in `callApprove` (`internal/host/approve.go:161`), the MCP tool that only Claude Code calls. `runAskedEvent` (`internal/host/approve.go:137`), the way of the other three, calls `handleApproval`, which does not look at the level.
+- Status: open, found by the A4.4 scenarios. Their examples for these CLIs are `@pending` (`features/m4.feature`, `features/s3_drivers.feature`) and pass with a level check in `runAskedEvent`. No 1.0 surface sets level 1 (`perm.set` is postponed).
+
 ### 2026-11-26 · bug · A jump to a card older than the messages read drifts out of view
 
 - Symptom: a reminder opens a task whose card is far back and was not read (160 messages): its thread opens and has the focus, but after the gap to the newer messages is paged in, the card is not where the jump put it. Measured with Playwright Firefox 1555 and Chromium 1248, 1280x720, real pages through a fake `fetch`, card 160 back fetched with `seek`; the thread open or not makes no difference. A card that is held, or 25 messages back, stays in place in both. Not measured: WebKit, the real home.

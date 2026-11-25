@@ -87,20 +87,21 @@ func s3Run(steps ...func() error) error {
 
 func (w *s3DriverWorld) runCase(name string) error {
 	cases := map[string]func() error{
-		"M3 tools":  w.tools,
-		"A3.1/A3.2": w.memory,
-		"A3.3":      w.remote,
-		"A3.4":      w.idle,
-		"A3.5":      w.maxOpen,
-		"A3.6":      w.crash,
-		"A3.7":      w.outside,
-		"A3.9":      w.secret,
-		"A3.10":     w.dedup,
-		"A4.4":      w.readOnly,
-		"A4.5":      w.levelThree,
-		"A4.7":      w.pause,
-		"A4.8":      w.offline,
-		"A4.9":      w.timeout,
+		"M3 tools":   w.tools,
+		"A4.4 asked": w.readOnlyAsked,
+		"A3.1/A3.2":  w.memory,
+		"A3.3":       w.remote,
+		"A3.4":       w.idle,
+		"A3.5":       w.maxOpen,
+		"A3.6":       w.crash,
+		"A3.7":       w.outside,
+		"A3.9":       w.secret,
+		"A3.10":      w.dedup,
+		"A4.4":       w.readOnly,
+		"A4.5":       w.levelThree,
+		"A4.7":       w.pause,
+		"A4.8":       w.offline,
+		"A4.9":       w.timeout,
 	}
 	return cases[name]()
 }

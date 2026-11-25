@@ -7,6 +7,7 @@ Feature: M4 permissions, approvals, decisions and the group pause
   cancelled tasks retire pending cards, and pausing the group stops a running
   turn and holds mentions until the resume. The offline switch (A4.8) and the
   turn time limit (A4.9) are in host_limits.feature.
+  After each scenario its one-person group shows no confirm card (A9.40).
 
   Scenario: Approving task permission requests from a second browser lets Claude Code and Codex run (A4.1)
     Given an M4 project group with a second browser and configured AIs "Claude" and "Codex"
@@ -39,6 +40,37 @@ Feature: M4 permissions, approvals, decisions and the group pause
     And "Codex" posts "Codex recorded MsgPack and zstd." in the M4 group
     When a second M4 task for "Claude" raises a four-option request_decision card and ends its turn
     Then the M4 second browser chooses option "B" with note "Keep contrast high" and wakes "Claude" to post "Received Top bar decision."
+
+  # SoloDawn's half of level 1 is the settings it starts the CLI with, which
+  # make a CLI that obeys them leave the file alone, and the host's refusal of
+  # a request to edit. That the real CLI obeys its settings is the vendor's
+  # half, on the real-machine list.
+  Scenario Outline: At level 1 a request to edit a file changes nothing on disk and produces no card (A4.4)
+    Given an M4 project with a "<cli>" AI whose CLI edits a file on every turn
+    When a task of that AI runs at level 1
+    Then the CLI refused its own edit, the file and the worktree are unchanged and there is no card
+    When a task of that AI runs at level 3
+    Then the same CLI edited the file and there is no card
+
+    Examples:
+      | cli    |
+      | claude |
+      | codex  |
+
+  Scenario Outline: At level 1 the host refuses a CLI's request to edit a file, without a card (A4.4)
+    Given an M4 project with a "<cli>" AI whose CLI edits a file on every turn
+    When a task of that AI runs at level 1 and its CLI asks the host to edit the file
+    Then the CLI refused its own edit, the file and the worktree are unchanged and there is no card
+
+    Examples:
+      | cli    |
+      | claude |
+
+    # issues.md: "At level 1 a request of Codex, OpenCode or Qwen Code produces a card"
+    @pending
+    Examples:
+      | cli    |
+      | codex  |
 
   Scenario: With the wait set to 20 seconds and no answer, the turn ends, the host restarts, late approval allows one retry without a second card, and a different command produces a new card (A4.3)
     Given an M4 project group with a 20-second approval wait, a second browser and configured AI "Claude"

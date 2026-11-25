@@ -8,6 +8,7 @@ Feature: M7 terminal takeover
   cancels or keeps takeover-origin tasks according to worktree changes, and
   closes pty with hand-back when an open direct PeerConnection transitions to a
   TURN relay pair while keeping ctl alive.
+  After each scenario its one-person group shows no confirm card (A9.40).
 
   Scenario: Mentions during takeover are held and delivered in order after hand-back (A7.3)
     Given an M7 project group on a direct path with configured AI "Claude" on an active task

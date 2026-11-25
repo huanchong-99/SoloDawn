@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http/httptest"
 	"os"
@@ -847,9 +848,20 @@ func m7Steps(sc *godog.ScenarioContext, f fixtures) {
 		f:       f,
 		cleanup: afterScenario(sc),
 	}
+	noConfirmCardAfter(sc, w.messages)
 	registerM7GivenSteps(sc, w)
 	registerM7TakeoverSteps(sc, w)
 	registerM7RelayAndTaskSteps(sc, w)
+}
+
+// messages is what the browser has of the group's history.
+func (w *m7World) messages() map[string]proto.MsgRow {
+	if w.browser == nil {
+		return nil
+	}
+	w.browser.mu.Lock()
+	defer w.browser.mu.Unlock()
+	return maps.Clone(w.browser.msgs)
 }
 
 func registerM7GivenSteps(sc *godog.ScenarioContext, w *m7World) {
