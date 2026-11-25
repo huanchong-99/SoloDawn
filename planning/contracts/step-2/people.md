@@ -68,7 +68,9 @@ The home accepts it when all of this holds:
    for `g`: else `forbidden`.
 2. A device log was presented on this connection (section 4, step 7), it
    is valid, and at its end the signer `k` is a valid device: else
-   `forbidden`. The person is the `user` of that log.
+   `forbidden`. The person is the `user` of that log. The home judges the
+   log it holds of that person, if any, with the entries the presented log
+   adds to it (first accepted wins, `contracts/envelope.md` section 4).
 3. That person is not a member of `g`, and `name` is unused in the group:
    else `conflict`. One exception, for a group restored from a copy
    (`contracts/step-2/export.md` section 4): a person who is already a

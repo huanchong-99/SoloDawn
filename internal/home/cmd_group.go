@@ -32,8 +32,8 @@ var (
 )
 
 // grpCreate makes this node the home of a new project group whose id is both g
-// and n, writes the group row and the owner's member row, and asks for a
-// groups push to connected peers.
+// and n, writes the group row and the owner's member and device rows, and asks
+// for a groups push to connected peers.
 func grpCreate(s *State, c Command) (Result, *Refusal) {
 	if !s.grpMayCreate(c.Who) {
 		return Result{}, &Refusal{"forbidden", "only a device of this node's owner creates a group"}
@@ -87,7 +87,7 @@ func grpFounded(s *State, c Command, p proto.GroupCreate) Result {
 		},
 		Role: "owner", Online: true,
 	}
-	return Result{Rows: []Row{RowOf(group), RowOf(owner)}, GroupsChanged: true}
+	return Result{Rows: append([]Row{RowOf(group), RowOf(owner)}, devOwner(s)...), GroupsChanged: true}
 }
 
 // grpOwnerID derives the owner's member id from the nonce of group create, so

@@ -227,18 +227,16 @@ func checkMemberLogUpdate(t *testing.T, ph *pairHarness, owner, ctl *fakeCtl, ad
 	checkMemberRevocation(t, ph, owner, node, admin, guest, device)
 }
 
+// checkMemberRevocation joins the guest to a second group with a log shorter
+// than the one the home holds, then revokes the guest's node, which cannot
+// join a third group with the older log.
 func checkMemberRevocation(t *testing.T, ph *pairHarness, owner, node *fakeCtl, admin, guest, device identity.Key) {
 	t.Helper()
-	second := openSecondInvitation(t, ph, owner, admin)
-	revoke := guest.Sign(fmt.Sprintf(`{"t":"device","user":%q,"ver":3,"op":"revoke","dev":%q}`, guest.ID(), device.ID()))
-	joining := startJoiningCtl(t, ph, second, guest)
-	entries := append(ph.logs.Log(guest.ID()).Entries, revoke)
-	joining.push(proto.Devlog{Type: "devlog", User: guest.ID(), Entries: entries})
-	sendInviteCmd(joining, guest, 2, proto.Join{HomeCommand: inviteCommand(ph, "join", sesID("second-group"), "second-join"), Name: "Guest"})
-	joined := inviteJoinResult(t, joining)
-	if joined.Re != 2 || !joined.OK {
-		t.Fatalf("second join = %+v", joined)
-	}
+	held := ph.logs.Log(guest.ID()).Entries
+	joining := joinWithLog(t, ph, owner, admin, guest, "second", held[:1])
+	mustEqual(t, bool(inviteJoinResult(t, joining).OK), true)
+	waitGroups(t, node, 2)
+	joining.push(proto.Devlog{Type: "devlog", User: guest.ID(), Entries: []proto.Envelope{sesRevokeEntry(guest, guest.ID(), 3, device.ID())}})
 	select {
 	case <-node.Done():
 	case <-time.After(5 * time.Second):
@@ -247,6 +245,25 @@ func checkMemberRevocation(t *testing.T, ph *pairHarness, owner, node *fakeCtl, 
 	if ph.logs.Known(device.ID()) {
 		t.Fatal("revoked device remains known")
 	}
+	revoked := joinWithLog(t, ph, owner, admin, device, "third", held)
+	expectErr(t, revoked.next(t), 2, "forbidden")
+}
+
+// joinWithLog opens an invitation to a new group and sends join from key
+// with log presented.
+func joinWithLog(t *testing.T, ph *pairHarness, owner *fakeCtl, admin, key identity.Key, name string, log []proto.Envelope) *fakeCtl {
+	t.Helper()
+	group := sesID(name + "-group")
+	sendInviteCmd(owner, admin, 11, proto.GroupCreate{
+		GroupCommand: proto.GroupCommand{HomeCommand: inviteCommand(ph, "group", group, name+"-create"), Op: "create"},
+		Name:         name, Checks: []string{},
+	})
+	mustEqual(t, bool(inviteJoinResult(t, owner).OK), true)
+	sendInviteCmd(owner, admin, 12, inviteCommand(ph, "invite", group, name+"-invitation"))
+	joining := startJoiningCtl(t, ph, checkInviteLink(t, ph, group, inviteJoinResult(t, owner)), key)
+	joining.push(proto.Devlog{Type: "devlog", User: log[0].Key, Entries: log})
+	sendInviteCmd(joining, key, 2, proto.Join{HomeCommand: inviteCommand(ph, "join", group, name+"-join"), Name: "Guest"})
+	return joining
 }
 
 func inviteJoinResult(t *testing.T, ctl *fakeCtl) proto.CmdResult {
@@ -257,9 +274,7 @@ func inviteJoinResult(t *testing.T, ctl *fakeCtl) proto.CmdResult {
 			Type string `json:"t,omitempty"`
 		}
 		mustNoErr(t, proto.Decode(raw, &header))
-		if header.Type == "groups" {
-			var groups proto.Groups
-			mustNoErr(t, proto.Decode(raw, &groups))
+		if header.Type != "" {
 			continue
 		}
 		var result proto.CmdResult
@@ -286,21 +301,6 @@ func TestInviteJoinResult(t *testing.T) {
 			}
 		})
 	}
-}
-
-func openSecondInvitation(t *testing.T, ph *pairHarness, owner *fakeCtl, admin identity.Key) *pairAttempt {
-	t.Helper()
-	group := sesID("second-group")
-	sendInviteCmd(owner, admin, 11, proto.GroupCreate{
-		GroupCommand: proto.GroupCommand{HomeCommand: inviteCommand(ph, "group", group, "second-create"), Op: "create"},
-		Name:         "Second", Checks: []string{},
-	})
-	var result proto.CmdResult
-	mustNoErr(t, proto.Decode(owner.next(t), &result))
-	owner.next(t)
-	sendInviteCmd(owner, admin, 12, inviteCommand(ph, "invite", group, "second-invitation"))
-	mustNoErr(t, proto.Decode(owner.next(t), &result))
-	return checkInviteLink(t, ph, group, result)
 }
 
 func TestInviteWithoutRendezvous(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/huanchong-99/SoloDawn/internal/home"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
@@ -238,10 +239,11 @@ func TestOpenLogsErrors(t *testing.T) {
 }
 
 func TestLogsKeepFirstAtTheSameVersion(t *testing.T) {
-	user, device := sesKey("kept-user"), sesKey("kept-device")
-	logs, err := OpenLogs(sesOpenStore(t), device.ID())
-	mustNoErr(t, err)
+	user, device, node := sesKey("kept-user"), sesKey("kept-device"), sesKey("kept-node")
+	db := sesOpenStore(t)
+	logs := seedOwnedLogs(t, db, node, sesKey("kept-owner"))
 	genesis := sesAddEntry(user, user.ID(), 1, user.ID(), "browser", "Original")
+	mustNoErr(t, db.Write(func(tx *store.Tx) error { return dvlPutEntries(tx, user.ID(), []proto.DeviceRow{dvlRowOf(genesis)}) })) // as the join stores it
 	first, err := identity.Replay(user.ID(), []proto.Envelope{genesis})
 	mustNoErr(t, err)
 	logs.dvlKeep(first, nil)
@@ -254,9 +256,37 @@ func TestLogsKeepFirstAtTheSameVersion(t *testing.T) {
 	}
 	next, err := identity.Replay(user.ID(), []proto.Envelope{genesis, sesAddEntry(user, user.ID(), 2, device.ID(), "node", "New")})
 	mustNoErr(t, err)
-	logs.dvlKeep(next, nil)
+	mustNoErr(t, logs.dvlKeep(next, nil))
 	if !logs.Known(device.ID()) {
 		t.Fatal("longer stored log did not add its device")
+	}
+	reopened, err := OpenLogs(db, node.ID())
+	mustNoErr(t, err)
+	mustEqual(t, reopened.Log(user.ID()).Entries, next.Entries) // a rejoin's new entry is stored
+}
+
+// A log taken from a join or an import that cannot be stored is reported.
+func TestKeptLogWriteFailureIsReported(t *testing.T) {
+	ph := newPairHarness(t, nil, false)
+	user := sesKey("kept-failure")
+	genesis := sesAddEntry(user, user.ID(), 1, user.ID(), "browser", "First")
+	first, err := identity.Replay(user.ID(), []proto.Envelope{genesis})
+	mustNoErr(t, err)
+	mustNoErr(t, ph.logs.dvlKeep(first, nil))
+	longer, err := identity.Replay(user.ID(), []proto.Envelope{genesis, sesAddEntry(user, user.ID(), 2, sesKey("kept-failure-node").ID(), "node", "Node")})
+	mustNoErr(t, err)
+	mustNoErr(t, ph.db.Write(func(tx *store.Tx) error { _, err := tx.Exec("DROP TABLE device_log"); return err }))
+
+	loop, err := home.StartLoop(home.LoopConfig{Store: ph.db, Logs: ph.logs.Log})
+	mustNoErr(t, err)
+	t.Cleanup(loop.Close)
+	c := &sesConn{home: loop.Attach(user.ID(), nilClient{}), joining: &joinConn{}}
+	ph.pairer.admit(&pairAttempt{joining: map[Ctl]bool{}}, c, longer, false)
+	(&nodeRuntime{logs: ph.logs, sessions: ph.sessions}).keepImported(map[string]*identity.Log{user.ID(): longer})
+	for range 2 {
+		if err := recvFrame(t, ph.reported); err == nil || !strings.Contains(err.Error(), "device_log") {
+			t.Fatalf("reported %v, want the failed device_log write", err)
+		}
 	}
 }
 
@@ -358,4 +388,24 @@ func TestBatchFramesExact60KiBBoundary(t *testing.T) {
 	if strings.Contains(string(dvlMustEncode(map[string]string{"x": "<&>"})), `\u003c`) {
 		t.Fatal("HTML characters were escaped")
 	}
+}
+
+// While the disk is ahead of memory (a join or an import stored the entry), a
+// different entry at that version is refused and the same one is taken.
+func TestLogsStoredEntryWinsOverAnother(t *testing.T) {
+	db := sesOpenStore(t)
+	nodeKey, owner := sesKey("stored-node"), sesKey("stored-owner")
+	logs := seedOwnedLogs(t, db, nodeKey, owner)
+	stored := sesAddEntry(owner, owner.ID(), 3, sesKey("stored-a").ID(), "browser", "A")
+	other := sesAddEntry(owner, owner.ID(), 3, sesKey("stored-b").ID(), "browser", "B")
+	mustNoErr(t, db.Write(func(tx *store.Tx) error { return dvlPutEntries(tx, owner.ID(), []proto.DeviceRow{dvlRowOf(stored)}) }))
+	if err := logs.dvlReceive(proto.Devlog{User: owner.ID(), Entries: []proto.Envelope{other}}, nil); err == nil {
+		t.Fatal("another entry at a stored version was accepted")
+	}
+	mustEqual(t, len(logs.Log(owner.ID()).Entries), 2)
+	mustNoErr(t, logs.dvlReceive(proto.Devlog{User: owner.ID(), Entries: []proto.Envelope{stored}}, nil))
+	reopened, err := OpenLogs(db, nodeKey.ID())
+	mustNoErr(t, err)
+	mustEqual(t, reopened.Log(owner.ID()).Entries, logs.Log(owner.ID()).Entries)
+	mustEqual(t, logs.Log(owner.ID()).Entries[2], stored)
 }

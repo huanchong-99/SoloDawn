@@ -18,11 +18,12 @@ func TestLocalGroupTransfer(t *testing.T) {
 	entries := append(testOwnerLog(t, owner, old).Entries, testDeviceAdd(owner, 3, "node", "next", next.ID()))
 	newer := append(entries, testDeviceAdd(owner, 4, "node", "extra", testSeedKey(4).ID()))
 	src := newClientNodeRig(t, "old", old, owner, newer, home.Table{"group/create": testTransferGroup})
-	dst := newClientNodeRig(t, "next", next, owner, entries, nil)
-	group := string(sesID("transfer-group"))
+	dst := newClientNodeRig(t, "next", next, owner, entries, home.Table{"group/create": testTransferGroup})
+	group, other := string(sesID("transfer-group")), string(sesID("other-group"))
 	seedGroupWithHostedAI(t, src, group)
+	seedGroupWithHostedAI(t, dst, other)
 	source := &nodeRuntime{loop: src.loop, logs: src.logs}
-	dest := &nodeRuntime{loop: dst.loop, logs: dst.logs}
+	dest := &nodeRuntime{loop: dst.loop, logs: dst.logs, sessions: dst.sessions}
 	path := filepath.Join(t.TempDir(), "group.sqlite")
 	target := src.loop.Attach(owner.ID(), nilClient{})
 	t.Cleanup(func() { src.loop.Detach(target) })
@@ -35,6 +36,8 @@ func TestLocalGroupTransfer(t *testing.T) {
 	assertMovedRequests(t, src, group, next.ID())
 	mustNoErr(t, sendGroupCmd(dest, Command{Cmd: "group.import", File: path}))
 	mustEqual(t, len(dst.logs.Log(owner.ID()).Entries), 4)
+	mustNoErr(t, dst.loop.ExportGroup(other, filepath.Join(t.TempDir(), "copy.sqlite"), "")) // after the device event
+	checkSingleString(t, dst.db, "SELECT id FROM row WHERE g='"+other+"' AND r='device'", owner.ID()+":4")
 	local := AttachLocal(dst.host, dst.loop)
 	t.Cleanup(func() { local.Close() })
 	answer, err := local.Request(t.Context(), func(id int64) any {

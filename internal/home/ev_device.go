@@ -36,3 +36,11 @@ func devRows(s *State, rows []proto.DeviceRow, held int) Result {
 	}
 	return res
 }
+
+// devOwner is the owner's whole log as device rows.
+func devOwner(s *State) (rows []Row) {
+	for _, env := range s.Logs[s.Owner].Entries {
+		rows = append(rows, RowOf(peopleDevice(env)))
+	}
+	return rows
+}

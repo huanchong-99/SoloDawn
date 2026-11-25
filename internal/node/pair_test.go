@@ -423,7 +423,7 @@ func checkKnownRoutesAfterRoom(t *testing.T, p *Pairer, wantDev, strangerDev str
 func checkRoleBPreAdoption(t *testing.T, ph *pairHarness, ctl *simCtl, bKey, otherKey identity.Key) {
 	t.Helper()
 	w1 := sendSimHello(t, ctl, "Phone Browser")
-	if w1.Owner || w1.Name != "" {
+	if w1.Owner || w1.Name != "workstation" {
 		t.Fatalf("first welcome = %+v", w1)
 	}
 	rawInfoErr, err := ctl.conn.Request(t.Context(), func(id int64) any { return proto.Request{Type: "host.info", ID: id} })

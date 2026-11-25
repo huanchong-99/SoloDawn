@@ -20,6 +20,7 @@ func teamState(t *testing.T) *home.State {
 	s := empty(t)
 	res := grpApply(t, s, disk{}, receipts{}, browser, teamPayload())
 	equal(t, res.Answer, store.Outcome{OK: true})
+	equal(t, briefRows(res)[2:], grpOwnerDevices(t, 3))
 	s.Commit(res)
 	return s
 }

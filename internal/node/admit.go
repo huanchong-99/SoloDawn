@@ -108,7 +108,7 @@ func (p *Pairer) joinSnapshot(a *pairAttempt, c *sesConn) *home.Joining {
 	p.mu.Lock()
 	open := pairLive(a, now)
 	p.mu.Unlock()
-	log := c.joining.presented()
+	log := p.cfg.Logs.dvlWith(c.joining.presented())
 	return &home.Joining{
 		Group: a.invitation.group, By: a.invitation.by, Open: open, Log: log,
 		Admit: func(used bool) { p.admit(a, c, log, used) },
@@ -116,7 +116,9 @@ func (p *Pairer) joinSnapshot(a *pairAttempt, c *sesConn) *home.Joining {
 }
 
 func (p *Pairer) admit(a *pairAttempt, c *sesConn, log *identity.Log, used bool) {
-	p.cfg.Logs.dvlKeep(log, c)
+	if err := p.cfg.Logs.dvlKeep(log, c); err != nil {
+		p.cfg.Sessions.cfg.Report(err)
+	}
 	p.mu.Lock()
 	delete(a.joining, c.raw)
 	if used {

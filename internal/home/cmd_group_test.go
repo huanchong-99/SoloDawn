@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/huanchong-99/SoloDawn/internal/home"
@@ -35,6 +36,18 @@ func grpCreatePayload(nonce, g string) proto.GroupCreate {
 		Name: "Website", Kind: "project", Repo: "https://git.example/team/website.git",
 		Base: "main", Forge: "github", Checks: []string{"go vet ./...", "go test ./..."}, MemberName: "owner",
 	}
+}
+
+// grpOwnerDevices is the owner's log as device rows, numbered from seq.
+func grpOwnerDevices(t *testing.T, seq int64) (rows []any) {
+	t.Helper()
+	for i, env := range logOf(t, browser, node, laptop).Entries {
+		var change proto.DeviceChange
+		equal(t, proto.Decode([]byte(env.Payload), &change), nil)
+		header := proto.RowHeader{Type: "device", ID: fmt.Sprintf("%s:%d", browser.ID(), i+1), Seq: seq + int64(i)}
+		rows = append(rows, proto.DeviceRow{RowHeader: header, DeviceChange: change, Env: env})
+	}
+	return rows
 }
 
 func grpApply(t *testing.T, s *home.State, d home.Disk, r home.Receipts, by identity.Key, payload any) home.Result {
@@ -124,7 +137,7 @@ func TestGroupCreateWritesTheGroupAndOwner(t *testing.T) {
 			equal(t, res.Answer, store.Outcome{OK: true})
 			equal(t, res.GroupsChanged, true)
 			rows := briefRows(res)
-			equal(t, rows, []any{wantGroup, wantOwner})
+			equal(t, rows, append([]any{wantGroup, wantOwner}, grpOwnerDevices(t, 3)...))
 			grpNoNulls(t, rows[0], "/paused")
 			grpNoNulls(t, rows[1])
 			s.Commit(res)

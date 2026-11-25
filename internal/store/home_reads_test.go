@@ -305,3 +305,25 @@ func TestTypedNotesAndUniqueIndex(t *testing.T) {
 		}
 	}
 }
+
+// The entries an import adds as device rows: those of the group's people that
+// the group has no live device row for.
+func TestLackingEntries(t *testing.T) {
+	s := openDB(t, ":memory:")
+	person, left, ai := member("m1", 1), member("m2", 2), member("m3", 3)
+	person.User, left.User, ai.User, ai.Kind = "u1", "u2", "u1", "ai"
+	for _, row := range []proto.HumanMemberRow{person, left, ai} {
+		put(t, s, "g", 10, row)
+	}
+	put(t, s, "g", 10, proto.GoneRow{RowHeader: header("member", "m2", 4), Gone: true})
+	put(t, s, "g", 10, proto.DeviceRow{RowHeader: header("device", "u1:1", 5)})
+	put(t, s, "g", 10, proto.GoneRow{RowHeader: header("device", "u1:3", 6), Gone: true})
+	put(t, s, "h", 10, proto.DeviceRow{RowHeader: header("device", "u1:2", 1)})
+	check(t, s.Write(func(tx *Tx) error {
+		_, err := tx.Exec(`INSERT INTO device_log VALUES ('u1',1,'1'),('u1',3,'3'),('u1',2,'2'),('u2',1,'4'),('u3',1,'5')`)
+		return err
+	}))
+	envs, err := within(t, s, func(tx *Tx) ([]json.RawMessage, error) { return tx.LackingEntries("g") })
+	check(t, err)
+	equal(t, envs, []json.RawMessage{json.RawMessage("2"), json.RawMessage("3")})
+}
