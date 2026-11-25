@@ -12,6 +12,10 @@ name: Changes
 #           the acceptance tests)
 #   web     web client and browsers: web/, internal/proto/, internal/node/, cmd/, features/web*,
 #           go.mod, go.sum
+#   e2e     browser end-to-end tests, which run the real node binary: everything that sets web, plus the
+#           non-test files (Go, *.sql, embedded texts) of internal/home/, host/, peer/, store/,
+#           identity/ and rendezvous/. web also starts vitest and the browser vectors, which these
+#           Go changes cannot affect
 #   netsim  network simulation: internal/peer/, internal/rendezvous/, features/netsim/, go.mod, go.sum
 #   smoke   service smoke tests: internal/node/service_*, cmd/solodawn/
 #
@@ -27,6 +31,9 @@ on:
       web:
         description: Whether the web client and browser checks apply.
         value: ${{ jobs.detect.outputs.web }}
+      e2e:
+        description: Whether the browser end-to-end tests apply.
+        value: ${{ jobs.detect.outputs.e2e }}
       netsim:
         description: Whether the network simulation applies.
         value: ${{ jobs.detect.outputs.netsim }}
@@ -47,6 +54,7 @@ jobs:
     outputs:
       go: ${{ steps.files.outputs.go }}
       web: ${{ steps.files.outputs.web }}
+      e2e: ${{ steps.files.outputs.e2e }}
       netsim: ${{ steps.files.outputs.netsim }}
       smoke: ${{ steps.files.outputs.smoke }}
     steps:
@@ -57,8 +65,8 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          go=false web=false netsim=false smoke=false
-          everything() { go=true web=true netsim=true smoke=true; }
+          go=false web=false e2e=false netsim=false smoke=false
+          everything() { go=true web=true e2e=true netsim=true smoke=true; }
 
           if [[ "$EVENT" != pull_request ]]; then
             everything
@@ -87,6 +95,11 @@ jobs:
                 web/* | internal/proto/* | internal/node/* | cmd/* | features/web* | go.mod | go.sum) web=true known=true ;;
               esac
               case "$f" in
+                web/* | internal/proto/* | internal/node/* | cmd/* | features/web* | go.mod | go.sum) e2e=true ;;
+                *_test.go | */testdata/*) ;;
+                internal/home/* | internal/host/* | internal/peer/* | internal/store/* | internal/identity/* | internal/rendezvous/*) e2e=true ;;
+              esac
+              case "$f" in
                 internal/peer/* | internal/rendezvous/* | features/netsim/* | go.mod | go.sum) netsim=true known=true ;;
               esac
               case "$f" in
@@ -102,8 +115,9 @@ jobs:
           {
             echo "go=$go"
             echo "web=$web"
+            echo "e2e=$e2e"
             echo "netsim=$netsim"
             echo "smoke=$smoke"
           } >> "$GITHUB_OUTPUT"
-          printf '| Checks | Run |\n| --- | --- |\n| go | %s |\n| web | %s |\n| netsim | %s |\n| smoke | %s |\n' \
-            "$go" "$web" "$netsim" "$smoke" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Checks | Run |\n| --- | --- |\n| go | %s |\n| web | %s |\n| e2e | %s |\n| netsim | %s |\n| smoke | %s |\n' \
+            "$go" "$web" "$e2e" "$netsim" "$smoke" >> "$GITHUB_STEP_SUMMARY"
