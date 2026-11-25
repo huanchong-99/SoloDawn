@@ -222,7 +222,7 @@ describe('step 2 in the browser', () => {
     await dialog.getByLabel('Check commands').fill('pnpm check\npnpm vitest run');
     const limits = dialog.locator('details', { hasText: 'Limits' });
     await limits.locator('summary').click();
-    const depth = limits.getByLabel('Questions within questions');
+    const depth = limits.getByLabel('Chain of questions');
     await depth.fill('5');
     await limits.locator('summary').click();
     expect(await depth.isVisible()).toBe(false);
