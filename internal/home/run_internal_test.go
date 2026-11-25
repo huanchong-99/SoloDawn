@@ -135,7 +135,7 @@ func TestRunForgetsAGroupThatDoesNotExist(t *testing.T) {
 		runSame(t, <-client, any(proto.ErrorResponse{Re: re, Err: proto.WireError{Code: "bad_sig", Message: "the envelope of the command was refused"}}))
 		for end := time.Now().Add(10 * time.Second); groups() != 0; {
 			if time.Now().After(end) {
-				t.Fatal("the group's goroutine did not end")
+				t.Fatalf("timed out after 10s waiting for the group's goroutine to end; saw 1: %d groups", groups())
 			}
 			time.Sleep(time.Millisecond)
 		}

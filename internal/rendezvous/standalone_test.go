@@ -185,7 +185,7 @@ func TestServeFailures(t *testing.T) {
 		case err := <-done:
 			return err
 		case <-time.After(time.Second):
-			return errors.New("invalid service did not stop")
+			return errors.New("timed out after 1s waiting for the invalid service to stop; saw 0: ")
 		}
 	}
 	if err := start(Options{NoRelay: true}); err == nil || err.Error() != "--domain is required for TLS and STUN" {
