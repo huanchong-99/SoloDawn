@@ -1068,11 +1068,37 @@ func seedWatchGrant(t *testing.T, h *host.Host, group, member, user, device stri
 	h.Rows.Put(group, "member", "by", json.RawMessage(dvlMustEncode(proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: "by"}, Kind: "human", User: user})))
 	h.Rows.Put(group, "device", user+":1", json.RawMessage(dvlMustEncode(proto.DeviceRow{RowHeader: proto.RowHeader{Type: "device", ID: user + ":1"}, DeviceChange: proto.DeviceChange{User: user, Device: device, Version: 1, Op: "add"}})))
 	key := host.SessionKey{Group: group, Member: member}
-	mustNoErr(t, h.Sessions.Create(host.Session{SessionKey: key, Kind: host.GroupSession, Agent: "claude"}))
+	mustNoErr(t, h.Sessions.Create(host.Session{SessionKey: key, Kind: host.GroupSession, Agent: "external"}))
 	mustNoErr(t, h.Sessions.Move(key, host.Dormant, host.Takeover))
 	card := proto.MsgRow{RowHeader: proto.RowHeader{Type: "msg", ID: "card"}, By: "by", Kind: "confirm", Mentions: []string{}}
 	h.Push("watch-home", json.RawMessage(dvlMustEncode(proto.Inbox{Type: "inbox", Group: proto.ID(group), Items: []proto.InboxItem{{Item: proto.Item{Item: item, AI: proto.ID(member), Why: "watch"}, Msg: json.RawMessage(dvlMustEncode(card))}}})))
 	mustEqual(t, h.Watchers(group, member), []string{user})
+}
+
+func TestNodePushesWatchers(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	n, err := openNode(t.Context(), socketRoot(t))
+	mustNoErr(t, err)
+	t.Cleanup(n.Close)
+	owner := adoptTestBrowser(t, n)
+	conn := startAdoptedConn(t, n, owner.ID())
+	defer conn.Close()
+	group, member := string(sesID("push-group")), string(sesID("push-member"))
+	seedWatchGrant(t, n.host, group, member, "watcher", "dev", 1)
+	checkWatchersPush(t, conn, []string{"watcher"})
+	endWatchGrant(t, n.host, group, member, "watcher")
+	checkWatchersPush(t, conn, []string{})
+	n.Close()
+	n.host.WatchersChanged()
+}
+
+func checkWatchersPush(t *testing.T, conn *fakeCtl, want []string) {
+	t.Helper()
+	var push proto.HostInfoPush
+	mustNoErr(t, proto.Decode(conn.next(t), &push))
+	mustEqual(t, push.Type, "host.info")
+	external := push.Agents[len(push.Agents)-1]
+	mustEqual(t, external.Groups[0].Watchers, want)
 }
 
 func TestNodeWatchGrantAdmission(t *testing.T) {

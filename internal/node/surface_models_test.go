@@ -29,6 +29,11 @@ func TestHostInfoRefreshPushesOnlyToWelcomedOwnerDevices(t *testing.T) {
 			return []proto.HostAgent{}, listErr
 		},
 	})
+	owner.beforeOut = func(any) {
+		if sf.pushing.TryLock() {
+			t.Error("a push may overtake a newer one")
+		}
+	}
 	read := func(text string) (any, error) {
 		return sf.reqHostInfo(t.Context(), nil, owner, ownerKey.ID(), 1, json.RawMessage(text))
 	}

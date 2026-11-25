@@ -137,9 +137,24 @@ func TestWatchLifecycle(t *testing.T) {
 	})
 }
 
+// recordWatchers keeps the watchers of a slot at each notice; reading them shows that no lock is held.
+func recordWatchers(h *Host, slot aiSlot) *[][]string {
+	seen := &[][]string{}
+	h.WatchersChanged = func() { *seen = append(*seen, h.Watchers(slot.group, slot.member)) }
+	return seen
+}
+
+func wantWatchers(t *testing.T, seen *[][]string, want ...[]string) {
+	t.Helper()
+	if !reflect.DeepEqual(*seen, append([][]string{}, want...)) {
+		t.Fatalf("watchers at each notice: %v, want %v", *seen, want)
+	}
+}
+
 func TestWatchItems(t *testing.T) {
 	h := newPTYTestHost(t)
 	slot := aiSlot{ptyTestGroupID, ptyTestAIID}
+	seen := recordWatchers(h, slot)
 	key := SessionKey{Group: slot.group, Member: slot.member}
 	if err := h.Sessions.Create(Session{SessionKey: key, Kind: GroupSession, Agent: "claude"}); err != nil {
 		t.Fatal(err)
@@ -157,6 +172,7 @@ func TestWatchItems(t *testing.T) {
 	if got := h.Watchers(slot.group, slot.member); !reflect.DeepEqual(got, []string{}) {
 		t.Fatal(got)
 	}
+	wantWatchers(t, seen)
 	h.Rows.Put(slot.group, "member", "by", json.RawMessage(marshalWire(proto.MemberRow{RowHeader: proto.RowHeader{ID: "by"}, User: "watcher"})))
 	v.item.Item = 2
 	v.wire.Msg = json.RawMessage(marshalWire(proto.MsgRow{By: "by", Mentions: []string{}}))
@@ -176,6 +192,8 @@ func TestWatchItems(t *testing.T) {
 	}
 	h.Rows.Put(slot.group, "member", "by", json.RawMessage(marshalWire(proto.GoneRow{RowHeader: proto.RowHeader{ID: "by"}, Gone: true})))
 	cleanupGoneMembers(h, slot.group)
+	cleanupGoneMembers(h, slot.group)
+	wantWatchers(t, seen, []string{"watcher"}, []string{"watcher"}, []string{})
 	if got := h.Watchers(slot.group, slot.member); !reflect.DeepEqual(got, []string{}) {
 		t.Fatal(got)
 	}
@@ -224,9 +242,11 @@ func TestWatchRefusalsAndRevocation(t *testing.T) {
 	if _, from := p.attach(key, term); from != o {
 		t.Fatal("attach")
 	}
+	seen := recordWatchers(h, slot)
 	if res, err := watchEnd(context.Background(), h, o, "dev", end); res != nil || err != nil {
 		t.Fatalf("%v %v", res, err)
 	}
+	wantWatchers(t, seen, []string{})
 	if !term.isClosed() {
 		t.Fatal("revoke left channel open")
 	}
@@ -262,9 +282,13 @@ func TestWatchHandBack(t *testing.T) {
 	p.attach(key, term)
 	var ended []string
 	h.WatchEnded = func(group, user string) { ended = append(ended, group+":"+user) }
+	seen := recordWatchers(h, slot)
 	if err := pty.Close(); err != nil {
 		t.Fatal(err)
 	}
+	wantWatchers(t, seen, []string{})
+	p.stop(slot)
+	wantWatchers(t, seen, []string{})
 	if !term.isClosed() || len(p.ok) != 0 || !reflect.DeepEqual(h.Watchers("g", "m"), []string{}) || !reflect.DeepEqual(ended, []string{"g:a"}) {
 		t.Fatalf("closed=%v, ok=%v, watchers=%v, ended=%v", term.isClosed(), p.ok, h.Watchers("g", "m"), ended)
 	}

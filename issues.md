@@ -468,11 +468,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `*peer.Connection` (`internal/peer/sockets.go`) exposes `Path()` without ICE candidate-pair round-trip statistics (the field and its reporter were removed until it does), and router port mapping (`PR-3`) was cut from step 1 on 2026-11-21 (`planning/contracts/mcp-tools.md` section 1).
 - Status: open, accepted for step 1 (`N-8`).
 
-### 2026-11-21 · limitation · `host.info` has no live push yet and reports `queued` as `0`
+### 2026-11-21 · limitation · `host.info` is pushed for `watchers` only and reports `queued` as `0`
 
-- Symptom: `Surface` (`internal/node/surface.go`) answers `host.info` requests with `HostState` and sends no `host.info` pushes (no `host.info` push yet), and every `AgentGroup.Queued` entry in `host.info` is `0` (`internal/node/surface.go:154`). A browser that stays connected therefore hears of a group that the person joined in another browser only at its next `host.info`, which is its next connection.
+- Symptom: `Surface` (`internal/node/surface.go`) answers `host.info` requests with `HostState` and pushes `host.info` only after a request with `refresh` and when `watchers` change, and every `AgentGroup.Queued` entry in `host.info` is `0` (`internal/node/surface.go:154`). A browser that stays connected therefore hears of a group that the person joined in another browser only at its next `host.info`, which is its next connection.
 - Cause: `settings.set` is postponed with `U-12`, the 1.0 web client requests `host.info` on connect and after `agent.set`, and held items are held on the home (`not_before`, `HM-7`) rather than counted on the host.
-- Status: open for the push, accepted for 1.0 (`N-3`). `queued` counts the items the host holds since HS-20 (`Host.QueuedCount`, `internal/host/deliver.go`). The web client shows no held count: the terminal page and the card of an AI in takeover say that messages to it wait until hand-back (`U-11`, coordinator 2026-11-22; `planning/flows/takeover.md` step 9).
+- Status: open for the push of the other fields, accepted for 1.0 (`N-3`). `watchers` is pushed when a watch grant is added or ends (`Host.WatchersChanged`, `internal/host/watch.go`; `Surface.pushHostInfo`, `internal/node/surface.go`). `queued` counts the items the host holds since HS-20 (`Host.QueuedCount`, `internal/host/deliver.go`). The web client shows no held count: the terminal page and the card of an AI in takeover say that messages to it wait until hand-back (`U-11`, coordinator 2026-11-22; `planning/flows/takeover.md` step 9).
 
 ### 2026-11-20 · limitation · Self-update leaves three things to the node runtime (N-4)
 

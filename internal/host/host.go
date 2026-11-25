@@ -86,6 +86,9 @@ type Host struct {
 	Connect func(ctx context.Context, device string)
 	// WatchEnded notifies node when a person's last watch grant ends.
 	WatchEnded func(group, user string)
+	// WatchersChanged notifies node when a watch grant is added or ends. It
+	// must not wait.
+	WatchersChanged func()
 	// Shim is the command line that starts this node's MCP shim, without the
 	// token (contracts/local.md section 1). node sets it, so that the CLIs of
 	// two nodes in one process reach each their own node.
