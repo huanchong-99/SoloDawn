@@ -46,13 +46,6 @@ func TestHostSurfaceGoldens(t *testing.T) {
 	state.Agents[0].Groups[0].Watchers = []string{}
 	golden(t, "host-info-push", HostInfoPush{"host.info", state})
 
-	// The next page after rows down to 413: the rows whose id is lower.
-	golden(t, "audit-request", Audit{Request{"audit", 10}, 413, 50})
-	golden(t, "audit-answer", AuditAnswer{Success{10, true}, []AuditRow{
-		{412, ts - 1000, ID(group), "claude", "approval", "git push origin other-branch", user, "approved"},
-		{ID: 411, TS: ts - 1000, What: "setting", Detail: "max_open 4", By: user},
-	}})
-
 	golden(t, "pty-resize", PTYResize{"pty.resize", ID(group), ID(agent), 120, 32})
 	golden(t, "beacon", Beacon{"beacon", ID(id("beacon")), ts, 47800})
 }

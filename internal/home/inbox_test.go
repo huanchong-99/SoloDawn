@@ -249,6 +249,7 @@ func TestInboxWakeUpCapHoldsAndReleasesItems(t *testing.T) {
 	t.Run("cap holds excess items and exempts merge", inboxCheckCapAndMerge)
 	t.Run("exact hour expiry and unsorted holds", inboxCheckHourBoundary)
 	t.Run("rollback and restart", inboxCheckCapRollbackAndRestart)
+	t.Run("people and replies are not held", inboxCheckCapSparesPeopleAndReplies)
 }
 
 func inboxCappedTables(capPerHour int, ai2 string) home.Tables {
@@ -288,18 +289,18 @@ func inboxCheckCapAndMerge(t *testing.T) {
 	w.loop.Inbox(host.conn)
 
 	// Merge before reaching the cap does not consume a wake slot: two mentions after it still go at once.
-	p.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"merge","Task":%q,"Commit":"c1"}]`, aiID, taskID))
+	host.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"merge","Task":%q,"Commit":"c1"}]`, aiID, taskID))
 	equal(t, inboxDecode(t, host.next()).Items[0].Item.Why, "merge")
-	p.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"mention","Msg":%q}]`, aiID, id(1)))
+	host.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"mention","Msg":%q}]`, aiID, id(1)))
 	equal(t, inboxDecode(t, host.next()).Items[0].Item.Item, int64(2))
 
 	w.clock.Store(clock + 1000)
-	p.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"mention","Msg":%q}]`, aiID, id(2)))
+	host.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"mention","Msg":%q}]`, aiID, id(2)))
 	equal(t, inboxDecode(t, host.next()).Items[0].Item.Item, int64(3))
 
 	// At the cap: merge and another AI still go immediately; two mentions for aiID wait in turn.
 	w.clock.Store(clock + 2000)
-	p.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"merge","Task":%q,"Commit":"c2"},{"AI":%q,"Why":"mention","Msg":%q},{"AI":%q,"Why":"mention","Msg":%q},{"AI":%q,"Why":"mention","Msg":%q}]`,
+	host.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"merge","Task":%q,"Commit":"c2"},{"AI":%q,"Why":"mention","Msg":%q},{"AI":%q,"Why":"mention","Msg":%q},{"AI":%q,"Why":"mention","Msg":%q}]`,
 		aiID, taskID, ai2, id(3), aiID, id(4), aiID, id(5)))
 	immediate := inboxDecode(t, host.next())
 	equal(t, []any{len(immediate.Items), immediate.Items[0].Item.Item, immediate.Items[1].Item.Item}, []any{2, int64(4), int64(5)})
@@ -317,31 +318,31 @@ func inboxCheckCapAndMerge(t *testing.T) {
 
 func inboxCheckHourBoundary(t *testing.T) {
 	ai2 := id(81)
-	w, p := runFounded(t, inboxCappedTables(2, ai2))
+	w, _ := runFounded(t, inboxCappedTables(2, ai2))
 	host := w.attach(laptop)
 	w.loop.Inbox(host.conn)
 
 	// Explicit NotBefore out of order: first due at clock+5000, second due at clock+1000.
-	p.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"notice","Code":"quiet","NotBefore":%d}]`, aiID, clock+5000))
+	host.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"notice","Code":"quiet","NotBefore":%d}]`, aiID, clock+5000))
 	w.clock.Store(clock + 1000)
-	p.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"notice","Code":"quiet"}]`, aiID))
+	host.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"notice","Code":"quiet"}]`, aiID))
 	equal(t, inboxDecode(t, host.next()).Items[0].Item.Item, int64(2))
 
 	// 1 ms before clock+1000 ages out, a 3rd item is held until clock+1000+3,600,000; a longer caller hold stays longer.
 	w.clock.Store(clock + 1000 + 3_600_000 - 1)
-	p.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"notice","Code":"quiet"},{"AI":%q,"Why":"notice","Code":"quiet","NotBefore":%d}]`,
+	host.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"notice","Code":"quiet"},{"AI":%q,"Why":"notice","Code":"quiet","NotBefore":%d}]`,
 		aiID, aiID, clock+9_000_000))
 	equal(t, runQuery[int64](t, w.db, "SELECT not_before FROM inbox WHERE id=3"), int64(clock+1000+3_600_000))
 	equal(t, runQuery[int64](t, w.db, "SELECT not_before FROM inbox WHERE id=4"), int64(clock+9_000_000))
 
 	// At exact hour expiry (at == now - 3,600,000), the aged wake drops and a new item goes out immediately.
-	w2, p2 := runFounded(t, inboxCappedTables(1, ai2))
+	w2, _ := runFounded(t, inboxCappedTables(1, ai2))
 	host2 := w2.attach(laptop)
 	w2.loop.Inbox(host2.conn)
-	p2.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"notice","Code":"quiet"}]`, aiID))
+	host2.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"notice","Code":"quiet"}]`, aiID))
 	equal(t, inboxDecode(t, host2.next()).Items[0].Item.Item, int64(1))
 	w2.clock.Store(clock + 3_600_000)
-	p2.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"notice","Code":"quiet"}]`, aiID))
+	host2.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"notice","Code":"quiet"}]`, aiID))
 	equal(t, inboxDecode(t, host2.next()).Items[0].Item.Item, int64(2))
 }
 
@@ -357,11 +358,11 @@ func inboxCheckCapRollbackAndRestart(t *testing.T) {
 	w.loop.Inbox(host.conn)
 
 	// A failed transaction leaves Wakes untouched.
-	re := p.send(groupID, "jump", fmt.Sprintf(`,"fail":true,"items":[{"AI":%q,"Why":"notice","Code":"quiet"}]`, aiID))
-	equal(t, strings.HasPrefix(p.next(), fmt.Sprintf(`{"re":%d,"err":{"code":"internal"`, re)), true)
+	re := host.send(groupID, "jump", fmt.Sprintf(`,"fail":true,"items":[{"AI":%q,"Why":"notice","Code":"quiet"}]`, aiID))
+	equal(t, strings.HasPrefix(host.next(), fmt.Sprintf(`{"re":%d,"err":{"code":"internal"`, re)), true)
 	w.reported()
 
-	p.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"notice","Code":"quiet"}]`, aiID))
+	host.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"notice","Code":"quiet"}]`, aiID))
 	equal(t, inboxDecode(t, host.next()).Items[0].Item.Item, int64(1))
 	w.loop.Ack(host.conn, proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 1})
 	w.idle()
@@ -370,8 +371,46 @@ func inboxCheckCapRollbackAndRestart(t *testing.T) {
 	w.loop.Close()
 	w = runStart(t, db, tables)
 	w.nonce.Store(10)
-	p, host = w.attach(browser), w.attach(laptop)
+	host = w.attach(laptop)
 	w.loop.Inbox(host.conn)
-	p.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"notice","Code":"quiet"}]`, aiID))
+	host.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"notice","Code":"quiet"}]`, aiID))
 	equal(t, inboxDecode(t, host.next()).Items[0].Item.Item, int64(2))
+}
+
+// At the cap, a person's items and an AI's reply go at once and take no slot: a
+// mention an AI causes is held, and goes out when the one counted mention ages out.
+func inboxCheckCapSparesPeopleAndReplies(t *testing.T) {
+	w, p := runFounded(t, inboxCappedTables(1, id(81)))
+	host := w.attach(laptop)
+	w.loop.Inbox(host.conn)
+	mention := func(n byte) string {
+		return fmt.Sprintf(`,"items":[{"AI":%q,"Why":"mention","Msg":%q}]`, aiID, id(n))
+	}
+	gets := func(why string, item int64) {
+		t.Helper()
+		got := inboxDecode(t, host.next())
+		equal(t, []any{len(got.Items), got.Items[0].Item.Why, got.Items[0].Item.Item}, []any{1, why, item})
+	}
+
+	p.does(groupID, "jump", mention(1))
+	gets("mention", 1)
+	host.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"reply","Msg":%q}]`, aiID, id(2)))
+	gets("reply", 2)
+	w.clock.Store(clock + 1000)
+	host.does(groupID, "jump", mention(3)) // the first that counts
+	gets("mention", 3)
+
+	w.clock.Store(clock + 2000)
+	host.does(groupID, "jump", mention(4)) // held
+	for _, why := range []string{"mention", "decided", "confirmed", "assign"} {
+		p.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":%q,"Msg":%q}]`, aiID, why, id(5)))
+		equal(t, inboxDecode(t, host.next()).Items[0].Item.Why, why)
+	}
+	host.does(groupID, "jump", fmt.Sprintf(`,"items":[{"AI":%q,"Why":"reply","Msg":%q}]`, aiID, id(6)))
+	gets("reply", 9)
+
+	w.loop.Tick(time.UnixMilli(clock + 1000 + 3_600_000 - 1))
+	host.quiet()
+	w.loop.Tick(time.UnixMilli(clock + 1000 + 3_600_000))
+	gets("mention", 4)
 }

@@ -27,8 +27,6 @@ var shapes = map[string]reflect.Type{
 	"act-revise":                     of[Act](),
 	"agent-set":                      of[AgentSet](),
 	"answer":                         of[Answer](),
-	"audit-answer":                   of[AuditAnswer](),
-	"audit-request":                  of[Audit](),
 	"beacon":                         of[Beacon](),
 	"cmd":                            of[Cmd](),
 	"cmd-error":                      of[ErrorResponse](),

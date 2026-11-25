@@ -32,8 +32,6 @@ export const schemaOf: Record<string, GenericSchema> = {
   'act-revise': p.Act,
   'agent-set': p.AgentSet,
   answer: p.Answer,
-  'audit-answer': p.AuditAnswer,
-  'audit-request': p.Audit,
   beacon: p.Beacon,
   cmd: p.Cmd,
   'cmd-error': p.ErrorResponse,
@@ -230,7 +228,6 @@ const answers = {
   fetch: 'fetched',
   cmd: 'cmd-ok',
   'host.info': 'host-info-answer',
-  audit: 'audit-answer',
   'watch.start': 'cmd-ok',
 } as const satisfies Record<p.RequestType, string>;
 
@@ -252,7 +249,7 @@ function cmdAnswer({ t, type }: CmdFields): string {
 }
 
 /** A connection to a node that knows the examples' one group and is the owner's: it answers
- *  `host.info` and `audit`. `sync` pushes `reset` and `rows`, then answers `synced`; commands
+ *  `host.info`. `sync` pushes `reset` and `rows`, then answers `synced`; commands
  *  answer with their typed example (`cmd-invite-link`, `cmd-noted`, or `cmd-ok`),
  *  and `group create` or `join` pushes `groups` before its answer. Frames are read as real ones
  *  are: answers with `decodeAnswer`, pushes with `Frame`. */

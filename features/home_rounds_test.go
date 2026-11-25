@@ -98,6 +98,13 @@ func homeRoundsWhenSteps(sc *godog.ScenarioContext, w *homeRoundsWorld) {
 		}
 		return err
 	})
+	sc.Step(`^the owner posts a newer message mentioning "([^"]*)" in the main line$`, func(aiName string) error {
+		if _, err := w.sendPost("owner", "text", nil, "And later this.", []string{w.members[aiName]}); err != nil {
+			return err
+		}
+		_, err := w.drainHostItems(1)
+		return err
+	})
 	sc.Step(`^the owner jumps the queue on that direct request$`, func() error {
 		w.receivedPush = nil
 		return w.sendJump("owner", w.directMsg, true)

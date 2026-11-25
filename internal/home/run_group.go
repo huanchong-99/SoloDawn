@@ -146,7 +146,9 @@ func (g *runGroup) transact(now time.Time, run func(d Disk, tx *store.Tx) (Resul
 		if res, err = run(d, tx); err != nil {
 			return err
 		}
-		res.Items = inboxPace(g.state, res.Items, now.UnixMilli())
+		if !res.byPerson {
+			res.Items = inboxPace(g.state, res.Items, now.UnixMilli())
+		}
 		return errors.Join(d.err, g.write(tx, res, now.UnixMilli()))
 	})
 	return res, err
@@ -154,16 +156,19 @@ func (g *runGroup) transact(now time.Time, run func(d Disk, tx *store.Tx) (Resul
 
 // settle follows a transaction that was committed. A result that holds
 // nothing (a refusal, a repeated command, a rule with nothing to do) only
-// gets its answer. Any other is taken into the state, counted for the
-// wake-up cap and given to every hook, in the order of their names; then
-// the changed rows are pushed, the answer is sent, and the other pushes follow.
+// gets its answer. Any other is taken into the state, counted for the wake-up
+// cap unless a person's command made it, and given to every hook, in the order
+// of their names; then the changed rows are pushed, the answer is sent, and the
+// other pushes follow.
 func (g *runGroup) settle(res Result, now time.Time, answer func()) {
 	if runIdle(res) {
 		answer()
 		return
 	}
 	g.state.Commit(res)
-	g.count(res.Items, now.UnixMilli())
+	if !res.byPerson {
+		g.count(res.Items, now.UnixMilli())
+	}
 	hooks := g.loop.cfg.Tables.After
 	for _, name := range slices.Sorted(maps.Keys(hooks)) {
 		hooks[name](g.state, res)
@@ -181,9 +186,9 @@ func runIdle(res Result) bool {
 // runHour is how far back the count of the wake-up cap goes, in milliseconds.
 const runHour = 3600_000
 
-// count keeps State.Wakes: each non-merge item counts once for its AI, at the
-// time it is due, which is now, or its NotBefore when that is later. What is an
-// hour old or older is dropped from the AI's list as the next item is counted.
+// count keeps State.Wakes: each item under the cap counts once for its AI, at
+// the time it is due, which is now, or its NotBefore when that is later. What is
+// an hour old or older is dropped from the AI's list as the next item is counted.
 func (g *runGroup) count(items []Item, now int64) {
 	for _, it := range items {
 		inboxWake(g.state.Wakes, it, 0, now)

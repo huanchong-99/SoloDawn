@@ -240,6 +240,10 @@ Tool errors: `not_found` when the node knows no group `group` (the text
 lists the valid ids with the group names); `conflict` when that group is
 not of kind `team`; `home_unreachable`; `secret` (R-137, as on every post).
 
+The secretary's turns name these groups with their ids
+(`contracts/step-3/profiles.md` section 3), and its instructions say when to
+post there.
+
 A secretary writes there and reads nothing there (`read_thread` takes no
 `group`); a person carries a matter from the team group into a project.
 

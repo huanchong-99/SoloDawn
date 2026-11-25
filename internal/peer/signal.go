@@ -308,7 +308,7 @@ func (c *Connection) connectionStateChanged(state webrtc.PeerConnectionState) {
 	case webrtc.PeerConnectionStateFailed:
 		go c.close("ice_failed")
 	case webrtc.PeerConnectionStateClosed:
-		go c.Close()
+		go c.close("ctl_closed")
 	}
 }
 

@@ -687,9 +687,12 @@ func (n *peerNode) initTransport(cfg peerNodeConfig) error {
 }
 
 func (n *peerNode) routesFor(dev string, mapRoute func(peer.Route) peer.Route) []peer.Route {
-	out := []peer.Route{mapRoute(n.Path.Route())}
+	own := n.Path.Route()
+	out := []peer.Route{mapRoute(own)}
 	for _, r := range n.Pairer.Routes(dev) {
-		out = append(out, mapRoute(r))
+		if r.ID != own.ID {
+			out = append(out, mapRoute(r))
+		}
 	}
 	return out
 }

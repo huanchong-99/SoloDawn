@@ -26,6 +26,7 @@ type Ctl interface {
 	host.Owner
 	Read(ctx context.Context) (json.RawMessage, error)
 	Close() error
+	Finish() // closes it after what was sent has arrived
 }
 
 type (
@@ -52,6 +53,7 @@ type SessionConfig struct {
 	Addrs       func() []string
 	Now         func() time.Time
 	Report      func(error)
+	Known       func(device string) bool // whether device may be connected; nil: any device
 	OnAdopt     func(owner string)
 	Spawn       func(func())
 }
@@ -77,6 +79,7 @@ type sesConn struct {
 	device           string
 	paired, welcomed bool
 	raw              Ctl
+	hub              *Sessions // set by serve
 	sendMu           sync.Mutex
 	home             *home.Conn
 	staging          map[string]*identity.Log
@@ -138,6 +141,7 @@ func (s *Sessions) Serve(ctx context.Context, device string, paired bool, raw Ct
 }
 
 func (s *Sessions) serve(ctx context.Context, c *sesConn, joining func() *home.Joining) {
+	c.hub = s
 	c.home = s.cfg.Home.Attach(c.device, c)
 	c.home.SetJoining(joining)
 	s.mu.Lock()
@@ -279,6 +283,10 @@ func (s *Sessions) sesFetch(_ context.Context, conn *home.Conn, _ Ctl, _ string,
 
 func (s *Sessions) sesEnrolled(c *sesConn) bool {
 	return s.sesWelcomed(c) && !c.joining.pending() && (s.cfg.Logs.Known(c.device) || s.cfg.Host.Watching(c.device))
+}
+
+func (s *Sessions) sesMayStay(c *sesConn) bool {
+	return s.cfg.Known == nil || c.joining.pending() || s.cfg.Known(c.device)
 }
 
 func (s *Sessions) sesWelcomed(c *sesConn) bool {
@@ -596,10 +604,28 @@ func (c *sesConn) sendErr(re int64, code, msg string) {
 }
 
 func (c *sesConn) Send(frame any) error {
-	w, ok := frame.(sesWelcome)
-	if !ok {
+	if w, ok := frame.(sesWelcome); ok {
+		return c.sendWelcome(w)
+	}
+	if groups, ok := frame.(proto.Groups); ok {
+		return c.sendGroups(groups)
+	}
+	return c.send(frame)
+}
+
+// sendGroups pushes the groups, the last frame of a device that has no reason
+// left to be connected: after a removal the home always pushes them. A revoked
+// device does not need them (sesLogChanged).
+func (c *sesConn) sendGroups(frame proto.Groups) error {
+	if c.hub.sesMayStay(c) {
 		return c.send(frame)
 	}
+	c.send(frame)
+	c.raw.Finish()
+	return nil
+}
+
+func (c *sesConn) sendWelcome(w sesWelcome) error {
 	defer close(w.sent)
 	c.sendMu.Lock()
 	defer c.sendMu.Unlock()
