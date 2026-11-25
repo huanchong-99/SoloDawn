@@ -116,14 +116,7 @@ func tskNoErr(t *testing.T, err error) {
 
 func tskStopAllCloud(t *testing.T, h *Host) {
 	t.Helper()
-	t.Cleanup(func() {
-		p := Part[tskPart](h)
-		p.mu.Lock()
-		for _, run := range p.cancels {
-			run.cancel()
-		}
-		p.mu.Unlock()
-	})
+	t.Cleanup(func() { settleHostedChecks(h) })
 }
 
 func tskDiskHost(t *testing.T) (*Host, string) {
@@ -730,7 +723,7 @@ func TestStaleCloudCheckRowDoesNotRestartCompletedPoll(t *testing.T) {
 	r := newDeliverRig(t, true)
 	tskStopAllCloud(t, r.h)
 	r.seedGroupAndMembers()
-	r.h.Settle()
+	settleDelivery(r.h)
 	const head = "old-head"
 	r.putTask(cloudCheckTask(testGroup1, testTask1, 1, testAI1, head, 10))
 	calls := fakeForgeGH(t, hostedView(head, passedRun), hostedView(head, passedRun))
@@ -747,6 +740,19 @@ func TestStaleCloudCheckRowDoesNotRestartCompletedPoll(t *testing.T) {
 	afterGroupState(r.h, deliv(r.h), testGroup1)
 	waitCloudIdle(r)
 	calls([]string{"pr", "view", "31", "--json", "headRefOid,statusCheckRollup"})
+}
+
+func TestSettleEndsTheHostedChecksPoll(t *testing.T) {
+	d := captureDiag(t)
+	h, home, _ := customForgeHost(t)
+	fakeForgeGH(t, forgeAnswer{Code: 8})
+	startHostedCheck(h, "home-device", tskTestGroupID, HostedCheck{Task: testTask1, Branch: "task/1-poll", Commit: "head", PR: 7, Since: time.Now()})
+	h.Settle()
+	d.ran(t, 1, "node="+h.Key.ID()[:8], "cloud_poll g="+tskTestGroupID+" task="+testTask1)
+	tskEqual(t, len(home.snapshotAsked()), 0)
+	p := Part[tskPart](h)
+	p.spawn(func() { t.Error("a poll started after Settle") })
+	p.wg.Wait()
 }
 
 func TestSubmitTaskDoesNotRestartRunningHostedCheckForSameCommit(t *testing.T) {

@@ -74,14 +74,13 @@ exit, the claimed interrupt or the event that ended the process); `run.open` and
 (`extOpenRun`, `extEnd`: `g`, `ai`, `run`; at the close `why` `done`, `crash` or `timeout`); `tool`
 (`runToolCall`, when the call returns: the session, `name`, `code` `ok` or the error code, `ms`);
 `settle.begin` and `settle.end` (`Settle`). `Host.bg` is the one wrapper for the work the host
-starts on its wait groups, the hosted checks poll, the answer to a CLI's question and the goroutines
-of a watched terminal. The work's goroutine, not the caller, who may hold a mutex, writes `bg.start`
-and `bg.stop` (`name`: `ask`, `cloud_poll`, `deliver`, `group_state`, `group_sync`, `hand_back`,
-`home_flush`, `home_sync`, `home_watch`, `member_status`, `path_watch`, `presence`, `run_timeout`,
-`watch_conn`, `watch_write`; `g` and `task` when the work has them), the stop before the wait
-group's `Done`, so that `Settle` returns after it. `diag_test.go` reads the lines from the standard
-logger and checks each once with its fields, and `inbox.take` with the pause reading and what it
-left.
+starts on its wait groups, the answer to a CLI's question and the goroutines of a watched terminal.
+The work's goroutine, not the caller, who may hold a mutex, writes `bg.start` and `bg.stop` (`name`:
+`ask`, `cloud_poll`, `deliver`, `group_state`, `group_sync`, `hand_back`, `home_flush`, `home_sync`,
+`home_watch`, `member_status`, `path_watch`, `presence`, `run_timeout`, `watch_conn`, `watch_write`;
+`g` and `task` when the work has them), the stop before the wait group's `Done`, so that `Settle`
+returns after it. `diag_test.go` reads the lines from the standard logger and checks each once with
+its fields, and `inbox.take` with the pause reading and what it left.
 
 ## Hooks
 
@@ -357,7 +356,7 @@ a second attempt. Windows programs must resolve to `.exe` files.
 - `tools_task.go` lists `start_task` to working AIs' group sessions, `push_branch`, `run_checks` and `submit_task` to task sessions above level 1, and `submit_review` to review sessions ([mcp-tools.md](../../planning/contracts/mcp-tools.md)).
 - `push_branch` and `submit_task` derive `task/<num>-<slug>` from `num` and `slug` via `taskName`, ignoring `TaskRow.Branch`.
 - `start_task`, `submit_task` and `submit_review` check outbound text arguments with `CheckOutboundSecret` before running Git or signing commands.
-- With a remote forge, `submit_task` and group-state resume (`afterGroupState`) share `startHostedCheck`, which claims `(group, task, commit)` in `Part[tskPart](h)`, runs `TaskForge.WaitHostedChecks` in the background, and sends `task cloud`. Starting a new poll cancels the previous poll for the task. The host retains claims for accepted results and superseded commits so stale rows cannot restart them. An accepted `submit_task` clears its commit's claim before starting the poll. A poll that stopped without acceptance or supersession can be resumed.
+- With a remote forge, `submit_task` and group-state resume (`afterGroupState`) share `startHostedCheck`, which claims `(group, task, commit)` in `Part[tskPart](h)`, runs `TaskForge.WaitHostedChecks` in the background, and sends `task cloud`. Starting a new poll cancels the previous poll for the task. The host retains claims for accepted results and superseded commits so stale rows cannot restart them. An accepted `submit_task` clears its commit's claim before starting the poll. A poll that stopped without acceptance or supersession can be resumed. `Settle` (entry `"task"`) sets `settled` under `tskPart.mu`, cancels the polls and waits for `tskPart.wg`; after that no poll starts.
 
 # Approvals
 
