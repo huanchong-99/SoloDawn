@@ -140,10 +140,14 @@ export class Nodes {
     const answer = await ctl.request({ t: 'host.info', ...(refresh && { refresh }) }).catch(lost);
     if (home.ctl !== ctl || answer.err) return;
     const { re: _re, ok: _ok, ...info } = answer;
-    const known = this.#known.get(ctl) ?? new Set();
-    for (const { g } of info.homes) known.add(g);
-    this.#known.set(ctl, known);
+    this.#learn(ctl, info);
     this.infos.set(home, info);
+  }
+
+  #learn(ctl: p.Ctl, { homes }: p.HostInfoPush) {
+    const known = this.#known.get(ctl) ?? new Set();
+    for (const { g } of homes) known.add(g);
+    this.#known.set(ctl, known);
   }
 }
 
