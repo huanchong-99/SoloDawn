@@ -266,7 +266,7 @@ func (w *peersWorld) open(i int) error {
 // info sends host.info on what node i offered and checks the answer.
 func (w *peersWorld) info(i int) error {
 	var id int64
-	data, err := w.conns[i].Request(w.ctx, func(n int64) any { id = n; return proto.Request{Type: "host.info", ID: n} })
+	data, err := requestWait(w.ctx, w.conns[i], nil, func(n int64) any { id = n; return proto.Request{Type: "host.info", ID: n} })
 	if err != nil {
 		return err
 	}

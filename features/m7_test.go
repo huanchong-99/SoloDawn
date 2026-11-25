@@ -175,47 +175,34 @@ func (p *m7PTY) text() string {
 }
 
 func (p *m7PTY) waitOpen(ctx context.Context) error {
+	start := time.Now()
 	select {
 	case <-p.opened:
 		return nil
 	case <-p.closed:
 		return errors.New("pty channel closed before opening")
 	case <-ctx.Done():
-		return ctx.Err()
+		return ctxEnded(ctx, start, "the pty channel to open", nil)
 	}
 }
 
 func (p *m7PTY) waitClosed(timeout time.Duration) error {
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case <-p.closed:
-		return nil
-	case <-timer.C:
-		return fmt.Errorf("pty channel did not close within %s", timeout)
-	}
+	w := newWait(timeout, "the pty channel to close", nil)
+	defer w.stop()
+	_, err := recvWait(w, p.closed)
+	return err
 }
 
 func (p *m7PTY) waitOutput(timeout time.Duration, sub string) error {
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	for {
-		if strings.Contains(p.text(), sub) {
-			return nil
-		}
-		if !p.waitStep(timer.C) {
-			return fmt.Errorf("timed out waiting for %q in pty output %q", sub, p.text())
+	w := newWait(timeout, fmt.Sprintf("%q in the pty output", sub), nil)
+	defer w.stop()
+	for !strings.Contains(p.text(), sub) {
+		w.saw.read(tailOf(p.text()))
+		if _, err := recvWait(w, p.notify); err != nil {
+			return err
 		}
 	}
-}
-
-func (p *m7PTY) waitStep(timeout <-chan time.Time) bool {
-	select {
-	case <-p.notify:
-		return true
-	case <-timeout:
-		return false
-	}
+	return nil
 }
 
 type m7Browser struct {
@@ -238,7 +225,8 @@ type m7Browser struct {
 	mu       sync.Mutex
 	nextID   int64
 	waiting  map[int64]chan json.RawMessage // each channel's single reader: awaitReqReply
-	changed  chan struct{}                  // closed under mu by applyRows; reader: m7WaitChan
+	changed  chan struct{}                  // closed under mu by applyRows; reader: waitRows
+	saw      trail                          // the frames of ctl
 	aiByName map[string]proto.AIMemberRow
 	tasks    map[string]proto.TaskRow
 	msgs     map[string]proto.MsgRow
@@ -462,12 +450,7 @@ func (b *m7Browser) exchangeSDP(nodePeer *peer.Peer) error {
 }
 
 func (b *m7Browser) awaitAnswer() (proto.Answer, error) {
-	select {
-	case ans := <-b.answers:
-		return ans, nil
-	case <-b.ctx.Done():
-		return proto.Answer{}, b.ctx.Err()
-	}
+	return recvCtx(b.ctx, b.answers, "the answer to the offer", nil)
 }
 
 func (b *m7Browser) applyRemoteICE() {
@@ -505,17 +488,19 @@ func (b *m7Browser) addICE(c proto.ICECandidate) {
 }
 
 func (b *m7Browser) waitCtlOpen() error {
+	start := time.Now()
 	select {
 	case <-b.ctlOpened:
 		return nil
 	case <-b.ctlClosed:
 		return errors.New("ctl closed before opening")
 	case <-b.ctx.Done():
-		return b.ctx.Err()
+		return ctxEnded(b.ctx, start, "ctl to open", nil)
 	}
 }
 
 func (b *m7Browser) onCtlFrame(data []byte) {
+	b.saw.see(frameBrief(data))
 	var hdr struct {
 		Re   *int64 `json:"re,omitempty"`
 		Type string `json:"t,omitempty"`
@@ -596,9 +581,9 @@ func (b *m7Browser) storeMsgLocked(elem json.RawMessage) {
 	b.msgs[m.ID] = m
 }
 
-func (b *m7Browser) waitRows(timeout time.Duration, pred func() bool) error {
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+func (b *m7Browser) waitRows(timeout time.Duration, what string, pred func() bool) error {
+	w := newWait(timeout, what, &b.saw)
+	defer w.stop()
 	for {
 		b.mu.Lock()
 		ok := pred()
@@ -607,18 +592,9 @@ func (b *m7Browser) waitRows(timeout time.Duration, pred func() bool) error {
 		if ok {
 			return nil
 		}
-		if !m7WaitChan(ch, timer.C) {
-			return errors.New("timed out waiting on M7 rows")
+		if _, err := recvWait(w, ch); err != nil {
+			return err
 		}
-	}
-}
-
-func m7WaitChan(ch <-chan struct{}, timeout <-chan time.Time) bool {
-	select {
-	case <-ch:
-		return true
-	case <-timeout:
-		return false
 	}
 }
 
@@ -652,13 +628,14 @@ func (b *m7Browser) request(ctx context.Context, build func(int64) any) (json.Ra
 }
 
 func (b *m7Browser) awaitReqReply(ctx context.Context, ch <-chan json.RawMessage) (json.RawMessage, error) {
+	start := time.Now()
 	select {
 	case msg := <-ch:
 		return msg, nil
 	case <-b.ctlClosed:
 		return nil, errors.New("ctl closed before response")
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, ctxEnded(ctx, start, "the reply to a ctl request", &b.saw)
 	}
 }
 
@@ -1126,12 +1103,7 @@ func (w *m7World) connectBrowser(mode m7CandMode) error {
 }
 
 func (w *m7World) acceptServed() (*peer.Connection, error) {
-	select {
-	case c := <-w.accepted:
-		return c, nil
-	case <-w.ctx.Done():
-		return nil, w.ctx.Err()
-	}
+	return recvCtx(w.ctx, w.accepted, "the node to accept the connection", nil)
 }
 
 func (w *m7World) createProjectGroup() error {
@@ -1186,7 +1158,7 @@ func (w *m7World) joinAI(aiName string) error {
 	if err := w.browser.execCmd(joinCmd); err != nil {
 		return err
 	}
-	return w.browser.waitRows(m7Event, func() bool {
+	return w.browser.waitRows(m7Event, "the row of AI "+aiName, func() bool {
 		_, ok := w.browser.aiByName[aiName]
 		return ok
 	})
@@ -1288,7 +1260,7 @@ func (w *m7World) aiID(aiName string) string {
 }
 
 func (w *m7World) waitMsgAndAIState(aiName, wantText, wantState string, timeout time.Duration) error {
-	return w.browser.waitRows(timeout, func() bool {
+	return w.browser.waitRows(timeout, fmt.Sprintf("AI %s in state %q with the message %q", aiName, wantState, wantText), func() bool {
 		ai := w.browser.aiByName[aiName]
 		return ai.State == wantState && w.hasMsgByLocked(ai.ID, wantText)
 	})
@@ -1426,7 +1398,7 @@ func (w *m7World) whenOpenTakeoverAndAttach(aiName string) error {
 	if err := w.openTakeoverSession(aiName, w.claudeTask, m7InteractiveHoldDoc()); err != nil {
 		return err
 	}
-	return w.browser.waitRows(m7Event, func() bool {
+	return w.browser.waitRows(m7Event, "AI "+aiName+" in takeover", func() bool {
 		return w.browser.aiByName[aiName].State == "takeover"
 	})
 }
@@ -1451,19 +1423,18 @@ func (w *m7World) whenPostThreeMentions(m1, m2, m3, aiName string) error {
 }
 
 func (w *m7World) waitHostQueued(aiName string, wantQueued int) error {
-	deadline := time.Now().Add(m7Event)
 	aiID := proto.ID(w.aiID(aiName))
-	for time.Now().Before(deadline) {
+	return waitUntilEvery(40*time.Millisecond, m7Event, fmt.Sprintf("%s queued=%d in takeover", aiName, wantQueued), func() error {
 		info, err := w.browser.hostInfo()
 		if err != nil {
-			return err
+			return abort(err)
 		}
-		if got, state, ok := m7LookupAgentGroup(info, w.groupID, aiID); ok && got == wantQueued && state == "takeover" {
-			return nil
+		got, state, ok := m7LookupAgentGroup(info, w.groupID, aiID)
+		if !ok || got != wantQueued || state != "takeover" {
+			return fmt.Errorf("found=%v queued=%d state=%q", ok, got, state)
 		}
-		time.Sleep(40 * time.Millisecond)
-	}
-	return fmt.Errorf("timed out waiting for %s queued=%d in takeover", aiName, wantQueued)
+		return nil
+	})
 }
 
 func m7LookupAgentGroup(info proto.HostInfo, gid, mid proto.ID) (int, string, bool) {
@@ -1720,7 +1691,7 @@ func (w *m7World) whenStartReplayAndEnd(aiName string) error {
 // the usual event bound for the hand-back turn's post. The turn starts CLI
 // and helper processes, so it is not part of the 2 second bound.
 func (w *m7World) waitLeftTakeover(aiName, hbText string, started time.Time) error {
-	err := w.browser.waitRows(m7Event, func() bool {
+	err := w.browser.waitRows(m7Event, "AI "+aiName+" to leave takeover", func() bool {
 		return w.browser.aiByName[aiName].State != "takeover"
 	})
 	w.handbackDur = time.Since(started)
@@ -1792,7 +1763,7 @@ func (w *m7World) thenLostConnHandbackAndConflict(wantCode string) error {
 }
 
 func (w *m7World) waitLostHandbackFetched(aiName, wantText string) error {
-	err := w.browser.waitRows(m7Event, func() bool {
+	err := w.browser.waitRows(m7Event, "AI "+aiName+" waiting", func() bool {
 		return w.browser.aiByName[aiName].State == "waiting"
 	})
 	if err != nil {
@@ -1802,15 +1773,16 @@ func (w *m7World) waitLostHandbackFetched(aiName, wantText string) error {
 }
 
 func (w *m7World) pollThreadHandback(aiID, wantText string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	return waitUntilEvery(50*time.Millisecond, timeout, fmt.Sprintf("handback %q in thread %s", wantText, w.claudeTask), func() error {
 		rows, err := w.browser.fetchThread(string(w.groupID), w.claudeTask)
-		if err == nil && m7HasHandbackRow(rows, aiID, wantText) {
-			return nil
+		if err != nil {
+			return err
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	return fmt.Errorf("thread %s missing handback %q", w.claudeTask, wantText)
+		if !m7HasHandbackRow(rows, aiID, wantText) {
+			return fmt.Errorf("%d rows, no handback", len(rows))
+		}
+		return nil
+	})
 }
 
 func m7HasHandbackRow(rows []proto.MsgRow, aiID, wantText string) bool {
@@ -1823,12 +1795,10 @@ func m7HasHandbackRow(rows []proto.MsgRow, aiID, wantText string) bool {
 }
 
 func (w *m7World) waitServedClosed(timeout time.Duration) error {
-	select {
-	case <-w.served.Done():
-		return nil
-	case <-time.After(timeout):
-		return fmt.Errorf("node WebRTC stack did not close lost connection within %s", timeout)
-	}
+	wt := newWait(timeout, "the node WebRTC stack to close the lost connection", nil)
+	defer wt.stop()
+	_, err := recvWait(wt, w.served.Done())
+	return err
 }
 
 func (w *m7World) reconnectAndSync() error {
@@ -1872,7 +1842,7 @@ func (w *m7World) hasTaskCardMsgLocked(taskID string) bool {
 }
 
 func (w *m7World) thenOwnerTakeoverCardExists(wantTitle, aiName string) error {
-	err := w.browser.waitRows(m7Event, func() bool {
+	err := w.browser.waitRows(m7Event, "the active takeover card "+wantTitle, func() bool {
 		t, ok := w.findTakeoverTaskLocked("")
 		return ok && t.State == "active" && t.Title == wantTitle && w.hasTaskCardMsgLocked(t.ID)
 	})
@@ -1899,7 +1869,7 @@ func (w *m7World) whenHandbackUnchanged(aiName string) error {
 }
 
 func (w *m7World) thenTakeoverTaskCancelled(wantState string, wantHandbacks int) error {
-	err := w.browser.waitRows(m7Event, func() bool {
+	err := w.browser.waitRows(m7Event, "the takeover task in state "+wantState, func() bool {
 		return w.browser.tasks[w.firstTakeID].State == wantState
 	})
 	if err != nil {
@@ -1917,14 +1887,12 @@ func (w *m7World) thenTakeoverTaskCancelled(wantState string, wantHandbacks int)
 }
 
 func (w *m7World) waitNoTaskSession(taskID string) error {
-	deadline := time.Now().Add(m7Event)
-	for time.Now().Before(deadline) {
-		if !w.hasOpenTaskSession(taskID) {
-			return nil
+	return waitUntilEvery(30*time.Millisecond, m7Event, "task session "+taskID+" to go after cancel", func() error {
+		if w.hasOpenTaskSession(taskID) {
+			return errors.New("session open")
 		}
-		time.Sleep(30 * time.Millisecond)
-	}
-	return fmt.Errorf("task session %s remained present after cancel", taskID)
+		return nil
+	})
 }
 
 func (w *m7World) hasOpenTaskSession(taskID string) bool {
@@ -1950,7 +1918,7 @@ func (w *m7World) whenSecondNoTaskCommitAndHandback(aiName, fileName, subject st
 	if err := w.openTakeoverSession(aiName, "", m7InteractiveHoldDoc()); err != nil {
 		return err
 	}
-	err := w.browser.waitRows(m7Event, func() bool {
+	err := w.browser.waitRows(m7Event, "the first takeover task active", func() bool {
 		t, ok := w.findTakeoverTaskLocked(w.firstTakeID)
 		return ok && t.State == "active"
 	})
@@ -2067,10 +2035,10 @@ func (w *m7World) whenCutDirectToRelay() error {
 	})
 	w.browser.ctrl.relayOnly.Store(true)
 	close(w.browser.cutDirect)
-	if !m7WaitChan(relay, time.After(m7Event)) {
-		return errors.New("browser did not select its TURN allocation")
-	}
-	return nil
+	wait := newWait(m7Event, "the browser to select its TURN allocation", nil)
+	defer wait.stop()
+	_, err := recvWait(wait, relay)
+	return err
 }
 
 func (w *m7World) thenStatsRelayClosesPTYAndHandsBack(aiName string) error {

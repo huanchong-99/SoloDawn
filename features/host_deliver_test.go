@@ -252,14 +252,12 @@ func (e *accDeliverEnv) attachAndFinishSync(seq int64) {
 }
 
 func (e *accDeliverEnv) waitCondition(desc string, ok func() bool) error {
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	return waitUntil(2*time.Second, desc, func() error {
 		if ok() {
 			return nil
 		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	return fmt.Errorf("timed out waiting for %s", desc)
+		return fmt.Errorf("acks=%d ai turns=%d secretary turns=%d sinces=%v", e.home.allAcks(), e.runner.count(accMember1), e.runner.count(accSecID), e.home.sincesSnapshot())
+	})
 }
 
 func accGroupRowJSON(homeID string, seq int64) string {
