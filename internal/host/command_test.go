@@ -36,6 +36,22 @@ func TestCommandWaitDelayDefault(t *testing.T) {
 	}
 }
 
+// Git does its automatic maintenance inside the host's command, also against
+// the owner's own setting, and the other settings of the node's environment
+// stay.
+func TestCommandKeepsGitMaintenanceInTheForeground(t *testing.T) {
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "gc.autoDetach")
+	t.Setenv("GIT_CONFIG_VALUE_0", "true")
+	t.Setenv("GIT_CONFIG_KEY_1", "user.name")
+	t.Setenv("GIT_CONFIG_VALUE_1", "owner")
+	for setting, want := range map[string]string{"gc.autoDetach": "false\n", "user.name": "owner\n"} {
+		if got, _, err := runIn(t.Context(), t.TempDir(), "git", "config", setting); err != nil || got != want {
+			t.Errorf("%s = %q (%v), want %q", setting, got, err, want)
+		}
+	}
+}
+
 // A missing folder is reported as such on every system. Once SysProcAttr is
 // set, os/exec skips its own check of the folder, and Windows would say only
 // "The directory name is invalid", which is not fs.ErrNotExist.

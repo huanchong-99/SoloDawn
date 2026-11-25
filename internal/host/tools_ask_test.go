@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -511,6 +512,50 @@ func verifyTimeoutBoundaryInBubble(t *testing.T, h *Host, doneCh <-chan askAsync
 	if waited, err := h.Hand(callID, askBuildReplyInboxItem(callID, "Late answer", &thread)); waited || err != nil {
 		t.Fatalf("late reply after timeout got waited=%v err=%v", waited, err)
 	}
+}
+
+// The owner of the callee denies the call while the ask waits
+// (contracts/step-2/confirm.md section 5).
+func TestAskReturnsADenial(t *testing.T) {
+	h, _ := seamHost(t, seamStore(t))
+	home := newAskFakeHome()
+	h.Attach("home-device", home)
+	askPutGroup(h, askGroupID, proto.Limits{AskDepth: 4, AskWaitS: 45})
+	askPutAI(h, askGroupID, askCallerID, "Claude Code", false)
+	askPutAI(h, askGroupID, askCalleeID, "Codex", false)
+	card := deniedCallCard(t)
+	home.onCmd = func(_ int64, cmd proto.Cmd) (json.RawMessage, error) {
+		var post proto.Post[proto.CallBody]
+		proto.Decode([]byte(cmd.Env.Payload), &post)
+		callID := string(post.Nonce)
+		card.Re = &callID
+		item := proto.InboxItem{
+			Item: proto.Item{Item: 9, AI: askCallerID, Why: "reply", Msg: proto.ID(card.ID)},
+			Msg:  json.RawMessage(marshalWire(card)),
+		}
+		h.Push("home-device", json.RawMessage(marshalWire(proto.Inbox{Type: "inbox", Group: askGroupID, Items: []proto.InboxItem{item}})))
+		return json.RawMessage(`{"re":1,"ok":true}`), nil
+	}
+	// Without the denial the ask would wait for 45 s of real time.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	got, err := Tools["ask"].Call(ctx, h, askBaseCaller(GroupSession, ""), json.RawMessage(`{"to":"Codex","text":"May I?"}`))
+	if err != nil || marshalWire(got) != `{"denied":true}` {
+		t.Fatalf("ask = %s, %v, want the denial", marshalWire(got), err)
+	}
+	h.Settle()
+}
+
+// deniedCallCard is the golden confirm card of a denied call.
+func deniedCallCard(t *testing.T) proto.MsgRow {
+	t.Helper()
+	raw, err := os.ReadFile("../proto/testdata/row-msg-confirm-denied.json")
+	secMustTrue(t, err == nil, "no golden card")
+	var card proto.MsgRow
+	if err := proto.Decode(raw, &card); err != nil {
+		t.Fatal(err)
+	}
+	return card
 }
 
 func assertNoOpenWait(t *testing.T, h *Host, callID string) {

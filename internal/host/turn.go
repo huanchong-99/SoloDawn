@@ -425,7 +425,16 @@ func parseCallInfo(msg *proto.MsgRow) (string, int, error) {
 
 func (c *turnCtx) buildReply(p parsedItem, _ bool) (itemBlock, int, error) {
 	thread := itemThread(string(p.item.Task), p.msg)
-	return itemBlock{why: "reply", whoPlace: c.msgWho(p.msg, thread), authority: "information", body: msgText(p.msg)}, 0, nil
+	return itemBlock{why: "reply", whoPlace: c.msgWho(p.msg, thread), authority: "information", body: c.replyBody(p.msg)}, 0, nil
+}
+
+// replyBody is the text of a reply, or what the confirm card says by which
+// the callee's owner denied the call.
+func (c *turnCtx) replyBody(msg *proto.MsgRow) string {
+	if msg == nil || msg.Kind != "confirm" {
+		return msgText(msg)
+	}
+	return fmt.Sprintf("Your call (id %s) was denied by %s.", strVal(msg.Re), c.memberLabel(stateBy(msg.State)))
 }
 
 func (c *turnCtx) buildAssign(p parsedItem, first bool) (itemBlock, int, error) {

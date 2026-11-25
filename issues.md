@@ -6,12 +6,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-26 · bug · A turn that ends while the held items are read gives the AI its newer messages first
-
-- Symptom: with 146 items held, `inbox.take` took items 352 to 369 and left 224 to 351, which went to a later turn. [agent-turn](planning/flows/agent-turn.md) B.6 gives a session all its held items, in order.
-- Cause: `isItemHeld` (`internal/host/deliver.go:909`) reads whether the AI is working anew for each item of the queue that `selectEligibleBatch` walks (`internal/host/deliver.go:879`). Items read before the turn ends stay held, and those after it are taken. FLAKY-27 fixed the same race for the group pause.
-- Status: open, found 2026-11-26 in the node log of `web/e2e/m2.spec.ts`.
-
 ### 2026-11-25 · limitation · A paired node's rendezvous addresses cannot be changed
 
 - Symptom: `solodawn pair <secret> --rendezvous <new>` on a node that already has an owner prints "this node already has an owner; to add a browser, run solodawn pair-browser", exits 1 and leaves the saved addresses as they were. Version 1 has no other command that writes them, so a node cannot be moved to another rendezvous.
@@ -757,6 +751,30 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open; the next occurrence needs the host and MCP lines of [diagnostics](planning/contracts/diagnostics.md).
 
 ## Resolved
+
+### 2026-11-26 · bug · A turn that ends while the held items are read gives the AI its newer messages first
+
+- Symptom: with 146 items held, `inbox.take` took items 352 to 369 and left 224 to 351, which went to a later turn. [agent-turn](planning/flows/agent-turn.md) B.6 gives a session all its held items, in order.
+- Cause: `isItemHeld` (`internal/host/deliver.go:909`) reads whether the AI is working anew for each item of the queue that `selectEligibleBatch` walks (`internal/host/deliver.go:879`). Items read before the turn ends stay held, and those after it are taken. FLAKY-27 fixed the same race for the group pause.
+- Status: resolved on `fix/host-delivery`: a walk reads each state once (`look`), the takeover, the holds and the tasks too. Found in the node log of `web/e2e/m2.spec.ts`. `TestWalkOfTheQueueReadsEachStateOnce`, `TestLookKeepsWhatItRead`.
+
+### 2026-11-26 · bug · An item sent again while its turn was prepared came twice in one turn
+
+- Symptom: the home sent an item again while delivery prepared its turn, and the preparation failed: the next turn had the item twice ("items 5,5"). A jump that retired the item meanwhile was delivered beside it.
+- Cause: `prependHeld` (`internal/host/deliver.go:1158` at 10ddc7c72) put the taken items before the queue without regard to what had arrived.
+- Status: resolved on `fix/host-delivery`: the queue is put behind the returned items by the rules of an arriving item (`enqueueHeld`), so a jump of another message goes first too (R-72). `TestItemTakenBackMeetsItsCopyInTheQueue`.
+
+### 2026-11-26 · bug · A denied `ask` did not reach the caller
+
+- Symptom: the owner of the called AI denied the call: an open `ask` was not ended, and after the wait the caller got a `reply` turn without text. Contract: [confirm.md](planning/contracts/step-2/confirm.md) section 5, acceptance A9.18.
+- Cause: the home queues the denial as a `reply` item that carries the confirm card (`cfmDeniedResult`, `internal/home/cmd_confirm.go`). The host took only a `reply` message as the answer of an open call (`replyCallID`, `internal/host/deliver.go:571`), read only an answer from it (`decodeReplyItem`, `internal/host/tools_ask.go`), and its turn showed the card's `text`, which is empty (`buildReply`, `internal/host/turn.go:419`).
+- Status: resolved on `fix/host-delivery`. `TestAskReturnsADenial`, `TestDeniedCallIsATurn`. The deny example of A9.18 stays `@pending` until the fixtures of `s2/lift-confirm` are merged; with them it passes.
+
+### 2026-11-26 · bug · A host Git command left a maintenance process behind (flaky `TestInterruptedLocalSquash`)
+
+- Symptom: `TestInterruptedLocalSquash` failed in about one of 600 runs under load: `TempDir RemoveAll cleanup: unlinkat …/.git: directory not empty`. What was left was `.git/objects/pack` and `.git/objects/info/packs`.
+- Cause: after a commit, a merge or a fetch Git runs `git maintenance run --auto`, which by default goes on in a process of its own (`--detach`); when two loose objects happen to be in `objects/17`, that process repacks (Git 2.54). `runInput` (`internal/host/command.go`) returned while it wrote: in the product it changed the clone outside the clone's lock and outlived the command's limit. The Git commands of the test fixtures left such processes too.
+- Status: resolved on `fix/host-delivery`: every command of the host has `gc.autoDetach=false` (`foregroundGC`), and so have the fixtures of the host tests and of the acceptance suite. `TestCommandKeepsGitMaintenanceInTheForeground`.
 
 ### 2026-11-25 · bug · `read_thread` gave an AI an empty text for most kinds
 

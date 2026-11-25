@@ -1145,3 +1145,105 @@ func TestTurnOfItsOwnStaysHeldAcrossAHandBackStart(t *testing.T) {
 		r.wantTurns(group, "items 2", jumpContinueGroup)
 	})
 }
+
+// A state that changes while delivery walks the queue lets no newer item go
+// before an older one: each walk takes all the items or none.
+func TestWalkOfTheQueueReadsEachStateOnce(t *testing.T) {
+	key := SessionKey{Group: runGroup1, Member: runAI1}
+	for name, c := range map[string]struct{ before, after State }{
+		"the turn ends":     {Working, Waiting},
+		"the takeover ends": {Takeover, Dormant},
+		"the hold lifts":    {Waiting, Waiting},
+	} {
+		t.Run(name, func(t *testing.T) {
+			jumpTest(t, func(t *testing.T, r *jumpRig) {
+				r.h.Sessions.Create(makeRunSession(key, GroupSession, "repo"))
+				r.h.Sessions.Move(key, Dormant, c.before)
+				reads := 0
+				Holds["change"] = func(*Host, SessionKey) (string, bool) {
+					reads++
+					if reads == 2 {
+						r.h.Sessions.Move(key, c.before, c.after)
+					}
+					return "change", reads == 1 && c.before == c.after
+				}
+				d, ai := deliv(r.h), aiGroupKey{group: runGroup1, member: runAI1}
+				for item := range int64(3) {
+					it := jumpMention(item, testMsg1, "", false)
+					it.AI = runAI1
+					d.held[ai] = append(d.held[ai], verifiedItem{home: jumpHome, group: runGroup1, item: it})
+				}
+				var took []int64
+				for range 2 {
+					_, batch, _ := takeEligibleBatch(r.h, d, ai, aiInfo{})
+					for _, v := range batch {
+						took = append(took, v.item.Item)
+					}
+				}
+				if !slices.Equal(took, []int64{0, 1, 2}) {
+					t.Fatalf("took %v, want the items in order", took)
+				}
+			})
+		})
+	}
+}
+
+// What a look read of the group pause and of a task stays for the whole walk.
+func TestLookKeepsWhatItRead(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		ai := aiGroupKey{group: runGroup1, member: runAI1}
+		item := verifiedItem{group: runGroup1, item: jumpMention(1, testMsg1, runTask1, false)}
+		check := func(what string, resume func()) {
+			t.Helper()
+			look := lookAt(r.h, ai)
+			held := look.heldBesidesTurn(item)
+			resume()
+			if !held || !look.heldBesidesTurn(item) || lookAt(r.h, ai).heldBesidesTurn(item) {
+				t.Fatalf("the look read the %s again, or the next one did not", what)
+			}
+		}
+		r.putTask(runTask1, "paused", "local_check", "manual")
+		check("task", func() { r.putTask(runTask1, "active", "local_check", "") })
+		r.putGroup(true)
+		check("pause", func() { r.putGroup(false) })
+	})
+}
+
+// The home sends an item again, or queues a jump that retires it, while its
+// turn is prepared, and the preparation fails: the queue then holds the
+// message once, and a jump goes first.
+func TestItemTakenBackMeetsItsCopyInTheQueue(t *testing.T) {
+	again := jumpMention(5, testMsg1, "", false)
+	for name, c := range map[string]struct {
+		meanwhile []proto.Item
+		turn      string
+		acked     []int64
+	}{
+		"sent again":                   {[]proto.Item{jumpMention(6, testMsg2, "", false), again}, "items 5,6", []int64{5, 6}},
+		"sent again as a jump":         {[]proto.Item{jumpMention(5, testMsg1, "", true)}, "items 5", []int64{5}},
+		"retired by a jump":            {[]proto.Item{jumpMention(6, testMsg1, "", true)}, "items 6", []int64{6}},
+		"a jump of another message":    {[]proto.Item{jumpMention(6, testMsg2, "", true)}, "items 6,5", []int64{5, 6}},
+		"an item that came after it":   {[]proto.Item{jumpMention(6, testMsg2, "", false)}, "items 5,6", []int64{5, 6}},
+		"nothing while it is prepared": {nil, "items 5", []int64{5}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			jumpTest(t, func(t *testing.T, r *jumpRig) {
+				Compose = func(*Host, Session, TurnKind, []json.RawMessage) (string, Turn, error) {
+					Compose = jumpCompose
+					for _, it := range c.meanwhile {
+						r.send(it)
+					}
+					return "", Turn{}, errors.New("not now")
+				}
+				r.push(again)
+				r.deliver()
+				group := r.drv.lastProc()
+				r.wantTurns(group, c.turn)
+				r.wantAcked(c.acked...)
+				r.end(group, "completed")
+				r.wantTurns(group, c.turn)
+				r.wantSettled()
+			})
+		})
+	}
+}

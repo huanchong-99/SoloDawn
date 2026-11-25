@@ -200,6 +200,19 @@ func TestHomeReplyAndTaskNotice(t *testing.T) {
 	}
 }
 
+// A call that was denied after the wait of its ask is a turn of the caller.
+func TestDeniedCallIsATurn(t *testing.T) {
+	r := newTeamLabelRig(t, "Q")
+	c := &turnCtx{h: r.h, s: r.sess(r.pAI, "P-work", GroupSession, false), owner: r.pUser}
+	card := deniedCallCard(t)
+	card.Thread, card.State.By = nil, &r.qMem
+	got, _, err := c.buildReply(parsedItem{msg: &card}, false)
+	want := itemBlock{why: "reply", whoPlace: "from the home in main", authority: "information", body: "Your call (id " + *card.Re + ") was denied by \"Q\"."}
+	if err != nil || got != want {
+		t.Fatalf("denied call = %+v, %v; want %+v", got, err, want)
+	}
+}
+
 type teamLabelRig struct {
 	*turnRig
 	pUser, qUser   string
