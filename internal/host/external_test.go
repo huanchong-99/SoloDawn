@@ -184,12 +184,12 @@ func TestExternalPresenceAndTimeLimit(t *testing.T) {
 
 		ep := extOf(h)
 		s, _ := h.Sessions.Get(SessionKey{Group: testGroup1, Member: testAI1})
-		extOpenRun(h, ep, aiGroupKey{group: testGroup1, member: testAI1}, s, 3)
+		extOpenRun(h, ep, aiGroupKey{group: testGroup1, member: testAI1}, s, 3, Turn{})
 		mustState(t, h, "working", "")
 		time.Sleep(time.Minute)
 		synctest.Wait()
 		mustState(t, h, "waiting", "")
-		extOpenRun(h, ep, aiGroupKey{group: testGroup1, member: testAI1}, s, 4)
+		extOpenRun(h, ep, aiGroupKey{group: testGroup1, member: testAI1}, s, 4, Turn{})
 	})
 }
 
@@ -204,7 +204,7 @@ func TestSettleExternalWaitsForItsTimersAndArmsNoMore(t *testing.T) {
 		}
 		ep, key := extOf(h), aiGroupKey{group: testGroup1, member: testAI1}
 		s, _ := h.Sessions.Get(SessionKey{Group: testGroup1, Member: testAI1})
-		extOpenRun(h, ep, key, s, 1)
+		extOpenRun(h, ep, key, s, 1, Turn{})
 		<-started
 		leave := h.ExternalPresent(testGroup1, testAI1)
 		go func() {
@@ -218,7 +218,7 @@ func TestSettleExternalWaitsForItsTimersAndArmsNoMore(t *testing.T) {
 		default:
 		}
 		leave()
-		extOpenRun(h, ep, key, s, 2)
+		extOpenRun(h, ep, key, s, 2, Turn{})
 		close(release)
 		<-settled
 		if len(ep.away) != 0 || len(ep.runs) != 0 {
