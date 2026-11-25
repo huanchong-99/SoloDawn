@@ -44,7 +44,7 @@ Each is a package map. The file that provides an entry adds it from its `init` w
 | `Drivers` | the agent name (`claude`, `codex`, …) | whoever starts a session's process |
 | `DriverCaps` | the agent name, matching `Drivers` | `Agents`, `agent.set`, `host.join`, `host.leave`, `Tools["approve"].For`, and `takeover.start` ([step-3/drivers.md](../../planning/contracts/step-3/drivers.md) sections 4 and 5) |
 | `Pushes` | `t` of a frame a home pushes: `inbox`, `rows`, `reset`, `groups` | `h.Push(home, frame)`, which `node` calls for each push it reads on a connection to a home, and the local link for a home on the same node |
-| `Surface` | `t` of a request or push of the [host surface](../../planning/contracts/datachannel.md) (`audit`, `pty.resize`), or `t` of a [host command](../../planning/contracts/commands.md) (`takeover.start`) | `node`, only for a device of the owner; for a command after the envelope checks and the receipt lookup |
+| `Surface` | `t` of a request or push of the [host surface](../../planning/contracts/datachannel.md) (`pty.resize`), or `t` of a [host command](../../planning/contracts/commands.md) (`takeover.start`) | `node`, only for a device of the owner; for a command after the envelope checks and the receipt lookup |
 | `Listeners` | the name of the listening unit | `h.Report(key, event)`, which the session runtime calls for every event of a session's CLI |
 | `Built` | the name of the unit | `New`, once, when the host is built |
 | `Attached` | the name of the unit | `h.Attach`, each time a connection to a home opens |

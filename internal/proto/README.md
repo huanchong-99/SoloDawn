@@ -2,7 +2,7 @@
 
 These structs describe the JSON exchanged during signalling, pairing, device-log
 transfer, session setup, group reads, commands, the inbox of a host and the host
-surface of a node ([`host.go`](host.go): `host.info`, `audit`, `pty.resize`, the
+surface of a node ([`host.go`](host.go): `host.info`, `pty.resize`, the
 `groups` push and the host commands of `settings.set`, `agent.set`, `perm.set` and
 the takeover). They do
 not authenticate peers, apply rows or execute commands. The source of truth is
