@@ -740,6 +740,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the removal pushed `groups` only (`internal/home/cmd_people.go`). `Logs` kept the person's log in memory (`internal/node/devlog.go`), so `knownPeer` still admitted their devices and `dvlCommit` still stored their entries, and nothing closed a connection except the end of a watch grant.
 - Status: resolved on `fix/removal-closes`. The home tells the node to drop the log (`LoopConfig.Forget`), and a connection that `knownPeer` no longer admits ends after its next `groups` push (`sesConn.sendGroups`, `peer.Connection.Finish`), which also replaces the separate close of a member's revoked device. `TestRemovedPersonIsDisconnected` fails without either half. A9.4 passes once its fixtures send `home.add` (another unit).
 
+### 2026-11-25 · bug · A tool call that waits kept the node from stopping
+
+- Symptom: a node stopped while a CLI waits in `approve`, `AskUserQuestion` or `ask` (up to `approval_wait_s`, 600 s) did not stop until that wait ended or the CLI died; a service manager killed it instead.
+- Cause: the SDK hides the server's context from its handlers (`notDone`, go-sdk v1.8.0 `internal/jsonrpc2/conn.go:232-234`), so the end of the node's context cancelled no call, `Server.Run` (`internal/host/mcp.go`) waited for it, and `serve` (`internal/node/node.go`) waited for `Run` before `n.Close`, whose `Settle` ends the CLIs.
+- Status: resolved on `fix/removal-closes`: `ServeMCP` closes the stream when its context ends, which is also how a removed member's stream ends; the read fails, and the SDK cancels the calls. `TestNodeStopEndsAWaitingToolCall` fails without the line.
+
 ### 2026-11-23 · bug · Removing an external member does not close its open MCP stream
 
 - Symptom: in A10.27, the owner successfully removes X after reassigning its task, and the member row is gone, but the already-open MCP stream does not close.

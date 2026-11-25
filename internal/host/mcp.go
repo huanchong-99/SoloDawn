@@ -34,6 +34,9 @@ func (h *Host) ServeMCP(ctx context.Context, token string, in io.Reader, out io.
 	}
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
+	// The SDK keeps ctx from its handlers: only the end of the stream cancels
+	// a call that waits.
+	defer context.AfterFunc(ctx, func() { out.Close() })()
 	if caller.External {
 		defer h.ExternalPresent(caller.Group, caller.Member)()
 		go h.untilRemoved(ctx, stop, aiGroupKey{group: caller.Group, member: caller.Member})
