@@ -132,10 +132,10 @@ What each of the failures of 2026-11-23 would have shown (`issues.md`):
 3. **Unit tests** need nothing more: the lines go to standard error, which
    `go test` prints for a failing package, and a test binary that runs out
    of time prints its goroutines.
-4. **CI.** The `test` and `other-os` jobs of
+4. **CI.** The `test`, `acceptance-race` and `other-os` jobs of
    `.github/workflows/backend.yml` set `SOLODAWN_TEST_ARTIFACTS` to a folder
    under the runner's temporary folder and upload it when the job fails, as
-   `diagnostics-<os>`, kept 14 days; no file is no error.
+   `diagnostics-<os>` (`diagnostics-race-<os>` for `acceptance-race`), kept 14 days; no file is no error.
 
 ## 5. On the owner's machines
 
