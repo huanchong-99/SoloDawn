@@ -211,6 +211,12 @@ export class TestHome {
       } as p.Row & Fields);
       return { ok: true };
     }
+    if (payload.t === 'group' && (payload.op === 'pause' || payload.op === 'resume')) {
+      const row = this.groups.get(payload.g)!.rows.get(`group ${payload.g}`)!;
+      const paused = payload.op === 'pause' ? { by: owner, at: payload.ts } : null;
+      this.write(payload.g, { ...row, paused });
+      return { ok: true };
+    }
     if (this.reply) return this.reply(payload);
     return { err: { code: 'bad_request', msg: 'not a command this home knows' } };
   }
@@ -311,7 +317,8 @@ export interface OwnedNode {
 }
 
 /** A computer of the person's own, as the client holds it: besides what `browser` does, it
- *  answers `host.info`, `agent.set` and `pair.browser`, and keeps those commands. */
+ *  answers `host.info`, `agent.set`, `pair.browser`, `host.offline` and `host.online`, and keeps
+ *  those commands. */
 export function ownedNode(
   name: string,
   device: string,
@@ -343,6 +350,13 @@ export function ownedNode(
         if (parsed.t === 'pair.browser') {
           commands.push(env);
           return p.decode(p.CmdResult, goldens['cmd-pair-link']);
+        }
+        if (parsed.t === 'host.offline' || parsed.t === 'host.online') {
+          commands.push(env);
+          info.offline = parsed.t === 'host.offline';
+          for (const entry of info.agents.flatMap((agent) => agent.groups))
+            entry.state = info.offline ? 'offline' : 'dormant';
+          return { re: 1, ok: true };
         }
         if (parsed.t !== 'agent.set') return undefined;
         commands.push(env);

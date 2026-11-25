@@ -62,6 +62,8 @@
                   ? t('groups.otherTab')
                   : `${group.home.name} · ${t('groups.down')}`}
               </span>
+            {:else if group.info?.paused}
+              <span class="st" data-st="paused"><i></i>{t('stop.list')}</span>
             {/if}
           </span>
           <span class="gside">
@@ -171,6 +173,9 @@
     align-items: center;
     gap: 6px;
     color: var(--danger);
+    font-size: var(--fs-xs);
+  }
+  .gbody .st {
     font-size: var(--fs-xs);
   }
   .gdown.away {

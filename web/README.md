@@ -178,6 +178,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   | `layer`         | after the page, above it: dialogs and notifications                        | `{ net }`                     |
   | `chat.head`     | the head of a chat, after the group's name                                 | `{ group }`                   |
   | `chat.top`      | between the head of a chat and its main line                               | `{ group }`                   |
+  | `chat.write`    | above the composer: what the writer should know before writing             | `{ group }`                   |
   | `chat.side`     | beside the main line from 1024 px; below, a panel that slides over         | `{ group, net }`              |
   | `member.ai`     | in the rows of each AI card, before the profile rows: `dt` and `dd` pairs  | `{ group, ai }`               |
   | `member.add`    | in Add AI, between the computer choices and the name field                 | `{ group, candidate, draft }` |
@@ -569,6 +570,19 @@ file in `src/routes/`. It edits neither the shell nor another area:
   a fresh `host.info` read when the owner chooses an unset AI account type, offering only the
   types in the AI's `driver.accounts` (`offeredAccounts`, as the pairing cards do), and opens
   `PairBrowserDialog` (`pair.browser`).
+- **Emergency stop (R-64).** `src/components/stop/` and `src/lib/stop.ts`. "Stop AIs" is in the top
+  bar (`bar`, `order: 20`) and, below 768 px, in a chat's head (`chat.head`). It shows while there
+  is something to stop: for an admin, the open project group while it is not paused; for an owner,
+  a computer whose AIs are not offline. Its panel (a `popover`) is the confirmation: each action
+  says what it does and is sent at once. `setPaused` sends `group pause` and `group resume` to the
+  home; `nodes.setOffline` sends `host.offline` and `host.online` to a computer of the person and
+  reads its `host.info` again, whose `offline` is what the page shows. A paused group says so to
+  everybody above the composer (`chat.write`), with "Resume" for an admin, and in the group list.
+  A computer with its AIs offline says so under the top bar (`banner`, with "Bring back online",
+  not on the computers page), on its card, which also takes them offline with a confirmation in
+  place, and on the owner's AI cards. The node pushes no `host.info` (`../issues.md`): when the
+  groups show an owned computer's AIs going offline or coming back, it is read again, so another
+  browser of the owner follows. A team group has no AIs and is not paused from here.
 - **In-page notifications.** `src/components/notify/` mounts `Notifications.svelte` at `layer`
   (`order: 10`), backed by `Notifier` in `src/lib/notify.svelte.ts`. After a group's first sync it
   shows the live events for the reader: `approval`, `decision`, `brief` and `confirm` waiting on the
@@ -639,6 +653,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/peer-fakes.ts`      | a peer connection and its channels for the tests of `peer.ts`                     |
 | `src/lib/groups.svelte.ts`    | `Home`, `Group`: row caches, cursor, paging, lists, commands                      |
 | `src/lib/members.ts`          | AI card status, path, candidate list, free name, `host.join`                      |
+| `src/lib/stop.ts`             | emergency stop: pause a group, which computers have their AIs offline             |
 | `src/lib/groupinfo.svelte.ts` | project-memory `note` and `review` paging, `forget`                               |
 | `src/lib/nodes.svelte.ts`     | connection indicator, `host.info` cache, `agent.set`, pairing                     |
 | `src/lib/notify.svelte.ts`    | live in-page notification store, classification, dismissal and jump               |
@@ -676,6 +691,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/watch/`       | receive-only watch channel, standalone request action and watcher stop controls   |
 | `src/components/team/`        | attributed bulletin card; team people use the shared member panel                 |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
+| `src/components/stop/`        | "Stop AIs" and its panel, the paused notice, the offline banner and card strip    |
 | `src/components/notify/`      | live in-page notifications mounted at `layer`                                     |
 | `src/components/driver/`      | account types and terminal action offered by an AI's `driver`                     |
 | `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
@@ -705,6 +721,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/terminal.spec.ts`   | steps of `../features/web_terminal.feature`                                       |
 | `features/watch_team.spec.ts` | steps of `../features/web_watch_team.feature`                                     |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
+| `features/stop.spec.ts`       | steps of `../features/web_stop.feature`                                           |
 | `features/notify.spec.ts`     | steps of `../features/web_notify.feature`                                         |
 | `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                     |
 | `features/driver.spec.ts`     | steps of `../features/web_driver.feature`                                         |
