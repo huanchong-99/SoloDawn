@@ -635,7 +635,6 @@ describe('ctl', () => {
     { t: 'sync', right: { t: 'synced', ok: true, g: 'group', seq: 7 } },
     { t: 'fetch', right: { t: 'fetched', ok: true, rows: [], more: false } },
     { t: 'host.info', right: JSON.parse(goldens['host-info-answer']) },
-    { t: 'audit', right: JSON.parse(goldens['audit-answer']) },
   ];
 
   it('numbers its requests and gives each the response that names it', async () => {

@@ -8,8 +8,6 @@
   "act-revise": {"optional":["text"],"nullable":[],"fraction":[],"id":["g","msg","n"],"opaque":[]},
   "agent-set": {"optional":[],"nullable":[],"fraction":[],"id":["n"],"opaque":[]},
   "answer": {"optional":["to"],"nullable":[],"fraction":[],"id":["n"],"opaque":[]},
-  "audit-answer": {"optional":["rows.ai","rows.by","rows.g","rows.result"],"nullable":[],"fraction":[],"id":["rows.g"],"opaque":[]},
-  "audit-request": {"optional":[],"nullable":[],"fraction":[],"id":[],"opaque":[]},
   "beacon": {"optional":[],"nullable":[],"fraction":[],"id":["n"],"opaque":[]},
   "cmd": {"optional":[],"nullable":[],"fraction":[],"id":[],"opaque":[]},
   "cmd-error": {"optional":[],"nullable":[],"fraction":[],"id":[],"opaque":[]},
