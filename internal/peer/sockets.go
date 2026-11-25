@@ -2,6 +2,7 @@ package peer
 
 import (
 	"errors"
+	"log/slog"
 	"net"
 	"strconv"
 
@@ -82,6 +83,14 @@ func classify(local, remote webrtc.ICECandidateType) string {
 // applied, which can change the type of a selected candidate at an unchanged
 // address (contracts/rendezvous-evidence.md, entry 11).
 func (c *Connection) PathChanged() <-chan struct{} { return c.pathChanged }
+
+func (c *Connection) selectedPairChanged(pair *webrtc.ICECandidatePair) {
+	local, remote := pair.Local.Typ, pair.Remote.Typ
+	c.diag.event(slog.LevelInfo, "ice.pair", "local", local.String(), "remote", remote.String(),
+		"proto", pair.Local.Protocol.String(), "path", classify(local, remote))
+	c.reclassify()
+}
+
 func (c *Connection) reclassify() {
 	select {
 	case c.pathChanged <- struct{}{}:
