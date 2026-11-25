@@ -194,8 +194,7 @@ func (t *s2TerminalWorld) beforeConsent() error {
 	if err := t.findCard(); err != nil {
 		return err
 	}
-	conn := t.bc.conn
-	raw, err := conn.Request(t.c.Ctx, func(id int64) any {
+	raw, err := t.bc.request(t.c.Ctx, func(id int64) any {
 		return map[string]any{"t": "watch.start", "id": id, "g": t.group, "member": t.ai}
 	})
 	if err != nil {
@@ -358,16 +357,14 @@ func (t *s2TerminalWorld) handBack() error {
 }
 
 func (t *s2TerminalWorld) closedOnHandBack() error {
-	select {
-	case closed := <-t.handBackClose:
-		elapsed := closed.Sub(t.handBackAt)
-		if elapsed <= 2*time.Second {
-			return nil
-		}
-		return fmt.Errorf("watch took %s to close on hand-back", elapsed)
-	case <-t.c.Ctx.Done():
-		return t.c.Ctx.Err()
+	closed, err := recvCtx(t.c.Ctx, t.handBackClose, "the watch to close on hand-back", nil)
+	if err != nil {
+		return err
 	}
+	if elapsed := closed.Sub(t.handBackAt); elapsed > 2*time.Second {
+		return fmt.Errorf("watch took %s to close on hand-back", elapsed)
+	}
+	return nil
 }
 
 func (t *s2TerminalWorld) directWatch() error {
@@ -378,18 +375,9 @@ func (t *s2TerminalWorld) directWatch() error {
 }
 
 func (t *s2TerminalWorld) waitForRelay() error {
-	tick := time.NewTicker(100 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		if t.watcher.checkPath(true) == nil {
-			return nil
-		}
-		select {
-		case <-tick.C:
-		case <-t.c.Ctx.Done():
-			return fmt.Errorf("watch connection did not move to TURN: %w", t.c.Ctx.Err())
-		}
-	}
+	return waitUntilCtx(t.c.Ctx, 100*time.Millisecond, "the watch connection to move to TURN", func() error {
+		return t.watcher.checkPath(true)
+	})
 }
 
 func (t *s2TerminalWorld) refusedOnRelay() error {

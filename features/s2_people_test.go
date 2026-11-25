@@ -5,6 +5,7 @@ package features
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os/exec"
@@ -393,15 +394,16 @@ func openJoiningCtl(ctx context.Context, cleanup func(func()), b *peerBrowser, l
 }
 
 func openS2PeopleCtl(ctx context.Context, cleanup func(func()), b *peerBrowser, homeID string) (*peerBrowserConn, error) {
-	bc, ok, err := b.tryOpenCtl(ctx, cleanup, homeID, s2ScenarioTimeout)
+	var saw trail
+	bc, ok, err := b.tryOpenCtl(ctx, cleanup, homeID, s2ScenarioTimeout, &saw)
 	if err == nil && !ok {
-		err = fmt.Errorf("ctl to %s closed before opening", homeID)
+		err = saw.timedOut(s2ScenarioTimeout, "ctl to "+homeID)
 	}
 	return bc, err
 }
 
 func verifyJoiningWelcome(ctx context.Context, conn *peer.Connection) error {
-	raw, err := conn.Request(ctx, func(id int64) any {
+	raw, err := requestWait(ctx, conn, nil, func(id int64) any {
 		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 2, Kind: "browser", Name: "Joiner", Addrs: []string{}}
 	})
 	if err != nil {
@@ -1037,22 +1039,16 @@ func (w *s2PeopleWorld) waitQBrowserClosed(deadline time.Time) error {
 func (w *s2PeopleWorld) waitP1DroppedQDevices(deadline time.Time) error {
 	ctx, cancel := context.WithDeadline(w.cast.Ctx, deadline)
 	defer cancel()
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
+	return waitUntilCtx(ctx, 100*time.Millisecond, "P1 to drop the Q connection", func() error {
 		connected, err := w.qConnectedToP1(ctx)
 		if err != nil {
-			return err
+			return abort(err)
 		}
-		if !connected {
-			return nil
+		if connected {
+			return errors.New("P1 lists a Q connection")
 		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("P1 still lists a Q connection past 1 second")
-		case <-ticker.C:
-		}
-	}
+		return nil
+	})
 }
 
 func (w *s2PeopleWorld) qConnectedToP1(ctx context.Context) (bool, error) {
@@ -1211,7 +1207,7 @@ func (w *s2PeopleWorld) verifyP1SurfaceForQ(wantCode string) error {
 }
 
 func (w *s2PeopleWorld) verifyQHomeSurfaceAllowed() error {
-	raw, err := w.qHomeBC.conn.Request(w.cast.Ctx, func(id int64) any {
+	raw, err := w.qHomeBC.request(w.cast.Ctx, func(id int64) any {
 		return proto.FetchThread{
 			FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: string(w.gid), Limit: 10},
 		}
@@ -1233,7 +1229,7 @@ func (w *s2PeopleWorld) verifyOtherGroupRefusedOnP1(wantCode string) error {
 }
 
 func expectRawRequestError(ctx context.Context, conn *peer.Connection, build func(int64) any, wantCode string) error {
-	raw, err := conn.Request(ctx, build)
+	raw, err := requestWait(ctx, conn, nil, build)
 	if err != nil {
 		return err
 	}
