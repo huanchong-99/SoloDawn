@@ -8,7 +8,7 @@ the coordinator, and the cuts of 2026-11-22. The outline being refined is
 
 The owner's rules of 2026-11-21 and 2026-11-22 override everything written
 before them here: least code; no attack-and-defence code (security comes
-from tunnels and firewalls, in the deployment guide); members of a group
+from tunnels and firewalls, in the [deployment guide](../../docs/cookbook/self-hosting.md)); members of a group
 trust each other, and the home of a group decides; identity the features
 need stays (signed commands say who did what; roles are enforced by the
 home); every AI session of 1.0 runs at the highest level, with no level
@@ -421,7 +421,7 @@ Why, for every line: the owner's rules of 2026-11-21 (least code; no
 defence in code against attackers, a dishonest home, host or member, forged
 or replayed messages, or a stolen device; members of a group trust each
 other) and 2026-11-22. Items are those of the slimming list SLIMMING.md;
-the external measure for each is in the deployment guide. Section numbers
+the external measure for each is in the [deployment guide](../../docs/cookbook/self-hosting.md). Section numbers
 are those of the files before the cut.
 
 | # | What was cut | Why | SLIMMING.md |

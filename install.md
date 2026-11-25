@@ -59,6 +59,12 @@ Copy-Item -LiteralPath $asset -Destination (Join-Path $bin 'solodawn.exe')
 Add the installation directory to your user `Path` or run the executable
 by its full path.
 
+## Run your own rendezvous
+
+The pairing steps below use the rendezvous of the page that gave you the
+prompt. To run your own server and protect your installation from the
+outside, see [Self-host a rendezvous and protect it](docs/cookbook/self-hosting.md).
+
 ## Check Git identity
 
 SoloDawn commits local task merges with your Git identity. Run

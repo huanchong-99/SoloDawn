@@ -43,4 +43,4 @@ must stay on (R-134).
 | Topic | What it says |
 | --- | --- |
 | accounts in a team | A secretary that several people talk to should run on a team plan or an API key, where the owner lists who may direct it. On a personal subscription every request from someone else waits for the owner (R-51), and that cannot be switched off. The same holds for any AI that colleagues direct often |
-| a group on someone else's computer | that computer stores the group, says who is a member and under which name, and decides which requests reach your AIs; join only groups of people you trust (deployment guide) |
+| a group on someone else's computer | that computer stores the group, says who is a member and under which name, and decides which requests reach your AIs; join only groups of people you trust ([deployment guide](../../../docs/cookbook/self-hosting.md)) |

@@ -281,6 +281,9 @@ what it would gain (`risks.md` Q-1).
 
 ## 6. Self-hosting
 
+The operator's guide, with the deployment security measures, is
+[`docs/cookbook/self-hosting.md`](../../docs/cookbook/self-hosting.md).
+
 ```
 solodawn rendezvous --domain rv.example --turn-domain turn.rv.example
 ```
