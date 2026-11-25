@@ -1,0 +1,7 @@
+{
+  "queue.waits": "{ai} is busy with {task}. This waits its turn.",
+  "queue.first": "Go first, pausing {task}",
+  "queue.first.review": "Go first, interrupting the review",
+  "queue.going": "{ai} takes this next.",
+  "queue.paused": "{task} is paused while {ai} takes this. It continues by itself."
+}

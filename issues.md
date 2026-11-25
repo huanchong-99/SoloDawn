@@ -18,6 +18,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `cmdPair` reads the line with `ReadPair(line, owner, nil)`, which returns `ErrOwned` before any address is read or saved (`internal/node/node.go:710-730`, `internal/node/socket.go:160-162`); `saveRendezvous` is reached only through `preparePairRV` for an unowned node.
 - Status: open, found 2026-11-25 in the review of the self-hosting guide. The guide tells the owner to choose a name that they will keep (a domain, not an address) before pairing ([self-hosting](docs/cookbook/self-hosting.md), step 5).
 
+### 2026-11-25 · limitation · The web client works out which messages wait for an AI
+
+- Symptom: a message of one's own can stop saying that it waits although the AI has not taken it: when the AI's row changed in the middle of a turn (its model edited, a status sent), or when the AI's next turn took older items of another session first.
+- Cause: no row tells what a home has queued; `waiting` (`web/src/lib/queue.ts`) compares the sequence of the message with that of the AI's row, which changes when a turn starts or ends.
+- Status: open, accepted: the message is delivered as before, only the choice to let it go first is gone.
+
 ### 2026-11-25 · deviation · The host sends no member status when a group is paused or resumed, or its AIs go offline or online
 
 - Symptom: after "Resume", the card of an AI that was interrupted outside a task stays "Paused" until its next turn or until it goes dormant. During a pause every other AI reads "Waiting" or "Sleeping · wakes when @mentioned", beside a notice that says the group is paused. An AI that never had a session reads "Sleeping" to everybody but its owner after `host.offline` and after `host.online` (see the entry below).
