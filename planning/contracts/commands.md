@@ -82,8 +82,8 @@ that led to the task, or `null`; in `note`, `task` is a task id or `null`.
 
 | `op` | Fields | By | Effect |
 | --- | --- | --- | --- |
-| `create` | `name`, `kind`, `repo`, `base`, `forge`, `checks`, `member_name` | a person: a device of the receiving node's owner | the node becomes home of group `g` = `n`: the payload carries `g` like every home command, and a `create` whose `g` is not its `n` is `bad_request`; group row with `pass` 90, `pass_foundation` 70 (R-101) and the `limits` of the example in `contracts/rows.md` section 1; a `member` row for that person with role `owner` and `member_name` as its `name`; a `groups` push to that person's connected devices |
-| `set` | any of `name`, `checks`, `pass`, `pass_foundation`, `limits`, `secretary` | an admin | group row updated. `limits`, when sent, is the whole object of `contracts/rows.md` section 1. `secretary` must name an AI member that is not assignee or reviewer of a task that is not final, else `conflict`; the previous secretary's member row loses the flag |
+| `create` | `name`, `kind` (`project` or `team`), `repo`, `base`, `forge` (`github`, `none` or `custom`), `checks`, `member_name`, `templates` | a person: a device of the receiving node's owner | `kind: "team"` and `templates` (with `forge: custom`) are in `contracts/step-2/watch-team.md` section 7 and `contracts/step-2/checks-forge.md` section 2. The node becomes home of group `g` = `n`: the payload carries `g` like every home command, and a `create` whose `g` is not its `n` is `bad_request`; group row with `pass` 90, `pass_foundation` 70 (R-101) and the `limits` of the example in `contracts/rows.md` section 1; a `member` row for that person with role `owner` and `member_name` as its `name`; a `groups` push to that person's connected devices |
+| `set` | any of `name`, `checks`, `pass`, `pass_foundation`, `limits`, `secretary`, `templates` | an admin | group row updated. `limits`, when sent, is the whole object of `contracts/rows.md` section 1. `secretary` must name an AI member that is not assignee or reviewer of a task that is not final, else `conflict`; the previous secretary's member row loses the flag |
 | `pause` | — | an admin | `group.paused` set; `system` `group_paused`; hosts interrupt running turns of the group and hold items. A `pause` of a paused group is accepted and changes nothing |
 | `resume` | — | an admin | `group.paused` cleared; `system` `group_resumed`; task-machine row 24. A `resume` of a group that is not paused is accepted and changes nothing |
 
@@ -95,14 +95,17 @@ for one when the group is created.
 
 | `op` | Fields | By | Effect |
 | --- | --- | --- | --- |
-| `add_ai` | `id`, `cli`, `name`, `account`, `secretary`, `approvers` | a host whose owner is a member | member row with `host` = the signer. `name` must be unused in the group, else `conflict`. `secretary: true` is accepted when the group has none or the owner is an admin, and sets `group.secretary`; a previous secretary's member row loses the flag |
+| `add_ai` | `id`, `cli` (one of `[a-z0-9_]+`, an agent the host runs), `name`, `account`, `secretary`, `approvers`, `profile`, `tool` | a host whose owner is a member | member row with `host` = the signer. `name` must be unused in the group, else `conflict`. `secretary: true` is accepted when the group has none or the owner is an admin, and sets `group.secretary`; a previous secretary's member row loses the flag |
 | `status` | `id`, `state`, `task`, `path`, `usage`, `event` | the member's host | member row updated; `event`, when present, becomes a `system` row (1.9) |
-| `set` | `id`, any of `name`, `account`, `allow`, `approvers` | the AI's owner; for `approvers` alone, also the AI's host | member row updated. A new `name` must be unused in the group, else `conflict` |
-| `remove` | `id` | the AI's owner, or an admin | refused with `conflict` while the AI is assignee or reviewer of a task that is not final: reassign or cancel first. Otherwise the member row is replaced by a `gone` marker. Removing the secretary clears `group.secretary` and writes `system` `no_secretary` |
+| `set` | `id`, any of `name`, `account`, `allow`, `approvers`, `profile`, `tool` | the AI's owner; for `approvers` alone, also the AI's host | member row updated. A new `name` must be unused in the group, else `conflict`. On a person's row, `set` takes `role` alone, by the owner (`contracts/step-2/people.md` section 2.3) |
+| `remove` | `id` | the AI's owner, or an admin; for a person's row, `contracts/step-2/people.md` section 2.4 | refused with `conflict` while the AI is assignee or reviewer of a task that is not final: reassign or cancel first. Otherwise the member row is replaced by a `gone` marker. Removing the secretary clears `group.secretary` and writes `system` `no_secretary` |
 
 On `add_ai` and on `set` with `approvers`, the home adds the owner's user id
 to `approvers` when it is missing (`contracts/rows.md` section 2); the owner
-is the person whose host signed `add_ai`. Adding people is step 2.
+is the person whose host signed `add_ai`.
+
+Step 2 adds people: `invite` and `join` (`contracts/step-2/people.md` section 2),
+and `set` and `remove` on a person's row.
 
 Step 3 adds the member's profile to `add_ai` and `set`
 (`contracts/step-3/profiles.md` section 2), and `tool` for an external AI
@@ -118,6 +121,8 @@ The message id is `n`.
 | `text` | a person, or an AI | — | item `mention` for each mentioned AI; a main-line message from a person that mentions no AI produces one for the secretary |
 | `progress`, `question` | an AI | `progress` only in a thread | item `mention` for each mentioned AI |
 | `report` | an AI | `thread` is a task whose assignee is `as` | — |
+| `bulletin` | a person who is a member | `contracts/step-2/watch-team.md` section 10 | as for `text` |
+| `confirm` | a person, for `body.what` `watch`; otherwise the home alone | `contracts/step-2/confirm.md` section 3 | `state.status = pending`; `main = true` |
 | `brief` | the secretary | `body.requester` is a member; every assignee and reviewer is a working AI of the group, the two differ, and `depends` names only earlier entries of the same brief; `body.replaces`, when not `null`, is a brief whose `state.status` is `pending` or `revise`, else `conflict` | `state.status = pending`; the brief named in `body.replaces` becomes `superseded` |
 | `summary` | the secretary | `thread` is a `merged` task | the home adds the whole `body` from the task row; `main = true` |
 | `approval` | an AI | `thread` = `body.task`, or `null` when `body.task` is `""`; `as` = `body.ai`; for a task, `as` is its assignee or reviewer | `state.status = pending`; `main = true`; with a task, task-machine row 17 |
@@ -156,6 +161,7 @@ Rules for every `post` by an AI:
 | `brief` | `revise` | same | `state.status = revise`, `state.note = text`; item `confirmed` for the secretary |
 | `approval` | `approve`, `deny` | a person in `body.approvers` | `state` updated; task-machine row 18 |
 | `decision` | `choose` | a person in `body.to`, or an admin | `state.status = decided` with `choice = arg` and `text`; task-machine row 20 |
+| `confirm` | `confirm`, `deny` | the person in `body.to` | `contracts/step-2/confirm.md` section 5 |
 
 On a decision with options, `choose` takes `arg` (the `id` of one of
 `body.options`), `text`, or both, and `text` alone is also accepted on a
@@ -214,7 +220,7 @@ names only the project memory; every other message leaves by retention.
 
 By a browser, for itself: `{"sub":{"endpoint":"…","p256dh":"…","auth":"…"},
 "vapid":{"pub":"…","priv":"…"},"on":["mention","approval","decision",
-"brief","done"]}`, or `{"off":true}`. A `push` whose `off` is `true` is the
+"brief","done","confirm"]}`, or `{"off":true}`. A `push` whose `off` is `true` is the
 second form, whatever else it holds; any other `push` is read as the first,
 and its `off` is not read. The browser creates the VAPID key pair
 and hands it to each home it wants reminders from. `g` routes the command,
@@ -236,7 +242,7 @@ Its content is a short summary:
 
 | Field | Content |
 | --- | --- |
-| `kind` | `approval`, `decision`, `brief`, `mention`, `done` |
+| `kind` | `approval`, `decision`, `brief`, `mention`, `done`, `confirm` |
 | `who` | display name of the member it is about: the AI asking, the secretary, the author of the mention; for a `system` row that mentions people, the AI its body names, or the assignee of the task its body names |
 | `title` | one line, at most 80 characters. `approval`: the first line of the justification the CLI attached (`body.why`), absent if there is none. `decision`: the question. `brief`, `done`: the brief or task title. `mention`: the task title for a `system` row about a task, else absent |
 
@@ -284,11 +290,13 @@ device id. Receipts apply as for home commands.
 
 | `t` | Fields | Effect |
 | --- | --- | --- |
-| `agent.set` | `agent`, `account` | declares the account type (`personal`, `team` or `api_key`, else `bad_request`) of a CLI found on this machine (`claude` or `codex`, else `bad_request`; `conflict` when not found here; R-50); sets `login_ok` back to `true` in `host.info` (`flows/agent-turn.md` E) and writes audit `setting` (`account <account>`); required before the AI can join a group |
+| `agent.set` | `agent`, `account` | declares the account type (`personal`, `team` or `api_key`, else `bad_request`) of a CLI found on this machine (one of the agents of `contracts/step-3/drivers.md`, else `bad_request`; `conflict` when not found here; R-50); sets `login_ok` back to `true` in `host.info` (`flows/agent-turn.md` E) and writes audit `setting` (`account <account>`); required before the AI can join a group |
 | `perm.set` | `agent`, `g`, `level` (1, 2, 3) | postponed after 1.0 (no level control in 1.0): permission level for that AI's sessions in that project (R-40); takes effect the next time a session's process starts |
 | `settings.set` | any of `retention_days`, `idle_minutes`, `max_open`, `default_level`, `all_level3`, `approvers`, `caps` | postponed after 1.0 (with `U-12`): node settings; for `approvers` the node sends `member set` with them for each of its AIs to that AI's home |
 | `host.join` | `g`, `home`, `agent`, `name`, `secretary` | the node connects to `home`, clones the project if this node has no clone of it yet (R-11), and sends `member add_ai` |
-| `host.leave` | `g`, `agent` | the node sends `member remove`; if the home accepts it, the AI's sessions in that group are closed (it is refused while the AI has unfinished tasks) |
+| `host.leave` | `g`, `agent`, `member` (needed when the node has several members of that CLI in `g`) | the node sends `member remove`; if the home accepts it, the AI's sessions in that group are closed (it is refused while the AI has unfinished tasks) |
+| `home.add` | `g`, `home`, `name`, `addrs` | records the home of a group on this node before any AI of its owner joins it (`contracts/step-2/people.md` section 7, point 2) |
+| `watch.end` | `g`, `member`, `user` | drops a person's watch grant (`contracts/step-2/watch-team.md` section 5) |
 | `takeover.start` | `g`, `member`, `task` (optional) | `flows/takeover.md`; refused with `relay`, `busy` or `cli` |
 | `takeover.end` | `g`, `member` | hand-back |
 | `host.offline`, `host.online` | — | R-64: `offline` interrupts and closes every session and tells every home; items stay on the homes, unacknowledged, until `online` |
