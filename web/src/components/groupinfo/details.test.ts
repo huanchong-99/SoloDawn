@@ -199,23 +199,27 @@ it('shows an unknown home owner, a raw absent-owner id and an owned home without
   expect(document.querySelector('section.field > p.hint')).toBeNull();
 });
 
-it('limits settings to project admins and hides unavailable secretary details', () => {
+it('limits settings to admins, of a team group too, and hides unavailable secretary details', () => {
   const { group, person, info } = setup('github');
   group.rows.delete(`member ${p.decode(p.AIMemberRow, goldens['row-member-ai']).id}`);
   show(GroupDetails, { group });
-  expect(document.querySelector('section > button')).toBeNull();
+  expect(one('section > button').textContent!.trim()).toBe('Edit group settings');
   group.apply([
-    { ...info, seq: 100, forge: 'custom', secretary: person.id },
+    { ...info, seq: 100, secretary: person.id },
     { ...person, seq: 101, role: 'member' },
   ]);
   flushSync();
   expect(document.querySelector('section > button')).toBeNull();
-  group.apply([{ ...info, seq: 102, kind: 'team' }]);
+  group.apply([
+    { ...info, seq: 102, kind: 'team' },
+    { ...person, seq: 103, role: 'admin' },
+  ]);
   flushSync();
   expect(document.querySelector('details')).toBeNull();
+  expect(one('section > button').textContent!.trim()).toBe('Edit group settings');
   group.rows.delete(`group ${group.g}`);
   flushSync();
-  expect(document.querySelector('details')).toBeNull();
+  expect(document.querySelector('section > button')).toBeNull();
 });
 
 it('disables settings while offline', () => {
@@ -225,24 +229,40 @@ it('disables settings while offline', () => {
   expect(one<HTMLButtonElement>('section > button').disabled).toBe(true);
 });
 
+const save = () => one<HTMLButtonElement>('dialog footer .btn-primary');
+const submit = () =>
+  one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+const input = (label: string) =>
+  all('dialog label')
+    .find((el) => el.textContent!.trim().startsWith(label))!
+    .querySelector<HTMLInputElement>('input, textarea')!;
+const limit = (label: string) =>
+  one<HTMLInputElement>(
+    `#${CSS.escape(all<HTMLLabelElement>('dialog .limit label').find((el) => el.textContent === label)!.htmlFor)}`,
+  );
+const sent = (request: ReturnType<typeof setup>['request'], i = 0) => {
+  const { n: _n, ts: _ts, ...command } = JSON.parse(request.mock.calls[i][0].env.p);
+  return command;
+};
+
 it('saves custom templates exactly, warns for a prospective secretary and reports refusals', async () => {
   const { group, info, ai, request } = setup();
-  const onclose = vi.fn();
   request.mockResolvedValueOnce({ re: 1, err: { code: 'forbidden', msg: 'refused' } });
   group.apply([{ ...ai, seq: 10000, user: 'secretary-owner', account: 'personal' }]);
-  show(EditGroup, { group, info, onclose });
+  show(EditGroup, { group, info, onclose: vi.fn() });
+  expect(save().disabled).toBe(true);
   choose(one<HTMLSelectElement>('dialog select'), ai.name);
   flushSync();
   expect(document.querySelectorAll('dialog .note').length).toBe(1);
+  expect(save().disabled).toBe(false);
   fill(one<HTMLTextAreaElement>('fieldset textarea'), 'program');
-  one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  submit();
   await vi.waitFor(() =>
     expect(document.querySelector('[role=alert]')?.textContent?.trim()).toBe(
       'Not sent: this device may not do that.',
     ),
   );
-  const { n, ts, ...command } = JSON.parse(request.mock.calls[0][0].env.p);
-  expect(command).toEqual({
+  expect(sent(request)).toEqual({
     t: 'group',
     g: group.g,
     op: 'set',
@@ -250,49 +270,105 @@ it('saves custom templates exactly, warns for a prospective secretary and report
     templates: { ...info.templates, push: ['program', ...info.templates!.push.slice(1)] },
   });
   expect(info.templates!.push[0]).toBe('git');
-  one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  request.mockResolvedValueOnce({ re: 1, err: { code: 'conflict', msg: 'busy' } });
+  submit();
+  await vi.waitFor(() =>
+    expect(document.querySelector('[role=alert]')?.textContent).toBe(
+      'Not saved: that AI is on an unfinished task, so it cannot be the secretary now.',
+    ),
+  );
+  submit();
   await vi.waitFor(() => expect(one<HTMLDialogElement>('dialog').open).toBe(false));
 });
 
-it('saves only a secretary for a built-in forge, and can cancel without a command', async () => {
-  const { group, info, ai, request } = setup('github');
+it('corrects the name, the check commands and the scores, and sends nothing else', async () => {
+  const { group, ai, info, request } = setup('github');
   delete info.templates;
   info.secretary = ai.id;
   show(EditGroup, { group, info, onclose: vi.fn() });
-  expect(document.querySelector('fieldset')).toBeNull();
+  expect(document.querySelector('dialog .folds fieldset')).toBeNull();
   group.apply([{ ...ai, seq: 10000, name: 'Renamed AI' }]);
   flushSync();
   expect(one<HTMLSelectElement>('dialog select').selectedOptions[0].textContent).toBe('Renamed AI');
-  expect(document.querySelector('dialog select[aria-label="Forge"]')).toBeNull();
-  one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
-  const { n, ts, ...command } = JSON.parse(request.mock.calls[0][0].env.p);
-  expect(command).toEqual({ t: 'group', g: group.g, op: 'set', secretary: ai.id });
+  expect(input('Check commands').value).toBe(info.checks.join('\n'));
+  fill(input('Group name'), ' Docs ');
+  fill(input('Check commands'), 'pnpm check\n\n pnpm test ');
+  fill(input('Pass score'), '85');
+  fill(input('Foundation tasks'), '60');
+  expect([input('Pass score'), input('Foundation tasks')].map((el) => [el.min, el.max])).toEqual([
+    ['1', '100'],
+    ['1', '100'],
+  ]);
+  submit();
+  await vi.waitFor(() => expect(one<HTMLDialogElement>('dialog').open).toBe(false));
+  expect(sent(request)).toEqual({
+    t: 'group',
+    g: group.g,
+    op: 'set',
+    name: 'Docs',
+    checks: ['pnpm check', 'pnpm test'],
+    pass: 85,
+    pass_foundation: 60,
+  });
 });
 
-it('never offers an external AI as secretary', () => {
+it('sends all limits when one changes, and opens the fold of a field the browser refuses', async () => {
+  const { group, info, request } = setup('github');
+  delete info.templates;
+  show(EditGroup, { group, info, onclose: vi.fn() });
+  const fold = one<HTMLDetailsElement>('dialog details');
+  expect(fold.open).toBe(false);
+  expect(all('dialog .limit label').map((el) => el.textContent)).toEqual([
+    'AI rounds in a thread',
+    'Wake-ups per hour',
+    'Longest turn',
+    'Failures in a row',
+    'Failed reviews',
+    'Quiet task',
+    'Wait for an approval',
+    'Wait for another AI',
+    'Chain of questions',
+  ]);
+  expect(all('dialog .limit .hint').every((el) => el.textContent)).toBe(true);
+  const approval = limit('Wait for an approval');
+  expect([approval.value, approval.max, approval.step]).toEqual(['10', '10', 'any']);
+  const depth = limit('Chain of questions');
+  expect([depth.value, depth.min, depth.max, depth.step]).toEqual(['4', '0', '4', '1']);
+  expect(limit('Failed reviews').min).toBe('0');
+  expect(limit('Failures in a row').min).toBe('1');
+  fill(limit('Wake-ups per hour'), '40');
+  fill(approval, '5');
+  approval.dispatchEvent(new Event('invalid'));
+  flushSync();
+  expect(fold.open).toBe(true);
+  submit();
+  await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+  expect(sent(request)).toEqual({
+    t: 'group',
+    g: group.g,
+    op: 'set',
+    limits: { ...info.limits, wakes_per_hour: 40, approval_wait_s: 300 },
+  });
+});
+
+it('renames a team group and offers nothing else of it', async () => {
+  const { group, info, request } = setup('none');
+  delete info.templates;
+  show(EditGroup, { group, info: { ...info, kind: 'team' }, onclose: vi.fn() });
+  expect(all('dialog input, dialog textarea, dialog select')).toHaveLength(1);
+  expect(all('dialog details')).toEqual([]);
+  fill(input('Group name'), 'Studio');
+  submit();
+  await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+  expect(sent(request)).toEqual({ t: 'group', g: group.g, op: 'set', name: 'Studio' });
+});
+
+it('never offers an external AI as secretary, and no choice when there is no other', () => {
   const { group, info, ai } = setup('github');
   group.apply([{ ...ai, id: 'external', name: 'Scout', cli: 'external' }]);
   show(EditGroup, { group, info, onclose: vi.fn() });
   expect(all('dialog option').map((el) => el.textContent)).toEqual(['Choose an AI', ai.name]);
-});
-
-it('offers no settings when an external AI is the only one', () => {
-  const { group, ai } = setup('github');
-  show(GroupDetails, { group });
-  expect(one('section > button').textContent!.trim()).toBe('Edit group settings');
   group.apply([{ ...ai, seq: 10000, cli: 'external' }]);
   flushSync();
-  expect(document.querySelector('section > button')).toBeNull();
-});
-
-it('edits templates with no AI members and sends no secretary field', async () => {
-  const { group, info, ai, request } = setup();
-  group.rows.delete(`member ${ai.id}`);
-  show(EditGroup, { group, info, onclose: vi.fn() });
   expect(document.querySelector('dialog select')).toBeNull();
-  one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
-  const { n, ts, ...command } = JSON.parse(request.mock.calls[0][0].env.p);
-  expect(command).toEqual({ t: 'group', g: group.g, op: 'set', templates: info.templates });
 });

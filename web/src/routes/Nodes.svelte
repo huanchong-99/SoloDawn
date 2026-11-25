@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import Avatar from '../components/Avatar.svelte';
   import Failure from '../components/Failure.svelte';
   import Icon from '../components/Icon.svelte';
@@ -7,9 +8,9 @@
   import NodeOffline from '../components/stop/NodeOffline.svelte';
   import { find } from '../lib/groups.svelte';
   import type { Net } from '../lib/net.svelte';
-  import { nodes, type Computer } from '../lib/nodes.svelte';
+  import { nodes, outdated, type Computer } from '../lib/nodes.svelte';
   import { accountLabel, cliName, type AccountKind } from '../lib/onboard.svelte';
-  import { t } from '../lib/prefs.svelte';
+  import { prefs, t } from '../lib/prefs.svelte';
   import { href } from '../lib/route.svelte';
   import { now } from '../lib/when';
 
@@ -21,6 +22,7 @@
   const computers = $derived(nodes.list(net));
   const pairable = $derived(computers.filter((comp) => comp.online && comp.info !== undefined));
   let pairing = $state(false);
+  let choosing = $state<Record<string, boolean>>({});
   let busyAcct = $state<Record<string, boolean>>({});
   let acctFailed = $state<Record<string, string>>({});
 
@@ -65,16 +67,38 @@
     card.focus({ preventScroll: true });
   }
 
-  async function chooseAccount(event: Event, comp: Computer, agent: string, account: AccountKind) {
+  /** Declares the account type, then corrects the members of this CLI. The choice stays open. */
+  async function chooseAccount(
+    event: Event & { currentTarget: HTMLInputElement },
+    comp: Computer,
+    agent: string,
+    before: string | null,
+    account: AccountKind,
+  ) {
     if (!comp.info) return;
+    const { device } = comp.info;
+    const radio = event.currentTarget;
     const card = trackedCard(event);
-    const key = `${comp.info.device}:${agent}`;
-    busyAcct[key] = true;
+    const key = `${device}:${agent}`;
+    choosing[key] = busyAcct[key] = true;
     acctFailed[key] = '';
     focusNodeCard(card);
-    const answer = await nodes.setAccount(comp.home, comp.info.device, agent, account);
+    const answer = await nodes.setAccount(comp.home, device, agent, account);
+    if (answer.err) {
+      acctFailed[key] = answer.err.code;
+      for (const each of radio.closest('fieldset')!.querySelectorAll('input'))
+        each.checked = each.value === before;
+    } else await correct(device, agent, account);
     busyAcct[key] = false;
-    if (answer.err) acctFailed[key] = answer.err.code;
+    await tick();
+    if (document.activeElement === card) radio.focus();
+  }
+
+  async function correct(device: string, agent: string, account: string) {
+    const key = `${device}:${agent}`;
+    busyAcct[key] = true;
+    acctFailed[key] = (await nodes.correct(device, agent, account))?.code ?? '';
+    busyAcct[key] = false;
   }
 </script>
 
@@ -189,6 +213,10 @@
           {#each comp.info.agents.filter((entry) => entry.agent !== 'external') as agent (agent.agent)}
             {@const label = cliName(agent.agent)}
             {@const acctKey = `${comp.info.device}:${agent.agent}`}
+            {@const open = agent.account === null || choosing[acctKey] === true}
+            {@const behind = agent.account
+              ? outdated(comp.info.device, agent.agent, agent.account)
+              : []}
             <div class="ai-row">
               <div class="row">
                 <Avatar id={agent.agent} name={label} cli={agent.agent} />
@@ -210,9 +238,20 @@
                     <p class="st" data-st="ok"><i></i>{t('nodes.ai.signedIn')}</p>
                   {/if}
                 </div>
+                {#if agent.account !== null}
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-ghost turn"
+                    aria-expanded={open}
+                    aria-label={`${t('nodes.account.change')} · ${label}`}
+                    onclick={() => (choosing[acctKey] = !open)}
+                  >
+                    {t('nodes.account.change')}<Icon name="down" sm />
+                  </button>
+                {/if}
               </div>
 
-              {#if agent.account === null}
+              {#if open}
                 <header class="card-head">
                   <h4 class="kind">{t('pairing.acct.title').replace('{name}', label)}</h4>
                 </header>
@@ -224,7 +263,9 @@
                         type="radio"
                         name={`${uid}-acct-${idx}-${agent.agent}`}
                         value={acct}
-                        onchange={(event) => void chooseAccount(event, comp, agent.agent, acct)}
+                        checked={agent.account === acct}
+                        onchange={(event) =>
+                          void chooseAccount(event, comp, agent.agent, agent.account, acct)}
                       />
                       <span>
                         <b>{accountLabel(acct)}</b>
@@ -233,9 +274,27 @@
                     </label>
                   {/each}
                 </fieldset>
-                {#if acctFailed[acctKey]}<Failure code={acctFailed[acctKey]} />{/if}
                 <p class="hint">{t('pairing.acct.hint')}</p>
               {/if}
+              {#if behind.length && !busyAcct[acctKey]}
+                {@const device = comp.info.device}
+                <div class="note behind" data-tone="dawn">
+                  <Icon name="alert" sm />
+                  <span class="grow">
+                    {t('nodes.account.behind').replace('{groups}', () =>
+                      behind.map(({ group }) => group.name).join(' · '),
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    class="btn btn-sm"
+                    onclick={() => void correct(device, agent.agent, agent.account!)}
+                  >
+                    {t('nodes.account.again')}
+                  </button>
+                </div>
+              {/if}
+              {#if acctFailed[acctKey]}<Failure code={acctFailed[acctKey]} />{/if}
 
               {#if agent.groups.length}
                 {#each agent.groups as entry (entry.member)}
@@ -348,6 +407,18 @@
   }
   .ai-row p.st {
     margin-top: 2px;
+  }
+  .behind {
+    align-items: center;
+  }
+  .turn {
+    margin-right: -10px;
+  }
+  .turn :global(.i) {
+    transition: transform var(--dur-2) var(--ease);
+  }
+  .turn[aria-expanded='true'] :global(.i) {
+    transform: rotate(180deg);
   }
   .perm {
     display: flex;

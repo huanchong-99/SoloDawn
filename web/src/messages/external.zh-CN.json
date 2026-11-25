@@ -23,8 +23,5 @@
   "external.check.pending": "待完成",
   "external.check.done": "已完成",
   "external.check.multiple": "该成员发了多条回复。检查需要恰好一条回复。",
-  "external.check.send": "再次发送连接检查",
-  "external.remove": "移除 AI",
-  "external.remove.confirm": "确认移除",
-  "external.remove.conflict": "请先转派该 AI 尚未完成的任务，再移除它。"
+  "external.check.send": "再次发送连接检查"
 }

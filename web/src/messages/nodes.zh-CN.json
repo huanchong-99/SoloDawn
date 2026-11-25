@@ -48,5 +48,8 @@
   "nodes.pair.expires": "{n} 分钟后过期（{time}），只能用一次。",
   "nodes.pair.expired": "这个配对链接已过期。",
   "nodes.pair.cancel": "取消",
-  "nodes.pair.done": "完成"
+  "nodes.pair.done": "完成",
+  "nodes.account.change": "账号类型",
+  "nodes.account.behind": "{groups} 里还没改过来。",
+  "nodes.account.again": "再试一次"
 }

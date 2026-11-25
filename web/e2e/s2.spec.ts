@@ -60,7 +60,7 @@ describe('step 2 in the browser', () => {
     await row.getByRole('button', { name: 'Remove' }).click();
     await expect.poll(() => sent(p), { timeout: 5000 }).toHaveLength(3);
     await p.evaluate(() => window.s2.remove('member', 'q'));
-    await texts(p, '.people li').toEqual(['A\nAlex · You · Owner\nOnline']);
+    await texts(p, '.people li').toEqual(['A\nAlex · You · Owner']);
     const { g, q: id } = await ids(p);
     expect(await sent(p)).toEqual([
       { t: 'invite', g },
@@ -188,6 +188,13 @@ describe('step 2 in the browser', () => {
     await texts(p, '[aria-label="Bulletin"] p:last-child').toEqual(['The website is ready.']);
     await p.getByRole('button', { name: 'Invite', exact: true }).waitFor();
     expect(await p.getByRole('button', { name: 'Add AI' }).count()).toBe(0);
+    await p.getByRole('button', { name: 'Edit group settings' }).click();
+    const settings = p.getByRole('dialog', { name: 'Edit group settings' });
+    expect(await settings.locator('input, textarea, select, summary').count()).toBe(1);
+    await settings.getByLabel('Group name').fill('Studio notices');
+    await settings.getByRole('button', { name: 'Save' }).click();
+    await settings.waitFor({ state: 'detached' });
+    expect((await sent(p)).at(-1)).toEqual({ t: 'group', g, op: 'set', name: 'Studio notices' });
   });
 
   test('A9.24 the dialog that joins an AI shows the check commands and each template', async () => {
@@ -204,6 +211,52 @@ describe('step 2 in the browser', () => {
       ...['forge', 'checks', '{request}', '{commit}'],
       ...['forge', 'merge', '{request}', '{commit}'],
     ]);
+  });
+
+  test('R-60, R-103 P corrects a check command and a limit, Q changes nothing', async () => {
+    const p = await open('P', '#/groups/{g}');
+    await p.getByRole('button', { name: 'Edit group settings' }).click();
+    const dialog = p.getByRole('dialog', { name: 'Edit group settings' });
+    const save = dialog.getByRole('button', { name: 'Save' });
+    expect(await save.isDisabled()).toBe(true);
+    await dialog.getByLabel('Check commands').fill('pnpm check\npnpm vitest run');
+    const limits = dialog.locator('details', { hasText: 'Limits' });
+    await limits.locator('summary').click();
+    const depth = limits.getByLabel('Chain of questions');
+    await depth.fill('5');
+    await limits.locator('summary').click();
+    expect(await depth.isVisible()).toBe(false);
+    await save.click();
+    // The browser refuses the field, in a fold that opens for it.
+    await depth.waitFor();
+    expect(await sent(p)).toEqual([]);
+    await depth.fill('4');
+    await limits.getByLabel('Wake-ups per hour').fill('40');
+    await save.click();
+    await dialog.waitFor({ state: 'detached' });
+    const { g } = await ids(p);
+    expect(await sent(p)).toEqual([
+      {
+        t: 'group',
+        g,
+        op: 'set',
+        checks: ['pnpm check', 'pnpm vitest run'],
+        limits: {
+          rounds: 10,
+          wakes_per_hour: 40,
+          turn_minutes: 60,
+          failures: 3,
+          review_rounds: 5,
+          ask_depth: 4,
+          ask_wait_s: 45,
+          approval_wait_s: 600,
+          idle_notice_minutes: 30,
+        },
+      },
+    ]);
+    const q = await open('Q', '#/groups/{g}');
+    await q.locator('.group-details').waitFor();
+    expect(await q.getByRole('button', { name: 'Edit group settings' }).count()).toBe(0);
   });
 
   test('A9.27 the group info shows the two commands to P only', async () => {

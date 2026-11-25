@@ -8,7 +8,7 @@ import type { Path, Source } from '../src/lib/net.svelte';
 import { nodes } from '../src/lib/nodes.svelte';
 import * as p from '../src/lib/proto';
 import { example, owner, TestHome, user } from './home';
-import { all, closePage, fill, one, openPage, texts } from './page';
+import { all, closePage, fill, one, read, openPage, texts } from './page';
 
 const feature = await loadFeature('../features/web_member.feature');
 
@@ -516,7 +516,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             true,
           );
           expect(cards[2].querySelector('.card-foot .hint')!.textContent).toBe('Direct link only');
-          expect(cards[3].querySelector('.card-foot')).toBeNull();
+          expect(read(cards[3].querySelector('.card-foot')!)).toBe('Remove AI');
           expect(cards[4].querySelector<HTMLButtonElement>('.card-foot button')!.disabled).toBe(
             true,
           );
@@ -607,52 +607,48 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     },
   );
 
-  Scenario('The people list shows names, roles and online status', ({ Given, Then, And }) => {
-    Given('the group also has "Mina" as an online admin and "Sam" as an offline member', () => {
-      workstation.home.write(
-        website,
-        example('row-member-human', {
-          id: 'mina',
-          g: website,
-          user: 'mina-user',
-          name: 'Mina',
-          role: 'admin',
-          online: true,
-        }),
+  Scenario(
+    'The people list shows names and roles, and nothing about being online',
+    ({ Given, Then, And }) => {
+      Given('the group also has "Mina" as an admin and "Sam" as a member', () => {
+        workstation.home.write(
+          website,
+          example('row-member-human', {
+            id: 'mina',
+            g: website,
+            user: 'mina-user',
+            name: 'Mina',
+            role: 'admin',
+          }),
+        );
+        workstation.home.write(
+          website,
+          example('row-member-human', {
+            id: 'sam',
+            g: website,
+            user: 'sam-user',
+            name: 'Sam',
+            role: 'member',
+          }),
+        );
+        flushSync();
+      });
+      Then('the people section reads "People · 3"', () => {
+        expect(texts('.members h2')[1]).toBe('People · 3');
+      });
+      And(
+        'the people list shows "Alex · You · Owner", "Mina · Admin" and "Sam" with no state',
+        () => {
+          expect(texts('.people .person > .grow')).toEqual([
+            'Alex · You · Owner',
+            'Mina · Admin',
+            'Sam',
+          ]);
+          expect(all('.people .st')).toEqual([]);
+        },
       );
-      workstation.home.write(
-        website,
-        example('row-member-human', {
-          id: 'sam',
-          g: website,
-          user: 'sam-user',
-          name: 'Sam',
-          role: 'member',
-          online: false,
-        }),
-      );
-      flushSync();
-    });
-    Then('the people section reads "People · 3"', () => {
-      expect(texts('.members h2')[1]).toBe('People · 3');
-    });
-    And(
-      'the people list shows "Alex · You · Owner" as "Online", "Mina · Admin" as "Online", and "Sam" as "Offline"',
-      () => {
-        expect(texts('.people .person > .grow')).toEqual([
-          'Alex · You · Owner',
-          'Mina · Admin',
-          'Sam',
-        ]);
-        expect(texts('.people .person .st')).toEqual(['Online', 'Online', 'Offline']);
-        expect(all('.people .person .st').map((el) => el.dataset.st)).toEqual([
-          'ok',
-          'ok',
-          'offline',
-        ]);
-      },
-    );
-  });
+    },
+  );
 
   Scenario(
     'Below 1024 px the member panel opens and closes from the chat header',

@@ -2,8 +2,9 @@
 // (planning/contracts/datachannel.md section 7, planning/contracts/commands.md section 2), and
 // the four states of the connection indicator (planning/flows/connect.md step 8 and section E).
 import { SvelteMap } from 'svelte/reactivity';
-import { lost, newId, type Group, type Home } from './groups.svelte';
+import { homes, lost, newId, type Group, type Home } from './groups.svelte';
 import { addHome } from './join';
+import { aiMembers } from './members';
 import type { Net, Path } from './net.svelte';
 import { setAccount, signalUrlOf, type AccountKind } from './onboard.svelte';
 import type * as p from './proto';
@@ -58,6 +59,14 @@ function activeCtl(home: Home): p.Ctl | undefined {
 /** Whether a computer of the owner learns the home of `group` from this browser alone: no AI
  *  joins a team group, and another person's computer is known by `home.add` only. */
 const unheard = ({ home, info }: Group) => !home.owner || info?.kind === 'team';
+
+/** The members that run `agent` on the computer `device` and have another account type in their
+ *  group than `account`, which is declared for that CLI (R-50). */
+export const outdated = (device: string, agent: string, account: string) =>
+  homes
+    .flatMap((home) => home.groups)
+    .flatMap((group) => aiMembers(group).map((ai) => ({ group, ai })))
+    .filter(({ ai }) => ai.host === device && ai.cli === agent && ai.account !== account);
 
 /** Holds the latest `host.info` of each owned computer, refreshes it when an owner node connects
  *  or after a command that changes it, and sends `pair.browser`. */
@@ -118,6 +127,17 @@ export class Nodes {
     const answer = await setAccount(ctl, home.me, to, agent, account);
     if (!answer.err) await this.#read(home, ctl!);
     return answer;
+  }
+
+  /** Gives the members that run `agent` on `device` its declared account type; the first refusal,
+   *  when there is one (contracts/commands.md 1.2 `set`). */
+  async correct(device: string, agent: string, account: string) {
+    const answers = await Promise.all(
+      outdated(device, agent, account).map(({ group, ai }) =>
+        group.home.command({ t: 'member', g: group.g, op: 'set', id: ai.id, account }),
+      ),
+    );
+    return answers.find((answer) => answer.err)?.err;
   }
 
   /** Asks an online owner node (`to`) for a one-time browser pairing link (`pair.browser`). */

@@ -5,7 +5,7 @@
   import Commands from '../forge/Commands.svelte';
   import EditGroup from './EditGroup.svelte';
   import SecretaryWarning from './SecretaryWarning.svelte';
-  import { homeOwner, secretaryCandidates } from './trust';
+  import { homeOwner } from './trust';
 
   let { group }: { group: Group } = $props();
   const uid = $props.id();
@@ -19,7 +19,6 @@
   const people = $derived(
     group.members.filter((member) => member.kind === 'human').map((member) => member.user),
   );
-  const editable = $derived(info?.forge === 'custom' || secretaryCandidates(group).length > 0);
 </script>
 
 <section class="group-details field" aria-labelledby={`${uid}-title`}>
@@ -40,7 +39,9 @@
       <p>{t('groupinfo.secretary')} · {secretary.name}</p>
       <SecretaryWarning account={secretary.account} owner={secretary.user} {people} />
     {/if}
-    {#if editable && isAdmin(group)}
+  {/if}
+  {#if info}
+    {#if isAdmin(group)}
       <button
         type="button"
         class="btn btn-sm"

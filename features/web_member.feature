@@ -19,10 +19,10 @@ Feature: Member panel and adding an AI to a group
     When the dormant AI wakes to work and two other AIs go offline and hit a limit
     Then those cards update to "Working", "Offline" with "offline" and "Limited"
 
-  Scenario: The people list shows names, roles and online status
-    Given the group also has "Mina" as an online admin and "Sam" as an offline member
+  Scenario: The people list shows names and roles, and nothing about being online
+    Given the group also has "Mina" as an admin and "Sam" as a member
     Then the people section reads "People · 3"
-    And the people list shows "Alex · You · Owner" as "Online", "Mina · Admin" as "Online", and "Sam" as "Offline"
+    And the people list shows "Alex · You · Owner", "Mina · Admin" and "Sam" with no state
 
   Scenario: Below 1024 px the member panel opens and closes from the chat header
     Given the chat is reopened on a screen 820 px wide

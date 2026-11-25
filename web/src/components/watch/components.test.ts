@@ -1,8 +1,10 @@
 import { flushSync } from 'svelte';
+import { SvelteMap } from 'svelte/reactivity';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { closePage, show } from '../../../features/page';
 import { Group, Home } from '../../lib/groups.svelte';
 import { goldens } from '../../lib/mock';
+import type { Path } from '../../lib/net.svelte';
 import { prefs } from '../../lib/prefs.svelte';
 import * as p from '../../lib/proto';
 import AskToWatch from './AskToWatch.svelte';
@@ -45,6 +47,28 @@ it('offers request and watch links only on another person’s taken-over AI', ()
   group.apply([{ ...ai, seq: ai.seq + 1, state: 'working' }]);
   flushSync();
   expect(document.querySelector('.member .card-foot')).toBeNull();
+});
+
+it('disables the watch link on a relayed path and says why', () => {
+  const { home, group, ai } = setup();
+  const far = new Home(me);
+  far.device = ai.host;
+  far.ctl = home.ctl;
+  const paths = new SvelteMap<Home, Path>([[far, { kind: 'relay', rtt: 90, since: 1 }]]);
+  show(MemberPanel, {
+    group,
+    net: { source: 'mock', homes: [far], path: (of: Home) => paths.get(of) },
+  });
+  expect(document.querySelector('.member a')).toBeNull();
+  const watch = document.querySelectorAll<HTMLButtonElement>('.member .card-foot button')[1];
+  expect(watch.textContent!.trim()).toBe('Watch');
+  expect(watch.disabled).toBe(true);
+  expect(document.getElementById(watch.getAttribute('aria-describedby')!)!.textContent).toBe(
+    'Watching requires a direct connection',
+  );
+  paths.set(far, { kind: 'direct', rtt: 9, since: 2 });
+  flushSync();
+  expect(document.querySelector('.member a')!.textContent!.trim()).toBe('Watch');
 });
 
 describe('ask to watch action', () => {
