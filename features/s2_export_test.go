@@ -51,8 +51,7 @@ func s2ExportSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^P imports the file on P2$`, w.importFile)
 	sc.Step(`^P2 is home and has the exported rows$`, w.checkRows)
 	sc.Step(`^the two browser peers follow P2 within 5 seconds of import without a reload$`, w.browsersFollow)
-	sc.Step(`^Q1 follows P2$`, w.q1Follows)
-	sc.Step(`^Q1 follows P2 within 5 seconds of import$`, w.q1FollowsInTime)
+	sc.Step(`^Q1 follows P2 by its normal retry$`, w.q1Follows)
 	sc.Step(`^P2 delivers the unacknowledged mention once and the next task gets number 2$`, w.checkDeliveryAndNumber)
 	sc.Step(`^the export cannot be imported on Q1 or exported again from P1$`, w.checkFailures)
 	sc.Step(`^P takes two successive copies on P1 and writes a note after each copy$`, w.copyExports)
@@ -444,21 +443,24 @@ func (w *s2ExportWorld) browsersFollow() error {
 	if err := w.followBrowserPeers(); err != nil {
 		return err
 	}
-	return w.followedInTime()
+	return w.followedWithin(5 * time.Second)
 }
 
-func (w *s2ExportWorld) q1Follows() error { return w.checkQ1Turn("Hello from the new home") }
+// s2ExportRetry is the longest wait of planning/flows/connect.md step 15 between two offers:
+// 10 seconds for an answer and a back-off of at most 60. The import comes right after the export, so Q1 is at its first
+// retries and has connected long before that.
+const s2ExportRetry = 70 * time.Second
 
-func (w *s2ExportWorld) q1FollowsInTime() error {
-	if err := w.q1Follows(); err != nil {
+func (w *s2ExportWorld) q1Follows() error {
+	if err := w.checkQ1Turn("Hello from the new home"); err != nil {
 		return err
 	}
-	return w.followedInTime()
+	return w.followedWithin(s2ExportRetry)
 }
 
-func (w *s2ExportWorld) followedInTime() error {
-	if duration := time.Since(w.importedAt); duration > 5*time.Second {
-		return fmt.Errorf("following P2 took %s after import, want at most 5s", duration)
+func (w *s2ExportWorld) followedWithin(limit time.Duration) error {
+	if duration := time.Since(w.importedAt); duration > limit {
+		return fmt.Errorf("following P2 took %s after import, want at most %s", duration, limit)
 	}
 	return nil
 }

@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -43,12 +44,21 @@ type s2LiveForgeConfig struct {
 	Inspect []string
 }
 
-func (w *m5World) liveProject() error {
-	path := os.Getenv("SOLODAWN_S2_LIVE_FORGE")
-	if path == "" {
-		return fmt.Errorf("set SOLODAWN_S2_LIVE_FORGE to the scratch forge configuration file")
+// TestS2LiveForgeFeature runs A9.26. Git keeps the person's own configuration, which signs in to the forge.
+func TestS2LiveForgeFeature(t *testing.T) {
+	if os.Getenv("SOLODAWN_S2_LIVE_FORGE") == "" {
+		t.Skip("set SOLODAWN_S2_LIVE_FORGE to the scratch forge configuration file; see s2_watch.md")
 	}
-	raw, err := os.ReadFile(path)
+	f := fixtures{t: t, fakeCLIs: buildFakeCLIs(t)}
+	suite := godog.TestSuite{ScenarioInitializer: func(sc *godog.ScenarioContext) { m5Steps(sc, f) },
+		Options: &godog.Options{Format: "pretty", Paths: []string{"s2_watch.feature"}, Tags: "@live", Strict: true, TestingT: t}}
+	if suite.Run() != 0 {
+		t.Fatal("the live forge scenario failed")
+	}
+}
+
+func (w *m5World) liveProject() error {
+	raw, err := os.ReadFile(os.Getenv("SOLODAWN_S2_LIVE_FORGE"))
 	if err != nil {
 		return err
 	}

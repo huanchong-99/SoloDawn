@@ -10,23 +10,14 @@
 
 ## A9.21 selected-pair change
 
-A9.21 remains pending: its network-switch driver is unavailable. The
-fixture opens an approved direct watch with the cast's TURN candidates
-available from the start, then waits for the same PeerConnection to select
-a relay. It checks watch closure, a successful sync on the original `ctl`
-and a `relay` refusal when that `ctl` retries `watch.start`. It does not
-induce the network transition.
-
-A transport-only probe used a controlling watcher, policy `all`, Pion
-renomination and frequent checks, a warmed relay/relay pair, and a filter
-on every watcher UDP socket allowing only the cast TURN server after the
-switch. The selected pair stayed direct. A binding-request selector did
-not switch both ends either. The experimental driver was removed.
-
-Once a same-connection switch driver is available, temporarily remove
-A9.21's `@pending` tag and run the scenario, then restore the tag. Do not
-substitute a new relay-only connection. Watch closure and original-ctl
-behavior after migration remain unverified.
+The watcher is a pion peer on 127.0.0.1 with the cast's TURN server from
+the start. `moveToRelay` (`s2_watch_peer_test.go`) delays its direct
+packets by 3 seconds, waits until ICE has measured that, and cuts direct
+UDP; ICE renominates the relayed pair on the same PeerConnection. The
+delay is needed: pion rates a pair by its last round trip even when it no
+longer answers. The browser and a real network are in the
+[real-machine checklist](../docs/cookbook/i11-real-machine-checklist.md),
+section 6.
 
 ## A9.26 live run
 
@@ -47,11 +38,11 @@ behavior after migration remain unverified.
    JSON object such as `{"request":17,"state":"merged","head":"<reviewed SHA>"}`.
    `head` must be the request's merged source head, not the base tip or a
    squash/merge commit. Point `SOLODAWN_S2_LIVE_FORGE` at the JSON file.
-3. In the local checkout, remove the `@pending` tag from A9.26 for the
-   duration of the run. Keep `@live`. Run this scenario:
+3. Run the scenario. It is the only one with `@live` in this feature, and
+   no other run includes it:
 
    ```sh
-   go test -tags acceptance -count=1 ./features -run '^TestFeatures/Tasks_run_from_brief_to_merge_on_a_real_non-GitHub_forge'
+   go test -tags acceptance -count=1 ./features -run '^TestS2LiveForgeFeature$'
    ```
 
 4. A9.26 reuses M5's forge-touching two-task brief-to-merge steps
@@ -62,5 +53,5 @@ behavior after migration remain unverified.
    Inspection must report two distinct requests merged at their reviewed
    heads. Other M5 scenarios use forge `none` and do not invoke forge
    templates; permission-level and attack/defence checks are excluded.
-   Record the CLI version and request URLs. Restore the tag and delete the
-   scratch repository when finished. No live run occurs unless opted in.
+   Record the CLI version and request URLs. Delete the scratch repository
+   when finished. No live run occurs unless opted in.

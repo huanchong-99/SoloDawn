@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -25,6 +26,8 @@ type s2TerminalPeer struct {
 	seq     int64
 	answers chan proto.Envelope
 	ice     proto.ICEConfig
+	net     *m7NetControl
+	saw     trail // the frames read from ctl
 }
 
 func openS2TerminalPeer(c *s2Cast, person *s2Person, key identity.Key, target *s2Node, withTURN bool) (*s2TerminalPeer, error) {
@@ -39,7 +42,11 @@ func openS2TerminalPeer(c *s2Cast, person *s2Person, key identity.Key, target *s
 		defer cancel()
 		p.readSignals()
 	}()
-	if err := p.connectRTC(p.config(withTURN), p.signalHeader, p.routeSignal); err != nil {
+	pc, err := p.peerConnection(withTURN)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.connectRTC(pc, p.signalHeader, p.routeSignal); err != nil {
 		return nil, err
 	}
 	if err := p.checkPath(false); err != nil {
@@ -80,14 +87,34 @@ func (p *s2TerminalPeer) dial(url string) error {
 	return wsjson.Read(p.ctx, ws, &p.ice)
 }
 
-func (p *s2TerminalPeer) config(withTURN bool) webrtc.Configuration {
-	var cfg webrtc.Configuration
+// peerConnection has the M7 browser's sockets, on 127.0.0.1 only: a firewall may refuse other addresses.
+func (p *s2TerminalPeer) peerConnection(withTURN bool) (*webrtc.PeerConnection, error) {
+	b := newM7Browser(p.ctx, p.key, p.target, m7CandDirect, "", nil)
 	if withTURN {
-		for _, server := range p.ice.ICE {
-			cfg.ICEServers = append(cfg.ICEServers, webrtc.ICEServer{URLs: server.URLs, Username: server.Username, Credential: server.Credential})
-		}
+		turn := strings.TrimSuffix(strings.TrimPrefix(p.ice.ICE[0].URLs[0], "turn:"), "?transport=udp")
+		b = newM7Browser(p.ctx, p.key, p.target, m7CandSrflxAndRelay, turn, p.ice.ICE)
 	}
-	return cfg
+	p.net = b.ctrl
+	return b.buildPeerConnection(net.IPv4(127, 0, 0, 1))
+}
+
+// moveToRelay makes ICE renominate. Pion rates a pair that answers no more by its last round trip, and a fast dead direct pair
+// above a relayed one, so the direct path first becomes slow and is then cut.
+func (p *s2TerminalPeer) moveToRelay() error {
+	p.net.delayNs.Store(int64(3 * time.Second))
+	if err := waitUntilCtx(p.ctx, 40*time.Millisecond, "the direct round trip to be measured as slow", p.directIsSlow); err != nil {
+		return err
+	}
+	p.net.relayOnly.Store(true)
+	return waitUntilCtx(p.ctx, 40*time.Millisecond, "the connection to select the TURN relay", func() error { return p.checkPath(true) })
+}
+
+func (p *s2TerminalPeer) directIsSlow() error {
+	stats, ok := p.pc.SCTP().Transport().ICETransport().GetSelectedCandidatePairStats()
+	if !ok || stats.CurrentRoundTripTime < 3 {
+		return fmt.Errorf("selected pair ok=%t, round trip %.3f s", ok, stats.CurrentRoundTripTime)
+	}
+	return nil
 }
 
 func (p *s2TerminalPeer) signalHeader(kind string) proto.SignalHeader {
@@ -152,7 +179,7 @@ func (p *s2TerminalPeer) request(frame map[string]any) (json.RawMessage, error) 
 	if err := p.send(frame); err != nil {
 		return nil, err
 	}
-	return p.nextCtl(func(raw json.RawMessage) bool {
+	return p.nextCtl(fmt.Sprintf("the answer to %v", frame["t"]), func(raw json.RawMessage) bool {
 		var r struct {
 			Re int64 `json:"re"`
 		}
@@ -160,20 +187,30 @@ func (p *s2TerminalPeer) request(frame map[string]any) (json.RawMessage, error) 
 	})
 }
 
-func (p *s2TerminalPeer) nextCtl(match func(json.RawMessage) bool) (json.RawMessage, error) {
-	var saw trail
+// waitClosed waits for the node to close the channel label.
+func (p *s2TerminalPeer) waitOpened(label, what string) error {
+	_, err := recvCtx(p.ctx, p.opened[label], what, &p.saw)
+	return err
+}
+
+func (p *s2TerminalPeer) waitClosed(label, what string) error {
+	_, err := recvCtx(p.ctx, p.closed[label], what, &p.saw)
+	return err
+}
+
+func (p *s2TerminalPeer) nextCtl(what string, match func(json.RawMessage) bool) (json.RawMessage, error) {
 	start := time.Now()
 	for {
 		select {
 		case raw := <-p.ctl:
+			p.saw.see(frameBrief(raw))
 			if match(raw) {
 				return raw, nil
 			}
-			saw.see(frameBrief(raw))
 		case <-p.closed["ctl"]:
 			return nil, fmt.Errorf("ctl closed")
 		case <-p.ctx.Done():
-			return nil, ctxEnded(p.ctx, start, "a matching frame on ctl", &saw)
+			return nil, ctxEnded(p.ctx, start, what, &p.saw)
 		}
 	}
 }

@@ -105,7 +105,11 @@ func (w *dispatchWorld) connect() error {
 	ice := []webrtc.ICEServer{{URLs: w.ice[0].URLs, Username: w.ice[0].Username, Credential: w.ice[0].Credential}}
 	conn := randomConn()
 	header := func(kind string) proto.SignalHeader { return w.header(kind, conn) }
-	if err := w.connectRTC(webrtc.Configuration{ICEServers: ice, ICETransportPolicy: webrtc.ICETransportPolicyRelay}, header, w.send); err != nil {
+	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{ICEServers: ice, ICETransportPolicy: webrtc.ICETransportPolicyRelay})
+	if err != nil {
+		return err
+	}
+	if err := w.connectRTC(pc, header, w.send); err != nil {
 		return err
 	}
 	select {
@@ -116,11 +120,7 @@ func (w *dispatchWorld) connect() error {
 	}
 }
 
-func (w *dispatchWorld) connectRTC(cfg webrtc.Configuration, header func(string) proto.SignalHeader, send func(any, *proto.Answer) error) error {
-	pc, err := webrtc.NewPeerConnection(cfg)
-	if err != nil {
-		return err
-	}
+func (w *dispatchWorld) connectRTC(pc *webrtc.PeerConnection, header func(string) proto.SignalHeader, send func(any, *proto.Answer) error) error {
 	w.pc, w.channels, w.opened, w.closed, w.received = pc, map[string]*webrtc.DataChannel{}, map[string]chan struct{}{}, map[string]chan struct{}{}, make(chan []byte, 32)
 	w.ctl = make(chan json.RawMessage, 128)
 	w.cleanup(func() { pc.Close() })
