@@ -129,6 +129,11 @@ func TestNewRoleAuthorityAndDuplicates(t *testing.T) {
 	res := Result{}
 	s.cftAsk(c, task, s.AIs["a"], d, &res)
 	cardTestSame(t, len(res.Rows), 0)
+	given := task
+	given.Asked = nil
+	s.Tasks[task.ID] = given
+	s.cftAsk(c, task, s.AIs["a"], d, &res)
+	cardTestSame(t, len(res.Rows), 0)
 	delete(d.msgs, card.ID)
 	s.cftAsk(c, task, s.AIs["a"], d, &res)
 	cardTestSame(t, res.Rows[0].Value().(proto.MsgRow).ID, card.ID)
@@ -141,6 +146,17 @@ func TestNewRoleAuthorityAndDuplicates(t *testing.T) {
 	cardTestSame(t, s.cftAsks("x", task, "a", "old", true), true)
 	cardTestSame(t, s.cftAsks("q", task, "a", "a", false), true)
 	cardTestSame(t, s.cftAsks("p", proto.TaskRow{}, "a", "a", false), false)
+}
+
+// A text in the thread of a finished task, whose decided cards retention has
+// deleted, asks nobody again.
+func TestFinishedTaskWritesNoCardAgain(t *testing.T) {
+	s, d, task, card, c := cftFixture()
+	task.State = taskMerged
+	s.Tasks[task.ID] = task
+	delete(d.msgs, card.ID)
+	task.Thread.Count++
+	cardTestSame(t, s.cftFinish(c, Result{Rows: []Row{RowOf(task)}}).Rows, []Row{RowOf(task)})
 }
 
 func TestTaskItemWithoutRowsIsGated(t *testing.T) {

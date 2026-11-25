@@ -88,8 +88,8 @@ that is waiting for them.
 ## C. Jumping the queue (R-72)
 
 11. The owner chooses "jump the queue" on their message (`jump`). H sends
-    the item again under its number with `jump: true`. N replaces the one it
-    holds; one it has delivered it acknowledges only.
+    every unacknowledged `mention` item of that message again with
+    `jump: true` (`contracts/commands.md` 1.4).
 12. If the AI is running a turn in the group, N interrupts it (the CLI's
     interrupt request) and waits for the turn-end event.
     - The jump item is for the **same** session: nothing is reported; the
@@ -97,6 +97,8 @@ that is waiting for them.
     - It is for another session, and the interrupted one is a task session:
       N reports `task preempted`. If the home refuses it (a task at step
       `merge`), nothing more is reported for that task.
+    - N has delivered the item under that number before: it interrupts
+      nothing and only acknowledges the item.
 13. N delivers the jump item as in steps 4 to 9.
 14. When the jump turn has ended, N gives the interrupted session, whatever
     its kind, one turn of its own: "You were interrupted by a direct request

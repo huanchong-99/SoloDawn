@@ -129,10 +129,12 @@ func (s *State) cftAsks(user string, old proto.TaskRow, ai, was string, initial 
 	return user != member.User && !(initial && cfmEnough(user, member))
 }
 
+// cftAsk writes the card of a role that did not ask yet, unless the request has
+// one. A kept role never gets one again: a finished task's is deleted.
 func (s *State) cftAsk(c Command, task proto.TaskRow, ai proto.AIMemberRow, d cftDisk, res *Result) {
 	req := proto.MsgRow{RowHeader: proto.RowHeader{ID: cftRequest(task)}}
 	card := s.cfmNewCard(c, cfmWhatDirect, req, ai)
-	if _, found := d.Msg(card.ID); found {
+	if _, found := d.Msg(card.ID); found || slices.Contains(s.Tasks[task.ID].Asked, ai.ID) {
 		return
 	}
 	d.msgs[card.ID] = card
