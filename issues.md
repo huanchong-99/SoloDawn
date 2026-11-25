@@ -6,17 +6,21 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-26 · bug · Removing a person does not close their connections
+### 2026-11-26 · limitation · On a Mac with the Application Firewall, a UDP write can block every connection on one local address
 
-- Symptom: after `member remove`, Q's browser and Q1 stay connected to P1 (A9.4: "close within 1 second and the next attempt is refused").
-- Cause: `peopleRemove` in `internal/home/cmd_people.go` only pushes `groups`; nothing closes the connections of devices that the home no longer knows.
-- Status: fixed by #399, not merged yet. The scenario "A removed member's connections close and are refused (A9.4)" stays `@pending` until then; it passes with #399 merged in (2 of 2 runs under `-race`). The rest of A9.4 is enabled.
-
-### 2026-11-26 · limitation · On a Mac with the Application Firewall, a UDP write can block one ICE agent for good
-
-- Symptom: on the development Mac, 4 of about 120 runs of A9.2 (five or six WebRTC connections between in-process peers each) failed: one connection exchanged offer, answer and candidates, then stayed silent until the other side reported ICE `failed` after 30 seconds (`timed out … waiting for ctl … saw 1: connection ended before it was ready`).
-- Cause: the goroutine dump of a failure shows the agent's task loop inside a UDP write that waits for the socket to become writable (`candidatepair.go:131` → `udp_mux.go:337` of pion ice v4.4.8, the binding response of a host candidate to a `127.0.0.1` address). pion writes on that loop with no deadline, so the agent answers no check on any pair, the relay included. The write blocks on this machine only, as far as known; the Application Firewall, which holds packets of unsigned binaries (2026-11-22 below), is the likely reason and was not proved.
+- Symptom: on the development Mac, some runs of A9.2 (five or six WebRTC connections between in-process peers each) failed with `timed out … waiting for ctl … saw 1: connection ended before it was ready`. Two causes were found; they are different failures:
+  1. A write that blocks (the goroutine dump below): one connection exchanged offer, answer and candidates, then stayed silent until the other side reported ICE `failed` after 30 seconds. The dump covers the failures of this kind only, 4 of about 120 runs before the fix of cause 2.
+  2. The fixture sent every ICE candidate to a joining browser twice (see the entry "The A9.2 fixture sent each signalling frame twice" below): the signalling pacer of `internal/peer/path.go` waited for a turn (A9.2 opens one owner and three joining connections within 1.5 seconds, just over 90 frames in 11 seconds), so the answer came too late and the offer was retired at 10 seconds. No blocked write is in that dump.
+- Cause of 1: the goroutine dump shows the agent's task loop inside a UDP write that waits for the socket to become writable (`candidatepair.go:131` → `udp_mux.go:337` of pion ice v4.4.8, the binding response of a host candidate to a `127.0.0.1` address). pion writes on that loop with no deadline, and Go holds the socket's write lock while the write waits (`internal/poll/fd_unix.go`), so every answered connection on that local address is mute, not one agent. The write blocks on this machine only, as far as known; the Application Firewall, which holds packets of unsigned binaries (2026-11-22 below), is the likely reason and was not proved (a two-socket program of 80,000 writes did not block).
+- Bounded in the product: nothing closes the stuck side by itself, but the peer's next offer does (`internal/peer/signal.go:185`, `old.Close()`), and pion then aborts the write after a 5 second grace (`udp_mux.go` `scheduleWriteAbort`/`checkWriteAborts`, through `Agent.Close`). `signal.go:185` runs under `p.mu`, so the node's signalling pauses for up to about 5 seconds in that case; no other peer code waits for the agent loop under the lock (`AddRemoteCandidate` runs in its own goroutine). No product change is needed.
 - Status: open, accepted for the local machine: CI decides. In the product the attempt is retired and offered again (`flows/connect.md` step 15).
+
+### 2026-11-26 · bug · The A9.2 fixture sent each signalling frame twice
+
+- Symptom: A9.2 waited for a signalling turn in 2 of 2 runs (8.9 s) and failed on this Mac in some runs (cause 2 of the entry above).
+- Cause: `peerNode.routesFor` in `features/helpers_test.go` added the node's rendezvous path and then every route of `Pairer.Routes`, which holds the same path, so each frame to a joining browser went twice over one WebSocket. The product skips such a route (`internal/node/node.go` `routesFor`, #373).
+- Status: resolved on `s2/lift-people`: the fixture skips a route whose ID is already there. A9.2 then passed 21 of 22 runs under `-race -tags acceptance`; the one failure is cause 1 (its goroutine dump holds the blocked `WriteToInet4` under `sendBindingSuccess`).
+
 ### 2026-11-25 · limitation · A paired node's rendezvous addresses cannot be changed
 
 - Symptom: `solodawn pair <secret> --rendezvous <new>` on a node that already has an owner prints "this node already has an owner; to add a browser, run solodawn pair-browser", exits 1 and leaves the saved addresses as they were. Version 1 has no other command that writes them, so a node cannot be moved to another rendezvous.
@@ -136,7 +140,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: A9.27 and A9.28 exercise browser peers at the protocol boundary, not the browser's own follow logic or the owner-only commands in group info. A9.28 takes successive copies without waiting for an OS timer at one-minute intervals.
 - Cause: the scenarios of `features/s2_export.feature` use the I2-0 Go cast and two invocations of the copy command. The product does not schedule copies (`planning/contracts/step-2/export.md:60-62`).
-- Status: open. Both scenarios run since 2026-11-26 and pass at the protocol boundary: Q's peer asks P1, gets `moved` and dials P2 itself, so they do not show the web client's two gaps (a group that left the list is not followed; a rejoin does not replace the old home). The owner-only commands in the group info are covered by `web/e2e/s2.spec.ts` (A9.27); the browser's following of `moved` and the OS timer remain open.
+- Status: open. Both scenarios run since 2026-11-26 and pass at the protocol boundary: Q's peer asks P1, gets `moved` and dials P2 itself. The owner-only commands in the group info are covered by `web/e2e/s2.spec.ts` (A9.27); the browser's following of `moved` and the OS timer remain open. The two web client gaps this hid are in the entry below.
+
+### 2026-11-26 · bug · The web client does not follow a moved group and does not replace the old home on a rejoin
+
+- Symptom: against A9.27, a browser whose group left the list is not sent to the new home; against A9.28, a rejoin of the group on another home does not replace the old home.
+- Cause: after the export P1 pushes `groups` without the group, `Home.#list` (`web/src/lib/groups.svelte.ts:391`) drops it and nothing asks P1 again, so `moved` (`web/src/lib/groups.svelte.ts:357`) is never seen. The rejoin gap was not traced.
+- Status: fixed on `web/homes` ([#403](https://github.com/huanchong-99/SoloDawn/pull/403)), not merged yet.
 
 ### 2026-11-22 · limitation · Task participation history is inferred from current fields
 
@@ -749,7 +759,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-26 · bug · A member's node can follow a moved group more than 5 seconds after the import
 
 - Symptom: A9.27 asks that Q1 follows P2 within 5 seconds of the import. Q1 took 11.6 seconds with the import right after the export; with minutes between them it can take up to 70 seconds. Once connected, everything else of A9.27 holds.
-- Cause: Q1 gets `moved` when P1 announces its groups (`internal/host/home_moved.go:14`) and offers to P2 at once. P2 does not know Q1 before the import and drops the offer (`internal/peer/signal.go:130`, `unknown_device`), so Q1 waits 10 seconds for an answer (`internal/peer/unanswered.go:5-13`, `flows/connect.md` step 15) and then backs off 1, 2, 4 … 60 seconds. Nothing wakes it: a node dials a home with no presence channel (`internal/node/node.go:461`), and the import changes no presence, since P2 is online all the time. `export.md` section 3 step 4 ("clients retry as for any home that is down") and the 5 seconds of A9.27 do not agree. A browser follows by the same rules.
+- Cause: Q1 gets `moved` when P1 announces its groups (`internal/host/home_moved.go:14`) and offers to P2 at once. P2 does not know Q1 before the import and drops the offer (`identity.OpenSignal` in `open`, `internal/peer/signal.go:104-110`, returns `unknown_device`, `internal/identity/envelope.go:59`; discarded in `internal/peer/path.go:227`), so Q1 waits 10 seconds for an answer (`internal/peer/unanswered.go:5-13`, `flows/connect.md` step 15) and then backs off 1, 2, 4 … 60 seconds. Nothing wakes it: a node dials a home with no presence channel (`internal/node/node.go:461`), and the import changes no presence, since P2 is online all the time. `export.md` section 3 step 4 ("clients retry as for any home that is down") and the 5 seconds of A9.27 do not agree. A browser follows by the same rules.
 - Status: resolved by decision (2026-11-26): the 5 seconds contradicted `export.md` section 3 step 4 and `flows/connect.md` step 15, so A9.27 now says "by their normal retry", within 70 seconds: 10 for an unanswered offer and a back-off of at most 60. The scenario measures those 70 seconds for Q1 and keeps 5 seconds for the two browser peers, which dial after the import. No product change.
 
 ### 2026-11-22 · limitation · A9.20 cannot set up a watcher before home invitation support lands
