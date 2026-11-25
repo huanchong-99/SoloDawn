@@ -72,9 +72,8 @@ Used for a phone, a second browser, or after site data was cleared.
 
 1. On any of the owner's nodes: `solodawn pair-browser` creates a secret,
    joins the room, and prints a link
-   `https://<web client>/#pair=<secret>` and the same as a QR code in the
-   terminal. From the web client the owner can ask a node to do the same and
-   display the link.
+   `https://<web client>/#pair=<secret>` (no QR code). From the
+   web client the owner can ask a node to do the same and display the link.
 2. The new browser opens the link, generates its key, joins the room.
 3. `pair` messages are exchanged and verified. The browser offers; `ctl`
    opens.
@@ -102,12 +101,15 @@ given to the AI on a computer that is already set up, ends at step A.6:
 
 ## D. Revoking a device
 
+Postponed after version 1: no screen sends a `revoke`.
+
 1. From any of the owner's browsers, the owner chooses a device and
    confirms.
 2. That browser appends a `revoke` entry and sends it in a `devlog` frame to
    every node of the owner and every home it is connected to.
-3. Each receiver that accepts the entry closes any connection from the
-   revoked device and refuses new ones (`unknown_device`).
+3. Each receiver that accepts the entry refuses new connections from the
+   revoked device (`unknown_device`). A node closes an open connection only
+   for a revoked device of a group member, not for one of the owner's.
 4. Receivers that were offline get the entry when they next connect to a
    peer that has it.
 

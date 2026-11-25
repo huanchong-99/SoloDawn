@@ -112,7 +112,7 @@ On `ctl` (`contracts/datachannel.md`):
 | Kind | Shape |
 | --- | --- |
 | request | has `t` and `id` (an integer, unique per connection, chosen by the sender) |
-| success | has `re` (that `id`) and `"ok": true`, then its result fields. It has `t` where the contract names one: `welcome`, `synced`, `fetched`, `host.info`. The answers to `cmd` and `audit` have no `t` |
+| success | has `re` (that `id`) and `"ok": true`, then its result fields. It has `t` where the contract names one: `welcome`, `synced`, `fetched`, `host.info`. The answer to `cmd` has no `t` |
 | error | exactly `{"re": <id>, "err": {"code": "…", "msg": "…"}}`, for **every** request type. No `t`, no `ok`, nothing else. `msg` is an English sentence for logs; clients show their own text for `code` |
 | push | has `t`; no `id`, no `re` |
 
@@ -160,7 +160,7 @@ The limit of a signalling frame is in `contracts/rendezvous.md` section 2.
 `internal/proto/testdata/`, and the same file parsed by the web client's
 tests. All three change in one pull request: whoever adds or changes a
 golden file also updates the schema in `web/src/lib/proto.ts` and the file
-map of `proto.test.ts`, because the web client's golden test fails on a file
+map `schemaOf` in `web/src/lib/mock.ts`, because the web client's golden test fails on a file
 it has no mapping for and the web job of CI runs on every pull request
 (decided by coordinator). In step 1, P-1 and P-2 freeze the shapes assigned
 to them below before the code that uses them (`steps/parallel-plan-units.md`
@@ -191,9 +191,12 @@ hold them as text and only the schemas name them.
 | the WebSocket frames of signalling: `challenge`, `auth`, `ready`, `ice` (request and answer), `to`, `from`, `offline`, `watch`, `presence`, `join`, `joined`, `room` | B-06 |
 | `quota` (request and answer) | B-07 |
 | the payloads of `group`, `member`, `post` (every kind), `act`, `jump`, `task`, `note`, `forget`, `push`; the review outcome and the host events (`contracts/commands.md` 1.8, 1.9); `inbox` with the signed `item` payload, `ack`; the payloads of `host.join`, `host.leave`; `fetch` of one row (`r`, `row`). Changes to shapes frozen earlier, in the same pull request: the task row's `slug`, `plan`, `review.failed` and `wait.kept`, with `row-task.json`'s branch made by the slug rule; the decision state `expired` (`row-msg-decision-expired.json`); `mentions` of an approval card holding its approvers; `act` payloads in the examples without empty `arg` or `text`; `welcome.addrs`. The approval body's `full` is frozen already (pull request 117) | P-1 |
-| `groups`; `host.info`, with `homes` entries of `g`, `home` and `name`; `audit` and its answer; `pty.resize`; the local-network `beacon` payload; the payloads of `settings.set`, `pair.browser`, `agent.set`, `perm.set`, `host.offline`, `host.online`, `takeover.start`, `takeover.end`; the MCP tool list (`tools.json`, `contracts/mcp-tools.md` section 5) | P-2, after P-1 and B-07 |
+| `groups`; `host.info`, with `homes` entries of `g`, `home` and `name`; `pty.resize`; the local-network `beacon` payload; the payloads of `settings.set`, `pair.browser`, `agent.set`, `perm.set`, `host.offline`, `host.online`, `takeover.start`, `takeover.end`; the MCP tool list (`tools.json`, `contracts/mcp-tools.md` section 5) | P-2, after P-1 and B-07 |
 | `inbox` and `item-*` re-frozen with a plain unsigned `item` object (`item`, `ai`, `why` and the optional fields of `contracts/datachannel.md` section 6), with no `env` wrapper and no `cause`, `g` or `to` (owner's decision of 2026-11-21: no attack-and-defence code) | P-1b |
 | one confirmed task end to end, with and without a remote | B-01 slice (c) |
+| the people and confirm shapes of `contracts/step-2/people.md` section 8 and `contracts/step-2/confirm.md` section 3 to 6, and `hello` with `v` 2 | P-4a |
+| the watch, team, forge and export shapes of `contracts/step-2/watch-team.md`, `checks-forge.md` and `export.md` | P-4b |
+| the note types `preset` and `kb`, the brief's `preset`, `kb_put`, `kb_search`, and the `driver` object of `host.info` | P-5 |
 | the additions of `contracts/step-3/profiles.md` section 6: the four fields of an AI member, `member` in `host.leave`, `refresh` and `models` in `host.info`, `stuck` on the task row | P-6 |
 | the additions of `contracts/step-3/external.md` section 12: `tool` on an AI member, `host.join` for `external`, `exe` and the `external` agent in `host.info`, the tool list `external`, the hand-out | P-7 |
 

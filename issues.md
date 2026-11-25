@@ -133,9 +133,9 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-22 · deviation · A confirmed brief cannot yet be replaced
 
-- Symptom: a new brief cannot replace a confirmed one as required by A9.13.
-- Cause: `internal/home/cmd_brief.go:153` accepts only pending or revised briefs as predecessors.
-- Status: open; A9.13 remains pending for T2-2b.
+- Symptom: a new brief cannot replace a confirmed one, although A9.13 and `labels.md` section 4 said it did.
+- Cause: `internal/home/cmd_brief.go:153` accepts only pending or revised briefs as predecessors, as `planning/contracts/commands.md` 1.3 says.
+- Status: resolved by decision (2026-11-25): the code stays. A started task's direction changes by cancelling the task and confirming a new brief, and `labels.md` section 4 and A9.13 in `planning/steps/step-2-3-acceptance.md` now say so. The A9.13 scenario in `features/` is changed by another unit and stays pending until then.
 
 ### 2026-11-22 · limitation · The OpenCode driver is declared from documentation, not from a capture
 
@@ -275,12 +275,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: row 23 writes no row (`planning/contracts/task-machine.md` row 23), so `After["quiet"]` records each notified task's last-activity timestamp in the group's `State.quiet` in memory (`rndRememberQuiet` in `internal/home/rounds.go:121`, `internal/home/home.go:69`).
 - Status: open, accepted in step 1.
 
-### 2026-11-22 · deviation · `driver` in `host.info` is optional until T3-2 fills it
-
-- Symptom: `planning/contracts/step-3/drivers.md` section 6 says each entry of `agents` carries `driver` always, but the frozen shape lets it be absent: Go `Driver *Driver` with `omitempty` (`internal/proto/host.go`, `HostAgent`), TS `v.optional(Driver)` (`web/src/lib/proto.ts`, `HostState.agents`), and `agents.driver` under `optional` in `internal/proto/testdata/wire.json`.
-- Cause: nothing on rebuild fills `driver` yet; a required field now would make the web client reject every real `host.info` until T3-2 lands. P-5 froze `driver` as `accounts` and `takeover` only; the other declaration fields stay in the host's table (coordinator, 2026-11-22).
-- Status: open, accepted for P-5. T3-2, the pull request that fills `driver` for every agent, makes it required: Go: the `Driver` field (JSON `driver`) (value type, no `omitempty`), TS `driver: Driver`, regenerate `wire.json` with `go test ./internal/proto -update`, and drop "once populated" from `internal/proto/README.md` (the `host.info` bullet). Also accepted: P-5 does not freeze the tool lists in `internal/proto/testdata/tools.json` (`planning/contracts/step-3/knowledge.md` section 7), because `internal/host` tests require it to equal the registered schemas; T3-5 adds `note_list` `type` and `propose_brief` `preset`, T3-6 adds `kb_put` and `kb_search` to all five lists, and the two merge with `go test ./internal/proto -update`.
-
 ### 2026-11-22 · limitation · Existing stores do not get the `row_named` index
 
 - Symptom, cause and status: T3-5 added `row_named` to migration 1 in place (`internal/store/schema.sql`), so a store created before it keeps working without the index and a preset lookup scans the group's notes instead; accepted before 1.0, since migrations are cut.
@@ -419,7 +413,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
   2. `Status` (`internal/node/update.go:40`) is written by `Check` and read for `host.info`; read from another goroutine, it races.
   3. `Restart` (`:39`) must replace the process in place (exec on Unix). launchd and systemd stop the whole process group when the node's process ends, so a child started before the exit would be stopped with it.
 - Cause: the `Updater` holds no lock and does not restart by itself; the owner of the runtime is to call `Check` and `Apply` under the lock that admits turns and takeovers, copy `Status` under it, and supply a `Restart` that execs.
-- Status: open, postponed off the step-1 main line (`N-6`).
+- Status: open, postponed off the step-1 main line (`N-6`). Version 1 ships without self-update; `install.md` says how to update by hand.
 
 ### 2026-11-21 · limitation · `Sessions` handlers and runtime pairing/surface wiring across `HM-2`, `HM-3`, `N-3` and `N-4`
 
@@ -935,7 +929,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: a current node does not admit a browser through an invitation; it knows only protocol version 1.
 - Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts`. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a. U2-1 supplies the join page and member controls.
-- Status: resolved. T2-1a (#309), T2-1b (#304) and W2-1 (#307) are merged.
+- Status: partly resolved. T2-1a (#309), T2-1b (#304) and W2-1 (#307) are merged, but they never registered a home handler for `invite` (`internal/home/cmd_people.go` registered only `join`; found 2026-11-25), so no group could admit a second person. #382 added the handler. Two fixture faults remain in the people scenarios (A9.2, A9.4 to A9.6 and the setups that join an AI): `features/helpers_test.go:600` starts the in-process home without `LoopConfig.Invite`, so the link of A9.2 is empty, and `JoinAI` in `features/s2_cast_test.go:845` sends `host.join` without the `home.add` that the web client sends after joining (`web/src/lib/join.ts:86`), so the host answers `home_unreachable`.
 
 ### 2026-11-22 · bug · Codex treated every failed thread resume as a lost session
 
