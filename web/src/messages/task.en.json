@@ -6,7 +6,7 @@
   "task.badge.reviewer": "Waiting for a reviewer",
   "task.badge.conflict": "Merge conflict",
   "task.badge.paused": "Paused",
-  "task.badge.takeover": "Owner is driving",
+  "task.badge.takeover": "AI's owner is driving",
   "task.badge.failed": "Stopped",
   "task.badge.failed.count": "Stopped after {n} failures",
   "task.badge.failed.reviews": "Stopped after {n} failed reviews",

@@ -412,7 +412,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
     start and from every `reset`, S at `synced`, then the `seq` of each live row applied; rows
     before `synced` and pages never move it, so a reset that breaks off starts again from nothing
     and a delta that breaks off keeps its place. The answer to a read moves the cursor only when
-    no later read of the group was started and its connection is still the home's.
+    no later read of the group was started and its connection is still the home's. After `synced`
+    it fetches, one row each, the requests of the waiting confirm cards that the read did not bring.
   - `older(thread)` fetches one page of a thread, or of the main line, and then the page before
     the lowest `pos` received. No page is asked for while the group is being read: the paging
     starts again at `synced`, from the rows the read brought. The main line starts before the oldest of the newest 50 messages
@@ -477,8 +478,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
   - Confirmation cards (`src/components/confirm/`) name who asks to act, answer a call, or watch a
     terminal (`confirmSentence` in `src/lib/confirm.ts`, also the card's subject in the lists of what
     waits). The watch card names its author; other cards name the author of the referenced request,
-    or who confirmed it when it is a brief. Only a reader named in `body.to` sees the pending card's Confirm and Deny actions;
-    everyone sees whether it is pending, confirmed, denied or expired.
+    or who confirmed it when it is a brief, and the task in place of a person when it is the `task`
+    message of a task without a brief. Only a reader named in `body.to` sees the pending card's
+    Confirm and Deny actions; everyone sees whether it is pending, confirmed, denied or expired.
   - The member panel (`src/components/member/`) mounts at `chat.side` (`order: 10`). It lists the
     group's AI members, placing the secretary first with its corner mark, with each AI's state
     (`working`, `waiting` on the reader in dawn or on another member, `dormant` as sleeping,

@@ -171,6 +171,10 @@ export class TestHome {
   }
 
   #fetch(req: Fields, group: Stored, re: number) {
+    if (req.r) {
+      const row = group.rows.get(`${req.r} ${req.row}`);
+      return { t: 'fetched', re, ok: true, rows: row ? [row] : [], more: false };
+    }
     const before = req.before as number;
     const scope = [...group.rows.values()]
       .filter((row) => (req.thread === null ? inMain(row) : row.thread === req.thread))

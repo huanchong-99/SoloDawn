@@ -25,8 +25,18 @@ function requester(group: Group, msg: Confirm): string {
   return nameOf(group, request.by);
 }
 
-/** "Let Codex act on the request from Pat." */
-export const confirmSentence = (group: Group, msg: Confirm): string =>
-  t(sentences[msg.body.what as keyof typeof sentences])
-    .replace('{ai}', () => nameOf(group, msg.body.ai))
+/** "Let Codex act on the request from Pat." The request of a role in a task without a brief is the
+ *  `task` message, which has the task's id. No row says who started such a task, so the sentence
+ *  names the task. */
+export function confirmSentence(group: Group, msg: Confirm): string {
+  const ai = () => nameOf(group, msg.body.ai);
+  const task = group.task(msg.re ?? undefined);
+  if (task)
+    return t('confirm.request.task')
+      .replace('{ai}', ai)
+      .replace('{task}', () => `T-${task.num}`)
+      .replace('{title}', () => task.title);
+  return t(sentences[msg.body.what as keyof typeof sentences])
+    .replace('{ai}', ai)
     .replace('{who}', () => requester(group, msg));
+}

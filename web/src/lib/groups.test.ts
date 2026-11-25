@@ -716,6 +716,85 @@ describe('waiting for you', () => {
   });
 });
 
+describe('the request of a confirm card that waits', () => {
+  const caller = row('row-member-ai', { id: 'caller', name: 'Caller' });
+  const answerer = row('row-member-ai', { id: codex, name: 'Codex' });
+  const call = row('row-msg-call-waiting', { id: 'call', by: 'caller', thread: task });
+  const card = (id: string, re: string | null, changes: object = {}) =>
+    row('row-msg-confirm-pending', {
+      id,
+      re,
+      by: 'system',
+      body: { what: 'ask', ai: codex, to: [user] },
+      ...changes,
+    }) as p.MsgRow;
+  const fetchRow = (id: string) => ({
+    t: 'fetch',
+    g: website,
+    r: 'msg',
+    row: id,
+    before: 0,
+    limit: 1,
+  });
+
+  /** A cold read that brings these rows. */
+  async function readWith(...of: p.Row[]) {
+    const all = joined();
+    all.link.push(rows(caller, answerer, ...of));
+    all.asked[0].answer(synced(815));
+    await settle();
+    return { ...all, asked: all.asked.slice(1) };
+  }
+
+  it('is fetched when the read did not bring it, once for each request', async () => {
+    const { group, asked } = await readWith(
+      card('first', 'call'),
+      card('second', 'call'),
+      card('third', 'mention'),
+    );
+    expect(asked.map((ask) => ask.req)).toEqual([fetchRow('call'), fetchRow('mention')]);
+    const sentence = () => subject(group, group.waiting[0]);
+    expect(sentence()).toBe('Let Codex answer the call from an unknown requester.');
+    asked[0].answer(fetched([call], false));
+    asked[1].answer({ re: 2, err: { code: 'internal', msg: 'no' } });
+    await settle();
+    expect(sentence()).toBe('Let Codex answer the call from Caller.');
+    expect(group.rows.has('msg mention')).toBe(false);
+    expect(group.cursor).toBe(815);
+  });
+
+  it('is not fetched when it is held, was removed, or there is none', async () => {
+    const { asked } = await readWith(
+      call,
+      gone('msg', 'removed', 700),
+      row('row-task', { id: 'started' }),
+      card('held', 'call'),
+      card('gone', 'removed'),
+      card('role', 'started'),
+      card('watch', null, { by: 'caller', body: { what: 'watch', ai: codex, to: [user] } }),
+      card('other', 'theirs', { body: { what: 'ask', ai: codex, to: ['somebody'] } }),
+      card('over', 'past', { state: { status: 'expired', at: 1 } }),
+      row('row-msg-decision-pending', { id: 'decision', re: 'question' }),
+    );
+    expect(asked).toEqual([]);
+  });
+
+  it('is dropped when it comes too late', async () => {
+    const { home, group, asked } = await readWith(card('first', 'call'));
+    void group.sync(home.ctl!);
+    asked[0].answer(fetched([call], false));
+    await settle();
+    expect(group.rows.has('msg call')).toBe(false);
+  });
+
+  it('stays unknown when the connection loses it', async () => {
+    const { group, asked } = await readWith(card('first', 'call'));
+    asked[0].fail();
+    await settle();
+    expect(group.rows.has('msg call')).toBe(false);
+  });
+});
+
 describe('the subject of a message', () => {
   const group = joined().group;
   const msg = (name: string, changes: object = {}) => row(name, changes) as p.MsgRow;

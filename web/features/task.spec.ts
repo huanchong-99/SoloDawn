@@ -488,8 +488,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           flushSync();
         },
       );
-      Then('the task card shows the takeover badge "Owner is driving" with step "now"', () => {
-        expect(badge().textContent?.trim()).toBe('Owner is driving');
+      Then(`the task card shows the takeover badge "AI's owner is driving" with step "now"`, () => {
+        expect(badge().textContent?.trim()).toBe("AI's owner is driving");
         expect(badge().querySelector<HTMLElement>('.st')?.dataset.st).toBe('takeover');
         expect(badge().dataset.tone).toBeUndefined();
         expect(mark()).toBe('now');
