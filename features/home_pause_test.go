@@ -30,12 +30,9 @@ type homePausePeer struct {
 }
 
 func (p *homePausePeer) next() ([]byte, error) {
-	select {
-	case raw := <-p.client.ch:
-		return raw, nil
-	case <-time.After(2 * time.Second):
-		return nil, errors.New("timed out waiting for frame")
-	}
+	w := newWait(2*time.Second, "a frame", p.client.saw)
+	defer w.stop()
+	return recvWait(w, p.client.ch)
 }
 
 type homePauseWorld struct {
