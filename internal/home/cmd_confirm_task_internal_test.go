@@ -146,6 +146,17 @@ func TestNewRoleAuthorityAndDuplicates(t *testing.T) {
 	c.Who.User = "q"
 	cardTestSame(t, s.cftHoldItem(c, d, Item{AI: "a", Task: "t", Why: itemAssign}, old), false)
 	cardTestSame(t, cftOwnerChange(c, task, task, "r", "q"), false)
+	old = task
+	old.Reviewer = "old"
+	cardTestSame(t, cftOwnerChange(c, old, task, "r", "q"), true)
+}
+
+func TestTaskItemWithoutRowsIsGated(t *testing.T) {
+	s, _, task, card, c := cftFixture()
+	res := s.cftFinish(c, Result{Items: []Item{{AI: task.Assignee, Task: task.ID, Why: itemAssign}}})
+	cardTestSame(t, res.Items, []Item{})
+	task.Wait = &proto.TaskWait{Kind: waitConfirm, Msg: card.ID, Who: []string{"q"}}
+	cardTestSame(t, res.Rows, []Row{RowOf(task)})
 }
 
 func TestRoleGrantOnDependencyActivationAndMultipleActiveTasks(t *testing.T) {

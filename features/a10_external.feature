@@ -1,6 +1,5 @@
 Feature: External agents take and finish one item without a CLI driver
 
-  @pending
   Scenario: Join and label external members without agent.set (A10.17)
     Given a running external acceptance project
     When the owner joins external member "X" with account "api_key" and tool "ZCode"
@@ -11,7 +10,6 @@ Feature: External agents take and finish one item without a CLI driver
     When the owner joins external member "Y" with account "team" and tool "Other"
     Then host info advertises both external members and the node executable
 
-  @pending
   Scenario: A nonblocking look hands out each mention once (A10.18)
     Given an external acceptance project with X
     Then an external look exits 3
@@ -35,7 +33,6 @@ Feature: External agents take and finish one item without a CLI driver
     Then an external look exits 3
     And an external look rejects an unknown member
 
-  @pending
   Scenario: Blocking and timed waits end for the right reason (A10.19)
     Given an external acceptance project with X
     When an external blocking wait starts
@@ -50,7 +47,7 @@ Feature: External agents take and finish one item without a CLI driver
     And the external owner removes X
     Then the external blocking wait exits 1
 
-  @pending @not-windows
+  @not-windows
   Scenario Outline: A runner starts exactly one agent for each item (A10.20)
     Given an external acceptance project with X
     And the external owner mentions X with "Setup check: answer here in one line, then finish."
@@ -65,14 +62,13 @@ Feature: External agents take and finish one item without a CLI driver
       | loop      |
       | scheduler |
 
-  @pending @not-windows
+  @not-windows
   Scenario Outline: A runner starts queued items one after the other (A10.20)
     Given an external acceptance project with X
     And the external owner mentions X with "First external mention"
-    And the external owner mentions X with "Second external mention"
-    Then the external home has 2 inbox items
+    Then the external home has 1 inbox items
     And external member "X" has state "offline"
-    When the "<runner>" runs 2 queued external items
+    When the "<runner>" runs 2 queued external items, with the second mention arriving while X is working on the first
     Then X posts "First external answer" in the external project
     And X posts "Second external answer" in the external project
     And external member "X" has state "waiting"
@@ -82,7 +78,6 @@ Feature: External agents take and finish one item without a CLI driver
       | loop      |
       | scheduler |
 
-  @pending
   Scenario: External MCP acts as X and is scoped to its open run (A10.21)
     Given an external acceptance project with X
     And a scripted stdio MCP client connects as X
@@ -107,7 +102,6 @@ Feature: External agents take and finish one item without a CLI driver
     Then external member "X" has state "waiting"
     And external MCP rejects an unknown member
 
-  @pending
   Scenario Outline: External task and review runs use their own checkout (A10.22)
     Given a project with external X and forge "<forge>"
     And a scripted stdio MCP client connects as X
@@ -151,7 +145,6 @@ Feature: External agents take and finish one item without a CLI driver
       | timeout   | timeout |
       | restart   | crash   |
 
-  @pending
   Scenario: A paused group and an offline host hold waiting mentions (A10.24)
     Given an external acceptance project with X
     When the external owner sets group to "pause"
@@ -189,7 +182,6 @@ Feature: External agents take and finish one item without a CLI driver
     And the external owner queues and jumps a newer item
     Then the jump heads the next external handout
 
-  @pending
   Scenario: Usage reaches the row, list_members and the secretary's turn (A10.25)
     Given an external acceptance project with X
     And a scripted stdio MCP client connects as X
@@ -212,12 +204,13 @@ Feature: External agents take and finish one item without a CLI driver
     When X requests a second Bash approval in the external task
     Then the owner can deny it and X receives the denial message
 
+  Scenario: Presence expires when the external runner stops (A10.27)
+    Then a connected external runner stays waiting until its 180 second presence interval expires
+
   @pending
-  Scenario: Presence expires and removal revokes access (A10.27)
+  Scenario: Offline work is held and removal revokes access (A10.27)
     Given an external acceptance project with X
-    And a scripted stdio MCP client connects as X
-    When the external runner stops
-    Then X becomes offline after the external presence interval
+    Then external member "X" has state "offline"
     And the external secretary's next turn lists X as offline
     When the external owner mentions X with "Keep this offline mention"
     Then the external home has 1 inbox items

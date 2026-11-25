@@ -171,6 +171,15 @@ func TestAllocationPlaces(t *testing.T) {
 	})
 }
 
+func TestLateAllocationCountsTowardSource(t *testing.T) {
+	a := newAllocations()
+	src := &net.UDPAddr{IP: net.IPv4(198, 51, 100, 1), Port: 9}
+	a.created("d", src)
+	if got := a.sources["198.51.100.1"]; got != 1 {
+		t.Fatalf("source count = %d; want 1", got)
+	}
+}
+
 // A client transport address has permissions for at most 64 peer IPs.
 // Refreshing one it has is always allowed, and a removed one frees its place.
 func TestPermissionLimit(t *testing.T) {
@@ -395,6 +404,20 @@ func TestRelayPortRange(t *testing.T) {
 		t.Fatal(again, err)
 	}
 	again.Close()
+}
+
+func TestRelaySkipsReservedPort(t *testing.T) {
+	g := testGenerator(&ledger{}, net.IPv4(127, 0, 0, 1))
+	g.portRange = freeRange(t)
+	g.holdPort(portKey{false, g.portRange.First})
+	c, err := g.listen("udp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if got := c.LocalAddr().(*net.UDPAddr).Port; got != g.portRange.Last {
+		t.Fatalf("bound port %d; want %d", got, g.portRange.Last)
+	}
 }
 
 // A relay socket of the other family than the bind address fails at once,

@@ -55,6 +55,34 @@ Each is a package map. The file that provides an entry adds it from its `init` w
 
 In `home_moved.go`, a `groups` push triggers a new sync if a live group is missing or a tracked group appears before sync succeeds. On `moved`, `followMovedHome` replaces the saved home and keeps the old home's signalling URLs.
 
+## Diagnostics
+
+`diag.go` writes the host's events of [diagnostics](../../planning/contracts/diagnostics.md) section
+2 through `log/slog`, with a logger made in `New` that holds `node`, the first 8 characters of the
+host's key id; a line holds ids, counts and states, never the text of a message or a turn, and a
+home's device id is cut to 8 characters. `host.attach` (`Attach`) and `host.detach`
+(`watchHomeConn`, when the connection is done), `home`; `sync.begin` and `sync.end` (`syncOneGroup`:
+`g`, `home`; at the end `seq`, `ok`); `rows.recv` (`pushRows`: `g`, `home`, `seq` the first and last
+row, `""` for none); `inbox.recv` (`handleInboxElem`: `g`, `item`, `ai`, `kind` the item's `why`,
+`seen`); `inbox.hand` (`tryOpenWait`: `g`, `item`, `wait`); `inbox.take` (`takeEligibleBatch` when
+the AI's queue is not empty: `g`, `ai`, `task`, `took` and `left` item numbers, `paused` the one
+pause reading of the batch); `ack.send` (`sendAck`: `g`, `home`, `item`); `turn.begin` and
+`turn.end` (the `diag` entry of `Listeners`: `g`, `ai`, `task`; at the end `status`);
+`turn.interrupt` (`interruptSessionTurn`, when it claims the turn: `why`); `proc.start` and
+`proc.exit` (`launchSessionProcess`, `runProcessLoop`: `agent`; `resume` at the start, `why` at the
+exit, the claimed interrupt or the event that ended the process); `run.open` and `run.close`
+(`extOpenRun`, `extEnd`: `g`, `ai`, `run`; at the close `why` `done`, `crash` or `timeout`); `tool`
+(`runToolCall`, when the call returns: the session, `name`, `code` `ok` or the error code, `ms`);
+`settle.begin` and `settle.end` (`Settle`). `Host.bg` is the one wrapper for the work the host
+starts on its wait groups, the hosted checks poll, the answer to a CLI's question and the goroutines
+of a watched terminal. The work's goroutine, not the caller, who may hold a mutex, writes `bg.start`
+and `bg.stop` (`name`: `ask`, `cloud_poll`, `deliver`, `group_state`, `group_sync`, `hand_back`,
+`home_flush`, `home_sync`, `home_watch`, `member_status`, `path_watch`, `presence`, `run_timeout`,
+`watch_conn`, `watch_write`; `g` and `task` when the work has them), the stop before the wait
+group's `Done`, so that `Settle` returns after it. `diag_test.go` reads the lines from the standard
+logger and checks each once with its fields, and `inbox.take` with the pause reading and what it
+left.
+
 ## Hooks
 
 One unit implements a hook and sets it from its `init` with `Provide(&Hook, value)`, which panics when the hook is set already.
@@ -296,7 +324,7 @@ The rules are in [mcp-tools.md](../../planning/contracts/mcp-tools.md) and [loca
 `external.go` and `tools_external.go` implement the host side of the external AI ([external.md](../../planning/contracts/step-3/external.md) sections 2 to 10).
 
 - **Joining.** `host.join` with `agent` `external` needs `account` (`personal`, `team` or `api_key`), takes an optional `tool`, refuses `secretary` `true` and reads no `agent.set`. It sends `member add_ai` with `cli` `external` and that `tool`, creates an ordinary `GroupSession` with `Agent` `external` and no `CLISession`, then reports the state. `host.leave` and `member remove` are unchanged. `Agents` ends with one entry `external`; the node fills its `groups`.
-- **Runs.** Delivery never starts a turn for an external member. `ExternalTake` hands out the next batch: it reuses delivery's selection, routing, folder, `delivered` audit and acknowledgement, moves the session row to `Working` and opens the member's one run, numbered by the batch's first item. `context` is the session instructions, `instructions/external.md` and the replaced-session context. `ExternalDone` with the open run moves the row to `Waiting`; with `failed` it reports `turn_interrupted` `crash` with that text, which fails a task session. After `limits.turn_minutes` the run ends the same way with `timeout`, and the process is not stopped. A `done` for any other run changes nothing. A restart reports `crash` through `ReportSaved`.
+- **Runs.** Delivery never starts a turn for an external member. `ExternalTake` hands out the next batch: it reuses delivery's selection, routing, folder, `delivered` audit and acknowledgement, moves the session row to `Working` and opens the member's one run, numbered by the batch's first item. `task` is `T-<num>` of a task or review session (`turnCtx.taskRef`) and empty for a group run. `context` is the session instructions, `instructions/external.md` and the replaced-session context. `ExternalDone` with the open run moves the row to `Waiting`; with `failed` it reports `turn_interrupted` `crash` with that text, which fails a task session. After `limits.turn_minutes` the run ends the same way with `timeout`, and the process is not stopped. A `done` for any other run changes nothing. A restart reports `crash` through `ReportSaved`.
 - **Presence and state.** `ExternalPresent` marks a command or MCP connection open until its `leave`; the member stays present for 180 s after the last one. The reported state is `working` while a run is open, then `offline` (absent or all AIs offline), `paused`, and otherwise `waiting`.
 - **Shutdown.** `Settle` (entry `"external"`) sets `settled` under `extPart.mu`, stops the run and presence timers and waits for `extPart.wg`, which runs every timer callback; after that a `leave` or a hand-out arms no timer.
 - **Member id.** `ServeMCP` and `RunShim --member <id>` accept the member id of an external AI on this node in place of a session token; an id that names none closes the connection. The caller is the session of the open run, or the group session without one, at level 3, and the connection counts as present. `ExternalWait` serves both `solodawn wait` and `next_item`: it takes a hand-out, or waits until delivery or removal wakes it, the timeout passes or the caller goes; `ExternalEnd` serves `solodawn done` and `done`, and a run that is not open changes nothing.

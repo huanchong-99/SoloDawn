@@ -357,7 +357,7 @@ func (w *m6World) createAndSyncGroup() error {
 }
 
 func (w *m6World) requestGroupSync() error {
-	raw, err := w.homeLink.conn.Request(w.ctx, func(id int64) any {
+	raw, err := w.homeLink.request(w.ctx, func(id int64) any {
 		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: string(w.groupID), Since: 0, StateOnly: false}
 	})
 	if err != nil {
@@ -384,8 +384,12 @@ func (w *m6World) setGroupAskWait(waitS int) error {
 }
 
 func (w *m6World) sendSignedCmd(conn *peer.Connection, signer identity.Key, payload any) error {
+	var saw *trail
+	if w.homeLink != nil && conn == w.homeLink.conn {
+		saw = &w.homeLink.saw
+	}
 	env := signer.Sign(string(mustMarshalNoEscape(payload)))
-	raw, err := conn.Request(w.ctx, func(id int64) any {
+	raw, err := requestWait(w.ctx, conn, saw, func(id int64) any {
 		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
 	})
 	if err != nil {

@@ -271,7 +271,7 @@ func TestRestartDoesNotForgetFutureOffer(t *testing.T) {
 func TestCloseFirstLeavesOutboundAlone(t *testing.T) {
 	f := newPair(t)
 	closed := make(chan struct{})
-	f.b.slot[f.a.key.ID()] = &Connection{close: func() error { close(closed); return errors.New("old transport") }}
+	f.b.slot[f.a.key.ID()] = &Connection{close: func(string) error { close(closed); return errors.New("old transport") }}
 	first := f.open(t, 0)
 	recv(t, closed)
 	back := dial(t, f.b, f.a, f.bMail, f.aMail, f.aOpened, 0)
@@ -454,7 +454,7 @@ func TestEarlyAndRetiredCutoffs(t *testing.T) {
 	p.prune(130001)
 	eq(t, len(p.early), 0)
 	f.now.Store(800000)
-	old := &Connection{ctx: context.Background(), close: func() error { return nil }}
+	old := &Connection{ctx: context.Background(), close: func(string) error { return nil }}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	old.ctx = ctx

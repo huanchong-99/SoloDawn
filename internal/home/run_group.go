@@ -35,6 +35,7 @@ type runSeat struct {
 // run does the jobs of the group, one after the other.
 func (g *runGroup) run() {
 	defer g.loop.wg.Done()
+	defer g.loop.diagBG("group", "g", g.state.ID)()
 	for {
 		job, ok := g.jobs.pop()
 		if !ok {

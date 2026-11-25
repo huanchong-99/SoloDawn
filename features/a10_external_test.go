@@ -149,6 +149,27 @@ func (w *externalWorld) state(name, state string) error {
 	return w.waitState(func() bool { return w.aiByName[name].State == state })
 }
 
+func (w *externalWorld) waitExternalPush(what string, ready func() bool) error {
+	wait := newWait(5*time.Second, what, nil)
+	defer wait.stop()
+	for !ready() {
+		raw, err := recvWait(wait, w.homeLink.pushes)
+		if err != nil {
+			return err
+		}
+		if raw == nil {
+			return errors.New("ctl connection closed before push")
+		}
+		var header struct {
+			Type string `json:"t"`
+		}
+		_ = json.Unmarshal(raw, &header)
+		wait.saw.see(header.Type)
+		w.recordRowsFrame(raw)
+	}
+	return nil
+}
+
 func (w *externalWorld) relabel(tool string) error {
 	cmd := proto.MemberSet{MemberCommand: proto.MemberCommand{HomeCommand: w.homeHeader("member"),
 		Op: "set", ID: proto.ID(w.aiByName["X"].ID)}, Tool: &tool}
@@ -369,7 +390,7 @@ func externalRunnerSteps(sc *godog.ScenarioContext, w *externalWorld) {
 	sc.Step(`^an external look rejects an unknown member$`, func() error { return w.missingWait(string(exampleID("unknown external"))) })
 	sc.Step(`^an external look rejects the removed member$`, func() error { return w.missingWait(w.aiByName["X"].ID) })
 	sc.Step(`^the external handout folder is the project clone$`, w.checkClone)
-	sc.Step(`^the "([^"]+)" runs (\d+) queued external items$`, w.runQueued)
+	sc.Step(`^the "([^"]+)" runs (\d+) queued external items(?:, with the second mention arriving while X is working on the first)?$`, w.runQueued)
 }
 
 func (w *externalWorld) openMCP() error {
@@ -383,12 +404,22 @@ func (w *externalWorld) openMCP() error {
 }
 
 func (w *externalWorld) connect(member string) (*mcp.ClientSession, error) {
+	start := time.Now()
 	client := mcp.NewClient(&mcp.Implementation{Name: "external-acceptance", Version: "1"}, nil)
-	return client.Connect(w.ctx, &mcp.CommandTransport{Command: w.command("mcp", "--member", member)}, nil)
+	session, err := client.Connect(w.ctx, &mcp.CommandTransport{Command: w.command("mcp", "--member", member)}, nil)
+	if err != nil {
+		return nil, ctxCallErr(w.ctx, start, "external MCP connect", nil, err)
+	}
+	return session, nil
 }
 
 func (w *externalWorld) call(name string, args any) (*mcp.CallToolResult, error) {
-	return w.mcp.CallTool(w.ctx, &mcp.CallToolParams{Name: name, Arguments: args})
+	start := time.Now()
+	res, err := w.mcp.CallTool(w.ctx, &mcp.CallToolParams{Name: name, Arguments: args})
+	if err != nil {
+		return nil, ctxCallErr(w.ctx, start, "external MCP tool "+name, nil, err)
+	}
+	return res, nil
 }
 
 func externalResult(result *mcp.CallToolResult) ([]byte, error) {
@@ -434,10 +465,11 @@ func (w *externalWorld) listedTools() error {
 	for _, t := range golden.External.Tools {
 		want = append(want, t.Name)
 	}
+	start := time.Now()
 	var got []string
 	for tool, err := range w.mcp.Tools(w.ctx, nil) {
 		if err != nil {
-			return err
+			return ctxCallErr(w.ctx, start, "external MCP Tools", nil, err)
 		}
 		got = append(got, tool.Name)
 	}
@@ -447,22 +479,40 @@ func (w *externalWorld) listedTools() error {
 	return nil
 }
 
-func (w *externalWorld) nextItem(none bool) error {
+func (w *externalWorld) callNextItem() ([]byte, error) {
 	result, err := w.call("next_item", map[string]any{})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if result.IsError {
-		return fmt.Errorf("next_item returned an error: %+v", result)
+		return nil, fmt.Errorf("next_item returned an error: %+v", result)
 	}
-	raw, err := externalResult(result)
-	if err != nil {
-		return err
-	}
+	return externalResult(result)
+}
+
+func (w *externalWorld) nextItem(none bool) error {
 	if none {
+		raw, err := w.callNextItem()
+		if err != nil {
+			return err
+		}
 		return expectExternalNone(raw)
 	}
-	return w.decodeHandout(raw)
+	return waitUntil(5*time.Second, "external MCP next_item handout", w.pollNextItem)
+}
+
+func (w *externalWorld) pollNextItem() error {
+	raw, err := w.callNextItem()
+	if err != nil {
+		return abort(err)
+	}
+	if expectExternalNone(raw) == nil {
+		return errors.New("none")
+	}
+	if err := w.decodeHandout(raw); err != nil {
+		return abort(err)
+	}
+	return nil
 }
 
 func expectExternalNone(raw []byte) error {
@@ -476,6 +526,7 @@ func expectExternalNone(raw []byte) error {
 func (w *externalWorld) rejectsMCP(member string) error {
 	ctx, cancel := context.WithTimeout(w.ctx, 5*time.Second)
 	defer cancel()
+	start := time.Now()
 	client := mcp.NewClient(&mcp.Implementation{Name: "external-acceptance", Version: "1"}, nil)
 	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: w.command("mcp", "--member", member)}, nil)
 	if err == nil {
@@ -483,7 +534,7 @@ func (w *externalWorld) rejectsMCP(member string) error {
 		return fmt.Errorf("MCP connected for invalid member %q", member)
 	}
 	if ctx.Err() != nil {
-		return fmt.Errorf("MCP did not close promptly: %w", ctx.Err())
+		return ctxEnded(ctx, start, "external MCP connect rejection", nil)
 	}
 	return nil
 }

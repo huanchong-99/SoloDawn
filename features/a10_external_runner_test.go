@@ -98,16 +98,17 @@ func externalAgentAnswer(run string) (string, error) {
 func externalAgentPost(answer string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	start := time.Now()
 	cmd := exec.CommandContext(ctx, os.Getenv("EXTERNAL_SOLODAWN"), "mcp", "--member", os.Getenv("EXTERNAL_MEMBER"))
 	client := mcp.NewClient(&mcp.Implementation{Name: "external-scripted-agent", Version: "1"}, nil)
 	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
 	if err != nil {
-		return err
+		return ctxCallErr(ctx, start, "external scripted MCP connect", nil, err)
 	}
 	defer session.Close()
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "post", Arguments: map[string]string{"text": answer}})
 	if err != nil {
-		return err
+		return ctxCallErr(ctx, start, "external scripted MCP post", nil, err)
 	}
 	if res.IsError {
 		return fmt.Errorf("scripted external post failed: %+v", res)
@@ -225,7 +226,11 @@ func (r *externalRunner) look(script string) {
 
 func (w *externalWorld) observeRunner(r *externalRunner, items [][2]string) error {
 	for i, item := range items {
-		if err := w.observeRunnerItem(r, i+1, item); err != nil {
+		var queued string
+		if i == 0 && len(items) == 2 {
+			queued = items[1][0]
+		}
+		if err := w.observeRunnerItem(r, i+1, item, queued); err != nil {
 			return err
 		}
 	}
@@ -234,16 +239,28 @@ func (w *externalWorld) observeRunner(r *externalRunner, items [][2]string) erro
 		func() error { _, err := r.starts(len(items)); return err })
 }
 
-func (w *externalWorld) observeRunnerItem(r *externalRunner, count int, item [2]string) error {
+func (w *externalWorld) observeRunnerItem(r *externalRunner, count int, item [2]string, queued string) error {
 	run, err := r.nextStart()
 	if err != nil {
 		return err
 	}
 	return s3Run(func() error { return w.checkRunnerInput(r, run, count, item[0]) },
 		func() error { return w.state("X", "working") },
+		func() error { return w.queueDuringRun(r, queued) },
 		r.expectEmptyLook,
 		func() error { return r.finish(item[1]) },
 		func() error { return w.externalPost(item[1]) })
+}
+
+func (w *externalWorld) queueDuringRun(r *externalRunner, text string) error {
+	if text == "" {
+		return nil
+	}
+	return s3Run(func() error { return w.inbox(0) },
+		func() error { return w.whenOwnerMentionsAI("X", text) },
+		func() error { return w.inbox(1) },
+		func() error { return w.look(3) },
+		func() error { _, err := r.starts(1); return err })
 }
 
 func (r *externalRunner) nextStart() (string, error) {

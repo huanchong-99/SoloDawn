@@ -136,7 +136,7 @@ func (w *m1World) createGroupFromFirstBrowser(name string) error {
 	payload := fmt.Sprintf(`{"t":"group","op":"create","n":%q,"ts":%d,"g":%q,"name":%q,"kind":"project","repo":"/tmp/website","base":"main","forge":"none","checks":[],"member_name":"Owner"}`,
 		gid, w.now.UnixMilli(), gid, name)
 	env := b.key.Sign(payload)
-	raw, err := bc.conn.Request(w.ctx, func(id int64) any {
+	raw, err := bc.request(w.ctx, func(id int64) any {
 		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
 	})
 	if err != nil {
@@ -172,7 +172,7 @@ func m1VerifyGroupListed(groups []proto.GroupSummary, wantID proto.ID, wantName 
 
 func (w *m1World) syncSecondAndPostFirst(_, text string) error {
 	b1, bc1, bc2 := w.browsers[0], w.conns[0], w.conns[1]
-	rawSync, err := bc2.conn.Request(w.ctx, func(id int64) any {
+	rawSync, err := bc2.request(w.ctx, func(id int64) any {
 		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: string(w.createdGrp), Since: 0, StateOnly: false}
 	})
 	if err != nil {
@@ -186,7 +186,7 @@ func (w *m1World) syncSecondAndPostFirst(_, text string) error {
 	payload := fmt.Sprintf(`{"t":"post","n":%q,"ts":%d,"g":%q,"kind":"text","text":%q,"thread":null,"main":true,"mentions":[],"re":null,"body":{}}`,
 		msgID, w.now.UnixMilli(), w.createdGrp, text)
 	env := b1.key.Sign(payload)
-	rawCmd, err := bc1.conn.Request(w.ctx, func(id int64) any {
+	rawCmd, err := bc1.request(w.ctx, func(id int64) any {
 		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
 	})
 	if err != nil {

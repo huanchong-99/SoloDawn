@@ -96,7 +96,7 @@ func (h *Host) WatchStart(from Owner, device string, data json.RawMessage) (any,
 	p.ok[watchKey{slot, device}] = watchOK{from, user}
 	if !p.connections[from] {
 		p.connections[from] = true
-		go p.monitor(from)
+		h.bg(func(f func()) { go f() }, "watch_conn", func() { p.monitor(from) })
 	}
 	return nil, nil
 }
@@ -170,7 +170,7 @@ func (h *Host) ServeWatch(t Terminal) {
 		return
 	}
 	sendWatchSize(h, key.aiSlot, from)
-	go p.writeLoop(w)
+	h.bg(func(f func()) { go f() }, "watch_write", func() { p.writeLoop(w) }, "g", g)
 	var b [1]byte
 	t.Read(b[:])
 	p.mu.Lock()

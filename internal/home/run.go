@@ -2,6 +2,7 @@ package home
 
 import (
 	"log"
+	"log/slog"
 	"maps"
 	"math"
 	"slices"
@@ -93,13 +94,15 @@ type Loop struct {
 	conns  map[*Conn]bool
 	views  map[string]runView // what each group that exists shows in groups
 	moved  map[string]string
+	diag   *slog.Logger
 }
 
 // StartLoop loads every group and the persisted browser push subscriptions
 // from the store, and starts each group's goroutine.
 func StartLoop(cfg LoopConfig) (*Loop, error) {
 	l := &Loop{cfg: runDefaults(cfg), stop: make(chan struct{}),
-		groups: map[string]*runGroup{}, conns: map[*Conn]bool{}, views: map[string]runView{}}
+		groups: map[string]*runGroup{}, conns: map[*Conn]bool{}, views: map[string]runView{},
+		diag: slog.With("node", diagDevice(cfg.Home))}
 	states, err := l.load()
 	if err != nil {
 		return nil, err
@@ -139,6 +142,7 @@ func runDefaults(cfg LoopConfig) LoopConfig {
 // clock runs the timers of every group as the time goes.
 func (l *Loop) clock() {
 	defer l.wg.Done()
+	defer l.diagBG("clock")()
 	ticker := time.NewTicker(l.cfg.Every)
 	defer ticker.Stop()
 	for {
@@ -275,6 +279,7 @@ func (l *Loop) ask(group string, f func(g *runGroup)) bool {
 // online and Groups is right for it. Attach waits for the groups: it must
 // not be called from a hook, a rule or a transaction of the store.
 func (l *Loop) Attach(device string, client Client) *Conn {
+	l.diag.Info("home.attach", "dev", diagDevice(device))
 	c := &Conn{loop: l, device: device, client: client, gone: make(chan struct{}), frames: runNewQueue[any](runBacklog)}
 	l.mu.Lock()
 	if l.closed {
@@ -356,9 +361,11 @@ func (l *Loop) Cmd(c *Conn, re int64, env proto.Envelope) {
 		return
 	}
 	l.route(group, func(g *runGroup) {
-		if !l.replyMoved(c, re, group) {
-			g.command(c, re, env)
+		if l.replyMoved(c, re, group) {
+			l.diagReply(c, group, re, env, "moved")
+			return
 		}
+		g.command(c, re, env)
 	})
 }
 
@@ -385,6 +392,7 @@ func (l *Loop) stray(c *Conn, re int64, env proto.Envelope) {
 	if _, refusal := l.fresh(runNowhere).open(env, c.seamJoining(), l.cfg.Now()); refusal != nil {
 		res = refused(refusal)
 	}
+	l.diagReply(c, "", re, env, res.Answer.Code)
 	c.send(res.Frame(re))
 }
 

@@ -795,7 +795,7 @@ func (c *s2Cast) SendCmd(p *s2Person, conn *peer.Connection, payload any) (proto
 
 func sendSignedCmdRaw(ctx context.Context, conn *peer.Connection, signer identity.Key, payload any) (json.RawMessage, error) {
 	env := signer.Sign(string(mustMarshalNoEscape(payload)))
-	return conn.Request(ctx, func(id int64) any {
+	return requestWait(ctx, conn, nil, func(id int64) any {
 		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
 	})
 }
@@ -832,7 +832,7 @@ func (c *s2Cast) syncGroup(conn *peer.Connection, gid proto.ID) error {
 }
 
 func syncS2Group(ctx context.Context, conn *peer.Connection, gid proto.ID) error {
-	raw, err := conn.Request(ctx, func(id int64) any {
+	raw, err := requestWait(ctx, conn, nil, func(id int64) any {
 		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: string(gid), Since: 0, StateOnly: false}
 	})
 	if err != nil {

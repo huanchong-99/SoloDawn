@@ -5,6 +5,7 @@ package features
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -12,13 +13,14 @@ import (
 	"os/exec"
 	ossignal "os/signal"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/cucumber/godog"
+	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
 func TestTrailCutsToTheLastTwenty(t *testing.T) {
@@ -234,24 +236,26 @@ func readFile(t *testing.T, dir, name string) string {
 }
 
 func TestRecvCtx(t *testing.T) {
-	ch := make(chan int, 1)
-	ch <- 7
-	if got, err := recvCtx(t.Context(), ch, "a number", nil); got != 7 || err != nil {
-		t.Fatalf("got %d, %v", got, err)
-	}
-	var seen trail
-	seen.see("t=rows seq=1")
-	late, cancelLate := context.WithTimeout(t.Context(), 50*time.Millisecond)
-	defer cancelLate()
-	_, err := recvCtx(late, ch, "a number", &seen)
-	if want := regexp.MustCompile(`^timed out after \d+ms waiting for a number; saw 1: t=rows seq=1$`); err == nil || !want.MatchString(err.Error()) {
-		t.Fatalf("got %v", err)
-	}
-	gone, cancel := context.WithCancel(t.Context())
-	cancel()
-	if _, err := recvCtx(gone, ch, "a number", nil); !errors.Is(err, context.Canceled) {
-		t.Fatalf("got %v, want the cancellation", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		ch := make(chan int, 1)
+		ch <- 7
+		if got, err := recvCtx(t.Context(), ch, "a number", nil); got != 7 || err != nil {
+			t.Fatalf("got %d, %v", got, err)
+		}
+		var seen trail
+		seen.see("t=rows seq=1")
+		late, cancelLate := context.WithTimeout(t.Context(), 50*time.Millisecond)
+		defer cancelLate()
+		_, err := recvCtx(late, ch, "a number", &seen)
+		if want := "timed out after 100ms waiting for a number; saw 1: t=rows seq=1"; err == nil || err.Error() != want {
+			t.Fatalf("got %v, want %q", err, want)
+		}
+		gone, cancel := context.WithCancel(t.Context())
+		cancel()
+		if _, err := recvCtx(gone, ch, "a number", nil); !errors.Is(err, context.Canceled) {
+			t.Fatalf("got %v, want the cancellation", err)
+		}
+	})
 }
 
 func TestRecvFrameListsTheFramesTaken(t *testing.T) {
@@ -268,19 +272,84 @@ func TestRecvFrameListsTheFramesTaken(t *testing.T) {
 }
 
 func TestWaitUntilCtx(t *testing.T) {
-	still := func() error { return errors.New("n") }
-	if err := waitUntilCtx(t.Context(), time.Millisecond, "x", func() error { return nil }); err != nil {
-		t.Fatalf("a passing check failed the wait: %v", err)
+	synctest.Test(t, func(t *testing.T) {
+		still := func() error { return errors.New("n") }
+		if err := waitUntilCtx(t.Context(), time.Millisecond, "x", func() error { return nil }); err != nil {
+			t.Fatalf("a passing check failed the wait: %v", err)
+		}
+		gone, cancel := context.WithCancel(t.Context())
+		cancel()
+		if err := waitUntilCtx(gone, time.Millisecond, "x", still); !errors.Is(err, context.Canceled) {
+			t.Fatalf("got %v, want the cancellation", err)
+		}
+		short, cancelShort := context.WithTimeout(t.Context(), 30*time.Millisecond)
+		defer cancelShort()
+		want := "timed out after 30ms waiting for x; saw 1: n"
+		if err := waitUntilCtx(short, time.Millisecond, "x", still); err == nil || err.Error() != want {
+			t.Fatalf("got %v, want %q", err, want)
+		}
+	})
+}
+
+type timeoutRequester struct{}
+
+func (timeoutRequester) Request(ctx context.Context, build func(int64) any) (json.RawMessage, error) {
+	build(5)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestRequestBriefAndCtxCallErr(t *testing.T) {
+	checkRequestBrief(t)
+	checkCtxCallErr(t)
+}
+
+func checkRequestBrief(t *testing.T) {
+	cases := []struct {
+		sent any
+		want string
+	}{
+		{proto.Hello{Request: proto.Request{Type: "hello", ID: 3}}, "t=hello re=3"},
+		{proto.Sync{Request: proto.Request{Type: "sync", ID: 4}, Group: "g1"}, "t=sync re=4 g=g1"},
+		{proto.Cmd{Request: proto.Request{Type: "cmd", ID: 9}, Env: proto.Envelope{Payload: `{"t":"group","op":"create","g":"g2"}`}}, "t=cmd/group/create re=9 g=g2"},
+		{"raw", `"\"raw\""`},
 	}
-	gone, cancel := context.WithCancel(t.Context())
-	cancel()
-	if err := waitUntilCtx(gone, time.Millisecond, "x", still); !errors.Is(err, context.Canceled) {
-		t.Fatalf("got %v, want the cancellation", err)
+	for _, tc := range cases {
+		if got := requestBrief(tc.sent); got != tc.want {
+			t.Errorf("requestBrief(%#v) = %q, want %q", tc.sent, got, tc.want)
+		}
 	}
-	short, cancelShort := context.WithTimeout(t.Context(), 30*time.Millisecond)
-	defer cancelShort()
-	want := regexp.MustCompile(`^timed out after [\d.]+ms waiting for x; saw 1: n$`)
-	if err := waitUntilCtx(short, time.Millisecond, "x", still); err == nil || !want.MatchString(err.Error()) {
-		t.Fatalf("got %v", err)
-	}
+}
+
+func checkCtxCallErr(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var seen trail
+		seen.see("t=rows seq=1")
+		late, cancelLate := context.WithTimeout(t.Context(), 10*time.Millisecond)
+		defer cancelLate()
+		<-late.Done()
+		err := ctxCallErr(late, time.Now().Add(-50*time.Millisecond), "the answer to t=sync", &seen, context.DeadlineExceeded)
+		if want := "timed out after 100ms waiting for the answer to t=sync; saw 1: t=rows seq=1"; err == nil || err.Error() != want {
+			t.Fatalf("got %v, want %q", err, want)
+		}
+		if got := ctxCallErr(t.Context(), time.Now(), "ok", nil, errors.New("other")); got == nil || got.Error() != "other" {
+			t.Fatalf("got %v, want original error", got)
+		}
+	})
+}
+
+func TestRequestWaitTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var seen trail
+		seen.see("t=rows seq=1")
+		short, cancel := context.WithTimeout(t.Context(), 60*time.Millisecond)
+		defer cancel()
+		_, err := requestWait(short, timeoutRequester{}, &seen, func(id int64) any {
+			return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: proto.Envelope{Payload: `{"t":"post","g":"g1"}`}}
+		})
+		want := "timed out after 100ms waiting for the answer to t=cmd/post re=5 g=g1; saw 1: t=rows seq=1"
+		if err == nil || err.Error() != want {
+			t.Fatalf("requestWait = %v, want %q", err, want)
+		}
+	})
 }

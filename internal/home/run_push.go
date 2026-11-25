@@ -44,16 +44,30 @@ func (g *runGroup) tell(res Result, now time.Time) {
 // is after this result, stops watching and is not sent these rows either
 // (planning/contracts/datachannel.md section 8): it has to ask again.
 func (g *runGroup) pushRows(rows []Row) {
+	if len(rows) == 0 {
+		return
+	}
 	frames := map[bool][]any{false: g.rowFrames(rows, false), true: g.rowFrames(rows, true)}
+	to := 0
 	for c, seat := range g.seats {
-		seat.watching = seat.watching && g.state.Serves(c.device)
-		if !seat.watching {
-			continue
-		}
-		for _, frame := range frames[seat.stateOnly] {
-			c.send(frame)
+		if g.pushTo(c, seat, frames[seat.stateOnly]) {
+			to++
 		}
 	}
+	g.loop.diag.Info("rows.send", "g", g.state.ID, "seq", diagSpan(rows), "to", to)
+}
+
+// pushTo sends frames to a connection that still watches the group, and
+// reports whether it sent any.
+func (g *runGroup) pushTo(c *Conn, seat *runSeat, frames []any) bool {
+	seat.watching = seat.watching && g.state.Serves(c.device)
+	if !seat.watching || len(frames) == 0 {
+		return false
+	}
+	for _, frame := range frames {
+		c.send(frame)
+	}
+	return true
 }
 
 // rowFrames makes the rows frames of a result, each filled only as far as a
@@ -182,6 +196,7 @@ func (g *runGroup) inbox(c *Conn) {
 type runLot struct {
 	frames []any
 	sent   map[int64]bool
+	items  int // the items in the frames
 }
 
 // deliver sends the queued items that are due to the connections that take
@@ -218,6 +233,9 @@ func (g *runGroup) deliver(now time.Time) {
 	g.next = next
 	for c, lot := range lots {
 		g.seats[c].sent = lot.sent
+		if lot.items > 0 {
+			g.loop.diag.Info("inbox.send", "g", g.state.ID, "dev", diagDevice(c.device), "items", lot.items)
+		}
 		for _, frame := range lot.frames {
 			c.send(frame)
 		}
@@ -278,6 +296,6 @@ func runLotOf(s *State, d Disk, takes bool, sent map[int64]bool, device string, 
 		}
 		entries, raws = append(entries, entry), append(raws, raw)
 	}
-	lot.frames = inboxFrames(s.ID, entries, raws)
+	lot.frames, lot.items = inboxFrames(s.ID, entries, raws), len(entries)
 	return lot, err
 }

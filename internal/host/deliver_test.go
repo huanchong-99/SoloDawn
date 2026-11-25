@@ -654,7 +654,7 @@ func verifySecondUnsyncedGroupAndCancelCleanup(t *testing.T, r *deliverRig) {
 	stale := newFakeDeliverHome()
 	stale.closeConn()
 	staleCtx, staleCancel := context.WithCancel(context.Background())
-	watchHomeConn(d, r.homeKey.ID(), stale, &homeSync{ctx: staleCtx, cancel: staleCancel})
+	watchHomeConn(r.h, d, r.homeKey.ID(), stale, &homeSync{ctx: staleCtx, cancel: staleCancel})
 	d.mu.Lock()
 	stillPresent := d.cancels[r.homeKey.ID()] != nil
 	d.mu.Unlock()
@@ -2107,13 +2107,13 @@ func checkStep17GuardsAndRoleChanges(t *testing.T, r *deliverRig, pDir, remoteDi
 	d.mu.Unlock()
 
 	pushTaskState(r, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "Alpha", Slug: "alpha", Origin: "brief", State: "active", Step: "review", Assignee: testAI1, Reviewer: testAI2, Commit: alphaHead})
-	d.wg.Wait()
+	settleDelivery(r.h)
 	assertStep17True(t, hasSession(r.h, kT1) && hasSession(r.h, kR1) && hasSession(r.h, kNoRow), "active sessions kept")
 	assertStep17True(t, pathExists(wt1) && pathExists(rev1), "active folders kept")
 
 	remoteAI := string(testCanonicalID(77))
 	pushTaskState(r, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 11}, Group: testGroup1, Num: 1, Title: "Alpha", Slug: "alpha", Origin: "brief", State: "active", Step: "review", Assignee: remoteAI, Reviewer: testAI2, Commit: alphaHead})
-	d.wg.Wait()
+	settleDelivery(r.h)
 	assertStep17True(t, !hasSession(r.h, kT1) && !pathExists(wt1), "reassigned task session and wt removed")
 	assertStep17True(t, strings.TrimSpace(runTestGit(t, remoteDir, "rev-parse", "refs/heads/task/1-alpha")) == alphaHead, "github handoff pushed branch")
 	assertStep17True(t, hasSession(r.h, kR1) && pathExists(rev1) && slices.Contains(r.runtime.closedKeys(), kT1), "reviewer kept and kT1 closed")
@@ -2130,7 +2130,7 @@ func checkStep17ReviewerChange(t *testing.T, r *deliverRig, pDir, remoteAI, alph
 	unrecordedWT := filepath.Join(pDir, "wt", "1-alpha")
 	os.MkdirAll(unrecordedWT, 0o700)
 	pushTaskState(r, proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 12}, Group: testGroup1, Num: 1, Title: "Alpha", Slug: "alpha", Origin: "brief", State: "active", Step: "review", Assignee: remoteAI, Reviewer: remoteAI, Commit: alphaHead})
-	deliv(r.h).wg.Wait()
+	settleDelivery(r.h)
 	assertStep17True(t, !hasSession(r.h, kR1) && !pathExists(rev1) && !pathExists(unrecordedWT), "changed reviewer session and folders removed")
 	assertStep17True(t, hasSession(r.h, kGrpKeep) && hasSession(r.h, kOtherGroup), "group session and other-group session kept")
 	r.h.Sessions.End(kGrpKeep)

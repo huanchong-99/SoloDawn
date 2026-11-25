@@ -407,7 +407,6 @@ type allocation struct {
 	addr   *net.UDPAddr
 	key    portKey
 	device string
-	packet []byte // one byte more than Pion reads, to see a datagram it would cut
 }
 
 func (a *allocation) Close() error {
@@ -416,16 +415,14 @@ func (a *allocation) Close() error {
 }
 
 func (a *allocation) ReadFrom(b []byte) (int, net.Addr, error) {
-	if len(a.packet) != len(b)+1 {
-		a.packet = make([]byte, len(b)+1)
-	}
+	packet := make([]byte, len(b)+1)
 	for {
-		n, src, err := readDatagram(a.PacketConn, a.packet)
+		n, src, err := readDatagram(a.PacketConn, packet)
 		if err != nil {
 			return n, src, err
 		}
 		if a.forward(n, len(b), src) {
-			copy(b, a.packet[:n])
+			copy(b, packet[:n])
 			return n, src, nil
 		}
 	}

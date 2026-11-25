@@ -194,8 +194,7 @@ func (t *s2TerminalWorld) beforeConsent() error {
 	if err := t.findCard(); err != nil {
 		return err
 	}
-	conn := t.bc.conn
-	raw, err := conn.Request(t.c.Ctx, func(id int64) any {
+	raw, err := t.bc.request(t.c.Ctx, func(id int64) any {
 		return map[string]any{"t": "watch.start", "id": id, "g": t.group, "member": t.ai}
 	})
 	if err != nil {
