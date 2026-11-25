@@ -299,7 +299,7 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   reads it in version 1.
 - **R-140** `[S2]` An invitation is a one-time link, valid 10 minutes, that
   admits one person to one group. (2026-11-22: no fingerprint and no check
-  against a rendezvous that stands in for a home; the deployment guide says
+  against a rendezvous that stands in for a home; the [deployment guide](../docs/cookbook/self-hosting.md) says
   to send the link privately and to use a trusted rendezvous.)
 
 ## Distribution
@@ -313,7 +313,7 @@ step 2 (teams), `[S3]` from step 3 (extensions).
   to their AI; the AI installs the node and pairs it. The pairing code in
   the prompt has 16 characters (Q-2).
 - **R-153** `[S1]` Self-hosting is documented: the rendezvous service is one
-  program file.
+  program file ([self-hosting](../docs/cookbook/self-hosting.md)).
 
 ## Interface
 

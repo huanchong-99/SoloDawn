@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-25 · limitation · A paired node's rendezvous addresses cannot be changed
+
+- Symptom: `solodawn pair <secret> --rendezvous <new>` on a node that already has an owner prints "this node already has an owner; to add a browser, run solodawn pair-browser", exits 1 and leaves the saved addresses as they were. Version 1 has no other command that writes them, so a node cannot be moved to another rendezvous.
+- Cause: `cmdPair` reads the line with `ReadPair(line, owner, nil)`, which returns `ErrOwned` before any address is read or saved (`internal/node/node.go:710-730`, `internal/node/socket.go:160-162`); `saveRendezvous` is reached only through `preparePairRV` for an unowned node.
+- Status: open, found 2026-11-25 in the review of the self-hosting guide. The guide tells the owner to choose a name that they will keep (a domain, not an address) before pairing ([self-hosting](docs/cookbook/self-hosting.md), step 5).
+
 ### 2026-11-23 · deviation · An agent without a driver cannot join a group
 
 - Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
