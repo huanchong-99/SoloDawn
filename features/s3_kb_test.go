@@ -285,13 +285,7 @@ func (w *s3KBWorld) recordB1Frame(raw json.RawMessage) {
 
 func (w *s3KBWorld) waitDormant() {
 	h := w.cluster.Nodes[0].Host
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if !hasNonDormant(h) {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	_ = waitUntil(5*time.Second, "every host session dormant", func() error { return sessionsDormant(h) })
 }
 
 func (w *s3KBWorld) callToolAsAI(aiName, groupName, tool string, args any, dst any) error {
@@ -415,15 +409,14 @@ func (w *s3KBWorld) whenAIStoreAndSearch(aiName, docName, groupName, hitWord, mi
 }
 
 func (w *s3KBWorld) waitFirstTurnCompleted(aiName string) error {
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	return waitUntil(10*time.Second, "the claude kb_put turn to finish", func() error {
 		data, _ := os.ReadFile(w.cluster.LogPath)
-		if strings.Contains(string(data), "start claude ") && !hasWorkingSession(w.cluster.Nodes[0].Host, w.aiByName[aiName].ID) {
-			return nil
+		started := strings.Contains(string(data), "start claude ")
+		if working := hasWorkingSession(w.cluster.Nodes[0].Host, w.aiByName[aiName].ID); !started || working {
+			return fmt.Errorf("started=%v working=%v", started, working)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return errors.New("timed out waiting for claude kb_put turn to finish")
+		return nil
+	})
 }
 
 func hasWorkingSession(h *host.Host, memberID string) bool {
@@ -561,16 +554,12 @@ func (w *s3KBWorld) thenSecondGetsGoneAndSearchEmpty(_, query string) error {
 }
 
 func (w *s3KBWorld) awaitGoneOnB2(rType, rowID string) error {
-	deadline := time.NewTimer(time.Second)
-	defer deadline.Stop()
+	wt := newWait(time.Second, fmt.Sprintf("the second browser to receive the gone marker of %s/%s", rType, rowID), w.b2.saw)
+	defer wt.stop()
 	for {
-		select {
-		case raw := <-w.b2.ch:
-			if hasGoneMarker(raw, rType, rowID) {
-				return nil
-			}
-		case <-deadline.C:
-			return fmt.Errorf("second browser did not receive gone marker for %s/%s within 1 second", rType, rowID)
+		raw, err := recvWait(wt, w.b2.ch)
+		if err != nil || hasGoneMarker(raw, rType, rowID) {
+			return err
 		}
 	}
 }
