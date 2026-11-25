@@ -82,11 +82,13 @@ func (d *diagLines) lineOnce(t *testing.T, line string) {
 // wait waits until the log holds line.
 func (d *diagLines) wait(t *testing.T, line string) {
 	t.Helper()
-	for deadline := time.Now().Add(10 * time.Second); d.count(d.is(line)) == 0; time.Sleep(time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out after 10s waiting for %q; saw %q", line, d.all())
+	poll(t, 10*time.Second, fmt.Sprintf("%q", line), func() string {
+		if d.count(d.is(line)) > 0 {
+			return ""
 		}
-	}
+		lines := d.all()
+		return fmt.Sprintf("%d lines, last %q", len(lines), lines[max(0, len(lines)-5):])
+	})
 }
 
 // ran fails unless the log holds bg.start and bg.stop of the work n times

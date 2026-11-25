@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -626,17 +627,14 @@ func startAsyncJoin(ctx context.Context, rig *joinRig, group proto.ID, home, age
 
 func waitWaiterCount(t *testing.T, jp *joinPart, device string, want int) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	poll(t, 5*time.Second, fmt.Sprintf("%d waiters on %s", want, device), func() string {
 		jp.mu.Lock()
-		n := len(jp.waiters[device])
-		jp.mu.Unlock()
-		if n == want {
-			return
+		defer jp.mu.Unlock()
+		if n := len(jp.waiters[device]); n != want {
+			return fmt.Sprintf("%d waiters", n)
 		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %d waiters on %s", want, device)
+		return ""
+	})
 }
 
 func TestHostJoinAttachTimeout15Seconds(t *testing.T) {
@@ -1360,15 +1358,12 @@ func runInflightSyncCacheHitCase(t *testing.T, rig *joinRig, fh *joinFakeHome, g
 
 func waitGroupSyncWaiters(t *testing.T, d *delivery, group string, want int) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	poll(t, 5*time.Second, fmt.Sprintf("%d sync waiters on %s", want, group), func() string {
 		d.mu.Lock()
-		n := len(d.groups[group].waiters)
-		d.mu.Unlock()
-		if n == want {
-			return
+		defer d.mu.Unlock()
+		if n := len(d.groups[group].waiters); n != want {
+			return fmt.Sprintf("%d sync waiters", n)
 		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %d sync waiters on %s", want, group)
+		return ""
+	})
 }

@@ -319,7 +319,7 @@ func TestFailedWriteEndsTheWriter(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		t.Fatal("writer blocked after a failed write")
+		t.Fatal("timed out after 1s waiting for the writer to return after a failed write; saw 0: ")
 	}
 }
 

@@ -506,7 +506,7 @@ func hevExpectAIState(t *testing.T, watcher *hevLoopClient, wantCount int, wantS
 		equal(t, got.Since, wantSince)
 		return got.Seq
 	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for %s rows push", wantState)
+		t.Fatal(timedOut(2*time.Second, wantState+" rows push", nil))
 		return 0
 	}
 }
@@ -527,7 +527,7 @@ func hevSyncBarrier(t *testing.T, loop *home.Loop, conn *home.Conn, watcher *hev
 	case reply := <-watcher.ch:
 		equal(t, reply, proto.Synced{Type: "synced", Success: proto.Success{Re: re, OK: true}, Group: groupID, Seq: seq})
 	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for sync reply %d", re)
+		t.Fatal(timedOut(2*time.Second, fmt.Sprintf("sync reply %d", re), nil))
 	}
 }
 

@@ -56,17 +56,14 @@ func (c *pairClock) After(_ time.Duration) <-chan time.Time {
 
 func (c *pairClock) WaitWaiters(t *testing.T, want int) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
+	poll(t, 3*time.Second, fmt.Sprintf("%d clock waiters", want), func() string {
 		c.mu.Lock()
-		n := len(c.waiters)
-		c.mu.Unlock()
-		if n >= want {
-			return
+		defer c.mu.Unlock()
+		if n := len(c.waiters); n < want {
+			return fmt.Sprintf("%d waiters", n)
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %d clock waiters", want)
+		return ""
+	})
 }
 
 func (c *pairClock) FireAll() {
@@ -288,11 +285,12 @@ func exchangeBrowserRoom(t *testing.T, ctx context.Context, b *simBrowser, secre
 	if err := b.path.Write(ctx, proto.RoomID{Type: "join", Room: room}); err != nil {
 		t.Fatal(err)
 	}
+	start := time.Now()
 	select {
 	case m := <-gotPeer:
 		return m
 	case <-ctx.Done():
-		t.Fatalf("timed out waiting for room peer: %v", ctx.Err())
+		t.Fatal(timedOut(time.Since(start).Round(100*time.Millisecond), "the room peer", []string{ctx.Err().Error()}))
 		return proto.Pair{}
 	}
 }
@@ -321,7 +319,7 @@ func openBrowserCtl(t *testing.T, b *simBrowser, nodeID string) *simCtl {
 	select {
 	case <-conn.Ready():
 	case <-time.After(10 * time.Second):
-		t.Fatal("timed out waiting for ctl data channel")
+		t.Fatal(timedOut(10*time.Second, "the ctl data channel", nil))
 	}
 	pushes := make(chan json.RawMessage, 32)
 	go pumpBrowserPushes(t.Context(), conn, pushes)
@@ -341,6 +339,7 @@ func pumpBrowserPushes(ctx context.Context, conn *peer.Connection, pushes chan<-
 
 func (sc *simCtl) nextPush(t *testing.T) json.RawMessage {
 	t.Helper()
+	start := time.Now()
 	select {
 	case msg, ok := <-sc.pushes:
 		if !ok {
@@ -348,7 +347,7 @@ func (sc *simCtl) nextPush(t *testing.T) json.RawMessage {
 		}
 		return msg
 	case <-t.Context().Done():
-		t.Fatalf("timed out waiting for ctl push: %v", t.Context().Err())
+		t.Fatal(timedOut(time.Since(start).Round(100*time.Millisecond), "a ctl push", []string{t.Context().Err().Error()}))
 		return nil
 	}
 }
@@ -370,14 +369,12 @@ func sendSimHello(t *testing.T, ctl *simCtl, name string) proto.Welcome {
 
 func waitPairKnown(t *testing.T, p *Pairer, device string) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if p.Known(device) {
-			return
+	poll(t, 3*time.Second, fmt.Sprintf("Pairer.Known(%q)", device), func() string {
+		if !p.Known(device) {
+			return "unknown"
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for Pairer.Known(%q)", device)
+		return ""
+	})
 }
 
 type roleBPairOut struct {
@@ -1102,7 +1099,7 @@ func awaitReportedErr(t *testing.T, reported <-chan error) {
 			t.Fatal("expected reported error")
 		}
 	case <-time.After(time.Second):
-		t.Fatal("expected dvlAppendAdd error to be reported")
+		t.Fatal(timedOut(time.Second, "the dvlAppendAdd error to be reported", nil))
 	}
 }
 
@@ -1128,15 +1125,12 @@ func checkDirectAppendErrors(t *testing.T, nodeKey, ownerKey identity.Key) {
 
 func waitAttempts(t *testing.T, p *Pairer, want int) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
+	poll(t, 3*time.Second, fmt.Sprintf("%d attempts", want), func() string {
 		p.mu.Lock()
-		n := len(p.attempts)
-		p.mu.Unlock()
-		if n == want {
-			return
+		defer p.mu.Unlock()
+		if n := len(p.attempts); n != want {
+			return fmt.Sprintf("%d attempts", n)
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %d attempts", want)
+		return ""
+	})
 }

@@ -47,7 +47,7 @@ func TestPTYWindowsSelfExitDeliversLastOutput(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		term.Close()
 		<-serveDone
-		t.Fatalf("the PTY did not stop at the end of its output; terminal got %q", term.output())
+		t.Fatal(timedOut(30*time.Second, "the PTY to stop at the end of its output", []string{term.output()}))
 	}
 	// ServeTerminal returns only once the terminal has been closed, and the
 	// test terminal refuses writes after Close.

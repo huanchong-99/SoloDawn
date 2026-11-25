@@ -746,6 +746,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-24 · bug · A scenario could restore the host drivers while another node discovered agents
+
+- Symptom: the Linux `-race` acceptance job reported a data race in A1.1 (`features/node_pair.feature:5`): a write of `host.Drivers` at `features/host_limits_test.go:237` against a read in `agtModels` (`internal/host/models.go:17`), from a `Pairer.Serve` goroutine started at `features/helpers_test.go:648`.
+- Cause: `hostLimitsSteps` registered the restore of `host.Drivers`, `host.Compose` and `host.Instructions` in `afterScenario` for every scenario of the suite (`features/host_limits_test.go:232-240`), not only for the host limits scenarios that replace them. So A1.1's own cleanup rewrote the global while its paired node, still serving, read it.
+- Status: resolved on `devin/race-store-drivers` in the test harness: `saveHLHooks` saves the three hooks and the three host limits bubbles and the host external run restore them with `defer` around the work that replaced them, so no other scenario writes them. `Drivers` stays a package-level registry: the product writes it only at package init (`Register` in each driver file), and only tests replace it.
+
+### 2026-11-24 · bug · A restarted host was settled while its home loop could still push to it
+
+- Symptom: the Linux `-race` acceptance job reported a data race in A4.3: `Store.Close` closing the write queue (`internal/store/store.go:73`, from `nodetest.Node.Close`) against `onWriter` sending on it (`:95`), from `projectDir` (`internal/host/run.go:184`) in `cleanupGroupState`, started by `pushRows` (`internal/host/deliver.go:347`).
+- Cause: the scenario's second host. `restartHost` (`features/m4_test.go`) registered `link2.Close(); h2.Settle()` as its cleanup, which ran while the node's home loop was still open. The pump of `link2` could be inside `pushRows`: `h2.Settle` returned, then `pushRows` started `afterGroupState` on `h2` (`internal/host/deliver.go:347-348`). The node's own cleanup then closed the store, and it settles only the first host, so nothing waited for `h2` again. The product cannot reach this: `nodeRuntime.closeCore` and `nodetest.Node.StopHome` close the home loop between the link and the settle, and `Loop.Close` waits for every pump, so no push is in progress when `Host.Settle` starts. Only an acceptance scenario that restarts a host settles it while its home stays open.
+- Status: resolved on `devin/race-store-drivers` in the test harness: the cleanup of the restarted host in `features/m4_test.go` and `features/m3_test.go` is `link.Close(); n.StopHome(); h2.Settle()`, and the M3 restart host, which was never settled, is now settled. Proved with a build overlay that sleeps 150 ms before the `d.wg.Go` in `pushRows`: A4.3 fails under `-race` on `rebuild` and passes with the fix. Limit: the mid-scenario `activeLink.Close(); activeHost.Settle()` in `restartHost` can still leave a late push on the first host; it cannot reach a closed store, because `Node.Close` settles that host again.
+
 ### 2026-11-23 · bug · FLAKY-29: the fake Qwen Code started OpenCode's MCP server
 
 - Symptom: Qwen A4.9 failed with `timed out waiting on home pushes`, and failed every time at step 4 with `OPENCODE_CONFIG_CONTENT='{"mcp":{}}'` in the environment (#373).

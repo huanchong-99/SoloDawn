@@ -1068,6 +1068,7 @@ func (w *m4World) restartHost() error {
 	w.activeLink = link2
 	w.cleanup(func() {
 		link2.Close()
+		n.StopHome()
 		h2.Settle()
 	})
 	return w.awaitHostWaitLimit(h2, 20)
