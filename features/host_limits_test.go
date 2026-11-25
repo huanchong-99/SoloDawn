@@ -229,20 +229,16 @@ type hlScenario struct {
 }
 
 func hostLimitsSteps(sc *godog.ScenarioContext, f fixtures) {
-	cleanup := afterScenario(sc)
-	prevDrivers := maps.Clone(host.Drivers)
-	prevCompose := host.Compose
-	prevInstr := host.Instructions
-	cleanup(func() {
-		host.Drivers = prevDrivers
-		host.Compose = prevCompose
-		host.Instructions = prevInstr
-	})
-
 	s := &hlScenario{}
 	registerOfflineScenarioSteps(sc, f.t, s)
 	registerTimeoutScenarioSteps(sc, f.t, s)
 	registerRateLimitScenarioSteps(sc, f.t, s)
+}
+
+// saveHLHooks returns what puts back the hooks that installHLHooks replaces.
+func saveHLHooks() func() {
+	drivers, compose, instr := maps.Clone(host.Drivers), host.Compose, host.Instructions
+	return func() { host.Drivers, host.Compose, host.Instructions = drivers, compose, instr }
 }
 
 func installHLHooks(drv *hlDriver) {
@@ -364,6 +360,7 @@ func hlSurface(ctx context.Context, h *host.Host, kind string) error {
 // that synctest.Wait orders its steps, and records what the later steps check.
 func runOfflineScenarioBubble(suiteT *testing.T, s *hlScenario) error {
 	var stepErr error
+	defer saveHLHooks()()
 	baseDir := suiteT.TempDir()
 	synctest.Test(suiteT, func(t *testing.T) {
 		drv := &hlDriver{}
@@ -454,6 +451,7 @@ func registerTimeoutScenarioSteps(sc *godog.ScenarioContext, suiteT *testing.T, 
 
 func runTimeoutScenarioBubble(suiteT *testing.T, s *hlScenario) error {
 	var stepErr error
+	defer saveHLHooks()()
 	baseDir := suiteT.TempDir()
 	synctest.Test(suiteT, func(t *testing.T) {
 		drv := &hlDriver{endOnInterrupt: true}
@@ -529,6 +527,7 @@ func checkRateLimitScenarioResult(s *hlScenario) error {
 
 func runRateLimitScenarioBubble(suiteT *testing.T, s *hlScenario) error {
 	var stepErr error
+	defer saveHLHooks()()
 	baseDir := suiteT.TempDir()
 	synctest.Test(suiteT, func(t *testing.T) {
 		drv := &hlDriver{}
