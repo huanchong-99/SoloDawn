@@ -89,36 +89,47 @@ describe('wire examples', () => {
       // The whole example is not replaced.
       if (path.length > 0) read(what, path, false, () => value);
     };
-    const visit = (value: unknown, path: string[]) => {
-      const field = named(path);
-      if (facts.opaque.includes(field)) return;
-      if (Array.isArray(value)) {
-        refused('an object', path, {});
-        value.forEach((element, i) => {
-          read('null in the list', [...path, `${i}`], false, () => null);
-          visit(element, [...path, `${i}`]);
-        });
-      } else if (typeof value === 'object' && value !== null) {
-        refused('a list', path, []);
-        for (const [key, member] of Object.entries(value)) {
-          const inner = [...path, key];
-          read('left out', inner, facts.optional.includes(named(inner)));
-          if (!facts.opaque.includes(named(inner))) {
-            read('null', inner, facts.nullable.includes(named(inner)), () => null);
-          }
-          visit(member, inner);
+    const visitArray = (value: unknown[], path: string[]) => {
+      refused('an object', path, {});
+      value.forEach((element, i) => {
+        const inner = [...path, `${i}`];
+        read('null in the list', inner, false, () => null);
+        visit(element, inner);
+      });
+    };
+    const visitObject = (value: Obj, path: string[]) => {
+      refused('a list', path, []);
+      for (const [key, member] of Object.entries(value)) {
+        const inner = [...path, key];
+        const innerField = named(inner);
+        read('left out', inner, facts.optional.includes(innerField));
+        if (!facts.opaque.includes(innerField)) {
+          read('null', inner, facts.nullable.includes(innerField), () => null);
         }
-      } else if (typeof value === 'string') {
+        visit(member, inner);
+      }
+    };
+    const scalars: Record<string, (field: string, path: string[]) => void> = {
+      string: (field, path) => {
         refused('a number', path, 7);
         if (facts.id.includes(field)) refused('a text that is no id', path, 'system');
-      } else if (typeof value === 'number') {
+      },
+      number: (field, path) => {
         const fraction = facts.fraction.includes(field);
         refused('a text', path, '7');
         read('a fraction', path, fraction, () => 0.5);
         read('2^53', path, fraction, () => 2 ** 53);
-      } else if (typeof value === 'boolean') {
+      },
+      boolean: (_, path) => {
         refused('a text', path, 'true');
-      }
+      },
+    };
+    const visit = (value: unknown, path: string[]) => {
+      const field = named(path);
+      if (value === null || facts.opaque.includes(field)) return;
+      if (Array.isArray(value)) return visitArray(value, path);
+      if (typeof value === 'object') return visitObject(value as Obj, path);
+      scalars[typeof value](field, path);
     };
     expect(accepts(name, JSON.parse(goldens[name]))).toBe(true);
     visit(JSON.parse(goldens[name]), []);
