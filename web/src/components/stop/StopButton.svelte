@@ -29,6 +29,12 @@
   const away = $derived(running.filter((home) => !home.ctl));
   const busyAIs = $derived(toPause ? working(toPause) : 0);
 
+  /** Under the button, which a banner above may have pushed down. */
+  function place(event: ToggleEvent) {
+    if (event.newState === 'open')
+      panel!.style.top = `${button!.getBoundingClientRect().bottom + 8}px`;
+  }
+
   function opened(event: ToggleEvent) {
     if (event.newState !== 'open') return;
     failed = '';
@@ -78,6 +84,7 @@
     aria-labelledby={`${uid}-h`}
     tabindex="-1"
     bind:this={panel}
+    onbeforetoggle={place}
     ontoggle={opened}
   >
     <h2 class="sec-title" id={`${uid}-h`}>{t('stop.panel')}</h2>
@@ -138,7 +145,7 @@
 <style>
   .panel {
     position: fixed;
-    inset: calc(var(--bar-h) + var(--sp-2)) var(--sp-4) auto auto;
+    inset: auto var(--sp-4) auto auto;
     width: min(400px, calc(100vw - 2 * var(--sp-3)));
     margin: 0;
     padding: var(--sp-4);

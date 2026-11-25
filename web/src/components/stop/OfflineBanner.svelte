@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
   import { homes } from '../../lib/groups.svelte';
   import { nodes } from '../../lib/nodes.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
@@ -17,11 +16,11 @@
   const stopped = $derived(computers(homes).stopped.filter((home) => home.ctl));
 
   // Another browser of the owner may take them offline, or back: the node pushes no host.info, and
-  // the groups show the AIs change.
+  // the groups show the AIs change. A computer that connects after the page opened is read too.
   const shown = $derived(owned.map((home) => offlineAIs(home, homes)).join('\n'));
   $effect(() => {
     void shown;
-    untrack(() => nodes.sync(owned, true));
+    nodes.sync(owned, true);
   });
 
   async function online() {

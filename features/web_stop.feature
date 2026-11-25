@@ -89,6 +89,17 @@ Feature: The emergency stop in the web client
     And another browser takes the AIs on "workstation" offline
     Then under the top bar it says that the AIs on workstation are offline
 
+  Scenario: After a reload a computer that connects later is read on every page
+    Given the AIs of "workstation" are offline, with no AI in a session, and its connection is down
+    When Alex opens the settings page and then "workstation" connects
+    Then under the top bar it says that the AIs on workstation are offline
+    And "Stop AIs" is gone, for there is nothing to stop
+
+  Scenario: The panel opens under its button wherever the button is
+    When Alex opens "Website" and the button is pushed down to 155 px
+    And Alex opens "Stop AIs"
+    Then the panel starts 8 px under the button
+
   Scenario: On a phone the button is in the head of the chat
     When Alex opens "Website" on a screen 390 px wide
     Then "Stop AIs" is in the head of the chat and not in the top bar

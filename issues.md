@@ -17,6 +17,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a message of one's own can stop saying that it waits although the AI has not taken it: when the AI's row changed in the middle of a turn (its model edited, a status sent), or when the AI's next turn took older items of another session first.
 - Cause: no row tells what a home has queued; `waiting` (`web/src/lib/queue.ts`) compares the sequence of the message with that of the AI's row, which changes when a turn starts or ends.
 - Status: open, accepted: the message is delivered as before, only the choice to let it go first is gone.
+### 2026-11-25 · deviation · The host sends no member status when a group is paused or resumed, or its AIs go offline or online
+
+- Symptom: after "Resume", the card of an AI that was interrupted outside a task stays "Paused" until its next turn or until it goes dormant. During a pause every other AI reads "Waiting" or "Sleeping · wakes when @mentioned", beside a notice that says the group is paused. An AI that never had a session reads "Sleeping" to everybody but its owner after `host.offline` and after `host.online` (see the entry below).
+- Cause: `afterGroupState` (`internal/host/deliver.go:383`) sends no status on pause or resume; seen by continuing `TestPausingInterruptsTheTurnsOfThePausedGroupOrTask` with a resume: `MemberState` is `waiting` and no command was sent. `handleHostOffline` and the online side report only members that have a session row (`distinctMemberSlots`, `internal/host/limits.go:209`). `planning/sessions.md` section 3 wants `paused` and `offline` reported.
+- Status: open. One host unit fixes it at the root: report the status of every AI this node hosts in the group (the `member` rows whose `host` is this node, not only `Sessions.All()`) on pause, resume, `host.offline` and `host.online`; best in or right after the `feat/host-jump` lane, which touches the same files. The web client derives nothing for it: that would repair only the pause, and only in one client.
 
 ### 2026-11-25 · limitation · `host.offline` does not mark an AI that never had a session
 
