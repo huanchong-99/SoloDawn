@@ -10,7 +10,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
 - Cause: only the second tier was planned and built. The MCP shim takes only the session token that the node creates when it starts a CLI itself ([local.md](planning/contracts/local.md), section 3), `host.join` takes only an agent with a driver (`agtValidAgent`, `internal/host/agents.go:258`), and nothing lets an agent take an inbox item.
-- Status: open, found 2026-11-23 and planned as the external AI (R-166, [external.md](planning/contracts/step-3/external.md); [parallel plan](planning/steps/parallel-plan-step-2-3.md), section 4.2). The implementation now supports joining, setup and member-scoped MCP without a driver. The [browser test](web/e2e/external.spec.ts) is enabled, as are the [I3-3 scenarios](features/a10_external.feature) for blocking and nonblocking waits, running one item and starting a second run for a mention received during the first, and holding mentions while a group is paused or a host is offline. The remaining scenarios still need verification or fixes; A10.28 needs a live agent. The agent writes its own runner around `solodawn wait`.
+- Status: open, found 2026-11-23 and planned as the external AI (R-166, [external.md](planning/contracts/step-3/external.md); [parallel plan](planning/steps/parallel-plan-step-2-3.md), section 4.2). The implementation supports joining, setup and member-scoped MCP without a driver. The [browser test](web/e2e/external.spec.ts) and [I3-3 scenarios](features/a10_external.feature) cover waiting, queued work, the owner-only tool label, managed replies, task and review checkouts, usage, and presence expiration. An already-open stream on removal still needs a fix (below); A10.28 needs a live agent. The agent writes its own runner around `solodawn wait`.
+
+### 2026-11-23 · bug · Removing an external member does not close its open MCP stream
+
+- Symptom: in A10.27, the owner successfully removes X after reassigning its task, and the member row is gone, but the already-open MCP stream does not close.
+- Cause: the member-removal path ends the host's member sessions (`internal/host/join.go:620`), but the local MCP server runs with the node's lifetime context (`internal/node/node.go:645–653`, `internal/host/mcp.go:28–42`). A tool call rechecks the token, but removal does not end an otherwise idle stream.
+- Status: open; the offline-work and removal scenario stays pending. The separate presence-expiry case exercises the real host timer on a fake clock and checks the status reports immediately before and at 180 seconds.
 
 ### 2026-11-23 · deviation · An intermittent failure cannot be explained from one occurrence
 
@@ -87,8 +93,8 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-22 · limitation · The multi-person label scenarios cannot admit Q yet
 
 - Symptom: A9.12 and five A9.42 cases (failing review, decision by P, decision by Q, secretary confirmation without Q on the allow list, and secretary confirmation with Q on it) each failed under `-race` in `Given the confirmation cast with Q`. The reply was `bad_request: the home has no such command`; decoding that refusal as a successful command reply reported `proto: a field that is always present is missing`.
-- Cause: the cast sends `invite` before it can admit Q (`features/s2_confirm_test.go:119`), and the current home has no registered handler for it (`internal/home/check.go:109`).
-- Status: pending until the people flow is available (T2-1b for invitation, T2-1a for home join). The label assertions did not run; any later blockers are unverified.
+- Cause: the cast sends `invite` before it can admit Q (`features/s2_confirm_test.go:119`), and the home had no registered handler for it (`internal/home/check.go:109`).
+- Status: pending retest. A10.17 now exercises invitation and join; the label assertions were not rerun here.
 
 ### 2026-11-22 · limitation · The A9.44 quiet-task fixture does not reach the timer
 
@@ -172,7 +178,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: A9.20 fails in its first Given with `bad_request: the home has no such command`, before opening the owner's terminal or exercising the watch host.
 - Cause: `joinWatcher` in `features/s2_watch_terminal_test.go` sends `invite`; `internal/home/people_seam.go` declares the invite/join command keys but registers no handlers, so `internal/home/check.go` refuses the command. The home invitation/join units T2-1a and T2-1b are outside T2-6.
-- Status: open. A9.20 stays pending; rerun it after the home invitation/join path lands. The later watch-confirmation steps were not reached by this run.
+- Status: pending retest. A10.17 now exercises invitation and join; the later watch-confirmation steps were not rerun here.
 
 ### 2026-11-22 · deviation · Host turn labels approximate task participation by role
 
