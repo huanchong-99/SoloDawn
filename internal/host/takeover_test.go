@@ -283,7 +283,7 @@ func TestTakeoverStartRefusals(t *testing.T) {
 	tkCode(t, r.startFrom(newTkOwner("relay"), runAI1, ""), "relay")
 	tkCode(t, r.start("NoSuchAIAAAAAAAAAAAAAA", ""), "not_found")
 
-	takeoverState(r.h).claim(aiSlot{group: runGroup1, member: runAI1}, &takeover{}, true)
+	takeoverState(r.h).claim(r.h, aiSlot{group: runGroup1, member: runAI1}, &takeover{}, true)
 	tkCode(t, r.start(runAI1, ""), "busy")
 	takeoverState(r.h).release(r.h, aiSlot{group: runGroup1, member: runAI1}, &takeover{})
 	tkCode(t, r.start(runAI1, ""), "busy")
@@ -767,7 +767,7 @@ func TestTakeoverSettleLeavesTheRowForTheNextStart(t *testing.T) {
 	busy := makeRunSession(SessionKey{Group: runGroup1, Member: tkSec}, GroupSession, "repo")
 	r.h.Sessions.Create(busy)
 	r.h.Sessions.Move(busy.SessionKey, Dormant, Takeover)
-	p.claim(aiSlot{group: runGroup1, member: tkSec}, &takeover{}, true)
+	p.claim(r.h, aiSlot{group: runGroup1, member: tkSec}, &takeover{}, true)
 	elsewhere := makeRunSession(SessionKey{Group: runGroup2, Member: runAI2}, GroupSession, "repo")
 	r.h.Sessions.Create(elsewhere)
 	r.h.Sessions.Move(elsewhere.SessionKey, Dormant, Takeover)
@@ -1020,5 +1020,42 @@ func TestTakeoverFakeOwnerSetPathWithFullSignalChannel(t *testing.T) {
 		if got := len(owner.changed); got != 1 {
 			t.Fatalf("pending signals = %d, want 1", got)
 		}
+	})
+}
+
+// A takeover that starts after delivery has looked at the holds, and before
+// the turn is given, would make the AI miss an item that is acknowledged.
+func TestTakeoverStartIsBusyWhileDeliveryGivesATurn(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		opening, leave := make(chan struct{}), make(chan struct{})
+		Drivers["claude"] = tkDriver{r.drv, func(Launch) ([]string, string, error) {
+			close(opening)
+			<-leave
+			return nil, "", errors.New("no terminal")
+		}}
+		req := (&tkRig{}).request(runAI1, runTask1)
+		var refused error
+		Compose = func(h *Host, s Session, kind TurnKind, items []json.RawMessage) (string, Turn, error) {
+			answered := make(chan struct{})
+			go func() {
+				defer close(answered)
+				_, refused = Surface["takeover.start"](context.Background(), h, newTkOwner("direct"), "owner-dev", json.RawMessage(req))
+			}()
+			select {
+			case <-opening:
+			case <-answered:
+			}
+			return jumpCompose(h, s, kind, items)
+		}
+		r.putTask(runTask1, "active", "local_check", "")
+		r.push(proto.Item{Item: 1, Why: "assign", Task: runTask1})
+		close(leave)
+		synctest.Wait()
+		r.wantAcked(1)
+		if n := r.drv.count(); n != 1 {
+			t.Fatalf("%d CLIs ran: the acknowledged item got no turn", n)
+		}
+		r.wantTurns(r.drv.lastProc(), "items 1")
+		tkCode(t, refused, "busy")
 	})
 }

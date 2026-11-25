@@ -89,6 +89,7 @@ type delivery struct {
 	merges        map[string][]verifiedItem
 	merging       map[string]bool
 	busy, recheck map[aiGroupKey]bool
+	giving        map[aiGroupKey]bool // the AIs whose items or owed turn delivery has read the holds for
 	cancels       map[string]*homeSync
 }
 
@@ -98,7 +99,8 @@ func deliv(h *Host) *delivery {
 	if d.groups == nil {
 		d.groups, d.held, d.merges = map[string]*groupSync{}, map[aiGroupKey][]verifiedItem{}, map[string][]verifiedItem{}
 		d.merging, d.cancels = map[string]bool{}, map[string]*homeSync{}
-		d.busy, d.recheck, d.pre = map[aiGroupKey]bool{}, map[aiGroupKey]bool{}, map[aiGroupKey][]*preemption{}
+		d.busy, d.recheck, d.giving = map[aiGroupKey]bool{}, map[aiGroupKey]bool{}, map[aiGroupKey]bool{}
+		d.pre = map[aiGroupKey][]*preemption{}
 	}
 	d.mu.Unlock()
 	return d
@@ -744,6 +746,16 @@ func (d *delivery) enterAI(key aiGroupKey) bool {
 	return true
 }
 
+// givingTurn reports whether delivery may have read an AI's holds for a turn
+// that has not begun.
+func givingTurn(h *Host, key aiGroupKey) bool {
+	d := deliv(h)
+	d.mu.Lock()
+	giving := d.giving[key]
+	d.mu.Unlock()
+	return giving && !aiHasState(h, key, Working)
+}
+
 func (d *delivery) leaveAI(key aiGroupKey) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -752,6 +764,7 @@ func (d *delivery) leaveAI(key aiGroupKey) bool {
 		return true
 	}
 	delete(d.busy, key)
+	delete(d.giving, key)
 	return false
 }
 
@@ -1083,6 +1096,7 @@ func takeEligibleBatch(h *Host, d *delivery, key aiGroupKey, ai aiInfo) (routedT
 	d.mu.Lock()
 	queue := slices.Clone(d.held[key])
 	jumpsOnly := len(d.pre[key]) > 0
+	d.giving[key] = len(queue) > 0 || jumpsOnly // before the holds are read
 	d.mu.Unlock()
 	var paused bool
 	readPause := func() bool {

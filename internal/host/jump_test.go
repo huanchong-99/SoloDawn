@@ -217,7 +217,7 @@ func (r *jumpRig) deliver() {
 // returns what ends it without a hand-back turn.
 func (r *jumpRig) takeOver(key SessionKey) func() {
 	slot, p := aiSlot{group: runGroup1, member: runAI1}, takeoverState(r.h)
-	p.claim(slot, &takeover{key: key}, false)
+	p.claim(r.h, slot, &takeover{key: key}, false)
 	Runner.Close(r.h, key)
 	r.h.Sessions.Move(key, Dormant, Takeover)
 	return func() {

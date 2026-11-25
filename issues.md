@@ -776,6 +776,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `settleExternal` (`internal/host/external.go:56`) stopped the run and presence timers but did not wait for a callback already running, and `extLeave` (`:209`) and `extOpenRun` (`:298`) armed `time.AfterFunc` timers after it.
 - Status: resolved on `devin/host-teardown-race`, with the pattern of `limits.go`: `extPart` has `settled` and `wg`, every timer callback starts on `wg` under `extPart.mu` unless settled (`extPart.after`), no timer is armed once settled, and `settleExternal` waits on `wg`. `TestSettleExternalWaitsForItsTimersAndArmsNoMore` holds a run timeout inside `Deliver` and pins that `Settle` waits for it and that a `leave` and a hand-out after it arm nothing.
 
+### 2026-11-26 · bug · A takeover that started while the AI was being given a turn lost the turn's items
+
+- Symptom: the owner opened the terminal while delivery prepared a turn (a `git fetch`, `task branch`, `Compose`, the wait for a `max_open` slot): the items were acknowledged and their turn was refused.
+- Cause: `takeoverStart` (`internal/host/takeover.go:132`) claimed the hold without regard to a delivery step that had read the holds before (`isItemHeld`, `internal/host/deliver.go`), and `Runner.Turn` then answered `busy`, which is logged.
+- Status: resolved on `feat/host-jump`: `takeover.start` answers `busy` while delivery may have read the AI's holds for a turn that has not begun (`givingTurn`), under the lock of the claim. `TestTakeoverStartIsBusyWhileDeliveryGivesATurn`.
+
 ### 2026-11-26 · bug · Five holes in the host half of the queue jump (review of #401)
 
 - Symptom and cause, all in `internal/host/deliver.go` at b4d7c8bef: (1) an item the home sent again while its jump turn was prepared interrupted that turn, and was only acknowledged then (`firstJump`, line 873, did not look for its audit row); (2) an accepted `task preempted` whose answer was lost left the task pre-empted (line 949 read "unreachable" as "refused"), and so did a host restart; (3) a jump whose session could not be prepared, as after a failed `git fetch`, had interrupted the running turn already and shut the AI's queue (`jumpRunningTurn`, line 859); (4) a takeover, a group pause or a second jump during the `task resume` round trip lost the turn of its own (`continueInterrupted`, lines 957 to 980, read the holds before it); (5) a takeover during the `task preempted` round trip lost the jump item (`stepSessions`, line 839, had taken the batch before it).
