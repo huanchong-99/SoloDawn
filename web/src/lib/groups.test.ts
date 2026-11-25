@@ -795,6 +795,36 @@ describe('the request of a confirm card that waits', () => {
   });
 });
 
+describe('a message sought by its id', () => {
+  it('is settled when it is held, and when the home answers, also with a refusal', async () => {
+    const { group, asked } = joined();
+    group.apply([text('held', 5)]);
+    expect(await group.seek('held')).toBe(true);
+    expect(asked).toHaveLength(1);
+    const refused = group.seek('old');
+    asked[1].answer({ re: 2, err: { code: 'not_found', msg: 'no' } });
+    expect(await refused).toBe(true);
+    const found = group.seek('old');
+    asked[2].answer(fetched([text('old', 1)], false));
+    expect(await found).toBe(true);
+    expect(group.rows.has('msg old')).toBe(true);
+  });
+
+  it('is not settled without a connection, by one that loses it, or by an answer that is late', async () => {
+    const { home, group, asked, link } = joined();
+    const late = group.seek('old');
+    void group.sync(home.ctl!);
+    asked[1].answer(fetched([text('old', 1)], false));
+    expect(await late).toBe(false);
+    const lost = group.seek('old');
+    asked[3].fail();
+    expect(await lost).toBe(false);
+    link.offline();
+    expect(await group.seek('old')).toBe(false);
+    expect(asked).toHaveLength(4);
+  });
+});
+
 describe('the subject of a message', () => {
   const group = joined().group;
   const msg = (name: string, changes: object = {}) => row(name, changes) as p.MsgRow;

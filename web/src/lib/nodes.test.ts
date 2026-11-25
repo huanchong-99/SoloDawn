@@ -624,4 +624,21 @@ describe('Nodes', () => {
     expect(asked).toHaveLength(1);
     expect(store.infos.get(home)!.offline).toBe(false);
   });
+
+  it('reads host.info on the connection that took the command', async () => {
+    const store = new Nodes();
+    let sign = (_: p.Envelope) => {};
+    const home = new Home({ ...me, sign: () => new Promise((done) => (sign = done)) });
+    const before = connectHome(home, { owner: true, device: deviceId });
+    const call = store.setOffline(home, true);
+    before.link.offline();
+    const { asked } = connectHome(home, { owner: true, device: deviceId });
+    sign({ p: '', k: 'this-browser', s: 'signature' });
+    await vi.waitFor(() => expect(asked).toHaveLength(1));
+    asked[0].answer({ re: 1, ok: true });
+    await vi.waitFor(() => expect(asked).toHaveLength(2));
+    asked[1].answer(hostAnswer({ offline: true }));
+    await call;
+    expect(store.infos.get(home)!.offline).toBe(true);
+  });
 });

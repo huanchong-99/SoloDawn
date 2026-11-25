@@ -17,6 +17,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   let mini: OwnedNode;
   let home: TestHome;
   const hidden = vi.fn();
+  const shown = vi.fn();
 
   /** The payloads of one type that a home received, or a computer as host commands. */
   const ops = (from: TestHome) =>
@@ -89,6 +90,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       'a browser of Alex, who owns "workstation", the home of "Website" with a working AI',
       async () => {
         HTMLElement.prototype.hidePopover = hidden;
+        HTMLElement.prototype.togglePopover = shown;
         workstation = ownedNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q');
         home = workstation.home;
         home.add(g, 'Website');
@@ -198,6 +200,49 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     });
   });
 
+  Scenario(
+    'A panel closed while its action runs opens again on a refusal, and else leaves the person alone',
+    ({ When, Then, And }) => {
+      let send: (answer: object) => void;
+      /** Pauses, and closes the panel before the home has answered. */
+      const pauseAndLeave = async () => {
+        const ctl = workstation.store.ctl!;
+        const answered = new Promise<object>((done) => (send = done));
+        workstation.store.ctl = {
+          request: (req: { t: string }) => (req.t === 'cmd' ? answered : ctl.request(req as never)),
+        } as p.Ctl;
+        press('Pause');
+        one('.dock textarea').focus();
+      };
+      When('Alex opens "Website", presses "Pause" in the panel and goes on writing', async () => {
+        await openGroup();
+        await openPanel();
+        await pauseAndLeave();
+      });
+      And('the home refuses the pause', async () => {
+        const tell = (type: string) =>
+          one('.panel').dispatchEvent(Object.assign(new Event(type), { newState: 'open' }));
+        shown.mockImplementationOnce(() => {
+          tell('beforetoggle');
+          setTimeout(tell, 0, 'toggle');
+        });
+        send({ re: 1, err: { code: 'forbidden', msg: '' } });
+        await settled(() => expect(document.activeElement).toBe(one('.panel')));
+        expect(shown.mock.calls).toEqual([[true]]);
+      });
+      Then('the panel opens again and says that this is not allowed', () => notAllowed('.panel'));
+      When('Alex presses "Pause" again and goes on writing, and the home takes it', async () => {
+        await pauseAndLeave();
+        send({ re: 2, ok: true });
+        await settled(() => expect(button('Pause').disabled).toBe(false));
+      });
+      Then('focus stays where Alex writes', async () => {
+        await new Promise((later) => setTimeout(later));
+        expect(document.activeElement).toBe(one('.dock textarea'));
+      });
+    },
+  );
+
   Scenario('A refused resume says why beside the button', ({ Given, And, When, Then }) => {
     Given('Mina paused the group', () => void pauseByMina());
     And('the home refuses commands with "forbidden"', () => {
@@ -256,7 +301,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         true,
         true,
       ]);
-      expect(texts('.panel .away')).toEqual([
+      expect(texts('.panel p').slice(1)).toEqual([
         "The group's computer cannot be reached now.",
         'Cannot be reached now: workstation.',
       ]);
@@ -292,12 +337,12 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           'Your AIs on workstation and mac-mini are offline. Messages to them wait.',
         );
       });
-      And('the AIs of "Website" read "Offline · you took it offline"', async () => {
+      And('the AIs of "Website" read "Offline · by you"', async () => {
         location.hash = `#/groups/${g}`;
         dispatchEvent(new HashChangeEvent('hashchange', { newURL: location.href }));
         home.write(g, example('row-member-ai', { g, state: 'offline', task: undefined }));
         flushSync();
-        expect(texts('.member p.st')).toEqual(['Offline · you took it offline']);
+        expect(texts('.member p.st')).toEqual(['Offline · by you']);
         // The group can still be paused: the button is back for it.
         expect(texts('.panel h3')).toEqual(['Pause this group']);
       });
@@ -313,6 +358,26 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     },
   );
 
+  Scenario(
+    'A person who left the panel keeps their place when the button goes away with the action',
+    ({ When, And, Then }) => {
+      const link = () => one('header a');
+      When('Alex opens the settings page and then "Stop AIs"', async () => {
+        await openSettings();
+        await openPanel();
+      });
+      And('Alex presses "Take offline" and moves on to the top bar', () => {
+        press('Take offline');
+        link().focus();
+      });
+      Then('"Stop AIs" is gone and focus stays in the top bar', async () => {
+        await settled(() => expect(all('.estop, .panel')).toEqual([]));
+        await new Promise((later) => setTimeout(later));
+        expect(document.activeElement).toBe(link());
+      });
+    },
+  );
+
   Scenario('One computer of two cannot be reached', ({ Given, And, When, Then }) => {
     Given('a second computer "mac-mini" of Alex', withMini);
     And('"mac-mini" stops', () => mini.drop());
@@ -321,7 +386,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       await openPanel();
     });
     Then('the panel says that mac-mini cannot be reached now', () =>
-      expect(texts('.panel .away')).toEqual(['Cannot be reached now: mac-mini.']),
+      expect(texts('.panel p')).toEqual([
+        'On workstation, in every group. Sessions close; messages wait until you bring them back.',
+        'Cannot be reached now: mac-mini.',
+      ]),
     );
     When('Alex presses "Take offline"', async () => {
       press('Take offline');
@@ -400,10 +468,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         expect(text('.strip b')).toBe('The AIs on this computer are offline');
         expect(text('.node header .st')).toBe('AIs offline');
         expect(one('.node header .st').dataset.st).toBe('offline');
-        expect(texts('.ai-row p.st')).toEqual([
-          'Offline · you took it offline',
-          'Offline · you took it offline',
-        ]);
+        expect(texts('.ai-row p.st')).toEqual(['Offline · by you', 'Offline · by you']);
       },
     );
     And('no banner repeats it on this page', () => expect(all('.off')).toEqual([]));

@@ -657,7 +657,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           await vi.waitFor(() => expect(workstation.starts).toHaveLength(2));
           flushSync();
           expect(one('.takeover .grow').textContent!.trim()).toBe(
-            'This AI is busy with another terminal or a merge right now.',
+            'This AI is busy: its terminal is already open, one of its tasks is merging, or it is about to start a turn (perhaps waiting for a free slot on its computer). Try again soon.',
           );
 
           workstation.refuseStart = 'internal';
@@ -667,7 +667,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       Then(
-        'the takeover bar shows "Direct connection required", then "This AI is busy with another terminal or a merge right now.", then error code "internal"',
+        'the takeover bar shows "Direct connection required", then "This AI is busy: its terminal is already open, one of its tasks is merging, or it is about to start a turn (perhaps waiting for a free slot on its computer). Try again soon.", then error code "internal"',
         () => {
           expect(texts('.takeover code')).toEqual(['internal']);
         },

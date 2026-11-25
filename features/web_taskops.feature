@@ -118,6 +118,8 @@ Feature: What a person does with a task: answer in its thread, stop it, carry it
     Then its card says "Mina said no to Qwen Code here. The secretary or an admin gives the role to another AI." with "Reassign"
     When Alex presses "Reassign"
     Then the form names Qwen Code to do it
+    When Mina gives T-12 to Qwen Code all the same
+    Then the card of T-12 says nothing of it
 
   Scenario: A member who is no admin sees why, and writes in the thread
     Given Alex is a member and T-12 stopped after 3 failures

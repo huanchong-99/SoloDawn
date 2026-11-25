@@ -349,9 +349,7 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       await page.getByRole('button', { name: 'Take offline' }).click();
       const offlineBanner = page.locator('.ban .off');
       await poll(() => offlineBanner.textContent()).toContain('Your AIs on studio are offline.');
-      await poll(() => claudeCard.locator('header .st').textContent()).toBe(
-        'Offline · you took it offline',
-      );
+      await poll(() => claudeCard.locator('header .st').textContent()).toBe('Offline · by you');
       await offlineBanner.getByRole('button', { name: 'Bring back online' }).click();
       await poll(() => offlineBanner.count()).toBe(0);
       await poll(() => claudeCard.locator('header .st').textContent()).toContain('Sleeping');

@@ -109,4 +109,21 @@ describe('jumpToMessage', () => {
     expect(elFocus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
     expect(document.activeElement).toBe(el);
   });
+
+  it("opens the thread of a task's card and focuses its line", async () => {
+    const { jumpToMessage } = await load();
+    const el = document.body.appendChild(document.createElement('article'));
+    el.id = 'm-task-1';
+    el.innerHTML =
+      '<button>Menu</button><details><summary>Other</summary></details>' +
+      '<details class="thread-fold"><summary>Thread</summary></details>';
+    const scroll = vi.fn();
+    el.scrollIntoView = scroll;
+    jumpToMessage(new MouseEvent('click'), 'task-1', 'mention');
+    expect(scroll.mock.calls).toEqual([[{ behavior: 'auto', block: 'center' }]]);
+    expect([...el.querySelectorAll('details')].map((each) => each.open)).toEqual([false, true]);
+    expect(document.activeElement?.textContent).toBe('Thread');
+    jumpToMessage(new MouseEvent('click'), 'task-1', 'mention');
+    expect(scroll.mock.calls[1]).toEqual([{ behavior: 'smooth', block: 'center' }]);
+  });
 });

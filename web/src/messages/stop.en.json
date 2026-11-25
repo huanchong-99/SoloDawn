@@ -27,5 +27,5 @@
   "stop.node.offline": "The AIs on this computer are offline",
   "stop.node.waits": "Messages to them wait until you bring them back.",
   "stop.node.status": "AIs offline",
-  "stop.ai.offline": "Offline · you took it offline"
+  "stop.ai.offline": "Offline · by you"
 }

@@ -146,7 +146,7 @@
       </dd>
     </dl>
 
-    <details class="fold" bind:open>
+    <details class="fold thread-fold" bind:open>
       <summary>
         <Icon name="down" sm />
         <b>{t('task.thread.count').replace('{n}', `${task.thread.count}`)}</b>

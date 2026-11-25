@@ -27,5 +27,5 @@
   "stop.node.offline": "这台电脑上的 AI 已全部下线",
   "stop.node.waits": "发给它们的消息先留着，等你让它们上线。",
   "stop.node.status": "AI 已下线",
-  "stop.ai.offline": "已下线 · 是你让它下线的"
+  "stop.ai.offline": "已下线 · 由你下线"
 }

@@ -81,13 +81,15 @@ function deniedAIs(group: Group, task: TaskRow) {
   );
 }
 
-/** An AI that gets no work in the task because its owner said no, which no row tells
- *  (contracts/step-2/confirm.md section 6). */
+/** An AI that gets no work in the task because its owner said no, which no wait tells. A role that
+ *  the owner gave needs no word of theirs (contracts/step-2/confirm.md section 6). */
 function deniedHold(group: Group, task: TaskRow): Hold | undefined {
   if (task.state !== 'active' || task.wait) return undefined;
   const denied = deniedAIs(group, task);
   const roles = [task.assignee, task.step === 'review' ? task.reviewer : undefined];
-  const ai = workingAIs(group).find(({ id }) => roles.includes(id) && denied.includes(id));
+  const ai = workingAIs(group).find(
+    ({ id }) => roles.includes(id) && task.asked?.includes(id) && denied.includes(id),
+  );
   if (!ai) return undefined;
   const text = t('task.hold.denied')
     .replace('{ai}', () => ai.name)

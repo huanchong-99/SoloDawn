@@ -44,6 +44,43 @@ Feature: Browser push reminders and iOS Home Screen hint
     Then the browser notification reads "Website · 审批申请" and "Codex: Time the path change in a browser."
     And the open window moves to the chat of "Website" with focus on the approval card's "批准" button
 
+  Scenario: Clicking the reminder of a task that stopped opens its thread
+    Given the home "workstation" holds the group "Website" with a task
+    When the service worker receives the reminder that the task stopped and the person clicks it
+    Then the browser notification reads "Website · Task stopped" and "Codex: Login page"
+    And the client opens the chat of "Website" with the task's thread open and focus on its line
+
+  Scenario: A reminder opens the closed client at a task older than what the client reads at first
+    Given the home "workstation" holds the group "Website" with a task and 60 newer messages
+    When the person clicks the reminder that the task stopped, with the client closed, and the first read breaks off
+    Then the client has not asked for the task's message
+    When the connection is back
+    Then the client asks the home for the task's message once
+    And the task's thread is open with focus on its line
+
+  Scenario: A reminder of what the home no longer has leaves the person alone
+    Given the home "workstation" holds the group "Website" without the task's message
+    When the person clicks the reminder that the task stopped, with the client closed
+    Then the client asks the home for the task's message once
+    When the person writes in the composer, the task's message arrives after all and the connection is renewed
+    Then focus stays in the composer and the thread is closed
+
+  Scenario: A reminder clicked in an open window whose connection is gone opens once it is back
+    Given the home "workstation" holds the group "Website" with a task
+    And the client is open and its connection is gone
+    When the person clicks the reminder of a task whose message came meanwhile
+    And the connection is back
+    Then the task's thread is open with focus on its line
+
+  Scenario: A reminder whose message was asked for on a dead connection opens on the next one
+    Given the home "workstation" holds the group "Website" with a task and 60 newer messages
+    And the client is open and its connection is dead without its knowing
+    When the person clicks the reminder that the task stopped
+    And the request is lost
+    Then the client has asked once, whatever else arrived, and the chat has no task
+    When the connection is back
+    Then the task's thread is open with focus on its line
+
   Scenario: iPhone and iPad require adding SoloDawn to the Home Screen before enabling notifications
     Given an iPhone browser tab that has not been added to the Home Screen
     When the person opens the client at "#/settings"

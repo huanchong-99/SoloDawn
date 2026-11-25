@@ -86,7 +86,8 @@ export class Group {
    *  the `seq` of each live row applied. Rows before `synced` and pages never move it. */
   cursor = 0;
   name = $state('');
-  #live = false;
+  /** The group has been read: what is not held now, the read did not bring. */
+  live = $state(false);
   // What the answer to a read or a page must still find when it arrives: each read of the group
   // makes a new one, so an answer that was overtaken changes nothing.
   #read = {};
@@ -153,7 +154,7 @@ export class Group {
 
   /** Takes rows in. A row replaces the copy held only with a higher `seq`; an equal or lower one
    *  changes nothing and does not move the cursor. */
-  apply(rows: p.Row[], live = this.#live) {
+  apply(rows: p.Row[], live = this.live) {
     for (const row of rows) {
       const held = this.rows.get(key(row.r, row.id));
       if (held && held.seq >= row.seq) continue;
@@ -174,7 +175,7 @@ export class Group {
    *  that overtook it will. Paging starts again at `synced`, from what the read brought. */
   async sync(ctl: p.Ctl) {
     const read = (this.#read = {});
-    this.#live = false;
+    this.live = false;
     const answer = await ctl
       .request({ t: 'sync', g: this.g, since: this.cursor, state_only: false })
       .catch(lost);
@@ -187,7 +188,7 @@ export class Group {
     }
     this.home.answered(this);
     this.cursor = answer.seq;
-    this.#live = true;
+    this.live = true;
     this.#paging = new Map();
     for (const row of this.#requests()) void this.#fetchRow(read, ctl, row);
   }
@@ -200,12 +201,21 @@ export class Group {
     return [...new Set(ids)].filter((id) => !this.rows.has(key('msg', id)) && !this.task(id));
   }
 
-  /** Fetches one message. */
+  /** Fetches a message that is not held; whether it is held, or the home has answered. */
+  async seek(id: string) {
+    if (this.rows.has(key('msg', id))) return true;
+    const ctl = this.home.ctl;
+    return ctl ? this.#fetchRow(this.#read, ctl, id) : false;
+  }
+
+  /** Fetches one message; whether the home answered, a refusal too, and not too late. */
   async #fetchRow(read: object, ctl: p.Ctl, row: string) {
     const answer = await ctl
       .request({ t: 'fetch', g: this.g, r: 'msg', row, before: 0, limit: 1 })
       .catch(lost);
-    if (!answer.err && !this.#late(read, ctl)) this.apply(answer.rows, false);
+    if (this.#late(read, ctl)) return false;
+    if (!answer.err) this.apply(answer.rows, false);
+    return answer.err?.code !== 'lost';
   }
 
   /** Whether an answer comes too late: the group was read again since it was asked for, or the
@@ -228,7 +238,7 @@ export class Group {
    *  first page would start from may be about to be dropped by a `reset`, and the page would
    *  then leave a gap that nothing fills. None while the home cannot be reached. */
   #pageable(paging: Paging) {
-    return this.#live && paging.ready ? this.home.ctl : undefined;
+    return this.live && paging.ready ? this.home.ctl : undefined;
   }
 
   /** Fetches the page of messages before the ones read so far, of a thread or of the main line.

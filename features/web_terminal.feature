@@ -49,7 +49,7 @@ Feature: Terminal takeover page and handback summary
     When the owner opens "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/1PC8WineBrUQ-apCjx7tug" directly
     Then no "takeover.start" is sent and the takeover bar says "Direct connection required"
     When the path becomes direct and "workstation" refuses "takeover.start" with "relay", then "busy", then "internal"
-    Then the takeover bar shows "Direct connection required", then "This AI is busy with another terminal or a merge right now.", then error code "internal"
+    Then the takeover bar shows "Direct connection required", then "This AI is busy: its terminal is already open, one of its tasks is merging, or it is about to start a turn (perhaps waiting for a free slot on its computer). Try again soon.", then error code "internal"
 
   Scenario: A relayed path that recovers to direct opens the terminal without reopening the page
     Given the path to "workstation" is relayed

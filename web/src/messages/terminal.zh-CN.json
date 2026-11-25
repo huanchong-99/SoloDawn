@@ -22,7 +22,7 @@
   "terminal.bar.relayed.body": "连接切到了中继，终端已关闭并自动交还给 AI。",
   "terminal.bar.starting": "正在接管终端…",
   "terminal.bar.starting.body": "正在将 AI 会话切到交互终端。",
-  "terminal.error.busy": "这个 AI 正在另一个终端或合并任务中，请稍后再试。",
+  "terminal.error.busy": "这个 AI 正忙：它的终端已经开着，或它的任务正在合并，或它马上要开始一轮（也许在等它的电脑有空位）。请稍后再试。",
   "terminal.error.cli": "电脑上的 AI 命令行未能启动或恢复交互会话。",
   "terminal.error.conflict": "当前会话状态无法接管。",
   "terminal.error.home_unreachable": "AI 所在的电脑现在连不上这个群的家。",

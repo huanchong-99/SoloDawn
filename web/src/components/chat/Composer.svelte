@@ -182,7 +182,7 @@
       aria-controls={`${uid}-list`}
       aria-activedescendant={found.length ? `${uid}-${active}` : undefined}
       aria-invalid={length === 'over' || undefined}
-      aria-describedby={readonly || length !== 'ok' ? `${uid}-state` : undefined}
+      aria-describedby={(readonly && net) || length !== 'ok' ? `${uid}-state` : undefined}
       placeholder={hint}
       disabled={readonly}
       oninput={read}

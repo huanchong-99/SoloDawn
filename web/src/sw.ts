@@ -1,7 +1,7 @@
 // Service worker for closed-page Web Push reminders (planning/contracts/commands.md section 1.7;
 // planning/steps/step-1-acceptance.md A8.3). Decodes proto.Reminder payloads without message text
-// or commands, shows "group · kind" and "who: title" in the reader's language, and opens or focuses
-// the group's chat at the card when clicked.
+// or commands, shows "group · what happened" and "who: title" in the reader's language, and opens or
+// focuses the group's chat at the card, or the task's thread, when clicked.
 import { decode, Reminder } from './lib/proto';
 
 export type ReminderLang = 'en' | 'zh-CN';
@@ -44,7 +44,13 @@ export interface SwScope {
     readonly scope: string;
     showNotification(
       title: string,
-      options: { body: string; icon: string; tag: string; data: ReminderTarget },
+      options: {
+        body: string;
+        icon: string;
+        tag: string;
+        renotify: boolean;
+        data: ReminderTarget;
+      },
     ): Promise<void>;
   };
   readonly clients: {
@@ -58,7 +64,8 @@ export interface SwScope {
   addEventListener(type: 'notificationclick', listener: (ev: SwClickEvent) => void): void;
 }
 
-const kindLabels: Record<ReminderLang, Record<string, string>> = {
+// Of a reminder's `code`, else of its `kind`.
+const labels: Record<ReminderLang, Record<string, string>> = {
   en: {
     approval: 'Approval',
     decision: 'Decision',
@@ -66,7 +73,8 @@ const kindLabels: Record<ReminderLang, Record<string, string>> = {
     confirm: 'Request for your AI',
     mention: 'Mention',
     done: 'Task done',
-    stopped: 'Task stopped',
+    task_failed: 'Task stopped',
+    login_invalid: 'Sign-in no longer valid',
   },
   'zh-CN': {
     approval: '审批申请',
@@ -75,7 +83,8 @@ const kindLabels: Record<ReminderLang, Record<string, string>> = {
     confirm: '有人想用你的 AI',
     mention: '提及',
     done: '任务完成',
-    stopped: '任务已停下',
+    task_failed: '任务已停下',
+    login_invalid: '登录状态已失效',
   },
 };
 
@@ -86,14 +95,20 @@ export function resolveReminderLang(search: string, browserLang: string): Remind
   return browserLang.startsWith('zh') ? 'zh-CN' : 'en';
 }
 
-/** Formats a decoded `Reminder` summary into the notification title and body. Only the notice of a
- *  task that stopped is a mention with a title. */
+/** Without a code, only the notice of a task that stopped is a mention with a title. */
+const plainOf = ({ kind, title }: Reminder) => (kind === 'mention' && title ? 'task_failed' : kind);
+
+/** What happened, by the reminder's `code`. */
+function labelOf(reminder: Reminder, words: Record<string, string>) {
+  const { kind, code = plainOf(reminder) } = reminder;
+  return words[code] ?? words[kind] ?? kind;
+}
+
+/** Formats a decoded `Reminder` summary into the notification title and body. */
 export function formatReminder(reminder: Reminder, lang: ReminderLang) {
-  const of = reminder.kind === 'mention' && reminder.title ? 'stopped' : reminder.kind;
-  const kind = kindLabels[lang][of] ?? of;
   const body = reminder.title ? `${reminder.who}: ${reminder.title}` : reminder.who;
   return {
-    title: `${reminder.group} · ${kind}`,
+    title: `${reminder.group} · ${labelOf(reminder, labels[lang])}`,
     body,
   };
 }
@@ -111,6 +126,8 @@ async function onPush(scope: SwScope, raw: string | undefined): Promise<void> {
     body,
     icon: new URL('icon.svg', scope.registration.scope).href,
     tag: `${reminder.g}/${reminder.msg}`,
+    // The next reminder of one thread takes the place of the last, and alerts again.
+    renotify: true,
     data: { g: reminder.g, msg: reminder.msg, kind: reminder.kind },
   });
 }
