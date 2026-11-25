@@ -463,6 +463,8 @@ type peerNode struct {
 	Peer     *peer.Peer
 	Path     *peer.Path
 	once     sync.Once
+	cancel   context.CancelFunc
+	serving  sync.WaitGroup
 }
 
 func startPeerNode(t testing.TB, cleanup func(func()), cfg peerNodeConfig) (*peerNode, error) {
@@ -500,6 +502,8 @@ func (n *peerNode) Close() {
 		n.Path.Close()
 		n.Pairer.Close()
 		n.Sockets.Close()
+		n.cancel()
+		n.serving.Wait()
 		n.closeCore()
 	})
 }
@@ -633,6 +637,8 @@ func (n *peerNode) initTransport(cfg peerNodeConfig) error {
 		socks.Close()
 		return err
 	}
+	ctx, cancel := context.WithCancel(cfg.Ctx)
+	n.cancel = cancel
 	n.Sockets, n.Path = socks, rvPath
 	n.Pairer = node.NewPairer(node.PairConfig{
 		Key: n.Key, Store: n.Store, Logs: n.Logs, Sessions: n.Sessions,
@@ -645,7 +651,7 @@ func (n *peerNode) initTransport(cfg peerNodeConfig) error {
 		if cfg.OnInbound != nil {
 			cfg.OnInbound(c)
 		}
-		go n.Pairer.Serve(cfg.Ctx, c.Device, c)
+		n.serving.Go(func() { n.Pairer.Serve(ctx, c.Device, c) })
 	}
 	channels := peer.Channels{"pty:": func(s *peer.Stream) { n.Host.ServeTerminal(s) }}
 	n.Peer = peer.New(n.Key, socks, n.Store, known, routes, inbound, channels)

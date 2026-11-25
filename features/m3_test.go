@@ -468,6 +468,7 @@ func (w *m3World) whenHostRestarts() error {
 	w.restartLink = wrapM3HoldLink(h2, n.Home, false)
 	w.cleanup(func() {
 		w.restartLink.Close()
+		n.StopHome()
 		h2.Settle()
 	})
 	return nil

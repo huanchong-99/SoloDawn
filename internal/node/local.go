@@ -20,10 +20,9 @@ var (
 // LocalLink connects the host and the home of the same node in memory through
 // host.Home and home.Client (planning/architecture.md section 8.3).
 //
-// Lock order: mu guards next and waiting, and orders the start of a push
-// against Close; it is never held across calls into host or home. Each
-// channel in waiting has a single reader, the Request call that registered
-// its id.
+// Lock order: mu guards next and waiting only; it is never held across calls
+// into host or home. Each channel in waiting has a single reader, the Request
+// call that registered its id.
 type LocalLink struct {
 	push   func(string, json.RawMessage)
 	loop   *home.Loop
@@ -33,7 +32,6 @@ type LocalLink struct {
 	mu      sync.Mutex
 	next    int64
 	waiting map[int64]chan json.RawMessage
-	pushing sync.WaitGroup
 }
 
 // AttachLocal connects h to loop over a new LocalLink for this node's device,
@@ -61,13 +59,9 @@ func (l *LocalLink) PathChanged() <-chan struct{} { return nil }
 // Done is closed when the link is closed or detached from the home loop.
 func (l *LocalLink) Done() <-chan struct{} { return l.conn.Gone() }
 
-// Close detaches the link from the home loop and returns once a push in
-// progress has reached the host; no push reaches it after.
+// Close detaches the link from the home loop.
 func (l *LocalLink) Close() error {
 	l.loop.Detach(l.conn)
-	l.mu.Lock()
-	l.mu.Unlock()
-	l.pushing.Wait()
 	return nil
 }
 
@@ -212,20 +206,7 @@ func (l *LocalLink) fromHome(data []byte) {
 		l.deliver(*hdr.Re, data)
 		return
 	}
-	if l.startPush() {
-		defer l.pushing.Done()
-		l.push(l.device, data)
-	}
-}
-
-func (l *LocalLink) startPush() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.isClosed() {
-		return false
-	}
-	l.pushing.Add(1)
-	return true
+	l.push(l.device, data)
 }
 
 func (l *LocalLink) deliver(re int64, data json.RawMessage) {
