@@ -7,7 +7,10 @@ new device in the `moved` setting. Import binds the group to the receiving node,
 rebuilds the knowledge-base index and assigns destination-local inbox IDs.
 Receipts and session rows are not copied.
 
-`Open(path)` migrates the node database and enables WAL for files. Use
+`Open(path)` migrates the node database and enables WAL for files. Three migrations run in order,
+saved as `PRAGMA user_version`: `schema.sql` (the tables of
+[storage](../../planning/contracts/storage.md)), `processed_offer` (`offers.go`) and the
+knowledge-base index. A database with a higher version is refused. Use
 `:memory:` for isolated tests. Each `Write` callback runs on the one writer;
 return its first error to roll back counters, rows, inbox items and receipts
 together. Item numbering happens inside that callback, after allocating the id.
@@ -35,6 +38,17 @@ before another transaction can run.
 what a rule reads from disk, and `RaiseNum` and `Retire`. A read there sees what its
 own transaction wrote, and never waits for the writer, which it runs on.
 
-`Retain` is the daily transaction's cleanup operation, not a scheduler.
+`offers.go` remembers applied signalling offers across restarts: `RememberOffer(signer, conn, ts, now)`
+claims one offer and reports false when it was already claimed, and `HasOffer` asks. A claim
+expires 120 seconds after the offer's `ts`. `receipt.go` keeps the replayable `Outcome` of each
+accepted command by signer and nonce: `PutReceipt` writes it inside the command's transaction and
+`Receipt` returns `sql.ErrNoRows` for a command that was not accepted. `TypedNotes` (`home_reads.go`)
+lists the live notes of one `type` of a group by name.
+
+`Retain(now, days)` is the daily transaction's cleanup operation, not a scheduler. It deletes
+what is older than `days` by the statements of [storage](../../planning/contracts/storage.md)
+section 4, which includes the rows of `processed_offer` that expired and the `receipt` rows older
+than 24 hours, whatever `days` is. A pending card, a note, a `review` message, and a confirmed
+brief, its tasks and their `direct` confirm cards while a task is not final, stay.
 See [storage](../../planning/contracts/storage.md) and
 [rows](../../planning/contracts/rows.md) for the schema and wire formats.

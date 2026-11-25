@@ -195,11 +195,12 @@ func (w *externalWorld) setHold(kind, op string) error {
 }
 
 func (w *externalWorld) queueJump() error {
-	return s3Run(func() error { return w.whenOwnerMentionsAI("X", "Older item") },
+	return s3Run(func() error { return w.setHold("group", "pause") },
+		func() error { return w.whenOwnerMentionsAI("X", "Older item") },
 		func() error { return w.whenOwnerMentionsAI("X", "Jump this item") },
 		func() error { return w.waitState(w.findJumpMsg) }, func() error {
 			return w.hostCommand(proto.Jump{HomeCommand: w.homeHeader("jump"), Msg: w.heldMsg})
-		})
+		}, func() error { return w.setHold("group", "resume") })
 }
 
 func (w *externalWorld) findJumpMsg() bool {
@@ -269,7 +270,14 @@ func (w *externalWorld) reconnectNode() error {
 		return err
 	}
 	w.homeLink = link
-	return w.requestGroupSync()
+	raw, err := link.conn.Request(w.ctx, func(id int64) any {
+		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: string(w.groupID), Since: w.currentTask().Seq}
+	})
+	if err != nil {
+		return err
+	}
+	var synced proto.Synced
+	return proto.Decode(raw, &synced)
 }
 
 func (w *externalWorld) interrupted(reason string) error {

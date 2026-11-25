@@ -74,14 +74,13 @@ exit, the claimed interrupt or the event that ended the process); `run.open` and
 (`extOpenRun`, `extEnd`: `g`, `ai`, `run`; at the close `why` `done`, `crash` or `timeout`); `tool`
 (`runToolCall`, when the call returns: the session, `name`, `code` `ok` or the error code, `ms`);
 `settle.begin` and `settle.end` (`Settle`). `Host.bg` is the one wrapper for the work the host
-starts on its wait groups, the hosted checks poll, the answer to a CLI's question and the goroutines
-of a watched terminal. The work's goroutine, not the caller, who may hold a mutex, writes `bg.start`
-and `bg.stop` (`name`: `ask`, `cloud_poll`, `deliver`, `group_state`, `group_sync`, `hand_back`,
-`home_flush`, `home_sync`, `home_watch`, `member_status`, `path_watch`, `presence`, `run_timeout`,
-`watch_conn`, `watch_write`; `g` and `task` when the work has them), the stop before the wait
-group's `Done`, so that `Settle` returns after it. `diag_test.go` reads the lines from the standard
-logger and checks each once with its fields, and `inbox.take` with the pause reading and what it
-left.
+starts on its wait groups and the goroutines of a watched terminal. The work's goroutine, not the
+caller, who may hold a mutex, writes `bg.start` and `bg.stop` (`name`: `ask`, `cloud_poll`,
+`deliver`, `group_state`, `group_sync`, `hand_back`, `home_flush`, `home_sync`, `home_watch`,
+`member_status`, `path_watch`, `presence`, `run_timeout`, `watch_conn`, `watch_write`; `g` and
+`task` when the work has them), the stop before the wait group's `Done`, so that `Settle` returns
+after it. `diag_test.go` reads the lines from the standard logger and checks each once with its
+fields, and `inbox.take` with the pause reading and what it left.
 
 ## Hooks
 

@@ -38,7 +38,7 @@ func recv[T any](t *testing.T, ch <-chan T) T {
 	case v := <-ch:
 		return v
 	case <-time.After(5 * time.Second):
-		t.Fatal("timeout")
+		t.Fatal(timedOut(5*time.Second, fmt.Sprintf("a %T", *new(T)), nil))
 	}
 	panic("unreachable")
 }

@@ -3,6 +3,7 @@ name: Mutation
 # The final mutation gate (`nightly` in .project-standard/gates.toml) run in parallel on GitHub's runners
 # instead of one machine overnight. It starts on a push to a branch named mutation-run/<n>: push the commit
 # to test there. A shard is one gremlins run over one package, or over a range of the files of a big one.
+# features/ is test code in gates.toml (`tests`) and the gate's mutation command excludes it, so no shard mutates it.
 # Shards took 2 to 85 minutes (host/run.go, one file whose mutants often time out, is the longest); with the
 # 20 or so runners GitHub gives at once, a full run is estimated at 2.5 hours.
 on:
@@ -38,6 +39,7 @@ jobs:
           - { name: host-claude-codex, pkg: internal/host, own: '^c[lo]' }
           - { name: host-tools-sec-turn-info, pkg: internal/host, own: '^(tools_s|turn_)' }
           - { name: host-h-w, pkg: internal/host, own: '^(h|w)' }
+          - { name: host-external, pkg: internal/host, own: '^(external|tools_external)' }
           - { name: home-cmd-task-ev, pkg: internal/home, own: '^(cmd_t|e)' }
           - { name: home-fetch-kb, pkg: internal/home, own: '^(f|h|i|k)' }
           - { name: home-machine-profile, pkg: internal/home, own: '^[m-p]' }
@@ -46,6 +48,7 @@ jobs:
           - { name: home-cmd-member-review, pkg: internal/home, own: '^cmd_[m-r]' }
           - { name: home-check-card, pkg: internal/home, own: '^(check|cmd_b|cmd_ca)' }
           - { name: home-sync-webpush, pkg: internal/home, own: '^[s-w]' }
+          - { name: home-diag, pkg: internal/home, own: '^d' }
           - { name: node-pair, pkg: internal/node, own: '^pair' }
           - { name: node-service-session, pkg: internal/node, own: '^(r|sc|se)' }
           - { name: node-socket-update, pkg: internal/node, own: '^(so|su|t|u|v)' }
@@ -60,7 +63,6 @@ jobs:
           - { name: identity, pkg: internal/identity }
           - { name: proto, pkg: internal/proto }
           - { name: cmd, pkg: cmd/solodawn }
-          - { name: netsim, pkg: features/netsim }
     env:
       PKG: ${{ matrix.pkg }}
       OWN: ${{ matrix.own || '.' }}
@@ -103,9 +105,14 @@ jobs:
           # --workers 8 is four parallel mutants (gremlins halves it in integration mode): a mutant that
           # hangs waits ten times the baseline run, and most of a shard's time goes to those.
           # A flaky test that fails the baseline run stops gremlins before any mutant runs: try again.
+          # A mutant can turn a timer or a loop into a runaway that allocates until the VM is out of memory
+          # (path.go:200 `10 * time.Second` becomes 0 in internal/peer: every ask re-arms the timer at once and
+          # starts another goroutine that waits for the pacer). The address-space limit, per process, makes the
+          # runaway test binary die by itself; the mutant then counts as killed. Four workers at 4 GiB each fit
+          # the runner's 16 GiB, and the tests of the shards need a small fraction of it.
           for attempt in 1 2 3; do
             echo "attempt $attempt"
-            GOFLAGS=-count=1 nice -n 10 gremlins unleash -i --timeout-coefficient 10 --workers 8 "${exclude[@]}" "./$PKG" 2>&1 | tee gremlins.log
+            (ulimit -v 4194304; GOFLAGS=-count=1 exec nice -n 10 gremlins unleash -i --timeout-coefficient 10 --workers 8 "${exclude[@]}" "./$PKG") 2>&1 | tee gremlins.log
             s=${PIPESTATUS[0]}
             grep -q 'failed to gather coverage' gremlins.log || break
           done
@@ -222,7 +229,7 @@ jobs:
       - name: Files in exactly one shard
         run: |
           cat results/go-*/files.txt | sort > shards.txt
-          git ls-files '*.go' | grep -v '_test\.go$' | grep -v '/fakecli/' | grep -vE '^[^/]+\.go$' | sort > module.txt
+          git ls-files '*.go' | grep -v '_test\.go$' | grep -v '/fakecli/' | grep -v '^features/' | grep -vE '^[^/]+\.go$' | sort > module.txt
           sort -u shards.txt | diff - module.txt && [ -z "$(uniq -d shards.txt)" ]
       - name: Shards passed
         run: |

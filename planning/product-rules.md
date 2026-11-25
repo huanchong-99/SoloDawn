@@ -295,7 +295,8 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 - **R-138** `[S1]` Every computer and every browser has its own identity key.
   A lost device can be revoked from another device.
 - **R-139** `[S1]` Each node keeps a local audit record of who made its AIs
-  do what and what was approved; the owner can read it; it follows retention.
+  do what and what was approved; it follows retention. No screen or request
+  reads it in version 1.
 - **R-140** `[S2]` An invitation is a one-time link, valid 10 minutes, that
   admits one person to one group. (2026-11-22: no fingerprint and no check
   against a rendezvous that stands in for a home; the deployment guide says
@@ -305,8 +306,9 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 
 - **R-150** `[S1]` Apache-2.0. The name stays SoloDawn.
 - **R-151** `[S1]` No installers, no code signing. Release binaries for
-  Windows, macOS and Linux with SHA-256 sums, verified on install and on
-  self-update.
+  Windows, macOS and Linux with SHA-256 sums, verified on install.
+  Self-update comes after 1.0; until then a user updates by hand
+  (`install.md`).
 - **R-152** `[S1]` Onboarding: the website shows a prompt; the user gives it
   to their AI; the AI installs the node and pairs it. The pairing code in
   the prompt has 16 characters (Q-2).
