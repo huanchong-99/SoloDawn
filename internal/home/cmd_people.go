@@ -11,7 +11,17 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
-func init() { Commands.Add(keyJoin, peopleJoin) }
+func init() {
+	Commands.Add(keyInvite, peopleInvite)
+	Commands.Add(keyJoin, peopleJoin)
+}
+
+func peopleInvite(s *State, c Command) (Result, *Refusal) {
+	if !s.Admin(c.Who) {
+		return Result{}, &Refusal{"forbidden", "only an admin can invite"}
+	}
+	return Result{InviteBy: c.Who.Human}, nil
+}
 
 func peopleJoin(s *State, c Command) (Result, *Refusal) {
 	if c.Joining == nil || !c.Joining.Open || c.Who.User == "" {
