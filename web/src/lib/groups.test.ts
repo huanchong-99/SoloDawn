@@ -1001,10 +1001,19 @@ describe('commands', () => {
     asked[1].answer({ re: 2, ok: true });
     expect(await sending).toEqual({ re: 2, ok: true });
 
-    const refused = home.command({ t: 'jump', g: website, msg: 'a' });
+    void group.post('In the thread', [], 'DrtCn6htSBwmMPrFPbHJHA');
+    await vi.waitFor(() => expect(signed).toHaveLength(2));
+    expect(p.decode(p.Post, signed[1])).toMatchObject({
+      thread: 'DrtCn6htSBwmMPrFPbHJHA',
+      main: false,
+      text: 'In the thread',
+    });
     await vi.waitFor(() => expect(asked).toHaveLength(3));
-    asked[2].answer({ re: 3, err: { code: 'conflict', msg: 'nothing to jump' } });
-    expect(await refused).toEqual({ re: 3, err: { code: 'conflict', msg: 'nothing to jump' } });
+
+    const refused = home.command({ t: 'jump', g: website, msg: 'a' });
+    await vi.waitFor(() => expect(asked).toHaveLength(4));
+    asked[3].answer({ re: 4, err: { code: 'conflict', msg: 'nothing to jump' } });
+    expect(await refused).toEqual({ re: 4, err: { code: 'conflict', msg: 'nothing to jump' } });
   });
 
   it('create a project group that the nonce names, as the wire example of the command has it', async () => {

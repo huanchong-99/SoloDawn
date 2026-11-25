@@ -22,6 +22,7 @@ import {
   takeoverBarState,
   takeoverErrorText,
   targetOf,
+  terminalTask,
   toTerminalChunk,
 } from './terminal.svelte';
 
@@ -173,6 +174,19 @@ describe('the parts of a terminal page', () => {
     expect(sessionTaskOf(group, ai, undefined)).toBe(t1);
     expect(sessionTaskOf(group, { ...ai, task: undefined }, undefined)).toBeUndefined();
     expect(sessionTaskOf(group, undefined, undefined)).toBeUndefined();
+  });
+
+  it('opens on the task the AI is on, while a terminal can open on it', () => {
+    const group = new Group(new Home(me), gid);
+    const ai = row<p.AIMemberRow>('row-member-ai', { task: taskId });
+    expect(terminalTask(group, ai)).toBeUndefined();
+    const states = ['active', 'paused', 'failed', 'queued', 'merged', 'cancelled'];
+    for (const [i, state] of states.entries()) {
+      group.apply([row('row-task', { id: taskId, seq: 900 + i, state })]);
+      expect(terminalTask(group, ai)).toBe(i < 3 ? taskId : undefined);
+    }
+    group.apply([row('row-task', { id: taskId, seq: 950, state: 'active' })]);
+    expect(terminalTask(group, { ...ai, task: undefined })).toBeUndefined();
   });
 
   it('writes the header line and the link line', () => {

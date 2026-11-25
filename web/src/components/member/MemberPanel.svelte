@@ -17,7 +17,7 @@
   import { prefs, t } from '../../lib/prefs.svelte';
   import { href } from '../../lib/route.svelte';
   import { statusIn } from '../../lib/stop';
-  import { endTakeover, hostHomeOf } from '../../lib/terminal.svelte';
+  import { endTakeover, hostHomeOf, terminalTask } from '../../lib/terminal.svelte';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
   import AllowEditor from '../allow/AllowEditor.svelte';
@@ -136,7 +136,14 @@
                         {t('member.handback')}
                       </button>
                     {:else if terminal && !termWhy}
-                      <a class="btn btn-sm" href={href('terminal', { g: group.g, member: ai.id })}>
+                      <a
+                        class="btn btn-sm"
+                        href={href('terminal', {
+                          g: group.g,
+                          member: ai.id,
+                          task: terminalTask(group, ai),
+                        })}
+                      >
                         <Icon name="terminal" sm /><span>{t('member.terminal')}</span>
                       </a>
                     {:else if terminal}
@@ -160,7 +167,14 @@
                 {:else if ai.state === 'takeover'}
                   <footer class="card-foot">
                     <AskToWatch {group} {ai} />
-                    <a class="btn btn-sm" href={href('terminal', { g: group.g, member: ai.id })}>
+                    <a
+                      class="btn btn-sm"
+                      href={href('terminal', {
+                        g: group.g,
+                        member: ai.id,
+                        task: terminalTask(group, ai),
+                      })}
+                    >
                       {t('watch.open')}
                     </a>
                   </footer>

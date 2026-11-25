@@ -590,6 +590,19 @@ file in `src/routes/`. It edits neither the shell nor another area:
   message, so only that one offers it; not for an external AI, which a jump does not interrupt, nor
   in a paused group. `conflict` means that it was taken meanwhile, and the line goes. After a jump
   the line says that the AI takes the message next, then that the task is paused, until it continues.
+- **What a person does with a task.** `src/lib/taskops.ts`, `TaskMenu.svelte` and
+  `TaskActions.svelte`. The menu in the head of a task card (a `popover`) holds what the reader may
+  do: for an admin pause, resume, reassign and cancel as `contracts/task-machine.md` allows them in
+  the task's state, and for an owner the terminals of their own AIs on the task, with the task in
+  the address. Without either there is no menu. Pause and resume are sent at once; a cancel asks on
+  the card and says what it does; a reassignment names assignee and reviewer and says whose AI stops
+  and which owner is asked. A line on the card says why a paused, stopped, queued or waiting task
+  stands still (`taskHold`; a wait for a card is the badge's) and holds the one action that moves it
+  on. A refusal is shown and changes nothing. The menu reads the connection from a context
+  (`components/net.ts`, given by the shell). In an open thread the same `Composer` posts into the
+  thread; it offers the task's own AIs first and says when a message wakes nobody, waits for a
+  paused task, or carries on one that the round limit paused (`replyNote`). A thread once opened is
+  kept while it is folded, with its draft.
 - **In-page notifications.** `src/components/notify/` mounts `Notifications.svelte` at `layer`
   (`order: 10`), backed by `Notifier` in `src/lib/notify.svelte.ts`. After a group's first sync it
   shows the live events for the reader: `approval`, `decision`, `brief` and `confirm` waiting on the
@@ -668,6 +681,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/compose.ts`          | mention being typed, mentions and parts of a text, row size                       |
 | `src/lib/when.ts`             | times in the reader's language; messages by day                                   |
 | `src/lib/task.ts`             | task card derivations: badge, six-step bar, review and thread                     |
+| `src/lib/taskops.ts`          | what a person may do to a task, why it stands still, replies in its thread        |
 | `src/lib/call.ts`             | AI-to-AI call derivations: elapsed time, route, question and inline reply         |
 | `src/lib/terminal.svelte.ts`  | terminal takeover: commands, `pty` channel, `Takeover`, what the page shows       |
 | `src/lib/push.ts`             | Web Push capability, VAPID keys in IndexedDB, `PushManager`, `push` commands      |
@@ -680,8 +694,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/`             | shared parts: `Icon` (line icons), `Avatar`, `Failure`, `Mount`, `Rich` (a text)  |
 | `src/components/groups/`      | the group list, the cards that wait, the create-group dialog                      |
 | `src/components/chat/`        | the chat of a group: main line, message, composer                                 |
-| `src/components/task/`        | `TaskCard.svelte`, mounted for kind `task`                                        |
-| `src/components/thread/`      | a task's thread, scored review block, checks and system notices                   |
+| `src/components/task/`        | `TaskCard.svelte`, mounted for kind `task`, with its menu and actions             |
+| `src/components/thread/`      | a task's thread and its composer, scored review block, checks and system notices                   |
 | `src/components/call/`        | `CallBlock.svelte`, mounted for kind `call` in threads and the main line          |
 | `src/components/confirm/`     | `ConfirmCard.svelte`, mounted for kind `confirm`                                  |
 | `src/components/allow/`       | `AllowEditor.svelte`, lists and editor for each AI in the member panel            |
@@ -714,6 +728,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/chat.spec.ts`       | steps of `../features/web_chat.feature`                                           |
 | `features/status.spec.ts`     | steps of `../features/web_status.feature`                                         |
 | `features/task.spec.ts`       | steps of `../features/web_task.feature`                                           |
+| `features/taskops.spec.ts`    | steps of `../features/web_taskops.feature`                                        |
 | `features/profile.spec.ts`    | steps of `../features/web_profile.feature`                                        |
 | `features/model.spec.ts`      | steps of `../features/web_model.feature`                                          |
 | `features/thread.spec.ts`     | steps of `../features/web_thread.feature`                                         |

@@ -480,6 +480,48 @@ function approvalAndDecisionScript() {
   };
 }
 
+const call = (id: number, name: string, args: object) => [
+  {
+    dir: 'mcp<-cli',
+    msg: { jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } },
+  },
+  { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id, result: { isError: false } } },
+];
+const turnEnd = (result: string) => ({
+  dir: 'stdout',
+  msg: { type: 'result', subtype: 'success', is_error: false, result, session_id: '$session' },
+});
+const turn = { dir: 'stdin', msg: { type: 'user', message: { role: 'user' } } };
+
+/** A group session: a first turn that does nothing, and one that starts a direct task. */
+function directTaskScript() {
+  return {
+    steps: [
+      ...claudeInitSteps(),
+      turnEnd('ready'),
+      turn,
+      ...call(1, 'start_task', { title: 'Dismiss the notice', plan: 'Add a close button.' }),
+      turnEnd('started'),
+      { dir: 'eof' },
+    ],
+  };
+}
+
+/** The session of that task: it asks a person in the thread, and works on with the answer. */
+function askingTaskScript() {
+  return {
+    steps: [
+      ...claudeInitSteps(),
+      ...call(1, 'post', { kind: 'question', where: 'thread', text: '@Alex keep the field?' }),
+      turnEnd('asked'),
+      turn,
+      ...call(2, 'post', { kind: 'progress', where: 'thread', text: 'Keeping the field.' }),
+      turnEnd('answered'),
+      { dir: 'eof' },
+    ],
+  };
+}
+
 describe('E-M5: full main-line task lifecycle and approval/decision round-trip', () => {
   let browser: Browser;
   let net: Net | undefined;
@@ -807,6 +849,92 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       expect(stdinLines).toHaveLength(2);
       expect(stdinLines[1]).toContain('Which caching backend should we ship?');
       expect(stdinLines[1]).toContain('Choice: B (SQLite table)');
+    },
+  );
+
+  test(
+    "answers an AI's question in its task's thread, then pauses and cancels the task from its card",
+    { timeout: 90_000 },
+    async () => {
+      const scriptDir = join(inject('e2e').root, `m5-thread-${Date.now()}`);
+      await mkdir(scriptDir, { recursive: true });
+      const claudePath = join(scriptDir, 'claude.json');
+      await writeFile(claudePath, JSON.stringify(directTaskScript()));
+
+      const active = await startNet({
+        nodes: 1,
+        env: () => ({ ...gitIdentityEnv, SOLODAWN_FAKE_CLAUDE_SCRIPT: claudePath }),
+      });
+      net = active;
+      const direct = await startDirectSurface(active.rendezvous, inject('browser'));
+      surface = direct;
+      const [node] = active.nodes;
+      const repo = await initGitRepo(active.dir, 'thread-repo', '# Thread\n');
+      const context = await openDirectContext(browser, contexts, direct);
+      const page = await context.newPage();
+      await pairNode(page, direct, node, 'workstation');
+
+      await page.locator('button', { hasText: 'New group' }).first().click();
+      const createDlg = page.locator('dialog.dlg[open]');
+      const inputs = createDlg.locator('input.input');
+      await inputs.nth(0).fill('Thread');
+      await inputs.nth(1).fill(repo);
+      await inputs.nth(2).fill('main');
+      await inputs.nth(3).fill('Alex');
+      await createDlg.locator('select.input').first().selectOption('none');
+      await createDlg.locator('button.btn-primary', { hasText: 'Create group' }).click();
+      await poll(() => page.url()).toMatch(/#\/groups\/[^/]+$/);
+      const members = page.locator('#chat-side .members');
+      await members.locator('button', { hasText: 'Add AI' }).click();
+      const addDlg = page.locator('dialog.dlg[open]');
+      await poll(() => addDlg.locator('.choice').count()).toBe(3);
+      await addDlg
+        .locator('.choice', { hasText: 'Claude Code · workstation' })
+        .locator('input')
+        .check();
+      await addDlg.locator('button.btn-primary', { hasText: 'Add AI' }).click();
+      await poll(() => members.locator('.member').count()).toBe(1);
+
+      // The group session has read its script once it has ended a turn; the task's reads the next.
+      await sendChatMessage(page, '@Claude Code are you there?');
+      await poll(() => members.locator('.member').textContent(), 30_000).toContain('Waiting');
+      await writeFile(claudePath, JSON.stringify(askingTaskScript()));
+      await sendChatMessage(page, '@Claude Code let the notice be dismissed');
+
+      const card = page.locator('.line section.card', { hasText: 'T-1' });
+      await poll(() => card.locator('.card-head').textContent(), 30_000).toContain('In progress');
+      await card.locator('details.fold > summary').click();
+      const thread = card.locator('.thread');
+      await poll(() => thread.textContent(), 30_000).toContain('@Alex keep the field?');
+
+      const reply = card.getByRole('combobox', { name: "Message in T-1's thread" });
+      await reply.fill('@Claude Code yes, keep it.');
+      await reply.press('Enter');
+      await poll(() => reply.inputValue()).toBe('');
+      await poll(() => thread.textContent(), 30_000).toContain('@Claude Code yes, keep it.');
+      // The task's own session got the answer: it posts what it does with it.
+      await poll(() => thread.textContent(), 30_000).toContain('Keeping the field.');
+      expect(await page.locator('.line .msg-body > .text').allTextContents()).not.toContain(
+        '@Claude Code yes, keep it.',
+      );
+
+      const more = card.getByRole('button', { name: 'Actions on T-1' });
+      const item = (name: string) => card.locator('.menu .item', { hasText: name });
+      await more.click();
+      await item('Pause').click();
+      await poll(() => card.locator('.hold').textContent()).toContain(
+        'The secretary or an admin paused it.',
+      );
+      await poll(() => card.locator('.card-head').textContent()).toContain('Paused');
+
+      await more.click();
+      await item('Cancel task').click();
+      const question = card.locator('.ask');
+      await poll(() => question.textContent()).toContain('Cancel T-1 for good?');
+      expect(await card.locator('.card-head').textContent()).toContain('Paused');
+      await question.getByRole('button', { name: 'Cancel task' }).click();
+      await poll(() => card.locator('.card-head').textContent()).toContain('Cancelled');
+      await poll(() => more.count()).toBe(0);
     },
   );
 });

@@ -763,6 +763,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-25 · deviation · No person could write in a task's thread
+
+- Symptom: an AI's question in a thread could not be answered, and a task paused by the round limit had no way back although the page said "Reply in its thread to carry on" (R-33, R-60, A5.8). A main-line mention goes to the AI's group session, never to its task session.
+- Cause: the only text post of the web client sent `thread: null` (`post`, `web/src/lib/groups.svelte.ts`), and `Thread.svelte` had no field. The home's half works.
+- Status: resolved on `web/task-actions`: the composer inside an open thread. Tests: `features/web_taskops.feature`, `web/e2e/m5.spec.ts`.
+
+### 2026-11-25 · deviation · No person could pause, resume, reassign or cancel a task
+
+- Symptom: a task stopped by three failures or six failed reviews, or paused, stayed so for ever: those resumes and reassignments are an admin's alone (`planning/contracts/task-machine.md` rows 11, 13 and 15), and the card did not say why a paused or queued task stood still.
+- Cause: nothing in `web/src` sent a `task` command.
+- Status: resolved on `web/task-actions`: `web/src/components/task/`, `web/src/lib/taskops.ts`, `features/web_taskops.feature`, `web/e2e/m5.spec.ts`.
+
+### 2026-11-25 · deviation · A terminal opened on no chosen task
+
+- Symptom: with two tasks the host took the one used last, and a review could not be taken over (F-12, `planning/flows/takeover.md` A).
+- Cause: the route and `takeover.start` carried `task`, and no link named one (`MemberPanel.svelte`).
+- Status: resolved on `web/task-actions`: the menu of a task card, and the AI card while its AI is on a task.
+
 ### 2026-11-25 · deviation · The web client had no emergency stop
 
 - Symptom: no control sent `group pause`, `group resume`, `host.offline` or `host.online`, and a paused group looked like any other (R-64, A4.7 and A4.8 "as seen"). On the computers page an AI in `takeover` or `paused` showed the raw word.

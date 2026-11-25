@@ -2,6 +2,7 @@
   import { onDestroy, untrack, type Component } from 'svelte';
   import Icon, { type IconName } from './components/Icon.svelte';
   import Mount from './components/Mount.svelte';
+  import { provideNet } from './components/net';
   import { sourceOf, start, type Net } from './lib/net.svelte';
   import { nodes } from './lib/nodes.svelte';
   import {
@@ -30,6 +31,7 @@
   // The shell decides where the homes come from, once; every page is given the result.
   const { net, stop } = start(sourceOf(import.meta.env.MODE, location.search));
   onDestroy(stop);
+  provideNet(net);
 
   $effect(() => nodes.sync(net.homes));
   $effect(() => nodes.tell(net.homes));
