@@ -377,6 +377,7 @@ func m5ResolvePRHead(bareRepo string, pr *m5GHPR) (string, error) {
 func m5GitOut(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=gh", "GIT_AUTHOR_EMAIL=gh@test.invalid", "GIT_COMMITTER_NAME=gh", "GIT_COMMITTER_EMAIL=gh@test.invalid")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
