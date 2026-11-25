@@ -69,6 +69,7 @@
   "task.hold.depends.never": "没法开工：它要等的任务已取消（{tasks}）。",
   "task.hold.reviewer": "该评审了，还没派人。由秘书或管理员来派。",
   "task.hold.conflict": "合并没成。由秘书或管理员交回去解决。",
+  "task.hold.denied": "{who} 没同意 {ai} 参与。由秘书或管理员换一个 AI。",
   "task.cancel.title": "确定取消 {task}？",
   "task.cancel.body": "取消后不能恢复。做它的 AI 停下，没处理的卡片关掉。",
   "task.cancel.queued": "取消后不能恢复，它不会再开工。",

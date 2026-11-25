@@ -69,6 +69,7 @@
   "task.hold.depends.never": "Cannot start: a task it waits for was cancelled ({tasks}).",
   "task.hold.reviewer": "Ready for review, and nobody is named to do it. The secretary or an admin names a reviewer.",
   "task.hold.conflict": "The merge did not go through. The secretary or an admin hands it back to be fixed.",
+  "task.hold.denied": "{who} said no to {ai} here. The secretary or an admin gives the role to another AI.",
   "task.cancel.title": "Cancel {task} for good?",
   "task.cancel.body": "Its AIs stop and its open cards close.",
   "task.cancel.queued": "It will never start.",

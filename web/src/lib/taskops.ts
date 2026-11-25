@@ -36,7 +36,8 @@ export const workingAIs = (group: Group) =>
 
 /** Why a task stands still and what moves it on, when no card says it. */
 export interface Hold {
-  kind: 'manual' | 'rounds' | 'preempted' | 'failed' | 'depends' | 'reviewer' | 'conflict';
+  kind:
+    'manual' | 'rounds' | 'preempted' | 'failed' | 'depends' | 'reviewer' | 'conflict' | 'denied';
   text: string;
   tone?: 'dawn' | 'danger';
 }
@@ -55,7 +56,6 @@ function dependsHold(group: Group, task: TaskRow): string | undefined {
 const holdTones: Partial<Record<Hold['kind'], Hold['tone']>> = {
   rounds: 'dawn',
   failed: 'danger',
-  conflict: 'danger',
 };
 const stateHolds: Record<string, Hold['kind']> = { failed: 'failed', queued: 'depends' };
 const waitHolds = ['manual', 'rounds', 'preempted', 'reviewer', 'conflict'] as const;
@@ -69,11 +69,38 @@ function holdText(group: Group, task: TaskRow, kind: Hold['kind']): string | und
   return t(`task.hold.${kind}`).replace('{n}', `${task.thread.rounds}`);
 }
 
+const ownerName = (group: Group, ai: AIMemberRow) => group.personName(ai.user) ?? t('chat.gone');
+
+/** The AIs whose owner denied them a role in what the task came from. Such a card is newer than the
+ *  task's message, so it is held wherever that message is drawn. */
+function deniedAIs(group: Group, task: TaskRow) {
+  const request = task.brief ?? task.id;
+  return group.main.map(
+    (msg) =>
+      msg.kind === 'confirm' && msg.re === request && msg.state.status === 'denied' && msg.body.ai,
+  );
+}
+
+/** An AI that gets no work in the task because its owner said no, which no row tells
+ *  (contracts/step-2/confirm.md section 6). */
+function deniedHold(group: Group, task: TaskRow): Hold | undefined {
+  if (task.state !== 'active' || task.wait) return undefined;
+  const denied = deniedAIs(group, task);
+  const roles = [task.assignee, task.step === 'review' ? task.reviewer : undefined];
+  const ai = workingAIs(group).find(({ id }) => roles.includes(id) && denied.includes(id));
+  if (!ai) return undefined;
+  const text = t('task.hold.denied')
+    .replace('{ai}', () => ai.name)
+    .replace('{who}', () => ownerName(group, ai));
+  return { kind: 'denied', text };
+}
+
 /** The waits of contracts/rows.md section 4, `failed` among them, that no card carries. */
 export function taskHold(group: Group, task: TaskRow): Hold | undefined {
   const kind = holdKind(task);
-  const text = kind && holdText(group, task, kind);
-  return kind && text ? { kind, text, tone: holdTones[kind] } : undefined;
+  if (!kind) return deniedHold(group, task);
+  const text = holdText(group, task, kind);
+  return text ? { kind, text, tone: holdTones[kind] } : undefined;
 }
 
 /** What cancelling the task does, in sentences. */
@@ -111,7 +138,7 @@ export function assignNotes(group: Group, task: TaskRow, roles: Roles): string[]
     ...asked.map((ai) =>
       t('task.assign.asked')
         .replace('{ai}', () => ai.name)
-        .replace('{who}', () => group.personName(ai.user) ?? t('chat.gone')),
+        .replace('{who}', () => ownerName(group, ai)),
     ),
   ];
 }

@@ -188,11 +188,7 @@
                       {:else}
                         <a
                           class="btn btn-sm"
-                          href={href('terminal', {
-                            g: group.g,
-                            member: ai.id,
-                            task: terminalTask(group, ai),
-                          })}
+                          href={href('terminal', { g: group.g, member: ai.id })}
                         >
                           {t('watch.open')}
                         </a>

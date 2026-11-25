@@ -11,6 +11,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a home stores any integer as `pass`, `pass_foundation` or a limit, also 0 and negative ones. Some have an effect nobody chose: `turn_minutes` 0 ends every check command at once.
 - Cause: `planning/contracts/commands.md` 1.1 names no range and `grpSetValid` (`internal/home/cmd_group.go`) checks only that a field is there.
 - Status: open, accepted: only an admin sends it. The web client's settings take 1 to 100 for the scores and at least 1 for a limit (0 for `review_rounds` and `ask_depth`, where it means something: a failed review stops the task for a person, AIs do not ask each other), at most 4 for `ask_depth` (R-114), 55 seconds for `ask_wait_s` (`flows/ask.md` D) and 10 minutes for `approval_wait_s` (`flows/approval.md` H) (`limitFields`, `web/src/lib/groupset.ts`).
+### 2026-11-26 · deviation · An AI that its owner denied and later assigned gets one turn only
+
+- Symptom: the owner of an AI denies it a role, then changes their mind and sends the `task assign` that names it again (once another AI held the role). The AI gets the `assign` or `review` item (`planning/contracts/step-2/confirm.md` section 6, the exception), but none of the later `checks`, `reviewed` and `resume` items; the task stands still, and its card says again that the owner said no.
+- Cause: `cftHoldItem` (`internal/home/cmd_confirm_task.go:138`) knows the exception only inside the command that makes the change (`cftOwnerChange`); for every later item the denied card decides (`cftHeld`). Seen with a throwaway test on `cftFixture`: `assign` queued, then `checks`, `reviewed` and `resume` dropped.
+- Status: open, home side; found while the task card learned to say that an owner denied a role (`web/src/lib/taskops.ts`, `deniedHold`). The card reads the denied card alone, so it shows the line during that one turn too.
 
 ### 2026-11-25 · bug · A `jump` on a busy AI loses the message instead of interrupting the turn
 
@@ -792,6 +797,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a task stopped by three failures or six failed reviews, or paused, stayed so for ever: those resumes and reassignments are an admin's alone (`planning/contracts/task-machine.md` rows 11, 13 and 15), and the card did not say why a paused or queued task stood still.
 - Cause: nothing in `web/src` sent a `task` command.
 - Status: resolved on `web/task-actions`: `web/src/components/task/`, `web/src/lib/taskops.ts`, `features/web_taskops.feature`, `web/e2e/m5.spec.ts`.
+
+### 2026-11-26 · deviation · A task whose AI's owner said no read "In progress" and nothing else
+
+- Symptom: after the owner denied the role, the AI gets no work, the task has no wait, and its card did not say why it stood still.
+- Cause: the wait of a `confirm` card ends with the denial (`planning/contracts/step-2/confirm.md` section 6) and no row takes its place.
+- Status: resolved on `web/task-actions`: the card's line, with "Reassign" for an admin (`deniedHold`, `web/src/lib/taskops.ts`). Tests: `taskops.test.ts`, `features/web_taskops.feature`.
 
 ### 2026-11-25 · deviation · A terminal opened on no chosen task
 
