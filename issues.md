@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-26 · deviation · An AI that its owner denied and later assigned gets one turn only
+
+- Symptom: the owner of an AI denies it a role, then changes their mind and sends the `task assign` that names it again (once another AI held the role). The AI gets the `assign` or `review` item (`planning/contracts/step-2/confirm.md` section 6, the exception), but none of the later `checks`, `reviewed` and `resume` items; the task stands still, and its card says again that the owner said no.
+- Cause: `cftHoldItem` (`internal/home/cmd_confirm_task.go:138`) knows the exception only inside the command that makes the change (`cftOwnerChange`); for every later item the denied card decides (`cftHeld`). Seen with a throwaway test on `cftFixture`: `assign` queued, then `checks`, `reviewed` and `resume` dropped.
+- Status: open, home side; found while the task card learned to say that an owner denied a role (`web/src/lib/taskops.ts`, `deniedHold`). The card reads the denied card alone, so it shows the line during that one turn too.
+
 ### 2026-11-25 · limitation · `group set` has no range for its numbers
 
 - Symptom: a home stores any integer as `pass`, `pass_foundation` or a limit, also 0 and negative ones. Some have an effect nobody chose: `turn_minutes` 0 ends every check command at once.
@@ -781,6 +787,36 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open; the next occurrence needs the host and MCP lines of [diagnostics](planning/contracts/diagnostics.md).
 
 ## Resolved
+
+### 2026-11-25 · deviation · No person could write in a task's thread
+
+- Symptom: an AI's question in a thread could not be answered, and a task paused by the round limit had no way back although the page said "Reply in its thread to carry on" (R-33, R-60, A5.8). A main-line mention goes to the AI's group session, never to its task session.
+- Cause: the only text post of the web client sent `thread: null` (`post`, `web/src/lib/groups.svelte.ts`), and `Thread.svelte` had no field. The home's half works.
+- Status: resolved on `web/task-actions`: the composer inside an open thread. Tests: `features/web_taskops.feature`, `web/e2e/m5.spec.ts`.
+
+### 2026-11-25 · deviation · No person could pause, resume, reassign or cancel a task
+
+- Symptom: a task stopped by three failures or six failed reviews, or paused, stayed so for ever: those resumes and reassignments are an admin's alone (`planning/contracts/task-machine.md` rows 11, 13 and 15), and the card did not say why a paused or queued task stood still.
+- Cause: nothing in `web/src` sent a `task` command.
+- Status: resolved on `web/task-actions`: `web/src/components/task/`, `web/src/lib/taskops.ts`, `features/web_taskops.feature`, `web/e2e/m5.spec.ts`.
+
+### 2026-11-26 · deviation · A task whose AI's owner said no read "In progress" and nothing else
+
+- Symptom: after the owner denied the role, the AI gets no work, the task has no wait, and its card did not say why it stood still.
+- Cause: the wait of a `confirm` card ends with the denial (`planning/contracts/step-2/confirm.md` section 6) and no row takes its place.
+- Status: resolved on `web/task-actions`: the card's line, with "Reassign" for an admin (`deniedHold`, `web/src/lib/taskops.ts`). Tests: `taskops.test.ts`, `features/web_taskops.feature`.
+
+### 2026-11-26 · bug · Enter broke the line in the composer of a computer without a mouse
+
+- Symptom: on Firefox 136 in CI, Enter in the composer of a task's thread left `@Claude Code yes, keep it.` and a line break in the field and sent nothing (`web/e2e/m5.spec.ts`). The main line's composer is the same component and did the same; the end-to-end tests send there with the button, so none saw it.
+- Cause: `web/src/components/chat/Composer.svelte:31` before the fix let Enter send under `(pointer: fine)` only. A browser without a pointing device answers `(pointer: none)`: neither fine nor a touch screen. Headless Firefox 136 on Linux always does (`widget/headless/HeadlessLookAndFeelGTK.cpp`, `PrimaryPointerCapabilities` is 0).
+- Status: resolved in PR #400: Enter sends unless the pointer is coarse. Test in `web/src/components/team/chat.test.ts` (fine, none, coarse).
+
+### 2026-11-25 · deviation · A terminal opened on no chosen task
+
+- Symptom: with two tasks the host took the one used last, and a review could not be taken over (F-12, `planning/flows/takeover.md` A).
+- Cause: the route and `takeover.start` carried `task`, and no link named one (`MemberPanel.svelte`).
+- Status: resolved on `web/task-actions`: the menu of a task card, and the AI card while its AI is on a task.
 
 ### 2026-11-25 · bug · A computer that missed the one `home.add` was shut out of the group
 

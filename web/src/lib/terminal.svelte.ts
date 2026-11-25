@@ -81,6 +81,17 @@ export function sessionTaskOf(
   return group?.task(taskParam ?? ai?.task);
 }
 
+/** Whether a terminal can open on the task: not before it starts, nor after it ends
+ *  (`flows/takeover.md` A). */
+export const hasSession = (task: p.TaskRow) => ['active', 'paused', 'failed'].includes(task.state);
+
+/** The task that the address of an AI's terminal names: the one the AI is on. Without one its
+ *  computer chooses. */
+export function terminalTask(group: Group, ai: p.AIMemberRow): string | undefined {
+  const task = group.task(ai.task);
+  return task && hasSession(task) ? task.id : undefined;
+}
+
 /** The line under the page's title: `computer · T-<num> · branch`. */
 export function headerSubtitle(
   ai: p.AIMemberRow | undefined,

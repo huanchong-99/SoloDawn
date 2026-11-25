@@ -158,14 +158,22 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         expect(texts('.panel h3')).toEqual(['Take all my AIs offline']);
       },
     );
-    When('Alex presses "Resume"', () => press('Resume'));
+    When('Alex opens the thread of a task and presses "Resume"', async () => {
+      home.write(g, example('row-task', { g }));
+      home.write(g, example('row-msg-task', { g }));
+      flushSync();
+      one<HTMLDetailsElement>('.card details').open = true;
+      one('.card details').dispatchEvent(new Event('toggle'));
+      await settled(() => expect(all('.composer textarea')).toHaveLength(2));
+      press('Resume');
+    });
     Then(
-      'the home receives "group resume", the notice and the mark are gone and focus is in the composer',
+      'the home receives "group resume", the notice and the mark are gone and focus is in the main composer',
       async () => {
         await settled(() => expect(all('.paused')).toEqual([]));
         expect(ops(home).map(({ op }) => op)).toEqual(['pause', 'resume']);
         expect(all('.glist .st')).toEqual([]);
-        await settled(() => expect(document.activeElement).toBe(one('.composer textarea')));
+        await settled(() => expect(document.activeElement).toBe(one('.dock textarea')));
       },
     );
   });

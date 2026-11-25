@@ -262,13 +262,14 @@ export class Group {
     paging.before = (answer.rows.at(-1) as p.MsgRow | undefined)?.pos ?? before;
   }
 
-  /** Posts a text message to the main line. The row comes back from the home like any other. */
-  post(text: string, mentions: string[]) {
+  /** Posts a text message to the main line, or to a task's thread. The row comes back from the
+   *  home like any other. */
+  post(text: string, mentions: string[], thread: string | null = null) {
     return this.home.command({
       t: 'post',
       g: this.g,
       kind: 'text',
-      thread: null,
+      thread,
       main: false,
       text,
       mentions,

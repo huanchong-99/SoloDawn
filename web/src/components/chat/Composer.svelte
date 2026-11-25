@@ -5,12 +5,16 @@
   import type { Group, Member } from '../../lib/groups.svelte';
   import type { Net } from '../../lib/net.svelte';
   import { t } from '../../lib/prefs.svelte';
+  import type { TaskRow } from '../../lib/proto';
+  import { replyNote, threadMembers } from '../../lib/taskops';
   import Avatar from '../Avatar.svelte';
   import Failure from '../Failure.svelte';
   import Icon from '../Icon.svelte';
 
-  /** Where a message is written: mention completion, a hint before the length limit, send. */
-  let { group, net }: { group: Group; net: Net } = $props();
+  /** Where a message is written: mention completion, a hint before the length limit, send. With a
+   *  task it goes to that task's thread, and a line says what becomes of it there; why the home
+   *  cannot be reached the composer of the main line says for both. */
+  let { group, net, task }: { group: Group; net?: Net; task?: TaskRow } = $props();
   const uid = $props.id();
 
   let field: HTMLTextAreaElement;
@@ -22,19 +26,28 @@
   // The `@` whose list the person closed with Escape.
   let closed = $state(-1);
 
-  // With a keyboard, Enter sends and Shift+Enter breaks the line. On a touch keyboard Enter
-  // breaks the line and the button sends.
-  const keyboard = new MediaQuery('pointer: fine');
+  // Enter sends and Shift+Enter breaks the line, also on a computer without a mouse. On a touch
+  // keyboard Enter breaks the line and the button sends.
+  const touch = new MediaQuery('pointer: coarse');
 
   const readonly = $derived(!group.home.ctl);
+  const people = $derived(task ? threadMembers(group, task) : group.members);
   const mention = $derived(typing(text, caret));
-  const found = $derived(
-    mention && mention.at !== closed ? matching(group.members, mention.query) : [],
-  );
+  const found = $derived(mention && mention.at !== closed ? matching(people, mention.query) : []);
   // The members a text mentions make its row longer too.
-  const named = $derived(mentioned(text, group.members).length);
+  const mentions = $derived(mentioned(text, group.members));
+  const named = $derived(mentions.length);
   const length = $derived(room(text, named));
-  const sendable = $derived(text.trim() !== '' && length !== 'over' && !busy && !readonly);
+  const written = $derived(text.trim() !== '');
+  const sendable = $derived(written && length !== 'over' && !busy && !readonly);
+  const note = $derived(task && written ? replyNote(group, task, mentions) : undefined);
+  const intoThread = (key: 'thread.reply' | 'thread.reply.hint') =>
+    task && t(key).replace('{task}', `T-${task.num}`);
+  const label = $derived(intoThread('thread.reply') ?? t('chat.compose'));
+  const hint = $derived(
+    intoThread('thread.reply.hint') ??
+      t(group.info?.kind === 'team' ? 'team.compose' : 'chat.compose.hint'),
+  );
 
   // The field is as tall as its text, up to its limit in the styles.
   $effect(() => {
@@ -72,7 +85,7 @@
     failed = '';
     const taken = text;
     const sent = taken.trim();
-    const answer = await group.post(sent, mentioned(sent, group.members));
+    const answer = await group.post(sent, mentioned(sent, group.members), task?.id);
     busy = false;
     if (answer.err) {
       failed = answer.err.code;
@@ -97,15 +110,15 @@
     // A key pressed while an input method composes a character belongs to the input method.
     if (event.isComposing) return;
     if (found.length) return listKey(event);
-    if (event.key === 'Enter' && !event.shiftKey && keyboard.current) {
+    if (event.key === 'Enter' && !event.shiftKey && !touch.current) {
       event.preventDefault();
       void send();
     }
   }
 </script>
 
-<div class="composer">
-  {#if readonly}
+<div class="composer" class:in-thread={task}>
+  {#if readonly && net}
     <p class={net.otherTab ? 'state away' : 'state down'} id={`${uid}-state`} role="status">
       <i></i>{t(net.otherTab ? 'chat.otherTab' : 'chat.readonly')}
     </p>
@@ -163,14 +176,14 @@
       rows="1"
       value={text}
       role="combobox"
-      aria-label={t('chat.compose')}
+      aria-label={label}
       aria-autocomplete="list"
       aria-expanded={found.length > 0}
       aria-controls={`${uid}-list`}
       aria-activedescendant={found.length ? `${uid}-${active}` : undefined}
       aria-invalid={length === 'over' || undefined}
       aria-describedby={readonly || length !== 'ok' ? `${uid}-state` : undefined}
-      placeholder={t(group.info?.kind === 'team' ? 'team.compose' : 'chat.compose.hint')}
+      placeholder={hint}
       disabled={readonly}
       oninput={read}
       onkeyup={read}
@@ -181,11 +194,13 @@
       <Icon name="send" />
     </button>
   </form>
+  {#if note}<p class="note-line" role="status">{note}</p>{/if}
 </div>
 
 <style>
   .composer {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--sp-2);
     padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + env(safe-area-inset-bottom));
     border-top: 1px solid var(--line);
@@ -195,6 +210,19 @@
     width: 100%;
     max-width: var(--measure);
     margin-inline: auto;
+  }
+  /* At the end of a task's thread, inside its card. */
+  .in-thread {
+    padding: 0 var(--sp-4) var(--sp-4);
+    border: 0;
+    background: none;
+    font-size: var(--fs-sm);
+  }
+  .note-line {
+    padding-left: 10px;
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+    animation: appear var(--dur-2) var(--ease-out);
   }
   form {
     position: relative;
@@ -324,6 +352,11 @@
   @media (hover: hover) {
     .mentions button:hover::before {
       opacity: 1;
+    }
+  }
+  @media (pointer: fine) {
+    .in-thread textarea {
+      padding-block: 7.5px;
     }
   }
   @media (pointer: coarse) {

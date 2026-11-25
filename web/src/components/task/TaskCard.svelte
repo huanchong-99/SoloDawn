@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { jumpToMessage } from '../../lib/jump';
   import type { CardProps } from '../../lib/mounts.svelte';
   import { t } from '../../lib/prefs.svelte';
@@ -6,11 +7,27 @@
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
   import Thread from '../thread/Thread.svelte';
+  import TaskActions from './TaskActions.svelte';
+  import TaskMenu from './TaskMenu.svelte';
 
   /** Draws a `task` message in the main line from the live `TaskRow` of its group. */
   let { group, msg }: CardProps<'task'> = $props();
   let open = $state(false);
+  // A thread once opened is kept while it is folded, with what is being written in it.
+  let opened = $state(false);
+  let card = $state<HTMLElement>();
+  let actions = $state<TaskActions>();
   const task = $derived(group.task(msg.body.task));
+
+  $effect(() => {
+    if (open) opened = true;
+  });
+
+  async function reply() {
+    open = true;
+    await tick();
+    card?.querySelector<HTMLElement>('.composer textarea')?.focus();
+  }
 </script>
 
 {#if !task}
@@ -27,13 +44,18 @@
   {@const waiting = waitBadge(group, task.wait)}
   {@const review = reviewLine(group, task)}
   {@const noChecks = !task.checks.local && !task.checks.cloud && task.wait?.kind !== 'conflict'}
-  <section class="card" aria-labelledby={`task-num-${msg.id} task-title-${msg.id}`}>
+  <section
+    class="card"
+    bind:this={card}
+    aria-labelledby={`task-num-${msg.id} task-title-${msg.id}`}
+  >
     <header class="card-head">
       <span class="mono" id={`task-num-${msg.id}`}>T-{task.num}</span>
       <h3 id={`task-title-${msg.id}`}>{task.title}</h3>
       <span class="badge" class:solid={badge.solid} data-tone={badge.tone}>
         {#if badge.dot}<span class="st" data-st={badge.dot}><i></i></span>{/if}{badge.text}
       </span>
+      <TaskMenu {group} {task} onpick={(op) => void actions?.pick(op)} />
     </header>
 
     <div class="steps" role="img" aria-label={steps.aria}>
@@ -42,6 +64,8 @@
       {/each}
       <span>{steps.summary}</span>
     </div>
+
+    <TaskActions bind:this={actions} {group} {task} onreply={() => void reply()} />
 
     <dl class="kv">
       <dt>{t('task.kv.owner')}</dt>
@@ -128,7 +152,7 @@
         <b>{t('task.thread.count').replace('{n}', `${task.thread.count}`)}</b>
         <span class="cut grow" class:muted={!task.thread.last}>{threadPreview(group, task)}</span>
       </summary>
-      {#if open}
+      {#if opened}
         <Thread {group} {task} />
       {/if}
     </details>
@@ -136,6 +160,15 @@
 {/if}
 
 <style>
+  .badge {
+    margin-left: auto;
+  }
+  /* On a phone the title has a line of its own, under the number, the badge and the menu. */
+  @media (max-width: 640px) {
+    h3 {
+      order: 1;
+    }
+  }
   .steps {
     display: flex;
     align-items: center;

@@ -358,7 +358,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(pendingDc.querySelector('a.tcard')?.getAttribute('href')).toBe('#m-k-dc');
           expect(decidedDc.querySelector('a.tcard')?.getAttribute('href')).toBe('#m-k-dc-done');
           expect(summaryRow.querySelector('a.tcard')?.getAttribute('href')).toBe('#m-k-sum');
-          expect(all('.thread .card, .thread button:not(.tpage button)')).toEqual([]);
+          expect(all('.tlist :is(.card, button)')).toEqual([]);
         },
       );
       And(

@@ -14,7 +14,7 @@ Feature: Terminal takeover page and handback summary
   Scenario: Opening an owned AI terminal with a task streams terminal bytes, resizes, says messages wait and renders handback
     Given "Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms
     When the owner clicks "Open terminal" on the "Claude Code" member card
-    Then "workstation" receives a signed "takeover.start" for "Claude Code" without an explicit task id
+    Then "workstation" receives a signed "takeover.start" for "Claude Code" on task 12
     And the browser opens channel "pty:rZNvy-1jH6Z-BcPqA5U5BQ:1PC8WineBrUQ-apCjx7tug" and pushes "pty.resize"
     And the terminal header reads "Claude Code · Terminal" and "workstation · T-12 · task/12-conn-events"
     And the takeover bar reads "Owner is driving" and the session card shows "T-12 Fix path events", "task/12-conn-events" and "Direct · 4 ms"
@@ -33,6 +33,14 @@ Feature: Terminal takeover page and handback summary
     Then "workstation" receives "takeover.end" for the previous session and "takeover.start" naming task "O21RWBqThVezWCWeVoSoSQ"
     When the owner navigates to "#/terminal/rZNvy-1jH6Z-BcPqA5U5BQ/qBSFMsr2hHYKOMblEA_kdA"
     Then the session card shows "Read-only group session" and "The secretary's session is read-only and changes no files."
+
+  Scenario: A task card opens the terminal on its own task
+    Given "Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms
+    And "Claude Code" is also the assignee of task 15, whose card is in the main line
+    When the owner opens the chat of "Website" over a relayed path
+    Then the menu of T-15 says "Open Claude Code's terminal" and "Direct link only" without a link
+    When the path is direct again and the owner follows "Open Claude Code's terminal" of T-15
+    Then "workstation" receives a signed "takeover.start" for "Claude Code" on task 15
 
   Scenario: Relayed paths and takeover refusals block terminal takeover clearly
     Given the path to "workstation" is relayed
