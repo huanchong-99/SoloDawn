@@ -124,6 +124,16 @@ func TestPeerDiagnosticsIceFailedBeforeCtlOpened(t *testing.T) {
 	assertCloseDiagnostic(t, d.forConn(c.diag.key.conn), f.a.key.ID(), f.b.key.ID(), c.diag.key.conn, "ice_failed", 0)
 }
 
+func TestPeerDiagnosticsRemoteStateClosed(t *testing.T) {
+	d := captureDiag(t)
+	f := newPair(t)
+	c, err := f.a.Offer(t.Context(), f.b.key.ID())
+	check(t, err)
+	c.connectionStateChanged(webrtc.PeerConnectionStateClosed)
+	recvDiagnostic(t, "connection to close", c.Done())
+	assertCloseDiagnostic(t, d.forConn(c.diag.key.conn), f.a.key.ID(), f.b.key.ID(), c.diag.key.conn, "ctl_closed", 0)
+}
+
 func diagnosticPair(t *testing.T) (*pair, *Connection, *Connection) {
 	t.Helper()
 	f := newPair(t)

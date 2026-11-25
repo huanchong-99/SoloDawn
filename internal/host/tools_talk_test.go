@@ -433,7 +433,7 @@ func TestReadThreadTool(t *testing.T) {
 	assertEqual(t, got, readThreadResult{
 		Messages: []threadMsgItem{
 			{ID: "m1____________________A", Pos: 20, By: "Codex", Kind: "text", At: seamStart, Text: "Review ready"},
-			{ID: "m2____________________A", Pos: 19, By: "system", Kind: "system", At: seamStart - 1000, Text: ""},
+			{ID: "m2____________________A", Pos: 19, By: "system", Kind: "system", At: seamStart - 1000, Text: "System: no_secretary"},
 			{ID: "m3____________________A", Pos: 18, By: "goneMember000000000000A", Kind: "question", At: seamStart - 2000, Text: "Old?"},
 		},
 		More: true,
@@ -478,6 +478,51 @@ func TestReadThreadTool(t *testing.T) {
 	assertErrorCode(t, err, "home_unreachable")
 }
 
+func TestReadThreadShowsWhatABodyHolds(t *testing.T) {
+	bodies := []struct {
+		kind, status string
+		body         any
+		want         string
+	}{
+		{"brief", "pending", proto.BriefBody{
+			Title: "Connection path", Goal: "Show the path.", Criteria: []string{"Within 1 s", "No false notice"},
+			Scope: proto.BriefScope{In: []string{"node", "web"}, Out: []string{"relay"}},
+			Tasks: []proto.BriefTask{{Title: "Report", Depends: []int{}}, {Title: "Draw", Depends: []int{0}}},
+		}, "Brief \"Connection path\" (id m): pending\nGoal: Show the path.\nAcceptance criteria:\n1. Within 1 s\n2. No false notice\nIn scope: node; web\nOut of scope: relay\nTasks:\n1. Report\n2. Draw"},
+		{"decision", "pending", proto.DecisionBody{
+			Question: "Where?", Options: []proto.DecisionOption{{ID: "A", Label: "Top", Effect: "Visible."}, {ID: "B", Label: "Foot", Effect: "Quiet."}}, To: []string{"u1"},
+		}, "Decision (id m): Where?\n- A (Top): Visible.\n- B (Foot): Quiet."},
+		{"approval", "approved", proto.ApprovalBody{Tool: "Bash", Command: "pnpm install", Category: "command", Approvers: []string{"u1"}}, "Approval (approved) of Bash:\npnpm install"},
+		{"approval", "pending", proto.EmptyBody{}, ""},
+		{"checks", "", proto.ChecksBody{Stage: "local", Commit: "9f2c1ab", Items: []proto.CheckItem{{Name: "go test"}}}, "Checks (local) on commit 9f2c1ab: failed\n- go test: fail"},
+		{"review", "", proto.ReviewBody{Commit: "9f2c1ab", Round: 1, Score: 86, Pass: 90, Items: []proto.ReviewItem{{Text: "No test", Veto: true}}}, "Review round 1 on commit 9f2c1ab: score 86/90\n- [veto] No test"},
+		{"review", "", proto.EmptyBody{}, ""},
+		{"brief", "pending", proto.EmptyBody{}, ""},
+	}
+	h, _ := seamHost(t, seamStore(t))
+	seedTalkGroup(t, h)
+	home := newTalkHomeStub()
+	h.Attach("home-device", home)
+	caller := talkCaller(GroupSession, talkSecID, "", true, Turn{})
+	for _, tc := range bodies {
+		row := proto.MessageRow[any, *proto.CardState]{
+			RowHeader: proto.RowHeader{Type: "msg", ID: "m", Seq: 1}, Pos: 1, Group: talkGroupID, By: talkAI2ID, Kind: tc.kind, Mentions: []string{}, Body: tc.body,
+		}
+		if tc.status != "" {
+			row.State = &proto.CardState{Status: tc.status}
+		}
+		page := proto.Fetched{Type: "fetched", Success: proto.Success{OK: true}, Rows: []json.RawMessage{json.RawMessage(marshalWire(row))}}
+		home.replies = append(home.replies, json.RawMessage(marshalWire(page)))
+		if tc.want == "" {
+			_, err := Tools["read_thread"].Call(t.Context(), h, caller, json.RawMessage(`{"task":"main"}`))
+			assertErrorCode(t, err, "bad_request")
+			continue
+		}
+		got := mustCallTalk[readThreadResult](t, h, caller, "read_thread", `{"task":"main"}`)
+		assertEqual(t, got.Messages, []threadMsgItem{{ID: "m", Pos: 1, By: "Codex", Kind: tc.kind, Text: tc.want}})
+	}
+}
+
 func TestListMembersTool(t *testing.T) {
 	h, _ := seamHost(t, seamStore(t))
 	caller := talkCaller(GroupSession, talkSecID, "", true, Turn{})
@@ -499,7 +544,6 @@ func TestListMembersTool(t *testing.T) {
 		RowHeader: proto.RowHeader{Type: "member", ID: "gone__________________A", Seq: 9}, Gone: true,
 	})
 	h.Rows.Put(talkGroupID, "member", "bad_ai", json.RawMessage(`{"r":"member","id":"bad_ai","seq":10,"g":"g","kind":"ai","user":"u","name":"BadAI","last_seen":1}`))
-	h.Rows.Put(talkGroupID, "member", "bad_hum", json.RawMessage(`{"r":"member","id":"bad_hum","seq":11,"g":"g","kind":"human","user":"u","name":"BadHum","last_seen":1}`))
 
 	out := mustCallTalk[listMembersResult](t, h, caller, "list_members", `{}`)
 	winPct := 42.5
@@ -510,12 +554,12 @@ func TestListMembersTool(t *testing.T) {
 		{Name: "Codex", Kind: "ai", State: "dormant", Host: seamKey().ID(), Account: "team", Usage: &emptyUsage},
 		{Name: "Secretary", Kind: "ai", State: "waiting", Host: "workstation", Account: "personal", Usage: &emptyUsage},
 		{Name: "Worker", Kind: "ai", State: "working", Host: "dev-raw", Account: "api_key", Task: "agedOutTask00000000000A", Usage: &emptyUsage},
-		{Name: "alice", Kind: "human", State: "offline"},
-		{Name: "owner", Kind: "human", State: "online"},
+		{Name: "alice", Kind: "human"},
+		{Name: "owner", Kind: "human"},
 	})
 	encoded, _ := json.Marshal(out)
 	assertNoNulls(t, encoded)
-	if strings.Contains(string(encoded), `"name":"alice","kind":"human","state":"offline","host"`) || strings.Contains(string(encoded), `"name":"Codex","kind":"ai","state":"dormant","host":"`+seamKey().ID()+`","account":"team","task"`) {
+	if !strings.Contains(string(encoded), `{"name":"alice","kind":"human"}`) || strings.Contains(string(encoded), `"name":"Codex","kind":"ai","state":"dormant","host":"`+seamKey().ID()+`","account":"team","task"`) {
 		t.Fatalf("unexpected omitted fields in %s", encoded)
 	}
 

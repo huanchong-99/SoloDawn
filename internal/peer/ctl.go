@@ -57,7 +57,12 @@ func newConnection(pc *webrtc.PeerConnection, diag linkDiag) *Connection {
 func (c *Connection) Ready() <-chan struct{} { return c.ready }
 func (c *Connection) Done() <-chan struct{}  { return c.ctx.Done() }
 func (c *Connection) Close() error           { return c.close("closed") }
-func (c *Connection) isClosed() bool         { return c.ctx.Err() != nil }
+
+// Finish closes ctl after everything sent on it has arrived; the connection
+// ends when the peer closes its side. Close drops what is still on its way.
+func (c *Connection) Finish() { c.dc.Close() }
+
+func (c *Connection) isClosed() bool { return c.ctx.Err() != nil }
 
 // acceptCtl takes the channel labelled ctl; dispatch has checked the label.
 func (c *Connection) acceptCtl(dc *webrtc.DataChannel, onOpen func(*Connection)) {

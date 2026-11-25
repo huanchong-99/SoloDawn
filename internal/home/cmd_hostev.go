@@ -147,7 +147,11 @@ func (s *State) hevWriteStatus(c Command, ai proto.AIMemberRow, p proto.MemberSt
 func (s *State) hevEventRows(c Command, ai proto.AIMemberRow, ev hevEvent) ([]Row, *Refusal) {
 	id := string(c.Nonce)
 	if ev.task == "" {
-		msg := s.tskThreadSystem(c, id, hevKindSystem, nil, []string{}, ev.body)
+		mentions := []string{}
+		if ev.code == hevLoginInvalid {
+			mentions = []string{s.human(ai.User)}
+		}
+		msg := s.tskThreadSystem(c, id, hevKindSystem, nil, mentions, ev.body)
 		return []Row{RowOf(ai), RowOf(msg)}, nil
 	}
 	task, ok := s.Tasks[ev.task]

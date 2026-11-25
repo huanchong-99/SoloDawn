@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -33,6 +34,7 @@ type homeInboxWorld struct {
 	laptopK   identity.Key
 	browser   *homeInboxPeer
 	laptop    *homeInboxPeer
+	agents    *homeInboxPeer // the laptop's connection that signs for its AIs and takes no items
 	group     string
 	ownerID   string
 	secID     string
@@ -92,10 +94,13 @@ func homeInboxSteps(sc *godog.ScenarioContext) {
 }
 
 func homeInboxCapSteps(sc *godog.ScenarioContext, w *homeInboxWorld) {
-	sc.Step(`^(\d+) mentions are queued for the working AI$`, w.queueMentions)
+	sc.Step(`^another AI mentions the working AI (\d+) times$`, w.queueMentions)
+	sc.Step(`^the owner mentions the working AI$`, func() error {
+		return w.mention(w.browser, w.browserK, nil)
+	})
 	sc.Step(`^the laptop receives (\d+) "mention" items$`, w.expectMentionItems)
 	sc.Step(`^the laptop receives (\d+) "mention" items in 1 inbox frame$`, w.expectMentionBatch)
-	sc.Step(`^another mention is queued for the working AI (\d+) seconds later$`, func(sec int64) error {
+	sc.Step(`^the other AI mentions the working AI again (\d+) seconds later$`, func(sec int64) error {
 		w.clock.Add(sec * 1000)
 		return w.queueMentions(1)
 	})
@@ -138,7 +143,7 @@ func (w *homeInboxWorld) setup(cleanup func(func()), capPerHour int, withSec boo
 	}
 	cleanup(loop.Close)
 	w.loop = loop
-	w.browser, w.laptop = w.attach(w.browserK), w.attach(w.laptopK)
+	w.browser, w.laptop, w.agents = w.attach(w.browserK), w.attach(w.laptopK), w.attach(w.laptopK)
 	return w.bootstrap(capPerHour, withSec)
 }
 
@@ -352,15 +357,20 @@ func (w *homeInboxWorld) laptopQuiet() error {
 
 func (w *homeInboxWorld) queueMentions(count int) error {
 	for range count {
-		err := w.cmd(w.browser, w.browserK, map[string]any{
-			"t": "post", "kind": "text", "text": "ping",
-			"thread": nil, "main": false, "mentions": []string{w.workerID}, "re": nil, "body": map[string]any{},
-		})
-		if err != nil {
+		if err := w.mention(w.agents, w.laptopK, map[string]any{"as": w.reviewID}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (w *homeInboxWorld) mention(p *homeInboxPeer, key identity.Key, as map[string]any) error {
+	post := map[string]any{
+		"t": "post", "kind": "text", "text": "ping",
+		"thread": nil, "main": false, "mentions": []string{w.workerID}, "re": nil, "body": map[string]any{},
+	}
+	maps.Copy(post, as)
+	return w.cmd(p, key, post)
 }
 
 func (w *homeInboxWorld) expectMentionItems(count int) error {

@@ -135,6 +135,11 @@ AI members (CLI on computer · tier · state · skills):
   managed AI's `usage` comes from its CLI's events, an external AI's from
   `report_usage`. No caps.
 - The host reads the rows it holds when it composes the turn.
+- After the members, when the node knows team groups
+  (`contracts/step-2/watch-team.md` section 10), one line names them with the
+  ids that `post` takes as `group`:
+  `Team groups (name and id): "Team" (H46nb5YsBesaWbHkHmZLow)`. A remembered
+  group whose rows the node has not read yet is left out.
 
 **The secretary's instructions** gain the four rules of assignment. When
 choosing assignee and reviewer:

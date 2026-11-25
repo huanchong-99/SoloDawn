@@ -65,5 +65,5 @@ session runs at the level of step 1 (`contracts/commands.md` section 2,
 
 | | Limit | Consequence |
 | --- | --- | --- |
-| 1 | The home says who may direct an AI and who is the secretary | a member who runs a home can put another member's AI to work; the deployment guide says to join only groups of people you trust |
+| 1 | The home says who may direct an AI and who is the secretary | a member who runs a home can put another member's AI to work; the [deployment guide](../../../docs/cookbook/self-hosting.md) says to join only groups of people you trust |
 | 2 | A delegate removed while their `act` is on the way | the home handles it by the row at that moment |

@@ -55,6 +55,7 @@ type turnCtx struct {
 	s               Session
 	kind            TurnKind
 	owner           string
+	teams           string
 	itemTasks       map[string]proto.TaskRow
 	confirmations   []proto.MsgRow
 	confirmsFetched bool
@@ -89,6 +90,7 @@ var itemBuilders = map[string]itemBuilder{
 }
 
 var msgFormatters = map[string]func(proto.MsgRow) (string, error){
+	"brief":    formatBriefMsg,
 	"review":   formatReviewMsg,
 	"checks":   formatChecksMsg,
 	"handback": formatHandbackMsg,
@@ -117,11 +119,16 @@ func newTurnCtx(h *Host, s Session, kind TurnKind) (*turnCtx, error) {
 	if err != nil {
 		return nil, err
 	}
+	teams, err := teamGroupsLine(h, s)
+	if err != nil {
+		return nil, err
+	}
 	return &turnCtx{
 		h:         h,
 		s:         s,
 		kind:      kind,
 		owner:     owner,
+		teams:     teams,
 		itemTasks: map[string]proto.TaskRow{},
 	}, nil
 }
@@ -261,7 +268,7 @@ func renderBlock(index, total int, b itemBlock) string {
 func (c *turnCtx) sessionHeader() string {
 	header := fmt.Sprintf("[SoloDawn] group %q · you are %q · %s", c.groupName(), c.s.Name, c.sessionLabel())
 	if c.s.Secretary {
-		return header + "\n" + c.profileRoster()
+		return header + "\n" + c.profileRoster() + c.teams
 	}
 	return header
 }
@@ -519,11 +526,36 @@ func (c *turnCtx) briefSpecLines(briefID string) ([]string, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	return briefLines(brief), brief.Preset, nil
+}
+
+func briefLines(brief proto.BriefBody) []string {
 	lines := []string{"Goal: " + brief.Goal, "Acceptance criteria:"}
 	for i, criterion := range brief.Criteria {
 		lines = append(lines, fmt.Sprintf("%d. %s", i+1, criterion))
 	}
-	return lines, brief.Preset, nil
+	lines = appendScope(lines, "In scope: ", brief.Scope.In)
+	return appendScope(lines, "Out of scope: ", brief.Scope.Out)
+}
+
+func appendScope(lines []string, label string, scope []string) []string {
+	if len(scope) == 0 {
+		return lines
+	}
+	return append(lines, label+strings.Join(scope, "; "))
+}
+
+func formatBriefMsg(msg proto.MsgRow) (string, error) {
+	var brief proto.BriefBody
+	if proto.Decode(msg.Body, &brief) != nil {
+		return "", &Error{"bad_request", "invalid brief body"}
+	}
+	lines := []string{fmt.Sprintf("Brief %q (id %s): %s", brief.Title, msg.ID, cardStatus(msg.State))}
+	lines = append(append(lines, briefLines(brief)...), "Tasks:")
+	for i, task := range brief.Tasks {
+		lines = append(lines, fmt.Sprintf("%d. %s", i+1, task.Title))
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 func (c *turnCtx) buildReview(p parsedItem, _ bool) (itemBlock, int, error) {
@@ -591,18 +623,14 @@ func formatApprovalMsg(msg proto.MsgRow) (string, error) {
 }
 
 func formatDecisionMsg(msg proto.MsgRow) (string, error) {
-	if cardStatus(msg.State) != "decided" {
-		return "(decision)", nil
-	}
-	return formatDecidedDecision(msg)
-}
-
-func formatDecidedDecision(msg proto.MsgRow) (string, error) {
 	var body proto.DecisionBody
 	if proto.Decode(msg.Body, &body) != nil {
 		return "", &Error{"bad_request", "invalid decision card"}
 	}
 	lines := []string{fmt.Sprintf("Decision (id %s): %s", msg.ID, body.Question)}
+	if cardStatus(msg.State) != "decided" {
+		return strings.Join(appendOptions(lines, body.Options), "\n"), nil
+	}
 	if choice := strVal(msg.State.Choice); choice != "" {
 		lines = append(lines, "Choice: "+decisionOptionLabel(body.Options, choice))
 	}
@@ -610,6 +638,13 @@ func formatDecidedDecision(msg proto.MsgRow) (string, error) {
 		lines = append(lines, text)
 	}
 	return strings.Join(lines, "\n"), nil
+}
+
+func appendOptions(lines []string, options []proto.DecisionOption) []string {
+	for _, opt := range options {
+		lines = append(lines, fmt.Sprintf("- %s (%s): %s", opt.ID, opt.Label, opt.Effect))
+	}
+	return lines
 }
 
 func decisionOptionLabel(options []proto.DecisionOption, id string) string {

@@ -516,7 +516,7 @@ func TestSessionChangesCommitWithTheirTransaction(t *testing.T) {
 	token := h.Sessions.Admit(seamGroup, 1, false)
 	h.Sessions.SetTurn(seamGroup, Turn{Thread: "t12"})
 	left := h.Sessions.All()
-	takeover := AuditRow{Group: "g1", Agent: "claude", What: AuditTakeover, Detail: "t12", By: "owner-device"}
+	takeover := AuditRow{Group: "g1", Agent: "claude", What: AuditSetting, Detail: "t12", By: "owner-device"}
 
 	err := h.Sessions.Write(func(tx *Tx) error {
 		if written, err := h.Audit(tx.Tx, takeover); err != nil || !written {
@@ -564,7 +564,7 @@ func TestSessionChangesCommitWithTheirTransaction(t *testing.T) {
 	if err != nil || seamState(t, h.Sessions, seamTask) != Takeover {
 		t.Fatalf("got %v and %s", err, seamState(t, h.Sessions, seamTask))
 	}
-	if record := seamRecord(t, h); record != "1763600000000|g1|claude|takeover|-|-|t12|owner-device|-" {
+	if record := seamRecord(t, h); record != "1763600000000|g1|claude|setting|-|-|t12|owner-device|-" {
 		t.Fatalf("got the audit record %q", record)
 	}
 	if _, saved := seamHost(t, db); saved[1].State != Takeover {

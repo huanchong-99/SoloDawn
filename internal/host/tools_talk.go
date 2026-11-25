@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strconv"
 
@@ -109,7 +110,7 @@ type readThreadResult struct {
 type memberListItem struct {
 	Name    string       `json:"name"`
 	Kind    string       `json:"kind"`
-	State   string       `json:"state"`
+	State   string       `json:"state,omitempty"`
 	Host    string       `json:"host,omitempty"`
 	Account string       `json:"account,omitempty"`
 	Task    string       `json:"task,omitempty"`
@@ -364,16 +365,33 @@ func fetchThreadMessages(ctx context.Context, h *Host, c Caller, thread *string,
 	for i, rawRow := range page.Rows {
 		var row proto.MsgRow
 		proto.Decode(rawRow, &row)
+		text, err := threadMsgText(row)
+		if err != nil {
+			return nil, err
+		}
 		msgs[i] = threadMsgItem{
 			ID:   row.ID,
 			Pos:  row.Pos,
 			By:   cmp.Or(names[row.By], row.By),
 			Kind: row.Kind,
 			At:   row.Timestamp,
-			Text: row.Text,
+			Text: text,
 		}
 	}
 	return readThreadResult{Messages: msgs, More: page.More}, nil
+}
+
+// threadMsgText is the text of a message for any reader. The turn text of an
+// approval tells the AI that asked what to do, so it is not that.
+func threadMsgText(msg proto.MsgRow) (string, error) {
+	if msg.Kind != "approval" {
+		return formatMsgContent(msg)
+	}
+	var body proto.ApprovalBody
+	if proto.Decode(msg.Body, &body) != nil {
+		return "", &Error{"bad_request", "invalid approval body"}
+	}
+	return fmt.Sprintf("Approval (%s) of %s:\n%s", cardStatus(msg.State), body.Tool, body.Command), nil
 }
 
 func callListMembers(_ context.Context, h *Host, c Caller, raw json.RawMessage) (any, error) {
@@ -403,7 +421,7 @@ func decodeMemberItem(raw json.RawMessage, tasks map[string]string) (memberListI
 	if base.Kind == "ai" {
 		return decodeAIMemberItem(raw, tasks)
 	}
-	return decodeHumanMemberItem(raw)
+	return memberListItem{Name: base.Name, Kind: base.Kind}, true
 }
 
 func decodeAIMemberItem(raw json.RawMessage, tasks map[string]string) (memberListItem, bool) {
@@ -421,18 +439,6 @@ func decodeAIMemberItem(raw json.RawMessage, tasks map[string]string) (memberLis
 		Task:    cmp.Or(tasks[ai.Task], ai.Task),
 		Usage:   &usage,
 	}, true
-}
-
-func decodeHumanMemberItem(raw json.RawMessage) (memberListItem, bool) {
-	var hum proto.HumanMemberRow
-	if proto.Decode(raw, &hum) != nil {
-		return memberListItem{}, false
-	}
-	state := "offline"
-	if hum.Online {
-		state = "online"
-	}
-	return memberListItem{Name: hum.Name, Kind: hum.Kind, State: state}, true
 }
 
 func callListTasks(_ context.Context, h *Host, c Caller, raw json.RawMessage) (any, error) {

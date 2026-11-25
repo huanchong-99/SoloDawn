@@ -336,6 +336,48 @@ func checkLocalSocketAndMCP(t *testing.T, dir string, n *nodeRuntime) {
 	}
 }
 
+// A tool call that waits ends with the node, which would otherwise wait for it
+// before it closes.
+func TestNodeStopEndsAWaitingToolCall(t *testing.T) {
+	called, ended := make(chan struct{}), make(chan struct{})
+	saved := host.Tools
+	host.Tools = map[string]host.Tool{"hold": {Call: func(ctx context.Context, _ *host.Host, _ host.Caller, _ json.RawMessage) (any, error) {
+		close(called)
+		<-ctx.Done()
+		close(ended)
+		return nil, ctx.Err()
+	}}}
+	t.Cleanup(func() { host.Tools = saved })
+	dir := socketRoot(t)
+	l := openSocket(t, dir)
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	n, err := openNode(ctx, dir)
+	mustNoErr(t, err)
+	t.Cleanup(n.Close)
+	served := make(chan struct{}) // single reader: this test
+	go func() { n.serve(l); close(served) }()
+	key := host.SessionKey{Group: "g1", Member: "m1"}
+	mustNoErr(t, n.host.Sessions.Create(host.Session{SessionKey: key, Kind: host.GroupSession, Folder: "repo", Agent: "claude", Home: n.key.ID(), Name: "Claude"}))
+	conn, err := net.Dial("unix", filepath.Join(dir, "sock"))
+	mustNoErr(t, err)
+	defer conn.Close()
+	fmt.Fprintf(conn, "{\"mcp\":%q}\n", n.host.Sessions.Admit(key, 3, false))
+	io.WriteString(conn, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"hold"}}
+`)
+	<-called
+	stop()
+	for _, done := range []chan struct{}{ended, served} {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("a waiting tool call kept the node from stopping")
+		}
+	}
+}
+
 func dialRawLocal(t *testing.T, dir, payload string) string {
 	t.Helper()
 	conn, err := net.Dial("unix", filepath.Join(dir, "sock"))
@@ -470,6 +512,20 @@ func TestPairingSurfaceClientAndForegroundStop(t *testing.T) {
 
 	checkSaveRendezvousError(t, rvURL)
 	checkForegroundContextStop(t)
+}
+
+func TestPairRoutesShareSignallingPath(t *testing.T) {
+	n := &nodeRuntime{localPath: &peer.Path{}, pairer: newPairer(PairConfig{})}
+	stale := n.localPath.Route()
+	stale.ICE = []proto.ICEServer{{URLs: []string{"stun:expired.invalid"}}}
+	n.pairer.attempts[&pairAttempt{
+		peer: proto.Pair{Key: "browser"}, link: PairLink{Expires: time.Now().Add(pairWindow).UnixMilli()},
+		routes: []peer.Route{stale, {ID: "pair-only"}},
+	}] = true
+	routes := n.routesFor("browser")
+	if len(routes) != 2 || routes[0].ID != stale.ID || len(routes[0].ICE) != 0 || routes[1].ID != "pair-only" {
+		t.Fatalf("routes = %+v, want current shared route followed by pair-only", routes)
+	}
 }
 
 func pairNodeOverRendezvous(t *testing.T, dir string, n *nodeRuntime, rvURL, label string) (identity.Key, *peer.Connection, []proto.Envelope) {

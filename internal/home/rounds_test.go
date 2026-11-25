@@ -93,64 +93,33 @@ func rndTaskRow(taskID string, num int) proto.TaskRow {
 	}
 }
 
-// Jump retires the newest unacknowledged mention item produced by a message of
-// the same person in the same thread or in the main line, and queues its
-// replacement with Jump set and NotBefore 0.
-func TestRoundsJumpRequeuesNewestMatchingMention(t *testing.T) {
-	t.Run("main line picks newest of that person and clears hold", func(t *testing.T) {
-		s := rndState(t)
-		m1, m2, mGuest, mThread := id(60), id(61), id(62), id(63)
-		t1 := id(70)
-		d := &rndDisk{
-			msgs: map[string]proto.MsgRow{
-				m1:      {RowHeader: proto.RowHeader{Type: "msg", ID: m1}, By: ownerID, Kind: "text"},
-				m2:      {RowHeader: proto.RowHeader{Type: "msg", ID: m2}, By: ownerID, Kind: "text"},
-				mGuest:  {RowHeader: proto.RowHeader{Type: "msg", ID: mGuest}, By: briefGuest, Kind: "text"},
-				mThread: {RowHeader: proto.RowHeader{Type: "msg", ID: mThread}, By: ownerID, Kind: "text", Thread: rndPtr(t1)},
-			},
-			queued: []store.Item{
-				{ID: 11, AI: briefA, Why: "mention", Msg: rndPtr(m1)},
-				{ID: 12, AI: briefB, Why: "mention", Msg: rndPtr(m2), NotBefore: clock + 30_000},
-				{ID: 13, AI: briefA, Why: "mention", Msg: rndPtr(mGuest)},
-				{ID: 14, AI: briefA, Why: "mention", Task: rndPtr(t1), Msg: rndPtr(mThread)},
-				{ID: 15, AI: briefA, Why: "assign", Task: rndPtr(t1), Msg: rndPtr(m1)},
-				{ID: 16, AI: briefA, Why: "mention", Msg: nil},
-				{ID: 17, AI: briefA, Why: "mention", Msg: rndPtr(id(99))},
-			},
-		}
-		res := briefApply(t, s, d, receipts{}, browser, rndJumpEnv(browser, 80, m1, ""))
-		equal(t, res, home.Result{
-			Items:  []home.Item{{AI: briefB, Why: "mention", Msg: m2, Jump: true, NotBefore: 0}},
-			Retire: []int64{12},
-			Answer: store.Outcome{OK: true},
-		})
-	})
-
-	t.Run("thread message matches oldest index 0 in the same thread", func(t *testing.T) {
-		s := rndState(t)
-		t1, t2 := id(70), id(71)
-		mT1, mT2, mMain := id(60), id(61), id(62)
-		// Distinct string copies ensure thread equality compares values, not pointers.
-		threadA, threadB := string([]byte(t1)), string([]byte(t1))
-		d := &rndDisk{
-			msgs: map[string]proto.MsgRow{
-				mT1:    {RowHeader: proto.RowHeader{Type: "msg", ID: mT1}, By: ownerID, Kind: "text", Thread: &threadA},
-				mT2:    {RowHeader: proto.RowHeader{Type: "msg", ID: mT2}, By: ownerID, Kind: "text", Thread: rndPtr(t2)},
-				mMain:  {RowHeader: proto.RowHeader{Type: "msg", ID: mMain}, By: ownerID, Kind: "text"},
-				id(64): {RowHeader: proto.RowHeader{Type: "msg", ID: id(64)}, By: ownerID, Kind: "text", Thread: &threadB},
-			},
-			queued: []store.Item{
-				{ID: 21, AI: briefA, Why: "mention", Task: &threadB, Msg: rndPtr(mT1)},
-				{ID: 22, AI: briefB, Why: "mention", Task: rndPtr(t2), Msg: rndPtr(mT2)},
-				{ID: 23, AI: aiID, Why: "mention", Msg: rndPtr(mMain)},
-			},
-		}
-		res := briefApply(t, s, d, receipts{}, browser, rndJumpEnv(browser, 81, id(64), ""))
-		equal(t, res, home.Result{
-			Items:  []home.Item{{AI: briefA, Why: "mention", Task: t1, Msg: mT1, Jump: true, NotBefore: 0}},
-			Retire: []int64{21},
-			Answer: store.Outcome{OK: true},
-		})
+// Jump retires every unacknowledged mention item that its message produced, and
+// queues their replacements with Jump set and no hold. A newer message of that
+// person in the same place, and an item of another kind, stay as they are.
+func TestRoundsJumpRequeuesTheItemsOfItsMessage(t *testing.T) {
+	s := rndState(t)
+	named, newer, t1 := id(60), id(61), id(70)
+	d := &rndDisk{
+		msgs: map[string]proto.MsgRow{
+			named: {RowHeader: proto.RowHeader{Type: "msg", ID: named}, By: ownerID, Kind: "text", Thread: rndPtr(t1)},
+			newer: {RowHeader: proto.RowHeader{Type: "msg", ID: newer}, By: ownerID, Kind: "text", Thread: rndPtr(t1)},
+		},
+		queued: []store.Item{
+			{ID: 11, AI: briefA, Why: "mention", Task: rndPtr(t1), Msg: rndPtr(named)},
+			{ID: 12, AI: briefB, Why: "mention", Task: rndPtr(t1), Msg: rndPtr(named), NotBefore: clock + 30_000},
+			{ID: 13, AI: briefA, Why: "mention", Task: rndPtr(t1), Msg: rndPtr(newer)},
+			{ID: 14, AI: briefA, Why: "watch", Msg: rndPtr(named)},
+			{ID: 15, AI: briefA, Why: "mention"},
+		},
+	}
+	res := briefApply(t, s, d, receipts{}, browser, rndJumpEnv(browser, 80, named, ""))
+	equal(t, res, home.Result{
+		Items: []home.Item{
+			{AI: briefA, Why: "mention", Task: t1, Msg: named, Jump: true},
+			{AI: briefB, Why: "mention", Task: t1, Msg: named, Jump: true},
+		},
+		Retire: []int64{11, 12},
+		Answer: store.Outcome{OK: true},
 	})
 }
 
@@ -161,9 +130,10 @@ func TestRoundsJumpGoldenAndRefusals(t *testing.T) {
 	equal(t, proto.Decode(raw, &golden), nil)
 	equal(t, proto.UnexpectedNulls(raw), []string{})
 
-	mOwner, mGuest, mAI, mSys := id(60), id(61), id(62), id(63)
+	mOwner, mGuest, mAI, mSys, mNewer := id(60), id(61), id(62), id(63), id(64)
 	baseMsgs := map[string]proto.MsgRow{
 		mOwner: {RowHeader: proto.RowHeader{Type: "msg", ID: mOwner}, By: ownerID, Kind: "text"},
+		mNewer: {RowHeader: proto.RowHeader{Type: "msg", ID: mNewer}, By: ownerID, Kind: "text"},
 		mGuest: {RowHeader: proto.RowHeader{Type: "msg", ID: mGuest}, By: briefGuest, Kind: "text"},
 		mAI:    {RowHeader: proto.RowHeader{Type: "msg", ID: mAI}, By: briefA, Kind: "text"},
 		mSys:   {RowHeader: proto.RowHeader{Type: "msg", ID: mSys}, By: "system", Kind: "system"},
@@ -186,6 +156,7 @@ func TestRoundsJumpGoldenAndRefusals(t *testing.T) {
 		"system msg":            {by: browser, msg: mSys, code: "forbidden"},
 		"empty queue":           {by: browser, msg: mOwner, code: "conflict"},
 		"only assign for msg":   {by: browser, msg: mOwner, queued: []store.Item{{ID: 1, AI: briefA, Why: "assign", Msg: rndPtr(mOwner)}}, code: "conflict"},
+		"only a newer msg due":  {by: browser, msg: mOwner, queued: []store.Item{{ID: 3, AI: briefA, Why: "mention", Msg: rndPtr(mNewer)}}, code: "conflict"},
 		"only other person due": {by: browser, msg: mOwner, queued: []store.Item{{ID: 2, AI: briefA, Why: "mention", Msg: rndPtr(mGuest)}}, code: "conflict"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -556,16 +527,17 @@ func TestRoundsFailedTaskDeliveryAndWakeCap(t *testing.T) {
 		// After 61 minutes, both round-limit wakes have aged out: two new mentions go out immediately, and the third is held for 1 hour.
 		later := int64(clock + 61*60_000)
 		w.clock.Store(later)
-		for i, n := range []byte{66, 67} {
-			env := browser.Sign(fmt.Sprintf(`{"t":"post","n":%q,"ts":%d,"g":%q,"kind":"text","thread":null,"main":false,"text":"m","mentions":[%q],"re":null,"body":{}}`, id(n), later, groupID, briefB))
-			w.loop.Cmd(p.conn, int64(10+i), env)
-			p.next()
+		ask := func(n byte) {
+			env := laptop.Sign(fmt.Sprintf(`{"t":"post","n":%q,"ts":%d,"g":%q,"as":%q,"kind":"text","thread":null,"main":false,"text":"m","mentions":[%q],"re":null,"body":{}}`, id(n), later, groupID, briefA, briefB))
+			w.loop.Cmd(host.conn, int64(n), env)
+			host.next()
+		}
+		for _, n := range []byte{66, 67} {
+			ask(n)
 			got := inboxDecode(t, host.next())
 			equal(t, string(got.Items[0].Item.Msg), id(n))
 		}
-		thirdEnv := browser.Sign(fmt.Sprintf(`{"t":"post","n":%q,"ts":%d,"g":%q,"kind":"text","thread":null,"main":false,"text":"m3","mentions":[%q],"re":null,"body":{}}`, id(68), later, groupID, briefB))
-		w.loop.Cmd(p.conn, 12, thirdEnv)
-		p.next()
+		ask(68)
 		host.quiet()
 		w.clock.Store(later + 3_600_000)
 		w.loop.Tick(time.UnixMilli(later + 3_600_000))

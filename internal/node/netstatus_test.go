@@ -33,6 +33,7 @@ func (c *netStubCtl) PathChanged() <-chan struct{}                  { return nil
 func (c *netStubCtl) Done() <-chan struct{}                         { return c.done }
 func (c *netStubCtl) Read(context.Context) (json.RawMessage, error) { return nil, io.EOF }
 func (c *netStubCtl) Close() error                                  { return nil }
+func (c *netStubCtl) Finish()                                       {}
 
 func TestNetStatusToolRegistrationAndSchema(t *testing.T) {
 	tool, ok := host.Tools["net_status"]

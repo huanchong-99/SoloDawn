@@ -282,7 +282,7 @@ func TestCommandExamplesAreNamedByWhatSelectsThem(t *testing.T) {
 			want = strings.ReplaceAll(kind, ".", "-")
 		case "groups", "beacon":
 			want = kind
-		case "host.info", "audit": // a request, its answer, a push
+		case "host.info": // a request, its answer, a push
 			if want = strings.ReplaceAll(kind, ".", "-") + "-"; strings.HasPrefix(name, want) {
 				continue
 			}

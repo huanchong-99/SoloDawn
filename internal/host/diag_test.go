@@ -219,7 +219,7 @@ func TestDiagExternalRunLines(t *testing.T) {
 			4: {"crash", func(run int64) { h.ExternalDone(testGroup1, testAI1, run, "boom") }},
 			5: {"done", func(run int64) { h.ExternalDone(testGroup1, testAI1, run, "") }},
 		} {
-			extOpenRun(h, extOf(h), aiGroupKey{group: testGroup1, member: testAI1}, s, run)
+			extOpenRun(h, extOf(h), aiGroupKey{group: testGroup1, member: testAI1}, s, run, Turn{})
 			end.do(run)
 			synctest.Wait()
 			line := fmt.Sprintf("%s g=%s ai=%s run=%d", node, testGroup1, testAI1, run)

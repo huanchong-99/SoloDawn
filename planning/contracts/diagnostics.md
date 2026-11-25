@@ -74,7 +74,7 @@ today; the builder may move a line to the nearest place that has the fields.
 | `sig.send`, `sig.recv` | `peer`: an offer or an answer; a candidate at `debug` | `dev`, `conn`, `kind` |
 | `ice.state` | `peer`: the connection state changes | `dev`, `conn`, `state` |
 | `ice.pair` | `peer`: the selected pair changes | `dev`, `conn`, `local`, `remote` (candidate types), `proto`, `path` (`direct`, `relay`) |
-| `ctl.open`, `conn.close` | `peer`: `ctl` is ready; the connection is done | `dev`, `conn`; at the close `why` (`ice_failed`, `ctl_closed`, `closed`), `ms` open |
+| `ctl.open`, `conn.close` | `peer`: `ctl` is ready; the connection is done | `dev`, `conn`; at the close `why` (`ice_failed`; `ctl_closed` when the remote side closed; `closed` when this side did), `ms` open |
 | `bg.start`, `bg.stop` | `host`, `home`, `node`: each goroutine a wait group starts (a delivery, a group sync, a poll of hosted checks, a status flush, a connection's pump), and in `host` the goroutines of a watched terminal; not the read loops of a CLI process or a terminal, the first of which `proc.*` covers | `name`; `g` and `task` when the work has them |
 
 A change of path is two `ice.pair` lines of one `conn` with different
@@ -90,7 +90,7 @@ What each of the failures of 2026-11-23 would have shown (`issues.md`):
 | A9.23, the bulletin before the attach | `tool name=post code=home_unreachable` between `home.dial` and `host.attach` of that home |
 | A10.3, the pause read (FLAKY-27) | `inbox.take` with the newer item in `took` and the older in `left` |
 | Host teardown | any line of that node, a `bg.stop` too, after `settle.end` |
-| A7.9 on Windows, open | `ice.pair` and `ice.state` of the takeover connection on the next failing run |
+| A7.9 on Windows | `ice.pair` and `ice.state` of the takeover connection on the next failing run |
 
 ## 3. Levels and the switch
 
