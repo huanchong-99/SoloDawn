@@ -193,11 +193,12 @@ func (w *externalWorld) setHold(kind, op string) error {
 }
 
 func (w *externalWorld) queueJump() error {
-	return s3Run(func() error { return w.whenOwnerMentionsAI("X", "Older item") },
+	return s3Run(func() error { return w.setHold("group", "pause") },
+		func() error { return w.whenOwnerMentionsAI("X", "Older item") },
 		func() error { return w.whenOwnerMentionsAI("X", "Jump this item") },
 		func() error { return w.waitState(w.findJumpMsg) }, func() error {
 			return w.hostCommand(proto.Jump{HomeCommand: w.homeHeader("jump"), Msg: w.heldMsg})
-		})
+		}, func() error { return w.setHold("group", "resume") })
 }
 
 func (w *externalWorld) findJumpMsg() bool {

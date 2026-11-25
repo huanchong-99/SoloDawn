@@ -239,11 +239,23 @@ func (w *externalWorld) waitCommand(timeout string) *exec.Cmd {
 }
 
 func (w *externalWorld) look(code int) error {
-	r := runExternalCLI(w.waitCommand("0"))
-	if err := r.expect(code); err != nil || code != 0 {
-		return err
+	if code == 0 {
+		return waitUntil(5*time.Second, "external wait handout", w.pollLook)
 	}
-	return w.readHandout(r)
+	return runExternalCLI(w.waitCommand("0")).expect(code)
+}
+
+// pollLook retries while the item is not staged yet (exit 3); any other
+// failure ends the wait.
+func (w *externalWorld) pollLook() error {
+	r := runExternalCLI(w.waitCommand("0"))
+	if r.expect(3) == nil {
+		return errors.New("wait exit 3")
+	}
+	if err := w.readHandout(r); err != nil {
+		return abort(err)
+	}
+	return nil
 }
 
 func (w *externalWorld) readHandout(r externalCLIResult) error {
