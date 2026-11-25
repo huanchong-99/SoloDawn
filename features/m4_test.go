@@ -161,6 +161,12 @@ func m4Steps(sc *godog.ScenarioContext, f fixtures) {
 	})
 	w.cleanup = afterScenario(sc)
 	w.tb = scenarioTB{TB: f.t, cleanup: w.cleanup}
+	noConfirmCardAfter(sc, func() map[string]proto.MsgRow {
+		if w.b1 == nil {
+			return nil
+		}
+		return w.b1.msgs
+	})
 	registerM4SetupSteps(sc, w)
 	registerM4ApprovalSteps(sc, w)
 	registerM4DecisionSteps(sc, w)

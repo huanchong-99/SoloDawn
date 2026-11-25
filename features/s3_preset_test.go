@@ -81,31 +81,32 @@ func (b *s3PresetHomeBridge) answer(ctx context.Context) (json.RawMessage, error
 }
 
 type s3PresetWorld struct {
-	today     time.Time
-	now       time.Time
-	db        *store.Store
-	hostDB    *store.Store
-	loop      *home.Loop
-	h         *host.Host
-	bridge    *s3PresetHomeBridge
-	ownerConn *homeRunPeer
-	hostConn  *homeRunPeer
-	watchConn *homeRunPeer
-	cleanup   func(func())
-	browser   identity.Key
-	node      identity.Key
-	group     string
-	ownerMID  string
-	secID     string
-	claudeID  string
-	codexID   string
-	nonce     int
-	presetIDs map[string]string
-	firstID   string
-	lastBrief string
-	lastTasks []proto.TaskRow
-	oldMsgID  string
-	forgotten string
+	today      time.Time
+	now        time.Time
+	db         *store.Store
+	hostDB     *store.Store
+	loop       *home.Loop
+	h          *host.Host
+	bridge     *s3PresetHomeBridge
+	ownerConn  *homeRunPeer
+	hostConn   *homeRunPeer
+	watchConn  *homeRunPeer
+	cleanup    func(func())
+	browser    identity.Key
+	node       identity.Key
+	group      string
+	ownerMID   string
+	secID      string
+	claudeID   string
+	codexID    string
+	nonce      int
+	presetIDs  map[string]string
+	firstID    string
+	lastBrief  string
+	lastTasks  []proto.TaskRow
+	oldMsgID   string
+	forgotten  string
+	forgetSent time.Time
 }
 
 func s3PresetSteps(sc *godog.ScenarioContext) {
@@ -133,7 +134,7 @@ func s3PresetSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^daily retention runs on the preset group today$`, w.runRetentionToday)
 	sc.Step(`^the old text message "([^"]+)" is purged while preset "([^"]+)" remains$`, w.checkRetentionOutcome)
 	sc.Step(`^a browser watches the preset group and the owner forgets the preset "([^"]+)"$`, w.watchAndForgetPreset)
-	sc.Step(`^the browser receives a gone marker for that preset, fetch kind "preset" is empty, and the name "([^"]+)" can be created again$`, w.checkGoneMarkerAndRecreate)
+	sc.Step(`^the browser receives a gone marker for that preset within 1 second, fetch kind "preset" is empty, and the name "([^"]+)" can be created again$`, w.checkGoneMarkerAndRecreate)
 }
 
 func (w *s3PresetWorld) nextID(tag string) string {
@@ -639,14 +640,26 @@ func (w *s3PresetWorld) watchAndForgetPreset(name string) error {
 			break
 		}
 	}
+	w.forgetSent = time.Now()
 	return w.ownerForgetsPreset(name)
 }
 
 func (w *s3PresetWorld) checkGoneMarkerAndRecreate(name string) error {
+	return s3Run(w.checkGoneMarker, w.checkNoPreset, func() error { return w.ownerWritesPreset(name, "Recreated after forget.") })
+}
+
+func (w *s3PresetWorld) checkGoneMarker() error {
 	pushed, err := w.watchConn.next()
 	if err != nil {
 		return err
 	}
+	if took := time.Since(w.forgetSent); took > time.Second {
+		return fmt.Errorf("the gone marker came %v after the forget, want within 1 second", took)
+	}
+	return w.checkGoneRow(pushed)
+}
+
+func (w *s3PresetWorld) checkGoneRow(pushed string) error {
 	var rowsPush proto.Rows
 	if err := proto.Decode([]byte(pushed), &rowsPush); err != nil {
 		return err
@@ -658,10 +671,13 @@ func (w *s3PresetWorld) checkGoneMarkerAndRecreate(name string) error {
 	if err := proto.Decode(rowsPush.Rows[0], &gone); err != nil {
 		return err
 	}
-	if gone.Type != "note" || gone.ID != w.forgotten || !gone.Gone {
-		return fmt.Errorf("unexpected gone row: %+v", gone)
+	if want := (proto.GoneRow{RowHeader: proto.RowHeader{Type: "note", ID: w.forgotten, Seq: gone.Seq}, Gone: true}); gone != want {
+		return fmt.Errorf("gone row %+v, want %+v", gone, want)
 	}
+	return nil
+}
 
+func (w *s3PresetWorld) checkNoPreset() error {
 	w.loop.Fetch(w.watchConn.conn, home.Fetch{
 		FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: 11}, Group: w.group, Before: 0, Limit: 10},
 		Kind:      "preset",
@@ -677,6 +693,5 @@ func (w *s3PresetWorld) checkGoneMarkerAndRecreate(name string) error {
 	if len(fetched.Rows) != 0 || fetched.More {
 		return fmt.Errorf("expected empty preset fetch after forget, got %s", fetchedRaw)
 	}
-
-	return w.ownerWritesPreset(name, "Recreated after forget.")
+	return nil
 }

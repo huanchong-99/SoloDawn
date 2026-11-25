@@ -136,6 +136,18 @@ func (d *hlDriver) turnCount() int {
 	return d.turns
 }
 
+func (d *hlDriver) openProcs() []int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var open []int
+	for i, p := range d.procs {
+		if !p.isClosed() {
+			open = append(open, i)
+		}
+	}
+	return open
+}
+
 func (d *hlDriver) proc(i int) *hlProc {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -198,6 +210,12 @@ func (p *hlProc) emit(e host.Event) {
 	}
 }
 
+func (p *hlProc) isClosed() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.closed
+}
+
 func (p *hlProc) finish() {
 	p.mu.Lock()
 	if !p.closed {
@@ -215,6 +233,7 @@ type hlScenario struct {
 	heldTurns          int
 	turnsAtOffline     int
 	offlineStoppedErr  error
+	cliOpen            []int // the started CLI processes that host.offline left open
 	onlineState        host.State
 	onlineAcks         int
 	onlineTurns        int
@@ -231,6 +250,7 @@ type hlScenario struct {
 func hostLimitsSteps(sc *godog.ScenarioContext, f fixtures) {
 	s := &hlScenario{}
 	registerOfflineScenarioSteps(sc, f.t, s)
+	registerStoppedHomeSteps(sc, f.t, s)
 	registerTimeoutScenarioSteps(sc, f.t, s)
 	registerRateLimitScenarioSteps(sc, f.t, s)
 }
@@ -324,10 +344,8 @@ func registerOfflineScenarioSteps(sc *godog.ScenarioContext, suiteT *testing.T, 
 		return runOfflineScenarioBubble(suiteT, s)
 	})
 	sc.Step(`^every session on the host is dormant and the home received turn_interrupted "stop" and state "offline"$`, func() error {
-		for _, st := range s.offlineStates {
-			if st != host.Dormant {
-				return fmt.Errorf("session states after offline: %v", s.offlineStates)
-			}
+		if err := checkDormant(s.offlineStates); err != nil {
+			return err
 		}
 		return checkOfflineHomeCmds(s.offlineCmds)
 	})
@@ -343,11 +361,69 @@ func registerOfflineScenarioSteps(sc *godog.ScenarioContext, suiteT *testing.T, 
 		if s.offlineStoppedErr != nil {
 			return fmt.Errorf("host.offline with stopped home failed: %w", s.offlineStoppedErr)
 		}
-		got := [3]any{s.onlineState, s.onlineAcks, s.onlineTurns}
-		if got != [3]any{host.Waiting, 1, s.turnsAtOffline + 1} {
-			return fmt.Errorf("after online: state, acks, turns = %v", got)
+		return checkOnline(s)
+	})
+}
+
+func checkOnline(s *hlScenario) error {
+	got := [3]any{s.onlineState, s.onlineAcks, s.onlineTurns}
+	if got != [3]any{host.Waiting, 1, s.turnsAtOffline + 1} {
+		return fmt.Errorf("after online: state, acks, turns = %v", got)
+	}
+	return nil
+}
+
+func checkDormant(states []host.State) error {
+	if !slices.Equal(states, []host.State{host.Dormant, host.Dormant}) {
+		return fmt.Errorf("session states after offline: %v", states)
+	}
+	return nil
+}
+
+func registerStoppedHomeSteps(sc *godog.ScenarioContext, suiteT *testing.T, s *hlScenario) {
+	sc.Step(`^the owner sends host\.offline while the home is stopped$`, func() error {
+		return runOfflineWhileStoppedBubble(suiteT, s)
+	})
+	sc.Step(`^host\.offline succeeded, every session on the host is dormant and its CLI closed$`, func() error {
+		if s.offlineStoppedErr != nil {
+			return fmt.Errorf("host.offline with stopped home failed: %w", s.offlineStoppedErr)
+		}
+		if len(s.cliOpen) != 0 {
+			return fmt.Errorf("CLI processes %v still open after host.offline", s.cliOpen)
+		}
+		return checkDormant(s.offlineStates)
+	})
+	sc.Step(`^the home starts again and pushes a mention item$`, func() {})
+	sc.Step(`^the returning home received state "offline"$`, func() error {
+		if !slices.ContainsFunc(s.offlineCmds, func(cmd map[string]any) bool { return cmd["state"] == "offline" }) {
+			return fmt.Errorf("no state offline in %+v", s.offlineCmds)
 		}
 		return nil
+	})
+	sc.Step(`^the owner sends host\.online to the host whose home returned$`, func() {})
+	sc.Step(`^host\.online delivered and acknowledged the held item$`, func() error { return checkOnline(s) })
+}
+
+// runOfflineWhileStoppedBubble sends the first host.offline, with a turn
+// running, after the home has stopped.
+func runOfflineWhileStoppedBubble(suiteT *testing.T, s *hlScenario) error {
+	return runHLTurns(suiteT, func(t *testing.T, drv *hlDriver, h *host.Host, homeID string, home *hlHome) error {
+		home.stop()
+		synctest.Wait()
+		s.offlineStoppedErr = hlSurface(t.Context(), h, "host.offline")
+		s.turnsAtOffline = drv.turnCount()
+		s.cliOpen = drv.openProcs()
+		s.offlineStates = hlStates(h)
+
+		home = newHLHome(3)
+		defer home.stop()
+		h.Attach(homeID, home)
+		synctest.Wait()
+		s.offlineCmds = home.snapshotCmds()
+		pushHLMention(h, homeID, hlAI2, 1)
+		synctest.Wait()
+		s.heldAcks, s.heldTurns = home.ackCount(1), drv.turnCount()
+		return s.recordOnline(t, drv, h, home)
 	})
 }
 
@@ -359,6 +435,50 @@ func hlSurface(ctx context.Context, h *host.Host, kind string) error {
 // runOfflineScenarioBubble runs the whole offline scenario in one bubble, so
 // that synctest.Wait orders its steps, and records what the later steps check.
 func runOfflineScenarioBubble(suiteT *testing.T, s *hlScenario) error {
+	return runHLTurns(suiteT, func(t *testing.T, drv *hlDriver, h *host.Host, homeID string, home *hlHome) error {
+		if err := hlSurface(t.Context(), h, "host.offline"); err != nil {
+			return err
+		}
+		s.turnsAtOffline = drv.turnCount()
+		s.offlineStates = hlStates(h)
+		s.offlineCmds = home.snapshotCmds()
+
+		pushHLMention(h, homeID, hlAI2, 1)
+		synctest.Wait()
+		s.heldAcks, s.heldTurns = home.ackCount(1), drv.turnCount()
+
+		home.stop()
+		s.offlineStoppedErr = hlSurface(t.Context(), h, "host.offline")
+		home = newHLHome(3)
+		defer home.stop()
+		h.Attach(homeID, home)
+		synctest.Wait()
+		return s.recordOnline(t, drv, h, home)
+	})
+}
+
+func (s *hlScenario) recordOnline(t *testing.T, drv *hlDriver, h *host.Host, home *hlHome) error {
+	drv.autoEnd = true
+	if err := hlSurface(t.Context(), h, "host.online"); err != nil {
+		return err
+	}
+	synctest.Wait()
+	sess, _ := h.Sessions.Get(host.SessionKey{Group: hlGroup, Member: hlAI2})
+	s.onlineState, s.onlineAcks, s.onlineTurns = sess.State, home.ackCount(1), drv.turnCount()
+	return nil
+}
+
+func hlStates(h *host.Host) []host.State {
+	var states []host.State
+	for _, sess := range h.Sessions.All() {
+		states = append(states, sess.State)
+	}
+	return states
+}
+
+// runHLTurns runs body, in one bubble, on a host that is attached to its home
+// and has a working task session and a waiting group session.
+func runHLTurns(suiteT *testing.T, body func(t *testing.T, drv *hlDriver, h *host.Host, homeID string, home *hlHome) error) error {
 	var stepErr error
 	defer saveHLHooks()()
 	baseDir := suiteT.TempDir()
@@ -378,46 +498,25 @@ func runOfflineScenarioBubble(suiteT *testing.T, s *hlScenario) error {
 			db.Close()
 		}()
 		h.Attach(homeKey.ID(), home)
-		taskKey := host.SessionKey{Group: hlGroup, Member: hlAI1, Task: hlTask1}
-		grpKey := host.SessionKey{Group: hlGroup, Member: hlAI2}
-		h.Sessions.Create(host.Session{SessionKey: taskKey, Kind: host.TaskSession, Folder: "wt/1", Agent: "claude", Home: homeKey.ID(), Name: "Claude Code"})
-		h.Sessions.Create(host.Session{SessionKey: grpKey, Kind: host.GroupSession, Folder: "repo", Agent: "claude", Home: homeKey.ID(), Name: "Sec", Secretary: true})
-		if stepErr = host.Runner.Turn(t.Context(), h, taskKey, "task work", host.Turn{Kind: host.ItemsTurn, Thread: hlTask1}); stepErr != nil {
-			return
-		}
-		if stepErr = host.Runner.Turn(t.Context(), h, grpKey, "group msg", host.Turn{Kind: host.ItemsTurn}); stepErr != nil {
+		if stepErr = startHLTurns(t.Context(), h, homeKey.ID()); stepErr != nil {
 			return
 		}
 		drv.proc(1).emit(host.Event{Kind: host.TurnEnded, Status: "completed"})
 		synctest.Wait()
-
-		if stepErr = hlSurface(t.Context(), h, "host.offline"); stepErr != nil {
-			return
-		}
-		s.turnsAtOffline = drv.turnCount()
-		for _, sess := range h.Sessions.All() {
-			s.offlineStates = append(s.offlineStates, sess.State)
-		}
-		s.offlineCmds = home.snapshotCmds()
-
-		pushHLMention(h, homeKey.ID(), hlAI2, 1)
-		synctest.Wait()
-		s.heldAcks, s.heldTurns = home.ackCount(1), drv.turnCount()
-
-		home.stop()
-		s.offlineStoppedErr = hlSurface(t.Context(), h, "host.offline")
-		drv.autoEnd = true
-		home = newHLHome(3)
-		h.Attach(homeKey.ID(), home)
-		synctest.Wait()
-		if stepErr = hlSurface(t.Context(), h, "host.online"); stepErr != nil {
-			return
-		}
-		synctest.Wait()
-		sess, _ := h.Sessions.Get(grpKey)
-		s.onlineState, s.onlineAcks, s.onlineTurns = sess.State, home.ackCount(1), drv.turnCount()
+		stepErr = body(t, drv, h, homeKey.ID(), home)
 	})
 	return stepErr
+}
+
+func startHLTurns(ctx context.Context, h *host.Host, homeID string) error {
+	taskKey := host.SessionKey{Group: hlGroup, Member: hlAI1, Task: hlTask1}
+	grpKey := host.SessionKey{Group: hlGroup, Member: hlAI2}
+	h.Sessions.Create(host.Session{SessionKey: taskKey, Kind: host.TaskSession, Folder: "wt/1", Agent: "claude", Home: homeID, Name: "Claude Code"})
+	h.Sessions.Create(host.Session{SessionKey: grpKey, Kind: host.GroupSession, Folder: "repo", Agent: "claude", Home: homeID, Name: "Sec", Secretary: true})
+	if err := host.Runner.Turn(ctx, h, taskKey, "task work", host.Turn{Kind: host.ItemsTurn, Thread: hlTask1}); err != nil {
+		return err
+	}
+	return host.Runner.Turn(ctx, h, grpKey, "group msg", host.Turn{Kind: host.ItemsTurn})
 }
 
 func checkOfflineHomeCmds(cmds []map[string]any) error {

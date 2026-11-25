@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cucumber/godog"
 	"github.com/huanchong-99/SoloDawn/internal/home"
 	"github.com/huanchong-99/SoloDawn/internal/host"
 	"github.com/huanchong-99/SoloDawn/internal/identity"
@@ -1199,6 +1200,19 @@ func recordViewTask(v *homeView, elem json.RawMessage) {
 	if proto.Decode(elem, &t) == nil {
 		v.tasks[t.ID] = t
 	}
+}
+
+// noConfirmCardAfter fails a scenario whose one-person group shows a confirm
+// card (A9.40). msgs is read after the last step.
+func noConfirmCardAfter(sc *godog.ScenarioContext, msgs func() map[string]proto.MsgRow) {
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+		for id, m := range msgs() {
+			if m.Kind == "confirm" {
+				return ctx, fmt.Errorf("a one-person group has the confirm card %s: %s", id, m.Body)
+			}
+		}
+		return ctx, nil
+	})
 }
 
 func recordViewMsg(v *homeView, elem json.RawMessage) {

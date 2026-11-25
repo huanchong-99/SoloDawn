@@ -53,6 +53,7 @@ func externalSteps(sc *godog.ScenarioContext, f fixtures) {
 	externalRunnerSteps(sc, w)
 	externalMCPSteps(sc, w)
 	externalTaskSteps(sc, w)
+	externalPairSteps(sc, w)
 }
 
 func (w *externalWorld) setupX() error {
@@ -63,11 +64,16 @@ func (w *externalWorld) setup() error {
 	return w.setupProject("none")
 }
 
-func (w *externalWorld) setupProject(forge string) error {
+// prepareContext bounds the scenario.
+func (w *externalWorld) prepareContext() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	w.ctx = ctx
 	w.cleanup(cancel)
-	return s3Run(w.prepareRootAndRepo, w.prepareClaude, func() error { return w.prepareForge(forge) }, w.startNode,
+	return nil
+}
+
+func (w *externalWorld) setupProject(forge string) error {
+	return s3Run(w.prepareContext, w.prepareRootAndRepo, w.prepareClaude, func() error { return w.prepareForge(forge) }, w.startNode,
 		func() error { return w.createExternalGroup(forge) })
 }
 
@@ -555,6 +561,8 @@ func externalMCPSteps(sc *godog.ScenarioContext, w *externalWorld) {
 	sc.Step(`^a scripted stdio MCP client connects as X$`, w.openMCP)
 	sc.Step(`^external MCP lists exactly the frozen external tools and approve$`, w.listedTools)
 	sc.Step(`^external MCP calls "([^"]+)" with (\{.*\}) and gets "([^"]+)"$`, w.tool)
+	sc.Step(`^X's note "([^"]+)" and document "([^"]+)" with "([^"]+)" are on the home as X's$`, w.storedNotes)
+	sc.Step(`^X's search for "([^"]+)" returns document "([^"]+)" with "([^"]+)" by X$`, w.searchedNote)
 	sc.Step(`^external MCP next_item returns none$`, func() error { return w.nextItem(true) })
 	sc.Step(`^external MCP next_item returns a handout$`, func() error { return w.nextItem(false) })
 	sc.Step(`^external MCP ends the run$`, func() error { return w.tool("done", fmt.Sprintf(`{"run":%d}`, w.run.Run), "ok") })
@@ -636,4 +644,54 @@ func (w *externalWorld) checkListedUsage(result *mcp.CallToolResult, pct int) er
 		}
 	}
 	return fmt.Errorf("list_members did not include X's reported usage: %s", raw)
+}
+
+// storedNotes compares what note_put and kb_put wrote, with their author.
+func (w *externalWorld) storedNotes(note, name, text string) error {
+	db, err := store.Open(filepath.Join(w.homeNode.data, "node.db"))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var stored string
+	err = db.Write(func(tx *store.Tx) error {
+		return tx.QueryRow(`SELECT json_group_array(json_array(coalesce(data->>'type', ''), coalesce(data->>'name', ''), data->>'text', data->>'by'))
+			FROM (SELECT data FROM row WHERE g = ? AND r = 'note' AND gone = 0 ORDER BY seq)`, string(w.groupID)).Scan(&stored)
+	})
+	if err != nil {
+		return err
+	}
+	var got [][4]string
+	if err := json.Unmarshal([]byte(stored), &got); err != nil {
+		return err
+	}
+	x := w.aiByName["X"].ID
+	want := [][4]string{{"", "", note, x}, {"kb", name, text, x}}
+	if !slices.Equal(got, want) {
+		return fmt.Errorf("notes on the home = %q, want %q", got, want)
+	}
+	return nil
+}
+
+func (w *externalWorld) searchedNote(query, name, text string) error {
+	result, err := w.call("kb_search", map[string]string{"query": query})
+	if err != nil {
+		return err
+	}
+	raw, err := externalResult(result)
+	if err != nil {
+		return err
+	}
+	var got struct {
+		Documents []struct{ Name, Text, By string }
+		More      bool
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		return err
+	}
+	want := []struct{ Name, Text, By string }{{name, text, "X"}}
+	if !slices.Equal(got.Documents, want) || got.More {
+		return fmt.Errorf("kb_search = %s, want only %v", raw, want)
+	}
+	return nil
 }

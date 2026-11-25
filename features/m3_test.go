@@ -79,6 +79,7 @@ func m3Steps(sc *godog.ScenarioContext, f fixtures) {
 	})
 	w.cleanup = afterScenario(sc)
 	w.tb = scenarioTB{TB: f.t, cleanup: w.cleanup}
+	noConfirmCardAfter(sc, func() map[string]proto.MsgRow { return w.msgs })
 	registerM3SetupSteps(sc, w)
 	registerM3ActionSteps(sc, w)
 	registerM3AssertSteps(sc, w)

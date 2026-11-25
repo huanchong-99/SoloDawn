@@ -6,6 +6,7 @@ Feature: Cross-node AI sessions and AI-to-AI calls
   an answer in time returns to the caller's open tool call with both messages
   and elapsed time recorded in the thread, a busy callee yields a receipt and
   a later reply turn, and a call at depth 5 is refused with limit (A6.1-A6.4).
+  After each scenario its one-person group shows no confirm card (A9.40).
 
   Scenario Outline: A3.3 Mentioning a <cli> member on a node other than the home
     Given two owned nodes over ctl and a project group on the first node

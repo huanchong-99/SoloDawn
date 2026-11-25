@@ -86,6 +86,7 @@ func m6Steps(sc *godog.ScenarioContext, f fixtures) {
 		tasksByNum: map[int]proto.TaskRow{},
 		msgs:       map[string]proto.MsgRow{},
 	}
+	noConfirmCardAfter(sc, func() map[string]proto.MsgRow { return w.msgs })
 	registerM6RemoteSessionSteps(sc, w)
 	registerM6CallSteps(sc, w)
 }

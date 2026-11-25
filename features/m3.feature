@@ -4,6 +4,7 @@ Feature: M3 AI sessions on the local link
   across turns and across idle dormancy, enforcing max_open, reporting mid-turn
   crashes, keeping unposted output and secrets out of the group, deduplicating
   repeated inbox items across restarts, and listing the contract's MCP tools.
+  After each scenario its one-person group shows no confirm card (A9.40).
 
   Scenario: Live MCP tool lists match the frozen contract across session kinds
     Given an in-process M3 node with a local MCP socket
