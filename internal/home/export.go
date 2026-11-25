@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 
+	"github.com/huanchong-99/SoloDawn/internal/proto"
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
@@ -86,9 +87,10 @@ func (g *runGroup) importGroup(file string, load func(*store.Tx) error, installe
 	var state *State
 	subs := map[string]wpushSub{}
 	read := func(tx *store.Tx) error {
+		devErr := importDevices(tx, group, l.cfg.Now().UnixMilli())
 		var err error
 		state, err = l.importState(tx, group)
-		return errors.Join(err, wpushReadSubs(tx, subs), load(tx))
+		return errors.Join(devErr, err, wpushReadSubs(tx, subs), load(tx))
 	}
 	if err := l.cfg.Store.ImportGroup(group, file, l.cfg.OwnerFn(), l.cfg.Home, read); err != nil {
 		return err
@@ -105,6 +107,22 @@ func (g *runGroup) importGroup(file string, load func(*store.Tx) error, installe
 	l.announce()
 	g.deliver(l.cfg.Now())
 	return nil
+}
+
+// importDevices writes the device rows that the group lacks of its people's
+// stored logs: the file holds the entries that the old home knew, and this
+// node may know more.
+func importDevices(tx *store.Tx, group string, now int64) error {
+	envs, err := tx.LackingEntries(group)
+	for _, raw := range envs {
+		var env proto.Envelope
+		decodeErr := json.Unmarshal(raw, &env)
+		seq, seqErr := tx.NextSeq(group)
+		row := RowOf(peopleDevice(env))
+		row.number(seq)
+		err = errors.Join(err, decodeErr, seqErr, row.Put(tx, group, now))
+	}
+	return err
 }
 
 func (l *Loop) importState(tx *store.Tx, group string) (*State, error) {

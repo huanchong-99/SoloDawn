@@ -89,17 +89,13 @@ func (n *nodeRuntime) importGroup(file string) error {
 		return fmt.Errorf("read group export: %w", err)
 	}
 	loaded := &Logs{log: map[string]*identity.Log{}}
-	return n.loop.ImportGroup(group, file, loaded.dvlLoadEntries, func() { n.logs.keepImported(loaded.log) })
+	return n.loop.ImportGroup(group, file, loaded.dvlLoadEntries, func() { n.keepImported(loaded.log) })
 }
 
-func (l *Logs) keepImported(logs map[string]*identity.Log) {
-	l.writeMu.Lock()
-	defer l.writeMu.Unlock()
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for user, loaded := range logs {
-		if prev := l.log[user]; prev == nil || len(loaded.Entries) > len(prev.Entries) {
-			l.log[user] = loaded
+func (n *nodeRuntime) keepImported(logs map[string]*identity.Log) {
+	for _, log := range logs {
+		if err := n.logs.dvlKeep(log, nil); err != nil {
+			n.sessions.cfg.Report(err)
 		}
 	}
 }

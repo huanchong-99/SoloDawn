@@ -162,24 +162,25 @@ func (l *Logs) dvlCommit(user string, entries []proto.Envelope) ([]proto.DeviceR
 	return rows, nil
 }
 
-func (l *Logs) dvlKeep(log *identity.Log, skip *sesConn) {
-	if rows := l.dvlKeepRows(log); len(rows) != 0 {
-		l.dvlNotify(log.User, rows, false, skip)
-	}
+// dvlKeep takes the log of a person who joined or was imported: whole for a
+// person this node holds no log of, whose log is stored already, and otherwise
+// as entries received.
+func (l *Logs) dvlKeep(log *identity.Log, skip *sesConn) error {
+	l.mu.Lock()
+	l.log[log.User] = cmp.Or(l.log[log.User], log)
+	l.mu.Unlock()
+	return l.dvlReceive(proto.Devlog{User: log.User, Entries: log.Entries}, skip)
 }
 
-func (l *Logs) dvlKeepRows(log *identity.Log) []proto.DeviceRow {
-	l.writeMu.Lock()
-	defer l.writeMu.Unlock()
-	var rows []proto.DeviceRow
-	if prev := l.Log(log.User); prev != nil {
-		rows = dvlCollectRows(prev, log.Entries)
-		log = prev
+// dvlWith is the log this node holds of log's person with what log adds to it
+// (first accepted wins), or log itself when none is held.
+func (l *Logs) dvlWith(log *identity.Log) *identity.Log {
+	if log == nil {
+		return nil
 	}
-	l.mu.Lock()
-	l.log[log.User] = log
-	l.mu.Unlock()
-	return rows
+	held := cmp.Or(l.Log(log.User), log)
+	dvlCollectRows(held, log.Entries)
+	return held
 }
 
 func (l *Logs) dvlForget(user string) {
@@ -271,11 +272,14 @@ func (l *Logs) dvlWriteAdd(signer identity.Key, dev, kind, name string, now int6
 }
 
 // dvlPutEntries stores an entry only behind the one it follows: the removal of
-// a person deletes their stored log before dvlForget drops it from memory.
+// a person deletes their stored log before dvlForget drops it from memory. A
+// join or an import stores entries before dvlKeep takes them again; another
+// entry at a stored version fails, and the log in memory stays as it was.
 func dvlPutEntries(tx *store.Tx, user string, rows []proto.DeviceRow) error {
 	for _, r := range rows {
 		if _, err := tx.Exec(`INSERT INTO device_log(user, ver, env) SELECT ?1, ?2, ?3
-			WHERE ?2 = 1 OR EXISTS (SELECT 1 FROM device_log WHERE user = ?1 AND ver = ?2 - 1)`, user, r.Version, string(dvlMustEncode(r.Env))); err != nil {
+			WHERE (?2 = 1 OR EXISTS (SELECT 1 FROM device_log WHERE user = ?1 AND ver = ?2 - 1))
+			AND NOT EXISTS (SELECT 1 FROM device_log WHERE user = ?1 AND ver = ?2 AND env = ?3)`, user, r.Version, string(dvlMustEncode(r.Env))); err != nil {
 			return err
 		}
 	}

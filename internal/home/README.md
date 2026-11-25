@@ -239,7 +239,9 @@ and `Loop.Fetch`, takes the names that start with `fet`, its tests too, and its 
 start with `TestFetch`.
 `export.go` exports `Loop.ExportGroup` and `Loop.ImportGroup`. The home answers `cmd`, `sync`,
 and `fetch` for moved groups with `moved` and the destination device ID from the `moved` map
-loaded by `StartLoop`.
+loaded by `StartLoop`. In the import's transaction the home writes the `device` rows that the group
+lacks of its people's logs in `device_log` (`importDevices`): this node may have accepted entries that
+the file does not hold.
 The checks and reviews (`cmd_review.go`) take the names that start with `rev`, their tests too, and
 their test functions start with `TestReviewCmd`. The merges and summaries (`cmd_merge.go`) take the
 names that start with `mrg`, their tests too, and their test functions start with `TestMerge`.
@@ -483,7 +485,7 @@ function that moves a task calls it and adds nothing to its rules.
   `member_name` is `bad_request`. A group that already exists (`s.Group.ID` not empty) is answered
   `conflict`. It writes the `group` row (`pass` 90, `pass_foundation` 70, default `limits`,
   `created` `c.Now`) and the owner's `human` `member` row (`role` `owner`, `online` true,
-  `last_seen` `c.Now`), with `GroupsChanged` true. The owner's member id is the first 16 bytes of
+  `last_seen` `c.Now`), and one `device` row per entry of the owner's log, with `GroupsChanged` true. The owner's member id is the first 16 bytes of
   the SHA-256 of `SoloDawn group owner <n>` in base64url, so the function stays pure
   ([issues](../../issues.md)).
 - **`group/set`.** By an admin, else `forbidden`. Sending none of `name`, `checks`, `pass`,

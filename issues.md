@@ -28,6 +28,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the delivery of the new `assign` runs `CreateTaskWorkspace` first: `slot.claim` (`internal/host/worktree.go:109`) deletes the old AI's worktree with `os.RemoveAll`, while `releaseUnmergedWorktree` (`internal/host/deliver.go:516`) runs `git push` with that folder as its working directory, in two or three cleanups at once. They end with `fatal: Unable to read current working directory` or `remote unpack failed: eof before pack header`. The error is dropped, and the next cleanup sees holder == assignee, so nothing pushes again. This is an ordering bug against `planning/flows/task.md` ("Reassignment": first the push, then the end of the task session and the removal of the worktree) and `planning/contracts/local.md` section 7 ("first the push"). Second effect: the push takes no lock of the clone, while `CreateTaskWorkspace` fetches under it (`workspaceBase`, `internal/host/workspace.go:89`), and a push moves `refs/remotes/origin/<br>` too, so the two write the same ref (the fetch error above); `local.md` section 7 ("One lock per clone") does not list `push`, and `TaskForge.PushBranch` (`internal/host/forge.go:36`) has no lock in `push_branch` and `submit_task` either. A lock on the push alone does not fix it: whichever wins, if the create is first, holder == assignee and nothing pushes.
 - Status: open; the fix is in work, host unit H1b-2: the push happens before the new AI's create, from a folder that exists, under the clone's lock, and its error is not dropped. The example is `@pending` until then; the contract may need one sentence on the push.
 
+### 2026-11-26 · limitation · An entry stored before a stop can be missing from the groups' rows
+
+- Symptom: a node stores an accepted device-log entry and stops before its groups have taken the `device` event. Those groups have no row for the entry; for a member they refuse that device, and every later entry of that person (`errGap`), until the group is moved. Only a move repairs it. The owner's devices are still accepted, since the group takes the owner's log from the node.
+- Cause: `dvlReceive` (`internal/node/devlog.go`) writes `device_log` in one transaction and the groups write their rows in their own, later (`devEvent`, `internal/home/ev_device.go`); nothing compares the two at start. Found by reading.
+- Status: open. A pass at `StartLoop` that writes what `LackingEntries` (`internal/store/home_reads.go`) returns for every group would close it, also for groups founded before 2026-11-26; it changes the sequence numbers that many home tests expect.
+
 ### 2026-11-25 · limitation · `group set` has no range for its numbers
 
 - Symptom: a home stores any integer as `pass`, `pass_foundation` or a limit, also 0 and negative ones. Some have an effect nobody chose: `turn_minutes` 0 ends every check command at once.
@@ -167,7 +173,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: a foreign home with no matching device row shows its computer name but says its owner was not provided.
 - Cause: `welcome` carries the device name and an owner boolean, not its owner's user id. Group details use a matching live `device` row rather than guessing from a person's group role.
-- Status: open when that row is unavailable. Real-host custom forge execution and Windows program resolution are not verified by the browser UI.
+- Status: the home now writes the owner's `device` rows too (2026-11-26), so the row is there for every home whose owner's log names it. Real-host custom forge execution and Windows program resolution are not verified by the browser UI.
 
 ### 2026-11-22 · limitation · The Qwen Code driver is declared from documentation, not from a capture
 
@@ -831,6 +837,30 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open; the next occurrence needs the host and MCP lines of [diagnostics](planning/contracts/diagnostics.md).
 
 ## Resolved
+
+### 2026-11-26 · bug · A joined person's group lacked entries that the home already held
+
+- Symptom: a person joins a second group of a home, or rejoins a restored group, with a browser that presents a shorter log than the home holds. The join answers `ok`, but the group gets no `device` rows for the entries in between, refuses those devices, and refuses every later entry of that person (`errGap`). A device that the home knows as revoked could join with the older log.
+- Cause: `joinSnapshot` (`internal/node/admit.go:111`) judged the join on the presented log alone, against `planning/contracts/envelope.md` section 4 (first accepted wins); and an import wrote only the owner's missing rows, from the log read before the file's logs were taken.
+- Status: resolved. The join is judged on the log the node holds plus what the presented one adds (`dvlWith`, `internal/node/devlog.go`); the import writes, in its own transaction, the `device` row of every stored entry of the group's people that the group lacks (`importDevices`, `internal/home/export.go`; `LackingEntries`, `internal/store/home_reads.go`), so a stop no longer leaves a moved group without them. Tests: `TestInvitationJoinAndMemberSurface` (short log, revoked device), `TestImportAddsTheMissingDeviceRows`.
+
+### 2026-11-26 · bug · Entries that a rejoin or an import brought were not stored
+
+- Symptom: after a member rejoined a restored group with a longer log than the copy had, a restart of the node lost the new entries: their devices got `unknown_device` until an older device of that person connected. An import whose file had a longer log raised no `device` event, so the person's other groups on that node never got the rows.
+- Cause: `dvlKeepRows` and `keepImported` (`internal/node/devlog.go`, `export.go`) replaced the log in memory only.
+- Status: resolved: `dvlKeep` takes a log it already holds as received entries (`dvlReceive`: stored, held, event raised), for a join and an import alike; `dvlPutEntries` ignores entries the join already stored. Tests: `TestLogsKeepFirstAtTheSameVersion`, `TestLocalGroupTransfer`.
+
+### 2026-11-26 · bug · The owner of a group could not watch an AI on another person's computer
+
+- Symptom: after the consent, the other person's node dropped the offers of the owner's devices that were enrolled before the group was made.
+- Cause: `grpFounded` (`internal/home/cmd_group.go:90`) wrote no `device` rows, against `planning/contracts/rows.md` section 3, and `devEvent` adds only later entries; so `watchDeviceUser` (`internal/host/watch.go:105`) found no person for the device. A9.20 and A9.21 passed because P's watching browser was enrolled after the group was made.
+- Status: resolved. The founding writes the owner's log as rows (`devOwner`, `internal/home/ev_device.go`), for both kinds of group, and an import writes the rows that the group lacks of its people's stored logs. The browser of A9.20 and A9.21 is now enrolled before the group. A group founded earlier gets the rows when it is moved; until then it has them only for entries accepted after its founding.
+
+### 2026-11-26 · bug · A paired computer's entry in the device log had an empty name
+
+- Symptom: `host_name` of every AI on a computer that was paired by the real client was empty; the terminal's header began with ` · T-1`.
+- Cause: the node saves the label of `solodawn pair` only when it is adopted (`Pairer.finish`, `internal/node/pair.go:475`), so the `welcome` before that had `name` empty (`sesWelcomeBase`, `internal/node/session.go:341`). The browser takes that name (`#onOnline`, `web/src/lib/onboard.svelte.ts:392`) into the entry it signs (`:418`), from which the home reads `host_name` (`memDevice`, `internal/home/cmd_member.go:47`). `TestPairRoleBEndToEndAndBootstrap` asserted the empty name.
+- Status: resolved: the `welcome` of a pairing connection carries the label of its pairing. An entry signed with an empty name keeps it.
 
 ### 2026-11-26 · bug · A member's node can follow a moved group more than 5 seconds after the import
 
@@ -1849,12 +1879,6 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Symptom: (1) an owner could answer a `watch` card in the chat only, and leaving the terminal page ends the takeover that the grant is for; the in-page and the system notification of the card led there without saying so. (2) The page of a watcher whose `watch.start` was refused stayed on the refusal after the consent. (3) The page of a watcher with no connection to the AI's computer dialled in a loop until the browser refused ("Cannot create so many PeerConnections"), so that watcher could never watch. (4) A refused or denied request could not be made again on a card whose button had sent one.
 - Cause (before the fix): (1) `ConfirmCard` was mounted in the chat alone (`web/src/components/confirm/mounts.ts`), and the effect cleanup of `web/src/routes/Terminal.svelte:89` hands back; `Notifier.open` and `ReminderSync.openTarget` set the chat's address. (2) `Watch.follow` starts only from `idle` (`web/src/components/watch/watch.svelte.ts:49`). (3) the effect at `web/src/routes/Terminal.svelte:92-94` called `net.watchHost` tracked, which pushes to `homes` (`homeOf`, `web/src/lib/net.svelte.ts:106`): the effect invalidated itself, and its cleanup released the host it had just dialled. (4) `sent` in `AskToWatch.svelte` was never reset.
 - Status: resolved. The terminal page shows the owner's pending `watch` cards of that AI over the terminal (`onOpenTerminal` in `web/src/lib/notify.svelte.ts`); both notifications leave the owner on it. `watchBar` and `watchRequest` (`web/src/components/watch/watch.svelte.ts`) say how the reader's request of this takeover stands; with the consent the page dials the computer again (`watchHost` in `web/src/lib/net.svelte.ts`) and tries a refused start again by the `Retry` of `peer.ts`. Tests: `web/src/components/watch/*.test.ts`, `notify.test.ts`, `net.test.ts`, and A9.20/A9.21 with three real nodes in `web/e2e/s2.spec.ts`.
-
-### 2026-11-26 · bug · The owner of a group can never watch an AI on another person's computer
-
-- Symptom: with P the owner of the group and P1 its home, Q confirms P's request, Q1 keeps the grant and lists P in `watchers`, but Q1 answers none of P's offers. Reproduced with two real nodes and the browser; with P as a member who joined, it works.
-- Cause: the home writes no `device` rows for the group's owner. `grpFounded` (`internal/home/cmd_group.go:90`) writes the group and the member row only, and `devEvent` (`internal/home/ev_device.go`) adds only entries accepted later, where `peopleJoined` (`internal/home/cmd_people.go`) writes the whole log of a person who joins. `planning/contracts/rows.md` section 3: one row per accepted entry of a person in the group. So `watchDeviceUser` (`internal/host/watch.go`) finds no user for P's devices, and `Host.Watching` and `WatchStart` refuse them.
-- Status: open; in the home, not in the web client.
 
 ### 2026-11-26 · bug · Review of the watcher's page: an untrue bar, retries without an end, a dial without an end
 

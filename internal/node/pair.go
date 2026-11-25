@@ -140,12 +140,14 @@ func (p *Pairer) Routes(device string) []peer.Route {
 // an active room exchange.
 func (p *Pairer) Serve(ctx context.Context, device string, raw Ctl) {
 	a := p.attachAttempt(device, raw)
-	if a != nil && a.invitation.group != "" {
+	switch {
+	case a == nil:
+		p.cfg.Sessions.Serve(ctx, device, false, raw)
+	case a.invitation.group != "":
 		p.serveJoining(ctx, a, device, raw)
-		return
-	}
-	p.cfg.Sessions.Serve(ctx, device, a != nil, raw)
-	if a != nil {
+	default:
+		c := &sesConn{device: device, label: a.label, paired: true, raw: raw, staging: map[string]*identity.Log{}}
+		p.cfg.Sessions.serve(ctx, c, nil)
 		p.finish(a, io.EOF)
 	}
 }

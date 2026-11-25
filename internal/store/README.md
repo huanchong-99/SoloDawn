@@ -34,7 +34,7 @@ writes; the single-connection in-memory database must release its snapshot
 before another transaction can run.
 
 `home_reads.go` holds what the run loop of a home needs inside a `Write`: `Groups`,
-`StateRows` and `Counters` to load a group, `Row`, `Thread`, `Pending` and `Queued` for
+`StateRows` and `Counters` to load a group, `LackingEntries` for an import, `Row`, `Thread`, `Pending` and `Queued` for
 what a rule reads from disk, and `RaiseNum`, `Retire` and `Jump`. A read there sees what its
 own transaction wrote, and never waits for the writer, which it runs on.
 

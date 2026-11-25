@@ -36,6 +36,15 @@ func (tx *Tx) StateRows(group string) ([]json.RawMessage, error) {
 		AND r IN ('group','member','device','task') ORDER BY seq`, group)
 }
 
+// LackingEntries returns the stored device-log entries of the group's people
+// that have no device row in the group, by person and version.
+func (tx *Tx) LackingEntries(group string) ([]json.RawMessage, error) {
+	return tx.data(`SELECT env FROM device_log AS l WHERE user IN (SELECT data->>'user' FROM row
+		WHERE g=?1 AND r='member' AND gone=0 AND data->>'kind'='human')
+		AND NOT EXISTS (SELECT 1 FROM row WHERE g=?1 AND r='device' AND gone=0 AND id=l.user||':'||l.ver)
+		ORDER BY user, ver`, group)
+}
+
 // Row returns one row of a group, or sql.ErrNoRows when there is none or
 // only its marker.
 func (tx *Tx) Row(group, r, id string) (json.RawMessage, error) {

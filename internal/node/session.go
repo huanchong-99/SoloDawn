@@ -76,7 +76,7 @@ type Sessions struct {
 }
 
 type sesConn struct {
-	device           string
+	device, label    string // label: the node's name in the pairing that this connection belongs to
 	paired, welcomed bool
 	raw              Ctl
 	hub              *Sessions // set by serve
@@ -302,7 +302,7 @@ func (s *Sessions) sesHello(ctx context.Context, c *sesConn, id int64, data json
 		return
 	}
 	sent := make(chan struct{})
-	base := s.sesWelcomeBase(id, c.device, h.V)
+	base := s.sesWelcomeBase(id, c, h.V)
 	joining := c.joining.pending()
 	if joining {
 		base.Owner = false
@@ -335,11 +335,11 @@ func (s *Sessions) sesBeforeWelcome(c *sesConn) {
 	}
 }
 
-func (s *Sessions) sesWelcomeBase(id int64, device string, version int) proto.Welcome {
+func (s *Sessions) sesWelcomeBase(id int64, c *sesConn, version int) proto.Welcome {
 	return proto.Welcome{
 		Type: "welcome", Success: proto.Success{Re: id, OK: true}, V: version,
-		Device: s.cfg.ID, Name: s.cfg.Name(), Version: s.cfg.Version,
-		Time: s.cfg.Now().UnixMilli(), Addrs: s.cfg.Addrs(), Owner: s.cfg.Logs.IsOwner(device),
+		Device: s.cfg.ID, Name: cmp.Or(c.label, s.cfg.Name()), Version: s.cfg.Version,
+		Time: s.cfg.Now().UnixMilli(), Addrs: s.cfg.Addrs(), Owner: s.cfg.Logs.IsOwner(c.device),
 	}
 }
 

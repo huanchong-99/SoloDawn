@@ -58,6 +58,10 @@ func (t *s2TerminalWorld) takeover() error {
 		return err
 	}
 	c := t.c
+	t.rtcKey = newRandomPeerKey()
+	if err := c.EnrollBrowser(c.P, t.rtcKey, "Watch terminal"); err != nil {
+		return err
+	}
 	var err error
 	t.group, err = c.CreateProjectGroup(c.P, c.P1, "Watch project", "none")
 	if err != nil {
@@ -67,10 +71,6 @@ func (t *s2TerminalWorld) takeover() error {
 		return err
 	}
 	if err := t.joinQAIs(); err != nil {
-		return err
-	}
-	t.rtcKey = newRandomPeerKey()
-	if err := c.EnrollBrowser(c.P, t.rtcKey, "Watch terminal"); err != nil {
 		return err
 	}
 	return t.openOwnerTerminal()
