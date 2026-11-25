@@ -112,18 +112,12 @@ func (w *s2ConfirmWorld) admitQ() error {
 	if err != nil {
 		return err
 	}
-	nonce := c.NextID()
-	bc, raw, err := joinGroupWithLink(c.Ctx, c.addUndo, c.Q.Browser, c.Q.Key, c.Q.Entries, link, c.Q.Name, nonce, time.Now())
+	bc, member, err := c.JoinGroup(c.Q, link, c.Q.Name)
 	if err != nil {
 		return err
 	}
-	var joined proto.CmdResult
-	if err := proto.Decode(raw, &joined); err != nil {
-		return err
-	}
-	w.browsers["Q"], c.Q.Conns[c.P1.ID()] = bc, bc
-	w.ids["Q-member"] = string(nonce)
-	return c.syncGroup(bc.conn, w.gid)
+	w.browsers["Q"], w.ids["Q-member"] = bc, string(member)
+	return nil
 }
 
 func (w *s2ConfirmWorld) secondBrowser() error {
