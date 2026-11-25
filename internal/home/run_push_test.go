@@ -69,8 +69,8 @@ func TestRunPushesTheRowsEachClientAskedFor(t *testing.T) {
 
 // A connection is pushed rows and sent items only while its group serves
 // its device (datachannel section 8). The result that ends that is not
-// pushed to it either, and it does not watch again by itself when the group
-// serves the device once more.
+// pushed to it either, except to the host of a person whom it removed, and it
+// does not watch again by itself when the group serves the device once more.
 func TestRunStopsPushingToADeviceTheGroupNoLongerServes(t *testing.T) {
 	tables := runTables()
 	visitor := proto.HumanMemberRow{MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: "visitor"}, Kind: "human", User: guest.ID()}, Role: "member"}
@@ -98,6 +98,9 @@ func TestRunStopsPushingToADeviceTheGroupNoLongerServes(t *testing.T) {
 	p.does(groupID, "jump", `,"what":"joins"`)
 	host.next()
 	equal(t, visit.watch(groupID, false), int64(5))
+	visitorsNode := w.attach(guest)
+	visitorsNode.watch(groupID, true)
+	w.loop.Inbox(visitorsNode.conn)
 	if users := w.loop.LogUsers(visit.conn); len(users) != 2 || !users[browser.ID()] || !users[guest.ID()] {
 		t.Fatalf("member log users = %v", users)
 	}
@@ -107,15 +110,18 @@ func TestRunStopsPushingToADeviceTheGroupNoLongerServes(t *testing.T) {
 	visit.gets(note)
 
 	// The visitor leaves the group: its connection is not pushed the row
-	// that says so, nor anything after it, also not as a member again.
+	// that says so, nor anything after it, also not as a member again. Its
+	// node is pushed that row, as the last.
 	p.does(groupID, "jump", `,"what":"leaves"`)
 	host.gets(runRows(groupID, runGone("member", "visitor", 7)))
 	visit.quiet()
+	visitorsNode.gets(runRows(groupID, runGone("member", "visitor", 7)))
 	p.does(groupID, "jump", `,"what":"returns"`)
 	host.next()
 	p.does(groupID, "note", `,"text":"not for a connection that did not ask again"`)
 	host.next()
 	visit.quiet()
+	visitorsNode.quiet()
 	equal(t, visit.watch(groupID, false), int64(10))
 
 	// The laptop is revoked: its open connection gets no row and no item.

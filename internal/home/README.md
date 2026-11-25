@@ -309,8 +309,10 @@ the answer, in this order:
    would get no row gets no frame. A connection whose device the group no longer serves
    (`State.Serves`, on the state that holds the result) stops watching with that result and is
    not pushed its rows: a revoked device and a member who left read nothing more on a connection
-   that is still open ([datachannel](../../planning/contracts/datachannel.md), section 8). It
-   watches again only through `Sync`.
+   that is still open ([datachannel](../../planning/contracts/datachannel.md), section 8). Only
+   the hosts of a person whom the result removed (the connections that take inbox items) are
+   pushed its state rows, as their last ([people](../../planning/contracts/step-2/people.md) 2.4).
+   A connection watches again only through `Sync`.
 2. `groups`, to every connection that has had its welcome, when the result has `GroupsChanged`:
    the groups that exist and whose `State.Serves` holds for the connection's device, in the
    order of their ids, `[]` when there are none.

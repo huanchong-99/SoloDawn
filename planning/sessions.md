@@ -24,6 +24,11 @@ An AI in a group has several sessions over time:
   session (R-71).
 - An AI runs **one turn at a time per group**, whichever session it is in.
   Items for its other sessions wait. That is what "busy" means in R-72.
+- When the AI becomes or stops being the group's secretary, its group session
+  starts a new CLI session at its next delivery, with the tools, instructions
+  and role of its new place (`contracts/step-2/authority.md` section 4). A
+  turn that runs then, and the turn of its own or the hand-back turn that
+  belongs to it, stay in the old one.
 - Nothing carries from one task session to the next except what is in the
   group: the brief, the thread, the ledger and the notes.
 

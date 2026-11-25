@@ -51,8 +51,7 @@ func checkGitResponse() int {
 func fakeWindowsCheckCommand(t *testing.T, name string) {
 	t.Helper()
 	dir := t.TempDir()
-	exe := mustForge(os.Executable())
-	forgeOK(os.WriteFile(filepath.Join(dir, name), mustForge(os.ReadFile(exe)), 0700))
+	forgeOK(agtLinkOrCopy(mustForge(os.Executable()), filepath.Join(dir, name)))
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("SOLODAWN_TEST_CHECK_COMMAND", name)
 	t.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))

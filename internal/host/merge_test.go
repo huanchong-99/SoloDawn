@@ -255,9 +255,13 @@ func mergeForgeFixture(t *testing.T) host.ReviewedMerge {
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	data, err := os.ReadFile(exe)
-	mergeOK(t, err)
-	mergeOK(t, os.WriteFile(filepath.Join(bin, name), data, 0700))
+	// A link starts at once; a copy is a new binary, which macOS checks on its
+	// first run, for seconds under load.
+	if gh := filepath.Join(bin, name); os.Symlink(exe, gh) != nil {
+		data, err := os.ReadFile(exe)
+		mergeOK(t, err)
+		mergeOK(t, os.WriteFile(gh, data, 0700))
+	}
 	t.Setenv("SOLODAWN_TEST_MERGE_GH", filepath.Join(bin, "calls"))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	repo := filepath.Join(t.TempDir(), "repo")

@@ -53,7 +53,9 @@ host takes the home's `decided` as in step 1.
 `group set` with `secretary` is by an admin, as in `contracts/commands.md`
 1.1, and the group row says which AI is the secretary. A host treats X as
 the secretary (its tools and instructions, `notice`, `confirmed`) when the
-group row names X.
+group row names X. When X becomes or stops being the secretary, its group
+session starts anew, without its old conversation (`planning/sessions.md`
+section 1).
 
 ## 5. The level of a task session (D-1)
 

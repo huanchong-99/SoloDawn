@@ -376,9 +376,6 @@ func joinSendAddAI(ctx context.Context, h *Host, p proto.HostJoin, cfg joinConfi
 func joinCommitJoined(h *Host, p proto.HostJoin, member, groupName, by string) error {
 	group := string(p.Group)
 	run := func(tx *Tx) error {
-		if err := joinDemoteIfSecretary(tx, h, group, p.Secretary); err != nil {
-			return err
-		}
 		session := Session{
 			SessionKey: SessionKey{Group: group, Member: member},
 			Kind:       GroupSession,
@@ -404,21 +401,6 @@ func joinCommitJoined(h *Host, p proto.HostJoin, member, groupName, by string) e
 		return err
 	}
 	return h.Sessions.Write(run)
-}
-
-func joinDemoteIfSecretary(tx *Tx, h *Host, group string, secretary bool) error {
-	if !secretary {
-		return nil
-	}
-	clearFlag := func(row *Session) { row.Secretary = false }
-	for _, s := range h.Sessions.All() {
-		if s.Group == group && s.Secretary {
-			if err := tx.Update(s.SessionKey, clearFlag); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 func joinUpsertHomeTx(tx *store.Tx, entry proto.Home) error {
@@ -609,11 +591,14 @@ func joinCommitLeft(h *Host, group, agent, member, by string) error {
 	return err
 }
 
+// closeMemberSessions closes the sessions of an AI that leaves the group, and
+// ends the watch grants of its terminal.
 func closeMemberSessions(h *Host, group, member string) []Session {
 	sessions := memberSessions(h, group, member)
 	for _, s := range sessions {
 		Runner.Close(h, s.SessionKey)
 	}
+	watchState(h).stop(aiSlot{group, member})
 	return sessions
 }
 

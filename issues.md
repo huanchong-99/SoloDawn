@@ -6,11 +6,23 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-26 · bug · At level 1 a request of Codex, OpenCode or Qwen Code produces a card
+### 2026-11-26 · limitation · A task handed to an AI of another node can start without the last commits
 
-- Symptom: a level 1 session of a CLI that asks on its connection (`ApprovalConn`) gets an `approval` card for the owner, who can allow it. [approval](planning/flows/approval.md) B.2 and [drivers](planning/contracts/drivers.md) section 2 say the host denies it at once, without a card.
-- Cause: the level is checked in `callApprove` (`internal/host/approve.go:161`), the MCP tool that only Claude Code calls. `runAskedEvent` (`internal/host/approve.go:137`), the way of the other three, calls `handleApproval`, which does not look at the level.
-- Status: open, found by the A4.4 scenarios. Their examples for these CLIs are `@pending` (`features/m4.feature`, `features/s3_drivers.feature`) and pass with a level check in `runAskedEvent`. No 1.0 surface sets level 1 (`perm.set` is postponed).
+- Symptom: the new assignee's node creates its worktree from the published branch while the old assignee's node still pushes its last commits. The new AI's own push is then refused, and `push_branch` or `submit_task` fetches the branch under the clone's lock and tells it to merge `origin/<br>`, run the checks and push again (`planning/contracts/mcp-tools.md`). If the old node is off when the task moves, its unpushed commits stay on it: it pushes them when it comes back, and if the new AI has pushed by then, that push is refused, told once in the task's thread, and the commits stay on the old node's local branch.
+- Cause: the home sends the task row to one node and the `assign` item to the other at the same time, and no message says that a branch has been published (`planning/flows/task.md`, "Reassignment": two nodes do not wait for each other).
+- Status: open, accepted. Waiting would hold the task for a node that may be off for good, which is why it was reassigned.
+
+### 2026-11-26 · limitation · A push holds the clone's lock, its hook included
+
+- Symptom: while an AI's `push_branch` or `submit_task` pushes, every other Git command of the group's clone waits: the fetch before a dormant group session's turn, a new task or review worktree, a local merge, a branch deletion. A project `pre-push` hook that runs the tests makes that minutes, up to the push's 60-minute limit.
+- Cause: a push moves `refs/remotes/origin/<br>` of the clone, which a concurrent fetch also locks ("cannot lock ref"), so it runs under the clone's lock (`PushBranch`, `internal/host/forge.go`; `planning/contracts/local.md` section 7). A push to `origin`'s push URL instead of its name was tried: it left the ref alone with Git 2.54.0 but updated it with Git 2.56.1 on CI.
+- Status: open, accepted by the coordinator.
+
+### 2026-11-26 · limitation · A node that missed its owner's removal and shares no other group with that home keeps the group
+
+- Symptom: a node that is off when its owner is removed keeps the group's remembered home and its AIs' dormant sessions, and offers that home a connection once a minute.
+- Cause: the home drops the offers of an unknown device without an answer (`planning/contracts/datachannel.md` section 8), as for a home that is gone for good.
+- Status: open, accepted: nothing wakes those sessions. `host.leave` needs the home, too.
 
 ### 2026-11-26 · bug · A jump to a card older than the messages read drifts out of view
 
@@ -21,12 +33,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
   Both are older than the branch `web/leftovers`; the same is so for a jump from the waiting bar to a pending card older than the first 50 (not measured there).
 - Fix ideas, not applied: for cause 1, no transform on messages that scroll-back or `seek` brings, only on ones that arrive at the end, or `appear` alone (a motion decision). For cause 2, `.scroller:has(.msg:focus-within) :is(.msg:not(:focus-within), .edge, .sep) { overflow-anchor: none }` with cause 1 removed gave 374 and 375 in every case of both engines, but leaves no anchor once the person scrolls the focused message out of view, so a new message would then move what they read; it must end when the gap is filled (state for the sought message, or not drawing rows beyond the gap).
 - Status: open, planned as its own unit.
-
-### 2026-11-26 · bug · The push of a handed-over task branch runs from a folder that the new assignee's create deletes
-
-- Symptom: with a remote, a task reassigned to another AI of the same node while its branch has unpushed commits: the commits of the old AI never reach the remote, and the pull request of the task still shows the old head (`pull request of task 1 ... got [OPEN <old head>]`). The last example of A5.5 in `features/m5.feature` without `@pending`: red in 9 of 10 runs without `-race`, green in 2 of 2 with it. Sometimes the new session's `git fetch origin` also ends with `cannot lock ref 'refs/remotes/origin/task/…': is at … but expected …`, the `assign` item is spent without a turn, and the task counts one failure. On one node the local branch survives, so the commits are not lost; they are published at the next submit.
-- Cause: the delivery of the new `assign` runs `CreateTaskWorkspace` first: `slot.claim` (`internal/host/worktree.go:109`) deletes the old AI's worktree with `os.RemoveAll`, while `releaseUnmergedWorktree` (`internal/host/deliver.go:516`) runs `git push` with that folder as its working directory, in two or three cleanups at once. They end with `fatal: Unable to read current working directory` or `remote unpack failed: eof before pack header`. The error is dropped, and the next cleanup sees holder == assignee, so nothing pushes again. This is an ordering bug against `planning/flows/task.md` ("Reassignment": first the push, then the end of the task session and the removal of the worktree) and `planning/contracts/local.md` section 7 ("first the push"). Second effect: the push takes no lock of the clone, while `CreateTaskWorkspace` fetches under it (`workspaceBase`, `internal/host/workspace.go:89`), and a push moves `refs/remotes/origin/<br>` too, so the two write the same ref (the fetch error above); `local.md` section 7 ("One lock per clone") does not list `push`, and `TaskForge.PushBranch` (`internal/host/forge.go:36`) has no lock in `push_branch` and `submit_task` either. A lock on the push alone does not fix it: whichever wins, if the create is first, holder == assignee and nothing pushes.
-- Status: open; the fix is in work, host unit H1b-2: the push happens before the new AI's create, from a folder that exists, under the clone's lock, and its error is not dropped. The example is `@pending` until then; the contract may need one sentence on the push.
 
 ### 2026-11-26 · limitation · An entry stored before a stop can be missing from the groups' rows
 
@@ -52,16 +58,10 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: nothing in `welcome.groups` says which copy is the newer (`planning/contracts/step-2/export.md` section 4 speaks of a lost home); `Home.#list` (`web/src/lib/groups.svelte.ts`) leaves a group to the home within reach that listed it first.
 - Status: open, accepted: the owner deletes the old copy.
 
-### 2026-11-26 · bug · A changed secretary gets no secretary tools on its host
-
-- Symptom: after `group set` with `secretary`, the AI it names cannot propose a brief: `tools/call` of `propose_brief` is refused and its CLI ends. A9.44 wants its host to list the secretary's tools.
-- Cause: the host goes by `Session.Secretary` (`internal/host/session.go:59`), which is written at `host.join` only (`internal/host/join.go`); `planning/contracts/step-2/authority.md` section 4 says the group row decides.
-- Status: open, for the queued host unit. The scenario "Q1 lists the secretary's tools for Q-team once it is named secretary" stays `@pending`; the two scenarios of the notices a named secretary gets run without it.
-
 ### 2026-11-26 · bug · The fixtures of the confirmation scenarios did not match the contracts
 
 - Symptom: the first run of A9.8 to A9.19 and A9.42 to A9.44 failed in A9.9, A9.11, A9.42 and A9.44 with nothing wrong in the product.
-- Cause, in `features/s2_confirm*`: `state.by` of a card was expected to be a user id, it is a member id (`contracts/messages.md` section 3); a scripted tool without arguments sent `"arguments": null`, which the host refuses; a `choose` had an empty `arg`; the group had `forge: none`, which is one machine only, so a reviewer on another node could not fetch the commit; the scripted results of a Claude Code tool call were not compared; the one-person quiet-task scenario needed the secretary's tools (above).
+- Cause, in `features/s2_confirm*`: `state.by` of a card was expected to be a user id, it is a member id (`contracts/messages.md` section 3); a scripted tool without arguments sent `"arguments": null`, which the host refuses; a `choose` had an empty `arg`; the group had `forge: none`, which is one machine only, so a reviewer on another node could not fetch the commit; the scripted results of a Claude Code tool call were not compared; the one-person quiet-task scenario needed the secretary's tools ("A changed secretary gets no secretary tools on its host").
 - Status: resolved in the change that enables the scenarios. The cast's group now has the fake forge of A9.24.
 
 ### 2026-11-26 · bug · FLAKY-32: A5.15 hung once: the fake Claude's MCP shim never connected
@@ -103,18 +103,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: no row tells what a home has queued; `waiting` (`web/src/lib/queue.ts`) compares the sequence of the message with that of the AI's row, which changes when a turn starts or ends.
 - Status: open, accepted: the message is delivered as before, only the choice to let it go first is gone.
 
-### 2026-11-25 · deviation · The host sends no member status when a group is paused or resumed, or its AIs go offline or online
-
-- Symptom: after "Resume", the card of an AI that was interrupted outside a task stays "Paused" until its next turn or until it goes dormant. During a pause every other AI reads "Waiting" or "Sleeping · wakes when @mentioned", beside a notice that says the group is paused. An AI that never had a session reads "Sleeping" to everybody but its owner after `host.offline` and after `host.online` (see the entry below).
-- Cause: `afterGroupState` (`internal/host/deliver.go:383`) sends no status on pause or resume; seen by continuing `TestPausingInterruptsTheTurnsOfThePausedGroupOrTask` with a resume: `MemberState` is `waiting` and no command was sent. `handleHostOffline` and the online side report only members that have a session row (`distinctMemberSlots`, `internal/host/limits.go:209`). `planning/sessions.md` section 3 wants `paused` and `offline` reported.
-- Status: open. One host unit fixes it at the root: report the status of every AI this node hosts in the group (the `member` rows whose `host` is this node, not only `Sessions.All()`) on pause, resume, `host.offline` and `host.online`; best in or right after the `feat/host-jump` lane, which touches the same files. The web client derives nothing for it: that would repair only the pause, and only in one client.
-
-### 2026-11-25 · limitation · `host.offline` does not mark an AI that never had a session
-
-- Symptom: an AI that was added to a group and never woken keeps `dormant` ("Sleeping") in the group for everybody but its owner after its owner took all AIs of the computer offline.
-- Cause: `handleHostOffline` reports a status for each AI that has a session row (`distinctMemberSlots`, `internal/host/limits.go:209`); a member without one is in none. The owner's browser shows it offline from `host.info` (`statusIn`, `web/src/lib/stop.ts`).
-- Status: open. Nothing wakes it meanwhile: its items are held.
-
 ### 2026-11-23 · deviation · An agent without a driver cannot join a group
 
 - Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
@@ -132,12 +120,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: if the owner lowers the last stronger AI's tier while `stuck.ask` is true, the turn and the host submission refusal say no candidate is currently listed.
 - Cause: the task row is authoritative. The profile contract does not clear an existing escalation on profile edits, and the host cannot clear it.
 - Status: the host still refuses without pushing. The owner can restore a stronger tier or arrange reassignment.
-
-### 2026-11-25 · limitation · A `jump` that crosses the delivery of its message delivers the message twice
-
-- Symptom: the author sends `jump` at the moment the AI takes the waiting message. The turn that just started with the message is interrupted, and the message comes again as the next turn.
-- Cause: the home retires the waiting item and queues the jump under a new item number (`rndRequeueJump`, `internal/home/rounds.go`), where [commands.md](planning/contracts/commands.md) 1.4 says the item "gets `jump: true` and is sent again". The host knows a delivered item by `(home, item)` (`hasAuditItem`, `internal/host/deliver.go`), so it cannot tell that the new item is a message it has delivered. An item it still holds, the waiting one or an earlier jump of the message, it does drop (`retiredByJump`).
-- Status: open. If the home kept the item's number, the host's audit check would acknowledge the second one without a turn.
 
 ### 2026-11-26 · limitation · A pre-empted task that is reassigned waits for row 13
 
@@ -209,7 +191,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-22 · limitation · The A9.44 quiet-task fixture does not reach the timer
 
 - Symptom: A9.44 remains pending after HM-13. With the scenario enabled, the brief proposed by the replacement secretary never appeared in either acceptance run (`features/s2_confirm.feature:560`).
-- Cause: the replacement secretary has no secretary tools on its host (entry of 2026-11-26 above), so its `propose_brief` was refused.
+- Cause: the replacement secretary had no secretary tools on its host (entry of 2026-11-26 in Resolved), so its `propose_brief` was refused.
 - Status: resolved. The first secretary proposes the brief before the change, and the scenario is enabled; the timer itself is also covered by `features/home_rounds.feature:40`.
 
 ### 2026-11-22 · limitation · Confirmation browser controls are not yet exercised
@@ -849,6 +831,54 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open; the next occurrence needs the host and MCP lines of [diagnostics](planning/contracts/diagnostics.md).
 
 ## Resolved
+
+### 2026-11-26 · bug · At level 1 a request of Codex, OpenCode or Qwen Code produces a card
+
+- Symptom: a level 1 session of a CLI that asks on its connection (`ApprovalConn`) gets an `approval` card for the owner, who can allow it. [approval](planning/flows/approval.md) B.2 and [drivers](planning/contracts/drivers.md) section 2 say the host denies it at once, without a card.
+- Cause: the level is checked in `callApprove` (`internal/host/approve.go:161`), the MCP tool that only Claude Code calls. `runAskedEvent` (`internal/host/approve.go:137`), the way of the other three, calls `handleApproval`, which does not look at the level.
+- Status: resolved. `runAskedEvent` denies a level 1 request at once, without a card, as `callApprove` does (`internal/host/approve.go`, host unit H1b-2); the three `@pending` examples (`features/m4.feature`, `features/s3_drivers.feature`) are enabled.
+
+### 2026-11-26 · bug · The push of a handed-over task branch runs from a folder that the new assignee's create deletes
+
+- Symptom: with a remote, a task reassigned to another AI of the same node while its branch has unpushed commits: the commits of the old AI never reach the remote, and the pull request of the task still shows the old head (`pull request of task 1 ... got [OPEN <old head>]`). The last example of A5.5 in `features/m5.feature` without `@pending`: red in 9 of 10 runs without `-race`, green in 2 of 2 with it. Sometimes the new session's `git fetch origin` also ends with `cannot lock ref 'refs/remotes/origin/task/…': is at … but expected …`, the `assign` item is spent without a turn, and the task counts one failure. On one node the local branch survives, so the commits are not lost; they are published at the next submit.
+- Cause: the delivery of the new `assign` runs `CreateTaskWorkspace` first: `slot.claim` (`internal/host/worktree.go:109`) deletes the old AI's worktree with `os.RemoveAll`, while `releaseUnmergedWorktree` (`internal/host/deliver.go:516`) runs `git push` with that folder as its working directory, in two or three cleanups at once. They end with `fatal: Unable to read current working directory` or `remote unpack failed: eof before pack header`. The error is dropped, and the next cleanup sees holder == assignee, so nothing pushes again. This is an ordering bug against `planning/flows/task.md` ("Reassignment": first the push, then the end of the task session and the removal of the worktree) and `planning/contracts/local.md` section 7 ("first the push"). Second effect: the push takes no lock of the clone, while `CreateTaskWorkspace` fetches under it (`workspaceBase`, `internal/host/workspace.go:89`), and a push moves `refs/remotes/origin/<br>` too, so the two write the same ref (the fetch error above); `local.md` section 7 ("One lock per clone") does not list `push`, and `TaskForge.PushBranch` (`internal/host/forge.go:36`) has no lock in `push_branch` and `submit_task` either. A lock on the push alone does not fix it: whichever wins, if the create is first, holder == assignee and nothing pushes.
+- Status: resolved by host unit H1b-2: the old assignee's session ends, its branch is pushed under the clone's lock and its worktree removed before the new one is made (see the entry "A task handed to another AI of the same node was not published, or failed its fetch" in Resolved). The A5.5 example is enabled.
+
+### 2026-11-26 · bug · A task handed to another AI of the same node was not published, or failed its fetch
+
+- Symptom: with a remote, a task reassigned to another AI of the same node while its branch had unpushed commits: most often the commits were never pushed (`fatal: Unable to read current working directory`, 9 of 10 runs of the last example of A5.5 without `-race`); sometimes the new task session's `git fetch origin` failed with `cannot lock ref 'refs/remotes/origin/task/…'`, and the task counted a failure.
+- Cause: delivery of the new `assign` deleted the old worktree (`slot.claim`, `internal/host/worktree.go`) while the clean-up ran `git push` in it (`releaseUnmergedWorktree`, `internal/host/deliver.go`), without the clone's lock and with its error dropped. The pushes of `push_branch` and `submit_task` and the fetch after a custom forge's merge did not take the lock either.
+- Status: resolved. The session of the old assignee ends, its branch is pushed and its worktree removed before the new one is made (`createTaskFolder`, `handOver`), all under the clone's lock, as is every push and fetch. A push that fails is told in the thread. That a task whose workspace cannot be prepared loses its `assign` item is by design (`planning/flows/agent-turn.md` E: one outcome, no retry): the secretary gets the `crash` notice with Git's output, and a `resume` brings the first turn with the brief. Tests: `internal/host/handover_test.go`.
+
+### 2026-11-26 · bug · A removed person's node kept their AIs' sessions, and a left team group stayed in the secretary's line
+
+- Symptom: after `member remove` of a person, that person's node kept the group's home, rows and AI sessions, dormant or with an open CLI. A team group that its owner had left stayed in "Team groups" of a secretary's turn until the node restarted.
+- Cause: the home pushed a removed person's connections `groups` and no rows (`pushTo`, `internal/home/run_push.go`) and closed them, and the host only asked for a sync when a group left the list (`internal/host/home_moved.go`), which the closed connection did not answer. A removal and a move could not be told apart. A late reader of a closed connection also lost frames that had arrived (`dequeue`, `internal/peer/ctl.go`).
+- Status: resolved. The home pushes the rows of a removal to the person's nodes first (`told`), the host leaves a group that is no longer listed and whose rows no longer have its owner (`ownerLeft`, `leaveGroup`), or whose home answers `forbidden`; a group that was syncing when its home stopped listing it is decided when the sync ends (`syncOneGroup`), and the watch grants of the AIs that leave go with their sessions (`closeMemberSessions`). `Read` returns what arrived before the end. Tests: `internal/host/home_left_test.go`, `TestRunStopsPushingToADeviceTheGroupNoLongerServes`, `TestFinishEndsAfterWhatWasSent`, the removal scenario of A9.4 with two real nodes.
+
+### 2026-11-25 · limitation · `host.offline` does not mark an AI that never had a session
+
+- Symptom: an AI that was added to a group and never woken keeps `dormant` ("Sleeping") in the group for everybody but its owner after its owner took all AIs of the computer offline.
+- Cause: `handleHostOffline` reports a status for each AI that has a session row (`distinctMemberSlots`, `internal/host/limits.go:209`); a member without one is in none. The owner's browser shows it offline from `host.info` (`statusIn`, `web/src/lib/stop.ts`).
+- Status: resolved with the entry "The host sends no member status when a group is paused or resumed": `hostedSlots` (`internal/host/limits.go`) takes the member rows too.
+
+### 2026-11-25 · deviation · The host sends no member status when a group is paused or resumed, or its AIs go offline or online
+
+- Symptom: after "Resume", the card of an AI that was interrupted outside a task stays "Paused" until its next turn or until it goes dormant. During a pause every other AI reads "Waiting" or "Sleeping · wakes when @mentioned", beside a notice that says the group is paused. An AI that never had a session reads "Sleeping" to everybody but its owner after `host.offline` and after `host.online` (see the entry above).
+- Cause: `afterGroupState` (`internal/host/deliver.go:383`) sends no status on pause or resume; seen by continuing `TestPausingInterruptsTheTurnsOfThePausedGroupOrTask` with a resume: `MemberState` is `waiting` and no command was sent. `handleHostOffline` and the online side report only members that have a session row (`distinctMemberSlots`, `internal/host/limits.go:209`). `planning/sessions.md` section 3 wants `paused` and `offline` reported.
+- Status: resolved: a group row that changes the pause reports the state of every AI this node hosts in the group (`reportPause`, `internal/host/deliver.go`), and `host.offline` and `host.online` report the AIs that a member row names too (`hostedSlots`, `internal/host/limits.go`). Test: `TestPauseAndOfflineAreReportedOfEveryHostedAI`.
+
+### 2026-11-26 · bug · A changed secretary gets no secretary tools on its host
+
+- Symptom: after `group set` with `secretary`, the AI it names cannot propose a brief: `tools/call` of `propose_brief` is refused and its CLI ends. A9.44 wants its host to list the secretary's tools.
+- Cause: the host goes by `Session.Secretary` (`internal/host/session.go:59`), which is written at `host.join` only (`internal/host/join.go`); `planning/contracts/step-2/authority.md` section 4 says the group row decides.
+- Status: resolved: before an AI gets its next turn its session takes the name and the role of the rows (`followMember`, `internal/host/deliver.go`), and a group session whose role changed starts a new CLI session; `joinDemoteIfSecretary` is gone. Tests: `TestGroupSessionFollowsTheSecretaryOfTheRows`, `TestSavedSessionFollowsTheSecretaryOfTheRows`, and the scenario of A9.44.
+
+### 2026-11-25 · limitation · A `jump` that crosses the delivery of its message delivers the message twice
+
+- Symptom: the author sends `jump` at the moment the AI takes the waiting message. The turn that just started with the message is interrupted, and the message comes again as the next turn.
+- Cause: the home retires the waiting item and queues the jump under a new item number (`rndRequeueJump`, `internal/home/rounds.go`), where [commands.md](planning/contracts/commands.md) 1.4 says the item "gets `jump: true` and is sent again". The host knows a delivered item by `(home, item)` (`hasAuditItem`, `internal/host/deliver.go`), so it cannot tell that the new item is a message it has delivered. An item it still holds, the waiting one or an earlier jump of the message, it does drop (`retiredByJump`).
+- Status: resolved. [#410](https://github.com/huanchong-99/SoloDawn/pull/410) keeps the number of the item (`rndJumpItems`, `internal/home/rounds.go`), so the host acknowledges a message it has delivered without a turn (`handleInboxElem`, `firstJump`); `retiredByJump` is removed. Test: `TestJumpThatCrossesItsDeliveryDeliversTheMessageOnce`.
 
 ### 2026-11-26 · bug · A joined person's group lacked entries that the home already held
 

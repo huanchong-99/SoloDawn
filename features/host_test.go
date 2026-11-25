@@ -89,7 +89,7 @@ func hostSeamSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the host moves the (task|group) session from "([^"]+)" to "([^"]+)"$`, func(kind, from, to string) {
 		moved = h.Sessions.Move(keys[kind], host.State(from), host.State(to))
 	})
-	sc.Step(`^the host records a takeover and moves the task session from "([^"]+)" to "([^"]+)" in one transaction$`, func(from, to string) {
+	sc.Step(`^the host writes an audit row and moves the task session from "([^"]+)" to "([^"]+)" in one transaction$`, func(from, to string) {
 		moved = h.Sessions.Write(func(tx *host.Tx) error {
 			if _, err := h.Audit(tx.Tx, host.AuditRow{Group: "g1", Agent: "claude", What: host.AuditSetting}); err != nil {
 				return err

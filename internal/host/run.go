@@ -125,6 +125,7 @@ type liveProc struct {
 	key             SessionKey
 	session         Session
 	token           string
+	level           int // the level it was started with
 	proc            Process
 	cancel          context.CancelFunc
 	closeOnce       sync.Once
@@ -273,6 +274,18 @@ func (sessionRunner) Answer(h *Host, key SessionKey, ask string, allow bool) err
 
 func (sessionRunner) Close(h *Host, key SessionKey) {
 	closeSession(h, stateOf(h), key)
+}
+
+// processLevel is the level that the session's open CLI was started with, 0
+// when none is open.
+func processLevel(h *Host, key SessionKey) int {
+	rt := stateOf(h)
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if lp := rt.procs[key]; lp != nil {
+		return lp.level
+	}
+	return 0
 }
 
 // closeSession closes the session's CLI process, also during a turn, and
@@ -474,7 +487,7 @@ func launchSessionProcess(h *Host, rt *runtimePart, s Session, cfg launchConfig,
 		return nil, err
 	}
 	lp := &liveProc{
-		key: s.SessionKey, session: s, token: token, proc: proc, cancel: procCancel,
+		key: s.SessionKey, session: s, token: token, level: cfg.level, proc: proc, cancel: procCancel,
 		turnActive: true, resumed: s.CLISession != "", origTurn: turn,
 		loopDone: make(chan struct{}), // single reader: stopProcess or writeTurnToWaiting
 	}

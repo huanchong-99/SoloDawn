@@ -315,11 +315,11 @@ func (h *Host) Hand(id string, item json.RawMessage) (waited bool, err error) {
 	return true, nil
 }
 
-// Holds says whether a session's deliveries are held, by the name of the
-// unit that knows of one kind of hold: the unit of limits for an AI that is
-// rate limited, or offline by the owner's command (flows/agent-turn.md step
-// 3). The session table itself holds an AI that is
-// working or taken over (Sessions.Move).
+// Holds says whether an AI's deliveries are held, by the name of the unit that
+// knows of one kind of hold: the unit of limits for an AI that is rate
+// limited, or offline by the owner's command (flows/agent-turn.md step 3).
+// Delivery asks for an AI, with no task in key. The session table itself
+// holds an AI that is working or taken over (Sessions.Move).
 var Holds = map[string]func(h *Host, key SessionKey) (reason string, held bool){}
 
 // Held asks every entry of Holds, in the order of their names, and returns

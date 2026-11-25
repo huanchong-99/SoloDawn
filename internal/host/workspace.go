@@ -12,8 +12,8 @@ import (
 )
 
 // cloneLocks holds one lock per clone. Every Git command that changes a clone
-// or one of its worktrees runs under it: clone, fetch, merge (the task merge
-// of merge.go included), worktree add and remove (local.md section 7).
+// or one of its worktrees runs under it: clone, fetch, push, merge (the task
+// merge of merge.go included), worktree add and remove (local.md section 7).
 var cloneLocks sync.Map
 
 // cloneLock returns the lock of the clone at repo. It is keyed by the clone's
@@ -190,11 +190,14 @@ func RemoveTaskWorkspace(ctx context.Context, projectDir string, num int, slug, 
 	}
 	_, unlock := lockClone(projectDir)
 	defer unlock()
-	var force []string
-	if why != TaskMerged {
-		force = []string{"--force", "--force"}
+	return newSlot(projectDir, "wt", name, "", ai).release(ctx, why)
+}
+
+func (s slot) release(ctx context.Context, why TaskRelease) error {
+	if why == TaskMerged {
+		return s.remove(ctx)
 	}
-	return newSlot(projectDir, "wt", name, "", ai).remove(ctx, force...)
+	return s.remove(ctx, "--force", "--force")
 }
 
 // RemoveReviewWorkspace removes review/<num> that the reviewer ai holds, on a

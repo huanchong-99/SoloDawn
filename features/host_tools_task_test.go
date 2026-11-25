@@ -343,7 +343,7 @@ func (st *tskScenario) setupRepos(remote bool) error {
 
 func (st *tskScenario) initBareOrigin(src string) error {
 	st.remoteDir = st.t.TempDir()
-	if _, err := hostForgeGit(st.remoteDir, []string{"init", "--bare", "-b", "base"}); err != nil {
+	if err := initBareRepo(st.remoteDir, "base"); err != nil {
 		return err
 	}
 	_, err := hostForgeGit(src, []string{"remote", "add", "origin", st.remoteDir}, []string{"push", "origin", "base"})
@@ -564,11 +564,7 @@ func tskCopySelfBinary(dst string) error {
 	if err != nil {
 		return err
 	}
-	binBytes, err := os.ReadFile(exe)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, binBytes, 0o700)
+	return m5CopyExec(exe, dst)
 }
 
 func (st *tskScenario) setScenarioEnv(key, val string) {

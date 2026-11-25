@@ -204,9 +204,19 @@ func (c *Connection) dequeue(ctx context.Context) (json.RawMessage, error) {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-c.Done():
-		return nil, io.EOF
+		return c.queued()
 	case msg := <-c.incoming:
 		return msg, nil
+	}
+}
+
+// queued returns what arrived before the connection ended.
+func (c *Connection) queued() (json.RawMessage, error) {
+	select {
+	case msg := <-c.incoming:
+		return msg, nil
+	default:
+		return nil, io.EOF
 	}
 }
 

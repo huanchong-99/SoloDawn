@@ -243,11 +243,7 @@ Feature: A request for another person's AI needs its owner's word
     Examples:
       | action  | status   | turn                  | mentions |
       | confirm | answered | ^The path is visible$ | 1        |
-
-    @pending
-    Examples:
-      | action | status | turn           | mentions |
-      | deny   | denied | (?i)\bdenied\b | 0        |
+      | deny    | denied   | (?i)\bdenied\b       | 0        |
 
   Scenario Outline: A9.18 — A listed or same-owner caller receives its reply in the open ask
     Given the confirmation cast with Q
@@ -523,7 +519,6 @@ Feature: A request for another person's AI needs its owner's word
     Then the confirmation command answers "ok"
     And "Q-team" receives a confirmation turn matching "^== .* · notice · information\nNotice \(confirm_denied\)$"
 
-  @pending
   Scenario: A9.44 — Q1 lists the secretary's tools for Q-team once it is named secretary
     Given the confirmation cast with Q
     When confirmation browser P sends as "secretary":

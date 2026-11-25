@@ -130,9 +130,11 @@ task through hosted checks and review again.
 
 ### Reassignment
 
-When a task's assignee changes, the previous assignee's node, with a remote,
-first pushes the task branch, then ends its task session and removes its
-worktree with `--force` (`contracts/local.md` section 7). The new assignee's
+When a task's assignee changes, the previous assignee's node ends its task
+session, pushes the task branch when there is a remote, and then removes its
+worktree with `--force` (`contracts/local.md` section 7). When the new
+assignee is on the same node, all of it comes before the new worktree is
+created; two nodes do not wait for each other. The new assignee's
 node creates its worktree from the published branch, or from the base
 branch if nothing was ever published; without a remote both AIs are on the
 same node and use the same local branch. Only commits carry over;

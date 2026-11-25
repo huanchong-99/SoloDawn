@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -626,6 +628,89 @@ func TestPausingInterruptsTheTurnsOfThePausedGroupOrTask(t *testing.T) {
 			t.Fatalf("group pause status: %+v", last.payload)
 		}
 	})
+}
+
+// limStates is the last state reported of each AI of a group since the first n
+// commands.
+func limStates(rh *runHome, group string, n int) map[string]string {
+	states := map[string]string{}
+	for _, c := range rh.snapshotCmds()[n:] {
+		if c.payload["op"] == "status" && c.payload["g"] == group {
+			states[c.payload["id"].(string)] = c.payload["state"].(string)
+		}
+	}
+	return states
+}
+
+// A pause and a resume of the group, and the owner's offline switch, are
+// reported of every AI this node hosts: of one that waits, and of one that
+// never had a session.
+func TestPauseAndOfflineAreReportedOfEveryHostedAI(t *testing.T) {
+	saveRuntimeGlobals(t)
+	base := t.TempDir()
+	synctest.Test(t, func(t *testing.T) {
+		h, rh, drv, shutdown := setupLimBubble(t, base)
+		defer shutdown()
+		drv.endOnInterrupt = true
+		d := deliv(h)
+		d.mu.Lock()
+		d.groupLocked(runGroup1, "home-dev").live = true
+		d.mu.Unlock()
+		putLimLocalAI(h, runGroup1, runAI1, "claude")
+		putLimLocalAI(h, runGroup1, runAI2, "codex")
+		h.Rows.Put(runGroup1, "member", "elsewhere", json.RawMessage(marshalWire(proto.AIMemberRow{
+			MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: "elsewhere", Seq: 2}, Group: runGroup1, Kind: "ai", Name: "Elsewhere"},
+			CLI:       "claude", Host: "another", Allow: []string{}, Approvers: []string{},
+		})))
+		key := SessionKey{Group: runGroup1, Member: runAI1}
+		h.Sessions.Create(makeRunSession(key, GroupSession, "repo"))
+		mustLimTurn(t, h, key, Turn{Kind: ItemsTurn})
+		check := func(what string, act func(), want map[string]string) {
+			t.Helper()
+			n := len(rh.snapshotCmds())
+			act()
+			synctest.Wait()
+			if got := limStates(rh, runGroup1, n); !maps.Equal(got, want) {
+				t.Fatalf("%s: reported %v, want %v", what, got, want)
+			}
+		}
+		push := func(seq int64, paused *proto.GroupPause) func() {
+			return func() {
+				pushLimRows(h, runGroup1, proto.GroupRow{
+					RowHeader: proto.RowHeader{Type: "group", ID: runGroup1, Seq: seq}, Name: "Proj", Kind: "project",
+					Base: "main", Forge: "none", Home: "home-dev", Checks: []string{}, Paused: paused,
+				})
+			}
+		}
+		paused := &proto.GroupPause{By: "owner", At: 1}
+		check("not paused", push(3, nil), map[string]string{})
+		check("pause", push(4, paused), map[string]string{runAI1: "paused", runAI2: "paused"})
+		check("still paused", push(5, paused), map[string]string{})
+		check("resume", push(6, nil), map[string]string{runAI1: "waiting", runAI2: "dormant"})
+		surface := func(kind string) func() { return func() { limSurface(t, h, kind) } }
+		check("host.offline", surface("host.offline"), map[string]string{runAI1: "offline", runAI2: "offline"})
+		check("host.online", surface("host.online"), map[string]string{runAI1: "dormant", runAI2: "dormant"})
+	})
+}
+
+// A turn that begins while the state is on its way reports its own, which may
+// arrive first: the state is reported again.
+func TestStateThatChangesWhileItIsReportedIsReportedAgain(t *testing.T) {
+	h, rh, _, _ := setupRunEnv(t)
+	key := SessionKey{Group: runGroup1, Member: runAI1}
+	h.Sessions.Create(makeRunSession(key, GroupSession, "repo"))
+	rh.cmdFn = func(map[string]any) (json.RawMessage, error) {
+		h.Sessions.Move(key, Dormant, Working)
+		return json.RawMessage(`{"re":1,"ok":true}`), nil
+	}
+	reportState(t.Context(), h, memberHomeSlot{"home-dev", runGroup1, runAI1}, proto.TurnInterruptedEvent{SystemCode: proto.SystemCode{Code: "turn_interrupted"}, Reason: "stop"})
+	var got []any
+	for _, c := range rh.snapshotCmds() {
+		got = append(got, c.payload["state"], eventOf(c)[0])
+	}
+	if !slices.Equal(got, []any{"dormant", "turn_interrupted", "working", nil}) {
+		t.Fatalf("reported %v", got)
+	}
 }
 
 func pushLimRows(h *Host, group string, rows ...any) {

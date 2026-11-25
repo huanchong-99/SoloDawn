@@ -44,6 +44,7 @@ Feature: Step 2 people, invitations, roles, removal and host surfaces
     Given the people cast where Q joined P's group "Alpha" on P1 and joined Q-team and Q-personal from Q1
     When P removes Q from the people group
     Then Q's connections to P1 close within 1 second and Q's next connection attempt to P1 is refused
+    And Q1 has ended the sessions of Q's AIs in the people group and forgotten its home
 
   Scenario: Joining Q-team from Q1 and refusing non-member or duplicate-secretary add_ai (A9.5)
     Given the people cast where P's group "Alpha" on P1 has a secretary, P also has group "Solo" and Q has joined only the first as "Q"

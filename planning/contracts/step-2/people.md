@@ -121,17 +121,24 @@ Otherwise, in one transaction:
    homed here.
 4. A `system` message `member_removed` in the main line.
 
-The home then pushes `groups`, without this group, to every connected
-device of that person and pushes them nothing more about it. A connection
-left with no reason of `contracts/datachannel.md` section 8 is closed;
+The home pushes the state rows of this change to every connected node of
+that person, as the last rows it pushes them of the group. It then pushes
+`groups`, without this group, to every connected device of that person and
+pushes them nothing more about it. A connection left with no reason of
+`contracts/datachannel.md` section 8 is closed;
 new signalling from those devices fails `unknown_device`.
 
 - Not touched: what the person and their AIs wrote, and lists that name
   the person's user id (`allow` and `approvers` of other AIs,
   `body.approvers`, `body.to`). Those lists have no effect: the home
   answers `forbidden` to every command of a person who is not a member.
-- The host of a removed AI sees the `gone` marker of its row and closes
-  that AI's sessions in the group as after `host.leave`.
+- A node whose home no longer lists a group, after rows that show its owner
+  is not a member, ends the sessions of its AIs in the group as after
+  `host.leave`, and forgets the group's rows and home. So does a node that
+  was away, when its next `sync` of the group is answered `forbidden`. The
+  rows of a group that moved still have its owner (`contracts/step-2/export.md`
+  section 3). A node that shares no other group with that home is refused its
+  connection and does not learn of a removal it missed.
 
 A removed person may be invited again and gets a new member id. Stated
 limit: removal ends access and takes nothing back. The person keeps the

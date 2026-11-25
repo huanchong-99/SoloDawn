@@ -3,6 +3,7 @@ package host
 import (
 	"encoding/json"
 	"log"
+	"slices"
 
 	"github.com/huanchong-99/SoloDawn/internal/identity"
 	"github.com/huanchong-99/SoloDawn/internal/proto"
@@ -20,8 +21,43 @@ func pushHomeGroups(h *Host, device string, raw json.RawMessage) {
 	}
 	d := deliv(h)
 	for _, group := range d.announcedGroups(device, present) {
-		ensureGroupSynced(h, d, device, group)
+		if !present[group] && ownerLeft(h, group) {
+			h.bg(d.wg.Go, "group_left", func() { leaveGroup(h, d, group) }, "g", group)
+		} else {
+			ensureGroupSynced(h, d, device, group)
+		}
 	}
+}
+
+// ownerLeft reports whether the rows of a group that its home no longer lists
+// show that the node's owner is no longer a member: a home pushes the rows of
+// a removal first (contracts/step-2/people.md 2.4). The rows of a group that
+// moved still have the owner.
+func ownerLeft(h *Host, group string) bool {
+	_, known := joinCachedGroup(h, group)
+	owner, err := loadOwner(h.Store)
+	if !known || err != nil {
+		return false
+	}
+	isOwner := func(raw json.RawMessage) bool {
+		var m proto.HumanMemberRow
+		return proto.Decode(raw, &m) == nil && m.Kind == "human" && m.User == owner
+	}
+	return !slices.ContainsFunc(h.Rows.Of(group, "member"), isOwner)
+}
+
+// leaveGroup ends what this node has of a group its owner is no longer in: the
+// sessions of its AIs, as after host.leave, the rows and the remembered home.
+func leaveGroup(h *Host, d *delivery, group string) {
+	for _, s := range h.Sessions.All() {
+		if s.Group == group {
+			leaveGoneMember(h, group, s.Member)
+		}
+	}
+	joinCommitLeft(h, group, "", "", "")
+	d.forget(group)
+	h.Rows.Reset(group)
+	joinSyncNow(h, joinStateOf(h))
 }
 
 func (d *delivery) announcedGroups(device string, present map[string]bool) []string {
@@ -33,7 +69,7 @@ func (d *delivery) announcedGroups(device string, present map[string]bool) []str
 			continue
 		}
 		if gs.syncing {
-			gs.refresh = true
+			gs.refresh, gs.unlisted = true, !present[group]
 		} else {
 			gs.live = false
 			sync = append(sync, group)
@@ -45,15 +81,29 @@ func (d *delivery) announcedGroups(device string, present map[string]bool) []str
 func settleHomeSync(h *Host, d *delivery, device, group string, answer json.RawMessage, ok, refresh bool) {
 	if ok {
 		h.bg(d.wg.Go, "group_state", func() { afterGroupState(h, d, group) }, "g", group)
-	} else if target := movedHome(answer); target != "" {
-		if err := followMovedHome(h, device, group, target); err != nil {
-			log.Printf("host: follow moved group: %v", err)
-		}
+	} else if settleRefusedSync(h, d, device, group, answer) {
 		return
 	}
 	if refresh {
 		ensureGroupSynced(h, d, device, group)
 	}
+}
+
+// settleRefusedSync acts on a home's refusal to show a group: it has moved, or
+// the node's owner is not a member.
+func settleRefusedSync(h *Host, d *delivery, device, group string, answer json.RawMessage) bool {
+	if target := movedHome(answer); target != "" {
+		if err := followMovedHome(h, device, group, target); err != nil {
+			log.Printf("host: follow moved group: %v", err)
+		}
+		return true
+	}
+	var refused proto.ErrorResponse
+	if proto.Decode(answer, &refused) != nil || refused.Err.Code != "forbidden" || d.groupHome(group) != device {
+		return false
+	}
+	leaveGroup(h, d, group)
+	return true
 }
 
 func movedHome(answer json.RawMessage) string {

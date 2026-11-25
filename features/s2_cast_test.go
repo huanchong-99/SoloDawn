@@ -557,7 +557,7 @@ func (c *s2Cast) prepareGitRepos() error {
 	if err := initLocalGitRepo(c.RepoDir); err != nil {
 		return err
 	}
-	if err := runGitIn("", "init", "--bare", "-b", "main", c.BareDir); err != nil {
+	if err := initBareRepo(c.BareDir, "main"); err != nil {
 		return err
 	}
 	if err := runGitIn(c.RepoDir, "remote", "add", "origin", c.BareDir); err != nil {

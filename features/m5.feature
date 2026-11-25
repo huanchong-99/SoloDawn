@@ -65,10 +65,6 @@ Feature: Tasks from brief to merge
       | none   | a crash, a crash, a crash                                                                   | reassigns the failed task to "Codex" | Codex  |
       | github | a crash, a crash, passed hosted checks, failed hosted checks, failed hosted checks, a crash | resumes the failed task              | Claude |
 
-    # The new assignee's CreateTaskWorkspace deletes the old worktree while the hand-over push still
-    # runs from it, so the commits never reach the remote; the fix is in work, host unit H1b-2
-    # (issues.md, 2026-11-26).
-    @pending
     Examples:
       | forge  | endings                                                                                     | takes it up                          | AI     |
       | github | a crash, a crash, passed hosted checks, failed hosted checks, failed hosted checks, a crash | reassigns the failed task to "Codex" | Codex  |

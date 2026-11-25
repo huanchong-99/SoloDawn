@@ -1,8 +1,10 @@
 package host
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
+	"slices"
 	"sync"
 	"time"
 
@@ -148,12 +150,12 @@ func handleHostOffline(ctx context.Context, h *Host, _ Owner, _ string, data jso
 			interrupted[memberHomeSlot{s.Home, s.Group, s.Member}] = s.Task
 		}
 	}
-	for _, slot := range distinctMemberSlots(h, "") {
+	for _, slot := range hostedSlots(h, "") {
 		var ev any
 		if task, ok := interrupted[slot]; ok {
 			ev = proto.TurnInterruptedEvent{SystemCode: proto.SystemCode{Code: "turn_interrupted"}, Reason: "stop", Task: proto.ID(task)}
 		}
-		sendMemberStatus(ctx, h, rt, slot.home, slot.group, slot.member, ev)
+		reportState(ctx, h, slot, ev)
 	}
 	return nil, nil
 }
@@ -189,9 +191,8 @@ func setOffline(h *Host, data json.RawMessage, offline bool) error {
 // releaseHeld reports the member status of the AIs of agent (every AI when
 // agent is "") and gives held items their turn.
 func releaseHeld(ctx context.Context, h *Host, agent string) {
-	rt := stateOf(h)
-	for _, slot := range distinctMemberSlots(h, agent) {
-		sendMemberStatus(ctx, h, rt, slot.home, slot.group, slot.member, nil)
+	for _, slot := range hostedSlots(h, agent) {
+		reportState(ctx, h, slot, nil)
 	}
 	limitsOf(h).spawn(h, func() { Deliver(h, "", "") })
 }
@@ -206,17 +207,44 @@ func (lp *limitsPart) spawn(h *Host, f func()) {
 	}
 }
 
-func distinctMemberSlots(h *Host, onlyAgent string) []memberHomeSlot {
-	seen := map[memberHomeSlot]bool{}
-	var out []memberHomeSlot
+// hostedSlots returns the AIs of agent that this node hosts (every AI when
+// agent is ""): those with a session, and those a member row names, which need
+// not have one yet.
+func hostedSlots(h *Host, agent string) []memberHomeSlot {
+	var slots []memberHomeSlot
 	for _, s := range h.Sessions.All() {
-		slot := memberHomeSlot{s.Home, s.Group, s.Member}
-		if (onlyAgent == "" || s.Agent == onlyAgent) && !seen[slot] {
-			seen[slot] = true
-			out = append(out, slot)
-		}
+		slots = append(slots, memberHomeSlot{s.Home, s.Group, s.Member})
 	}
-	return out
+	for group, home := range deliv(h).homes() {
+		slots = append(slots, groupSlots(h, home, group)...)
+	}
+	slots = slices.DeleteFunc(slots, func(s memberHomeSlot) bool { return agent != "" && memberAgent(h, s.group, s.member) != agent })
+	slices.SortFunc(slots, func(a, b memberHomeSlot) int {
+		return cmp.Or(cmp.Compare(a.group, b.group), cmp.Compare(a.member, b.member), cmp.Compare(a.home, b.home))
+	})
+	return slices.Compact(slots)
+}
+
+func groupSlots(h *Host, home, group string) []memberHomeSlot {
+	var slots []memberHomeSlot
+	for _, ai := range localGroupAIs(h, group) {
+		slots = append(slots, memberHomeSlot{home, group, ai})
+	}
+	return slots
+}
+
+// reportState reports the state of an AI, and again while it has changed
+// meanwhile: the report of a turn that began or ended may have been overtaken.
+func reportState(ctx context.Context, h *Host, slot memberHomeSlot, ev any) {
+	for {
+		state, task := h.MemberState(slot.group, slot.member)
+		err := sendMemberStatus(ctx, h, stateOf(h), slot.home, slot.group, slot.member, ev)
+		newState, newTask := h.MemberState(slot.group, slot.member)
+		if err != nil || newState == state && newTask == task {
+			return
+		}
+		ev = nil
+	}
 }
 
 func holdLimits(h *Host, key SessionKey) (string, bool) {

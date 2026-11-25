@@ -41,7 +41,7 @@ Conventions:
 | Tool | Arguments | Returns | Maps to |
 | --- | --- | --- | --- |
 | `post` | `text`; `kind` = `text` (default), `progress`, `question`; also `handback` in a hand-back turn (the node adds the Git facts), and `summary` with `task` for the secretary after a merge; `mentions` (names); `where` = `thread` or `main`, by default the place of the last item of the turn: its thread, or `main` when that item is in no thread | `{"id":"…"}` | `post` |
-| `ask` | `to` (an AI's name); `text`; `wait` = true (default) or false | `{"answer":"…"}`, or `{"pending":true,"receipt":"…"}` | `post` kind `call`; `flows/ask.md` |
+| `ask` | `to` (an AI's name); `text`; `wait` = true (default) or false | `{"answer":"…"}`, or `{"pending":true,"receipt":"…"}`; a denied call: `contracts/step-2/confirm.md` section 5 | `post` kind `call`; `flows/ask.md` |
 | `reply` | `call` (the id shown in the turn); `text` | `{"ok":true}` | `post` kind `reply` |
 | `read_thread` | `task` or `"main"`; `limit` (default 30, at most 100); `before` (the `pos` of a message from an earlier result; left out for the newest messages) | `{"messages":[{"id","pos","by","kind","at","text"}],"more":true}` | `fetch` |
 | `list_members` | — | `{"members":[{"name","kind","state","host","account","task","usage"}]}` | state rows |
@@ -77,6 +77,12 @@ Notes:
   `[unverified]` on both; the turn time limit ends them.
 - `submit_task` fails with `conflict` if the worktree has uncommitted
   changes or the last `run_checks` did not pass on the head commit.
+- `push_branch` and `submit_task` fail with `conflict` when Git refuses the
+  push because the remote branch has commits the worktree lacks, as after a
+  reassignment from another node (`flows/task.md` "Reassignment"). The node
+  first fetches the branch into `origin/<br>` under the clone's lock
+  (`contracts/local.md` section 7); the text tells the AI to run
+  `git merge origin/<br>` and `run_checks`, and to call the tool again.
 - A task session at level 1 is not offered `push_branch`, `run_checks` or
   `submit_task` (`contracts/drivers.md` section 2).
 - `push_branch` and `submit_task` are the only way a task's branch is

@@ -51,7 +51,7 @@ func hostForgeSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^a task worktree with a bare origin and another unpublished branch$`, func() (err error) {
 		task = host.TaskForge{Worktree: f.t.TempDir(), Branch: "task/12-fix"}
 		remote = f.t.TempDir()
-		if _, err = hostForgeGit(remote, []string{"init", "--bare", "-b", "base"}); err != nil {
+		if err = initBareRepo(remote, "base"); err != nil {
 			return err
 		}
 		commit, err = hostForgeGit(task.Worktree, []string{"init", "-b", task.Branch}, hostForgeCommit("task"),

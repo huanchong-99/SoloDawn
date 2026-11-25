@@ -36,6 +36,8 @@ type groupSync struct {
 	cursor        int64
 	live, syncing bool
 	refresh       bool
+	unlisted      bool // the groups frame that asked for the refresh did not list it
+	paused        bool // the group's pause, as its AIs' states were last reported
 	token         *byte
 	waiters       []chan struct{}
 }
@@ -216,13 +218,29 @@ func (d *delivery) replaceHome(group, device string) bool {
 	if gs == nil || gs.home == device {
 		return false
 	}
+	d.dropLocked(group, gs)
+	*gs = groupSync{home: device}
+	return true
+}
+
+// dropLocked drops what a home sent for a group.
+func (d *delivery) dropLocked(group string, gs *groupSync) {
 	for _, ch := range gs.waiters {
 		close(ch)
 	}
-	*gs = groupSync{home: device}
 	maps.DeleteFunc(d.held, func(key aiGroupKey, _ []verifiedItem) bool { return key.group == group })
 	delete(d.merges, group)
-	return true
+}
+
+// forget drops a group this node no longer reads.
+func (d *delivery) forget(group string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if gs := d.groups[group]; gs != nil {
+		d.dropLocked(group, gs)
+		delete(d.groups, group)
+	}
+	maps.DeleteFunc(d.pre, func(key aiGroupKey, _ []*preemption) bool { return key.group == group })
 }
 
 func ensureGroupSynced(h *Host, d *delivery, device, group string) {
@@ -296,7 +314,12 @@ func syncOneGroup(ctx context.Context, h *Host, d *delivery, conn Home, device s
 	synced, syncErr := decodeSyncAnswer(answer, err)
 	ok := syncErr == nil
 	h.diag.Info("sync.end", "g", job.group, "home", diagDevice(device), "seq", synced.Seq, "ok", ok)
-	if current, refresh := d.finishGroupSync(job, device, synced.Seq, ok); current {
+	current, refresh, unlisted := d.finishGroupSync(job, device, synced.Seq, ok)
+	switch {
+	case !current:
+	case ok && unlisted && ownerLeft(h, job.group):
+		leaveGroup(h, d, job.group)
+	default:
 		settleHomeSync(h, d, device, job.group, answer, ok, refresh)
 	}
 	return syncErr
@@ -317,25 +340,25 @@ func decodeSyncAnswer(answer json.RawMessage, err error) (proto.Synced, error) {
 	return synced, nil
 }
 
-func (d *delivery) finishGroupSync(job syncJob, device string, seq int64, ok bool) (bool, bool) {
+func (d *delivery) finishGroupSync(job syncJob, device string, seq int64, ok bool) (current, refresh, unlisted bool) {
 	d.mu.Lock()
 	gs := d.groupLocked(job.group, device)
 	if gs.token != job.token {
 		d.mu.Unlock()
-		return false, false
+		return false, false, false
 	}
 	gs.syncing = false
 	if ok {
 		gs.cursor, gs.live = seq, true
 	}
-	waiters, refresh := gs.waiters, gs.refresh
-	gs.waiters, gs.refresh = nil, false
+	waiters, refresh, unlisted := gs.waiters, gs.refresh, gs.unlisted
+	gs.waiters, gs.refresh, gs.unlisted = nil, false, false
 	gs.live = gs.live && !refresh
 	d.mu.Unlock()
 	for _, ch := range waiters {
 		close(ch)
 	}
-	return true, refresh
+	return true, refresh, unlisted
 }
 
 func pushReset(h *Host, home string, frame json.RawMessage) {
@@ -362,7 +385,31 @@ func pushRows(h *Host, home string, frame json.RawMessage) {
 	for _, raw := range batch.Rows {
 		applyGroupRow(h, d, home, batch.Group, raw)
 	}
+	reportPause(h, d, home, batch.Group)
 	h.bg(d.wg.Go, "group_state", func() { afterGroupState(h, d, batch.Group) }, "g", batch.Group)
+}
+
+// reportPause reports the state of every AI this node hosts in a group that
+// was paused or resumed (sessions.md section 3).
+func reportPause(h *Host, d *delivery, home, group string) {
+	grp, ok := lookupRow[proto.GroupRow](h, group, "group", group)
+	if !ok || !d.pauseChanged(home, group, grp.Paused != nil) {
+		return
+	}
+	h.bg(d.wg.Go, "member_status", func() {
+		for _, slot := range groupSlots(h, home, group) {
+			reportState(context.Background(), h, slot, nil)
+		}
+	}, "g", group)
+}
+
+func (d *delivery) pauseChanged(home, group string, paused bool) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	gs := d.groupLocked(group, home)
+	changed := gs.paused != paused
+	gs.paused = paused
+	return changed
 }
 
 func applyGroupRow(h *Host, d *delivery, home, group string, raw json.RawMessage) {
@@ -457,7 +504,7 @@ func cleanupGroupState(h *Host, d *delivery, group string) {
 	}
 	grp, _ := lookupRow[proto.GroupRow](h, group, "group", group)
 	for _, task := range tasks {
-		cleanupTaskFolder(context.Background(), pDir, grp, task)
+		cleanupTaskFolder(context.Background(), h, pDir, grp, task)
 		cleanupReviewFolder(context.Background(), pDir, task)
 	}
 }
@@ -493,7 +540,7 @@ func sessionTaskObsolete(h *Host, group string, s Session) bool {
 	return ok && (task.State == "merged" || task.State == "cancelled" || role != s.Member)
 }
 
-func cleanupTaskFolder(ctx context.Context, pDir string, grp proto.GroupRow, task proto.TaskRow) {
+func cleanupTaskFolder(ctx context.Context, h *Host, pDir string, grp proto.GroupRow, task proto.TaskRow) {
 	name := strconv.Itoa(task.Num) + "-" + string(task.Slug)
 	wtPath := filepath.Join(pDir, "wt", name)
 	if !pathExists(wtPath) {
@@ -504,19 +551,45 @@ func cleanupTaskFolder(ctx context.Context, pDir string, grp proto.GroupRow, tas
 		(ReviewedMerge{Repo: filepath.Join(pDir, "repo"), Branch: "task/" + name, Commit: task.Commit}).DeleteBranch(ctx)
 		return
 	}
-	releaseUnmergedWorktree(ctx, pDir, grp, task, name, wtPath)
+	if task.State == "cancelled" {
+		RemoveTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), newSlot(pDir, "wt", name, "", "").holder(ctx), TaskCancelled)
+		return
+	}
+	handOver(ctx, h, pDir, grp, task, name)
 }
 
-func releaseUnmergedWorktree(ctx context.Context, pDir string, grp proto.GroupRow, task proto.TaskRow, name, wtPath string) {
-	holder := newSlot(pDir, "wt", name, "", "").holder(ctx)
-	if task.State == "cancelled" {
-		RemoveTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), holder, TaskCancelled)
-	} else if holder != task.Assignee {
-		if grp.Forge != "none" && holder != "" {
-			(TaskForge{Worktree: wtPath, Branch: "task/" + name, Base: grp.Base, Templates: grp.Templates}).PushBranch(ctx)
-		}
-		RemoveTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), holder, TaskGivenAway)
+// handOver publishes what the AI that had a task committed in its worktree
+// here, once another is the assignee, and removes that worktree (flows/task.md
+// "Reassignment"). The new assignee's session does it too, before it makes its
+// own worktree. A push that fails is told in the task's thread; the commits
+// stay on the branch of this node.
+func handOver(ctx context.Context, h *Host, pDir string, grp proto.GroupRow, task proto.TaskRow, name string) {
+	holder, err := releaseGivenAway(ctx, h, pDir, grp, task, name)
+	if err == nil {
+		return
 	}
+	log.Printf("host: push of task %s handed over by %s: %v", task.ID, holder, err)
+	sendMemberStatus(ctx, h, stateOf(h), grp.Home, task.Group, holder, proto.TurnInterruptedEvent{
+		SystemCode: proto.SystemCode{Code: "turn_interrupted"}, Reason: "crash", Task: proto.ID(task.ID), Detail: RedactSecrets(err.Error()),
+	})
+}
+
+// releaseGivenAway reads the assignee under the clone's lock: it may have
+// waited there while the task went on to another AI, which made its worktree.
+func releaseGivenAway(ctx context.Context, h *Host, pDir string, grp proto.GroupRow, task proto.TaskRow, name string) (holder string, pushErr error) {
+	_, unlock := lockClone(pDir)
+	defer unlock()
+	s := newSlot(pDir, "wt", name, "", "")
+	s.ai = s.holder(ctx)
+	now, known := lookupTaskRow(h, task.Group, task.ID)
+	if !known || s.ai == now.Assignee || !pathExists(s.path) {
+		return "", nil
+	}
+	if grp.Forge != "none" && s.ai != "" {
+		pushErr = (TaskForge{Worktree: s.path, Branch: "task/" + name, Base: grp.Base, Templates: grp.Templates}).push(ctx)
+	}
+	s.release(ctx, TaskGivenAway)
+	return s.ai, pushErr
 }
 
 func cleanupReviewFolder(ctx context.Context, pDir string, task proto.TaskRow) {
@@ -658,18 +731,9 @@ func enqueueHeld(queue []verifiedItem, incoming verifiedItem) []verifiedItem {
 		return queue
 	}
 	if it.Jump {
-		replaced := func(e verifiedItem) bool { return e.item.Item == it.Item || retiredByJump(e.item, it) }
-		queue = slices.DeleteFunc(queue, replaced)
+		queue = slices.DeleteFunc(queue, func(e verifiedItem) bool { return e.item.Item == it.Item })
 	}
 	return insertHeld(queue, incoming)
-}
-
-// retiredByJump reports whether old is an item the home retired when it
-// queued jump for the same message (contracts/commands.md 1.4), be it the
-// waiting item or an earlier jump of that message: the home never sends old
-// again, and the message is delivered once.
-func retiredByJump(old, jump proto.Item) bool {
-	return old.Why == jump.Why && old.Msg == jump.Msg
 }
 
 func insertHeld(queue []verifiedItem, incoming verifiedItem) []verifiedItem {
@@ -1156,8 +1220,8 @@ func setQueue[K comparable, V any](m map[K][]V, key K, rest []V) {
 }
 
 // prependHeld puts items that delivery took back before what came meanwhile,
-// by the rules of enqueueHeld: the home may have sent one of them again, or
-// have queued a jump that retired it.
+// by the rules of enqueueHeld: the home may have sent one of them again, as
+// it was or as a jump.
 func (d *delivery) prependHeld(key aiGroupKey, items []verifiedItem) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -1322,7 +1386,10 @@ func prepareTargetSession(h *Host, ai aiInfo, target routedTarget, home string, 
 	if err := ensureCloneIfConfigured(ctx, pDir, grp); err != nil {
 		return Session{}, err, nil
 	}
-	existing, exists := h.Sessions.Get(target.key)
+	existing, exists, err := followMember(h, ai, target.key)
+	if err != nil {
+		return Session{}, nil, err
+	}
 	folder, branchToReport, err := prepareSessionFolder(ctx, h, pDir, grp, target, exists, existing, batch)
 	if err != nil {
 		return Session{}, err, nil
@@ -1335,6 +1402,25 @@ func prepareTargetSession(h *Host, ai aiInfo, target routedTarget, home string, 
 		return Session{}, nil, err
 	}
 	return session, nil, nil
+}
+
+// followMember returns a session as the rows say its AI is: its name, and
+// whether it is the secretary (contracts/step-2/authority.md section 4). A
+// CLI's instructions and tools are fixed when it starts, so another role
+// starts a new CLI session. A turn that runs, and a takeover, keep theirs.
+func followMember(h *Host, ai aiInfo, key SessionKey) (Session, bool, error) {
+	s, ok := h.Sessions.Get(key)
+	if !ok || active(s.State) || s.Name == ai.name && s.Secretary == ai.secretary {
+		return s, ok, nil
+	}
+	setName := func(r *Session) { r.Name = ai.name }
+	if s.Secretary != ai.secretary {
+		Runner.Close(h, key)
+		setName = func(r *Session) { r.Name, r.Secretary, r.CLISession = ai.name, ai.secretary, "" }
+	}
+	err := h.Sessions.Update(key, setName)
+	s, ok = h.Sessions.Get(key)
+	return s, ok, err
 }
 
 func ensureSessionRow(h *Host, ai aiInfo, target routedTarget, folder, home string, exists bool, existing Session) (Session, error) {
@@ -1370,7 +1456,7 @@ func prepareSessionFolder(ctx context.Context, h *Host, pDir string, grp proto.G
 	remote := grp.Forge != "none"
 	switch target.kind {
 	case TaskSession:
-		return prepareTaskFolder(ctx, h, pDir, grp.Base, remote, target.key, exists, existing.Folder)
+		return prepareTaskFolder(ctx, h, pDir, grp, target.key, exists, existing.Folder)
 	case ReviewSession:
 		return prepareReviewFolder(ctx, h, pDir, grp.Base, remote, target.key, batch)
 	default:
@@ -1387,7 +1473,7 @@ func prepareGroupFolder(ctx context.Context, pDir, base string, remote, exists b
 	return "repo", "", nil
 }
 
-func prepareTaskFolder(ctx context.Context, h *Host, pDir, base string, remote bool, key SessionKey, exists bool, folder string) (string, string, error) {
+func prepareTaskFolder(ctx context.Context, h *Host, pDir string, grp proto.GroupRow, key SessionKey, exists bool, folder string) (string, string, error) {
 	task, _ := lookupTaskRow(h, key.Group, key.Task)
 	name := strings.TrimPrefix(folder, "wt/")
 	if !exists {
@@ -1395,10 +1481,8 @@ func prepareTaskFolder(ctx context.Context, h *Host, pDir, base string, remote b
 		if name, err = taskName(task.Num, string(task.Slug)); err != nil {
 			return "", "", err
 		}
-		if hasGitClone(pDir) {
-			if _, err := CreateTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), key.Member, base, remote); err != nil {
-				return "", "", err
-			}
+		if err := createTaskFolder(ctx, h, pDir, grp, task, key.Member, name); err != nil {
+			return "", "", err
 		}
 		folder = "wt/" + name
 	}
@@ -1406,6 +1490,18 @@ func prepareTaskFolder(ctx context.Context, h *Host, pDir, base string, remote b
 		return folder, "task/" + name, nil
 	}
 	return folder, "", nil
+}
+
+// createTaskFolder makes a task's worktree for its assignee, after the
+// assignee before it on this node has ended its session and handed over.
+func createTaskFolder(ctx context.Context, h *Host, pDir string, grp proto.GroupRow, task proto.TaskRow, ai, name string) error {
+	if !hasGitClone(pDir) {
+		return nil
+	}
+	cleanupTaskSessions(h, task.Group)
+	handOver(ctx, h, pDir, grp, task, name)
+	_, err := CreateTaskWorkspace(ctx, pDir, task.Num, string(task.Slug), ai, grp.Base, grp.Forge != "none")
+	return err
 }
 
 func prepareReviewFolder(ctx context.Context, h *Host, pDir, base string, remote bool, key SessionKey, batch []verifiedItem) (string, string, error) {
@@ -1665,6 +1761,17 @@ func recordMergeTaken(h *Host, agent string, v verifiedItem, taskID string) (boo
 	}
 	err := h.Store.Write(write)
 	return written, err
+}
+
+// homes returns the home of each group this node reads the state of.
+func (d *delivery) homes() map[string]string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	homes := make(map[string]string, len(d.groups))
+	for group, gs := range d.groups {
+		homes[group] = gs.home
+	}
+	return homes
 }
 
 func (d *delivery) groupHome(group string) string {
