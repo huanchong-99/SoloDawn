@@ -110,4 +110,7 @@
     gap: var(--sp-2);
     margin-left: auto;
   }
+  .acts .btn {
+    min-width: 112px;
+  }
 </style>

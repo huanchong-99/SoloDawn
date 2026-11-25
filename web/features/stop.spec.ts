@@ -44,7 +44,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   /** The panel opens as the browser opens the popover of its button. */
   const openPanel = async () => {
     expect(stop().getAttribute('popovertarget')).toBe(one('.panel').id);
-    one('.panel').dispatchEvent(Object.assign(new Event('toggle'), { newState: 'open' }));
+    for (const type of ['beforetoggle', 'toggle'])
+      one('.panel').dispatchEvent(Object.assign(new Event(type), { newState: 'open' }));
     await tick();
     expect(document.activeElement).toBe(one('.panel'));
   };
@@ -424,6 +425,41 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     Then('under the top bar it says that the AIs on workstation are offline', () =>
       settled(() => expect(text('.off [role="status"]')).toContain('Your AIs on workstation')),
     );
+  });
+
+  Scenario(
+    'After a reload a computer that connects later is read on every page',
+    ({ Given, When, Then, And }) => {
+      Given(
+        'the AIs of "workstation" are offline, with no AI in a session, and its connection is down',
+        () => {
+          workstation.drop();
+          workstation.info.offline = true;
+          home.write(g, example('row-member-ai', { g, state: 'dormant', task: undefined }));
+        },
+      );
+      When('Alex opens the settings page and then "workstation" connects', async () => {
+        openPage('#/settings');
+        await workstation.connect();
+      });
+      Then('under the top bar it says that the AIs on workstation are offline', () =>
+        settled(() => expect(text('.off [role="status"]')).toContain('Your AIs on workstation')),
+      );
+      And('"Stop AIs" is gone, for there is nothing to stop', () =>
+        expect(all('.estop')).toEqual([]),
+      );
+    },
+  );
+
+  Scenario('The panel opens under its button wherever the button is', ({ When, And, Then }) => {
+    When('Alex opens "Website" and the button is pushed down to 155 px', async () => {
+      await openGroup();
+      vi.spyOn(stop(), 'getBoundingClientRect').mockReturnValue({ bottom: 155 } as DOMRect);
+    });
+    And('Alex opens "Stop AIs"', openPanel);
+    Then('the panel starts 8 px under the button', () => {
+      expect(one('.panel').style.top).toBe('163px');
+    });
   });
 
   Scenario('On a phone the button is in the head of the chat', ({ When, Then }) => {
