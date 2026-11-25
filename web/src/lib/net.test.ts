@@ -464,6 +464,24 @@ describe('the homes that an own computer knows', () => {
     expect([pc.closes, ownPC.closes]).toEqual([0, 0]);
   });
 
+  it('keeps a home that no longer speaks to this browser, with its groups as away', async () => {
+    const { browser, foreign, rv, knows, homeOf } = await secondBrowser();
+    knows([{ g: websiteId, home: foreign.id, name: 'Website' }]);
+    const home = homeOf(foreign.id)!;
+    const pc = await answerNode(rv, foreign, browser.id, undefined);
+    const refuse = (re: number) =>
+      pc.ctl.deliver({ re, err: { code: 'version', msg: 'update needed' } });
+    refuse(1);
+    await vi.waitFor(() => expect(pc.ctl.frames()).toHaveLength(2));
+    refuse(2);
+    await vi.waitFor(() => expect(pc.closes).toBe(1));
+    expect([homeOf(foreign.id), home.ctl, home.groups.map(({ g }) => g)]).toEqual([
+      home,
+      undefined,
+      [websiteId],
+    ]);
+  });
+
   it('keeps a watched computer that is also the home of a group', async () => {
     const { foreign, net, knows, homeOf } = await secondBrowser();
     const end = net.watchHost!(foreign.id);
