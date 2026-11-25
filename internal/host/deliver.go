@@ -159,7 +159,7 @@ func (d *delivery) setHomeEntryLocked(h *Host, device string, conn Home) *homeSy
 	ctx, cancel := context.WithCancel(context.Background())
 	entry := &homeSync{ctx: ctx, cancel: cancel}
 	d.cancels[device] = entry
-	go watchHomeConn(h, d, device, conn, entry)
+	h.bg(d.wg.Go, "home_watch", func() { watchHomeConn(h, d, device, conn, entry) })
 	return entry
 }
 

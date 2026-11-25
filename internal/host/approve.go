@@ -107,7 +107,7 @@ func startAskedGoroutine(h *Host, s Session, ask Ask) {
 	st := Part[approvalState](h)
 	ctx, cancel := context.WithCancel(context.Background())
 	id := st.registerAsk(s.SessionKey, cancel)
-	go runAskedEvent(ctx, cancel, h, st, s, id, ask, callDone)
+	h.bg(func(f func()) { go f() }, "ask", func() { runAskedEvent(ctx, cancel, h, st, s, id, ask, callDone) }, "g", s.Group, "task", s.Task)
 }
 
 func runAskedEvent(ctx context.Context, cancel context.CancelFunc, h *Host, st *approvalState, s Session, id *byte, ask Ask, callDone func()) {

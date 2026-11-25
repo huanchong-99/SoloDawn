@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -41,22 +43,25 @@ func captureDiag(t *testing.T) *diagLines {
 		log.SetOutput(prevOut)
 		log.SetFlags(prevFlags)
 		if t.Failed() {
-			t.Logf("log: %q", d.lines)
+			t.Logf("log: %q", d.all())
 		}
 	})
 	return d
 }
 
-func (d *diagLines) count(match func(string) bool) int {
+func (d *diagLines) all() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	n := 0
-	for _, l := range d.lines {
-		if match(l) {
-			n++
-		}
-	}
-	return n
+	return slices.Clone(d.lines)
+}
+
+// with is the lines whose text begins with prefix.
+func (d *diagLines) with(prefix string) []string {
+	return slices.DeleteFunc(d.all(), func(l string) bool { return !strings.HasPrefix(l, prefix) })
+}
+
+func (d *diagLines) count(match func(string) bool) int {
+	return len(slices.DeleteFunc(d.all(), func(l string) bool { return !match(l) }))
 }
 
 func (d *diagLines) is(line string) func(string) bool {
@@ -67,15 +72,34 @@ func (d *diagLines) is(line string) func(string) bool {
 func (d *diagLines) once(t *testing.T, what string, match func(string) bool) {
 	t.Helper()
 	if n := d.count(match); n != 1 {
-		d.mu.Lock()
-		defer d.mu.Unlock()
-		t.Fatalf("%s: %d lines, want 1; log %q", what, n, d.lines)
+		t.Fatalf("%s: %d lines, want 1", what, n)
 	}
 }
 
 func (d *diagLines) lineOnce(t *testing.T, line string) {
 	t.Helper()
 	d.once(t, line, d.is(line))
+}
+
+// wait waits until the log holds line.
+func (d *diagLines) wait(t *testing.T, line string) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); d.count(d.is(line)) == 0; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out after 10s waiting for %q; saw %q", line, d.all())
+		}
+	}
+}
+
+// ran fails unless the log holds bg.start and bg.stop of the work n times
+// each, the start first.
+func (d *diagLines) ran(t *testing.T, n int, node, work string) {
+	t.Helper()
+	start, stop := "bg.start "+node+" name="+work, "bg.stop "+node+" name="+work
+	lines := d.all()
+	if i, j := slices.Index(lines, start), slices.Index(lines, stop); i < 0 || j < i || d.count(d.is(start)) != n || d.count(d.is(stop)) != n {
+		t.Fatalf("name=%s: %d starts (first %d) and %d stops (first %d), want %d", work, d.count(d.is(start)), i, d.count(d.is(stop)), j, n)
+	}
 }
 
 func TestDiagDeliveryLines(t *testing.T) {
@@ -85,6 +109,8 @@ func TestDiagDeliveryLines(t *testing.T) {
 	g := node + " g=" + testGroup1
 	r.seedGroupAndMembers()
 	r.waitUntil("home sync stopped", func() bool { return d.count(d.is("bg.stop "+node+" name=home_sync")) == 1 })
+	r.h.Push(r.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup2, Rows: []json.RawMessage{}})))
+	r.waitGroupLive(testGroup2)
 
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 7, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "hi"))
 	take7 := "inbox.take " + g + " ai=" + testAI1 + ` task="" took=7 left="" paused=false`
@@ -116,7 +142,6 @@ func TestDiagDeliveryLines(t *testing.T) {
 		"host.attach " + node + " " + home,
 		"sync.begin " + g + " " + home,
 		"sync.end " + g + " " + home + " seq=0 ok=true",
-		"bg.start " + node + " name=home_sync",
 		"inbox.recv " + g + " item=7 ai=" + testAI1 + " kind=mention seen=false",
 		take7,
 		"inbox.recv " + g + " item=8 ai=" + testAI1 + " kind=decided seen=false",
@@ -130,8 +155,33 @@ func TestDiagDeliveryLines(t *testing.T) {
 	} {
 		d.lineOnce(t, line)
 	}
-	if d.count(d.is("bg.start "+node+" name=deliver g="+testGroup1)) == 0 {
-		t.Fatal("no bg.start of a delivery")
+	d.ran(t, 1, node, "home_sync")
+	d.ran(t, 1, node, "home_watch")
+	d.ran(t, 1, node, "group_sync g="+testGroup2)
+	d.ran(t, 3, node, "group_state g="+testGroup1)
+	d.ran(t, 2, node, "deliver g="+testGroup1)
+}
+
+func TestDiagSettleWaitsForTheHomeWatch(t *testing.T) {
+	d := captureDiag(t)
+	r := newDeliverRig(t, false)
+	r.seedGroupAndMembers()
+	r.h.Settle()
+	d.ran(t, 1, "node="+r.hostKey.ID()[:8], "home_watch")
+}
+
+// The caller of bg may hold a mutex, so the work writes its own bg.start.
+func TestDiagWorkWritesItsStart(t *testing.T) {
+	d := captureDiag(t)
+	before := -1
+	r := newDeliverRig(t, false)
+	r.h.bg(func(f func()) {
+		before = len(d.with("bg."))
+		f()
+	}, "work", func() {})
+	d.ran(t, 1, "node="+r.hostKey.ID()[:8], "work")
+	if before != 0 {
+		t.Fatalf("%d lines before the work started", before)
 	}
 }
 
@@ -145,23 +195,39 @@ func TestDiagTurnLines(t *testing.T) {
 	diagTurn(r.h, key, Event{Kind: Used})
 	diagTurn(r.h, key, Event{Kind: TurnEnded, Status: "completed"})
 	want := []string{"turn.begin " + s, "turn.end " + s + " status=completed"}
-	if !slices.Equal(d.lines, want) || Listeners["diag"] == nil {
-		t.Fatalf("lines %q, want %q; listener %v", d.lines, want, Listeners["diag"] != nil)
+	if got := d.with("turn."); !slices.Equal(got, want) || Listeners["diag"] == nil {
+		t.Fatalf("lines %q, want %q; listener %v", got, want, Listeners["diag"] != nil)
 	}
 }
 
 func TestDiagExternalRunLines(t *testing.T) {
-	d := captureDiag(t)
-	r := newExternalRig(t, false)
-	r.pushExternalItem(proto.Item{Item: 5, Why: "mention", Msg: testMsg1})
-	got, ok, err := r.h.ExternalTake(testGroup1, testAI1)
-	if !ok || err != nil {
-		t.Fatalf("take = %v %v", ok, err)
-	}
-	r.h.ExternalDone(testGroup1, testAI1, got.Run, "")
-	run := fmt.Sprintf("node=%s g=%s ai=%s run=%d", r.hostKey.ID()[:8], testGroup1, testAI1, got.Run)
-	d.lineOnce(t, "run.open "+run)
-	d.lineOnce(t, "run.close "+run+" why=done")
+	synctest.Test(t, func(t *testing.T) {
+		d := captureDiag(t)
+		h := externalBubble(t)
+		node := "node=" + h.Key.ID()[:8]
+		h.ExternalPresent(testGroup1, testAI1)()
+		time.Sleep(externalPresence)
+		synctest.Wait()
+		d.ran(t, 1, node, "presence g="+testGroup1)
+
+		s, _ := h.Sessions.Get(SessionKey{Group: testGroup1, Member: testAI1})
+		for run, end := range map[int64]struct {
+			why string
+			do  func(run int64)
+		}{
+			3: {"timeout", func(int64) { time.Sleep(time.Minute) }},
+			4: {"crash", func(run int64) { h.ExternalDone(testGroup1, testAI1, run, "boom") }},
+			5: {"done", func(run int64) { h.ExternalDone(testGroup1, testAI1, run, "") }},
+		} {
+			extOpenRun(h, extOf(h), aiGroupKey{group: testGroup1, member: testAI1}, s, run)
+			end.do(run)
+			synctest.Wait()
+			line := fmt.Sprintf("%s g=%s ai=%s run=%d", node, testGroup1, testAI1, run)
+			d.lineOnce(t, "run.open "+line)
+			d.lineOnce(t, "run.close "+line+" why="+end.why)
+		}
+		d.ran(t, 1, node, "run_timeout g="+testGroup1)
+	})
 }
 
 func TestDiagToolLine(t *testing.T) {
@@ -184,23 +250,124 @@ func TestDiagToolLine(t *testing.T) {
 }
 
 func TestDiagProcessAndInterruptLines(t *testing.T) {
+	key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
+	for name, end := range map[string]struct {
+		resume   bool
+		why      string
+		delivers int
+		do       func(h *Host, p *limProc)
+	}{
+		"interrupt": {false, "stop", 1, func(h *Host, _ *limProc) {
+			interruptSessionTurn(h, key, "stop", "")
+			time.Sleep(stopSeconds * time.Second)
+		}},
+		"no session":    {true, "no_session", 0, func(_ *Host, p *limProc) { p.emit(Event{Kind: NoSession}) }},
+		"login invalid": {true, "login_invalid", 1, func(_ *Host, p *limProc) { p.emit(Event{Kind: LoginInvalid}) }},
+		"exit":          {false, `""`, 1, func(_ *Host, p *limProc) { p.finish() }},
+	} {
+		t.Run(name, func(t *testing.T) {
+			saveRuntimeGlobals(t)
+			base := t.TempDir()
+			synctest.Test(t, func(t *testing.T) {
+				d := captureDiag(t)
+				h, _, drv, shutdown := setupLimBubble(t, base)
+				defer shutdown()
+				drv.ignoreInterrupt = true
+				session := makeRunSession(key, TaskSession, "wt/1")
+				if end.resume {
+					session.CLISession = "old"
+				}
+				h.Sessions.Create(session)
+				mustLimTurn(t, h, key, Turn{Kind: ItemsTurn, Thread: runTask1})
+				synctest.Wait()
+				end.do(h, drv.proc(0))
+				synctest.Wait()
+				node := "node=" + h.Key.ID()[:8]
+				s := fmt.Sprintf("%s g=%s ai=%s task=%s", node, runGroup1, runAI1, runTask1)
+				d.lineOnce(t, fmt.Sprintf("proc.start %s agent=claude resume=%t", s, end.resume))
+				d.lineOnce(t, "proc.exit "+s+" agent=claude why="+end.why)
+				d.ran(t, 1, node, "home_flush")
+				if got := d.with("turn.interrupt"); name == "interrupt" != slices.Equal(got, []string{"turn.interrupt " + s + " why=stop"}) {
+					t.Fatalf("interrupts %q", got)
+				}
+				if end.delivers > 0 {
+					d.ran(t, end.delivers, node, "deliver g="+runGroup1)
+				}
+			})
+		})
+	}
+}
+
+func TestDiagLimitLines(t *testing.T) {
 	saveRuntimeGlobals(t)
 	base := t.TempDir()
 	synctest.Test(t, func(t *testing.T) {
 		d := captureDiag(t)
-		h, _, drv, shutdown := setupLimBubble(t, base)
+		h, _, _, shutdown := setupLimBubble(t, base)
 		defer shutdown()
-		drv.ignoreInterrupt = true
-		key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
-		h.Sessions.Create(makeRunSession(key, TaskSession, "wt/1"))
-		mustLimTurn(t, h, key, Turn{Kind: ItemsTurn, Thread: runTask1})
+		s := makeRunSession(SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}, TaskSession, "wt/1")
+		onRateLimited(h, limitsOf(h), s, time.Now().Add(time.Second).UnixMilli())
+		time.Sleep(time.Second)
 		synctest.Wait()
-		interruptSessionTurn(h, key, "stop", "")
-		time.Sleep(stopSeconds * time.Second)
-		synctest.Wait()
-		s := fmt.Sprintf("node=%s g=%s ai=%s task=%s", h.Key.ID()[:8], runGroup1, runAI1, runTask1)
-		d.lineOnce(t, "proc.start "+s+" agent=claude resume=false")
-		d.lineOnce(t, "turn.interrupt "+s+" why=stop")
-		d.lineOnce(t, "proc.exit "+s+" agent=claude why=stop")
+		node := "node=" + h.Key.ID()[:8]
+		d.ran(t, 1, node, "member_status g="+runGroup1+" task="+runTask1)
+		d.ran(t, 1, node, "deliver")
 	})
+}
+
+func TestDiagTakeoverLines(t *testing.T) {
+	d := captureDiag(t)
+	r := newTkRig(t)
+	r.putTask(tkTask, "active", runAI1, "", 1)
+	if err := r.start(runAI1, tkTask); err != nil {
+		t.Fatal(err)
+	}
+	r.end(runAI1)
+	r.waitReleased(runAI1)
+	saved := makeRunSession(SessionKey{Group: runGroup1, Member: tkSec, Task: runTask2}, TaskSession, "wt/2")
+	r.h.Sessions.Create(saved)
+	r.h.Sessions.Move(saved.SessionKey, Dormant, Takeover)
+	handBackSaved(r.h, runGroup1)
+	r.waitReleased(tkSec)
+	r.h.Settle()
+	node := "node=" + r.h.Key.ID()[:8]
+	d.ran(t, 1, node, "path_watch")
+	d.ran(t, 1, node, "hand_back g="+runGroup1+" task="+tkTask)
+	d.ran(t, 1, node, "hand_back g="+runGroup1+" task="+runTask2)
+}
+
+func TestDiagReleasedSlotDeliveryLines(t *testing.T) {
+	d := captureDiag(t)
+	r := newDeliverRig(t, false)
+	takeoverState(r.h).release(r.h, aiSlot{group: testGroup1, member: testAI1}, &takeover{})
+	r.h.Settle()
+	d.ran(t, 1, "node="+r.hostKey.ID()[:8], "deliver g="+testGroup1)
+}
+
+func TestDiagCloudPollLines(t *testing.T) {
+	d := captureDiag(t)
+	h, root := tskDiskHost(t)
+	grp := tskGroupFixture("custom")
+	grp.Templates = forgeTestTemplates()
+	tskPutRow(t, h, "group", tskTestGroupID, grp)
+	tskNoErr(t, os.MkdirAll(filepath.Join(root, "projects", tskTestGroupID, "repo"), 0700))
+	h.Attach("home-device", newTskScriptHome())
+	fakeForgeGH(t, forgeAnswer{})
+	startHostedCheck(h, "home-device", tskTestGroupID, HostedCheck{Task: testTask1, Branch: "task/1-poll", Commit: "head", PR: 7, Since: time.Now()})
+	node, work := "node="+h.Key.ID()[:8], "cloud_poll g="+tskTestGroupID+" task="+testTask1
+	d.wait(t, "bg.stop "+node+" name="+work)
+	d.ran(t, 1, node, work)
+}
+
+func TestDiagAskLines(t *testing.T) {
+	d := captureDiag(t)
+	fx := newApproveFixture(t)
+	posted := make(chan struct{}, 1)
+	fx.home.onPost = func(proto.Post[proto.ApprovalBody]) { posted <- struct{}{} }
+	fx.h.Report(fx.sessKey, Event{Kind: Asked, Ask: &Ask{ID: "c1", Tool: "commandExecution", Category: "command", Command: "make a"}})
+	recvApproveChan(t, posted, "the card")
+	fx.h.Report(fx.sessKey, Event{Kind: TurnEnded, Status: "interrupted"})
+	node, work := "node="+fx.hostKey.ID()[:8], "ask g="+fx.groupID+" task="+fx.taskID
+	d.wait(t, "bg.stop "+node+" name="+work)
+	d.ran(t, 1, node, work)
 }

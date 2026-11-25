@@ -17,13 +17,14 @@ func init() { Register(Listeners, "diag", diagTurn) }
 
 func diagDevice(id string) string { return id[:min(len(id), 8)] }
 
-// bg writes bg.start, starts f with start (a wait group's Go, or a go
-// statement) and writes bg.stop when f returns, before the wait group's Done,
-// so that Settle returns after it.
+// bg starts f with start (a wait group's Go, or a go statement). The
+// goroutine writes bg.start, because the caller may hold a mutex, and bg.stop
+// when f returns, before the wait group's Done, so that Settle returns after
+// it.
 func (h *Host) bg(start func(func()), name string, f func(), more ...any) {
 	attrs := append([]any{"name", name}, more...)
-	h.diag.Info("bg.start", attrs...)
 	start(func() {
+		h.diag.Info("bg.start", attrs...)
 		defer h.diag.Info("bg.stop", attrs...)
 		f()
 	})
