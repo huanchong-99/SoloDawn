@@ -28,8 +28,6 @@
   "member.join.submit": "添加",
   "member.join.title": "添加 AI 到本群",
   "member.join.unconfigured": "请先到「电脑和 AI」页为它选账号类型",
-  "member.offline": "离线",
-  "member.online": "在线",
   "member.owner": "群主",
   "member.path.direct": "直连",
   "member.path.local": "群的家",
@@ -56,5 +54,10 @@
   "member.terminal.offline": "电脑离线",
   "member.terminal.relay": "终端画面只走直连",
   "member.usage.resets": "{time} 重置",
-  "member.usage.window": "这一轮额度已用"
+  "member.usage.window": "这一轮额度已用",
+  "member.remove": "移除 AI",
+  "member.remove.busy": "{name} 手上还有 {tasks}，先改派或者取消再移除。",
+  "member.remove.confirm": "确认移除",
+  "member.remove.secretary": "移除以后这个群就没有秘书了，直到你另选一个。",
+  "member.usage.turns": "今天的轮数"
 }

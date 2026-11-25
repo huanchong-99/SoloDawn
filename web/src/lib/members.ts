@@ -6,7 +6,7 @@ import { cliName } from './onboard.svelte';
 import { t, type Key } from './prefs.svelte';
 import type { AIMemberRow, HostInfoPush, HostJoin, HumanMemberRow, MsgRow, TaskRow } from './proto';
 import { hostHomeOf } from './terminal.svelte';
-import { clock } from './when';
+import { clock, dayOf, now } from './when';
 
 /** The model, level and profile an AI member is added or edited with. */
 export type Draft = Pick<AIMemberRow, 'model' | 'effort' | 'tier' | 'skills'> &
@@ -177,21 +177,28 @@ export function pathLabel(ai: AIMemberRow): string {
   return ai.path;
 }
 
-/** Usage bar model for an AI member card: the rate-limit window the CLI reported. */
+/** Usage line of an AI member card, with a bar when the CLI reported a share of its limit. */
 export interface UsageMeter {
   label: string;
   value: string;
-  fill: number;
+  fill?: number;
   tone?: 'danger';
   note?: string;
 }
 
-/** Projects `ai.usage` into the card's `.meter` bar, or undefined when no window was reported. */
-export function usageMeter(usage: AIMemberRow['usage'], lang: string): UsageMeter | undefined {
-  const pct = usage.window_pct;
-  if (pct === undefined) return undefined;
+/** The turns of the day the AI's computer last reported in, while that day lasts. */
+function turnsToday({ usage, last_seen }: AIMemberRow): UsageMeter | undefined {
+  const turns = usage.turns_today;
+  if (turns === undefined || dayOf(last_seen) !== dayOf(now())) return undefined;
+  return { label: t('member.usage.turns'), value: String(turns) };
+}
+
+/** Projects the AI's usage into the card's `.meter`: the rate-limit window the CLI reported, or
+ *  the turns of today for a CLI that reports none; undefined when there is neither. */
+export function usageMeter(ai: AIMemberRow, lang: string): UsageMeter | undefined {
+  const { window_pct: pct, window_resets: resets } = ai.usage;
+  if (pct === undefined) return turnsToday(ai);
   const shown = Math.round(pct);
-  const resets = usage.window_resets;
   return {
     label: t('member.usage.window'),
     value: `${shown}%`,
@@ -210,6 +217,21 @@ export function terminalDisabledReason(net: Net, ai: AIMemberRow): string | unde
   if (!host?.ctl || ai.state === 'offline') return t('member.terminal.offline');
   return net.path(host)?.kind === 'direct' ? undefined : t('member.terminal.relay');
 }
+
+/** Reason why "Watch" is disabled: the path to the AI's computer is known and relayed. Before a
+ *  grant this browser may have none (contracts/step-2/watch-team.md section 1). */
+export function watchDisabledReason(net: Net, ai: AIMemberRow): string | undefined {
+  const host = hostHomeOf(net.homes, ai.host);
+  return host && net.path(host)?.kind === 'relay' ? t('watch.relay') : undefined;
+}
+
+/** The tasks that keep an AI in the group: those that are not final and have it as assignee or
+ *  reviewer (contracts/commands.md 1.2 `remove`), by number. No other row has either. */
+export const openTasks = (group: Group, ai: AIMemberRow): TaskRow[] =>
+  ([...group.rows.values()] as TaskRow[])
+    .filter((task) => [task.assignee, task.reviewer].includes(ai.id))
+    .filter((task) => !['merged', 'cancelled'].includes(task.state))
+    .sort((a, b) => a.num - b.num);
 
 /** Registered AIs on the owner's connected computers, marking those already in `group`. */
 export function candidatesOf(

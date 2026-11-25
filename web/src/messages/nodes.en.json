@@ -48,5 +48,8 @@
   "nodes.pair.expires": "Expires in {n} min ({time}) and works once.",
   "nodes.pair.expired": "This pairing link has expired.",
   "nodes.pair.cancel": "Cancel",
-  "nodes.pair.done": "Done"
+  "nodes.pair.done": "Done",
+  "nodes.account.change": "Account type",
+  "nodes.account.behind": "Not changed yet in {groups}.",
+  "nodes.account.again": "Try again"
 }
