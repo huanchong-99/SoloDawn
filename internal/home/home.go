@@ -222,6 +222,8 @@ type Result struct {
 	// once the result is committed, every connected peer is pushed its
 	// groups again (planning/contracts/datachannel.md section 3).
 	GroupsChanged bool
+
+	byPerson bool // of a person's command: the wake-up cap lets its items through
 }
 
 // Frame returns the answer to the request re that carried the command

@@ -132,14 +132,17 @@ Rules for every `post`:
 - A member named twice in `mentions` is `bad_request`, and a mentioned id
   that is no member of the group is `conflict`.
 - A post never queues an item for its own author.
+- The wake-up cap (R-60): if an AI has been sent `limits.wakes_per_hour`
+  items in the last hour, a new item for it is held until the hour allows
+  it. An item queued by a person's command, that is, a command of a device
+  that hosts no AI of the group, is neither held nor counted, and no more are
+  `reply`, `merge` and `watch` items. The count is kept in memory by the home
+  and starts again when the home restarts.
 
 Rules for every `post` by an AI:
 
 - A message in a thread that mentions an AI counts a round (task-machine
   rows 21 and 22).
-- If an AI has been sent `limits.wakes_per_hour` items in the last hour, a
-  new item for it is held until the hour allows it. The count is kept in
-  memory by the home and starts again when the home restarts.
 - The outbound secret check (R-137) runs on the AI's host before signing. A
   refused message never reaches the home (`contracts/local.md` section 8).
 
@@ -163,10 +166,9 @@ is empty it takes `text` and no `arg`. `revise` may have `text`. `confirm`,
 Acting on a card whose `state.status` is not `pending` returns `conflict`.
 A decided card keeps the signed `act` in `state.act`.
 
-`jump` (R-72), fields: `msg`. By the person who wrote message `msg`. The
-newest unacknowledged item that a message of that person in the same
-thread (or the main line, when `msg` has no thread) produced gets
-`jump: true` and is sent again; when there is none, `conflict`.
+`jump` (R-72), fields: `msg`. By the person who wrote message `msg`. Every
+unacknowledged `mention` item that `msg` produced gets `jump: true` and is
+sent again; when there is none, `conflict`.
 The host does the rest (`flows/agent-turn.md` C).
 
 ### 1.5 `task`
@@ -235,8 +237,8 @@ Its content is a short summary:
 | Field | Content |
 | --- | --- |
 | `kind` | `approval`, `decision`, `brief`, `mention`, `done` |
-| `who` | display name of the member it is about: the AI asking, the secretary, the author of the mention |
-| `title` | one line, at most 80 characters. `approval`: the first line of the justification the CLI attached (`body.why`), absent if there is none. `decision`: the question. `brief`, `done`: the brief or task title. `mention`: absent |
+| `who` | display name of the member it is about: the AI asking, the secretary, the author of the mention; for a `system` row that mentions people, the AI its body names, or the assignee of the task its body names |
+| `title` | one line, at most 80 characters. `approval`: the first line of the justification the CLI attached (`body.why`), absent if there is none. `decision`: the question. `brief`, `done`: the brief or task title. `mention`: the task title for a `system` row about a task, else absent |
 
 `title` is optional; every other field is always present.
 
@@ -267,8 +269,9 @@ fields of each). The home adds `ai`, the `id` of that `member status`, and
 writes the row in the thread of the event's `task` when it has one, else in
 the main line.
 
-For `login_invalid`, `cap_reached` and `rate_limited` the home also gives
-the secretary a `notice`. `cap_reached` is postponed after 1.0 with
+The row of `login_invalid` mentions the AI's owner (R-56). For
+`login_invalid`, `cap_reached` and `rate_limited` the home also gives the
+secretary a `notice`. `cap_reached` is postponed after 1.0 with
 `settings.set`, which alone sets caps: a 1.0 host never sends it, and a 1.0
 home refuses it as an unknown code. A closed host connection sets `state = offline`
 for its AIs. Nothing else is derived from a status.

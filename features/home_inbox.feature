@@ -1,7 +1,8 @@
 Feature: Inbox wire delivery and wake-up cap in the home
   The home sends queued items to each AI's host in wire inbox frames with copies
   of the rows they name, sends unacknowledged items again on hello until their
-  host acknowledges them, and holds excess wakes under the group's hourly cap.
+  host acknowledges them, and holds excess wakes between AIs under the group's
+  hourly cap.
 
   Scenario: An unacknowledged inbox item is sent again on reconnect, and not after ack
     Given a group home with a secretary and a working AI on the owner's laptop
@@ -16,13 +17,15 @@ Feature: Inbox wire delivery and wake-up cap in the home
     And the laptop reconnects and says hello
     Then the laptop receives no inbox frame
 
-  Scenario: Excess wakes for an AI wait for the hour, while resends count once
+  Scenario: Excess wakes by AIs wait for the hour, while a person's message goes at once and resends count once
     Given a group home with a wake-up cap of 2 per hour and a working AI on the owner's laptop
-    When 2 mentions are queued for the working AI
+    When another AI mentions the working AI 2 times
     Then the laptop receives 2 "mention" items
     When the laptop reconnects and says hello before acknowledging the items
     Then the laptop receives 2 "mention" items in 1 inbox frame
-    When another mention is queued for the working AI 10 seconds later
-    Then the laptop receives no inbox frame before 1 hour has passed since the 1st mention
+    When the other AI mentions the working AI again 10 seconds later
+    And the owner mentions the working AI
+    Then the laptop receives item 4
+    And the laptop receives no inbox frame before 1 hour has passed since the 1st mention
     When 1 hour has passed since the 1st mention
     Then the laptop receives item 3

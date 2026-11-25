@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"time"
 
@@ -128,6 +129,7 @@ func homeHostEvSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^task 1 has (\d+) thread message, a "system" message "([^"]*)" for "codex"$`, w.checkThreadEvent)
 	sc.Step(`^no inbox item was queued by the status$`, func() error { return w.checkNotice("none") })
 	sc.Step(`^the "([^"]*)" system message for "codex" is in "(task 1|main)"$`, w.checkEventPlacement)
+	sc.Step(`^that system message mentions "(none|owner)"$`, w.checkMentions)
 	sc.Step(`^the status queued "([^"]*)"$`, w.checkNotice)
 	sc.Step(`^the laptop has (\d+) open connections to the home$`, func(n int) error { return w.openLaptopConns(cleanup, n) })
 	sc.Step(`^(?:one|the last) laptop connection closes$`, w.closeLaptopConn)
@@ -310,6 +312,14 @@ func (w *homeHostEvWorld) checkMsgWhere(thread *string, where string) error {
 		return fmt.Errorf("expected thread %q, got %q", want, got)
 	}
 	return nil
+}
+
+func (w *homeHostEvWorld) checkMentions(want string) error {
+	got := w.disk[w.lastMsgID].Mentions
+	if want == "owner" && slices.Equal(got, []string{w.members["owner"]}) || want == "none" && len(got) == 0 {
+		return nil
+	}
+	return fmt.Errorf("the message mentions %v; want %s", got, want)
 }
 
 func (w *homeHostEvWorld) checkNotice(want string) error {

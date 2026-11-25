@@ -93,6 +93,17 @@ func inboxFrames(group string, entries []proto.InboxItem, raws []json.RawMessage
 	return frames
 }
 
+// inboxByPerson reports whether a person signed a command: its device hosts no
+// AI of the group, so neither an AI nor a host speaks through it.
+func inboxByPerson(s *State, device string) bool {
+	for _, ai := range s.AIs {
+		if ai.Host == device {
+			return false
+		}
+	}
+	return true
+}
+
 // inboxPace applies the group's hourly wake-up cap to items without mutating s
 // (planning/contracts/commands.md sections 1.3 and 3).
 func inboxPace(s *State, items []Item, now int64) []Item {
@@ -106,9 +117,10 @@ func inboxPace(s *State, items []Item, now int64) []Item {
 
 // inboxWake records one item in wakes and, when limit > 0, holds it once the AI
 // has limit due times in the last hour. Merge and watch items are for the AI's
-// host rather than a session, so they neither wait on nor count toward the cap.
+// host rather than a session, and a reply answers a call that may be waiting, so
+// they neither wait on nor count toward the cap.
 func inboxWake(wakes map[string][]int64, it Item, limit int, now int64) Item {
-	if it.Why == itemMerge || it.Why == cfmWhatWatch {
+	if it.Why == itemMerge || it.Why == cfmWhatWatch || it.Why == calWhyReply {
 		return it
 	}
 	recent := runRecent(wakes[it.AI], now)

@@ -345,12 +345,15 @@ with `runBatches` within the 61,440-byte `ctl` limit
 queues the `fetched` or error answer on `conn`.
 
 **The wake-up cap.** `inboxPace` enforces `limits.wakes_per_hour` before items are written, and
-`State.Wakes[ai]` holds one time for each non-`merge` item queued for that AI: when the item is
+`State.Wakes[ai]` holds one time for each item under the cap queued for that AI: when the item is
 due, which is the home's time when its result was committed, or its `NotBefore` when that is
 later. Once an AI has `limits.wakes_per_hour` due times after `now - 3600000`, each further item
-gets `NotBefore` at least one hour after the oldest of the last `wakes_per_hour` times. A `merge`
-item is for the assignee's host rather than an AI session, so it neither waits on nor counts
-toward `wakes_per_hour`. Sending an item again, on a hello after a reconnect or to a second
+gets `NotBefore` at least one hour after the oldest of the last `wakes_per_hour` times. A
+`merge` or `watch` item is for the AI's host rather than a session, and a `reply` answers a call
+that may be waiting, so they neither wait on nor count toward `wakes_per_hour`. Neither do the
+items of a person's command: `seamCommand` sets `Result.byPerson` when the signing device hosts no
+AI of the group (`inboxByPerson`), so a message, a decided card, a confirmed brief, a resume or a
+`jump` goes at once. Sending an item again, on a hello after a reconnect or to a second
 connection of its host, counts nothing, and so does a host that was not connected when the item
 became due. Retiring or acknowledging an item does not take its time back. The count is in memory
 and starts again with the loop, as the contract says; items sent again after a restart count
@@ -734,7 +737,7 @@ and `Events` key `HostOfflineEvent`. Where the contracts are silent, it does thi
 - **Rows and notices.** The AI's `AIMemberRow` gets `State`, `Task`, `Path`, `Usage` and
   `LastSeen = c.Now`; `Since` becomes `c.Now` when `State` changes and stays as it was when `State`
   is unchanged. When `event` is present, the home writes a `system` `MsgRow` (`id` `n`, `by`
-  `"system"`, `ts` `c.Now`, `mentions` `[]`, and `ai` set to `id`) in the thread of `event.task`
+  `"system"`, `ts` `c.Now`, `mentions` `[]`, or the AI's owner for `login_invalid`, and `ai` set to `id`) in the thread of `event.task`
   when set, advancing `task.Thread.Count` and `task.Thread.Last` (`text` `""`, `ts` `c.Now`) on the
   task row, or in the main line otherwise. For `login_invalid` and `rate_limited`, when `State.Group.Secretary` is not
   empty, it queues `Item{AI: s.Group.Secretary, Why: "notice", Msg: n, Code: code}`.
@@ -803,10 +806,8 @@ row 23), and the thread round transitions (rows 21 and 22, and section 4 "Held b
 - **`jump`.** Registered under `jump`. Refuses an AI signer (a non-empty `c.Who.AI`) with
   `forbidden`, a missing `msg` with `not_found`, and any `msg` whose `by` differs from `c.Who.Human`
   with `forbidden`.
-  Scans `c.Disk.Queued()` from newest to oldest for an unacknowledged `mention` item whose message
-  was written by `c.Who.Human` in the same thread (or in the main line when `msg` has no thread),
-  retires that item and queues its replacement with `Jump: true` and `NotBefore: 0`, or answers
-  `conflict` when none exists.
+  Retires every unacknowledged `mention` item of `c.Disk.Queued()` whose `msg` is that message and
+  queues its replacement with `Jump: true`, or answers `conflict` when none exists.
 - **`quiet` timer.** Registered under `Timers["quiet"]` and `After["quiet"]`. When the group has a
   secretary, is not paused and has `limits.idle_notice_minutes > 0`, checks each task in sorted id
   order: if the task has had no thread message for at least `limits.idle_notice_minutes`
@@ -882,7 +883,9 @@ shutdown hooks ([commands](../../planning/contracts/commands.md) 1.7;
   from any other message kind), filters for offline subscribed devices of concerned group members
   that remain valid in `State.Logs`, encrypts `proto.Reminder` JSON (without HTML escaping) via
   RFC 8291 (`webpush-go`), and sends each request in its own goroutine with a 5 s context timeout.
-  Confirmation reminders go to `body.to`, name the AI in `who`, and omit `title`.
+  Confirmation reminders go to `body.to`, name the AI in `who`, and omit `title`. A `system` row that
+  mentions people (`task_failed`, `login_invalid`) names the AI of its body, or the assignee of the
+  task of its body with that task's title.
   A `404` or `410` response drops that subscription in memory and from `push_sub` if not replaced
   since.
 
@@ -923,7 +926,7 @@ a restart, with commands of its own. The choices behind the loop are in
 
 `inbox_test.go` pins every frozen `item-*.json` wire shape, `msg` and `task` row copies, multi-item
 `inbox` frame batching to the `ctl` byte limit, `Loop.Ack`, and the `wakes_per_hour` hold and
-release. `features/home_inbox.feature` holds the home half of A3.10 and the hourly wake-up cap.
+release, with what it does not hold. `features/home_inbox.feature` holds the home half of A3.10 and the hourly wake-up cap.
 
 `machine_test.go` has a case for every row of the task machine, for every rule of its section 2
 and for the refusals, and covers every statement of `machine.go`. `features/home_machine.feature`
@@ -974,7 +977,7 @@ card-wait recomputation, veto and row-14 stop, and checking `proto.UnexpectedNul
 written. `features/home_review.feature` holds the home half of acceptance tests A5.3 and A5.4.
 
 `cmd_hostev_test.go` checks `member/status` against the wire golden files, state and `since`
-transitions, the four host event codes, `login_invalid` and `rate_limited` secretary notices, refusals, and
+transitions, the four host event codes, the owner's mention of `login_invalid`, `login_invalid` and `rate_limited` secretary notices, refusals, and
 `HostOfflineEvent` both directly and when taker connections end on `StartLoop`.
 `features/home_hostev.feature` holds the home half of acceptance test A3.6 together with the four
 host event codes, secretary notices and host disconnection.

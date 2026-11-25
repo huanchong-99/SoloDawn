@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
-	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
 // Rounds in task threads, queue jumps and the quiet-task timer
@@ -36,9 +35,8 @@ func rndWrap(key string, f Func) Func {
 }
 
 // rndJump implements the jump command (commands.md 1.4, R-72): by the person
-// who wrote msg, it retires the newest unacknowledged mention item produced by
-// a message of that person in the same thread (or main line) and queues its
-// replacement with Jump set.
+// who wrote msg, it retires every unacknowledged mention item that msg
+// produced and queues its replacement with Jump set.
 func rndJump(_ *State, c Command) (Result, *Refusal) {
 	if c.Who.AI != "" {
 		return Result{}, &Refusal{"forbidden", "only a person jumps the queue"}
@@ -54,27 +52,21 @@ func rndJump(_ *State, c Command) (Result, *Refusal) {
 	if target.By != c.Who.Human {
 		return Result{}, &Refusal{"forbidden", "only the author of the message jumps the queue"}
 	}
-	return rndRequeueJump(c.Disk, c.Who.Human, target.Thread)
+	return rndRequeueJump(c.Disk, target.ID)
 }
 
-func rndRequeueJump(d Disk, author string, thread *string) (Result, *Refusal) {
-	queued := d.Queued()
-	for i := len(queued) - 1; i >= 0; i-- {
-		q := queued[i]
-		if rndJumpMatch(d, q, author, thread) {
-			it := Item{AI: q.AI, Why: postMentionWhy, Task: postTaskID(q.Task), Msg: *q.Msg, Jump: true}
-			return Result{Items: []Item{it}, Retire: []int64{q.ID}}, nil
+func rndRequeueJump(d Disk, msg string) (Result, *Refusal) {
+	var res Result
+	for _, q := range d.Queued() {
+		if q.Why == postMentionWhy && postTaskID(q.Msg) == msg {
+			res.Items = append(res.Items, Item{AI: q.AI, Why: postMentionWhy, Task: postTaskID(q.Task), Msg: msg, Jump: true})
+			res.Retire = append(res.Retire, q.ID)
 		}
 	}
-	return Result{}, &Refusal{"conflict", "no unacknowledged item from that person in that thread is queued"}
-}
-
-func rndJumpMatch(d Disk, q store.Item, author string, thread *string) bool {
-	if q.Why != postMentionWhy || q.Msg == nil {
-		return false
+	if res.Items == nil {
+		return Result{}, &Refusal{"conflict", "no unacknowledged item of that message is queued"}
 	}
-	msg, _ := d.Msg(*q.Msg)
-	return msg.By == author && postTaskID(msg.Thread) == postTaskID(thread)
+	return res, nil
 }
 
 // rndQuiet is the quiet-task timer (task-machine.md row 23): while the group is

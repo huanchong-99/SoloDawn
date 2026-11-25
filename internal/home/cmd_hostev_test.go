@@ -211,6 +211,8 @@ type hevEventCase struct {
 	wantThread string
 	wantBody   any
 	wantNotice *home.Item
+
+	wantMention []string
 }
 
 func hevCheckEventRows(t *testing.T, s *home.State, tc hevEventCase, res home.Result) proto.MsgRow {
@@ -224,7 +226,7 @@ func hevCheckEventRows(t *testing.T, s *home.State, tc hevEventCase, res home.Re
 	wantMsg := proto.MsgRow{
 		RowHeader: proto.RowHeader{Type: "msg", ID: id(10), Seq: 12}, Pos: 12,
 		Group: groupID, Thread: thread, By: "system", Kind: "system",
-		Timestamp: clock, Mentions: []string{}, Body: briefRaw(t, tc.wantBody),
+		Timestamp: clock, Mentions: append([]string{}, tc.wantMention...), Body: briefRaw(t, tc.wantBody),
 	}
 	if tc.wantThread == "" {
 		equal(t, briefRows(res), []any{wantAI, wantMsg})
@@ -274,7 +276,8 @@ func TestHostEvEventsAndNotices(t *testing.T) {
 			wantBody: proto.LoginInvalidBody{
 				SystemCode: proto.SystemCode{Code: "login_invalid"}, AI: hevWorker, Detail: hevStr("Token expired."),
 			},
-			wantNotice: &home.Item{AI: aiID, Why: "notice", Msg: id(10), Code: "login_invalid"},
+			wantNotice:  &home.Item{AI: aiID, Why: "notice", Msg: id(10), Code: "login_invalid"},
+			wantMention: []string{ownerID},
 		},
 		{
 			name:      "login_invalid without detail",
@@ -282,7 +285,8 @@ func TestHostEvEventsAndNotices(t *testing.T) {
 			wantBody: proto.LoginInvalidBody{
 				SystemCode: proto.SystemCode{Code: "login_invalid"}, AI: hevWorker,
 			},
-			wantNotice: &home.Item{AI: aiID, Why: "notice", Msg: id(10), Code: "login_invalid"},
+			wantNotice:  &home.Item{AI: aiID, Why: "notice", Msg: id(10), Code: "login_invalid"},
+			wantMention: []string{ownerID},
 		},
 		{
 			name:       "session_replaced in thread",
