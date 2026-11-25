@@ -695,7 +695,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/groups/`      | the group list, the cards that wait, the create-group dialog                      |
 | `src/components/chat/`        | the chat of a group: main line, message, composer                                 |
 | `src/components/task/`        | `TaskCard.svelte`, mounted for kind `task`, with its menu and actions             |
-| `src/components/thread/`      | a task's thread and its composer, scored review block, checks and system notices                   |
+| `src/components/thread/`      | a task's thread and its composer, scored review block, checks and system notices  |
 | `src/components/call/`        | `CallBlock.svelte`, mounted for kind `call` in threads and the main line          |
 | `src/components/confirm/`     | `ConfirmCard.svelte`, mounted for kind `confirm`                                  |
 | `src/components/allow/`       | `AllowEditor.svelte`, lists and editor for each AI in the member panel            |
