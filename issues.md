@@ -35,6 +35,26 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: with 146 items held, `inbox.take` took items 352 to 369 and left 224 to 351, which went to a later turn. [agent-turn](planning/flows/agent-turn.md) B.6 gives a session all its held items, in order.
 - Cause: `isItemHeld` (`internal/host/deliver.go:909`) reads whether the AI is working anew for each item of the queue that `selectEligibleBatch` walks (`internal/host/deliver.go:879`). Items read before the turn ends stay held, and those after it are taken. FLAKY-27 fixed the same race for the group pause.
 - Status: open, found 2026-11-26 in the node log of `web/e2e/m2.spec.ts`.
+### 2026-11-26 · bug · A member's node can follow a moved group more than 5 seconds after the import
+
+- Symptom: A9.27 asks that Q1 follows P2 within 5 seconds of the import. Q1 took 11.6 seconds with the import right after the export; with minutes between them it can take up to 70 seconds. Once connected, everything else of A9.27 holds.
+- Cause: Q1 gets `moved` when P1 announces its groups (`internal/host/home_moved.go:14`) and offers to P2 at once. P2 does not know Q1 before the import and drops the offer (`identity.OpenSignal` in `open`, `internal/peer/signal.go:104-110`, returns `unknown_device`, `internal/identity/envelope.go:59`; discarded in `internal/peer/path.go:227`), so Q1 waits 10 seconds for an answer (`internal/peer/unanswered.go:5-13`, `flows/connect.md` step 15) and then backs off 1, 2, 4 … 60 seconds. Nothing wakes it: a node dials a home with no presence channel (`internal/node/node.go:461`), and the import changes no presence, since P2 is online all the time. `export.md` section 3 step 4 ("clients retry as for any home that is down") and the 5 seconds of A9.27 do not agree. A browser follows by the same rules.
+- Status: open, needs a decision: reword A9.27 to the retry of `flows/connect.md` step 15, or give the import a way to wake the clients. The scenario "A member's node follows a moved group within 5 seconds (A9.27)" stays `@pending`; "Move a group to another node of its owner (A9.27)" runs with the 5 seconds on the two browser peers, and asserts that Q1 follows without them.
+
+### 2026-11-26 · limitation · On a Mac with the Application Firewall, a UDP write can block every connection on one local address
+
+- Symptom: on the development Mac, some runs of A9.2 (five or six WebRTC connections between in-process peers each) failed with `timed out … waiting for ctl … saw 1: connection ended before it was ready`. Two causes were found; they are different failures:
+  1. A write that blocks (the goroutine dump below): one connection exchanged offer, answer and candidates, then stayed silent until the other side reported ICE `failed` after 30 seconds. The dump covers the failures of this kind only, 4 of about 120 runs before the fix of cause 2.
+  2. The fixture sent every ICE candidate to a joining browser twice (see the entry "The A9.2 fixture sent each signalling frame twice" below): the signalling pacer of `internal/peer/path.go` waited for a turn (A9.2 opens one owner and three joining connections within 1.5 seconds, just over 90 frames in 11 seconds), so the answer came too late and the offer was retired at 10 seconds. No blocked write is in that dump.
+- Cause of 1: the goroutine dump shows the agent's task loop inside a UDP write that waits for the socket to become writable (`candidatepair.go:131` → `udp_mux.go:337` of pion ice v4.4.8, the binding response of a host candidate to a `127.0.0.1` address). pion writes on that loop with no deadline, and Go holds the socket's write lock while the write waits (`internal/poll/fd_unix.go`), so every answered connection on that local address is mute, not one agent. The write blocks on this machine only, as far as known; the Application Firewall, which holds packets of unsigned binaries (2026-11-22 below), is the likely reason and was not proved (a two-socket program of 80,000 writes did not block).
+- Bounded in the product: nothing closes the stuck side by itself, but the peer's next offer does (`internal/peer/signal.go:185`, `old.Close()`), and pion then aborts the write after a 5 second grace (`udp_mux.go` `scheduleWriteAbort`/`checkWriteAborts`, through `Agent.Close`). `signal.go:185` runs under `p.mu`, so the node's signalling pauses for up to about 5 seconds in that case; no other peer code waits for the agent loop under the lock (`AddRemoteCandidate` runs in its own goroutine). No product change is needed.
+- Status: open, accepted for the local machine: CI decides. In the product the attempt is retired and offered again (`flows/connect.md` step 15).
+
+### 2026-11-26 · bug · The A9.2 fixture sent each signalling frame twice
+
+- Symptom: A9.2 waited for a signalling turn in 2 of 2 runs (8.9 s) and failed on this Mac in some runs (cause 2 of the entry above).
+- Cause: `peerNode.routesFor` in `features/helpers_test.go` added the node's rendezvous path and then every route of `Pairer.Routes`, which holds the same path, so each frame to a joining browser went twice over one WebSocket. The product skips such a route (`internal/node/node.go` `routesFor`, #373).
+- Status: resolved on `s2/lift-people`: the fixture skips a route whose ID is already there. A9.2 then passed 21 of 22 runs under `-race -tags acceptance`; the one failure is cause 1 (its goroutine dump holds the blocked `WriteToInet4` under `sendBindingSuccess`).
 
 ### 2026-11-25 · limitation · A paired node's rendezvous addresses cannot be changed
 
@@ -148,7 +168,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: A9.12 and five A9.42 cases (failing review, decision by P, decision by Q, secretary confirmation without Q on the allow list, and secretary confirmation with Q on it) each failed under `-race` in `Given the confirmation cast with Q`. The reply was `bad_request: the home has no such command`; decoding that refusal as a successful command reply reported `proto: a field that is always present is missing`.
 - Cause: the cast sends `invite` before it can admit Q (`features/s2_confirm_test.go:119`), and the home had no registered handler for it (`internal/home/check.go:109`).
-- Status: pending retest. A10.17 now exercises invitation and join; the label assertions were not rerun here.
+- Status: pending retest. #382 registered `invite`, and the cast admits Q with `JoinGroup` (`features/s2_cast_test.go`); the label assertions were not rerun here.
 
 ### 2026-11-22 · limitation · The A9.44 quiet-task fixture does not reach the timer
 
@@ -184,7 +204,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: A9.27 and A9.28 exercise browser peers at the protocol boundary, not the browser's own follow logic or the owner-only commands in group info. A9.28 takes successive copies without waiting for an OS timer at one-minute intervals.
 - Cause: `features/s2_export.feature:12,19,24` use the I2-0 Go cast and two invocations of the copy command. The product does not schedule copies (`planning/contracts/step-2/export.md:60-62`).
-- Status: open for the OS timer. The owner-only commands in the group info are covered by `web/e2e/s2.spec.ts` (A9.27), the browser's following by `features/web_move.feature` and `web/src/lib/{groups,net}.test.ts`.
+- Status: open for the OS timer. Both scenarios run since 2026-11-26 and pass at the protocol boundary: Q's peer asks P1, gets `moved` and dials P2 itself. The owner-only commands in the group info are covered by `web/e2e/s2.spec.ts` (A9.27), the browser's following by `features/web_move.feature` and `web/src/lib/{groups,net}.test.ts`.
+
+### 2026-11-26 · bug · The web client does not follow a moved group and does not replace the old home on a rejoin
+
+- Symptom: against A9.27, a browser whose group left the list is not sent to the new home; against A9.28, a rejoin of the group on another home does not replace the old home.
+- Cause: after the export P1 pushes `groups` without the group, `Home.#list` (`web/src/lib/groups.svelte.ts:391`) drops it and nothing asks P1 again, so `moved` (`web/src/lib/groups.svelte.ts:357`) is never seen. The rejoin gap was not traced.
+- Status: fixed by [#403](https://github.com/huanchong-99/SoloDawn/pull/403) (merged), both gaps; see "An idle browser lost a moved group, and an open tab stayed on a lost home".
 
 ### 2026-11-22 · limitation · Task participation history is inferred from current fields
 
@@ -1134,7 +1160,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: a current node does not admit a browser through an invitation; it knows only protocol version 1.
 - Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts`. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a. U2-1 supplies the join page and member controls.
-- Status: partly resolved. T2-1a (#309), T2-1b (#304) and W2-1 (#307) are merged, but they never registered a home handler for `invite` (`internal/home/cmd_people.go` registered only `join`; found 2026-11-25), so no group could admit a second person. #382 added the handler. Two fixture faults remain in the people scenarios (A9.2, A9.4 to A9.6 and the setups that join an AI): `features/helpers_test.go:600` starts the in-process home without `LoopConfig.Invite`, so the link of A9.2 is empty, and `JoinAI` in `features/s2_cast_test.go:845` sends `host.join` without the `home.add` that the web client sends after joining (`web/src/lib/join.ts:86`), so the host answers `home_unreachable`.
+- Status: resolved. T2-1a (#309), T2-1b (#304) and W2-1 (#307) are merged, but they never registered a home handler for `invite` (`internal/home/cmd_people.go` registered only `join`; found 2026-11-25), so no group could admit a second person. #382 added the handler. The two fixture faults that then remained are fixed with A9.1 to A9.6, A9.27 and A9.28 enabled: `peerNode.initCore` in `features/helpers_test.go` started the in-process home without `LoopConfig.Invite`, so the link of A9.2 was empty; and a person who joined in the cast of `features/s2_cast_test.go` sent no `home.add`, as the web client does (`web/src/lib/join.ts:86`), so the host answered `host.join` with `home_unreachable` (now `JoinGroup`).
 
 ### 2026-11-22 · bug · Codex treated every failed thread resume as a lost session
 
