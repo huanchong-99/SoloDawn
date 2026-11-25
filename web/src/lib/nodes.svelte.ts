@@ -148,7 +148,7 @@ export class Nodes {
   }
 
   /** Takes every AI of the owned node `home` offline, or back online (R-64), then reads its
-   *  `host.info` again: the node pushes none. */
+   *  `host.info` again: the node pushes it only when the watchers change. */
   async setOffline(home: Home, offline: boolean): Promise<p.CmdResult | p.ErrorResponse> {
     const answer = await this.#command(home, home.device, `host.${offline ? 'offline' : 'online'}`);
     if (!answer.err) await this.#read(home, home.ctl!);

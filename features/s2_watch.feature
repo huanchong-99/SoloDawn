@@ -1,23 +1,22 @@
 Feature: Watch a takeover, post to a team group and use custom forges
 
-  @pending
   Scenario: Terminal watching needs the owner's consent and ends at hand-back (A9.20)
     Given Q-team is in a takeover on Q1
     When P asks to watch the takeover
-    Then Q sees a pending watch confirmation and P cannot start watching
+    Then Q sees a pending watch confirmation and Q1 takes no connection of P
     When Q confirms the watch request
-    Then P receives the owner's terminal bytes in order
+    Then Q1 takes P's connection and refuses a watch of Q-personal
+    And P receives the owner's terminal bytes in order
     And P's input and resize do not reach the terminal
     When Q hands back the takeover
-    Then P's watch channel closes within 2 seconds
+    Then P's watch channel closes within 2 seconds and Q1 ends P's connection
 
-  @pending
   Scenario: An open direct watch closes after the same connection selects TURN (A9.21)
     Given Q-team is in a takeover on Q1
     And Q has granted P access to watch
     And P opens a direct watch on Q1
-    When the same connection selects the cast TURN relay
-    Then the watch closes, the original ctl syncs and watch.start is refused with relay
+    When the direct path slows down and is cut, so the same connection selects the cast TURN relay
+    Then the watch closes and the original ctl answers, refusing watch.start with relay
 
   Scenario: A team group has no repository, tasks, briefs, or AI members (A9.22)
     Given P creates a team group on P2 without a repository
@@ -47,7 +46,7 @@ Feature: Watch a takeover, post to a team group and use custom forges
     When P confirms a brief with a title containing spaces, quotes and shell punctuation
     Then the forge receives the title as one argument and the tag as a literal without creating a marker
 
-  @pending @live
+  @live
   Scenario: Tasks run from brief to merge on a real non-GitHub forge (A9.26)
     Given a signed-in non-GitHub forge and its scratch repository
     When the owner posts a feature request in the main line and the secretary proposes a two-task brief

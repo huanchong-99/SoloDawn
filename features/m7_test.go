@@ -56,6 +56,14 @@ type m7NetControl struct {
 	turnAddr  string
 	cut       atomic.Bool
 	relayOnly atomic.Bool
+	delayNs   atomic.Int64
+}
+
+func (c *m7NetControl) delayFor(addr net.Addr) time.Duration {
+	if addr.String() == c.turnAddr {
+		return 0
+	}
+	return time.Duration(c.delayNs.Load())
 }
 
 func (c *m7NetControl) drops(addr net.Addr) bool {
@@ -75,6 +83,11 @@ type m7UDPConn struct {
 
 func (u *m7UDPConn) WriteTo(p []byte, addr net.Addr) (int, error) {
 	if u.ctrl.drops(addr) {
+		return len(p), nil
+	}
+	if d := u.ctrl.delayFor(addr); d > 0 {
+		cp := bytes.Clone(p)
+		time.AfterFunc(d, func() { _, _ = u.UDPConn.WriteTo(cp, addr) })
 		return len(p), nil
 	}
 	return u.UDPConn.WriteTo(p, addr)

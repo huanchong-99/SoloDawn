@@ -183,10 +183,11 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   `solodawn group import` of that file on `P2`. The rows on `P2` equal those
   `P1` held; the next task gets the next number; an item that was
   unacknowledged on `P1` is delivered once, by `P2`. `P1` answers the group's
-  requests with `moved` naming `P2`, and both browsers and `Q1` follow within
-  5 seconds of the import, without a reload. Importing the file on `Q1` fails,
-  and so does exporting the group on a node that is not its home. In the
-  browser: the group info shows the two commands to P only.
+  requests with `moved` naming `P2`, and both browsers and `Q1` follow by
+  their normal retry (`contracts/step-2/export.md` section 3, step 4;
+  `flows/connect.md` step 15), without a reload. Importing the file on `Q1`
+  fails, and so does exporting the group on a node that is not its home. In
+  the browser: the group info shows the two commands to P only.
 - **A9.28** A copy of the group is exported from `P1` every minute, then the
   data directory of `P1` is deleted. P imports the last copy on `P2`: `P2` is
   the home with the rows of that copy and none written later. P sends an
