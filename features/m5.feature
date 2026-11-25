@@ -76,6 +76,7 @@ Feature: Tasks from brief to merge
     Given an active brief task on forge "none" assigned to "Claude" and reviewed by "Codex"
     When "Claude" is running its task turn and the owner jumps the queue on a message in the task thread
     Then the running turn is interrupted and the jumped message goes first in the next turn of the same session
+    And the session continues by itself with one turn of its own, before the message that waited
     And the task was never paused, and nothing is reported as a failure
 
   Scenario: Repeated act confirm and repeated task fail with the same nonce apply once (A5.15)

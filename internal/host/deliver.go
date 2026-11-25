@@ -68,15 +68,14 @@ type routedTarget struct {
 	kind Kind
 }
 
-// A preemption is a turn that a queue jump for another session interrupted
-// (flows/agent-turn.md C). It is kept in memory only: after a restart the
-// home's row 13 resumes the task (contracts/task-machine.md section 4).
+// A preemption is a turn that a queue jump interrupted (flows/agent-turn.md
+// C). It is kept in memory only; a task that the home still shows as
+// pre-empted is found again by its row (adoptPreempted).
 type preemption struct {
 	session SessionKey // the interrupted session, owed a turn of its own
 	msg     proto.ID   // the message whose jump interrupted it
 	ended   bool       // its turn ended interrupted; set by listenJump under delivery.mu
-	told    bool       // the jump turn was about to start: task preempted is reported or not needed
-	paused  bool       // the home accepted task preempted: task resume is owed
+	told    bool       // task preempted is sent, or not to be sent
 }
 
 // delivery holds per-host sync cursors, held queues, open pre-emptions and active merges via Part[delivery](h).
@@ -86,7 +85,7 @@ type delivery struct {
 	wg            sync.WaitGroup
 	groups        map[string]*groupSync
 	held          map[aiGroupKey][]verifiedItem
-	pre           map[aiGroupKey]*preemption
+	pre           map[aiGroupKey][]*preemption // the interrupted turns of an AI, the latest last
 	merges        map[string][]verifiedItem
 	merging       map[string]bool
 	busy, recheck map[aiGroupKey]bool
@@ -99,7 +98,7 @@ func deliv(h *Host) *delivery {
 	if d.groups == nil {
 		d.groups, d.held, d.merges = map[string]*groupSync{}, map[aiGroupKey][]verifiedItem{}, map[string][]verifiedItem{}
 		d.merging, d.cancels = map[string]bool{}, map[string]*homeSync{}
-		d.busy, d.recheck, d.pre = map[aiGroupKey]bool{}, map[aiGroupKey]bool{}, map[aiGroupKey]*preemption{}
+		d.busy, d.recheck, d.pre = map[aiGroupKey]bool{}, map[aiGroupKey]bool{}, map[aiGroupKey][]*preemption{}
 	}
 	d.mu.Unlock()
 	return d
@@ -404,6 +403,11 @@ func afterGroupState(h *Host, d *delivery, group string) {
 	resumeGroupHostedChecks(h, d, group)
 	for _, key := range d.heldKeys() {
 		deliverPair(h, d, key)
+	}
+	for _, s := range h.Sessions.All() {
+		if s.Group == group && taskPreempted(h, s) {
+			deliverPair(h, d, aiGroupKey{group: group, member: s.Member})
+		}
 	}
 }
 
@@ -835,42 +839,50 @@ func stepAI(h *Host, d *delivery, key aiGroupKey) bool {
 
 // stepSessions gives the AI its next turn. While it runs one, only a jump
 // item does anything: it interrupts that turn and stays held until the turn
-// has ended (flows/agent-turn.md C).
+// has ended (flows/agent-turn.md C). The holds are read after a report that
+// waited for the home.
 func stepSessions(h *Host, d *delivery, key aiGroupKey, ai aiInfo) bool {
 	if s, busy := findSessionInState(memberSessions(h, key.group, key.member), Working); busy {
 		jumpRunningTurn(h, d, key, ai, s.SessionKey)
 		return false
 	}
 	d.dropUninterrupted(key)
+	adoptPreempted(h, d, key)
+	reportPreempted(h, d, key, ai)
 	target, batch, ok := takeEligibleBatch(h, d, key, ai)
 	if !ok {
 		return continueInterrupted(h, d, key)
 	}
-	reportPreempted(h, d, key)
 	return deliverTargetBatch(h, d, key, ai, target, batch)
 }
 
 // jumpRunningTurn interrupts the turn the AI is running, for the first jump
-// item that only this turn holds (flows/agent-turn.md step 12). The item
-// stays held and unacknowledged until the turn has ended, however it ends. A
-// jump for another session opens a pre-emption; while one is open, a further
-// jump for another session interrupts nothing and goes when the jump turn
-// has ended.
+// item that only this turn holds and whose session can be prepared
+// (flows/agent-turn.md step 12). The item stays held and unacknowledged until
+// the turn has ended, however it ends.
 func jumpRunningTurn(h *Host, d *delivery, key aiGroupKey, ai aiInfo, running SessionKey) {
 	jump, target, ok := firstJump(h, d, key, ai)
 	if !ok {
 		return
 	}
-	other := target != running
-	if other && !d.openPreemption(key, &preemption{session: running, msg: jump.Msg}) {
+	p := &preemption{session: running, msg: jump.item.Msg, told: target.key == running}
+	if !d.openPreemption(key, p) {
 		return
 	}
-	if !interruptSessionTurn(h, running, "jump", "") && other {
-		d.closePreemption(key)
+	if !canPrepare(h, ai, target, jump) || !interruptSessionTurn(h, running, "jump", "") {
+		d.closePreemption(key, p)
 	}
 }
 
-func firstJump(h *Host, d *delivery, key aiGroupKey, ai aiInfo) (proto.Item, SessionKey, bool) {
+func canPrepare(h *Host, ai aiInfo, target routedTarget, v verifiedItem) bool {
+	_, gitErr, err := prepareTargetSession(h, ai, target, v.home, []verifiedItem{v})
+	return gitErr == nil && err == nil
+}
+
+// firstJump returns the first jump item that at most a running turn holds. An
+// item with an audit row is a copy of one that was delivered, perhaps as that
+// turn.
+func firstJump(h *Host, d *delivery, key aiGroupKey, ai aiInfo) (verifiedItem, routedTarget, bool) {
 	d.mu.Lock()
 	queue := slices.Clone(d.held[key])
 	d.mu.Unlock()
@@ -878,12 +890,13 @@ func firstJump(h *Host, d *delivery, key aiGroupKey, ai aiInfo) (proto.Item, Ses
 	if len(queue) > 0 {
 		diagTake(h, key, "", nil, queue, paused)
 	}
-	for _, v := range queue {
-		if target := routeSessionItem(h, ai, v); bool(v.item.Jump) && !heldBesidesTurn(h, target, v, paused) {
-			return v.item, target.key, true
+	for _, v := range itemsToGo(queue, true) {
+		target := routeSessionItem(h, ai, v)
+		if seen, _ := hasAuditItem(h.Store, v.home, v.item.Item); !seen && !heldBesidesTurn(h, target, v, paused) {
+			return v, target, true
 		}
 	}
-	return proto.Item{}, SessionKey{}, false
+	return verifiedItem{}, routedTarget{}, false
 }
 
 // diagTake writes inbox.take: what a look at the AI's queue took and left.
@@ -892,20 +905,37 @@ func diagTake(h *Host, key aiGroupKey, task string, took, left []verifiedItem, p
 	h.diag.Info("inbox.take", "g", key.group, "ai", key.member, "task", task, "took", diagItems(took), "left", diagItems(left), "paused", paused)
 }
 
+// openPreemption notes that a jump is about to interrupt a turn. It refuses a
+// jump for another session while the AI has an interrupted turn already: that
+// jump interrupts nothing and goes when the jump turn has ended. A session
+// interrupted again is still owed one turn.
 func (d *delivery) openPreemption(key aiGroupKey, p *preemption) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.pre[key] != nil {
+	open := d.pre[key]
+	if len(open) > 0 && !p.told {
 		return false
 	}
-	d.pre[key] = p
+	if !slices.ContainsFunc(open, func(o *preemption) bool { return o.session == p.session }) {
+		d.pre[key] = append(open, p)
+	}
 	return true
 }
 
-func (d *delivery) closePreemption(key aiGroupKey) {
+func (d *delivery) closePreemption(key aiGroupKey, p *preemption) {
 	d.mu.Lock()
-	delete(d.pre, key)
-	d.mu.Unlock()
+	defer d.mu.Unlock()
+	setQueue(d.pre, key, slices.DeleteFunc(d.pre[key], func(o *preemption) bool { return o == p }))
+}
+
+// lastPreemption returns the turn interrupted last, or nil.
+func (d *delivery) lastPreemption(key aiGroupKey) *preemption {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if open := d.pre[key]; len(open) > 0 {
+		return open[len(open)-1]
+	}
+	return nil
 }
 
 // listenJump notes that the turn a jump interrupted has ended interrupted.
@@ -918,7 +948,7 @@ func listenJump(h *Host, key SessionKey, e Event) {
 	d := deliv(h)
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if p := d.pre[aiGroupKey{group: key.Group, member: key.Member}]; p != nil && p.session == key {
+	for _, p := range d.pre[aiGroupKey{group: key.Group, member: key.Member}] {
 		p.ended = true
 	}
 }
@@ -928,64 +958,71 @@ func listenJump(h *Host, key SessionKey, e Event) {
 func (d *delivery) dropUninterrupted(key aiGroupKey) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if p := d.pre[key]; p != nil && !p.ended {
-		delete(d.pre, key)
+	setQueue(d.pre, key, slices.DeleteFunc(d.pre[key], func(p *preemption) bool { return !p.ended }))
+}
+
+// adoptPreempted opens the pre-emption of a task session whose task the home
+// shows as pre-empted when none is known: the host stopped before task
+// resume, or the answer to task preempted was lost.
+func adoptPreempted(h *Host, d *delivery, key aiGroupKey) {
+	for _, s := range memberSessions(h, key.group, key.member) {
+		if taskPreempted(h, s) {
+			d.openPreemption(key, &preemption{session: s.SessionKey, ended: true, told: true})
+		}
 	}
 }
 
+func taskPreempted(h *Host, s Session) bool {
+	task, _ := lookupTaskRow(h, s.Group, s.Task)
+	return s.Kind == TaskSession && task.Wait != nil && task.Wait.Kind == "preempted"
+}
+
 // reportPreempted reports task preempted for an interrupted task session,
-// once, before the jump turn in another session (flows/agent-turn.md step
-// 12). A refusal, as at step merge, is not an error: then no resume is owed.
-func reportPreempted(h *Host, d *delivery, key aiGroupKey) {
-	d.mu.Lock()
-	p := d.pre[key]
-	d.mu.Unlock()
+// once, when the first jump turn can start (flows/agent-turn.md step 12). A
+// refusal, as at step merge, is not an error.
+func reportPreempted(h *Host, d *delivery, key aiGroupKey, ai aiInfo) {
+	p := d.lastPreemption(key)
 	if p == nil || p.told {
+		return
+	}
+	if _, _, ok := firstJump(h, d, key, ai); !ok {
 		return
 	}
 	p.told = true
 	if s, ok := h.Sessions.Get(p.session); ok && s.Kind == TaskSession {
 		cmd := proto.TaskPreempted{TaskCommand: hostTaskCommand(h, key.group, "preempted", s.Task), Msg: p.msg}
-		p.paused = sendHostCommand(context.Background(), h, s.Home, marshalWire(cmd)) == nil
+		sendHostCommand(context.Background(), h, s.Home, marshalWire(cmd))
 	}
 }
 
 // continueInterrupted gives the session that a jump interrupted its turn of
 // its own, once no jump item can go before it (flows/agent-turn.md step 14).
-// It waits while that session gets no turn, and for the home when task
-// resume is owed.
+// It waits while that session gets no turn. For a pre-empted task it first
+// reports task resume (contracts/task-machine.md row 13b), again when
+// delivery next runs if the home could not be reached.
 func continueInterrupted(h *Host, d *delivery, key aiGroupKey) bool {
-	d.mu.Lock()
-	p := d.pre[key]
-	d.mu.Unlock()
+	p := d.lastPreemption(key)
 	if p == nil {
 		return false
 	}
 	s, ok := h.Sessions.Get(p.session)
-	if ok && !mayContinue(h, p, s) {
+	if !ok {
+		d.closePreemption(key, p)
+		return true
+	}
+	if !mayContinue(h, s) {
 		return false
 	}
-	d.closePreemption(key)
-	if ok {
-		continueTurn(h, s)
+	if taskPreempted(h, s) {
+		return sendHostCommand(context.Background(), h, s.Home, marshalWire(hostTaskCommand(h, s.Group, "resume", s.Task))) == nil
 	}
+	d.closePreemption(key, p)
+	continueTurn(h, s)
 	return true
 }
 
-func mayContinue(h *Host, p *preemption, s Session) bool {
-	return !groupIsPaused(h, s.Group) && !turnsHeld(h, s.SessionKey) && !aiWorking(h, s.SessionKey) && resumePreempted(h, p, s)
-}
-
-// resumePreempted reports task resume for a task this host pre-empted
-// (contracts/task-machine.md row 13b). It reports false when the home could
-// not be reached: the report is made again when delivery next runs.
-func resumePreempted(h *Host, p *preemption, s Session) bool {
-	if !p.paused {
-		return true
-	}
-	err := sendHostCommand(context.Background(), h, s.Home, marshalWire(hostTaskCommand(h, s.Group, "resume", s.Task)))
-	p.paused = isUnreachable(err)
-	return !p.paused
+func mayContinue(h *Host, s Session) bool {
+	return !groupIsPaused(h, s.Group) && !turnsHeld(h, s.SessionKey) && !aiWorking(h, s.SessionKey)
 }
 
 // continueTurn gives a session the turn of its own, unless its task is
@@ -1045,7 +1082,7 @@ func (d *delivery) removeHeldItems(key aiGroupKey, ids map[int64]bool) {
 func takeEligibleBatch(h *Host, d *delivery, key aiGroupKey, ai aiInfo) (routedTarget, []verifiedItem, bool) {
 	d.mu.Lock()
 	queue := slices.Clone(d.held[key])
-	jumpsOnly := d.pre[key] != nil
+	jumpsOnly := len(d.pre[key]) > 0
 	d.mu.Unlock()
 	var paused bool
 	readPause := func() bool {
@@ -1096,7 +1133,7 @@ func selectEligibleBatch(h *Host, ai aiInfo, queue []verifiedItem, readPause fun
 	return target, taken, takenIDs
 }
 
-func setQueue[K comparable](m map[K][]verifiedItem, key K, rest []verifiedItem) {
+func setQueue[K comparable, V any](m map[K][]V, key K, rest []V) {
 	if len(rest) == 0 {
 		delete(m, key)
 		return

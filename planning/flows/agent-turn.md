@@ -93,7 +93,8 @@ that is waiting for them.
 12. If the AI is running a turn in the group, N interrupts it (the CLI's
     interrupt request) and waits for the turn-end event.
     - The jump item is for the **same** session: nothing is reported; the
-      item simply goes first, and the task is not paused.
+      item simply goes first, and the task is not paused. Step 14 applies as
+      after any jump.
     - It is for another session, and the interrupted one is a task session:
       N reports `task preempted`. If the home refuses it (a task at step
       `merge`), nothing more is reported for that task.

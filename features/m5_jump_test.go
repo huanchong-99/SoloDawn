@@ -33,22 +33,30 @@ func m5RegisterJumpSteps(sc *godog.ScenarioContext, w *m5World) {
 	sc.Step(`^the task continues by itself with one turn of its own, and nothing is reported as a failure or delivered twice$`, m5FinalStep(w, j.stepVerifyContinued))
 	sc.Step(`^"Claude" is running its task turn and the owner jumps the queue on a message in the task thread$`, j.stepJumpThreadMessage)
 	sc.Step(`^the running turn is interrupted and the jumped message goes first in the next turn of the same session$`, j.stepVerifyWentFirst)
+	sc.Step(`^the session continues by itself with one turn of its own, before the message that waited$`, j.stepVerifyContinuedInSession)
 	sc.Step(`^the task was never paused, and nothing is reported as a failure$`, m5FinalStep(w, j.stepVerifyNeverPaused))
 }
 
+// m5JumpTurn is a turn of a scripted Claude Code session: what it must read,
+// and what it then posts.
+type m5JumpTurn struct {
+	user map[string]any
+	post string
+}
+
 // m5InterruptedClaudeScript is a Claude Code session whose first turn runs
-// until it is interrupted, and whose next turn, which must be next, makes
-// calls.
-func m5InterruptedClaudeScript(next map[string]any, calls []m5ToolCallSpec) string {
+// until it is interrupted.
+func m5InterruptedClaudeScript(turns ...m5JumpTurn) string {
 	steps := append(m5ClaudeTurnStart(0),
 		m5StepJSON("stdin", map[string]any{"type": "control_request", "request": map[string]any{"subtype": "interrupt"}}),
 		m5StepJSON("stdout", map[string]any{"type": "result", "subtype": "error_during_execution", "is_error": true, "session_id": "$session"}),
-		m5StepJSON("stdin", next),
-		m5StepJSON("stdout", map[string]any{"type": "assistant", "session_id": "$session"}),
 	)
-	callSteps, _ := m5BuildMCPCallSteps(calls, 2)
-	steps = append(steps, callSteps...)
-	steps = append(steps, m5StepJSON("stdout", map[string]any{"type": "result", "subtype": "success", "is_error": false, "session_id": "$session"}))
+	for i, turn := range turns {
+		steps = append(steps, m5StepJSON("stdin", turn.user), m5StepJSON("stdout", map[string]any{"type": "assistant", "session_id": "$session"}))
+		callSteps, _ := m5BuildMCPCallSteps(m5PostCall(turn.post), 2+i)
+		steps = append(steps, callSteps...)
+		steps = append(steps, m5StepJSON("stdout", map[string]any{"type": "result", "subtype": "success", "is_error": false, "session_id": "$session"}))
+	}
 	return `{"steps":[` + strings.Join(steps, ",") + `]}`
 }
 
@@ -58,6 +66,10 @@ func m5ClaudeUserTurn(content ...map[string]string) map[string]any {
 		message["content"] = content
 	}
 	return map[string]any{"type": "user", "message": message}
+}
+
+func m5ContinuedTurn() m5JumpTurn {
+	return m5JumpTurn{m5ClaudeUserTurn(map[string]string{"type": "text", "text": m5ContinueTaskTurn}), "Continuing T-1."}
 }
 
 func m5PostCall(text string) []m5ToolCallSpec {
@@ -167,9 +179,7 @@ func (j *m5Jump) turns() []string {
 
 func (j *m5Jump) stepJumpDirectRequest() error {
 	w := j.w
-	if err := j.startTaskTurn(m5InterruptedClaudeScript(
-		m5ClaudeUserTurn(map[string]string{"type": "text", "text": m5ContinueTaskTurn}), m5PostCall("Continuing T-1."),
-	)); err != nil {
+	if err := j.startTaskTurn(m5InterruptedClaudeScript(m5ContinuedTurn())); err != nil {
 		return err
 	}
 	w.writeScriptFile("claude", m5ClaudeScript(m5PostCall("Direct answer.")))
@@ -262,7 +272,8 @@ func (j *m5Jump) verifyTurns(want []string) error {
 }
 
 func (j *m5Jump) stepJumpThreadMessage() error {
-	if err := j.startTaskTurn(m5InterruptedClaudeScript(m5ClaudeUserTurn(), m5PostCall("Answered first."))); err != nil {
+	script := m5InterruptedClaudeScript(m5JumpTurn{m5ClaudeUserTurn(), "Answered first."}, m5ContinuedTurn(), m5JumpTurn{m5ClaudeUserTurn(), "Noted."})
+	if err := j.startTaskTurn(script); err != nil {
 		return err
 	}
 	waiting, err := j.ownerMentionsClaude("@Claude a note for later.", j.task, 1)
@@ -281,7 +292,17 @@ func (j *m5Jump) stepVerifyWentFirst() error {
 	if err := j.waitPost("Answered first."); err != nil {
 		return err
 	}
-	return j.verifyTurns([]string{"items task", "items task " + j.jumped + " " + j.waiting})
+	if got := j.turns(); len(got) < 2 || got[1] != "items task "+j.jumped {
+		return fmt.Errorf("Claude's turns = %q, want the jumped message alone in the second", got)
+	}
+	return nil
+}
+
+func (j *m5Jump) stepVerifyContinuedInSession() error {
+	if err := j.waitPost("Noted."); err != nil {
+		return err
+	}
+	return j.verifyTurns([]string{"items task", "items task " + j.jumped, "continue task", "items task " + j.waiting})
 }
 
 func (j *m5Jump) stepVerifyNeverPaused() error {

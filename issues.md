@@ -36,10 +36,10 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the home retires the waiting item and queues the jump under a new item number (`rndRequeueJump`, `internal/home/rounds.go`), where [commands.md](planning/contracts/commands.md) 1.4 says the item "gets `jump: true` and is sent again". The host knows a delivered item by `(home, item)` (`hasAuditItem`, `internal/host/deliver.go`), so it cannot tell that the new item is a message it has delivered. An item it still holds, the waiting one or an earlier jump of the message, it does drop (`retiredByJump`).
 - Status: open. If the home kept the item's number, the host's audit check would acknowledge the second one without a turn.
 
-### 2026-11-25 · limitation · A pre-emption is forgotten when the host restarts
+### 2026-11-26 · limitation · A pre-empted task that is reassigned waits for row 13
 
-- Symptom: a host that stops after `task preempted` and before `task resume` leaves the task `paused` with wait `preempted`, and the interrupted session gets no turn of its own. Nobody is told: the quiet-task notice is for active tasks only ([task-machine.md](planning/contracts/task-machine.md) row 23).
-- Cause: the pre-emption is kept in memory (`preemption`, `internal/host/deliver.go`), as the contract allows: "If the host never reports 13b, row 13 does".
+- Symptom: a task reassigned while it is `paused` with wait `preempted` stays paused: its old host ends the session, and its new host has none.
+- Cause: the host brings back only a task it has a task session for (`adoptPreempted`, `internal/host/deliver.go`).
 - Status: open, accepted. The secretary or an admin resumes the task.
 
 ### 2026-11-23 · limitation · Qwen Code model and level changes wait for a new session
@@ -775,6 +775,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `Settle` could return while an external AI's run timeout (`extEnd`, which calls `Deliver`) or presence report (`extReport`) was still running, and a `leave` or a hand-out during shutdown armed a new timer, such as a 180 s presence timer.
 - Cause: `settleExternal` (`internal/host/external.go:56`) stopped the run and presence timers but did not wait for a callback already running, and `extLeave` (`:209`) and `extOpenRun` (`:298`) armed `time.AfterFunc` timers after it.
 - Status: resolved on `devin/host-teardown-race`, with the pattern of `limits.go`: `extPart` has `settled` and `wg`, every timer callback starts on `wg` under `extPart.mu` unless settled (`extPart.after`), no timer is armed once settled, and `settleExternal` waits on `wg`. `TestSettleExternalWaitsForItsTimersAndArmsNoMore` holds a run timeout inside `Deliver` and pins that `Settle` waits for it and that a `leave` and a hand-out after it arm nothing.
+
+### 2026-11-26 · bug · Five holes in the host half of the queue jump (review of #401)
+
+- Symptom and cause, all in `internal/host/deliver.go` at b4d7c8bef: (1) an item the home sent again while its jump turn was prepared interrupted that turn, and was only acknowledged then (`firstJump`, line 873, did not look for its audit row); (2) an accepted `task preempted` whose answer was lost left the task pre-empted (line 949 read "unreachable" as "refused"), and so did a host restart; (3) a jump whose session could not be prepared, as after a failed `git fetch`, had interrupted the running turn already and shut the AI's queue (`jumpRunningTurn`, line 859); (4) a takeover, a group pause or a second jump during the `task resume` round trip lost the turn of its own (`continueInterrupted`, lines 957 to 980, read the holds before it); (5) a takeover during the `task preempted` round trip lost the jump item (`stepSessions`, line 839, had taken the batch before it).
+- Status: resolved on `feat/host-jump`: `firstJump` skips a delivered item; `task resume` is owed by the task's row, and `adoptPreempted` finds a pre-empted task again; `canPrepare` goes before the interrupt; the holds are read after both round trips. Tests in `internal/host/jump_test.go`: `TestResentJumpItemDoesNotInterruptItsOwnTurn`, `TestTaskPreemptedWithALostAnswerIsResumed`, `TestTaskFoundPreemptedAfterALostAnswerIsResumed`, `TestPreemptedTaskIsBroughtBackAfterAHostRestart`, `TestJumpWhoseSessionCannotBePreparedInterruptsNothing`, `TestHoldDuringTaskResumeKeepsTheTurnOfItsOwn`, `TestSecondJumpInTheThreadOfThePreemptedTask`, `TestTakeoverDuringTaskPreemptedHoldsTheJump`.
 
 ### 2026-11-25 · bug · A `jump` at a busy AI lost the message: the host half of the queue jump was never built
 

@@ -34,6 +34,8 @@ type jumpRig struct {
 	tasks  map[string]proto.TaskRow
 	refuse map[string]string // "task <op>" to the code the home refuses it with
 	gone   map[string]int    // "task <op>" to how often the home is not reached
+	lost   map[string]int    // "task <op>" to how often the home does it and the answer is lost
+	during map[string]func() // "task <op>" to what happens while the home's answer is on its way
 }
 
 // newJumpRig makes a host on the store in dir, inside a synctest bubble, with
@@ -41,7 +43,7 @@ type jumpRig struct {
 func newJumpRig(t *testing.T, dir string) *jumpRig {
 	t.Helper()
 	jump := Listeners["jump"]
-	r := &jumpRig{t: t, home: newFakeDeliverHome(), drv: &fakeDriver{}, ai: runAI1, tasks: map[string]proto.TaskRow{}, refuse: map[string]string{}, gone: map[string]int{}}
+	r := &jumpRig{t: t, home: newFakeDeliverHome(), drv: &fakeDriver{}, ai: runAI1, tasks: map[string]proto.TaskRow{}, refuse: map[string]string{}, gone: map[string]int{}, lost: map[string]int{}, during: map[string]func(){}}
 	Drivers = map[string]Driver{"claude": r.drv}
 	Listeners = map[string]func(*Host, SessionKey, Event){}
 	if jump != nil {
@@ -125,7 +127,7 @@ func (r *jumpRig) pushGroup(paused bool, seq int64) {
 
 // putTask writes the row of a task of the AI, as the home pushes it before it
 // answers the command that changed it.
-func (r *jumpRig) putTask(id, state, step string) {
+func (r *jumpRig) putTask(id, state, step, wait string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	task, ok := r.tasks[id]
@@ -137,7 +139,10 @@ func (r *jumpRig) putTask(id, state, step string) {
 		}
 	}
 	task.Seq++
-	task.State, task.Step = state, step
+	task.State, task.Step, task.Wait = state, step, nil
+	if wait != "" {
+		task.Wait = &proto.TaskWait{Kind: wait}
+	}
 	r.tasks[id] = task
 	r.h.Rows.Put(runGroup1, "task", id, json.RawMessage(marshalWire(task)))
 }
@@ -154,22 +159,33 @@ func (r *jumpRig) answer(_ context.Context, cmd proto.Cmd) (json.RawMessage, err
 	json.Unmarshal([]byte(cmd.Env.Payload), &p)
 	op := p.T + " " + p.Op
 	r.mu.Lock()
-	code, gone := r.refuse[op], r.gone[op] > 0
-	if gone {
-		r.gone[op]--
-	}
+	code, gone, lost, during := r.refuse[op], r.gone[op] > 0, r.lost[op] > 0, r.during[op]
+	r.gone[op]--
+	r.lost[op]--
 	r.mu.Unlock()
 	switch {
 	case gone:
 		return nil, errors.New("the home is gone")
 	case code != "":
 		return json.RawMessage(`{"re":1,"err":{"code":"` + code + `","msg":"refused"}}`), nil
-	case op == "task preempted":
-		r.putTask(p.ID, "paused", "local_check")
-	case op == "task resume":
-		r.putTask(p.ID, "active", "local_check")
+	}
+	r.apply(op, p.ID)
+	if during != nil {
+		during()
+	}
+	if lost {
+		return nil, errors.New("the connection ended")
 	}
 	return json.RawMessage(`{"re":1,"ok":true}`), nil
+}
+
+func (r *jumpRig) apply(op, id string) {
+	switch op {
+	case "task preempted":
+		r.putTask(id, "paused", "local_check", "preempted")
+	case "task resume":
+		r.putTask(id, "active", "local_check", "")
+	}
 }
 
 func (r *jumpRig) set(table map[string]string, op, code string) {
@@ -181,10 +197,36 @@ func (r *jumpRig) set(table map[string]string, op, code string) {
 // push delivers one inbox item from the home and waits until the host has
 // done all it can with it.
 func (r *jumpRig) push(it proto.Item) {
+	r.send(it)
+	synctest.Wait()
+}
+
+func (r *jumpRig) send(it proto.Item) {
 	it.AI = proto.ID(r.ai)
 	frame := proto.Inbox{Type: "inbox", Group: runGroup1, Items: []proto.InboxItem{{Item: it}}}
 	r.h.Push(jumpHome, json.RawMessage(marshalWire(frame)))
+}
+
+// deliver looks at everything again, as when a hold has been lifted.
+func (r *jumpRig) deliver() {
+	Deliver(r.h, runGroup1, runAI1)
 	synctest.Wait()
+}
+
+// takeOver begins a takeover of a session of the AI, whose CLI it closes, and
+// returns what ends it without a hand-back turn.
+func (r *jumpRig) takeOver(key SessionKey) func() {
+	slot, p := aiSlot{group: runGroup1, member: runAI1}, takeoverState(r.h)
+	p.claim(slot, &takeover{key: key}, false)
+	Runner.Close(r.h, key)
+	r.h.Sessions.Move(key, Dormant, Takeover)
+	return func() {
+		r.h.Sessions.Move(key, Takeover, Dormant)
+		p.mu.Lock()
+		delete(p.open, slot)
+		p.mu.Unlock()
+		r.deliver()
+	}
 }
 
 func jumpMention(item int64, msg, task string, jump bool) proto.Item {
@@ -200,7 +242,7 @@ func (r *jumpRig) end(p *fakeProc, status string) {
 // work starts the task session of a task with its assign item and returns its
 // CLI, which is then running that turn.
 func (r *jumpRig) work(item int64, task, step string) *fakeProc {
-	r.putTask(task, "active", step)
+	r.putTask(task, "active", step, "")
 	r.push(proto.Item{Item: item, Why: "assign", Task: proto.ID(task)})
 	return r.drv.lastProc()
 }
@@ -340,7 +382,7 @@ func TestJumpForAnotherSessionPreemptsTheTaskAndContinuesIt(t *testing.T) {
 		// Item 4 is the jump of the message of item 2, which the home retired.
 		r.wantHeld(3, 4)
 		r.wantReports()
-		r.wantStates(Working, "")
+		r.wantStates(Working, Dormant)
 		if n := task.interrupts.Load(); n != 1 {
 			t.Fatalf("the running turn got %d interrupts, want 1", n)
 		}
@@ -378,6 +420,8 @@ func TestJumpForAnotherSessionPreemptsTheTaskAndContinuesIt(t *testing.T) {
 	}
 }
 
+// The jump item goes first, then the interrupted session gets the turn of its
+// own as after any jump, then what waited.
 func TestJumpForTheRunningSessionGoesFirstAndReportsNothing(t *testing.T) {
 	jumpTest(t, func(t *testing.T, r *jumpRig) {
 		task := r.work(1, runTask1, "local_check")
@@ -389,10 +433,14 @@ func TestJumpForTheRunningSessionGoesFirstAndReportsNothing(t *testing.T) {
 			t.Fatalf("the running turn got %d interrupts, want 1", n)
 		}
 		r.end(task, "interrupted")
-		r.wantTurns(task, "items 1", "items 3,2")
-		r.wantAcked(2, 3)
+		r.wantTurns(task, "items 1", "items 3")
+		r.wantAcked(3)
+		r.wantHeld(2)
 		r.end(task, "completed")
-		r.wantTurns(task, "items 1", "items 3,2")
+		r.wantTurns(task, "items 1", "items 3", jumpContinueTask)
+		r.end(task, "completed")
+		r.wantTurns(task, "items 1", "items 3", jumpContinueTask, "items 2")
+		r.end(task, "completed")
 		r.wantReports()
 		r.wantSettled()
 		if r.drv.count() != 1 {
@@ -586,7 +634,7 @@ func TestHeldJumpInterruptsNothing(t *testing.T) {
 		other := r.work(1, runTask2, "local_check")
 		r.end(other, "completed")
 		task := r.work(2, runTask1, "local_check")
-		r.putTask(runTask2, "paused", "local_check")
+		r.putTask(runTask2, "paused", "local_check", "manual")
 		r.push(jumpMention(3, testMsg1, runTask2, true))
 		r.putGroup(true)
 		r.push(jumpMention(4, testMsg2, "", true))
@@ -608,8 +656,7 @@ func TestJumpInAGroupPausedMeanwhileWaitsForTheResume(t *testing.T) {
 		r.wantHeld(2)
 		r.wantReports()
 		r.putGroup(false)
-		Deliver(r.h, runGroup1, runAI1)
-		synctest.Wait()
+		r.deliver()
 		r.wantAcked(2)
 		r.end(r.drv.proc(1), "completed")
 		r.wantTurns(task, "items 1", jumpContinueTask)
@@ -672,11 +719,10 @@ func TestInterruptedSessionOfAStoppedTaskGetsNoTurn(t *testing.T) {
 		task := r.work(1, runTask1, "local_check")
 		r.push(jumpMention(2, testMsg1, "", true))
 		r.end(task, "interrupted")
-		r.putTask(runTask1, "failed", "local_check")
-		r.set(r.refuse, "task resume", "conflict")
+		r.putTask(runTask1, "failed", "local_check", "")
 		r.end(r.drv.proc(1), "completed")
 		r.wantTurns(task, "items 1")
-		r.wantReports("task preempted "+runTask1+" "+testMsg1, "task resume "+runTask1)
+		r.wantReports("task preempted " + runTask1 + " " + testMsg1)
 		r.wantSettled()
 	})
 }
@@ -693,8 +739,7 @@ func TestTaskResumeWaitsForTheHome(t *testing.T) {
 		r.mu.Unlock()
 		r.end(r.drv.proc(1), "completed")
 		r.wantTurns(task, "items 1")
-		Deliver(r.h, runGroup1, runAI1)
-		synctest.Wait()
+		r.deliver()
 		r.wantTurns(task, "items 1", jumpContinueTask)
 		r.wantReports("task preempted "+runTask1+" "+testMsg1, "task resume "+runTask1, "task resume "+runTask1)
 		r.end(task, "completed")
@@ -704,8 +749,8 @@ func TestTaskResumeWaitsForTheHome(t *testing.T) {
 
 // While a pre-emption is open, a jump for the session that is running
 // interrupts it, and one for yet another session interrupts nothing and runs
-// when the jump turn has ended. Both go before the interrupted session
-// continues.
+// when the jump turn has ended. Both go before the interrupted sessions
+// continue, the one interrupted last first.
 func TestFurtherJumpsRunBeforeTheInterruptedSessionContinues(t *testing.T) {
 	jumpTest(t, func(t *testing.T, r *jumpRig) {
 		second := r.work(1, runTask2, "local_check")
@@ -732,6 +777,9 @@ func TestFurtherJumpsRunBeforeTheInterruptedSessionContinues(t *testing.T) {
 		r.wantTurns(second, "items 1", "items 5")
 		r.wantTurns(task, "items 2")
 		r.end(second, "completed")
+		r.wantTurns(group, "items 3", "items 4", jumpContinueGroup)
+		r.wantTurns(task, "items 2")
+		r.end(group, "completed")
 		r.wantTurns(task, "items 2", strings.Replace(jumpContinueTask, "T-1", "T-2", 1))
 		r.wantReports("task preempted "+runTask1+" "+testMsg1, "task resume "+runTask1)
 		r.end(task, "completed")
@@ -773,13 +821,278 @@ func TestJumpSurvivesAHostRestartBeforeItsTurn(t *testing.T) {
 
 		r = newJumpRig(t, dir)
 		defer r.close()
-		r.putTask(runTask1, "active", "local_check")
+		r.putTask(runTask1, "active", "local_check", "")
 		r.push(jumpMention(2, testMsg1, "", true))
 		r.wantAcked(2)
 		r.wantTurns(r.drv.lastProc(), "items 2")
 		if r.state(runTask1) != Dormant {
 			t.Fatalf("the interrupted session is %s after the restart", r.state(runTask1))
 		}
+	})
+}
+
+// The home sends an unacknowledged item again when it connects. A copy that
+// arrives while the jump turn is being prepared is of that turn.
+func TestResentJumpItemDoesNotInterruptItsOwnTurn(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		task := r.work(1, runTask1, "local_check")
+		r.push(jumpMention(2, testMsg1, "", true))
+		Compose = func(h *Host, s Session, kind TurnKind, items []json.RawMessage) (string, Turn, error) {
+			r.send(jumpMention(2, testMsg1, "", true))
+			Compose = jumpCompose
+			return jumpCompose(h, s, kind, items)
+		}
+		r.end(task, "interrupted")
+		group := r.drv.proc(1)
+		r.wantTurns(group, "items 2")
+		if n := group.interrupts.Load(); n != 0 {
+			t.Fatalf("the jump turn got %d interrupts from its own item", n)
+		}
+		r.end(group, "completed")
+		r.wantTurns(group, "items 2")
+		r.wantTurns(task, "items 1", jumpContinueTask)
+	})
+}
+
+// The home accepts task preempted and the answer is lost: the row it pushed
+// says that task resume is owed.
+func TestTaskPreemptedWithALostAnswerIsResumed(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		r.lost["task preempted"] = 1
+		task := r.work(1, runTask1, "local_check")
+		r.push(jumpMention(2, testMsg1, "", true))
+		r.end(task, "interrupted")
+		r.end(r.drv.proc(1), "completed")
+		r.wantTurns(task, "items 1", jumpContinueTask)
+		r.wantReports("task preempted "+runTask1+" "+testMsg1, "task resume "+runTask1)
+		r.end(task, "completed")
+		r.wantSettled()
+	})
+}
+
+// As before, and the row comes only when the host has synced, after the
+// interrupted session was continued: the task goes on all the same, and
+// before what waits for the AI.
+func TestTaskFoundPreemptedAfterALostAnswerIsResumed(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		r.gone["task preempted"] = 1
+		task := r.work(1, runTask1, "local_check")
+		r.push(jumpMention(2, testMsg1, "", true))
+		r.end(task, "interrupted")
+		r.end(r.drv.proc(1), "completed")
+		r.wantTurns(task, "items 1", jumpContinueTask)
+		r.push(jumpMention(3, testMsg2, "", false))
+		r.putTask(runTask1, "paused", "local_check", "preempted")
+		r.pushGroup(false, 2)
+		r.end(task, "interrupted")
+		r.wantTurns(task, "items 1", jumpContinueTask, jumpContinueTask)
+		r.wantHeld(3)
+		r.wantReports("task preempted "+runTask1+" "+testMsg1, "event turn_interrupted stop", "task resume "+runTask1)
+		r.end(task, "completed")
+		r.wantAcked(3)
+	})
+}
+
+// A host that stops after task preempted finds the task pre-empted when it
+// has synced again, and brings it back although no item is held for the AI.
+func TestPreemptedTaskIsBroughtBackAfterAHostRestart(t *testing.T) {
+	saveRuntimeGlobals(t)
+	dir := t.TempDir()
+	synctest.Test(t, func(t *testing.T) {
+		r := newJumpRig(t, dir)
+		r.work(1, runTask1, "local_check")
+		r.push(jumpMention(2, testMsg1, "", true))
+		r.end(r.drv.proc(0), "interrupted")
+		r.wantStates(Waiting, Working)
+		r.close()
+
+		r = newJumpRig(t, dir)
+		defer r.close()
+		r.putTask(runTask1, "paused", "local_check", "preempted")
+		r.putTask(runTask2, "paused", "local_check", "preempted")
+		r.pushGroup(false, 2)
+		r.wantReports("task resume " + runTask1)
+		task := r.drv.lastProc()
+		r.wantTurns(task, jumpContinueTask)
+		r.end(task, "completed")
+		r.wantSettled()
+	})
+}
+
+// A jump goes before a task that is found pre-empted, which is not reported
+// again.
+func TestJumpGoesBeforeATaskFoundPreempted(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		task := r.work(1, runTask1, "local_check")
+		r.end(task, "completed")
+		r.putTask(runTask1, "paused", "local_check", "preempted")
+		r.push(jumpMention(2, testMsg1, "", true))
+		group := r.drv.proc(1)
+		r.wantTurns(group, "items 2")
+		r.wantReports()
+		r.end(group, "completed")
+		r.wantReports("task resume " + runTask1)
+		r.wantTurns(task, "items 1", jumpContinueTask)
+	})
+}
+
+// The task of a review session, and one paused otherwise, are not the host's
+// to resume.
+func TestOnlyAPreemptedTaskOfATaskSessionIsBroughtBack(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		task := r.work(1, runTask1, "local_check")
+		r.end(task, "completed")
+		r.putTask(runTask1, "paused", "local_check", "manual")
+		r.putTask(runTask2, "paused", "review", "preempted")
+		r.h.Sessions.Create(makeRunSession(SessionKey{Group: runGroup1, Member: runAI1, Task: runTask2}, ReviewSession, "review/2"))
+		r.deliver()
+		r.wantReports()
+		r.wantSettled()
+	})
+}
+
+// A task resume that the home refuses is not repeated until delivery next
+// runs, and the turn of its own follows the task's row.
+func TestRefusedTaskResumeWaitsForTheRow(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		task := r.work(1, runTask1, "local_check")
+		r.push(jumpMention(2, testMsg1, "", true))
+		r.end(task, "interrupted")
+		r.set(r.refuse, "task resume", "conflict")
+		r.end(r.drv.proc(1), "completed")
+		r.wantTurns(task, "items 1")
+		r.wantReports("task preempted "+runTask1+" "+testMsg1, "task resume "+runTask1)
+		r.putTask(runTask1, "active", "local_check", "")
+		r.deliver()
+		r.wantTurns(task, "items 1", jumpContinueTask)
+		r.wantReports("task preempted "+runTask1+" "+testMsg1, "task resume "+runTask1)
+	})
+}
+
+// A jump whose session cannot be prepared, as when a git fetch fails, stops
+// nothing: the turn goes on and the item waits. The next look tries again.
+func TestJumpWhoseSessionCannotBePreparedInterruptsNothing(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		task := r.work(1, runTask1, "local_check")
+		var grp proto.GroupRow
+		json.Unmarshal(jumpGroupRow(false, 1), &grp)
+		grp.Repo = filepath.Join(t.TempDir(), "no-such-repo")
+		r.h.Rows.Put(runGroup1, "group", runGroup1, json.RawMessage(marshalWire(grp)))
+		r.push(jumpMention(2, testMsg1, "", true))
+		r.wantHeld(2)
+		r.wantReports()
+		if n := task.interrupts.Load(); n != 0 {
+			t.Fatalf("the turn got %d interrupts for a jump that cannot go", n)
+		}
+		r.putGroup(false)
+		r.deliver()
+		if n := task.interrupts.Load(); n != 1 {
+			t.Fatalf("the turn got %d interrupts once the session can be prepared, want 1", n)
+		}
+		r.end(task, "interrupted")
+		r.wantAcked(2)
+		r.end(r.drv.proc(1), "completed")
+		r.wantTurns(task, "items 1", jumpContinueTask)
+	})
+}
+
+// The home is waited for when task resume is sent. What comes meanwhile, a
+// takeover or a pause of the group, holds the turn of its own.
+func TestHoldDuringTaskResumeKeepsTheTurnOfItsOwn(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		task := r.work(1, runTask1, "local_check")
+		r.push(jumpMention(2, testMsg1, "", true))
+		r.end(task, "interrupted")
+		var handBack func()
+		r.during["task resume"] = func() { handBack = r.takeOver(SessionKey{Group: runGroup1, Member: runAI1}) }
+		r.end(r.drv.proc(1), "completed")
+		r.wantTurns(task, "items 1")
+		r.during["task resume"] = nil
+		handBack()
+		r.wantTurns(task, "items 1", jumpContinueTask)
+		r.end(task, "completed")
+		r.wantSettled()
+	})
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		task := r.work(1, runTask1, "local_check")
+		r.push(jumpMention(2, testMsg1, "", true))
+		r.end(task, "interrupted")
+		r.during["task resume"] = func() { r.putGroup(true) }
+		r.end(r.drv.proc(1), "completed")
+		r.wantTurns(task, "items 1")
+		r.putGroup(false)
+		r.deliver()
+		r.wantTurns(task, "items 1", jumpContinueTask)
+		r.wantReports("task preempted "+runTask1+" "+testMsg1, "task resume "+runTask1)
+	})
+}
+
+// A second jump, in the thread of the pre-empted task, is held until the task
+// is resumed. Then it goes first, and the turn of its own follows.
+func TestSecondJumpInTheThreadOfThePreemptedTask(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		task := r.work(1, runTask1, "local_check")
+		r.push(jumpMention(2, testMsg1, "", true))
+		r.end(task, "interrupted")
+		r.push(jumpMention(3, testMsg2, runTask1, true))
+		r.wantHeld(3)
+		r.end(r.drv.proc(1), "completed")
+		r.wantTurns(task, "items 1", "items 3")
+		if n := task.interrupts.Load(); n != 1 {
+			t.Fatalf("the task session got %d interrupts, want the one of the first jump", n)
+		}
+		r.end(task, "completed")
+		r.wantTurns(task, "items 1", "items 3", jumpContinueTask)
+		r.end(task, "completed")
+		r.wantReports("task preempted "+runTask1+" "+testMsg1, "task resume "+runTask1)
+		r.wantSettled()
+	})
+}
+
+// A takeover that starts while task preempted is on its way holds the jump
+// item, which is not acknowledged.
+func TestTakeoverDuringTaskPreemptedHoldsTheJump(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		task := r.work(1, runTask1, "local_check")
+		r.push(jumpMention(2, testMsg1, "", true))
+		var handBack func()
+		r.during["task preempted"] = func() {
+			handBack = r.takeOver(SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1})
+			r.send(jumpMention(2, testMsg1, "", true))
+		}
+		r.end(task, "interrupted")
+		r.wantHeld(2)
+		if n := r.drv.count(); n != 1 {
+			t.Fatalf("%d CLIs ran during the takeover, want 1", n)
+		}
+		handBack()
+		r.wantAcked(2)
+		group := r.drv.proc(1)
+		r.wantTurns(group, "items 2")
+		r.end(group, "completed")
+		r.wantTurns(r.drv.lastProc(), jumpContinueTask)
+		r.wantReports("task preempted "+runTask1+" "+testMsg1, "task resume "+runTask1)
+	})
+}
+
+// A further jump for the session that is running the jump turn interrupts
+// that turn. A session interrupted twice still gets one turn of its own.
+func TestJumpTurnThatAFurtherJumpInterruptsIsContinuedOnce(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		task := r.work(1, runTask1, "local_check")
+		r.push(jumpMention(2, testMsg1, runTask1, true))
+		r.end(task, "interrupted")
+		r.push(jumpMention(3, testMsg2, runTask1, true))
+		if n := task.interrupts.Load(); n != 2 {
+			t.Fatalf("the session got %d interrupts, want 2", n)
+		}
+		r.end(task, "interrupted")
+		r.wantTurns(task, "items 1", "items 2", "items 3")
+		r.end(task, "completed")
+		r.wantTurns(task, "items 1", "items 2", "items 3", jumpContinueTask)
+		r.end(task, "completed")
+		r.wantReports()
+		r.wantSettled()
 	})
 }
 
@@ -790,20 +1103,45 @@ func TestItemsStayHeldAcrossAHandBackStart(t *testing.T) {
 	jumpTest(t, func(t *testing.T, r *jumpRig) {
 		key := SessionKey{Group: runGroup1, Member: runAI1}
 		// The takeover is registered, so that reading the group's state does not hand the row back as one a restart left.
-		takeoverState(r.h).claim(aiSlot{group: runGroup1, member: runAI1}, &takeover{key: key}, false)
 		r.h.Sessions.Create(makeRunSession(key, GroupSession, "repo"))
-		r.h.Sessions.Move(key, Dormant, Takeover)
+		r.takeOver(key)
 		r.push(jumpMention(1, testMsg1, "", false))
 		r.wantHeld(1)
 		Holds["hand_back"] = func(h *Host, _ SessionKey) (string, bool) {
 			h.Sessions.Move(key, Takeover, Working)
 			return "", false
 		}
-		Deliver(r.h, runGroup1, runAI1)
-		synctest.Wait()
+		r.deliver()
 		r.wantHeld(1)
 		if r.state("") != Working || r.drv.count() != 0 {
 			t.Fatalf("state %s, %d CLIs started: an item was delivered into the hand-back turn", r.state(""), r.drv.count())
 		}
+	})
+}
+
+// The turn of its own is held across a hand-back start as items are.
+func TestTurnOfItsOwnStaysHeldAcrossAHandBackStart(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		task := r.work(1, runTask1, "local_check")
+		r.end(task, "completed")
+		r.push(jumpMention(2, testMsg1, "", false))
+		group := r.drv.proc(1)
+		r.push(jumpMention(3, testMsg2, runTask1, true))
+		r.end(group, "interrupted")
+		key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
+		r.putGroup(true)
+		r.end(task, "completed")
+		handBack := r.takeOver(key)
+		r.putGroup(false)
+		Holds["hand_back"] = func(h *Host, _ SessionKey) (string, bool) {
+			h.Sessions.Move(key, Takeover, Working)
+			return "", false
+		}
+		r.deliver()
+		r.wantTurns(group, "items 2")
+		delete(Holds, "hand_back")
+		r.h.Sessions.Move(key, Working, Dormant)
+		handBack()
+		r.wantTurns(group, "items 2", jumpContinueGroup)
 	})
 }
