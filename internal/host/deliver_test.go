@@ -290,6 +290,7 @@ type deliverRig struct {
 	composeMu sync.Mutex
 	composeE  error
 	onCompose func(s Session, items []json.RawMessage)
+	hold      atomic.Pointer[func(*Host, SessionKey) (string, bool)]
 }
 
 func newDeliverRig(t *testing.T, disk bool) *deliverRig {
@@ -335,7 +336,7 @@ func newDeliverRigOnStore(t *testing.T, db *store.Store) *deliverRig {
 
 func (r *deliverRig) installHooks() {
 	prevRunner, prevCompose, prevHolds := Runner, Compose, Holds
-	Holds = map[string]func(*Host, SessionKey) (string, bool){}
+	Holds = map[string]func(*Host, SessionKey) (string, bool){"rig": r.held}
 	Runner = r.runtime
 	Compose = func(_ *Host, s Session, kind TurnKind, items []json.RawMessage) (string, Turn, error) {
 		r.composeMu.Lock()
@@ -355,6 +356,17 @@ func (r *deliverRig) installHooks() {
 		Holds = prevHolds
 	})
 }
+
+// held is the one entry of Holds, there before the host starts: its goroutines
+// read that map without a lock. A test sets what it answers with setHold.
+func (r *deliverRig) held(h *Host, key SessionKey) (string, bool) {
+	if hold := r.hold.Load(); hold != nil {
+		return (*hold)(h, key)
+	}
+	return "", false
+}
+
+func (r *deliverRig) setHold(hold func(*Host, SessionKey) (string, bool)) { r.hold.Store(&hold) }
 
 func (r *deliverRig) waitUntil(desc string, ok func() bool) {
 	r.t.Helper()
@@ -910,17 +922,17 @@ func verifyMergePreAuditWrittenFalse(t *testing.T, r *deliverRig, pDir string) {
 
 	mIt2 := proto.Item{Item: 906, AI: testAI1, Why: "merge", Task: testTask2, Commit: c2}
 	var first atomic.Bool
-	Holds["dup"] = func(*Host, SessionKey) (string, bool) {
+	r.setHold(func(*Host, SessionKey) (string, bool) {
 		if first.CompareAndSwap(false, true) {
 			r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, mIt2, nil)
 			r.waitUntil("inner merge 906 completed", func() bool { return len(r.home.cmdPayloads()) == 2 })
 		}
 		return "", false
-	}
+	})
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, mIt2, nil)
 	r.waitUntil("inner merge 906 acked", func() bool { return r.home.ackCountFor(906) == 1 && len(r.home.cmdPayloads()) == 2 })
 	r.waitNoActiveMerges()
-	delete(Holds, "dup")
+	r.hold.Store(nil)
 	// Also exercise recordMergeTaken returning written == false when an already-audited merge entry reaches takeOneMerge: acked again, 0 extra Apply.
 	d := deliv(r.h)
 	d.enqueueMerge(verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Item: mIt2}, item: mIt2})
@@ -971,14 +983,14 @@ func verifyHoldLockNotUnderDeliveryMutex(t *testing.T, r *deliverRig) {
 	t.Helper()
 	var extMu sync.Mutex
 	var first atomic.Bool
-	Holds["lockorder"] = func(*Host, SessionKey) (string, bool) {
+	r.setHold(func(*Host, SessionKey) (string, bool) {
 		extMu.Lock()
 		defer extMu.Unlock()
 		if first.CompareAndSwap(false, true) {
 			r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 42, AI: testAI2, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "reentrant"))
 		}
 		return "", false
-	}
+	})
 	extMu.Lock()
 	done := make(chan struct{})
 	go func() {
@@ -1260,10 +1272,10 @@ func verifyHoldsBatchingAndJump(t *testing.T) {
 	var heldFlag atomic.Bool
 	var holdChecks atomic.Int32
 	heldFlag.Store(true)
-	Holds["cap"] = func(*Host, SessionKey) (string, bool) {
+	r.setHold(func(*Host, SessionKey) (string, bool) {
 		holdChecks.Add(1)
 		return "cap", heldFlag.Load()
-	}
+	})
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 12}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "local_check", Assignee: testAI1})
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 604, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "grp"))
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 605, AI: testAI2, Why: "mention", Msg: testMsg2}, r.makeTextMsg(testMsg2, nil, "ai2"))
@@ -1385,10 +1397,10 @@ func TestStillCurrentTaskRoleStepCommitMismatches(t *testing.T) {
 	var held atomic.Bool
 	var holdChecks atomic.Int32
 	held.Store(true)
-	Holds["off"] = func(*Host, SessionKey) (string, bool) {
+	r.setHold(func(*Host, SessionKey) (string, bool) {
 		holdChecks.Add(1)
 		return "offline", held.Load()
-	}
+	})
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 10}, Group: testGroup1, Num: 1, Title: "T1", Slug: "t1", Origin: "brief", State: "active", Step: "review", Commit: "c1", Assignee: testAI1, Reviewer: testAI2})
 
 	// Mixed batch on TaskSession: stale assign + valid thread mention on existing TaskSession, plus GroupSession decided queued behind an all-stale batch.
@@ -1545,10 +1557,10 @@ func verifyReviewRoundsAndMergeStats(t *testing.T, r *deliverRig, pDir, wt, c1 s
 	var holdReason atomic.Value
 	var offChecks atomic.Int32
 	holdReason.Store("offline")
-	Holds["off"] = func(*Host, SessionKey) (string, bool) {
+	r.setHold(func(*Host, SessionKey) (string, bool) {
 		offChecks.Add(1)
 		return holdReason.Load().(string), true
-	}
+	})
 	r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 9}, Group: testGroup1, Num: 1, Title: "Add feature", Slug: "add-feature", Origin: "brief", State: "active", Step: "merge", Commit: c2, Assignee: testAI1, Reviewer: testAI2, Stats: proto.TaskStats{Added: 17, Removed: 5}})
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 806, AI: testAI1, Why: "merge", Task: testTask1, Commit: c2}, nil)
 	r.waitUntil("offline merge hold checked", func() bool { return offChecks.Load() >= 1 })
@@ -1672,10 +1684,10 @@ func TestGroupSessionGitFailureKeepsItemsHeld(t *testing.T) {
 	r := newDeliverRig(t, true)
 	originDir, pDir, _ := initTestOriginAndGroupRepo(t, r, "github")
 	var attempts atomic.Int32
-	Holds["obs"] = func(*Host, SessionKey) (string, bool) {
+	r.setHold(func(*Host, SessionKey) (string, bool) {
 		attempts.Add(1)
 		return "", false
-	}
+	})
 
 	// 1) Initial clone failure for a group session keeps the item held with 0 acks and 0 audit rows, then delivers once Repo is reachable.
 	missingOrigin := filepath.Join(t.TempDir(), "unreachable.git")
@@ -1838,15 +1850,15 @@ func checkRemainingWorkspaceAndMergeEdges(t *testing.T, r *deliverRig, pDir stri
 	r.waitUntil("sec waiting turn without refresh", func() bool { return len(r.runtime.recorded()) == beforeTurns+1 })
 	r.waitAIUnbusy(testGroup1, testSec)
 	var secChecks atomic.Int32
-	Holds["secobs"] = func(*Host, SessionKey) (string, bool) {
+	r.setHold(func(*Host, SessionKey) (string, bool) {
 		secChecks.Add(1)
 		return "", false
-	}
+	})
 	r.h.Sessions.Move(secKey, Waiting, Dormant)
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 912, AI: testSec, Why: "notice", Code: "c"}, nil)
 	r.waitUntil("sec refresh attempt started", func() bool { return secChecks.Load() >= 1 })
 	r.waitAIUnbusy(testGroup1, testSec)
-	delete(Holds, "secobs")
+	r.hold.Store(nil)
 	if r.home.ackCountFor(912) != 0 {
 		t.Fatal("dormant group refresh failure acked item 912")
 	}
@@ -1982,10 +1994,10 @@ func verifyRestartCloudPollOnce(t *testing.T, db *store.Store, head string, rows
 	waitCloudIdle(r2)
 
 	var secondRowsChecks atomic.Int32
-	Holds["obs"] = func(*Host, SessionKey) (string, bool) {
+	r2.setHold(func(*Host, SessionKey) (string, bool) {
 		secondRowsChecks.Add(1)
 		return "cap", true
-	}
+	})
 	r2.pushItem(r2.homeKey, r2.homeKey.ID(), testGroup1, proto.Item{Item: 980, AI: testAI1, Why: "notice", Code: "c"}, nil)
 	r2.waitAIUnbusy(testGroup1, testAI1)
 
@@ -2347,11 +2359,7 @@ func verifyMergeHoldReasons(t *testing.T) {
 	c2 := commitNewMergeTask(t, r, pDir, testTask2, 2, "m-unheld", "f2.txt")
 	d := deliv(r.h)
 
-	t.Cleanup(func() {
-		r.h.Settle()
-		delete(Holds, "reason")
-	})
-	Holds["reason"] = func(*Host, SessionKey) (string, bool) { return "offline", true }
+	r.setHold(func(*Host, SessionKey) (string, bool) { return "offline", true })
 	m1 := proto.Item{Item: 972, AI: testAI1, Why: "merge", Task: testTask1, Commit: c1}
 	d.enqueueMerge(verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Item: m1}, item: m1})
 	stepMerges(r.h, d, testGroup1)
@@ -2359,13 +2367,13 @@ func verifyMergeHoldReasons(t *testing.T) {
 	joinAssertEqual(t, "offline merge acks", r.home.ackCountFor(972), 0)
 	joinAssertEqual(t, "offline merge cmds", len(r.home.cmdPayloads()), 0)
 
-	Holds["reason"] = func(*Host, SessionKey) (string, bool) { return "rate_limit", true }
+	r.setHold(func(*Host, SessionKey) (string, bool) { return "rate_limit", true })
 	stepMerges(r.h, d, testGroup1)
 	joinAssertEqual(t, "rate_limit mergeHeldNow", mergeHeldNow(r.h, d, testGroup1, testAI1), false)
 	joinAssertEqual(t, "rate_limit merge acks", r.home.ackCountFor(972), 1)
 	joinAssertEqual(t, "rate_limit merge cmds", len(r.home.cmdPayloads()), 1)
 
-	delete(Holds, "reason")
+	r.hold.Store(nil)
 	m2 := proto.Item{Item: 973, AI: testAI1, Why: "merge", Task: testTask2, Commit: c2}
 	d.enqueueMerge(verifiedItem{home: r.homeKey.ID(), group: testGroup1, wire: proto.InboxItem{Item: m2}, item: m2})
 	stepMerges(r.h, d, testGroup1)
