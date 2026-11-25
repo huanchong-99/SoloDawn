@@ -203,7 +203,7 @@ describe('why a task stands still', () => {
     expect(taskHold(group, task({ wait: wait('conflict') }))).toEqual({
       kind: 'conflict',
       text: 'The merge did not go through. The secretary or an admin hands it back to be fixed.',
-      tone: 'danger',
+      tone: undefined,
     });
     for (const kind of ['approval', 'decision', 'confirm'])
       expect(taskHold(group, task({ wait: wait(kind) }))).toBeUndefined();
@@ -248,6 +248,47 @@ describe('why a task stands still', () => {
     expect(queued('unknown')).toBeUndefined();
     prefs.lang = 'zh-CN';
     expect(queued('b', 'c')!.text).toBe('等 T-4、T-5 合并以后开工。');
+  });
+});
+
+describe('a role that an owner denied', () => {
+  const text =
+    'Mina said no to Qwen Code here. The secretary or an admin gives the role to another AI.';
+  const card = (changes: object = {}, ai = qwen) =>
+    row('row-msg-confirm-denied', {
+      ...{ id: 'card', re: base.id, body: { what: 'direct', ai, to: ['mina-user'] } },
+      ...changes,
+    });
+  const given = task({ assignee: qwen, brief: undefined });
+  const said = (changes: Partial<TaskRow> = {}, ...cards: Row[]) =>
+    taskHold(makeGroup('owner', ...(cards.length ? cards : [card()])), { ...given, ...changes });
+
+  it('is said of its assignee at every step, and of its reviewer at the review', () => {
+    for (const step of ['branch', 'local_check', 'review'])
+      expect(said({ step })).toEqual({ kind: 'denied', text });
+    const reviews = { assignee: codex, reviewer: qwen };
+    expect(said({ ...reviews, step: 'review' })?.text).toBe(text);
+    expect(said({ ...reviews, step: 'local_check' })).toBeUndefined();
+    expect(said({ assignee: codex, step: 'review' })).toBeUndefined();
+    prefs.lang = 'zh-CN';
+    expect(said()!.text).toBe('Mina 没同意 Qwen Code 参与。由秘书或管理员换一个 AI。');
+  });
+
+  it('is of the request that the task came from', () => {
+    expect(said({ brief: 'the-brief' })).toBeUndefined();
+    expect(said({ brief: 'the-brief' }, card({ re: 'the-brief' }))!.text).toBe(text);
+  });
+
+  it('is not said of any other card or message, of another AI, or beside another reason', () => {
+    for (const status of ['pending', 'confirmed', 'expired'])
+      expect(said({}, card({ state: { status } }))).toBeUndefined();
+    expect(said({}, card({ kind: 'approval' }))).toBeUndefined();
+    expect(said({}, card({}, codex))).toBeUndefined();
+    expect(said({}, card({}, 'gone'))).toBeUndefined();
+    expect(said({ wait: wait('confirm') })).toBeUndefined();
+    expect(said({ state: 'merged' })).toBeUndefined();
+    expect(said({ state: 'failed', wait: null })!.kind).toBe('failed');
+    expect(said({ wait: wait('reviewer') })!.kind).toBe('reviewer');
   });
 });
 

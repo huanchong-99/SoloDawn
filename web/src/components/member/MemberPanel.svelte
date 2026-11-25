@@ -167,14 +167,7 @@
                 {:else if ai.state === 'takeover'}
                   <footer class="card-foot">
                     <AskToWatch {group} {ai} />
-                    <a
-                      class="btn btn-sm"
-                      href={href('terminal', {
-                        g: group.g,
-                        member: ai.id,
-                        task: terminalTask(group, ai),
-                      })}
-                    >
+                    <a class="btn btn-sm" href={href('terminal', { g: group.g, member: ai.id })}>
                       {t('watch.open')}
                     </a>
                   </footer>

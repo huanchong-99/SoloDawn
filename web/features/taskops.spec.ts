@@ -64,6 +64,16 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   const received = (op: string, roles: object = {}) =>
     settled(() => expect(sent.at(-1)).toMatchObject({ op, id: t12, g, ...roles }));
   const onMenu = () => settled(() => expect(document.activeElement).toBe(one('.more')));
+  const withMina = () => {
+    const person = { id: mina, g, name: 'Mina', user: 'mina', role: 'member' };
+    home.write(g, example('row-member-human', person));
+    const ai = { id: qwen, g, name: 'Qwen Code', user: 'mina', host_name: 'mina-mac' };
+    home.write(g, example('row-member-ai', { ...ai, state: 'offline', task: undefined }));
+    flushSync();
+  };
+  const named = () => all<HTMLSelectElement>('.ask select').map((each) => each.value);
+  const submit = () =>
+    one('.ask').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   const chooseAI = (role: number, label: string) =>
     choose(all<HTMLSelectElement>('.ask select')[role], label);
 
@@ -337,11 +347,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
 
   Scenario('An admin gives a task to another AI', ({ When, Then }) => {
     When('Alex picks "Reassign"', async () => {
-      const person = { id: mina, g, name: 'Mina', user: 'mina', role: 'member' };
-      home.write(g, example('row-member-human', person));
-      const ai = { id: qwen, g, name: 'Qwen Code', user: 'mina', host_name: 'mina-mac' };
-      home.write(g, example('row-member-ai', { ...ai, state: 'offline', task: undefined }));
-      flushSync();
+      withMina();
       await pick('Reassign');
     });
     Then(
@@ -377,7 +383,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     );
     When('Alex presses "Reassign"', () => {
       expect(button('Reassign').disabled).toBe(false);
-      one('.ask').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      submit();
     });
     Then(
       'the home receives "assign" for T-12 with Qwen Code as its assignee and no reviewer',
@@ -385,6 +391,36 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         await received('assign', { assignee: qwen });
         expect(sent[0]).not.toHaveProperty('reviewer');
         await settled(() => expect(all('.ask')).toEqual([]));
+      },
+    );
+  });
+
+  Scenario('What others change while the form is open stays theirs', ({ When, And, Then }) => {
+    When('Alex picks "Reassign"', async () => {
+      withMina();
+      await pick('Reassign');
+    });
+    And('the secretary gives T-12 to Qwen Code, and its review to Codex', () =>
+      task({ assignee: qwen, reviewer: codex }),
+    );
+    Then('the form names Qwen Code to do it and Codex to review it, and cannot be sent yet', () => {
+      expect(named()).toEqual([qwen, codex]);
+      expect(button('Reassign').disabled).toBe(true);
+      expect(texts('.notes p')).toEqual([]);
+    });
+    When('Alex chooses "Claude Code · workstation" to review it', () =>
+      chooseAI(1, 'Claude Code · workstation'),
+    );
+    And('the secretary gives T-12 back to Codex', () => {
+      task({ assignee: codex, reviewer: qwen });
+      expect(named()).toEqual([codex, claude]);
+    });
+    And('Alex presses "Reassign"', () => void submit());
+    Then(
+      'the home receives "assign" for T-12 with Claude Code as its reviewer and no assignee',
+      async () => {
+        await received('assign', { reviewer: claude });
+        expect(sent[0]).not.toHaveProperty('assignee');
       },
     );
   });
@@ -413,7 +449,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         chooseAI(1, 'Claude Code · workstation'),
       );
       And('Alex presses "Reassign"', () => {
-        one('.ask').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        submit();
       });
       Then(
         'the home receives "assign" for T-12 with Claude Code as its reviewer and no assignee',
@@ -429,6 +465,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           'The merge did not go through. The secretary or an admin hands it back to be fixed.',
           'Hand back to Codex',
         ]);
+        expect(one('.hold').dataset.tone).toBeUndefined();
       });
       And('Alex presses "Hand back to Codex"', () => press('Hand back to Codex'));
       Then('the home receives "assign" for T-12 with Codex as its assignee', async () => {
@@ -477,7 +514,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         expect(button('Resume').disabled).toBe(false);
       },
     );
-    When('the home answers "conflict" and Alex confirms a cancel', async () => {
+    When('the home answers "paused" and Alex confirms a cancel', async () => {
       answer = { err: { code: 'paused', msg: 'refused by the test' } };
       await pick('Cancel task');
       expect(all('.acts .fail')).toEqual([]);
@@ -489,6 +526,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         'Nothing changed: the task or its AIs moved on in the meantime.',
       ]),
     );
+    When('T-12 is carried on', () => task());
+    Then('the refusal is gone', () => expect(all('.acts .fail')).toEqual([]));
   });
 
   Scenario('A question goes away when another person was faster', ({ When, And, Then }) => {
@@ -501,10 +540,41 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       expect(all('.ask')).toEqual([]);
       expect(menu()).toEqual(['Cancel task']);
     });
-    When('Alex picks "Cancel task"', () => pick('Cancel task'));
+    When('T-12 has a merge conflict', () => task({ wait: wait('conflict') }));
+    Then('the form stays away', () => expect(all('.ask')).toEqual([]));
+    When('T-12 enters "merge" again', () => task({ step: 'merge' }));
+    And('Alex picks "Cancel task"', () => pick('Cancel task'));
     Then('the card also says "It has passed review and may be merging right now."', () =>
       expect(texts('.ask p')[0]).toBe('It has passed review and may be merging right now.'),
     );
+  });
+
+  Scenario('A pre-empted task carries on by itself', ({ Given, Then }) => {
+    Given('T-12 is pre-empted', () => task({ state: 'paused', wait: wait('preempted') }));
+    Then(
+      'its card says "A message jumped the queue. It carries on by itself afterwards." without a button',
+      () =>
+        expect(hold()).toEqual(['A message jumped the queue. It carries on by itself afterwards.']),
+    );
+  });
+
+  Scenario('The owner of the AI said no', ({ Given, Then, When }) => {
+    const line =
+      'Mina said no to Qwen Code here. The secretary or an admin gives the role to another AI.';
+    Given('Mina denied that Qwen Code takes T-12', () => {
+      withMina();
+      task({ assignee: qwen });
+      const body = { what: 'direct', ai: qwen, to: ['mina'] };
+      const re = example('row-task').brief;
+      home.write(g, example('row-msg-confirm-denied', { thread: null, re, body }));
+      flushSync();
+    });
+    Then(`its card says "${line}" with "Reassign"`, () => {
+      expect(hold()).toEqual([line, 'Reassign']);
+      expect(one('.hold').dataset.tone).toBeUndefined();
+    });
+    When('Alex presses "Reassign"', () => press('Reassign'));
+    Then('the form names Qwen Code to do it', () => settled(() => expect(named()[0]).toBe(qwen)));
   });
 
   Scenario(

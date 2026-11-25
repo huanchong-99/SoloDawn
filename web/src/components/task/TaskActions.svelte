@@ -27,17 +27,17 @@
   let asked = $state<'assign' | 'cancel'>();
   let busy = $state(false);
   let failed = $state('');
-  let next = $state<Required<Roles>>({ assignee: '', reviewer: '' });
+  // Only what the person chose: the rest follows the row.
+  let chosen = $state<Roles>({});
 
   const ops = $derived(taskOps(group, task));
   const hold = $derived(taskHold(group, task));
-  // What was asked for goes when the task no longer allows it: another person was faster.
-  const asking = $derived(asked && ops.includes(asked) ? asked : undefined);
   const locked = $derived(busy || !group.home.ctl);
   const assignee = $derived(group.member(task.assignee));
 
   const ais = $derived(workingAIs(group));
-  const roles = $derived(changedRoles(task, next));
+  const next = $derived({ assignee: task.assignee, reviewer: task.reviewer ?? '', ...chosen });
+  const roles = $derived(changedRoles(task, chosen));
   const same = $derived(next.assignee === next.reviewer);
   const icon = $derived.by(() => {
     if (hold?.tone) return 'alert';
@@ -46,10 +46,20 @@
   const away = (ai: AIMemberRow) =>
     ai.state === 'offline' || ai.state === 'limited' ? ` · ${statusOf(group, ai).text}` : '';
 
+  // What was asked for goes when the task no longer allows it: another person was faster.
+  $effect(() => {
+    if (asked && !ops.includes(asked)) asked = undefined;
+  });
+  // A refusal was about the row before.
+  $effect(() => {
+    void task;
+    failed = '';
+  });
+
   /** What the menu picked: a pause or a resume at once, the others after a question. */
   export async function pick(op: TaskOp) {
     if (op !== 'assign' && op !== 'cancel') return run(op);
-    next = { assignee: task.assignee, reviewer: task.reviewer ?? '' };
+    chosen = {};
     await ask(op);
   }
 
@@ -88,7 +98,7 @@
   <button type="button" class="btn btn-sm" disabled={locked} {onclick}>{label}</button>
 {/snippet}
 
-<div class="acts" class:none={!hold && !asking && !failed} tabindex="-1" bind:this={root}>
+<div class="acts" class:none={!hold && !asked && !failed} tabindex="-1" bind:this={root}>
   {#if hold}
     <div class="hold" data-tone={hold.tone}>
       <p role="status">
@@ -108,6 +118,8 @@
           )}
         {:else if hold.kind === 'reviewer' && ops.includes('assign')}
           {@render button(t('task.op.reviewer'), () => void pick('assign'))}
+        {:else if hold.kind === 'denied' && ops.includes('assign')}
+          {@render button(t('task.op.assign'), () => void pick('assign'))}
         {:else if hold.kind !== 'preempted' && ops.includes('resume')}
           {@render button(t('task.op.resume'), () => void pick('resume'))}
         {/if}
@@ -115,7 +127,7 @@
     </div>
   {/if}
 
-  {#if asking === 'cancel'}
+  {#if asked === 'cancel'}
     <div
       class="ask hot"
       role="group"
@@ -150,7 +162,7 @@
         </button>
       </div>
     </div>
-  {:else if asking === 'assign'}
+  {:else if asked === 'assign'}
     <form
       class="ask"
       aria-label={t('task.op.assign')}
@@ -163,7 +175,11 @@
       <div class="fields">
         <label class="field">
           <span>{t('task.assign.assignee')}</span>
-          <select class="input" bind:value={next.assignee} disabled={busy}>
+          <select
+            class="input"
+            bind:value={() => next.assignee, (id) => (chosen.assignee = id)}
+            disabled={busy}
+          >
             {#each ais as ai (ai.id)}
               <option value={ai.id}>{ai.name} · {ai.host_name}{away(ai)}</option>
             {/each}
@@ -171,7 +187,11 @@
         </label>
         <label class="field">
           <span>{t('task.assign.reviewer')}</span>
-          <select class="input" bind:value={next.reviewer} disabled={busy}>
+          <select
+            class="input"
+            bind:value={() => next.reviewer, (id) => (chosen.reviewer = id)}
+            disabled={busy}
+          >
             {#if !task.reviewer}
               <option value="">{t('task.assign.nobody')}</option>
             {/if}

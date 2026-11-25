@@ -10,6 +10,7 @@ import Watchers from './Watchers.svelte';
 import MemberPanel from '../member/MemberPanel.svelte';
 
 const g = 'rZNvy-1jH6Z-BcPqA5U5BQ';
+const task12: string = JSON.parse(goldens['row-task']).id;
 const me = {
   user: 'viewer',
   sign: async (payload: string) => ({ p: payload, k: 'key', s: 'sig' }),
@@ -35,6 +36,8 @@ afterEach(closePage);
 
 it('offers request and watch links only on another person’s taken-over AI', () => {
   const { group, ai } = setup();
+  // A watcher follows the takeover: their address names no task.
+  group.apply([p.decode(p.Row, goldens['row-task']), { ...ai, seq: ai.seq + 1, task: task12 }]);
   show(MemberPanel, { group, net: { source: 'mock', homes: [], path: () => undefined } });
   expect(
     document.querySelector('.member .card-foot')!.textContent!.replace(/\s+/g, ' ').trim(),
@@ -42,7 +45,7 @@ it('offers request and watch links only on another person’s taken-over AI', ()
   expect(document.querySelector('.member a')!.getAttribute('href')).toBe(
     `#/terminal/${group.g}/${ai.id}`,
   );
-  group.apply([{ ...ai, seq: ai.seq + 1, state: 'working' }]);
+  group.apply([{ ...ai, seq: ai.seq + 2, state: 'working' }]);
   flushSync();
   expect(document.querySelector('.member .card-foot')).toBeNull();
 });
