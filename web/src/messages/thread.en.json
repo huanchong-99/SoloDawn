@@ -36,5 +36,11 @@
   "thread.sys.group_resumed": "{by} resumed the group. Its AIs carry on.",
   "thread.sys.rate_limited": "{ai} is out of quota until {time}, then carries on.",
   "thread.sys.rounds_limit": "{task} is paused: the AIs went {n} rounds without a person. Reply in its thread to carry on.",
-  "thread.sys.preempted": "{by} jumped the queue. {task} is paused and carries on afterwards."
+  "thread.sys.preempted": "{by} jumped the queue. {task} is paused and carries on afterwards.",
+  "thread.reply": "Message in {task}'s thread",
+  "thread.reply.hint": "Write in {task}'s thread, @ an AI to reach it",
+  "thread.reply.resumes": "Sending this carries the task on.",
+  "thread.reply.silent": "@ an AI if one should answer. Otherwise this just stays in the thread.",
+  "thread.reply.paused": "{task} is paused: its AIs get this once it resumes.",
+  "thread.reply.failed": "{task} is stopped: its AIs get this once it resumes."
 }

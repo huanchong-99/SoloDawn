@@ -22,7 +22,7 @@
     failed = '';
     failed = (await setPaused(group, false)).err?.code ?? '';
     busy = false;
-    if (!failed) document.querySelector<HTMLElement>('.composer textarea')?.focus();
+    if (!failed) document.querySelector<HTMLElement>('.dock textarea')?.focus();
   }
 </script>
 

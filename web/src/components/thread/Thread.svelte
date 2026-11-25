@@ -8,9 +8,10 @@
   import type { MsgRow, TaskRow } from '../../lib/proto';
   import { clock, now } from '../../lib/when';
   import Avatar from '../Avatar.svelte';
+  import Composer from '../chat/Composer.svelte';
   import Rich from '../Rich.svelte';
 
-  /** The message list of one task's thread, mounted inside a task card's fold. */
+  /** The messages of one task's thread and the field to write in it, inside a task card's fold. */
   let { group, task }: { group: Group; task: TaskRow } = $props();
 
   const msgs = $derived(withoutInlineReplies(group.thread(task.id), Boolean(cardOf('call'))));
@@ -172,6 +173,7 @@
       </li>
     {/if}
   </ol>
+  <Composer {group} {task} />
 </div>
 
 <style>

@@ -37,6 +37,7 @@
     power: '<path d="M12 3v9M7 6.5a8 8 0 1 0 10 0"/>',
     phone: '<path d="M7 3h10v18H7zM11 18h2"/>',
     lock: '<path d="M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3"/>',
+    more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
     eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   };
   export type IconName = keyof typeof icons;

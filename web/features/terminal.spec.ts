@@ -337,25 +337,22 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(all('.member .card-foot a')).toHaveLength(1);
         });
         const link = one<HTMLAnchorElement>('.member .card-foot a');
-        expect(link.getAttribute('href')).toBe(`#/terminal/${website}/${claudeId}`);
+        expect(link.getAttribute('href')).toBe(`#/terminal/${website}/${claudeId}/${task12Id}`);
         go(link.getAttribute('href')!);
         await vi.waitFor(() => expect(workstation.channels).toHaveLength(1));
         await vi.waitFor(() => expect(xtermState.instances).toHaveLength(1));
         flushSync();
       });
-      Then(
-        '"workstation" receives a signed "takeover.start" for "Claude Code" without an explicit task id',
-        () => {
-          expect(workstation.starts).toHaveLength(1);
-          expect(workstation.starts[0]).toMatchObject({
-            t: 'takeover.start',
-            to: workstationId,
-            g: website,
-            member: claudeId,
-          });
-          expect(workstation.starts[0].task).toBeUndefined();
-        },
-      );
+      Then('"workstation" receives a signed "takeover.start" for "Claude Code" on task 12', () => {
+        expect(workstation.starts).toHaveLength(1);
+        expect(workstation.starts[0]).toMatchObject({
+          t: 'takeover.start',
+          to: workstationId,
+          g: website,
+          member: claudeId,
+          task: task12Id,
+        });
+      });
       And(
         'the browser opens channel "pty:rZNvy-1jH6Z-BcPqA5U5BQ:1PC8WineBrUQ-apCjx7tug" and pushes "pty.resize"',
         () => {
@@ -569,6 +566,51 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       );
     },
   );
+
+  Scenario('A task card opens the terminal on its own task', ({ Given, And, When, Then }) => {
+    const items = () => texts('.card .menu > .item');
+    const settled = (check: () => void) =>
+      vi.waitFor(() => {
+        flushSync();
+        check();
+      });
+    Given(
+      '"Claude Code" is working on task 12 "Fix path events" on branch "task/12-conn-events" with a direct path of 4 ms',
+      () => {
+        const row = { id: task12Id, g: website, num: 12, assignee: claudeId };
+        workstation.home.write(website, example('row-task', row));
+      },
+    );
+    And('"Claude Code" is also the assignee of task 15, whose card is in the main line', () => {
+      const row = { id: task15Id, g: website, num: 15, assignee: claudeId, reviewer: secId };
+      workstation.home.write(website, example('row-task', row));
+      workstation.home.write(website, example('row-msg-task', { body: { task: task15Id } }));
+    });
+    When('the owner opens the chat of "Website" over a relayed path', async () => {
+      paths.set(workstation.store, { kind: 'relay', rtt: 90, since: Date.now() });
+      openPage(`#/groups/${website}`, 1440);
+      await settled(() => expect(items()).toHaveLength(4));
+    });
+    Then(
+      'the menu of T-15 says "Open Claude Code\'s terminal" and "Direct link only" without a link',
+      () => {
+        expect(items()[0]).toBe("Open Claude Code's terminalDirect link only");
+        expect(all('.menu a')).toEqual([]);
+      },
+    );
+    When(
+      'the path is direct again and the owner follows "Open Claude Code\'s terminal" of T-15',
+      async () => {
+        paths.set(workstation.store, { kind: 'direct', rtt: 4, since: Date.now() });
+        await settled(() => expect(items()[0]).toBe("Open Claude Code's terminal"));
+        go(one<HTMLAnchorElement>('.card .menu a').getAttribute('href')!);
+        await settled(() => expect(workstation.starts).toHaveLength(1));
+      },
+    );
+    Then('"workstation" receives a signed "takeover.start" for "Claude Code" on task 15', () =>
+      expect(workstation.starts[0]).toMatchObject({ member: claudeId, task: task15Id }),
+    );
+  });
 
   Scenario(
     'Relayed paths and takeover refusals block terminal takeover clearly',

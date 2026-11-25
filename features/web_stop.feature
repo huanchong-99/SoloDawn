@@ -16,8 +16,8 @@ Feature: The emergency stop in the web client
     Then the home receives "group pause" and the panel closes
     And above the composer it says that Alex paused the group, what becomes of new messages, and "Resume"
     And the group list marks "Website" as paused, and "Stop AIs" no longer offers to pause it
-    When Alex presses "Resume"
-    Then the home receives "group resume", the notice and the mark are gone and focus is in the composer
+    When Alex opens the thread of a task and presses "Resume"
+    Then the home receives "group resume", the notice and the mark are gone and focus is in the main composer
 
   Scenario: A refused pause stays in the panel with its reason
     Given the home refuses commands with "forbidden"
