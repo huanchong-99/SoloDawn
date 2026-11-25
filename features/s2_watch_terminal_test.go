@@ -283,7 +283,23 @@ func (t *s2TerminalWorld) openWatch() error {
 	if err := t.watcher.channel(label); err != nil {
 		return err
 	}
-	return t.watcher.wait(t.watcher.opened[label])
+	return t.waitAttached()
+}
+
+// waitAttached reads the size that Q1 pushes once the watch is open on its side: the peer's own side opens before that,
+// and a watcher gets only the bytes from then on.
+func (t *s2TerminalWorld) waitAttached() error {
+	var got proto.PTYResize
+	raw, err := t.watcher.nextCtl(func(raw json.RawMessage) bool {
+		return proto.Decode(raw, &got) == nil && got.Type == "pty.resize"
+	})
+	if err != nil {
+		return err
+	}
+	if fmt.Sprintf("%dx%d", got.Cols, got.Rows) != s2WatchSize || got.Group != t.group || got.AI != proto.ID(t.ai) {
+		return fmt.Errorf("size push %s, want %s of %s", raw, s2WatchSize, t.ai)
+	}
+	return nil
 }
 
 func (t *s2TerminalWorld) compareTerminalBytes() error {
