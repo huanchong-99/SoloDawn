@@ -1,8 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { homes, type Home, type NewGroup } from '../../lib/groups.svelte';
-  import { addHome } from '../../lib/join';
-  import { signalUrlOf } from '../../lib/onboard.svelte';
   import { t } from '../../lib/prefs.svelte';
   import Failure from '../Failure.svelte';
   import ForgeChoice from '../forge/ForgeChoice.svelte';
@@ -30,8 +28,6 @@
   let member = $state('');
   let busy = $state(false);
   let failed = $state('');
-  // A group that was created, when some of the person's computers were not told its home.
-  let untold = $state('');
 
   const kinds = [
     { kind: 'project', icon: 'fork' },
@@ -84,36 +80,19 @@
       return;
     }
     busy = true;
-    const title = name.trim();
     const { g, answer } = await home.create({
-      name: title,
+      name: name.trim(),
       ...fields(),
       member_name: member.trim(),
     });
+    busy = false;
     if (answer.err) {
-      busy = false;
       failed = answer.err.code;
       return;
     }
-    const missed = kind === 'team' ? await announce(home, g, title) : [];
-    busy = false;
     name = repo = checks = '';
     templates = emptyTemplates();
     kind = 'project';
-    if (missed.length) untold = g;
-    else show(g);
-  }
-
-  /** The person's other computers learn a team group from this browser alone: no AI joins it. */
-  const announce = (home: Home, g: string, title: string) =>
-    addHome(
-      owned.filter((node) => node !== home),
-      { g, home: home.device },
-      title,
-      signalUrlOf(),
-    );
-
-  function show(g: string) {
     dialog.close();
     // The group itself arrives in a push; its chat opens as soon as it is listed.
     location.hash = `#/groups/${g}`;
@@ -124,127 +103,111 @@
   bind:this={dialog}
   class="dlg"
   aria-labelledby={`${uid}-title`}
-  onclose={() => {
-    open = false;
-    untold = '';
-  }}
+  onclose={() => (open = false)}
 >
-  {#if untold}
-    <div class="told">
+  <form onsubmit={submit}>
+    <header>
       <h2 id={`${uid}-title`}>{t('groups.new')}</h2>
-      <p role="status">{t('groups.create.notifications')}</p>
-      <footer class="row">
-        <span class="grow"></span>
-        <button type="button" class="btn btn-primary" onclick={() => show(untold)}>
-          {t('groups.create.open')}
-        </button>
-      </footer>
-    </div>
-  {:else}
-    <form onsubmit={submit}>
-      <header>
-        <h2 id={`${uid}-title`}>{t('groups.new')}</h2>
-        <p class="lead">{t('groups.create.lead')}</p>
-      </header>
+      <p class="lead">{t('groups.create.lead')}</p>
+    </header>
 
-      <fieldset class="acct kinds">
-        <legend class="sr">{t('groups.create.kind')}</legend>
-        {#each kinds as { kind: each, icon } (each)}
-          <label>
-            <input
-              type="radio"
-              name={`${uid}-kind`}
-              value={each}
-              aria-labelledby={`${uid}-${each}`}
-              aria-describedby={`${uid}-${each}-hint`}
-              bind:group={kind}
-            />
-            <b id={`${uid}-${each}`}>{t(`groups.create.kind.${each}`)}</b>
-            <Icon name={icon} />
-            <span id={`${uid}-${each}-hint`}>{t(`groups.create.kind.${each}.hint`)}</span>
-          </label>
-        {/each}
-      </fieldset>
-      <label class="field">
-        <span>{t('groups.create.name')}</span>
-        <!-- The pattern asks for one character that is no space. -->
-        <input class="input" bind:value={name} required pattern=".*\S.*" maxlength="80" />
+    <fieldset class="acct kinds">
+      <legend class="sr">{t('groups.create.kind')}</legend>
+      {#each kinds as { kind: each, icon } (each)}
+        <label>
+          <input
+            type="radio"
+            name={`${uid}-kind`}
+            value={each}
+            aria-labelledby={`${uid}-${each}`}
+            aria-describedby={`${uid}-${each}-hint`}
+            bind:group={kind}
+          />
+          <b id={`${uid}-${each}`}>{t(`groups.create.kind.${each}`)}</b>
+          <Icon name={icon} />
+          <span id={`${uid}-${each}-hint`}>{t(`groups.create.kind.${each}.hint`)}</span>
+        </label>
+      {/each}
+    </fieldset>
+    <label class="field">
+      <span>{t('groups.create.name')}</span>
+      <!-- The pattern asks for one character that is no space. -->
+      <input class="input" bind:value={name} required pattern=".*\S.*" maxlength="80" />
+    </label>
+    {#if kind === 'project'}
+      <label class="field arrives">
+        <span id={`${uid}-repo`}>{t('groups.create.repo')}</span>
+        <input
+          class="input mono"
+          aria-labelledby={`${uid}-repo`}
+          aria-describedby={`${uid}-repo-hint`}
+          bind:value={repo}
+          required
+          pattern=".*\S.*"
+          placeholder="https://github.com/you/project.git"
+          autocapitalize="off"
+          spellcheck="false"
+        />
+        <span class="hint" id={`${uid}-repo-hint`}>{t('groups.create.repo.hint')}</span>
       </label>
+    {/if}
+    <div class="two">
       {#if kind === 'project'}
         <label class="field arrives">
-          <span id={`${uid}-repo`}>{t('groups.create.repo')}</span>
+          <span>{t('groups.create.base')}</span>
           <input
             class="input mono"
-            aria-labelledby={`${uid}-repo`}
-            aria-describedby={`${uid}-repo-hint`}
-            bind:value={repo}
+            bind:value={base}
             required
-            pattern=".*\S.*"
-            placeholder="https://github.com/you/project.git"
+            pattern="\S+"
             autocapitalize="off"
             spellcheck="false"
           />
-          <span class="hint" id={`${uid}-repo-hint`}>{t('groups.create.repo.hint')}</span>
         </label>
-      {/if}
-      <div class="two">
-        {#if kind === 'project'}
-          <label class="field arrives">
-            <span>{t('groups.create.base')}</span>
-            <input
-              class="input mono"
-              bind:value={base}
-              required
-              pattern="\S+"
-              autocapitalize="off"
-              spellcheck="false"
-            />
-          </label>
-        {/if}
-        <label class="field">
-          <span>{t('groups.create.member')}</span>
-          <input class="input" bind:value={member} required pattern=".*\S.*" maxlength="40" />
-        </label>
-      </div>
-      {#if kind === 'project'}
-        <div class="part arrives">
-          <ForgeChoice bind:forge bind:templates />
-          <label class="field">
-            <span id={`${uid}-checks`}>{t('groups.create.checks')}</span>
-            <textarea
-              class="input mono"
-              aria-labelledby={`${uid}-checks`}
-              aria-describedby={`${uid}-checks-hint`}
-              bind:value={checks}
-              rows="2"
-              placeholder={'go vet ./...\ngo test ./...'}
-              autocapitalize="off"
-              spellcheck="false"></textarea>
-            <span class="hint" id={`${uid}-checks-hint`}>{t('groups.create.checks.hint')}</span>
-          </label>
-        </div>
       {/if}
       <label class="field">
-        <span id={`${uid}-home`}>{t('groups.create.home')}</span>
-        <select class="input" aria-labelledby={`${uid}-home`} bind:value={chosen}>
-          {#each owned as home (home)}
-            <option value={home}>{home.name}</option>
-          {/each}
-        </select>
+        <span>{t('groups.create.member')}</span>
+        <input class="input" bind:value={member} required pattern=".*\S.*" maxlength="40" />
       </label>
+    </div>
+    {#if kind === 'project'}
+      <div class="part arrives">
+        <ForgeChoice bind:forge bind:templates />
+        <label class="field">
+          <span id={`${uid}-checks`}>{t('groups.create.checks')}</span>
+          <textarea
+            class="input mono"
+            aria-labelledby={`${uid}-checks`}
+            aria-describedby={`${uid}-checks-hint`}
+            bind:value={checks}
+            rows="2"
+            placeholder={'go vet ./...\ngo test ./...'}
+            autocapitalize="off"
+            spellcheck="false"></textarea>
+          <span class="hint" id={`${uid}-checks-hint`}>{t('groups.create.checks.hint')}</span>
+        </label>
+      </div>
+    {/if}
+    <label class="field">
+      <span id={`${uid}-home`}>{t('groups.create.home')}</span>
+      <select class="input" aria-labelledby={`${uid}-home`} bind:value={chosen}>
+        {#each owned as home (home)}
+          <option value={home}>{home.name}</option>
+        {/each}
+      </select>
+    </label>
 
-      {#if failed}<Failure code={failed} />{/if}
-      <footer class="row">
-        <span class="grow"></span>
-        <button type="button" class="btn btn-ghost" onclick={() => dialog.close()}>
-          {t('groups.create.cancel')}
-        </button>
-        <button class="btn btn-primary" disabled={busy || !owned.length}>
-          {t('groups.create.submit')}
-        </button>
-      </footer>
-    </form>
-  {/if}
+    {#if failed}<Failure code={failed} />{/if}
+    <footer class="row">
+      <span class="grow"></span>
+      <button type="button" class="btn btn-ghost" onclick={() => dialog.close()}>
+        {t('groups.create.cancel')}
+      </button>
+      <button class="btn btn-primary" disabled={busy || !owned.length}>
+        {t('groups.create.submit')}
+      </button>
+    </footer>
+  </form>
 </dialog>
 
 <style>
@@ -255,7 +218,6 @@
     max-height: calc(100dvh - 2 * var(--top));
     overflow: auto;
   }
-  .told,
   .part {
     display: grid;
     gap: var(--sp-4);

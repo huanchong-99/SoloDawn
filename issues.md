@@ -6,12 +6,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-25 · limitation · A computer that is not connected when a team group is created never learns its home
-
-- Symptom: a secretary on that computer cannot post a notice in the team group: its `post` with `group` answers `not_found`.
-- Cause: the browser sends `home.add` once, after it creates or joins the group, to the person's computers it is connected to (`planning/contracts/step-2/people.md` sections 4 and 7). For a project group `host.join` makes up for it; no AI joins a team group, and nothing sends `home.add` again. The same holds for a computer paired later.
-- Status: open, found while building the creation of team groups. The contract asks for nothing more.
-
 ### 2026-11-23 · deviation · An agent without a driver cannot join a group
 
 - Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
@@ -746,11 +740,17 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-25 · bug · A computer that missed the one `home.add` was shut out of the group
+
+- Symptom: a person's computer that was asleep when they joined a group homed on another person's computer, or was paired later, could never add an AI to it: `host.join` ended in `home_unreachable`. For a team group its secretary could not post: `post` with `group` answered `not_found`. Joining again was not possible.
+- Cause: the browser sent `home.add` once, to the computers connected at that moment (`web/src/lib/join.ts`). `host.join` does not make up for it, for project groups either: the node checks the sender of every signal with `knownPeer` (`internal/peer/signal.go:107`, `internal/node/node.go:426`), only the setting `homes` makes another person's computer known (`internal/node/admit.go:133`), and `host.join` writes that setting after it has connected.
+- Status: resolved: the browser compares the groups' homes with `host.info.homes` when a computer connects and when a group appears, and sends what is missing (`Nodes.tell` in `web/src/lib/nodes.svelte.ts`). Joining keeps its own `home.add`: it also replaces the home of a group restored from a copy (`planning/contracts/step-2/export.md` section 4). Tests: `web/src/lib/nodes.test.ts` (`tell`), the group feature, `e2e/s2.spec.ts` (A9.23).
+
 ### 2026-11-25 · bug · Nobody could create a team group in the web client
 
-- Symptom: the create dialog always made a project group and asked for a repository. In a team group the empty chat promised a brief from the secretary, the side panel offered style presets, and the group list and the in-page notification of a mention named the person whose computer sent a bulletin instead of the AI it names (`planning/contracts/step-2/watch-team.md` sections 9 and 10).
-- Cause: `create` sent a fixed `kind: "project"` (`web/src/lib/groups.svelte.ts`) and `CreateGroup.svelte` had no choice; #316 built only the reading half. `Chat.svelte`, `PresetPanel.svelte`, `preview` in `GroupList.svelte` and `whoOf` in `web/src/lib/notify.svelte.ts` had no case for a team group or a bulletin.
-- Status: resolved: the dialog asks for the kind, and after a team group the browser sends `home.add` to the person's other connected computers (`addHome` in `web/src/lib/join.ts`). Tests: the group feature, `e2e/s2.spec.ts` (A9.23), `web/src/lib/{groups,join,notify}.test.ts`, the team and preset component tests.
+- Symptom: the create dialog always made a project group and asked for a repository. In a team group the empty chat promised a brief from the secretary, the side panel offered project memory, style presets and a knowledge base, and the group list and the in-page notification of a mention named the person whose computer sent a bulletin instead of the AI it names (`planning/contracts/step-2/watch-team.md` sections 9 and 10).
+- Cause: `create` sent a fixed `kind: "project"` (`web/src/lib/groups.svelte.ts`) and `CreateGroup.svelte` had no choice; #316 built only the reading half. `Chat.svelte`, the mounts of `chat.side`, `preview` in `GroupList.svelte` and `whoOf` in `web/src/lib/notify.svelte.ts` had no case for a team group or a bulletin.
+- Status: resolved: the dialog asks for the kind. Project memory, style presets and the knowledge base are mounted for project groups only (`project` of an `Entry` in `web/src/lib/mounts.svelte.ts`). Tests: the group feature, `features/watch_team.spec.ts`, `e2e/s2.spec.ts` (A9.23), `web/src/lib/{groups,join,notify}.test.ts`, the team component tests.
 
 ### 2026-11-25 · bug · Group settings offered an external AI as secretary
 

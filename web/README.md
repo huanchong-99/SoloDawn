@@ -194,7 +194,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
   external AI area uses it to open setup when the new member row reaches the browser.
   Removing an external AI takes an inline confirmation, which Escape cancels.
 
-  An entry is `{ order, component }`: the lower `order` comes first, then the area's name. A
+  An entry is `{ order, component }`: the lower `order` comes first, then the area's name; one
+  with `project: true` is not drawn in a team group. A
   component with nothing to show draws nothing; an empty banner takes no room. While any area
   mounts at `chat.side`, the chat has a side column from 1024 px and, below it, a button "People
   and details" in its head that opens the panel over the chat: focus moves to the panel's close
@@ -468,8 +469,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
   - The create-group dialog holds the computer chosen as the home, not its place in the list, and
     sends nothing when that computer is no longer among those that can be reached. A computer
     that appears while there was none to choose from is chosen. A team group asks only for the two
-    names and the home; once it is made, the browser sends `home.add` to the person's other
-    connected computers (`addHome` in `join.ts`), and says so when one did not take it.
+    names and the home.
+  - The shell keeps the person's computers told the homes they need (`tell` in
+    `src/lib/nodes.svelte.ts`): those of team groups and of groups on another person's computer.
+    What a computer's `host.info.homes` lacks is sent with `home.add`, once per connection,
+    whatever it answers.
   - Only text messages are drawn in full. A card is one line that names its kind and its subject,
     with the dawn edge when it waits for the reader, and a row the home wrote is a quiet line;
     the cards the areas mount replace both. An AI-to-AI `call` (`src/components/call/`) draws its

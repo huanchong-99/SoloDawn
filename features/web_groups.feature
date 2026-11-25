@@ -36,13 +36,11 @@ Feature: Group list and group cache of the web client
     And its chat opens as a team group, ready for the first message and for inviting people, and without AIs
     And the dialog starts again with a project group
 
-  Scenario: A team group is created while another computer does not take its home
-    Given the person owns a second computer, "desk", which refuses to be told a home
-    When the person chooses "Team group" in the dialog, which then asks only for the names and the home, and creates "Studio"
-    Then the dialog says "The group was created, but not all of your connected computers were notified."
-    When the person presses "Open group"
-    Then the dialog is closed and the address is that of "Studio"
-    And the dialog starts again with a project group
+  Scenario: A computer that connects later is told the home of a team group
+    Given the home also holds the team group "Studio", which the browser shows
+    When the person's computer "desk" connects, then "laptop"
+    Then "desk" and "laptop" have each been told once which computer is the home of "Studio"
+    And neither has been told the home of "Website", a project group of a computer of the person
 
   Scenario: The dialog sends to the computer that was chosen, whatever happens to the others
     Given the person owns a second computer, "laptop", which is connected

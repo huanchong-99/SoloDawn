@@ -381,34 +381,29 @@ it('keeps the admitted group when its own nodes refuse or lose the notification'
   expect(run.close).not.toHaveBeenCalled();
 });
 
-it('tells each node the home of a group, and answers with those that did not take it', async () => {
+it.each([
+  { re: 1, ok: true },
+  { re: 1, err: { code: 'bad_request', msg: '' } },
+])('tells a node the home of a group, whether it takes it or not', async (answer) => {
   const sign = async (p: string) => ({ p, k: browser, s: 's' });
-  const node = (device: string, answer: object) => {
-    const request = vi.fn(async (_request: { t: string; env: Envelope }) => answer);
-    return { device, me: { sign }, ctl: { request } };
-  };
-  const taken = node('taken', { re: 1, ok: true });
-  const refused = node('refused', { re: 1, err: { code: 'bad_request', msg: '' } });
+  const request = vi.fn(async (_request: { t: string; env: Envelope }) => answer);
+  const node = { device: 'node', me: { sign }, ctl: { request } } as unknown as Home;
   vi.spyOn(Date, 'now').mockReturnValue(42);
-  const nodes = [taken, refused] as unknown as Home[];
-  expect(await addHome(nodes, { g, home }, 'Studio', url)).toMatchObject([
-    { node: 'refused', error: { step: 'home.add', code: 'bad_request' } },
-  ]);
+  await addHome(node, { g, home }, 'Studio', url);
   vi.restoreAllMocks();
-  for (const { device, ctl } of [taken, refused]) {
-    const [{ t, env }] = ctl.request.mock.calls[0];
-    expect([t, env.k]).toEqual(['cmd', browser]);
-    expect(JSON.parse(env.p)).toEqual({
-      t: 'home.add',
-      n: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
-      ts: 42,
-      to: device,
-      g,
-      home,
-      name: 'Studio',
-      addrs: [url],
-    });
-  }
+  expect(request).toHaveBeenCalledOnce();
+  const [{ t, env }] = request.mock.calls[0];
+  expect([t, env.k]).toEqual(['cmd', browser]);
+  expect(JSON.parse(env.p)).toEqual({
+    t: 'home.add',
+    n: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
+    ts: 42,
+    to: 'node',
+    g,
+    home,
+    name: 'Studio',
+    addrs: [url],
+  });
 });
 
 it('closes the room when nobody arrives before the invitation window ends', async () => {

@@ -52,92 +52,85 @@
   }
 </script>
 
-<!-- A team group has no briefs to name a preset (contracts/step-2/watch-team.md section 9). -->
-{#if group.info?.kind !== 'team'}
-  <section class="preset" aria-labelledby={`${uid}-head`}>
-    <details class="fold" bind:open>
-      <summary bind:this={heading}>
-        <Icon name="down" sm />
-        <b id={`${uid}-head`}>{t('preset.title')}</b>
-        <span class="cut grow muted">{t('preset.lead')}</span>
-      </summary>
-      {#if open}
-        <div class="fold-body mem-body">
-          {#if !group.home.ctl}<p class="hint">{t('preset.offline')}</p>{/if}
-          {#if view.failed}<Failure code={view.failed} />{/if}
-          {#if view.busy}<p class="hint" role="status">{t('preset.loading')}</p>{/if}
-          <ul class="mem-list" aria-labelledby={`${uid}-head`}>
-            {#each notes as note (note.id)}
-              <li class="mem-item">
-                <b>{note.name}</b>
-                <div class="mem-meta">
-                  <b>{authorOf(group, note.by)}</b>
-                  <time datetime={new Date(note.ts).toISOString()}>
-                    {shortWhen(note.ts, now(), prefs.lang)}
-                  </time>
-                  <button
-                    type="button"
-                    class="btn btn-sm btn-ghost"
-                    disabled={!writable || busy}
-                    onclick={() => edit(note)}
-                  >
-                    {t('preset.edit')}
-                  </button>
-                  <button
-                    type="button"
-                    class="btn btn-sm btn-ghost del"
-                    disabled={!deletable || busy}
-                    aria-label={t('groupinfo.forget.note').replace('{text}', note.name!)}
-                    onclick={() =>
-                      (pending = { r: 'note', id: note.id, label: note.name!, heading })}
-                  >
-                    {t('groupinfo.forget')}
-                  </button>
-                </div>
-                <p class="mem-text">{note.text}</p>
-              </li>
-            {/each}
-          </ul>
-          {#if view.loaded && notes.length === 0}<p class="hint">{t('preset.empty')}</p>{/if}
-          <form class="mem-body" onsubmit={submit}>
-            <label class="field">
-              <span>{t('preset.name')}</span><input
-                class="input"
-                bind:value={name}
-                required
-                disabled={!writable || busy || editing}
-              />
-            </label>
-            <label class="field">
-              <span>{t('preset.text')}</span><textarea
-                class="input"
-                rows="4"
-                bind:value={text}
-                disabled={!writable || busy}></textarea>
-            </label>
-            {#if failed}<Failure code={failed} />{/if}
-            <div class="row">
-              <button
-                class="btn btn-primary btn-sm"
-                disabled={!writable || busy || !validName(name)}
-              >
-                {t('preset.save')}
-              </button>
-              {#if editing}<button
+<section class="preset" aria-labelledby={`${uid}-head`}>
+  <details class="fold" bind:open>
+    <summary bind:this={heading}>
+      <Icon name="down" sm />
+      <b id={`${uid}-head`}>{t('preset.title')}</b>
+      <span class="cut grow muted">{t('preset.lead')}</span>
+    </summary>
+    {#if open}
+      <div class="fold-body mem-body">
+        {#if !group.home.ctl}<p class="hint">{t('preset.offline')}</p>{/if}
+        {#if view.failed}<Failure code={view.failed} />{/if}
+        {#if view.busy}<p class="hint" role="status">{t('preset.loading')}</p>{/if}
+        <ul class="mem-list" aria-labelledby={`${uid}-head`}>
+          {#each notes as note (note.id)}
+            <li class="mem-item">
+              <b>{note.name}</b>
+              <div class="mem-meta">
+                <b>{authorOf(group, note.by)}</b>
+                <time datetime={new Date(note.ts).toISOString()}>
+                  {shortWhen(note.ts, now(), prefs.lang)}
+                </time>
+                <button
                   type="button"
-                  class="btn btn-ghost btn-sm"
-                  disabled={busy}
-                  onclick={clear}
+                  class="btn btn-sm btn-ghost"
+                  disabled={!writable || busy}
+                  onclick={() => edit(note)}
                 >
-                  {t('preset.cancel')}
-                </button>{/if}
-            </div>
-          </form>
-        </div>
-      {/if}
-    </details>
-  </section>
-{/if}
+                  {t('preset.edit')}
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-ghost del"
+                  disabled={!deletable || busy}
+                  aria-label={t('groupinfo.forget.note').replace('{text}', note.name!)}
+                  onclick={() => (pending = { r: 'note', id: note.id, label: note.name!, heading })}
+                >
+                  {t('groupinfo.forget')}
+                </button>
+              </div>
+              <p class="mem-text">{note.text}</p>
+            </li>
+          {/each}
+        </ul>
+        {#if view.loaded && notes.length === 0}<p class="hint">{t('preset.empty')}</p>{/if}
+        <form class="mem-body" onsubmit={submit}>
+          <label class="field">
+            <span>{t('preset.name')}</span><input
+              class="input"
+              bind:value={name}
+              required
+              disabled={!writable || busy || editing}
+            />
+          </label>
+          <label class="field">
+            <span>{t('preset.text')}</span><textarea
+              class="input"
+              rows="4"
+              bind:value={text}
+              disabled={!writable || busy}></textarea>
+          </label>
+          {#if failed}<Failure code={failed} />{/if}
+          <div class="row">
+            <button class="btn btn-primary btn-sm" disabled={!writable || busy || !validName(name)}>
+              {t('preset.save')}
+            </button>
+            {#if editing}<button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                disabled={busy}
+                onclick={clear}
+              >
+                {t('preset.cancel')}
+              </button>{/if}
+          </div>
+        </form>
+      </div>
+    {/if}
+  </details>
+</section>
 
 {#if pending}<ForgetDialog {group} target={pending} onclose={() => (pending = undefined)} />{/if}
 

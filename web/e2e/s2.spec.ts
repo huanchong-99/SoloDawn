@@ -165,18 +165,24 @@ describe('step 2 in the browser', () => {
         member_name: 'Alex',
       },
     ]);
-    const { p2 } = await ids(p);
+    // P2 listed neither team group: it was told the first as it connected, then the new one.
+    const { p2, team } = await ids(p);
     const { host } = new URL(p.url());
-    const told = await p.evaluate(() => window.s2.told());
-    expect(told).toEqual([
-      {
-        t: 'home.add',
-        to: p2,
-        g,
-        home: expect.any(String),
-        name: 'Studio',
-        addrs: [`ws://${host}/rv`],
-      },
+    const notice = (g: string, name: string) => ({
+      t: 'home.add',
+      to: p2,
+      g,
+      home: expect.any(String),
+      name,
+      addrs: [`ws://${host}/rv`],
+    });
+    await expect
+      .poll(() => p.evaluate(() => window.s2.told()), { timeout: 5000 })
+      .toEqual([notice(team, 'Team'), notice(g, 'Studio')]);
+    await texts(p, '#chat-side h2, #chat-side summary b').toEqual([
+      'PEOPLE · 1',
+      'GROUP DETAILS',
+      'MOVE GROUP',
     ]);
     await p.evaluate((g) => window.s2.bulletin(g), g);
     await texts(p, '[aria-label="Bulletin"] p:last-child').toEqual(['The website is ready.']);

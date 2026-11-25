@@ -229,11 +229,13 @@ A role change writes no message: the row shows it.
    the `setting` key `homes`, and `addrs` as addresses of `home`. The node
    connects to each home in `host.info.homes`, reads the group with
    `state_only` to learn its kind, and keeps the connection. It clones
-   nothing. A node B did not reach learns the group at `host.join`. When
-   the node has an AI in that group, `home.add` replaces the home it
-   connects to for it (`contracts/step-2/export.md` section 4). P-4a froze
-   `home.add` and T2-1b built it. T2-7 added the connections as specified
-   in [watch-team.md section 10 ("Which home")](watch-team.md#10-a-secretarys-notice-r-14),
+   nothing. B sends `home.add` for a team group, or a group homed on another
+   person's node, that a node of P does not list, when it connects to that
+   node and when the group appears, once per connection. When the node has
+   an AI in that group, `home.add` replaces the home it connects to for it
+   (`contracts/step-2/export.md` section 4). P-4a froze `home.add` and T2-1b
+   built it. T2-7 added the connections as specified in
+   [watch-team.md section 10 ("Which home")](watch-team.md#10-a-secretarys-notice-r-14),
    decided 2026-11-22.
 3. **One web client origin.** A stated limit: a browser is a device per
    origin, and the link opens the web client of the home's rendezvous. A

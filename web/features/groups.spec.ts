@@ -225,12 +225,29 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   let studio: string;
   const signed = (req: object) => JSON.parse((req as { env: p.Envelope }).env.p);
 
-  async function secondNode(answer: object) {
-    desk = ownedNode('desk', 'desk-device');
-    desk.home.reply = () => answer;
-    homes.push(desk.store);
-    await desk.connect();
+  /** Connects another computer of the person, which knows no home yet. */
+  async function ownNode(name: string) {
+    const node = ownedNode(name, `${name}-device`, { homes: [] });
+    node.home.reply = () => ({ ok: true });
+    homes.push(node.store);
+    await node.connect();
+    return node;
   }
+
+  const told = (node: OwnedNode) => node.home.asked.filter((req) => req.t === 'cmd').map(signed);
+
+  const notice = (g: string) => (name: string) => [
+    {
+      t: 'home.add',
+      n: expect.any(String),
+      ts: expect.any(Number),
+      to: `${name}-device`,
+      g,
+      home: first.store.device,
+      name: 'Studio',
+      addrs: [`ws://${location.host}/rv`],
+    },
+  ];
 
   function openDialog() {
     one('.head button').click();
@@ -263,16 +280,15 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       true,
       false,
     ]);
-    expect(texts('dialog [role=status]')).toEqual([]);
   }
 
   const creates =
     'the person chooses "Team group" in the dialog, which then asks only for the names and the home, and creates "Studio"';
 
   Scenario('A team group is created without a repository', ({ Given, When, Then, And }) => {
-    Given('the person owns a second computer, "desk", which is connected', () =>
-      secondNode({ ok: true }),
-    );
+    Given('the person owns a second computer, "desk", which is connected', async () => {
+      desk = await ownNode('desk');
+    });
     When(creates, async () => {
       createTeam();
       await vi.waitFor(() => expect(location.hash).toMatch(/^#\/groups\/.{22}$/));
@@ -294,21 +310,9 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       expect(n).toBe(studio);
       expect(home.groups.get(studio)!.name).toBe('Studio');
     });
-    And('"desk" has been told which computer is the home of "Studio"', () => {
-      const notices = desk.home.asked.filter((req) => req.t === 'cmd').map(signed);
-      expect(notices).toEqual([
-        {
-          t: 'home.add',
-          n: expect.any(String),
-          ts: expect.any(Number),
-          to: 'desk-device',
-          g: studio,
-          home: first.store.device,
-          name: 'Studio',
-          addrs: [`ws://${location.host}/rv`],
-        },
-      ]);
-    });
+    And('"desk" has been told which computer is the home of "Studio"', () =>
+      vi.waitFor(() => expect(told(desk)).toEqual(notice(studio)('desk'))),
+    );
     And(
       'its chat opens as a team group, ready for the first message and for inviting people, and without AIs',
       async () => {
@@ -326,38 +330,28 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   });
 
   Scenario(
-    'A team group is created while another computer does not take its home',
+    'A computer that connects later is told the home of a team group',
     ({ Given, When, Then, And }) => {
-      Given('the person owns a second computer, "desk", which refuses to be told a home', () =>
-        secondNode({ err: { code: 'bad_request', msg: 'refused' } }),
-      );
-      When(creates, async () => {
-        createTeam();
-        await vi.waitFor(() => {
-          flushSync();
-          expect(all('dialog [role=status]')).toHaveLength(1);
-        });
-        studio = [...home.groups.keys()].at(-1)!;
+      let late: OwnedNode[];
+      Given('the home also holds the team group "Studio", which the browser shows', async () => {
+        home.add(docs, 'Studio', 'row-group-team');
+        first.drop();
+        await read();
+        openPage();
+        expect(texts('.glist a b').sort()).toEqual(['Studio', 'Website']);
+      });
+      When('the person\'s computer "desk" connects, then "laptop"', async () => {
+        late = [await ownNode('desk'), await ownNode('laptop')];
       });
       Then(
-        'the dialog says "The group was created, but not all of your connected computers were notified."',
-        () => {
-          expect(texts('dialog [role=status]')).toEqual([
-            'The group was created, but not all of your connected computers were notified.',
-          ]);
-          expect(location.hash).toBe('#/groups');
-        },
+        '"desk" and "laptop" have each been told once which computer is the home of "Studio"',
+        () =>
+          vi.waitFor(() => expect(late.map(told)).toEqual(['desk', 'laptop'].map(notice(docs)))),
       );
-      When('the person presses "Open group"', () => {
-        expect(texts('dialog button')).toEqual(['Open group']);
-        one('dialog button').click();
-        flushSync();
-      });
-      Then('the dialog is closed and the address is that of "Studio"', () => {
-        expect(one<HTMLDialogElement>('dialog').open).toBe(false);
-        expect(location.hash).toBe(`#/groups/${studio}`);
-      });
-      And('the dialog starts again with a project group', startsWithProject);
+      And(
+        'neither has been told the home of "Website", a project group of a computer of the person',
+        () => expect(late.flatMap(told).map(({ g }) => g)).toEqual([docs, docs]),
+      );
     },
   );
 

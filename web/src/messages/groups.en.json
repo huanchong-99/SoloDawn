@@ -39,7 +39,5 @@
   "groups.create.home": "Home computer",
   "groups.create.submit": "Create group",
   "groups.create.cancel": "Cancel",
-  "groups.create.notifications": "The group was created, but not all of your connected computers were notified.",
-  "groups.create.open": "Open group",
   "groups.missing": "This group has not been read yet. It is read once the computer that is its home can be reached."
 }

@@ -39,7 +39,5 @@
   "groups.create.home": "群的家",
   "groups.create.submit": "创建",
   "groups.create.cancel": "取消",
-  "groups.create.notifications": "群已建好，但并非所有已连接的电脑都收到了通知。",
-  "groups.create.open": "打开群",
   "groups.missing": "还没有读到这个群。连上它所在的那台电脑后才能读到。"
 }
