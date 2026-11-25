@@ -36,6 +36,7 @@ type homeHostEvWorld struct {
 	loop        *home.Loop
 	watchConn   *home.Conn
 	watchFrames chan any
+	watchSaw    trail
 	laptopConns []*home.Conn
 	nonce       int
 }
@@ -423,16 +424,15 @@ func (w *homeHostEvWorld) closeLaptopConn() error {
 
 func (w *homeHostEvWorld) drainWatchedAIs() error {
 	for {
-		select {
-		case frame := <-w.watchFrames:
-			if frame == "sync" {
-				return nil
-			}
-			if err := w.applyRowsFrame(frame); err != nil {
-				return err
-			}
-		case <-time.After(2 * time.Second):
-			return fmt.Errorf("timed out waiting for watch sync")
+		frame, err := recvFrame(w.watchFrames, 2*time.Second, &w.watchSaw, briefAny)
+		if err != nil {
+			return err
+		}
+		if frame == "sync" {
+			return nil
+		}
+		if err := w.applyRowsFrame(frame); err != nil {
+			return err
 		}
 	}
 }
