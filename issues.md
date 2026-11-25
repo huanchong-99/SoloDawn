@@ -758,6 +758,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-25 · deviation · A confirm card for a task without a brief names "Former member" as the requester
+
+- Symptom: when a role in a task that has no brief is given to another person's AI (`task assign`), the owner is asked "Let Codex act on the request from Former member." Contract `planning/contracts/step-2/confirm.md` section 3: who asked is then the owner of the AI that started the task.
+- Cause: the request is the `task` message, which the home writes with `by: "system"` (`internal/home/cmd_brief.go:339`); `requester` in `web/src/lib/confirm.ts` takes the author of the request. No row says who started a task once its assignee has changed.
+- Status: resolved on `web/confirm-waits`. The sentence names the task and no person, "Let Codex take part in T-12 “Show connection path”." (`confirmSentence` in `web/src/lib/confirm.ts`): the request has the task's id, and task rows are always held. Section 3's person cannot be shown without a new field, which is not worth one.
+
+### 2026-11-25 · bug · After a page load, a confirm card for a call said "from an unknown requester"
+
+- Symptom: an owner who opened the app from the push read "Let Codex answer the call from an unknown requester." in the waiting bar, the group list and the card, until they opened the call's thread. The same for a mention in a thread, and for a main-line request older than the newest 50.
+- Cause: a cold read brings every pending card and the newest 50 main-line messages, and no message of a thread (`internal/home/sync.go:100-103`); `requester` in `web/src/lib/confirm.ts` takes the author from the request's row.
+- Status: resolved on `web/confirm-waits`: after `synced`, `Group` fetches the missing request of each confirm card that waits for the reader, one row each (`#requests` in `web/src/lib/groups.svelte.ts`).
+
+### 2026-11-25 · bug · Confirm cards did not count as waiting, and task badges and system rows missed their step 2 wording
+
+- Symptom: a card that asks an owner "may Pat direct your AI?" showed only in the chat: not in "Waiting on you", the group's count, the in-page notifications or the browser push, so it could expire unseen. A task held by such a card, and a task whose owner had taken over the terminal, showed "In progress". `member_joined`, `member_removed`, `rate_limited`, `rounds_limit`, `preempted`, `group_paused` and `group_resumed` showed as their codes. A card for a role named the secretary, who writes the brief, instead of the person who confirmed it.
+- Cause: the lists of kinds in `waitsFor` and `subject` (`web/src/lib/groups.svelte.ts`), `reminderKinds` (`web/src/lib/push.ts`), `waitingKinds` and the `by: "system"` early return of `classify` (`web/src/lib/notify.svelte.ts`) and `kindLabels` (`web/src/sw.ts`) had no `confirm`; `waitBadge` and `taskBadge` (`web/src/lib/task.ts`) and `SystemRow.svelte` had no case for them, left out while those features were postponed.
+- Status: resolved. Tests: `web/src/lib/{confirm,groups,notify,push,task,when}.test.ts`, `web/src/sw.test.ts`, the group, approval, notification, reminder, task and thread features.
+
 ### 2026-11-25 · bug · `read_thread` gave an AI an empty text for most kinds
 
 - Symptom: a brief, decision, approval, check result or review read back with `"text":""`, and an AI that reads context first (R-33), or the secretary told to write notes after every review, saw nothing of it. A pending decision or a brief in the history of a replaced session was only `(decision)` or `(brief)`.

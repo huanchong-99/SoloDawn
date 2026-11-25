@@ -36,6 +36,18 @@ const relative = (ago: number, lang: string) =>
 export const clock = (ts: number, lang: string) =>
   format(ts, lang, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 
+/** The time of day, with its date when that is not the day of `from`: "Nov 22, 03:00". */
+export const clockOn = (ts: number, from: number, lang: string) =>
+  dayOf(ts) === dayOf(from)
+    ? clock(ts, lang)
+    : format(ts, lang, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+      });
+
 /** The heading of a day in the main line: "today · November 20", "yesterday · November 19",
  *  "Wednesday, November 18", and "November 18, 2025" for a day of another year. */
 export function dayLabel(ts: number, now: number, lang: string) {

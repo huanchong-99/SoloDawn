@@ -10,15 +10,17 @@ Feature: Approval card and waiting bar of the web client
     Given the chat of the group "Website" open in a browser of its owner, set to English
 
   Scenario: The waiting bar lists the cards waiting on the reader and jumps to a card
-    Given the group holds a pending brief, a pending approval and a pending decision for the reader, and an approval for "Mina"
-    Then the chat waiting bar reads "Waiting on you · 3" with chips for the brief, the approval and the decision
+    Given the group holds a pending brief, approval, decision and confirmation for the reader, and an approval for "Mina"
+    Then the chat waiting bar reads "Waiting on you · 4" with chips for the brief, the approval, the decision and the confirmation
     When the person clicks the approval chip in the waiting bar
     Then the chat stays open on "Website" and focus moves to the Approve button of that card
     When the person clicks the brief chip in the waiting bar
     Then focus moves to the brief message in the main line
     When the person clicks the decision chip in the waiting bar
     Then focus moves to the decision message in the main line
-    When the three cards waiting on the reader are no longer pending
+    When the person clicks the confirmation chip in the waiting bar
+    Then focus moves to the Confirm button of that card
+    When the four cards waiting on the reader are no longer pending
     Then the chat has no waiting bar
 
   Scenario: Approving a pending card sends act approve and shows the approved state

@@ -18,6 +18,7 @@
     approval: 'shield',
     decision: 'fork',
     brief: 'doc',
+    confirm: 'shield',
     done: 'check',
     mention: 'at',
   };
@@ -25,6 +26,7 @@
     approval: 'dawn',
     decision: 'dawn',
     brief: 'dawn',
+    confirm: 'dawn',
     done: 'ok',
     mention: 'sky',
   };
@@ -71,7 +73,7 @@
       >
         <span class="glyph"><Icon name={icons[item.kind]} /></span>
         <div class="grow">
-          <b class="cut" id={`n-${item.key}`}>
+          <b class:cut={!item.needsYou} id={`n-${item.key}`}>
             {t(`notify.kind.${item.kind}`)}{title ? ` · ${title}` : ''}
           </b>
           <p class="muted cut">{item.group.name} · {whoOf(item.group, item.msg)}</p>
@@ -155,6 +157,15 @@
   .toast b {
     display: block;
     font-size: 14px;
+  }
+  /* What waits for the reader has room to say who asks. */
+  .toast.need b {
+    display: -webkit-box;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    line-clamp: 2;
+    -webkit-line-clamp: 2;
   }
   .toast p {
     font-size: var(--fs-xs);

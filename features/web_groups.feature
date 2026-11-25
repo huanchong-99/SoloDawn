@@ -11,9 +11,10 @@ Feature: Group list and group cache of the web client
   Scenario: The list shows each group with its last message and what waits for the reader
     Given the home also holds the group "Docs", where "Mina" wrote "Section 3 is in." a minute ago
     And a brief in "Website" waits for the reader to confirm it
+    And a confirmation in "Website" waits for the reader, the owner of "Codex"
     When the browser has read both groups
-    Then the list reads "Docs" with "Mina: Section 3 is in.", then "Website" with "Secretary: Show connection paths"
-    And "Website" shows that 1 card waits for the reader, and "Docs" shows none
+    Then the list reads "Docs" with "Mina: Section 3 is in.", then "Website" with "System: Let Codex act on the request from Mina."
+    And "Website" shows that 2 cards wait for the reader, and "Docs" shows none
 
   Scenario: A group created in the dialog shows in another browser without a reload
     Given a second browser of the same person is connected

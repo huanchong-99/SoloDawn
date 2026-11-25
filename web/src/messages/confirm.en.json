@@ -1,5 +1,6 @@
 {
   "confirm.request.direct": "Let {ai} act on the request from {who}.",
+  "confirm.request.task": "Let {ai} take part in {task} “{title}”.",
   "confirm.request.ask": "Let {ai} answer the call from {who}.",
   "confirm.request.watch": "Let {who} watch {ai}’s terminal.",
   "confirm.requester_unknown": "an unknown requester",

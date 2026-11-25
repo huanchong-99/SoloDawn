@@ -44,6 +44,14 @@ Feature: Task card in the chat main line
     When the group has forge "none"
     Then the merged six-step bar skips pull request and hosted checks as "done, done, -, -, done, done"
 
+  Scenario: A task held for its AI's owner asks that owner, and shows when the owner has taken over its terminal
+    When the home writes "row-task-confirm", its pending confirmation and a task message for it
+    Then the task card shows solid dawn badge "Waiting for your confirmation", step "wait" and a checks link to the confirmation
+    When the confirmation waits on "Mina" instead
+    Then the task card shows neutral "Waiting for Mina's confirmation" with step "now"
+    When the card is confirmed and the assignee's owner takes over its terminal for this task
+    Then the task card shows the takeover badge "AI's owner is driving" with step "now"
+
   Scenario: Waiting tasks distinguish waits on the reader from waits on another person, a reviewer or a conflict
     When the home writes "row-task-waiting" and a task message for it
     Then the task card shows solid dawn badge "Waiting for your decision", steps "wait, -, -, -, -, -" with "Work · 1 / 6", and a checks link to "#m-TDRDfXwvOO-iOegSUoyidg"

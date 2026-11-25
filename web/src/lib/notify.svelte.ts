@@ -7,7 +7,7 @@ import { t } from './prefs.svelte';
 import type { MsgRow, Row } from './proto';
 import { href, route } from './route.svelte';
 
-export type NotifyKind = 'approval' | 'decision' | 'brief' | 'done' | 'mention';
+export type NotifyKind = 'approval' | 'decision' | 'brief' | 'confirm' | 'done' | 'mention';
 
 /** One live notification shown in the shell's overlay layer. */
 export interface Notice {
@@ -30,6 +30,7 @@ const waitingKinds: Partial<Record<MsgRow['kind'], NotifyKind>> = {
   approval: 'approval',
   decision: 'decision',
   brief: 'brief',
+  confirm: 'confirm',
 };
 
 const firstLine = (text: string): string => text.split('\n')[0];
@@ -44,9 +45,14 @@ function cardNotifyKind(group: Group, msg: MsgRow): NotifyKind | null | undefine
 const mentionsMe = (group: Group, msg: MsgRow): boolean =>
   group.me !== undefined && msg.mentions.includes(group.me.id);
 
+/** Whether `msg` never notifies: the reader wrote it, or the home did. Of what the home writes, only
+ *  a confirmation asks something of a person. */
+const isQuiet = (group: Group, msg: MsgRow): boolean =>
+  msg.by === group.me?.id || (msg.by === 'system' && msg.kind !== 'confirm');
+
 /** Notification kind for a newly created message, or undefined when it does not notify this reader. */
 export function classify(group: Group, msg: MsgRow): NotifyKind | undefined {
-  if (msg.by === 'system' || msg.by === group.me?.id) return undefined;
+  if (isQuiet(group, msg)) return undefined;
   const card = cardNotifyKind(group, msg);
   if (card !== null) return card;
   return mentionsMe(group, msg) ? 'mention' : undefined;
@@ -54,7 +60,7 @@ export function classify(group: Group, msg: MsgRow): NotifyKind | undefined {
 
 /** Display name of the member a notification is about. */
 export function whoOf(group: Group, msg: MsgRow): string {
-  const id = msg.kind === 'approval' ? msg.body.ai : msg.by;
+  const id = msg.kind === 'approval' || msg.kind === 'confirm' ? msg.body.ai : msg.by;
   return group.member(id)?.name ?? t('chat.gone');
 }
 
@@ -64,7 +70,7 @@ export function titleOf(group: Group, msg: MsgRow): string {
     const task = group.task(msg.body.task);
     return task ? `T-${task.num} ${task.title}` : firstLine(msg.text);
   }
-  return firstLine(subject(msg));
+  return firstLine(subject(group, msg));
 }
 
 /** Main-line message id to scroll and focus when opening `msg` (the task card for a thread message). */

@@ -52,7 +52,8 @@ Feature: Task thread, review block and system notices
     When the thread of task 12 is mounted
     Then the task_merged row names "Secretary", "T-12", "Show connection path" and commits "9f2c1ab → def4567" with an ok check icon
     And every 1.0 system row is worded in English and the postponed row shows its code
-    And switching the language to Chinese words task_merged under "Secretary" as "已合并 T-12"
+    And only the round limit of a task that waits for a person is warm
+    And switching the language to Chinese words task_merged under "Secretary" as "已合并 T-12" and every other row in Chinese
     When the reader opens the main line of "Website"
     Then the main line also renders the task_merged notice under "Secretary"
 

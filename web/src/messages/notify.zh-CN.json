@@ -2,6 +2,7 @@
   "notify.dismiss": "关闭通知",
   "notify.kind.approval": "审批",
   "notify.kind.brief": "确认开工",
+  "notify.kind.confirm": "确认",
   "notify.kind.decision": "拍板",
   "notify.kind.done": "任务完成",
   "notify.kind.mention": "有人 @ 你",

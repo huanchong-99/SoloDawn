@@ -436,6 +436,68 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   );
 
   Scenario(
+    "A task held for its AI's owner asks that owner, and shows when the owner has taken over its terminal",
+    ({ When, Then }) => {
+      const held = example('row-task-confirm') as p.TaskRow & Record<string, unknown>;
+      const card = held.wait!.msg!;
+      const badge = () => one('.card-head .badge');
+      const mark = () => all('.card .steps i')[0].getAttribute('data-s');
+      When(
+        'the home writes "row-task-confirm", its pending confirmation and a task message for it',
+        () => {
+          home.write(website, held);
+          home.write(website, example('row-msg-confirm-pending', { id: card }));
+          home.write(website, taskMsg('msg-t15', held.id));
+          flushSync();
+        },
+      );
+      Then(
+        'the task card shows solid dawn badge "Waiting for your confirmation", step "wait" and a checks link to the confirmation',
+        () => {
+          const task = one('#m-msg-t15');
+          const pill = task.querySelector<HTMLElement>('.card-head .badge')!;
+          expect(pill.textContent?.trim()).toBe('Waiting for your confirmation');
+          expect(pill.dataset.tone).toBe('dawn');
+          expect(pill.classList.contains('solid')).toBe(true);
+          expect(task.querySelector('.steps i')?.getAttribute('data-s')).toBe('wait');
+          const link = task.querySelector<HTMLAnchorElement>('.kv a')!;
+          expect(link.getAttribute('href')).toBe(`#m-${card}`);
+          expect(link.textContent?.trim()).toBe('Waiting for your confirmation');
+          home.remove(website, 'msg', card);
+          flushSync();
+        },
+      );
+      When('the confirmation waits on "Mina" instead', () => {
+        home.write(website, { ...held, wait: { ...held.wait!, who: ['mina-user'] } });
+        flushSync();
+      });
+      Then('the task card shows neutral "Waiting for Mina\'s confirmation" with step "now"', () => {
+        expect(badge().textContent?.trim()).toBe("Waiting for Mina's confirmation");
+        expect(badge().dataset.tone).toBeUndefined();
+        expect(badge().classList.contains('solid')).toBe(false);
+        expect(mark()).toBe('now');
+      });
+      When(
+        "the card is confirmed and the assignee's owner takes over its terminal for this task",
+        () => {
+          home.write(website, { ...held, wait: null });
+          home.write(
+            website,
+            example('row-member-ai', { id: held.assignee, state: 'takeover', task: held.id }),
+          );
+          flushSync();
+        },
+      );
+      Then(`the task card shows the takeover badge "AI's owner is driving" with step "now"`, () => {
+        expect(badge().textContent?.trim()).toBe("AI's owner is driving");
+        expect(badge().querySelector<HTMLElement>('.st')?.dataset.st).toBe('takeover');
+        expect(badge().dataset.tone).toBeUndefined();
+        expect(mark()).toBe('now');
+      });
+    },
+  );
+
+  Scenario(
     'Waiting tasks distinguish waits on the reader from waits on another person, a reviewer or a conflict',
     ({ When, Then }) => {
       const seen: Array<[string, string | null, boolean, string]> = [];

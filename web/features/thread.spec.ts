@@ -603,6 +603,13 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         'login_invalid',
         'session_replaced',
         'no_secretary',
+        'rounds_limit',
+        'preempted',
+        'rate_limited',
+        'group_paused',
+        'group_resumed',
+        'member_joined',
+        'member_removed',
       ];
 
       Given(
@@ -630,11 +637,36 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             { code: 'session_replaced', ai: codexId, task: taskId },
             { code: 'no_secretary' },
             { code: 'rounds_limit', task: taskId, n: 10 },
+            { code: 'rounds_limit', task: 'paused-task', n: 3 },
+            { code: 'preempted', task: taskId, by: 'mina' },
+            { code: 'rate_limited', ai: codexId, resets: new Date(2026, 10, 22, 15).getTime() },
+            { code: 'rate_limited', ai: codexId, resets: new Date(2026, 10, 23, 3).getTime() },
+            { code: 'group_paused', by: 'mina' },
+            { code: 'group_resumed', by: 'mina' },
+            { code: 'member_joined', member: 'mina', by: owner },
+            { code: 'member_removed', user: 'pat-user', name: "$& $'", by: 'mina' },
+            { code: 'member_removed', user: 'sam-user', name: 'Sam' },
+            { code: 'member_joined', member: 'gone', by: 'gone' },
+            { code: 'cap_reached', ai: codexId, cap: 'day' },
           ];
+          const ts = new Date(2026, 10, 22, 9, 58).getTime();
+          home.write(
+            website,
+            example('row-member-human', { id: 'mina', name: 'Mina', user: 'mina-user' }),
+          );
+          home.write(
+            website,
+            example('row-task', {
+              id: 'paused-task',
+              num: 14,
+              state: 'paused',
+              wait: { kind: 'rounds', since: ts },
+            }),
+          );
           bodies.forEach((body, i) => {
             home.write(
               website,
-              example('row-msg-system', { id: `sys-${i}`, thread: taskId, body }),
+              example('row-msg-system', { id: `sys-${i}`, thread: taskId, ts, body }),
             );
           });
         },
@@ -671,7 +703,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       And('every 1.0 system row is worded in English and the postponed row shows its code', () => {
-        const rendered = texts('.tlist .ti.sys').join('\n');
+        const rows = texts('.tlist .ti.sys');
+        const rendered = rows.join('\n');
         for (const code of activeCodes) expect(rendered).not.toContain(code);
         expect(rendered).toContain('Task T-12 stopped after repeated failures.');
         expect(rendered).toContain('Task T-12 stopped after repeated failed reviews.');
@@ -681,14 +714,48 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         expect(rendered).toContain("Codex's sign-in is no longer valid. · expired token");
         expect(rendered).toContain('Codex started a new session from the task notes. · T-12');
         expect(rendered).toContain('This group has no secretary AI.');
-        expect(rendered).toContain('rounds_limit');
+        expect(rows.slice(9)).toEqual(
+          [
+            'T-12 is paused: the AIs went 10 rounds without a person. Reply in its thread to carry on.',
+            'T-14 is paused: the AIs went 3 rounds without a person. Reply in its thread to carry on.',
+            'Mina jumped the queue. T-12 is paused and carries on afterwards.',
+            'Codex is out of quota until 15:00, then carries on.',
+            'Codex is out of quota until Nov 23, 03:00, then carries on.',
+            'Mina paused the group. All its AIs stop for now.',
+            'Mina resumed the group. Its AIs carry on.',
+            'Mina joined, invited by Alex.',
+            "Mina removed $& $' from the group.",
+            'Sam left the group.',
+            'Former member joined, invited by Former member.',
+            'cap_reached',
+          ].map((line) => `${line} · 09:58`),
+        );
+      });
+      And('only the round limit of a task that waits for a person is warm', () => {
+        const tones = all<HTMLElement>('.tlist .ti.sys .glyph').map((el) => el.dataset.tone);
+        expect(tones.slice(9, 20)).toEqual([undefined, 'dawn', ...Array(9).fill(undefined)]);
       });
       And(
-        'switching the language to Chinese words task_merged under "Secretary" as "已合并 T-12"',
+        'switching the language to Chinese words task_merged under "Secretary" as "已合并 T-12" and every other row in Chinese',
         () => {
           prefs.lang = 'zh-CN';
           flushSync();
           expect(all('.tlist > .ti.sys')[0].textContent).toContain('Secretary 已合并 T-12');
+          expect(texts('.tlist .ti.sys').slice(9, 20)).toEqual(
+            [
+              'T-12 已暂停：AI 之间来回了 10 轮，没有人参与。在话题里说句话就会继续。',
+              'T-14 已暂停：AI 之间来回了 3 轮，没有人参与。在话题里说句话就会继续。',
+              'Mina 插队了，T-12 先暂停，之后自动继续。',
+              'Codex 的额度用完了，15:00 重置后继续。',
+              'Codex 的额度用完了，11月23日 03:00 重置后继续。',
+              'Mina 暂停了这个群，AI 都先停下。',
+              'Mina 恢复了这个群，AI 继续干活。',
+              'Alex 邀请 Mina 加入了群。',
+              "Mina 把 $& $' 移出了群。",
+              'Sam 退出了群。',
+              '已离开的成员 邀请 已离开的成员 加入了群。',
+            ].map((line) => `${line} · 09:58`),
+          );
           prefs.lang = 'en';
           flushSync();
         },
