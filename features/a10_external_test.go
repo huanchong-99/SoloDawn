@@ -149,6 +149,27 @@ func (w *externalWorld) state(name, state string) error {
 	return w.waitState(func() bool { return w.aiByName[name].State == state })
 }
 
+func (w *externalWorld) waitExternalPush(what string, ready func() bool) error {
+	wait := newWait(5*time.Second, what, nil)
+	defer wait.stop()
+	for !ready() {
+		raw, err := recvWait(wait, w.homeLink.pushes)
+		if err != nil {
+			return err
+		}
+		if raw == nil {
+			return errors.New("ctl connection closed before push")
+		}
+		var header struct {
+			Type string `json:"t"`
+		}
+		_ = json.Unmarshal(raw, &header)
+		wait.saw.see(header.Type)
+		w.recordRowsFrame(raw)
+	}
+	return nil
+}
+
 func (w *externalWorld) relabel(tool string) error {
 	cmd := proto.MemberSet{MemberCommand: proto.MemberCommand{HomeCommand: w.homeHeader("member"),
 		Op: "set", ID: proto.ID(w.aiByName["X"].ID)}, Tool: &tool}
@@ -458,22 +479,40 @@ func (w *externalWorld) listedTools() error {
 	return nil
 }
 
-func (w *externalWorld) nextItem(none bool) error {
+func (w *externalWorld) callNextItem() ([]byte, error) {
 	result, err := w.call("next_item", map[string]any{})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if result.IsError {
-		return fmt.Errorf("next_item returned an error: %+v", result)
+		return nil, fmt.Errorf("next_item returned an error: %+v", result)
 	}
-	raw, err := externalResult(result)
-	if err != nil {
-		return err
-	}
+	return externalResult(result)
+}
+
+func (w *externalWorld) nextItem(none bool) error {
 	if none {
+		raw, err := w.callNextItem()
+		if err != nil {
+			return err
+		}
 		return expectExternalNone(raw)
 	}
-	return w.decodeHandout(raw)
+	return waitUntil(5*time.Second, "external MCP next_item handout", w.pollNextItem)
+}
+
+func (w *externalWorld) pollNextItem() error {
+	raw, err := w.callNextItem()
+	if err != nil {
+		return abort(err)
+	}
+	if expectExternalNone(raw) == nil {
+		return errors.New("none")
+	}
+	if err := w.decodeHandout(raw); err != nil {
+		return abort(err)
+	}
+	return nil
 }
 
 func expectExternalNone(raw []byte) error {
