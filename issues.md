@@ -873,6 +873,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `internal/host/deliver.go:1378-1379` can select a stale `cloud_check` row after `tskFinishCloud` releases the polling slot, even after the task has reached review. The home acknowledges the result before sending the updated row (`internal/home/run_group.go:170-171`).
 - Status: resolved in PR #335. The host keeps claims for accepted and superseded commits, while allowing retries after failed result delivery or an accepted resubmission. `TestStaleCloudCheckRowDoesNotRestartCompletedPoll` verifies that resuming from a stale row does not make a second forge call.
 
+### 2026-11-25 · bug · The answer to a CLI's question could outlive the host's Settle and crash the node
+
+- Symptom: `Settle` returned while `runAskedEvent` still ran; `bg.stop name=ask` followed `settle.end`. With a card open it only waited, but an ask that had not posted its card yet, or whose post failed with the connection, wrote to the store after the node closed it: `panic: send on closed channel` (`internal/store/store.go:95`).
+- Cause: `startAskedGoroutine` (`internal/host/approve.go:110`) started it with a plain `go` statement; only `TurnBegan` and `TurnEnded` of its session cancelled it, and no `Settled` entry did. The goroutines of a watched terminal (`internal/host/watch.go:99` and `:173`) are not waited for either; they end with their connection, which `node` closes first, and touch no store.
+- Status: resolved on `fix/host-cloud-poll-settle`: the asks run on the runtime's wait group, and `Settle` (entry `"runtime"`) cancels them after it has ended the CLI processes and waits. `TestSettleWaitsForAnAskWithTheHomeClosed` and `TestSettleEndsAnAskWhoseCardIsBeingPosted` fail with the old `go` statement.
+
+### 2026-11-25 · bug · The hosted checks poll could send a command after the host settled
+
+- Symptom: after `Settle` a poll of hosted checks still ran, and the result it got sent `task cloud`, so `bg.stop name=cloud_poll` and the command could follow `settle.end`.
+- Cause: `startHostedCheck` (`internal/host/tools_task.go:463`) started the poll with a plain `go` statement, and no `Settled` entry ended it or waited for it.
+- Status: resolved on `fix/host-cloud-poll-settle`, with the pattern of `limits.go`: the polls run on `tskPart.wg`, and `Settle` (entry `"task"`) cancels them and waits. `TestSettleEndsTheHostedChecksPoll` checks that the poll has stopped when `Settle` returns and that none starts afterwards; it fails with the old `go` statement.
+
 ### 2026-11-22 · limitation · Browser invitation joining needs the node and home implementations
 
 - Symptom: a current node does not admit a browser through an invitation; it knows only protocol version 1.

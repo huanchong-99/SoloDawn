@@ -558,7 +558,7 @@ func dialTestRTC(t *testing.T, bPeer *peer.Peer, nodeID string) *peer.Connection
 	select {
 	case <-rtcConn.Ready():
 	case <-time.After(10 * time.Second):
-		t.Fatal("WebRTC ctl connection did not open")
+		t.Fatal(timedOut(10*time.Second, "the WebRTC ctl connection to open", nil))
 	}
 	go func() {
 		for {
@@ -733,14 +733,12 @@ func checkForegroundContextStop(t *testing.T) {
 
 func waitCond(t *testing.T, fn func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if fn() {
-			return
+	poll(t, 5*time.Second, "the condition", func() string {
+		if !fn() {
+			return "not met"
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("condition was not met before deadline")
+		return ""
+	})
 }
 
 func seedWorkerNode(t *testing.T, dir, owner string, entries []proto.Envelope, rvURL string, homes []proto.Home, key identity.Key) {
@@ -977,7 +975,7 @@ func TestNodePTYChannelBridge(t *testing.T) {
 	select {
 	case <-rejected:
 	case <-time.After(5 * time.Second):
-		t.Fatal("member terminal channel was not closed")
+		t.Fatal(timedOut(5*time.Second, "the member terminal channel to close", nil))
 	}
 	if p.Attached() {
 		t.Fatal("member terminal channel attached")
@@ -1000,7 +998,7 @@ func TestNodeWatchChannelWithoutGrant(t *testing.T) {
 	select {
 	case <-closed:
 	case <-time.After(5 * time.Second):
-		t.Fatal("ungranted watch channel was not closed")
+		t.Fatal(timedOut(5*time.Second, "the ungranted watch channel to close", nil))
 	}
 }
 
@@ -1063,7 +1061,7 @@ func TestNodeWatchGrantAdmission(t *testing.T) {
 			select {
 			case <-conn.Done():
 			case <-time.After(5 * time.Second):
-				t.Fatal("last grant left the watcher's connection open")
+				t.Fatal(timedOut(5*time.Second, "the watcher's connection to close after the last grant", nil))
 			}
 		})
 	}
@@ -1214,7 +1212,7 @@ func waitPTYBytes(t *testing.T, recvCh <-chan []byte, sub string) {
 		case b := <-recvCh:
 			buf.Write(b)
 		case <-timer.C:
-			t.Fatalf("timed out waiting for %q in %q", sub, buf.String())
+			t.Fatal(timedOut(10*time.Second, fmt.Sprintf("%q in the PTY output", sub), []string{buf.String()}))
 		}
 	}
 }

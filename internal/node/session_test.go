@@ -92,7 +92,7 @@ func (f *fakeCtl) next(t *testing.T) json.RawMessage {
 	case msg := <-f.out:
 		return msg
 	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for frame")
+		t.Fatal(timedOut(5*time.Second, "a frame", nil))
 		return nil
 	}
 }
@@ -546,7 +546,7 @@ func TestHomeLoopIntegrationAndDevlogForwarding(t *testing.T) {
 	select {
 	case <-cFail.Done():
 	case <-time.After(time.Second):
-		t.Fatal("broken connection did not close")
+		t.Fatal(timedOut(time.Second, "the broken connection to close", nil))
 	}
 }
 

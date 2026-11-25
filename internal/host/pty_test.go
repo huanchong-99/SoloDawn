@@ -266,7 +266,7 @@ func (tt *ptyTestTerminal) waitContains(t *testing.T, sub string) {
 		select {
 		case <-tt.notify:
 		case <-deadline.C:
-			t.Fatalf("timed out waiting for %q in %q", sub, tt.output())
+			t.Fatal(timedOut(10*time.Second, fmt.Sprintf("%q in the terminal output", sub), []string{tt.output()}))
 		}
 	}
 }
@@ -479,7 +479,7 @@ func TestPTYProcessSelfExitClosesTerminalAndAllowsReopen(t *testing.T) {
 	select {
 	case <-unattachedDone:
 	case <-time.After(3 * time.Second):
-		t.Fatal("unattached self-exiting PTY did not finish promptly")
+		t.Fatal(timedOut(3*time.Second, "the unattached self-exiting PTY to finish", nil))
 	}
 	if elapsed := time.Since(start); elapsed >= ptyStopTimeout {
 		t.Fatalf("unattached exit took %v, expected well below %v", elapsed, ptyStopTimeout)
@@ -513,13 +513,17 @@ func TestPTYBackPressureStopsReadingWhileTerminalWriteBlocks(t *testing.T) {
 
 	// Wait until the first Read from the PTY has occurred and blocked inside Terminal.Write.
 	deadline := time.Now().Add(5 * time.Second)
-	for spy.reads.Load() == 0 {
-		if time.Now().After(deadline) {
+	defer func() {
+		if t.Failed() {
 			p.Close()
-			t.Fatal("timed out waiting for first PTY read")
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	}()
+	poll(t, 5*time.Second, "the first PTY read", func() string {
+		if n := spy.reads.Load(); n == 0 {
+			return fmt.Sprintf("%d reads", n)
+		}
+		return ""
+	})
 	time.Sleep(40 * time.Millisecond)
 	pinnedReads := spy.reads.Load()
 	if pinnedReads != 1 {
@@ -535,13 +539,12 @@ func TestPTYBackPressureStopsReadingWhileTerminalWriteBlocks(t *testing.T) {
 	// Unblocking Terminal.Write resumes reading from the PTY.
 	term.setBlocked(false)
 	term.waitContains(t, "FLOOD0123456789")
-	for spy.reads.Load() <= pinnedReads {
-		if time.Now().After(deadline) {
-			p.Close()
-			t.Fatal("PTY reads did not resume after unblocking Terminal.Write")
+	poll(t, time.Until(deadline), "PTY reads to resume after unblocking Terminal.Write", func() string {
+		if n := spy.reads.Load(); n <= pinnedReads {
+			return fmt.Sprintf("%d reads", n)
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
+		return ""
+	})
 
 	// Block again and verify ClosePTY cleanly unblocks Terminal.Write and shuts down.
 	term.setBlocked(true)
@@ -735,35 +738,33 @@ func TestPTYResizeFailure(t *testing.T) {
 
 func waitLeafListening(t *testing.T, addrFile string) string {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	var addr string
+	poll(t, 10*time.Second, "the leaf listener in "+addrFile, func() string {
 		data, err := os.ReadFile(addrFile)
-		if err == nil && len(data) > 0 {
-			addr := strings.TrimSpace(string(data))
-			conn, dialErr := net.DialTimeout("tcp", addr, 50*time.Millisecond)
-			if dialErr == nil {
-				conn.Close()
-				return addr
-			}
+		if err != nil || len(data) == 0 {
+			return fmt.Sprintf("file %q, %v", data, err)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for leaf listener in %s", addrFile)
-	return ""
+		addr = strings.TrimSpace(string(data))
+		conn, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
+		if err != nil {
+			return err.Error()
+		}
+		conn.Close()
+		return ""
+	})
+	return addr
 }
 
 func waitLeafStopped(t *testing.T, addr string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	poll(t, 5*time.Second, "the leaf process at "+addr+" to stop listening after the tree kill", func() string {
 		conn, err := net.DialTimeout("tcp", addr, 40*time.Millisecond)
 		if err != nil {
-			return
+			return ""
 		}
 		conn.Close()
-		time.Sleep(15 * time.Millisecond)
-	}
-	t.Fatalf("leaf process at %s still listening after tree kill", addr)
+		return "listening"
+	})
 }
 
 func TestPTYKillTreeStopsLeaderAndChildSubprocess(t *testing.T) {

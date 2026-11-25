@@ -215,7 +215,7 @@ func nextCodexEvent(t *testing.T, ch <-chan Event) Event {
 		codexCheck(t, ok, "events channel closed early")
 		return ev
 	case <-time.After(10 * time.Second):
-		t.Fatal("timed out waiting for event")
+		t.Fatal(timedOut(10*time.Second, "an event", nil))
 		return Event{}
 	}
 }
@@ -236,6 +236,7 @@ func nextNonActiveEvent(t *testing.T, ch <-chan Event) (Event, int) {
 func waitEventsClosed(t *testing.T, ch <-chan Event) []Event {
 	t.Helper()
 	var rest []Event
+	var saw []string
 	timeout := time.After(10 * time.Second)
 	for {
 		select {
@@ -244,8 +245,9 @@ func waitEventsClosed(t *testing.T, ch <-chan Event) []Event {
 				return rest
 			}
 			rest = append(rest, ev)
+			saw = append(saw, string(ev.Kind))
 		case <-timeout:
-			t.Fatal("timed out waiting for events channel to close")
+			t.Fatal(timedOut(10*time.Second, "the events channel to close", saw))
 		}
 	}
 }
@@ -942,18 +944,19 @@ func TestCodexContextCancelKillsProcessTree(t *testing.T) {
 
 func waitTreeChildPID(t *testing.T, treeFile string) int {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	var pid int
+	poll(t, 5*time.Second, "the codex tree helper to record its child pid", func() string {
 		raw, err := os.ReadFile(treeFile)
-		if err == nil {
-			if pid, convErr := strconv.Atoi(strings.TrimSpace(string(raw))); convErr == nil {
-				return pid
-			}
+		if err != nil {
+			return err.Error()
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("codex tree helper did not record child pid")
-	return 0
+		var convErr error
+		if pid, convErr = strconv.Atoi(strings.TrimSpace(string(raw))); convErr != nil {
+			return fmt.Sprintf("file %q", raw)
+		}
+		return ""
+	})
+	return pid
 }
 
 func waitCodexChildGone(t *testing.T, pid int) {
@@ -961,16 +964,15 @@ func waitCodexChildGone(t *testing.T, pid int) {
 	if runtime.GOOS == "windows" {
 		return
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		proc, _ := os.FindProcess(pid)
-		if proc.Signal(syscall.Signal(0)) != nil {
-			return
+	defer func() {
+		if proc, err := os.FindProcess(pid); err == nil && t.Failed() {
+			proc.Kill()
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if proc, err := os.FindProcess(pid); err == nil {
-		proc.Kill()
-	}
-	t.Fatalf("grandchild pid %d survived context cancellation", pid)
+	}()
+	poll(t, 2*time.Second, fmt.Sprintf("grandchild pid %d to end after context cancellation", pid), func() string {
+		if proc, _ := os.FindProcess(pid); proc.Signal(syscall.Signal(0)) == nil {
+			return "running"
+		}
+		return ""
+	})
 }
