@@ -39,9 +39,12 @@ the channel handlers are the caller's.
 - **One inbound connection per device.** The first application of a valid ordinary offer closes that
   signer's earlier inbound connection before the new checks start. A copy or a replay closes
   nothing.
+- **Offers apply once.** `RememberOffer` records an offer across restarts and the claim lasts 120
+  seconds after its timestamp. A repeat of a live offer returns the same answer; a repeat of a
+  closed one returns nothing.
 - **Candidates.** At most 64 per connection, held or applied; one that arrives before its
   description is held for 30 seconds and for at most 8 attempts of one signer; each distinct
-  candidate is applied once.
+  candidate is applied once. Candidates for a retired link are ignored.
 - **ctl.** A frame is at most 60 KiB of UTF-8 and is a request, a push or a response of the
   contract. Any other frame is dropped, or answered `bad_request` when it carries a request id; the
   connection stays open.
@@ -60,6 +63,8 @@ the channel handlers are the caller's.
 - **Path.** `Connection.Path` is `relay` when either candidate of the selected pair is a relay
   candidate, `direct` for any other pair and `""` while none is selected. `PathChanged` signals
   that it may have changed.
+- **Close.** `Close` waits, under the `Peer` lock, for pion to free the mux, so no callback that
+  takes the `Peer` lock may run inside `Close`.
 - **Locks.** The `Peer` lock covers its own decisions only. It is never held while `known`, `paths`,
   `inbound` or a channel handler runs, or while a frame is sent on a `Route`.
 

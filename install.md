@@ -87,36 +87,58 @@ group session: Qwen Code has no known switch to keep it out.
 
 ## Update
 
-Version 1 does not update itself. To update a computer, download the new
-release's `SHA256SUMS` and binary into an empty directory, then verify and
-install as in "Verify and install" above, with the new filename. The node
-keeps its pairing and groups; they are not in the binary. A running node
-keeps running the old program until it restarts, so restart it afterwards.
-Confirm the new tag with `solodawn version`.
+Version 1 does not update itself. The node keeps its pairing and groups;
+they are not in the binary. To update a computer, download the new release's
+`SHA256SUMS` and binary into an empty directory, then for your system do three
+things in this order: stop the node, replace the binary with the commands of
+"Verify and install" above (set `asset` to the new filename in that block),
+and start the node. Confirm the new tag with `solodawn version`.
 
-If the node runs in a terminal, stop it with Ctrl+C and start
-`solodawn node` again. If it runs as the login service, restart it:
+If the node runs in a terminal, press Ctrl+C there first, replace the binary,
+then start `solodawn node` again. If it runs as the login service, use the
+commands below.
 
 **Linux**
 
 ```sh
-systemctl --user restart solodawn.service
+systemctl --user stop solodawn.service
+```
+
+Replace the binary, then:
+
+```sh
+systemctl --user start solodawn.service
 ```
 
 **macOS**
 
 ```sh
-launchctl kickstart -k "gui/$(id -u)/org.solodawn.node"
+launchctl bootout "gui/$(id -u)/org.solodawn.node" 2>/dev/null || true
 ```
 
-**Windows** (PowerShell). The running program cannot be overwritten, so stop
-the task first, run the install commands above, then start it:
+Replace the binary, then:
+
+```sh
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/org.solodawn.node.plist"
+```
+
+**Windows** (PowerShell). A running `solodawn.exe` cannot be overwritten, so
+end the task and wait until no `solodawn` process is left:
 
 ```powershell
 $name = 'SoloDawn-' + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-Stop-ScheduledTask -TaskName $name
-# run the install commands above
-Start-ScheduledTask -TaskName $name
+Stop-ScheduledTask -TaskPath '\' -TaskName $name
+for ($i = 0; $i -lt 10 -and (Get-Process -Name solodawn -ErrorAction SilentlyContinue); $i++) {
+    Start-Sleep -Seconds 1
+}
+Get-Process -Name solodawn -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.Id -Force }
+```
+
+Replace the binary, then:
+
+```powershell
+$name = 'SoloDawn-' + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+Start-ScheduledTask -TaskPath '\' -TaskName $name
 ```
 
 ## Back up a group
