@@ -418,22 +418,24 @@ func checkRemovedPerson(t *testing.T, self bool) {
 	waitGroups(t, node, 1)
 	mustEqual(t, n.knownPeer(device.ID()), true)
 	remove(second)
-	for _, c := range []*fakeCtl{browser, node} {
-		waitGroups(t, c, 0)
-		select {
-		case <-c.Done():
-		case <-time.After(5 * time.Second):
-			t.Fatal("a removed person's connection stayed open")
-		}
-	}
-	for _, key := range []identity.Key{guest, device} {
-		mustEqual(t, n.knownPeer(key.ID()), false)
-	}
+	waitLastGroups(t, browser)
+	waitLastGroups(t, node)
+	mustEqual(t, n.knownPeer(guest.ID()) || n.knownPeer(device.ID()), false)
 	mustEqual(t, n.knownPeer(admin.ID()), true)
 	_, err = n.logs.dvlCommit(guest.ID(), []proto.Envelope{sesAddEntry(guest, guest.ID(), 3, device.ID(), "node", "Renamed")})
 	mustNoErr(t, err)
 	_, err = OpenLogs(n.db, n.key.ID()) // an entry stored without the log would end the next start
 	mustNoErr(t, err)
+}
+
+func waitLastGroups(t *testing.T, c *fakeCtl) {
+	t.Helper()
+	waitGroups(t, c, 0)
+	select {
+	case <-c.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("a removed person's connection stayed open")
+	}
 }
 
 func guestMember(group proto.ID) proto.ID { return sesID(string(group) + "-join") }

@@ -53,10 +53,9 @@ type SessionConfig struct {
 	Addrs       func() []string
 	Now         func() time.Time
 	Report      func(error)
+	Known       func(device string) bool // whether device may be connected; nil: any device
 	OnAdopt     func(owner string)
 	Spawn       func(func())
-	// Known reports whether device has a reason to be connected; nil admits all.
-	Known func(device string) bool
 }
 
 // Sessions serves ctl connections, dispatches home and host surfaces, forwards
@@ -80,7 +79,7 @@ type sesConn struct {
 	device           string
 	paired, welcomed bool
 	raw              Ctl
-	known            func() bool
+	hub              *Sessions // set by serve
 	sendMu           sync.Mutex
 	home             *home.Conn
 	staging          map[string]*identity.Log
@@ -142,7 +141,7 @@ func (s *Sessions) Serve(ctx context.Context, device string, paired bool, raw Ct
 }
 
 func (s *Sessions) serve(ctx context.Context, c *sesConn, joining func() *home.Joining) {
-	c.known = func() bool { return s.cfg.Known == nil || c.joining.pending() || s.cfg.Known(c.device) }
+	c.hub = s
 	c.home = s.cfg.Home.Attach(c.device, c)
 	c.home.SetJoining(joining)
 	s.mu.Lock()
@@ -284,6 +283,10 @@ func (s *Sessions) sesFetch(_ context.Context, conn *home.Conn, _ Ctl, _ string,
 
 func (s *Sessions) sesEnrolled(c *sesConn) bool {
 	return s.sesWelcomed(c) && !c.joining.pending() && (s.cfg.Logs.Known(c.device) || s.cfg.Host.Watching(c.device))
+}
+
+func (s *Sessions) sesMayStay(c *sesConn) bool {
+	return s.cfg.Known == nil || c.joining.pending() || s.cfg.Known(c.device)
 }
 
 func (s *Sessions) sesWelcomed(c *sesConn) bool {
@@ -601,21 +604,20 @@ func (c *sesConn) sendErr(re int64, code, msg string) {
 }
 
 func (c *sesConn) Send(frame any) error {
-	switch f := frame.(type) {
-	case sesWelcome:
-		return c.sendWelcome(f)
-	case proto.Groups:
-		return c.sendGroups(f)
-	default:
-		return c.send(frame)
+	if w, ok := frame.(sesWelcome); ok {
+		return c.sendWelcome(w)
 	}
+	if groups, ok := frame.(proto.Groups); ok {
+		return c.sendGroups(groups)
+	}
+	return c.send(frame)
 }
 
 // sendGroups pushes the groups, the last frame of a device that has no reason
 // left to be connected: after a removal or a revocation the home always pushes
 // them.
 func (c *sesConn) sendGroups(frame proto.Groups) error {
-	if c.known() {
+	if c.hub.sesMayStay(c) {
 		return c.send(frame)
 	}
 	c.send(frame)
