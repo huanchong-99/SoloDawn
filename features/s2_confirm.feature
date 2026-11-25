@@ -242,7 +242,7 @@ Feature: A request for another person's AI needs its owner's word
 
     @pending
     Examples:
-      | action | status | turn             | mentions |
+      | action | status | turn           | mentions |
       | deny   | denied | (?i)\bdenied\b | 0        |
 
   Scenario Outline: A9.18 — A listed or same-owner caller receives its reply in the open ask
