@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"log/slog"
 	"maps"
 	"net"
 	"net/http"
@@ -140,7 +141,9 @@ type nodeRuntime struct {
 	stop      context.CancelFunc
 	dir, exe  string
 	logFile   *logFile
-	prevLog   io.Writer
+	resetLog  func()
+	level     slog.Level
+	diag      *slog.Logger
 	key       identity.Key
 	db        *store.Store
 	logs      *Logs
@@ -200,8 +203,8 @@ func (n *nodeRuntime) stepLog() error {
 	if err != nil {
 		return err
 	}
-	n.logFile, n.prevLog = lf, log.Writer()
-	log.SetOutput(lf)
+	n.logFile, n.level = lf, diagLevel(n.dir)
+	n.resetLog = diagOutput(lf, n.level)
 	return nil
 }
 
@@ -219,6 +222,8 @@ func (n *nodeRuntime) stepIdentity() error {
 		return err
 	}
 	n.exe, n.key, n.db = exe, key, db
+	n.diag = slog.With("node", diagDevice(key.ID()))
+	n.diagNode("node.start")
 	return nil
 }
 
@@ -256,8 +261,8 @@ func (n *nodeRuntime) wireServices() {
 	nameFn := func() string { return ReadName(n.db) }
 	n.sessions = NewSessions(SessionConfig{
 		ID: n.key.ID(), Version: Version, Store: n.db, Logs: n.logs,
-		Home: n.loop, Host: n.host, Name: nameFn, Addrs: n.addrs,
-		OnAdopt: n.onAdopt, Spawn: n.spawn, Known: n.knownPeer,
+		Home: n.loop, Host: n.host, Name: nameFn, Addrs: n.addrs, OnAdopt: n.onAdopt,
+		Spawn: func(fn func()) { n.spawn("host_cmd", fn) }, Known: n.knownPeer,
 	})
 	NewSurface(SurfaceConfig{
 		ID: n.key.ID(), Version: Version, Exe: n.exe, Store: n.db,
@@ -302,7 +307,7 @@ func (n *nodeRuntime) startLocalHTTP(ln net.Listener) error {
 		return err
 	}
 	n.localPath = path
-	n.spawn(func() { path.Serve(n.ctx, n.peer, n.rvEvents(n.ctx, path)) })
+	n.spawn("local_rv", func() { path.Serve(n.ctx, n.peer, n.rvEvents(n.ctx, path)) })
 	return nil
 }
 
@@ -343,10 +348,11 @@ func (n *nodeRuntime) withBg(fn func()) {
 	}
 }
 
-func (n *nodeRuntime) spawn(fn func()) {
+func (n *nodeRuntime) spawn(name string, fn func()) {
 	if n.enterBg() {
 		go func() {
 			defer n.bg.Done()
+			defer n.diagBG(name)()
 			fn()
 		}()
 	}
@@ -354,6 +360,9 @@ func (n *nodeRuntime) spawn(fn func()) {
 
 func (n *nodeRuntime) Close() {
 	n.closeOnce.Do(func() {
+		if n.diag != nil {
+			n.diagNode("node.stop")
+		}
 		n.mu.Lock()
 		n.closing = true
 		n.mu.Unlock()
@@ -393,7 +402,7 @@ func (n *nodeRuntime) closeCore() {
 		n.db.Close()
 	}
 	if n.logFile != nil {
-		log.SetOutput(n.prevLog)
+		n.resetLog()
 		n.logFile.Close()
 	}
 }
@@ -449,17 +458,18 @@ func (n *nodeRuntime) closeUnknownDevice(device string) {
 }
 
 func (n *nodeRuntime) serveInbound(c *peer.Connection) {
-	n.spawn(func() { n.pairer.Serve(n.ctx, c.Device, c) })
+	n.spawn("inbound", func() { n.pairer.Serve(n.ctx, c.Device, c) })
 }
 
 func (n *nodeRuntime) dialHome(ctx context.Context, device string, run func(clientCtl)) {
-	n.spawn(func() {
+	n.spawn("home_dial", func() {
+		n.diag.Info("home.dial", "home", diagDevice(device))
 		runCtx, cancel := context.WithCancel(ctx)
 		stop := context.AfterFunc(n.ctx, cancel)
 		defer stop()
 		defer cancel()
 		n.peer.Connect(runCtx, device, nil, func(c *peer.Connection) {
-			n.spawn(func() { run(c) })
+			n.spawn("home_session", func() { run(c) })
 		})
 	})
 }
@@ -600,6 +610,7 @@ func (n *nodeRuntime) waitRVPath(url string) error {
 
 func (n *nodeRuntime) runRVLoop(ctx context.Context, url string, loop *rvLoop) {
 	defer n.bg.Done()
+	defer n.diagBG("rendezvous")()
 	delay := time.Second
 	for ctx.Err() == nil {
 		delay = peer.NextDelay(ctx, nil, delay, n.serveOneRV(ctx, url, loop))
@@ -642,6 +653,7 @@ func (n *nodeRuntime) serve(l *Local) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer n.diagBG("local")()
 			n.handleLocal(conn)
 		}()
 	}

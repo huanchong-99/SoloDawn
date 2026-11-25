@@ -10,6 +10,7 @@ kind: reference
 `internal/node` assembles the components of a SoloDawn node ([architecture](../../planning/architecture.md), section 8):
 
 - `node.go` and `proc_*.go`: `Foreground()` runtime assembly (`openNode`, `runNode`), `logs/node.log` rotation at 10 MiB (keeping `.1`), `device.key` and `node.db` initialization, `home.StartLoop` (`OwnerFn: logs.Owner`), `host.Host` + `ServeMCP` on the local socket, `AttachLocal`, `Logs` + `Sessions` + `Surface` + `Pairer`, start-at-login registration on adoption (`InstallService`), `peer.Peer` + `Host.Connect`, embedded local web UI (`localhost:47800` with `:0` fallback) + `/rv` local signalling path, and persistent remote rendezvous connections ([local](../../planning/contracts/local.md), sections 1-3 and 10).
+- `diag.go`: the node's diagnostic events, the level file and the form of the log ([diagnostics](../../planning/contracts/diagnostics.md)).
 - `dir.go` and `socket*.go`: per-user data directory, exclusive lock on `lock`, and owner-only local Unix socket (`sock`) carrying local CLI commands and MCP sessions ([local](../../planning/contracts/local.md), sections 2 and 3).
 - `cmd.go`: the `Subcommands` table, `MCP` (`solodawn mcp --token <t>` or `--member <id>`), and local command exchange (`solodawn pair` auto-starts a detached background node when `sock` is absent).
 - `export.go`: `solodawn group export <group id> <file> [--to <device id>]` and `solodawn group import <file>` use the running node's local socket. Export without `--to` keeps the group on the old node; export with it makes the old node answer `moved`. Import requires a node of the same owner and no existing rows for that group. Files resolve relative to the CLI's working directory.
@@ -115,6 +116,19 @@ Non-owner devices may send `watch.start` as well as `sync` and `fetch`. A device
 6. `SurfaceConfig.Agents` is set to `(*Host).Agents` (`HS-3`), and `peer.New` registers `pty:` channels onto `(*Host).ServeTerminal` (`HS-19`) and receive-only `watch:` channels onto `(*Host).ServeWatch` (`T2-6`). Watch grants and channel lifetimes belong to the host; `host.info` exposes them as `agents[].groups[].watchers`.
 7. `netStatusPart` is wired to `(*nodeRuntime).netStatus` (`netstatus.go`), and `stepStartup` launches `startRetention` (`schedule.go`).
 
+## Diagnostics
+
+`diag.go` writes the node's events of [diagnostics](../../planning/contracts/diagnostics.md) section 2
+through `log/slog`, with a logger made in `stepIdentity` that holds `node`, the first 8 characters of
+the device id. `node.start` (`stepIdentity`) and `node.stop` (the start of `Close`): `version`, `os`,
+`level`; `home.dial` (`dialHome`, the dial that `connectHome` starts): `home`, cut to 8 characters;
+`bg.start` and `bg.stop` (`name`) around every goroutine that a wait group of the runtime starts:
+`home_dial`, `home_session`, `host_cmd`, `inbound`, `local` (one local socket connection), `local_rv`,
+`rendezvous`, `retention`. The goroutine writes its own start, because the caller may hold a mutex,
+and its stop before its wait group's `Done`. `stepLog` sets the flags of `log` (date, time with
+microseconds, UTC) and the level, which is `debug` when `logs/level` holds the word `debug` and `info`
+otherwise; `closeCore` puts back the output, the flags and the level.
+
 ## Known limitations
 
 - `Surface` answers `host.info` requests and forwards `pty.resize` pushes; there is no `host.info` push yet, `settings.set` is postponed with `U-12`.
@@ -124,4 +138,4 @@ Non-owner devices may send `watch.start` as well as `sync` and `fetch`. A device
 
 ## Verification and sources
 
-`go test ./internal/node/ ./internal/node/nodetest/` covers every statement of both packages, including foreground runtime startup, port fallback, log rotation, adoption login-service registration, rendezvous reconnects, room pairing in both roles, `pair.browser` single-use expiry and nonce replay, `host.info` state assembly, local socket locking, opening lines, MCP shim dispatch, `pair` auto-start, service definitions, `Updater` verification, `LocalLink` `cmd`, `sync`, `fetch` and `ack` framing, inbox delivery for groups created after `AttachLocal`, cancellation and closure, and `nodetest` startup and fake CLI replay. Acceptance scenarios live in `features/node.feature`, `features/node_service.feature`, `features/node_update.feature`, `features/node_local.feature`, `features/node_session.feature` and `features/node_pair.feature`.
+`go test ./internal/node/ ./internal/node/nodetest/` covers every statement of both packages, including foreground runtime startup, port fallback, log rotation, the diagnostic events (`diag_test.go`), adoption login-service registration, rendezvous reconnects, room pairing in both roles, `pair.browser` single-use expiry and nonce replay, `host.info` state assembly, local socket locking, opening lines, MCP shim dispatch, `pair` auto-start, service definitions, `Updater` verification, `LocalLink` `cmd`, `sync`, `fetch` and `ack` framing, inbox delivery for groups created after `AttachLocal`, cancellation and closure, and `nodetest` startup and fake CLI replay. Acceptance scenarios live in `features/node.feature`, `features/node_service.feature`, `features/node_update.feature`, `features/node_local.feature`, `features/node_session.feature` and `features/node_pair.feature`.

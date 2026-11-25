@@ -257,9 +257,14 @@ var (
 	diagKids  []diagChild
 )
 
-// startNodeCmd starts a node as a child process; a scenario that fails
-// leaves the node's logs folder and what it wrote to standard error.
+// startNodeCmd starts a node as a child process that logs at debug level; a
+// scenario that fails leaves the node's logs folder and what it wrote to
+// standard error.
 func startNodeCmd(t testing.TB, cleanup func(func()), cmd *exec.Cmd, name, data string, stderr fmt.Stringer) (func(), error) {
+	logs := filepath.Join(data, "logs")
+	if err := errors.Join(os.MkdirAll(logs, 0o700), os.WriteFile(filepath.Join(logs, "level"), []byte("debug"), 0o600)); err != nil {
+		return nil, err
+	}
 	stop, err := startManagedCmd(t, cleanup, cmd)
 	if err == nil {
 		diagKidsM.Lock()

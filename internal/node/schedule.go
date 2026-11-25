@@ -11,7 +11,7 @@ import (
 
 func (n *nodeRuntime) startRetention() {
 	t := time.NewTicker(24 * time.Hour)
-	n.spawn(func() {
+	n.spawn("retention", func() {
 		defer t.Stop()
 		runRetention(n.ctx, n.db, time.Now(), t.C)
 	})

@@ -22,7 +22,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: several tests called flaky were product races (A9.24 twice, the A9.23 bulletin attach, the A10.3 pause read, a host teardown race). Each took hours of stress runs to find, and the first Windows A7.9 failure contained no candidate-pair trace. The owner's rule of 2026-11-23: an intermittent failure must not depend on being reproduced; the logs of its one occurrence, in CI or on the owner's machines, must point at the cause.
 - Cause: the node logs only errors, in prose (`log.Printf` in `internal/host/deliver.go`, `internal/home/run.go`, `internal/node/session.go`). A wait in a test that times out says only that it did (`features/m4_test.go:70`, "timed out waiting on M4 home frames"). CI keeps nothing from a failed scenario (`.github/workflows/backend.yml`).
-- Status: open. The contract is [diagnostics](planning/contracts/diagnostics.md); the units are DG-1 to DG-7 of `planning/steps/parallel-plan-step-2-3.md` section 4.3.
+- Status: resolved by DG-1 to DG-7 of `planning/steps/parallel-plan-step-2-3.md` section 4.3, of which DG-4 (the node's events, the level file, "After a failure" in `install.md`) was the last. The contract is [diagnostics](planning/contracts/diagnostics.md); its section 6 lists what is not verified, the Windows `tar` line of `install.md` among it (I-11).
 
 ### 2026-11-23 · limitation · A required escalation can outlast its last stronger candidate
 

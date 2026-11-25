@@ -173,3 +173,29 @@ Skip this section unless you were asked to run a server. The pairing steps
 above use the rendezvous of the page that gave you the prompt. To run your own
 server and protect your installation from the outside, see
 [Self-host a rendezvous and protect it](https://github.com/huanchong-99/SoloDawn/blob/main/docs/cookbook/self-hosting.md).
+
+## After a failure
+
+Run the command for your system and send the archive it writes, with the time
+of the failure; the times in the log are UTC. Do it soon: the node keeps only
+`node.log` and the file before it, 10 MB each. The node need not be stopped.
+The lines hold ids, counts and states, not messages, file contents, tokens or
+keys; an error line can name a file.
+
+**macOS**
+
+```sh
+tar czf ~/Desktop/solodawn-logs.tgz -C "$HOME/Library/Application Support/solodawn" logs
+```
+
+**Linux**
+
+```sh
+tar czf ~/solodawn-logs.tgz -C "${XDG_DATA_HOME:-$HOME/.local/share}/solodawn" logs
+```
+
+**Windows** (PowerShell)
+
+```powershell
+tar -a -cf "$env:USERPROFILE\Desktop\solodawn-logs.zip" -C "$env:LocalAppData\solodawn" logs
+```
