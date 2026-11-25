@@ -5,6 +5,7 @@ package features
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -209,11 +210,16 @@ func (t *s2TerminalWorld) confirm() error {
 }
 
 func (t *s2TerminalWorld) waitGrant() error {
-	if err := t.owner.send(map[string]any{"t": "host.info", "id": 1 << 30}); err != nil {
-		return err
-	}
-	_, err := t.owner.nextCtl(t.hasWatcher)
-	return err
+	return waitUntilCtx(t.c.Ctx, 100*time.Millisecond, "Q1 to list P as a watcher", func() error {
+		raw, err := t.owner.request(map[string]any{"t": "host.info"})
+		if err != nil {
+			return abort(err)
+		}
+		if !t.hasWatcher(raw) {
+			return errors.New("no watcher listed")
+		}
+		return nil
+	})
 }
 
 type s2WatcherGroup struct {
