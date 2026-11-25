@@ -10,10 +10,11 @@ on:
 permissions:
   contents: read
 
-# A new push to a pull request cancels the run it supersedes; a push to rebuild never does.
+# A new push to a pull request, or to rebuild, cancels the run it supersedes. A pull request and a
+# push never share a group: the group is the pull request's number or the pushed ref.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 # A pull request runs the smoke tests only when it changes internal/node/service_*, cmd/solodawn/ or
 # anything under .github/ (see changes.yml); a push to rebuild always runs them. The job-level

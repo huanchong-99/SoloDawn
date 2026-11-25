@@ -9,11 +9,11 @@ on:
 permissions:
   contents: read
 
-# A new push to a pull request cancels the run it supersedes. A push to rebuild never does: each of
-# its runs has a group of its own, since one group would drop all but the newest queued run.
+# A new push to a pull request, or to rebuild, cancels the run it supersedes. A pull request and a
+# push never share a group: the group is the pull request's number or the pushed ref.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 # Which parts of the tree a pull request touches decides which jobs run (see changes.yml); a push
 # to rebuild runs all of them. conflict-markers has no condition: it also checks documentation.
@@ -97,7 +97,17 @@ jobs:
         with:
           go-version: '1.27.x'
           check-latest: true
+      - name: Folder for the diagnostics of failed scenarios
+        run: echo "SOLODAWN_TEST_ARTIFACTS=$RUNNER_TEMP/diagnostics" >> "$GITHUB_ENV"
       - run: go test -race -tags acceptance -count=1 -timeout 50m ./features/...
+      # A failed scenario leaves its logs and goroutines there (planning/contracts/diagnostics.md section 4).
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostics-race-${{ runner.os }}
+          path: ${{ runner.temp }}/diagnostics
+          retention-days: 14
+          if-no-files-found: ignore
 
   # The network simulation needs root and the kernel's netns and nftables.
   # Its tests are built with the tag "netsim" and run as root here only.
