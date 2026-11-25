@@ -26,9 +26,9 @@
   // The `@` whose list the person closed with Escape.
   let closed = $state(-1);
 
-  // With a keyboard, Enter sends and Shift+Enter breaks the line. On a touch keyboard Enter
-  // breaks the line and the button sends.
-  const keyboard = new MediaQuery('pointer: fine');
+  // Enter sends and Shift+Enter breaks the line, also on a computer without a mouse. On a touch
+  // keyboard Enter breaks the line and the button sends.
+  const touch = new MediaQuery('pointer: coarse');
 
   const readonly = $derived(!group.home.ctl);
   const people = $derived(task ? threadMembers(group, task) : group.members);
@@ -110,7 +110,7 @@
     // A key pressed while an input method composes a character belongs to the input method.
     if (event.isComposing) return;
     if (found.length) return listKey(event);
-    if (event.key === 'Enter' && !event.shiftKey && keyboard.current) {
+    if (event.key === 'Enter' && !event.shiftKey && !touch.current) {
       event.preventDefault();
       void send();
     }

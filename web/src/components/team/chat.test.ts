@@ -104,6 +104,20 @@ it('starts mentions, selects people with the mouse and handles all completion ke
   expect(field().value).toBe('say @owner ');
 });
 
+// Firefox tells `pointer: none` of a computer without a mouse, as of a headless one on Linux.
+it.each([
+  ['fine', 1],
+  ['none', 1],
+  ['coarse', 0],
+])('with the pointer %s, Enter sends %i messages', (pointer, sent) => {
+  const { group } = setup();
+  openPage(`#/groups/${group.g}`, 1440, pointer);
+  const post = vi.spyOn(group, 'post').mockReturnValue(new Promise(() => {}));
+  type('hello');
+  press('Enter');
+  expect(post).toHaveBeenCalledTimes(sent);
+});
+
 it('shows a task event after its task has disappeared', () => {
   const { group } = setup();
   const msg = p.decode(p.MsgRow, goldens['row-msg-task']);
