@@ -874,12 +874,21 @@ func firstJump(h *Host, d *delivery, key aiGroupKey, ai aiInfo) (proto.Item, Ses
 	queue := slices.Clone(d.held[key])
 	d.mu.Unlock()
 	paused := groupIsPaused(h, key.group)
+	if len(queue) > 0 {
+		diagTake(h, key, "", nil, queue, paused)
+	}
 	for _, v := range queue {
 		if target := routeSessionItem(h, ai, v); bool(v.item.Jump) && !isItemHeld(h, target, v, paused) {
 			return v.item, target.key, true
 		}
 	}
 	return proto.Item{}, SessionKey{}, false
+}
+
+// diagTake writes inbox.take: what a look at the AI's queue took and left.
+// While the AI runs a turn it takes nothing.
+func diagTake(h *Host, key aiGroupKey, task string, took, left []verifiedItem, paused bool) {
+	h.diag.Info("inbox.take", "g", key.group, "ai", key.member, "task", task, "took", diagItems(took), "left", diagItems(left), "paused", paused)
 }
 
 func (d *delivery) openPreemption(key aiGroupKey, p *preemption) bool {
@@ -1045,7 +1054,7 @@ func takeEligibleBatch(h *Host, d *delivery, key aiGroupKey, ai aiInfo) (routedT
 	target, taken, takenIDs := selectEligibleBatch(h, ai, itemsToGo(queue, jumpsOnly), readPause)
 	if len(queue) > 0 {
 		left := slices.DeleteFunc(queue, func(v verifiedItem) bool { return takenIDs[v.item.Item] })
-		h.diag.Info("inbox.take", "g", key.group, "ai", key.member, "task", target.key.Task, "took", diagItems(taken), "left", diagItems(left), "paused", paused)
+		diagTake(h, key, target.key.Task, taken, left, paused)
 	}
 	if len(taken) == 0 {
 		return routedTarget{}, nil, false

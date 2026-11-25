@@ -65,8 +65,9 @@ home's device id is cut to 8 characters. `host.attach` (`Attach`) and `host.deta
 `g`, `home`; at the end `seq`, `ok`); `rows.recv` (`pushRows`: `g`, `home`, `seq` the first and last
 row, `""` for none); `inbox.recv` (`handleInboxElem`: `g`, `item`, `ai`, `kind` the item's `why`,
 `seen`); `inbox.hand` (`tryOpenWait`: `g`, `item`, `wait`); `inbox.take` (`takeEligibleBatch` when
-the AI's queue is not empty: `g`, `ai`, `task`, `took` and `left` item numbers, `paused` the one
-pause reading of the batch); `ack.send` (`sendAck`: `g`, `home`, `item`); `turn.begin` and
+the AI's queue is not empty, and `firstJump` while the AI runs a turn and nothing is taken: `g`,
+`ai`, `task`, `took` and `left` item numbers, `paused` the one pause reading of the batch);
+`ack.send` (`sendAck`: `g`, `home`, `item`); `turn.begin` and
 `turn.end` (the `diag` entry of `Listeners`: `g`, `ai`, `task`; at the end `status`);
 `turn.interrupt` (`interruptSessionTurn`, when it claims the turn: `why` is `stop`, `timeout` or
 `jump`); `proc.start` and

@@ -354,8 +354,11 @@ func TestJumpForAnotherSessionPreemptsTheTaskAndContinuesIt(t *testing.T) {
 			t.Fatal("the retired item was acknowledged")
 		}
 	})
-	line := "turn.interrupt node=" + seamKey().ID()[:8] + " g=" + runGroup1 + " ai=" + runAI1 + " task=" + runTask1 + " why=jump"
-	d.lineOnce(t, line)
+	where := " node=" + seamKey().ID()[:8] + " g=" + runGroup1 + " ai=" + runAI1
+	d.lineOnce(t, "turn.interrupt"+where+" task="+runTask1+" why=jump")
+	if busy := "inbox.take" + where + ` task="" took="" left=4,3 paused=false`; d.count(d.is(busy)) == 0 {
+		t.Fatalf("no line %q for the look at the queue of the busy AI", busy)
+	}
 }
 
 func TestJumpForTheRunningSessionGoesFirstAndReportsNothing(t *testing.T) {
