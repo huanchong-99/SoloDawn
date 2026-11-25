@@ -33,6 +33,7 @@ type process struct {
 	session, id    json.RawMessage
 	mcp            *mcp
 	http           *openCode
+	log            *os.File
 }
 
 // Run is one start of a fake CLI. It returns the exit status.
@@ -68,6 +69,7 @@ func (p *process) replay() (int, error) {
 		return 0, fmt.Errorf("SOLODAWN_FAKECLI_LOG: %w", err)
 	}
 	defer log.Close()
+	p.log = log
 	fmt.Fprintln(log, "start", p.vendor, id)
 	defer fmt.Fprintln(log, "exit", p.vendor, id)
 	defer p.stopMCP()

@@ -94,7 +94,7 @@ func loopbackEngine() webrtc.SettingEngine {
 	return engine
 }
 func sockets(t *testing.T) *Sockets {
-	s, err := listen(0, "127.0.0.1:0", loopbackEngine(), ice.UDPMuxFromPortWithLoopback(), ice.UDPMuxFromPortWithIPFilter(loopback))
+	s, err := listen(0, "127.0.0.1:0", "test", loopbackEngine(), ice.UDPMuxFromPortWithLoopback(), ice.UDPMuxFromPortWithIPFilter(loopback))
 	check(t, err)
 	t.Cleanup(func() { s.Close() })
 	return s

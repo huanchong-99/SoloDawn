@@ -27,6 +27,7 @@ the channel handlers are the caller's.
 | `stream.go` | `Stream`: any other data channel as a stream of bytes |
 | `path.go` | `Path`: the signalling WebSocket, `Dial`, `Serve`, frame pacing and renewal of the ICE servers |
 | `sockets.go` | `Sockets`, `Listen`, the two WebRTC APIs, and `Connection.Path` with `PathChanged` |
+| `accept.go` | `Steady`, a listener whose accept loop ends only when it is closed |
 | `reconnect.go` | `Connect` and its back-off |
 | `unanswered.go` | an offer's wait for an answer, ended by `Offline` |
 | `diag.go` | the diagnostic events of a connection ([diagnostics](../../planning/contracts/diagnostics.md)) |

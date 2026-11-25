@@ -32,8 +32,10 @@ Markers as in `contracts/local.md`: `[verified]` run by the planning lead,
   made where the package is given the node's key or id. It tells apart two
   nodes in one test process, and the logs of two machines.
 - A field holds an id, a count, a sequence number, a state, a duration in
-  milliseconds (`ms`) or a reason from the lists of section 2 (`why`). A
-  device id is cut to 8 characters; other ids are whole. A session is the
+  milliseconds (`ms`) or a reason from the lists of section 2 (`why`); an
+  error line may also hold the system's own error text (`err`), whose
+  address or socket path in the data directory holds no project path or
+  secret. A device id is cut to 8 characters; other ids are whole. A session is the
   three fields `g`, `ai`, `task`. A line never holds the text of a message
   or a turn, file content, a path inside a project, a token or a key: the
   owner sends this file to others.
@@ -51,6 +53,7 @@ today; the builder may move a line to the nearest place that has the fields.
 | Event | Where | Fields besides `node` |
 | --- | --- | --- |
 | `node.start`, `node.stop` | `node`: the runtime opens, closes | `version`, `os`, `level` |
+| `accept.fail` (`error`) | `peer`: `steadyListener.Accept`, an accept error that did not end the listener | `name` (`local`, `http`, `ice_tcp`), `err` (the system's text) |
 | `home.dial` | `node`: `dialHome` starts the dial of a home | `home` |
 | `home.attach` | `home`: `Loop.Attach` | `dev` |
 | `home.detach` | `home`: `Loop.Detach` | `dev`, `why`: `gave_up` (the queue was full or a send failed), `ended` |

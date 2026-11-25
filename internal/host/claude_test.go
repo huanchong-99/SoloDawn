@@ -1,6 +1,7 @@
 package host
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/huanchong-99/SoloDawn/internal/proto"
 )
 
 var claudeUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
@@ -219,6 +222,7 @@ func TestClaudeStreamLineAndRateEvents(t *testing.T) {
 		want []Event
 	}{
 		{`{"type":"system","subtype":"init","session_id":"s1"}`, []Event{{Kind: Ready, Session: "s1"}}},
+		{`{"type":"system","subtype":"init","session_id":"s1","mcp_servers":[{"name":"other","status":"failed"},{"name":"solodawn","status":"connected"}]}`, []Event{{Kind: Ready, Session: "s1"}}},
 		{`{"type":"assistant","subtype":"init","session_id":"s1"}`, []Event{{Kind: Active}}},
 		{`{"type":"system","subtype":"thinking_tokens","session_id":"s1"}`, []Event{{Kind: Active}}},
 		{`{"type":"system","subtype":"init","session_id":""}`, []Event{{Kind: Active}}},
@@ -248,6 +252,20 @@ func TestClaudeStreamLineAndRateEvents(t *testing.T) {
 		}
 		claudeEqual(t, "remaining events", len(events), 0)
 	}
+}
+
+// The line after a failed init, such as a sign-in error, is not read: the
+// process is a crash that names the server.
+func TestClaudeReadsNothingAfterAFailedInit(t *testing.T) {
+	events := make(chan Event, 16)
+	killed := false
+	p := &claudeProcess{events: events, kill: func() { killed = true }}
+	stdout := `{"type":"system","subtype":"init","session_id":"s1","mcp_servers":[{"name":"solodawn","status":"failed"}]}` + "\n" +
+		`{"type":"result","subtype":"success","is_error":true,"result":"Not logged in"}` + "\n"
+	claudeTrue(t, p.readLines(bufio.NewReader(strings.NewReader(stdout))), "no diagnosis")
+	claudeTrue(t, killed, "the process was not killed")
+	claudeEqual(t, "event", <-events, Event{Kind: Active, Text: "claude: MCP server solodawn: failed"})
+	claudeEqual(t, "remaining events", len(events), 0)
 }
 
 func TestClaudeResultAndDiagnosticMapping(t *testing.T) {
@@ -507,6 +525,37 @@ func runClaudeDiagCase(t *testing.T, session, steps string, exit int, want []Eve
 	}
 	claudeEqual(t, "diag case events", got, want)
 	claudeTrue(t, errors.Is(proc.Turn("after exit"), os.ErrClosed), "expected os.ErrClosed after process exit")
+}
+
+// The captured CLI works on after its MCP server failed. The runtime reports
+// the crash, and the first start leaves no CLI session id.
+func TestClaudeWithoutItsToolsIsACrash(t *testing.T) {
+	buildFakeClaudeBinary(t)
+	log := filepath.Join(t.TempDir(), "log")
+	t.Setenv("SOLODAWN_FAKECLI_LOG", log)
+	script, err := filepath.Abs(filepath.Join("fakecli", "testdata", "claude-mcp-failed.json"))
+	claudeNoErr(t, err)
+	t.Setenv("SOLODAWN_FAKE_CLAUDE_SCRIPT", script)
+	h, rh, _, dataDir := setupRunEnv(t)
+	Drivers["claude"] = claudeDriver{}
+	key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
+	claudeNoErr(t, os.MkdirAll(filepath.Join(dataDir, "projects", runGroup1, "wt", "1-tools"), 0o700))
+	claudeNoErr(t, h.Sessions.Create(makeRunSession(key, TaskSession, "wt/1-tools")))
+	claudeNoErr(t, Runner.Turn(t.Context(), h, key, "go", Turn{Kind: ItemsTurn, Thread: runTask1}))
+	rh.waitCmd(t)
+	crash, fail := rh.waitCmd(t), rh.waitCmd(t)
+	const detail = "claude: MCP server solodawn: failed"
+	var status proto.MemberStatus[proto.TurnInterruptedEvent]
+	claudeNoErr(t, proto.Decode([]byte(crash.raw), &status))
+	claudeEqual(t, "reason", status.Event.Reason, "crash")
+	claudeEqual(t, "detail", status.Event.Detail, detail)
+	var failed proto.TaskFail
+	claudeNoErr(t, proto.Decode([]byte(fail.raw), &failed))
+	claudeEqual(t, "task fail", failed.Reason+" "+failed.Detail, "crash "+detail)
+	claudeEqual(t, "CLI session", waitForState(t, h, key, Dormant).CLISession, "")
+	written, err := os.ReadFile(log)
+	claudeNoErr(t, err)
+	claudeTrue(t, !strings.Contains(string(written), "exit claude"), "the CLI ended by itself")
 }
 
 func testClaudeContextCancelKillsTree(t *testing.T) {

@@ -81,7 +81,7 @@ func (codexDriver) Start(ctx context.Context, l Launch) (Process, error) {
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, "codex", append([]string{"app-server"}, flags...)...)
+	cmd := exec.CommandContext(ctx, "codex", append([]string{"app-server", "-c", "mcp_servers.solodawn.required=true"}, flags...)...)
 	cmd.Dir = l.Folder
 	detachTerminal(cmd)
 	cmd.WaitDelay = time.Second

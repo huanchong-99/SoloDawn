@@ -541,6 +541,7 @@ func verifyHandshakeCase(t *testing.T, tc codexHandshakeCase) {
 	proc, peer := startPeerCodex(t, l)
 	initMsg, threadMsg := completePeerHandshake(t, peer, "thr-9")
 	codexEqual(t, peer.header.Args[0], "app-server")
+	codexCheck(t, slices.Contains(peer.header.Args, "mcp_servers.solodawn.required=true"), "missing required on app-server")
 	codexCheck(t, slices.Contains(peer.header.Args, "features.default_mode_request_user_input=true"), "missing default_mode_request_user_input flag on app-server")
 	codexEqual(t, initMsg["method"], "initialize")
 	codexEqual(t, threadMsg["method"], tc.wantMethod)

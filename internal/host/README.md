@@ -141,6 +141,7 @@ A `Driver` starts the structured CLI (`Start`) and gives the command line of the
 Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/drivers.md), sections 1.1 and 1.3).
 
 - `claudeProcess.mu` serializes stdin writes (`Turn`, `Interrupt`), `Close`, `reqSeq` and `interrupted`; nothing inside `mu` waits on `events` or the child process. `readLoop` is the sole writer of `events` and closes it after stdout EOF, `Wait` and process-tree cleanup; the caller of `Process.Events` is its single reader.
+- A `system/init` that lists the `solodawn` server with a status other than `connected` emits no `Ready`: `readLoop` kills the process tree and reads no further line, so the turn ends as a crash with the status in its detail ([drivers.md](../../planning/contracts/drivers.md), section 1.1).
 - `rate_limit_event` emits `Used` (`WindowPct`, `WindowResets`) and `RateLimited` when `status` is neither `allowed` nor `allowed_warning`.
 - `Process.Answer` returns an error because Claude Code sends permission prompts through the MCP `approve` tool ([mcp-tools.md](../../planning/contracts/mcp-tools.md), section 3).
 - `LoginInvalid` and `NoSession` match HTTP status `401` and Claude Code's English error phrases on `result` and non-zero-exit `stderr` until live failure captures exist ([issues.md](../../issues.md)).
@@ -149,7 +150,7 @@ Registered in `Drivers` under `"claude"` ([drivers.md](../../planning/contracts/
 
 `codex.go` registers `Drivers["codex"]` ([drivers.md](../../planning/contracts/drivers.md), section 1.2 and 1.3):
 
-- `Start` runs `codex app-server` over stdio JSON-RPC (`initialize`, `initialized`, `thread/start` or `thread/resume`, with `-c features.default_mode_request_user_input=true`), detached from any terminal (`detachTerminal`). `Interactive` returns the `codex resume` command line and refuses an empty `Launch.Session`.
+- `Start` runs `codex app-server` over stdio JSON-RPC (`initialize`, `initialized`, `thread/start` or `thread/resume`, with `-c features.default_mode_request_user_input=true` and `-c mcp_servers.solodawn.required=true`), detached from any terminal (`detachTerminal`). `Interactive` returns the `codex resume` command line and refuses an empty `Launch.Session`.
 - **One reader per channel and lock order.** `Events()` is written only by `readLoop` and read only by `Start`'s caller, and closes after `cmd.Wait` and tree cleanup finish; `ready` is closed once by `finishReady` for `Turn`. `wmu` (stdin writes and close) and `mu` (protocol, turn, approval, user-input and file-change state) are never nested.
 - **Requests and notifications.** `commandExecution` and `fileChange` approvals emit `Asked` for `Process.Answer`; `item/tool/requestUserInput` emits `Asked` with `Ask.Reply`; invalid parameters and all other server requests get JSON-RPC error `-32601`. Notifications during an active turn emit `Active`; `account/rateLimits/updated` selects the higher `usedPercent` window (`Used`, and `RateLimited` at 100 percent or when a limit flag is set), and a turn that fails with `usageLimitExceeded` emits `RateLimited`. Live behavior of `features.default_mode_request_user_input=true` and `item/tool/requestUserInput` remains unverified ([issues.md](../../issues.md)).
 
@@ -245,7 +246,7 @@ Each [script](fakecli/testdata/) is a span of one of the [macOS captures](https:
 | Step direction | Action |
 | --- | --- |
 | `stdin`, `mcp->cli` | Wait for one JSON line from the node or from the MCP server. An object matches when it has the fields of `msg`, recursively; arrays, numbers and strings must be equal, the text of an MCP result included. |
-| `stdout`, `mcp<-cli` | Write `msg` as one JSON line to the node or to the MCP server. The first MCP step starts the server named `solodawn` in `--mcp-config <file or json>` or in the two `-c mcp_servers.solodawn.{command,args}=…` settings. OpenCode's is `mcp.solodawn.command` in `OPENCODE_CONFIG_CONTENT`; Qwen Code's is `mcpServers.solodawn` in the file `QWEN_CODE_SYSTEM_SETTINGS_PATH`. The fake runs nothing else. |
+| `stdout`, `mcp<-cli` | Write `msg` as one JSON line to the node or to the MCP server. The first MCP step starts the server named `solodawn` in `--mcp-config <file or json>` or in the two `-c mcp_servers.solodawn.{command,args}=…` settings. OpenCode's is `mcp.solodawn.command` in `OPENCODE_CONFIG_CONTENT`; Qwen Code's is `mcpServers.solodawn` in the file `QWEN_CODE_SYSTEM_SETTINGS_PATH`. The fake runs nothing else, and appends the server's stderr to `SOLODAWN_FAKECLI_LOG`. |
 | `stderr` | Write the string `msg` as one line. |
 | `eof` | Wait for closed stdin; input fails the script. |
 | `http` | OpenCode and Qwen Code. Wait for the next request other than the event stream, check `msg.call` (`"<method> <path>"`) and the fields of `msg.body` (`null` for none), then answer with `msg.status` (default 200) and `msg.res`. |
@@ -256,6 +257,8 @@ A string value `"$session"` is replaced by the session id. In `stdout`, `"$id"` 
 A step that does not hold ends the process with status 1 and the reason on stderr. Reads, not sleeps, control order: the next output is written only after the line before it was read. Script timestamps and usage are captured values, not readings of the test machine.
 
 The fake OpenCode prints `opencode server listening on <url>`, refuses a request without the `OPENCODE_SERVER_PASSWORD` basic-auth password, and has no capture: its scripts are written in the tests from the documented API. The fake Qwen Code is the same server: it prints `qwen server listening on <url>`, refuses a request without the `--token` bearer token, takes its session id from the script, and has no capture either.
+
+`claude-mcp-failed.json` is a capture of Claude Code 2.1.311 whose MCP server exits at once, with an API address nobody listens on (no model call).
 
 Two scripts go beyond their capture: `codex-exit-mid-turn.json` ends at the first approval request, and `codex-late-call.json` waits for the tool reply after the call has failed. No capture shows either, and the fake prints nothing for them.
 

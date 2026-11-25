@@ -301,7 +301,7 @@ func serveNodeHelper(wantPath string) error {
 		return err
 	}
 	defer stack.close()
-	socks, err := peer.Listen(netsimNodeUDP, netsimNodeTCP)
+	socks, err := peer.Listen(netsimNodeUDP, netsimNodeTCP, "test")
 	if err != nil {
 		return err
 	}
@@ -427,7 +427,7 @@ func runBrowserHelper(wantPath string) error {
 }
 
 func openBrowserPeerDeps() (*peer.Sockets, *store.Store, error) {
-	socks, err := peer.Listen(0, 0)
+	socks, err := peer.Listen(0, 0, "test")
 	if err != nil {
 		return nil, nil, err
 	}

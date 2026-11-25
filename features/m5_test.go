@@ -940,8 +940,13 @@ func (w *m5World) acceptMCPLoop(ctx context.Context, ln net.Listener, h *host.Ho
 	defer wg.Done()
 	for {
 		conn, err := ln.Accept()
-		if err != nil {
+		if errors.Is(err, net.ErrClosed) {
 			return
+		}
+		if err != nil {
+			w.recordHookErr(fmt.Errorf("accept an MCP shim: %w", err))
+			time.Sleep(10 * time.Millisecond) // the error may last; this is no busy loop
+			continue
 		}
 		wg.Add(1)
 		go func() {

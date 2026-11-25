@@ -647,7 +647,7 @@ func (i peerNodeInviter) ReplayInvite(signer, nonce string) (home.InviteLink, bo
 }
 
 func (n *peerNode) initTransport(cfg peerNodeConfig) error {
-	socks, err := peer.Listen(0, 0)
+	socks, err := peer.Listen(0, 0, "test")
 	if err != nil {
 		return err
 	}
@@ -759,7 +759,7 @@ func newPeerBrowser(ctx context.Context, cleanup func(func()), key identity.Key,
 		return nil, ctxCallErr(ctx, dialStart, "rendezvous dial", nil, err)
 	}
 	cleanup(func() { path.Close() })
-	socks, err := peer.Listen(0, 0)
+	socks, err := peer.Listen(0, 0, "test")
 	if err != nil {
 		return nil, err
 	}
