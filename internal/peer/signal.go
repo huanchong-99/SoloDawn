@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"log/slog"
 	"maps"
 	"sync"
 	"time"
@@ -28,6 +29,7 @@ type link struct{ device, conn string }
 // lock that known or paths takes.
 type Peer struct {
 	key      identity.Key
+	diag     *slog.Logger
 	sockets  *Sockets
 	db       *store.Store
 	known    func(string) bool
@@ -45,7 +47,7 @@ type Peer struct {
 // New keeps its own copy of channels: what the caller changes later does not
 // reach it.
 func New(key identity.Key, sockets *Sockets, db *store.Store, known func(string) bool, paths func(string) []Route, inbound func(*Connection), channels Channels) *Peer {
-	return &Peer{key: key, sockets: sockets, db: db, known: known, paths: paths, inbound: inbound, channels: maps.Clone(channels), now: time.Now, live: make(map[link]*Connection), slot: make(map[string]*Connection), early: make(map[link]*batch), retired: make(map[link]int64)}
+	return &Peer{key: key, diag: slog.With("node", diagDevice(key.ID())), sockets: sockets, db: db, known: known, paths: paths, inbound: inbound, channels: maps.Clone(channels), now: time.Now, live: make(map[link]*Connection), slot: make(map[string]*Connection), early: make(map[link]*batch), retired: make(map[link]int64)}
 }
 func randomID() string {
 	var b [16]byte
@@ -84,13 +86,18 @@ func (p *Peer) Receive(ctx context.Context, path Route, frame proto.Route) error
 		return err
 	}
 	paths := p.paths(env.Key) // before the lock: the callback may take locks of its own
-	answer, err := p.apply(link{env.Key, hdr.Conn}, hdr.Type, []byte(env.Payload), now.UnixMilli(), paths)
+	diag := linkDiag{p.diag, link{env.Key, hdr.Conn}}
+	diag.signal("sig.recv", hdr.Type)
+	answer, err := p.apply(diag.key, hdr.Type, []byte(env.Payload), now.UnixMilli(), paths)
 	if err != nil || answer == nil {
 		return err
 	}
 	// The answer waits for its turn on the path, as candidates do, while
 	// the path's reader goes on.
-	go path.Send(ctx, env.Key, *answer)
+	go func() {
+		diag.signal("sig.send", "answer")
+		path.Send(ctx, env.Key, *answer)
+	}()
 	return nil
 }
 func (p *Peer) open(frame proto.Route, now time.Time) (env proto.Envelope, hdr proto.SignalHeader, err error) {
@@ -245,6 +252,7 @@ func (p *Peer) Offer(ctx context.Context, device string) (*Connection, error) {
 	// paths go on for as long as the connection lives.
 	stop := context.AfterFunc(ctx, func() { c.Close() })
 	defer stop()
+	c.diag.signal("sig.send", "offer")
 	if err := broadcast(c.ctx, paths, device, offer); err != nil {
 		c.Close()
 		return nil, err
@@ -278,23 +286,30 @@ func (p *Peer) create(k link, api *webrtc.API, paths []Route) (*Connection, erro
 	if err != nil {
 		return nil, err
 	}
-	c := newConnection(pc, k.device)
+	c := newConnection(pc, linkDiag{p.diag, k})
 	c.candidates = p.take(k)
 	p.live[k] = c
 	pc.OnICECandidate(func(i *webrtc.ICECandidate) {
 		if i != nil {
 			msg := proto.ICECandidate{SignalHeader: p.header(k, "ice"), Candidate: i.ToJSON().Candidate, MID: i.SDPMid}
+			c.diag.signal("sig.send", "ice")
 			_ = broadcast(c.ctx, p.paths(k.device), k.device, p.sign(msg))
 		}
 	})
-	pc.SCTP().Transport().ICETransport().OnSelectedCandidatePairChange(func(*webrtc.ICECandidatePair) { c.reclassify() })
-	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
-			go c.Close()
-		}
-	})
+	pc.SCTP().Transport().ICETransport().OnSelectedCandidatePairChange(c.selectedPairChanged)
+	pc.OnConnectionStateChange(c.connectionStateChanged)
 	go p.forget(k, c)
 	return c, nil
+}
+
+func (c *Connection) connectionStateChanged(state webrtc.PeerConnectionState) {
+	c.diag.event(slog.LevelInfo, "ice.state", "state", state.String())
+	switch state {
+	case webrtc.PeerConnectionStateFailed:
+		go c.close("ice_failed")
+	case webrtc.PeerConnectionStateClosed:
+		go c.Close()
+	}
 }
 
 func (p *Peer) forget(k link, c *Connection) {

@@ -16,7 +16,7 @@ func TestUnansweredOfferDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		p := &Peer{}
 		ctx, cancel := context.WithCancel(t.Context())
-		c := &Connection{ctx: ctx, close: func() error { cancel(); return nil }}
+		c := &Connection{ctx: ctx, close: func(string) error { cancel(); return nil }}
 		p.mu.Lock()
 		p.waitForAnswer(c, []Route{{ID: "local"}})
 		p.mu.Unlock()

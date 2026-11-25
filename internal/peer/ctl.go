@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -19,8 +20,10 @@ type Connection struct {
 	Device      string
 	pc          *webrtc.PeerConnection
 	ctx         context.Context
-	close       func() error
+	close       func(string) error
+	diag        linkDiag
 	ready       chan struct{}
+	opened      time.Time
 	pathChanged chan struct{}
 	incoming    chan json.RawMessage // single reader: Read
 	mu          sync.Mutex
@@ -33,17 +36,27 @@ type Connection struct {
 	candidates  *batch
 }
 
-func newConnection(pc *webrtc.PeerConnection, device string) *Connection {
+func newConnection(pc *webrtc.PeerConnection, diag linkDiag) *Connection {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Connection{
-		Device: device, pc: pc, ctx: ctx, ready: make(chan struct{}), pathChanged: make(chan struct{}, 1),
+	c := &Connection{
+		Device: diag.key.device, pc: pc, ctx: ctx, diag: diag, ready: make(chan struct{}), pathChanged: make(chan struct{}, 1),
 		incoming: make(chan json.RawMessage, 16), waiting: make(map[int64]chan json.RawMessage),
-		close: sync.OnceValue(func() error { cancel(); return pc.Close() }),
 	}
+	var once sync.Once
+	var err error
+	c.close = func(why string) error {
+		once.Do(func() {
+			c.diagClose(why)
+			cancel()
+			err = pc.Close()
+		})
+		return err
+	}
+	return c
 }
 func (c *Connection) Ready() <-chan struct{} { return c.ready }
 func (c *Connection) Done() <-chan struct{}  { return c.ctx.Done() }
-func (c *Connection) Close() error           { return c.close() }
+func (c *Connection) Close() error           { return c.close("closed") }
 func (c *Connection) isClosed() bool         { return c.ctx.Err() != nil }
 
 // acceptCtl takes the channel labelled ctl; dispatch has checked the label.
@@ -62,13 +75,20 @@ func (c *Connection) bind(dc *webrtc.DataChannel, onOpen func(*Connection)) {
 		return
 	}
 	c.dc = dc
-	dc.OnClose(func() { go c.Close() })
-	dc.OnOpen(func() { close(c.ready); onOpen(c) })
+	dc.OnClose(func() { go c.close("ctl_closed") })
+	dc.OnOpen(func() { c.openCtl(onOpen) })
 	dc.OnMessage(func(m webrtc.DataChannelMessage) {
 		if m.IsString { // a binary message on ctl is dropped
 			c.deliver(m.Data)
 		}
 	})
+}
+
+func (c *Connection) openCtl(onOpen func(*Connection)) {
+	c.opened = time.Now()
+	c.diag.event(slog.LevelInfo, "ctl.open")
+	close(c.ready)
+	onOpen(c)
 }
 
 type framing struct {
