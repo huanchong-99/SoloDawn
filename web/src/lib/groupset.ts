@@ -11,6 +11,8 @@ interface LimitField {
   per: number;
   /** The most the rules allow, in the unit shown. */
   max?: number;
+  /** Set when 0 is a choice of its own (the default is 1). */
+  min?: 0;
 }
 
 /** The limits, with the everyday ones first. `ask_depth` is R-114's; an answer to `ask` must come
@@ -21,11 +23,11 @@ export const limitFields: LimitField[] = [
   { key: 'wakes_per_hour', per: 1 },
   { key: 'turn_minutes', unit: 'min', per: 1 },
   { key: 'failures', per: 1 },
-  { key: 'review_rounds', per: 1 },
+  { key: 'review_rounds', per: 1, min: 0 },
   { key: 'idle_notice_minutes', unit: 'min', per: 1 },
   { key: 'approval_wait_s', unit: 'min', per: 60, max: 10 },
   { key: 'ask_wait_s', unit: 's', per: 1, max: 55 },
-  { key: 'ask_depth', per: 1, max: 4 },
+  { key: 'ask_depth', per: 1, min: 0, max: 4 },
 ];
 
 /** The commands of a text with one on each line. */

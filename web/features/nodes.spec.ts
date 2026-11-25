@@ -302,6 +302,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
   Scenario(
     'An account type is corrected, with its members in the groups',
     ({ Given, When, Then, And }) => {
+      let noteWhileOpen: Element | null | undefined;
       const row = () => all('.card.node .ai-row')[0];
       const radios = () => [...row().querySelectorAll<HTMLInputElement>('.acct input')];
       const chosen = () => radios().find((radio) => radio.checked)?.value;
@@ -359,7 +360,11 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       When(
         'the group home refuses member commands and the person chooses "API key" for "Claude Code"',
         () => {
-          workstation.home.reply = () => ({ err: { code: 'forbidden', msg: '' } });
+          workstation.home.reply = () => {
+            flushSync();
+            noteWhileOpen = row().querySelector('.note');
+            return { err: { code: 'forbidden', msg: '' } };
+          };
           pick('api_key');
         },
       );
@@ -376,6 +381,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(commands()).toMatchObject([
             { t: 'member', g: website, op: 'set', id: 'claude-row', account: 'api_key' },
           ]);
+          expect(noteWhileOpen).toBeNull();
           expect(chosen()).toBe('api_key');
           expect((document.activeElement as HTMLInputElement).value).toBe('api_key');
           expect(row().querySelector('.badge')!.textContent!.trim()).toBe('API key');

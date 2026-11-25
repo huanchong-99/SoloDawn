@@ -327,13 +327,15 @@ it('sends all limits when one changes, and opens the fold of a field the browser
     'Quiet task',
     'Wait for an approval',
     'Wait for another AI',
-    'Questions within questions',
+    'Chain of questions',
   ]);
   expect(all('dialog .limit .hint').every((el) => el.textContent)).toBe(true);
   const approval = limit('Wait for an approval');
   expect([approval.value, approval.max, approval.step]).toEqual(['10', '10', 'any']);
-  const depth = limit('Questions within questions');
-  expect([depth.value, depth.min, depth.max, depth.step]).toEqual(['4', '1', '4', '1']);
+  const depth = limit('Chain of questions');
+  expect([depth.value, depth.min, depth.max, depth.step]).toEqual(['4', '0', '4', '1']);
+  expect(limit('Failed reviews').min).toBe('0');
+  expect(limit('Failures in a row').min).toBe('1');
   fill(limit('Wake-ups per hour'), '40');
   fill(approval, '5');
   approval.dispatchEvent(new Event('invalid'));

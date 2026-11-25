@@ -8,7 +8,7 @@
   const uid = $props.id();
 </script>
 
-{#each limitFields as { key, unit, max, per } (key)}
+{#each limitFields as { key, unit, min, max, per } (key)}
   <div class="limit">
     <label for={`${uid}-${key}`}>{t(`groupinfo.limit.${key}`)}</label>
     <span class="value">
@@ -17,7 +17,7 @@
         id={`${uid}-${key}`}
         type="number"
         inputmode="numeric"
-        min="1"
+        min={min ?? 1}
         {max}
         step={per === 1 ? 1 : 'any'}
         required
@@ -57,5 +57,10 @@
   }
   input {
     text-align: right;
+    appearance: textfield;
+  }
+  input::-webkit-inner-spin-button,
+  input::-webkit-outer-spin-button {
+    appearance: none;
   }
 </style>

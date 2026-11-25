@@ -38,11 +38,11 @@ it('shows every limit of the row once, the wait for an approval in minutes', () 
     { key: 'wakes_per_hour', per: 1 },
     { key: 'turn_minutes', unit: 'min', per: 1 },
     { key: 'failures', per: 1 },
-    { key: 'review_rounds', per: 1 },
+    { key: 'review_rounds', per: 1, min: 0 },
     { key: 'idle_notice_minutes', unit: 'min', per: 1 },
     { key: 'approval_wait_s', unit: 'min', per: 60, max: 10 },
     { key: 'ask_wait_s', unit: 's', per: 1, max: 55 },
-    { key: 'ask_depth', per: 1, max: 4 },
+    { key: 'ask_depth', per: 1, min: 0, max: 4 },
   ]);
   expect(draftOf({ ...info, limits }).limits).toEqual({ ...limits, approval_wait_s: 10 });
 });

@@ -45,7 +45,7 @@
   "groupinfo.limit.rounds": "话题里 AI 来回的轮数",
   "groupinfo.limit.rounds.hint": "没有人说话时，AI 之间最多来回这么多轮，然后任务暂停。",
   "groupinfo.limit.wakes_per_hour": "每小时叫醒次数",
-  "groupinfo.limit.wakes_per_hour.hint": "每个 AI 单独算，超出的先等着。",
+  "groupinfo.limit.wakes_per_hour.hint": "别的 AI 每小时最多叫醒它这么多次，超出的先等着；人发的消息和回答不受限。",
   "groupinfo.limit.turn_minutes": "一轮最长时间",
   "groupinfo.limit.turn_minutes.hint": "AI 的一轮超过这个时间就会被停下，跑检查命令的时间也算在内。",
   "groupinfo.limit.failures": "连续失败次数",
@@ -59,5 +59,5 @@
   "groupinfo.limit.ask_wait_s": "等别的 AI 回答的时间",
   "groupinfo.limit.ask_wait_s.hint": "到时间 AI 先往下做，回答会作为消息送到。",
   "groupinfo.limit.ask_depth": "提问的层数",
-  "groupinfo.limit.ask_depth.hint": "被问的 AI 还可以再问别的 AI，最多这么多层。"
+  "groupinfo.limit.ask_depth.hint": "一个问一个最多连着问几层。填 1，被问的 AI 就不能再问别的；填 0，AI 之间不能提问。"
 }
