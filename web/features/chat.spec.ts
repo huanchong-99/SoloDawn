@@ -10,6 +10,7 @@ import {
   field,
   one,
   openPage,
+  otherBrowser,
   press,
   scrollToTop,
   send,
@@ -75,7 +76,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     'A message written in the composer appears in the main line of both browsers',
     ({ Given, When, Then, And }) => {
       Given('a second browser of the same person reads the group', async () => {
-        second = browser(home);
+        second = await otherBrowser(home);
         await read(second);
       });
       When('the person writes "The path is direct." and sends it', async () => {

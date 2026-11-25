@@ -11,6 +11,19 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a home stores any integer as `pass`, `pass_foundation` or a limit, also 0 and negative ones. Some have an effect nobody chose: `turn_minutes` 0 ends every check command at once.
 - Cause: `planning/contracts/commands.md` 1.1 names no range and `grpSetValid` (`internal/home/cmd_group.go`) checks only that a field is there.
 - Status: open, accepted: only an admin sends it. The web client's settings take 1 to 100 for the scores and at least 1 for a limit (0 for `review_rounds` and `ask_depth`, where it means something: a failed review stops the task for a person, AIs do not ask each other), at most 4 for `ask_depth` (R-114), 55 seconds for `ask_wait_s` (`flows/ask.md` D) and 10 minutes for `approval_wait_s` (`flows/approval.md` H) (`limitFields`, `web/src/lib/groupset.ts`).
+
+### 2026-11-26 · limitation · A home that never answers stays in the group list as away
+
+- Symptom: the group of a home that is gone for good, or that ignores this browser, stays in the list as away, with no way to remove it; the home is offered a connection once a minute for as long as the browser runs.
+- Cause: the homes this browser remembers (`joined`, `web/src/lib/net.svelte.ts`) and a node's `host.info.homes` (`planning/contracts/step-2/people.md` section 7) are never pruned, and a home drops the offers of an unknown device without an answer (`planning/contracts/datachannel.md` section 8).
+- Status: open, accepted for 1.0.
+
+### 2026-11-26 · limitation · Two homes that both hold a group: the first to be reached shows it
+
+- Symptom: a lost home that returns after its group was restored elsewhere lists the group too. The browser shows one copy, that of the home it reached first, so a reload can show the other; when the copy shown is deleted, the other appears at its home's next list.
+- Cause: nothing in `welcome.groups` says which copy is the newer (`planning/contracts/step-2/export.md` section 4 speaks of a lost home); `Home.#list` (`web/src/lib/groups.svelte.ts`) leaves a group to the home within reach that listed it first.
+- Status: open, accepted: the owner deletes the old copy.
+
 ### 2026-11-26 · deviation · An AI that its owner denied and later assigned gets one turn only
 
 - Symptom: the owner of an AI denies it a role, then changes their mind and sends the `task assign` that names it again (once another AI held the role). The AI gets the `assign` or `review` item (`planning/contracts/step-2/confirm.md` section 6, the exception), but none of the later `checks`, `reviewed` and `resume` items; the task stands still, and its card says again that the owner said no.
@@ -778,7 +791,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: after `group export --to` a member's idle browser dropped the group instead of following it (A9.27); after a rejoin of a restored group the open tab showed the lost home's stale copy (A9.28).
 - Cause: the old home pushes `groups` without the group, `Home.#list` (`web/src/lib/groups.svelte.ts`) dropped it and asked nothing more, so no `moved` came (`planning/contracts/step-2/export.md` section 3). `setJoin` added a second home, and `find` returned the first one's copy.
-- Status: resolved on `web/homes`: a group that left the list is read once more, and one listed by a node while its held home is out of reach is taken over and read from the start. Tests: `web/src/lib/{groups,net}.test.ts`, `features/web_move.feature`.
+- Status: resolved on `web/homes`: a group that left the list is read once more, and one listed by a node while its held home is out of reach, or no longer lists it, is taken over and read from the start (`Home.#enter`); one that a host names while its old home is connected is asked for there (`Home.expect`). Tests: `web/src/lib/{groups,net}.test.ts`, `features/web_move.feature`.
 
 ### 2026-11-26 · deviation · A stopped task or a failed sign-in alerted nobody who had the page open
 

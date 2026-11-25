@@ -46,6 +46,7 @@ Feature: Group list and group cache of the web client
     Given "desk", a computer of the person, knows that "Docs" is homed on a computer out of reach
     When "desk" connects
     Then the list shows "Docs" with "cannot reach the group home" and no word of its messages
+    And its chat says neither its kind nor how many members it has
     When that computer connects, with "Mina: Section 3 is in." in "Docs"
     Then the list shows "Docs" with "Mina: Section 3 is in."
 

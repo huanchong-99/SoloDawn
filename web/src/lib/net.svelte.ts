@@ -174,21 +174,11 @@ function startLive(
               },
               push: link.push,
               offline: link.offline,
-              refused: () => {
-                if (!log.valid(id) && !watches.has(id)) drop(id);
-              },
             };
           },
           (path) => (path ? paths.set(home, path) : paths.delete(home)),
         );
         peers.set(id, peer);
-      };
-      const drop = (id: string) => {
-        peers.get(id)!.close();
-        peers.delete(id);
-        const home = added.get(id)!;
-        added.delete(id);
-        homes.splice(homes.indexOf(home), 1);
       };
       const syncPeers = () => {
         for (const [id, name] of pairedNodes(log)) {
@@ -209,7 +199,11 @@ function startLive(
         }
         watches.delete(id);
         if (log.valid(id) || Object.hasOwn(joined, id) || invited.has(id)) return;
-        drop(id);
+        peers.get(id)!.close();
+        peers.delete(id);
+        const home = added.get(id)!;
+        added.delete(id);
+        homes.splice(homes.indexOf(home), 1);
       };
       setWatchHost((id) => {
         watches.set(id, (watches.get(id) ?? 0) + 1);

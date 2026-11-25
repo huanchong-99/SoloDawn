@@ -185,6 +185,7 @@ export class Group {
       this.paging().failed = true;
       return;
     }
+    this.home.answered(this);
     this.cursor = answer.seq;
     this.#live = true;
     this.#paging = new Map();
@@ -409,13 +410,21 @@ export class Home {
     if (this.#unlisted.get(group.g) === 'leaves') this.#drop(group);
   }
 
+  /** The node answered a read: it holds the group, whatever its last list says. */
+  answered(group: Group) {
+    this.#unlisted.delete(group.g);
+  }
+
   /** A group whose home is this node, by what another node knows: shown by its name until this
-   *  node can be reached and lists it. */
+   *  node can be reached and lists it. A node that can be reached is asked where it went. */
   expect(g: string, name: string) {
-    if (this.ctl || find(g)) return;
+    if (find(g)) return;
     const group = new Group(this, g);
     group.name = name;
     this.groups = [...this.groups, group];
+    if (!this.ctl) return;
+    this.#unlisted.set(g, 'leaves');
+    void group.sync(this.ctl);
   }
 
   /** Makes this node the home of a new group, whose id is the command's nonce. Answers with that
@@ -439,14 +448,16 @@ export class Home {
     this.groups = this.groups.filter((item) => item !== group);
   }
 
-  /** A group new in this node's list. One that a home out of reach still holds was restored here
-   *  from a copy (contracts/step-2/export.md section 4), whose rows may be older, so it is read
-   *  from the start. */
+  /** Whether this node can be reached and has a group in its last list. */
+  #lists(g: string) {
+    return this.ctl && this.#find(g) && !this.#unlisted.has(g);
+  }
+
+  /** A group new in this node's list. One that another home still holds was moved or restored
+   *  here from a copy (contracts/step-2/export.md sections 3 and 4), whose rows may be older, so
+   *  it is read from the start. */
   #enter(g: string) {
-    const group = homes
-      .filter((home) => !home.ctl)
-      .flatMap((home) => home.groups)
-      .find((item) => item.g === g);
+    const group = find(g);
     if (!group) return new Group(this, g);
     group.home.#drop(group);
     group.home = this;
@@ -454,13 +465,15 @@ export class Home {
     return group;
   }
 
-  /** Replaces the list. A group listed before keeps its rows. Returned are the groups to read: the
-   *  new ones, and those that left the list, of which only the answer says whether they moved
-   *  (contracts/step-2/export.md section 3). */
+  /** Replaces the list. A group listed before keeps its rows; one that another home within reach
+   *  lists is left to that home. Returned are the groups to read: the new ones, and those that left
+   *  the list, of which only the answer says whether they moved (contracts/step-2/export.md
+   *  section 3). */
   #list(listed: p.Welcome['groups']) {
     const held = this.groups;
     const unread: Group[] = [];
-    const next = listed.map(({ g, name }) => {
+    const own = listed.filter(({ g }) => !homes.some((home) => home !== this && home.#lists(g)));
+    const next = own.map(({ g, name }) => {
       const group = this.#find(g) ?? this.#enter(g);
       if (this.#unlisted.delete(g) || !held.includes(group)) unread.push(group);
       group.name = name;

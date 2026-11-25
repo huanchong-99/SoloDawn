@@ -275,8 +275,8 @@ const sign = async (payload: string) => ({ p: payload, k: 'this-browser', s: 'si
 
 /** A browser of the person, as the client holds it: a `Home` of the store, and its connection to
  *  the test home. `connect` says hello and reads; `drop` is the connection lost. */
-export function browser(home: TestHome, me = user) {
-  const store = new Home({ user: me, sign });
+export function browser(home: TestHome, me = user, Store = Home) {
+  const store = new Store({ user: me, sign });
   /** The type of every push received, in order. */
   const seen: string[] = [];
   let drop = () => {};

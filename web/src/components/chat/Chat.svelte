@@ -105,9 +105,11 @@
     <div class="bar-title">
       <h2>{group.name}</h2>
       <p>
-        {t(group.info?.kind === 'team' ? 'team.title' : 'chat.project')} · {t('chat.members')}
-        {group.members.length}
-        {#if group.home.name}· <Icon name="home" sm /> {group.home.name}{/if}
+        {#if group.info}
+          {t(group.info.kind === 'team' ? 'team.title' : 'chat.project')} · {t('chat.members')}
+          {group.members.length}
+          {#if group.home.name}· <Icon name="home" sm /> {group.home.name}{/if}
+        {:else}&nbsp;{/if}
       </p>
     </div>
     <Mount at="chat.head" props={{ group }} />

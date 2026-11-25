@@ -5,7 +5,20 @@ import { homes, type Group } from '../src/lib/groups.svelte';
 import * as p from '../src/lib/proto';
 import { browser, example, ownedNode, owner, TestHome, user, type OwnedNode } from './home';
 import CreateGroup from '../src/components/groups/CreateGroup.svelte';
-import { all, choose, closePage, field, fill, go, one, openPage, show, text, texts } from './page';
+import {
+  all,
+  choose,
+  closePage,
+  field,
+  fill,
+  go,
+  one,
+  openPage,
+  otherBrowser,
+  show,
+  text,
+  texts,
+} from './page';
 
 const feature = await loadFeature('../features/web_groups.feature');
 
@@ -143,7 +156,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     ({ Given, When, Then, And }) => {
       let created: string;
       Given('a second browser of the same person is connected', async () => {
-        second = browser(home);
+        second = await otherBrowser(home);
         await read(second);
       });
       When(
@@ -358,7 +371,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
 
   Scenario(
     'A group known from a computer of the person shows while its home is away',
-    ({ Given, When, Then }) => {
+    ({ Given, When, Then, And }) => {
       let desk: OwnedNode;
       const far = new TestHome('far');
       const away = browser(far);
@@ -383,6 +396,11 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(row().querySelector('.gprev')!.textContent).toBe('');
         },
       );
+      And('its chat says neither its kind nor how many members it has', () => {
+        go(`#/groups/${docs}`);
+        expect([text('.chat-head h2'), text('.chat-head p')]).toEqual(['Docs', '']);
+        go('#/groups');
+      });
       When('that computer connects, with "Mina: Section 3 is in." in "Docs"', async () => {
         far.add(docs, 'Docs');
         far.write(
@@ -602,7 +620,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       When('a browser that holds nothing reads the group', async () => {
-        second = browser(home);
+        second = await otherBrowser(home);
         await read(second);
         cold = second.store.groups[0];
       });

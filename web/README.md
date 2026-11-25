@@ -170,8 +170,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
   (`contracts/step-2/people.md` section 7, point 2): `net.svelte.ts` dials and remembers those
   homes (`Home.onhomes`), so another browser of the person shows the groups they joined. Until its
   home can be reached such a group is in the list by its name, as one whose home is away; a home
-  that refuses this browser's hello, or the group, is dropped without a word. The computer name of
-  a home never reached is not known, and left out.
+  that can be reached is asked for it at once, so a move made while the tab was closed is followed.
+  A group that its home refuses is dropped without a word; a home that ignores this browser stays
+  away. The computer name of a home never reached is not known, and left out.
 - **Mounting points.** An area of the interface mounts its components without editing the shell,
   the chat or another area: it adds `src/components/<area>/mounts.ts`, whose default export is a
   `Mounts` (`src/lib/mounts.svelte.ts`), and `gather` finds every such file by name. The points,
@@ -416,6 +417,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
     reads. The owner of the connections therefore calls `online` only for the connection that is
     to become the home's: for a probe, when it takes over. `online` lists the node's groups and reads each with `sync` from its cursor; a `groups`
     push replaces the list, keeps the rows of a group listed before and reads a new one at once.
+    A group is in the list of one home: of two within reach that list it the first keeps it, and
+    from a home that is out of reach, or no longer lists it, the one that lists it takes it over.
   - A `Group` applies a row only with a higher `seq` than the copy it holds, and keeps a `gone`
     marker in place of its row, unseen. Its `cursor`, the `since` of its next `sync`, is 0 at the
     start and from every `reset`, S at `synced`, then the `seq` of each live row applied; rows

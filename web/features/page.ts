@@ -7,6 +7,7 @@ import { vi } from 'vitest';
 import App from '../src/App.svelte';
 import { homes } from '../src/lib/groups.svelte';
 import { prefs } from '../src/lib/prefs.svelte';
+import { browser, user, type TestHome } from './home';
 
 let page: Record<string, never> | undefined;
 const parts: Record<string, never>[] = [];
@@ -64,6 +65,13 @@ export async function closePage() {
   location.hash = '';
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+}
+
+/** Another browser of the person, which shares none of this page's homes. */
+export async function otherBrowser(home: TestHome) {
+  vi.resetModules();
+  const { Home } = await import('../src/lib/groups.svelte');
+  return browser(home, user, Home);
 }
 
 /** The address changes, as when the person follows a link of the page. */

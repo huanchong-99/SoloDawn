@@ -437,7 +437,9 @@ describe('the homes that an own computer knows', () => {
       undefined,
     ]);
     expect(home.groups.map(({ g, name }) => [g, name])).toEqual([[websiteId, 'Website']]);
-    expect(homeOf(own.id)!.groups).toEqual([]);
+    // An own computer that names itself is asked, not dialled again.
+    expect(homeOf(own.id)!.groups.map(({ g }) => g)).toEqual([other]);
+    expect(syncsOf(ownPC)).toMatchObject([{ g: other, since: 0 }]);
     expect(rv.known(foreign.id)).toBe(true);
     const remembered = { [foreign.id]: { name: '', url: rv.url } };
     await vi.waitFor(async () => expect(await loadJoined(() => idb)).toEqual(remembered));
@@ -455,49 +457,11 @@ describe('the homes that an own computer knows', () => {
     await vi.waitFor(() => expect(syncsOf(pc)).toHaveLength(1));
     expect([home.name, home.groups.map(({ g }) => g)]).toEqual(["Q's computer", [websiteId]]);
     knows([...entries, { g: 'ZG9jcy1ncm91cC0wMDAwMw', home: foreign.id, name: 'Docs' }]);
-    expect(home.groups.map(({ g }) => g)).toEqual([websiteId]);
+    await vi.waitFor(() => expect(syncsOf(pc)).toHaveLength(2));
+    pc.ctl.deliver({ re: syncsOf(pc)[1].id, err: { code: 'forbidden', msg: 'not a member' } });
+    await vi.waitFor(() => expect(home.groups.map(({ g }) => g)).toEqual([websiteId]));
     expect(rv.offersFor(foreign.id)).toHaveLength(1);
     expect([pc.closes, ownPC.closes]).toEqual([0, 0]);
-  });
-
-  it('drops one that refuses this browser, until an own computer names it again', async () => {
-    const { browser, own, foreign, net, rv, knows, homeOf } = await secondBrowser();
-    const entries = [{ g: websiteId, home: foreign.id, name: 'Website' }];
-    knows(entries);
-    const refuse = async () => {
-      const pc = await answerNode(rv, foreign, browser.id, undefined);
-      pc.ctl.deliver({ re: 1, err: { code: 'forbidden', msg: 'not a member' } });
-      return pc;
-    };
-    const first = homeOf(foreign.id)!;
-    const pc = await refuse();
-    await vi.waitFor(() => expect(net.homes.map(({ device }) => device)).toEqual([own.id]));
-    expect(pc.closes).toBe(1);
-    knows(entries);
-    const again = homeOf(foreign.id)!;
-    expect(again).not.toBe(first);
-
-    // A watch on that computer keeps it, and so does the person's own computer.
-    const end = net.watchHost!(foreign.id);
-    await vi.waitFor(() => expect(rv.offersFor(foreign.id)).toHaveLength(2));
-    await refuse();
-    await vi.waitFor(() => expect(FakePC.made.at(-1)!.closes).toBe(1));
-    expect(homeOf(foreign.id)).toBe(again);
-    end();
-    expect(homeOf(foreign.id)).toBe(again);
-  });
-
-  it('keeps an own computer that refuses this browser', async () => {
-    const { browser, own, net, rv, ownPC, homeOf } = await secondBrowser();
-    const home = homeOf(own.id)!;
-    ownPC.becomes('failed');
-    await vi.waitFor(() => expect(home.ctl).toBeUndefined());
-    rv.receive(rv.url, { t: 'presence', k: own.id, on: true });
-    await vi.waitFor(() => expect(rv.offersFor(own.id)).toHaveLength(2));
-    const pc = await answerNode(rv, own, browser.id, undefined);
-    pc.ctl.deliver({ re: 1, err: { code: 'forbidden', msg: 'revoked' } });
-    await vi.waitFor(() => expect(pc.closes).toBe(1));
-    expect(net.homes).toEqual([home]);
   });
 
   it('keeps a watched computer that is also the home of a group', async () => {
