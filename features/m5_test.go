@@ -1538,6 +1538,7 @@ func m5Steps(sc *godog.ScenarioContext, f fixtures) {
 	m5RegisterCheckAndReviewSteps(sc, w)
 	m5RegisterDepAndDirectSteps(sc, w)
 	m5RegisterConflictAndEdgeSteps(sc, w)
+	m5RegisterJumpSteps(sc, w)
 }
 
 func m5RegisterFullFlowSteps(sc *godog.ScenarioContext, w *m5World) {

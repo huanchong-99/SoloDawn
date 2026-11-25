@@ -30,6 +30,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the task row is authoritative. The profile contract does not clear an existing escalation on profile edits, and the host cannot clear it.
 - Status: the host still refuses without pushing. The owner can restore a stronger tier or arrange reassignment.
 
+### 2026-11-25 · limitation · A `jump` that crosses the delivery of its message delivers the message twice
+
+- Symptom: the author sends `jump` at the moment the AI takes the waiting message. The turn that just started with the message is interrupted, and the message comes again as the next turn.
+- Cause: the home retires the waiting item and queues the jump under a new item number (`rndRequeueJump`, `internal/home/rounds.go:66`), where [commands.md](planning/contracts/commands.md) 1.4 says the item "gets `jump: true` and is sent again". The host knows a delivered item by `(home, item)` (`hasAuditItem`, `internal/host/deliver.go`), so it cannot tell that the new item is a message it has delivered. An item it still holds it does drop (`retiredByJump`).
+- Status: open. If the home kept the item's number, the host's audit check would acknowledge the second one without a turn.
+
+### 2026-11-25 · limitation · A pre-emption is forgotten when the host restarts
+
+- Symptom: a host that stops after `task preempted` and before `task resume` leaves the task `paused` with wait `preempted`, and the interrupted session gets no turn of its own. Nobody is told: the quiet-task notice is for active tasks only ([task-machine.md](planning/contracts/task-machine.md) row 23).
+- Cause: the pre-emption is kept in memory (`preemption`, `internal/host/deliver.go`), as the contract allows: "If the host never reports 13b, row 13 does".
+- Status: open, accepted. The secretary or an admin resumes the task.
+
 ### 2026-11-23 · limitation · Qwen Code model and level changes wait for a new session
 
 - Symptom: a changed model or level of a Qwen Code member applies only to its next new session; the serve protocol documents startupConfig only at creation.
@@ -757,6 +769,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `Settle` could return while an external AI's run timeout (`extEnd`, which calls `Deliver`) or presence report (`extReport`) was still running, and a `leave` or a hand-out during shutdown armed a new timer, such as a 180 s presence timer.
 - Cause: `settleExternal` (`internal/host/external.go:56`) stopped the run and presence timers but did not wait for a callback already running, and `extLeave` (`:209`) and `extOpenRun` (`:298`) armed `time.AfterFunc` timers after it.
 - Status: resolved on `devin/host-teardown-race`, with the pattern of `limits.go`: `extPart` has `settled` and `wg`, every timer callback starts on `wg` under `extPart.mu` unless settled (`extPart.after`), no timer is armed once settled, and `settleExternal` waits on `wg`. `TestSettleExternalWaitsForItsTimersAndArmsNoMore` holds a run timeout inside `Deliver` and pins that `Settle` waits for it and that a `leave` and a hand-out after it arm nothing.
+
+### 2026-11-25 · bug · A `jump` at a busy AI lost the message: the host half of the queue jump was never built
+
+- Symptom: while an AI ran a turn, the author of a waiting message chose "jump the queue". The turn was not interrupted, nothing was reported, and the message never reached the AI. Contract: [agent-turn.md](planning/flows/agent-turn.md) section C, acceptance A5.11.
+- Cause: planned as HS-15 and B-27 and not built. Delivery took a jump item although the AI was working (`isItemHeld`, `internal/host/deliver.go:909` before the fix), wrote the audit row and acknowledged it (`runSessionTurn`, `deliver.go:1190-1195`), and only then called `Runner.Turn` (`deliver.go:1196`), which answered `busy` (`internal/host/session.go:260`); the error was logged. Nothing read `Turn.Jump`, sent `task preempted` or the host's `task resume`, or composed a `ContinueTurn`. The home queues the jump under a new item number, and the host kept the retired item of the same message beside it (`enqueueHeld`).
+- Status: resolved on `feat/host-jump`: delivery interrupts the running turn, keeps the item held until that turn has ended, reports the pre-emption of a task session and gives the interrupted session its own turn (`internal/host/README.md`, "Queue jump"). Tests: `internal/host/jump_test.go` (`TestJumpAtABusyAIDeliversTheMessageAfterTheInterruptedTurn` is the regression test), and the two A5.11 scenarios in `features/m5.feature`. The entry the web client's branch (`web/queue-jump`) added for this bug under Open is this one.
 
 ### 2026-11-23 · bug · FLAKY-30: the kill of a PTY that outlives its stop timeout was covered only by timing on Windows
 

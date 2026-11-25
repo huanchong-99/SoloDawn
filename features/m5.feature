@@ -1,7 +1,7 @@
 Feature: Tasks from brief to merge
   End-to-end task flows on in-process nodes with fake Claude Code, Codex and gh
   CLIs, covering briefs, worktrees, local and hosted checks, reviews, merges,
-  conflicts, direct tasks, idempotency and stale-item retirement.
+  conflicts, direct tasks, queue jumps, idempotency and stale-item retirement.
 
   Scenario: Two tasks run from brief to merge without a remote, with no human action beyond confirm (A5.1, A5.2, A5.12)
     Given a project group with forge "none", a secretary and working AIs "Claude" and "Codex"
@@ -65,6 +65,18 @@ Feature: Tasks from brief to merge
     Then the task returns to local_check with wait "conflict" and the secretary receives a conflict notice
     When the secretary names "Claude" on the conflicted task and "Claude" resolves, re-checks, resubmits, passes review and merges
     Then the task reaches state "merged" and base holds the resolved content
+
+  Scenario: Jumping the queue on a direct request interrupts the running task turn, pre-empts the task and lets it continue by itself (A5.11)
+    Given an active brief task on forge "none" assigned to "Claude" and reviewed by "Codex"
+    When "Claude" is running its task turn and the owner jumps the queue on a direct request to it
+    Then the running turn is interrupted and the task shows as pre-empted while "Claude" answers the request in its group session
+    And the task continues by itself with one turn of its own, and nothing is reported as a failure or delivered twice
+
+  Scenario: A jump aimed at the session that is running interrupts it and goes first without pausing the task (A5.11)
+    Given an active brief task on forge "none" assigned to "Claude" and reviewed by "Codex"
+    When "Claude" is running its task turn and the owner jumps the queue on a message in the task thread
+    Then the running turn is interrupted and the jumped message goes first in the next turn of the same session
+    And the task was never paused, and nothing is reported as a failure
 
   Scenario: Repeated act confirm and repeated task fail with the same nonce apply once (A5.15)
     Given a project group with forge "none", a secretary, working AIs and a pending one-task brief

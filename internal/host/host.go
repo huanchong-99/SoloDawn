@@ -559,9 +559,10 @@ type Runtime interface {
 	// made. It starts the session's CLI when the session is dormant, as a
 	// resume when the CLI has a session id; notes turn with
 	// Sessions.SetTurn; writes text; and reports TurnBegan. It returns once
-	// the turn is written. With turn.Jump it first interrupts the turn the
-	// AI is running in the group (flows/agent-turn.md C). When the turn has
-	// ended, the runtime reports TurnEnded and calls Deliver.
+	// the turn is written. It interrupts nothing: for a queue jump, delivery
+	// interrupts the running turn and waits for its end before it hands the
+	// jump turn over (flows/agent-turn.md C). When the turn has ended, the
+	// runtime reports TurnEnded and calls Deliver.
 	Turn(ctx context.Context, h *Host, key SessionKey, text string, turn Turn) error
 	// Answer allows or declines a permission request that the CLI of a
 	// session made: the event Asked.

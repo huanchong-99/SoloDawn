@@ -1319,7 +1319,7 @@ func verifyHoldsBatchingAndJump(t *testing.T) {
 
 func verifyWorkingJumpAndTakeoverRelease(t *testing.T, r *deliverRig, gKey SessionKey) {
 	t.Helper()
-	// Move AI1 from Takeover to Working: non-jump items stay held; jump item interrupts immediately while keepRun stays true.
+	// Move AI1 from Takeover to Working: every item stays held and unacknowledged, a jump item first in the queue.
 	r.runtime.mu.Lock()
 	r.runtime.keepRun = true
 	r.runtime.mu.Unlock()
@@ -1330,17 +1330,23 @@ func verifyWorkingJumpAndTakeoverRelease(t *testing.T, r *deliverRig, gKey Sessi
 	}
 	jumpIt := proto.Item{Item: 606, AI: testAI1, Why: "mention", Msg: testMsg2, Jump: true}
 	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, jumpIt, r.makeTextMsg(testMsg2, nil, "jump"))
-	r.waitUntil("jump turn delivered", func() bool { return len(r.runtime.recorded()) == 3 && r.home.ackCountFor(606) == 1 })
+	r.waitUntil("jump item held first", func() bool {
+		d := deliv(r.h)
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		queue := d.held[aiGroupKey{group: testGroup1, member: testAI1}]
+		return len(queue) == 4 && queue[0].item.Item == 606
+	})
 	r.waitAIUnbusy(testGroup1, testAI1)
-	if !r.runtime.recorded()[2].turn.Jump || r.runtime.recorded()[2].text != "group:1" {
-		t.Fatalf("unexpected jump turn: %+v", r.runtime.recorded()[2])
+	if len(r.runtime.recorded()) != 2 || r.home.ackCountFor(606) != 0 {
+		t.Fatal("a jump item was delivered or acknowledged while the AI was working")
 	}
 	verifyReentrantDrain(t, r, gKey)
 }
 
 func verifyReentrantDrain(t *testing.T, r *deliverRig, gKey SessionKey) {
 	t.Helper()
-	// Finish Working and test re-entrant Deliver draining TaskSession batch of 2 (601+602) then GroupSession batch of 1 (604).
+	// Finish Working and test re-entrant Deliver draining the GroupSession batch of the jump (606+604) then the TaskSession batch (601+602).
 	var reentered atomic.Bool
 	r.runtime.mu.Lock()
 	r.runtime.keepRun = false
@@ -1352,10 +1358,10 @@ func verifyReentrantDrain(t *testing.T, r *deliverRig, gKey SessionKey) {
 	r.runtime.mu.Unlock()
 	r.h.Sessions.Move(gKey, Working, Waiting)
 	Deliver(r.h, testGroup1, testAI1)
-	r.waitUntil("5 turns drained", func() bool { return len(r.runtime.recorded()) == 5 })
+	r.waitUntil("4 turns drained", func() bool { return len(r.runtime.recorded()) == 4 })
 	turns := r.runtime.recorded()
-	if turns[3].text != "task:2" || turns[4].text != "group:1" {
-		t.Fatalf("expected task:2 then group:1 turns, got %+v", turns)
+	if turns[2].text != "group:2" || !turns[2].turn.Jump || turns[3].text != "task:2" || r.home.ackCountFor(606) != 1 {
+		t.Fatalf("expected the jump's group:2 then task:2 turns, got %+v", turns)
 	}
 }
 
@@ -1366,7 +1372,7 @@ func verifyEnqueueHeldOrdering(t *testing.T) {
 		if jump {
 			j = true
 		}
-		return verifiedItem{item: proto.Item{Item: id, Jump: j}}
+		return verifiedItem{item: proto.Item{Item: id, Why: "mention", Msg: testCanonicalID(byte(id)), Jump: j}}
 	}
 	var q []verifiedItem
 	q = enqueueHeld(q, mk(10, true))
@@ -1387,6 +1393,17 @@ func verifyEnqueueHeldOrdering(t *testing.T) {
 	q2 = enqueueHeld(q2, mk(20, true))
 	if len(q2) != 2 || q2[0].item.Item != 20 || !bool(q2[0].item.Jump) {
 		t.Fatalf("index 0 upgrade failed: %+v", q2)
+	}
+	verifyJumpReplacesRetiredItem(t, mk(32, false), mk(30, false), mk(31, true))
+}
+
+// The home retires the waiting item of a message and queues its jump under a new number.
+func verifyJumpReplacesRetiredItem(t *testing.T, other, retired, jump verifiedItem) {
+	t.Helper()
+	jump.item.Msg = retired.item.Msg
+	q := enqueueHeld(enqueueHeld(enqueueHeld(nil, other), retired), jump)
+	if len(q) != 2 || q[0].item.Item != jump.item.Item || q[1].item.Item != other.item.Item {
+		t.Fatalf("the jump did not replace the retired item: %+v", q)
 	}
 }
 
