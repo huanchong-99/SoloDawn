@@ -108,8 +108,19 @@ func TestPeerDiagnostics(t *testing.T) {
 	check(t, a.Close())
 	check(t, a.Close())
 	d.expect(t, conn, diagLine("INFO ice.state", aID, bID, conn, " state=closed"))
-	assertCloseDiagnostic(t, d.forConn(conn), aID, bID, conn, time.Since(a.opened))
-	check(t, b.Close())
+	assertCloseDiagnostic(t, d.forConn(conn), aID, bID, conn, "closed", time.Since(a.opened))
+	recvDiagnostic(t, "answerer to see ctl close", b.Done())
+	assertCloseDiagnostic(t, d.forConn(conn), bID, aID, conn, "ctl_closed", time.Since(b.opened))
+}
+
+func TestPeerDiagnosticsIceFailedBeforeCtlOpened(t *testing.T) {
+	d := captureDiag(t)
+	f := newPair(t)
+	c, err := f.a.Offer(t.Context(), f.b.key.ID())
+	check(t, err)
+	c.connectionStateChanged(webrtc.PeerConnectionStateFailed)
+	recvDiagnostic(t, "connection to close", c.Done())
+	assertCloseDiagnostic(t, d.forConn(c.diag.key.conn), f.a.key.ID(), f.b.key.ID(), c.diag.key.conn, "ice_failed", 0)
 }
 
 func diagnosticPair(t *testing.T) (*pair, *Connection, *Connection) {
@@ -146,7 +157,7 @@ func openDiagnostics(node, dev, conn, sent, received string) []string {
 	}
 }
 
-func assertCloseDiagnostic(t *testing.T, lines []string, node, dev, conn string, elapsed time.Duration) {
+func assertCloseDiagnostic(t *testing.T, lines []string, node, dev, conn, why string, elapsed time.Duration) {
 	t.Helper()
 	prefix := diagLine("INFO conn.close", node, dev, conn, "")
 	var closed []string
@@ -156,7 +167,7 @@ func assertCloseDiagnostic(t *testing.T, lines []string, node, dev, conn string,
 		}
 	}
 	eq(t, len(closed), 1)
-	rest, ok := strings.CutPrefix(closed[0], prefix+" why=closed ms=")
+	rest, ok := strings.CutPrefix(closed[0], prefix+" why="+why+" ms=")
 	eq(t, ok, true)
 	ms, err := strconv.ParseInt(rest, 10, 64)
 	check(t, err)
