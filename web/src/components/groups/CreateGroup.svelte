@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { homes, type Home, type NewGroup } from '../../lib/groups.svelte';
+  import { commandsIn } from '../../lib/groupset';
   import { t } from '../../lib/prefs.svelte';
   import Failure from '../Failure.svelte';
   import ForgeChoice from '../forge/ForgeChoice.svelte';
@@ -61,10 +62,7 @@
       base: base.trim(),
       forge,
       ...(forge === 'custom' ? { templates } : {}),
-      checks: checks
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean),
+      checks: commandsIn(checks),
     };
   }
 

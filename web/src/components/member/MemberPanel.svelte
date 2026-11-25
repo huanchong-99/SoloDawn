@@ -9,6 +9,7 @@
     personTags,
     terminalDisabledReason,
     usageMeter,
+    watchDisabledReason,
   } from '../../lib/members';
   import type { Points } from '../../lib/mounts.svelte';
   import type { Net } from '../../lib/net.svelte';
@@ -29,6 +30,7 @@
   import { suggestedTier } from '../profile/profile';
   import AskToWatch from '../watch/AskToWatch.svelte';
   import AddAI from './AddAI.svelte';
+  import RemoveAI from './RemoveAI.svelte';
 
   /** The member column of a group's chat: AI member cards, people, and the add-AI dialog. */
   let { group, net }: { group: Group; net: Net } = $props();
@@ -40,6 +42,7 @@
 
   const ais = $derived(aiMembers(group));
   const humans = $derived(humanMembers(group));
+  const admin = $derived(isAdmin(group));
   const addReason = $derived(addDisabledReason(group, homes));
 
   $effect(() => nodes.sync(net.homes));
@@ -71,7 +74,8 @@
       {@const owner = mine ? undefined : group.personName(ai.user)}
       {@const termWhy = mine ? terminalDisabledReason(net, ai) : undefined}
       {@const terminal = offersTerminal(host, ai.cli)}
-      {@const meter = usageMeter(ai.usage, prefs.lang)}
+      {@const watchWhy = watchDisabledReason(net, ai)}
+      {@const meter = usageMeter(ai, prefs.lang)}
       <section class="card member">
         <header class="row">
           <span
@@ -109,7 +113,7 @@
                   {@render profileRows()}
                   {@render accessRows()}
                 </dl>
-                {#if meter}
+                {#if meter?.fill !== undefined}
                   <div
                     class="meter"
                     role="meter"
@@ -123,6 +127,8 @@
                         {meter.note}
                       </small>{/if}
                   </div>
+                {:else if meter}
+                  <p class="meter"><span>{meter.label}</span><b>{meter.value}</b></p>
                 {/if}
                 {#if mine}
                   <footer class="card-foot">
@@ -163,20 +169,36 @@
                     {:else if terminal && termWhy}
                       <span id={`${uid}-term-${ai.id}`} class="hint">{termWhy}</span>
                     {/if}
+                    <RemoveAI {group} {ai} />
                   </footer>
-                {:else if ai.state === 'takeover'}
+                {:else if ai.state === 'takeover' || admin}
                   <footer class="card-foot">
-                    <AskToWatch {group} {ai} />
-                    <a
-                      class="btn btn-sm"
-                      href={href('terminal', {
-                        g: group.g,
-                        member: ai.id,
-                        task: terminalTask(group, ai),
-                      })}
-                    >
-                      {t('watch.open')}
-                    </a>
+                    {#if ai.state === 'takeover'}
+                      <AskToWatch {group} {ai} />
+                      {#if watchWhy}
+                        <button
+                          type="button"
+                          class="btn btn-sm"
+                          disabled
+                          aria-describedby={`${uid}-watch-${ai.id}`}
+                        >
+                          {t('watch.open')}
+                        </button>
+                        <span id={`${uid}-watch-${ai.id}`} class="hint">{watchWhy}</span>
+                      {:else}
+                        <a
+                          class="btn btn-sm"
+                          href={href('terminal', {
+                            g: group.g,
+                            member: ai.id,
+                            task: terminalTask(group, ai),
+                          })}
+                        >
+                          {t('watch.open')}
+                        </a>
+                      {/if}
+                    {/if}
+                    {#if admin}<RemoveAI {group} {ai} />{/if}
                   </footer>
                 {/if}
               {/snippet}
@@ -191,7 +213,7 @@
 
   <div class="row people-head">
     <h2 class="sec-title grow">{t('member.people')} · {humans.length}</h2>
-    {#if isAdmin(group)}
+    {#if admin}
       <button
         type="button"
         class="btn btn-sm"
@@ -209,9 +231,6 @@
         <Avatar id={person.user} name={person.name} />
         <span class="person-name grow">
           {person.name}{#if tags}{' '}<span class="muted">· {tags}</span>{/if}
-        </span>
-        <span class="st" data-st={person.online ? 'ok' : 'offline'}>
-          <i></i>{t(person.online ? 'member.online' : 'member.offline')}
         </span>
         <PersonActions {group} {person} />
       </li>
@@ -331,7 +350,7 @@
   }
   .people {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) max-content;
+    grid-template-columns: auto minmax(0, 1fr);
   }
   .person {
     display: grid;

@@ -228,7 +228,8 @@ describeFeature(feature, ({ BeforeEachScenario, AfterEachScenario, Scenario }) =
         'Approval delegates',
       ]);
       expect(accessValues()).toEqual(['Requester', 'None', 'Requester', 'None']);
-      expect(all('.member button')).toHaveLength(0);
+      // The group's admin, who may remove the AI and edit nothing of it.
+      expect(texts('.member button')).toEqual(['Remove AI', 'Remove AI']);
     });
     When('the owner changes both lists on the team AI', async () => {
       const { group, connect } = ownerView;

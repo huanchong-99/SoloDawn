@@ -50,21 +50,18 @@ it('shows a missing signer explicitly and supports an empty message', () => {
   expect(text()).toBe('Claude Code Website On a computer belonging to Former member');
 });
 
-it('shows only people, their live state, and no AI controls', () => {
+it('shows only people, and no AI controls', () => {
   const group = setup();
   const person = p.decode(p.HumanMemberRow, goldens['row-member-human']);
   group.apply([
     { ...p.decode(p.GroupRow, goldens['row-group-team']), id: group.g },
     person,
-    { ...person, id: 'other', name: 'Reader', online: false },
+    { ...person, id: 'other', name: 'Reader' },
     p.decode(p.AIMemberRow, goldens['row-member-ai']),
   ]);
   show(MemberPanel, { group, net: { source: 'mock', homes: [], path: () => undefined } });
   expect(document.querySelectorAll('li').length).toBe(2);
-  expect([...document.querySelectorAll('.st')].map((el) => el.textContent!.trim())).toEqual([
-    'Online',
-    'Offline',
-  ]);
+  expect(document.querySelector('.st')).toBeNull();
   expect(document.querySelector('.head')).toBeNull();
   expect(document.querySelector('.member')).toBeNull();
 });

@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-25 · limitation · `group set` has no range for its numbers
+
+- Symptom: a home stores any integer as `pass`, `pass_foundation` or a limit, also 0 and negative ones. Some have an effect nobody chose: `turn_minutes` 0 ends every check command at once.
+- Cause: `planning/contracts/commands.md` 1.1 names no range and `grpSetValid` (`internal/home/cmd_group.go`) checks only that a field is there.
+- Status: open, accepted: only an admin sends it. The web client's settings take 1 to 100 for the scores and at least 1 for a limit (0 for `review_rounds` and `ask_depth`, where it means something: a failed review stops the task for a person, AIs do not ask each other), at most 4 for `ask_depth` (R-114), 55 seconds for `ask_wait_s` (`flows/ask.md` D) and 10 minutes for `approval_wait_s` (`flows/approval.md` H) (`limitFields`, `web/src/lib/groupset.ts`).
+
 ### 2026-11-25 · bug · A `jump` on a busy AI loses the message instead of interrupting the turn
 
 - Symptom: while an AI runs a turn, the author of a waiting mention sends `jump`. The turn is not interrupted, no `task preempted` is reported, and the message never reaches the AI: it is acknowledged, so neither the host nor the home holds it any more. Contract: `planning/flows/agent-turn.md` section C, acceptance A5.11.

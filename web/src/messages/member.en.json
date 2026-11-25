@@ -28,8 +28,6 @@
   "member.join.submit": "Add AI",
   "member.join.title": "Add an AI",
   "member.join.unconfigured": "Choose an account type on the Computers page first",
-  "member.offline": "Offline",
-  "member.online": "Online",
   "member.owner": "Owner",
   "member.path.direct": "direct",
   "member.path.local": "group home",
@@ -56,5 +54,10 @@
   "member.terminal.offline": "Computer offline",
   "member.terminal.relay": "Direct link only",
   "member.usage.resets": "Resets {time}",
-  "member.usage.window": "Window used"
+  "member.usage.window": "Window used",
+  "member.remove": "Remove AI",
+  "member.remove.busy": "{name} is on {tasks}. Reassign or cancel that work first.",
+  "member.remove.confirm": "Confirm removal",
+  "member.remove.secretary": "The group will have no secretary until you choose another one.",
+  "member.usage.turns": "Turns today"
 }

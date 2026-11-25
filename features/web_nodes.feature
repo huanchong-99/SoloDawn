@@ -40,6 +40,18 @@ Feature: Connection indicator and my computers and AIs
     When "windows-box" stops
     Then "windows-box" is marked "Offline" and its AIs say "Offline · wakes when the computer returns"
 
+  Scenario: An account type is corrected, with its members in the groups
+    Given an owned computer "workstation" on "macOS 15.2" running "v0.3.1" with direct path 4 ms and group "Website"
+    When the browser opens "#/nodes" and the person opens "Account type" of "Claude Code"
+    Then "Personal subscription" is checked among the three choices
+    When the group home refuses member commands and the person chooses "API key" for "Claude Code"
+    Then "workstation" receives "agent.set" with "api_key" and "member set" of "Claude Code" with "api_key", and the choice stays
+    And the card says "Not changed yet in Website." and why
+    When the group home takes them again and the person presses "Try again"
+    Then the note is gone and the member in "Website" has "api_key"
+    When "workstation" refuses "agent.set" and the person chooses "Team plan" for "Claude Code"
+    Then "API key" is checked again and no member command is sent
+
   Scenario: Adding a computer opens onboarding and adding a browser requests a one-time pairing link
     Given an owned computer "workstation" on "macOS 15.2" running "v0.3.1" with direct path 4 ms and group "Website"
     When the browser opens "#/nodes"
