@@ -1365,28 +1365,6 @@ func verifyReentrantDrain(t *testing.T, r *deliverRig, gKey SessionKey) {
 	}
 }
 
-// A hand-back takes a session from takeover to working. Delivery that looks
-// at the AI in between, having seen no running turn yet, must still see one
-// of the two and hold the items.
-func TestItemsStayHeldAcrossAHandBackStart(t *testing.T) {
-	r := newDeliverRig(t, false)
-	r.seedGroupAndMembers()
-	gKey := SessionKey{Group: testGroup1, Member: testAI1}
-	r.h.Sessions.Create(Session{SessionKey: gKey, Kind: GroupSession, Folder: "repo", Agent: "claude", Home: r.homeKey.ID(), Name: "C"})
-	r.h.Sessions.Move(gKey, Dormant, Takeover)
-	r.pushItem(r.homeKey, r.homeKey.ID(), testGroup1, proto.Item{Item: 701, AI: testAI1, Why: "mention", Msg: testMsg1}, r.makeTextMsg(testMsg1, nil, "held"))
-	r.waitUntil("item held", func() bool { return r.h.QueuedCount(testGroup1, testAI1) == 1 })
-	r.waitAIUnbusy(testGroup1, testAI1)
-	Holds["hand_back"] = func(h *Host, _ SessionKey) (string, bool) {
-		h.Sessions.Move(gKey, Takeover, Working)
-		return "", false
-	}
-	Deliver(r.h, testGroup1, testAI1)
-	if s, _ := r.h.Sessions.Get(gKey); s.State != Working || len(r.runtime.recorded()) != 0 || r.home.ackCountFor(701) != 0 {
-		t.Fatalf("state %s, %d turns, %d acks: an item was delivered into the hand-back turn", s.State, len(r.runtime.recorded()), r.home.ackCountFor(701))
-	}
-}
-
 func verifyEnqueueHeldOrdering(t *testing.T) {
 	t.Helper()
 	mk := func(id int64, jump bool) verifiedItem {

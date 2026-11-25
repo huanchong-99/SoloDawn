@@ -782,3 +782,28 @@ func TestJumpSurvivesAHostRestartBeforeItsTurn(t *testing.T) {
 		}
 	})
 }
+
+// A hand-back takes a session from takeover to working. Delivery that looks
+// at the AI in between, having seen no running turn yet, must still see one
+// of the two and hold the items.
+func TestItemsStayHeldAcrossAHandBackStart(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		key := SessionKey{Group: runGroup1, Member: runAI1}
+		// The takeover is registered, so that reading the group's state does not hand the row back as one a restart left.
+		takeoverState(r.h).claim(aiSlot{group: runGroup1, member: runAI1}, &takeover{key: key}, false)
+		r.h.Sessions.Create(makeRunSession(key, GroupSession, "repo"))
+		r.h.Sessions.Move(key, Dormant, Takeover)
+		r.push(jumpMention(1, testMsg1, "", false))
+		r.wantHeld(1)
+		Holds["hand_back"] = func(h *Host, _ SessionKey) (string, bool) {
+			h.Sessions.Move(key, Takeover, Working)
+			return "", false
+		}
+		Deliver(r.h, runGroup1, runAI1)
+		synctest.Wait()
+		r.wantHeld(1)
+		if r.state("") != Working || r.drv.count() != 0 {
+			t.Fatalf("state %s, %d CLIs started: an item was delivered into the hand-back turn", r.state(""), r.drv.count())
+		}
+	})
+}
