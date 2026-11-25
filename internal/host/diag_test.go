@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -84,11 +82,13 @@ func (d *diagLines) lineOnce(t *testing.T, line string) {
 // wait waits until the log holds line.
 func (d *diagLines) wait(t *testing.T, line string) {
 	t.Helper()
-	for deadline := time.Now().Add(10 * time.Second); d.count(d.is(line)) == 0; time.Sleep(time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out after 10s waiting for %q; saw %q", line, d.all())
+	poll(t, 10*time.Second, fmt.Sprintf("%q", line), func() string {
+		if d.count(d.is(line)) > 0 {
+			return ""
 		}
-	}
+		lines := d.all()
+		return fmt.Sprintf("%d lines, last %q", len(lines), lines[max(0, len(lines)-5):])
+	})
 }
 
 // ran fails unless the log holds bg.start and bg.stop of the work n times
@@ -346,12 +346,7 @@ func TestDiagReleasedSlotDeliveryLines(t *testing.T) {
 
 func TestDiagCloudPollLines(t *testing.T) {
 	d := captureDiag(t)
-	h, root := tskDiskHost(t)
-	grp := tskGroupFixture("custom")
-	grp.Templates = forgeTestTemplates()
-	tskPutRow(t, h, "group", tskTestGroupID, grp)
-	tskNoErr(t, os.MkdirAll(filepath.Join(root, "projects", tskTestGroupID, "repo"), 0700))
-	h.Attach("home-device", newTskScriptHome())
+	h, _, _ := customForgeHost(t)
 	fakeForgeGH(t, forgeAnswer{})
 	startHostedCheck(h, "home-device", tskTestGroupID, HostedCheck{Task: testTask1, Branch: "task/1-poll", Commit: "head", PR: 7, Since: time.Now()})
 	node, work := "node="+h.Key.ID()[:8], "cloud_poll g="+tskTestGroupID+" task="+testTask1

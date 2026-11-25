@@ -167,14 +167,12 @@ func TestPushesDeliveredBeforeAnswer(t *testing.T) {
 
 func waitQueued(t *testing.T, c *Connection, want int) {
 	t.Helper()
-	deadline := time.Now().Add(4 * time.Second)
-	for time.Now().Before(deadline) {
-		if len(c.incoming) == want {
-			return
+	poll(t, 4*time.Second, fmt.Sprintf("%d queued frames", want), func() string {
+		if n := len(c.incoming); n != want {
+			return fmt.Sprintf("%d queued", n)
 		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("queued %d frames, want %d", len(c.incoming), want)
+		return ""
+	})
 }
 
 func readReplies(ctx context.Context, c *Connection) func() {
@@ -347,7 +345,7 @@ func TestBackoffKeptAfterShortConnection(t *testing.T) {
 			t.Fatalf("offered again after %v", time.Since(closed))
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("no new offer")
+		t.Fatal(timedOut(5*time.Second, "a new offer", nil))
 	}
 	cancel()
 	recv(t, done)
