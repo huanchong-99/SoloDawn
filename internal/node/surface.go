@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"runtime"
+	"sync"
 
 	"github.com/huanchong-99/SoloDawn/internal/home"
 	"github.com/huanchong-99/SoloDawn/internal/host"
@@ -27,7 +28,8 @@ type (
 	}
 	// Surface serves host.info on a Sessions hub.
 	Surface struct {
-		cfg SurfaceConfig
+		cfg     SurfaceConfig
+		pushing sync.Mutex
 	}
 	srfDBState struct {
 		name    string
@@ -129,19 +131,27 @@ func (sf *Surface) reqHostInfo(ctx context.Context, _ *home.Conn, _ Ctl, _ strin
 	if err := proto.Decode(data, &request); err != nil {
 		return nil, &host.Error{Code: "bad_request", Message: err.Error()}
 	}
-	state, err := sf.hostState(ctx, request.Refresh)
-	if err == nil && request.Refresh {
-		sf.pushHostInfo(state)
+	if request.Refresh {
+		return sf.pushHostInfo(ctx, true)
 	}
-	return state, err
+	return sf.HostState(ctx)
 }
 
-func (sf *Surface) pushHostInfo(state proto.HostState) {
+// pushHostInfo holds pushing from reading the state to the last send, so that
+// the last push a device gets is the newest state.
+func (sf *Surface) pushHostInfo(ctx context.Context, refresh bool) (proto.HostState, error) {
+	sf.pushing.Lock()
+	defer sf.pushing.Unlock()
+	state, err := sf.hostState(ctx, refresh)
+	if err != nil {
+		return state, err
+	}
 	for _, c := range sf.cfg.Sessions.sesConns() {
 		if sf.cfg.Sessions.sesWelcomed(c) && sf.cfg.Sessions.cfg.Logs.IsOwner(c.device) {
 			c.Send(proto.HostInfoPush{Type: "host.info", HostState: state})
 		}
 	}
+	return state, nil
 }
 
 func srfCountOpen(sessions []host.Session) int {

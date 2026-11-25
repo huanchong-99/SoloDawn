@@ -92,12 +92,13 @@ The owner's devices can send `home.add` to record a group's home and its signall
 
 `SessionConfig.OnAdopt` is invoked once with the adopted owner's user id when an unowned node persists its first valid adoption log (`dvlAdopt`), before forwarding `devlog` frames. `SessionConfig.Spawn` starts a host command; `nil` runs it on a bare goroutine. `nodeRuntime.onAdopt` registers the node to start at login (`InstallService`), while `home.Loop` reads the dynamic owner through `LoopConfig.OwnerFn` (`logs.Owner`). `home.Loop.Welcome` and `home.Loop` group announcements deliver `welcome.groups` and `groups` pushes over `Sessions`.
 
-Non-owner devices may send `watch.start` as well as `sync` and `fetch`. A device whose person holds a watch grant is admitted by `knownPeer` and session enrolment even without a locally known device log. It receives the ordinary peer welcome (`owner: false`, readable groups often empty), may send `hello` and `devlog`, and may start and open its granted watch channels. `Host.WatchEnded` closes that person's device sessions, including their peer connections, after the last grant ends unless `knownPeer` still accepts them for another reason.
+Non-owner devices may send `watch.start` as well as `sync` and `fetch`. A device whose person holds a watch grant is admitted by `knownPeer` and session enrolment even without a locally known device log. It receives the ordinary peer welcome (`owner: false`, readable groups often empty), may send `hello` and `devlog`, and may start and open its granted watch channels. `Host.WatchEnded` closes that person's device sessions, including their peer connections, after the last grant ends unless `knownPeer` still accepts them for another reason. `Host.WatchersChanged` pushes `host.info` to the owner's connected devices, on a goroutine of `nodeRuntime.bg` (`host_info`), each time a watch grant is added or ends.
 
 ## Concurrency and lock order
 
 - `nodeRuntime.bg` waits for all inbound `Pairer.Serve` sessions, outgoing `serveClient` sessions, rendezvous loops, the daily retention schedule (`startRetention`), and host commands, which `Sessions` starts through `SessionConfig.Spawn`, before `Close` shuts `LocalLink`, `home.Loop` and `Store`; `nodeRuntime.mu` is a leaf lock guarding `closing`, `rvPaths` and `rvLoops`.
 - `Sessions.cmdMu` guards `inflight` (keyed by signer and nonce) and receipt reads/writes in `Store.Write`; host command handlers and `Replays` handlers run outside `cmdMu`, and duplicate `(signer, nonce)` requests wait on the in-flight channel before reading the stored receipt.
+- `Surface.pushing` serializes the pushes of `host.info`, each from reading the state to the last send, so that the last one a device gets is the newest; no other lock is held when it is taken.
 - `Pairer.mu` guards active `attempts` and nonce-keyed `links`; it is a leaf lock never held across `Store.Write`, `Logs`, `Sessions`, `Peer` or WebSocket operations. Each `pairAttempt.outcome` channel has a single reader (`waitPair` for role `b`, `watchBrowser` for role `a`).
 - `Logs.writeMu` serializes device-log mutations and is acquired before `Store.Write` and before `Logs.mu`; `dvlNotify` runs after `writeMu` is released.
 - `Logs.mu` (`sync.RWMutex`) guards `owner`, `log` and `onChange`; it is a leaf lock never held across `Store.Write`, `home.Loop` calls, `OnAdopt` or network writes.
@@ -123,15 +124,15 @@ through `log/slog`, with a logger made in `stepIdentity` that holds `node`, the 
 the device id. `node.start` (`stepIdentity`) and `node.stop` (the start of `Close`): `version`, `os`,
 `level`; `home.dial` (`dialHome`, the dial that `connectHome` starts): `home`, cut to 8 characters;
 `bg.start` and `bg.stop` (`name`) around every goroutine that a wait group of the runtime starts:
-`home_dial`, `home_session`, `host_cmd`, `inbound`, `local` (one local socket connection), `local_rv`,
-`rendezvous`, `retention`. The goroutine writes its own start, because the caller may hold a mutex,
+`home_dial`, `home_session`, `host_cmd`, `host_info` (a push of `host.info`), `inbound`, `local` (one
+local socket connection), `local_rv`, `rendezvous`, `retention`. The goroutine writes its own start, because the caller may hold a mutex,
 and its stop before its wait group's `Done`. `stepLog` sets the flags of `log` (date, time with
 microseconds, UTC) and the level, which is `debug` when `logs/level` holds the word `debug` and `info`
 otherwise; `closeCore` puts back the output, the flags and the level.
 
 ## Known limitations
 
-- `Surface` answers `host.info` requests and forwards `pty.resize` pushes; there is no `host.info` push yet, `settings.set` is postponed with `U-12`.
+- `Surface` answers `host.info` requests and forwards `pty.resize` pushes; it pushes `host.info` after a request with `refresh` and when `watchers` change, not when another field does; `settings.set` is postponed with `U-12`.
 - `net_status` omits `rtt_ms` (`*peer.Connection` exposes `Path()` without ICE candidate-pair round-trip statistics) and reports `mapped_ports` as `false` in step 1 ([issues](../../issues.md)).
 - Self-update (`Updater`, `N-6`) is postponed off the step-1 main line ([issues](../../issues.md)).
 - On macOS, Unix socket paths are limited to 103 bytes, so tests that bind `sock` under `HOME` use `/tmp` ([issues](../../issues.md)).

@@ -264,10 +264,13 @@ func (n *nodeRuntime) wireServices() {
 		Home: n.loop, Host: n.host, Name: nameFn, Addrs: n.addrs, OnAdopt: n.onAdopt,
 		Spawn: func(fn func()) { n.spawn("host_cmd", fn) }, Known: n.knownPeer,
 	})
-	NewSurface(SurfaceConfig{
+	surface := NewSurface(SurfaceConfig{
 		ID: n.key.ID(), Version: Version, Exe: n.exe, Store: n.db,
 		Sessions: n.sessions, Host: n.host, Name: nameFn, Agents: n.host.Agents,
 	})
+	n.host.WatchersChanged = func() {
+		n.spawn("host_info", func() { surface.pushHostInfo(n.ctx, false) })
+	}
 	n.pairer.bind(n.sessions)
 	host.Part[netStatusPart](n.host).status = n.netStatus
 }

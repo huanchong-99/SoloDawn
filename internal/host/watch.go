@@ -68,6 +68,7 @@ func watchItem(h *Host, v verifiedItem) {
 		}
 		p.grants[slot][member.User] = card.By
 		p.mu.Unlock()
+		h.watchersChanged()
 	}
 	ai, _, _ := lookupLocalAI(h, v.group, slot.member)
 	row := AuditRow{Group: v.group, Agent: ai.agent, What: AuditDelivered, Item: v.item.Item, Home: v.home, Detail: v.item.Why, By: v.home}
@@ -417,5 +418,14 @@ func (h *Host) watchEnded(slot aiSlot, users []string) {
 		if !watchState(h).hasUser(user) && h.WatchEnded != nil {
 			h.WatchEnded(slot.group, user)
 		}
+	}
+	if len(users) > 0 {
+		h.watchersChanged()
+	}
+}
+
+func (h *Host) watchersChanged() {
+	if h.WatchersChanged != nil {
+		h.WatchersChanged()
 	}
 }
