@@ -95,15 +95,27 @@ func jumpCompose(h *Host, s Session, kind TurnKind, items []json.RawMessage) (st
 	return "items " + strings.Join(nums, ","), Turn{Kind: kind, Thread: s.Task}, nil
 }
 
-func (r *jumpRig) putGroup(paused bool) {
+func jumpGroupRow(paused bool, seq int64) json.RawMessage {
 	grp := proto.GroupRow{
-		RowHeader: proto.RowHeader{Type: "group", ID: runGroup1, Seq: 1}, Name: "Website", Kind: "project",
+		RowHeader: proto.RowHeader{Type: "group", ID: runGroup1, Seq: seq}, Name: "Website", Kind: "project",
 		Base: "main", Forge: "none", Home: jumpHome, Checks: []string{},
 	}
 	if paused {
 		grp.Paused = &proto.GroupPause{By: testHuman, At: 1}
 	}
-	r.h.Rows.Put(runGroup1, "group", runGroup1, json.RawMessage(marshalWire(grp)))
+	return json.RawMessage(marshalWire(grp))
+}
+
+func (r *jumpRig) putGroup(paused bool) {
+	r.h.Rows.Put(runGroup1, "group", runGroup1, jumpGroupRow(paused, 1))
+}
+
+// pushGroup pushes the group's row as the home does when the group is paused
+// or resumed, and waits until the host has acted on it.
+func (r *jumpRig) pushGroup(paused bool, seq int64) {
+	frame := proto.Rows{Type: "rows", Group: runGroup1, Rows: []json.RawMessage{jumpGroupRow(paused, seq)}}
+	r.h.Push(jumpHome, json.RawMessage(marshalWire(frame)))
+	synctest.Wait()
 }
 
 // putTask writes the row of a task of the AI, as the home pushes it before it
@@ -419,6 +431,55 @@ func TestJumpInterruptingAGroupSessionReportsNothingAndContinuesIt(t *testing.T)
 		r.wantTurns(group, "items 2", jumpContinueGroup)
 		r.end(group, "completed")
 		r.wantReports()
+		r.wantSettled()
+	})
+}
+
+// The author jumps a message a second time, as after a reload of the page:
+// the home retires the first jump item and sends another, and the message is
+// delivered once.
+func TestMessageJumpedTwiceIsDeliveredOnce(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		task := r.work(1, runTask1, "local_check")
+		r.push(jumpMention(2, testMsg1, "", true))
+		r.push(jumpMention(3, testMsg1, "", true))
+		r.wantHeld(3)
+		if n := task.interrupts.Load(); n != 1 {
+			t.Fatalf("the running turn got %d interrupts, want 1", n)
+		}
+		r.end(task, "interrupted")
+		group := r.drv.proc(1)
+		r.wantTurns(group, "items 3")
+		r.end(group, "completed")
+		r.wantTurns(group, "items 3")
+		r.wantTurns(task, "items 1", jumpContinueTask)
+		r.wantAcked(3)
+		if r.home.ackCountFor(2) != 0 {
+			t.Fatal("the retired jump item was acknowledged")
+		}
+	})
+}
+
+// A group paused during the jump turn stops that turn and leaves the task
+// pre-empted; the resume of the group brings the task back by row 13b and
+// continues it.
+func TestGroupPausedDuringTheJumpTurnContinuesTheTaskOnResume(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		task := r.work(1, runTask1, "local_check")
+		r.push(jumpMention(2, testMsg1, "", true))
+		r.end(task, "interrupted")
+		group := r.drv.proc(1)
+		r.pushGroup(true, 2)
+		if group.interrupts.Load() != 1 {
+			t.Fatal("the pause did not interrupt the jump turn")
+		}
+		r.end(group, "interrupted")
+		r.wantTurns(task, "items 1")
+		r.wantReports("task preempted "+runTask1+" "+testMsg1, "event turn_interrupted stop")
+		r.pushGroup(false, 3)
+		r.wantTurns(task, "items 1", jumpContinueTask)
+		r.wantReports("task preempted "+runTask1+" "+testMsg1, "event turn_interrupted stop", "task resume "+runTask1)
+		r.end(task, "completed")
 		r.wantSettled()
 	})
 }

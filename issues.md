@@ -33,7 +33,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-25 · limitation · A `jump` that crosses the delivery of its message delivers the message twice
 
 - Symptom: the author sends `jump` at the moment the AI takes the waiting message. The turn that just started with the message is interrupted, and the message comes again as the next turn.
-- Cause: the home retires the waiting item and queues the jump under a new item number (`rndRequeueJump`, `internal/home/rounds.go:66`), where [commands.md](planning/contracts/commands.md) 1.4 says the item "gets `jump: true` and is sent again". The host knows a delivered item by `(home, item)` (`hasAuditItem`, `internal/host/deliver.go`), so it cannot tell that the new item is a message it has delivered. An item it still holds it does drop (`retiredByJump`).
+- Cause: the home retires the waiting item and queues the jump under a new item number (`rndRequeueJump`, `internal/home/rounds.go`), where [commands.md](planning/contracts/commands.md) 1.4 says the item "gets `jump: true` and is sent again". The host knows a delivered item by `(home, item)` (`hasAuditItem`, `internal/host/deliver.go`), so it cannot tell that the new item is a message it has delivered. An item it still holds, the waiting one or an earlier jump of the message, it does drop (`retiredByJump`).
 - Status: open. If the home kept the item's number, the host's audit check would acknowledge the second one without a turn.
 
 ### 2026-11-25 · limitation · A pre-emption is forgotten when the host restarts

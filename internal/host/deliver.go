@@ -651,11 +651,12 @@ func enqueueHeld(queue []verifiedItem, incoming verifiedItem) []verifiedItem {
 	return insertHeld(queue, incoming)
 }
 
-// retiredByJump reports whether old is the item the home retired when it
-// queued jump for the same message (contracts/commands.md 1.4): the home
-// never sends old again, and the message is delivered once.
+// retiredByJump reports whether old is an item the home retired when it
+// queued jump for the same message (contracts/commands.md 1.4), be it the
+// waiting item or an earlier jump of that message: the home never sends old
+// again, and the message is delivered once.
 func retiredByJump(old, jump proto.Item) bool {
-	return !bool(old.Jump) && old.Why == jump.Why && old.Msg == jump.Msg
+	return old.Why == jump.Why && old.Msg == jump.Msg
 }
 
 func insertHeld(queue []verifiedItem, incoming verifiedItem) []verifiedItem {
@@ -878,7 +879,7 @@ func firstJump(h *Host, d *delivery, key aiGroupKey, ai aiInfo) (proto.Item, Ses
 		diagTake(h, key, "", nil, queue, paused)
 	}
 	for _, v := range queue {
-		if target := routeSessionItem(h, ai, v); bool(v.item.Jump) && !isItemHeld(h, target, v, paused) {
+		if target := routeSessionItem(h, ai, v); bool(v.item.Jump) && !heldBesidesTurn(h, target, v, paused) {
 			return v.item, target.key, true
 		}
 	}
@@ -972,7 +973,7 @@ func continueInterrupted(h *Host, d *delivery, key aiGroupKey) bool {
 }
 
 func mayContinue(h *Host, p *preemption, s Session) bool {
-	return !groupIsPaused(h, s.Group) && !turnsHeld(h, s.SessionKey) && resumePreempted(h, p, s)
+	return !groupIsPaused(h, s.Group) && !turnsHeld(h, s.SessionKey) && !aiWorking(h, s.SessionKey) && resumePreempted(h, p, s)
 }
 
 // resumePreempted reports task resume for a task this host pre-empted
@@ -1109,10 +1110,21 @@ func (d *delivery) prependHeld(key aiGroupKey, items []verifiedItem) {
 	setQueue(d.held, key, append(items, d.held[key]...))
 }
 
-// isItemHeld reports whether something other than a turn the AI is running
-// holds an item for its session (flows/agent-turn.md step 3).
+// isItemHeld reports whether an item is held for its session
+// (flows/agent-turn.md step 3). A turn the AI is running holds every item, a
+// jump item too: jumpRunningTurn interrupts for that one. The takeover is
+// read before the running turn, so that a hand-back, which goes from the one
+// to the other, is seen as one of them.
 func isItemHeld(h *Host, target routedTarget, v verifiedItem, paused bool) bool {
+	return heldBesidesTurn(h, target, v, paused) || aiWorking(h, target.key)
+}
+
+func heldBesidesTurn(h *Host, target routedTarget, v verifiedItem, paused bool) bool {
 	return paused || taskIsHeld(h, v) || turnsHeld(h, target.key)
+}
+
+func aiWorking(h *Host, key SessionKey) bool {
+	return aiHasState(h, aiGroupKey{group: key.Group, member: key.Member}, Working)
 }
 
 // turnsHeld reports whether a session gets no turn for now: a hold of Holds
