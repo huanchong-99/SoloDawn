@@ -542,7 +542,7 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
       await pairNode(page, direct, homeNode, 'workstation');
       await pairNode(page, direct, secNode, 'coordinator');
 
-      await page.locator('button', { hasText: 'New project group' }).first().click();
+      await page.locator('button', { hasText: 'New group' }).first().click();
       const createDlg = page.locator('dialog.dlg[open]');
       const inputs = createDlg.locator('input.input');
       await inputs.nth(0).fill('Release Ops');
@@ -737,7 +737,7 @@ describe('E-M5: full main-line task lifecycle and approval/decision round-trip',
 
       await pairNode(page, direct, node, 'workstation');
 
-      await page.locator('button', { hasText: 'New project group' }).first().click();
+      await page.locator('button', { hasText: 'New group' }).first().click();
       const createDlg = page.locator('dialog.dlg[open]');
       const inputs = createDlg.locator('input.input');
       await inputs.nth(0).fill('Card Roundtrip');

@@ -169,7 +169,7 @@
           <div class="empty">
             <span class="horizon"></span>
             <h3>{t('chat.empty.title')}</h3>
-            <p>{t('chat.empty.body')}</p>
+            <p>{t(group.info?.kind === 'team' ? 'team.empty' : 'chat.empty.body')}</p>
           </div>
         {/if}
       {/each}

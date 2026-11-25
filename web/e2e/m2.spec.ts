@@ -342,7 +342,7 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
 
       await page1.locator('.rail .tabs a[href="#/groups"]').click();
       await poll(() => page1.url()).toContain('#/groups');
-      await page1.locator('button', { hasText: 'New project group' }).first().click();
+      await page1.locator('button', { hasText: 'New group' }).first().click();
 
       const createDlg = page1.locator('dialog.dlg[open]');
       const textInputs = createDlg.locator('input.input');

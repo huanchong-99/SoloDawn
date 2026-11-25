@@ -222,8 +222,9 @@ sent from a browser; only its kind, `bulletin`, says a node wrote it.
 
 **Which home.** A node knows the team groups homed on itself and those in
 `host.info.homes` (`contracts/step-2/people.md` section 7, point 2): the
-browser sends `home.add` to each of its person's nodes after it creates or
-joins a team group, as after any join. (`settings.set` is postponed after
+browser sends `home.add` to each of its person's nodes that does not list
+the home of a team group, when it connects to the node and when the group
+appears. (`settings.set` is postponed after
 1.0, so there is no `settings.teams`; decided 2026-11-22.) The node connects
 to each such `home` as a device of a member (`contracts/datachannel.md`
 section 8, third row) and reads the group with `state_only`, which gives its

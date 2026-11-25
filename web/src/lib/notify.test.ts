@@ -164,6 +164,12 @@ describe('classify, whoOf, titleOf and targetIdOf', () => {
     expect(titleOf(group, watchMine)).toBe('Let Pat watch Codex’s terminal.');
   });
 
+  it('names the AI of a bulletin, not the person whose computer sent it', () => {
+    const { group } = makeReadyGroup();
+    const bulletin = row<p.MsgRow>('row-msg-bulletin', { by: ownerId });
+    expect(whoOf(group, bulletin)).toBe('Claude Code');
+  });
+
   it('classifies summaries, mentions from others, and ignores system or own messages', () => {
     const { group } = makeReadyGroup();
     const summary = row<p.MsgRow>('row-msg-summary', { seq: 6, pos: 6 });

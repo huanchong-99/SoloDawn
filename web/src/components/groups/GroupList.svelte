@@ -4,6 +4,7 @@
   import { homes, recent, subject, type Group } from '../../lib/groups.svelte';
   import type { Net } from '../../lib/net.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
+  import type { MsgRow } from '../../lib/proto';
   import { now, shortWhen } from '../../lib/when';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
@@ -15,19 +16,24 @@
   // A group is created on a node of the person's own that can be reached.
   const canCreate = $derived(homes.some((home) => home.owner && home.ctl));
 
+  /** Who wrote a message: for a bulletin the AI it names, not the person whose computer sent it. */
+  function author(group: Group, msg: MsgRow) {
+    if (msg.kind === 'bulletin') return msg.body.ai;
+    return msg.by === 'system' ? t('chat.system') : group.member(msg.by)?.name;
+  }
+
   /** Who wrote the last message of the main line, and what it says. */
   function preview(group: Group) {
     const last = group.main.at(-1);
     if (!last) return t('groups.none');
-    const by = last.by === 'system' ? t('chat.system') : group.member(last.by)?.name;
     const said = subject(group, last) || t(`chat.kind.${last.kind}`);
-    return `${by ?? t('chat.gone')}${t('groups.colon')}${said}`;
+    return `${author(group, last) ?? t('chat.gone')}${t('groups.colon')}${said}`;
   }
 </script>
 
 <header class="head">
   <div class="grow">
-    <h2 class="sec-title">{t('groups.projects')}</h2>
+    <h2 class="sec-title">{t('groups.all')}</h2>
     <p class="hint">{t('groups.lead')}</p>
   </div>
   <button class="btn btn-sm" onclick={oncreate} disabled={!canCreate}>

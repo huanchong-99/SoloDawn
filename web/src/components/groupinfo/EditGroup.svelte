@@ -7,6 +7,7 @@
   import TemplateEditor from '../forge/TemplateEditor.svelte';
   import { emptyTemplates } from '../forge/templates';
   import SecretaryWarning from './SecretaryWarning.svelte';
+  import { secretaryCandidates } from './trust';
 
   let { group, info, onclose }: { group: Group; info: GroupRow; onclose: () => void } = $props();
   const uid = $props.id();
@@ -15,7 +16,7 @@
   let secretary = $state(untrack(() => info.secretary ?? ''));
   let busy = $state(false);
   let failed = $state('');
-  const candidates = $derived(group.members.filter((member) => member.kind === 'ai'));
+  const candidates = $derived(secretaryCandidates(group));
   const selected = $derived(group.member(secretary));
   const people = $derived(
     group.members.filter((member) => member.kind === 'human').map((member) => member.user),

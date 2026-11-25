@@ -269,6 +269,141 @@ describe('Nodes', () => {
     expect(store.infos.size).toBe(0);
   });
 
+  describe('tell', () => {
+    const notes = 'cccccccccccccccccccccc';
+    const studio = 'dddddddddddddddddddddd';
+    const listing = (g: string, name: string) => ({ groups: [{ g, name, seq: 0 }] });
+    /** The commands a connection was asked, without nonce and time. */
+    const told = (asked: Pending[]) =>
+      asked
+        .filter(({ req }) => req.t === 'cmd')
+        .map(({ req }) => {
+          const { n, ts, ...rest } = JSON.parse((req.env as p.Envelope).p);
+          expect(n).toMatch(/^[A-Za-z0-9_-]{21}[AQgw]$/);
+          expect(ts).toBe(1763600000000);
+          return rest;
+        });
+    const notice = (to: string, g: string, home: string, name: string) => ({
+      t: 'home.add',
+      to,
+      g,
+      home,
+      name,
+      addrs: [`ws://${location.host}/rv`],
+    });
+
+    let store: Nodes;
+    let stop: () => void;
+
+    /** Keeps the homes told, as the shell does, and answers with their connections. */
+    function keepTold(homes: Home[]) {
+      vi.spyOn(Date, 'now').mockReturnValue(1763600000000);
+      store = new Nodes();
+      const ends = [watch(() => store.sync(homes)), watch(() => store.tell(homes))];
+      stop = () => ends.forEach((end) => end());
+    }
+    afterEach(() => stop());
+
+    /** Answers the last `host.info` asked with the homes the node knows. */
+    async function knows(asked: Pending[], homes: p.HostInfo['homes']) {
+      await settle();
+      asked.findLast(({ req }) => req.t === 'host.info')!.answer(hostAnswer({ homes }));
+      await settle();
+    }
+
+    it('names the home of a foreign group and of a team group to each owned node that lacks it', async () => {
+      const foreign = new Home(me);
+      const first = new Home(me);
+      const second = new Home(me);
+      const foreignConn = connectHome(foreign, {
+        device: 'foreign',
+        owner: false,
+        ...listing(website, 'Website'),
+      });
+      const firstConn = connectHome(first, {
+        device: 'first',
+        groups: [
+          { g: notes, name: 'Notes', seq: 0 },
+          { g: studio, name: 'Studio', seq: 0 },
+        ],
+      });
+      const secondConn = connectHome(second, { device: 'second', groups: [] });
+      keepTold([foreign, first, second]);
+      await knows(firstConn.asked, []);
+      await knows(secondConn.asked, []);
+      expect(told(firstConn.asked)).toEqual([notice('first', website, 'foreign', 'Website')]);
+      expect(told(secondConn.asked)).toEqual([notice('second', website, 'foreign', 'Website')]);
+
+      // The rows of the two groups of `first` arrive: a project and a team.
+      for (const [i, row] of ['row-group', 'row-group-team'].entries()) {
+        const group = first.groups[i];
+        group.apply([{ ...p.decode(p.GroupRow, goldens[row]), id: group.g }]);
+      }
+      await settle();
+      expect(told(firstConn.asked)).toHaveLength(1);
+      expect(told(secondConn.asked)).toEqual([
+        notice('second', website, 'foreign', 'Website'),
+        notice('second', studio, 'first', 'Studio'),
+      ]);
+      expect(told(foreignConn.asked)).toEqual([]);
+    });
+
+    it('tells nothing that host.info lists, and nothing before it has been read', async () => {
+      const foreign = new Home(me);
+      const own = new Home(me);
+      connectHome(foreign, { device: 'foreign', owner: false, ...listing(website, 'Website') });
+      const { asked } = connectHome(own, { device: 'own' });
+      keepTold([foreign, own]);
+      await settle();
+      expect(told(asked)).toEqual([]);
+      await knows(asked, [{ g: website, home: 'foreign', name: 'Website' }]);
+      expect(told(asked)).toEqual([]);
+    });
+
+    it('asks a node that refuses once per connection, and tells the others', async () => {
+      const foreign = new Home(me);
+      const refusing = new Home(me);
+      const other = new Home(me);
+      const { link: foreignLink } = connectHome(foreign, {
+        device: 'foreign',
+        owner: false,
+        ...listing(website, 'Website'),
+      });
+      const before = connectHome(refusing, { device: 'refusing' });
+      const otherConn = connectHome(other, { device: 'other' });
+      keepTold([foreign, refusing, other]);
+      await knows(before.asked, []);
+      await knows(otherConn.asked, []);
+      const refused = notice('refusing', website, 'foreign', 'Website');
+      expect(told(before.asked)).toEqual([refused]);
+      before.asked.at(-1)!.answer({ re: 2, err: { code: 'bad_request', msg: '' } });
+      await settle();
+      expect(told(otherConn.asked)).toEqual([notice('other', website, 'foreign', 'Website')]);
+
+      // An unchanged `host.info` sends nothing again, and a new group sends only itself.
+      store.sync([refusing], true);
+      await knows(before.asked, []);
+      expect(told(before.asked)).toEqual([refused]);
+      foreignLink.push({
+        t: 'groups',
+        groups: [
+          { g: website, name: 'Website', seq: 0 },
+          { g: notes, name: 'Notes', seq: 0 },
+        ],
+      });
+      await settle();
+      expect(told(before.asked)).toEqual([refused, notice('refusing', notes, 'foreign', 'Notes')]);
+
+      // The next connection tells again what its own `host.info` lacks, and waits for that.
+      before.link.offline();
+      const after = connectHome(refusing, { device: 'refusing' });
+      await settle();
+      expect(told(after.asked)).toEqual([]);
+      await knows(after.asked, [{ g: notes, home: 'foreign', name: 'Notes' }]);
+      expect(told(after.asked)).toEqual([refused]);
+    });
+  });
+
   it('lists owned homes with their info and path and excludes foreign homes', async () => {
     const store = new Nodes();
     const online = new Home(me);

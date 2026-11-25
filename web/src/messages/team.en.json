@@ -1,5 +1,6 @@
 {
   "team.title": "Team group",
+  "team.empty": "Write to the whole team. Notices that secretaries post show up here too.",
   "team.compose": "Message the team",
   "team.bulletin": "Bulletin",
   "team.computer": "On a computer belonging to {who}"
