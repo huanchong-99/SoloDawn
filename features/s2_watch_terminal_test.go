@@ -312,7 +312,7 @@ func (t *s2TerminalWorld) compareTerminalBytes() error {
 	if err := t.openWatch(); err != nil {
 		return err
 	}
-	owner, err := t.ownerRoundTrip("watch first\nwatch second\n")
+	owner, err := t.ownerRoundTrip("watch first\rwatch second\r")
 	if err != nil {
 		return err
 	}
@@ -331,11 +331,13 @@ func (t *s2TerminalWorld) ownerRoundTrip(input string) (string, error) {
 	return t.owner.terminalBytes(s2WatchStop + "\r\n")
 }
 
+// compareS2TerminalBytes: the watcher has every byte of the owner from the moment its watch opened. What the terminal
+// echoes between the lines, and when, differs between systems.
 func compareS2TerminalBytes(owner, watcher string) error {
-	const first = "91x27 watch first"
-	const second = "91x27 watch second"
-	if owner != watcher || !strings.Contains(owner, first+"\r\n"+second+"\r\n"+s2WatchStop+"\r\n") {
-		return fmt.Errorf("owner terminal %q differs from watch %q or lacks ordered output", owner, watcher)
+	_, after, first := strings.Cut(watcher, s2WatchSize+" watch first")
+	second := strings.Contains(after, s2WatchSize+" watch second")
+	if !strings.HasSuffix(owner, watcher) || !first || !second {
+		return fmt.Errorf("owner terminal %q does not end with watch %q, or the watch lacks ordered output", owner, watcher)
 	}
 	return nil
 }
@@ -348,7 +350,7 @@ func (t *s2TerminalWorld) receiveOnly() error {
 		return err
 	}
 	label := t.label("watch")
-	if err := t.watcher.channels[label].Send([]byte(s2WatchInput + "\n")); err != nil {
+	if err := t.watcher.channels[label].Send([]byte(s2WatchInput + "\r")); err != nil {
 		return err
 	}
 	if err := t.watcher.wait(t.watcher.closed[label]); err != nil {
@@ -358,7 +360,7 @@ func (t *s2TerminalWorld) receiveOnly() error {
 }
 
 func (t *s2TerminalWorld) checkOwnerTerminal() error {
-	out, err := t.ownerRoundTrip("watch probe\nwatch second\n")
+	out, err := t.ownerRoundTrip("watch probe\rwatch second\r")
 	if err != nil {
 		return err
 	}
@@ -434,7 +436,7 @@ func s2RunWatchInteractive() int {
 	fmt.Println(s2WatchReady)
 	in := bufio.NewScanner(os.Stdin)
 	for in.Scan() {
-		cols, rows, err := term.GetSize(int(os.Stdin.Fd()))
+		cols, rows, err := term.GetSize(int(os.Stdout.Fd()))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
