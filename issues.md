@@ -34,17 +34,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: nothing in `welcome.groups` says which copy is the newer (`planning/contracts/step-2/export.md` section 4 speaks of a lost home); `Home.#list` (`web/src/lib/groups.svelte.ts`) leaves a group to the home within reach that listed it first.
 - Status: open, accepted: the owner deletes the old copy.
 
-### 2026-11-26 · bug · A turn that ends while the held items are read gives the AI its newer messages first
-
-- Symptom: with 146 items held, `inbox.take` took items 352 to 369 and left 224 to 351, which went to a later turn. [agent-turn](planning/flows/agent-turn.md) B.6 gives a session all its held items, in order.
-- Cause: `isItemHeld` (`internal/host/deliver.go:909`) reads whether the AI is working anew for each item of the queue that `selectEligibleBatch` walks (`internal/host/deliver.go:879`). Items read before the turn ends stay held, and those after it are taken. FLAKY-27 fixed the same race for the group pause.
-- Status: open, found 2026-11-26 in the node log of `web/e2e/m2.spec.ts`.
-### 2026-11-26 · bug · A denied `ask` does not tell the caller
-
-- Symptom: A9.18 wants the denial of a call as the caller's turn, and as `{"denied":true}` in an open `ask` (`planning/contracts/step-2/confirm.md` section 5). Enabled, the deny example fails at that turn: P-work gets a `reply` turn with an empty body, and an open `ask` is not ended.
-- Cause: the home queues the denial as a `reply` item that carries the confirm card (`internal/home/cmd_confirm.go`, `cfmDeniedResult`). The host takes only a `reply` message as the answer of an open call (`internal/host/deliver.go:576`, `replyCallID`), reads only an answer from it (`internal/host/tools_ask.go`, `decodeReplyItem`), and the turn shows the card's `text`, which is empty (`internal/host/turn.go:426`, `buildReply`).
-- Status: open, for the queued host unit. The deny example of A9.18 stays `@pending`; the confirm example and the two callers of the open `ask` run.
-
 ### 2026-11-26 · bug · A changed secretary gets no secretary tools on its host
 
 - Symptom: after `group set` with `secretary`, the AI it names cannot propose a brief: `tools/call` of `propose_brief` is refused and its CLI ends. A9.44 wants its host to list the secretary's tools.
@@ -937,6 +926,30 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a card that asks an owner "may Pat direct your AI?" showed only in the chat: not in "Waiting on you", the group's count, the in-page notifications or the browser push, so it could expire unseen. A task held by such a card, and a task whose owner had taken over the terminal, showed "In progress". `member_joined`, `member_removed`, `rate_limited`, `rounds_limit`, `preempted`, `group_paused` and `group_resumed` showed as their codes. A card for a role named the secretary, who writes the brief, instead of the person who confirmed it.
 - Cause: the lists of kinds in `waitsFor` and `subject` (`web/src/lib/groups.svelte.ts`), `reminderKinds` (`web/src/lib/push.ts`), `waitingKinds` and the `by: "system"` early return of `classify` (`web/src/lib/notify.svelte.ts`) and `kindLabels` (`web/src/sw.ts`) had no `confirm`; `waitBadge` and `taskBadge` (`web/src/lib/task.ts`) and `SystemRow.svelte` had no case for them, left out while those features were postponed.
 - Status: resolved. Tests: `web/src/lib/{confirm,groups,notify,push,task,when}.test.ts`, `web/src/sw.test.ts`, the group, approval, notification, reminder, task and thread features.
+
+### 2026-11-26 · bug · A turn that ends while the held items are read gives the AI its newer messages first
+
+- Symptom: with 146 items held, `inbox.take` took items 352 to 369 and left 224 to 351, which went to a later turn. [agent-turn](planning/flows/agent-turn.md) B.6 gives a session all its held items, in order.
+- Cause: `isItemHeld` (`internal/host/deliver.go:909`) reads whether the AI is working anew for each item of the queue that `selectEligibleBatch` walks (`internal/host/deliver.go:879`). Items read before the turn ends stay held, and those after it are taken. FLAKY-27 fixed the same race for the group pause.
+- Status: resolved on `fix/host-delivery`: a walk reads each state once (`look`), the takeover, the holds and the tasks too. Found in the node log of `web/e2e/m2.spec.ts`. `TestWalkOfTheQueueReadsEachStateOnce`, `TestLookKeepsWhatItRead`.
+
+### 2026-11-26 · bug · An item sent again while its turn was prepared came twice in one turn
+
+- Symptom: the home sent an item again while delivery prepared its turn, and the preparation failed: the next turn had the item twice ("items 5,5"). A jump that retired the item meanwhile was delivered beside it.
+- Cause: `prependHeld` (`internal/host/deliver.go:1158` at 10ddc7c72) put the taken items before the queue without regard to what had arrived.
+- Status: resolved on `fix/host-delivery`: the queue is put behind the returned items by the rules of an arriving item (`enqueueHeld`), so a jump of another message goes first too (R-72). `TestItemTakenBackMeetsItsCopyInTheQueue`.
+
+### 2026-11-26 · bug · A denied `ask` did not reach the caller
+
+- Symptom: the owner of the called AI denied the call: an open `ask` was not ended, and after the wait the caller got a `reply` turn without text. Contract: [confirm.md](planning/contracts/step-2/confirm.md) section 5, acceptance A9.18.
+- Cause: the home queues the denial as a `reply` item that carries the confirm card (`cfmDeniedResult`, `internal/home/cmd_confirm.go`). The host took only a `reply` message as the answer of an open call (`replyCallID`, `internal/host/deliver.go:571`), read only an answer from it (`decodeReplyItem`, `internal/host/tools_ask.go`), and its turn showed the card's `text`, which is empty (`buildReply`, `internal/host/turn.go:419`).
+- Status: resolved on `fix/host-delivery`. `TestAskReturnsADenial`, `TestDeniedCallIsATurn`. The deny example of A9.18 stays `@pending` until the fixtures of `s2/lift-confirm` are merged; with them it passes.
+
+### 2026-11-26 · bug · A host Git command left a maintenance process behind (flaky `TestInterruptedLocalSquash`)
+
+- Symptom: `TestInterruptedLocalSquash` failed in about one of 600 runs under load: `TempDir RemoveAll cleanup: unlinkat …/.git: directory not empty`. What was left was `.git/objects/pack` and `.git/objects/info/packs`.
+- Cause: after a commit, a merge or a fetch Git runs `git maintenance run --auto`, which by default goes on in a process of its own (`--detach`); when two loose objects happen to be in `objects/17`, that process repacks (Git 2.54). `runInput` (`internal/host/command.go`) returned while it wrote: in the product it changed the clone outside the clone's lock and outlived the command's limit. The Git commands of the test fixtures left such processes too.
+- Status: resolved on `fix/host-delivery`: every command of the host has `gc.autoDetach=false` (`foregroundGC`), and so have the fixtures of the host tests and of the acceptance suite. `TestCommandKeepsGitMaintenanceInTheForeground`.
 
 ### 2026-11-25 · bug · `read_thread` gave an AI an empty text for most kinds
 

@@ -38,6 +38,12 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(RunShim(os.Args[2:], dial, os.Stdin, os.Stdout, os.Stderr))
 	}
+	// A fixture's git command leaves no maintenance process behind, which
+	// would write on in a temporary directory that is being removed.
+	for _, setting := range foregroundGC() {
+		name, value, _ := strings.Cut(setting, "=")
+		os.Setenv(name, value)
+	}
 	os.Exit(m.Run())
 }
 
