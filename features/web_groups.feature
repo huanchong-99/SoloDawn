@@ -42,6 +42,13 @@ Feature: Group list and group cache of the web client
     Then "desk" and "laptop" have each been told once which computer is the home of "Studio"
     And neither has been told the home of "Website", a project group of a computer of the person
 
+  Scenario: A group known from a computer of the person shows while its home is away
+    Given "desk", a computer of the person, knows that "Docs" is homed on a computer out of reach
+    When "desk" connects
+    Then the list shows "Docs" with "cannot reach the group home" and no word of its messages
+    When that computer connects, with "Mina: Section 3 is in." in "Docs"
+    Then the list shows "Docs" with "Mina: Section 3 is in."
+
   Scenario: The dialog sends to the computer that was chosen, whatever happens to the others
     Given the person owns a second computer, "laptop", which is connected
     When the person chooses "laptop" in the dialog, the first computer goes away, and they create the group "Notes"

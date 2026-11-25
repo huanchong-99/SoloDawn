@@ -211,6 +211,17 @@ async function answerNode(
   return pc;
 }
 
+/** The home's list no longer has its one group, and the home says that it did not move. */
+async function left(pc: FakePC, home: Home) {
+  const syncs = () => pc.ctl.frames().filter((frame) => frame.t === 'sync');
+  await vi.waitFor(() => expect(syncs()).not.toHaveLength(0));
+  const before = syncs().length;
+  pc.ctl.deliver({ t: 'groups', groups: [] });
+  await vi.waitFor(() => expect(syncs()).toHaveLength(before + 1));
+  pc.ctl.deliver({ re: syncs().at(-1)!.id, err: { code: 'not_found', msg: 'no such group' } });
+  await vi.waitFor(() => expect(home.groups).toEqual([]));
+}
+
 function welcomeFrame(
   re: number,
   device: string,
@@ -327,7 +338,7 @@ it('follows moved to an unknown node on the retained signalling URLs, persists i
   expect(home.groups).toEqual([]);
   expect(rv.known(target.id)).toBe(true);
   expect((await loadOwner(crypto, () => idb)).addrs[target.id]).toBeUndefined();
-  expect(await loadJoined(() => idb)).toEqual({ [target.id]: { name: target.id, url: urls[0] } });
+  expect(await loadJoined(() => idb)).toEqual({ [target.id]: { name: '', url: urls[0] } });
   expect((await loadOwner(crypto, () => idb)).log!.valid(target.id)).toBe(false);
   const next = await answerNode(rv, target, browser.id, undefined);
   next.ctl.deliver(welcomeFrame(1, target.id, 'Destination', [], ['wss://new-rv.example/rv']));
@@ -375,7 +386,195 @@ it('follows moved to an unknown node on the retained signalling URLs, persists i
   expect(rv.offersFor(source.id).length).toBe(offers);
   expect(old.closes).toBe(0);
   expect(home.ctl).toBe(sourceCtl);
-  expect(await loadJoined(() => idb)).toEqual({ [target.id]: { name: target.id, url: urls[0] } });
+  expect(await loadJoined(() => idb)).toEqual({ [target.id]: { name: '', url: urls[0] } });
+});
+
+describe('the homes that an own computer knows', () => {
+  const other = 'ZG9jcy1ncm91cC0wMDAwMQ';
+  const { re: _re, ok: _ok, ...info } = p.decode(p.HostInfo, goldens['host-info-answer']);
+  const syncsOf = (pc: FakePC) => pc.ctl.frames().filter((frame) => frame.t === 'sync');
+
+  /** A browser of a person with one computer, which is online, and what its `host.info` says. */
+  async function secondBrowser() {
+    const browser = await loadDevice({ crypto, idb: () => idb });
+    const own = await newDevice();
+    const foreign = await newDevice();
+    const log = new DeviceLog(crypto, browser.id);
+    await log.apply(
+      await signDeviceEntry(browser, browser.id, 1, 'add', browser.id, 'browser', 'Web'),
+    );
+    await log.apply(
+      await signDeviceEntry(browser, browser.id, 2, 'add', own.id, 'node', 'Computer'),
+    );
+    await saveOwner(() => idb, log, {});
+    const { net } = startTracked('live');
+    await vi.waitFor(() => expect(clients).toHaveLength(1));
+    const [rv] = clients;
+    rv.ready();
+    const ownPC = await answerNode(rv, own, browser.id, undefined);
+    ownPC.ctl.deliver(welcomeFrame(1, own.id, 'Computer'));
+    await vi.waitFor(() => expect(net.homes[0].ctl).toBeDefined());
+    const knows = (homes: p.HostInfo['homes']) =>
+      ownPC.ctl.deliver({ ...info, t: 'host.info', homes });
+    const homeOf = (id: string) => net.homes.find(({ device }) => device === id);
+    return { browser, own, foreign, net, rv, ownPC, knows, homeOf };
+  }
+
+  it('are dialled once and remembered; a group of one that is away is shown as away', async () => {
+    const { browser, own, foreign, net, rv, ownPC, knows, homeOf } = await secondBrowser();
+    expect(rv.known(foreign.id)).toBe(false);
+    const entries = [
+      { g: websiteId, home: foreign.id, name: 'Website' },
+      { g: other, home: own.id, name: 'Own' },
+    ];
+    knows(entries);
+    expect(net.homes.map(({ device }) => device)).toEqual([own.id, foreign.id]);
+    const home = homeOf(foreign.id)!;
+    expect([home.owner, home.name, home.ctl, net.path(home)]).toEqual([
+      false,
+      '',
+      undefined,
+      undefined,
+    ]);
+    expect(home.groups.map(({ g, name }) => [g, name])).toEqual([[websiteId, 'Website']]);
+    expect(homeOf(own.id)!.groups).toEqual([]);
+    expect(rv.known(foreign.id)).toBe(true);
+    const remembered = { [foreign.id]: { name: '', url: rv.url } };
+    await vi.waitFor(async () => expect(await loadJoined(() => idb)).toEqual(remembered));
+    const save = vi.spyOn(owner, 'saveJoined');
+    const closes = vi.spyOn(Peer.prototype, 'close');
+    knows(entries);
+    expect(net.homes).toHaveLength(2);
+    expect(closes).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+
+    const pc = await answerNode(rv, foreign, browser.id, undefined);
+    expect(rv.offersFor(foreign.id)).toHaveLength(1);
+    const listed = [{ g: websiteId, name: 'Website', seq: 1 }];
+    pc.ctl.deliver({ ...welcomeFrame(1, foreign.id, "Q's computer", listed), owner: false });
+    await vi.waitFor(() => expect(syncsOf(pc)).toHaveLength(1));
+    expect([home.name, home.groups.map(({ g }) => g)]).toEqual(["Q's computer", [websiteId]]);
+    knows([...entries, { g: 'ZG9jcy1ncm91cC0wMDAwMw', home: foreign.id, name: 'Docs' }]);
+    expect(home.groups.map(({ g }) => g)).toEqual([websiteId]);
+    expect(rv.offersFor(foreign.id)).toHaveLength(1);
+    expect([pc.closes, ownPC.closes]).toEqual([0, 0]);
+  });
+
+  it('drops one that refuses this browser, until an own computer names it again', async () => {
+    const { browser, own, foreign, net, rv, knows, homeOf } = await secondBrowser();
+    const entries = [{ g: websiteId, home: foreign.id, name: 'Website' }];
+    knows(entries);
+    const refuse = async () => {
+      const pc = await answerNode(rv, foreign, browser.id, undefined);
+      pc.ctl.deliver({ re: 1, err: { code: 'forbidden', msg: 'not a member' } });
+      return pc;
+    };
+    const first = homeOf(foreign.id)!;
+    const pc = await refuse();
+    await vi.waitFor(() => expect(net.homes.map(({ device }) => device)).toEqual([own.id]));
+    expect(pc.closes).toBe(1);
+    knows(entries);
+    const again = homeOf(foreign.id)!;
+    expect(again).not.toBe(first);
+
+    // A watch on that computer keeps it, and so does the person's own computer.
+    const end = net.watchHost!(foreign.id);
+    await vi.waitFor(() => expect(rv.offersFor(foreign.id)).toHaveLength(2));
+    await refuse();
+    await vi.waitFor(() => expect(FakePC.made.at(-1)!.closes).toBe(1));
+    expect(homeOf(foreign.id)).toBe(again);
+    end();
+    expect(homeOf(foreign.id)).toBe(again);
+  });
+
+  it('keeps an own computer that refuses this browser', async () => {
+    const { browser, own, net, rv, ownPC, homeOf } = await secondBrowser();
+    const home = homeOf(own.id)!;
+    ownPC.becomes('failed');
+    await vi.waitFor(() => expect(home.ctl).toBeUndefined());
+    rv.receive(rv.url, { t: 'presence', k: own.id, on: true });
+    await vi.waitFor(() => expect(rv.offersFor(own.id)).toHaveLength(2));
+    const pc = await answerNode(rv, own, browser.id, undefined);
+    pc.ctl.deliver({ re: 1, err: { code: 'forbidden', msg: 'revoked' } });
+    await vi.waitFor(() => expect(pc.closes).toBe(1));
+    expect(net.homes).toEqual([home]);
+  });
+
+  it('keeps a watched computer that is also the home of a group', async () => {
+    const { foreign, net, knows, homeOf } = await secondBrowser();
+    const end = net.watchHost!(foreign.id);
+    const watched = homeOf(foreign.id)!;
+    knows([{ g: websiteId, home: foreign.id, name: 'Website' }]);
+    end();
+    expect(homeOf(foreign.id)).toBe(watched);
+    expect(watched.groups.map(({ g }) => g)).toEqual([websiteId]);
+  });
+
+  it('follows a group that its home no longer lists, and dials the new home', async () => {
+    const { browser, foreign, rv, knows, homeOf } = await secondBrowser();
+    knows([{ g: websiteId, home: foreign.id, name: 'Website' }]);
+    const group = homeOf(foreign.id)!.groups[0];
+    const pc = await answerNode(rv, foreign, browser.id, undefined);
+    pc.ctl.deliver({
+      ...welcomeFrame(1, foreign.id, 'P1', [{ g: websiteId, name: 'Website', seq: 1 }]),
+      owner: false,
+    });
+    await vi.waitFor(() => expect(syncsOf(pc)).toHaveLength(1));
+    pc.ctl.deliver({ t: 'synced', re: syncsOf(pc)[0].id, ok: true, g: websiteId, seq: 7 });
+    await vi.waitFor(() => expect(group.cursor).toBe(7));
+    const next = await newDevice();
+    pc.ctl.deliver({ t: 'groups', groups: [] });
+    await vi.waitFor(() => expect(syncsOf(pc)).toHaveLength(2));
+    pc.ctl.deliver({
+      re: syncsOf(pc)[1].id,
+      err: { code: 'moved', msg: 'The group has moved.', home: next.id },
+    });
+    await vi.waitFor(() => expect(homeOf(next.id)?.groups).toEqual([group]));
+    expect([group.home, homeOf(foreign.id)!.groups]).toEqual([homeOf(next.id), []]);
+    const there = await answerNode(rv, next, browser.id, undefined);
+    there.ctl.deliver({
+      ...welcomeFrame(1, next.id, 'P2', [{ g: websiteId, name: 'Website', seq: 7 }]),
+      owner: false,
+    });
+    await vi.waitFor(() => expect(syncsOf(there)).toMatchObject([{ since: 7 }]));
+  });
+
+  it('are not dialled while this browser joins there, and take over a group that was lost', async () => {
+    const { browser, foreign, rv, knows, homeOf, net } = await secondBrowser();
+    knows([{ g: websiteId, home: foreign.id, name: 'Website' }]);
+    const lost = homeOf(foreign.id)!;
+    const group = lost.groups[0];
+    const restored = await newDevice();
+    const secret = parseSecret('7K2M-9QXD-4F8T-WB3N');
+    const invitation = readInvitation(`#join=${shown(secret)}&g=${websiteId}&home=${restored.id}`)!;
+    const joined = net.join!(invitation, 'Q', new AbortController().signal);
+    const id = await room(crypto, secret);
+    await vi.waitFor(() => expect(rv.sent).toContainEqual({ t: 'join', room: id }));
+    const remote = { role: 'a' as const, k: restored.id, kind: 'node' as const, name: 'P2' };
+    rv.receive(rv.url, {
+      t: 'room',
+      room: id,
+      data: { t: 'pair', ...remote, mac: await mac(crypto, secret, remote) },
+    });
+    const pc = await answerNode(rv, restored, browser.id, undefined);
+    knows([
+      { g: websiteId, home: foreign.id, name: 'Website' },
+      { g: other, home: restored.id, name: 'Docs' },
+    ]);
+    expect(pc.closes).toBe(0);
+    const groups = [{ g: websiteId, name: 'Website', seq: 3 }];
+    pc.ctl.deliver({ ...welcomeFrame(1, restored.id, 'P2', groups), owner: false, v: 2 });
+    await vi.waitFor(() => expect(pc.ctl.frames().at(-1)?.t).toBe('cmd'));
+    pc.ctl.deliver({ t: 'cmd', re: pc.ctl.frames().at(-1)!.id, ok: true });
+    const home = homeOf(restored.id)!;
+    await vi.waitFor(() => expect(home.groups[0]).toBe(group));
+    expect([group.home, lost.groups]).toEqual([home, []]);
+    await vi.waitFor(() => expect(syncsOf(pc)[0]).toMatchObject({ g: websiteId, since: 0 }));
+    await vi.waitFor(async () =>
+      expect((await loadJoined(() => idb))[restored.id]).toEqual({ name: 'P2', url: rv.url }),
+    );
+    void joined;
+  });
 });
 
 it('shares a temporary watch-host connection and closes it only after the last watch ends', async () => {
@@ -548,8 +747,7 @@ it('joins an invitation without adopting the home and reconnects to it after rel
   expect(sharedHome.owner).toBe(false);
   expect(sharedHome.groups.map((group) => group.g)).toEqual([websiteId]);
   await vi.waitFor(() => expect(pc.ctl.frames().at(-1)?.t).toBe('sync'));
-  pc.ctl.deliver({ t: 'groups', groups: [] });
-  expect(sharedHome.groups).toEqual([]);
+  await left(pc, sharedHome);
   expect((await loadOwner(crypto, () => idb)).log?.entries).toEqual(log.entries);
   expect(await loadJoined(() => idb)).toEqual({ [home.id]: { name: 'Foreign home', url: rv.url } });
   const anotherBrowser = await newDevice();
@@ -569,7 +767,7 @@ it('joins an invitation without adopting the home and reconnects to it after rel
   apply.mockRestore();
   expect(await loadOwner(crypto, () => idb)).toMatchObject({ log: { entries: log.entries } });
   ownPC.ctl.deliver({ t: 'devlog', user: browser.id, entries: [entry] });
-  await vi.waitFor(() => expect(pc.ctl.frames().at(-1)).toEqual(updated));
+  await vi.waitFor(() => expect(pc.ctl.frames()).toContainEqual(updated));
 
   pc.becomes('failed');
   await vi.waitFor(() => expect(sharedHome.ctl).toBeUndefined());
@@ -595,8 +793,7 @@ it('joins an invitation without adopting the home and reconnects to it after rel
       entries: [...updated.entries, offlineEntry],
     }),
   );
-  reconnected.ctl.deliver({ t: 'groups', groups: [] });
-  expect(sharedHome.groups).toEqual([]);
+  await left(reconnected, sharedHome);
   await vi.waitFor(() => expect(client.net.path(sharedHome)).toMatchObject({ kind: 'direct' }));
 
   const newNode = await newDevice();

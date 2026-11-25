@@ -132,15 +132,21 @@ function startLive(
         syncPeers();
         for (const p of peers.values()) presentLog(p, log);
       };
+      /** A home that this browser hears of from a node, which is dialled unless it is already. */
+      const reach = (id: string) => {
+        const home = homeOf(log, id, '');
+        if (log.valid(id)) return home;
+        if (!Object.hasOwn(joined, id)) {
+          joined[id] = { name: '', url };
+          void saveJoined(() => indexedDB, joined);
+        }
+        if (!peers.has(id) && !invited.has(id)) dial(id, home);
+        return home;
+      };
       const connectHome = (home: Home) => {
-        home.onmove = (g, id) => {
-          const destination = homeOf(log, id, id);
-          if (!peers.has(id)) {
-            joined[id] = { name: destination.name, url };
-            void saveJoined(() => indexedDB, joined);
-            dial(id, destination);
-          }
-          home.move(g, destination);
+        home.onmove = (g, id) => home.move(g, reach(id));
+        home.onhomes = (known) => {
+          for (const { g, home: id, name } of known) reach(id).expect(g, name);
         };
         const link = home.connect();
         return {
@@ -168,11 +174,21 @@ function startLive(
               },
               push: link.push,
               offline: link.offline,
+              refused: () => {
+                if (!log.valid(id) && !watches.has(id)) drop(id);
+              },
             };
           },
           (path) => (path ? paths.set(home, path) : paths.delete(home)),
         );
         peers.set(id, peer);
+      };
+      const drop = (id: string) => {
+        peers.get(id)!.close();
+        peers.delete(id);
+        const home = added.get(id)!;
+        added.delete(id);
+        homes.splice(homes.indexOf(home), 1);
       };
       const syncPeers = () => {
         for (const [id, name] of pairedNodes(log)) {
@@ -193,11 +209,7 @@ function startLive(
         }
         watches.delete(id);
         if (log.valid(id) || Object.hasOwn(joined, id) || invited.has(id)) return;
-        peers.get(id)!.close();
-        peers.delete(id);
-        const home = added.get(id)!;
-        added.delete(id);
-        homes.splice(homes.indexOf(home), 1);
+        drop(id);
       };
       setWatchHost((id) => {
         watches.set(id, (watches.get(id) ?? 0) + 1);

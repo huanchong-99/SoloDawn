@@ -41,11 +41,8 @@ const confirm = (id: string, re: string, aiId: string, status: string) =>
     state: { status },
   });
 
-/** Who the message waits for, with the task, and a mark where it can go first. */
-const said = (msg: p.MsgRow) =>
-  waiting(group, msg).map(
-    ({ wait, first }) => `${wait.ai.id} T-${wait.task!.num}${first ? ' first' : ''}`,
-  );
+/** Who the message waits for, with the task. */
+const said = (msg: p.MsgRow) => waiting(group, msg).map(({ ai, task }) => `${ai.id} T-${task.num}`);
 
 beforeEach(() => {
   seq = 0;
@@ -63,8 +60,7 @@ beforeEach(() => {
 describe('waiting', () => {
   it('is a message of the person to an AI that has been busy with a task since before it', () => {
     const msg = say('m1');
-    expect(said(msg)).toEqual(['codex T-12 first']);
-    expect(waiting(group, msg)[0].wait).toMatchObject({ msg: { id: 'm1' }, at: msg.seq });
+    expect(said(msg)).toEqual(['codex T-12']);
   });
 
   it('is over when the row of the AI changes after the message', () => {
@@ -86,12 +82,11 @@ describe('waiting', () => {
       return part;
     };
     expect(waiting(without('me'), msg)).toEqual([]);
-    expect(waiting(without(gid), msg)).toMatchObject([{ first: true }]);
+    expect(waiting(without(gid), msg)).toMatchObject([{ ai: { id: 'codex' }, task: { num: 12 } }]);
   });
 
-  it('is for the author only, for a text in the main line, while the group runs', () => {
+  it('is for the author only, for a text, while the group runs', () => {
     expect(said(say('other', { by: 'mina' }))).toEqual([]);
-    expect(said(say('thread', { thread: task12 }))).toEqual([]);
     expect(
       said(
         write('row-msg-progress', {
@@ -103,7 +98,7 @@ describe('waiting', () => {
       ),
     ).toEqual([]);
     const msg = say('m1');
-    expect(said(msg)).toEqual(['codex T-12 first']);
+    expect(said(msg)).toEqual(['codex T-12']);
     write('row-group-paused', { id: gid });
     expect(said(msg)).toEqual([]);
   });
@@ -124,29 +119,34 @@ describe('waiting', () => {
   });
 
   it('goes to the secretary when it mentions no AI', () => {
-    expect(said(say('m1', { mentions: [] }))).toEqual(['secretary T-12 first']);
-    expect(said(say('m2', { mentions: ['mina', 'gone'] }))).toEqual(['secretary T-12 first']);
-    expect(said(say('m3', { mentions: ['codex'] }))).toEqual(['codex T-12 first']);
+    expect(said(say('m1', { mentions: [] }))).toEqual(['secretary T-12']);
+    expect(said(say('m2', { mentions: ['mina', 'gone'] }))).toEqual(['secretary T-12']);
+    expect(said(say('m3', { mentions: ['codex'] }))).toEqual(['codex T-12']);
   });
 
-  it('lets only the newest that waits go first, and of two AIs the one named last', () => {
+  it('is every message, for every AI it names that is busy', () => {
     const older = say('m1');
     const newer = say('m2', { mentions: ['secretary', 'codex'] });
     expect(said(older)).toEqual(['codex T-12']);
-    expect(said(newer)).toEqual(['secretary T-12', 'codex T-12 first']);
-    // A newer one that an AI has not taken for another reason is the one a jump would move.
-    ai('off', { state: 'offline', task: undefined });
-    for (const state of ['takeover', 'limited', 'offline', 'paused']) {
-      ai('off', { state, task: undefined });
-      const id = `m-${state}`;
-      say(id, { mentions: ['off'] });
-      expect(said(newer), state).toEqual(['secretary T-12', 'codex T-12']);
-      ai('off', { state: 'waiting', task: undefined });
-      expect(said(newer), state).toEqual(['secretary T-12', 'codex T-12 first']);
+    expect(said(newer)).toEqual(['secretary T-12', 'codex T-12']);
+  });
+
+  it('is a message in a thread for the AIs it names, unless its task holds it', () => {
+    const msg = say('m1', { thread: task12 });
+    expect(said(msg)).toEqual(['codex T-12']);
+    expect(said(say('m2', { thread: task12, mentions: [] }))).toEqual([]);
+    expect(said(say('m3', { thread: task12, mentions: ['secretary'] }))).toEqual([
+      'secretary T-12',
+    ]);
+    write('row-task', { id: 'other', num: 13 });
+    const states = { active: ['codex T-12'], queued: ['codex T-12'], paused: [], failed: [] };
+    for (const [state, expected] of Object.entries(states)) {
+      write('row-task', { id: 'other', num: 13, state });
+      expect(said(say(`m-${state}`, { thread: 'other' })), state).toEqual(expected);
     }
-    // One of another person's does not count.
-    say('theirs', { by: 'mina' });
-    expect(said(newer)).toEqual(['secretary T-12', 'codex T-12 first']);
+    write('row-task', { id: task12, num: 12, state: 'paused' });
+    expect(said(msg)).toEqual([]);
+    expect(said(say('main'))).toEqual(['codex T-12']);
   });
 
   it('begins when the owner of the AI has confirmed it', () => {
@@ -154,24 +154,23 @@ describe('waiting', () => {
     confirm('c-other', 'm0', 'codex', 'pending');
     confirm('c-ai', 'm1', 'secretary', 'pending');
     write('row-msg-system', { id: 's', thread: null, re: 'm1', body: { ai: 'codex' } });
-    expect(said(msg)).toEqual(['codex T-12 first']);
+    expect(said(msg)).toEqual(['codex T-12']);
     confirm('c', 'm1', 'codex', 'pending');
     expect(said(msg)).toEqual([]);
     ai('codex');
     confirm('c', 'm1', 'codex', 'confirmed');
-    expect(said(msg)).toEqual(['codex T-12 first']);
+    expect(said(msg)).toEqual(['codex T-12']);
     confirm('c', 'm1', 'codex', 'denied');
     expect(said(msg)).toEqual([]);
   });
 
   it('counts a confirmed message from its confirmation', () => {
-    const first = say('m1');
+    const msg = say('m1');
     confirm('c', 'm1', 'codex', 'pending');
-    const second = say('m2', { mentions: ['secretary'] });
-    expect(said(second)).toEqual(['secretary T-12 first']);
+    ai('codex');
     confirm('c', 'm1', 'codex', 'confirmed');
-    expect(said(second)).toEqual(['secretary T-12']);
-    expect(said(first)).toEqual(['codex T-12 first']);
+    ai('codex');
+    expect(said(msg)).toEqual([]);
   });
 });
 

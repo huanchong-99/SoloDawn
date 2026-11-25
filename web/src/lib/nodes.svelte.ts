@@ -174,6 +174,7 @@ export class Nodes {
     const { re: _re, ok: _ok, ...info } = answer;
     this.#learn(ctl, info);
     this.infos.set(home, info);
+    home.onhomes?.(info.homes);
   }
 
   #learn(ctl: p.Ctl, { homes }: p.HostInfoPush) {

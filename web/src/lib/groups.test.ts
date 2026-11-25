@@ -892,9 +892,15 @@ describe('a home', () => {
     expect(home.groups[1]).toBe(group);
     expect(asked.slice(1).map((ask) => ask.req)).toEqual([sync(0, 'new')]);
 
-    link.push({ t: 'groups', groups: [] });
-    expect(home.groups).toEqual([]);
-    expect(asked).toHaveLength(2);
+    // One that left the list stays until the home has said that it did not move.
+    asked[1].answer({ ...synced(0), g: 'new' });
+    await settle();
+    link.push({ t: 'groups', groups: [listed('new', 'Docs')] });
+    expect(home.groups.map((each) => each.g)).toEqual(['new', website]);
+    expect(asked.slice(2).map((ask) => ask.req)).toEqual([sync(815)]);
+    asked[2].answer({ re: 3, err: { code: 'not_found', msg: 'no such group' } });
+    await settle();
+    expect(home.groups.map((each) => each.g)).toEqual(['new']);
   });
 
   it('gives each push to the group it names and drops the others', async () => {
@@ -914,9 +920,41 @@ describe('a home', () => {
     expect([...home.terminalSizes]).toEqual([]);
   });
 
-  it('reads a fresh group again when an unlisted group is listed again', async () => {
+  it('keeps a group that is listed again before the home has said where it went', async () => {
     const { home, group, link, asked } = await read(815);
     link.push({ t: 'groups', groups: [] });
+    link.push({ t: 'groups', groups: [listed(website, 'Listed again')] });
+    expect(asked.map(({ req }) => req)).toEqual([sync(0), sync(815), sync(815)]);
+    asked[1].answer({ re: 2, err: { code: 'not_found', msg: 'no such group' } });
+    await settle();
+    expect(home.groups).toEqual([group]);
+    asked[2].answer(synced(815));
+    await settle();
+    // Listed, it is no longer on its way out: a read that fails does not drop it.
+    link.push({ t: 'groups', groups: [listed(website)] });
+    expect(asked).toHaveLength(3);
+    home.refused(group, { code: 'internal', msg: 'the node failed' });
+    expect(home.groups).toEqual([group]);
+  });
+
+  it('asks again after a lost connection where a group that left its list went', async () => {
+    const { home, group, link } = await read(815);
+    link.push({ t: 'groups', groups: [] });
+    link.offline();
+    await settle();
+    expect(home.groups).toEqual([group]);
+    const again = connect(home, []);
+    expect(again.asked.map(({ req }) => req)).toEqual([sync(815)]);
+    again.asked[0].answer({ re: 1, err: { code: 'unknown_device', msg: 'not a member' } });
+    await settle();
+    expect(home.groups).toEqual([]);
+  });
+
+  it('reads a fresh group when one that is gone is listed again', async () => {
+    const { home, group, link, asked } = await read(815);
+    link.push({ t: 'groups', groups: [] });
+    asked[1].answer({ re: 2, err: { code: 'not_found', msg: 'no such group' } });
+    await settle();
     expect(home.groups).toEqual([]);
     link.push({ t: 'groups', groups: [listed(website, 'Listed again')] });
     expect(home.groups).toHaveLength(1);
@@ -926,7 +964,17 @@ describe('a home', () => {
       0,
       0,
     ]);
-    expect(asked.map(({ req }) => req)).toEqual([sync(0), sync(0)]);
+    expect(asked.map(({ req }) => req)).toEqual([sync(0), sync(815), sync(0)]);
+  });
+
+  it('hands on the homes a host.info push names', () => {
+    const { home, link } = joined();
+    const info = p.decode(p.HostInfoPush, goldens['host-info-push']);
+    link.push(info);
+    expect(home.hostInfo).toBe(info);
+    home.onhomes = vi.fn();
+    link.push(info);
+    expect(home.onhomes).toHaveBeenCalledExactlyOnceWith(info.homes);
   });
 
   it('takes pushes from the last connection to come online and from no other', async () => {
@@ -1168,7 +1216,11 @@ describe('following a moved group', () => {
     await settle();
     expect([group.name, group.paging().failed, group.cursor]).toEqual(['Imported', false, 6]);
     expect(target.groups).toEqual([group]);
+    // Imported, it can leave the list of its new home as any other.
     next.link.push({ t: 'groups', groups: [] });
+    expect(next.asked.map(({ req }) => req)).toEqual([sync(0), sync(0), sync(6)]);
+    next.asked[2].answer({ re: 3, err: { code: 'not_found', msg: 'no such group' } });
+    await settle();
     expect(target.groups).toEqual([]);
   });
 
@@ -1190,26 +1242,49 @@ describe('following a moved group', () => {
     expect(existing.asked.map(({ req }) => req)).toEqual([sync(0, 'other'), sync(0), sync(815)]);
     home.move('absent', target);
     expect(target.groups.map((item) => item.g)).toEqual(['other', website]);
-    existing.link.push({ t: 'groups', groups: [] });
-    expect(target.groups).toEqual([]);
+    existing.link.push({ t: 'groups', groups: [listed(website)] });
+    expect(target.groups.map((item) => item.g)).toEqual([website, 'other']);
+    expect(existing.asked.map(({ req }) => req).slice(3)).toEqual([sync(0, 'other')]);
   });
 
-  it('does not resurrect an unlisted group when an old command answers moved', async () => {
+  it('follows a group that left the list to the home that the old one names', async () => {
     const { home, group, asked, link } = await read();
     const target = destination(home);
-    const reread = vi.spyOn(group, 'sync').mockResolvedValue(undefined);
+    const { asked: there, link: imported } = connect(target, [], { device: 'destination' });
+    link.push({ t: 'groups', groups: [listed('stays')] });
+    expect([home.groups.map(({ g }) => g), group.home]).toEqual([['stays', website], home]);
+    expect(asked.slice(1).map(({ req }) => req)).toEqual([sync(0, 'stays'), sync(815)]);
+    asked[2].answer(moved);
+    await settle();
+    expect([home.groups.map(({ g }) => g), group.home]).toEqual([['stays'], target]);
+    expect(target.groups).toEqual([group]);
+    expect(there.map(({ req }) => req)).toEqual([sync(815)]);
+    // Not imported yet: it stays, and a list without it changes nothing.
+    there[0].answer({ re: 1, err: { code: 'not_found', msg: 'not imported' } });
+    await settle();
+    imported.push({ t: 'groups', groups: [] });
+    expect(target.groups).toEqual([group]);
+    expect(there).toHaveLength(1);
+    // It is no longer the old home's to drop, nor to take back.
+    home.refused(group, { code: 'not_found', msg: 'no such group' });
+    expect(target.groups).toEqual([group]);
+    imported.push({ t: 'groups', groups: [listed(website, 'Imported')] });
+    expect(there.map(({ req }) => req)).toEqual([sync(815), sync(815)]);
+  });
+
+  it('follows the command whose answer names the new home while the old one is asked', async () => {
+    const { home, group, asked, link } = await read();
+    const target = destination(home);
     const command = group.post('once', []);
     await settle();
     link.push({ t: 'groups', groups: [] });
     asked[1].answer(moved);
     expect(await command).toEqual(moved);
-    expect(reread).toHaveBeenCalledTimes(0);
-    reread.mockRestore();
-    expect(target.groups).toEqual([]);
+    expect([home.groups, target.groups, group.home]).toEqual([[], [group], target]);
+    asked[2].answer({ re: 3, err: { code: 'not_found', msg: 'no such group' } });
+    await settle();
+    expect(target.groups).toEqual([group]);
     expect(home.onmove).toHaveBeenCalledExactlyOnceWith(website, 'destination');
-    expect(asked.map(({ req }) => req.t)).toEqual(['sync', 'cmd']);
-    expect(group.home).toBe(home);
-    expect(home.groups).toEqual([]);
   });
 
   it('ignores missing, empty and self destinations and other errors', () => {
@@ -1238,6 +1313,74 @@ describe('following a moved group', () => {
     expect(await command).toEqual(moved);
     expect(home.onmove).toHaveBeenCalledTimes(0);
     expect(group.home).toBe(home);
+  });
+});
+
+describe('a group restored on another node', () => {
+  it('is taken over from a home out of reach, and read from the start', async () => {
+    const { home: lostHome, group, link } = await read(815);
+    group.apply([text('kept', 815)]);
+    const other = new Home(me);
+    const otherConn = connect(other, [listed('mine')], { device: 'other' });
+    const target = new Home(me);
+    homes.push(other, lostHome, target);
+    link.offline();
+    const { asked, link: restored } = connect(target, [listed('also')], { device: 'restored' });
+    restored.push({ t: 'groups', groups: [listed('also'), listed(website, 'Restored')] });
+    expect([lostHome.groups, group.home, group.name]).toEqual([[], target, 'Restored']);
+    expect(target.groups[1]).toBe(group);
+    expect(find(website)).toBe(group);
+    expect(group.main.map((msg) => msg.id)).toEqual(['kept']);
+    // The rows of the copy can be older than those held.
+    expect(asked.map(({ req }) => req)).toEqual([sync(0, 'also'), sync(0)]);
+    expect(other.groups.map(({ g }) => g)).toEqual(['mine']);
+    expect(otherConn.asked).toHaveLength(1);
+  });
+
+  it('is not taken from a home that can be reached', async () => {
+    const { home, group } = await read(815);
+    const target = new Home(me);
+    homes.push(home, target);
+    connect(target, [listed(website)]);
+    expect([home.groups, group.home, group.cursor]).toEqual([[group], home, 815]);
+    expect(target.groups[0]).not.toBe(group);
+  });
+});
+
+describe('a group known from another node', () => {
+  it('is shown by its name until its home lists it', async () => {
+    const home = new Home(me);
+    homes.push(home);
+    home.expect(website, 'Website');
+    home.expect(website, 'Again');
+    home.expect('gone', 'Gone');
+    expect(home.groups.map(({ g, name, home }) => [g, name, home])).toEqual([
+      [website, 'Website', home],
+      ['gone', 'Gone', home],
+    ]);
+    const [group] = home.groups;
+    const { asked } = connect(home, [listed(website, 'Site')]);
+    expect(home.groups[0]).toBe(group);
+    expect(group.name).toBe('Site');
+    expect(asked.map(({ req }) => req)).toEqual([sync(0), sync(0, 'gone')]);
+    asked[1].answer({ re: 2, err: { code: 'not_found', msg: 'no such group' } });
+    await settle();
+    expect(home.groups).toEqual([group]);
+  });
+
+  it('is left to the list of a home that can be reached, and to any home that holds it', () => {
+    const home = new Home(me);
+    const other = new Home(me);
+    homes.push(home, other);
+    connect(home, []);
+    home.expect(website, 'Website');
+    expect(home.groups).toEqual([]);
+    other.expect(website, 'Website');
+    expect(other.groups.map(({ g }) => g)).toEqual([website]);
+    new Home(me).expect(website, 'Website');
+    const third = new Home(me);
+    third.expect(website, 'Website');
+    expect(third.groups).toEqual([]);
   });
 });
 

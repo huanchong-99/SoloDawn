@@ -29,6 +29,13 @@ Feature: In-page notifications of the web client
     When the person clicks "Open" on the confirmation notification
     Then the chat of "Website" opens with focus on the "Confirm" button of that card
 
+  Scenario: A notice of the home that mentions the reader says in its own words what happened
+    Given the person opens the client at "#/settings"
+    When task 12, which "Codex" does, stops after repeated failures, and the sign-in of "Claude Code" fails
+    Then the notification layer shows two red notifications: "Task T-12 stopped after repeated failures." for "Website · Codex" and "Claude Code's sign-in is no longer valid." for "Website · Claude Code"
+    When the person clicks "Open" on the stopped task
+    Then the chat of "Website" opens with focus on task 12's card
+
   Scenario: Mentions and completed tasks pause under focus or pointer, auto-dismiss after leaving, and yield to blocking cards
     Given the person opens the client at "#/settings"
     When "Codex" mentions the owner in "Website" with "Check `path.go` first" and "Secretary" posts a summary for task 12

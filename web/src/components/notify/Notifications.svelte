@@ -21,15 +21,20 @@
     confirm: 'shield',
     done: 'check',
     mention: 'at',
+    alert: 'alert',
   };
-  const tones: Record<NotifyKind, 'dawn' | 'ok' | 'sky'> = {
+  const tones: Record<NotifyKind, 'dawn' | 'ok' | 'sky' | 'danger'> = {
     approval: 'dawn',
     decision: 'dawn',
     brief: 'dawn',
     confirm: 'dawn',
     done: 'ok',
     mention: 'sky',
+    alert: 'danger',
   };
+
+  /** An alert's title is a sentence of its own. */
+  const kindOf = (kind: NotifyKind) => (kind === 'alert' ? '' : t(`notify.kind.${kind}`));
 
   const sliding = new MediaQuery('max-width: 1023px');
   const notifier = new Notifier();
@@ -74,7 +79,7 @@
         <span class="glyph"><Icon name={icons[item.kind]} /></span>
         <div class="grow">
           <b class:cut={!item.needsYou} id={`n-${item.key}`}>
-            {t(`notify.kind.${item.kind}`)}{title ? ` · ${title}` : ''}
+            {[kindOf(item.kind), title].filter(Boolean).join(' · ')}
           </b>
           <p class="muted cut">{item.group.name} · {whoOf(item.group, item.msg)}</p>
         </div>
