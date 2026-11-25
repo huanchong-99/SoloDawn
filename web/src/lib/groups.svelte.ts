@@ -188,6 +188,23 @@ export class Group {
     this.cursor = answer.seq;
     this.#live = true;
     this.#paging = new Map();
+    for (const row of this.#requests()) void this.#fetchRow(read, ctl, row);
+  }
+
+  /** The requests of the waiting confirm cards that are not held: a read brings every pending card,
+   *  but no message of a thread. Of a task without a brief the request is its `task` message, and
+   *  the task row that says the same is always held. */
+  #requests() {
+    const ids = this.waiting.flatMap((msg) => (msg.kind === 'confirm' && msg.re) || []);
+    return [...new Set(ids)].filter((id) => !this.rows.has(key('msg', id)) && !this.task(id));
+  }
+
+  /** Fetches one message. */
+  async #fetchRow(read: object, ctl: p.Ctl, row: string) {
+    const answer = await ctl
+      .request({ t: 'fetch', g: this.g, r: 'msg', row, before: 0, limit: 1 })
+      .catch(lost);
+    if (!answer.err && !this.#late(read, ctl)) this.apply(answer.rows, false);
   }
 
   /** Whether an answer comes too late: the group was read again since it was asked for, or the

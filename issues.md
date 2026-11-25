@@ -6,12 +6,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-25 · deviation · A confirm card for a task without a brief names "Former member" as the requester
-
-- Symptom: when a role in a task that has no brief is given to another person's AI (`task assign`), the owner is asked "Let Codex act on the request from Former member." Contract `planning/contracts/step-2/confirm.md` section 3: who asked is then the owner of the AI that started the task.
-- Cause: the request is the `task` message, which the home writes with `by: "system"` (`internal/home/cmd_brief.go:339`); `requester` in `web/src/lib/confirm.ts` takes the author of the request. No row says who started a task once its assignee has changed.
-- Status: open, found while making confirm cards count as waiting.
-
 ### 2026-11-23 · deviation · An agent without a driver cannot join a group
 
 - Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
@@ -745,6 +739,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-25 · deviation · A confirm card for a task without a brief names "Former member" as the requester
+
+- Symptom: when a role in a task that has no brief is given to another person's AI (`task assign`), the owner is asked "Let Codex act on the request from Former member." Contract `planning/contracts/step-2/confirm.md` section 3: who asked is then the owner of the AI that started the task.
+- Cause: the request is the `task` message, which the home writes with `by: "system"` (`internal/home/cmd_brief.go:339`); `requester` in `web/src/lib/confirm.ts` takes the author of the request. No row says who started a task once its assignee has changed.
+- Status: resolved on `web/confirm-waits`. The sentence names the task and no person, "Let Codex take part in T-12 “Show connection path”." (`confirmSentence` in `web/src/lib/confirm.ts`): the request has the task's id, and task rows are always held. Section 3's person cannot be shown without a new field, which is not worth one.
+
+### 2026-11-25 · bug · After a page load, a confirm card for a call said "from an unknown requester"
+
+- Symptom: an owner who opened the app from the push read "Let Codex answer the call from an unknown requester." in the waiting bar, the group list and the card, until they opened the call's thread. The same for a mention in a thread, and for a main-line request older than the newest 50.
+- Cause: a cold read brings every pending card and the newest 50 main-line messages, and no message of a thread (`internal/home/sync.go:100-103`); `requester` in `web/src/lib/confirm.ts` takes the author from the request's row.
+- Status: resolved on `web/confirm-waits`: after `synced`, `Group` fetches the missing request of each confirm card that waits for the reader, one row each (`#requests` in `web/src/lib/groups.svelte.ts`).
 
 ### 2026-11-25 · bug · Confirm cards did not count as waiting, and task badges and system rows missed their step 2 wording
 

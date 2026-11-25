@@ -64,6 +64,19 @@ describe('the sentence of a confirm card', () => {
     );
   });
 
+  it('names the task when the request is the message of a task without a brief', () => {
+    const task = row('row-task', { id: 'request', num: 12, title: "Cost $& $'" });
+    const message = row('row-msg-task', { id: 'request', body: { task: 'request' } });
+    for (const group of [groupWith(task, message), groupWith(task)]) {
+      prefs.lang = 'en';
+      expect(confirmSentence(group, card('direct'))).toBe(
+        "Let Codex take part in T-12 “Cost $& $'”.",
+      );
+      prefs.lang = 'zh-CN';
+      expect(confirmSentence(group, card('direct'))).toBe("允许 Codex 参与 T-12「Cost $& $'」。");
+    }
+  });
+
   it('says when who asked is not known, and when a member has left', () => {
     const unknown = 'Let Codex act on the request from an unknown requester.';
     expect(confirmSentence(groupWith(), card('direct'))).toBe(unknown);

@@ -50,7 +50,7 @@ Feature: Task card in the chat main line
     When the confirmation waits on "Mina" instead
     Then the task card shows neutral "Waiting for Mina's confirmation" with step "now"
     When the card is confirmed and the assignee's owner takes over its terminal for this task
-    Then the task card shows the takeover badge "Owner is driving" with step "now"
+    Then the task card shows the takeover badge "AI's owner is driving" with step "now"
 
   Scenario: Waiting tasks distinguish waits on the reader from waits on another person, a reviewer or a conflict
     When the home writes "row-task-waiting" and a task message for it

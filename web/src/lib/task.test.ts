@@ -136,7 +136,7 @@ describe('task helpers', () => {
     const { group } = makeGroup();
     const task = row<TaskRow>('row-task');
     const ai = (changes: object) => group.apply([row('row-member-ai', changes)]);
-    const takeover = { text: 'Owner is driving', dot: 'takeover' };
+    const takeover = { text: "AI's owner is driving", dot: 'takeover' };
     const rejected = { text: 'Sent back · round 1', tone: 'danger' };
 
     ai({ seq: 900, state: 'takeover', task: undefined });
