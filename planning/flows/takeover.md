@@ -29,9 +29,10 @@ session, and a `takeover.start` that names one is answered `conflict`.
    disabled unless B's path to N is `direct` (`flows/connect.md` step 8).
 2. B sends the signed host command `takeover.start` to N.
 3. N checks the signer is its owner and picks S (section A). It answers
-   `busy` while another takeover of this AI is open or a merge of one of
-   its tasks is running. If the AI is running a turn in this group, N
-   interrupts it and waits for its end.
+   `busy` while another takeover of this AI is open, N is giving the AI a
+   turn that has not begun, or a merge of one of its tasks is running. If
+   the AI is running a turn in this group, N interrupts it and waits for its
+   end.
 4. N closes the structured CLI process of S, if one is open, and waits for
    it to exit (C-6).
 5. N notes, for the hand-back summary, the current commit and the list of

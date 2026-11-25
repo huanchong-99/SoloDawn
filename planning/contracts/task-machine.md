@@ -151,8 +151,8 @@ is a person with role `owner` or `admin`. Items are inbox items
   queue jump in **another** session reports row 16, runs the jump turn,
   reports row 13b when it has ended, and gives the interrupted session a
   turn of its own. A jump aimed at the very session that is running just
-  interrupts it and goes first; the task is not paused. If the host never
-  reports 13b, row 13 does.
+  interrupts it and goes first; the task is not paused, and the session gets
+  its turn of its own after it. If the host never reports 13b, row 13 does.
 - **Paused or failed means no turns.** A host gives no turn to the sessions
   of a task that is `paused` or `failed`, and interrupts one that is running
   when the row arrives.

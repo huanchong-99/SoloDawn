@@ -31,7 +31,8 @@ func init() {
 }
 
 // takeovers is kept via Part[takeovers](h). mu guards its fields and those of
-// each takeover, and is never held across a call out of this file.
+// each takeover, and is never held across a call out of this file but the
+// one to givingTurn in claim.
 type takeovers struct {
 	mu      sync.Mutex
 	wg      sync.WaitGroup
@@ -68,12 +69,14 @@ func takeoverState(h *Host) *takeovers {
 	return p
 }
 
-// claim registers t for slot when no takeover is registered there, or, if
-// replaceFree, when the one registered has started its hand-back.
-func (p *takeovers) claim(slot aiSlot, t *takeover, replaceFree bool) bool {
+// claim registers t for slot when no takeover is registered there. A
+// takeover.start may also replace one that has started its hand-back, and is
+// refused while delivery may be giving the AI a turn. After the claim delivery
+// reads the hold.
+func (p *takeovers) claim(h *Host, slot aiSlot, t *takeover, start bool) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if old := p.open[slot]; old != nil && !(replaceFree && old.free) {
+	if old := p.open[slot]; old != nil && !(start && old.free) || start && givingTurn(h, aiGroupKey(slot)) {
 		return false
 	}
 	p.open[slot] = t
@@ -129,8 +132,8 @@ func takeoverStart(ctx context.Context, h *Host, from Owner, _ string, data json
 	slot := aiSlot{group: string(req.Group), member: string(req.Member)}
 	p := takeoverState(h)
 	t := &takeover{from: from, nonce: string(req.Nonce), assign: assignFirst}
-	if mergeRunning(h, slot) || !p.claim(slot, t, true) {
-		return nil, &Error{"busy", "the AI is taken over or one of its tasks is merging"}
+	if mergeRunning(h, slot) || !p.claim(h, slot, t, true) {
+		return nil, &Error{"busy", "the AI is taken over, is being given a turn, or one of its tasks is merging"}
 	}
 	if err := openTerminal(ctx, h, p, slot, ai, t, string(req.Task)); err != nil {
 		p.release(h, slot, t)
@@ -433,7 +436,7 @@ func handBackSaved(h *Host, group string) {
 	p := takeoverState(h)
 	for _, s := range h.Sessions.All() {
 		t := &takeover{key: s.SessionKey}
-		if s.Group == group && s.State == Takeover && p.claim(aiSlot{group: s.Group, member: s.Member}, t, false) {
+		if s.Group == group && s.State == Takeover && p.claim(h, aiSlot{group: s.Group, member: s.Member}, t, false) {
 			h.bg(p.wg.Go, "hand_back", func() { handBack(h, p, t) }, "g", t.key.Group, "task", t.key.Task)
 		}
 	}
