@@ -153,22 +153,25 @@ func (w *acmeWorld) startPebble(seconds int) error {
 func (w *acmeWorld) loadIssuer(roots *x509.CertPool) error {
 	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots}}}
 	var body []byte
-	for range 100 {
+	err := waitUntilEvery(100*time.Millisecond, 10*time.Second, "Pebble to serve its root", func() error {
 		resp, err := client.Get("https://localhost:" + w.manage + "/roots/0")
-		if err == nil {
-			body, err = io.ReadAll(resp.Body)
-			resp.Body.Close()
-			if err == nil && resp.StatusCode == http.StatusOK {
-				w.issuer = x509.NewCertPool()
-				if !w.issuer.AppendCertsFromPEM(body) {
-					return fmt.Errorf("Pebble's root: %s", body)
-				}
-				return nil
-			}
+		if err != nil {
+			return err
 		}
-		time.Sleep(100 * time.Millisecond)
+		defer resp.Body.Close()
+		if body, err = io.ReadAll(resp.Body); err == nil && resp.StatusCode != http.StatusOK {
+			err = fmt.Errorf("status %d", resp.StatusCode)
+		}
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("%w\n%s", err, w.log("pebble"))
 	}
-	return fmt.Errorf("Pebble did not start: %s", w.log("pebble"))
+	w.issuer = x509.NewCertPool()
+	if !w.issuer.AppendCertsFromPEM(body) {
+		return fmt.Errorf("Pebble's root: %s", body)
+	}
+	return nil
 }
 
 func (w *acmeWorld) log(name string) []byte {
@@ -259,18 +262,18 @@ func (w *acmeWorld) twoThirds() error {
 
 func (w *acmeWorld) renewed() error {
 	for name, first := range w.first {
-		for {
+		err := waitUntilEvery(250*time.Millisecond, time.Until(first.NotAfter), name+" to be renewed", func() error {
 			cert, err := w.leaf(name)
 			if err != nil {
-				return err
+				return abort(err)
 			}
-			if cert.SerialNumber.Cmp(first.SerialNumber) != 0 && cert.NotBefore.After(first.NotBefore) && slices.Equal(cert.DNSNames, []string{name}) {
-				break
+			if cert.SerialNumber.Cmp(first.SerialNumber) == 0 || !cert.NotBefore.After(first.NotBefore) || !slices.Equal(cert.DNSNames, []string{name}) {
+				return fmt.Errorf("serial %v, valid from %v", cert.SerialNumber, cert.NotBefore)
 			}
-			if time.Now().After(first.NotAfter) {
-				return fmt.Errorf("%s: not renewed before %v\n%s", name, first.NotAfter, w.log("pebble"))
-			}
-			time.Sleep(250 * time.Millisecond)
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("%w\n%s", err, w.log("pebble"))
 		}
 	}
 	return nil

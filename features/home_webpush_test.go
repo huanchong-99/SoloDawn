@@ -76,15 +76,13 @@ func (b *homeWebPushBrowser) waitCount(want int) ([][]byte, error) {
 		}
 		return got, nil
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if got := b.count(); len(got) == want {
-			return got, nil
+	err := waitUntil(3*time.Second, fmt.Sprintf("%d push notifications", want), func() error {
+		if n := len(b.count()); n != want {
+			return fmt.Errorf("%d notifications", n)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	got := b.count()
-	return got, fmt.Errorf("push endpoint got %d notifications; want %d", len(got), want)
+		return nil
+	})
+	return b.count(), err
 }
 
 type homeWebPushWorld struct {

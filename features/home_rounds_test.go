@@ -27,6 +27,7 @@ type homeRoundsPeer struct {
 	conn *home.Conn
 	// frames has a single reader: nextFrame or checkHostQuiet on the scenario goroutine.
 	frames chan any
+	saw    trail
 	re     int64
 }
 
@@ -34,12 +35,7 @@ func (p *homeRoundsPeer) Send(frame any) error  { p.frames <- frame; return nil 
 func (p *homeRoundsPeer) Done() <-chan struct{} { return nil }
 
 func (p *homeRoundsPeer) nextFrame() (any, error) {
-	select {
-	case frame := <-p.frames:
-		return frame, nil
-	case <-time.After(10 * time.Second):
-		return nil, fmt.Errorf("timed out waiting for frame")
-	}
+	return recvFrame(p.frames, 10*time.Second, &p.saw, briefAny)
 }
 
 type homeRoundsWorld struct {

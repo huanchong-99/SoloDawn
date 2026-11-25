@@ -26,6 +26,7 @@ type s3PresetHomeBridge struct {
 	loop *home.Loop
 	conn *home.Conn
 	ch   chan json.RawMessage
+	saw  trail
 	done chan struct{}
 }
 
@@ -46,6 +47,7 @@ func (b *s3PresetHomeBridge) Send(frame any) error {
 	if json.Unmarshal(raw, &push) == nil && push.Type != "" && push.Type != "fetched" && push.Type != "synced" {
 		return nil
 	}
+	b.saw.see(frameBrief(raw))
 	b.ch <- raw
 	return nil
 }
@@ -75,12 +77,7 @@ func (b *s3PresetHomeBridge) Request(ctx context.Context, build func(int64) any)
 }
 
 func (b *s3PresetHomeBridge) answer(ctx context.Context) (json.RawMessage, error) {
-	select {
-	case raw := <-b.ch:
-		return raw, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	return recvCtx(ctx, b.ch, "the home's answer", &b.saw)
 }
 
 type s3PresetWorld struct {
