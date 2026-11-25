@@ -334,18 +334,20 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           for (const link of openLinks) expect(read(link)).toBe('Open');
         },
       );
-      When('the person opens "New project group"', () => {
-        buttonNamed(one('section.list'), 'New project group').click();
+      When('the person opens "New group"', () => {
+        buttonNamed(one('section.list'), 'New group').click();
         flushSync();
       });
       Then(
-        'the dialog is named "New project group" and every field is named by its label without concatenating its hint',
+        'the dialog is named "New group" and every field is named by its label without concatenating its hint',
         () => {
           const dlg = one<HTMLDialogElement>('dialog');
           expect(dlg.open).toBe(true);
-          expect(named(dlg)).toBe('New project group');
+          expect(named(dlg)).toBe('New group');
           const controls = [...dlg.querySelectorAll('input, select, textarea')];
           expect(controls.map((el) => named(el))).toEqual([
+            'Project group',
+            'Team group',
             'Group name',
             'Git repository',
             'Base branch',
@@ -354,8 +356,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
             'Check commands',
             'Home computer',
           ]);
-          expect(described(controls[1])).toContain('clone the project from');
-          expect(described(controls[5])).toContain('One per line');
+          expect(described(controls[0])).toBe('AIs work on one repository.');
+          expect(described(controls[1])).toBe('Notices and talk. No tasks.');
+          expect(described(controls[3])).toContain('clone the project from');
+          expect(described(controls[7])).toContain('One per line');
         },
       );
       When('the person opens the chat of "Website" on a 1280 px desktop', () => {

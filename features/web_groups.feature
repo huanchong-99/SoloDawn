@@ -23,6 +23,25 @@ Feature: Group list and group cache of the web client
     And both browsers list "Handbook" without a reload
     And the first browser has opened its chat
 
+  Scenario: The last message of a team group names the AI of a bulletin
+    Given the home also holds the team group "Studio" with a bulletin of "Claude Code", sent from the computer of "Alex"
+    When the browser has read both groups
+    Then the list reads "Claude Code: The website is ready." under "Studio"
+
+  Scenario: A team group is created without a repository
+    Given the person owns a second computer, "desk", which is connected
+    When the person chooses "Team group" in the dialog, which then asks only for the names and the home, and creates "Studio"
+    Then the home has made the team group "Studio" without a repository, checks or forge
+    And "desk" has been told which computer is the home of "Studio"
+    And its chat opens as a team group, ready for the first message and for inviting people, and without AIs
+    And the dialog starts again with a project group
+
+  Scenario: A computer that connects later is told the home of a team group
+    Given the home also holds the team group "Studio", which the browser shows
+    When the person's computer "desk" connects, then "laptop"
+    Then "desk" and "laptop" have each been told once which computer is the home of "Studio"
+    And neither has been told the home of "Website", a project group of a computer of the person
+
   Scenario: The dialog sends to the computer that was chosen, whatever happens to the others
     Given the person owns a second computer, "laptop", which is connected
     When the person chooses "laptop" in the dialog, the first computer goes away, and they create the group "Notes"

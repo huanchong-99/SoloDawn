@@ -27,6 +27,9 @@ it('shows the empty team main line when no older messages remain', () => {
   group.paging().more = false;
   openPage(`#/groups/${group.g}`);
   expect(text('.empty h3')).toBe('Nothing here yet');
+  expect(text('.empty p')).toBe(
+    'Write to the whole team. Notices that secretaries post show up here too.',
+  );
   expect(text('.edge')).toBe('');
 });
 

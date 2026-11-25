@@ -58,8 +58,9 @@ export function classify(group: Group, msg: MsgRow): NotifyKind | undefined {
   return mentionsMe(group, msg) ? 'mention' : undefined;
 }
 
-/** Display name of the member a notification is about. */
+/** Display name of the member a notification is about; of a bulletin, the AI that it names. */
 export function whoOf(group: Group, msg: MsgRow): string {
+  if (msg.kind === 'bulletin') return msg.body.ai;
   const id = msg.kind === 'approval' || msg.kind === 'confirm' ? msg.body.ai : msg.by;
   return group.member(id)?.name ?? t('chat.gone');
 }

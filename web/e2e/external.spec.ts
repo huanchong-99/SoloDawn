@@ -31,7 +31,7 @@ async function pair(page: Page, surface: DirectSurface, node: Node) {
 }
 
 async function createProject(page: Page, repo: string) {
-  await page.locator('button', { hasText: 'New project group' }).first().click();
+  await page.locator('button', { hasText: 'New group' }).first().click();
   const form = page.getByRole('dialog');
   const inputs = form.locator('input.input');
   await inputs.nth(0).fill('External project');
