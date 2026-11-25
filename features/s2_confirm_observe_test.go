@@ -163,14 +163,8 @@ func s2ConfirmMatches(got, want any) bool {
 }
 
 func (w *s2ConfirmWorld) aiNode(name string) *s2Node {
-	switch name {
-	case s2SecretaryName:
-		return w.cast.P1
-	case s2PWorkName, "P-review":
-		return w.cast.P2
-	default:
-		return w.cast.Q1
-	}
+	nodes := []*s2Node{w.cast.P1, w.cast.P2, w.cast.Q1}
+	return nodes[slices.IndexFunc(nodes, func(n *s2Node) bool { return n.ID() == w.ais[name].Host })]
 }
 
 func (w *s2ConfirmWorld) awaitTurn(ai, pattern string) error {

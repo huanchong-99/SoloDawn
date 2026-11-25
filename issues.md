@@ -35,6 +35,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: with 146 items held, `inbox.take` took items 352 to 369 and left 224 to 351, which went to a later turn. [agent-turn](planning/flows/agent-turn.md) B.6 gives a session all its held items, in order.
 - Cause: `isItemHeld` (`internal/host/deliver.go:909`) reads whether the AI is working anew for each item of the queue that `selectEligibleBatch` walks (`internal/host/deliver.go:879`). Items read before the turn ends stay held, and those after it are taken. FLAKY-27 fixed the same race for the group pause.
 - Status: open, found 2026-11-26 in the node log of `web/e2e/m2.spec.ts`.
+### 2026-11-26 · bug · A denied `ask` does not tell the caller
+
+- Symptom: A9.18 wants the denial of a call as the caller's turn, and as `{"denied":true}` in an open `ask` (`planning/contracts/step-2/confirm.md` section 5). Enabled, the deny example fails at that turn: P-work gets a `reply` turn with an empty body, and an open `ask` is not ended.
+- Cause: the home queues the denial as a `reply` item that carries the confirm card (`internal/home/cmd_confirm.go`, `cfmDeniedResult`). The host takes only a `reply` message as the answer of an open call (`internal/host/deliver.go:576`, `replyCallID`), reads only an answer from it (`internal/host/tools_ask.go`, `decodeReplyItem`), and the turn shows the card's `text`, which is empty (`internal/host/turn.go:426`, `buildReply`).
+- Status: open, for the queued host unit. The deny example of A9.18 stays `@pending`; the confirm example and the two callers of the open `ask` run.
+
+### 2026-11-26 · bug · A changed secretary gets no secretary tools on its host
+
+- Symptom: after `group set` with `secretary`, the AI it names cannot propose a brief: `tools/call` of `propose_brief` is refused and its CLI ends. A9.44 wants its host to list the secretary's tools.
+- Cause: the host goes by `Session.Secretary` (`internal/host/session.go:59`), which is written at `host.join` only (`internal/host/join.go`); `planning/contracts/step-2/authority.md` section 4 says the group row decides.
+- Status: open, for the queued host unit. The scenario "Q1 lists the secretary's tools for Q-team once it is named secretary" stays `@pending`; the two scenarios of the notices a named secretary gets run without it.
+
+### 2026-11-26 · bug · The fixtures of the confirmation scenarios did not match the contracts
+
+- Symptom: the first run of A9.8 to A9.19 and A9.42 to A9.44 failed in A9.9, A9.11, A9.42 and A9.44 with nothing wrong in the product.
+- Cause, in `features/s2_confirm*`: `state.by` of a card was expected to be a user id, it is a member id (`contracts/messages.md` section 3); a scripted tool without arguments sent `"arguments": null`, which the host refuses; a `choose` had an empty `arg`; the group had `forge: none`, which is one machine only, so a reviewer on another node could not fetch the commit; the scripted results of a Claude Code tool call were not compared; the one-person quiet-task scenario needed the secretary's tools (above).
+- Status: resolved in the change that enables the scenarios. The cast's group now has the fake forge of A9.24.
+
 ### 2026-11-26 · bug · A member's node can follow a moved group more than 5 seconds after the import
 
 - Symptom: A9.27 asks that Q1 follows P2 within 5 seconds of the import. Q1 took 11.6 seconds with the import right after the export; with minutes between them it can take up to 70 seconds. Once connected, everything else of A9.27 holds.
@@ -168,13 +186,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: A9.12 and five A9.42 cases (failing review, decision by P, decision by Q, secretary confirmation without Q on the allow list, and secretary confirmation with Q on it) each failed under `-race` in `Given the confirmation cast with Q`. The reply was `bad_request: the home has no such command`; decoding that refusal as a successful command reply reported `proto: a field that is always present is missing`.
 - Cause: the cast sends `invite` before it can admit Q (`features/s2_confirm_test.go:119`), and the home had no registered handler for it (`internal/home/check.go:109`).
-- Status: pending retest. #382 registered `invite`, and the cast admits Q with `JoinGroup` (`features/s2_cast_test.go`); the label assertions were not rerun here.
+- Status: resolved. #382 registered `invite`, the cast admits Q with `JoinGroup` (`features/s2_cast_test.go`), and the scenarios of A9.12 and A9.42 are enabled.
 
 ### 2026-11-22 · limitation · The A9.44 quiet-task fixture does not reach the timer
 
 - Symptom: A9.44 remains pending after HM-13. With the scenario enabled, the brief proposed by the replacement secretary never appeared in either acceptance run (`features/s2_confirm.feature:560`).
-- Cause: not verified; both runs stopped in the proposal step before confirming the brief or waiting for the timer.
-- Status: open; HM-13's timer is covered separately by `features/home_rounds.feature:40`.
+- Cause: the replacement secretary has no secretary tools on its host (entry of 2026-11-26 above), so its `propose_brief` was refused.
+- Status: resolved. The first secretary proposes the brief before the change, and the scenario is enabled; the timer itself is also covered by `features/home_rounds.feature:40`.
 
 ### 2026-11-22 · limitation · Confirmation browser controls are not yet exercised
 
@@ -192,7 +210,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: a new brief cannot replace a confirmed one, although A9.13 and `labels.md` section 4 said it did.
 - Cause: `internal/home/cmd_brief.go:153` accepts only pending or revised briefs as predecessors, as `planning/contracts/commands.md` 1.3 says.
-- Status: resolved by decision (2026-11-25): the code stays. A started task's direction changes by cancelling the task and confirming a new brief, and `labels.md` section 4 and A9.13 in `planning/steps/step-2-3-acceptance.md` now say so. The A9.13 scenario in `features/` is changed by another unit and stays pending until then.
+- Status: resolved by decision (2026-11-25): the code stays. A started task's direction changes by cancelling the task and confirming a new brief, and `labels.md` section 4 and A9.13 in `planning/steps/step-2-3-acceptance.md` now say so. The A9.13 scenario follows that sequence and is enabled.
 
 ### 2026-11-22 · limitation · The OpenCode driver is declared from documentation, not from a capture
 
