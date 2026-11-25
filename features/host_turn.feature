@@ -11,7 +11,7 @@ Feature: A host composes session instructions and turn text
       | review    | .solodawn-review.diff |
       | secretary | propose_brief         |
 
-  Scenario: The first turn of a brief task session carries goal, criteria and newest notes
+  Scenario: The first turn of a brief task session carries goal, criteria, scope and newest notes
     Given a host turn fixture
     When the host composes the first assign turn of task 12
     Then the composed turn text is:
@@ -23,6 +23,8 @@ Feature: A host composes session instructions and turn text
       Goal: Show the connection path and warn when relayed.
       Acceptance criteria:
       1. Indicator follows a path change within 1 s
+      In scope: node
+      Out of scope: relay
       Reviewer: Codex   Pass score: 90
       Notes of this group:
       - Path events use fields path, rtt_ms, since, limited.

@@ -119,10 +119,10 @@ Not in the seam: the one state per AI that others see (sessions.md, section 3), 
 
 - `Instructions(s)` returns the embedded English prompt for `s` from `instructions/{group,task,review,secretary}.md` (`secretary.md` when `s.Secretary` is set, otherwise by `s.Kind`).
 - `Compose(h, s, kind, items)` formats `ItemsTurn` (from `items`) and `ReplacedTurn`, `ContinueTurn` and `HandbackTurn` (`items` nil), returning the turn text and `Turn{Kind, Thread, Depth, Jump}` (`N` is set later by `Sessions.SetTurn`).
-- Every secretary turn lists the group's AIs by name with their CLI, computer, tier, state, current task, usage (`window <pct>% used, resets in <n> h`, hours rounded up, from the row's `usage`) and skills from the synced rows. The secretary uses these to choose assignees and reviewers; the task tools do not enforce the assignment guidance.
+- Every secretary turn lists the group's AIs by name with their CLI, computer, tier, state, current task, usage (`window <pct>% used, resets in <n> h`, hours rounded up, from the row's `usage`) and skills from the synced rows. The secretary uses these to choose assignees and reviewers; the task tools do not enforce the assignment guidance. When the node knows team groups, one more line names them with their ids: those homed on this node and, once their rows are read, those of remembered homes (`teamGroupsLine`).
 - A `checks` or `reviewed` item for a task with `stuck.ask` names all stronger AIs, including the secretary if eligible. `submit_task` returns `conflict` naming the same candidates before pushing, opening a pull request or posting a report. The home clears the block after a qualifying reply.
 - Item header labels (`== <i of n> · <why> · …`) and carried message or card-decision lines (`-- from … · <label>`, with `from the home` for home-written `checks` and `system` rows) come from `setting` key `owner` in `h.Store`, the `member` rows (`account`, `allow`) in `h.Rows`, and `msg.state` / `body.to`, never from message text, envelope re-verification, or `cause`.
-- First task turns, review turns and `ReplacedTurn` fetch the brief (`FetchRow`), any style preset named by the brief (`FetchKind` `preset` in `turn_preset.go`, outside the 8 KiB note budget; review turns include only `Style preset: "<name>"`), the newest 100 notes up to 8 KiB (`FetchKind`), and up to 20 recent thread or main-line messages (`FetchThread`) through `fetchFrom(ctx, h, device, build)`. Because `Compose` reads `h.Store` with `Store.Write` and calls `Home.Request`, call it outside any `Store.Write` or `Sessions.Write` transaction.
+- First task turns, review turns and `ReplacedTurn` fetch the brief (`FetchRow`) for its goal, criteria and confirmed scope, any style preset named by the brief (`FetchKind` `preset` in `turn_preset.go`, outside the 8 KiB note budget; review turns include only `Style preset: "<name>"`), the newest 100 notes up to 8 KiB (`FetchKind`), and up to 20 recent thread or main-line messages (`FetchThread`) through `fetchFrom(ctx, h, device, build)`. Because `Compose` reads `h.Store` with `Store.Write` and calls `Home.Request`, call it outside any `Store.Write` or `Sessions.Write` transaction.
 
 ## Drivers
 
@@ -341,6 +341,7 @@ refused. Team state is read state-only when it is not already cached.
 Bulletin `post` waits for the team home's attach, with the same bound as `host.join`, before answering `home_unreachable`.
 
 `tools_talk.go` registers `post`, `read_thread`, `list_members`, `list_tasks`, `note_put` and `note_list` in `Tools` ([mcp-tools.md](../../planning/contracts/mcp-tools.md), sections 1 and 5), and `tools_kb.go` registers `kb_put` and `kb_search` for every session ([step-3/knowledge.md](../../planning/contracts/step-3/knowledge.md), section 5).
+`read_thread` gives each message the text `formatMsgContent` makes for a turn, so reviews, checks, briefs and decisions show what their bodies hold; an approval shows its status and the request (`threadMsgText`). `list_members` gives no state for a person.
 `post`, `note_put` and `kb_put` (both `name` and `text`) run `CheckOutboundSecret` before signing or sending any command to the home.
 
 # Task and review tools

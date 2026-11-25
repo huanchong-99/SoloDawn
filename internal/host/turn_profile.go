@@ -32,6 +32,37 @@ func (c *turnCtx) profileRoster() string {
 	return strings.Join(lines, "\n")
 }
 
+// teamGroupsLine is the line of a secretary's header with the team groups its
+// node knows (R-14), or "" for another session or when there is none.
+func teamGroupsLine(h *Host, s Session) (string, error) {
+	if !s.Secretary {
+		return "", nil
+	}
+	known, err := bulletinHomes(h.Store)
+	if err != nil {
+		return "", err
+	}
+	teams := teamGroups(h, known)
+	if len(teams) == 0 {
+		return "", nil
+	}
+	return "\nTeam groups (name and id): " + strings.Join(teams, ", "), nil
+}
+
+func teamGroups(h *Host, known []bulletinDest) []string {
+	var teams []string
+	for _, home := range known {
+		if group, ok := joinCachedGroup(h, string(home.Group)); ok {
+			home.Name, home.Kind = group.Name, group.Kind
+		}
+		if home.Kind == "team" {
+			teams = append(teams, fmt.Sprintf("%q (%s)", home.Name, home.Group))
+		}
+	}
+	slices.Sort(teams)
+	return slices.Compact(teams)
+}
+
 func (c *turnCtx) profileMemberLine(ai proto.AIMemberRow) string {
 	cli := ai.CLI
 	if ai.Tool != "" {
