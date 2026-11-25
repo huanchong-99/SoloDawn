@@ -368,6 +368,8 @@ func (o *s2CLIObserver) replyDefaultCodex(out io.Writer, line []byte) {
 		fmt.Fprintf(out, `{"id":%s,"result":{}}`+"\n", req.ID)
 	case "thread/start", "thread/resume":
 		fmt.Fprintf(out, `{"id":%s,"result":{"thread":{"id":%q}}}`+"\n", req.ID, o.session)
+	case "model/list":
+		fmt.Fprintf(out, `{"id":%s,"result":{"data":[]}}`+"\n", req.ID)
 	case "turn/start":
 		o.writeCodexTurnDone(out, req.ID)
 	}
@@ -821,6 +823,10 @@ func (c *s2Cast) CreateProjectGroup(p *s2Person, home *s2Node, name, forge strin
 		Forge:      forge,
 		Checks:     []string{},
 		MemberName: p.Name,
+	}
+	if forge == "custom" {
+		templates := proto.ForgeTemplates(s2FakeConfig(c).Templates)
+		create.Templates = &templates
 	}
 	if _, err := c.SendCmd(p, bc.conn, create); err != nil {
 		return "", err

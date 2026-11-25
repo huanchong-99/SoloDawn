@@ -31,6 +31,7 @@ func s2ConfirmSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^the confirmation cast (with Q|without Q)$`, func(cast string) error {
 		return w.setup(f, cleanup, cast == "with Q")
 	})
+	sc.Step(`^P has another AI "([^"]+)" in the confirmation cast$`, w.joinAnother)
 	sc.Step(`^Q opens a second confirmation browser$`, w.secondBrowser)
 	sc.Step(`^confirmation browser (P|Q|Q2) sends as "([^"]+)":$`, w.command)
 	sc.Step(`^(P|Q) asks "([^"]+)" in "([^"]+)" with "([^"]+)" as "([^"]+)" for confirmation$`, w.mention)
@@ -42,12 +43,16 @@ func s2ConfirmSteps(sc *godog.ScenarioContext, f fixtures) {
 }
 
 func (w *s2ConfirmWorld) setup(f fixtures, cleanup func(func()), withQ bool) error {
-	c, err := startS2Cast(f.t, cleanup, f, s2CastConfig{Timeout: 5 * time.Minute})
+	c, err := startS2Cast(f.t, cleanup, f, s2CastConfig{})
 	if err != nil {
 		return err
 	}
 	w.cast = c
-	w.gid, err = c.CreateProjectGroup(c.P, c.P1, "Confirmation", "none")
+	// The AIs are on different nodes, so the project has a remote (contracts/rows.md section 1).
+	if err := c.SetForgeReplies("watch-open", s2ForgeReply{Stdout: s2ForgeURL + "1\n"}); err != nil {
+		return err
+	}
+	w.gid, err = c.CreateProjectGroup(c.P, c.P1, "Confirmation", "custom")
 	if err != nil {
 		return err
 	}
@@ -81,12 +86,15 @@ func (w *s2ConfirmWorld) joinCast(withQ bool) error {
 	return w.joinAI(c.Q1, s2QTeamCLI, s2QTeamName, false)
 }
 
-func (w *s2ConfirmWorld) joinLocalReviewer() error {
-	c := w.cast
-	if err := c.configureNodeAgent(c.P, c.P2, "codex", "team"); err != nil {
+func (w *s2ConfirmWorld) joinLocalReviewer() error { return w.joinCodex(w.cast.P2, "P-review") }
+
+func (w *s2ConfirmWorld) joinAnother(name string) error { return w.joinCodex(w.cast.P1, name) }
+
+func (w *s2ConfirmWorld) joinCodex(n *s2Node, name string) error {
+	if err := w.cast.configureNodeAgent(w.cast.P, n, "codex", "team"); err != nil {
 		return err
 	}
-	return w.joinAI(c.P2, "codex", "P-review", false)
+	return w.joinAI(n, "codex", name, false)
 }
 
 func (w *s2ConfirmWorld) joinAI(n *s2Node, cli, name string, secretary bool) error {
@@ -217,5 +225,8 @@ func (w *s2ConfirmWorld) answer(want string) error {
 		return checkWireError([]byte(w.lastActor), want)
 	}
 	var ok proto.CmdResult
-	return proto.Decode([]byte(w.lastActor), &ok)
+	if err := proto.Decode([]byte(w.lastActor), &ok); err != nil {
+		return fmt.Errorf("the command answered %s: %w", w.lastActor, err)
+	}
+	return nil
 }
