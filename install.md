@@ -84,3 +84,63 @@ Add only repositories you trust, because their `CLAUDE.md`, `AGENTS.md` and
 hooks are used by the AIs that work on them. A Qwen Code AI may load a
 repository's own configuration (`.qwen/settings.json`, `QWEN.md`) even in a
 group session: Qwen Code has no known switch to keep it out.
+
+## Update
+
+Version 1 does not update itself. To update a computer, download the new
+release's `SHA256SUMS` and binary into an empty directory, then verify and
+install as in "Verify and install" above, with the new filename. The node
+keeps its pairing and groups; they are not in the binary. A running node
+keeps running the old program until it restarts, so restart it afterwards.
+Confirm the new tag with `solodawn version`.
+
+If the node runs in a terminal, stop it with Ctrl+C and start
+`solodawn node` again. If it runs as the login service, restart it:
+
+**Linux**
+
+```sh
+systemctl --user restart solodawn.service
+```
+
+**macOS**
+
+```sh
+launchctl kickstart -k "gui/$(id -u)/org.solodawn.node"
+```
+
+**Windows** (PowerShell). The running program cannot be overwritten, so stop
+the task first, run the install commands above, then start it:
+
+```powershell
+$name = 'SoloDawn-' + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+Stop-ScheduledTask -TaskName $name
+# run the install commands above
+Start-ScheduledTask -TaskName $name
+```
+
+## Back up a group
+
+`solodawn group export <group id> <file>` without `--to` writes a copy of a
+group that this node is the home of, and replaces `<file>` if it exists.
+The node must be running. SoloDawn schedules nothing; run the command from
+the system's timer.
+
+**Linux and macOS**: add one line with `crontab -e`, here every day at 03:00
+(adjust the two paths):
+
+```text
+0 3 * * * "$HOME/.local/bin/solodawn" group export <group id> "$HOME/solodawn-backup.db"
+```
+
+**Windows** (PowerShell), every day at 03:00:
+
+```powershell
+$exe = "$env:LOCALAPPDATA\Programs\SoloDawn\solodawn.exe"
+$action = New-ScheduledTaskAction -Execute $exe -Argument "group export <group id> `"$env:USERPROFILE\solodawn-backup.db`""
+Register-ScheduledTask -TaskName SoloDawnBackup -Action $action -Trigger (New-ScheduledTaskTrigger -Daily -At 3am)
+```
+
+To restore on another computer of the same owner, run
+`solodawn group import <file>` there (`planning/contracts/step-2/export.md`
+section 4).

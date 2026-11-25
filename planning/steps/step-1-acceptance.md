@@ -271,7 +271,7 @@ Run once with a scratch GitHub repository and once with `forge: none`.
 - **A8.1** On a clean machine of each system, pasting the onboarding prompt
   into an AI CLI installs the node, verifies the checksum, pairs, and the
   node is running again after a reboot.
-- **A8.2** Self-update replaces version n with n + 1 when the sum matches,
+- **A8.2** Postponed after 1.0 (no self-update). Self-update replaces version n with n + 1 when the sum matches,
   replaces nothing when it does not, and does not restart during a turn or
   a takeover.
 - **A8.3** With the page closed and the owner's node still connected to the

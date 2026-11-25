@@ -159,7 +159,7 @@ CREATE TABLE setting (
 
 ```sql
 CREATE TABLE agent (              -- AI CLIs registered on this machine
-  agent       TEXT PRIMARY KEY,   -- claude | codex
+  agent       TEXT PRIMARY KEY,   -- an agent of contracts/step-3/drivers.md
   cli_version TEXT NOT NULL,
   account     TEXT,               -- personal | team | api_key; NULL until declared
   caps        TEXT NOT NULL DEFAULT '{}'   -- JSON, as in commands.md section 2
@@ -250,17 +250,19 @@ UPDATE grp SET purged = MAX(purged, (SELECT COALESCE(MAX(seq), 0) FROM row
 DELETE FROM row   WHERE gone = 1 AND mt < :cutoff;
 DELETE FROM row   WHERE r = 'msg'  AND gone = 0 AND keep = 0 AND pending = 0
                     AND ts < :cutoff
-                    AND NOT (data->>'kind' = 'brief'
-                             AND data->>'$.state.status' = 'confirmed'
-                             AND EXISTS (SELECT 1 FROM row AS t
-                                         WHERE t.g = row.g AND t.r = 'task'
-                                           AND t.data->>'state' = 'queued'
-                                           AND t.data->>'brief' = row.id));
+                    AND NOT EXISTS (SELECT 1 FROM row AS t
+                                    WHERE t.g = row.g AND t.r = 'task' AND t.final = 0
+                                      AND (row.id = t.id OR row.id = t.data->>'brief'
+                                           OR (row.data->>'kind' = 'confirm'
+                                               AND row.data->>'$.body.what' = 'direct'
+                                               AND (row.data->>'re' = t.id
+                                                    OR row.data->>'re' = t.data->>'brief'))));
 DELETE FROM row   WHERE r = 'task' AND final = 1 AND mt < :cutoff;
 DELETE FROM inbox WHERE created < :cutoff;
 DELETE FROM audit WHERE ts < :cutoff;
 DELETE FROM usage WHERE day < :cutoff_day;
 DELETE FROM peer  WHERE ok_at < :cutoff;
+DELETE FROM processed_offer WHERE expires_ms < :now;
 DELETE FROM receipt WHERE ts < :now - 86400000;
 ```
 
@@ -273,10 +275,12 @@ DELETE FROM receipt WHERE ts < :now - 86400000;
   it was created.
 - A card that is still pending is never deleted, however old: someone still
   has to act on it. It goes with the next run after it is decided.
-- A confirmed brief is not deleted while a task made from it is still
-  queued: that task's first `assign` item must carry the confirmation the
-  brief holds. The statement reads this from the rows' JSON, which is
-  enough at this size; with much more data it becomes an indexed column.
+- A brief, the `task` message of a task made from it and the `confirm`
+  cards of `what` `direct` that name either are not deleted while that task
+  is not final: its items must carry what the brief and the cards hold
+  (`contracts/step-2/confirm.md` section 6). The statement reads this from
+  the rows' JSON, which is enough at this size; with much more data it
+  becomes an indexed column.
 - Notes and `review` messages have `keep = 1` and are never deleted by this
   run (R-102). A person removes one with `forget`; the row then becomes a
   `gone` marker.
@@ -287,7 +291,8 @@ DELETE FROM receipt WHERE ts < :now - 86400000;
 
 - IndexedDB: the device key (non-extractable), the owner's device log, the
   list of the owner's nodes and group homes with their signalling URLs, the
-  VAPID key pair, interface preferences.
+  VAPID key pair.
+- `localStorage`: interface preferences.
 - Memory only: group rows.
 
 ## 6. Sizes to expect

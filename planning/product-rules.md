@@ -305,8 +305,9 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 
 - **R-150** `[S1]` Apache-2.0. The name stays SoloDawn.
 - **R-151** `[S1]` No installers, no code signing. Release binaries for
-  Windows, macOS and Linux with SHA-256 sums, verified on install and on
-  self-update.
+  Windows, macOS and Linux with SHA-256 sums, verified on install.
+  Self-update comes after 1.0; until then a user updates by hand
+  (`install.md`).
 - **R-152** `[S1]` Onboarding: the website shows a prompt; the user gives it
   to their AI; the AI installs the node and pairs it. The pairing code in
   the prompt has 16 characters (Q-2).
