@@ -75,6 +75,7 @@ describe('step 2 in the browser', () => {
     await texts(p, cards).toEqual([waiting, waiting]);
     expect(await p.locator(cards).getByRole('button').count()).toBe(0);
     const q = await open('Q', '#/groups/{g}');
+    await texts(q, 'nav.needbar b').toEqual(['Waiting on you · 2']);
     await q.locator(cards).nth(0).getByRole('button', { name: 'Confirm' }).click();
     await q.locator(cards).nth(1).getByRole('button', { name: 'Deny' }).click();
     const { g, c1, c2, q: by } = await ids(q);

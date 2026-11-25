@@ -13,7 +13,7 @@ export interface Badge {
   text: string;
   tone?: 'sky' | 'dawn' | 'ok' | 'danger';
   solid?: boolean;
-  dot?: 'working' | 'paused';
+  dot?: 'working' | 'paused' | 'takeover';
 }
 
 const stepKeys = ['work', 'checks', 'pr', 'cloud', 'review', 'merge'] as const;
@@ -26,7 +26,11 @@ const stepPos: Record<string, number> = {
 };
 const idleStates = new Set(['paused', 'cancelled']);
 
-function cardWaitBadge(group: Group, kind: 'approval' | 'decision', who?: string[]): Badge {
+type CardWait = 'approval' | 'decision' | 'confirm';
+const isCardWait = (kind: string): kind is CardWait =>
+  ['approval', 'decision', 'confirm'].includes(kind);
+
+function cardWaitBadge(group: Group, kind: CardWait, who?: string[]): Badge {
   if (who?.includes(group.home.me.user)) {
     return { text: t(`task.wait.${kind}.you`), tone: 'dawn', solid: true };
   }
@@ -40,9 +44,7 @@ function cardWaitBadge(group: Group, kind: 'approval' | 'decision', who?: string
 /** Words `task.wait` for the status badge and the checks link when an active wait is present. */
 export function waitBadge(group: Group, wait: TaskRow['wait']): Badge | undefined {
   if (!wait) return undefined;
-  if (wait.kind === 'approval' || wait.kind === 'decision') {
-    return cardWaitBadge(group, wait.kind, wait.who);
-  }
+  if (isCardWait(wait.kind)) return cardWaitBadge(group, wait.kind, wait.who);
   if (wait.kind === 'reviewer') return { text: t('task.badge.reviewer') };
   return wait.kind === 'conflict' ? { text: t('task.badge.conflict'), tone: 'danger' } : undefined;
 }
@@ -84,10 +86,16 @@ function activeBadge(group: Group, task: TaskRow): Badge {
   return { text: t('task.badge.active'), tone: 'sky', dot: 'working' };
 }
 
+function takenOver(group: Group, task: TaskRow): boolean {
+  const assignee = group.member(task.assignee);
+  return assignee?.kind === 'ai' && assignee.state === 'takeover' && assignee.task === task.id;
+}
+
 /** Selects the task's single status badge in the order of contracts/rows.md section 4. */
 export function taskBadge(group: Group, task: TaskRow): Badge {
   const ended = finalBadge(task);
   if (ended) return ended;
+  if (takenOver(group, task)) return { text: t('task.badge.takeover'), dot: 'takeover' };
   if (task.state === 'paused') return { text: t('task.badge.paused'), dot: 'paused' };
   return task.state === 'queued' ? { text: t('task.badge.queued') } : activeBadge(group, task);
 }
@@ -112,10 +120,7 @@ function activeStepFailed(task: TaskRow, at: number): boolean {
 
 function waitsOnViewer(group: Group, task: TaskRow): boolean {
   const { wait } = task;
-  return (
-    (wait?.kind === 'approval' || wait?.kind === 'decision') &&
-    Boolean(wait.who?.includes(group.home.me.user))
-  );
+  return wait !== null && isCardWait(wait.kind) && Boolean(wait.who?.includes(group.home.me.user));
 }
 
 function currentMark(group: Group, task: TaskRow, at: number): StepMark {

@@ -128,6 +128,42 @@ describe('classify, whoOf, titleOf and targetIdOf', () => {
     expect(classify(group, briefOther)).toBeUndefined();
   });
 
+  it('classifies a confirmation put to the reader, whoever wrote it, and names its AI', () => {
+    const { group } = makeReadyGroup();
+    const confirm = (id: string, seq: number, to: string, changes: object = {}) =>
+      row<p.MsgRow>('row-msg-confirm-pending', {
+        id,
+        seq,
+        pos: seq,
+        by: 'system',
+        re: 'ask',
+        body: { what: 'direct', ai: codexId, to: [to] },
+        ...changes,
+      });
+    const mine = confirm('cf-mine', 8, ownerUser);
+    const other = confirm('cf-other', 9, 'pat-user', { mentions: [ownerId] });
+    const watchMine = confirm('cf-watch', 10, ownerUser, {
+      by: 'pat',
+      re: null,
+      body: { what: 'watch', ai: codexId, to: [ownerUser] },
+    });
+    pushLive(group, [
+      row('row-member-human', { id: 'pat', seq: 6, user: 'pat-user', name: 'Pat' }),
+      row('row-msg-text', { id: 'ask', seq: 7, pos: 7, by: 'pat' }),
+      mine,
+      other,
+      watchMine,
+    ]);
+
+    expect(classify(group, mine)).toBe('confirm');
+    expect(classify(group, other)).toBeUndefined();
+    expect(classify(group, watchMine)).toBe('confirm');
+    expect(whoOf(group, mine)).toBe('Codex');
+    expect(whoOf(group, watchMine)).toBe('Codex');
+    expect(titleOf(group, mine)).toBe('Let Codex act on the request from Pat.');
+    expect(titleOf(group, watchMine)).toBe('Let Pat watch Codex’s terminal.');
+  });
+
   it('classifies summaries, mentions from others, and ignores system or own messages', () => {
     const { group } = makeReadyGroup();
     const summary = row<p.MsgRow>('row-msg-summary', { seq: 6, pos: 6 });
@@ -435,6 +471,23 @@ describe('Notifier', () => {
     expect(ids()).toEqual(['ap3', 'br7', 'ap9']);
     vi.advanceTimersByTime(60_000);
     expect(ids()).toEqual(['ap3', 'br7', 'ap9']);
+  });
+
+  it('keeps a confirmation until it is decided', () => {
+    const notifier = new Notifier();
+    const { home, group } = makeReadyGroup();
+    notifier.sync([home]);
+    const card = { id: 'cf', by: 'system', body: { what: 'direct', ai: codexId, to: [ownerUser] } };
+    pushLive(group, [row('row-msg-confirm-pending', { ...card, seq: 6, pos: 6 })]);
+    notifier.sync([home]);
+    expect(notifier.items.map((i) => [i.msg.id, i.kind, i.needsYou, i.targetId])).toEqual([
+      ['cf', 'confirm', true, 'cf'],
+    ]);
+    vi.advanceTimersByTime(autoDismissMs * 2);
+    expect(notifier.items).toHaveLength(1);
+    pushLive(group, [row('row-msg-confirm-confirmed', { ...card, seq: 7, pos: 6 })]);
+    notifier.sync([home]);
+    expect(notifier.items).toEqual([]);
   });
 
   it('forgets the holds of a notification that is let go, dismissed or cleared', () => {

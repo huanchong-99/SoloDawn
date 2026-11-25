@@ -12,6 +12,7 @@
   "reminder.kind.decision": "A decision is needed",
   "reminder.kind.approval": "An approval is needed",
   "reminder.kind.brief": "A brief awaits confirmation",
+  "reminder.kind.confirm": "Someone wants to use my AI",
   "reminder.kind.done": "A task is done",
   "reminder.ios": "On iPhone and iPad, add SoloDawn to your Home Screen first. Notifications work after that; it also stops Safari from clearing this browser's key after seven days without a visit.",
   "reminder.error.subscribe": "Could not enable notifications in this browser."

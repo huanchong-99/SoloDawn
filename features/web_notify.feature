@@ -1,8 +1,8 @@
 @web
 Feature: In-page notifications of the web client
   Live events that need or mention this browser's reader appear in the shell's overlay layer while
-  the reader is outside that group's main line: approvals, decisions and briefs waiting on the
-  reader in dawn, and mentions and completed tasks in calm neutral (planning/product-rules.md R-34,
+  the reader is outside that group's main line: approvals, decisions, briefs and confirmations
+  waiting on the reader in dawn, and mentions and completed tasks in calm neutral (planning/product-rules.md R-34,
   planning/contracts/commands.md section 1.7). Opening a notification navigates to the group's chat
   and focuses its card or message; resolving a card, dismissing a notification, or waiting out a
   transient notice removes it cleanly.
@@ -21,6 +21,13 @@ Feature: In-page notifications of the web client
     Then the approval notification disappears, leaving the decision and the brief
     When the person clicks "Open" on the brief notification
     Then the chat of "Website" opens with focus on the "Confirm & start" button and no notifications remain
+
+  Scenario: A confirmation the home asks of the AI's owner appears in dawn and opens on its Confirm button
+    Given the person opens the client at "#/nodes"
+    When the home asks in "Website" whether "Mina" may direct "Codex", and whether she may direct an AI of her own
+    Then the notification layer shows one warm notification "Confirm · Let Codex act on the request from Mina." for "Website · Codex"
+    When the person clicks "Open" on the confirmation notification
+    Then the chat of "Website" opens with focus on the "Confirm" button of that card
 
   Scenario: Mentions and completed tasks pause under focus or pointer, auto-dismiss after leaving, and yield to blocking cards
     Given the person opens the client at "#/settings"

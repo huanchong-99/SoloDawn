@@ -142,7 +142,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     ({ Given, When, Then }) => {
       let scrolled: Element[] = [];
       Given(
-        'the group holds a pending brief, a pending approval and a pending decision for the reader, and an approval for "Mina"',
+        'the group holds a pending brief, approval, decision and confirmation for the reader, and an approval for "Mina"',
         () => {
           scrolled = [];
           Element.prototype.scrollIntoView = function () {
@@ -157,6 +157,14 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           home.write(website, example('row-msg-decision-pending', { id: 'd-1', pos: 30 }));
           home.write(
             website,
+            example('row-msg-confirm-pending', {
+              id: 'c-1',
+              by: 'mina-m',
+              body: { what: 'watch', ai: example('row-member-ai').id, to: [user] },
+            }),
+          );
+          home.write(
+            website,
             example('row-msg-approval-pending', {
               id: 'ap-mina',
               pos: 40,
@@ -167,14 +175,15 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       Then(
-        'the chat waiting bar reads "Waiting on you · 3" with chips for the brief, the approval and the decision',
+        'the chat waiting bar reads "Waiting on you · 4" with chips for the brief, the approval, the decision and the confirmation',
         () => {
           expect(one('nav.needbar').getAttribute('aria-label')).toBe('Waiting on you');
-          expect(texts('nav.needbar b')).toEqual(['Waiting on you · 3']);
+          expect(texts('nav.needbar b')).toEqual(['Waiting on you · 4']);
           expect(texts('nav.needbar a')).toEqual([
             'Confirm start · Show connection paths',
             'Approval · Time the path change in a browser.',
             'Your call · Where should the path appear?',
+            'Confirm · Let Mina watch Codex’s terminal.',
           ]);
         },
       );
@@ -212,10 +221,20 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           decisionEl.querySelector('input:not([disabled]), textarea:not([disabled])') ?? decisionEl;
         expect(document.activeElement).toBe(target);
       });
-      When('the three cards waiting on the reader are no longer pending', () => {
+      When('the person clicks the confirmation chip in the waiting bar', () => {
+        all<HTMLAnchorElement>('nav.needbar a')[3].click();
+        flushSync();
+      });
+      Then('focus moves to the Confirm button of that card', () => {
+        const msgEl = document.getElementById('m-c-1')!;
+        expect(scrolled.at(-1)).toBe(msgEl);
+        expect(document.activeElement).toBe(msgEl.querySelector('button.btn-dawn'));
+      });
+      When('the four cards waiting on the reader are no longer pending', () => {
         home.write(website, example('row-msg-brief-confirmed', { id: 'b-1' }));
         home.write(website, example('row-msg-approval-approved', { id: approvalId }));
         home.write(website, example('row-msg-decision-decided', { id: 'd-1' }));
+        home.write(website, example('row-msg-confirm-denied', { id: 'c-1' }));
         flushSync();
       });
       Then('the chat has no waiting bar', () => {

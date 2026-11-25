@@ -646,6 +646,14 @@ describe('waiting for you', () => {
     row('row-msg-approval-pending', { id, seq, pos: seq, ...changes });
   const decision = (id: string, seq: number, changes: object = {}) =>
     row('row-msg-decision-pending', { id, seq, pos: seq, ...changes });
+  const confirm = (id: string, seq: number, to: string[]) =>
+    row('row-msg-confirm-pending', {
+      id,
+      seq,
+      pos: seq,
+      by: 'system',
+      ...body('row-msg-confirm-pending', { to }),
+    });
   const body = (name: string, changes: object) => ({
     body: { ...(p.decode(p.MsgRow, goldens[name]).body as object), ...changes },
   });
@@ -658,8 +666,18 @@ describe('waiting for you', () => {
 
   it('lists the pending cards that this person has to act on, oldest first', () => {
     const group = withMe();
-    group.apply([decision('decision', 30), brief('brief', 10), approval('approval', 20)]);
-    expect(group.waiting.map((msg) => msg.id)).toEqual(['brief', 'approval', 'decision']);
+    group.apply([
+      confirm('confirm', 40, [user]),
+      decision('decision', 30),
+      brief('brief', 10),
+      approval('approval', 20),
+    ]);
+    expect(group.waiting.map((msg) => msg.id)).toEqual([
+      'brief',
+      'approval',
+      'decision',
+      'confirm',
+    ]);
   });
 
   it('leaves out the cards of other people', () => {
@@ -668,6 +686,7 @@ describe('waiting for you', () => {
       brief('brief', 10, body('row-msg-brief-pending', { requester: 'someone-else' })),
       approval('approval', 20, body('row-msg-approval-pending', { approvers: ['someone'] })),
       decision('decision', 30, body('row-msg-decision-pending', { to: ['someone'] })),
+      confirm('confirm', 40, ['someone']),
     ]);
     expect(group.waiting).toEqual([]);
   });
@@ -684,6 +703,10 @@ describe('waiting for you', () => {
       row('row-msg-brief-confirmed', { id: 'confirmed' }),
       row('row-msg-approval-approved', { id: 'approved' }),
       row('row-msg-decision-decided', { id: 'decided' }),
+      row('row-msg-confirm-denied', {
+        id: 'denied',
+        ...body('row-msg-confirm-denied', { to: [user] }),
+      }),
       row('row-msg-call-waiting', { id: 'call' }),
       text('text', 5),
       // A kind that is no card is never waited for, whatever it carries.
@@ -693,7 +716,87 @@ describe('waiting for you', () => {
   });
 });
 
+describe('the request of a confirm card that waits', () => {
+  const caller = row('row-member-ai', { id: 'caller', name: 'Caller' });
+  const answerer = row('row-member-ai', { id: codex, name: 'Codex' });
+  const call = row('row-msg-call-waiting', { id: 'call', by: 'caller', thread: task });
+  const card = (id: string, re: string | null, changes: object = {}) =>
+    row('row-msg-confirm-pending', {
+      id,
+      re,
+      by: 'system',
+      body: { what: 'ask', ai: codex, to: [user] },
+      ...changes,
+    }) as p.MsgRow;
+  const fetchRow = (id: string) => ({
+    t: 'fetch',
+    g: website,
+    r: 'msg',
+    row: id,
+    before: 0,
+    limit: 1,
+  });
+
+  /** A cold read that brings these rows. */
+  async function readWith(...of: p.Row[]) {
+    const all = joined();
+    all.link.push(rows(caller, answerer, ...of));
+    all.asked[0].answer(synced(815));
+    await settle();
+    return { ...all, asked: all.asked.slice(1) };
+  }
+
+  it('is fetched when the read did not bring it, once for each request', async () => {
+    const { group, asked } = await readWith(
+      card('first', 'call'),
+      card('second', 'call'),
+      card('third', 'mention'),
+    );
+    expect(asked.map((ask) => ask.req)).toEqual([fetchRow('call'), fetchRow('mention')]);
+    const sentence = () => subject(group, group.waiting[0]);
+    expect(sentence()).toBe('Let Codex answer the call from an unknown requester.');
+    asked[0].answer(fetched([call], false));
+    asked[1].answer({ re: 2, err: { code: 'internal', msg: 'no' } });
+    await settle();
+    expect(sentence()).toBe('Let Codex answer the call from Caller.');
+    expect(group.rows.has('msg mention')).toBe(false);
+    expect(group.cursor).toBe(815);
+  });
+
+  it('is not fetched when it is held, was removed, or there is none', async () => {
+    const { asked } = await readWith(
+      call,
+      gone('msg', 'removed', 700),
+      row('row-task', { id: 'started' }),
+      card('held', 'call'),
+      card('gone', 'removed'),
+      card('role', 'started'),
+      card('watch', null, { by: 'caller', body: { what: 'watch', ai: codex, to: [user] } }),
+      card('other', 'theirs', { body: { what: 'ask', ai: codex, to: ['somebody'] } }),
+      card('over', 'past', { state: { status: 'expired', at: 1 } }),
+      row('row-msg-decision-pending', { id: 'decision', re: 'question' }),
+    );
+    expect(asked).toEqual([]);
+  });
+
+  it('is dropped when it comes too late', async () => {
+    const { home, group, asked } = await readWith(card('first', 'call'));
+    void group.sync(home.ctl!);
+    asked[0].answer(fetched([call], false));
+    await settle();
+    expect(group.rows.has('msg call')).toBe(false);
+  });
+
+  it('stays unknown when the connection loses it', async () => {
+    const { group, asked } = await readWith(card('first', 'call'));
+    asked[0].fail();
+    await settle();
+    expect(group.rows.has('msg call')).toBe(false);
+  });
+});
+
 describe('the subject of a message', () => {
+  const group = joined().group;
   const msg = (name: string, changes: object = {}) => row(name, changes) as p.MsgRow;
   const without = (name: string, field: string) => {
     const { [field]: _dropped, ...body } = p.decode(p.MsgRow, goldens[name]).body as Record<
@@ -704,22 +807,32 @@ describe('the subject of a message', () => {
   };
 
   it('is the title of a brief and the question of a decision', () => {
-    expect(subject(msg('row-msg-brief-pending', { text: 'Here is the brief.' }))).toBe(
+    expect(subject(group, msg('row-msg-brief-pending', { text: 'Here is the brief.' }))).toBe(
       'Show connection paths',
     );
-    expect(subject(msg('row-msg-decision-pending'))).toBe('Where should the path appear?');
+    expect(subject(group, msg('row-msg-decision-pending'))).toBe('Where should the path appear?');
   });
 
   it('is the reason of an approval, or else the request itself', () => {
-    expect(subject(msg('row-msg-approval-pending'))).toBe('Time the path change in a browser.');
-    expect(subject(without('row-msg-approval-pending', 'why'))).toBe(
+    expect(subject(group, msg('row-msg-approval-pending'))).toBe(
+      'Time the path change in a browser.',
+    );
+    expect(subject(group, without('row-msg-approval-pending', 'why'))).toBe(
       'pnpm exec playwright install chromium',
     );
   });
 
+  it('is the request of a confirmation', () => {
+    group.apply([row('row-member-ai', { id: 'TEcBBAeLwcuEpP9Z0Sekug', name: 'Claude Code' })]);
+    group.apply([row('row-member-human', { name: 'Pat' })]);
+    expect(subject(group, msg('row-msg-confirm-pending'))).toBe(
+      'Let Pat watch Claude Code’s terminal.',
+    );
+  });
+
   it('is the text of any other message', () => {
-    expect(subject(text('a', 1))).toBe('The path is direct.');
-    expect(subject(msg('row-msg-question'))).toBe('Should the path include latency?');
+    expect(subject(group, text('a', 1))).toBe('The path is direct.');
+    expect(subject(group, msg('row-msg-question'))).toBe('Should the path include latency?');
   });
 });
 

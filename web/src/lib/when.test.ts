@@ -1,7 +1,7 @@
 import { flushSync } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { watch } from '../../features/watch.svelte';
-import { clock, dayLabel, dayOf, days, now as timeNow, shortWhen } from './when';
+import { clock, clockOn, dayLabel, dayOf, days, now as timeNow, shortWhen } from './when';
 
 /** A local time, so that the tests read the same in every time zone. */
 const at = (year: number, month: number, day: number, hour = 12, minute = 0) =>
@@ -21,6 +21,15 @@ describe('clock', () => {
     expect(clock(at(2026, 11, 20, 9, 58), 'en')).toBe('09:58');
     expect(clock(at(2026, 11, 20, 0, 5), 'en')).toBe('00:05');
     expect(clock(at(2026, 11, 20, 23, 7), 'zh-CN')).toBe('23:07');
+  });
+});
+
+describe('clockOn', () => {
+  it('is the time of day on the same day, and the date with it on another', () => {
+    expect(clockOn(at(2026, 11, 20, 15, 0), now, 'en')).toBe('15:00');
+    expect(clockOn(at(2026, 11, 20, 0, 5), now, 'zh-CN')).toBe('00:05');
+    expect(clockOn(at(2026, 11, 21, 3, 0), now, 'en')).toBe('Nov 21, 03:00');
+    expect(clockOn(at(2026, 11, 21, 0, 0), now, 'zh-CN')).toBe('11月21日 00:00');
   });
 });
 

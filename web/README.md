@@ -413,7 +413,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
     start and from every `reset`, S at `synced`, then the `seq` of each live row applied; rows
     before `synced` and pages never move it, so a reset that breaks off starts again from nothing
     and a delta that breaks off keeps its place. The answer to a read moves the cursor only when
-    no later read of the group was started and its connection is still the home's.
+    no later read of the group was started and its connection is still the home's. After `synced`
+    it fetches, one row each, the requests of the waiting confirm cards that the read did not bring.
   - `older(thread)` fetches one page of a thread, or of the main line, and then the page before
     the lowest `pos` received. No page is asked for while the group is being read: the paging
     starts again at `synced`, from the rows the read brought. The main line starts before the oldest of the newest 50 messages
@@ -425,7 +426,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
     can be asked for (`ready`).
   - The lists and lookups: `main` and `thread(task)` in `pos` order, `members` by name,
     `member(id)`, `personName(user)`, `task(id)`, `me`, `waiting` (the
-    pending brief the person asked for, the pending approvals and decisions put to them), `info`
+    pending brief the person asked for, the pending approvals, decisions and confirmations put to
+    them), `info`
     (the group row), `latest`. `recent()` is every group, the newest main line first.
   - `post` and `create` send signed commands, shaped as the wire examples `post-text.json` and
     `group-create.json`, and answer what the node answered; the client draws from the rows that
@@ -475,9 +477,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
     `answered` duration with the `reply` folded inside, hiding the standalone `reply` row when
     both are in the same list. A denied call shows “Denied” instead of a timer or reply.
   - Confirmation cards (`src/components/confirm/`) name who asks to act, answer a call, or watch a
-    terminal. The watch card names its author; other cards name the author of the referenced request.
-    Only a reader named in `body.to` sees the pending card's Confirm and Deny actions;
-    everyone sees whether it is pending, confirmed, denied or expired.
+    terminal (`confirmSentence` in `src/lib/confirm.ts`, also the card's subject in the lists of what
+    waits). The watch card names its author; other cards name the author of the referenced request,
+    or who confirmed it when it is a brief, and the task in place of a person when it is the `task`
+    message of a task without a brief. Only a reader named in `body.to` sees the pending card's
+    Confirm and Deny actions; everyone sees whether it is pending, confirmed, denied or expired.
   - The member panel (`src/components/member/`) mounts at `chat.side` (`order: 10`). It lists the
     group's AI members, placing the secretary first with its corner mark, with each AI's state
     (`working`, `waiting` on the reader in dawn or on another member, `dormant` as sleeping,
@@ -561,9 +565,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
   `PairBrowserDialog` (`pair.browser`).
 - **In-page notifications.** `src/components/notify/` mounts `Notifications.svelte` at `layer`
   (`order: 10`), backed by `Notifier` in `src/lib/notify.svelte.ts`. After a group's first sync it
-  shows the live events for the reader: `approval`, `decision` and `brief` waiting on the reader, in
-  dawn, until opened, dismissed or resolved; `done` summaries and `mention`s, in calm neutral, for
-  8 seconds, a delay held while focus or the pointer is on the notification and restarted in full
+  shows the live events for the reader: `approval`, `decision`, `brief` and `confirm` waiting on the
+  reader, in dawn, until opened, dismissed or resolved; `done` summaries and `mention`s, in calm
+  neutral, for 8 seconds, a delay held while focus or the pointer is on the notification and restarted in full
   when both leave. Main-line messages of the chat open on screen stay quiet; thread mentions and
   other groups still notify. Open jumps to the card or message. At most three are shown: a
   newcomer past that drops the oldest self-closing one, or the oldest waiting card when none is
@@ -581,9 +585,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
 - **Web Push reminders.** `src/sw.ts` (built by `vite.config.ts` into a self-contained `sw.js` at
   the root of `webdist/`), `src/lib/push.ts`, and `src/components/reminder/` implement the browser
   side of `planning/contracts/commands.md` section 1.7 and A8.3. `ReminderCard.svelte` on
-  `routes/Settings.svelte` turns browser notifications on or off, selects which of the five
-  event kinds (`mention`, `approval`, `decision`, `brief`, `done`, kept via `preference`) send
-  reminders, in a group named by "Notify me when", and shows the iPhone/iPad Home Screen hint
+  `routes/Settings.svelte` turns browser notifications on or off, selects which of the six
+  event kinds (`mention`, `approval`, `decision`, `brief`, `confirm`, `done`, kept via
+  `preference`) send reminders, in a group named by "Notify me when", and shows the iPhone/iPad Home Screen hint
   (`risks.md` K-20). `loadVapid` keeps a
   P-256 VAPID key pair in IndexedDB (`solodawn`, store `device`, key `vapid`); `Reminders`
   subscribes through `PushManager` and sends `push` (`PushOn` or `{ off: true }`) to connected

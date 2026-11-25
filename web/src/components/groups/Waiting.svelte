@@ -7,8 +7,13 @@
    *  with a line for each. */
   let { bar = false }: { bar?: boolean } = $props();
 
-  const icons: Record<string, IconName> = { brief: 'doc', approval: 'shield', decision: 'fork' };
-  type Asked = 'brief' | 'approval' | 'decision';
+  type Asked = 'brief' | 'approval' | 'decision' | 'confirm';
+  const icons: Record<Asked, IconName> = {
+    brief: 'doc',
+    approval: 'shield',
+    decision: 'fork',
+    confirm: 'shield',
+  };
 
   // Every card that waits for this person, in every group, the group written to last first.
   const waiting = $derived(
@@ -23,7 +28,7 @@
     <section class="needbar" aria-label={t('groups.waiting')}>
       <b><Icon name="alert" sm />{t('groups.waiting')} · {waiting.length}</b>
       {#each waiting as { group, msg, kind } (msg.id)}
-        <a href={`#/groups/${group.g}`}>{t(`groups.waiting.${kind}`)} · {subject(msg)}</a>
+        <a href={`#/groups/${group.g}`}>{t(`groups.waiting.${kind}`)} · {subject(group, msg)}</a>
       {/each}
     </section>
   {/if}
@@ -41,13 +46,13 @@
           <li class="todo" style:--i={Math.min(i, 8)}>
             <Icon name={icons[kind]} />
             <div class="grow">
-              <b class="cut">{t(`groups.waiting.${kind}`)} · {subject(msg)}</b>
+              <b class="cut">{t(`groups.waiting.${kind}`)} · {subject(group, msg)}</b>
               <p class="muted cut">{group.name}</p>
             </div>
             <a
               class="btn btn-sm btn-dawn"
               href={`#/groups/${group.g}`}
-              aria-label={`${t('groups.waiting.open')} · ${t(`groups.waiting.${kind}`)} · ${subject(msg)} · ${group.name}`}
+              aria-label={`${t('groups.waiting.open')} · ${t(`groups.waiting.${kind}`)} · ${subject(group, msg)} · ${group.name}`}
             >
               {t('groups.waiting.open')}
             </a>

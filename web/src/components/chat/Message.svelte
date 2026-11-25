@@ -30,7 +30,7 @@
   {:else if card}
     <div class="card stub" class:need={needsMe}>
       <span class="kind">{t(`chat.kind.${msg.kind}`)}</span>
-      <span class="grow cut">{subject(msg) === msg.text ? '' : subject(msg)}</span>
+      <span class="grow cut">{subject(group, msg) === msg.text ? '' : subject(group, msg)}</span>
       {#if needsMe}
         <span class="badge solid" data-tone="dawn">{t('groups.waiting')}</span>
       {/if}

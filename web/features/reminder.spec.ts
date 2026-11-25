@@ -247,6 +247,14 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       And('the Home Screen note is not shown on a desktop browser', () => {
         expect(all('[aria-labelledby="s-noti"] .note.ios')).toEqual([]);
       });
+      And(
+        'the choices read "I am @mentioned, A decision is needed, An approval is needed, A brief awaits confirmation, Someone wants to use my AI, A task is done"',
+        () => {
+          expect(texts('[aria-labelledby="s-noti"] .check').join(', ')).toBe(
+            'I am @mentioned, A decision is needed, An approval is needed, A brief awaits confirmation, Someone wants to use my AI, A task is done',
+          );
+        },
+      );
       When('the person turns browser notifications on', async () => {
         const toggle = one<HTMLInputElement>('[aria-labelledby="s-noti"] .switch');
         toggle.checked = true;
@@ -268,10 +276,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       And(
-        'the home "workstation" received a push subscription for "mention, approval, decision, brief, done"',
+        'the home "workstation" received a push subscription for "mention, approval, decision, brief, confirm, done"',
         () => {
           const first = workstation.pushes[0] as p.PushOn;
-          expect(first.on.join(', ')).toBe('mention, approval, decision, brief, done');
+          expect(first.on.join(', ')).toBe('mention, approval, decision, brief, confirm, done');
         },
       );
       When(
@@ -305,13 +313,13 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         });
       });
       Then(
-        'both homes received a push subscription for "mention, approval, decision, brief"',
+        'both homes received a push subscription for "mention, approval, decision, brief, confirm"',
         () => {
           expect((workstation.pushes[1] as p.PushOn).on.join(', ')).toBe(
-            'mention, approval, decision, brief',
+            'mention, approval, decision, brief, confirm',
           );
           expect((mini.pushes[1] as p.PushOn).on.join(', ')).toBe(
-            'mention, approval, decision, brief',
+            'mention, approval, decision, brief, confirm',
           );
         },
       );

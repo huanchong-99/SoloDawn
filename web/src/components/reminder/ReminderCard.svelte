@@ -8,7 +8,14 @@
   /** The Notifications card on `#/settings` (`web/design/settings.html` `#s-noti`). */
   let { net }: { net: Net } = $props();
 
-  const order: readonly ReminderKind[] = ['mention', 'decision', 'approval', 'brief', 'done'];
+  const order: readonly ReminderKind[] = [
+    'mention',
+    'decision',
+    'approval',
+    'brief',
+    'confirm',
+    'done',
+  ];
   const dots: Record<PushState, string> = {
     allowed: 'ok',
     off: 'offline',

@@ -6,8 +6,16 @@ import { decode, encode, keep, type KeyStore } from './identity';
 import { preference, prefs, type Lang, type Preference } from './prefs.svelte';
 import type * as p from './proto';
 
-/** The five reminder event kinds of `commands.md` section 1.7, in wire-example order. */
-export const reminderKinds = ['mention', 'approval', 'decision', 'brief', 'done'] as const;
+/** The six reminder event kinds of `commands.md` section 1.7 and `step-2/confirm.md` section 5, in
+ *  wire-example order. */
+export const reminderKinds = [
+  'mention',
+  'approval',
+  'decision',
+  'brief',
+  'confirm',
+  'done',
+] as const;
 export type ReminderKind = (typeof reminderKinds)[number];
 
 /** How this browser currently stands with Web Push notifications. */
@@ -164,6 +172,7 @@ export class Reminders {
       approval: preference('reminder-approval', ['on', 'off'] as const, 'on'),
       decision: preference('reminder-decision', ['on', 'off'] as const, 'on'),
       brief: preference('reminder-brief', ['on', 'off'] as const, 'on'),
+      confirm: preference('reminder-confirm', ['on', 'off'] as const, 'on'),
       done: preference('reminder-done', ['on', 'off'] as const, 'on'),
     };
   }

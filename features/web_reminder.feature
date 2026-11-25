@@ -16,14 +16,15 @@ Feature: Browser push reminders and iOS Home Screen hint
     When the person opens the client at "#/settings"
     Then the browser notifications status reads "Off in this browser"
     And the Home Screen note is not shown on a desktop browser
+    And the choices read "I am @mentioned, A decision is needed, An approval is needed, A brief awaits confirmation, Someone wants to use my AI, A task is done"
     When the person turns browser notifications on
     Then the browser notifications status reads "Allowed in this browser"
     And the service worker "./sw.js?lang=en" is registered with a valid VAPID subscription
-    And the home "workstation" received a push subscription for "mention, approval, decision, brief, done"
+    And the home "workstation" received a push subscription for "mention, approval, decision, brief, confirm, done"
     When the person navigates to "#/groups" and a second home "mini" connects with group "Docs"
     Then the home "mini" also received the same push subscription
     When the person returns to "#/settings" and unchecks "A task is done"
-    Then both homes received a push subscription for "mention, approval, decision, brief"
+    Then both homes received a push subscription for "mention, approval, decision, brief, confirm"
     When the person turns browser notifications off
     Then the browser notifications status reads "Off in this browser" again
     And the browser subscription is unsubscribed and both homes received push off
