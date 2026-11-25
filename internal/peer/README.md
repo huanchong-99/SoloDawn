@@ -29,6 +29,7 @@ the channel handlers are the caller's.
 | `sockets.go` | `Sockets`, `Listen`, the two WebRTC APIs, and `Connection.Path` with `PathChanged` |
 | `reconnect.go` | `Connect` and its back-off |
 | `unanswered.go` | an offer's wait for an answer, ended by `Offline` |
+| `diag.go` | the diagnostic events of a connection ([diagnostics](../../planning/contracts/diagnostics.md)) |
 
 ## Invariants
 
