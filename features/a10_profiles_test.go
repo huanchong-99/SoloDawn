@@ -214,7 +214,7 @@ func (w *a10ProfileWorld) listMembers(ctx context.Context) error {
 		{"name": "L", "kind": "ai", "host": "node", "state": "limited", "account": "personal", "usage": map[string]any{}},
 		{"name": "M", "kind": "ai", "host": "node", "state": "waiting", "account": "personal", "usage": map[string]any{}},
 		{"name": "S", "kind": "ai", "host": "node", "state": "offline", "account": "personal", "usage": map[string]any{}},
-		{"name": "owner", "kind": "human", "state": "online"},
+		{"name": "owner", "kind": "human"},
 	}
 	return hostModelsEqual(result.Members, want)
 }

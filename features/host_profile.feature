@@ -18,7 +18,7 @@ Feature: Host profile turns and escalation
         {"name":"Claude Code","kind":"ai","state":"offline","host":"node","account":"personal","usage":{"window_pct":40,"window_resets":1763609000000}},
         {"name":"Codex","kind":"ai","state":"limited","host":"node","account":"personal","usage":{"window_pct":100}},
         {"name":"Secretary","kind":"ai","state":"working","host":"node","account":"personal","task":"T-12","usage":{}},
-        {"name":"owner","kind":"human","state":"online"}
+        {"name":"owner","kind":"human"}
       ]}
       """
 

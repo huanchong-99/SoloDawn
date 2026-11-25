@@ -11,6 +11,11 @@ import (
 	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
+type bulletinDest struct {
+	proto.Home
+	Kind string `json:"kind"` // "" for a remembered home: only its rows say
+}
+
 type bulletinArgs struct {
 	Group    *string  `json:"group,omitempty"`
 	Text     string   `json:"text"`
@@ -60,7 +65,7 @@ func bulletinHome(h *Host, group string) (proto.Home, error) {
 	valid := []string{}
 	for _, home := range homes {
 		if string(home.Group) == group {
-			return home, nil
+			return home.Home, nil
 		}
 		valid = append(valid, fmt.Sprintf("%s (%s)", home.Group, home.Name))
 	}
@@ -68,11 +73,11 @@ func bulletinHome(h *Host, group string) (proto.Home, error) {
 	return proto.Home{}, &Error{Code: "not_found", Message: "unknown group; valid groups: " + strings.Join(valid, ", ")}
 }
 
-func bulletinHomes(db *store.Store) ([]proto.Home, error) {
+func bulletinHomes(db *store.Store) ([]bulletinDest, error) {
 	var raw string
 	err := db.Write(func(tx *store.Tx) error {
 		return tx.QueryRow(`SELECT json_group_array(json(home)) FROM (
-			SELECT json_object('g', g, 'home', data->>'home', 'name', data->>'name') AS home
+			SELECT json_object('g', g, 'home', data->>'home', 'name', data->>'name', 'kind', data->>'kind') AS home
 			FROM row WHERE r='group' AND gone=0
 			UNION ALL
 			SELECT value FROM json_each(coalesce((SELECT value FROM setting WHERE key='homes'), '[]'))
@@ -81,7 +86,7 @@ func bulletinHomes(db *store.Store) ([]proto.Home, error) {
 	if err != nil {
 		return nil, err
 	}
-	var homes []proto.Home
+	var homes []bulletinDest
 	err = json.Unmarshal([]byte(raw), &homes)
 	return homes, err
 }

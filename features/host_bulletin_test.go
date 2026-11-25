@@ -103,6 +103,20 @@ func hostBulletinSteps(sc *godog.ScenarioContext, _ fixtures) {
 		}
 		return nil
 	})
+	var turn string
+	sc.Step(`^the host composes a turn of the team secretary$`, func() (err error) {
+		turn, _, err = host.Compose(h, caller.Session, host.ContinueTurn, nil)
+		return err
+	})
+	sc.Step(`^the turn names the team group with its id and the instructions name the argument$`, func() error {
+		if line := fmt.Sprintf("\nTeam groups (name and id): \"Team\" (%s)\n== 1 of 1", w.state.ID); !strings.Contains(turn, line) {
+			return fmt.Errorf("turn = %q, want %q", turn, line)
+		}
+		if text := host.Instructions(caller.Session); !strings.Contains(text, "`post` it with `group` set to the id of one of the team groups your turn lists") {
+			return fmt.Errorf("instructions = %q", text)
+		}
+		return nil
+	})
 	sc.Step(`^the team home queues no inbox item$`, func() error {
 		if len(w.last.Items) != 0 {
 			return fmt.Errorf("team queued items: %+v", w.last.Items)
