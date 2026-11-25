@@ -159,6 +159,7 @@ func claudeBypassFlags(interactive bool) []string {
 }
 
 func startClaudeProcess(ctx context.Context, l Launch, args []string) (Process, error) {
+	ctx, kill := context.WithCancel(ctx)
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	detachTerminal(cmd)
 	cmd.WaitDelay = time.Second
@@ -171,6 +172,7 @@ func startClaudeProcess(ctx context.Context, l Launch, args []string) (Process, 
 	err := cmd.Start()
 	stdinRead.Close()
 	if err != nil {
+		kill()
 		stdinWrite.Close()
 		stdout.Close()
 		return nil, err
@@ -182,6 +184,7 @@ func startClaudeProcess(ctx context.Context, l Launch, args []string) (Process, 
 		// Single reader: the caller of Process.Events (the session runtime).
 		events:  make(chan Event),
 		resumed: l.Session != "",
+		kill:    kill,
 	}
 	go p.readLoop(cmd, stdout, &stderr, killTree)
 	return p, nil
@@ -197,6 +200,8 @@ type claudeProcess struct {
 	reqSeq      int64
 	interrupted bool
 	resumed     bool
+	kill        func() // ends the context of the process, which kills its tree
+	noTools     bool   // used by readLoop only
 	// Single reader: the caller of Process.Events (the session runtime).
 	events chan Event
 }
@@ -272,9 +277,21 @@ func (p *claudeProcess) takeInterrupted() bool {
 }
 
 func (p *claudeProcess) readLoop(cmd *exec.Cmd, stdout io.Reader, stderr *checkTail, killTree func()) {
-	reportedDiag := false
-	reader := bufio.NewReader(stdout)
-	for {
+	reportedDiag := p.readLines(bufio.NewReader(stdout))
+	waitErr := cmd.Wait()
+	killTree()
+	p.kill()
+	p.Close()
+	if waitErr != nil && !reportedDiag {
+		p.emitExitDiag(strings.TrimSpace(string(*stderr)))
+	}
+	close(p.events)
+}
+
+// readLines handles stdout to its end, or to the line that shows that the
+// process has no tools.
+func (p *claudeProcess) readLines(reader *bufio.Reader) (reportedDiag bool) {
+	for !p.noTools {
 		line, err := reader.ReadBytes('\n')
 		if p.handleLine(bytes.TrimSpace(line)) {
 			reportedDiag = true
@@ -283,19 +300,28 @@ func (p *claudeProcess) readLoop(cmd *exec.Cmd, stdout io.Reader, stderr *checkT
 			break
 		}
 	}
-	waitErr := cmd.Wait()
-	killTree()
-	p.Close()
-	if waitErr != nil && !reportedDiag {
-		p.emitExitDiag(strings.TrimSpace(string(*stderr)))
-	}
-	close(p.events)
+	return reportedDiag
 }
 
 type claudeHeader struct {
-	Type      string `json:"type"`
-	Subtype   string `json:"subtype"`
-	SessionID string `json:"session_id"`
+	Type       string `json:"type"`
+	Subtype    string `json:"subtype"`
+	SessionID  string `json:"session_id"`
+	MCPServers []struct {
+		Name   string `json:"name"`
+		Status string `json:"status"`
+	} `json:"mcp_servers"`
+}
+
+// toolsStatus is the status of the solodawn server that system/init lists;
+// another than connected means a session without the node's tools.
+func (hdr claudeHeader) toolsStatus() string {
+	for _, srv := range hdr.MCPServers {
+		if srv.Name == "solodawn" {
+			return srv.Status
+		}
+	}
+	return "connected"
 }
 
 func (p *claudeProcess) handleLine(line []byte) bool {
@@ -310,9 +336,21 @@ func (p *claudeProcess) handleLine(line []byte) bool {
 	case "result":
 		return p.handleResult(line)
 	default:
-		p.events <- claudeOtherEvent(hdr)
-		return false
+		return p.handleOther(hdr)
 	}
+}
+
+// handleOther kills a process that works without the node's tools
+// (contracts/drivers.md 1.1) and reports any other line.
+func (p *claudeProcess) handleOther(hdr claudeHeader) bool {
+	if status := hdr.toolsStatus(); status != "connected" {
+		p.noTools = true
+		p.kill()
+		p.events <- Event{Kind: Active, Text: "claude: MCP server solodawn: " + status}
+		return true
+	}
+	p.events <- claudeOtherEvent(hdr)
+	return false
 }
 
 func claudeOtherEvent(hdr claudeHeader) Event {

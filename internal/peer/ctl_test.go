@@ -405,9 +405,9 @@ func TestPathChangedOnCandidate(t *testing.T) {
 }
 
 func TestListenFailures(t *testing.T) {
-	_, err := Listen(-1, 0)
+	_, err := Listen(-1, 0, "test")
 	eq(t, err == nil, false)
-	_, err = listen(0, "127.0.0.1:-1", loopbackEngine(), ice.UDPMuxFromPortWithLoopback(), ice.UDPMuxFromPortWithIPFilter(loopback))
+	_, err = listen(0, "127.0.0.1:-1", "test", loopbackEngine(), ice.UDPMuxFromPortWithLoopback(), ice.UDPMuxFromPortWithIPFilter(loopback))
 	eq(t, err == nil, false)
 }
 

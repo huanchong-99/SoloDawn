@@ -47,6 +47,7 @@ func (p *process) startMCP() error {
 	cmd := exec.Command(srv.Command, srv.Args...)
 	in, _ := cmd.StdinPipe()
 	out, _ := cmd.StdoutPipe()
+	cmd.Stderr = p.log
 	if err := cmd.Start(); err != nil {
 		return err
 	}

@@ -57,6 +57,19 @@ func TestAScriptIsReplayedStepByStep(t *testing.T) {
 	}
 }
 
+func TestTheMCPServersStderrIsInTheLog(t *testing.T) {
+	t.Setenv("TEST_MCP_PEER", "no-port")
+	program, _ := os.Executable()
+	config, _ := json.Marshal(map[string]any{"mcpServers": map[string]server{"solodawn": {program, []string{"mcp"}}}})
+	code, _, stderr, log := replay(t, `{"steps":[{"dir":"mcp->cli","msg":{}}]}`, "", "--session-id", session, "--mcp-config", string(config))
+	if code != 1 || stderr != "fake claude: step 1 (mcp->cli): EOF\n" {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	if !strings.Contains(log, "dial tcp: address no-port: missing port in address") {
+		t.Fatalf("log %q", log)
+	}
+}
+
 func TestTheSessionIdComesFromTheStartOrTheScript(t *testing.T) {
 	for _, tt := range []struct {
 		args []string

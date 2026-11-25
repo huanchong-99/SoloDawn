@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net"
@@ -11,32 +12,42 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
+var (
+	tcpListen    = net.Listen
+	steadyListen = Steady
+)
+
 type Sockets struct {
 	udp           ice.UDPMux
 	tcp           ice.TCPMux
 	offer, answer *webrtc.API
+	stop          context.CancelFunc // ends the back-off of the ICE-TCP accept
 }
 
 // Listen reserves udpPort on each eligible local address for the host
 // candidates of answered connections, and opens the passive ICE-TCP listener
 // on tcpPort for both roles (contracts/rendezvous.md section 5.1, point 3).
-func Listen(udpPort, tcpPort int) (*Sockets, error) {
-	return listen(udpPort, ":"+strconv.Itoa(tcpPort), webrtc.SettingEngine{})
+// id is the node's device id.
+func Listen(udpPort, tcpPort int, id string) (*Sockets, error) {
+	return listen(udpPort, ":"+strconv.Itoa(tcpPort), id, webrtc.SettingEngine{})
 }
 
 // listen builds on engine and passes opts to the UDP mux, so that tests can
 // keep every socket on the loopback address.
-func listen(udpPort int, tcpAddr string, engine webrtc.SettingEngine, opts ...ice.UDPMuxFromPortOption) (*Sockets, error) {
+func listen(udpPort int, tcpAddr, id string, engine webrtc.SettingEngine, opts ...ice.UDPMuxFromPortOption) (*Sockets, error) {
 	udp, err := ice.NewMultiUDPMuxFromPort(udpPort, opts...)
 	if err != nil {
 		return nil, err
 	}
-	tcp, err := net.Listen("tcp", tcpAddr)
+	tcp, err := tcpListen("tcp", tcpAddr)
 	if err != nil {
 		udp.Close()
 		return nil, err
 	}
-	s := &Sockets{udp: udp, tcp: webrtc.NewICETCPMux(nil, tcp, 8192)}
+	// pion's accept loop ends at the first error; Close ends its back-off.
+	ctx, stop := context.WithCancel(context.Background())
+	steady := steadyListen(ctx, tcp, slog.With("node", diagDevice(id)), "ice_tcp")
+	s := &Sockets{udp: udp, tcp: webrtc.NewICETCPMux(nil, steady, 8192), stop: stop}
 	engine.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4, webrtc.NetworkTypeUDP6, webrtc.NetworkTypeTCP4, webrtc.NetworkTypeTCP6})
 	engine.SetICEMulticastDNSMode(ice.MulticastDNSModeQueryOnly)
 	engine.SetICETCPMux(s.tcp)
@@ -45,7 +56,10 @@ func listen(udpPort int, tcpAddr string, engine webrtc.SettingEngine, opts ...ic
 	s.answer = webrtc.NewAPI(webrtc.WithSettingEngine(engine))
 	return s, nil
 }
-func (s *Sockets) Close() error { return errors.Join(s.udp.Close(), s.tcp.Close()) }
+func (s *Sockets) Close() error {
+	s.stop()
+	return errors.Join(s.udp.Close(), s.tcp.Close())
+}
 
 func iceConfig(paths []Route) webrtc.Configuration {
 	var servers []webrtc.ICEServer

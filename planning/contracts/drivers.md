@@ -85,6 +85,14 @@ claude -p --verbose
   unresumable session or unusable sign-in reported in an error `result` or
   on `stderr` of a non-zero exit becomes `NoSession` or `LoginInvalid`
   instead of `TurnEnded`.
+- The CLI waits for the node's MCP server before `system/init`, which lists
+  it with a status, `connected` or `failed` (a server that exits, that does
+  not exist, or that has not answered after 30 s; the CLI then works on
+  without the node's tools) `[verified]`. When `system/init` lists `solodawn`
+  with a status other than `connected`, the node kills the process; that is
+  a crash of the turn (`flows/agent-turn.md` E, first row). This rests on
+  Claude Code 2.1.221 or later, before which the first turn could start
+  before the servers had connected; 2.1.311 is the version measured.
 - Interrupt: a `control_request` with subtype `interrupt` on stdin, always
   sent. The CLI answers with a `control_response` and ends the turn with a
   `result` of subtype `error_during_execution`; the next turn works in the
@@ -117,6 +125,7 @@ codex app-server
   -c mcp_servers.solodawn.args=["mcp","--token","<t>"]            [verified]
   -c mcp_servers.solodawn.default_tools_approval_mode="approve"   [verified]
   -c mcp_servers.solodawn.tool_timeout_sec=<seconds>              [verified]
+  -c mcp_servers.solodawn.required=true   (app-server only)       [verified]
   -c notify=[]
   -c features.default_mode_request_user_input=true                [unverified]
 ```
@@ -127,6 +136,12 @@ codex app-server
   (`contracts/mcp-tools.md` section 1). The node sets it to the group's
   `limits.turn_minutes` in seconds, so that the turn limit is what ends a
   long call.
+- `required`: without it Codex works on when the node's server did not
+  start. With it `thread/start` and `thread/resume` answer a JSON-RPC error
+  (`required MCP servers failed to initialize: solodawn: …`) for a server
+  that exits, that does not exist, or that has not answered after 30 s. The
+  node closes the process; that is a crash of the turn
+  (`flows/agent-turn.md` E, first row).
 - `notify=[]` keeps the owner's own notification program from running for
   the node's sessions (it ran in the spike).
 

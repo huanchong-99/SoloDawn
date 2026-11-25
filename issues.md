@@ -64,6 +64,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause, in `features/s2_confirm*`: `state.by` of a card was expected to be a user id, it is a member id (`contracts/messages.md` section 3); a scripted tool without arguments sent `"arguments": null`, which the host refuses; a `choose` had an empty `arg`; the group had `forge: none`, which is one machine only, so a reviewer on another node could not fetch the commit; the scripted results of a Claude Code tool call were not compared; the one-person quiet-task scenario needed the secretary's tools (above).
 - Status: resolved in the change that enables the scenarios. The cast's group now has the fake forge of A9.24.
 
+### 2026-11-26 · bug · FLAKY-32: A5.15 hung once: the fake Claude's MCP shim never connected
+
+- Symptom: one run of A5.15 with forge `none` (`features/m5.feature`) waited for the secretary's brief until it timed out; the MCP shim of the fake Claude never reached the bridge.
+- Cause: not proven. A listener that ended silently fits ("FLAKY-32, found on the way: an accept error ended the node's listeners" below; `acceptMCPLoop` had the same form), and nothing would have shown it: the fixture hid the accept error and the fake CLI dropped the shim's stderr.
+- Status: open, not reproduced: about 1000 runs under `-race` with those diagnostics, 6 to 14 in parallel (665 of the scenario as it is here, 340 of the `none` example of `acc/m5-remote`; 1-minute load 17 to 44), without a failure; the slowest of the first 300 took 2.8 s. `acceptMCPLoop` (`features/m5_test.go`) now fails the scenario with the accept error and goes on, and the shim's stderr is in `SOLODAWN_FAKECLI_LOG` (`internal/host/fakecli/mcp.go`), which the folder of a failed scenario holds; the next occurrence names its place.
+
+### 2026-11-26 · limitation · OpenCode and Qwen Code are not asked whether the `solodawn` MCP server connected
+
+- Symptom: an AI of these two whose MCP server did not connect would work on without its tools; not observed, neither program is installed here.
+- Cause: `internal/host/opencode.go` and `internal/host/qwen.go` read no state of the MCP server, and no contract names one.
+- Status: open, left as it is (coordinator, 2026-11-26).
+
 ### 2026-11-26 · limitation · On a Mac with the Application Firewall, a UDP write can block every connection on one local address
 
 - Symptom: on the development Mac, some runs of A9.2 (five or six WebRTC connections between in-process peers each) failed with `timed out … waiting for ctl … saw 1: connection ended before it was ready`. Two causes were found; they are different failures:
@@ -861,6 +873,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: `host_name` of every AI on a computer that was paired by the real client was empty; the terminal's header began with ` · T-1`.
 - Cause: the node saves the label of `solodawn pair` only when it is adopted (`Pairer.finish`, `internal/node/pair.go:475`), so the `welcome` before that had `name` empty (`sesWelcomeBase`, `internal/node/session.go:341`). The browser takes that name (`#onOnline`, `web/src/lib/onboard.svelte.ts:392`) into the entry it signs (`:418`), from which the home reads `host_name` (`memDevice`, `internal/home/cmd_member.go:47`). `TestPairRoleBEndToEndAndBootstrap` asserted the empty name.
 - Status: resolved: the `welcome` of a pairing connection carries the label of its pairing. An entry signed with an empty name keeps it.
+
+### 2026-11-26 · bug · FLAKY-32, found on the way: an accept error ended the node's listeners
+
+- Symptom: after one accept error, such as too many open files, the node stayed up and answered nothing on its local socket: every MCP shim and local command connected to the backlog and waited for ever. Nothing was logged. The loopback web server did the same on an error `net/http` does not take as temporary, and the ICE-TCP port on any error.
+- Cause: `serve` (`internal/node/node.go:653` before the fix) left its loop on any error of `Accept`; `startLocalHTTP` (`node.go:307`) dropped the error that ended `Serve`; `TCPMuxDefault.start` of pion ice (`tcp_mux.go:101`) returns on any error of the listener of `internal/peer/sockets.go:34`.
+- Status: resolved on `fix/mcp-accept`: the three accept through `peer.Steady` (`internal/peer/accept.go`), which ends only with its listener or its node, logs any other error as `accept.fail` and tries again after 5 ms, doubling to 1 s.
+
+### 2026-11-26 · bug · FLAKY-32, found on the way: an AI whose `solodawn` MCP server did not connect worked on without its tools
+
+- Symptom: Claude Code 2.1.311 and Codex 0.164.0 ran the turn as if all were well. Measured with the real programs and no model call, for a server that exits at once, one whose command does not exist and one that never answers: Claude's `system/init` lists `{"name":"solodawn","status":"failed"}`, after 30 s in the last case (a server that answers after 3 or 10 s is waited for, `connected`); Codex answers `thread/start` and `thread/resume` at once and reports `mcpServer/startupStatus/updated` with `failed`.
+- Cause: `internal/host/claude.go` (`claudeOtherEvent`) read only the session id of `system/init`; `internal/host/codex.go` does not read that notification, and did not set `required`.
+- Status: resolved on `fix/mcp-accept`: Claude's process is killed and the turn is a crash; Codex gets `mcp_servers.solodawn.required=true`, with which both requests failed in all three cases, and a failed request was a failed start already (`handleStartupError`). `planning/contracts/drivers.md` 1.1 and 1.2. The captured line is `internal/host/fakecli/testdata/claude-mcp-failed.json`.
 
 ### 2026-11-26 · bug · A member's node can follow a moved group more than 5 seconds after the import
 

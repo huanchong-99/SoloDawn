@@ -227,7 +227,7 @@ func seedInvalidGroupRow(tx *store.Tx) error {
 }
 
 func checkNetworkAndStartupErrors(t *testing.T) {
-	socks, err := listenNodePeer(0, 0)
+	socks, err := listenNodePeer(0, 0, "test")
 	mustNoErr(t, err)
 	socks.Close()
 	ln, err := listenNodeHTTP(":0")
@@ -239,7 +239,7 @@ func checkNetworkAndStartupErrors(t *testing.T) {
 		peerListen = savedPeer
 		tcpListen = savedTCP
 	})
-	peerListen = func(int, int) (*peer.Sockets, error) { return nil, io.ErrClosedPipe }
+	peerListen = func(int, int, string) (*peer.Sockets, error) { return nil, io.ErrClosedPipe }
 	if _, err := openNode(t.Context(), socketRoot(t)); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("peerListen error = %v", err)
 	}
@@ -422,7 +422,7 @@ func startRoomMember(t *testing.T, rv, tag, room string) <-chan struct{} {
 	p, err := peer.Dial(t.Context(), rv, key)
 	mustNoErr(t, err)
 	t.Cleanup(func() { p.Close() })
-	socks, err := peer.Listen(0, 0)
+	socks, err := peer.Listen(0, 0, "test")
 	mustNoErr(t, err)
 	t.Cleanup(func() { socks.Close() })
 	pr := peer.New(key, socks, sesOpenStore(t), identity.IsDevice, func(string) []peer.Route { return nil }, func(*peer.Connection) {}, nil)
@@ -564,7 +564,7 @@ func newTestBrowserPeer(t *testing.T, key identity.Key, rvURL string) (*peer.Pee
 	bPath, err := peer.Dial(t.Context(), rvURL, key)
 	mustNoErr(t, err)
 	t.Cleanup(func() { bPath.Close() })
-	bSocks, err := peer.Listen(0, 0)
+	bSocks, err := peer.Listen(0, 0, "test")
 	mustNoErr(t, err)
 	t.Cleanup(func() { bSocks.Close() })
 	bDB := sesOpenStore(t)

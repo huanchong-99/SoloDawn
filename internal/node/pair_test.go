@@ -195,7 +195,7 @@ func wirePairHarnessPeer(t *testing.T, ph *pairHarness, withSharedPath bool) {
 	})
 	t.Cleanup(ph.pairer.Close)
 
-	socks, err := peer.Listen(0, 0)
+	socks, err := peer.Listen(0, 0, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func dialSimBrowser(t *testing.T, ph *pairHarness, key identity.Key) *simBrowser
 	}
 	t.Cleanup(func() { path.Close() })
 
-	socks, err := peer.Listen(0, 0)
+	socks, err := peer.Listen(0, 0, "test")
 	if err != nil {
 		t.Fatal(err)
 	}

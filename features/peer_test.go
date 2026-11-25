@@ -93,7 +93,7 @@ func (w *peersWorld) start(routes func(i int) []peer.Route) error {
 	for i, name := range []string{"node", "tablet"} {
 		w.keys[i] = exampleKey(name)
 		w.accepted[i] = make(chan *peer.Connection, 4)
-		socks, err := peer.Listen(0, 0)
+		socks, err := peer.Listen(0, 0, "test")
 		if err != nil {
 			return err
 		}

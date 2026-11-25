@@ -75,7 +75,7 @@ func (w *dispatchWorld) startNode(family string) error {
 	}
 	w.ice, w.browser, w.node = relay.relay, exampleKey("browser"), exampleKey("node")
 	w.accepted, w.toPeer, w.handed = make(chan *peer.Connection, 1), make(chan proto.Envelope, 64), make(chan *peer.Stream, 2)
-	socks, err := peer.Listen(0, 0)
+	socks, err := peer.Listen(0, 0, "test")
 	if err != nil {
 		return err
 	}

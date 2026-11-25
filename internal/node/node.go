@@ -276,7 +276,7 @@ func (n *nodeRuntime) wireServices() {
 }
 
 func (n *nodeRuntime) stepNetwork() error {
-	socks, err := listenNodePeer(defaultWebPort, defaultTCPPort)
+	socks, err := listenNodePeer(defaultWebPort, defaultTCPPort, n.key.ID())
 	if err != nil {
 		return err
 	}
@@ -304,7 +304,7 @@ func (n *nodeRuntime) startLocalHTTP(ln net.Listener) error {
 	web, _ := fs.Sub(assets, "webdist")
 	n.httpPort = ln.Addr().(*net.TCPAddr).Port
 	n.httpSrv = &http.Server{Handler: rendezvous.Handler(web)}
-	go n.httpSrv.Serve(ln)
+	go n.httpSrv.Serve(peer.Steady(n.ctx, ln, n.diag, "http"))
 	path, err := peer.Dial(n.ctx, "ws://127.0.0.1:"+strconv.Itoa(n.httpPort)+"/rv", n.key)
 	if err != nil {
 		return err
@@ -410,11 +410,11 @@ func (n *nodeRuntime) closeCore() {
 	}
 }
 
-func listenNodePeer(udpPort, tcpPort int) (*peer.Sockets, error) {
-	if socks, err := peerListen(udpPort, tcpPort); err == nil {
+func listenNodePeer(udpPort, tcpPort int, id string) (*peer.Sockets, error) {
+	if socks, err := peerListen(udpPort, tcpPort, id); err == nil {
 		return socks, nil
 	}
-	return peerListen(0, 0)
+	return peerListen(0, 0, id)
 }
 
 func listenNodeHTTP(addr string) (net.Listener, error) {
@@ -647,9 +647,10 @@ func (n *nodeRuntime) serveOneRV(ctx context.Context, url string, loop *rvLoop) 
 func (n *nodeRuntime) serve(l *Local) {
 	stopAccept := context.AfterFunc(n.ctx, func() { l.SetDeadline(time.Now()) })
 	defer stopAccept()
+	accept := peer.Steady(n.ctx, l, n.diag, "local").Accept
 	var wg sync.WaitGroup
 	for {
-		conn, err := l.Accept()
+		conn, err := accept()
 		if err != nil {
 			break
 		}

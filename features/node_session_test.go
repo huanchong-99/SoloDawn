@@ -150,7 +150,7 @@ func (w *nodeSessionWorld) startNodePeer() error {
 }
 
 func (w *nodeSessionWorld) makePeer(key identity.Key, known func(string) bool, inbound func(*peer.Connection)) (*peer.Peer, error) {
-	socks, err := peer.Listen(0, 0)
+	socks, err := peer.Listen(0, 0, "test")
 	if err != nil {
 		return nil, err
 	}
