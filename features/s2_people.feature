@@ -40,8 +40,6 @@ Feature: Step 2 people, invitations, roles, removal and host surfaces
     When P cancels that task and removes Q from the people group
     Then Q's browser receives groups without the group and P sees gone markers for Q and Q's AIs
 
-  # Waits for #399: the home does not close a removed person's connections yet (issues.md, 2026-11-26).
-  @pending
   Scenario: A removed member's connections close and are refused (A9.4)
     Given the people cast where Q joined P's group "Alpha" on P1 and joined Q-team and Q-personal from Q1
     When P removes Q from the people group
