@@ -387,12 +387,26 @@ func TestRemovedPersonIsDisconnected(t *testing.T) {
 }
 
 func checkRemovedPerson(t *testing.T, self bool) {
-	n, err := openNode(t.Context(), socketRoot(t))
+	guest, device := sesKey("removed-guest"), sesKey("removed-guest-node")
+	var n *nodeRuntime
+	var err error
+	renamed := func() error {
+		_, err := n.logs.dvlCommit(guest.ID(), []proto.Envelope{sesAddEntry(guest, guest.ID(), 3, device.ID(), "node", "Renamed")})
+		return err
+	}
+	between := make(chan error, 1)
+	home.After["entry after the removal"] = func(_ *home.State, res home.Result) {
+		if res.Forget != "" {
+			between <- renamed() // the removal is committed, and the log still held
+		}
+	}
+	t.Cleanup(func() { delete(home.After, "entry after the removal") })
+	n, err = openNode(t.Context(), socketRoot(t))
 	mustNoErr(t, err)
 	t.Cleanup(n.Close)
 	ph := &pairHarness{pairer: n.pairer, nodeKey: n.key, clock: newPairClock(time.Now())}
 	n.pairer.cfg.Now = ph.clock.Now
-	admin, guest, device := adoptTestBrowser(t, n), sesKey("removed-guest"), sesKey("removed-guest-node")
+	admin := adoptTestBrowser(t, n)
 	owner := startAdoptedConn(t, n, admin.ID())
 	log := []proto.Envelope{
 		sesAddEntry(guest, guest.ID(), 1, guest.ID(), "browser", "Guest"),
@@ -422,10 +436,30 @@ func checkRemovedPerson(t *testing.T, self bool) {
 	waitLastGroups(t, node)
 	mustEqual(t, n.knownPeer(guest.ID()) || n.knownPeer(device.ID()), false)
 	mustEqual(t, n.knownPeer(admin.ID()), true)
-	_, err = n.logs.dvlCommit(guest.ID(), []proto.Envelope{sesAddEntry(guest, guest.ID(), 3, device.ID(), "node", "Renamed")})
-	mustNoErr(t, err)
+	mustNoErr(t, <-between)
+	mustNoErr(t, renamed())
 	_, err = OpenLogs(n.db, n.key.ID()) // an entry stored without the log would end the next start
 	mustNoErr(t, err)
+}
+
+// The host of AIs of another home has no group to push: the entry itself ends
+// the revoked device's connection.
+func TestRevokedDeviceIsDisconnectedWithoutAGroup(t *testing.T) {
+	n, err := openNode(t.Context(), socketRoot(t))
+	mustNoErr(t, err)
+	t.Cleanup(n.Close)
+	owner, second := adoptTestBrowser(t, n), sesKey("second-browser")
+	_, err = n.logs.dvlCommit(owner.ID(), []proto.Envelope{sesAddEntry(owner, owner.ID(), 3, second.ID(), "browser", "Second")})
+	mustNoErr(t, err)
+	first, revoked := startAdoptedConn(t, n, owner.ID()), startAdoptedConn(t, n, second.ID())
+	first.push(proto.Devlog{Type: "devlog", User: owner.ID(), Entries: []proto.Envelope{sesRevokeEntry(owner, owner.ID(), 4, second.ID())}})
+	select {
+	case <-revoked.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("a revoked device's connection stayed open")
+	}
+	first.pushRaw(`{"t":"sync","id":2,"g":"` + string(sesID("no-group")) + `","since":0,"state_only":false}`)
+	expectErr(t, first.next(t), 2, "not_found")
 }
 
 func waitLastGroups(t *testing.T, c *fakeCtl) {

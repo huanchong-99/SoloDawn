@@ -738,7 +738,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: after `member remove` of a person, or after they left, their devices stayed connected to the home and could reconnect until the node restarted; they got no rows and no commands. A removed person who then added a device also kept the node from starting again: the entry was stored without the log it follows, and `OpenLogs` failed with "the version does not follow the log".
 - Cause: the removal pushed `groups` only (`internal/home/cmd_people.go`). `Logs` kept the person's log in memory (`internal/node/devlog.go`), so `knownPeer` still admitted their devices and `dvlCommit` still stored their entries, and nothing closed a connection except the end of a watch grant.
-- Status: resolved on `fix/removal-closes`. The home tells the node to drop the log (`LoopConfig.Forget`), and a connection that `knownPeer` no longer admits ends after its next `groups` push (`sesConn.sendGroups`, `peer.Connection.Finish`), which also replaces the separate close of a member's revoked device. `TestRemovedPersonIsDisconnected` fails without either half. A9.4 passes once its fixtures send `home.add` (another unit).
+- Status: resolved on `fix/removal-closes`. The home tells the node to drop the log (`LoopConfig.Forget`), and a connection that `knownPeer` no longer admits ends after its next `groups` push (`sesConn.sendGroups`, `peer.Connection.Finish`). An entry that comes between the removal's transaction and `Forget` is not stored either: `dvlPutEntries` stores an entry only behind the one it follows. `TestRemovedPersonIsDisconnected` fails without any of the three; a development node that already has such rows needs them deleted by hand. A9.4 passes once its fixtures send `home.add` (another unit).
+
+### 2026-11-26 · bug · A revoked device stayed connected to a node that homes no group
+
+- Symptom: the owner revoked a browser; on their computer that only hosts AIs, its connection and its open `pty:` channels stayed. `planning/flows/pairing.md` D.3 has each receiver of the entry close it.
+- Cause: `sesLogChanged` (`internal/node/devlog.go`) closed only the revoked devices of other people, never the owner's.
+- Status: resolved on `fix/removal-closes`: when a log changes, `sesLogChanged` closes every connection that `knownPeer` no longer admits. `TestRevokedDeviceIsDisconnectedWithoutAGroup` fails without it.
 
 ### 2026-11-25 · bug · A tool call that waits kept the node from stopping
 

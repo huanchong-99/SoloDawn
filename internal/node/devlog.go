@@ -270,9 +270,12 @@ func (l *Logs) dvlWriteAdd(signer identity.Key, dev, kind, name string, now int6
 	return row, nil
 }
 
+// dvlPutEntries stores an entry only behind the one it follows: the removal of
+// a person deletes their stored log before dvlForget drops it from memory.
 func dvlPutEntries(tx *store.Tx, user string, rows []proto.DeviceRow) error {
 	for _, r := range rows {
-		if _, err := tx.Exec("INSERT INTO device_log(user, ver, env) VALUES(?, ?, ?)", user, r.Version, string(dvlMustEncode(r.Env))); err != nil {
+		if _, err := tx.Exec(`INSERT INTO device_log(user, ver, env) SELECT ?1, ?2, ?3
+			WHERE ?2 = 1 OR EXISTS (SELECT 1 FROM device_log WHERE user = ?1 AND ver = ?2 - 1)`, user, r.Version, string(dvlMustEncode(r.Env))); err != nil {
 			return err
 		}
 	}
@@ -367,6 +370,10 @@ func (s *Sessions) sesLogChanged(user string, rows []proto.DeviceRow, adopted bo
 	}
 	frames := dvlBatchFrames(user, envs)
 	for _, c := range s.sesConns() {
+		if !s.sesMayStay(c) {
+			c.Close()
+			continue
+		}
 		s.sesSyncOne(c, user, frames, skip)
 	}
 }

@@ -2,7 +2,6 @@ package home_test
 
 import (
 	"errors"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -241,18 +240,10 @@ func TestLoopRunsInviterOutsideStoreWriteAndAdmitsJoiningConn(t *testing.T) {
 	equal(t, (<-joinOut).(proto.ErrorResponse).Err.Code, "forbidden")
 }
 
-type forgetClient struct {
-	forgotten *atomic.Bool
-	groups    chan bool // whether the person was forgotten when the push was sent
-}
+type forgetClient chan any // single reader: TestLoopForgetsRemovedPersonBeforeGroups
 
 func (c forgetClient) Done() <-chan struct{} { return nil }
-func (c forgetClient) Send(frame any) error {
-	if _, ok := frame.(proto.Groups); ok {
-		c.groups <- c.forgotten.Load()
-	}
-	return nil
-}
+func (c forgetClient) Send(frame any) error  { c <- frame; return nil }
 
 // The node drops a removed person's log before anyone is pushed groups.
 func TestLoopForgetsRemovedPersonBeforeGroups(t *testing.T) {
@@ -261,24 +252,32 @@ func TestLoopForgetsRemovedPersonBeforeGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	client := forgetClient{new(atomic.Bool), make(chan bool, 1)}
+	client := make(forgetClient, 8)
+	var loop *home.Loop
+	var conn *home.Conn
 	tables := home.Tables{Commands: home.Table{"group/create": func(s *home.State, _ home.Command) (home.Result, *home.Refusal) {
 		return home.Result{
 			Rows:   []home.Row{home.RowOf(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "G", Home: s.Home})},
 			Forget: "visitor", GroupsChanged: true,
 		}, nil
 	}}}
-	loop, err := home.StartLoop(home.LoopConfig{
+	loop, err = home.StartLoop(home.LoopConfig{
 		Store: db, Home: node.ID(), Owner: browser.ID(), Tables: tables, Now: func() time.Time { return now },
-		Logs:   func(string) *identity.Log { return logOf(t, browser, node) },
-		Forget: func(user string) { client.forgotten.Store(user == "visitor") },
+		Logs: func(string) *identity.Log { return logOf(t, browser, node) },
+		// Sent through the connection's queue, the frame stands where Forget ran.
+		Forget: func(user string) {
+			loop.Welcome(conn, func([]proto.GroupSummary) any { return "forgot " + user })
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer loop.Close()
-	conn := loop.Attach(browser.ID(), client)
-	loop.Welcome(conn, func([]proto.GroupSummary) any { return nil })
+	conn = loop.Attach(browser.ID(), client)
+	loop.Welcome(conn, func([]proto.GroupSummary) any { return "welcome" })
 	loop.Cmd(conn, 1, signed(browser, "group", 9, `,"op":"create"`))
-	equal(t, <-client.groups, true)
+	equal(t, <-client, any("welcome"))
+	equal(t, <-client, any("forgot visitor"))
+	equal(t, (<-client).(proto.CmdResult).OK, proto.True(true))
+	equal(t, (<-client).(proto.Groups).Type, "groups")
 }

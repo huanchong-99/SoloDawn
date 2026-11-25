@@ -614,8 +614,8 @@ func (c *sesConn) Send(frame any) error {
 }
 
 // sendGroups pushes the groups, the last frame of a device that has no reason
-// left to be connected: after a removal or a revocation the home always pushes
-// them.
+// left to be connected: after a removal the home always pushes them. A revoked
+// device does not need them (sesLogChanged).
 func (c *sesConn) sendGroups(frame proto.Groups) error {
 	if c.hub.sesMayStay(c) {
 		return c.send(frame)
