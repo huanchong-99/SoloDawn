@@ -38,7 +38,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-23 · deviation · An intermittent failure cannot be explained from one occurrence
 
-- Symptom: several tests called flaky were product races (A9.24 twice, the A9.23 bulletin attach, the A10.3 pause read, a host teardown race). Each took hours of stress runs to find, and A7.9 on Windows still has no cause. The owner's rule of 2026-11-23: an intermittent failure must not depend on being reproduced; the logs of its one occurrence, in CI or on the owner's machines, must point at the cause.
+- Symptom: several tests called flaky were product races (A9.24 twice, the A9.23 bulletin attach, the A10.3 pause read, a host teardown race). Each took hours of stress runs to find, and the first Windows A7.9 failure contained no candidate-pair trace. The owner's rule of 2026-11-23: an intermittent failure must not depend on being reproduced; the logs of its one occurrence, in CI or on the owner's machines, must point at the cause.
 - Cause: the node logs only errors, in prose (`log.Printf` in `internal/host/deliver.go`, `internal/home/run.go`, `internal/node/session.go`). A wait in a test that times out says only that it did (`features/m4_test.go:70`, "timed out waiting on M4 home frames"). CI keeps nothing from a failed scenario (`.github/workflows/backend.yml`).
 - Status: open. The contract is [diagnostics](planning/contracts/diagnostics.md); the units are DG-1 to DG-7 of `planning/steps/parallel-plan-step-2-3.md` section 4.3.
 
@@ -179,12 +179,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: cancelling an invitation stops browser handling, but the rendezvous socket remains in the room until expiry or disconnect. Retrying the same room on the same socket does not trigger a new `joined` from a home already in the room.
 - Cause: `internal/rendezvous/room.go` has no leave frame. It ignores duplicate joins by the same socket and caps membership at 16 rooms per connection.
 - Status: open; the browser must keep the socket alive for existing homes.
-
-### 2026-11-22 · limitation · A7.9 does not run on Windows
-
-- Symptom: on the Windows CI runner the A7.9 scenario (`features/m7.feature`, moving an open takeover PeerConnection from direct to TURN relay) fails with "selected-pair statistics did not transition to relay" (CI run 45037819755, twice). Linux and macOS pass.
-- Cause: the test cannot force the takeover connection from direct to TURN on Windows. pion ICE renominates to the relay pair only when the relay's measured round trip beats the direct pair's by more than 10 ms (`shouldRenominate`).
-- Status: open, accepted. The scenario is tagged `@not-windows`, which the acceptance runner leaves out on Windows (`features/acceptance_test.go`, `tags`); Linux and macOS still run it. Product behaviour is unchanged.
 
 ### 2026-11-22 · limitation · A9.20 cannot set up a watcher before home invitation support lands
 
@@ -559,6 +553,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Workaround: the connection works over the relay, and the probe of `planning/flows/connect.md` section B moves it to a direct path.
 - Status: open, external; not reported upstream for now.
 
+### 2026-11-26 · limitation · A7.9 mostly fails on a Mac with its firewall on
+
+- Symptom: on macOS with the application firewall enabled, A7.9 fails most runs at "direct UDP is cut" with no selected-pair change (9 of 12 runs of the fixture of #373 after the merge of #374, 3 of 4 before it). It passes in CI on all three systems.
+- Cause: the cut needs the pair from the TURN relay to the node's host candidate, both on the machine's LAN address, and the firewall drops UDP to that address for the unsigned test binary. In a traced failure pion sent 9 checks on that pair and none reached the node; a two-socket UDP program loses every packet the same way. Why some runs pass was not traced.
+- Status: open, accepted; CI decides.
+
 ### 2026-11-20 · limitation · Three peer scenarios time out on a Mac with its firewall on
 
 - Symptom: "Both nodes can offer over the same two signalling paths", "A replayed offer is not processed" and "Early and repeated candidates" fail with `context deadline exceeded` after 20 s on macOS with the application firewall enabled, on `rebuild` as merged (815c52aa6) and with the audit fixes; the other 77 scenarios pass. They pass on Linux in CI, and on GitHub's `macos-latest` runner (#145).
@@ -750,6 +750,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `web/src/messages/files.ts` takes every message file eagerly, and the loader merges them all (`web/src/messages/texts.ts`).
 - Status: open, accepted with U-0 (#170).
 
+### 2026-11-23 · bug · FLAKY-29: Qwen A4.9 timed out waiting for its first post
+
+- Symptom: step 4 (`features/s3_driver_limits_test.go:77`) failed once in CI with `timed out waiting on home pushes`.
+- Cause: not established. The log did not record the environment or whether the post reached MCP. The fake CLI defect fixed in #377 needs a variable that nothing sets, so it is not the cause. Whether the teardown race of #363 was is not known.
+- Status: open; the next occurrence needs the host and MCP lines of [diagnostics](planning/contracts/diagnostics.md).
+
 ## Resolved
 
 ### 2026-11-24 · bug · A scenario could restore the host drivers while another node discovered agents
@@ -765,10 +771,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: resolved on `devin/race-store-drivers` in the test harness: the cleanup of the restarted host in `features/m4_test.go` and `features/m3_test.go` is `link.Close(); n.StopHome(); h2.Settle()`, and the M3 restart host, which was never settled, is now settled. Proved with a build overlay that sleeps 150 ms before the `d.wg.Go` in `pushRows`: A4.3 fails under `-race` on `rebuild` and passes with the fix. Limit: the mid-scenario `activeLink.Close(); activeHost.Settle()` in `restartHost` can still leave a late push on the first host; it cannot reach a closed store, because `Node.Close` settles that host again.
 
 ### 2026-11-23 · bug · FLAKY-29: the fake Qwen Code started OpenCode's MCP server
+### 2026-11-23 · bug · The fake Qwen Code started OpenCode's MCP server
 
-- Symptom: Qwen A4.9 failed with `timed out waiting on home pushes`, and failed every time at step 4 with `OPENCODE_CONFIG_CONTENT='{"mcp":{}}'` in the environment (#373).
+- Symptom: Qwen A4.9 failed every time at step 4 with `OPENCODE_CONFIG_CONTENT='{"mcp":{}}'` in the environment (#373). Nothing in the tests or CI sets it; found while looking for FLAKY-29.
 - Cause: `startMCP` (`internal/host/fakecli/mcp.go:40-43`) replaced the server of any fake CLI with the one in `OPENCODE_CONFIG_CONTENT` whenever that variable was set. The Qwen Code driver passes only `QWEN_CODE_SYSTEM_SETTINGS_PATH` and inherits the rest of the environment, so the fake Qwen Code launched an empty command and never posted.
-- Status: resolved on `devin/host-handout-task-flaky29`: only the fake OpenCode reads `OPENCODE_CONFIG_CONTENT`. `TestQwenServesItsScriptBehindTheBearerToken` sets it and checks that the fake Qwen Code starts its own server.
+- Status: resolved in #377: only the fake OpenCode reads `OPENCODE_CONFIG_CONTENT`. `TestQwenServesItsScriptBehindTheBearerToken` sets it and checks that the fake Qwen Code starts its own server.
 
 ### 2026-11-23 · bug · An external AI's task hand-out named the task by its id
 
@@ -811,6 +818,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: under Linux race stress, the test expected sequence 8 but received sequence 9 in the matching `Synced` reply for request 4, in nine runs.
 - Cause: the test read `Loop.Groups` after observing the working row, but the run loop pushes changed rows before publishing the group summary (`internal/home/run_group.go:170`–`:172`, `internal/home/run_push.go:32`–`:33`). The test could sample the old summary; the queued sync then read the committed sequence (`internal/home/sync.go:41`).
 - Status: fixed in `internal/home/cmd_hostev_test.go:523` and `:589`. The negative sync barrier uses the observed row sequence and checks the next frame. No product change.
+
+### 2026-11-23 · bug · FLAKY-21: a pairing node duplicated ICE candidates on the same socket
+
+- Symptom: `TestNetStatusLiveNodeRuntime` timed out before the browser's `ctl` opened.
+- Cause: pairing saved the shared paths (`internal/node/pair.go:345–349`) and `routesFor` appended them again (`internal/node/node.go:471`). Each candidate went twice over one socket. With the writer held during gathering, all 16 sender slots filled before the SDP answer and the server dropped it (`internal/rendezvous/server.go:159`). The original run has no packet trace, so this is the established defect and the likely cause of that run.
+- Status: fixed by using each path ID once and retaining the current ICE configuration. In the same schedule the answer entered the queue and `ctl` opened.
+
+### 2026-11-23 · bug · Windows A7.9 could keep the direct pair selected
+
+- Symptom: Windows kept a working 500 ms direct pair even with a succeeded sub-millisecond relay pair. A7.9 needs a direct-to-relay transition on the original connection to exercise terminal handback.
+- Cause: the fixture delayed direct packets but still delivered them (`features/m7_test.go`, before this fix). Pion v4.4.8 ranks succeeded pairs before it tests the RTT improvement (`selection.go:276–287`, `agent.go:2394–2459`).
+- Status: the fixture cuts direct UDP, pairs the browser's TURN allocation with the node interface that owns the advertised relay IP, and waits for ICE selection. The Windows exclusion is removed. The separate relay-to-direct probe was dropped from version 1 in [#172](https://github.com/huanchong-99/SoloDawn/pull/172#issuecomment-7057401511).
 
 ### 2026-11-23 · bug · External AI removal could be triggered by one click
 
