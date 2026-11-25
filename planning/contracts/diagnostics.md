@@ -51,7 +51,7 @@ today; the builder may move a line to the nearest place that has the fields.
 | Event | Where | Fields besides `node` |
 | --- | --- | --- |
 | `node.start`, `node.stop` | `node`: the runtime opens, closes | `version`, `os`, `level` |
-| `home.dial` | `node`: `connectHome` starts the dial of a home | `home` |
+| `home.dial` | `node`: `dialHome` starts the dial of a home | `home` |
 | `home.attach` | `home`: `Loop.Attach` | `dev` |
 | `home.detach` | `home`: `Loop.Detach` | `dev`, `why`: `gave_up` (the queue was full or a send failed), `ended` |
 | `cmd.reply` | `home`: where a command's answer is queued, a refusal too | `g`, `dev`, `re`, `t` (the key of the command table, `task/checked`), `code` (`ok` or the error code) |
@@ -156,7 +156,7 @@ system, in the order of the table. Windows has `tar` since Windows 10.
 ```
 tar czf ~/Desktop/solodawn-logs.tgz -C "$HOME/Library/Application Support/solodawn" logs
 tar czf ~/solodawn-logs.tgz -C "${XDG_DATA_HOME:-$HOME/.local/share}/solodawn" logs
-tar -a -cf "$env:USERPROFILE\Desktop\solodawn-logs.zip" -C "$env:LocalAppData\solodawn" logs
+tar -a -cf "$([Environment]::GetFolderPath('Desktop'))\solodawn-logs.zip" -C "$env:LocalAppData\solodawn" logs
 ```
 
 ## 6. Not built, not verified
