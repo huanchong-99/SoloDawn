@@ -591,7 +591,7 @@ func onProcessTurnEnded(h *Host, rt *runtimePart, lp *liveProc, slot aiSlot, e E
 	idle := readIdleDuration(h)
 	h.Sessions.Move(lp.key, Working, Waiting)
 	armTurnIdle(h, rt, lp, idle)
-	reportFinishedTurn(h, rt, lp.session, why, detail)
+	reportFinishedTurn(h, rt, lp.session, reportedWhy(why), detail)
 	rt.notify()
 	rt.startBackground(h, "deliver", func() { Deliver(h, slot.group, slot.member) }, "g", slot.group)
 }
@@ -623,11 +623,28 @@ func reportFinishedTurn(h *Host, rt *runtimePart, s Session, why, detail string)
 	sendCrashStep(context.Background(), h, rt, &c)
 }
 
-func interruptSessionTurn(h *Host, key SessionKey, reason, detail string) {
-	if lp := claimTurnInterrupt(stateOf(h), key, reason, detail); lp != nil {
-		h.diag.Info("turn.interrupt", diagSession(key, "why", reason)...)
-		lp.proc.Interrupt()
+// interruptSessionTurn interrupts the turn a session is running, with the
+// reason its end is reported with: stop, timeout, or jump, which reports
+// nothing. It reports whether the turn is now ending for that reason, and not
+// for an earlier one.
+func interruptSessionTurn(h *Host, key SessionKey, reason, detail string) bool {
+	lp := claimTurnInterrupt(stateOf(h), key, reason, detail)
+	if lp == nil {
+		return false
 	}
+	h.diag.Info("turn.interrupt", diagSession(key, "why", reason)...)
+	lp.proc.Interrupt()
+	return true
+}
+
+// reportedWhy is the reason the end of an interrupted turn is reported with.
+// A queue jump's interrupt is none (flows/agent-turn.md step 12): a turn it
+// ended is a turn that ended, and a CLI killed for not answering it crashed.
+func reportedWhy(why string) string {
+	if why == "jump" {
+		return ""
+	}
+	return why
 }
 
 func claimTurnInterrupt(rt *runtimePart, key SessionKey, reason, detail string) *liveProc {
@@ -850,7 +867,7 @@ func finishTurnProcessExit(h *Host, rt *runtimePart, lp *liveProc) {
 		finishLoginInvalid(h, rt, lp.session, slot, lp.eventText)
 	} else {
 		detail := cmp.Or(RedactSecrets(lp.eventText), intrDetail)
-		c := pendingCrash{session: lp.session, reason: why, detail: detail}
+		c := pendingCrash{session: lp.session, reason: reportedWhy(why), detail: detail}
 		sendCrashStep(context.Background(), h, rt, &c)
 	}
 	rt.startBackground(h, "deliver", func() { Deliver(h, slot.group, slot.member) }, "g", slot.group)

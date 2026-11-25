@@ -204,7 +204,8 @@ Run once with a scratch GitHub repository and once with `forge: none`.
 - **A5.11** "Jump the queue" on a direct request interrupts the running
   turn; the task shows as pre-empted meanwhile and continues afterwards by
   itself. A jump aimed at the session that is running interrupts it and
-  goes first without pausing the task.
+  goes first without pausing the task; the session then continues by itself
+  with one turn of its own.
 - **A5.12** When a review passes, the merge follows with no AI turn in
   between, and the thread shows it under the secretary's name.
 - **A5.13** At level 2, `push_branch` pushes the task's branch and no card
