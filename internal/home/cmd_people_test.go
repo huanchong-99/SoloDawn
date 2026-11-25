@@ -176,10 +176,11 @@ func TestPeopleRemovalCascades(t *testing.T) {
 		res := peopleApply(t, s, d, browser, nil, "member", fmt.Sprintf(`,"op":"remove","id":%q`, person.ID))
 		equal(t, res.Answer, store.Outcome{OK: true})
 		equal(t, res.GroupsChanged, true)
-		wantWrites := 1
+		wantWrites, wantForget := 1, person.User
 		if other {
-			wantWrites = 0
+			wantWrites, wantForget = 0, ""
 		}
+		equal(t, res.Forget, wantForget)
 		equal(t, len(res.Rows), 6)
 		equal(t, len(res.Writes), wantWrites)
 		equal(t, res.Rows[4].Value(), proto.GoneRow{RowHeader: proto.RowHeader{Type: "device", ID: person.User + ":1", Seq: 15}, Gone: true})

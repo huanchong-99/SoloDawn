@@ -203,7 +203,6 @@ Feature: External agents take and finish one item without a CLI driver
   Scenario: Presence expires when the external runner stops (A10.27)
     Then a connected external runner stays waiting until its 180 second presence interval expires
 
-  @pending
   Scenario: Offline work is held and removal revokes access (A10.27)
     Given an external acceptance project with X
     Then external member "X" has state "offline"

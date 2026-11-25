@@ -66,6 +66,7 @@ can clear the counter; local checks and crashes do not count.
 | create or replay an invitation | `Result.InviteBy` (the inviting admin's member id) with `LoopConfig.Invite` (`Inviter`) |
 | handle a joining connection | `c.Joining`, attached with `conn.SetJoining(fn)` on `Loop`; `Result.InviteUsed` marks consumption |
 | admit or remove a person, or change their role | `cmd_people.go`: `join`, human `member/set` and `member/remove` |
+| have the node drop a removed person's device log | `Result.Forget` (their user id) with `LoopConfig.Forget`, called after the commit and before the `groups` push |
 | check another group's membership in a transaction | `Disk.OtherMember(user)` excludes the current group |
 | refuse | `&Refusal{Code: "conflict", Msg: "…"}`, with a code of [datachannel](../../planning/contracts/datachannel.md) section 9 |
 | read a message, a note, a thread, the pending cards, the queued items | `c.Disk` in a command, the `Disk` argument of a timer or a handler |
@@ -374,8 +375,8 @@ for that device. A client's `Send` must return once the client is done or closed
 **For the node and the local link.** A loop is started with a `LoopConfig`: the store, the node's
 device id, its owner's user id, the tables, and `Logs`, which returns the node's verified log of a
 person as a value of its own (a second `identity.Replay` of the entries, not the log the node
-keeps), or nil. `Now`, `Report` and `Every` may be left out: the machine's clock, the standard
-logger, and no ticks but `Tick`. A connection goes through four entries, the same for a
+keeps), or nil. `Now`, `Report`, `Forget` and `Every` may be left out: the machine's clock, the standard
+logger, nothing, and no ticks but `Tick`. A connection goes through four entries, the same for a
 `peer.Connection` and for the local link of a host on the same node:
 
 1. `conn := loop.Attach(device, client)`, once the device is authenticated.
@@ -396,9 +397,9 @@ wait for a group and may be called from anywhere. The `build` of a `Welcome` run
 of the loop: it only puts the frame together from the list of groups and from values the node
 worked out before it called `Welcome`, such as `time` and `addrs`. It takes no lock, waits for
 nothing and calls nothing, the loop least of all; a `build` that waits for a lock of the node
-which another goroutine holds while it calls `Cmd` waits for ever. The loop calls `LoopConfig.Logs`, `Now`
-and `Report` on the goroutines of its groups, and `Logs` and `Now` also on the caller of `Cmd`:
-none of the three may wait for a lock that is held around a call of `Attach`, `Sync`, `Fetch`,
+which another goroutine holds while it calls `Cmd` waits for ever. The loop calls `LoopConfig.Logs`, `Now`,
+`Report` and `Forget` on the goroutines of its groups, and `Logs` and `Now` also on the caller of `Cmd`:
+none of the four may wait for a lock that is held around a call of `Attach`, `Sync`, `Fetch`,
 `Close` or `Cmd`, and none may call those. `Attach`, `Sync`, `Fetch` and `Close` wait for the
 groups: they must not be called on the goroutine of a group, which is where a hook runs, or on the
 store's writer, which is where the function of a command, a timer, a handler, a `Disk` and a
