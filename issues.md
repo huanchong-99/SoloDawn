@@ -17,18 +17,17 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: on the development Mac, 4 of about 120 runs of A9.2 (five or six WebRTC connections between in-process peers each) failed: one connection exchanged offer, answer and candidates, then stayed silent until the other side reported ICE `failed` after 30 seconds (`timed out … waiting for ctl … saw 1: connection ended before it was ready`).
 - Cause: the goroutine dump of a failure shows the agent's task loop inside a UDP write that waits for the socket to become writable (`candidatepair.go:131` → `udp_mux.go:337` of pion ice v4.4.8, the binding response of a host candidate to a `127.0.0.1` address). pion writes on that loop with no deadline, so the agent answers no check on any pair, the relay included. The write blocks on this machine only, as far as known; the Application Firewall, which holds packets of unsigned binaries (2026-11-22 below), is the likely reason and was not proved.
 - Status: open, accepted for the local machine: CI decides. In the product the attempt is retired and offered again (`flows/connect.md` step 15).
+### 2026-11-25 · limitation · A paired node's rendezvous addresses cannot be changed
+
+- Symptom: `solodawn pair <secret> --rendezvous <new>` on a node that already has an owner prints "this node already has an owner; to add a browser, run solodawn pair-browser", exits 1 and leaves the saved addresses as they were. Version 1 has no other command that writes them, so a node cannot be moved to another rendezvous.
+- Cause: `cmdPair` reads the line with `ReadPair(line, owner, nil)`, which returns `ErrOwned` before any address is read or saved (`internal/node/node.go:710-730`, `internal/node/socket.go:160-162`); `saveRendezvous` is reached only through `preparePairRV` for an unowned node.
+- Status: open, found 2026-11-25 in the review of the self-hosting guide. The guide tells the owner to choose a name that they will keep (a domain, not an address) before pairing ([self-hosting](docs/cookbook/self-hosting.md), step 5).
 
 ### 2026-11-23 · deviation · An agent without a driver cannot join a group
 
 - Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
 - Cause: only the second tier was planned and built. The MCP shim takes only the session token that the node creates when it starts a CLI itself ([local.md](planning/contracts/local.md), section 3), `host.join` takes only an agent with a driver (`agtValidAgent`, `internal/host/agents.go:258`), and nothing lets an agent take an inbox item.
-- Status: open, found 2026-11-23 and planned as the external AI (R-166, [external.md](planning/contracts/step-3/external.md); [parallel plan](planning/steps/parallel-plan-step-2-3.md), section 4.2). The implementation supports joining, setup and member-scoped MCP without a driver. The [browser test](web/e2e/external.spec.ts) and [I3-3 scenarios](features/a10_external.feature) cover waiting, queued work, the owner-only tool label, managed replies, task and review checkouts, usage, and presence expiration. An already-open stream on removal still needs a fix (below); A10.28 needs a live agent. The agent writes its own runner around `solodawn wait`.
-
-### 2026-11-23 · bug · Removing an external member does not close its open MCP stream
-
-- Symptom: in A10.27, the owner successfully removes X after reassigning its task, and the member row is gone, but the already-open MCP stream does not close.
-- Cause: the member-removal path ends the host's member sessions (`internal/host/join.go:620`), but the local MCP server runs with the node's lifetime context (`internal/node/node.go:645–653`, `internal/host/mcp.go:28–42`). A tool call rechecks the token, but removal does not end an otherwise idle stream.
-- Status: open; the offline-work and removal scenario stays pending. The separate presence-expiry case exercises the real host timer on a fake clock and checks the status reports immediately before and at 180 seconds.
+- Status: open, found 2026-11-23 and planned as the external AI (R-166, [external.md](planning/contracts/step-3/external.md); [parallel plan](planning/steps/parallel-plan-step-2-3.md), section 4.2). The implementation supports joining, setup and member-scoped MCP without a driver. The [browser test](web/e2e/external.spec.ts) and [I3-3 scenarios](features/a10_external.feature) cover waiting, queued work, the owner-only tool label, managed replies, task and review checkouts, usage, and presence expiration. A10.28 needs a live agent. The agent writes its own runner around `solodawn wait`.
 
 ### 2026-11-23 · deviation · An intermittent failure cannot be explained from one occurrence
 
@@ -174,6 +173,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: cancelling an invitation stops browser handling, but the rendezvous socket remains in the room until expiry or disconnect. Retrying the same room on the same socket does not trigger a new `joined` from a home already in the room.
 - Cause: `internal/rendezvous/room.go` has no leave frame. It ignores duplicate joins by the same socket and caps membership at 16 rooms per connection.
 - Status: open; the browser must keep the socket alive for existing homes.
+
+### 2026-11-22 · limitation · A9.20 cannot set up a watcher before home invitation support lands
+
+- Symptom: A9.20 fails in its first Given with `bad_request: the home has no such command`, before opening the owner's terminal or exercising the watch host.
+- Cause: `joinWatcher` in `features/s2_watch_terminal_test.go` sends `invite`; `internal/home/people_seam.go` declares the invite/join command keys but registers no handlers, so `internal/home/check.go` refuses the command. The home invitation/join units T2-1a and T2-1b are outside T2-6.
+- Status: pending retest. A10.17 now exercises invitation and join; the later watch-confirmation steps were not rerun here.
 
 ### 2026-11-22 · deviation · Host turn labels approximate task participation by role
 
@@ -758,6 +763,77 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: the original fixture opened a new relay-only connection instead of moving an established watch to TURN.
 - Cause: a transport-only probe with controlling ICE, renomination, warm relay pairs and bidirectional filtering on every watcher UDP socket kept the direct pair selected. Pion's automatic selector retained that pair; the binding-request selector also failed to move both ends. This is fixture evidence, not an end-to-end watch result.
 - Status: resolved 2026-11-26, A9.21 is enabled (3 of 3 on the development Mac with its firewall on). `moveToRelay` in `features/s2_watch_peer_test.go` uses the network control of A7.9 (#373) on 127.0.0.1: direct packets take 3 seconds until the measured round trip says so, then direct UDP is cut. Pion (v4.4.8, `agent.go`, `evaluateCandidatePairQuality`) rates the last round trip of a pair that answers no more, and 3 seconds put the dead direct pair below relay to relay (10 plus 20 for recent answers), so ICE renominates by itself in about 5 seconds, when the direct pair loses its own 20.
+### 2026-11-25 · bug · `read_thread` gave an AI an empty text for most kinds
+
+- Symptom: a brief, decision, approval, check result or review read back with `"text":""`, and an AI that reads context first (R-33), or the secretary told to write notes after every review, saw nothing of it. A pending decision or a brief in the history of a replaced session was only `(decision)` or `(brief)`.
+- Cause: `fetchThreadMessages` (`internal/host/tools_talk.go`) returned `row.Text`; these kinds keep their content in `body`. `msgFormatters` (`internal/host/turn.go`) had no brief, and the decision formatter only an outcome.
+- Status: resolved on `fix/host-context`; `TestReadThreadShowsWhatABodyHolds` pins the texts.
+
+### 2026-11-25 · deviation · The confirmed scope reached no AI
+
+- Symptom: the person confirms what is in and out of scope on the brief, but neither the assignee's nor the reviewer's turn said it.
+- Cause: `briefSpecLines` (`internal/host/turn.go`) gave goal and criteria only, and `drivers.md` section 3 named no scope line.
+- Status: resolved on `fix/host-context`: `In scope:` and `Out of scope:` follow the criteria.
+
+### 2026-11-25 · deviation · The secretary was not told which team groups exist
+
+- Symptom: R-14's relay happened only when the owner gave the group's id, because no turn, instruction or tool description named a team group.
+- Cause: neither `sessionHeader` (`internal/host/turn.go`) nor `internal/host/instructions/secretary.md` said it.
+- Status: resolved on `fix/host-context`: the secretary's header lists the team groups its node knows, and its instructions say when to post there.
+
+### 2026-11-25 · deviation · `list_members` called every person online
+
+- Symptom: a person without any browser connected was `"state":"online"`.
+- Cause: `online` is written `true` when a person creates or joins a group and nothing writes `false` (`internal/home/cmd_group.go`, `cmd_people.go`); the tool passed it on.
+- Status: the tool half is resolved on `fix/host-context`: a person has no state there. The row field and the badge in the web client stay as they are.
+
+### 2026-11-25 · bug · The wake-up cap held people's messages and the answers to waiting calls
+
+- Symptom: from the 21st item in an hour on, an AI got a person's message, a decided approval, a confirmed brief or the reply to its call up to an hour late, and no row or screen said so. The secretary, which gets every unaddressed message and every notice, fell silent in a busy hour (gap 6 of the rules audit of 2026-11-25).
+- Cause: `inboxWake` (`internal/home/inbox.go:111` before the fix) exempted only `merge` and `watch` items, whoever caused the item. R-60 limits AIs that wake AIs.
+- Status: resolved in branch `fix/home-items`: the items of a command of a device that hosts no AI of the group, and `reply` items, are neither held nor counted ([commands](planning/contracts/commands.md) 1.3). Test: `TestInboxWakeUpCapHoldsAndReleasesItems`, "people and replies are not held", and `features/home_inbox.feature`.
+
+### 2026-11-25 · bug · A failed sign-in mentioned nobody, and the push of a system row named nobody
+
+- Symptom: a `login_invalid` row reached no person though R-56 says the owner is told, and the push of a `task_failed` row had an empty `who` and no title, so the browser showed an empty body (gap 7 of the same audit, home part).
+- Cause: `hevEventRows` (`internal/home/cmd_hostev.go:150` before the fix) wrote `mentions` `[]`, and `wpushMention` (`internal/home/webpush.go:236` before the fix) looked up the name of the member `system`.
+- Status: resolved in branch `fix/home-items`: `login_invalid` mentions the AI's owner, and `wpushSystem` names the AI of the row, or the assignee and the title of its task. Tests: `TestHostEvEventsAndNotices`, `TestWebPushReminderKindsTitlesAndNoLeak`, `features/home_hostev.feature`, `features/home_webpush.feature`. The notification of an open page is another unit's.
+
+### 2026-11-25 · deviation · `jump` moved another message than the one it named
+
+- Symptom: `jump` on an older message moved the author's newest waiting message of that thread, and one AI only when the message mentioned several.
+- Cause: the rule of [commands](planning/contracts/commands.md) 1.4, implemented by `rndRequeueJump` (`internal/home/rounds.go:60` before the fix), which read of `msg` only its author and thread.
+- Status: resolved in branch `fix/home-items` (coordinator's decision of 2026-11-25): every unacknowledged `mention` item that `msg` produced is sent again with `jump: true`. Test: `TestRoundsJumpRequeuesTheItemsOfItsMessage`.
+
+### 2026-11-25 · bug · Removing a person left their connections open
+
+- Symptom: after `member remove` of a person, or after they left, their devices stayed connected to the home and could reconnect until the node restarted; they got no rows and no commands. A removed person who then added a device also kept the node from starting again: the entry was stored without the log it follows, and `OpenLogs` failed with "the version does not follow the log".
+- Cause: the removal pushed `groups` only (`internal/home/cmd_people.go`). `Logs` kept the person's log in memory (`internal/node/devlog.go`), so `knownPeer` still admitted their devices and `dvlCommit` still stored their entries, and nothing closed a connection except the end of a watch grant.
+- Status: resolved on `fix/removal-closes`. The home tells the node to drop the log (`LoopConfig.Forget`), and a connection that `knownPeer` no longer admits ends after its next `groups` push (`sesConn.sendGroups`, `peer.Connection.Finish`). An entry that comes between the removal's transaction and `Forget` is not stored either: `dvlPutEntries` stores an entry only behind the one it follows. `TestRemovedPersonIsDisconnected` fails without any of the three; a development node that already has such rows needs them deleted by hand. A9.4 passes once its fixtures send `home.add` (another unit).
+
+### 2026-11-26 · bug · A revoked device stayed connected to a node that homes no group
+
+- Symptom: the owner revoked a browser; on their computer that only hosts AIs, its connection and its open `pty:` channels stayed. `planning/flows/pairing.md` D.3 has each receiver of the entry close it.
+- Cause: `sesLogChanged` (`internal/node/devlog.go`) closed only the revoked devices of other people, never the owner's.
+- Status: resolved on `fix/removal-closes`: when a log changes, `sesLogChanged` closes every connection that `knownPeer` no longer admits. `TestRevokedDeviceIsDisconnectedWithoutAGroup` fails without it.
+
+### 2026-11-25 · bug · A tool call that waits kept the node from stopping
+
+- Symptom: a node stopped while a CLI waits in `approve`, `AskUserQuestion` or `ask` (up to `approval_wait_s`, 600 s) did not stop until that wait ended or the CLI died; a service manager killed it instead.
+- Cause: the SDK hides the server's context from its handlers (`notDone`, go-sdk v1.8.0 `internal/jsonrpc2/conn.go:232-234`), so the end of the node's context cancelled no call, `Server.Run` (`internal/host/mcp.go`) waited for it, and `serve` (`internal/node/node.go`) waited for `Run` before `n.Close`, whose `Settle` ends the CLIs.
+- Status: resolved on `fix/removal-closes`: `ServeMCP` closes the stream when its context ends, which is also how a removed member's stream ends; the read fails, and the SDK cancels the calls. `TestNodeStopEndsAWaitingToolCall` fails without the line.
+
+### 2026-11-23 · bug · Removing an external member does not close its open MCP stream
+
+- Symptom: in A10.27, the owner successfully removes X after reassigning its task, and the member row is gone, but the already-open MCP stream does not close.
+- Cause: the member-removal path ended the host's member sessions (`internal/host/join.go:620`), but the local MCP server ran with the node's lifetime context (`internal/node/node.go`, `internal/host/mcp.go`). A tool call rechecked the token, but removal did not end an otherwise idle stream.
+- Status: resolved on `fix/removal-closes`: `ServeMCP` watches the wake of the member (`untilRemoved`) and ends its context when the member is gone. `TestRemovalClosesExternalMCP` fails without it, and the second A10.27 scenario is enabled.
+
+### 2026-11-23 · bug · The fake Qwen Code started OpenCode's MCP server
+
+- Symptom: Qwen A4.9 failed every time at step 4 with `OPENCODE_CONFIG_CONTENT='{"mcp":{}}'` in the environment (#373). Nothing in the tests or CI sets it; found while looking for FLAKY-29.
+- Cause: `startMCP` (`internal/host/fakecli/mcp.go:40-43`) replaced the server of any fake CLI with the one in `OPENCODE_CONFIG_CONTENT` whenever that variable was set. The Qwen Code driver passes only `QWEN_CODE_SYSTEM_SETTINGS_PATH` and inherits the rest of the environment, so the fake Qwen Code launched an empty command and never posted.
+- Status: resolved in #377: only the fake OpenCode reads `OPENCODE_CONFIG_CONTENT`. `TestQwenServesItsScriptBehindTheBearerToken` sets it and checks that the fake Qwen Code starts its own server.
 
 ### 2026-11-24 · bug · A scenario could restore the host drivers while another node discovered agents
 
@@ -892,6 +968,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: A9.24 can report an unexpected `watch-checks` call for the first commit of the task that is reassigned.
 - Cause: `internal/host/deliver.go:1378-1379` can select a stale `cloud_check` row after `tskFinishCloud` releases the polling slot, even after the task has reached review. The home acknowledges the result before sending the updated row (`internal/home/run_group.go:170-171`).
 - Status: resolved in PR #335. The host keeps claims for accepted and superseded commits, while allowing retries after failed result delivery or an accepted resubmission. `TestStaleCloudCheckRowDoesNotRestartCompletedPoll` verifies that resuming from a stale row does not make a second forge call.
+
+### 2026-11-25 · bug · An external AI could not write in its task's thread
+
+- Symptom: in an open run of an external AI, `post` with kind `progress`, which its task instructions order, was refused by the home ("the post belongs in a task thread"); a plain `post` in a task or review run, or in a group run from a thread, went to the main line; `where` `thread` was `bad_request`; an `ask` in a group run from a thread went to the main line; and every call had depth 1, so the limit of 4 did not count external AIs.
+- Cause: `extHandOut` dropped the `Turn` that `Compose` returns (`internal/host/external.go:293`), and `externalCaller` built the caller without one (`internal/host/tools_external.go:41`).
+- Status: resolved on `fix/external-thread`: the open run keeps its turn and the caller has it until the run ends. `TestExternalCallsGoToThePlaceOfTheRun` and an A10.22 scenario fail with the old code. A node restart ends the run, so its place needs no recovery ([external.md](planning/contracts/step-3/external.md), 3.3).
 
 ### 2026-11-25 · bug · The answer to a CLI's question could outlive the host's Settle and crash the node
 
@@ -1514,3 +1596,9 @@ No Safari release runs in CI, and Safari 17.5, the baseline, was not run at all.
 - Symptom: `go test -cover ./internal/store/` reported 93.7% of statements, leaving nine error-return blocks uncovered across `inbox.go`, `read.go` and `store.go`.
 - Cause: unit tests did not exercise locked or closed database paths in `Enqueue` (`internal/store/inbox.go:20-22`), `Inbox` (`internal/store/inbox.go:35-37`), `Snapshot` (`internal/store/read.go:20-22`, `:26-28`, `:31-33`), `Snapshot.rows` (`internal/store/read.go:72-74`) and `transaction` (`internal/store/store.go:78-80`); and `Inbox` (`internal/store/inbox.go:44-46` before the fix) and `Snapshot.rows` (`internal/store/read.go:79-81` before the fix) checked `rows.Scan` errors that cannot occur. Both `inbox` and `row` are SQLite `STRICT` tables (`internal/store/schema.sql:1-17`, `:31-44`; `planning/contracts/storage.md` section 1) whose selected columns match the non-nil Go destination types (`INTEGER NOT NULL` and `INTEGER PRIMARY KEY` to `*int64`, `TEXT NOT NULL` to `*string` or `*[]byte`, nullable `TEXT` to `**string` or `*[]byte`), while `modernc.org/sqlite` steps and reads column values inside `rows.Next()`, surfacing any SQLite or I/O failure through `rows.Err()`.
 - Status: resolved in #174: removed the two unreachable `rows.Scan` error branches in `internal/store/inbox.go` and `internal/store/read.go`, and added unit tests covering all seven reachable error paths (`TestInboxFailures` in `internal/store/delivery_test.go`, `TestSnapshotAndQueryFailures` in `internal/store/read_test.go`, `TestWriteBeginFailure` in `internal/store/store_test.go`), bringing `internal/store` to 100.0% statement coverage.
+
+### 2026-11-26 · bug · A remote close was logged as `why=closed` when the connection state came before the `ctl` close
+
+- Symptom: `TestPeerDiagnostics` failed in CI (run 45669069695, `internal/peer/diag_test.go:113`): the side that did not close logged `conn.close why=closed` instead of `ctl_closed`.
+- Cause: pion reports either the `ctl` close or the state `closed` first; `connectionStateChanged` (`internal/peer/signal.go:310-311` before the fix) answered the state with `c.Close()`. A local `Close` takes the `once` before its own state change, so a `closed` state that gets through is always the remote's.
+- Status: resolved: the state closes with `ctl_closed` (`internal/peer/signal.go:311`), as the `ctl` close does (`internal/peer/ctl.go:78`). Test `TestPeerDiagnosticsRemoteStateClosed`; `planning/contracts/diagnostics.md` names the side of each `why`.

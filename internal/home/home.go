@@ -217,11 +217,14 @@ type Result struct {
 	Expires    int64  // invite answer expiry in Unix ms, omitted from receipt
 	InviteBy   string // member id of the inviting admin when an invite is accepted
 	InviteUsed bool   // true when an accepted join consumes its invitation
+	Forget     string // user id of a removed person whose device log leaves the node
 
 	// GroupsChanged says that the list of groups a peer may read has changed:
 	// once the result is committed, every connected peer is pushed its
 	// groups again (planning/contracts/datachannel.md section 3).
 	GroupsChanged bool
+
+	byPerson bool // of a person's command: the wake-up cap lets its items through
 }
 
 // Frame returns the answer to the request re that carried the command

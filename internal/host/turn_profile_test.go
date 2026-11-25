@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/huanchong-99/SoloDawn/internal/proto"
+	"github.com/huanchong-99/SoloDawn/internal/store"
 )
 
 func setTurnProfile(t *testing.T, r *turnRig, id string, edit func(*proto.AIMemberRow)) {
@@ -39,6 +40,38 @@ AI members (CLI on computer · tier · state · skills):
 - "Secretary" · claude on workstation · standard · offline · window 100% used, resets in 0 h
 == context · instruction`
 	assertComposed(t, r.h, r.session(GroupSession, true, ""), ReplacedTurn, nil, want, Turn{Kind: ReplacedTurn})
+}
+
+func TestSecretaryHeaderNamesTheTeamGroups(t *testing.T) {
+	r := newTurnRig(t)
+	put := func(cached bool, id, name, kind string) {
+		row := makeGroupRow(proto.ID(id), r.homeKey.ID(), name, "", "")
+		row.Kind = kind
+		if cached {
+			r.h.Rows.Put(id, "group", id, mustJSON(t, row))
+			return
+		}
+		if err := r.h.Store.Write(func(tx *store.Tx) error { return store.Put(tx, id, seamStart, row) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put(false, string(joinTestGroup3), "Local", "team") // homed here, no AI in it
+	put(false, turnID("project"), "Project", "project")
+	put(true, bulletinGroup, "Team, renamed", "team")
+	homes := marshalWire([]proto.Home{
+		{Group: bulletinGroup, Home: "team-home", Name: "Team"},
+		{Group: bulletinGroup, Home: "team-home", Name: "Team"},
+		{Group: proto.ID(turnID("unread")), Home: "far", Name: "Unread"},
+	})
+	seamSQL(t, r.h.Store, `INSERT INTO setting(key,value) VALUES('homes','`+homes+`')`)
+	teams := `Team groups (name and id): "Local" (` + string(joinTestGroup3) + `), "Team, renamed" (` + bulletinGroup + ")\n"
+	assertComposed(t, r.h, r.session(GroupSession, true, ""), ReplacedTurn, nil, secretaryTurnHeader+teams+"== context · instruction", Turn{Kind: ReplacedTurn})
+	want := "[SoloDawn] group \"Website\" · you are \"Claude Code\" · group session\n== context · instruction"
+	assertComposed(t, r.h, r.session(GroupSession, false, ""), ReplacedTurn, nil, want, Turn{Kind: ReplacedTurn})
+	seamSQL(t, r.h.Store, "DROP TABLE row")
+	if _, _, err := Compose(r.h, r.session(GroupSession, true, ""), ReplacedTurn, nil); err == nil {
+		t.Fatal("a store that cannot be read gave a turn")
+	}
 }
 
 func TestProfileEscalationUsesLatestTaskAndAppendsToItem(t *testing.T) {

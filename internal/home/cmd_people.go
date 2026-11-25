@@ -133,7 +133,7 @@ func peopleRemoved(s *State, c Command, person proto.HumanMemberRow) Result {
 	res.Rows = append(res.Rows, RowOf(proto.GoneRow{RowHeader: proto.RowHeader{Type: "member", ID: person.ID}, Gone: true}))
 	res.Rows = append(res.Rows, peopleGoneDevices(s, person.User)...)
 	if !c.Disk.OtherMember(person.User) {
-		res.Writes = append(res.Writes, peopleForget{person.User})
+		res.Writes, res.Forget = append(res.Writes, peopleForget{person.User}), person.User
 	}
 	body := proto.MemberRemovedBody{SystemCode: proto.SystemCode{Code: "member_removed"}, User: person.User, Name: person.Name}
 	if c.Who.User != person.User {

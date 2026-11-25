@@ -2,9 +2,9 @@ Feature: Rounds in threads, queue jumps and the quiet-task timer
   AI-to-AI exchanges in a task thread count rounds up to the group's limit, where the task pauses
   with wait "rounds", a "rounds_limit" system message is written in the main line, the secretary is
   notified, and the host holds thread mentions while the task is paused until a person's message in
-  the thread or an admin's "task resume" ends the wait. "jump" retires the newest unacknowledged
-  mention item from a message of that person in the same thread or main line and sends a jump
-  replacement at once. The "quiet" timer notifies the secretary once per quiet period for an active
+  the thread or an admin's "task resume" ends the wait. "jump" retires every unacknowledged
+  mention item that the named message of that person produced and sends jump replacements at
+  once. The "quiet" timer notifies the secretary once per quiet period for an active
   task with no wait before step "merge" that has had no thread message for "idle_notice_minutes".
 
   Scenario: Ten AI rounds pause the task until a person posts in the thread
@@ -29,6 +29,7 @@ Feature: Rounds in threads, queue jumps and the quiet-task timer
   Scenario: Jump the queue on a direct request and on a running task thread
     Given a rounds home with a secretary, two working AIs and an active task for "ai-one"
     When the owner posts a direct request mentioning "ai-one" in the main line
+    And the owner posts a newer message mentioning "ai-one" in the main line
     And the owner jumps the queue on that direct request
     Then the first mention item is retired and the rounds host receives a jump mention for "ai-one"
     When the host of "ai-one" reports the rounds task pre-empted by that direct request and then resumes it

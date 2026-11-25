@@ -32,8 +32,14 @@ func (h *Host) ServeMCP(ctx context.Context, token string, in io.Reader, out io.
 		out.Close()
 		return &Error{Code: "forbidden", Message: "unknown session token"}
 	}
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	// The SDK keeps ctx from its handlers: only the end of the stream cancels
+	// a call that waits.
+	defer context.AfterFunc(ctx, func() { out.Close() })()
 	if caller.External {
 		defer h.ExternalPresent(caller.Group, caller.Member)()
+		go h.untilRemoved(ctx, stop, aiGroupKey{group: caller.Group, member: caller.Member})
 	}
 	srv := h.newMCPServer(token, caller)
 	tr := &mcpTransport{
@@ -41,6 +47,17 @@ func (h *Host) ServeMCP(ctx context.Context, token string, in io.Reader, out io.
 		methods: map[jsonrpc.ID]string{},
 	}
 	return srv.Run(ctx, tr)
+}
+
+// untilRemoved ends the MCP connection of an external AI whose member is gone.
+func (h *Host) untilRemoved(ctx context.Context, stop context.CancelFunc, key aiGroupKey) {
+	defer stop()
+	for again := true; again; {
+		woken := extWaker(h, key)
+		if _, again = h.ExternalMember(key.member); again {
+			again, _ = extSlept(ctx, h, key.member, woken, nil)
+		}
+	}
 }
 
 func (h *Host) newMCPServer(token string, initial Caller) *mcp.Server {

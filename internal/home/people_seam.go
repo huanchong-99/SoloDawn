@@ -202,6 +202,7 @@ func (g *runGroup) seamCommand(c *Conn, re int64, env proto.Envelope) {
 		var out Result
 		var txErr error
 		out, def, txErr = g.loop.cfg.Tables.Commands.seamRunTx(g.state, d, tx, env, join, now, g.loop.cfg.Invite != nil)
+		out.byPerson = inboxByPerson(g.state, env.Key)
 		return out, txErr
 	})
 	res, err = g.seamResolveInvite(env.Key, res, def, err)
@@ -213,6 +214,9 @@ func (g *runGroup) seamCommand(c *Conn, re int64, env proto.Envelope) {
 	}
 	g.settle(res, now, func() {
 		seamAdmit(join, res)
+		if res.Forget != "" {
+			g.loop.cfg.Forget(res.Forget)
+		}
 		g.loop.diagReply(c, g.state.ID, re, env, res.Answer.Code)
 		c.send(res.Frame(re))
 	})
