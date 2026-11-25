@@ -19,6 +19,7 @@ import (
 	"strings"
 	"testing"
 	"testing/iotest"
+	"testing/synctest"
 	"time"
 )
 
@@ -81,6 +82,16 @@ func newUpdate(t *testing.T) (*updateFixture, *http.ServeMux) {
 	mux := http.NewServeMux()
 	server := httptest.NewTLSServer(mux)
 	t.Cleanup(server.Close)
+	f := newOfflineUpdate(t)
+	f.u.ReleaseURL = server.URL + "/download"
+	f.u.Transport = server.Client().Transport
+	return f, mux
+}
+
+// newOfflineUpdate is newUpdate without a server, which a synctest bubble
+// cannot wait out: the caller sets ReleaseURL and Transport.
+func newOfflineUpdate(t *testing.T) *updateFixture {
+	t.Helper()
 	f := &updateFixture{
 		name:     "solodawn_v1.10.1_" + updateTarget(runtime.GOOS, runtime.GOARCH),
 		image:    newImage,
@@ -88,15 +99,13 @@ func newUpdate(t *testing.T) (*updateFixture, *http.ServeMux) {
 	}
 	f.manifest = fmt.Sprintf("%x  %s\n", sha256.Sum256([]byte(newImage)), f.name)
 	f.u = Updater{
-		ReleaseURL: server.URL + "/download",
-		Binary:     filepath.Join(t.TempDir(), "solodawn"),
-		Version:    "v1.9.1",
-		Busy:       func() bool { return f.busy },
-		Restart:    func() error { f.restarts++; return nil },
-		Transport:  server.Client().Transport,
+		Binary:  filepath.Join(t.TempDir(), "solodawn"),
+		Version: "v1.9.1",
+		Busy:    func() bool { return f.busy },
+		Restart: func() error { f.restarts++; return nil },
 	}
 	writeImage(t, f.u.Binary, "old binary")
-	return f, mux
+	return f
 }
 
 func (f *updateFixture) serve(mux *http.ServeMux) {
@@ -296,24 +305,101 @@ func TestUpdateStallsInTheBody(t *testing.T) {
 	checkFolder(t, filepath.Dir(f.u.Binary), "solodawn")
 }
 
+// trickle is a release server in memory: the manifest at once, the binary one
+// byte every gap, and nothing at all when gap is negative. A canceled request
+// ends with its cancel cause, as net/http does.
+type trickle struct {
+	f   *updateFixture
+	gap time.Duration
+}
+
+func (tr trickle) RoundTrip(req *http.Request) (*http.Response, error) {
+	var body io.ReadCloser = io.NopCloser(strings.NewReader(tr.f.manifest))
+	if strings.HasSuffix(req.URL.Path, tr.f.name) {
+		body = &trickleBody{ctx: req.Context(), gap: tr.gap, left: tr.f.image}
+	}
+	return &http.Response{StatusCode: http.StatusOK, Body: body}, nil
+}
+
+type trickleBody struct {
+	ctx  context.Context
+	gap  time.Duration
+	left string
+}
+
+func (b *trickleBody) Read(p []byte) (int, error) {
+	if b.left == "" {
+		return 0, io.EOF
+	}
+	select {
+	case <-b.ctx.Done():
+		return 0, context.Cause(b.ctx)
+	case <-time.After(b.gap):
+	}
+	p[0], b.left = b.left[0], b.left[1:]
+	return 1, nil
+}
+
+func (b *trickleBody) Close() error { return nil }
+
+// startTrickle makes the fixture download from a trickle, on the clock of the
+// synctest bubble the caller is in.
+func startTrickle(t *testing.T, gap time.Duration) *updateFixture {
+	f := newOfflineUpdate(t)
+	f.u.ReleaseURL = "https://release.test/download"
+	f.u.Transport = trickle{f, gap}
+	setStall(t, 200*time.Millisecond)
+	return f
+}
+
 // A slow download that keeps sending takes longer than the stall limit in all
 // and is installed.
 func TestUpdateSlowButSteady(t *testing.T) {
-	f, mux := newUpdate(t)
-	setStall(t, 200*time.Millisecond)
-	f.serveBinary(mux, func(w http.ResponseWriter, _ *http.Request) {
-		for i := range len(f.image) {
-			w.Write([]byte{f.image[i]})
-			w.(http.Flusher).Flush()
-			time.Sleep(50 * time.Millisecond)
+	synctest.Test(t, func(t *testing.T) {
+		f := startTrickle(t, 150*time.Millisecond)
+		start := time.Now()
+		noErr(t, f.u.Check(t.Context(), start))
+		checkImage(t, f.u.Binary, newImage)
+		if took := time.Since(start); took < 3*stallTimeout {
+			t.Fatalf("the download took %v, not longer than the stall limit in all", took)
 		}
 	})
-	start := time.Now()
-	noErr(t, f.u.Check(t.Context(), start))
-	checkImage(t, f.u.Binary, newImage)
-	if took := time.Since(start); took < 3*stallTimeout {
-		t.Fatalf("the download took %v, not longer than the stall limit in all", took)
-	}
+}
+
+// The wait for the next byte is what the stall limit measures: a reader that
+// takes longer than the limit between two reads (a slow disk) loses nothing.
+func TestUpdateSlowReaderIsNotAStall(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := startTrickle(t, time.Millisecond)
+		body, err := f.u.get(t.Context(), f.name)
+		noErr(t, err)
+		defer body.Close()
+		time.Sleep(2 * stallTimeout)
+		got, err := io.ReadAll(iotest.OneByteReader(slowReader{body}))
+		noErr(t, err)
+		checkUpdateValue(t, string(got), newImage)
+	})
+}
+
+// slowReader keeps the reader busy for longer than the stall limit after each read.
+type slowReader struct{ io.Reader }
+
+func (r slowReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	time.Sleep(2 * stallTimeout)
+	return n, err
+}
+
+// A gap longer than the stall limit between two bytes is a stall.
+func TestUpdateStallsBetweenBytes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := startTrickle(t, 250*time.Millisecond)
+		if err := f.u.Check(t.Context(), time.Now()); !errors.Is(err, errStalled) {
+			t.Fatalf("bytes further apart than the limit: %v", err)
+		}
+		checkImage(t, f.u.Binary, "old binary")
+		checkFolder(t, filepath.Dir(f.u.Binary), "solodawn")
+	})
 }
 
 func (f *updateFixture) serveBinary(mux *http.ServeMux, binary http.HandlerFunc) {

@@ -108,7 +108,8 @@ func (u *Updater) pending() bool {
 
 // A download longer than maxDownload is cut, and so fails its checksum. A
 // request with no data for stallTimeout (connecting, waiting for the answer
-// or reading the body) is given up; a slow link that keeps sending is not.
+// or waiting for the body) is given up; a slow link that keeps sending is not,
+// and neither is time spent by the reader (a slow disk) between two reads.
 var (
 	maxDownload  int64         = 256 << 20
 	stallTimeout time.Duration = 60e9 // 60 s
@@ -129,8 +130,8 @@ func (u *Updater) get(ctx context.Context, name string) (io.ReadCloser, error) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	stall := time.AfterFunc(stallTimeout, func() { cancel(errStalled) })
 	body, err := u.fetch(ctx, name)
+	stall.Stop() // running again only inside Read
 	if err != nil {
-		stall.Stop()
 		cancel(nil)
 		return nil, err
 	}
@@ -157,7 +158,7 @@ func (u *Updater) fetch(ctx context.Context, name string) (io.ReadCloser, error)
 	return resp.Body, nil
 }
 
-// progressBody restarts the stall timer whenever data arrives. net/http
+// progressBody runs the stall timer only while a Read waits for data. net/http
 // reports a request canceled for a stall with errStalled, the cancel cause.
 type progressBody struct {
 	body    io.ReadCloser
@@ -167,13 +168,12 @@ type progressBody struct {
 }
 
 func (b *progressBody) Read(p []byte) (int, error) {
-	n, err := b.limited.Read(p)
-	b.stall.Reset(stallTimeout) // a read returns only with data or at the end
-	return n, err
+	b.stall.Reset(stallTimeout)
+	defer b.stall.Stop()
+	return b.limited.Read(p)
 }
 
 func (b *progressBody) Close() error {
-	b.stall.Stop()
 	b.cancel(nil)
 	return b.body.Close()
 }
