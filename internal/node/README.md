@@ -70,6 +70,8 @@ The node runtime also subscribes its `LocalLink` to `groups` pushes.
 
 A home `invite` opens an in-memory pairing room for one group. Unlike `pair.browser`, a `#join` invitation never enrols a device of the node's owner. The joining connection only accepts `hello`, its person's `devlog` and `join` for the invitation's group. After the home commits the join, the person keeps their own devices and gains that group's home surface, not the host surface. Stored device logs are sent only to peers that can read a group containing the person; the owner's log is also sent to enrolled or pairing owner devices.
 
+`nodeRuntime.knownPeer` decides who may be connected: it admits signalling, and `SessionConfig.Known` gives it to `Sessions`. The home pushes `groups` to everyone after a removal, so `sesConn.sendGroups` asks it at each push: to a device that has no reason left the push is the last frame, and `Ctl.Finish` closes the connection once it has arrived. Before that push `LoopConfig.Forget` (`Logs.dvlForget`) drops the log of a person who is in no group homed here. `sesLogChanged` asks it for every connection when a device log changes, and closes a revoked device at once, also on a node that homes no group (`planning/flows/pairing.md`, D.3). A joining connection stays until its invitation ends.
+
 The owner's devices can send `home.add` to record a group's home and its signalling URLs without joining or cloning it. If the node already hosts sessions for that group, their home changes and the host reconnects to it.
 
 ## Multi-node test helper (`nodetest`)

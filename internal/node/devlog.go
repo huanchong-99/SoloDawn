@@ -182,6 +182,14 @@ func (l *Logs) dvlKeepRows(log *identity.Log) []proto.DeviceRow {
 	return rows
 }
 
+func (l *Logs) dvlForget(user string) {
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.log, user)
+}
+
 func dvlCollectRows(log *identity.Log, entries []proto.Envelope) []proto.DeviceRow {
 	var rows []proto.DeviceRow
 	for _, env := range entries {
@@ -262,9 +270,12 @@ func (l *Logs) dvlWriteAdd(signer identity.Key, dev, kind, name string, now int6
 	return row, nil
 }
 
+// dvlPutEntries stores an entry only behind the one it follows: the removal of
+// a person deletes their stored log before dvlForget drops it from memory.
 func dvlPutEntries(tx *store.Tx, user string, rows []proto.DeviceRow) error {
 	for _, r := range rows {
-		if _, err := tx.Exec("INSERT INTO device_log(user, ver, env) VALUES(?, ?, ?)", user, r.Version, string(dvlMustEncode(r.Env))); err != nil {
+		if _, err := tx.Exec(`INSERT INTO device_log(user, ver, env) SELECT ?1, ?2, ?3
+			WHERE ?2 = 1 OR EXISTS (SELECT 1 FROM device_log WHERE user = ?1 AND ver = ?2 - 1)`, user, r.Version, string(dvlMustEncode(r.Env))); err != nil {
 			return err
 		}
 	}
@@ -358,20 +369,13 @@ func (s *Sessions) sesLogChanged(user string, rows []proto.DeviceRow, adopted bo
 		envs[i] = r.Env
 	}
 	frames := dvlBatchFrames(user, envs)
-	memberLog := user != s.cfg.Logs.Owner()
 	for _, c := range s.sesConns() {
-		if memberLog && dvlRevoked(c.device, rows) {
+		if !s.sesMayStay(c) {
 			c.Close()
 			continue
 		}
 		s.sesSyncOne(c, user, frames, skip)
 	}
-}
-
-func dvlRevoked(device string, rows []proto.DeviceRow) bool {
-	return slices.ContainsFunc(rows, func(r proto.DeviceRow) bool {
-		return r.Op == "revoke" && r.Device == device
-	})
 }
 
 func (s *Sessions) sesAdopted(user string, skip *sesConn) {

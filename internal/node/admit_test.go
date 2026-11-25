@@ -61,6 +61,7 @@ func TestInvitationJoinAndMemberSurface(t *testing.T) {
 	mustNoErr(t, err)
 	t.Cleanup(loop.Close)
 	ph.sessions.cfg.Home = loop
+	ph.sessions.cfg.Known = func(device string) bool { return ph.logs.Known(device) || ph.pairer.Known(device) }
 	group := sesID("invite-shared")
 	owner := serveConn(t, ph.sessions, admin.ID(), false)
 	checkInviteHello(t, owner, 1, true, 0)
@@ -375,4 +376,127 @@ func sendHomeAdd(t *testing.T, n *clientNodeRig, c *fakeCtl, owner, target ident
 		t.Fatal("the added home is not known for signalling")
 	}
 	checkSingleString(t, n.db, fmt.Sprintf("SELECT url FROM peer WHERE device = '%s'", target.ID()), address)
+}
+
+// The connections of a person who left or was removed end after the groups
+// push, and their devices are unknown, once no group homed here has them.
+func TestRemovedPersonIsDisconnected(t *testing.T) {
+	for _, self := range []bool{false, true} {
+		t.Run(fmt.Sprint(self), func(t *testing.T) { checkRemovedPerson(t, self) })
+	}
+}
+
+func checkRemovedPerson(t *testing.T, self bool) {
+	guest, device := sesKey("removed-guest"), sesKey("removed-guest-node")
+	var n *nodeRuntime
+	var err error
+	renamed := func() error {
+		_, err := n.logs.dvlCommit(guest.ID(), []proto.Envelope{sesAddEntry(guest, guest.ID(), 3, device.ID(), "node", "Renamed")})
+		return err
+	}
+	between := make(chan error, 1)
+	home.After["entry after the removal"] = func(_ *home.State, res home.Result) {
+		if res.Forget != "" {
+			between <- renamed() // the removal is committed, and the log still held
+		}
+	}
+	t.Cleanup(func() { delete(home.After, "entry after the removal") })
+	n, err = openNode(t.Context(), socketRoot(t))
+	mustNoErr(t, err)
+	t.Cleanup(n.Close)
+	ph := &pairHarness{pairer: n.pairer, nodeKey: n.key, clock: newPairClock(time.Now())}
+	n.pairer.cfg.Now = ph.clock.Now
+	admin := adoptTestBrowser(t, n)
+	owner := startAdoptedConn(t, n, admin.ID())
+	log := []proto.Envelope{
+		sesAddEntry(guest, guest.ID(), 1, guest.ID(), "browser", "Guest"),
+		sesAddEntry(guest, guest.ID(), 2, device.ID(), "node", "Guest node"),
+	}
+	first, second := sesID("removal-first"), sesID("removal-second")
+	for _, group := range []proto.ID{first, second} {
+		joinAsGuest(t, ph, owner, admin, guest, group, log)
+	}
+	browser, node := startAdoptedConn(t, n, guest.ID()), startAdoptedConn(t, n, device.ID())
+	browser.next(t) // the owner's log follows the guest's
+	by, conn := admin, owner
+	if self {
+		by, conn = guest, browser
+	}
+	remove := func(group proto.ID) {
+		cmd := inviteCommand(ph, "member", group, string(group)+"-remove")
+		sendInviteCmd(conn, by, 9, proto.MemberCommand{HomeCommand: cmd, Op: "remove", ID: guestMember(group)})
+		mustEqual(t, bool(inviteJoinResult(t, conn).OK), true)
+		waitGroups(t, owner, 2)
+	}
+	remove(first)
+	waitGroups(t, node, 1)
+	mustEqual(t, n.knownPeer(device.ID()), true)
+	remove(second)
+	waitLastGroups(t, browser)
+	waitLastGroups(t, node)
+	mustEqual(t, n.knownPeer(guest.ID()) || n.knownPeer(device.ID()), false)
+	mustEqual(t, n.knownPeer(admin.ID()), true)
+	mustNoErr(t, <-between)
+	mustNoErr(t, renamed())
+	_, err = OpenLogs(n.db, n.key.ID()) // an entry stored without the log would end the next start
+	mustNoErr(t, err)
+}
+
+// The host of AIs of another home has no group to push: the entry itself ends
+// the revoked device's connection.
+func TestRevokedDeviceIsDisconnectedWithoutAGroup(t *testing.T) {
+	n, err := openNode(t.Context(), socketRoot(t))
+	mustNoErr(t, err)
+	t.Cleanup(n.Close)
+	owner, second := adoptTestBrowser(t, n), sesKey("second-browser")
+	_, err = n.logs.dvlCommit(owner.ID(), []proto.Envelope{sesAddEntry(owner, owner.ID(), 3, second.ID(), "browser", "Second")})
+	mustNoErr(t, err)
+	first, revoked := startAdoptedConn(t, n, owner.ID()), startAdoptedConn(t, n, second.ID())
+	first.push(proto.Devlog{Type: "devlog", User: owner.ID(), Entries: []proto.Envelope{sesRevokeEntry(owner, owner.ID(), 4, second.ID())}})
+	select {
+	case <-revoked.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("a revoked device's connection stayed open")
+	}
+	first.pushRaw(`{"t":"sync","id":2,"g":"` + string(sesID("no-group")) + `","since":0,"state_only":false}`)
+	expectErr(t, first.next(t), 2, "not_found")
+}
+
+func waitLastGroups(t *testing.T, c *fakeCtl) {
+	t.Helper()
+	waitGroups(t, c, 0)
+	select {
+	case <-c.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("a removed person's connection stayed open")
+	}
+}
+
+func guestMember(group proto.ID) proto.ID { return sesID(string(group) + "-join") }
+
+func joinAsGuest(t *testing.T, ph *pairHarness, owner *fakeCtl, admin, guest identity.Key, group proto.ID, log []proto.Envelope) {
+	t.Helper()
+	create := proto.GroupCreate{
+		GroupCommand: proto.GroupCommand{HomeCommand: inviteCommand(ph, "group", group, ""), Op: "create"},
+		Name:         "Group", MemberName: "Admin", Kind: "project", Repo: "repo", Base: "main", Forge: "none", Checks: []string{},
+	}
+	create.Nonce = group
+	sendInviteCmd(owner, admin, 7, create)
+	mustEqual(t, bool(inviteJoinResult(t, owner).OK), true)
+	sendInviteCmd(owner, admin, 8, inviteCommand(ph, "invite", group, string(group)+"-invite"))
+	ctl := startJoiningCtl(t, ph, checkInviteLink(t, ph, group, inviteJoinResult(t, owner)), guest)
+	ctl.push(proto.Devlog{Type: "devlog", User: guest.ID(), Entries: log})
+	sendInviteCmd(ctl, guest, 2, proto.Join{HomeCommand: inviteCommand(ph, "join", group, string(group)+"-join"), Name: "Guest"})
+	mustEqual(t, bool(inviteJoinResult(t, ctl).OK), true)
+}
+
+// waitGroups reads c up to the groups push that lists want groups.
+func waitGroups(t *testing.T, c *fakeCtl, want int) {
+	t.Helper()
+	for {
+		var push proto.Groups
+		if proto.Decode(c.next(t), &push) == nil && push.Type == "groups" && len(push.Groups) == want {
+			return
+		}
+	}
 }
