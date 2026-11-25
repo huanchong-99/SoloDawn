@@ -253,6 +253,8 @@ async function pairSecondBrowser(firstPage: Page, secondPage: Page, surface: Dir
   await poll(() => secondPage.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
 }
 
+// The turn stays open after its one question: a person's messages are not held by the wake-up cap,
+// so a secretary whose turn ended would write rows among the ones the test counts.
 function decisionSecretaryScript() {
   return {
     steps: [
@@ -278,16 +280,6 @@ function decisionSecretaryScript() {
         },
       },
       { dir: 'mcp->cli', msg: { jsonrpc: '2.0', id: 1, result: { isError: false } } },
-      {
-        dir: 'stdout',
-        msg: {
-          type: 'result',
-          subtype: 'success',
-          is_error: false,
-          result: 'asked',
-          session_id: '$session',
-        },
-      },
       { dir: 'eof' },
     ],
   };

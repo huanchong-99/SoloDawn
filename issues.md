@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-26 · bug · A turn that ends while the held items are read gives the AI its newer messages first
+
+- Symptom: with 146 items held, `inbox.take` took items 352 to 369 and left 224 to 351, which went to a later turn. [agent-turn](planning/flows/agent-turn.md) B.6 gives a session all its held items, in order.
+- Cause: `isItemHeld` (`internal/host/deliver.go:909`) reads whether the AI is working anew for each item of the queue that `selectEligibleBatch` walks (`internal/host/deliver.go:879`). Items read before the turn ends stay held, and those after it are taken. FLAKY-27 fixed the same race for the group pause.
+- Status: open, found 2026-11-26 in the node log of `web/e2e/m2.spec.ts`.
+
 ### 2026-11-23 · deviation · An agent without a driver cannot join a group
 
 - Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
@@ -733,6 +739,30 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open; the next occurrence needs the host and MCP lines of [diagnostics](planning/contracts/diagnostics.md).
 
 ## Resolved
+
+### 2026-11-25 · bug · The wake-up cap held people's messages and the answers to waiting calls
+
+- Symptom: from the 21st item in an hour on, an AI got a person's message, a decided approval, a confirmed brief or the reply to its call up to an hour late, and no row or screen said so. The secretary, which gets every unaddressed message and every notice, fell silent in a busy hour (gap 6 of the rules audit of 2026-11-25).
+- Cause: `inboxWake` (`internal/home/inbox.go:111` before the fix) exempted only `merge` and `watch` items, whoever caused the item. R-60 limits AIs that wake AIs.
+- Status: resolved in branch `fix/home-items`: the items of a command of a device that hosts no AI of the group, and `reply` items, are neither held nor counted ([commands](planning/contracts/commands.md) 1.3). Test: `TestInboxWakeUpCapHoldsAndReleasesItems`, "people and replies are not held", and `features/home_inbox.feature`.
+
+### 2026-11-26 · bug · E-M2 counted on the wake-up cap to keep its secretary silent
+
+- Symptom: with the people's items let through, `web/e2e/m2.spec.ts` failed on every engine: "History line 1451" was not on the first page, or the first line of the page before was not where it was counted to be.
+- Cause: the test sends 21 messages to a secretary and then 1500, and expects pages of 50 rows that hold only those lines. The old cap of 20 wake-ups held the 1500. Now they wake the secretary, whose fake CLI asks its question on every start and exits at a second turn, so decision cards and `turn_interrupted` rows take places on the pages. No row of the history is missing or moved: the loaded lines are contiguous up to 1500.
+- Status: resolved in branch `fix/home-items`: the fake secretary's one turn stays open (`decisionSecretaryScript`), so the only card is the one from before the 1500 messages.
+
+### 2026-11-25 · bug · A failed sign-in mentioned nobody, and the push of a system row named nobody
+
+- Symptom: a `login_invalid` row reached no person though R-56 says the owner is told, and the push of a `task_failed` row had an empty `who` and no title, so the browser showed an empty body (gap 7 of the same audit, home part).
+- Cause: `hevEventRows` (`internal/home/cmd_hostev.go:150` before the fix) wrote `mentions` `[]`, and `wpushMention` (`internal/home/webpush.go:236` before the fix) looked up the name of the member `system`.
+- Status: resolved in branch `fix/home-items`: `login_invalid` mentions the AI's owner, and `wpushSystem` names the AI of the row, or the assignee and the title of its task. Tests: `TestHostEvEventsAndNotices`, `TestWebPushReminderKindsTitlesAndNoLeak`, `features/home_hostev.feature`, `features/home_webpush.feature`. The notification of an open page is another unit's.
+
+### 2026-11-25 · deviation · `jump` moved another message than the one it named
+
+- Symptom: `jump` on an older message moved the author's newest waiting message of that thread, and one AI only when the message mentioned several.
+- Cause: the rule of [commands](planning/contracts/commands.md) 1.4, implemented by `rndRequeueJump` (`internal/home/rounds.go:60` before the fix), which read of `msg` only its author and thread.
+- Status: resolved in branch `fix/home-items` (coordinator's decision of 2026-11-25): every unacknowledged `mention` item that `msg` produced is sent again with `jump: true`. Test: `TestRoundsJumpRequeuesTheItemsOfItsMessage`.
 
 ### 2026-11-25 · bug · Removing a person left their connections open
 

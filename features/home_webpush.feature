@@ -26,3 +26,11 @@ Feature: Encrypted Web Push reminders from the home
     When the first browser reconnects, turns Web Push off, and disconnects
     And "Codex" posts a text message "Second mention after off" mentioning the owner in "Mobile"
     Then the push endpoint of the first browser receives no further notifications
+
+  Scenario: The owner of an AI whose sign-in failed gets a reminder that names the AI
+    Given a home with the group "Website", two browsers of the owner, and the owner's node hosting "Codex"
+    When the first browser subscribes to Web Push for "mention, approval, decision, brief, done"
+    And the first browser disconnects while the second browser and the owner's node stay connected
+    And the owner's node reports "Codex" in "Website" with "login_invalid" and detail "Token expired."
+    Then the push endpoint of the first browser receives 1 encrypted notification
+    And decrypted by the first browser, the reminder is for group "Website", kind "mention", who "Codex" and title "", with none of "Token expired."

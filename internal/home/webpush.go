@@ -1,6 +1,7 @@
 package home
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"maps"
@@ -39,6 +40,7 @@ const (
 var (
 	wpushExtractors = map[string]func(*State, proto.MsgRow) wpushEvent{
 		"approval": wpushApproval, "decision": wpushDecision, "brief": wpushBrief, "summary": wpushSummary,
+		"system": wpushSystem,
 	}
 	wpushMu    sync.Mutex
 	wpushHomes = map[string]*wpushHome{}
@@ -223,6 +225,17 @@ func wpushSummary(s *State, msg proto.MsgRow) wpushEvent {
 		users = append(users, p.User)
 	}
 	return wpushEvent{kind: "done", who: wpushWho(s, msg.By), title: wpushTitle(s.Tasks[b.Task].Title), users: users}
+}
+
+// wpushSystem is a mention by a row of the home: about the AI its body names,
+// or the assignee of the task its body names.
+func wpushSystem(s *State, msg proto.MsgRow) wpushEvent {
+	var b struct{ AI, Task string }
+	json.Unmarshal(msg.Body, &b)
+	task := s.Tasks[b.Task]
+	ev := wpushMention(s, msg)
+	ev.who, ev.title = wpushWho(s, cmp.Or(b.AI, task.Assignee)), wpushTitle(task.Title)
+	return ev
 }
 
 func wpushMention(s *State, msg proto.MsgRow) wpushEvent {
