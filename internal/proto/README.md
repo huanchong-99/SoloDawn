@@ -55,7 +55,7 @@ host command with `HostCommand` (`to` is always there).
   ([issues](../../issues.md)).
 - `Post[B]` holds what the author signs of the body: the row's body type,
   `EmptyBody` for a summary, `ReviewSigned` for a review, `ConfirmSigned` for a
-  watch confirmation card. The home adds the rest.
+  watch confirmation card, `BulletinSigned` for a bulletin. The home adds the rest.
 - `MemberStatus[E]` carries a host's fact as one of the event types, which are
   the system bodies without `ai`. Read it as `MemberStatus[SystemCode]` first to
   learn the code.
@@ -121,6 +121,9 @@ alone reads four things differently from a browser. An error from `Decode` is
   this type, and so has every id in a command payload, in an `Item`, and `g` of `inbox` and `ack`.
   Of the bodies a `post` carries, a review's, a confirm card's and a bulletin's ids are checked:
   `task` of `ReviewSigned`, `ai` of `ConfirmSigned`, `from` of `BulletinSigned`.
+  The host surface uses it too: `g` of `Home`, `AuditRow`, `PTYResize`, `WatchStart`, `WatchEnd`,
+  `HostJoin`, `HostLeave` and `Reminder`, `msg` of `Reminder`, `ai` of `PTYResize`, `member` of
+  `WatchStart`, `WatchEnd` and `HostLeave`, and `g`, `member` and `task` of `AgentGroup`.
   Rows, the other message bodies and the frames that read
   a group still hold ids as plain strings ([issues](../../issues.md)).
 - **Slugs.** A field of type `Slug` takes 1 to 40 characters, groups of `a` to `z` and `0` to `9`
@@ -145,7 +148,7 @@ and the node, where names follow MCP (`inputSchema`). Its type is `ToolLists`
 the type does not name, not with `Decode`.
 
 - `host.info` is answered with `HostInfo` and pushed as `HostInfoPush`, the same
-  `HostState` without `re` and `ok`. `relay` and an agent's `account` may be `null`;
+  `HostState` without `re` and `ok`. `update`, `relay` and an agent's `account` may be `null`;
   each agent entry carries `Driver` (`Accounts`, `Takeover`) (`step-3/drivers.md` section 6).
 - External AIs add the optional `tool` to AI member rows, `member add_ai`,
   `member set` and `host.join`, which also takes `account` for an external AI.
@@ -161,7 +164,15 @@ the type does not name, not with `Decode`.
   protocol step `v: 2` in `Hello` and `Welcome` (`step-3/knowledge.md` section 8).
 - Presets and knowledge-base documents (`step-3/knowledge.md`) add optional `type`
   (the field `NoteType`, JSON `type`) and `name` on `NoteRow` and `Note` (answered with `id` and `replaced`
-  in `CmdResult`), `preset` on `BriefBody`, and `q` on `FetchKind`.
+  in `CmdResult`), `preset` on `BriefBody`, and `q` on `FetchKind`. The tool lists in
+  `testdata/tools.json` add `kb_put` and `kb_search` to every kind of session and `group` to the
+  secretary's `post`.
+- Member profiles and escalation (`step-3/profiles.md`) add `Profile` (`model`, `effort`,
+  `tier`, `skills`) to AI member rows and `ProfileSet` to `member add_ai`, `member set` and
+  `host.join`, `member` on `HostLeave`, `refresh` on `HostInfoRequest`, `models` (`Model`) on each
+  agent of `host.info`, and `stuck` (`Stuck`) on `TaskRow`.
+- `True` is a boolean that decodes only `true`: `ok` of a success (`Success`), `off` of a push
+  and `jump` of an item.
 - In `SettingsSet`, `caps` is `AgentCaps`: a member per agent being changed, its
   caps whole. A field per agent, not a map, so that every name on the wire is fixed.
 - `pair.browser`, `host.offline` and `host.online` are a `HostCommand` alone;

@@ -18,9 +18,11 @@ node's address needs no server at all.
 | `https://<host>/` | rendezvous | static web client and `install.md` |
 | `http://localhost:47800/` | every node | static web client for the local browser |
 
-A node's ports are fixed in step 1: 47800 (TCP signalling, UDP ICE), 47801
-(ICE-TCP), 47802 (beacon). HTTPS and TURN over TLS share port 443, chosen
-by the TLS server name `[verified, S-6]`, local CA only (`risks.md` T-11).
+A node asks for 47800 (TCP signalling and the local web client, UDP ICE) and
+47801 (ICE-TCP), and takes a free port in place of one that is taken. 47802
+(beacon) is not used: the beacon was cut on 2026-11-21. HTTPS and TURN over
+TLS share port 443, chosen by the TLS server name `[verified, S-6]`, local CA
+only (`risks.md` T-11).
 
 **Local delivery.** On its own handler a node counts as connected under its
 device id, without a WebSocket: a `to` for it reaches it as `from`, its
