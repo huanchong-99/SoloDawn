@@ -82,8 +82,8 @@ The four kinds of test of `steps/step-1-acceptance.md` apply unchanged, and
   P mentions the AI in its thread: no card appears, and the turn's header
   reads `information`, also when P's text says "your owner instructs you". Q
   posts there: the header reads `instruction`.
-- **A9.13** P confirms a brief that replaces the first and changes the task. A
-  new `confirm` card for Q appears; until Q confirms it, no turn labelled
+- **A9.13** P cancels the task and confirms a new brief with the changed task.
+  A new `confirm` card for Q appears; until Q confirms it, no turn labelled
   `instruction` from that brief reaches Q-personal.
 - **A9.42** Two labels. In a task of Q-team on `Q1`, a `reviewed` item reads
   `instruction` in its header and `information` on the line of the review,

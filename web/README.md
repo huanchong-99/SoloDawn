@@ -337,7 +337,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
     `undefined` while no pair is selected or no connection serves. `kind` is `relay` when either
     candidate of the selected pair is a relay candidate and `direct` otherwise; the pair is the
     one the transport statistics name, or the one marked `selected` where there are none.
-  - **For the probe and the move** (`move.ts`, unit W-3): `peer.dial(probe)` offers a connection
+  - **For the probe and the move** (unit W-3, not built: the shell dials with `probe` false only):
+    `peer.dial(probe)` offers a connection
     that is not the peer's own, a probe without TURN entries; `connection.opened`, `closed`,
     `hello()` and `request()` drive it; `peer.adopt(connection, welcome)` makes it the one that
     serves and closes every other connection the peer dialled; `peer.hold()` keeps a loss from
@@ -796,13 +797,12 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
 - Onboarding (`routes/Onboarding.svelte`, `lib/onboard.svelte.ts`, `lib/owner.ts`,
   `components/pairing/`) pairs a node or joins from a `#pair=<secret>` link, stores the owner's
   device log in IndexedDB (`solodawn`, store `device`, key `owner`), asks for persistent storage
-  once enrolled, and sends `agent.set`; the rest of the pages are not yet wired to `peer.ts`
-  (`net.svelte.ts`).
-- `peer.ts` has run against fakes only. No browser has opened a connection with it, and how each
-  browser's statistics name the selected pair is not verified; unit I-8 runs the three browsers.
+  once enrolled, and sends `agent.set`; the other pages reach their nodes through `peer.ts`, by way
+  of `net.svelte.ts`.
+- `peer.ts` runs against real nodes in the end-to-end tests (`e2e/connect.spec.ts`), in the three
+  browsers.
 - The manifest has an SVG icon only.
-- Outside onboarding, no page has a connection to a node yet, so the built client lists no group
-  and no computer. A development server (`pnpm dev`) shows the one computer and the one group of
+- A development server (`pnpm dev`) shows the one computer and the one group of
   the wire examples, unless the address has `?nomock`; the mock answers every command with a bare
   `ok` and pushes no row, so a message sent there does not appear, an account choice does not
   update `host.info`, and `pair.browser` returns no link.
@@ -818,9 +818,7 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   their page.
 - Cards and the rows a home writes are one line each in the main line, and Safari moves the main
   line when a message arrives while the reader is scrolled back (`issues.md`).
-- The end-to-end harness runs on macOS and Linux only. Until the node runtime is wired (N-4),
-  `solodawn node` exits right after making its data directory, so a test cannot await a running
-  node yet, and a node has no address but its local socket (`issues.md`).
+- The end-to-end harness runs on macOS and Linux only (`issues.md`).
 
 ## Verification and sources
 
@@ -864,7 +862,7 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
   have run in Node only; IndexedDB has run as `fake-indexeddb` only. Running them in the three
   browsers is task F-01c.
 - Importing `decode` and `Frame` adds about 7.6 KiB to the bundle, 2.6 KiB gzipped (measured
-  with `valibot` 1.5.0 on 2026-11-20). Nothing in the application imports them yet.
+  with `valibot` 1.5.0 on 2026-11-20). `peer.ts` imports `Frame`.
 - The group list and the chat have unit tests beside `groups.svelte.ts`, `compose.ts` and
   `when.ts`, and two acceptance features, `../features/web_groups.feature` (A2.1, A2.2, A2.6 and
   the reset of round 3, R3-5) and `../features/web_chat.feature`. Their steps mount
