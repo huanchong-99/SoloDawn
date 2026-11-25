@@ -79,6 +79,8 @@ func s3LiveStart(agent, dir, marker string, repoConfig bool) error {
 }
 
 func s3AwaitReady(ctx context.Context, agent string, events <-chan host.Event) error {
+	var saw trail
+	start := time.Now()
 	for {
 		select {
 		case event, ok := <-events:
@@ -88,8 +90,9 @@ func s3AwaitReady(ctx context.Context, agent string, events <-chan host.Event) e
 			if event.Kind == host.Ready {
 				return nil
 			}
+			saw.see(string(event.Kind))
 		case <-ctx.Done():
-			return ctx.Err()
+			return ctxEnded(ctx, start, agent+" to be ready", &saw)
 		}
 	}
 }

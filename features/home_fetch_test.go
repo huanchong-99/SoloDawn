@@ -28,6 +28,7 @@ type homeFetchWorld struct {
 	browser   identity.Key
 	conn      *home.Conn
 	frames    chan any
+	saw       trail
 	group     string
 	task      string
 	otherTask string
@@ -225,18 +226,17 @@ func (w *homeFetchWorld) writeItem(item homeFetchWrite) error {
 }
 
 func (w *homeFetchWorld) nextJSON() (string, error) {
-	select {
-	case frame := <-w.frames:
-		var b bytes.Buffer
-		e := json.NewEncoder(&b)
-		e.SetEscapeHTML(false)
-		if err := e.Encode(frame); err != nil {
-			return "", err
-		}
-		return strings.TrimSuffix(b.String(), "\n"), nil
-	case <-time.After(10 * time.Second):
-		return "", fmt.Errorf("timed out waiting for frame")
+	frame, err := recvFrame(w.frames, 10*time.Second, &w.saw, briefAny)
+	if err != nil {
+		return "", err
 	}
+	var b bytes.Buffer
+	e := json.NewEncoder(&b)
+	e.SetEscapeHTML(false)
+	if err := e.Encode(frame); err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(b.String(), "\n"), nil
 }
 
 func (w *homeFetchWorld) seedThreads(cleanup func(func())) error {

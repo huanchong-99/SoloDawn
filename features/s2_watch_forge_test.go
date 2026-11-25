@@ -484,19 +484,16 @@ func (f *s2ForgeWorld) waitTaskCleanup(node *s2Node, id string, dirs []string) e
 }
 
 func s2ForgeWaitCleanup(ctx context.Context, db *store.Store, group proto.ID, id string, dirs []string) error {
-	tick := time.NewTicker(time.Second)
-	defer tick.Stop()
-	for {
+	return waitUntilCtx(ctx, time.Second, "the forge sessions to go", func() error {
 		gone, err := s2ForgeSessionsGone(db, group, id, dirs)
-		if err != nil || gone {
-			return err
+		if err != nil {
+			return abort(err)
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-tick.C:
+		if !gone {
+			return errors.New("sessions remain")
 		}
-	}
+		return nil
+	})
 }
 
 func s2ForgeSessionsGone(db *store.Store, group proto.ID, id string, dirs []string) (bool, error) {
@@ -543,23 +540,22 @@ func (f *s2ForgeWorld) verifyRecorded() error {
 }
 
 func (f *s2ForgeWorld) verifyTitle() error {
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		calls, err := f.c.ForgeCalls()
-		if err != nil {
-			return err
+	var calls []s2ForgeCall
+	i := -1
+	err := waitUntilCtx(f.c.Ctx, 10*time.Millisecond, "the forge to be called with watch-open", func() error {
+		var err error
+		if calls, err = f.c.ForgeCalls(); err != nil {
+			return abort(err)
 		}
-		i := slices.IndexFunc(calls, func(call s2ForgeCall) bool { return len(call.Args) > 0 && call.Args[0] == "watch-open" })
-		if i >= 0 {
-			return f.checkTitleOpen(calls, calls[i])
+		if i = slices.IndexFunc(calls, func(call s2ForgeCall) bool { return len(call.Args) > 0 && call.Args[0] == "watch-open" }); i < 0 {
+			return fmt.Errorf("%d forge calls", len(calls))
 		}
-		select {
-		case <-f.c.Ctx.Done():
-			return f.c.Ctx.Err()
-		case <-tick.C:
-		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
+	return f.checkTitleOpen(calls, calls[i])
 }
 
 func (f *s2ForgeWorld) checkTitleOpen(calls []s2ForgeCall, open s2ForgeCall) error {

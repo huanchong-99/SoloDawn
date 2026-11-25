@@ -98,6 +98,74 @@ func recvWait[T any](w *wait, ch <-chan T) (T, error) {
 	}
 }
 
+// waitUntilCtx is waitUntilEvery for the time that ctx has left; a cancelled
+// ctx ends it with ctx.Err().
+func waitUntilCtx(ctx context.Context, every time.Duration, what string, check func() error) error {
+	left := time.Hour
+	if deadline, ok := ctx.Deadline(); ok {
+		left = time.Until(deadline)
+	}
+	return waitUntilEvery(every, left, what, func() error {
+		if ctx.Err() == context.Canceled {
+			return abort(ctx.Err())
+		}
+		return check()
+	})
+}
+
+// recvCtx takes one value from ch until ctx ends. A context that ran out
+// fails it in the form of a wait, with the time it waited; one that was
+// cancelled gives ctx.Err(). saw may be nil.
+func recvCtx[T any](ctx context.Context, ch <-chan T, what string, saw *trail) (T, error) {
+	start := time.Now()
+	select {
+	case v := <-ch:
+		return v, nil
+	case <-ctx.Done():
+		var none T
+		return none, ctxEnded(ctx, start, what, saw)
+	}
+}
+
+func ctxEnded(ctx context.Context, start time.Time, what string, saw *trail) error {
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return ctx.Err()
+	}
+	return cmp.Or(saw, new(trail)).timedOut(time.Since(start).Round(100*time.Millisecond), what)
+}
+
+// recvFrame takes the next frame from ch within d. The frames taken before
+// are listed when it fails; saw is the trail of the source of the frames.
+func recvFrame[T any](ch <-chan T, d time.Duration, saw *trail, brief func(T) string) (T, error) {
+	w := newWait(d, "a frame", saw)
+	defer w.stop()
+	v, err := recvWait(w, ch)
+	if err == nil {
+		saw.see(brief(v))
+	}
+	return v, err
+}
+
+// briefAny is frameBrief for a frame that is still a Go value.
+func briefAny[T any](frame T) string {
+	raw, err := json.Marshal(frame)
+	if err != nil {
+		return fmt.Sprintf("%T", frame)
+	}
+	return frameBrief(raw)
+}
+
+func briefString(frame string) string { return frameBrief([]byte(frame)) }
+
+// tailOf is the last 200 bytes of an output, for a reading that is a whole
+// terminal screen or log.
+func tailOf(s string) string {
+	if len(s) <= 200 {
+		return s
+	}
+	return "..." + s[len(s)-200:]
+}
+
 // aborted is the error of a check that ends waitUntil at once.
 type aborted struct{ error }
 
@@ -107,9 +175,14 @@ func abort(err error) error { return aborted{err} }
 // check returns instead is what it saw: the readings are listed when the wait
 // fails. A check that returns abort(err) ends the wait with err.
 func waitUntil(d time.Duration, what string, check func() error) error {
+	return waitUntilEvery(pollEvery, d, what, check)
+}
+
+// waitUntilEvery is waitUntil with a pause between the calls of check.
+func waitUntilEvery(every, d time.Duration, what string, check func() error) error {
 	w := newWait(d, what, nil)
 	defer w.stop()
-	tick := time.NewTicker(pollEvery)
+	tick := time.NewTicker(every)
 	defer tick.Stop()
 	for {
 		err := check()
@@ -303,4 +376,83 @@ func envValue(env []string, key string) string {
 		}
 	}
 	return ""
+}
+
+type requester interface {
+	Request(context.Context, func(int64) any) (json.RawMessage, error)
+}
+
+// requestWait sends a request on conn and waits for its answer; when ctx runs
+// out of time it fails in the form of a wait.
+func requestWait(ctx context.Context, conn requester, saw *trail, build func(int64) any) (json.RawMessage, error) {
+	start := time.Now()
+	var sent any
+	wrap := func(id int64) any {
+		sent = build(id)
+		return sent
+	}
+	raw, err := conn.Request(ctx, wrap)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nil, ctxEnded(ctx, start, "the answer to "+requestBrief(sent), saw)
+	}
+	return raw, err
+}
+
+func requestBrief(sent any) string {
+	raw, err := json.Marshal(sent)
+	if err != nil {
+		return fmt.Sprintf("%T", sent)
+	}
+	var req struct {
+		T   string `json:"t"`
+		ID  *int64 `json:"id"`
+		G   string `json:"g"`
+		Env struct {
+			Payload string `json:"p"`
+		} `json:"env"`
+	}
+	if json.Unmarshal(raw, &req) != nil || req.T == "" {
+		return fmt.Sprintf("%.60q", raw)
+	}
+	return formatRequestBrief(req.T, req.ID, req.G, req.Env.Payload)
+}
+
+func formatRequestBrief(typ string, id *int64, group, payload string) string {
+	t, g := cmdPayloadBrief(typ, group, payload)
+	parts := []string{"t=" + t}
+	if id != nil {
+		parts = append(parts, fmt.Sprintf("re=%d", *id))
+	}
+	if g != "" {
+		parts = append(parts, "g="+g)
+	}
+	return strings.Join(parts, " ")
+}
+
+func cmdPayloadBrief(typ, group, payload string) (string, string) {
+	if payload == "" {
+		return typ, group
+	}
+	var cmd struct {
+		T  string `json:"t"`
+		Op string `json:"op"`
+		G  string `json:"g"`
+	}
+	if json.Unmarshal([]byte(payload), &cmd) != nil || cmd.T == "" {
+		return typ, group
+	}
+	name := typ + "/" + cmd.T
+	if cmd.Op != "" {
+		name += "/" + cmd.Op
+	}
+	return name, cmp.Or(group, cmd.G)
+}
+
+// ctxCallErr turns a deadline failure of a context-bound call into the form of
+// a wait; any other error is returned as is.
+func ctxCallErr(ctx context.Context, start time.Time, what string, saw *trail, err error) error {
+	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return ctxEnded(ctx, start, what, saw)
+	}
+	return err
 }

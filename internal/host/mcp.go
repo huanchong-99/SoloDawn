@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -104,7 +105,7 @@ func (h *Host) invokeTool(ctx context.Context, token, name string, raw json.RawM
 	}
 	done := h.Sessions.Calling(caller.SessionKey)
 	defer done()
-	return h.runToolCall(ctx, caller, tool.Call, raw)
+	return h.runToolCall(ctx, caller, name, tool.Call, raw)
 }
 
 // mcpCaller is the caller a session token, or an external AI's member id,
@@ -116,12 +117,14 @@ func (h *Host) mcpCaller(token string) (Caller, bool) {
 	return externalCaller(h, token)
 }
 
-func (h *Host) runToolCall(ctx context.Context, caller Caller, call func(context.Context, *Host, Caller, json.RawMessage) (any, error), raw json.RawMessage) *mcp.CallToolResult {
+func (h *Host) runToolCall(ctx context.Context, caller Caller, name string, call func(context.Context, *Host, Caller, json.RawMessage) (any, error), raw json.RawMessage) *mcp.CallToolResult {
 	args := raw
 	if len(args) == 0 {
 		args = json.RawMessage("{}")
 	}
+	start := time.Now()
 	value, err := call(ctx, h, caller, args)
+	h.diag.Info("tool", diagSession(caller.SessionKey, "name", name, "code", diagCode(err), "ms", time.Since(start).Milliseconds())...)
 	if err != nil {
 		return toolFailureResult(err)
 	}

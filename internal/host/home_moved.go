@@ -44,7 +44,7 @@ func (d *delivery) announcedGroups(device string, present map[string]bool) []str
 
 func settleHomeSync(h *Host, d *delivery, device, group string, answer json.RawMessage, ok, refresh bool) {
 	if ok {
-		d.wg.Go(func() { afterGroupState(h, d, group) })
+		h.bg(d.wg.Go, "group_state", func() { afterGroupState(h, d, group) }, "g", group)
 	} else if target := movedHome(answer); target != "" {
 		if err := followMovedHome(h, device, group, target); err != nil {
 			log.Printf("host: follow moved group: %v", err)

@@ -272,12 +272,9 @@ func (w *choiceWorld) keptID() error {
 }
 
 func (w *choiceWorld) notice() (json.RawMessage, error) {
-	select {
-	case raw := <-w.home.notices:
-		return raw, nil
-	case <-time.After(10 * time.Second):
-		return nil, fmt.Errorf("no model-choice host notice")
-	}
+	wt := newWait(10*time.Second, "the model-choice host notice", nil)
+	defer wt.stop()
+	return recvWait(wt, w.home.notices)
 }
 
 func (w *choiceWorld) run(name string, resume, refused bool) error {

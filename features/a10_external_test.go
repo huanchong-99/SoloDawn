@@ -334,15 +334,14 @@ func (w *externalWorld) startWait() {
 }
 
 func (w *externalWorld) finishWait(code int) error {
-	select {
-	case got := <-w.wait:
-		if code == 0 {
-			return w.readHandout(got)
-		}
-		return got.expect(code)
-	case <-w.ctx.Done():
-		return w.ctx.Err()
+	got, err := recvCtx(w.ctx, w.wait, "the blocking wait to exit", nil)
+	if err != nil {
+		return err
 	}
+	if code == 0 {
+		return w.readHandout(got)
+	}
+	return got.expect(code)
 }
 
 func (w *externalWorld) keepWaiting() error {
@@ -417,12 +416,22 @@ func (w *externalWorld) openMCP() error {
 }
 
 func (w *externalWorld) connect(member string) (*mcp.ClientSession, error) {
+	start := time.Now()
 	client := mcp.NewClient(&mcp.Implementation{Name: "external-acceptance", Version: "1"}, nil)
-	return client.Connect(w.ctx, &mcp.CommandTransport{Command: w.command("mcp", "--member", member)}, nil)
+	session, err := client.Connect(w.ctx, &mcp.CommandTransport{Command: w.command("mcp", "--member", member)}, nil)
+	if err != nil {
+		return nil, ctxCallErr(w.ctx, start, "external MCP connect", nil, err)
+	}
+	return session, nil
 }
 
 func (w *externalWorld) call(name string, args any) (*mcp.CallToolResult, error) {
-	return w.mcp.CallTool(w.ctx, &mcp.CallToolParams{Name: name, Arguments: args})
+	start := time.Now()
+	res, err := w.mcp.CallTool(w.ctx, &mcp.CallToolParams{Name: name, Arguments: args})
+	if err != nil {
+		return nil, ctxCallErr(w.ctx, start, "external MCP tool "+name, nil, err)
+	}
+	return res, nil
 }
 
 func externalResult(result *mcp.CallToolResult) ([]byte, error) {
@@ -468,10 +477,11 @@ func (w *externalWorld) listedTools() error {
 	for _, t := range golden.External.Tools {
 		want = append(want, t.Name)
 	}
+	start := time.Now()
 	var got []string
 	for tool, err := range w.mcp.Tools(w.ctx, nil) {
 		if err != nil {
-			return err
+			return ctxCallErr(w.ctx, start, "external MCP Tools", nil, err)
 		}
 		got = append(got, tool.Name)
 	}
@@ -528,6 +538,7 @@ func expectExternalNone(raw []byte) error {
 func (w *externalWorld) rejectsMCP(member string) error {
 	ctx, cancel := context.WithTimeout(w.ctx, 5*time.Second)
 	defer cancel()
+	start := time.Now()
 	client := mcp.NewClient(&mcp.Implementation{Name: "external-acceptance", Version: "1"}, nil)
 	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: w.command("mcp", "--member", member)}, nil)
 	if err == nil {
@@ -535,7 +546,7 @@ func (w *externalWorld) rejectsMCP(member string) error {
 		return fmt.Errorf("MCP connected for invalid member %q", member)
 	}
 	if ctx.Err() != nil {
-		return fmt.Errorf("MCP did not close promptly: %w", ctx.Err())
+		return ctxEnded(ctx, start, "external MCP connect rejection", nil)
 	}
 	return nil
 }
