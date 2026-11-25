@@ -157,8 +157,7 @@ type extBubble struct {
 func runExtBubble(suiteT *testing.T, run func(*extBubble) error) error {
 	var stepErr error
 	base := suiteT.TempDir()
-	prevDrivers, prevCompose, prevInstr := maps.Clone(host.Drivers), host.Compose, host.Instructions
-	defer func() { host.Drivers, host.Compose, host.Instructions = prevDrivers, prevCompose, prevInstr }()
+	defer saveHLHooks()()
 	synctest.Test(suiteT, func(t *testing.T) {
 		installHLHooks(&hlDriver{})
 		host.Instructions = func(s host.Session) string { return "instructions of " + string(s.Kind) }
