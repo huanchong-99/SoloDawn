@@ -105,7 +105,7 @@ func TestInvitationJoinAndMemberSurface(t *testing.T) {
 	select {
 	case <-probe.Done():
 	case <-time.After(5 * time.Second):
-		t.Fatal("invitation expiry did not close the unadmitted connection")
+		t.Fatal(timedOut(5*time.Second, "the invitation expiry to close the unadmitted connection", nil))
 	}
 
 	cmd.Timestamp = ph.clock.Now().UnixMilli()
@@ -241,7 +241,7 @@ func checkMemberRevocation(t *testing.T, ph *pairHarness, owner, node *fakeCtl, 
 	select {
 	case <-node.Done():
 	case <-time.After(5 * time.Second):
-		t.Fatal("revoked member device remained connected")
+		t.Fatal(timedOut(5*time.Second, "the revoked member device to disconnect", nil))
 	}
 	if ph.logs.Known(device.ID()) {
 		t.Fatal("revoked device remains known")

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -226,12 +227,12 @@ func (r *tkRig) lastState(member string) any {
 
 func (r *tkRig) waitFor(desc string, ok func() bool) {
 	r.t.Helper()
-	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+	poll(r.t, 15*time.Second, desc, func() string {
 		if ok() {
-			return
+			return ""
 		}
-	}
-	r.t.Fatalf("timed out waiting for %s", desc)
+		return fmt.Sprintf("turns=%d delivered=%d sessions=%s", r.drv.count(), len(r.delivered), sessionStates(r.h))
+	})
 }
 
 func (r *tkRig) held(member string) bool {
@@ -701,7 +702,7 @@ func TestTakeoverClosesOnRelayOnALostConnectionAndUnattached(t *testing.T) {
 		select {
 		case r.owner.changed <- struct{}{}:
 		case <-time.After(15 * time.Second):
-			t.Fatal("the watch stopped reading path changes")
+			t.Fatal(timedOut(15*time.Second, "the watch to read a path change", nil))
 		}
 	}
 	if !r.open(tkSec) {
@@ -881,7 +882,7 @@ func TestSettleEndsARunningHandBackTurn(t *testing.T) {
 	select {
 	case <-settled:
 	case <-time.After(15 * time.Second):
-		t.Fatal("Settle blocked during a hand-back turn")
+		t.Fatal(timedOut(15*time.Second, "Settle to return during a hand-back turn", nil))
 	}
 	if len(r.delivered) != 0 {
 		t.Fatal("a hand-back delivered after Settle")
@@ -900,7 +901,7 @@ func waitHandBackTurn(t *testing.T, started <-chan *fakeProc) {
 		}
 	case <-timeout:
 	}
-	t.Fatal("hand-back turn did not start")
+	t.Fatal(timedOut(15*time.Second, "the hand-back turn to start", nil))
 }
 
 func TestHandBackOfAHeldAIStartsNoTurn(t *testing.T) {
@@ -991,7 +992,7 @@ func TestTakeoverFakeOwnerSetPathNeverBlocksWhenTheWatchLeavesASignalUnread(t *t
 		<-r.owner.changed
 		<-sent
 		close(relay)
-		t.Fatal("setPath stayed blocked on a full signal channel after the watch left")
+		t.Fatal(timedOut(3*time.Second, "setPath on a full signal channel after the watch left", nil))
 	}
 	close(relay)
 	r.waitReleased(tkSec)

@@ -661,7 +661,7 @@ func TestSessionTableIsReadInsideATransaction(t *testing.T) {
 				t.Fatal(err)
 			}
 		case <-time.After(10 * time.Second):
-			t.Fatal("a reader of the table and a change of it wait for each other")
+			t.Fatal(timedOut(10*time.Second, "a reader of the table and a change of it", nil))
 		}
 	}
 	if seamState(t, h.Sessions, seamTask) != Working {

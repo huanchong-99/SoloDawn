@@ -68,8 +68,7 @@ func (d *diagLog) expect(t *testing.T, line string) int {
 		case <-timeout:
 			d.mu.Lock()
 			defer d.mu.Unlock()
-			saw := d.lines[max(0, len(d.lines)-20):]
-			t.Fatalf("timed out after 10s waiting for %q; saw %d: %q", line, len(saw), saw)
+			t.Fatal(timedOut(10*time.Second, fmt.Sprintf("%q", line), d.lines))
 		}
 	}
 }

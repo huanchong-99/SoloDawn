@@ -833,6 +833,17 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a card that asks an owner "may Pat direct your AI?" showed only in the chat: not in "Waiting on you", the group's count, the in-page notifications or the browser push, so it could expire unseen. A task held by such a card, and a task whose owner had taken over the terminal, showed "In progress". `member_joined`, `member_removed`, `rate_limited`, `rounds_limit`, `preempted`, `group_paused` and `group_resumed` showed as their codes. A card for a role named the secretary, who writes the brief, instead of the person who confirmed it.
 - Cause: the lists of kinds in `waitsFor` and `subject` (`web/src/lib/groups.svelte.ts`), `reminderKinds` (`web/src/lib/push.ts`), `waitingKinds` and the `by: "system"` early return of `classify` (`web/src/lib/notify.svelte.ts`) and `kindLabels` (`web/src/sw.ts`) had no `confirm`; `waitBadge` and `taskBadge` (`web/src/lib/task.ts`) and `SystemRow.svelte` had no case for them, left out while those features were postponed.
 - Status: resolved. Tests: `web/src/lib/{confirm,groups,notify,push,task,when}.test.ts`, `web/src/sw.test.ts`, the group, approval, notification, reminder, task and thread features.
+### 2026-11-24 · bug · A scenario could restore the host drivers while another node discovered agents
+
+- Symptom: the Linux `-race` acceptance job reported a data race in A1.1 (`features/node_pair.feature:5`): a write of `host.Drivers` at `features/host_limits_test.go:237` against a read in `agtModels` (`internal/host/models.go:17`), from a `Pairer.Serve` goroutine started at `features/helpers_test.go:648`.
+- Cause: `hostLimitsSteps` registered the restore of `host.Drivers`, `host.Compose` and `host.Instructions` in `afterScenario` for every scenario of the suite (`features/host_limits_test.go:232-240`), not only for the host limits scenarios that replace them. So A1.1's own cleanup rewrote the global while its paired node, still serving, read it.
+- Status: resolved on `devin/race-store-drivers` in the test harness: `saveHLHooks` saves the three hooks and the three host limits bubbles and the host external run restore them with `defer` around the work that replaced them, so no other scenario writes them. `Drivers` stays a package-level registry: the product writes it only at package init (`Register` in each driver file), and only tests replace it.
+
+### 2026-11-24 · bug · A restarted host was settled while its home loop could still push to it
+
+- Symptom: the Linux `-race` acceptance job reported a data race in A4.3: `Store.Close` closing the write queue (`internal/store/store.go:73`, from `nodetest.Node.Close`) against `onWriter` sending on it (`:95`), from `projectDir` (`internal/host/run.go:184`) in `cleanupGroupState`, started by `pushRows` (`internal/host/deliver.go:347`).
+- Cause: the scenario's second host. `restartHost` (`features/m4_test.go`) registered `link2.Close(); h2.Settle()` as its cleanup, which ran while the node's home loop was still open. The pump of `link2` could be inside `pushRows`: `h2.Settle` returned, then `pushRows` started `afterGroupState` on `h2` (`internal/host/deliver.go:347-348`). The node's own cleanup then closed the store, and it settles only the first host, so nothing waited for `h2` again. The product cannot reach this: `nodeRuntime.closeCore` and `nodetest.Node.StopHome` close the home loop between the link and the settle, and `Loop.Close` waits for every pump, so no push is in progress when `Host.Settle` starts. Only an acceptance scenario that restarts a host settles it while its home stays open.
+- Status: resolved on `devin/race-store-drivers` in the test harness: the cleanup of the restarted host in `features/m4_test.go` and `features/m3_test.go` is `link.Close(); n.StopHome(); h2.Settle()`, and the M3 restart host, which was never settled, is now settled. Proved with a build overlay that sleeps 150 ms before the `d.wg.Go` in `pushRows`: A4.3 fails under `-race` on `rebuild` and passes with the fix. Limit: the mid-scenario `activeLink.Close(); activeHost.Settle()` in `restartHost` can still leave a late push on the first host; it cannot reach a closed store, because `Node.Close` settles that host again.
 
 ### 2026-11-23 · bug · FLAKY-29: the fake Qwen Code started OpenCode's MCP server
 
@@ -942,6 +953,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: A9.24 can report an unexpected `watch-checks` call for the first commit of the task that is reassigned.
 - Cause: `internal/host/deliver.go:1378-1379` can select a stale `cloud_check` row after `tskFinishCloud` releases the polling slot, even after the task has reached review. The home acknowledges the result before sending the updated row (`internal/home/run_group.go:170-171`).
 - Status: resolved in PR #335. The host keeps claims for accepted and superseded commits, while allowing retries after failed result delivery or an accepted resubmission. `TestStaleCloudCheckRowDoesNotRestartCompletedPoll` verifies that resuming from a stale row does not make a second forge call.
+
+### 2026-11-25 · bug · The answer to a CLI's question could outlive the host's Settle and crash the node
+
+- Symptom: `Settle` returned while `runAskedEvent` still ran; `bg.stop name=ask` followed `settle.end`. With a card open it only waited, but an ask that had not posted its card yet, or whose post failed with the connection, wrote to the store after the node closed it: `panic: send on closed channel` (`internal/store/store.go:95`).
+- Cause: `startAskedGoroutine` (`internal/host/approve.go:110`) started it with a plain `go` statement; only `TurnBegan` and `TurnEnded` of its session cancelled it, and no `Settled` entry did. The goroutines of a watched terminal (`internal/host/watch.go:99` and `:173`) are not waited for either; they end with their connection, which `node` closes first, and touch no store.
+- Status: resolved on `fix/host-cloud-poll-settle`: the asks run on the runtime's wait group, and `Settle` (entry `"runtime"`) cancels them after it has ended the CLI processes and waits. `TestSettleWaitsForAnAskWithTheHomeClosed` and `TestSettleEndsAnAskWhoseCardIsBeingPosted` fail with the old `go` statement.
+
+### 2026-11-25 · bug · The hosted checks poll could send a command after the host settled
+
+- Symptom: after `Settle` a poll of hosted checks still ran, and the result it got sent `task cloud`, so `bg.stop name=cloud_poll` and the command could follow `settle.end`.
+- Cause: `startHostedCheck` (`internal/host/tools_task.go:463`) started the poll with a plain `go` statement, and no `Settled` entry ended it or waited for it.
+- Status: resolved on `fix/host-cloud-poll-settle`, with the pattern of `limits.go`: the polls run on `tskPart.wg`, and `Settle` (entry `"task"`) cancels them and waits. `TestSettleEndsTheHostedChecksPoll` checks that the poll has stopped when `Settle` returns and that none starts afterwards; it fails with the old `go` statement.
 
 ### 2026-11-22 · limitation · Browser invitation joining needs the node and home implementations
 
