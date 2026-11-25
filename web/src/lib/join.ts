@@ -79,8 +79,9 @@ export function presentLog(ctl: { send?(frame: Devlog): void }, log: DeviceLog) 
   ctl.send!(frame);
 }
 
-function homeNotice(node: Home, invitation: Invitation, name: string, url: string) {
-  const { g, home } = invitation;
+type GroupHome = Pick<Invitation, 'g' | 'home'>;
+
+function homeNotice(node: Home, { g, home }: GroupHome, name: string, url: string) {
   return node.me.sign(
     JSON.stringify({
       t: 'home.add',
@@ -104,6 +105,12 @@ async function sendNotice(node: Home, env: Envelope) {
 async function notify(nodes: Home[], envelopes: Envelope[]) {
   const results = await Promise.all(nodes.map((node, i) => sendNotice(node, envelopes[i])));
   return results.filter((result) => result !== undefined);
+}
+
+/** Tells one of the person's nodes the home of a group (contracts/step-2/people.md section 7,
+ *  point 2). */
+export async function addHome(node: Home, group: GroupHome, name: string, url: string) {
+  await sendNotice(node, await homeNotice(node, group, name, url));
 }
 
 function abortPending(signal: AbortSignal, failed: (code: string) => void) {

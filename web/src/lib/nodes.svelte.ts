@@ -3,8 +3,9 @@
 // the four states of the connection indicator (planning/flows/connect.md step 8 and section E).
 import { SvelteMap } from 'svelte/reactivity';
 import { lost, newId, type Group, type Home } from './groups.svelte';
+import { addHome } from './join';
 import type { Net, Path } from './net.svelte';
-import { setAccount, type AccountKind } from './onboard.svelte';
+import { setAccount, signalUrlOf, type AccountKind } from './onboard.svelte';
 import type * as p from './proto';
 
 /** Visual states of the connection indicator. */
@@ -54,12 +55,19 @@ function activeCtl(home: Home): p.Ctl | undefined {
   return home.owner ? home.ctl : undefined;
 }
 
+/** Whether a computer of the owner learns the home of `group` from this browser alone: no AI
+ *  joins a team group, and another person's computer is known by `home.add` only. */
+const unheard = ({ home, info }: Group) => !home.owner || info?.kind === 'team';
+
 /** Holds the latest `host.info` of each owned computer, refreshes it when an owner node connects
  *  or after `agent.set`, and sends `pair.browser`. */
 export class Nodes {
   /** The latest `host.info` state for each owned `Home`. */
   readonly infos = new SvelteMap<Home, p.HostInfoPush>();
   #asked = new WeakMap<Home, p.Ctl | undefined>();
+  // Per connection, the groups whose home the node knows: those of its `host.info`, and those it
+  // was told since, whatever it answered.
+  #known = new WeakMap<p.Ctl, Set<string>>();
 
   /** Requests `host.info` for each newly online owner `Home` in `homes`, or every online owner
    *  `Home` when `again` is true. */
@@ -70,6 +78,21 @@ export class Nodes {
       this.#asked.set(home, ctl);
       if (ctl) void this.#read(home, ctl);
     }
+  }
+
+  /** Tells each owned computer the homes it needs and does not list in `host.info`, once per
+   *  connection (contracts/step-2/people.md section 7, point 2). */
+  tell(homes: readonly Home[]) {
+    const groups = homes.flatMap((home) => home.groups).filter(unheard);
+    for (const [node] of this.infos)
+      for (const group of groups) if (group.home !== node) this.#tell(node, group);
+  }
+
+  #tell(node: Home, { g, name, home }: Group) {
+    const known = node.ctl && this.#known.get(node.ctl);
+    if (!known || known.has(g)) return;
+    known.add(g);
+    void addHome(node, { g, home: home.device }, name, signalUrlOf());
   }
 
   /** Lists the owner's computers from `net.homes`, with each node's latest `host.info` and path. */
@@ -117,7 +140,14 @@ export class Nodes {
     const answer = await ctl.request({ t: 'host.info', ...(refresh && { refresh }) }).catch(lost);
     if (home.ctl !== ctl || answer.err) return;
     const { re: _re, ok: _ok, ...info } = answer;
+    this.#learn(ctl, info);
     this.infos.set(home, info);
+  }
+
+  #learn(ctl: p.Ctl, { homes }: p.HostInfoPush) {
+    const known = this.#known.get(ctl) ?? new Set();
+    for (const { g } of homes) known.add(g);
+    this.#known.set(ctl, known);
   }
 }
 
