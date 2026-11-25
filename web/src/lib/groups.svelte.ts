@@ -439,15 +439,15 @@ export class Home {
     this.groups = this.groups.filter((item) => item !== group);
   }
 
-  /** A group new in this node's list that a home out of reach still holds: it was restored here
+  /** A group new in this node's list. One that a home out of reach still holds was restored here
    *  from a copy (contracts/step-2/export.md section 4), whose rows may be older, so it is read
    *  from the start. */
-  #restored(g: string) {
+  #enter(g: string) {
     const group = homes
       .filter((home) => !home.ctl)
       .flatMap((home) => home.groups)
       .find((item) => item.g === g);
-    if (!group) return undefined;
+    if (!group) return new Group(this, g);
     group.home.#drop(group);
     group.home = this;
     group.cursor = 0;
@@ -461,7 +461,7 @@ export class Home {
     const held = this.groups;
     const unread: Group[] = [];
     const next = listed.map(({ g, name }) => {
-      const group = this.#find(g) ?? this.#restored(g) ?? new Group(this, g);
+      const group = this.#find(g) ?? this.#enter(g);
       if (this.#unlisted.delete(g) || !held.includes(group)) unread.push(group);
       group.name = name;
       return group;

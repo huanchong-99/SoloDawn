@@ -57,13 +57,15 @@ export function classify(group: Group, msg: MsgRow): NotifyKind | undefined {
   return msg.kind === 'system' ? 'alert' : 'mention';
 }
 
-/** The member a message is about: the AI that the body of a card or a notice names, or the
- *  assignee of the task that a notice names; of any other message, who wrote it. */
+/** The AI that a notice names, or the assignee of the task it names. */
+const namedIn = (group: Group, { ai, task }: Partial<Record<'ai' | 'task', string>>) =>
+  ai ?? group.task(task)?.assignee;
+
+/** The member a message is about: of a card or a notice, the AI that its body names; of any other
+ *  message, who wrote it. */
 function aboutOf(group: Group, msg: MsgRow) {
   if (msg.kind === 'approval' || msg.kind === 'confirm') return msg.body.ai;
-  if (msg.kind !== 'system') return msg.by;
-  const { ai, task } = msg.body as Partial<Record<'ai' | 'task', string>>;
-  return ai ?? group.task(task)?.assignee;
+  return msg.kind === 'system' ? namedIn(group, msg.body as object) : msg.by;
 }
 
 /** Display name of the member a notification is about; of a bulletin, the AI that it names. */
