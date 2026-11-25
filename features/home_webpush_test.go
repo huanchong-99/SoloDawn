@@ -119,6 +119,7 @@ func homeWebPushSteps(sc *godog.ScenarioContext) {
 		return w.restart(cleanup)
 	})
 	sc.Step(`^"([^"]*)" posts a text message "([^"]*)" mentioning the owner in "([^"]*)"$`, w.postMention)
+	sc.Step(`^the owner's node reports "([^"]*)" in "([^"]*)" with "login_invalid" and detail "([^"]*)"$`, w.reportLogin)
 	sc.Step(`^the first browser reconnects, turns Web Push off, and disconnects$`, w.turnOffFirst)
 }
 
@@ -379,6 +380,16 @@ func (w *homeWebPushWorld) postMention(_, text, groupName string) error {
 		Body:     proto.EmptyBody{},
 	}
 	return w.execCmd(w.hostConn, w.hostPeer, w.hostKey, post)
+}
+
+func (w *homeWebPushWorld) reportLogin(_, groupName, detail string) error {
+	msgID := w.nextID()
+	w.lastMsgID = string(msgID)
+	return w.execCmd(w.hostConn, w.hostPeer, w.hostKey, map[string]any{
+		"t": "member", "op": "status", "n": msgID, "ts": w.now.UnixMilli(), "g": w.groups[groupName],
+		"id": w.aiID, "state": "limited", "path": "local", "usage": map[string]any{},
+		"event": map[string]any{"code": "login_invalid", "detail": detail},
+	})
 }
 
 func (w *homeWebPushWorld) restart(cleanup func(func())) error {
