@@ -61,7 +61,7 @@ type pendingCrash struct {
 // Host, Driver, Process or hook/listener locks.
 type runtimePart struct {
 	mu         sync.Mutex
-	wg         sync.WaitGroup // the process loops and background callbacks
+	wg         sync.WaitGroup // the process loops, the asks and background callbacks
 	settling   bool           // Settle has begun: no process starts, and a loop that ends leaves the rows as they are
 	procs      map[SessionKey]*liveProc
 	closing    map[SessionKey]bool
@@ -73,8 +73,9 @@ type runtimePart struct {
 
 var errSettling = &Error{"busy", "the host is shutting down"}
 
-// settleRuntime ends every CLI process and waits for its loop and the
-// runtime's callbacks. The session rows keep their state:
+// settleRuntime ends every CLI process, then every open ask, whose answer
+// could otherwise block on a live CLI, and waits for the loops, the asks and
+// the runtime's callbacks. The session rows keep their state:
 // the next start reports a turn that was running (flows/agent-turn.md E).
 func settleRuntime(h *Host) {
 	rt := stateOf(h)
@@ -86,6 +87,7 @@ func settleRuntime(h *Host) {
 		lp.cancel()
 	}
 	rt.mu.Unlock()
+	cancelAsks(h)
 	rt.wg.Wait()
 }
 

@@ -623,14 +623,12 @@ func TestWebPushLoopStartupEvictionRollbackAndShutdown(t *testing.T) {
 
 func wpushWaitRowCount(t *testing.T, db *store.Store, dev string, want int) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if runQuery[int](t, db, "SELECT count(*) FROM push_sub WHERE device = ?", dev) == want {
-			return
+	poll(t, 2*time.Second, fmt.Sprintf("push_sub count %d on %s", want, dev), func() string {
+		if n := runQuery[int](t, db, "SELECT count(*) FROM push_sub WHERE device = ?", dev); n != want {
+			return fmt.Sprintf("count %d", n)
 		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for push_sub count %d on %s", want, dev)
+		return ""
+	})
 }
 
 func wpushPostGroupTwoMention(t *testing.T, w *runWorld, nonce byte, text string) {

@@ -554,7 +554,7 @@ func recvFrame[T any](t *testing.T, ch <-chan T) T {
 		return v
 	case <-time.After(5 * time.Second):
 		var zero T
-		t.Fatal("timed out waiting for frame")
+		t.Fatal(timedOut(5*time.Second, "a frame", nil))
 		return zero
 	}
 }

@@ -251,7 +251,7 @@ func seamSoon(t *testing.T, what string, run func()) {
 	select {
 	case <-returned:
 	case <-time.After(10 * time.Second):
-		t.Fatalf("%s does not return", what)
+		t.Fatal(timedOut(10*time.Second, what+" to return", nil))
 	}
 }
 
