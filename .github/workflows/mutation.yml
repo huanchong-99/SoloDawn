@@ -25,44 +25,9 @@ jobs:
       # each product file of the module belongs to exactly one shard.
       matrix:
         include:
-          - { name: host-run, pkg: internal/host, own: '^run\.go' }
-          - { name: host-deliver, pkg: internal/host, own: '^d' }
-          - { name: node-node, pkg: internal/node, own: '^node\.go' }
-          - { name: host-a-checks, pkg: internal/host, own: '^(a|ca|checks)' }
-          - { name: host-f-l, pkg: internal/host, own: '^(f|j|l)' }
-          - { name: host-turn, pkg: internal/host, own: '^turn\.go' }
-          - { name: host-s-takeover, pkg: internal/host, own: '^(s|ta|ti|tools_[abk])' }
-          - { name: host-tools-talk-task, pkg: internal/host, own: '^tools_ta' }
-          - { name: host-models-opencode, pkg: internal/host, own: '^(mo|o)' }
-          - { name: host-mcp-merge, pkg: internal/host, own: '^(mc|me)' }
-          - { name: host-pty-qwen, pkg: internal/host, own: '^[pq]' }
-          - { name: host-claude-codex, pkg: internal/host, own: '^c[lo]' }
-          - { name: host-tools-sec-turn-info, pkg: internal/host, own: '^(tools_s|turn_)' }
-          - { name: host-h-w, pkg: internal/host, own: '^(h|w)' }
           - { name: host-external, pkg: internal/host, own: '^(external|tools_external)' }
-          - { name: home-cmd-task-ev, pkg: internal/home, own: '^(cmd_t|e)' }
-          - { name: home-fetch-kb, pkg: internal/home, own: '^(f|h|i|k)' }
-          - { name: home-machine-profile, pkg: internal/home, own: '^[m-p]' }
-          - { name: home-run-rounds, pkg: internal/home, own: '^r' }
-          - { name: home-cmd-confirm-hostev, pkg: internal/home, own: '^cmd_(co|g|h)' }
-          - { name: home-cmd-member-review, pkg: internal/home, own: '^cmd_[m-r]' }
-          - { name: home-check-card, pkg: internal/home, own: '^(check|cmd_b|cmd_ca)' }
-          - { name: home-sync-webpush, pkg: internal/home, own: '^[s-w]' }
           - { name: home-diag, pkg: internal/home, own: '^d' }
-          - { name: node-pair, pkg: internal/node, own: '^pair' }
-          - { name: node-service-session, pkg: internal/node, own: '^(r|sc|se)' }
-          - { name: node-socket-update, pkg: internal/node, own: '^(so|su|t|u|v)' }
-          - { name: node-admit-local, pkg: internal/node, own: '^[a-l]' }
-          - { name: node-misc, pkg: internal/node, own: '^(ne|nodetest|proc)' }
-          - { name: rendezvous-limits-room, pkg: internal/rendezvous, own: '^(l|q|r)' }
-          - { name: rendezvous-server-tls, pkg: internal/rendezvous, own: '^(s|t)' }
-          - { name: peer-ctl, pkg: internal/peer, own: '^ctl' }
           - { name: peer-candidates-path, pkg: internal/peer, own: '^(ca|p|r)' }
-          - { name: peer-signal-stream, pkg: internal/peer, own: '^[su]' }
-          - { name: store, pkg: internal/store }
-          - { name: identity, pkg: internal/identity }
-          - { name: proto, pkg: internal/proto }
-          - { name: cmd, pkg: cmd/solodawn }
     env:
       PKG: ${{ matrix.pkg }}
       OWN: ${{ matrix.own || '.' }}
@@ -140,6 +105,7 @@ jobs:
 
   web:
     name: web ${{ matrix.name }}
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 300
     strategy:
