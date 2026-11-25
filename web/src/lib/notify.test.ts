@@ -665,6 +665,39 @@ describe('Notifier', () => {
     expect(clearSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('leaves a request to watch to the terminal page of the takeover while that is open', () => {
+    const notifier = new Notifier();
+    const { home, group } = makeReadyGroup();
+    const codex = row<p.AIMemberRow>('row-member-ai', { id: codexId, seq: 5, state: 'takeover' });
+    const ask = (id: string, seq: number, body: object) =>
+      row<p.MsgRow>('row-msg-confirm-pending', { id, seq, pos: seq, by: 'mina', body });
+    const shown = () => {
+      notifier.sync([home]);
+      return notifier.items.map((item) => item.msg.id);
+    };
+    pushLive(group, [codex]);
+    setRoute('#/nodes');
+    notifier.sync([home]);
+    const to = [ownerUser];
+    pushLive(group, [ask('watch-1', 6, { what: 'watch', ai: codexId, to })]);
+    expect(shown()).toEqual(['watch-1']);
+    setRoute(`#/terminal/${website}/${codexId}`);
+    expect(shown()).toEqual([]);
+    pushLive(group, [
+      ask('watch-2', 7, { what: 'watch', ai: codexId, to }),
+      ask('direct', 8, { what: 'direct', ai: codexId, to }),
+      ask('elsewhere', 9, { what: 'watch', ai: secretaryId, to }),
+    ]);
+    expect(shown()).toEqual(['direct', 'elsewhere']);
+    // Outside a takeover the terminal page shows no request.
+    pushLive(group, [
+      { ...codex, seq: 10, state: 'waiting' },
+      ask('late', 11, { what: 'watch', ai: codexId, to }),
+    ]);
+    expect(shown()).toEqual(['direct', 'elsewhere', 'late']);
+    notifier.clear();
+  });
+
   it('suppresses arrival in an open main line and opens target messages across routes', async () => {
     const notifier = new Notifier();
     const { home, group } = makeReadyGroup();

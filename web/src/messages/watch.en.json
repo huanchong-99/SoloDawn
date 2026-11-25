@@ -5,12 +5,18 @@
   "watch.watchers": "Watching",
   "watch.stop": "Stop watching",
   "watch.empty": "Nobody is watching.",
-  "watch.idle": "Connecting to the terminal",
+  "watch.idle": "The owner's consent is needed",
   "watch.starting": "Opening the watch channel",
   "watch.active": "Watching · receive only",
   "watch.relay": "Watching requires a direct connection",
   "watch.ended": "Watching ended",
   "watch.error": "Could not open the watch channel",
   "watch.readonly": "You can watch, but cannot type or resize the owner's terminal.",
-  "watch.privacy": "SoloDawn does not read terminal content. Watching starts with the next bytes; earlier output is not replayed."
+  "watch.privacy": "SoloDawn does not read terminal content. Watching starts with the next bytes; earlier output is not replayed.",
+  "watch.none": "With it you can watch, but not type or resize the owner's terminal.",
+  "watch.over": "The takeover has ended",
+  "watch.over.body": "There is nothing to watch until the owner opens the terminal again.",
+  "watch.pending": "The terminal opens here by itself once your request is confirmed.",
+  "watch.confirmed": "The terminal opens here by itself once the computer has the consent. If it does not, ask again.",
+  "watch.again": "You can ask again."
 }

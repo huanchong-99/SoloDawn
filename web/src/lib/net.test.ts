@@ -579,14 +579,26 @@ it('shares a temporary watch-host connection and closes it only after the last w
   net.watchHost!(own.id)();
   expect(net.homes[0].ctl).toBe(ownCtl);
   expect(ownPC.closes).toBe(0);
-  const first = net.watchHost!(foreign.id);
-  const second = net.watchHost!(foreign.id);
+  // One that is being reconnected anyway keeps its connection and the requests in it.
+  net.homes[0].ctl = undefined;
+  net.watchHost!(own.id)();
+  expect([ownPC.closes, clients[0].offersFor(own.id).length]).toEqual([0, 1]);
+  net.homes[0].ctl = ownCtl;
+  const early = net.watchHost!(foreign.id);
   expect(clients[0].known(foreign.id)).toBe(true);
-  const pc = await answerNode(clients[0], foreign, browser.id, 1);
-  pc.ctl.deliver({ ...welcomeFrame(1, foreign.id, 'AI host'), owner: false });
+  await vi.waitFor(() => expect(clients[0].offersFor(foreign.id)).toHaveLength(1));
   const host = net.homes.find((home) => home.device === foreign.id)!;
+  // The computer did not answer: reached for again, it is offered a new connection at once.
+  const first = net.watchHost!(foreign.id);
+  early();
+  expect(net.homes.filter((home) => home.device === foreign.id)).toEqual([host]);
+  await vi.waitFor(() => expect(clients[0].offersFor(foreign.id)).toHaveLength(2));
+  expect([FakePC.made[1].closes, FakePC.made[2].closes]).toEqual([1, 0]);
+  const pc = await answerNode(clients[0], foreign, browser.id, 2);
+  pc.ctl.deliver({ ...welcomeFrame(1, foreign.id, 'AI host'), owner: false });
   await vi.waitFor(() => expect(host.ctl).toBeDefined());
-  expect(clients[0].offersFor(foreign.id)).toHaveLength(1);
+  const second = net.watchHost!(foreign.id);
+  expect(clients[0].offersFor(foreign.id)).toHaveLength(2);
   first();
   expect([pc.closes, clients[0].known(foreign.id)]).toEqual([0, true]);
   expect(host.ctl).toBeDefined();

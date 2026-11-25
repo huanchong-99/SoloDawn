@@ -25,7 +25,21 @@ function setup() {
   group.apply([p.decode(p.Row, goldens['row-member-human']), ai]);
   const request = vi.fn().mockResolvedValue({ re: 1, ok: true });
   home.ctl = { request: request as p.Ctl['request'] };
-  return { home, group, ai, request };
+  const card = p.decode(p.Row, goldens['row-msg-confirm-pending']) as p.MsgRow;
+  /** The home writes this person's request to watch, or settles it. */
+  const answer = (state: object, seq: number) =>
+    group.apply([
+      { ...card, by: 'me', seq, body: { what: 'watch', ai: ai.id, to: [ai.user] }, state } as p.Row,
+    ]);
+  group.apply([
+    {
+      ...p.decode(p.HumanMemberRow, goldens['row-member-human']),
+      id: 'me',
+      user: me.user,
+      role: 'member',
+    },
+  ]);
+  return { home, group, ai, request, answer };
 }
 
 const text = () => document.body.textContent!.replace(/\s+/g, ' ').trim();
@@ -75,14 +89,31 @@ it('disables the watch link on a relayed path and says why', () => {
 });
 
 describe('ask to watch action', () => {
-  it('submits once and displays success', async () => {
+  it('submits once while the request waits, and again once it was denied', async () => {
     const s = setup();
-    show(AskToWatch, s);
+    s.request.mockImplementation(async () => {
+      s.answer({ status: 'pending' }, 900);
+      return { re: 1, ok: true };
+    });
+    show(AskToWatch, { group: s.group, ai: s.ai });
     expect(text()).toBe('Ask to watch');
     click();
     await vi.waitFor(() => expect(text()).toBe('Watch request sent'));
     expect(document.querySelector('button')!.disabled).toBe(true);
     expect(s.request).toHaveBeenCalledTimes(1);
+    s.answer({ status: 'denied', by: s.ai.user, at: s.ai.since }, 901);
+    flushSync();
+    expect(text()).toBe('Ask to watch');
+    expect(document.querySelector('button')!.disabled).toBe(false);
+    // Consent given: there is nothing to ask for, unless the computer refuses.
+    s.answer({ status: 'confirmed', by: s.ai.user, at: s.ai.since }, 902);
+    flushSync();
+    expect(text()).toBe('Watch request sent');
+    expect(document.querySelector('button')!.disabled).toBe(true);
+    await closePage();
+    show(AskToWatch, { group: s.group, ai: s.ai, again: true });
+    expect(text()).toBe('Ask to watch');
+    expect(document.querySelector('button')!.disabled).toBe(false);
   });
 
   it('disables the action offline and outside a takeover', () => {
@@ -138,6 +169,23 @@ describe('watcher list', () => {
       user: user.user,
     });
     s.home.hostInfo = { ...info, agents: [] };
+    flushSync();
+    expect(text()).toBe('Watching Nobody is watching.');
+  });
+
+  it('follows a host.info that the computer pushes', () => {
+    const s = setup();
+    s.request.mockReturnValue(new Promise(() => {}));
+    const link = s.home.connect();
+    link.online(s.home.ctl!, { ...p.decode(p.Welcome, goldens.welcome), groups: [] });
+    show(Watchers, { group: s.group, host: s.home, member: s.ai.id });
+    const person = p.decode(p.HumanMemberRow, goldens['row-member-human']);
+    const info = p.decode(p.HostInfoPush, goldens['host-info-push']);
+    Object.assign(info.agents[0].groups[0], { g, member: s.ai.id, watchers: [person.user] });
+    link.push(info);
+    flushSync();
+    expect(text()).toBe(`Watching O ${person.name} Stop watching`);
+    link.push({ ...info, agents: [] });
     flushSync();
     expect(text()).toBe('Watching Nobody is watching.');
   });

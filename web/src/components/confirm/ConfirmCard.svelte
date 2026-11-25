@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { confirmSentence } from '../../lib/confirm';
+  import { confirmSentence, confirmStatus } from '../../lib/confirm';
   import type { CardProps } from '../../lib/mounts.svelte';
-  import { prefs, t } from '../../lib/prefs.svelte';
-  import { clock } from '../../lib/when';
+  import { t } from '../../lib/prefs.svelte';
   import Failure from '../Failure.svelte';
   import Icon from '../Icon.svelte';
 
@@ -13,15 +12,7 @@
 
   const status = $derived(msg.state.status);
   const needsMe = $derived(status === 'pending' && msg.body.to.includes(group.home.me.user));
-  const nameOf = (id: string) => group.member(id)?.name ?? t('chat.gone');
-  const recipients = $derived(
-    msg.body.to.map((user) => group.personName(user) ?? t('chat.gone')).join(t('confirm.sep')),
-  );
-  function outcome(state: Exclude<CardProps<'confirm'>['msg']['state'], { status: 'pending' }>) {
-    const label = t(`confirm.${state.status}`).replace('{time}', clock(state.at, prefs.lang));
-    if (state.status === 'expired') return label;
-    return label.replace('{who}', () => nameOf(state.by));
-  }
+  const tones = { pending: undefined, expired: undefined, confirmed: 'ok', denied: 'danger' };
 
   async function decide(action: 'confirm' | 'deny') {
     card.tabIndex = -1;
@@ -40,15 +31,8 @@
     <span class="kind">{t('chat.kind.confirm')}</span>
     {#if needsMe}
       <span class="badge solid" data-tone="dawn">{t('confirm.needs_you')}</span>
-    {:else if msg.state.status === 'pending'}
-      <span class="badge">{t('confirm.waiting').replace('{who}', () => recipients)}</span>
     {:else}
-      <span
-        class="badge"
-        data-tone={status === 'expired' ? undefined : status === 'confirmed' ? 'ok' : 'danger'}
-      >
-        {outcome(msg.state)}
-      </span>
+      <span class="badge" data-tone={tones[status]}>{confirmStatus(group, msg)}</span>
     {/if}
   </header>
 

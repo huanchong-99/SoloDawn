@@ -1,10 +1,15 @@
 // What a confirm card asks of the owner of an AI, in one sentence
 // (planning/contracts/step-2/confirm.md sections 1 and 3).
 import type { Group } from './groups.svelte';
-import { t } from './prefs.svelte';
+import { prefs, t } from './prefs.svelte';
 import type { MsgRow } from './proto';
+import { clock } from './when';
 
-type Confirm = Extract<MsgRow, { kind: 'confirm' }>;
+export type Confirm = Extract<MsgRow, { kind: 'confirm' }>;
+
+/** A request to watch the terminal of an AI. */
+export const isWatch = (msg: MsgRow): msg is Confirm =>
+  msg.kind === 'confirm' && msg.body.what === 'watch';
 
 const sentences = {
   direct: 'confirm.request.direct',
@@ -39,4 +44,15 @@ export function confirmSentence(group: Group, msg: Confirm): string {
   return t(sentences[msg.body.what as keyof typeof sentences])
     .replace('{ai}', ai)
     .replace('{who}', () => requester(group, msg));
+}
+
+/** Whom a pending card waits for, or how it ended: "Confirmed by Pat · 09:58". */
+export function confirmStatus(group: Group, { body, state }: Confirm): string {
+  if (state.status === 'pending') {
+    const people = body.to.map((user) => group.personName(user) ?? t('chat.gone'));
+    return t('confirm.waiting').replace('{who}', () => people.join(t('confirm.sep')));
+  }
+  const label = t(`confirm.${state.status}`).replace('{time}', clock(state.at, prefs.lang));
+  if (state.status === 'expired') return label;
+  return label.replace('{who}', () => nameOf(group, state.by));
 }

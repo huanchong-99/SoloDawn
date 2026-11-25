@@ -5,12 +5,18 @@
   "watch.watchers": "旁观",
   "watch.stop": "停止旁观",
   "watch.empty": "暂无人旁观。",
-  "watch.idle": "正在连接终端",
+  "watch.idle": "需要主人同意",
   "watch.starting": "正在打开旁观通道",
   "watch.active": "旁观中 · 只读",
   "watch.relay": "旁观需要直连",
   "watch.ended": "旁观已结束",
   "watch.error": "无法打开旁观通道",
-  "watch.readonly": "只能观看，不能输入或调整所有者的终端大小。",
-  "watch.privacy": "SoloDawn 不读取终端内容。旁观从新输出开始，不回放之前的内容。"
+  "watch.readonly": "只能观看，不能输入或调整主人的终端大小。",
+  "watch.privacy": "SoloDawn 不读取终端内容。旁观从新输出开始，不回放之前的内容。",
+  "watch.none": "同意后只能观看，不能输入或调整主人的终端大小。",
+  "watch.over": "接管已结束",
+  "watch.over.body": "主人再次打开终端之前，没有内容可看。",
+  "watch.pending": "申请得到确认后，终端会自动在这里打开。",
+  "watch.confirmed": "计算机收到同意后，终端会自动在这里打开。如果没有打开，请再次申请。",
+  "watch.again": "可以再次申请。"
 }

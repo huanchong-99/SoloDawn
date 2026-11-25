@@ -11,36 +11,13 @@ import {
   gitIdentityEnv,
   initGitRepo,
   openDirectContext,
+  pairPrimaryBrowser,
   poll,
-  readPairingCode,
   sendChatMessage,
   startDirectSurface,
   type DirectSurface,
 } from './direct';
-import { startNet, type Net, type Node } from './nodes';
-
-async function pairPrimaryBrowser(page: Page, surface: DirectSurface, node: Node, label: string) {
-  await page.goto(`${surface.url}#/onboarding`);
-  const code = await readPairingCode(page, surface.signal);
-  const paired = await node.run(
-    'solodawn',
-    'pair',
-    code,
-    '--name',
-    label,
-    '--rendezvous',
-    surface.signal,
-  );
-  expect(paired.code, paired.stderr).toBe(0);
-  await poll(() => page.locator('input[name="acct-claude"][value="personal"]').count()).toBe(1);
-  await page.locator('input[name="acct-claude"][value="personal"]').check();
-  await poll(() => page.locator('fieldset.acct').first().isDisabled()).toBe(false);
-  await page.locator('input[name="acct-codex"][value="api_key"]').check();
-  await poll(() => page.locator('a.done-btn').count()).toBe(1);
-  await page.locator('a.done-btn').click();
-  await poll(() => page.url()).toContain('#/groups');
-  await poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
-}
+import { startNet, type Net } from './nodes';
 
 // E-M2 approximates A2.6 in the browser by cutting Browser 2's WebSocket and WebRTC transports;
 // full group-home stop and restart is covered in features/m2.feature.
