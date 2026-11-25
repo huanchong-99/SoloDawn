@@ -434,7 +434,11 @@
     .chat-head {
       padding: 0 var(--sp-3) 0 var(--sp-2);
     }
-    /* On a phone the chat has the screen without the top bar. */
+    /* On a phone the chat has the screen without the top bar. The group's name is worth more
+       there than its picture. */
+    .chat-head > :global(.av) {
+      display: none;
+    }
     .side {
       top: 0;
     }

@@ -127,7 +127,7 @@
           aria-busy={busy === 'mine'}
           onclick={() => void takeOffline()}
         >
-          <Icon name="power" sm />{t('stop.mine.action')}
+          <Icon name="power" sm />{t(busy === 'mine' ? 'stop.mine.busy' : 'stop.mine.action')}
         </button>
       </section>
     {/if}
@@ -165,6 +165,9 @@
   section + section {
     padding-top: var(--sp-3);
     border-top: 1px solid var(--line);
+  }
+  section .btn {
+    min-width: 112px;
   }
   h3 {
     font-size: var(--fs-md);

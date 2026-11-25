@@ -379,4 +379,50 @@ describe('Nodes', () => {
     expect(await store.pairBrowser(home, deviceId)).toStrictEqual(lost());
     expect(asked).toHaveLength(3);
   });
+
+  it('takes the AIs of a computer offline and back online, and reads host.info after each', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1763600000000);
+    const store = new Nodes();
+    const home = new Home(me);
+    const { asked, link } = connectHome(home, { owner: true, device: deviceId });
+    signed.length = 0;
+
+    for (const [offline, t] of [
+      [true, 'host.offline'],
+      [false, 'host.online'],
+    ] as const) {
+      const call = store.setOffline(home, offline);
+      await vi.waitFor(() => expect(asked).toHaveLength(1));
+      expect(asked[0].req).toStrictEqual({
+        t: 'cmd',
+        env: { p: signed[0], k: 'this-browser', s: 'signature' },
+      });
+      const payload = JSON.parse(signed[0]) as Record<string, unknown>;
+      expect(p.decode(p.HostCommandOnly, signed[0])).toStrictEqual(payload);
+      expect(payload).toStrictEqual({
+        t,
+        n: expect.stringMatching(/^[A-Za-z0-9_-]{21}[AQgw]$/),
+        ts: 1763600000000,
+        to: deviceId,
+      });
+      asked[0].answer({ re: 1, ok: true });
+      await vi.waitFor(() => expect(asked).toHaveLength(2));
+      expect(asked[1].req).toStrictEqual({ t: 'host.info' });
+      asked[1].answer(hostAnswer({ offline }));
+      expect(await call).toStrictEqual({ re: 1, ok: true });
+      expect(store.infos.get(home)!.offline).toBe(offline);
+      asked.length = signed.length = 0;
+    }
+
+    // A refusal, and a connection lost, are returned; nothing is read.
+    const refused = store.setOffline(home, true);
+    await vi.waitFor(() => expect(asked).toHaveLength(1));
+    const errFrame = { re: 2, err: { code: 'forbidden', msg: 'not the owner' } };
+    asked[0].answer(errFrame);
+    expect(await refused).toStrictEqual(errFrame);
+    link.offline();
+    expect(await store.setOffline(home, true)).toStrictEqual(lost());
+    expect(asked).toHaveLength(1);
+    expect(store.infos.get(home)!.offline).toBe(false);
+  });
 });

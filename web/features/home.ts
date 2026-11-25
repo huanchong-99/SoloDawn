@@ -353,6 +353,8 @@ export function ownedNode(
         if (parsed.t === 'host.offline' || parsed.t === 'host.online') {
           commands.push(env);
           info.offline = parsed.t === 'host.offline';
+          for (const entry of info.agents.flatMap((agent) => agent.groups))
+            entry.state = info.offline ? 'offline' : 'dormant';
           return { re: 1, ok: true };
         }
         if (parsed.t !== 'agent.set') return undefined;

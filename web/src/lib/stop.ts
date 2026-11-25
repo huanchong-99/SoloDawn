@@ -18,9 +18,9 @@ export const working = (group: Group) =>
   aiMembers(group).filter((ai) => ai.state === 'working').length;
 
 /** Whether the owner took the AIs of this computer offline, as its last `host.info` says. */
-export const isOffline = (home: Home) => nodes.infos.get(home)?.offline === true;
+export const isOffline = (home: Home | undefined) => nodes.infos.get(home!)?.offline === true;
 
-/** The computers of this person, those whose AIs are offline apart. */
+/** The computers of this person: those whose AIs are offline, and the others. */
 export function computers(homes: readonly Home[]) {
   const mine = homes.filter((home) => home.owner);
   return {
@@ -29,9 +29,13 @@ export function computers(homes: readonly Home[]) {
   };
 }
 
-/** The names of computers as one phrase in the reader's language. */
+/** The names of computers as one phrase in the reader's language, with the space that Chinese
+ *  text has beside a Latin name. */
 export const names = (homes: readonly Home[], lang: string) =>
-  new Intl.ListFormat(lang, { type: 'conjunction' }).format(homes.map((home) => home.name));
+  new Intl.ListFormat(lang)
+    .formatToParts(homes.map((home) => home.name))
+    .map(({ type, value }) => (type === 'literal' ? value.replace('和', ' 和 ') : value))
+    .join('');
 
 /** Which AIs of one computer its groups show as offline. The node pushes no `host.info`; a change
  *  here is the sign that another browser of the owner took its AIs offline, or back. */
@@ -46,8 +50,7 @@ export const offlineAIs = (home: Home, homes: readonly Home[]) =>
 /** An AI's status, where `host` is its computer when this person owns that: it says so when they
  *  took it offline. A running turn or an open terminal tells more than the last `host.info`. */
 export function statusIn(group: Group, ai: AIMemberRow, host: Home | undefined) {
-  const stopped = host !== undefined && isOffline(host);
-  return stopped && ai.state !== 'working' && ai.state !== 'takeover'
+  return isOffline(host) && ai.state !== 'working' && ai.state !== 'takeover'
     ? { st: 'offline', text: t('stop.ai.offline') }
     : statusOf(group, ai);
 }

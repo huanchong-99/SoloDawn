@@ -69,7 +69,7 @@
         aria-busy={busy}
         onclick={() => void set(true)}
       >
-        <Icon name="power" sm />{t('stop.mine.action')}
+        <Icon name="power" sm />{t(busy ? 'stop.mine.busy' : 'stop.mine.action')}
       </button>
       <button type="button" class="btn" disabled={busy} onclick={() => void ask(false)}>
         {t('stop.node.cancel')}
@@ -97,7 +97,7 @@
     background: var(--danger-soft);
   }
   .grow {
-    flex-basis: 220px;
+    flex-basis: 160px;
   }
   b {
     font-weight: 500;

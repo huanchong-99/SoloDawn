@@ -6,6 +6,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-25 · bug · A `jump` on a busy AI loses the message instead of interrupting the turn
+
+- Symptom: while an AI runs a turn, the author of a waiting mention sends `jump`. The turn is not interrupted, no `task preempted` is reported, and the message never reaches the AI: it is acknowledged, so neither the host nor the home holds it any more. Contract: `planning/flows/agent-turn.md` section C, acceptance A5.11.
+- Cause: the host half of the jump was never built. The home's half is (`rndJump`, `internal/home/rounds.go:42`), and delivery takes a jump item although the AI is `working` (`isItemHeld`, `internal/host/deliver.go:895`), but nothing reads `Turn.Jump` (its only writers are `internal/host/turn.go:193` and `deliver.go:1174`; the promise is the comment at `internal/host/host.go:557`). `runSessionTurn` (`deliver.go:1165`) commits the audit row and acknowledges the batch before `Runner.Turn`, which answers `busy` (another session of the AI is working, `Sessions.Move`, `internal/host/session.go:260`) or `conflict` (the same session, `startHandBack`, `run.go:326`); the error is only logged. `TaskPreempted` and a `ContinueTurn` are sent by nothing. Seen by running `TestMemberStatusPriorityAnswerAndTurnRefusals` with `Turn{Kind: ItemsTurn, Jump: true}`: `busy`, as without it.
+- Status: open, found while building the web control for `jump`, which must not ship before the host half. The acceptance scenario of A5.11 does not exist.
+
+### 2026-11-25 · limitation · `host.offline` does not mark an AI that never had a session
+
+- Symptom: an AI that was added to a group and never woken keeps `dormant` ("Sleeping") in the group for everybody but its owner after its owner took all AIs of the computer offline.
+- Cause: `handleHostOffline` reports a status for each AI that has a session row (`distinctMemberSlots`, `internal/host/limits.go:209`); a member without one is in none. The owner's browser shows it offline from `host.info` (`statusIn`, `web/src/lib/stop.ts`).
+- Status: open. Nothing wakes it meanwhile: its items are held.
+
 ### 2026-11-23 · deviation · An agent without a driver cannot join a group
 
 - Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
@@ -739,6 +751,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-25 · deviation · The web client had no emergency stop
+
+- Symptom: no control sent `group pause`, `group resume`, `host.offline` or `host.online`, and a paused group looked like any other (R-64, A4.7 and A4.8 "as seen"). On the computers page an AI in `takeover` or `paused` showed the raw word.
+- Cause: the unit that held them (U-5) was cancelled for its permission levels; `stateLabel` in `web/src/routes/Nodes.svelte` did not know the two states.
+- Status: resolved on `web/stop-and-jump`: `web/src/components/stop/`, `web/src/lib/stop.ts`, `features/web_stop.feature`, `web/e2e/m3.spec.ts`.
 
 ### 2026-11-25 · deviation · A confirm card for a task without a brief names "Former member" as the requester
 

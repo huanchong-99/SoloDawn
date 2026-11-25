@@ -32,7 +32,7 @@
     relay:
       '<circle cx="4.5" cy="17" r="2.2"/><circle cx="12" cy="6" r="2.2"/><circle cx="19.5" cy="17" r="2.2"/><path d="M5.8 15.2l4.9-7.4M13.3 7.8l4.9 7.4"/>',
     key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/>',
-    pause: '<path d="M9 5v14M15 5v14"/>',
+    pause: '<path d="M8 5v14M16 5v14"/>',
     play: '<path d="M7 5l12 7-12 7z"/>',
     power: '<path d="M12 3v9M7 6.5a8 8 0 1 0 10 0"/>',
     phone: '<path d="M7 3h10v18H7zM11 18h2"/>',
