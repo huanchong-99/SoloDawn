@@ -67,21 +67,21 @@ func TestAuditHoldsAnInboxItemOnce(t *testing.T) {
 
 func TestAuditRowsWithoutAnItem(t *testing.T) {
 	h, _ := seamHost(t, seamStore(t))
-	decided := AuditRow{Group: "g1", Agent: "codex", What: AuditApproval, Detail: "git push origin other-branch", By: "owner-device", Result: "approved"}
+	decided := AuditRow{Group: "g1", Agent: "codex", What: AuditKilled, Detail: "pid 4411", By: "owner-device", Result: "killed"}
 	// Rows that name no item never stand in each other's way.
 	if !seamAudit(t, h, decided) || !seamAudit(t, h, decided) || !seamAudit(t, h, AuditRow{What: AuditSetting}) {
 		t.Fatal("a row without an item was not written")
 	}
 	want := strings.Join([]string{
-		"1763600000000|g1|codex|approval|-|-|git push origin other-branch|owner-device|approved",
-		"1763600001000|g1|codex|approval|-|-|git push origin other-branch|owner-device|approved",
+		"1763600000000|g1|codex|killed|-|-|pid 4411|owner-device|killed",
+		"1763600001000|g1|codex|killed|-|-|pid 4411|owner-device|killed",
 		"1763600002000|-|-|setting|-|-||-|-",
 	}, "\n")
 	if got := seamRecord(t, h); got != want {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}
-	whats := []string{AuditDelivered, AuditRefused, AuditRequested, AuditApproval, AuditTakeover, AuditHandback, AuditMerge, AuditSetting, AuditKilled}
-	if got := strings.Join(whats, " "); got != "delivered refused requested approval takeover handback merge setting killed" {
+	whats := []string{AuditDelivered, AuditRefused, AuditMerge, AuditSetting, AuditKilled}
+	if got := strings.Join(whats, " "); got != "delivered refused merge setting killed" {
 		t.Fatalf("the constants spell %q, not the values of contracts/storage.md section 3", got)
 	}
 }

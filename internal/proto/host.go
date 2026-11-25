@@ -153,35 +153,6 @@ type HostSettings struct {
 	Approvers     []string `json:"approvers"`
 }
 
-// Audit asks for the owner's audit rows whose id is lower than Before, the id
-// of the oldest row the client holds, newest first; Before 0 asks for the
-// newest.
-type Audit struct {
-	Request
-	Before int64 `json:"before"`
-	Limit  int   `json:"limit"`
-}
-
-// AuditAnswer has no t, like the answer to cmd.
-type AuditAnswer struct {
-	Success
-	Rows []AuditRow `json:"rows"`
-}
-
-// AuditRow is one entry of the audit (R-139). ID is its number on this node,
-// which grows with every row, and pages the audit. AI is the agent, e.g.
-// claude; By is the device that caused it.
-type AuditRow struct {
-	ID     int64  `json:"id"`
-	TS     int64  `json:"ts"`
-	Group  ID     `json:"g,omitempty"`
-	AI     string `json:"ai,omitempty"`
-	What   string `json:"what"`
-	Detail string `json:"detail"`
-	By     string `json:"by,omitempty"`
-	Result string `json:"result,omitempty"`
-}
-
 // PTYResize is the size of the terminal of a takeover, pushed by the browser.
 // AI is the member that is taken over.
 type PTYResize struct {
