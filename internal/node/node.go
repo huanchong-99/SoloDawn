@@ -469,9 +469,15 @@ func (n *nodeRuntime) sharedPaths() []*peer.Path {
 }
 
 func (n *nodeRuntime) routesFor(device string) []peer.Route {
-	routes := slices.Clone(n.pairer.Routes(device))
+	routes := n.pairer.Routes(device)
 	for _, p := range n.sharedPaths() {
-		routes = append(routes, p.Route())
+		route := p.Route()
+		i := slices.IndexFunc(routes, func(r peer.Route) bool { return r.ID == route.ID })
+		if i < 0 {
+			routes = append(routes, route)
+		} else {
+			routes[i] = route
+		}
 	}
 	return routes
 }

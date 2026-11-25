@@ -90,7 +90,7 @@ What each of the failures of 2026-11-23 would have shown (`issues.md`):
 | A9.23, the bulletin before the attach | `tool name=post code=home_unreachable` between `home.dial` and `host.attach` of that home |
 | A10.3, the pause read (FLAKY-27) | `inbox.take` with the newer item in `took` and the older in `left` |
 | Host teardown | any line of that node, a `bg.stop` too, after `settle.end` |
-| A7.9 on Windows, open | `ice.pair` and `ice.state` of the takeover connection on the next failing run |
+| A7.9 on Windows | `ice.pair` and `ice.state` of the takeover connection on the next failing run |
 
 ## 3. Levels and the switch
 
