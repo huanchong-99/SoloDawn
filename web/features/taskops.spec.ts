@@ -243,6 +243,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         expect(texts('.composer [role=status]')).toEqual([
           'Cannot reach the group home. What is already here can still be read.',
         ]);
+        expect(field().hasAttribute('aria-describedby')).toBe(false);
       });
       And('the menu of T-12 offers nothing that can be pressed', () =>
         expect(all<HTMLButtonElement>('.menu button').map((each) => each.disabled)).toEqual([
@@ -563,7 +564,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       'Mina said no to Qwen Code here. The secretary or an admin gives the role to another AI.';
     Given('Mina denied that Qwen Code takes T-12', () => {
       withMina();
-      task({ assignee: qwen });
+      task({ assignee: qwen, asked: [qwen] });
       const body = { what: 'direct', ai: qwen, to: ['mina'] };
       const re = example('row-task').brief;
       home.write(g, example('row-msg-confirm-denied', { thread: null, re, body }));
@@ -575,6 +576,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     });
     When('Alex presses "Reassign"', () => press('Reassign'));
     Then('the form names Qwen Code to do it', () => settled(() => expect(named()[0]).toBe(qwen)));
+    When('Mina gives T-12 to Qwen Code all the same', () => task({ assignee: qwen }));
+    Then('the card of T-12 says nothing of it', () => expect(all('.hold')).toEqual([]));
   });
 
   Scenario(

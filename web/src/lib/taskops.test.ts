@@ -259,7 +259,7 @@ describe('a role that an owner denied', () => {
       ...{ id: 'card', re: base.id, body: { what: 'direct', ai, to: ['mina-user'] } },
       ...changes,
     });
-  const given = task({ assignee: qwen, brief: undefined });
+  const given = task({ assignee: qwen, brief: undefined, asked: [qwen] });
   const said = (changes: Partial<TaskRow> = {}, ...cards: Row[]) =>
     taskHold(makeGroup('owner', ...(cards.length ? cards : [card()])), { ...given, ...changes });
 
@@ -274,6 +274,11 @@ describe('a role that an owner denied', () => {
     expect(said()!.text).toBe('Mina 没同意 Qwen Code 参与。由秘书或管理员换一个 AI。');
   });
 
+  it('is not said of a role that the owner gave in spite of it', () => {
+    expect(said({ asked: undefined })).toBeUndefined();
+    expect(said({ asked: [codex] })).toBeUndefined();
+  });
+
   it('is of the request that the task came from', () => {
     expect(said({ brief: 'the-brief' })).toBeUndefined();
     expect(said({ brief: 'the-brief' }, card({ re: 'the-brief' }))!.text).toBe(text);
@@ -283,7 +288,7 @@ describe('a role that an owner denied', () => {
     for (const status of ['pending', 'confirmed', 'expired'])
       expect(said({}, card({ state: { status } }))).toBeUndefined();
     expect(said({}, card({ kind: 'approval' }))).toBeUndefined();
-    expect(said({}, card({}, codex))).toBeUndefined();
+    expect(said({ asked: [qwen, codex] }, card({}, codex))).toBeUndefined();
     expect(said({}, card({}, 'gone'))).toBeUndefined();
     expect(said({ wait: wait('confirm') })).toBeUndefined();
     expect(said({ state: 'merged' })).toBeUndefined();

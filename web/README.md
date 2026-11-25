@@ -647,10 +647,12 @@ file in `src/routes/`. It edits neither the shell nor another area:
   P-256 VAPID key pair in IndexedDB (`solodawn`, store `device`, key `vapid`); `Reminders`
   subscribes through `PushManager` and sends `push` (`PushOn` or `{ off: true }`) to connected
   homes, while `ReminderSync.svelte` (mounted at `layer`) keeps newly connected homes in sync and
-  scrolls to `#m-<msg>` when a notification is clicked. `sw.ts` decodes `Reminder`, displays
-  `group · kind` with `who: title` in the reader's language (a mention with a title is the notice of
-  a task that stopped, and says so), and focuses an open tab or opens
-  `#/groups/<g>` at the card.
+  jumps to `#m-<msg>` when a notification is clicked, fetching that one message when the read did not
+  bring it (`Group.seek`); of a task's card the thread opens.
+  `sw.ts` decodes `Reminder`, displays `group · kind` with `who: title` in the reader's language,
+  with words for `code` in place of the kind when it has some (without a code, a mention with a title
+  is the notice of a task that stopped, and says so), alerts again for another reminder of the same
+  message or thread, and focuses an open tab or opens `#/groups/<g>` at the card.
 - **Where code goes.** Logic lives in `.ts` and `.svelte.ts` modules, which the gates measure
   (CRAP and mutation); components stay thin. A module that only holds an `import.meta.glob` is
   named `*.glob.ts` and is not mutated; it holds no logic. Stryker would wrap the glob's
@@ -681,7 +683,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/net.svelte.ts`       | where the homes come from: `sourceOf`, `start` (`mock` and `live`), `runTab` lock |
 | `src/lib/mounts.svelte.ts`    | mounting points, `gather` of the areas' mounts, `card(kind)`                      |
 | `src/lib/motion.ts`           | `spring`, the curve of `--spring`; `shift`, the page cross-fade                   |
-| `src/lib/jump.ts`             | `jumpToMessage`: scroll and focus `#m-<id>` without routing                       |
+| `src/lib/jump.ts`             | `jumpToMessage`: scroll and focus `#m-<id>` or a task's thread, without routing   |
 | `src/lib/proto.ts`            | wire schemas and types, `decode`, the `Ctl` interface                             |
 | `src/lib/mock.ts`             | wire examples by name, their schemas, `mockCtl`                                   |
 | `src/lib/rendezvous.ts`       | signalling client: sign-in, pacing, the receiver's checks                         |

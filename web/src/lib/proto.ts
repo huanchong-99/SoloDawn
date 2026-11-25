@@ -302,6 +302,7 @@ export const TaskRow = v.object({
   commit: v.optional(str),
   assignee: str,
   reviewer: v.optional(str),
+  asked: v.optional(strs),
   foundation: bool,
   pass: int,
   depends: strs,
@@ -911,6 +912,7 @@ export const Reminder = v.object({
   kind: str,
   who: str,
   title: optionalText,
+  code: optionalText,
 });
 export type Reminder = v.InferOutput<typeof Reminder>;
 

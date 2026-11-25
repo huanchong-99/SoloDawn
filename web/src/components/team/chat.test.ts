@@ -5,6 +5,7 @@ import { closePage, field, one, openPage, press, show, text, type } from '../../
 import { Group, Home, homes } from '../../lib/groups.svelte';
 import { goldens } from '../../lib/mock';
 import { cards } from '../../lib/mounts.svelte';
+import { prefs } from '../../lib/prefs.svelte';
 import * as p from '../../lib/proto';
 import Message from '../chat/Message.svelte';
 import TerminalInfo from '../terminal/TerminalInfo.svelte';
@@ -27,6 +28,17 @@ it('shows the empty team main line when no older messages remain', () => {
   group.paging().more = false;
   openPage(`#/groups/${group.g}`);
   expect(text('.empty h3')).toBe('Nothing here yet');
+  expect(text('.empty p')).toBe(
+    'Invite people, then write to the whole team. Notices that secretaries post show up here too.',
+  );
+  prefs.lang = 'zh-CN';
+  flushSync();
+  expect(text('.empty p')).toBe(
+    '先邀请大家进来，再跟整个团队说点什么吧。各项目秘书发的公告也会出现在这里。',
+  );
+  prefs.lang = 'en';
+  group.apply([{ ...p.decode(p.HumanMemberRow, goldens['row-member-human']), id: 'mina' }]);
+  flushSync();
   expect(text('.empty p')).toBe(
     'Write to the whole team. Notices that secretaries post show up here too.',
   );

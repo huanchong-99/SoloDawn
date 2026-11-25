@@ -150,9 +150,8 @@ export class Nodes {
   /** Takes every AI of the owned node `home` offline, or back online (R-64), then reads its
    *  `host.info` again: the node pushes none. */
   async setOffline(home: Home, offline: boolean): Promise<p.CmdResult | p.ErrorResponse> {
-    const ctl = home.ctl;
     const answer = await this.#command(home, home.device, `host.${offline ? 'offline' : 'online'}`);
-    if (!answer.err) await this.#read(home, ctl!);
+    if (!answer.err) await this.#read(home, home.ctl!);
     return answer;
   }
 

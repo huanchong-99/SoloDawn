@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
 import { flushSync, tick } from 'svelte';
 import { expect, vi } from 'vitest';
-import { find, Home, homes } from '../src/lib/groups.svelte';
+import { find, Home, homes, type Link } from '../src/lib/groups.svelte';
 import { decode as b64Decode } from '../src/lib/identity';
 import { goldens } from '../src/lib/mock';
 import type { Source } from '../src/lib/net.svelte';
@@ -36,6 +36,8 @@ interface PushHomeRig {
   store: Home;
   pushes: (p.PushOn | p.PushOff)[];
   connect(): Promise<void>;
+  /** The connection is gone. */
+  drop(): void;
 }
 
 function makePushHome(name: string, g: string, groupName: string): PushHomeRig {
@@ -44,13 +46,14 @@ function makePushHome(name: string, g: string, groupName: string): PushHomeRig {
   const sign = async (payload: string) => ({ p: payload, k: 'this-browser', s: 'signature' });
   const store = new Home({ user, sign });
   const pushes: (p.PushOn | p.PushOff)[] = [];
+  let link: Link;
 
   return {
     home,
     store,
     pushes,
     async connect() {
-      const link = store.connect();
+      link = store.connect();
       const base = home.connect(link.push);
       const ctl = {
         request: async (req: { t: string; env?: p.Envelope }) => {
@@ -76,6 +79,7 @@ function makePushHome(name: string, g: string, groupName: string): PushHomeRig {
       link.online(ctl, welcome);
       await vi.waitFor(() => expect(find(g)?.info).toBeDefined());
     },
+    drop: () => link.offline(),
   };
 }
 
@@ -486,6 +490,231 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           });
         },
       );
+    },
+  );
+
+  /** The home with a task, without its message; the client opened by a reminder of that task. */
+  const task = example('row-task', { g: website });
+  const taskMsg = () => workstation.home.write(website, example('row-msg-task', { g: website }));
+  const line = () => one('.card .thread-fold > summary');
+  const withTask = () => {
+    pushRig = installBrowserPush({ permission: 'granted' });
+    workstation = makePushHome('workstation', website, 'Website');
+    workstation.home.write(website, task);
+    homes.push(workstation.store);
+  };
+  const openClosed = async () => {
+    history.replaceState(null, '', `/?msg=${task.id}&kind=mention#/groups/${website}`);
+    // Known by its name until the home can be reached.
+    workstation.store.expect(website, 'Website');
+    openPage(location.hash);
+    await tick();
+    await workstation.connect();
+  };
+  const threadOpen = () =>
+    vi.waitFor(() => {
+      flushSync();
+      expect(document.activeElement).toBe(line());
+      expect(all('.card .thread')).toHaveLength(1);
+    });
+  const withOlderTask = () => {
+    withTask();
+    taskMsg();
+    for (let i = 0; i < 60; i += 1)
+      workstation.home.write(website, example('row-msg-text', { id: `m${i}`, thread: null }));
+  };
+  const openClient = async () => {
+    openPage(`#/groups/${website}`);
+    await workstation.connect();
+    await vi.waitFor(() => expect(find(website)?.live).toBe(true));
+  };
+  const clickInWindow = () => {
+    pushRig.deliverSwMessage({ t: 'reminder', g: website, msg: task.id, kind: 'mention' });
+    flushSync();
+  };
+  const askedOnce = () =>
+    vi.waitFor(() => {
+      flushSync();
+      expect(workstation.home.asked.filter((req) => req.r === 'msg')).toEqual([
+        { t: 'fetch', g: website, r: 'msg', row: task.id, before: 0, limit: 1 },
+      ]);
+    });
+
+  Scenario(
+    'Clicking the reminder of a task that stopped opens its thread',
+    ({ Given, When, Then, And }) => {
+      Given('the home "workstation" holds the group "Website" with a task', async () => {
+        withTask();
+        taskMsg();
+        await workstation.connect();
+      });
+      When(
+        'the service worker receives the reminder that the task stopped and the person clicks it',
+        async () => {
+          openPage('#/settings');
+          swHarness = makeSwHarness('?lang=en', [
+            {
+              url: `${location.origin}/#/settings`,
+              focus: async () => {},
+              postMessage: (msg) => pushRig.deliverSwMessage(msg),
+            },
+          ]);
+          const reminder = {
+            ...{ g: website, msg: task.id, group: 'Website', kind: 'mention', who: 'Codex' },
+            ...{ title: 'Login page', code: 'task_failed' },
+          };
+          await swHarness.fire('push', { data: { text: () => JSON.stringify(reminder) } });
+          await swHarness.fire('notificationclick', {
+            notification: { data: swHarness.shown[0].data, close: () => {} },
+          });
+          await tick();
+          flushSync();
+        },
+      );
+      Then(
+        'the browser notification reads "Website · Task stopped" and "Codex: Login page"',
+        () => {
+          expect(swHarness.shown[0]).toMatchObject({
+            title: 'Website · Task stopped',
+            body: 'Codex: Login page',
+          });
+        },
+      );
+      And(
+        'the client opens the chat of "Website" with the task\'s thread open and focus on its line',
+        async () => {
+          await vi.waitFor(() => {
+            flushSync();
+            expect(texts('.chat-head h2')).toEqual(['Website']);
+            expect(document.activeElement).toBe(line());
+            expect(all('.card .thread')).toHaveLength(1);
+          });
+          expect(workstation.home.asked.filter((req) => req.r === 'msg')).toEqual([]);
+        },
+      );
+    },
+  );
+
+  Scenario(
+    'A reminder opens the closed client at a task older than what the client reads at first',
+    ({ Given, When, Then, And }) => {
+      Given(
+        'the home "workstation" holds the group "Website" with a task and 60 newer messages',
+        withOlderTask,
+      );
+      When(
+        'the person clicks the reminder that the task stopped, with the client closed, and the first read breaks off',
+        async () => {
+          workstation.home.batch = 10;
+          workstation.home.breakAfter = 1;
+          await openClosed();
+          await new Promise((later) => setTimeout(later));
+          flushSync();
+        },
+      );
+      Then("the client has not asked for the task's message", () =>
+        expect(workstation.home.asked.filter((req) => req.r === 'msg')).toEqual([]),
+      );
+      When('the connection is back', () => {
+        workstation.drop();
+        return workstation.connect();
+      });
+      Then("the client asks the home for the task's message once", askedOnce);
+      And("the task's thread is open with focus on its line", threadOpen);
+    },
+  );
+
+  Scenario(
+    'A reminder of what the home no longer has leaves the person alone',
+    ({ Given, When, Then }) => {
+      Given(
+        'the home "workstation" holds the group "Website" without the task\'s message',
+        withTask,
+      );
+      When(
+        'the person clicks the reminder that the task stopped, with the client closed',
+        openClosed,
+      );
+      Then("the client asks the home for the task's message once", askedOnce);
+      When(
+        "the person writes in the composer, the task's message arrives after all and the connection is renewed",
+        async () => {
+          one('.dock textarea').focus();
+          taskMsg();
+          await vi.waitFor(() => {
+            flushSync();
+            expect(line()).not.toBeNull();
+          });
+          workstation.drop();
+          await workstation.connect();
+          await vi.waitFor(() => expect(workstation.home.synced).toBe(2));
+          await new Promise((later) => setTimeout(later));
+        },
+      );
+      Then('focus stays in the composer and the thread is closed', () => {
+        expect(document.activeElement).toBe(one('.dock textarea'));
+        expect(all('.card .thread')).toEqual([]);
+      });
+    },
+  );
+
+  Scenario(
+    'A reminder clicked in an open window whose connection is gone opens once it is back',
+    ({ Given, And, When, Then }) => {
+      Given('the home "workstation" holds the group "Website" with a task', withTask);
+      And('the client is open and its connection is gone', async () => {
+        await openClient();
+        workstation.drop();
+        flushSync();
+      });
+      When('the person clicks the reminder of a task whose message came meanwhile', async () => {
+        taskMsg();
+        clickInWindow();
+        await new Promise((later) => setTimeout(later));
+      });
+      And('the connection is back', () => workstation.connect());
+      Then("the task's thread is open with focus on its line", threadOpen);
+    },
+  );
+
+  Scenario(
+    'A reminder whose message was asked for on a dead connection opens on the next one',
+    ({ Given, And, When, Then }) => {
+      const asked: { t: string }[] = [];
+      let lose: (error: Error) => void;
+      Given(
+        'the home "workstation" holds the group "Website" with a task and 60 newer messages',
+        withOlderTask,
+      );
+      And('the client is open and its connection is dead without its knowing', async () => {
+        await openClient();
+        const dead = new Promise<never>((_, reject) => (lose = reject));
+        workstation.store.ctl = {
+          request: (req: { t: string }) => {
+            asked.push(req);
+            return dead;
+          },
+        } as p.Ctl;
+        flushSync();
+      });
+      When('the person clicks the reminder that the task stopped', clickInWindow);
+      And('the request is lost', async () => {
+        workstation.home.say(website, 'mina', 'Meanwhile');
+        await tick();
+        lose(new Error('connection closed'));
+        await new Promise((later) => setTimeout(later));
+        flushSync();
+      });
+      Then('the client has asked once, whatever else arrived, and the chat has no task', () => {
+        expect(asked.filter((req) => req.t === 'fetch')).toHaveLength(1);
+        expect(line()).toBeNull();
+      });
+      When('the connection is back', async () => {
+        workstation.drop();
+        flushSync();
+        await workstation.connect();
+      });
+      Then("the task's thread is open with focus on its line", threadOpen);
     },
   );
 

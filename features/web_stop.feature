@@ -25,6 +25,13 @@ Feature: The emergency stop in the web client
     And Alex presses "Pause"
     Then the panel is still open and says that this is not allowed
 
+  Scenario: A panel closed while its action runs opens again on a refusal, and else leaves the person alone
+    When Alex opens "Website", presses "Pause" in the panel and goes on writing
+    And the home refuses the pause
+    Then the panel opens again and says that this is not allowed
+    When Alex presses "Pause" again and goes on writing, and the home takes it
+    Then focus stays where Alex writes
+
   Scenario: A refused resume says why beside the button
     Given Mina paused the group
     And the home refuses commands with "forbidden"
@@ -52,9 +59,14 @@ Feature: The emergency stop in the web client
     When Alex presses "Take offline"
     Then both computers receive "host.offline", the panel closes and "Stop AIs" is gone
     And under the top bar it says that the AIs on workstation and mac-mini are offline
-    And the AIs of "Website" read "Offline · you took it offline"
+    And the AIs of "Website" read "Offline · by you"
     When Alex presses "Bring back online"
     Then both computers receive "host.online" and the banner is gone
+
+  Scenario: A person who left the panel keeps their place when the button goes away with the action
+    When Alex opens the settings page and then "Stop AIs"
+    And Alex presses "Take offline" and moves on to the top bar
+    Then "Stop AIs" is gone and focus stays in the top bar
 
   Scenario: One computer of two cannot be reached
     Given a second computer "mac-mini" of Alex

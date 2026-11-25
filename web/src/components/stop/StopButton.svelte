@@ -31,26 +31,33 @@
 
   /** Under the button, which a banner above may have pushed down. */
   function place(event: ToggleEvent) {
-    if (event.newState === 'open')
-      panel!.style.top = `${button!.getBoundingClientRect().bottom + 8}px`;
+    if (event.newState !== 'open') return;
+    failed = '';
+    panel!.style.top = `${button!.getBoundingClientRect().bottom + 8}px`;
   }
 
   function opened(event: ToggleEvent) {
     if (event.newState !== 'open') return;
-    failed = '';
     nodes.sync(homes, true);
     panel!.focus();
   }
 
-  /** Runs one action; the panel stays open on a refusal. */
+  /** Runs one action. On a refusal the panel stays open, or opens again to say so; a person who
+   *  left it keeps their place otherwise. */
   async function act(name: string, run: () => Promise<string>) {
     busy = name;
     failed = '';
     // The pressed button is about to be disabled, and would let go of the focus.
     panel!.focus();
-    failed = await run();
+    const code = await run();
     busy = '';
-    if (failed) return;
+    if (code) {
+      panel?.togglePopover(true);
+      failed = code;
+      return;
+    }
+    const at = document.activeElement;
+    if (panel ? !panel.contains(at) : at !== document.body) return;
     panel?.hidePopover();
     await tick();
     (button ?? document.querySelector('main')!).focus();
@@ -120,7 +127,9 @@
       <section>
         <div>
           <h3>{t('stop.mine.title')}</h3>
-          <p>{t('stop.mine.body').replace('{names}', () => names(running, prefs.lang))}</p>
+          {#if reached.length}
+            <p>{t('stop.mine.body').replace('{names}', () => names(reached, prefs.lang))}</p>
+          {/if}
           {#if away.length}
             <p class="away">
               {t('stop.mine.away').replace('{names}', () => names(away, prefs.lang))}

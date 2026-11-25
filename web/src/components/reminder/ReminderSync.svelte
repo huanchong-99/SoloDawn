@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
-  import { find } from '../../lib/groups.svelte';
+  import { onMount, tick, untrack } from 'svelte';
+  import { find, type Group } from '../../lib/groups.svelte';
   import { jumpToMessage } from '../../lib/jump';
   import type { Net } from '../../lib/net.svelte';
   import { prefs } from '../../lib/prefs.svelte';
@@ -11,7 +11,7 @@
   /** Keeps subscribed homes in sync across pages and opens a card chosen from a push reminder. */
   let { net }: { net: Net } = $props();
 
-  let target = $state<ReminderTarget>();
+  let target = $state.raw<ReminderTarget>();
 
   function openTarget(next: ReminderTarget) {
     target = next;
@@ -53,13 +53,17 @@
     const pending = target;
     if (!pending) return;
     const group = find(pending.g);
-    if (!group || route.page !== 'chat' || route.params.g !== pending.g) return;
-    void group.main;
-    void tick().then(() => {
-      if (document.getElementById(`m-${pending.msg}`)) {
-        jumpToMessage(new Event('click'), pending.msg, pending.kind);
-        target = undefined;
-      }
-    });
+    if (!group?.live || route.page !== 'chat' || route.params.g !== pending.g) return;
+    // Tried again when the group is read anew, if the connection was lost before the home answered.
+    untrack(() => void open(group, pending));
   });
+
+  /** Jumps to the message, however old; one that the home does not have is let go. */
+  async function open(group: Group, pending: ReminderTarget) {
+    const answered = await group.seek(pending.msg);
+    if (!answered || target !== pending) return;
+    target = undefined;
+    await tick();
+    jumpToMessage(new Event('click'), pending.msg, pending.kind);
+  }
 </script>

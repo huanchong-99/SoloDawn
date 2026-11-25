@@ -221,8 +221,10 @@ describe('the parts of a terminal page', () => {
   });
 
   it('words the refusals it knows and says what the bar shows in every phase', () => {
+    const busy =
+      'This AI is busy: its terminal is already open, one of its tasks is merging, or it is about to start a turn (perhaps waiting for a free slot on its computer). Try again soon.';
     for (const [code, text] of [
-      ['busy', 'This AI is busy with another terminal or a merge right now.'],
+      ['busy', busy],
       ['cli', 'The AI CLI could not open the interactive session on its computer.'],
       ['conflict', 'This session cannot be taken over in its current state.'],
       ['home_unreachable', "The AI's computer cannot reach this group's home right now."],
@@ -232,6 +234,11 @@ describe('the parts of a terminal page', () => {
       expect(takeoverErrorText(code)).toBe(text);
     }
     expect(takeoverErrorText('forbidden')).toBeUndefined();
+    prefs.lang = 'zh-CN';
+    expect(takeoverErrorText('busy')).toBe(
+      '这个 AI 正忙：它的终端已经开着，或它的任务正在合并，或它马上要开始一轮（也许在等它的电脑有空位）。请稍后再试。',
+    );
+    prefs.lang = 'en';
 
     const ai = row<p.AIMemberRow>('row-member-ai', { state: 'working' });
     const base = {
@@ -289,7 +296,7 @@ describe('the parts of a terminal page', () => {
     );
     expect(takeoverBarState({ ...base, phase: 'error', errorCode: 'busy' })).toEqual({
       title: 'Cannot open terminal',
-      detail: 'This AI is busy with another terminal or a merge right now.',
+      detail: busy,
       errorCode: undefined,
       handback: false,
     });

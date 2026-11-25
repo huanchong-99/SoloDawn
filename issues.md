@@ -6,6 +6,16 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-26 · bug · A jump to a card older than the messages read drifts out of view
+
+- Symptom: a reminder opens a task whose card is far back and was not read (160 messages): its thread opens and has the focus, but after the gap to the newer messages is paged in, the card is not where the jump put it. Measured with Playwright Firefox 1555 and Chromium 1248, 1280x720, real pages through a fake `fetch`, card 160 back fetched with `seek`; the thread open or not makes no difference. A card that is held, or 25 messages back, stays in place in both. Not measured: WebKit, the real home.
+- Cause: the card is fetched alone (`Group.seek`), so the pages of scroll-back (`Group.older`, `web/src/components/chat/Chat.svelte`) are inserted below it, in a reversed scroller whose offset counts from the bottom. Shared condition: the card is near the top of what is held, so `edge` (`Chat.svelte:68-73`, 600 px margin) stays in reach and the pages follow at once, until the rows above the card fill 600 px. Pages go between held rows because `main` is sorted by `pos` (`groups.svelte.ts`, `#msgs`); the keyed `each` inserts and moves nothing. Two causes, neither is Firefox's own:
+  1. Pages that arrive while a row still rises: `Message.svelte:97-99` runs `rise`, a transform (`base.css:1263`), on every newly drawn message, the fetched card too. A running transform between the anchor and the scroller turns scroll anchoring off for that layout, in both engines, and the page inserted below is not compensated. With 10 older held rows and pages 90 ms apart: Firefox -1301, Chromium -1428 (374 is right); at 30 ms Firefox 82 or 379 (a race), Chromium -1428; at 300 ms, after the animation, 362 and 363. Without the animation, or with `appear` alone: 374 and 375 in every timing. With `translate` instead of `transform`: Firefox 363 to 366, Chromium still -1428.
+  2. A page that goes past the card (deterministic, both engines): the first row in view is the anchor, a held row above the card, the day or the edge. Messages older than the card are inserted between it and the card, so the card goes down: with 40 messages before it 1473 to 1495, with 120 3713 to 3735, in both engines, animation or not. Focus is no anchor in either engine here.
+  Both are older than the branch `web/leftovers`; the same is so for a jump from the waiting bar to a pending card older than the first 50 (not measured there).
+- Fix ideas, not applied: for cause 1, no transform on messages that scroll-back or `seek` brings, only on ones that arrive at the end, or `appear` alone (a motion decision). For cause 2, `.scroller:has(.msg:focus-within) :is(.msg:not(:focus-within), .edge, .sep) { overflow-anchor: none }` with cause 1 removed gave 374 and 375 in every case of both engines, but leaves no anchor once the person scrolls the focused message out of view, so a new message would then move what they read; it must end when the gap is filled (state for the sought message, or not drawing rows beyond the gap).
+- Status: open, planned as its own unit.
+
 ### 2026-11-25 · limitation · `group set` has no range for its numbers
 
 - Symptom: a home stores any integer as `pass`, `pass_foundation` or a limit, also 0 and negative ones. Some have an effect nobody chose: `turn_minutes` 0 ends every check command at once.
@@ -23,12 +33,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a lost home that returns after its group was restored elsewhere lists the group too. The browser shows one copy, that of the home it reached first, so a reload can show the other; when the copy shown is deleted, the other appears at its home's next list.
 - Cause: nothing in `welcome.groups` says which copy is the newer (`planning/contracts/step-2/export.md` section 4 speaks of a lost home); `Home.#list` (`web/src/lib/groups.svelte.ts`) leaves a group to the home within reach that listed it first.
 - Status: open, accepted: the owner deletes the old copy.
-
-### 2026-11-26 · deviation · An AI that its owner denied and later assigned gets one turn only
-
-- Symptom: the owner of an AI denies it a role, then changes their mind and sends the `task assign` that names it again (once another AI held the role). The AI gets the `assign` or `review` item (`planning/contracts/step-2/confirm.md` section 6, the exception), but none of the later `checks`, `reviewed` and `resume` items; the task stands still, and its card says again that the owner said no.
-- Cause: `cftHoldItem` (`internal/home/cmd_confirm_task.go:138`) knows the exception only inside the command that makes the change (`cftOwnerChange`); for every later item the denied card decides (`cftHeld`). Seen with a throwaway test on `cftFixture`: `assign` queued, then `checks`, `reviewed` and `resume` dropped.
-- Status: open, home side; found while the task card learned to say that an owner denied a role (`web/src/lib/taskops.ts`, `deniedHold`). The card reads the denied card alone, so it shows the line during that one turn too.
 
 ### 2026-11-26 · bug · A turn that ends while the held items are read gives the AI its newer messages first
 
@@ -986,7 +990,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: the owner of an AI denied a role and later gave it that task with their own `task assign`: the first `assign` reached the AI, the later `checks`, `reviewed`, `review` and `resume` items were dropped. In the same way a card written for one task of a brief held the items of another task of it that the AI already did by its owner's word, and gave it the wait `confirm`.
 - Cause: `cftHoldItem` (`internal/home/cmd_confirm_task.go:138` before the fix) saw the exception of [confirm](planning/contracts/step-2/confirm.md) section 6 only in the command that changed the role; for every other command it looked at the request's one card, and nothing on disk said who had given the role.
-- Status: resolved in branch `fix/home-items-3`: the task row's optional `asked` names the AIs whose role needs the card ([rows](planning/contracts/rows.md) section 4). A role given before the fix has none: nothing holds it, and a card still pending for it starts nothing, so the role is given again. Tests: `TestRoleDeniedThenGivenByTheOwner`, `TestRoleThatAsksNobodyIgnoresTheCardOfItsRequest`.
+- Status: resolved in branch `fix/home-items-3`: the task row's optional `asked` names the AIs whose role needs the card ([rows](planning/contracts/rows.md) section 4). A role given before the fix has none: nothing holds it, and a card still pending for it starts nothing, so the role is given again. Tests: `TestRoleDeniedThenGivenByTheOwner`, `TestRoleThatAsksNobodyIgnoresTheCardOfItsRequest`. The task card reads `asked` too since branch `web/leftovers` (`deniedHold`, `web/src/lib/taskops.ts`): its line that the owner said no went on after the owner gave the role.
 
 ### 2026-11-26 · bug · A jump that crossed the delivery of its message was delivered twice
 
@@ -998,7 +1002,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: the push of a stopped task and of a failed sign-in both read as a mention, and a click on the reminder of a row in a task's thread looked for a message that the main line never shows.
 - Cause: `proto.Reminder` had no code, and `wpushNotify` (`internal/home/webpush.go:180` before the fix) always sent the row's id.
-- Status: home part resolved in branch `fix/home-items-3`: `code` for a `system` row, and the task's id as `msg` for a row in a thread alone ([commands](planning/contracts/commands.md) 1.7). Tests: `TestWebPushReminderKindsTitlesAndNoLeak`, `features/home_webpush.feature`. Open: the service worker's words for `code`, another unit.
+- Status: home part resolved in branch `fix/home-items-3`: `code` for a `system` row, and the task's id as `msg` for a row in a thread alone ([commands](planning/contracts/commands.md) 1.7). Tests: `TestWebPushReminderKindsTitlesAndNoLeak`, `features/home_webpush.feature`. The browser's part resolved in branch `web/leftovers`: words for `code`, `renotify`, and the click opens the task's thread, fetching its message when the read did not bring it (`web/src/sw.ts`, `web/src/lib/jump.ts`, `Group.seek`). Tests: `web/src/sw.test.ts`, `web/src/lib/jump.test.ts`, `features/web_reminder.feature`.
 
 ### 2026-11-25 · bug · Removing a person left their connections open
 

@@ -45,6 +45,10 @@
 
   const paging = $derived(group.paging());
   const line = $derived(days(withoutInlineReplies(group.main, Boolean(cardOf('call')))));
+  const emptyBody = $derived.by(() => {
+    if (group.info?.kind !== 'team') return 'chat.empty.body';
+    return group.members.length > 1 ? 'team.empty' : 'team.empty.alone';
+  });
   const newest = $derived(group.main.at(-1)?.id);
   // Older messages may exist and cannot be had now: the home refused a page, or is not reachable.
   const stuck = $derived(paging.failed || (paging.more && !group.home.ctl));
@@ -171,7 +175,7 @@
           <div class="empty">
             <span class="horizon"></span>
             <h3>{t('chat.empty.title')}</h3>
-            <p>{t(group.info?.kind === 'team' ? 'team.empty' : 'chat.empty.body')}</p>
+            <p>{t(emptyBody)}</p>
           </div>
         {/if}
       {/each}

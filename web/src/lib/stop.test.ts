@@ -153,7 +153,7 @@ describe('statusIn', () => {
     expect(said('offline')).toEqual({ st: 'offline', text: 'Offline' });
     nodes.infos.set(home, info(true));
     for (const state of ['offline', 'dormant'])
-      expect(said(state)).toEqual({ st: 'offline', text: 'Offline · you took it offline' });
+      expect(said(state)).toEqual({ st: 'offline', text: 'Offline · by you' });
     expect(said('working')).toEqual({ st: 'working', text: 'Working' });
     expect(said('takeover')).toEqual({ st: 'takeover', text: 'Owner is driving' });
     expect(statusIn(group, ai('a', { state: 'offline' }), undefined)).toEqual({

@@ -101,6 +101,23 @@ describe('formatReminder', () => {
     }
   });
 
+  it('says what happened by the code, and keeps to the kind without one it knows', () => {
+    const of = (code: string | undefined, title: string, lang: 'en' | 'zh-CN') =>
+      formatReminder(
+        decode(Reminder, JSON.stringify({ ...sample, kind: 'mention', title, code })),
+        lang,
+      ).title;
+    expect(of('task_failed', 'Login page', 'en')).toBe('Website · Task stopped');
+    expect(of('task_failed', 'Login page', 'zh-CN')).toBe('Website · 任务已停下');
+    expect(of('login_invalid', '', 'en')).toBe('Website · Sign-in no longer valid');
+    expect(of('login_invalid', '', 'zh-CN')).toBe('Website · 登录状态已失效');
+    expect(of('unheard_of', '', 'en')).toBe('Website · Mention');
+    expect(of('unheard_of', 'Login page', 'en')).toBe('Website · Mention');
+    expect(of('unheard_of', 'Login page', 'zh-CN')).toBe('Website · 提及');
+    expect(of(undefined, '', 'en')).toBe('Website · Mention');
+    expect(of(undefined, 'Login page', 'zh-CN')).toBe('Website · 任务已停下');
+  });
+
   it('shows only who in the body when title is absent or empty', () => {
     const { title: _dropped, ...withoutTitle } = sample;
     expect(formatReminder(withoutTitle, 'en')).toEqual({
@@ -163,6 +180,7 @@ describe('service worker events', () => {
           body: 'Codex: Time the path change in a browser.',
           icon: 'https://app.example/client/icon.svg',
           tag: 'rZNvy-1jH6Z-BcPqA5U5BQ/netluHiPQf-UoheEIBfbLw',
+          renotify: true,
           data: {
             g: 'rZNvy-1jH6Z-BcPqA5U5BQ',
             msg: 'netluHiPQf-UoheEIBfbLw',

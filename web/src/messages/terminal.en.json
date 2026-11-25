@@ -22,7 +22,7 @@
   "terminal.bar.relayed.body": "The connection switched to a relay, so the terminal closed and handed back to the AI.",
   "terminal.bar.starting": "Opening terminal…",
   "terminal.bar.starting.body": "Switching the AI session into interactive terminal mode.",
-  "terminal.error.busy": "This AI is busy with another terminal or a merge right now.",
+  "terminal.error.busy": "This AI is busy: its terminal is already open, one of its tasks is merging, or it is about to start a turn (perhaps waiting for a free slot on its computer). Try again soon.",
   "terminal.error.cli": "The AI CLI could not open the interactive session on its computer.",
   "terminal.error.conflict": "This session cannot be taken over in its current state.",
   "terminal.error.home_unreachable": "The AI's computer cannot reach this group's home right now.",
