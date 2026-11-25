@@ -42,6 +42,7 @@ export interface Net {
   /** Steals the device's connection lock for this tab after the person chooses "Use here". */
   useHere?(): void;
   join?(invitation: Invitation, name: string, signal: AbortSignal): Promise<JoinResult>;
+  /** Reaches a computer to watch a terminal on it, until the function it returns is called. */
   watchHost?(id: string): () => void;
 }
 
@@ -190,6 +191,7 @@ function startLive(
       for (const [id, { name }] of Object.entries(joined)) {
         if (!peers.has(id)) dial(id, homeOf(log, id, name));
       }
+      const keeps = (id: string) => log.valid(id) || Object.hasOwn(joined, id) || invited.has(id);
       const releaseWatch = (id: string) => {
         if (controller.signal.aborted) return;
         const remaining = watches.get(id)! - 1;
@@ -198,7 +200,7 @@ function startLive(
           return;
         }
         watches.delete(id);
-        if (log.valid(id) || Object.hasOwn(joined, id) || invited.has(id)) return;
+        if (keeps(id)) return;
         peers.get(id)!.close();
         peers.delete(id);
         const home = added.get(id)!;
@@ -207,7 +209,11 @@ function startLive(
       };
       setWatchHost((id) => {
         watches.set(id, (watches.get(id) ?? 0) + 1);
-        if (!peers.has(id)) dial(id, homeOf(log, id, id));
+        // A computer that is not reached yet is dialled again, its back-off from the start: it may
+        // have dropped the offers so far (contracts/step-2/watch-team.md section 3). One that this
+        // browser reaches for anyway has dropped none, and may have requests to be sent again.
+        const home = homeOf(log, id, id);
+        if (keeps(id) ? !peers.has(id) : !home.ctl) dial(id, home);
         return () => releaseWatch(id);
       });
       setJoin(async (invitation, name, cancel) => {

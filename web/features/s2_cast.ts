@@ -71,14 +71,6 @@ async function cast(as: 'P' | 'Q') {
   prefs.lang = 'en';
   const me = browser(home, as === 'P' ? user : ids.qUser);
   other = ownedNode(as === 'P' ? 'P2' : 'Q1', as === 'P' ? ids.p2 : ids.q1);
-  other.info.agents = [
-    {
-      ...other.info.agents[0],
-      groups: [
-        { g: ids.g, member: ids.qTeam, level: 2, state: 'takeover', queued: 0, watchers: [user] },
-      ],
-    },
-  ];
   other.home.reply = () => ({ ok: true });
   homes.push(me.store, other.store);
   await Promise.all([me.connect(), other.connect()]);

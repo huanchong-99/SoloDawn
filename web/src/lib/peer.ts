@@ -115,7 +115,7 @@ function read(data: string): { id?: unknown; re?: unknown } {
 }
 
 /** When to try again (flows/connect.md steps 15 and 16): after 1, 2, 4 … 60 seconds. */
-class Retry {
+export class Retry {
   #delay = second;
   #timer: Timer | undefined;
 

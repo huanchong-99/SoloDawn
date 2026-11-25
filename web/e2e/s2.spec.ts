@@ -1,10 +1,23 @@
 // The "In the browser" sentences of step 2 (planning/steps/step-2-3-acceptance.md), each person in
-// a page of their own whose homes are the test homes of features/s2_cast.ts.
-import type { Browser, Page } from 'playwright';
+// a page of their own whose homes are the test homes of features/s2_cast.ts; watching runs against
+// real nodes.
+import { mkdir, writeFile } from 'node:fs/promises';
+import { delimiter, join } from 'node:path';
+import type { Browser, BrowserContext, Page } from 'playwright';
 import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, afterEach, beforeAll, describe, expect, inject, test } from 'vitest';
 import type {} from '../features/s2_cast';
 import { launch } from './config';
+import {
+  gitIdentityEnv,
+  initGitRepo,
+  openDirectContext,
+  pairPrimaryBrowser,
+  poll,
+  startDirectSurface,
+  type DirectSurface,
+} from './direct';
+import { startNet, type Net, type Node } from './nodes';
 
 type Id = keyof Window['s2']['ids'];
 
@@ -115,17 +128,6 @@ describe('step 2 in the browser', () => {
     for (const list of ['Allow list', 'Approval delegates'])
       await texts(p, `.member dt:text-is("${list}") + dd`).toEqual(['Alex', 'Alex']);
     expect(await p.getByRole('button', { name: 'Edit access' }).count()).toBe(0);
-  });
-
-  test("A9.21 P's terminal takes no input, and Q sees that P is watching", async () => {
-    const p = await open('P', '#/terminal/{g}/{qTeam}');
-    await p
-      .getByText("You can watch, but cannot type or resize the owner's terminal.")
-      .first()
-      .waitFor();
-    expect(await p.locator('.keys').count()).toBe(0);
-    const q = await open('Q', '#/terminal/{g}/{qTeam}');
-    await texts(q, 'section[aria-label="Watching"] .row').toEqual(['A\nAlex\nStop watching']);
   });
 
   test('A9.23 the team group has no task list, no brief and no AI cards', async () => {
@@ -271,4 +273,116 @@ describe('step 2 in the browser', () => {
     await q.locator('.people li', { hasText: 'Alex' }).waitFor();
     expect(await q.locator('.move').count()).toBe(0);
   });
+});
+
+// The fake Claude Code replays scripts and has no terminal: this one echoes what is typed there.
+const cli = `#!/bin/sh
+case " $* " in
+  " --version ") echo "2.1.311 (Claude Code)"; exit;;
+  *" -p "*) exit 1;;
+esac
+echo terminal ready
+while read -r line; do echo "got $line"; done
+`;
+
+const screen = (page: Page) => poll(() => page.locator('.xterm-rows').innerText());
+const bar = (page: Page) => poll(() => page.locator('.takeover b').innerText(), 30_000);
+const watching = (page: Page) =>
+  poll(() => page.locator('section[aria-label="Watching"]').innerText());
+
+// Who watches reaches no computer of the owner before the consent, and the owner has one device,
+// whose terminal page is open.
+describe('watching a terminal, with real nodes', () => {
+  let browser: Browser;
+  let net: Net | undefined;
+  let surface: DirectSurface | undefined;
+  const contexts: BrowserContext[] = [];
+
+  beforeAll(async () => {
+    browser = await launch(inject('browser'));
+  });
+  afterAll(() => browser?.close());
+  afterEach(async () => {
+    await Promise.allSettled(contexts.splice(0).map((context) => context.close()));
+    await surface?.close();
+    await net?.stop();
+  });
+
+  test(
+    'A9.20 A9.21 the owner answers on the terminal page, and the watcher starts by itself',
+    { timeout: 180_000 },
+    async () => {
+      const bin = join(inject('e2e').root, 'watch-bin');
+      await mkdir(bin);
+      await writeFile(join(bin, 'claude'), cli, { mode: 0o700 });
+      const PATH = [bin, inject('e2e').bin, process.env.PATH].join(delimiter);
+      const active = (net = await startNet({ nodes: 3, env: () => ({ ...gitIdentityEnv, PATH }) }));
+      const direct = (surface = await startDirectSurface(active.rendezvous, inject('browser')));
+      const open = async () => (await openDirectContext(browser, contexts, direct)).newPage();
+
+      const h = await open();
+      await pairPrimaryBrowser(h, direct, active.nodes[0], 'H1');
+      await h.locator('button', { hasText: 'New group' }).first().click();
+      const create = h.locator('dialog.dlg[open]');
+      await create.getByLabel('Group name').fill('Website');
+      await create
+        .getByLabel('Git repository')
+        .fill(await initGitRepo(active.dir, 'repo', '# Website\n'));
+      await create.getByLabel('Your name in the group').fill('Mina');
+      await create.locator('select.input').first().selectOption('none');
+      await create.locator('button.btn-primary', { hasText: 'Create group' }).click();
+      const member = async (name: string, node: Node) => {
+        await h.getByRole('button', { name: 'Invite', exact: true }).click();
+        await h.getByRole('button', { name: 'Create link' }).click();
+        const link = await h.locator('pre.cmd').innerText();
+        await h.getByRole('button', { name: 'Done' }).click();
+        const page = await open();
+        await pairPrimaryBrowser(page, direct, node, `${name}'s computer`);
+        await page.goto(`${direct.url}${link.slice(link.indexOf('#join='))}`);
+        await page.getByLabel('Your name in this group').fill(name);
+        await page.locator('form button.btn-primary').click();
+        await poll(() => page.locator('.chat-head h2').allTextContents()).toEqual(['Website']);
+        return page;
+      };
+      const p = await member('Alex', active.nodes[1]);
+      const q = await member('Quinn', active.nodes[2]);
+      await q.locator('.members button', { hasText: 'Add AI' }).click();
+      const add = q.locator('dialog.dlg[open]');
+      await add.locator('.choice', { hasText: 'Claude Code' }).locator('input').check();
+      await add.locator('button.btn-primary', { hasText: 'Add AI' }).click();
+      await q.locator('.member').getByRole('link', { name: 'Open terminal' }).click();
+      await bar(q).toBe('Owner is driving');
+      await screen(q).toContain('terminal ready');
+      await watching(q).toContain('Nobody is watching.');
+
+      await q.locator('.xterm-helper-textarea').focus();
+      await p.locator('.member').getByRole('button', { name: 'Ask to watch' }).click();
+      await p.locator('.member').getByRole('link', { name: 'Watch', exact: true }).click();
+      await bar(p).toBe('Waiting for Quinn');
+      const card = q.locator('.asked .card');
+      await poll(() => card.locator('p').innerText()).toBe(
+        'Let Alex watch Claude Code’s terminal.',
+      );
+      expect(await q.locator('.toast').count()).toBe(0);
+      // The terminal has kept the keyboard, and gets it back after the answer.
+      await q.keyboard.type('before\n');
+      await card.getByRole('button', { name: 'Confirm' }).click();
+      await poll(() => card.count()).toBe(0);
+      await bar(p).toBe('Watching · receive only');
+      expect(await p.locator('.keys').count()).toBe(0);
+      await watching(q).toMatch(/Alex\s+Stop watching/);
+      // The owner's size arrives with the channel: from here the watcher misses nothing.
+      const rows = await q.locator('.xterm-rows > div').count();
+      await poll(() => p.locator('.xterm-rows > div').count()).toBe(rows);
+      await q.keyboard.type('after\n');
+      await screen(q).toMatch(/got before[^]*got after/);
+      await screen(p).toContain('got after');
+      await bar(q).toBe('Owner is driving');
+
+      await q.getByRole('button', { name: 'Stop watching' }).click();
+      await watching(q).toContain('Nobody is watching.');
+      await bar(p).toBe('Watching ended');
+      await bar(q).toBe('Owner is driving');
+    },
+  );
 });

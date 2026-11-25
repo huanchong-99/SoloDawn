@@ -1,12 +1,16 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
+  import { prefersReducedMotion } from 'svelte/motion';
+  import { fade } from 'svelte/transition';
+  import ConfirmCard from '../components/confirm/ConfirmCard.svelte';
   import Failure from '../components/Failure.svelte';
   import Icon from '../components/Icon.svelte';
   import TerminalInfo from '../components/terminal/TerminalInfo.svelte';
   import AskToWatch from '../components/watch/AskToWatch.svelte';
   import Watchers from '../components/watch/Watchers.svelte';
-  import { Watch } from '../components/watch/watch.svelte';
+  import { Watch, watchBar, watchRequest } from '../components/watch/watch.svelte';
   import { find } from '../lib/groups.svelte';
+  import { onOpenTerminal } from '../lib/notify.svelte';
   import { t } from '../lib/prefs.svelte';
   import { href, type PageProps } from '../lib/route.svelte';
   import {
@@ -56,19 +60,23 @@
   const taskId = $derived(params.task);
   const tk = $derived(new Takeover(g, memberId, taskId, write));
   const watch = $derived(new Watch(g, memberId, write));
-  const watchHost = $derived(watching && watch.phase !== 'ended' ? ai?.host : undefined);
+  // Reached for while the takeover lasts. A watch that is open stays when the AI's computer loses
+  // the home, and so the AI is offline.
+  const reached = $derived(
+    watch.phase === 'active' || (watch.phase !== 'ended' && ai?.state === 'takeover'),
+  );
+  const watchHost = $derived(watching && reached ? ai?.host : undefined);
   const session = $derived(watching ? watch : tk);
+  // The requests to watch that wait for this reader, the owner.
+  const asked = $derived(group ? group.waiting.filter((msg) => onOpenTerminal(group, msg)) : []);
+  const request = $derived(watching ? watchRequest(group!, ai!) : undefined);
+  const consent = $derived(request?.state.status === 'confirmed' ? request.id : undefined);
   const size = $derived(host?.terminalSizes.get(`${g}:${memberId}`));
   const backHref = $derived(href('chat', { g: params.g }));
   const subtitle = $derived(headerSubtitle(ai, task, group?.name));
   const bar = $derived(
     watching
-      ? {
-          title: t(`watch.${watch.phase}`),
-          detail: t('watch.readonly'),
-          handback: false,
-          errorCode: watch.errorCode,
-        }
+      ? watchBar(watch, group!, ai!)
       : takeoverBarState({
           phase: tk.phase,
           ai,
@@ -88,9 +96,27 @@
     });
     return () => current.handBack();
   });
-  $effect(() => session.follow(targetOf(host, ai), path));
   $effect(() => {
-    if (watchHost) return net.watchHost?.(watchHost);
+    if (!watching || reached) session.follow(targetOf(host, ai), path);
+  });
+  // A card that goes while it has the focus gives it to the terminal.
+  $effect.pre(() => {
+    const ids = asked.map(({ id }) => `m-${id}`);
+    const card = document.activeElement?.closest('.asked > div');
+    if (card && !ids.includes(card.id)) untrack(() => term?.focus());
+  });
+  $effect(() => {
+    const current = watch;
+    if (consent) untrack(() => current.consented());
+  });
+  // With the consent the computer answers this browser, so it is reached for again.
+  $effect(() => {
+    void consent;
+    const reach = net.watchHost;
+    if (!reach || !watchHost) return;
+    const release = untrack(() => reach(watchHost));
+    // After the effect has run again, so that a connection that is open stays.
+    return () => queueMicrotask(release);
   });
   $effect(() => {
     if (watching && term && size) term.resize(size.cols, size.rows);
@@ -173,8 +199,8 @@
             {bar.detail}
           {/if}
         </span>
-        {#if watching && watch.errorCode === 'forbidden' && group && ai}
-          <AskToWatch {group} {ai} />
+        {#if bar.ask && group && ai}
+          <AskToWatch {group} {ai} again />
         {/if}
         {#if bar.handback}
           <a class="btn btn-dawn" href={backHref} bind:this={exit} onclick={() => tk.handBack()}>
@@ -185,13 +211,22 @@
         {/if}
       </div>
 
-      <div
-        class="term"
-        id="term"
-        bind:this={termHost}
-        role="region"
-        aria-label={t('terminal.aria.term').replace('{ai}', ai?.name ?? t('terminal.title'))}
-      ></div>
+      <div class="screen">
+        <div class="asked" aria-live="polite">
+          {#each asked as msg (msg.id)}
+            <div id={`m-${msg.id}`} out:fade={{ duration: prefersReducedMotion.current ? 0 : 200 }}>
+              <ConfirmCard group={group!} {msg} />
+            </div>
+          {/each}
+        </div>
+        <div
+          class="term"
+          id="term"
+          bind:this={termHost}
+          role="region"
+          aria-label={t('terminal.aria.term').replace('{ai}', ai?.name ?? t('terminal.title'))}
+        ></div>
+      </div>
 
       {#if !watching}<div
           class="keys only-narrow"
@@ -285,6 +320,32 @@
   .takeover :global(.fail) {
     color: inherit;
   }
+  .screen {
+    position: relative;
+    display: grid;
+    min-height: 0;
+  }
+  /* Over the terminal, which keeps its size and its focus, where the notifications are. */
+  .asked {
+    position: absolute;
+    inset: 0 0 auto auto;
+    z-index: 2;
+    display: grid;
+    gap: var(--sp-2);
+    width: min(380px, 100%);
+    max-height: 100%;
+    padding: var(--sp-3);
+    overflow: auto;
+    pointer-events: none;
+  }
+  .asked > div {
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-pop);
+    pointer-events: auto;
+    animation:
+      drop var(--dur-4) var(--spring),
+      appear var(--dur-2) var(--ease-out);
+  }
   .term {
     min-height: 0;
     min-width: 0;
@@ -345,6 +406,9 @@
     .takeover > .grow {
       order: 3;
       flex-basis: 100%;
+    }
+    .takeover > :global(:is(.btn-sm, .fail)) {
+      order: 4;
     }
   }
   @media (max-width: 1023px) {

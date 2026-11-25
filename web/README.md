@@ -69,7 +69,8 @@ removes the directory. The run's teardown kills what a test process that died le
 Keychain WebCrypto master key on a fresh runner. `pnpm test` leaves `e2e/` out. The tests change
 nothing of the test process's own environment; the scenarios of `../features/web_e2e.feature` check
 that. `e2e/s2.spec.ts` instead runs the step 2 cast of `features/s2_cast.ts` in each page against a
-Vite development server with `?nomock`; the node side of step 2 is tested by integration.
+Vite development server with `?nomock`, except watching, which three people do with real nodes; the
+rest of the node side of step 2 is tested by integration.
 
 The runtime dependencies are `valibot`, for the wire types, and `@xterm/xterm` 6.0.0 with
 `@xterm/addon-fit` 0.11.0 (MIT) for the terminal page. It is about
@@ -623,7 +624,9 @@ file in `src/routes/`. It edits neither the shell nor another area:
   neutral, and `alert`s, for 8 seconds. An alert is a notice of the home that mentions the reader
   (a task that stopped, an AI whose sign-in failed), in the words of its row (`src/lib/system.ts`)
   and the red of its mark. The 8 seconds are held while focus or the pointer is on the notification
-  and start again in full when both leave. Main-line messages of the chat open on screen stay quiet;
+  and start again in full when both leave. Main-line messages of the chat open on screen stay quiet,
+  as does a request to watch the takeover whose terminal page is open (`onOpenTerminal`): that page
+  shows the card, and leaving it would hand the terminal back;
   thread mentions and other groups still notify. Open jumps to the card or message. At most three are shown: a
   newcomer past that drops the oldest self-closing one, or the oldest waiting card when none is
   self-closing. The stack sits at the top right of the page's area, under the top bar and the
@@ -647,8 +650,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
   P-256 VAPID key pair in IndexedDB (`solodawn`, store `device`, key `vapid`); `Reminders`
   subscribes through `PushManager` and sends `push` (`PushOn` or `{ off: true }`) to connected
   homes, while `ReminderSync.svelte` (mounted at `layer`) keeps newly connected homes in sync and
-  jumps to `#m-<msg>` when a notification is clicked, fetching that one message when the read did not
-  bring it (`Group.seek`); of a task's card the thread opens.
+  jumps to `#m-<msg>` when a notification is clicked, in the chat or, for a request to watch, on the
+  terminal page that is open, fetching that one message when the read did not bring it
+  (`Group.seek`); of a task's card the thread opens. A request chosen on the terminal page that this
+  browser does not hold is fetched, if need be after the home is reached again, before the page is
+  left.
   `sw.ts` decodes `Reminder`, displays `group · kind` with `who: title` in the reader's language,
   with words for `code` in place of the kind when it has some (without a code, a mention with a title
   is the notice of a task that stopped, and says so), alerts again for another reminder of the same
@@ -809,8 +815,15 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
 - Watching reuses `#/terminal/<g>/<member>` for another person's AI. The terminal acquires its
   host through the existing signalling session, reuses a connected home or node, and releases a
   temporary connection when the last watch ends. Another person's taken-over AI offers Ask to
-  watch and Watch; a forbidden watch offers the same request action in the terminal bar. Only
-  the owner's terminal shows watchers. Real-host watching and other browsers remain unverified.
+  watch and Watch. The terminal bar says how the reader's request stands (`watchBar`) and offers to
+  ask; a request settled before the takeover began does not count. With the consent the page
+  reaches for the computer again, with a new back-off, and a refused `watch.start` is tried again
+  by the back-off of a connection, since the grant arrives a moment later. The bar changes only with
+  an answer, and after a second refusal it offers to ask again (the owner may have stopped the
+  watcher). An ended watch is not started again, and the computer is let go when the takeover ends,
+  unless the watch is open. The owner's terminal
+  shows the watchers, and over the terminal each pending request as the `ConfirmCard` of the chat:
+  it takes no focus when it comes and gives it to the terminal when it goes.
 - Custom forges are chosen at group creation. Group settings can edit their four argument-list
   templates, not change the forge. Each field is one argument; whitespace and empty arguments
   are preserved, without shell parsing. The home validates template restrictions.

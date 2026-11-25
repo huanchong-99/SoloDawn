@@ -24,6 +24,8 @@ export interface BarView {
   detail?: string;
   errorCode?: string;
   handback: boolean;
+  /** The bar offers to ask to watch. */
+  ask?: boolean;
 }
 
 /** The `pty:<g>:<member>` data channel as the page uses it. */

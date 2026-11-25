@@ -1,6 +1,7 @@
 // In-page notifications for live events that need or mention this browser's reader
 // (planning/product-rules.md R-34, planning/contracts/commands.md section 1.7).
 import { tick } from 'svelte';
+import { isWatch, type Confirm } from './confirm';
 import { subject, type Group, type Home } from './groups.svelte';
 import { jumpToMessage } from './jump';
 import { t } from './prefs.svelte';
@@ -96,6 +97,23 @@ const isMainLine = (msg: MsgRow): boolean => msg.thread === null || msg.main;
 export const inOpenChat = (g: string, msg: MsgRow): boolean =>
   route.page === 'chat' && route.params.g === g && isMainLine(msg);
 
+const takenOver = (group: Group, id: string): boolean => {
+  const ai = group.member(id);
+  return ai?.kind === 'ai' && ai.state === 'takeover';
+};
+
+/** True for a request to watch the takeover whose terminal page is open on screen. That page shows
+ *  the card: to leave it for the chat would end the takeover. */
+export const onOpenTerminal = (group: Group, msg: MsgRow): msg is Confirm =>
+  isWatch(msg) &&
+  takenOver(group, msg.body.ai) &&
+  route.page === 'terminal' &&
+  route.params.g === group.g &&
+  route.params.member === msg.body.ai;
+
+const onScreen = (group: Group, msg: MsgRow): boolean =>
+  inOpenChat(group.g, msg) || onOpenTerminal(group, msg);
+
 const isLiveMsg = (row: Row, prev: number): row is MsgRow =>
   row.r === 'msg' && row.seq > prev && (row as MsgRow).pos === row.seq;
 
@@ -112,7 +130,7 @@ function rowStillActive(item: Notice): boolean {
 }
 
 const stillValid = (allHomes: readonly Home[], item: Notice): boolean =>
-  groupListed(allHomes, item.group) && !inOpenChat(item.group.g, item.msg) && rowStillActive(item);
+  groupListed(allHomes, item.group) && !onScreen(item.group, item.msg) && rowStillActive(item);
 
 /** Reactive store of live in-page notifications across connected homes. */
 export class Notifier {
@@ -206,7 +224,7 @@ export class Notifier {
   }
 
   #push(group: Group, msg: MsgRow): void {
-    if (inOpenChat(group.g, msg)) return;
+    if (onScreen(group, msg)) return;
     const kind = classify(group, msg);
     if (!kind) return;
     const needsYou = kind in waitingKinds;
