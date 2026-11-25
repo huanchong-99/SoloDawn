@@ -56,7 +56,7 @@ can clear the counter; local checks and crashes do not count.
 | read the payload in a function | `c.Decode(&p)`, with `p` the wire type of the command; the refusal it returns is the function's answer |
 | ask who sent it | `c.Who`, `c.Who.Member()`, `s.Admin(c.Who)`, `s.Secretary(c.Who)`, `s.Hosts(c.Who, ai)` |
 | change rows | `Result.Rows`, each made with `RowOf(row)` from a row type of `internal/proto` |
-| queue or withdraw inbox items | `Result.Items`, with `Item.NotBefore` to hold one back; `Result.Retire` |
+| queue or withdraw inbox items | `Result.Items`, with `Item.NotBefore` to hold one back; `Result.Retire`; `Result.Jump` to send some again as jumps |
 | change something that is no row | `Result.Writes`, values with `Put(tx)` |
 | have every peer pushed its `groups` again | `Result.GroupsChanged` |
 | show the group an accepted device-log entry | a `proto.DeviceRow` in `Result.Rows`; `Commit` applies its entry to the state's log |
@@ -205,7 +205,7 @@ result is committed.
 **Items.** An `Item` is an inbox item before the home numbers it: the AI, the `why`, and the fields
 [datachannel](../../planning/contracts/datachannel.md) section 6 gives that `why`. `NotBefore`
 holds an item back until that time. `Retire` lists queued items, by id, that the change made
-pointless.
+pointless, and `Jump` those that jump the queue.
 
 **Errors.** `Apply` returns an error only when a receipt could not be read or written. The caller
 drops the transaction and answers `internal`.
@@ -312,7 +312,7 @@ the answer, in this order:
 2. `groups`, to every connection that has had its welcome, when the result has `GroupsChanged`:
    the groups that exist and whose `State.Serves` holds for the connection's device, in the
    order of their ids, `[]` when there are none.
-3. The inbox items the result queued, to the connections that take them and whose device the
+3. The inbox items the result queued or that jump, to the connections that take them and whose device the
    group serves. So a row change reaches a host before the items it caused.
 
 **Welcome.** `Welcome(conn, build)` reads the list of groups for the connection's device, has
@@ -330,7 +330,8 @@ from then on each item when it is queued or when its `NotBefore` has passed, whi
 at on a tick. Due items for one connection are sent in `proto.Inbox` frames packed up to 61,376
 bytes (`runRoom`), in queue order, each carrying live copies of the `msg` and `task` rows the item
 names when sent ([datachannel](../../planning/contracts/datachannel.md), section 6). `Ack(conn, req)` deletes `req.Item` in `req.Group` when `conn`'s device is the item's host. Each delivery reads the queue from the store, so an
-item that was acknowledged or retired is not sent again. A queue that cannot be read is reported
+item that was acknowledged or retired is not sent again. An item of `Result.Jump` keeps its number,
+gets `jump: true`, loses its `NotBefore` and is sent again to every connection that takes it. A queue that cannot be read is reported
 and read again on the next tick. An item that cannot be made into a frame is reported and left out,
 once for each connection until its next `Inbox`, and the other items are sent.
 
@@ -530,7 +531,10 @@ card's approvers and the AI row's current approvers.
 `cmd_confirm_task.go` finishes results with task rows or task items before sealing them;
 other commands need no task disk reads. Rows 1 and 11 create missing
 role cards, including queued tasks and reviewers not yet at review. Cards use the request and AI
-as their stable identity. Pending or denied roles receive no work items. An active assignee waits
+as their stable identity. `TaskRow.Asked` names the AIs whose role in that task needs the card:
+every role but one the AI's owner gave by `task assign`, or one of a brief that the confirmer's
+word was enough for. Such a role has no card there (`cftCard`), so a card of the request neither
+holds nor starts it. Pending or denied roles receive no work items. An active assignee waits
 on its pending card at every step; a reviewer waits at review. Confirmation takes priority over
 ordinary card waits. Confirmation releases active role items, while later activations use the same
 grant; denial clears its wait and notifies the secretary. Decisions write only changed task
@@ -807,8 +811,8 @@ row 23), and the thread round transitions (rows 21 and 22, and section 4 "Held b
 - **`jump`.** Registered under `jump`. Refuses an AI signer (a non-empty `c.Who.AI`) with
   `forbidden`, a missing `msg` with `not_found`, and any `msg` whose `by` differs from `c.Who.Human`
   with `forbidden`.
-  Retires every unacknowledged `mention` item of `c.Disk.Queued()` whose `msg` is that message and
-  queues its replacement with `Jump: true`, or answers `conflict` when none exists.
+  Every unacknowledged `mention` item of `c.Disk.Queued()` whose `msg` is that message jumps
+  (`Result.Jump`); `conflict` when none exists.
 - **`quiet` timer.** Registered under `Timers["quiet"]` and `After["quiet"]`. When the group has a
   secretary, is not paused and has `limits.idle_notice_minutes > 0`, checks each task in sorted id
   order: if the task has had no thread message for at least `limits.idle_notice_minutes`
@@ -886,7 +890,8 @@ shutdown hooks ([commands](../../planning/contracts/commands.md) 1.7;
   RFC 8291 (`webpush-go`), and sends each request in its own goroutine with a 5 s context timeout.
   Confirmation reminders go to `body.to`, name the AI in `who`, and omit `title`. A `system` row that
   mentions people (`task_failed`, `login_invalid`) names the AI of its body, or the assignee of the
-  task of its body with that task's title.
+  task of its body with that task's title, and carries its code. The `msg` of a message in a task's
+  thread alone is the task's id (`wpushTarget`).
   A `404` or `410` response drops that subscription in memory and from `push_sub` if not replaced
   since.
 

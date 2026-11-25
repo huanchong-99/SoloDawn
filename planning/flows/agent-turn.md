@@ -88,7 +88,8 @@ that is waiting for them.
 ## C. Jumping the queue (R-72)
 
 11. The owner chooses "jump the queue" on their message (`jump`). H sends
-    the item again with `jump: true`.
+    the item again under its number with `jump: true`. N replaces the one it
+    holds; one it has delivered it acknowledges only.
 12. If the AI is running a turn in the group, N interrupts it (the CLI's
     interrupt request) and waits for the turn-end event.
     - The jump item is for the **same** session: nothing is reported; the

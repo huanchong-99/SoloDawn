@@ -300,6 +300,7 @@ type Reminder struct {
 	Kind      string `json:"kind"`
 	Who       string `json:"who"`
 	Title     string `json:"title,omitempty"`
+	Code      string `json:"code,omitempty"`
 }
 
 // HostCommand starts the payload of every host command: To is the node it is
