@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 	"unicode/utf8"
 
@@ -1321,4 +1322,81 @@ func assertCodexConcurrentWaitAndCancel(t *testing.T, fx *approveFixture, runner
 	fx.h.Report(groupKey, Event{Kind: Asked, Ask: &Ask{ID: "nil-runner", Tool: "commandExecution", Category: "command", Command: "ls"}})
 	waitCallsZero(t, fx.h, groupKey)
 	fx.home.onPost = nil
+}
+
+// settledAskFixture is an approval fixture with a fake Runner and a recorder
+// of the diagnostic lines, and the Asked event of the session's CLI.
+func settledAskFixture(t *testing.T) (*approveFixture, *approveFakeRunner, *diagLines, Event) {
+	t.Helper()
+	d := captureDiag(t)
+	fx, runner := newApproveFixture(t), newApproveFakeRunner()
+	prevRunner := Runner
+	Runner = runner
+	t.Cleanup(func() { Runner = prevRunner })
+	return fx, runner, d, Event{Kind: Asked, Ask: &Ask{ID: "a1", Tool: "commandExecution", Category: "command", Command: "make a"}}
+}
+
+func (fx *approveFixture) assertAskSettled(d *diagLines, runner *approveFakeRunner) {
+	fx.t.Helper()
+	node := "node=" + fx.h.Key.ID()[:8]
+	d.ran(fx.t, 1, node, "ask g="+fx.groupID+" task="+fx.taskID)
+	lines := d.all()
+	mustApproveEqual(fx.t, lines[len(lines)-1], "settle.end "+node, "last line")
+	mustApproveEqual(fx.t, runner.answerCount(), 0, "answers of the cancelled ask")
+}
+
+func TestSettleWaitsForAnAskWithTheHomeClosed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fx, runner, d, asked := settledAskFixture(t)
+		close(fx.home.done)
+		release, settled := make(chan struct{}), make(chan struct{})
+		go fx.db.Write(func(*store.Tx) error { <-release; return nil })
+		synctest.Wait()
+		fx.h.Report(fx.sessKey, asked)
+		go func() {
+			fx.h.Settle()
+			close(settled)
+		}()
+		synctest.Wait()
+		select {
+		case <-settled:
+			t.Error("Settle returned before the ask finished")
+		default:
+		}
+		close(release)
+		<-settled
+		synctest.Wait()
+		fx.assertAskSettled(d, runner)
+
+		fx.h.Report(fx.sessKey, asked)
+		synctest.Wait()
+		fx.assertAskSettled(d, runner)
+		mustApproveEqual(t, fx.approvalRows(), "", "approval rows")
+	})
+}
+
+// heldHome holds each post until its context ends.
+type heldHome struct {
+	*approveFakeHome
+	held chan struct{} // single reader: the test
+}
+
+func (f *heldHome) Request(ctx context.Context, build func(int64) any) (json.RawMessage, error) {
+	if cmd, ok := build(1).(proto.Cmd); ok && isMemberStatusCmd(cmd.Env.Payload) {
+		return f.approveFakeHome.Request(ctx, build)
+	}
+	close(f.held)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestSettleEndsAnAskWhoseCardIsBeingPosted(t *testing.T) {
+	fx, runner, d, asked := settledAskFixture(t)
+	home := &heldHome{fx.home, make(chan struct{})}
+	fx.h.Attach(fx.homeKey.ID(), home)
+	fx.h.Report(fx.sessKey, asked)
+	recvApproveChan(t, home.held, "held post")
+	seamSoon(t, "Settle", fx.h.Settle)
+	fx.assertAskSettled(d, runner)
+	mustApproveEqual(t, fx.approvalRows(), "", "approval rows")
 }

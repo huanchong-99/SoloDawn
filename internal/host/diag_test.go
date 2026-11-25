@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -346,12 +344,7 @@ func TestDiagReleasedSlotDeliveryLines(t *testing.T) {
 
 func TestDiagCloudPollLines(t *testing.T) {
 	d := captureDiag(t)
-	h, root := tskDiskHost(t)
-	grp := tskGroupFixture("custom")
-	grp.Templates = forgeTestTemplates()
-	tskPutRow(t, h, "group", tskTestGroupID, grp)
-	tskNoErr(t, os.MkdirAll(filepath.Join(root, "projects", tskTestGroupID, "repo"), 0700))
-	h.Attach("home-device", newTskScriptHome())
+	h, _, _ := customForgeHost(t)
 	fakeForgeGH(t, forgeAnswer{})
 	startHostedCheck(h, "home-device", tskTestGroupID, HostedCheck{Task: testTask1, Branch: "task/1-poll", Commit: "head", PR: 7, Since: time.Now()})
 	node, work := "node="+h.Key.ID()[:8], "cloud_poll g="+tskTestGroupID+" task="+testTask1

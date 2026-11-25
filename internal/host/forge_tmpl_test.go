@@ -116,7 +116,10 @@ func TestCustomForgeChecksCancellation(t *testing.T) {
 	assertForge(t, err, context.Canceled)
 }
 
-func TestCustomForgePollingUsesRepositoryState(t *testing.T) {
+// customForgeHost is a host attached to home-device, with the repository of a
+// group whose forge is custom.
+func customForgeHost(t *testing.T) (*Host, *tskScriptHome, proto.GroupRow) {
+	t.Helper()
 	h, root := tskDiskHost(t)
 	grp := tskGroupFixture("custom")
 	grp.Templates = forgeTestTemplates()
@@ -125,6 +128,11 @@ func TestCustomForgePollingUsesRepositoryState(t *testing.T) {
 	forgeOK(os.MkdirAll(repo, 0700))
 	home := newTskScriptHome()
 	h.Attach("home-device", home)
+	return h, home, grp
+}
+
+func TestCustomForgePollingUsesRepositoryState(t *testing.T) {
+	h, home, grp := customForgeHost(t)
 	calls := fakeForgeGH(t, forgeAnswer{})
 	startHostedCheck(h, "home-device", tskTestGroupID, HostedCheck{Task: tskTestTaskID, Branch: "task/12-fix-path", Commit: "head", PR: 7, Since: time.Now()})
 	asked := home.waitAsked(t, 1)
