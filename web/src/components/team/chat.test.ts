@@ -104,7 +104,7 @@ it('starts mentions, selects people with the mouse and handles all completion ke
   expect(field().value).toBe('say @owner ');
 });
 
-// Firefox tells `pointer: none` of a computer without a mouse, as of a headless one on Linux.
+// `none` is a computer without a pointing device, as headless Firefox 136 on Linux tells it.
 it.each([
   ['fine', 1],
   ['none', 1],

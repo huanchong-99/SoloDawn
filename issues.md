@@ -784,7 +784,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-26 · bug · Enter broke the line in the composer of a computer without a mouse
 
 - Symptom: on Firefox 136 in CI, Enter in the composer of a task's thread left `@Claude Code yes, keep it.` and a line break in the field and sent nothing (`web/e2e/m5.spec.ts`). The main line's composer is the same component and did the same; the end-to-end tests send there with the button, so none saw it.
-- Cause: `web/src/components/chat/Composer.svelte:31` before the fix let Enter send under `(pointer: fine)` only. A browser without a pointing device answers `(pointer: none)`: neither fine nor a touch screen. Headless Firefox on Linux always does (`widget/headless/HeadlessLookAndFeelGTK.cpp`, `PrimaryPointerCapabilities` is 0).
+- Cause: `web/src/components/chat/Composer.svelte:31` before the fix let Enter send under `(pointer: fine)` only. A browser without a pointing device answers `(pointer: none)`: neither fine nor a touch screen. Headless Firefox 136 on Linux always does (`widget/headless/HeadlessLookAndFeelGTK.cpp`, `PrimaryPointerCapabilities` is 0).
 - Status: resolved in PR #400: Enter sends unless the pointer is coarse. Test in `web/src/components/team/chat.test.ts` (fine, none, coarse).
 
 ### 2026-11-25 · deviation · A terminal opened on no chosen task
