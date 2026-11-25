@@ -594,10 +594,17 @@ func waitTargetID(v verifiedItem) string {
 
 func replyCallID(v verifiedItem) string {
 	var msg proto.MsgRow
-	if proto.Decode(v.wire.Msg, &msg) != nil || msg.ID != string(v.item.Msg) || msg.Kind != "reply" || msg.Re == nil {
+	if proto.Decode(v.wire.Msg, &msg) != nil || msg.ID != string(v.item.Msg) || !answersCall(msg) {
 		return ""
 	}
-	return *msg.Re
+	return strVal(msg.Re)
+}
+
+// answersCall reports whether a message answers the call it names in re: a
+// reply, or the confirm card by which the callee's owner denied it
+// (contracts/step-2/confirm.md section 5).
+func answersCall(msg proto.MsgRow) bool {
+	return msg.Kind == "reply" || msg.Kind == "confirm"
 }
 
 func tryOpenWait(h *Host, v verifiedItem, agent string) bool {
@@ -899,13 +906,14 @@ func firstJump(h *Host, d *delivery, key aiGroupKey, ai aiInfo) (verifiedItem, r
 	d.mu.Lock()
 	queue := slices.Clone(d.held[key])
 	d.mu.Unlock()
-	paused := groupIsPaused(h, key.group)
-	if len(queue) > 0 {
-		diagTake(h, key, "", nil, queue, paused)
+	if len(queue) == 0 {
+		return verifiedItem{}, routedTarget{}, false
 	}
+	look := lookAt(h, key)
+	diagTake(h, key, "", nil, queue, look.paused)
 	for _, v := range itemsToGo(queue, true) {
 		target := routeSessionItem(h, ai, v)
-		if seen, _ := hasAuditItem(h.Store, v.home, v.item.Item); !seen && !heldBesidesTurn(h, target, v, paused) {
+		if seen, _ := hasAuditItem(h.Store, v.home, v.item.Item); !seen && !look.heldBesidesTurn(v) {
 			return v, target, true
 		}
 	}
@@ -1023,7 +1031,7 @@ func continueInterrupted(h *Host, d *delivery, key aiGroupKey) bool {
 		d.closePreemption(key, p)
 		return true
 	}
-	if !mayContinue(h, s) {
+	if !lookAt(h, key).mayGiveTurn() {
 		return false
 	}
 	if taskPreempted(h, s) {
@@ -1032,10 +1040,6 @@ func continueInterrupted(h *Host, d *delivery, key aiGroupKey) bool {
 	d.closePreemption(key, p)
 	continueTurn(h, s)
 	return true
-}
-
-func mayContinue(h *Host, s Session) bool {
-	return !groupIsPaused(h, s.Group) && !turnsHeld(h, s.SessionKey) && !aiWorking(h, s.SessionKey)
 }
 
 // continueTurn gives a session the turn of its own, unless its task is
@@ -1098,16 +1102,13 @@ func takeEligibleBatch(h *Host, d *delivery, key aiGroupKey, ai aiInfo) (routedT
 	jumpsOnly := len(d.pre[key]) > 0
 	d.giving[key] = len(queue) > 0 || jumpsOnly // before the holds are read
 	d.mu.Unlock()
-	var paused bool
-	readPause := func() bool {
-		paused = groupIsPaused(h, key.group)
-		return paused
+	if len(queue) == 0 {
+		return routedTarget{}, nil, false
 	}
-	target, taken, takenIDs := selectEligibleBatch(h, ai, itemsToGo(queue, jumpsOnly), readPause)
-	if len(queue) > 0 {
-		left := slices.DeleteFunc(queue, func(v verifiedItem) bool { return takenIDs[v.item.Item] })
-		diagTake(h, key, target.key.Task, taken, left, paused)
-	}
+	look := lookAt(h, key)
+	target, taken, takenIDs := selectEligibleBatch(look, ai, itemsToGo(queue, jumpsOnly))
+	left := slices.DeleteFunc(queue, func(v verifiedItem) bool { return takenIDs[v.item.Item] })
+	diagTake(h, key, target.key.Task, taken, left, look.paused)
 	if len(taken) == 0 {
 		return routedTarget{}, nil, false
 	}
@@ -1131,14 +1132,13 @@ func itemsToGo(queue []verifiedItem, jumpsOnly bool) []verifiedItem {
 	return jumps
 }
 
-func selectEligibleBatch(h *Host, ai aiInfo, queue []verifiedItem, readPause func() bool) (routedTarget, []verifiedItem, map[int64]bool) {
-	groupPaused := readPause()
+func selectEligibleBatch(l look, ai aiInfo, queue []verifiedItem) (routedTarget, []verifiedItem, map[int64]bool) {
 	var target routedTarget
 	var taken []verifiedItem
 	takenIDs := map[int64]bool{}
 	for _, v := range queue {
-		cand := routeSessionItem(h, ai, v)
-		if (len(taken) == 0 || cand == target) && !isItemHeld(h, cand, v, groupPaused) {
+		cand := routeSessionItem(l.h, ai, v)
+		if (len(taken) == 0 || cand == target) && !l.working && !l.heldBesidesTurn(v) {
 			target = cand
 			taken = append(taken, v)
 			takenIDs[v.item.Item] = true
@@ -1155,36 +1155,60 @@ func setQueue[K comparable, V any](m map[K][]V, key K, rest []V) {
 	m[key] = rest
 }
 
+// prependHeld puts items that delivery took back before what came meanwhile,
+// by the rules of enqueueHeld: the home may have sent one of them again, or
+// have queued a jump that retired it.
 func (d *delivery) prependHeld(key aiGroupKey, items []verifiedItem) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	setQueue(d.held, key, append(items, d.held[key]...))
-}
-
-// isItemHeld reports whether an item is held for its session
-// (flows/agent-turn.md step 3). A turn the AI is running holds every item, a
-// jump item too: jumpRunningTurn interrupts for that one. The takeover is
-// read before the running turn, so that a hand-back, which goes from the one
-// to the other, is seen as one of them.
-func isItemHeld(h *Host, target routedTarget, v verifiedItem, paused bool) bool {
-	return heldBesidesTurn(h, target, v, paused) || aiWorking(h, target.key)
-}
-
-func heldBesidesTurn(h *Host, target routedTarget, v verifiedItem, paused bool) bool {
-	return paused || taskIsHeld(h, v) || turnsHeld(h, target.key)
-}
-
-func aiWorking(h *Host, key SessionKey) bool {
-	return aiHasState(h, aiGroupKey{group: key.Group, member: key.Member}, Working)
-}
-
-// turnsHeld reports whether a session gets no turn for now: a hold of Holds
-// is on it, or its AI is taken over.
-func turnsHeld(h *Host, key SessionKey) bool {
-	if _, held := h.Held(key); held {
-		return true
+	for _, v := range d.held[key] {
+		items = enqueueHeld(items, v)
 	}
-	return aiHasState(h, aiGroupKey{group: key.Group, member: key.Member}, Takeover)
+	setQueue(d.held, key, items)
+}
+
+// A look is what holds an AI's items (flows/agent-turn.md step 3) while
+// delivery walks them. Each state is read once: one that changes during the
+// walk cannot let a newer item go before an older one. A turn the AI is
+// running holds every item, a jump item too: jumpRunningTurn interrupts for
+// that one.
+type look struct {
+	h       *Host
+	paused  bool
+	held    bool // a hold of Holds is on the AI, or it is taken over
+	working bool
+	stopped map[string]bool // what taskStopped said, by task
+}
+
+// lookAt reads the takeover before the running turn, so that a hand-back,
+// which goes from the one to the other, is seen as one of them.
+func lookAt(h *Host, key aiGroupKey) look {
+	l := look{h: h, paused: groupIsPaused(h, key.group), stopped: map[string]bool{}}
+	_, hold := h.Held(SessionKey{Group: key.group, Member: key.member})
+	l.held = hold || aiHasState(h, key, Takeover)
+	l.working = aiHasState(h, key, Working)
+	return l
+}
+
+func (l look) mayGiveTurn() bool {
+	return !l.paused && !l.held && !l.working
+}
+
+func (l look) heldBesidesTurn(v verifiedItem) bool {
+	return l.paused || l.held || l.taskHolds(v)
+}
+
+func (l look) taskHolds(v verifiedItem) bool {
+	if v.item.Why == "notice" {
+		return false
+	}
+	task := threadTaskID(v)
+	stopped, read := l.stopped[task]
+	if !read {
+		stopped = taskStopped(l.h, v.group, task)
+		l.stopped[task] = stopped
+	}
+	return stopped
 }
 
 // QueuedCount returns how many items are held for an AI in a group: the
@@ -1199,13 +1223,6 @@ func (h *Host) QueuedCount(group, member string) int {
 func groupIsPaused(h *Host, group string) bool {
 	grp, ok := lookupRow[proto.GroupRow](h, group, "group", group)
 	return ok && grp.Paused != nil
-}
-
-func taskIsHeld(h *Host, v verifiedItem) bool {
-	if v.item.Why == "notice" {
-		return false
-	}
-	return taskStopped(h, v.group, threadTaskID(v))
 }
 
 // taskStopped reports whether a task is paused or failed: its sessions get

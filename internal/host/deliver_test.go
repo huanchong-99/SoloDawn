@@ -1164,39 +1164,6 @@ func verifyColdStartDrainOpenWait(t *testing.T) {
 	r.waitUntil("mention delivered after unpause", func() bool { return len(r.runtime.recorded()) == 1 })
 }
 
-func TestSelectEligibleBatchUsesOneGroupPauseSnapshot(t *testing.T) {
-	r := newDeliverRig(t, false)
-	group := proto.GroupRow{
-		RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1},
-		Name:      "Proj", Kind: "project", Base: "main", Forge: "none",
-		Home: r.homeKey.ID(), Checks: []string{}, Paused: &proto.GroupPause{By: testHuman, At: testStartMS},
-	}
-	r.putGroup(group)
-	queue := []verifiedItem{
-		{group: group.ID, item: proto.Item{Item: 1, AI: testAI1, Why: "mention", Msg: testMsg1}},
-		{group: group.ID, item: proto.Item{Item: 2, AI: testAI1, Why: "mention", Msg: testMsg2}},
-	}
-	readPause := func() bool {
-		paused := groupIsPaused(r.h, group.ID)
-		group.Paused = nil
-		group.Seq = 2
-		r.putGroup(group)
-		return paused
-	}
-	_, batch, ids := selectEligibleBatch(r.h, aiInfo{}, queue, readPause)
-	if len(batch) != 0 || len(ids) != 0 {
-		t.Fatalf("paused selection took %v, want neither mention", ids)
-	}
-
-	key := aiGroupKey{group: group.ID, member: testAI1}
-	d := deliv(r.h)
-	d.held[key] = queue
-	_, batch, ok := takeEligibleBatch(r.h, d, key, aiInfo{})
-	if !ok || len(batch) != 2 || batch[0].item.Item != 1 || batch[1].item.Item != 2 {
-		t.Fatalf("resumed selection = %+v, want both mentions in queue order", batch)
-	}
-}
-
 func TestRoutingHoldsJumpAndBatchSelection(t *testing.T) {
 	r := newDeliverRig(t, false)
 	r.seedGroupAndMembers()

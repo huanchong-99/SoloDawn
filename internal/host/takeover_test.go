@@ -1059,3 +1059,36 @@ func TestTakeoverStartIsBusyWhileDeliveryGivesATurn(t *testing.T) {
 		tkCode(t, refused, "busy")
 	})
 }
+
+// The turn of its own of an interrupted session is given like any other.
+func TestTakeoverIsBusyWhileATurnOfItsOwnIsComposed(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		task := r.work(1, runTask1, "local_check")
+		r.push(jumpMention(2, testMsg1, "", true))
+		r.end(task, "interrupted")
+		var claimed bool
+		Compose = func(h *Host, s Session, kind TurnKind, items []json.RawMessage) (string, Turn, error) {
+			claimed = takeoverState(r.h).claim(r.h, aiSlot{group: runGroup1, member: runAI1}, &takeover{}, true)
+			return jumpCompose(h, s, kind, items)
+		}
+		r.end(r.drv.proc(1), "completed")
+		if claimed {
+			t.Fatal("the AI was taken over while its turn was composed")
+		}
+		r.wantTurns(task, "items 1", jumpContinueTask)
+	})
+}
+
+// An AI whose items are only held can be taken over once delivery has looked
+// at them.
+func TestAIWithHeldItemsCanBeTakenOver(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		r.end(r.work(1, runTask1, "local_check"), "completed")
+		r.putTask(runTask1, "paused", "local_check", "manual")
+		r.push(jumpMention(2, testMsg1, runTask1, false))
+		r.wantHeld(2)
+		if !takeoverState(r.h).claim(r.h, aiSlot{group: runGroup1, member: runAI1}, &takeover{}, true) {
+			t.Fatal("the AI is busy")
+		}
+	})
+}

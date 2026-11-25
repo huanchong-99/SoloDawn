@@ -49,6 +49,10 @@ type askPending struct {
 	Receipt string `json:"receipt"`
 }
 
+type askDenied struct {
+	Denied bool `json:"denied"`
+}
+
 func runAskTool(ctx context.Context, h *Host, c Caller, raw json.RawMessage) (any, error) {
 	in, err := decodeSecInput[askArgs](raw)
 	if err != nil {
@@ -121,11 +125,14 @@ func sendWaitingCall(ctx context.Context, h *Host, home string, callID proto.ID,
 	return decodeReplyItem(raw), nil
 }
 
-func decodeReplyItem(raw json.RawMessage) askAnswered {
+func decodeReplyItem(raw json.RawMessage) any {
 	var item proto.InboxItem
 	var msg proto.MsgRow
 	proto.Decode(raw, &item)
 	proto.Decode(item.Msg, &msg)
+	if msg.Kind == "confirm" {
+		return askDenied{Denied: true}
+	}
 	return askAnswered{Answer: msg.Text}
 }
 

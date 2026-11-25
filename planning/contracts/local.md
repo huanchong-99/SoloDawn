@@ -192,7 +192,9 @@ remote.
   `GIT_TERMINAL_PROMPT=0`, `GH_PROMPT_DISABLED=1`,
   `SSH_ASKPASS_REQUIRE=never` and `GCM_INTERACTIVE=never`, and without a
   controlling terminal (a new session on Unix, no console window on
-  Windows), so no prompt can wait for an answer. The owner's ssh command
+  Windows), so no prompt can wait for an answer. Git's automatic maintenance
+  runs inside the command (`gc.autoDetach=false`), not in a process that
+  outlives it and its lock. The owner's ssh command
   and ssh configuration are left as they are. The project's check commands
   are not `git` or `gh` commands and keep the rules of `run_checks`.
 - **A worktree left by a crash.** When the node stopped during or after
