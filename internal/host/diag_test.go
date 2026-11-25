@@ -250,10 +250,10 @@ func TestDiagToolLine(t *testing.T) {
 func TestDiagProcessAndInterruptLines(t *testing.T) {
 	key := SessionKey{Group: runGroup1, Member: runAI1, Task: runTask1}
 	for name, end := range map[string]struct {
-		resume   bool
-		why      string
-		delivers int
-		do       func(h *Host, p *limProc)
+		resume  bool
+		why     string
+		deliver int
+		do      func(h *Host, p *limProc)
 	}{
 		"interrupt": {false, "stop", 1, func(h *Host, _ *limProc) {
 			interruptSessionTurn(h, key, "stop", "")
@@ -285,11 +285,11 @@ func TestDiagProcessAndInterruptLines(t *testing.T) {
 				d.lineOnce(t, fmt.Sprintf("proc.start %s agent=claude resume=%t", s, end.resume))
 				d.lineOnce(t, "proc.exit "+s+" agent=claude why="+end.why)
 				d.ran(t, 1, node, "home_flush")
-				if got := d.with("turn.interrupt"); name == "interrupt" != slices.Equal(got, []string{"turn.interrupt " + s + " why=stop"}) {
+				if got := d.with("turn.interrupt " + node); name == "interrupt" != slices.Equal(got, []string{"turn.interrupt " + s + " why=stop"}) {
 					t.Fatalf("interrupts %q", got)
 				}
-				if end.delivers > 0 {
-					d.ran(t, end.delivers, node, "deliver g="+runGroup1)
+				if got := d.count(d.is("bg.stop " + node + " name=deliver g=" + runGroup1)); got != end.deliver {
+					t.Fatalf("%d deliveries, want %d", got, end.deliver)
 				}
 			})
 		})
