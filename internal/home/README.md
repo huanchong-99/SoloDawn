@@ -127,7 +127,8 @@ does one of those five types without its field. `Add` panics when a key is given
 9. no row of its result is above the size limit of a row, else `bad_request`.
 
 Checks 1 and 2 leave no receipt. From check 4 on, the outcome is written as the receipt, a refusal
-included, with the command's own `ts`. For an accepted `invite` (`Result.InviteBy` not empty), the
+included, with the command's own `ts`. Owners and admins can `invite`; the command writes no rows.
+For an accepted `invite` (`Result.InviteBy` not empty), the
 home calls `Inviter.Invite(group, by, signer, nonce)` (on a `Loop`, on the group's goroutine outside
 `Store.Write` before writing the `{ok: true}` receipt, so an `Invite` error leaves no receipt and
 never deadlocks `Store.Write`), and carries `Link` and `Expires` on `Result` without storing them in
@@ -416,6 +417,19 @@ connection, `g.transact` and `g.settle` write and finish a result, `g.deliver` s
 `conn.send(frame)` queues a frame behind the ones before it. Both `Loop.Sync` and `Loop.Fetch`
 take a typed request on `(conn, req)` and read their `store.Snapshot` on the goroutine of the
 group through `loop.ask`. `runDisk` is the `Disk` of a transaction.
+
+**Diagnostics** ([diagnostics](../../planning/contracts/diagnostics.md), `diag.go`). The loop logs
+through `log/slog` with a logger that holds `node`, the first 8 characters of `LoopConfig.Home`;
+a line holds ids, counts and states, never the text of a message. `home.attach` and `home.detach`
+(`why`: `gave_up` for a connection the loop gave up, `ended` otherwise; once per connection,
+`dev` is the device cut to 8 characters); `cmd.reply` (`g`, `dev`, `re`, `t` the key of the
+command table, `code` `ok` or the error code) for the answer of every command, written before the
+answer is queued and so after the `rows.send` of the same command; `rows.send` (`g`, `seq` the
+first and last row, `to` the connections that were sent a frame); `inbox.send` (`g`, `dev`,
+`items`) for each connection that is sent items; `ack.recv` (`g`, `dev`, `item`); `bg.start` and
+`bg.stop` (`name`: `clock`, `group`, `pump`, `watch`, `webpush`; `g` for `group` and `webpush`)
+around every goroutine the loop starts, the stop written before the goroutine's `Done`, so that
+`Close` returns after it.
 
 ## The task machine
 
@@ -900,6 +914,8 @@ to a store in memory, because no command file exists yet. The choices behind the
 
 The run loop is covered through its entries by `run_test.go`, `run_push_test.go` and
 `run_disk_test.go`, on a store in memory with clients that keep, hold or refuse their frames, and
+`diag_test.go` reads the lines of the diagnostics events from the standard logger and
+checks each once with its fields, and `rows.send` before the `cmd.reply` of one command;
 `run_internal_test.go` pins its arithmetic: where a frame is cut, when an item is due, how many
 values a queue takes. `features/home_run.feature` holds the home half of acceptance test A2.1 and
 a restart, with commands of its own. The choices behind the loop are in

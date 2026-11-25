@@ -28,7 +28,7 @@ func s2ConfirmObservationSteps(sc *godog.ScenarioContext, w *s2ConfirmWorld) {
 }
 
 func (w *s2ConfirmWorld) browserCardStatus(card, status string) error {
-	raw, err := w.browsers["P"].conn.Request(w.cast.Ctx, func(id int64) any {
+	raw, err := w.browsers["P"].request(w.cast.Ctx, func(id int64) any {
 		return proto.FetchRow{
 			FetchPage: proto.FetchPage{Request: proto.Request{Type: "fetch", ID: id}, Group: string(w.gid), Limit: 1},
 			Row:       "msg", RowID: w.ids[card],

@@ -108,9 +108,10 @@ func hostMCPSteps(sc *godog.ScenarioContext, t *testing.T) {
 		st.session = session
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		start := time.Now()
 		listed, err := session.ListTools(ctx, nil)
 		if err != nil {
-			return err
+			return ctxCallErr(ctx, start, "MCP ListTools", nil, err)
 		}
 		st.listed = listed
 		return nil
@@ -124,12 +125,13 @@ func hostMCPSteps(sc *godog.ScenarioContext, t *testing.T) {
 	sc.Step(`^calling "([^"]+)" with "([^"]*)" returns '([^']*)'$`, func(name, input, want string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		start := time.Now()
 		res, err := st.session.CallTool(ctx, &mcp.CallToolParams{
 			Name:      name,
 			Arguments: map[string]any{"text": input},
 		})
 		if err != nil {
-			return err
+			return ctxCallErr(ctx, start, "MCP tool "+name, nil, err)
 		}
 		if res.IsError || len(res.Content) != 1 {
 			return fmt.Errorf("got result %+v", res)
@@ -149,17 +151,22 @@ func hostMCPSteps(sc *godog.ScenarioContext, t *testing.T) {
 	sc.Step(`^calling "([^"]+)" is refused by the MCP server$`, func(name string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		start := time.Now()
 		if _, err := st.session.CallTool(ctx, &mcp.CallToolParams{Name: name}); err == nil {
 			return fmt.Errorf("tool %s unexpectedly succeeded", name)
+		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return ctxEnded(ctx, start, "MCP refusal of "+name, nil)
 		}
 		return nil
 	})
 	sc.Step(`^calling "([^"]+)" returns tool error "([^"]*)"$`, func(name, want string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		start := time.Now()
 		res, err := st.session.CallTool(ctx, &mcp.CallToolParams{Name: name})
 		if err != nil {
-			return err
+			return ctxCallErr(ctx, start, "MCP tool "+name, nil, err)
 		}
 		if !res.IsError || len(res.Content) != 1 {
 			return fmt.Errorf("expected tool error, got %+v", res)
@@ -296,10 +303,11 @@ func (m *mcpHarness) connectClient(cleanup func(func()), token string) (*mcp.Cli
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	start := time.Now()
 	client := mcp.NewClient(&mcp.Implementation{Name: "acceptance-client", Version: "1"}, nil)
 	session, err := client.Connect(ctx, &mcp.IOTransport{Reader: clientR, Writer: clientW}, nil)
 	if err != nil {
-		return nil, err
+		return nil, ctxCallErr(ctx, start, "MCP connect", nil, err)
 	}
 	cleanup(func() { session.Close() })
 	return session, nil

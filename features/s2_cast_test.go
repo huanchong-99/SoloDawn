@@ -639,7 +639,7 @@ func (c *s2Cast) seedAndStartNode(t testing.TB, n *s2Node) error {
 	cmd := exec.Command(c.F.bin, "node")
 	cmd.Env = n.Env
 	cmd.Stdout, cmd.Stderr = &n.Out, &n.Out
-	stop, err := startManagedCmd(t, c.addUndo, cmd)
+	stop, err := startNodeCmd(t, c.addUndo, cmd, n.Name, n.Data, &n.Out)
 	if err != nil {
 		return err
 	}
@@ -795,7 +795,7 @@ func (c *s2Cast) SendCmd(p *s2Person, conn *peer.Connection, payload any) (proto
 
 func sendSignedCmdRaw(ctx context.Context, conn *peer.Connection, signer identity.Key, payload any) (json.RawMessage, error) {
 	env := signer.Sign(string(mustMarshalNoEscape(payload)))
-	return conn.Request(ctx, func(id int64) any {
+	return requestWait(ctx, conn, nil, func(id int64) any {
 		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
 	})
 }
@@ -832,7 +832,7 @@ func (c *s2Cast) syncGroup(conn *peer.Connection, gid proto.ID) error {
 }
 
 func syncS2Group(ctx context.Context, conn *peer.Connection, gid proto.ID) error {
-	raw, err := conn.Request(ctx, func(id int64) any {
+	raw, err := requestWait(ctx, conn, nil, func(id int64) any {
 		return proto.Sync{Request: proto.Request{Type: "sync", ID: id}, Group: string(gid), Since: 0, StateOnly: false}
 	})
 	if err != nil {
@@ -1047,23 +1047,20 @@ func verifyS2SecondBrowser(t *testing.T, cast *s2Cast) {
 }
 
 func waitS2NodeAcceptsBrowser(cast *s2Cast, b *peerBrowser, nodeID string) error {
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-	for {
+	return waitUntilEvery(500*time.Millisecond, s2ScenarioTimeout, "the node to welcome the second browser", func() error {
 		ok, err := tryS2OwnerWelcome(cast, b, nodeID)
-		if err != nil || ok {
-			return err
+		if err != nil {
+			return abort(err)
 		}
-		select {
-		case <-cast.Ctx.Done():
-			return cast.Ctx.Err()
-		case <-ticker.C:
+		if !ok {
+			return errors.New("no welcome")
 		}
-	}
+		return nil
+	})
 }
 
 func tryS2OwnerWelcome(cast *s2Cast, b *peerBrowser, nodeID string) (bool, error) {
-	bc, ok, err := b.tryOpenCtl(cast.Ctx, cast.addUndo, nodeID, s2ScenarioTimeout)
+	bc, ok, err := b.tryOpenCtl(cast.Ctx, cast.addUndo, nodeID, s2ScenarioTimeout, new(trail))
 	if err != nil || !ok {
 		return false, err
 	}

@@ -1,6 +1,7 @@
 package host
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"errors"
@@ -70,12 +71,12 @@ func settleExternal(h *Host) {
 }
 
 // after runs f on wg once d has passed, unless the part has settled.
-func (ep *extPart) after(d time.Duration, f func()) *time.Timer {
+func (ep *extPart) after(h *Host, d time.Duration, name string, f func(), more ...any) *time.Timer {
 	return time.AfterFunc(d, func() {
 		ep.mu.Lock()
 		defer ep.mu.Unlock()
 		if !ep.settled {
-			ep.wg.Go(f)
+			h.bg(ep.wg.Go, name, f, more...)
 		}
 	})
 }
@@ -222,7 +223,7 @@ func extLeave(h *Host, ep *extPart, key aiGroupKey) {
 	}
 	ep.until[key] = time.Now().Add(externalPresence)
 	if !ep.settled {
-		ep.away[key] = ep.after(externalPresence, func() { extReport(h, key) })
+		ep.away[key] = ep.after(h, externalPresence, "presence", func() { extReport(h, key) }, "g", key.group)
 	}
 }
 
@@ -304,18 +305,19 @@ func extHandOut(h *Host, ep *extPart, d *delivery, key aiGroupKey, s Session, ba
 	run := batch[0].item.Item
 	extOpenRun(h, ep, key, s, run)
 	return proto.Handout{
-		Run: run, Kind: string(s.Kind), Task: s.Task, Folder: sessionDir(h, s),
+		Run: run, Kind: string(s.Kind), Task: (&turnCtx{h: h, s: s}).taskRef(s.Task), Folder: sessionDir(h, s),
 		Context: Instructions(s) + "\n" + externalInstructions + "\n" + replaced, Text: text,
 	}, true, nil
 }
 
 func extOpenRun(h *Host, ep *extPart, key aiGroupKey, s Session, run int64) {
+	h.diag.Info("run.open", "g", key.group, "ai", key.member, "run", run)
 	h.Sessions.Move(s.SessionKey, s.State, Working)
 	ep.mu.Lock()
 	if !ep.settled {
-		ep.runs[key] = &extRun{id: run, key: s.SessionKey, timer: ep.after(groupToolTimeout(h, s.Group), func() {
+		ep.runs[key] = &extRun{id: run, key: s.SessionKey, timer: ep.after(h, groupToolTimeout(h, s.Group), "run_timeout", func() {
 			extEnd(h, key, run, "timeout", "")
-		})}
+		}, "g", key.group)}
 	}
 	ep.mu.Unlock()
 	extReport(h, key)
@@ -343,6 +345,7 @@ func extEnd(h *Host, key aiGroupKey, run int64, why, detail string) {
 	r.timer.Stop()
 	delete(ep.runs, key)
 	ep.mu.Unlock()
+	h.diag.Info("run.close", "g", key.group, "ai", key.member, "run", run, "why", cmp.Or(why, "done"))
 	h.Sessions.Move(r.key, Working, Waiting)
 	s, _ := h.Sessions.Get(r.key)
 	reportFinishedTurn(h, stateOf(h), s, why, detail)

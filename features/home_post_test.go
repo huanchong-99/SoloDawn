@@ -28,6 +28,7 @@ type homePostPeer struct {
 	key    identity.Key
 	conn   *home.Conn
 	frames chan any
+	saw    trail
 	re     int64
 }
 
@@ -39,16 +40,15 @@ func (p *homePostPeer) Send(frame any) error {
 func (p *homePostPeer) Done() <-chan struct{} { return nil }
 
 func (p *homePostPeer) next() (string, error) {
-	select {
-	case frame := <-p.frames:
-		var b bytes.Buffer
-		enc := json.NewEncoder(&b)
-		enc.SetEscapeHTML(false)
-		err := enc.Encode(frame)
-		return strings.TrimSuffix(b.String(), "\n"), err
-	case <-time.After(time.Second):
-		return "", fmt.Errorf("no frame arrived within 1 second")
+	frame, err := recvFrame(p.frames, time.Second, &p.saw, briefAny)
+	if err != nil {
+		return "", err
 	}
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	err = enc.Encode(frame)
+	return strings.TrimSuffix(b.String(), "\n"), err
 }
 
 type homePostWorld struct {

@@ -273,12 +273,13 @@ func wpushSend(s *State, ev wpushEvent, payload []byte) {
 	loop.wg.Add(len(targets))
 	wpushMu.Unlock()
 	for _, sub := range targets {
-		go wpushDeliver(h, loop, sub, payload)
+		go wpushDeliver(h, loop, sub, payload, s.ID)
 	}
 }
 
-func wpushDeliver(h *wpushHome, loop *Loop, sub wpushSub, payload []byte) {
+func wpushDeliver(h *wpushHome, loop *Loop, sub wpushSub, payload []byte, group string) {
 	defer loop.wg.Done()
+	defer loop.diagBG("webpush", "g", group)()
 	ctx, cancel := context.WithTimeout(context.Background(), wpushWindow)
 	defer cancel()
 	dst := &webpush.Subscription{Endpoint: sub.sub.Endpoint, Keys: webpush.Keys{P256dh: sub.sub.P256DH, Auth: sub.sub.Auth}}

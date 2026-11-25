@@ -58,6 +58,11 @@ func (c *Conn) fail() {
 // leave ends the sending; what still waits is dropped.
 func (c *Conn) leave() {
 	c.once.Do(func() {
+		why := "ended"
+		if c.broken.Load() {
+			why = "gave_up"
+		}
+		c.loop.diag.Info("home.detach", "dev", diagDevice(c.device), "why", why)
 		close(c.gone)
 		c.frames.shut(false)
 	})
@@ -66,6 +71,7 @@ func (c *Conn) leave() {
 // pump hands the queued frames to the client, one at a time.
 func (c *Conn) pump() {
 	defer c.loop.wg.Done()
+	defer c.loop.diagBG("pump")()
 	for {
 		frame, ok := c.frames.pop()
 		if !ok {
@@ -81,6 +87,7 @@ func (c *Conn) pump() {
 // client of a connection that the loop gave up.
 func (c *Conn) watch() {
 	defer c.loop.wg.Done()
+	defer c.loop.diagBG("watch")()
 	select {
 	case <-c.client.Done():
 		c.loop.Detach(c)

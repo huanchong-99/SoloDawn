@@ -91,6 +91,19 @@ func cancelSessionAsks(h *Host, key SessionKey) {
 	}
 }
 
+// cancelAsks ends every open ask. Settle calls it once the runtime starts no
+// more: an ask that runs is registered by then.
+func cancelAsks(h *Host) {
+	st := Part[approvalState](h)
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	for _, asks := range st.cancels {
+		for _, cancel := range asks {
+			cancel()
+		}
+	}
+}
+
 func listenApprove(h *Host, key SessionKey, e Event) {
 	switch e.Kind {
 	case TurnBegan, TurnEnded:
@@ -107,7 +120,7 @@ func startAskedGoroutine(h *Host, s Session, ask Ask) {
 	st := Part[approvalState](h)
 	ctx, cancel := context.WithCancel(context.Background())
 	id := st.registerAsk(s.SessionKey, cancel)
-	go runAskedEvent(ctx, cancel, h, st, s, id, ask, callDone)
+	stateOf(h).startBackground(h, "ask", func() { runAskedEvent(ctx, cancel, h, st, s, id, ask, callDone) }, "g", s.Group, "task", s.Task)
 }
 
 func runAskedEvent(ctx context.Context, cancel context.CancelFunc, h *Host, st *approvalState, s Session, id *byte, ask Ask, callDone func()) {

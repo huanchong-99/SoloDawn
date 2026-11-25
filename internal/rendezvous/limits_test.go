@@ -59,7 +59,7 @@ func waitAllocations(t *testing.T, s *turn.Server, n int) {
 	t.Helper()
 	for deadline := time.Now().Add(2 * time.Second); s.AllocationCount() != n; time.Sleep(time.Millisecond) {
 		if time.Now().After(deadline) {
-			t.Fatalf("%d allocations; want %d", s.AllocationCount(), n)
+			t.Fatalf("timed out after 2s waiting for %d allocations; saw 1: %d allocations", n, s.AllocationCount())
 		}
 	}
 }
@@ -169,6 +169,15 @@ func TestAllocationPlaces(t *testing.T) {
 			t.Fatal(a.devices, a.sources)
 		}
 	})
+}
+
+func TestLateAllocationCountsTowardSource(t *testing.T) {
+	a := newAllocations()
+	src := &net.UDPAddr{IP: net.IPv4(198, 51, 100, 1), Port: 9}
+	a.created("d", src)
+	if got := a.sources["198.51.100.1"]; got != 1 {
+		t.Fatalf("source count = %d; want 1", got)
+	}
 }
 
 // A client transport address has permissions for at most 64 peer IPs.
@@ -335,7 +344,7 @@ func TestSendOutsideTheLedgerLock(t *testing.T) {
 			t.Fatal(q)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("the quota is locked during a send")
+		t.Fatal("timed out after 1s waiting for the quota during a send; saw 0: ")
 	}
 	close(conn.release)
 }
@@ -395,6 +404,20 @@ func TestRelayPortRange(t *testing.T) {
 		t.Fatal(again, err)
 	}
 	again.Close()
+}
+
+func TestRelaySkipsReservedPort(t *testing.T) {
+	g := testGenerator(&ledger{}, net.IPv4(127, 0, 0, 1))
+	g.portRange = freeRange(t)
+	g.holdPort(portKey{false, g.portRange.First})
+	c, err := g.listen("udp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if got := c.LocalAddr().(*net.UDPAddr).Port; got != g.portRange.Last {
+		t.Fatalf("bound port %d; want %d", got, g.portRange.Last)
+	}
 }
 
 // A relay socket of the other family than the bind address fails at once,

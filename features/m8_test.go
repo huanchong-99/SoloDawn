@@ -233,12 +233,11 @@ func (w *m8InstallWorld) completeBrowserAdopt(b *peerBrowser, roomMsg proto.Pair
 }
 
 func (w *m8InstallWorld) awaitPairCLI(done <-chan m8CLIResult, label string) error {
-	select {
-	case res := <-done:
-		return w.verifyPairCLIResult(res, label)
-	case <-w.ctx.Done():
-		return w.ctx.Err()
+	res, err := recvCtx(w.ctx, done, "the pairing CLI "+label+" to finish", nil)
+	if err != nil {
+		return err
 	}
+	return w.verifyPairCLIResult(res, label)
 }
 
 func (w *m8InstallWorld) verifyPairCLIResult(res m8CLIResult, label string) error {
@@ -291,7 +290,7 @@ func (w *m8InstallWorld) startForegroundNode() error {
 	cmd := exec.Command(w.binPath, "node")
 	cmd.Env = w.env
 	cmd.Stdout, cmd.Stderr = &logBuf, &logBuf
-	if _, err := startManagedCmd(w.f.t, w.cleanup, cmd); err != nil {
+	if _, err := startNodeCmd(w.f.t, w.cleanup, cmd, "node", filepath.Dir(w.sockPath), &logBuf); err != nil {
 		return err
 	}
 	if err := waitAcceptanceSocket(w.sockPath, 10*time.Second); err != nil {
@@ -388,9 +387,10 @@ func launchOneCommandRV(f fixtures, cleanup func(func()), rvDir string) (string,
 func verifyOneCommandRVICE(wsURL string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	start := time.Now()
 	path, err := peer.Dial(ctx, wsURL, exampleKey("m8-rv-probe"))
 	if err != nil {
-		return err
+		return ctxCallErr(ctx, start, "rendezvous probe dial", nil, err)
 	}
 	defer path.Close()
 	return m8CheckReadyICE(path.Route().ICE)
@@ -503,11 +503,12 @@ func m8LoadFencedInstall(doc, lang, placeholder, asset string) (string, error) {
 }
 
 func m8ExecCLIContext(ctx context.Context, bin string, env []string, args ...string) (string, string, error) {
+	start := time.Now()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
+	err := ctxCallErr(ctx, start, "CLI command "+strings.Join(args, " "), nil, cmd.Run())
 	return stdout.String(), stderr.String(), err
 }
 
@@ -530,14 +531,11 @@ func m8StopExeWindows(exe, sock string) error {
 
 func m8StopExeUnix(exe, sock string) error {
 	m8SignalUnixPIDs(m8FindUnixPIDs(exe), os.Interrupt)
-	if m8WaitUnixStopped(exe, sock, 3*time.Second) {
+	if m8WaitUnixStopped(exe, sock, 3*time.Second) == nil {
 		return nil
 	}
 	m8SignalUnixPIDs(m8FindUnixPIDs(exe), os.Kill)
-	if m8WaitUnixStopped(exe, sock, 2*time.Second) {
-		return nil
-	}
-	return fmt.Errorf("processes for %s did not stop", exe)
+	return m8WaitUnixStopped(exe, sock, 2*time.Second)
 }
 
 func m8SignalUnixPIDs(pids []int, sig os.Signal) {
@@ -548,26 +546,22 @@ func m8SignalUnixPIDs(pids []int, sig os.Signal) {
 	}
 }
 
-func m8WaitUnixStopped(exe, sock string, wait time.Duration) bool {
-	deadline := time.Now().Add(wait)
-	for time.Now().Before(deadline) {
-		if len(m8FindUnixPIDs(exe)) == 0 && !m8CanDialUnix(sock) {
-			return true
+func m8WaitUnixStopped(exe, sock string, wait time.Duration) error {
+	return waitUntilEvery(25*time.Millisecond, wait, "the processes of "+exe+" to stop", func() error {
+		if pids := m8FindUnixPIDs(exe); len(pids) != 0 || m8CanDialUnix(sock) {
+			return fmt.Errorf("pids %v, socket reachable %v", pids, m8CanDialUnix(sock))
 		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	return false
+		return nil
+	})
 }
 
 func m8WaitSocketGone(sock string, wait time.Duration) error {
-	deadline := time.Now().Add(wait)
-	for time.Now().Before(deadline) {
-		if !m8CanDialUnix(sock) {
-			return nil
+	return waitUntilEvery(25*time.Millisecond, wait, "the socket "+sock+" to go", func() error {
+		if m8CanDialUnix(sock) {
+			return errors.New("socket reachable")
 		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	return fmt.Errorf("socket %s stayed reachable", sock)
+		return nil
+	})
 }
 
 func m8CanDialUnix(sock string) bool {

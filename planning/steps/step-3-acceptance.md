@@ -93,9 +93,11 @@ seconds of presence and the turn limit.
   run; X was `offline` before, `working` while the agent ran, and
   `waiting` after. The same with
   the runner as a task that looks every second with `--timeout 0`: while
-  the agent runs, every look exits 3 and no second agent is started. Two
-  mentions then start the agent twice, one after the other. In the
-  browser: the four marks of the setup panel turn on in that order, and
+  the agent runs, every look exits 3 and no second agent is started. In
+  both runner modes, the second mention arrives while X is `working`
+  on the first. Nothing is handed out until that run ends. Then the
+  runner starts the agent a second time. In the browser: the four marks
+  of the setup panel turn on in that order, and
   the button sends the check again.
 - **A10.21** Tools. A client behind `solodawn mcp --member X` is listed
   exactly the tools of `external` in `tools.json`, and `approve`. With no

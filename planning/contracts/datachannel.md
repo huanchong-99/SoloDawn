@@ -38,8 +38,8 @@ messages it accepts from a peer depends on who the peer is (section 8).
 The client's first message, `hello`, and the node's answer, `welcome`:
 
 ```json
-{"t":"hello","id":1,"v":1,"kind":"browser","name":"phone browser","addrs":[]}
-{"t":"welcome","re":1,"ok":true,"v":1,"device":"<node device id>",
+{"t":"hello","id":1,"v":2,"kind":"browser","name":"phone browser","addrs":[]}
+{"t":"welcome","re":1,"ok":true,"v":2,"device":"<node device id>",
  "name":"workstation","version":"v0.3.1","time":1763600000000,
  "addrs":["ws://192.0.2.10:47800/rv","wss://rv.example/rv"],
  "groups":[{"g":"Qm1…","name":"Website","seq":812}],"owner":true}
@@ -47,7 +47,7 @@ The client's first message, `hello`, and the node's answer, `welcome`:
 
 | Field | Meaning |
 | --- | --- |
-| `v` | protocol version. A node that cannot speak it answers `version` and keeps the connection open, so that the client can send `hello` again with a lower `v` |
+| `v` | protocol version. A node that cannot speak it answers `version` and keeps the connection open, so that the client can send `hello` again with a lower `v`. Steps 2 and 3 share `v` 2; a client sends 2 and, answered `version`, again 1 (`contracts/step-3/knowledge.md` section 8) |
 | `kind` | `browser` or `host` |
 | `addrs` | where the sender can be signalled. In `hello`, URLs at which this node may be reachable, `[]` from a browser. In `welcome`, what reaches the node without the rendezvous: its own `ws://<address>:<port>/rv` URLs, with the mapped external port when it has one, then its rendezvous URLs (`contracts/rendezvous.md` section 4) |
 | `time` | the node's clock, in Unix milliseconds, when it sends `welcome` |
@@ -246,14 +246,16 @@ and without `re` and `ok` (`contracts/conventions.md` section 3):
 
 ```json
 {"t":"host.info","re":5,"ok":true,"device":"…","name":"workstation",
- "os":"macOS 15.2","version":"v0.3.1","open":2,"max_open":4,"offline":false,
+ "os":"darwin/arm64","version":"v0.3.1","exe":"/usr/local/bin/solodawn","open":2,"max_open":4,"offline":false,
  "update":null,"homes":[{"g":"Qm1…","home":"<device id>","name":"Website"}],
  "relay":{"used":3250000,"limit":52428800},
  "agents":[{"agent":"claude","cli_version":"2.1.311","account":"personal",
    "login_ok":true,"caps":{"day":{"unit":"turns","max":200}},
-   "groups":[{"g":"Qm1…","member":"<member id>","level":2,
-              "state":"working","task":"<task id>","queued":0}]}],
- "settings":{"retention_days":90,"idle_minutes":15,"default_level":2,"all_level3":false,"approvers":[]}}
+   "driver":{"accounts":["personal","team","api_key"],"takeover":"resume"},
+   "models":[{"model":"…","name":"…","efforts":["low","high"],"tier":"…"}],
+   "groups":[{"g":"Qm1…","member":"<member id>","level":3,
+              "state":"working","task":"<task id>","queued":0,"watchers":[]}]}],
+ "settings":{"retention_days":90,"idle_minutes":15,"default_level":3,"all_level3":false,"approvers":[]}}
 ```
 
 - `homes`: the groups whose home this node knows, one entry per group: `g`,
@@ -272,24 +274,19 @@ and without `re` and `ok` (`contracts/conventions.md` section 3):
   update check (`contracts/local.md` section 9): `pending` when that version
   is installed and waits for a restart, `mismatch` when its file failed the
   checksum and nothing was replaced.
+- `exe`: the absolute path of the node's own program. `driver` and `models`
+  are those of `contracts/step-3/drivers.md` sections 6 and 10.3. `watchers`
+  lists the people who hold a watch grant for that AI
+  (`contracts/step-2/watch-team.md` section 5).
 - In `groups`: `state` and `task` are the AI's derived state
   (`contracts/rows.md` section 2; `task` is optional), `level` is the level
   of its task sessions, and `queued` counts held items.
 
 ### `audit` (request)
 
-`{"t":"audit","id":6,"before":413,"limit":50}` is answered with
-`{"re":6,"ok":true,"rows":[…]}`, each row shaped as
-`{"id":412,"ts":1763599000000,"g":"Qm1…","ai":"claude","what":"approval","detail":"git push origin other-branch","by":"<device id>","result":"approved"}`.
-`g`, `ai`, `by` and `result` are optional. `ai` is the agent (`claude`), not a
-member id; `what` is one of the values of `contracts/storage.md` section 3.
-`id` is the row's number on this node (the `id` of the `audit` table,
-`contracts/storage.md` section 3), which grows with every row. `before` is
-the `id` of the oldest row the client already holds: the answer holds the
-rows whose `id` is lower, newest first, and `before: 0` asks for the newest.
-Ids are never reused, so no row is skipped or repeated between pages, as
-paging by time could do for rows with the same `ts`. `limit` is at most
-100. `rows` is `[]` when there is nothing.
+Not in version 1: the audit list was cancelled, and a node answers an `audit`
+request `bad_request`. Nothing reads the `audit` table over the data channel;
+the table itself is in `contracts/storage.md` section 3.
 
 ### Terminal
 

@@ -10,7 +10,13 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
 - Cause: only the second tier was planned and built. The MCP shim takes only the session token that the node creates when it starts a CLI itself ([local.md](planning/contracts/local.md), section 3), `host.join` takes only an agent with a driver (`agtValidAgent`, `internal/host/agents.go:258`), and nothing lets an agent take an inbox item.
-- Status: open, found 2026-11-23 and planned as the external AI (R-166, [external.md](planning/contracts/step-3/external.md); [parallel plan](planning/steps/parallel-plan-step-2-3.md), section 4.2). The wire shapes are frozen (P-7), the home accepts external tool labels and owner edits (T3-12), the secretary's roster shows window usage (T3-15), the browser provides setup and its check (U3-6), the host joins external AIs, hands out items and reports runs, presence and state (T3-13), and the MCP tools under a member id with the `wait` and `done` commands serve them (T3-14). The [I3-3 scenarios](features/a10_external.feature) and [browser test](web/e2e/external.spec.ts) stay pending until they are wired to these; A10.28 needs a live agent. The agent writes its own runner around `solodawn wait`.
+- Status: open, found 2026-11-23 and planned as the external AI (R-166, [external.md](planning/contracts/step-3/external.md); [parallel plan](planning/steps/parallel-plan-step-2-3.md), section 4.2). The implementation supports joining, setup and member-scoped MCP without a driver. The [browser test](web/e2e/external.spec.ts) and [I3-3 scenarios](features/a10_external.feature) cover waiting, queued work, the owner-only tool label, managed replies, task and review checkouts, usage, and presence expiration. An already-open stream on removal still needs a fix (below); A10.28 needs a live agent. The agent writes its own runner around `solodawn wait`.
+
+### 2026-11-23 · bug · Removing an external member does not close its open MCP stream
+
+- Symptom: in A10.27, the owner successfully removes X after reassigning its task, and the member row is gone, but the already-open MCP stream does not close.
+- Cause: the member-removal path ends the host's member sessions (`internal/host/join.go:620`), but the local MCP server runs with the node's lifetime context (`internal/node/node.go:645–653`, `internal/host/mcp.go:28–42`). A tool call rechecks the token, but removal does not end an otherwise idle stream.
+- Status: open; the offline-work and removal scenario stays pending. The separate presence-expiry case exercises the real host timer on a fake clock and checks the status reports immediately before and at 180 seconds.
 
 ### 2026-11-23 · deviation · An intermittent failure cannot be explained from one occurrence
 
@@ -81,8 +87,8 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-22 · limitation · The multi-person label scenarios cannot admit Q yet
 
 - Symptom: A9.12 and five A9.42 cases (failing review, decision by P, decision by Q, secretary confirmation without Q on the allow list, and secretary confirmation with Q on it) each failed under `-race` in `Given the confirmation cast with Q`. The reply was `bad_request: the home has no such command`; decoding that refusal as a successful command reply reported `proto: a field that is always present is missing`.
-- Cause: the cast sends `invite` before it can admit Q (`features/s2_confirm_test.go:119`), and the current home has no registered handler for it (`internal/home/check.go:109`).
-- Status: pending until the people flow is available (T2-1b for invitation, T2-1a for home join). The label assertions did not run; any later blockers are unverified.
+- Cause: the cast sends `invite` before it can admit Q (`features/s2_confirm_test.go:119`), and the home had no registered handler for it (`internal/home/check.go:109`).
+- Status: pending retest. A10.17 now exercises invitation and join; the label assertions were not rerun here.
 
 ### 2026-11-22 · limitation · The A9.44 quiet-task fixture does not reach the timer
 
@@ -104,9 +110,9 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-22 · deviation · A confirmed brief cannot yet be replaced
 
-- Symptom: a new brief cannot replace a confirmed one as required by A9.13.
-- Cause: `internal/home/cmd_brief.go:153` accepts only pending or revised briefs as predecessors.
-- Status: open; A9.13 remains pending for T2-2b.
+- Symptom: a new brief cannot replace a confirmed one, although A9.13 and `labels.md` section 4 said it did.
+- Cause: `internal/home/cmd_brief.go:153` accepts only pending or revised briefs as predecessors, as `planning/contracts/commands.md` 1.3 says.
+- Status: resolved by decision (2026-11-25): the code stays. A started task's direction changes by cancelling the task and confirming a new brief, and `labels.md` section 4 and A9.13 in `planning/steps/step-2-3-acceptance.md` now say so. The A9.13 scenario in `features/` is changed by another unit and stays pending until then.
 
 ### 2026-11-22 · limitation · The OpenCode driver is declared from documentation, not from a capture
 
@@ -166,7 +172,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: A9.20 fails in its first Given with `bad_request: the home has no such command`, before opening the owner's terminal or exercising the watch host.
 - Cause: `joinWatcher` in `features/s2_watch_terminal_test.go` sends `invite`; `internal/home/people_seam.go` declares the invite/join command keys but registers no handlers, so `internal/home/check.go` refuses the command. The home invitation/join units T2-1a and T2-1b are outside T2-6.
-- Status: open. A9.20 stays pending; rerun it after the home invitation/join path lands. The later watch-confirmation steps were not reached by this run.
+- Status: pending retest. A10.17 now exercises invitation and join; the later watch-confirmation steps were not rerun here.
 
 ### 2026-11-22 · deviation · Host turn labels approximate task participation by role
 
@@ -245,12 +251,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: a home restart forgets which quiet periods already notified the secretary and can send one more `quiet` notice if an active task stays silent across the restart.
 - Cause: row 23 writes no row (`planning/contracts/task-machine.md` row 23), so `After["quiet"]` records each notified task's last-activity timestamp in the group's `State.quiet` in memory (`rndRememberQuiet` in `internal/home/rounds.go:121`, `internal/home/home.go:69`).
 - Status: open, accepted in step 1.
-
-### 2026-11-22 · deviation · `driver` in `host.info` is optional until T3-2 fills it
-
-- Symptom: `planning/contracts/step-3/drivers.md` section 6 says each entry of `agents` carries `driver` always, but the frozen shape lets it be absent: Go `Driver *Driver` with `omitempty` (`internal/proto/host.go`, `HostAgent`), TS `v.optional(Driver)` (`web/src/lib/proto.ts`, `HostState.agents`), and `agents.driver` under `optional` in `internal/proto/testdata/wire.json`.
-- Cause: nothing on rebuild fills `driver` yet; a required field now would make the web client reject every real `host.info` until T3-2 lands. P-5 froze `driver` as `accounts` and `takeover` only; the other declaration fields stay in the host's table (coordinator, 2026-11-22).
-- Status: open, accepted for P-5. T3-2, the pull request that fills `driver` for every agent, makes it required: Go: the `Driver` field (JSON `driver`) (value type, no `omitempty`), TS `driver: Driver`, regenerate `wire.json` with `go test ./internal/proto -update`, and drop "once populated" from `internal/proto/README.md` (the `host.info` bullet). Also accepted: P-5 does not freeze the tool lists in `internal/proto/testdata/tools.json` (`planning/contracts/step-3/knowledge.md` section 7), because `internal/host` tests require it to equal the registered schemas; T3-5 adds `note_list` `type` and `propose_brief` `preset`, T3-6 adds `kb_put` and `kb_search` to all five lists, and the two merge with `go test ./internal/proto -update`.
 
 ### 2026-11-22 · limitation · Existing stores do not get the `row_named` index
 
@@ -390,7 +390,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
   2. `Status` (`internal/node/update.go:40`) is written by `Check` and read for `host.info`; read from another goroutine, it races.
   3. `Restart` (`:39`) must replace the process in place (exec on Unix). launchd and systemd stop the whole process group when the node's process ends, so a child started before the exit would be stopped with it.
 - Cause: the `Updater` holds no lock and does not restart by itself; the owner of the runtime is to call `Check` and `Apply` under the lock that admits turns and takeovers, copy `Status` under it, and supply a `Restart` that execs.
-- Status: open, postponed off the step-1 main line (`N-6`).
+- Status: open, postponed off the step-1 main line (`N-6`). Version 1 ships without self-update; `install.md` says how to update by hand.
 
 ### 2026-11-21 · limitation · `Sessions` handlers and runtime pairing/surface wiring across `HM-2`, `HM-3`, `N-3` and `N-4`
 
@@ -734,6 +734,30 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-24 · bug · A scenario could restore the host drivers while another node discovered agents
+
+- Symptom: the Linux `-race` acceptance job reported a data race in A1.1 (`features/node_pair.feature:5`): a write of `host.Drivers` at `features/host_limits_test.go:237` against a read in `agtModels` (`internal/host/models.go:17`), from a `Pairer.Serve` goroutine started at `features/helpers_test.go:648`.
+- Cause: `hostLimitsSteps` registered the restore of `host.Drivers`, `host.Compose` and `host.Instructions` in `afterScenario` for every scenario of the suite (`features/host_limits_test.go:232-240`), not only for the host limits scenarios that replace them. So A1.1's own cleanup rewrote the global while its paired node, still serving, read it.
+- Status: resolved on `devin/race-store-drivers` in the test harness: `saveHLHooks` saves the three hooks and the three host limits bubbles and the host external run restore them with `defer` around the work that replaced them, so no other scenario writes them. `Drivers` stays a package-level registry: the product writes it only at package init (`Register` in each driver file), and only tests replace it.
+
+### 2026-11-24 · bug · A restarted host was settled while its home loop could still push to it
+
+- Symptom: the Linux `-race` acceptance job reported a data race in A4.3: `Store.Close` closing the write queue (`internal/store/store.go:73`, from `nodetest.Node.Close`) against `onWriter` sending on it (`:95`), from `projectDir` (`internal/host/run.go:184`) in `cleanupGroupState`, started by `pushRows` (`internal/host/deliver.go:347`).
+- Cause: the scenario's second host. `restartHost` (`features/m4_test.go`) registered `link2.Close(); h2.Settle()` as its cleanup, which ran while the node's home loop was still open. The pump of `link2` could be inside `pushRows`: `h2.Settle` returned, then `pushRows` started `afterGroupState` on `h2` (`internal/host/deliver.go:347-348`). The node's own cleanup then closed the store, and it settles only the first host, so nothing waited for `h2` again. The product cannot reach this: `nodeRuntime.closeCore` and `nodetest.Node.StopHome` close the home loop between the link and the settle, and `Loop.Close` waits for every pump, so no push is in progress when `Host.Settle` starts. Only an acceptance scenario that restarts a host settles it while its home stays open.
+- Status: resolved on `devin/race-store-drivers` in the test harness: the cleanup of the restarted host in `features/m4_test.go` and `features/m3_test.go` is `link.Close(); n.StopHome(); h2.Settle()`, and the M3 restart host, which was never settled, is now settled. Proved with a build overlay that sleeps 150 ms before the `d.wg.Go` in `pushRows`: A4.3 fails under `-race` on `rebuild` and passes with the fix. Limit: the mid-scenario `activeLink.Close(); activeHost.Settle()` in `restartHost` can still leave a late push on the first host; it cannot reach a closed store, because `Node.Close` settles that host again.
+
+### 2026-11-23 · bug · FLAKY-29: the fake Qwen Code started OpenCode's MCP server
+
+- Symptom: Qwen A4.9 failed with `timed out waiting on home pushes`, and failed every time at step 4 with `OPENCODE_CONFIG_CONTENT='{"mcp":{}}'` in the environment (#373).
+- Cause: `startMCP` (`internal/host/fakecli/mcp.go:40-43`) replaced the server of any fake CLI with the one in `OPENCODE_CONFIG_CONTENT` whenever that variable was set. The Qwen Code driver passes only `QWEN_CODE_SYSTEM_SETTINGS_PATH` and inherits the rest of the environment, so the fake Qwen Code launched an empty command and never posted.
+- Status: resolved on `devin/host-handout-task-flaky29`: only the fake OpenCode reads `OPENCODE_CONFIG_CONTENT`. `TestQwenServesItsScriptBehindTheBearerToken` sets it and checks that the fake Qwen Code starts its own server.
+
+### 2026-11-23 · bug · An external AI's task hand-out named the task by its id
+
+- Symptom: a task or review hand-out carried the task's internal id in `task`; `external.md` section 3.2 requires `T-<num>`. This blocked A10.22, A10.23, the paused-task half of A10.24 and A10.26.
+- Cause: `extHandOut` sent `Task: s.Task` (`internal/host/external.go:307`).
+- Status: resolved on `devin/host-handout-task-flaky29`: `task` is formatted by `turnCtx.taskRef` and stays empty for a group run. `TestExternalTaskHandOutNamesTheTaskByItsNumber` pins `T-7`.
+
 ### 2026-11-23 · bug · An external AI's timer callback could outlive Settle
 
 - Symptom: `Settle` could return while an external AI's run timeout (`extEnd`, which calls `Deliver`) or presence report (`extReport`) was still running, and a `leave` or a hand-out during shutdown armed a new timer, such as a 180 s presence timer.
@@ -757,6 +781,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: under `-race`, the host acceptance scenarios reported a data race between restoring `host.Deliver`, the seam provided at `internal/host/deliver.go:28`, in `afterScenario` (`features/host_run_test.go:322`) and a delivery wakeup reading it (`internal/host/run.go:592` in `onProcessTurnEnded`, and `:851` in `finishTurnProcessExit`, reached from `:813`). The wakeups at `internal/host/run.go:763`, `internal/host/takeover.go:90` and `internal/host/limits.go:196` read it the same way.
 - Cause: `hostRunSteps` (`features/host_run_test.go:313-323`) wrote the four hooks back in its After hook in every scenario, not only in its own. Each step set has its own After hook, and they run in the order of the sorted step set names, so in a later step set's scenario the hooks were written back before that step set settled its host (for example `cleanup(w.h.Settle)` in `features/host_start_model_test.go:151`). In the step set's own scenarios, the teardown (`features/host_run_test.go:374-377`) polled the session rows until they were `dormant` (`waitAllSessionsIdle`, `:383-398`) instead of settling the host, and a row changes before the loop starts its delivery wakeup. The product closes a host with `Settle` (`internal/node/node.go:390`), which already waits for all of those wakeups (`settleRuntime`, `internal/host/run.go:79`; `settleTakeovers`, `internal/host/takeover.go:106`; `settleLimits`, `internal/host/limits.go:93`).
 - Status: resolved on `devin/host-teardown-race`: `installHRDefaultHooks` saves and restores the hooks in the scenarios that install them, the teardown settles the host instead of polling, and `TestSettleWaitsForDeliveryAfterAnExitMidTurn` pins that `Settle` waits for the wakeup after a mid-turn exit, as `TestSettleWaitsForRuntimeDelivery` does after a turn's end.
+
+### 2026-11-23 · bug · FLAKY-31: the two-task fixture assumed one notice per turn and immediate browser delivery
+
+- Turn-count cause: in 12 of 400 traced Linux race samples, the Claude secretary began turn 8 on item 10, the second task's `task_merged` notice. The home queues that notice in the committed merge result (`internal/home/machine.go:581–585`, `internal/home/cmd_merge.go:45–58`), but browser rows and host inbox frames have independent connection pumps (`internal/home/run_conn.go:46–75`). The former browser callback could record eight turns after the home had already merged at seven. All 12 failures had `summaries browser=2 home=2`; this turn did not make a third card.
+- Summary timeout: holding the secretary after confirmation until both merge notices were queued deterministically reproduced `timed out waiting for two summary cards; summaries browser=1 home=1` with both tasks merged. The host routes both notices to the secretary's group session and delivers them together (`internal/host/deliver.go:734–739`, `:857–871`). The fake CLI consumes one script entry per turn, and the fixture scripts one summary per notice (`features/m5_test.go:1702–1714`). Windows job 137765616100 passed all 100 traced samples; the log from the original Windows timeout (job 137696879496) did not capture the count or the notices, so that occurrence cannot be attributed to batching with certainty.
+- Fix: count review pass and merge in the home's existing post-commit hook (`features/m5_test.go:722–743`); still verify the merge message in the browser. In the scripted fixture, release task 1 after the confirmation turn starts and task 2 after the first summary arrives (`features/m5_test.go:1613–1651`), so the notices cannot share a turn. The forced-delay run then produced both summaries. No product change or timeout increase.
+
+### 2026-11-23 · bug · FLAKY-19b: the offline test used an older sync sequence
+
+- Symptom: under Linux race stress, the test expected sequence 8 but received sequence 9 in the matching `Synced` reply for request 4, in nine runs.
+- Cause: the test read `Loop.Groups` after observing the working row, but the run loop pushes changed rows before publishing the group summary (`internal/home/run_group.go:170`–`:172`, `internal/home/run_push.go:32`–`:33`). The test could sample the old summary; the queued sync then read the committed sequence (`internal/home/sync.go:41`).
+- Status: fixed in `internal/home/cmd_hostev_test.go:523` and `:589`. The negative sync barrier uses the observed row sequence and checks the next frame. No product change.
 
 ### 2026-11-23 · bug · External AI removal could be triggered by one click
 
@@ -819,11 +855,23 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `internal/host/deliver.go:1378-1379` can select a stale `cloud_check` row after `tskFinishCloud` releases the polling slot, even after the task has reached review. The home acknowledges the result before sending the updated row (`internal/home/run_group.go:170-171`).
 - Status: resolved in PR #335. The host keeps claims for accepted and superseded commits, while allowing retries after failed result delivery or an accepted resubmission. `TestStaleCloudCheckRowDoesNotRestartCompletedPoll` verifies that resuming from a stale row does not make a second forge call.
 
+### 2026-11-25 · bug · The answer to a CLI's question could outlive the host's Settle and crash the node
+
+- Symptom: `Settle` returned while `runAskedEvent` still ran; `bg.stop name=ask` followed `settle.end`. With a card open it only waited, but an ask that had not posted its card yet, or whose post failed with the connection, wrote to the store after the node closed it: `panic: send on closed channel` (`internal/store/store.go:95`).
+- Cause: `startAskedGoroutine` (`internal/host/approve.go:110`) started it with a plain `go` statement; only `TurnBegan` and `TurnEnded` of its session cancelled it, and no `Settled` entry did. The goroutines of a watched terminal (`internal/host/watch.go:99` and `:173`) are not waited for either; they end with their connection, which `node` closes first, and touch no store.
+- Status: resolved on `fix/host-cloud-poll-settle`: the asks run on the runtime's wait group, and `Settle` (entry `"runtime"`) cancels them after it has ended the CLI processes and waits. `TestSettleWaitsForAnAskWithTheHomeClosed` and `TestSettleEndsAnAskWhoseCardIsBeingPosted` fail with the old `go` statement.
+
+### 2026-11-25 · bug · The hosted checks poll could send a command after the host settled
+
+- Symptom: after `Settle` a poll of hosted checks still ran, and the result it got sent `task cloud`, so `bg.stop name=cloud_poll` and the command could follow `settle.end`.
+- Cause: `startHostedCheck` (`internal/host/tools_task.go:463`) started the poll with a plain `go` statement, and no `Settled` entry ended it or waited for it.
+- Status: resolved on `fix/host-cloud-poll-settle`, with the pattern of `limits.go`: the polls run on `tskPart.wg`, and `Settle` (entry `"task"`) cancels them and waits. `TestSettleEndsTheHostedChecksPoll` checks that the poll has stopped when `Settle` returns and that none starts afterwards; it fails with the old `go` statement.
+
 ### 2026-11-22 · limitation · Browser invitation joining needs the node and home implementations
 
 - Symptom: a current node does not admit a browser through an invitation; it knows only protocol version 1.
 - Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts`. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a. U2-1 supplies the join page and member controls.
-- Status: resolved. T2-1a (#309), T2-1b (#304) and W2-1 (#307) are merged.
+- Status: partly resolved. T2-1a (#309), T2-1b (#304) and W2-1 (#307) are merged, but they never registered a home handler for `invite` (`internal/home/cmd_people.go` registered only `join`; found 2026-11-25), so no group could admit a second person. #382 added the handler. Two fixture faults remain in the people scenarios (A9.2, A9.4 to A9.6 and the setups that join an AI): `features/helpers_test.go:600` starts the in-process home without `LoopConfig.Invite`, so the link of A9.2 is empty, and `JoinAI` in `features/s2_cast_test.go:845` sends `host.join` without the `home.add` that the web client sends after joining (`web/src/lib/join.ts:86`), so the host answers `home_unreachable`.
 
 ### 2026-11-22 · bug · Codex treated every failed thread resume as a lost session
 

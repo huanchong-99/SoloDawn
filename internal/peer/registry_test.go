@@ -15,7 +15,7 @@ func TestChannelDispatchByLabel(t *testing.T) {
 	t.Cleanup(func() { pc.Close() })
 	handed := make(chan *Stream, 2)
 	p := &Peer{channels: Channels{"test:": func(s *Stream) { handed <- s }, "ctl": func(*Stream) { t.Error("ctl handed over") }}}
-	c := &Connection{Device: "device", ctx: t.Context(), close: func() error { t.Error("closed the connection"); return nil }}
+	c := &Connection{Device: "device", ctx: t.Context(), close: func(string) error { t.Error("closed the connection"); return nil }}
 	for _, label := range []string{"test:g:member", "test:"} {
 		dc, err := pc.CreateDataChannel(label, nil)
 		check(t, err)
@@ -40,7 +40,7 @@ func TestChannelDispatchByLabel(t *testing.T) {
 
 func TestNewKeepsItsOwnChannels(t *testing.T) {
 	channels := Channels{"test:": func(*Stream) {}}
-	p := New(identity.Key{}, nil, nil, nil, nil, nil, channels)
+	p := New(testKey(t), nil, nil, nil, nil, nil, channels)
 	channels["other:"] = func(*Stream) {}
 	eq(t, len(p.channels), 1)
 }

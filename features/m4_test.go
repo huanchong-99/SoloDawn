@@ -57,17 +57,16 @@ func attachM4Client(loop *home.Loop, cleanup func(func()), key identity.Key) *m4
 
 // drainUntil is the single reader of c.frames.ch.
 func (c *m4Client) drainUntil(timeout time.Duration, stop func() bool, onFrame func(json.RawMessage)) error {
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+	w := newWait(timeout, "home frames", c.frames.saw)
+	defer w.stop()
 	for !stop() {
-		select {
-		case raw := <-c.frames.ch:
-			applyRowsFrame(&c.homeView, raw)
-			if onFrame != nil {
-				onFrame(raw)
-			}
-		case <-timer.C:
-			return errors.New("timed out waiting on M4 home frames")
+		raw, err := recvWait(w, c.frames.ch)
+		if err != nil {
+			return err
+		}
+		applyRowsFrame(&c.homeView, raw)
+		if onFrame != nil {
+			onFrame(raw)
 		}
 	}
 	return nil
@@ -343,23 +342,23 @@ func (w *m4World) setApprovalWait(waitS int) error {
 }
 
 func (w *m4World) awaitHostWaitLimit(h *host.Host, want int) error {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if m4HostHasWaitLimit(h, string(w.groupID), want) {
-			return nil
+	return waitUntil(5*time.Second, fmt.Sprintf("host approval_wait_s %d", want), func() error {
+		got, err := m4HostWaitLimit(h, string(w.groupID))
+		if err == nil && got != want {
+			err = fmt.Errorf("approval_wait_s %d", got)
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	return fmt.Errorf("timed out waiting for host approval_wait_s %d", want)
+		return err
+	})
 }
 
-func m4HostHasWaitLimit(h *host.Host, gid string, want int) bool {
+func m4HostWaitLimit(h *host.Host, gid string) (int, error) {
 	raw, ok := h.Rows.Get(gid, "group", gid)
 	if !ok {
-		return false
+		return 0, errors.New("no group row")
 	}
 	var grp proto.GroupRow
-	return proto.Decode(raw, &grp) == nil && grp.Limits.ApprovalWaitS == want
+	err := proto.Decode(raw, &grp)
+	return grp.Limits.ApprovalWaitS, err
 }
 
 func (w *m4World) joinAI(aiName, agent string) error {
@@ -1069,6 +1068,7 @@ func (w *m4World) restartHost() error {
 	w.activeLink = link2
 	w.cleanup(func() {
 		link2.Close()
+		n.StopHome()
 		h2.Settle()
 	})
 	return w.awaitHostWaitLimit(h2, 20)
@@ -1225,15 +1225,13 @@ func (w *m4World) whenOwnerCancelsSecondTask() error {
 }
 
 func (w *m4World) awaitTaskSessionRemoved(taskID string) error {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	return waitUntil(5*time.Second, "cleanup of cancelled task session "+taskID, func() error {
 		hasTask := func(s host.Session) bool { return s.Task == taskID }
-		if !slices.ContainsFunc(w.activeHost.Sessions.All(), hasTask) {
-			return nil
+		if slices.ContainsFunc(w.activeHost.Sessions.All(), hasTask) {
+			return errors.New("session present")
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	return fmt.Errorf("timed out waiting for cancelled task session %s cleanup", taskID)
+		return nil
+	})
 }
 
 func (w *m4World) thenCancelledCardsExpiredAndRefused(wantStatus, wantCode string) error {

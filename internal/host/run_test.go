@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -288,7 +289,7 @@ func (rh *runHome) waitCmd(t *testing.T) recordedCmd {
 		}
 		return c
 	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for home command")
+		t.Fatal(timedOut(5*time.Second, "a home command", nil))
 		return recordedCmd{}
 	}
 }
@@ -455,16 +456,15 @@ func putSetting(t *testing.T, db *store.Store, key, jsonVal string) {
 
 func waitForState(t *testing.T, h *Host, key SessionKey, want State) Session {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if s, ok := h.Sessions.Get(key); ok && s.State == want {
-			return s
+	var got Session
+	poll(t, 5*time.Second, fmt.Sprintf("session %v in state %s", key, want), func() string {
+		var ok bool
+		if got, ok = h.Sessions.Get(key); !ok || got.State != want {
+			return fmt.Sprintf("state %q, present %v", got.State, ok)
 		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	s, _ := h.Sessions.Get(key)
-	t.Fatalf("session %v stayed %s, want %s", key, s.State, want)
-	return Session{}
+		return ""
+	})
+	return got
 }
 
 func tokenFromLaunch(l Launch) string {
@@ -481,7 +481,7 @@ func waitReportedKind(t *testing.T, reported <-chan EventKind) EventKind {
 	case kind := <-reported:
 		return kind
 	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for reported event")
+		t.Fatal(timedOut(5*time.Second, "a reported event", nil))
 		return ""
 	}
 }
@@ -505,7 +505,7 @@ func waitDeliveredSlot(t *testing.T, delivered <-chan aiSlot, want aiSlot) {
 			t.Fatalf("delivered %+v, want %+v", slot, want)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("Deliver not called")
+		t.Fatal(timedOut(5*time.Second, "Deliver to be called", nil))
 	}
 }
 
@@ -649,7 +649,7 @@ func TestDeliverOnTurnEndEvictsSameProcessWithoutDeadlock(t *testing.T) {
 			t.Fatalf("synchronous Deliver Turn failed: %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatalf("deadlock: task turn never started; group=%s task=%s", seamState(t, h.Sessions, grpKey), seamState(t, h.Sessions, taskKey))
+		t.Fatal(timedOut(5*time.Second, "the task turn to start", []string{"group " + string(seamState(t, h.Sessions, grpKey)), "task " + string(seamState(t, h.Sessions, taskKey))}))
 	}
 	if seamState(t, h.Sessions, grpKey) != Dormant || seamState(t, h.Sessions, taskKey) != Working {
 		t.Fatalf("states: group=%s task=%s", seamState(t, h.Sessions, grpKey), seamState(t, h.Sessions, taskKey))
@@ -2237,7 +2237,7 @@ func TestSettleUnblocksAWaitingOpenSlot(t *testing.T) {
 		assertEqual(t, h.Sessions.Move(key, Dormant, Working), nil)
 		rt := stateOf(h)
 		result := make(chan error, 1)
-		rt.startBackground(func() {
+		rt.startBackground(h, "test", func() {
 			other := SessionKey{Group: runGroup1, Member: runAI2}
 			result <- acquireOpenSlot(t.Context(), h, rt, other, 1)
 		})

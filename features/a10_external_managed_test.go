@@ -83,12 +83,14 @@ func (w *externalWorld) scriptClaude(body []map[string]any) error {
 }
 
 func (w *externalWorld) scriptNotice() error {
-	return w.scriptClaude(mcpPostSteps(1, "Interruption seen"))
+	steps := slices.Concat(claudeToolTurn(true, "", "", mcpPostSteps(1, "Interruption seen")),
+		claudeToolTurn(false, "", "", nil), []map[string]any{{"dir": "eof"}})
+	return writeM6Script(w.homeNode, "claude", map[string]any{"steps": steps})
 }
 
 func (w *externalWorld) askManaged() error {
 	return s3Run(func() error { return w.joinManaged("M", false) },
-		func() error { return w.scriptClaude(nil) }, w.askAndAnswer)
+		func() error { return w.setHold("group", "pause") }, w.askAndAnswer)
 }
 
 func (w *externalWorld) askAndAnswer() error {
@@ -131,10 +133,8 @@ func (w *externalWorld) findManagedQuestion(question string) proto.MsgRow {
 }
 
 func (w *externalWorld) answerAsManaged(call proto.MsgRow, answer string) error {
-	h := w.homeHeader("post")
-	h.As = proto.ID(w.aiByName["M"].ID)
-	cmd := proto.Post[proto.EmptyBody]{HomeCommand: h, Kind: "reply", Text: answer, Re: new(proto.ID(call.ID)), Mentions: []proto.ID{}}
-	return w.sendSignedCmd(w.homeLink.conn, w.homeNode.key, cmd)
+	steps := mcpCallSteps(1, "reply", map[string]any{"call": call.ID, "text": answer}, map[string]any{"isError": false})
+	return s3Run(func() error { return w.scriptClaude(steps) }, func() error { return w.setHold("group", "resume") })
 }
 
 func (w *externalWorld) managedTools() error {
@@ -145,7 +145,9 @@ func (w *externalWorld) managedTools() error {
 }
 
 func (w *externalWorld) scriptManagedToolCheck() error {
-	body := mcpCallSteps(1, "report_usage", map[string]any{"window_pct": 40}, map[string]any{"isError": true})
+	body := mcpCallSteps(1, "report_usage", map[string]any{"window_pct": 40}, nil)
+	body[1]["msg"] = map[string]any{"jsonrpc": "2.0", "id": 1,
+		"error": map[string]any{"code": -32602, "message": `unknown tool "report_usage"`}}
 	body = append(body, mcpPostSteps(2, "Managed tool check completed")...)
 	steps := slices.Concat(claudeToolTurn(true, "", "", body),
 		claudeToolTurn(false, "", "", mcpPostSteps(3, "Roster seen")),
@@ -243,36 +245,61 @@ func (w *externalWorld) prepareBrief(role string) error {
 	if err := w.scriptManagedBriefWork(role); err != nil {
 		return err
 	}
-	cmd := w.briefCommand(assignee, reviewer)
-	return s3Run(func() error { return w.sendSignedCmd(w.homeLink.conn, w.homeNode.key, cmd) },
-		func() error { return w.confirmBrief(cmd.Nonce) })
+	if err := w.setBriefGitIdentity(); err != nil {
+		return err
+	}
+	return s3Run(func() error { return w.scriptBrief(assignee, reviewer) },
+		func() error { return w.whenOwnerMentionsAI("Secretary", "Propose the external brief") },
+		w.confirmBrief)
 }
 
-func (w *externalWorld) briefCommand(assignee, reviewer string) proto.Post[proto.BriefBody] {
-	h := w.homeHeader("post")
-	h.As = proto.ID(w.aiByName["Secretary"].ID)
-	body := proto.BriefBody{Title: "External brief", Goal: "Exercise external task work", Criteria: []string{externalCriteria},
-		Scope: proto.BriefScope{In: []string{"project"}, Out: []string{}}, Pass: 90, Requester: w.ownerKey.ID(),
-		Tasks: []proto.BriefTask{{Title: "External work", Assignee: w.aiByName[assignee].ID, Reviewer: w.aiByName[reviewer].ID, Depends: []int{}}}}
-	return proto.Post[proto.BriefBody]{HomeCommand: h, Kind: "brief", Text: "External brief", Mentions: []proto.ID{}, Body: body}
+func (w *externalWorld) setBriefGitIdentity() error {
+	repo := filepath.Join(w.homeNode.data, "projects", string(w.groupID), "repo")
+	for _, args := range [][]string{{"user.name", "fixture"}, {"user.email", "fixture@test.invalid"}} {
+		if _, err := m5GitOut(repo, "config", args[0], args[1]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (w *externalWorld) confirmBrief(id proto.ID) error {
+func (w *externalWorld) scriptBrief(assignee, reviewer string) error {
+	args := map[string]any{
+		"title": "External brief", "goal": "Exercise external task work", "criteria": []string{externalCriteria},
+		"scope_in": []string{"project"}, "scope_out": []string{},
+		"tasks": []map[string]string{{"title": "External work", "assignee": assignee, "reviewer": reviewer}},
+	}
+	return w.scriptClaude(mcpCallSteps(1, "propose_brief", args, map[string]any{"isError": false}))
+}
+
+func (w *externalWorld) confirmBrief() error {
+	var id proto.ID
+	err := w.waitExternalPush("secretary's brief", func() bool {
+		for _, msg := range w.msgs {
+			if msg.Kind == "brief" && msg.By == w.aiByName["Secretary"].ID {
+				id = proto.ID(msg.ID)
+				return true
+			}
+		}
+		return false
+	})
+	if err != nil {
+		return err
+	}
 	if err := w.hostCommand(proto.Act{HomeCommand: w.homeHeader("act"), Msg: id, Action: "confirm"}); err != nil {
 		return err
 	}
-	return w.waitState(func() bool {
+	return w.waitExternalPush("confirmed external task", func() bool {
 		task := w.tasksByNum[1]
 		w.taskID = task.ID
-		return task.ID != "" && task.Branch != ""
+		return task.ID != ""
 	})
 }
 
 func (w *externalWorld) scriptManagedBriefWork(role string) error {
 	script := m5CodexScript("external-managed-review", m5PassingReview(100))
 	if role == "reviewer" {
-		script = m5CodexScript("external-managed-task", []m5ToolCallSpec{{Name: "run_checks", Args: map[string]any{}},
-			{Name: "submit_task", Args: map[string]any{"summary": "Managed task complete"}}})
+		script = m5CodexScript("external-managed-task", m5WorkerCalls(w.group.Forge != "none", "Managed task complete"))
 	}
 	return os.WriteFile(w.homeNode.scriptPath("codex"), []byte(script), 0o600)
 }
@@ -281,14 +308,24 @@ func (w *externalWorld) handleBriefRun(role string) error {
 	if role == "reviewer" {
 		return w.reviewBrief()
 	}
-	return s3Run(func() error { return w.look(0) }, func() error { return w.handout("task", "External brief") },
-		w.commitExternalWork, func() error { return w.tool("run_checks", "{}", "ok") },
+	return s3Run(w.awaitBriefHandout, func() error { return w.handout("task", "External work") },
+		w.commitExternalWork, w.pushExternalWork, func() error { return w.tool("run_checks", "{}", "ok") },
 		func() error { return w.tool("submit_task", `{"summary":"External task complete"}`, "ok") },
 		func() error { return w.end(w.run.Run) })
 }
 
+func (w *externalWorld) pushExternalWork() error {
+	if w.group.Forge == "none" {
+		return nil
+	}
+	return w.tool("push_branch", "{}", "ok")
+}
+
 func (w *externalWorld) commitExternalWork() error {
 	w.folder = w.run.Folder
+	if err := w.waitExternalPush("external task branch", func() bool { return w.currentTask().Branch != "" }); err != nil {
+		return err
+	}
 	branch, err := m5GitOut(w.folder, "branch", "--show-current")
 	if err != nil {
 		return err
@@ -301,8 +338,19 @@ func (w *externalWorld) commitExternalWork() error {
 }
 
 func (w *externalWorld) reviewBrief() error {
-	return s3Run(func() error { w.startWait(); return w.finishWait(0) },
+	return s3Run(w.awaitBriefHandout,
 		func() error { return w.handout("review", "External work") }, w.submitExternalReview)
+}
+
+func (w *externalWorld) awaitBriefHandout() error {
+	w.startWait()
+	wait := newWait(10*time.Second, "external brief handout", nil)
+	defer wait.stop()
+	got, err := recvWait(wait, w.wait)
+	if err != nil {
+		return err
+	}
+	return w.readHandout(got)
 }
 
 func (w *externalWorld) submitExternalReview() error {
@@ -315,16 +363,14 @@ func (w *externalWorld) submitExternalReview() error {
 }
 
 func (w *externalWorld) waitForManagedNotice(reason string) error {
-	_, err := waitFakeCLILogs(w.homeNode.cliLog(), "start claude ", 1, 5*time.Second)
-	if err != nil {
-		return err
-	}
-	f, err := os.ReadFile(w.turnsPath())
-	if err != nil {
-		return err
-	}
-	if !strings.Contains(string(f), "notice · information") || !strings.Contains(string(f), reason) {
-		return fmt.Errorf("secretary's input did not include the %q notice: %s", reason, f)
-	}
-	return nil
+	return waitUntil(5*time.Second, fmt.Sprintf("secretary's %q notice", reason), func() error {
+		f, err := os.ReadFile(w.turnsPath())
+		if err != nil {
+			return abort(err)
+		}
+		if !strings.Contains(string(f), fmt.Sprintf("notice · information\\nNotice (%s)", reason)) {
+			return fmt.Errorf("secretary's input: %s", f)
+		}
+		return nil
+	})
 }

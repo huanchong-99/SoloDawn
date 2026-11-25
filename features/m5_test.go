@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -53,17 +54,57 @@ func init() {
 		os.Exit(m5RunMCPShim(os.Args[2], os.Args[3:]))
 	}
 	host.Register(host.Listeners, "m5_turns", m5OnHostEvent)
+	compose := host.Compose
+	host.Compose = func(h *host.Host, s host.Session, kind host.TurnKind, items []json.RawMessage) (string, host.Turn, error) {
+		text, turn, err := compose(h, s, kind, items)
+		if w := m5CurrentWorld.Load(); w != nil && err == nil {
+			w.recordComposedTurn(s, kind, items)
+		}
+		return text, turn, err
+	}
 	host.Register(host.Holds, "m5_hold", m5OnHostHold)
 	stepSets["m5"] = m5Steps
 }
 
-func m5OnHostEvent(_ *host.Host, _ host.SessionKey, e host.Event) {
+func m5OnHostEvent(_ *host.Host, key host.SessionKey, e host.Event) {
 	w := m5CurrentWorld.Load()
 	if w != nil && e.Kind == host.TurnBegan {
 		w.mu.Lock()
 		w.turns++
+		trace := w.composedTurns[key]
+		trace.Key = key
+		w.turnTrace = append(w.turnTrace, trace)
+		delete(w.composedTurns, key)
 		w.mu.Unlock()
 	}
+}
+
+type m5TurnTrace struct {
+	Vendor string
+	Key    host.SessionKey
+	Kind   host.TurnKind
+	Items  []m5ItemTrace
+}
+
+type m5ItemTrace struct {
+	ID   int64
+	Why  string
+	Task proto.ID
+	Msg  proto.ID
+}
+
+func (w *m5World) recordComposedTurn(s host.Session, kind host.TurnKind, items []json.RawMessage) {
+	trace := m5TurnTrace{Vendor: s.Agent, Key: s.SessionKey, Kind: kind}
+	for _, raw := range items {
+		var item proto.InboxItem
+		if proto.Decode(raw, &item) == nil {
+			i := item.Item
+			trace.Items = append(trace.Items, m5ItemTrace{ID: i.Item, Why: i.Why, Task: i.Task, Msg: i.Msg})
+		}
+	}
+	w.mu.Lock()
+	w.composedTurns[s.SessionKey] = trace
+	w.mu.Unlock()
 }
 
 func m5OnHostHold(h *host.Host, key host.SessionKey) (string, bool) {
@@ -467,19 +508,17 @@ type m5ToolRecord struct {
 type m5HookFunc func(caller host.Caller) error
 
 type m5Browser struct {
-	mu          sync.Mutex
-	conn        *home.Conn
-	nextReq     int64
-	waiting     map[int64]chan json.RawMessage
-	rows        map[string]map[string]json.RawMessage
-	onTaskMerge func(taskID string)
+	mu      sync.Mutex
+	conn    *home.Conn
+	nextReq int64
+	waiting map[int64]chan json.RawMessage
+	rows    map[string]map[string]json.RawMessage
 }
 
-func newM5Browser(onMerge func(string)) *m5Browser {
+func newM5Browser() *m5Browser {
 	return &m5Browser{
-		waiting:     map[int64]chan json.RawMessage{},
-		rows:        map[string]map[string]json.RawMessage{},
-		onTaskMerge: onMerge,
+		waiting: map[int64]chan json.RawMessage{},
+		rows:    map[string]map[string]json.RawMessage{},
 	}
 }
 
@@ -522,46 +561,22 @@ func (b *m5Browser) applyRows(raw json.RawMessage) {
 	if json.Unmarshal(raw, &batch) != nil {
 		return
 	}
-	var merged []string
 	b.mu.Lock()
 	for _, elem := range batch.Rows {
-		if id := b.storeRowLocked(elem); id != "" {
-			merged = append(merged, id)
-		}
+		b.storeRowLocked(elem)
 	}
 	b.mu.Unlock()
-	for _, id := range merged {
-		b.onTaskMerge(id)
-	}
 }
 
-func (b *m5Browser) storeRowLocked(elem json.RawMessage) string {
+func (b *m5Browser) storeRowLocked(elem json.RawMessage) {
 	var rh proto.RowHeader
 	if json.Unmarshal(elem, &rh) != nil || rh.Type == "" {
-		return ""
+		return
 	}
 	if b.rows[rh.Type] == nil {
 		b.rows[rh.Type] = map[string]json.RawMessage{}
 	}
-	prev := b.rows[rh.Type][rh.ID]
 	b.rows[rh.Type][rh.ID] = elem
-	if rh.Type != "task" {
-		return ""
-	}
-	return m5JustMergedID(prev, elem)
-}
-
-func m5WasMerged(prev json.RawMessage) bool {
-	var oldT proto.TaskRow
-	return len(prev) > 0 && json.Unmarshal(prev, &oldT) == nil && oldT.State == "merged"
-}
-
-func m5JustMergedID(prev, cur json.RawMessage) string {
-	var newT proto.TaskRow
-	if json.Unmarshal(cur, &newT) == nil && newT.State == "merged" && !m5WasMerged(prev) {
-		return newT.ID
-	}
-	return ""
 }
 
 func (b *m5Browser) openRequest() (int64, <-chan json.RawMessage) {
@@ -593,6 +608,8 @@ type m5World struct {
 
 	mu                sync.Mutex
 	turns             int
+	composedTurns     map[host.SessionKey]m5TurnTrace
+	turnTrace         []m5TurnTrace
 	turnsAtReviewPass map[string]int
 	turnsAtMerged     map[string]int
 	sawTaskSess       map[int]host.SessionKey
@@ -621,6 +638,7 @@ type m5World struct {
 func newM5World(sc *godog.ScenarioContext, f fixtures) *m5World {
 	w := &m5World{
 		f:                 f,
+		composedTurns:     map[host.SessionKey]m5TurnTrace{},
 		turnsAtReviewPass: map[string]int{},
 		turnsAtMerged:     map[string]int{},
 		sawTaskSess:       map[int]host.SessionKey{},
@@ -636,7 +654,7 @@ func newM5World(sc *godog.ScenarioContext, f fixtures) *m5World {
 		return ctx, nil
 	})
 	w.cleanup = afterScenario(sc)
-	w.browser = newM5Browser(w.recordTaskMerged)
+	w.browser = newM5Browser()
 	return w
 }
 
@@ -701,12 +719,46 @@ func (w *m5World) setMemberHeld(member string, held bool) {
 	w.mu.Unlock()
 }
 
-func (w *m5World) recordTaskMerged(taskID string) {
+func (w *m5World) homeTables() home.Tables {
+	tables := home.NodeTables()
+	tables.After = maps.Clone(tables.After)
+	tables.After.Add("m5_merge_order", w.recordMergeOrder)
+	return tables
+}
+
+func (w *m5World) recordMergeOrder(_ *home.State, result home.Result) {
 	w.mu.Lock()
-	if _, ok := w.turnsAtMerged[taskID]; !ok {
-		w.turnsAtMerged[taskID] = w.turns
+	defer w.mu.Unlock()
+	for _, item := range result.Items {
+		if item.Why == "merge" {
+			w.turnsAtReviewPass[item.Task] = w.turns
+		}
 	}
-	w.mu.Unlock()
+	for _, row := range result.Rows {
+		msg, _ := row.Value().(proto.MsgRow)
+		if task := m5MergedThread(msg); task != "" {
+			w.turnsAtMerged[task] = w.turns
+		}
+	}
+}
+
+func TestM5MergeOrderDoesNotWaitForBrowser(t *testing.T) {
+	w := &m5World{turns: 7, turnsAtReviewPass: map[string]int{}, turnsAtMerged: map[string]int{}}
+	const taskID = "task"
+	thread := taskID
+	merged := proto.MsgRow{Kind: "system", By: "system", Thread: &thread, Body: json.RawMessage(`{"code":"task_merged"}`)}
+	task := proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: taskID}, State: "merged"}
+	hook := w.homeTables().After["m5_merge_order"]
+	hook(nil, home.Result{Items: []home.Item{{Why: "merge", Task: taskID}}})
+	hook(nil, home.Result{Rows: []home.Row{home.RowOf(task), home.RowOf(merged)}})
+	w.turns++ // The secretary receives the merge notice before the browser receives the row.
+	browser := newM5Browser()
+	if err := browser.Send(proto.Rows{Type: "rows", Rows: []json.RawMessage{json.RawMessage(m5MustJSON(task))}}); err != nil {
+		t.Fatal(err)
+	}
+	if pass, merge := w.turnsAtReviewPass[taskID], w.turnsAtMerged[taskID]; pass != 7 || merge != 7 {
+		t.Fatalf("turns at review pass=%d, at merge=%d; want 7, 7", pass, merge)
+	}
 }
 
 func (w *m5World) setupCluster(forge string, checks []string, level2 bool) error {
@@ -715,7 +767,7 @@ func (w *m5World) setupCluster(forge string, checks []string, level2 bool) error
 	}
 	w.registerHostHooks()
 	tb := scenarioTB{TB: w.f.t, cleanup: w.cleanup}
-	w.cluster = nodetest.Start(tb, nodetest.Config{BinDir: w.binDir, Nodes: 1})
+	w.cluster = nodetest.Start(tb, nodetest.Config{BinDir: w.binDir, Nodes: 1, Tables: w.homeTables()})
 	if err := w.startMCPBridge(); err != nil {
 		return err
 	}
@@ -849,20 +901,7 @@ func m5FinalStep(w *m5World, fn func() error) func() error {
 }
 
 func m5WaitAllDormant(h *host.Host) error {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if !m5HasNonDormant(h) {
-			return nil
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	return errors.New("timed out waiting for host sessions to become dormant")
-}
-
-func m5HasNonDormant(h *host.Host) bool {
-	return slices.ContainsFunc(h.Sessions.All(), func(s host.Session) bool {
-		return s.State != host.Dormant
-	})
+	return waitUntil(5*time.Second, "every host session dormant", func() error { return sessionsDormant(h) })
 }
 
 func (w *m5World) startMCPBridge() error {
@@ -871,9 +910,11 @@ func (w *m5World) startMCPBridge() error {
 		return err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
 	w.cleanup(func() {
 		cancel()
 		ln.Close()
+		wg.Wait()
 	})
 	exe, err := os.Executable()
 	if err != nil {
@@ -881,17 +922,23 @@ func (w *m5World) startMCPBridge() error {
 	}
 	n0 := w.cluster.Nodes[0]
 	n0.Host.Shim = []string{exe, "m5-mcp-shim", ln.Addr().String()}
-	go w.acceptMCPLoop(ctx, ln, n0.Host)
+	wg.Add(1)
+	go w.acceptMCPLoop(ctx, ln, n0.Host, &wg)
 	return nil
 }
 
-func (w *m5World) acceptMCPLoop(ctx context.Context, ln net.Listener, h *host.Host) {
+func (w *m5World) acceptMCPLoop(ctx context.Context, ln net.Listener, h *host.Host, wg *sync.WaitGroup) {
+	defer wg.Done()
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		go w.serveOneMCPConn(ctx, conn, h)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w.serveOneMCPConn(ctx, conn, h)
+		}()
 	}
 }
 
@@ -900,6 +947,7 @@ func (w *m5World) serveOneMCPConn(ctx context.Context, conn net.Conn, h *host.Ho
 	if err != nil {
 		return
 	}
+	defer context.AfterFunc(ctx, func() { conn.Close() })()
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	var reqMu sync.Mutex
@@ -1067,23 +1115,12 @@ func m5ParseToolCallResult(raw json.RawMessage) (string, bool) {
 
 func (w *m5World) onAfterToolCall(h *host.Host, caller host.Caller, tool string, raw json.RawMessage) {
 	text, isErr := m5ParseToolCallResult(raw)
-	if !isErr {
-		w.syncAfterSuccessTool(h, caller, tool, text)
+	if !isErr && tool == "run_checks" {
+		w.waitHostLocalChecks(h, caller, text)
 	}
 	w.mu.Lock()
 	w.tools = append(w.tools, m5ToolRecord{Session: caller.SessionKey, Kind: caller.Kind, Tool: tool, IsError: isErr, Text: text})
 	w.mu.Unlock()
-}
-
-func (w *m5World) syncAfterSuccessTool(h *host.Host, caller host.Caller, tool, text string) {
-	if tool == "run_checks" {
-		w.waitHostLocalChecks(h, caller, text)
-	}
-	if tool == "submit_review" && strings.Contains(text, `"passed":true`) {
-		w.mu.Lock()
-		w.turnsAtReviewPass[caller.Task] = w.turns
-		w.mu.Unlock()
-	}
 }
 
 func (w *m5World) waitHostLocalChecks(h *host.Host, caller host.Caller, text string) {
@@ -1093,14 +1130,15 @@ func (w *m5World) waitHostLocalChecks(h *host.Host, caller host.Caller, text str
 	if json.Unmarshal([]byte(text), &out) != nil || out.Commit == "" {
 		return
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if m5TaskHasLocalCheck(h, caller.Group, caller.Task, out.Commit) {
-			return
+	err := waitUntil(3*time.Second, "host local check "+out.Commit, func() error {
+		if !m5TaskHasLocalCheck(h, caller.Group, caller.Task, out.Commit) {
+			return errors.New("no local check")
 		}
-		time.Sleep(2 * time.Millisecond)
+		return nil
+	})
+	if err != nil {
+		w.recordHookErr(err)
 	}
-	w.recordHookErr(fmt.Errorf("timed out waiting for host local check %s", out.Commit))
 }
 
 func m5TaskHasLocalCheck(h *host.Host, group, taskID, commit string) bool {
@@ -1301,17 +1339,18 @@ func (w *m5World) sendEnvelopeCmd(env proto.Envelope) (proto.CmdResult, error) {
 }
 
 func (w *m5World) waitCmdReply(ch <-chan json.RawMessage) (proto.CmdResult, error) {
-	select {
-	case raw := <-ch:
-		var errResp proto.ErrorResponse
-		if proto.Decode(raw, &errResp) == nil {
-			return proto.CmdResult{}, &host.Error{Code: errResp.Err.Code, Message: errResp.Err.Message}
-		}
-		var res proto.CmdResult
-		return res, proto.Decode(raw, &res)
-	case <-time.After(10 * time.Second):
-		return proto.CmdResult{}, errors.New("timed out waiting for home command reply")
+	wt := newWait(10*time.Second, "the home command reply", nil)
+	defer wt.stop()
+	raw, err := recvWait(wt, ch)
+	if err != nil {
+		return proto.CmdResult{}, err
 	}
+	var errResp proto.ErrorResponse
+	if proto.Decode(raw, &errResp) == nil {
+		return proto.CmdResult{}, &host.Error{Code: errResp.Err.Code, Message: errResp.Err.Message}
+	}
+	var res proto.CmdResult
+	return res, proto.Decode(raw, &res)
 }
 
 func (w *m5World) syncBrowser() error {
@@ -1320,13 +1359,14 @@ func (w *m5World) syncBrowser() error {
 		Request: proto.Request{Type: "sync", ID: reqID},
 		Group:   w.groupID,
 	})
-	select {
-	case raw := <-ch:
-		var synced proto.Synced
-		return proto.Decode(raw, &synced)
-	case <-time.After(10 * time.Second):
-		return errors.New("timed out waiting for browser sync")
+	wt := newWait(10*time.Second, "the browser sync", nil)
+	defer wt.stop()
+	raw, err := recvWait(wt, ch)
+	if err != nil {
+		return err
 	}
+	var synced proto.Synced
+	return proto.Decode(raw, &synced)
 }
 
 func (w *m5World) waitFor(desc string, check func() bool) error {
@@ -1334,19 +1374,15 @@ func (w *m5World) waitFor(desc string, check func() bool) error {
 	if w.live != nil {
 		timeout = 8 * time.Minute
 	}
-	deadline := time.Now().Add(timeout)
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-	for time.Now().Before(deadline) {
+	return waitUntilEvery(10*time.Millisecond, timeout, desc, func() error {
 		if err := w.checkHookErr(); err != nil {
-			return err
+			return abort(err)
 		}
-		if check() {
-			return nil
+		if !check() {
+			return errors.New("not yet")
 		}
-		<-tick.C
-	}
-	return fmt.Errorf("timed out waiting for %s", desc)
+		return nil
+	})
 }
 
 func (w *m5World) ownerPostMain(text string, mentions []string) error {
@@ -1572,21 +1608,65 @@ func (w *m5World) stepConfirmAndRunTwoTasks(withPush bool) error {
 	w.addBeforeHook("submit_review", func(_ host.Caller) error {
 		w.writeScriptFile("codex", m5CodexScript("codex-task-2", t2Calls))
 		w.writeScriptFile("claude", m5ClaudeScript(m5PassingReview(96)))
+		w.setMemberHeld(w.codexM, true)
 		return nil
 	})
 	w.addBeforeHook(commitHook1, func(c host.Caller) error {
 		_, err := m5GitCommitFiles(w.sessionFolder(c), map[string]string{"beta.go": "package proj\n", "beta_test.go": "package proj\n"}, "Add beta")
 		return err
 	})
-	if err := w.ownerConfirmBrief(w.pendingBriefID()); err != nil {
-		return err
+	if err := w.confirmTwoTaskBrief(); err != nil {
+		return w.twoTaskFailure(err)
 	}
 	hasFirst := func() bool { return len(w.summaryCards()) >= 1 }
 	if err := w.waitFor("first summary card", hasFirst); err != nil {
+		return w.twoTaskFailure(err)
+	}
+	w.setMemberHeld(w.codexM, false)
+	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.codexM)
+	hasBoth := func() bool { return len(w.summaryCards()) == 2 }
+	if err := w.waitFor("two summary cards", hasBoth); err != nil {
+		return w.twoTaskFailure(err)
+	}
+	return nil
+}
+
+func (w *m5World) confirmTwoTaskBrief() error {
+	// The fake secretary consumes one event per turn: confirmation, then each merge notice.
+	w.setMemberHeld(w.claudeM, true)
+	if err := w.ownerConfirmBrief(w.pendingBriefID()); err != nil {
 		return err
 	}
-	hasBoth := func() bool { return len(w.summaryCards()) == 2 }
-	return w.waitFor("two summary cards", hasBoth)
+	if err := w.waitFor("secretary confirmed turn started", func() bool { return w.turnCount() >= 2 }); err != nil {
+		return err
+	}
+	w.setMemberHeld(w.claudeM, false)
+	host.Deliver(w.cluster.Nodes[0].Host, w.groupID, w.claudeM)
+	return nil
+}
+
+func (w *m5World) twoTaskFailure(cause error) error {
+	var tasks, queued, deliveries string
+	var summaries int
+	n := w.cluster.Nodes[0]
+	err := n.Store.Write(func(tx *store.Tx) error {
+		return tx.QueryRow(`SELECT
+			(SELECT json_group_array(json_object('id',id,'num',data->>'num','state',data->>'state','step',data->>'step'))
+				FROM row WHERE g=? AND r='task' AND gone=0),
+			(SELECT json_group_array(json_object('id',id,'why',why,'task',task,'ai',ai,'not_before',not_before))
+				FROM inbox WHERE g=?),
+			(SELECT json_group_array(json_object('item',item,'what',what,'agent',agent,'detail',detail))
+				FROM (SELECT item,what,agent,detail FROM audit
+					WHERE g=? AND what IN ('delivered','refused') ORDER BY id DESC LIMIT 12)),
+			(SELECT count(*) FROM row WHERE g=? AND r='msg' AND gone=0 AND data->>'kind'='summary')`,
+			w.groupID, w.groupID, w.groupID, w.groupID).Scan(&tasks, &queued, &deliveries, &summaries)
+	})
+	log, logErr := os.ReadFile(w.cluster.LogPath)
+	w.mu.Lock()
+	turns := slices.Clone(w.turnTrace)
+	w.mu.Unlock()
+	return fmt.Errorf("%w; summaries browser=%d home=%d; home tasks=%s queued=%s; host item audit=%s; db=%v; hooks=%v; turns=%+v; fake CLI log err=%v:\n%s",
+		cause, len(w.summaryCards()), summaries, tasks, queued, deliveries, err, w.checkHookErr(), turns, logErr, log)
 }
 
 func (w *m5World) verifyPushedBranchHead(c host.Caller) error {
@@ -1765,7 +1845,7 @@ func (w *m5World) verifyTaskMergedOrder(taskID string) error {
 	atMerge, ok2 := w.turnsAtMerged[taskID]
 	w.mu.Unlock()
 	if !ok1 || !ok2 || atPass != atMerge {
-		return fmt.Errorf("task %s turns at review pass=%d (ok=%v), at merge=%d (ok=%v)", taskID, atPass, ok1, atMerge, ok2)
+		return w.twoTaskFailure(fmt.Errorf("task %s turns at review pass=%d (ok=%v), at merge=%d (ok=%v)", taskID, atPass, ok1, atMerge, ok2))
 	}
 	if !w.hasThreadTaskMergedMsg(taskID) {
 		return fmt.Errorf("task %s missing system task_merged message in thread", taskID)
@@ -1773,16 +1853,16 @@ func (w *m5World) verifyTaskMergedOrder(taskID string) error {
 	return nil
 }
 
-func m5IsTaskMergedMsg(m proto.MsgRow, taskID string) bool {
-	if m.Thread == nil || *m.Thread != taskID || m.Kind != "system" {
-		return false
+func m5MergedThread(m proto.MsgRow) string {
+	if m.Thread != nil && m.Kind == "system" && m.By == "system" && strings.Contains(string(m.Body), `"task_merged"`) {
+		return *m.Thread
 	}
-	return m.By == "system" && strings.Contains(string(m.Body), `"task_merged"`)
+	return ""
 }
 
 func (w *m5World) hasThreadTaskMergedMsg(taskID string) bool {
 	for _, m := range w.browserMessages() {
-		if m5IsTaskMergedMsg(m, taskID) {
+		if m5MergedThread(m) == taskID {
 			return true
 		}
 	}
@@ -2627,7 +2707,7 @@ func (w *m5World) sendHostEnvelope(env proto.Envelope) (proto.CmdResult, error) 
 	build := func(id int64) any {
 		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
 	}
-	raw, err := n0.Link.Request(context.Background(), build)
+	raw, err := requestWait(context.Background(), n0.Link, nil, build)
 	if err != nil {
 		return proto.CmdResult{}, err
 	}
