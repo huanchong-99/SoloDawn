@@ -583,6 +583,14 @@ file in `src/routes/`. It edits neither the shell nor another area:
   place, and on the owner's AI cards. The node pushes no `host.info` (`../issues.md`): when the
   groups show an owned computer's AIs going offline or coming back, it is read again, so another
   browser of the owner follows. A team group has no AIs and is not paused from here.
+- **Waiting for a busy AI (R-72).** `src/components/queue/Waits.svelte` and `src/lib/queue.ts`. Under a
+  message of the reader's own in the main line: that an AI busy with a task has not taken it, and
+  "Go first, pausing T-12", which sends `jump`. No row names what a home has queued, so it is worked
+  out: a message waits for an AI it went to while the AI's row is older than the message (or than
+  its owner's confirmation) and the AI is at work. A `jump` moves the author's newest waiting
+  message, so only that one offers it; not for an external AI, which a jump does not interrupt, nor
+  in a paused group. `conflict` means that it was taken meanwhile, and the line goes. After a jump
+  the line says that the AI takes the message next, then that the task is paused, until it continues.
 - **In-page notifications.** `src/components/notify/` mounts `Notifications.svelte` at `layer`
   (`order: 10`), backed by `Notifier` in `src/lib/notify.svelte.ts`. After a group's first sync it
   shows the live events for the reader: `approval`, `decision`, `brief` and `confirm` waiting on the
@@ -654,6 +662,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/groups.svelte.ts`    | `Home`, `Group`: row caches, cursor, paging, lists, commands                      |
 | `src/lib/members.ts`          | AI card status, path, candidate list, free name, `host.join`                      |
 | `src/lib/stop.ts`             | emergency stop: pause a group, which computers have their AIs offline             |
+| `src/lib/queue.ts`            | which of the person's messages wait for a busy AI; `jump`                         |
 | `src/lib/groupinfo.svelte.ts` | project-memory `note` and `review` paging, `forget`                               |
 | `src/lib/nodes.svelte.ts`     | connection indicator, `host.info` cache, `agent.set`, pairing                     |
 | `src/lib/notify.svelte.ts`    | live in-page notification store, classification, dismissal and jump               |
@@ -692,6 +701,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/components/team/`        | attributed bulletin card; team people use the shared member panel                 |
 | `src/components/nodes/`       | top-bar and phone-chat indicator, add-browser pairing dialog                      |
 | `src/components/stop/`        | "Stop AIs" and its panel, the paused notice, the offline banner and card strip    |
+| `src/components/queue/`       | `Waits.svelte`: a message waits for a busy AI, and can go first                   |
 | `src/components/notify/`      | live in-page notifications mounted at `layer`                                     |
 | `src/components/driver/`      | account types and terminal action offered by an AI's `driver`                     |
 | `src/components/pairing/`     | onboarding status and CLI account cards, `#pair=` mount                           |
@@ -722,6 +732,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `features/watch_team.spec.ts` | steps of `../features/web_watch_team.feature`                                     |
 | `features/nodes.spec.ts`      | steps of `../features/web_nodes.feature`                                          |
 | `features/stop.spec.ts`       | steps of `../features/web_stop.feature`                                           |
+| `features/queue.spec.ts`      | steps of `../features/web_queue.feature`                                          |
 | `features/notify.spec.ts`     | steps of `../features/web_notify.feature`                                         |
 | `features/onboarding.spec.ts` | steps of `../features/web_onboarding.feature`                                     |
 | `features/driver.spec.ts`     | steps of `../features/web_driver.feature`                                         |
