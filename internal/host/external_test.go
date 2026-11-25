@@ -143,23 +143,31 @@ func TestExternalTakeWithoutHandOut(t *testing.T) {
 	})
 }
 
+// externalBubble is a host with an external AI member in a group whose turns
+// last a minute, settled when the test ends.
+func externalBubble(t *testing.T) *Host {
+	t.Helper()
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	h, _, err := New(db, testSeedKey(12), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h.Settle)
+	h.Rows.Put(testGroup1, "group", testGroup1, json.RawMessage(marshalWire(proto.GroupRow{
+		RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "Proj", Kind: "project", Base: "main", Forge: "none",
+		Home: "home", Secretary: testSec, Checks: []string{}, Limits: proto.Limits{TurnMinutes: 1},
+	})))
+	putExternalMember(h, h.Key.ID(), testAI1)
+	return h
+}
+
 func TestExternalPresenceAndTimeLimit(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		db, err := store.Open(":memory:")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer db.Close()
-		h, _, err := New(db, testSeedKey(12), time.Now)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer h.Settle()
-		h.Rows.Put(testGroup1, "group", testGroup1, json.RawMessage(marshalWire(proto.GroupRow{
-			RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "Proj", Kind: "project", Base: "main", Forge: "none",
-			Home: "home", Secretary: testSec, Checks: []string{}, Limits: proto.Limits{TurnMinutes: 1},
-		})))
-		putExternalMember(h, h.Key.ID(), testAI1)
+		h := externalBubble(t)
 		mustState(t, h, "offline", "")
 		first, second := h.ExternalPresent(testGroup1, testAI1), h.ExternalPresent(testGroup1, testAI1)
 		mustState(t, h, "waiting", "")
@@ -188,20 +196,7 @@ func TestExternalPresenceAndTimeLimit(t *testing.T) {
 func TestSettleExternalWaitsForItsTimersAndArmsNoMore(t *testing.T) {
 	saveRuntimeGlobals(t)
 	synctest.Test(t, func(t *testing.T) {
-		db, err := store.Open(":memory:")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer db.Close()
-		h, _, err := New(db, testSeedKey(12), time.Now)
-		if err != nil {
-			t.Fatal(err)
-		}
-		h.Rows.Put(testGroup1, "group", testGroup1, json.RawMessage(marshalWire(proto.GroupRow{
-			RowHeader: proto.RowHeader{Type: "group", ID: testGroup1, Seq: 1}, Name: "Proj", Kind: "project", Base: "main", Forge: "none",
-			Home: "home", Secretary: testSec, Checks: []string{}, Limits: proto.Limits{TurnMinutes: 1},
-		})))
-		putExternalMember(h, h.Key.ID(), testAI1)
+		h := externalBubble(t)
 		started, release, settled := make(chan struct{}), make(chan struct{}), make(chan struct{})
 		Deliver = func(*Host, string, string) {
 			close(started)

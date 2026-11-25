@@ -111,11 +111,11 @@ func (rt *runtimePart) notify() {
 	rt.mu.Unlock()
 }
 
-func (rt *runtimePart) startBackground(work func()) {
+func (rt *runtimePart) startBackground(h *Host, name string, work func(), more ...any) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	if !rt.settling {
-		rt.wg.Go(work)
+		h.bg(rt.wg.Go, name, work, more...)
 	}
 }
 
@@ -230,7 +230,7 @@ func attachRuntime(h *Host, device string) {
 	delete(rt.savedCrash, device)
 	rt.mu.Unlock()
 	slots := homeAISlots(h, device)
-	rt.startBackground(func() { flushHomeRuntime(h, rt, device, pending, slots) })
+	rt.startBackground(h, "home_flush", func() { flushHomeRuntime(h, rt, device, pending, slots) })
 }
 
 func homeAISlots(h *Host, device string) []aiSlot {
@@ -488,6 +488,7 @@ func launchSessionProcess(h *Host, rt *runtimePart, s Session, cfg launchConfig,
 		h.Sessions.Forget(token)
 		return nil, errSettling
 	}
+	h.diag.Info("proc.start", diagSession(s.SessionKey, "agent", s.Agent, "resume", lp.resumed)...)
 	go runProcessLoop(h, rt, lp)
 	return lp, nil
 }
@@ -512,6 +513,7 @@ func runProcessLoop(h *Host, rt *runtimePart, lp *liveProc) {
 	for e := range lp.proc.Events() {
 		handleProcessEvent(h, rt, lp, e)
 	}
+	h.diag.Info("proc.exit", diagSession(lp.key, "agent", lp.session.Agent, "why", diagExitWhy(rt, lp))...)
 	h.Sessions.Forget(lp.token)
 	if !rt.dropIfSettling(lp) {
 		finishExitedProcess(h, rt, lp)
@@ -589,7 +591,7 @@ func onProcessTurnEnded(h *Host, rt *runtimePart, lp *liveProc, slot aiSlot, e E
 	armTurnIdle(h, rt, lp, idle)
 	reportFinishedTurn(h, rt, lp.session, why, detail)
 	rt.notify()
-	rt.startBackground(func() { Deliver(h, slot.group, slot.member) })
+	rt.startBackground(h, "deliver", func() { Deliver(h, slot.group, slot.member) }, "g", slot.group)
 }
 
 func finishActiveTurn(rt *runtimePart, lp *liveProc, slot aiSlot) (string, string, bool) {
@@ -621,6 +623,7 @@ func reportFinishedTurn(h *Host, rt *runtimePart, s Session, why, detail string)
 
 func interruptSessionTurn(h *Host, key SessionKey, reason, detail string) {
 	if lp := claimTurnInterrupt(stateOf(h), key, reason, detail); lp != nil {
+		h.diag.Info("turn.interrupt", diagSession(key, "why", reason)...)
 		lp.proc.Interrupt()
 	}
 }
@@ -760,7 +763,7 @@ func finishSessionClose(h *Host, rt *runtimePart, lp *liveProc, wasTurn bool) {
 	}
 	completeWaitingDormant(h, rt, lp)
 	if wasTurn {
-		rt.startBackground(func() { Deliver(h, lp.key.Group, lp.key.Member) })
+		rt.startBackground(h, "deliver", func() { Deliver(h, lp.key.Group, lp.key.Member) }, "g", lp.key.Group)
 	}
 }
 
@@ -848,7 +851,7 @@ func finishTurnProcessExit(h *Host, rt *runtimePart, lp *liveProc) {
 		c := pendingCrash{session: lp.session, reason: why, detail: detail}
 		sendCrashStep(context.Background(), h, rt, &c)
 	}
-	rt.startBackground(func() { Deliver(h, slot.group, slot.member) })
+	rt.startBackground(h, "deliver", func() { Deliver(h, slot.group, slot.member) }, "g", slot.group)
 	endTurnExitClose(rt, lp.key)
 }
 
@@ -950,7 +953,7 @@ func failReplacement(h *Host, rt *runtimePart, lp *liveProc, err error) {
 	lp.replaceErr = err
 	h.Sessions.Move(lp.key, Working, Dormant)
 	sendMemberStatus(context.Background(), h, rt, lp.session.Home, lp.key.Group, lp.key.Member, nil)
-	rt.startBackground(func() { Deliver(h, lp.key.Group, lp.key.Member) })
+	rt.startBackground(h, "deliver", func() { Deliver(h, lp.key.Group, lp.key.Member) }, "g", lp.key.Group)
 	endTurnExitClose(rt, lp.key)
 }
 

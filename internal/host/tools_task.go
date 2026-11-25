@@ -460,7 +460,7 @@ func startHostedCheck(h *Host, home, group string, hc HostedCheck) {
 	if grp.Forge == "custom" {
 		forge.Worktree = filepath.Join(projectDir(h, group), "repo")
 	}
-	go tskPollHostedChecks(pollCtx, p, h, home, key, run, forge, hc.PR, hc.Commit, hc.Since)
+	h.bg(func(f func()) { go f() }, "cloud_poll", func() { tskPollHostedChecks(pollCtx, p, h, home, key, run, forge, hc.PR, hc.Commit, hc.Since) }, "g", group, "task", hc.Task)
 }
 
 func tskBeginCloud(p *tskPart, key tskCloudKey, commit string) (context.Context, *tskCloudRun) {

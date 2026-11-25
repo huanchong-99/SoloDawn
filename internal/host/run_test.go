@@ -2237,7 +2237,7 @@ func TestSettleUnblocksAWaitingOpenSlot(t *testing.T) {
 		assertEqual(t, h.Sessions.Move(key, Dormant, Working), nil)
 		rt := stateOf(h)
 		result := make(chan error, 1)
-		rt.startBackground(func() {
+		rt.startBackground(h, "test", func() {
 			other := SessionKey{Group: runGroup1, Member: runAI2}
 			result <- acquireOpenSlot(t.Context(), h, rt, other, 1)
 		})

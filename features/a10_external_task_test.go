@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"testing/synctest"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -44,8 +45,7 @@ func externalTaskSteps(sc *godog.ScenarioContext, w *externalWorld) {
 	sc.Step(`^X requests a (Bash|second Bash) approval in the external task$`, w.askApproval)
 	sc.Step(`^the owner can approve it and X receives allow$`, func() error { return w.decideApproval("approve") })
 	sc.Step(`^the owner can deny it and X receives the denial message$`, func() error { return w.decideApproval("deny") })
-	sc.Step(`^the external runner stops$`, w.stopRunner)
-	sc.Step(`^X becomes offline after the external presence interval$`, w.expirePresence)
+	sc.Step(`^a connected external runner stays waiting until its 180 second presence interval expires$`, w.expirePresence)
 	sc.Step(`^the external owner tries to remove X from an unfinished task$`, w.removeConflict)
 	sc.Step(`^removal is refused until the external task is reassigned$`, w.reassign)
 	sc.Step(`^the external member is gone and its MCP connection closes$`, w.revoked)
@@ -248,20 +248,14 @@ func (w *externalWorld) restartNode() error {
 }
 
 func (w *externalWorld) awaitNodeStopped() error {
-	ticker := time.NewTicker(25 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			conn, err := net.Dial("unix", filepath.Join(w.homeNode.data, "sock"))
-			if err != nil {
-				return nil
-			}
-			conn.Close()
-		case <-w.ctx.Done():
-			return w.ctx.Err()
+	return waitUntilCtx(w.ctx, 25*time.Millisecond, "the node to stop", func() error {
+		conn, err := net.Dial("unix", filepath.Join(w.homeNode.data, "sock"))
+		if err != nil {
+			return nil
 		}
-	}
+		conn.Close()
+		return errors.New("socket accepts")
+	})
 }
 
 func (w *externalWorld) reconnectNode() error {
@@ -369,23 +363,45 @@ func (w *externalWorld) decideApproval(action string) error {
 	if err := w.hostCommand(proto.Act{HomeCommand: w.homeHeader("act"), Msg: proto.ID(card.ID), Action: action}); err != nil {
 		return err
 	}
-	select {
-	case err := <-w.approval:
+	result, err := recvCtx(w.ctx, w.approval, "the approval to finish", nil)
+	if err != nil {
 		return err
-	case <-w.ctx.Done():
-		return w.ctx.Err()
 	}
+	return result
 }
 
-func (w *externalWorld) stopRunner() error { return w.mcp.Close() }
-
 func (w *externalWorld) expirePresence() error {
-	start := time.Now()
-	if err := w.state("X", "offline"); err != nil {
+	return runExtBubble(w.f.t, checkExternalPresenceInterval)
+}
+
+func checkExternalPresenceInterval(b *extBubble) error {
+	client, err := connectExternal(b, hlAI1)
+	if err != nil {
 		return err
 	}
-	if time.Since(start) < 179*time.Second {
-		return fmt.Errorf("external presence expired early after %s", time.Since(start))
+	b.leave()
+	if err := client.Close(); err != nil {
+		return err
+	}
+	synctest.Wait()
+	<-time.After(180*time.Second - time.Nanosecond)
+	if err := checkPresenceState(b, "waiting"); err != nil {
+		return err
+	}
+	<-time.After(time.Nanosecond)
+	synctest.Wait()
+	return checkPresenceState(b, "offline")
+}
+
+func checkPresenceState(b *extBubble, want string) error {
+	var reported any
+	for _, cmd := range b.home.snapshotCmds() {
+		if cmd["op"] == "status" && cmd["id"] == hlAI1 {
+			reported = cmd["state"]
+		}
+	}
+	if got := b.state(); got != want || reported != want {
+		return fmt.Errorf("external state = %q, reported %v, want %q", got, reported, want)
 	}
 	return nil
 }
@@ -409,12 +425,13 @@ func (w *externalWorld) revoked() error {
 	if err := w.confirmGone(); err != nil {
 		return err
 	}
-	select {
-	case <-w.ctx.Done():
-		return fmt.Errorf("removed member's MCP session did not close: %w", w.ctx.Err())
-	case err := <-w.mcpDone():
+	wait := newWait(5*time.Second, "removed member's MCP session to close", nil)
+	defer wait.stop()
+	result, err := recvWait(wait, w.mcpDone())
+	if err != nil {
 		return err
 	}
+	return result
 }
 
 func (w *externalWorld) mcpDone() <-chan error {
@@ -439,11 +456,17 @@ func (w *externalWorld) confirmGone() error {
 }
 
 func (w *externalWorld) merged() error {
-	if err := w.waitState(func() bool { return w.currentTask().State == "merged" }); err != nil {
+	if err := w.waitExternalPush("external task merge", func() bool { return w.currentTask().State == "merged" }); err != nil {
 		return err
 	}
-	if _, err := os.Stat(w.folder); !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("merged task worktree still present: %s (%v)", w.folder, err)
-	}
-	return nil
+	return waitUntil(5*time.Second, "merged worktree removal", func() error {
+		_, err := os.Stat(w.folder)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return abort(err)
+		}
+		return fmt.Errorf("merged worktree still present: %s", w.folder)
+	})
 }

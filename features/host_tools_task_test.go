@@ -646,12 +646,10 @@ func (st *tskScenario) parseCheckOK() (bool, error) {
 }
 
 func (st *tskScenario) awaitRowPush() error {
-	select {
-	case <-st.home.pushedCh:
-		return nil
-	case <-time.After(5 * time.Second):
-		return errors.New("timed out waiting for row push")
-	}
+	w := newWait(5*time.Second, "a row push", nil)
+	defer w.stop()
+	_, err := recvWait(w, st.home.pushedCh)
+	return err
 }
 
 func (st *tskScenario) whenFailingCheckThenSubmit() error {
@@ -790,12 +788,13 @@ func (st *tskScenario) thenRemoteSubmitAndCloudSucceeded() error {
 	if err := st.expectResultJSON(fmt.Sprintf(`{"ok":true,"commit":%q,"pr":31}`, st.head)); err != nil {
 		return err
 	}
-	select {
-	case cloud := <-st.home.cloudCh:
-		return tskCheckCloudResult(cloud, st.head)
-	case <-time.After(10 * time.Second):
-		return errors.New("timed out waiting for task cloud command")
+	w := newWait(10*time.Second, "the task cloud command", nil)
+	defer w.stop()
+	cloud, err := recvWait(w, st.home.cloudCh)
+	if err != nil {
+		return err
 	}
+	return tskCheckCloudResult(cloud, st.head)
 }
 
 func tskCheckCloudResult(cloud proto.TaskChecked, head string) error {

@@ -127,7 +127,8 @@ does one of those five types without its field. `Add` panics when a key is given
 9. no row of its result is above the size limit of a row, else `bad_request`.
 
 Checks 1 and 2 leave no receipt. From check 4 on, the outcome is written as the receipt, a refusal
-included, with the command's own `ts`. For an accepted `invite` (`Result.InviteBy` not empty), the
+included, with the command's own `ts`. Owners and admins can `invite`; the command writes no rows.
+For an accepted `invite` (`Result.InviteBy` not empty), the
 home calls `Inviter.Invite(group, by, signer, nonce)` (on a `Loop`, on the group's goroutine outside
 `Store.Write` before writing the `{ok: true}` receipt, so an `Invite` error leaves no receipt and
 never deadlocks `Store.Write`), and carries `Link` and `Expires` on `Result` without storing them in

@@ -43,6 +43,24 @@ func peopleApply(t *testing.T, s *home.State, d home.Disk, by identity.Key, join
 	return s.Seal(res)
 }
 
+func TestPeopleInvite(t *testing.T) {
+	s := group(t)
+	res := peopleApply(t, s, disk{}, browser, nil, "invite", "")
+	equal(t, res.Answer, store.Outcome{OK: true})
+	equal(t, res.InviteBy, ownerID)
+	equal(t, len(res.Rows), 0)
+
+	s.People[ownerID] = person(ownerID, browser, "admin")
+	res = peopleApply(t, s, disk{}, browser, nil, "invite", "")
+	equal(t, res.Answer, store.Outcome{OK: true})
+	equal(t, res.InviteBy, ownerID)
+
+	s.People[ownerID] = person(ownerID, browser, "member")
+	res = peopleApply(t, s, disk{}, browser, nil, "invite", "")
+	equal(t, res.Answer.Code, "forbidden")
+	equal(t, res.InviteBy, "")
+}
+
 func TestPeopleJoin(t *testing.T) {
 	log := logOf(t, nobody, device(7))
 	join := &home.Joining{Group: groupID, By: ownerID, Open: true, Log: log}

@@ -901,20 +901,7 @@ func m5FinalStep(w *m5World, fn func() error) func() error {
 }
 
 func m5WaitAllDormant(h *host.Host) error {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if !m5HasNonDormant(h) {
-			return nil
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	return errors.New("timed out waiting for host sessions to become dormant")
-}
-
-func m5HasNonDormant(h *host.Host) bool {
-	return slices.ContainsFunc(h.Sessions.All(), func(s host.Session) bool {
-		return s.State != host.Dormant
-	})
+	return waitUntil(5*time.Second, "every host session dormant", func() error { return sessionsDormant(h) })
 }
 
 func (w *m5World) startMCPBridge() error {
@@ -1134,14 +1121,15 @@ func (w *m5World) waitHostLocalChecks(h *host.Host, caller host.Caller, text str
 	if json.Unmarshal([]byte(text), &out) != nil || out.Commit == "" {
 		return
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if m5TaskHasLocalCheck(h, caller.Group, caller.Task, out.Commit) {
-			return
+	err := waitUntil(3*time.Second, "host local check "+out.Commit, func() error {
+		if !m5TaskHasLocalCheck(h, caller.Group, caller.Task, out.Commit) {
+			return errors.New("no local check")
 		}
-		time.Sleep(2 * time.Millisecond)
+		return nil
+	})
+	if err != nil {
+		w.recordHookErr(err)
 	}
-	w.recordHookErr(fmt.Errorf("timed out waiting for host local check %s", out.Commit))
 }
 
 func m5TaskHasLocalCheck(h *host.Host, group, taskID, commit string) bool {
@@ -1342,17 +1330,18 @@ func (w *m5World) sendEnvelopeCmd(env proto.Envelope) (proto.CmdResult, error) {
 }
 
 func (w *m5World) waitCmdReply(ch <-chan json.RawMessage) (proto.CmdResult, error) {
-	select {
-	case raw := <-ch:
-		var errResp proto.ErrorResponse
-		if proto.Decode(raw, &errResp) == nil {
-			return proto.CmdResult{}, &host.Error{Code: errResp.Err.Code, Message: errResp.Err.Message}
-		}
-		var res proto.CmdResult
-		return res, proto.Decode(raw, &res)
-	case <-time.After(10 * time.Second):
-		return proto.CmdResult{}, errors.New("timed out waiting for home command reply")
+	wt := newWait(10*time.Second, "the home command reply", nil)
+	defer wt.stop()
+	raw, err := recvWait(wt, ch)
+	if err != nil {
+		return proto.CmdResult{}, err
 	}
+	var errResp proto.ErrorResponse
+	if proto.Decode(raw, &errResp) == nil {
+		return proto.CmdResult{}, &host.Error{Code: errResp.Err.Code, Message: errResp.Err.Message}
+	}
+	var res proto.CmdResult
+	return res, proto.Decode(raw, &res)
 }
 
 func (w *m5World) syncBrowser() error {
@@ -1361,13 +1350,14 @@ func (w *m5World) syncBrowser() error {
 		Request: proto.Request{Type: "sync", ID: reqID},
 		Group:   w.groupID,
 	})
-	select {
-	case raw := <-ch:
-		var synced proto.Synced
-		return proto.Decode(raw, &synced)
-	case <-time.After(10 * time.Second):
-		return errors.New("timed out waiting for browser sync")
+	wt := newWait(10*time.Second, "the browser sync", nil)
+	defer wt.stop()
+	raw, err := recvWait(wt, ch)
+	if err != nil {
+		return err
 	}
+	var synced proto.Synced
+	return proto.Decode(raw, &synced)
 }
 
 func (w *m5World) waitFor(desc string, check func() bool) error {
@@ -1375,19 +1365,15 @@ func (w *m5World) waitFor(desc string, check func() bool) error {
 	if w.live != nil {
 		timeout = 8 * time.Minute
 	}
-	deadline := time.Now().Add(timeout)
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-	for time.Now().Before(deadline) {
+	return waitUntilEvery(10*time.Millisecond, timeout, desc, func() error {
 		if err := w.checkHookErr(); err != nil {
-			return err
+			return abort(err)
 		}
-		if check() {
-			return nil
+		if !check() {
+			return errors.New("not yet")
 		}
-		<-tick.C
-	}
-	return fmt.Errorf("timed out waiting for %s", desc)
+		return nil
+	})
 }
 
 func (w *m5World) ownerPostMain(text string, mentions []string) error {
@@ -2712,7 +2698,7 @@ func (w *m5World) sendHostEnvelope(env proto.Envelope) (proto.CmdResult, error) 
 	build := func(id int64) any {
 		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
 	}
-	raw, err := n0.Link.Request(context.Background(), build)
+	raw, err := requestWait(context.Background(), n0.Link, nil, build)
 	if err != nil {
 		return proto.CmdResult{}, err
 	}

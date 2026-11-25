@@ -193,16 +193,16 @@ func releaseHeld(ctx context.Context, h *Host, agent string) {
 	for _, slot := range distinctMemberSlots(h, agent) {
 		sendMemberStatus(ctx, h, rt, slot.home, slot.group, slot.member, nil)
 	}
-	limitsOf(h).spawn(func() { Deliver(h, "", "") })
+	limitsOf(h).spawn(h, func() { Deliver(h, "", "") })
 }
 
 // spawn runs f on wg unless the part has settled; the Add happens under mu,
 // so it comes before Settle's Wait or not at all.
-func (lp *limitsPart) spawn(f func()) {
+func (lp *limitsPart) spawn(h *Host, f func()) {
 	lp.mu.Lock()
 	defer lp.mu.Unlock()
 	if !lp.settled {
-		lp.wg.Go(f)
+		h.bg(lp.wg.Go, "deliver", f)
 	}
 }
 
@@ -380,7 +380,7 @@ func onRateLimited(h *Host, lp *limitsPart, s Session, resets int64) {
 		lp.pending[s.SessionKey] = ev
 		return
 	}
-	lp.wg.Go(func() { sendMemberStatus(context.Background(), h, stateOf(h), s.Home, s.Group, s.Member, ev) })
+	h.bg(lp.wg.Go, "member_status", func() { sendMemberStatus(context.Background(), h, stateOf(h), s.Home, s.Group, s.Member, ev) }, "g", s.Group, "task", s.Task)
 }
 
 func releaseRateLimit(h *Host, lp *limitsPart, agent string) {
