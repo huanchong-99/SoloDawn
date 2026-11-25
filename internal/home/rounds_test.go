@@ -93,10 +93,10 @@ func rndTaskRow(taskID string, num int) proto.TaskRow {
 	}
 }
 
-// Jump retires every unacknowledged mention item that its message produced, and
-// queues their replacements with Jump set and no hold. A newer message of that
-// person in the same place, and an item of another kind, stay as they are.
-func TestRoundsJumpRequeuesTheItemsOfItsMessage(t *testing.T) {
+// Every unacknowledged mention item that its message produced jumps. A newer
+// message of that person in the same place, and an item of another kind, stay
+// as they are.
+func TestRoundsJumpTakesTheItemsOfItsMessage(t *testing.T) {
 	s := rndState(t)
 	named, newer, t1 := id(60), id(61), id(70)
 	d := &rndDisk{
@@ -113,14 +113,7 @@ func TestRoundsJumpRequeuesTheItemsOfItsMessage(t *testing.T) {
 		},
 	}
 	res := briefApply(t, s, d, receipts{}, browser, rndJumpEnv(browser, 80, named, ""))
-	equal(t, res, home.Result{
-		Items: []home.Item{
-			{AI: briefA, Why: "mention", Task: t1, Msg: named, Jump: true},
-			{AI: briefB, Why: "mention", Task: t1, Msg: named, Jump: true},
-		},
-		Retire: []int64{11, 12},
-		Answer: store.Outcome{OK: true},
-	})
+	equal(t, res, home.Result{Jump: []int64{11, 12}, Answer: store.Outcome{OK: true}})
 }
 
 func TestRoundsJumpGoldenAndRefusals(t *testing.T) {
@@ -546,7 +539,7 @@ func TestRoundsFailedTaskDeliveryAndWakeCap(t *testing.T) {
 }
 
 // Through StartLoop with NodeTables, main-line posts pass through the post
-// wrapper untouched, jump replaces the queued mention in the store, and quiet
+// wrapper untouched, jump sends the queued mention again under its number, and quiet
 // fires once across ticks even after acknowledgement.
 func TestRoundsLoopJumpAndQuiet(t *testing.T) {
 	tables := home.NodeTables()
@@ -589,16 +582,17 @@ func TestRoundsLoopJumpAndQuiet(t *testing.T) {
 		proto.ID(groupID), 1, proto.Item{Item: 1, AI: proto.ID(briefA), Why: "mention", Msg: proto.ID(msgID)},
 	})
 
-	// Jump retires item 1 and pushes item 2 with Jump: true.
+	// A jump that the wake-up cap held, and that was sent before, is sent now under its number.
+	runExec(t, w.db, "UPDATE inbox SET not_before=? WHERE id=1", clock+3_600_000)
 	p.does(groupID, "jump", `,"msg":"`+msgID+`"`)
 	jumpPush := inboxDecode(t, host.next())
 	equal(t, []any{len(jumpPush.Items), jumpPush.Items[0].Item}, []any{
-		1, proto.Item{Item: 2, AI: proto.ID(briefA), Why: "mention", Msg: proto.ID(msgID), Jump: true},
+		1, proto.Item{Item: 1, AI: proto.ID(briefA), Why: "mention", Msg: proto.ID(msgID), Jump: true},
 	})
-	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM inbox WHERE id=1"), 0)
+	equal(t, runQuery[string](t, w.db, "SELECT group_concat(id || ' ' || not_before) FROM inbox"), "1 0")
 
-	// Acknowledge item 2 via Loop.Ack, then advance the clock to test the quiet timer.
-	w.loop.Ack(host.conn, proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 2})
+	// Acknowledge item 1 via Loop.Ack, then advance the clock to test the quiet timer.
+	w.loop.Ack(host.conn, proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 1})
 	w.idle()
 	w.clock.Store(clock + 59_999)
 	w.loop.Tick(time.UnixMilli(clock + 59_999))
@@ -608,11 +602,11 @@ func TestRoundsLoopJumpAndQuiet(t *testing.T) {
 	w.loop.Tick(time.UnixMilli(clock + 60_000))
 	quietPush := inboxDecode(t, host.next())
 	equal(t, []any{len(quietPush.Items), quietPush.Items[0].Item}, []any{
-		1, proto.Item{Item: 3, AI: proto.ID(aiID), Why: "notice", Task: proto.ID(id(70)), Code: "quiet"},
+		1, proto.Item{Item: 2, AI: proto.ID(aiID), Why: "notice", Task: proto.ID(id(70)), Code: "quiet"},
 	})
 
 	// Acknowledge the quiet notice; later ticks in the same quiet period send nothing.
-	w.loop.Ack(host.conn, proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 3})
+	w.loop.Ack(host.conn, proto.Ack{Type: "ack", Group: proto.ID(groupID), Item: 2})
 	w.idle()
 	w.clock.Store(clock + 180_000)
 	w.loop.Tick(time.UnixMilli(clock + 180_000))

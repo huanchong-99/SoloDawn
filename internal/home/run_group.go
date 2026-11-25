@@ -180,7 +180,7 @@ func (g *runGroup) settle(res Result, now time.Time, answer func()) {
 
 // runIdle reports whether a result changes nothing.
 func runIdle(res Result) bool {
-	return len(res.Rows) == 0 && len(res.Items) == 0 && len(res.Retire) == 0 && len(res.Writes) == 0 && !res.GroupsChanged
+	return len(res.Rows) == 0 && len(res.Items) == 0 && len(res.Retire) == 0 && len(res.Jump) == 0 && len(res.Writes) == 0 && !res.GroupsChanged
 }
 
 // runHour is how far back the count of the wake-up cap goes, in milliseconds.
@@ -203,14 +203,15 @@ func runRecent(list []int64, now int64) []int64 {
 }
 
 // write writes a sealed result through: its rows under the sequence numbers
-// the store gives out, the task counter, its items, its retirements and its
-// other writes.
+// the store gives out, the task counter, its items, its retirements, its jumps
+// and its other writes.
 func (g *runGroup) write(tx *store.Tx, res Result, now int64) error {
 	return runSteps(
 		func() error { return g.putRows(tx, res.Rows, now) },
 		func() error { return tx.RaiseNum(g.state.ID, runNum(res.Rows)) },
 		func() error { return g.putItems(tx, res, now) },
-		func() error { return runRetire(tx, g.state.ID, res.Retire) },
+		func() error { return runEach(g.state.ID, res.Retire, tx.Retire) },
+		func() error { return runEach(g.state.ID, res.Jump, tx.Jump) },
 		func() error { return runPut(tx, res.Writes) },
 	)
 }
@@ -296,9 +297,9 @@ func runText(s string) *string {
 	return &s
 }
 
-func runRetire(tx *store.Tx, group string, ids []int64) error {
+func runEach(group string, ids []int64, change func(group string, id int64) error) error {
 	for _, id := range ids {
-		if err := tx.Retire(group, id); err != nil {
+		if err := change(group, id); err != nil {
 			return err
 		}
 	}

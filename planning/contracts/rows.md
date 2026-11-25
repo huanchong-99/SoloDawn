@@ -149,6 +149,7 @@ Optional:
 | `plan` | when `origin` is `direct` or `takeover` and the `plan` of `task start` is not empty: that plan |
 | `commit` | from the first submission: what hosted checks, the review and the merge are about |
 | `reviewer` | once one is named |
+| `asked` | while it names any: those of the assignee and the reviewer whose role in this task needs their owner's `confirm` card (`contracts/step-2/confirm.md` section 6) |
 | `branch` | once the branch exists |
 | `pr`, `pr_url` | after a submission, when the group has a remote |
 | `review` | after the first review; `review.failed` counts from 0 before it |

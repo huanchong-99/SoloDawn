@@ -53,6 +53,7 @@ type homeRoundsWorld struct {
 	threadMsg    string
 	tenthMsg     string
 	firstItemID  int64
+	threadItemID int64
 	lastQuietID  int64
 	midState     string
 	midWait      string
@@ -133,7 +134,7 @@ func homeRoundsThenSteps(sc *godog.ScenarioContext, w *homeRoundsWorld) {
 	sc.Step(`^the rounds task is "([^"]*)" waiting for "([^"]*)" at (\d+) rounds$`, w.checkTaskRounds)
 	sc.Step(`^the main line of the rounds home holds a "([^"]*)" system message for the task$`, w.checkMainSystemMsg)
 	sc.Step(`^the rounds host has received the 10th mention with the task "([^"]*)" and "([^"]*)"$`, w.checkTenthPush)
-	sc.Step(`^the first mention item is retired and the rounds host receives a jump mention for "([^"]*)"$`, w.checkDirectJump)
+	sc.Step(`^the rounds host receives the first mention item again as a jump mention for "([^"]*)"$`, w.checkDirectJump)
 	sc.Step(`^the rounds task was "([^"]*)" waiting for "([^"]*)" meanwhile and is "([^"]*)" waiting for "([^"]*)" afterwards$`, w.checkPreemptCycle)
 	sc.Step(`^the rounds host receives a jump mention for "([^"]*)" on the task$`, w.checkThreadJump)
 	sc.Step(`^the rounds host has nothing new$`, w.checkHostQuiet)
@@ -450,9 +451,11 @@ func (w *homeRoundsWorld) threadPostAndJump(aiName string) error {
 		return err
 	}
 	w.threadMsg = msgID
-	if _, err := w.drainHostItems(1); err != nil {
+	items, err := w.drainHostItems(1)
+	if err != nil {
 		return err
 	}
+	w.threadItemID = items[0].Item.Item
 	w.receivedPush = nil
 	return w.sendJump("owner", w.threadMsg, true)
 }
@@ -570,21 +573,9 @@ func (w *homeRoundsWorld) checkDirectJump(aiName string) error {
 		return err
 	}
 	got := items[0].Item
-	got.Item = 0
-	want := proto.Item{AI: proto.ID(w.members[aiName]), Why: "mention", Msg: proto.ID(w.directMsg), Jump: true}
+	want := proto.Item{Item: w.firstItemID, AI: proto.ID(w.members[aiName]), Why: "mention", Msg: proto.ID(w.directMsg), Jump: true}
 	if got != want {
 		return fmt.Errorf("jump item = %+v, want %+v", got, want)
-	}
-	return w.assertRetired(w.firstItemID)
-}
-
-func (w *homeRoundsWorld) assertRetired(id int64) error {
-	var count int
-	err := w.db.Write(func(tx *store.Tx) error {
-		return tx.QueryRow("SELECT count(*) FROM inbox WHERE id=?", id).Scan(&count)
-	})
-	if err != nil || count != 0 {
-		return fmt.Errorf("retired item %d still present (%d, %v)", id, count, err)
 	}
 	return nil
 }
@@ -602,8 +593,7 @@ func (w *homeRoundsWorld) checkThreadJump(aiName string) error {
 		return err
 	}
 	got := items[0].Item
-	got.Item = 0
-	want := proto.Item{AI: proto.ID(w.members[aiName]), Why: "mention", Task: proto.ID(w.taskID), Msg: proto.ID(w.threadMsg), Jump: true}
+	want := proto.Item{Item: w.threadItemID, AI: proto.ID(w.members[aiName]), Why: "mention", Task: proto.ID(w.taskID), Msg: proto.ID(w.threadMsg), Jump: true}
 	if got != want {
 		return fmt.Errorf("thread jump item = %+v, want %+v", got, want)
 	}

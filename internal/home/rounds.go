@@ -35,8 +35,7 @@ func rndWrap(key string, f Func) Func {
 }
 
 // rndJump implements the jump command (commands.md 1.4, R-72): by the person
-// who wrote msg, it retires every unacknowledged mention item that msg
-// produced and queues its replacement with Jump set.
+// who wrote msg, every unacknowledged mention item that msg produced jumps.
 func rndJump(_ *State, c Command) (Result, *Refusal) {
 	if c.Who.AI != "" {
 		return Result{}, &Refusal{"forbidden", "only a person jumps the queue"}
@@ -52,18 +51,17 @@ func rndJump(_ *State, c Command) (Result, *Refusal) {
 	if target.By != c.Who.Human {
 		return Result{}, &Refusal{"forbidden", "only the author of the message jumps the queue"}
 	}
-	return rndRequeueJump(c.Disk, target.ID)
+	return rndJumpItems(c.Disk, target.ID)
 }
 
-func rndRequeueJump(d Disk, msg string) (Result, *Refusal) {
+func rndJumpItems(d Disk, msg string) (Result, *Refusal) {
 	var res Result
 	for _, q := range d.Queued() {
 		if q.Why == postMentionWhy && postTaskID(q.Msg) == msg {
-			res.Items = append(res.Items, Item{AI: q.AI, Why: postMentionWhy, Task: postTaskID(q.Task), Msg: msg, Jump: true})
-			res.Retire = append(res.Retire, q.ID)
+			res.Jump = append(res.Jump, q.ID)
 		}
 	}
-	if res.Items == nil {
+	if res.Jump == nil {
 		return Result{}, &Refusal{"conflict", "no unacknowledged item of that message is queued"}
 	}
 	return res, nil

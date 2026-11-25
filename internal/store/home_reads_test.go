@@ -149,8 +149,8 @@ func TestHomeReadsWhatIsOnDiskOnly(t *testing.T) {
 }
 
 // The queue of a group is read oldest first with the items that are held
-// back, and an item is retired by its number in its own group only.
-func TestHomeReadsAndRetiresTheQueue(t *testing.T) {
+// back, and an item jumps and is retired by its number in its own group only.
+func TestHomeReadsJumpsAndRetiresTheQueue(t *testing.T) {
 	s := openDB(t, ":memory:")
 	task := "task"
 	held := Item{Group: "g", AI: "ai", Host: "host", Why: "review", Task: &task, NotBefore: 50, Created: 10}
@@ -173,6 +173,16 @@ func TestHomeReadsAndRetiresTheQueue(t *testing.T) {
 	}
 	equal(t, queued("g"), []Item{held, plain})
 	equal(t, queued("none"), []Item{})
+
+	jump := func(group string, id int64) { check(t, s.Write(func(tx *Tx) error { return tx.Jump(group, id) })) }
+	jump("b", 1)
+	jump("g", 2)
+	jump("g", 9)
+	equal(t, queued("g"), []Item{held, plain})
+	equal(t, string(queued("b")[0].Env), `{"p":"item 2","k":"home","s":"sig"}`)
+	jump("g", 1)
+	held.Env, held.NotBefore = json.RawMessage(`{"p":"item 1","k":"home","s":"sig","jump":true}`), 0
+	equal(t, queued("g"), []Item{held, plain})
 
 	retire := func(group string, id int64) { check(t, s.Write(func(tx *Tx) error { return tx.Retire(group, id) })) }
 	retire("b", 1)
@@ -241,6 +251,7 @@ func TestHomeReadsFail(t *testing.T) {
 	})
 	failed(func(tx *Tx) error { return tx.RaiseNum("g", 1) })
 	failed(func(tx *Tx) error { return tx.Retire("g", 1) })
+	failed(func(tx *Tx) error { return tx.Jump("g", 1) })
 }
 
 func TestTypedNotesAndUniqueIndex(t *testing.T) {

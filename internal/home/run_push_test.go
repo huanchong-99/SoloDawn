@@ -171,7 +171,7 @@ func runWake(s *home.State, c home.Command) (home.Result, *home.Refusal) {
 	if refusal := c.Decode(&p); refusal != nil {
 		return home.Result{}, refusal
 	}
-	item := home.Item{AI: aiID, Why: p.Why, Task: "t1", Msg: string(c.Nonce), Commit: "9f2c1ab", PR: 7, Jump: true, Code: "c", Detail: "d"}
+	item := home.Item{AI: aiID, Why: p.Why, Task: "t1", Msg: string(c.Nonce), Commit: "9f2c1ab", PR: 7, Code: "c", Detail: "d"}
 	if p.Hold != 0 {
 		item.NotBefore = c.Now + p.Hold
 	}
@@ -203,7 +203,7 @@ func TestRunQueuesAndSendsInboxItems(t *testing.T) {
 		n := int64(len(items) + 1)
 		items[n] = proto.Item{
 			Item: n, AI: proto.ID(aiID), Why: "mention", Task: "t1", Msg: proto.ID(runID(w.nonce.Load())),
-			Commit: "9f2c1ab", PR: 7, Jump: true, Code: "c", Detail: "d",
+			Commit: "9f2c1ab", PR: 7, Code: "c", Detail: "d",
 		}
 		return inbox(seq, n)
 	}
@@ -645,11 +645,11 @@ func TestRunAResultThatHoldsAnythingIsCommitted(t *testing.T) {
 	tables := runTables()
 	var hooks runRecord
 	tables.After.Add("seen", func(s *home.State, res home.Result) {
-		hooks.add("%d %d %d %d %v", len(res.Rows), len(res.Items), len(res.Retire), len(res.Writes), res.GroupsChanged)
+		hooks.add("%d %d %d %d %d %v", len(res.Rows), len(res.Items), len(res.Retire), len(res.Jump), len(res.Writes), res.GroupsChanged)
 	})
 	results := map[string]home.Result{
 		"nothing": {}, "an item": {Items: []home.Item{{AI: aiID, Why: "notice"}}}, "a retirement": {Retire: []int64{9}},
-		"a write": {Writes: []home.Write{setting{"k", "v"}}}, "the groups": {GroupsChanged: true},
+		"a jump": {Jump: []int64{9}}, "a write": {Writes: []home.Write{setting{"k", "v"}}}, "the groups": {GroupsChanged: true},
 	}
 	tables.Commands["jump"] = func(s *home.State, c home.Command) (home.Result, *home.Refusal) {
 		var p struct {
@@ -659,12 +659,12 @@ func TestRunAResultThatHoldsAnythingIsCommitted(t *testing.T) {
 		return results[p.What], nil
 	}
 	w, p := runFounded(t, tables)
-	for _, what := range []string{"nothing", "an item", "a retirement", "a write"} {
+	for _, what := range []string{"nothing", "an item", "a retirement", "a jump", "a write"} {
 		p.does(groupID, "jump", `,"what":"`+what+`"`)
 	}
 	p.does(groupID, "jump", `,"what":"the groups"`)
 	p.gets(runGroupsFrame(proto.GroupSummary{Group: groupID, Name: "Website", Seq: 3}))
-	equal(t, hooks.all(), []string{"3 0 0 0 true", "0 1 0 0 false", "0 0 1 0 false", "0 0 0 1 false", "0 0 0 0 true"})
+	equal(t, hooks.all(), []string{"3 0 0 0 0 true", "0 1 0 0 0 false", "0 0 1 0 0 false", "0 0 0 1 0 false", "0 0 0 0 1 false", "0 0 0 0 0 true"})
 	equal(t, runQuery[string](t, w.db, "SELECT value FROM setting WHERE key='k'"), "v")
 	equal(t, runQuery[int](t, w.db, "SELECT count(*) FROM inbox"), 1)
 }

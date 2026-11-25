@@ -40,7 +40,6 @@ func inboxSeal(it Item, id int64) (json.RawMessage, error) {
 		Msg:    proto.ID(it.Msg),
 		Commit: it.Commit,
 		PR:     it.PR,
-		Jump:   proto.True(it.Jump),
 		Code:   it.Code,
 		Detail: it.Detail,
 	})

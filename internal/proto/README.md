@@ -160,7 +160,8 @@ the type does not name, not with `Decode`.
   `MemberSet`, `MemberJoinedBody` and `MemberRemovedBody`, `HomeAdd` (`home.add`,
   populating `host.info.homes` with `home`), `ConfirmBody` and `ConfirmSigned` with
   card states (`pending`, `confirmed`, `denied`, `expired`), `call` state `denied`
-  (`TimedState`), `"confirm"` in `PushOn.On`, `Reminder.Kind` and `TaskWait.Kind`, and
+  (`TimedState`), `"confirm"` in `PushOn.On`, `Reminder.Kind` and `TaskWait.Kind`, `Asked` on
+  `TaskRow`, and
   protocol step `v: 2` in `Hello` and `Welcome` (`step-3/knowledge.md` section 8).
 - Presets and knowledge-base documents (`step-3/knowledge.md`) add optional `type`
   (the field `NoteType`, JSON `type`) and `name` on `NoteRow` and `Note` (answered with `id` and `replaced`

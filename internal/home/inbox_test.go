@@ -33,7 +33,7 @@ func inboxCleanTask(id string, seq int64, title string) proto.TaskRow {
 func inboxGoldenToHome(want proto.Item) home.Item {
 	return home.Item{
 		AI: string(want.AI), Why: want.Why, Task: string(want.Task), Msg: string(want.Msg),
-		Commit: want.Commit, PR: want.PR, Jump: bool(want.Jump), Code: want.Code, Detail: want.Detail,
+		Commit: want.Commit, PR: want.PR, Code: want.Code, Detail: want.Detail,
 	}
 }
 
@@ -67,7 +67,11 @@ func inboxCheckGolden(t *testing.T, name string) {
 	tables.Commands["jump"] = runFixed(func(s *home.State, c home.Command) home.Result {
 		member := runAI(0)
 		member.ID = string(want.AI)
-		return home.Result{Rows: []home.Row{home.RowOf(member)}, Items: []home.Item{inboxGoldenToHome(want)}}
+		res := home.Result{Rows: []home.Row{home.RowOf(member)}, Items: []home.Item{inboxGoldenToHome(want)}}
+		if want.Jump {
+			res.Jump = []int64{want.Item}
+		}
+		return res
 	})
 	w, p := runFounded(t, tables)
 	runExec(t, w.db, "INSERT INTO sqlite_sequence(name, seq) VALUES('inbox', ?)", want.Item-1)

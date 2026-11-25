@@ -436,7 +436,7 @@ func TestTaskCmdAssignTransitionsAndEffects(t *testing.T) {
 		equal(t, card.Re, &task.Brief)
 		equal(t, card.Body, briefRaw(t, proto.ConfirmBody{What: "direct", AI: tskC, To: []string{browser.ID()}}))
 		want := task
-		want.Seq, want.Reviewer = 11, tskC
+		want.Seq, want.Reviewer, want.Asked = 11, tskC, []string{tskC}
 		want.Wait = &proto.TaskWait{Kind: "confirm", Msg: card.ID, Who: []string{browser.ID()}, Since: clock}
 		equal(t, res.Rows[0].Value(), want)
 	})

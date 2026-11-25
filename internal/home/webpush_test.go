@@ -411,9 +411,25 @@ func wpushReminderFixtures(t *testing.T, ownerMem, secretCmd, secretText string)
 			Body: briefRaw(t, proto.LoginInvalidBody{SystemCode: proto.SystemCode{Code: "login_invalid"}, AI: wpushSecMem, Detail: &secretText}),
 		}),
 	}
+	thread := wpushTaskID
+	rows = append(rows,
+		home.RowOf(proto.MsgRow{
+			RowHeader: proto.RowHeader{Type: "msg", ID: id(30)}, Group: groupID, Thread: &thread, By: "system",
+			Kind: "system", Mentions: []string{ownerMem},
+			Body: briefRaw(t, proto.LoginInvalidBody{SystemCode: proto.SystemCode{Code: "login_invalid"}, AI: wpushAIMem}),
+		}),
+		home.RowOf(proto.MsgRow{
+			RowHeader: proto.RowHeader{Type: "msg", ID: id(31)}, Group: groupID, Thread: &thread, Main: true, By: "system",
+			Kind: "confirm", Text: secretText,
+			Body:  briefRaw(t, proto.ConfirmBody{What: "direct", AI: wpushSecMem, To: []string{wpushBrowserOne.ID()}}),
+			State: &proto.CardState{Status: "pending"},
+		}),
+	)
 	want := map[proto.ID]proto.Reminder{
-		proto.ID(id(28)): {Group: proto.ID(groupID), Msg: proto.ID(id(28)), GroupName: grpName, Kind: "mention", Who: "Codex", Title: "Ship encrypted Web Push reminders"},
-		proto.ID(id(29)): {Group: proto.ID(groupID), Msg: proto.ID(id(29)), GroupName: grpName, Kind: "mention", Who: "Dawn"},
+		proto.ID(thread): {Group: proto.ID(groupID), Msg: proto.ID(thread), GroupName: grpName, Kind: "mention", Who: "Codex", Code: "login_invalid"},
+		proto.ID(id(31)): {Group: proto.ID(groupID), Msg: proto.ID(id(31)), GroupName: grpName, Kind: "confirm", Who: "Dawn"},
+		proto.ID(id(28)): {Group: proto.ID(groupID), Msg: proto.ID(id(28)), GroupName: grpName, Kind: "mention", Who: "Codex", Title: "Ship encrypted Web Push reminders", Code: "task_failed"},
+		proto.ID(id(29)): {Group: proto.ID(groupID), Msg: proto.ID(id(29)), GroupName: grpName, Kind: "mention", Who: "Dawn", Code: "login_invalid"},
 		proto.ID(id(27)): {Group: proto.ID(groupID), Msg: proto.ID(id(27)), GroupName: grpName, Kind: "confirm", Who: "Codex"},
 		proto.ID(id(20)): {Group: proto.ID(groupID), Msg: proto.ID(id(20)), GroupName: grpName, Kind: "approval", Who: "Codex", Title: strings.Repeat("界", 80)},
 		proto.ID(id(21)): {Group: proto.ID(groupID), Msg: proto.ID(id(21)), GroupName: grpName, Kind: "approval", Who: "Codex"},
@@ -474,6 +490,9 @@ func wpushCheckPlain(t *testing.T, plain []byte, secretCmd, secretText string, w
 	}
 	if exp.Title == "" {
 		wpushNoSubstrings(t, plain, `"title"`)
+	}
+	if exp.Code == "" {
+		wpushNoSubstrings(t, plain, `"code"`)
 	}
 	delete(want, got.Msg)
 }

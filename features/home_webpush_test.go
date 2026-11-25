@@ -113,7 +113,7 @@ func homeWebPushSteps(sc *godog.ScenarioContext) {
 	sc.Step(`^the push endpoint of (the first browser|the second browser) receives (\d+) (?:encrypted )?notifications?$`, w.checkCount)
 	sc.Step(`^the push endpoint of (the first browser|the second browser) receives no further notifications$`, w.checkNoMore)
 	sc.Step(`^the wire bytes received by the push endpoint contain none of "([^"]*)", "([^"]*)", "([^"]*)" or "([^"]*)"$`, w.checkWireOpaque)
-	sc.Step(`^decrypted by the first browser, the reminder is for group "([^"]*)", kind "([^"]*)", who "([^"]*)" and title "([^"]*)", with none of "([^"]*)"(?: or "([^"]*)")?$`, w.checkDecrypted)
+	sc.Step(`^decrypted by the first browser, the reminder is for group "([^"]*)", kind "([^"]*)", who "([^"]*)" and title "([^"]*)"(?: and code "([^"]*)")?, with none of "([^"]*)"(?: or "([^"]*)")?$`, w.checkDecrypted)
 	sc.Step(`^the second browser creates the group "([^"]*)" on the same home with "([^"]*)"$`, w.createGroup)
 	sc.Step(`^the home restarts and loads its push subscriptions while only the owner's node reconnects$`, func() error {
 		return w.restart(cleanup)
@@ -446,7 +446,7 @@ func (w *homeWebPushWorld) checkWireOpaque(a, b, c, d string) error {
 	return nil
 }
 
-func (w *homeWebPushWorld) checkDecrypted(groupName, kind, who, title, leakOne, leakTwo string) error {
+func (w *homeWebPushWorld) checkDecrypted(groupName, kind, who, title, code, leakOne, leakTwo string) error {
 	got := w.browsers["the first browser"].count()
 	if len(got) == 0 {
 		return fmt.Errorf("no notification received")
@@ -469,6 +469,7 @@ func (w *homeWebPushWorld) checkDecrypted(groupName, kind, who, title, leakOne, 
 		Kind:      kind,
 		Who:       who,
 		Title:     title,
+		Code:      code,
 	}
 	if rem != want {
 		return fmt.Errorf("got reminder %+v; want %+v", rem, want)

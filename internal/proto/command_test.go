@@ -195,7 +195,7 @@ func TestOtherHomeCommandGoldens(t *testing.T) {
 		[]string{"mention", "approval", "decision", "brief", "confirm", "done"}}
 	golden(t, "push-on", on)
 	golden(t, "push-off", PushOff{command("push", "push off"), true})
-	golden(t, "push-reminder", Reminder{ID(group), ID(id("approval")), "Website", "approval", "Codex", "Time the path change in a browser."})
+	golden(t, "push-reminder", Reminder{ID(group), ID(id("approval")), "Website", "approval", "Codex", "Time the path change in a browser.", ""})
 	golden(t, "push-reminder-confirm", Reminder{Group: ID(group), Msg: ID(id("confirm")), GroupName: "Website", Kind: "confirm", Who: "Codex"})
 }
 
