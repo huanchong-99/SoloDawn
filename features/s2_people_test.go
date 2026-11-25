@@ -736,6 +736,9 @@ func (w *s2PeopleWorld) expectNewcomerRefused() error {
 	if err := b.path.Write(ch.ctx, self); err != nil {
 		return err
 	}
+	if err := b.waitOnline(ch.ctx, ch.link.Home); err != nil { // the rendezvous has passed the pair message on
+		return err
+	}
 	if err := expectNeverOpens(ch.ctx, b, ch.link.Home); err != nil {
 		return err
 	}

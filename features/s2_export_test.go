@@ -331,6 +331,10 @@ func (w *s2ExportWorld) moveExport() error {
 	if !reflect.DeepEqual(held, w.rows) {
 		return fmt.Errorf("exported rows differ: P1 held %v, the file has %v", held, w.rows)
 	}
+	return w.checkMovedFile()
+}
+
+func (w *s2ExportWorld) checkMovedFile() error {
 	items, err := readS2SQLiteRows(w.c.Ctx, w.file,
 		"SELECT count(*) FROM inbox WHERE g=? AND ai=? AND msg=? AND why='mention'", w.g, w.qTeam, w.mention)
 	if err != nil || !reflect.DeepEqual(items, [][]any{{int64(1)}}) {
@@ -471,6 +475,17 @@ func (w *s2ExportWorld) followBrowserPeers() error {
 }
 
 func (w *s2ExportWorld) checkDeliveryAndNumber() error {
+	if err := w.deliverMention(); err != nil {
+		return err
+	}
+	if err := w.createTask(w.c.P2, "second task", 2); err != nil {
+		return err
+	}
+	_, err := w.resumedMentionTurn()
+	return err
+}
+
+func (w *s2ExportWorld) deliverMention() error {
 	c := w.c
 	items, err := readS2SQLiteRows(c.Ctx, s2ExportDB(c.P2),
 		"SELECT id FROM inbox WHERE g=? AND ai=? AND msg=? AND why='mention'", w.g, w.qTeam, w.mention)
@@ -486,14 +501,7 @@ func (w *s2ExportWorld) checkDeliveryAndNumber() error {
 	}); err != nil {
 		return err
 	}
-	if err := w.checkDelivery(); err != nil {
-		return err
-	}
-	if err := w.createTask(c.P2, "second task", 2); err != nil {
-		return err
-	}
-	_, err = w.resumedMentionTurn()
-	return err
+	return w.checkDelivery()
 }
 
 func (w *s2ExportWorld) resumedMentionTurn() (bool, error) {

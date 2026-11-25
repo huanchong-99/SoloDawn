@@ -6,6 +6,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-26 · bug · A member's node can follow a moved group more than 5 seconds after the import
+
+- Symptom: A9.27 asks that Q1 follows P2 within 5 seconds of the import. Q1 took 11.6 seconds with the import right after the export; with minutes between them it can take up to 70 seconds. Once connected, everything else of A9.27 holds.
+- Cause: Q1 gets `moved` when P1 announces its groups (`internal/host/home_moved.go:14`) and offers to P2 at once. P2 does not know Q1 before the import and drops the offer (`internal/peer/signal.go:130`, `unknown_device`), so Q1 waits 10 seconds for an answer (`internal/peer/unanswered.go:5-13`, `flows/connect.md` step 15) and then backs off 1, 2, 4 … 60 seconds. Nothing wakes it: a node dials a home with no presence channel (`internal/node/node.go:461`), and the import changes no presence, since P2 is online all the time. `export.md` section 3 step 4 ("clients retry as for any home that is down") and the 5 seconds of A9.27 do not agree. A browser follows by the same rules.
+- Status: open, needs a decision: reword A9.27 to the retry of `flows/connect.md` step 15, or give the import a way to wake the clients. The scenario "A member's node follows a moved group within 5 seconds (A9.27)" stays `@pending`; "Move a group to another node of its owner (A9.27)" runs with the 5 seconds on the two browser peers, and asserts that Q1 follows without them.
+
+### 2026-11-26 · bug · Removing a person does not close their connections
+
+- Symptom: after `member remove`, Q's browser and Q1 stay connected to P1 (A9.4: "close within 1 second and the next attempt is refused").
+- Cause: `peopleRemove` in `internal/home/cmd_people.go` only pushes `groups`; nothing closes the connections of devices that the home no longer knows.
+- Status: fixed by #399, not merged yet. The scenario "A removed member's connections close and are refused (A9.4)" stays `@pending` until then; it passes with #399 merged in (2 of 2 runs under `-race`). The rest of A9.4 is enabled.
+
+### 2026-11-26 · limitation · On a Mac with the Application Firewall, a UDP write can block one ICE agent for good
+
+- Symptom: on the development Mac, 4 of about 120 runs of A9.2 (five or six WebRTC connections between in-process peers each) failed: one connection exchanged offer, answer and candidates, then stayed silent until the other side reported ICE `failed` after 30 seconds (`timed out … waiting for ctl … saw 1: connection ended before it was ready`).
+- Cause: the goroutine dump of a failure shows the agent's task loop inside a UDP write that waits for the socket to become writable (`candidatepair.go:131` → `udp_mux.go:337` of pion ice v4.4.8, the binding response of a host candidate to a `127.0.0.1` address). pion writes on that loop with no deadline, so the agent answers no check on any pair, the relay included. The write blocks on this machine only, as far as known; the Application Firewall, which holds packets of unsigned binaries (2026-11-22 below), is the likely reason and was not proved.
+- Status: open, accepted for the local machine: CI decides. In the product the attempt is retired and offered again (`flows/connect.md` step 15).
+
 ### 2026-11-23 · deviation · An agent without a driver cannot join a group
 
 - Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
@@ -88,7 +106,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: A9.12 and five A9.42 cases (failing review, decision by P, decision by Q, secretary confirmation without Q on the allow list, and secretary confirmation with Q on it) each failed under `-race` in `Given the confirmation cast with Q`. The reply was `bad_request: the home has no such command`; decoding that refusal as a successful command reply reported `proto: a field that is always present is missing`.
 - Cause: the cast sends `invite` before it can admit Q (`features/s2_confirm_test.go:119`), and the home had no registered handler for it (`internal/home/check.go:109`).
-- Status: pending retest. A10.17 now exercises invitation and join; the label assertions were not rerun here.
+- Status: pending retest. #382 registered `invite`, and the cast admits Q with `JoinGroup` (`features/s2_cast_test.go`); the label assertions were not rerun here.
 
 ### 2026-11-22 · limitation · The A9.44 quiet-task fixture does not reach the timer
 
@@ -123,8 +141,8 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-22 · deviation · The Go export scenarios do not exercise browser UI or an OS timer
 
 - Symptom: A9.27 and A9.28 exercise browser peers at the protocol boundary, not the browser's own follow logic or the owner-only commands in group info. A9.28 takes successive copies without waiting for an OS timer at one-minute intervals.
-- Cause: `features/s2_export.feature:12,19,24` use the I2-0 Go cast and two invocations of the copy command. The product does not schedule copies (`planning/contracts/step-2/export.md:60-62`).
-- Status: open. The owner-only commands in the group info are covered by `web/e2e/s2.spec.ts` (A9.27); the browser's following of `moved` and the OS timer remain open.
+- Cause: the scenarios of `features/s2_export.feature` use the I2-0 Go cast and two invocations of the copy command. The product does not schedule copies (`planning/contracts/step-2/export.md:60-62`).
+- Status: open. Both scenarios run since 2026-11-26 and pass at the protocol boundary: Q's peer asks P1, gets `moved` and dials P2 itself, so they do not show the web client's two gaps (a group that left the list is not followed; a rejoin does not replace the old home). The owner-only commands in the group info are covered by `web/e2e/s2.spec.ts` (A9.27); the browser's following of `moved` and the OS timer remain open.
 
 ### 2026-11-22 · limitation · Task participation history is inferred from current fields
 
@@ -859,7 +877,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: a current node does not admit a browser through an invitation; it knows only protocol version 1.
 - Cause: W2-1 implements the browser exchange in `web/src/lib/join.ts`. The invitation and joining connection on the node are T2-1b, and the home commands are T2-1a. U2-1 supplies the join page and member controls.
-- Status: partly resolved. T2-1a (#309), T2-1b (#304) and W2-1 (#307) are merged, but they never registered a home handler for `invite` (`internal/home/cmd_people.go` registered only `join`; found 2026-11-25), so no group could admit a second person. #382 added the handler. Two fixture faults remain in the people scenarios (A9.2, A9.4 to A9.6 and the setups that join an AI): `features/helpers_test.go:600` starts the in-process home without `LoopConfig.Invite`, so the link of A9.2 is empty, and `JoinAI` in `features/s2_cast_test.go:845` sends `host.join` without the `home.add` that the web client sends after joining (`web/src/lib/join.ts:86`), so the host answers `home_unreachable`.
+- Status: resolved. T2-1a (#309), T2-1b (#304) and W2-1 (#307) are merged, but they never registered a home handler for `invite` (`internal/home/cmd_people.go` registered only `join`; found 2026-11-25), so no group could admit a second person. #382 added the handler. The two fixture faults that then remained are fixed with A9.1 to A9.6, A9.27 and A9.28 enabled: `peerNode.initCore` in `features/helpers_test.go` started the in-process home without `LoopConfig.Invite`, so the link of A9.2 was empty; and a person who joined in the cast of `features/s2_cast_test.go` sent no `home.add`, as the web client does (`web/src/lib/join.ts:86`), so the host answered `host.join` with `home_unreachable` (now `JoinGroup`).
 
 ### 2026-11-22 · bug · Codex treated every failed thread resume as a lost session
 
