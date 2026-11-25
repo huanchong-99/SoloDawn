@@ -56,7 +56,7 @@ jobs:
           - { name: node-misc, pkg: internal/node, own: '^(ne|nodetest|proc)' }
           - { name: rendezvous-limits-room, pkg: internal/rendezvous, own: '^(l|q|r)' }
           - { name: rendezvous-server-tls, pkg: internal/rendezvous, own: '^(s|t)' }
-          - { name: peer-ctl, pkg: internal/peer, own: '^ctl' }
+          - { name: peer-ctl, pkg: internal/peer, own: '^(a|ctl|d)' }
           - { name: peer-candidates-path, pkg: internal/peer, own: '^(ca|p|r)' }
           - { name: peer-signal-stream, pkg: internal/peer, own: '^[su]' }
           - { name: store, pkg: internal/store }
