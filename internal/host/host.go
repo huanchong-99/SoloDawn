@@ -401,7 +401,7 @@ func (h *Host) Push(home string, frame json.RawMessage) {
 
 // Surface holds what the host answers on the host surface
 // (contracts/datachannel.md section 7), by t: the t of a request or a push
-// ("audit", "pty.resize"), or the t of a host command's payload
+// ("pty.resize"), or the t of a host command's payload
 // ("takeover.start", contracts/commands.md section 2).
 //
 // node calls a handler only for a device of the owner, by: for a command,

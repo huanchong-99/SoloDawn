@@ -6,10 +6,6 @@ import "github.com/huanchong-99/SoloDawn/internal/store"
 const (
 	AuditDelivered = "delivered" // an inbox item was delivered
 	AuditRefused   = "refused"   // an inbox item was refused
-	AuditRequested = "requested" // an approval card was posted
-	AuditApproval  = "approval"  // an approval request was answered
-	AuditTakeover  = "takeover"
-	AuditHandback  = "handback"
 	AuditMerge     = "merge"
 	AuditSetting   = "setting"
 	AuditKilled    = "killed" // an idle CLI did not exit within 10 s of closing its input

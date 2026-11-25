@@ -115,6 +115,13 @@ Feature: External agents take and finish one item without a CLI driver
       | github | assignee |
       | github | reviewer |
 
+  Scenario: An external AI's progress appears in its task's thread (A10.22)
+    Given a project with external X and forge "none"
+    And a scripted stdio MCP client connects as X
+    When X takes the task of an external brief
+    And external MCP calls "post" with {"text":"Halfway there","kind":"progress"} and gets "ok"
+    Then X's "progress" post "Halfway there" appears in the external task's thread
+
   Scenario: A task started in a group run waits for that run to end (A10.22)
     Given an external acceptance project with X
     And a scripted stdio MCP client connects as X
@@ -203,7 +210,6 @@ Feature: External agents take and finish one item without a CLI driver
   Scenario: Presence expires when the external runner stops (A10.27)
     Then a connected external runner stays waiting until its 180 second presence interval expires
 
-  @pending
   Scenario: Offline work is held and removal revokes access (A10.27)
     Given an external acceptance project with X
     Then external member "X" has state "offline"

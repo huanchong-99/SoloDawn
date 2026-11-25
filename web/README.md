@@ -279,7 +279,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
   answers, and pushes.
 - **Mock connection.** `mockCtl(onpush)` in `src/lib/mock.ts` is a `Ctl` that answers from the
   files of `internal/proto/testdata`: `hello` with `welcome`; `sync` with the pushes `reset` and
-  `rows`, then `synced`; `fetch` with `fetched`; `host.info` and `audit` from the examples' node;
+  `rows`, then `synced`; `fetch` with `fetched`; `host.info` from the examples' node;
   every `cmd` with `ok`, a `group create` after the push `groups`. It knows the examples' one
   group. It is for development and tests only: import it dynamically behind
   `import.meta.env.DEV`, so that the build leaves it and the examples out. `vite.config.ts` names

@@ -340,8 +340,8 @@ func TestRunCountsTheItemsOfTheLastHour(t *testing.T) {
 		seen.add("%v", s.Wakes)
 		return home.Result{}
 	})
-	w, p := runFounded(t, tables)
-	host := w.attach(laptop)
+	w, _ := runFounded(t, tables)
+	p, host := w.attach(laptop), w.attach(laptop) // the items of a person's command would not count
 	w.loop.Inbox(host.conn)
 	p.does(groupID, "jump", `,"hold":0,"why":"mention"`)
 	host.next()

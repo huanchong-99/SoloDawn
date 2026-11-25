@@ -400,8 +400,20 @@ func wpushReminderFixtures(t *testing.T, ownerMem, secretCmd, secretText string)
 			Body:  briefRaw(t, proto.ApprovalBody{Task: wpushTaskID, AI: wpushAIMem, Tool: "Bash", Command: secretCmd, Why: &emptyWhy, Category: "command", Approvers: []string{wpushBrowserOne.ID()}}),
 			State: &proto.CardState{Status: "pending"},
 		}),
+		home.RowOf(proto.MsgRow{
+			RowHeader: proto.RowHeader{Type: "msg", ID: id(28)}, Group: groupID, By: "system",
+			Kind: "system", Mentions: []string{ownerMem},
+			Body: briefRaw(t, proto.TaskFailedBody{SystemCode: proto.SystemCode{Code: "task_failed"}, Task: wpushTaskID, Reason: "failures"}),
+		}),
+		home.RowOf(proto.MsgRow{
+			RowHeader: proto.RowHeader{Type: "msg", ID: id(29)}, Group: groupID, By: "system",
+			Kind: "system", Mentions: []string{ownerMem},
+			Body: briefRaw(t, proto.LoginInvalidBody{SystemCode: proto.SystemCode{Code: "login_invalid"}, AI: wpushSecMem, Detail: &secretText}),
+		}),
 	}
 	want := map[proto.ID]proto.Reminder{
+		proto.ID(id(28)): {Group: proto.ID(groupID), Msg: proto.ID(id(28)), GroupName: grpName, Kind: "mention", Who: "Codex", Title: "Ship encrypted Web Push reminders"},
+		proto.ID(id(29)): {Group: proto.ID(groupID), Msg: proto.ID(id(29)), GroupName: grpName, Kind: "mention", Who: "Dawn"},
 		proto.ID(id(27)): {Group: proto.ID(groupID), Msg: proto.ID(id(27)), GroupName: grpName, Kind: "confirm", Who: "Codex"},
 		proto.ID(id(20)): {Group: proto.ID(groupID), Msg: proto.ID(id(20)), GroupName: grpName, Kind: "approval", Who: "Codex", Title: strings.Repeat("界", 80)},
 		proto.ID(id(21)): {Group: proto.ID(groupID), Msg: proto.ID(id(21)), GroupName: grpName, Kind: "approval", Who: "Codex"},

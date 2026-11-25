@@ -26,6 +26,7 @@ Feature: Host talking and group state MCP tools
     Then the tool result JSON contains '"task":"T-12"' and '"assignee":"Claude Code"'
     When the AI calls "read_thread" with '{}'
     Then the tool result JSON contains '"by":"Codex"' and '"text":"Looks good."'
+    And the tool result JSON contains '"kind":"review"' and '"text":"Review round 1 on commit 9f2c1ab: score 86/90\n- No test"'
     When the AI calls "note_put" with '{"text":"Always check path state."}'
     Then the tool succeeds with an id
     When the AI calls "note_list" with '{"task":"T-12"}'

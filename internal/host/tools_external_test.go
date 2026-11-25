@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"reflect"
@@ -101,6 +102,79 @@ func TestExternalCallerOfOpenRun(t *testing.T) {
 	}
 	if got := neededKinds(c, func(c Caller) bool { return c.Kind != GroupSession }); !slices.Equal(got, []string{"task", "review"}) {
 		t.Fatalf("kinds = %v", got)
+	}
+}
+
+// composeExternalTurn makes every composed items turn be turn.
+func composeExternalTurn(turn Turn) {
+	compose := Compose
+	Compose = func(h *Host, s Session, kind TurnKind, items []json.RawMessage) (string, Turn, error) {
+		text, composed, err := compose(h, s, kind, items)
+		if kind == ItemsTurn {
+			composed = turn
+		}
+		return text, composed, err
+	}
+}
+
+// externalPlace calls a tool as testAI1 and returns the thread of the post it
+// sent home with the depth of a call, or the error.
+func externalPlace(t *testing.T, r *deliverRig, name, args string) string {
+	t.Helper()
+	c, _ := externalCaller(r.h, testAI1)
+	if _, err := Tools[name].Call(t.Context(), r.h, c, json.RawMessage(args)); err != nil {
+		return err.Error()
+	}
+	var post proto.Post[proto.CallBody]
+	cmds := r.home.cmdPayloads()
+	json.Unmarshal([]byte(cmds[len(cmds)-1]), &post)
+	thread := proto.ID("main")
+	if post.Thread != nil {
+		thread = *post.Thread
+	}
+	return fmt.Sprintf("%s %s %d", post.Kind, thread, post.Body.Depth)
+}
+
+// externalPlaces is where each call of an external AI writes.
+func externalPlaces(t *testing.T, r *deliverRig) []string {
+	t.Helper()
+	return []string{
+		externalPlace(t, r, "post", `{"text":"x"}`),
+		externalPlace(t, r, "post", `{"text":"x","kind":"progress"}`),
+		externalPlace(t, r, "post", `{"text":"x","where":"thread"}`),
+		externalPlace(t, r, "post", `{"text":"x","where":"main"}`),
+		externalPlace(t, r, "ask", `{"to":"Codex","text":"x","wait":false}`),
+	}
+}
+
+func TestExternalCallsGoToThePlaceOfTheRun(t *testing.T) {
+	noThread := "bad_request: no task thread for where=thread"
+	mention := proto.Item{Item: 5, Why: "mention", Msg: testMsg1}
+	for _, tc := range []struct {
+		name string
+		item proto.Item
+		turn Turn
+		want []string
+	}{
+		{"task run", proto.Item{Item: 5, Why: "assign", Task: testTask1}, Turn{Kind: ItemsTurn, Thread: testTask1},
+			[]string{"text " + testTask1 + " 0", "progress " + testTask1 + " 0", "text " + testTask1 + " 0", "text main 0", "call " + testTask1 + " 1"}},
+		{"group run from a thread", mention, Turn{Kind: ItemsTurn, Thread: testTask2, Depth: 3},
+			[]string{"text " + testTask2 + " 0", "progress " + testTask2 + " 0", "text " + testTask2 + " 0", "text main 0", "call " + testTask2 + " 4"}},
+		{"group run from the main line", mention, Turn{Kind: ItemsTurn, Depth: 1},
+			[]string{"text main 0", "progress main 0", noThread, "text main 0", "call main 2"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newExternalRig(t, true)
+			initTestOriginAndGroupRepo(t, r, "none")
+			putExternalMember(r.h, r.hostKey.ID(), testAI1)
+			r.putTask(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: testTask1, Seq: 5}, Group: testGroup1, Num: 7, Title: "T", Slug: "t", Origin: "brief", State: "active", Step: "work", Assignee: testAI1})
+			composeExternalTurn(tc.turn)
+			r.pushExternalItem(tc.item)
+			r.h.ExternalTake(testGroup1, testAI1)
+			assertEqual(t, externalPlaces(t, r), tc.want)
+			r.h.ExternalDone(testGroup1, testAI1, 5, "")
+			assertEqual(t, externalPlaces(t, r), []string{"text main 0", "progress main 0", noThread, "text main 0", "call main 1"})
+		})
 	}
 }
 

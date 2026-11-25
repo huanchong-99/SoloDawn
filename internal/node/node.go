@@ -233,7 +233,7 @@ func (n *nodeRuntime) stepServices() error {
 	})
 	loop, err := home.StartLoop(home.LoopConfig{
 		Store: n.db, Home: n.key.ID(), OwnerFn: logs.Owner,
-		Logs: logs.Log, Tables: home.NodeTables(), Invite: n.pairer, Every: time.Second,
+		Logs: logs.Log, Forget: logs.dvlForget, Tables: home.NodeTables(), Invite: n.pairer, Every: time.Second,
 	})
 	if err != nil {
 		return err
@@ -257,7 +257,7 @@ func (n *nodeRuntime) wireServices() {
 	n.sessions = NewSessions(SessionConfig{
 		ID: n.key.ID(), Version: Version, Store: n.db, Logs: n.logs,
 		Home: n.loop, Host: n.host, Name: nameFn, Addrs: n.addrs,
-		OnAdopt: n.onAdopt, Spawn: n.spawn,
+		OnAdopt: n.onAdopt, Spawn: n.spawn, Known: n.knownPeer,
 	})
 	NewSurface(SurfaceConfig{
 		ID: n.key.ID(), Version: Version, Exe: n.exe, Store: n.db,
@@ -469,9 +469,15 @@ func (n *nodeRuntime) sharedPaths() []*peer.Path {
 }
 
 func (n *nodeRuntime) routesFor(device string) []peer.Route {
-	routes := slices.Clone(n.pairer.Routes(device))
+	routes := n.pairer.Routes(device)
 	for _, p := range n.sharedPaths() {
-		routes = append(routes, p.Route())
+		route := p.Route()
+		i := slices.IndexFunc(routes, func(r peer.Route) bool { return r.ID == route.ID })
+		if i < 0 {
+			routes = append(routes, route)
+		} else {
+			routes[i] = route
+		}
 	}
 	return routes
 }

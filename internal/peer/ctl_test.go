@@ -165,6 +165,20 @@ func TestPushesDeliveredBeforeAnswer(t *testing.T) {
 	eq(t, string(recv(t, reply)), fmt.Sprintf(`{"re":%d,"ok":true}`, q.ID))
 }
 
+// Finish lets everything sent arrive before the connection ends on both sides.
+func TestFinishEndsAfterWhatWasSent(t *testing.T) {
+	f := newPair(t)
+	n := f.open(t, 0)
+	push := map[string]string{"t": "push", "data": strings.Repeat("a", 60_000)}
+	for range cap(n.client.incoming) {
+		check(t, n.server.Send(push))
+	}
+	n.server.Finish()
+	waitQueued(t, n.client, cap(n.client.incoming))
+	recv(t, n.client.Done())
+	recv(t, n.server.Done())
+}
+
 func waitQueued(t *testing.T, c *Connection, want int) {
 	t.Helper()
 	poll(t, 4*time.Second, fmt.Sprintf("%d queued frames", want), func() string {

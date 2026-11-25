@@ -279,6 +279,8 @@ Branch: task/12-node-report-connection-path-changes (this folder is its worktree
 Goal: …
 Acceptance criteria:
 1. …
+In scope: …; …
+Out of scope: …; …
 Reviewer: Codex   Pass score: 90
 Notes of this group:
 - Path events use fields path, rtt_ms, since, limited.
@@ -315,6 +317,14 @@ Which fields do you need in the path event?
   also names the person who confirmed it or sent it back (`confirmed by
   "<name>"` or `sent back by "<name>"`); its authority comes from
   `msg.state.by`, by the rule above.
+- `In scope:` and `Out of scope:` are the brief's `scope.in` and `scope.out` as
+  the person confirmed them, in the task's first turn and in a review turn; an
+  empty list leaves its line out.
+- A message without a fixed text is given by what its body holds. A `brief`:
+  `Brief "<title>" (id <id>): <status>`, then `Goal:` to `Out of scope:` as
+  above, `Tasks:` and the numbered titles. A `decision` that is not decided:
+  `Decision (id <id>): <question>` and one line `- <id> (<label>): <effect>` per
+  option.
 - A task without a brief (`direct` or `takeover` origin) shows `Plan: <plan>`
   when `plan` is not empty, and `Reviewer: none` while no reviewer is named.
 - Text from other members is included verbatim below the header and never

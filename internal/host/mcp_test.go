@@ -945,3 +945,29 @@ func verifyShimPipeFallback(t *testing.T) {
 		t.Fatalf("pipe fallback: code %d, err %q", code, errBuf.String())
 	}
 }
+
+// Removing an external AI ends its open MCP connections; an item does not.
+func TestRemovalClosesExternalMCP(t *testing.T) {
+	r := newExternalRig(t, false)
+	client, server := net.Pipe()
+	defer client.Close()
+	served := make(chan error, 1) // single reader: this test
+	go func() { served <- r.h.ServeMCP(t.Context(), testAI1, bufio.NewReader(server), server) }()
+	client.SetDeadline(time.Now().Add(5 * time.Second))
+	dec := json.NewDecoder(client)
+	verifyDiscoverProbe(t, client, dec)
+	r.pushExternalItem(proto.Item{Item: 5, Why: "mention", Msg: testMsg1})
+	verifyDiscoverProbe(t, client, dec)
+	leaveGoneMember(r.h, testGroup1, testAI1)
+	if err := dec.Decode(new(any)); err != io.EOF {
+		t.Fatalf("the stream of a removed member = %v, want io.EOF", err)
+	}
+	if err := <-served; !errors.Is(err, context.Canceled) {
+		t.Fatalf("ServeMCP after removal = %v, want context.Canceled", err)
+	}
+	ctx, stop := context.WithCancel(t.Context())
+	r.h.untilRemoved(ctx, stop, aiGroupKey{group: testGroup1, member: testAI1})
+	if ctx.Err() == nil {
+		t.Fatal("a member that is gone already keeps its connection")
+	}
+}
