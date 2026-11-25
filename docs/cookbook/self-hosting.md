@@ -14,27 +14,41 @@ The program defends only itself against ordinary misuse (limits listed in [What 
 
 ## Prerequisites
 
-- A server with a public IP address, Linux with systemd, and root access. About 1 core and 512 MB of memory is enough for personal and small-team use (not measured).
+- A server that your devices can reach (with a public IP address for setups B and C below), Linux with systemd, and root access. Size it to your own use.
 - Two DNS names that both point to that server, for example `rv.example.org` (web client and signalling) and `turn.example.org` (relay over TLS). They must be different names. Add both A records, and both AAAA records if the server has IPv6.
-- Ports the server can open: TCP 443, UDP 3478, and UDP 20000 to 29999 (the relay). All three are needed for the relay; see [Ports](#ports).
-- A release binary of `solodawn` for the server (see [install.md](../../install.md)), checked against `SHA256SUMS`. Use the same release on the server and on every computer, because the server also hands out the web client that is built into the binary.
-- If you will not use automatic certificates: a certificate and key (PEM) that cover both names.
-- A decision on who may reach the server: only your own devices (recommended) or everyone. See [Protect it from the outside](#protect-it-from-the-outside).
+- Ports the server can open: TCP 443, UDP 3478, and UDP 20000 to 29999 (the relay). Which ones you open depends on your setup; see [Choose your setup](#choose-your-setup) and [Ports](#ports).
+- A release binary of `solodawn` for the server (see [install.md](../../install.md)), checked against `SHA256SUMS`; a binary built from source does not serve the web client or `/install.md`, which the onboarding prompt links. Use the same release on the server and on every computer, because the server also hands out the web client that is built into the binary.
+- With your own certificate (setups A and B): a certificate and key (PEM) that cover the names you use.
+- A name that you will keep. A node keeps the rendezvous address it was paired with, and version 1 has no command that changes it (see step 5), so choose a domain name, not an address, before you pair anything.
+
+## Choose your setup
+
+Choose before you start. The setup decides the flags in step 2, the ports and their sources in step 3, and which checks in step 6 apply.
+
+| Setup | Best for | Flags (step 2) | Ports to open (step 3), from where |
+| --- | --- | --- | --- |
+| **A. Everyone on one VPN** (Tailscale or WireGuard) | One person with several devices, a small team | `--no-relay`, and `--cert` and `--key` | TCP 443 and UDP 3478, from the VPN only |
+| **B. Public server, only your addresses allowed** | Fixed home or office addresses | `--cert` and `--key` | TCP 443, UDP 3478 and UDP 20000-29999, from your addresses only |
+| **C. Public server, everyone allowed** | Running a service for others | none (automatic certificates); add the measures in [Additional measures for setup C](#additional-measures-for-setup-c) | TCP 443, UDP 3478 and UDP 20000-29999, from everywhere |
+
+Recommended: **A**. Home and mobile addresses change, which makes **B** a chore. In **A** you need only one DNS name (no relay name) and no UDP range; devices in a VPN are expected to reach each other directly, which the program does not itself ensure. Browsers only run the page's cryptography on an HTTPS page or on `localhost`, so a rendezvous inside a VPN still needs a certificate and a name: with `--cert` and `--key` (for Tailscale, `tailscale cert` makes one for a `*.ts.net` name), or with a private ACME server (`--acme-directory`). The exact steps of these options with SoloDawn have not been tried. Automatic certificates need TCP 443 open to the whole internet, which is why only setup C uses them.
 
 ## Steps
 
 ### 1. Install the binary
 
-Download the release binary and `SHA256SUMS` to an empty directory and check the digest as [install.md](../../install.md) describes, then:
+Download the release binary for the server (`linux_amd64` or `linux_arm64`) and `SHA256SUMS` to an empty directory and run only the checksum part of [install.md](../../install.md)'s "Verify and install" block (not its `install` line, which targets a user's `~/.local/bin`), then:
 
 ```sh
-sudo install -m 755 solodawn_<version>_linux_amd64 /usr/local/bin/solodawn
+sudo install -m 755 solodawn_<version>_linux_<arch> /usr/local/bin/solodawn
 solodawn version
 ```
 
 `solodawn version` must print the release tag you downloaded.
 
 ### 2. Create the service account and the unit
+
+The unit below is for **setup C**. For A or B, change `ExecStart` as shown under it before you start the service.
 
 ```sh
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin solodawn
@@ -61,24 +75,24 @@ EOF
 
 Replace the two names. Why these lines: the program writes certificates under the user's cache directory, which `XDG_CACHE_HOME=/var/cache` and `CacheDirectory=solodawn` turn into `/var/cache/solodawn/certs`, owned by the service account. `AmbientCapabilities` lets a non-root account listen on port 443. The program always ends with an error message (it never exits cleanly), so `Restart=always` is right.
 
-Other setups:
+Setups A and B:
 
-- **Your own certificate** (needed when port 443 is not open to the whole internet, see step 3): add `--cert /etc/solodawn/fullchain.pem --key /etc/solodawn/privkey.pem` to `ExecStart`. The certificate must cover both names, and the `solodawn` account must be able to read both files.
-- **No relay** (all devices are on one VPN, where devices reach each other directly): replace `--turn-domain ...` with `--no-relay`. The server then offers signalling and STUN only, and you need no UDP range.
+- **Your own certificate** (setups A and B, where port 443 is not open to the whole internet): add `--cert /etc/solodawn/fullchain.pem --key /etc/solodawn/privkey.pem` to `ExecStart`. The certificate must cover the names you use (both names with the relay), and the `solodawn` account must be able to read both files. The program reads them once at start: after you renew them, run `sudo systemctl restart solodawn-rendezvous`, which drops relayed connections.
+- **No relay** (setup A): replace `--turn-domain ...` with `--no-relay`. The server then offers signalling and STUN only, and you need no UDP range.
 - **A private ACME server** (such as a step-ca of your own): add `--acme-directory <url>` and, if its HTTPS certificate is not publicly trusted, `--acme-ca <pem file>`.
 
 ### 3. Open the ports
 
-On the server's firewall and in the cloud security group, allow in:
+On the server's firewall and in the cloud security group, allow in only what your setup needs, from the sources your setup allows:
 
-| Protocol and port | For | Source |
+| Protocol and port | For | Setups |
 | --- | --- | --- |
-| TCP 443 | web client, signalling, relay over TLS | your devices (see below) |
-| UDP 3478 | STUN, relay over UDP | your devices |
-| UDP 20000-29999 | relay sockets | your devices |
+| TCP 443 | web client, signalling, relay over TLS | A, B, C |
+| UDP 3478 | STUN, relay over UDP | A, B, C |
+| UDP 20000-29999 | relay sockets | B, C |
 | TCP 22 | your administration | your own address only |
 
-With automatic certificates, Let's Encrypt must also reach TCP 443 from its own servers when it issues and renews. Those addresses are not fixed. So with automatic certificates, TCP 443 must be open to the whole internet. If you want 443 limited to your own addresses, use `--cert` and `--key` instead (and renew the certificate yourself). The ACME check is made over TLS on port 443 (it adds the `acme-tls/1` protocol), not over port 80, so port 80 is not needed.
+The source is the VPN (A), your own addresses (B) or everyone (C). With automatic certificates, Let's Encrypt must also reach TCP 443 from its own servers when it issues and renews. Those addresses are not fixed. So with automatic certificates, TCP 443 must be open to the whole internet, which is why setups A and B use `--cert` and `--key` instead (and you renew the certificate yourself). The ACME check is made over TLS on port 443 (it adds the `acme-tls/1` protocol), not over port 80, so port 80 is not needed.
 
 ### 4. Start it
 
@@ -101,25 +115,28 @@ By starting it with automatic certificates you accept the certificate authority'
   solodawn pair <secret> --name "<label>" --rendezvous wss://rv.example.org/rv
   ```
 
-  The node saves that address as its list of rendezvous servers (the new address replaces any earlier list) and uses it from then on. A node has no built-in address, so a node only knows a server because pairing gave it one. The prompt from your own page contains this command already.
+  `<secret>` is the pairing code that the onboarding page of your server shows (valid for 10 minutes). The prompt on that page gives the code and the address `--rendezvous wss://rv.example.org/rv`; it is not the whole command. The node saves that address as its list of rendezvous servers and uses it from then on. A node has no built-in address, so a node only knows a server because pairing gave it one.
+
+A paired node keeps the addresses it was paired with. Version 1 has no command that changes them, and pairing again with `--rendezvous` is refused once the node has an owner. So the address you pair with is the one the node keeps: choose a name that you will keep (a domain, not an address) before you pair, and keep it pointing at the server.
 
 All devices that should find each other must use the same rendezvous.
 
 ### 6. Check that it works
 
-Run these from another machine (replace the names):
+Run these from your own computer, not on the server and not by the assistant working on it (replace the names). In setup A run them from a device inside the VPN, in setup B from an allowed address.
 
 ```sh
 # 1. The web client loads and the certificate is valid (a release binary also serves /install.md).
 curl -sS -o /dev/null -w '%{http_code}\n' https://rv.example.org/            # 200
 
-# 2. The relay name has a certificate too (TURN over TLS answers on the same port).
+# 2. The relay name has a certificate too (TURN over TLS answers on the same port). Skip it with --no-relay.
 openssl s_client -connect turn.example.org:443 -servername turn.example.org </dev/null 2>/dev/null | openssl x509 -noout -subject -dates
 
 # 3. Signalling accepts a WebSocket and sends a challenge.
 curl -sS --http1.1 -i --max-time 3 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
   -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' https://rv.example.org/rv
 # HTTP/1.1 101 Switching Protocols, then a frame holding {"t":"challenge","nonce":"..."}
+# curl then waits for the closing frame and ends with exit 28 after 3 seconds; that is expected.
 
 # 4. STUN answers on UDP 3478 (a binding response starts with 0101).
 python3 - <<'EOF'
@@ -130,7 +147,17 @@ print(s.recvfrom(512)[0][:2].hex())
 EOF
 ```
 
-The last proof is a real pairing: `solodawn pair ... --rendezvous wss://rv.example.org/rv` ends without an error once the node has reached the server. The relay itself is proved only by two devices on networks that block direct paths; see [the real-machine checklist](i11-real-machine-checklist.md).
+The last proof is a real pairing, which needs the pairing code that the browser's onboarding page shows. `solodawn pair <code> --rendezvous wss://rv.example.org/rv` keeps waiting until the browser finishes pairing the node (it gives up after 10 minutes) and succeeds only then; an error within seconds means the node could not reach the server. The relay itself is proved only by two devices on networks that block direct paths; see [the real-machine checklist](i11-real-machine-checklist.md).
+
+### 7. Check that the protection works
+
+Run the checks of step 6 from an address that your setup does not allow (for example a phone on mobile data, outside the VPN): in setups A and B the four must fail, and from an allowed address the same four must succeed. In setup C there is nothing to refuse, so check the measures under [Additional measures for setup C](#additional-measures-for-setup-c) instead. Then from the same disallowed address check a node, if it has a public address: TCP and UDP 47800 and TCP 47801 of the node must not connect (for example `nc -vz -w 3 <node address> 47800`).
+
+Also check that:
+
+- the list of computers in the web client holds only computers you know;
+- you have a backup of each group you care about (see Backups under [For every setup](#for-every-setup));
+- you know what you will do first if a device is lost (see "A lost or stolen device" there).
 
 ## Update
 
@@ -139,12 +166,12 @@ A new release replaces the program file; nothing else changes, because the serve
 ```sh
 # After downloading and checking the new release as in install.md:
 sudo systemctl stop solodawn-rendezvous
-sudo install -m 755 solodawn_<new-version>_linux_amd64 /usr/local/bin/solodawn
+sudo install -m 755 solodawn_<new-version>_linux_<arch> /usr/local/bin/solodawn
 sudo systemctl start solodawn-rendezvous
 solodawn version
 ```
 
-Direct connections that are already open do not pass through the server and stay up; relayed connections drop, and devices reconnect by themselves. A restart resets the daily relay counters (they live in memory) and makes the server forget the relay credentials it issued; devices ask for new ones. Update your computers to the same release.
+Direct connections that are already open do not pass through the server and stay up; relayed connections drop, and nodes reconnect by themselves. A restart resets the daily relay counters (they live in memory) and makes the server forget the relay credentials it issued; devices ask for new ones. Update your computers to the same release.
 
 ## Options, ports and files
 
@@ -203,33 +230,23 @@ What it does **not** do:
 
 - It does not restrict **who** may sign in. Any key that answers the challenge is accepted, and anyone can make a new key. So its limits slow down a single client but do not cap total traffic. The daily relay quota counts per device key, not per server.
 - It does not limit total connections or relayed traffic across many source addresses, and does not detect a flood or a scan. In plain-HTTP mode (no `--domain`) the 256-connection limit does not apply.
-- It does not protect you from a rendezvous you do not trust. Whoever runs it can see which devices connect from which addresses and when, can refuse, delay or drop messages, and can pretend to be offline. Version 1 has no defence against a rendezvous that tampers with connection set-up (decided 2026-11-21; see [step-1-acceptance](../../planning/steps/step-1-acceptance.md), A1.5). Use your own or one you trust.
+- It does not protect you from a rendezvous you do not trust. Whoever runs it can see which devices connect from which addresses and when, can refuse, delay or drop messages, and can pretend to be offline. Version 1 has no defence against a rendezvous that tampers with connection set-up. Use your own or one you trust.
 - It keeps no audit log of connections.
 - It cannot refuse relay traffic to a NAT64 prefix that your own network chose (only the standard ranges are listed); use the server's outbound firewall for that.
 - Nodes do not defend against scans or floods of their own ports 47800 and 47801, and version 1 has no way to revoke a lost device (revoking was postponed to after version 1). A group member, and the computer that runs a group (its home), is trusted: the home decides roles and which requests reach your AIs.
 
 ## Protect it from the outside
 
-Pick one of three setups. They differ in how close strangers can get.
-
-| Setup | Best for | Do |
-| --- | --- | --- |
-| **A. Everyone on one VPN** (Tailscale or WireGuard) | One person with several devices, a small team | Run the rendezvous on a machine that is only reachable inside the VPN. Use `--no-relay` (devices in a VPN reach each other directly; the relay refuses VPN addresses anyway). |
-| **B. Public server, only your addresses allowed** | Fixed home or office addresses | Cloud security group and server firewall allow TCP 443, UDP 3478 and UDP 20000-29999 only from your addresses. Use `--cert` and `--key`, because automatic certificates need 443 open to the internet. |
-| **C. Public server, everyone allowed** | Running a service for others | Accept that anyone can use the relay up to its limits. Add the measures at the end of this section. |
-
-Recommended: **A**. Home and mobile addresses change, which makes **B** a chore.
-
-A VPN needs one more thing: browsers only run the page's cryptography on an HTTPS page or on `localhost`, so a rendezvous inside a VPN still needs a certificate and a name (`--cert` and `--key`; for Tailscale, `tailscale cert` makes one for a `*.ts.net` name; a private ACME server with `--acme-directory` also works). The exact steps of these two options with SoloDawn have not been tried.
+The setup you chose in [Choose your setup](#choose-your-setup) decides who can get close to the server. The rest is the same for all setups.
 
 ### For every setup
 
-- **Do not expose a node's ports.** Do not forward 47800 or 47801 in a router, do not put a node in a router's DMZ, and keep the host firewall's default of refusing inbound connections. The node asks the router for nothing, so a port is open to the internet only if you opened it. Where direct connections need an inbound path, allow them only from your VPN or your own addresses (TCP and UDP 47800, TCP 47801).
+- **Do not expose a node's ports.** Do not forward 47800 or 47801 in a router, do not put a node in a router's DMZ, and keep the host firewall's default of refusing inbound connections (fine in setup A; in B and C it costs the direct paths, and on macOS allow `solodawn` in the Application Firewall as install.md says). The node asks the router for nothing, so a port is open to the internet only if you opened it. Where direct connections need an inbound path, allow them only from your VPN or your own addresses (TCP and UDP 47800, TCP 47801).
 - **Computers.** Turn on full-disk encryption and a screen lock, and give each system account to one person. The data folder holds the device identity (`device.key`), the group data (`node.db`) and the projects; do not put it in a synchronised folder or share it. It is `~/.local/share/solodawn` on Linux, `~/Library/Application Support/solodawn` on macOS and `%LOCALAPPDATA%\solodawn` on Windows. Anyone who can act as you on that computer can drive the node through its local socket.
-- **A lost or stolen device.** Version 1 cannot revoke a device, so cut it off from the network instead: remove it from the VPN (Tailscale: delete the machine; WireGuard: delete its public key from every peer) or remove its address from the security group and firewalls. Then sign the services you used on it out of (GitHub, `gh`, and each AI command-line tool), at their own websites: SoloDawn never stores those credentials, but they sit on that disk. If it was the home of a group, restore the group from a backup on another computer (below); without a backup, create the group again. The lost device stays on your device list until revoking exists.
+- **A lost or stolen device.** Version 1 cannot revoke a device, so cut it off from the network instead: remove it from the VPN (Tailscale: delete the machine; WireGuard: delete its public key from every peer) or remove its address from the security group and firewalls. Then sign out, at their own websites, of the services you used on it (GitHub, `gh`, and each AI command-line tool): SoloDawn never stores those credentials, but they sit on that disk. If it was the home of a group, restore the group from a backup on another computer (see Backups below); without a backup, create the group again. The lost device stays on your device list until revoking exists.
 - **Groups.** Join only groups of people you trust, and only trust the computer that is a group's home with the group's content: it stores the group, decides who is a member and which requests reach your AIs. Send invitation links privately and to the person they are for (a link admits one person for 10 minutes). When a member leaves, remove them in the group and also from the VPN or the security group; what they have already read or cloned cannot be taken back.
-- **Check commands.** A group's check commands (build, test, lint) run on the computer of whoever does the task, as that person, and run code that an AI wrote. They run without your secrets in their environment (only a short list such as `PATH`, `HOME` and locale variables is passed). Read the list shown before an AI joins a group, and for stricter isolation run the node as a separate system account or in a virtual machine with nothing else on it.
-- **Backups.** A group exists only on its home. Back up with `solodawn group export <group id> <file>` as [install.md](../../install.md) shows, and keep the file encrypted: it is as sensitive as the group.
+- **Check commands.** A group's check commands (build, test, lint) run on the computer of whoever does the task, as that person, and run code that an AI wrote. They run without your secrets in their environment (only a short list such as `PATH`, `HOME` and locale variables is passed). For stricter isolation run the node as a separate system account or in a virtual machine with nothing else on it.
+- **Backups.** A group exists only on its home. Back up with `solodawn group export <group id> <file>` as [install.md](../../install.md) shows, and keep the file encrypted: it is as sensitive as the group. To restore on another computer of the same owner, run `solodawn group import <file>` there.
 - **Server basics.** Keep the server's SSH to your own address and key-only, apply operating-system updates, and keep nothing else on it. The certificate key in the cache directory (or your `--key`) must stay readable only by the service account.
 - **Browsers on other people's devices.** Pair a browser only on a device you trust; a paired browser is a device.
 
@@ -251,7 +268,7 @@ A VPN needs one more thing: browsers only run the page's cryptography on an HTTP
 | `bind: permission denied` on 443 | The unit lacks `AmbientCapabilities=CAP_NET_BIND_SERVICE`, or a non-root user runs it by hand. |
 | `bind: address already in use` | Another program holds 443 or UDP 3478. Stop it, or use `--listen` and `--udp-port` (devices find the relay port from the server, but the firewall must match). |
 | Browser warns about the certificate, or step 6 check 1 or 2 fails | Both names must resolve to the server and, with automatic certificates, TCP 443 must be open to the internet. Look at `journalctl -u solodawn-rendezvous`. A cached certificate lives in `/var/cache/solodawn/certs`; deleting the folder makes the program ask for new ones on the next connection. |
-| Web client loads but nodes cannot pair | The node was paired without `--rendezvous`, or with another address. Pair with the address of this server. |
+| Web client loads but nodes cannot pair | A node that has not finished pairing was given another address (or none): pair it again with `--rendezvous` of this server. A node that is already paired keeps the address it was paired with and cannot be moved in version 1 (see step 5, and `issues.md`). |
 | Direct paths work, relayed connections do not | UDP 3478 or the relay range is blocked, or the quota is spent (it resets at 00:00 UTC). |
 | `relay: N allocations refused since start` in the journal | Limits or credentials refused a request; normal in small numbers. A fast-growing number means someone is probing the relay: narrow who may reach it. |
 

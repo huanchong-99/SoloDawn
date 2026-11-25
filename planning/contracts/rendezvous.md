@@ -19,7 +19,8 @@ node's address needs no server at all.
 | `http://localhost:47800/` | every node | static web client for the local browser |
 
 A node asks for 47800 (TCP signalling and the local web client, UDP ICE) and
-47801 (ICE-TCP), and takes a free port in place of one that is taken. 47802
+47801 (ICE-TCP), and takes a free port in place of one that is taken (both ICE ports
+together; the web port separately). 47802
 (beacon) is not used: the beacon was cut on 2026-11-21. HTTPS and TURN over
 TLS share port 443, chosen by the TLS server name `[verified, S-6]`, local CA
 only (`risks.md` T-11).
@@ -189,12 +190,9 @@ the review of section 5.1 measured. "Evidence n" is entry n of
 - **TCP.** An ICE-TCP passive listener on 47801 (`SetICETCPMux`), for the
   connections a node answers and for those it offers `[verified, S-1]`.
 - Host candidates on IPv4 and IPv6, server-reflexive by STUN, relay by TURN.
-- The node requests mappings (UPnP, NAT-PMP) for the answering UDP socket, the
-  TCP signalling listener and the passive ICE-TCP listener. It publishes the
-  external TCP signalling port in the signalling URL and each mapped ICE
-  endpoint only for the socket it serves (section 5.1, point 8). pion's
-  address rewrite rule has no external-port field. S-8 verifies publication
-  and reachability when a router grants a different port `[unverified]`.
+- The node asks no router for a port mapping (UPnP and NAT-PMP were cut on
+  2026-11-21). A port is reachable from outside only if its owner forwards it
+  (section 5.1, point 8).
 - Queries the `.local` names that browsers give instead of their host
   addresses (`SetICEMulticastDNSMode`, query only). A name that does not
   resolve is no obstacle: in S-1 the connections used the browser's

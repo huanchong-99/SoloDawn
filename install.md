@@ -59,12 +59,6 @@ Copy-Item -LiteralPath $asset -Destination (Join-Path $bin 'solodawn.exe')
 Add the installation directory to your user `Path` or run the executable
 by its full path.
 
-## Run your own rendezvous
-
-The pairing steps below use the rendezvous of the page that gave you the
-prompt. To run your own server and protect your installation from the
-outside, see [Self-host a rendezvous and protect it](docs/cookbook/self-hosting.md).
-
 ## Check Git identity
 
 SoloDawn commits local task merges with your Git identity. Run
@@ -172,3 +166,10 @@ Register-ScheduledTask -TaskName SoloDawnBackup -Action $action -Trigger (New-Sc
 To restore on another computer of the same owner, run
 `solodawn group import <file>` there (`planning/contracts/step-2/export.md`
 section 4).
+
+## Run your own rendezvous
+
+Skip this section unless you were asked to run a server. The pairing steps
+above use the rendezvous of the page that gave you the prompt. To run your own
+server and protect your installation from the outside, see
+[Self-host a rendezvous and protect it](https://github.com/huanchong-99/SoloDawn/blob/main/docs/cookbook/self-hosting.md).
