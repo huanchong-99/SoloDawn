@@ -98,23 +98,13 @@ func (j *m5Jump) startTaskTurn(script string) error {
 // item behind the running turn, and returns its id.
 func (j *m5Jump) ownerMentionsClaude(text, thread string, held int) (string, error) {
 	w := j.w
-	n0 := w.cluster.Nodes[0]
-	var in any
-	if thread != "" {
-		in = thread
-	}
-	_, err := w.ownerCmd(map[string]any{
-		"t": "post", "n": w.nextID(), "ts": n0.Host.Now().UnixMilli(), "g": w.groupID,
-		"kind": "text", "text": text, "thread": in, "main": thread == "",
-		"mentions": []string{w.claudeM}, "re": nil, "body": map[string]any{},
-	})
-	if err != nil {
+	if err := w.ownerPost(text, thread, []string{w.claudeM}); err != nil {
 		return "", err
 	}
 	var id string
-	err = w.waitFor("the host to hold the item of "+text, func() bool {
+	err := w.waitFor("the host to hold the item of "+text, func() bool {
 		id = j.message(func(m proto.MsgRow) bool { return m.Text == text }).ID
-		return id != "" && n0.Host.QueuedCount(w.groupID, w.claudeM) == held
+		return id != "" && w.cluster.Nodes[0].Host.QueuedCount(w.groupID, w.claudeM) == held
 	})
 	return id, err
 }
