@@ -30,6 +30,7 @@ type jumpRig struct {
 	drv  *fakeDriver
 
 	mu     sync.Mutex
+	ai     string // the AI whose items and tasks the rig makes; runAI1 unless a test changes it
 	tasks  map[string]proto.TaskRow
 	refuse map[string]string // "task <op>" to the code the home refuses it with
 	gone   map[string]int    // "task <op>" to how often the home is not reached
@@ -40,7 +41,7 @@ type jumpRig struct {
 func newJumpRig(t *testing.T, dir string) *jumpRig {
 	t.Helper()
 	jump := Listeners["jump"]
-	r := &jumpRig{t: t, home: newFakeDeliverHome(), drv: &fakeDriver{}, tasks: map[string]proto.TaskRow{}, refuse: map[string]string{}, gone: map[string]int{}}
+	r := &jumpRig{t: t, home: newFakeDeliverHome(), drv: &fakeDriver{}, ai: runAI1, tasks: map[string]proto.TaskRow{}, refuse: map[string]string{}, gone: map[string]int{}}
 	Drivers = map[string]Driver{"claude": r.drv}
 	Listeners = map[string]func(*Host, SessionKey, Event){}
 	if jump != nil {
@@ -63,12 +64,16 @@ func newJumpRig(t *testing.T, dir string) *jumpRig {
 	r.home.onCmd = r.answer
 	h.Attach(jumpHome, r.home)
 	r.putGroup(false)
-	member := proto.AIMemberRow{
-		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: runAI1, Seq: 2}, Group: runGroup1, Kind: "ai", Name: "Claude Code"},
-		CLI:       "claude", Host: h.Key.ID(), Allow: []string{}, Approvers: []string{},
-	}
-	h.Rows.Put(runGroup1, "member", runAI1, json.RawMessage(marshalWire(member)))
+	r.putAI(runAI1)
 	return r
+}
+
+func (r *jumpRig) putAI(id string) {
+	member := proto.AIMemberRow{
+		MemberRow: proto.MemberRow{RowHeader: proto.RowHeader{Type: "member", ID: id, Seq: 2}, Group: runGroup1, Kind: "ai", Name: "Claude Code"},
+		CLI:       "claude", Host: r.h.Key.ID(), Allow: []string{}, Approvers: []string{},
+	}
+	r.h.Rows.Put(runGroup1, "member", id, json.RawMessage(marshalWire(member)))
 }
 
 // close ends the host as a node that stops does: the CLIs are killed and the
@@ -128,7 +133,7 @@ func (r *jumpRig) putTask(id, state, step string) {
 		num := len(r.tasks) + 1
 		task = proto.TaskRow{
 			RowHeader: proto.RowHeader{Type: "task", ID: id}, Group: runGroup1, Num: num, Title: "Fix it",
-			Slug: proto.Slug("fix-" + strconv.Itoa(num)), Origin: "direct", Assignee: runAI1, Depends: []string{},
+			Slug: proto.Slug("fix-" + strconv.Itoa(num)), Origin: "direct", Assignee: r.ai, Depends: []string{},
 		}
 	}
 	task.Seq++
@@ -176,7 +181,7 @@ func (r *jumpRig) set(table map[string]string, op, code string) {
 // push delivers one inbox item from the home and waits until the host has
 // done all it can with it.
 func (r *jumpRig) push(it proto.Item) {
-	it.AI = runAI1
+	it.AI = proto.ID(r.ai)
 	frame := proto.Inbox{Type: "inbox", Group: runGroup1, Items: []proto.InboxItem{{Item: it}}}
 	r.h.Push(jumpHome, json.RawMessage(marshalWire(frame)))
 	synctest.Wait()
@@ -481,6 +486,38 @@ func TestGroupPausedDuringTheJumpTurnContinuesTheTaskOnResume(t *testing.T) {
 		r.wantReports("task preempted "+runTask1+" "+testMsg1, "event turn_interrupted stop", "task resume "+runTask1)
 		r.end(task, "completed")
 		r.wantSettled()
+	})
+}
+
+// A message that mentions two AIs of this host is jumped for both: each is
+// interrupted, answers and continues by itself.
+func TestJumpOfAMessageForTwoAIsRunsForEach(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		first := r.work(1, runTask1, "local_check")
+		r.putAI(runAI2)
+		r.ai = runAI2
+		second := r.work(2, runTask2, "local_check")
+		r.push(jumpMention(4, testMsg1, "", true))
+		r.ai = runAI1
+		r.push(jumpMention(3, testMsg1, "", true))
+		if first.interrupts.Load() != 1 || second.interrupts.Load() != 1 {
+			t.Fatalf("interrupts = %d and %d, want 1 and 1", first.interrupts.Load(), second.interrupts.Load())
+		}
+		r.end(first, "interrupted")
+		answer1 := r.drv.lastProc()
+		r.end(second, "interrupted")
+		answer2 := r.drv.lastProc()
+		r.wantTurns(answer1, "items 3")
+		r.wantTurns(answer2, "items 4")
+		r.end(answer1, "completed")
+		r.end(answer2, "completed")
+		r.wantTurns(first, "items 1", jumpContinueTask)
+		r.wantTurns(second, "items 2", strings.Replace(jumpContinueTask, "T-1", "T-2", 1))
+		r.wantReports(
+			"task preempted "+runTask1+" "+testMsg1, "task preempted "+runTask2+" "+testMsg1,
+			"task resume "+runTask1, "task resume "+runTask2,
+		)
+		r.wantAcked(1, 2, 3, 4)
 	})
 }
 
