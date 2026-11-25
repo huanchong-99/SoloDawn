@@ -822,6 +822,10 @@ func (c *s2Cast) CreateProjectGroup(p *s2Person, home *s2Node, name, forge strin
 		Checks:     []string{},
 		MemberName: p.Name,
 	}
+	if forge == "custom" {
+		templates := proto.ForgeTemplates(s2FakeConfig(c).Templates)
+		create.Templates = &templates
+	}
 	if _, err := c.SendCmd(p, bc.conn, create); err != nil {
 		return "", err
 	}
