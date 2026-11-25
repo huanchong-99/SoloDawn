@@ -725,6 +725,11 @@ func checkWorkerClientAndRVReconnect(t *testing.T, n *nodeRuntime, browserKey id
 		return ok
 	})
 	nHost.Close()
+	lines, node := diagLines(t, hostDir), "node="+hostKey.ID()[:8]
+	diagOnce(t, lines, "home.dial "+node+" home="+n.key.ID()[:8])
+	for _, event := range []string{"bg.start", "bg.stop"} {
+		mustEqual(t, slices.Contains(lines, event+" "+node+" name=home_session"), true)
+	}
 	nHost.dialHome(t.Context(), n.key.ID(), func(clientCtl) {})
 
 	firstPath := n.remoteRVPaths()[0]
@@ -955,7 +960,7 @@ func adoptTestBrowser(t *testing.T, n *nodeRuntime) identity.Key {
 func startAdoptedConn(t *testing.T, n *nodeRuntime, device string) *fakeCtl {
 	t.Helper()
 	fc := newFakeCtl()
-	n.spawn(func() { n.sessions.Serve(n.ctx, device, false, fc) })
+	n.spawn("test", func() { n.sessions.Serve(n.ctx, device, false, fc) })
 	fc.push(proto.Hello{Request: proto.Request{Type: "hello", ID: 1}, V: 1, Kind: "browser", Name: "b1", Addrs: []string{}})
 	fc.next(t)
 	fc.next(t)
