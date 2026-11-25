@@ -909,6 +909,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `internal/host/deliver.go:1378-1379` can select a stale `cloud_check` row after `tskFinishCloud` releases the polling slot, even after the task has reached review. The home acknowledges the result before sending the updated row (`internal/home/run_group.go:170-171`).
 - Status: resolved in PR #335. The host keeps claims for accepted and superseded commits, while allowing retries after failed result delivery or an accepted resubmission. `TestStaleCloudCheckRowDoesNotRestartCompletedPoll` verifies that resuming from a stale row does not make a second forge call.
 
+### 2026-11-25 · bug · An external AI could not write in its task's thread
+
+- Symptom: in an open run of an external AI, `post` with kind `progress`, which its task instructions order, was refused by the home ("the post belongs in a task thread"); a plain `post` in a task or review run, or in a group run from a thread, went to the main line; `where` `thread` was `bad_request`; an `ask` in a group run from a thread went to the main line; and every call had depth 1, so the limit of 4 did not count external AIs.
+- Cause: `extHandOut` dropped the `Turn` that `Compose` returns (`internal/host/external.go:293`), and `externalCaller` built the caller without one (`internal/host/tools_external.go:41`).
+- Status: resolved on `fix/external-thread`: the open run keeps its turn and the caller has it until the run ends. `TestExternalCallsGoToThePlaceOfTheRun` and an A10.22 scenario fail with the old code. A node restart ends the run, so its place needs no recovery ([external.md](planning/contracts/step-3/external.md), 3.3).
+
 ### 2026-11-25 · bug · The answer to a CLI's question could outlive the host's Settle and crash the node
 
 - Symptom: `Settle` returned while `runAskedEvent` still ran; `bg.stop name=ask` followed `settle.end`. With a card open it only waited, but an ask that had not posted its card yet, or whose post failed with the connection, wrote to the store after the node closed it: `panic: send on closed channel` (`internal/store/store.go:95`).

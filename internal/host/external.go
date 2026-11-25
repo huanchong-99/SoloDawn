@@ -28,6 +28,7 @@ var externalInstructions string
 type extRun struct {
 	id    int64
 	key   SessionKey
+	turn  Turn
 	timer *time.Timer
 }
 
@@ -291,7 +292,7 @@ func extPrepare(h *Host, ep *extPart, d *delivery, key aiGroupKey, ai aiInfo, ta
 
 func extHandOut(h *Host, ep *extPart, d *delivery, key aiGroupKey, s Session, batch []verifiedItem) (proto.Handout, bool, error) {
 	raw, _ := collectRawItems(batch)
-	text, _, textErr := Compose(h, s, ItemsTurn, raw)
+	text, turn, textErr := Compose(h, s, ItemsTurn, raw)
 	replaced, _, replErr := Compose(h, s, ReplacedTurn, nil)
 	err := errors.Join(textErr, replErr)
 	if err == nil {
@@ -303,19 +304,19 @@ func extHandOut(h *Host, ep *extPart, d *delivery, key aiGroupKey, s Session, ba
 	}
 	ackBatch(h, batch)
 	run := batch[0].item.Item
-	extOpenRun(h, ep, key, s, run)
+	extOpenRun(h, ep, key, s, run, turn)
 	return proto.Handout{
 		Run: run, Kind: string(s.Kind), Task: (&turnCtx{h: h, s: s}).taskRef(s.Task), Folder: sessionDir(h, s),
 		Context: Instructions(s) + "\n" + externalInstructions + "\n" + replaced, Text: text,
 	}, true, nil
 }
 
-func extOpenRun(h *Host, ep *extPart, key aiGroupKey, s Session, run int64) {
+func extOpenRun(h *Host, ep *extPart, key aiGroupKey, s Session, run int64, turn Turn) {
 	h.diag.Info("run.open", "g", key.group, "ai", key.member, "run", run)
 	h.Sessions.Move(s.SessionKey, s.State, Working)
 	ep.mu.Lock()
 	if !ep.settled {
-		ep.runs[key] = &extRun{id: run, key: s.SessionKey, timer: ep.after(h, groupToolTimeout(h, s.Group), "run_timeout", func() {
+		ep.runs[key] = &extRun{id: run, key: s.SessionKey, turn: turn, timer: ep.after(h, groupToolTimeout(h, s.Group), "run_timeout", func() {
 			extEnd(h, key, run, "timeout", "")
 		}, "g", key.group)}
 	}
