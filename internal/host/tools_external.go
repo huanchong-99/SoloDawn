@@ -36,22 +36,22 @@ func onlyExternal(c Caller) bool { return c.External }
 var externalKinds = []Kind{GroupSession, TaskSession, ReviewSession}
 
 // externalCaller is the caller an external AI's member id stands for: the
-// session of its open run, or its group session without one, at level 3
+// session and turn of its open run, or its group session without one, at level 3
 // (contracts/step-3/external.md section 5).
 func externalCaller(h *Host, member string) (Caller, bool) {
 	group, ok := h.ExternalMember(member)
 	if !ok {
 		return Caller{}, false
 	}
-	key := SessionKey{Group: group, Member: member}
+	key, turn := SessionKey{Group: group, Member: member}, Turn{}
 	ep := extOf(h)
 	ep.mu.Lock()
 	if r := ep.runs[aiGroupKey{group: group, member: member}]; r != nil {
-		key = r.key
+		key, turn = r.key, r.turn
 	}
 	ep.mu.Unlock()
 	s, _ := h.Sessions.Get(key)
-	return Caller{Session: s, Level: 3, External: true}, true
+	return Caller{Session: s, Level: 3, External: true, Turn: turn}, true
 }
 
 // neededKinds returns the kinds of run in which an external caller may call

@@ -29,6 +29,8 @@ func externalTaskSteps(sc *godog.ScenarioContext, w *externalWorld) {
 	sc.Step(`^the external home rejects a non-owner tool edit$`, w.nonOwnerEdit)
 	sc.Step(`^a project with external X and forge "([^"]+)"$`, w.setupForge)
 	sc.Step(`^the external brief runs with X as "([^"]+)"$`, w.runBrief)
+	sc.Step(`^X takes the task of an external brief$`, w.takeBrief)
+	sc.Step(`^X's "([^"]+)" post "([^"]+)" appears in the external task's thread$`, w.inTaskThread)
 	sc.Step(`^the external task merges and its worktree is removed$`, w.merged)
 	sc.Step(`^X starts an external task from the group run$`, w.startTask)
 	sc.Step(`^an external task run$`, w.takeTask)
