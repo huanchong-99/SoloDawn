@@ -28,5 +28,13 @@
   "thread.sys.turn_interrupted.stop": "{ai}'s turn was stopped.",
   "thread.sys.login_invalid": "{ai}'s sign-in is no longer valid.",
   "thread.sys.session_replaced": "{ai} started a new session from the task notes.",
-  "thread.sys.no_secretary": "This group has no secretary AI."
+  "thread.sys.no_secretary": "This group has no secretary AI.",
+  "thread.sys.member_joined": "{who} joined, invited by {by}.",
+  "thread.sys.member_left": "{who} left the group.",
+  "thread.sys.member_removed": "{by} removed {who} from the group.",
+  "thread.sys.group_paused": "{by} paused the group. All its AIs stop for now.",
+  "thread.sys.group_resumed": "{by} resumed the group. Its AIs carry on.",
+  "thread.sys.rate_limited": "{ai} is out of quota until {time}, then carries on.",
+  "thread.sys.rounds_limit": "{task} is paused: the AIs went {n} rounds without a person. Reply in its thread to carry on.",
+  "thread.sys.preempted": "{by} jumped the queue. {task} is paused and carries on afterwards."
 }

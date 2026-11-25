@@ -114,6 +114,47 @@ describe('task helpers', () => {
     expect(waitBadge(group, { kind: 'decision', who: ['stranger'], since: 1 })).toEqual({
       text: 'Waiting for a decision',
     });
+    expect(waitBadge(group, { kind: 'confirm', who: [owner.user], since: 1 })).toEqual({
+      text: 'Waiting for your confirmation',
+      tone: 'dawn',
+      solid: true,
+    });
+    expect(waitBadge(group, { kind: 'confirm', who: ['mina-user'], since: 1 })).toEqual({
+      text: "Waiting for Mina's confirmation",
+    });
+    expect(waitBadge(group, { kind: 'confirm', who: ['stranger'], since: 1 })).toEqual({
+      text: 'Waiting for confirmation',
+    });
+    expect(taskBadge(group, row<TaskRow>('row-task-confirm'))).toEqual({
+      text: 'Waiting for your confirmation',
+      tone: 'dawn',
+      solid: true,
+    });
+  });
+
+  it('shows the takeover of the assignee after a final state and before every other', () => {
+    const { group } = makeGroup();
+    const task = row<TaskRow>('row-task');
+    const ai = (changes: object) => group.apply([row('row-member-ai', changes)]);
+    const takeover = { text: 'Owner is driving', dot: 'takeover' };
+    const rejected = { text: 'Sent back · round 1', tone: 'danger' };
+
+    ai({ seq: 900, state: 'takeover', task: undefined });
+    expect(taskBadge(group, task)).toEqual(rejected);
+    ai({ seq: 901, state: 'takeover', task: 'another' });
+    expect(taskBadge(group, task)).toEqual(rejected);
+    ai({ seq: 902, state: 'waiting', task: task.id });
+    expect(taskBadge(group, task)).toEqual(rejected);
+
+    ai({ seq: 903, state: 'takeover', task: task.id });
+    expect(taskBadge(group, task)).toEqual(takeover);
+    expect(taskBadge(group, { ...task, state: 'paused' })).toEqual(takeover);
+    expect(taskBadge(group, { ...task, wait: { kind: 'conflict', since: 1 } })).toEqual(takeover);
+    expect(taskBadge(group, { ...task, state: 'cancelled' })).toEqual({ text: 'Cancelled' });
+    expect(taskBadge(group, { ...task, assignee: 'departed' })).toEqual(rejected);
+    prefs.lang = 'zh-CN';
+    expect(taskBadge(group, task)).toEqual({ text: '主人正在直接操作', dot: 'takeover' });
+    prefs.lang = 'en';
   });
 
   it('puts the stronger-AI badge after waits and before rejected review, only while active', () => {
@@ -321,6 +362,20 @@ describe('task helpers', () => {
         'Waiting',
       ).items[0].mark,
     ).toBe('wait');
+    expect(
+      taskSteps(
+        group,
+        { ...base, wait: { kind: 'confirm', who: [owner.user], since: 1 } },
+        'Waiting',
+      ).items[0].mark,
+    ).toBe('wait');
+    expect(
+      taskSteps(
+        group,
+        { ...base, wait: { kind: 'confirm', who: ['mina-user'], since: 1 } },
+        'Waiting',
+      ).items[0].mark,
+    ).toBe('now');
     expect(
       taskSteps(
         group,

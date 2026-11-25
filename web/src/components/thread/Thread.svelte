@@ -61,7 +61,7 @@
       const num = group.task(msg.body.task)?.num;
       return num !== undefined ? `T-${num} · ${score}` : score;
     }
-    return subject(msg) || t(`chat.kind.${msg.kind}`);
+    return subject(group, msg) || t(`chat.kind.${msg.kind}`);
   }
   let root: HTMLElement;
   let listEl: HTMLElement;

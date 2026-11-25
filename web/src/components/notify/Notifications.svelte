@@ -18,6 +18,7 @@
     approval: 'shield',
     decision: 'fork',
     brief: 'doc',
+    confirm: 'shield',
     done: 'check',
     mention: 'at',
   };
@@ -25,6 +26,7 @@
     approval: 'dawn',
     decision: 'dawn',
     brief: 'dawn',
+    confirm: 'dawn',
     done: 'ok',
     mention: 'sky',
   };

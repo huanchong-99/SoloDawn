@@ -2,6 +2,7 @@
 // (planning/flows/sync.md, planning/contracts/datachannel.md section 4). A cache is never an
 // authoritative copy: the home writes, the client applies rows and sends commands.
 import { SvelteMap } from 'svelte/reactivity';
+import { confirmSentence } from './confirm';
 import { encode } from './identity';
 import type * as p from './proto';
 
@@ -51,20 +52,26 @@ export class Paging {
 }
 
 /** Whether a card waits for this person: a pending brief they asked for, a pending approval they
- *  may give, a pending decision put to them. `member` is their member id in the card's group. */
+ *  may give, a pending decision or confirmation put to them. `member` is their member id in the
+ *  card's group. */
 function waitsFor(msg: p.MsgRow, user: string, member: string | undefined): boolean {
   if (msg.state?.status !== 'pending') return false;
   if (msg.kind === 'brief') return msg.body.requester === member;
   if (msg.kind === 'approval') return msg.body.approvers.includes(user);
-  return msg.kind === 'decision' && msg.body.to.includes(user);
+  if (msg.kind === 'decision' || msg.kind === 'confirm') return msg.body.to.includes(user);
+  return false;
 }
 
+const approvalSubject = ({ why, command }: { why?: string; command: string }) => why ?? command;
+
 /** What a card is about, in one line: the title of a brief, the reason or else the request of
- *  an approval, the question of a decision. For any other message, its text. */
-export function subject(msg: p.MsgRow): string {
+ *  an approval, the question of a decision, the request of a confirmation. For any other message,
+ *  its text. */
+export function subject(group: Group, msg: p.MsgRow): string {
   if (msg.kind === 'brief') return msg.body.title;
-  if (msg.kind === 'approval') return msg.body.why ?? msg.body.command;
+  if (msg.kind === 'approval') return approvalSubject(msg.body);
   if (msg.kind === 'decision') return msg.body.question;
+  if (msg.kind === 'confirm') return confirmSentence(group, msg);
   return msg.text;
 }
 

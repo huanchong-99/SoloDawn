@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmSentence } from '../../lib/confirm';
   import type { CardProps } from '../../lib/mounts.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { clock } from '../../lib/when';
@@ -20,25 +21,6 @@
     const label = t(`confirm.${state.status}`).replace('{time}', clock(state.at, prefs.lang));
     if (state.status === 'expired') return label;
     return label.replace('{who}', () => nameOf(state.by));
-  }
-
-  function requestLabel() {
-    const { what, ai } = msg.body;
-    const label =
-      what === 'watch'
-        ? 'confirm.request.watch'
-        : what === 'ask'
-          ? 'confirm.request.ask'
-          : 'confirm.request.direct';
-    return t(label)
-      .replace('{ai}', () => nameOf(ai))
-      .replace('{who}', requester);
-  }
-
-  function requester() {
-    if (msg.body.what === 'watch') return nameOf(msg.by);
-    const request = group.rows.get(`msg ${msg.re}`);
-    return request && 'by' in request ? nameOf(request.by) : t('confirm.requester_unknown');
   }
 
   async function decide(action: 'confirm' | 'deny') {
@@ -70,7 +52,7 @@
     {/if}
   </header>
 
-  <p>{requestLabel()}</p>
+  <p>{confirmSentence(group, msg)}</p>
 
   {#if needsMe}
     <footer class="card-foot">

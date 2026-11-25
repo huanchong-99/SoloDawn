@@ -18,6 +18,7 @@
   "groups.waiting.brief": "Confirm start",
   "groups.waiting.approval": "Approval",
   "groups.waiting.decision": "Your call",
+  "groups.waiting.confirm": "Confirm",
   "groups.waiting.open": "Open",
   "groups.create.lead": "One project, one group. The computer you choose becomes the group's home: it keeps the group's messages, so it has to stay on.",
   "groups.create.name": "Group name",

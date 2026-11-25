@@ -303,7 +303,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           expect(named(one('[role="switch"]'))).toBe('Browser notifications');
           const choices = one('[aria-labelledby="s-noti"] [role="group"]');
           expect(named(choices)).toBe('Notify me when');
-          expect(choices.querySelectorAll('input[type="checkbox"]')).toHaveLength(5);
+          expect(choices.querySelectorAll('input[type="checkbox"]')).toHaveLength(6);
         },
       );
     },

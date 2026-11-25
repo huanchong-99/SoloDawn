@@ -6,6 +6,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
+### 2026-11-25 · deviation · A confirm card for a task without a brief names "Former member" as the requester
+
+- Symptom: when a role in a task that has no brief is given to another person's AI (`task assign`), the owner is asked "Let Codex act on the request from Former member." Contract `planning/contracts/step-2/confirm.md` section 3: who asked is then the owner of the AI that started the task.
+- Cause: the request is the `task` message, which the home writes with `by: "system"` (`internal/home/cmd_brief.go:339`); `requester` in `web/src/lib/confirm.ts` takes the author of the request. No row says who started a task once its assignee has changed.
+- Status: open, found while making confirm cards count as waiting.
+
 ### 2026-11-23 · deviation · An agent without a driver cannot join a group
 
 - Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
@@ -733,6 +739,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open, accepted with U-0 (#170).
 
 ## Resolved
+
+### 2026-11-25 · bug · Confirm cards did not count as waiting, and task badges and system rows missed their step 2 wording
+
+- Symptom: a card that asks an owner "may Pat direct your AI?" showed only in the chat: not in "Waiting on you", the group's count, the in-page notifications or the browser push, so it could expire unseen. A task held by such a card, and a task whose owner had taken over the terminal, showed "In progress". `member_joined`, `member_removed`, `rate_limited`, `rounds_limit`, `preempted`, `group_paused` and `group_resumed` showed as their codes. A card for a role named the secretary, who writes the brief, instead of the person who confirmed it.
+- Cause: the lists of kinds in `waitsFor` and `subject` (`web/src/lib/groups.svelte.ts`), `reminderKinds` (`web/src/lib/push.ts`), `waitingKinds` and the `by: "system"` early return of `classify` (`web/src/lib/notify.svelte.ts`) and `kindLabels` (`web/src/sw.ts`) had no `confirm`; `waitBadge` and `taskBadge` (`web/src/lib/task.ts`) and `SystemRow.svelte` had no case for them, left out while those features were postponed.
+- Status: resolved. Tests: `web/src/lib/{confirm,groups,notify,push,task,when}.test.ts`, `web/src/sw.test.ts`, the group, approval, notification, reminder, task and thread features.
 
 ### 2026-11-23 · bug · FLAKY-29: the fake Qwen Code started OpenCode's MCP server
 

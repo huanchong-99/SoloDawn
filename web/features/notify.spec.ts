@@ -8,7 +8,7 @@ import { homes } from '../src/lib/groups.svelte';
 import type { Net } from '../src/lib/net.svelte';
 import { autoDismissMs } from '../src/lib/notify.svelte';
 import { prefs } from '../src/lib/prefs.svelte';
-import { browser, example, owner, TestHome } from './home';
+import { browser, example, owner, TestHome, user } from './home';
 import { all, closePage, go, one, openPage, show, texts } from './page';
 
 const feature = await loadFeature('../features/web_notify.feature');
@@ -160,6 +160,56 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           const briefEl = document.getElementById('m-br-live')!;
           expect(scrolled.at(-1)).toBe(briefEl);
           expect(document.activeElement?.textContent?.trim()).toBe('Confirm & start');
+          expect(activeToasts()).toEqual([]);
+        },
+      );
+    },
+  );
+
+  Scenario(
+    "A confirmation the home asks of the AI's owner appears in dawn and opens on its Confirm button",
+    ({ Given, When, Then }) => {
+      Given('the person opens the client at "#/nodes"', () => openPage('#/nodes'));
+      When(
+        'the home asks in "Website" whether "Mina" may direct "Codex", and whether she may direct an AI of her own',
+        () => {
+          const ask = home.say(website, 'mina-w', '@Codex tidy the header');
+          const card = (id: string, ai: string, to: string) =>
+            home.write(
+              website,
+              example('row-msg-confirm-pending', {
+                id,
+                by: 'system',
+                re: ask.id,
+                body: { what: 'direct', ai, to: [to] },
+              }),
+            );
+          card('cf-mine', codex, user);
+          card('cf-mina', claude, 'mina-u');
+          flushSync();
+        },
+      );
+      Then(
+        'the notification layer shows one warm notification "Confirm · Let Codex act on the request from Mina." for "Website · Codex"',
+        () => {
+          expect(toastTexts('b')).toEqual(['Confirm · Let Codex act on the request from Mina.']);
+          expect(toastTexts('p')).toEqual(['Website · Codex']);
+          expect(one('.toast:not([inert])').classList.contains('need')).toBe(true);
+          expect(one('.toast:not([inert])').dataset.tone).toBe('dawn');
+        },
+      );
+      When('the person clicks "Open" on the confirmation notification', async () => {
+        one<HTMLAnchorElement>('.toast:not([inert]) a.btn').click();
+        go(location.hash);
+        await vi.waitFor(() => expect(texts('.chat-head h2')).toEqual(['Website']));
+        flushSync();
+      });
+      Then(
+        'the chat of "Website" opens with focus on the "Confirm" button of that card',
+        async () => {
+          const card = document.getElementById('m-cf-mine')!;
+          await vi.waitFor(() => expect(scrolled.at(-1)).toBe(card));
+          expect(document.activeElement).toBe(card.querySelector('button.btn-dawn'));
           expect(activeToasts()).toEqual([]);
         },
       );

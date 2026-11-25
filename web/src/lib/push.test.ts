@@ -194,8 +194,8 @@ function makeHomeRig(groups: string[] = [sampleGroup], online = true) {
 }
 
 describe('reminderKinds and defaultPushEnv', () => {
-  it('lists the five reminder event kinds and reads browser globals lazily', () => {
-    expect(reminderKinds).toEqual(['mention', 'approval', 'decision', 'brief', 'done']);
+  it('lists the six reminder event kinds and reads browser globals lazily', () => {
+    expect(reminderKinds).toEqual(['mention', 'approval', 'decision', 'brief', 'confirm', 'done']);
     const env = defaultPushEnv();
     expect(env.crypto).toBe(crypto);
     expect(env.idb()).toBe(indexedDB);
@@ -400,7 +400,7 @@ describe('Reminders', () => {
     const emptyHome = makeHomeRig([], true);
 
     expect(store.enabled).toBe(false);
-    expect(store.activeKinds).toEqual(['mention', 'approval', 'decision', 'brief', 'done']);
+    expect(store.activeKinds).toEqual(p.decode(p.PushOn, goldens['push-on']).on);
     expect(store.state(rig.env)).toBe('off');
     expect(await store.sync([homeA.home], rig.env)).toEqual({ ok: true });
     expect(homeA.sent).toEqual([]);
@@ -418,7 +418,7 @@ describe('Reminders', () => {
 
     const pushed = p.decode(p.PushOn, JSON.stringify(homeA.sent[0]));
     expect(pushed.g).toBe(sampleGroup);
-    expect(pushed.on).toEqual(['mention', 'approval', 'decision', 'brief', 'done']);
+    expect(pushed.on).toEqual(['mention', 'approval', 'decision', 'brief', 'confirm', 'done']);
 
     await store.sync([homeA.home], rig.env, 'en');
     expect(homeA.sent).toHaveLength(1);
@@ -483,11 +483,18 @@ describe('Reminders', () => {
       'approval',
       'decision',
       'brief',
+      'confirm',
     ]);
 
-    expect(await store.setKind('done', true, [home.home], rig.env)).toEqual({ ok: true });
+    expect(await store.setKind('confirm', false, [home.home], rig.env)).toEqual({ ok: true });
+    expect(localStorage.getItem('sd-reminder-confirm')).toBe('off');
+    expect(store.hasKind('confirm')).toBe(false);
+    expect(store.activeKinds).toEqual(['mention', 'approval', 'decision', 'brief']);
     expect(home.sent).toHaveLength(2);
-    expect((home.sent[1] as { on: string[] }).on).toEqual([
+
+    expect(await store.setKind('done', true, [home.home], rig.env)).toEqual({ ok: true });
+    expect(home.sent).toHaveLength(3);
+    expect((home.sent[2] as { on: string[] }).on).toEqual([
       'mention',
       'approval',
       'decision',

@@ -7,7 +7,7 @@
   /** Pinned above a group's main line while cards in this group wait on the reader. */
   let { group }: { group: Group } = $props();
 
-  type Asked = 'brief' | 'approval' | 'decision';
+  type Asked = 'brief' | 'approval' | 'decision' | 'confirm';
 </script>
 
 {#if group.waiting.length}
@@ -19,7 +19,7 @@
     {#each group.waiting as msg (msg.id)}
       {@const kind = msg.kind as Asked}
       <a href={`#m-${msg.id}`} onclick={(event) => jumpToMessage(event, msg.id, kind)}>
-        {t(`approval.waiting.${kind}`)} · {subject(msg)}
+        {t(`approval.waiting.${kind}`)} · {subject(group, msg)}
       </a>
     {/each}
   </nav>

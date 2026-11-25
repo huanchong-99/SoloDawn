@@ -12,6 +12,7 @@
   "reminder.kind.decision": "要我拍板",
   "reminder.kind.approval": "要我审批",
   "reminder.kind.brief": "要我确认开工",
+  "reminder.kind.confirm": "有人想用我的 AI",
   "reminder.kind.done": "任务完成",
   "reminder.ios": "iPhone 和 iPad 上要先把 SoloDawn「添加到主屏幕」；之后才能收到通知，Safari 也不会在七天没打开后清掉这个浏览器的密钥。",
   "reminder.error.subscribe": "没能在这个浏览器里开启通知。"

@@ -31,6 +31,7 @@
   "approval.waiting": "等你处理",
   "approval.waiting.approval": "审批",
   "approval.waiting.brief": "确认开工",
+  "approval.waiting.confirm": "确认",
   "approval.waiting.count": "等你处理 {n}",
   "approval.waiting.decision": "拍板",
   "approval.wants": "想做什么",

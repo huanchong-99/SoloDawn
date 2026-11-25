@@ -88,28 +88,51 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           example('row-msg-brief-pending', { by: 'secretary', ts: Date.now() - 10 * minute }),
         );
       });
+      And('a confirmation in "Website" waits for the reader, the owner of "Codex"', () => {
+        home.write(website, example('row-member-ai', { id: 'codex', name: 'Codex' }));
+        home.write(
+          website,
+          example('row-member-human', { id: 'mina', name: 'Mina', user: 'mina' }),
+        );
+        const ask = home.say(website, 'mina', '@Codex tidy the header', {
+          ts: Date.now() - 9 * minute,
+        });
+        home.write(
+          website,
+          example('row-msg-confirm-pending', {
+            by: 'system',
+            re: ask.id,
+            ts: Date.now() - 9 * minute,
+            body: { what: 'direct', ai: 'codex', to: [user] },
+          }),
+        );
+      });
       When('the browser has read both groups', async () => {
         first.drop();
         await read();
         openPage();
       });
       Then(
-        'the list reads "Docs" with "Mina: Section 3 is in.", then "Website" with "Secretary: Show connection paths"',
+        'the list reads "Docs" with "Mina: Section 3 is in.", then "Website" with "System: Let Codex act on the request from Mina."',
         () => {
           expect(texts('.glist a b')).toEqual(['Docs', 'Website']);
           expect(texts('.glist .gprev')).toEqual([
             'Mina: Section 3 is in.',
-            'Secretary: Show connection paths',
+            'System: Let Codex act on the request from Mina.',
           ]);
         },
       );
-      And('"Website" shows that 1 card waits for the reader, and "Docs" shows none', () => {
+      And('"Website" shows that 2 cards wait for the reader, and "Docs" shows none', () => {
         const [docsRow, websiteRow] = all('.glist a');
         expect(docsRow.querySelector('.badge')).toBeNull();
         // The count is part of the link's name, with what it counts in words.
-        expect(texts('.glist a .badge')).toEqual(['Waiting on you 1']);
+        expect(texts('.glist a .badge')).toEqual(['Waiting on you 2']);
         expect(websiteRow.querySelector('.badge .sr')!.textContent).toBe('Waiting on you');
-        expect(texts('.needbar a')).toEqual(['Confirm start · Show connection paths']);
+        expect(texts('.needbar a')).toEqual([
+          'Confirm start · Show connection paths',
+          'Confirm · Let Codex act on the request from Mina.',
+        ]);
+        expect(texts('.digest .todo b')).toEqual(texts('.needbar a'));
       });
     },
   );

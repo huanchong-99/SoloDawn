@@ -646,6 +646,14 @@ describe('waiting for you', () => {
     row('row-msg-approval-pending', { id, seq, pos: seq, ...changes });
   const decision = (id: string, seq: number, changes: object = {}) =>
     row('row-msg-decision-pending', { id, seq, pos: seq, ...changes });
+  const confirm = (id: string, seq: number, to: string[]) =>
+    row('row-msg-confirm-pending', {
+      id,
+      seq,
+      pos: seq,
+      by: 'system',
+      ...body('row-msg-confirm-pending', { to }),
+    });
   const body = (name: string, changes: object) => ({
     body: { ...(p.decode(p.MsgRow, goldens[name]).body as object), ...changes },
   });
@@ -658,8 +666,18 @@ describe('waiting for you', () => {
 
   it('lists the pending cards that this person has to act on, oldest first', () => {
     const group = withMe();
-    group.apply([decision('decision', 30), brief('brief', 10), approval('approval', 20)]);
-    expect(group.waiting.map((msg) => msg.id)).toEqual(['brief', 'approval', 'decision']);
+    group.apply([
+      confirm('confirm', 40, [user]),
+      decision('decision', 30),
+      brief('brief', 10),
+      approval('approval', 20),
+    ]);
+    expect(group.waiting.map((msg) => msg.id)).toEqual([
+      'brief',
+      'approval',
+      'decision',
+      'confirm',
+    ]);
   });
 
   it('leaves out the cards of other people', () => {
@@ -668,6 +686,7 @@ describe('waiting for you', () => {
       brief('brief', 10, body('row-msg-brief-pending', { requester: 'someone-else' })),
       approval('approval', 20, body('row-msg-approval-pending', { approvers: ['someone'] })),
       decision('decision', 30, body('row-msg-decision-pending', { to: ['someone'] })),
+      confirm('confirm', 40, ['someone']),
     ]);
     expect(group.waiting).toEqual([]);
   });
@@ -684,6 +703,10 @@ describe('waiting for you', () => {
       row('row-msg-brief-confirmed', { id: 'confirmed' }),
       row('row-msg-approval-approved', { id: 'approved' }),
       row('row-msg-decision-decided', { id: 'decided' }),
+      row('row-msg-confirm-denied', {
+        id: 'denied',
+        ...body('row-msg-confirm-denied', { to: [user] }),
+      }),
       row('row-msg-call-waiting', { id: 'call' }),
       text('text', 5),
       // A kind that is no card is never waited for, whatever it carries.
@@ -694,6 +717,7 @@ describe('waiting for you', () => {
 });
 
 describe('the subject of a message', () => {
+  const group = joined().group;
   const msg = (name: string, changes: object = {}) => row(name, changes) as p.MsgRow;
   const without = (name: string, field: string) => {
     const { [field]: _dropped, ...body } = p.decode(p.MsgRow, goldens[name]).body as Record<
@@ -704,22 +728,32 @@ describe('the subject of a message', () => {
   };
 
   it('is the title of a brief and the question of a decision', () => {
-    expect(subject(msg('row-msg-brief-pending', { text: 'Here is the brief.' }))).toBe(
+    expect(subject(group, msg('row-msg-brief-pending', { text: 'Here is the brief.' }))).toBe(
       'Show connection paths',
     );
-    expect(subject(msg('row-msg-decision-pending'))).toBe('Where should the path appear?');
+    expect(subject(group, msg('row-msg-decision-pending'))).toBe('Where should the path appear?');
   });
 
   it('is the reason of an approval, or else the request itself', () => {
-    expect(subject(msg('row-msg-approval-pending'))).toBe('Time the path change in a browser.');
-    expect(subject(without('row-msg-approval-pending', 'why'))).toBe(
+    expect(subject(group, msg('row-msg-approval-pending'))).toBe(
+      'Time the path change in a browser.',
+    );
+    expect(subject(group, without('row-msg-approval-pending', 'why'))).toBe(
       'pnpm exec playwright install chromium',
     );
   });
 
+  it('is the request of a confirmation', () => {
+    group.apply([row('row-member-ai', { id: 'TEcBBAeLwcuEpP9Z0Sekug', name: 'Claude Code' })]);
+    group.apply([row('row-member-human', { name: 'Pat' })]);
+    expect(subject(group, msg('row-msg-confirm-pending'))).toBe(
+      'Let Pat watch Claude Code’s terminal.',
+    );
+  });
+
   it('is the text of any other message', () => {
-    expect(subject(text('a', 1))).toBe('The path is direct.');
-    expect(subject(msg('row-msg-question'))).toBe('Should the path include latency?');
+    expect(subject(group, text('a', 1))).toBe('The path is direct.');
+    expect(subject(group, msg('row-msg-question'))).toBe('Should the path include latency?');
   });
 });
 

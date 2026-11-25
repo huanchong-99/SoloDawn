@@ -28,5 +28,13 @@
   "thread.sys.turn_interrupted.stop": "{ai} 的这一轮已停止。",
   "thread.sys.login_invalid": "{ai} 的登录状态已失效。",
   "thread.sys.session_replaced": "{ai} 已根据任务记录开启新会话。",
-  "thread.sys.no_secretary": "这个群还没有秘书 AI。"
+  "thread.sys.no_secretary": "这个群还没有秘书 AI。",
+  "thread.sys.member_joined": "{by} 邀请 {who} 加入了群。",
+  "thread.sys.member_left": "{who} 退出了群。",
+  "thread.sys.member_removed": "{by} 把 {who} 移出了群。",
+  "thread.sys.group_paused": "{by} 暂停了这个群，AI 都先停下。",
+  "thread.sys.group_resumed": "{by} 恢复了这个群，AI 继续干活。",
+  "thread.sys.rate_limited": "{ai} 的额度用完了，{time} 重置后继续。",
+  "thread.sys.rounds_limit": "{task} 已暂停：AI 之间来回了 {n} 轮，没有人参与。在话题里说句话就会继续。",
+  "thread.sys.preempted": "{by} 插队了，{task} 先暂停，之后自动继续。"
 }

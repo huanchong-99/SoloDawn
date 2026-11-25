@@ -20,7 +20,7 @@
     const last = group.main.at(-1);
     if (!last) return t('groups.none');
     const by = last.by === 'system' ? t('chat.system') : group.member(last.by)?.name;
-    const said = subject(last) || t(`chat.kind.${last.kind}`);
+    const said = subject(group, last) || t(`chat.kind.${last.kind}`);
     return `${by ?? t('chat.gone')}${t('groups.colon')}${said}`;
   }
 </script>
