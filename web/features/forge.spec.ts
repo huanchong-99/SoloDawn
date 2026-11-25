@@ -6,7 +6,7 @@ import { goldens } from '../src/lib/mock';
 import { prefs } from '../src/lib/prefs.svelte';
 import * as p from '../src/lib/proto';
 import GroupDetails from '../src/components/groupinfo/GroupDetails.svelte';
-import { all, closePage, one, show, text } from './page';
+import { all, closePage, one, show, text, texts } from './page';
 
 const feature = await loadFeature('../features/web_forge.feature');
 describeFeature(feature, ({ AfterEachScenario, Scenario }) => {
@@ -24,7 +24,7 @@ describeFeature(feature, ({ AfterEachScenario, Scenario }) => {
       person,
       { ...ai, user: 'another-owner', account: 'personal' },
       {
-        ...p.decode(p.GroupRow, goldens['row-group-custom']),
+        ...p.decode(p.GroupRow, goldens[forge === 'custom' ? 'row-group-custom' : 'row-group']),
         forge,
         secretary: ai.id,
         checks: ['pnpm check', 'pnpm test'],
@@ -86,10 +86,16 @@ describeFeature(feature, ({ AfterEachScenario, Scenario }) => {
         flushSync();
       });
       Then('no forge selector or template editor is offered', () => {
-        expect(document.querySelector('dialog > form > p.hint')).toBeNull();
-        expect(document.querySelector('dialog fieldset')).toBeNull();
+        expect(texts('dialog summary b')).toEqual(['Limits']);
+        expect(texts('dialog legend')).toEqual(['Review scores']);
         expect(document.querySelectorAll('dialog select').length).toBe(1);
-        expect(text('dialog label > span')).toBe('Secretary');
+        expect(texts('dialog label > span:first-child')).toEqual([
+          'Group name',
+          'Secretary',
+          'Check commands',
+          'Pass score',
+          'Foundation tasks',
+        ]);
       });
     },
   );

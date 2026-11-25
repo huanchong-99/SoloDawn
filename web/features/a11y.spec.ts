@@ -599,9 +599,10 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           radio.dispatchEvent(new Event('change', { bubbles: true }));
           await vi.waitFor(() => {
             flushSync();
-            expect(all('.card.node .acct')).toEqual([]);
+            expect(document.activeElement).toBe(radio);
           });
-          expect(document.activeElement).toBe(one('.card.node'));
+          expect(radio.disabled || radio.closest('fieldset')!.disabled).toBe(false);
+          expect(radio.checked).toBe(true);
 
           buttonNamed(one('.page-head'), 'Add a browser').click();
           flushSync();
@@ -623,7 +624,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         },
       );
       Then(
-        'choosing the account keeps focus on the computer card, copying the pairing link announces "Copied", and the dialog is open again',
+        'choosing the account keeps focus on the choice, copying the pairing link announces "Copied", and the dialog is open again',
         () => {
           expect(text('.app > [role="status"]')).toBe('Copied');
           expect(one<HTMLDialogElement>('dialog').open).toBe(true);

@@ -246,7 +246,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         radio.dispatchEvent(new Event('change', { bubbles: true }));
         await vi.waitFor(() => {
           flushSync();
-          expect(ai.querySelector('.acct')).toBeNull();
+          expect(ai.querySelector('.badge')!.textContent!.trim()).toBe('Team plan');
         });
       });
       Then(
@@ -296,6 +296,135 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
           );
         },
       );
+    },
+  );
+
+  Scenario(
+    'An account type is corrected, with its members in the groups',
+    ({ Given, When, Then, And }) => {
+      const row = () => all('.card.node .ai-row')[0];
+      const radios = () => [...row().querySelectorAll<HTMLInputElement>('.acct input')];
+      const chosen = () => radios().find((radio) => radio.checked)?.value;
+      const commands = () =>
+        workstation.home.asked
+          .filter((req) => req.t === 'cmd')
+          .map((req) => JSON.parse((req.env as { p: string }).p) as Record<string, unknown>);
+      const member = () => workstation.home.groups.get(website)!.rows.get('member claude-row')!;
+      const pick = (value: string) => {
+        const radio = radios().find((each) => each.value === value)!;
+        radio.checked = true;
+        radio.focus();
+        radio.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+
+      Given(
+        'an owned computer "workstation" on "macOS 15.2" running "v0.3.1" with direct path 4 ms and group "Website"',
+        async () => {
+          workstation = ownedNode('workstation', 'J3Uuh-y1z2AX536yAFlGHJL5sjxVpWVJavvVphvdm5Q');
+          workstation.home.add(website, 'Website');
+          workstation.home.write(
+            website,
+            example('row-member-ai', {
+              ...{ id: 'claude-row', g: website, cli: 'claude', account: 'personal' },
+              host: workstation.device,
+            }),
+          );
+          homes.push(workstation.store);
+          await workstation.connect();
+          paths.set(workstation.store, { kind: 'direct', rtt: 4, since: Date.now() });
+          await vi.waitFor(() => expect(find(website)?.member('claude-row')).toBeDefined());
+        },
+      );
+      When(
+        'the browser opens "#/nodes" and the person opens "Account type" of "Claude Code"',
+        async () => {
+          openPage('#/nodes');
+          await vi.waitFor(() => {
+            flushSync();
+            expect(row()).toBeDefined();
+          });
+          expect(row().querySelector('.acct')).toBeNull();
+          const button = row().querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+          expect(button.getAttribute('aria-label')).toBe('Account type · Claude Code');
+          button.click();
+          flushSync();
+          expect(button.getAttribute('aria-expanded')).toBe('true');
+        },
+      );
+      Then('"Personal subscription" is checked among the three choices', () => {
+        expect(radios().map((radio) => radio.value)).toEqual(['personal', 'team', 'api_key']);
+        expect(chosen()).toBe('personal');
+        expect(row().querySelector('.note')).toBeNull();
+      });
+      When(
+        'the group home refuses member commands and the person chooses "API key" for "Claude Code"',
+        () => {
+          workstation.home.reply = () => ({ err: { code: 'forbidden', msg: '' } });
+          pick('api_key');
+        },
+      );
+      Then(
+        '"workstation" receives "agent.set" with "api_key" and "member set" of "Claude Code" with "api_key", and the choice stays',
+        async () => {
+          await vi.waitFor(() => {
+            flushSync();
+            expect(row().querySelector('.fail')).not.toBeNull();
+          });
+          expect(workstation.commands.map((env) => JSON.parse(env.p))).toMatchObject([
+            { t: 'agent.set', agent: 'claude', account: 'api_key' },
+          ]);
+          expect(commands()).toMatchObject([
+            { t: 'member', g: website, op: 'set', id: 'claude-row', account: 'api_key' },
+          ]);
+          expect(chosen()).toBe('api_key');
+          expect((document.activeElement as HTMLInputElement).value).toBe('api_key');
+          expect(row().querySelector('.badge')!.textContent!.trim()).toBe('API key');
+        },
+      );
+      And('the card says "Not changed yet in Website." and why', () => {
+        expect(row().querySelector('.note .grow')!.textContent).toBe('Not changed yet in Website.');
+        expect(row().querySelector('.fail')!.textContent!.trim()).toBe(
+          'Not sent: this device may not do that.',
+        );
+      });
+      When('the group home takes them again and the person presses "Try again"', () => {
+        workstation.home.reply = (payload) => {
+          workstation.home.write(website, { ...member(), account: payload.account } as never);
+          return { ok: true };
+        };
+        const again = row().querySelector<HTMLButtonElement>('.note button')!;
+        expect(again.textContent!.trim()).toBe('Try again');
+        again.click();
+      });
+      Then('the note is gone and the member in "Website" has "api_key"', async () => {
+        await vi.waitFor(() => {
+          flushSync();
+          expect(row().querySelector('.fail, .note')).toBeNull();
+          expect(radios()[0].closest('fieldset')!.disabled).toBe(false);
+        });
+        expect(member().account).toBe('api_key');
+        expect(commands()).toHaveLength(2);
+      });
+      When(
+        '"workstation" refuses "agent.set" and the person chooses "Team plan" for "Claude Code"',
+        async () => {
+          const ctl = workstation.store.ctl!;
+          vi.spyOn(ctl, 'request').mockResolvedValueOnce({
+            re: 1,
+            err: { code: 'conflict', msg: '' },
+          } as never);
+          pick('team');
+          await vi.waitFor(() => {
+            flushSync();
+            expect(row().querySelector('.fail code')!.textContent).toBe('conflict');
+          });
+        },
+      );
+      Then('"API key" is checked again and no member command is sent', () => {
+        expect(chosen()).toBe('api_key');
+        expect(row().querySelector('.badge')!.textContent!.trim()).toBe('API key');
+        expect(commands()).toHaveLength(2);
+      });
     },
   );
 

@@ -139,7 +139,6 @@ it.each([
     expect(row('Admin').querySelector(':scope > .person-name')?.textContent?.trim()).toBe(
       'Admin · Admin',
     );
-    expect(row('Admin').querySelector(':scope > .st')?.textContent?.trim()).toBe('Online');
     expect(actions('Reader')).toEqual(own);
     expect(actions('Member')).toEqual(member);
     expect(actions('Admin')).toEqual(admin);

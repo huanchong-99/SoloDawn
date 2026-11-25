@@ -169,9 +169,12 @@ describe('E-M1: onboarding, pairing, account declaration, and two computers', ()
       await poll(() => laptopCard.textContent()).toContain('Account type not set');
 
       await laptopCard.locator('fieldset.acct input[value="api_key"]').click();
-      await poll(() => laptopCard.locator('fieldset.acct').count()).toBe(0);
-      await poll(() => laptopCard.textContent()).toContain('Team plan');
-      await poll(() => laptopCard.textContent()).toContain('API key');
+      await poll(() => laptopCard.locator('.ai-title .badge').allInnerTexts()).toEqual([
+        'Team plan',
+        'API key',
+      ]);
+      // The choice stays, to be corrected.
+      expect(await laptopCard.locator('fieldset.acct input:checked').inputValue()).toBe('api_key');
 
       await poll(() => page.locator('section.card.node').count()).toBe(2);
       await poll(() => indicator.getAttribute('data-st')).toBe('ok');

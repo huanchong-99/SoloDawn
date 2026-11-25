@@ -355,6 +355,35 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       await offlineBanner.getByRole('button', { name: 'Bring back online' }).click();
       await poll(() => offlineBanner.count()).toBe(0);
       await poll(() => claudeCard.locator('header .st').textContent()).toContain('Sleeping');
+
+      // Correct what was set at creation: the name and a check command (R-103).
+      await page.getByRole('button', { name: 'Edit group settings' }).click();
+      const settings = page.getByRole('dialog', { name: 'Edit group settings' });
+      await settings.getByLabel('Group name').fill('Website two');
+      await settings.getByLabel('Check commands').fill('git status');
+      await settings.getByLabel('Pass score').fill('85');
+      await settings.getByRole('button', { name: 'Save' }).click();
+      await poll(() => settings.count()).toBe(0);
+      await poll(() => page.locator('.chat-head h2').textContent()).toBe('Website two');
+      await page.getByRole('button', { name: 'Edit group settings' }).click();
+      expect(await settings.getByLabel('Check commands').inputValue()).toBe('git status');
+      expect(await settings.getByLabel('Pass score').inputValue()).toBe('85');
+      await settings.getByRole('button', { name: 'Cancel' }).click();
+
+      // Correct an account type on the computers page; the member in the group follows (R-50).
+      const chat = page.url();
+      await page.locator('.rail a[href="#/nodes"]').click();
+      await page.getByRole('button', { name: 'Account type · Codex' }).click();
+      const codexRow = page.locator('.ai-row', { hasText: 'Codex' });
+      await codexRow.getByRole('radio', { name: /^Team plan/ }).check();
+      await poll(() => codexRow.locator('.badge').first().textContent()).toBe('Team plan');
+      await page.goto(chat);
+      await poll(() => codexCard.textContent()).toContain('Team plan');
+
+      // Remove an AI that is not external, in two presses (R-11).
+      await codexCard.getByRole('button', { name: 'Remove AI' }).click();
+      await codexCard.getByRole('button', { name: 'Confirm removal' }).click();
+      await poll(() => members.locator('.member').count()).toBe(1);
     },
   );
 });

@@ -10,6 +10,7 @@ import {
   isAdmin,
   joinError,
   joinGroup,
+  openTasks,
   otherWaiter,
   pathLabel,
   personTags,
@@ -21,6 +22,7 @@ import {
   usageMeter,
   waitingOnMe,
   waitingOnOther,
+  watchDisabledReason,
 } from './members';
 import { goldens } from './mock';
 import type { Net } from './net.svelte';
@@ -578,8 +580,12 @@ describe('AI status and path projections', () => {
     expect(pathLabel(mk('working', 'direct'))).toBe('直连');
   });
 
-  it('projects usageMeter from the rate-limit window only', () => {
+  it('projects usageMeter from the rate-limit window, or else from the turns of today', () => {
     const resetAt = new Date(2026, 10, 20, 15, 0).getTime();
+    const at = new Date(2026, 10, 20, 9, 0).getTime();
+    vi.useFakeTimers({ now: new Date(2026, 10, 20, 23, 59) });
+    const meter = (usage: p.AIMemberRow['usage'], lang = 'en', last_seen = at) =>
+      usageMeter(row<p.AIMemberRow>('row-member-ai', { usage, last_seen }), lang);
     const bar = (value: string, fill: number, tone?: 'danger', note?: string) => ({
       label: 'Window used',
       value,
@@ -588,25 +594,63 @@ describe('AI status and path projections', () => {
       note,
     });
 
-    expect(usageMeter({}, 'en')).toBeUndefined();
-    expect(usageMeter({ turns_today: 14, window_resets: resetAt }, 'en')).toBeUndefined();
-    expect(usageMeter({ window_pct: 18 }, 'en')).toEqual(bar('18%', 18));
-    expect(usageMeter({ window_pct: -4 }, 'en')).toEqual(bar('-4%', 0));
-    expect(usageMeter({ window_pct: 62.5, window_resets: resetAt }, 'en')).toEqual(
+    expect(meter({})).toBeUndefined();
+    expect(meter({ window_resets: resetAt })).toBeUndefined();
+    expect(meter({ window_pct: 18, turns_today: 14 })).toEqual(bar('18%', 18));
+    expect(meter({ window_pct: -4 })).toEqual(bar('-4%', 0));
+    expect(meter({ window_pct: 62.5, window_resets: resetAt })).toEqual(
       bar('63%', 63, undefined, 'Resets 15:00'),
     );
-    expect(usageMeter({ window_pct: 99.9 }, 'en')).toEqual(bar('100%', 100));
-    expect(usageMeter({ window_pct: 100 }, 'en')).toEqual(bar('100%', 100, 'danger'));
-    expect(usageMeter({ window_pct: 125 }, 'en')).toEqual(bar('125%', 100, 'danger'));
+    expect(meter({ window_pct: 99.9 })).toEqual(bar('100%', 100));
+    expect(meter({ window_pct: 100 })).toEqual(bar('100%', 100, 'danger'));
+    expect(meter({ window_pct: 125 })).toEqual(bar('125%', 100, 'danger'));
+    const turns = { label: 'Turns today', value: '14' };
+    expect(meter({ turns_today: 14, window_resets: resetAt })).toStrictEqual(turns);
+    // Reported before midnight: the count is yesterday's.
+    vi.setSystemTime(new Date(2026, 10, 21, 0, 0));
+    expect(meter({ turns_today: 14 })).toBeUndefined();
 
     prefs.lang = 'zh-CN';
-    expect(usageMeter({ window_pct: 62, window_resets: resetAt }, 'zh-CN')).toEqual({
+    expect(meter({ window_pct: 62, window_resets: resetAt }, 'zh-CN')).toEqual({
       label: '这一轮额度已用',
       value: '62%',
       fill: 62,
       tone: undefined,
       note: '15:00 重置',
     });
+    vi.useRealTimers();
+  });
+
+  it('disables watching on a relayed path only', () => {
+    const { home } = makeGroup();
+    const ai = row<p.AIMemberRow>('row-member-ai', { g: gid, host: home.device });
+    const why = (entries: Home[], path: ReturnType<Net['path']>) =>
+      watchDisabledReason({ source: 'live', homes: entries, path: () => path }, ai);
+    const relay = { kind: 'relay', rtt: 80, since: 1 } as const;
+    expect(why([home], relay)).toBe('Watching requires a direct connection');
+    expect(why([home], { kind: 'direct', rtt: 4, since: 1 })).toBeUndefined();
+    expect(why([home], undefined)).toBeUndefined();
+    expect(why([], relay)).toBeUndefined();
+  });
+
+  it('lists the tasks that are not final and have the AI as assignee or reviewer, by number', () => {
+    const { group } = makeGroup();
+    const ai = row<p.AIMemberRow>('row-member-ai', { id: 'ai-o', g: gid });
+    const task = (num: number, state: string, assignee: string, reviewer: string) =>
+      row('row-task', { id: `t${num}`, g: gid, num, state, assignee, reviewer });
+    const gone = { r: 'task', id: 't9', seq: nextSeq(), gone: true } as p.Row;
+    group.apply([
+      ai,
+      task(8, 'failed', 'other', 'ai-o'),
+      task(3, 'queued', 'ai-o', 'other'),
+      task(5, 'paused', 'ai-o', 'other'),
+      task(4, 'active', 'other', 'ai-o'),
+      task(1, 'merged', 'ai-o', 'other'),
+      task(2, 'cancelled', 'ai-o', 'other'),
+      task(6, 'active', 'other', 'another'),
+      gone,
+    ]);
+    expect(openTasks(group, ai).map((each) => each.num)).toEqual([3, 4, 5, 8]);
   });
 
   it('computes terminalDisabledReason across offline host/AI, relay, linking and direct', () => {

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { watch } from '../../features/watch.svelte';
-import { Home, lost } from './groups.svelte';
+import { Home, homes, lost } from './groups.svelte';
 import { goldens } from './mock';
 import type { Net, Path } from './net.svelte';
-import { indicator, Nodes, nodes } from './nodes.svelte';
+import { indicator, Nodes, nodes, outdated } from './nodes.svelte';
 import * as p from './proto';
 
 const user = 'akWV_5PtNLIGhakuMAvpD9LcG1D8TUfc1URh48VREcs';
@@ -468,6 +468,59 @@ describe('Nodes', () => {
     link.offline();
     expect(await store.setAccount(home, deviceId, 'codex', 'personal')).toStrictEqual(lost());
     expect(asked).toHaveLength(3);
+  });
+
+  it('gives the members of the CLI on that computer its account type, and no other', async () => {
+    const store = new Nodes();
+    const first = new Home(me);
+    const second = new Home(me);
+    const links = [first, second].map((home, i) =>
+      connectHome(home, { groups: [{ g: `group-${i}`, name: `Group ${i}`, seq: 0 }] }),
+    );
+    homes.push(first, second);
+    const member = (id: string, g: string, changes: object = {}) => ({
+      ...p.decode(p.AIMemberRow, goldens['row-member-ai']),
+      ...{ id, g, host: deviceId, cli: 'codex', account: 'personal' },
+      ...changes,
+    });
+    first.groups[0].apply([
+      member('a', 'group-0'),
+      member('same', 'group-0', { account: 'api_key' }),
+      member('cli', 'group-0', { cli: 'claude' }),
+      member('host', 'group-0', { host: 'elsewhere' }),
+    ]);
+    second.groups[0].apply([member('b', 'group-1', { account: 'team' })]);
+    expect(
+      outdated(deviceId, 'codex', 'api_key').map(({ group, ai }) => [group.name, ai.id]),
+    ).toEqual([
+      ['Group 0', 'a'],
+      ['Group 1', 'b'],
+    ]);
+
+    const commands = ({ asked }: (typeof links)[number]) =>
+      asked.filter(({ req }) => req.t === 'cmd');
+    const call = store.correct(deviceId, 'codex', 'api_key');
+    await vi.waitFor(() => expect(links.flatMap(commands)).toHaveLength(2));
+    expect(signed.map((payload) => JSON.parse(payload))).toEqual(
+      ['a', 'b'].map((id, i) => ({
+        t: 'member',
+        n: expect.any(String),
+        ts: expect.any(Number),
+        g: `group-${i}`,
+        op: 'set',
+        id,
+        account: 'api_key',
+      })),
+    );
+    commands(links[0])[0].answer({ re: 1, ok: true });
+    commands(links[1])[0].answer({ re: 1, err: { code: 'forbidden', msg: 'no' } });
+    expect(await call).toStrictEqual({ code: 'forbidden', msg: 'no' });
+
+    const again = store.correct(deviceId, 'codex', 'api_key');
+    await vi.waitFor(() => expect(links.flatMap(commands)).toHaveLength(4));
+    for (const link of links) commands(link)[1].answer({ re: 2, ok: true });
+    expect(await again).toBeUndefined();
+    homes.length = 0;
   });
 
   it('signs and sends pair.browser and returns link and expires, or the error response', async () => {

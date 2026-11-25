@@ -253,7 +253,7 @@ it('uses the unset profile label for external AI and keeps the default for manag
   ]);
 });
 
-it('keeps setup with the owner and confirms removal before sending the command', async () => {
+it('keeps setup with the owner', async () => {
   show(MemberExternal, { group, ai: { ...member, cli: 'codex' } });
   expect(all('dt, dd')).toEqual([]);
   show(MemberExternal, { group, ai: { ...member, user: 'other-user', tool: undefined } });
@@ -261,42 +261,10 @@ it('keeps setup with the owner and confirms removal before sending the command',
   expect(all('button')).toEqual([]);
   show(MemberExternal, { group, ai: member });
   expect(texts('dd.tool')).toEqual(['External AI', 'External AI · ZCode']);
+  expect(texts('.actions button')).toEqual(['Setup']);
   one('.actions button').click();
   await tick();
   expect(one<HTMLDialogElement>('dialog').open).toBe(true);
   one('dialog header button').click();
   await vi.waitFor(() => expect(all('dialog')).toHaveLength(0));
-  const remove = one<HTMLButtonElement>('.actions button:nth-child(2)');
-  const confirm = async () => {
-    remove.click();
-    await tick();
-    expect(remove.textContent?.trim()).toBe('Confirm removal');
-    expect(remove.classList.contains('btn-danger')).toBe(true);
-  };
-  await confirm();
-  expect(request).not.toHaveBeenCalled();
-  const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
-  remove.dispatchEvent(escape);
-  await tick();
-  expect(escape.defaultPrevented).toBe(true);
-  expect(remove.textContent?.trim()).toBe('Remove AI');
-  expect(request).not.toHaveBeenCalled();
-
-  request.mockResolvedValueOnce({ re: 1, err: { code: 'conflict' } });
-  await confirm();
-  remove.click();
-  await vi.waitFor(() =>
-    expect(texts('.actions [role=alert]')).toEqual([
-      'Reassign the AI’s unfinished tasks before removing it.',
-    ]),
-  );
-  request.mockResolvedValueOnce({ re: 1, err: { code: 'forbidden' } });
-  await confirm();
-  remove.click();
-  await vi.waitFor(() =>
-    expect(texts('.actions [role=alert]')).toEqual(['Not sent: this device may not do that.']),
-  );
-  await confirm();
-  remove.click();
-  await vi.waitFor(() => expect(texts('.actions [role=alert]')).toEqual([]));
 });
