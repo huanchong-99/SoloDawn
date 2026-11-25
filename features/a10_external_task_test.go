@@ -248,20 +248,14 @@ func (w *externalWorld) restartNode() error {
 }
 
 func (w *externalWorld) awaitNodeStopped() error {
-	ticker := time.NewTicker(25 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			conn, err := net.Dial("unix", filepath.Join(w.homeNode.data, "sock"))
-			if err != nil {
-				return nil
-			}
-			conn.Close()
-		case <-w.ctx.Done():
-			return w.ctx.Err()
+	return waitUntilCtx(w.ctx, 25*time.Millisecond, "the node to stop", func() error {
+		conn, err := net.Dial("unix", filepath.Join(w.homeNode.data, "sock"))
+		if err != nil {
+			return nil
 		}
-	}
+		conn.Close()
+		return errors.New("socket accepts")
+	})
 }
 
 func (w *externalWorld) reconnectNode() error {
@@ -369,12 +363,11 @@ func (w *externalWorld) decideApproval(action string) error {
 	if err := w.hostCommand(proto.Act{HomeCommand: w.homeHeader("act"), Msg: proto.ID(card.ID), Action: action}); err != nil {
 		return err
 	}
-	select {
-	case err := <-w.approval:
+	result, err := recvCtx(w.ctx, w.approval, "the approval to finish", nil)
+	if err != nil {
 		return err
-	case <-w.ctx.Done():
-		return w.ctx.Err()
 	}
+	return result
 }
 
 func (w *externalWorld) expirePresence() error {

@@ -216,13 +216,11 @@ func (w *nodeSessionWorld) dialNode(clientKey identity.Key) (*peer.Peer, *peer.C
 		return nil, nil, err
 	}
 	w.cleanup(func() { conn.Close() })
-	select {
-	case <-w.ctx.Done():
-		return nil, nil, w.ctx.Err()
-	case <-conn.Ready():
-		go drainBrowserConn(w.ctx, conn)
-		return cp, conn, nil
+	if _, err := recvCtx(w.ctx, conn.Ready(), "the connection to be ready", nil); err != nil {
+		return nil, nil, err
 	}
+	go drainBrowserConn(w.ctx, conn)
+	return cp, conn, nil
 }
 
 func drainBrowserConn(ctx context.Context, conn *peer.Connection) {
@@ -260,7 +258,7 @@ func (w *nodeSessionWorld) checkPairingForbidden(wantCode string) error {
 		return err
 	}
 	env := w.b1Key.Sign(fmt.Sprintf(`{"t":"settings.set","n":%q,"ts":%d,"to":%q,"offline":true}`, exampleID("pair-cmd"), w.now.UnixMilli(), w.nodeKey.ID()))
-	raw, err := w.b1Conn.Request(w.ctx, func(id int64) any {
+	raw, err := requestWait(w.ctx, w.b1Conn, nil, func(id int64) any {
 		return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
 	})
 	if err != nil {
@@ -305,7 +303,7 @@ func (w *nodeSessionWorld) checkAdoptedSurfaceAndReceipt() error {
 }
 
 func (w *nodeSessionWorld) verifyAdoptedHostInfo() error {
-	rawInfo, err := w.b1Conn.Request(w.ctx, func(id int64) any {
+	rawInfo, err := requestWait(w.ctx, w.b1Conn, nil, func(id int64) any {
 		return proto.Request{Type: "host.info", ID: id}
 	})
 	if err != nil {
@@ -324,7 +322,7 @@ func (w *nodeSessionWorld) verifyAdoptedHostInfo() error {
 func (w *nodeSessionWorld) verifyIdempotentSettingsCmd() error {
 	env := w.b1Key.Sign(fmt.Sprintf(`{"t":"settings.set","n":%q,"ts":%d,"to":%q,"offline":true}`, exampleID("set-1"), w.now.UnixMilli(), w.nodeKey.ID()))
 	for range 2 {
-		rawCmd, err := w.b1Conn.Request(w.ctx, func(id int64) any {
+		rawCmd, err := requestWait(w.ctx, w.b1Conn, nil, func(id int64) any {
 			return proto.Cmd{Request: proto.Request{Type: "cmd", ID: id}, Env: env}
 		})
 		if err != nil {
@@ -345,7 +343,7 @@ func (w *nodeSessionWorld) verifyIdempotentSettingsCmd() error {
 }
 
 func (w *nodeSessionWorld) expectRequestError(conn *peer.Connection, typ, wantCode string) error {
-	raw, err := conn.Request(w.ctx, func(id int64) any {
+	raw, err := requestWait(w.ctx, conn, nil, func(id int64) any {
 		return proto.Request{Type: typ, ID: id}
 	})
 	if err != nil {

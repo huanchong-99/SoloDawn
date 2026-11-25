@@ -72,13 +72,14 @@ func (b *m2Browser) cacheOf(group string) *m2Cache {
 	return c
 }
 
-func (b *m2Browser) nextRaw(timeout time.Duration) ([]byte, error) {
-	select {
-	case raw := <-b.ch:
-		return raw, nil
-	case <-time.After(timeout):
-		return nil, fmt.Errorf("%s timed out waiting for frame", b.name)
-	}
+func (b *m2Browser) nextFrame(timeout time.Duration, what string) ([]byte, error) {
+	w := b.wait(timeout, what)
+	defer w.stop()
+	return recvWait(w, b.ch)
+}
+
+func (b *m2Browser) wait(timeout time.Duration, what string) *wait {
+	return newWait(timeout, b.name+": "+what, b.saw)
 }
 
 func (b *m2Browser) connect(loop *home.Loop, homeID string, now int64) error {
@@ -112,9 +113,10 @@ func (b *m2Browser) disconnect(loop *home.Loop) {
 }
 
 func (b *m2Browser) readResponse(re int64, timeout time.Duration) ([]byte, error) {
-	deadline := time.Now().Add(timeout)
+	w := b.wait(timeout, fmt.Sprintf("the answer to request %d", re))
+	defer w.stop()
 	for {
-		raw, err := b.nextRaw(time.Until(deadline))
+		raw, err := recvWait(w, b.ch)
 		if err != nil {
 			return nil, err
 		}
@@ -245,7 +247,7 @@ func (b *m2Browser) sync(loop *home.Loop, group string) error {
 
 func (b *m2Browser) collectSync(group string, re int64) error {
 	for {
-		raw, err := b.nextRaw(10 * time.Second)
+		raw, err := b.nextFrame(10*time.Second, "the sync of "+group)
 		if err != nil {
 			return err
 		}
@@ -324,12 +326,13 @@ func (b *m2Browser) findGroup(name string) (string, bool) {
 }
 
 func (b *m2Browser) awaitGroup(name string, timeout time.Duration) (string, error) {
-	deadline := time.Now().Add(timeout)
+	w := b.wait(timeout, fmt.Sprintf("group %q in its list", name))
+	defer w.stop()
 	for {
 		if id, ok := b.findGroup(name); ok {
 			return id, nil
 		}
-		raw, err := b.nextRaw(time.Until(deadline))
+		raw, err := recvWait(w, b.ch)
 		if err != nil {
 			return "", err
 		}
@@ -360,9 +363,10 @@ func (b *m2Browser) mainTexts(group string) []string {
 }
 
 func (b *m2Browser) awaitText(group, text string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
+	w := b.wait(timeout, fmt.Sprintf("text %q in the main line", text))
+	defer w.stop()
 	for !slices.Contains(b.mainTexts(group), text) {
-		raw, err := b.nextRaw(time.Until(deadline))
+		raw, err := recvWait(w, b.ch)
 		if err != nil {
 			return err
 		}
