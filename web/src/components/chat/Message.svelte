@@ -6,6 +6,7 @@
   import { clock } from '../../lib/when';
   import Avatar from '../Avatar.svelte';
   import Rich from '../Rich.svelte';
+  import Waits from '../queue/Waits.svelte';
 
   /** One message of the main line. `joined`: it follows a message of the same author closely, and
    *  is drawn under it without a head of its own. */
@@ -77,7 +78,10 @@
         <time datetime={new Date(msg.ts).toISOString()}>{time}</time>
       </p>
     {/if}
-    <div class="msg-body">{@render body()}</div>
+    <div class="msg-body">
+      {@render body()}
+      {#if author && author.id === group.me?.id}<Waits {group} {msg} />{/if}
+    </div>
   </article>
 {/if}
 

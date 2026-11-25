@@ -12,6 +12,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the host half of the jump was never built. The home's half is (`rndJump`, `internal/home/rounds.go:42`), and delivery takes a jump item although the AI is `working` (`isItemHeld`, `internal/host/deliver.go:895`), but nothing reads `Turn.Jump` (its only writers are `internal/host/turn.go:193` and `deliver.go:1174`; the promise is the comment at `internal/host/host.go:557`). `runSessionTurn` (`deliver.go:1165`) commits the audit row and acknowledges the batch before `Runner.Turn`, which answers `busy` (another session of the AI is working, `Sessions.Move`, `internal/host/session.go:260`) or `conflict` (the same session, `startHandBack`, `run.go:326`); the error is only logged. `TaskPreempted` and a `ContinueTurn` are sent by nothing. Seen by running `TestMemberStatusPriorityAnswerAndTurnRefusals` with `Turn{Kind: ItemsTurn, Jump: true}`: `busy`, as without it.
 - Status: open, found while building the web control for `jump`, which must not ship before the host half. The acceptance scenario of A5.11 does not exist.
 
+### 2026-11-25 · limitation · The web client works out which messages wait for an AI
+
+- Symptom: a message of one's own can stop saying that it waits although the AI has not taken it: when the AI's row changed in the middle of a turn (its model edited, a status sent), or when the AI's next turn took older items of another session first.
+- Cause: no row tells what a home has queued; `waiting` (`web/src/lib/queue.ts`) compares the sequence of the message with that of the AI's row, which changes when a turn starts or ends.
+- Status: open, accepted: the message is delivered as before, only the choice to let it go first is gone.
+
 ### 2026-11-25 · limitation · `host.offline` does not mark an AI that never had a session
 
 - Symptom: an AI that was added to a group and never woken keeps `dormant` ("Sleeping") in the group for everybody but its owner after its owner took all AIs of the computer offline.
