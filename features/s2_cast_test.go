@@ -463,13 +463,14 @@ type s2Cast struct {
 	Q1         *s2Node
 
 	ids       seqIDGen
+	groups    map[proto.ID]string
 	mu        sync.Mutex
 	undos     []func()
 	closeOnce sync.Once
 }
 
 func startS2Cast(t testing.TB, cleanup func(func()), f fixtures, cfg s2CastConfig) (*s2Cast, error) {
-	c := &s2Cast{F: f}
+	c := &s2Cast{F: f, groups: map[proto.ID]string{}}
 	registerBothCleanups(t, cleanup, c.Close)
 	cleanWindowsLoginTaskIfAbsent(t, c.addUndo)
 	ctx, cancel := context.WithTimeout(context.Background(), cmp.Or(cfg.Timeout, s2ScenarioTimeout))
@@ -824,7 +825,48 @@ func (c *s2Cast) CreateProjectGroup(p *s2Person, home *s2Node, name, forge strin
 	if _, err := c.SendCmd(p, bc.conn, create); err != nil {
 		return "", err
 	}
+	c.groups[gid] = name
 	return gid, c.syncGroup(bc.conn, gid)
+}
+
+func (c *s2Cast) JoinGroup(p *s2Person, link s2JoinLink, name string) (*peerBrowserConn, proto.ID, error) {
+	bc, member, err := c.sendJoin(p, link, name)
+	if err != nil {
+		return nil, "", err
+	}
+	return bc, member, c.followJoin(p, link)
+}
+
+func (c *s2Cast) sendJoin(p *s2Person, link s2JoinLink, name string) (*peerBrowserConn, proto.ID, error) {
+	member := c.NextID()
+	bc, raw, err := joinGroupWithLink(c.Ctx, c.addUndo, p.Browser, p.Key, p.Entries, link, name, member, time.Now())
+	if err != nil {
+		return nil, "", err
+	}
+	var res proto.CmdResult
+	if err := proto.Decode(raw, &res); err != nil {
+		return nil, "", fmt.Errorf("join: %s (%w)", raw, err)
+	}
+	p.Conns[link.Home] = bc
+	return bc, member, nil
+}
+
+// followJoin is what the web client does after an accepted join (joinGroup in web/src/lib/join.ts):
+// it sends home.add to the person's own nodes and syncs the group.
+func (c *s2Cast) followJoin(p *s2Person, link s2JoinLink) error {
+	for _, n := range []*s2Node{c.P1, c.P2, c.Q1} {
+		if n.Owner != p {
+			continue
+		}
+		_, err := c.SendCmd(p, p.Conns[n.ID()].conn, proto.HomeAdd{
+			HostCommand: proto.HostCommand{Type: "home.add", Nonce: c.NextID(), Timestamp: time.Now().UnixMilli(), To: n.ID()},
+			Group:       proto.ID(link.Group), Home: link.Home, Name: c.groups[proto.ID(link.Group)], Addrs: []string{c.RVURL},
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return c.syncGroup(p.Conns[link.Home].conn, proto.ID(link.Group))
 }
 
 func (c *s2Cast) syncGroup(conn *peer.Connection, gid proto.ID) error {

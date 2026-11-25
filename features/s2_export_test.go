@@ -31,7 +31,8 @@ type s2ExportWorld struct {
 	cleanup    func(func())
 	c          *s2Cast
 	g, task    proto.ID
-	name, file string
+	file       string
+	link       s2JoinLink
 	secretary  string
 	qTeam      string
 	item       int64
@@ -49,7 +50,9 @@ func s2ExportSteps(sc *godog.ScenarioContext, f fixtures) {
 	sc.Step(`^P1 no longer lists the group and answers cmd, sync and fetch with moved to P2$`, w.checkMoved)
 	sc.Step(`^P imports the file on P2$`, w.importFile)
 	sc.Step(`^P2 is home and has the exported rows$`, w.checkRows)
-	sc.Step(`^the two browser peers and Q1 follow P2 within 5 seconds of import without a reload$`, w.followMoved)
+	sc.Step(`^the two browser peers follow P2 within 5 seconds of import without a reload$`, w.browsersFollow)
+	sc.Step(`^Q1 follows P2$`, w.q1Follows)
+	sc.Step(`^Q1 follows P2 within 5 seconds of import$`, w.q1FollowsInTime)
 	sc.Step(`^P2 delivers the unacknowledged mention once and the next task gets number 2$`, w.checkDeliveryAndNumber)
 	sc.Step(`^the export cannot be imported on Q1 or exported again from P1$`, w.checkFailures)
 	sc.Step(`^P takes two successive copies on P1 and writes a note after each copy$`, w.copyExports)
@@ -63,12 +66,16 @@ func (w *s2ExportWorld) group(name string) error {
 	if err != nil {
 		return err
 	}
-	w.c, w.name = c, name
+	w.c = c
 	w.g, err = c.CreateProjectGroup(c.P, c.P1, name, "none")
 	if err != nil {
 		return err
 	}
-	if err := w.joinQ(c.P1); err != nil {
+	link, err := w.inviteQ(c.P1)
+	if err != nil {
+		return err
+	}
+	if _, _, err := c.JoinGroup(c.Q, link, c.Q.Name); err != nil {
 		return err
 	}
 	ai, err := c.JoinAI(c.Q, c.Q1, c.P1, w.g, s2QTeamCLI, s2QTeamName, false)
@@ -80,26 +87,17 @@ func (w *s2ExportWorld) header(typ string) proto.HomeCommand {
 	return proto.HomeCommand{Type: typ, Nonce: w.c.NextID(), Timestamp: time.Now().UnixMilli(), Group: w.g}
 }
 
-func (w *s2ExportWorld) joinQ(home *s2Node) error {
-	c, q := w.c, w.c.Q
+func (w *s2ExportWorld) inviteQ(home *s2Node) (s2JoinLink, error) {
+	c := w.c
 	res, err := c.SendCmd(c.P, c.P.Conns[home.ID()].conn, w.header("invite"))
 	if err != nil {
-		return err
+		return s2JoinLink{}, err
 	}
 	link, err := parseS2JoinLink(res.Link, res.Expires)
-	if err != nil {
-		return err
+	if err == nil && (link.Group != string(w.g) || link.Home != home.ID()) {
+		err = errors.New("invitation does not name the group and home")
 	}
-	if link.Group != string(w.g) || link.Home != home.ID() {
-		return errors.New("invitation does not name the group and home")
-	}
-	bc, raw, err := joinGroupWithLink(c.Ctx, c.addUndo, q.Browser, q.Key, q.Entries, link, q.Name, c.NextID(), time.Now())
-	if err != nil {
-		return err
-	}
-	q.Conns[home.ID()] = bc
-	var result proto.CmdResult
-	return proto.Decode(raw, &result)
+	return link, err
 }
 
 func (w *s2ExportWorld) dialQ(home string) (*peerBrowserConn, error) {
@@ -323,8 +321,15 @@ func (w *s2ExportWorld) export(file string, move ...string) error {
 }
 
 func (w *s2ExportWorld) moveExport() error {
+	held, err := w.groupRows(s2ExportDB(w.c.P1))
+	if err != nil {
+		return err
+	}
 	if err := w.export("move.db", "--to", w.c.P2.ID()); err != nil {
 		return err
+	}
+	if !reflect.DeepEqual(held, w.rows) {
+		return fmt.Errorf("exported rows differ: P1 held %v, the file has %v", held, w.rows)
 	}
 	items, err := readS2SQLiteRows(w.c.Ctx, w.file,
 		"SELECT count(*) FROM inbox WHERE g=? AND ai=? AND msg=? AND why='mention'", w.g, w.qTeam, w.mention)
@@ -431,13 +436,23 @@ func (w *s2ExportWorld) checkHome(p *s2Person) error {
 	})
 }
 
-func (w *s2ExportWorld) followMoved() error {
+func (w *s2ExportWorld) browsersFollow() error {
 	if err := w.followBrowserPeers(); err != nil {
 		return err
 	}
-	if err := w.checkQ1Turn("Hello from the new home"); err != nil {
+	return w.followedInTime()
+}
+
+func (w *s2ExportWorld) q1Follows() error { return w.checkQ1Turn("Hello from the new home") }
+
+func (w *s2ExportWorld) q1FollowsInTime() error {
+	if err := w.q1Follows(); err != nil {
 		return err
 	}
+	return w.followedInTime()
+}
+
+func (w *s2ExportWorld) followedInTime() error {
 	if duration := time.Since(w.importedAt); duration > 5*time.Second {
 		return fmt.Errorf("following P2 took %s after import, want at most 5s", duration)
 	}
@@ -474,7 +489,11 @@ func (w *s2ExportWorld) checkDeliveryAndNumber() error {
 	if err := w.checkDelivery(); err != nil {
 		return err
 	}
-	return w.createTask(c.P2, "second task", 2)
+	if err := w.createTask(c.P2, "second task", 2); err != nil {
+		return err
+	}
+	_, err = w.resumedMentionTurn()
+	return err
 }
 
 func (w *s2ExportWorld) resumedMentionTurn() (bool, error) {
@@ -548,22 +567,22 @@ func (w *s2ExportWorld) deleteOldHome() error {
 }
 
 func (w *s2ExportWorld) restoreMember() error {
-	if err := w.joinQ(w.c.P2); err != nil {
+	link, err := w.inviteQ(w.c.P2)
+	if err != nil {
 		return err
 	}
+	if _, _, err := w.c.sendJoin(w.c.Q, link, w.c.Q.Name); err != nil {
+		return err
+	}
+	w.link = link
 	return w.compareRows(s2ExportDB(w.c.P2))
 }
 
 func (w *s2ExportWorld) followRestored() error {
-	c := w.c
-	_, err := c.SendCmd(c.Q, c.Q.Conns[c.Q1.ID()].conn, proto.HomeAdd{
-		HostCommand: proto.HostCommand{Type: "home.add", Nonce: c.NextID(), Timestamp: time.Now().UnixMilli(), To: c.Q1.ID()},
-		Group:       w.g, Home: c.P2.ID(), Name: w.name, Addrs: []string{c.RVURL},
-	})
-	if err != nil {
+	if err := w.c.followJoin(w.c.Q, w.link); err != nil {
 		return err
 	}
-	if err := w.checkHome(c.Q); err != nil {
+	if err := w.checkHome(w.c.Q); err != nil {
 		return err
 	}
 	return w.checkQ1Turn("Hello from the restored home")

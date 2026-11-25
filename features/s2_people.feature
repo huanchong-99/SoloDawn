@@ -1,4 +1,3 @@
-@pending
 Feature: Step 2 people, invitations, roles, removal and host surfaces
   A group owner or admin invites a second person through a one-time #join link,
   manages member roles and removal, admits the member's host AIs, and enforces
@@ -39,8 +38,14 @@ Feature: Step 2 people, invitations, roles, removal and host surfaces
     When an unfinished task has Q-team as assignee and then as reviewer
     Then removing Q while Q-team holds either unfinished task role was refused with "conflict"
     When P cancels that task and removes Q from the people group
+    Then Q's browser receives groups without the group and P sees gone markers for Q and Q's AIs
+
+  # Waits for #399: the home does not close a removed person's connections yet (issues.md, 2026-11-26).
+  @pending
+  Scenario: A removed member's connections close and are refused (A9.4)
+    Given the people cast where Q joined P's group "Alpha" on P1 and joined Q-team and Q-personal from Q1
+    When P removes Q from the people group
     Then Q's connections to P1 close within 1 second and Q's next connection attempt to P1 is refused
-    And Q's browser received groups without the group and P sees gone markers for Q and Q's AIs
 
   Scenario: Joining Q-team from Q1 and refusing non-member or duplicate-secretary add_ai (A9.5)
     Given the people cast where P's group "Alpha" on P1 has a secretary, P also has group "Solo" and Q has joined only the first as "Q"

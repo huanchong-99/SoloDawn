@@ -610,7 +610,7 @@ func (n *peerNode) initCore(cfg peerNodeConfig) error {
 	}
 	loop, err := home.StartLoop(home.LoopConfig{
 		Store: n.Store, Home: n.Key.ID(), OwnerFn: logs.Owner,
-		Logs: logs.Log, Tables: home.NodeTables(), Now: cfg.Now,
+		Logs: logs.Log, Tables: home.NodeTables(), Invite: peerNodeInviter{n}, Now: cfg.Now,
 	})
 	if err != nil {
 		return err
@@ -632,6 +632,17 @@ func (n *peerNode) initCore(cfg peerNodeConfig) error {
 		Store: n.Store, Sessions: n.Sessions, Host: h, Name: nameFn, Agents: h.Agents,
 	})
 	return nil
+}
+
+// peerNodeInviter gives the home loop the node's Pairer, which needs the loop's Sessions and so is built after it.
+type peerNodeInviter struct{ n *peerNode }
+
+func (i peerNodeInviter) Invite(group, by, signer, nonce string) (home.InviteLink, error) {
+	return i.n.Pairer.Invite(group, by, signer, nonce)
+}
+
+func (i peerNodeInviter) ReplayInvite(signer, nonce string) (home.InviteLink, bool) {
+	return i.n.Pairer.ReplayInvite(signer, nonce)
 }
 
 func (n *peerNode) initTransport(cfg peerNodeConfig) error {
@@ -817,17 +828,17 @@ func (b *peerBrowser) waitOnline(ctx context.Context, devices ...string) error {
 }
 
 func (b *peerBrowser) exchangeRoom(ctx context.Context, secret identity.Secret, myRole, wantRole string) (proto.Pair, error) {
-	room := secret.Room()
-	self := proto.Pair{Type: "pair", Key: b.key.ID(), Kind: "browser", Name: "Owner Browser", Role: myRole}
-	self.MAC = secret.MAC(self)
-	rawSelf, err := json.Marshal(self)
-	if err != nil {
-		return proto.Pair{}, err
-	}
+	room, rawSelf := secret.Room(), b.pairSelf(secret, myRole)
 	if err := b.path.Write(ctx, proto.RoomID{Type: "join", Room: room}); err != nil {
 		return proto.Pair{}, err
 	}
 	return b.awaitRoomPeer(ctx, secret, room, wantRole, rawSelf)
+}
+
+func (b *peerBrowser) pairSelf(secret identity.Secret, role string) []byte {
+	self := proto.Pair{Type: "pair", Key: b.key.ID(), Kind: "browser", Name: "Owner Browser", Role: role}
+	self.MAC = secret.MAC(self)
+	return mustMarshalNoEscape(self)
 }
 
 func (b *peerBrowser) awaitRoomPeer(ctx context.Context, secret identity.Secret, room, wantRole string, rawSelf []byte) (proto.Pair, error) {

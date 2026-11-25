@@ -5,7 +5,6 @@ package features
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"os/exec"
@@ -142,6 +141,7 @@ type s2ClockHome struct {
 	pView       *s2BrowserView
 	gid         proto.ID
 	invites     map[string]s2JoinLink
+	link        s2JoinLink
 	lastJoinRaw json.RawMessage
 	lastCmdRaw  json.RawMessage
 }
@@ -209,8 +209,9 @@ func registerS2PeopleA93A94Steps(sc *godog.ScenarioContext, w *s2PeopleWorld) {
 	sc.Step(`^an unfinished task has Q-team as assignee and then as reviewer$`, w.stageUnfinishedTaskForQTeam)
 	sc.Step(`^removing Q while Q-team holds either unfinished task role was refused with "([^"]*)"$`, w.verifyUnfinishedTaskConflicts)
 	sc.Step(`^P cancels that task and removes Q from the people group$`, w.cancelTaskAndRemoveQ)
+	sc.Step(`^P removes Q from the people group$`, w.removeConnectedQ)
 	sc.Step(`^Q's connections to P1 close within 1 second and Q's next connection attempt to P1 is refused$`, w.verifyQDisconnectedAndRefused)
-	sc.Step(`^Q's browser received groups without the group and P sees gone markers for Q and Q's AIs$`, w.verifyQGroupsAndGoneMarkers)
+	sc.Step(`^Q's browser receives groups without the group and P sees gone markers for Q and Q's AIs$`, w.verifyQGroupsAndGoneMarkers)
 }
 
 func registerS2PeopleA95A96Steps(sc *godog.ScenarioContext, w *s2PeopleWorld) {
@@ -338,27 +339,19 @@ func (w *s2PeopleWorld) verifyJoinLinkFields() error {
 	if w.inviteLink.Group != string(w.gid) || w.inviteLink.Home != w.cast.P1.ID() {
 		return fmt.Errorf("invite link = %+v, want g=%s home=%s", w.inviteLink, w.gid, w.cast.P1.ID())
 	}
-	if w.inviteLink.Expires <= now || w.inviteLink.Expires > now+11*time.Minute.Milliseconds() {
+	if w.inviteLink.Expires <= now+9*time.Minute.Milliseconds() || w.inviteLink.Expires > now+10*time.Minute.Milliseconds() {
 		return fmt.Errorf("invite expires = %d, now = %d", w.inviteLink.Expires, now)
 	}
 	return nil
 }
 
 func (w *s2PeopleWorld) qBrowserJoinsGroup(memberName string) error {
-	bc, raw, err := joinGroupWithLink(
-		w.cast.Ctx, w.cast.addUndo, w.cast.Q.Browser, w.cast.Q.Key,
-		w.cast.Q.Entries, w.inviteLink, memberName, w.cast.NextID(), time.Now(),
-	)
+	bc, _, err := w.cast.JoinGroup(w.cast.Q, w.inviteLink, memberName)
 	if err != nil {
 		return err
 	}
-	var res proto.CmdResult
-	if err := proto.Decode(raw, &res); err != nil {
-		return err
-	}
 	w.qHomeBC = bc
-	w.cast.Q.Conns[w.cast.P1.ID()] = bc
-	return w.syncQAndAwaitViews()
+	return w.awaitQJoinedOnBothViews()
 }
 
 func joinGroupWithLink(
@@ -419,13 +412,10 @@ func verifyJoiningWelcome(ctx context.Context, conn *peer.Connection) error {
 	return nil
 }
 
-func (w *s2PeopleWorld) syncQAndAwaitViews() error {
+func (w *s2PeopleWorld) awaitQJoinedOnBothViews() error {
 	if err := w.drainViewUntil(w.cast.Ctx, w.qHomeBC, w.qView, string(w.gid), func() bool {
 		return slices.ContainsFunc(w.qView.groups, func(g proto.GroupSummary) bool { return g.Group == string(w.gid) })
 	}); err != nil {
-		return err
-	}
-	if err := w.cast.syncGroup(w.qHomeBC.conn, w.gid); err != nil {
 		return err
 	}
 	if err := w.awaitQJoinedOnView(w.qView, w.qHomeBC); err != nil {
@@ -598,7 +588,7 @@ func (w *s2PeopleWorld) clockCreateInvite(tag string) error {
 		return fmt.Errorf("invite %s: %s (%w)", tag, raw, err)
 	}
 	link, err := parseS2JoinLink(res.Link, res.Expires)
-	ch.invites[tag] = link
+	ch.invites[tag], ch.link = link, link
 	return err
 }
 
@@ -690,7 +680,10 @@ func (w *s2PeopleWorld) clockQJoinsFirstLink(memberName string) error {
 	}
 	ch.qConn = bc
 	var res proto.CmdResult
-	return proto.Decode(raw, &res)
+	if err := proto.Decode(raw, &res); err != nil {
+		return err
+	}
+	return leaveS2PairingRoom(ch.ctx, ch.rvURL, qb)
 }
 
 func (w *s2PeopleWorld) prepareClockProbe(link s2JoinLink) error {
@@ -722,7 +715,48 @@ func (w *s2PeopleWorld) expectClockProbeRefused() error {
 	if err != nil {
 		return err
 	}
-	return checkWireError(raw, "forbidden")
+	if err := checkWireError(raw, "forbidden"); err != nil {
+		return err
+	}
+	return w.expectNewcomerRefused()
+}
+
+// expectNewcomerRefused has a browser that the home never met enter the room of the last invitation and offer.
+func (w *s2PeopleWorld) expectNewcomerRefused() error {
+	ch := w.clock
+	b, err := newPeerBrowser(ch.ctx, w.cleanup, newRandomPeerKey(), ch.rvURL, nil)
+	if err != nil {
+		return err
+	}
+	room := ch.link.Secret.Room()
+	if err := b.path.Write(ch.ctx, proto.RoomID{Type: "join", Room: room}); err != nil {
+		return err
+	}
+	self := proto.RoomData{RoomID: proto.RoomID{Type: "room", Room: room}, Data: b.pairSelf(ch.link.Secret, "b")}
+	if err := b.path.Write(ch.ctx, self); err != nil {
+		return err
+	}
+	if err := expectNeverOpens(ch.ctx, b, ch.link.Home); err != nil {
+		return err
+	}
+	return leaveS2PairingRoom(ch.ctx, ch.rvURL, b)
+}
+
+// expectNeverOpens offers once; the home answers nothing, and the offer is retired when its wait for an answer ends.
+func expectNeverOpens(ctx context.Context, b *peerBrowser, home string) error {
+	conn, err := b.peer.Offer(ctx, home)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	select {
+	case <-conn.Ready():
+		return fmt.Errorf("%s accepted a new connection from %s", home, b.key.ID())
+	case <-conn.Done():
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (w *s2PeopleWorld) clockCreateAndExpire(tag string) error {
@@ -980,6 +1014,17 @@ func (w *s2PeopleWorld) cancelTaskAndRemoveQ() error {
 	if err != nil {
 		return err
 	}
+	return w.removeQ()
+}
+
+func (w *s2PeopleWorld) removeConnectedQ() error {
+	if err := w.expectQConnectedToP1(); err != nil {
+		return err
+	}
+	return w.removeQ()
+}
+
+func (w *s2PeopleWorld) removeQ() error {
 	w.removeAt = time.Now()
 	w.qClosed = make(chan time.Time, 1)
 	go func() {
@@ -989,7 +1034,7 @@ func (w *s2PeopleWorld) cancelTaskAndRemoveQ() error {
 		case <-w.cast.Ctx.Done():
 		}
 	}()
-	raw, err := w.sendRemove(pBC.conn, w.cast.P.Key, w.qMemID)
+	raw, err := w.sendRemove(w.cast.P.Conns[w.cast.P1.ID()].conn, w.cast.P.Key, w.qMemID)
 	if err != nil {
 		return err
 	}
@@ -1005,23 +1050,7 @@ func (w *s2PeopleWorld) verifyQDisconnectedAndRefused() error {
 	if err := w.waitP1DroppedQDevices(deadline); err != nil {
 		return err
 	}
-	return w.verifyQReconnectRefused()
-}
-
-func (w *s2PeopleWorld) verifyQReconnectRefused() error {
-	conn, err := w.cast.Q.Browser.peer.Offer(w.cast.Ctx, w.cast.P1.ID())
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	select {
-	case <-conn.Ready():
-		return fmt.Errorf("P1 accepted a new connection from removed Q")
-	case <-conn.Done():
-		return nil
-	case <-w.cast.Ctx.Done():
-		return w.cast.Ctx.Err()
-	}
+	return expectNeverOpens(w.cast.Ctx, w.cast.Q.Browser, w.cast.P1.ID())
 }
 
 func (w *s2PeopleWorld) waitQBrowserClosed(deadline time.Time) error {
@@ -1039,58 +1068,51 @@ func (w *s2PeopleWorld) waitQBrowserClosed(deadline time.Time) error {
 func (w *s2PeopleWorld) waitP1DroppedQDevices(deadline time.Time) error {
 	ctx, cancel := context.WithDeadline(w.cast.Ctx, deadline)
 	defer cancel()
-	return waitUntilCtx(ctx, 100*time.Millisecond, "P1 to drop the Q connection", func() error {
-		connected, err := w.qConnectedToP1(ctx)
+	return waitUntilCtx(ctx, 100*time.Millisecond, "P1 to drop Q's connections", func() error {
+		devices, err := w.qDevicesOnP1(ctx)
 		if err != nil {
 			return abort(err)
 		}
-		if connected {
-			return errors.New("P1 lists a Q connection")
+		if len(devices) != 0 {
+			return fmt.Errorf("P1 lists connections of %v", devices)
 		}
 		return nil
 	})
 }
 
-func (w *s2PeopleWorld) qConnectedToP1(ctx context.Context) (bool, error) {
+func (w *s2PeopleWorld) expectQConnectedToP1() error {
+	devices, err := w.qDevicesOnP1(w.cast.Ctx)
+	if err == nil && len(devices) != 2 {
+		err = fmt.Errorf("P1 lists connections of %v, want Q's browser and Q1", devices)
+	}
+	return err
+}
+
+func (w *s2PeopleWorld) qDevicesOnP1(ctx context.Context) ([]string, error) {
 	cmd := exec.CommandContext(ctx, w.cast.F.bin, "status")
 	cmd.Env = w.cast.P1.Env
 	out, err := cmd.CombinedOutput()
-	return s2StatusHasConnection(string(out), w.cast.Q.ID(), w.cast.Q1.ID()), err
+	return s2StatusConnections(string(out), w.cast.Q.ID(), w.cast.Q1.ID()), err
 }
 
-func s2StatusHasConnection(status string, devices ...string) bool {
+func s2StatusConnections(status string, devices ...string) []string {
+	var connected []string
 	for _, line := range strings.Split(status, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 3 && fields[0] == "connection" && slices.Contains(devices, fields[1]) {
-			return true
+			connected = append(connected, fields[1])
 		}
 	}
-	return false
+	return connected
 }
 
 func (w *s2PeopleWorld) verifyQGroupsAndGoneMarkers() error {
-	if err := w.drainQRemovalPushes(); err != nil {
+	if err := w.drainViewUntil(w.cast.Ctx, w.qHomeBC, w.qView, string(w.gid), func() bool {
+		return !slices.ContainsFunc(w.qView.groups, func(g proto.GroupSummary) bool { return g.Group == string(w.gid) })
+	}); err != nil {
 		return err
 	}
-	hasGroup := slices.ContainsFunc(w.qView.groups, func(g proto.GroupSummary) bool { return g.Group == string(w.gid) })
-	if hasGroup {
-		return fmt.Errorf("Q browser groups after removal = %+v, want group absent", w.qView.groups)
-	}
 	return w.awaitPGoneMarkers()
-}
-
-func (w *s2PeopleWorld) drainQRemovalPushes() error {
-	for {
-		select {
-		case raw, ok := <-w.qHomeBC.pushes:
-			if !ok {
-				return nil
-			}
-			w.qView.applyPush(raw, string(w.gid))
-		case <-w.cast.Ctx.Done():
-			return w.cast.Ctx.Err()
-		}
-	}
 }
 
 func (w *s2PeopleWorld) awaitPGoneMarkers() error {
@@ -1257,15 +1279,8 @@ func (w *s2PeopleWorld) invitePIntoQ1Group() (*peerBrowserConn, error) {
 	if err != nil {
 		return nil, err
 	}
-	bc, raw, err := joinGroupWithLink(
-		w.cast.Ctx, w.cast.addUndo, w.cast.P.Browser, w.cast.P.Key,
-		w.cast.P.Entries, link, w.cast.P.Name, w.cast.NextID(), time.Now(),
-	)
-	if err != nil {
-		return nil, err
-	}
-	var result proto.CmdResult
-	return bc, proto.Decode(raw, &result)
+	bc, _, err := w.cast.JoinGroup(w.cast.P, link, w.cast.P.Name)
+	return bc, err
 }
 
 func (w *s2PeopleWorld) verifyQ1RefusesHostCmdAndTakeoverFromP(conn *peer.Connection) error {
