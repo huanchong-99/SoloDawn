@@ -726,13 +726,19 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `web/src/messages/files.ts` takes every message file eagerly, and the loader merges them all (`web/src/messages/texts.ts`).
 - Status: open, accepted with U-0 (#170).
 
+### 2026-11-23 · bug · FLAKY-29: Qwen A4.9 timed out waiting for its first post
+
+- Symptom: step 4 (`features/s3_driver_limits_test.go:77`) failed once in CI with `timed out waiting on home pushes`.
+- Cause: not established. The log did not record the environment or whether the post reached MCP. The fake CLI defect fixed in #377 needs a variable that nothing sets, so it is not the cause. Whether the teardown race of #363 was is not known.
+- Status: open; the next occurrence needs the host and MCP lines of [diagnostics](planning/contracts/diagnostics.md).
+
 ## Resolved
 
-### 2026-11-23 · bug · FLAKY-29: the fake Qwen Code started OpenCode's MCP server
+### 2026-11-23 · bug · The fake Qwen Code started OpenCode's MCP server
 
-- Symptom: Qwen A4.9 failed with `timed out waiting on home pushes`, and failed every time at step 4 with `OPENCODE_CONFIG_CONTENT='{"mcp":{}}'` in the environment (#373). The original timeout log did not record the environment or whether the post reached MCP.
+- Symptom: Qwen A4.9 failed every time at step 4 with `OPENCODE_CONFIG_CONTENT='{"mcp":{}}'` in the environment (#373). Nothing in the tests or CI sets it; found while looking for FLAKY-29.
 - Cause: `startMCP` (`internal/host/fakecli/mcp.go:40-43`) replaced the server of any fake CLI with the one in `OPENCODE_CONFIG_CONTENT` whenever that variable was set. The Qwen Code driver passes only `QWEN_CODE_SYSTEM_SETTINGS_PATH` and inherits the rest of the environment, so the fake Qwen Code launched an empty command and never posted.
-- Status: resolved on `devin/host-handout-task-flaky29`: only the fake OpenCode reads `OPENCODE_CONFIG_CONTENT`. `TestQwenServesItsScriptBehindTheBearerToken` sets it and checks that the fake Qwen Code starts its own server.
+- Status: resolved in #377: only the fake OpenCode reads `OPENCODE_CONFIG_CONTENT`. `TestQwenServesItsScriptBehindTheBearerToken` sets it and checks that the fake Qwen Code starts its own server.
 
 ### 2026-11-23 · bug · An external AI's task hand-out named the task by its id
 
@@ -776,16 +782,16 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: the test read `Loop.Groups` after observing the working row, but the run loop pushes changed rows before publishing the group summary (`internal/home/run_group.go:170`–`:172`, `internal/home/run_push.go:32`–`:33`). The test could sample the old summary; the queued sync then read the committed sequence (`internal/home/sync.go:41`).
 - Status: fixed in `internal/home/cmd_hostev_test.go:523` and `:589`. The negative sync barrier uses the observed row sequence and checks the next frame. No product change.
 
-### 2026-11-23 · bug · FLAKY-21: a paired node duplicated ICE candidates on the same socket
+### 2026-11-23 · bug · FLAKY-21: a pairing node duplicated ICE candidates on the same socket
 
 - Symptom: `TestNetStatusLiveNodeRuntime` timed out before the browser's `ctl` opened.
-- Cause: pairing saved the shared paths (`internal/node/pair.go:345–349`) and `routesFor` appended them again (`internal/node/node.go:471`). Each candidate went twice over one socket. With the writer held during gathering, all 16 sender slots filled before the SDP answer and the server dropped it (`internal/rendezvous/server.go:159`).
+- Cause: pairing saved the shared paths (`internal/node/pair.go:345–349`) and `routesFor` appended them again (`internal/node/node.go:471`). Each candidate went twice over one socket. With the writer held during gathering, all 16 sender slots filled before the SDP answer and the server dropped it (`internal/rendezvous/server.go:159`). The original run has no packet trace, so this is the established defect and the likely cause of that run.
 - Status: fixed by using each path ID once and retaining the current ICE configuration. In the same schedule the answer entered the queue and `ctl` opened.
 
 ### 2026-11-23 · bug · Windows A7.9 could keep the direct pair selected
 
 - Symptom: Windows kept a working 500 ms direct pair even with a succeeded sub-millisecond relay pair. A7.9 needs a direct-to-relay transition on the original connection to exercise terminal handback.
-- Cause: the fixture delayed direct packets but still delivered them (`features/m7_test.go:2004` before this fix). Pion v4.4.8 ranks succeeded pairs before it tests the RTT improvement (`selection.go:276–287`, `agent.go:2394–2459`). A relay nomination through a different interface could also reach the node as a peer-reflexive address.
+- Cause: the fixture delayed direct packets but still delivered them (`features/m7_test.go`, before this fix). Pion v4.4.8 ranks succeeded pairs before it tests the RTT improvement (`selection.go:276–287`, `agent.go:2394–2459`).
 - Status: the fixture cuts direct UDP, pairs the browser's TURN allocation with the node interface that owns the advertised relay IP, and waits for ICE selection. The Windows exclusion is removed. The separate relay-to-direct probe was dropped from version 1 in [#172](https://github.com/huanchong-99/SoloDawn/pull/172#issuecomment-7057401511).
 
 ### 2026-11-23 · bug · External AI removal could be triggered by one click
