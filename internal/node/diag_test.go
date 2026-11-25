@@ -91,6 +91,7 @@ func TestDiagNodeEvents(t *testing.T) {
 }
 
 func TestDiagLevelAndOutput(t *testing.T) {
+	log.SetFlags(log.LstdFlags)
 	for content, level := range map[string]slog.Level{"": slog.LevelInfo, "debug\n": slog.LevelDebug, "debugging": slog.LevelInfo} {
 		dir := socketRoot(t)
 		if content != "" {

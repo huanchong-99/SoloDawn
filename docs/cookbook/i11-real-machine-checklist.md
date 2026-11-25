@@ -78,7 +78,7 @@ Run on **Windows** while `solodawn node` is actively writing logs (during an act
    2. While `solodawn node` is running and actively appending to `logs\node.log` (do not stop the node), execute the platform command:
       - Windows (PowerShell):
         ```powershell
-        tar -a -cf "$env:USERPROFILE\Desktop\solodawn-logs.zip" -C "$env:LocalAppData\solodawn" logs
+        tar -a -cf "$([Environment]::GetFolderPath('Desktop'))\solodawn-logs.zip" -C "$env:LocalAppData\solodawn" logs
         ```
       - macOS (Bash/Zsh):
         ```sh
