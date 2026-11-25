@@ -233,8 +233,28 @@ func externalRosterMatches(line, prefix, usage string) bool {
 }
 
 func (w *externalWorld) runBrief(role string) error {
+	return s3Run(func() error { return w.startBrief(role) }, func() error { return w.handleBriefRun(role) })
+}
+
+func (w *externalWorld) startBrief(role string) error {
 	return s3Run(w.joinSecretary, func() error { return w.joinManaged("M", false) },
-		func() error { return w.prepareBrief(role) }, func() error { return w.handleBriefRun(role) })
+		func() error { return w.prepareBrief(role) })
+}
+
+func (w *externalWorld) takeBrief() error {
+	return s3Run(func() error { return w.startBrief("assignee") }, w.awaitBriefHandout,
+		func() error { return w.handout("task", "External work") })
+}
+
+func (w *externalWorld) inTaskThread(kind, text string) error {
+	return w.waitState(func() bool {
+		for _, msg := range w.msgs {
+			if msg.By == w.aiByName["X"].ID && msg.Kind == kind && msg.Text == text {
+				return msg.Thread != nil && *msg.Thread == w.taskID
+			}
+		}
+		return false
+	})
 }
 
 func (w *externalWorld) prepareBrief(role string) error {
