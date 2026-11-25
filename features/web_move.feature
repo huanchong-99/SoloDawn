@@ -7,6 +7,12 @@ Feature: Moving a group's home (U2-5)
     Then the group stays on the same route with its cached rows and its new home
     And the browser reads from the new home without replaying the command
 
+  Scenario: An idle browser follows a group that its home no longer lists
+    Given a browser reading a project on its old home
+    When the old home no longer lists the group, and says where it went
+    Then the group stays on the same route with its cached rows and its new home
+    And the browser reads from the new home without replaying the command
+
   Scenario: Only the owner sees local move commands
     Given the owner reads a project and has another computer
     When the owner opens the export and import guidance

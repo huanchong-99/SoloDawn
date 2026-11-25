@@ -22,10 +22,10 @@
     return msg.by === 'system' ? t('chat.system') : group.member(msg.by)?.name;
   }
 
-  /** Who wrote the last message of the main line, and what it says. */
+  /** Who wrote the last message of the main line, and what it says; nothing of a group not read. */
   function preview(group: Group) {
     const last = group.main.at(-1);
-    if (!last) return t('groups.none');
+    if (!last) return group.info ? t('groups.none') : '';
     const said = subject(group, last) || t(`chat.kind.${last.kind}`);
     return `${author(group, last) ?? t('chat.gone')}${t('groups.colon')}${said}`;
   }
@@ -60,7 +60,7 @@
               <span class="gdown cut" class:away={net.otherTab}>
                 <i></i>{net.otherTab
                   ? t('groups.otherTab')
-                  : `${group.home.name} · ${t('groups.down')}`}
+                  : [group.home.name, t('groups.down')].filter(Boolean).join(' · ')}
               </span>
             {:else if group.info?.paused}
               <span class="st" data-st="paused"><i></i>{t('stop.list')}</span>

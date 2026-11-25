@@ -66,6 +66,7 @@ const kindLabels: Record<ReminderLang, Record<string, string>> = {
     confirm: 'Request for your AI',
     mention: 'Mention',
     done: 'Task done',
+    stopped: 'Task stopped',
   },
   'zh-CN': {
     approval: '审批申请',
@@ -74,6 +75,7 @@ const kindLabels: Record<ReminderLang, Record<string, string>> = {
     confirm: '有人想用你的 AI',
     mention: '提及',
     done: '任务完成',
+    stopped: '任务已停下',
   },
 };
 
@@ -84,9 +86,11 @@ export function resolveReminderLang(search: string, browserLang: string): Remind
   return browserLang.startsWith('zh') ? 'zh-CN' : 'en';
 }
 
-/** Formats a decoded `Reminder` summary into the notification title and body. */
+/** Formats a decoded `Reminder` summary into the notification title and body. Only the notice of a
+ *  task that stopped is a mention with a title. */
 export function formatReminder(reminder: Reminder, lang: ReminderLang) {
-  const kind = kindLabels[lang][reminder.kind] ?? reminder.kind;
+  const of = reminder.kind === 'mention' && reminder.title ? 'stopped' : reminder.kind;
+  const kind = kindLabels[lang][of] ?? of;
   const body = reminder.title ? `${reminder.who}: ${reminder.title}` : reminder.who;
   return {
     title: `${reminder.group} · ${kind}`,

@@ -132,15 +132,21 @@ function startLive(
         syncPeers();
         for (const p of peers.values()) presentLog(p, log);
       };
+      /** A home that this browser hears of from a node, which is dialled unless it is already. */
+      const reach = (id: string) => {
+        const home = homeOf(log, id, '');
+        if (log.valid(id)) return home;
+        if (!Object.hasOwn(joined, id)) {
+          joined[id] = { name: '', url };
+          void saveJoined(() => indexedDB, joined);
+        }
+        if (!peers.has(id) && !invited.has(id)) dial(id, home);
+        return home;
+      };
       const connectHome = (home: Home) => {
-        home.onmove = (g, id) => {
-          const destination = homeOf(log, id, id);
-          if (!peers.has(id)) {
-            joined[id] = { name: destination.name, url };
-            void saveJoined(() => indexedDB, joined);
-            dial(id, destination);
-          }
-          home.move(g, destination);
+        home.onmove = (g, id) => home.move(g, reach(id));
+        home.onhomes = (known) => {
+          for (const { g, home: id, name } of known) reach(id).expect(g, name);
         };
         const link = home.connect();
         return {

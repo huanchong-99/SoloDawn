@@ -170,7 +170,31 @@ describe('classify, whoOf, titleOf and targetIdOf', () => {
     expect(whoOf(group, bulletin)).toBe('Claude Code');
   });
 
-  it('classifies summaries, mentions from others, and ignores system or own messages', () => {
+  it('classifies a notice of the home that mentions the reader, in its own words', () => {
+    const { group } = makeReadyGroup();
+    const notice = (id: string, seq: number, body: object, changes: object = {}) =>
+      row<p.MsgRow>('row-msg-system', { id, seq, pos: seq, mentions: [ownerId], body, ...changes });
+    const stopped = { code: 'task_failed', task: taskId, reason: 'failures' };
+    const failed = notice('failed', 6, stopped, { thread: taskId });
+    const unknown = notice('unknown', 7, { ...stopped, task: 'not-held' });
+    const login = notice('login', 8, { code: 'login_invalid', ai: secretaryId, detail: 'a\nb' });
+    const quiet = notice('quiet', 9, stopped, { mentions: [codexId] });
+    pushLive(group, [failed, unknown, login, quiet]);
+
+    expect([failed, unknown, login].map((msg) => classify(group, msg))).toEqual(
+      Array(3).fill('alert'),
+    );
+    expect(classify(group, quiet)).toBeUndefined();
+    expect([failed, unknown, login].map((msg) => whoOf(group, msg))).toEqual([
+      'Codex',
+      'Former member',
+      'Secretary',
+    ]);
+    expect(titleOf(group, failed)).toBe('Task T-12 stopped after repeated failures.');
+    expect(titleOf(group, login)).toBe("Secretary's sign-in is no longer valid. · a");
+  });
+
+  it('classifies summaries, mentions from others, and ignores own messages', () => {
     const { group } = makeReadyGroup();
     const summary = row<p.MsgRow>('row-msg-summary', { seq: 6, pos: 6 });
     const mention = row<p.MsgRow>('row-msg-text', {
@@ -194,14 +218,12 @@ describe('classify, whoOf, titleOf and targetIdOf', () => {
       by: ownerId,
       mentions: [ownerId],
     });
-    const sysMsg = row<p.MsgRow>('row-msg-system', { seq: 10, pos: 10, mentions: [ownerId] });
-    pushLive(group, [summary, mention, plain, ownMention, sysMsg]);
+    pushLive(group, [summary, mention, plain, ownMention]);
 
     expect(classify(group, summary)).toBe('done');
     expect(classify(group, mention)).toBe('mention');
     expect(classify(group, plain)).toBeUndefined();
     expect(classify(group, ownMention)).toBeUndefined();
-    expect(classify(group, sysMsg)).toBeUndefined();
 
     const strangerHome = new Home({ user: 'stranger', sign });
     const noMeGroup = new Group(strangerHome, website);

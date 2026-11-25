@@ -466,4 +466,51 @@ describe('E-M2: multi-browser group sync, delta catch-up, and cold scroll-back',
       expect(idxOldestBefore).toBeLessThan(idx1500);
     },
   );
+
+  test(
+    "a person's second browser sees the group that they joined on another person's computer",
+    { timeout: 120_000 },
+    async () => {
+      const active = await startNet({ nodes: 2 });
+      net = active;
+      const direct = await startDirectSurface(active.rendezvous, inject('browser'));
+      surface = direct;
+      const open = async () => (await openDirectContext(browser, contexts, direct)).newPage();
+
+      const alex = await open();
+      await pairPrimaryBrowser(alex, direct, active.nodes[0], 'alex-box');
+      await alex.locator('button', { hasText: 'New group' }).first().click();
+      const create = alex.locator('dialog.dlg[open]');
+      await create.getByRole('radio', { name: 'Team group' }).check();
+      await create.getByLabel('Group name').fill('Studio');
+      await create.getByLabel('Your name in the group').fill('Alex');
+      await create.locator('button.btn-primary', { hasText: 'Create group' }).click();
+      await poll(() => alex.locator('.chat-head h2').allTextContents()).toEqual(['Studio']);
+      await sendChatMessage(alex, 'Welcome to the studio');
+      await alex.getByRole('button', { name: 'Invite', exact: true }).click();
+      await alex.getByRole('button', { name: 'Create link' }).click();
+      await poll(() => alex.locator('pre.cmd').count()).toBe(1);
+      const link = (await alex.locator('pre.cmd').textContent())!;
+
+      const first = await open();
+      await pairPrimaryBrowser(first, direct, active.nodes[1], 'quinn-box');
+      await first.goto(`${direct.url}${link.slice(link.indexOf('#join='))}`);
+      await first.getByLabel('Your name in this group').fill('Quinn');
+      await first.locator('form button.btn-primary').click();
+      await poll(() => first.locator('.chat-head h2').allTextContents()).toEqual(['Studio']);
+
+      const second = await open();
+      await pairSecondBrowser(first, second, direct);
+      await poll(() => second.locator('.glist a.gitem b').allTextContents()).toEqual(['Studio']);
+      await second.locator('.glist a.gitem').click();
+      await poll(() => second.locator('.line .msg .text').allTextContents(), 30_000).toEqual([
+        'Welcome to the studio',
+      ]);
+      await sendChatMessage(second, 'Hello from my other browser');
+      await poll(() => alex.locator('.line .msg .text').allTextContents()).toEqual([
+        'Welcome to the studio',
+        'Hello from my other browser',
+      ]);
+    },
+  );
 });

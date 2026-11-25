@@ -1,10 +1,11 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import type { Group } from '../../lib/groups.svelte';
-  import { t } from '../../lib/prefs.svelte';
-  import type { MsgRow } from '../../lib/proto';
-  import type { Areas } from '../../messages/texts';
+  import { prefs, t } from '../../lib/prefs.svelte';
+  import type { MsgRow, TaskRow } from '../../lib/proto';
   import { goFirst, waiting, type Wait } from '../../lib/queue';
+  import { names } from '../../lib/stop';
+  import type { Areas } from '../../messages/texts';
   import Failure from '../Failure.svelte';
   import Icon from '../Icon.svelte';
 
@@ -15,59 +16,76 @@
   let line = $state<HTMLElement>();
   let busy = $state(false);
   let failed = $state('');
-  // The wait that was let go first; and that the home no longer held it, so that none is left.
-  let jumped = $state.raw<Wait>();
+  // What the message waited for when it was let go first; and that the home no longer held it, so
+  // that nothing of it waits.
+  let jumped = $state.raw<Wait[]>([]);
   let taken = $state(false);
 
   const waits = $derived(taken ? [] : waiting(group, msg));
-  const task = $derived(group.task(jumped?.task?.id));
-  const pausedFor = $derived(
-    task?.state === 'paused' && task.wait?.kind === 'preempted' ? task : undefined,
+  // The tasks that were interrupted for it and have not continued.
+  const paused = $derived(
+    jumped.filter(({ task }) => {
+      const now = group.task(task.id);
+      return now?.state === 'paused' && now.wait?.kind === 'preempted';
+    }),
   );
+  const still = $derived(waits.filter(({ ai }) => !paused.some((each) => each.ai.id === ai.id)));
 
-  const word = (key: keyof Areas['queue'], wait: Wait) =>
+  const tag = (task: TaskRow) => `T-${task.num}`;
+  const word = (key: keyof Areas['queue'], { ai, task }: Wait) =>
     t(key)
-      .replace('{task}', `T-${wait.task!.num}`)
-      .replace('{ai}', () => wait.ai.name);
+      .replace('{task}', tag(task))
+      .replace('{ai}', () => ai.name);
 
-  async function first(wait: Wait) {
+  /** What a `jump` does to the one AI: it interrupts a review, the session the message goes to, or
+   *  a task, which pauses (flows/agent-turn.md C). */
+  function effect({ ai, task }: Wait) {
+    if (task.assignee !== ai.id) return 'queue.first.review';
+    return msg.thread === task.id ? 'queue.first.turn' : 'queue.first';
+  }
+  const offer = $derived.by(() => {
+    if (waits.length === 1) return word(effect(waits[0]), waits[0]);
+    const tasks = [...new Set(waits.map(({ task }) => tag(task)))].map((name) => ({ name }));
+    return t('queue.first.all').replace('{tasks}', names(tasks, prefs.lang));
+  });
+
+  async function first() {
+    const all = waits;
     busy = true;
     failed = '';
     const code = (await goFirst(group, msg)).err?.code;
     busy = false;
     if (code === 'conflict') taken = true;
     else if (code) failed = code;
-    else jumped = wait;
+    else jumped = all;
     await tick();
     line?.focus();
   }
 </script>
 
-{#if jumped && pausedFor}
+{#each paused as wait (wait.ai.id)}
   <p class="wait" tabindex="-1" bind:this={line}>
-    <Icon name="pause" sm /><span>{word('queue.paused', jumped)}</span>
+    <Icon name="pause" sm /><span>{word('queue.paused', wait)}</span>
   </p>
-{:else}
-  {#each waits as { wait, first: can } (wait.ai.id)}
-    {@const going = jumped?.ai.id === wait.ai.id}
-    <p class="wait" tabindex="-1" bind:this={line}>
-      <Icon name="clock" sm />
-      <span role="status">{word(going ? 'queue.going' : 'queue.waits', wait)}</span>
-      {#if can && !going}
-        <button
-          type="button"
-          class="go"
-          disabled={busy || !group.home.ctl}
-          aria-busy={busy}
-          onclick={() => void first(wait)}
-        >
-          {word(wait.task!.assignee === wait.ai.id ? 'queue.first' : 'queue.first.review', wait)}
-        </button>
-      {/if}
-    </p>
-  {/each}
-{/if}
-{#if failed}<Failure code={failed} />{/if}
+{/each}
+{#each still as wait, i (wait.ai.id)}
+  <p class="wait" tabindex="-1" bind:this={line}>
+    <Icon name="clock" sm />
+    <span role="status">{word(jumped.length ? 'queue.going' : 'queue.waits', wait)}</span>
+    {#if !jumped.length && i === still.length - 1}
+      <button
+        type="button"
+        class="go"
+        disabled={busy || !group.home.ctl}
+        aria-busy={busy}
+        onclick={() => void first()}
+      >
+        {offer}
+      </button>
+    {/if}
+  </p>
+{/each}
+{#if failed && waits.length}<Failure code={failed} />{/if}
 
 <style>
   .wait {

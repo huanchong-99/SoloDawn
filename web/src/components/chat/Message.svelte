@@ -80,7 +80,7 @@
     {/if}
     <div class="msg-body">
       {@render body()}
-      {#if author && author.id === group.me?.id}<Waits {group} {msg} />{/if}
+      <Waits {group} {msg} />
     </div>
   </article>
 {/if}

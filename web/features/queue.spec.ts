@@ -9,6 +9,7 @@ import { all, closePage, one, openPage, read, text, texts } from './page';
 const feature = await loadFeature('../features/web_queue.feature');
 const g = 'rZNvy-1jH6Z-BcPqA5U5BQ';
 const codex = '1PC8WineBrUQ-apCjx7tug';
+const claude = 'Y2xhdWRlLW1lbWJlci0wMQ';
 const mina = 'bWluYS1tZW1iZXItMDAwMQ';
 const task = example('row-task').id as string;
 
@@ -34,6 +35,13 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     all<HTMLButtonElement>('.wait button').find((each) => read(each) === name)!;
   const press = (name: string) => {
     button(name).click();
+    flushSync();
+  };
+  /** Codex takes the message: its turn is of its group session, and T-12 waits for it. */
+  const take = () => {
+    home.write(g, example('row-member-ai', { ...working, task: undefined }));
+    const wait = { kind: 'preempted', since: Date.now() };
+    home.write(g, example('row-task', { g, assignee: codex, num: 12, state: 'paused', wait }));
     flushSync();
   };
   const silent = () => settled(() => expect(all('.wait')).toEqual([]));
@@ -89,12 +97,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
         await settled(() => expect(document.activeElement).toBe(one('.wait')));
       },
     );
-    When('Codex takes the message and T-12 is pre-empted', () => {
-      home.write(g, example('row-member-ai', { ...working, task: undefined }));
-      const wait = { kind: 'preempted', since: Date.now() };
-      home.write(g, example('row-task', { g, assignee: codex, num: 12, state: 'paused', wait }));
-      flushSync();
-    });
+    When('Codex takes the message and T-12 is pre-empted', take);
     Then('the message says that T-12 is paused while Codex takes it', () =>
       expect(texts('.wait')).toEqual([
         'T-12 is paused while Codex takes this. It continues by itself.',
@@ -117,14 +120,84 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     );
   });
 
-  Scenario('Only the newest waiting message can go first', ({ When, Then }) => {
+  Scenario('Every waiting message can go first', ({ When, Then }) => {
     let ids: string[];
     When('Alex writes to Codex twice', () => {
       ids = [say(), say()];
     });
-    Then('both messages say that they wait and only the newer one offers to go first', () => {
-      expect(all('.wait')).toHaveLength(2);
-      expect(all('.wait button').map((each) => each.closest('.msg')!.id)).toEqual([`m-${ids[1]}`]);
+    Then('both messages offer "Go first, pausing T-12"', () => {
+      expect(all('.wait button').map((each) => [each.closest('.msg')!.id, read(each)])).toEqual(
+        ids.map((id) => [`m-${id}`, 'Go first, pausing T-12']),
+      );
+    });
+  });
+
+  Scenario('A message that waits for two AIs goes first with both', ({ Given, When, Then }) => {
+    let id: string;
+    Given('Claude works on T-13', () => {
+      const t13 = 'dGFzay0xMy0wMDAwMDAwMQ';
+      home.write(g, example('row-task', { g, id: t13, assignee: claude, num: 13 }));
+      home.write(
+        g,
+        example('row-member-ai', { g, id: claude, name: 'Claude', state: 'working', task: t13 }),
+      );
+    });
+    When('Alex writes to Codex and Claude', () => {
+      id = newId();
+      home.say(g, owner, '@Codex @Claude where are you?', { id, mentions: [codex, claude] });
+      flushSync();
+    });
+    Then(
+      'both lines say that the message waits, and one choice offers "Go first, interrupting T-13 and T-12"',
+      () => {
+        expect(texts('.wait span')).toEqual([
+          'Claude is busy with T-13. This waits its turn.',
+          'Codex is busy with T-12. This waits its turn.',
+        ]);
+        expect(texts('.wait button')).toEqual(['Go first, interrupting T-13 and T-12']);
+      },
+    );
+    When('Alex presses "Go first, interrupting T-13 and T-12"', () =>
+      press('Go first, interrupting T-13 and T-12'),
+    );
+    Then('the home receives one "jump", and both AIs take the message next', async () => {
+      await settled(() =>
+        expect(texts('.wait')).toEqual(['Claude takes this next.', 'Codex takes this next.']),
+      );
+      expect(sent).toEqual([id]);
+    });
+    When('Codex takes the message and T-12 is pre-empted', take);
+    Then('the message says that T-12 is paused and that Claude takes it next', () =>
+      expect(texts('.wait')).toEqual([
+        'T-12 is paused while Codex takes this. It continues by itself.',
+        'Claude takes this next.',
+      ]),
+    );
+  });
+
+  Scenario('A message in the thread of the task that the AI works on', ({ Given, When, Then }) => {
+    let id: string;
+    Given("T-12's card in the main line, its thread open", async () => {
+      home.write(g, example('row-msg-task', { g, id: task, body: { task } }));
+      await settled(() => expect(all('.card details')).toHaveLength(1));
+      one<HTMLDetailsElement>('.card details').open = true;
+      one('.card details').dispatchEvent(new Event('toggle'));
+      await settled(() => expect(all('.card .in-thread')).toHaveLength(1));
+    });
+    When('Alex writes to Codex in the thread', () => {
+      id = newId();
+      home.say(g, owner, '@Codex and the docs', { id, mentions: [codex], thread: task });
+      flushSync();
+    });
+    Then('the message offers "Go first, interrupting what Codex is doing"', () =>
+      expect(texts('.thread .wait button')).toEqual(['Go first, interrupting what Codex is doing']),
+    );
+    When('Alex presses "Go first, interrupting what Codex is doing"', () =>
+      press('Go first, interrupting what Codex is doing'),
+    );
+    Then('the home receives "jump" for the message in the thread', async () => {
+      await settled(() => expect(texts('.thread .wait')).toEqual(['Codex takes this next.']));
+      expect(sent).toEqual([id]);
     });
   });
 
@@ -150,6 +223,11 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
       await settled(() => expect(all('.msg .fail')).toHaveLength(1));
       expect(button('Go first, pausing T-12').disabled).toBe(false);
     });
+    When('Codex takes the message', () => {
+      home.write(g, example('row-member-ai', working));
+      flushSync();
+    });
+    Then('neither is left', () => expect(all('.wait, .msg .fail')).toEqual([]));
   });
 
   Scenario("Somebody else's message says nothing", ({ When, Then }) => {

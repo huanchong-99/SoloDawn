@@ -404,6 +404,17 @@ describe('Nodes', () => {
     });
   });
 
+  it('hands the homes that a computer knows to whoever dials them', async () => {
+    const home = new Home(me);
+    home.onhomes = vi.fn();
+    const { asked } = connectHome(home, { device: 'own' });
+    new Nodes().sync([home]);
+    const known = [{ g: 'g', home: 'foreign', name: 'Website' }];
+    asked[0].answer(hostAnswer({ homes: known }));
+    await settle();
+    expect(home.onhomes).toHaveBeenCalledExactlyOnceWith(known);
+  });
+
   it('lists owned homes with their info and path and excludes foreign homes', async () => {
     const store = new Nodes();
     const online = new Home(me);

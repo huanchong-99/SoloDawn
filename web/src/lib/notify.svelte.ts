@@ -6,8 +6,10 @@ import { jumpToMessage } from './jump';
 import { t } from './prefs.svelte';
 import type { MsgRow, Row } from './proto';
 import { href, route } from './route.svelte';
+import { systemText } from './system';
 
-export type NotifyKind = 'approval' | 'decision' | 'brief' | 'confirm' | 'done' | 'mention';
+export type NotifyKind =
+  'approval' | 'decision' | 'brief' | 'confirm' | 'done' | 'mention' | 'alert';
 
 /** One live notification shown in the shell's overlay layer. */
 export interface Notice {
@@ -45,24 +47,31 @@ function cardNotifyKind(group: Group, msg: MsgRow): NotifyKind | null | undefine
 const mentionsMe = (group: Group, msg: MsgRow): boolean =>
   group.me !== undefined && msg.mentions.includes(group.me.id);
 
-/** Whether `msg` never notifies: the reader wrote it, or the home did. Of what the home writes, only
- *  a confirmation asks something of a person. */
-const isQuiet = (group: Group, msg: MsgRow): boolean =>
-  msg.by === group.me?.id || (msg.by === 'system' && msg.kind !== 'confirm');
-
-/** Notification kind for a newly created message, or undefined when it does not notify this reader. */
+/** Notification kind for a newly created message, or undefined when it does not notify this reader:
+ *  a notice of the home that mentions them, as of a task that stopped, is an `alert`. */
 export function classify(group: Group, msg: MsgRow): NotifyKind | undefined {
-  if (isQuiet(group, msg)) return undefined;
+  if (msg.by === group.me?.id) return undefined;
   const card = cardNotifyKind(group, msg);
   if (card !== null) return card;
-  return mentionsMe(group, msg) ? 'mention' : undefined;
+  if (!mentionsMe(group, msg)) return undefined;
+  return msg.kind === 'system' ? 'alert' : 'mention';
+}
+
+/** The AI that a notice names, or the assignee of the task it names. */
+const namedIn = (group: Group, { ai, task }: Partial<Record<'ai' | 'task', string>>) =>
+  ai ?? group.task(task)?.assignee;
+
+/** The member a message is about: of a card or a notice, the AI that its body names; of any other
+ *  message, who wrote it. */
+function aboutOf(group: Group, msg: MsgRow) {
+  if (msg.kind === 'approval' || msg.kind === 'confirm') return msg.body.ai;
+  return msg.kind === 'system' ? namedIn(group, msg.body as object) : msg.by;
 }
 
 /** Display name of the member a notification is about; of a bulletin, the AI that it names. */
 export function whoOf(group: Group, msg: MsgRow): string {
   if (msg.kind === 'bulletin') return msg.body.ai;
-  const id = msg.kind === 'approval' || msg.kind === 'confirm' ? msg.body.ai : msg.by;
-  return group.member(id)?.name ?? t('chat.gone');
+  return group.member(aboutOf(group, msg))?.name ?? t('chat.gone');
 }
 
 /** Single-line summary shown beside the notification's kind label. */
@@ -71,7 +80,7 @@ export function titleOf(group: Group, msg: MsgRow): string {
     const task = group.task(msg.body.task);
     return task ? `T-${task.num} ${task.title}` : firstLine(msg.text);
   }
-  return firstLine(subject(group, msg));
+  return firstLine(msg.kind === 'system' ? systemText(group, msg) : subject(group, msg));
 }
 
 /** Main-line message id to scroll and focus when opening `msg` (the task card for a thread message). */

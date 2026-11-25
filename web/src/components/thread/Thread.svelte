@@ -9,6 +9,7 @@
   import { clock, now } from '../../lib/when';
   import Avatar from '../Avatar.svelte';
   import Composer from '../chat/Composer.svelte';
+  import Waits from '../queue/Waits.svelte';
   import Rich from '../Rich.svelte';
 
   /** The messages of one task's thread and the field to write in it, inside a task card's fold. */
@@ -150,6 +151,7 @@
               {#if Card}
                 <Card {group} {msg} />
               {/if}
+              <Waits {group} {msg} />
             {/if}
           </div>
         </li>

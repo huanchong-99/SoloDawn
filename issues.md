@@ -6,17 +6,29 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-26 · deviation · An AI that its owner denied and later assigned gets one turn only
-
-- Symptom: the owner of an AI denies it a role, then changes their mind and sends the `task assign` that names it again (once another AI held the role). The AI gets the `assign` or `review` item (`planning/contracts/step-2/confirm.md` section 6, the exception), but none of the later `checks`, `reviewed` and `resume` items; the task stands still, and its card says again that the owner said no.
-- Cause: `cftHoldItem` (`internal/home/cmd_confirm_task.go:138`) knows the exception only inside the command that makes the change (`cftOwnerChange`); for every later item the denied card decides (`cftHeld`). Seen with a throwaway test on `cftFixture`: `assign` queued, then `checks`, `reviewed` and `resume` dropped.
-- Status: open, home side; found while the task card learned to say that an owner denied a role (`web/src/lib/taskops.ts`, `deniedHold`). The card reads the denied card alone, so it shows the line during that one turn too.
-
 ### 2026-11-25 · limitation · `group set` has no range for its numbers
 
 - Symptom: a home stores any integer as `pass`, `pass_foundation` or a limit, also 0 and negative ones. Some have an effect nobody chose: `turn_minutes` 0 ends every check command at once.
 - Cause: `planning/contracts/commands.md` 1.1 names no range and `grpSetValid` (`internal/home/cmd_group.go`) checks only that a field is there.
 - Status: open, accepted: only an admin sends it. The web client's settings take 1 to 100 for the scores and at least 1 for a limit (0 for `review_rounds` and `ask_depth`, where it means something: a failed review stops the task for a person, AIs do not ask each other), at most 4 for `ask_depth` (R-114), 55 seconds for `ask_wait_s` (`flows/ask.md` D) and 10 minutes for `approval_wait_s` (`flows/approval.md` H) (`limitFields`, `web/src/lib/groupset.ts`).
+
+### 2026-11-26 · limitation · A home that never answers stays in the group list as away
+
+- Symptom: the group of a home that is gone for good, or that ignores this browser, stays in the list as away, with no way to remove it; the home is offered a connection once a minute for as long as the browser runs.
+- Cause: the homes this browser remembers (`joined`, `web/src/lib/net.svelte.ts`) and a node's `host.info.homes` (`planning/contracts/step-2/people.md` section 7) are never pruned, and a home drops the offers of an unknown device without an answer (`planning/contracts/datachannel.md` section 8).
+- Status: open, accepted for 1.0.
+
+### 2026-11-26 · limitation · Two homes that both hold a group: the first to be reached shows it
+
+- Symptom: a lost home that returns after its group was restored elsewhere lists the group too. The browser shows one copy, that of the home it reached first, so a reload can show the other; when the copy shown is deleted, the other appears at its home's next list.
+- Cause: nothing in `welcome.groups` says which copy is the newer (`planning/contracts/step-2/export.md` section 4 speaks of a lost home); `Home.#list` (`web/src/lib/groups.svelte.ts`) leaves a group to the home within reach that listed it first.
+- Status: open, accepted: the owner deletes the old copy.
+
+### 2026-11-26 · deviation · An AI that its owner denied and later assigned gets one turn only
+
+- Symptom: the owner of an AI denies it a role, then changes their mind and sends the `task assign` that names it again (once another AI held the role). The AI gets the `assign` or `review` item (`planning/contracts/step-2/confirm.md` section 6, the exception), but none of the later `checks`, `reviewed` and `resume` items; the task stands still, and its card says again that the owner said no.
+- Cause: `cftHoldItem` (`internal/home/cmd_confirm_task.go:138`) knows the exception only inside the command that makes the change (`cftOwnerChange`); for every later item the denied card decides (`cftHeld`). Seen with a throwaway test on `cftFixture`: `assign` queued, then `checks`, `reviewed` and `resume` dropped.
+- Status: open, home side; found while the task card learned to say that an owner denied a role (`web/src/lib/taskops.ts`, `deniedHold`). The card reads the denied card alone, so it shows the line during that one turn too.
 
 ### 2026-11-26 · bug · A turn that ends while the held items are read gives the AI its newer messages first
 
@@ -110,7 +122,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-22 · limitation · Group moves follow replies, not unsolicited pushes
 
-- Symptom: a browser follows `moved` replies to `cmd`, `sync` and `fetch`; it cannot follow an unsolicited move notification.
+- Symptom: a browser follows `moved` replies to `cmd`, `sync` and `fetch`; it cannot follow an unsolicited move notification. Since 2026-11-26 it reads a group that left its home's list, so that an idle browser gets the reply (below, "An idle browser lost a moved group").
 - Cause: the frozen error has a response id and a destination home, but no group id; there is no moved push in `proto.ts`. The export contract specifies request replies, and U2-5 preserves those shapes unchanged.
 - Status: response-based following is implemented. Before import, connection failures use the normal peer retry; a connected destination answering `not_found` is read again when import pushes `groups`. Real CLI export/import and multi-machine WebRTC migration remain unverified.
 
@@ -172,7 +184,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: A9.27 and A9.28 exercise browser peers at the protocol boundary, not the browser's own follow logic or the owner-only commands in group info. A9.28 takes successive copies without waiting for an OS timer at one-minute intervals.
 - Cause: `features/s2_export.feature:12,19,24` use the I2-0 Go cast and two invocations of the copy command. The product does not schedule copies (`planning/contracts/step-2/export.md:60-62`).
-- Status: open. The owner-only commands in the group info are covered by `web/e2e/s2.spec.ts` (A9.27); the browser's following of `moved` and the OS timer remain open.
+- Status: open for the OS timer. The owner-only commands in the group info are covered by `web/e2e/s2.spec.ts` (A9.27), the browser's following by `features/web_move.feature` and `web/src/lib/{groups,net}.test.ts`.
 
 ### 2026-11-22 · limitation · Task participation history is inferred from current fields
 
@@ -421,7 +433,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ### 2026-11-21 · limitation · `host.info` has no live push yet and reports `queued` as `0`
 
-- Symptom: `Surface` (`internal/node/surface.go`) answers `host.info` requests with `HostState` and sends no `host.info` pushes (no `host.info` push yet), and every `AgentGroup.Queued` entry in `host.info` is `0` (`internal/node/surface.go:154`).
+- Symptom: `Surface` (`internal/node/surface.go`) answers `host.info` requests with `HostState` and sends no `host.info` pushes (no `host.info` push yet), and every `AgentGroup.Queued` entry in `host.info` is `0` (`internal/node/surface.go:154`). A browser that stays connected therefore hears of a group that the person joined in another browser only at its next `host.info`, which is its next connection.
 - Cause: `settings.set` is postponed with `U-12`, the 1.0 web client requests `host.info` on connect and after `agent.set`, and held items are held on the home (`not_before`, `HM-7`) rather than counted on the host.
 - Status: open for the push, accepted for 1.0 (`N-3`). `queued` counts the items the host holds since HS-20 (`Host.QueuedCount`, `internal/host/deliver.go`). The web client shows no held count: the terminal page and the card of an AI in takeover say that messages to it wait until hand-back (`U-11`, coordinator 2026-11-22; `planning/flows/takeover.md` step 9).
 
@@ -787,6 +799,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open; the next occurrence needs the host and MCP lines of [diagnostics](planning/contracts/diagnostics.md).
 
 ## Resolved
+
+### 2026-11-26 · deviation · A person's second browser did not see the groups they joined
+
+- Symptom: a colleague joined on one browser and saw no group, card or approval on another, nor on the first after its storage was cleared (R-42; gap 10 of the rules audit of 2026-11-25).
+- Cause: `openSession` (`web/src/lib/net.svelte.ts`) dialled the owner's nodes and the homes stored by this browser's own join; `host.info.homes` (`planning/contracts/step-2/people.md` section 7, point 2) was read for names only.
+- Status: resolved on `web/homes`: each foreign home of an own node's `host.info` is dialled and remembered (`Home.onhomes`). Tests: `web/src/lib/net.test.ts` ("the homes that an own computer knows"), the group feature, `web/e2e/m2.spec.ts` with real nodes.
+
+### 2026-11-26 · deviation · An idle browser lost a moved group, and an open tab stayed on a lost home
+
+- Symptom: after `group export --to` a member's idle browser dropped the group instead of following it (A9.27); after a rejoin of a restored group the open tab showed the lost home's stale copy (A9.28).
+- Cause: the old home pushes `groups` without the group, `Home.#list` (`web/src/lib/groups.svelte.ts`) dropped it and asked nothing more, so no `moved` came (`planning/contracts/step-2/export.md` section 3). `setJoin` added a second home, and `find` returned the first one's copy.
+- Status: resolved on `web/homes`: a group that left the list is read once more, and one listed by a node while its held home is out of reach, or no longer lists it, is taken over and read from the start (`Home.#enter`); one that a host names while its old home is connected is asked for there (`Home.expect`). Tests: `web/src/lib/{groups,net}.test.ts`, `features/web_move.feature`.
+
+### 2026-11-26 · deviation · A stopped task or a failed sign-in alerted nobody who had the page open
+
+- Symptom: neither `task_failed` nor `login_invalid` showed in the page outside the chat (R-56, R-63; gap 7 of the same audit, page part), and their push read as a mention.
+- Cause: `isQuiet` (`web/src/lib/notify.svelte.ts`) dropped every row by `system` but a confirmation.
+- Status: resolved on `web/homes`: a notice that mentions the reader notifies in its row's words, and the push of a stopped task says so (`web/src/sw.ts`). The push of a failed sign-in carries no title and no code (`planning/contracts/commands.md` 1.7), so it still reads "Mention" with the AI's name.
 
 ### 2026-11-25 · deviation · No person could write in a task's thread
 

@@ -127,7 +127,7 @@ export class Group {
   }
 
   /** A member by id; undefined for one that left, and for `system`. */
-  member(id: string) {
+  member(id: string | undefined) {
     return this.members.find((member) => member.id === id);
   }
 
@@ -180,11 +180,12 @@ export class Group {
       .catch(lost);
     if (this.#late(read, ctl)) return;
     if (answer.err) {
-      this.home.follow(this.g, answer.err);
+      this.home.refused(this, answer.err);
       // Nothing can page the group until a read succeeds: the top says so, not that it loads.
       this.paging().failed = true;
       return;
     }
+    this.home.answered(this);
     this.cursor = answer.seq;
     this.#live = true;
     this.#paging = new Map();
@@ -323,8 +324,12 @@ export class Home {
   owner = $state(false);
   // The connection that is the home's now: the last one to come online, until it is gone.
   #link: Link | undefined;
-  #arrivals = new Set<string>();
+  // The groups held that the node's last list does not have: one that moved here and is not
+  // imported yet, and one that left the list, until the node has said where it went.
+  #unlisted = new Map<string, 'arrives' | 'leaves'>();
   onmove?: (g: string, device: string) => void;
+  /** Hears the groups whose home the node knows, from each `host.info` of it. */
+  onhomes?: (known: p.HostInfoPush['homes']) => void;
 
   constructor(me: Me) {
     this.me = me;
@@ -355,8 +360,8 @@ export class Home {
     return link;
   }
 
-  /** A push of the home's connection. A group new in a `groups` push is read at once; rows for a
-   *  group that is not listed are dropped. */
+  /** A push of the home's connection. A group new in a `groups` push, or gone from it, is read at
+   *  once; rows for a group that is not held are dropped. */
   #push(frame: p.Push) {
     this.#hostPush(frame);
     if (frame.t === 'groups') this.#readAll(this.#list(frame.groups));
@@ -365,7 +370,10 @@ export class Home {
   }
 
   #hostPush(frame: p.Push) {
-    if (frame.t === 'host.info') this.hostInfo = frame;
+    if (frame.t === 'host.info') {
+      this.hostInfo = frame;
+      this.onhomes?.(frame.homes);
+    }
     if (frame.t === 'pty.resize') this.terminalSizes.set(`${frame.g}:${frame.ai}`, frame);
   }
 
@@ -389,11 +397,34 @@ export class Home {
   move(g: string, destination: Home) {
     const group = this.#find(g);
     if (!group) return;
-    this.groups = this.groups.filter((item) => item.g !== g);
-    if (!destination.#find(g)) destination.#arrivals.add(g);
+    this.#drop(group);
+    if (!destination.#find(g)) destination.#unlisted.set(g, 'arrives');
     destination.groups = [...destination.groups.filter((item) => item.g !== g), group];
     group.home = destination;
     if (destination.ctl) void group.sync(destination.ctl);
+  }
+
+  /** The node refused a read. A group that left its list is gone, unless it moved. */
+  refused(group: Group, error: p.ErrorResponse['err']) {
+    this.follow(group.g, error);
+    if (this.#unlisted.get(group.g) === 'leaves') this.#drop(group);
+  }
+
+  /** The node answered a read: it holds the group, whatever its last list says. */
+  answered(group: Group) {
+    this.#unlisted.delete(group.g);
+  }
+
+  /** A group whose home is this node, by what another node knows: shown by its name until this
+   *  node can be reached and lists it. A node that can be reached is asked where it went. */
+  expect(g: string, name: string) {
+    if (find(g)) return;
+    const group = new Group(this, g);
+    group.name = name;
+    this.groups = [...this.groups, group];
+    if (!this.ctl) return;
+    this.#unlisted.set(g, 'leaves');
+    void group.sync(this.ctl);
   }
 
   /** Makes this node the home of a new group, whose id is the command's nonce. Answers with that
@@ -413,20 +444,51 @@ export class Home {
     for (const group of groups) void group.sync(ctl);
   }
 
-  /** Replaces the list. A group listed before keeps its rows; the new ones are returned. */
+  #drop(group: Group) {
+    this.groups = this.groups.filter((item) => item !== group);
+  }
+
+  /** Whether this node can be reached and has a group in its last list. */
+  #lists(g: string) {
+    return this.ctl && this.#find(g) && !this.#unlisted.has(g);
+  }
+
+  /** A group new in this node's list. One that another home still holds was moved or restored
+   *  here from a copy (contracts/step-2/export.md sections 3 and 4), whose rows may be older, so
+   *  it is read from the start. */
+  #enter(g: string) {
+    const group = find(g);
+    if (!group) return new Group(this, g);
+    group.home.#drop(group);
+    group.home = this;
+    group.cursor = 0;
+    return group;
+  }
+
+  /** Replaces the list. A group listed before keeps its rows; one that another home within reach
+   *  lists is left to that home. Returned are the groups to read: the new ones, and those that left
+   *  the list, of which only the answer says whether they moved (contracts/step-2/export.md
+   *  section 3). */
   #list(listed: p.Welcome['groups']) {
-    const fresh: Group[] = [];
-    const pending = this.groups;
-    const next = listed.map(({ g, name }) => {
-      let group = this.#find(g);
-      if (!group) fresh.push((group = new Group(this, g)));
-      else if (this.#arrivals.has(g)) fresh.push(group);
-      this.#arrivals.delete(g);
+    const held = this.groups;
+    const unread: Group[] = [];
+    const own = listed.filter(({ g }) => !homes.some((home) => home !== this && home.#lists(g)));
+    const next = own.map(({ g, name }) => {
+      const group = this.#find(g) ?? this.#enter(g);
+      if (this.#unlisted.delete(g) || !held.includes(group)) unread.push(group);
       group.name = name;
       return group;
     });
-    this.groups = [...next, ...pending.filter((group) => this.#arrivals.has(group.g))];
-    return fresh;
+    const left = held.filter((group) => !next.includes(group));
+    this.groups = [...next, ...left];
+    return [...unread, ...left.filter(({ g }) => this.#leaves(g))];
+  }
+
+  /** Whether a group held but not listed is on its way out, not on its way in. */
+  #leaves(g: string) {
+    if (this.#unlisted.get(g) === 'arrives') return false;
+    this.#unlisted.set(g, 'leaves');
+    return true;
   }
 }
 
