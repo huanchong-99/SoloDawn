@@ -910,9 +910,11 @@ func (w *m5World) startMCPBridge() error {
 		return err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
 	w.cleanup(func() {
 		cancel()
 		ln.Close()
+		wg.Wait()
 	})
 	exe, err := os.Executable()
 	if err != nil {
@@ -920,17 +922,23 @@ func (w *m5World) startMCPBridge() error {
 	}
 	n0 := w.cluster.Nodes[0]
 	n0.Host.Shim = []string{exe, "m5-mcp-shim", ln.Addr().String()}
-	go w.acceptMCPLoop(ctx, ln, n0.Host)
+	wg.Add(1)
+	go w.acceptMCPLoop(ctx, ln, n0.Host, &wg)
 	return nil
 }
 
-func (w *m5World) acceptMCPLoop(ctx context.Context, ln net.Listener, h *host.Host) {
+func (w *m5World) acceptMCPLoop(ctx context.Context, ln net.Listener, h *host.Host, wg *sync.WaitGroup) {
+	defer wg.Done()
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		go w.serveOneMCPConn(ctx, conn, h)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w.serveOneMCPConn(ctx, conn, h)
+		}()
 	}
 }
 
@@ -939,6 +947,7 @@ func (w *m5World) serveOneMCPConn(ctx context.Context, conn net.Conn, h *host.Ho
 	if err != nil {
 		return
 	}
+	defer context.AfterFunc(ctx, func() { conn.Close() })()
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	var reqMu sync.Mutex

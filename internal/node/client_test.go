@@ -364,14 +364,12 @@ func checkLiveDevlogBothWays(t *testing.T, owner identity.Key, homeNode, hostNod
 
 func waitKnown(t *testing.T, logs *Logs, dev string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if logs.Known(dev) {
-			return
+	poll(t, 5*time.Second, "device "+dev+" to become known", func() string {
+		if !logs.Known(dev) {
+			return "unknown"
 		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatalf("device %s never became known", dev)
+		return ""
+	})
 }
 
 func TestClientSynchronousPushOrderAndFraming(t *testing.T) {

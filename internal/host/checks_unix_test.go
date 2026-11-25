@@ -96,14 +96,17 @@ func TestBackgroundChildDiesWithCheck(t *testing.T) {
 	if got.OK || err != nil || pidText != strconv.Itoa(pid)+"\n" {
 		t.Fatalf("background check: ok=%v detail %q", got.OK, *got.Detail)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for syscall.Kill(pid, 0) == nil {
-		if time.Now().After(deadline) {
+	defer func() {
+		if t.Failed() {
 			syscall.Kill(pid, syscall.SIGKILL)
-			t.Fatalf("background child %d still runs after the check returned", pid)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	}()
+	poll(t, 2*time.Second, fmt.Sprintf("background child %d to end after the check returned", pid), func() string {
+		if syscall.Kill(pid, 0) == nil {
+			return "running"
+		}
+		return ""
+	})
 }
 
 func TestCheckThatCannotStart(t *testing.T) {

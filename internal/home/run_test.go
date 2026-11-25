@@ -108,7 +108,7 @@ func (w *runWorld) reported() string {
 	case err := <-w.reports:
 		return err.Error()
 	case <-time.After(10 * time.Second):
-		w.t.Fatal("the loop reported nothing")
+		w.t.Fatal(timedOut(10*time.Second, "the loop to report a failure", nil))
 		return ""
 	}
 }
@@ -226,7 +226,7 @@ func (p *runPeer) next() string {
 	case frame := <-p.client.got:
 		return runFrame(frame)
 	case <-time.After(10 * time.Second):
-		p.w.t.Fatal("no frame arrived")
+		p.w.t.Fatal(timedOut(10*time.Second, "a frame", nil))
 		return ""
 	}
 }
@@ -283,7 +283,7 @@ func runWait[T any](t *testing.T, ch <-chan T) {
 	select {
 	case <-ch:
 	case <-time.After(10 * time.Second):
-		t.Fatal("what the test waits for did not happen")
+		t.Fatal(timedOut(10*time.Second, fmt.Sprintf("a %T from a channel", *new(T)), nil))
 	}
 }
 
