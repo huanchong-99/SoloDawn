@@ -295,7 +295,8 @@ step 2 (teams), `[S3]` from step 3 (extensions).
 - **R-138** `[S1]` Every computer and every browser has its own identity key.
   A lost device can be revoked from another device.
 - **R-139** `[S1]` Each node keeps a local audit record of who made its AIs
-  do what and what was approved; the owner can read it; it follows retention.
+  do what and what was approved; it follows retention. No screen or request
+  reads it in version 1.
 - **R-140** `[S2]` An invitation is a one-time link, valid 10 minutes, that
   admits one person to one group. (2026-11-22: no fingerprint and no check
   against a rendezvous that stands in for a home; the deployment guide says

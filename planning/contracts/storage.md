@@ -204,7 +204,7 @@ CREATE TABLE audit (              -- R-139
   ts     INTEGER NOT NULL,
   g      TEXT,
   agent  TEXT,
-  what   TEXT NOT NULL,           -- delivered | refused | requested | approval | takeover | handback | merge | setting | killed
+  what   TEXT NOT NULL,           -- delivered | refused | merge | setting | killed
   item   INTEGER,                 -- delivered, refused: the inbox item id
   home   TEXT,                    -- delivered, refused: device id of the home
   detail TEXT NOT NULL,           -- merge: the task and the commit (contracts/local.md section 7)
@@ -232,7 +232,7 @@ CREATE TABLE peer (               -- remembered signalling addresses (R-133)
 - **Delivered once.** Before a host acknowledges an inbox item it writes the
   audit row `delivered` (or `refused`) with the home and the item id. An
   item that is already there is acknowledged again and not delivered again.
-  The audit the owner reads (R-139) is the same record.
+  Nothing reads the table for the owner in version 1.
 - **Approvals.** A row is written when the request is posted and removed
   when the request is denied, when the grant is used, and when the task is
   reassigned or ends.
