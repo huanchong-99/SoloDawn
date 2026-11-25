@@ -184,13 +184,13 @@ func (w *rvWorld) command() error {
 
 // The command has no way to say that it is listening.
 func rvListening(addr string) error {
-	for range 100 {
-		if c, err := net.Dial("tcp", addr); err == nil {
-			return c.Close()
+	return waitUntilEvery(50*time.Millisecond, 5*time.Second, "solodawn rendezvous to listen on "+addr, func() error {
+		c, err := net.Dial("tcp", addr)
+		if err != nil {
+			return err
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	return fmt.Errorf("solodawn rendezvous does not listen on %s", addr)
+		return c.Close()
+	})
 }
 
 func (w *rvWorld) get(path, file string) error {

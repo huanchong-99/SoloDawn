@@ -238,12 +238,11 @@ func (w *nodeScenarioWorld) enrollNodeOverCtl(conn *peer.Connection, nodeID, lab
 }
 
 func (w *nodeScenarioWorld) waitPairDone(pairDone <-chan error) error {
-	select {
-	case err := <-pairDone:
-		return err
-	case <-w.ctx.Done():
-		return w.ctx.Err()
+	err, ctxErr := recvCtx(w.ctx, pairDone, "the pairing to finish", nil)
+	if ctxErr != nil {
+		return ctxErr
 	}
+	return err
 }
 
 func (w *nodeScenarioWorld) collectListedNodes() error {
@@ -425,18 +424,13 @@ func startAcceptanceNode(t testing.TB, bin string, cleanup func(func())) (*runni
 }
 
 func waitAcceptanceSocket(sock string, wait time.Duration) error {
-	deadline := time.Now().Add(wait)
-	var last error
-	for time.Now().Before(deadline) {
+	return waitUntilEvery(25*time.Millisecond, wait, "the node socket to accept", func() error {
 		conn, err := net.Dial("unix", sock)
 		if err == nil {
 			conn.Close()
-			return nil
 		}
-		last = err
-		time.Sleep(25 * time.Millisecond)
-	}
-	return last
+		return err
+	})
 }
 
 func extractFingerprintLine(out string) string {

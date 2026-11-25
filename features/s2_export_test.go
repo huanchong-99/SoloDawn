@@ -108,7 +108,7 @@ func (w *s2ExportWorld) dialQ(home string) (*peerBrowserConn, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw, err := bc.conn.Request(c.Ctx, func(id int64) any {
+	raw, err := bc.request(c.Ctx, func(id int64) any {
 		return proto.Hello{Request: proto.Request{Type: "hello", ID: id}, V: 2, Kind: "browser", Name: q.Name, Addrs: []string{}}
 	})
 	if err != nil {
@@ -373,7 +373,7 @@ func (w *s2ExportWorld) movedSync(conn *peer.Connection) error {
 }
 
 func (w *s2ExportWorld) expectMoved(conn *peer.Connection, op string, build func(proto.Request) any) error {
-	raw, err := conn.Request(w.c.Ctx, func(id int64) any { return build(proto.Request{Type: op, ID: id}) })
+	raw, err := requestWait(w.c.Ctx, conn, nil, func(id int64) any { return build(proto.Request{Type: op, ID: id}) })
 	if err != nil {
 		return err
 	}

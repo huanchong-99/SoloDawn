@@ -37,6 +37,7 @@ type homeRunWorld struct {
 type homeRunPeer struct {
 	conn    *home.Conn
 	frames  chan any
+	saw     trail
 	re      int64
 	welcome string // the answer to its hello
 }
@@ -47,13 +48,12 @@ func (p *homeRunPeer) Done() <-chan struct{} { return nil }
 // next returns the next frame the connection was sent, as a peer connection
 // would encode it.
 func (p *homeRunPeer) next() (string, error) {
-	select {
-	case frame := <-p.frames:
-		text, err := json.Marshal(frame)
-		return string(text), err
-	case <-time.After(10 * time.Second):
-		return "", fmt.Errorf("the connection was sent nothing")
+	frame, err := recvFrame(p.frames, 10*time.Second, &p.saw, briefAny)
+	if err != nil {
+		return "", err
 	}
+	text, err := json.Marshal(frame)
+	return string(text), err
 }
 
 const (
