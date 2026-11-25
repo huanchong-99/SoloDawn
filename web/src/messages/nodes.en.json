@@ -36,6 +36,8 @@
   "nodes.ai.state.dormant": "Dormant",
   "nodes.ai.state.limited": "Limited",
   "nodes.ai.state.offline": "Offline",
+  "nodes.ai.state.takeover": "Owner is driving",
+  "nodes.ai.state.paused": "Paused",
   "nodes.pair.title": "Add a browser or phone",
   "nodes.pair.lead": "Create a one-time link on one of your computers, then open it in the browser or on the phone you want to add.",
   "nodes.pair.computer": "Computer",

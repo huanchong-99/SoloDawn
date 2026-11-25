@@ -186,6 +186,7 @@
         {#if unseen}<i class="dot"></i>{/if}
       </button>
     {/if}
+    <Mount at="chat.write" props={{ group }} />
     <Composer {group} {net} />
   </div>
   {#if sided}

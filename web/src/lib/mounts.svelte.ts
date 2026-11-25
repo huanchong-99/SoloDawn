@@ -34,6 +34,8 @@ export interface Points {
   'chat.head': { group: Group };
   /** Between the head of a chat and its main line. */
   'chat.top': { group: Group };
+  /** Above the composer: what the writer should know before writing. */
+  'chat.write': { group: Group };
   /** Beside the main line of a chat from 1024 px; below that, a panel that slides over the chat
    *  when the person opens it with the button the chat's head then shows. */
   'chat.side': { group: Group; net: Net };
@@ -53,6 +55,7 @@ export const points = [
   'layer',
   'chat.head',
   'chat.top',
+  'chat.write',
   'chat.side',
   'member.ai',
   'member.add',

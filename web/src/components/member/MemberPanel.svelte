@@ -7,7 +7,6 @@
     isAdmin,
     pathLabel,
     personTags,
-    statusOf,
     terminalDisabledReason,
     usageMeter,
   } from '../../lib/members';
@@ -17,6 +16,7 @@
   import { accountLabel } from '../../lib/onboard.svelte';
   import { prefs, t } from '../../lib/prefs.svelte';
   import { href } from '../../lib/route.svelte';
+  import { statusIn } from '../../lib/stop';
   import { endTakeover, hostHomeOf } from '../../lib/terminal.svelte';
   import Avatar from '../Avatar.svelte';
   import Icon from '../Icon.svelte';
@@ -65,11 +65,11 @@
     </div>
 
     {#each ais as ai (ai.id)}
-      {@const status = statusOf(group, ai)}
+      {@const host = hostHomeOf(net.homes, ai.host)}
+      {@const status = statusIn(group, ai, host)}
       {@const mine = ai.user === group.home.me.user}
       {@const owner = mine ? undefined : group.personName(ai.user)}
       {@const termWhy = mine ? terminalDisabledReason(net, ai) : undefined}
-      {@const host = hostHomeOf(net.homes, ai.host)}
       {@const terminal = offersTerminal(host, ai.cli)}
       {@const meter = usageMeter(ai.usage, prefs.lang)}
       <section class="card member">

@@ -36,6 +36,8 @@
   "nodes.ai.state.dormant": "休眠",
   "nodes.ai.state.limited": "受限",
   "nodes.ai.state.offline": "离线",
+  "nodes.ai.state.takeover": "主人正在直接操作",
+  "nodes.ai.state.paused": "已暂停",
   "nodes.pair.title": "添加浏览器或手机",
   "nodes.pair.lead": "选一台在线的电脑生成一次性配对链接，在要接入的浏览器或手机上打开即可。",
   "nodes.pair.computer": "生成链接的电脑",
