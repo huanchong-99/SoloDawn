@@ -315,6 +315,15 @@ func runGitIn(dir string, args ...string) error {
 	return nil
 }
 
+// initBareRepo makes dir a bare repository whose maintenance ends with the
+// push that starts it, and does not go on in the folder when it is removed.
+func initBareRepo(dir, base string) error {
+	if err := runGitIn("", "init", "--bare", "-b", base, dir); err != nil {
+		return err
+	}
+	return runGitIn(dir, "config", "gc.autoDetach", "false")
+}
+
 func initLocalGitRepo(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err

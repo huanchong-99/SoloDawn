@@ -52,7 +52,9 @@ func (g *runGroup) forgetSent(ids []int64) {
 // pushRows sends the rows of a result to the connections that watch the
 // group. A connection whose device the group no longer serves, as the state
 // is after this result, stops watching and is not sent these rows either
-// (planning/contracts/datachannel.md section 8): it has to ask again.
+// (planning/contracts/datachannel.md section 8): it has to ask again. Only
+// the hosts of a person whom this result removed are sent them, as their
+// last (planning/contracts/step-2/people.md 2.4).
 func (g *runGroup) pushRows(rows []Row) {
 	if len(rows) == 0 {
 		return
@@ -67,17 +69,26 @@ func (g *runGroup) pushRows(rows []Row) {
 	g.loop.diag.Info("rows.send", "g", g.state.ID, "seq", diagSpan(rows), "to", to)
 }
 
-// pushTo sends frames to a connection that still watches the group, and
-// reports whether it sent any.
+// pushTo sends frames to a connection that is told of them, and reports
+// whether it sent any.
 func (g *runGroup) pushTo(c *Conn, seat *runSeat, frames []any) bool {
-	seat.watching = seat.watching && g.state.Serves(c.device)
-	if !seat.watching || len(frames) == 0 {
+	if !g.told(c, seat) || len(frames) == 0 {
 		return false
 	}
 	for _, frame := range frames {
 		c.send(frame)
 	}
 	return true
+}
+
+// told reports whether a connection is sent the rows of a result. One that the
+// group no longer serves stops watching.
+func (g *runGroup) told(c *Conn, seat *runSeat) bool {
+	if !seat.watching || g.state.Serves(c.device) {
+		return seat.watching
+	}
+	seat.watching = false
+	return seat.inbox && g.state.human(seat.user) == ""
 }
 
 // rowFrames makes the rows frames of a result, each filled only as far as a

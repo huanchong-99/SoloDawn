@@ -203,7 +203,7 @@ func tskInitWorktree(t *testing.T, dataDir string, remote bool) (projectDir, rem
 	source := src
 	if remote {
 		remoteDir = t.TempDir()
-		forgeGit(t, remoteDir, "init", "--bare", "-b", "base")
+		bareRepo(t, remoteDir, "base")
 		forgeGit(t, src, "remote", "add", "origin", remoteDir)
 		forgeGit(t, src, "push", "origin", "base")
 		source = remoteDir
@@ -420,6 +420,38 @@ func TestPushBranchSuccessAndSecretRedaction(t *testing.T) {
 	_, err = call(t.Context(), h, caller, json.RawMessage(`{}`))
 	seamCode(t, err, "cli")
 	tskRequire(t, !strings.Contains(err.Error(), secretToken) && strings.Contains(err.Error(), "[redacted]"), "expected redacted cli error")
+}
+
+// A push that the remote refuses because its branch has commits the worktree
+// lacks, such as the last commits of the task's assignee before, fetches them
+// under the clone's lock and says how to go on. A fetch that fails is told.
+func TestPushBranchBehindTheRemoteFetchesAndSaysHowToGoOn(t *testing.T) {
+	h, dataDir := tskDiskHost(t)
+	projectDir, remoteDir, wtDir, _ := tskInitWorktree(t, dataDir, true)
+	tskCommitFiles(t, wtDir, map[string]string{"a.go": "package a\n"}, "work")
+	before := t.TempDir()
+	forgeGit(t, before, "clone", "-q", "-b", "base", remoteDir, ".")
+	earlier := tskCommitFiles(t, before, map[string]string{"b.go": "package b\n"}, "earlier work")
+	forgeGit(t, before, "push", "-q", "origin", "HEAD:refs/heads/task/12-fix-path")
+	tskPutRow(t, h, "group", tskTestGroupID, tskGroupFixture("github"))
+	tskPutRow(t, h, "task", tskTestTaskID, tskTaskFixture(12, "fix-path", "", nil))
+	push := func() error {
+		_, err := Tools["push_branch"].Call(t.Context(), h, tskTaskCaller("wt/12-fix-path", 2), json.RawMessage(`{}`))
+		return err
+	}
+
+	hook := filepath.Join(projectDir, "repo", ".git", "hooks", "reference-transaction")
+	tskNoErr(t, os.WriteFile(hook, []byte("#!/bin/sh\necho no refs today >&2\nexit 1\n"), 0o700))
+	err := push()
+	seamCode(t, err, "cli")
+	tskRequire(t, strings.Contains(err.Error(), "no refs today"), "expected the fetch's output")
+	tskNoErr(t, os.Remove(hook))
+
+	err = push()
+	seamCode(t, err, "conflict")
+	tskEqual(t, err.Error(), "conflict: origin has commits on task/12-fix-path that this worktree lacks, now fetched: "+
+		"run git merge origin/task/12-fix-path, run_checks, and call this tool again")
+	tskEqual(t, forgeGit(t, wtDir, "rev-parse", "origin/task/12-fix-path"), earlier)
 }
 
 func TestRunChecksRefusals(t *testing.T) {

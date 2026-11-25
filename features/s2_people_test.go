@@ -211,6 +211,7 @@ func registerS2PeopleA93A94Steps(sc *godog.ScenarioContext, w *s2PeopleWorld) {
 	sc.Step(`^P cancels that task and removes Q from the people group$`, w.cancelTaskAndRemoveQ)
 	sc.Step(`^P removes Q from the people group$`, w.removeConnectedQ)
 	sc.Step(`^Q's connections to P1 close within 1 second and Q's next connection attempt to P1 is refused$`, w.verifyQDisconnectedAndRefused)
+	sc.Step(`^Q1 has ended the sessions of Q's AIs in the people group and forgotten its home$`, w.verifyQ1LeftGroup)
 	sc.Step(`^Q's browser receives groups without the group and P sees gone markers for Q and Q's AIs$`, w.verifyQGroupsAndGoneMarkers)
 }
 
@@ -1054,6 +1055,23 @@ func (w *s2PeopleWorld) verifyQDisconnectedAndRefused() error {
 		return err
 	}
 	return expectNeverOpens(w.cast.Ctx, w.cast.Q.Browser, w.cast.P1.ID())
+}
+
+func (w *s2PeopleWorld) verifyQ1LeftGroup() error {
+	return waitUntilCtx(w.cast.Ctx, 100*time.Millisecond, "Q1 to leave the group", func() error {
+		info, err := requestHostInfo(w.cast.Ctx, w.cast.Q.Conns[w.cast.Q1.ID()].conn)
+		if err != nil {
+			return abort(err)
+		}
+		kept := slices.ContainsFunc(info.Homes, func(h proto.Home) bool { return h.Group == w.gid })
+		for _, agent := range info.Agents {
+			kept = kept || slices.ContainsFunc(agent.Groups, func(g proto.AgentGroup) bool { return g.Group == w.gid })
+		}
+		if kept {
+			return fmt.Errorf("Q1 still has homes %v and agents %+v", info.Homes, info.Agents)
+		}
+		return nil
+	})
 }
 
 func (w *s2PeopleWorld) waitQBrowserClosed(deadline time.Time) error {

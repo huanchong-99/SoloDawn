@@ -132,7 +132,7 @@ func tkOrigin(t *testing.T) string {
 	t.Helper()
 	ctx := t.Context()
 	origin, seed := filepath.Join(t.TempDir(), "origin.git"), t.TempDir()
-	mustGit(t, ctx, "", "init", "--bare", "--initial-branch=main", origin)
+	bareRepo(t, origin, "main")
 	mustGit(t, ctx, "", "init", "--initial-branch=main", seed)
 	os.WriteFile(filepath.Join(seed, "README.md"), []byte("one\n"), 0o600)
 	mustGit(t, ctx, seed, "add", "README.md")

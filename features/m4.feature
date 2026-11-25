@@ -66,8 +66,6 @@ Feature: M4 permissions, approvals, decisions and the group pause
       | cli    |
       | claude |
 
-    # issues.md: "At level 1 a request of Codex, OpenCode or Qwen Code produces a card"
-    @pending
     Examples:
       | cli    |
       | codex  |

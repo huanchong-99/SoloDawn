@@ -1400,3 +1400,38 @@ func TestSettleEndsAnAskWhoseCardIsBeingPosted(t *testing.T) {
 	fx.assertAskSettled(d, runner)
 	mustApproveEqual(t, fx.approvalRows(), "", "approval rows")
 }
+
+// A CLI that asks on its connection and was started at level 1 is denied at
+// once, without a card; at level 2 the request becomes a card.
+func TestLevelOneRequestOfAConnectionIsDeniedWithoutACard(t *testing.T) {
+	for level, want := range map[int]int{1: 0, 2: 1} {
+		t.Run(strconv.Itoa(level), func(t *testing.T) {
+			h, rh, drv, _ := setupRunEnv(t)
+			Listeners["approve"] = listenApprove
+			putSetting(t, h.Store, "default_level", strconv.Itoa(level))
+			posts := func() int {
+				return len(slices.DeleteFunc(rh.snapshotCmds(), func(c recordedCmd) bool { return c.payload["t"] != "post" }))
+			}
+			rh.cmdFn = func(p map[string]any) (json.RawMessage, error) {
+				if p["t"] == "post" {
+					return json.RawMessage(`{"re":1,"err":{"code":"conflict","msg":"refused"}}`), nil
+				}
+				return json.RawMessage(`{"re":1,"ok":true}`), nil
+			}
+			key := SessionKey{Group: runGroup1, Member: runAI1}
+			mustApproveNoErr(t, h.Sessions.Create(makeRunSession(key, GroupSession, "repo")))
+			mustApproveNoErr(t, Runner.Turn(t.Context(), h, key, "turn", Turn{Kind: ItemsTurn}))
+			p := drv.proc(0)
+			p.emit(Event{Kind: Asked, Ask: &Ask{ID: "a1", Tool: "commandExecution", Category: "command", Command: "make a"}})
+			poll(t, 5*time.Second, "the answer", func() string {
+				p.mu.Lock()
+				defer p.mu.Unlock()
+				if !slices.Equal(p.answers, []recordedAsk{{id: "a1", allow: false}}) {
+					return fmt.Sprint(p.answers)
+				}
+				return ""
+			})
+			mustApproveEqual(t, posts(), want, "cards posted")
+		})
+	}
+}

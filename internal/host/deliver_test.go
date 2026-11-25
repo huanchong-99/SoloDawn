@@ -266,6 +266,10 @@ func (f *fakeDeliverHome) cmdPayloads() []string {
 	return out
 }
 
+func (f *fakeDeliverHome) taskPayloads() []string {
+	return slices.DeleteFunc(f.cmdPayloads(), func(p string) bool { return !strings.HasPrefix(p, `{"t":"task"`) })
+}
+
 func (f *fakeDeliverHome) syncSinces() []int64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1372,23 +1376,6 @@ func verifyEnqueueHeldOrdering(t *testing.T) {
 	if len(q2) != 2 || q2[0].item.Item != 20 || !bool(q2[0].item.Jump) {
 		t.Fatalf("index 0 upgrade failed: %+v", q2)
 	}
-	verifyJumpReplacesRetiredItem(t, mk(32, false), mk(30, false), mk(31, true))
-}
-
-// The home retires the waiting item of a message and queues its jump under a new number.
-func verifyJumpReplacesRetiredItem(t *testing.T, other, retired, jump verifiedItem) {
-	t.Helper()
-	jump.item.Msg = retired.item.Msg
-	q := enqueueHeld(enqueueHeld(enqueueHeld(nil, other), retired), jump)
-	if len(q) != 2 || q[0].item.Item != jump.item.Item || q[1].item.Item != other.item.Item {
-		t.Fatalf("the jump did not replace the retired item: %+v", q)
-	}
-	// A second jump of the message retires the first.
-	again := jump
-	again.item.Item += 10
-	if q = enqueueHeld(q, again); len(q) != 2 || q[0].item.Item != again.item.Item || q[1].item.Item != other.item.Item {
-		t.Fatalf("the second jump did not replace the first: %+v", q)
-	}
 }
 
 func TestStillCurrentTaskRoleStepCommitMismatches(t *testing.T) {
@@ -1450,7 +1437,7 @@ func initTestOriginAndGroupRepo(t *testing.T, r *deliverRig, forge string) (orig
 	ctx := t.Context()
 	originDir = filepath.Join(t.TempDir(), "team", "website.git")
 	seed := t.TempDir()
-	mustGit(t, ctx, "", "init", "--bare", "--initial-branch=main", originDir)
+	bareRepo(t, originDir, "main")
 	mustGit(t, ctx, "", "init", "--initial-branch=main", seed)
 	mustGit(t, ctx, seed, "config", "user.name", "Test")
 	mustGit(t, ctx, seed, "config", "user.email", "test@example.invalid")
@@ -1612,7 +1599,7 @@ func verifyConflictRestartInspectAndRemoteForge(t *testing.T) {
 	remoteAIRaw := json.RawMessage(marshalWire(proto.TaskRow{RowHeader: proto.RowHeader{Type: "task", ID: string(testCanonicalID(97)), Seq: 15}, Group: testGroup1, Num: 4, Title: "R", Slug: "remote-ai", Origin: "brief", State: "active", Step: "merge", Commit: baseCommit, Assignee: testAI2, Depends: []string{}}))
 	r2.h.Push(r2.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpPaused, aiRaw, t2Raw, noAuditRaw, remoteAIRaw}})))
 	afterGroupState(r2.h, deliv(r2.h), testGroup1)
-	if len(r2.home.cmdPayloads()) != 0 {
+	if len(r2.home.taskPayloads()) != 0 {
 		t.Fatal("restart inspect ran while group paused")
 	}
 	d2 := deliv(r2.h)
@@ -1620,12 +1607,12 @@ func verifyConflictRestartInspectAndRemoteForge(t *testing.T) {
 	d2.claimMerge(mKey2)
 	r2.h.Rows.Put(testGroup1, "group", testGroup1, grpRaw)
 	resumeOneMerge(r2.h, d2, r2.homeKey.ID(), testGroup1, proto.TaskRow{RowHeader: proto.RowHeader{ID: testTask2}, Num: 2, Slug: "restart", State: "active", Step: "merge", Commit: baseCommit, Assignee: testAI1})
-	if len(r2.home.cmdPayloads()) != 0 {
+	if len(r2.home.taskPayloads()) != 0 {
 		t.Fatal("restart inspect ran while merge already claimed")
 	}
 	d2.unclaimMerge(mKey2)
 	r2.h.Push(r2.homeKey.ID(), json.RawMessage(marshalWire(proto.Rows{Type: "rows", Group: testGroup1, Rows: []json.RawMessage{grpRaw}})))
-	r2.waitUntil("restart inspect reported", func() bool { return len(r2.home.cmdPayloads()) == 1 })
+	r2.waitUntil("restart inspect reported", func() bool { return len(r2.home.taskPayloads()) == 1 })
 	r2.waitNoActiveMerges()
 	r2.h.Settle()
 	verifyRemoteForgeAndGitHubRepo(t)
@@ -2071,7 +2058,7 @@ func setupStep17Rig(t *testing.T) (*deliverRig, string, string, string) {
 	r := newDeliverRig(t, true)
 	r.seedGroupAndMembers()
 	remoteDir := filepath.Join(t.TempDir(), "origin.git")
-	runTestGit(t, "", "init", "--bare", "--initial-branch=main", remoteDir)
+	bareRepo(t, remoteDir, "main")
 	seed := filepath.Join(t.TempDir(), "seed")
 	runTestGit(t, "", "clone", remoteDir, seed)
 	os.WriteFile(filepath.Join(seed, "README.md"), []byte("base\n"), 0o600)

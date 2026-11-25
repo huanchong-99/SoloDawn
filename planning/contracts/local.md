@@ -151,7 +151,7 @@ remote.
 | merge, no remote | only if `git -C repo rev-parse <br>` is `<commit>`: `git -C repo merge --squash <commit>` and a commit on `<base>` whose message names the task and the commit; on failure `git -C repo reset --merge`. These three run with `-c core.hooksPath=<an empty folder>`, so no hook of the project runs in them, and the commit with `--no-verify --no-gpg-sign`, so no signing prompt waits for a person; pushes and fetches keep the project's hooks |
 | node restarts with a merge it took and did not report | no second attempt. It knows it took one from the audit row `merge` (task, commit) written in the same transaction as the item's `delivered` row. It looks: with a remote the read of the row "merge, with a remote", or without a remote for a commit on the first-parent history of `<base>` whose message is exactly the merge message. Merged, and with a remote `headRefOid` is the reviewed commit: `task merged`. Merged with another head, or not merged: `task conflict`. A merge still pending (as in the row "merge, with a remote") is waited for the same way, and the 60 minutes count from the time of the audit row `merge`, or from the restart when the caller does not have it |
 | merge failed, or the head is not the reviewed commit | `task conflict` with the command's output |
-| task given to another AI | with a remote, first the push of `push_branch`; then `git -C repo worktree remove --force ../<wt>`. Only commits carry over: uncommitted changes in the worktree are discarded. The reviewer's checkout stays. When both AIs are on one node, the order of the new AI's create and the old AI's removal does not matter: the create adds the worktree again for the new AI, and the removal leaves a worktree that another AI holds untouched (below the table) |
+| task given to another AI | with a remote, first the push of `push_branch`; then `git -C repo worktree remove --force ../<wt>`, both under one hold of the clone's lock. Only commits carry over: uncommitted changes in the worktree are discarded. The reviewer's checkout stays. A push that fails is told in the task's thread (`turn_interrupted`, `crash`, with its output) and is not tried again; the commits stay on the local branch. When both AIs are on one node, the new AI's create does both first, unless the removal has. The removal leaves a worktree that another AI holds untouched (below the table) |
 | reviewer changed | the old reviewer's node removes `review/<num>`; on one node, as for a task given to another AI |
 | task merged | `git -C repo worktree remove ../<wt>`, then, under the clone's lock and only while `git -C repo rev-parse --verify refs/heads/<br>` is the merged commit, `git -C repo branch -D <br>`: a branch that has moved since is kept, with its commits, and `branch -D` refuses a branch that a worktree whose removal failed still has checked out. The reviewer's node removes `review/<num>` |
 | task cancelled | `git -C repo worktree remove --force ../<wt>`: uncommitted changes in the worktree are discarded; the branch `<br>` keeps its commits. The reviewer's node removes `review/<num>` |
@@ -180,11 +180,14 @@ remote.
   host runs `git -C repo reset --merge` under the clone's lock; the row on
   the restart above then reports `task conflict`. HS-7b implements it.
 - **One lock per clone.** Every Git command that changes the clone or one
-  of its worktrees runs under one lock per clone: `clone`, `fetch`, `merge`
-  (fast-forwards, and the local squash merge with its commit or reset),
-  `worktree add` and `worktree remove`. The lock is keyed by the clone's
-  real path, with symbolic links resolved, so two spellings of one clone
-  share it.
+  of its worktrees runs under one lock per clone: `clone`, `fetch`, `push`
+  (it moves `refs/remotes/origin/<br>` as a fetch does, also when it goes
+  to the push URL), `merge` (fast-forwards, and the local squash merge with
+  its commit or reset), `worktree add` and `worktree remove`. A push holds
+  the lock for as long as it runs, the project's `pre-push` hook included,
+  and the group's other Git work waits for it. The lock is keyed by the
+  clone's real path, with symbolic links resolved, so two spellings of one
+  clone share it.
 - **Commands never wait for a person.** Every `git` and `gh` command the
   host runs has a limit: 60 minutes for `git clone` and `git push`, 10
   minutes for any other; a stopped command is killed with every process it

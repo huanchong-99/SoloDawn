@@ -449,7 +449,7 @@ func TestHostJoinPreconditions(t *testing.T) {
 	rig.mustJoin(proto.HostJoin{Group: joinTestGroup2, Home: "home-1", Agent: "claude", Name: "Claude Backend"})
 }
 
-func TestHostJoinOneConnectionPerHomeCloneReuseAndSecretaryDemotion(t *testing.T) {
+func TestHostJoinOneConnectionPerHomeAndCloneReuse(t *testing.T) {
 	rig := newJoinRig(t)
 	rig.setAgent("claude", "2.1.311", joinStr("personal"))
 	rig.setAgent("codex", "0.164.0", joinStr("api_key"))
@@ -480,15 +480,6 @@ func setupMultiHomeGroups(t *testing.T, rig *joinRig) (*joinFakeHome, string) {
 	fhA.putGroup(makeGroupRow(joinTestGroup1, "home-a", "Website", repo1, "main"))
 	fhA.putGroup(makeGroupRow(joinTestGroup2, "home-a", "Backend", rig.makeRepo("repo2", "trunk"), "trunk"))
 	fhB.putGroup(makeGroupRow(joinTestGroup3, "home-b", "Docs", rig.makeRepo("repo3", "main"), "main"))
-
-	// Seed another group's secretary session to verify demotion affects only the target group.
-	err := rig.h.Sessions.Create(Session{
-		SessionKey: SessionKey{Group: string(joinTestGroup3), Member: "existing-sec"},
-		Kind:       GroupSession, Folder: "repo", Agent: "claude", Home: "home-b", Name: "Docs Sec", Secretary: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	return fhA, repo1
 }
 
@@ -510,7 +501,7 @@ func assertMultiJoinOutcomes(t *testing.T, rig *joinRig, fhA *joinFakeHome) {
 	joinAssertEqual(t, "sync state_only", fhA.syncs[0].StateOnly, true)
 	joinAssertEqual(t, "sync since", fhA.syncs[0].Since, int64(0))
 	assertAddAICommands(t, fhA.addAIs)
-	assertSecretaryStates(t, rig.h, string(fhA.addAIs[0].ID), string(fhA.addAIs[1].ID))
+	assertJoinedSessions(t, rig.h, string(fhA.addAIs[0].ID), string(fhA.addAIs[1].ID))
 	joinAssertHomes(t, rig.db, []proto.Home{
 		{Group: joinTestGroup1, Home: "home-a", Name: "Website v2"},
 		{Group: joinTestGroup2, Home: "home-a", Name: "Backend"},
@@ -538,20 +529,16 @@ func assertAddAICommands(t *testing.T, adds []proto.MemberAddAI) {
 	joinAssertSlice(t, "configured approvers", adds[1].Approvers, []string{"u-del-1", "u-del-2"})
 }
 
-func assertSecretaryStates(t *testing.T, h *Host, claudeID, codexID string) {
+func assertJoinedSessions(t *testing.T, h *Host, claudeID, codexID string) {
 	t.Helper()
 	sClaudeG1, ok := h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: claudeID})
 	joinAssertEqual(t, "claude g1 exists", ok, true)
-	joinAssertEqual(t, "claude g1 demoted", sClaudeG1.Secretary, false)
 	joinAssertEqual(t, "claude g1 kind", sClaudeG1.Kind, GroupSession)
 	joinAssertEqual(t, "claude g1 folder", sClaudeG1.Folder, "repo")
 	joinAssertEqual(t, "claude g1 state", sClaudeG1.State, Dormant)
 
 	sCodexG1, ok := h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: codexID})
 	joinAssertEqual(t, "codex g1 secretary", ok && sCodexG1.Secretary && sCodexG1.Agent == "codex", true)
-
-	sClaudeG3, ok := h.Sessions.Get(SessionKey{Group: string(joinTestGroup3), Member: "existing-sec"})
-	joinAssertEqual(t, "claude g3 preserved secretary", ok && sClaudeG3.Secretary, true)
 }
 
 func TestHostJoinAttachModesAndWaiters(t *testing.T) {
@@ -1077,13 +1064,9 @@ func checkCorruptAndDroppedSettings(t *testing.T) {
 func checkJoinCommitRollbacks(t *testing.T) {
 	t.Helper()
 	steps := []struct {
-		name         string
-		hasSecretary bool
-		mutateDB     func(*testing.T, *store.Store)
+		name     string
+		mutateDB func(*testing.T, *store.Store)
 	}{
-		{name: "demote-secretary-update-fails", hasSecretary: true, mutateDB: func(t *testing.T, db *store.Store) {
-			seamSQL(t, db, "CREATE TRIGGER block_demote BEFORE INSERT ON session WHEN NEW.secretary = 0 BEGIN SELECT RAISE(ABORT, 'demote blocked'); END")
-		}},
 		{name: "create-session-fails", mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE session") }},
 		{name: "upsert-homes-scan-fails", mutateDB: func(t *testing.T, db *store.Store) { seamSQL(t, db, "DROP TABLE setting") }},
 		{name: "upsert-homes-unmarshal-fails", mutateDB: func(t *testing.T, db *store.Store) {
@@ -1093,21 +1076,18 @@ func checkJoinCommitRollbacks(t *testing.T) {
 	}
 	for _, tc := range steps {
 		t.Run("join-"+tc.name, func(t *testing.T) {
-			runJoinRollbackCase(t, tc.hasSecretary, tc.mutateDB)
+			runJoinRollbackCase(t, tc.mutateDB)
 		})
 	}
 }
 
-func runJoinRollbackCase(t *testing.T, hasSecretary bool, mutateDB func(*testing.T, *store.Store)) {
+func runJoinRollbackCase(t *testing.T, mutateDB func(*testing.T, *store.Store)) {
 	t.Helper()
 	rig := newJoinRig(t)
 	rig.setAgent("claude", "2.1.311", joinStr("personal"))
 	rig.setAgent("codex", "0.164.0", joinStr("personal"))
 	fh := rig.addHome("home-1")
 	fh.putGroup(makeGroupRow(joinTestGroup1, "home-1", "Website", rig.makeRepo("r", "main"), "main"))
-	if hasSecretary {
-		seedExistingSecretary(t, rig.h)
-	}
 	fh.cmdFn = func(proto.Envelope) (json.RawMessage, error) {
 		mutateDB(t, rig.db)
 		ok := proto.CmdResult{Success: proto.Success{Re: 7, OK: true}}
@@ -1118,26 +1098,6 @@ func runJoinRollbackCase(t *testing.T, hasSecretary bool, mutateDB func(*testing
 	})
 	assertRawStoreFailure(t, err)
 	joinAssertEqual(t, "rolled-back claude absent", len(joinAgentMembers(rig.h, string(joinTestGroup1), "claude")), 0)
-	if hasSecretary {
-		sec, ok := rig.h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: "sec-1"})
-		joinAssertEqual(t, "prior secretary restored", ok && sec.Secretary, true)
-		seamSQL(t, rig.db, "DROP TRIGGER block_demote")
-		fh.cmdFn = nil
-		rig.mustJoin(proto.HostJoin{Group: joinTestGroup1, Home: "home-1", Agent: "claude", Name: "Claude", Secretary: true})
-		secAfter, ok := rig.h.Sessions.Get(SessionKey{Group: string(joinTestGroup1), Member: "sec-1"})
-		joinAssertEqual(t, "prior secretary demoted without trigger", ok && !secAfter.Secretary, true)
-	}
-}
-
-func seedExistingSecretary(t *testing.T, h *Host) {
-	t.Helper()
-	err := h.Sessions.Create(Session{
-		SessionKey: SessionKey{Group: string(joinTestGroup1), Member: "sec-1"},
-		Kind:       GroupSession, Folder: "repo", Agent: "codex", Home: "home-1", Name: "Sec", Secretary: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }
 
 func assertRawStoreFailure(t *testing.T, err error) {

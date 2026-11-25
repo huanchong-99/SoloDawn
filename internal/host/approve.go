@@ -134,7 +134,10 @@ func runAskedEvent(ctx context.Context, cancel context.CancelFunc, h *Host, st *
 		}
 		return
 	}
-	allow, _ := handleApproval(ctx, h, s, ask)
+	allow := false
+	if processLevel(h, s.SessionKey) != 1 { // read only: denied without a card (flows/approval.md step 2)
+		allow, _ = handleApproval(ctx, h, s, ask)
+	}
 	if ctx.Err() == nil && Runner != nil {
 		Runner.Answer(h, s.SessionKey, ask.ID, allow)
 	}

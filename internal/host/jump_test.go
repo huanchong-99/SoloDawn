@@ -378,9 +378,8 @@ func TestJumpForAnotherSessionPreemptsTheTaskAndContinuesIt(t *testing.T) {
 		r.push(jumpMention(2, testMsg1, "", false))
 		r.push(jumpMention(3, testMsg2, runTask1, false))
 		r.wantHeld(2, 3)
-		r.push(jumpMention(4, testMsg1, "", true))
-		// Item 4 is the jump of the message of item 2, which the home retired.
-		r.wantHeld(3, 4)
+		r.push(jumpMention(2, testMsg1, "", true))
+		r.wantHeld(2, 3)
 		r.wantReports()
 		r.wantStates(Working, Dormant)
 		if n := task.interrupts.Load(); n != 1 {
@@ -390,8 +389,8 @@ func TestJumpForAnotherSessionPreemptsTheTaskAndContinuesIt(t *testing.T) {
 		r.end(task, "interrupted")
 		group := r.drv.proc(1)
 		r.wantReports("task preempted " + runTask1 + " " + testMsg1)
-		r.wantTurns(group, "items 4")
-		r.wantAcked(4)
+		r.wantTurns(group, "items 2")
+		r.wantAcked(2)
 		r.wantHeld(3)
 		r.wantStates(Waiting, Working)
 
@@ -409,13 +408,10 @@ func TestJumpForAnotherSessionPreemptsTheTaskAndContinuesIt(t *testing.T) {
 		r.end(task, "completed")
 		r.wantReports("task preempted "+runTask1+" "+testMsg1, "task resume "+runTask1)
 		r.wantSettled()
-		if r.home.ackCountFor(2) != 0 {
-			t.Fatal("the retired item was acknowledged")
-		}
 	})
 	where := " node=" + seamKey().ID()[:8] + " g=" + runGroup1 + " ai=" + runAI1
 	d.lineOnce(t, "turn.interrupt"+where+" task="+runTask1+" why=jump")
-	if busy := "inbox.take" + where + ` task="" took="" left=4,3 paused=false`; d.count(d.is(busy)) == 0 {
+	if busy := "inbox.take" + where + ` task="" took="" left=2,3 paused=false`; d.count(d.is(busy)) == 0 {
 		t.Fatalf("no line %q for the look at the queue of the busy AI", busy)
 	}
 }
@@ -489,27 +485,44 @@ func TestJumpInterruptingAGroupSessionReportsNothingAndContinuesIt(t *testing.T)
 }
 
 // The author jumps a message a second time, as after a reload of the page:
-// the home retires the first jump item and sends another, and the message is
-// delivered once.
+// the home sends the jump item again, and the message is delivered once.
 func TestMessageJumpedTwiceIsDeliveredOnce(t *testing.T) {
 	jumpTest(t, func(t *testing.T, r *jumpRig) {
 		task := r.work(1, runTask1, "local_check")
 		r.push(jumpMention(2, testMsg1, "", true))
-		r.push(jumpMention(3, testMsg1, "", true))
-		r.wantHeld(3)
+		r.push(jumpMention(2, testMsg1, "", true))
+		r.wantHeld(2)
 		if n := task.interrupts.Load(); n != 1 {
 			t.Fatalf("the running turn got %d interrupts, want 1", n)
 		}
 		r.end(task, "interrupted")
 		group := r.drv.proc(1)
-		r.wantTurns(group, "items 3")
+		r.wantTurns(group, "items 2")
 		r.end(group, "completed")
-		r.wantTurns(group, "items 3")
+		r.wantTurns(group, "items 2")
 		r.wantTurns(task, "items 1", jumpContinueTask)
-		r.wantAcked(3)
-		if r.home.ackCountFor(2) != 0 {
-			t.Fatal("the retired jump item was acknowledged")
+		r.wantAcked(2)
+	})
+}
+
+// The author sends the jump as the AI takes the waiting message: the home
+// sends the item again under its number, which the host has delivered.
+func TestJumpThatCrossesItsDeliveryDeliversTheMessageOnce(t *testing.T) {
+	jumpTest(t, func(t *testing.T, r *jumpRig) {
+		jump := jumpMention(1, testMsg1, "", true)
+		Compose = func(h *Host, s Session, kind TurnKind, items []json.RawMessage) (string, Turn, error) {
+			r.send(jump)
+			return jumpCompose(h, s, kind, items)
 		}
+		r.push(jumpMention(1, testMsg1, "", false))
+		group := r.drv.proc(0)
+		r.push(jump)
+		if n := group.interrupts.Load(); n != 0 {
+			t.Fatalf("the turn got %d interrupts from its own message", n)
+		}
+		r.end(group, "completed")
+		r.wantTurns(group, "items 1")
+		r.wantSettled()
 	})
 }
 
@@ -1188,7 +1201,8 @@ func TestWalkOfTheQueueReadsEachStateOnce(t *testing.T) {
 	}
 }
 
-// What a look read of the group pause and of a task stays for the whole walk.
+// What a look read of the group pause, of a task and of a running turn stays
+// for the whole walk.
 func TestLookKeepsWhatItRead(t *testing.T) {
 	jumpTest(t, func(t *testing.T, r *jumpRig) {
 		ai := aiGroupKey{group: runGroup1, member: runAI1}
@@ -1206,12 +1220,20 @@ func TestLookKeepsWhatItRead(t *testing.T) {
 		check("task", func() { r.putTask(runTask1, "active", "local_check", "") })
 		r.putGroup(true)
 		check("pause", func() { r.putGroup(false) })
+		key := SessionKey{Group: runGroup1, Member: runAI1}
+		r.h.Sessions.Create(makeRunSession(key, GroupSession, "repo"))
+		r.h.Sessions.Move(key, Dormant, Working)
+		look := lookAt(r.h, ai)
+		r.h.Sessions.Move(key, Working, Waiting)
+		if _, taken, _ := selectEligibleBatch(look, aiInfo{}, []verifiedItem{item}); taken != nil {
+			t.Fatalf("took %v from a look at a running turn", taken)
+		}
 	})
 }
 
-// The home sends an item again, or queues a jump that retires it, while its
-// turn is prepared, and the preparation fails: the queue then holds the
-// message once, and a jump goes first.
+// The home sends an item again, as it was or as a jump, while its turn is
+// prepared, and the preparation fails: the queue then holds the message once,
+// and a jump goes first.
 func TestItemTakenBackMeetsItsCopyInTheQueue(t *testing.T) {
 	again := jumpMention(5, testMsg1, "", false)
 	for name, c := range map[string]struct {
@@ -1221,7 +1243,6 @@ func TestItemTakenBackMeetsItsCopyInTheQueue(t *testing.T) {
 	}{
 		"sent again":                   {[]proto.Item{jumpMention(6, testMsg2, "", false), again}, "items 5,6", []int64{5, 6}},
 		"sent again as a jump":         {[]proto.Item{jumpMention(5, testMsg1, "", true)}, "items 5", []int64{5}},
-		"retired by a jump":            {[]proto.Item{jumpMention(6, testMsg1, "", true)}, "items 6", []int64{6}},
 		"a jump of another message":    {[]proto.Item{jumpMention(6, testMsg2, "", true)}, "items 6,5", []int64{5, 6}},
 		"an item that came after it":   {[]proto.Item{jumpMention(6, testMsg2, "", false)}, "items 5,6", []int64{5, 6}},
 		"nothing while it is prepared": {nil, "items 5", []int64{5}},

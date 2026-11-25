@@ -43,6 +43,19 @@ func fixtureGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSuffix(string(out), "\n")
 }
 
+// foregroundMaintenance is the setting of a bare repository of the fixtures. A
+// push to it from the same disk does not pass on the node's settings, so its
+// maintenance would go on in the folder when the test removes it.
+const foregroundMaintenance = "gc.autoDetach=false"
+
+// bareRepo makes dir a bare repository with foregroundMaintenance.
+func bareRepo(t *testing.T, dir, base string) {
+	t.Helper()
+	fixtureGit(t, "", "init", "--bare", "--initial-branch="+base, dir)
+	key, value, _ := strings.Cut(foregroundMaintenance, "=")
+	fixtureGit(t, dir, "config", key, value)
+}
+
 type workspaceFixture struct{ project, source, repo string }
 
 func workspaceSetup(t *testing.T) workspaceFixture {
@@ -62,7 +75,7 @@ func workspaceSetup(t *testing.T) workspaceFixture {
 	fixtureGit(t, dir, "init", "-b", "trunk", source)
 	fixtureGit(t, source, "commit", "--allow-empty", "-m", "base")
 	upstream := filepath.Join(dir, "origin.git")
-	fixtureGit(t, dir, "clone", "--bare", source, upstream)
+	fixtureGit(t, dir, "clone", "--bare", "-c", foregroundMaintenance, source, upstream)
 	fixtureGit(t, source, "remote", "add", "origin", upstream)
 	repo, err := EnsureGroupWorkspace(t.Context(), project, upstream, "trunk")
 	workOK(t, err)

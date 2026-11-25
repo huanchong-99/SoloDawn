@@ -65,8 +65,9 @@ func fakeForgeGH(t *testing.T, answers ...forgeAnswer) func(...[]string) {
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	exe := mustForge(os.Executable())
-	forgeOK(os.WriteFile(filepath.Join(dir, name), mustForge(os.ReadFile(exe)), 0700))
+	// A link starts at once; a copy is a new binary, which macOS checks on its
+	// first run, for seconds under load.
+	forgeOK(agtLinkOrCopy(mustForge(os.Executable()), filepath.Join(dir, name)))
 	log := filepath.Join(dir, "calls")
 	forgeOK(os.WriteFile(log, nil, 0600))
 	for i, answer := range answers {
@@ -111,7 +112,7 @@ func forgeRepo(t *testing.T) (TaskForge, string, string) {
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("LC_ALL", "C")
 	worktree, remote := t.TempDir(), t.TempDir()
-	forgeGit(t, remote, "init", "--bare", "-b", "base")
+	bareRepo(t, remote, "base")
 	forgeGit(t, worktree, "init", "-b", "base")
 	forgeGit(t, worktree, "-c", "user.name=test", "-c", "user.email=test.invalid", "commit", "--allow-empty", "-m", "base")
 	forgeGit(t, worktree, "remote", "add", "origin", remote)
@@ -203,6 +204,7 @@ func TestForgeGHCannotStart(t *testing.T) {
 	f, _, head := forgeRepo(t)
 	calls := fakeForgeGH(t)
 	gh := mustForge(exec.LookPath("gh"))
+	forgeOK(os.Remove(gh)) // a link to the test binary, which must not be written
 	forgeOK(os.WriteFile(gh, []byte("invalid executable"), 0700))
 	pr, err := f.Submit(t.Context(), head, "t", "s")
 	assertForge(t, pr, (*ForgePullRequest)(nil))

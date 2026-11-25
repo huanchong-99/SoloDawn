@@ -27,6 +27,7 @@ type runGroup struct {
 // runSeat is what a group knows of one connection.
 type runSeat struct {
 	watching  bool           // it is pushed the rows of every result
+	user      string         // the person of its device, as it began to watch
 	stateOnly bool           // of those, only the state rows
 	inbox     bool           // it takes the inbox items of its device
 	sent      map[int64]bool // the queued items it was sent already
@@ -74,7 +75,7 @@ func (g *runGroup) detach(c *Conn) {
 // watch subscribes a seated connection to the rows of the group.
 func (g *runGroup) watch(c *Conn, stateOnly bool) {
 	seat := g.seats[c]
-	seat.watching, seat.stateOnly = true, stateOnly
+	seat.watching, seat.stateOnly, seat.user = true, stateOnly, g.state.user(c.device)
 }
 
 // runReader checks that a group exists and serves device on its home surface.

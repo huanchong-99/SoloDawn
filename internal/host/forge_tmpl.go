@@ -140,6 +140,9 @@ func (m ReviewedMerge) mergeTemplate(ctx context.Context) (MergeResult, error) {
 	if err != nil {
 		return MergeResult{Conflict: RedactSecrets(forgeTemplateError(out, stderr, err).Error())}, nil
 	}
+	lock := cloneLock(m.Repo)
+	lock.Lock()
+	defer lock.Unlock()
 	if _, err := m.run(ctx, "git", "fetch", "origin"); err != nil {
 		return MergeResult{}, err
 	}

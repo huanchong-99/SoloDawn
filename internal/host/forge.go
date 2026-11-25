@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -33,12 +34,29 @@ func (f TaskForge) command(ctx context.Context, name string, args ...string) (st
 
 // PushBranch pushes only the host-assigned branch, without requesting approval.
 // The full refspec keeps the owner's push configuration from redirecting it.
+// The push runs under the clone's lock, because it moves the clone's
+// refs/remotes as a fetch does (local.md section 7).
 func (f TaskForge) PushBranch(ctx context.Context) error {
+	_, unlock := lockClone(filepath.Join(f.Worktree, "..", "..")) // <project>/wt/<name>
+	defer unlock()
+	return f.push(ctx)
+}
+
+// push is PushBranch under a lock the caller holds.
+func (f TaskForge) push(ctx context.Context) error {
 	if f.Templates != nil {
 		return f.pushTemplate(ctx)
 	}
 	ref := "refs/heads/" + f.Branch
 	_, err := f.command(ctx, "git", "push", "origin", ref+":"+ref)
+	return err
+}
+
+// fetchBranch fetches the task branch into origin/<br>, under the clone's lock.
+func (f TaskForge) fetchBranch(ctx context.Context) error {
+	_, unlock := lockClone(filepath.Join(f.Worktree, "..", "..")) // <project>/wt/<name>
+	defer unlock()
+	_, err := f.command(ctx, "git", "fetch", "origin", "+refs/heads/"+f.Branch+":refs/remotes/origin/"+f.Branch)
 	return err
 }
 

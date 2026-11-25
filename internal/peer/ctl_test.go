@@ -165,7 +165,8 @@ func TestPushesDeliveredBeforeAnswer(t *testing.T) {
 	eq(t, string(recv(t, reply)), fmt.Sprintf(`{"re":%d,"ok":true}`, q.ID))
 }
 
-// Finish lets everything sent arrive before the connection ends on both sides.
+// Finish lets everything sent arrive before the connection ends on both sides,
+// and a late reader still reads it.
 func TestFinishEndsAfterWhatWasSent(t *testing.T) {
 	f := newPair(t)
 	n := f.open(t, 0)
@@ -177,6 +178,12 @@ func TestFinishEndsAfterWhatWasSent(t *testing.T) {
 	waitQueued(t, n.client, cap(n.client.incoming))
 	recv(t, n.client.Done())
 	recv(t, n.server.Done())
+	for range cap(n.client.incoming) {
+		_, err := n.client.Read(t.Context())
+		check(t, err)
+	}
+	_, err := n.client.Read(t.Context())
+	eq(t, err, io.EOF)
 }
 
 func waitQueued(t *testing.T, c *Connection, want int) {

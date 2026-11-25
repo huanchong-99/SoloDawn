@@ -179,6 +179,20 @@ func tskCLIError(err error) error {
 	return &Error{Code: "cli", Message: RedactSecrets(err.Error())}
 }
 
+// tskPushError tells the AI how to go on from a push that Git refused because
+// the remote branch has commits the worktree lacks (flows/task.md
+// "Reassignment"); a push is never forced, so it is refused for no other reason.
+// The host fetches those commits itself, under the clone's lock.
+func tskPushError(ctx context.Context, f TaskForge, err error) error {
+	if !strings.Contains(err.Error(), "[rejected]") {
+		return tskCLIError(err)
+	}
+	if err := f.fetchBranch(ctx); err != nil {
+		return tskCLIError(err)
+	}
+	return &Error{Code: "conflict", Message: "origin has commits on " + f.Branch + " that this worktree lacks, now fetched: run git merge origin/" + f.Branch + ", run_checks, and call this tool again"}
+}
+
 func tskTreeError(err error) error {
 	if errors.Is(err, ErrDirtyCheckTree) || errors.Is(err, ErrSkipWorktree) {
 		return &Error{Code: "conflict", Message: strings.TrimPrefix(err.Error(), "conflict: ")}
@@ -285,7 +299,7 @@ func tskPushBranch(ctx context.Context, forge TaskForge) (tskPushResult, error) 
 		return tskPushResult{}, tskCLIError(err)
 	}
 	if err := forge.PushBranch(ctx); err != nil {
-		return tskPushResult{}, tskCLIError(err)
+		return tskPushResult{}, tskPushError(ctx, forge, err)
 	}
 	return tskPushResult{OK: true, Commit: strings.TrimSpace(out)}, nil
 }
@@ -411,7 +425,7 @@ func tskForgeSubmitIfRemote(ctx context.Context, r tskSubmitReady, summary strin
 		Request: ForgePullRequest{Number: r.task.PR, URL: r.task.PRURL}}
 	pr, err := forge.Submit(ctx, r.head, r.task.Title, summary)
 	if err != nil {
-		return nil, tskCLIError(err)
+		return nil, tskPushError(ctx, forge, err)
 	}
 	return pr, nil
 }

@@ -52,8 +52,6 @@ Feature: Step 3 driver acceptance (A10.1 to A10.4)
       | opencode | A4.9       |
       | qwen     | A4.9       |
 
-    # issues.md: "At level 1 a request of Codex, OpenCode or Qwen Code produces a card"
-    @pending
     Examples:
       | cli      | case       |
       | opencode | A4.4 asked |
