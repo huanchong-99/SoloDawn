@@ -56,9 +56,9 @@ func NodeTables() Tables {
 	return Tables{Commands: Commands, Timers: Timers, Events: Events, After: After}
 }
 
-// LoopConfig is what a loop is started with. The loop calls Logs, Now and
-// Report on the goroutines of its groups, and Logs and Now also on the
-// caller of Cmd. So none of the three may wait for a lock that is held
+// LoopConfig is what a loop is started with. The loop calls Logs, Now, Report
+// and Forget on the goroutines of its groups, and Logs and Now also on the
+// caller of Cmd. So none of the four may wait for a lock that is held
 // around a call of Attach, Sync, Close or Cmd, and none may call those.
 type LoopConfig struct {
 	Store   *store.Store
@@ -71,6 +71,9 @@ type LoopConfig struct {
 	Logs   func(user string) *identity.Log
 	Tables Tables
 	Invite Inviter
+	// Forget drops the device log of a removed person from what Logs holds,
+	// once the removal is committed and before anyone is pushed groups.
+	Forget func(user string)
 	// Now is the home's clock; time.Now when nil.
 	Now func() time.Time
 	// Report takes every failure that is answered internal or that has no
@@ -135,6 +138,9 @@ func runDefaults(cfg LoopConfig) LoopConfig {
 	}
 	if cfg.Report == nil {
 		cfg.Report = func(err error) { log.Printf("home: %v", err) }
+	}
+	if cfg.Forget == nil {
+		cfg.Forget = func(string) {}
 	}
 	return cfg
 }

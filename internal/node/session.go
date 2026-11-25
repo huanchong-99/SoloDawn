@@ -26,6 +26,7 @@ type Ctl interface {
 	host.Owner
 	Read(ctx context.Context) (json.RawMessage, error)
 	Close() error
+	Finish() // closes it after what was sent has arrived
 }
 
 type (
@@ -54,6 +55,8 @@ type SessionConfig struct {
 	Report      func(error)
 	OnAdopt     func(owner string)
 	Spawn       func(func())
+	// Known reports whether device has a reason to be connected; nil admits all.
+	Known func(device string) bool
 }
 
 // Sessions serves ctl connections, dispatches home and host surfaces, forwards
@@ -77,6 +80,7 @@ type sesConn struct {
 	device           string
 	paired, welcomed bool
 	raw              Ctl
+	known            func() bool
 	sendMu           sync.Mutex
 	home             *home.Conn
 	staging          map[string]*identity.Log
@@ -138,6 +142,7 @@ func (s *Sessions) Serve(ctx context.Context, device string, paired bool, raw Ct
 }
 
 func (s *Sessions) serve(ctx context.Context, c *sesConn, joining func() *home.Joining) {
+	c.known = func() bool { return s.cfg.Known == nil || c.joining.pending() || s.cfg.Known(c.device) }
 	c.home = s.cfg.Home.Attach(c.device, c)
 	c.home.SetJoining(joining)
 	s.mu.Lock()
@@ -596,10 +601,29 @@ func (c *sesConn) sendErr(re int64, code, msg string) {
 }
 
 func (c *sesConn) Send(frame any) error {
-	w, ok := frame.(sesWelcome)
-	if !ok {
+	switch f := frame.(type) {
+	case sesWelcome:
+		return c.sendWelcome(f)
+	case proto.Groups:
+		return c.sendGroups(f)
+	default:
 		return c.send(frame)
 	}
+}
+
+// sendGroups pushes the groups, the last frame of a device that has no reason
+// left to be connected: after a removal or a revocation the home always pushes
+// them.
+func (c *sesConn) sendGroups(frame proto.Groups) error {
+	if c.known() {
+		return c.send(frame)
+	}
+	c.send(frame)
+	c.raw.Finish()
+	return nil
+}
+
+func (c *sesConn) sendWelcome(w sesWelcome) error {
 	defer close(w.sent)
 	c.sendMu.Lock()
 	defer c.sendMu.Unlock()

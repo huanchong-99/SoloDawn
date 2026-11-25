@@ -2,6 +2,7 @@ package home_test
 
 import (
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -238,4 +239,46 @@ func TestLoopRunsInviterOutsideStoreWriteAndAdmitsJoiningConn(t *testing.T) {
 	joinConn.SetJoining(nil)
 	loop.Cmd(joinConn, 14, signed(guest, "join", 12, ``))
 	equal(t, (<-joinOut).(proto.ErrorResponse).Err.Code, "forbidden")
+}
+
+type forgetClient struct {
+	forgotten *atomic.Bool
+	groups    chan bool // whether the person was forgotten when the push was sent
+}
+
+func (c forgetClient) Done() <-chan struct{} { return nil }
+func (c forgetClient) Send(frame any) error {
+	if _, ok := frame.(proto.Groups); ok {
+		c.groups <- c.forgotten.Load()
+	}
+	return nil
+}
+
+// The node drops a removed person's log before anyone is pushed groups.
+func TestLoopForgetsRemovedPersonBeforeGroups(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	client := forgetClient{new(atomic.Bool), make(chan bool, 1)}
+	tables := home.Tables{Commands: home.Table{"group/create": func(s *home.State, _ home.Command) (home.Result, *home.Refusal) {
+		return home.Result{
+			Rows:   []home.Row{home.RowOf(proto.GroupRow{RowHeader: proto.RowHeader{Type: "group", ID: s.ID}, Name: "G", Home: s.Home})},
+			Forget: "visitor", GroupsChanged: true,
+		}, nil
+	}}}
+	loop, err := home.StartLoop(home.LoopConfig{
+		Store: db, Home: node.ID(), Owner: browser.ID(), Tables: tables, Now: func() time.Time { return now },
+		Logs:   func(string) *identity.Log { return logOf(t, browser, node) },
+		Forget: func(user string) { client.forgotten.Store(user == "visitor") },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer loop.Close()
+	conn := loop.Attach(browser.ID(), client)
+	loop.Welcome(conn, func([]proto.GroupSummary) any { return nil })
+	loop.Cmd(conn, 1, signed(browser, "group", 9, `,"op":"create"`))
+	equal(t, <-client.groups, true)
 }

@@ -165,6 +165,7 @@ func (c *a10ModelCtl) Read(ctx context.Context) (json.RawMessage, error) {
 	}
 }
 func (c *a10ModelCtl) Close() error                 { return nil }
+func (c *a10ModelCtl) Finish()                      {}
 func (c *a10ModelCtl) Path() string                 { return "local" }
 func (c *a10ModelCtl) PathChanged() <-chan struct{} { return nil }
 

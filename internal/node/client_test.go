@@ -75,6 +75,7 @@ func (c *clientPipe) Path() string                 { return "direct" }
 func (c *clientPipe) PathChanged() <-chan struct{} { return c.pathCh }
 func (c *clientPipe) Done() <-chan struct{}        { return c.pair.done }
 func (c *clientPipe) Close() error                 { return c.pair.close() }
+func (c *clientPipe) Finish()                      { c.pair.close() }
 
 func (c *clientPipe) Send(frame any) error {
 	raw, err := encodeCtl(frame)
@@ -186,6 +187,7 @@ func (s *serverPipe) Path() string                 { return "direct" }
 func (s *serverPipe) PathChanged() <-chan struct{} { return nil }
 func (s *serverPipe) Done() <-chan struct{}        { return s.pair.done }
 func (s *serverPipe) Close() error                 { return s.pair.close() }
+func (s *serverPipe) Finish()                      { s.pair.close() }
 
 func (s *serverPipe) Send(frame any) error {
 	raw, err := encodeCtl(frame)

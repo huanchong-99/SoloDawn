@@ -75,6 +75,7 @@ func (f *fakeCtl) Path() string                 { return "direct" }
 func (f *fakeCtl) PathChanged() <-chan struct{} { return f.pathCh }
 func (f *fakeCtl) Done() <-chan struct{}        { return f.done }
 func (f *fakeCtl) Close() error                 { f.once.Do(func() { close(f.done) }); return nil }
+func (f *fakeCtl) Finish()                      { f.Close() }
 
 func (f *fakeCtl) pushRaw(s string) { f.in <- json.RawMessage(s) }
 

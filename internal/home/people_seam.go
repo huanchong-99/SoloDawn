@@ -213,6 +213,9 @@ func (g *runGroup) seamCommand(c *Conn, re int64, env proto.Envelope) {
 	}
 	g.settle(res, now, func() {
 		seamAdmit(join, res)
+		if res.Forget != "" {
+			g.loop.cfg.Forget(res.Forget)
+		}
 		g.loop.diagReply(c, g.state.ID, re, env, res.Answer.Code)
 		c.send(res.Frame(re))
 	})

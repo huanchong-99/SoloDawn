@@ -182,6 +182,14 @@ func (l *Logs) dvlKeepRows(log *identity.Log) []proto.DeviceRow {
 	return rows
 }
 
+func (l *Logs) dvlForget(user string) {
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.log, user)
+}
+
 func dvlCollectRows(log *identity.Log, entries []proto.Envelope) []proto.DeviceRow {
 	var rows []proto.DeviceRow
 	for _, env := range entries {
@@ -358,20 +366,9 @@ func (s *Sessions) sesLogChanged(user string, rows []proto.DeviceRow, adopted bo
 		envs[i] = r.Env
 	}
 	frames := dvlBatchFrames(user, envs)
-	memberLog := user != s.cfg.Logs.Owner()
 	for _, c := range s.sesConns() {
-		if memberLog && dvlRevoked(c.device, rows) {
-			c.Close()
-			continue
-		}
 		s.sesSyncOne(c, user, frames, skip)
 	}
-}
-
-func dvlRevoked(device string, rows []proto.DeviceRow) bool {
-	return slices.ContainsFunc(rows, func(r proto.DeviceRow) bool {
-		return r.Op == "revoke" && r.Device == device
-	})
 }
 
 func (s *Sessions) sesAdopted(user string, skip *sesConn) {
