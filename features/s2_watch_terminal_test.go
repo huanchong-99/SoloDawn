@@ -27,11 +27,10 @@ const (
 type s2TerminalWorld struct {
 	*s2WatchWorld
 	group          proto.ID
-	ai, card       string
+	ai, other      string
+	card           string
 	owner, watcher *s2TerminalPeer
-	browser        *peerBrowser
 	rtcKey         identity.Key
-	bc             *peerBrowserConn
 	handBackAt     time.Time
 	handBackClose  chan time.Time
 }
@@ -40,16 +39,17 @@ func s2RegisterTerminal(sc *godog.ScenarioContext, w *s2WatchWorld) {
 	t := &s2TerminalWorld{s2WatchWorld: w}
 	sc.Step("^Q-team is in a takeover on Q1$", t.takeover)
 	sc.Step("^P asks to watch the takeover$", t.ask)
-	sc.Step("^Q sees a pending watch confirmation and P cannot start watching$", t.beforeConsent)
+	sc.Step("^Q sees a pending watch confirmation and Q1 takes no connection of P$", t.beforeConsent)
 	sc.Step("^Q confirms the watch request$", t.confirm)
+	sc.Step("^Q1 takes P's connection and refuses a watch of Q-personal$", t.connectGranted)
 	sc.Step("^P receives the owner's terminal bytes in order$", t.compareTerminalBytes)
 	sc.Step("^P's input and resize do not reach the terminal$", t.receiveOnly)
 	sc.Step("^Q hands back the takeover$", t.handBack)
-	sc.Step("^P's watch channel closes within 2 seconds$", t.closedOnHandBack)
+	sc.Step("^P's watch channel closes within 2 seconds and Q1 ends P's connection$", t.closedOnHandBack)
 	sc.Step("^Q has granted P access to watch$", t.grant)
 	sc.Step("^P opens a direct watch on Q1$", t.directWatch)
-	sc.Step("^the same connection selects the cast TURN relay$", t.waitForRelay)
-	sc.Step(`^the watch closes, the original ctl syncs and watch\.start is refused with relay$`, t.refusedOnRelay)
+	sc.Step("^the direct path slows down and is cut, so the same connection selects the cast TURN relay$", t.moveToRelay)
+	sc.Step(`^the watch closes and the original ctl answers, refusing watch\.start with relay$`, t.refusedOnRelay)
 }
 
 func (t *s2TerminalWorld) takeover() error {
@@ -58,31 +58,27 @@ func (t *s2TerminalWorld) takeover() error {
 	}
 	c := t.c
 	var err error
-	t.group, err = c.CreateProjectGroup(c.Q, c.Q1, "Watch project", "none")
+	t.group, err = c.CreateProjectGroup(c.P, c.P1, "Watch project", "none")
 	if err != nil {
 		return err
 	}
-	ai, err := c.JoinAI(c.Q, c.Q1, c.Q1, t.group, s2QTeamCLI, s2QTeamName, false)
-	if err != nil {
+	if err := t.admitQ(); err != nil {
 		return err
 	}
-	t.ai = ai.ID
-	if err := t.joinWatcher(); err != nil {
+	if err := t.joinQAIs(); err != nil {
+		return err
+	}
+	t.rtcKey = newRandomPeerKey()
+	if err := c.EnrollBrowser(c.P, t.rtcKey, "Watch terminal"); err != nil {
 		return err
 	}
 	return t.openOwnerTerminal()
 }
 
-func (t *s2TerminalWorld) joinWatcher() error {
+func (t *s2TerminalWorld) admitQ() error {
 	c := t.c
-	t.rtcKey = newRandomPeerKey()
-	if err := c.EnrollBrowser(c.P, t.rtcKey, "Watch terminal"); err != nil {
-		return err
-	}
-	t.browser = c.P.Browser
-	conn := c.Q.Conns[c.Q1.ID()].conn
 	invite := proto.HomeCommand{Type: "invite", Nonce: c.NextID(), Timestamp: time.Now().UnixMilli(), Group: t.group}
-	res, err := c.SendCmd(c.Q, conn, invite)
+	res, err := c.SendCmd(c.P, c.P.Conns[c.P1.ID()].conn, invite)
 	if err != nil {
 		return err
 	}
@@ -90,12 +86,19 @@ func (t *s2TerminalWorld) joinWatcher() error {
 	if err != nil {
 		return err
 	}
-	bc, raw, err := joinGroupWithLink(c.Ctx, c.addUndo, t.browser, c.P.Key, c.P.Entries, link, c.P.Name, c.NextID(), time.Now())
+	_, _, err = c.JoinGroup(c.Q, link, c.Q.Name)
+	return err
+}
+
+func (t *s2TerminalWorld) joinQAIs() error {
+	c := t.c
+	team, err := c.JoinAI(c.Q, c.Q1, c.P1, t.group, s2QTeamCLI, s2QTeamName, false)
 	if err != nil {
 		return err
 	}
-	t.bc = bc
-	return s2WatchReply(raw, "")
+	personal, err := c.JoinAI(c.Q, c.Q1, c.P1, t.group, s2QPersonalCLI, s2QPersonalName, false)
+	t.ai, t.other = team.ID, personal.ID
+	return err
 }
 
 func (t *s2TerminalWorld) openOwnerTerminal() error {
@@ -152,7 +155,7 @@ func (t *s2TerminalWorld) hostCommand(kind string) map[string]any {
 func (t *s2TerminalWorld) ask() error {
 	body := map[string]any{"what": "watch", "ai": t.ai}
 	fields := s2WatchPost(t.group, "confirm", "", body)
-	return s2WatchCmd(t.c, t.c.P, t.bc.conn, fields, "")
+	return s2WatchCmd(t.c, t.c.P, t.c.P.Conns[t.c.P1.ID()].conn, fields, "")
 }
 
 func s2WatchPost(group proto.ID, kind, text string, body any) map[string]any {
@@ -161,7 +164,7 @@ func s2WatchPost(group proto.ID, kind, text string, body any) map[string]any {
 }
 
 func (t *s2TerminalWorld) findCard() error {
-	return t.c.readGroupRowsUntil(t.c.Q.Conns[t.c.Q1.ID()], t.group, t.matchCard)
+	return t.c.readGroupRowsUntil(t.c.Q.Conns[t.c.P1.ID()], t.group, t.matchCard)
 }
 
 func (t *s2TerminalWorld) matchCard(raw json.RawMessage) (bool, error) {
@@ -194,18 +197,12 @@ func (t *s2TerminalWorld) beforeConsent() error {
 	if err := t.findCard(); err != nil {
 		return err
 	}
-	raw, err := t.bc.request(t.c.Ctx, func(id int64) any {
-		return map[string]any{"t": "watch.start", "id": id, "g": t.group, "member": t.ai}
-	})
-	if err != nil {
-		return err
-	}
-	return s2WatchReply(raw, "forbidden")
+	return expectNeverOpens(t.c.Ctx, t.c.P.Browser, t.c.Q1.ID())
 }
 
 func (t *s2TerminalWorld) confirm() error {
 	fields := map[string]any{"t": "act", "g": t.group, "msg": t.card, "action": "confirm"}
-	if err := s2WatchCmd(t.c, t.c.Q, t.c.Q.Conns[t.c.Q1.ID()].conn, fields, ""); err != nil {
+	if err := s2WatchCmd(t.c, t.c.Q, t.c.Q.Conns[t.c.P1.ID()].conn, fields, ""); err != nil {
 		return err
 	}
 	return t.waitGrant()
@@ -263,8 +260,15 @@ func (t *s2TerminalWorld) connectWatcher(withTURN bool) error {
 	return err
 }
 
-func (t *s2TerminalWorld) watchStart(want string) error {
-	raw, err := t.watcher.request(map[string]any{"t": "watch.start", "g": t.group, "member": t.ai})
+func (t *s2TerminalWorld) connectGranted() error {
+	if err := t.connectWatcher(false); err != nil {
+		return err
+	}
+	return t.watchStart(t.other, "forbidden")
+}
+
+func (t *s2TerminalWorld) watchStart(ai, want string) error {
+	raw, err := t.watcher.request(map[string]any{"t": "watch.start", "g": t.group, "member": ai})
 	if err != nil {
 		return err
 	}
@@ -272,7 +276,7 @@ func (t *s2TerminalWorld) watchStart(want string) error {
 }
 
 func (t *s2TerminalWorld) openWatch() error {
-	if err := t.watchStart(""); err != nil {
+	if err := t.watchStart(t.ai, ""); err != nil {
 		return err
 	}
 	label := t.label("watch")
@@ -283,9 +287,6 @@ func (t *s2TerminalWorld) openWatch() error {
 }
 
 func (t *s2TerminalWorld) compareTerminalBytes() error {
-	if err := t.connectWatcher(false); err != nil {
-		return err
-	}
 	if err := t.openWatch(); err != nil {
 		return err
 	}
@@ -321,7 +322,7 @@ func (t *s2TerminalWorld) receiveOnly() error {
 	if err := t.watcher.send(proto.PTYResize{Type: "pty.resize", Group: t.group, AI: proto.ID(t.ai), Cols: 44, Rows: 12}); err != nil {
 		return err
 	}
-	if err := t.watcherSync(); err != nil {
+	if err := t.hostInfoRefused(); err != nil {
 		return err
 	}
 	label := t.label("watch")
@@ -364,7 +365,7 @@ func (t *s2TerminalWorld) closedOnHandBack() error {
 	if elapsed := closed.Sub(t.handBackAt); elapsed > 2*time.Second {
 		return fmt.Errorf("watch took %s to close on hand-back", elapsed)
 	}
-	return nil
+	return t.watcher.wait(t.watcher.closed["ctl"])
 }
 
 func (t *s2TerminalWorld) directWatch() error {
@@ -374,28 +375,25 @@ func (t *s2TerminalWorld) directWatch() error {
 	return t.openWatch()
 }
 
-func (t *s2TerminalWorld) waitForRelay() error {
-	return waitUntilCtx(t.c.Ctx, 100*time.Millisecond, "the watch connection to move to TURN", func() error {
-		return t.watcher.checkPath(true)
-	})
-}
+func (t *s2TerminalWorld) moveToRelay() error { return t.watcher.moveToRelay() }
 
 func (t *s2TerminalWorld) refusedOnRelay() error {
 	if err := t.watcher.wait(t.watcher.closed[t.label("watch")]); err != nil {
 		return err
 	}
-	if err := t.watcherSync(); err != nil {
+	if err := t.hostInfoRefused(); err != nil {
 		return err
 	}
-	return t.watchStart("relay")
+	return t.watchStart(t.ai, "relay")
 }
 
-func (t *s2TerminalWorld) watcherSync() error {
-	raw, err := t.watcher.request(map[string]any{"t": "sync", "g": t.group, "since": 0, "state_only": true})
+// hostInfoRefused shows that ctl answers, and that the grant gives P no host surface.
+func (t *s2TerminalWorld) hostInfoRefused() error {
+	raw, err := t.watcher.request(map[string]any{"t": "host.info"})
 	if err != nil {
 		return err
 	}
-	return proto.Decode(raw, new(proto.Synced))
+	return s2WatchReply(raw, "forbidden")
 }
 
 func s2WatchInteractiveFlag(root string) string {

@@ -139,7 +139,7 @@ Run against real signed-in CLIs (`claude`, `codex`, `opencode`, `qwen`) on a liv
 3. **Failure reporting:**
    - Attach the CLI version (`claude --version`, `codex --version`, etc.), sanitized output of the CLI's native model listing, the `host.info` `agents[].models` payload (captured from browser DevTools Network/WebRTC message inspection or page state), UI screenshots if misaligned, and `logs/node.log`.
 
-### 6. Terminal Takeover and Watching on Home and Company Networks (`A7.1`, `A7.2`, `A7.5`, `A7.8`, `A7.9`, `A9.20`)
+### 6. Terminal Takeover and Watching on Home and Company Networks (`A7.1`, `A7.2`, `A7.5`, `A7.8`, `A7.9`, `A9.20`, `A9.21`)
 
 Run using real `claude` and `codex` members on a workstation node and at least two browsers (`O` owner browser, `W` watcher browser in a shared group).
 
@@ -153,28 +153,29 @@ Run using real `claude` and `codex` members on a workstation node and at least t
    1. Move the browser (or connect the node behind a restrictive company firewall blocking direct UDP/inbound peer TCP so ICE falls back to the rendezvous `443` TURN relay).
    2. Wait for the **Computers** indicator to show **Relayed · limited**. Verify normal chat, task status, and approval cards still arrive and answer over the relay.
    3. Inspect **Open terminal** and **Watch** controls (`A7.5`): attempt takeover / watch over the relay.
-   4. Switch back to a **Direct** home connection, open a terminal takeover (and optionally a watch stream), then simulate dropping direct paths while keeping TURN reachable (e.g., disconnect/switch browser to a hotspot/company VPN forcing a relay transition mid-session, `A7.9`).
+   4. Switch back to a **Direct** home connection, open a terminal takeover (and optionally a watch stream), then simulate dropping direct paths while keeping TURN reachable (e.g., disconnect/switch browser to a hotspot/company VPN forcing a relay transition mid-session, `A7.9`, `A9.21`).
 3. **Expected result:**
    - **Home network (`direct`):** Claude Code (`A7.1`), Codex (`A7.2`), Windows ConPTY tail output, and Secretary read-only enforcement (`A7.8`) all succeed; queued mentions sent during takeover arrive in order after **Hand back**; `W` receives live terminal output only after `O` confirms and loses access immediately on `watch.end` or hand-back.
    - **Company network (`relay`):** Chat and approvals remain functional; **Open terminal** is disabled (`"Direct link only"` / `"The terminal works over a direct connection only"`) and `takeover.start` / `watch.start` refuse with `relay`.
-   - **Mid-takeover switch to relay (`A7.9`):** Browser displays `"Handed back · switched to relay"` (and `"Watching ended"` for watchers), the PTY/watch channel closes cleanly, control returns to the AI, and `host.info` / chat continues working on the existing `ctl` connection without re-pairing or refreshing.
+   - **Mid-takeover switch to relay (`A7.9`, `A9.21`):** Browser displays `"Handed back · switched to relay"` (and `"Watching ended"` for watchers), the PTY/watch channel closes cleanly, control returns to the AI, and `host.info` / chat continues working on the existing `ctl` connection without re-pairing or refreshing.
 4. **Failure reporting:**
    - Attach network label (`home-direct` vs `company-relay` — never private hostnames/SSIDs/IPs), browser path indicator, `solodawn status`, `logs/node.log` + `logs/node.log.1` covering the failure window (check `ice.pair`, `ice.state`, `ctl.open`, `conn.close` lines), browser Console errors, and `chrome://webrtc-internals` / WebRTC candidate-pair dump (`selectedCandidatePairId` / local & remote candidate types).
 
-### 7. Live CLI Approvals, Hooks, Questions, GitHub Remote, and Rendezvous Footprint (`A3.8`, `A4.1`, `A4.10`, `A4.11`, `A5.13`, `A8.4`, `A8.6`, `A10.4`)
+### 7. Live CLI Approvals, Hooks, Questions, GitHub Remote, and Rendezvous Footprint (`A3.8`, `A4.1`, `A4.10`, `A4.11`, `A5.13`, `A8.4`, `A8.6`, `A9.26`, `A10.4`)
 
 Run the remaining `live` checks referenced by **I-11** in [step-1-acceptance.md](../../planning/steps/step-1-acceptance.md), [step-3-acceptance.md](../../planning/steps/step-3-acceptance.md), and [parallel-plan-units.md](../../planning/steps/parallel-plan-units.md):
 
 1. **Steps:**
-   1. **Repo hooks (`A3.8`, `A10.4`):** In a task worktree with a test repo hook writing a marker file, run one group-session mention and one task-session turn on each real CLI. Confirm the hook fires in `task`/`review` sessions and **not** in group sessions (`--setting-sources user` / `project_doc_max_bytes = 0`; note documented Qwen limitation in [install.md](../../install.md)).
+   1. **Repo hooks (`A3.8`, `A10.4`):** In a task worktree with a test repo hook writing a marker file, run one group-session mention and one task-session turn on each real CLI. Confirm the hook fires in `task`/`review` sessions and **not** in group sessions (`--setting-sources user` / `project_doc_max_bytes = 0`; note documented Qwen limitation in [install.md](../../install.md)). For **Qwen Code** record four results: group and task session, each with the hook unapproved and approved (approve by starting `qwen` once in the folder; its documentation says unapproved project hooks run in neither), and whether `QWEN.md` was read; then decide the `@pending` scenario of `features/s3_drivers.feature` ([issues.md](../../issues.md), "A Qwen Code group session may load the repository's configuration").
    2. **Sandbox containment & approvals (`A4.1`, `A4.10`):** At level 2 on each CLI, ask the AI to install/fetch from network or write a marker file outside its worktree (`A4.10`). Verify no outside file exists before approval, a single approval card appears, and on **native Windows Claude Code** setting level 2 returns a clean refusal explaining level 2 lacks a Windows sandbox (`risks.md` `Q-4`).
    3. **Interactive question cards (`A4.1` second half, `A4.11`):**
       - On **Claude Code** at permission modes `1`, `2`, and `3`, trigger `AskUserQuestion` and confirm a `decision` card reaches the browser and the selected `updatedInput.answers` reply reaches Claude Code cleanly.
       - On **Codex** with `-c features.default_mode_request_user_input=true`, test whether Codex emits `item/tool/requestUserInput` in Default mode (`A4.11`); if unsupported on the installed CLI release, verify Codex asks through `request_decision` per [drivers.md](../../planning/contracts/drivers.md) section 1.2 and record the outcome.
    4. **GitHub remote M5 flow (`A5.13`):** Run a full brief -> task -> `run_checks` -> `push_branch` -> `submit_task` -> review -> merge pass against a **scratch GitHub repository**, verifying `push_branch` requires no approval card while a direct `git push` to another branch produces one.
-   5. **Public standalone rendezvous (`A8.4`) and resource footprint (`A8.6`):** Start `solodawn rendezvous --listen :443 --domain <rv-host> --turn-domain <turn-host> ...` on a clean server (`A8.4`), pass `A1.1`–`A1.3` across two real networks, and record for `A8.6`: CLI versions, node binary size (`<= 30 MB` target), node idle RSS (`<= 40 MB` target), peak RSS per open CLI session, and rendezvous RSS with 100 idle connections.
+   5. **Another forge (`A9.26`):** With a signed-in forge program other than `gh` (for example `glab`, or `tea` for a Gitea or Forgejo server) and a scratch repository there, run `TestS2LiveForgeFeature` as [s2_watch.md](../../features/s2_watch.md) ("A9.26 live run") says.
+   6. **Public standalone rendezvous (`A8.4`) and resource footprint (`A8.6`):** Start `solodawn rendezvous --listen :443 --domain <rv-host> --turn-domain <turn-host> ...` on a clean server (`A8.4`), pass `A1.1`–`A1.3` across two real networks, and record for `A8.6`: CLI versions, node binary size (`<= 30 MB` target), node idle RSS (`<= 40 MB` target), peak RSS per open CLI session, and rendezvous RSS with 100 idle connections.
 2. **Expected result:**
-   - All `live` hooks, level-2 approvals, question replies (`updatedInput.answers` / `request_decision`), GitHub PR checks/merge, `A8.4` TLS + TURN `:443` pass, and `A8.6` footprint figures meet contract bounds.
+   - All `live` hooks, level-2 approvals, question replies (`updatedInput.answers` / `request_decision`), GitHub PR checks/merge, both merged requests on the other forge (`A9.26`), `A8.4` TLS + TURN `:443` pass, and `A8.6` footprint figures meet contract bounds.
 3. **Failure reporting:**
    - Attach CLI version (`claude --version`, `codex --version`, etc.), permission level, group/task state at failure, `logs/node.log`, `solodawn status`, and for `AskUserQuestion` / `requestUserInput` failures, sanitized CLI stderr/stream events if captured.
 

@@ -67,10 +67,7 @@ func TestFeatures(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", bin, "../cmd/solodawn").CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
-	fakes := t.TempDir()
-	if out, err := exec.Command("go", "build", "-o", fakes+string(os.PathSeparator), "../internal/host/fakecli/claude", "../internal/host/fakecli/codex").CombinedOutput(); err != nil {
-		t.Fatalf("build fake CLIs: %v\n%s", err, out)
-	}
+	fakes := buildFakeCLIs(t)
 	t.Setenv("PATH", fakes+string(os.PathListSeparator)+os.Getenv("PATH"))
 	// Git reads no user or system configuration, so a developer's settings
 	// (commit signing, hooks) cannot change what the scenarios see.
@@ -110,6 +107,14 @@ func TestFeatures(t *testing.T) {
 	if suite.Run() != 0 {
 		t.Fatal("acceptance scenarios failed")
 	}
+}
+
+func buildFakeCLIs(t *testing.T) string {
+	dir := t.TempDir()
+	if out, err := exec.Command("go", "build", "-o", dir+string(os.PathSeparator), "../internal/host/fakecli/claude", "../internal/host/fakecli/codex").CombinedOutput(); err != nil {
+		t.Fatalf("build fake CLIs: %v\n%s", err, out)
+	}
+	return dir
 }
 
 // tags is the suite's tag filter on one operating system.

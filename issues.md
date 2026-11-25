@@ -6,12 +6,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Open
 
-### 2026-11-26 · bug · A member's node can follow a moved group more than 5 seconds after the import
-
-- Symptom: A9.27 asks that Q1 follows P2 within 5 seconds of the import. Q1 took 11.6 seconds with the import right after the export; with minutes between them it can take up to 70 seconds. Once connected, everything else of A9.27 holds.
-- Cause: Q1 gets `moved` when P1 announces its groups (`internal/host/home_moved.go:14`) and offers to P2 at once. P2 does not know Q1 before the import and drops the offer (`internal/peer/signal.go:130`, `unknown_device`), so Q1 waits 10 seconds for an answer (`internal/peer/unanswered.go:5-13`, `flows/connect.md` step 15) and then backs off 1, 2, 4 … 60 seconds. Nothing wakes it: a node dials a home with no presence channel (`internal/node/node.go:461`), and the import changes no presence, since P2 is online all the time. `export.md` section 3 step 4 ("clients retry as for any home that is down") and the 5 seconds of A9.27 do not agree. A browser follows by the same rules.
-- Status: open, needs a decision: reword A9.27 to the retry of `flows/connect.md` step 15, or give the import a way to wake the clients. The scenario "A member's node follows a moved group within 5 seconds (A9.27)" stays `@pending`; "Move a group to another node of its owner (A9.27)" runs with the 5 seconds on the two browser peers, and asserts that Q1 follows without them.
-
 ### 2026-11-26 · bug · Removing a person does not close their connections
 
 - Symptom: after `member remove`, Q's browser and Q1 stay connected to P1 (A9.4: "close within 1 second and the next attempt is refused").
@@ -76,7 +70,7 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 - Symptom: a checks template can report an older request head, and a successful merge can name a later merge on the base branch.
 - Cause: `internal/host/forge_tmpl.go:124-147` supplies the submitted `{commit}` but cannot verify its use by the forge program. After merging it fetches `origin` and reads the base tip, as specified in `checks-forge.md` section 3.
-- Status: accepted contract limitations for T2-8. Real non-GitHub forge behavior and native Windows process execution remain unverified; A9.26 remains pending without a signed-in scratch forge configuration.
+- Status: accepted contract limitations for T2-8. Real non-GitHub forge behavior and native Windows process execution remain unverified; A9.26 has not run without a signed-in scratch forge configuration.
 
 ### 2026-11-22 · limitation · Group moves follow replies, not unsolicited pushes
 
@@ -99,8 +93,9 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 ### 2026-11-22 · limitation · A Qwen Code group session may load the repository's configuration
 
 - Symptom: `contracts/step-3/drivers.md` section 3 requires the repository's configuration to be kept out of group sessions. `qwenDriver` cannot do that: a Qwen Code group session may load the project's `.qwen/settings.json`, `QWEN.md` and extensions (`internal/host/qwen.go`).
-- Cause: Qwen Code 0.28.0 documents no switch for it. Folder trust is not one: in an untrusted folder Qwen Code asks before every tool, even at `yolo`, which would turn level 3 into approval cards.
-- Status: accepted by the coordinator (2026-11-22): Qwen Code ships with this limitation, the risk R-45 already accepts (only trusted repositories go into a group; `install.md`). Open until a capture shows a switch that keeps the configuration out and leaves approvals alone.
+- Cause: Qwen Code 0.28.0 documents no switch for all of it. Folder trust is not one: in an untrusted folder Qwen Code asks before every tool, even at `yolo`, which would turn level 3 into approval cards.
+- Read again 2026-11-26 (`docs/users/features/hooks.md` and `headless.md` at tag v0.28.0, not run): hooks do have a switch, `disableAllHooks` in the system settings file that the driver already writes (it also ends the person's own hooks; `QWEN.md` and MCP servers stay). `--safe-mode` drops the rest too, but with it the solodawn MCP server. And a project's hooks run only after a person approved them in an interactive session; non-interactive runs leave unapproved ones out, and an approval mode from settings does not change that. So the first half of A3.8 may hold already, and its second half ("runs in task and review sessions") likely fails in a fresh worktree.
+- Status: accepted by the coordinator (2026-11-22): Qwen Code ships with this limitation, the risk R-45 already accepts (only trusted repositories go into a group; `install.md`). Open until a capture shows a switch that keeps the configuration out and leaves approvals alone. The scenario of A10.4 for Qwen Code stays `@pending`: it needs the real program, an owner key, and a decision on the second half of A3.8 (`docs/cookbook/i11-real-machine-checklist.md` section 7).
 
 ### 2026-11-22 · limitation · The multi-person label scenarios cannot admit Q yet
 
@@ -180,12 +175,6 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `internal/rendezvous/room.go` has no leave frame. It ignores duplicate joins by the same socket and caps membership at 16 rooms per connection.
 - Status: open; the browser must keep the socket alive for existing homes.
 
-### 2026-11-22 · limitation · A9.20 cannot set up a watcher before home invitation support lands
-
-- Symptom: A9.20 fails in its first Given with `bad_request: the home has no such command`, before opening the owner's terminal or exercising the watch host.
-- Cause: `joinWatcher` in `features/s2_watch_terminal_test.go` sends `invite`; `internal/home/people_seam.go` declares the invite/join command keys but registers no handlers, so `internal/home/check.go` refuses the command. The home invitation/join units T2-1a and T2-1b are outside T2-6.
-- Status: pending retest. A10.17 now exercises invitation and join; the later watch-confirmation steps were not rerun here.
-
 ### 2026-11-22 · deviation · Host turn labels approximate task participation by role
 
 - Symptom: a role still held for confirmation counts as participation for host labels, although `planning/contracts/step-2/confirm.md:37-38,156-172` also requires a queued assign or review item.
@@ -240,17 +229,11 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `callView` treats every status other than `answered` as waiting (`web/src/lib/call.ts:78`). The states sheet therefore lists three call rows, and `web/features/call.spec.ts` expects them.
 - Status: resolved in U2-2. The call block shows “Denied” without a waiting timer or reply.
 
-### 2026-11-22 · limitation · A9.21 lacks a same-connection network-switch driver
-
-- Symptom: the original fixture opened a new relay-only connection instead of moving an established watch to TURN.
-- Cause: a transport-only probe with controlling ICE, renomination, warm relay pairs and bidirectional filtering on every watcher UDP socket kept the direct pair selected. Pion's automatic selector retained that pair; the binding-request selector also failed to move both ends. This is fixture evidence, not an end-to-end watch result.
-- Status: open. Experimental transport code was removed. A9.21 stays pending with direct-watch, same-PeerConnection relay observation, closure and original-ctl assertions; `waitForRelay` in `features/s2_watch_terminal_test.go` observes but does not drive migration. See `features/s2_watch.md`.
-
 ### 2026-11-22 · deviation · A9.26 live M5 forge coverage awaits a configured live run
 
 - Symptom: the original live fixture checked two remote filenames without reusing M5's forge steps or inspecting request heads.
 - Cause: A9.26 used the subprocess fixture instead of M5's two-task forge flow.
-- Status: A9.26 now reuses the applicable M5 steps with live custom templates and independently inspects both request IDs and reviewed heads. Open until an opt-in run with `SOLODAWN_S2_LIVE_FORGE` completes; inspection is test-only, documented in `features/s2_watch.md`.
+- Status: open until one run against a real forge, which needs the owner's account there (`docs/cookbook/i11-real-machine-checklist.md` section 7). The scenario reuses the applicable M5 steps with live custom templates and independently inspects both request IDs and reviewed heads. The documented run started nothing, since `TestFeatures` leaves out `@live`; `TestS2LiveForgeFeature` now runs it when `SOLODAWN_S2_LIVE_FORGE` is set, and the `@pending` tag is gone. A dry run with scripts over a bare repository as the forge passed (2026-11-26), and failed at the inspection step with a wrong merged head.
 
 ### 2026-11-21 · deviation · The `rounds_limit` system message has an id derived from the triggering post's nonce
 
@@ -757,6 +740,24 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Status: open; the next occurrence needs the host and MCP lines of [diagnostics](planning/contracts/diagnostics.md).
 
 ## Resolved
+
+### 2026-11-26 · bug · A member's node can follow a moved group more than 5 seconds after the import
+
+- Symptom: A9.27 asks that Q1 follows P2 within 5 seconds of the import. Q1 took 11.6 seconds with the import right after the export; with minutes between them it can take up to 70 seconds. Once connected, everything else of A9.27 holds.
+- Cause: Q1 gets `moved` when P1 announces its groups (`internal/host/home_moved.go:14`) and offers to P2 at once. P2 does not know Q1 before the import and drops the offer (`internal/peer/signal.go:130`, `unknown_device`), so Q1 waits 10 seconds for an answer (`internal/peer/unanswered.go:5-13`, `flows/connect.md` step 15) and then backs off 1, 2, 4 … 60 seconds. Nothing wakes it: a node dials a home with no presence channel (`internal/node/node.go:461`), and the import changes no presence, since P2 is online all the time. `export.md` section 3 step 4 ("clients retry as for any home that is down") and the 5 seconds of A9.27 do not agree. A browser follows by the same rules.
+- Status: resolved by decision (2026-11-26): the 5 seconds contradicted `export.md` section 3 step 4 and `flows/connect.md` step 15, so A9.27 now says "by their normal retry", within 70 seconds: 10 for an unanswered offer and a back-off of at most 60. The scenario measures those 70 seconds for Q1 and keeps 5 seconds for the two browser peers, which dial after the import. No product change.
+
+### 2026-11-22 · limitation · A9.20 cannot set up a watcher before home invitation support lands
+
+- Symptom: A9.20 fails in its first Given with `bad_request: the home has no such command`, before opening the owner's terminal or exercising the watch host.
+- Cause: `joinWatcher` in `features/s2_watch_terminal_test.go` sends `invite`; `internal/home/people_seam.go` declares the invite/join command keys but registers no handlers, so `internal/home/check.go` refuses the command. The home invitation/join units T2-1a and T2-1b are outside T2-6.
+- Status: resolved 2026-11-26, A9.20 is enabled. #382 added the `invite` handler; the Given then timed out because the terminal peer (`features/s2_watch_peer_test.go`) offered only the candidates of this machine's own addresses, which a firewall drops. It now uses 127.0.0.1 alone, through the sockets of the M7 browser. The group is homed on P1, as in the cast, so the grant goes to a node that is not the home; P, no member of any group there, is admitted by the grant alone and cut off at hand-back.
+
+### 2026-11-22 · limitation · A9.21 lacks a same-connection network-switch driver
+
+- Symptom: the original fixture opened a new relay-only connection instead of moving an established watch to TURN.
+- Cause: a transport-only probe with controlling ICE, renomination, warm relay pairs and bidirectional filtering on every watcher UDP socket kept the direct pair selected. Pion's automatic selector retained that pair; the binding-request selector also failed to move both ends. This is fixture evidence, not an end-to-end watch result.
+- Status: resolved 2026-11-26, A9.21 is enabled (3 of 3 on the development Mac with its firewall on). `moveToRelay` in `features/s2_watch_peer_test.go` uses the network control of A7.9 (#373) on 127.0.0.1: direct packets take 3 seconds until the measured round trip says so, then direct UDP is cut. Pion (v4.4.8, `agent.go`, `evaluateCandidatePairQuality`) rates the last round trip of a pair that answers no more, and 3 seconds put the dead direct pair below relay to relay (10 plus 20 for recent answers), so ICE renominates by itself in about 5 seconds, when the direct pair loses its own 20.
 
 ### 2026-11-24 · bug · A scenario could restore the host drivers while another node discovered agents
 
