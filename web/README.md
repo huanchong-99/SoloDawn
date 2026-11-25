@@ -166,6 +166,12 @@ file in `src/routes/`. It edits neither the shell nor another area:
   the home to admit it. On success, it
   remembers the home in IndexedDB (store `device`, key `joined`), notifies its connected own
   nodes with `home.add`, and starts reading the new group on the same connection.
+- **Homes heard of.** Each `host.info` of an own node names the groups whose home it knows
+  (`contracts/step-2/people.md` section 7, point 2): `net.svelte.ts` dials and remembers those
+  homes (`Home.onhomes`), so another browser of the person shows the groups they joined. Until its
+  home can be reached such a group is in the list by its name, as one whose home is away; a home
+  that refuses this browser's hello, or the group, is dropped without a word. The computer name of
+  a home never reached is not known, and left out.
 - **Mounting points.** An area of the interface mounts its components without editing the shell,
   the chat or another area: it adds `src/components/<area>/mounts.ts`, whose default export is a
   `Mounts` (`src/lib/mounts.svelte.ts`), and `gather` finds every such file by name. The points,
@@ -584,13 +590,16 @@ file in `src/routes/`. It edits neither the shell nor another area:
   groups show an owned computer's AIs going offline or coming back, it is read again, so another
   browser of the owner follows. A team group has no AIs and is not paused from here.
 - **Waiting for a busy AI (R-72).** `src/components/queue/Waits.svelte` and `src/lib/queue.ts`. Under a
-  message of the reader's own in the main line: that an AI busy with a task has not taken it, and
+  message of the reader's own in the main line or a thread: that an AI busy with a task has not taken it, and
   "Go first, pausing T-12", which sends `jump`. No row names what a home has queued, so it is worked
   out: a message waits for an AI it went to while the AI's row is older than the message (or than
-  its owner's confirmation) and the AI is at work. A `jump` moves the author's newest waiting
-  message, so only that one offers it; not for an external AI, which a jump does not interrupt, nor
-  in a paused group. `conflict` means that it was taken meanwhile, and the line goes. After a jump
-  the line says that the AI takes the message next, then that the task is paused, until it continues.
+  its owner's confirmation) and the AI is at work. Every waiting message offers it, once for all
+  the AIs it waits for, as one `jump` sends all its items again; not for an external AI, which a
+  jump does not interrupt, nor in a paused group or the thread of a paused or failed task, where the
+  message is held. The choice says what it does: it pauses the task, or interrupts a review, the
+  session of the thread it stands in, or several tasks. `conflict` means that it was taken meanwhile,
+  and the line goes; any other refusal shows while the message waits. After a jump the line says that
+  the AI takes the message next, then that the task is paused, until it continues.
 - **What a person does with a task.** `src/lib/taskops.ts`, `TaskMenu.svelte` and
   `TaskActions.svelte`. The menu in the head of a task card (a `popover`) holds what the reader may
   do: for an admin pause, resume, reassign and cancel as `contracts/task-machine.md` allows them in
@@ -608,9 +617,11 @@ file in `src/routes/`. It edits neither the shell nor another area:
   (`order: 10`), backed by `Notifier` in `src/lib/notify.svelte.ts`. After a group's first sync it
   shows the live events for the reader: `approval`, `decision`, `brief` and `confirm` waiting on the
   reader, in dawn, until opened, dismissed or resolved; `done` summaries and `mention`s, in calm
-  neutral, for 8 seconds, a delay held while focus or the pointer is on the notification and restarted in full
-  when both leave. Main-line messages of the chat open on screen stay quiet; thread mentions and
-  other groups still notify. Open jumps to the card or message. At most three are shown: a
+  neutral, and `alert`s, for 8 seconds. An alert is a notice of the home that mentions the reader
+  (a task that stopped, an AI whose sign-in failed), in the words of its row (`src/lib/system.ts`)
+  and the red of its mark. The 8 seconds are held while focus or the pointer is on the notification
+  and start again in full when both leave. Main-line messages of the chat open on screen stay quiet;
+  thread mentions and other groups still notify. Open jumps to the card or message. At most three are shown: a
   newcomer past that drops the oldest self-closing one, or the oldest waiting card when none is
   self-closing. The stack sits at the top right of the page's area, under the top bar and the
   banners, so it never covers the composer or "Use here". On a chat it hangs under the chat's
@@ -634,7 +645,8 @@ file in `src/routes/`. It edits neither the shell nor another area:
   subscribes through `PushManager` and sends `push` (`PushOn` or `{ off: true }`) to connected
   homes, while `ReminderSync.svelte` (mounted at `layer`) keeps newly connected homes in sync and
   scrolls to `#m-<msg>` when a notification is clicked. `sw.ts` decodes `Reminder`, displays
-  `group · kind` with `who: title` in the reader's language, and focuses an open tab or opens
+  `group · kind` with `who: title` in the reader's language (a mention with a title is the notice of
+  a task that stopped, and says so), and focuses an open tab or opens
   `#/groups/<g>` at the card.
 - **Where code goes.** Logic lives in `.ts` and `.svelte.ts` modules, which the gates measure
   (CRAP and mutation); components stay thin. A module that only holds an `import.meta.glob` is
@@ -678,6 +690,7 @@ file in `src/routes/`. It edits neither the shell nor another area:
 | `src/lib/queue.ts`            | which of the person's messages wait for a busy AI; `jump`                         |
 | `src/lib/groupinfo.svelte.ts` | project-memory `note` and `review` paging, `forget`                               |
 | `src/lib/nodes.svelte.ts`     | connection indicator, `host.info` cache, `agent.set`, pairing                     |
+| `src/lib/system.ts`           | the words of a notice of the home, by its code                                    |
 | `src/lib/notify.svelte.ts`    | live in-page notification store, classification, dismissal and jump               |
 | `src/lib/compose.ts`          | mention being typed, mentions and parts of a text, row size                       |
 | `src/lib/when.ts`             | times in the reader's language; messages by day                                   |
@@ -772,12 +785,18 @@ in `Highlight` and `HighlightText` instead (`base.css` section 8).
 
 ## Known limitations
 
-- A `moved` response to `cmd`, `sync` or `fetch` switches a listed group to the named home and
+- A `moved` response to `cmd`, `sync` or `fetch` switches a group to the named home and
   preserves its cache. An existing destination connection is reused; an unknown destination is
   remembered for reconnecting on the current signalling paths. Its welcome supplies its remembered
-  addresses. Unlisted groups are discarded and read afresh if listed again. Commands are
+  addresses. A group that leaves its home's list is read once more, so that an idle browser gets
+  that answer; any other refusal discards it. Commands are
   not replayed across a move: their receipts stay on the old home. Before import the cached
   group remains visible; the destination's `groups` push starts a new read after import.
+- A group in the list of a node that a home out of reach still holds was restored there from a
+  copy (`contracts/step-2/export.md` section 4): it is taken over and read from the start, so an
+  open chat goes on there. While the old home can be reached nothing is taken over.
+- A browser that stays connected hears of a group joined in another one at its next `host.info`:
+  the node pushes none (`../issues.md`).
 - Only a group's owner sees the local `solodawn group export` / `group import` guidance. The
   browser neither runs these commands nor transfers the file. A copy omits `--to`; scheduling
   copies belongs to the operating system, not the browser.

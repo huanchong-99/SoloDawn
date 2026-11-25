@@ -436,7 +436,6 @@ export class Home {
   }
 
   #drop(group: Group) {
-    this.#unlisted.delete(group.g);
     this.groups = this.groups.filter((item) => item !== group);
   }
 

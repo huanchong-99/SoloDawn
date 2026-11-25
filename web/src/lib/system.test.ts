@@ -42,6 +42,9 @@ describe('systemText', () => {
       { code: 'task_failed', task: 'DrtCn6htSBw', reason: 'failures' },
       'Task DrtCn6h stopped after repeated failures.',
     ],
+    // A reason that this client does not know yet.
+    [{ code: 'task_failed', task, reason: 'new' }, 'Task T-12 stopped after repeated failures.'],
+    [{ code: 'turn_interrupted', ai: codex, reason: 'new' }, "Codex $& $''s turn was stopped."],
     [
       { code: 'turn_interrupted', ai: codex, reason: 'crash', task, detail: 'signal 9' },
       "Codex $& $''s turn crashed. · T-12 · signal 9",
