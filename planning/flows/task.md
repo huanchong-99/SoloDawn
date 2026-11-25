@@ -72,7 +72,11 @@ task through hosted checks and review again.
     have not finished after 60 minutes count as failed
     (`contracts/local.md` section 7). A failure returns the task to
     `local_check`, counts as one failure, and A gets the detail.
-12. With `forge: none` this step and the pull request are skipped.
+12. With `forge: custom` the group's `checks` template takes the place of
+    that read. With `forge: none` this step and the pull request are
+    skipped. With `forge: custom` the `push`, `open` and `merge` templates
+    likewise take the place of the forge commands in steps 10 and 18
+    (`contracts/step-2/checks-forge.md` section 3).
 
 ## D. Review
 

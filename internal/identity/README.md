@@ -36,8 +36,8 @@ connection, clock or database: every function works on the values it is given.
   nonce as text, so neither signature verifies as the other.
 - **Device id.** A text is a device id when it is the canonical base64url spelling of 32 bytes
   that are not one of the fourteen weak values (the encodings of the points of small order).
-  Anything else is never used as a key: as `k` it is `bad_sig`, as `dev` it makes a log entry
-  refused, and `Secret.Verify` refuses a pair message that carries it. Being a point of the curve
+  Anything else is never used as a key: as `k` it is `bad_sig`, as `dev` or `user` it makes a log
+  entry refused, and `Secret.Verify` refuses a pair message that carries it. Being a point of the curve
   is not tested: nothing verifies under a key that is none, and a log may add a `dev` that is
   none, which can then never sign.
 - **Verifying.** A signature is 64 bytes in their canonical spelling whose first half is not a weak
@@ -46,7 +46,8 @@ connection, clock or database: every function works on the values it is given.
   point, and other libraries do not. That the second half is below the order of the group is left
   to the library, which refuses it.
 - **Receiving.** `OpenSignal` and `OpenCommand` fail with the code of the first check that fails, in
-  the contract's order: `bad_sig`, `unknown_device`, `bad_request`, `not_for_me`, `stale`. The
+  the contract's order: `BadSig`, `UnknownDevice`, `BadRequest`, `NotForMe`, `Stale` (the `Code`
+  values `bad_sig`, `unknown_device`, `bad_request`, `not_for_me`, `stale`). The
   payload is read with `proto.Decode`: `t` is a string, `n` a random id (`proto.ID`: 16 bytes in
   their canonical spelling, 22 characters) and `ts` an integer; `g` is an id and `to` a string
   when they are there. An empty `n` or `g` is no id. Signalling must carry `to`; a command may
