@@ -40,7 +40,7 @@ async function createGroup(page: Page, surface: DirectSurface, node: Node, repo:
   await page.locator('a.done-btn').click();
   await poll(() => page.url()).toContain('#/groups');
   await poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
-  await page.getByRole('button', { name: 'New project group', exact: true }).first().click();
+  await page.getByRole('button', { name: 'New group', exact: true }).first().click();
   const dialog = page.locator('dialog.dlg[open]');
   const inputs = dialog.locator('input.input');
   await inputs.nth(0).fill('Profiles');

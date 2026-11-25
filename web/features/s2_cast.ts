@@ -2,7 +2,7 @@
 // member whose AIs run on Q1. Loaded by the page of e2e/s2.spec.ts.
 import { homes } from '../src/lib/groups.svelte';
 import { prefs } from '../src/lib/prefs.svelte';
-import { browser, example, ownedNode, owner, TestHome, user } from './home';
+import { browser, example, ownedNode, owner, TestHome, user, type OwnedNode } from './home';
 
 type Fields = Record<string, unknown>;
 
@@ -59,15 +59,18 @@ for (const id of [ids.c1, ids.c2])
       body: { what: 'direct', ai: ids.qPersonal, to: [ids.qUser] },
     }),
   );
-home.add(ids.team, 'Team');
-home.write(ids.team, example('row-group-team', { id: ids.team }));
-home.write(ids.team, example('row-msg-bulletin', { g: ids.team }));
+/** Writes a secretary's notice to a team group. */
+const bulletin = (g: string) => home.write(g, example('row-msg-bulletin', { g }));
+home.add(ids.team, 'Team', 'row-group-team');
+bulletin(ids.team);
+
+let other: OwnedNode;
 
 /** Connects this page as P or Q to P1, and to the other computer of that person. */
 async function cast(as: 'P' | 'Q') {
   prefs.lang = 'en';
   const me = browser(home, as === 'P' ? user : ids.qUser);
-  const other = ownedNode(as === 'P' ? 'P2' : 'Q1', as === 'P' ? ids.p2 : ids.q1);
+  other = ownedNode(as === 'P' ? 'P2' : 'Q1', as === 'P' ? ids.p2 : ids.q1);
   other.info.agents = [
     {
       ...other.info.agents[0],
@@ -76,18 +79,24 @@ async function cast(as: 'P' | 'Q') {
       ],
     },
   ];
+  other.home.reply = () => ({ ok: true });
   homes.push(me.store, other.store);
   await Promise.all([me.connect(), other.connect()]);
 }
 
-/** The commands P1 received, without nonce and time. */
-const sent = () =>
-  home.asked
+const commands = (of: TestHome) =>
+  of.asked
     .filter((req) => req.t === 'cmd')
     .map((req) => {
       const { n, ts, ...rest } = JSON.parse((req.env as { p: string }).p) as Fields;
       return rest;
     });
+
+/** The commands P1 received, without nonce and time. */
+const sent = () => commands(home);
+
+/** The commands the other computer of this page's person received, without nonce and time. */
+const told = () => commands(other.home);
 
 type Id = keyof typeof ids;
 
@@ -100,7 +109,7 @@ const update = (r: string, id: Id, changes: Fields) =>
 
 const remove = (r: string, id: Id) => home.remove(ids.g, r, ids[id]);
 
-const s2 = { ids, cast, sent, update, remove };
+const s2 = { ids, cast, sent, told, update, remove, bulletin };
 declare global {
   interface Window {
     s2: typeof s2;

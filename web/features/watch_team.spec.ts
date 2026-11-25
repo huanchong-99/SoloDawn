@@ -47,7 +47,8 @@ describeFeature(feature, ({ AfterEachScenario, Scenario }) => {
         ).toBe('Claude Code Website On a computer belonging to owner The website is ready.');
         expect(document.querySelectorAll('.people li').length).toBe(2);
         expect(document.querySelector('.member')).toBeNull();
-        expect(document.querySelector('.groupinfo')).not.toBeNull();
+        expect(document.querySelector('.group-details')).not.toBeNull();
+        expect(document.querySelector('.groupinfo, .preset, .kb')).toBeNull();
         expect(document.querySelector('.members .head')).toBeNull();
         expect(document.querySelector('.nosec')).toBeNull();
         expect(document.querySelector('.chat-head')!.textContent).toContain('Team group');

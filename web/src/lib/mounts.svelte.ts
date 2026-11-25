@@ -67,6 +67,8 @@ export const points = [
 export interface Entry<P extends Points[Point]> {
   order: number;
   component: Component<P> | Component<{}>;
+  /** Not drawn in a team group: what it shows comes from AIs and their tasks. */
+  project?: true;
 }
 
 /** What one area mounts. */

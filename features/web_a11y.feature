@@ -23,8 +23,8 @@ Feature: Accessibility across the pages and design widths
     Given two groups "Website" and "Docs" with waiting brief, approval and decision cards, a locked approval, a task and a summary
     When the person opens "#/groups" on a 1280 px desktop
     Then the group list and waiting digest expose named landmarks, and each digest action starts with "Open" and names its card and group
-    When the person opens "New project group"
-    Then the dialog is named "New project group" and every field is named by its label without concatenating its hint
+    When the person opens "New group"
+    Then the dialog is named "New group" and every field is named by its label without concatenating its hint
     When the person opens the chat of "Website" on a 1280 px desktop
     Then the chat, main line, waiting bar, composer and every card expose localized accessible names and linked status descriptions in English and Chinese
 

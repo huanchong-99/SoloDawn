@@ -3,6 +3,7 @@
   import Icon, { type IconName } from './components/Icon.svelte';
   import Mount from './components/Mount.svelte';
   import { sourceOf, start, type Net } from './lib/net.svelte';
+  import { nodes } from './lib/nodes.svelte';
   import {
     announcement,
     isDark,
@@ -29,6 +30,9 @@
   // The shell decides where the homes come from, once; every page is given the result.
   const { net, stop } = start(sourceOf(import.meta.env.MODE, location.search));
   onDestroy(stop);
+
+  $effect(() => nodes.sync(net.homes));
+  $effect(() => nodes.tell(net.homes));
 
   const icons: Record<Tab, IconName> = { groups: 'chat', nodes: 'pc', settings: 'sliders' };
   const at = $derived(routes[route.page]);

@@ -44,21 +44,21 @@ it('starts with four independent required programs', () => {
     'Renamed computer',
   );
   custom();
-  expect(all('fieldset legend').map((el) => el.textContent)).toEqual([
+  expect(all('fieldset.field legend').map((el) => el.textContent)).toEqual([
     'Push branch',
     'Open request',
     'Hosted checks',
     'Merge request',
   ]);
   expect(
-    all<HTMLTextAreaElement>('fieldset textarea').map((el) => [el.value, el.required]),
+    all<HTMLTextAreaElement>('fieldset.field textarea').map((el) => [el.value, el.required]),
   ).toEqual([
     ['', true],
     ['', true],
     ['', true],
     ['', true],
   ]);
-  expect(all<HTMLButtonElement>('fieldset .row button').map((el) => el.disabled)).toEqual([
+  expect(all<HTMLButtonElement>('fieldset.field .row button').map((el) => el.disabled)).toEqual([
     true,
     true,
     true,
@@ -72,7 +72,7 @@ it('starts with four independent required programs', () => {
 it('creates a custom group with exact argument arrays, including empty and multiline arguments', async () => {
   const { request } = setup();
   const now = vi.spyOn(Date, 'now').mockReturnValue(42);
-  const inputs = all<HTMLInputElement>('dialog input');
+  const inputs = all<HTMLInputElement>('dialog input.input');
   [' Project ', ' https://git.example/team/project.git ', ' stable ', ' Owner '].forEach(
     (value, i) => fill(inputs[i], value),
   );
@@ -83,7 +83,7 @@ it('creates a custom group with exact argument arrays, including empty and multi
     checks: ['forge'],
     merge: ['forge'],
   };
-  const fields = all<HTMLFieldSetElement>('fieldset');
+  const fields = all<HTMLFieldSetElement>('fieldset.field');
   operations.forEach((operation, at) => {
     const field = fields[at];
     templates[operation].forEach((argument, i) => {
@@ -134,7 +134,7 @@ it('omits templates when changing back to a built-in forge and shows refusals wi
   custom();
   choose(one<HTMLSelectElement>('dialog select'), 'None, this computer only');
   flushSync();
-  expect(document.querySelector('fieldset')).toBeNull();
+  expect(document.querySelector('fieldset.field')).toBeNull();
   one('dialog form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   await vi.waitFor(() =>
     expect(document.querySelector('[role=alert]')?.textContent?.trim()).toBe(

@@ -55,7 +55,7 @@ async function pairAndCreateGroup(page: Page, surface: DirectSurface, node: Node
   await poll(() => page.url()).toContain('#/groups');
   await poll(() => page.locator('.bar a.conn').getAttribute('data-st')).toBe('ok');
 
-  await page.locator('button', { hasText: 'New project group' }).first().click();
+  await page.locator('button', { hasText: 'New group' }).first().click();
   const dlg = page.locator('dialog.dlg[open]');
   const inputs = dlg.locator('input.input');
   await inputs.nth(0).fill('Website');

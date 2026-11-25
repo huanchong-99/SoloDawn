@@ -67,9 +67,9 @@ export class TestHome {
   }
 
   /** Adds a group with its row and the person as its owner. */
-  add(g: string, name: string) {
+  add(g: string, name: string, row = 'row-group') {
     this.groups.set(g, { name, seq: 0, rows: new Map() });
-    this.write(g, example('row-group', { id: g, name, created: Date.now() }));
+    this.write(g, example(row, { id: g, name, created: Date.now() }));
     this.write(g, example('row-member-human', { g, name: 'Alex' }));
     return g;
   }
@@ -196,7 +196,8 @@ export class TestHome {
 
   #apply(payload: Fields & { n: string; g: string; ts: number }): object {
     if (payload.t === 'group' && payload.op === 'create') {
-      this.add(payload.g, payload.name as string);
+      const row = payload.kind === 'team' ? 'row-group-team' : 'row-group';
+      this.add(payload.g, payload.name as string, row);
       for (const connection of this.#connections)
         connection.push({ t: 'groups', groups: this.#listed() });
       return { ok: true };
