@@ -417,7 +417,6 @@ describe('decode', () => {
     ['cmd-invite-link', 'cmd'],
     ['cmd-noted', 'cmd'],
     ['host-info-answer', 'host.info'],
-    ['audit-answer', 'audit'],
   ];
   const pushes = ['rows', 'reset', 'devlog', 'groups', 'host-info-push'];
 
@@ -480,22 +479,13 @@ describe('decode', () => {
     );
   });
 
-  // Read by the request they answer, the answers to cmd and audit ignore what they do not read,
+  // Read by the request they answer, the answer to cmd ignores what it does not read,
   // as Go does (contracts/conventions.md section 2).
   it('ignores in a cmd answer the members it does not read, rows and t included', () => {
-    for (const extra of [{ rows: null }, { rows: [{ ts: 1 }] }, { t: 'audit' }, { t: null }]) {
+    for (const extra of [{ rows: null }, { rows: [{ ts: 1 }] }, { t: 'sync' }, { t: null }]) {
       const text = JSON.stringify({ re: 4, ok: true, ...extra });
       expect(p.decodeAnswer('cmd', text), text).toStrictEqual({ re: 4, ok: true });
     }
-  });
-
-  it('refuses an audit answer whose rows it cannot read', () => {
-    const answer = JSON.parse(goldens['audit-answer']);
-    for (const rows of [[{ ts: 1 }], 'none', null, [null]]) {
-      const text = JSON.stringify({ ...answer, rows });
-      expect(() => p.decodeAnswer('audit', text), text).toThrow(v.ValiError);
-    }
-    expect(() => p.decodeAnswer('audit', goldens['cmd-ok'])).toThrow(v.ValiError);
   });
 
   it.each(answers)('refuses %s, the answer to %s, without one of its fields', (name, t) => {
@@ -517,7 +507,7 @@ describe('decode', () => {
 
   it('refuses a frame a node does not send, and an answer as a push', () => {
     expect(() => p.decode(p.Frame, goldens.hello)).toThrow(v.ValiError);
-    for (const name of ['welcome', 'synced', 'fetched', 'cmd-ok', 'audit-answer']) {
+    for (const name of ['welcome', 'synced', 'fetched', 'cmd-ok']) {
       expect(() => p.decode(p.Frame, goldens[name]), name).toThrow(v.ValiError);
     }
   });
@@ -899,16 +889,6 @@ describe('mock connection', () => {
     const ctl = mockCtl((push) => seen.push(push.t));
     const synced = await ctl.request({ t: 'sync', g: 'g', since: 0, state_only: false });
     expect([...seen, synced]).toEqual(['reset', 'rows', { ...JSON.parse(goldens.synced), re: 1 }]);
-  });
-
-  it('answers audit with the example, typed by the request', async () => {
-    const ctl = mockCtl(() => {});
-    const answer: p.AuditAnswer | p.ErrorResponse = await ctl.request({
-      t: 'audit',
-      before: 0,
-      limit: 50,
-    });
-    expect(answer).toStrictEqual({ ...JSON.parse(goldens['audit-answer']), re: 1 });
   });
 
   it('answers host.info with the example, numbered', async () => {

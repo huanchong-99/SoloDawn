@@ -1099,30 +1099,6 @@ export type HostInfo = v.InferOutput<typeof HostInfo>;
 export const HostInfoPush = v.object({ t: v.literal('host.info'), ...HostState });
 export type HostInfoPush = v.InferOutput<typeof HostInfoPush>;
 
-/** Asks for the audit rows whose `id` is lower than `before`, the id of the oldest row already
- *  held, newest first; `before: 0` for the newest. */
-export const Audit = v.object({ t: v.literal('audit'), id: int, before: int, limit: int });
-export type Audit = v.InferOutput<typeof Audit>;
-
-/** The answer to `audit`, which has no `t`. `id` numbers a row on its node and grows with each;
- *  `ai` is the agent, `by` the device that caused it. */
-export const AuditAnswer = v.object({
-  ...Success,
-  rows: v.array(
-    v.object({
-      id: int,
-      ts: int,
-      g: v.optional(Id),
-      ai: optionalText,
-      what: str,
-      detail: str,
-      by: optionalText,
-      result: optionalText,
-    }),
-  ),
-});
-export type AuditAnswer = v.InferOutput<typeof AuditAnswer>;
-
 /** The size of a takeover's terminal, pushed by the browser; `ai` is the member taken over. */
 export const PTYResize = v.object({
   t: v.literal('pty.resize'),
@@ -1284,7 +1260,7 @@ export type Frame = v.InferOutput<typeof Frame>;
 export type Push = Rows | Reset | Devlog | Groups | HostInfoPush | PTYResize;
 
 /** The schema of the answer to each request, by the request's `t`. An answer is read with the
- *  schema of the request it answers, not by what it holds: the answers to `cmd` and `audit` have no
+ *  schema of the request it answers, not by what it holds: the answer to `cmd` has no
  *  `t`, and like any frame each ignores the members it does not read (contracts/conventions.md
  *  sections 2 and 3). */
 export const AnswerOf = {
@@ -1293,7 +1269,6 @@ export const AnswerOf = {
   fetch: Fetched,
   cmd: CmdResult,
   'host.info': HostInfo,
-  audit: AuditAnswer,
   'watch.start': CmdResult,
 } as const;
 export type RequestType = keyof typeof AnswerOf;
@@ -1344,7 +1319,6 @@ export interface Ctl {
   ): Promise<AnswerTo<'fetch'> | ErrorResponse>;
   request(req: Ask<Cmd>): Promise<AnswerTo<'cmd'> | ErrorResponse>;
   request(req: Ask<HostInfoRequest>): Promise<AnswerTo<'host.info'> | ErrorResponse>;
-  request(req: Ask<Audit>): Promise<AnswerTo<'audit'> | ErrorResponse>;
   request(req: Ask<WatchStart>): Promise<AnswerTo<'watch.start'> | ErrorResponse>;
   send?(frame: Devlog | PTYResize): void;
   channel?(label: string): PtyChannel | undefined;
