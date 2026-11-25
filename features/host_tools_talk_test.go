@@ -64,11 +64,17 @@ func (f *talkFakeHome) threadReply(id int64, thread *string) json.RawMessage {
 		Re:        nil,
 		Body:      proto.EmptyBody{},
 	}
+	review := proto.MessageRow[proto.ReviewBody, proto.NoCard]{
+		RowHeader: proto.RowHeader{Type: "msg", ID: "m2____________________A", Seq: 9},
+		Pos:       9, Group: f.groupID, Thread: thread, By: f.codexID, Kind: "review", Timestamp: 1_763_600_000_000, Mentions: []string{},
+		Body: proto.ReviewBody{Commit: "9f2c1ab", Round: 1, Score: 86, Pass: 90, Items: []proto.ReviewItem{{Text: "No test"}}},
+	}
 	raw, _ := json.Marshal(row)
+	rawReview, _ := json.Marshal(review)
 	resp, _ := json.Marshal(proto.Fetched{
 		Type:    "fetched",
 		Success: proto.Success{Re: id, OK: true},
-		Rows:    []json.RawMessage{raw},
+		Rows:    []json.RawMessage{raw, rawReview},
 		More:    false,
 	})
 	return resp

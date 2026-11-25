@@ -740,6 +740,30 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 
 ## Resolved
 
+### 2026-11-25 · bug · `read_thread` gave an AI an empty text for most kinds
+
+- Symptom: a brief, decision, approval, check result or review read back with `"text":""`, and an AI that reads context first (R-33), or the secretary told to write notes after every review, saw nothing of it. A pending decision or a brief in the history of a replaced session was only `(decision)` or `(brief)`.
+- Cause: `fetchThreadMessages` (`internal/host/tools_talk.go`) returned `row.Text`; these kinds keep their content in `body`. `msgFormatters` (`internal/host/turn.go`) had no brief, and the decision formatter only an outcome.
+- Status: resolved on `fix/host-context`; `TestReadThreadShowsWhatABodyHolds` pins the texts.
+
+### 2026-11-25 · deviation · The confirmed scope reached no AI
+
+- Symptom: the person confirms what is in and out of scope on the brief, but neither the assignee's nor the reviewer's turn said it.
+- Cause: `briefSpecLines` (`internal/host/turn.go`) gave goal and criteria only, and `drivers.md` section 3 named no scope line.
+- Status: resolved on `fix/host-context`: `In scope:` and `Out of scope:` follow the criteria.
+
+### 2026-11-25 · deviation · The secretary was not told which team groups exist
+
+- Symptom: R-14's relay happened only when the owner gave the group's id, because no turn, instruction or tool description named a team group.
+- Cause: neither `sessionHeader` (`internal/host/turn.go`) nor `internal/host/instructions/secretary.md` said it.
+- Status: resolved on `fix/host-context`: the secretary's header lists the team groups its node knows, and its instructions say when to post there.
+
+### 2026-11-25 · deviation · `list_members` called every person online
+
+- Symptom: a person without any browser connected was `"state":"online"`.
+- Cause: `online` is written `true` when a person creates or joins a group and nothing writes `false` (`internal/home/cmd_group.go`, `cmd_people.go`); the tool passed it on.
+- Status: the tool half is resolved on `fix/host-context`: a person has no state there. The row field and the badge in the web client stay as they are.
+
 ### 2026-11-23 · bug · FLAKY-29: the fake Qwen Code started OpenCode's MCP server
 
 - Symptom: Qwen A4.9 failed with `timed out waiting on home pushes`, and failed every time at step 4 with `OPENCODE_CONFIG_CONTENT='{"mcp":{}}'` in the environment (#373).

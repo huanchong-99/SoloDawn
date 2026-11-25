@@ -60,6 +60,12 @@ Notes:
 
 - `post` is the only way an AI speaks in the group. What the model prints
   outside tool calls stays in its own session.
+- The `text` of a `read_thread` message is the text a turn gives for its kind
+  (`contracts/drivers.md` section 3): what its `body` and `state` hold, then
+  its own text. An `approval` is `Approval (<status>) of <tool>:` and the
+  request on the next line, because its turn text tells only the AI that asked
+  what to do next.
+- A person in `list_members` has `name` and `kind` only.
 - `ask` returns within `limits.ask_wait_s` (45 seconds) in every case.
 - `run_checks` may run for a long time, and the call stays open until the
   checks end. Claude Code kept a call of 600 seconds in the foreground,
