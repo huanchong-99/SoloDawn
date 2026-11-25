@@ -298,8 +298,19 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
         'Claude reply two in same open session: codeword-amber',
       );
 
-      // Mention @Codex and verify Codex also replies in chat.
+      // Pause the group: a mention of @Codex waits, and resuming delivers it (A4.7).
+      await page.getByRole('button', { name: 'Stop AIs' }).click();
+      await page.getByRole('button', { name: 'Pause', exact: true }).click();
+      const pausedNotice = page.locator('.dock .paused');
+      await poll(() => pausedNotice.textContent()).toContain('You paused this group');
+      await poll(() => page.locator('.glist .st').textContent()).toBe('Paused');
       await sendChatMessage(page, '@Codex say hello');
+      await poll(() => page.locator('.line .msg .text').allTextContents()).toContain(
+        '@Codex say hello',
+      );
+      expect(await page.locator('.line').textContent()).not.toContain('Codex reply from studio');
+      await page.getByRole('button', { name: 'Resume' }).click();
+      await poll(() => pausedNotice.count()).toBe(0);
       await poll(() => page.locator('.line .msg .text').allTextContents()).toContain(
         'Codex reply from studio',
       );
@@ -332,6 +343,18 @@ describe('E-M3: AI member panel, add-AI dialog, mentions, dormancy, and resume',
       const claudeStartsAfterResume = [...logAfterResume.matchAll(/^start claude (\S+)$/gm)];
       expect(claudeStartsAfterResume).toHaveLength(2);
       expect(claudeStartsAfterResume[1][1]).toBe(originalSessionId);
+
+      // Take all AIs of the computer offline, which closes the session, and bring them back (A4.8).
+      await page.getByRole('button', { name: 'Stop AIs' }).click();
+      await page.getByRole('button', { name: 'Take offline' }).click();
+      const offlineBanner = page.locator('.ban .off');
+      await poll(() => offlineBanner.textContent()).toContain('Your AIs on studio are offline.');
+      await poll(() => claudeCard.locator('header .st').textContent()).toBe(
+        'Offline · you took it offline',
+      );
+      await offlineBanner.getByRole('button', { name: 'Bring back online' }).click();
+      await poll(() => offlineBanner.count()).toBe(0);
+      await poll(() => claudeCard.locator('header .st').textContent()).toContain('Sleeping');
     },
   );
 });

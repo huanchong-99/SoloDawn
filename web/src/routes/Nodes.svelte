@@ -4,6 +4,7 @@
   import Icon from '../components/Icon.svelte';
   import { offeredAccounts } from '../components/driver/driver';
   import PairBrowserDialog from '../components/nodes/PairBrowserDialog.svelte';
+  import NodeOffline from '../components/stop/NodeOffline.svelte';
   import { find } from '../lib/groups.svelte';
   import type { Net } from '../lib/net.svelte';
   import { nodes, type Computer } from '../lib/nodes.svelte';
@@ -37,7 +38,15 @@
   const stateTone = (state: string) => (state === 'dormant' ? 'sleeping' : state);
 
   function stateLabel(state: string) {
-    const known = ['working', 'waiting', 'dormant', 'limited', 'offline'] as const;
+    const known = [
+      'working',
+      'waiting',
+      'dormant',
+      'limited',
+      'offline',
+      'takeover',
+      'paused',
+    ] as const;
     const match = known.find((each) => each === state);
     return match ? t(`nodes.ai.state.${match}`) : state;
   }
@@ -86,6 +95,7 @@
   {#if computers.length}
     {#each computers as comp, idx (comp.info?.device ?? comp.home)}
       {@const hosted = hostedGroups(comp)}
+      {@const stopped = comp.online && comp.info?.offline}
       {@const relayed = comp.online && comp.path?.kind === 'relay'}
       <section class="card node" aria-labelledby={`${uid}-n-${idx}`}>
         <header class="row">
@@ -102,8 +112,14 @@
               </p>
             {/if}
           </div>
-          <span class="st" data-st={comp.online ? 'ok' : 'offline'}>
-            <i></i>{t(comp.online ? 'nodes.status.online' : 'nodes.status.offline')}
+          <span class="st" data-st={comp.online && !stopped ? 'ok' : 'offline'}>
+            <i></i>{t(
+              stopped
+                ? 'stop.node.status'
+                : comp.online
+                  ? 'nodes.status.online'
+                  : 'nodes.status.offline',
+            )}
           </span>
         </header>
 
@@ -167,6 +183,8 @@
           </p>
         {/if}
 
+        {#if comp.online && comp.info}<NodeOffline home={comp.home} />{/if}
+
         {#if comp.info}
           {#each comp.info.agents.filter((entry) => entry.agent !== 'external') as agent (agent.agent)}
             {@const label = cliName(agent.agent)}
@@ -184,6 +202,8 @@
                   </div>
                   {#if !comp.online}
                     <p class="st" data-st="offline"><i></i>{t('nodes.ai.offline')}</p>
+                  {:else if stopped}
+                    <p class="st" data-st="offline"><i></i>{t('stop.ai.offline')}</p>
                   {:else if !agent.login_ok}
                     <p class="st" data-st="down"><i></i>{t('nodes.ai.notSignedIn')}</p>
                   {:else}

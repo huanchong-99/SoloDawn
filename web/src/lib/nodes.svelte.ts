@@ -60,7 +60,7 @@ function activeCtl(home: Home): p.Ctl | undefined {
 const unheard = ({ home, info }: Group) => !home.owner || info?.kind === 'team';
 
 /** Holds the latest `host.info` of each owned computer, refreshes it when an owner node connects
- *  or after `agent.set`, and sends `pair.browser`. */
+ *  or after a command that changes it, and sends `pair.browser`. */
 export class Nodes {
   /** The latest `host.info` state for each owned `Home`. */
   readonly infos = new SvelteMap<Home, p.HostInfoPush>();
@@ -122,13 +122,25 @@ export class Nodes {
 
   /** Asks an online owner node (`to`) for a one-time browser pairing link (`pair.browser`). */
   async pairBrowser(home: Home, to: string): Promise<PairLink | p.ErrorResponse> {
-    const env = await home.me.sign(
-      JSON.stringify({ t: 'pair.browser', n: newId(), ts: Date.now(), to }),
-    );
-    const ctl = home.ctl;
-    const answer = await (ctl ? ctl.request({ t: 'cmd', env }).catch(lost) : lost());
+    const answer = await this.#command(home, to, 'pair.browser');
     if (answer.err) return answer;
     return { link: answer.link!, expires: answer.expires! };
+  }
+
+  /** Takes every AI of the owned node `home` offline, or back online (R-64), then reads its
+   *  `host.info` again: the node pushes none. */
+  async setOffline(home: Home, offline: boolean): Promise<p.CmdResult | p.ErrorResponse> {
+    const ctl = home.ctl;
+    const answer = await this.#command(home, home.device, `host.${offline ? 'offline' : 'online'}`);
+    if (!answer.err) await this.#read(home, ctl!);
+    return answer;
+  }
+
+  /** Sends a host command that carries nothing of its own (`HostCommandOnly`). */
+  async #command(home: Home, to: string, t: p.HostCommandOnly['t']) {
+    const env = await home.me.sign(JSON.stringify({ t, n: newId(), ts: Date.now(), to }));
+    const ctl = home.ctl;
+    return ctl ? ctl.request({ t: 'cmd', env }).catch(lost) : lost();
   }
 
   /** Asks the online owner node `home` for `host.info` with `refresh`: its models listed again. */

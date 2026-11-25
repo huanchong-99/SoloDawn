@@ -18,6 +18,18 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Cause: `cmdPair` reads the line with `ReadPair(line, owner, nil)`, which returns `ErrOwned` before any address is read or saved (`internal/node/node.go:710-730`, `internal/node/socket.go:160-162`); `saveRendezvous` is reached only through `preparePairRV` for an unowned node.
 - Status: open, found 2026-11-25 in the review of the self-hosting guide. The guide tells the owner to choose a name that they will keep (a domain, not an address) before pairing ([self-hosting](docs/cookbook/self-hosting.md), step 5).
 
+### 2026-11-25 · deviation · The host sends no member status when a group is paused or resumed, or its AIs go offline or online
+
+- Symptom: after "Resume", the card of an AI that was interrupted outside a task stays "Paused" until its next turn or until it goes dormant. During a pause every other AI reads "Waiting" or "Sleeping · wakes when @mentioned", beside a notice that says the group is paused. An AI that never had a session reads "Sleeping" to everybody but its owner after `host.offline` and after `host.online` (see the entry below).
+- Cause: `afterGroupState` (`internal/host/deliver.go:383`) sends no status on pause or resume; seen by continuing `TestPausingInterruptsTheTurnsOfThePausedGroupOrTask` with a resume: `MemberState` is `waiting` and no command was sent. `handleHostOffline` and the online side report only members that have a session row (`distinctMemberSlots`, `internal/host/limits.go:209`). `planning/sessions.md` section 3 wants `paused` and `offline` reported.
+- Status: open. One host unit fixes it at the root: report the status of every AI this node hosts in the group (the `member` rows whose `host` is this node, not only `Sessions.All()`) on pause, resume, `host.offline` and `host.online`; best in or right after the `feat/host-jump` lane, which touches the same files. The web client derives nothing for it: that would repair only the pause, and only in one client.
+
+### 2026-11-25 · limitation · `host.offline` does not mark an AI that never had a session
+
+- Symptom: an AI that was added to a group and never woken keeps `dormant` ("Sleeping") in the group for everybody but its owner after its owner took all AIs of the computer offline.
+- Cause: `handleHostOffline` reports a status for each AI that has a session row (`distinctMemberSlots`, `internal/host/limits.go:209`); a member without one is in none. The owner's browser shows it offline from `host.info` (`statusIn`, `web/src/lib/stop.ts`).
+- Status: open. Nothing wakes it meanwhile: its items are held.
+
 ### 2026-11-23 · deviation · An agent without a driver cannot join a group
 
 - Symptom: only Claude Code, Codex, OpenCode and Qwen Code can be AI members. An agent its owner runs outside SoloDawn (a self-built agent, ZCode, Cursor, Cline) cannot join. The owner required on 2026-11-19 that any AI that supports MCP can join a group and work, and that a per-CLI adapter is needed only to wake it and keep it running.
@@ -775,6 +787,12 @@ Entry format: `### YYYY-MM-DD · type · title`, where type is `bug`, `deviation
 - Symptom: chosen, such a secretary was never started and has no `propose_brief`, `set_task` or `summary`, so requests went nowhere. `planning/contracts/step-3/external.md` section 2: "The client does not offer it".
 - Cause: `EditGroup.svelte:18` listed every AI member. The add-AI dialog already left the choice out.
 - Status: resolved: `secretaryCandidates` in `web/src/components/groupinfo/trust.ts`; with nothing else to edit, group details no longer offer settings that could only send an empty `group set`. Tests in `details.test.ts`.
+
+### 2026-11-25 · deviation · The web client had no emergency stop
+
+- Symptom: no control sent `group pause`, `group resume`, `host.offline` or `host.online`, and a paused group looked like any other (R-64, A4.7 and A4.8 "as seen"). On the computers page an AI in `takeover` or `paused` showed the raw word.
+- Cause: the unit that held them (U-5) was cancelled for its permission levels; `stateLabel` in `web/src/routes/Nodes.svelte` did not know the two states.
+- Status: resolved on `web/stop-and-jump`: `web/src/components/stop/`, `web/src/lib/stop.ts`, `features/web_stop.feature`, `web/e2e/m3.spec.ts`.
 
 ### 2026-11-25 · deviation · A confirm card for a task without a brief names "Former member" as the requester
 
