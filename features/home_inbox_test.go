@@ -46,6 +46,7 @@ type homeInboxPeer struct {
 	conn *home.Conn
 	// frames has a single reader: the scenario step reading from this peer.
 	frames chan string
+	saw    trail
 	re     int64
 }
 
@@ -63,12 +64,7 @@ func (p *homeInboxPeer) Send(frame any) error {
 func (p *homeInboxPeer) Done() <-chan struct{} { return nil }
 
 func (p *homeInboxPeer) next() (string, error) {
-	select {
-	case raw := <-p.frames:
-		return raw, nil
-	case <-time.After(5 * time.Second):
-		return "", fmt.Errorf("timed out waiting for frame")
-	}
+	return recvFrame(p.frames, 5*time.Second, &p.saw, briefString)
 }
 
 func homeInboxSteps(sc *godog.ScenarioContext) {

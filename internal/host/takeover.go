@@ -87,7 +87,7 @@ func (p *takeovers) release(h *Host, slot aiSlot, t *takeover) {
 		delete(p.open, slot)
 	}
 	if !p.settled {
-		p.wg.Go(func() { Deliver(h, slot.group, slot.member) })
+		h.bg(p.wg.Go, "deliver", func() { Deliver(h, slot.group, slot.member) }, "g", slot.group)
 	}
 	p.mu.Unlock()
 }
@@ -357,7 +357,7 @@ func (p *takeovers) watch(h *Host, from Owner) {
 		return
 	}
 	p.watched[from] = true
-	p.wg.Go(func() {
+	h.bg(p.wg.Go, "path_watch", func() {
 		for from.Path() == "direct" && p.waitPath(from) {
 		}
 		p.closeFrom(from)
@@ -423,7 +423,7 @@ func (p *takeovers) closed(h *Host, t *takeover, token string) {
 	defer p.mu.Unlock()
 	t.closed = true
 	if !p.settled {
-		p.wg.Go(func() { handBack(h, p, t) })
+		h.bg(p.wg.Go, "hand_back", func() { handBack(h, p, t) }, "g", t.key.Group, "task", t.key.Task)
 	}
 }
 
@@ -434,7 +434,7 @@ func handBackSaved(h *Host, group string) {
 	for _, s := range h.Sessions.All() {
 		t := &takeover{key: s.SessionKey}
 		if s.Group == group && s.State == Takeover && p.claim(aiSlot{group: s.Group, member: s.Member}, t, false) {
-			p.wg.Go(func() { handBack(h, p, t) })
+			h.bg(p.wg.Go, "hand_back", func() { handBack(h, p, t) }, "g", t.key.Group, "task", t.key.Task)
 		}
 	}
 }

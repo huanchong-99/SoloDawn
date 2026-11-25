@@ -196,15 +196,18 @@ func (w *a10LiveWorld) checkReport(ctx context.Context, p host.Process, folder s
 }
 
 func a10AwaitLiveEvent(ctx context.Context, events <-chan host.Event, want host.EventKind) (host.Event, error) {
+	var saw trail
+	start := time.Now()
 	for {
 		select {
 		case event, open := <-events:
+			saw.see(string(event.Kind))
 			done, err := a10LiveEventResult(event, open, want)
 			if done {
 				return event, err
 			}
 		case <-ctx.Done():
-			return host.Event{}, ctx.Err()
+			return host.Event{}, ctxEnded(ctx, start, fmt.Sprintf("the %s event", want), &saw)
 		}
 	}
 }

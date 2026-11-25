@@ -36,6 +36,7 @@ func (o *watchOwner) wantSizes(t *testing.T, want ...proto.PTYResize) {
 
 func TestWatchLifecycle(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
+		d := captureDiag(t)
 		h := newPTYTestHost(t)
 		p := watchState(h)
 		slot := aiSlot{ptyTestGroupID, ptyTestAIID}
@@ -130,6 +131,9 @@ func TestWatchLifecycle(t *testing.T) {
 		part.release(slot)
 		sendWatchSize(h, slot, o)
 		o.wantSizes(t, size, resized, resized)
+		node := "node=" + h.Key.ID()[:8]
+		d.ran(t, 3, node, "watch_conn")
+		d.ran(t, 3, node, "watch_write g="+slot.group)
 	})
 }
 

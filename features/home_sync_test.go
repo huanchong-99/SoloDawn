@@ -40,6 +40,7 @@ type homeSyncWorld struct {
 type homeSyncPeer struct {
 	conn    *home.Conn
 	frames  chan any
+	saw     trail
 	started chan struct{}
 	hold    chan struct{}
 }
@@ -60,13 +61,12 @@ func (p *homeSyncPeer) Send(frame any) error {
 func (p *homeSyncPeer) Done() <-chan struct{} { return nil }
 
 func (p *homeSyncPeer) next() (string, error) {
-	select {
-	case frame := <-p.frames:
-		raw, err := json.Marshal(frame)
-		return string(raw), err
-	case <-time.After(10 * time.Second):
-		return "", fmt.Errorf("timed out waiting for frame")
+	frame, err := recvFrame(p.frames, 10*time.Second, &p.saw, briefAny)
+	if err != nil {
+		return "", err
 	}
+	raw, err := json.Marshal(frame)
+	return string(raw), err
 }
 
 type homeSyncRead struct {
@@ -378,10 +378,10 @@ func (w *homeSyncWorld) syncConcurrentFirstRead() error {
 	p.conn = w.loop.Attach(w.browser.ID(), p)
 	w.slowP = p
 	w.loop.Sync(p.conn, proto.Sync{Request: proto.Request{Type: "sync", ID: 9}, Group: w.group, Since: 0})
-	select {
-	case <-p.started:
-	case <-time.After(10 * time.Second):
-		return fmt.Errorf("first frame never started")
+	started := newWait(10*time.Second, "the first frame to start", nil)
+	defer started.stop()
+	if _, err := recvWait(started, p.started); err != nil {
+		return err
 	}
 	err := w.execCmd(w.laptop, "post", `,"kind":"text","msg_id":"msg-concurrent","text":"during sync"`)
 	close(p.hold)

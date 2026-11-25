@@ -187,23 +187,16 @@ func (at *accTerminal) output() string {
 }
 
 func (at *accTerminal) waitOutput(subs ...string) error {
-	timer := time.NewTimer(10 * time.Second)
-	defer timer.Stop()
+	w := newWait(10*time.Second, fmt.Sprintf("%q in the terminal output", subs), nil)
+	defer w.stop()
 	for {
 		out := at.output()
-		allFound := true
-		for _, sub := range subs {
-			if !strings.Contains(out, sub) {
-				allFound = false
-			}
-		}
-		if allFound {
+		if !slices.ContainsFunc(subs, func(sub string) bool { return !strings.Contains(out, sub) }) {
 			return nil
 		}
-		select {
-		case <-at.notify:
-		case <-timer.C:
-			return fmt.Errorf("timed out waiting for %v in %q", subs, at.output())
+		w.saw.read(tailOf(out))
+		if _, err := recvWait(w, at.notify); err != nil {
+			return err
 		}
 	}
 }
@@ -319,12 +312,14 @@ func hostPTYSteps(sc *godog.ScenarioContext, suiteT *testing.T) {
 	})
 
 	sc.Step(`^pseudo-terminal reads pause while the terminal write buffer is full$`, func() error {
-		deadline := time.Now().Add(5 * time.Second)
-		for term.writeCnt.Load() == 0 {
-			if time.Now().After(deadline) {
-				return errors.New("timed out waiting for first blocked terminal write")
+		err := waitUntil(5*time.Second, "the first blocked terminal write", func() error {
+			if n := term.writeCnt.Load(); n == 0 {
+				return fmt.Errorf("%d writes", n)
 			}
-			time.Sleep(5 * time.Millisecond)
+			return nil
+		})
+		if err != nil {
+			return err
 		}
 		pinned := term.writeCnt.Load()
 		time.Sleep(80 * time.Millisecond)

@@ -98,16 +98,17 @@ func externalAgentAnswer(run string) (string, error) {
 func externalAgentPost(answer string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	start := time.Now()
 	cmd := exec.CommandContext(ctx, os.Getenv("EXTERNAL_SOLODAWN"), "mcp", "--member", os.Getenv("EXTERNAL_MEMBER"))
 	client := mcp.NewClient(&mcp.Implementation{Name: "external-scripted-agent", Version: "1"}, nil)
 	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
 	if err != nil {
-		return err
+		return ctxCallErr(ctx, start, "external scripted MCP connect", nil, err)
 	}
 	defer session.Close()
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "post", Arguments: map[string]string{"text": answer}})
 	if err != nil {
-		return err
+		return ctxCallErr(ctx, start, "external scripted MCP post", nil, err)
 	}
 	if res.IsError {
 		return fmt.Errorf("scripted external post failed: %+v", res)
@@ -263,6 +264,7 @@ func (w *externalWorld) queueDuringRun(r *externalRunner, text string) error {
 }
 
 func (r *externalRunner) nextStart() (string, error) {
+	start := time.Now()
 	for {
 		select {
 		case run := <-r.ready:
@@ -272,7 +274,7 @@ func (r *externalRunner) nextStart() (string, error) {
 				return "", err
 			}
 		case <-r.ctx.Done():
-			return "", fmt.Errorf("external agent did not start: %w", r.ctx.Err())
+			return "", ctxEnded(r.ctx, start, "the external agent to start", nil)
 		}
 	}
 }
@@ -285,6 +287,7 @@ func (r *externalRunner) expectLook(code int, since time.Time) error {
 	if r.looks == nil {
 		return nil
 	}
+	start := time.Now()
 	for {
 		select {
 		case result := <-r.looks:
@@ -293,7 +296,7 @@ func (r *externalRunner) expectLook(code int, since time.Time) error {
 			}
 			return result.expect(code)
 		case <-r.ctx.Done():
-			return r.ctx.Err()
+			return ctxEnded(r.ctx, start, fmt.Sprintf("a look with exit code %d", code), nil)
 		}
 	}
 }
@@ -303,11 +306,12 @@ func (result externalScheduledLook) earlierEmptyLook(code int, since time.Time) 
 }
 
 func (r *externalRunner) finish(answer string) error {
+	start := time.Now()
 	select {
 	case r.answer <- answer:
 		return r.expectLook(0, time.Time{})
 	case <-r.ctx.Done():
-		return r.ctx.Err()
+		return ctxEnded(r.ctx, start, "the runner to take the answer", nil)
 	}
 }
 
