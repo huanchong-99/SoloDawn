@@ -27,6 +27,7 @@ var (
 )
 
 func init() {
+	Register(Settled, "task", settleHostedChecks)
 	Register(Tools, "start_task", Tool{
 		Description: "Create a direct task and move the work to a new task session.",
 		Schema:      tskStartSchema,
@@ -139,8 +140,32 @@ type tskCloudRun struct {
 // Sessions, Rows or Store locks.
 type tskPart struct {
 	mu      sync.Mutex
+	wg      sync.WaitGroup // the polls
+	settled bool           // Settle has begun: no poll starts
 	cancels map[tskCloudKey]*tskCloudRun
 	claimed map[tskCloudHead]struct{}
+}
+
+// settleHostedChecks ends the polls; the next start resumes them.
+func settleHostedChecks(h *Host) {
+	p := Part[tskPart](h)
+	p.mu.Lock()
+	p.settled = true
+	for _, run := range p.cancels {
+		run.cancel()
+	}
+	p.mu.Unlock()
+	p.wg.Wait()
+}
+
+// spawn runs f on wg unless the part has settled; the Add happens under mu,
+// so it comes before Settle's Wait or not at all.
+func (p *tskPart) spawn(f func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.settled {
+		p.wg.Go(f)
+	}
 }
 
 func tskDecodeArgs(raw json.RawMessage, dst any) error {
@@ -460,7 +485,7 @@ func startHostedCheck(h *Host, home, group string, hc HostedCheck) {
 	if grp.Forge == "custom" {
 		forge.Worktree = filepath.Join(projectDir(h, group), "repo")
 	}
-	h.bg(func(f func()) { go f() }, "cloud_poll", func() { tskPollHostedChecks(pollCtx, p, h, home, key, run, forge, hc.PR, hc.Commit, hc.Since) }, "g", group, "task", hc.Task)
+	h.bg(p.spawn, "cloud_poll", func() { tskPollHostedChecks(pollCtx, p, h, home, key, run, forge, hc.PR, hc.Commit, hc.Since) }, "g", group, "task", hc.Task)
 }
 
 func tskBeginCloud(p *tskPart, key tskCloudKey, commit string) (context.Context, *tskCloudRun) {
